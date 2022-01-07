@@ -121,7 +121,7 @@ jobs:
         run: |
           C:
           cd %TBUILD%
-          %REPO_NAME%/Telegram/build/prepare/win.bat silent skip-qt5
+          %REPO_NAME%/Telegram/build/prepare/win.bat silent skip-qt6
 
       - name: Read defines.
         shell: bash
