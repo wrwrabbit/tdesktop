@@ -479,18 +479,6 @@ HistoryWidget::HistoryWidget(
 		Window::ActivateWindow(controller);
 	});
 
-	controller->adaptive().changes(
-	) | rpl::start_with_next([=] {
-		if (_history) {
-			_history->forceFullResize();
-			if (_migrated) {
-				_migrated->forceFullResize();
-			}
-			updateHistoryGeometry();
-			update();
-		}
-	}, lifetime());
-
 	session().data().newItemAdded(
 	) | rpl::start_with_next([=](not_null<HistoryItem*> item) {
 		newItemAdded(item);
@@ -503,7 +491,10 @@ HistoryWidget::HistoryWidget(
 
 	session().data().viewResizeRequest(
 	) | rpl::start_with_next([=](not_null<HistoryView::Element*> view) {
-		if (view->data()->mainView() == view) {
+		const auto item = view->data();
+		const auto history = item->history();
+		if (item->mainView() == view
+			&& (history == _history || history == _migrated)) {
 			updateHistoryGeometry();
 		}
 	}, lifetime());
@@ -2068,9 +2059,6 @@ void HistoryWidget::showHistory(
 	_historyInited = false;
 	_contactStatus = nullptr;
 
-	// Unload lottie animations.
-	session().data().unloadHeavyViewParts(HistoryInner::ElementDelegate());
-
 	if (peerId) {
 		_peer = session().data().peer(peerId);
 		_canSendMessages = _peer->canWrite();
@@ -2150,6 +2138,16 @@ void HistoryWidget::showHistory(
 		_list = _scroll->setOwnedWidget(
 			object_ptr<HistoryInner>(this, _scroll, controller(), _history));
 		_list->show();
+
+		controller()->adaptive().changes(
+		) | rpl::start_with_next([=] {
+			_history->forceFullResize();
+			if (_migrated) {
+				_migrated->forceFullResize();
+			}
+			updateHistoryGeometry();
+			update();
+		}, _list->lifetime());
 
 		if (_chooseForReport && _chooseForReport->active) {
 			_list->setChooseReportReason(_chooseForReport->reason);
@@ -2242,6 +2240,21 @@ void HistoryWidget::setHistory(History *history) {
 	if (_history == history) {
 		return;
 	}
+
+	const auto wasHistory = base::take(_history);
+	const auto wasMigrated = base::take(_migrated);
+
+	// Unload lottie animations.
+	const auto unloadHeavyViewParts = [](History *history) {
+		if (history) {
+			history->owner().unloadHeavyViewParts(
+				history->delegateMixin()->delegate());
+			history->forceFullResize();
+		}
+	};
+	unloadHeavyViewParts(wasHistory);
+	unloadHeavyViewParts(wasMigrated);
+
 	unregisterDraftSources();
 	_history = history;
 	_migrated = _history ? _history->migrateFrom() : nullptr;
