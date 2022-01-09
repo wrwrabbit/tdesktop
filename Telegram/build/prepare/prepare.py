@@ -42,6 +42,7 @@ optionsList = [
     'build-qt6',
     'skip-qt6',
     'build-stackwalk',
+    'skip-debug'
 ]
 options = []
 runCommand = []
@@ -206,6 +207,11 @@ def filterByPlatform(commands):
                 inscope = True
             # if linux and 'linux' in scopes:
             #     inscope = True
+            if 'debug' in scopes:
+                if 'skip-debug' in options:
+                    inscope = False
+                elif len(scopes) == 1:
+                    continue
             if 'release' in scopes:
                 if 'skip-release' in options:
                     inscope = False
@@ -435,6 +441,7 @@ stage('lzma', """
 win:
     git clone https://github.com/desktop-app/lzma.git
     cd lzma\\C\\Util\\LzmaLib
+debug:
     msbuild LzmaLib.sln /property:Configuration=Debug /property:Platform="$X8664"
 release:
     msbuild LzmaLib.sln /property:Configuration=Release /property:Platform="$X8664"
@@ -458,6 +465,7 @@ stage('zlib', """
     cd zlib
 win:
     cd contrib\\vstudio\\vc14
+debug:
     msbuild zlibstat.vcxproj /property:Configuration=Debug /property:Platform="%X8664%"
 release:
     msbuild zlibstat.vcxproj /property:Configuration=ReleaseWithoutAsm /property:Platform="%X8664%"
@@ -478,6 +486,7 @@ win:
         -A %WIN32X64% ^
         -DWITH_JPEG8=ON ^
         -DPNG_SUPPORTED=OFF
+debug:
     cmake --build . --config Debug
 release:
     cmake --build . --config Release
@@ -579,6 +588,7 @@ stage('rnnoise', """
     cd out
 win:
     cmake -A %WIN32X64% ..
+debug:
     cmake --build . --config Debug
 release:
     cmake --build . --config Release
@@ -887,6 +897,7 @@ win:
         -A %WIN32X64% ^
         -D LIBTYPE:STRING=STATIC ^
         -D FORCE_STATIC_VCRT=ON
+debug:
     msbuild OpenAL.vcxproj /property:Configuration=Debug /property:Platform="%WIN32X64%"
 release:
     msbuild OpenAL.vcxproj /property:Configuration=RelWithDebInfo /property:Platform="%WIN32X64%"
@@ -935,6 +946,7 @@ win:
     cd src\\client\\windows
     gyp --no-circular-check breakpad_client.gyp --format=ninja
     cd ..\\..
+debug:
     ninja -C out/Debug%FolderPostfix% common crash_generation_client exception_handler
 release:
     ninja -C out/Release%FolderPostfix% common crash_generation_client exception_handler
@@ -948,6 +960,7 @@ mac:
     git checkout e1e7b0ad8e
     cd ../../..
     cd src/client/mac
+debug:
     xcodebuild -project Breakpad.xcodeproj -target Breakpad -configuration Debug build
 release:
     xcodebuild -project Breakpad.xcodeproj -target Breakpad -configuration Release build
@@ -966,6 +979,7 @@ mac:
     ZLIB_LIB=$USED_PREFIX/lib/libz.a
     mkdir out
     cd out
+debug:
     mkdir Debug.x86_64
     cd Debug.x86_64
     cmake -G Ninja \
@@ -1022,6 +1036,7 @@ win:
     git checkout 0bb011f9e4
     mkdir out
     cd out
+debug:
     mkdir Debug
     cd Debug
     cmake -G Ninja ^
@@ -1029,8 +1044,8 @@ win:
         -DTG_ANGLE_SPECIAL_TARGET=%SPECIAL_TARGET% ^
         -DTG_ANGLE_ZLIB_INCLUDE_PATH=%LIBS_DIR%/zlib ../..
     ninja
-release:
     cd ..
+release:
     mkdir Release
     cd Release
     cmake -G Ninja ^
@@ -1053,7 +1068,7 @@ depends:patches/qtbase_5_15_2/*.patch
 win:
     for /r %%i in (..\\..\\patches\\qtbase_5_15_2\\*) do git apply %%i
     cd ..
-
+debug:
     SET CONFIGURATIONS=-debug
 release:
     SET CONFIGURATIONS=-debug-and-release
@@ -1098,7 +1113,7 @@ win:
 mac:
     find ../../patches/qtbase_5_15_2 -type f -print0 | sort -z | xargs -0 git apply
     cd ..
-
+debug:
     CONFIGURATIONS=-debug
 release:
     CONFIGURATIONS=-debug-and-release
@@ -1140,7 +1155,7 @@ depends:patches/qt5compat_6_2_2/*.patch
 
     find ../../patches/qt5compat_6_2_2 -type f -print0 | sort -z | xargs -0 git apply
     cd ..
-
+debug:
     CONFIGURATIONS=-debug
 release:
     CONFIGURATIONS=-debug-and-release
@@ -1176,6 +1191,7 @@ win:
     SET FFMPEG_PATH=$LIBS_DIR/ffmpeg
     mkdir out
     cd out
+debug:
     mkdir Debug
     cd Debug
     cmake -G Ninja \
@@ -1187,8 +1203,8 @@ win:
         -DTG_OWT_OPUS_INCLUDE_PATH=$OPUS_PATH \
         -DTG_OWT_FFMPEG_INCLUDE_PATH=$FFMPEG_PATH ../..
     ninja
-release:
     cd ..
+release:
     mkdir Release
     cd Release
     cmake -G Ninja \
@@ -1206,6 +1222,7 @@ mac:
     FFMPEG_PATH=$USED_PREFIX/include
     mkdir out
     cd out
+debug:
     mkdir Debug.x86_64
     cd Debug.x86_64
     cmake -G Ninja \
