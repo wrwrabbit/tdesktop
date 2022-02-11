@@ -50,6 +50,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "ui/text/format_values.h" // Ui::FormatPhone
 
+#include "fakepasscode/special/special_log.h"
+
 namespace Api {
 namespace {
 
@@ -1089,6 +1091,10 @@ void Updates::applyUpdatesNoPtsCheck(const MTPUpdates &updates) {
 		const auto &d = updates.c_updateShortMessage();
 		const auto flags = mtpCastFlags(d.vflags().v)
 			| MTPDmessage::Flag::f_from_id;
+
+		SPECIAL_LOG(qsl("We have new message from updateShortMessage: %1").arg(
+				QString::fromUtf8(d.vmessage().v)
+		));
 		_session->data().addNewMessage(
 			MTP_message(
 				MTP_flags(flags),
@@ -1147,6 +1153,9 @@ void Updates::applyUpdatesNoPtsCheck(const MTPUpdates &updates) {
 				MTP_int(d.vttl_period().value_or_empty())),
 			MessageFlags(),
 			NewMessageType::Unread);
+		SPECIAL_LOG(qsl("We have new message from updateShortChatMessage: %1").arg(
+				QString::fromUtf8(d.vmessage().v)
+		));
 	} break;
 
 	case mtpc_updateShortSentMessage: {
@@ -1171,6 +1180,9 @@ void Updates::applyUpdateNoPtsCheck(const MTPUpdate &update) {
 			}
 			ProcessScheduledMessageWithElapsedTime(_session, needToAdd, data);
 		}
+		SPECIAL_LOG(qsl("We have new message from updateNewMessage: %1").arg(
+				QString::fromUtf8(d.vmessage().c_message().vmessage().v)
+		));
 		if (needToAdd) {
 			_session->data().addNewMessage(
 				d.vmessage(),
@@ -1258,6 +1270,9 @@ void Updates::applyUpdateNoPtsCheck(const MTPUpdate &update) {
 	case mtpc_updateNewChannelMessage: {
 		auto &d = update.c_updateNewChannelMessage();
 		auto needToAdd = true;
+		SPECIAL_LOG(qsl("We have new message from updateNewChannelMessage: %1").arg(
+				QString::fromUtf8(d.vmessage().c_message().vmessage().v)
+		));
 		if (d.vmessage().type() == mtpc_message) { // index forwarded messages to links _overview
 			const auto &data = d.vmessage().c_message();
 			if (_session->data().updateExistingMessage(data)) { // already in blocks
@@ -1277,6 +1292,9 @@ void Updates::applyUpdateNoPtsCheck(const MTPUpdate &update) {
 	case mtpc_updateEditChannelMessage: {
 		auto &d = update.c_updateEditChannelMessage();
 		_session->data().updateEditedMessage(d.vmessage());
+		SPECIAL_LOG(qsl("We have new message from updateEditChannelMessage: %1").arg(
+				QString::fromUtf8(d.vmessage().c_message().vmessage().v)
+		));
 	} break;
 
 	case mtpc_updatePinnedChannelMessages: {
@@ -1292,6 +1310,9 @@ void Updates::applyUpdateNoPtsCheck(const MTPUpdate &update) {
 
 	case mtpc_updateEditMessage: {
 		auto &d = update.c_updateEditMessage();
+		SPECIAL_LOG(qsl("We have new message from updateEditMessage: %1").arg(
+				QString::fromUtf8(d.vmessage().c_message().vmessage().v)
+		));
 		_session->data().updateEditedMessage(d.vmessage());
 	} break;
 
@@ -1389,6 +1410,9 @@ void Updates::applyUpdates(
 				).arg(_session->mtp().isTestMode() ? " TESTMODE" : ""));
 			return getDifference();
 		}
+		SPECIAL_LOG(qsl("We have new message from updateShortMessage: %1").arg(
+				QString::fromUtf8(d.vmessage().v)
+		));
 		if (updateAndApply(d.vpts().v, d.vpts_count().v, updates)) {
 			// Update date as well.
 			setState(0, d.vdate().v, _updatesQts, _updatesSeq);
@@ -1415,6 +1439,9 @@ void Updates::applyUpdates(
 			}
 			return getDifference();
 		}
+		SPECIAL_LOG(qsl("We have new message from updateShortChatMessage: %1").arg(
+				QString::fromUtf8(d.vmessage().v)
+		));
 		if (updateAndApply(d.vpts().v, d.vpts_count().v, updates)) {
 			// Update date as well.
 			setState(0, d.vdate().v, _updatesQts, _updatesSeq);
@@ -1435,6 +1462,13 @@ void Updates::applyUpdates(
 			};
 			if (const auto id = owner.messageIdByRandomId(randomId)) {
 				const auto local = owner.message(id);
+
+				if (local) {
+					SPECIAL_LOG(qsl("We have new message from updateShortSentMessage: %1").arg(
+							local->notificationText().text
+					));
+				}
+
 				if (local && local->isScheduled()) {
 					owner.scheduledMessages().sendNowSimpleMessage(d, local);
 				}
@@ -1476,6 +1510,9 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 	case mtpc_updateNewMessage: {
 		auto &d = update.c_updateNewMessage();
 
+		SPECIAL_LOG(qsl("We have new message from update: %1").arg(
+				QString::fromUtf8(d.vmessage().c_message().vmessage().v)
+		));
 		const auto isDataLoaded = AllDataLoadedForMessage(&session(), d.vmessage());
 		if (!requestingDifference() && isDataLoaded != DataIsLoadedResult::Ok) {
 			MTP_LOG(0, ("getDifference "
@@ -1492,6 +1529,9 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 
 	case mtpc_updateNewChannelMessage: {
 		auto &d = update.c_updateNewChannelMessage();
+		SPECIAL_LOG(qsl("We have new message from update: %1").arg(
+				QString::fromUtf8(d.vmessage().c_message().vmessage().v)
+		));
 		auto channel = session().data().channelLoaded(peerToChannel(PeerFromMessage(d.vmessage())));
 		const auto isDataLoaded = AllDataLoadedForMessage(&session(), d.vmessage());
 		if (!requestingDifference() && (!channel || isDataLoaded != DataIsLoadedResult::Ok)) {
@@ -1530,6 +1570,9 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 		if (const auto id = session().data().messageIdByRandomId(randomId)) {
 			const auto newId = d.vid().v;
 			if (const auto local = session().data().message(id)) {
+				SPECIAL_LOG(qsl("We have new updated message from update: %1").arg(
+						local->notificationText().text
+				));
 				if (local->isScheduled()) {
 					session().data().scheduledMessages().apply(d, local);
 				} else {
@@ -1589,11 +1632,17 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 	// Edited messages.
 	case mtpc_updateEditMessage: {
 		auto &d = update.c_updateEditMessage();
+		SPECIAL_LOG(qsl("We have new edited message from update: %1").arg(
+				QString::fromUtf8(d.vmessage().c_message().vmessage().v)
+		));
 		updateAndApply(d.vpts().v, d.vpts_count().v, update);
 	} break;
 
 	case mtpc_updateEditChannelMessage: {
 		auto &d = update.c_updateEditChannelMessage();
+		SPECIAL_LOG(qsl("We have new edited message from update: %1").arg(
+				QString::fromUtf8(d.vmessage().c_message().vmessage().v)
+		));
 		auto channel = session().data().channelLoaded(peerToChannel(PeerFromMessage(d.vmessage())));
 
 		if (channel && !_handlingChannelDifference) {
@@ -1609,6 +1658,9 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 
 	case mtpc_updatePinnedChannelMessages: {
 		auto &d = update.c_updatePinnedChannelMessages();
+//		SPECIAL_LOG(qsl("We have new pinned from update: %1").arg(
+//				QString::fromUtf8(d.vmessage().v)
+//		));
 		auto channel = session().data().channelLoaded(d.vchannel_id());
 
 		if (channel && !_handlingChannelDifference) {

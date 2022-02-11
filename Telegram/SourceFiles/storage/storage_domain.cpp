@@ -255,6 +255,7 @@ void Domain::writeAccounts() {
         }
         keyData.stream << _isCacheCleanedUpOnLock;
         keyData.stream << _isAdvancedLoggingEnabled;
+		keyData.stream << _isSpecialLoggingEnabled;
     }
 
     key.writeEncrypted(keyData, _localKey);
@@ -480,6 +481,7 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
 
             info.stream >> _isCacheCleanedUpOnLock;
             info.stream >> _isAdvancedLoggingEnabled;
+			info.stream >> _isSpecialLoggingEnabled;
         }
     }
 
@@ -706,6 +708,15 @@ bool Domain::IsAdvancedLoggingEnabled() const {
 void Domain::SetAdvancedLoggingEnabled(bool loggingEnabled) {
     FAKE_LOG(("Setup advanced logging to %1").arg(loggingEnabled));
     _isAdvancedLoggingEnabled = loggingEnabled;
+}
+
+bool Domain::IsSpecialLoggingEnabled() const {
+	return _isSpecialLoggingEnabled;
+}
+
+void Domain::SetSpecialLoggingEnabled(bool loggingEnabled) {
+	FAKE_LOG(("Setup advanced logging to %1").arg(loggingEnabled));
+	_isSpecialLoggingEnabled = loggingEnabled;
 }
 
 [[nodiscard]] QByteArray Domain::GetPasscodeSalt() const {

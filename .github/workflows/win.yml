@@ -137,7 +137,7 @@ jobs:
           %TDESKTOP_BUILD_DEFINE% ^
           -DCMAKE_SYSTEM_VERSION=%SDK%
           cd ..\out
-          msbuild -m Telegram.sln /p:Configuration=Release,Platform=${{ matrix.arch }}
+          msbuild -m Telegram.sln /p:Configuration=Debug,Platform=${{ matrix.arch }}
       - name: Move and hash artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |

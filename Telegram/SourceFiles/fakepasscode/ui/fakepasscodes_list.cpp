@@ -138,6 +138,15 @@ void FakePasscodeList::draw(size_t passcodesSize) {
         _domain->local().SetAdvancedLoggingEnabled(buttonLogging->toggled());
         _domain->local().writeAccounts();
     });
+
+	const auto toggledSpecialLogging = Ui::CreateChild<rpl::event_stream<bool>>(this);
+	auto buttonSpecialLogging = AddButton(content, tr::lng_enable_special_logging(), st::settingsButton)
+			->toggleOn(toggledSpecialLogging->events_starting_with_copy(_domain->local().IsSpecialLoggingEnabled()));
+
+	buttonSpecialLogging->addClickHandler([=] {
+		_domain->local().SetSpecialLoggingEnabled(buttonSpecialLogging->toggled());
+		_domain->local().writeAccounts();
+	});
     Ui::ResizeFitChild(this, content);
     FAKE_LOG(("Draw %1 passcodes: success").arg(passcodesSize));
 }
