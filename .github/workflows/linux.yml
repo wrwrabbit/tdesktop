@@ -94,7 +94,7 @@ jobs:
 
       - name: Check.
         run: |
-          filePath="$REPO_NAME/out/Release/Telegram"
+          filePath="$REPO_NAME/out/Debug/Telegram"
           if test -f "$filePath"; then
             echo "Build successfully done! :)"
 
@@ -107,12 +107,12 @@ jobs:
 
       - name: SHA256 calculation
         run: |
-          sha256sum $REPO_NAME/out/Release/Telegram | awk -F " " 'END {print $1}' > $REPO_NAME/out/Release/Telegram_sha256.txt
+          sha256sum $REPO_NAME/out/Debug/Telegram | awk -F " " 'END {print $1}' > $REPO_NAME/out/Debug/Telegram_sha256.txt
 
       - name: Move artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
-          cd $REPO_NAME/out/Release
+          cd $REPO_NAME/out/Debug
           mkdir artifact
           mkdir "artifact/Telegram"
           strip -s "Telegram"
@@ -126,4 +126,4 @@ jobs:
         name: Upload artifact.
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.REPO_NAME }}/out/Release/artifact/
+          path: ${{ env.REPO_NAME }}/out/Debug/artifact/
