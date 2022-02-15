@@ -241,7 +241,7 @@ NEW LOGGING INSTANCE STARTED!!!\n\
 		part = newPart;
 
 		int32 dayIndex = (tm.tm_year + 1900) * 10000 + (tm.tm_mon + 1) * 100 + tm.tm_mday;
-		QString postfix = QString("_%4_%5").arg((part * switchEach) / 60, 2, 10, QChar('0')).arg((part * switchEach) % 60, 2, 10, QChar('0'));
+		QString postfix = QString("_%4_%5_%6").arg((part * switchEach) / 60, 2, 10, QChar('0')).arg((part * switchEach) % 60, 2, 10, QChar('0')).arg(dayIndex);
 
 		reopen(LogDataDebug, dayIndex, postfix);
 		reopen(LogDataTcp, dayIndex, postfix);
