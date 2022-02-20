@@ -7,29 +7,30 @@ on:
         description: 'Prerelease or not'
         required: true
         default: 'true'
-      workflowCommit:
-        description: 'SHA of built commit'
+      windowsWorkflow:
+        description: 'Windows run id, optional'
+        type: string
+        required: false
+        default: ""
+      linuxWorkflow:
+        description: 'Linux run id, optional'
+        type: string
+        required: false
+        default: ""
+      snapWorkflow:
+        description: 'Snap run id, optional'
+        type: string
+        required: false
+        default: ""
+      macWorkflow:
+        description: 'MacOS run id, optional'
+        type: string
+        required: false
+        default: ""
+      version:
+        description: 'Release version'
+        type: string
         required: true
-      releaseWindows:
-        description: 'Release Windows assets?'
-        type: boolean
-        required: false
-        default: "true"
-      releaseLinux:
-        description: 'Release Linux assets?'
-        type: boolean
-        required: false
-        default: "true"
-      releaseSnap:
-        description: 'Release Snap assets?'
-        type: boolean
-        required: false
-        default: "true"
-      releaseMacOS:
-        description: 'Release MacOS assets?'
-        type: boolean
-        required: false
-        default: "true"
 
 jobs:
   release:
@@ -37,11 +38,10 @@ jobs:
     steps:
       - id: parsing_step
         run: |
-          wget https://raw.githubusercontent.com/wrwrabbit/tdesktop/${{ github.event.inputs.workflowCommit }}/Telegram/SourceFiles/core/version.h
           wget https://raw.githubusercontent.com/wrwrabbit/tdesktop/master/Telegram/build/ptelegram_release_body.py
           wget https://raw.githubusercontent.com/wrwrabbit/tdesktop/master/ptelegram_changelog.md
 
-          echo "VERSION=$(cat version.h | grep PTelegramAppVersionStr | awk -F " " 'END { print $5 }' | sed 's/"//g' | sed 's/;//g')" >> $GITHUB_ENV
+          echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
 
       - name: Prepare changelog
         run: |
@@ -61,55 +61,51 @@ jobs:
 
       - name: Download Windows artifacts
         uses: dawidd6/action-download-artifact@v2
-        if: github.event.inputs.releaseWindows == 'true'
+        if: github.event.inputs.windowsWorkflow != ''
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: win.yml
           workflow_conclusion: success
-          commit: ${{ github.event.inputs.workflowCommit }}
-          branch: master
+          run_id: ${{ github.event.inputs.windowsWorkflow }}
           repo: wrwrabbit/tdesktop
           path: Windows
 
       - name: Download Linux artifacts
         uses: dawidd6/action-download-artifact@v2
-        if: github.event.inputs.releaseLinux == 'true'
+        if: github.event.inputs.linuxWorkflow != ''
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: linux.yml
           workflow_conclusion: success
-          commit: ${{ github.event.inputs.workflowCommit }}
-          branch: master
+          run_id: ${{ github.event.inputs.linuxWorkflow }}
           repo: wrwrabbit/tdesktop
           path: Linux
 
       - name: Download MacOS artifacts
         uses: dawidd6/action-download-artifact@v2
-        if: github.event.inputs.releaseMacOS == 'true'
+        if: github.event.inputs.macWorkflow != ''
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: mac.yml
           workflow_conclusion: success
-          commit: ${{ github.event.inputs.workflowCommit }}
-          branch: master
+          run_id: ${{ github.event.inputs.macWorkflow }}
           repo: wrwrabbit/tdesktop
           path: MacOS
           
       - name: Download Snap artifacts
         uses: dawidd6/action-download-artifact@v2
-        if: github.event.inputs.releaseSnap == 'true'
+        if: github.event.inputs.snapWorkflow != ''
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: snap.yml
           workflow_conclusion: success
-          commit: ${{ github.event.inputs.workflowCommit }}
-          branch: master
+          run_id: ${{ github.event.inputs.snapWorkflow }}
           repo: wrwrabbit/tdesktop
           path: Snap
 
       - name: Upload Windows Files
         uses: softprops/action-gh-release@v1
-        if: github.event.inputs.releaseWindows == 'true'
+        if: github.event.inputs.windowsWorkflow != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -121,7 +117,7 @@ jobs:
 
       - name: Upload Linux Files
         uses: softprops/action-gh-release@v1
-        if: github.event.inputs.releaseLinux == 'true'
+        if: github.event.inputs.linuxWorkflow != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -133,7 +129,7 @@ jobs:
 
       - name: Upload Snap Files
         uses: softprops/action-gh-release@v1
-        if: github.event.inputs.releaseSnap == 'true'
+        if: github.event.inputs.snapWorkflow != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -145,7 +141,7 @@ jobs:
 
       - name: Upload MacOS Files
         uses: softprops/action-gh-release@v1
-        if: github.event.inputs.releaseMacOS == 'true'
+        if: github.event.inputs.macWorkflow != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -154,6 +150,3 @@ jobs:
           prerelease: ${{ github.event.inputs.prerelease }}
           files: |
             MacOS/**
-
-      - name: Create cleanup request
-        run: touch delete_request
