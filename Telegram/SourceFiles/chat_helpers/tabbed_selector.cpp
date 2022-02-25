@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_session.h"
 #include "data/data_changes.h"
+#include "data/data_media_types.h"
 #include "data/stickers/data_stickers.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"

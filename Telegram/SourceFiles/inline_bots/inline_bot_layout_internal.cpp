@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/cached_round_corners.h"
 #include "main/main_session.h"
 #include "lang/lang_keys.h"
+#include "data/data_media_types.h"
 #include "styles/style_overview.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
