@@ -659,11 +659,10 @@ void Account::postLogoutClearing() {
 }
 
 void Account::logOutAfterAction() {
-	loggedOutAfterAction();
 	if (_mtp) {
 		_mtp->logout([] {});
-		resetAuthorizationKeys();
 	}
+	loggedOutAfterAction();
 	postLogoutClearing();
 }
 
