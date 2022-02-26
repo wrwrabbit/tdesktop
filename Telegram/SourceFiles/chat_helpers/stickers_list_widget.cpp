@@ -224,16 +224,6 @@ private:
 
 };
 
-struct StickersListWidget::Sticker {
-	not_null<DocumentData*> document;
-	std::shared_ptr<Data::DocumentMedia> documentMedia;
-	Lottie::Animation *lottie = nullptr;
-	Media::Clip::ReaderPointer webm;
-	QPixmap savedFrame;
-
-	void ensureMediaCreated();
-};
-
 auto StickersListWidget::PrepareStickers(
 	const QVector<DocumentData*> &pack)
 -> std::vector<Sticker> {

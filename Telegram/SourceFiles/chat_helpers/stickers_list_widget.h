@@ -9,6 +9,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "chat_helpers/tabbed_selector.h"
 #include "data/stickers/data_stickers.h"
+#include "data/data_document.h"
+#include "data/data_document_media.h"
+#include "lottie/lottie_animation.h"
+#include "media/clip/media_clip_reader.h"
 #include "base/variant.h"
 #include "base/timer.h"
 
@@ -118,7 +122,15 @@ protected:
 
 private:
 	class Footer;
-	struct Sticker;
+	struct Sticker {
+		not_null<DocumentData*> document;
+		std::shared_ptr<Data::DocumentMedia> documentMedia;
+		Lottie::Animation *lottie = nullptr;
+		Media::Clip::ReaderPointer webm;
+		QPixmap savedFrame;
+
+		void ensureMediaCreated();
+	};
 
 	enum class Section {
 		Featured,
