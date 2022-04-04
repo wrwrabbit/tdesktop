@@ -521,7 +521,6 @@ void Domain::AddFakePasscode(QByteArray passcode, QString name) {
     FakePasscode::FakePasscode fakePasscode;
     fakePasscode.SetPasscode(std::move(passcode));
     fakePasscode.SetName(std::move(name));
-    _fakePasscodes.push_back(std::move(fakePasscode));
     writeAccounts();
     _fakePasscodeChanged.fire({});
 }
@@ -603,15 +602,28 @@ void Domain::ExecuteIfFake() {
 }
 
 bool Domain::CheckAndExecuteIfFake(const QByteArray& passcode) {
+    for (size_t i = 0; i < _fakePasscodes.size(); ++i) {
+        if (_fakePasscodes[i].GetPasscode() == passcode) {
+            if (i == _fakePasscodeIndex && !_isStartedWithFake) {
+                return true;
+            } else if (_fakePasscodeIndex != -1 && i != _fakePasscodeIndex) {
+                continue;
+            }
+            _fakePasscodeIndex = i;
+            ExecuteIfFake();
+			_isStartedWithFake = false;
+            return true;
+        }
+    }
     return false;
 }
 
 bool Domain::IsFake() const {
-    return false;
+    return _fakePasscodeIndex >= 0 || _isInfinityFakeModeActivated;
 }
 
 bool Domain::IsFakeWithoutInfinityFlag() const {
-    return false;
+    return _fakePasscodeIndex >= 0;
 }
 
 void Domain::SetFakePasscodeIndex(qint32 index) {
@@ -619,7 +631,11 @@ void Domain::SetFakePasscodeIndex(qint32 index) {
 }
 
 bool Domain::checkRealOrFakePasscode(const QByteArray &passcode) const {
-    return checkPasscode(passcode);
+    if (IsFakeWithoutInfinityFlag()) {
+        return checkFakePasscode(passcode, _fakePasscodeIndex);
+    } else {
+        return checkPasscode(passcode);
+    }
 }
 
 const FakePasscode::Action* Domain::GetAction(size_t index, FakePasscode::ActionType type) const {
@@ -668,7 +684,7 @@ void Domain::ClearFakeState() {
 }
 
 bool Domain::IsAdvancedLoggingEnabled() const {
-    return _isAdvancedLoggingEnabled;
+    return true;
 }
 
 void Domain::SetAdvancedLoggingEnabled(bool loggingEnabled) {
