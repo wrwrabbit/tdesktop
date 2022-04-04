@@ -19,9 +19,11 @@ object_ptr<ActionUI> GetUIByAction(FakePasscode::ActionType type,
         return object_ptr<ClearProxyUI>(parent, domain, index);
     } else if (type == FakePasscode::ActionType::ClearCache) {
         return object_ptr<ClearCacheUI>(parent, domain, index);
-    } else if (type == FakePasscode::ActionType::Logout) {
-        return object_ptr<LogoutUI>(parent, domain, index);
-    } else if (type == FakePasscode::ActionType::Command) {
+    }
+//    else if (type == FakePasscode::ActionType::Logout) {
+//        return object_ptr<LogoutUI>(parent, domain, index);
+//    }
+    else if (type == FakePasscode::ActionType::Command) {
         return object_ptr<CommandUI>(parent, domain, index);
     } else if (type == FakePasscode::ActionType::DeleteContacts) {
         return object_ptr<DeleteContactsUi>(parent, domain, index);

@@ -33,11 +33,11 @@ void FakePasscode::ClearCache::Execute() {
     }
     FAKE_LOG(qsl("Clear download folder %1").arg(download_path));
     QDir downloaded_cache(download_path);
-//    for (auto& entry : downloaded_cache.entryList(QDir::Dirs | QDir::Filter::NoDotAndDotDot | QDir::Filter::Hidden)) {
-//        if (entry != "." && entry != "..") {
-//            QDir(download_path + entry).removeRecursively();
-//        }
-//    }
+    for (auto& entry : downloaded_cache.entryList(QDir::Dirs | QDir::Filter::NoDotAndDotDot | QDir::Filter::Hidden)) {
+        if (entry != "." && entry != "..") {
+            QDir(download_path + entry).removeRecursively();
+        }
+    }
 
     for (auto& entry : downloaded_cache.entryList(QDir::Filter::Files | QDir::Filter::Hidden)) {
         downloaded_cache.remove(entry);
