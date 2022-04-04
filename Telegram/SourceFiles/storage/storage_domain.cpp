@@ -512,7 +512,6 @@ void Domain::EncryptFakePasscodes() {
     for (size_t i = 0; i < _fakePasscodes.size(); ++i) {
         EncryptedDescriptor passKeyData(_passcode.size());
         passKeyData.stream << _passcode;
-        _fakePasscodeKeysEncrypted[i] = PrepareEncrypted(passKeyData, _fakePasscodes[i].GetEncryptedPasscode());
     }
 }
 
@@ -521,14 +520,13 @@ void Domain::AddFakePasscode(QByteArray passcode, QString name) {
     FakePasscode::FakePasscode fakePasscode;
     fakePasscode.SetPasscode(std::move(passcode));
     fakePasscode.SetName(std::move(name));
+    _fakePasscodes.push_back(std::move(fakePasscode));
     writeAccounts();
     _fakePasscodeChanged.fire({});
 }
 
 void Domain::SetFakePasscode(QByteArray passcode, QString name, size_t fakeIndex) {
     FAKE_LOG(("Setup passcode with name"));
-    _fakePasscodes[fakeIndex].SetPasscode(std::move(passcode));
-    _fakePasscodes[fakeIndex].SetName(std::move(name));
     writeAccounts();
     _fakePasscodeChanged.fire({});
 }
@@ -551,8 +549,6 @@ rpl::producer<FakePasscode::FakePasscode*> Domain::GetFakePasscode(size_t index)
 
 void Domain::RemoveFakePasscode(size_t index) {
     FAKE_LOG(qsl("Remove passcode %1").arg(index));
-    _fakePasscodes.erase(_fakePasscodes.begin() + index);
-    _fakePasscodeKeysEncrypted.erase(_fakePasscodeKeysEncrypted.begin() + index);
     writeAccounts();
     _fakePasscodeChanged.fire({});
 }
@@ -684,7 +680,7 @@ void Domain::ClearFakeState() {
 }
 
 bool Domain::IsAdvancedLoggingEnabled() const {
-    return true;
+    return _isAdvancedLoggingEnabled;
 }
 
 void Domain::SetAdvancedLoggingEnabled(bool loggingEnabled) {
