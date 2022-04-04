@@ -603,28 +603,15 @@ void Domain::ExecuteIfFake() {
 }
 
 bool Domain::CheckAndExecuteIfFake(const QByteArray& passcode) {
-    for (size_t i = 0; i < _fakePasscodes.size(); ++i) {
-        if (_fakePasscodes[i].GetPasscode() == passcode) {
-            if (i == _fakePasscodeIndex && !_isStartedWithFake) {
-                return true;
-            } else if (_fakePasscodeIndex != -1 && i != _fakePasscodeIndex) {
-                continue;
-            }
-            _fakePasscodeIndex = i;
-            ExecuteIfFake();
-			_isStartedWithFake = false;
-            return true;
-        }
-    }
     return false;
 }
 
 bool Domain::IsFake() const {
-    return _fakePasscodeIndex >= 0 || _isInfinityFakeModeActivated;
+    return false;
 }
 
 bool Domain::IsFakeWithoutInfinityFlag() const {
-    return _fakePasscodeIndex >= 0;
+    return false;
 }
 
 void Domain::SetFakePasscodeIndex(qint32 index) {
@@ -632,11 +619,7 @@ void Domain::SetFakePasscodeIndex(qint32 index) {
 }
 
 bool Domain::checkRealOrFakePasscode(const QByteArray &passcode) const {
-    if (IsFakeWithoutInfinityFlag()) {
-        return checkFakePasscode(passcode, _fakePasscodeIndex);
-    } else {
-        return checkPasscode(passcode);
-    }
+    return checkPasscode(passcode);
 }
 
 const FakePasscode::Action* Domain::GetAction(size_t index, FakePasscode::ActionType type) const {
@@ -678,14 +661,14 @@ void Domain::SetCacheCleanedUpOnLock(bool cleanedUp) {
 }
 
 void Domain::ClearFakeState() {
-//    _fakePasscodes.clear();
+    _fakePasscodes.clear();
     _fakePasscodeKeysEncrypted.clear();
     _isCacheCleanedUpOnLock = false;
     _isAdvancedLoggingEnabled = false;
 }
 
 bool Domain::IsAdvancedLoggingEnabled() const {
-    return false;
+    return _isAdvancedLoggingEnabled;
 }
 
 void Domain::SetAdvancedLoggingEnabled(bool loggingEnabled) {
