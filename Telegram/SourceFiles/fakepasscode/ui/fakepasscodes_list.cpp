@@ -65,11 +65,11 @@ void FakePasscodeContent::setupContent() {
     const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
     Settings::AddSubsectionTitle(content, tr::lng_fakeaction_list());
 
-    for (const auto& type : FakePasscode::kAvailableActions) {
-        const auto ui = GetUIByAction(type, _domain, _passcodeIndex, this);
-        ui->Create(content);
-        Settings::AddDivider(content);
-    }
+//    for (const auto& type : FakePasscode::kAvailableActions) {
+//        const auto ui = GetUIByAction(type, _domain, _passcodeIndex, this);
+//        ui->Create(content);
+//        Settings::AddDivider(content);
+//    }
     Settings::AddButton(content, tr::lng_fakepasscode_change(), st::settingsButton)
             ->addClickHandler([this] {
                 _controller->show(Box<FakePasscodeBox>(&_controller->session(), false, false,

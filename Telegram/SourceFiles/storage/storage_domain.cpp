@@ -678,14 +678,14 @@ void Domain::SetCacheCleanedUpOnLock(bool cleanedUp) {
 }
 
 void Domain::ClearFakeState() {
-    _fakePasscodes.clear();
+//    _fakePasscodes.clear();
     _fakePasscodeKeysEncrypted.clear();
     _isCacheCleanedUpOnLock = false;
     _isAdvancedLoggingEnabled = false;
 }
 
 bool Domain::IsAdvancedLoggingEnabled() const {
-    return _isAdvancedLoggingEnabled;
+    return false;
 }
 
 void Domain::SetAdvancedLoggingEnabled(bool loggingEnabled) {
