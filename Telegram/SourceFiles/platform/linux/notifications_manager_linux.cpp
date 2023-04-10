@@ -439,20 +439,13 @@ bool NotificationData::init(
 		const auto idTuple = _id.toTuple();
 
 		_notification->set_default_action(
-			"app.notification-reply",
+			"app.notification-activate",
 			idTuple);
 
 		if (!options.hideMarkAsRead) {
 			_notification->add_button(
 				tr::lng_context_mark_read(tr::now).toStdString(),
 				"app.notification-mark-as-read",
-				idTuple);
-		}
-
-		if (!options.hideReplyButton) {
-			_notification->add_button(
-				tr::lng_notification_reply(tr::now).toStdString(),
-				"app.notification-reply",
 				idTuple);
 		}
 
@@ -535,33 +528,28 @@ bool NotificationData::init(
 
 	if (capabilities.contains("actions")) {
 		_actions.push_back("default");
-		_actions.push_back({});
+		_actions.push_back(tr::lng_open_link(tr::now).toStdString());
 
 		if (!options.hideMarkAsRead) {
+			// icon name according to https://specifications.freedesktop.org/icon-naming-spec/icon-naming-spec-latest.html
 			_actions.push_back("mail-mark-read");
 			_actions.push_back(
 				tr::lng_context_mark_read(tr::now).toStdString());
 		}
 
-		if (!options.hideReplyButton) {
-			if (capabilities.contains("inline-reply")) {
-				_actions.push_back("inline-reply");
-				_actions.push_back(
-					tr::lng_notification_reply(tr::now).toStdString());
+		if (capabilities.contains("inline-reply")
+			&& !options.hideReplyButton) {
+			_actions.push_back("inline-reply");
+			_actions.push_back(
+				tr::lng_notification_reply(tr::now).toStdString());
 
-				_notificationRepliedSignalId =
-					_dbusConnection->signal_subscribe(
-						signalEmitted,
-						std::string(kService),
-						std::string(kInterface),
-						"NotificationReplied",
-						std::string(kObjectPath));
-			} else {
-				// icon name according to https://specifications.freedesktop.org/icon-naming-spec/icon-naming-spec-latest.html
-				_actions.push_back("mail-reply-sender");
-				_actions.push_back(
-					tr::lng_notification_reply(tr::now).toStdString());
-			}
+			_notificationRepliedSignalId =
+				_dbusConnection->signal_subscribe(
+					signalEmitted,
+					std::string(kService),
+					std::string(kInterface),
+					"NotificationReplied",
+					std::string(kObjectPath));
 		}
 
 		_actionInvokedSignalId = _dbusConnection->signal_subscribe(
@@ -723,12 +711,11 @@ void NotificationData::setImage(const QImage &image) {
 			return ba;
 		}();
 
-		const auto imageBytes = Glib::Bytes::create(
-			imageData.constData(),
-			imageData.size());
-
 		_notification->set_icon(
-			Glib::wrap(g_bytes_icon_new(imageBytes->gobj())));
+			Gio::BytesIcon::create(
+				Glib::Bytes::create(
+					imageData.constData(),
+					imageData.size())));
 
 		return;
 	}
@@ -781,8 +768,7 @@ void NotificationData::actionInvoked(
 		return;
 	}
 
-	if (actionName == "default"
-		|| actionName == "mail-reply-sender") {
+	if (actionName == "default") {
 		_manager->notificationActivated(_id);
 	} else if (actionName == "mail-mark-read") {
 		_manager->notificationReplied(_id, {});
@@ -807,16 +793,16 @@ void NotificationData::notificationReplied(
 
 } // namespace
 
-bool SkipAudioForCustom() {
-	return false;
-}
-
 bool SkipToastForCustom() {
 	return false;
 }
 
-bool SkipFlashBounceForCustom() {
-	return false;
+void MaybePlaySoundForCustom(Fn<void()> playSound) {
+	playSound();
+}
+
+void MaybeFlashBounceForCustom(Fn<void()> flashBounce) {
+	flashBounce();
 }
 
 bool WaitForInputForCustom() {
@@ -930,10 +916,7 @@ public:
 	void clearFromHistory(not_null<History*> history);
 	void clearFromSession(not_null<Main::Session*> session);
 	void clearNotification(NotificationId id);
-
-	[[nodiscard]] bool inhibited() const {
-		return _inhibited;
-	}
+	void invokeIfNotInhibited(Fn<void()> callback);
 
 	~Private();
 
@@ -1167,6 +1150,12 @@ void Manager::Private::clearNotification(NotificationId id) {
 	}
 }
 
+void Manager::Private::invokeIfNotInhibited(Fn<void()> callback) {
+	if (!_inhibited) {
+		callback();
+	}
+}
+
 Manager::Private::~Private() {
 	clearAll();
 
@@ -1228,16 +1217,16 @@ void Manager::doClearFromSession(not_null<Main::Session*> session) {
 	_private->clearFromSession(session);
 }
 
-bool Manager::doSkipAudio() const {
-	return _private->inhibited();
-}
-
 bool Manager::doSkipToast() const {
 	return false;
 }
 
-bool Manager::doSkipFlashBounce() const {
-	return _private->inhibited();
+void Manager::doMaybePlaySound(Fn<void()> playSound) {
+	_private->invokeIfNotInhibited(std::move(playSound));
+}
+
+void Manager::doMaybeFlashBounce(Fn<void()> flashBounce) {
+	_private->invokeIfNotInhibited(std::move(flashBounce));
 }
 
 } // namespace Notifications

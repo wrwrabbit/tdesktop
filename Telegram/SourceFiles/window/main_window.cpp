@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/main_window.h"
 
+#include "api/api_updates.h"
 #include "storage/localstorage.h"
 #include "platform/platform_specific.h"
 #include "ui/platform/ui_platform_window.h"
@@ -49,6 +50,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QScreen>
 #include <QtGui/QDrag>
 
+#include <kurlmimedata.h>
+
 namespace Window {
 namespace {
 
@@ -62,6 +65,11 @@ using Core::WindowPosition;
 		+ st::defaultDialogRow.padding.left();
 	const auto skipy = st::windowTitleHeight;
 	return { skipx, skipy };
+}
+
+[[nodiscard]] QImage &OverridenIcon() {
+	static auto result = QImage();
+	return result;
 }
 
 } // namespace
@@ -123,12 +131,19 @@ void ConvertIconToBlack(QImage &image) {
 	}
 }
 
+void OverrideApplicationIcon(QImage image) {
+	OverridenIcon() = std::move(image);
+}
+
 QIcon CreateOfficialIcon(Main::Session *session) {
 	const auto support = (session && session->supportMode());
 	if (!support) {
 		return QIcon();
 	}
-	auto image = Logo();
+	auto overriden = OverridenIcon();
+	auto image = overriden.isNull()
+		? Platform::DefaultApplicationIcon()
+		: overriden;
 	ConvertIconToBlack(image);
 	return QIcon(Ui::PixmapFromImage(std::move(image)));
 }
@@ -498,8 +513,12 @@ void MainWindow::handleStateChanged(Qt::WindowState state) {
 }
 
 void MainWindow::handleActiveChanged() {
+	checkActivation();
 	if (isActiveWindow()) {
 		Core::App().windowActivated(&controller());
+	}
+	if (const auto controller = sessionController()) {
+		controller->session().updates().updateOnline();
 	}
 }
 

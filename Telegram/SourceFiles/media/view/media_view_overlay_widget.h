@@ -105,6 +105,7 @@ public:
 	void activateControls();
 	void close();
 	void minimize();
+	void toggleFullScreen();
 	void toggleFullScreen(bool fullscreen);
 
 	void notifyFileDialogShown(bool shown);
@@ -129,7 +130,6 @@ private:
 		OverNone,
 		OverLeftNav,
 		OverRightNav,
-		OverClose,
 		OverHeader,
 		OverName,
 		OverDate,
@@ -155,6 +155,7 @@ private:
 	struct ContentGeometry {
 		QRectF rect;
 		qreal rotation = 0.;
+		qreal controlsOpacity = 0.;
 	};
 	struct StartStreaming {
 		StartStreaming() : continueStreaming(false), startTime(0) {
@@ -204,7 +205,7 @@ private:
 	void playbackControlsVolumeToggled() override;
 	void playbackControlsVolumeChangeFinished() override;
 	void playbackControlsSpeedChanged(float64 speed) override;
-	float64 playbackControlsCurrentSpeed() override;
+	float64 playbackControlsCurrentSpeed(bool lastNonDefault) override;
 	void playbackControlsToFullScreen() override;
 	void playbackControlsFromFullScreen() override;
 	void playbackControlsToPictureInPicture() override;
@@ -418,6 +419,9 @@ private:
 		QRect clip,
 		float64 opacity);
 
+	[[nodiscard]] float64 controlOpacity(
+		float64 progress,
+		bool nonbright = false) const;
 	[[nodiscard]] bool isSaveMsgShown() const;
 
 	void updateOverRect(OverState state);
@@ -455,6 +459,7 @@ private:
 	void clearStreaming(bool savePosition = true);
 	bool canInitStreaming() const;
 
+	[[nodiscard]] bool topShadowOnTheRight() const;
 	void applyHideWindowWorkaround();
 
 	Window::SessionController *findWindow(bool switchTo = true) const;
@@ -492,10 +497,12 @@ private:
 	std::unique_ptr<Collage> _collage;
 	std::optional<WebPageCollage> _collageData;
 
-	QRect _closeNav, _closeNavIcon;
-	QRect _leftNav, _leftNavIcon, _rightNav, _rightNavIcon;
+	QRect _leftNav, _leftNavOver, _leftNavIcon;
+	QRect _rightNav, _rightNavOver, _rightNavIcon;
 	QRect _headerNav, _nameNav, _dateNav;
-	QRect _rotateNav, _rotateNavIcon, _saveNav, _saveNavIcon, _moreNav, _moreNavIcon;
+	QRect _rotateNav, _rotateNavOver, _rotateNavIcon;
+	QRect _saveNav, _saveNavOver, _saveNavIcon;
+	QRect _moreNav, _moreNavOver, _moreNavIcon;
 	bool _leftNavVisible = false;
 	bool _rightNavVisible = false;
 	bool _saveVisible = false;
@@ -532,6 +539,7 @@ private:
 	QImage _staticContent;
 	bool _staticContentTransparent = false;
 	bool _blurred = true;
+	bool _reShow = false;
 
 	ContentGeometry _oldGeometry;
 	Ui::Animations::Simple _geometryAnimation;
@@ -553,6 +561,10 @@ private:
 	object_ptr<Ui::LinkButton> _docDownload;
 	object_ptr<Ui::LinkButton> _docSaveAs;
 	object_ptr<Ui::LinkButton> _docCancel;
+
+	QRect _bottomShadowRect;
+	QRect _topShadowRect;
+	rpl::variable<bool> _topShadowRight = false;
 
 	QRect _photoRadialRect;
 	Ui::RadialAnimation _radial;

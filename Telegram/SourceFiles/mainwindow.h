@@ -58,7 +58,7 @@ public:
 
 	MainWidget *sessionContent() const;
 
-	void checkActivation();
+	void checkActivation() override;
 	[[nodiscard]] bool markingAsRead() const;
 
 	bool takeThirdSectionFromLayer();

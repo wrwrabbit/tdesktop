@@ -38,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/format_values.h"
 #include "ui/grouped_layout.h"
 #include "ui/cached_round_corners.h"
+#include "ui/power_saving.h"
 #include "ui/effects/path_shift_gradient.h"
 #include "ui/effects/spoiler_mess.h"
 #include "data/data_session.h"
@@ -198,6 +199,10 @@ QSize Gif::countOptimalSize() {
 			minHeight = adjustHeightForLessCrop(
 				scaled,
 				{ maxWidth, minHeight });
+			if (const auto botTop = _parent->Get<FakeBotAboutTop>()) {
+				accumulate_max(maxWidth, botTop->maxWidth);
+				minHeight += botTop->height;
+			}
 			minHeight += st::mediaCaptionSkip + _caption.minHeight();
 			if (isBubbleBottom()) {
 				minHeight += st::msgPadding.bottom();
@@ -235,11 +240,14 @@ QSize Gif::countCurrentSize(int newWidth) {
 	if (_parent->hasBubble()) {
 		accumulate_max(newWidth, _parent->minWidthForMedia());
 		if (!_caption.isEmpty()) {
-			const auto maxWithCaption = qMin(
-				st::msgMaxWidth,
-				(st::msgPadding.left()
-					+ _caption.maxWidth()
-					+ st::msgPadding.right()));
+			auto captionMaxWidth = st::msgPadding.left()
+				+ _caption.maxWidth()
+				+ st::msgPadding.right();
+			const auto botTop = _parent->Get<FakeBotAboutTop>();
+			if (botTop) {
+				accumulate_max(captionMaxWidth, botTop->maxWidth);
+			}
+			const auto maxWithCaption = qMin(st::msgMaxWidth, captionMaxWidth);
 			newWidth = qMin(qMax(newWidth, maxWithCaption), thumbMaxWidth);
 			newHeight = adjustHeightForLessCrop(
 				scaled,
@@ -247,6 +255,9 @@ QSize Gif::countCurrentSize(int newWidth) {
 			const auto captionw = newWidth
 				- st::msgPadding.left()
 				- st::msgPadding.right();
+			if (botTop) {
+				newHeight += botTop->height;
+			}
 			newHeight += st::mediaCaptionSkip + _caption.countHeight(captionw);
 			if (isBubbleBottom()) {
 				newHeight += st::msgPadding.bottom();
@@ -348,12 +359,16 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 	const auto outbg = context.outbg;
 	const auto inWebPage = (_parent->media() != this);
 	const auto isRound = _data->isVideoMessage();
+	const auto botTop = _parent->Get<FakeBotAboutTop>();
 
 	const auto rounding = inWebPage
 		? std::optional<Ui::BubbleRounding>()
 		: adjustedBubbleRoundingWithCaption(_caption);
 	if (bubble) {
 		if (!_caption.isEmpty()) {
+			if (botTop) {
+				painth -= botTop->height;
+			}
 			painth -= st::mediaCaptionSkip + _caption.countHeight(captionw);
 			if (isBubbleBottom()) {
 				painth -= st::msgPadding.bottom();
@@ -673,15 +688,24 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 	if (!unwrapped && !_caption.isEmpty()) {
 		p.setPen(stm->historyTextFg);
 		_parent->prepareCustomEmojiPaint(p, context, _caption);
-		_caption.draw(p, {
-			.position = QPoint(
+		auto top = painty + painth + st::mediaCaptionSkip;
+		if (botTop) {
+			botTop->text.drawLeftElided(
+				p,
 				st::msgPadding.left(),
-				painty + painth + st::mediaCaptionSkip),
+				top,
+				captionw,
+				_parent->width());
+			top += botTop->height;
+		}
+		_caption.draw(p, {
+			.position = QPoint(st::msgPadding.left(), top),
 			.availableWidth = captionw,
 			.palette = &stm->textPalette,
 			.spoiler = Ui::Text::DefaultSpoilerCache(),
 			.now = context.now,
-			.paused = context.paused,
+			.pausedEmoji = context.paused || On(PowerSaving::kEmojiChat),
+			.pausedSpoiler = context.paused || On(PowerSaving::kChatSpoiler),
 			.selection = context.selection,
 		});
 	} else if (!inWebPage && !skipDrawingSurrounding) {
@@ -953,6 +977,9 @@ TextState Gif::textState(QPoint point, StateRequest request) const {
 				captionw,
 				request.forText()));
 			return result;
+		}
+		if (const auto botTop = _parent->Get<FakeBotAboutTop>()) {
+			painth -= botTop->height;
 		}
 		painth -= st::mediaCaptionSkip;
 	}

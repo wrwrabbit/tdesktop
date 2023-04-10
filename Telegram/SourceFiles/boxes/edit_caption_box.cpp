@@ -67,12 +67,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace {
 
+constexpr auto kChangesDebounceTimeout = crl::time(1000);
+
 auto ListFromMimeData(not_null<const QMimeData*> data, bool premium) {
 	using Error = Ui::PreparedList::Error;
-	auto result = data->hasUrls()
+	const auto list = Core::ReadMimeUrls(data);
+	auto result = !list.isEmpty()
 		? Storage::PrepareMediaList(
-			// When we edit media, we need only 1 file.
-			base::GetMimeUrls(data).mid(0, 1),
+			list.mid(0, 1), // When we edit media, we need only 1 file.
 			st::sendMediaPreviewSize,
 			premium)
 		: Ui::PreparedList(Error::EmptyFile, QString());
@@ -288,12 +290,23 @@ void EditCaptionBox::setupField() {
 }
 
 void EditCaptionBox::setInitialText() {
+	const auto initial = PrepareEditText(_historyItem);
 	_field->setTextWithTags(
-		PrepareEditText(_historyItem),
+		initial,
 		Ui::InputField::HistoryAction::Clear);
 	auto cursor = _field->textCursor();
 	cursor.movePosition(QTextCursor::End);
 	_field->setTextCursor(cursor);
+
+	_checkChangedTimer.setCallback([=] {
+		if (_field->getTextWithAppliedMarkdown() == initial) {
+			setCloseByOutsideClick(true);
+		}
+	});
+	connect(_field, &Ui::InputField::changed, [=] {
+		_checkChangedTimer.callOnce(kChangesDebounceTimeout);
+		setCloseByOutsideClick(false);
+	});
 }
 
 void EditCaptionBox::setupControls() {

@@ -210,7 +210,7 @@ parts:
       - shared-mime-info
       - xdg-user-dirs
     override-prime: |
-      snapcraftctl prime
+      craftctl default
       update-mime-database usr/share/mime
       glib-compile-schemas usr/share/glib-2.0/schemas
       for theme in usr/share/icons/*; do
@@ -228,16 +228,24 @@ parts:
     plugin: nil
     build-packages:
       - libavcodec-dev
+      - libavfilter-dev
       - libavformat-dev
       - libavutil-dev
       - libswresample-dev
       - libswscale-dev
     stage-packages:
       - libavcodec58
+      - libavfilter7
       - libavformat58
       - libavutil56
       - libswresample3
       - libswscale5
+    override-build: |
+      craftctl default
+      mv "$CRAFT_PART_INSTALL/usr/lib/$CRAFT_ARCH_TRIPLET/blas/"* "$CRAFT_PART_INSTALL/usr/lib/$CRAFT_ARCH_TRIPLET"
+      rmdir "$CRAFT_PART_INSTALL/usr/lib/$CRAFT_ARCH_TRIPLET/blas"
+      mv "$CRAFT_PART_INSTALL/usr/lib/$CRAFT_ARCH_TRIPLET/lapack/"* "$CRAFT_PART_INSTALL/usr/lib/$CRAFT_ARCH_TRIPLET"
+      rmdir "$CRAFT_PART_INSTALL/usr/lib/$CRAFT_ARCH_TRIPLET/lapack"
     stage:
       - -./usr/lib/$CRAFT_ARCH_TRIPLET/libjpeg.so.8.2.2
     after:
@@ -429,6 +437,7 @@ parts:
       - libx11-dev
       - libx11-xcb-dev
       - libxcb1-dev
+      - libxcb-cursor-dev
       - libxcb-glx0-dev
       - libxcb-icccm4-dev
       - libxcb-image0-dev
@@ -442,7 +451,6 @@ parts:
       - libxcb-util-dev
       - libxcb-xfixes0-dev
       - libxcb-xkb-dev
-      - libxcursor-dev
       - libxkbcommon-dev
       - libxkbcommon-x11-dev
       - zlib1g-dev
@@ -470,6 +478,7 @@ parts:
       - libx11-6
       - libx11-xcb1
       - libxcb1
+      - libxcb-cursor0
       - libxcb-glx0
       - libxcb-icccm4
       - libxcb-image0
@@ -483,14 +492,13 @@ parts:
       - libxcb-util1
       - libxcb-xfixes0
       - libxcb-xkb1
-      - libxcursor1
       - libxkbcommon0
       - libxkbcommon-x11-0
       - zlib1g
     override-pull: |
-      QT=6_4_2
+      QT=6.5.0
 
-      git clone -b v6.4.2 --depth=1 git://code.qt.io/qt/qt5.git .
+      git clone -b v${QT}-beta3 --depth=1 git://code.qt.io/qt/qt5.git .
       git submodule update --init --recursive --depth=1 qtbase qtdeclarative qtwayland qtimageformats qtsvg qt5compat qtshadertools
 
       cd qtbase

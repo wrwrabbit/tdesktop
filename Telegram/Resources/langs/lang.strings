@@ -396,6 +396,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_username_available" = "This username is available.";
 "lng_username_not_found" = "User @{user} not found.";
 "lng_username_by_phone_not_found" = "User {phone} not found.";
+"lng_username_app_not_found" = "Bot application not found.";
 "lng_username_link" = "This link opens a chat with you:";
 "lng_username_copied" = "Link copied to clipboard.";
 
@@ -497,6 +498,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_open_system_settings" = "Open Settings";
 "lng_settings_add_sendto" = "Place Telegram in \"Send to\" menu";
 "lng_settings_mac_warn_before_quit" = "Show warning before quitting with {text}";
+"lng_settings_mac_round_icon" = "Round application icon";
 
 "lng_settings_experimental" = "Experimental settings";
 "lng_settings_experimental_about" = "Warning! Those are experimental settings. Some may not work. Others may break the app. Any of them may disappear in the next version without a trace. Use at your own risk.";
@@ -593,7 +595,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_version_info" = "Version and updates";
 "lng_settings_system_integration" = "System integration";
 "lng_settings_performance" = "Performance";
-"lng_settings_enable_animations" = "Enable animations";
 "lng_settings_enable_hwaccel" = "Hardware accelerated video decoding";
 "lng_settings_enable_opengl" = "Enable OpenGL rendering for media";
 "lng_settings_angle_backend" = "ANGLE graphics backend";
@@ -608,6 +609,26 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_sensitive_about" = "Display sensitive media in public channels on all your Telegram devices.";
 "lng_settings_security_bots" = "Bots and websites";
 "lng_settings_clear_payment_info" = "Clear Payment and Shipping Info";
+
+"lng_settings_power_menu" = "Battery and Animations";
+"lng_settings_power_title" = "Power Usage";
+"lng_settings_power_subtitle" = "Power saving options";
+"lng_settings_power_stickers" = "Animated Stickers";
+"lng_settings_power_stickers_panel" = "Autoplay in panel";
+"lng_settings_power_stickers_chat" = "Autoplay in chat";
+"lng_settings_power_emoji" = "Animated Emoji";
+"lng_settings_power_emoji_panel" = "Autoplay in panel";
+"lng_settings_power_emoji_reactions" = "Autoplay in reactions menu";
+"lng_settings_power_emoji_chat" = "Autoplay in messages";
+"lng_settings_power_emoji_status" = "Autoplay in premium status";
+"lng_settings_power_chat" = "Animations in Chats";
+"lng_settings_power_chat_background" = "Background rotation";
+"lng_settings_power_chat_spoiler" = "Animated spoiler effect";
+"lng_settings_power_calls" = "Animations in Calls";
+"lng_settings_power_ui" = "Interface animations";
+"lng_settings_power_auto" = "Save Power on Low Battery";
+"lng_settings_power_auto_about" = "Automatically disable all animations when your laptop is in a battery saving mode.";
+"lng_settings_power_turn_off" = "Please turn off Save Power on Low Battery to change these settings.";
 
 "lng_settings_cloud_password_on" = "On";
 "lng_settings_cloud_password_off" = "Off";
@@ -1089,6 +1110,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_profile_copy_phone" = "Copy Phone Number";
 "lng_profile_copy_fullname" = "Copy Name";
 
+"lng_via_link_group_one" = "**{user}** restricts adding them to groups.\nYou can send them an invite link as message instead.";
+"lng_via_link_group_many#one" = "**{count} user** restricts adding them to groups.\nYou can send them an invite link as message instead.";
+"lng_via_link_group_many#other" = "**{count} users** restrict adding them to groups.\nYou can send them an invite link as message instead.";
+"lng_via_link_channel_one" = "**{user}** restricts adding them to channels.\nYou can send them an invite link as message instead.";
+"lng_via_link_channel_many#one" = "**{count} user** restricts adding them to channels.\nYou can send them an invite link as message instead.";
+"lng_via_link_channel_many#other" = "**{count} users** restrict adding them to channels.\nYou can send them an invite link as message instead.";
+"lng_via_link_send" = "Send Invite Link";
+"lng_via_link_cant" = "You can't create a link";
+"lng_via_link_cant_one" = "**{user}** can only by invited via link, but you don't have permission to share invite links to this group.";
+"lng_via_link_cant_many#one" = "**{count} user** can only by invited via link, but you don't have permission to share invite links to this group.";
+"lng_via_link_cant_many#other" = "**{count} users** can only by invited via link, but you don't have permission to share invite links to this group.";
+"lng_via_link_shared_one" = "Link shared with **{user}**.";
+"lng_via_link_shared_many#one" = "Link shared with **{count} user**.";
+"lng_via_link_shared_many#other" = "Link shared with **{count} users**.";
+
 "lng_info_mobile_label" = "Mobile";
 "lng_info_mobile_context_menu_fragment_about" = "This number is not tied to a SIM card and was acquired on {link}.";
 "lng_info_mobile_context_menu_fragment_about_link" = "Fragment";
@@ -1445,6 +1481,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_action_took_screenshot" = "{from} took a screenshot!";
 "lng_action_you_took_screenshot" = "You took a screenshot!";
 "lng_action_bot_allowed_from_domain" = "You allowed this bot to message you when you logged in on {domain}.";
+"lng_action_bot_allowed_from_app" = "You allowed this bot to message you when you opened {app}.";
 "lng_action_secure_values_sent" = "{user} received the following documents: {documents}";
 "lng_action_secure_personal_details" = "personal details";
 "lng_action_secure_proof_of_identity" = "proof of identity";
@@ -2398,6 +2435,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mediaview_set_userpic" = "Set as Main";
 "lng_mediaview_report_profile_photo" = "Report";
 
+"lng_mediaview_title" = "Media viewer";
 "lng_mediaview_saved_to" = "Image was saved to your {downloads} folder";
 "lng_mediaview_saved_images_to" = "Images were saved to your {downloads} folder";
 "lng_mediaview_downloads" = "Downloads";
@@ -2554,6 +2592,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_call_status_failed" = "failed to connect";
 "lng_call_status_ringing" = "ringing...";
 "lng_call_status_busy" = "line busy";
+"lng_call_status_sure" = "Click on the Camera icon if you want to start a video call.";
 "lng_call_fingerprint_tooltip" = "If emoji on {user}'s screen are the same, this call is 100% secure";
 
 "lng_call_error_not_available" = "Sorry, {user} doesn't accept calls.";
@@ -2594,6 +2633,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_call_rate_label" = "Please rate the quality of your call";
 "lng_call_rate_comment" = "Comment (optional)";
 
+"lng_call_start" = "Start Call";
 "lng_call_start_video" = "Start Video";
 "lng_call_stop_video" = "Stop Video";
 "lng_call_screencast" = "Screencast";
@@ -3514,13 +3554,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_voice_speed_slow" = "Slow";
 "lng_voice_speed_normal" = "Normal";
+"lng_voice_speed_medium" = "Medium";
 "lng_voice_speed_fast" = "Fast";
 "lng_voice_speed_very_fast" = "Very fast";
+"lng_voice_speed_super_fast" = "Super fast";
 
 "lng_view_button_user" = "View user";
 "lng_view_button_bot" = "View bot";
 "lng_view_button_group" = "View group";
 "lng_view_button_channel" = "View channel";
+"lng_view_button_bot_app" = "Open app";
 "lng_view_button_background" = "View background";
 "lng_view_button_theme" = "View theme";
 "lng_view_button_message" = "View message";
@@ -3532,6 +3575,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_sponsored_title" = "What are sponsored messages?";
 "lng_sponsored_info_description1" = "Unlike other apps, Telegram never uses your private data to target ads. Sponsored messages on Telegram are based solely on the topic of the public channels in which they are shown. This means that no user data is mined or analyzed to display ads, and every user viewing a channel on Telegram sees the same sponsored messages.\n\nUnlike other apps, Telegram doesn't track whether you tapped on a sponsored message and doesn't profile you based on your activity. We also prevent external links in sponsored messages to ensure that third parties can’t spy on our users. We believe that everyone has the right to privacy, and technological platforms should respect that.\n\nTelegram offers a free and unlimited service to hundreds of millions of users, which involves significant server and traffic costs. In order to remain independent and stay true to its values, Telegram developed a paid tool to promote messages with user privacy in mind. We welcome responsible advertisers at:";
 "lng_sponsored_info_description2" = "Sponsored Messages are currently in test mode. Once they are fully launched and allow Telegram to cover its basic costs, we will start sharing ad revenue with the owners of public channels in which sponsored messages are displayed.\n\nOnline ads should no longer be synonymous with abuse of user privacy. Let us redefine how a tech company should operate – together.";
+"lng_sponsored_info_menu" = "About this ad";
+"lng_sponsored_info_submenu" = "Advertiser: {text}";
 
 "lng_telegram_features_url" = "https://t.me/TelegramTips";
 

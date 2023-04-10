@@ -404,7 +404,7 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout e8574ccccc
+    git checkout f61eb3406b
 """)
 
 stage('msys64', """
@@ -731,7 +731,7 @@ release:
 
 stage('libheif', """
 win:
-    git clone --depth 1 -b v1.14.2 https://github.com/strukturag/libheif.git
+    git clone --depth 1 -b v1.15.1 https://github.com/strukturag/libheif.git
     cd libheif
     %THIRDPARTY_DIR%\\msys64\\usr\\bin\\sed.exe -i 's/LIBHEIF_EXPORTS/LIBDE265_STATIC_BUILD/g' libheif/CMakeLists.txt
     %THIRDPARTY_DIR%\\msys64\\usr\\bin\\sed.exe -i 's/HAVE_VISIBILITY/LIBHEIF_STATIC_BUILD/g' libheif/CMakeLists.txt
@@ -746,7 +746,9 @@ win:
         -DENABLE_PLUGIN_LOADING=OFF ^
         -DWITH_LIBDE265=ON ^
         -DWITH_SvtEnc=OFF ^
+        -DWITH_SvtEnc_PLUGIN=OFF ^
         -DWITH_RAV1E=OFF ^
+        -DWITH_RAV1E_PLUGIN=OFF ^
         -DWITH_EXAMPLES=OFF
     cmake --build . --config Debug
     cmake --install . --config Debug
@@ -870,8 +872,8 @@ win:
 stage('ffmpeg', """
     git clone https://github.com/FFmpeg/FFmpeg.git ffmpeg
     cd ffmpeg
+    git checkout 7268323193
 win:
-    git checkout cc33e73618
     SET PATH_BACKUP_=%PATH%
     SET PATH=%ROOT_DIR%\\ThirdParty\\msys64\\usr\\bin;%PATH%
 
@@ -883,7 +885,6 @@ depends:patches/build_ffmpeg_win.sh
 
     SET PATH=%PATH_BACKUP_%
 mac:
-    git checkout 7268323193
     export PKG_CONFIG_PATH=$USED_PREFIX/lib/pkgconfig
 depends:yasm/yasm
 
@@ -979,6 +980,7 @@ depends:yasm/yasm
         --enable-decoder=wmav2 \
         --enable-decoder=wmavoice \
         --enable-encoder=libopus \
+        --enable-filter=atempo \
         --enable-parser=aac \
         --enable-parser=aac_latm \
         --enable-parser=flac \
@@ -1007,6 +1009,7 @@ depends:yasm/yasm
     make $MAKE_THREADS_CNT
 
     mkdir out.arm64
+    mv libavfilter/libavfilter.a out.arm64
     mv libavformat/libavformat.a out.arm64
     mv libavcodec/libavcodec.a out.arm64
     mv libswresample/libswresample.a out.arm64
@@ -1019,12 +1022,14 @@ depends:yasm/yasm
     make $MAKE_THREADS_CNT
 
     mkdir out.x86_64
+    mv libavfilter/libavfilter.a out.x86_64
     mv libavformat/libavformat.a out.x86_64
     mv libavcodec/libavcodec.a out.x86_64
     mv libswresample/libswresample.a out.x86_64
     mv libswscale/libswscale.a out.x86_64
     mv libavutil/libavutil.a out.x86_64
 
+    lipo -create out.arm64/libavfilter.a out.x86_64/libavfilter.a -output libavfilter/libavfilter.a
     lipo -create out.arm64/libavformat.a out.x86_64/libavformat.a -output libavformat/libavformat.a
     lipo -create out.arm64/libavcodec.a out.x86_64/libavcodec.a -output libavcodec/libavcodec.a
     lipo -create out.arm64/libswresample.a out.x86_64/libswresample.a -output libswresample/libswresample.a
@@ -1187,10 +1192,10 @@ if buildQt5:
     perl init-repository --module-subset=qtbase,qtimageformats,qtsvg
     git checkout v5.15.8-lts-lgpl
     git submodule update qtbase qtimageformats qtsvg
-depends:patches/qtbase_5_15_8/*.patch
+depends:patches/qtbase_5.15.8/*.patch
     cd qtbase
 win:
-    for /r %%i in (..\\..\\patches\\qtbase_5_15_8\\*) do git apply %%i
+    for /r %%i in (..\\..\\patches\\qtbase_5.15.8\\*) do git apply %%i
     cd ..
 
     SET CONFIGURATIONS=-debug-and-release
@@ -1226,6 +1231,7 @@ win:
         LIBJPEG_LIBS_DEBUG="%MOZJPEG_DIR%\Debug\jpeg-static.lib" ^
         LIBJPEG_LIBS_RELEASE="%MOZJPEG_DIR%\Release\jpeg-static.lib" ^
         -mp ^
+        -no-feature-netlistmgr ^
         -nomake examples ^
         -nomake tests ^
         -platform win32-msvc
@@ -1238,7 +1244,7 @@ win:
     del /S *.obj
     cd ..
 mac:
-    find ../../patches/qtbase_5_15_8 -type f -print0 | sort -z | xargs -0 git apply
+    find ../../patches/qtbase_5.15.8 -type f -print0 | sort -z | xargs -0 git apply
     cd ..
 
     CONFIGURATIONS=-debug-and-release
@@ -1269,10 +1275,10 @@ mac:
     git clone -b v6.3.2 https://code.qt.io/qt/qt5.git qt_6_3_2
     cd qt_6_3_2
     perl init-repository --module-subset=qtbase,qtimageformats,qtsvg,qt5compat
-depends:patches/qtbase_6_3_2/*.patch
+depends:patches/qtbase_6.3.2/*.patch
     cd qtbase
 
-    find ../../patches/qtbase_6_3_2 -type f -print0 | sort -z | xargs -0 git apply
+    find ../../patches/qtbase_6.3.2 -type f -print0 | sort -z | xargs -0 git apply
     cd ..
 
     CONFIGURATIONS=-debug-and-release

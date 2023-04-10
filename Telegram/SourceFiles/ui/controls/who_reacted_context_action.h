@@ -19,6 +19,8 @@ class PopupMenu;
 
 struct WhoReadParticipant {
 	QString name;
+	QString date;
+	bool dateReacted = false;
 	QString customEntityData;
 	QImage userpicSmall;
 	QImage userpicLarge;

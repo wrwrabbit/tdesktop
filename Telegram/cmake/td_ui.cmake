@@ -120,8 +120,12 @@ PRIVATE
     media/clip/media_clip_reader.cpp
     media/clip/media_clip_reader.h
 
+    media/player/media_player_button.cpp
+    media/player/media_player_button.h
     media/player/media_player_dropdown.cpp
     media/player/media_player_dropdown.h
+
+    media/media_common.h
 
     menu/menu_check_item.cpp
     menu/menu_check_item.h
@@ -303,6 +307,8 @@ PRIVATE
     ui/empty_userpic.h
     ui/grouped_layout.cpp
     ui/grouped_layout.h
+    ui/power_saving.cpp
+    ui/power_saving.h
     ui/unread_badge_paint.cpp
     ui/unread_badge_paint.h
     ui/userpic_view.cpp

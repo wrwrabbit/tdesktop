@@ -448,6 +448,8 @@ PRIVATE
     data/data_audio_msg_id.h
     data/data_auto_download.cpp
     data/data_auto_download.h
+    data/data_bot_app.cpp
+    data/data_bot_app.h
     data/data_chat.cpp
     data/data_chat.h
     data/data_chat_filters.cpp
@@ -984,10 +986,6 @@ PRIVATE
     media/audio/media_audio_track.h
     media/audio/media_child_ffmpeg_loader.cpp
     media/audio/media_child_ffmpeg_loader.h
-    media/audio/media_openal_functions.cpp
-    media/audio/media_openal_functions.h
-    media/player/media_player_button.cpp
-    media/player/media_player_button.h
     media/player/media_player_float.cpp
     media/player/media_player_float.h
     media/player/media_player_instance.cpp
@@ -1255,6 +1253,8 @@ PRIVATE
     settings/settings_main.h
     settings/settings_notifications.cpp
     settings/settings_notifications.h
+    settings/settings_power_saving.cpp
+    settings/settings_power_saving.h
     settings/settings_premium.cpp
     settings/settings_premium.h
     settings/settings_privacy_controllers.cpp
@@ -1485,6 +1485,13 @@ PRIVATE
     langs/cloud_lang.strings
     numbers.txt
 )
+
+if (APPLE AND NOT build_macstore)
+    nice_target_sources(Telegram ${res_loc}
+    PRIVATE
+        qrc/telegram/mac_icons.qrc
+    )
+endif()
 
 if (WIN32)
     # message(${CMAKE_GENERATOR})

@@ -100,16 +100,7 @@ MainWindow::MainWindow(not_null<Window::Controller*> controller)
 
 void MainWindow::initHook() {
 	Platform::MainWindow::initHook();
-
 	QCoreApplication::instance()->installEventFilter(this);
-
-	// Non-queued activeChanged handlers must use QtSignalProducer.
-	connect(
-		windowHandle(),
-		&QWindow::activeChanged,
-		this,
-		[=] { checkActivation(); },
-		Qt::QueuedConnection);
 }
 
 void MainWindow::applyInitialWorkMode() {
@@ -345,7 +336,9 @@ void MainWindow::ensureLayerCreated() {
 		return;
 	}
 	_layer = base::make_unique_q<Ui::LayerStackWidget>(
-		bodyWidget());
+		bodyWidget(),
+		crl::guard(this, [=] {
+			return std::make_shared<Window::Show>(&controller()); }));
 
 	_layer->hideFinishEvents(
 	) | rpl::filter([=] {
@@ -527,6 +520,8 @@ bool MainWindow::markingAsRead() const {
 		&& !_main->isHidden()
 		&& !_main->animatingShow()
 		&& !_layer
+		&& !isHidden()
+		&& !isMinimized()
 		&& (AutoScrollInactiveChat.value()
 			|| (isActive() && !_main->session().updates().isIdle()));
 }

@@ -314,7 +314,7 @@ void LaunchGApplication() {
 			});
 		}, true);
 
-		app->add_action("Quit", [] {
+		app->add_action("quit", [] {
 			Core::Sandbox::Instance().customEnterFromEventLoop([] {
 				Core::Quit();
 			});
@@ -337,7 +337,7 @@ void LaunchGApplication() {
 		}();
 
 		app->add_action_with_parameter(
-			"notification-reply",
+			"notification-activate",
 			notificationIdVariantType,
 			[](const Glib::VariantBase &parameter) {
 				Core::Sandbox::Instance().customEnterFromEventLoop([&] {
@@ -850,6 +850,10 @@ void NewVersionLaunched(int oldVersion) {
 	if (oldVersion <= 4001001 && cAutoStart()) {
 		AutostartToggle(true);
 	}
+}
+
+QImage DefaultApplicationIcon() {
+	return Window::Logo();
 }
 
 namespace ThirdParty {

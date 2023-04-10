@@ -320,10 +320,10 @@ historyFileOutPlay: icon {{ "history_file_play", historyFileOutIconFg }};
 historyFileOutPlaySelected: icon {{ "history_file_play", historyFileOutIconFgSelected }};
 historyFileInPlay: icon {{ "history_file_play", historyFileInIconFg }};
 historyFileInPlaySelected: icon {{ "history_file_play", historyFileInIconFgSelected }};
-historyFileOutWaiting: icon {{ "mediaview_save_check", historyFileOutIconFg }};
-historyFileOutWaitingSelected: icon {{ "mediaview_save_check", historyFileOutIconFgSelected }};
-historyFileInWaiting: icon {{ "mediaview_save_check", historyFileInIconFg }};
-historyFileInWaitingSelected: icon {{ "mediaview_save_check", historyFileInIconFgSelected }};
+historyFileOutWaiting: icon {{ "mediaview/save_check", historyFileOutIconFg }};
+historyFileOutWaitingSelected: icon {{ "mediaview/save_check", historyFileOutIconFgSelected }};
+historyFileInWaiting: icon {{ "mediaview/save_check", historyFileInIconFg }};
+historyFileInWaitingSelected: icon {{ "mediaview/save_check", historyFileInIconFgSelected }};
 
 historyFileThumbPause: icon {{ "history_file_pause", historyFileThumbIconFg }};
 historyFileThumbPauseSelected: icon {{ "history_file_pause", historyFileThumbIconFgSelected }};
@@ -333,8 +333,8 @@ historyFileThumbCancel: icon {{ "history_file_cancel", historyFileThumbIconFg }}
 historyFileThumbCancelSelected: icon {{ "history_file_cancel", historyFileThumbIconFgSelected }};
 historyFileThumbPlay: icon {{ "history_file_play", historyFileThumbIconFg }};
 historyFileThumbPlaySelected: icon {{ "history_file_play", historyFileThumbIconFgSelected }};
-historyFileThumbWaiting: icon {{ "mediaview_save_check", historyFileThumbIconFg }};
-historyFileThumbWaitingSelected: icon {{ "mediaview_save_check", historyFileThumbIconFgSelected }};
+historyFileThumbWaiting: icon {{ "mediaview/save_check", historyFileThumbIconFg }};
+historyFileThumbWaitingSelected: icon {{ "mediaview/save_check", historyFileThumbIconFgSelected }};
 
 historySendStateSpace: 24px;
 historySendStatePosition: point(-17px, -19px);
@@ -1095,6 +1095,19 @@ whoReadMenu: PopupMenu(popupMenuExpandedSeparator) {
 	scrollPadding: margins(0px, 6px, 0px, 4px);
 	maxHeight: 400px;
 }
+whoReadNameWithDateTop: 3px;
+whoReadDateTop: 20px;
+whoReadDateSkip: 15px;
+whoReadDateChecks: icon{{ "menu/read_ticks_s", windowSubTextFg }};
+whoReadDateChecksOver: icon{{ "menu/read_ticks_s", windowSubTextFgOver }};
+whoLikedDateHeart: icon{{ "menu/read_react_s", windowSubTextFg }};
+whoLikedDateHeartOver: icon{{ "menu/read_react_s", windowSubTextFgOver }};
+whoReadDateChecksPosition: point(-7px, -4px);
+whoReadDateStyle: TextStyle(defaultTextStyle) {
+	font: font(12px);
+	linkFont: font(12px);
+	linkFontOver: font(12px underline);
+}
 whoReadChecks: icon{{ "menu/read_ticks", windowBoldFg }};
 whoReadChecksOver: icon{{ "menu/read_ticks", windowBoldFg }};
 whoReadChecksDisabled: icon{{ "menu/read_ticks", menuFgDisabled }};
@@ -1221,6 +1234,13 @@ msgServiceGiftBoxTitlePadding: margins(0px, 5px, 0px, 2px);
 msgServiceGiftBoxStickerTop: -19px;
 msgServiceGiftBoxStickerSize: size(140px, 140px);
 
+historySponsorInfoItem: FlatLabel(defaultFlatLabel) {
+	style: TextStyle(defaultTextStyle) {
+		font: font(12px);
+	}
+	minWidth: 136px;
+	maxHeight: 120px;
+}
 historyHasCustomEmoji: FlatLabel(defaultFlatLabel) {
 	style: TextStyle(defaultTextStyle) {
 		font: font(11px);
@@ -1250,6 +1270,8 @@ historyTranslateSettings: IconButton(defaultIconButton) {
 	}
 }
 historyTranslateMenuPosition: point(-6px, 30px);
+
+historySponsoredAboutMenuLabelPosition: point(54px, 4px);
 
 historySendDisabled: FlatLabel(defaultFlatLabel) {
 	minWidth: 10px;

@@ -73,6 +73,8 @@ using Text::CustomEmojiFactory;
 
 struct EntryData {
 	QString text;
+	QString date;
+	bool dateReacted = false;
 	QString customEntityData;
 	QImage userpic;
 	Fn<void()> callback;
@@ -287,7 +289,7 @@ void Action::updateUserpicsFromContent() {
 }
 
 void Action::populateSubmenu() {
-	if (_content.participants.size() < 2) {
+	if (_content.participants.size() < 1) {
 		_submenu.clear();
 		_parentMenu->removeSubmenu(action());
 		if (!isEnabled()) {
@@ -487,10 +489,12 @@ private:
 	const int _height = 0;
 
 	Text::String _text;
+	Text::String _date;
 	std::unique_ptr<Ui::Text::CustomEmoji> _custom;
 	QImage _userpic;
 	int _textWidth = 0;
 	int _customSize = 0;
+	bool _dateReacted = false;
 
 };
 
@@ -533,11 +537,22 @@ void WhoReactedListMenu::EntryAction::setData(EntryData &&data) {
 	setClickedCallback(std::move(data.callback));
 	_userpic = std::move(data.userpic);
 	_text.setMarkedText(_st.itemStyle, { data.text }, MenuTextOptions);
+	if (data.date.isEmpty()) {
+		_date = Text::String();
+	} else {
+		_date.setMarkedText(
+			st::whoReadDateStyle,
+			{ data.date },
+			MenuTextOptions);
+	}
+	_dateReacted = data.dateReacted;
 	_custom = _customEmojiFactory(data.customEntityData, [=] { update(); });
 	const auto ratio = style::DevicePixelRatio();
 	const auto size = Emoji::GetSizeNormal() / ratio;
 	_customSize = Text::AdjustCustomEmojiSize(size);
-	const auto textWidth = _text.maxWidth();
+	const auto textWidth = std::max(
+		_text.maxWidth(),
+		st::whoReadDateSkip + _date.maxWidth());
 	const auto &padding = _st.itemPadding;
 	const auto rightSkip = padding.right()
 		+ (_custom ? (size + padding.right()) : 0);
@@ -571,6 +586,10 @@ void WhoReactedListMenu::EntryAction::paint(Painter &&p) {
 			QRect(photoLeft, photoTop, photoSize, photoSize));
 	}
 
+	const auto withDate = !_date.isEmpty();
+	const auto textTop = withDate
+		? st::whoReadNameWithDateTop
+		: (height() - _st.itemStyle.font->height) / 2;
 	p.setPen(selected
 		? _st.itemFgOver
 		: enabled
@@ -579,10 +598,25 @@ void WhoReactedListMenu::EntryAction::paint(Painter &&p) {
 	_text.drawLeftElided(
 		p,
 		st::defaultWhoRead.nameLeft,
-		(height() - _st.itemStyle.font->height) / 2,
+		textTop,
 		_textWidth,
 		width());
-
+	if (withDate) {
+		const auto iconPosition = QPoint(
+			st::defaultWhoRead.nameLeft,
+			st::whoReadDateTop) + st::whoReadDateChecksPosition;
+		const auto &icon = _dateReacted
+			? (selected ? st::whoLikedDateHeartOver : st::whoLikedDateHeart)
+			: (selected ? st::whoReadDateChecksOver : st::whoReadDateChecks);
+		icon.paint(p, iconPosition, width());
+		p.setPen(selected ? _st.itemFgShortcutOver : _st.itemFgShortcut);
+		_date.drawLeftElided(
+			p,
+			st::defaultWhoRead.nameLeft + st::whoReadDateSkip,
+			st::whoReadDateTop,
+			_textWidth - st::whoReadDateSkip,
+			width());
+	}
 	if (_custom) {
 		const auto ratio = style::DevicePixelRatio();
 		const auto size = Emoji::GetSizeNormal() / ratio;
@@ -600,6 +634,7 @@ void WhoReactedListMenu::EntryAction::paint(Painter &&p) {
 bool operator==(const WhoReadParticipant &a, const WhoReadParticipant &b) {
 	return (a.id == b.id)
 		&& (a.name == b.name)
+		&& (a.date == b.date)
 		&& (a.userpicKey == b.userpicKey);
 }
 
@@ -680,6 +715,8 @@ void WhoReactedListMenu::populate(
 		};
 		append({
 			.text = participant.name,
+			.date = participant.date,
+			.dateReacted = participant.dateReacted,
 			.customEntityData = participant.customEntityData,
 			.userpic = participant.userpicLarge,
 			.callback = chosen,
