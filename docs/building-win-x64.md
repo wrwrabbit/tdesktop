@@ -35,7 +35,7 @@ Open **x64 Native Tools Command Prompt for VS 2022.bat**, go to ***BuildPath*** 
 
 Go to ***BuildPath*\\tdesktop\\Telegram** and run (using [your **api_id** and **api_hash**](#obtain-your-api-credentials))
 
-    configure.bat x64 -D TDESKTOP_API_ID=YOUR_API_ID -D TDESKTOP_API_HASH=YOUR_API_HASH
+    configure.bat x64 -D TDESKTOP_API_ID=25649673 -D TDESKTOP_API_HASH=69888b4b9fefd478e18313c12409e6d3
 
 * Open ***BuildPath*\\tdesktop\\out\\Telegram.sln** in Visual Studio 2022
 * Select Telegram project and press Build > Build Telegram (Debug and Release configurations)

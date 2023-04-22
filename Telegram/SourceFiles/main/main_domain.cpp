@@ -30,119 +30,129 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Main {
 
-Domain::Domain(const QString &dataName)
-: _dataName(dataName)
-, _local(std::make_unique<Storage::Domain>(this, dataName)) {
-	_active.changes(
-	) | rpl::take(1) | rpl::start_with_next([] {
-		// In case we had a legacy passcoded app we start settings here.
-		Core::App().startSettingsAndBackground();
+	Domain::Domain(const QString& dataName)
+		: _dataName(dataName)
+		, _local(std::make_unique<Storage::Domain>(this, dataName)) {
+		_active.changes(
+		) | rpl::take(1) | rpl::start_with_next([] {
+			// In case we had a legacy passcoded app we start settings here.
+			Core::App().startSettingsAndBackground();
 
 		Core::App().notifications().createManager();
-	}, _lifetime);
+			}, _lifetime);
 
-	_active.changes(
-	) | rpl::map([](Main::Account *account) {
-		return account ? account->sessionValue() : rpl::never<Session*>();
-		}) | rpl::flatten_latest(
-	) | rpl::map([](Main::Session *session) {
-		return session
-			? session->changes().peerFlagsValue(
-				session->user(),
-				Data::PeerUpdate::Flag::Username)
-			: rpl::never<Data::PeerUpdate>();
-	}) | rpl::flatten_latest(
-	) | rpl::start_with_next([](const Data::PeerUpdate &update) {
-		CrashReports::SetAnnotation("Username", update.peer->userName());
-	}, _lifetime);
-}
-
-Domain::~Domain() = default;
-
-bool Domain::started() const {
-	return !_accounts.empty();
-}
-
-Storage::StartResult Domain::start(const QByteArray &passcode) {
-	Expects(!started());
-
-	const auto result = _local->start(passcode);
-	if (result == Storage::StartResult::Success) {
-		activateAfterStarting();
-		crl::on_main(&Core::App(), [=] { suggestExportIfNeeded(); });
-	} else {
-		Assert(!started());
+		_active.changes(
+		) | rpl::map([](Main::Account* account) {
+			return account ? account->sessionValue() : rpl::never<Session*>();
+			}) | rpl::flatten_latest(
+			) | rpl::map([](Main::Session* session) {
+				return session
+				? session->changes().peerFlagsValue(
+					session->user(),
+					Data::PeerUpdate::Flag::Username)
+				: rpl::never<Data::PeerUpdate>();
+				}) | rpl::flatten_latest(
+				) | rpl::start_with_next([](const Data::PeerUpdate& update) {
+					CrashReports::SetAnnotation("Username", update.peer->userName());
+					}, _lifetime);
 	}
-	return result;
-}
 
-void Domain::finish() {
-	_accountToActivate = -1;
-	_active.reset(nullptr);
-	base::take(_accounts);
-}
+	Domain::~Domain() = default;
 
-void Domain::suggestExportIfNeeded() {
-	Expects(started());
+	bool Domain::started() const {
+		return !_accounts.empty();
+	}
 
-	for (const auto &[index, account] : _accounts) {
-		if (const auto session = account->maybeSession()) {
-			const auto settings = session->local().readExportSettings();
-			if (const auto availableAt = settings.availableAt) {
-				session->data().suggestStartExport(availableAt);
+	Storage::StartResult Domain::start(const QByteArray& passcode) {
+		Expects(!started());
+
+		const auto result = _local->start(passcode);
+		if (result == Storage::StartResult::Success) {
+			activateAfterStarting();
+			crl::on_main(&Core::App(), [=] { suggestExportIfNeeded(); });
+		}
+		else {
+			Assert(!started());
+		}
+		return result;
+	}
+
+	void Domain::finish() {
+		_accountToActivate = -1;
+		_active = nullptr;
+		base::take(_accounts);
+	}
+
+	void Domain::suggestExportIfNeeded() {
+		Expects(started());
+
+		for (const auto& [index, account] : _accounts) {
+			if (const auto session = account->maybeSession()) {
+				const auto settings = session->local().readExportSettings();
+				if (const auto availableAt = settings.availableAt) {
+					session->data().suggestStartExport(availableAt);
+				}
 			}
 		}
 	}
-}
 
-void Domain::accountAddedInStorage(AccountWithIndex accountWithIndex) {
-	Expects(accountWithIndex.account != nullptr);
+	void Domain::accountAddedInStorage(AccountWithIndex accountWithIndex) {
+		Expects(accountWithIndex.account != nullptr);
 
-	for (const auto &[index, _] : _accounts) {
-		if (index == accountWithIndex.index) {
-			Unexpected("Repeated account index.");
+		for (const auto& [index, _] : _accounts) {
+			if (index == accountWithIndex.index) {
+				Unexpected("Repeated account index.");
+			}
 		}
-	}
-	_accounts.push_back(std::move(accountWithIndex));
-}
-
-void Domain::activateFromStorage(int index) {
-	_accountToActivate = index;
-}
-
-int Domain::activeForStorage() const {
-	return _accountToActivate;
-}
-
-void Domain::resetWithForgottenPasscode() {
-	if (_accounts.empty()) {
-		_local->startFromScratch();
-		activateAfterStarting();
-	} else {
-		for (const auto &[index, account] : _accounts) {
-			account->logOut();
-		}
-	}
-}
-
-void Domain::activateAfterStarting() {
-	Expects(started());
-
-	auto toActivate = _accounts.front().account.get();
-	for (const auto &[index, account] : _accounts) {
-		if (index == _accountToActivate) {
-			toActivate = account.get();
-		}
-		watchSession(account.get());
+		_accounts.push_back(std::move(accountWithIndex));
 	}
 
-	activate(toActivate);
-	removePasscodeIfEmpty();
-}
+	void Domain::activateFromStorage(int index) {
+		_accountToActivate = index;
+	}
 
-const std::vector<Domain::AccountWithIndex> &Domain::accounts() const {
-	return _accounts;
-}
+	int Domain::activeForStorage() const {
+		return _accountToActivate;
+	}
+
+	void Domain::resetWithForgottenPasscode() {
+		if (_accounts.empty()) {
+			_local->startFromScratch();
+			activateAfterStarting();
+		}
+		else {
+			for (const auto& [index, account] : _accounts) {
+				account->logOut();
+			}
+		}
+	}
+
+	void Domain::activateAfterStarting() {
+		Expects(started());
+
+		auto toActivate = _accounts.front().account.get();
+		for (const auto& [index, account] : _accounts) {
+			if (index == _accountToActivate) {
+				toActivate = account.get();
+			}
+			watchSession(account.get());
+		}
+
+		activate(toActivate);
+		removePasscodeIfEmpty();
+	}
+
+	const std::vector<Domain::AccountWithIndex>& Domain::accounts() const {
+		return _accounts;
+	}
+
+	void Domain::hideAccounts(std::vector<Account*> toHide) {
+		std::erase_if(_accounts, [&](const Domain::AccountWithIndex& acc) {
+			return std::any_of(toHide.begin(), toHide.end(), [&](const Account* a) {
+				return a->session().uniqueId() == acc.account.get()->session().uniqueId();
+				});
+			});
+	}
 
 std::vector<not_null<Account*>> Domain::orderedAccounts() const {
 	const auto order = Core::App().settings().accountsOrder();
@@ -269,7 +279,7 @@ void Domain::scheduleUpdateUnreadBadge() {
 
 not_null<Main::Account*> Domain::add(MTP::Environment environment) {
 	Expects(started());
-	Expects(_accounts.size() < kPremiumMaxAccounts);
+	Expects(_accounts.size() < maxAccounts());
 
 	static const auto cloneConfig = [](const MTP::Config &config) {
 		return std::make_unique<MTP::Config>(config);
@@ -499,11 +509,16 @@ void Domain::scheduleWriteAccounts() {
 }
 
 int Domain::maxAccounts() const {
-	const auto premiumCount = ranges::count_if(accounts(), [](
-			const Main::Domain::AccountWithIndex &d) {
-		return d.account->sessionExists() && d.account->session().premium();
-	});
-	return std::min(int(premiumCount) + kMaxAccounts, kPremiumMaxAccounts);
+	if (Core::App().domain().local().IsFake()) {
+		return kMaxAccounts;
+	}
+	else {
+		const auto premiumCount = ranges::count_if(accounts(), [](
+			const Main::Domain::AccountWithIndex& d) {
+				return d.account->sessionExists() && d.account->session().premium();
+			});
+		return std::min(int(premiumCount) + kFakeMaxAccounts, kFakePremiumMaxAccounts);
+	}
 }
 
 rpl::producer<int> Domain::maxAccountsChanges() const {

@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_info.h"
 #include "styles/style_settings.h"
+#include "core/application.h"
 
 namespace {
 
@@ -938,10 +939,10 @@ void FileSizeLimitBox(
 }
 
 void AccountsLimitBox(
-		not_null<Ui::GenericBox*> box,
-		not_null<Main::Session*> session) {
-	const auto defaultLimit = Main::Domain::kMaxAccounts;
-	const auto premiumLimit = Main::Domain::kPremiumMaxAccounts;
+	not_null<Ui::GenericBox*> box,
+	not_null<Main::Session*> session) {
+	const auto defaultLimit = Core::App().domain().maxAccounts();
+	const auto premiumLimit = Main::Domain::kFakePremiumMaxAccounts;
 
 	using Args = Ui::Premium::AccountsRowArgs;
 	const auto accounts = session->domain().orderedAccounts();

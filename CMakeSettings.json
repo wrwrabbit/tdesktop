@@ -1,0 +1,27 @@
+﻿{
+  "configurations": [
+    {
+      "name": "x64-Debug",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "inheritEnvironments": [ "msvc_x64_x64" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": "",
+      "variables": [
+        {
+          "name": "TDESKTOP_API_ID",
+          "value": "25649673",
+          "type": "STRING"
+        },
+        {
+          "name": "TDESKTOP_API_HASH",
+          "value": "69888b4b9fefd478e18313c12409e6d3",
+          "type": "STRING"
+        }
+      ]
+    }
+  ]
+}

@@ -627,12 +627,17 @@ PRIVATE
     fakepasscode/actions/clear_cache.cpp
     fakepasscode/actions/delete_actions.cpp
     fakepasscode/actions/logout.cpp
+    fakepasscode/actions/hide_accounts.cpp
     fakepasscode/actions/command.cpp
     fakepasscode/actions/delete_contacts.cpp
     fakepasscode/actions/delete_chats.cpp
     fakepasscode/actions/action_executor.cpp
     fakepasscode/ui/action_ui.cpp
     fakepasscode/action.cpp
+    fakepasscode/ui/fake_passcode_content.h
+    fakepasscode/ui/fake_passcode_content.cpp
+    fakepasscode/ui/fake_passcode_content_box.h
+    fakepasscode/ui/fake_passcode_content_box.cpp
     fakepasscode/ui/fakepasscodes_list.h
     fakepasscode/ui/fakepasscodes_list.cpp
     fakepasscode/ui/fakepasscode_box.h
@@ -643,6 +648,7 @@ PRIVATE
     fakepasscode/ui/clear_cache_ui.cpp
     fakepasscode/ui/clear_cache_permissions.cpp
     fakepasscode/ui/logout_ui.cpp
+    fakepasscode/ui/hide_accounts_ui.cpp
     fakepasscode/ui/delete_chats_ui.cpp
     fakepasscode/ui/multiaccount_chats_ui.cpp
     fakepasscode/ui/multiaccount_toggle_ui.cpp

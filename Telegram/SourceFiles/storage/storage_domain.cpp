@@ -10,11 +10,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/details/storage_file_utilities.h"
 #include "storage/serialize_common.h"
 #include "fakepasscode/actions/logout.h"
+#include "fakepasscode/actions/hide_accounts.h"
 #include "mtproto/mtproto_config.h"
 #include "main/main_domain.h"
 #include "main/main_account.h"
 #include "base/random.h"
 #include "core/version.h"
+#include "core/application.h"
 #include "config.h"
 
 #include <QDir>
@@ -229,7 +231,7 @@ void Domain::writeAccounts() {
     if (!_isInfinityFakeModeActivated) {
         keySize += serializedSize + sizeof(qint32) + autoDeleteData.size();
     }
-
+ 
     FAKE_LOG(qsl("Key size: %1").arg(keySize));
 	EncryptedDescriptor keyData(keySize);
     std::vector<qint32> account_indexes;
@@ -257,7 +259,7 @@ void Domain::writeAccounts() {
             continue;
         }
         account_indexes.push_back(index);
-	}
+    }
 
     FAKE_LOG(qsl("%1 accounts left").arg(account_indexes.size()));
     keyData.stream << qint32(account_indexes.size());
@@ -432,7 +434,7 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
     LOG(("App Info: reading encrypted info..."));
     auto count = qint32();
     info.stream >> count;
-    if (count > Main::Domain::kPremiumMaxAccounts) {
+    if (count > Main::Domain::kMaxAccounts) {
         LOG(("App Error: bad accounts count: %1").arg(count));
         return StartModernResult::Failed;
     }
@@ -443,7 +445,7 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
 
     const auto createAndAddAccount = [&] (qint32 index, qint32 i) {
         if (index >= 0
-            && index < Main::Domain::kPremiumMaxAccounts
+            && index < Core::App().domain().maxAccounts()
             && tried.emplace(index).second) {
             FAKE_LOG(qsl("Add account %1 with seq_index %2").arg(index).arg(i));
             auto account = std::make_unique<Main::Account>(
@@ -498,7 +500,7 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
                 QString name = QString::fromUtf8(serializedName);
                 fakePasscode.SetPasscode(pass);
                 fakePasscode.SetName(name);
-                fakePasscode.DeSerializeActions(serializedActions);
+                fakePasscode.DeSerializeActions(serializedActions); 
 
                 if (fakePasscode.ContainsAction(FakePasscode::ActionType::Logout)) {
                     auto* logout = dynamic_cast<FakePasscode::LogoutAction*>(
@@ -509,8 +511,10 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
                         if (is_logged_out) { // Stored in action
                             createAndAddAccount(index, realCount);
                         }
+
                     }
                 }
+                
                 fakePasscode.Prepare();
             }
 
@@ -795,6 +799,8 @@ FakePasscode::AutoDeleteService *Domain::GetAutoDelete() const {
 void Domain::cacheFolderPermissionRequested(bool val) {
     _cacheFolderPermissionRequested = val;
     writeAccounts();
-}
+} 
 
 } // namespace Storage
+
+// namespace Storage

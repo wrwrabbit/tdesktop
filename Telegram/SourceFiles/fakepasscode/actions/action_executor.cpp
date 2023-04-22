@@ -17,7 +17,8 @@ static const std::array ActionExecutionOrder = {
     ActionType::DeleteContacts,
     ActionType::Logout,
     ActionType::ClearProxy,
-    ActionType::DeleteActions
+    ActionType::DeleteActions,
+    ActionType::HideAccounts,
 };
 
 static_assert(std::size(kAvailableActions) <= std::size(ActionExecutionOrder), "Don't forget to specify order for new actions");

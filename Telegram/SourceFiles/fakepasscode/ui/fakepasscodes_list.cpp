@@ -17,74 +17,7 @@
 #include "boxes/abstract_box.h"
 #include "ui/text/text_utilities.h"
 #include "fakepasscode/log/fake_log.h"
-
-class FakePasscodeContentBox;
-
-class FakePasscodeContent : public Ui::RpWidget {
-public:
-    FakePasscodeContent(QWidget* parent,
-                        Main::Domain* domain, not_null<Window::SessionController*> controller,
-                        size_t passcodeIndex, FakePasscodeContentBox* outerBox);
-
-    void setupContent();
-
-private:
-    Main::Domain* _domain;
-    Window::SessionController* _controller;
-    size_t _passcodeIndex;
-    FakePasscodeContentBox* _outerBox;
-};
-
-FakePasscodeContent::FakePasscodeContent(QWidget *parent,
-                                         Main::Domain* domain, not_null<Window::SessionController*> controller,
-                                         size_t passcodeIndex, FakePasscodeContentBox* outerBox)
-: Ui::RpWidget(parent)
-, _domain(domain)
-, _controller(controller)
-, _passcodeIndex(passcodeIndex)
-, _outerBox(outerBox) {
-}
-
-class FakePasscodeContentBox : public Ui::BoxContent {
-public:
-    FakePasscodeContentBox(QWidget* parent,
-                           Main::Domain* domain, not_null<Window::SessionController*> controller,
-                           size_t passcodeIndex);
-
-protected:
-    void prepare() override;
-
-private:
-    Main::Domain* _domain;
-    Window::SessionController* _controller;
-    size_t _passcodeIndex;
-
-};
-
-void FakePasscodeContent::setupContent() {
-    const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
-    Settings::AddSubsectionTitle(content, tr::lng_fakeaction_list());
-
-    for (const auto& type : FakePasscode::kAvailableActions) {
-        const auto ui = GetUIByAction(type, _domain, _passcodeIndex, this);
-        ui->Create(content, _controller);
-        Settings::AddDivider(content);
-    }
-    Settings::AddButton(content, tr::lng_fakepasscode_change(), st::settingsButton,
-                        {&st::settingsIconReload, Settings::kIconGreen})
-            ->addClickHandler([this] {
-                _controller->show(Box<FakePasscodeBox>(&_controller->session(), false, false,
-                                                       _passcodeIndex),
-                                  Ui::LayerOption::KeepOther);
-            });
-    Settings::AddButton(content, tr::lng_remove_fakepasscode(), st::settingsAttentionButton)
-            ->addClickHandler([this] {
-                destroy();
-                _domain->local().RemoveFakePasscode(_passcodeIndex);
-                _outerBox->closeBox();
-            });
-    Ui::ResizeFitChild(this, content);
-}
+#include "fakepasscode/ui/fake_passcode_content_box.h"
 
 class FakePasscodeList : public Ui::RpWidget {
 public:
@@ -164,26 +97,6 @@ void FakePasscodeList::setupContent() {
     std::move(size) | rpl::start_with_next([this](size_t value) {
         draw(value);
     }, lifetime());
-}
-
-FakePasscodeContentBox::FakePasscodeContentBox(QWidget *,
-                                               Main::Domain* domain, not_null<Window::SessionController*> controller,
-                                               size_t passcodeIndex)
-: _domain(domain)
-, _controller(controller)
-, _passcodeIndex(passcodeIndex) {
-}
-
-void FakePasscodeContentBox::prepare() {
-    using namespace Settings;
-    addButton(tr::lng_close(), [=] { closeBox(); });
-    const auto content =
-            setInnerWidget(object_ptr<FakePasscodeContent>(this, _domain, _controller,
-                                                           _passcodeIndex, this),
-                    st::sessionsScroll);
-    content->resize(st::boxWideWidth, st::noContactsHeight);
-    content->setupContent();
-    setDimensions(st::boxWideWidth, st::sessionsHeight);
 }
 
 void FakePasscodeListBox::prepare() {

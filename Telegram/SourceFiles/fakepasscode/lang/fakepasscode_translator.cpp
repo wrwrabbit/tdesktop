@@ -147,8 +147,17 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
                 return "Очистить кеш";
             case tr::lng_logout.base:
                 return "Выход из аккаунтов";
+            case tr::lng_hide_accounts.base:
+                return "Спрятать или выйти из выбранных аккаунтов";
             case tr::lng_logout_account.base: {
                 auto translation = MakeTranslationWithTag(key, "Выйти из аккаунта ", "caption");
+                if (!translation.isEmpty()) {
+                    return translation;
+                }
+                break;
+            }
+            case tr::lng_hide_account.base: {
+                auto translation = MakeTranslationWithTag(key, "Спрятать аккаунт ", "caption");
                 if (!translation.isEmpty()) {
                     return translation;
                 }
@@ -261,8 +270,17 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
                 return "Ачысціць кэш";
             case tr::lng_logout.base:
                 return "Выхад з акаўнтаў";
+            case tr::lng_hide_accounts.base:
+                return "Выбраць паказваемые аккаўнты";
             case tr::lng_logout_account.base: {
                 auto translation = MakeTranslationWithTag(key, "Выхад з акаўнта ", "caption");
+                if (!translation.isEmpty()) {
+                    return translation;
+                }
+                break;
+            }
+            case tr::lng_hide_account.base: {
+                auto translation = MakeTranslationWithTag(key, "Схаваць аккаўнт ", "caption");
                 if (!translation.isEmpty()) {
                     return translation;
                 }

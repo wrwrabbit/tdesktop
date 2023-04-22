@@ -1324,17 +1324,17 @@ void DoubledLimitsPreviewBox(
 		});
 	}
 	const auto nextMax = session->domain().maxAccounts() + 1;
-	const auto till = (nextMax >= Main::Domain::kPremiumMaxAccounts)
-		? QString::number(Main::Domain::kPremiumMaxAccounts)
+	const auto till = (nextMax >= Main::Domain::kFakePremiumMaxAccounts)
+		? QString::number(Main::Domain::kFakePremiumMaxAccounts)
 		: (QString::number(nextMax) + QChar('+'));
 	entries.push_back(Ui::Premium::ListEntry{
 		tr::lng_premium_double_limits_subtitle_accounts(),
 		tr::lng_premium_double_limits_about_accounts(
 			lt_count,
-			rpl::single(float64(Main::Domain::kPremiumMaxAccounts)),
+			rpl::single(float64(Main::Domain::kFakePremiumMaxAccounts)),
 			Ui::Text::RichLangValue),
-		Main::Domain::kMaxAccounts,
-		Main::Domain::kPremiumMaxAccounts,
+		Main::Domain::kFakeMaxAccounts,
+		Main::Domain::kFakePremiumMaxAccounts,
 		till,
 	});
 	Ui::Premium::ShowListBox(box, std::move(entries));

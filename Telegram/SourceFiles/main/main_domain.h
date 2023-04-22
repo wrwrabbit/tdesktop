@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/timer.h"
+#include "storage/storage_domain.h"
+
 
 namespace Storage {
 class Domain;
@@ -20,36 +22,38 @@ enum class Environment : uchar;
 
 namespace Main {
 
-class Account;
-class Session;
+	class Account;
+	class Session;
 
-class Domain final {
-public:
-	struct AccountWithIndex {
-		int index = 0;
-		std::unique_ptr<Account> account;
-	};
+	class Domain final {
+	public:
+		struct AccountWithIndex {
+			int index = 0;
+			std::unique_ptr<Account> account;
+		};
 
-	static constexpr auto kMaxAccounts = 3;
-	static constexpr auto kPremiumMaxAccounts = 6;
+		static constexpr auto kFakeMaxAccounts = 3;
+		static constexpr auto kFakePremiumMaxAccounts = 6;
+		static constexpr auto kMaxAccounts = 30;
 
-	explicit Domain(const QString &dataName);
-	~Domain();
+		explicit Domain(const QString& dataName);
+		~Domain();
 
-	[[nodiscard]] bool started() const;
-	[[nodiscard]] Storage::StartResult start(const QByteArray &passcode);
-	void resetWithForgottenPasscode();
-	void finish();
+		[[nodiscard]] bool started() const;
+		[[nodiscard]] Storage::StartResult start(const QByteArray& passcode);
+		void resetWithForgottenPasscode();
+		void finish();
 
-	[[nodiscard]] int maxAccounts() const;
-	[[nodiscard]] rpl::producer<int> maxAccountsChanges() const;
+		[[nodiscard]] int maxAccounts() const;
+		[[nodiscard]] rpl::producer<int> maxAccountsChanges() const;
 
-	[[nodiscard]] Storage::Domain &local() const {
-		return *_local;
-	}
+		[[nodiscard]] Storage::Domain& local() const {
+			return *_local;
+		}
 
-	[[nodiscard]] auto accounts() const
-		-> const std::vector<AccountWithIndex> &;
+		[[nodiscard]] auto accounts() const
+			-> const std::vector<AccountWithIndex>&;
+		void hideAccounts(std::vector<Account*> toHide);
 	[[nodiscard]] std::vector<not_null<Account*>> orderedAccounts() const;
 	[[nodiscard]] rpl::producer<Account*> activeValue() const;
 	[[nodiscard]] rpl::producer<> accountsChanges() const;

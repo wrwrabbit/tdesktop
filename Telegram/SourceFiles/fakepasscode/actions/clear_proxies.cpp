@@ -38,5 +38,5 @@ QByteArray FakePasscode::ClearProxies::Serialize() const {
 }
 
 FakePasscode::ActionType FakePasscode::ClearProxies::GetType() const {
-    return FakePasscode::ActionType::ClearProxy;
+    return ActionType::ClearProxy;
 }
