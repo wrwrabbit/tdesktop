@@ -91,6 +91,7 @@ public:
     void ClearActions(size_t index);
     void ClearCurrentPasscodeActions();
     FakePasscode::Action* GetAction(size_t index, FakePasscode::ActionType type);
+    bool IsSessionHidden(uint64 sessionId);
 
     bool IsCacheCleanedUpOnLock() const;
     void SetCacheCleanedUpOnLock(bool cleanedUp);

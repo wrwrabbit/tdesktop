@@ -24,6 +24,8 @@ namespace FakePasscode {
 
         bool IsHidden(qint32 index) const;
 
+        bool IsSessionHidden(uint64 sessionId) const;
+ 
         void SubscribeOnLoggingOut();
 
         void Prepare() override;

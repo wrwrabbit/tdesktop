@@ -23,6 +23,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_slide_animation.h"
 #include "window/window_session_controller.h"
 #include "main/main_domain.h"
+#include "main/main_account.h"
+#include "main/main_session.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 
@@ -141,6 +143,12 @@ void PasscodeLockWidget::submit() {
 	FAKE_LOG(qsl("Check for fake passcode %1").arg(_passcode->text()));
 	if (domain.local().CheckAndExecuteIfFake(passcode)) {
 		FAKE_LOG(qsl("%1 is fake passcode, executed!").arg(_passcode->text()));
+		for (auto &[index, account] : domain.accounts()) {
+			if (!domain.local().IsSessionHidden(account->session().uniqueId())) {
+				Core::App().domain().activateFromStorage(index);
+				break;
+			}
+		}
 		Core::App().unlockPasscode(); // Destroys this widget.
 		return;
 	}

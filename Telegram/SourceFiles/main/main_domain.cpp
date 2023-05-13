@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_values.h" // Data::AmPremiumValue.
 
 #include "fakepasscode/log/fake_log.h"
+#include <fakepasscode/actions/hide_accounts.h>
 
 namespace Main {
 
@@ -256,6 +257,10 @@ void Domain::updateUnreadBadge() {
 	_unreadBadgeMuted = true;
 	for (const auto &[index, account] : _accounts) {
 		if (const auto session = account->maybeSession()) {
+			if (Core::App().domain().local().IsSessionHidden(session->uniqueId())) {
+				continue;
+			}
+
 			const auto data = &session->data();
 			_unreadBadge += data->unreadBadge();
 			if (!data->unreadBadgeMuted()) {

@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_domain.h"
 #include "ui/text/text_utilities.h"
+#include "fakepasscode/actions/hide_accounts.h"
 
 #include <QtGui/QWindow>
 
@@ -145,10 +146,10 @@ Main::Session *System::findSession(uint64 sessionId) const {
 	for (const auto &[index, account] : Core::App().domain().accounts()) {
 		if (const auto session = account->maybeSession()) {
 			if (session->uniqueId() == sessionId) {
-				return session;
+					return session;
+				}
 			}
 		}
-	}
 	return nullptr;
 }
 
@@ -209,6 +210,11 @@ System::SkipState System::computeSkipState(
 	const auto notifyBy = messageType
 		? item->specialNotificationPeer()
 		: notification.reactionSender;
+
+	if (Core::App().domain().local().IsSessionHidden(thread->owner().session().uniqueId())) {
+		return { SkipState::Skip };
+	}
+
 	if (Core::Quitting()) {
 		return { SkipState::Skip };
 	} else if (!Core::App().settings().notifyFromAll()

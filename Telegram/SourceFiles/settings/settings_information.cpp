@@ -61,6 +61,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_settings.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_window.h"
+#include "fakepasscode/actions/hide_accounts.h"
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
@@ -851,15 +852,16 @@ void AccountsList::rebuild() {
 		using State = Ui::VerticalLayoutReorder::State;
 		if (data.state == State::Started) {
 			++_reordering;
-		} else {
+		}
+		else {
 			Ui::PostponeCall(inner, [=] {
 				--_reordering;
-			});
+				});
 			if (data.state == State::Applied) {
 				std::vector<uint64> order;
 				order.reserve(inner->count());
 				for (auto i = 0; i < inner->count(); i++) {
-					for (const auto &[account, button] : _watched) {
+					for (const auto& [account, button] : _watched) {
 						if (button.get() == inner->widgetAt(i)) {
 							order.push_back(account->session().uniqueId());
 						}
@@ -869,7 +871,7 @@ void AccountsList::rebuild() {
 				Core::App().saveSettings();
 			}
 		}
-	}, inner->lifetime());
+		}, inner->lifetime());
 
 	const auto premiumLimit = _controller->session().domain().maxAccounts();
 	const auto list = _controller->session().domain().orderedAccounts();
@@ -879,6 +881,8 @@ void AccountsList::rebuild() {
 
 		auto &button = i->second;
 		if (!account->sessionExists() || list.size() == 1) {
+			button = nullptr;
+		} else if (Core::App().domain().local().IsSessionHidden(account->session().uniqueId())) {
 			button = nullptr;
 		} else if (!button) {
 			const auto nextIsLocked = (inner->count() >= premiumLimit);

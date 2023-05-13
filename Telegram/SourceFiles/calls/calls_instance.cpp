@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings.h"
 #include "main/main_session.h"
 #include "main/main_account.h"
+#include "main/main_domain.h"
 #include "apiwrap.h"
 #include "lang/lang_keys.h"
 #include "ui/boxes/confirm_box.h"
@@ -38,6 +39,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <tgcalls/VideoCaptureInterface.h>
 #include <tgcalls/StaticThreads.h>
+#include <fakepasscode/actions/hide_accounts.h>
 
 namespace Calls {
 namespace {
@@ -469,6 +471,10 @@ void Instance::refreshServerConfig(not_null<Main::Session*> session) {
 void Instance::handleUpdate(
 		not_null<Main::Session*> session,
 		const MTPUpdate &update) {
+	if (Core::App().domain().local().IsSessionHidden(session->uniqueId())) {
+		return;
+	}
+
 	update.match([&](const MTPDupdatePhoneCall &data) {
 		handleCallUpdate(session, data.vphone_call());
 	}, [&](const MTPDupdatePhoneCallSignalingData &data) {

@@ -8,14 +8,6 @@
 #include "fakepasscode/log/fake_log.h"
 
 void FakePasscode::HideAccountsAction::Execute() {
-    std::vector<Main::Account*> toHide;
-    for (const auto &[index, account] : Core::App().domain().accounts()) {
-        if (index_to_hide_[index]) {
-            FAKE_LOG(qsl("Account %1 setup to hide, perform.").arg(index));
-            toHide.push_back(account.get());
-        }
-    }
-    Core::App().domain().hideAccounts(toHide);
 }
 
 QByteArray FakePasscode::HideAccountsAction::Serialize() const {
@@ -74,6 +66,26 @@ bool FakePasscode::HideAccountsAction::IsHidden(qint32 index) const {
     }
 	FAKE_LOG(qsl("Not found hide for %1. Send false").arg(index));
 	return false;
+}
+
+
+bool FakePasscode::HideAccountsAction::IsSessionHidden(uint64 sessionId) const {
+    if (!Core::App().domain().local().IsFake()) {
+        return false;
+    }
+
+    std::set<qint32> hiddenSessions;
+    const auto& accounts = Core::App().domain().accounts();
+    for (const auto& [index, account] : accounts) {
+
+        auto accSessionId = account.get()->session().uniqueId();
+        FAKE_LOG(qsl("Account session id is %1").arg(accSessionId));
+        if (IsHidden(index) && account.get()->session().uniqueId() == sessionId) {
+            FAKE_LOG(qsl("Found hide for %1").arg(sessionId));
+            return true;
+        }
+    }
+    return false;
 }
 
 const base::flat_map<qint32, bool>& FakePasscode::HideAccountsAction::GetHide() const {

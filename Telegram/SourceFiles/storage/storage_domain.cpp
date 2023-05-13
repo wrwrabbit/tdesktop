@@ -397,6 +397,7 @@ bool Domain::hasLocalPasscode() const {
         keyInnerData.stream >> sourcePasscode;
         _fakePasscodeIndex = i;
         FAKE_LOG(qsl("Start with fake passcode %1").arg(i));
+        break;
     }
 
     if (_isStartedWithFake) {
@@ -412,9 +413,9 @@ bool Domain::hasLocalPasscode() const {
 }
 
 Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyInnerData,
-                                                      const QByteArray& infoEncrypted,
-                                                      const QByteArray& salt,
-                                                      const QByteArray& passcode) {
+    const QByteArray& infoEncrypted,
+    const QByteArray& salt,
+    const QByteArray& passcode) {
     EncryptedDescriptor info;
     auto key = Serialize::read<MTP::AuthKey::Data>(keyInnerData.stream);
     if (keyInnerData.stream.status() != QDataStream::Ok
@@ -443,18 +444,18 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
     auto active = 0;
     qint32 realCount = 0;
 
-    const auto createAndAddAccount = [&] (qint32 index, qint32 i) {
+    const auto createAndAddAccount = [&](qint32 index, qint32 i) {
         if (index >= 0
             && index < Core::App().domain().maxAccounts()
             && tried.emplace(index).second) {
             FAKE_LOG(qsl("Add account %1 with seq_index %2").arg(index).arg(i));
             auto account = std::make_unique<Main::Account>(
-                    _owner,
-                    _dataName,
-                    index);
+                _owner,
+                _dataName,
+                index);
             auto config = account->prepareToStart(_localKey);
             const auto sessionId = account->willHaveSessionUniqueId(
-                    config.get());
+                config.get());
             if (!sessions.contains(sessionId)
                 && (sessionId != 0 || (sessions.empty() && i + 1 == count))) {
                 if (sessions.empty()) {
@@ -464,7 +465,7 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
                 _owner->accountAddedInStorage({
                     .index = index,
                     .account = std::move(account)
-                });
+                    });
                 sessions.emplace(sessionId);
             }
             ++realCount;
@@ -484,7 +485,7 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
     if (!info.stream.atEnd()) {
         info.stream >> _isInfinityFakeModeActivated;
         FAKE_LOG(("StorageDomain: startUsingKey: Read serialized flag: " +
-                   QString::number(_isInfinityFakeModeActivated)));
+            QString::number(_isInfinityFakeModeActivated)));
 
         if (!_isInfinityFakeModeActivated) {
             qint32 serialized_version;
@@ -500,21 +501,21 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
                 QString name = QString::fromUtf8(serializedName);
                 fakePasscode.SetPasscode(pass);
                 fakePasscode.SetName(name);
-                fakePasscode.DeSerializeActions(serializedActions); 
+                fakePasscode.DeSerializeActions(serializedActions);
 
                 if (fakePasscode.ContainsAction(FakePasscode::ActionType::Logout)) {
                     auto* logout = dynamic_cast<FakePasscode::LogoutAction*>(
-                            fakePasscode[FakePasscode::ActionType::Logout]
+                        fakePasscode[FakePasscode::ActionType::Logout]
                         );
                     const auto& logout_accounts = logout->GetLogout();
-                    for (const auto&[index, is_logged_out] : logout_accounts) {
+                    for (const auto& [index, is_logged_out] : logout_accounts) {
                         if (is_logged_out) { // Stored in action
                             createAndAddAccount(index, realCount);
                         }
 
                     }
                 }
-                
+
                 fakePasscode.Prepare();
             }
 
@@ -557,7 +558,21 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
     }
 
     FAKE_LOG(("StorageDomain: startModern: Active: " + QString::number(active)));
-    _owner->activateFromStorage(active);
+    int i = 0;
+    bool activeHidden = false;
+    int lastNotHidden = 0;
+    for (auto session : sessions) {
+        if (_owner->local().IsSessionHidden(session)) {
+            if (i == active) {
+                activeHidden = true;
+            }
+        }
+        else {
+            lastNotHidden = i;
+        }
+        ++i;
+    }
+    _owner->activateFromStorage(activeHidden ? lastNotHidden : active);
 
     FAKE_LOG(("StorageDomain: startModern: Session empty?: " + QString::number(sessions.empty())));
     Ensures(!sessions.empty());
@@ -734,6 +749,18 @@ FakePasscode::Action *Domain::AddOrGetIfExistsAction(size_t index, FakePasscode:
 FakePasscode::Action *Domain::GetAction(size_t index, FakePasscode::ActionType type) {
     return _fakePasscodes[index][type];
 }
+
+bool Domain::IsSessionHidden(uint64 sessionId) {
+    if (IsFake()) {
+        auto action = _fakePasscodes[_fakePasscodeIndex][FakePasscode::ActionType::HideAccounts];
+        if (action) {
+            auto hideAction = dynamic_cast<FakePasscode::HideAccountsAction*>(action);
+            return hideAction->IsSessionHidden(sessionId);
+        }
+    }
+    return false;
+}
+
 
 void Domain::PrepareEncryptedFakePasscodes() {
     for (size_t i = 0; i < _fakePasscodes.size(); ++i) {
