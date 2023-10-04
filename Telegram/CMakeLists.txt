@@ -48,6 +48,9 @@ endif()
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     add_compile_options("/Zm10000")
 endif()
+if (UNIX AND NOT APPLE)
+   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -no-pie")
+endif()
 
 set_target_properties(Telegram PROPERTIES AUTOMOC ON)
 
