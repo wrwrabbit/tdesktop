@@ -109,7 +109,7 @@ jobs:
           ./configure.sh \
           -D CMAKE_C_FLAGS_DEBUG="" \
           -D CMAKE_CXX_FLAGS_DEBUG="" \
-          -D CMAKE_EXE_LINKER_FLAGS="-s" \
+          -D CMAKE_EXE_LINKER_FLAGS="-s -no-pie" \
           -D TDESKTOP_API_TEST=OFF \
           -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
           -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
