@@ -433,7 +433,7 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
     LOG(("App Info: reading encrypted info..."));
     auto count = qint32();
     info.stream >> count;
-    if (count > Main::Domain::kPremiumMaxAccounts) {
+    if (count > Main::Domain::kPremiumMaxAccounts()) {
         LOG(("App Error: bad accounts count: %1").arg(count));
         return StartModernResult::Failed;
     }
@@ -444,7 +444,7 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
 
     const auto createAndAddAccount = [&] (qint32 index, qint32 i) {
         if (index >= 0
-            && index < Main::Domain::kPremiumMaxAccounts
+            && index < Main::Domain::kPremiumMaxAccounts()
             && tried.emplace(index).second) {
             FAKE_LOG(qsl("Add account %1 with seq_index %2").arg(index).arg(i));
             auto account = std::make_unique<Main::Account>(

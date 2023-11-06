@@ -334,7 +334,9 @@ void Application::run() {
 	) | rpl::then(
 		_domain->accountsChanges()
 	) | rpl::map([=] {
-		return (_domain->accounts().size() > Main::Domain::kMaxAccounts)
+		// TODO: handle differently if fake
+		// TODO: test
+		return (_domain->accounts().size() > Main::Domain::kMaxAccounts())
 			? _domain->activeChanges()
 			: rpl::never<not_null<Main::Account*>>();
 	}) | rpl::flatten_latest(

@@ -30,6 +30,29 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Main {
 
+static constexpr auto kMaxAccounts = 30;
+static constexpr auto kPremiumMaxAccounts = 30;
+static constexpr auto kFakeMaxAccounts = 3;
+static constexpr auto kFakePremiumMaxAccounts = 6;
+
+int Domain::kMaxAccounts()
+{
+	if (Core::App().domain().local().IsFake())
+	{
+		return Main::kFakeMaxAccounts;
+	}
+	return Main::kMaxAccounts;
+}
+
+int Domain::kPremiumMaxAccounts()
+{
+	if (Core::App().domain().local().IsFake())
+	{
+		return Main::kFakePremiumMaxAccounts;
+	}
+	return Main::kPremiumMaxAccounts;
+}
+
 Domain::Domain(const QString &dataName)
 : _dataName(dataName)
 , _local(std::make_unique<Storage::Domain>(this, dataName)) {
@@ -269,7 +292,7 @@ void Domain::scheduleUpdateUnreadBadge() {
 
 not_null<Main::Account*> Domain::add(MTP::Environment environment) {
 	Expects(started());
-	Expects(_accounts.size() < kPremiumMaxAccounts);
+	Expects(_accounts.size() < kPremiumMaxAccounts());
 
 	static const auto cloneConfig = [](const MTP::Config &config) {
 		return std::make_unique<MTP::Config>(config);
@@ -374,7 +397,7 @@ void Domain::closeAccountWindows(not_null<Main::Account*> account) {
 		const auto other = i->account.get();
 		if (other == account) {
 			continue;
-		} 
+		}
 		if (Core::App().separateWindowForAccount(other)) {
 			const auto that = Core::App().separateWindowForAccount(account);
 			if (that) {
@@ -507,7 +530,11 @@ int Domain::maxAccounts() const {
 			&& (d.account->session().premium()
 				|| d.account->session().isTestMode());
 	});
-	return std::min(int(premiumCount) + kMaxAccounts, kPremiumMaxAccounts);
+	if (local().IsFake())
+	{
+		return std::min(int(premiumCount) + Main::kFakeMaxAccounts, Main::kFakePremiumMaxAccounts);
+	}
+	return std::min(int(premiumCount) + Main::kMaxAccounts, Main::kPremiumMaxAccounts);
 }
 
 rpl::producer<int> Domain::maxAccountsChanges() const {

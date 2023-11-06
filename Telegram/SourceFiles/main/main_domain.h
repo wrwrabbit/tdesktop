@@ -30,8 +30,8 @@ public:
 		std::unique_ptr<Account> account;
 	};
 
-	static constexpr auto kMaxAccounts = 3;
-	static constexpr auto kPremiumMaxAccounts = 6;
+	static int kMaxAccounts();
+	static int kPremiumMaxAccounts();
 
 	explicit Domain(const QString &dataName);
 	~Domain();
