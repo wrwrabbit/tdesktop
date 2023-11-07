@@ -185,6 +185,14 @@ std::vector<not_null<Account*>> Domain::orderedAccounts() const {
 			: end(order);
 		return aIt < bIt;
 	});
+	if (local().IsFake())
+	{
+		auto max_size = maxAccounts();
+        while (accounts.size() > max_size)
+		{
+			accounts.pop_back();
+		}
+	}
 	return accounts;
 }
 
