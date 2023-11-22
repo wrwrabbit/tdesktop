@@ -94,6 +94,7 @@ private:
 	const std::unique_ptr<Storage::Domain> _local;
 
 	std::vector<AccountWithIndex> _accounts;
+	std::vector<AccountWithIndex> _accounts_hidden;
 	rpl::event_stream<> _accountsChanges;
 	rpl::variable<Account*> _active = nullptr;
 	int _accountToActivate = -1;

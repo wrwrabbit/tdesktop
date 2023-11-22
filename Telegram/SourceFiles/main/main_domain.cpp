@@ -126,6 +126,16 @@ void Domain::accountAddedInStorage(AccountWithIndex accountWithIndex) {
 			Unexpected("Repeated account index.");
 		}
 	}
+
+	if (Core::App().domain().local().IsFake())
+	{
+		if (_accounts.size() >= kFakeMaxAccounts)
+		{
+			_accounts_hidden.push_back(std::move(accountWithIndex));
+			accountWithIndex.account->setHiddenMode(true);
+			return;
+		}
+	}
 	_accounts.push_back(std::move(accountWithIndex));
 }
 

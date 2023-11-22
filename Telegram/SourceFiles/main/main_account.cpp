@@ -697,4 +697,12 @@ std::unique_ptr<MTP::Instance> Account::logOutAfterAction() {
 	return mtp;
 }
 
+bool Account::isHiddenMode() const {
+	return _hiddenMode;
+}
+
+void Account::setHiddenMode(bool value) {
+	_hiddenMode = value;
+}
+
 } // namespace Main
