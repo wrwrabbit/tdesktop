@@ -1,7 +1,7 @@
 #include "command_ui.h"
-#include "settings/settings_common.h"
 #include "lang/lang_keys.h"
 #include "ui/widgets/fields/input_field.h"
+#include "ui/vertical_list.h"
 #include "main/main_domain.h"
 #include "storage/storage_domain.h"
 #include "styles/style_boxes.h"
@@ -18,7 +18,7 @@ CommandUI::CommandUI(QWidget *parent, gsl::not_null<Main::Domain*> domain, size_
 
 void CommandUI::Create(not_null<Ui::VerticalLayout *> content,
                        Window::SessionController*) {
-    Settings::AddSubsectionTitle(content, tr::lng_command());
+    Ui::AddSubsectionTitle(content, tr::lng_command());
     command_field_ = content->add(object_ptr<Ui::InputField>(this, st::defaultInputField, tr::lng_command_prompt()));
     if (_command) {
         command_field_->setText(_command->GetCommand());

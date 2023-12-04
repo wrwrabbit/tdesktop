@@ -1,7 +1,6 @@
 #include "delete_chats_ui.h"
 
 #include "dialogs/dialogs_row.h"
-#include "settings/settings_common.h"
 #include "ui/widgets/buttons.h"
 #include "data/data_peer.h"
 #include "lang/lang_keys.h"
