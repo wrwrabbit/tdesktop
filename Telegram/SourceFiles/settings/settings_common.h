@@ -134,10 +134,6 @@ void AddButtonIcon(
 	not_null<Ui::AbstractButton*> button,
 	const style::SettingsButton &st,
 	IconDescriptor &&descriptor);
-void AddDialogImageToButton(
-    not_null<Ui::AbstractButton*> button,
-    const style::SettingsButton &st,
-    not_null<Dialogs::Row*> dialog);
 object_ptr<Button> CreateButtonWithIcon(
 	not_null<QWidget*> parent,
 	rpl::producer<QString> text,

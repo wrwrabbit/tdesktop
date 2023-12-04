@@ -347,7 +347,7 @@ void SetupLocalPasscode(
 
     auto& local_domain = controller->session().domain().local();
     if (!local_domain.IsFake() && local_domain.hasLocalPasscode()) {
-        AddButton(
+        AddButtonWithIcon(
             container,
             tr::lng_show_fakes(),
             st::settingsButton,
