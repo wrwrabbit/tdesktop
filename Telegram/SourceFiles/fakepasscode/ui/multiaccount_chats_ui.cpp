@@ -20,6 +20,7 @@
 #include "ui/text/text_utilities.h"
 #include "data/data_session.h"
 #include "data/data_folder.h"
+#include "history/history.h"
 #include "window/window_session_controller.h"
 
 #include "fakepasscode/actions/delete_chats.h"
@@ -132,8 +133,8 @@ void SelectChatsContent::setupContent() {
                 continue; // Archive, skip
             }
 
-            chat->entry()->chatListPreloadData();
-            auto button = Settings::AddButton(content, rpl::single(chat->entry()->chatListName()), st::settingsButton);
+            const auto& chat_name = chat->history()->peer->isSelf() ? tr::lng_saved_messages(tr::now) : chat->entry()->chatListName();
+            auto button = Settings::AddButton(content, rpl::single(chat_name), st::settingsButton);
             Settings::AddDialogImageToButton(button, st::settingsButton, chat);
             auto dialog_id = chat->key().peer()->id.value;
             button->toggleOn(rpl::single(data_.peer_ids.contains(dialog_id)));
