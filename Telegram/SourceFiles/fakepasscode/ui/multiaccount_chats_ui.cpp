@@ -12,6 +12,7 @@
 #include "ui/widgets/buttons.h"
 #include "lang/lang_keys.h"
 #include "ui/widgets/fields/input_field.h"
+#include "ui/vertical_list.h"
 #include "styles/style_boxes.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
@@ -107,7 +108,7 @@ void SelectChatsContent::setupContent() {
     using ChatWithName = std::pair<not_null<const Dialogs::MainList*>, rpl::producer<QString>>;
 
     const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
-    Settings::AddSubsectionTitle(content, description_->popup_window_title());
+    Ui::AddSubsectionTitle(content, description_->popup_window_title());
 
     const auto& accounts = domain_->accounts();
     Main::Account* cur_account = nullptr;
@@ -127,15 +128,14 @@ void SelectChatsContent::setupContent() {
     }
     chat_lists.emplace_back(account_data.chatsList(), tr::lng_chats_action_main_chats());
     for (const auto&[list, name] : chat_lists) {
-        Settings::AddSubsectionTitle(content, name);
+        Ui::AddSubsectionTitle(content, name);
         for (auto chat: list->indexed()->all()) {
             if (chat->entry()->fixedOnTopIndex() == Dialogs::Entry::kArchiveFixOnTopIndex) {
                 continue; // Archive, skip
             }
 
             const auto& chat_name = chat->history()->peer->isSelf() ? tr::lng_saved_messages(tr::now) : chat->entry()->chatListName();
-            auto button = Settings::AddButton(content, rpl::single(chat_name), st::settingsButton);
-            Settings::AddDialogImageToButton(button, st::settingsButton, chat);
+            auto button = Settings::AddButtonWithIcon(content, rpl::single(chat_name), st::settingsButton);
             auto dialog_id = chat->key().peer()->id.value;
             button->toggleOn(rpl::single(data_.peer_ids.contains(dialog_id)));
             button->addClickHandler([this, chat, button] {
@@ -164,10 +164,10 @@ MultiAccountSelectChatsUi::MultiAccountSelectChatsUi(QWidget *parent, gsl::not_n
 void MultiAccountSelectChatsUi::Create(not_null<Ui::VerticalLayout *> content,
                                        Window::SessionController* controller) {
     Expects(controller != nullptr);
-    Settings::AddSubsectionTitle(content, _description.title());
+    Ui::AddSubsectionTitle(content, _description.title());
     const auto& accounts = Core::App().domain().accounts();
     for (const auto&[index, account] : accounts) {
-        Settings::AddButton(
+        Settings::AddButtonWithIcon(
                 content,
                 _description.account_title(account.get()),
                 st::settingsButton,

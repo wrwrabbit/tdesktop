@@ -12,12 +12,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/call_delayed.h"
 #include "base/event_filter.h"
 #include "base/unixtime.h"
+#include "boxes/abstract_box.h"
 #include "boxes/peer_list_controllers.h"
 #include "boxes/peers/peer_short_info_box.h"
 #include "boxes/peers/prepare_short_info_box.h"
+#include "calls/calls_instance.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "data/data_changes.h"
+#include "data/data_file_origin.h"
 #include "data/data_peer_values.h" // Data::AmPremiumValue.
+#include "data/data_photo_media.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "data/data_user_photos.h" // UserPhotosViewer.
@@ -25,17 +30,28 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/photo_editor_layer_widget.h"
 #include "history/admin_log/history_admin_log_item.h"
 #include "history/history.h"
+#include "history/history_item.h"
 #include "history/history_item_components.h"
+#include "history/view/history_view_element.h"
+#include "history/view/history_view_message.h"
+#include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "settings/settings_common.h"
 #include "settings/settings_privacy_security.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/cached_round_corners.h"
 #include "ui/chat/chat_style.h"
 #include "ui/chat/chat_theme.h"
+#include "ui/image/image_prepare.h"
+#include "ui/image/image_prepare.h"
 #include "ui/painter.h"
+#include "ui/vertical_list.h"
 #include "ui/text/format_values.h" // Ui::FormatPhone
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/checkbox.h"
+#include "ui/wrap/padding_wrap.h"
 #include "ui/wrap/slide_wrap.h"
+#include "ui/wrap/vertical_layout.h"
 #include "window/section_widget.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
@@ -547,8 +563,10 @@ object_ptr<Ui::RpWidget> PhoneNumberPrivacyController::setupMiddleWidget(
 		object_ptr<Ui::VerticalLayout>(parent));
 
 	const auto container = widget->entity();
-	AddSkip(container);
-	AddSubsectionTitle(container, tr::lng_edit_privacy_phone_number_find());
+	Ui::AddSkip(container);
+	Ui::AddSubsectionTitle(
+		container,
+		tr::lng_edit_privacy_phone_number_find());
 	const auto group = std::make_shared<Ui::RadioenumGroup<Option>>();
 	group->setChangedCallback([=](Option value) {
 		_addedByPhone = value;
@@ -566,8 +584,10 @@ object_ptr<Ui::RpWidget> PhoneNumberPrivacyController::setupMiddleWidget(
 	};
 	addOption(Option::Everyone);
 	addOption(Option::Contacts);
-	AddSkip(container, st::settingsSectionSkip + st::settingsPrivacySkipTop);
-	AddDivider(container);
+	Ui::AddSkip(
+		container,
+		st::defaultVerticalListSkip + st::settingsPrivacySkipTop);
+	Ui::AddDivider(container);
 
 	using namespace rpl::mappers;
 	widget->toggleOn(_phoneNumberOption.value(
@@ -742,8 +762,10 @@ object_ptr<Ui::RpWidget> CallsPrivacyController::setupBelowWidget(
 	auto result = object_ptr<Ui::VerticalLayout>(parent);
 	const auto content = result.data();
 
-	AddSkip(content, st::settingsPeerToPeerSkip);
-	AddSubsectionTitle(content, tr::lng_settings_calls_peer_to_peer_title());
+	Ui::AddSkip(content, st::settingsPeerToPeerSkip);
+	Ui::AddSubsectionTitle(
+		content,
+		tr::lng_settings_calls_peer_to_peer_title());
 	Settings::AddPrivacyButton(
 		controller,
 		content,
@@ -752,7 +774,7 @@ object_ptr<Ui::RpWidget> CallsPrivacyController::setupBelowWidget(
 		UserPrivacy::Key::CallsPeer2Peer,
 		[] { return std::make_unique<CallsPeer2PeerPrivacyController>(); },
 		&st::settingsButton);
-	AddSkip(content);
+	Ui::AddSkip(content);
 
 	return result;
 }
@@ -896,7 +918,7 @@ object_ptr<Ui::RpWidget> ForwardsPrivacyController::setupAboveWidget(
 		object_ptr<Ui::RpWidget>(parent),
 		style::margins(
 			0,
-			st::settingsSectionSkip,
+			st::defaultVerticalListSkip,
 			0,
 			st::settingsPrivacySkipTop));
 	const auto widget = result->entity();
@@ -1066,8 +1088,8 @@ object_ptr<Ui::RpWidget> ProfilePhotoPrivacyController::setupMiddleWidget(
 		st::inviteLinkUserpics.size,
 		st::inviteLinkUserpics.size);
 
-	AddSkip(container);
-	const auto setUserpicButton = AddButton(
+	Ui::AddSkip(container);
+	const auto setUserpicButton = AddButtonWithIcon(
 		container,
 		state->setUserpicButtonText.value(),
 		st::settingsButtonLight,
@@ -1080,8 +1102,8 @@ object_ptr<Ui::RpWidget> ProfilePhotoPrivacyController::setupMiddleWidget(
 				parent,
 				tr::lng_edit_privacy_profile_photo_public_remove(),
 				stRemoveButton)));
-	AddSkip(container);
-	AddDividerText(
+	Ui::AddSkip(container);
+	Ui::AddDividerText(
 		container,
 		tr::lng_edit_privacy_profile_photo_public_about());
 

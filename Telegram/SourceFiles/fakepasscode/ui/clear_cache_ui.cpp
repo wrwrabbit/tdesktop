@@ -2,6 +2,7 @@
 #include "lang/lang_keys.h"
 #include "settings/settings_common.h"
 #include "ui/widgets/buttons.h"
+#include "ui/vertical_list.h"
 #include "styles/style_boxes.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
@@ -14,10 +15,10 @@
 
 void ClearCacheUI::Create(not_null<Ui::VerticalLayout*> content,
                           Window::SessionController*) {
-    Settings::AddSubsectionTitle(content, tr::lng_clear_cache());
+    Ui::AddSubsectionTitle(content, tr::lng_clear_cache());
     const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
-    auto *button = Settings::AddButton(content, tr::lng_clear_cache(), st::settingsButton,
-                                       {&st::menuIconClear})
+    auto *button = Settings::AddButtonWithIcon(content, tr::lng_clear_cache(), st::settingsButton,
+                                               {&st::menuIconClear})
             ->toggleOn(toggled->events_starting_with_copy(
                     _domain->local().ContainsAction(_index, FakePasscode::ActionType::ClearCache)));
     button->addClickHandler([=] {

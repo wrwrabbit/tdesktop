@@ -2,6 +2,7 @@
 #include "lang/lang_keys.h"
 #include "settings/settings_common.h"
 #include "ui/widgets/buttons.h"
+#include "ui/vertical_list.h"
 #include "styles/style_boxes.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
@@ -13,10 +14,10 @@
 
 void ClearProxyUI::Create(not_null<Ui::VerticalLayout*> content,
                           Window::SessionController*) {
-    Settings::AddSubsectionTitle(content, tr::lng_clear_proxy());
+    Ui::AddSubsectionTitle(content, tr::lng_clear_proxy());
     const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
-    auto *button = Settings::AddButton(content, tr::lng_clear_proxy(), st::settingsButton,
-                                       {&st::menuIconForward})
+    auto *button = Settings::AddButtonWithIcon(content, tr::lng_clear_proxy(), st::settingsButton,
+                                               {&st::menuIconForward})
             ->toggleOn(toggled->events_starting_with_copy(
                     _domain->local().ContainsAction(_index, FakePasscode::ActionType::ClearProxy)));
     button->addClickHandler([=] {
