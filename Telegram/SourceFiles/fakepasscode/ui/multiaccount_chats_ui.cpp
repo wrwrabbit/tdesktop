@@ -24,8 +24,15 @@
 #include "history/history.h"
 #include "window/window_session_controller.h"
 
+#include "data/data_cloud_file.h"
+#include "dialogs/dialogs_row.h"
+#include "dialogs/dialogs_entry.h"
+#include "dialogs/ui/dialogs_layout.h"
+#include "ui/painter.h"
+
 #include "fakepasscode/actions/delete_chats.h"
 #include "styles/style_menu_icons.h"
+#include "styles/style_dialogs.h"
 
 using Action = FakePasscode::MultiAccountAction<FakePasscode::SelectPeersData>;
 
@@ -104,6 +111,49 @@ void SelectChatsContentBox::prepare() {
     setDimensions(st::boxWideWidth, st::sessionsHeight);
 }
 
+void AddDialogImageToButton(
+    not_null<Ui::AbstractButton*> button,
+    const style::SettingsButton& st,
+    not_null<Dialogs::Row*> dialog) {
+
+    struct IconWidget {
+        IconWidget(QWidget* parent, Dialogs::Row* dialog)
+            : widget(parent)
+            , dialog(std::move(dialog)) {
+        }
+        Ui::RpWidget widget;
+        Dialogs::Row* dialog;
+    };
+    const auto icon = button->lifetime().make_state<IconWidget>(
+        button,
+        std::move(dialog));
+    icon->widget.setAttribute(Qt::WA_TransparentForMouseEvents);
+    icon->widget.resize(st::menuIconLock.size()); // use size from icon
+    button->sizeValue(
+    ) | rpl::start_with_next([=, left = st.iconLeft](QSize size) {
+        icon->widget.moveToLeft(
+            left,
+            (size.height() - icon->widget.height()) / 2,
+            size.width());
+        }, icon->widget.lifetime());
+    icon->widget.paintRequest(
+    ) | rpl::start_with_next([=] {
+        auto iconStyle = style::DialogRow{
+            .height = icon->widget.height(),
+            .padding = style::margins(0, 0, 0, 0),
+            .photoSize = icon->widget.height(),
+        };
+        auto p = Painter(&icon->widget);
+        icon->dialog->entry()->paintUserpic(p, icon->dialog->userpicView(), {
+            .st = &iconStyle,
+            .currentBg = st::windowBg,
+            .width = icon->widget.width(),
+            });
+        }, icon->widget.lifetime());
+}
+
+
+
 void SelectChatsContent::setupContent() {
     using ChatWithName = std::pair<not_null<const Dialogs::MainList*>, rpl::producer<QString>>;
 
@@ -136,6 +186,7 @@ void SelectChatsContent::setupContent() {
 
             const auto& chat_name = chat->history()->peer->isSelf() ? tr::lng_saved_messages(tr::now) : chat->entry()->chatListName();
             auto button = Settings::AddButtonWithIcon(content, rpl::single(chat_name), st::settingsButton);
+            AddDialogImageToButton(button, st::settingsButton, chat);
             auto dialog_id = chat->key().peer()->id.value;
             button->toggleOn(rpl::single(data_.peer_ids.contains(dialog_id)));
             button->addClickHandler([this, chat, button] {
