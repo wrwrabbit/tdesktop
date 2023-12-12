@@ -47,6 +47,14 @@ inline const char *cGUIDStr() {
 	return gGuidStr;
 }
 
+static const char *UpdatesPTGPublicKey = "\
+-----BEGIN RSA PUBLIC KEY-----\n\
+MIGJAoGBAMnntmfJSxpDsnUZVcx2H1tsoPRwDGs60Yxg/sQl0d4XXQ/3quUpLJLq\n\
+m7QwseiHsF/tifXoJsrIh6A0SBGMcUFxblm6PHC/8BOGkh6uWwEiC7DbL/Bn9c/3\n\
+8zyXhsrdsmwegVLehOAXvvU4a+geXIvDHmr/t/+Pye87O9EtGiv/AgMBAAE=\n\
+-----END RSA PUBLIC KEY-----\
+";
+
 static const char *UpdatesPublicKey = "\
 -----BEGIN RSA PUBLIC KEY-----\n\
 MIGJAoGBAMA4ViQrjkPZ9xj0lrer3r23JvxOnrtE8nI69XLGSr+sRERz9YnUptnU\n\

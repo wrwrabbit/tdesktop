@@ -1,50 +1,14 @@
-name: MacOS.
+name: Public MacOS Release.
 
 on:
   push:
-    branches:
-      - master
     paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'changelog.txt'
-      - 'LEGAL'
-      - 'LICENSE'
-      - '.github/**'
-      - 'lib/xdg/**'
-      - 'snap/**'
-      - 'Telegram/build/docker/**'
-      - 'Telegram/Resources/uwp/**'
-      - 'Telegram/Resources/winrc/**'
-      - 'Telegram/SourceFiles/platform/win/**'
-      - 'Telegram/SourceFiles/platform/linux/**'
-      - 'Telegram/configure.bat'
-  pull_request:
-    types: [opened, reopened]
-    branches-ignore:
-      - 'compare/**'
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'changelog.txt'
-      - 'LEGAL'
-      - 'LICENSE'
-      - '.github/**'
-      - 'lib/xdg/**'
-      - 'snap/**'
-      - 'Telegram/build/docker/**'
-      - 'Telegram/Resources/uwp/**'
-      - 'Telegram/Resources/winrc/**'
-      - 'Telegram/SourceFiles/platform/win/**'
-      - 'Telegram/SourceFiles/platform/linux/**'
-      - 'Telegram/configure.bat'
+      - '**'
+      - '!.github/workflows/release_mac.yml'
+      - '!Telegram/build/release_build.py'
+      - '!Telegram/build/build.sh'
+
   workflow_dispatch:
-    inputs:
-      buildCommit:
-        description: 'Commit for building. Default it latest on branch'
-        required: false
-        type: string
-        default: ''
 
 jobs:
 
@@ -58,9 +22,6 @@ jobs:
           - ""
     env:
       UPLOAD_ARTIFACT: "true"
-      ONLY_CACHE: "false"
-      ARTIFACT_NAME: "Mac-PTelegram"
-      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
 
     steps:
       - name: Get repository name.
@@ -107,44 +68,47 @@ jobs:
           cd Libraries
           find . -iname "*.dir" -exec rm -rf {} || true \;
 
-      - name: Telegram Desktop build.
-        if: env.ONLY_CACHE == 'false'
+      - name: Read defines.
         run: |
-          cd $REPO_NAME/Telegram
+          echo "ARTIFACT_NAME=PTelegram_${{ matrix.arch }}" >> $GITHUB_ENV
 
-          DEFINE=""
-          if [ -n "${{ matrix.defines }}" ]; then
-            DEFINE="-D ${{ matrix.defines }}=ON"
-            echo Define from matrix: $DEFINE
-            echo "ARTIFACT_NAME=Telegram_${{ matrix.defines }}" >> $GITHUB_ENV
+      - name: Telegram Desktop build.
+        env:
+          RSA_PRIVATE: ${{ secrets.RSA_PRIVATE }}
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          cd $REPO_NAME/Telegram/build
+
+          python3 release_build.py mac
+
+      - name: Check.
+        run: |
+          filePath="$REPO_NAME/out/Release/deploy"
+          if test -d "$filePath"; then
+            echo "Build successfully done! :)"
+
+            size=$(stat -c %s "$filePath/Telegram/Telegram")
+            echo "File size of ${filePath}: ${size} Bytes."
           else
-            echo "ARTIFACT_NAME=Telegram" >> $GITHUB_ENV
+            echo "Build error, output file does not exist."
+            exit 1
           fi
 
-          ./configure.sh \
-          -D TDESKTOP_API_TEST=OFF \
-          -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
-          -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
-          -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
-          -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
-          $DEFINE
-
-          cd ../out
-
-          xcoderun='xcodebuild build -project Telegram.xcodeproj -scheme Telegram -destination "platform=macOS,arch=x86_64" -configuration Release'
-          bash -c "$xcoderun" || bash -c "$xcoderun" || bash -c "$xcoderun"
-
       - name: Strip and sign executable
+        if: false
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
         run: |
           lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram -output $REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram
-          #lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater -output $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater
+          lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater -output $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater
           lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler -output $REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler
 
           strip "$REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram"
-          #strip "$REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater"
+          strip "$REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater"
           strip "$REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler"
 
           echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12

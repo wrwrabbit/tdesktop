@@ -1,0 +1,112 @@
+name: Public Windows Release.
+
+on:
+  push:
+    paths-ignore:
+      - '**'
+      - '!.github/workflows/release_win.yml'
+      - '!Telegram/build/release_build.py'
+      - '!Telegram/build/build.bat'
+  workflow_dispatch:
+
+jobs:
+
+  windows:
+    name: Windows
+    #runs-on: windows-2022
+    runs-on: self-hosted
+
+    strategy:
+      matrix:
+#        arch: [Win32, x64]
+        arch: [x64] # debug only
+
+    env:
+      UPLOAD_ARTIFACT: "true"
+      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
+      PreferredToolArchitecture: "x64"
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Prepare directories.
+          #following is for github-hosted runners
+          #mkdir %userprofile%\TBuild\Libraries
+          #mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
+        run: |
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+
+      - name: Get repository name.
+        shell: bash
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - uses: ilammy/msvc-dev-cmd@v1.12.0
+        name: Native Tools Command Prompt.
+        with:
+          arch: ${{ matrix.arch }}
+          sdk: 10.0.22000.0
+
+      - name: Clone.
+        uses: actions/checkout@v3.1.0
+        with:
+          submodules: recursive
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
+      - name: Set up environment paths.
+        shell: bash
+        run: |
+          echo "Configurate git for cherry-picks."
+          git config --global user.email "you@example.com"
+          git config --global user.name "Sample"
+
+      - name: NuGet sources.
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      - name: Libraries.
+        env:
+          #GYP_MSVS_OVERRIDE_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\'
+          GYP_MSVS_OVERRIDE_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Community\'
+          GYP_MSVS_VERSION: 2022
+        run: |
+          cd %TBUILD%
+          %REPO_NAME%\Telegram\build\prepare\win.bat silent
+
+      - name: Read defines.
+        shell: bash
+        run: |
+          echo "ARTIFACT_NAME=PTelegram_${{ matrix.arch }}" >> $GITHUB_ENV
+
+      - name: Free up some disk space.
+        run: |
+          cd %TBUILD%
+          del /S Libraries\*.pdb
+          del /S Libraries\*.pch
+          del /S Libraries\*.obj
+
+      - name: Telegram Desktop build.
+        env:
+          RSA_PRIVATE: ${{ secrets.RSA_PRIVATE }}
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+        run: |
+          cd %TBUILD%\%REPO_NAME%\Telegram\build
+
+          python release_build.py ${{ matrix.arch }}
+
+      - name: Move artifact.
+        if: (env.UPLOAD_ARTIFACT == 'true') || ${{ github.ref == 'refs/heads/nightly' }}
+        run: |
+          del artifact /Q/F/S
+          mkdir artifact
+          xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\tportable*.zip artifact\ /E/C
+          xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\t*upd* artifact\ /E/C
+      - uses: actions/upload-artifact@master
+        name: Upload artifact.
+        if: (env.UPLOAD_ARTIFACT == 'true') || ${{ github.ref == 'refs/heads/nightly' }}
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: artifact\

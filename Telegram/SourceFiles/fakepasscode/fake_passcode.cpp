@@ -60,7 +60,7 @@ FakePasscode::FakePasscode::GetActions() const {
 }
 
 void FakePasscode::FakePasscode::Execute() {
-    ExecuteActions(actions_ | ranges::view::values | ranges::to_vector, name_);
+    ExecuteActions(actions_ | ranges::views::values | ranges::to_vector, name_);
 }
 
 FakePasscode::FakePasscode::FakePasscode(
