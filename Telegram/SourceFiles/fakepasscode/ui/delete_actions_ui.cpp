@@ -2,6 +2,7 @@
 #include "lang/lang_keys.h"
 #include "settings/settings_common.h"
 #include "ui/widgets/buttons.h"
+#include "ui/vertical_list.h"
 #include "styles/style_settings.h"
 #include "main/main_domain.h"
 #include "storage/storage_domain.h"
@@ -10,10 +11,10 @@
 
 void DeleteActionsUI::Create(not_null<Ui::VerticalLayout*> content,
                              Window::SessionController*) {
-    Settings::AddSubsectionTitle(content, tr::lng_delete_actions());
+    Ui::AddSubsectionTitle(content, tr::lng_delete_actions());
     const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
-    auto *button = Settings::AddButton(content, tr::lng_delete_actions(), st::settingsButton,
-                                       {&st::menuIconRemove})
+    auto *button = Settings::AddButtonWithIcon(content, tr::lng_delete_actions(), st::settingsButton,
+                                               {&st::menuIconRemove})
             ->toggleOn(toggled->events_starting_with_copy(
                     _domain->local().ContainsAction(_index, FakePasscode::ActionType::DeleteActions)));
     button->addClickHandler([=] {

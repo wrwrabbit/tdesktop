@@ -140,11 +140,11 @@ jobs:
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
         run: |
           lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram -output $REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram
-          lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater -output $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater
+          #lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater -output $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater
           lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler -output $REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler
 
           strip "$REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram"
-          strip "$REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater"
+          #strip "$REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater"
           strip "$REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler"
 
           echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
