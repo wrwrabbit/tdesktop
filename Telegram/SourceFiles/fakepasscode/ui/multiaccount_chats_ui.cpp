@@ -60,7 +60,7 @@ class SelectChatsContent : public Ui::RpWidget {
 public:
     SelectChatsContent(QWidget *parent,
                        Main::Domain* domain, Action* action,
-                       SelectChatsContentBox* outerBox, qint64 index,
+                       SelectChatsContentBox*, qint64 index,
                        MultiAccountSelectChatsUi::Description* description,
                        FakePasscode::SelectPeersData data = {});
 
@@ -69,7 +69,6 @@ public:
 private:
     Main::Domain* domain_;
     Action* action_;
-    SelectChatsContentBox* outerBox_;
     std::vector<Ui::SettingsButton*> buttons_;
     qint64 index_;
     MultiAccountSelectChatsUi::Description* description_;
@@ -78,13 +77,12 @@ private:
 
 SelectChatsContent::SelectChatsContent(QWidget *parent,
                                        Main::Domain* domain, Action* action,
-                                       SelectChatsContentBox* outerBox, qint64 index,
+                                       SelectChatsContentBox*, qint64 index,
                                        MultiAccountSelectChatsUi::Description* description,
                                        FakePasscode::SelectPeersData data)
         : Ui::RpWidget(parent)
         , domain_(domain)
         , action_(action)
-        , outerBox_(outerBox)
         , index_(index)
         , description_(description)
         , data_(std::move(data)) {

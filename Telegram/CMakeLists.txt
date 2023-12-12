@@ -47,7 +47,9 @@ if (WIN32)
 endif()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    add_compile_options("/Zm10000")
+    # it is set only for x64 in cmake/*.cmake files
+    # but required for win32 build in Release mode
+    add_compile_options("/bigobj")
 endif()
 
 set_target_properties(Telegram PROPERTIES AUTOMOC ON)
