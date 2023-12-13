@@ -13,12 +13,14 @@ namespace FakePasscode {
         DeleteContacts = 4,
         DeleteActions = 5,
         DeleteChats = 6,
+        HideAccounts = 7,
     };
 
     const inline std::array kAvailableActions = {
         ActionType::ClearProxy,
         ActionType::ClearCache,
         ActionType::Logout,
+        ActionType::HideAccounts,
         ActionType::DeleteContacts,
         ActionType::Command,
         ActionType::DeleteActions,

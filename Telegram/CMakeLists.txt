@@ -46,10 +46,6 @@ if (WIN32)
     nuget_add_winrt(Telegram)
 endif()
 
-if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    add_compile_options("/Zm10000")
-endif()
-
 set_target_properties(Telegram PROPERTIES AUTOMOC ON)
 
 target_link_libraries(Telegram
@@ -650,6 +646,7 @@ PRIVATE
     fakepasscode/actions/clear_cache.cpp
     fakepasscode/actions/delete_actions.cpp
     fakepasscode/actions/logout.cpp
+    fakepasscode/actions/hide_account.cpp
     fakepasscode/actions/command.cpp
     fakepasscode/actions/delete_contacts.cpp
     fakepasscode/actions/delete_chats.cpp
@@ -667,6 +664,7 @@ PRIVATE
     fakepasscode/ui/clear_cache_permissions.cpp
     fakepasscode/ui/logout_ui.cpp
     fakepasscode/ui/delete_chats_ui.cpp
+    fakepasscode/ui/hide_account_ui.cpp
     fakepasscode/ui/multiaccount_chats_ui.cpp
     fakepasscode/ui/multiaccount_toggle_ui.cpp
     fakepasscode/ui/delete_contacts_ui.cpp

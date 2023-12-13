@@ -15,6 +15,7 @@ static const std::array ActionExecutionOrder = {
     ActionType::ClearCache,
     ActionType::DeleteChats,
     ActionType::DeleteContacts,
+    ActionType::HideAccounts,
     ActionType::Logout,
     ActionType::ClearProxy,
     ActionType::DeleteActions

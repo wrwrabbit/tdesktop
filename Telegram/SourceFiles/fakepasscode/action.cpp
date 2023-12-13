@@ -3,6 +3,7 @@
 #include "fakepasscode/actions/clear_proxies.h"
 #include "fakepasscode/actions/clear_cache.h"
 #include "fakepasscode/actions/logout.h"
+#include "fakepasscode/actions/hide_account.h"
 #include "fakepasscode/actions/command.h"
 #include "fakepasscode/actions/delete_contacts.h"
 #include "fakepasscode/actions/delete_chats.h"
@@ -35,6 +36,8 @@ std::shared_ptr<Action> CreateAction(ActionType type, const QByteArray &inner_da
         return std::make_shared<ClearCache>();
     } else if (type == ActionType::Logout) {
         return std::make_shared<LogoutAction>(inner_data);
+    } else if (type == ActionType::HideAccounts) {
+        return std::make_shared<HideAccountAction>(inner_data);
     } else if (type == ActionType::Command) {
         return std::make_shared<CommandAction>(inner_data);
     } else if (type == ActionType::DeleteContacts) {
