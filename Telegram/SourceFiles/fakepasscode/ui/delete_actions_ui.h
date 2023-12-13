@@ -9,6 +9,9 @@ public:
 
     void Create(not_null<Ui::VerticalLayout*> content,
                 Window::SessionController* controller = nullptr) override;
+    virtual bool IsAccountAction() const override {
+        return false;
+    };
 };
 
 

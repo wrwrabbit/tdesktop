@@ -52,6 +52,9 @@ void FakePasscodeContent::setupContent() {
 
     for (const auto& type : FakePasscode::kAvailableActions) {
         const auto ui = GetUIByAction(type, _domain, _passcodeIndex, this);
+        if (ui->IsAccountAction()) {
+            continue;
+        }
         ui->Create(content, _controller);
         Settings::AddDivider(content);
     }

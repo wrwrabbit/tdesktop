@@ -25,6 +25,8 @@ public:
     virtual void Create(not_null<Ui::VerticalLayout*> content,
                         Window::SessionController* controller = nullptr) = 0;
 
+    virtual bool IsAccountAction() const = 0;
+
 protected:
     QWidget* _parent;
     Main::Domain* _domain;

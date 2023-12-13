@@ -12,6 +12,10 @@ public:
     void Create(not_null<Ui::VerticalLayout*> content,
                 Window::SessionController* controller = nullptr) override;
 
+    virtual bool IsAccountAction() const override {
+        return true;
+    };
+
 private:
     FakePasscode::LogoutAction* _logout;
     std::vector<Settings::Button*> account_buttons_;
