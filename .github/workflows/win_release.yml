@@ -1,26 +1,6 @@
 name: Windows Release.
 
 on:
-  push:
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'changelog.txt'
-      - 'LEGAL'
-      - 'LICENSE'
-      - '.github/**'
-      - '!.github/workflows/win_release.yml'
-      - 'lib/xdg/**'
-      - 'snap/**'
-      - 'Telegram/build/docker/**'
-      - 'Telegram/Resources/uwp/**'
-      - 'Telegram/SourceFiles/platform/linux/**'
-      - 'Telegram/SourceFiles/platform/mac/**'
-      - 'Telegram/Telegram/**'
-      - 'Telegram/configure.sh'
-      - 'Telegram/Telegram.plist'
-    branches-ignore:
-      - 'compare/**'
   pull_request:
     types: [opened, reopened]
     branches-ignore:

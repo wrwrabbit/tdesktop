@@ -1,9 +1,10 @@
 name: Linux Release.
 
 on:
-  push:
-    branches:
-      - master
+  pull_request:
+    types: [opened, reopened]
+    branches-ignore:
+      - 'compare/**'
     paths-ignore:
       - 'docs/**'
       - '**.md'
@@ -20,10 +21,7 @@ on:
       - 'Telegram/Telegram/**'
       - 'Telegram/configure.bat'
       - 'Telegram/Telegram.plist'
-  pull_request:
-    types: [opened, reopened]
-    branches-ignore:
-      - 'compare/**'
+
   workflow_dispatch:
 
 jobs:
