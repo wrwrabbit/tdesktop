@@ -70,7 +70,7 @@ bool UpdaterIsDisabled = false;
 std::weak_ptr<Updater> UpdaterInstance;
 
 bool AcceptUpstreamRelease = false;
-const QString PTG_UPDATE_CHANNEL = "gg112233112233";
+const QString PTG_UPDATE_CHANNEL = "tdptgFeed";
 
 using Progress = UpdateChecker::Progress;
 using State = UpdateChecker::State;
