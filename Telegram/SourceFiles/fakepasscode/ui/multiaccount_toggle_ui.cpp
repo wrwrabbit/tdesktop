@@ -10,6 +10,7 @@
 #include "storage/storage_domain.h"
 #include "settings/settings_common.h"
 #include "ui/widgets/buttons.h"
+#include "ui/vertical_list.h"
 #include "styles/style_settings.h"
 #include "styles/style_menu_icons.h"
 
@@ -23,13 +24,13 @@ MultiAccountToggleUi::MultiAccountToggleUi(QWidget *parent, gsl::not_null<Main::
 
 void MultiAccountToggleUi::Create(not_null<Ui::VerticalLayout *> content,
                                   Window::SessionController*) {
-    Settings::AddSubsectionTitle(content, _description.title());
+    Ui::AddSubsectionTitle(content, _description.title());
     const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
     const auto& accounts = Core::App().domain().accounts();
     account_buttons_.resize(accounts.size());
     size_t idx = 0;
     for (const auto&[index, account]: accounts) {
-        auto *button = Settings::AddButton(
+        auto *button = Settings::AddButtonWithIcon(
                 content,
                 _description.account_title(account.get()),
                 st::settingsButton,

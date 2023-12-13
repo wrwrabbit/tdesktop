@@ -1,6 +1,7 @@
 #include "logout_ui.h"
 #include "settings/settings_common.h"
 #include "ui/widgets/buttons.h"
+#include "ui/vertical_list.h"
 #include "lang/lang_keys.h"
 #include "main/main_domain.h"
 #include "storage/storage_domain.h"
@@ -15,14 +16,14 @@
 
 void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
                       Window::SessionController*) {
-    Settings::AddSubsectionTitle(content, tr::lng_logout());
+    Ui::AddSubsectionTitle(content, tr::lng_logout());
     const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
     const auto& accounts = Core::App().domain().accounts();
     account_buttons_.resize(accounts.size());
     size_t idx = 0;
     for (const auto&[index, account]: accounts) {
         auto user = account->session().user();
-        auto *button = Settings::AddButton(
+        auto *button = Settings::AddButtonWithIcon(
                 content,
                 tr::lng_logout_account(lt_caption, rpl::single(user->firstName + " " + user->lastName)),
                 st::settingsButton,
