@@ -4,6 +4,7 @@
 import sys
 import os
 import platform
+import base64
 
 _THIS_DIR = os.path.dirname(__file__)
 
@@ -60,7 +61,8 @@ def main():
         f.write("static const char *AlphaPrivateKey = \"\";\n")
     if "RSA_PRIVATE" in os.environ:
         print("Generate packer_private.h")
-        rsa_key = os.environ["RSA_PRIVATE"]
+        rsa_key = os.environ["RSA_PRIVATE"] # base64
+        rsa_key = base64.b64decode(rsa_key).decode('ascii')
         rsa_key = rsa_key.splitlines()
         RSA_STRING = "\\n\\\n".join(rsa_key)
         cpp_file = "const char *PrivateBetaKey = \"\\\n" +\
