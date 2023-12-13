@@ -2,11 +2,26 @@ name: Public Release - Windows
 
 on:
   push:
+    branches:
+      - master
     paths-ignore:
-      - '**'
+      - 'docs/**'
+      - '**.md'
+      - 'changelog.txt'
+      - 'LEGAL'
+      - 'LICENSE'
+      - '.github/**'
       - '!.github/workflows/release_win.yml'
-      - '!Telegram/build/release_build.py'
-      - '!Telegram/build/build.bat'
+      - 'lib/xdg/**'
+      - 'snap/**'
+      - 'Telegram/build/docker/**'
+      - 'Telegram/Resources/uwp/**'
+      - 'Telegram/SourceFiles/platform/linux/**'
+      - 'Telegram/SourceFiles/platform/mac/**'
+      - 'Telegram/Telegram/**'
+      - 'Telegram/configure.sh'
+      - 'Telegram/Telegram.plist'
+
   workflow_dispatch:
 
 jobs:

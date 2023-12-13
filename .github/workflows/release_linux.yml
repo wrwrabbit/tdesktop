@@ -2,12 +2,25 @@ name: Public Release - Linux
 
 on:
   push:
+    branches:
+      - master
     paths-ignore:
-      - '**'
+      - 'docs/**'
+      - '**.md'
+      - 'changelog.txt'
+      - 'LEGAL'
+      - 'LICENSE'
+      - '.github/**'
       - '!.github/workflows/release_linux.yml'
-      - '!Telegram/build/release_build.py'
-      - '!Telegram/build/build.sh'
-      - '!Telegram/build/docker/build.sh'
+      - 'snap/**'
+      - 'Telegram/build/**'
+      - 'Telegram/Resources/uwp/**'
+      - 'Telegram/Resources/winrc/**'
+      - 'Telegram/SourceFiles/platform/win/**'
+      - 'Telegram/SourceFiles/platform/mac/**'
+      - 'Telegram/Telegram/**'
+      - 'Telegram/configure.bat'
+      - 'Telegram/Telegram.plist'
 
   workflow_dispatch:
 
