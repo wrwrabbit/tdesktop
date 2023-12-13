@@ -1,4 +1,4 @@
-name: Public MacOS Release.
+name: Public Release - MacOS
 
 on:
   push:
@@ -13,6 +13,7 @@ on:
 jobs:
 
   macos:
+    environment: release
     name: MacOS
     runs-on: macos-13
 

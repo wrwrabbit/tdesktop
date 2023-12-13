@@ -1,4 +1,4 @@
-name: Public Windows Release.
+name: Public Release - Windows
 
 on:
   push:
@@ -12,14 +12,14 @@ on:
 jobs:
 
   windows:
+    environment: release
     name: Windows
     #runs-on: windows-2022
     runs-on: self-hosted
 
     strategy:
       matrix:
-#        arch: [Win32, x64]
-        arch: [x64] # debug only
+        arch: [Win32, x64]
 
     env:
       UPLOAD_ARTIFACT: "true"

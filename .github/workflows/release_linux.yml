@@ -1,4 +1,4 @@
-name: Public Linux Release.
+name: Public Release - Linux
 
 on:
   push:
@@ -14,6 +14,7 @@ on:
 jobs:
 
   Linux:
+    environment: release
     name: Rocky Linux 8
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.experimental }}
