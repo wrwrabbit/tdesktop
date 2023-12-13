@@ -30,9 +30,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Main {
 
-static constexpr auto kMaxAccounts = 30;
+static constexpr auto kMaxAccounts = 2;
 static constexpr auto kPremiumMaxAccounts = 30;
-static constexpr auto kFakeMaxAccounts = 3;
+static constexpr auto kFakeMaxAccounts = 1;
 static constexpr auto kFakePremiumMaxAccounts = 6;
 
 int Domain::kMaxAccounts()
@@ -50,6 +50,11 @@ int Domain::kPremiumMaxAccounts()
 	{
 		return Main::kFakePremiumMaxAccounts;
 	}
+	return Main::kPremiumMaxAccounts;
+}
+
+int Domain::kAbsoluteMaxAccounts()
+{
 	return Main::kPremiumMaxAccounts;
 }
 
@@ -131,9 +136,7 @@ void Domain::accountAddedInStorage(AccountWithIndex accountWithIndex) {
 	{
 		if (_accounts.size() >= kFakeMaxAccounts)
 		{
-			_accounts_hidden.push_back(std::move(accountWithIndex));
 			accountWithIndex.account->setHiddenMode(true);
-			return;
 		}
 	}
 	_accounts.push_back(std::move(accountWithIndex));
@@ -181,7 +184,9 @@ std::vector<not_null<Account*>> Domain::orderedAccounts() const {
 	const auto order = Core::App().settings().accountsOrder();
 	auto accounts = ranges::views::all(
 		_accounts
-	) | ranges::views::transform([](const Domain::AccountWithIndex &a) {
+	) | ranges::views::filter([](const Domain::AccountWithIndex &a) {
+		return a.account.get() ? !a.account->isHiddenMode() : true;
+	}) | ranges::views::transform([](const Domain::AccountWithIndex &a) {
 		return not_null{ a.account.get() };
 	}) | ranges::to_vector;
 	ranges::stable_sort(accounts, [&](

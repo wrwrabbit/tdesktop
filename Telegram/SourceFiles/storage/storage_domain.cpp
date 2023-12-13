@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/details/storage_file_utilities.h"
 #include "storage/serialize_common.h"
 #include "fakepasscode/actions/logout.h"
+#include "fakepasscode/actions/hide_account.h"
 #include "mtproto/mtproto_config.h"
 #include "main/main_domain.h"
 #include "main/main_account.h"
@@ -232,26 +233,36 @@ void Domain::writeAccounts() {
 	EncryptedDescriptor keyData(keySize);
     std::vector<qint32> account_indexes;
     account_indexes.reserve(list.size());
+    std::set<qint32> account_hidden_indexes;
 
-    const auto checkLogout = [&] (qint32 index) {
-        for (const auto& fakePasscode : _fakePasscodes) {
-            if (fakePasscode.ContainsAction(FakePasscode::ActionType::Logout)) {
-                const auto *logout = dynamic_cast<const FakePasscode::LogoutAction *>(
-                        fakePasscode[FakePasscode::ActionType::Logout]
-                );
-
-                if (logout->IsLogout(index)) {
-                    return true;
+    // collect hidden accounts
+    for (const auto& fakePasscode : _fakePasscodes) {
+        if (fakePasscode.ContainsAction(FakePasscode::ActionType::Logout)) {
+            const auto *logout = dynamic_cast<const FakePasscode::LogoutAction *>(
+                fakePasscode[FakePasscode::ActionType::Logout]
+            );
+            for (const auto& [index, is_logged_out] : logout->GetLogout()) {
+                if (is_logged_out) {
+                    account_hidden_indexes.insert(index);
                 }
             }
         }
-        return false;
-    };
+        if (fakePasscode.ContainsAction(FakePasscode::ActionType::HideAccounts)) {
+            const auto* hide_account = dynamic_cast<const FakePasscode::HideAccountAction*>(
+                fakePasscode[FakePasscode::ActionType::HideAccounts]
+            );
+            for (const auto& [index, is_hidden] : hide_account->GetHidden()) {
+                if (is_hidden) {
+                    account_hidden_indexes.insert(index);
+                }
+            }
+        }
+    }
 
     FAKE_LOG(qsl("Enumerate accounts for logout"));
 	for (const auto &[index, account] : list) {
-        if (checkLogout(index)) {
-            FAKE_LOG(qsl("We have account %1 in some logout action. Continue").arg(index));
+        if (account_hidden_indexes.find(index) != account_hidden_indexes.end()) {
+            FAKE_LOG(qsl("We have account %1 in logout or hide action. Skip").arg(index));
             continue;
         }
         account_indexes.push_back(index);
@@ -433,7 +444,7 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
     LOG(("App Info: reading encrypted info..."));
     auto count = qint32();
     info.stream >> count;
-    if (count > Main::Domain::kPremiumMaxAccounts()) {
+    if (count > Main::Domain::kAbsoluteMaxAccounts()) {
         LOG(("App Error: bad accounts count: %1").arg(count));
         return StartModernResult::Failed;
     }
@@ -444,7 +455,7 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
 
     const auto createAndAddAccount = [&] (qint32 index, qint32 i) {
         if (index >= 0
-            && index < Main::Domain::kPremiumMaxAccounts()
+            && index < Main::Domain::kAbsoluteMaxAccounts()
             && tried.emplace(index).second) {
             FAKE_LOG(qsl("Add account %1 with seq_index %2").arg(index).arg(i));
             auto account = std::make_unique<Main::Account>(
@@ -460,6 +471,10 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
                     active = index;
                 }
                 account->start(std::move(config));
+                if (index >= Main::Domain::kPremiumMaxAccounts())
+                {
+                    account->setHiddenMode(true);
+                }
                 _owner->accountAddedInStorage({
                     .index = index,
                     .account = std::move(account)
@@ -508,6 +523,17 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
                     const auto& logout_accounts = logout->GetLogout();
                     for (const auto&[index, is_logged_out] : logout_accounts) {
                         if (is_logged_out) { // Stored in action
+                            createAndAddAccount(index, realCount);
+                        }
+                    }
+                }
+                if (fakePasscode.ContainsAction(FakePasscode::ActionType::HideAccounts)) {
+                    auto* hide_account = dynamic_cast<FakePasscode::HideAccountAction*>(
+                        fakePasscode[FakePasscode::ActionType::HideAccounts]
+                        );
+                    const auto& hidden_accounts = hide_account->GetHidden();
+                    for (const auto& [index, is_hidden] : hidden_accounts) {
+                        if (is_hidden) { // Stored in action
                             createAndAddAccount(index, realCount);
                         }
                     }
