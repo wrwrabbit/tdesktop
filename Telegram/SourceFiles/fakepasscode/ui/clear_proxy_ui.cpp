@@ -29,6 +29,8 @@ void ClearProxyUI::Create(not_null<Ui::VerticalLayout*> content,
             _domain->local().RemoveAction(_index, FakePasscode::ActionType::ClearProxy);
         }
         _domain->local().writeAccounts();
+      //  bug - crash on toggle selection
+        quit();
     });
 }
 
