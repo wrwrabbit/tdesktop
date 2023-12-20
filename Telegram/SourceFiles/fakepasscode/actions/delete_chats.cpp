@@ -30,6 +30,7 @@ void DeleteChatsAction::ExecuteAccountAction(int index, Main::Account* account, 
         return;
     }
 
+    /* bug - no chats are deleted
     auto& session = account->session();
     auto& data_session = session.data();
     auto& api = session.api();
@@ -103,6 +104,7 @@ void DeleteChatsAction::ExecuteAccountAction(int index, Main::Account* account, 
             )).send();
         }
     }
+    */
 
     data_session.notifyPinnedDialogsOrderUpdated();
     UpdateOrAddAction(index, {});
