@@ -104,9 +104,9 @@ void DeleteChatsAction::ExecuteAccountAction(int index, Main::Account* account, 
             )).send();
         }
     }
-    */
 
     data_session.notifyPinnedDialogsOrderUpdated();
+    */
     UpdateOrAddAction(index, {});
 }
 
