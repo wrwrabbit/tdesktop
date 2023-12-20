@@ -82,12 +82,13 @@ void AboutBox::prepare() {
 	_version->setClickedCallback([this] { showVersionHistory(); });
 
     int height = st::aboutTextTop;
-    if (Core::App().domain().local().IsFake()) {
-        _ptelegram_version->hide();
-        _ptelegram_version->mask();
-    } else {
+    // bug, show PTelegram ID always
+    //if (Core::App().domain().local().IsFake()) { 
+    //    _ptelegram_version->hide();
+    //    _ptelegram_version->mask();
+    //} else {
         height += _ptelegram_version->height() + st::aboutSkip;
-    }
+    //}
     height += _text1->height() + st::aboutSkip + _text2->height() + st::aboutSkip + _text3->height();
 	setDimensions(st::aboutWidth, height);
 }
