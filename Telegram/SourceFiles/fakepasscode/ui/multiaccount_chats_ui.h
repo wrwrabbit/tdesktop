@@ -37,6 +37,7 @@ private:
     Description _description;
     Action* _action = nullptr;
     int _accountIndex;
+    std::vector<Ui::SettingsButton*> buttons_;
 };
 
 

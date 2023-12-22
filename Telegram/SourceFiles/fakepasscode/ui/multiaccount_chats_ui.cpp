@@ -71,7 +71,7 @@ class SelectChatsContent : public Ui::RpWidget {
 public:
     SelectChatsContent(QWidget *parent,
                        Main::Domain* domain, Action* action,
-                       SelectChatsContentBox* outerBox, qint64 index, int accountIndex,
+                       qint64 index, int accountIndex,
                        MultiAccountSelectChatsUi::Description* description,
                        FakePasscode::SelectPeersData data = {});
 
@@ -80,7 +80,6 @@ public:
 private:
     Main::Domain* domain_;
     Action* action_;
-    SelectChatsContentBox* outerBox_;
     std::vector<Ui::SettingsButton*> buttons_;
     qint64 index_;
     int accountIndex_;
@@ -90,13 +89,12 @@ private:
 
 SelectChatsContent::SelectChatsContent(QWidget *parent,
                                        Main::Domain* domain, Action* action,
-                                       SelectChatsContentBox* outerBox, qint64 index, int accountIndex,
+                                       qint64 index, int accountIndex,
                                        MultiAccountSelectChatsUi::Description* description,
                                        FakePasscode::SelectPeersData data)
         : Ui::RpWidget(parent)
         , domain_(domain)
         , action_(action)
-        , outerBox_(outerBox)
         , index_(index)
         , accountIndex_(accountIndex)
         , description_(description)
@@ -107,7 +105,7 @@ void SelectChatsContentBox::prepare() {
     using namespace Settings;
     addButton(tr::lng_close(), [=] { closeBox(); });
     const auto content =
-            setInnerWidget(object_ptr<SelectChatsContent>(this, domain_, action_, this, index_, accountIndex_, description_,
+            setInnerWidget(object_ptr<SelectChatsContent>(this, domain_, action_, index_, accountIndex_, description_,
                                                           action_->GetData(index_)),
                            st::sessionsScroll);
     content->resize(st::boxWideWidth, st::noContactsHeight);
@@ -220,19 +218,56 @@ MultiAccountSelectChatsUi::MultiAccountSelectChatsUi(QWidget *parent, gsl::not_n
 void MultiAccountSelectChatsUi::Create(not_null<Ui::VerticalLayout *> content,
                                        Window::SessionController* controller) {
     Expects(controller != nullptr);
-    Settings::AddButtonWithIcon(
-            content,
-            _description.title(),
-            st::settingsButton,
-            {&st::menuIconChannel}
-    )->addClickHandler([controller, this] {
-        if (!_action->HasAction(_accountIndex)) {
-            _action->AddAction(_accountIndex, FakePasscode::SelectPeersData{});
-        }
+    Ui::AddSubsectionTitle(content, _description.title());
 
-        _domain->local().writeAccounts();
-        controller->show(Box<SelectChatsContentBox>(_domain, _action, _index, _accountIndex, &_description));
-    });
+    //auto sub_content =
+    //    object_ptr<SelectChatsContent>(content, _domain, _action, _index, _accountIndex, &_description,
+    //        _action->GetData(_accountIndex));
+    //sub_content->resize(st::boxWideWidth, st::noContactsHeight);
+    //sub_content->setupContent();
+
+    static FakePasscode::SelectPeersData data_;
+    data_ = _action->GetData(_accountIndex);
+
+    const auto& accounts = _domain->accounts();
+    Main::Account* cur_account = nullptr;
+    for (const auto& [index, account] : accounts) {
+        if (index == _accountIndex) {
+            cur_account = account.get();
+        }
+    }
+    if (cur_account == nullptr) {
+        return;
+    }
+    const auto& account_data = cur_account->session().data();
+
+    using ChatWithName = std::pair<not_null<const Dialogs::MainList*>, rpl::producer<QString>>;
+    std::vector<ChatWithName> chat_lists;
+    if (auto archive_folder = account_data.folderLoaded(Data::Folder::kId)) {
+        chat_lists.emplace_back(account_data.chatsList(archive_folder), tr::lng_chats_action_archive());
+    }
+    chat_lists.emplace_back(account_data.chatsList(), tr::lng_chats_action_main_chats());
+    for (const auto& [list, name] : chat_lists) {
+        Ui::AddSubsectionTitle(content, name);
+        for (auto chat : list->indexed()->all()) {
+            if (chat->entry()->fixedOnTopIndex() == Dialogs::Entry::kArchiveFixOnTopIndex) {
+                continue; // Archive, skip
+            }
+
+            const auto& chat_name = chat->history()->peer->isSelf() ? tr::lng_saved_messages(tr::now) : chat->entry()->chatListName();
+            auto button = Settings::AddButtonWithIcon(content, rpl::single(chat_name), st::settingsButton);
+            AddDialogImageToButton(button, st::settingsButton, chat);
+            auto dialog_id = chat->key().peer()->id.value;
+            button->toggleOn(rpl::single(data_.peer_ids.contains(dialog_id)));
+            button->addClickHandler([this, chat, button] {
+                data_ = _description.button_handler(button, chat, std::move(data_));
+                _action->UpdateOrAddAction(_accountIndex, data_);
+                _domain->local().writeAccounts();
+                });
+            buttons_.push_back(button);
+        }
+    }
+
 }
 
 
