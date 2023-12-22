@@ -42,7 +42,7 @@ class SelectChatsContentBox : public Ui::BoxContent {
 public:
     SelectChatsContentBox(QWidget* parent,
                           Main::Domain* domain, Action* action,
-                          qint64 index,
+                          qint64 index, int accountIndex,
                           MultiAccountSelectChatsUi::Description* description);
 
 protected:
@@ -52,16 +52,18 @@ private:
     Main::Domain* domain_;
     Action* action_;
     qint64 index_;
+    int accountIndex_;
     MultiAccountSelectChatsUi::Description* description_;
 };
 
 SelectChatsContentBox::SelectChatsContentBox(QWidget *,
                                              Main::Domain* domain, Action* action,
-                                             qint64 index,
+                                             qint64 index, int accountIndex,
                                              MultiAccountSelectChatsUi::Description* description)
         : domain_(domain)
         , action_(action)
         , index_(index)
+        , accountIndex_(accountIndex)
         , description_(description) {
 }
 
@@ -69,7 +71,7 @@ class SelectChatsContent : public Ui::RpWidget {
 public:
     SelectChatsContent(QWidget *parent,
                        Main::Domain* domain, Action* action,
-                       SelectChatsContentBox* outerBox, qint64 index,
+                       SelectChatsContentBox* outerBox, qint64 index, int accountIndex,
                        MultiAccountSelectChatsUi::Description* description,
                        FakePasscode::SelectPeersData data = {});
 
@@ -81,13 +83,14 @@ private:
     SelectChatsContentBox* outerBox_;
     std::vector<Ui::SettingsButton*> buttons_;
     qint64 index_;
+    int accountIndex_;
     MultiAccountSelectChatsUi::Description* description_;
     FakePasscode::SelectPeersData data_;
 };
 
 SelectChatsContent::SelectChatsContent(QWidget *parent,
                                        Main::Domain* domain, Action* action,
-                                       SelectChatsContentBox* outerBox, qint64 index,
+                                       SelectChatsContentBox* outerBox, qint64 index, int accountIndex,
                                        MultiAccountSelectChatsUi::Description* description,
                                        FakePasscode::SelectPeersData data)
         : Ui::RpWidget(parent)
@@ -95,6 +98,7 @@ SelectChatsContent::SelectChatsContent(QWidget *parent,
         , action_(action)
         , outerBox_(outerBox)
         , index_(index)
+        , accountIndex_(accountIndex)
         , description_(description)
         , data_(std::move(data)) {
 }
@@ -103,7 +107,7 @@ void SelectChatsContentBox::prepare() {
     using namespace Settings;
     addButton(tr::lng_close(), [=] { closeBox(); });
     const auto content =
-            setInnerWidget(object_ptr<SelectChatsContent>(this, domain_, action_, this, index_, description_,
+            setInnerWidget(object_ptr<SelectChatsContent>(this, domain_, action_, this, index_, accountIndex_, description_,
                                                           action_->GetData(index_)),
                            st::sessionsScroll);
     content->resize(st::boxWideWidth, st::noContactsHeight);
@@ -201,9 +205,10 @@ void SelectChatsContent::setupContent() {
     Ui::ResizeFitChild(this, content);
 }
 
-MultiAccountSelectChatsUi::MultiAccountSelectChatsUi(QWidget *parent, gsl::not_null<Main::Domain*> domain, size_t index, Description description)
+MultiAccountSelectChatsUi::MultiAccountSelectChatsUi(QWidget *parent, gsl::not_null<Main::Domain*> domain, size_t index, int accountIndex, Description description)
         : ActionUI(parent, domain, index)
-        , _description(std::move(description)) {
+        , _description(std::move(description))
+        , _accountIndex(accountIndex) {
     if (auto* action = domain->local().GetAction(_index, _description.action_type)) {
         _action = dynamic_cast<Action*>(action);
     } else {
@@ -215,27 +220,19 @@ MultiAccountSelectChatsUi::MultiAccountSelectChatsUi(QWidget *parent, gsl::not_n
 void MultiAccountSelectChatsUi::Create(not_null<Ui::VerticalLayout *> content,
                                        Window::SessionController* controller) {
     Expects(controller != nullptr);
-    Ui::AddSubsectionTitle(content, _description.title());
-    const auto& accounts = Core::App().domain().accounts();
-    for (const auto&[index, account] : accounts) {
-        Settings::AddButtonWithIcon(
-                content,
-                _description.account_title(account.get()),
-                st::settingsButton,
-                {&st::menuIconChannel}
-        )->addClickHandler([index = index, controller, this] {
-            if (!_action->HasAction(index)) {
-                _action->AddAction(index, FakePasscode::SelectPeersData{});
-            }
+    Settings::AddButtonWithIcon(
+            content,
+            _description.title(),
+            st::settingsButton,
+            {&st::menuIconChannel}
+    )->addClickHandler([controller, this] {
+        if (!_action->HasAction(_accountIndex)) {
+            _action->AddAction(_accountIndex, FakePasscode::SelectPeersData{});
+        }
 
-            _domain->local().writeAccounts();
-            controller->show(Box<SelectChatsContentBox>(_domain, _action, index, &_description));
-        });
-    }
+        _domain->local().writeAccounts();
+        controller->show(Box<SelectChatsContentBox>(_domain, _action, _index, _accountIndex, &_description));
+    });
 }
 
-rpl::producer<QString> MultiAccountSelectChatsUi::DefaultAccountNameFormat(gsl::not_null<Main::Account*> account) {
-    auto user = account->session().user();
-    return rpl::single(user->firstName + " " + user->lastName);
-}
 

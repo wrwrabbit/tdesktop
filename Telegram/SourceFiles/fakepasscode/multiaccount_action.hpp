@@ -131,6 +131,11 @@ void FakePasscode::MultiAccountAction<Data>::RemoveAction(qint32 index) {
 }
 
 template<typename Data>
+bool FakePasscode::MultiAccountAction<Data>::HasAnyAction() const {
+    return !index_actions_.empty();
+}
+
+template<typename Data>
 void FakePasscode::MultiAccountAction<Data>::Execute() {
     for (const auto &[index, account] : Core::App().domain().accounts()) {
         if (const auto it = index_actions_.find(index); it != index_actions_.end()) {

@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "storage/file_upload.h"
 #include "storage/storage_shared_media.h"
+#include "storage/storage_domain.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"

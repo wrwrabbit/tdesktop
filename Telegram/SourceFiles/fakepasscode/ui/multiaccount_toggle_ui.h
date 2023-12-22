@@ -14,23 +14,18 @@ public:
         QString name;
         FakePasscode::ActionType action_type;
         std::function<rpl::producer<QString>()> title;
-        std::function<rpl::producer<QString>(const Main::Account*)> account_title;
     };
-    static rpl::producer<QString> DefaultAccountNameFormat(const Main::Account* account);
 
-    MultiAccountToggleUi(QWidget* parent, gsl::not_null<Main::Domain*> domain, size_t index, Description description);
+    MultiAccountToggleUi(QWidget* parent, gsl::not_null<Main::Domain*> domain, size_t index, int accountIndex, Description description);
 
     void Create(not_null<Ui::VerticalLayout*> content,
                 Window::SessionController* controller = nullptr) override;
 
-    virtual bool IsAccountAction() const override {
-        return true;
-    };
 private:
     using Action = FakePasscode::MultiAccountAction<FakePasscode::ToggleAction>;
     Description _description;
     Action* _action = nullptr;
-    std::vector<Ui::SettingsButton*> account_buttons_;
+    int _accountIndex;
 };
 
 

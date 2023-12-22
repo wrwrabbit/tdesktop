@@ -47,6 +47,8 @@ namespace FakePasscode {
         bool HasAction(qint32 index) const;
         void RemoveAction(qint32 index);
 
+        bool HasAnyAction() const;
+
         QByteArray Serialize() const override;
 
     protected:

@@ -16,56 +16,35 @@
 
 void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
                       Window::SessionController*) {
-    Ui::AddSubsectionTitle(content, tr::lng_logout());
     const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
-    const auto& accounts = Core::App().domain().accounts();
-    account_buttons_.resize(accounts.size());
-    size_t idx = 0;
-    for (const auto&[index, account]: accounts) {
-        auto user = account->session().user();
-        auto *button = Settings::AddButtonWithIcon(
-                content,
-                tr::lng_logout_account(lt_caption, rpl::single(user->firstName + " " + user->lastName)),
-                st::settingsButton,
-                {&st::menuIconLeave}
-            )->toggleOn(toggled->events_starting_with_copy(_logout != nullptr && _logout->IsLogout(index)));
-        account_buttons_[idx] = button;
+    auto *button = Settings::AddButtonWithIcon(
+            content,
+            tr::lng_logout(),
+            st::settingsButton,
+            {&st::menuIconLeave}
+        )->toggleOn(toggled->events_starting_with_copy(_action != nullptr && _action->IsLogout(_accountIndex)));
 
-        button->addClickHandler([index = index, button, this] {
-            bool any_activate = false;
-            for (auto* check_button : account_buttons_) {
-                if (check_button->toggled()) {
-                    any_activate = true;
-                    break;
-                }
-            }
+    button->addClickHandler([button, this] {
+        bool current_active = button->toggled();
 
-            if (any_activate && !_logout) {
-                FAKE_LOG(("LogoutUI: Activate"));
-                _logout = dynamic_cast<FakePasscode::LogoutAction*>(
-                        _domain->local().AddAction(_index, FakePasscode::ActionType::Logout));
-                _logout->SubscribeOnLoggingOut();
-            } else if (!any_activate) {
-                FAKE_LOG(("LogoutUI: Remove"));
-                _domain->local().RemoveAction(_index, FakePasscode::ActionType::Logout);
-                _logout = nullptr;
-            }
+        if (!_action && current_active) {
+            FAKE_LOG(("LogoutUI: Activate"));
+            _action = dynamic_cast<FakePasscode::LogoutAction*>(
+                _domain->local().AddAction(_index, FakePasscode::ActionType::Logout));
+            _action->SubscribeOnLoggingOut();
+        }
 
-            if (_logout) {
-                FAKE_LOG(qsl("LogoutUI: Set %1 to %2").arg(index).arg(button->toggled()));
-                _logout->SetLogout(index, button->toggled());
-            }
-            _domain->local().writeAccounts();
-        });
-        ++idx;
-    }
-}
+        if (_action) {
+            FAKE_LOG(qsl("LogoutUI: Set %1 to %2").arg(_accountIndex).arg(current_active));
+            _action->SetLogout(_accountIndex, current_active);
+        }
 
-LogoutUI::LogoutUI(QWidget *parent, gsl::not_null<Main::Domain*> domain, size_t index)
-: ActionUI(parent, domain, index)
-, _logout(nullptr)
-{
-    if (auto* action = domain->local().GetAction(index, FakePasscode::ActionType::Logout); action != nullptr) {
-        _logout = dynamic_cast<FakePasscode::LogoutAction*>(action);
-    }
+        if (_action && !_action->IsAnyLogout()) {
+            FAKE_LOG(("LogoutUI: Remove Action"));
+            _domain->local().RemoveAction(_index, FakePasscode::ActionType::Logout);
+            _action = nullptr;
+        }
+
+        _domain->local().writeAccounts();
+    });
 }

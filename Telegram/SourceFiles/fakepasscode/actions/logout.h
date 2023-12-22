@@ -2,15 +2,17 @@
 #define TELEGRAM_LOGOUT_H
 
 #include "fakepasscode/action.h"
+#include "fakepasscode/multiaccount_action.h"
 
 #include "base/flat_map.h"
 
 namespace FakePasscode {
     class LogoutAction : public Action {
     public:
+        static constexpr ActionType Kind = ActionType::Logout;
+
         LogoutAction() = default;
         explicit LogoutAction(QByteArray inner_data);
-        LogoutAction(base::flat_map<qint32, bool> logout_accounts);
 
         void Execute() override;
 
@@ -23,6 +25,7 @@ namespace FakePasscode {
         const base::flat_map<qint32, bool>& GetLogout() const;
 
         bool IsLogout(qint32 index) const;
+        bool IsAnyLogout() const;
 
         void SubscribeOnLoggingOut();
 

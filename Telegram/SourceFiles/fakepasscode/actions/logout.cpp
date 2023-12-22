@@ -55,12 +55,6 @@ FakePasscode::LogoutAction::LogoutAction(QByteArray inner_data) {
     SubscribeOnAccountsChanges();
 }
 
-FakePasscode::LogoutAction::LogoutAction(base::flat_map<qint32, bool> index_to_logout)
-: index_to_logout_(std::move(index_to_logout))
-{
-    SubscribeOnAccountsChanges();
-}
-
 void FakePasscode::LogoutAction::SetLogout(qint32 index, bool logout) {
     FAKE_LOG(qsl("Set logout %1 for account %2").arg(logout).arg(index));
     index_to_logout_[index] = logout;
@@ -73,6 +67,17 @@ bool FakePasscode::LogoutAction::IsLogout(qint32 index) const {
     }
 	FAKE_LOG(qsl("Not found logout for %1. Send false").arg(index));
 	return false;
+}
+
+bool FakePasscode::LogoutAction::IsAnyLogout() const {
+    for (auto pos = index_to_logout_.begin(); pos != index_to_logout_.end(); pos ++) {
+        FAKE_LOG(qsl("Found logout for %1. Send %2").arg(pos->first).arg(pos->second));
+        if (pos->second) {
+            return true;
+        }
+    }
+    FAKE_LOG(qsl("Not found any logout. Send false"));
+    return false;
 }
 
 const base::flat_map<qint32, bool>& FakePasscode::LogoutAction::GetLogout() const {

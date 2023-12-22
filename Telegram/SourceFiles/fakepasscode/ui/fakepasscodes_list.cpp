@@ -9,18 +9,23 @@
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
 #include "fakepasscode/ui/fakepasscode_box.h"
+#include "core/application.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/buttons.h"
 #include "ui/vertical_list.h"
 #include "fakepasscode/ui/action_ui.h"
+#include "main/main_session.h"
 #include "main/main_domain.h"
+#include "main/main_account.h"
 #include "storage/storage_domain.h"
+#include "data/data_user.h"
 #include "boxes/abstract_box.h"
 #include "ui/text/text_utilities.h"
 #include "styles/style_menu_icons.h"
 #include "fakepasscode/log/fake_log.h"
 
 class FakePasscodeContentBox;
+class FakePasscodeAccountContent;
 
 class FakePasscodeContent : public Ui::RpWidget {
 public:
@@ -35,6 +40,7 @@ private:
     Window::SessionController* _controller;
     size_t _passcodeIndex;
     FakePasscodeContentBox* _outerBox;
+    std::vector<Settings::Button*> account_buttons_;
 };
 
 FakePasscodeContent::FakePasscodeContent(QWidget *parent,
@@ -49,16 +55,52 @@ FakePasscodeContent::FakePasscodeContent(QWidget *parent,
 
 void FakePasscodeContent::setupContent() {
     const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
-    Ui::AddSubsectionTitle(content, tr::lng_fakeaction_list());
 
-    for (const auto& type : FakePasscode::kAvailableActions) {
-        const auto ui = GetUIByAction(type, _domain, _passcodeIndex, this);
-        if (ui->IsAccountAction()) {
-            continue;
+    // accout buttons
+
+    const auto AccountUIActions = [=] {
+
+        size_t total = 0;
+        for (const auto& type : FakePasscode::kAvailableAccountActions) {
+            if (_domain->local().ContainsAction(_passcodeIndex, type)) {
+                total++;
+            }
         }
+
+        return rpl::single(QString::number(total));
+    };
+
+    Ui::AddSubsectionTitle(content, tr::lng_fakeaccountaction_list());
+    const auto& accounts = Core::App().domain().accounts();
+    account_buttons_.resize(accounts.size());
+    size_t idx = 0;
+    for (const auto& [index, account] : accounts) {
+        auto user = account->session().user();
+        auto button = Settings::AddButtonWithLabel(
+            content,
+            tr::lng_hide_account(lt_caption, rpl::single(user->name())),
+            AccountUIActions(),
+            st::settingsButtonNoIcon
+        );
+        account_buttons_[idx] = button;
+
+        button->addClickHandler([index, button, this] {
+                _controller->show(Box<FakePasscodeAccountBox>(_domain, _controller, _passcodeIndex, index),
+                                  Ui::LayerOption::KeepOther);
+            });
+        ++idx;
+    }
+
+    // non account action_list
+    Ui::AddSubsectionTitle(content, tr::lng_fakeglobalaction_list());
+    for (const auto& type : FakePasscode::kAvailableGlobalActions) {
+        const auto ui = GetUIByAction(type, _domain, _passcodeIndex, this);
         ui->Create(content, _controller);
         Ui::AddDivider(content);
     }
+
+    // password actions
+    Ui::AddSubsectionTitle(content, tr::lng_fakepassaction_list());
     Settings::AddButtonWithIcon(content, tr::lng_fakepasscode_change(), st::settingsButton,
                                 {&st::menuIconEdit})
             ->addClickHandler([this] {
@@ -72,6 +114,52 @@ void FakePasscodeContent::setupContent() {
                 _domain->local().RemoveFakePasscode(_passcodeIndex);
                 _outerBox->closeBox();
             });
+
+    Ui::ResizeFitChild(this, content);
+}
+
+class FakePasscodeAccountContent : public Ui::RpWidget {
+public:
+    FakePasscodeAccountContent(QWidget* parent,
+        Main::Domain* domain, not_null<Window::SessionController*> controller,
+        size_t passcodeIndex, int accountIndex,
+        FakePasscodeAccountBox* outerBox);
+
+    void setupContent();
+
+private:
+    Main::Domain* _domain;
+    Window::SessionController* _controller;
+    size_t _passcodeIndex;
+    int _accountIndex;
+    FakePasscodeAccountBox* _outerBox;
+};
+
+FakePasscodeAccountContent::FakePasscodeAccountContent(QWidget* parent,
+    Main::Domain* domain, not_null<Window::SessionController*> controller,
+    size_t passcodeIndex, int accountIndex,
+    FakePasscodeAccountBox* outerBox)
+    : Ui::RpWidget(parent)
+    , _domain(domain)
+    , _controller(controller)
+    , _passcodeIndex(passcodeIndex)
+    , _accountIndex(accountIndex)
+    , _outerBox(outerBox) {
+}
+
+void FakePasscodeAccountContent::setupContent() {
+    const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+
+    Ui::AddSubsectionTitle(content, tr::lng_fakeaccountaction_list());
+
+    // account action_list
+    Ui::AddSubsectionTitle(content, tr::lng_fakeglobalaction_list());
+    for (const auto& type : FakePasscode::kAvailableAccountActions) {
+        const auto ui = GetAccountUIByAction(type, _domain, _passcodeIndex, _accountIndex, this);
+        ui->Create(content, _controller);
+        Ui::AddDivider(content);
+    }
+
     Ui::ResizeFitChild(this, content);
 }
 
@@ -170,6 +258,27 @@ void FakePasscodeContentBox::prepare() {
             setInnerWidget(object_ptr<FakePasscodeContent>(this, _domain, _controller,
                                                            _passcodeIndex, this),
                     st::sessionsScroll);
+    content->resize(st::boxWideWidth, st::noContactsHeight);
+    content->setupContent();
+    setDimensions(st::boxWideWidth, st::sessionsHeight);
+}
+
+FakePasscodeAccountBox::FakePasscodeAccountBox(QWidget*,
+    Main::Domain* domain, not_null<Window::SessionController*> controller,
+    size_t passcodeIndex, const int accountIndex)
+    : _domain(domain)
+    , _controller(controller)
+    , _passcodeIndex(passcodeIndex)
+    , _accountIndex(accountIndex) {
+}
+
+void FakePasscodeAccountBox::prepare() {
+    using namespace Settings;
+    addButton(tr::lng_close(), [=] { closeBox(); });
+    const auto content =
+        setInnerWidget(object_ptr<FakePasscodeAccountContent>(this, _domain, _controller,
+            _passcodeIndex, _accountIndex, this),
+            st::sessionsScroll);
     content->resize(st::boxWideWidth, st::noContactsHeight);
     content->setupContent();
     setDimensions(st::boxWideWidth, st::sessionsHeight);

@@ -5,19 +5,14 @@
 #include "fakepasscode/actions/hide_account.h"
 #include "settings/settings_common.h"
 
-class HideAccountUI : public ActionUI {
+class HideAccountUI : public AccountActionUI<FakePasscode::HideAccountAction> {
 public:
-    HideAccountUI(QWidget* parent, gsl::not_null<Main::Domain*> domain, size_t index);
+    HideAccountUI(QWidget* parent, gsl::not_null<Main::Domain*> domain, size_t passcodeIndex, int accountIndex)
+        : AccountActionUI<FakePasscode::HideAccountAction>(parent, domain, passcodeIndex, accountIndex)
+    {}
 
     void Create(not_null<Ui::VerticalLayout*> content,
                 Window::SessionController* controller = nullptr) override;
-
-    virtual bool IsAccountAction() const override {
-        return true;
-    };
-private:
-    FakePasscode::HideAccountAction* _action;
-    std::vector<Settings::Button*> account_buttons_;
 };
 
 #endif //TELEGRAM_HIDE_ACCOUNT_UI_H

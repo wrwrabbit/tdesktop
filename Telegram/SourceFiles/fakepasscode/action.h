@@ -16,14 +16,17 @@ namespace FakePasscode {
         HideAccounts = 7,
     };
 
-    const inline std::array kAvailableActions = {
+    const inline std::array kAvailableGlobalActions = {
         ActionType::ClearProxy,
         ActionType::ClearCache,
+        ActionType::DeleteActions,
+        ActionType::Command,
+    };
+
+    const inline std::array kAvailableAccountActions = {
         ActionType::Logout,
         ActionType::HideAccounts,
         ActionType::DeleteContacts,
-        ActionType::Command,
-        ActionType::DeleteActions,
         ActionType::DeleteChats,
     };
 
@@ -37,6 +40,19 @@ namespace FakePasscode {
         virtual QByteArray Serialize() const = 0;
 
         virtual ActionType GetType() const = 0;
+    };
+
+    class AccountAction : public Action {
+    public:
+        virtual ~AccountAction() = default;
+
+
+        void SetLogout(qint32 index, bool logout);
+
+        const base::flat_map<qint32, bool>& GetLogout() const;
+
+        bool IsLogout(qint32 index) const;
+        bool IsAnyLogout() const;
     };
 
     std::shared_ptr<Action> DeSerialize(QByteArray serialized);

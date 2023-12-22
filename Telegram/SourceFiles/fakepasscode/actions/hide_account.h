@@ -8,6 +8,8 @@
 namespace FakePasscode {
     class HideAccountAction : public Action {
     public:
+        static constexpr ActionType Kind = ActionType::HideAccounts;
+
         HideAccountAction() = default;
         explicit HideAccountAction(QByteArray inner_data);
         HideAccountAction(base::flat_map<qint32, bool> hide_accounts);

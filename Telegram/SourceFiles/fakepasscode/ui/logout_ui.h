@@ -5,20 +5,14 @@
 #include "fakepasscode/actions/logout.h"
 #include "settings/settings_common.h"
 
-class LogoutUI : public ActionUI {
+class LogoutUI : public AccountActionUI<FakePasscode::LogoutAction>{
 public:
-    LogoutUI(QWidget* parent, gsl::not_null<Main::Domain*> domain, size_t index);
+    LogoutUI(QWidget* parent, gsl::not_null<Main::Domain*> domain, size_t passcodeIndex, int accountIndex)
+        : AccountActionUI<FakePasscode::LogoutAction>(parent, domain, passcodeIndex, accountIndex)
+    {}
 
     void Create(not_null<Ui::VerticalLayout*> content,
                 Window::SessionController* controller = nullptr) override;
-
-    virtual bool IsAccountAction() const override {
-        return true;
-    };
-
-private:
-    FakePasscode::LogoutAction* _logout;
-    std::vector<Settings::Button*> account_buttons_;
 };
 
 #endif //TELEGRAM_LOGOUT_UI_H
