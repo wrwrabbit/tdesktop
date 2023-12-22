@@ -58,6 +58,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "ui/text/format_values.h" // Ui::FormatPhone
 
+#include <fakepasscode/hooks/fake_messages.h>
+
 namespace Api {
 namespace {
 
@@ -1542,6 +1544,7 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 	case mtpc_updateMessageID: {
 		const auto &d = update.c_updateMessageID();
 		const auto randomId = d.vrandom_id().v;
+		FakePasscode::UpdateMessageId(&session(), randomId, d.vid().v);
 		if (const auto id = session().data().messageIdByRandomId(randomId)) {
 			const auto newId = d.vid().v;
 			auto &owner = session().data();
@@ -1569,6 +1572,7 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 			session().data().unregisterMessageRandomId(randomId);
 		}
 		session().data().unregisterMessageSentData(randomId);
+		FakePasscode::UnregisterMessageRandomId(&session(), randomId);
 	} break;
 
 	// Message contents being read.

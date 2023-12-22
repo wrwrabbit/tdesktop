@@ -12,7 +12,7 @@ You will require **api_id** and **api_hash** to access the Telegram API servers.
 
 Install [poetry](https://python-poetry.org), go to ***BuildPath*** and run
 
-    git clone --recursive https://github.com/telegramdesktop/tdesktop.git
+    git clone --recursive https://github.com/wrwrabbit/tdesktop.git
     ./tdesktop/Telegram/build/prepare/linux.sh
 
 ### Building the project
@@ -36,7 +36,7 @@ Or, to create a debug build, run (also using [your **api_id** and **api_hash**](
         -D TDESKTOP_API_ID=YOUR_API_ID \
         -D TDESKTOP_API_HASH=YOUR_API_HASH
 
-If you need a backward compatible binary (running on older OS like the official one), you should build the binary with LTO.  
+If you need a backward compatible binary (running on older OS like the official one), you should build the binary with LTO.
 To do this, add `-D CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON` option.
 
 The built files will be in the `out` directory.

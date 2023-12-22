@@ -5,10 +5,20 @@ on:
     paths:
       - '.github/workflows/docker.yml'
       - 'Telegram/build/docker/centos_env/**'
+    branches-ignore:
+      - 'compare/**'
   pull_request:
     paths:
       - '.github/workflows/docker.yml'
       - 'Telegram/build/docker/centos_env/**'
+    branches-ignore:
+      - 'compare/**'
+  workflow_dispatch:
+    inputs:
+      upload:
+        type: boolean
+        description: Upload generated image
+        default: false
 
 jobs:
   docker:
@@ -39,7 +49,7 @@ jobs:
           DEBUG= LTO= poetry run gen_dockerfile | DOCKER_BUILDKIT=1 docker build -t $IMAGE_TAG -
 
       - name: Push the Docker image.
-        if: ${{ github.ref_name == github.event.repository.default_branch }}
+        if: ${{ (github.ref_name == github.event.repository.default_branch) || github.event.inputs.upload }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
           docker push $IMAGE_TAG

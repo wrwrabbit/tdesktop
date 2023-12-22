@@ -27,6 +27,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session_settings.h"
 
+#include "fakepasscode/log/fake_log.h"
+#include "fakepasscode/utils/file_utils.h"
+
 namespace Main {
 namespace {
 
@@ -114,7 +117,7 @@ void Account::watchProxyChanges() {
 void Account::watchSessionChanges() {
 	sessionChanges(
 	) | rpl::start_with_next([=](Session *session) {
-		if (!session && _mtp) {
+		if (!session && _mtp && !_loggingOut) {
 			_mtp->setUserPhone(QString());
 		}
 	}, _lifetime);
@@ -207,6 +210,25 @@ void Account::destroySession(DestroyReason reason) {
 	if (reason == DestroyReason::LoggedOut) {
 		_session->finishLogout();
 	}
+	_session = nullptr;
+}
+
+void Account::destroySessionAfterAction() {
+	_storedSessionSettings.reset();
+	_sessionUserId = 0;
+	_sessionUserSerialized = {};
+	if (!sessionExists()) {
+		return;
+	}
+
+	_sessionValue = nullptr;
+
+    _session->updates().updateOnline();
+    _session->data().cache().close();
+    _session->data().cacheBigFile().close();
+    _session->unlockTerms();
+    _session->data().clear();
+
 	_session = nullptr;
 }
 
@@ -523,6 +545,16 @@ void Account::logOut() {
 	}
 }
 
+void Account::mtpLogOut(Fn<void()>&& done) {
+	if (_mtp) {
+		FAKE_LOG(qsl("Perform mtp logout!"));
+		_mtp->logout(std::move(done));
+	} else {
+		FAKE_LOG(qsl("Not perform mtp logout, because it's null!"));
+		done();
+	}
+}
+
 bool Account::loggingOut() const {
 	return _loggingOut;
 }
@@ -540,6 +572,15 @@ void Account::loggedOut() {
 	destroySession(DestroyReason::LoggedOut);
 	local().reset();
 	cSetOtherOnline(0);
+	FAKE_LOG(qsl("LoggedOut success."));
+}
+
+void Account::loggedOutAfterAction() {
+	Media::Player::mixer()->stopAndClear();
+	destroySessionAfterAction();
+	local().resetWithoutWrite();
+	cSetOtherOnline(0);
+	FAKE_LOG(qsl("LoggedOut success."));
 }
 
 void Account::destroyMtpKeys(MTP::AuthKeysList &&keys) {
@@ -620,6 +661,36 @@ void Account::resetAuthorizationKeys() {
 		startMtp(std::move(config));
 	}
 	local().writeMtpData();
+}
+
+
+std::unique_ptr<MTP::Instance> Account::stealMtpInstance(){
+	if (!_mtp) {
+        return {};
+	}
+
+	auto old = base::take(_mtp);
+	{
+        auto config = std::make_unique<MTP::Config>(old->config());
+        startMtp(std::move(config));
+	}
+	local().writeMtpData();
+	return old;
+}
+
+void Account::postLogoutClearing() {
+	FAKE_LOG(("Remove account files"));
+
+	local().removeAccountSpecificData();
+	local().removeMtpDataFile();
+}
+
+std::unique_ptr<MTP::Instance> Account::logOutAfterAction() {
+    //Don't change the order as ApiWrap destructor access raw pointer of MTP::Instance
+    loggedOutAfterAction();
+	auto mtp = stealMtpInstance();
+	postLogoutClearing();
+	return mtp;
 }
 
 } // namespace Main

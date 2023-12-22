@@ -20,6 +20,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_helpers.h" // ShouldSendSilent
 #include "main/main_session.h"
 
+#include "fakepasscode/hooks/fake_messages.h"
+
 namespace Api {
 namespace {
 
@@ -70,6 +72,7 @@ void Polls::create(
 	}
 	auto &histories = history->owner().histories();
 	const auto randomId = base::RandomValue<uint64>();
+	FakePasscode::RegisterMessageRandomId(_session, randomId, peer->id, action.options);
 	histories.sendPreparedMessage(
 		history,
 		action.replyTo,

@@ -25,6 +25,8 @@ struct SendOptions {
 	bool silent = false;
 	bool handleSupportSwitch = false;
 	bool hideViaBot = false;
+
+    std::optional<TimeId> ptgAutoDelete = std::nullopt;
 };
 [[nodiscard]] SendOptions DefaultSendWhenOnlineOptions();
 

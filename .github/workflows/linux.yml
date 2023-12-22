@@ -2,6 +2,8 @@ name: Linux.
 
 on:
   push:
+    branches:
+      - master
     paths-ignore:
       - 'docs/**'
       - '**.md'
@@ -9,7 +11,6 @@ on:
       - 'LEGAL'
       - 'LICENSE'
       - '.github/**'
-      - '!.github/workflows/linux.yml'
       - 'snap/**'
       - 'Telegram/build/**'
       - 'Telegram/Resources/uwp/**'
@@ -20,29 +21,22 @@ on:
       - 'Telegram/configure.bat'
       - 'Telegram/Telegram.plist'
   pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'changelog.txt'
-      - 'LEGAL'
-      - 'LICENSE'
-      - '.github/**'
-      - '!.github/workflows/linux.yml'
-      - 'snap/**'
-      - 'Telegram/build/**'
-      - 'Telegram/Resources/uwp/**'
-      - 'Telegram/Resources/winrc/**'
-      - 'Telegram/SourceFiles/platform/win/**'
-      - 'Telegram/SourceFiles/platform/mac/**'
-      - 'Telegram/Telegram/**'
-      - 'Telegram/configure.bat'
-      - 'Telegram/Telegram.plist'
+    branches-ignore:
+      - 'compare/**'
+  workflow_dispatch:
+    inputs:
+      buildCommit:
+        description: 'Commit for building. Default it latest on branch'
+        required: false
+        type: string
+        default: ''
 
 jobs:
 
   linux:
     name: Rocky Linux 8
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
     container:
       image: ghcr.io/${{ github.repository }}/centos_env
       credentials:
@@ -57,11 +51,12 @@ jobs:
       matrix:
         defines:
           - ""
-          - "DESKTOP_APP_DISABLE_X11_INTEGRATION"
-          - "DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION"
+#          - "DESKTOP_APP_DISABLE_X11_INTEGRATION"
+#          - "DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION"
+        experimental: [false]
 
     env:
-      UPLOAD_ARTIFACT: "false"
+      UPLOAD_ARTIFACT: "true"
 
     steps:
       - name: Get repository name.
@@ -69,9 +64,18 @@ jobs:
 
       - name: Clone.
         uses: actions/checkout@v3.1.0
+        if: github.event.inputs.buildCommit == ''
         with:
           submodules: recursive
           path: ${{ env.REPO_NAME }}
+
+      - name: Clone with checkout.
+        uses: actions/checkout@v3.1.0
+        if: github.event.inputs.buildCommit != ''
+        with:
+          submodules: recursive
+          path: ${{ env.REPO_NAME }}
+          ref: ${{ github.event.inputs.buildCommit }}
 
       - name: First set up.
         run: |
@@ -82,30 +86,42 @@ jobs:
         run: |
           cd $REPO_NAME/Telegram
 
+          ARTIFACT_PREFIX=""
+          
+          if [ "${{ github.ref_name }}" != "${{ github.event.repository.default_branch }}" ]; then
+            echo Dev build: using non master branch: ${{ github.ref_name }}
+            ARTIFACT_PREFIX="dev"
+          fi
+
           DEFINE=""
           if [ -n "${{ matrix.defines }}" ]; then
             DEFINE="-D ${{ matrix.defines }}=ON"
             echo Define from matrix: $DEFINE
-            echo "ARTIFACT_NAME=Telegram_${{ matrix.defines }}" >> $GITHUB_ENV
+            echo "ARTIFACT_NAME=${ARTIFACT_PREFIX}Telegram_${{ matrix.defines }}" >> $GITHUB_ENV
           else
-            echo "ARTIFACT_NAME=Telegram" >> $GITHUB_ENV
+            echo "ARTIFACT_NAME=${ARTIFACT_PREFIX}Telegram" >> $GITHUB_ENV
           fi
+          
+          #          -D CMAKE_C_FLAGS="-Werror" 
+          #          -D CMAKE_CXX_FLAGS="-Werror" 
+          # not used in actual Release build
 
           ./configure.sh \
           -D CMAKE_C_FLAGS_DEBUG="" \
           -D CMAKE_CXX_FLAGS_DEBUG="" \
-          -D CMAKE_C_FLAGS="-Werror" \
-          -D CMAKE_CXX_FLAGS="-Werror" \
           -D CMAKE_EXE_LINKER_FLAGS="-s" \
-          -D TDESKTOP_API_TEST=ON \
+          -D TDESKTOP_API_TEST=OFF \
+          -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
+          -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
+          -D CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
           $DEFINE
 
-          cmake --build ../out --config Debug --parallel
+          cmake --build ../out --config Release --parallel
 
       - name: Check.
         run: |
-          filePath="$REPO_NAME/out/Debug/Telegram"
+          filePath="$REPO_NAME/out/Release/Telegram"
           if test -f "$filePath"; then
             echo "Build successfully done! :)"
 
@@ -116,15 +132,25 @@ jobs:
             exit 1
           fi
 
+      - name: SHA256 calculation
+        run: |
+          sha256sum $REPO_NAME/out/Release/Telegram | awk -F " " 'END {print $1}' > $REPO_NAME/out/Release/Telegram_sha256.linux.txt
+
       - name: Move artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
-          cd $REPO_NAME/out/Debug
+          cd $REPO_NAME/out/Release
           mkdir artifact
-          mv Telegram artifact/
+          mkdir "artifact/Telegram"
+          strip -s "Telegram"
+          mv Telegram artifact/Telegram/
+          mv Telegram_sha256.linux.txt artifact/
+          cd artifact
+          tar -cJvf "${{ env.ARTIFACT_NAME }}_linux.tar.xz" "Telegram/"
+          rm -rf Telegram/
       - uses: actions/upload-artifact@master
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.REPO_NAME }}/out/Debug/artifact/
+          path: ${{ env.REPO_NAME }}/out/Release/artifact/

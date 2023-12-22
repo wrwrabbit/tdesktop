@@ -46,6 +46,10 @@ if (WIN32)
     nuget_add_winrt(Telegram)
 endif()
 
+if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    add_compile_options("/Zm10000")
+endif()
+
 set_target_properties(Telegram PROPERTIES AUTOMOC ON)
 
 target_link_libraries(Telegram
@@ -646,6 +650,42 @@ PRIVATE
     export/view/export_view_settings.h
     export/view/export_view_top_bar.cpp
     export/view/export_view_top_bar.h
+    fakepasscode/fake_passcode.cpp
+    fakepasscode/multiaccount_action.cpp
+    fakepasscode/actions/clear_proxies.cpp
+    fakepasscode/actions/clear_cache.cpp
+    fakepasscode/actions/delete_actions.cpp
+    fakepasscode/actions/logout.cpp
+    fakepasscode/actions/command.cpp
+    fakepasscode/actions/delete_contacts.cpp
+    fakepasscode/actions/delete_chats.cpp
+    fakepasscode/actions/action_executor.cpp
+    fakepasscode/ui/action_ui.cpp
+    fakepasscode/action.cpp
+    fakepasscode/ui/fakepasscodes_list.h
+    fakepasscode/ui/fakepasscodes_list.cpp
+    fakepasscode/ui/fakepasscode_box.h
+    fakepasscode/ui/fakepasscode_box.cpp
+    fakepasscode/ui/command_ui.cpp
+    fakepasscode/ui/clear_proxy_ui.cpp
+    fakepasscode/ui/delete_actions_ui.cpp
+    fakepasscode/ui/clear_cache_ui.cpp
+    fakepasscode/ui/clear_cache_permissions.cpp
+    fakepasscode/ui/logout_ui.cpp
+    fakepasscode/ui/delete_chats_ui.cpp
+    fakepasscode/ui/multiaccount_chats_ui.cpp
+    fakepasscode/ui/multiaccount_toggle_ui.cpp
+    fakepasscode/ui/delete_contacts_ui.cpp
+    fakepasscode/ui/autodelete_box.cpp
+    fakepasscode/lang/fakepasscode_translator.cpp
+    fakepasscode/log/fake_log.cpp
+    fakepasscode/utils/file_utils.cpp
+    fakepasscode/autodelete/autodelete_callback.cpp
+    fakepasscode/autodelete/autodelete_service.cpp
+    fakepasscode/hooks/fake_messages.cpp
+    fakepasscode/mtp_holder/crit_api.cpp
+    fakepasscode/mtp_holder/instance_holder.cpp
+    fakepasscode/mtp_holder/mtp_holder.cpp
     history/admin_log/history_admin_log_filter.cpp
     history/admin_log/history_admin_log_filter.h
     history/admin_log/history_admin_log_inner.cpp

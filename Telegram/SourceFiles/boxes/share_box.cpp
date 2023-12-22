@@ -50,6 +50,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_menu_icons.h"
 
+#include "fakepasscode/hooks/fake_messages.h"
+#include "fakepasscode/ui/autodelete_box.h"
+
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
 
@@ -498,6 +501,7 @@ void ShareBox::showMenu(not_null<Ui::RpWidget*> parent) {
 		sendMenuType(),
 		[=] { submitSilent(); },
 		[=] { submitScheduled(); },
+		[=] { submitAutoDelete(); },
 		[=] { submitWhenOnline(); });
 	const auto success = (result == SendMenu::FillMenuResult::Success);
 	if (_descriptor.forwardOptions.show || success) {
@@ -596,6 +600,13 @@ void ShareBox::submitScheduled() {
 
 void ShareBox::submitWhenOnline() {
 	submit(Api::DefaultSendWhenOnlineOptions());
+}
+
+void ShareBox::submitAutoDelete() {
+    const auto callback = [=](Api::SendOptions options) { submit(options); };
+	uiShow()->showBox(
+		FakePasscode::AutoDeleteBox(this, callback, _descriptor.scheduleBoxStyle.chooseDateTimeArgs),
+		Ui::LayerOption::KeepOther);
 }
 
 void ShareBox::copyLink() const {
@@ -1398,10 +1409,11 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 		for (const auto &fullId : existingIds) {
 			mtpMsgIds.push_back(MTP_int(fullId.msg));
 		}
-		const auto generateRandom = [&] {
+		const auto generateRandom = [&] (PeerId peer) {
 			auto result = QVector<MTPlong>(existingIds.size());
 			for (auto &value : result) {
 				value = base::RandomValue<MTPlong>();
+				FakePasscode::RegisterMessageRandomId(&history->owner().session(), value.v, peer, options);
 			}
 			return result;
 		};
@@ -1438,8 +1450,8 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 					MTPmessages_ForwardMessages(
 						MTP_flags(sendFlags),
 						history->peer->input,
-						MTP_vector<MTPint>(mtpMsgIds),
-						MTP_vector<MTPlong>(generateRandom()),
+                        MTP_vector<MTPint>(mtpMsgIds),
+                        MTP_vector<MTPlong>(generateRandom(peer->id)),
 						peer->input,
 						MTP_int(topMsgId),
 						MTP_int(options.scheduled),

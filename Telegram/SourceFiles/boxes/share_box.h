@@ -118,6 +118,7 @@ private:
 	void submit(Api::SendOptions options);
 	void submitSilent();
 	void submitScheduled();
+	void submitAutoDelete();
 	void submitWhenOnline();
 	void copyLink() const;
 	bool searchByUsername(bool useCache = false);

@@ -98,6 +98,7 @@ void ScheduleBox(
 		[=] { return SendMenu::Type::SilentOnly; },
 		[=] { save(true, descriptor.collect()); },
 		nullptr,
+		SendMenu::NoAutoDeleteCallback(),
 		nullptr);
 
 	if (type == SendMenu::Type::ScheduledToUser) {

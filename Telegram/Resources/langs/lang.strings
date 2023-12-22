@@ -1294,6 +1294,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_info_delete_contact" = "Delete contact";
 "lng_info_share_contact" = "Share contact";
 "lng_profile_clear_history" = "Clear history";
+"lng_profile_delete_my_messages" = "Delete my messages";
 "lng_profile_delete_conversation" = "Delete conversation";
 "lng_profile_block_user" = "Block user";
 "lng_profile_unblock_user" = "Unblock user";
@@ -4500,5 +4501,48 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mac_touchbar_favorite_stickers" = "Favorite stickers";
 
 "lng_mac_hold_to_quit" = "Hold {text} to Quit";
+
+"lng_fakepasscode" = "Passcode {caption}";
+"lng_ptelegram_version" = "PTelegram v. {version}";
+
+"lng_version_mistmatch_confirm" = "Confirm existing data overwrite";
+"lng_version_mistmatch_desc" = "You are starting Telegram using data from more recent version. Telegram does not support this. If you continue - all existing configuration/sessions/data will be erased.\nWARNING: You will need to login again, and may loose your account if you can't.\nNote: You can try use more recent version of Telegram.\nDo you want to proceed and clean existing data?";
+
+"lng_fakepasscodes_list" = "Fake passcodes list";
+"lng_fakeaction_list" = "Actions";
+"lng_remove_fakepasscode" = "Remove fake passcode";
+"lng_show_fakes" = "Show fake passcodes";
+"lng_add_fakepasscode" = "Add fake passcode";
+"lng_add_fakepasscode_passcode" = "Fake passcode";
+"lng_fakepasscode_create" = "Enter new fake passcode";
+"lng_fakepasscode_change" = "Change fake passcode";
+"lng_fakepasscode_name" = "Fake passcode name";
+"lng_passcode_exists" = "Passcode already used";
+
+"lng_special_actions" = "Special actions";
+"lng_clear_cache_on_lock" = "Clear cache on lock";
+"lng_enable_advance_logging" = "Enable logging (only debug!)";
+
+"lng_clear_proxy" = "Clear proxies list";
+"lng_clear_cache" = "Clear cache";
+"lng_logout" = "Log out";
+"lng_logout_account" = "Log out {caption}";
+"lng_delete_contacts" = "Delete synced contacts";
+"lng_delete_contacts_account" = "Delete contacts for {caption}";
+"lng_command" = "Execute command (dangerous!)";
+"lng_command_prompt" = "Enter command";
+"lng_enable_dod_cleaning" = "Enable wipe clean";
+"lng_delete_actions" = "Delete actions";
+"lng_send_autodelete_message" = "Delete as read";
+"lng_autodelete_title" = "Delete as read in:";
+"lng_autodelete_hours" = "hours:";
+"lng_autodelete_minutes" = "minutes:";
+"lng_autodelete_seconds" = "seconds:";
+"lng_remove_chats" = "Remove chats";
+"lng_remove_chats_popup" = "Chats to remove";
+"lng_remove_chats_account" = "Remove chats for {caption}";
+"lng_chats_action_archive" = "Archived chats";
+"lng_chats_action_main_chats" = "Main chats";
+"lng_macos_cache_folder_permission_desc" = "To clear cache properly, please confirm access to Downloads folder if needed";
 
 // Keys finished

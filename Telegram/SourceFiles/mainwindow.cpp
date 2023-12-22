@@ -8,13 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 
 #include "data/data_document.h"
-#include "data/data_session.h"
 #include "data/data_document_media.h"
-#include "dialogs/ui/dialogs_layout.h"
-#include "history/history.h"
-#include "ui/widgets/popup_menu.h"
-#include "ui/widgets/buttons.h"
-#include "ui/widgets/shadow.h"
 #include "ui/widgets/tooltip.h"
 #include "ui/emoji_config.h"
 #include "lang/lang_cloud_manager.h"
@@ -29,10 +23,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "mainwidget.h"
 #include "ui/boxes/confirm_box.h"
-#include "boxes/connection_box.h"
-#include "storage/storage_account.h"
-#include "storage/localstorage.h"
-#include "apiwrap.h"
 #include "api/api_updates.h"
 #include "settings/settings_intro.h"
 #include "base/options.h"
@@ -48,6 +38,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_window.h"
 
 #include <QtGui/QWindow>
+#include <QtCore/QCoreApplication>
+#include <QMenu>
 
 namespace {
 

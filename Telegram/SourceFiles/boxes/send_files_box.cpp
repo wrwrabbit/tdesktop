@@ -422,7 +422,7 @@ void SendFilesBox::enqueueNextPrepare() {
 }
 
 void SendFilesBox::prepare() {
-	initSendWay();
+    initSendWay();
 	setupCaption();
 	setupSendWayControls();
 	preparePreview();
@@ -538,10 +538,12 @@ void SendFilesBox::refreshButtons() {
 			[=] { return _sendMenuType; },
 			[=] { sendSilent(); },
 			[=] { sendScheduled(); },
+			[=] { sendAutoDelete(); },
 			[=] { sendWhenOnline(); });
 	}
 	addButton(tr::lng_cancel(), [=] { closeBox(); });
-	_addFile = addLeftButton(
+
+    _addFile = addLeftButton(
 		tr::lng_stickers_featured_add(),
 		base::fn_delayed(st::historyAttach.ripple.hideDuration, this, [=] {
 			openDialogToAddFileToAlbum();
@@ -615,6 +617,7 @@ void SendFilesBox::addMenuButton() {
 				_sendMenuType,
 				[=] { sendSilent(); },
 				[=] { sendScheduled(); },
+                [=] { sendAutoDelete(); },
 				[=] { sendWhenOnline(); },
 				&_st.tabbed.icons);
 		}
@@ -1449,6 +1452,12 @@ void SendFilesBox::sendScheduled() {
 
 void SendFilesBox::sendWhenOnline() {
 	send(Api::DefaultSendWhenOnlineOptions());
+}
+
+void SendFilesBox::sendAutoDelete() {
+    SendMenu::DefaultAutoDeleteCallback(this,
+        [=](auto box) { _show->show(std::move(box), Ui::LayerOption::KeepOther); },
+        [=](auto opts) { send(opts); })();
 }
 
 SendFilesBox::~SendFilesBox() = default;

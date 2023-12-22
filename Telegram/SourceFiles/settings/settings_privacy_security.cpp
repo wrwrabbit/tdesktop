@@ -63,6 +63,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_menu_icons.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
+#include "fakepasscode/ui/fakepasscodes_list.h"
 
 #include <QtGui/QGuiApplication>
 
@@ -343,6 +344,18 @@ void SetupLocalPasscode(
 			showOther(LocalPasscodeCreateId());
 		}
 	});
+
+    auto& local_domain = controller->session().domain().local();
+    if (!local_domain.IsFake() && local_domain.hasLocalPasscode()) {
+        AddButtonWithIcon(
+            container,
+            tr::lng_show_fakes(),
+            st::settingsButton,
+            { &st::menuIconSettings }
+        )->addClickHandler([=] {
+            controller->show(Box<FakePasscodeListBox>(&controller->session().domain(), controller));
+        });
+    }
 }
 
 void SetupCloudPassword(

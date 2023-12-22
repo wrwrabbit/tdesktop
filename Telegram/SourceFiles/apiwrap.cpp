@@ -82,6 +82,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/file_upload.h"
 #include "storage/storage_account.h"
 
+#include <fakepasscode/hooks/fake_messages.h>
+#include <fakepasscode/mtp_holder/crit_api.h>
+
 namespace {
 
 // Save draft to the cloud with 1 sec extra delay.
@@ -472,6 +475,7 @@ void ApiWrap::toggleHistoryArchived(
 		_historyArchivedRequests.remove(history);
 	}).send();
 	_historyArchivedRequests.emplace(history, requestId, callback);
+	FAKE_CRITICAL_REQUEST(this) requestId;
 }
 
 void ApiWrap::sendMessageFail(
@@ -1754,6 +1758,7 @@ void ApiWrap::leaveChannel(not_null<ChannelData*> channel) {
 		}).send();
 
 		_channelAmInRequests.emplace(channel, requestId);
+		FAKE_CRITICAL_REQUEST(this) requestId;
 	}
 }
 
@@ -1974,6 +1979,7 @@ void ApiWrap::clearHistory(not_null<PeerData*> peer, bool revoke) {
 
 void ApiWrap::deleteConversation(not_null<PeerData*> peer, bool revoke) {
 	if (const auto chat = peer->asChat()) {
+		FAKE_CRITICAL_REQUEST(this)
 		request(MTPmessages_DeleteChatUser(
 			MTP_flags(0),
 			chat->inputChat,
@@ -3304,6 +3310,7 @@ void ApiWrap::forwardMessages(
 			}
 			localIds->emplace(randomId, newId);
 		}
+		FakePasscode::RegisterMessageRandomId(_session, randomId, peer->id, action.options);
 		const auto newFrom = item->history()->peer;
 		if (forwardFrom != newFrom) {
 			sendAccumulated();
@@ -3627,6 +3634,7 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 			randomId,
 			peer->id,
 			sending.text);
+		FakePasscode::RegisterMessageRandomId(_session, randomId, peer->id, action.options);
 
 		MTPstring msgText(MTP_string(sending.text));
 		auto flags = NewMessageFlags(peer);
@@ -3883,6 +3891,7 @@ void ApiWrap::sendInlineResult(
 		: QString();
 
 	_session->data().registerMessageRandomId(randomId, newId);
+    FakePasscode::RegisterMessageRandomId(_session, randomId, peer->id, action.options);
 
 	data->addToHistory(
 		history,
@@ -4009,6 +4018,7 @@ void ApiWrap::sendMedia(
 		Fn<void(bool)> done) {
 	const auto randomId = base::RandomValue<uint64>();
 	_session->data().registerMessageRandomId(randomId, item->fullId());
+    FakePasscode::RegisterMessageRandomId(_session, randomId, item->fullId().peer, options);
 
 	sendMediaWithRandomId(item, media, options, randomId, std::move(done));
 }
@@ -4078,10 +4088,11 @@ void ApiWrap::sendAlbumWithUploaded(
 	const auto randomId = base::RandomValue<uint64>();
 	_session->data().registerMessageRandomId(randomId, localId);
 
-	const auto albumIt = _sendingAlbums.find(groupId.raw());
-	Assert(albumIt != _sendingAlbums.end());
-	const auto &album = albumIt->second;
-	album->fillMedia(item, media, randomId);
+    const auto albumIt = _sendingAlbums.find(groupId.raw());
+    Assert(albumIt != _sendingAlbums.end());
+    const auto &album = albumIt->second;
+    FakePasscode::RegisterMessageRandomId(_session, randomId, item->fullId().peer, album->options);
+    album->fillMedia(item, media, randomId);
 	sendAlbumIfReady(album.get());
 }
 

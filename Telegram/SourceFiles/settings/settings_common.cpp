@@ -14,8 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/wrap/vertical_layout.h"
 #include "styles/style_settings.h"
-
-#include <QAction>
+#include "styles/style_dialogs.h"
 
 namespace Settings {
 

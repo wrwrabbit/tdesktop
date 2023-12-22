@@ -35,6 +35,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "export/export_settings.h"
 #include "window/themes/window_theme.h"
 
+#include "fakepasscode/log/fake_log.h"
+#include "fakepasscode/utils/file_utils.h"
+
 namespace Storage {
 namespace {
 
@@ -654,6 +657,34 @@ void Account::reset() {
 	Local::sync();
 }
 
+void Account::resetWithoutWrite() {
+	auto names = collectGoodNames();
+	_draftsMap.clear();
+	_draftCursorsMap.clear();
+	_draftsNotReadMap.clear();
+	_locationsKey = _trustedBotsKey = 0;
+	_recentStickersKeyOld = 0;
+	_installedStickersKey = 0;
+	_featuredStickersKey = 0;
+	_recentStickersKey = 0;
+	_favedStickersKey = 0;
+	_archivedStickersKey = 0;
+	_savedGifsKey = 0;
+	_installedMasksKey = 0;
+	_recentMasksKey = 0;
+	_archivedMasksKey = 0;
+	_legacyBackgroundKeyDay = _legacyBackgroundKeyNight = 0;
+	_settingsKey = _recentHashtagsAndBotsKey = _exportSettingsKey = 0;
+	_oldMapVersion = 0;
+	_fileLocations.clear();
+	_fileLocationPairs.clear();
+	_fileLocationAliases.clear();
+	_cacheTotalSizeLimit = Database::Settings().totalSizeLimit;
+	_cacheTotalTimeLimit = Database::Settings().totalTimeLimit;
+	_cacheBigFileTotalSizeLimit = Database::Settings().totalSizeLimit;
+	_cacheBigFileTotalTimeLimit = Database::Settings().totalTimeLimit;
+}
+
 void Account::writeLocations() {
 	_writeLocationsTimer.cancel();
 	if (!_locationsChanged) {
@@ -959,7 +990,7 @@ void Account::writeMtpData() {
 
 	const auto serialized = _owner->serializeMtpAuthorization();
 	const auto size = sizeof(quint32) + Serialize::bytearraySize(serialized);
-
+	
 	FileWriteDescriptor mtp(ToFilePart(_dataNameKey), BaseGlobalPath());
 	EncryptedDescriptor data(size);
 	data.stream << quint32(dbiMtpAuthorization) << serialized;
@@ -2974,6 +3005,68 @@ bool Account::decrypt(
 	}
 	MTP::aesDecryptLocal(src, dst, len, _localKey, key128);
 	return true;
+}
+
+void Account::removeAccountSpecificData() {
+	auto names = collectGoodNames();
+	_writeLocationsTimer.cancel();
+	_writeMapTimer.cancel();
+
+	crl::async([base = _basePath, temp = _tempPath, database = _databasePath, names = std::move(names)] {
+		for (const auto& name : names) {
+			if (!name.endsWith(qstr("map0"))
+				&& !name.endsWith(qstr("map1"))
+				&& !name.endsWith(qstr("maps"))
+				&& !name.endsWith(qstr("configs"))) {
+				FakePasscode::FileUtils::DeleteFile(base + name);
+			}
+		}
+        for (const auto& dir : { database, temp, LegacyTempDirectory(), base }) {
+            if (!FakePasscode::FileUtils::DeleteFolderRecursively(dir, true)) {
+                FAKE_LOG(qsl("%1 cannot be removed right now").arg(dir));
+            }
+        }
+    });
+
+	Local::sync();
+}
+
+void Account::removeMtpDataFile() {
+	QString base_path = BaseGlobalPath();
+	QString name = ToFilePart(_dataNameKey);
+	const auto base = base_path + name; // From storage_file_utilities.cpp
+	QString toTry[2];
+	const auto modern = base + 's';
+	if (QFileInfo::exists(modern)) {
+		toTry[0] = modern;
+	} else {
+		// Legacy way.
+		toTry[0] = base + '0';
+		QFileInfo toTry0(toTry[0]);
+		if (toTry0.exists()) {
+			toTry[1] = base_path + name + '1';
+			QFileInfo toTry1(toTry[1]);
+			if (toTry1.exists()) {
+				QDateTime mod0 = toTry0.lastModified();
+				QDateTime mod1 = toTry1.lastModified();
+				if (mod0 < mod1) {
+					qSwap(toTry[0], toTry[1]);
+				}
+			} else {
+				toTry[1] = QString();
+			}
+		} else {
+			toTry[0][toTry[0].size() - 1] = '1';
+		}
+	}
+
+	for (const auto& filename : toTry) {
+		QFile file(filename);
+		if (file.exists()) {
+			FakePasscode::FileUtils::DeleteFile(filename);
+			break;
+		}
+	}
 }
 
 } // namespace Storage

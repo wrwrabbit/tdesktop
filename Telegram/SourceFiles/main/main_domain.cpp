@@ -26,6 +26,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "data/data_peer_values.h" // Data::AmPremiumValue.
 
+#include "fakepasscode/log/fake_log.h"
+
 namespace Main {
 
 Domain::Domain(const QString &dataName)
@@ -372,12 +374,14 @@ void Domain::closeAccountWindows(not_null<Main::Account*> account) {
 		const auto other = i->account.get();
 		if (other == account) {
 			continue;
-		} else if (Core::App().separateWindowForAccount(other)) {
+		} 
+		if (Core::App().separateWindowForAccount(other)) {
 			const auto that = Core::App().separateWindowForAccount(account);
 			if (that) {
 				that->close();
 			}
-		} else if (!another
+		}
+		if (!another
 			|| (other->sessionExists() && !another->sessionExists())) {
 			another = other;
 		}

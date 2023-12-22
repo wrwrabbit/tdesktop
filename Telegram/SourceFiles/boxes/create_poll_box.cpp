@@ -1106,6 +1106,9 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	const auto sendWhenOnline = [=] {
 		send(Api::DefaultSendWhenOnlineOptions());
 	};
+    const auto sendAutoDelete = SendMenu::DefaultAutoDeleteCallback(this, [=] (auto box) {
+        _controller->show(std::move(box), Ui::LayerOption::KeepOther);
+    }, send);
 
 	options->scrollToWidget(
 	) | rpl::start_with_next([=](not_null<QWidget*> widget) {
@@ -1130,11 +1133,13 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			? SendMenu::Type::Disabled
 			: _sendMenuType;
 	};
+
 	SendMenu::SetupMenuAndShortcuts(
 		submit.data(),
 		sendMenuType,
 		sendSilent,
 		sendScheduled,
+		sendAutoDelete,
 		sendWhenOnline);
 	addButton(tr::lng_cancel(), [=] { closeBox(); });
 

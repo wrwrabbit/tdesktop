@@ -642,7 +642,7 @@ void PasscodeBox::save(bool force) {
 			return;
 		}
 
-		if (_session->domain().local().checkPasscode(old.toUtf8())) {
+		if (_session->domain().local().checkRealOrFakePasscode(old.toUtf8())) {
 			cSetPasscodeBadTries(0);
 			if (_turningOff) pwd = conf = QString();
 		} else {
@@ -706,7 +706,16 @@ void PasscodeBox::save(bool force) {
 		} else {
 			changeCloudPassword(old, pwd);
 		}
-	} else {
+	} else if (!_session->domain().local().IsFake() &&
+            _session->domain().local().CheckFakePasscodeExists(pwd.toUtf8())) {
+        _newPasscode->selectAll();
+        _newPasscode->setFocus();
+        _newPasscode->showError();
+        _newError = tr::lng_passcode_exists(tr::now);
+        update();
+        closeReplacedBy();
+        return;
+    } else {
 		closeReplacedBy();
 		const auto weak = Ui::MakeWeak(this);
 		cSetPasscodeBadTries(0);

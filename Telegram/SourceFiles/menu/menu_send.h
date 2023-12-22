@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "base/object_ptr.h"
+
 namespace style {
 struct ComposeIcons;
 } // namespace style
@@ -51,6 +53,7 @@ FillMenuResult FillSendMenu(
 	Type type,
 	Fn<void()> silent,
 	Fn<void()> schedule,
+	Fn<void()> autoDelete,
 	Fn<void()> whenOnline,
 	const style::ComposeIcons *iconsOverride = nullptr);
 
@@ -59,6 +62,7 @@ void SetupMenuAndShortcuts(
 	Fn<Type()> type,
 	Fn<void()> silent,
 	Fn<void()> schedule,
+	Fn<void()> autoDelete,
 	Fn<void()> whenOnline);
 
 void SetupUnreadMentionsMenu(
@@ -68,5 +72,23 @@ void SetupUnreadMentionsMenu(
 void SetupUnreadReactionsMenu(
 	not_null<Ui::RpWidget*> button,
 	Fn<Data::Thread*()> currentThread);
+} // namespace SendMenu
+
+namespace Ui {
+class BoxContent;
+}
+
+namespace SendMenu {
+
+Fn<void()> DefaultAutoDeleteCallback(
+	not_null<Ui::RpWidget*> parent,
+	Fn<void(object_ptr<Ui::BoxContent>)> show,
+	Fn<void(Api::SendOptions)> send);
+
+Fn<void()> DefaultAutoDeleteCallback(
+	not_null<Ui::RpWidget*> parent,
+	Fn<void(Api::SendOptions)> send);
+
+Fn<void()> NoAutoDeleteCallback();
 
 } // namespace SendMenu

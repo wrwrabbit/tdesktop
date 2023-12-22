@@ -46,6 +46,10 @@ namespace Lottie {
 struct IconDescriptor;
 } // namespace Lottie
 
+namespace Dialogs {
+class Row;
+}
+
 namespace Settings {
 
 using Button = Ui::SettingsButton;

@@ -306,6 +306,7 @@ HistoryWidget::HistoryWidget(
 		[=] { return sendButtonMenuType(); },
 		[=] { sendSilent(); },
 		[=] { sendScheduled(); },
+		[=] { sendAutoDelete(); },
 		[=] { sendWhenOnline(); });
 
 	_unblock->addClickHandler([=] { unblockUser(); });
@@ -4034,6 +4035,15 @@ void HistoryWidget::sendScheduled() {
 
 void HistoryWidget::sendWhenOnline() {
 	send(Api::DefaultSendWhenOnlineOptions());
+}
+
+void HistoryWidget::sendAutoDelete() {
+	if (!_list) {
+		return;
+	}
+	SendMenu::DefaultAutoDeleteCallback(_list,
+		[=] (auto box) { controller()->show(std::move(box), Ui::LayerOption::KeepOther); },
+		[=] (auto opts) { send(opts); })();
 }
 
 SendMenu::Type HistoryWidget::sendMenuType() const {

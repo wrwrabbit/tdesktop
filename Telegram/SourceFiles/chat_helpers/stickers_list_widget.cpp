@@ -1655,6 +1655,7 @@ base::unique_qptr<Ui::PopupMenu> StickersListWidget::fillContextMenu(
 		type,
 		SendMenu::DefaultSilentCallback(send),
 		SendMenu::DefaultScheduleCallback(this, type, send),
+		SendMenu::DefaultAutoDeleteCallback(this, send),
 		SendMenu::DefaultWhenOnlineCallback(send),
 		icons);
 

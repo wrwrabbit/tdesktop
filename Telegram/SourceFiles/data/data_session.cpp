@@ -4562,4 +4562,30 @@ void Session::clearLocalStorage() {
 	_bigFileCache->clear();
 }
 
+void Session::resetCaches() {
+    clearLocalStorage();
+    _cache->open(_session->local().cacheKey());
+    _bigFileCache->open(_session->local().cacheBigFileKey());
+}
+
+void Session::clearContacts() {
+	auto clearIndexedList = [](Dialogs::IndexedList* list) {
+		QVector<Dialogs::Key> keys;
+		keys.reserve(list->size());
+		for (auto row : *list) {
+			keys.push_back(row->key());
+		}
+		for (auto key : keys) {
+			list->remove(key);
+		}
+		list->clear();
+		Ensures(list->empty());
+	};
+
+	clearIndexedList(contactsList());
+	clearIndexedList(contactsNoChatsList());
+	_contactItems.clear();
+	_contactsLoaded = false;
+}
+
 } // namespace Data

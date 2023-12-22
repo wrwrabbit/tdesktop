@@ -98,6 +98,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/confirm_box.h"
 #include "styles/style_window.h"
 
+#include "fakepasscode/log/fake_log.h"
+#include "fakepasscode/utils/file_utils.h"
+#include "fakepasscode/autodelete/autodelete_service.h"
+#include "fakepasscode/mtp_holder/mtp_holder.h"
+
 #include <QtCore/QStandardPaths>
 #include <QtCore/QMimeDatabase>
 #include <QtGui/QGuiApplication>
@@ -165,7 +170,8 @@ Application::Application()
 , _emojiKeywords(std::make_unique<ChatHelpers::EmojiKeywords>())
 , _tray(std::make_unique<Tray>())
 , _autoLockTimer([=] { checkAutoLock(); })
-, _fileOpenTimer([=] { checkFileOpen(); }) {
+, _fileOpenTimer([=] { checkFileOpen(); })
+, _fakeMtpHolder(new FakePasscode::FakeMtpHolder) {
 	Ui::Integration::Set(&_private->uiIntegration);
 
 	_platformIntegration->init();
@@ -195,6 +201,8 @@ Application::Application()
 }
 
 Application::~Application() {
+	_fakeMtpHolder.reset();
+
 	if (_saveSettingsTimer && _saveSettingsTimer->isActive()) {
 		Local::writeSettings();
 	}
@@ -851,6 +859,19 @@ void Application::logout(Main::Account *account) {
 	}
 }
 
+void Application::logoutWithClear(Main::Account* account) {
+	if (account) {
+		if (account->sessionExists()) {
+			account->session().api().requestCancellingDiscard();
+		}
+		auto oldInstance = account->logOutAfterAction();
+		_fakeMtpHolder->HoldMtpInstance(std::move(oldInstance));
+	}
+	else {
+		_domain->resetWithForgottenPasscode();
+	}
+}
+
 void Application::logoutWithChecks(Main::Account *account) {
 	const auto weak = base::make_weak(account);
 	const auto retry = [=] {
@@ -870,6 +891,28 @@ void Application::logoutWithChecks(Main::Account *account) {
 			&account->session());
 	} else {
 		logout(account);
+	}
+}
+
+void Application::logoutWithChecksAndClear(Main::Account* account) {
+	if (account && account->sessionExists()) {
+		if (auto autoDelete = domain().local().GetAutoDelete()) {
+			autoDelete->DeleteAll(account->maybeSession());
+		}
+	}
+	if (!account || !account->sessionExists()) {
+		logoutWithClear(account);
+	} else if (_exportManager->inProgress(&account->session())) {
+		_exportManager->stop();
+        logoutWithChecksAndClear(account);
+	} else if (account->session().uploadsInProgress()) {
+		account->session().uploadsStop();
+        logoutWithChecksAndClear(account);
+	} else if (_downloadManager->loadingInProgress(&account->session())) {
+        _downloadManager->loadingStop(&account->session());
+        logoutWithChecksAndClear(account);
+    } else {
+		logoutWithClear(account);
 	}
 }
 
@@ -1156,9 +1199,15 @@ void Application::updateWindowTitles() {
 }
 
 void Application::lockByPasscode() {
-	_passcodeLock = true;
+    bool cleanup = _domain->local().IsCacheCleanedUpOnLock();
+    _passcodeLock = true;
 	enumerateWindows([&](not_null<Window::Controller*> w) {
-		w->setupPasscodeLock();
+        if (cleanup) {
+            cleanup = false;
+            FakePasscode::FileUtils::ClearCaches(false);
+            Ui::Emoji::ClearIrrelevantCache();
+        }
+        w->setupPasscodeLock();
 	});
 	if (_mediaView) {
 		_mediaView->close();
@@ -1173,6 +1222,13 @@ void Application::maybeLockByPasscode() {
 
 void Application::unlockPasscode() {
 	clearPasscodeLock();
+    if (_domain->local().IsCacheCleanedUpOnLock()) {
+        for (const auto &[index, account]: _domain->accounts()) {
+            if (account->sessionExists()) {
+                account->session().data().resetCaches();
+            }
+        }
+    }
 	enumerateWindows([&](not_null<Window::Controller*> w) {
 		w->clearPasscodeLock();
 	});

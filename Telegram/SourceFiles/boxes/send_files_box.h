@@ -200,6 +200,7 @@ private:
 	void send(Api::SendOptions options, bool ctrlShiftEnter = false);
 	void sendSilent();
 	void sendScheduled();
+	void sendAutoDelete();
 	void sendWhenOnline();
 	void captionResized();
 	void saveSendWaySettings();

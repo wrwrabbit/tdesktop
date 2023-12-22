@@ -395,6 +395,7 @@ base::unique_qptr<Ui::PopupMenu> GifsListWidget::fillContextMenu(
 		type,
 		SendMenu::DefaultSilentCallback(send),
 		SendMenu::DefaultScheduleCallback(this, type, send),
+		SendMenu::DefaultAutoDeleteCallback(this, send),
 		SendMenu::DefaultWhenOnlineCallback(send),
 		icons);
 

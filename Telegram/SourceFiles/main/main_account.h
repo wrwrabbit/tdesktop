@@ -59,6 +59,7 @@ public:
 		std::unique_ptr<SessionSettings> settings);
 
 	void logOut();
+    void mtpLogOut(Fn<void()>&& done);
 	void forcedLogOut();
 	[[nodiscard]] bool loggingOut() const;
 
@@ -117,6 +118,12 @@ public:
 		return _lifetime;
 	}
 
+    void loggedOut();
+	void loggedOutAfterAction();
+	void postLogoutClearing();
+
+    [[nodiscard]] std::unique_ptr<MTP::Instance> logOutAfterAction();
+
 private:
 	static constexpr auto kDefaultSaveDelay = crl::time(1000);
 	enum class DestroyReason {
@@ -137,9 +144,10 @@ private:
 
 	void destroyMtpKeys(MTP::AuthKeysList &&keys);
 	void resetAuthorizationKeys();
+    [[nodiscard]] std::unique_ptr<MTP::Instance> stealMtpInstance();
 
-	void loggedOut();
 	void destroySession(DestroyReason reason);
+	void destroySessionAfterAction();
 
 	const not_null<Domain*> _domain;
 	const std::unique_ptr<Storage::Account> _local;

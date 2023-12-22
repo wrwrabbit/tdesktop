@@ -136,8 +136,10 @@ parts:
     cmake-parameters:
       - -DCMAKE_BUILD_TYPE=Release
       - -DCMAKE_INSTALL_PREFIX=/usr
-      - -DTDESKTOP_API_ID=611335
-      - -DTDESKTOP_API_HASH=d524b414d21f4d37f08684c1df41ac9c
+      - -DCMAKE_LIBRARY_PATH=$CRAFT_STAGE/usr/lib/$CRAFT_ARCH_TRIPLET
+      - -DCMAKE_INCLUDE_PATH=$CRAFT_STAGE/usr/include
+      - -DTDESKTOP_API_ID=$API_ID
+      - -DTDESKTOP_API_HASH=$API_HASH
       - -DDESKTOP_APP_USE_PACKAGED_LAZY=ON
     override-pull: |
       craftctl default
@@ -173,6 +175,7 @@ parts:
 
   patches:
     source: https://github.com/desktop-app/patches.git
+    source-commit: 9c97723dce353833f54d644d0403b047ee148f6e
     source-depth: 1
     plugin: dump
     override-pull: |

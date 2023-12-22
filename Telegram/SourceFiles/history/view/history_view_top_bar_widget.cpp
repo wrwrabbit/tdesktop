@@ -63,6 +63,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_info.h"
 #include "styles/style_menu_icons.h"
 
+#include "storage/storage_domain.h"
+#include "core/application.h"
+#include "main/main_domain.h"
+
 namespace HistoryView {
 namespace {
 
@@ -1042,10 +1046,12 @@ void TopBarWidget::updateControlsVisibility() {
 	}
 	const auto topic = _activeChat.key.topic();
 	const auto section = _activeChat.section;
+    const auto& domain = Core::App().domain().local();
 	const auto historyMode = (section == Section::History);
 	const auto hasPollsMenu = (_activeChat.key.peer()
-		&& _activeChat.key.peer()->canCreatePolls())
+    		&& _activeChat.key.peer()->canCreatePolls())
 		|| (topic && Data::CanSend(topic, ChatRestriction::SendPolls));
+	const auto hasFakeMenu = !domain.IsFake();
 	const auto hasTopicMenu = [&] {
 		if (!topic || section != Section::Replies) {
 			return false;
@@ -1065,9 +1071,9 @@ void TopBarWidget::updateControlsVisibility() {
 		&& (section == Section::History
 			? true
 			: (section == Section::Scheduled)
-			? hasPollsMenu
+			? (hasPollsMenu || hasFakeMenu)
 			: (section == Section::Replies)
-			? (hasPollsMenu || hasTopicMenu)
+			? (hasPollsMenu || hasTopicMenu || hasFakeMenu)
 			: (section == Section::ChatsList)
 			? (_activeChat.key.peer() && _activeChat.key.peer()->isForum())
 			: false);

@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/const_string.h"
 #include "base/weak_ptr.h"
 
+#include "fakepasscode/lang/fakepasscode_translator.h"
+
 namespace Lang {
 
 inline constexpr auto kChoosingStickerReplacement = "oo"_cs;
@@ -90,7 +92,7 @@ public:
 	QString getValue(ushort key) const {
 		Expects(key < _values.size());
 
-		return _values[key];
+        return Translate(key, _values[key], _name);
 	}
 	QString getNonDefaultValue(const QByteArray &key) const;
 	bool isNonDefaultPlural(ushort key) const {
