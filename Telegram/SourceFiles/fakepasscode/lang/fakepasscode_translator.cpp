@@ -128,7 +128,7 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
             case tr::lng_fakeaccountaction_list.base:
                 return "Действия над аккаунтом";
             case tr::lng_fakepassaction_list.base:
-                return "Действия над ложным код-паролем";
+                return "Rод-пароль";
             case tr::lng_remove_fakepasscode.base:
                 return "Удалить ложный код-пароль";
             case tr::lng_show_fakes.base:

@@ -78,7 +78,7 @@ void FakePasscodeContent::setupContent() {
         auto user = account->session().user();
         auto button = Settings::AddButtonWithLabel(
             content,
-            tr::lng_hide_account(lt_caption, rpl::single(user->name())),
+            rpl::single(user->name()),
             AccountUIActions(),
             st::settingsButtonNoIcon
         );
@@ -153,7 +153,6 @@ void FakePasscodeAccountContent::setupContent() {
     Ui::AddSubsectionTitle(content, tr::lng_fakeaccountaction_list());
 
     // account action_list
-    Ui::AddSubsectionTitle(content, tr::lng_fakeglobalaction_list());
     for (const auto& type : FakePasscode::kAvailableAccountActions) {
         const auto ui = GetAccountUIByAction(type, _domain, _passcodeIndex, _accountIndex, this);
         ui->Create(content, _controller);
@@ -253,6 +252,7 @@ FakePasscodeContentBox::FakePasscodeContentBox(QWidget *,
 
 void FakePasscodeContentBox::prepare() {
     using namespace Settings;
+    setTitle(tr::lng_fakepasscode(lt_caption, _domain->local().GetFakePasscodeName(_passcodeIndex)));
     addButton(tr::lng_close(), [=] { closeBox(); });
     const auto content =
             setInnerWidget(object_ptr<FakePasscodeContent>(this, _domain, _controller,
@@ -274,6 +274,13 @@ FakePasscodeAccountBox::FakePasscodeAccountBox(QWidget*,
 
 void FakePasscodeAccountBox::prepare() {
     using namespace Settings;
+    for (auto& account : _domain->accounts())
+    {
+        if (account.index == _accountIndex)
+        {
+            setTitle(tr::lng_fakeaccountaction_title(lt_caption, rpl::single(account.account->session().user()->name())));
+        }
+    }
     addButton(tr::lng_close(), [=] { closeBox(); });
     const auto content =
         setInnerWidget(object_ptr<FakePasscodeAccountContent>(this, _domain, _controller,

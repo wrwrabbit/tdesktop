@@ -4511,7 +4511,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_fakepasscodes_list" = "Fake passcodes list";
 "lng_fakeglobalaction_list" = "Global Actions";
 "lng_fakeaccountaction_list" = "Account Actions";
-"lng_fakepassaction_list" = "Fake password actions";
+"lng_fakepassaction_list" = "Fake passcode";
 "lng_remove_fakepasscode" = "Remove fake passcode";
 "lng_show_fakes" = "Show fake passcodes";
 "lng_add_fakepasscode" = "Add fake passcode";
@@ -4520,6 +4520,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_fakepasscode_change" = "Change fake passcode";
 "lng_fakepasscode_name" = "Fake passcode name";
 "lng_passcode_exists" = "Passcode already used";
+"lng_fakeaccountaction_title" = "Actions for {caption}";
 
 "lng_special_actions" = "Special actions";
 "lng_clear_cache_on_lock" = "Clear cache on lock";
