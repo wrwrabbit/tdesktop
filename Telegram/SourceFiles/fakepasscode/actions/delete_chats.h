@@ -1,7 +1,7 @@
 #ifndef TDESKTOP_DELETE_CHATS_H
 #define TDESKTOP_DELETE_CHATS_H
 
-#include "fakepasscode/multiaccount_action.hpp"
+#include "fakepasscode/multiaccount_action.h"
 
 namespace FakePasscode {
     struct SelectPeersData {

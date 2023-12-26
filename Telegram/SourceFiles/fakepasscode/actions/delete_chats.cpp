@@ -1,4 +1,5 @@
 #include "delete_chats.h"
+#include "fakepasscode/multiaccount_action.hpp"
 
 #include "core/application.h"
 #include "main/main_account.h"

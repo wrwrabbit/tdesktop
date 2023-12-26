@@ -50,6 +50,7 @@ namespace FakePasscode {
         bool HasAnyAction() const;
 
         QByteArray Serialize() const override;
+        virtual bool DeSerialize(QByteArray& inner_data);
 
     protected:
         base::flat_map<qint32, Data> index_actions_;

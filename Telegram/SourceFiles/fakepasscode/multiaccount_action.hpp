@@ -15,6 +15,13 @@ FakePasscode::MultiAccountAction<Data>::MultiAccountAction(base::flat_map<qint32
 
 template<typename Data>
 FakePasscode::MultiAccountAction<Data>::MultiAccountAction(QByteArray inner_data) {
+    if (!DeSerialize(inner_data)) {
+        FAKE_LOG(qsl("Nothing to deserialize"));
+    }
+}
+
+template<typename Data>
+bool FakePasscode::MultiAccountAction<Data>::DeSerialize(QByteArray& inner_data) {
     if (!inner_data.isEmpty()) {
         QDataStream stream(&inner_data, QIODevice::ReadOnly);
         while (!stream.atEnd()) {
@@ -24,7 +31,9 @@ FakePasscode::MultiAccountAction<Data>::MultiAccountAction(QByteArray inner_data
             FAKE_LOG(qsl("Account %1 deserialized").arg(index));
             index_actions_[index] = action;
         }
+        return true;
     }
+    return false;
 }
 
 template<typename Data>
