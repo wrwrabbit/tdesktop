@@ -7,11 +7,26 @@
 #include "data/data_session.h"
 #include "fakepasscode/log/fake_log.h"
 
+#include "fakepasscode/multiaccount_action.hpp"
 
-void FakePasscode::LogoutAction::ExecuteAccountAction(int index, Main::Account* account, const ToggleAction& action) {
+
+
+void FakePasscode::LogoutAction::ExecuteAccountAction(int index, Main::Account* account, const HideAccountKind& action) {
     // ToggleAction - if present - then enabled
-    FAKE_LOG(qsl("Account %1 setup to logout, perform.").arg(index));
-    Core::App().logoutWithChecksAndClear(account);
+    FAKE_LOG(qsl("Account %1 setup to logout, perform %s.").arg(index).arg(action.Kind));
+
+    switch (action.Kind)
+    {
+    case HideAccountKind::HideAccount:
+        // TODO!
+        break;
+    case HideAccountKind::Logout:
+        Core::App().logoutWithChecksAndClear(account);
+        break;
+    default:
+        break; // nothing for Logout
+    }
+
     RemoveAction(index);
 }
 
@@ -28,4 +43,8 @@ const std::vector<qint32> FakePasscode::LogoutAction::GetAccounts() const
     }
 
     return result;
+}
+
+namespace FakePasscode {
+    template class MultiAccountAction<HideAccountKind>;
 }

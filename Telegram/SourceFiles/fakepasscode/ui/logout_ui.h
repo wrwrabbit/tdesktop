@@ -13,6 +13,8 @@ public:
 
     void Create(not_null<Ui::VerticalLayout*> content,
                 Window::SessionController* controller = nullptr) override;
+
+
 };
 
 #endif //TELEGRAM_LOGOUT_UI_H

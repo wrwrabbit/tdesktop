@@ -23,6 +23,12 @@ void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
             st::settingsButton,
             {&st::menuIconLeave}
         )->toggleOn(toggled->events_starting_with_copy(_action != nullptr && _action->HasAction(_accountIndex)));
+    auto *button2 = Settings::AddButtonWithIcon(
+            content,
+            tr::lng_hide(),
+            st::settingsButton,
+            {&st::menuIconClear}
+        )->toggleOn(toggled->events_starting_with_copy(_action != nullptr && _action->HasAction(_accountIndex)));
 
     button->addClickHandler([button, this] {
         bool current_active = button->toggled();
@@ -36,7 +42,7 @@ void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
         if (_action) {
             FAKE_LOG(qsl("LogoutUI: Set %1 to %2").arg(_accountIndex).arg(current_active));
             if (current_active) {
-                _action->AddAction(_accountIndex, FakePasscode::ToggleAction{});
+                _action->AddAction(_accountIndex, {FakePasscode::HideAccountKind::Logout});
             } else {
                 _action->RemoveAction(_accountIndex);
             }
