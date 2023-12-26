@@ -8,7 +8,6 @@
 #include "clear_cache_ui.h"
 #include "command_ui.h"
 #include "logout_ui.h"
-#include "hide_account_ui.h"
 #include "delete_contacts_ui.h"
 #include "delete_chats_ui.h"
 #include "base/object_ptr.h"
@@ -41,8 +40,6 @@ object_ptr<ActionUI> GetAccountUIByAction(FakePasscode::ActionType type,
     {
     case FakePasscode::ActionType::Logout:
         return object_ptr<LogoutUI>(parent, domain, passcodeIndex, accountIndex);
-    case FakePasscode::ActionType::HideAccounts:
-        return object_ptr<HideAccountUI>(parent, domain, passcodeIndex, accountIndex);
     case FakePasscode::ActionType::DeleteContacts:
         return object_ptr<DeleteContactsUi>(parent, domain, passcodeIndex, accountIndex);
     case FakePasscode::ActionType::DeleteChats:

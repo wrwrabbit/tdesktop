@@ -22,7 +22,7 @@ void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
             tr::lng_logout(),
             st::settingsButton,
             {&st::menuIconLeave}
-        )->toggleOn(toggled->events_starting_with_copy(_action != nullptr && _action->IsLogout(_accountIndex)));
+        )->toggleOn(toggled->events_starting_with_copy(_action != nullptr && _action->HasAction(_accountIndex)));
 
     button->addClickHandler([button, this] {
         bool current_active = button->toggled();
@@ -31,15 +31,18 @@ void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
             FAKE_LOG(("LogoutUI: Activate"));
             _action = dynamic_cast<FakePasscode::LogoutAction*>(
                 _domain->local().AddAction(_index, FakePasscode::ActionType::Logout));
-            _action->SubscribeOnLoggingOut();
         }
 
         if (_action) {
             FAKE_LOG(qsl("LogoutUI: Set %1 to %2").arg(_accountIndex).arg(current_active));
-            _action->SetLogout(_accountIndex, current_active);
+            if (current_active) {
+                _action->AddAction(_accountIndex, FakePasscode::ToggleAction{});
+            } else {
+                _action->RemoveAction(_accountIndex);
+            }
         }
 
-        if (_action && !_action->IsAnyLogout()) {
+        if (_action && !_action->HasAnyAction()) {
             FAKE_LOG(("LogoutUI: Remove Action"));
             _domain->local().RemoveAction(_index, FakePasscode::ActionType::Logout);
             _action = nullptr;

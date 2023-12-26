@@ -111,3 +111,8 @@ void DeleteChatsAction::ExecuteAccountAction(int index, Main::Account* account, 
 ActionType DeleteChatsAction::GetType() const {
     return ActionType::DeleteChats;
 }
+
+
+namespace FakePasscode {
+    template class MultiAccountAction<SelectPeersData>;
+}

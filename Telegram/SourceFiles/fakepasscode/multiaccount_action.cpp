@@ -33,5 +33,4 @@ void LogoutSubscribedAction::SubscribeOnLoggingOut() {
 
 namespace FakePasscode {
     template class MultiAccountAction<ToggleAction>;
-    template class MultiAccountAction<SelectPeersData>;
 }

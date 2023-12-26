@@ -4,40 +4,18 @@
 #include "fakepasscode/action.h"
 #include "fakepasscode/multiaccount_action.h"
 
-#include "base/flat_map.h"
+#include <vector>
 
 namespace FakePasscode {
-    class LogoutAction : public Action {
+    class LogoutAction : public MultiAccountAction<ToggleAction> {
     public:
+        using MultiAccountAction::MultiAccountAction;
         static constexpr ActionType Kind = ActionType::Logout;
 
-        LogoutAction() = default;
-        explicit LogoutAction(QByteArray inner_data);
-
-        void Execute() override;
-
-        QByteArray Serialize() const override;
-
+        void ExecuteAccountAction(int index, Main::Account* account, const ToggleAction& action) override;
         ActionType GetType() const override;
 
-        void SetLogout(qint32 index, bool logout);
-
-        const base::flat_map<qint32, bool>& GetLogout() const;
-
-        bool IsLogout(qint32 index) const;
-        bool IsAnyLogout() const;
-
-        void SubscribeOnLoggingOut();
-
-        void Prepare() override;
-
-    private:
-        base::flat_map<qint32, bool> index_to_logout_;
-
-        rpl::lifetime lifetime_;
-        rpl::lifetime sub_lifetime_;
-
-        void SubscribeOnAccountsChanges();
+        const std::vector<qint32> GetAccounts() const;
     };
 }
 #endif //TELEGRAM_LOGOUT_H

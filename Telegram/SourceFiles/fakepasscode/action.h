@@ -13,7 +13,6 @@ namespace FakePasscode {
         DeleteContacts = 4,
         DeleteActions = 5,
         DeleteChats = 6,
-        HideAccounts = 7,
     };
 
     const inline std::array kAvailableGlobalActions = {
@@ -25,7 +24,6 @@ namespace FakePasscode {
 
     const inline std::array kAvailableAccountActions = {
         ActionType::Logout,
-        ActionType::HideAccounts,
         ActionType::DeleteContacts,
         ActionType::DeleteChats,
     };
@@ -42,18 +40,18 @@ namespace FakePasscode {
         virtual ActionType GetType() const = 0;
     };
 
-    class AccountAction : public Action {
-    public:
-        virtual ~AccountAction() = default;
+    //class AccountAction : public Action {
+    //public:
+    //    virtual ~AccountAction() = default;
 
 
-        void SetLogout(qint32 index, bool logout);
+    //    void SetLogout(qint32 index, bool logout);
 
-        const base::flat_map<qint32, bool>& GetLogout() const;
+    //    const base::flat_map<qint32, bool>& GetLogout() const;
 
-        bool IsLogout(qint32 index) const;
-        bool IsAnyLogout() const;
-    };
+    //    bool IsLogout(qint32 index) const;
+    //    bool IsAnyLogout() const;
+    //};
 
     std::shared_ptr<Action> DeSerialize(QByteArray serialized);
     std::shared_ptr<Action> CreateAction(ActionType type, const QByteArray& inner_data = QByteArray());

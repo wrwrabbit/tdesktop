@@ -108,7 +108,8 @@ void FakePasscodeContent::setupContent() {
                                                        _passcodeIndex),
                                   Ui::LayerOption::KeepOther);
             });
-    Settings::AddButtonWithIcon(content, tr::lng_remove_fakepasscode(), st::settingsAttentionButton)
+    Settings::AddButtonWithIcon(content, tr::lng_remove_fakepasscode(), st::settingsAttentionButton,
+                                {&st::menuIconRemove})
             ->addClickHandler([this] {
                 destroy();
                 _domain->local().RemoveFakePasscode(_passcodeIndex);
@@ -156,7 +157,6 @@ void FakePasscodeAccountContent::setupContent() {
     for (const auto& type : FakePasscode::kAvailableAccountActions) {
         const auto ui = GetAccountUIByAction(type, _domain, _passcodeIndex, _accountIndex, this);
         ui->Create(content, _controller);
-        Ui::AddDivider(content);
     }
 
     Ui::ResizeFitChild(this, content);
@@ -258,9 +258,9 @@ void FakePasscodeContentBox::prepare() {
             setInnerWidget(object_ptr<FakePasscodeContent>(this, _domain, _controller,
                                                            _passcodeIndex, this),
                     st::sessionsScroll);
-    content->resize(st::boxWideWidth, st::noContactsHeight);
+    //content->resize(st::boxWideWidth, st::noContactsHeight);
     content->setupContent();
-    setDimensions(st::boxWideWidth, st::sessionsHeight);
+    setDimensionsToContent(st::boxWideWidth, content);
 }
 
 FakePasscodeAccountBox::FakePasscodeAccountBox(QWidget*,
@@ -286,24 +286,21 @@ void FakePasscodeAccountBox::prepare() {
         setInnerWidget(object_ptr<FakePasscodeAccountContent>(this, _domain, _controller,
             _passcodeIndex, _accountIndex, this),
             st::sessionsScroll);
-    content->resize(st::boxWideWidth, st::noContactsHeight);
+    //content->resize(st::boxWideWidth, st::noContactsHeight);
     content->setupContent();
-    setDimensions(st::boxWideWidth, st::sessionsHeight);
+    setDimensionsToContent(st::boxWideWidth, content);
 }
 
 void FakePasscodeListBox::prepare() {
     setTitle(tr::lng_fakepasscodes_list());
     addButton(tr::lng_close(), [=] { closeBox(); });
 
-    const auto w = st::boxWideWidth;
-
     const auto content = setInnerWidget(
             object_ptr<FakePasscodeList>(this, _domain, _controller),
             st::sessionsScroll);
-    content->resize(w, st::noContactsHeight);
+    //content->resize(st::boxWideWidth, st::noContactsHeight);
     content->setupContent();
-
-    setDimensions(w, st::sessionsHeight);
+    setDimensionsToContent(st::boxWideWidth, content);
 }
 
 FakePasscodeListBox::FakePasscodeListBox(QWidget *, not_null<Main::Domain *> domain,

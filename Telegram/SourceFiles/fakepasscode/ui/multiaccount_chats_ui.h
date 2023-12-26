@@ -2,7 +2,7 @@
 #define TELEGRAM_MULTIACCOUNT_CHATS_UI_H
 
 #include "action_ui.h"
-#include "fakepasscode/multiaccount_action.h"
+#include "fakepasscode/actions/delete_chats.h"
 
 namespace Ui {
     class SettingsButton;

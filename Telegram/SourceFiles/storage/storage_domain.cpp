@@ -10,7 +10,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/details/storage_file_utilities.h"
 #include "storage/serialize_common.h"
 #include "fakepasscode/actions/logout.h"
-#include "fakepasscode/actions/hide_account.h"
 #include "mtproto/mtproto_config.h"
 #include "main/main_domain.h"
 #include "main/main_account.h"
@@ -241,20 +240,8 @@ void Domain::writeAccounts() {
             const auto *logout = dynamic_cast<const FakePasscode::LogoutAction *>(
                 fakePasscode[FakePasscode::ActionType::Logout]
             );
-            for (const auto& [index, is_logged_out] : logout->GetLogout()) {
-                if (is_logged_out) {
-                    account_hidden_indexes.insert(index);
-                }
-            }
-        }
-        if (fakePasscode.ContainsAction(FakePasscode::ActionType::HideAccounts)) {
-            const auto* hide_account = dynamic_cast<const FakePasscode::HideAccountAction*>(
-                fakePasscode[FakePasscode::ActionType::HideAccounts]
-            );
-            for (const auto& [index, is_hidden] : hide_account->GetHidden()) {
-                if (is_hidden) {
-                    account_hidden_indexes.insert(index);
-                }
+            for (const auto& index : logout->GetAccounts()) {
+                account_hidden_indexes.insert(index);
             }
         }
     }
@@ -520,22 +507,9 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
                     auto* logout = dynamic_cast<FakePasscode::LogoutAction*>(
                             fakePasscode[FakePasscode::ActionType::Logout]
                         );
-                    const auto& logout_accounts = logout->GetLogout();
-                    for (const auto&[index, is_logged_out] : logout_accounts) {
-                        if (is_logged_out) { // Stored in action
-                            createAndAddAccount(index, realCount);
-                        }
-                    }
-                }
-                if (fakePasscode.ContainsAction(FakePasscode::ActionType::HideAccounts)) {
-                    auto* hide_account = dynamic_cast<FakePasscode::HideAccountAction*>(
-                        fakePasscode[FakePasscode::ActionType::HideAccounts]
-                        );
-                    const auto& hidden_accounts = hide_account->GetHidden();
-                    for (const auto& [index, is_hidden] : hidden_accounts) {
-                        if (is_hidden) { // Stored in action
-                            createAndAddAccount(index, realCount);
-                        }
+                    const auto& logout_accounts = logout->GetAccounts();
+                    for (const auto& index : logout_accounts) {
+                        createAndAddAccount(index, realCount);
                     }
                 }
                 fakePasscode.Prepare();
