@@ -36,16 +36,6 @@ jobs:
   linux:
     name: Rocky Linux 8
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.experimental }}
-    container:
-      image: ghcr.io/${{ github.repository }}/centos_env
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    defaults:
-      run:
-        shell: scl enable gcc-toolset-12 -- bash --noprofile --norc -eo pipefail {0}
 
     strategy:
       matrix:
@@ -79,12 +69,13 @@ jobs:
 
       - name: First set up.
         run: |
-          gcc --version
-          ln -s /usr/src/Libraries
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
+          docker pull ghcr.io/$GITHUB_REPOSITORY/centos_env
+          docker tag ghcr.io/$GITHUB_REPOSITORY/centos_env tdesktop:centos_env
 
       - name: Telegram Desktop build.
         run: |
-          cd $REPO_NAME/Telegram
+          cd $REPO_NAME
 
           ARTIFACT_PREFIX=""
           
@@ -106,7 +97,10 @@ jobs:
           #          -D CMAKE_CXX_FLAGS="-Werror" 
           # not used in actual Release build
 
-          ./configure.sh \
+          docker run --rm \
+          -v $PWD:/usr/src/tdesktop \
+          tdesktop:centos_env \
+          /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
           -D CMAKE_C_FLAGS_DEBUG="" \
           -D CMAKE_CXX_FLAGS_DEBUG="" \
           -D CMAKE_EXE_LINKER_FLAGS="-s" \
@@ -116,8 +110,6 @@ jobs:
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
           -D CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
           $DEFINE
-
-          cmake --build ../out --config Release --parallel
 
       - name: Check.
         run: |
