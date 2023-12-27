@@ -130,8 +130,8 @@ jobs:
           cd $REPO_NAME
           mkdir artifact
           mkdir "artifact/Telegram"
-          strip -s "Telegram"
           cp out/Release/Telegram artifact/Telegram/
+          strip -s "artifact/Telegram/Telegram"
           sha256sum artifact/Telegram/Telegram | awk -F " " 'END {print $1}' > artifact/Telegram_sha256.linux.txt
           cd artifact
           tar -cJvf "${{ env.ARTIFACT_NAME }}_linux.tar.xz" "Telegram/"
