@@ -124,11 +124,7 @@ jobs:
             exit 1
           fi
 
-      - name: SHA256 calculation
-        run: |
-          sha256sum $REPO_NAME/out/Release/Telegram | awk -F " " 'END {print $1}' > $REPO_NAME/out/Release/Telegram_sha256.linux.txt
-
-      - name: Move artifact.
+      - name: Move and SHA artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
           cd $REPO_NAME/out/Release
@@ -136,7 +132,7 @@ jobs:
           mkdir "artifact/Telegram"
           strip -s "Telegram"
           mv Telegram artifact/Telegram/
-          mv Telegram_sha256.linux.txt artifact/
+          sha256sum artifact/Telegram/Telegram | awk -F " " 'END {print $1}' > artifact/Telegram_sha256.linux.txt
           cd artifact
           tar -cJvf "${{ env.ARTIFACT_NAME }}_linux.tar.xz" "Telegram/"
           rm -rf Telegram/
