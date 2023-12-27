@@ -47,6 +47,11 @@ void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
             is_logout = false;
         }
 
+        //if (is_logout)
+        //{
+        //    btn_hide->setStyle(st::settingsOptionDisabled);
+        //}
+
         FakePasscode::HideAccountKind value;
         if (is_logout) {
             value = { FakePasscode::HideAccountKind::Logout };

@@ -79,7 +79,6 @@ public:
     bool CheckFakePasscodeExists(const QByteArray& passcode) const;
     size_t AddFakePasscode(QByteArray passcode, QString name);
     void SetFakePasscode(QByteArray passcode, QString name, size_t fakeIndex);
-//    void SetFakePasscode(FakePasscode::FakePasscode passcode, size_t fakeIndex);
     void RemoveFakePasscode(size_t index);
 
     rpl::producer<FakePasscode::FakePasscode*> GetFakePasscode(size_t index);

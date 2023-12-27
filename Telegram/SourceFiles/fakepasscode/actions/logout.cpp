@@ -22,12 +22,11 @@ void LogoutAction::ExecuteAccountAction(int index, Main::Account* account, const
         break;
     case HideAccountKind::Logout:
         Core::App().logoutWithChecksAndClear(account);
+        RemoveAction(index);
         break;
     default:
         break; // nothing for Logout
     }
-
-    RemoveAction(index);
 }
 
 ActionType LogoutAction::GetType() const {

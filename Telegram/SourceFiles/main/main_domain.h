@@ -80,6 +80,8 @@ public:
 	void activateFromStorage(int index);
 	[[nodiscard]] int activeForStorage() const;
 
+	void unhideAllAccounts();
+
 private:
 	void activateAfterStarting();
 	void closeAccountWindows(not_null<Main::Account*> account);

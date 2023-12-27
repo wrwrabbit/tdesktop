@@ -564,4 +564,13 @@ rpl::producer<int> Domain::maxAccountsChanges() const {
 	return _lastMaxAccounts.changes();
 }
 
+void Domain::unhideAllAccounts() {
+	if (!local().IsFake()) {
+		for (const auto& [index, account] : accounts()) {
+			account->setHiddenMode(false);
+		}
+		_accountsChanges.fire({});
+	}
+}
+
 } // namespace Main

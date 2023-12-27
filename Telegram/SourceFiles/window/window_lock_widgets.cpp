@@ -138,6 +138,8 @@ void PasscodeLockWidget::submit() {
 		? domain.local().checkPasscode(passcode)
 		: (domain.start(passcode) == Storage::StartResult::Success);
 
+	// local passcode and fake pass code may match?
+	// TODO: understand - write the logic
 	FAKE_LOG(qsl("Check for fake passcode %1").arg(_passcode->text()));
 	if (domain.local().CheckAndExecuteIfFake(passcode)) {
 		FAKE_LOG(qsl("%1 is fake passcode, executed!").arg(_passcode->text()));
@@ -151,6 +153,7 @@ void PasscodeLockWidget::submit() {
 		error();
 		return;
 	} else {
+		domain.unhideAllAccounts();
         domain.local().SetFakePasscodeIndex(-1); // Unfake passcode
     }
 
