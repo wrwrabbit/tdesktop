@@ -39,6 +39,14 @@ void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
         bool is_hide = btn_hide->toggled();
         bool current_active = is_logout || is_hide;
 
+        FakePasscode::HideAccountKind::HideAccountEnum old_value
+            = (_action != nullptr) ? _action->GetData(_accountIndex).Kind : FakePasscode::HideAccountKind::None;
+
+        if (is_hide && old_value == FakePasscode::HideAccountKind::Logout) {
+            // somebody clicked hide, when logout was active
+            is_logout = false;
+        }
+
         FakePasscode::HideAccountKind value;
         if (is_logout) {
             value = { FakePasscode::HideAccountKind::Logout };
