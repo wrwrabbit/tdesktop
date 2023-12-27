@@ -44,9 +44,6 @@ public:
         }
     }
 
-    virtual void Create(not_null<Ui::VerticalLayout*> content,
-        Window::SessionController* controller = nullptr) = 0;
-
 protected:
     ActionType* _action;
     int _accountIndex;

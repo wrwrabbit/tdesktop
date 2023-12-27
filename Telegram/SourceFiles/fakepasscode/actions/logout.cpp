@@ -18,7 +18,7 @@ void LogoutAction::ExecuteAccountAction(int index, Main::Account* account, const
     switch (action.Kind)
     {
     case HideAccountKind::HideAccount:
-        // TODO!
+        account->setHiddenMode(true);
         break;
     case HideAccountKind::Logout:
         Core::App().logoutWithChecksAndClear(account);

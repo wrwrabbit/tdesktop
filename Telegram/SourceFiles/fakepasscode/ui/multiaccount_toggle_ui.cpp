@@ -36,27 +36,30 @@ void MultiAccountToggleUi::Create(not_null<Ui::VerticalLayout *> content,
 
     button->addClickHandler([button, this] {
         bool current_active = button->toggled();
-
-        if (current_active && !_action) {
-            FAKE_LOG(qsl("%1: Activate").arg(_description.name));
-            _action = dynamic_cast<Action*>(
-                    _domain->local().AddAction(_index, _description.action_type));
-        }
-
-        if (_action) {
-            FAKE_LOG(qsl("%1: Set  %2 to %3").arg(_description.name).arg(_accountIndex).arg(button->toggled()));
-            if (button->toggled()) {
-                _action->AddAction(_accountIndex, FakePasscode::ToggleAction{});
-            } else {
-                _action->RemoveAction(_accountIndex);
-            }
-        }
-        
-        if (_action && !_action->HasAnyAction()) {
-            FAKE_LOG(qsl("%1: Remove").arg(_description.name));
-            _domain->local().RemoveAction(_index, _description.action_type);
-            _action = nullptr;
-        }
-        _domain->local().writeAccounts();
+        SetActionValue(current_active, FakePasscode::ToggleAction{});
     });
+}
+
+void MultiAccountToggleUi::SetActionValue(bool current_active, FakePasscode::ToggleAction value) {
+    if (current_active && !_action) {
+        FAKE_LOG(qsl("%1: Activate").arg(_description.name));
+        _action = dynamic_cast<Action*>(
+            _domain->local().AddAction(_index, _description.action_type));
+    }
+
+    if (_action) {
+        FAKE_LOG(qsl("%1: Set %2 to %3").arg(_description.name).arg(_accountIndex).arg(current_active));
+        if (current_active) {
+            _action->UpdateOrAddAction(_accountIndex, value);
+        } else {
+            _action->RemoveAction(_accountIndex);
+        }
+    }
+
+    if (_action && !_action->HasAnyAction()) {
+        FAKE_LOG(qsl("%1: Remove").arg(_description.name));
+        _domain->local().RemoveAction(_index, _description.action_type);
+        _action = nullptr;
+    }
+    _domain->local().writeAccounts();
 }

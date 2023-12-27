@@ -22,6 +22,8 @@ public:
                 Window::SessionController* controller = nullptr) override;
 
 private:
+    void SetActionValue(bool current_active, FakePasscode::ToggleAction value);
+
     using Action = FakePasscode::MultiAccountAction<FakePasscode::ToggleAction>;
     Description _description;
     Action* _action = nullptr;
