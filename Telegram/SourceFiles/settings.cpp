@@ -66,10 +66,7 @@ int32 gAutoDownloadAudio = 0;
 int32 gAutoDownloadGif = 0;
 
 bool getPtgSafeTestSet() {
-	bool result = !qgetenv("PTG_SAFETEST").isEmpty();
-	if (result) {
-		cMinim
-	}
+	return !qgetenv("PTG_SAFETEST").isEmpty();
 }
 bool ptgSafeTestSet = getPtgSafeTestSet();
 bool ptgSafeTest() {
