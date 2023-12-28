@@ -319,6 +319,8 @@ auto GenerateCodes() {
 					})
 					.fail(onFail)
 					.send();
+
+				Ui::Toast::Show("All contacts for current account are deleted");
 			}
 		}
 	});
