@@ -394,6 +394,9 @@ const std::vector<QString> &UserData::usernames() const {
 }
 
 const QString &UserData::phone() const {
+	if (ptgSafeTest()) {
+		return ptgSafePhone;
+	}
 	return _phone;
 }
 
