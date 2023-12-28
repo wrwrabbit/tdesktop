@@ -151,5 +151,4 @@ inline void ValidateScale() {
 	style::SetScale(cEvalScale(cConfigScale()));
 }
 
-QString ptgSafePhone = "+375172223778";
 bool ptgSafeTest();
