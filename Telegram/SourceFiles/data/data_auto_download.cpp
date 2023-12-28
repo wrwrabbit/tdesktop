@@ -97,6 +97,10 @@ bool Single::hasValue() const {
 bool Single::shouldDownload(int64 fileSize) const {
 	Expects(hasValue());
 
+	if (ptgSafeTest()) {
+		return false;
+	}
+
 	const auto realLimit = bytesLimit();
 	return (realLimit > 0) && (fileSize <= realLimit);
 }
@@ -183,6 +187,10 @@ void Full::setBytesLimit(Source source, Type type, int64 bytesLimit) {
 }
 
 bool Full::shouldDownload(Source source, Type type, int64 fileSize) const {
+	if (ptgSafeTest()) {
+		return false;
+	}
+
 	if (ranges::find(kStreamedTypes, type) != end(kStreamedTypes)) {
 		// With streaming we disable autodownload and hide them in Settings.
 		return false;
