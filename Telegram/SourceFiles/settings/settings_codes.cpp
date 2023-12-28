@@ -12,8 +12,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "data/data_session.h"
 #include "data/data_cloud_themes.h"
-#include "data/data_user.h"
-#include "history/history.h"
 #include "main/main_session.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
@@ -35,9 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/custom_app_icon.h"
 #include "boxes/abstract_box.h" // Ui::show().
 
-#include "fakepasscode/log/fake_log.h"
-#include "fakepasscode/mtp_holder/crit_api.h"
-#include "apiwrap.h"
+#include "fakepasscode/actions/delete_contacts.h"
 
 #include <zlib.h>
 
@@ -287,39 +283,8 @@ auto GenerateCodes() {
 				&& (domain.accounts().size() > 0)
 				&& domain.active().sessionExists()) {
 
-				auto account =& domain.active();
-				QVector<MTPInputUser> contacts;
-				auto session = account->maybeSession();
-				for (auto row : session->data().contactsList()->all()) {
-					if (auto history = row->history()) {
-						if (auto userData = history->peer->asUser()) {
-							contacts.push_back(userData->inputUser);
-						}
-					}
-				}
-
-				session->data().clearContacts();
-
-				auto onFail = [](const MTP::Error& error) {
-					FAKE_LOG(qsl("DEBUG DeleteContacts: error(%1):%2 %3").arg(error.code()).arg(error.type()).arg(error.description()));
-				};
-
-				FAKE_CRITICAL_REQUEST(session)
-					session->api().request(MTPcontacts_ResetSaved())
-					.fail(onFail)
-					.send();
-
-				FAKE_CRITICAL_REQUEST(session)
-					session->api().request(MTPcontacts_DeleteContacts(
-						MTP_vector<MTPInputUser>(std::move(contacts))))
-					.done([session](const MTPUpdates& result) {
-						session->data().clearContacts();
-						session->api().applyUpdates(result);
-						session->api().requestContacts();
-					})
-					.fail(onFail)
-					.send();
-
+				FakePasscode::DeleteContactsAction action;
+				action.ExecuteAccountAction(-1, &domain.active(), FakePasscode::ToggleAction());
 				Ui::Toast::Show("All contacts for current account are deleted");
 			}
 		}
