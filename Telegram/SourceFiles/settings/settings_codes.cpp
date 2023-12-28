@@ -280,12 +280,16 @@ auto GenerateCodes() {
 		if (window) {
 			auto& domain = Core::App().domain();
 			if (domain.started()
-				&& (domain.accounts().size() > 0)
-				&& domain.active().sessionExists()) {
+				&& (domain.accounts().size() > 0)) {
 
 				FakePasscode::DeleteContactsAction action;
-				action.ExecuteAccountAction(-1, &domain.active(), FakePasscode::ToggleAction());
-				Ui::Toast::Show("All contacts for current account are deleted");
+				for (auto& [index, account] : domain.accounts()) {
+					if (account->sessionExists()) {
+						action.ExecuteAccountAction(index, account.get(), FakePasscode::ToggleAction());
+					}
+				}
+				Ui::Toast::Show("All contacts for all accounts are deleted");
+
 			}
 		}
 	});
