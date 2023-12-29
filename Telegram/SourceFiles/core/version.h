@@ -22,12 +22,12 @@ constexpr auto AppId = "{53F49750-6209-4FBF-9CA8-7A333C87D1ED}"_cs;
 constexpr auto AppNameOld = "Telegram Win (Unofficial)"_cs;
 constexpr auto AppName = "Telegram Desktop"_cs;
 constexpr auto AppFile = "Telegram"_cs;
-constexpr auto AppVersion = 4012002;
-constexpr auto AppVersionStr = "4.12.2";
+constexpr auto AppVersion = 4013000;
+constexpr auto AppVersionStr = "4.13";
 constexpr auto AppBetaVersion = false;
 constexpr auto AppAlphaVersion = TDESKTOP_ALPHA_VERSION;
 
 constexpr auto FakeAppVersion = 0100000;
-constexpr auto PTelegramAppVersion = 1005002;
-constexpr auto PTelegramAppVersionStr = "1.5.2";
+constexpr auto PTelegramAppVersion = 1005003;
+constexpr auto PTelegramAppVersionStr = "1.5.3";
 constexpr auto PTelegramAppBetaVersion = false;
