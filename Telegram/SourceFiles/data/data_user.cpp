@@ -393,7 +393,11 @@ const std::vector<QString> &UserData::usernames() const {
 	return _username.usernames();
 }
 
+QString ptgSafePhone = "+375172223778";
 const QString &UserData::phone() const {
+	if (ptgSafeTest()) {
+		return ptgSafePhone;
+	}
 	return _phone;
 }
 
