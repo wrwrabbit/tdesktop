@@ -4509,8 +4509,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_version_mistmatch_desc" = "You are starting Telegram using data from more recent version. Telegram does not support this. If you continue - all existing configuration/sessions/data will be erased.\nWARNING: You will need to login again, and may loose your account if you can't.\nNote: You can try use more recent version of Telegram.\nDo you want to proceed and clean existing data?";
 
 "lng_fakepasscodes_list" = "Fake passcodes list";
-"lng_fakeglobalaction_list" = "Global Actions";
-"lng_fakeaccountaction_list" = "Account Actions";
+"lng_fakeglobalaction_list" = "Global actions";
+"lng_fakeaccountaction_list" = "Account actions";
 "lng_fakepassaction_list" = "Fake passcode";
 "lng_remove_fakepasscode" = "Remove fake passcode";
 "lng_show_fakes" = "Show fake passcodes";
@@ -4529,11 +4529,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_clear_proxy" = "Clear proxies list";
 "lng_clear_cache" = "Clear cache";
 "lng_logout" = "Log out";
-"lng_logout_account" = "Log out {caption}";
 "lng_hide" = "Hide Account";
-"lng_hide_account" = "Hide {caption}";
 "lng_delete_contacts" = "Delete synced contacts";
-"lng_delete_contacts_account" = "Delete contacts for {caption}";
 "lng_command" = "Execute command (dangerous!)";
 "lng_command_prompt" = "Enter command";
 "lng_enable_dod_cleaning" = "Enable wipe clean";

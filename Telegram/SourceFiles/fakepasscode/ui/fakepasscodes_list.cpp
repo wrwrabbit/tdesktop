@@ -108,7 +108,7 @@ void FakePasscodeContent::setupContent() {
                                                        _passcodeIndex),
                                   Ui::LayerOption::KeepOther);
             });
-    Settings::AddButtonWithIcon(content, tr::lng_remove_fakepasscode(), st::settingsAttentionButton,
+    Settings::AddButtonWithIcon(content, tr::lng_remove_fakepasscode(), st::settingsAttentionButtonWithIcon,
                                 {&st::menuIconRemove})
             ->addClickHandler([this] {
                 destroy();

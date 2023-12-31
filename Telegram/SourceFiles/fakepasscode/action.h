@@ -23,8 +23,8 @@ namespace FakePasscode {
     };
 
     const inline std::array kAvailableAccountActions = {
-        ActionType::Logout,
         ActionType::DeleteContacts,
+        ActionType::Logout,
         ActionType::DeleteChats,
     };
 
