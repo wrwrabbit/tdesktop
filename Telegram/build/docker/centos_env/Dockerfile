@@ -24,14 +24,14 @@ RUN dnf -y install epel-release \
 	&& dnf -y install autoconf automake libtool pkgconfig make patch git \
 		python3.11-pip python3.11-devel gperf flex bison clang lld yasm \
 		file which perl-open perl-XML-Parser xorg-x11-util-macros \
-		gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ gcc-toolset-13-binutils \
+		gcc-toolset-12-gcc gcc-toolset-12-gcc-c++ gcc-toolset-12-binutils \
 		libffi-devel fontconfig-devel freetype-devel libX11-devel \
 		alsa-lib-devel pulseaudio-libs-devel mesa-libGL-devel mesa-libEGL-devel \
 		mesa-libgbm-devel libdrm-devel vulkan-devel libva-devel libvdpau-devel \
 		glib2-devel at-spi2-core-devel gtk3-devel boost1.78-devel fmt-devel \
 	&& dnf clean all
 
-SHELL [ "bash", "-c", ". /opt/rh/gcc-toolset-13/enable; exec bash -c \"$@\"", "-s"]
+SHELL [ "bash", "-c", ". /opt/rh/gcc-toolset-12/enable; exec bash -c \"$@\"", "-s"]
 
 WORKDIR {{ LibrariesPath }}
 
@@ -54,7 +54,7 @@ FROM builder AS patches
 RUN git init patches \
 	&& cd patches \
 	&& git remote add origin {{ GIT }}/desktop-app/patches.git \
-	&& git fetch --depth=1 origin 12780ae73abe21d00ae125e284d8bca9d8993948 \
+	&& git fetch --depth=1 origin 78fe199b743df0358c04502d6947cd42bb5d16ed \
 	&& git reset --hard FETCH_HEAD \
 	&& rm -rf .git
 
@@ -906,5 +906,5 @@ ENV BOOST_INCLUDEDIR /usr/include/boost1.78
 ENV BOOST_LIBRARYDIR /usr/lib64/boost1.78
 
 VOLUME [ "/usr/src/tdesktop" ]
-ENTRYPOINT [ "scl", "enable", "gcc-toolset-13", "--" ]
+ENTRYPOINT [ "scl", "enable", "gcc-toolset-12", "--" ]
 CMD [ "/usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh" ]

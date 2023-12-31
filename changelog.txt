@@ -1,3 +1,13 @@
+4.14 (31.12.23)
+
+- Improved saved messages.
+- One-time voice messages.
+
+4.13.1 (23.12.23)
+
+- Fix crash in chat history right click.
+- Fix user emoji status display in main menu, profile and settings.
+
 4.13 (22.12.23)
 
 - Support setting channel wallpaper.
