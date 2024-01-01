@@ -36,16 +36,6 @@ jobs:
   linux:
     name: Rocky Linux 8
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.experimental }}
-    container:
-      image: ghcr.io/${{ github.repository }}/centos_env
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    defaults:
-      run:
-        shell: scl enable gcc-toolset-12 -- bash --noprofile --norc -eo pipefail {0}
 
     strategy:
       matrix:
@@ -79,12 +69,13 @@ jobs:
 
       - name: First set up.
         run: |
-          gcc --version
-          ln -s /usr/src/Libraries
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
+          docker pull ghcr.io/$GITHUB_REPOSITORY/centos_env
+          docker tag ghcr.io/$GITHUB_REPOSITORY/centos_env tdesktop:centos_env
 
       - name: Telegram Desktop build.
         run: |
-          cd $REPO_NAME/Telegram
+          cd $REPO_NAME
 
           ARTIFACT_PREFIX=""
           
@@ -105,8 +96,13 @@ jobs:
           #          -D CMAKE_C_FLAGS="-Werror" 
           #          -D CMAKE_CXX_FLAGS="-Werror" 
           # not used in actual Release build
+          # -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
+          # not good for updater builds yet
 
-          ./configure.sh \
+          docker run --rm \
+          -v $PWD:/usr/src/tdesktop \
+          tdesktop:centos_env \
+          /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
           -D CMAKE_C_FLAGS_DEBUG="" \
           -D CMAKE_CXX_FLAGS_DEBUG="" \
           -D CMAKE_EXE_LINKER_FLAGS="-s" \
@@ -116,8 +112,6 @@ jobs:
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
           -D CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
           $DEFINE
-
-          cmake --build ../out --config Release --parallel
 
       - name: Check.
         run: |
@@ -132,25 +126,22 @@ jobs:
             exit 1
           fi
 
-      - name: SHA256 calculation
-        run: |
-          sha256sum $REPO_NAME/out/Release/Telegram | awk -F " " 'END {print $1}' > $REPO_NAME/out/Release/Telegram_sha256.linux.txt
-
-      - name: Move artifact.
+      - name: Move and SHA artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
-          cd $REPO_NAME/out/Release
+          cd $REPO_NAME
           mkdir artifact
           mkdir "artifact/Telegram"
-          strip -s "Telegram"
-          mv Telegram artifact/Telegram/
-          mv Telegram_sha256.linux.txt artifact/
+          cp out/Release/Telegram artifact/Telegram/
+          strip -s "artifact/Telegram/Telegram"
+          sha256sum artifact/Telegram/Telegram | awk -F " " 'END {print $1}' > artifact/Telegram_sha256.linux.txt
           cd artifact
           tar -cJvf "${{ env.ARTIFACT_NAME }}_linux.tar.xz" "Telegram/"
           rm -rf Telegram/
+          # mv {Telegram,Updater} artifact/
       - uses: actions/upload-artifact@master
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.REPO_NAME }}/out/Release/artifact/
+          path: ${{ env.REPO_NAME }}/artifact/

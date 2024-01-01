@@ -113,12 +113,15 @@ jobs:
           else
             echo "ARTIFACT_NAME=Telegram" >> $GITHUB_ENV
           fi
+          
+          #-D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
+          # not good for updater builds yet
 
           ./configure.sh \
           -D TDESKTOP_API_TEST=OFF \
           -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
-          -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
           -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
+          -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
           $DEFINE
 

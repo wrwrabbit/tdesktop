@@ -54,7 +54,7 @@ FROM builder AS patches
 RUN git init patches \
 	&& cd patches \
 	&& git remote add origin {{ GIT }}/desktop-app/patches.git \
-	&& git fetch --depth=1 origin 12780ae73abe21d00ae125e284d8bca9d8993948 \
+	&& git fetch --depth=1 origin 78fe199b743df0358c04502d6947cd42bb5d16ed \
 	&& git reset --hard FETCH_HEAD \
 	&& rm -rf .git
 
@@ -729,6 +729,7 @@ RUN git clone -b 2.78.0 --depth=1 {{ GIT }}/GNOME/glibmm.git \
 		-Dbuild-examples=false \
 		-Dsigc++-3.0:build-documentation=false \
 		-Dsigc++-3.0:build-examples=false \
+		-Dsigc++-3.0:build-tests=false \
 		-Dsigc++-3.0:validation=false \
 		-Dmm-common:use-network=true \
 	&& meson compile -C build \
@@ -796,19 +797,10 @@ RUN git clone -b {{ QT_TAG }} --depth=1 {{ GIT }}/qt/qt5.git qt_{{ QT }} \
 	&& cd .. \
 	&& rm -rf qt_{{ QT }}
 
-FROM patches AS breakpad
-RUN git init breakpad \
+FROM builder AS breakpad
+RUN git clone -b v2023.01.27 --depth=1 https://chromium.googlesource.com/breakpad/breakpad.git \
 	&& cd breakpad \
-	&& git remote add origin https://chromium.googlesource.com/breakpad/breakpad.git \
-	&& git fetch --depth=1 origin dfcb7b6799b7c1e2c8d65e857d8afede185471d8 \
-	&& git reset --hard FETCH_HEAD \
-	&& git apply ../patches/breakpad.diff \
-	&& git init src/third_party/lss \
-	&& cd src/third_party/lss \
-	&& git remote add origin https://chromium.googlesource.com/linux-syscall-support.git \
-	&& git fetch --depth=1 origin e1e7b0ad8ee99a875b272c8e33e308472e897660 \
-	&& git reset --hard FETCH_HEAD \
-	&& cd ../../.. \
+	&& git clone -b v2022.10.12 --depth=1 https://chromium.googlesource.com/linux-syscall-support.git src/third_party/lss \
 	&& env -u CFLAGS -u CXXFLAGS ./configure \
 	&& make -j$(nproc) \
 	&& make DESTDIR="{{ LibrariesPath }}/breakpad-cache" install \
@@ -828,7 +820,7 @@ COPY --link --from=pipewire {{ LibrariesPath }}/pipewire-cache /
 RUN git init tg_owt \
 	&& cd tg_owt \
 	&& git remote add origin {{ GIT }}/desktop-app/tg_owt.git \
-	&& git fetch --depth=1 origin 3bb3d757681e6cc5135aec6529a753dc3dcdcfb9 \
+	&& git fetch --depth=1 origin afd9d5d31798d3eacf9ed6c30601e91d0f1e4d60 \
 	&& git reset --hard FETCH_HEAD \
 	&& git submodule update --init --recursive --depth=1 \
 	&& rm -rf .git \
