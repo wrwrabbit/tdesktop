@@ -1218,7 +1218,7 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 					width(),
 					st::msgPhotoSize,
 					context.paused);
-			} else if (const auto info = item->hiddenSenderInfo()) {
+			} else if (const auto info = item->displayHiddenSenderInfo()) {
 				if (info->customUserpic.empty()) {
 					info->emptyUserpic.paintCircle(
 						p,
@@ -2526,7 +2526,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			? link->copyToClipboardContextItemText()
 			: QString();
 
-		if (item->isSponsored()) {
+		if (item && item->isSponsored()) {
 			FillSponsoredMessagesMenu(controller, item->fullId(), _menu);
 		}
 		if (isUponSelected > 0) {
