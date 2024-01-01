@@ -96,6 +96,8 @@ jobs:
           #          -D CMAKE_C_FLAGS="-Werror" 
           #          -D CMAKE_CXX_FLAGS="-Werror" 
           # not used in actual Release build
+          # -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
+          # not good for updater builds yet
 
           docker run --rm \
           -v $PWD:/usr/src/tdesktop \
@@ -136,6 +138,7 @@ jobs:
           cd artifact
           tar -cJvf "${{ env.ARTIFACT_NAME }}_linux.tar.xz" "Telegram/"
           rm -rf Telegram/
+          # mv {Telegram,Updater} artifact/
       - uses: actions/upload-artifact@master
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.
