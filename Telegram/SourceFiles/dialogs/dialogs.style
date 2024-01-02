@@ -347,6 +347,7 @@ dialogsForumIcon: ThreeStateIcon {
 dialogsArchiveUserpic: icon {{ "archive_userpic", historyPeerUserpicFg }};
 dialogsRepliesUserpic: icon {{ "replies_userpic", historyPeerUserpicFg }};
 dialogsInaccessibleUserpic: icon {{ "dialogs/inaccessible_userpic", historyPeerUserpicFg }};
+dialogsHiddenAuthorUserpic: icon {{ "hidden_author_userpic", historyPeerUserpicFg }};
 
 dialogsSendStateSkip: 20px;
 dialogsSendingIcon: ThreeStateIcon {
@@ -396,7 +397,7 @@ dialogsPremiumIcon: ThreeStateIcon {
 historySendingIcon: icon {{ "dialogs/dialogs_sending", historySendingOutIconFg, point(5px, 5px) }};
 historySendingInvertedIcon: icon {{ "dialogs/dialogs_sending", historySendingInvertedIconFg, point(5px, 5px) }};
 historyViewsSendingIcon: icon {{ "dialogs/dialogs_sending", historySendingInIconFg, point(3px, 0px) }};
-historyViewsSendingInvertedIcon: icon  {{ "dialogs/dialogs_sending", historySendingInvertedIconFg, point(3px, 0px) }};
+historyViewsSendingInvertedIcon: icon {{ "dialogs/dialogs_sending", historySendingInvertedIconFg, point(3px, 0px) }};
 
 dialogsUpdateButton: FlatButton {
 	color: activeButtonFg;

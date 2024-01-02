@@ -182,7 +182,7 @@ void KeyboardStyle::paintButtonBg(
 			const auto &small = sti->msgServiceBgCornersSmall;
 			const auto &large = sti->msgServiceBgCornersLarge;
 			auto corners = Ui::CornersPixmaps();
-            int radiuses[4];
+			int radiuses[4];
 			for (auto i = 0; i != 4; ++i) {
 				const auto isLarge = (rounding[i] == Corner::Large);
 				corners.p[i] = (isLarge ? large : small).p[i];
@@ -403,6 +403,11 @@ Message::Message(
 , _bottomInfo(
 		&data->history()->owner().reactions(),
 		BottomInfoDataFromMessage(this)) {
+	if (const auto media = data->media()) {
+		if (media->giveawayResults()) {
+			_hideReply = 1;
+		}
+	}
 	initLogEntryOriginal();
 	initPsa();
 	refreshReactions();
@@ -733,7 +738,7 @@ QSize Message::performCountOptimalSize() {
 				validateFromNameText(from);
 				const auto &name = from
 					? _fromName
-					: item->hiddenSenderInfo()->nameText();
+					: item->displayHiddenSenderInfo()->nameText();
 				auto namew = st::msgPadding.left()
 					+ name.maxWidth()
 					+ (_fromNameStatus
@@ -1384,7 +1389,7 @@ void Message::paintFromName(
 
 	const auto stm = context.messageStyle();
 	const auto from = item->displayFrom();
-	const auto info = from ? nullptr : item->hiddenSenderInfo();
+	const auto info = from ? nullptr : item->displayHiddenSenderInfo();
 	Assert(from || info);
 	const auto nameFg = !context.outbg
 		? FromNameFg(context, colorIndex())
@@ -1405,13 +1410,12 @@ void Message::paintFromName(
 		const auto y = trect.top();
 		auto color = nameFg;
 		color.setAlpha(115);
-		const auto user = from->asUser();
-		const auto id = user ? user->emojiStatusId() : 0;
+		const auto id = from ? from->emojiStatusId() : 0;
 		if (_fromNameStatus->id != id) {
 			const auto that = const_cast<Message*>(this);
 			_fromNameStatus->custom = id
 				? std::make_unique<Ui::Text::LimitedLoopsEmoji>(
-					user->owner().customEmojiManager().create(
+					history()->owner().customEmojiManager().create(
 						id,
 						[=] { that->customEmojiRepaint(); }),
 					kPlayStatusLimit)
@@ -1970,13 +1974,6 @@ void Message::unloadHeavyPart() {
 	}
 }
 
-bool Message::showForwardsFromSender(
-		not_null<HistoryMessageForwarded*> forwarded) const {
-	const auto peer = data()->history()->peer;
-	return !forwarded->story
-		&& (peer->isSelf() || peer->isRepliesChat() || forwarded->imported);
-}
-
 bool Message::hasFromPhoto() const {
 	if (isHidden()) {
 		return false;
@@ -1986,7 +1983,8 @@ bool Message::hasFromPhoto() const {
 		return true;
 	case Context::History:
 	case Context::Pinned:
-	case Context::Replies: {
+	case Context::Replies:
+	case Context::SavedSublist: {
 		const auto item = data();
 		if (item->isPost()) {
 			return false;
@@ -2324,7 +2322,7 @@ bool Message::getStateFromName(
 			if (from) {
 				validateFromNameText(from);
 				return &_fromName;
-			} else if (const auto info = item->hiddenSenderInfo()) {
+			} else if (const auto info = item->displayHiddenSenderInfo()) {
 				return &info->nameText();
 			} else {
 				Unexpected("Corrupt forwarded information in message.");
@@ -3012,7 +3010,10 @@ void Message::validateFromNameText(PeerData *from) const {
 			from->name(),
 			Ui::NameTextOptions());
 	}
-	if (from->isPremium()) {
+	if (from->isPremium()
+		|| (from->isChannel()
+			&& from->emojiStatusId()
+			&& from != history()->peer)) {
 		if (!_fromNameStatus) {
 			_fromNameStatus = std::make_unique<FromNameStatus>();
 			const auto size = st::emojiSize;
@@ -3157,10 +3158,17 @@ bool Message::hasFromName() const {
 		return true;
 	case Context::History:
 	case Context::Pinned:
-	case Context::Replies: {
+	case Context::Replies:
+	case Context::SavedSublist: {
 		const auto item = data();
 		const auto peer = item->history()->peer;
 		if (hasOutLayout() && !item->from()->isChannel()) {
+			if (peer->isSelf()) {
+				if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
+					return forwarded->savedFromSender
+						&& forwarded->savedFromSender->isChannel();
+				}
+			}
 			return false;
 		} else if (!peer->isUser()) {
 			if (const auto media = this->media()) {
@@ -3172,7 +3180,7 @@ bool Message::hasFromName() const {
 			if (forwarded->imported
 				&& peer.get() == forwarded->originalSender) {
 				return false;
-			} else if (showForwardsFromSender(forwarded)) {
+			} else if (item->showForwardsFromSender(forwarded)) {
 				return true;
 			}
 		}
@@ -3196,8 +3204,9 @@ bool Message::displayForwardedFrom() const {
 	if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
 		if (forwarded->story) {
 			return true;
-		} else if (showForwardsFromSender(forwarded)) {
-			return false;
+		} else if (item->showForwardsFromSender(forwarded)) {
+			return forwarded->savedFromSender
+				&& (forwarded->savedFromSender != forwarded->originalSender);
 		}
 		if (const auto sender = item->discussionPostOriginalSender()) {
 			if (sender == forwarded->originalSender) {
@@ -3213,12 +3222,21 @@ bool Message::displayForwardedFrom() const {
 bool Message::hasOutLayout() const {
 	const auto item = data();
 	if (item->history()->peer->isSelf()) {
-		return !item->Has<HistoryMessageForwarded>();
+		if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
+			return (context() == Context::SavedSublist)
+				&& (!forwarded->forwardOfForward()
+					? (forwarded->originalSender
+						&& forwarded->originalSender->isSelf())
+					: ((forwarded->savedFromSender
+						&& forwarded->savedFromSender->isSelf())
+						|| forwarded->savedFromOutgoing));
+		}
+		return true;
 	} else if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
 		if (!forwarded->imported
 			|| !forwarded->originalSender
 			|| !forwarded->originalSender->isSelf()) {
-			if (showForwardsFromSender(forwarded)) {
+			if (item->showForwardsFromSender(forwarded)) {
 				return false;
 			}
 		}
@@ -3320,6 +3338,7 @@ bool Message::displayFastReply() const {
 
 bool Message::displayRightActionComments() const {
 	return !isPinnedContext()
+		&& (context() != Context::SavedSublist)
 		&& data()->repliesAreComments()
 		&& media()
 		&& media()->isDisplayed()
@@ -3354,11 +3373,10 @@ bool Message::displayFastShare() const {
 		return !peer->isMegagroup();
 	} else if (const auto user = peer->asUser()) {
 		if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
-			return !showForwardsFromSender(forwarded)
-				&& !item->out()
+			return !item->out()
 				&& forwarded->originalSender
-				&& forwarded->originalSender->isChannel()
-				&& !forwarded->originalSender->isMegagroup();
+				&& forwarded->originalSender->isBroadcast()
+				&& !item->showForwardsFromSender(forwarded);
 		} else if (user->isBot() && !item->out()) {
 			if (const auto media = this->media()) {
 				return media->allowsFastShare();
@@ -3377,7 +3395,7 @@ bool Message::displayGoToOriginal() const {
 		return forwarded->savedFromPeer
 			&& forwarded->savedFromMsgId
 			&& (!item->externalReply() || !hasBubble())
-			&& !(context() == Context::Replies);
+			&& (context() != Context::Replies);
 	}
 	return false;
 }
@@ -3446,7 +3464,9 @@ void Message::drawRightAction(
 	} else {
 		const auto &icon = data()->isSponsored()
 			? st->historyFastCloseIcon()
-			: (displayFastShare() && !isPinnedContext())
+			: (displayFastShare()
+				&& !isPinnedContext()
+				&& this->context() != Context::SavedSublist)
 			? st->historyFastShareIcon()
 			: st->historyGoToOriginalIcon();
 		icon.paintInCenter(p, { left, top, size->width(), size->height() });
@@ -3478,7 +3498,8 @@ ClickHandlerPtr Message::prepareRightActionLink() const {
 		return HideSponsoredClickHandler();
 	} else if (isPinnedContext()) {
 		return JumpToMessageClickHandler(data());
-	} else if (displayRightActionComments()) {
+	} else if ((context() != Context::SavedSublist)
+		&& displayRightActionComments()) {
 		return createGoToCommentsLink();
 	}
 	const auto sessionId = data()->history()->session().uniqueId();
@@ -3650,7 +3671,7 @@ void Message::fromNameUpdated(int width) const {
 			const auto nameText = [&]() -> const Ui::Text::String * {
 				if (from) {
 					return &_fromName;
-				} else if (const auto info	= item->hiddenSenderInfo()) {
+				} else if (const auto info= item->originalHiddenSenderInfo()) {
 					return &info->nameText();
 				} else {
 					Unexpected("Corrupted forwarded information in message.");

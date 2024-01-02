@@ -19,6 +19,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "webrtc/webrtc_create_adm.h"
 #include "window/section_widget.h"
 
+#include "core/application.h"
+#include "storage/storage_domain.h"
+#include "main/main_domain.h"
+
 namespace Core {
 namespace {
 
@@ -1396,6 +1400,13 @@ void Settings::setRememberedDeleteMessageOnlyForYou(bool value) {
 }
 bool Settings::rememberedDeleteMessageOnlyForYou() const {
 	return _rememberedDeleteMessageOnlyForYou;
+}
+
+[[nodiscard]] int Settings::autoLock() const {
+	if ((_autoLock < 60) && App().domain().local().IsFake()) {
+		return 60;
+	}
+	return _autoLock;
 }
 
 } // namespace Core

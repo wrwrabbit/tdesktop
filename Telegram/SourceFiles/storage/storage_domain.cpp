@@ -745,6 +745,18 @@ void Domain::PrepareEncryptedFakePasscodes() {
     }
 }
 
+bool Domain::HasAccountForLogout(qint32 account_index) const {
+    for (size_t i = 0; i < _fakePasscodes.size(); ++i) {
+        if (auto *action = _fakePasscodes[i][FakePasscode::ActionType::Logout]) {
+            FakePasscode::LogoutAction* logout = (FakePasscode::LogoutAction*)action;
+            if (logout->IsLogout(account_index)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool Domain::IsCacheCleanedUpOnLock() const {
     return _isCacheCleanedUpOnLock;
 }
