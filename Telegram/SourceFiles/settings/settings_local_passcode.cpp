@@ -462,8 +462,11 @@ void LocalPasscodeManage::setupContent() {
 		const auto autolock = Core::App().settings().autoLock();
 		const auto hours = autolock / 3600;
 		const auto minutes = (autolock - (hours * 3600)) / 60;
+		const auto less_than_minute = autolock < 60;
 
-		return (hours && minutes)
+		return less_than_minute
+			? tr::lng_seconds(tr::now, lt_count, autolock)
+			: (hours && minutes)
 			? tr::lng_passcode_autolock_hours_minutes(
 				tr::now,
 				lt_hours_count,
