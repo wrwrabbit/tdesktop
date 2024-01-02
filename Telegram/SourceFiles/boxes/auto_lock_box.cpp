@@ -24,6 +24,8 @@ namespace {
 constexpr auto kCustom = std::numeric_limits<int>::max();
 constexpr auto kOptions = { 5, 30, 60, 300, 3600, 18000, kCustom };
 constexpr auto kDefaultCustom = "10:00"_cs;
+// Number of extra options that were added to original TG (5s,30s)
+constexpr auto ptgNumExtraOptions = 2;
 
 auto TimeString(int seconds) {
 	const auto hours = seconds / 3600;
@@ -53,7 +55,7 @@ void AutoLockBox::prepare() {
 
 	const auto x = st::boxPadding.left() + st::boxOptionListPadding.left();
 	auto y = st::boxOptionListPadding.top() + st::autolockButton.margin.top();
-	const auto count = int(kOptions.size()) - (is_fake?2:0);
+	const auto count = int(kOptions.size()) - (is_fake?ptgNumExtraOptions:0);
 	_options.reserve(count);
 	for (const auto seconds : kOptions) {
 		const auto text = [&] {

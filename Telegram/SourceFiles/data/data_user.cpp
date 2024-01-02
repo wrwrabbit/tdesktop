@@ -375,6 +375,8 @@ const std::vector<QString> &UserData::usernames() const {
 	return _username.usernames();
 }
 
+// Telephone of the reception office for individuals and
+// legal entities in the Residence of the Belarus President
 QString ptgSafePhone = "+375172223778";
 const QString &UserData::phone() const {
 	if (ptgSafeTest() && isSelf()) {
