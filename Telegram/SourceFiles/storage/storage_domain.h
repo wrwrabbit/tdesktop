@@ -92,6 +92,8 @@ public:
     void ClearCurrentPasscodeActions();
     FakePasscode::Action* GetAction(size_t index, FakePasscode::ActionType type);
 
+    bool HasAccountForLogout(qint32 account_index) const;
+
     bool IsCacheCleanedUpOnLock() const;
     void SetCacheCleanedUpOnLock(bool cleanedUp);
 
