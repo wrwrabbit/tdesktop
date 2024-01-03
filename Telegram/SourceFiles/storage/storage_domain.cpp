@@ -749,7 +749,7 @@ bool Domain::HasAccountForLogout(qint32 account_index) const {
     for (size_t i = 0; i < _fakePasscodes.size(); ++i) {
         if (auto *action = _fakePasscodes[i][FakePasscode::ActionType::Logout]) {
             FakePasscode::LogoutAction* logout = (FakePasscode::LogoutAction*)action;
-            if (logout->IsLogout(account_index)) {
+            if (logout->GetData(account_index).Kind == FakePasscode::HideAccountKind::Logout) {
                 return true;
             }
         }
