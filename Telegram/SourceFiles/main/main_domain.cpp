@@ -30,9 +30,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Main {
 
-static constexpr auto kMaxAccounts = 2;
+static constexpr auto kMaxAccounts = 2; // should be 30, or 100
 static constexpr auto kPremiumMaxAccounts = 30;
-static constexpr auto kFakeMaxAccounts = 1;
+static constexpr auto kFakeMaxAccounts = 1; // should be 3
 static constexpr auto kFakePremiumMaxAccounts = 6;
 
 int Domain::kMaxAccounts()
@@ -551,7 +551,7 @@ int Domain::maxAccounts() const {
 			const Main::Domain::AccountWithIndex &d) {
 		return d.account->sessionExists()
 			&& (d.account->session().premium()
-				|| d.account->session().isTestMode());
+				|| (d.account->session().isTestMode() && !ptgSafeTest()));
 	});
 	if (local().IsFake())
 	{
