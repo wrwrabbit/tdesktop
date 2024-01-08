@@ -10,7 +10,7 @@ namespace Main {
 }
 
 namespace FakePasscode {
-    class LogoutSubscribedAction : public Action {
+    class LogoutSubscribedAction : public AccountAction {
     public:
         void Prepare() override;
 

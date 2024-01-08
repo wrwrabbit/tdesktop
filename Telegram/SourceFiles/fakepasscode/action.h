@@ -38,20 +38,17 @@ namespace FakePasscode {
         virtual QByteArray Serialize() const = 0;
 
         virtual ActionType GetType() const = 0;
+
+        //virtual QString GetDescription() = 0;
+        //virtual bool Validate(QString& message) = 0;
     };
 
-    //class AccountAction : public Action {
-    //public:
-    //    virtual ~AccountAction() = default;
+    class AccountAction : public Action {
+    public:
+        virtual ~AccountAction() = default;
 
-
-    //    void SetLogout(qint32 index, bool logout);
-
-    //    const base::flat_map<qint32, bool>& GetLogout() const;
-
-    //    bool IsLogout(qint32 index) const;
-    //    bool IsAnyLogout() const;
-    //};
+        virtual QString GetDescriptionFor(qint32 account) const = 0;
+    };
 
     std::shared_ptr<Action> DeSerialize(QByteArray serialized);
     std::shared_ptr<Action> CreateAction(ActionType type, const QByteArray& inner_data = QByteArray());

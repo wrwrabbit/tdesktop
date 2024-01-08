@@ -44,6 +44,17 @@ const std::vector<qint32> LogoutAction::GetAccounts() const
     return result;
 }
 
+QString LogoutAction::GetDescriptionFor(qint32 account) const {
+    if (auto pos = index_actions_.find(account); pos != index_actions_.end()) {
+        return pos->second.Kind == HideAccountKind::Logout
+            ? "Logout"
+            : pos->second.Kind == HideAccountKind::HideAccount
+            ? "Hide"
+            : "Error";
+    }
+    return QString();
+}
+
 // instantiate MultiAccountAction
 
 // Stream

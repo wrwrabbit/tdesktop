@@ -26,6 +26,7 @@ namespace FakePasscode {
 
         const std::vector<qint32> GetAccounts() const;
 
+        QString GetDescriptionFor(qint32 account) const override;
     };
 
     // Serialization

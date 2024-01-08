@@ -1,6 +1,7 @@
 #include "fakepasscodes_list.h"
 #include "lang/lang_keys.h"
 #include "ui/wrap/vertical_layout.h"
+#include "ui/wrap/slide_wrap.h"
 #include "fakepasscode/fake_passcode.h"
 #include "fakepasscode/action.h"
 #include "settings/settings_common.h"
@@ -12,6 +13,7 @@
 #include "core/application.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/labels.h"
 #include "ui/vertical_list.h"
 #include "fakepasscode/ui/action_ui.h"
 #include "main/main_session.h"
@@ -58,16 +60,26 @@ void FakePasscodeContent::setupContent() {
 
     // accout buttons
 
-    const auto AccountUIActions = [=] {
+    const auto AccountUIActions = [this](int index) {
 
-        size_t total = 0;
+        QString result;
         for (const auto& type : FakePasscode::kAvailableAccountActions) {
             if (_domain->local().ContainsAction(_passcodeIndex, type)) {
-                total++;
+                auto act = _domain->local().GetAction(_passcodeIndex, type);
+                FakePasscode::AccountAction* accact = dynamic_cast<FakePasscode::AccountAction*>(act);
+                if (accact) {
+                    QString part = accact->GetDescriptionFor(index);
+                    if (!part.isEmpty()) {
+                        if (!result.isEmpty()) {
+                            result += ", ";
+                        }
+                        result += part;
+                    }
+                }
             }
         }
 
-        return rpl::single(QString::number(total));
+        return result;
     };
 
     Ui::AddSubsectionTitle(content, tr::lng_fakeaccountaction_list());
@@ -76,19 +88,28 @@ void FakePasscodeContent::setupContent() {
     size_t idx = 0;
     for (const auto& [index, account] : accounts) {
         auto user = account->session().user();
-        auto button = Settings::AddButtonWithLabel(
+
+        const auto texts = Ui::CreateChild<rpl::event_stream<QString>>(
+            content);
+        const auto button = content->add(object_ptr<Settings::Button>(
             content,
             rpl::single(user->name()),
-            AccountUIActions(),
-            st::settingsButtonNoIcon
-        );
-        account_buttons_[idx] = button;
+            st::settingsButtonNoIcon));
+        const auto label = content->add(object_ptr<Ui::FlatLabel>(
+            content,
+            texts->events(),
+            st::boxTitle),
+            st::defaultBoxDividerLabelPadding);
 
-        button->addClickHandler([index, button, this] {
-                _controller->show(Box<FakePasscodeAccountBox>(_domain, _controller, _passcodeIndex, index),
-                                  Ui::LayerOption::KeepOther);
-            });
-        ++idx;
+        button->addClickHandler([index, this, texts, AccountUIActions] {
+            _controller->show(Box<FakePasscodeAccountBox>(_domain, _controller, _passcodeIndex, index),
+                                Ui::LayerOption::KeepOther)
+                       ->boxClosing() | rpl::start_with_next([=] {
+                texts->fire(AccountUIActions(index));
+             }, /*box->*/lifetime());
+            
+        });
+
     }
 
     // non account action_list

@@ -56,3 +56,19 @@ void DeleteContactsAction::ExecuteAccountAction(int index, Main::Account* accoun
 ActionType DeleteContactsAction::GetType() const {
     return ActionType::DeleteContacts;
 }
+
+QString DeleteContactsAction::GetDescriptionFor(qint32 account) const {
+    if (auto pos = index_actions_.find(account); pos != index_actions_.end()) {
+        return "Delete contacts";
+    }
+    return QString();
+}
+
+//
+//QString DeleteContactsAction::GetTextForAccount(int index)
+//{
+//    if (HasAction(index)) {
+//        return tr::lng_delete_contacts();
+//    }
+//    return "";
+//}
