@@ -22,7 +22,10 @@ namespace FakePasscode {
         static constexpr ActionType Kind = ActionType::Logout;
 
         void ExecuteAccountAction(int index, Main::Account* account, const HideAccountKind& action) override;
+        void PostExecuteAction() override;
         ActionType GetType() const override;
+
+        void HandleAccountChanges() override;
 
         const std::vector<qint32> GetAccounts() const;
 

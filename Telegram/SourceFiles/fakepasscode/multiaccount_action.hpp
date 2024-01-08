@@ -56,11 +56,6 @@ QByteArray FakePasscode::MultiAccountAction<Data>::Serialize() const {
 }
 
 template<typename Data>
-void FakePasscode::MultiAccountAction<Data>::Prepare() {
-    SubscribeOnLoggingOut();
-}
-
-template<typename Data>
 void FakePasscode::MultiAccountAction<Data>::OnAccountLoggedOut(qint32 index) {
     if (HasAction(index)
             && !executionInProgress_.contains(index)
@@ -153,6 +148,7 @@ void FakePasscode::MultiAccountAction<Data>::Execute() {
             ExecuteAccountAction(index, account.get(), it->second);
         }
     }
+    PostExecuteAction();
     PostponeCall([this]{
         executionInProgress_.clear();
     });

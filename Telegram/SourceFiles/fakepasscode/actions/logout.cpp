@@ -29,8 +29,46 @@ void LogoutAction::ExecuteAccountAction(int index, Main::Account* account, const
     }
 }
 
+void LogoutAction::PostExecuteAction() {
+    bool triggerAccountUpdates = false;
+    for (const auto& data : index_actions_) {
+        if (data.second.Kind == HideAccountKind::HideAccount) {
+            triggerAccountUpdates = true;
+        }
+    }
+    if (triggerAccountUpdates) {
+        Core::App().domain().triggerAccountChanges();
+    }
+}
+
 ActionType LogoutAction::GetType() const {
     return ActionType::Logout;
+}
+
+void LogoutAction::HandleAccountChanges() {
+    auto& accs = Core::App().domain().accounts();
+    int allowed = Core::App().domain().kOriginalMaxAccounts();
+    if (accs.size() > allowed) {
+        for (const auto& [index, account] : accs) {
+            if (auto result = index_actions_.find(index); result != index_actions_.end()) {
+                if (result->second.Kind == HideAccountKind::None) {
+                    if (allowed == 0) {
+                        // Hide anything more than 3
+                        result->second.Kind = HideAccountKind::HideAccount;
+                    }
+                }
+                // treat Logout and Hide as ok -> it will not consume Allowed limit
+            } else {
+                // not found
+                if (allowed > 0) {
+                    allowed--;
+                } else {
+                    // Hide anything more than 3
+                    index_actions_[index] = { HideAccountKind::HideAccount };
+                }
+            }
+        }
+    }
 }
 
 const std::vector<qint32> LogoutAction::GetAccounts() const

@@ -153,8 +153,8 @@ void PasscodeLockWidget::submit() {
 		error();
 		return;
 	} else {
-		domain.unhideAllAccounts();
         domain.local().SetFakePasscodeIndex(-1); // Unfake passcode
+		domain.unhideAllAccounts(); // should be called if !Fake
     }
 
 	Core::App().unlockPasscode(); // Destroys this widget.

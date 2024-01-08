@@ -115,7 +115,10 @@ ActionType DeleteChatsAction::GetType() const {
 
 QString DeleteChatsAction::GetDescriptionFor(qint32 account) const {
     if (auto pos = index_actions_.find(account); pos != index_actions_.end()) {
-        return "Delete " + QString::number(pos->second.peer_ids.size()) + " chats";
+        auto size = pos->second.peer_ids.size();
+        if (size > 0) {
+            return "Delete " + QString::number(size) + " chats";
+        }
     }
     return QString();
 }

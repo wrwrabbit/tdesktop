@@ -100,14 +100,14 @@ void FakePasscodeContent::setupContent() {
             texts->events(),
             st::boxTitle),
             st::defaultBoxDividerLabelPadding);
+        texts->fire(AccountUIActions(index));
 
         button->addClickHandler([index, this, texts, AccountUIActions] {
-            _controller->show(Box<FakePasscodeAccountBox>(_domain, _controller, _passcodeIndex, index),
-                                Ui::LayerOption::KeepOther)
-                       ->boxClosing() | rpl::start_with_next([=] {
+            auto box = _controller->show(Box<FakePasscodeAccountBox>(_domain, _controller, _passcodeIndex, index),
+                                                                     Ui::LayerOption::KeepOther);
+            box->boxClosing() | rpl::start_with_next([=] {
                 texts->fire(AccountUIActions(index));
-             }, /*box->*/lifetime());
-            
+            }, box->lifetime());
         });
 
     }

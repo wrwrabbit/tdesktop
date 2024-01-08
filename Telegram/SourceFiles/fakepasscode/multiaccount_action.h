@@ -20,6 +20,7 @@ namespace FakePasscode {
 
         virtual void SubscribeOnLoggingOut();
         virtual void OnAccountLoggedOut(qint32 index) = 0;
+        virtual void HandleAccountChanges();
     };
 
     template<typename Data>
@@ -29,9 +30,9 @@ namespace FakePasscode {
         explicit MultiAccountAction(QByteArray inner_data);
         MultiAccountAction(base::flat_map<qint32, Data> data);
 
-        void Prepare() override;
         void Execute() override;
         virtual void ExecuteAccountAction(int index, Main::Account* account, const Data& action) = 0;
+        virtual void PostExecuteAction() {};
 
         void AddAction(qint32 index, const Data& data);
         void AddAction(qint32 index, Data&& data);

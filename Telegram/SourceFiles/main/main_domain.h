@@ -33,6 +33,7 @@ public:
 	static int kMaxAccounts();
 	static int kPremiumMaxAccounts();
 	static int kAbsoluteMaxAccounts();
+	static int kOriginalMaxAccounts();
 
 	explicit Domain(const QString &dataName);
 	~Domain();
@@ -81,6 +82,7 @@ public:
 	[[nodiscard]] int activeForStorage() const;
 
 	void unhideAllAccounts();
+	void triggerAccountChanges();
 
 private:
 	void activateAfterStarting();

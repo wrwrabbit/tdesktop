@@ -12,6 +12,7 @@ void LogoutSubscribedAction::Prepare() {
     SubscribeOnLoggingOut();
     Core::App().domain().accountsChanges() | rpl::start_with_next([this] {
         SubscribeOnLoggingOut();
+        HandleAccountChanges();
     }, lifetime_);
 }
 
@@ -29,6 +30,9 @@ void LogoutSubscribedAction::SubscribeOnLoggingOut() {
                     OnAccountLoggedOut(index);
                 }, sub_lifetime_);
     }
+}
+
+void LogoutSubscribedAction::HandleAccountChanges() {
 }
 
 namespace FakePasscode {
