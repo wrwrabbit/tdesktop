@@ -8,7 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include <storage/details/storage_file_utilities.h>
-#include "../fakepasscode/fake_passcode.h"
+#include <fakepasscode/fake_passcode.h>
 
 #include <deque>
 
