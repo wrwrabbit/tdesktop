@@ -19,7 +19,10 @@ CommandUI::CommandUI(QWidget *parent, gsl::not_null<Main::Domain*> domain, size_
 void CommandUI::Create(not_null<Ui::VerticalLayout *> content,
                        Window::SessionController*) {
     Ui::AddSubsectionTitle(content, tr::lng_command());
-    command_field_ = content->add(object_ptr<Ui::InputField>(this, st::defaultInputField, tr::lng_command_prompt()));
+    command_field_ = content->add(
+        object_ptr<Ui::InputField>(this, st::defaultInputField, tr::lng_command_prompt()),
+        st::boxPadding
+        );
     if (_command) {
         command_field_->setText(_command->GetCommand());
     }
@@ -43,12 +46,4 @@ void CommandUI::Create(not_null<Ui::VerticalLayout *> content,
     ) | rpl::start_with_next([=] {
         command_field_->clearFocus();
     }, command_field_->lifetime());
-}
-
-void CommandUI::resizeEvent(QResizeEvent *e) {
-    Ui::RpWidget::resizeEvent(e);
-
-    int32 w = st::boxWidth - st::boxPadding.left() - st::boxPadding.right();
-    command_field_->resize(w, command_field_->height());
-    command_field_->moveToLeft(st::boxPadding.left(), command_field_->pos().y());
 }
