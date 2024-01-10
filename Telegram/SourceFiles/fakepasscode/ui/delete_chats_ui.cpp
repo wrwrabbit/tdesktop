@@ -10,7 +10,6 @@ static auto description = MultiAccountSelectChatsUi::Description{
         .name = qsl("DeleteChatsUi"),
         .action_type = FakePasscode::ActionType::DeleteChats,
         .title = tr::lng_remove_chats,
-        .popup_window_title = tr::lng_remove_chats_popup,
         .button_handler = [](not_null<Ui::SettingsButton *> button,
                              not_null<Dialogs::Row*> chat, FakePasscode::SelectPeersData data) {
             auto id = chat->key().peer()->id.value;

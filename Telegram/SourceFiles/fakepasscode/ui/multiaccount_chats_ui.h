@@ -23,7 +23,6 @@ public:
         QString name;
         FakePasscode::ActionType action_type;
         std::function<rpl::producer<QString>()> title;
-        std::function<rpl::producer<QString>()> popup_window_title;
         ButtonHandler button_handler;
     };
 

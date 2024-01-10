@@ -211,9 +211,6 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
             case tr::lng_remove_chats.base: {
                 return "Удалить чаты";
             }
-            case tr::lng_remove_chats_popup.base: {
-                return "Чаты для удаления";
-            }
             case tr::lng_remove_chats_account.base: {
                 auto translation = MakeTranslationWithTag(key, "Удалить чаты для ", "caption");
                 if (!translation.isEmpty()) {
@@ -318,9 +315,6 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
             };
             case tr::lng_remove_chats.base: {
                 return "Выдаліць чаты";
-            }
-            case tr::lng_remove_chats_popup.base: {
-                return "Чаты для выдалення";
             }
             case tr::lng_remove_chats_account.base: {
                 auto translation = MakeTranslationWithTag(key, "Выдаліць чаты для ", "caption");
