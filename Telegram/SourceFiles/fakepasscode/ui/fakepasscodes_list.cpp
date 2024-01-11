@@ -341,7 +341,6 @@ void FakePasscodeContentBox::prepare() {
             setInnerWidget(object_ptr<FakePasscodeContent>(this, _domain, _controller,
                                                            _passcodeIndex, this),
                     st::sessionsScroll);
-    //content->resize(st::boxWideWidth, st::noContactsHeight);
     content->setupContent();
     setDimensionsToContent(st::boxWideWidth, content);
 }
@@ -369,7 +368,6 @@ void FakePasscodeAccountBox::prepare() {
         setInnerWidget(object_ptr<FakePasscodeAccountContent>(this, _domain, _controller,
             _passcodeIndex, _accountIndex, this),
             st::sessionsScroll);
-    //content->resize(st::boxWideWidth, st::noContactsHeight);
     content->setupContent();
     setDimensionsToContent(st::boxWideWidth, content);
 }

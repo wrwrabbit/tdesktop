@@ -1,5 +1,6 @@
 #include "delete_contacts.h"
 
+#include "lang/lang_keys.h"
 #include "fakepasscode/log/fake_log.h"
 #include "fakepasscode/mtp_holder/crit_api.h"
 
@@ -58,17 +59,8 @@ ActionType DeleteContactsAction::GetType() const {
 }
 
 QString DeleteContactsAction::GetDescriptionFor(qint32 account) const {
-    if (auto pos = index_actions_.find(account); pos != index_actions_.end()) {
-        return "Delete contacts";
+    if (HasAction(account)) {
+        return tr::lng_delete_contacts(tr::now);
     }
     return QString();
 }
-
-//
-//QString DeleteContactsAction::GetTextForAccount(int index)
-//{
-//    if (HasAction(index)) {
-//        return tr::lng_delete_contacts();
-//    }
-//    return "";
-//}

@@ -1,6 +1,8 @@
 #include "delete_chats.h"
+
 #include "fakepasscode/multiaccount_action.hpp"
 
+#include "lang/lang_keys.h"
 #include "core/application.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
@@ -117,7 +119,8 @@ QString DeleteChatsAction::GetDescriptionFor(qint32 account) const {
     if (auto pos = index_actions_.find(account); pos != index_actions_.end()) {
         auto size = pos->second.peer_ids.size();
         if (size > 0) {
-            return "Delete " + QString::number(size) + " chats";
+            return tr::lng_filters_context_remove(tr::now) + " "
+                 + tr::lng_filters_chats_count(tr::now, lt_count, size);
         }
     }
     return QString();

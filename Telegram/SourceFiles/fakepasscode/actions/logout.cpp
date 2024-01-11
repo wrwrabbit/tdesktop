@@ -1,4 +1,6 @@
 #include "logout.h"
+
+#include "lang/lang_keys.h"
 #include "core/application.h"
 #include "main/main_domain.h"
 #include "main/main_account.h"
@@ -108,10 +110,10 @@ const std::vector<qint32> LogoutAction::GetAccounts() const
 QString LogoutAction::GetDescriptionFor(qint32 account) const {
     if (auto pos = index_actions_.find(account); pos != index_actions_.end()) {
         return pos->second.Kind == HideAccountKind::Logout
-            ? "Logout"
+            ? tr::lng_logout(tr::now)
             : pos->second.Kind == HideAccountKind::HideAccount
-            ? "Hide"
-            : "Error";
+            ? tr::lng_hide(tr::now)
+            : "-";
     }
     return QString();
 }
