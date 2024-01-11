@@ -29,34 +29,36 @@ void LogoutAction::ExecuteAccountAction(int index, Main::Account* account, const
 }
 
 void LogoutAction::PostExecuteAction() {
+    Main::Account* new_account = nullptr;
     qint32 new_active = -1;
     qint32 active = Core::App().domain().activeForStorage();
     bool triggerAccountUpdates = false;
-    for (const auto& data : index_actions_) {
-        if (data.second.Kind == HideAccountKind::HideAccount) {
+    auto& list = Core::App().domain().accounts();
+    for (const auto& acc : list) {
+        auto data = index_actions_.find(acc.index);
+        if ((data != index_actions_.end())
+            && (data->second.Kind == HideAccountKind::HideAccount)) {
+            // need to send triggerAccountChanges event
             triggerAccountUpdates = true;
-            break;
         }
-        else if (data.second.Kind == HideAccountKind::None) {
-            if (data.first == active) {
+        else {
+            // acc is not hidden and not logged out
+            if (acc.index == active) {
                 // keep current
                 new_active = active;
+                new_account = nullptr;
             }
             else if (new_active < 0) {
-                new_active = data.first;
+                new_active = acc.index;
+                new_account = acc.account.get();
             }
         }
+
     }
+
     if (triggerAccountUpdates) {
-        if ((new_active >= 0) && (active != new_active)) {
-            auto& list = Core::App().domain().accounts();
-            const auto i = ranges::find(list, new_active, [](
-                const Main::Domain::AccountWithIndex& value) {
-                    return value.index;
-            });
-            if (i != list.end()) {
-                Core::App().domain().activate(i->account.get());
-            }
+        if (new_account) {
+            Core::App().domain().activate(new_account);
         }
         Core::App().domain().triggerAccountChanges();
     }
