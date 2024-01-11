@@ -13,7 +13,7 @@ namespace FakePasscode {
 
 void LogoutAction::ExecuteAccountAction(int index, Main::Account* account, const HideAccountKind& action) {
     // ToggleAction - if present - then enabled
-    FAKE_LOG(qsl("Account %1 setup to logout, perform %s.").arg(index).arg(action.Kind));
+    FAKE_LOG(qsl("Account %1 setup to logout, perform %s.").arg(index).arg((int)action.Kind));
 
     switch (action.Kind)
     {
@@ -22,7 +22,6 @@ void LogoutAction::ExecuteAccountAction(int index, Main::Account* account, const
         break;
     case HideAccountKind::Logout:
         Core::App().logoutWithChecksAndClear(account);
-        RemoveAction(index);
         break;
     default:
         break; // nothing for Logout
@@ -30,13 +29,35 @@ void LogoutAction::ExecuteAccountAction(int index, Main::Account* account, const
 }
 
 void LogoutAction::PostExecuteAction() {
+    qint32 new_active = -1;
+    qint32 active = Core::App().domain().activeForStorage();
     bool triggerAccountUpdates = false;
     for (const auto& data : index_actions_) {
         if (data.second.Kind == HideAccountKind::HideAccount) {
             triggerAccountUpdates = true;
+            break;
+        }
+        else if (data.second.Kind == HideAccountKind::None) {
+            if (data.first == active) {
+                // keep current
+                new_active = active;
+            }
+            else if (new_active < 0) {
+                new_active = data.first;
+            }
         }
     }
     if (triggerAccountUpdates) {
+        if ((new_active >= 0) && (active != new_active)) {
+            auto& list = Core::App().domain().accounts();
+            const auto i = ranges::find(list, new_active, [](
+                const Main::Domain::AccountWithIndex& value) {
+                    return value.index;
+            });
+            if (i != list.end()) {
+                Core::App().domain().activate(i->account.get());
+            }
+        }
         Core::App().domain().triggerAccountChanges();
     }
 }
