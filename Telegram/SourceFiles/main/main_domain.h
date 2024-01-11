@@ -52,7 +52,6 @@ public:
 
 	[[nodiscard]] auto accounts() const
 		-> const std::vector<AccountWithIndex> &;
-	[[nodiscard]] const std::vector<AccountWithIndex> accountsWithHidden() const;
 	[[nodiscard]] std::vector<not_null<Account*>> orderedAccounts() const;
 	[[nodiscard]] rpl::producer<Account*> activeValue() const;
 	[[nodiscard]] rpl::producer<> accountsChanges() const;
