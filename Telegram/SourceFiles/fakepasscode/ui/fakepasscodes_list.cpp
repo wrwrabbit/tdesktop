@@ -1,30 +1,34 @@
 #include "fakepasscodes_list.h"
-#include "lang/lang_keys.h"
-#include "ui/wrap/vertical_layout.h"
-#include "ui/wrap/slide_wrap.h"
-#include "fakepasscode/fake_passcode.h"
+
+#include "boxes/abstract_box.h"
+#include "core/application.h"
+#include "data/data_changes.h"
+#include "data/data_user.h"
 #include "fakepasscode/action.h"
+#include "fakepasscode/fake_passcode.h"
+#include "fakepasscode/log/fake_log.h"
+#include "fakepasscode/ui/action_ui.h"
+#include "fakepasscode/ui/fakepasscode_box.h"
+#include "lang/lang_keys.h"
+#include "main/main_account.h"
+#include "main/main_domain.h"
+#include "main/main_session.h"
 #include "settings/settings_common.h"
+#include "storage/storage_domain.h"
 #include "styles/style_boxes.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
-#include "styles/style_settings.h"
-#include "fakepasscode/ui/fakepasscode_box.h"
-#include "core/application.h"
-#include "ui/widgets/fields/input_field.h"
-#include "ui/widgets/buttons.h"
-#include "ui/widgets/labels.h"
-#include "ui/vertical_list.h"
-#include "fakepasscode/ui/action_ui.h"
-#include "main/main_session.h"
-#include "main/main_domain.h"
-#include "main/main_account.h"
-#include "storage/storage_domain.h"
-#include "data/data_user.h"
-#include "boxes/abstract_box.h"
-#include "ui/text/text_utilities.h"
 #include "styles/style_menu_icons.h"
-#include "fakepasscode/log/fake_log.h"
+#include "styles/style_settings.h"
+#include "styles/style_window.h"
+#include "ui/painter.h"
+#include "ui/text/text_utilities.h"
+#include "ui/vertical_list.h"
+#include "ui/widgets/buttons.h"
+#include "ui/widgets/fields/input_field.h"
+#include "ui/widgets/labels.h"
+#include "ui/wrap/vertical_layout.h"
+
 
 class FakePasscodeContentBox;
 class FakePasscodeAccountContent;
@@ -53,6 +57,60 @@ FakePasscodeContent::FakePasscodeContent(QWidget *parent,
 , _controller(controller)
 , _passcodeIndex(passcodeIndex)
 , _outerBox(outerBox) {
+}
+
+[[nodiscard]] object_ptr<Ui::SettingsButton> MakeAccountButton(
+    QWidget* parent,
+    not_null<Main::Account*> account) {
+
+    const auto session = &account->session();
+    const auto user = session->user();
+
+    auto text = rpl::single(
+        user->name()
+    ) | rpl::then(session->changes().realtimeNameUpdates(
+        user
+    ) | rpl::map([=] {
+        return user->name();
+    }));
+    auto result = object_ptr<Ui::SettingsButton>(
+        parent,
+        rpl::duplicate(text),
+        st::mainMenuAddAccountButton);
+    const auto raw = result.data();
+
+    struct State {
+        State(QWidget* parent) : userpic(parent) {
+            userpic.setAttribute(Qt::WA_TransparentForMouseEvents);
+        }
+
+        Ui::RpWidget userpic;
+        Ui::PeerUserpicView view;
+    };
+    const auto state = raw->lifetime().make_state<State>(raw);
+
+    const auto userpicSkip = 2 * st::mainMenuAccountLine + st::lineWidth;
+    const auto userpicSize = st::mainMenuAccountSize
+        + userpicSkip * 2;
+    raw->heightValue(
+    ) | rpl::start_with_next([=](int height) {
+        const auto left = st::mainMenuAddAccountButton.iconLeft
+            + (st::settingsIconAdd.width() - userpicSize) / 2;
+        const auto top = (height - userpicSize) / 2;
+        state->userpic.setGeometry(left, top, userpicSize, userpicSize);
+        }, state->userpic.lifetime());
+
+    state->userpic.paintRequest(
+    ) | rpl::start_with_next([=] {
+        auto p = Painter(&state->userpic);
+        const auto size = st::mainMenuAccountSize;
+        const auto line = st::mainMenuAccountLine;
+        const auto skip = 2 * line + st::lineWidth;
+        const auto full = size + skip * 2;
+        user->paintUserpicLeft(p, state->view, skip, skip, full, size);
+    }, state->userpic.lifetime());
+
+    return result;
 }
 
 void FakePasscodeContent::setupContent() {
@@ -91,15 +149,18 @@ void FakePasscodeContent::setupContent() {
 
         const auto texts = Ui::CreateChild<rpl::event_stream<QString>>(
             content);
-        const auto button = content->add(object_ptr<Settings::Button>(
-            content,
-            rpl::single(user->name()),
-            st::settingsButtonNoIcon));
-        const auto label = content->add(object_ptr<Ui::FlatLabel>(
+        const auto button = content->add(MakeAccountButton(content, account.get()));
+
+        const auto name = content->add(object_ptr<Ui::FlatLabel>(
             content,
             texts->events(),
-            st::boxTitle),
-            st::defaultBoxDividerLabelPadding);
+            st::defaultSettingsRightLabel),
+            st::boxRowPadding);
+        std::move(
+            texts->events()
+        ) | rpl::start_with_next([=](const QString& text) {
+            name->resizeToWidth(button->width());
+        }, content->lifetime());
         texts->fire(AccountUIActions(index));
 
         button->addClickHandler([index, this, texts, AccountUIActions] {
@@ -113,7 +174,8 @@ void FakePasscodeContent::setupContent() {
     }
 
     // non account action_list
-    Ui::AddSubsectionTitle(content, tr::lng_fakeglobalaction_list());
+    Ui::AddSubsectionTitle(content, tr::lng_fakeglobalaction_list(),
+        style::margins(0, st::defaultVerticalListSkip, 0, 0));
     for (const auto& type : FakePasscode::kAvailableGlobalActions) {
         const auto ui = GetUIByAction(type, _domain, _passcodeIndex, this);
         ui->Create(content, _controller);
