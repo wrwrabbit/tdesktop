@@ -391,6 +391,7 @@ bool Domain::hasLocalPasscode() const {
         keyInnerData.stream >> sourcePasscode;
         _fakePasscodeIndex = i;
         FAKE_LOG(qsl("Start with fake passcode %1").arg(i));
+        break;
     }
 
     if (_isStartedWithFake) {
