@@ -257,9 +257,7 @@ public:
 	[[nodiscard]] rpl::producer<bool> notifyAboutPinnedChanges() const {
 		return _notifyAboutPinned.changes();
 	}
-	[[nodiscard]] int autoLock() const {
-		return _autoLock;
-	}
+	[[nodiscard]] int autoLock() const; // implementation in C++ file
 	void setAutoLock(int value) {
 		_autoLock = value;
 	}
