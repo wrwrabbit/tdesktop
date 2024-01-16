@@ -20,8 +20,6 @@ namespace FakePasscode {
    public:
       FakePasscode();
 
-      explicit FakePasscode(base::flat_map<ActionType, std::shared_ptr<Action>> actions);
-
       FakePasscode(FakePasscode&& passcode) noexcept;
 
       virtual ~FakePasscode() = default;
@@ -61,7 +59,7 @@ namespace FakePasscode {
 		  return lifetime_;
 	  }
 
-	  void Prepare();
+	  void PostInit();
 
    protected:
       rpl::variable<QByteArray> fake_passcode_;

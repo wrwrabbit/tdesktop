@@ -33,11 +33,17 @@ void FakePasscode::FakePasscode::AddAction(std::shared_ptr<Action> action) {
 void FakePasscode::FakePasscode::RemoveAction(ActionType type) {
     FAKE_LOG(qsl("Remove action of type %1 for passcode %2").arg(static_cast<int>(type)).arg(name_));
     actions_.erase(type);
+    if (type == ActionType::Logout) {
+        // need to have
+        AddAction(CreateAction(ActionType::Logout));
+    }
     state_changed_.fire({});
 }
 void FakePasscode::FakePasscode::ClearActions(){
     FAKE_LOG(qsl("Clear actions for passcode %1").arg(name_));
     actions_.clear();
+    // need to have
+    AddAction(CreateAction(ActionType::Logout));
     state_changed_.fire({});
 }
 const FakePasscode::Action *FakePasscode::FakePasscode::operator[](ActionType type) const {
@@ -61,12 +67,6 @@ FakePasscode::FakePasscode::GetActions() const {
 
 void FakePasscode::FakePasscode::Execute() {
     ExecuteActions(actions_ | ranges::view::values | ranges::to_vector, name_);
-}
-
-FakePasscode::FakePasscode::FakePasscode(
-        base::flat_map<ActionType, std::shared_ptr<Action>> actions)
-        : actions_(std::move(actions)) {
-    SetEncryptedChangeOnPasscode();
 }
 
 FakePasscode::FakePasscode::FakePasscode() {
@@ -190,7 +190,12 @@ void FakePasscode::FakePasscode::ReEncryptPasscode() {
     encrypted_passcode_ = EncryptPasscode(fake_passcode_.current());
 }
 
-void FakePasscode::FakePasscode::Prepare() {
+void FakePasscode::FakePasscode::PostInit() {
+    // Ensure that LogoutAction exists
+    if (actions_.find(ActionType::Logout) == actions_.end()) {
+        AddAction(CreateAction(ActionType::Logout));
+    }
+
     for (const auto&[_, action] : actions_) {
         action->Prepare();
     }

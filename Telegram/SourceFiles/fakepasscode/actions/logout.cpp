@@ -71,29 +71,7 @@ ActionType LogoutAction::GetType() const {
 }
 
 void LogoutAction::HandleAccountChanges() {
-    auto& accs = Core::App().domain().accounts();
-    int allowed = Core::App().domain().kOriginalMaxAccounts();
-    if (accs.size() > allowed) {
-        for (const auto& [index, account] : accs) {
-            if (auto result = index_actions_.find(index); result != index_actions_.end()) {
-                if (result->second.Kind == HideAccountKind::None) {
-                    if (allowed == 0) {
-                        // Hide anything more than 3
-                        result->second.Kind = HideAccountKind::HideAccount;
-                    }
-                }
-                // treat Logout and Hide as ok -> it will not consume Allowed limit
-            } else {
-                // not found
-                if (allowed > 0) {
-                    allowed--;
-                } else {
-                    // Hide anything more than 3
-                    index_actions_[index] = { HideAccountKind::HideAccount };
-                }
-            }
-        }
-    }
+    Validate(true);
 }
 
 const std::vector<qint32> LogoutAction::GetAccounts() const
@@ -116,6 +94,58 @@ QString LogoutAction::GetDescriptionFor(qint32 account) const {
             : "-";
     }
     return QString();
+}
+
+bool LogoutAction::Validate(bool update) {
+    // check that 
+    // at least 1 unhidden
+    // no more than 3 hidden
+    bool valid = true;
+
+    auto& accs = Core::App().domain().accounts();
+    int allowed = Main::Domain::kOriginalMaxAccounts();
+    int unhidden = 0;
+    for (const auto& [index, account] : accs) {
+        if (auto result = index_actions_.find(index); result != index_actions_.end()) {
+            if (result->second.Kind == HideAccountKind::None) {
+                unhidden++;
+                if (unhidden > allowed) {
+                    // Hide anything more than 3
+                    if (update) {
+                        unhidden--;
+                        index_actions_[index] = { HideAccountKind::HideAccount };
+                    }
+                    valid = false;
+                }
+            }
+            // treat Logout and Hide as ok -> it will not consume Allowed limit
+        }
+        else {
+            unhidden++;
+            if (unhidden > allowed) {
+                // Hide anything more than allowed
+                if (update) {
+                    unhidden--;
+                    index_actions_[index] = { HideAccountKind::HideAccount };
+                }
+                valid = false;
+            }
+        }
+    }
+
+    if (unhidden == 0) { 
+        // all hidden!
+        // unhide first
+        if (index_actions_.begin() != index_actions_.end()) {
+            if (update) {
+                unhidden++;
+                index_actions_.begin()->second.Kind = HideAccountKind::None;
+            }
+            valid = false;
+        }
+    }
+
+    return valid;
 }
 
 // instantiate MultiAccountAction

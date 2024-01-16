@@ -455,9 +455,6 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
                     config.get());
             if (!sessions.contains(sessionId)
                 && (sessionId != 0 || (sessions.empty() && i + 1 == count))) {
-                if (sessions.empty()) {
-                    active = index;
-                }
                 account->start(std::move(config));
                 if (index >= Main::Domain::kPremiumMaxAccounts())
                 {
@@ -513,7 +510,7 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
                         createAndAddAccount(index, realCount);
                     }
                 }
-                fakePasscode.Prepare();
+                fakePasscode.PostInit();
             }
 
             info.stream >> _isCacheCleanedUpOnLock;
@@ -589,6 +586,7 @@ size_t Domain::AddFakePasscode(QByteArray passcode, QString name) {
     fakePasscode.SetPasscode(std::move(passcode));
     fakePasscode.SetName(std::move(name));
     _fakePasscodes.push_back(std::move(fakePasscode));
+    fakePasscode.PostInit();
     FAKE_LOG(qsl("Call write accounts from AddFakePasscode"));
     writeAccounts();
     _fakePasscodeChanged.fire({});

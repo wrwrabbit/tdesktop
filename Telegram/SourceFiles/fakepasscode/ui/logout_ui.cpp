@@ -13,6 +13,7 @@
 #include "styles/style_settings.h"
 #include "fakepasscode/log/fake_log.h"
 #include "styles/style_menu_icons.h"
+#include "ui/toast/toast.h"
 
 void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
                       Window::SessionController*) {
@@ -72,12 +73,12 @@ void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
             }
         }
 
-        if (_action && !_action->HasAnyAction()) {
-            FAKE_LOG(("LogoutUI: Remove Action"));
-            _domain->local().RemoveAction(_index, FakePasscode::ActionType::Logout);
-            _action = nullptr;
+        if (!_action->Validate(true)) {
+            value = _action->GetData(_accountIndex);
+            Ui::Toast::Show("Account should be hidden");
         }
 
+        // not for logout 
         tgl_logout->fire(value.Kind == FakePasscode::HideAccountKind::Logout);
         tgl_hide->fire(value.Kind == FakePasscode::HideAccountKind::HideAccount);
 
