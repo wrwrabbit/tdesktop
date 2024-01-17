@@ -96,7 +96,7 @@ PhoneWidget::PhoneWidget(
 		if (account->mtp().isTestMode()) {
 			_country->chooseCountry("");
 			_code->setText("");
-			_phone->setText("+99966" + QString::number(10000 + base::RandomValue<short>() % 10000));
+			_phone->setText("+99966" + QString::number(10000 + (base::RandomValue<quint16>() % 10000)));
 		}
 	}
 
