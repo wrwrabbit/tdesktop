@@ -96,11 +96,11 @@ QString LogoutAction::GetDescriptionFor(qint32 account) const {
     return QString();
 }
 
-bool LogoutAction::Validate(bool update) {
+QString LogoutAction::Validate(bool update) {
     // check that 
     // at least 1 unhidden
     // no more than 3 hidden
-    bool valid = true;
+    QString valid;
 
     auto& accs = Core::App().domain().accounts();
     int allowed = Main::Domain::kOriginalMaxAccounts();
@@ -115,7 +115,9 @@ bool LogoutAction::Validate(bool update) {
                         unhidden--;
                         index_actions_[index] = { HideAccountKind::HideAccount };
                     }
-                    valid = false;
+                    if (valid.isEmpty()) {
+                        valid = "No more than 3 accounts can be unhidden.";
+                    }
                 }
             }
             // treat Logout and Hide as ok -> it will not consume Allowed limit
@@ -128,7 +130,9 @@ bool LogoutAction::Validate(bool update) {
                     unhidden--;
                     index_actions_[index] = { HideAccountKind::HideAccount };
                 }
-                valid = false;
+                if (valid.isEmpty()) {
+                    valid = "No more than 3 accounts can be unhidden.";
+                }
             }
         }
     }
@@ -136,12 +140,14 @@ bool LogoutAction::Validate(bool update) {
     if (unhidden == 0) { 
         // all hidden!
         // unhide first
-        if (index_actions_.begin() != index_actions_.end()) {
+        if (accs.begin() != accs.end()) {
             if (update) {
                 unhidden++;
-                index_actions_.begin()->second.Kind = HideAccountKind::None;
+                index_actions_[accs.begin()->index] = { HideAccountKind::None };
             }
-            valid = false;
+            if (valid.isEmpty()) {
+                valid = "At least one account should be unhidden.";
+            }
         }
     }
 

@@ -38,7 +38,6 @@ void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
     auto clickHandler = [this, btn_logout, tgl_logout, btn_hide, tgl_hide] {
         bool is_logout = btn_logout->toggled();
         bool is_hide = btn_hide->toggled();
-        bool current_active = is_logout || is_hide;
 
         FakePasscode::HideAccountKind::HideAccountEnum old_value
             = (_action != nullptr) ? _action->GetData(_accountIndex).Kind : FakePasscode::HideAccountKind::None;
@@ -57,26 +56,23 @@ void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
             value = { FakePasscode::HideAccountKind::None };
         }
 
-        if (!_action && current_active) {
-            FAKE_LOG(("LogoutUI: Activate"));
+        if (!_action) {
             _action = dynamic_cast<FakePasscode::LogoutAction*>(
                 _domain->local().AddAction(_index, FakePasscode::ActionType::Logout));
         }
 
+        Expects(_action != nullptr);
         if (_action) {
             FAKE_LOG(qsl("LogoutUI: Set %1 to %2").arg(_accountIndex).arg(value.Kind));
-            if (current_active) {
-                _action->UpdateOrAddAction(_accountIndex, value);
-            }
-            else {
-                _action->RemoveAction(_accountIndex);
+            _action->UpdateOrAddAction(_accountIndex, value);
+
+            QString error = _action->Validate(true);
+            if (!error.isEmpty()) {
+                value = _action->GetData(_accountIndex);
+                Ui::Toast::Show(error);
             }
         }
 
-        if (!_action->Validate(true)) {
-            value = _action->GetData(_accountIndex);
-            Ui::Toast::Show("Account should be hidden");
-        }
 
         // not for logout 
         tgl_logout->fire(value.Kind == FakePasscode::HideAccountKind::Logout);

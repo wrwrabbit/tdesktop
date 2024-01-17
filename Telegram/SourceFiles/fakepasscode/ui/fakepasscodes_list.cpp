@@ -140,6 +140,8 @@ void FakePasscodeContent::setupContent() {
         return result;
     };
 
+    const auto updates = Ui::CreateChild<rpl::event_stream<>>(content);
+
     Ui::AddSubsectionTitle(content, tr::lng_fakeaccountaction_list());
     const auto& accounts = Core::App().domain().accounts();
     account_buttons_.resize(accounts.size());
@@ -163,11 +165,16 @@ void FakePasscodeContent::setupContent() {
         }, content->lifetime());
         texts->fire(AccountUIActions(index));
 
-        button->addClickHandler([index, this, texts, AccountUIActions] {
+        updates->events(
+        ) | rpl::start_with_next([=] {
+            texts->fire(AccountUIActions(index));
+        }, content->lifetime());
+
+        button->addClickHandler([index, this, updates] {
             auto box = _controller->show(Box<FakePasscodeAccountBox>(_domain, _controller, _passcodeIndex, index),
                                                                      Ui::LayerOption::KeepOther);
             box->boxClosing() | rpl::start_with_next([=] {
-                texts->fire(AccountUIActions(index));
+                updates->fire({});
             }, box->lifetime());
         });
 

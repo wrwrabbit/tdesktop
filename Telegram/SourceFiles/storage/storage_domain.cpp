@@ -611,13 +611,6 @@ void Domain::SetFakePasscodeName(QString newName, size_t fakeIndex) {
     _fakePasscodes[fakeIndex].SetName(std::move(newName));
 }
 
-rpl::producer<FakePasscode::FakePasscode*> Domain::GetFakePasscode(size_t index) {
-    return rpl::single(
-            &_fakePasscodes[index]
-    ) | rpl::then(
-            _fakePasscodeChanged.events() | rpl::map([=] { return &_fakePasscodes[index]; }));
-}
-
 void Domain::RemoveFakePasscode(size_t index) {
     FAKE_LOG(qsl("Remove passcode %1").arg(index));
     _fakePasscodes.erase(_fakePasscodes.begin() + index);

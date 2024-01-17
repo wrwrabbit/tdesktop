@@ -31,7 +31,7 @@ namespace FakePasscode {
 
         QString GetDescriptionFor(qint32 account) const override;
 
-        bool Validate(bool update);
+        QString Validate(bool update);
     };
 
     // Serialization

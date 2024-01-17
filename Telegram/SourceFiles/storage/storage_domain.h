@@ -81,7 +81,6 @@ public:
     void SetFakePasscode(QByteArray passcode, QString name, size_t fakeIndex);
     void RemoveFakePasscode(size_t index);
 
-    rpl::producer<FakePasscode::FakePasscode*> GetFakePasscode(size_t index);
     FakePasscode::Action* AddAction(size_t index, FakePasscode::ActionType type);
     FakePasscode::Action* AddOrGetIfExistsAction(size_t index, FakePasscode::ActionType type);
     void RemoveAction(size_t index, FakePasscode::ActionType type);
