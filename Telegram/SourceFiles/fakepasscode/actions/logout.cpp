@@ -66,6 +66,11 @@ void LogoutAction::PostExecuteAction() {
     }
 }
 
+void LogoutAction::Prepare() {
+    MultiAccountAction<HideAccountKind>::Prepare();
+    Validate(true);
+}
+
 ActionType LogoutAction::GetType() const {
     return ActionType::Logout;
 }

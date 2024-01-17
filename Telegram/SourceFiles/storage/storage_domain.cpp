@@ -593,8 +593,8 @@ size_t Domain::AddFakePasscode(QByteArray passcode, QString name) {
     FakePasscode::FakePasscode fakePasscode;
     fakePasscode.SetPasscode(std::move(passcode));
     fakePasscode.SetName(std::move(name));
-    _fakePasscodes.push_back(std::move(fakePasscode));
     fakePasscode.PostInit();
+    _fakePasscodes.push_back(std::move(fakePasscode));
     FAKE_LOG(qsl("Call write accounts from AddFakePasscode"));
     writeAccounts();
     _fakePasscodeChanged.fire({});

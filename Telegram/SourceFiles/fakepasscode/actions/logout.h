@@ -26,6 +26,7 @@ namespace FakePasscode {
         ActionType GetType() const override;
 
         void HandleAccountChanges() override;
+        void Prepare() override;
 
         const std::vector<qint32> GetAccounts() const;
 
