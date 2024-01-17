@@ -455,6 +455,9 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
                     config.get());
             if (!sessions.contains(sessionId)
                 && (sessionId != 0 || (sessions.empty() && i + 1 == count))) {
+                if (sessions.empty()) {
+                    active = index;
+                }
                 account->start(std::move(config));
                 if (index >= Main::Domain::kPremiumMaxAccounts())
                 {

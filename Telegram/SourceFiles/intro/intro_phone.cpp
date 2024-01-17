@@ -90,6 +90,14 @@ PhoneWidget::PhoneWidget(
 	if (!_country->chooseCountry(getData()->country)) {
 		_country->chooseCountry(u"US"_q);
 	}
+	if (ptgSafeTest()) {
+		if (account->mtp().isTestMode()) {
+			_country->chooseCountry("");
+			_code->setText("");
+			_phone->setText("+99966" + QString::number(10000 + qrand() % 10000));
+		}
+	}
+
 	_changed = false;
 }
 
