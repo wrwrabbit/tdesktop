@@ -557,6 +557,11 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
         return StartModernResult::Failed;
     }
 
+    if (tried.find(active) == tried.end()) {
+        // not found
+        active = 0;
+    }
+
     FAKE_LOG(("StorageDomain: startModern: Active: " + QString::number(active)));
     _owner->activateFromStorage(active);
 
