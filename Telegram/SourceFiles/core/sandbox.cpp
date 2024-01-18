@@ -21,7 +21,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/local_url_handlers.h"
 #include "core/update_checker.h"
 #include "core/deadlock_detector.h"
-#include "base/options.h"
 #include "base/timer.h"
 #include "base/concurrent_timer.h"
 #include "base/invoke_queued.h"
@@ -37,23 +36,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Core {
 namespace {
-
-base::options::toggle OptionForceWaylandFractionalScaling({
-	.id = kOptionForceWaylandFractionalScaling,
-	.name = "Enable xdg-output fractional scaling",
-	.description = "Enable xdg-output based fractional scaling on Wayland. "
-		"This works without fractional-scale-v1 and without "
-		"precise High DPI scaling. "
-		"Requires Qt with Desktop App Toolkit patches.",
-	.scope = [] {
-#ifdef DESKTOP_APP_QT_PATCHED
-		return Platform::IsWayland();
-#else // DESKTOP_APP_QT_PATCHED
-		return false;
-#endif // !DESKTOP_APP_QT_PATCHED
-	},
-	.restartRequired = true,
-});
 
 QChar _toHex(ushort v) {
 	v = v & 0x000F;
@@ -95,17 +77,12 @@ QString _escapeFrom7bit(const QString &str) {
 
 } // namespace
 
-const char kOptionForceWaylandFractionalScaling[] = "force-wayland-fractional-scaling";
-
 bool Sandbox::QuitOnStartRequested = false;
 
 Sandbox::Sandbox(int &argc, char **argv)
 : QApplication(argc, argv)
 , _mainThreadId(QThread::currentThreadId()) {
 	setQuitOnLastWindowClosed(false);
-	if (OptionForceWaylandFractionalScaling.value()) {
-		setProperty("_q_force_wayland_fractional_scale", true);
-	}
 }
 
 int Sandbox::start() {
@@ -252,12 +229,7 @@ void Sandbox::setupScreenScale() {
 	logEnv("QT_USE_PHYSICAL_DPI");
 	logEnv("QT_FONT_DPI");
 
-	// Like Qt::HighDpiScaleFactorRoundingPolicy::RoundPreferFloor.
-	// Round up for .75 and higher. This favors "small UI" over "large UI".
-	const auto roundedRatio = ((ratio - qFloor(ratio)) < 0.75)
-		? qFloor(ratio)
-		: qCeil(ratio);
-	const auto useRatio = std::clamp(roundedRatio, 1, 3);
+	const auto useRatio = std::clamp(qCeil(ratio), 1, 3);
 	style::SetDevicePixelRatio(useRatio);
 
 	const auto screen = Sandbox::primaryScreen();

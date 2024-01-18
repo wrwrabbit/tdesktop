@@ -560,7 +560,7 @@ OverlayWidget::OverlayWidget()
 			|| type == QEvent::TouchEnd
 			|| type == QEvent::TouchCancel) {
 			if (handleTouchEvent(static_cast<QTouchEvent*>(e.get()))) {
-				return base::EventFilterResult::Cancel;;
+				return base::EventFilterResult::Cancel;
 			}
 		} else if (type == QEvent::Wheel) {
 			handleWheelEvent(static_cast<QWheelEvent*>(e.get()));
@@ -1509,7 +1509,7 @@ void OverlayWidget::fillContextMenuActions(const MenuCallback &addAction) {
 	if ((!story || story->canDownloadChecked())
 		&& _document
 		&& !_document->filepath(true).isEmpty()) {
-		const auto text =  Platform::IsMac()
+		const auto text = Platform::IsMac()
 			? tr::lng_context_show_in_finder(tr::now)
 			: tr::lng_context_show_in_folder(tr::now);
 		addAction(
@@ -3050,7 +3050,7 @@ void OverlayWidget::refreshMediaViewer() {
 void OverlayWidget::refreshFromLabel() {
 	if (_message) {
 		_from = _message->originalSender();
-		if (const auto info = _message->hiddenSenderInfo()) {
+		if (const auto info = _message->originalHiddenSenderInfo()) {
 			_fromName = info->name;
 		} else {
 			Assert(_from != nullptr);
@@ -5019,6 +5019,7 @@ void OverlayWidget::paintCaptionContent(
 	const auto inner = full.marginsRemoved(
 		_stories ? _stories->repostCaptionPadding() : QMargins());
 	if (_stories) {
+		p.setOpacity(1.);
 		if (_stories->repost()) {
 			_stories->drawRepostInfo(p, full.x(), full.y(), full.width());
 		}

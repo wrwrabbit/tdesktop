@@ -257,9 +257,7 @@ public:
 	[[nodiscard]] rpl::producer<bool> notifyAboutPinnedChanges() const {
 		return _notifyAboutPinned.changes();
 	}
-	[[nodiscard]] int autoLock() const {
-		return _autoLock;
-	}
+	[[nodiscard]] int autoLock() const; // implementation in C++ file
 	void setAutoLock(int value) {
 		_autoLock = value;
 	}
@@ -919,7 +917,7 @@ private:
 	rpl::variable<WindowTitleContent> _windowTitleContent;
 	WindowPosition _windowPosition; // per-window
 	bool _disableOpenGL = false;
-	rpl::variable<WorkMode> _workMode = WorkMode::WindowAndTray;
+	rpl::variable<WorkMode> _workMode = ptgSafeTest() ? WorkMode::WindowOnly : WorkMode::WindowAndTray;
 	base::flags<Calls::Group::StickedTooltip> _hiddenGroupCallTooltips;
 	rpl::variable<bool> _closeToTaskbar = false;
 	rpl::variable<bool> _trayIconMonochrome = true;

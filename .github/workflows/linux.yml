@@ -29,15 +29,6 @@ jobs:
   linux:
     name: Rocky Linux 8
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/${{ github.repository }}/centos_env
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    defaults:
-      run:
-        shell: scl enable gcc-toolset-12 -- bash --noprofile --norc -eo pipefail {0}
 
     strategy:
       matrix:
@@ -61,12 +52,13 @@ jobs:
 
       - name: First set up.
         run: |
-          gcc --version
-          ln -s /usr/src/Libraries
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
+          docker pull ghcr.io/$GITHUB_REPOSITORY/centos_env
+          docker tag ghcr.io/$GITHUB_REPOSITORY/centos_env tdesktop:centos_env
 
       - name: Telegram Desktop build.
         run: |
-          cd $REPO_NAME/Telegram
+          cd $REPO_NAME
 
           ARTIFACT_PREFIX=""
           
@@ -84,7 +76,11 @@ jobs:
             echo "ARTIFACT_NAME=${ARTIFACT_PREFIX}Telegram" >> $GITHUB_ENV
           fi
 
-          ./configure.sh \
+          docker run --rm \
+          -v $PWD:/usr/src/tdesktop \
+          -e DEBUG=1 \
+          tdesktop:centos_env \
+          /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
           -D CMAKE_C_FLAGS_DEBUG="" \
           -D CMAKE_CXX_FLAGS_DEBUG="" \
           -D CMAKE_C_FLAGS="-Werror" \
@@ -93,10 +89,9 @@ jobs:
           -D TDESKTOP_API_TEST=OFF \
           -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
           -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
+          -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
           $DEFINE
-
-          cmake --build ../out --config Debug --parallel
 
       - name: Check.
         run: |
@@ -114,12 +109,18 @@ jobs:
       - name: Move artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
-          cd $REPO_NAME/out/Debug
+          cd $REPO_NAME
           mkdir artifact
-          mv Telegram artifact/
+          mkdir "artifact/Telegram"
+          cp out/Release/Telegram artifact/Telegram/
+          strip -s "artifact/Telegram/Telegram"
+          cd artifact
+          tar -cJvf "${{ env.ARTIFACT_NAME }}_linux.tar.xz" "Telegram/"
+          rm -rf Telegram/
+          # mv {Telegram,Updater} artifact/
       - uses: actions/upload-artifact@master
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.REPO_NAME }}/out/Debug/artifact/
+          path: ${{ env.REPO_NAME }}/artifact/

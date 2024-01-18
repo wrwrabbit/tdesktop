@@ -56,7 +56,8 @@ enum class Context : char {
 	Replies,
 	Pinned,
 	AdminLog,
-	ContactPreview
+	ContactPreview,
+	SavedSublist,
 };
 
 enum class OnlyEmojiAndSpaces : char {
@@ -464,6 +465,8 @@ public:
 		const ClickHandlerPtr &handler) const;
 	[[nodiscard]] virtual bool allowTextSelectionByHandler(
 		const ClickHandlerPtr &handler) const;
+
+	[[nodiscard]] bool usesBubblePattern(const PaintContext &context) const;
 
 	struct VerticalRepaintRange {
 		int top = 0;

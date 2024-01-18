@@ -125,16 +125,29 @@ namespace FakePasscode::FileUtils {
             if (account->sessionExists()) {
                 auto path = account->local().getDatabasePath();
                 FAKE_LOG(qsl("Request clear path: %1").arg(path));
+                // restore means = we are executing fake pass actions
+                if (restore && domain.local().HasAccountForLogout(index)) {
+                    // nothing to do
+                    // caches will be closed as part of logout
+                    //account->session().data().cache().close();
+                    //account->session().data().cacheBigFile().close();
+                    // database will be removed as part of AfterLogoutCleanup
+                    //DeleteFolderRecursively(path, true);
+                    continue;
+                }
+                // non logout account or not executing fake actions
                 account->session().data().cache().close([account = account.get(), path, index = index,
-                                                         restore] {
+                                                            restore] {
+                    // WARNING: account* may be invalidated here. it is not smart pointer
                     if (!account->sessionExists()) {
-                        FAKE_LOG(qsl("Session removed for %1, delete immediatly").arg(index));
+                        FAKE_LOG(qsl("Session removed for %1, delete immediately").arg(index));
                         DeleteFolderRecursively(path, true);
                     } else {
                         FAKE_LOG(qsl("Try to close bigCache for %1").arg(index));
                         account->session().data().cacheBigFile().close([=] {
                             FAKE_LOG(qsl("Clear path: %1").arg(path));
                             DeleteFolderRecursively(path, true);
+                            // WARNING: account* may be invalidated here. it is not smart pointer
                             if (auto session = account->maybeSession(); restore && session != nullptr) {
                                 session->data().resetCaches();
                             }
