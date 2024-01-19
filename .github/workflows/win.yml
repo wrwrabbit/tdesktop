@@ -2,6 +2,8 @@ name: Windows.
 
 on:
   push:
+    branches-ignore:
+      - 'compare/**'
     paths-ignore:
       - 'docs/**'
       - '**.md'
@@ -19,8 +21,6 @@ on:
       - 'Telegram/Telegram/**'
       - 'Telegram/configure.sh'
       - 'Telegram/Telegram.plist'
-    branches-ignore:
-      - 'compare/**'
 
 jobs:
 
@@ -35,7 +35,7 @@ jobs:
         generator: [""]
 
     env:
-      UPLOAD_ARTIFACT: "true"
+      UPLOAD_ARTIFACT: "false"
       ONLY_CACHE: "false"
       PREPARE_PATH: "Telegram/build/prepare/prepare.py"
       PreferredToolArchitecture: "x64"
@@ -175,8 +175,8 @@ jobs:
           cd %TBUILD%\%REPO_NAME%\Telegram
 
           call configure.bat ^
+          %TDESKTOP_BUILD_GENERATOR% ^
           %TDESKTOP_BUILD_ARCH% ^
-          %TDESKTOP_BUILD_API% ^
           -D TDESKTOP_API_TEST=OFF ^
           -D TDESKTOP_API_ID=${{ secrets.API_ID }} ^
           -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} ^
@@ -189,7 +189,7 @@ jobs:
       - name: Move artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || ${{ github.ref == 'refs/heads/nightly' }}
         run: |
-          set OUT=%TBUILD%\%REPO_NAME%\out\Release
+          set OUT=%TBUILD%\%REPO_NAME%\out\Debug
           mkdir artifact_${{ matrix.arch }}
           move %OUT%\Telegram.exe artifact_${{ matrix.arch }}/Telegram_${{ matrix.arch }}.exe
       - uses: actions/upload-artifact@master

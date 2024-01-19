@@ -38,7 +38,7 @@ jobs:
 #          - "DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION"
 
     env:
-      UPLOAD_ARTIFACT: "true"
+      UPLOAD_ARTIFACT: "false"
 
     steps:
       - name: Get repository name.
@@ -112,7 +112,7 @@ jobs:
           cd $REPO_NAME
           mkdir artifact
           mkdir "artifact/Telegram"
-          cp out/Release/Telegram artifact/Telegram/
+          cp out/Debug/Telegram artifact/Telegram/
           strip -s "artifact/Telegram/Telegram"
           cd artifact
           tar -cJvf "${{ env.ARTIFACT_NAME }}_linux.tar.xz" "Telegram/"
