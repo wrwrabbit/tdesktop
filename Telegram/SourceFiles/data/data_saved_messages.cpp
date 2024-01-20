@@ -20,6 +20,8 @@ namespace {
 
 constexpr auto kPerPage = 50;
 constexpr auto kFirstPerPage = 10;
+constexpr auto kListPerPage = 100;
+constexpr auto kListFirstPerPage = 20;
 
 } // namespace
 
@@ -82,7 +84,7 @@ void SavedMessages::sendLoadMore() {
 			MTP_int(_offsetDate),
 			MTP_int(_offsetId),
 			_offsetPeer ? _offsetPeer->input : MTP_inputPeerEmpty(),
-			MTP_int(kPerPage),
+			MTP_int(_offsetId ? kListPerPage : kListFirstPerPage),
 			MTP_long(0)) // hash
 	).done([=](const MTPmessages_SavedDialogs &result) {
 		apply(result, false);
@@ -233,8 +235,10 @@ void SavedMessages::apply(
 		_chatsList.setLoaded();
 	} else if (result.type() == mtpc_messages_savedDialogs) {
 		_chatsList.setLoaded();
-	} else if (offsetDate < _offsetDate
-		|| (offsetDate == _offsetDate && offsetId == _offsetId && offsetPeer == _offsetPeer)) {
+	} else if ((_offsetDate > 0 && offsetDate > _offsetDate)
+		|| (offsetDate == _offsetDate
+			&& offsetId == _offsetId
+			&& offsetPeer == _offsetPeer)) {
 		LOG(("API Error: Bad order in messages.savedDialogs."));
 		_chatsList.setLoaded();
 	} else {

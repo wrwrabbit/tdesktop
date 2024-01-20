@@ -59,10 +59,12 @@ TimeId DefaultScheduleTime() {
 }
 
 bool CanScheduleUntilOnline(not_null<PeerData*> peer) {
-	return !peer->isSelf()
-		&& peer->isUser()
-		&& !peer->asUser()->isBot()
-		&& (peer->asUser()->onlineTill > 0);
+	if (const auto user = peer->asUser()) {
+		return !user->isSelf()
+			&& !user->isBot()
+			&& !user->lastseen().isHidden();
+	}
+	return false;
 }
 
 void ScheduleBox(
@@ -93,9 +95,10 @@ void ScheduleBox(
 		.style = style.chooseDateTimeArgs,
 	});
 
+	using T = SendMenu::Type;
 	SendMenu::SetupMenuAndShortcuts(
 		descriptor.submit.data(),
-		[=] { return SendMenu::Type::SilentOnly; },
+		[t = type == T::Disabled ? T::Disabled : T::SilentOnly] { return t; },
 		[=] { save(true, descriptor.collect()); },
 		nullptr,
 		SendMenu::NoAutoDeleteCallback(),

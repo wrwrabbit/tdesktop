@@ -27,6 +27,7 @@ struct SendOptions {
 	bool hideViaBot = false;
 
     std::optional<TimeId> ptgAutoDelete = std::nullopt;
+	crl::time ttlSeconds = 0;
 };
 [[nodiscard]] SendOptions DefaultSendWhenOnlineOptions();
 

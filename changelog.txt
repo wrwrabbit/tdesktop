@@ -1,3 +1,47 @@
+4.14.9 (19.01.24)
+
+- Fix two possible crashes in messages history and group search.
+- Fix local online status turning off. (once again)
+
+4.14.8 (18.01.24)
+
+- Fix initial position and size of secondary windows.
+- Optimize messages loading. (load replies on demand)
+- Fix local online status turning off.
+
+4.14.7 (18.01.24)
+
+- See when your message was read in private chat.
+- Premium users can see other last seen times if they weren't hidden explicitly.
+- Premium users can allow new chats only from their contacts and other Premium users.
+
+4.14.6 (15.01.24)
+
+- Fix one-time audio tooltip showing in wrong places.
+- Fix media viewer showing above taskbar on Windows.
+- Fix crash in one-time video message playback.
+
+4.14.5 (15.01.24)
+
+- Allow sending one-time voice messages.
+- Improve playing one-time voice and video messages.
+- Remove Ctrl+Shift+[1-6] shortcuts by default, some are used in input methods.
+- Some bugs and glitches fixed.
+
+4.14.4 (08.01.24)
+
+- Switch between logged in accounts using Ctrl+Shift+[1-6] shortcuts.
+- Add poll creation in groups to the attach menu, if exists.
+- Another fix for payment card validation.
+
+4.14.3 (04.01.24)
+
+- Allow sending single-time voice messages.
+- Fix payments card validation.
+- Fix crash when trying to join channels above the limit.
+- Add "Quit Telegram" to the Taskbar context menu. (Windows)
+- Fix opened windows list in the Dock icon context menu. (macOS)
+
 4.14.2 (02.01.24)
 
 - Show original senders name in reply to forward information.

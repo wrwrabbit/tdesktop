@@ -565,10 +565,10 @@ public:
 
 	struct PaintContextArgs {
 		not_null<Ui::ChatTheme*> theme;
-		int visibleAreaTop = 0;
-		int visibleAreaTopGlobal = 0;
-		int visibleAreaWidth = 0;
 		QRect clip;
+		QPoint visibleAreaPositionGlobal;
+		int visibleAreaTop = 0;
+		int visibleAreaWidth = 0;
 	};
 	[[nodiscard]] Ui::ChatPaintContext preparePaintContext(
 		PaintContextArgs &&args);
@@ -601,7 +601,7 @@ private:
 	struct CachedTheme;
 
 	void init();
-	void initSupportMode();
+	void setupShortcuts();
 	void refreshFiltersMenu();
 	void checkOpenedFilter();
 	void suggestArchiveAndMute();

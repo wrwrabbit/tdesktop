@@ -410,6 +410,8 @@ PRIVATE
     chat_helpers/tabbed_section.h
     chat_helpers/tabbed_selector.cpp
     chat_helpers/tabbed_selector.h
+    chat_helpers/ttl_media_layer_widget.cpp
+    chat_helpers/ttl_media_layer_widget.h
     core/application.cpp
     core/application.h
     core/base_integration.cpp
@@ -517,6 +519,7 @@ PRIVATE
     data/data_groups.h
     data/data_histories.cpp
     data/data_histories.h
+    data/data_lastseen_status.h
     data/data_location.cpp
     data/data_location.h
     data/data_media_rotation.cpp
@@ -613,6 +616,8 @@ PRIVATE
     dialogs/dialogs_row.h
     dialogs/dialogs_search_from_controllers.cpp
     dialogs/dialogs_search_from_controllers.h
+    dialogs/dialogs_search_tags.cpp
+    dialogs/dialogs_search_tags.h
     dialogs/dialogs_widget.cpp
     dialogs/dialogs_widget.h
     dialogs/ui/dialogs_layout.cpp
@@ -788,6 +793,8 @@ PRIVATE
     history/view/reactions/history_view_reactions_strip.h
     history/view/reactions/history_view_reactions_tabs.cpp
     history/view/reactions/history_view_reactions_tabs.h
+    history/view/history_view_about_view.cpp
+    history/view/history_view_about_view.h
     history/view/history_view_bottom_info.cpp
     history/view/history_view_bottom_info.h
     history/view/history_view_contact_status.cpp

@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_attached_stickers.h"
 #include "api/api_editing.h"
+#include "api/api_global_privacy.h"
 #include "api/api_polls.h"
 #include "api/api_report.h"
 #include "api/api_ringtones.h"
@@ -26,6 +27,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_web_page.h"
 #include "history/view/reactions/history_view_reactions_list.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/widgets/menu/menu_action.h"
+#include "ui/widgets/menu/menu_common.h"
 #include "ui/widgets/menu/menu_multiline_action.h"
 #include "ui/image/image.h"
 #include "ui/toast/toast.h"
@@ -37,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "menu/menu_item_download_files.h"
 #include "menu/menu_send.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/boxes/show_or_premium_box.h"
 #include "boxes/delete_messages_box.h"
 #include "boxes/report_messages_box.h"
 #include "boxes/sticker_set_box.h"
@@ -60,6 +64,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/click_handler_types.h"
 #include "base/platform/base_platform_info.h"
 #include "base/call_delayed.h"
+#include "settings/settings_premium.h"
 #include "window/window_peer_menu.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
@@ -216,7 +221,7 @@ void AddSaveDocumentAction(
 		HistoryItem *item,
 		not_null<DocumentData*> document,
 		not_null<ListWidget*> list) {
-	if (list->hasCopyMediaRestriction(item)) {
+	if (list->hasCopyMediaRestriction(item) || ItemHasTtl(item)) {
 		return;
 	}
 	const auto origin = item ? item->fullId() : FullMsgId();
@@ -552,7 +557,7 @@ bool AddRescheduleAction(
 			? SendMenu::Type::Reminder
 			: HistoryView::CanScheduleUntilOnline(peer)
 			? SendMenu::Type::ScheduledToUser
-			: SendMenu::Type::Scheduled;
+			: SendMenu::Type::Disabled;
 
 		const auto itemDate = firstItem->date();
 		const auto date = (itemDate == Api::kScheduledUntilOnlineTimestamp)
@@ -1224,6 +1229,9 @@ void AddSaveSoundForNotifications(
 		not_null<HistoryItem*> item,
 		not_null<DocumentData*> document,
 		not_null<Window::SessionController*> controller) {
+	if (ItemHasTtl(item)) {
+		return;
+	}
 	const auto &ringtones = document->session().api().ringtones();
 	if (document->size > ringtones.maxSize()) {
 		return;
@@ -1260,6 +1268,21 @@ void AddWhoReactedAction(
 		not_null<Window::SessionController*> controller) {
 	const auto whoReadIds = std::make_shared<Api::WhoReadList>();
 	const auto weak = Ui::MakeWeak(menu.get());
+	const auto user = item->history()->peer;
+	const auto showOrPremium = [=] {
+		if (const auto strong = weak.data()) {
+			strong->hideMenu();
+		}
+		const auto type = Ui::ShowOrPremium::ReadTime;
+		const auto name = user->shortName();
+		auto box = Box(Ui::ShowOrPremiumBox, type, name, [=] {
+			const auto api = &controller->session().api();
+			api->globalPrivacy().updateHideReadTime({});
+		}, [=] {
+			Settings::ShowPremium(controller, u"revtime_hidden"_q);
+		});
+		controller->show(std::move(box));
+	};
 	const auto participantChosen = [=](uint64 id) {
 		if (const auto strong = weak.data()) {
 			strong->hideMenu();
@@ -1282,12 +1305,75 @@ void AddWhoReactedAction(
 	if (!menu->empty()) {
 		menu->addSeparator(&st::expandedMenuSeparator);
 	}
-	menu->addAction(Ui::WhoReactedContextAction(
-		menu.get(),
-		Api::WhoReacted(item, context, st::defaultWhoRead, whoReadIds),
-		Data::ReactedMenuFactory(&controller->session()),
-		participantChosen,
-		showAllChosen));
+	if (item->history()->peer->isUser()) {
+		menu->addAction(Ui::WhenReadContextAction(
+			menu.get(),
+			Api::WhoReacted(item, context, st::defaultWhoRead, whoReadIds),
+			showOrPremium));
+	} else {
+		menu->addAction(Ui::WhoReactedContextAction(
+			menu.get(),
+			Api::WhoReacted(item, context, st::defaultWhoRead, whoReadIds),
+			Data::ReactedMenuFactory(&controller->session()),
+			participantChosen,
+			showAllChosen));
+	}
+}
+
+void ShowTagMenu(
+		not_null<base::unique_qptr<Ui::PopupMenu>*> menu,
+		QPoint position,
+		not_null<QWidget*> context,
+		not_null<HistoryItem*> item,
+		const Data::ReactionId &id,
+		not_null<Window::SessionController*> controller) {
+	using namespace Data;
+	const auto itemId = item->fullId();
+	const auto owner = &controller->session().data();
+	*menu = base::make_unique_q<Ui::PopupMenu>(
+		context,
+		st::popupMenuExpandedSeparator);
+	(*menu)->addAction(tr::lng_context_filter_by_tag(tr::now), [=] {
+		HashtagClickHandler(SearchTagToQuery(id)).onClick({
+			.button = Qt::LeftButton,
+			.other = QVariant::fromValue(ClickHandlerContext{
+				.sessionWindow = controller,
+			}),
+		});
+	}, &st::menuIconFave);
+
+	const auto removeTag = [=] {
+		if (const auto item = owner->message(itemId)) {
+			const auto &list = item->reactions();
+			if (ranges::contains(list, id, &MessageReaction::id)) {
+				item->toggleReaction(
+					id,
+					HistoryItem::ReactionSource::Quick);
+			}
+		}
+	};
+	(*menu)->addAction(base::make_unique_q<Ui::Menu::Action>(
+		(*menu)->menu(),
+		st::menuWithIconsAttention,
+		Ui::Menu::CreateAction(
+			(*menu)->menu(),
+			tr::lng_context_remove_tag(tr::now),
+			removeTag),
+		&st::menuIconDisableAttention,
+		&st::menuIconDisableAttention));
+
+	if (const auto custom = id.custom()) {
+		if (const auto set = owner->document(custom)->sticker()) {
+			if (set->set.id) {
+				AddEmojiPacksAction(
+					menu->get(),
+					{ set->set },
+					EmojiPacksSource::Reaction,
+					controller);
+			}
+		}
+	}
+	(*menu)->popup(position);
 }
 
 void ShowWhoReactedMenu(
@@ -1298,6 +1384,11 @@ void ShowWhoReactedMenu(
 		const Data::ReactionId &id,
 		not_null<Window::SessionController*> controller,
 		rpl::lifetime &lifetime) {
+	if (item->reactionsAreTags()) {
+		ShowTagMenu(menu, position, context, item, id, controller);
+		return;
+	}
+
 	struct State {
 		int addedToBottom = 0;
 	};
@@ -1330,7 +1421,7 @@ void ShowWhoReactedMenu(
 		context,
 		st::defaultWhoRead
 	) | rpl::filter([=](const Ui::WhoReadContent &content) {
-		return !content.unknown;
+		return content.state != Ui::WhoReadState::Unknown;
 	}) | rpl::start_with_next([=, &lifetime](Ui::WhoReadContent &&content) {
 		const auto creating = !*menu;
 		const auto refillTop = [=] {
@@ -1519,6 +1610,12 @@ TextWithEntities TransribedText(not_null<HistoryItem*> item) {
 		return { entry.result };
 	}
 	return {};
+}
+
+bool ItemHasTtl(HistoryItem *item) {
+	return (item && item->media())
+		? (item->media()->ttlSeconds() > 0)
+		: false;
 }
 
 } // namespace HistoryView
