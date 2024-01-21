@@ -7,10 +7,10 @@ on:
 jobs:
 
   windows:
-    environment: release
+    environment: Release
     name: Windows
-    #runs-on: windows-2022
-    runs-on: self-hosted
+    runs-on: windows-2022
+    #runs-on: windows-larger
 
     strategy:
       matrix:

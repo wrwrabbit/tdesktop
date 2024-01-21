@@ -7,7 +7,7 @@ on:
 jobs:
 
   macos:
-    environment: release
+    environment: Release
     name: MacOS
     runs-on: macos-13
 
