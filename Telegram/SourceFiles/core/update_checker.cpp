@@ -943,9 +943,11 @@ void MtpChecker::start() {
 	}
 	const auto updaterVersion = Platform::AutoUpdateVersion();
 	const auto feed = AcceptUpstreamRelease ?
+		// upstream TG channel name -> tdhbcfeed<NUM>
 		"tdhbcfeed"
 		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString())
 		:
+		// Partisan TG channel name
 		PTG_UPDATE_CHANNEL
 		;
 	FAKE_LOG(("Update channel : %1").arg(feed));
