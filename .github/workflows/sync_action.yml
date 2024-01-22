@@ -3,7 +3,7 @@ name: Sync repo
 on:
   workflow_call:
   workflow_dispatch:
-  
+
 jobs:
   sync:
     name: Sync repo
@@ -22,3 +22,10 @@ jobs:
               repo: 'tdesktop',
               branch: 'master',
             });
+
+      - name: Build Docker
+
+  call-docker:
+    uses: cpartisans/tdesktop/.github/workflows/docker.yml@master
+    if: github.repository == 'cpartisans/tdesktop'
+    needs: sync
