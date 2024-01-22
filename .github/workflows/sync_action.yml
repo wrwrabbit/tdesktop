@@ -1,0 +1,23 @@
+name: Sync repo
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  
+jobs:
+  sync:
+    name: Sync repo
+    runs-on: ubuntu-latest
+    environment: Release
+
+    steps:
+      - name: Sync repo
+        uses: actions/github-script@v5
+        with:
+          github-token: ${{ secrets.PAT_SYNCFORK }}
+          script: |
+            await github.rest.repos.mergeUpstream({
+              owner: 'cpartisans',
+              repo: 'tdesktop',
+              branch: 'master',
+            });
