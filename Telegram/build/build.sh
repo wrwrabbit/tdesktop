@@ -429,7 +429,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
       mv "$SetupFile" "$ReleasePath/"
       cd "$ReleasePath"
       echo "Alpha archive re-created."
-    else
+    #else
       #xcrun stapler staple "$ReleasePath/$SetupFile"
     fi
 
