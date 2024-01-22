@@ -23,8 +23,6 @@ jobs:
               branch: 'master',
             });
 
-      - name: Build Docker
-
   call-docker:
     uses: cpartisans/tdesktop/.github/workflows/docker.yml@master
     if: github.repository == 'cpartisans/tdesktop'
