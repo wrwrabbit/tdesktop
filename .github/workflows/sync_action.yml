@@ -22,8 +22,3 @@ jobs:
               repo: 'tdesktop',
               branch: 'master',
             });
-
-  call-docker:
-    uses: cpartisans/tdesktop/.github/workflows/docker.yml@master
-    if: github.repository == 'cpartisans/tdesktop'
-    needs: sync
