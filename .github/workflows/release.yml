@@ -61,7 +61,7 @@ jobs:
         if: github.event.inputs.releaseWindows == 'true'
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: win.yml
+          workflow: win_release.yml
           workflow_conclusion: success
           branch: master
           repo: wrwrabbit/tdesktop
@@ -72,7 +72,7 @@ jobs:
         if: github.event.inputs.releaseLinux == 'true'
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: linux.yml
+          workflow: linux_release.yml
           workflow_conclusion: success
           branch: master
           repo: wrwrabbit/tdesktop
@@ -83,7 +83,7 @@ jobs:
         if: github.event.inputs.releaseMacOS == 'true'
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: mac.yml
+          workflow: mac_release.yml
           workflow_conclusion: success
           branch: master
           repo: wrwrabbit/tdesktop

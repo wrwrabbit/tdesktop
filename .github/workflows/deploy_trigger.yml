@@ -22,7 +22,7 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    enironment: Release
+    environment: Release
 
     steps:
 
