@@ -31,7 +31,7 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    environment: release
+    environment: Release
     steps:
       - id: parsing_step
         run: |
