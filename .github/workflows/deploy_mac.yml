@@ -17,6 +17,9 @@ jobs:
           - ""
     env:
       UPLOAD_ARTIFACT: "true"
+      ONLY_CACHE: "false"
+      ARTIFACT_NAME: "Mac-PTelegram"
+      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
 
     steps:
       - name: Get repository name.
@@ -68,6 +71,7 @@ jobs:
           echo "ARTIFACT_NAME=PTelegram_${{ matrix.arch }}" >> $GITHUB_ENV
 
       - name: Telegram Desktop build.
+        if: env.ONLY_CACHE == 'false'
         env:
           RSA_PRIVATE: ${{ secrets.RSA_PRIVATE }}
           API_ID: ${{ secrets.API_ID }}

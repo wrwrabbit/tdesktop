@@ -98,29 +98,6 @@ jobs:
           cd %TBUILD%
           %REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent
 
-      - name: Read defines.
-        shell: bash
-        run: |
-          DEFINE=""
-          if [ -n "${{ matrix.defines }}" ]; then
-            DEFINE="-D ${{ matrix.defines }}=ON"
-            echo "Define from matrix: $DEFINE"
-            echo "ARTIFACT_NAME=PTelegram_${{ matrix.arch }}_${{ matrix.defines }}" >> $GITHUB_ENV
-          else
-            echo "ARTIFACT_NAME=PTelegram_${{ matrix.arch }}" >> $GITHUB_ENV
-          fi
-          echo "TDESKTOP_BUILD_DEFINE=$DEFINE" >> $GITHUB_ENV
-
-          API="-D TDESKTOP_API_TEST=OFF -D TDESKTOP_API_ID=${{ secrets.API_ID }} -D TDESKTOP_API_HASH=${{ secrets.API_HASH }}"
-          echo "TDESKTOP_BUILD_API=$API" >> $GITHUB_ENV
-
-      - name: Free up some disk space.
-        run: |
-          cd %TBUILD%
-          del /S Libraries\*.pdb
-          del /S Libraries\*.pch
-          del /S Libraries\*.obj
-
       - name: Read configuration matrix.
         shell: bash
         run: |
