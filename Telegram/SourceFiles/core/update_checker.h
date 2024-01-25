@@ -47,6 +47,8 @@ public:
 	int already() const;
 	int size() const;
 
+	void setAcceptUpstreamRelease(bool value);
+
 private:
 	const std::shared_ptr<Updater> _updater;
 

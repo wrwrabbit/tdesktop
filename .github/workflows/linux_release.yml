@@ -1,7 +1,8 @@
-name: Linux.
+name: Linux Release.
 
 on:
-  push:
+  pull_request:
+    types: [opened, reopened]
     branches-ignore:
       - 'compare/**'
     paths-ignore:
@@ -11,7 +12,7 @@ on:
       - 'LEGAL'
       - 'LICENSE'
       - '.github/**'
-      - '!.github/workflows/linux.yml'
+      - '!.github/workflows/linux_release.yml'
       - 'snap/**'
       - 'Telegram/build/**'
       - 'Telegram/Resources/uwp/**'
@@ -38,7 +39,7 @@ jobs:
 #          - "DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION"
 
     env:
-      UPLOAD_ARTIFACT: "false"
+      UPLOAD_ARTIFACT: "true"
 
     steps:
       - name: Get repository name.
@@ -75,27 +76,29 @@ jobs:
           else
             echo "ARTIFACT_NAME=${ARTIFACT_PREFIX}Telegram" >> $GITHUB_ENV
           fi
+          
+          #          -D CMAKE_C_FLAGS="-Werror" 
+          #          -D CMAKE_CXX_FLAGS="-Werror" 
+          # not used in actual Release build
 
           docker run --rm \
           -v $PWD:/usr/src/tdesktop \
-          -e DEBUG=1 \
           tdesktop:centos_env \
           /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
           -D CMAKE_C_FLAGS_DEBUG="" \
           -D CMAKE_CXX_FLAGS_DEBUG="" \
-          -D CMAKE_C_FLAGS="-Werror" \
-          -D CMAKE_CXX_FLAGS="-Werror" \
           -D CMAKE_EXE_LINKER_FLAGS="-s" \
           -D TDESKTOP_API_TEST=OFF \
           -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
           -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
+          -D CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
           $DEFINE
 
       - name: Check.
         run: |
-          filePath="$REPO_NAME/out/Debug/Telegram"
+          filePath="$REPO_NAME/out/Release/Telegram"
           if test -f "$filePath"; then
             echo "Build successfully done! :)"
 
@@ -112,7 +115,7 @@ jobs:
           cd $REPO_NAME
           mkdir artifact
           mkdir "artifact/Telegram"
-          cp out/Debug/Telegram artifact/Telegram/
+          cp out/Release/Telegram artifact/Telegram/
           strip -s "artifact/Telegram/Telegram"
           cd artifact
           tar -cJvf "${{ env.ARTIFACT_NAME }}_linux.tar.xz" "Telegram/"

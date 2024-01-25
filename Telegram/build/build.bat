@@ -104,6 +104,7 @@ if %Build64% neq 0 (
 )
 set "ReleasePath=%SolutionPath%\Release"
 set "DeployPath=%ReleasePath%\deploy\%AppVersionStrMajor%\%AppVersionStrFull%"
+set "DeployPath=%ReleasePath%\deploy"
 set "SignPath=%HomePath%\..\..\DesktopPrivate\Sign.bat"
 set "BinaryName=Telegram"
 set "DropboxSymbolsPath=Y:\Telegram\symbols"
@@ -136,10 +137,10 @@ if %BuildUWP% neq 0 (
   )
 )
 if %AlphaVersion% neq 0 (
-  if exist %DeployPath%\ (
-    echo Deploy folder for version %AppVersionStr% already exists!
-    exit /b 1
-  )
+  rem if exist %DeployPath%\ (
+  rem   echo Deploy folder for version %AppVersionStr% already exists!
+  rem   exit /b 1
+  rem )
   if exist %ReleasePath%\%AlphaKeyFile% (
     echo Alpha version key file for version %AppVersion% already exists!
     exit /b 1
@@ -204,17 +205,18 @@ if %BuildUWP% equ 0 (
     goto sign2
   )
 
-  if %AlphaVersion% equ 0 (
-    iscc /dMyAppVersion=%AppVersionStrSmall% /dMyAppVersionZero=%AppVersionStr% /dMyAppVersionFull=%AppVersionStrFull% "/dReleasePath=%ReleasePath%" "/dMyBuildTarget=%BuildTarget%" "%FullScriptPath%setup.iss"
-    if %errorlevel% neq 0 goto error
-    if not exist "%SetupFile%" goto error
-:sign3
-    call "%SignPath%" "%SetupFile%"
-    if %errorlevel% neq 0 (
-      timeout /t 3
-      goto sign3
-    )
-  )
+rem  No installer in PTG
+rem   if %AlphaVersion% equ 0 (
+rem     iscc /dMyAppVersion=%AppVersionStrSmall% /dMyAppVersionZero=%AppVersionStr% /dMyAppVersionFull=%AppVersionStrFull% "/dReleasePath=%ReleasePath%" "/dMyBuildTarget=%BuildTarget%" "%FullScriptPath%setup.iss"
+rem     if %errorlevel% neq 0 goto error
+rem     if not exist "%SetupFile%" goto error
+rem  :sign3
+rem     call "%SignPath%" "%SetupFile%"
+rem     if %errorlevel% neq 0 (
+rem       timeout /t 3
+rem       goto sign3
+rem     )
+rem   )
 
   call Packer.exe -version %VersionForPacker% -path %BinaryName%.exe -path Updater.exe -path "modules\%Platform%\d3d\d3dcompiler_47.dll" -target %BuildTarget% %AlphaBetaParam%
   if %errorlevel% neq 0 goto error
@@ -328,9 +330,9 @@ if %BuildUWP% equ 0 (
 
   if not exist "%DeployPath%\%UpdateFile%" goto error
   if not exist "%DeployPath%\%PortableFile%" goto error
-  if %AlphaVersion% equ 0 (
-    if not exist "%DeployPath%\%SetupFile%" goto error
-  )
+rem   if %AlphaVersion% equ 0 (
+rem     if not exist "%DeployPath%\%SetupFile%" goto error
+rem   )
   if not exist "%DeployPath%\%BinaryName%.pdb" goto error
   if not exist "%DeployPath%\Updater.exe" goto error
   if not exist "%DeployPath%\Updater.pdb" goto error
@@ -338,11 +340,11 @@ if %BuildUWP% equ 0 (
 
   xcopy "%DeployPath%\%UpdateFile%" "%FinalDeployPath%\" /Y
   xcopy "%DeployPath%\%PortableFile%" "%FinalDeployPath%\" /Y
-  if %AlphaVersion% equ 0 (
-    xcopy "%DeployPath%\%SetupFile%" "%FinalDeployPath%\" /Y
-  ) else (
-    xcopy "%DeployPath%\%AlphaKeyFile%" "%FinalDeployPath%\" /Y
-  )
+rem   if %AlphaVersion% equ 0 (
+rem     xcopy "%DeployPath%\%SetupFile%" "%FinalDeployPath%\" /Y
+rem   ) else (
+rem     xcopy "%DeployPath%\%AlphaKeyFile%" "%FinalDeployPath%\" /Y
+rem   )
 )
 
 echo Version %AppVersionStrFull% is ready!

@@ -1,4 +1,4 @@
-name: 'Create Release'
+name: Create Public Release
 
 on:
   workflow_dispatch:
@@ -31,6 +31,7 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    environment: Release
     steps:
       - id: parsing_step
         run: |
@@ -61,10 +62,10 @@ jobs:
         if: github.event.inputs.releaseWindows == 'true'
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: win_release.yml
+          workflow: deploy_win.yml
           workflow_conclusion: success
           branch: master
-          repo: wrwrabbit/tdesktop
+          repo: cpartisans/tdesktop
           path: Windows
 
       - name: Download Linux artifacts
@@ -72,10 +73,10 @@ jobs:
         if: github.event.inputs.releaseLinux == 'true'
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: linux_release.yml
+          workflow: depoy_linux.yml
           workflow_conclusion: success
           branch: master
-          repo: wrwrabbit/tdesktop
+          repo: cpartisans/tdesktop
           path: Linux
 
       - name: Download MacOS artifacts
@@ -83,10 +84,10 @@ jobs:
         if: github.event.inputs.releaseMacOS == 'true'
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: mac_release.yml
+          workflow: deploy_mac.yml
           workflow_conclusion: success
           branch: master
-          repo: wrwrabbit/tdesktop
+          repo: cpartisans/tdesktop
           path: MacOS
           
       - name: Download Snap artifacts
