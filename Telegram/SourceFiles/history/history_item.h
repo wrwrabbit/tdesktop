@@ -195,6 +195,8 @@ public:
 	void checkStoryForwardInfo();
 	void checkBuyButton();
 
+	void resolveDependent();
+
 	void updateServiceText(PreparedServiceText &&text);
 	void updateStoryMentionText();
 
@@ -314,8 +316,8 @@ public:
 	[[nodiscard]] bool isLocal() const {
 		return _flags & MessageFlag::Local;
 	}
-	[[nodiscard]] bool isFakeBotAbout() const {
-		return _flags & MessageFlag::FakeBotAbout;
+	[[nodiscard]] bool isFakeAboutView() const {
+		return _flags & MessageFlag::FakeAboutView;
 	}
 	[[nodiscard]] bool showSimilarChannels() const {
 		return _flags & MessageFlag::ShowSimilarChannels;
@@ -454,6 +456,7 @@ public:
 		not_null<UserData*> from) const;
 	[[nodiscard]] crl::time lastReactionsRefreshTime() const;
 
+	[[nodiscard]] bool reactionsAreTags() const;
 	[[nodiscard]] bool hasDirectLink() const;
 	[[nodiscard]] bool changesWallPaper() const;
 
@@ -515,6 +518,11 @@ public:
 	[[nodiscard]] HistoryItem *lookupDiscussionPostOriginal() const;
 	[[nodiscard]] PeerData *displayFrom() const;
 	[[nodiscard]] uint8 colorIndex() const;
+
+	// In forwards we show name in sender's color, but the message
+	// content uses the color of the original sender.
+	[[nodiscard]] PeerData *contentColorsFrom() const;
+	[[nodiscard]] uint8 contentColorIndex() const;
 
 	[[nodiscard]] std::unique_ptr<HistoryView::Element> createView(
 		not_null<HistoryView::ElementDelegate*> delegate,
@@ -581,7 +589,7 @@ private:
 	[[nodiscard]] auto GetServiceDependentData() const
 		-> const HistoryServiceDependentData *;
 	void updateDependentServiceText();
-	bool updateServiceDependent(bool force = false);
+	void updateServiceDependent(bool force = false);
 	void setServiceText(PreparedServiceText &&prepared);
 
 	void setStoryFields(not_null<Data::Story*> story);
@@ -596,6 +604,9 @@ private:
 		not_null<HistoryMessageTranslation*> translation,
 		bool used);
 	void setSelfDestruct(HistorySelfDestructType type, MTPint mtpTTLvalue);
+
+	void resolveDependent(not_null<HistoryServiceDependentData*> dependent);
+	void resolveDependent(not_null<HistoryMessageReply*> reply);
 
 	[[nodiscard]] TextWithEntities fromLinkText() const;
 	[[nodiscard]] ClickHandlerPtr fromLink() const;

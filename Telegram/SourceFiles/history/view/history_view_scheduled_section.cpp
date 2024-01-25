@@ -198,11 +198,15 @@ void ScheduledWidget::setupComposeControls() {
 		const auto restriction = Data::RestrictionError(
 			_history->peer,
 			ChatRestriction::SendOther);
-		return !canSendAnything
+		auto text = !canSendAnything
 			? (restriction
 				? restriction
 				: tr::lng_group_not_accessible(tr::now))
 			: std::optional<QString>();
+		return text ? Controls::WriteRestriction{
+			.text = std::move(*text),
+			.type = Controls::WriteRestrictionType::Rights,
+		} : Controls::WriteRestriction();
 	});
 	_composeControls->setHistory({
 		.history = _history.get(),
@@ -843,7 +847,8 @@ bool ScheduledWidget::cornerButtonsIgnoreVisibility() {
 }
 
 std::optional<bool> ScheduledWidget::cornerButtonsDownShown() {
-	if (_composeControls->isLockPresent()) {
+	if (_composeControls->isLockPresent()
+		|| _composeControls->isTTLButtonShown()) {
 		return false;
 	}
 	const auto top = _scroll->scrollTop() + st::historyToDownShownAfter;
@@ -857,7 +862,8 @@ std::optional<bool> ScheduledWidget::cornerButtonsDownShown() {
 
 bool ScheduledWidget::cornerButtonsUnreadMayBeShown() {
 	return _inner->loadedAtBottomKnown()
-		&& !_composeControls->isLockPresent();
+		&& !_composeControls->isLockPresent()
+		&& !_composeControls->isTTLButtonShown();
 }
 
 bool ScheduledWidget::cornerButtonsHas(CornerButtonType type) {

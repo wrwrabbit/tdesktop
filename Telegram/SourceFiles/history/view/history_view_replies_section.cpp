@@ -699,7 +699,7 @@ void RepliesWidget::setupComposeControls() {
 		const auto restriction = Data::RestrictionError(
 			_history->peer,
 			ChatRestriction::SendOther);
-		return !canSendAnything
+		auto text = !canSendAnything
 			? (restriction
 				? restriction
 				: topicRestriction
@@ -708,6 +708,10 @@ void RepliesWidget::setupComposeControls() {
 			: topicRestriction
 			? std::move(topicRestriction)
 			: std::optional<QString>();
+		return text ? Controls::WriteRestriction{
+			.text = std::move(*text),
+			.type = Controls::WriteRestrictionType::Rights,
+		} : Controls::WriteRestriction();
 	});
 
 	_composeControls->setHistory({
@@ -1838,7 +1842,8 @@ bool RepliesWidget::cornerButtonsIgnoreVisibility() {
 }
 
 std::optional<bool> RepliesWidget::cornerButtonsDownShown() {
-	if (_composeControls->isLockPresent()) {
+	if (_composeControls->isLockPresent()
+		|| _composeControls->isTTLButtonShown()) {
 		return false;
 	}
 	const auto top = _scroll->scrollTop() + st::historyToDownShownAfter;
@@ -1851,7 +1856,9 @@ std::optional<bool> RepliesWidget::cornerButtonsDownShown() {
 }
 
 bool RepliesWidget::cornerButtonsUnreadMayBeShown() {
-	return _loaded && !_composeControls->isLockPresent();
+	return _loaded
+		&& !_composeControls->isLockPresent()
+		&& !_composeControls->isTTLButtonShown();
 }
 
 bool RepliesWidget::cornerButtonsHas(CornerButtonType type) {
