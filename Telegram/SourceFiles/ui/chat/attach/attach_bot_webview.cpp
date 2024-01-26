@@ -364,7 +364,7 @@ Panel::Panel(
 }
 
 Panel::~Panel() {
-	_webview = nullptr;
+	base::take(_webview);
 	_progress = nullptr;
 	_widget = nullptr;
 }
@@ -533,7 +533,14 @@ bool Panel::showWebview(
 			}, &st::menuIconLeave);
 		}
 		callback(tr::lng_bot_reload_page(tr::now), [=] {
-			_webview->window.reload();
+			if (_webview) {
+				_webview->window.reload();
+			} else if (const auto params = _delegate->botThemeParams()
+				; createWebview(params)) {
+				showWebviewProgress();
+				updateThemeParams(params);
+				_webview->window.navigate(url);
+			}
 		}, &st::menuIconRestore);
 		const auto main = (_menuButtons & MenuButton::RemoveFromMainMenu);
 		if (main || (_menuButtons & MenuButton::RemoveFromMenu)) {
@@ -587,7 +594,7 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 
 	QObject::connect(container, &QObject::destroyed, [=] {
 		if (_webview && &_webview->window == raw) {
-			_webview = nullptr;
+			base::take(_webview);
 			if (_webviewProgress) {
 				hideWebviewProgress();
 				if (_progress && !_progress->shown) {
@@ -604,6 +611,16 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 		return false;
 	}
 	QObject::connect(raw->widget(), &QObject::destroyed, [=] {
+		const auto parent = _webviewParent.data();
+		if (!_webview
+			|| &_webview->window != raw
+			|| !parent
+			|| _widget->inner() != parent) {
+			// If we destroyed _webview ourselves,
+			// or if we changed _widget->inner ourselves,
+			// we don't show any message, nothing crashed.
+			return;
+		}
 		crl::on_main(this, [=] {
 			showCriticalError({ "Error: WebView has crashed." });
 		});
@@ -733,8 +750,9 @@ void Panel::switchInlineQueryMessage(const QJsonObject &args) {
 		u"groups"_q,
 		u"channels"_q,
 	};
+	const auto typeArray = args["chat_types"].toArray();
 	auto types = std::vector<QString>();
-	for (const auto &value : args["chat_types"].toArray()) {
+	for (const auto &value : typeArray) {
 		const auto type = value.toString();
 		if (valid.contains(type)) {
 			types.push_back(type);
@@ -810,8 +828,9 @@ void Panel::openPopup(const QJsonObject &args) {
 		{ "cancel", Type::Cancel },
 		{ "destructive", Type::Destructive },
 	};
+	const auto buttonArray = args["buttons"].toArray();
 	auto buttons = std::vector<Webview::PopupArgs::Button>();
-	for (const auto button : args["buttons"].toArray()) {
+	for (const auto button : buttonArray) {
 		const auto fields = button.toObject();
 		const auto i = types.find(fields["type"].toString());
 		if (i == end(types)) {

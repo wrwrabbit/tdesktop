@@ -818,6 +818,15 @@ public:
 	void setStoriesClickTooltipHidden(bool value) {
 		_storiesClickTooltipHidden = value;
 	}
+	[[nodiscard]] bool ttlVoiceClickTooltipHidden() const {
+		return _ttlVoiceClickTooltipHidden.current();
+	}
+	[[nodiscard]] rpl::producer<bool> ttlVoiceClickTooltipHiddenValue() const {
+		return _ttlVoiceClickTooltipHidden.value();
+	}
+	void setTtlVoiceClickTooltipHidden(bool value) {
+		_ttlVoiceClickTooltipHidden = value;
+	}
 
 	[[nodiscard]] static bool ThirdColumnByDefault();
 	[[nodiscard]] static float64 DefaultDialogsWidthRatio();
@@ -943,6 +952,7 @@ private:
 	rpl::variable<bool> _ignoreBatterySaving = false;
 	std::optional<uint64> _macRoundIconDigest;
 	rpl::variable<bool> _storiesClickTooltipHidden = false;
+	rpl::variable<bool> _ttlVoiceClickTooltipHidden = false;
 
 	bool _tabbedReplacedWithInfo = false; // per-window
 	rpl::event_stream<bool> _tabbedReplacedWithInfoValue; // per-window

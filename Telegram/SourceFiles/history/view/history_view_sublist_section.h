@@ -58,6 +58,8 @@ public:
 	bool showInternal(
 		not_null<Window::SectionMemento*> memento,
 		const Window::SectionShow &params) override;
+	bool sameTypeAs(not_null<Window::SectionMemento*> memento) override;
+
 	std::shared_ptr<Window::SectionMemento> createMemento() override;
 	bool showMessage(
 		PeerId peerId,
@@ -165,11 +167,13 @@ private:
 	void setupOpenChatButton();
 	void setupAboutHiddenAuthor();
 	void setupTranslateBar();
+	void setupShortcuts();
 
 	void confirmDeleteSelected();
 	void confirmForwardSelected();
 	void clearSelected();
 	void recountChatWidth();
+	void searchInSublist();
 
 	const not_null<Data::SavedSublist*> _sublist;
 	const not_null<History*> _history;

@@ -442,7 +442,6 @@ void InnerWidget::applyFilter(FilterValue &&value) {
 }
 
 void InnerWidget::applySearch(const QString &query) {
-	auto clearQuery = query.trimmed();
 	if (_searchQuery != query) {
 		_searchQuery = query;
 		clearAndRequestLog();
@@ -944,10 +943,10 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 	auto clip = e->rect();
 	auto context = _controller->preparePaintContext({
 		.theme = _theme.get(),
-		.visibleAreaTop = _visibleTop,
-		.visibleAreaTopGlobal = mapToGlobal(QPoint(0, _visibleTop)).y(),
-		.visibleAreaWidth = width(),
 		.clip = clip,
+		.visibleAreaPositionGlobal = mapToGlobal(QPoint(0, _visibleTop)),
+		.visibleAreaTop = _visibleTop,
+		.visibleAreaWidth = width(),
 	});
 	if (_items.empty() && _upLoaded && _downLoaded) {
 		paintEmpty(p, context.st);

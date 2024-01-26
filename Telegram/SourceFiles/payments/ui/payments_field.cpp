@@ -36,7 +36,8 @@ struct SimpleFieldState {
 }
 
 [[nodiscard]] QString RemoveNonNumbers(QString value) {
-	return value.replace(QRegularExpression("[^0-9]"), QString());
+	static const auto RegExp = QRegularExpression("[^0-9]");
+	return value.replace(RegExp, QString());
 }
 
 [[nodiscard]] SimpleFieldState CleanMoneyState(
@@ -219,6 +220,7 @@ struct SimpleFieldState {
 	if (config.type == FieldType::Country) {
 		return countryIso2;
 	} else if (config.type == FieldType::Money) {
+		static const auto RegExp = QRegularExpression("[^0-9\\.]");
 		const auto rule = LookupCurrencyRule(config.currency);
 		const auto real = QString(parsed).replace(
 			QChar(rule.decimal),
@@ -227,16 +229,15 @@ struct SimpleFieldState {
 			QChar(','),
 			QChar('.')
 		).replace(
-			QRegularExpression("[^0-9\\.]"),
+			RegExp,
 			QString()
 		).toDouble();
 		return QString::number(
 			int64(base::SafeRound(real * std::pow(10., rule.exponent))));
 	} else if (config.type == FieldType::CardNumber
 		|| config.type == FieldType::CardCVC) {
-		return QString(parsed).replace(
-			QRegularExpression("[^0-9\\.]"),
-			QString());
+		static const auto RegExp = QRegularExpression("[^0-9]");
+		return QString(parsed).replace(RegExp, QString());
 	}
 	return parsed;
 }

@@ -234,7 +234,7 @@ Story *Stories::applySingle(PeerId peerId, const MTPstoryItem &story) {
 void Stories::requestPeerStories(
 		not_null<PeerData*> peer,
 		Fn<void()> done) {
-	const auto [i, ok] = _requestingPeerStories.emplace(peer);
+	const auto &[i, ok] = _requestingPeerStories.emplace(peer);
 	if (done) {
 		i->second.push_back(std::move(done));
 	}
@@ -1290,7 +1290,6 @@ void Stories::sendIncrementViewsRequests() {
 	if (_incrementViewsPending.empty()) {
 		return;
 	}
-	auto ids = QVector<MTPint>();
 	struct Prepared {
 		PeerId peer = 0;
 		QVector<MTPint> ids;

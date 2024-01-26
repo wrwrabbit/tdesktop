@@ -309,7 +309,7 @@ System::Timing System::countTiming(
 
 void System::registerThread(not_null<Data::Thread*> thread) {
 	if (const auto topic = thread->asTopic()) {
-		const auto [i, ok] = _watchedTopics.emplace(topic, rpl::lifetime());
+		const auto &[i, ok] = _watchedTopics.emplace(topic, rpl::lifetime());
 		if (ok) {
 			topic->destroyed() | rpl::start_with_next([=] {
 				clearFromTopic(topic);
@@ -900,7 +900,6 @@ TextWithEntities Manager::ComposeReactionEmoji(
 		return TextWithEntities{ *emoji };
 	}
 	const auto id = v::get<DocumentId>(reaction.data);
-	auto entities = EntitiesInText();
 	const auto document = session->data().document(id);
 	const auto sticker = document->sticker();
 	const auto text = sticker ? sticker->alt : PlaceholderReactionText();

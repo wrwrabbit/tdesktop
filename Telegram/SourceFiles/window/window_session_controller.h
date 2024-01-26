@@ -162,6 +162,7 @@ struct SectionShow {
 	bool childColumn = false;
 	bool forbidLayer = false;
 	bool reapplyLocalDraft = false;
+	bool dropSameFromStack = false;
 	Origin origin;
 
 };
@@ -380,7 +381,7 @@ public:
 
 	void showEditPeerBox(PeerData *peer);
 	void showGiftPremiumBox(UserData *user);
-	void showGiftPremiumsBox();
+	void showGiftPremiumsBox(const QString &ref);
 
 	void enableGifPauseReason(GifPauseReason reason);
 	void disableGifPauseReason(GifPauseReason reason);
@@ -564,10 +565,10 @@ public:
 
 	struct PaintContextArgs {
 		not_null<Ui::ChatTheme*> theme;
-		int visibleAreaTop = 0;
-		int visibleAreaTopGlobal = 0;
-		int visibleAreaWidth = 0;
 		QRect clip;
+		QPoint visibleAreaPositionGlobal;
+		int visibleAreaTop = 0;
+		int visibleAreaWidth = 0;
 	};
 	[[nodiscard]] Ui::ChatPaintContext preparePaintContext(
 		PaintContextArgs &&args);
@@ -600,7 +601,7 @@ private:
 	struct CachedTheme;
 
 	void init();
-	void initSupportMode();
+	void setupShortcuts();
 	void refreshFiltersMenu();
 	void checkOpenedFilter();
 	void suggestArchiveAndMute();
