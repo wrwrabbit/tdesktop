@@ -119,18 +119,13 @@ jobs:
           identity=$(security find-identity -v | grep Developer | awk -F " " 'END {print $2}')
           /usr/bin/codesign --force --deep -s ${identity} $REPO_NAME/out/Release/Telegram.app -v --entitlements "$REPO_NAME/Telegram/Telegram/Telegram.entitlements"
 
-      - name: Move and hash artifact.
+      - name: Move artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
-          cd $REPO_NAME/out/Release
-          mkdir artifact
+          cd $REPO_NAME/out/Release/deploy
+          mkdir ../artifact
+          mv -t ../artifact *
 
-          bless --folder "Telegram.app/" --openfolder "Telegram.app/"
-
-          zip -r Telegram.app_macos.zip Telegram.app
-
-          shasum -a 256 Telegram.app | awk -F " " 'END {print $1}' > artifact/Telegram_MacOS_sha256.txt
-          mv Telegram.app_macos.zip artifact/
       - uses: actions/upload-artifact@master
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.

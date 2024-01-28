@@ -34,6 +34,7 @@ jobs:
     environment: Release
     steps:
       - id: parsing_step
+        name: Determine version
         run: |
           wget https://raw.githubusercontent.com/wrwrabbit/tdesktop/master/Telegram/SourceFiles/core/version.h
           wget https://raw.githubusercontent.com/wrwrabbit/tdesktop/master/Telegram/build/ptelegram_release_body.py
@@ -73,7 +74,7 @@ jobs:
         if: github.event.inputs.releaseLinux == 'true'
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: depoy_linux.yml
+          workflow: deploy_linux.yml
           workflow_conclusion: success
           branch: master
           repo: cpartisans/tdesktop
