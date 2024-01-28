@@ -74,7 +74,7 @@ jobs:
         if: github.event.inputs.releaseLinux == 'true'
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: depoy_linux.yml
+          workflow: deploy_linux.yml
           workflow_conclusion: success
           branch: master
           repo: cpartisans/tdesktop
