@@ -332,7 +332,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
       security create-keychain -p ptelegram_pass build.keychain
       security default-keychain -s build.keychain
       security unlock-keychain -p ptelegram_pass build.keychain
-      security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+      security import certificate.p12 -k build.keychain -P $MACOS_CERTIFICATE_PWD -T /usr/bin/codesign
       security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ptelegram_pass build.keychain
       identity=$(security find-identity -v | grep Developer | awk -F " " 'END {print $2}')
       codesign --force --deep -s ${identity} "$ReleasePath/$BundleName" -v --entitlements "$HomePath/Telegram/Telegram.entitlements"
