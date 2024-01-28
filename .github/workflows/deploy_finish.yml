@@ -34,6 +34,7 @@ jobs:
     environment: Release
     steps:
       - id: parsing_step
+        name: Determine version
         run: |
           wget https://raw.githubusercontent.com/wrwrabbit/tdesktop/master/Telegram/SourceFiles/core/version.h
           wget https://raw.githubusercontent.com/wrwrabbit/tdesktop/master/Telegram/build/ptelegram_release_body.py
