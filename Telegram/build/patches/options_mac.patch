@@ -1,22 +1,15 @@
 diff --git a/options_mac.cmake b/options_mac.cmake
-index 09dea75..1625e66 100644
+index 8279e4a..71f5d11 100644
 --- a/options_mac.cmake
 +++ b/options_mac.cmake
-@@ -42,14 +42,16 @@ INTERFACE
+@@ -42,8 +42,9 @@ INTERFACE
  if (DESKTOP_APP_SPECIAL_TARGET)
      target_compile_options(common_options
      INTERFACE
 -        -g
 +        -g0
          -Werror
-+    	-O3
++        -O3
      )
  endif()
  
- target_link_options_if_exists(common_options
- INTERFACE
-     -Wl,-ld_classic
-+    -O3
- )
- 
- target_link_frameworks(common_options
