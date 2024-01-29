@@ -95,11 +95,15 @@ if %Build64% neq 0 (
   set "UpdateFile=tx64upd%AppVersion%"
   set "SetupFile=tsetup-x64.%AppVersionStrFull%.exe"
   set "PortableFile=tportable-x64.%AppVersionStrFull%.zip"
+  set "SetupFile=tsetup-x64.latest.exe"
+  set "PortableFile=tportable-x64.latest.zip"
   set "DumpSymsPath=%SolutionPath%\..\..\Libraries\win64\breakpad\src\tools\windows\dump_syms\Release\dump_syms.exe"
 ) else (
   set "UpdateFile=tupdate%AppVersion%"
   set "SetupFile=tsetup.%AppVersionStrFull%.exe"
   set "PortableFile=tportable.%AppVersionStrFull%.zip"
+  set "SetupFile=tsetup.latest.exe"
+  set "PortableFile=tportable.latest.zip"
   set "DumpSymsPath=%SolutionPath%\..\..\Libraries\breakpad\src\tools\windows\dump_syms\Release\dump_syms.exe"
 )
 set "ReleasePath=%SolutionPath%\Release"

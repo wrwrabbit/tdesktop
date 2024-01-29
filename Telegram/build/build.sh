@@ -56,6 +56,7 @@ if [ "$BuildTarget" == "linux" ]; then
   echo "Building version $AppVersionStrFull for Linux 64bit.."
   UpdateFile="tlinuxupd$AppVersion"
   SetupFile="tsetup.$AppVersionStrFull.tar.xz"
+  SetupFile="tsetup.latest.tar.xz"
   ProjectPath="$HomePath/../out"
   ReleasePath="$ProjectPath/Release"
   BinaryName="Telegram"
@@ -95,9 +96,11 @@ elif [ "$BuildTarget" == "mac" ] ; then
   if [ "$MacArch" != "" ]; then
     BundleName="$BinaryName.$MacArch.app"
     SetupFile="tsetup.$MacArch.$AppVersionStrFull.dmg"
+    SetupFile="tsetup.$MacArch.latest.dmg"
   else
     BundleName="$BinaryName.app"
     SetupFile="tsetup.$AppVersionStrFull.dmg"
+    SetupFile="tsetup.latest.dmg"
   fi
 elif [ "$BuildTarget" == "macstore" ]; then
   if [ "$AlphaVersion" != "0" ]; then
