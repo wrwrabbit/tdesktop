@@ -80,10 +80,8 @@ jobs:
           rm snap/snapcraft.yaml
           artifact_name=$(echo telegram-desktop_*.snap)
           echo "ARTIFACT_NAME=$artifact_name" >> $GITHUB_ENV
-          sha256sum $artifact_name | awk -F " " 'END {print $1}' > telegram_snap_sha256.txt
           mkdir artifact
           mv $artifact_name artifact/
-          mv telegram_snap_sha256.txt artifact/
 
       - uses: actions/upload-artifact@master
         if: env.UPLOAD_ARTIFACT == 'true'
