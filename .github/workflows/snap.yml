@@ -36,6 +36,7 @@ jobs:
   snap:
     name: Ubuntu
     runs-on: ubuntu-20.04
+    if: github.repository != 'cpartisans/tdesktop'
 
     env:
       UPLOAD_ARTIFACT: "true"
