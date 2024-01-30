@@ -51,8 +51,6 @@ jobs:
       - name: Set up environment paths.
         shell: bash
         run: |
-          sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH
-          $(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')
           echo "CACHE_KEY=$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> $GITHUB_ENV
 
           echo "Configurate git for cherry-picks."
@@ -65,7 +63,7 @@ jobs:
           nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
 
       - name: Libraries cache.
-        id: cache-libs
+        id: cache-
         uses: actions/cache@v4
         with:
           path: ${{ env.TBUILD }}\Libraries
@@ -145,7 +143,7 @@ jobs:
           nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
 
       - name: Libraries cache.
-        id: cache-libs
+        id: cache-
         uses: actions/cache@v4
         with:
           path: ${{ env.TBUILD }}\Libraries
