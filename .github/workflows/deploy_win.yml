@@ -51,6 +51,8 @@ jobs:
       - name: Set up environment paths.
         shell: bash
         run: |
+          sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH
+          $(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')
           echo "CACHE_KEY=$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> $GITHUB_ENV
 
           echo "Configurate git for cherry-picks."
@@ -67,8 +69,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.TBUILD }}\Libraries
-          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-libs-
+          key: ${{ runner.OS }}-${{ matrix.arch }}-rel-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-rel-
 
       - name: Libraries.
         env:
@@ -147,8 +149,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.TBUILD }}\Libraries
-          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-libs-${{ env.CACHE_KEY }}
+          key: ${{ runner.OS }}-${{ matrix.arch }}-rel-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-rel-${{ env.CACHE_KEY }}
           fail-on-cache-miss: true
 
       - name: Read configuration matrix.
@@ -177,8 +179,7 @@ jobs:
         run: |
           cd %TBUILD%\%REPO_NAME%\Telegram\build
 
-          where python3
-          where python
+          echo %PATH%
 
           python3 release_build.py ${{ matrix.arch }}
 
