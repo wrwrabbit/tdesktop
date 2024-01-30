@@ -29,6 +29,7 @@ jobs:
   windows:
     name: Windows
     runs-on: windows-2022
+    if: github.repository != 'cpartisans/tdesktop'
 
     strategy:
       matrix:
