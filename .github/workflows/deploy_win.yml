@@ -179,8 +179,6 @@ jobs:
         run: |
           cd %TBUILD%\%REPO_NAME%\Telegram\build
 
-          echo %PATH%
-
           python3 release_build.py ${{ matrix.arch }}
 
       - name: Move artifact.
