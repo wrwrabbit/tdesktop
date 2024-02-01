@@ -115,4 +115,11 @@ jobs:
         name: Upload artifact.
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.REPO_NAME }}/out/Release/artifact/
+          path: ${{ env.REPO_NAME }}/out/Release/artifact/tsetup*
+
+      - uses: actions/upload-artifact@master
+        if: env.UPLOAD_ARTIFACT == 'true'
+        name: Upload artifact TG.
+        with:
+          name: ${{ env.ARTIFACT_NAME }}_tg
+          path: ${{ env.REPO_NAME }}/out/Release/artifact/t*macupd*
