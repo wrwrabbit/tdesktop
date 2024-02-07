@@ -381,14 +381,24 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
 
     if [ "$NotarizeRequestId" == "" ]; then
       if [ "$AlphaVersion" == "0" ]; then
-        cp -f tsetup_template.dmg tsetup.temp.dmg
-        TempDiskPath=`hdiutil attach -nobrowse -noautoopenrw -readwrite tsetup.temp.dmg | awk -F "\t" 'END {print $3}'`
-        cp -R "./$BundleName" "$TempDiskPath/"
-        bless --folder "$TempDiskPath/"
-        hdiutil detach "$TempDiskPath"
-        hdiutil convert tsetup.temp.dmg -format UDBZ -ov -o "$SetupFile"
-        rm tsetup.temp.dmg
-      fi
+        #cp -f tsetup_template.dmg tsetup.temp.dmg
+        #TempDiskPath=`hdiutil attach -nobrowse -noautoopenrw -readwrite tsetup.temp.dmg | awk -F "\t" 'END {print $3}'`
+        #cp -R "./$BundleName" "$TempDiskPath/"
+        #bless --folder "$TempDiskPath/"
+        #hdiutil detach "$TempDiskPath"
+        #hdiutil convert tsetup.temp.dmg -format UDBZ -ov -o "$SetupFile"
+        #rm tsetup.temp.dmg
+        # Do simple
+        create-dmg \ 
+            --volname "Telegram Desktop" \
+            --volicon "./$BundleName/Contents/Resources/Icon.icns" \
+            --hide-extension "$BundleName" \
+            --icon-size 100 \
+            --app-drop-link 400 20 \
+            --bless \
+            --format UDBZ \
+            "$SetupFile" \
+            "./$BundleName"
     fi
 
     if [ "$AlphaVersion" != "0" ]; then
