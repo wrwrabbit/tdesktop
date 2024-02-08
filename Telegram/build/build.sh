@@ -389,7 +389,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
         #hdiutil convert tsetup.temp.dmg -format UDBZ -ov -o "$SetupFile"
         #rm tsetup.temp.dmg
         # Do simple
-        create-dmg \ 
+        create-dmg \
             --volname "Telegram Desktop" \
             --volicon "./$BundleName/Contents/Resources/Icon.icns" \
             --hide-extension "$BundleName" \
@@ -399,6 +399,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
             --format UDBZ \
             "$SetupFile" \
             "./$BundleName"
+      fi
     fi
 
     if [ "$AlphaVersion" != "0" ]; then
