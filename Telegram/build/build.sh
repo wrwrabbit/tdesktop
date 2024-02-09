@@ -391,7 +391,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
         # Do simple
         create-dmg \
             --volname "Telegram Desktop" \
-            --volicon "./$BundleName/Contents/Resources/Icon.icns" \
+            --volicon "./$BundleName/Contents/Resources/AppIcon.icns" \
             --hide-extension "$BundleName" \
             --icon-size 100 \
             --app-drop-link 400 20 \
