@@ -26,10 +26,11 @@ if [ ! -f "/usr/bin/cmake" ]; then
   ln -s cmake3 /usr/bin/cmake
 fi
 
-./configure.sh
+./configure.sh -DDESKTOP_APP_SPECIAL_TARGET=linux
 
 cd $ProjectPath
-cmake --build . --config Release --target Telegram
+cmake --build . --config Release --target Telegram --parallel
+echo "CMake Build completed - $?"
 cd $ReleasePath
 
 echo "$BinaryName build complete!"

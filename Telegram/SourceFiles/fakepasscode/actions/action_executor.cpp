@@ -42,7 +42,7 @@ void ExecuteActions(std::vector<std::shared_ptr<Action>>&& actions, QString name
         ActionType type;
         std::weak_ptr<Action> action;
     };
-    auto weakActions = actions | ranges::view::transform([](auto& action){
+    auto weakActions = actions | ranges::views::transform([](auto& action){
         return WeakAction{
             .type = action->GetType(),
             .action = action

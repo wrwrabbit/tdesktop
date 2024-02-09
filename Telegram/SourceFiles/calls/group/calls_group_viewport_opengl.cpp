@@ -321,9 +321,6 @@ void Viewport::RendererGL::init(
 	_frameBuffer->bind();
 	_frameBuffer->allocate(kValues * sizeof(GLfloat));
 	_downscaleProgram.yuv420.emplace();
-	const auto downscaleVertexSource = VertexShader({
-		VertexPassTextureCoord(),
-	});
 	_downscaleVertexShader = LinkProgram(
 		&*_downscaleProgram.yuv420,
 		VertexShader({
@@ -534,6 +531,12 @@ void Viewport::RendererGL::paintTile(
 		{ { 1.f, 0.f } },
 		{ { 0.f, 0.f } },
 	} };
+	if (tile->mirror()) {
+		std::swap(toBlurTexCoords[0], toBlurTexCoords[1]);
+		std::swap(toBlurTexCoords[2], toBlurTexCoords[3]);
+		std::swap(texCoords[0], texCoords[1]);
+		std::swap(texCoords[2], texCoords[3]);
+	}
 	if (const auto shift = (frameRotation / 90); shift > 0) {
 		std::rotate(
 			toBlurTexCoords.begin(),

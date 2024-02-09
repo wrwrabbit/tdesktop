@@ -1,0 +1,125 @@
+name: Public Release - MacOS
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+
+  macos:
+    environment: Release
+    name: MacOS
+    runs-on: macos-13
+
+    strategy:
+      matrix:
+        defines:
+          - ""
+    env:
+      UPLOAD_ARTIFACT: "true"
+      ONLY_CACHE: "false"
+      ARTIFACT_NAME: "Mac-PTelegram"
+      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
+
+    steps:
+      - name: Get repository name.
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - name: Clone.
+        uses: actions/checkout@v3.1.0
+        with:
+          submodules: recursive
+          path: ${{ env.REPO_NAME }}
+
+      - name: First set up.
+        run: |
+          sudo chown -R `whoami`:admin /usr/local/share
+          brew install automake ninja pkg-config icoutils create-dmg
+
+          # Disable spotlight.
+          sudo mdutil -a -i off
+
+          sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
+
+      - name: Libraries.
+        run: |
+          ./$REPO_NAME/Telegram/build/prepare/mac.sh silent skip-qt5 build-qt6
+
+      - name: Free up some disk space.
+        run: |
+          cd Libraries
+          find . -iname "*.dir" -exec rm -rf {} || true \;
+
+      - name: Read defines.
+        run: |
+          echo "ARTIFACT_NAME=PTelegram_${{ matrix.arch }}" >> $GITHUB_ENV
+
+      - name: Telegram Desktop build.
+        if: env.ONLY_CACHE == 'false'
+        env:
+          RSA_PRIVATE: ${{ secrets.RSA_PRIVATE }}
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          cd $REPO_NAME/Telegram/build
+
+          python3 release_build.py mac
+
+      - name: Check.
+        run: |
+          filePath="$REPO_NAME/out/Release/deploy"
+          if test -d "$filePath"; then
+            echo "Build successfully done! :)"
+
+            size=$(stat -c %s "$filePath/Telegram/Telegram")
+            echo "File size of ${filePath}: ${size} Bytes."
+          else
+            echo "Build error, output file does not exist."
+            exit 1
+          fi
+
+      - name: Strip and sign executable
+        if: false
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram -output $REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram
+          lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater -output $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater
+          lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler -output $REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler
+
+          strip "$REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram"
+          strip "$REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater"
+          strip "$REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler"
+
+          echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
+          security create-keychain -p ptelegram_pass build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ptelegram_pass build.keychain
+          security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ptelegram_pass build.keychain
+          identity=$(security find-identity -v | grep Developer | awk -F " " 'END {print $2}')
+          /usr/bin/codesign --force --deep -s ${identity} $REPO_NAME/out/Release/Telegram.app -v --entitlements "$REPO_NAME/Telegram/Telegram/Telegram.entitlements"
+
+      - name: Move artifact.
+        if: env.UPLOAD_ARTIFACT == 'true'
+        run: |
+          cd $REPO_NAME/out/Release/deploy
+          mkdir ../artifact
+          mv -t ../artifact *
+
+      - uses: actions/upload-artifact@master
+        if: env.UPLOAD_ARTIFACT == 'true'
+        name: Upload artifact.
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.REPO_NAME }}/out/Release/artifact/tsetup*
+
+      - uses: actions/upload-artifact@master
+        if: env.UPLOAD_ARTIFACT == 'true'
+        name: Upload artifact TG.
+        with:
+          name: ${{ env.ARTIFACT_NAME }}_tg
+          path: ${{ env.REPO_NAME }}/out/Release/artifact/t*macupd*

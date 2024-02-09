@@ -4,8 +4,8 @@
 
 namespace base {
 
-void LogFakeMain(const QString& message, const char *file);
+void LogFakeMain(const QString& message, const char *file, const int line);
 
 }
 
-#define FAKE_LOG(message) (::base::LogFakeMain(QString message, SOURCE_FILE_BASENAME))
+#define FAKE_LOG(message) (::base::LogFakeMain(QString message, SOURCE_FILE_BASENAME, __LINE__))
