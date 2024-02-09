@@ -63,13 +63,12 @@ void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
 
         Expects(_action != nullptr);
         if (_action) {
-            FAKE_LOG(qsl("LogoutUI: Set %1 to %2").arg(_accountIndex).arg(value.Kind));
-            _action->UpdateOrAddAction(_accountIndex, value);
+            FAKE_LOG(qsl("LogoutUI: Try Set %1 to %2").arg(_accountIndex).arg(value.Kind));
 
-            QString error = _action->Validate(true);
+            QString error = _action->SetIfValid(_accountIndex, value);
             if (!error.isEmpty()) {
-                value = _action->GetData(_accountIndex);
                 Ui::Toast::Show(error);
+                value = _action->GetData(_accountIndex);
             }
         }
 

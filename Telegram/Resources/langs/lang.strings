@@ -4629,5 +4629,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_chats_action_archive" = "Archived chats";
 "lng_chats_action_main_chats" = "Main chats";
 "lng_macos_cache_folder_permission_desc" = "To clear cache properly, please confirm access to Downloads folder if needed";
+"lng_unhidden_limit_msg" = "No more than 3 accounts can be unhidden.";
+"lng_one_unhidden_limit_msg" = "At least one account should be unhidden.";
 
 // Keys finished

@@ -32,6 +32,7 @@ namespace FakePasscode {
 
         QString GetDescriptionFor(qint32 account) const override;
 
+        QString SetIfValid(qint32 index, const HideAccountKind& data);
         QString Validate(bool update);
     };
 

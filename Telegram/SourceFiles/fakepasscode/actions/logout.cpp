@@ -84,7 +84,9 @@ const std::vector<qint32> LogoutAction::GetAccounts() const
     std::vector<qint32> result;
 
     for (auto pos = index_actions_.begin(); pos != index_actions_.end(); pos ++) {
-        result.push_back(pos->first);
+        if (pos->second.Kind != HideAccountKind::None) {
+            result.push_back(pos->first);
+        }
     }
 
     return result;
@@ -96,9 +98,21 @@ QString LogoutAction::GetDescriptionFor(qint32 account) const {
             ? tr::lng_logout(tr::now)
             : pos->second.Kind == HideAccountKind::HideAccount
             ? tr::lng_hide(tr::now)
-            : "-";
+            : QString();
     }
     return QString();
+}
+
+
+QString LogoutAction::SetIfValid(qint32 index, const HideAccountKind& data) {
+    HideAccountKind save = GetData(index);
+    UpdateOrAddAction(index, data);
+    QString error = Validate(false);
+    if (!error.isEmpty()) {
+        // error - revert
+        UpdateOrAddAction(index, save);
+    }
+    return error;
 }
 
 QString LogoutAction::Validate(bool update) {
@@ -121,7 +135,7 @@ QString LogoutAction::Validate(bool update) {
                         index_actions_[index] = { HideAccountKind::HideAccount };
                     }
                     if (valid.isEmpty()) {
-                        valid = "No more than 3 accounts can be unhidden.";
+                        valid = tr::lng_unhidden_limit_msg(tr::now);
                     }
                 }
             }
@@ -136,7 +150,7 @@ QString LogoutAction::Validate(bool update) {
                     index_actions_[index] = { HideAccountKind::HideAccount };
                 }
                 if (valid.isEmpty()) {
-                    valid = "No more than 3 accounts can be unhidden.";
+                    valid = tr::lng_unhidden_limit_msg(tr::now);
                 }
             }
         }
@@ -151,7 +165,7 @@ QString LogoutAction::Validate(bool update) {
                 index_actions_[accs.begin()->index] = { HideAccountKind::None };
             }
             if (valid.isEmpty()) {
-                valid = "At least one account should be unhidden.";
+                valid = tr::lng_one_unhidden_limit_msg(tr::now);
             }
         }
     }
