@@ -280,6 +280,11 @@ bool GenerateDesktopFile(
 			}
 		}
 
+		if (!args.isEmpty()
+				&& target->has_key("Desktop Entry", "DBusActivatable")) {
+			target->remove_key("Desktop Entry", "DBusActivatable");
+		}
+
 		target->save_to_file(targetFile.toStdString());
 	} catch (const std::exception &e) {
 		if (!silent) {
@@ -454,9 +459,13 @@ QString SingleInstanceLocalServerName(const QString &hash) {
 			+ '.'
 			+ hash;
 	}
-	return hash + '-' + cGUIDStr();
+	return hash + '-' + QCoreApplication::applicationName();
 #else // Q_OS_LINUX && Qt >= 6.2.0
-	return QDir::tempPath() + '/' + hash + '-' + cGUIDStr();
+	return QDir::tempPath()
+		+ '/'
+		+ hash
+		+ '-'
+		+ QCoreApplication::applicationName();
 #endif // !Q_OS_LINUX || Qt < 6.2.0
 }
 
@@ -648,7 +657,7 @@ void start() {
 	Webview::WebKitGTK::SetSocketPath(u"%1/%2-%3-webview-%4"_q.arg(
 		QDir::tempPath(),
 		h,
-		cGUIDStr(),
+		QCoreApplication::applicationName(),
 		u"%1"_q).toStdString());
 
 	InstallLauncher();

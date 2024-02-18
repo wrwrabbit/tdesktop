@@ -258,6 +258,13 @@ public:
 			_widget->elementSendBotCommand(command, context);
 		}
 	}
+	void elementSearchInList(
+			const QString &query,
+			const FullMsgId &context) override {
+		if (_widget) {
+			_widget->elementSearchInList(query, context);
+		}
+	}
 	void elementHandleViaClick(not_null<UserData*> bot) override {
 		if (_widget) {
 			_widget->elementHandleViaClick(bot);
@@ -348,6 +355,7 @@ HistoryInner::HistoryInner(
 		_theme = std::move(theme);
 		controller->setChatStyleTheme(_theme);
 	}, lifetime());
+	Assert(_theme != nullptr);
 
 	setAttribute(Qt::WA_AcceptTouchEvents);
 
@@ -384,14 +392,6 @@ HistoryInner::HistoryInner(
 	) | rpl::start_with_next([=](ChosenReaction reaction) {
 		_reactionsManager->updateButton({});
 		reactionChosen(reaction);
-	}, lifetime());
-
-	_reactionsManager->premiumPromoChosen(
-	) | rpl::start_with_next([=](FullMsgId context) {
-		_reactionsManager->updateButton({});
-		ShowPremiumPreviewBox(
-			_controller,
-			PremiumPreview::InfiniteReactions);
 	}, lifetime());
 
 	session().data().peerDecorationsUpdated(
@@ -2224,6 +2224,11 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			_menu->addAction(lnkIsVideo ? tr::lng_context_save_video(tr::now) : (lnkIsVoice ? tr::lng_context_save_audio(tr::now) : (lnkIsAudio ? tr::lng_context_save_audio_file(tr::now) : tr::lng_context_save_file(tr::now))), base::fn_delayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {
 				saveDocumentToFile(itemId, document);
 			}), &st::menuIconDownload);
+
+			HistoryView::AddCopyFilename(
+				_menu,
+				document,
+				[=] { return showCopyRestrictionForSelected(); });
 		}
 		if (document->hasAttachedStickers()) {
 			_menu->addAction(tr::lng_context_attached_stickers(tr::now), [=] {
@@ -2644,9 +2649,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			desiredPosition,
 			reactItem,
 			[=](ChosenReaction reaction) { reactionChosen(reaction); },
-			[=](FullMsgId context) { ShowPremiumPreviewBox(
-				controller,
-				PremiumPreview::InfiniteReactions); },
+			ItemReactionsAbout(reactItem),
 			_controller->cachedReactionIconFactory().createMethod())
 		: AttachSelectorResult::Skipped;
 	if (attached == AttachSelectorResult::Failed) {
@@ -3404,6 +3407,15 @@ void HistoryInner::elementSendBotCommand(
 		const QString &command,
 		const FullMsgId &context) {
 	_widget->sendBotCommand({ _history->peer, command, context });
+}
+
+void HistoryInner::elementSearchInList(
+		const QString &query,
+		const FullMsgId &context) {
+	const auto inChat = _history->peer->isUser()
+		? Dialogs::Key()
+		: Dialogs::Key(_history);
+	_controller->searchMessages(query, inChat);
 }
 
 void HistoryInner::elementHandleViaClick(not_null<UserData*> bot) {

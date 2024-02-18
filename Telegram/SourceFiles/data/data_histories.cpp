@@ -42,11 +42,9 @@ MTPInputReplyTo ReplyToForMTP(
 	const auto owner = &history->owner();
 	if (replyTo.storyId) {
 		if (const auto peer = owner->peerLoaded(replyTo.storyId.peer)) {
-			if (const auto user = peer->asUser()) {
-				return MTP_inputReplyToStory(
-					user->inputUser,
-					MTP_int(replyTo.storyId.story));
-			}
+			return MTP_inputReplyToStory(
+				peer->input,
+				MTP_int(replyTo.storyId.story));
 		}
 	} else if (replyTo.messageId || replyTo.topicRootId) {
 		const auto to = LookupReplyTo(history, replyTo.messageId);
@@ -95,7 +93,7 @@ MTPInputMedia WebPageForMTP(
 		bool required) {
 	using Flag = MTPDinputMediaWebPage::Flag;
 	return MTP_inputMediaWebPage(
-		MTP_flags((required ? Flag() : Flag::f_optional)
+		MTP_flags(((false && required) ? Flag() : Flag::f_optional)
 			| (draft.forceLargeMedia ? Flag::f_force_large_media : Flag())
 			| (draft.forceSmallMedia ? Flag::f_force_small_media : Flag())),
 		MTP_string(draft.url));
