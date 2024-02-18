@@ -83,6 +83,7 @@ jobs:
 
           docker run --rm \
           -v $PWD:/usr/src/tdesktop \
+          -e CONFIG=Release \
           tdesktop:centos_env \
           /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
           -D CMAKE_C_FLAGS_DEBUG="" \
