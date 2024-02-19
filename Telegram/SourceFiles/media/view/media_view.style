@@ -602,6 +602,9 @@ storiesEmojiPan: EmojiPan(defaultEmojiPan) {
 	colorAllLabel: storiesColorAllLabel;
 	removeSet: storiesRemoveSet;
 	boxLabel: storiesBoxLabel;
+	about: FlatLabel(defaultEmojiPanAbout) {
+		textFg: storiesComposeGrayText;
+	}
 	icons: ComposeIcons {
 		settings: icon {{ "emoji/emoji_settings", storiesComposeGrayIcon }};
 
@@ -637,10 +640,6 @@ storiesEmojiPan: EmojiPan(defaultEmojiPan) {
 		stripBubble: icon{
 			{ "chat/reactions_bubble_shadow", windowShadowFg },
 			{ "chat/reactions_bubble", storiesComposeBg },
-		};
-		stripPremiumLocked: icon{
-			{ "chat/reactions_premium_bg", storiesComposeBgRipple },
-			{ "chat/reactions_premium_star", storiesComposeGrayIcon },
 		};
 		stripExpandPanel: icon{
 			{ "chat/reactions_round_big", storiesComposeBgRipple },
@@ -1047,4 +1046,5 @@ storiesRepostSimpleStyle: QuoteStyle(defaultQuoteStyle) {
 	radius: 10px;
 }
 storiesRepostIcon: icon {{ "mediaview/mini_repost", windowFg }};
-storiesRepostIconPadding: margins(0px, 4px, 4px, 0px);
+storiesRepostIconPadding: margins(0px, 4px, 2px, 0px);
+storiesRepostUserpicPadding: margins(0px, 1px, 4px, 0px);

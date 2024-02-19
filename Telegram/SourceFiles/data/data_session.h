@@ -62,6 +62,7 @@ class NotifySettings;
 class CustomEmojiManager;
 class Stories;
 class SavedMessages;
+struct ReactionId;
 
 struct RepliesReadTillUpdate {
 	FullMsgId id;
@@ -366,6 +367,7 @@ public:
 		not_null<Forum*> forum) const;
 	[[nodiscard]] rpl::producer<int> maxPinnedChatsLimitValue(
 		not_null<SavedMessages*> saved) const;
+	[[nodiscard]] int groupFreeTranscribeLevel() const;
 	[[nodiscard]] const std::vector<Dialogs::Key> &pinnedChatsOrder(
 		Folder *folder) const;
 	[[nodiscard]] const std::vector<Dialogs::Key> &pinnedChatsOrder(
@@ -742,6 +744,11 @@ public:
 	void applyStatsDcId(not_null<ChannelData*>, MTP::DcId);
 	[[nodiscard]] MTP::DcId statsDcId(not_null<ChannelData*>);
 
+	void viewTagsChanged(
+		not_null<ViewElement*> view,
+		std::vector<ReactionId> &&was,
+		std::vector<ReactionId> &&now);
+
 	void clearLocalStorage();
 
     void resetCaches();
@@ -885,6 +892,7 @@ private:
 	QPointer<Ui::BoxContent> _exportSuggestion;
 
 	rpl::variable<bool> _contactsLoaded = false;
+	rpl::variable<int> _groupFreeTranscribeLevel;
 	rpl::event_stream<Folder*> _chatsListLoadedEvents;
 	rpl::event_stream<Folder*> _chatsListChanged;
 	rpl::event_stream<not_null<UserData*>> _userIsBotChanges;
@@ -1009,9 +1017,14 @@ private:
 
 	base::flat_map<uint64, not_null<GroupCall*>> _groupCalls;
 	rpl::event_stream<InviteToCall> _invitesToCalls;
-	base::flat_map<uint64, base::flat_set<not_null<UserData*>>> _invitedToCallUsers;
+	base::flat_map<
+		uint64,
+		base::flat_set<not_null<UserData*>>> _invitedToCallUsers;
 
 	base::flat_set<not_null<ViewElement*>> _shownSpoilers;
+	base::flat_map<
+		ReactionId,
+		base::flat_set<not_null<ViewElement*>>> _viewsByTag;
 
 	History *_topPromoted = nullptr;
 
