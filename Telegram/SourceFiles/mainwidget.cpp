@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mainwidget.h"
 
+#include "api/api_updates.h"
 #include "api/api_views.h"
 #include "data/data_document_media.h"
 #include "data/data_document_resolver.h"
@@ -20,20 +21,27 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
+#include "data/data_chat_filters.h"
 #include "data/data_scheduled_messages.h"
 #include "data/data_file_origin.h"
+#include "data/data_histories.h"
+#include "data/stickers/data_stickers.h"
 #include "ui/chat/chat_theme.h"
+#include "ui/widgets/buttons.h"
 #include "ui/widgets/shadow.h"
 #include "ui/widgets/dropdown_menu.h"
 #include "ui/focus_persister.h"
 #include "ui/resize_area.h"
 #include "window/window_connecting_widget.h"
 #include "window/window_top_bar_wrap.h"
+#include "window/notifications_manager.h"
 #include "window/window_slide_animation.h"
 #include "window/window_history_hider.h"
 #include "window/window_controller.h"
 #include "window/window_peer_menu.h"
 #include "window/themes/window_theme.h"
+#include "chat_helpers/tabbed_selector.h" // TabbedSelector::refreshStickers
+#include "chat_helpers/message_field.h"
 #include "info/info_memento.h"
 #include "apiwrap.h"
 #include "dialogs/dialogs_widget.h"
@@ -52,6 +60,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_panel.h"
 #include "media/player/media_player_widget.h"
+#include "media/player/media_player_dropdown.h"
 #include "media/player/media_player_instance.h"
 #include "base/qthelp_regex.h"
 #include "mtproto/mtproto_dc_options.h"
@@ -64,16 +73,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_instance.h"
 #include "calls/calls_top_bar.h"
 #include "calls/group/calls_group_call.h"
+#include "export/export_settings.h"
 #include "export/export_manager.h"
 #include "export/view/export_view_top_bar.h"
 #include "export/view/export_view_panel_controller.h"
 #include "main/main_session.h"
+#include "main/main_session_settings.h"
+#include "main/main_account.h"
 #include "support/support_helper.h"
 #include "storage/storage_user_photos.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_chat.h"
 #include "styles/style_window.h"
 
+#include <QtCore/QCoreApplication>
+#include <QtCore/QMimeData>
 
 enum StackItemType {
 	HistoryStackItem,
