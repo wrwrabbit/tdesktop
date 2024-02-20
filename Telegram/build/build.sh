@@ -339,6 +339,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
       security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ptelegram_pass build.keychain
       identity=$(security find-identity -v | grep Developer | awk -F " " 'END {print $2}')
       codesign --force --deep -s ${identity} "$ReleasePath/$BundleName" -v --entitlements "$HomePath/Telegram/Telegram.entitlements"
+      security delete-keychain build.keychain
       
       #codesign --force --deep --timestamp --options runtime --sign "Developer ID Application: John Preston" "$ReleasePath/$BundleName" --entitlements "$HomePath/Telegram/Telegram.entitlements"
     elif [ "$BuildTarget" == "macstore" ]; then
