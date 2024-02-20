@@ -91,13 +91,15 @@ jobs:
     needs: deps
     environment: Release
     name: Build
-    #runs-on: windows-2022
-    #runs-on: windows-larger
-    runs-on: t-desktop
 
     strategy:
       matrix:
         arch: [Win32, x64]
+
+    #runs-on: windows-2022
+    #runs-on: windows-larger
+    #runs-on: t-desktop
+    runs-on: ${{ matrix.arch == 'x64' && 't-desktop' || 'windows-2022' }}
 
     env:
       UPLOAD_ARTIFACT: "true"
