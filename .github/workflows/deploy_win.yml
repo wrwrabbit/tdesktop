@@ -42,7 +42,6 @@ jobs:
         with:
           arch: ${{ matrix.arch }}
           sdk: 10.0.22000.0
-          toolset: 14.37
 
       - name: Clone.
         uses: actions/checkout@v3.1.0
@@ -126,7 +125,6 @@ jobs:
         with:
           arch: ${{ matrix.arch }}
           sdk: 10.0.22000.0
-          toolset: 14.37
 
       - name: Clone.
         uses: actions/checkout@v3.1.0
