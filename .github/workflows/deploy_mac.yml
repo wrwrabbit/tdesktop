@@ -73,35 +73,11 @@ jobs:
           if test -d "$filePath"; then
             echo "Build successfully done! :)"
 
-            size=$(stat -c %s "$filePath/Telegram/Telegram")
-            echo "File size of ${filePath}: ${size} Bytes."
+            ls $filePath
           else
             echo "Build error, output file does not exist."
             exit 1
           fi
-
-      - name: Strip and sign executable
-        if: false
-        env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
-        run: |
-          lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram -output $REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram
-          lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater -output $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater
-          lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler -output $REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler
-
-          strip "$REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram"
-          strip "$REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater"
-          strip "$REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler"
-
-          echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
-          security create-keychain -p ptelegram_pass build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p ptelegram_pass build.keychain
-          security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ptelegram_pass build.keychain
-          identity=$(security find-identity -v | grep Developer | awk -F " " 'END {print $2}')
-          /usr/bin/codesign --force --deep -s ${identity} $REPO_NAME/out/Release/Telegram.app -v --entitlements "$REPO_NAME/Telegram/Telegram/Telegram.entitlements"
 
       - name: Move artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
