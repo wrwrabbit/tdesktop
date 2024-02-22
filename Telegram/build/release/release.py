@@ -245,7 +245,7 @@ PREFIX = {
     "tlinuxupd": "linux", 
     "tx64upd": "win64",
     "tupdate": "win",
-    "tarmmacupd": "armac",
+    "tarmacupd": "armac",
     "tmacupd": "mac"
 }
 
