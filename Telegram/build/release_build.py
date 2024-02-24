@@ -84,6 +84,8 @@ def main():
         ["../../cmake", "validate_d3d_compiler.py", "validate_d3d_compiler.patch"],
         ["../../cmake", "options_linux.cmake", "options_linux.patch"],
         ["../../cmake", "options_mac.cmake", "options_mac.patch"],
+        ["../../cmake", "options_win.cmake", "options_win.patch"],
+        ["../../cmake", "init_target.cmake", "init_target.patch"],
     ]
     print("Apply patches")
     for fn_path, fn, patch_fn in patches:
