@@ -1,8 +1,8 @@
 diff --git a/options_win.cmake b/options_win.cmake
-index d84e503..eae574c 100644
+index d84e503..a150c70 100644
 --- a/options_win.cmake
 +++ b/options_win.cmake
-@@ -79,15 +79,16 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+@@ -79,15 +79,18 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
      endif()
  
      if (DESKTOP_APP_SPECIAL_TARGET)
@@ -16,6 +16,8 @@ index d84e503..eae574c 100644
 -            $<IF:$<CONFIG:Debug>,,/LTCGOUT:>
 -        )
 +        # don't do /LTCG sa free GH runner is out of heap on x64 build
++        # /GL implicitly enables /LTCG
++        # /LTCGOUT: - does not make sense w/o /LTCG
 +        #target_compile_options(common_options
 +        #INTERFACE
 +        #    $<IF:$<CONFIG:Debug>,,/GL>
