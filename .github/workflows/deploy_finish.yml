@@ -17,11 +17,6 @@ on:
         type: boolean
         required: false
         default: "true"
-      releaseSnap:
-        description: 'Release Snap assets?'
-        type: boolean
-        required: false
-        default: "true"
       releaseMacOS:
         description: 'Release MacOS assets?'
         type: boolean
@@ -32,6 +27,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     environment: Release
+    permissions:
+      contents: write
+
     steps:
       - id: parsing_step
         name: Determine version
@@ -90,65 +88,72 @@ jobs:
           branch: master
           repo: cpartisans/tdesktop
           path: MacOS
-          
-      - name: Download Snap artifacts
-        uses: dawidd6/action-download-artifact@v2
-        if: github.event.inputs.releaseSnap == 'true'
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: snap.yml
-          workflow_conclusion: success
-          branch: master
-          repo: wrwrabbit/tdesktop
-          path: Snap
+
+      - name: Check version consistency
+        run: |
+          echo "Found versions:"
+          find -name "t*" | grep -Po "\d{7}$" | sort -u
+          UNIQUE=$(find -name "t*" | grep -Po "\d{7}$" | sort -u | wc -l)
+          if [ "$UNIQUE" != "1" ]; then
+            echo More than one version downloaded
+            exit 1
+          fi
 
       - name: Upload Windows Files
-        uses: softprops/action-gh-release@v1
+        uses: "actions/github-script@v6"
         if: github.event.inputs.releaseWindows == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: "v.${{ env.VERSION }}"
-          name: "Version ${{ env.VERSION }}"
-          prerelease: ${{ github.event.inputs.prerelease }}
-          files: |
-            Windows/**
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          script: |
+            const fs = require('fs').promises;
+            await github.rest.repos.uploadReleaseAsset({
+              name: 'tportable-x64.latest.zip',
+              label: 'Windows 64 bit: Portable',
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ steps.create_release.outputs.id }},
+              data: await fs.readFile('Windows\Telegram_x64\tportable-x64.latest.zip')
+            });
+            await github.rest.repos.uploadReleaseAsset({
+              name: 'tportable.latest.zip',
+              label: 'Windows 32 bit: Portable',
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ steps.create_release.outputs.id }},
+              data: await fs.readFile('Windows\Telegram_Win32\tportable.latest.zip')
+            });
 
       - name: Upload Linux Files
-        uses: softprops/action-gh-release@v1
+        uses: "actions/github-script@v6"
         if: github.event.inputs.releaseLinux == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: "v.${{ env.VERSION }}"
-          name: "Version ${{ env.VERSION }}"
-          prerelease: ${{ github.event.inputs.prerelease }}
-          files: |
-            Linux/**
-
-      - name: Upload Snap Files
-        uses: softprops/action-gh-release@v1
-        if: github.event.inputs.releaseSnap == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: "v.${{ env.VERSION }}"
-          name: "Version ${{ env.VERSION }}"
-          prerelease: ${{ github.event.inputs.prerelease }}
-          files: |
-            Snap/**
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          script: |
+            const fs = require('fs').promises;
+            await github.rest.repos.uploadReleaseAsset({
+              name: 'tsetup.latest.tar.xz',
+              label: 'Linux 64 bit: Binary',
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ steps.create_release.outputs.id }},
+              data: await fs.readFile('Linux/build_gh/tsetup.latest.tar.xz')
+            });
 
       - name: Upload MacOS Files
-        uses: softprops/action-gh-release@v1
+        uses: "actions/github-script@v6"
         if: github.event.inputs.releaseMacOS == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: "v.${{ env.VERSION }}"
-          name: "Version ${{ env.VERSION }}"
-          prerelease: ${{ github.event.inputs.prerelease }}
-          files: |
-            MacOS/**
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          script: |
+            const fs = require('fs').promises;
+            await github.rest.repos.uploadReleaseAsset({
+              name: 'tsetup.latest.dmg',
+              label: 'macOS 10.13+: Installer',
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ steps.create_release.outputs.id }},
+              data: await fs.readFile('MacOS/PTelegram_/tsetup.latest.dmg')
+            });
 
       - name: Create cleanup request
         run: touch delete_request
