@@ -68,7 +68,7 @@ jobs:
           path: |
               ${{ env.TBUILD }}\Libraries
               ${{ env.TBUILD }}\ThirdParty
-          key: cache-${{ github.sha }}
+          key: cache-${{ matrix.arch }}-${{ github.sha }}
 
       - name: Libraries.
         env:
@@ -152,8 +152,8 @@ jobs:
           path: |
               ${{ env.TBUILD }}\Libraries
               ${{ env.TBUILD }}\ThirdParty
-          key: cache-${{ github.sha }}
-          restore-keys: cache-${{ github.sha }}
+          key: cache-${{ matrix.arch }}-${{ github.sha }}
+          restore-keys: cache-${{ matrix.arch }}-${{ github.sha }}
           fail-on-cache-miss: true
 
       - name: Read configuration matrix.
