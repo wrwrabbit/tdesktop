@@ -170,7 +170,7 @@ if %AlphaVersion% neq 0 (
 
 cd "%HomePath%"
 
-call configure.bat
+call configure.bat -DDESKTOP_APP_NO_PDB=ON
 if %errorlevel% neq 0 goto error
 
 cd "%SolutionPath%"
@@ -284,7 +284,7 @@ if %BuildUWP% neq 0 (
   if not exist "%ReleasePath%\deploy\%AppVersionStrMajor%" mkdir "%ReleasePath%\deploy\%AppVersionStrMajor%"
   mkdir "%DeployPath%"
 
-  move "%ReleasePath%\%BinaryName%.pdb" "%DeployPath%\"
+  rem move "%ReleasePath%\%BinaryName%.pdb" "%DeployPath%\"
   move "%ReleasePath%\%BinaryName%.%Platform%.appx" "%DeployPath%\"
   move "%ReleasePath%\%BinaryName%.exe" "%DeployPath%\"
 
@@ -302,8 +302,8 @@ if %BuildUWP% neq 0 (
   move "%ReleasePath%\%BinaryName%.exe" "%DeployPath%\%BinaryName%\"
   xcopy "%ReleasePath%\modules\%Platform%\d3d\d3dcompiler_47.dll" "%DeployPath%\%BinaryName%\modules\%Platform%\d3d\"
   move "%ReleasePath%\Updater.exe" "%DeployPath%\"
-  move "%ReleasePath%\%BinaryName%.pdb" "%DeployPath%\"
-  move "%ReleasePath%\Updater.pdb" "%DeployPath%\"
+  rem move "%ReleasePath%\%BinaryName%.pdb" "%DeployPath%\"
+  rem move "%ReleasePath%\Updater.pdb" "%DeployPath%\"
   if %AlphaVersion% equ 0 (
     move "%ReleasePath%\%SetupFile%" "%DeployPath%\"
   ) else (
@@ -337,9 +337,9 @@ if %BuildUWP% equ 0 (
 rem   if %AlphaVersion% equ 0 (
 rem     if not exist "%DeployPath%\%SetupFile%" goto error
 rem   )
-  if not exist "%DeployPath%\%BinaryName%.pdb" goto error
+rem  if not exist "%DeployPath%\%BinaryName%.pdb" goto error
   if not exist "%DeployPath%\Updater.exe" goto error
-  if not exist "%DeployPath%\Updater.pdb" goto error
+rem  if not exist "%DeployPath%\Updater.pdb" goto error
   md "%FinalDeployPath%"
 
   xcopy "%DeployPath%\%UpdateFile%" "%FinalDeployPath%\" /Y
