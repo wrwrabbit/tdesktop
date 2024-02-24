@@ -68,7 +68,7 @@ jobs:
           path: |
               ${{ env.TBUILD }}\Libraries
               ${{ env.TBUILD }}\ThirdParty
-          key: cache-${{ github.sha }}
+          key: cache-${{ matrix.arch }}-${{ github.sha }}
 
       - name: Libraries.
         env:
@@ -91,12 +91,13 @@ jobs:
 
     strategy:
       matrix:
-        arch: [Win32, x64]
+        include:
+          - arch: "Win32"
+            runner: "windows-2022"
+          - arch: "x64"
+            runner: "t-desktop"
 
-    #runs-on: windows-2022
-    #runs-on: windows-larger
-    #runs-on: t-desktop
-    runs-on: ${{ matrix.arch == 'x64' && 't-desktop' || 'windows-2022' }}
+    runs-on: ${{ matrix.runner }}
 
     env:
       UPLOAD_ARTIFACT: "true"
@@ -151,8 +152,8 @@ jobs:
           path: |
               ${{ env.TBUILD }}\Libraries
               ${{ env.TBUILD }}\ThirdParty
-          key: cache-${{ github.sha }}
-          restore-keys: cache-${{ github.sha }}
+          key: cache-${{ matrix.arch }}-${{ github.sha }}
+          restore-keys: cache-${{ matrix.arch }}-${{ github.sha }}
           fail-on-cache-miss: true
 
       - name: Read configuration matrix.

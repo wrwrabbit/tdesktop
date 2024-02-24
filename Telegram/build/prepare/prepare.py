@@ -416,9 +416,9 @@ if customRunCommand:
     finish(0)
 
 stage('patches', """
-    git clone https://github.com/agl-1984/patches.git
+    git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout 02b71ee
+    git checkout bed08b53a3
 """)
 
 stage('msys64', """
