@@ -5,6 +5,7 @@ on:
     inputs:
       prerelease:
         description: 'Prerelease or not'
+        type: boolean
         required: true
         default: 'true'
       releaseWindows:
