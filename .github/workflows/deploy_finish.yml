@@ -26,7 +26,6 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    environment: Release
     permissions:
       contents: write
 
