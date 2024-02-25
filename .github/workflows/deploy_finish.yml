@@ -5,6 +5,7 @@ on:
     inputs:
       prerelease:
         description: 'Prerelease or not'
+        type: boolean
         required: true
         default: 'true'
       releaseWindows:
@@ -26,7 +27,6 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    environment: Release
     permissions:
       contents: write
 
@@ -112,7 +112,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: ${{ steps.create_release.outputs.id }},
-              data: await fs.readFile('Windows\Telegram_x64\tportable-x64.latest.zip')
+              data: await fs.readFile('Windows/Telegram_x64/tportable-x64.latest.zip')
             });
             await github.rest.repos.uploadReleaseAsset({
               name: 'tportable.latest.zip',
@@ -120,7 +120,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: ${{ steps.create_release.outputs.id }},
-              data: await fs.readFile('Windows\Telegram_Win32\tportable.latest.zip')
+              data: await fs.readFile('Windows/Telegram_Win32/tportable.latest.zip')
             });
 
       - name: Upload Linux Files
