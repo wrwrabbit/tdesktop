@@ -11,14 +11,18 @@ namespace FakePasscode {
         Logout = 2,
         Command = 3,
         DeleteContacts = 4,
+        DeleteActions = 5,
+        DeleteChats = 6,
     };
 
-    const static std::vector<ActionType> kAvailableActions = {
+    const inline std::array kAvailableActions = {
         ActionType::ClearProxy,
         ActionType::ClearCache,
         ActionType::Logout,
         ActionType::DeleteContacts,
         ActionType::Command,
+        ActionType::DeleteActions,
+        ActionType::DeleteChats,
     };
 
     class Action {

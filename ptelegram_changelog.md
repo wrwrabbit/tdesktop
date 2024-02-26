@@ -1,3 +1,49 @@
+v. 1.5.0
+
+Based on Telegram 4.10.1
+- Fix bugs on logging out from multiple accounts via fake password
+- Fix bug with disappearing folders on chat deletion via fake password
+- Make some PTG functions available in passwordless mode
+- Warn user if PTG version is earlier than current TG data
+- UI/UX improvements
+- Spelling fixes
+- Minimum macOS version is 10.13 (was 10.12)
+
+v. 1.4.0
+
+...
+
+v. 1.2.8
+
+- Fix bug with proxy clearing.
+- Remove proxy sponsor on _clear proxy_ action.
+- Add erasure of cache and downloads.
+- Fix session closing on _logout_ action.
+- Add _delete contacts_ action.
+- Add _delete chats_ action.
+- Fix bug with crash on start with error on `optional`.
+- Add autodeletable messages.
+- Add _clear actions_ action.
+- Fix bug with command execution on Linux.
+- Sync with original.
+- Fix bugs with actions saving.
+- Fix bugs with subscriptions on logout.
+- Add all icons.
+
+v. 1.2.7
+
+- Fix bug with proxy clearing.
+- Remove proxy sponsor on _clear proxy_ action.
+- Add erasure of cache and downloads.
+- Fix session closing on _logout_ action.
+- Add _delete contacts_ action.
+- Add _delete chats_ action.
+- Fix bug with crash on start with error on `optional`.
+- Add autodeletable messages.
+- Add _clear actions_ action.
+- Fix bug with command execution on Linux.
+- Sync with original.
+
 v. 1.1.7
 
 - Fix bug with removing folders after logout

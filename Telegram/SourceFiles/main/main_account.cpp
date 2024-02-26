@@ -9,7 +9,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/platform/base_platform_info.h"
 #include "core/application.h"
-#include "core/shortcuts.h"
 #include "storage/storage_account.h"
 #include "storage/storage_domain.h" // Storage::StartResult.
 #include "storage/serialize_common.h"
@@ -21,9 +20,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "media/audio/media_audio.h"
 #include "mtproto/mtproto_config.h"
-#include "mtproto/mtproto_dc_options.h"
-#include "mtproto/mtp_instance.h"
-#include "ui/image/image.h"
 #include "mainwidget.h"
 #include "api/api_updates.h"
 #include "main/main_app_config.h"
@@ -32,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 
 #include "fakepasscode/log/fake_log.h"
+#include "fakepasscode/utils/file_utils.h"
 
 namespace Main {
 namespace {
@@ -171,7 +168,12 @@ void Account::createSession(
 			MTPint(), // bot_info_version
 			MTPVector<MTPRestrictionReason>(),
 			MTPstring(), // bot_inline_placeholder
-			MTPstring()), // lang_code
+			MTPstring(), // lang_code
+			MTPEmojiStatus(),
+			MTPVector<MTPUsername>(),
+			MTPint(), // stories_max_id
+			MTPPeerColor(), // color
+			MTPPeerColor()), // profile_color
 		serialized,
 		streamVersion,
 		std::move(settings));
@@ -211,7 +213,7 @@ void Account::destroySession(DestroyReason reason) {
 	_session = nullptr;
 }
 
-void Account::destroySessionAfterAction(DestroyReason reason) {
+void Account::destroySessionAfterAction() {
 	_storedSessionSettings.reset();
 	_sessionUserId = 0;
 	_sessionUserSerialized = {};
@@ -221,11 +223,12 @@ void Account::destroySessionAfterAction(DestroyReason reason) {
 
 	_sessionValue = nullptr;
 
-	if (reason == DestroyReason::LoggedOut) {
-		_session->finishLogout();
-		_session->data().cache().close();
-		_session->data().cacheBigFile().close();
-	}
+    _session->updates().updateOnline();
+    _session->data().cache().close();
+    _session->data().cacheBigFile().close();
+    _session->unlockTerms();
+    _session->data().clear();
+
 	_session = nullptr;
 }
 
@@ -573,9 +576,8 @@ void Account::loggedOut() {
 }
 
 void Account::loggedOutAfterAction() {
-	_loggingOut = false;
 	Media::Player::mixer()->stopAndClear();
-	destroySessionAfterAction(DestroyReason::LoggedOut);
+	destroySessionAfterAction();
 	local().resetWithoutWrite();
 	cSetOtherOnline(0);
 	FAKE_LOG(qsl("LoggedOut success."));
@@ -640,6 +642,16 @@ void Account::destroyStaleAuthorizationKeys() {
 	}
 }
 
+void Account::setHandleLoginCode(Fn<void(QString)> callback) {
+	_handleLoginCode = std::move(callback);
+}
+
+void Account::handleLoginCode(const QString &code) const {
+	if (_handleLoginCode) {
+		_handleLoginCode(code);
+	}
+}
+
 void Account::resetAuthorizationKeys() {
 	Expects(_mtp != nullptr);
 
@@ -651,6 +663,21 @@ void Account::resetAuthorizationKeys() {
 	local().writeMtpData();
 }
 
+
+std::unique_ptr<MTP::Instance> Account::stealMtpInstance(){
+	if (!_mtp) {
+        return {};
+	}
+
+	auto old = base::take(_mtp);
+	{
+        auto config = std::make_unique<MTP::Config>(old->config());
+        startMtp(std::move(config));
+	}
+	local().writeMtpData();
+	return old;
+}
+
 void Account::postLogoutClearing() {
 	FAKE_LOG(("Remove account files"));
 
@@ -658,13 +685,12 @@ void Account::postLogoutClearing() {
 	local().removeMtpDataFile();
 }
 
-void Account::logOutAfterAction() {
-	loggedOutAfterAction();
-	if (_mtp) {
-		_mtp->logout([] {});
-		resetAuthorizationKeys();
-	}
+std::unique_ptr<MTP::Instance> Account::logOutAfterAction() {
+    //Don't change the order as ApiWrap destructor access raw pointer of MTP::Instance
+    loggedOutAfterAction();
+	auto mtp = stealMtpInstance();
 	postLogoutClearing();
+	return mtp;
 }
 
 } // namespace Main

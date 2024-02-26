@@ -13,25 +13,28 @@
 #include "ui/layers/generic_box.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/buttons.h"
-#include "ui/widgets/input_fields.h"
+#include "ui/widgets/fields/input_field.h"
+#include "ui/widgets/fields/password_input.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/wrap/fade_wrap.h"
+#include "ui/painter.h"
 #include "passport/passport_encryption.h"
 #include "passport/passport_panel_edit_contact.h"
-#include "settings/settings_privacy_security.h"
 #include "styles/style_layers.h"
 #include "styles/style_passport.h"
 #include "styles/style_boxes.h"
 #include "fakepasscode/log/fake_log.h"
+#include "fakepasscodes_list.h"
 
 FakePasscodeBox::FakePasscodeBox(
         QWidget*,
-        not_null<Main::Session*> session,
+        not_null<Window::SessionController*> controller,
         bool turningOff,
         bool turningOn,
         size_t fakeIndex)
-        : _session(session)
+        : _session(&controller->session())
+        , _controller(controller)
         , _turningOff(turningOff)
         , _turningOn(turningOn)
         , _fakeIndex(fakeIndex)
@@ -40,7 +43,7 @@ FakePasscodeBox::FakePasscodeBox(
         , _newPasscode(
                 this,
                 st::defaultInputField,
-                session->domain().local().hasLocalPasscode()
+                _session->domain().local().hasLocalPasscode()
                 ? tr::lng_passcode_enter_new()
                 : tr::lng_passcode_enter_first())
         , _reenterPasscode(this, st::defaultInputField, tr::lng_passcode_confirm_new())
@@ -95,15 +98,20 @@ void FakePasscodeBox::prepare() {
     connect(_oldPasscode, &Ui::MaskedInputField::changed, [=] { oldChanged(); });
     connect(_newPasscode, &Ui::MaskedInputField::changed, [=] { newChanged(); });
     connect(_reenterPasscode, &Ui::MaskedInputField::changed, [=] { newChanged(); });
-    connect(_passwordName, &Ui::InputField::changed, [=] { newChanged(); });
-    connect(_passwordHint, &Ui::InputField::changed, [=] { newChanged(); });
+
+    _passwordName->changes(
+    ) | rpl::start_with_next([=] { newChanged(); }, _passwordName->lifetime());
+    _passwordHint->changes(
+    ) | rpl::start_with_next([=] { newChanged(); }, _passwordHint->lifetime());
 
     const auto fieldSubmit = [=] { submit(); };
     connect(_oldPasscode, &Ui::MaskedInputField::submitted, fieldSubmit);
     connect(_newPasscode, &Ui::MaskedInputField::submitted, fieldSubmit);
     connect(_reenterPasscode, &Ui::MaskedInputField::submitted, fieldSubmit);
-    connect(_passwordName, &Ui::InputField::submitted, fieldSubmit);
-    connect(_passwordHint, &Ui::InputField::submitted, fieldSubmit);
+    _passwordName->submits(
+    ) | rpl::start_with_next(fieldSubmit, _passwordName->lifetime());
+    _passwordHint->submits(
+    ) | rpl::start_with_next(fieldSubmit, _passwordHint->lifetime());
 
     const auto has = currentlyHave();
     _oldPasscode->setVisible(onlyCheck || has);
@@ -126,7 +134,7 @@ void FakePasscodeBox::submit() {
         }
     } else if (_newPasscode->hasFocus()) {
         _reenterPasscode->setFocus();
-    } else if (_reenterPasscode->hasFocus()) {
+    } else {
         if (has && _oldPasscode->text().isEmpty()) {
             _oldPasscode->setFocus();
             _oldPasscode->showError();
@@ -191,14 +199,6 @@ void FakePasscodeBox::setInnerFocus() {
     }
 }
 
-void FakePasscodeBox::closeReplacedBy() {
-    if (isHidden()) {
-        if (_replacedBy && !_replacedBy->isHidden()) {
-            _replacedBy->closeBox();
-        }
-    }
-}
-
 void FakePasscodeBox::save(bool force) {
     QString old = _oldPasscode->text(), pwd = _newPasscode->text(), conf = _reenterPasscode->text();
     QString name = _passwordName->getLastText();
@@ -223,27 +223,27 @@ void FakePasscodeBox::save(bool force) {
         }
     }
     const auto onlyCheck = onlyCheckCurrent();
-    FAKE_LOG(qsl("We have onlyCheck=%1. Also old=%2, pwd=%3, conf=%4, has=%5")
-            .arg(onlyCheck).arg(old).arg(pwd).arg(conf).arg(has));
     if (!onlyCheck && pwd != conf) {
         _reenterPasscode->selectAll();
         _reenterPasscode->setFocus();
         _reenterPasscode->showError();
         _newError = tr::lng_passcode_differ(tr::now);
         update();
-        closeReplacedBy();
+        return;
+    } else if (!onlyCheck && _turningOn && pwd.isEmpty()) {
+        _newPasscode->setFocus();
+        _newPasscode->showError();
+        update();
         return;
     } else if (!onlyCheck && has && old == pwd) {
         _newPasscode->setFocus();
         _newPasscode->showError();
         _newError = tr::lng_passcode_is_same(tr::now);
         update();
-        closeReplacedBy();
         return;
     } else if (!onlyCheck && name.isEmpty()) {
         _passwordName->setFocus();
         _passwordName->showError();
-        closeReplacedBy();
         return;
     } else if (_session->domain().local().CheckFakePasscodeExists(pwd.toUtf8())) {
         _newPasscode->selectAll();
@@ -251,14 +251,14 @@ void FakePasscodeBox::save(bool force) {
         _newPasscode->showError();
         _newError = tr::lng_passcode_exists(tr::now);
         update();
-        closeReplacedBy();
         return;
     } else {
-        closeReplacedBy();
         const auto weak = Ui::MakeWeak(this);
         cSetPasscodeBadTries(0);
         if (_turningOn) {
-            _session->domain().local().AddFakePasscode(pwd.toUtf8(), name);
+            _fakeIndex = _session->domain().local().AddFakePasscode(pwd.toUtf8(), name);
+            _controller->show(Box<FakePasscodeContentBox>(&_session->domain(), _controller, _fakeIndex),
+                Ui::LayerOption::KeepOther);
         } else {
             if (pwd.isEmpty()) {
                 _session->domain().local().SetFakePasscodeName(name, _fakeIndex);
@@ -270,8 +270,6 @@ void FakePasscodeBox::save(bool force) {
             closeBox();
         }
     }
-
-    closeBox();
 }
 
 void FakePasscodeBox::badOldPasscode() {

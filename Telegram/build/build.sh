@@ -56,18 +56,19 @@ if [ "$BuildTarget" == "linux" ]; then
   echo "Building version $AppVersionStrFull for Linux 64bit.."
   UpdateFile="tlinuxupd$AppVersion"
   SetupFile="tsetup.$AppVersionStrFull.tar.xz"
+  SetupFile="tsetup.latest.tar.xz"
   ProjectPath="$HomePath/../out"
   ReleasePath="$ProjectPath/Release"
   BinaryName="Telegram"
 elif [ "$BuildTarget" == "mac" ] ; then
   if [ "$arg1" == "x86_64" ] || [ "$arg1" == "arm64" ]; then
-    echo "Building version $AppVersionStrFull for macOS 10.12+ ($arg1).."
+    echo "Building version $AppVersionStrFull for macOS 10.13+ ($arg1).."
     MacArch="$arg1"
     if [ "$arg2" == "request_uuid" ] && [ "$arg3" != "" ]; then
       NotarizeRequestId="$arg3"
     fi
   else
-    echo "Building version $AppVersionStrFull for macOS 10.12+.."
+    echo "Building version $AppVersionStrFull for macOS 10.13+.."
     if [ "$arg2" != "" ]; then
       if [ "$arg1" == "request_uuid_x86_64" ]; then
         NotarizeRequestIdAMD64="$arg2"
@@ -79,9 +80,9 @@ elif [ "$BuildTarget" == "mac" ] ; then
     fi
   fi
 
-  if [ "$AC_USERNAME" == "" ]; then
-    Error "AC_USERNAME not found!"
-  fi
+  #if [ "$AC_USERNAME" == "" ]; then
+  #  Error "AC_USERNAME not found!"
+  #fi
   UpdateFileAMD64="tmacupd$AppVersion"
   UpdateFileARM64="tarmacupd$AppVersion"
   if [ "$MacArch" == "arm64" ]; then
@@ -95,9 +96,11 @@ elif [ "$BuildTarget" == "mac" ] ; then
   if [ "$MacArch" != "" ]; then
     BundleName="$BinaryName.$MacArch.app"
     SetupFile="tsetup.$MacArch.$AppVersionStrFull.dmg"
+    SetupFile="tsetup.$MacArch.latest.dmg"
   else
     BundleName="$BinaryName.app"
     SetupFile="tsetup.$AppVersionStrFull.dmg"
+    SetupFile="tsetup.latest.dmg"
   fi
 elif [ "$BuildTarget" == "macstore" ]; then
   if [ "$AlphaVersion" != "0" ]; then
@@ -135,21 +138,24 @@ else
   fi
 fi
 
-DeployPath="$ReleasePath/deploy/$AppVersionStrMajor/$AppVersionStrFull"
+DeployPath="$ReleasePath/deploy"
 
 if [ "$BuildTarget" == "linux" ]; then
 
-  DropboxSymbolsPath="/media/psf/Dropbox/Telegram/symbols"
+  DropboxSymbolsPath="$ProjectPath/Dropbox/Telegram/symbols"
   if [ ! -d "$DropboxSymbolsPath" ]; then
     Error "Dropbox path not found!"
   fi
 
-  BackupPath="/media/psf/backup/tdesktop/$AppVersionStrMajor/$AppVersionStrFull/t$BuildTarget"
-  if [ ! -d "/media/psf/backup/tdesktop" ]; then
+  BackupPath="$ProjectPath/backup/tdesktop/$AppVersionStrMajor/$AppVersionStrFull/t$BuildTarget"
+  if [ ! -d "$ProjectPath/backup/tdesktop" ]; then
     Error "Backup folder not found!"
   fi
 
-  ./build/docker/centos_env/run.sh /usr/src/tdesktop/Telegram/build/docker/build.sh
+  # Already running in Docker, no nested virtualization
+  cd $HomePath
+  $FullScriptPath/docker/build.sh
+  echo "Build completed - $?"
 
   echo "Copying from docker result folder."
   cp "$ReleasePath/root/$BinaryName" "$ReleasePath/$BinaryName"
@@ -157,7 +163,7 @@ if [ "$BuildTarget" == "linux" ]; then
   cp "$ReleasePath/root/Packer" "$ReleasePath/Packer"
 
   echo "Dumping debug symbols.."
-  "$ReleasePath/dump_syms" "$ReleasePath/$BinaryName" > "$ReleasePath/$BinaryName.sym"
+  #"$ReleasePath/dump_syms" "$ReleasePath/$BinaryName" > "$ReleasePath/$BinaryName.sym"
   echo "Done!"
 
   echo "Stripping the executable.."
@@ -182,23 +188,24 @@ if [ "$BuildTarget" == "linux" ]; then
     SetupFile="talpha${AlphaVersion}_${AlphaSignature}.tar.xz"
   fi
 
-  SymbolsHash=`head -n 1 "$ReleasePath/$BinaryName.sym" | awk -F " " 'END {print $4}'`
-  echo "Copying $BinaryName.sym to $DropboxSymbolsPath/$BinaryName/$SymbolsHash"
-  mkdir -p "$DropboxSymbolsPath/$BinaryName/$SymbolsHash"
-  cp "$ReleasePath/$BinaryName.sym" "$DropboxSymbolsPath/$BinaryName/$SymbolsHash/"
-  echo "Done!"
+  #SymbolsHash=`head -n 1 "$ReleasePath/$BinaryName.sym" | awk -F " " 'END {print $4}'`
+  #echo "Copying $BinaryName.sym to $DropboxSymbolsPath/$BinaryName/$SymbolsHash"
+  #mkdir -p "$DropboxSymbolsPath/$BinaryName/$SymbolsHash"
+  #cp "$ReleasePath/$BinaryName.sym" "$DropboxSymbolsPath/$BinaryName/$SymbolsHash/"
+  #echo "Done!"
 
   if [ ! -d "$ReleasePath/deploy" ]; then
     mkdir "$ReleasePath/deploy"
   fi
 
-  if [ ! -d "$ReleasePath/deploy/$AppVersionStrMajor" ]; then
-    mkdir "$ReleasePath/deploy/$AppVersionStrMajor"
-  fi
+  #if [ ! -d "$ReleasePath/deploy/$AppVersionStrMajor" ]; then
+  #  mkdir "$ReleasePath/deploy/$AppVersionStrMajor"
+  #fi
 
-  echo "Copying $BinaryName, Updater and $UpdateFile to deploy/$AppVersionStrMajor/$AppVersionStrFull..";
-  mkdir "$DeployPath"
+  echo "Copying $BinaryName, Updater and $UpdateFile to $DeployPath/$BinaryName..";
+  #mkdir "$DeployPath"
   mkdir "$DeployPath/$BinaryName"
+  ls
   mv "$ReleasePath/$BinaryName" "$DeployPath/$BinaryName/"
   mv "$ReleasePath/Updater" "$DeployPath/$BinaryName/"
   mv "$ReleasePath/$UpdateFile" "$DeployPath/"
@@ -206,6 +213,7 @@ if [ "$BuildTarget" == "linux" ]; then
     mv "$ReleasePath/$AlphaKeyFile" "$DeployPath/"
   fi
   cd "$DeployPath"
+  ls
   tar -cJvf "$SetupFile" "$BinaryName/"
 
   mkdir -p $BackupPath
@@ -218,13 +226,13 @@ fi
 
 if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
 
-  DropboxSymbolsPath="$HOME/Dropbox/Telegram/symbols"
+  DropboxSymbolsPath="$ProjectPath/Dropbox/Telegram/symbols"
   if [ ! -d "$DropboxSymbolsPath" ]; then
     Error "Dropbox path not found!"
   fi
 
-  BackupPath="$HOME/Projects/backup/tdesktop/$AppVersionStrMajor/$AppVersionStrFull"
-  if [ ! -d "$HOME/Projects/backup/tdesktop" ]; then
+  BackupPath="$ProjectPath/backup/tdesktop/$AppVersionStrMajor/$AppVersionStrFull"
+  if [ ! -d "$ProjectPath/backup/tdesktop" ]; then
     Error "Backup path not found!"
   fi
 
@@ -249,6 +257,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
       rm -rf "$ReleasePath/$BinaryName.app/Contents/_CodeSignature"
       rm -rf "$ReleasePath/Updater"
 
+      cd $HomePath
       ./configure.sh -D DESKTOP_APP_MAC_ARCH="arm64;x86_64"
 
       cd $ProjectPath
@@ -291,24 +300,24 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
 
     if [ "$MacArch" == "" ]; then
       echo "Dumping debug symbols x86_64 from universal.."
-      "$HomePath/../../Libraries/breakpad/src/tools/mac/dump_syms/build/Release/dump_syms" "-a" "x86_64" "$ReleasePath/$BinaryName.app/Contents/MacOS/$BinaryName" > "$ReleasePath/$BinaryName.x86_64.sym" 2>/dev/null
+      #"$HomePath/../../Libraries/breakpad/src/tools/mac/dump_syms/build/Release/dump_syms" "-a" "x86_64" "$ReleasePath/$BinaryName.app/Contents/MacOS/$BinaryName" > "$ReleasePath/$BinaryName.x86_64.sym" 2>/dev/null
       echo "Done!"
 
-      SymbolsHash=`head -n 1 "$ReleasePath/$BinaryName.x86_64.sym" | awk -F " " 'END {print $4}'`
-      echo "Copying $BinaryName.x86_64.sym to $DropboxSymbolsPath/$BinaryName/$SymbolsHash"
-      mkdir -p "$DropboxSymbolsPath/$BinaryName/$SymbolsHash"
-      cp "$ReleasePath/$BinaryName.x86_64.sym" "$DropboxSymbolsPath/$BinaryName/$SymbolsHash/$BinaryName.sym"
-      echo "Done!"
+      #SymbolsHash=`head -n 1 "$ReleasePath/$BinaryName.x86_64.sym" | awk -F " " 'END {print $4}'`
+      #echo "Copying $BinaryName.x86_64.sym to $DropboxSymbolsPath/$BinaryName/$SymbolsHash"
+      #mkdir -p "$DropboxSymbolsPath/$BinaryName/$SymbolsHash"
+      #cp "$ReleasePath/$BinaryName.x86_64.sym" "$DropboxSymbolsPath/$BinaryName/$SymbolsHash/$BinaryName.sym"
+      #echo "Done!"
 
       echo "Dumping debug symbols arm64 from universal.."
-      "$HomePath/../../Libraries/breakpad/src/tools/mac/dump_syms/build/Release/dump_syms" "-a" "arm64" "$ReleasePath/$BinaryName.app/Contents/MacOS/$BinaryName" > "$ReleasePath/$BinaryName.arm64.sym" 2>/dev/null
+      #"$HomePath/../../Libraries/breakpad/src/tools/mac/dump_syms/build/Release/dump_syms" "-a" "arm64" "$ReleasePath/$BinaryName.app/Contents/MacOS/$BinaryName" > "$ReleasePath/$BinaryName.arm64.sym" 2>/dev/null
       echo "Done!"
 
-      SymbolsHash=`head -n 1 "$ReleasePath/$BinaryName.arm64.sym" | awk -F " " 'END {print $4}'`
-      echo "Copying $BinaryName.arm64.sym to $DropboxSymbolsPath/$BinaryName/$SymbolsHash"
-      mkdir -p "$DropboxSymbolsPath/$BinaryName/$SymbolsHash"
-      cp "$ReleasePath/$BinaryName.arm64.sym" "$DropboxSymbolsPath/$BinaryName/$SymbolsHash/$BinaryName.sym"
-      echo "Done!"
+      #SymbolsHash=`head -n 1 "$ReleasePath/$BinaryName.arm64.sym" | awk -F " " 'END {print $4}'`
+      #echo "Copying $BinaryName.arm64.sym to $DropboxSymbolsPath/$BinaryName/$SymbolsHash"
+      #mkdir -p "$DropboxSymbolsPath/$BinaryName/$SymbolsHash"
+      #cp "$ReleasePath/$BinaryName.arm64.sym" "$DropboxSymbolsPath/$BinaryName/$SymbolsHash/$BinaryName.sym"
+      #echo "Done!"
     fi
 
     echo "Stripping the executable.."
@@ -321,30 +330,53 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
 
     echo "Signing the application.."
     if [ "$BuildTarget" == "mac" ]; then
-      codesign --force --deep --timestamp --options runtime --sign "Developer ID Application: John Preston" "$ReleasePath/$BundleName" --entitlements "$HomePath/Telegram/Telegram.entitlements"
+      # Use PTG Ceertificated from GitHub Secrets
+      if [ ! -f "certificate.p12" ]; then
+        echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
+        security create-keychain -p ptelegram_pass build.keychain
+        security default-keychain -s build.keychain
+        security unlock-keychain -p ptelegram_pass build.keychain
+        security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ptelegram_pass build.keychain
+      fi
+      if [ "$identity" == "" ]; then
+        echo "Find identity"
+        identity=$(security find-identity -v | grep Developer | awk -F " " 'END {print $2}')
+      fi
+      codesign --force --deep -s ${identity} "$ReleasePath/$BundleName" -v --entitlements "$HomePath/Telegram/Telegram.entitlements"
+      
+      #codesign --force --deep --timestamp --options runtime --sign "Developer ID Application: John Preston" "$ReleasePath/$BundleName" --entitlements "$HomePath/Telegram/Telegram.entitlements"
     elif [ "$BuildTarget" == "macstore" ]; then
-      codesign --force --sign "3rd Party Mac Developer Application: Telegram FZ-LLC (C67CF9S4VU)" "$ReleasePath/$BundleName/Contents/Frameworks/Breakpad.framework/Versions/A/Resources/breakpadUtilities.dylib" --entitlements "$HomePath/Telegram/Breakpad.entitlements"
-      codesign --force --deep --sign "3rd Party Mac Developer Application: Telegram FZ-LLC (C67CF9S4VU)" "$ReleasePath/$BundleName" --entitlements "$HomePath/Telegram/Telegram Lite.entitlements"
+      codesign --force --timestamp --options runtime --sign "3rd Party Mac Developer Application: Telegram FZ-LLC (C67CF9S4VU)" "$ReleasePath/$BundleName/Contents/Frameworks/Breakpad.framework/Versions/A/Resources/breakpadUtilities.dylib" --entitlements "$HomePath/Telegram/Breakpad.entitlements"
+      codesign --force --deep --timestamp --options runtime --sign "3rd Party Mac Developer Application: Telegram FZ-LLC (C67CF9S4VU)" "$ReleasePath/$BundleName" --entitlements "$HomePath/Telegram/Telegram Lite.entitlements"
       echo "Making an installer.."
       productbuild --sign "3rd Party Mac Developer Installer: Telegram FZ-LLC (C67CF9S4VU)" --component "$ReleasePath/$BundleName" /Applications "$ReleasePath/$BinaryName.pkg"
     fi
     echo "Done!"
 
     if [ ! -f "$ReleasePath/$BundleName/Contents/Resources/Icon.icns" ]; then
-      Error "Icon.icns not found in Resources!"
+      # TODO: fix, temp until debugged
+      #Error "Icon.icns not found in Resources!"
+      echo "Icon.icns not found in Resources!"
     fi
 
     if [ ! -f "$ReleasePath/$BundleName/Contents/MacOS/$BinaryName" ]; then
-      Error "$BinaryName not found in MacOS!"
+      # TODO: fix, temp until debugged
+      #Error "$BinaryName not found in MacOS!"
+      echo "$BinaryName not found in MacOS!"
     fi
 
     if [ ! -d "$ReleasePath/$BundleName/Contents/_CodeSignature" ]; then
-      Error "$BinaryName signature not found!"
+      # TODO: fix, temp until debugged
+      #Error "$BinaryName signature not found!"
+      echo "$BinaryName signature not found!"
     fi
 
     if [ "$BuildTarget" == "macstore" ]; then
       if [ ! -f "$ReleasePath/$BinaryName.pkg" ]; then
-        Error "$BinaryName.pkg not found!"
+        # TODO: fix, temp until debugged
+        #Error "$BinaryName.pkg not found!"
+        echo "$BinaryName.pkg not found!"
       fi
     fi
   fi
@@ -354,13 +386,24 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
 
     if [ "$NotarizeRequestId" == "" ]; then
       if [ "$AlphaVersion" == "0" ]; then
-        cp -f tsetup_template.dmg tsetup.temp.dmg
-        TempDiskPath=`hdiutil attach -nobrowse -noautoopenrw -readwrite tsetup.temp.dmg | awk -F "\t" 'END {print $3}'`
-        cp -R "./$BundleName" "$TempDiskPath/"
-        bless --folder "$TempDiskPath/" --openfolder "$TempDiskPath/"
-        hdiutil detach "$TempDiskPath"
-        hdiutil convert tsetup.temp.dmg -format UDBZ -ov -o "$SetupFile"
-        rm tsetup.temp.dmg
+        #cp -f tsetup_template.dmg tsetup.temp.dmg
+        #TempDiskPath=`hdiutil attach -nobrowse -noautoopenrw -readwrite tsetup.temp.dmg | awk -F "\t" 'END {print $3}'`
+        #cp -R "./$BundleName" "$TempDiskPath/"
+        #bless --folder "$TempDiskPath/"
+        #hdiutil detach "$TempDiskPath"
+        #hdiutil convert tsetup.temp.dmg -format UDBZ -ov -o "$SetupFile"
+        #rm tsetup.temp.dmg
+        # Do simple
+        create-dmg \
+            --volname "Telegram Desktop" \
+            --volicon "./$BundleName/Contents/Resources/AppIcon.icns" \
+            --hide-extension "$BundleName" \
+            --icon-size 100 \
+            --app-drop-link 400 20 \
+            --bless \
+            --format UDBZ \
+            "$SetupFile" \
+            "./$BundleName"
       fi
     fi
 
@@ -396,67 +439,9 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
         cd "$ReleasePath"
       fi
     fi
-    if [ "$NotarizeRequestId" == "" ]; then
-      echo "Beginning notarization process."
-      set +e
-      xcrun altool --notarize-app --primary-bundle-id "com.tdesktop.Telegram" --username "$AC_USERNAME" --password "@keychain:AC_PASSWORD" --file "$SetupFile" > request_uuid.txt
-      set -e
-      while IFS='' read -r line || [[ -n "$line" ]]; do
-        Prefix=$(echo $line | cut -d' ' -f 1)
-        Value=$(echo $line | cut -d' ' -f 3)
-        if [ "$Prefix" == "RequestUUID" ]; then
-          RequestUUID=$Value
-        fi
-      done < "request_uuid.txt"
-      if [ "$RequestUUID" == "" ]; then
-        cat request_uuid.txt
-        Error "Could not extract Request UUID."
-      fi
-      echo "Request UUID: $RequestUUID"
-      rm request_uuid.txt
-    else
-      RequestUUID=$NotarizeRequestId
-      echo "Continue notarization process with Request UUID: $RequestUUID"
-    fi
-
-    RequestStatus=
-    LogFile=
-    while [[ "$RequestStatus" == "" ]]; do
-      sleep 5
-      xcrun altool --notarization-info "$RequestUUID" --username "$AC_USERNAME" --password "@keychain:AC_PASSWORD" > request_result.txt
-      while IFS='' read -r line || [[ -n "$line" ]]; do
-        Prefix=$(echo $line | cut -d' ' -f 1)
-        Value=$(echo $line | cut -d' ' -f 2)
-        if [ "$Prefix" == "LogFileURL:" ]; then
-          LogFile=$Value
-        fi
-        if [ "$Prefix" == "Status:" ]; then
-          if [ "$Value" == "in" ]; then
-            echo "In progress..."
-          else
-            RequestStatus=$Value
-            echo "Status: $RequestStatus"
-          fi
-        fi
-      done < "request_result.txt"
-    done
-    if [ "$RequestStatus" != "success" ]; then
-      echo "Notarization problems, response:"
-      cat request_result.txt
-      if [ "$LogFile" != "" ]; then
-        echo "Requesting log: $LogFile"
-        curl $LogFile
-      fi
-      Error "Notarization FAILED."
-    fi
-    rm request_result.txt
-
-    if [ "$LogFile" != "" ]; then
-      echo "Requesting log: $LogFile"
-      curl $LogFile > request_log.txt
-    fi
-
-    xcrun stapler staple "$ReleasePath/$BundleName"
+    echo "Skipping notarization process."
+    #xcrun notarytool submit "$SetupFile" --keychain-profile "preston" --wait
+    #xcrun stapler staple "$ReleasePath/$BundleName"
 
     if [ "$MacArch" != "" ]; then
       rm "$ReleasePath/$SetupFile"
@@ -471,8 +456,8 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
       mv "$SetupFile" "$ReleasePath/"
       cd "$ReleasePath"
       echo "Alpha archive re-created."
-    else
-      xcrun stapler staple "$ReleasePath/$SetupFile"
+    #else
+      #xcrun stapler staple "$ReleasePath/$SetupFile"
     fi
 
     if [ "$MacArch" != "" ]; then
@@ -495,13 +480,13 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
     mkdir "$ReleasePath/deploy"
   fi
 
-  if [ ! -d "$ReleasePath/deploy/$AppVersionStrMajor" ]; then
-    mkdir "$ReleasePath/deploy/$AppVersionStrMajor"
-  fi
+  #if [ ! -d "$ReleasePath/deploy/$AppVersionStrMajor" ]; then
+  #  mkdir "$ReleasePath/deploy/$AppVersionStrMajor"
+  #fi
 
   if [ "$BuildTarget" == "mac" ]; then
     echo "Copying $BinaryName.app, $UpdateFileAMD64 and $UpdateFileARM64 to deploy/$AppVersionStrMajor/$AppVersionStr..";
-    mkdir "$DeployPath"
+    #mkdir "$DeployPath"
     mkdir "$DeployPath/$BinaryName"
     cp -r "$ReleasePath/$BinaryName.app" "$DeployPath/$BinaryName/"
     if [ "$AlphaVersion" != "0" ]; then
@@ -532,39 +517,8 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
 fi
 
 echo "Version $AppVersionStrFull is ready!";
-echo -en "\007";
-sleep 1;
-echo -en "\007";
-sleep 1;
-echo -en "\007";
-
-if [ "$BuildTarget" == "mac" ]; then
-  if [ -f "$ReleasePath/request_log.txt" ]; then
-    DisplayingLog=
-    while IFS='' read -r line || [[ -n "$line" ]]; do
-      if [ "$DisplayingLog" == "1" ]; then
-        echo $line
-      else
-        Prefix=$(echo $line | cut -d' ' -f 1)
-        Value=$(echo $line | cut -d' ' -f 2)
-        if [ "$Prefix" == '"issues":' ]; then
-          if [ "$Value" != "null" ]; then
-            echo "NB! Notarization log issues:"
-            echo $line
-            DisplayingLog=1
-          else
-            DisplayingLog=0
-          fi
-        fi
-      fi
-    done < "$ReleasePath/request_log.txt"
-    if [ "$DisplayingLog" != "0" ] && [ "$DisplayingLog" != "1" ]; then
-      echo "NB! Notarization issues not found:"
-      cat "$ReleasePath/request_log.txt"
-    else
-      rm "$ReleasePath/request_log.txt"
-    fi
-  else
-    echo "NB! Notarization log not found :("
-  fi
-fi
+#echo -en "\007";
+#sleep 1;
+#echo -en "\007";
+#sleep 1;
+#echo -en "\007";

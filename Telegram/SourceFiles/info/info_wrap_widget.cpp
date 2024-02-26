@@ -14,10 +14,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/info_controller.h"
 #include "info/info_memento.h"
 #include "info/info_top_bar.h"
+#include "settings/cloud_password/settings_cloud_password_email_confirm.h"
+#include "settings/settings_chat.h"
+#include "settings/settings_main.h"
+#include "settings/settings_premium.h"
+#include "ui/effects/ripple_animation.h" // MaskByDrawer.
 #include "ui/widgets/discrete_sliders.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/shadow.h"
-#include "ui/widgets/dropdown_menu.h"
+#include "ui/widgets/popup_menu.h"
+#include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/search_field_controller.h"
 #include "core/application.h"
@@ -34,8 +40,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_changes.h"
 #include "data/data_user.h"
+#include "data/data_forum_topic.h"
 #include "mainwidget.h"
 #include "lang/lang_keys.h"
+#include "styles/style_chat.h" // popupMenuExpandedSeparator
 #include "styles/style_info.h"
 #include "styles/style_profile.h"
 #include "styles/style_menu_icons.h"
@@ -48,6 +56,12 @@ const style::InfoTopBar &TopBarStyle(Wrap wrap) {
 	return (wrap == Wrap::Layer)
 		? st::infoLayerTopBar
 		: st::infoTopBar;
+}
+
+[[nodiscard]] bool HasCustomTopBar(not_null<const Controller*> controller) {
+	const auto section = controller->section();
+	return (section.type() == Section::Type::Settings)
+		&& section.settingsType()->hasCustomTopBar();
 }
 
 } // namespace
@@ -65,12 +79,18 @@ WrapWidget::WrapWidget(
 : SectionWidget(parent, window, rpl::producer<PeerData*>())
 , _wrap(wrap)
 , _controller(createController(window, memento->content()))
-, _topShadow(this) {
+, _topShadow(this)
+, _bottomShadow(this) {
 	_topShadow->toggleOn(
 		topShadowToggledValue(
 		) | rpl::filter([](bool shown) {
 			return true;
 		}));
+
+	_bottomShadow->toggleOn(
+		_desiredBottomShadowVisibilities.events(
+		) | rpl::flatten_latest() | rpl::distinct_until_changed());
+
 	_wrap.changes(
 	) | rpl::start_with_next([this] {
 		setupTop();
@@ -79,16 +99,36 @@ WrapWidget::WrapWidget(
 	selectedListValue(
 	) | rpl::start_with_next([this](SelectedItems &&items) {
 		InvokeQueued(this, [this, items = std::move(items)]() mutable {
-			if (_topBar) _topBar->setSelectedItems(std::move(items));
+			if (_topBar) {
+				_topBar->setSelectedItems(std::move(items));
+			}
 		});
 	}, lifetime());
 	restoreHistoryStack(memento->takeStack());
+
+	if (const auto topic = _controller->topic()) {
+		topic->destroyed(
+		) | rpl::start_with_next([=] {
+			if (_wrap.current() == Wrap::Layer) {
+				_controller->parentController()->hideSpecialLayer();
+			} else if (_wrap.current() == Wrap::Narrow) {
+				_controller->parentController()->showBackFromStack(
+					Window::SectionShow(
+						anim::type::normal,
+						anim::activation::background));
+			} else {
+				_removeRequests.fire({});
+			}
+		}, lifetime());
+	}
 }
 
 void WrapWidget::setupShortcuts() {
 	Shortcuts::Requests(
 	) | rpl::filter([=] {
-		return requireTopBarSearch();
+		return requireTopBarSearch()
+			&& (Core::App().activeWindow()
+				== &_controller->parentController()->window());
 	}) | rpl::start_with_next([=](not_null<Shortcuts::Request*> request) {
 		using Command = Shortcuts::Command;
 		request->check(Command::Search) && request->handle([=] {
@@ -148,23 +188,32 @@ void WrapWidget::injectActivePeerProfile(not_null<PeerData*> peer) {
 		? _historyStack.front().section->section().type()
 		: _controller->section().type();
 	const auto firstSectionMediaType = [&] {
-		if (firstSectionType == Section::Type::Profile) {
+		if (firstSectionType == Section::Type::Profile
+			|| firstSectionType == Section::Type::SavedSublists) {
 			return Section::MediaType::kCount;
 		}
 		return hasStackHistory()
 			? _historyStack.front().section->section().mediaType()
 			: _controller->section().mediaType();
 	}();
-	const auto expectedType = peer->sharedMediaInfo()
+	const auto savedSublistsInfo = peer->savedSublistsInfo();
+	const auto sharedMediaInfo = peer->sharedMediaInfo();
+	const auto expectedType = savedSublistsInfo
+		? Section::Type::SavedSublists
+		: sharedMediaInfo
 		? Section::Type::Media
 		: Section::Type::Profile;
-	const auto expectedMediaType = peer->sharedMediaInfo()
+	const auto expectedMediaType = savedSublistsInfo
+		? Section::MediaType::kCount
+		: sharedMediaInfo
 		? Section::MediaType::Photo
 		: Section::MediaType::kCount;
 	if (firstSectionType != expectedType
 		|| firstSectionMediaType != expectedMediaType
 		|| firstPeer != peer) {
-		auto section = peer->sharedMediaInfo()
+		auto section = savedSublistsInfo
+			? Section(Section::Type::SavedSublists)
+			: sharedMediaInfo
 			? Section(Section::MediaType::Photo)
 			: Section(Section::Type::Profile);
 		injectActiveProfileMemento(std::move(
@@ -204,135 +253,35 @@ Dialogs::RowDescriptor WrapWidget::activeChat() const {
 		return Dialogs::RowDescriptor(
 			peer->owner().history(peer),
 			FullMsgId());
-	} else if (key().settingsSelf() || key().isDownloads() || key().poll()) {
+	} else if (const auto storiesPeer = key().storiesPeer()) {
+		return (key().storiesTab() == Stories::Tab::Saved)
+			? Dialogs::RowDescriptor(
+				storiesPeer->owner().history(storiesPeer),
+				FullMsgId())
+			: Dialogs::RowDescriptor();
+	} else if (key().settingsSelf()
+			|| key().isDownloads()
+			|| key().poll()
+			|| key().statisticsPeer()) {
 		return Dialogs::RowDescriptor();
 	}
 	Unexpected("Owner in WrapWidget::activeChat().");
 }
 
-// This was done for tabs support.
-//
-//void WrapWidget::createTabs() {
-//	_topTabs.create(this, st::infoTabs);
-//	auto sections = QStringList();
-//	sections.push_back(tr::lng_profile_info_section(tr::now).toUpper());
-//	sections.push_back(tr::lng_info_tab_media(tr::now).toUpper());
-//	_topTabs->setSections(sections);
-//	_topTabs->setActiveSection(static_cast<int>(_tab));
-//	_topTabs->finishAnimating();
-//
-//	_topTabs->sectionActivated(
-//	) | rpl::map([](int index) {
-//		return static_cast<Tab>(index);
-//	}) | rpl::start_with_next(
-//		[this](Tab tab) { showTab(tab); },
-//		lifetime());
-//
-//	_topTabs->move(0, 0);
-//	_topTabs->resizeToWidth(width());
-//	_topTabs->show();
-//
-//	_topTabsBackground.create(this, st::profileBg);
-//	_topTabsBackground->setAttribute(Qt::WA_OpaquePaintEvent);
-//
-//	_topTabsBackground->move(0, 0);
-//	_topTabsBackground->resize(
-//		width(),
-//		_topTabs->height() - st::lineWidth);
-//	_topTabsBackground->show();
-//}
-
 void WrapWidget::forceContentRepaint() {
 	// WA_OpaquePaintEvent on TopBar creates render glitches when
 	// animating the LayerWidget's height :( Fixing by repainting.
-
-	// This was done for tabs support.
-	//
-	//if (_topTabs) {
-	//	_topTabsBackground->update();
-	//}
-
 	if (_topBar) {
 		_topBar->update();
 	}
 	_content->update();
 }
 
-// This was done for tabs support.
-//
-//void WrapWidget::showTab(Tab tab) {
-//	if (_tab == tab) {
-//		return;
-//	}
-//	Expects(_content != nullptr);
-//	auto direction = (tab > _tab)
-//		? SlideDirection::FromRight
-//		: SlideDirection::FromLeft;
-//	auto newAnotherMemento = _content->createMemento();
-//	if (!_anotherTabMemento) {
-//		_anotherTabMemento = createTabMemento(tab);
-//	}
-//	auto newController = createController(
-//		_controller->parentController(),
-//		_anotherTabMemento.get());
-//	auto newContent = createContent(
-//		_anotherTabMemento.get(),
-//		newController.get());
-//	auto animationParams = SectionSlideParams();
-////	animationParams.withFade = (wrap() == Wrap::Layer);
-//	animationParams.withTabs = true;
-//	animationParams.withTopBarShadow = hasTopBarShadow()
-//			&& newContent->hasTopBarShadow();
-//	animationParams.oldContentCache = grabForShowAnimation(
-//		animationParams);
-//
-//	_controller = std::move(newController);
-//	showContent(std::move(newContent));
-//
-//	showAnimated(direction, animationParams);
-//
-//	_anotherTabMemento = std::move(newAnotherMemento);
-//	_tab = tab;
-//}
-//
-//void WrapWidget::setupTabbedTop() {
-//	auto section = _controller->section();
-//	switch (section.type()) {
-//	case Section::Type::Profile:
-//		setupTabs(Tab::Profile);
-//		break;
-//	case Section::Type::Media:
-//		switch (section.mediaType()) {
-//		case Section::MediaType::Photo:
-//		case Section::MediaType::Video:
-//		case Section::MediaType::File:
-//			setupTabs(Tab::Media);
-//			break;
-//		default:
-//			setupTabs(Tab::None);
-//			break;
-//		}
-//		break;
-//	case Section::Type::CommonGroups:
-//  case Section::Type::Members:
-//		setupTabs(Tab::None);
-//		break;
-//	}
-//}
-
 void WrapWidget::setupTop() {
-	// This was done for tabs support.
-	//
-	//if (wrap() == Wrap::Side && !hasStackHistory()) {
-	//	setupTabbedTop();
-	//} else {
-	//	setupTabs(Tab::None);
-	//}
-	//if (_topTabs) {
-	//	_topBar.destroy();
-	//} else {
-	//	createTopBar();
-	//}
+	if (HasCustomTopBar(_controller.get())) {
+		_topBar.destroy();
+		return;
+	}
 	createTopBar();
 }
 
@@ -351,11 +300,7 @@ void WrapWidget::createTopBar() {
 		_content->selectionAction(action);
 	}, _topBar->lifetime());
 
-	_topBar->setTitle(TitleValue(
-		_controller->section(),
-		_controller->key(),
-		!hasStackHistory()));
-	if (wrapValue == Wrap::Narrow || hasStackHistory()) {
+	if (hasBackButton()) {
 		_topBar->enableBackButton();
 		_topBar->backRequest(
 		) | rpl::start_with_next([=] {
@@ -370,6 +315,11 @@ void WrapWidget::createTopBar() {
 			_controller->parentController()->closeThirdSection();
 		});
 	}
+	_topBar->storyClicks() | rpl::start_with_next([=] {
+		if (const auto peer = _controller->key().peer()) {
+			_controller->parentController()->openPeerStories(peer->id);
+		}
+	}, _topBar->lifetime());
 	if (wrapValue == Wrap::Layer) {
 		auto close = _topBar->addButton(
 			base::make_unique_q<Ui::IconButton>(
@@ -395,8 +345,10 @@ void WrapWidget::createTopBar() {
 		addTopBarMenuButton();
 		addProfileCallsButton();
 	} else if (section.type() == Section::Type::Settings
-		&& (section.settingsType() == Section::SettingsType::Main
-			|| section.settingsType() == Section::SettingsType::Chat)) {
+		&& (section.settingsType()
+				== ::Settings::CloudPasswordEmailConfirmId()
+			|| section.settingsType() == ::Settings::Main::Id()
+			|| section.settingsType() == ::Settings::Chat::Id())) {
 		addTopBarMenuButton();
 	} else if (section.type() == Section::Type::Downloads) {
 		auto &manager = Core::App().downloadManager();
@@ -430,12 +382,20 @@ void WrapWidget::createTopBar() {
 }
 
 void WrapWidget::checkBeforeClose(Fn<void()> close) {
-	Ui::hideLayer();
+	_controller->parentController()->hideLayer();
 	close();
 }
 
 void WrapWidget::addTopBarMenuButton() {
 	Expects(_topBar != nullptr);
+
+	{
+		const auto guard = gsl::finally([&] { _topBarMenu = nullptr; });
+		showTopBarMenu(true);
+		if (_topBarMenu->empty()) {
+			return;
+		}
+	}
 
 	_topBarMenuToggle.reset(_topBar->addButton(
 		base::make_unique_q<Ui::IconButton>(
@@ -444,7 +404,7 @@ void WrapWidget::addTopBarMenuButton() {
 				? st::infoLayerTopBarMenu
 				: st::infoTopBarMenu))));
 	_topBarMenuToggle->addClickHandler([this] {
-		showTopBarMenu();
+		showTopBarMenu(false);
 	});
 }
 
@@ -485,50 +445,36 @@ void WrapWidget::addProfileCallsButton() {
 	}
 }
 
-void WrapWidget::showTopBarMenu() {
+void WrapWidget::showTopBarMenu(bool check) {
 	if (_topBarMenu) {
-		_topBarMenu->hideAnimated(
-			Ui::InnerDropdown::HideOption::IgnoreShow);
+		_topBarMenu->hideMenu(true);
 		return;
 	}
-	_topBarMenu = base::make_unique_q<Ui::DropdownMenu>(
+	_topBarMenu = base::make_unique_q<Ui::PopupMenu>(
 		this,
-		st::dropdownMenuWithIcons);
+		st::popupMenuExpandedSeparator);
 
-	_topBarMenu->setHiddenCallback([this] {
+	_topBarMenu->setDestroyedCallback([this] {
 		InvokeQueued(this, [this] { _topBarMenu = nullptr; });
 		if (auto toggle = _topBarMenuToggle.get()) {
 			toggle->setForceRippled(false);
 		}
 	});
-	_topBarMenu->setShowStartCallback([this] {
-		if (auto toggle = _topBarMenuToggle.get()) {
-			toggle->setForceRippled(true);
-		}
-	});
-	_topBarMenu->setHideStartCallback([this] {
-		if (auto toggle = _topBarMenuToggle.get()) {
-			toggle->setForceRippled(false);
-		}
-	});
-	_topBarMenuToggle->installEventFilter(_topBarMenu.get());
 
-	const auto addAction = [=](
-			const QString &text,
-			Fn<void()> callback,
-			const style::icon *icon) {
-		return _topBarMenu->addAction(text, std::move(callback), icon);
-	};
+	const auto addAction = Ui::Menu::CreateAddActionCallback(_topBarMenu);
 	if (key().isDownloads()) {
 		addAction(
 			tr::lng_context_delete_all_files(tr::now),
 			[=] { deleteAllDownloads(); },
 			&st::menuIconDelete);
 	} else if (const auto peer = key().peer()) {
+		const auto topic = key().topic();
 		Window::FillDialogsEntryMenu(
 			_controller->parentController(),
 			Dialogs::EntryState{
-				.key = peer->owner().history(peer),
+				.key = (topic
+					? Dialogs::Key{ topic }
+					: Dialogs::Key{ peer->owner().history(peer) }),
 				.section = Dialogs::EntryState::Section::Profile,
 			},
 			addAction);
@@ -547,11 +493,13 @@ void WrapWidget::showTopBarMenu() {
 		_topBarMenu = nullptr;
 		return;
 	}
-	auto position = (wrap() == Wrap::Layer)
-		? st::infoLayerTopBarMenuPosition
-		: st::infoTopBarMenuPosition;
-	_topBarMenu->moveToRight(position.x(), position.y());
-	_topBarMenu->showAnimated(Ui::PanelAnimation::Origin::TopRight);
+	_topBarMenu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
+	if (check) {
+		return;
+	}
+	_topBarMenuToggle->setForceRippled(true);
+	_topBarMenu->popup(_topBarMenuToggle->mapToGlobal(
+		st::infoLayerTopBarMenuPosition));
 }
 
 void WrapWidget::deleteAllDownloads() {
@@ -573,19 +521,16 @@ void WrapWidget::deleteAllDownloads() {
 }
 
 bool WrapWidget::requireTopBarSearch() const {
-	if (!_controller->searchFieldController()) {
+	if (!_topBar || !_controller->searchFieldController()) {
 		return false;
 	} else if (_controller->wrap() == Wrap::Layer
 		|| _controller->section().type() == Section::Type::Profile) {
 		return false;
+	} else if (key().isDownloads()) {
+		return false;
 	} else if (hasStackHistory()) {
 		return true;
 	}
-	// This was for top-level tabs support.
-	//
-	//auto section = _controller->section();
-	//return (section.type() != Section::Type::Media)
-	//	|| !Media::TypeToTabIndex(section.mediaType()).has_value();
 	return false;
 }
 
@@ -597,23 +542,43 @@ bool WrapWidget::showBackFromStackInternal(
 		showNewContent(
 			last.section.get(),
 			params.withWay(Window::SectionShow::Way::Backward));
-		//_anotherTabMemento = std::move(last.anotherTab);
 		return true;
 	}
 	return (wrap() == Wrap::Layer);
 }
 
+void WrapWidget::removeFromStack(const std::vector<Section> &sections) {
+	for (const auto &section : sections) {
+		const auto it = ranges::find_if(_historyStack, [&](
+				const StackItem &item) {
+			const auto &s = item.section->section();
+			if (s.type() != section.type()) {
+				return false;
+			} else if (s.type() == Section::Type::SavedSublists) {
+				return true;
+			} else if (s.type() == Section::Type::Media) {
+				return (s.mediaType() == section.mediaType());
+			} else if (s.type() == Section::Type::Settings) {
+				return (s.settingsType() == section.settingsType());
+			}
+			return false;
+		});
+		if (it != end(_historyStack)) {
+			_historyStack.erase(it);
+		}
+	}
+}
+
 not_null<Ui::RpWidget*> WrapWidget::topWidget() const {
-	// This was done for tabs support.
-	//
-	//if (_topTabs) {
-	//	return _topTabsBackground;
-	//}
 	return _topBar;
 }
 
 void WrapWidget::showContent(object_ptr<ContentWidget> content) {
 	if (auto old = std::exchange(_content, std::move(content))) {
+		if (Ui::InFocusChain(old)) {
+			// Prevent activating dialogs filter field while animating.
+			setFocus();
+		}
 		old->hide();
 
 		// Content destructor may invoke closeBox() that will try to
@@ -623,70 +588,58 @@ void WrapWidget::showContent(object_ptr<ContentWidget> content) {
 		old->setParent(nullptr);
 		old.destroy();
 	}
-	_content->show();
 	_additionalScroll = 0;
-	//_anotherTabMemento = nullptr;
+	_content->show();
 	finishShowContent();
 }
 
 void WrapWidget::finishShowContent() {
-	_content->setIsStackBottom(!hasStackHistory());
 	updateContentGeometry();
+	_content->setIsStackBottom(!hasStackHistory());
+	if (_topBar) {
+		_topBar->setTitle({
+			.title = _content->title(),
+			.subtitle = _content->subtitle(),
+		});
+		_topBar->setStories(_content->titleStories());
+		_topBar->setStoriesArchive(
+			_controller->key().storiesTab() == Stories::Tab::Archive);
+	}
 	_desiredHeights.fire(desiredHeightForContent());
 	_desiredShadowVisibilities.fire(_content->desiredShadowVisibility());
+	_desiredBottomShadowVisibilities.fire(
+		_content->desiredBottomShadowVisibility());
 	_selectedLists.fire(_content->selectedListValue());
 	_scrollTillBottomChanges.fire(_content->scrollTillBottomChanges());
 	_topShadow->raise();
 	_topShadow->finishAnimating();
+	_bottomShadow->raise();
+	_bottomShadow->finishAnimating();
 	_contentChanges.fire({});
 
-	// This was done for tabs support.
-	//
-	//if (_topTabs) {
-	//	_topTabs->raise();
-	//}
+	_content->scrollBottomSkipValue(
+	) | rpl::start_with_next([=] {
+		updateContentGeometry();
+	}, _content->lifetime());
 }
 
 rpl::producer<bool> WrapWidget::topShadowToggledValue() const {
-	// Allows always showing shadow for specific wrap value.
-	// Was done for top level tabs support.
-	//
-	//using namespace rpl::mappers;
-	//return rpl::combine(
-	//	_controller->wrapValue(),
-	//	_desiredShadowVisibilities.events() | rpl::flatten_latest(),
-	//	(_1 == Wrap::Side) || _2);
 	return _desiredShadowVisibilities.events()
-		| rpl::flatten_latest();
+		| rpl::flatten_latest(
+		) | rpl::map([=](bool v) { return v && (_topBar != nullptr); });
 }
 
 rpl::producer<int> WrapWidget::desiredHeightForContent() const {
 	using namespace rpl::mappers;
-	return rpl::combine(
+	return rpl::single(0) | rpl::then(rpl::combine(
 		_content->desiredHeightValue(),
-		topWidget()->heightValue(),
-		_1 + _2);
+		(_topBar ? _topBar->heightValue() : rpl::single(0)),
+		_1 + _2));
 }
 
 rpl::producer<SelectedItems> WrapWidget::selectedListValue() const {
 	return _selectedLists.events() | rpl::flatten_latest();
 }
-
-// Was done for top level tabs support.
-//
-//std::shared_ptr<ContentMemento> WrapWidget::createTabMemento(
-//		Tab tab) {
-//	switch (tab) {
-//	case Tab::Profile: return std::make_shared<Profile::Memento>(
-//		_controller->peerId(),
-//		_controller->migratedPeerId());
-//	case Tab::Media: return std::make_shared<Media::Memento>(
-//		_controller->peerId(),
-//		_controller->migratedPeerId(),
-//		Media::Type::Photo);
-//	}
-//	Unexpected("Tab value in Info::WrapWidget::createInner()");
-//}
 
 object_ptr<ContentWidget> WrapWidget::createContent(
 		not_null<ContentMemento*> memento,
@@ -697,43 +650,11 @@ object_ptr<ContentWidget> WrapWidget::createContent(
 		contentGeometry());
 }
 
-// Was done for top level tabs support.
-//
-//void WrapWidget::convertProfileFromStackToTab() {
-//	if (!hasStackHistory()) {
-//		return;
-//	}
-//	auto &entry = _historyStack[0];
-//	if (entry.section->section().type() != Section::Type::Profile) {
-//		return;
-//	}
-//	auto convertInsideStack = (_historyStack.size() > 1);
-//	auto checkSection = convertInsideStack
-//		? _historyStack[1].section->section()
-//		: _controller->section();
-//	auto &anotherMemento = convertInsideStack
-//		? _historyStack[1].anotherTab
-//		: _anotherTabMemento;
-//	if (checkSection.type() != Section::Type::Media) {
-//		return;
-//	}
-//	if (!Info::Media::TypeToTabIndex(checkSection.mediaType())) {
-//		return;
-//	}
-//	anotherMemento = std::move(entry.section);
-//	_historyStack.erase(_historyStack.begin());
-//}
-
 rpl::producer<Wrap> WrapWidget::wrapValue() const {
 	return _wrap.value();
 }
 
 void WrapWidget::setWrap(Wrap wrap) {
-	// Was done for top level tabs support.
-	//
-	//if (_wrap.current() != Wrap::Side && wrap == Wrap::Side) {
-	//	convertProfileFromStackToTab();
-	//}
 	_wrap = wrap;
 }
 
@@ -752,25 +673,22 @@ QPixmap WrapWidget::grabForShowAnimation(
 	} else {
 		_topShadow->setVisible(_topShadow->toggled());
 	}
-	//if (params.withTabs && _topTabs) {
-	//	_topTabs->hide();
-	//}
+	const auto expanding = _expanding;
+	if (expanding) {
+		_grabbingForExpanding = true;
+	}
 	auto result = Ui::GrabWidget(this);
+	if (expanding) {
+		_grabbingForExpanding = false;
+	}
 	if (params.withTopBarShadow) {
 		_topShadow->setVisible(true);
 	}
-	//if (params.withTabs && _topTabs) {
-	//	_topTabs->show();
-	//}
 	return result;
 }
 
 void WrapWidget::showAnimatedHook(
 		const Window::SectionSlideParams &params) {
-	//if (params.withTabs && _topTabs) {
-	//	_topTabs->show();
-	//	_topTabsBackground->show();
-	//}
 	if (params.withTopBarShadow) {
 		_topShadow->setVisible(true);
 	}
@@ -778,7 +696,7 @@ void WrapWidget::showAnimatedHook(
 }
 
 void WrapWidget::doSetInnerFocus() {
-	if (!_topBar->focusSearchField()) {
+	if (!_topBar || !_topBar->focusSearchField()) {
 		_content->setInnerFocus();
 	}
 }
@@ -786,7 +704,9 @@ void WrapWidget::doSetInnerFocus() {
 void WrapWidget::showFinishedHook() {
 	// Restore shadow visibility after showChildren() call.
 	_topShadow->toggle(_topShadow->toggled(), anim::type::instant);
+	_bottomShadow->toggle(_bottomShadow->toggled(), anim::type::instant);
 	_topBarSurrogate.destroy();
+	_content->showFinished();
 }
 
 bool WrapWidget::showInternal(
@@ -803,25 +723,6 @@ bool WrapWidget::showInternal(
 			if (!skipInternal && _content->showInternal(content)) {
 				highlightTopBar();
 				return true;
-
-			// This was done for tabs support.
-			//
-			//} else if (_topTabs) {
-			//	// If we open the profile being in the media tab.
-			//	// Just switch back to the profile tab.
-			//	auto type = content->section().type();
-			//	if (type == Section::Type::Profile
-			//		&& _tab != Tab::Profile) {
-			//		_anotherTabMemento = std::move(infoMemento->takeStack().back());
-			//		_topTabs->setActiveSection(static_cast<int>(Tab::Profile));
-			//		return true;
-			//	} else if (type == Section::Type::Media
-			//		&& _tab != Tab::Media
-			//		&& Media::TypeToTabIndex(content->section().mediaType()).has_value()) {
-			//		_anotherTabMemento = std::move(infoMemento->takeStack().back());
-			//		_topTabs->setActiveSection(static_cast<int>(Tab::Media));
-			//		return true;
-			//	}
 			}
 		}
 
@@ -832,9 +733,7 @@ bool WrapWidget::showInternal(
 			return true;
 		}
 
-		showNewContent(
-			content,
-			params);
+		showNewContent(content, params);
 		return true;
 	}
 	return false;
@@ -866,7 +765,8 @@ rpl::producer<int> WrapWidget::desiredHeightValue() const {
 }
 
 QRect WrapWidget::contentGeometry() const {
-	return rect().marginsRemoved({ 0, topWidget()->height(), 0, 0 });
+	const auto top = _topBar ? _topBar->height() : 0;
+	return rect().marginsRemoved({ 0, top, 0, 0 });
 }
 
 bool WrapWidget::returnToFirstStackFrame(
@@ -890,17 +790,24 @@ bool WrapWidget::returnToFirstStackFrame(
 void WrapWidget::showNewContent(
 		not_null<ContentMemento*> memento,
 		const Window::SectionShow &params) {
-	auto saveToStack = (_content != nullptr)
+	const auto saveToStack = (_content != nullptr)
 		&& (params.way == Window::SectionShow::Way::Forward);
-	auto needAnimation = (_content != nullptr)
+	const auto needAnimation = (_content != nullptr)
 		&& (params.animated != anim::type::instant);
 	auto animationParams = SectionSlideParams();
 	auto newController = createController(
 		_controller->parentController(),
 		memento);
+	if (_controller && newController) {
+		newController->takeStepData(_controller.get());
+	}
 	auto newContent = object_ptr<ContentWidget>(nullptr);
-	if (needAnimation) {
+	const auto withBackButton = willHaveBackButton(params);
+	const auto createInAdvance = needAnimation || withBackButton;
+	if (createInAdvance) {
 		newContent = createContent(memento, newController.get());
+	}
+	if (needAnimation) {
 		animationParams.withTopBarShadow = hasTopBarShadow()
 			&& newContent->hasTopBarShadow();
 		animationParams.oldContentCache = grabForShowAnimation(
@@ -908,16 +815,30 @@ void WrapWidget::showNewContent(
 		const auto layer = (wrap() == Wrap::Layer);
 		animationParams.withFade = layer;
 		animationParams.topSkip = layer ? st::boxRadius : 0;
+
+		if (HasCustomTopBar(_controller.get())
+			|| HasCustomTopBar(newController.get())) {
+			const auto s = QSize(
+				newContent->width(),
+				animationParams.topSkip);
+			auto image = Ui::RippleAnimation::MaskByDrawer(s, false, [&](
+					QPainter &p) {
+				const auto r = QRect(0, 0, s.width(), s.height() * 2);
+				p.drawRoundedRect(r, st::boxRadius, st::boxRadius);
+			});
+			animationParams.topMask = Ui::PixmapFromImage(std::move(image));
+		}
 	}
 	if (saveToStack) {
 		auto item = StackItem();
 		item.section = _content->createMemento();
-		//if (_anotherTabMemento) {
-		//	item.anotherTab = std::move(_anotherTabMemento);
-		//}
 		_historyStack.push_back(std::move(item));
 	} else if (params.way == Window::SectionShow::Way::ClearStack) {
 		_historyStack.clear();
+	}
+
+	if (withBackButton) {
+		newContent->enableBackButton();
 	}
 
 	{
@@ -951,29 +872,7 @@ void WrapWidget::showNewContent(not_null<ContentMemento*> memento) {
 	showContent(createContent(memento, _controller.get()));
 }
 
-// This was done for tabs support.
-//
-//void WrapWidget::setupTabs(Tab tab) {
-//	_tab = tab;
-//	if (_tab == Tab::None) {
-//		_topTabs.destroy();
-//		_topTabsBackground.destroy();
-//	} else if (!_topTabs) {
-//		createTabs();
-//	} else {
-//		_topTabs->setActiveSection(static_cast<int>(tab));
-//	}
-//}
-
 void WrapWidget::resizeEvent(QResizeEvent *e) {
-	// This was done for tabs support.
-	//
-	//if (_topTabs) {
-	//	_topTabs->resizeToWidth(width());
-	//	_topTabsBackground->resize(
-	//		width(),
-	//		_topTabs->height() - st::lineWidth);
-	//}
 	if (_topBar) {
 		_topBar->resizeToWidth(width());
 	}
@@ -992,9 +891,17 @@ void WrapWidget::keyPressEvent(QKeyEvent *e) {
 
 void WrapWidget::updateContentGeometry() {
 	if (_content) {
-		_topShadow->resizeToWidth(width());
-		_topShadow->moveToLeft(0, topWidget()->height());
+		if (_topBar) {
+			_topShadow->resizeToWidth(width());
+			_topShadow->moveToLeft(0, _topBar->height());
+		}
 		_content->setGeometry(contentGeometry());
+		_bottomShadow->resizeToWidth(width());
+		_bottomShadow->moveToLeft(
+			0,
+			_content->y()
+				+ _content->height()
+				- _content->scrollBottomSkip());
 	}
 }
 
@@ -1008,7 +915,7 @@ QRect WrapWidget::floatPlayerAvailableRect() {
 
 object_ptr<Ui::RpWidget> WrapWidget::createTopBarSurrogate(
 		QWidget *parent) {
-	if (hasStackHistory() || wrap() == Wrap::Narrow) {
+	if (_topBar && hasBackButton()) {
 		Assert(_topBar != nullptr);
 
 		auto result = object_ptr<Ui::AbstractButton>(parent);
@@ -1024,11 +931,15 @@ object_ptr<Ui::RpWidget> WrapWidget::createTopBarSurrogate(
 	return nullptr;
 }
 
-void WrapWidget::updateGeometry(QRect newGeometry, int additionalScroll) {
+void WrapWidget::updateGeometry(
+		QRect newGeometry,
+		bool expanding,
+		int additionalScroll) {
 	auto scrollChanged = (_additionalScroll != additionalScroll);
 	auto geometryChanged = (geometry() != newGeometry);
 	auto shrinkingContent = (additionalScroll < _additionalScroll);
 	_additionalScroll = additionalScroll;
+	_expanding = expanding;
 
 	if (geometryChanged) {
 		if (shrinkingContent) {
@@ -1046,13 +957,41 @@ void WrapWidget::updateGeometry(QRect newGeometry, int additionalScroll) {
 }
 
 int WrapWidget::scrollTillBottom(int forHeight) const {
-	return _content->scrollTillBottom(forHeight - topWidget()->height());
+	return _content->scrollTillBottom(forHeight
+		- (_topBar ? _topBar->height() : 0));
+}
+
+int WrapWidget::scrollBottomSkip() const {
+	return _content->scrollBottomSkip();
 }
 
 rpl::producer<int> WrapWidget::scrollTillBottomChanges() const {
 	return _scrollTillBottomChanges.events_starting_with(
 		_content->scrollTillBottomChanges()
 	) | rpl::flatten_latest();
+}
+
+rpl::producer<bool> WrapWidget::grabbingForExpanding() const {
+	return _grabbingForExpanding.value();
+}
+
+const Ui::RoundRect *WrapWidget::bottomSkipRounding() const {
+	return _content->bottomSkipRounding();
+}
+
+bool WrapWidget::hasBackButton() const {
+	return (wrap() == Wrap::Narrow || hasStackHistory());
+}
+
+bool WrapWidget::willHaveBackButton(
+		const Window::SectionShow &params) const {
+	using Way = Window::SectionShow::Way;
+	const auto willSaveToStack = (_content != nullptr)
+		&& (params.way == Way::Forward);
+	const auto willClearStack = (params.way == Way::ClearStack);
+	const auto willHaveStack = !willClearStack
+		&& (hasStackHistory() || willSaveToStack);
+	return (wrap() == Wrap::Narrow) || willHaveStack;
 }
 
 WrapWidget::~WrapWidget() = default;

@@ -32,10 +32,11 @@ using namespace ::Media::Streaming;
 
 ItemSingleMediaPreview::ItemSingleMediaPreview(
 	QWidget *parent,
+	const style::ComposeControls &st,
 	Fn<bool()> gifPaused,
 	not_null<HistoryItem*> item,
 	AttachControls::Type type)
-: AbstractSingleMediaPreview(parent, type)
+: AbstractSingleMediaPreview(parent, st, type)
 , _gifPaused(std::move(gifPaused))
 , _fullId(item->fullId()) {
 	const auto media = item->media();
@@ -190,11 +191,15 @@ void ItemSingleMediaPreview::startStreamedPlayer() {
 	_streamed->play(options);
 }
 
+bool ItemSingleMediaPreview::supportsSpoilers() const {
+	return false; // We are not allowed to change existing spoiler setting.
+}
+
 bool ItemSingleMediaPreview::drawBackground() const {
 	return true; // A sticker can't be here.
 }
 
-bool ItemSingleMediaPreview::tryPaintAnimation(Painter &p) {
+bool ItemSingleMediaPreview::tryPaintAnimation(QPainter &p) {
 	checkStreamedIsStarted();
 	if (_streamed
 		&& _streamed->player().ready()

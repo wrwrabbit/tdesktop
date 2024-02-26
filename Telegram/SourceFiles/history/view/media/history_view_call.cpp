@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "ui/chat/chat_style.h"
 #include "ui/text/format_values.h"
+#include "ui/painter.h"
 #include "layout/layout_selection.h" // FullSelection
 #include "history/history.h"
 #include "history/history_item.h"
@@ -45,7 +46,9 @@ Call::Call(
 , _video(call->video) {
 	const auto item = parent->data();
 	_text = Data::MediaCall::Text(item, _reason, _video);
-	_status = parent->dateTime().time().toString(cTimeFormat());
+	_status = QLocale().toString(
+		parent->dateTime().time(),
+		QLocale::ShortFormat);
 	if (_duration) {
 		_status = tr::lng_call_duration_info(
 			tr::now,
@@ -57,7 +60,7 @@ Call::Call(
 }
 
 QSize Call::countOptimalSize() {
-	const auto user = _parent->data()->history()->peer->asUser();
+	const auto user = _parent->history()->peer->asUser();
 	const auto video = _video;
 	_link = std::make_shared<LambdaClickHandler>([=] {
 		if (user) {

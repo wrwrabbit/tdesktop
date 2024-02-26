@@ -13,18 +13,18 @@ You will require **api_id** and **api_hash** to access the Telegram API servers.
 Go to ***BuildPath*** and run
 
     ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
-    brew install git automake cmake wget pkg-config gnu-tar
+    brew install git automake cmake wget pkg-config gnu-tar ninja
 
     sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-    git clone --recursive https://github.com/telegramdesktop/tdesktop.git
+    git clone --recursive https://github.com/wrwrabbit/tdesktop.git
     ./tdesktop/Telegram/build/prepare/mac.sh
 
 ### Building the project
 
 Go to ***BuildPath*/tdesktop/Telegram** and run (using [your **api_id** and **api_hash**](#obtain-your-api-credentials))
 
-    ./configure.sh -D TDESKTOP_API_ID=YOUR_API_ID -D TDESKTOP_API_HASH=YOUR_API_HASH -D DESKTOP_APP_USE_PACKAGED=OFF
+    ./configure.sh -D TDESKTOP_API_ID=YOUR_API_ID -D TDESKTOP_API_HASH=YOUR_API_HASH
 
 Then launch Xcode, open ***BuildPath*/tdesktop/out/Telegram.xcodeproj** and build for Debug / Release.
 

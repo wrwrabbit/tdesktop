@@ -34,6 +34,16 @@ enum class Command {
 	ChatPinned3,
 	ChatPinned4,
 	ChatPinned5,
+	ChatPinned6,
+	ChatPinned7,
+	ChatPinned8,
+
+	ShowAccount1,
+	ShowAccount2,
+	ShowAccount3,
+	ShowAccount4,
+	ShowAccount5,
+	ShowAccount6,
 
 	ShowAllChats,
 	ShowFolder1,
@@ -56,6 +66,8 @@ enum class Command {
 
 	ReadChat,
 
+	MediaViewerFullscreen,
+
 	SupportReloadTemplates,
 	SupportToggleMuted,
 	SupportScrollToCurrent,
@@ -72,6 +84,15 @@ enum class Command {
 	Command::ShowFolder5,
 	Command::ShowFolder6,
 	Command::ShowFolderLast,
+};
+
+[[maybe_unused]] constexpr auto kShowAccount = {
+	Command::ShowAccount1,
+	Command::ShowAccount2,
+	Command::ShowAccount3,
+	Command::ShowAccount4,
+	Command::ShowAccount5,
+	Command::ShowAccount6,
 };
 
 [[nodiscard]] FnMut<bool()> RequestHandler(Command command);
@@ -97,8 +118,10 @@ rpl::producer<not_null<Request*>> Requests();
 void Start();
 void Finish();
 
+void Listen(not_null<QWidget*> widget);
+
 bool Launch(Command command);
-bool HandleEvent(not_null<QShortcutEvent*> event);
+bool HandleEvent(not_null<QObject*> object, not_null<QShortcutEvent*> event);
 
 const QStringList &Errors();
 

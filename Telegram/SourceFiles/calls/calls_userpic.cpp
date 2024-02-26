@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_photo_media.h"
 #include "data/data_file_origin.h"
 #include "ui/empty_userpic.h"
+#include "ui/painter.h"
 #include "apiwrap.h" // requestFullPeer.
 #include "styles/style_calls.h"
 
@@ -90,7 +91,7 @@ void Userpic::setMuteLayout(QPoint position, int size, int stroke) {
 }
 
 void Userpic::paint() {
-	Painter p(&_content);
+	auto p = QPainter(&_content);
 
 	p.drawPixmap(0, 0, _userPhoto);
 	if (_muted && _muteSize > 0) {
@@ -158,7 +159,12 @@ void Userpic::refreshPhoto() {
 		_userPhotoFull = true;
 		createCache(_photo->image(Data::PhotoSize::Thumbnail));
 	} else if (_userPhoto.isNull()) {
-		createCache(_userpic ? _userpic->image() : nullptr);
+		if (const auto cloud = _peer->userpicCloudImage(_userpic)) {
+			auto image = Image(base::duplicate(*cloud));
+			createCache(&image);
+		} else {
+			createCache(nullptr);
+		}
 	}
 }
 
@@ -194,11 +200,11 @@ void Userpic::createCache(Image *image) {
 		filled.setDevicePixelRatio(cRetinaFactor());
 		filled.fill(Qt::transparent);
 		{
-			Painter p(&filled);
+			auto p = QPainter(&filled);
 			Ui::EmptyUserpic(
-				Data::PeerUserpicColor(_peer->id),
-				_peer->name
-			).paint(p, 0, 0, size, size);
+				Ui::EmptyUserpic::UserpicColor(_peer->colorIndex()),
+				_peer->name()
+			).paintCircle(p, 0, 0, size, size);
 		}
 		//_userPhoto = Images::PixmapFast(Images::Round(
 		//	std::move(filled),

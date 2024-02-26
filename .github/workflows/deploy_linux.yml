@@ -1,0 +1,93 @@
+name: Public Release - Linux
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+
+  Linux:
+    environment: Release
+    name: Rocky Linux 8
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    container:
+      image: ghcr.io/${{ github.repository }}/centos_env
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    defaults:
+      run:
+        shell: scl enable gcc-toolset-12 -- bash --noprofile --norc -eo pipefail {0}
+
+    strategy:
+      matrix:
+        defines:
+          - ""
+#          - "DESKTOP_APP_DISABLE_X11_INTEGRATION"
+#          - "DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION"
+        experimental: [false]
+
+    env:
+      UPLOAD_ARTIFACT: "true"
+
+    steps:
+      - name: Get repository name.
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - name: Clone.
+        uses: actions/checkout@v3.1.0
+        with:
+          submodules: recursive
+          path: ${{ env.REPO_NAME }}
+
+      - name: First set up.
+        run: |
+          gcc --version
+          ln -s /usr/src/Libraries
+
+      - name: Telegram Desktop build.
+        env:
+          RSA_PRIVATE: ${{ secrets.RSA_PRIVATE }}
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+        run: |
+          cd $REPO_NAME/Telegram/build
+
+          python3 release_build.py linux
+
+      - name: Check.
+        run: |
+          filePath="$REPO_NAME/out/Release/deploy"
+          if test -d "$filePath"; then
+            echo "Build successfully done! :)"
+
+            size=$(stat -c %s "$filePath/Telegram/Telegram")
+            echo "File size of ${filePath}: ${size} Bytes."
+          else
+            echo "Build error, output file does not exist."
+            exit 1
+          fi
+
+      - name: Move artifact.
+        if: env.UPLOAD_ARTIFACT == 'true'
+        run: |
+          cd $REPO_NAME/out/Release/deploy
+          mkdir ../artifact
+          mv -t ../artifact tlinux*
+          mv -t ../artifact tsetup*
+
+      - uses: actions/upload-artifact@master
+        name: Upload artifact.
+        if: (env.UPLOAD_ARTIFACT == 'true')
+        with:
+          name: build_gh
+          path: ${{ env.REPO_NAME }}/out/Release/artifact/tsetup*
+
+      - uses: actions/upload-artifact@master
+        name: Upload artifact for TG.
+        if: (env.UPLOAD_ARTIFACT == 'true')
+        with:
+          name: build_tg
+          path: ${{ env.REPO_NAME }}/out/Release/artifact/tlinux*

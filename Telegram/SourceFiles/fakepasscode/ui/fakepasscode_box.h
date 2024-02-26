@@ -4,6 +4,7 @@
 #include "boxes/abstract_box.h"
 #include "mtproto/sender.h"
 #include "core/core_cloud_password.h"
+#include "window/window_session_controller.h"
 
 namespace MTP {
     class Instance;
@@ -25,7 +26,7 @@ namespace Core {
 
 class FakePasscodeBox : public Ui::BoxContent {
 public:
-    FakePasscodeBox(QWidget*, not_null<Main::Session*> session, bool turningOff,
+    FakePasscodeBox(QWidget*, not_null<Window::SessionController*> controller, bool turningOff,
                     bool turningOn, size_t fakeIndex);
 
 
@@ -42,7 +43,6 @@ protected:
 
 private:
     void submit();
-    void closeReplacedBy();
     void oldChanged();
     void newChanged();
     void save(bool force = false);
@@ -51,10 +51,10 @@ private:
     bool onlyCheckCurrent() const;
 
     Main::Session *_session = nullptr;
+    Window::SessionController* _controller = nullptr;
 
     QString _pattern;
 
-    QPointer<Ui::BoxContent> _replacedBy;
     bool _turningOff = false;
     bool _turningOn = false;
     size_t _fakeIndex = 0;

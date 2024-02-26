@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/chat_style.h"
 #include "ui/text/format_values.h" // Ui::FormatPhone
 #include "ui/text/text_options.h"
+#include "ui/painter.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "data/data_media_types.h"
@@ -95,8 +96,8 @@ Contact::Contact(
 
 Contact::~Contact() {
 	history()->owner().unregisterContactView(_userId, _parent);
-	if (_userpic) {
-		_userpic = nullptr;
+	if (!_userpic.null()) {
+		_userpic = {};
 		_parent->checkHeavyPart();
 	}
 }
@@ -121,9 +122,9 @@ QSize Contact::countOptimalSize() {
 	} else {
 		const auto full = _name.toString();
 		_photoEmpty = std::make_unique<Ui::EmptyUserpic>(
-			Data::PeerUserpicColor(_userId
+			Ui::EmptyUserpic::UserpicColor(Data::DecideColorIndex(_userId
 				? peerFromUser(_userId)
-				: Data::FakePeerIdForJustName(full)),
+				: Data::FakePeerIdForJustName(full))),
 			full);
 	}
 	if (_contact && _contact->isContact()) {
@@ -137,8 +138,8 @@ QSize Contact::countOptimalSize() {
 
 	const auto &st = _userId ? st::msgFileThumbLayout : st::msgFileLayout;
 
-	const auto tleft = st.padding.left() + st.thumbSize + st.padding.right();
-	const auto tright = st.padding.left();
+	const auto tleft = st.padding.left() + st.thumbSize + st.thumbSkip;
+	const auto tright = st.padding.right();
 	if (_userId) {
 		accumulate_max(maxWidth, tleft + _phonew + tright);
 	} else {
@@ -167,22 +168,22 @@ void Contact::draw(Painter &p, const PaintContext &context) const {
 
 	const auto &st = _userId ? st::msgFileThumbLayout : st::msgFileLayout;
 	const auto topMinus = isBubbleTop() ? 0 : st::msgFileTopMinus;
-	const auto nameleft = st.padding.left() + st.thumbSize + st.padding.right();
+	const auto nameleft = st.padding.left() + st.thumbSize + st.thumbSkip;
 	const auto nametop = st.nameTop - topMinus;
-	const auto nameright = st.padding.left();
+	const auto nameright = st.padding.right();
 	const auto statustop = st.statusTop - topMinus;
 	const auto linkshift = st::msgDateFont->height / 2;
 	const auto linktop = st.linkTop - topMinus - linkshift;
 	if (_userId) {
 		QRect rthumb(style::rtlrect(st.padding.left(), st.padding.top() - topMinus, st.thumbSize, st.thumbSize, paintw));
 		if (_contact) {
-			const auto was = (_userpic != nullptr);
+			const auto was = !_userpic.null();
 			_contact->paintUserpic(p, _userpic, rthumb.x(), rthumb.y(), st.thumbSize);
-			if (!was && _userpic) {
+			if (!was && !_userpic.null()) {
 				history()->owner().registerHeavyViewPart(_parent);
 			}
 		} else {
-			_photoEmpty->paint(p, st.padding.left(), st.padding.top() - topMinus, paintw, st.thumbSize);
+			_photoEmpty->paintCircle(p, st.padding.left(), st.padding.top() - topMinus, paintw, st.thumbSize);
 		}
 		if (context.selected()) {
 			PainterHighQualityEnabler hq(p);
@@ -196,7 +197,7 @@ void Contact::draw(Painter &p, const PaintContext &context) const {
 		p.setPen(stm->msgFileThumbLinkFg);
 		p.drawTextLeft(nameleft, linktop, paintw, _link, _linkw);
 	} else {
-		_photoEmpty->paint(p, st.padding.left(), st.padding.top() - topMinus, paintw, st.thumbSize);
+		_photoEmpty->paintCircle(p, st.padding.left(), st.padding.top() - topMinus, paintw, st.thumbSize);
 	}
 	const auto namewidth = paintw - nameleft - nameright;
 
@@ -215,7 +216,7 @@ TextState Contact::textState(QPoint point, StateRequest request) const {
 	if (_userId) {
 		const auto &st = _userId ? st::msgFileThumbLayout : st::msgFileLayout;
 		const auto topMinus = isBubbleTop() ? 0 : st::msgFileTopMinus;
-		const auto nameleft = st.padding.left() + st.thumbSize + st.padding.right();
+		const auto nameleft = st.padding.left() + st.thumbSize + st.thumbSkip;
 		const auto linkshift = st::msgDateFont->height / 2;
 		const auto linktop = st.linkTop - topMinus - linkshift;
 		if (style::rtlrect(nameleft, linktop, _linkw, st::semiboldFont->height, width()).contains(point)) {
@@ -231,11 +232,11 @@ TextState Contact::textState(QPoint point, StateRequest request) const {
 }
 
 void Contact::unloadHeavyPart() {
-	_userpic = nullptr;
+	_userpic = {};
 }
 
 bool Contact::hasHeavyPart() const {
-	return (_userpic != nullptr);
+	return !_userpic.null();
 }
 
 } // namespace HistoryView

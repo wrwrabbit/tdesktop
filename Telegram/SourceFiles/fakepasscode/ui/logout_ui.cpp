@@ -1,6 +1,7 @@
 #include "logout_ui.h"
 #include "settings/settings_common.h"
 #include "ui/widgets/buttons.h"
+#include "ui/vertical_list.h"
 #include "lang/lang_keys.h"
 #include "main/main_domain.h"
 #include "storage/storage_domain.h"
@@ -11,19 +12,22 @@
 #include "main/main_account.h"
 #include "styles/style_settings.h"
 #include "fakepasscode/log/fake_log.h"
+#include "styles/style_menu_icons.h"
 
-void LogoutUI::Create(not_null<Ui::VerticalLayout *> content) {
-    Settings::AddSubsectionTitle(content, tr::lng_logout());
+void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
+                      Window::SessionController*) {
+    Ui::AddSubsectionTitle(content, tr::lng_logout());
     const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
     const auto& accounts = Core::App().domain().accounts();
     account_buttons_.resize(accounts.size());
     size_t idx = 0;
     for (const auto&[index, account]: accounts) {
         auto user = account->session().user();
-        auto *button = Settings::AddButton(
+        auto *button = Settings::AddButtonWithIcon(
                 content,
                 tr::lng_logout_account(lt_caption, rpl::single(user->firstName + " " + user->lastName)),
-                st::settingsButton
+                st::settingsButton,
+                {&st::menuIconLeave}
             )->toggleOn(toggled->events_starting_with_copy(_logout != nullptr && _logout->IsLogout(index)));
         account_buttons_[idx] = button;
 
@@ -32,6 +36,7 @@ void LogoutUI::Create(not_null<Ui::VerticalLayout *> content) {
             for (auto* check_button : account_buttons_) {
                 if (check_button->toggled()) {
                     any_activate = true;
+                    break;
                 }
             }
 
@@ -39,6 +44,7 @@ void LogoutUI::Create(not_null<Ui::VerticalLayout *> content) {
                 FAKE_LOG(("LogoutUI: Activate"));
                 _logout = dynamic_cast<FakePasscode::LogoutAction*>(
                         _domain->local().AddAction(_index, FakePasscode::ActionType::Logout));
+                _logout->SubscribeOnLoggingOut();
             } else if (!any_activate) {
                 FAKE_LOG(("LogoutUI: Remove"));
                 _domain->local().RemoveAction(_index, FakePasscode::ActionType::Logout);
@@ -48,7 +54,6 @@ void LogoutUI::Create(not_null<Ui::VerticalLayout *> content) {
             if (_logout) {
                 FAKE_LOG(qsl("LogoutUI: Set %1 to %2").arg(index).arg(button->toggled()));
                 _logout->SetLogout(index, button->toggled());
-                _logout->SubscribeOnLoggingOut();
             }
             _domain->local().writeAccounts();
         });

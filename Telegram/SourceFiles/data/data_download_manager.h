@@ -58,7 +58,7 @@ struct DownloadedId {
 	DownloadId download;
 	DownloadDate started = 0;
 	QString path;
-	int32 size = 0;
+	int64 size = 0;
 	FullMsgId itemId;
 	uint64 peerAccessHash = 0;
 
@@ -69,8 +69,8 @@ struct DownloadingId {
 	DownloadObject object;
 	DownloadDate started = 0;
 	QString path;
-	int ready = 0;
-	int total = 0;
+	int64 ready = 0;
+	int64 total = 0;
 	bool hiddenByView = false;
 	bool done = false;
 };
@@ -105,6 +105,7 @@ public:
 
 	[[nodiscard]] bool loadingInProgress(
 		Main::Session *onlyInSession = nullptr) const;
+    void loadingStop(Main::Session *onlyInSession);
 	void loadingStopWithConfirmation(
 		Fn<void()> callback,
 		Main::Session *onlyInSession = nullptr);
@@ -170,7 +171,6 @@ private:
 
 	[[nodiscard]] HistoryItem *lookupLoadingItem(
 		Main::Session *onlyInSession) const;
-	void loadingStop(Main::Session *onlyInSession);
 
 	void finishFilesDelete(DeleteFilesDescriptor &&descriptor);
 	void writePostponed(not_null<Main::Session*> session);

@@ -8,52 +8,40 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/linux/linux_xdp_open_with_dialog.h"
 
 #include "base/platform/base_platform_info.h"
-#include "base/platform/linux/base_linux_glibmm_helper.h"
-#include "base/platform/linux/base_linux_wayland_integration.h"
-#include "core/application.h"
-#include "window/window_controller.h"
+#include "base/platform/linux/base_linux_xdp_utilities.h"
+#include "base/platform/linux/base_linux_xdg_activation_token.h"
 #include "base/random.h"
-
-#include <QtGui/QWindow>
 
 #include <fcntl.h>
 #include <glibmm.h>
 #include <giomm.h>
-#include <private/qguiapplication_p.h>
-
-using base::Platform::WaylandIntegration;
 
 namespace Platform {
 namespace File {
 namespace internal {
 namespace {
 
-constexpr auto kXDGDesktopPortalService = "org.freedesktop.portal.Desktop"_cs;
-constexpr auto kXDGDesktopPortalObjectPath = "/org/freedesktop/portal/desktop"_cs;
-constexpr auto kXDGDesktopPortalOpenURIInterface = "org.freedesktop.portal.OpenURI"_cs;
-constexpr auto kPropertiesInterface = "org.freedesktop.DBus.Properties"_cs;
+constexpr auto kXDPOpenURIInterface = "org.freedesktop.portal.OpenURI";
+constexpr auto kPropertiesInterface = "org.freedesktop.DBus.Properties";
+using base::Platform::XdgActivationToken;
 
 } // namespace
 
 bool ShowXDPOpenWithDialog(const QString &filepath) {
 	try {
 		const auto connection = Gio::DBus::Connection::get_sync(
-			Gio::DBus::BusType::BUS_TYPE_SESSION);
+			Gio::DBus::BusType::SESSION);
 
-		auto reply = connection->call_sync(
-			std::string(kXDGDesktopPortalObjectPath),
-			std::string(kPropertiesInterface),
+		const auto version = connection->call_sync(
+			base::Platform::XDP::kObjectPath,
+			kPropertiesInterface,
 			"Get",
-			base::Platform::MakeGlibVariant(std::tuple{
-				Glib::ustring(
-					std::string(kXDGDesktopPortalOpenURIInterface)),
+			Glib::create_variant(std::tuple{
+				Glib::ustring(kXDPOpenURIInterface),
 				Glib::ustring("version"),
 			}),
-			std::string(kXDGDesktopPortalService));
-
-		const auto version = base::Platform::GlibVariantCast<uint>(
-			base::Platform::GlibVariantCast<Glib::VariantBase>(
-				reply.get_child(0)));
+			base::Platform::XDP::kService
+		).get_child(0).get_dynamic<Glib::Variant<uint>>().get();
 
 		if (version < 3) {
 			return false;
@@ -71,27 +59,6 @@ bool ShowXDPOpenWithDialog(const QString &filepath) {
 
 		const auto fdGuard = gsl::finally([&] { ::close(fd); });
 
-		const auto parentWindowId = [&]() -> Glib::ustring {
-			std::stringstream result;
-
-			const auto activeWindow = Core::App().activeWindow();
-			if (!activeWindow) {
-				return result.str();
-			}
-
-			const auto window = activeWindow->widget()->windowHandle();
-			if (const auto integration = WaylandIntegration::Instance()) {
-				if (const auto handle = integration->nativeHandle(window)
-					; !handle.isEmpty()) {
-					result << "wayland:" << handle.toStdString();
-				}
-			} else if (IsX11()) {
-				result << "x11:" << std::hex << window->winId();
-			}
-
-			return result.str();
-		}();
-
 		const auto handleToken = Glib::ustring("tdesktop")
 			+ std::to_string(base::RandomValue<uint>());
 
@@ -105,12 +72,7 @@ bool ShowXDPOpenWithDialog(const QString &filepath) {
 			+ '/'
 			+ handleToken;
 
-		const auto context = Glib::MainContext::create();
-		const auto loop = Glib::MainLoop::create(context);
-		g_main_context_push_thread_default(context->gobj());
-		const auto contextGuard = gsl::finally([&] {
-			g_main_context_pop_thread_default(context->gobj());
-		});
+		const auto loop = Glib::MainLoop::create();
 
 		const auto signalId = connection->signal_subscribe(
 			[&](
@@ -122,8 +84,8 @@ bool ShowXDPOpenWithDialog(const QString &filepath) {
 				const Glib::VariantContainerBase &parameters) {
 				loop->quit();
 			},
-			std::string(kXDGDesktopPortalService),
-			"org.freedesktop.portal.Request",
+			base::Platform::XDP::kService,
+			base::Platform::XDP::kRequestInterface,
 			"Response",
 			requestPath);
 
@@ -133,40 +95,41 @@ bool ShowXDPOpenWithDialog(const QString &filepath) {
 			}
 		});
 
-		const auto fdList = Gio::UnixFDList::create();
-		fdList->append(fd);
 		auto outFdList = Glib::RefPtr<Gio::UnixFDList>();
 
 		connection->call_sync(
-			std::string(kXDGDesktopPortalObjectPath),
-			std::string(kXDGDesktopPortalOpenURIInterface),
+			base::Platform::XDP::kObjectPath,
+			kXDPOpenURIInterface,
 			"OpenFile",
-			Glib::VariantContainerBase::create_tuple({
-				Glib::Variant<Glib::ustring>::create(parentWindowId),
-				Glib::wrap(g_variant_new_handle(0)),
-				Glib::Variant<std::map<
-					Glib::ustring,
-					Glib::VariantBase
-				>>::create({
+			Glib::create_variant(std::tuple{
+				base::Platform::XDP::ParentWindowID(),
+				Glib::DBusHandle(),
+				std::map<Glib::ustring, Glib::VariantBase>{
 					{
 						"handle_token",
-						Glib::Variant<Glib::ustring>::create(handleToken)
+						Glib::create_variant(handleToken)
+					},
+					{
+						"activation_token",
+						Glib::create_variant(
+							Glib::ustring(XdgActivationToken().toStdString()))
 					},
 					{
 						"ask",
-						Glib::Variant<bool>::create(true)
+						Glib::create_variant(true)
 					},
-				}),
+				},
 			}),
-			fdList,
+			Gio::UnixFDList::create(std::vector<int>{ fd }),
 			outFdList,
-			std::string(kXDGDesktopPortalService));
+			base::Platform::XDP::kService);
 
 		if (signalId != 0) {
-			QWindow window;
-			QGuiApplicationPrivate::showModalWindow(&window);
+			QWidget window;
+			window.setAttribute(Qt::WA_DontShowOnScreen);
+			window.setWindowModality(Qt::ApplicationModal);
+			window.show();
 			loop->run();
-			QGuiApplicationPrivate::hideModalWindow(&window);
 		}
 
 		return true;

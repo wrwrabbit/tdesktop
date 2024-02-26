@@ -17,14 +17,9 @@ enum {
 	LocalEncryptNoPwdIterCount = 4, // key derivation iteration count without pwd (not secure anyway)
 	LocalEncryptSaltSize = 32, // 256 bit
 
-	AnimationTimerDelta = 7,
 	RecentInlineBotsLimit = 10,
 
 	AutoSearchTimeout = 900, // 0.9 secs
-	SearchPerPage = 50,
-	SearchManyPerPage = 100,
-	LinksOverviewPerPage = 12,
-	MediaOverviewStartPerPage = 5,
 
 	PreloadHeightsCount = 3, // when 3 screens to scroll left make a preload request
 
@@ -51,6 +46,14 @@ inline const char *cGUIDStr() {
 
 	return gGuidStr;
 }
+
+static const char *UpdatesPTGPublicKey = "\
+-----BEGIN RSA PUBLIC KEY-----\n\
+MIGJAoGBAPImJEfWXR6CTgHcq2VxEBzM79kX5t8bVV+HwY3PD2Wjb7cKBvg3rtfb\n\
+dhCiHblRIYg0iTak8pu3ExVhylzEpNSz/fggcSOnbxIHwicRqNxJUR//3LY729Pr\n\
+QsMmhGM6xRLnlGmItOxPkfoiL/LYtw4gXgvMLTXstdRjLy4zyd2ZAgMBAAE=\n\
+-----END RSA PUBLIC KEY-----\
+";
 
 static const char *UpdatesPublicKey = "\
 -----BEGIN RSA PUBLIC KEY-----\n\
@@ -113,7 +116,7 @@ static const char *AlphaPrivateKey = "";
 extern QString gKeyFile;
 inline const QString &cDataFile() {
 	if (!gKeyFile.isEmpty()) return gKeyFile;
-	static const QString res(qsl("data"));
+	static const QString res(u"data"_q);
 	return res;
 }
 

@@ -25,6 +25,10 @@ namespace Main {
 class Session;
 } // namespace Main
 
+namespace Ui {
+class Show;
+} // namespace Ui
+
 namespace Calls::Group {
 struct JoinInfo;
 class Panel;
@@ -53,8 +57,6 @@ struct StartGroupCallArgs {
 	QString joinHash;
 	JoinConfirm confirm = JoinConfirm::IfNowInAnother;
 	bool scheduleNeeded = false;
-	bool rtmpNeeded = false;
-	bool useRtmp = false;
 };
 
 class Instance final : public base::has_weak_ptr {
@@ -64,8 +66,12 @@ public:
 
 	void startOutgoingCall(not_null<UserData*> user, bool video);
 	void startOrJoinGroupCall(
+		std::shared_ptr<Ui::Show> show,
 		not_null<PeerData*> peer,
-		const StartGroupCallArgs &args);
+		StartGroupCallArgs args);
+	void showStartWithRtmp(
+		std::shared_ptr<Ui::Show> show,
+		not_null<PeerData*> peer);
 	void handleUpdate(
 		not_null<Main::Session*> session,
 		const MTPUpdate &update);
@@ -83,10 +89,13 @@ public:
 	[[nodiscard]] rpl::producer<GroupCall*> currentGroupCallValue() const;
 	[[nodiscard]] bool inCall() const;
 	[[nodiscard]] bool inGroupCall() const;
+	[[nodiscard]] bool hasVisiblePanel(
+		Main::Session *session = nullptr) const;
 	[[nodiscard]] bool hasActivePanel(
-		not_null<Main::Session*> session) const;
+		Main::Session *session = nullptr) const;
 	bool activateCurrentCall(const QString &joinHash = QString());
 	bool minimizeCurrentActiveCall();
+	bool toggleFullScreenCurrentActiveCall();
 	bool closeCurrentActiveCall();
 	[[nodiscard]] auto getVideoCapture(
 		std::optional<QString> deviceId = std::nullopt,
@@ -94,10 +103,9 @@ public:
 		-> std::shared_ptr<tgcalls::VideoCaptureInterface>;
 	void requestPermissionsOrFail(Fn<void()> onSuccess, bool video = true);
 
-	void setCurrentAudioDevice(bool input, const QString &deviceId);
-
 	[[nodiscard]] FnMut<void()> addAsyncWaiter();
 
+	[[nodiscard]] bool isSharingScreen() const;
 	[[nodiscard]] bool isQuitPrevent();
 
 private:
@@ -107,13 +115,18 @@ private:
 	not_null<Media::Audio::Track*> ensureSoundLoaded(const QString &key);
 	void playSoundOnce(const QString &key);
 
-	void createCall(not_null<UserData*> user, CallType type, bool video);
+	void createCall(not_null<UserData*> user, CallType type, bool isVideo);
 	void destroyCall(not_null<Call*> call);
 
 	void createGroupCall(
 		Group::JoinInfo info,
 		const MTPInputGroupCall &inputCall);
 	void destroyGroupCall(not_null<GroupCall*> call);
+	void confirmLeaveCurrent(
+		std::shared_ptr<Ui::Show> show,
+		not_null<PeerData*> peer,
+		StartGroupCallArgs args,
+		Fn<void(StartGroupCallArgs)> confirmed);
 
 	void requestPermissionOrFail(
 		Platform::PermissionType type,

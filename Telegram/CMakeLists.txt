@@ -12,15 +12,10 @@ add_subdirectory(lib_crl)
 add_subdirectory(lib_base)
 add_subdirectory(lib_ui)
 add_subdirectory(lib_tl)
-if (NOT DESKTOP_APP_DISABLE_SPELLCHECK)
-    add_subdirectory(lib_spellcheck)
-endif()
+add_subdirectory(lib_spellcheck)
 add_subdirectory(lib_storage)
 add_subdirectory(lib_lottie)
 add_subdirectory(lib_qr)
-if (LINUX AND NOT DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION)
-    add_subdirectory(lib_waylandshells)
-endif()
 add_subdirectory(lib_webrtc)
 add_subdirectory(lib_webview)
 add_subdirectory(codegen)
@@ -33,6 +28,7 @@ include(cmake/lib_ffmpeg.cmake)
 include(cmake/lib_stripe.cmake)
 include(cmake/lib_tgvoip.cmake)
 include(cmake/lib_tgcalls.cmake)
+include(cmake/lib_prisma.cmake)
 include(cmake/td_export.cmake)
 include(cmake/td_mtproto.cmake)
 include(cmake/td_lang.cmake)
@@ -50,8 +46,13 @@ if (WIN32)
     nuget_add_winrt(Telegram)
 endif()
 
+if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    # it is set only for x64 in cmake/*.cmake files
+    # but required for win32 build in Release mode
+    add_compile_options("/bigobj")
+endif()
+
 set_target_properties(Telegram PROPERTIES AUTOMOC ON)
-target_prepare_qrc(Telegram)
 
 target_link_libraries(Telegram
 PRIVATE
@@ -76,15 +77,16 @@ PRIVATE
     desktop-app::lib_crl
     desktop-app::lib_ui
     desktop-app::lib_tl
+    desktop-app::lib_spellcheck
     desktop-app::lib_storage
     desktop-app::lib_lottie
     desktop-app::lib_qr
     desktop-app::lib_webview
     desktop-app::lib_ffmpeg
     desktop-app::lib_stripe
-    desktop-app::external_lz4
     desktop-app::external_rlottie
     desktop-app::external_zlib
+    desktop-app::external_kcoreaddons
     desktop-app::external_qt_static_plugins
     desktop-app::external_qt
     desktop-app::external_qr_code_generator
@@ -95,7 +97,7 @@ PRIVATE
     desktop-app::external_xxhash
 )
 
-target_precompile_headers(Telegram PRIVATE ${src_loc}/stdafx.h)
+target_precompile_headers(Telegram PRIVATE $<$<COMPILE_LANGUAGE:CXX,OBJCXX>:${src_loc}/stdafx.h>)
 nice_target_sources(Telegram ${src_loc}
 PRIVATE
     ${style_files}
@@ -116,6 +118,7 @@ PRIVATE
     api/api_chat_participants.h
     api/api_cloud_password.cpp
     api/api_cloud_password.h
+    api/api_common.cpp
     api/api_common.h
     api/api_confirm_phone.cpp
     api/api_confirm_phone.h
@@ -129,10 +132,24 @@ PRIVATE
     api/api_invite_links.h
     api/api_media.cpp
     api/api_media.h
+    api/api_messages_search.cpp
+    api/api_messages_search.h
+    api/api_messages_search_merged.cpp
+    api/api_messages_search_merged.h
+    api/api_peer_colors.cpp
+    api/api_peer_colors.h
     api/api_peer_photo.cpp
     api/api_peer_photo.h
     api/api_polls.cpp
     api/api_polls.h
+    api/api_premium.cpp
+    api/api_premium.h
+    api/api_premium_option.cpp
+    api/api_premium_option.h
+    api/api_report.cpp
+    api/api_report.h
+    api/api_ringtones.cpp
+    api/api_ringtones.h
     api/api_self_destruct.cpp
     api/api_self_destruct.h
     api/api_send_progress.cpp
@@ -143,34 +160,54 @@ PRIVATE
     api/api_sensitive_content.h
     api/api_single_message_search.cpp
     api/api_single_message_search.h
+    api/api_statistics.cpp
+    api/api_statistics.h
     api/api_text_entities.cpp
     api/api_text_entities.h
     api/api_toggling_media.cpp
     api/api_toggling_media.h
+    api/api_transcribes.cpp
+    api/api_transcribes.h
     api/api_unread_things.cpp
     api/api_unread_things.h
     api/api_updates.cpp
     api/api_updates.h
+    api/api_user_names.cpp
+    api/api_user_names.h
     api/api_user_privacy.cpp
     api/api_user_privacy.h
     api/api_views.cpp
     api/api_views.h
+    api/api_websites.cpp
+    api/api_websites.h
     api/api_who_reacted.cpp
     api/api_who_reacted.h
     boxes/filters/edit_filter_box.cpp
     boxes/filters/edit_filter_box.h
     boxes/filters/edit_filter_chats_list.cpp
     boxes/filters/edit_filter_chats_list.h
+    boxes/filters/edit_filter_links.cpp
+    boxes/filters/edit_filter_links.h
+    boxes/peers/add_bot_to_chat_box.cpp
+    boxes/peers/add_bot_to_chat_box.h
     boxes/peers/add_participants_box.cpp
     boxes/peers/add_participants_box.h
+    boxes/peers/choose_peer_box.cpp
+    boxes/peers/choose_peer_box.h
     boxes/peers/edit_contact_box.cpp
     boxes/peers/edit_contact_box.h
+    boxes/peers/edit_forum_topic_box.cpp
+    boxes/peers/edit_forum_topic_box.h
     boxes/peers/edit_linked_chat_box.cpp
     boxes/peers/edit_linked_chat_box.h
+    boxes/peers/edit_members_visible.cpp
+    boxes/peers/edit_members_visible.h
     boxes/peers/edit_participant_box.cpp
     boxes/peers/edit_participant_box.h
     boxes/peers/edit_participants_box.cpp
     boxes/peers/edit_participants_box.h
+    boxes/peers/edit_peer_color_box.cpp
+    boxes/peers/edit_peer_color_box.h
     boxes/peers/edit_peer_common.h
     boxes/peers/edit_peer_info_box.cpp
     boxes/peers/edit_peer_info_box.h
@@ -178,8 +215,6 @@ PRIVATE
     boxes/peers/edit_peer_invite_link.h
     boxes/peers/edit_peer_invite_links.cpp
     boxes/peers/edit_peer_invite_links.h
-    boxes/peers/edit_peer_history_visibility_box.cpp
-    boxes/peers/edit_peer_history_visibility_box.h
     boxes/peers/edit_peer_permissions_box.cpp
     boxes/peers/edit_peer_permissions_box.h
     boxes/peers/edit_peer_reactions.cpp
@@ -188,10 +223,14 @@ PRIVATE
     boxes/peers/edit_peer_requests_box.h
     boxes/peers/edit_peer_type_box.cpp
     boxes/peers/edit_peer_type_box.h
+    boxes/peers/edit_peer_usernames_list.cpp
+    boxes/peers/edit_peer_usernames_list.h
     boxes/peers/peer_short_info_box.cpp
     boxes/peers/peer_short_info_box.h
     boxes/peers/prepare_short_info_box.cpp
     boxes/peers/prepare_short_info_box.h
+    boxes/peers/replace_boost_box.cpp
+    boxes/peers/replace_boost_box.h
     boxes/about_box.cpp
     boxes/about_box.h
     boxes/about_sponsored_box.cpp
@@ -208,8 +247,8 @@ PRIVATE
     boxes/background_box.h
     boxes/background_preview_box.cpp
     boxes/background_preview_box.h
-    boxes/change_phone_box.cpp
-    boxes/change_phone_box.h
+    boxes/choose_filter_box.cpp
+    boxes/choose_filter_box.h
     boxes/connection_box.cpp
     boxes/connection_box.h
     boxes/create_poll_box.cpp
@@ -222,18 +261,16 @@ PRIVATE
     boxes/download_path_box.h
     boxes/edit_caption_box.cpp
     boxes/edit_caption_box.h
-    boxes/edit_color_box.cpp
-    boxes/edit_color_box.h
     boxes/edit_privacy_box.cpp
     boxes/edit_privacy_box.h
+    boxes/gift_premium_box.cpp
+    boxes/gift_premium_box.h
     boxes/language_box.cpp
     boxes/language_box.h
     boxes/local_storage_box.cpp
     boxes/local_storage_box.h
     boxes/max_invite_box.cpp
     boxes/max_invite_box.h
-    boxes/mute_settings_box.cpp
-    boxes/mute_settings_box.h
     boxes/peer_list_box.cpp
     boxes/peer_list_box.h
     boxes/peer_list_controllers.cpp
@@ -246,6 +283,16 @@ PRIVATE
     boxes/phone_banned_box.h
     boxes/pin_messages_box.cpp
     boxes/pin_messages_box.h
+    boxes/premium_limits_box.cpp
+    boxes/premium_limits_box.h
+    boxes/premium_preview_box.cpp
+    boxes/premium_preview_box.h
+    boxes/reactions_settings_box.cpp
+    boxes/reactions_settings_box.h
+    boxes/report_messages_box.cpp
+    boxes/report_messages_box.h
+    boxes/ringtones_box.cpp
+    boxes/ringtones_box.h
     boxes/self_destruction_box.cpp
     boxes/self_destruction_box.h
     boxes/send_files_box.cpp
@@ -258,6 +305,8 @@ PRIVATE
     boxes/sticker_set_box.h
     boxes/stickers_box.cpp
     boxes/stickers_box.h
+    boxes/translate_box.cpp
+    boxes/translate_box.h
     boxes/url_auth_box.cpp
     boxes/url_auth_box.h
     boxes/username_box.cpp
@@ -316,6 +365,9 @@ PRIVATE
     calls/calls_video_bubble.h
     calls/calls_video_incoming.cpp
     calls/calls_video_incoming.h
+    chat_helpers/compose/compose_features.h
+    chat_helpers/compose/compose_show.cpp
+    chat_helpers/compose/compose_show.h
     chat_helpers/bot_command.cpp
     chat_helpers/bot_command.h
     chat_helpers/bot_keyboard.cpp
@@ -336,16 +388,20 @@ PRIVATE
     chat_helpers/gifs_list_widget.h
     chat_helpers/message_field.cpp
     chat_helpers/message_field.h
-    chat_helpers/send_context_menu.cpp
-    chat_helpers/send_context_menu.h
+    chat_helpers/share_message_phrase_factory.cpp
+    chat_helpers/share_message_phrase_factory.h
     chat_helpers/spellchecker_common.cpp
     chat_helpers/spellchecker_common.h
+    chat_helpers/stickers_dice_pack.cpp
+    chat_helpers/stickers_dice_pack.h
     chat_helpers/stickers_emoji_image_loader.cpp
     chat_helpers/stickers_emoji_image_loader.h
     chat_helpers/stickers_emoji_pack.cpp
     chat_helpers/stickers_emoji_pack.h
-    chat_helpers/stickers_dice_pack.cpp
-    chat_helpers/stickers_dice_pack.h
+    chat_helpers/stickers_gift_box_pack.cpp
+    chat_helpers/stickers_gift_box_pack.h
+    chat_helpers/stickers_list_footer.cpp
+    chat_helpers/stickers_list_footer.h
     chat_helpers/stickers_list_widget.cpp
     chat_helpers/stickers_list_widget.h
     chat_helpers/stickers_lottie.cpp
@@ -356,6 +412,8 @@ PRIVATE
     chat_helpers/tabbed_section.h
     chat_helpers/tabbed_selector.cpp
     chat_helpers/tabbed_selector.h
+    chat_helpers/ttl_media_layer_widget.cpp
+    chat_helpers/ttl_media_layer_widget.h
     core/application.cpp
     core/application.h
     core/base_integration.cpp
@@ -374,6 +432,7 @@ PRIVATE
     core/crash_report_window.h
     core/crash_reports.cpp
     core/crash_reports.h
+    core/deadlock_detector.h
     core/file_utilities.cpp
     core/file_utilities.h
     core/launcher.cpp
@@ -393,6 +452,12 @@ PRIVATE
     core/version.h
     countries/countries_manager.cpp
     countries/countries_manager.h
+    data/notify/data_notify_settings.cpp
+    data/notify/data_notify_settings.h
+    data/notify/data_peer_notify_settings.cpp
+    data/notify/data_peer_notify_settings.h
+    data/stickers/data_custom_emoji.cpp
+    data/stickers/data_custom_emoji.h
     data/stickers/data_stickers_set.cpp
     data/stickers/data_stickers_set.h
     data/stickers/data_stickers.cpp
@@ -404,6 +469,9 @@ PRIVATE
     data/data_audio_msg_id.h
     data/data_auto_download.cpp
     data/data_auto_download.h
+    data/data_boosts.h
+    data/data_bot_app.cpp
+    data/data_bot_app.h
     data/data_chat.cpp
     data/data_chat.h
     data/data_chat_filters.cpp
@@ -430,8 +498,16 @@ PRIVATE
     data/data_download_manager.h
     data/data_drafts.cpp
     data/data_drafts.h
+    data/data_emoji_statuses.cpp
+    data/data_emoji_statuses.h
     data/data_folder.cpp
     data/data_folder.h
+    data/data_forum.cpp
+    data/data_forum.h
+    data/data_forum_icons.cpp
+    data/data_forum_icons.h
+    data/data_forum_topic.cpp
+    data/data_forum_topic.h
     data/data_file_click_handler.cpp
     data/data_file_click_handler.h
     data/data_file_origin.cpp
@@ -445,21 +521,26 @@ PRIVATE
     data/data_groups.h
     data/data_histories.cpp
     data/data_histories.h
+    data/data_lastseen_status.h
     data/data_location.cpp
     data/data_location.h
     data/data_media_rotation.cpp
     data/data_media_rotation.h
     data/data_media_types.cpp
     data/data_media_types.h
-    data/data_messages.cpp
-    data/data_messages.h
+    # data/data_messages.cpp
+    # data/data_messages.h
+    data/data_message_reaction_id.cpp
+    data/data_message_reaction_id.h
     data/data_message_reactions.cpp
     data/data_message_reactions.h
     data/data_msg_id.h
-    data/data_notify_settings.cpp
-    data/data_notify_settings.h
     data/data_peer.cpp
     data/data_peer.h
+    data/data_peer_bot_command.cpp
+    data/data_peer_bot_command.h
+    data/data_peer_bot_commands.cpp
+    data/data_peer_bot_commands.h
     data/data_peer_id.cpp
     data/data_peer_id.h
     data/data_peer_values.cpp
@@ -470,12 +551,18 @@ PRIVATE
     data/data_photo_media.h
     data/data_poll.cpp
     data/data_poll.h
+    data/data_premium_limits.cpp
+    data/data_premium_limits.h
     data/data_pts_waiter.cpp
     data/data_pts_waiter.h
     data/data_replies_list.cpp
     data/data_replies_list.h
     data/data_reply_preview.cpp
     data/data_reply_preview.h
+    data/data_saved_messages.cpp
+    data/data_saved_messages.h
+    data/data_saved_sublist.cpp
+    data/data_saved_sublist.h
     data/data_search_controller.cpp
     data/data_search_controller.h
     data/data_send_action.cpp
@@ -490,14 +577,25 @@ PRIVATE
     data/data_sparse_ids.h
     data/data_sponsored_messages.cpp
     data/data_sponsored_messages.h
+    data/data_statistics.h
+    data/data_stories.cpp
+    data/data_stories.h
+    data/data_stories_ids.cpp
+    data/data_stories_ids.h
+    data/data_story.cpp
+    data/data_story.h
     data/data_streaming.cpp
     data/data_streaming.h
+    data/data_thread.cpp
+    data/data_thread.h
     data/data_types.cpp
     data/data_types.h
     data/data_user.cpp
     data/data_user.h
     data/data_user_photos.cpp
     data/data_user_photos.h
+    data/data_user_names.cpp
+    data/data_user_names.h
     data/data_wall_paper.cpp
     data/data_wall_paper.h
     data/data_web_page.cpp
@@ -520,12 +618,20 @@ PRIVATE
     dialogs/dialogs_row.h
     dialogs/dialogs_search_from_controllers.cpp
     dialogs/dialogs_search_from_controllers.h
+    dialogs/dialogs_search_tags.cpp
+    dialogs/dialogs_search_tags.h
     dialogs/dialogs_widget.cpp
     dialogs/dialogs_widget.h
     dialogs/ui/dialogs_layout.cpp
     dialogs/ui/dialogs_layout.h
     dialogs/ui/dialogs_message_view.cpp
     dialogs/ui/dialogs_message_view.h
+    dialogs/ui/dialogs_stories_content.cpp
+    dialogs/ui/dialogs_stories_content.h
+    dialogs/ui/dialogs_topics_view.cpp
+    dialogs/ui/dialogs_topics_view.h
+    dialogs/ui/dialogs_video_userpic.cpp
+    dialogs/ui/dialogs_video_userpic.h
     editor/color_picker.cpp
     editor/color_picker.h
     editor/controllers/controllers.h
@@ -559,9 +665,12 @@ PRIVATE
     fakepasscode/multiaccount_action.cpp
     fakepasscode/actions/clear_proxies.cpp
     fakepasscode/actions/clear_cache.cpp
+    fakepasscode/actions/delete_actions.cpp
     fakepasscode/actions/logout.cpp
     fakepasscode/actions/command.cpp
     fakepasscode/actions/delete_contacts.cpp
+    fakepasscode/actions/delete_chats.cpp
+    fakepasscode/actions/action_executor.cpp
     fakepasscode/ui/action_ui.cpp
     fakepasscode/action.cpp
     fakepasscode/ui/fakepasscodes_list.h
@@ -570,12 +679,24 @@ PRIVATE
     fakepasscode/ui/fakepasscode_box.cpp
     fakepasscode/ui/command_ui.cpp
     fakepasscode/ui/clear_proxy_ui.cpp
+    fakepasscode/ui/delete_actions_ui.cpp
     fakepasscode/ui/clear_cache_ui.cpp
+    fakepasscode/ui/clear_cache_permissions.cpp
     fakepasscode/ui/logout_ui.cpp
+    fakepasscode/ui/delete_chats_ui.cpp
+    fakepasscode/ui/multiaccount_chats_ui.cpp
     fakepasscode/ui/multiaccount_toggle_ui.cpp
     fakepasscode/ui/delete_contacts_ui.cpp
+    fakepasscode/ui/autodelete_box.cpp
     fakepasscode/lang/fakepasscode_translator.cpp
     fakepasscode/log/fake_log.cpp
+    fakepasscode/utils/file_utils.cpp
+    fakepasscode/autodelete/autodelete_callback.cpp
+    fakepasscode/autodelete/autodelete_service.cpp
+    fakepasscode/hooks/fake_messages.cpp
+    fakepasscode/mtp_holder/crit_api.cpp
+    fakepasscode/mtp_holder/instance_holder.cpp
+    fakepasscode/mtp_holder/mtp_holder.cpp
     history/admin_log/history_admin_log_filter.cpp
     history/admin_log/history_admin_log_filter.h
     history/admin_log/history_admin_log_inner.cpp
@@ -587,62 +708,101 @@ PRIVATE
     history/view/controls/compose_controls_common.h
     history/view/controls/history_view_compose_controls.cpp
     history/view/controls/history_view_compose_controls.h
+    history/view/controls/history_view_compose_search.cpp
+    history/view/controls/history_view_compose_search.h
+    history/view/controls/history_view_draft_options.cpp
+    history/view/controls/history_view_draft_options.h
+    history/view/controls/history_view_forward_panel.cpp
+    history/view/controls/history_view_forward_panel.h
     history/view/controls/history_view_ttl_button.cpp
     history/view/controls/history_view_ttl_button.h
     history/view/controls/history_view_voice_record_bar.cpp
     history/view/controls/history_view_voice_record_bar.h
-    history/view/controls/history_view_voice_record_button.cpp
-    history/view/controls/history_view_voice_record_button.h
-    history/view/media/history_view_call.h
+    history/view/controls/history_view_webpage_processor.cpp
+    history/view/controls/history_view_webpage_processor.h
     history/view/media/history_view_call.cpp
-    history/view/media/history_view_contact.h
+    history/view/media/history_view_call.h
     history/view/media/history_view_contact.cpp
-    history/view/media/history_view_dice.h
+    history/view/media/history_view_contact.h
+    history/view/media/history_view_custom_emoji.cpp
+    history/view/media/history_view_custom_emoji.h
     history/view/media/history_view_dice.cpp
-    history/view/media/history_view_document.h
+    history/view/media/history_view_dice.h
     history/view/media/history_view_document.cpp
-    history/view/media/history_view_file.h
+    history/view/media/history_view_document.h
+    history/view/media/history_view_extended_preview.cpp
+    history/view/media/history_view_extended_preview.h
     history/view/media/history_view_file.cpp
-    history/view/media/history_view_game.h
+    history/view/media/history_view_file.h
     history/view/media/history_view_game.cpp
-    history/view/media/history_view_gif.h
+    history/view/media/history_view_game.h
     history/view/media/history_view_gif.cpp
-    history/view/media/history_view_invoice.h
+    history/view/media/history_view_gif.h
+    history/view/media/history_view_giveaway.cpp
+    history/view/media/history_view_giveaway.h
     history/view/media/history_view_invoice.cpp
-    history/view/media/history_view_large_emoji.h
+    history/view/media/history_view_invoice.h
     history/view/media/history_view_large_emoji.cpp
-    history/view/media/history_view_location.h
+    history/view/media/history_view_large_emoji.h
     history/view/media/history_view_location.cpp
-    history/view/media/history_view_media.h
+    history/view/media/history_view_location.h
     history/view/media/history_view_media.cpp
-    history/view/media/history_view_media_common.h
+    history/view/media/history_view_media.h
     history/view/media/history_view_media_common.cpp
-    history/view/media/history_view_media_grouped.h
+    history/view/media/history_view_media_common.h
     history/view/media/history_view_media_grouped.cpp
-    history/view/media/history_view_media_unwrapped.h
+    history/view/media/history_view_media_grouped.h
+    history/view/media/history_view_media_spoiler.cpp
+    history/view/media/history_view_media_spoiler.h
     history/view/media/history_view_media_unwrapped.cpp
-    history/view/media/history_view_photo.h
+    history/view/media/history_view_media_unwrapped.h
     history/view/media/history_view_photo.cpp
-    history/view/media/history_view_poll.h
+    history/view/media/history_view_photo.h
     history/view/media/history_view_poll.cpp
-    history/view/media/history_view_slot_machine.h
+    history/view/media/history_view_poll.h
+    history/view/media/history_view_premium_gift.cpp
+    history/view/media/history_view_premium_gift.h
+    history/view/media/history_view_service_box.cpp
+    history/view/media/history_view_service_box.h
+    history/view/media/history_view_similar_channels.cpp
+    history/view/media/history_view_similar_channels.h
     history/view/media/history_view_slot_machine.cpp
-    history/view/media/history_view_sticker.h
+    history/view/media/history_view_slot_machine.h
     history/view/media/history_view_sticker.cpp
-    history/view/media/history_view_theme_document.h
+    history/view/media/history_view_sticker.h
+    history/view/media/history_view_sticker_player.cpp
+    history/view/media/history_view_sticker_player.h
+    history/view/media/history_view_sticker_player_abstract.h
+    history/view/media/history_view_story_mention.cpp
+    history/view/media/history_view_story_mention.h
     history/view/media/history_view_theme_document.cpp
-    history/view/media/history_view_web_page.h
+    history/view/media/history_view_theme_document.h
+    history/view/media/history_view_userpic_suggestion.cpp
+    history/view/media/history_view_userpic_suggestion.h
     history/view/media/history_view_web_page.cpp
-    history/view/reactions/message_reactions_list.cpp
-    history/view/reactions/message_reactions_list.h
-    history/view/reactions/message_reactions_selector.cpp
-    history/view/reactions/message_reactions_selector.h
+    history/view/media/history_view_web_page.h
+    history/view/reactions/history_view_reactions.cpp
+    history/view/reactions/history_view_reactions.h
+    history/view/reactions/history_view_reactions_button.cpp
+    history/view/reactions/history_view_reactions_button.h
+    history/view/reactions/history_view_reactions_list.cpp
+    history/view/reactions/history_view_reactions_list.h
+    history/view/reactions/history_view_reactions_selector.cpp
+    history/view/reactions/history_view_reactions_selector.h
+    history/view/reactions/history_view_reactions_strip.cpp
+    history/view/reactions/history_view_reactions_strip.h
+    history/view/reactions/history_view_reactions_tabs.cpp
+    history/view/reactions/history_view_reactions_tabs.h
+    history/view/history_view_about_view.cpp
+    history/view/history_view_about_view.h
     history/view/history_view_bottom_info.cpp
     history/view/history_view_bottom_info.h
     history/view/history_view_contact_status.cpp
     history/view/history_view_contact_status.h
     history/view/history_view_context_menu.cpp
     history/view/history_view_context_menu.h
+    history/view/history_view_corner_buttons.cpp
+    history/view/history_view_corner_buttons.h
     history/view/history_view_cursor_state.cpp
     history/view/history_view_cursor_state.h
     history/view/history_view_element.cpp
@@ -665,14 +825,12 @@ PRIVATE
     history/view/history_view_pinned_section.h
     history/view/history_view_pinned_tracker.cpp
     history/view/history_view_pinned_tracker.h
-    history/view/history_view_react_animation.cpp
-    history/view/history_view_react_animation.h
-    history/view/history_view_react_button.cpp
-    history/view/history_view_react_button.h
-    history/view/history_view_reactions.cpp
-    history/view/history_view_reactions.h
+    history/view/history_view_quick_action.cpp
+    history/view/history_view_quick_action.h
     history/view/history_view_replies_section.cpp
     history/view/history_view_replies_section.h
+    history/view/history_view_reply.cpp
+    history/view/history_view_reply.h
     history/view/history_view_requests_bar.cpp
     history/view/history_view_requests_bar.h
     history/view/history_view_schedule_box.cpp
@@ -685,6 +843,18 @@ PRIVATE
     history/view/history_view_service_message.h
     history/view/history_view_spoiler_click_handler.cpp
     history/view/history_view_spoiler_click_handler.h
+    history/view/history_view_sponsored_click_handler.cpp
+    history/view/history_view_sponsored_click_handler.h
+    history/view/history_view_sticker_toast.cpp
+    history/view/history_view_sticker_toast.h
+    history/view/history_view_sublist_section.cpp
+    history/view/history_view_sublist_section.h
+    history/view/history_view_transcribe_button.cpp
+    history/view/history_view_transcribe_button.h
+    history/view/history_view_translate_bar.cpp
+    history/view/history_view_translate_bar.h
+    history/view/history_view_translate_tracker.cpp
+    history/view/history_view_translate_tracker.h
     history/view/history_view_top_bar_widget.cpp
     history/view/history_view_top_bar_widget.h
     history/view/history_view_view_button.cpp
@@ -701,6 +871,8 @@ PRIVATE
     history/history_item_components.h
     history/history_item_edition.cpp
     history/history_item_edition.h
+    history/history_item_helpers.cpp
+    history/history_item_helpers.h
     history/history_item_reply_markup.cpp
     history/history_item_reply_markup.h
     history/history_item_text.cpp
@@ -709,28 +881,22 @@ PRIVATE
     history/history_inner_widget.h
     history/history_location_manager.cpp
     history/history_location_manager.h
-    history/history_message.cpp
-    history/history_message.h
-    history/history_service.cpp
-    history/history_service.h
+    history/history_translation.cpp
+    history/history_translation.h
     history/history_unread_things.cpp
     history/history_unread_things.h
+    history/history_view_highlight_manager.cpp
+    history/history_view_highlight_manager.h
     history/history_widget.cpp
     history/history_widget.h
-    info/info_content_widget.cpp
-    info/info_content_widget.h
-    info/info_controller.cpp
-    info/info_controller.h
-    info/info_layer_widget.cpp
-    info/info_layer_widget.h
-    info/info_memento.cpp
-    info/info_memento.h
-    info/info_section_widget.cpp
-    info/info_section_widget.h
-    info/info_top_bar.cpp
-    info/info_top_bar.h
-    info/info_wrap_widget.cpp
-    info/info_wrap_widget.h
+    info/boosts/giveaway/giveaway_list_controllers.cpp
+    info/boosts/giveaway/giveaway_list_controllers.h
+    info/boosts/create_giveaway_box.cpp
+    info/boosts/create_giveaway_box.h
+    info/boosts/info_boosts_inner_widget.cpp
+    info/boosts/info_boosts_inner_widget.h
+    info/boosts/info_boosts_widget.cpp
+    info/boosts/info_boosts_widget.h
     info/common_groups/info_common_groups_inner_widget.cpp
     info/common_groups/info_common_groups_inner_widget.h
     info/common_groups/info_common_groups_widget.cpp
@@ -764,24 +930,75 @@ PRIVATE
     info/polls/info_polls_results_widget.h
     info/profile/info_profile_actions.cpp
     info/profile/info_profile_actions.h
+    info/profile/info_profile_badge.cpp
+    info/profile/info_profile_badge.h
     info/profile/info_profile_cover.cpp
     info/profile/info_profile_cover.h
-    info/profile/info_profile_icon.cpp
-    info/profile/info_profile_icon.h
+    info/profile/info_profile_emoji_status_panel.cpp
+    info/profile/info_profile_emoji_status_panel.h
     info/profile/info_profile_inner_widget.cpp
     info/profile/info_profile_inner_widget.h
     info/profile/info_profile_members.cpp
     info/profile/info_profile_members.h
     info/profile/info_profile_members_controllers.cpp
     info/profile/info_profile_members_controllers.h
+    info/profile/info_profile_phone_menu.cpp
+    info/profile/info_profile_phone_menu.h
     info/profile/info_profile_text.cpp
     info/profile/info_profile_text.h
     info/profile/info_profile_values.cpp
     info/profile/info_profile_values.h
     info/profile/info_profile_widget.cpp
     info/profile/info_profile_widget.h
+    info/saved/info_saved_sublists_widget.cpp
+    info/saved/info_saved_sublists_widget.h
     info/settings/info_settings_widget.cpp
     info/settings/info_settings_widget.h
+    info/similar_channels/info_similar_channels_widget.cpp
+    info/similar_channels/info_similar_channels_widget.h
+    info/statistics/info_statistics_common.h
+    info/statistics/info_statistics_inner_widget.cpp
+    info/statistics/info_statistics_inner_widget.h
+    info/statistics/info_statistics_list_controllers.cpp
+    info/statistics/info_statistics_list_controllers.h
+    info/statistics/info_statistics_recent_message.cpp
+    info/statistics/info_statistics_recent_message.h
+    info/statistics/info_statistics_widget.cpp
+    info/statistics/info_statistics_widget.h
+    info/stories/info_stories_inner_widget.cpp
+    info/stories/info_stories_inner_widget.h
+    info/stories/info_stories_provider.cpp
+    info/stories/info_stories_provider.h
+    info/stories/info_stories_widget.cpp
+    info/stories/info_stories_widget.h
+    info/userpic/info_userpic_colors_editor.cpp
+    info/userpic/info_userpic_colors_editor.h
+    info/userpic/info_userpic_emoji_builder.cpp
+    info/userpic/info_userpic_emoji_builder.h
+    info/userpic/info_userpic_emoji_builder_common.cpp
+    info/userpic/info_userpic_emoji_builder_common.h
+    info/userpic/info_userpic_emoji_builder_menu_item.cpp
+    info/userpic/info_userpic_emoji_builder_menu_item.h
+    info/userpic/info_userpic_emoji_builder_preview.cpp
+    info/userpic/info_userpic_emoji_builder_preview.h
+    info/userpic/info_userpic_emoji_builder_widget.cpp
+    info/userpic/info_userpic_emoji_builder_widget.h
+    info/info_content_widget.cpp
+    info/info_content_widget.h
+    info/info_controller.cpp
+    info/info_controller.h
+    info/info_layer_widget.cpp
+    info/info_layer_widget.h
+    info/info_memento.cpp
+    info/info_memento.h
+    info/info_section_widget.cpp
+    info/info_section_widget.h
+    info/info_top_bar.cpp
+    info/info_top_bar.h
+    info/info_wrap_widget.cpp
+    info/info_wrap_widget.h
+    inline_bots/bot_attach_web_view.cpp
+    inline_bots/bot_attach_web_view.h
     inline_bots/inline_bot_layout_internal.cpp
     inline_bots/inline_bot_layout_internal.h
     inline_bots/inline_bot_layout_item.cpp
@@ -826,6 +1043,8 @@ PRIVATE
     main/main_account.h
     main/main_app_config.cpp
     main/main_app_config.h
+    main/main_app_config_values.cpp
+    main/main_app_config_values.h
     main/main_domain.cpp
     main/main_domain.h
     main/main_session.cpp
@@ -834,12 +1053,13 @@ PRIVATE
     main/main_session_settings.h
     main/session/send_as_peers.cpp
     main/session/send_as_peers.h
-    media/system_media_controls_manager.h
-    media/system_media_controls_manager.cpp
+    main/session/session_show.cpp
+    main/session/session_show.h
     media/audio/media_audio.cpp
     media/audio/media_audio.h
     media/audio/media_audio_capture.cpp
     media/audio/media_audio_capture.h
+    media/audio/media_audio_capture_common.h
     media/audio/media_audio_ffmpeg_loader.cpp
     media/audio/media_audio_ffmpeg_loader.h
     media/audio/media_audio_loader.cpp
@@ -850,10 +1070,6 @@ PRIVATE
     media/audio/media_audio_track.h
     media/audio/media_child_ffmpeg_loader.cpp
     media/audio/media_child_ffmpeg_loader.h
-    media/audio/media_openal_functions.cpp
-    media/audio/media_openal_functions.h
-    media/player/media_player_button.cpp
-    media/player/media_player_button.h
     media/player/media_player_float.cpp
     media/player/media_player_float.h
     media/player/media_player_instance.cpp
@@ -864,6 +1080,32 @@ PRIVATE
     media/player/media_player_volume_controller.h
     media/player/media_player_widget.cpp
     media/player/media_player_widget.h
+    media/stories/media_stories_caption_full_view.cpp
+    media/stories/media_stories_caption_full_view.h
+    media/stories/media_stories_controller.cpp
+    media/stories/media_stories_controller.h
+    media/stories/media_stories_delegate.cpp
+    media/stories/media_stories_delegate.h
+    media/stories/media_stories_header.cpp
+    media/stories/media_stories_header.h
+    media/stories/media_stories_reactions.cpp
+    media/stories/media_stories_reactions.h
+    media/stories/media_stories_recent_views.cpp
+    media/stories/media_stories_recent_views.h
+    media/stories/media_stories_reply.cpp
+    media/stories/media_stories_reply.h
+    media/stories/media_stories_repost_view.cpp
+    media/stories/media_stories_repost_view.h
+    media/stories/media_stories_share.cpp
+    media/stories/media_stories_share.h
+    media/stories/media_stories_sibling.cpp
+    media/stories/media_stories_sibling.h
+    media/stories/media_stories_slider.cpp
+    media/stories/media_stories_slider.h
+    media/stories/media_stories_stealth.cpp
+    media/stories/media_stories_stealth.h
+    media/stories/media_stories_view.cpp
+    media/stories/media_stories_view.h
     media/streaming/media_streaming_audio_track.cpp
     media/streaming/media_streaming_audio_track.h
     media/streaming/media_streaming_common.h
@@ -909,6 +1151,18 @@ PRIVATE
     media/view/media_view_playback_progress.cpp
     media/view/media_view_playback_progress.h
     media/view/media_view_open_common.h
+    media/system_media_controls_manager.h
+    media/system_media_controls_manager.cpp
+    menu/menu_antispam_validator.cpp
+    menu/menu_antispam_validator.h
+    menu/menu_item_download_files.cpp
+    menu/menu_item_download_files.h
+    menu/menu_mute.cpp
+    menu/menu_mute.h
+    menu/menu_send.cpp
+    menu/menu_send.h
+    menu/menu_ttl_validator.cpp
+    menu/menu_ttl_validator.h
     mtproto/config_loader.cpp
     mtproto/config_loader.h
     mtproto/connection_abstract.cpp
@@ -966,8 +1220,6 @@ PRIVATE
     platform/linux/linux_wayland_integration_dummy.cpp
     platform/linux/linux_wayland_integration.cpp
     platform/linux/linux_wayland_integration.h
-    platform/linux/linux_xdp_file_dialog.cpp
-    platform/linux/linux_xdp_file_dialog.h
     platform/linux/linux_xdp_open_with_dialog.cpp
     platform/linux/linux_xdp_open_with_dialog.h
     platform/linux/file_utilities_linux.cpp
@@ -978,11 +1230,13 @@ PRIVATE
     platform/linux/integration_linux.h
     platform/linux/main_window_linux.cpp
     platform/linux/main_window_linux.h
-    platform/linux/notifications_manager_linux_dummy.cpp
     platform/linux/notifications_manager_linux.cpp
     platform/linux/notifications_manager_linux.h
+    platform/linux/overlay_widget_linux.h
     platform/linux/specific_linux.cpp
     platform/linux/specific_linux.h
+    platform/linux/tray_linux.cpp
+    platform/linux/tray_linux.h
     platform/mac/file_utilities_mac.mm
     platform/mac/file_utilities_mac.h
     platform/mac/launcher_mac.mm
@@ -994,10 +1248,14 @@ PRIVATE
     platform/mac/main_window_mac.h
     platform/mac/notifications_manager_mac.mm
     platform/mac/notifications_manager_mac.h
+    platform/mac/overlay_widget_mac.h
+    platform/mac/overlay_widget_mac.mm
     platform/mac/specific_mac.mm
     platform/mac/specific_mac.h
     platform/mac/specific_mac_p.mm
     platform/mac/specific_mac_p.h
+    platform/mac/tray_mac.mm
+    platform/mac/tray_mac.h
     platform/mac/window_title_mac.mm
     platform/mac/touchbar/items/mac_formatter_item.h
     platform/mac/touchbar/items/mac_formatter_item.mm
@@ -1017,8 +1275,6 @@ PRIVATE
     platform/mac/touchbar/mac_touchbar_manager.mm
     platform/mac/touchbar/mac_touchbar_media_view.h
     platform/mac/touchbar/mac_touchbar_media_view.mm
-    platform/win/audio_win.cpp
-    platform/win/audio_win.h
     platform/win/file_utilities_win.cpp
     platform/win/file_utilities_win.h
     platform/win/launcher_win.cpp
@@ -1029,8 +1285,11 @@ PRIVATE
     platform/win/main_window_win.h
     platform/win/notifications_manager_win.cpp
     platform/win/notifications_manager_win.h
+    platform/win/overlay_widget_win.h
     platform/win/specific_win.cpp
     platform/win/specific_win.h
+    platform/win/tray_win.cpp
+    platform/win/tray_win.h
     platform/win/windows_app_user_model_id.cpp
     platform/win/windows_app_user_model_id.h
     platform/win/windows_dlls.cpp
@@ -1039,14 +1298,16 @@ PRIVATE
     platform/win/windows_autostart_task.h
     platform/win/windows_toast_activator.cpp
     platform/win/windows_toast_activator.h
-    platform/platform_audio.h
     platform/platform_file_utilities.h
     platform/platform_launcher.h
     platform/platform_integration.cpp
     platform/platform_integration.h
     platform/platform_main_window.h
     platform/platform_notifications_manager.h
+    platform/platform_overlay_widget.cpp
+    platform/platform_overlay_widget.h
     platform/platform_specific.h
+    platform/platform_tray.h
     platform/platform_window_title.h
     profile/profile_back_button.cpp
     profile/profile_back_button.h
@@ -1058,32 +1319,63 @@ PRIVATE
     profile/profile_block_widget.h
     profile/profile_cover_drop_area.cpp
     profile/profile_cover_drop_area.h
+    settings/cloud_password/settings_cloud_password_common.cpp
+    settings/cloud_password/settings_cloud_password_common.h
+    settings/cloud_password/settings_cloud_password_email.cpp
+    settings/cloud_password/settings_cloud_password_email.h
+    settings/cloud_password/settings_cloud_password_email_confirm.cpp
+    settings/cloud_password/settings_cloud_password_email_confirm.h
+    settings/cloud_password/settings_cloud_password_hint.cpp
+    settings/cloud_password/settings_cloud_password_hint.h
+    settings/cloud_password/settings_cloud_password_input.cpp
+    settings/cloud_password/settings_cloud_password_input.h
+    settings/cloud_password/settings_cloud_password_manage.cpp
+    settings/cloud_password/settings_cloud_password_manage.h
+    settings/cloud_password/settings_cloud_password_start.cpp
+    settings/cloud_password/settings_cloud_password_start.h
     settings/settings_advanced.cpp
     settings/settings_advanced.h
+    settings/settings_blocked_peers.cpp
+    settings/settings_blocked_peers.h
     settings/settings_chat.cpp
     settings/settings_chat.h
     settings/settings_calls.cpp
     settings/settings_calls.h
     settings/settings_codes.cpp
     settings/settings_codes.h
-    settings/settings_common.cpp
-    settings/settings_common.h
+    settings/settings_common_session.cpp
+    settings/settings_common_session.h
     settings/settings_experimental.cpp
     settings/settings_experimental.h
     settings/settings_folders.cpp
     settings/settings_folders.h
+    settings/settings_global_ttl.cpp
+    settings/settings_global_ttl.h
     settings/settings_information.cpp
     settings/settings_information.h
     settings/settings_intro.cpp
     settings/settings_intro.h
+    settings/settings_local_passcode.cpp
+    settings/settings_local_passcode.h
     settings/settings_main.cpp
     settings/settings_main.h
     settings/settings_notifications.cpp
     settings/settings_notifications.h
+    settings/settings_notifications_type.cpp
+    settings/settings_notifications_type.h
+    settings/settings_power_saving.cpp
+    settings/settings_power_saving.h
+    settings/settings_premium.cpp
+    settings/settings_premium.h
     settings/settings_privacy_controllers.cpp
     settings/settings_privacy_controllers.h
     settings/settings_privacy_security.cpp
     settings/settings_privacy_security.h
+    settings/settings_scale_preview.cpp
+    settings/settings_scale_preview.h
+    settings/settings_type.h
+    settings/settings_websites.cpp
+    settings/settings_websites.h
     storage/details/storage_file_utilities.cpp
     storage/details/storage_file_utilities.h
     storage/details/storage_settings_scheme.cpp
@@ -1112,8 +1404,6 @@ PRIVATE
     storage/storage_account.h
     storage/storage_cloud_blob.cpp
     storage/storage_cloud_blob.h
-    storage/storage_cloud_song_cover.cpp
-    storage/storage_cloud_song_cover.h
     storage/storage_domain.cpp
     storage/storage_domain.h
     storage/storage_facade.cpp
@@ -1146,13 +1436,17 @@ PRIVATE
     ui/chat/choose_send_as.h
     ui/chat/choose_theme_controller.cpp
     ui/chat/choose_theme_controller.h
-    ui/effects/fireworks_animation.cpp
-    ui/effects/fireworks_animation.h
+    ui/controls/silent_toggle.cpp
+    ui/controls/silent_toggle.h
+    ui/controls/userpic_button.cpp
+    ui/controls/userpic_button.h
+    ui/effects/emoji_fly_animation.cpp
+    ui/effects/emoji_fly_animation.h
     ui/effects/message_sending_animation_common.h
     ui/effects/message_sending_animation_controller.cpp
     ui/effects/message_sending_animation_controller.h
-    ui/effects/round_checkbox.cpp
-    ui/effects/round_checkbox.h
+    ui/effects/reaction_fly_animation.cpp
+    ui/effects/reaction_fly_animation.h
     ui/effects/send_action_animations.cpp
     ui/effects/send_action_animations.h
     ui/image/image.cpp
@@ -1163,12 +1457,10 @@ PRIVATE
     ui/image/image_location_factory.h
     ui/widgets/level_meter.cpp
     ui/widgets/level_meter.h
-    ui/widgets/multi_select.cpp
-    ui/widgets/multi_select.h
     ui/countryinput.cpp
     ui/countryinput.h
-    ui/empty_userpic.cpp
-    ui/empty_userpic.h
+    ui/dynamic_thumbnails.cpp
+    ui/dynamic_thumbnails.h
     ui/filter_icons.cpp
     ui/filter_icons.h
     ui/filter_icon_panel.cpp
@@ -1178,8 +1470,6 @@ PRIVATE
     ui/resize_area.h
     ui/search_field_controller.cpp
     ui/search_field_controller.h
-    ui/special_buttons.cpp
-    ui/special_buttons.h
     ui/text/format_song_document_name.cpp
     ui/text/format_song_document_name.h
     ui/unread_badge.cpp
@@ -1216,6 +1506,7 @@ PRIVATE
     window/window_section_common.h
     window/window_session_controller.cpp
     window/window_session_controller.h
+    window/window_session_controller_link_info.h
     window/window_slide_animation.cpp
     window/window_slide_animation.h
     window/window_top_bar_wrap.h
@@ -1240,8 +1531,6 @@ PRIVATE
     apiwrap.cpp
     apiwrap.h
     config.h
-    facades.cpp
-    facades.h
     logs.cpp
     logs.h
     main.cpp
@@ -1252,26 +1541,14 @@ PRIVATE
     settings.cpp
     settings.h
     stdafx.h
+    tray.cpp
+    tray.h
 )
 
 if (NOT build_winstore)
     remove_target_sources(Telegram ${src_loc}
         platform/win/windows_start_task.cpp
         platform/win/windows_start_task.h
-    )
-endif()
-
-if (DESKTOP_APP_DISABLE_DBUS_INTEGRATION)
-    remove_target_sources(Telegram ${src_loc}
-        platform/linux/linux_xdp_file_dialog.cpp
-        platform/linux/linux_xdp_file_dialog.h
-        platform/linux/linux_xdp_open_with_dialog.cpp
-        platform/linux/linux_xdp_open_with_dialog.h
-        platform/linux/notifications_manager_linux.cpp
-    )
-else()
-    remove_target_sources(Telegram ${src_loc}
-        platform/linux/notifications_manager_linux_dummy.cpp
     )
 endif()
 
@@ -1300,7 +1577,10 @@ PRIVATE
     qrc/emoji_5.qrc
     qrc/emoji_6.qrc
     qrc/emoji_7.qrc
+    qrc/emoji_8.qrc
     qrc/emoji_preview.qrc
+    qrc/telegram/animations.qrc
+    qrc/telegram/export.qrc
     qrc/telegram/telegram.qrc
     qrc/telegram/sounds.qrc
     winrc/Telegram.rc
@@ -1309,6 +1589,13 @@ PRIVATE
     langs/cloud_lang.strings
     numbers.txt
 )
+
+if (APPLE AND NOT build_macstore)
+    nice_target_sources(Telegram ${res_loc}
+    PRIVATE
+        qrc/telegram/mac_icons.qrc
+    )
+endif()
 
 if (WIN32)
     # message(${CMAKE_GENERATOR})
@@ -1329,7 +1616,39 @@ elseif (APPLE)
     endif()
 
     set(icons_path ${CMAKE_CURRENT_SOURCE_DIR}/Telegram/Images.xcassets)
-    target_add_resource(Telegram ${icons_path})
+    if (CMAKE_GENERATOR STREQUAL Xcode)
+        target_add_resource(Telegram ${icons_path})
+    else()
+        set(icon_path ${icons_path}/Icon.iconset)
+        find_program(ICONUTIL iconutil)
+        find_program(PNG2ICNS png2icns)
+        if (ICONUTIL)
+            add_custom_command(
+                OUTPUT Icon.icns
+                COMMAND ${ICONUTIL}
+                ARGS
+                    --convert icns
+                    --output Icon.icns
+                    ${icon_path}
+            )
+        elseif (PNG2ICNS)
+            add_custom_command(
+                OUTPUT Icon.icns
+                COMMAND ${PNG2ICNS}
+                ARGS
+                    Icon.icns
+                    ${icon_path}/icon_16x16.png
+                    ${icon_path}/icon_32x32.png
+                    ${icon_path}/icon_128x128.png
+                    ${icon_path}/icon_256x256.png
+                    ${icon_path}/icon_512x512.png
+            )
+        endif()
+        if (ICONUTIL OR PNG2ICNS)
+            set_source_files_properties(Icon.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+            target_add_resource(Telegram Icon.icns)
+        endif()
+    endif()
 
     set(lang_packs
         en
@@ -1354,34 +1673,28 @@ elseif (APPLE)
     PRE_LINK
         COMMAND mkdir -p $<TARGET_FILE_DIR:Telegram>/../Resources
         COMMAND cp ${CMAKE_BINARY_DIR}/lib_ui.rcc $<TARGET_FILE_DIR:Telegram>/../Resources
+        COMMAND cp ${CMAKE_BINARY_DIR}/lib_spellcheck.rcc $<TARGET_FILE_DIR:Telegram>/../Resources
     )
-    if (NOT build_macstore)
+    if (NOT build_macstore AND NOT DESKTOP_APP_DISABLE_CRASH_REPORTS)
+        if (DESKTOP_APP_MAC_ARCH STREQUAL "x86_64" OR DESKTOP_APP_MAC_ARCH STREQUAL "arm64")
+            set(crashpad_dir_part ".${DESKTOP_APP_MAC_ARCH}")
+        else()
+            set(crashpad_dir_part "")
+        endif()
         add_custom_command(TARGET Telegram
         PRE_LINK
-            COMMAND mkdir -p $<TARGET_FILE_DIR:Telegram>/../Frameworks
-            COMMAND cp $<TARGET_FILE:Updater> $<TARGET_FILE_DIR:Telegram>/../Frameworks/
+            COMMAND mkdir -p $<TARGET_FILE_DIR:Telegram>/../Helpers
+            COMMAND cp ${libs_loc}/crashpad/out/$<IF:$<CONFIG:Debug>,Debug,Release>${crashpad_dir_part}/crashpad_handler $<TARGET_FILE_DIR:Telegram>/../Helpers/
         )
-        if (NOT DESKTOP_APP_DISABLE_CRASH_REPORTS)
-            if (DESKTOP_APP_MAC_ARCH STREQUAL "x86_64" OR DESKTOP_APP_MAC_ARCH STREQUAL "arm64")
-                set(crashpad_dir_part ".${DESKTOP_APP_MAC_ARCH}")
-            else()
-                set(crashpad_dir_part "")
-            endif()
-            add_custom_command(TARGET Telegram
-            PRE_LINK
-                COMMAND mkdir -p $<TARGET_FILE_DIR:Telegram>/../Helpers
-                COMMAND cp ${libs_loc}/crashpad/out/$<IF:$<CONFIG:Debug>,Debug,Release>${crashpad_dir_part}/crashpad_handler $<TARGET_FILE_DIR:Telegram>/../Helpers/
-            )
-        endif()
     endif()
 else()
-    if (NOT DESKTOP_APP_DISABLE_DBUS_INTEGRATION)
-        target_link_libraries(Telegram
-        PRIVATE
-            desktop-app::external_glibmm
-            desktop-app::external_glib
-        )
-    endif()
+    target_link_libraries(Telegram
+    PRIVATE
+        desktop-app::external_glibmm
+    )
+
+    include(${cmake_helpers_loc}/external/glib/generate_dbus.cmake)
+    generate_dbus(Telegram org.freedesktop.portal. XdpInhibit ${src_loc}/platform/linux/org.freedesktop.portal.Inhibit.xml)
 
     if (NOT DESKTOP_APP_DISABLE_X11_INTEGRATION)
         target_link_libraries(Telegram
@@ -1391,10 +1704,15 @@ else()
     endif()
 
     if (NOT DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION)
+        qt_generate_wayland_protocol_client_sources(Telegram
+        FILES
+            ${third_party_loc}/wayland/protocol/wayland.xml
+            ${third_party_loc}/plasma-wayland-protocols/src/protocols/plasma-shell.xml
+        )
+
         target_link_libraries(Telegram
         PRIVATE
-            desktop-app::lib_waylandshells
-            desktop-app::external_kwayland
+            desktop-app::external_wayland_client
         )
     endif()
 endif()
@@ -1416,13 +1734,23 @@ if (build_macstore)
         COMMAND rm -rf $<TARGET_FILE_DIR:Telegram>/../Frameworks/Breakpad.framework/Resources/Inspector
     )
 else()
-    set(bundle_identifier "com.tdesktop.Telegram$<$<CONFIG:Debug>:Debug>")
+    if (CMAKE_GENERATOR STREQUAL Xcode)
+        set(bundle_identifier "com.tdesktop.Telegram$<$<CONFIG:Debug>:Debug>")
+    else()
+        set(bundle_identifier "com.tdesktop.Telegram")
+    endif()
     set(bundle_entitlements "Telegram.entitlements")
     if (LINUX AND DESKTOP_APP_USE_PACKAGED)
         set(output_name "telegram-desktop")
     else()
         set(output_name "Telegram")
     endif()
+endif()
+
+if (CMAKE_GENERATOR STREQUAL Xcode)
+    set(bundle_identifier_plist "$(PRODUCT_BUNDLE_IDENTIFIER)")
+else()
+    set(bundle_identifier_plist ${bundle_identifier})
 endif()
 
 set_target_properties(Telegram PROPERTIES
@@ -1469,6 +1797,10 @@ endif()
 set_target_properties(Telegram PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${output_folder})
 
 if (WIN32)
+    target_link_libraries(Telegram
+    PRIVATE
+        delayimp
+    )
     target_link_options(Telegram
     PRIVATE
         /DELAYLOAD:secur32.dll
@@ -1496,7 +1828,9 @@ if (WIN32)
     )
 endif()
 
-if ((NOT DESKTOP_APP_DISABLE_AUTOUPDATE OR APPLE) AND NOT build_macstore AND NOT build_winstore)
+target_prepare_qrc(Telegram)
+
+if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND NOT build_macstore AND NOT build_winstore)
     add_executable(Updater WIN32)
     init_non_host_target(Updater)
 
@@ -1523,6 +1857,10 @@ if ((NOT DESKTOP_APP_DISABLE_AUTOUPDATE OR APPLE) AND NOT build_macstore AND NOT
         )
         target_include_directories(Updater PRIVATE ${lib_base_loc})
         if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+            target_link_libraries(Updater
+            PRIVATE
+                delayimp
+            )
             target_link_options(Updater
             PRIVATE
                 /DELAYLOAD:user32.dll
@@ -1534,6 +1872,12 @@ if ((NOT DESKTOP_APP_DISABLE_AUTOUPDATE OR APPLE) AND NOT build_macstore AND NOT
         else()
             target_link_options(Updater PRIVATE -municode)
         endif()
+    elseif (APPLE)
+        add_custom_command(TARGET Updater
+        PRE_LINK
+            COMMAND mkdir -p $<TARGET_FILE_DIR:Telegram>/../Frameworks
+            COMMAND cp $<TARGET_FILE:Updater> $<TARGET_FILE_DIR:Telegram>/../Frameworks/
+        )
     endif()
 
     if (DESKTOP_APP_SPECIAL_TARGET)
@@ -1576,8 +1920,9 @@ endif()
 
 if (LINUX AND DESKTOP_APP_USE_PACKAGED)
     include(GNUInstallDirs)
-    configure_file("../lib/xdg/telegramdesktop.metainfo.xml.in" "${CMAKE_CURRENT_BINARY_DIR}/telegramdesktop.metainfo.xml" @ONLY)
-    generate_appdata_changelog(Telegram "${CMAKE_SOURCE_DIR}/changelog.txt" "${CMAKE_CURRENT_BINARY_DIR}/telegramdesktop.metainfo.xml")
+    configure_file("../lib/xdg/org.telegram.desktop.service" "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.service" @ONLY)
+    configure_file("../lib/xdg/org.telegram.desktop.metainfo.xml" "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.metainfo.xml" @ONLY)
+    generate_appdata_changelog(Telegram "${CMAKE_SOURCE_DIR}/changelog.txt" "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.metainfo.xml")
     install(TARGETS Telegram RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" BUNDLE DESTINATION "${CMAKE_INSTALL_BINDIR}")
     install(FILES "Resources/art/icon16.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/16x16/apps" RENAME "telegram.png")
     install(FILES "Resources/art/icon32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "telegram.png")
@@ -1586,6 +1931,8 @@ if (LINUX AND DESKTOP_APP_USE_PACKAGED)
     install(FILES "Resources/art/icon128.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps" RENAME "telegram.png")
     install(FILES "Resources/art/icon256.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps" RENAME "telegram.png")
     install(FILES "Resources/art/icon512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "telegram.png")
-    install(FILES "../lib/xdg/telegramdesktop.desktop" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications" RENAME "${TDESKTOP_LAUNCHER_BASENAME}.desktop")
-    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/telegramdesktop.metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "${TDESKTOP_LAUNCHER_BASENAME}.metainfo.xml")
+    install(FILES "Resources/icons/tray_monochrome.svg" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/symbolic/apps" RENAME "telegram-symbolic.svg")
+    install(FILES "../lib/xdg/org.telegram.desktop.desktop" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.service" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/dbus-1/services")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo")
 endif()

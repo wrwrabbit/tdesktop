@@ -7,18 +7,29 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "data/data_drafts.h"
+
 class History;
 
+namespace Data {
+class Thread;
+} // namespace Data
+
 namespace Api {
+
+inline constexpr auto kScheduledUntilOnlineTimestamp = TimeId(0x7FFFFFFE);
 
 struct SendOptions {
 	PeerData *sendAs = nullptr;
 	TimeId scheduled = 0;
 	bool silent = false;
 	bool handleSupportSwitch = false;
-	bool removeWebPageId = false;
 	bool hideViaBot = false;
+
+    std::optional<TimeId> ptgAutoDelete = std::nullopt;
+	crl::time ttlSeconds = 0;
 };
+[[nodiscard]] SendOptions DefaultSendWhenOnlineOptions();
 
 enum class SendType {
 	Normal,
@@ -28,18 +39,17 @@ enum class SendType {
 
 struct SendAction {
 	explicit SendAction(
-		not_null<History*> history,
-		SendOptions options = SendOptions())
-	: history(history)
-	, options(options) {
-	}
+		not_null<Data::Thread*> thread,
+		SendOptions options = SendOptions());
 
 	not_null<History*> history;
 	SendOptions options;
-	MsgId replyTo = 0;
+	FullReplyTo replyTo;
 	bool clearDraft = true;
 	bool generateLocal = true;
 	MsgId replaceMediaOf = 0;
+
+	[[nodiscard]] MTPInputReplyTo mtpReplyTo() const;
 };
 
 struct MessageToSend {
@@ -48,7 +58,7 @@ struct MessageToSend {
 
 	SendAction action;
 	TextWithTags textWithTags;
-	WebPageId webPageId = 0;
+	Data::WebPageDraft webPage;
 };
 
 struct RemoteFileInfo {

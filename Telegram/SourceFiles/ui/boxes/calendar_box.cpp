@@ -12,15 +12,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/ripple_animation.h"
 #include "ui/chat/chat_style.h"
 #include "ui/ui_utility.h"
+#include "ui/painter.h"
 #include "ui/cached_round_corners.h"
 #include "lang/lang_keys.h"
 #include "styles/style_boxes.h"
+#include "styles/style_chat.h"
 
 namespace Ui {
 namespace {
 
 constexpr auto kDaysInWeek = 7;
-constexpr auto kMaxDaysForScroll = kDaysInWeek * 1000;
 constexpr auto kTooltipDelay = crl::time(1000);
 constexpr auto kJumpDelay = 2 * crl::time(1000);
 
@@ -366,7 +367,7 @@ private:
 	int rowsLeft() const;
 	int rowsTop() const;
 	void resizeToCurrent();
-	void paintRows(Painter &p, QRect clip);
+	void paintRows(QPainter &p, QRect clip);
 
 	const style::CalendarSizes &_st;
 	const style::CalendarColors &_styleColors;
@@ -415,8 +416,7 @@ CalendarBox::FloatingDate::FloatingDate(
 , _corners(
 	PrepareCornerPixmaps(
 		HistoryServiceMsgRadius(),
-		st::roundedBg,
-		nullptr)) {
+		st::roundedBg)) {
 	_context->monthValue(
 	) | rpl::start_with_next([=](QDate month) {
 		_text = langMonthOfYearFull(month.month(), month.year());
@@ -448,7 +448,7 @@ rpl::lifetime &CalendarBox::FloatingDate::lifetime() {
 }
 
 void CalendarBox::FloatingDate::paint() {
-	auto p = Painter(&_widget);
+	auto p = QPainter(&_widget);
 
 	FillRoundRect(p, _widget.rect(), st::roundedBg, _corners);
 
@@ -496,7 +496,7 @@ void CalendarBox::Inner::resizeToCurrent() {
 }
 
 void CalendarBox::Inner::paintEvent(QPaintEvent *e) {
-	Painter p(this);
+	auto p = QPainter(this);
 
 	auto clip = e->rect();
 
@@ -511,7 +511,7 @@ int CalendarBox::Inner::rowsTop() const {
 	return _st.padding.top();
 }
 
-void CalendarBox::Inner::paintRows(Painter &p, QRect clip) {
+void CalendarBox::Inner::paintRows(QPainter &p, QRect clip) {
 	p.setFont(st::calendarDaysFont);
 	auto y = rowsTop();
 	auto index = -_context->daysShift();
@@ -669,7 +669,7 @@ void CalendarBox::Inner::mousePressEvent(QMouseEvent *e) {
 		auto cell = QRect(rowsLeft() + col * _st.cellSize.width(), rowsTop() + row * _st.cellSize.height(), _st.cellSize.width(), _st.cellSize.height());
 		auto it = _ripples.find(_selected);
 		if (it == _ripples.cend()) {
-			auto mask = RippleAnimation::ellipseMask(QSize(_st.cellInner, _st.cellInner));
+			auto mask = RippleAnimation::EllipseMask(QSize(_st.cellInner, _st.cellInner));
 			auto update = [this, cell] { rtlupdate(cell); };
 			it = _ripples.emplace(_selected, std::make_unique<RippleAnimation>(st::defaultRippleAnimation, std::move(mask), std::move(update))).first;
 		}

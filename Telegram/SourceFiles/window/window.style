@@ -7,7 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 using "ui/basic.style";
 using "ui/widgets/widgets.style";
-using "ui/chat/chat.style";
+using "chat_helpers/chat_helpers.style";
 using "boxes/boxes.style"; // UserpicButton
 
 windowMinWidth: 380px;
@@ -16,12 +16,10 @@ windowDefaultWidth: 800px;
 windowDefaultHeight: 600px;
 windowBigDefaultWidth: 1024px;
 windowBigDefaultHeight: 768px;
-windowResizeArea: 4px;
 
 columnMinimalWidthLeft: 260px;
 columnMaximalWidthLeft: 540px;
 columnMinimalWidthMain: 380px;
-columnDesiredWidthMain: 512px;
 columnMinimalWidthThird: 292px;
 columnMaximalWidthThird: 392px;
 
@@ -84,6 +82,7 @@ notifySendReply: IconButton {
 	iconOver: historySendIconOver;
 	iconPosition: point(6px, 6px);
 }
+notifyFadeRight: icon {{ "fade_horizontal", notificationBg }};
 
 titleUnreadCounterTop: 6px;
 titleUnreadCounterRight: 35px;
@@ -113,9 +112,8 @@ mainMenuResetScaleTop: 2px;
 mainMenuResetScaleIconLeft: 5px;
 mainMenuCoverNameLeft: 26px;
 mainMenuCoverNameTop: 84px;
-mainMenuCoverStatusLeft: 24px;
+mainMenuCoverStatusLeft: mainMenuCoverNameLeft;
 mainMenuCoverStatusTop: 103px;
-mainMenuPhoneFont: font(12px);
 mainMenuSkip: 6px;
 mainMenuFooterHeightMin: 80px;
 mainMenu: Menu(defaultMenu) {
@@ -142,8 +140,6 @@ mainMenuAddAccountButton: SettingsButton(mainMenuButton) {
 	iconLeft: 23px;
 }
 
-mainMenuShadow: icon {{ "menu_shadow", windowShadowFg }};
-mainMenuAddAccount: icon {{ "settings/add", windowFgActive }};
 mainMenuAccountSize: 26px;
 mainMenuAccountLine: 2px;
 mainMenuBadgeFont: font(11px bold);
@@ -155,8 +151,6 @@ mainMenuTelegramLabel: FlatLabel(defaultFlatLabel) {
 	textFg: windowSubTextFg;
 	style: TextStyle(defaultTextStyle) {
 		font: semiboldFont;
-		linkFont: semiboldFont;
-		linkFontOver: font(fsize semibold underline);
 	}
 	palette: TextPalette(defaultTextPalette) {
 		linkFg: windowSubTextFg;
@@ -169,7 +163,7 @@ mainMenuVersionLabel: FlatLabel(mainMenuTelegramLabel) {
 mainMenuVersionBottom: 17px;
 
 mainMenuToggleSize: 6px;
-mainMenuToggleFourStrokes: 4px;
+mainMenuToggleFourStrokes: 3px;
 mainMenuTogglePosition: point(30px, 30px);
 
 themeEditorSampleSize: size(90px, 51px);
@@ -177,13 +171,6 @@ themeEditorMargin: margins(17px, 10px, 17px, 10px);
 themeEditorDescriptionSkip: 10px;
 themeEditorNameFont: font(15px semibold);
 themeEditorCopyNameFont: font(fsize semibold);
-
-windowEmojiSuggestionsPopup: PopupMenu(defaultPopupMenu) {
-	menu: Menu(defaultMenu) {
-		itemPadding: margins(48px, 8px, 17px, 7px);
-		widthMax: 512px;
-	}
-}
 
 connectingLeftShadow: icon {{ "connecting_left_shadow", windowShadowFg }};
 connectingLeft: icon {{ "connecting_left", windowBg }};
@@ -193,7 +180,6 @@ connectingBodyShadow: icon {{ "connecting_body_shadow", windowShadowFg }};
 connectingBody: icon {{ "connecting_body", windowBg }};
 connectingMargin: margins(2px, 2px, 2px, 2px);
 connectingTextPadding: margins(18px, 11px, 18px, 0px);
-connectingRadialSkip: 6px;
 connectingRadial: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
 	color: menuIconFg;
 	thickness: 2px;
@@ -286,8 +272,8 @@ windowFiltersMainMenuUnreadMuted: icon {
 };
 windowFilterSmallItem: PeerListItem(defaultPeerListItem) {
 	height: 44px;
-	photoPosition: point(15px, 5px);
-	namePosition: point(62px, 14px);
+	photoPosition: point(13px, 5px);
+	namePosition: point(59px, 14px);
 	photoSize: 34px;
 	checkbox: RoundImageCheckbox(defaultPeerListCheckbox) {
 		imageRadius: 17px;
@@ -317,19 +303,23 @@ windowFilterTypeBots: icon {{ "folders/folders_type_bots", historyPeerUserpicFg 
 windowFilterTypeNoMuted: icon {{ "folders/folders_type_muted", historyPeerUserpicFg }};
 windowFilterTypeNoArchived: icon {{ "folders/folders_type_archived", historyPeerUserpicFg }};
 windowFilterTypeNoRead: icon {{ "folders/folders_type_read", historyPeerUserpicFg }};
+windowFilterChatsSectionSubtitleHeight: 28px;
 windowFilterChatsSectionSubtitle: FlatLabel(defaultFlatLabel) {
 	style: TextStyle(defaultTextStyle) {
-		font: searchedBarFont;
+		font: semiboldFont;
 	}
 	textFg: searchedBarFg;
 }
-windowFilterChatsSectionSubtitlePadding: margins(17px, 7px, 17px, 7px);
-windowFilterAboutPadding: margins(22px, 0px, 22px, 19px);
+windowFilterChatsSectionSubtitlePadding: margins(22px, 5px, 22px, 5px);
 
 windowArchiveToast: Toast(defaultToast) {
 	minWidth: boxWideWidth;
 	maxWidth: boxWideWidth;
 }
+
+// Windows specific
+
+winQuitIcon: icon {{ "win_quit", windowFg }};
 
 // Mac specific
 

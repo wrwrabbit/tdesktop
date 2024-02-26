@@ -11,7 +11,11 @@ using "info/info.style";
 
 paymentsPanelSize: size(392px, 600px);
 
-paymentsPanelButton: defaultBoxButton;
+paymentsPanelButton: RoundButton(defaultBoxButton) {
+	width: -36px;
+	height: 36px;
+	font: boxButtonFont;
+}
 paymentsPanelSubmit: RoundButton(defaultActiveButton) {
 	width: -36px;
 	height: 36px;
@@ -130,4 +134,11 @@ paymentsLoading: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
 	size: size(24px, 24px);
 	color: windowSubTextFg;
 	thickness: 4px;
+}
+
+botWebViewPanelSize: size(384px, 694px);
+botWebViewBottomButton: RoundButton(paymentsPanelSubmit) {
+	height: 56px;
+	font: boxButtonFont;
+	textTop: 19px;
 }

@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_download_manager.h"
 #include "data/data_user.h"
 #include "core/application.h"
+#include "lang/lang_keys.h"
 #include "styles/style_info.h"
 
 namespace Info::Downloads {
@@ -25,7 +26,7 @@ Memento::Memento(not_null<Controller*> controller)
 }
 
 Memento::Memento(not_null<UserData*> self)
-: ContentMemento(Downloads::Tag{})
+: ContentMemento(Tag{})
 , _media(self, 0, Media::Type::File) {
 }
 
@@ -99,6 +100,10 @@ rpl::producer<SelectedItems> Widget::selectedListValue() const {
 
 void Widget::selectionAction(SelectionAction action) {
 	_inner->selectionAction(action);
+}
+
+rpl::producer<QString> Widget::title() {
+	return tr::lng_downloads_section();
 }
 
 std::shared_ptr<Info::Memento> Make(not_null<UserData*> self) {

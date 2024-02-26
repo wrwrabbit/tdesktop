@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "ui/rp_widget.h"
+#include "ui/widgets/tooltip.h"
 #include "info/media/info_media_widget.h"
 #include "info/media/info_media_common.h"
 #include "overview/overview_layout_delegate.h"
@@ -53,7 +54,8 @@ class ListProvider;
 
 class ListWidget final
 	: public Ui::RpWidget
-	, public Overview::Layout::Delegate {
+	, public Overview::Layout::Delegate
+	, public Ui::AbstractTooltipShower {
 public:
 	ListWidget(
 		QWidget *parent,
@@ -82,6 +84,11 @@ public:
 	void unregisterHeavyItem(not_null<const BaseLayout*> item) override;
 	void repaintItem(not_null<const BaseLayout*> item) override;
 	bool itemVisible(not_null<const BaseLayout*> item) override;
+
+	// AbstractTooltipShower interface
+	QString tooltipText() const override;
+	QPoint tooltipPos() const override;
+	bool tooltipWindowActive() const override;
 
 	void openPhoto(not_null<PhotoData*> photo, FullMsgId id) override;
 	void openDocument(
@@ -150,6 +157,8 @@ private:
 
 	void setupSelectRestriction();
 
+	[[nodiscard]] MsgId topicRootId() const;
+
 	QMargins padding() const;
 	bool isItemLayout(
 		not_null<const HistoryItem*> item,
@@ -160,7 +169,6 @@ private:
 	void itemRemoved(not_null<const HistoryItem*> item);
 	void itemLayoutChanged(not_null<const HistoryItem*> item);
 
-	void refreshViewer();
 	void refreshRows();
 	void trackSession(not_null<Main::Session*> session);
 
@@ -181,8 +189,12 @@ private:
 	void forwardItem(GlobalMsgId globalId);
 	void forwardItems(MessageIdsList &&items);
 	void deleteSelected();
+	void toggleStoryPinSelected();
 	void deleteItem(GlobalMsgId globalId);
 	void deleteItems(SelectedItems &&items, Fn<void()> confirmed = nullptr);
+	void toggleStoryPin(
+		MessageIdsList &&items,
+		Fn<void()> confirmed = nullptr);
 	void applyItemSelection(
 		HistoryItem *item,
 		TextSelection selection);
@@ -286,7 +298,6 @@ private:
 	bool _wasSelectedText = false; // was some text selected in current drag action
 
 	const std::unique_ptr<DateBadge> _dateBadge;
-	base::flat_map<not_null<Main::Session*>, rpl::lifetime> _trackedSessions;
 
 	base::unique_qptr<Ui::PopupMenu> _contextMenu;
 	rpl::event_stream<> _checkForHide;
@@ -295,6 +306,8 @@ private:
 
 	QPoint _trippleClickPoint;
 	crl::time _trippleClickStartTime = 0;
+
+	base::flat_map<not_null<Main::Session*>, rpl::lifetime> _trackedSessions;
 
 };
 

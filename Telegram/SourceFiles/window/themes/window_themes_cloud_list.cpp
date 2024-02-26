@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/style/style_palette_colorizer.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/painter.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "core/application.h"
@@ -220,7 +221,7 @@ void CloudListCheck::validateBackgroundCache(int width) {
 	_backgroundCache.setDevicePixelRatio(cRetinaFactor());
 }
 
-void CloudListCheck::paint(Painter &p, int left, int top, int outerWidth) {
+void CloudListCheck::paint(QPainter &p, int left, int top, int outerWidth) {
 	if (!_colors) {
 		return;
 	} else if (_colors->background.isNull()) {
@@ -231,7 +232,7 @@ void CloudListCheck::paint(Painter &p, int left, int top, int outerWidth) {
 }
 
 void CloudListCheck::paintNotSupported(
-		Painter &p,
+		QPainter &p,
 		int left,
 		int top,
 		int outerWidth) {
@@ -241,13 +242,13 @@ void CloudListCheck::paintNotSupported(
 
 	const auto height = st::settingsThemePreviewSize.height();
 	const auto rect = QRect(0, 0, outerWidth, height);
-	const auto radius = st::historyMessageRadius;
+	const auto radius = st::roundRadiusLarge;
 	p.drawRoundedRect(rect, radius, radius);
 	st::settingsThemeNotSupportedIcon.paintInCenter(p, rect);
 }
 
 void CloudListCheck::paintWithColors(
-		Painter &p,
+		QPainter &p,
 		int left,
 		int top,
 		int outerWidth) {
@@ -592,7 +593,8 @@ void CloudList::showMenu(Element &element) {
 		_contextMenu->addAction(tr::lng_theme_share(tr::now), [=] {
 			QGuiApplication::clipboard()->setText(
 				_window->session().createInternalLinkFull("addtheme/" + slug));
-			Ui::Toast::Show(tr::lng_background_link_copied(tr::now));
+			_window->window().showToast(
+				tr::lng_background_link_copied(tr::now));
 		}, &st::menuIconShare);
 	}
 	if (cloud.documentId

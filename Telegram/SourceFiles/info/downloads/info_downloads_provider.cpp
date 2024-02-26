@@ -18,10 +18,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_account.h"
 #include "history/history_item.h"
+#include "history/history_item_helpers.h"
 #include "history/history.h"
 #include "core/application.h"
 #include "storage/storage_shared_media.h"
 #include "layout/layout_selection.h"
+#include "styles/style_overview.h"
 
 namespace Info::Downloads {
 namespace {
@@ -305,9 +307,8 @@ std::vector<ListSection> Provider::fillSections(
 		return {};
 	}
 
-	auto result = std::vector<ListSection>(
-		1,
-		ListSection(Type::File, sectionDelegate()));
+	auto result = std::vector<ListSection>();
+	result.emplace_back(Type::File, sectionDelegate());
 	auto &section = result.back();
 	for (const auto &element : ranges::views::reverse(_elements)) {
 		if (search && !element.found) {

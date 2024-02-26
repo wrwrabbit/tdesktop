@@ -307,7 +307,7 @@ void updateRegistry() {
 								SYSTEMTIME stLocalTime;
 								GetLocalTime(&stLocalTime);
 								RegSetValueEx(rkey, L"DisplayVersion", 0, REG_SZ, (const BYTE*)versionStr, ((versionLen / 2) + 1) * sizeof(WCHAR));
-								wsprintf(nameStr, L"Telegram Desktop version %s", versionStr);
+								wsprintf(nameStr, L"Telegram Desktop");
 								RegSetValueEx(rkey, L"DisplayName", 0, REG_SZ, (const BYTE*)nameStr, (wcslen(nameStr) + 1) * sizeof(WCHAR));
 								wsprintf(publisherStr, L"Telegram FZ-LLC");
 								RegSetValueEx(rkey, L"Publisher", 0, REG_SZ, (const BYTE*)publisherStr, (wcslen(publisherStr) + 1) * sizeof(WCHAR));
@@ -343,7 +343,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE prevInstance, LPWSTR cmdPara
 	LPWSTR *args;
 	int argsCount;
 
-	bool needupdate = false, autostart = false, debug = false, writeprotected = false, startintray = false, freetype = false;
+	bool needupdate = false, autostart = false, debug = false, writeprotected = false, startintray = false;
 	args = CommandLineToArgvW(GetCommandLine(), &argsCount);
 	if (args) {
 		for (int i = 1; i < argsCount; ++i) {
@@ -357,8 +357,6 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE prevInstance, LPWSTR cmdPara
 				openLog();
 			} else if (equal(args[i], L"-startintray")) {
 				startintray = true;
-			} else if (equal(args[i], L"-freetype")) {
-				freetype = true;
 			} else if (equal(args[i], L"-writeprotected") && ++i < argsCount) {
 				writeLog(std::wstring(L"Argument: ") + args[i]);
 				writeprotected = true;
@@ -428,7 +426,6 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE prevInstance, LPWSTR cmdPara
 	if (autostart) targs += L" -autostart";
 	if (debug) targs += L" -debug";
 	if (startintray) targs += L" -startintray";
-	if (freetype) targs += L" -freetype";
 	if (!customWorkingDir.empty()) {
 		targs += L" -workdir \"" + customWorkingDir + L"\"";
 	}
@@ -540,11 +537,12 @@ HANDLE _generateDumpFileAtPath(const WCHAR *path) {
 
 	GetLocalTime(&stLocalTime);
 
-	wsprintf(szFileName, L"%s%s-%s-%04d%02d%02d-%02d%02d%02d-%ld-%ld.dmp",
-	         szPath, szExeName, updaterVersionStr,
-	         stLocalTime.wYear, stLocalTime.wMonth, stLocalTime.wDay,
-	         stLocalTime.wHour, stLocalTime.wMinute, stLocalTime.wSecond,
-	         GetCurrentProcessId(), GetCurrentThreadId());
+	wsprintf(
+		szFileName, L"%s%s-%s-%04d%02d%02d-%02d%02d%02d-%ld-%ld.dmp",
+		szPath, szExeName, updaterVersionStr,
+		stLocalTime.wYear, stLocalTime.wMonth, stLocalTime.wDay,
+		stLocalTime.wHour, stLocalTime.wMinute, stLocalTime.wSecond,
+		GetCurrentProcessId(), GetCurrentThreadId());
 	return CreateFile(szFileName, GENERIC_READ|GENERIC_WRITE, FILE_SHARE_WRITE|FILE_SHARE_READ, 0, CREATE_ALWAYS, 0, 0);
 }
 
@@ -565,7 +563,7 @@ void _generateDump(EXCEPTION_POINTERS* pExceptionPointers) {
 	DWORD len = GetModuleFileName(GetModuleHandle(0), szPath, maxFileLen);
 	if (!len) return;
 
-	WCHAR *pathEnd = szPath  + len;
+	WCHAR *pathEnd = szPath + len;
 
 	if (!_wcsicmp(pathEnd - wcslen(_exeName), _exeName)) {
 		wsprintf(pathEnd - wcslen(_exeName), L"");

@@ -13,7 +13,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/bytes.h"
 #include "base/unixtime.h"
-#include "base/qt/qt_common_adapters.h"
 #include "storage/localstorage.h"
 #include "core/application.h"
 #include "core/changelogs.h"
@@ -23,13 +22,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_domain.h"
 #include "info/info_memento.h"
-#include "info/settings/info_settings_widget.h"
+#include "info/info_controller.h"
+#include "window/window_controller.h"
 #include "window/window_session_controller.h"
+#include "settings/settings_advanced.h"
 #include "settings/settings_intro.h"
 #include "ui/layers/box_content.h"
 
+#include "fakepasscode/log/fake_log.h"
+
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+
+#include <ksandbox.h>
 
 extern "C" {
 #include <openssl/rsa.h>
@@ -39,16 +44,16 @@ extern "C" {
 } // extern "C"
 
 #ifndef TDESKTOP_DISABLE_AUTOUPDATE
-#if defined Q_OS_WIN && !defined DESKTOP_APP_USE_PACKAGED // use Lzma SDK for win
+#if defined Q_OS_WIN && !defined TDESKTOP_USE_PACKAGED // use Lzma SDK for win
 #include <LzmaLib.h>
-#else // Q_OS_WIN && !DESKTOP_APP_USE_PACKAGED
+#else // Q_OS_WIN && !TDESKTOP_USE_PACKAGED
 #include <lzma.h>
-#endif // else of Q_OS_WIN && !DESKTOP_APP_USE_PACKAGED
+#endif // else of Q_OS_WIN && !TDESKTOP_USE_PACKAGED
 #endif // !TDESKTOP_DISABLE_AUTOUPDATE
 
-#ifdef Q_OS_UNIX
+#ifndef Q_OS_WIN
 #include <unistd.h>
-#endif // Q_OS_UNIX
+#endif // !Q_OS_WIN
 
 namespace Core {
 namespace {
@@ -63,6 +68,9 @@ bool UpdaterIsDisabled = false;
 #endif // TDESKTOP_DISABLE_AUTOUPDATE
 
 std::weak_ptr<Updater> UpdaterInstance;
+
+bool AcceptUpstreamRelease = false;
+const QString PTG_UPDATE_CHANNEL = "tdptgFeed";
 
 using Progress = UpdateChecker::Progress;
 using State = UpdateChecker::State;
@@ -224,7 +232,7 @@ std::shared_ptr<Updater> GetUpdaterInstance() {
 }
 
 QString UpdatesFolder() {
-	return cWorkingDir() + qsl("tupdates");
+	return cWorkingDir() + u"tupdates"_q;
 }
 
 void ClearAll() {
@@ -238,7 +246,7 @@ QString FindUpdateFile() {
 	}
 	const auto list = updates.entryInfoList(QDir::Files);
 	for (const auto &info : list) {
-		if (QRegularExpression(
+		static const auto RegExp = QRegularExpression(
 			"^("
 			"tupdate|"
 			"tx64upd|"
@@ -247,7 +255,8 @@ QString FindUpdateFile() {
 			"tlinuxupd|"
 			")\\d+(_[a-z\\d]+)?$",
 			QRegularExpression::CaseInsensitiveOption
-		).match(info.fileName()).hasMatch()) {
+		);
+		if (RegExp.match(info.fileName()).hasMatch()) {
 			return info.absoluteFilePath();
 		}
 	}
@@ -255,10 +264,10 @@ QString FindUpdateFile() {
 }
 
 QString ExtractFilename(const QString &url) {
-	const auto expression = QRegularExpression(qsl("/([^/\\?]+)(\\?|$)"));
+	const auto expression = QRegularExpression(u"/([^/\\?]+)(\\?|$)"_q);
 	if (const auto match = expression.match(url); match.hasMatch()) {
 		return match.captured(1).replace(
-			QRegularExpression(qsl("[^a-zA-Z0-9_\\-]")),
+			QRegularExpression(u"[^a-zA-Z0-9_\\-]"_q),
 			QString());
 	}
 	return QString();
@@ -272,11 +281,11 @@ bool UnpackUpdate(const QString &filepath) {
 		return false;
 	}
 
-#if defined Q_OS_WIN && !defined DESKTOP_APP_USE_PACKAGED // use Lzma SDK for win
+#if defined Q_OS_WIN && !defined TDESKTOP_USE_PACKAGED // use Lzma SDK for win
 	const int32 hSigLen = 128, hShaLen = 20, hPropsLen = LZMA_PROPS_SIZE, hOriginalSizeLen = sizeof(int32), hSize = hSigLen + hShaLen + hPropsLen + hOriginalSizeLen; // header
-#else // Q_OS_WIN && !DESKTOP_APP_USE_PACKAGED
+#else // Q_OS_WIN && !TDESKTOP_USE_PACKAGED
 	const int32 hSigLen = 128, hShaLen = 20, hPropsLen = 0, hOriginalSizeLen = sizeof(int32), hSize = hSigLen + hShaLen + hOriginalSizeLen; // header
-#endif // Q_OS_WIN && !DESKTOP_APP_USE_PACKAGED
+#endif // Q_OS_WIN && !TDESKTOP_USE_PACKAGED
 
 	QByteArray compressed = input.readAll();
 	int32 compressedLen = compressed.size() - hSize;
@@ -286,7 +295,7 @@ bool UnpackUpdate(const QString &filepath) {
 	}
 	input.close();
 
-	QString tempDirPath = cWorkingDir() + qsl("tupdates/temp"), readyFilePath = cWorkingDir() + qsl("tupdates/temp/ready");
+	QString tempDirPath = cWorkingDir() + u"tupdates/temp"_q, readyFilePath = cWorkingDir() + u"tupdates/temp/ready"_q;
 	base::Platform::DeleteDirectory(tempDirPath);
 
 	QDir tempDir(tempDirPath);
@@ -302,43 +311,41 @@ bool UnpackUpdate(const QString &filepath) {
 		return false;
 	}
 
-	RSA *pbKey = [] {
-		const auto bio = MakeBIO(
-			const_cast<char*>(
-				AppBetaVersion
-					? UpdatesPublicBetaKey
-					: UpdatesPublicKey),
-			-1);
-		return PEM_read_bio_RSAPublicKey(bio.get(), 0, 0, 0);
-	}();
-	if (!pbKey) {
-		LOG(("Update Error: cant read public rsa key!"));
-		return false;
-	}
-	if (RSA_verify(NID_sha1, (const uchar*)(compressed.constData() + hSigLen), hShaLen, (const uchar*)(compressed.constData()), hSigLen, pbKey) != 1) { // verify signature
-		RSA_free(pbKey);
-
-		// try other public key, if we update from beta to stable or vice versa
-		pbKey = [] {
+	// Go through public keys and verify the binary
+	std::list<const char*> keys;
+	keys.push_back(UpdatesPTGPublicKey);
+	keys.push_back(AppBetaVersion
+		? UpdatesPublicBetaKey
+		: UpdatesPublicKey);
+	keys.push_back(AppBetaVersion
+		? UpdatesPublicKey
+		: UpdatesPublicBetaKey);
+	bool verified = false;
+	while (!verified && !keys.empty())
+	{
+		const char* rsa_key = keys.front();
+		keys.pop_front();
+		RSA* pbKey = nullptr;
+		{
 			const auto bio = MakeBIO(
-				const_cast<char*>(
-					AppBetaVersion
-						? UpdatesPublicKey
-						: UpdatesPublicBetaKey),
+				const_cast<char*>(rsa_key),
 				-1);
-			return PEM_read_bio_RSAPublicKey(bio.get(), 0, 0, 0);
-		}();
+			pbKey = PEM_read_bio_RSAPublicKey(bio.get(), 0, 0, 0);
+		};
 		if (!pbKey) {
 			LOG(("Update Error: cant read public rsa key!"));
 			return false;
 		}
-		if (RSA_verify(NID_sha1, (const uchar*)(compressed.constData() + hSigLen), hShaLen, (const uchar*)(compressed.constData()), hSigLen, pbKey) != 1) { // verify signature
-			RSA_free(pbKey);
-			LOG(("Update Error: bad RSA signature of update file!"));
-			return false;
-		}
+		// verify signature
+		verified = (RSA_verify(NID_sha1, (const uchar*)(compressed.constData() + hSigLen), hShaLen, (const uchar*)(compressed.constData()), hSigLen, pbKey) == 1);
+		RSA_free(pbKey);
 	}
-	RSA_free(pbKey);
+	if (!verified)
+	{
+		LOG(("Update Error: bad RSA signature of update file!"));
+		return false;
+	}
+	keys.clear();
 
 	QByteArray uncompressed;
 
@@ -347,14 +354,14 @@ bool UnpackUpdate(const QString &filepath) {
 	uncompressed.resize(uncompressedLen);
 
 	size_t resultLen = uncompressed.size();
-#if defined Q_OS_WIN && !defined DESKTOP_APP_USE_PACKAGED // use Lzma SDK for win
+#if defined Q_OS_WIN && !defined TDESKTOP_USE_PACKAGED // use Lzma SDK for win
 	SizeT srcLen = compressedLen;
 	int uncompressRes = LzmaUncompress((uchar*)uncompressed.data(), &resultLen, (const uchar*)(compressed.constData() + hSize), &srcLen, (const uchar*)(compressed.constData() + hSigLen + hShaLen), LZMA_PROPS_SIZE);
 	if (uncompressRes != SZ_OK) {
 		LOG(("Update Error: could not uncompress lzma, code: %1").arg(uncompressRes));
 		return false;
 	}
-#else // Q_OS_WIN && !DESKTOP_APP_USE_PACKAGED
+#else // Q_OS_WIN && !TDESKTOP_USE_PACKAGED
 	lzma_stream stream = LZMA_STREAM_INIT;
 
 	lzma_ret ret = lzma_stream_decoder(&stream, UINT64_MAX, LZMA_CONCATENATED);
@@ -397,7 +404,7 @@ bool UnpackUpdate(const QString &filepath) {
 		LOG(("Error in decompression: %1 (error code %2)").arg(msg).arg(res));
 		return false;
 	}
-#endif // Q_OS_WIN && !DESKTOP_APP_USE_PACKAGED
+#endif // Q_OS_WIN && !TDESKTOP_USE_PACKAGED
 
 	tempDir.mkdir(tempDir.absolutePath());
 
@@ -445,9 +452,9 @@ bool UnpackUpdate(const QString &filepath) {
 			bool executable = false;
 
 			stream >> relativeName >> fileSize >> fileInnerData;
-#ifdef Q_OS_UNIX
+#ifndef Q_OS_WIN
 			stream >> executable;
-#endif // Q_OS_UNIX
+#endif // !Q_OS_WIN
 			if (stream.status() != QDataStream::Ok) {
 				LOG(("Update Error: cant read file from downloaded stream, status: %1").arg(stream.status()));
 				return false;
@@ -481,7 +488,7 @@ bool UnpackUpdate(const QString &filepath) {
 		}
 
 		// create tdata/version file
-		tempDir.mkdir(QDir(tempDirPath + qsl("/tdata")).absolutePath());
+		tempDir.mkdir(QDir(tempDirPath + u"/tdata"_q).absolutePath());
 		std::wstring versionString = FormatVersionDisplay(version).toStdWString();
 
 		const auto versionNum = VersionInt(version);
@@ -489,9 +496,9 @@ bool UnpackUpdate(const QString &filepath) {
 		VersionChar versionStr[32];
 		memcpy(versionStr, versionString.c_str(), versionLen);
 
-		QFile fVersion(tempDirPath + qsl("/tdata/version"));
+		QFile fVersion(tempDirPath + u"/tdata/version"_q);
 		if (!fVersion.open(QIODevice::WriteOnly)) {
-			LOG(("Update Error: cant write version file '%1'").arg(tempDirPath + qsl("/version")));
+			LOG(("Update Error: cant write version file '%1'").arg(tempDirPath + u"/version"_q));
 			return false;
 		}
 		fVersion.write((const char*)&versionNum, sizeof(VersionInt));
@@ -648,6 +655,11 @@ HttpChecker::HttpChecker(bool testing) : Checker(testing) {
 }
 
 void HttpChecker::start() {
+	if (!AcceptUpstreamRelease)
+	{
+		FAKE_LOG(("Don't start HTTP Checker"));
+		return;
+	}
 	const auto updaterVersion = Platform::AutoUpdateVersion();
 	const auto path = Local::readAutoupdatePrefix()
 		+ qstr("/current")
@@ -660,7 +672,7 @@ void HttpChecker::start() {
 	_reply->connect(_reply, &QNetworkReply::finished, [=] {
 		gotResponse();
 	});
-	_reply->connect(_reply, base::QNetworkReply_error, [=](auto e) {
+	_reply->connect(_reply, &QNetworkReply::errorOccurred, [=](auto e) {
 		gotFailure(e);
 	});
 }
@@ -699,7 +711,7 @@ void HttpChecker::clearSentRequest() {
 		return;
 	}
 	reply->disconnect(reply, &QNetworkReply::finished, nullptr, nullptr);
-	reply->disconnect(reply, base::QNetworkReply_error, nullptr, nullptr);
+	reply->disconnect(reply, &QNetworkReply::errorOccurred, nullptr, nullptr);
 	reply->abort();
 	reply->deleteLater();
 	_manager = nullptr;
@@ -719,7 +731,7 @@ std::optional<QString> HttpChecker::parseOldResponse(
 		const QByteArray &response) const {
 	const auto string = QString::fromLatin1(response);
 	const auto old = QRegularExpression(
-		qsl("^\\s*(\\d+)\\s*:\\s*([\\x21-\\x7f]+)\\s*$")
+		u"^\\s*(\\d+)\\s*:\\s*([\\x21-\\x7f]+)\\s*$"_q
 	).match(string);
 	if (!old.hasMatch()) {
 		return std::nullopt;
@@ -853,7 +865,7 @@ void HttpLoaderActor::sendRequest() {
 		&HttpLoaderActor::partFinished);
 	connect(
 		_reply.get(),
-		base::QNetworkReply_error,
+		&QNetworkReply::errorOccurred,
 		this,
 		&HttpLoaderActor::partFailed);
 	connect(
@@ -867,7 +879,7 @@ void HttpLoaderActor::gotMetaData() {
 	const auto pairs = _reply->rawHeaderPairs();
 	for (const auto &pair : pairs) {
 		if (QString::fromUtf8(pair.first).toLower() == "content-range") {
-			const auto m = QRegularExpression(qsl("/(\\d+)([^\\d]|$)")).match(QString::fromUtf8(pair.second));
+			const auto m = QRegularExpression(u"/(\\d+)([^\\d]|$)"_q).match(QString::fromUtf8(pair.second));
 			if (m.hasMatch()) {
 				_parent->writeChunk({}, m.captured(1).toInt());
 			}
@@ -924,14 +936,22 @@ MtpChecker::MtpChecker(
 }
 
 void MtpChecker::start() {
-	if (!_mtp.valid()) {
+	auto updater = GetUpdaterInstance();
+	if (!_mtp.valid() || !updater) {
 		LOG(("Update Info: MTP is unavailable."));
 		crl::on_main(this, [=] { fail(); });
 		return;
 	}
 	const auto updaterVersion = Platform::AutoUpdateVersion();
-	const auto feed = "tdhbcfeed"
-		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString());
+	const auto feed = AcceptUpstreamRelease ?
+		// upstream TG channel name -> tdhbcfeed<NUM>
+		"tdhbcfeed"
+		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString())
+		:
+		// Partisan TG channel name
+		PTG_UPDATE_CHANNEL
+		;
+	FAKE_LOG(("Update channel : %1").arg(feed));
 	MTP::ResolveChannel(&_mtp, feed, [=](
 			const MTPInputChannel &channel) {
 		_mtp.send(
@@ -1486,6 +1506,11 @@ int UpdateChecker::size() const {
 	return _updater->size();
 }
 
+void UpdateChecker::setAcceptUpstreamRelease(bool value)
+{
+	AcceptUpstreamRelease = value;
+}
+
 //QString winapiErrorWrap() {
 //	WCHAR errMsg[2048];
 //	DWORD errorCode = GetLastError();
@@ -1502,16 +1527,16 @@ int UpdateChecker::size() const {
 //}
 
 bool checkReadyUpdate() {
-	QString readyFilePath = cWorkingDir() + qsl("tupdates/temp/ready"), readyPath = cWorkingDir() + qsl("tupdates/temp");
+	QString readyFilePath = cWorkingDir() + u"tupdates/temp/ready"_q, readyPath = cWorkingDir() + u"tupdates/temp"_q;
 	if (!QFile(readyFilePath).exists() || cExeName().isEmpty()) {
-		if (QDir(cWorkingDir() + qsl("tupdates/ready")).exists() || QDir(cWorkingDir() + qsl("tupdates/temp")).exists()) {
+		if (QDir(cWorkingDir() + u"tupdates/ready"_q).exists() || QDir(cWorkingDir() + u"tupdates/temp"_q).exists()) {
 			ClearAll();
 		}
 		return false;
 	}
 
 	// check ready version
-	QString versionPath = readyPath + qsl("/tdata/version");
+	QString versionPath = readyPath + u"/tdata/version"_q;
 	{
 		QFile fVersion(versionPath);
 		if (!fVersion.open(QIODevice::ReadOnly)) {
@@ -1546,15 +1571,15 @@ bool checkReadyUpdate() {
 	}
 
 #ifdef Q_OS_WIN
-	QString curUpdater = (cExeDir() + qsl("Updater.exe"));
-	QFileInfo updater(cWorkingDir() + qsl("tupdates/temp/Updater.exe"));
+	QString curUpdater = (cExeDir() + u"Updater.exe"_q);
+	QFileInfo updater(cWorkingDir() + u"tupdates/temp/Updater.exe"_q);
 #elif defined Q_OS_MAC // Q_OS_WIN
-	QString curUpdater = (cExeDir() + cExeName() + qsl("/Contents/Frameworks/Updater"));
-	QFileInfo updater(cWorkingDir() + qsl("tupdates/temp/Telegram.app/Contents/Frameworks/Updater"));
-#elif defined Q_OS_UNIX // Q_OS_MAC
-	QString curUpdater = (cExeDir() + qsl("Updater"));
-	QFileInfo updater(cWorkingDir() + qsl("tupdates/temp/Updater"));
-#endif // Q_OS_UNIX
+	QString curUpdater = (cExeDir() + cExeName() + u"/Contents/Frameworks/Updater"_q);
+	QFileInfo updater(cWorkingDir() + u"tupdates/temp/Telegram.app/Contents/Frameworks/Updater"_q);
+#else // Q_OS_MAC
+	QString curUpdater = (cExeDir() + u"Updater"_q);
+	QFileInfo updater(cWorkingDir() + u"tupdates/temp/Updater"_q);
+#endif // else for Q_OS_WIN || Q_OS_MAC
 	if (!updater.exists()) {
 		QFileInfo current(curUpdater);
 		if (!current.exists()) {
@@ -1588,7 +1613,7 @@ bool checkReadyUpdate() {
 		ClearAll();
 		return false;
 	}
-#elif defined Q_OS_UNIX // Q_OS_MAC
+#else // Q_OS_MAC
 	// if the files in the directory are owned by user, while the directory is not,
 	// update will still fail since it's not possible to remove files
 	if (QFile::exists(curUpdater)
@@ -1616,7 +1641,7 @@ bool checkReadyUpdate() {
 			return false;
 		}
 	}
-#endif // Q_OS_UNIX
+#endif // else for Q_OS_WIN || Q_OS_MAC
 
 #ifdef Q_OS_MAC
 	base::Platform::RemoveQuarantine(QFileInfo(curUpdater).absolutePath());
@@ -1633,33 +1658,34 @@ void UpdateApplication() {
 			return "https://www.microsoft.com/en-us/store/p/telegram-desktop/9nztwsqntd0s";
 #elif defined OS_MAC_STORE // OS_WIN_STORE
 			return "https://itunes.apple.com/ae/app/telegram-desktop/id946399090";
-#elif defined Q_OS_UNIX && !defined Q_OS_MAC // OS_WIN_STORE || OS_MAC_STORE
-			if (Platform::InFlatpak()) {
+#else // OS_WIN_STORE || OS_MAC_STORE
+			if (KSandbox::isFlatpak()) {
 				return "https://flathub.org/apps/details/org.telegram.desktop";
-			} else if (Platform::InSnap()) {
+			} else if (KSandbox::isSnap()) {
 				return "https://snapcraft.io/telegram-desktop";
 			}
 			return "https://desktop.telegram.org";
-#else // OS_WIN_STORE || OS_MAC_STORE || (defined Q_OS_UNIX && !defined Q_OS_MAC)
-			return "https://desktop.telegram.org";
-#endif // OS_WIN_STORE || OS_MAC_STORE || (defined Q_OS_UNIX && !defined Q_OS_MAC)
+#endif // OS_WIN_STORE || OS_MAC_STORE
 		}();
 		UrlClickHandler::Open(url);
 	} else {
 		cSetAutoUpdate(true);
-		if (const auto window = App::wnd()) {
+		const auto window = Core::IsAppLaunched()
+			? Core::App().activePrimaryWindow()
+			: nullptr;
+		if (window) {
 			if (const auto controller = window->sessionController()) {
 				controller->showSection(
 					std::make_shared<Info::Memento>(
 						Info::Settings::Tag{ controller->session().user() },
-						Info::Section::SettingsType::Advanced),
+						::Settings::Advanced::Id()),
 					Window::SectionShow());
 			} else {
-				window->showSpecialLayer(
-					Box<::Settings::LayerWidget>(&window->controller()),
+				window->widget()->showSpecialLayer(
+					Box<::Settings::LayerWidget>(window),
 					anim::type::normal);
 			}
-			window->showFromTray();
+			window->widget()->showFromTray();
 		}
 		cSetLastUpdateCheck(0);
 		Core::UpdateChecker().start();

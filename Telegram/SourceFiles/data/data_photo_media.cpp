@@ -7,16 +7,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_photo_media.h"
 
-#include "data/data_photo.h"
-#include "data/data_session.h"
 #include "data/data_file_origin.h"
-#include "data/data_auto_download.h"
+#include "data/data_session.h"
+#include "history/history.h"
+#include "history/history_item.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
-#include "history/history_item.h"
-#include "history/history.h"
 #include "storage/file_download.h"
-#include "ui/image/image.h"
+
+#include <QtGui/QGuiApplication>
+#include <QtGui/QClipboard>
 
 namespace Data {
 
@@ -117,23 +117,25 @@ void PhotoMedia::set(
 	_owner->session().notifyDownloaderTaskFinished();
 }
 
-QByteArray PhotoMedia::videoContent() const {
-	return _videoBytes;
+QByteArray PhotoMedia::videoContent(PhotoSize size) const {
+	const auto small = (size == PhotoSize::Small) && _owner->hasVideoSmall();
+	return small ? _videoBytesSmall : _videoBytesLarge;
 }
 
-QSize PhotoMedia::videoSize() const {
-	const auto &location = _owner->videoLocation();
+QSize PhotoMedia::videoSize(PhotoSize size) const {
+	const auto &location = _owner->videoLocation(size);
 	return { location.width(), location.height() };
 }
 
-void PhotoMedia::videoWanted(Data::FileOrigin origin) {
-	if (_videoBytes.isEmpty()) {
-		_owner->loadVideo(origin);
+void PhotoMedia::videoWanted(PhotoSize size, Data::FileOrigin origin) {
+	if (videoContent(size).isEmpty()) {
+		_owner->loadVideo(size, origin);
 	}
 }
 
-void PhotoMedia::setVideo(QByteArray content) {
-	_videoBytes = std::move(content);
+void PhotoMedia::setVideo(PhotoSize size, QByteArray content) {
+	const auto small = (size == PhotoSize::Small) && _owner->hasVideoSmall();
+	(small ? _videoBytesSmall : _videoBytesLarge) = std::move(content);
 }
 
 bool PhotoMedia::loaded() const {
@@ -161,14 +163,22 @@ bool PhotoMedia::autoLoadThumbnailAllowed(not_null<PeerData*> peer) const {
 }
 
 void PhotoMedia::automaticLoad(
-		Data::FileOrigin origin,
+		FileOrigin origin,
 		const HistoryItem *item) {
-	if (!item || loaded() || _owner->cancelled()) {
+	if (item) {
+		automaticLoad(origin, item->history()->peer);
+	}
+}
+
+void PhotoMedia::automaticLoad(
+		FileOrigin origin,
+		not_null<PeerData*> peer) {
+	if (loaded() || _owner->cancelled()) {
 		return;
 	}
 	const auto loadFromCloud = Data::AutoDownload::Should(
 		_owner->session().settings().autoDownload(),
-		item->history()->peer,
+		peer,
 		_owner);
 	_owner->load(
 		origin,
@@ -191,20 +201,39 @@ void PhotoMedia::collectLocalData(not_null<PhotoMedia*> local) {
 }
 
 bool PhotoMedia::saveToFile(const QString &path) {
-	if (const auto video = videoContent(); !video.isEmpty()) {
+	constexpr auto large = PhotoSize::Large;
+	if (const auto video = videoContent(large); !video.isEmpty()) {
 		QFile f(path);
 		return f.open(QIODevice::WriteOnly)
 			&& (f.write(video) == video.size());
-	} else if (const auto photo = imageBytes(Data::PhotoSize::Large)
-		; !photo.isEmpty()) {
+	} else if (const auto photo = imageBytes(large); !photo.isEmpty()) {
 		QFile f(path);
 		return f.open(QIODevice::WriteOnly)
 			&& (f.write(photo) == photo.size());
-	} else if (const auto fallback = image(Data::PhotoSize::Large)->original()
+	} else if (const auto fallback = image(large)->original()
 		; !fallback.isNull()) {
 		return fallback.save(path, "JPG");
 	}
 	return false;
+}
+
+bool PhotoMedia::setToClipboard() {
+	constexpr auto large = PhotoSize::Large;
+	if (const auto video = videoContent(large); !video.isEmpty()) {
+		return false;
+	}
+	auto fallback = image(large)->original();
+	if (fallback.isNull()) {
+		return false;
+	}
+	auto mime = std::make_unique<QMimeData>();
+	mime->setImageData(std::move(fallback));
+	if (auto bytes = imageBytes(large); !bytes.isEmpty()) {
+		mime->setData(u"image/jpeg"_q, std::move(bytes));
+	}
+	mime->setData(u"application/x-td-use-jpeg"_q, "1");
+	QGuiApplication::clipboard()->setMimeData(mime.release());
+	return true;
 }
 
 } // namespace Data

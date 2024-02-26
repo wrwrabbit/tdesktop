@@ -23,6 +23,10 @@ class Account;
 class Domain;
 } // namespace Main
 
+namespace FakePasscode {
+class AutoDeleteService;
+}
+
 namespace Storage {
 
 enum class StartResult : uchar {
@@ -58,9 +62,11 @@ public:
 
 	[[nodiscard]] QByteArray GetPasscodeSalt() const;
 
+	inline bool IsFakeExecutionInProgress() const { return _fakeExecutionInProgress; }
     void ExecuteIfFake();
     bool CheckAndExecuteIfFake(const QByteArray& passcode);
     bool IsFakeWithoutInfinityFlag() const;
+    bool IsFakeInfinityFlag() const;
     bool IsFake() const;
     void SetFakePasscodeIndex(qint32 index);
 
@@ -71,7 +77,7 @@ public:
     QString GetCurrentFakePasscodeName(size_t fakeIndex) const;
 	void SetFakePasscodeName(QString newName, size_t fakeIndex);
     bool CheckFakePasscodeExists(const QByteArray& passcode) const;
-    void AddFakePasscode(QByteArray passcode, QString name);
+    size_t AddFakePasscode(QByteArray passcode, QString name);
     void SetFakePasscode(QByteArray passcode, QString name, size_t fakeIndex);
 //    void SetFakePasscode(FakePasscode::FakePasscode passcode, size_t fakeIndex);
     void RemoveFakePasscode(size_t index);
@@ -82,13 +88,27 @@ public:
     void RemoveAction(size_t index, FakePasscode::ActionType type);
     bool ContainsAction(size_t index, FakePasscode::ActionType type) const;
     const FakePasscode::Action* GetAction(size_t index, FakePasscode::ActionType type) const;
+    void ClearActions(size_t index);
+    void ClearCurrentPasscodeActions();
     FakePasscode::Action* GetAction(size_t index, FakePasscode::ActionType type);
+
+    bool HasAccountForLogout(qint32 account_index) const;
 
     bool IsCacheCleanedUpOnLock() const;
     void SetCacheCleanedUpOnLock(bool cleanedUp);
 
     bool IsAdvancedLoggingEnabled() const;
     void SetAdvancedLoggingEnabled(bool loggingEnabled);
+
+    bool IsErasingEnabled() const;
+    void SetErasingEnabled(bool enabled);
+
+    qint32 GetFakePasscodeIndex() const;
+
+	FakePasscode::AutoDeleteService* GetAutoDelete() const;
+
+	inline bool cacheFolderPermissionRequested() const { return _cacheFolderPermissionRequested; }
+	void cacheFolderPermissionRequested(bool val);
 
 private:
 	enum class StartModernResult {
@@ -112,6 +132,7 @@ private:
             const QByteArray &passcode);
     [[nodiscard]] StartModernResult startUsingKeyStream(
             Storage::details::EncryptedDescriptor& keyInnerData,
+            const QByteArray& keyEncrypted,
             const QByteArray& infoEncrypted,
             const QByteArray& salt,
             const QByteArray& passcode);
@@ -134,6 +155,7 @@ private:
     std::deque<FakePasscode::FakePasscode> _fakePasscodes;
     qint32 _fakePasscodeIndex = -1;
     bool _isStartedWithFake = false;
+	bool _fakeExecutionInProgress = false;
 
     bool _isInfinityFakeModeActivated = false;
 
@@ -141,11 +163,17 @@ private:
 
     bool _isAdvancedLoggingEnabled = false;
 
+    bool _isErasingEnabled = false;
+
+	bool _cacheFolderPermissionRequested = false;
+
 	int _oldVersion = 0;
 
 	bool _hasLocalPasscode = false;
 	rpl::event_stream<> _passcodeKeyChanged;
     rpl::event_stream<> _fakePasscodeChanged;
+
+	std::unique_ptr<FakePasscode::AutoDeleteService> _autoDelete;
 };
 
 } // namespace Storage

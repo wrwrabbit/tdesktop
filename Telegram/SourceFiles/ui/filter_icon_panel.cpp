@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/panel_animation.h"
 #include "ui/ui_utility.h"
 #include "ui/filter_icons.h"
+#include "ui/painter.h"
 #include "ui/cached_round_corners.h"
 #include "lang/lang_keys.h"
 #include "core/application.h"
@@ -26,36 +27,51 @@ constexpr auto kIconsPerRow = 6;
 
 constexpr auto kIcons = std::array{
 	FilterIcon::Cat,
-	FilterIcon::Crown,
-	FilterIcon::Favorite,
-	FilterIcon::Flower,
+	FilterIcon::Book,
+	FilterIcon::Money,
+	// FilterIcon::Camera,
 	FilterIcon::Game,
+	// FilterIcon::House,
+	FilterIcon::Light,
+	FilterIcon::Like,
+	// FilterIcon::Plus,
+	FilterIcon::Note,
+	FilterIcon::Palette,
+	FilterIcon::Travel,
+	FilterIcon::Sport,
+	FilterIcon::Favorite,
+	FilterIcon::Study,
+	FilterIcon::Airplane,
+	// FilterIcon::Microbe,
+	// FilterIcon::Worker,
+	FilterIcon::Private,
+	FilterIcon::Groups,
+	FilterIcon::All,
+	FilterIcon::Unread,
+	// FilterIcon::Check,
+	FilterIcon::Bots,
+	// FilterIcon::Folders,
+	FilterIcon::Crown,
+	FilterIcon::Flower,
 	FilterIcon::Home,
 	FilterIcon::Love,
 	FilterIcon::Mask,
 	FilterIcon::Party,
-	FilterIcon::Sport,
-	FilterIcon::Study,
 	FilterIcon::Trade,
-	FilterIcon::Travel,
 	FilterIcon::Work,
-
-	FilterIcon::All,
-	FilterIcon::Unread,
 	FilterIcon::Unmuted,
-	FilterIcon::Bots,
 	FilterIcon::Channels,
-	FilterIcon::Groups,
-	FilterIcon::Private,
 	FilterIcon::Custom,
 	FilterIcon::Setup,
+	// FilterIcon::Poo,
 };
 
 } // namespace
 
 FilterIconPanel::FilterIconPanel(QWidget *parent)
 : RpWidget(parent)
-, _inner(Ui::CreateChild<Ui::RpWidget>(this)) {
+, _inner(Ui::CreateChild<Ui::RpWidget>(this))
+, _innerBg(ImageRoundRadius::Small, st::dialogsBg) {
 	setup();
 }
 
@@ -102,11 +118,7 @@ void FilterIconPanel::setupInner() {
 	_inner->paintRequest(
 		) | rpl::start_with_next([=](QRect clip) {
 		auto p = Painter(_inner);
-		Ui::FillRoundRect(
-			p,
-			_inner->rect(),
-			st::dialogsBg,
-			ImageRoundRadius::Small);
+		_innerBg.paint(p, _inner->rect());
 		p.setFont(st::emojiPanHeaderFont);
 		p.setPen(st::emojiPanHeaderFg);
 		p.drawTextLeft(

@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "storage/storage_shared_media.h"
 #include "layout/layout_selection.h"
+#include "ui/painter.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_info.h"
 
 namespace Info::Media {
@@ -64,7 +66,12 @@ bool ListSection::addItem(not_null<BaseLayout*> item) {
 
 void ListSection::finishSection() {
 	if (_type == Type::GIF) {
-		_mosaic.setOffset(st::infoMediaSkip, headerHeight());
+		_mosaic.setPadding({
+			st::infoMediaSkip,
+			headerHeight(),
+			st::infoMediaSkip,
+			st::stickerPanPadding,
+		});
 		_mosaic.setRightSkip(st::infoMediaSkip);
 		_mosaic.addItems(_items);
 	}
@@ -332,15 +339,19 @@ void ListSection::resizeToWidth(int newWidth) {
 	switch (_type) {
 	case Type::Photo:
 	case Type::Video:
+	case Type::PhotoVideo:
 	case Type::RoundFile: {
-		_itemsLeft = st::infoMediaSkip;
+		const auto skip = st::infoMediaSkip;
+		_itemsLeft = st::infoMediaLeft;
 		_itemsTop = st::infoMediaSkip;
-		_itemsInRow = (newWidth - _itemsLeft)
-			/ (st::infoMediaMinGridSize + st::infoMediaSkip);
-		_itemWidth = ((newWidth - _itemsLeft) / _itemsInRow)
+		_itemsInRow = (newWidth - _itemsLeft * 2 + skip)
+			/ (st::infoMediaMinGridSize + skip);
+		_itemWidth = ((newWidth - _itemsLeft * 2 + skip) / _itemsInRow)
 			- st::infoMediaSkip;
+		_itemsLeft = (newWidth - (_itemWidth + skip) * _itemsInRow + skip)
+			/ 2;
 		for (auto &item : _items) {
-			item->resizeGetHeight(_itemWidth);
+			_itemHeight = item->resizeGetHeight(_itemWidth);
 		}
 	} break;
 
@@ -369,8 +380,9 @@ int ListSection::recountHeight() {
 	switch (_type) {
 	case Type::Photo:
 	case Type::Video:
+	case Type::PhotoVideo:
 	case Type::RoundFile: {
-		auto itemHeight = _itemWidth + st::infoMediaSkip;
+		auto itemHeight = _itemHeight + st::infoMediaSkip;
 		auto index = 0;
 		result += _itemsTop;
 		for (auto &item : _items) {
@@ -389,7 +401,7 @@ int ListSection::recountHeight() {
 	} break;
 
 	case Type::GIF: {
-		return _mosaic.countDesiredHeight(0) + result;
+		return _mosaic.countDesiredHeight(0);
 	} break;
 
 	case Type::RoundVoiceFile:

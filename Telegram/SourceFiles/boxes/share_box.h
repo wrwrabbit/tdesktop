@@ -7,13 +7,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "boxes/abstract_box.h"
+#include "ui/layers/box_content.h"
 #include "base/timer.h"
 #include "history/view/history_view_schedule_box.h"
 #include "ui/chat/forward_options_box.h"
 #include "ui/effects/animations.h"
 #include "ui/effects/round_checkbox.h"
 #include "mtproto/sender.h"
+
+class History;
 
 namespace style {
 struct MultiSelect;
@@ -44,6 +46,7 @@ class IndexedList;
 
 namespace Data {
 enum class ForwardOptions;
+class Thread;
 } // namespace Data
 
 namespace Ui {
@@ -66,23 +69,30 @@ void FastShareMessage(
 	not_null<Window::SessionController*> controller,
 	not_null<HistoryItem*> item);
 
+struct RecipientPremiumRequiredError;
+[[nodiscard]] auto SharePremiumRequiredError()
+-> Fn<RecipientPremiumRequiredError(not_null<UserData*>)>;
+
 class ShareBox final : public Ui::BoxContent {
 public:
 	using CopyCallback = Fn<void()>;
 	using SubmitCallback = Fn<void(
-		std::vector<not_null<PeerData*>>&&,
+		std::vector<not_null<Data::Thread*>>&&,
 		TextWithTags&&,
 		Api::SendOptions,
-		Data::ForwardOptions option)>;
-	using FilterCallback = Fn<bool(PeerData*)>;
+		Data::ForwardOptions)>;
+	using FilterCallback = Fn<bool(not_null<Data::Thread*>)>;
+
+	[[nodiscard]] static SubmitCallback DefaultForwardCallback(
+		std::shared_ptr<Ui::Show> show,
+		not_null<History*> history,
+		MessageIdsList msgIds);
 
 	struct Descriptor {
 		not_null<Main::Session*> session;
 		CopyCallback copyCallback;
 		SubmitCallback submitCallback;
 		FilterCallback filterCallback;
-		Fn<void(not_null<Ui::InputField*>)> initSpellchecker;
-		Fn<void(not_null<Ui::InputField*>)> initEditLink;
 		object_ptr<Ui::RpWidget> bottomWidget = { nullptr };
 		rpl::producer<QString> copyLinkText;
 		const style::MultiSelect *stMultiSelect = nullptr;
@@ -90,11 +100,14 @@ public:
 		const style::PeerList *st = nullptr;
 		const style::InputField *stLabel = nullptr;
 		struct {
-			int messagesCount = 0;
+			int sendersCount = 0;
+			int captionsCount = 0;
 			bool show = false;
-			bool hasCaptions = false;
 		} forwardOptions;
 		HistoryView::ScheduleBoxStyleArgs scheduleBoxStyle;
+
+		using PremiumRequiredError = RecipientPremiumRequiredError;
+		Fn<PremiumRequiredError(not_null<UserData*>)> premiumRequiredError;
 	};
 	ShareBox(QWidget*, Descriptor &&descriptor);
 
@@ -112,7 +125,9 @@ private:
 	void submit(Api::SendOptions options);
 	void submitSilent();
 	void submitScheduled();
-	void copyLink();
+	void submitAutoDelete();
+	void submitWhenOnline();
+	void copyLink() const;
 	bool searchByUsername(bool useCache = false);
 
 	SendMenu::Type sendMenuType() const;
@@ -127,8 +142,8 @@ private:
 	int contentHeight() const;
 	void updateScrollSkips();
 
-	void addPeerToMultiSelect(PeerData *peer, bool skipAnimation = false);
-	void innerSelectedChanged(PeerData *peer, bool checked);
+	void addPeerToMultiSelect(not_null<Data::Thread*> thread);
+	void innerSelectedChanged(not_null<Data::Thread*> thread, bool checked);
 
 	void peopleDone(
 		const MTPcontacts_Found &result,
@@ -139,8 +154,6 @@ private:
 
 	Descriptor _descriptor;
 	MTP::Sender _api;
-
-	std::shared_ptr<Ui::BoxShow> _show;
 
 	object_ptr<Ui::MultiSelect> _select;
 	object_ptr<Ui::SlideWrap<Ui::InputField>> _comment;

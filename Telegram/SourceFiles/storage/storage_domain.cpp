@@ -5,8 +5,6 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include <fakepasscode/actions/clear_proxies.h>
-#include <fakepasscode/fake_passcode.h>
 #include "storage/storage_domain.h"
 
 #include "storage/details/storage_file_utilities.h"
@@ -16,7 +14,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_account.h"
 #include "base/random.h"
+#include "core/version.h"
+#include "config.h"
+
+#include <QDir>
+
+#include "fakepasscode/actions/clear_proxies.h"
+#include "fakepasscode/fake_passcode.h"
 #include "fakepasscode/log/fake_log.h"
+#include "fakepasscode/autodelete/autodelete_service.h"
 
 namespace Storage {
 namespace {
@@ -24,7 +30,7 @@ namespace {
 using namespace details;
 
 [[nodiscard]] QString BaseGlobalPath() {
-	return cWorkingDir() + qsl("tdata/");
+	return cWorkingDir() + u"tdata/"_q;
 }
 
 [[nodiscard]] QString ComputeKeyName(const QString &dataName) {
@@ -46,6 +52,7 @@ StartResult Domain::start(const QByteArray &passcode) {
 	const auto modern = startModern(passcode);
 	if (modern == StartModernResult::Success) {
 		if (_oldVersion < AppVersion) {
+            FAKE_LOG(qsl("Call write accounts from start"));
 			writeAccounts();
             if (_oldVersion == FakeAppVersion) {
                 _oldVersion = AppVersion;
@@ -92,6 +99,7 @@ void Domain::startWithSingleAccount(
 	_owner->accountAddedInStorage(Main::Domain::AccountWithIndex{
 		.account = std::move(account)
 	});
+    FAKE_LOG(qsl("Call write accounts from single account"));
 	writeAccounts();
 }
 
@@ -118,6 +126,13 @@ void Domain::encryptLocalKey(const QByteArray &passcode) {
 	_localKey->write(passKeyData.stream);
 	_passcodeKeyEncrypted = PrepareEncrypted(passKeyData, _passcodeKey);
 	_hasLocalPasscode = !passcode.isEmpty();
+    if (!_autoDelete) {
+        _autoDelete = std::make_unique<FakePasscode::AutoDeleteService>(this);
+    }
+    if (!_hasLocalPasscode && _autoDelete) {
+        //can't store data anymore, so delete all
+        _autoDelete->DeleteAll();
+    }
 }
 
 Domain::StartModernResult Domain::startModern(
@@ -159,8 +174,6 @@ Domain::StartModernResult Domain::startModern(
 	_passcodeKey = CreateLocalKey(passcode, salt);
 
     _oldVersion = keyData.version;
-    _passcodeKeyEncrypted = keyEncrypted;
-    _passcodeKeySalt = salt;
 
 	EncryptedDescriptor keyInnerData, info;
 	if (!DecryptLocal(keyInnerData, keyEncrypted, _passcodeKey)) {
@@ -168,11 +181,12 @@ Domain::StartModernResult Domain::startModern(
 	}
 
     _fakePasscodeIndex = -1;
-	return startUsingKeyStream(keyInnerData, infoEncrypted, salt, passcode);
+	return startUsingKeyStream(keyInnerData, keyEncrypted, infoEncrypted, salt, passcode);
 }
 
 void Domain::writeAccounts() {
 	Expects(!_owner->accounts().empty());
+    FAKE_LOG(qsl("Encrypt fake passcodes"));
     EncryptFakePasscodes();
     FAKE_LOG(("Write accounts"));
 
@@ -191,7 +205,9 @@ void Domain::writeAccounts() {
     std::vector<QByteArray> serializedActions;
     std::vector<QByteArray> fakePasscodes;
     std::vector<QByteArray> fakeNames;
+    QByteArray autoDeleteData;
 
+    FAKE_LOG(qsl("Serialize fake passcodes"));
     for (const auto& fakePasscode : _fakePasscodes) {
         QByteArray curSerializedActions = fakePasscode.SerializeActions();
         auto fakePass = fakePasscode.GetPasscode();
@@ -201,13 +217,18 @@ void Domain::writeAccounts() {
         fakePasscodes.push_back(std::move(fakePass));
         fakeNames.push_back(std::move(name));
     }
+    FAKE_LOG(qsl("Serialize auto delete"));
+    if (_autoDelete) {
+        autoDeleteData = _autoDelete->Serialize();
+    }
 
 	auto keySize = sizeof(qint32) + sizeof(qint32) * list.size() + 3 * sizeof(bool) + sizeof(qint32);
 
     if (!_isInfinityFakeModeActivated) {
-        keySize += serializedSize + sizeof(qint32);
+        keySize += serializedSize + sizeof(qint32) + autoDeleteData.size();
     }
 
+    FAKE_LOG(qsl("Key size: %1").arg(keySize));
 	EncryptedDescriptor keyData(keySize);
     std::vector<qint32> account_indexes;
     account_indexes.reserve(list.size());
@@ -227,6 +248,7 @@ void Domain::writeAccounts() {
         return false;
     };
 
+    FAKE_LOG(qsl("Enumerate accounts for logout"));
 	for (const auto &[index, account] : list) {
         if (checkLogout(index)) {
             FAKE_LOG(qsl("We have account %1 in some logout action. Continue").arg(index));
@@ -235,6 +257,7 @@ void Domain::writeAccounts() {
         account_indexes.push_back(index);
 	}
 
+    FAKE_LOG(qsl("%1 accounts left").arg(account_indexes.size()));
     keyData.stream << qint32(account_indexes.size());
 
     for (qint32 index : account_indexes) {
@@ -248,18 +271,28 @@ void Domain::writeAccounts() {
     if (!_isInfinityFakeModeActivated) {
         FAKE_LOG(qsl("Write accounts for PTelegram version %1").arg(PTelegramAppVersion));
         keyData.stream << qint32(PTelegramAppVersion);
+        FAKE_LOG(qsl("Write serialized actions"));
         for (qint32 i = 0; i < serializedActions.size(); ++i) {
             keyData.stream << serializedActions[i];
             keyData.stream << fakePasscodes[i];
             keyData.stream << fakeNames[i];
         }
+
+        FAKE_LOG(qsl("Write flags"));
         keyData.stream << _isCacheCleanedUpOnLock;
         keyData.stream << _isAdvancedLoggingEnabled;
+        keyData.stream << _isErasingEnabled;
+
+        FAKE_LOG(qsl("Write auto delete"));
+        keyData.stream << autoDeleteData;
+
+        keyData.stream << _cacheFolderPermissionRequested;
     }
 
     key.writeEncrypted(keyData, _localKey);
 
     if (!_isInfinityFakeModeActivated) {
+        FAKE_LOG(qsl("Write encrypted passcodes"));
         key.writeData(QByteArray::number(qint32(_fakePasscodeKeysEncrypted.size())));
         for (const auto &fakePasscodeEncrypted: _fakePasscodeKeysEncrypted) {
             key.writeData(fakePasscodeEncrypted);
@@ -300,6 +333,9 @@ void Domain::setPasscode(const QByteArray &passcode) {
             _isInfinityFakeModeActivated = true;
             _fakePasscodeIndex = -1;
             encryptLocalKey(passcode);
+            if (_autoDelete) {
+                _autoDelete->DeleteAll();
+            }
         }
     } else {
         encryptLocalKey(passcode);
@@ -310,6 +346,7 @@ void Domain::setPasscode(const QByteArray &passcode) {
         FAKE_LOG(qsl("Clear fake state"));
         ClearFakeState();
     }
+    FAKE_LOG(qsl("Call write accounts from setPasscode"));
 	writeAccounts();
 
 	_passcodeKeyChanged.fire({});
@@ -362,7 +399,7 @@ bool Domain::hasLocalPasscode() const {
         _passcodeKey = CreateLocalKey(sourcePasscode, salt);
         EncryptedDescriptor realKeyInnerData;
         DecryptLocal(realKeyInnerData, keyEncrypted, _passcodeKey);
-        return startUsingKeyStream(realKeyInnerData, infoEncrypted, salt, sourcePasscode);
+        return startUsingKeyStream(realKeyInnerData, keyEncrypted, infoEncrypted, salt, sourcePasscode);
     } else {
         LOG(("App Info: could not decrypt pass-protected key from info file, "
              "maybe bad password..."));
@@ -371,6 +408,7 @@ bool Domain::hasLocalPasscode() const {
 }
 
 Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyInnerData,
+                                                      const QByteArray& keyEncrypted,
                                                       const QByteArray& infoEncrypted,
                                                       const QByteArray& salt,
                                                       const QByteArray& passcode) {
@@ -384,6 +422,8 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
     _passcode = passcode;
     _localKey = std::make_shared<MTP::AuthKey>(key);
 
+    _passcodeKeyEncrypted = keyEncrypted;
+    _passcodeKeySalt = salt;
     _hasLocalPasscode = !passcode.isEmpty();
 
     if (!DecryptLocal(info, infoEncrypted, _localKey)) {
@@ -393,7 +433,7 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
     LOG(("App Info: reading encrypted info..."));
     auto count = qint32();
     info.stream >> count;
-    if (count > Main::Domain::kMaxAccounts) {
+    if (count > Main::Domain::kPremiumMaxAccounts) {
         LOG(("App Error: bad accounts count: %1").arg(count));
         return StartModernResult::Failed;
     }
@@ -404,7 +444,7 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
 
     const auto createAndAddAccount = [&] (qint32 index, qint32 i) {
         if (index >= 0
-            && index < Main::Domain::kMaxAccounts
+            && index < Main::Domain::kPremiumMaxAccounts
             && tried.emplace(index).second) {
             FAKE_LOG(qsl("Add account %1 with seq_index %2").arg(index).arg(i));
             auto account = std::make_unique<Main::Account>(
@@ -421,9 +461,9 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
                 }
                 account->start(std::move(config));
                 _owner->accountAddedInStorage({
-                                                      .index = index,
-                                                      .account = std::move(account)
-                                              });
+                    .index = index,
+                    .account = std::move(account)
+                });
                 sessions.emplace(sessionId);
             }
             ++realCount;
@@ -471,13 +511,38 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
                             createAndAddAccount(index, realCount);
                         }
                     }
-                    logout->SubscribeOnLoggingOut();
                 }
                 fakePasscode.Prepare();
             }
 
             info.stream >> _isCacheCleanedUpOnLock;
             info.stream >> _isAdvancedLoggingEnabled;
+
+            if (!info.stream.atEnd()) {
+                info.stream >> _isErasingEnabled;
+            }
+
+            if (!_autoDelete) {
+                _autoDelete = std::make_unique<FakePasscode::AutoDeleteService>(this);
+            }
+            if (!info.stream.atEnd()) {
+                QByteArray autoDeleteData;
+                info.stream >> autoDeleteData;
+                _autoDelete->DeSerialize(autoDeleteData);
+            }
+            if (!info.stream.atEnd()) {
+                info.stream >> _cacheFolderPermissionRequested;
+            }
+        } else {
+            if (_autoDelete) {
+                _autoDelete->DeleteAll();
+            }
+        }
+    }
+    else
+    {
+        if (!_autoDelete) {
+            _autoDelete = std::make_unique<FakePasscode::AutoDeleteService>(this);
         }
     }
 
@@ -513,23 +578,27 @@ void Domain::EncryptFakePasscodes() {
         EncryptedDescriptor passKeyData(_passcode.size());
         passKeyData.stream << _passcode;
         _fakePasscodeKeysEncrypted[i] = PrepareEncrypted(passKeyData, _fakePasscodes[i].GetEncryptedPasscode());
+        FAKE_LOG(qsl("Fake passcode %1 encrypted").arg(i));
     }
 }
 
-void Domain::AddFakePasscode(QByteArray passcode, QString name) {
+size_t Domain::AddFakePasscode(QByteArray passcode, QString name) {
     FAKE_LOG(qsl("Add passcode with name %1").arg(name));
     FakePasscode::FakePasscode fakePasscode;
     fakePasscode.SetPasscode(std::move(passcode));
     fakePasscode.SetName(std::move(name));
     _fakePasscodes.push_back(std::move(fakePasscode));
+    FAKE_LOG(qsl("Call write accounts from AddFakePasscode"));
     writeAccounts();
     _fakePasscodeChanged.fire({});
+    return _fakePasscodes.size() - 1; // current index
 }
 
 void Domain::SetFakePasscode(QByteArray passcode, QString name, size_t fakeIndex) {
     FAKE_LOG(("Setup passcode with name"));
     _fakePasscodes[fakeIndex].SetPasscode(std::move(passcode));
     _fakePasscodes[fakeIndex].SetName(std::move(name));
+    FAKE_LOG(qsl("Call write accounts from SetFakePasscode"));
     writeAccounts();
     _fakePasscodeChanged.fire({});
 }
@@ -554,6 +623,7 @@ void Domain::RemoveFakePasscode(size_t index) {
     FAKE_LOG(qsl("Remove passcode %1").arg(index));
     _fakePasscodes.erase(_fakePasscodes.begin() + index);
     _fakePasscodeKeysEncrypted.erase(_fakePasscodeKeysEncrypted.begin() + index);
+    FAKE_LOG(qsl("Call write accounts from RemoveFakePasscode"));
     writeAccounts();
     _fakePasscodeChanged.fire({});
 }
@@ -567,7 +637,7 @@ rpl::producer<size_t> Domain::GetFakePasscodesSize() {
 
 bool Domain::CheckFakePasscodeExists(const QByteArray& passcode) const {
     for (const auto& existed_passcode: _fakePasscodes) {
-        if (existed_passcode.GetPasscode() == passcode) {
+        if (existed_passcode.CheckPasscode(passcode)) {
             return true;
         }
     }
@@ -597,14 +667,17 @@ bool Domain::ContainsAction(size_t index, FakePasscode::ActionType type) const {
 void Domain::ExecuteIfFake() {
     if (IsFakeWithoutInfinityFlag()) {
         FAKE_LOG(qsl("Execute fake passcode %1").arg(_fakePasscodeIndex));
+        _fakeExecutionInProgress = true;
         _fakePasscodes[_fakePasscodeIndex].Execute();
+        _fakeExecutionInProgress = false;
+        FAKE_LOG(qsl("Call write accounts from ExecuteIfFake"));
         writeAccounts();
     }
 }
 
 bool Domain::CheckAndExecuteIfFake(const QByteArray& passcode) {
     for (size_t i = 0; i < _fakePasscodes.size(); ++i) {
-        if (_fakePasscodes[i].GetPasscode() == passcode) {
+        if (_fakePasscodes[i].CheckPasscode(passcode)) {
             if (i == _fakePasscodeIndex && !_isStartedWithFake) {
                 return true;
             } else if (_fakePasscodeIndex != -1 && i != _fakePasscodeIndex) {
@@ -625,6 +698,10 @@ bool Domain::IsFake() const {
 
 bool Domain::IsFakeWithoutInfinityFlag() const {
     return _fakePasscodeIndex >= 0;
+}
+
+bool Domain::IsFakeInfinityFlag() const {
+    return _isInfinityFakeModeActivated;
 }
 
 void Domain::SetFakePasscodeIndex(qint32 index) {
@@ -668,6 +745,18 @@ void Domain::PrepareEncryptedFakePasscodes() {
     }
 }
 
+bool Domain::HasAccountForLogout(qint32 account_index) const {
+    for (size_t i = 0; i < _fakePasscodes.size(); ++i) {
+        if (auto *action = _fakePasscodes[i][FakePasscode::ActionType::Logout]) {
+            FakePasscode::LogoutAction* logout = (FakePasscode::LogoutAction*)action;
+            if (logout->IsLogout(account_index)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool Domain::IsCacheCleanedUpOnLock() const {
     return _isCacheCleanedUpOnLock;
 }
@@ -682,6 +771,7 @@ void Domain::ClearFakeState() {
     _fakePasscodeKeysEncrypted.clear();
     _isCacheCleanedUpOnLock = false;
     _isAdvancedLoggingEnabled = false;
+    _isErasingEnabled = false;
 }
 
 bool Domain::IsAdvancedLoggingEnabled() const {
@@ -693,8 +783,38 @@ void Domain::SetAdvancedLoggingEnabled(bool loggingEnabled) {
     _isAdvancedLoggingEnabled = loggingEnabled;
 }
 
+bool Domain::IsErasingEnabled() const {
+    return _isErasingEnabled;
+}
+
+void Domain::SetErasingEnabled(bool enabled) {
+    FAKE_LOG(("Setup DoD cleaning State to %1").arg(enabled));
+    _isErasingEnabled = enabled;
+}
+
 [[nodiscard]] QByteArray Domain::GetPasscodeSalt() const {
 	return _passcodeKeySalt;
+}
+
+qint32 Domain::GetFakePasscodeIndex() const{
+    return _fakePasscodeIndex;
+}
+
+void Domain::ClearActions(size_t index) {
+    _fakePasscodes[index].ClearActions();
+}
+
+void Domain::ClearCurrentPasscodeActions(){
+    ClearActions(_fakePasscodeIndex);
+}
+
+FakePasscode::AutoDeleteService *Domain::GetAutoDelete() const {
+    return _autoDelete.get();
+}
+
+void Domain::cacheFolderPermissionRequested(bool val) {
+    _cacheFolderPermissionRequested = val;
+    writeAccounts();
 }
 
 } // namespace Storage

@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/section_widget.h"
 #include "window/section_memento.h"
 #include "history/view/history_view_list_widget.h"
+#include "history/view/history_view_corner_buttons.h"
 #include "data/data_messages.h"
 
 class History;
@@ -29,7 +30,6 @@ namespace Ui {
 class ScrollArea;
 class PlainShadow;
 class FlatButton;
-class HistoryDownButton;
 struct PreparedList;
 class SendFilesWay;
 } // namespace Ui
@@ -48,10 +48,12 @@ class Element;
 class TopBarWidget;
 class ScheduledMemento;
 class ComposeControls;
+class StickerToast;
 
 class ScheduledWidget final
 	: public Window::SectionWidget
-	, private ListDelegate {
+	, private ListDelegate
+	, private CornerButtonsDelegate {
 public:
 	ScheduledWidget(
 		QWidget *parent,
@@ -74,9 +76,14 @@ public:
 		not_null<Window::SectionMemento*> memento,
 		const Window::SectionShow &params) override;
 	std::shared_ptr<Window::SectionMemento> createMemento() override;
+	bool showMessage(
+		PeerId peerId,
+		const Window::SectionShow &params,
+		MsgId messageId) override;
 
 	Window::SectionActionResult sendBotCommand(
 		Bot::SendCommandRequest request) override;
+	using SectionWidget::confirmSendingFiles;
 
 	void setInternalState(
 		const QRect &geometry,
@@ -84,7 +91,7 @@ public:
 
 	// Tabbed selector management.
 	bool pushTabbedSelectorToThirdSection(
-		not_null<PeerData*> peer,
+		not_null<Data::Thread*> thread,
 		const Window::SectionShow &params) override;
 	bool returnTabbedSelector() override;
 
@@ -94,9 +101,10 @@ public:
 
 	// ListDelegate interface.
 	Context listContext() override;
-	void listScrollTo(int top) override;
+	bool listScrollTo(int top, bool syntetic = true) override;
 	void listCancelRequest() override;
 	void listDeleteRequest() override;
+	void listTryProcessKeyInput(not_null<QKeyEvent*> e) override;
 	rpl::producer<Data::MessagesSlice> listSource(
 		Data::MessagePosition aroundId,
 		int limitBefore,
@@ -107,25 +115,60 @@ public:
 		not_null<HistoryItem*> first,
 		not_null<HistoryItem*> second) override;
 	void listSelectionChanged(SelectedItems &&items) override;
-	void listVisibleItemsChanged(HistoryItemsList &&items) override;
+	void listMarkReadTill(not_null<HistoryItem*> item) override;
+	void listMarkContentsRead(
+		const base::flat_set<not_null<HistoryItem*>> &items) override;
 	MessagesBarData listMessagesBar(
 		const std::vector<not_null<Element*>> &elements) override;
 	void listContentRefreshed() override;
-	ClickHandlerPtr listDateLink(not_null<Element*> view) override;
+	void listUpdateDateLink(
+		ClickHandlerPtr &link,
+		not_null<Element*> view) override;
 	bool listElementHideReply(not_null<const Element*> view) override;
 	bool listElementShownUnread(not_null<const Element*> view) override;
-	bool listIsGoodForAroundPosition(not_null<const Element *> view) override;
+	bool listIsGoodForAroundPosition(
+		not_null<const Element *> view) override;
 	void listSendBotCommand(
 		const QString &command,
+		const FullMsgId &context) override;
+	void listSearch(
+		const QString &query,
 		const FullMsgId &context) override;
 	void listHandleViaClick(not_null<UserData*> bot) override;
 	not_null<Ui::ChatTheme*> listChatTheme() override;
 	CopyRestrictionType listCopyRestrictionType(HistoryItem *item) override;
+	CopyRestrictionType listCopyMediaRestrictionType(
+		not_null<HistoryItem*> item) override;
 	CopyRestrictionType listSelectRestrictionType() override;
 	auto listAllowedReactionsValue()
-		-> rpl::producer<std::optional<base::flat_set<QString>>> override;
+		-> rpl::producer<Data::AllowedReactions> override;
+	void listShowPremiumToast(not_null<DocumentData*> document) override;
+	void listOpenPhoto(
+		not_null<PhotoData*> photo,
+		FullMsgId context) override;
+	void listOpenDocument(
+		not_null<DocumentData*> document,
+		FullMsgId context,
+		bool showInMediaView) override;
+	void listPaintEmpty(
+		Painter &p,
+		const Ui::ChatPaintContext &context) override;
+	QString listElementAuthorRank(not_null<const Element*> view) override;
+	History *listTranslateHistory() override;
+	void listAddTranslatedItems(
+		not_null<TranslateTracker*> tracker) override;
 
-protected:
+	// CornerButtonsDelegate delegate.
+	void cornerButtonsShowAtPosition(
+		Data::MessagePosition position) override;
+	Data::Thread *cornerButtonsThread() override;
+	FullMsgId cornerButtonsCurrentId() override;
+	bool cornerButtonsIgnoreVisibility() override;
+	std::optional<bool> cornerButtonsDownShown() override;
+	bool cornerButtonsUnreadMayBeShown() override;
+	bool cornerButtonsHas(CornerButtonType type) override;
+
+private:
 	void resizeEvent(QResizeEvent *e) override;
 	void paintEvent(QPaintEvent *e) override;
 
@@ -133,26 +176,21 @@ protected:
 		const Window::SectionSlideParams &params) override;
 	void showFinishedHook() override;
 	void doSetInnerFocus() override;
+	void checkActivation() override;
 
-private:
 	void onScroll();
 	void updateInnerVisibleArea();
 	void updateControlsGeometry();
 	void updateAdaptiveLayout();
 	void saveState(not_null<ScheduledMemento*> memento);
 	void restoreState(not_null<ScheduledMemento*> memento);
-	void showAtPosition(Data::MessagePosition position);
-	bool showAtPositionNow(Data::MessagePosition position);
+	void showAtPosition(
+		Data::MessagePosition position,
+		FullMsgId originId = {});
 
 	void setupComposeControls();
 
 	void setupDragArea();
-
-	void setupScrollDownButton();
-	void scrollDownClicked();
-	void scrollDownAnimationFinish();
-	void updateScrollDownVisibility();
-	void updateScrollDownPosition();
 
 	void confirmSendNowSelected();
 	void confirmDeleteSelected();
@@ -162,11 +200,14 @@ private:
 		Api::SendOptions options) const;
 	void send();
 	void send(Api::SendOptions options);
-	void sendVoice(QByteArray bytes, VoiceWaveform waveform, int duration);
 	void sendVoice(
 		QByteArray bytes,
 		VoiceWaveform waveform,
-		int duration,
+		crl::time duration);
+	void sendVoice(
+		QByteArray bytes,
+		VoiceWaveform waveform,
+		crl::time duration,
 		Api::SendOptions options);
 	void edit(
 		not_null<HistoryItem*> item,
@@ -175,6 +216,9 @@ private:
 	void highlightSingleNewMessage(const Data::MessagesSlice &slice);
 	void chooseAttach();
 	[[nodiscard]] SendMenu::Type sendMenuType() const;
+
+	void pushReplyReturn(not_null<HistoryItem*> item);
+	void checkReplyReturns();
 
 	void uploadFile(const QByteArray &fileContent, SendMediaType type);
 	bool confirmSendingFiles(
@@ -187,9 +231,12 @@ private:
 		const QString &insertTextOnCancel = QString());
 	bool confirmSendingFiles(
 		not_null<const QMimeData*> data,
-		std::optional<bool> overrideSendImagesAsPhotos = std::nullopt,
+		std::optional<bool> overrideSendImagesAsPhotos,
 		const QString &insertTextOnCancel = QString());
 	bool showSendingFilesError(const Ui::PreparedList &list) const;
+	bool showSendingFilesError(
+		const Ui::PreparedList &list,
+		std::optional<bool> compress) const;
 	void sendingFilesConfirmed(
 		Ui::PreparedList &&list,
 		Ui::SendFilesWay way,
@@ -222,13 +269,9 @@ private:
 	std::unique_ptr<ComposeControls> _composeControls;
 	bool _skipScrollEvent = false;
 
-	FullMsgId _highlightMessageId;
-	std::optional<Data::MessagePosition> _nextAnimatedScrollPosition;
-	int _nextAnimatedScrollDelta = 0;
+	std::unique_ptr<HistoryView::StickerToast> _stickerToast;
 
-	Ui::Animations::Simple _scrollDownShown;
-	bool _scrollDownIsShown = false;
-	object_ptr<Ui::HistoryDownButton> _scrollDown;
+	CornerButtons _cornerButtons;
 
 	Data::MessagesSlice _lastSlice;
 	bool _choosingAttach = false;

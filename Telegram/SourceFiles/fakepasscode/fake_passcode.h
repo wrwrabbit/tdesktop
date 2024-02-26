@@ -2,7 +2,12 @@
 #define TELEGRAM_FAKE_PASSCODE_H
 
 #include <QByteArray>
+#include <QString>
+
 #include "action.h"
+#include "base/flat_map.h"
+#include "rpl/producer.h"
+#include "rpl/variable.h"
 
 namespace MTP {
 class Config;
@@ -36,6 +41,7 @@ namespace FakePasscode {
 
       void AddAction(std::shared_ptr<Action> action);
       void RemoveAction(ActionType type);
+      void ClearActions();
       bool ContainsAction(ActionType type) const;
       Action* operator[](ActionType type);
 

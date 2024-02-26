@@ -13,19 +13,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
-#include "settings/settings_common.h" // AddDivider.
 #include "ui/boxes/confirm_box.h"
 #include "ui/layers/generic_box.h"
 #include "ui/text/text_utilities.h"
+#include "ui/toast/toast.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/wrap/vertical_layout.h"
+#include "ui/vertical_list.h"
 #include "styles/style_boxes.h"
 #include "styles/style_calls.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
-#include "styles/style_settings.h"
 
 #include <QGuiApplication>
 #include <QStyle>
@@ -39,8 +39,7 @@ void StartWithBox(
 		not_null<Ui::GenericBox*> box,
 		Fn<void()> done,
 		Fn<void()> revoke,
-		Fn<void(object_ptr<Ui::BoxContent>)> showBox,
-		Fn<void(QString)> showToast,
+		std::shared_ptr<Ui::Show> show,
 		rpl::producer<RtmpInfo> &&data) {
 	struct State {
 		base::unique_qptr<Ui::PopupMenu> menu;
@@ -50,18 +49,17 @@ void StartWithBox(
 	StartRtmpProcess::FillRtmpRows(
 		box->verticalLayout(),
 		true,
-		std::move(showBox),
-		std::move(showToast),
+		std::move(show),
 		std::move(data),
 		&st::boxLabel,
 		&st::groupCallRtmpShowButton,
-		&st::settingsSubsectionTitle,
+		&st::defaultSubsectionTitle,
 		&st::attentionBoxButton,
 		&st::defaultPopupMenu);
 
 	box->setTitle(tr::lng_group_call_rtmp_title());
 
-	Settings::AddDividerText(
+	Ui::AddDividerText(
 		box->verticalLayout(),
 		tr::lng_group_call_rtmp_info());
 
@@ -97,23 +95,19 @@ void StartWithBox(
 } // namespace
 
 StartRtmpProcess::~StartRtmpProcess() {
-	if (_request) {
-		_request->peer->session().api().request(_request->id).cancel();
-	}
+	close();
 }
 
 void StartRtmpProcess::start(
 		not_null<PeerData*> peer,
-		Fn<void(object_ptr<Ui::BoxContent>)> showBox,
-		Fn<void(QString)> showToast,
+		std::shared_ptr<Ui::Show> show,
 		Fn<void(JoinInfo)> done) {
 	Expects(done != nullptr);
 
 	const auto session = &peer->session();
 	if (_request) {
 		if (_request->peer == peer) {
-			_request->showBox = std::move(showBox);
-			_request->showToast = std::move(showToast);
+			_request->show = std::move(show);
 			_request->done = std::move(done);
 			return;
 		}
@@ -123,15 +117,25 @@ void StartRtmpProcess::start(
 	_request = std::make_unique<RtmpRequest>(
 		RtmpRequest{
 			.peer = peer,
-			.showBox = std::move(showBox),
-			.showToast = std::move(showToast),
-			.done = std::move(done) });
+			.show = std::move(show),
+			.done = std::move(done),
+		});
 	session->account().sessionChanges(
 	) | rpl::start_with_next([=] {
 		_request = nullptr;
 	}, _request->lifetime);
 
 	requestUrl(false);
+}
+
+void StartRtmpProcess::close() {
+	if (_request) {
+		_request->peer->session().api().request(_request->id).cancel();
+		if (const auto strong = _request->box.data()) {
+			strong->closeBox();
+		}
+		_request = nullptr;
+	}
 }
 
 void StartRtmpProcess::requestUrl(bool revoke) {
@@ -146,7 +150,7 @@ void StartRtmpProcess::requestUrl(bool revoke) {
 		});
 		processUrl(std::move(data));
 	}).fail([=] {
-		_request->showToast(Lang::Hard::ServerError());
+		_request->show->showToast(Lang::Hard::ServerError());
 	}).send();
 }
 
@@ -158,15 +162,8 @@ void StartRtmpProcess::processUrl(RtmpInfo data) {
 }
 
 void StartRtmpProcess::finish(JoinInfo info) {
-	const auto done = std::move(_request->done);
-	const auto box = _request->box;
-	const auto current = _request->data.current();
-	_request = nullptr;
-	info.rtmpInfo = current;
-	done(std::move(info));
-	if (const auto strong = box.data()) {
-		strong->closeBox();
-	}
+	info.rtmpInfo = _request->data.current();
+	_request->done(std::move(info));
 }
 
 void StartRtmpProcess::createBox() {
@@ -176,7 +173,7 @@ void StartRtmpProcess::createBox() {
 	};
 	auto revoke = [=] {
 		const auto guard = base::make_weak(&_request->guard);
-		_request->showBox(Ui::MakeConfirmBox({
+		_request->show->showBox(Ui::MakeConfirmBox({
 			.text = tr::lng_group_call_rtmp_revoke_sure(),
 			.confirmed = crl::guard(guard, [=](Fn<void()> &&close) {
 				requestUrl(true);
@@ -189,22 +186,20 @@ void StartRtmpProcess::createBox() {
 		StartWithBox,
 		std::move(done),
 		std::move(revoke),
-		_request->showBox,
-		_request->showToast,
+		_request->show,
 		_request->data.value());
 	object->boxClosing(
 	) | rpl::start_with_next([=] {
 		_request = nullptr;
 	}, _request->lifetime);
 	_request->box = Ui::MakeWeak(object.data());
-	_request->showBox(std::move(object));
+	_request->show->showBox(std::move(object));
 }
 
 void StartRtmpProcess::FillRtmpRows(
 		not_null<Ui::VerticalLayout*> container,
 		bool divider,
-		Fn<void(object_ptr<Ui::BoxContent>)> showBox,
-		Fn<void(QString)> showToast,
+		std::shared_ptr<Ui::Show> show,
 		rpl::producer<RtmpInfo> &&data,
 		const style::FlatLabel *labelStyle,
 		const style::IconButton *showButtonStyle,
@@ -230,6 +225,9 @@ void StartRtmpProcess::FillRtmpRows(
 		data
 	) | rpl::map([=](const auto &d) { return d.url; });
 
+	const auto showToast = [=](const QString &text) {
+		show->showToast(text);
+	};
 	const auto addButton = [&](
 			bool key,
 			rpl::producer<QString> &&text) {
@@ -248,9 +246,9 @@ void StartRtmpProcess::FillRtmpRows(
 				QGuiApplication::clipboard()->setText(state->url.current());
 				showToast(tr::lng_group_call_rtmp_url_copied(tr::now));
 			}));
-		Settings::AddSkip(container, st::groupCallRtmpCopyButtonTopSkip);
+		Ui::AddSkip(container, st::groupCallRtmpCopyButtonTopSkip);
 		const auto weak = container->add(std::move(wrap), rowPadding);
-		Settings::AddSkip(container, st::groupCallRtmpCopyButtonBottomSkip);
+		Ui::AddSkip(container, st::groupCallRtmpCopyButtonBottomSkip);
 		button->heightValue(
 		) | rpl::start_with_next([=](int height) {
 			weak->resize(weak->width(), height);
@@ -272,7 +270,7 @@ void StartRtmpProcess::FillRtmpRows(
 	};
 
 	// Server URL.
-	Settings::AddSubsectionTitle(
+	Ui::AddSubsectionTitle(
 		container,
 		tr::lng_group_call_rtmp_url_subtitle(),
 		st::groupCallRtmpSubsectionTitleAddPadding,
@@ -280,18 +278,18 @@ void StartRtmpProcess::FillRtmpRows(
 
 	auto urlLabelContent = state->url.value();
 	addLabel(std::move(urlLabelContent));
-	Settings::AddSkip(container, st::groupCallRtmpUrlSkip);
+	Ui::AddSkip(container, st::groupCallRtmpUrlSkip);
 	addButton(false, tr::lng_group_call_rtmp_url_copy());
 	//
 
 	if (divider) {
-		Settings::AddDivider(container);
+		Ui::AddDivider(container);
 	}
 
 	// Stream Key.
-	Settings::AddSkip(container, st::groupCallRtmpKeySubsectionTitleSkip);
+	Ui::AddSkip(container, st::groupCallRtmpKeySubsectionTitleSkip);
 
-	Settings::AddSubsectionTitle(
+	Ui::AddSubsectionTitle(
 		container,
 		tr::lng_group_call_rtmp_key_subtitle(),
 		st::groupCallRtmpSubsectionTitleAddPadding,
@@ -332,7 +330,7 @@ void StartRtmpProcess::FillRtmpRows(
 				newValue);
 		};
 		if (!state->warned && state->hidden.current()) {
-			showBox(Ui::MakeConfirmBox({
+			show->showBox(Ui::MakeConfirmBox({
 				.text = tr::lng_group_call_rtmp_key_warning(
 					Ui::Text::RichLangValue),
 				.confirmed = [=](Fn<void()> &&close) {
@@ -341,7 +339,7 @@ void StartRtmpProcess::FillRtmpRows(
 					close();
 				},
 				.confirmText = tr::lng_from_request_understand(),
-				.cancelText = tr::lng_close(),
+				.cancelText = tr::lng_cancel(),
 				.confirmStyle = attentionButtonStyle,
 				.labelStyle = labelStyle,
 			}));

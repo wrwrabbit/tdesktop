@@ -10,26 +10,35 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_widget.h"
 #include "history/history.h" // History::session
 #include "history/history_item.h" // HistoryItem::originalText
+#include "history/history_item_helpers.h" // DropDisallowedCustomEmoji
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
 #include "base/event_filter.h"
 #include "ui/layers/generic_box.h"
+#include "ui/rect.h"
 #include "core/shortcuts.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "ui/toast/toast.h"
 #include "ui/wrap/vertical_layout.h"
+#include "ui/widgets/buttons.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/power_saving.h"
 #include "ui/ui_utility.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "data/data_document.h"
+#include "data/stickers/data_custom_emoji.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
 #include "window/window_session_controller.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
 #include "main/main_session.h"
+#include "settings/settings_premium.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "base/qt/qt_common_adapters.h"
 
 #include <QtCore/QMimeData>
@@ -47,36 +56,64 @@ using EditLinkAction = Ui::InputField::EditLinkAction;
 using EditLinkSelection = Ui::InputField::EditLinkSelection;
 
 constexpr auto kParseLinksTimeout = crl::time(1000);
+constexpr auto kTypesDuration = 4 * crl::time(1000);
 
-// For mention tags save and validate userId, ignore tags for different userId.
-class FieldTagMimeProcessor : public Ui::InputField::TagMimeProcessor {
+// For mention / custom emoji tags save and validate selfId,
+// ignore tags for different users.
+class FieldTagMimeProcessor final {
 public:
-	explicit FieldTagMimeProcessor(
-		not_null<Window::SessionController*> controller);
+	FieldTagMimeProcessor(
+		not_null<Main::Session*> _session,
+		Fn<bool(not_null<DocumentData*>)> allowPremiumEmoji);
 
-	QString tagFromMimeTag(const QString &mimeTag) override;
+	QString operator()(QStringView mimeTag);
 
 private:
-	const not_null<Window::SessionController*> _controller;
+	const not_null<Main::Session*> _session;
+	const Fn<bool(not_null<DocumentData*>)> _allowPremiumEmoji;
 
 };
 
 FieldTagMimeProcessor::FieldTagMimeProcessor(
-	not_null<Window::SessionController*> controller)
-: _controller(controller) {
+	not_null<Main::Session*> session,
+	Fn<bool(not_null<DocumentData*>)> allowPremiumEmoji)
+: _session(session)
+, _allowPremiumEmoji(allowPremiumEmoji) {
 }
 
-QString FieldTagMimeProcessor::tagFromMimeTag(const QString &mimeTag) {
-	if (TextUtilities::IsMentionLink(mimeTag)) {
-		const auto userId = _controller->session().userId();
-		auto match = QRegularExpression(":(\\d+)$").match(mimeTag);
-		if (!match.hasMatch()
-			|| match.capturedView(1).toULongLong() != userId.bare) {
-			return QString();
+QString FieldTagMimeProcessor::operator()(QStringView mimeTag) {
+	const auto id = _session->userId().bare;
+	auto all = TextUtilities::SplitTags(mimeTag);
+	auto premiumSkipped = (DocumentData*)nullptr;
+	for (auto i = all.begin(); i != all.end();) {
+		const auto tag = *i;
+		if (TextUtilities::IsMentionLink(tag)
+			&& TextUtilities::MentionNameDataToFields(tag).selfId != id) {
+			i = all.erase(i);
+			continue;
+		} else if (Ui::InputField::IsCustomEmojiLink(tag)) {
+			const auto data = Ui::InputField::CustomEmojiEntityData(tag);
+			const auto emoji = Data::ParseCustomEmojiData(data);
+			if (!emoji) {
+				i = all.erase(i);
+				continue;
+			} else if (!_session->premium()) {
+				const auto document = _session->data().document(emoji);
+				if (document->isPremiumEmoji()) {
+					if (!_allowPremiumEmoji
+						|| premiumSkipped
+						|| !_session->premiumPossible()
+						|| !_allowPremiumEmoji(document)) {
+						premiumSkipped = document;
+						i = all.erase(i);
+						continue;
+					}
+				}
+			}
 		}
-		return mimeTag.mid(0, mimeTag.size() - match.capturedLength());
+		++i;
 	}
-	return mimeTag;
+	return TextUtilities::JoinTag(all);
 }
 
 //bool ValidateUrl(const QString &value) {
@@ -91,8 +128,7 @@ QString FieldTagMimeProcessor::tagFromMimeTag(const QString &mimeTag) {
 
 void EditLinkBox(
 		not_null<Ui::GenericBox*> box,
-		std::shared_ptr<Ui::Show> show,
-		not_null<Main::Session*> session,
+		std::shared_ptr<Main::SessionShow> show,
 		const QString &startText,
 		const QString &startLink,
 		Fn<void(QString, QString)> callback,
@@ -115,8 +151,8 @@ void EditLinkBox(
 	Ui::Emoji::SuggestionsController::Init(
 		box->getDelegate()->outerContainer(),
 		text,
-		session);
-	InitSpellchecker(std::move(show), session, text, fieldStyle != nullptr);
+		&show->session());
+	InitSpellchecker(show, text, fieldStyle != nullptr);
 
 	const auto placeholder = content->add(
 		object_ptr<Ui::RpWidget>(content),
@@ -156,16 +192,18 @@ void EditLinkBox(
 		}
 	};
 
-	QObject::connect(text, &Ui::InputField::submitted, [=] {
+	text->submits(
+	) | rpl::start_with_next([=] {
 		url->setFocusFast();
-	});
-	QObject::connect(url, &Ui::InputField::submitted, [=] {
+	}, text->lifetime());
+	url->submits(
+	) | rpl::start_with_next([=] {
 		if (text->getLastText().isEmpty()) {
 			text->setFocusFast();
 		} else {
 			submit();
 		}
-	});
+	}, url->lifetime());
 
 	box->setTitle(url->getLastText().isEmpty()
 		? tr::lng_formatting_link_create_title()
@@ -189,17 +227,23 @@ void EditLinkBox(
 	url->customTab(true);
 	text->customTab(true);
 
-	QObject::connect(url, &Ui::InputField::tabbed, [=] { text->setFocus(); });
-	QObject::connect(text, &Ui::InputField::tabbed, [=] { url->setFocus(); });
+	url->tabbed(
+	) | rpl::start_with_next([=] {
+		text->setFocus();
+	}, url->lifetime());
+	text->tabbed(
+	) | rpl::start_with_next([=] {
+		url->setFocus();
+	}, text->lifetime());
 }
 
-TextWithEntities StripSupportHashtag(TextWithEntities &&text) {
+TextWithEntities StripSupportHashtag(TextWithEntities text) {
 	static const auto expression = QRegularExpression(
-		qsl("\\n?#tsf[a-z0-9_-]*[\\s#a-z0-9_-]*$"),
+		u"\\n?#tsf[a-z0-9_-]*[\\s#a-z0-9_-]*$"_q,
 		QRegularExpression::CaseInsensitiveOption);
 	const auto match = expression.match(text.text);
 	if (!match.hasMatch()) {
-		return std::move(text);
+		return text;
 	}
 	text.text.chop(match.capturedLength());
 	const auto length = text.text.size();
@@ -216,7 +260,7 @@ TextWithEntities StripSupportHashtag(TextWithEntities &&text) {
 		}
 		++i;
 	}
-	return std::move(text);
+	return text;
 }
 
 } // namespace
@@ -225,17 +269,35 @@ QString PrepareMentionTag(not_null<UserData*> user) {
 	return TextUtilities::kMentionTagStart
 		+ QString::number(user->id.value)
 		+ '.'
-		+ QString::number(user->accessHash());
+		+ QString::number(user->accessHash())
+		+ ':'
+		+ QString::number(user->session().userId().bare);
 }
 
 TextWithTags PrepareEditText(not_null<HistoryItem*> item) {
-	const auto original = item->history()->session().supportMode()
+	auto original = item->history()->session().supportMode()
 		? StripSupportHashtag(item->originalText())
 		: item->originalText();
+	original = DropDisallowedCustomEmoji(
+		item->history()->peer,
+		std::move(original));
 	return TextWithTags{
 		original.text,
 		TextUtilities::ConvertEntitiesToTextTags(original.entities)
 	};
+}
+
+bool EditTextChanged(
+		not_null<HistoryItem*> item,
+		const TextWithTags &updated) {
+	const auto original = PrepareEditText(item);
+
+	// Tags can be different for the same entities, because for
+	// animated emoji each tag contains a different random number.
+	// So we compare entities instead of tags.
+	return (original.text != updated.text)
+		|| (TextUtilities::ConvertTextTagsToEntities(original.tags)
+			!= TextUtilities::ConvertTextTagsToEntities(updated.tags));
 }
 
 Fn<bool(
@@ -243,8 +305,7 @@ Fn<bool(
 	QString text,
 	QString link,
 	EditLinkAction action)> DefaultEditLinkCallback(
-		std::shared_ptr<Ui::Show> show,
-		not_null<Main::Session*> session,
+		std::shared_ptr<Main::SessionShow> show,
 		not_null<Ui::InputField*> field,
 		const style::InputField *fieldStyle) {
 	const auto weak = Ui::MakeWeak(field);
@@ -262,51 +323,96 @@ Fn<bool(
 				strong->commitMarkdownLinkEdit(selection, text, link);
 			}
 		};
-		show->showBox(
-			Box(
-				EditLinkBox,
-				show,
-				session,
-				text,
-				link,
-				std::move(callback),
-				fieldStyle),
-			Ui::LayerOption::KeepOther);
+		show->showBox(Box(
+			EditLinkBox,
+			show,
+			text,
+			link,
+			std::move(callback),
+			fieldStyle));
 		return true;
 	};
 }
 
-void InitMessageField(
-		not_null<Window::SessionController*> controller,
-		not_null<Ui::InputField*> field) {
-	field->setMinHeight(st::historySendSize.height() - 2 * st::historySendPadding);
-	field->setMaxHeight(st::historyComposeFieldMaxHeight);
-
+void InitMessageFieldHandlers(
+		not_null<Main::Session*> session,
+		std::shared_ptr<Main::SessionShow> show,
+		not_null<Ui::InputField*> field,
+		Fn<bool()> customEmojiPaused,
+		Fn<bool(not_null<DocumentData*>)> allowPremiumEmoji,
+		const style::InputField *fieldStyle) {
 	field->setTagMimeProcessor(
-		std::make_unique<FieldTagMimeProcessor>(controller));
-
-	field->document()->setDocumentMargin(4.);
-	field->setAdditionalMargin(style::ConvertScale(4) - 4);
-
-	field->customTab(true);
+		FieldTagMimeProcessor(session, allowPremiumEmoji));
+	const auto paused = [customEmojiPaused] {
+		return On(PowerSaving::kEmojiChat) || customEmojiPaused();
+	};
+	field->setCustomEmojiFactory(
+		session->data().customEmojiManager().factory(),
+		std::move(customEmojiPaused));
 	field->setInstantReplaces(Ui::InstantReplaces::Default());
 	field->setInstantReplacesEnabled(
 		Core::App().settings().replaceEmojiValue());
 	field->setMarkdownReplacesEnabled(rpl::single(true));
-	field->setEditLinkCallback(
-		DefaultEditLinkCallback(
-			std::make_shared<Window::Show>(controller),
-			&controller->session(),
-			field));
+	if (show) {
+		field->setEditLinkCallback(
+			DefaultEditLinkCallback(show, field, fieldStyle));
+		InitSpellchecker(show, field, fieldStyle != nullptr);
+	}
+}
+
+void InitMessageFieldHandlers(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::InputField*> field,
+		ChatHelpers::PauseReason pauseReasonLevel,
+		Fn<bool(not_null<DocumentData*>)> allowPremiumEmoji) {
+	InitMessageFieldHandlers(
+		&controller->session(),
+		controller->uiShow(),
+		field,
+		[=] { return controller->isGifPausedAtLeastFor(pauseReasonLevel); },
+		allowPremiumEmoji);
+}
+
+void InitMessageFieldGeometry(not_null<Ui::InputField*> field) {
+	field->setMinHeight(
+		st::historySendSize.height() - 2 * st::historySendPadding);
+	field->setMaxHeight(st::historyComposeFieldMaxHeight);
+
+	field->document()->setDocumentMargin(4.);
+	field->setAdditionalMargin(style::ConvertScale(4) - 4);
+}
+
+void InitMessageField(
+		std::shared_ptr<ChatHelpers::Show> show,
+		not_null<Ui::InputField*> field,
+		Fn<bool(not_null<DocumentData*>)> allowPremiumEmoji) {
+	InitMessageFieldHandlers(
+		&show->session(),
+		show,
+		field,
+		[=] { return show->paused(ChatHelpers::PauseReason::Any); },
+		std::move(allowPremiumEmoji));
+	InitMessageFieldGeometry(field);
+	field->customTab(true);
+}
+
+void InitMessageField(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::InputField*> field,
+		Fn<bool(not_null<DocumentData*>)> allowPremiumEmoji) {
+	return InitMessageField(
+		controller->uiShow(),
+		field,
+		std::move(allowPremiumEmoji));
 }
 
 void InitSpellchecker(
-		std::shared_ptr<Ui::Show> show,
-		not_null<Main::Session*> session,
+		std::shared_ptr<Main::SessionShow> show,
 		not_null<Ui::InputField*> field,
 		bool skipDictionariesManager) {
 #ifndef TDESKTOP_DISABLE_SPELLCHECK
 	using namespace Spellchecker;
+	const auto session = &show->session();
 	const auto menuItem = skipDictionariesManager
 		? std::nullopt
 		: std::make_optional(SpellingHighlighter::CustomContextMenuItem{
@@ -321,15 +427,6 @@ void InitSpellchecker(
 #endif // TDESKTOP_DISABLE_SPELLCHECK
 }
 
-void InitSpellchecker(
-		not_null<Window::SessionController*> controller,
-		not_null<Ui::InputField*> field) {
-	InitSpellchecker(
-		std::make_shared<Window::Show>(controller),
-		&controller->session(),
-		field);
-}
-
 bool HasSendText(not_null<const Ui::InputField*> field) {
 	const auto &text = field->getTextWithTags().text;
 	for (const auto &ch : text) {
@@ -342,6 +439,73 @@ bool HasSendText(not_null<const Ui::InputField*> field) {
 		}
 	}
 	return false;
+}
+
+void InitMessageFieldFade(
+		not_null<Ui::InputField*> field,
+		const style::color &bg) {
+	class Fade final : public Ui::RpWidget {
+	public:
+		using Ui::RpWidget::RpWidget;
+
+		void setFade(QPixmap &&fade) {
+			_fade = std::move(fade);
+		}
+
+		int resizeGetHeight(int newWidth) override {
+			return st::historyComposeFieldFadeHeight;
+		}
+
+	private:
+		void paintEvent(QPaintEvent *event) override {
+			auto p = QPainter(this);
+			p.drawTiledPixmap(rect(), _fade);
+		}
+
+		QPixmap _fade;
+
+	};
+
+	const auto topFade = Ui::CreateChild<Fade>(field.get());
+	const auto bottomFade = Ui::CreateChild<Fade>(field.get());
+
+	const auto generateFade = [=] {
+		const auto size = QSize(1, st::historyComposeFieldFadeHeight);
+		auto fade = QPixmap(size * style::DevicePixelRatio());
+		fade.setDevicePixelRatio(style::DevicePixelRatio());
+		fade.fill(Qt::transparent);
+		{
+			auto p = QPainter(&fade);
+
+			auto gradient = QLinearGradient(0, 1, 0, size.height());
+			gradient.setStops({ { 0., bg->c }, { .9, Qt::transparent } });
+			p.setPen(Qt::NoPen);
+			p.setBrush(gradient);
+			p.drawRect(Rect(size));
+		}
+		bottomFade->setFade(fade.transformed(QTransform().scale(1, -1)));
+		topFade->setFade(std::move(fade));
+	};
+	generateFade();
+	style::PaletteChanged(
+	) | rpl::start_with_next([=] {
+		generateFade();
+	}, topFade->lifetime());
+
+	field->sizeValue(
+	) | rpl::start_with_next_done([=](const QSize &size) {
+		topFade->resizeToWidth(size.width());
+		bottomFade->resizeToWidth(size.width());
+		bottomFade->move(
+			0,
+			size.height() - st::historyComposeFieldFadeHeight);
+	}, [t = Ui::MakeWeak(topFade), b = Ui::MakeWeak(bottomFade)] {
+		Ui::DestroyChild(t.data());
+		Ui::DestroyChild(b.data());
+	}, topFade->lifetime());
+
+	topFade->show();
+	bottomFade->show();
 }
 
 InlineBotQuery ParseInlineBotQuery(
@@ -371,7 +535,7 @@ InlineBotQuery ParseInlineBotQuery(
 		auto inlineUsernameEqualsText = (inlineUsernameEnd == textLength);
 		auto validInlineUsername = false;
 		if (inlineUsernameEqualsText) {
-			validInlineUsername = text.endsWith(qstr("bot"));
+			validInlineUsername = text.endsWith(u"bot"_q);
 		} else if (inlineUsernameEnd < textLength && inlineUsernameLength) {
 			validInlineUsername = text[inlineUsernameEnd].isSpace();
 		}
@@ -396,10 +560,7 @@ InlineBotQuery ParseInlineBotQuery(
 					result.lookingUpBot = true;
 				}
 			}
-			if (result.lookingUpBot) {
-				result.query = QString();
-				return result;
-			} else if (result.bot
+			if (result.bot
 				&& (!result.bot->isBot()
 					|| result.bot->botInfo->inlinePlaceholder.isEmpty())) {
 				result.bot = nullptr;
@@ -422,7 +583,8 @@ InlineBotQuery ParseInlineBotQuery(
 }
 
 AutocompleteQuery ParseMentionHashtagBotCommandQuery(
-		not_null<const Ui::InputField*> field) {
+		not_null<const Ui::InputField*> field,
+		ChatHelpers::ComposeFeatures features) {
 	auto result = AutocompleteQuery();
 
 	const auto cursor = field->textCursor();
@@ -454,6 +616,9 @@ AutocompleteQuery ParseMentionHashtagBotCommandQuery(
 		const auto text = fragment.text();
 		for (auto i = position - fragmentPosition; i != 0; --i) {
 			if (text[i - 1] == '@') {
+				if (!features.autocompleteMentions) {
+					return {};
+				}
 				if ((position - fragmentPosition - i < 1 || text[i].isLetter()) && (i < 2 || !(text[i - 2].isLetterOrNumber() || text[i - 2] == '_'))) {
 					result.fromStart = (i == 1) && (fragmentPosition == 0);
 					result.query = text.mid(i - 1, position - fragmentPosition - i + 1);
@@ -464,13 +629,19 @@ AutocompleteQuery ParseMentionHashtagBotCommandQuery(
 				}
 				return result;
 			} else if (text[i - 1] == '#') {
+				if (!features.autocompleteHashtags) {
+					return {};
+				}
 				if (i < 2 || !(text[i - 2].isLetterOrNumber() || text[i - 2] == '_')) {
 					result.fromStart = (i == 1) && (fragmentPosition == 0);
 					result.query = text.mid(i - 1, position - fragmentPosition - i + 1);
 				}
 				return result;
 			} else if (text[i - 1] == '/') {
-				if (i < 2) {
+				if (!features.autocompleteCommands) {
+					return {};
+				}
+				if (i < 2 && !fragmentPosition) {
 					result.fromStart = (i == 1) && (fragmentPosition == 0);
 					result.query = text.mid(i - 1, position - fragmentPosition - i + 1);
 				}
@@ -491,8 +662,15 @@ AutocompleteQuery ParseMentionHashtagBotCommandQuery(
 MessageLinksParser::MessageLinksParser(not_null<Ui::InputField*> field)
 : _field(field)
 , _timer([=] { parse(); }) {
-	_connection = QObject::connect(_field, &Ui::InputField::changed, [=] {
+	_lifetime = _field->changes(
+	) | rpl::start_with_next([=] {
 		const auto length = _field->getTextWithTags().text.size();
+		if (!length) {
+			_lastLength = 0;
+			_timer.cancel();
+			parse();
+			return;
+		}
 		const auto timeout = (std::abs(length - _lastLength) > 2)
 			? 0
 			: kParseLinksTimeout;
@@ -507,6 +685,10 @@ MessageLinksParser::MessageLinksParser(not_null<Ui::InputField*> field)
 void MessageLinksParser::parseNow() {
 	_timer.cancel();
 	parse();
+}
+
+void MessageLinksParser::setDisabled(bool disabled) {
+	_disabled = disabled;
 }
 
 bool MessageLinksParser::eventFilter(QObject *object, QEvent *event) {
@@ -530,16 +712,13 @@ bool MessageLinksParser::eventFilter(QObject *object, QEvent *event) {
 	return QObject::eventFilter(object, event);
 }
 
-const rpl::variable<QStringList> &MessageLinksParser::list() const {
-	return _list;
-}
-
 void MessageLinksParser::parse() {
 	const auto &textWithTags = _field->getTextWithTags();
 	const auto &text = textWithTags.text;
 	const auto &tags = textWithTags.tags;
 	const auto &markdownTags = _field->getMarkdownTags();
-	if (text.isEmpty()) {
+	if (_disabled || text.isEmpty()) {
+		_ranges = {};
 		_list = QStringList();
 		return;
 	}
@@ -551,7 +730,7 @@ void MessageLinksParser::parse() {
 			|| (tag == Ui::InputField::kTagSpoiler);
 	};
 
-	auto ranges = QVector<LinkRange>();
+	_ranges.clear();
 
 	auto tag = tags.begin();
 	const auto tagsEnd = tags.end();
@@ -560,7 +739,7 @@ void MessageLinksParser::parse() {
 
 		if (Ui::InputField::IsValidMarkdownLink(tag->id)
 			&& !TextUtilities::IsMentionLink(tag->id)) {
-			ranges.push_back({ tag->offset, tag->length, tag->id });
+			_ranges.push_back({ tag->offset, tag->length, tag->id });
 		}
 		++tag;
 	};
@@ -662,7 +841,7 @@ void MessageLinksParser::parse() {
 				continue;
 			}
 		}
-		const auto range = LinkRange {
+		const auto range = MessageLinkRange{
 			int(domainOffset),
 			static_cast<int>(p - start - domainOffset),
 			QString()
@@ -670,22 +849,20 @@ void MessageLinksParser::parse() {
 		processTagsBefore(domainOffset);
 		if (!hasTagsIntersection(range.start + range.length)) {
 			if (markdownTagsAllow(range.start, range.length)) {
-				ranges.push_back(range);
+				_ranges.push_back(range);
 			}
 		}
 		offset = matchOffset = p - start;
 	}
-	processTagsBefore(QFIXED_MAX);
+	processTagsBefore(Ui::kQFixedMax);
 
-	apply(text, ranges);
+	applyRanges(text);
 }
 
-void MessageLinksParser::apply(
-		const QString &text,
-		const QVector<LinkRange> &ranges) {
-	const auto count = int(ranges.size());
+void MessageLinksParser::applyRanges(const QString &text) {
+	const auto count = int(_ranges.size());
 	const auto current = _list.current();
-	const auto computeLink = [&](const LinkRange &range) {
+	const auto computeLink = [&](const MessageLinkRange &range) {
 		return range.custom.isEmpty()
 			? base::StringViewMid(text, range.start, range.length)
 			: QStringView(range.custom);
@@ -695,7 +872,7 @@ void MessageLinksParser::apply(
 			return true;
 		}
 		for (auto i = 0; i != count; ++i) {
-			if (computeLink(ranges[i]) != current[i]) {
+			if (computeLink(_ranges[i]) != current[i]) {
 				return true;
 			}
 		}
@@ -706,8 +883,156 @@ void MessageLinksParser::apply(
 	}
 	auto parsed = QStringList();
 	parsed.reserve(count);
-	for (const auto &range : ranges) {
+	for (const auto &range : _ranges) {
 		parsed.push_back(computeLink(range).toString());
 	}
 	_list = std::move(parsed);
+}
+
+base::unique_qptr<Ui::RpWidget> CreateDisabledFieldView(
+		QWidget *parent,
+		not_null<PeerData*> peer) {
+	auto result = base::make_unique_q<Ui::AbstractButton>(parent);
+	const auto raw = result.get();
+	const auto label = CreateChild<Ui::FlatLabel>(
+		result.get(),
+		tr::lng_send_text_no(),
+		st::historySendDisabled);
+	label->setAttribute(Qt::WA_TransparentForMouseEvents);
+	raw->setPointerCursor(false);
+	raw->widthValue(
+	) | rpl::start_with_next([=](int width) {
+		const auto &st = st::historyComposeField;
+		const auto margins = (st.textMargins + st.placeholderMargins);
+		const auto available = width - margins.left() - margins.right();
+		const auto skip = st::historySendDisabledIconSkip;
+		label->resizeToWidth(available - skip);
+		label->moveToLeft(margins.left() + skip, margins.top(), width);
+	}, label->lifetime());
+	raw->paintRequest(
+	) | rpl::start_with_next([=] {
+		auto p = QPainter(raw);
+		const auto &st = st::historyComposeField;
+		const auto margins = (st.textMargins + st.placeholderMargins);
+		const auto &icon = st::historySendDisabledIcon;
+		icon.paint(
+			p,
+			margins.left() + st::historySendDisabledPosition.x(),
+			margins.top() + st::historySendDisabledPosition.y(),
+			raw->width());
+	}, raw->lifetime());
+	using WeakToast = base::weak_ptr<Ui::Toast::Instance>;
+	const auto toast = raw->lifetime().make_state<WeakToast>();
+	raw->setClickedCallback([=] {
+		if (toast->get()) {
+			return;
+		}
+		using Flag = ChatRestriction;
+		const auto map = base::flat_map<Flag, tr::phrase<>>{
+			{ Flag::SendPhotos, tr::lng_send_text_type_photos },
+			{ Flag::SendVideos, tr::lng_send_text_type_videos },
+			{
+				Flag::SendVideoMessages,
+				tr::lng_send_text_type_video_messages,
+			},
+			{ Flag::SendMusic, tr::lng_send_text_type_music },
+			{
+				Flag::SendVoiceMessages,
+				tr::lng_send_text_type_voice_messages,
+			},
+			{ Flag::SendFiles, tr::lng_send_text_type_files },
+			{ Flag::SendStickers, tr::lng_send_text_type_stickers },
+			{ Flag::SendPolls, tr::lng_send_text_type_polls },
+		};
+		auto list = QStringList();
+		for (const auto &[flag, phrase] : map) {
+			if (Data::CanSend(peer, flag, false)) {
+				list.append(phrase(tr::now));
+			}
+		}
+		if (list.empty()) {
+			return;
+		}
+		const auto types = (list.size() > 1)
+			? tr::lng_send_text_type_and_last(
+				tr::now,
+				lt_types,
+				list.mid(0, list.size() - 1).join(", "),
+				lt_last,
+				list.back())
+			: list.back();
+		*toast = Ui::Toast::Show(parent, {
+			.text = { tr::lng_send_text_no_about(tr::now, lt_types, types) },
+			.st = &st::defaultMultilineToast,
+			.duration = kTypesDuration,
+			.multiline = true,
+			.slideSide = RectPart::Bottom,
+		});
+	});
+	return result;
+}
+
+base::unique_qptr<Ui::RpWidget> TextErrorSendRestriction(
+		QWidget *parent,
+		const QString &text) {
+	auto result = base::make_unique_q<Ui::RpWidget>(parent);
+	const auto raw = result.get();
+	const auto label = CreateChild<Ui::FlatLabel>(
+		result.get(),
+		text,
+		st::historySendPremiumRequired);
+	label->setAttribute(Qt::WA_TransparentForMouseEvents);
+	raw->paintRequest() | rpl::start_with_next([=](QRect clip) {
+		QPainter(raw).fillRect(clip, st::windowBg);
+	}, raw->lifetime());
+	raw->sizeValue(
+	) | rpl::start_with_next([=](QSize size) {
+		const auto &st = st::historyComposeField;
+		const auto width = size.width();
+		const auto margins = (st.textMargins + st.placeholderMargins);
+		const auto available = width - margins.left() - margins.right();
+		label->resizeToWidth(available);
+		label->moveToLeft(
+			margins.left(),
+			(size.height() - label->height()) / 2,
+			width);
+	}, label->lifetime());
+	return result;
+}
+
+base::unique_qptr<Ui::RpWidget> PremiumRequiredSendRestriction(
+		QWidget *parent,
+		not_null<UserData*> user,
+		not_null<Window::SessionController*> controller) {
+	auto result = base::make_unique_q<Ui::RpWidget>(parent);
+	const auto raw = result.get();
+	const auto label = CreateChild<Ui::FlatLabel>(
+		result.get(),
+		tr::lng_restricted_send_non_premium(
+			tr::now,
+			lt_user,
+			user->shortName()),
+		st::historySendPremiumRequired);
+	label->setAttribute(Qt::WA_TransparentForMouseEvents);
+	const auto link = CreateChild<Ui::LinkButton>(
+		result.get(),
+		tr::lng_restricted_send_non_premium_more(tr::now));
+	raw->paintRequest() | rpl::start_with_next([=](QRect clip) {
+		QPainter(raw).fillRect(clip, st::windowBg);
+	}, raw->lifetime());
+	raw->widthValue(
+	) | rpl::start_with_next([=](int width) {
+		const auto &st = st::historyComposeField;
+		const auto margins = (st.textMargins + st.placeholderMargins);
+		const auto available = width - margins.left() - margins.right();
+		label->resizeToWidth(available);
+		label->moveToLeft(margins.left(), margins.top(), width);
+		link->move(
+			(width - link->width()) / 2,
+			label->y() + label->height());
+	}, label->lifetime());
+	link->setClickedCallback([=] {
+		Settings::ShowPremium(controller, u"require_premium"_q);
+	});
+	return result;
 }

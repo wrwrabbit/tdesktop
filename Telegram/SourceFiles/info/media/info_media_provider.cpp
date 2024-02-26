@@ -15,13 +15,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/history_item_helpers.h"
 #include "data/data_session.h"
 #include "data/data_chat.h"
 #include "data/data_channel.h"
+#include "data/data_forum_topic.h"
 #include "data/data_user.h"
 #include "data/data_peer_values.h"
 #include "data/data_document.h"
 #include "styles/style_info.h"
+#include "styles/style_overview.h"
 
 namespace Info::Media {
 namespace {
@@ -61,6 +64,9 @@ constexpr auto kPreloadedScreensCountFull
 Provider::Provider(not_null<AbstractController*> controller)
 : _controller(controller)
 , _peer(_controller->key().peer())
+, _topicRootId(_controller->key().topic()
+	? _controller->key().topic()->rootId()
+	: 0)
 , _migrated(_controller->migrated())
 , _type(_controller->section().mediaType())
 , _slice(sliceKey(_universalAroundId)) {
@@ -348,14 +354,14 @@ void Provider::setSearchQuery(QString query) {
 SparseIdsMergedSlice::Key Provider::sliceKey(
 		UniversalMsgId universalId) const {
 	using Key = SparseIdsMergedSlice::Key;
-	if (_migrated) {
-		return Key(_peer->id, _migrated->id, universalId);
+	if (!_topicRootId && _migrated) {
+		return Key(_peer->id, _topicRootId, _migrated->id, universalId);
 	}
 	if (universalId < 0) {
 		// Convert back to plain id for non-migrated histories.
 		universalId = universalId + ServerMaxMsgId;
 	}
-	return Key(_peer->id, 0, universalId);
+	return Key(_peer->id, _topicRootId, 0, universalId);
 }
 
 void Provider::itemRemoved(not_null<const HistoryItem*> item) {
@@ -411,7 +417,7 @@ std::unique_ptr<BaseLayout> Provider::createLayout(
 		return nullptr;
 	};
 	const auto getFile = [&]() -> DocumentData* {
-		if (auto media = item->media()) {
+		if (const auto media = item->media()) {
 			return media->document();
 		}
 		return nullptr;
@@ -419,10 +425,18 @@ std::unique_ptr<BaseLayout> Provider::createLayout(
 
 	const auto &songSt = st::overviewFileLayout;
 	using namespace Overview::Layout;
+	const auto options = [&] {
+		const auto media = item->media();
+		return MediaOptions{ .spoiler = media && media->hasSpoiler() };
+	};
 	switch (type) {
 	case Type::Photo:
 		if (const auto photo = getPhoto()) {
-			return std::make_unique<Photo>(delegate, item, photo);
+			return std::make_unique<Photo>(
+				delegate,
+				item,
+				photo,
+				options());
 		}
 		return nullptr;
 	case Type::GIF:
@@ -432,7 +446,7 @@ std::unique_ptr<BaseLayout> Provider::createLayout(
 		return nullptr;
 	case Type::Video:
 		if (const auto file = getFile()) {
-			return std::make_unique<Video>(delegate, item, file);
+			return std::make_unique<Video>(delegate, item, file, options());
 		}
 		return nullptr;
 	case Type::File:

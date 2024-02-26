@@ -15,11 +15,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/wrap.h"
 #include "ui/image/image_prepare.h"
 #include "ui/text/text_utilities.h"
+#include "ui/painter.h"
 #include "info/profile/info_profile_text.h"
 #include "media/streaming/media_streaming_instance.h"
 #include "media/streaming/media_streaming_player.h"
 #include "base/event_filter.h"
 #include "lang/lang_keys.h"
+#include "styles/style_boxes.h"
 #include "styles/style_layers.h"
 #include "styles/style_info.h"
 
@@ -103,6 +105,7 @@ PeerShortInfoCover::PeerShortInfoCover(
 		userpic
 	) | rpl::start_with_next([=](PeerShortInfoUserpic &&value) {
 		applyUserpic(std::move(value));
+		applyAdditionalStatus(value.additionalStatus);
 	}, lifetime());
 
 	style::PaletteChanged(
@@ -134,16 +137,7 @@ PeerShortInfoCover::PeerShortInfoCover(
 		return base::EventFilterResult::Cancel;
 	});
 
-	_name->moveToLeft(
-		_st.namePosition.x(),
-		_st.size - _st.namePosition.y() - _name->height(),
-		_st.size);
-	_status->moveToLeft(
-		_st.statusPosition.x(),
-		(_st.size
-			- _st.statusPosition.y()
-			- _status->height()),
-		_st.size);
+	refreshLabelsGeometry();
 
 	_roundedTopImage = QImage(
 		QSize(_st.size, _st.radius) * style::DevicePixelRatio(),
@@ -413,6 +407,23 @@ QImage PeerShortInfoCover::currentVideoFrame() const {
 		: QImage();
 }
 
+void PeerShortInfoCover::applyAdditionalStatus(const QString &status) {
+	if (status.isEmpty()) {
+		if (_additionalStatus) {
+			_additionalStatus.destroy();
+			refreshLabelsGeometry();
+		}
+		return;
+	}
+	if (_additionalStatus) {
+		_additionalStatus->setText(status);
+	} else {
+		_additionalStatus.create(_widget.get(), status, _statusStyle->st);
+		_additionalStatus->show();
+		refreshLabelsGeometry();
+	}
+}
+
 void PeerShortInfoCover::applyUserpic(PeerShortInfoUserpic &&value) {
 	if (_index != value.index) {
 		_index = value.index;
@@ -591,6 +602,28 @@ void PeerShortInfoCover::refreshBarImages() {
 	_barLarge = makeBar(_largeWidth);
 }
 
+void PeerShortInfoCover::refreshLabelsGeometry() {
+	const auto statusTop = _st.size
+		- _st.statusPosition.y()
+		- _status->height();
+	const auto diff = _st.namePosition.y()
+		- _name->height()
+		- _st.statusPosition.y();
+	if (_additionalStatus) {
+		_additionalStatus->moveToLeft(
+			_status->x(),
+			statusTop - diff - _additionalStatus->height());
+	}
+	_name->moveToLeft(
+		_st.namePosition.x(),
+		_st.size
+			- _st.namePosition.y()
+			- _name->height()
+			- (_additionalStatus ? (diff + _additionalStatus->height()) : 0),
+		_st.size);
+	_status->moveToLeft(_st.statusPosition.x(), statusTop, _st.size);
+}
+
 QRect PeerShortInfoCover::radialRect() const {
 	const auto cover = _widget->rect();
 	const auto size = st::boxLoadingSize;
@@ -613,8 +646,10 @@ PeerShortInfoBox::PeerShortInfoBox(
 	rpl::producer<PeerShortInfoFields> fields,
 	rpl::producer<QString> status,
 	rpl::producer<PeerShortInfoUserpic> userpic,
-	Fn<bool()> videoPaused)
-: _type(type)
+	Fn<bool()> videoPaused,
+	const style::ShortInfoBox *stOverride)
+: _st(stOverride ? *stOverride : st::shortInfoBox)
+, _type(type)
 , _fields(std::move(fields))
 , _topRoundBackground(this)
 , _scroll(this, st::shortInfoScroll)
@@ -650,12 +685,16 @@ rpl::producer<int> PeerShortInfoBox::moveRequests() const {
 void PeerShortInfoBox::prepare() {
 	addButton(tr::lng_close(), [=] { closeBox(); });
 
-	// Perhaps a new lang key should be added for opening a group.
-	addLeftButton((_type == PeerShortInfoType::User)
-		? tr::lng_profile_send_message()
-		: (_type == PeerShortInfoType::Group)
-		? tr::lng_view_button_group()
-		: tr::lng_profile_view_channel(), [=] { _openRequests.fire({}); });
+	if (_type != PeerShortInfoType::Self) {
+		// Perhaps a new lang key should be added for opening a group.
+		addLeftButton(
+			(_type == PeerShortInfoType::User)
+				? tr::lng_profile_send_message()
+				: (_type == PeerShortInfoType::Group)
+				? tr::lng_view_button_group()
+				: tr::lng_profile_view_channel(),
+			[=] { _openRequests.fire({}); });
+	}
 
 	prepareRows();
 
@@ -690,11 +729,12 @@ void PeerShortInfoBox::prepareRows() {
 	auto addInfoLineGeneric = [&](
 			rpl::producer<QString> &&label,
 			rpl::producer<TextWithEntities> &&text,
-			const style::FlatLabel &textSt = st::infoLabeled) {
+			const style::FlatLabel &textSt) {
 		auto line = CreateTextWithLabel(
 			_rows,
 			rpl::duplicate(label) | Ui::Text::ToWithEntities(),
 			rpl::duplicate(text),
+			_st.label,
 			textSt,
 			st::shortInfoLabeledPadding);
 		_rows->add(object_ptr<Ui::OverrideMargins>(
@@ -714,7 +754,7 @@ void PeerShortInfoBox::prepareRows() {
 	auto addInfoLine = [&](
 			rpl::producer<QString> &&label,
 			rpl::producer<TextWithEntities> &&text,
-			const style::FlatLabel &textSt = st::infoLabeled) {
+			const style::FlatLabel &textSt) {
 		return addInfoLineGeneric(
 			std::move(label),
 			std::move(text),
@@ -727,7 +767,7 @@ void PeerShortInfoBox::prepareRows() {
 		auto result = addInfoLine(
 			std::move(label),
 			std::move(text),
-			st::infoLabeledOneLine);
+			_st.labeledOneLine);
 		result->setDoubleClickSelectsParagraph(true);
 		result->setContextCopyText(contextCopyText);
 		return result;
@@ -743,7 +783,7 @@ void PeerShortInfoBox::prepareRows() {
 	auto label = _fields.current().isBio
 		? tr::lng_info_bio_label()
 		: tr::lng_info_about_label();
-	addInfoLine(std::move(label), aboutValue());
+	addInfoLine(std::move(label), aboutValue(), _st.labeled);
 	addInfoOneLine(
 		tr::lng_info_username_label(),
 		usernameValue() | Ui::Text::ToWithEntities(),

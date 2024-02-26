@@ -11,13 +11,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/format_values.h"
 #include "ui/text/text_utilities.h"
 #include "ui/image/image_prepare.h"
+#include "ui/painter.h"
 #include "lang/lang_keys.h"
 #include "styles/style_dialogs.h"
 
 namespace Ui {
 namespace {
-
-constexpr auto kFullArcLength = 360 * 16;
 
 [[nodiscard]] QImage Make(const QImage &image, int size) {
 	if (image.isNull()) {
@@ -208,7 +207,7 @@ void DownloadBar::paint(Painter &p, QRect clip) {
 			p.setBrush(Qt::NoBrush);
 			const auto m = added / 2.;
 			auto rect = QRectF(full).marginsRemoved({ m, m, m, m });
-			if (loading.arcLength < kFullArcLength) {
+			if (loading.arcLength < arc::kFullLength) {
 				p.drawArc(rect, loading.arcFrom, loading.arcLength);
 			} else {
 				p.drawEllipse(rect);
@@ -288,7 +287,7 @@ void DownloadBar::paint(Painter &p, QRect clip) {
 }
 
 float64 DownloadBar::computeProgress() const {
-	const auto now  = _progress.current();
+	const auto now = _progress.current();
 	return now.total ? (now.ready / float64(now.total)) : 0.;
 }
 

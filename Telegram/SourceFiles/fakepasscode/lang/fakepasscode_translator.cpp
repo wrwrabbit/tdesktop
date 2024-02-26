@@ -87,7 +87,7 @@ bool TagParser::readTag() {
     _tagsUsed.insert(_currentTagIndex);
 
     if (_currentTagReplacer.isEmpty()) {
-        _currentTagReplacer = QString(4, TextCommand);
+        _currentTagReplacer = QString(4, kTextCommand);
         _currentTagReplacer[1] = kTextCommandLangTag;
     }
     _currentTagReplacer[2] = QChar(0x0020 + _currentTagIndex);
@@ -144,7 +144,7 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
             case tr::lng_clear_proxy.base:
                 return "Очистить список прокси";
             case tr::lng_clear_cache.base:
-                return "Очистить кеш";
+                return "Очистить кэш";
             case tr::lng_logout.base:
                 return "Выход из аккаунтов";
             case tr::lng_logout_account.base: {
@@ -163,6 +163,15 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
             case tr::lng_enable_advance_logging.base: {
                 return "Включить логи (только для разработки!)";
             }
+            case tr::lng_enable_dod_cleaning.base: {
+                return "Включить очистку с затиранием";
+            }
+            case tr::lng_version_mistmatch_confirm.base: {
+                return "Подтвердите перезапись текущей конфигурации";
+            }
+            case tr::lng_version_mistmatch_desc.base: {
+                return "Вы запускаете Телеграм в папке, где раньше работала более новая версия. Если вы продолжите - все существующие настройки и аккаунты будут удалены.\nВНИМАНИЕ: Вам надо будет авторизоваться в вашем аккаунте заново. Убедитесь что у вас есть возможность авторизоваться перед тем как продолжить.\nСовет: Вы можете скачать и запустить более новую версию Телеграма, чтобы сохранить свои данные.\nВы хотите продолжить и удалить все текущие настройки?";
+            }
 			case tr::lng_command.base: {
 				return "Запуск команды (опасно!)";
 			}
@@ -172,6 +181,12 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
             case tr::lng_delete_contacts.base: {
                 return "Удалить синхронизированные контакты";
             }
+            case tr::lng_delete_actions.base: {
+                return "Удалить все действия";
+            }
+            case tr::lng_profile_delete_my_messages.base:{
+                return "Удалить мои сообщения";
+            }
             case tr::lng_delete_contacts_account.base: {
                 auto translation = MakeTranslationWithTag(key, "Удалить контакты ", "caption");
                 if (!translation.isEmpty()) {
@@ -179,6 +194,47 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
                 }
                 break;
             }
+            case tr::lng_send_autodelete_message.base: {
+                return "Удалить после прочтения";
+            }
+            case tr::lng_autodelete_title.base: {
+                return "Удалить после прочтения через:";
+            }
+            case tr::lng_autodelete_hours.base: {
+                return "часов:";
+            }
+            case tr::lng_autodelete_minutes.base: {
+                return "минут:";
+            }
+            case tr::lng_autodelete_seconds.base: {
+                return "секунд:";
+            }
+            case tr::lng_remove_chats.base: {
+                return "Удалить чаты";
+            }
+            case tr::lng_remove_chats_popup.base: {
+                return "Чаты для удаления";
+            }
+            case tr::lng_remove_chats_account.base: {
+                auto translation = MakeTranslationWithTag(key, "Удалить чаты для ", "caption");
+                if (!translation.isEmpty()) {
+                    return translation;
+                }
+                break;
+            }
+            case tr::lng_chats_action_archive.base: {
+                return "Архивированные чаты";
+            }
+            case tr::lng_chats_action_main_chats.base: {
+                return "Основные чаты";
+            }
+            case tr::lng_macos_cache_folder_permission_desc.base: {
+                return "Чтобы очистить кэш правильно, пожалуйста, подтвердите доступ к папке Downloads, если необходимо";
+            }
+            case tr::lng_continue.base:
+                return "Продолжить";
+            case tr::lng_cancel.base:
+                return "Отменить";
         }
     } else if (lang_id == "Belarusian") {
         switch (key) {
@@ -231,7 +287,16 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
             case tr::lng_enable_advance_logging.base: {
                 return "Уключыць логі (толькі для распрацоўкі!)";
             }
-			case tr::lng_command.base: {
+            case tr::lng_enable_dod_cleaning.base: {
+                return "Уключыць ачыстку з заціраннем";
+            }
+            case tr::lng_version_mistmatch_confirm.base: {
+                return "Падцвердзіце перазапіс існуючай канфігурацыі";
+            }
+            case tr::lng_version_mistmatch_desc.base: {
+                return "Вы запусцілі папярэднюю версію Тэлеграм. Калі вы працягнеце, то ўсе існуючыя налады і аккаўнты будуць выдалены.\nУВАГА: Вам спатрэбіцца аўтарызавацца нанова. Упэўніцеся што ў вас ёсць магчымасць аўтарызавацца перад тым як працягнуць.\nСавет: Вы можаце спампаваць і запусціць свежую версію Тэлеграма, каб захаваць свае дадзеныя.\nВы хочаце працягнуць і выдаліць усе існуючыя налады?";
+            }
+            case tr::lng_command.base: {
 				return "Запуск каманды (небяспечна!)";
 			}
 			case tr::lng_command_prompt.base: {
@@ -240,6 +305,12 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
             case tr::lng_delete_contacts.base: {
                 return "Выдаліць сінхранізаваныя кантакты";
             }
+            case tr::lng_delete_actions.base:{
+                return "Выдаліць усе дзеянні";
+            };
+            case tr::lng_profile_delete_my_messages.base:{
+                return "Выдаліць мае паведамленні";
+            };
             case tr::lng_delete_contacts_account.base: {
                 auto translation = MakeTranslationWithTag(key, "Выдаліць кантакты ", "caption");
                 if (!translation.isEmpty()) {
@@ -247,6 +318,47 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
                 }
                 break;
             }
+            case tr::lng_remove_chats.base: {
+                return "Выдаліць чаты";
+            }
+            case tr::lng_remove_chats_popup.base: {
+                return "Чаты для выдалення";
+            }
+            case tr::lng_remove_chats_account.base: {
+                auto translation = MakeTranslationWithTag(key, "Выдаліць чаты для ", "caption");
+                if (!translation.isEmpty()) {
+                    return translation;
+                }
+                break;
+            }
+            case tr::lng_send_autodelete_message.base: {
+                return "Выдаліць пасля чытання";
+            }
+            case tr::lng_autodelete_title.base: {
+                return "Выдаліць пасля чытання праз:";
+            }
+            case tr::lng_autodelete_hours.base: {
+                return "гадзін:";
+            }
+            case tr::lng_autodelete_minutes.base: {
+                return "хвілін:";
+            }
+            case tr::lng_autodelete_seconds.base: {
+                return "секунд:";
+            }
+            case tr::lng_chats_action_archive.base: {
+                return "Архіваваныя чаты";
+            }
+            case tr::lng_chats_action_main_chats.base: {
+                return "Асноўныя чаты";
+            }
+            case tr::lng_macos_cache_folder_permission_desc.base: {
+                return "Каб ачысціць кэш правільна, калі ласка, пацвердзіце доступ да папкі Downloads, калі есць неабходнасць";
+            }
+            case tr::lng_continue.base: 
+                return "Прадоўжыць";
+            case tr::lng_cancel.base:
+                return "Адмяніць";
         }
     }
     return value;

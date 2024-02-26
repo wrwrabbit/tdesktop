@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_media_common.h"
 #include "media/clip/media_clip_reader.h"
 #include "ui/effects/path_shift_gradient.h"
+#include "ui/painter.h"
 #include "main/main_session.h"
 
 namespace ChatHelpers {
@@ -26,6 +27,10 @@ namespace {
 constexpr auto kDontCacheLottieAfterArea = 512 * 512;
 
 } // namespace
+
+uint8 LottieCacheKeyShift(uint8 replacementsTag, StickerLottieSize sizeTag) {
+	return ((replacementsTag << 4) & 0xF0) | (uint8(sizeTag) & 0x0F);
+}
 
 template <typename Method>
 auto LottieCachedFromContent(
@@ -44,7 +49,7 @@ auto LottieCachedFromContent(
 			key,
 			std::move(handler));
 	};
-	const auto weak = base::make_weak(session.get());
+	const auto weak = base::make_weak(session);
 	const auto put = [=](QByteArray &&cached) {
 		crl::on_main(weak, [=, data = std::move(cached)]() mutable {
 			weak->data().cacheBigFile().put(key, std::move(data));
@@ -115,8 +120,9 @@ std::unique_ptr<Lottie::SinglePlayer> LottiePlayerFromDocument(
 			replacements,
 			std::move(renderer));
 	};
-	const auto tag = replacements ? replacements->tag : uint8(0);
-	const auto keyShift = ((tag << 4) & 0xF0) | (uint8(sizeTag) & 0x0F);
+	const auto keyShift = LottieCacheKeyShift(
+		replacements ? replacements->tag : uint8(0),
+		sizeTag);
 	return LottieFromDocument(method, media, uint8(keyShift), box);
 }
 
@@ -235,7 +241,8 @@ bool PaintStickerThumbnailPath(
 		QPainter &p,
 		not_null<Data::DocumentMedia*> media,
 		QRect target,
-		QLinearGradient *gradient) {
+		QLinearGradient *gradient,
+		bool mirrorHorizontal) {
 	const auto &path = media->thumbnailPath();
 	const auto dimensions = media->owner()->dimensions;
 	if (path.isEmpty() || dimensions.isEmpty() || target.isEmpty()) {
@@ -254,6 +261,12 @@ bool PaintStickerThumbnailPath(
 			0);
 		p.setBrush(*gradient);
 	}
+	if (mirrorHorizontal) {
+		const auto c = QPointF(target.width() / 2., target.height() / 2.);
+		p.translate(c);
+		p.scale(-1., 1.);
+		p.translate(-c);
+	}
 	p.scale(
 		target.width() / float64(dimensions.width()),
 		target.height() / float64(dimensions.height()));
@@ -266,14 +279,25 @@ bool PaintStickerThumbnailPath(
 		QPainter &p,
 		not_null<Data::DocumentMedia*> media,
 		QRect target,
-		not_null<Ui::PathShiftGradient*> gradient) {
+		not_null<Ui::PathShiftGradient*> gradient,
+		bool mirrorHorizontal) {
 	return gradient->paint([&](const Ui::PathShiftGradient::Background &bg) {
 		if (const auto color = std::get_if<style::color>(&bg)) {
 			p.setBrush(*color);
-			return PaintStickerThumbnailPath(p, media, target);
+			return PaintStickerThumbnailPath(
+				p,
+				media,
+				target,
+				nullptr,
+				mirrorHorizontal);
 		}
 		const auto gradient = v::get<QLinearGradient*>(bg);
-		return PaintStickerThumbnailPath(p, media, target, gradient);
+		return PaintStickerThumbnailPath(
+			p,
+			media,
+			target,
+			gradient,
+			mirrorHorizontal);
 	});
 }
 
@@ -285,7 +309,7 @@ QSize ComputeStickerSize(not_null<DocumentData*> document, QSize box) {
 	}
 	const auto ratio = style::DevicePixelRatio();
 	const auto request = Lottie::FrameRequest{ box * ratio };
-	return HistoryView::NonEmptySize(request.size(dimensions, true) / ratio);
+	return HistoryView::NonEmptySize(request.size(dimensions, 8) / ratio);
 }
 
 } // namespace ChatHelpers

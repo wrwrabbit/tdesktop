@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "intro/intro_qr.h"
 
+#include "boxes/abstract_box.h"
 #include "intro/intro_phone.h"
 #include "intro/intro_widget.h"
 #include "intro/intro_password_check.h"
@@ -189,7 +190,11 @@ QrWidget::QrWidget(
 	}, lifetime());
 
 	setupControls();
-	refreshCode();
+	account->mtp().mainDcIdValue(
+	) | rpl::start_with_next([=] {
+		api().request(base::take(_requestId)).cancel();
+		refreshCode();
+	}, lifetime());
 }
 
 int QrWidget::errorTop() const {
@@ -343,7 +348,7 @@ void QrWidget::handleTokenResult(const MTPauth_LoginToken &result) {
 
 void QrWidget::showTokenError(const MTP::Error &error) {
 	_requestId = 0;
-	if (error.type() == qstr("SESSION_PASSWORD_NEEDED")) {
+	if (error.type() == u"SESSION_PASSWORD_NEEDED"_q) {
 		sendCheckPasswordRequest();
 	} else if (base::take(_forceRefresh)) {
 		refreshCode();
@@ -371,18 +376,7 @@ void QrWidget::importTo(MTP::DcId dcId, const QByteArray &token) {
 }
 
 void QrWidget::done(const MTPauth_Authorization &authorization) {
-	authorization.match([&](const MTPDauth_authorization &data) {
-		if (data.vuser().type() != mtpc_user
-			|| !data.vuser().c_user().is_self()) {
-			showError(rpl::single(Lang::Hard::ServerError()));
-			return;
-		}
-		finish(data.vuser());
-	}, [&](const MTPDauth_authorizationSignUpRequired &data) {
-		_requestId = 0;
-		LOG(("API Error: Unexpected auth.authorizationSignUpRequired."));
-		showError(rpl::single(Lang::Hard::ServerError()));
-	});
+	finish(authorization);
 }
 
 void QrWidget::sendCheckPasswordRequest() {
@@ -394,7 +388,7 @@ void QrWidget::sendCheckPasswordRequest() {
 				LOG(("API Error: No current password received on login."));
 				goReplace<QrWidget>(Animate::Forward);
 				return;
-			} else if (!getData()->pwdState.request) {
+			} else if (!getData()->pwdState.hasPassword) {
 				const auto callback = [=](Fn<void()> &&close) {
 					Core::UpdateApplication();
 					close();

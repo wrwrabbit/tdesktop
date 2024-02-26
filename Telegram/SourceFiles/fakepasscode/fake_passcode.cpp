@@ -5,6 +5,7 @@
 #include "storage/details/storage_file_utilities.h"
 #include "storage/serialize_common.h"
 #include "fakepasscode/log/fake_log.h"
+#include "actions/action_executor.h"
 
 #include "core/application.h"
 #include "main/main_domain.h"
@@ -13,7 +14,7 @@
 MTP::AuthKeyPtr FakePasscode::FakePasscode::GetEncryptedPasscode() const {
     if (!encrypted_passcode_) {
         encrypted_passcode_ = EncryptPasscode(fake_passcode_.current());
-    }    
+    }
     return encrypted_passcode_;
 }
 
@@ -34,7 +35,11 @@ void FakePasscode::FakePasscode::RemoveAction(ActionType type) {
     actions_.erase(type);
     state_changed_.fire({});
 }
-
+void FakePasscode::FakePasscode::ClearActions(){
+    FAKE_LOG(qsl("Clear actions for passcode %1").arg(name_));
+    actions_.clear();
+    state_changed_.fire({});
+}
 const FakePasscode::Action *FakePasscode::FakePasscode::operator[](ActionType type) const {
     FAKE_LOG(qsl("Get action of type %1 for passcode %2").arg(static_cast<int>(type)).arg(name_));
     if (auto pos = actions_.find(type); pos != actions_.end()) {
@@ -55,16 +60,7 @@ FakePasscode::FakePasscode::GetActions() const {
 }
 
 void FakePasscode::FakePasscode::Execute() {
-    for (const auto&[type, action]: actions_) {
-        try {
-            FAKE_LOG(qsl("Execute action of type %1 for passcode %2").arg(static_cast<int>(type)).arg(name_));
-            action->Execute();
-        } catch (...) {
-            FAKE_LOG(qsl("Execution of action type %1 failed for passcode %2")
-                .arg(static_cast<int>(type))
-                .arg(name_));
-        }
-    }
+    ExecuteActions(actions_ | ranges::views::values | ranges::to_vector, name_);
 }
 
 FakePasscode::FakePasscode::FakePasscode(
@@ -86,16 +82,22 @@ bool FakePasscode::FakePasscode::CheckPasscode(const QByteArray &passcode) const
 QByteArray FakePasscode::FakePasscode::SerializeActions() const {
     QByteArray result;
     QDataStream stream(&result, QIODevice::ReadWrite);
-    stream << qint32(actions_.size());
+    std::vector<QByteArray> serialized_actions;
+    serialized_actions.reserve(actions_.size());
     for (const auto &[type, action] : actions_) {
         FAKE_LOG(qsl("Serialize action of type %1 for passcode %2").arg(static_cast<int>(type)).arg(name_));
         auto serialized_data = action->Serialize();
         if (!serialized_data.isEmpty()) {
-            stream << serialized_data;
+            serialized_actions.push_back(std::move(serialized_data));
         } else {
             FAKE_LOG(qsl("Serialization failed for action of type %1 for passcode %2, "
                          "because we have no data for it").arg(static_cast<int>(type)).arg(name_));
         }
+    }
+
+    stream << qint32(serialized_actions.size());
+    for (auto&& data : serialized_actions) {
+        stream << data;
     }
     return result;
 }
@@ -109,6 +111,10 @@ void FakePasscode::FakePasscode::DeSerializeActions(QByteArray serialized) {
     for (qint32 i = 0; i < actionsSize; ++i) {
         QByteArray actionSerialized;
         stream >> actionSerialized;
+        // Ignore corrupted actions. Possibly we write amount greater than real amount
+        if (actionSerialized.isEmpty()) {
+            continue;
+        }
         auto action = ::FakePasscode::DeSerialize(actionSerialized);
         FAKE_LOG(qsl("Find action of type %1 for passcode %2").arg(static_cast<int>(action->GetType())).arg(name_));
         actions_[action->GetType()] = std::move(action);

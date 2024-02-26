@@ -10,10 +10,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/group_call_userpics.h"
 #include "ui/widgets/shadow.h"
 #include "ui/text/text_options.h"
+#include "ui/painter.h"
 #include "lang/lang_keys.h"
-#include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_calls.h"
 #include "styles/style_info.h" // st::topBarArrowPadding, like TopBarWidget.
+#include "styles/style_window.h" // st::columnMinimalWidthLeft
 #include "styles/palette.h"
 
 #include <QtGui/QtEvents>
@@ -143,18 +145,20 @@ void RequestsBar::paint(Painter &p) {
 	const auto userpicsLeft = userpicsTop * 2;
 	const auto textTop = st::lineWidth + (st::historyRequestsHeight
 		- st::lineWidth
-		- st::msgServiceNameFont->height) / 2;
+		- st::semiboldFont->height) / 2;
 	const auto width = _inner->width();
 	const auto &font = st::defaultMessageBar.title.font;
 	p.setPen(st::defaultMessageBar.titleFg);
 	p.setFont(font);
 
-	const auto textLeft = userpicsLeft + _userpicsWidth + userpicsLeft;
-	const auto available = width - textLeft - userpicsLeft;
-	if (_textFull.isEmpty() || available < _textFull.maxWidth()) {
-		_textShort.drawElided(p, textLeft, textTop, available);
-	} else {
-		_textFull.drawElided(p, textLeft, textTop, available);
+	if (width >= st::columnMinimalWidthLeft / 2) {
+		const auto textLeft = userpicsLeft + _userpicsWidth + userpicsLeft;
+		const auto available = width - textLeft - userpicsLeft;
+		if (_textFull.isEmpty() || available < _textFull.maxWidth()) {
+			_textShort.drawElided(p, textLeft, textTop, available);
+		} else {
+			_textFull.drawElided(p, textLeft, textTop, available);
+		}
 	}
 
 	// Skip shadow of the bar above.

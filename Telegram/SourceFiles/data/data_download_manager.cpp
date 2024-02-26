@@ -20,10 +20,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 #include "main/main_session.h"
 #include "main/main_account.h"
+#include "lang/lang_keys.h"
 #include "storage/storage_account.h"
 #include "history/history.h"
 #include "history/history_item.h"
-#include "history/history_message.h"
+#include "history/history_item_helpers.h"
 #include "core/application.h"
 #include "core/mime_type.h"
 #include "ui/controls/download_bar.h"
@@ -39,7 +40,7 @@ namespace Data {
 namespace {
 
 constexpr auto kClearLoadingTimeout = 5 * crl::time(1000);
-constexpr auto kMaxFileSize = 2000 * 1024 * 1024;
+constexpr auto kMaxFileSize = 4000 * int64(1024 * 1024);
 constexpr auto kMaxResolvePerAttempt = 100;
 
 constexpr auto ByItem = [](const auto &entry) {
@@ -64,26 +65,43 @@ constexpr auto ByDocument = [](const auto &entry) {
 	return 0;
 }
 
-[[nodiscard]] PhotoData *ItemPhoto(not_null<HistoryItem*> item) {
-	if (const auto media = item->media()) {
-		if (const auto page = media->webpage()) {
-			return page->document ? nullptr : page->photo;
-		} else if (const auto photo = media->photo()) {
-			return photo;
+[[nodiscard]] bool ItemContainsMedia(const DownloadObject &object) {
+	if (const auto photo = object.photo) {
+		if (const auto media = object.item->media()) {
+			if (const auto page = media->webpage()) {
+				if (page->photo == photo) {
+					return true;
+				}
+				for (const auto &item : page->collage.items) {
+					if (const auto v = std::get_if<PhotoData*>(&item)) {
+						if ((*v) == photo) {
+							return true;
+						}
+					}
+				}
+			} else {
+				return (media->photo() == photo);
+			}
+		}
+	} else if (const auto document = object.document) {
+		if (const auto media = object.item->media()) {
+			if (const auto page = media->webpage()) {
+				if (page->document == document) {
+					return true;
+				}
+				for (const auto &item : page->collage.items) {
+					if (const auto v = std::get_if<DocumentData*>(&item)) {
+						if ((*v) == document) {
+							return true;
+						}
+					}
+				}
+			} else {
+				return (media->document() == document);
+			}
 		}
 	}
-	return nullptr;
-}
-
-[[nodiscard]] DocumentData *ItemDocument(not_null<HistoryItem*> item) {
-	if (const auto media = item->media()) {
-		if (const auto page = media->webpage()) {
-			return page->document;
-		} else if (const auto document = media->document()) {
-			return document;
-		}
-	}
-	return nullptr;
+	return false;
 }
 
 struct DocumentDescriptor {
@@ -242,12 +260,12 @@ void DownloadManager::check(
 		std::vector<DownloadingId>::iterator i) {
 	auto &entry = *i;
 
-	const auto photo = ItemPhoto(entry.object.item);
-	const auto document = ItemDocument(entry.object.item);
-	if (entry.object.photo != photo || entry.object.document != document) {
+	if (!ItemContainsMedia(entry.object)) {
 		cancel(data, i);
 		return;
 	}
+	const auto document = entry.object.document;
+
 	// Load with progress only documents for now.
 	Assert(document != nullptr);
 
@@ -295,7 +313,7 @@ void DownloadManager::addLoaded(
 		.download = id,
 		.started = started,
 		.path = path,
-		.size = int32(size),
+		.size = size,
 		.itemId = item->fullId(),
 		.peerAccessHash = PeerAccessHash(item->history()->peer),
 		.object = std::make_unique<DownloadObject>(object),
@@ -508,9 +526,13 @@ HistoryItem *DownloadManager::lookupLoadingItem(
 void DownloadManager::loadingStopWithConfirmation(
 		Fn<void()> callback,
 		Main::Session *onlyInSession) {
-	const auto window = Core::App().primaryWindow();
 	const auto item = lookupLoadingItem(onlyInSession);
-	if (!window || !item) {
+	if (!item) {
+		return;
+	}
+	const auto window = Core::App().windowFor(
+		&item->history()->session().account());
+	if (!window) {
 		return;
 	}
 	const auto weak = base::make_weak(&item->history()->session());
@@ -540,7 +562,7 @@ void DownloadManager::loadingStopWithConfirmation(
 			if (const auto strong = weak.get()) {
 				if (const auto item = strong->data().message(id)) {
 					if (const auto window = strong->tryResolveWindow()) {
-						window->showPeerHistoryAtItem(item);
+						window->showMessage(item);
 					}
 				}
 			}
@@ -743,6 +765,7 @@ void DownloadManager::generateEntry(
 		InlineImageLocation(), // inlineThumbnail
 		ImageWithLocation(), // thumbnail
 		ImageWithLocation(), // videoThumbnail
+		false, // isPremiumSticker
 		0, // dc
 		id.size);
 	document->setLocation(Core::FileLocation(info));
@@ -789,11 +812,14 @@ void DownloadManager::cancel(
 		SessionData &data,
 		std::vector<DownloadingId>::iterator i) {
 	const auto object = i->object;
+	const auto item = object.item;
 	remove(data, i);
-	if (const auto document = object.document) {
-		document->cancel();
-	} else if (const auto photo = object.photo) {
-		photo->cancel();
+	if (!item->isAdminLogEntry()) {
+		if (const auto document = object.document) {
+			document->cancel();
+		} else if (const auto photo = object.photo) {
+			photo->cancel();
+		}
 	}
 }
 
@@ -860,10 +886,9 @@ not_null<HistoryItem*> DownloadManager::generateItem(
 		? previousItem->history()
 		: session->data().history(session->user());
 	const auto flags = MessageFlag::FakeHistoryItem;
-	const auto replyTo = MsgId();
+	const auto replyTo = FullReplyTo();
 	const auto viaBotId = UserId();
 	const auto date = base::unixtime::now();
-	const auto postAuthor = QString();
 	const auto caption = TextWithEntities();
 	const auto make = [&](const auto media) {
 		return history->makeMessage(
@@ -929,7 +954,7 @@ void DownloadManager::writePostponed(not_null<Main::Session*> session) {
 
 Fn<std::optional<QByteArray>()> DownloadManager::serializator(
 		not_null<Main::Session*> session) const {
-	return [this, weak = base::make_weak(session.get())]()
+	return [this, weak = base::make_weak(session)]()
 		-> std::optional<QByteArray> {
 		const auto strong = weak.get();
 		if (!strong) {
@@ -943,7 +968,7 @@ Fn<std::optional<QByteArray>()> DownloadManager::serializator(
 		const auto constant = sizeof(quint64) // download.objectId
 			+ sizeof(qint32) // download.type
 			+ sizeof(qint64) // started
-			+ sizeof(qint32) // size
+			+ sizeof(quint32) // size
 			+ sizeof(quint64) // itemId.peer
 			+ sizeof(qint64) // itemId.msg
 			+ sizeof(quint64); // peerAccessHash
@@ -962,7 +987,8 @@ Fn<std::optional<QByteArray>()> DownloadManager::serializator(
 				<< quint64(id.download.objectId)
 				<< qint32(id.download.type)
 				<< qint64(id.started)
-				<< qint32(id.size)
+				// FileSize: Right now any file size fits 32 bit.
+				<< quint32(id.size)
 				<< quint64(id.itemId.peer.value)
 				<< qint64(id.itemId.msg.bare)
 				<< quint64(id.peerAccessHash)
@@ -995,7 +1021,8 @@ std::vector<DownloadedId> DownloadManager::deserialize(
 		auto downloadObjectId = quint64();
 		auto uncheckedDownloadType = qint32();
 		auto started = qint64();
-		auto size = qint32();
+		// FileSize: Right now any file size fits 32 bit.
+		auto size = quint32();
 		auto itemIdPeer = quint64();
 		auto itemIdMsg = qint64();
 		auto peerAccessHash = quint64();
@@ -1025,7 +1052,7 @@ std::vector<DownloadedId> DownloadManager::deserialize(
 			},
 			.started = started,
 			.path = path,
-			.size = size,
+			.size = int64(size),
 			.itemId = { PeerId(itemIdPeer), MsgId(itemIdMsg) },
 			.peerAccessHash = peerAccessHash,
 		});
@@ -1082,9 +1109,7 @@ rpl::producer<Ui::DownloadBarContent> MakeDownloadBarContent() {
 		auto &manager = Core::App().downloadManager();
 
 		const auto resolveThumbnailRecursive = [=](auto &&self) -> bool {
-			if (state->document
-				&& (!state->document->hasThumbnail()
-					|| state->document->thumbnailFailed())) {
+			if (state->document && !state->document->hasThumbnail()) {
 				state->media = nullptr;
 			}
 			if (!state->media) {

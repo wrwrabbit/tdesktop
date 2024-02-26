@@ -117,6 +117,7 @@ public:
 	[[nodiscard]] bool hasCallback(mtpRequestId requestId) const;
 	void processCallback(const Response &response);
 	void processUpdate(const Response &message);
+	void clearCallbacks();
 
 	// return true if need to clean request data
 	bool rpcErrorOccured(
@@ -150,8 +151,11 @@ public:
 			ResponseHandler &&callbacks = {},
 			ShiftedDcId shiftedDcId = 0,
 			crl::time msCanWait = 0,
-			mtpRequestId afterRequestId = 0) {
-		const auto requestId = details::GetNextRequestId();
+			mtpRequestId afterRequestId = 0,
+			mtpRequestId overrideRequestId = 0) {
+		const auto requestId = overrideRequestId
+			? overrideRequestId
+			: details::GetNextRequestId();
 		sendSerialized(
 			requestId,
 			details::SerializedRequest::Serialize(request),
@@ -169,13 +173,15 @@ public:
 			FailHandler &&onFail = nullptr,
 			ShiftedDcId shiftedDcId = 0,
 			crl::time msCanWait = 0,
-			mtpRequestId afterRequestId = 0) {
+			mtpRequestId afterRequestId = 0,
+			mtpRequestId overrideRequestId = 0) {
 		return send(
 			request,
 			ResponseHandler{ std::move(onDone), std::move(onFail) },
 			shiftedDcId,
 			msCanWait,
-			afterRequestId);
+			afterRequestId,
+			overrideRequestId);
 	}
 
 	template <typename Request>

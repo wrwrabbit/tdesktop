@@ -7,7 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "settings/settings_common.h"
+#include "settings/settings_common_session.h"
 #include "api/api_user_privacy.h"
 
 class EditPrivacyController;
@@ -32,13 +32,20 @@ void AddPrivacyButton(
 	rpl::producer<QString> label,
 	IconDescriptor &&descriptor,
 	Api::UserPrivacy::Key key,
-	Fn<std::unique_ptr<EditPrivacyController>()> controllerFactory);
+	Fn<std::unique_ptr<EditPrivacyController>()> controllerFactory,
+	const style::SettingsButton *stOverride = nullptr);
 
-class PrivacySecurity : public Section {
+void SetupArchiveAndMute(
+	not_null<Window::SessionController*> controller,
+	not_null<Ui::VerticalLayout*> container);
+
+class PrivacySecurity : public Section<PrivacySecurity> {
 public:
 	PrivacySecurity(
 		QWidget *parent,
 		not_null<Window::SessionController*> controller);
+
+	[[nodiscard]] rpl::producer<QString> title() override;
 
 	rpl::producer<Type> sectionShowOther() override;
 

@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_chat.h"
 #include "data/data_user.h"
 #include "lang/lang_keys.h"
+#include "history/history.h"
+#include "history/history_item.h"
 #include "main/main_session.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/widgets/checkbox.h"
@@ -19,10 +21,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace {
 
-[[nodiscard]] bool IsOldForPin(MsgId id, not_null<PeerData*> peer) {
+[[nodiscard]] bool IsOldForPin(
+		MsgId id,
+		not_null<PeerData*> peer,
+		MsgId topicRootId) {
 	const auto normal = peer->migrateToOrMe();
 	const auto migrated = normal->migrateFrom();
-	const auto top = Data::ResolveTopPinnedId(normal, migrated);
+	const auto top = Data::ResolveTopPinnedId(normal, topicRootId, migrated);
 	if (!top) {
 		return false;
 	} else if (peer == migrated) {
@@ -38,15 +43,17 @@ namespace {
 
 void PinMessageBox(
 		not_null<Ui::GenericBox*> box,
-		not_null<PeerData*> peer,
-		MsgId msgId) {
+		not_null<HistoryItem*> item) {
 	struct State {
 		QPointer<Ui::Checkbox> pinForPeer;
 		QPointer<Ui::Checkbox> notify;
 		mtpRequestId requestId = 0;
 	};
 
-	const auto pinningOld = IsOldForPin(msgId, peer);
+	const auto peer = item->history()->peer;
+	const auto msgId = item->id;
+	const auto topicRootId = item->topic() ? item->topicRootId() : MsgId();
+	const auto pinningOld = IsOldForPin(msgId, peer, topicRootId);
 	const auto state = box->lifetime().make_state<State>();
 	const auto api = box->lifetime().make_state<MTP::Sender>(
 		&peer->session().mtp());

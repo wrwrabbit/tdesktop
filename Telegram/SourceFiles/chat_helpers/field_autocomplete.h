@@ -14,6 +14,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/object_ptr.h"
 
+namespace style {
+struct EmojiPan;
+} // namespace style
+
 namespace Ui {
 class PopupMenu;
 class ScrollArea;
@@ -25,28 +29,39 @@ class SinglePlayer;
 class FrameRenderer;
 } // namespace Lottie;
 
+namespace Main {
+class Session;
+} // namespace Main
+
 namespace Window {
 class SessionController;
 } // namespace Window
 
 namespace Data {
 class DocumentMedia;
-class CloudImageView;
 } // namespace Data
 
 namespace SendMenu {
 enum class Type;
 } // namespace SendMenu
 
+namespace ChatHelpers {
+struct FileChosen;
+class Show;
+} // namespace ChatHelpers
 
 class FieldAutocomplete final : public Ui::RpWidget {
 public:
 	FieldAutocomplete(
 		QWidget *parent,
 		not_null<Window::SessionController*> controller);
+	FieldAutocomplete(
+		QWidget *parent,
+		std::shared_ptr<ChatHelpers::Show> show,
+		const style::EmojiPan *stOverride = nullptr);
 	~FieldAutocomplete();
 
-	[[nodiscard]] not_null<Window::SessionController*> controller() const;
+	[[nodiscard]] std::shared_ptr<ChatHelpers::Show> uiShow() const;
 
 	bool clearFilteredBotCommands();
 	void showFiltered(
@@ -73,22 +88,18 @@ public:
 	};
 	struct MentionChosen {
 		not_null<UserData*> user;
-		ChooseMethod method;
+		QString mention;
+		ChooseMethod method = ChooseMethod::ByEnter;
 	};
 	struct HashtagChosen {
 		QString hashtag;
-		ChooseMethod method;
+		ChooseMethod method = ChooseMethod::ByEnter;
 	};
 	struct BotCommandChosen {
 		QString command;
-		ChooseMethod method;
+		ChooseMethod method = ChooseMethod::ByEnter;
 	};
-	struct StickerChosen {
-		not_null<DocumentData*> sticker;
-		Api::SendOptions options;
-		ChooseMethod method;
-		Ui::MessageSendingAnimationFrom messageSendingFrom;
-	};
+	using StickerChosen = ChatHelpers::FileChosen;
 	enum class Type {
 		Mentions,
 		Hashtags,
@@ -114,16 +125,14 @@ public:
 	void setSendMenuType(Fn<SendMenu::Type()> &&callback);
 
 	void hideFast();
+	void showAnimated();
+	void hideAnimated();
 
 	rpl::producer<MentionChosen> mentionChosen() const;
 	rpl::producer<HashtagChosen> hashtagChosen() const;
 	rpl::producer<BotCommandChosen> botCommandChosen() const;
 	rpl::producer<StickerChosen> stickerChosen() const;
 	rpl::producer<Type> choosingProcesses() const;
-
-public Q_SLOTS:
-	void showAnimated();
-	void hideAnimated();
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
@@ -132,19 +141,8 @@ private:
 	class Inner;
 	friend class Inner;
 	struct StickerSuggestion;
-
-	struct MentionRow {
-		not_null<UserData*> user;
-		std::shared_ptr<Data::CloudImageView> userpic;
-	};
-
-	struct BotCommandRow {
-		not_null<UserData*> user;
-		QString command;
-		QString description;
-		std::shared_ptr<Data::CloudImageView> userpic;
-		Ui::Text::String descriptionText;
-	};
+	struct MentionRow;
+	struct BotCommandRow;
 
 	using HashtagRows = std::vector<QString>;
 	using BotCommandRows = std::vector<BotCommandRow>;
@@ -158,7 +156,9 @@ private:
 	void recount(bool resetScroll = false);
 	StickerRows getStickerSuggestions();
 
-	const not_null<Window::SessionController*> _controller;
+	const std::shared_ptr<ChatHelpers::Show> _show;
+	const not_null<Main::Session*> _session;
+	const style::EmojiPan &_st;
 	QPixmap _cache;
 	MentionRows _mrows;
 	HashtagRows _hrows;

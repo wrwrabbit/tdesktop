@@ -9,13 +9,15 @@
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
 #include "fakepasscode/ui/fakepasscode_box.h"
-#include "ui/widgets/input_fields.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/buttons.h"
+#include "ui/vertical_list.h"
 #include "fakepasscode/ui/action_ui.h"
 #include "main/main_domain.h"
 #include "storage/storage_domain.h"
 #include "boxes/abstract_box.h"
 #include "ui/text/text_utilities.h"
+#include "styles/style_menu_icons.h"
 #include "fakepasscode/log/fake_log.h"
 
 class FakePasscodeContentBox;
@@ -45,38 +47,23 @@ FakePasscodeContent::FakePasscodeContent(QWidget *parent,
 , _outerBox(outerBox) {
 }
 
-class FakePasscodeContentBox : public Ui::BoxContent {
-public:
-    FakePasscodeContentBox(QWidget* parent,
-                           Main::Domain* domain, not_null<Window::SessionController*> controller,
-                           size_t passcodeIndex);
-
-protected:
-    void prepare() override;
-
-private:
-    Main::Domain* _domain;
-    Window::SessionController* _controller;
-    size_t _passcodeIndex;
-
-};
-
 void FakePasscodeContent::setupContent() {
     const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
-    Settings::AddSubsectionTitle(content, tr::lng_fakeaction_list());
+    Ui::AddSubsectionTitle(content, tr::lng_fakeaction_list());
 
     for (const auto& type : FakePasscode::kAvailableActions) {
         const auto ui = GetUIByAction(type, _domain, _passcodeIndex, this);
-        ui->Create(content);
-        Settings::AddDivider(content);
+        ui->Create(content, _controller);
+        Ui::AddDivider(content);
     }
-    Settings::AddButton(content, tr::lng_fakepasscode_change(), st::settingsButton)
+    Settings::AddButtonWithIcon(content, tr::lng_fakepasscode_change(), st::settingsButton,
+                                {&st::menuIconEdit})
             ->addClickHandler([this] {
-                _controller->show(Box<FakePasscodeBox>(&_controller->session(), false, false,
+                _controller->show(Box<FakePasscodeBox>(_controller, false, false,
                                                        _passcodeIndex),
                                   Ui::LayerOption::KeepOther);
             });
-    Settings::AddButton(content, tr::lng_remove_fakepasscode(), st::settingsAttentionButton)
+    Settings::AddButtonWithIcon(content, tr::lng_remove_fakepasscode(), st::settingsAttentionButton)
             ->addClickHandler([this] {
                 destroy();
                 _domain->local().RemoveFakePasscode(_passcodeIndex);
@@ -109,20 +96,23 @@ void FakePasscodeList::draw(size_t passcodesSize) {
     FAKE_LOG(("Draw %1 passcodes").arg(passcodesSize));
     const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
     for (size_t i = 0; i < passcodesSize; ++i) {
-        AddButton(content, tr::lng_fakepasscode(lt_caption, _domain->local().GetFakePasscodeName(i)),
-                  st::settingsButton)->addClickHandler([this, i]{
+        AddButtonWithIcon(content, tr::lng_fakepasscode(lt_caption, _domain->local().GetFakePasscodeName(i)),
+                          st::settingsButton, { &st::menuIconLock }
+                          )->addClickHandler([this, i]{
             _controller->show(Box<FakePasscodeContentBox>(_domain, _controller, i),
                               Ui::LayerOption::KeepOther);
         });
     }
     AddDivider(content);
-    AddButton(content, tr::lng_add_fakepasscode(), st::settingsButton)->addClickHandler([this] {
-        _controller->show(Box<FakePasscodeBox>(&_controller->session(), false, true, 0), // _domain
+    AddButtonWithIcon(content, tr::lng_add_fakepasscode(), st::settingsButton,
+                      {&st::settingsIconAdd})->addClickHandler([this] {
+        _controller->show(Box<FakePasscodeBox>(_controller, false, true, 0), // _domain
                           Ui::LayerOption::KeepOther);
     });
     AddDividerText(content, tr::lng_special_actions());
     const auto toggledCacheCleaning = Ui::CreateChild<rpl::event_stream<bool>>(this);
-    auto buttonCacheCleaning = AddButton(content, tr::lng_clear_cache_on_lock(), st::settingsButton)
+    auto buttonCacheCleaning = AddButtonWithIcon(content, tr::lng_clear_cache_on_lock(), st::settingsButton,
+                                                 {&st::menuIconClear})
             ->toggleOn(toggledCacheCleaning->events_starting_with_copy(_domain->local().IsCacheCleanedUpOnLock()));
 
     buttonCacheCleaning->addClickHandler([=] {
@@ -131,13 +121,25 @@ void FakePasscodeList::draw(size_t passcodesSize) {
     });
 
     const auto toggledLogging = Ui::CreateChild<rpl::event_stream<bool>>(this);
-    auto buttonLogging = AddButton(content, tr::lng_enable_advance_logging(), st::settingsButton)
+    auto buttonLogging = AddButtonWithIcon(content, tr::lng_enable_advance_logging(), st::settingsButton,
+                                           {&st::menuIconSavedMessages})
             ->toggleOn(toggledLogging->events_starting_with_copy(_domain->local().IsAdvancedLoggingEnabled()));
 
     buttonLogging->addClickHandler([=] {
         _domain->local().SetAdvancedLoggingEnabled(buttonLogging->toggled());
         _domain->local().writeAccounts();
     });
+
+    const auto toggledErasingCleaning = Ui::CreateChild<rpl::event_stream<bool>>(this);
+    auto buttonErasing = AddButtonWithIcon(content, tr::lng_enable_dod_cleaning(), st::settingsButton,
+                                           {&st::menuIconClear})
+        ->toggleOn(toggledErasingCleaning->events_starting_with_copy(_domain->local().IsErasingEnabled()));
+
+    buttonErasing->addClickHandler([=] {
+        _domain->local().SetErasingEnabled(buttonErasing->toggled());
+        _domain->local().writeAccounts();
+    });
+
     Ui::ResizeFitChild(this, content);
     FAKE_LOG(("Draw %1 passcodes: success").arg(passcodesSize));
 }

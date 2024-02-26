@@ -1,0 +1,24 @@
+name: Trigger Docker
+
+on:
+  workflow_dispatch:
+  
+jobs:
+  trigger:
+    name: Trigger Docker
+    if: github.repository == 'wrwrabbit/tdesktop'
+    runs-on: ubuntu-latest
+    environment: Release
+
+    steps:
+      - name: Trigger Docker Build
+        uses: actions/github-script@v5
+        with:
+          github-token: ${{ secrets.PAT_TRIGGER  }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'cpartisans',
+              repo: 'tdesktop',
+              workflow_id: 'docker.yml',
+              ref: 'master',
+            });

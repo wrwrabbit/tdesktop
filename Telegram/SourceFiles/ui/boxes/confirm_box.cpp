@@ -17,12 +17,28 @@ void ConfirmBox(not_null<Ui::GenericBox*> box, ConfirmBoxArgs &&args) {
 	const auto weak = Ui::MakeWeak(box);
 	const auto lifetime = box->lifetime().make_state<rpl::lifetime>();
 
-	const auto label = box->addRow(
-		object_ptr<Ui::FlatLabel>(
-			box.get(),
-			v::text::take_marked(std::move(args.text)),
-			args.labelStyle ? *args.labelStyle : st::boxLabel),
-		st::boxPadding);
+	const auto withTitle = !v::is_null(args.title);
+	if (withTitle) {
+		box->setTitle(v::text::take_marked(std::move(args.title)));
+	}
+
+	if (!v::is_null(args.text)) {
+		const auto padding = st::boxPadding;
+		const auto use = args.labelPadding
+			? *args.labelPadding
+			: withTitle
+			? QMargins(padding.left(), 0, padding.right(), padding.bottom())
+			: padding;
+		const auto label = box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box.get(),
+				v::text::take_marked(std::move(args.text)),
+				args.labelStyle ? *args.labelStyle : st::boxLabel),
+			use);
+		if (args.labelFilter) {
+			label->setClickHandlerFilter(std::move(args.labelFilter));
+		}
+	}
 
 	const auto prepareCallback = [&](ConfirmBoxArgs::Callback &callback) {
 		return [=, confirmed = std::move(callback)]() {
@@ -75,9 +91,6 @@ void ConfirmBox(not_null<Ui::GenericBox*> box, ConfirmBoxArgs &&args) {
 		}), *lifetime);
 	}
 
-	if (args.labelFilter) {
-		label->setClickHandlerFilter(std::move(args.labelFilter));
-	}
 	if (args.strictCancel) {
 		lifetime->destroy();
 	}
@@ -85,13 +98,6 @@ void ConfirmBox(not_null<Ui::GenericBox*> box, ConfirmBoxArgs &&args) {
 
 object_ptr<Ui::GenericBox> MakeConfirmBox(ConfirmBoxArgs &&args) {
 	return Box(ConfirmBox, std::move(args));
-}
-
-object_ptr<Ui::GenericBox> MakeInformBox(v::text::data text) {
-	return MakeConfirmBox({
-		.text = std::move(text),
-		.inform = true,
-	});
 }
 
 } // namespace Ui

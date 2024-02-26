@@ -18,7 +18,7 @@ struct ConfirmBoxArgs {
 		Fn<void()>,
 		Fn<void(Fn<void()>)>>;
 
-	v::text::data text;
+	v::text::data text = v::null;
 	Callback confirmed = v::null;
 	Callback cancelled = v::null;
 
@@ -30,6 +30,9 @@ struct ConfirmBoxArgs {
 
 	const style::FlatLabel *labelStyle = nullptr;
 	Fn<bool(const ClickHandlerPtr&, Qt::MouseButton)> labelFilter;
+	std::optional<QMargins> labelPadding;
+
+	v::text::data title = v::null;
 
 	bool inform = false;
 	// If strict cancel is set the cancel.callback() is only called
@@ -37,10 +40,24 @@ struct ConfirmBoxArgs {
 	bool strictCancel = false;
 };
 
-void ConfirmBox(not_null<Ui::GenericBox*> box, ConfirmBoxArgs &&args);
+void ConfirmBox(not_null<GenericBox*> box, ConfirmBoxArgs &&args);
 
-[[nodiscard]] object_ptr<Ui::GenericBox> MakeConfirmBox(
-	ConfirmBoxArgs &&args);
-[[nodiscard]] object_ptr<Ui::GenericBox> MakeInformBox(v::text::data text);
+inline void InformBox(not_null<GenericBox*> box, ConfirmBoxArgs &&args) {
+	args.inform = true;
+	ConfirmBox(box, std::move(args));
+}
+
+[[nodiscard]] object_ptr<GenericBox> MakeConfirmBox(ConfirmBoxArgs &&args);
+
+[[nodiscard]] inline object_ptr<GenericBox> MakeInformBox(
+		ConfirmBoxArgs &&args) {
+	args.inform = true;
+	return MakeConfirmBox(std::move(args));
+}
+
+[[nodiscard]] inline object_ptr<GenericBox> MakeInformBox(
+		v::text::data text) {
+	return MakeInformBox({ .text = std::move(text) });
+}
 
 } // namespace Ui

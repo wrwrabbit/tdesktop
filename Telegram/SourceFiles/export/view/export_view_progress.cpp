@@ -53,7 +53,7 @@ private:
 	void toggleInstance(Instance &data, bool shown);
 	void instanceOpacityCallback(QPointer<Ui::FlatLabel> label);
 	void removeOldInstance(QPointer<Ui::FlatLabel> label);
-	void paintInstance(Painter &p, const Instance &data);
+	void paintInstance(QPainter &p, const Instance &data);
 
 	void updateControlsGeometry(int newWidth);
 	void updateInstanceGeometry(const Instance &instance, int newWidth);
@@ -185,7 +185,7 @@ int ProgressWidget::Row::resizeGetHeight(int newWidth) {
 }
 
 void ProgressWidget::Row::paintEvent(QPaintEvent *e) {
-	Painter p(this);
+	auto p = QPainter(this);
 
 	const auto thickness = st::exportProgressWidth;
 	const auto top = height() - thickness;
@@ -197,7 +197,7 @@ void ProgressWidget::Row::paintEvent(QPaintEvent *e) {
 	paintInstance(p, _current);
 }
 
-void ProgressWidget::Row::paintInstance(Painter &p, const Instance &data) {
+void ProgressWidget::Row::paintInstance(QPainter &p, const Instance &data) {
 	const auto opacity = data.opacity.value(data.hiding ? 0. : 1.);
 
 	if (!opacity) {
@@ -296,6 +296,7 @@ rpl::producer<> ProgressWidget::doneClicks() const {
 }
 
 void ProgressWidget::setupBottomButton(not_null<Ui::RoundButton*> button) {
+	button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 	button->show();
 
 	sizeValue(
@@ -361,7 +362,7 @@ void ProgressWidget::showDone() {
 		tr::lng_export_done(),
 		st::exportDoneButton);
 	const auto desired = std::min(
-		st::exportDoneButton.font->width(tr::lng_export_done(tr::now).toUpper())
+		st::exportDoneButton.font->width(tr::lng_export_done(tr::now))
 		+ st::exportDoneButton.height
 		- st::exportDoneButton.font->height,
 		st::exportPanelSize.width() - 2 * st::exportCancelBottom);

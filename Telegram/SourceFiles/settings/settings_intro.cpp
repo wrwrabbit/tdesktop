@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/settings_intro.h"
 
-#include "settings/settings_common.h"
 #include "settings/settings_advanced.h"
 #include "settings/settings_main.h"
 #include "settings/settings_chat.h"
@@ -19,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/cached_round_corners.h"
+#include "ui/vertical_list.h"
 #include "lang/lang_keys.h"
 #include "boxes/abstract_box.h"
 #include "window/window_controller.h"
@@ -61,46 +61,49 @@ object_ptr<Ui::RpWidget> CreateIntroSettings(
 		not_null<Window::Controller*> window) {
 	auto result = object_ptr<Ui::VerticalLayout>(parent);
 
-	AddDivider(result);
-	AddSkip(result);
-	SetupLanguageButton(result, false);
+	Ui::AddDivider(result);
+	Ui::AddSkip(result);
+	SetupLanguageButton(window, result);
 	SetupConnectionType(window, &window->account(), result);
-	AddSkip(result);
+	Ui::AddSkip(result);
 	if (HasUpdate()) {
-		AddDivider(result);
-		AddSkip(result);
-		SetupUpdate(result, nullptr);
-		AddSkip(result);
+		Ui::AddDivider(result);
+		Ui::AddSkip(result);
+		SetupUpdate(result);
+		Ui::AddSkip(result);
 	}
 	{
 		auto wrap = object_ptr<Ui::VerticalLayout>(result);
 		SetupSystemIntegrationContent(
 			window->sessionController(),
 			wrap.data());
+		SetupWindowTitleContent(
+			window->sessionController(),
+			wrap.data());
 		if (wrap->count() > 0) {
-			AddDivider(result);
-			AddSkip(result);
+			Ui::AddDivider(result);
+			Ui::AddSkip(result);
 			result->add(object_ptr<Ui::OverrideMargins>(
 				result,
 				std::move(wrap)));
-			AddSkip(result);
+			Ui::AddSkip(result);
 		}
 	}
-	AddDivider(result);
-	AddSkip(result);
+	Ui::AddDivider(result);
+	Ui::AddSkip(result);
 	SetupInterfaceScale(window, result, false);
 	SetupDefaultThemes(window, result);
-	AddSkip(result);
+	Ui::AddSkip(result);
 
 	if (anim::Disabled()) {
-		AddDivider(result);
-		AddSkip(result);
-		SetupAnimations(result);
-		AddSkip(result);
+		Ui::AddDivider(result);
+		Ui::AddSkip(result);
+		SetupAnimations(window, result);
+		Ui::AddSkip(result);
 	}
 
-	AddDivider(result);
-	AddSkip(result);
+	Ui::AddDivider(result);
+	Ui::AddSkip(result);
 	SetupFaq(result, false);
 
 	return result;
@@ -174,7 +177,7 @@ public:
 
 	void updateGeometry(QRect newGeometry, int additionalScroll);
 	int scrollTillBottom(int forHeight) const;
-	rpl::producer<int>  scrollTillBottomChanges() const;
+	rpl::producer<int> scrollTillBottomChanges() const;
 
 	void setInnerFocus();
 
@@ -217,7 +220,7 @@ IntroWidget::IntroWidget(
 	_wrap->setAttribute(Qt::WA_OpaquePaintEvent);
 	_wrap->paintRequest(
 	) | rpl::start_with_next([=](QRect clip) {
-		Painter p(_wrap.data());
+		auto p = QPainter(_wrap.data());
 		p.fillRect(clip, st::boxBg);
 	}, _wrap->lifetime());
 
@@ -510,25 +513,20 @@ void LayerWidget::doSetInnerFocus() {
 }
 
 void LayerWidget::paintEvent(QPaintEvent *e) {
-	Painter p(this);
+	auto p = QPainter(this);
 
 	auto clip = e->rect();
 	auto r = st::boxRadius;
-	auto parts = RectPart::None | 0;
+	const auto &pixmaps = Ui::CachedCornerPixmaps(Ui::BoxCorners);
 	if (!_tillTop && clip.intersects({ 0, 0, width(), r })) {
-		parts |= RectPart::FullTop;
+		Ui::FillRoundRect(p, 0, 0, width(), r, st::boxBg, {
+			.p = { pixmaps.p[0], pixmaps.p[1], QPixmap(), QPixmap() },
+		});
 	}
 	if (!_tillBottom && clip.intersects({ 0, height() - r, width(), r })) {
-		parts |= RectPart::FullBottom;
-	}
-	if (parts) {
-		Ui::FillRoundRect(
-			p,
-			rect(),
-			st::boxBg,
-			Ui::BoxCorners,
-			nullptr,
-			parts);
+		Ui::FillRoundRect(p, 0, height() - r, width(), r, st::boxBg, {
+			.p = { QPixmap(), QPixmap(), pixmaps.p[2], pixmaps.p[3] },
+		});
 	}
 	if (_tillTop) {
 		p.fillRect(0, 0, width(), r, st::boxBg);

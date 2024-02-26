@@ -8,12 +8,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include <rpl/variable.h>
-#include "boxes/peer_list_box.h"
 #include "mtproto/sender.h"
 #include "base/timer.h"
 #include "base/weak_ptr.h"
 #include "info/profile/info_profile_members_controllers.h"
 
+class PeerListStories;
 struct ChatAdminRightsInfo;
 struct ChatRestrictionsInfo;
 
@@ -174,6 +174,9 @@ public:
 		QWidget *parent,
 		not_null<PeerListRow*> row) override;
 	void loadMoreRows() override;
+	bool trackSelectedList() override {
+		return !_stories;
+	}
 
 	void peerListSearchAddRow(not_null<PeerData*> peer) override;
 	std::unique_ptr<PeerListRow> createSearchRow(
@@ -184,7 +187,10 @@ public:
 	std::unique_ptr<PeerListState> saveState() const override;
 	void restoreState(std::unique_ptr<PeerListState> state) override;
 
-	rpl::producer<int> onlineCountValue() const override;
+	[[nodiscard]] rpl::producer<int> onlineCountValue() const;
+	[[nodiscard]] rpl::producer<int> fullCountValue() const;
+
+	void setStoriesShown(bool shown);
 
 protected:
 	// Allow child controllers not providing navigation.
@@ -229,6 +235,8 @@ private:
 	void rebuildChatAdmins(not_null<ChatData*> chat);
 	void chatListReady();
 	void rebuildRowTypes();
+	void rebuild();
+	void unload();
 
 	void addNewItem();
 	void addNewParticipants();
@@ -266,6 +274,7 @@ private:
 	void migrate(not_null<ChatData*> chat, not_null<ChannelData*> channel);
 	void subscribeToCreatorChange(not_null<ChannelData*> channel);
 	void fullListRefresh();
+	void refreshRows();
 
 	// It may be nullptr in subclasses of this controller.
 	Window::SessionNavigation *_navigation = nullptr;
@@ -278,9 +287,13 @@ private:
 	bool _allLoaded = false;
 	ParticipantsAdditionalData _additional;
 	std::unique_ptr<ParticipantsOnlineSorter> _onlineSorter;
+	rpl::variable<int> _onlineCountValue;
+	rpl::variable<int> _fullCountValue;
 	Ui::BoxPointer _editBox;
 	Ui::BoxPointer _addBox;
 	QPointer<Ui::BoxContent> _editParticipantBox;
+
+	std::unique_ptr<PeerListStories> _stories;
 
 };
 

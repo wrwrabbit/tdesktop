@@ -63,8 +63,6 @@ public:
 	void forcedLogOut();
 	[[nodiscard]] bool loggingOut() const;
 
-    void postLogoutClearing();
-
 	[[nodiscard]] AppConfig &appConfig() const {
 		Expects(_appConfig != nullptr);
 
@@ -113,14 +111,18 @@ public:
 	void suggestMainDcId(MTP::DcId mainDcId);
 	void destroyStaleAuthorizationKeys();
 
+	void setHandleLoginCode(Fn<void(QString)> callback);
+	void handleLoginCode(const QString &code) const;
+
 	[[nodiscard]] rpl::lifetime &lifetime() {
 		return _lifetime;
 	}
 
     void loggedOut();
 	void loggedOutAfterAction();
+	void postLogoutClearing();
 
-	void logOutAfterAction();
+    [[nodiscard]] std::unique_ptr<MTP::Instance> logOutAfterAction();
 
 private:
 	static constexpr auto kDefaultSaveDelay = crl::time(1000);
@@ -142,9 +144,10 @@ private:
 
 	void destroyMtpKeys(MTP::AuthKeysList &&keys);
 	void resetAuthorizationKeys();
+    [[nodiscard]] std::unique_ptr<MTP::Instance> stealMtpInstance();
 
 	void destroySession(DestroyReason reason);
-	void destroySessionAfterAction(DestroyReason reason);
+	void destroySessionAfterAction();
 
 	const not_null<Domain*> _domain;
 	const std::unique_ptr<Storage::Account> _local;
@@ -159,6 +162,8 @@ private:
 
 	std::unique_ptr<Session> _session;
 	rpl::variable<Session*> _sessionValue;
+
+	Fn<void(QString)> _handleLoginCode = nullptr;
 
 	UserId _sessionUserId = 0;
 	QByteArray _sessionUserSerialized;

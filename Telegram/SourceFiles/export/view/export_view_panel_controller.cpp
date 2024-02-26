@@ -156,7 +156,7 @@ PanelController::~PanelController() {
 		saveSettings();
 	}
 	if (_panel) {
-		_panel->destroyLayer();
+		_panel->hideLayer(anim::type::instant);
 	}
 }
 
@@ -168,7 +168,9 @@ void PanelController::activatePanel() {
 
 void PanelController::createPanel() {
 	const auto singlePeer = _settings->onlySinglePeer();
-	_panel = base::make_unique_q<Ui::SeparatePanel>();
+	_panel = base::make_unique_q<Ui::SeparatePanel>(Ui::SeparatePanelArgs{
+		.onAllSpaces = true,
+	});
 	_panel->setTitle((singlePeer
 		? tr::lng_export_header_chats
 		: tr::lng_export_title)());
@@ -218,12 +220,12 @@ void PanelController::showSettings() {
 void PanelController::showError(const ApiErrorState &error) {
 	LOG(("Export Info: API Error '%1'.").arg(error.data.type()));
 
-	if (error.data.type() == qstr("TAKEOUT_INVALID")) {
+	if (error.data.type() == u"TAKEOUT_INVALID"_q) {
 		showError(tr::lng_export_invalid(tr::now));
-	} else if (error.data.type().startsWith(qstr("TAKEOUT_INIT_DELAY_"))) {
+	} else if (error.data.type().startsWith(u"TAKEOUT_INIT_DELAY_"_q)) {
 		const auto seconds = std::max(base::StringViewMid(
 			error.data.type(),
-			qstr("TAKEOUT_INIT_DELAY_").size()).toInt(), 1);
+			u"TAKEOUT_INIT_DELAY_"_q.size()).toInt(), 1);
 		const auto now = QDateTime::currentDateTime();
 		const auto when = now.addSecs(seconds);
 		const auto hours = seconds / 3600;
@@ -231,7 +233,7 @@ void PanelController::showError(const ApiErrorState &error) {
 			if (hours <= 0) {
 				return tr::lng_export_delay_less_than_hour(tr::now);
 			}
-			return tr::lng_export_delay_hours(tr::now, lt_count, hours);
+			return tr::lng_hours(tr::now, lt_count, hours);
 		}();
 		showError(tr::lng_export_delay(
 			tr::now,
