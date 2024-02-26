@@ -7,17 +7,17 @@ on:
         description: 'Build Windows assets?'
         type: boolean
         required: false
-        default: "true"
+        default: "false"
       releaseLinux:
         description: 'Build Linux assets?'
         type: boolean
         required: false
-        default: "true"
+        default: "false"
       releaseMacOS:
         description: 'Build MacOS assets?'
         type: boolean
         required: false
-        default: "true"
+        default: "false"
 
 jobs:
   release:

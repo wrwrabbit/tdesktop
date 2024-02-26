@@ -61,6 +61,9 @@ enum class PremiumPreview {
 	AnimatedUserpics,
 	RealTimeTranslation,
 	Wallpapers,
+	TagsForMessages,
+	LastSeen,
+	MessagePrivacy,
 
 	kCount,
 };

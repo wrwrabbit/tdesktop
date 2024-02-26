@@ -52,8 +52,6 @@ jobs:
       - name: Set up environment paths.
         shell: bash
         run: |
-          echo "CACHE_KEY=$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> $GITHUB_ENV
-
           echo "Configurate git for cherry-picks."
           git config --global user.email "you@example.com"
           git config --global user.name "Sample"
@@ -64,14 +62,13 @@ jobs:
           nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
 
       - name: Libraries cache.
-        id: cache-
+        id: cache
         uses: actions/cache@v4
         with:
           path: |
               ${{ env.TBUILD }}\Libraries
               ${{ env.TBUILD }}\ThirdParty
-          key: ${{ runner.OS }}-${{ matrix.arch }}-rels-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-rels-
+          key: cache-${{ matrix.arch }}-${{ github.sha }}
 
       - name: Libraries.
         env:
@@ -91,12 +88,18 @@ jobs:
     needs: deps
     environment: Release
     name: Build
-    runs-on: windows-2022
-    #runs-on: windows-larger
 
     strategy:
+      fail-fast: false
       matrix:
-        arch: [Win32, x64]
+        include:
+          - arch: "x64"
+            runner: "windows-2022"
+            #runner: "t-desktop"
+          - arch: "Win32"
+            runner: "windows-2022"
+
+    runs-on: ${{ matrix.runner }}
 
     env:
       UPLOAD_ARTIFACT: "true"
@@ -135,8 +138,6 @@ jobs:
       - name: Set up environment paths.
         shell: bash
         run: |
-          echo "CACHE_KEY=$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> $GITHUB_ENV
-
           echo "Configurate git for cherry-picks."
           git config --global user.email "you@example.com"
           git config --global user.name "Sample"
@@ -147,14 +148,14 @@ jobs:
           nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
 
       - name: Libraries cache.
-        id: cache-
+        id: cache
         uses: actions/cache@v4
         with:
           path: |
               ${{ env.TBUILD }}\Libraries
               ${{ env.TBUILD }}\ThirdParty
-          key: ${{ runner.OS }}-${{ matrix.arch }}-rels-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-rels-${{ env.CACHE_KEY }}
+          key: cache-${{ matrix.arch }}-${{ github.sha }}
+          restore-keys: cache-${{ matrix.arch }}-${{ github.sha }}
           fail-on-cache-miss: true
 
       - name: Read configuration matrix.

@@ -197,6 +197,7 @@ class FileData:
     path = None
 
 def get_file_data(art_id):
+    result = []
     stage = os.path.join("stage", "%s.zip" % (art_id))
     stage_tmp = os.path.join("stage", "%s" % (art_id))
     if not os.path.exists(stage):
@@ -206,20 +207,19 @@ def get_file_data(art_id):
     with zipfile.ZipFile(stage) as zip:
         fs = zip.namelist()
         fs = [f for f in fs if "." not in f]
-        if len(fs) != 1:
-            print(fs)
-            print("Zip contains more than 1 file")
-            sys.exit(1)
         
         if os.path.exists(stage_tmp):
             shutil.rmtree(stage_tmp)
-        zip.extract(fs[0], stage_tmp)
+        for fn in fs:
+            zip.extract(fn, stage_tmp)
         
-        f = FileData()
-        f.fn = fs[0]
-        f.path = os.path.join(stage_tmp, fs[0])
+            f = FileData()
+            f.fn = fn
+            f.path = os.path.join(stage_tmp, fn)
         
-        return f
+            result.append(f)
+
+    return result
 
 ############### MAIN
 
@@ -245,7 +245,7 @@ PREFIX = {
     "tlinuxupd": "linux", 
     "tx64upd": "win64",
     "tupdate": "win",
-    "tarmmacupd": "armac",
+    "tarmacupd": "armac",
     "tmacupd": "mac"
 }
 
@@ -272,27 +272,28 @@ def do_list(args):
 def do_upload(args):
     # check id?
     # unpack file!
-    newfile = get_file_data(args.ids[0])
-    if not newfile:
+    newfiles = get_file_data(args.ids[0])
+    if not newfiles:
         print("No files to upload")
         sys.exit(1)
-        
+
     # tg upload    
     client = tg_login()
     with client:
         # check duplicates
         existing = tg_list_files(client, args.limit)
-        for f in existing:
-            if newfile.fn == f["name"]:
-                print("File %s already exists in TG" % (newfile.fn))
-                pprint(f)
-                sys.exit(1)
-            
-        print ("Found: %s @%s" % (newfile.fn, newfile.path))
-        if args.dry_run:
-            print ("Skip uploading")
-            return
-        tg_upload(client, newfile.fn, newfile.path)
+        for newfile in newfiles:
+            for f in existing:
+                if newfile.fn == f["name"]:
+                    print("File %s already exists in TG. Skip" % (newfile.fn))
+                    pprint(f)
+                    continue
+        
+            print ("Found: %s @%s" % (newfile.fn, newfile.path))
+            if args.dry_run:
+                print ("Skip uploading")
+                return
+            tg_upload(client, newfile.fn, newfile.path)
         print ("Done")
 
 def do_files(args):

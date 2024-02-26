@@ -302,19 +302,26 @@ bool UpdateExtendedMedia(
 	});
 }
 
-} // namespace
-
 TextForMimeData WithCaptionClipboardText(
 		const QString &attachType,
 		TextForMimeData &&caption) {
 	auto result = TextForMimeData();
-	result.reserve(5 + attachType.size() + caption.expanded.size());
-	result.append(u"[ "_q).append(attachType).append(u" ]"_q);
-	if (!caption.empty()) {
-		result.append('\n').append(std::move(caption));
+	if (attachType.isEmpty()) {
+		result.reserve(1 + caption.expanded.size());
+		if (!caption.empty()) {
+			result.append(std::move(caption));
+		}
+	} else {
+		result.reserve(5 + attachType.size() + caption.expanded.size());
+		result.append(u"[ "_q).append(attachType).append(u" ]"_q);
+		if (!caption.empty()) {
+			result.append('\n').append(std::move(caption));
+		}
 	}
 	return result;
 }
+
+} // namespace
 
 Invoice ComputeInvoiceData(
 		not_null<HistoryItem*> item,
@@ -767,9 +774,7 @@ QString MediaPhoto::pinnedTextSubstring() const {
 }
 
 TextForMimeData MediaPhoto::clipboardText() const {
-	return WithCaptionClipboardText(
-		tr::lng_in_dlg_photo(tr::now),
-		parent()->clipboardText());
+	return TextForMimeData();
 }
 
 bool MediaPhoto::allowsEditCaption() const {
@@ -983,13 +988,17 @@ ItemPreview MediaFile::toPreview(ToPreviewOptions options) const {
 	const auto type = [&] {
 		using namespace Ui::Text;
 		if (_document->isVideoMessage()) {
-			return tr::lng_in_dlg_video_message(tr::now);
+			return (item->media() && item->media()->ttlSeconds())
+				? tr::lng_in_dlg_video_message_ttl(tr::now)
+				: tr::lng_in_dlg_video_message(tr::now);
 		} else if (_document->isAnimation()) {
 			return u"GIF"_q;
 		} else if (_document->isVideoFile()) {
 			return tr::lng_in_dlg_video(tr::now);
 		} else if (_document->isVoiceMessage()) {
-			return tr::lng_in_dlg_audio(tr::now);
+			return (item->media() && item->media()->ttlSeconds())
+				? tr::lng_in_dlg_voice_message_ttl(tr::now)
+				: tr::lng_in_dlg_audio(tr::now);
 		} else if (const auto name = FormatSongNameFor(_document).string();
 				!name.isEmpty()) {
 			return name;
@@ -1020,13 +1029,19 @@ TextWithEntities MediaFile::notificationText() const {
 	}
 	const auto type = [&] {
 		if (_document->isVideoMessage()) {
-			return tr::lng_in_dlg_video_message(tr::now);
+			const auto media = parent()->media();
+			return (media && media->ttlSeconds())
+				? tr::lng_in_dlg_video_message_ttl(tr::now)
+				: tr::lng_in_dlg_video_message(tr::now);
 		} else if (_document->isAnimation()) {
 			return u"GIF"_q;
 		} else if (_document->isVideoFile()) {
 			return tr::lng_in_dlg_video(tr::now);
 		} else if (_document->isVoiceMessage()) {
-			return tr::lng_in_dlg_audio(tr::now);
+			const auto media = parent()->media();
+			return (media && media->ttlSeconds())
+				? tr::lng_in_dlg_voice_message_ttl(tr::now)
+				: tr::lng_in_dlg_audio(tr::now);
 		} else if (!_document->filename().isEmpty()) {
 			return _document->filename();
 		} else if (_document->isAudioFile()) {
@@ -1062,36 +1077,9 @@ QString MediaFile::pinnedTextSubstring() const {
 }
 
 TextForMimeData MediaFile::clipboardText() const {
-	const auto attachType = [&] {
-		const auto name = Ui::Text::FormatSongNameFor(_document).string();
-		const auto addName = !name.isEmpty()
-			? u" : "_q + name
-			: QString();
-		if (const auto sticker = _document->sticker()) {
-			if (!_emoji.isEmpty()) {
-				return tr::lng_in_dlg_sticker_emoji(
-					tr::now,
-					lt_emoji,
-					_emoji);
-			}
-			return tr::lng_in_dlg_sticker(tr::now);
-		} else if (_document->isAnimation()) {
-			if (_document->isVideoMessage()) {
-				return tr::lng_in_dlg_video_message(tr::now);
-			}
-			return u"GIF"_q;
-		} else if (_document->isVideoFile()) {
-			return tr::lng_in_dlg_video(tr::now);
-		} else if (_document->isVoiceMessage()) {
-			return tr::lng_in_dlg_audio(tr::now) + addName;
-		} else if (_document->isSong()) {
-			return tr::lng_in_dlg_audio_file(tr::now) + addName;
-		}
-		return tr::lng_in_dlg_file(tr::now) + addName;
-	}();
 	auto caption = parent()->clipboardText();
 
-	if (_document->isVoiceMessage()) {
+	if (_document->isVoiceMessage() || _document->isVideoMessage()) {
 		const auto &entry = _document->session().api().transcribes().entry(
 			parent());
 		if (!entry.requestId
@@ -1099,17 +1087,18 @@ TextForMimeData MediaFile::clipboardText() const {
 			&& !entry.toolong
 			&& !entry.failed
 			&& (entry.pending || !entry.result.isEmpty())) {
-			const auto text = "{{\n"
+			const auto hasCaption = !caption.rich.text.isEmpty();
+			const auto text = (hasCaption ? "{{\n" : "")
 				+ entry.result
 				+ (entry.result.isEmpty() ? "" : " ")
 				+ (entry.pending ? "[...]" : "")
-				+ "\n}}"
-				+ (caption.rich.text.isEmpty() ? "" : "\n");
-			caption = TextForMimeData{ text, { text } }.append(std::move(caption));
+				+ (hasCaption ? "\n}}\n" : "");
+			caption = TextForMimeData{ text, { text } }.append(
+				std::move(caption));
 		}
 	}
 
-	return WithCaptionClipboardText(attachType, std::move(caption));
+	return caption;
 }
 
 bool MediaFile::allowsEditCaption() const {

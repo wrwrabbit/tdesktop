@@ -1,0 +1,14 @@
+diff --git a/init_target.cmake b/init_target.cmake
+index 549865e..0ff31ee 100644
+--- a/init_target.cmake
++++ b/init_target.cmake
+@@ -24,7 +24,8 @@ function(init_target target_name) # init_target(my_target [cxx_std_..] folder_na
+     target_compile_features(${target_name} PRIVATE ${standard})
+ 
+     if (WIN32 AND DESKTOP_APP_SPECIAL_TARGET)
+-        set_property(TARGET ${target_name} APPEND_STRING PROPERTY STATIC_LIBRARY_OPTIONS "$<IF:$<CONFIG:Debug>,,/LTCG>")
++        # don't do /LTCG sa free GH runner is out of heap on x64 build
++        #set_property(TARGET ${target_name} APPEND_STRING PROPERTY STATIC_LIBRARY_OPTIONS "$<IF:$<CONFIG:Debug>,,/LTCG>")
+     endif()
+ 
+     if (LINUX AND NOT DESKTOP_APP_DISABLE_SCUDO AND NOT target_name STREQUAL external_scudo)

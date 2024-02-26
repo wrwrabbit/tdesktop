@@ -238,6 +238,12 @@ Session::Session(not_null<Main::Session*> session)
 , _bigFileCache(Core::App().databases().get(
 	_session->local().cacheBigFilePath(),
 	_session->local().cacheBigFileSettings()))
+, _groupFreeTranscribeLevel(session->account().appConfig().value(
+) | rpl::map([=] {
+	return session->account().appConfig().get<int>(
+		u"group_transcribe_level_min"_q,
+		6);
+}))
 , _chatsList(
 	session,
 	FilterId(),
@@ -292,6 +298,16 @@ Session::Session(not_null<Main::Session*> session)
 		if (enabled != session->settings().dialogsFiltersEnabled()) {
 			session->settings().setDialogsFiltersEnabled(enabled);
 			session->saveSettingsDelayed();
+		}
+	}, _lifetime);
+
+	_reactions->myTagRenamed(
+	) | rpl::start_with_next([=](const ReactionId &id) {
+		const auto i = _viewsByTag.find(id);
+		if (i != end(_viewsByTag)) {
+			for (const auto &view : i->second) {
+				notifyItemDataChange(view->data());
+			}
 		}
 	}, _lifetime);
 
@@ -2168,8 +2184,7 @@ rpl::producer<int> Session::maxPinnedChatsLimitValue(
 	// We always use premium limit in the MainList limit producer,
 	// because it slices the list to that limit. We don't want to slice
 	// premium-ly added chats from the pinned list because of sync issues.
-	return rpl::single(rpl::empty_value()) | rpl::then(
-		_session->account().appConfig().refreshed()
+	return _session->account().appConfig().value(
 	) | rpl::map([=] {
 		const auto limits = Data::PremiumLimits(_session);
 		return folder
@@ -2184,8 +2199,7 @@ rpl::producer<int> Session::maxPinnedChatsLimitValue(
 	// We always use premium limit in the MainList limit producer,
 	// because it slices the list to that limit. We don't want to slice
 	// premium-ly added chats from the pinned list because of sync issues.
-	return rpl::single(rpl::empty_value()) | rpl::then(
-		_session->account().appConfig().refreshed()
+	return _session->account().appConfig().value(
 	) | rpl::map([=] {
 		const auto limits = Data::PremiumLimits(_session);
 		return limits.dialogFiltersChatsPremium();
@@ -2194,8 +2208,7 @@ rpl::producer<int> Session::maxPinnedChatsLimitValue(
 
 rpl::producer<int> Session::maxPinnedChatsLimitValue(
 		not_null<Data::Forum*> forum) const {
-	return rpl::single(rpl::empty_value()) | rpl::then(
-		_session->account().appConfig().refreshed()
+	return _session->account().appConfig().value(
 	) | rpl::map([=] {
 		const auto limits = Data::PremiumLimits(_session);
 		return limits.topicsPinnedCurrent();
@@ -2208,12 +2221,15 @@ rpl::producer<int> Session::maxPinnedChatsLimitValue(
 	// We always use premium limit in the MainList limit producer,
 	// because it slices the list to that limit. We don't want to slice
 	// premium-ly added chats from the pinned list because of sync issues.
-	return rpl::single(rpl::empty_value()) | rpl::then(
-		_session->account().appConfig().refreshed()
+	return _session->account().appConfig().value(
 	) | rpl::map([=] {
 		const auto limits = Data::PremiumLimits(_session);
 		return limits.savedSublistsPinnedPremium();
 	});
+}
+
+int Session::groupFreeTranscribeLevel() const {
+	return _groupFreeTranscribeLevel.current();
 }
 
 const std::vector<Dialogs::Key> &Session::pinnedChatsOrder(
@@ -4439,6 +4455,7 @@ void Session::insertCheckedServiceNotification(
 				MTP_flags(flags),
 				MTP_int(0), // Not used (would've been trimmed to 32 bits).
 				peerToMTP(PeerData::kServiceNotificationsId),
+				MTPint(), // from_boosts_applied
 				peerToMTP(PeerData::kServiceNotificationsId),
 				MTPPeer(), // saved_peer_id
 				MTPMessageFwdHeader(),
@@ -4606,6 +4623,28 @@ auto Session::webViewResultSent() const -> rpl::producer<WebViewResultSent> {
 
 rpl::producer<not_null<PeerData*>> Session::peerDecorationsUpdated() const {
 	return _peerDecorationsUpdated.events();
+}
+
+void Session::viewTagsChanged(
+		not_null<ViewElement*> view,
+		std::vector<Data::ReactionId> &&was,
+		std::vector<Data::ReactionId> &&now) {
+	for (const auto &id : now) {
+		const auto i = ranges::remove(was, id);
+		if (i != end(was)) {
+			was.erase(i, end(was));
+		} else {
+			_viewsByTag[id].emplace(view);
+		}
+	}
+	for (const auto &id : was) {
+		const auto i = _viewsByTag.find(id);
+		if (i != end(_viewsByTag)
+			&& i->second.remove(view)
+			&& i->second.empty()) {
+			_viewsByTag.erase(i);
+		}
+	}
 }
 
 void Session::clearLocalStorage() {

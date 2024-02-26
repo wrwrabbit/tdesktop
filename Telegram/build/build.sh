@@ -331,13 +331,18 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
     echo "Signing the application.."
     if [ "$BuildTarget" == "mac" ]; then
       # Use PTG Ceertificated from GitHub Secrets
-      echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
-      security create-keychain -p ptelegram_pass build.keychain
-      security default-keychain -s build.keychain
-      security unlock-keychain -p ptelegram_pass build.keychain
-      security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
-      security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ptelegram_pass build.keychain
-      identity=$(security find-identity -v | grep Developer | awk -F " " 'END {print $2}')
+      if [ ! -f "certificate.p12" ]; then
+        echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
+        security create-keychain -p ptelegram_pass build.keychain
+        security default-keychain -s build.keychain
+        security unlock-keychain -p ptelegram_pass build.keychain
+        security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ptelegram_pass build.keychain
+      fi
+      if [ "$identity" == "" ]; then
+        echo "Find identity"
+        identity=$(security find-identity -v | grep Developer | awk -F " " 'END {print $2}')
+      fi
       codesign --force --deep -s ${identity} "$ReleasePath/$BundleName" -v --entitlements "$HomePath/Telegram/Telegram.entitlements"
       
       #codesign --force --deep --timestamp --options runtime --sign "Developer ID Application: John Preston" "$ReleasePath/$BundleName" --entitlements "$HomePath/Telegram/Telegram.entitlements"
