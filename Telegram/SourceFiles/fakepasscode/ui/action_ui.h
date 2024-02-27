@@ -10,6 +10,7 @@
 #include "fakepasscode/action.h"
 #include "ui/wrap/vertical_layout.h"
 #include "main/main_domain.h"
+#include "storage/storage_domain.h"
 
 namespace Main {
 class Domain;

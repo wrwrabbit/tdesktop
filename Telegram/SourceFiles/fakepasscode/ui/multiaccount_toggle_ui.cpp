@@ -26,7 +26,6 @@ MultiAccountToggleUi::MultiAccountToggleUi(QWidget *parent, gsl::not_null<Main::
 void MultiAccountToggleUi::Create(not_null<Ui::VerticalLayout *> content,
                                   Window::SessionController*) {
     const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
-    size_t idx = 0;
     auto *button = Settings::AddButtonWithIcon(
             content,
             _description.title(),

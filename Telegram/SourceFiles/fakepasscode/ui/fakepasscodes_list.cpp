@@ -145,10 +145,7 @@ void FakePasscodeContent::setupContent() {
     Ui::AddSubsectionTitle(content, tr::lng_fakeaccountaction_list());
     const auto& accounts = Core::App().domain().accounts();
     account_buttons_.resize(accounts.size());
-    size_t idx = 0;
     for (const auto& [index, account] : accounts) {
-        auto user = account->session().user();
-
         const auto texts = Ui::CreateChild<rpl::event_stream<QString>>(
             content);
         const auto button = content->add(MakeAccountButton(content, account.get()));
