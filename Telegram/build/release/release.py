@@ -272,7 +272,11 @@ def do_list(args):
 def do_upload(args):
     # check id?
     # unpack file!
-    newfiles = get_file_data(args.ids[0])
+    newfiles = []
+    for fid in args.ids:
+        newfiles_ = get_file_data(fid)
+        if newfiles_:
+            newfiles += newfiles_
     if not newfiles:
         print("No files to upload")
         sys.exit(1)
