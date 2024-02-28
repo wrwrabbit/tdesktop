@@ -743,10 +743,11 @@ void CheckReactionNotificationSchedule(
 
 [[nodiscard]] TextWithEntities UnsupportedMessageText() {
 	const auto siteLink = u"https://desktop.telegram.org"_q;
-	const auto ptgSiteLink = u"https://github.com/wrwrabbit/tdesktop/releases/latest"_q;
 	auto is_fake = Core::App().domain().local().IsFake();
 	auto result = TextWithEntities{
-		tr::lng_message_unsupported(tr::now, lt_link, is_fake ? siteLink : ptgSiteLink )
+		is_fake
+		? tr::lng_message_unsupported(tr::now, lt_link, siteLink)
+		: tr::lng_message_unsupported_ptg(tr::now)
 	};
 	TextUtilities::ParseEntities(result, Ui::ItemTextNoMonoOptions().flags);
 	result.entities.push_front(
