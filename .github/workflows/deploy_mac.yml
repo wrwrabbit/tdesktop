@@ -99,3 +99,10 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}_tg
           path: ${{ env.REPO_NAME }}/out/Release/artifact/t*macupd*
+
+      - uses: actions/upload-artifact@master
+        if: env.UPLOAD_ARTIFACT == 'true'
+        name: Upload artifact Extra.
+        with:
+          name: ${{ env.ARTIFACT_NAME }}_extra
+          path: ${{ env.REPO_NAME }}/out/Release/artifact/*.zip
