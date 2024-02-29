@@ -46,7 +46,6 @@ private:
     Window::SessionController* _controller;
     size_t _passcodeIndex;
     FakePasscodeContentBox* _outerBox;
-    std::vector<Settings::Button*> account_buttons_;
 };
 
 FakePasscodeContent::FakePasscodeContent(QWidget *parent,
@@ -144,7 +143,6 @@ void FakePasscodeContent::setupContent() {
 
     Ui::AddSubsectionTitle(content, tr::lng_fakeaccountaction_list());
     const auto& accounts = Core::App().domain().accounts();
-    account_buttons_.resize(accounts.size());
     for (const auto& [index, account] : accounts) {
         const auto texts = Ui::CreateChild<rpl::event_stream<QString>>(
             content);
@@ -154,7 +152,12 @@ void FakePasscodeContent::setupContent() {
             content,
             texts->events(),
             st::defaultSettingsRightLabel),
-            st::boxRowPadding);
+            style::margins(
+                st::boxRowPadding.left() + 32,
+                0,
+                st::boxRowPadding.right(),
+                st::defaultVerticalListSkip * 2)
+        );
         std::move(
             texts->events()
         ) | rpl::start_with_next([=](const QString& text) {
