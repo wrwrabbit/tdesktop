@@ -44,6 +44,7 @@ public:
 	void finish();
 
 	[[nodiscard]] int maxAccounts() const;
+
 	[[nodiscard]] rpl::producer<int> maxAccountsChanges() const;
 
 	[[nodiscard]] Storage::Domain &local() const {
@@ -57,6 +58,7 @@ public:
 	[[nodiscard]] rpl::producer<> accountsChanges() const;
 	[[nodiscard]] Account *maybeLastOrSomeAuthedAccount();
 	[[nodiscard]] int accountsAuthedCount() const;
+	[[nodiscard]] int visibleAccounts() const;
 
 	// Expects(started());
 	[[nodiscard]] Account &active() const;

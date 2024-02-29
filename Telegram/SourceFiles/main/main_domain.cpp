@@ -377,7 +377,7 @@ void Domain::addActivated(MTP::Environment environment, bool newWindow) {
 			activate(account);
 		}
 	};
-	if (accounts().size() < maxAccounts()) {
+	if (visibleAccounts() < maxAccounts()) {
 		added(add(environment));
 	} else {
 		for (auto &[index, account] : accounts()) {
@@ -563,6 +563,18 @@ int Domain::maxAccounts() const {
 		return std::min(int(premiumCount) + Main::kFakeMaxAccounts, Main::kFakePremiumMaxAccounts);
 	}
 	return std::min(int(premiumCount) + Main::kMaxAccounts, Main::kPremiumMaxAccounts);
+}
+
+int Domain::visibleAccounts() const {
+	if (local().IsFake()) {
+		const auto hiddenCount = ranges::count_if(accounts(), [](
+			const Main::Domain::AccountWithIndex &d) {
+			return d.account->isHiddenMode();
+		});
+		return _accounts.size() - hiddenCount;
+	} else {
+		return _accounts.size();
+	}
 }
 
 rpl::producer<int> Domain::maxAccountsChanges() const {

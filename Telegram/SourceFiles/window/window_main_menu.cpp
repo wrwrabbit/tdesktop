@@ -356,7 +356,7 @@ MainMenu::ToggleAccountsButton::ToggleAccountsButton(QWidget *parent)
 	}, lifetime());
 
 	auto &settings = Core::App().settings();
-	if (Core::App().domain().accounts().size() < 2
+	if (Core::App().domain().visibleAccounts() < 2
 		&& settings.mainMenuAccountsShown()) {
 		settings.setMainMenuAccountsShown(false);
 	}
