@@ -17,16 +17,19 @@ struct RoundButton;
 
 namespace ChatHelpers {
 class Show;
+enum class WindowUsage;
 } // namespace ChatHelpers
 
 namespace Ui {
 class RpWidget;
 class RoundButton;
 class GradientButton;
+class VerticalLayout;
 } // namespace Ui
 
 namespace Main {
 class Session;
+class SessionShow;
 } // namespace Main
 
 namespace Window {
@@ -60,6 +63,13 @@ void ShowPremiumPromoToast(
 	std::shared_ptr<ChatHelpers::Show> show,
 	TextWithEntities textWithLink,
 	const QString &ref);
+void ShowPremiumPromoToast(
+	std::shared_ptr<::Main::SessionShow> show,
+	Fn<Window::SessionController*(
+		not_null<::Main::Session*>,
+		ChatHelpers::WindowUsage)> resolveWindow,
+	TextWithEntities textWithLink,
+	const QString &ref);
 
 struct SubscribeButtonArgs final {
 	Window::SessionController *controller = nullptr;
@@ -84,6 +94,11 @@ struct SubscribeButtonArgs final {
 [[nodiscard]] std::vector<PremiumPreview> PremiumPreviewOrder(
 	not_null<::Main::Session*> session);
 
+void AddSummaryPremium(
+	not_null<Ui::VerticalLayout*> content,
+	not_null<Window::SessionController*> controller,
+	const QString &ref,
+	Fn<void(PremiumPreview)> buttonCallback);
 
 } // namespace Settings
 

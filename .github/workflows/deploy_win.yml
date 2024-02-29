@@ -1,0 +1,208 @@
+name: Public Release - Windows
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+
+  deps:
+    environment: Release
+    name: Libraries
+    runs-on: windows-2022
+
+    strategy:
+      matrix:
+        arch: [Win32, x64]
+
+    env:
+      UPLOAD_ARTIFACT: "true"
+      ONLY_CACHE: "false"
+      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
+      PreferredToolArchitecture: "x64"
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Prepare directories.
+        run: |
+          mkdir %userprofile%\TBuild\Libraries
+          mkdir %userprofile%\TBuild\ThirdParty
+          mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+
+      - name: Get repository name.
+        shell: bash
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - uses: ilammy/msvc-dev-cmd@v1.12.0
+        name: Native Tools Command Prompt.
+        with:
+          arch: ${{ matrix.arch }}
+          sdk: 10.0.22000.0
+
+      - name: Clone.
+        uses: actions/checkout@v3.1.0
+        with:
+          submodules: recursive
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
+      - name: Set up environment paths.
+        shell: bash
+        run: |
+          echo "Configurate git for cherry-picks."
+          git config --global user.email "you@example.com"
+          git config --global user.name "Sample"
+
+      - name: NuGet sources.
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      - name: Libraries cache.
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+              ${{ env.TBUILD }}\Libraries
+              ${{ env.TBUILD }}\ThirdParty
+          key: cache-${{ matrix.arch }}-${{ github.sha }}
+
+      - name: Libraries.
+        env:
+          GYP_MSVS_VERSION: 2022
+        run: |
+          cd %TBUILD%
+          %REPO_NAME%\Telegram\build\prepare\win.bat silent
+
+      - name: Free up some disk space.
+        run: |
+          cd %TBUILD%
+          del /S Libraries\*.pdb
+          del /S Libraries\*.pch
+          del /S Libraries\*.obj
+
+  build:
+    needs: deps
+    environment: Release
+    name: Build
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: "x64"
+            runner: "windows-2022"
+            #runner: "t-desktop"
+          - arch: "Win32"
+            runner: "windows-2022"
+
+    runs-on: ${{ matrix.runner }}
+
+    env:
+      UPLOAD_ARTIFACT: "true"
+      ONLY_CACHE: "false"
+      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
+      PreferredToolArchitecture: "x64"
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Prepare directories.
+        run: |
+          mkdir %userprofile%\TBuild\Libraries
+          mkdir %userprofile%\TBuild\ThirdParty
+          mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+
+      - name: Get repository name.
+        shell: bash
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - uses: ilammy/msvc-dev-cmd@v1.12.0
+        name: Native Tools Command Prompt.
+        with:
+          arch: ${{ matrix.arch }}
+          sdk: 10.0.22000.0
+
+      - name: Clone.
+        uses: actions/checkout@v3.1.0
+        with:
+          submodules: recursive
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
+      - name: Set up environment paths.
+        shell: bash
+        run: |
+          echo "Configurate git for cherry-picks."
+          git config --global user.email "you@example.com"
+          git config --global user.name "Sample"
+
+      - name: NuGet sources.
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      - name: Libraries cache.
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+              ${{ env.TBUILD }}\Libraries
+              ${{ env.TBUILD }}\ThirdParty
+          key: cache-${{ matrix.arch }}-${{ github.sha }}
+          restore-keys: cache-${{ matrix.arch }}-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      - name: Read configuration matrix.
+        shell: bash
+        run: |
+          ARTIFACT_NAME="Telegram"
+
+          ARCH=""
+          if [ -n "${{ matrix.arch }}" ]; then
+            case "${{ matrix.arch }}" in
+              Win32) ARCH="x86";;
+              *) ARCH="${{ matrix.arch }}";;
+            esac
+            echo "Architecture from matrix: $ARCH"
+            ARTIFACT_NAME="${ARTIFACT_NAME}_${{ matrix.arch }}"
+          fi
+
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+
+      - name: Telegram Desktop build.
+        if: env.ONLY_CACHE == 'false'
+        env:
+          RSA_PRIVATE: ${{ secrets.RSA_PRIVATE }}
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+        run: |
+          cd %TBUILD%\%REPO_NAME%\Telegram\build
+
+          python3 release_build.py ${{ matrix.arch }}
+
+      - name: Move artifact.
+        if: (env.UPLOAD_ARTIFACT == 'true') || ${{ github.ref == 'refs/heads/nightly' }}
+        run: |
+          mkdir artifact
+          xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\tportable*.zip artifact\ /E/C
+          xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\t*upd* artifact\ /E/C
+      - uses: actions/upload-artifact@master
+        name: Upload artifact.
+        if: (env.UPLOAD_ARTIFACT == 'true')
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: artifact\tportable*
+
+      - uses: actions/upload-artifact@master
+        name: Upload artifact TG.
+        if: (env.UPLOAD_ARTIFACT == 'true')
+        with:
+          name: ${{ env.ARTIFACT_NAME }}_tg
+          path: artifact\t*upd*
+          

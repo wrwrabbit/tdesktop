@@ -418,7 +418,7 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout 58c8cd0c0f
+    git checkout bed08b53a3
 """)
 
 stage('msys64', """
@@ -513,8 +513,9 @@ stage('xz', """
 """)
 
 stage('zlib', """
-    git clone -b v1.3 https://github.com/madler/zlib.git
+    git clone https://github.com/madler/zlib.git
     cd zlib
+    git checkout 643e17b749
 win:
     cmake . ^
         -A %WIN32X64% ^
@@ -854,9 +855,9 @@ win:
     SET MSYS2_PATH_TYPE=inherit
 
     if "%X8664%" equ "x64" (
-        SET "TARGET=x86_64-win64-vs17"
+        SET "TOOLCHAIN=x86_64-win64-vs17"
     ) else (
-        SET "TARGET=x86-win32-vs17"
+        SET "TOOLCHAIN=x86-win32-vs17"
     )
 
 depends:patches/build_libvpx_win.sh
@@ -1127,7 +1128,7 @@ depends:yasm/yasm
 """)
 
 stage('openal-soft', """
-version: 2
+version: 3
 win:
     git clone -b wasapi_exact_device_time https://github.com/telegramdesktop/openal-soft.git
     cd openal-soft
@@ -1139,9 +1140,8 @@ win:
 release:
     cmake --build build --config RelWithDebInfo --parallel
 mac:
-    git clone https://github.com/kcat/openal-soft.git
+    git clone -b coreaudio_device_uid https://github.com/telegramdesktop/openal-soft.git
     cd openal-soft
-    git checkout 1.23.1
     CFLAGS=$UNGUARDED CPPFLAGS=$UNGUARDED cmake -B build . \\
         -D CMAKE_BUILD_TYPE=RelWithDebInfo \\
         -D CMAKE_INSTALL_PREFIX:PATH=$USED_PREFIX \\
@@ -1299,23 +1299,23 @@ release:
 """)
 
 if buildQt5:
-    stage('qt_5_15_11', """
-    git clone https://github.com/qt/qt5.git qt_5_15_11
-    cd qt_5_15_11
+    stage('qt_5_15_12', """
+    git clone https://github.com/qt/qt5.git qt_5_15_12
+    cd qt_5_15_12
     perl init-repository --module-subset=qtbase,qtimageformats,qtsvg
-    git checkout v5.15.11-lts-lgpl
+    git checkout v5.15.12-lts-lgpl
     git submodule update qtbase qtimageformats qtsvg
-depends:patches/qtbase_5.15.11/*.patch
+depends:patches/qtbase_5.15.12/*.patch
     cd qtbase
 win:
-    for /r %%i in (..\\..\\patches\\qtbase_5.15.11\\*) do git apply %%i -v
+    for /r %%i in (..\\..\\patches\\qtbase_5.15.12\\*) do git apply %%i -v
     cd ..
 
     SET CONFIGURATIONS=-debug
 release:
     SET CONFIGURATIONS=-debug-and-release
 win:
-    """ + removeDir("\"%LIBS_DIR%\\Qt-5.15.11\"") + """
+    """ + removeDir("\"%LIBS_DIR%\\Qt-5.15.12\"") + """
     SET ANGLE_DIR=%LIBS_DIR%\\tg_angle
     SET ANGLE_LIBS_DIR=%ANGLE_DIR%\\out
     SET MOZJPEG_DIR=%LIBS_DIR%\\mozjpeg
@@ -1323,7 +1323,7 @@ win:
     SET OPENSSL_LIBS_DIR=%OPENSSL_DIR%\\out
     SET ZLIB_LIBS_DIR=%LIBS_DIR%\\zlib
     SET WEBP_DIR=%LIBS_DIR%\\libwebp
-    configure -prefix "%LIBS_DIR%\\Qt-5.15.11" ^
+    configure -prefix "%LIBS_DIR%\\Qt-5.15.12" ^
         %CONFIGURATIONS% ^
         -force-debug-info ^
         -opensource ^
@@ -1358,14 +1358,14 @@ win:
     jom -j16
     jom -j16 install
 mac:
-    find ../../patches/qtbase_5.15.11 -type f -print0 | sort -z | xargs -0 git apply
+    find ../../patches/qtbase_5.15.12 -type f -print0 | sort -z | xargs -0 git apply
     cd ..
 
     CONFIGURATIONS=-debug
 release:
     CONFIGURATIONS=-debug-and-release
 mac:
-    ./configure -prefix "$USED_PREFIX/Qt-5.15.11" \
+    ./configure -prefix "$USED_PREFIX/Qt-5.15.12" \
         $CONFIGURATIONS \
         -force-debug-info \
         -opensource \
@@ -1386,14 +1386,14 @@ mac:
 """)
 
 if buildQt6:
-    stage('qt_6_2_6', """
+    stage('qt_6_2_7', """
 mac:
-    git clone -b v6.2.6-lts-lgpl https://github.com/qt/qt5.git qt_6_2_6
-    cd qt_6_2_6
+    git clone -b v6.2.7-lts-lgpl https://github.com/qt/qt5.git qt_6_2_7
+    cd qt_6_2_7
     perl init-repository --module-subset=qtbase,qtimageformats,qtsvg
-depends:patches/qtbase_6.2.6/*.patch
+depends:patches/qtbase_6.2.7/*.patch
     cd qtbase
-    find ../../patches/qtbase_6.2.6 -type f -print0 | sort -z | xargs -0 git apply -v
+    find ../../patches/qtbase_6.2.7 -type f -print0 | sort -z | xargs -0 git apply -v
     cd ..
     sed -i.bak 's/tqtc-//' {qtimageformats,qtsvg}/dependencies.yaml
 
@@ -1401,7 +1401,7 @@ depends:patches/qtbase_6.2.6/*.patch
 release:
     CONFIGURATIONS=-debug-and-release
 mac:
-    ./configure -prefix "$USED_PREFIX/Qt-6.2.6" \
+    ./configure -prefix "$USED_PREFIX/Qt-6.2.7" \
         $CONFIGURATIONS \
         -force-debug-info \
         -opensource \
@@ -1426,7 +1426,7 @@ mac:
 stage('tg_owt', """
     git clone https://github.com/desktop-app/tg_owt.git
     cd tg_owt
-    git checkout 76a3513d7f
+    git checkout afd9d5d317
     git submodule init
     git submodule update
 win:

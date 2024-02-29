@@ -38,6 +38,8 @@ historyReplyGroup: icon {{ "chat/reply_type_group", windowFg }};
 historyReplyGroupPadding: margins(0px, 4px, 4px, 0px);
 historyReplyChannel: icon {{ "chat/reply_type_channel", windowFg }};
 historyReplyChannelPadding: margins(0px, 5px, 4px, 0px);
+historyReplyForward: icon {{ "mini_forward", windowFg }};
+historyReplyForwardPadding: margins(0px, 2px, 2px, 0px);
 
 msgReplyPadding: margins(6px, 6px, 11px, 6px);
 msgReplyBarPos: point(1px, 0px);
@@ -511,6 +513,11 @@ msgWaveformSkip: 1px;
 msgWaveformMin: 3px;
 msgWaveformMax: 17px;
 
+historyVoiceMessageInTTL: icon {{ "chat/mini_media_once", historyFileInIconFg }};
+historyVoiceMessageInTTLSelected: icon {{ "chat/mini_media_once", historyFileInIconFgSelected }};
+historyVoiceMessageOutTTL: icon {{ "chat/mini_media_once", historyFileOutIconFg }};
+historyVoiceMessageOutTTLSelected: icon {{ "chat/mini_media_once", historyFileOutIconFgSelected }};
+
 historyTranscribeSkip: 10px;
 historyTranscribeSize: size(28px, 22px);
 historyTranscribeRadius: 4px;
@@ -534,6 +541,8 @@ historyVideoMessageMute: icon {{ "volume_mute", historyFileThumbIconFg }};
 historyVideoMessageMuteSelected: icon {{ "volume_mute", historyFileThumbIconFgSelected }};
 historyVideoMessageMuteSize: 25px;
 historyVideoMessageProgressOpacity: 0.72;
+historyVideoMessageTtlIcon: icon {{ "chat/audio_once", historyFileThumbIconFg }};
+historyVideoMessageTtlIconSelected: icon {{ "chat/audio_once", historyFileThumbIconFgSelected }};
 
 historyAdminLogEmptyWidth: 260px;
 historyAdminLogEmptyPadding: margins(10px, 12px, 10px, 12px);
@@ -791,6 +800,10 @@ whoReadDateChecks: icon{{ "menu/read_ticks_s", windowSubTextFg }};
 whoReadDateChecksOver: icon{{ "menu/read_ticks_s", windowSubTextFgOver }};
 whoLikedDateHeart: icon{{ "menu/read_react_s", windowSubTextFg }};
 whoLikedDateHeartOver: icon{{ "menu/read_react_s", windowSubTextFgOver }};
+whoRepostedDateHeart: icon{{ "mediaview/mini_repost", groupCallMemberActiveIcon, point(4px, 4px) }};
+whoRepostedDateHeartOver: icon{{ "mediaview/mini_repost", groupCallMemberActiveIcon, point(4px, 4px) }};
+whoForwardedDateHeart: icon{{ "statistics/mini_stats_share", groupCallMemberActiveIcon, point(4px, 4px) }};
+whoForwardedDateHeartOver: icon{{ "statistics/mini_stats_share", groupCallMemberActiveIcon, point(4px, 4px) }};
 whoReadDateChecksPosition: point(-7px, -4px);
 whoReadDateStyle: TextStyle(defaultTextStyle) {
 	font: font(12px);
@@ -845,6 +858,15 @@ reactionInlinePadding: margins(5px, 2px, 7px, 2px);
 reactionInlineSize: 18px;
 reactionInlineImage: 32px;
 reactionInlineSkip: 3px;
+reactionInlineTagSkip: 6px;
+reactionInlineTagLeftRadius: 6px;
+reactionInlineTagRightRadius: 3px;
+reactionInlineTagArrow: 5px;
+reactionInlineTagDot: 5px;
+reactionInlineTagDotSkip: 2px;
+reactionInlineTagFont: font(12px);
+reactionInlineTagNamePosition: point(26px, 2px);
+reactionInlineTagPromoPosition: point(20px, 2px);
 reactionInlineBetween: 4px;
 reactionInlineInBubbleLeft: -3px;
 reactionInlineUserpicsPadding: margins(1px, 1px, 1px, 1px);
@@ -890,6 +912,7 @@ searchInChatPeerListItem: PeerListItem(defaultPeerListItem) {
 searchInChatPeerList: PeerList(defaultPeerList) {
 	item: searchInChatPeerListItem;
 }
+searchInChatTagsPadding: margins(6px, 0px, 6px, 0px);
 
 msgServiceGiftBoxSize: size(236px, 231px); // Plus msgServiceGiftBoxTopSkip.
 msgServiceGiftBoxRadius: 20px;
@@ -946,6 +969,9 @@ historySendDisabled: FlatLabel(defaultFlatLabel) {
 historySendDisabledIcon: icon {{ "emoji/premium_lock", placeholderFgActive }};
 historySendDisabledIconSkip: 20px;
 historySendDisabledPosition: point(0px, 0px);
+historySendPremiumRequired: FlatLabel(historySendDisabled) {
+	align: align(top);
+}
 
 backgroundSwitchToDark: IconButton(defaultIconButton) {
 	width: 48px;
@@ -974,22 +1000,22 @@ storyMentionButtonSkip: 5px;
 
 chatGiveawayWidth: 292px;
 chatGiveawayStickerTop: -16px;
+chatGiveawayWinnersTopSkip: 25px;
 chatGiveawayBadgeFont: font(12px bold);
 chatGiveawayBadgeTop: 106px;
 chatGiveawayBadgePadding: margins(7px, 1px, 5px, 3px);
 chatGiveawayBadgeStroke: 2px;
-chatGiveawayPrizesTop: 16px;
-chatGiveawayPrizesSkip: 4px;
-chatGiveawayParticipantsTop: 16px;
-chatGiveawayParticipantsSkip: 4px;
-chatGiveawayChannelTop: 6px;
-chatGiveawayChannelSize: 32px;
-chatGiveawayChannelPadding: margins(5px, 7px, 12px, 0px);
-chatGiveawayChannelSkip: 8px;
-chatGiveawayCountriesSkip: 16px;
-chatGiveawayDateTop: 6px;
-chatGiveawayDateSkip: 4px;
-chatGiveawayBottomSkip: 16px;
+chatGiveawayPrizesTitleMargin: margins(11px, 16px, 11px, 4px);
+chatGiveawayPrizesMargin: margins(11px, 0px, 11px, 0px);
+chatGiveawayPrizesWithPadding: margins(22px, 2px, 22px, 2px);
+chatGiveawayPrizesWithSkip: 8px;
+chatGiveawayPrizesWithLineTop: 9px;
+chatGiveawayParticipantsMargin: margins(11px, 0px, 11px, 6px);
+chatGiveawayNoCountriesTitleMargin: margins(11px, 6px, 11px, 4px);
+chatGiveawayEndDateMargin: margins(11px, 0px, 11px, 16px);
+chatGiveawayPeerSize: 32px;
+chatGiveawayPeerPadding: margins(5px, 7px, 12px, 0px);
+chatGiveawayPeerSkip: 8px;
 
 chatSimilarRadius: 12px;
 chatSimilarArrowSize: 6px;
@@ -1012,3 +1038,12 @@ chatSimilarName: TextStyle(defaultTextStyle) {
 }
 chatSimilarWidthMax: 424px;
 chatSimilarSkip: 12px;
+
+premiumRequiredWidth: 186px;
+premiumRequiredIcon: icon{{ "chat/large_lockedchat", msgServiceFg }};
+premiumRequiredCircle: 60px;
+
+boostMessageIcon: icon {{ "stories/boost_mini", windowFg }};
+boostMessageIconPadding: margins(0px, 2px, 0px, 0px);
+boostsMessageIcon: icon {{ "stories/boosts_mini", windowFg }};
+boostsMessageIconPadding: margins(0px, 2px, 0px, 0px);

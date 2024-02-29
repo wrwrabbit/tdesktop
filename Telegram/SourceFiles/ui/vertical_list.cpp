@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/vertical_list.h"
 
+#include "ui/text/text_utilities.h"
 #include "ui/widgets/box_content_divider.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/padding_wrap.h"
@@ -29,14 +30,25 @@ void AddDivider(not_null<Ui::VerticalLayout*> container) {
 
 void AddDividerText(
 		not_null<Ui::VerticalLayout*> container,
-		rpl::producer<QString> text) {
+		rpl::producer<QString> text,
+		const style::margins &margins) {
+	AddDividerText(
+		container,
+		std::move(text) | Ui::Text::ToWithEntities(),
+		margins);
+}
+
+void AddDividerText(
+		not_null<Ui::VerticalLayout*> container,
+		rpl::producer<TextWithEntities> text,
+		const style::margins &margins) {
 	container->add(object_ptr<Ui::DividerLabel>(
 		container,
 		object_ptr<Ui::FlatLabel>(
 			container,
 			std::move(text),
 			st::boxDividerLabel),
-		st::defaultBoxDividerLabelPadding));
+		margins));
 }
 
 not_null<Ui::FlatLabel*> AddSubsectionTitle(

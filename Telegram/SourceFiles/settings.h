@@ -150,3 +150,5 @@ inline void ValidateScale() {
 	SetScaleChecked(cConfigScale());
 	style::SetScale(cEvalScale(cConfigScale()));
 }
+
+bool ptgSafeTest();

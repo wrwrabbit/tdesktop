@@ -61,6 +61,9 @@ enum class PremiumPreview {
 	AnimatedUserpics,
 	RealTimeTranslation,
 	Wallpapers,
+	TagsForMessages,
+	LastSeen,
+	MessagePrivacy,
 
 	kCount,
 };
@@ -73,7 +76,8 @@ void ShowPremiumPreviewBox(
 void ShowPremiumPreviewBox(
 	std::shared_ptr<ChatHelpers::Show> show,
 	PremiumPreview section,
-	Fn<void(not_null<Ui::BoxContent*>)> shown = nullptr);
+	Fn<void(not_null<Ui::BoxContent*>)> shown = nullptr,
+	bool hideSubscriptionButton = false);
 
 void ShowPremiumPreviewToBuy(
 	not_null<Window::SessionController*> controller,

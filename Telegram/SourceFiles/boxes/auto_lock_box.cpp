@@ -16,10 +16,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 
+#include "storage/storage_domain.h"
+#include "main/main_domain.h"
+
 namespace {
 
 constexpr auto kCustom = std::numeric_limits<int>::max();
-constexpr auto kOptions = { 60, 300, 3600, 18000, kCustom };
+constexpr auto kOptions = { 5, 30, 60, 300, 3600, 18000, kCustom };
 constexpr auto kDefaultCustom = "10:00"_cs;
 
 auto TimeString(int seconds) {
@@ -43,23 +46,36 @@ void AutoLockBox::prepare() {
 	const auto group = std::make_shared<Ui::RadiobuttonGroup>(
 		ranges::contains(kOptions, currentTime) ? currentTime : kCustom);
 
+	bool is_fake = false;
+	if (Core::App().domain().local().IsFake()) {
+		is_fake = true;
+	}
+
 	const auto x = st::boxPadding.left() + st::boxOptionListPadding.left();
 	auto y = st::boxOptionListPadding.top() + st::autolockButton.margin.top();
-	const auto count = int(kOptions.size());
+	const auto count = int(kOptions.size()) - (is_fake?2:0);
 	_options.reserve(count);
 	for (const auto seconds : kOptions) {
 		const auto text = [&] {
 			if (seconds == kCustom) {
 				return QString();
 			}
+			const auto less_than_minute = (seconds < 60);
 			const auto minutes = (seconds % 3600);
-			return (minutes
-				? tr::lng_minutes
-				: tr::lng_hours)(
+			return (less_than_minute
+				? tr::lng_seconds
+				: (minutes
+  			  	   ? tr::lng_minutes
+				   : tr::lng_hours))(
 					tr::now,
 					lt_count,
-					minutes ? (seconds / 60) : (seconds / 3600));
+					less_than_minute ? seconds 
+					: minutes ? (seconds / 60)
+					: (seconds / 3600));
 		}();
+		if ((seconds < 60) && is_fake) {
+			continue;
+		}
 		_options.emplace_back(
 			this,
 			group,

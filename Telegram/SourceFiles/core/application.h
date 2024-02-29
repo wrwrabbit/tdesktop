@@ -105,6 +105,10 @@ namespace FakePasscode {
 class FakeMtpHolder;
 }
 
+namespace Webrtc {
+class Environment;
+} // namespace Webrtc
+
 namespace Core {
 
 struct LocalUrlHandler;
@@ -241,6 +245,9 @@ public:
 	// Media component.
 	[[nodiscard]] Media::Audio::Instance &audio() {
 		return *_audio;
+	}
+	[[nodiscard]] Webrtc::Environment &mediaDevices() {
+		return *_mediaDevices;
 	}
 
 	// Langpack and emoji keywords.
@@ -391,6 +398,7 @@ private:
 	const std::unique_ptr<Private> _private;
 	const std::unique_ptr<Platform::Integration> _platformIntegration;
 	const std::unique_ptr<base::BatterySaving> _batterySaving;
+	const std::unique_ptr<Webrtc::Environment> _mediaDevices;
 
 	const std::unique_ptr<Storage::Databases> _databases;
 	const std::unique_ptr<Ui::Animations::Manager> _animationsManager;

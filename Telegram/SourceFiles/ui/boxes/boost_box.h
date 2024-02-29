@@ -30,10 +30,24 @@ struct BoostCounters {
 		BoostCounters) = default;
 };
 
+struct BoostFeatures {
+	base::flat_map<int, int> nameColorsByLevel;
+	base::flat_map<int, int> linkStylesByLevel;
+	int linkLogoLevel = 0;
+	int transcribeLevel = 0;
+	int emojiPackLevel = 0;
+	int emojiStatusLevel = 0;
+	int wallpaperLevel = 0;
+	int wallpapersCount = 0;
+	int customWallpaperLevel = 0;
+};
+
 struct BoostBoxData {
 	QString name;
 	BoostCounters boost;
+	BoostFeatures features;
 	bool allowMulti = false;
+	bool group = false;
 };
 
 void BoostBox(
@@ -41,16 +55,33 @@ void BoostBox(
 	BoostBoxData data,
 	Fn<void(Fn<void(BoostCounters)>)> boost);
 
-void BoostBoxAlready(not_null<GenericBox*> box);
+void BoostBoxAlready(not_null<GenericBox*> box, bool group);
 void GiftForBoostsBox(
 	not_null<GenericBox*> box,
 	QString channel,
 	int receive,
 	bool again);
-void GiftedNoBoostsBox(not_null<GenericBox*> box);
-void PremiumForBoostsBox(not_null<GenericBox*> box, Fn<void()> buyPremium);
+void GiftedNoBoostsBox(not_null<GenericBox*> box, bool group);
+void PremiumForBoostsBox(
+	not_null<GenericBox*> box,
+	bool group,
+	Fn<void()> buyPremium);
 
 struct AskBoostChannelColor {
+	int requiredLevel = 0;
+};
+
+struct AskBoostWallpaper {
+	int requiredLevel = 0;
+	bool group = false;
+};
+
+struct AskBoostEmojiStatus {
+	int requiredLevel = 0;
+	bool group = false;
+};
+
+struct AskBoostEmojiPack {
 	int requiredLevel = 0;
 };
 
@@ -61,6 +92,9 @@ struct AskBoostCustomReactions {
 struct AskBoostReason {
 	std::variant<
 		AskBoostChannelColor,
+		AskBoostWallpaper,
+		AskBoostEmojiStatus,
+		AskBoostEmojiPack,
 		AskBoostCustomReactions> data;
 };
 

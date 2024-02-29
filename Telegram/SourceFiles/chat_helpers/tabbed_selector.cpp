@@ -332,6 +332,7 @@ TabbedSelector::TabbedSelector(
 : TabbedSelector(parent, {
 	.show = std::move(show),
 	.st = ((mode == Mode::EmojiStatus
+		|| mode == Mode::ChannelStatus
 		|| mode == Mode::BackgroundEmoji
 		|| mode == Mode::FullReactions)
 		? st::statusEmojiPan
@@ -521,6 +522,8 @@ TabbedSelector::Tab TabbedSelector::createTab(SelectorTab type, int index) {
 				.show = _show,
 				.mode = (_mode == Mode::EmojiStatus
 					? EmojiMode::EmojiStatus
+					: _mode == Mode::ChannelStatus
+					? EmojiMode::ChannelStatus
 					: _mode == Mode::BackgroundEmoji
 					? EmojiMode::BackgroundEmoji
 					: _mode == Mode::FullReactions
@@ -963,6 +966,9 @@ void TabbedSelector::setCurrentPeer(PeerData *peer) {
 	}
 	_currentPeer = peer;
 	checkRestrictedPeer();
+	if (hasEmojiTab()) {
+		emoji()->showMegagroupSet(peer ? peer->asMegagroup() : nullptr);
+	}
 	if (hasStickersTab()) {
 		stickers()->showMegagroupSet(peer ? peer->asMegagroup() : nullptr);
 	}

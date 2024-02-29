@@ -1,8 +1,10 @@
 name: Master branch updater.
 
-on:
-  release:
-    types: released
+on: workflow_dispatch
+# don't need that
+#on:
+#  release:
+#    types: released
 
 jobs:
   updater:

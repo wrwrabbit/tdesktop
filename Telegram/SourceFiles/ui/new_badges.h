@@ -7,12 +7,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-namespace Platform {
-namespace Audio {
+namespace Ui {
+class RpWidget;
+} // namespace Ui
 
-void Init();
-void DeInit();
+namespace Ui::NewBadge {
 
-} // namespace Audio
-} // namespace Platform
+void AddToRight(not_null<Ui::RpWidget*> parent);
+void AddAfterLabel(
+	not_null<Ui::RpWidget*> parent,
+	not_null<Ui::RpWidget*> label);
 
+} // namespace Ui::NewBadge

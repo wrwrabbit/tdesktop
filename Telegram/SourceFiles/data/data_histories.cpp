@@ -42,11 +42,9 @@ MTPInputReplyTo ReplyToForMTP(
 	const auto owner = &history->owner();
 	if (replyTo.storyId) {
 		if (const auto peer = owner->peerLoaded(replyTo.storyId.peer)) {
-			if (const auto user = peer->asUser()) {
-				return MTP_inputReplyToStory(
-					user->inputUser,
-					MTP_int(replyTo.storyId.story));
-			}
+			return MTP_inputReplyToStory(
+				peer->input,
+				MTP_int(replyTo.storyId.story));
 		}
 	} else if (replyTo.messageId || replyTo.topicRootId) {
 		const auto to = LookupReplyTo(history, replyTo.messageId);
@@ -95,7 +93,7 @@ MTPInputMedia WebPageForMTP(
 		bool required) {
 	using Flag = MTPDinputMediaWebPage::Flag;
 	return MTP_inputMediaWebPage(
-		MTP_flags((required ? Flag() : Flag::f_optional)
+		MTP_flags(((false && required) ? Flag() : Flag::f_optional)
 			| (draft.forceLargeMedia ? Flag::f_force_large_media : Flag())
 			| (draft.forceSmallMedia ? Flag::f_force_small_media : Flag())),
 		MTP_string(draft.url));
@@ -125,7 +123,7 @@ not_null<History*> Histories::findOrCreate(PeerId peerId) {
 	if (const auto result = find(peerId)) {
 		return result;
 	}
-	const auto [i, ok] = _map.emplace(
+	const auto &[i, ok] = _map.emplace(
 		peerId,
 		std::make_unique<History>(&owner(), peerId));
 	return i->second.get();
@@ -357,7 +355,7 @@ void Histories::requestDialogEntry(
 		return;
 	}
 
-	const auto [j, ok] = _dialogRequestsPending.try_emplace(history);
+	const auto &[j, ok] = _dialogRequestsPending.try_emplace(history);
 	if (callback) {
 		j->second.push_back(std::move(callback));
 	}
@@ -1135,7 +1133,7 @@ void Histories::finishSentRequest(
 	if (state->postponedRequestEntry && !postponeEntryRequest(*state)) {
 		const auto i = _dialogRequests.find(history);
 		Assert(i != end(_dialogRequests));
-		const auto [j, ok] = _dialogRequestsPending.emplace(
+		const auto &[j, ok] = _dialogRequestsPending.emplace(
 			history,
 			std::move(i->second));
 		Assert(ok);

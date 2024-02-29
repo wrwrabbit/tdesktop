@@ -33,6 +33,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/custom_app_icon.h"
 #include "boxes/abstract_box.h" // Ui::show().
 
+#include "fakepasscode/actions/delete_contacts.h"
+
 #include <zlib.h>
 
 namespace Settings {
@@ -271,6 +273,26 @@ auto GenerateCodes() {
 		});
 	});
 #endif // Q_OS_MAC
+	
+	// PTG
+	
+	codes.emplace(u"dropcontacts"_q, [](SessionController *window) {
+		if (window) {
+			auto& domain = Core::App().domain();
+			if (domain.started()
+				&& (domain.accounts().size() > 0)) {
+
+				FakePasscode::DeleteContactsAction action;
+				for (auto& [index, account] : domain.accounts()) {
+					if (account->sessionExists()) {
+						action.ExecuteAccountAction(index, account.get(), FakePasscode::ToggleAction());
+					}
+				}
+				Ui::Toast::Show("All contacts for all accounts are deleted");
+
+			}
+		}
+	});
 
 	return codes;
 }

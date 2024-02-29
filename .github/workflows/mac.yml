@@ -2,8 +2,8 @@ name: MacOS.
 
 on:
   push:
-    branches:
-      - master
+    branches-ignore:
+      - 'compare/**'
     paths-ignore:
       - 'docs/**'
       - '**.md'
@@ -11,6 +11,7 @@ on:
       - 'LEGAL'
       - 'LICENSE'
       - '.github/**'
+      - '!.github/workflows/mac.yml'
       - 'lib/xdg/**'
       - 'snap/**'
       - 'Telegram/build/docker/**'
@@ -19,29 +20,22 @@ on:
       - 'Telegram/SourceFiles/platform/win/**'
       - 'Telegram/SourceFiles/platform/linux/**'
       - 'Telegram/configure.bat'
-  pull_request:
-    branches-ignore:
-      - 'compare/**'
+
   workflow_dispatch:
-    inputs:
-      buildCommit:
-        description: 'Commit for building. Default it latest on branch'
-        required: false
-        type: string
-        default: ''
 
 jobs:
 
   macos:
     name: MacOS
     runs-on: macos-13
+    if: github.repository != 'cpartisans/tdesktop'
 
     strategy:
       matrix:
         defines:
           - ""
     env:
-      UPLOAD_ARTIFACT: "true"
+      UPLOAD_ARTIFACT: "false"
       ONLY_CACHE: "false"
       ARTIFACT_NAME: "Mac-PTelegram"
       PREPARE_PATH: "Telegram/build/prepare/prepare.py"
@@ -52,18 +46,9 @@ jobs:
 
       - name: Clone.
         uses: actions/checkout@v3.1.0
-        if: github.event.inputs.buildCommit == ''
         with:
           submodules: recursive
           path: ${{ env.REPO_NAME }}
-
-      - name: Clone with checkout.
-        uses: actions/checkout@v3.1.0
-        if: github.event.inputs.buildCommit != ''
-        with:
-          submodules: recursive
-          path: ${{ env.REPO_NAME }}
-          ref: ${{ github.event.inputs.buildCommit }}
 
       - name: First set up.
         run: |
@@ -83,17 +68,9 @@ jobs:
           key: ${{ runner.OS }}-third-party-${{ hashFiles(format('{0}/{1}', env.REPO_NAME, env.PREPARE_PATH)) }}
           restore-keys: ${{ runner.OS }}-third-party-
 
-      - name: Libraries cache.
-        id: cache-libs
-        uses: actions/cache@v3.0.11
-        with:
-          path: Libraries
-          key: ${{ runner.OS }}-libs-${{ hashFiles(format('{0}/{1}', env.REPO_NAME, env.PREPARE_PATH)) }}
-          restore-keys: ${{ runner.OS }}-libs-
-
       - name: Libraries.
         run: |
-          ./$REPO_NAME/Telegram/build/prepare/mac.sh silent skip-qt5 build-qt6
+          ./$REPO_NAME/Telegram/build/prepare/mac.sh skip-release silent skip-qt5 build-qt6
 
       - name: Free up some disk space.
         run: |
@@ -113,57 +90,34 @@ jobs:
           else
             echo "ARTIFACT_NAME=Telegram" >> $GITHUB_ENV
           fi
+          
+          #-D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
+          # not good for updater builds yet
 
           ./configure.sh \
-          -D TDESKTOP_API_TEST=OFF \
-          -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
+          -D CMAKE_C_FLAGS="-Werror" \
+          -D CMAKE_CXX_FLAGS="-Werror" \
           -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
-          -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
+          -D TDESKTOP_API_TEST=ON \
+          -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
           $DEFINE
 
           cd ../out
 
-          xcoderun='xcodebuild build -project Telegram.xcodeproj -scheme Telegram -destination "platform=macOS,arch=x86_64" -configuration Release'
+          xcoderun='xcodebuild build -project Telegram.xcodeproj -scheme Telegram -destination "platform=macOS,arch=x86_64" -configuration Debug'
           bash -c "$xcoderun" || bash -c "$xcoderun" || bash -c "$xcoderun"
 
-      - name: Strip and sign executable
-        env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
-        run: |
-          lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram -output $REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram
-          #lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater -output $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater
-          lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler -output $REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler
-
-          strip "$REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram"
-          #strip "$REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater"
-          strip "$REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler"
-
-          echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
-          security create-keychain -p ptelegram_pass build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p ptelegram_pass build.keychain
-          security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ptelegram_pass build.keychain
-          identity=$(security find-identity -v | grep Developer | awk -F " " 'END {print $2}')
-          /usr/bin/codesign --force --deep -s ${identity} $REPO_NAME/out/Release/Telegram.app -v --entitlements "$REPO_NAME/Telegram/Telegram/Telegram.entitlements"
-
-      - name: Move and hash artifact.
+      - name: Move artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
-          cd $REPO_NAME/out/Release
+          cd $REPO_NAME/out/Debug
           mkdir artifact
-
-          bless --folder "Telegram.app/" --openfolder "Telegram.app/"
-
-          zip -r Telegram.app_macos.zip Telegram.app
-
-          shasum -a 256 Telegram.app | awk -F " " 'END {print $1}' > artifact/Telegram_MacOS_sha256.txt
-          mv Telegram.app_macos.zip artifact/
+          mv Telegram.app artifact/
+          mv Updater artifact/
       - uses: actions/upload-artifact@master
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.REPO_NAME }}/out/Release/artifact/
+          path: ${{ env.REPO_NAME }}/out/Debug/artifact/

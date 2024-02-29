@@ -44,6 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum_topic.h"
 #include "data/data_sponsored_messages.h"
 #include "data/data_message_reactions.h"
+#include "data/data_user.h"
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
 
@@ -64,16 +65,20 @@ Element *MousedElement/* = nullptr*/;
 		HistoryMessageForwarded *prevForwarded,
 		not_null<HistoryItem*> item,
 		HistoryMessageForwarded *forwarded) {
-	const auto sender = previous->originalSender();
+	const auto sender = previous->displayFrom();
 	if ((prevForwarded != nullptr) != (forwarded != nullptr)) {
 		return false;
-	} else if (sender != item->originalSender()) {
+	} else if (sender != item->displayFrom()) {
 		return false;
 	} else if (!prevForwarded || sender) {
 		return true;
 	}
-	const auto previousInfo = prevForwarded->hiddenSenderInfo.get();
-	const auto itemInfo = forwarded->hiddenSenderInfo.get();
+	const auto previousInfo = prevForwarded->savedFromHiddenSenderInfo
+		? prevForwarded->savedFromHiddenSenderInfo.get()
+		: prevForwarded->originalHiddenSenderInfo.get();
+	const auto itemInfo = forwarded->savedFromHiddenSenderInfo
+		? forwarded->savedFromHiddenSenderInfo.get()
+		: forwarded->originalHiddenSenderInfo.get();
 	Assert(previousInfo != nullptr);
 	Assert(itemInfo != nullptr);
 	return (*previousInfo == *itemInfo);
@@ -158,6 +163,11 @@ bool DefaultElementDelegate::elementShownUnread(
 
 void DefaultElementDelegate::elementSendBotCommand(
 	const QString &command,
+	const FullMsgId &context) {
+}
+
+void DefaultElementDelegate::elementSearchInList(
+	const QString &query,
 	const FullMsgId &context) {
 }
 
@@ -271,6 +281,9 @@ QString DateTooltipText(not_null<Element*> view) {
 				lt_user,
 				msgsigned->postAuthor);
 		}
+	}
+	if (item->isScheduled() && item->isSilent()) {
+		dateText += '\n' + QChar(0xD83D) + QChar(0xDD15);
 	}
 	return dateText;
 }
@@ -465,8 +478,11 @@ Element::Element(
 	if (_context == Context::History) {
 		history()->setHasPendingResizedItems();
 	}
-	if (data->isFakeBotAbout() && !data->history()->peer->isRepliesChat()) {
-		AddComponents(FakeBotAboutTop::Bit());
+	if (data->isFakeAboutView()) {
+		const auto user = data->history()->peer->asUser();
+		if (user && user->isBot() && !user->isRepliesChat()) {
+			AddComponents(FakeBotAboutTop::Bit());
+		}
 	}
 }
 
@@ -484,6 +500,10 @@ not_null<History*> Element::history() const {
 
 uint8 Element::colorIndex() const {
 	return data()->colorIndex();
+}
+
+uint8 Element::contentColorIndex() const {
+	return data()->contentColorIndex();
 }
 
 QDateTime Element::dateTime() const {
@@ -806,7 +826,7 @@ auto Element::contextDependentServiceText() -> TextWithLinks {
 		return {};
 	}
 	const auto from = item->from();
-	const auto topicUrl =  u"internal:url:https://t.me/c/%1/%2"_q
+	const auto topicUrl = u"internal:url:https://t.me/c/%1/%2"_q
 		.arg(peerToChannel(peerId).bare)
 		.arg(topicRootId.bare);
 	const auto fromLink = [&](int index) {
@@ -1338,6 +1358,10 @@ bool Element::hasOutLayout() const {
 	return false;
 }
 
+bool Element::hasRightLayout() const {
+	return hasOutLayout() && !_delegate->elementIsChatWide();
+}
+
 bool Element::drawBubble() const {
 	return false;
 }
@@ -1387,6 +1411,14 @@ bool Element::toggleSelectionByHandlerClick(
 bool Element::allowTextSelectionByHandler(
 		const ClickHandlerPtr &handler) const {
 	return false;
+}
+
+bool Element::usesBubblePattern(const PaintContext &context) const {
+	return (context.selection != FullSelection)
+		&& hasOutLayout()
+		&& context.bubblesPattern
+		&& !context.viewport.isEmpty()
+		&& !context.bubblesPattern->pixmap.size().isEmpty();
 }
 
 bool Element::hasVisibleText() const {

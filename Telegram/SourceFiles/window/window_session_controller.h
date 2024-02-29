@@ -162,6 +162,7 @@ struct SectionShow {
 	bool childColumn = false;
 	bool forbidLayer = false;
 	bool reapplyLocalDraft = false;
+	bool dropSameFromStack = false;
 	Origin origin;
 
 };
@@ -239,6 +240,11 @@ public:
 		FullMsgId contextId,
 		const SectionShow &params = SectionShow());
 
+	void searchInChat(Dialogs::Key inChat);
+	void searchMessages(const QString &query, Dialogs::Key inChat);
+
+	void resolveBoostState(not_null<ChannelData*> channel);
+
 	base::weak_ptr<Ui::Toast::Instance> showToast(
 		Ui::Toast::Config &&config);
 	base::weak_ptr<Ui::Toast::Instance> showToast(
@@ -275,7 +281,6 @@ private:
 		not_null<PeerData*> peer,
 		const PeerByLinkInfo &info);
 
-	void resolveBoostState(not_null<ChannelData*> channel);
 	void applyBoost(
 		not_null<ChannelData*> channel,
 		Fn<void(Ui::BoostCounters)> done);
@@ -339,7 +344,12 @@ public:
 
 	// This is needed for History TopBar updating when searchInChat
 	// is changed in the Dialogs::Widget of the current window.
-	rpl::variable<Dialogs::Key> searchInChat;
+	rpl::producer<Dialogs::Key> searchInChatValue() const {
+		return _searchInChat.value();
+	}
+	void setSearchInChat(Dialogs::Key value) {
+		_searchInChat = value;
+	}
 	bool uniqueChatsInSearchResults() const;
 
 	void openFolder(not_null<Data::Folder*> folder);
@@ -380,6 +390,7 @@ public:
 
 	void showEditPeerBox(PeerData *peer);
 	void showGiftPremiumBox(UserData *user);
+	void showGiftPremiumsBox(const QString &ref);
 
 	void enableGifPauseReason(GifPauseReason reason);
 	void disableGifPauseReason(GifPauseReason reason);
@@ -563,10 +574,10 @@ public:
 
 	struct PaintContextArgs {
 		not_null<Ui::ChatTheme*> theme;
-		int visibleAreaTop = 0;
-		int visibleAreaTopGlobal = 0;
-		int visibleAreaWidth = 0;
 		QRect clip;
+		QPoint visibleAreaPositionGlobal;
+		int visibleAreaTop = 0;
+		int visibleAreaWidth = 0;
 	};
 	[[nodiscard]] Ui::ChatPaintContext preparePaintContext(
 		PaintContextArgs &&args);
@@ -599,7 +610,7 @@ private:
 	struct CachedTheme;
 
 	void init();
-	void initSupportMode();
+	void setupShortcuts();
 	void refreshFiltersMenu();
 	void checkOpenedFilter();
 	void suggestArchiveAndMute();
@@ -656,6 +667,7 @@ private:
 	// Depends on _gifPause*.
 	const std::unique_ptr<ChatHelpers::TabbedSelector> _tabbedSelector;
 
+	rpl::variable<Dialogs::Key> _searchInChat;
 	rpl::variable<Dialogs::RowDescriptor> _activeChatEntry;
 	rpl::lifetime _activeHistoryLifetime;
 	rpl::variable<bool> _dialogsListFocused = false;

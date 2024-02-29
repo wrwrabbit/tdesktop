@@ -43,7 +43,8 @@ enum class MediaCheckResult {
 	Good,
 	Unsupported,
 	Empty,
-	HasTimeToLive,
+	HasExpiredMediaTimeToLive,
+	HasUnsupportedTimeToLive,
 	HasStoryMention,
 };
 [[nodiscard]] MediaCheckResult CheckMessageMedia(
@@ -65,7 +66,9 @@ void CheckReactionNotificationSchedule(
 	not_null<PeerData*> peer,
 	PeerId from,
 	not_null<HistoryItem*> fwd);
-[[nodiscard]] MessageFlags FinalizeMessageFlags(MessageFlags flags);
+[[nodiscard]] MessageFlags FinalizeMessageFlags(
+	not_null<History*> history,
+	MessageFlags flags);
 [[nodiscard]] bool CopyMarkupToForward(not_null<const HistoryItem*> item);
 [[nodiscard]] TextWithEntities EnsureNonEmpty(
 	const TextWithEntities &text = TextWithEntities());
@@ -108,7 +111,9 @@ struct SendingErrorRequest {
 	not_null<Data::Thread*> thread,
 	SendingErrorRequest request);
 
-[[nodiscard]] TextWithEntities DropCustomEmoji(TextWithEntities text);
+[[nodiscard]] TextWithEntities DropDisallowedCustomEmoji(
+	not_null<PeerData*> to,
+	TextWithEntities text);
 
 [[nodiscard]] Main::Session *SessionByUniqueId(uint64 sessionUniqueId);
 [[nodiscard]] HistoryItem *MessageByGlobalId(GlobalMsgId globalId);
@@ -155,3 +160,8 @@ ClickHandlerPtr JumpToStoryClickHandler(
 	CallId callId);
 
 void ShowTrialTranscribesToast(int left, TimeId until);
+
+void ClearMediaAsExpired(not_null<HistoryItem*> item);
+
+[[nodiscard]] int ItemsForwardSendersCount(const HistoryItemsList &list);
+[[nodiscard]] int ItemsForwardCaptionsCount(const HistoryItemsList &list);

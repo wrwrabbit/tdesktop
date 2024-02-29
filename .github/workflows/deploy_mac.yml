@@ -1,0 +1,101 @@
+name: Public Release - MacOS
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+
+  macos:
+    environment: Release
+    name: MacOS
+    runs-on: macos-13
+
+    strategy:
+      matrix:
+        defines:
+          - ""
+    env:
+      UPLOAD_ARTIFACT: "true"
+      ONLY_CACHE: "false"
+      ARTIFACT_NAME: "Mac-PTelegram"
+      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
+
+    steps:
+      - name: Get repository name.
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - name: Clone.
+        uses: actions/checkout@v3.1.0
+        with:
+          submodules: recursive
+          path: ${{ env.REPO_NAME }}
+
+      - name: First set up.
+        run: |
+          sudo chown -R `whoami`:admin /usr/local/share
+          brew install automake ninja pkg-config icoutils create-dmg
+
+          # Disable spotlight.
+          sudo mdutil -a -i off
+
+          sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
+
+      - name: Libraries.
+        run: |
+          ./$REPO_NAME/Telegram/build/prepare/mac.sh silent skip-qt5 build-qt6
+
+      - name: Free up some disk space.
+        run: |
+          cd Libraries
+          find . -iname "*.dir" -exec rm -rf {} || true \;
+
+      - name: Read defines.
+        run: |
+          echo "ARTIFACT_NAME=PTelegram_${{ matrix.arch }}" >> $GITHUB_ENV
+
+      - name: Telegram Desktop build.
+        if: env.ONLY_CACHE == 'false'
+        env:
+          RSA_PRIVATE: ${{ secrets.RSA_PRIVATE }}
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          cd $REPO_NAME/Telegram/build
+
+          python3 release_build.py mac
+
+      - name: Check.
+        run: |
+          filePath="$REPO_NAME/out/Release/deploy"
+          if test -d "$filePath"; then
+            echo "Build successfully done! :)"
+
+            ls $filePath
+          else
+            echo "Build error, output file does not exist."
+            exit 1
+          fi
+
+      - name: Move artifact.
+        if: env.UPLOAD_ARTIFACT == 'true'
+        run: |
+          cd $REPO_NAME/out/Release/deploy
+          mkdir ../artifact
+          mv * ../artifact
+
+      - uses: actions/upload-artifact@master
+        if: env.UPLOAD_ARTIFACT == 'true'
+        name: Upload artifact.
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.REPO_NAME }}/out/Release/artifact/tsetup*
+
+      - uses: actions/upload-artifact@master
+        if: env.UPLOAD_ARTIFACT == 'true'
+        name: Upload artifact TG.
+        with:
+          name: ${{ env.ARTIFACT_NAME }}_tg
+          path: ${{ env.REPO_NAME }}/out/Release/artifact/t*macupd*

@@ -19,6 +19,7 @@ on:
         type: boolean
         description: Upload generated image
         default: false
+  workflow_call:
 
 jobs:
   docker:
@@ -38,6 +39,7 @@ jobs:
         run: |
           sudo apt update
           curl -sSL https://install.python-poetry.org | python3 -
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
 
       - name: Free up some disk space.
         uses: jlumbroso/free-disk-space@f68fdb76e2ea636224182cfb7377ff9a1708f9b8
@@ -50,6 +52,4 @@ jobs:
 
       - name: Push the Docker image.
         if: ${{ (github.ref_name == github.event.repository.default_branch) || github.event.inputs.upload }}
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
-          docker push $IMAGE_TAG
+        run: docker push $IMAGE_TAG

@@ -51,8 +51,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace {
 
 constexpr auto kPremiumShift = 21. / 240;
-constexpr auto kReactionsPerRow = 5;
-constexpr auto kDisabledOpacity = 0.5;
 constexpr auto kToggleStickerTimeout = 2 * crl::time(1000);
 constexpr auto kStarOpacityOff = 0.1;
 constexpr auto kStarOpacityOn = 1.;
@@ -66,6 +64,7 @@ struct Descriptor {
 	bool fromSettings = false;
 	Fn<void()> hiddenCallback;
 	Fn<void(not_null<Ui::BoxContent*>)> shownCallback;
+	bool hideSubscriptionButton = false;
 };
 
 bool operator==(const Descriptor &a, const Descriptor &b) {
@@ -111,6 +110,12 @@ void PreloadSticker(const std::shared_ptr<Data::DocumentMedia> &media) {
 		return tr::lng_premium_summary_subtitle_emoji_status();
 	case PremiumPreview::InfiniteReactions:
 		return tr::lng_premium_summary_subtitle_infinite_reactions();
+	case PremiumPreview::TagsForMessages:
+		return tr::lng_premium_summary_subtitle_tags_for_messages();
+	case PremiumPreview::LastSeen:
+		return tr::lng_premium_summary_subtitle_last_seen();
+	case PremiumPreview::MessagePrivacy:
+		return tr::lng_premium_summary_subtitle_message_privacy();
 	case PremiumPreview::Stickers:
 		return tr::lng_premium_summary_subtitle_premium_stickers();
 	case PremiumPreview::AnimatedEmoji:
@@ -147,6 +152,12 @@ void PreloadSticker(const std::shared_ptr<Data::DocumentMedia> &media) {
 		return tr::lng_premium_summary_about_emoji_status();
 	case PremiumPreview::InfiniteReactions:
 		return tr::lng_premium_summary_about_infinite_reactions();
+	case PremiumPreview::TagsForMessages:
+		return tr::lng_premium_summary_about_tags_for_messages();
+	case PremiumPreview::LastSeen:
+		return tr::lng_premium_summary_about_last_seen();
+	case PremiumPreview::MessagePrivacy:
+		return tr::lng_premium_summary_about_message_privacy();
 	case PremiumPreview::Stickers:
 		return tr::lng_premium_summary_about_premium_stickers();
 	case PremiumPreview::AnimatedEmoji:
@@ -472,10 +483,13 @@ struct VideoPreviewDocument {
 			return "advanced_chat_management";
 		case PremiumPreview::EmojiStatus: return "emoji_status";
 		case PremiumPreview::InfiniteReactions: return "infinite_reactions";
+		case PremiumPreview::TagsForMessages: return "saved_tags";
 		case PremiumPreview::ProfileBadge: return "profile_badge";
 		case PremiumPreview::AnimatedUserpics: return "animated_userpics";
 		case PremiumPreview::RealTimeTranslation: return "translations";
 		case PremiumPreview::Wallpapers: return "wallpapers";
+		case PremiumPreview::LastSeen: return "last_seen";
+		case PremiumPreview::MessagePrivacy: return "message_privacy";
 		}
 		return "";
 	}();
@@ -1025,7 +1039,8 @@ void PreviewBox(
 			state->preload();
 		}
 	};
-	if (descriptor.fromSettings && show->session().premium()) {
+	if ((descriptor.fromSettings && show->session().premium())
+		|| descriptor.hideSubscriptionButton) {
 		box->setShowFinishedCallback(showFinished);
 		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 	} else {
@@ -1151,7 +1166,7 @@ void DecorateListPromoBox(
 		box->boxClosing() | rpl::start_with_next(hidden, box->lifetime());
 	}
 
-	if (session->premium()) {
+	if (session->premium() || descriptor.hideSubscriptionButton) {
 		box->addButton(tr::lng_close(), [=] {
 			box->closeBox();
 		});
@@ -1286,10 +1301,12 @@ void ShowPremiumPreviewBox(
 void ShowPremiumPreviewBox(
 		std::shared_ptr<ChatHelpers::Show> show,
 		PremiumPreview section,
-		Fn<void(not_null<Ui::BoxContent*>)> shown) {
+		Fn<void(not_null<Ui::BoxContent*>)> shown,
+		bool hideSubscriptionButton) {
 	Show(std::move(show), Descriptor{
 		.section = section,
 		.shownCallback = std::move(shown),
+		.hideSubscriptionButton = hideSubscriptionButton,
 	});
 }
 

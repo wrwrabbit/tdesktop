@@ -520,6 +520,8 @@ void BoxController::loadMoreRows() {
 		MTP_inputPeerEmpty(),
 		MTP_string(), // q
 		MTP_inputPeerEmpty(),
+		MTPInputPeer(), // saved_peer_id
+		MTPVector<MTPReaction>(), // saved_reaction
 		MTPint(), // top_msg_id
 		MTP_inputMessagesFilterPhoneCalls(MTP_flags(0)),
 		MTP_int(0), // min_date

@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/settings_privacy_controllers.h"
 
+#include "api/api_global_privacy.h"
 #include "api/api_peer_photo.h"
 #include "apiwrap.h"
 #include "base/call_delayed.h"
@@ -37,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "settings/settings_common.h"
+#include "settings/settings_premium.h"
 #include "settings/settings_privacy_security.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/cached_round_corners.h"
@@ -170,7 +172,9 @@ AdminLog::OwnedItem GenerateForwardedItem(
 		MTP_flags(flags),
 		MTP_int(0), // Not used (would've been trimmed to 32 bits).
 		peerToMTP(history->peer->id),
+		MTPint(), // from_boosts_applied
 		peerToMTP(history->peer->id),
+		MTPPeer(), // saved_peer_id
 		MTP_messageFwdHeader(
 			MTP_flags(MTPDmessageFwdHeader::Flag::f_from_id),
 			peerToMTP(history->session().userPeerId()),
@@ -180,6 +184,9 @@ AdminLog::OwnedItem GenerateForwardedItem(
 			MTPstring(), // post_author
 			MTPPeer(), // saved_from_peer
 			MTPint(), // saved_from_msg_id
+			MTPPeer(), // saved_from_id
+			MTPstring(), // saved_from_name
+			MTPint(), // saved_date
 			MTPstring()), // psa_type
 		MTPlong(), // via_bot_id
 		MTPMessageReplyHeader(),
@@ -661,6 +668,67 @@ auto LastSeenPrivacyController::exceptionsDescription() const
 	return tr::lng_edit_privacy_lastseen_exceptions();
 }
 
+object_ptr<Ui::RpWidget> LastSeenPrivacyController::setupBelowWidget(
+		not_null<Window::SessionController*> controller,
+		not_null<QWidget*> parent,
+		rpl::producer<Option> option) {
+	using namespace rpl::mappers;
+
+	auto result = object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+		parent,
+		object_ptr<Ui::VerticalLayout>(parent));
+
+	_option = std::move(option);
+
+	const auto content = result->entity();
+
+	Ui::AddSkip(content);
+
+	const auto privacy = &controller->session().api().globalPrivacy();
+	content->add(object_ptr<Ui::SettingsButton>(
+		content,
+		tr::lng_edit_lastseen_hide_read_time(),
+		st::settingsButtonNoIcon
+	))->toggleOn(privacy->hideReadTime())->toggledValue(
+	) | rpl::start_with_next([=](bool value) {
+		_hideReadTime = value;
+	}, content->lifetime());
+
+	Ui::AddSkip(content);
+	Ui::AddDividerText(
+		content,
+		tr::lng_edit_lastseen_hide_read_time_about());
+	if (!controller->session().premium()) {
+		Ui::AddSkip(content);
+		content->add(object_ptr<Ui::SettingsButton>(
+			content,
+			tr::lng_edit_lastseen_subscribe(),
+			st::settingsButtonLightNoIcon
+		))->setClickedCallback([=] {
+			Settings::ShowPremium(controller, u"lastseen"_q);
+		});
+		Ui::AddSkip(content);
+		Ui::AddDividerText(
+			content,
+			tr::lng_edit_lastseen_subscribe_about());
+	}
+
+	result->toggleOn(rpl::combine(
+		_option.value(),
+		_exceptionsNever.value(),
+		(_1 != Option::Everyone) || (_2 > 0)));
+
+	return result;
+}
+
+void LastSeenPrivacyController::handleExceptionsChange(
+		Exception exception,
+		rpl::producer<int> value) {
+	if (exception == Exception::Never) {
+		_exceptionsNever = std::move(value);
+	}
+}
+
 void LastSeenPrivacyController::confirmSave(
 		bool someAreDisallowed,
 		Fn<void()> saveCallback) {
@@ -682,6 +750,17 @@ void LastSeenPrivacyController::confirmSave(
 		Ui::show(std::move(box), Ui::LayerOption::KeepOther);
 	} else {
 		saveCallback();
+	}
+}
+
+void LastSeenPrivacyController::saveAdditional() {
+	if (_option.current() == Option::Everyone
+		&& !_exceptionsNever.current()) {
+		return;
+	}
+	const auto privacy = &_session->api().globalPrivacy();
+	if (privacy->hideReadTimeCurrent() != _hideReadTime) {
+		privacy->updateHideReadTime(_hideReadTime);
 	}
 }
 
@@ -758,7 +837,8 @@ auto CallsPrivacyController::exceptionsDescription() const
 
 object_ptr<Ui::RpWidget> CallsPrivacyController::setupBelowWidget(
 		not_null<Window::SessionController*> controller,
-		not_null<QWidget*> parent) {
+		not_null<QWidget*> parent,
+		rpl::producer<Option> option) {
 	auto result = object_ptr<Ui::VerticalLayout>(parent);
 	const auto content = result.data();
 

@@ -116,7 +116,9 @@ MTPMessage PrepareLogMessage(const MTPMessage &message, TimeId newDate) {
 			MTP_flags(data.vflags().v & ~removeFlags),
 			data.vid(),
 			data.vfrom_id() ? *data.vfrom_id() : MTPPeer(),
+			MTPint(), // from_boosts_applied
 			data.vpeer_id(),
+			MTPPeer(), // saved_peer_id
 			data.vfwd_from() ? *data.vfwd_from() : MTPMessageFwdHeader(),
 			MTP_long(data.vvia_bot_id().value_or_empty()),
 			MTPMessageReplyHeader(),
@@ -733,6 +735,7 @@ void GenerateItems(
 	using LogBan = MTPDchannelAdminLogEventActionParticipantToggleBan;
 	using LogPromote = MTPDchannelAdminLogEventActionParticipantToggleAdmin;
 	using LogSticker = MTPDchannelAdminLogEventActionChangeStickerSet;
+	using LogEmoji = MTPDchannelAdminLogEventActionChangeEmojiStickerSet;
 	using LogPreHistory =
 		MTPDchannelAdminLogEventActionTogglePreHistoryHidden;
 	using LogPermissions = MTPDchannelAdminLogEventActionDefaultBannedRights;
@@ -767,8 +770,10 @@ void GenerateItems(
 	using LogDeleteTopic = MTPDchannelAdminLogEventActionDeleteTopic;
 	using LogPinTopic = MTPDchannelAdminLogEventActionPinTopic;
 	using LogToggleAntiSpam = MTPDchannelAdminLogEventActionToggleAntiSpam;
-	using LogChangeColor = MTPDchannelAdminLogEventActionChangeColor;
-	using LogChangeBackgroundEmoji = MTPDchannelAdminLogEventActionChangeBackgroundEmoji;
+	using LogChangePeerColor = MTPDchannelAdminLogEventActionChangePeerColor;
+	using LogChangeProfilePeerColor = MTPDchannelAdminLogEventActionChangeProfilePeerColor;
+	using LogChangeWallpaper = MTPDchannelAdminLogEventActionChangeWallpaper;
+	using LogChangeEmojiStatus = MTPDchannelAdminLogEventActionChangeEmojiStatus;
 
 	const auto session = &history->session();
 	const auto id = event.vid().v;
@@ -1133,6 +1138,50 @@ void GenerateItems(
 							controller->uiShow(),
 							Data::FromInputSet(set),
 							Data::StickersType::Stickers),
+						Ui::LayerOption::CloseOther);
+				}
+			});
+			auto message = PreparedServiceText{ text };
+			message.links.push_back(fromLink);
+			message.links.push_back(setLink);
+			addPart(history->makeMessage(
+				history->nextNonHistoryEntryId(),
+				MessageFlag::AdminLogEntry,
+				date,
+				std::move(message),
+				peerToUser(from->id)));
+		}
+	};
+
+	const auto createChangeEmojiSet = [&](const LogEmoji &action) {
+		const auto set = action.vnew_stickerset();
+		const auto removed = (set.type() == mtpc_inputStickerSetEmpty);
+		if (removed) {
+			const auto text = tr::lng_admin_log_removed_emoji_group(
+				tr::now,
+				lt_from,
+				fromLinkText,
+				Ui::Text::WithEntities);
+			addSimpleServiceMessage(text);
+		} else {
+			const auto text = tr::lng_admin_log_changed_emoji_group(
+				tr::now,
+				lt_from,
+				fromLinkText,
+				lt_sticker_set,
+				Ui::Text::Link(
+					tr::lng_admin_log_changed_emoji_set(tr::now),
+					QString()),
+				Ui::Text::WithEntities);
+			const auto setLink = std::make_shared<LambdaClickHandler>([=](
+					ClickContext context) {
+				const auto my = context.other.value<ClickHandlerContext>();
+				if (const auto controller = my.sessionWindow.get()) {
+					controller->show(
+						Box<StickerSetBox>(
+							controller->uiShow(),
+							Data::FromInputSet(set),
+							Data::StickersType::Emoji),
 						Ui::LayerOption::CloseOther);
 				}
 			});
@@ -1817,51 +1866,170 @@ void GenerateItems(
 		addSimpleServiceMessage(text);
 	};
 
-	const auto createChangeColor = [&](const LogChangeColor &data) {
-		const auto text = tr::lng_admin_log_change_color(
-			tr::now,
-			lt_from,
-			fromLinkText,
-			lt_previous,
-			{ '#' + QString::number(data.vprev_value().v + 1) },
-			lt_color,
-			{ '#' + QString::number(data.vnew_value().v + 1) },
-			Ui::Text::WithEntities);
-		addSimpleServiceMessage(text);
-	};
-
-	const auto createChangeBackgroundEmoji = [&](const LogChangeBackgroundEmoji &data) {
-		const auto was = data.vprev_value().v;
-		const auto now = data.vnew_value().v;
-		const auto text = !was
-			? tr::lng_admin_log_set_background_emoji(
-				tr::now,
-				lt_from,
-				fromLinkText,
-				lt_emoji,
-				Ui::Text::SingleCustomEmoji(
-					Data::SerializeCustomEmojiId(now)),
-				Ui::Text::WithEntities)
-			: !now
-			? tr::lng_admin_log_removed_background_emoji(
-				tr::now,
-				lt_from,
-				fromLinkText,
-				lt_emoji,
-				Ui::Text::SingleCustomEmoji(
-					Data::SerializeCustomEmojiId(was)),
-				Ui::Text::WithEntities)
-			: tr::lng_admin_log_change_background_emoji(
+	const auto createColorChange = [&](
+			const MTPPeerColor &was,
+			const MTPPeerColor &now,
+			const auto &colorPhrase,
+			const auto &setEmoji,
+			const auto &removeEmoji,
+			const auto &changeEmoji) {
+		const auto prevColor = was.data().vcolor();
+		const auto nextColor = now.data().vcolor();
+		if (prevColor != nextColor) {
+			const auto wrap = [&](tl::conditional<MTPint> value) {
+				return value
+					? value->v
+					: Data::DecideColorIndex(history->peer->id);
+			};
+			const auto text = colorPhrase(
 				tr::now,
 				lt_from,
 				fromLinkText,
 				lt_previous,
-				Ui::Text::SingleCustomEmoji(
-					Data::SerializeCustomEmojiId(was)),
+				{ '#' + QString::number(wrap(prevColor) + 1) },
+				lt_color,
+				{ '#' + QString::number(wrap(nextColor) + 1) },
+				Ui::Text::WithEntities);
+			addSimpleServiceMessage(text);
+		}
+		const auto prevEmoji = was.data().vbackground_emoji_id().value_or_empty();
+		const auto nextEmoji = now.data().vbackground_emoji_id().value_or_empty();
+		if (prevEmoji != nextEmoji) {
+			const auto text = !prevEmoji
+				? setEmoji(
+					tr::now,
+					lt_from,
+					fromLinkText,
+					lt_emoji,
+					Ui::Text::SingleCustomEmoji(
+						Data::SerializeCustomEmojiId(nextEmoji)),
+					Ui::Text::WithEntities)
+				: !nextEmoji
+				? removeEmoji(
+					tr::now,
+					lt_from,
+					fromLinkText,
+					lt_emoji,
+					Ui::Text::SingleCustomEmoji(
+						Data::SerializeCustomEmojiId(prevEmoji)),
+					Ui::Text::WithEntities)
+				: changeEmoji(
+					tr::now,
+					lt_from,
+					fromLinkText,
+					lt_previous,
+					Ui::Text::SingleCustomEmoji(
+						Data::SerializeCustomEmojiId(prevEmoji)),
+					lt_emoji,
+					Ui::Text::SingleCustomEmoji(
+						Data::SerializeCustomEmojiId(nextEmoji)),
+					Ui::Text::WithEntities);
+			addSimpleServiceMessage(text);
+		}
+	};
+
+	const auto createChangePeerColor = [&](const LogChangePeerColor &data) {
+		createColorChange(
+			data.vprev_value(),
+			data.vnew_value(),
+			tr::lng_admin_log_change_color,
+			tr::lng_admin_log_set_background_emoji,
+			tr::lng_admin_log_removed_background_emoji,
+			tr::lng_admin_log_change_background_emoji);
+	};
+
+	const auto createChangeProfilePeerColor = [&](const LogChangeProfilePeerColor &data) {
+		createColorChange(
+			data.vprev_value(),
+			data.vnew_value(),
+			tr::lng_admin_log_change_profile_color,
+			tr::lng_admin_log_set_profile_background_emoji,
+			tr::lng_admin_log_removed_profile_background_emoji,
+			tr::lng_admin_log_change_profile_background_emoji);
+	};
+
+	const auto createChangeWallpaper = [&](const LogChangeWallpaper &data) {
+		addSimpleServiceMessage(tr::lng_admin_log_change_wallpaper(
+			tr::now,
+			lt_from,
+			fromLinkText,
+			Ui::Text::WithEntities));
+	};
+
+	const auto createChangeEmojiStatus = [&](const LogChangeEmojiStatus &data) {
+		const auto parse = [](const MTPEmojiStatus &status) {
+			return status.match([](
+					const MTPDemojiStatus &data) {
+				return data.vdocument_id().v;
+			}, [](const MTPDemojiStatusEmpty &) {
+				return DocumentId();
+			}, [](const MTPDemojiStatusUntil &data) {
+				return data.vdocument_id().v;
+			});
+		};
+		const auto prevEmoji = parse(data.vprev_value());
+		const auto nextEmoji = parse(data.vnew_value());
+		const auto nextUntil = data.vnew_value().match([](
+				const MTPDemojiStatusUntil &data) {
+			return data.vuntil().v;
+		}, [](const auto &) { return TimeId(); });
+
+		const auto text = !prevEmoji
+			? (nextUntil
+				? tr::lng_admin_log_set_status_until(
+					tr::now,
+					lt_from,
+					fromLinkText,
+					lt_emoji,
+					Ui::Text::SingleCustomEmoji(
+						Data::SerializeCustomEmojiId(nextEmoji)),
+					lt_date,
+					TextWithEntities{
+						langDateTime(base::unixtime::parse(nextUntil)) },
+					Ui::Text::WithEntities)
+				: tr::lng_admin_log_set_status(
+					tr::now,
+					lt_from,
+					fromLinkText,
+					lt_emoji,
+					Ui::Text::SingleCustomEmoji(
+						Data::SerializeCustomEmojiId(nextEmoji)),
+					Ui::Text::WithEntities))
+			: !nextEmoji
+			? tr::lng_admin_log_removed_status(
+				tr::now,
+				lt_from,
+				fromLinkText,
 				lt_emoji,
 				Ui::Text::SingleCustomEmoji(
-					Data::SerializeCustomEmojiId(now)),
-				Ui::Text::WithEntities);
+					Data::SerializeCustomEmojiId(prevEmoji)),
+				Ui::Text::WithEntities)
+			: (nextUntil
+				? tr::lng_admin_log_change_status_until(
+					tr::now,
+					lt_from,
+					fromLinkText,
+					lt_previous,
+					Ui::Text::SingleCustomEmoji(
+						Data::SerializeCustomEmojiId(prevEmoji)),
+					lt_emoji,
+					Ui::Text::SingleCustomEmoji(
+						Data::SerializeCustomEmojiId(nextEmoji)),
+					lt_date,
+					TextWithEntities{
+						langDateTime(base::unixtime::parse(nextUntil)) },
+					Ui::Text::WithEntities)
+				: tr::lng_admin_log_change_status(
+					tr::now,
+					lt_from,
+					fromLinkText,
+					lt_previous,
+					Ui::Text::SingleCustomEmoji(
+						Data::SerializeCustomEmojiId(prevEmoji)),
+					lt_emoji,
+					Ui::Text::SingleCustomEmoji(
+						Data::SerializeCustomEmojiId(nextEmoji)),
+					Ui::Text::WithEntities));
 		addSimpleServiceMessage(text);
 	};
 
@@ -1881,6 +2049,7 @@ void GenerateItems(
 		createParticipantToggleBan,
 		createParticipantToggleAdmin,
 		createChangeStickerSet,
+		createChangeEmojiSet,
 		createTogglePreHistoryHidden,
 		createDefaultBannedRights,
 		createStopPoll,
@@ -1909,8 +2078,10 @@ void GenerateItems(
 		createDeleteTopic,
 		createPinTopic,
 		createToggleAntiSpam,
-		createChangeColor,
-		createChangeBackgroundEmoji);
+		createChangePeerColor,
+		createChangeProfilePeerColor,
+		createChangeWallpaper,
+		createChangeEmojiStatus);
 }
 
 } // namespace AdminLog

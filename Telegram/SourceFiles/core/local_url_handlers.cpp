@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/confirm_box.h"
 #include "boxes/share_box.h"
 #include "boxes/connection_box.h"
+#include "boxes/premium_preview_box.h"
 #include "boxes/sticker_set_box.h"
 #include "boxes/sessions_box.h"
 #include "boxes/language_box.h"
@@ -344,9 +345,19 @@ bool ResolveUsernameOrPhone(
 		qthelp::UrlParamNameTransform::ToLower);
 	const auto domainParam = params.value(u"domain"_q);
 	const auto appnameParam = params.value(u"appname"_q);
+	const auto myContext = context.value<ClickHandlerContext>();
 
 	if (domainParam == u"giftcode"_q && !appnameParam.isEmpty()) {
-		ResolveGiftCode(controller, appnameParam);
+		const auto itemId = myContext.itemId;
+		const auto item = controller->session().data().message(itemId);
+		const auto fromId = item ? item->from()->id : PeerId();
+		const auto selfId = controller->session().userPeerId();
+		const auto toId = !item
+			? PeerId()
+			: (fromId == selfId)
+			? item->history()->peer->id
+			: selfId;
+		ResolveGiftCode(controller, appnameParam, fromId, toId);
 		return true;
 	}
 
@@ -413,7 +424,6 @@ bool ResolveUsernameOrPhone(
 			startToken = params.value(u"startapp"_q);
 		}
 	}
-	const auto myContext = context.value<ClickHandlerContext>();
 	controller->window().activate();
 	controller->showPeerByLink(Window::PeerByLinkInfo{
 		.usernameOrId = domain,
@@ -648,6 +658,17 @@ bool CopyPeerId(
 	return true;
 }
 
+bool ShowSearchTagsPromo(
+		Window::SessionController *controller,
+		const Match &match,
+		const QVariant &context) {
+	if (!controller) {
+		return false;
+	}
+	ShowPremiumPreviewBox(controller, PremiumPreview::TagsForMessages);
+	return true;
+}
+
 void ExportTestChatTheme(
 		not_null<Window::SessionController*> controller,
 		not_null<const Data::CloudTheme*> theme) {
@@ -732,7 +753,8 @@ void ExportTestChatTheme(
 				MTP_int(color(bg.size() > 2 ? bg[2] : Qt::black)),
 				MTP_int(color(bg.size() > 3 ? bg[3] : Qt::black)),
 				MTP_int(fields.paper->patternIntensity()),
-				MTP_int(0)));
+				MTP_int(0), // rotation
+				MTPstring())); // emoticon
 	};
 	const auto light = inputSettings(Data::CloudThemeType::Light);
 	if (!light) {
@@ -831,6 +853,21 @@ bool ResolvePremiumOffer(
 	const auto ref = "deeplink"
 		+ (refAddition.isEmpty() ? QString() : '_' + refAddition);
 	::Settings::ShowPremium(controller, ref);
+	controller->window().activate();
+	return true;
+}
+
+bool ResolvePremiumMultigift(
+		Window::SessionController *controller,
+		const Match &match,
+		const QVariant &context) {
+	if (!controller) {
+		return false;
+	}
+	const auto params = url_parse_params(
+		match->captured(1).mid(1),
+		qthelp::UrlParamNameTransform::ToLower);
+	controller->showGiftPremiumsBox(params.value(u"ref"_q, u"gift_url"_q));
 	controller->window().activate();
 	return true;
 }
@@ -959,6 +996,10 @@ const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
 			ResolvePremiumOffer,
 		},
 		{
+			u"^premium_multigift/?\\?(.+)(#|$)"_q,
+			ResolvePremiumMultigift,
+		},
+		{
 			u"^login/?(\\?code=([0-9]+))(&|$)"_q,
 			ResolveLoginCode
 		},
@@ -991,6 +1032,10 @@ const std::vector<LocalUrlHandler> &InternalUrlHandlers() {
 		{
 			u"^copy:(.+)$"_q,
 			CopyPeerId
+		},
+		{
+			u"about_tags"_q,
+			ShowSearchTagsPromo
 		}
 	};
 	return Result;
@@ -1082,7 +1127,7 @@ QString TryConvertUrlToLocal(QString url) {
 			const auto base = u"tg://privatepost?channel="_q + channel;
 			auto added = QString();
 			if (const auto threadPostMatch = regex_match(u"^/(\\d+)/(\\d+)(/?\\?|/?$)"_q, privateMatch->captured(2))) {
-				added = u"&topic=%1&post=%2"_q.arg(threadPostMatch->captured(1)).arg(threadPostMatch->captured(2));
+				added = u"&topic=%1&post=%2"_q.arg(threadPostMatch->captured(1), threadPostMatch->captured(2));
 			} else if (const auto postMatch = regex_match(u"^/(\\d+)(/?\\?|/?$)"_q, privateMatch->captured(2))) {
 				added = u"&post="_q + postMatch->captured(1);
 			}
@@ -1112,7 +1157,7 @@ QString TryConvertUrlToLocal(QString url) {
 			const auto base = u"tg://resolve?domain="_q + url_encode(usernameMatch->captured(1));
 			auto added = QString();
 			if (const auto threadPostMatch = regex_match(u"^/(\\d+)/(\\d+)(/?\\?|/?$)"_q, usernameMatch->captured(2))) {
-				added = u"&topic=%1&post=%2"_q.arg(threadPostMatch->captured(1)).arg(threadPostMatch->captured(2));
+				added = u"&topic=%1&post=%2"_q.arg(threadPostMatch->captured(1), threadPostMatch->captured(2));
 			} else if (const auto postMatch = regex_match(u"^/(\\d+)(/?\\?|/?$)"_q, usernameMatch->captured(2))) {
 				added = u"&post="_q + postMatch->captured(1);
 			} else if (const auto storyMatch = regex_match(u"^/s/(\\d+)(/?\\?|/?$)"_q, usernameMatch->captured(2))) {

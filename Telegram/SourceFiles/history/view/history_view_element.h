@@ -56,7 +56,9 @@ enum class Context : char {
 	Replies,
 	Pinned,
 	AdminLog,
-	ContactPreview
+	ContactPreview,
+	SavedSublist,
+	TTLViewer,
 };
 
 enum class OnlyEmojiAndSpaces : char {
@@ -95,6 +97,9 @@ public:
 	virtual bool elementShownUnread(not_null<const Element*> view) = 0;
 	virtual void elementSendBotCommand(
 		const QString &command,
+		const FullMsgId &context) = 0;
+	virtual void elementSearchInList(
+		const QString &query,
 		const FullMsgId &context) = 0;
 	virtual void elementHandleViaClick(not_null<UserData*> bot) = 0;
 	virtual bool elementIsChatWide() = 0;
@@ -143,6 +148,9 @@ public:
 	bool elementShownUnread(not_null<const Element*> view) override;
 	void elementSendBotCommand(
 		const QString &command,
+		const FullMsgId &context) override;
+	void elementSearchInList(
+		const QString &query,
 		const FullMsgId &context) override;
 	void elementHandleViaClick(not_null<UserData*> bot) override;
 	bool elementIsChatWide() override;
@@ -316,6 +324,7 @@ public:
 	void refreshDataId();
 
 	[[nodiscard]] uint8 colorIndex() const;
+	[[nodiscard]] uint8 contentColorIndex() const;
 	[[nodiscard]] QDateTime dateTime() const;
 
 	[[nodiscard]] int y() const;
@@ -438,6 +447,7 @@ public:
 	[[nodiscard]] virtual TopicButton *displayedTopicButton() const;
 	[[nodiscard]] virtual bool displayForwardedFrom() const;
 	[[nodiscard]] virtual bool hasOutLayout() const;
+	[[nodiscard]] bool hasRightLayout() const;
 	[[nodiscard]] virtual bool drawBubble() const;
 	[[nodiscard]] virtual bool hasBubble() const;
 	[[nodiscard]] virtual bool unwrapped() const;
@@ -464,6 +474,8 @@ public:
 		const ClickHandlerPtr &handler) const;
 	[[nodiscard]] virtual bool allowTextSelectionByHandler(
 		const ClickHandlerPtr &handler) const;
+
+	[[nodiscard]] bool usesBubblePattern(const PaintContext &context) const;
 
 	struct VerticalRepaintRange {
 		int top = 0;

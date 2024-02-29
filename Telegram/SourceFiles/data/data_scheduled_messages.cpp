@@ -67,7 +67,9 @@ constexpr auto kRequestTimeLimit = 60 * crl::time(1000);
 			MTP_flags(data.vflags().v | MTPDmessage::Flag::f_from_scheduled),
 			data.vid(),
 			data.vfrom_id() ? *data.vfrom_id() : MTPPeer(),
+			MTPint(), // from_boosts_applied
 			data.vpeer_id(),
+			data.vsaved_peer_id() ? *data.vsaved_peer_id() : MTPPeer(),
 			data.vfwd_from() ? *data.vfwd_from() : MTPMessageFwdHeader(),
 			MTP_long(data.vvia_bot_id().value_or_empty()),
 			data.vreply_to() ? *data.vreply_to() : MTPMessageReplyHeader(),
@@ -215,7 +217,9 @@ void ScheduledMessages::sendNowSimpleMessage(
 			MTP_flags(flags),
 			update.vid(),
 			peerToMTP(local->from()->id),
+			MTPint(), // from_boosts_applied
 			peerToMTP(history->peer->id),
+			MTPPeer(), // saved_peer_id
 			MTPMessageFwdHeader(),
 			MTPlong(), // via_bot_id
 			replyHeader,

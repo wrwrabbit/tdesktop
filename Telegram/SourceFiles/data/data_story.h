@@ -61,6 +61,8 @@ struct StoryMedia {
 struct StoryView {
 	not_null<PeerData*> peer;
 	Data::ReactionId reaction;
+	StoryId repostId = 0;
+	MsgId forwardId = 0;
 	TimeId date = 0;
 
 	friend inline bool operator==(StoryView, StoryView) = default;
@@ -70,6 +72,8 @@ struct StoryViews {
 	std::vector<StoryView> list;
 	QString nextOffset;
 	int reactions = 0;
+	int forwards = 0;
+	int views = 0;
 	int total = 0;
 	bool known = false;
 };
@@ -107,6 +111,15 @@ struct SuggestedReaction {
 	friend inline bool operator==(
 		const SuggestedReaction &,
 		const SuggestedReaction &) = default;
+};
+
+struct ChannelPost {
+	StoryArea area;
+	FullMsgId itemId;
+
+	friend inline bool operator==(
+		const ChannelPost &,
+		const ChannelPost &) = default;
 };
 
 class Story final {
@@ -166,13 +179,21 @@ public:
 	[[nodiscard]] auto recentViewers() const
 		-> const std::vector<not_null<PeerData*>> &;
 	[[nodiscard]] const StoryViews &viewsList() const;
+	[[nodiscard]] const StoryViews &channelReactionsList() const;
+	[[nodiscard]] int interactions() const;
 	[[nodiscard]] int views() const;
+	[[nodiscard]] int forwards() const;
 	[[nodiscard]] int reactions() const;
 	void applyViewsSlice(const QString &offset, const StoryViews &slice);
+	void applyChannelReactionsSlice(
+		const QString &offset,
+		const StoryViews &slice);
 
 	[[nodiscard]] const std::vector<StoryLocation> &locations() const;
 	[[nodiscard]] auto suggestedReactions() const
 		-> const std::vector<SuggestedReaction> &;
+	[[nodiscard]] auto channelPosts() const
+		-> const std::vector<ChannelPost> &;
 
 	void applyChanges(
 		StoryMedia media,
@@ -182,13 +203,17 @@ public:
 	[[nodiscard]] TimeId lastUpdateTime() const;
 
 	[[nodiscard]] bool repost() const;
+	[[nodiscard]] bool repostModified() const;
 	[[nodiscard]] PeerData *repostSourcePeer() const;
 	[[nodiscard]] QString repostSourceName() const;
 	[[nodiscard]] StoryId repostSourceId() const;
 
+	[[nodiscard]] PeerData *fromPeer() const;
+
 private:
 	struct ViewsCounts {
 		int views = 0;
+		int forwards = 0;
 		int reactions = 0;
 		base::flat_map<Data::ReactionId, int> reactionsCounts;
 		std::vector<not_null<PeerData*>> viewers;
@@ -211,13 +236,16 @@ private:
 	PeerData * const _repostSourcePeer = nullptr;
 	const QString _repostSourceName;
 	const StoryId _repostSourceId = 0;
+	PeerData * const _fromPeer = nullptr;
 	Data::ReactionId _sentReactionId;
 	StoryMedia _media;
 	TextWithEntities _caption;
 	std::vector<not_null<PeerData*>> _recentViewers;
 	std::vector<StoryLocation> _locations;
 	std::vector<SuggestedReaction> _suggestedReactions;
+	std::vector<ChannelPost> _channelPosts;
 	StoryViews _views;
+	StoryViews _channelReactions;
 	const TimeId _date = 0;
 	const TimeId _expires = 0;
 	TimeId _lastUpdateTime = 0;
@@ -227,6 +255,7 @@ private:
 	bool _privacyCloseFriends : 1 = false;
 	bool _privacyContacts : 1 = false;
 	bool _privacySelectedContacts : 1 = false;
+	const bool _repostModified : 1 = false;
 	bool _noForwards : 1 = false;
 	bool _edited : 1 = false;
 

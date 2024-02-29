@@ -23,6 +23,8 @@ class Show;
 namespace Data {
 struct ReactionId;
 class ForumTopic;
+class WallPaper;
+class Session;
 } // namespace Data
 
 namespace Main {
@@ -136,11 +138,17 @@ public:
 	virtual bool showInternal(
 		not_null<SectionMemento*> memento,
 		const SectionShow &params) = 0;
+	virtual bool sameTypeAs(not_null<SectionMemento*> memento) {
+		return false;
+	}
 
 	virtual bool showMessage(
 			PeerId peerId,
 			const SectionShow &params,
 			MsgId messageId) {
+		return false;
+	}
+	virtual bool searchInChatEmbedded(Dialogs::Key chat, QString query) {
 		return false;
 	}
 
@@ -250,5 +258,9 @@ private:
 	not_null<SessionController*> controller,
 	not_null<HistoryItem*> item,
 	const Data::ReactionId &id);
+
+[[nodiscard]] rpl::producer<const Data::WallPaper*> WallPaperResolved(
+	not_null<Data::Session*> owner,
+	const Data::WallPaper *paper);
 
 } // namespace Window

@@ -61,6 +61,8 @@ class GroupCall;
 class NotifySettings;
 class CustomEmojiManager;
 class Stories;
+class SavedMessages;
+struct ReactionId;
 
 struct RepliesReadTillUpdate {
 	FullMsgId id;
@@ -136,6 +138,9 @@ public:
 	}
 	[[nodiscard]] Stories &stories() const {
 		return *_stories;
+	}
+	[[nodiscard]] SavedMessages &savedMessages() const {
+		return *_savedMessages;
 	}
 
 	[[nodiscard]] MsgId nextNonHistoryEntryId() {
@@ -345,25 +350,32 @@ public:
 		const QVector<MTPDialog> &dialogs,
 		std::optional<int> count = std::nullopt);
 
-	[[nodiscard]] bool pinnedCanPin(not_null<Thread*> thread) const;
+	[[nodiscard]] bool pinnedCanPin(not_null<Dialogs::Entry*> entry) const;
 	[[nodiscard]] bool pinnedCanPin(
 		FilterId filterId,
 		not_null<History*> history) const;
 	[[nodiscard]] int pinnedChatsLimit(Folder *folder) const;
 	[[nodiscard]] int pinnedChatsLimit(FilterId filterId) const;
 	[[nodiscard]] int pinnedChatsLimit(not_null<Forum*> forum) const;
+	[[nodiscard]] int pinnedChatsLimit(
+		not_null<SavedMessages*> saved) const;
 	[[nodiscard]] rpl::producer<int> maxPinnedChatsLimitValue(
 		Folder *folder) const;
 	[[nodiscard]] rpl::producer<int> maxPinnedChatsLimitValue(
 		FilterId filterId) const;
 	[[nodiscard]] rpl::producer<int> maxPinnedChatsLimitValue(
 		not_null<Forum*> forum) const;
+	[[nodiscard]] rpl::producer<int> maxPinnedChatsLimitValue(
+		not_null<SavedMessages*> saved) const;
+	[[nodiscard]] int groupFreeTranscribeLevel() const;
 	[[nodiscard]] const std::vector<Dialogs::Key> &pinnedChatsOrder(
 		Folder *folder) const;
 	[[nodiscard]] const std::vector<Dialogs::Key> &pinnedChatsOrder(
 		not_null<Forum*> forum) const;
 	[[nodiscard]] const std::vector<Dialogs::Key> &pinnedChatsOrder(
 		FilterId filterId) const;
+	[[nodiscard]] const std::vector<Dialogs::Key> &pinnedChatsOrder(
+		not_null<Data::SavedMessages*> saved) const;
 	void setChatPinned(Dialogs::Key key, FilterId filterId, bool pinned);
 	void setPinnedFromEntryList(Dialogs::Key key, bool pinned);
 	void clearPinnedChats(Folder *folder);
@@ -732,6 +744,11 @@ public:
 	void applyStatsDcId(not_null<ChannelData*>, MTP::DcId);
 	[[nodiscard]] MTP::DcId statsDcId(not_null<ChannelData*>);
 
+	void viewTagsChanged(
+		not_null<ViewElement*> view,
+		std::vector<ReactionId> &&was,
+		std::vector<ReactionId> &&now);
+
 	void clearLocalStorage();
 
     void resetCaches();
@@ -875,6 +892,7 @@ private:
 	QPointer<Ui::BoxContent> _exportSuggestion;
 
 	rpl::variable<bool> _contactsLoaded = false;
+	rpl::variable<int> _groupFreeTranscribeLevel;
 	rpl::event_stream<Folder*> _chatsListLoadedEvents;
 	rpl::event_stream<Folder*> _chatsListChanged;
 	rpl::event_stream<not_null<UserData*>> _userIsBotChanges;
@@ -999,9 +1017,14 @@ private:
 
 	base::flat_map<uint64, not_null<GroupCall*>> _groupCalls;
 	rpl::event_stream<InviteToCall> _invitesToCalls;
-	base::flat_map<uint64, base::flat_set<not_null<UserData*>>> _invitedToCallUsers;
+	base::flat_map<
+		uint64,
+		base::flat_set<not_null<UserData*>>> _invitedToCallUsers;
 
 	base::flat_set<not_null<ViewElement*>> _shownSpoilers;
+	base::flat_map<
+		ReactionId,
+		base::flat_set<not_null<ViewElement*>>> _viewsByTag;
 
 	History *_topPromoted = nullptr;
 
@@ -1045,6 +1068,7 @@ private:
 	const std::unique_ptr<NotifySettings> _notifySettings;
 	const std::unique_ptr<CustomEmojiManager> _customEmojiManager;
 	const std::unique_ptr<Stories> _stories;
+	const std::unique_ptr<SavedMessages> _savedMessages;
 
 	MsgId _nonHistoryEntryId = ServerMaxMsgId.bare + ScheduledMsgIdsRange;
 

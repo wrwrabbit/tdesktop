@@ -101,6 +101,7 @@ class VoiceRecordBar;
 class ForwardPanel;
 class TTLButton;
 class WebpageProcessor;
+class CharactersLimitLabel;
 } // namespace HistoryView::Controls
 
 class BotKeyboard;
@@ -251,7 +252,7 @@ public:
 	[[nodiscard]] rpl::producer<> cancelRequests() const {
 		return _cancelRequests.events();
 	}
-	void searchInChatEmbedded(std::optional<QString> query = {});
+	bool searchInChatEmbedded(Dialogs::Key chat, QString query);
 
 	void updateNotifyControls();
 
@@ -475,7 +476,6 @@ private:
 	[[nodiscard]] MsgId resolveReplyToTopicRootId();
 	[[nodiscard]] Data::ForumTopic *resolveReplyToTopic();
 	[[nodiscard]] bool canWriteMessage() const;
-	std::optional<QString> writeRestriction() const;
 	void orderWidgets();
 
 	[[nodiscard]] InlineBotQuery parseInlineBotQuery() const;
@@ -504,11 +504,8 @@ private:
 	bool editingMessage() const {
 		return _editMsgId != 0;
 	}
-	bool jumpToDialogRow(const Dialogs::RowDescriptor &to);
 
 	void setupShortcuts();
-	bool showNextChat();
-	bool showPreviousChat();
 
 	void handlePeerMigration();
 
@@ -537,7 +534,6 @@ private:
 		const QRect &rect,
 		int left,
 		int top) const;
-	void drawRestrictedWrite(Painter &p, const QString &error);
 	bool paintShowAnimationFrame();
 
 	void updateMouseTracking();
@@ -549,6 +545,7 @@ private:
 	[[nodiscard]] bool insideJumpToEndInsteadOfToUnread() const;
 	void createUnreadBarAndResize();
 
+	[[nodiscard]] TextWithEntities prepareTextForEditMsg() const;
 	void saveEditMsg();
 
 	void setupPreview();
@@ -560,6 +557,8 @@ private:
 	void addMessagesToFront(not_null<PeerData*> peer, const QVector<MTPMessage> &messages);
 	void addMessagesToBack(not_null<PeerData*> peer, const QVector<MTPMessage> &messages);
 
+	void updateSendRestriction();
+	[[nodiscard]] QString computeSendRestriction() const;
 	void updateHistoryGeometry(bool initial = false, bool loadedDown = false, const ScrollChange &change = { ScrollChangeNone, 0 });
 	void updateListSize();
 	void startItemRevealAnimations();
@@ -645,7 +644,9 @@ private:
 
 	bool kbWasHidden() const;
 
-	void searchInChat();
+	void switchToSearch(QString query);
+
+	void checkCharsLimitation();
 
 	MTP::Sender _api;
 	FullReplyTo _replyTo;
@@ -766,6 +767,10 @@ private:
 	bool _cmdStartShown = false;
 	object_ptr<Ui::InputField> _field;
 	base::unique_qptr<Ui::RpWidget> _fieldDisabled;
+	base::unique_qptr<Ui::RpWidget> _sendRestriction;
+	using CharactersLimitLabel = HistoryView::Controls::CharactersLimitLabel;
+	base::unique_qptr<CharactersLimitLabel> _charsLimitation;
+	QString _sendRestrictionKey;
 	Ui::Animations::Simple _inPhotoEditOver;
 	bool _inDetails = false;
 	bool _inPhotoEdit = false;

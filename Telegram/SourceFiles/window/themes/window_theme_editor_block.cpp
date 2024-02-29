@@ -331,9 +331,8 @@ void EditorBlock::activateRow(const Row &row) {
 			const auto state = editor->lifetime().make_state<State>();
 
 			const auto save = crl::guard(this, [=] {
-				saveEditing(editor->color());
 				state->cancelLifetime.destroy();
-				box->closeBox();
+				saveEditing(editor->color());
 			});
 			box->boxClosing(
 			) | rpl::start_with_next(crl::guard(this, [=] {
@@ -819,7 +818,7 @@ EditorBlock::Row &EditorBlock::rowAtIndex(int index) {
 }
 
 int EditorBlock::findRowIndex(const QString &name) const {
-	return _indices.value(name, -1);;
+	return _indices.value(name, -1);
 }
 
 EditorBlock::Row *EditorBlock::findRow(const QString &name) {

@@ -7,9 +7,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/controls/history_view_compose_controls.h"
 
+#include "base/call_delayed.h"
 #include "base/event_filter.h"
 #include "base/platform/base_platform_info.h"
 #include "base/qt_signal_producer.h"
+#include "base/timer_rpl.h"
 #include "base/unixtime.h"
 #include "boxes/edit_caption_box.h"
 #include "chat_helpers/compose/compose_show.h"
@@ -35,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum_topic.h"
 #include "data/data_peer_values.h"
 #include "data/data_photo_media.h"
+#include "data/data_premium_limits.h" // Data::PremiumLimits.
 #include "data/stickers/data_stickers.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_web_page.h"
@@ -46,6 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/power_saving.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/view/controls/history_view_characters_limit.h"
 #include "history/view/controls/history_view_forward_panel.h"
 #include "history/view/controls/history_view_draft_options.h"
 #include "history/view/controls/history_view_voice_record_bar.h"
@@ -61,7 +65,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/session/send_as_peers.h"
 #include "media/audio/media_audio_capture.h"
 #include "media/audio/media_audio.h"
+#include "settings/settings_premium.h"
+#include "ui/item_text_options.h"
 #include "ui/text/text_options.h"
+#include "ui/text/text_utilities.h"
 #include "ui/ui_utility.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/dropdown_menu.h"
@@ -89,6 +96,7 @@ constexpr auto kMouseEvents = {
 	QEvent::MouseButtonPress,
 	QEvent::MouseButtonRelease
 };
+constexpr auto kRefreshSlowmodeLabelTimeout = crl::time(200);
 
 constexpr auto kCommonModifiers = 0
 	| Qt::ShiftModifier
@@ -385,6 +393,10 @@ void FieldHeader::init() {
 					_jumpToItemRequests.fire_copy(reply);
 				} else if (reply) {
 					_editOptionsRequests.fire({});
+				}
+			} else if (!isLeftButton) {
+				if (const auto reply = replyingToMessage()) {
+					_jumpToItemRequests.fire_copy(reply);
 				}
 			}
 		}
@@ -795,7 +807,6 @@ ComposeControls::ComposeControls(
 	: not_null(_ownedSelector.get()))
 , _mode(descriptor.mode)
 , _wrap(std::make_unique<Ui::RpWidget>(parent))
-, _writeRestricted(std::make_unique<Ui::RpWidget>(parent))
 , _send(std::make_shared<Ui::SendButton>(_wrap.get(), _st.send))
 , _like(_features.likes
 	? Ui::CreateChild<Ui::IconButton>(_wrap.get(), _st.like)
@@ -873,7 +884,7 @@ void ComposeControls::setHistory(SetHistoryArgs &&args) {
 	_sendDisabledBySlowmode = rpl::single(false)
 		| rpl::then(std::move(args.sendDisabledBySlowmode));
 	_liked = args.liked ? std::move(args.liked) : rpl::single(false);
-	_writeRestriction = rpl::single(std::optional<QString>())
+	_writeRestriction = rpl::single(Controls::WriteRestriction())
 		| rpl::then(std::move(args.writeRestriction));
 	const auto history = *args.history;
 	if (_history == history) {
@@ -887,6 +898,7 @@ void ComposeControls::setHistory(SetHistoryArgs &&args) {
 	registerDraftSource();
 	_selector->setCurrentPeer(history ? history->peer.get() : nullptr);
 	initWebpageProcess();
+	initWriteRestriction();
 	initForwardProcess();
 	updateBotCommandShown();
 	updateLikeShown();
@@ -936,12 +948,16 @@ PeerData *ComposeControls::sendAsPeer() const {
 
 void ComposeControls::move(int x, int y) {
 	_wrap->move(x, y);
-	_writeRestricted->move(x, y);
+	if (_writeRestricted) {
+		_writeRestricted->move(x, y);
+	}
 }
 
 void ComposeControls::resizeToWidth(int width) {
 	_wrap->resizeToWidth(width);
-	_writeRestricted->resizeToWidth(width);
+	if (_writeRestricted) {
+		_writeRestricted->resizeToWidth(width);
+	}
 	updateHeight();
 }
 
@@ -956,12 +972,12 @@ rpl::producer<int> ComposeControls::height() const {
 	return rpl::conditional(
 		_writeRestriction.value() | rpl::map(!_1),
 		_wrap->heightValue(),
-		_writeRestricted->heightValue());
+		rpl::single(_st.attach.height));
 }
 
 int ComposeControls::heightCurrent() const {
 	return _writeRestriction.current()
-		? _writeRestricted->height()
+		? _st.attach.height
 		: _wrap->height();
 }
 
@@ -1115,7 +1131,9 @@ void ComposeControls::showStarted() {
 		_autocomplete->hideFast();
 	}
 	_wrap->hide();
-	_writeRestricted->hide();
+	if (_writeRestricted) {
+		_writeRestricted->hide();
+	}
 }
 
 void ComposeControls::showFinished() {
@@ -1191,6 +1209,8 @@ void ComposeControls::setFieldText(
 	_field->setTextCursor(cursor);
 	_textUpdateEvents = TextUpdateEvent::SaveDraft
 		| TextUpdateEvent::SendTyping;
+
+	checkCharsLimitation();
 
 	if (_preview) {
 		_preview->checkNow(false);
@@ -1314,7 +1334,8 @@ void ComposeControls::init() {
 
 	_wrap->paintRequest(
 	) | rpl::start_with_next([=](QRect clip) {
-		paintBackground(clip);
+		auto p = QPainter(_wrap.get());
+		paintBackground(p, _wrap->rect(), clip);
 	}, _wrap->lifetime());
 
 	_header->editMsgIdValue(
@@ -1461,18 +1482,6 @@ void ComposeControls::clearListenState() {
 	_voiceRecordBar->clearListenState();
 }
 
-void ComposeControls::drawRestrictedWrite(QPainter &p, const QString &error) {
-	p.fillRect(_writeRestricted->rect(), st::historyReplyBg);
-
-	p.setFont(st::normalFont);
-	p.setPen(st::windowSubTextFg);
-	p.drawText(
-		_writeRestricted->rect().marginsRemoved(
-			QMargins(st::historySendPadding, 0, st::historySendPadding, 0)),
-		error,
-		style::al_center);
-}
-
 void ComposeControls::initKeyHandler() {
 	_wrap->events(
 	) | rpl::filter([=](not_null<QEvent*> event) {
@@ -1556,8 +1565,17 @@ void ComposeControls::initField() {
 	) | rpl::start_with_next([=] {
 		fieldChanged();
 	}, _field->lifetime());
+#ifdef Q_OS_MAC
+	// Removed an ability to insert text from the menu bar
+	// when the field is hidden.
+	_field->shownValue(
+	) | rpl::start_with_next([=](bool shown) {
+		_field->setEnabled(shown);
+	}, _field->lifetime());
+#endif // Q_OS_MAC
 	InitMessageField(_show, _field, [=](not_null<DocumentData*> emoji) {
-		if (_history && Data::AllowEmojiWithoutPremium(_history->peer)) {
+		if (_history
+			&& Data::AllowEmojiWithoutPremium(_history->peer, emoji)) {
 			return true;
 		}
 		if (_unavailableEmojiPasted) {
@@ -1565,11 +1583,13 @@ void ComposeControls::initField() {
 		}
 		return false;
 	});
+	InitMessageFieldFade(_field, _st.field.textBg);
 	_field->setEditLinkCallback(
 		DefaultEditLinkCallback(_show, _field, &_st.boxField));
 	initAutocomplete();
-	const auto allow = [=](const auto &) {
-		return _history && Data::AllowEmojiWithoutPremium(_history->peer);
+	const auto allow = [=](not_null<DocumentData*> emoji) {
+		return _history
+			&& Data::AllowEmojiWithoutPremium(_history->peer, emoji);
 	};
 	const auto suggestions = Ui::Emoji::SuggestionsController::Init(
 		_parent,
@@ -1776,6 +1796,8 @@ void ComposeControls::fieldChanged() {
 			_sendActionUpdates.fire({ Api::SendProgressType::Typing });
 		}
 	});
+
+	checkCharsLimitation();
 
 	_saveCloudDraftTimer.cancel();
 	if (!(_textUpdateEvents & TextUpdateEvent::SaveDraft)) {
@@ -2010,6 +2032,7 @@ void ComposeControls::applyDraft(FieldHistoryAction fieldHistoryAction) {
 			_preview->setDisabled(false);
 		}
 	}
+	checkCharsLimitation();
 }
 
 void ComposeControls::cancelForward() {
@@ -2068,7 +2091,9 @@ void ComposeControls::initTabbedSelector() {
 			if (data.document->isPremiumEmoji()
 				&& !session().premium()
 				&& (!_history
-					|| !Data::AllowEmojiWithoutPremium(_history->peer))) {
+					|| !Data::AllowEmojiWithoutPremium(
+						_history->peer,
+						data.document))) {
 				if (_unavailableEmojiPasted) {
 					_unavailableEmojiPasted(data.document);
 				}
@@ -2187,24 +2212,164 @@ void ComposeControls::inlineBotChanged() {
 	}
 }
 
+void SetupRestrictionView(
+		not_null<Ui::RpWidget*> widget,
+		not_null<const style::ComposeControls*> st,
+		std::shared_ptr<ChatHelpers::Show> show,
+		const QString &name,
+		rpl::producer<Controls::WriteRestriction> restriction,
+		Fn<void(QPainter &p, QRect clip)> paintBackground) {
+	struct State {
+		std::unique_ptr<Ui::FlatLabel> label;
+		std::unique_ptr<Ui::AbstractButton> button;
+		std::unique_ptr<Ui::RoundButton> unlock;
+		std::unique_ptr<Ui::RpWidget> icon;
+		Fn<void()> updateGeometries;
+	};
+	const auto state = widget->lifetime().make_state<State>();
+	state->updateGeometries = [=] {
+		if (!state->label) {
+			return;
+		} else if (state->button) {
+			const auto available = widget->width()
+				- st->like.width
+				- st::historySendRight
+				- state->unlock->width()
+				- st->premiumRequired.buttonSkip
+				- st->premiumRequired.position.x();
+			state->label->resizeToWidth(available);
+			state->label->moveToLeft(
+				st->premiumRequired.position.x(),
+				st->premiumRequired.position.y(),
+				widget->width());
+			const auto left = st->premiumRequired.position.x()
+				+ std::min(available, state->label->textMaxWidth())
+				+ st->premiumRequired.buttonSkip;
+			state->unlock->moveToLeft(
+				left,
+				st->premiumRequired.buttonTop,
+				widget->width());
+			state->button->setGeometry(QRect(
+				QPoint(),
+				QSize(left + state->unlock->width(), widget->height())));
+			state->icon->moveToLeft(0, 0, widget->width());
+		} else {
+			const auto left = st::historySendRight;
+			state->label->resizeToWidth(widget->width() - 2 * left);
+			state->label->moveToLeft(
+				left,
+				(widget->height() - state->label->height()) / 2,
+				widget->width());
+		}
+	};
+	const auto makeLabel = [=](
+			const QString &text,
+			const style::FlatLabel &st) {
+		auto label = std::make_unique<Ui::FlatLabel>(widget, text, st);
+		label->show();
+		label->setAttribute(Qt::WA_TransparentForMouseEvents);
+		label->heightValue(
+		) | rpl::start_with_next(
+			state->updateGeometries,
+			label->lifetime());
+		return label;
+	};
+	const auto makeUnlock = [=](const QString &text, const QString &name) {
+		using namespace Ui;
+		auto unlock = std::make_unique<RoundButton>(
+			widget,
+			rpl::single(text),
+			st->premiumRequired.button);
+		unlock->show();
+		unlock->setAttribute(Qt::WA_TransparentForMouseEvents);
+		unlock->setTextTransform(RoundButton::TextTransform::NoTransform);
+		unlock->setFullRadius(true);
+		return unlock;
+	};
+	const auto makeIcon = [=] {
+		auto icon = std::make_unique<Ui::RpWidget>(widget);
+		icon->resize(st->premiumRequired.icon.size());
+		icon->show();
+		icon->paintRequest() | rpl::start_with_next([st, raw = icon.get()] {
+			auto p = QPainter(raw);
+			st->premiumRequired.icon.paint(p, {}, raw->width());
+		}, icon->lifetime());
+		return icon;
+	};
+	std::move(
+		restriction
+	) | rpl::distinct_until_changed(
+	) | rpl::start_with_next([=](Controls::WriteRestriction value) {
+		using Type = Controls::WriteRestriction::Type;
+		if (value.type == Type::Rights) {
+			state->icon = nullptr;
+			state->unlock = nullptr;
+			state->button = nullptr;
+			state->label = makeLabel(value.text, st->restrictionLabel);
+		} else if (value.type == Type::PremiumRequired) {
+			state->icon = makeIcon();
+			state->unlock = makeUnlock(value.button, name);
+			state->button = std::make_unique<Ui::AbstractButton>(widget);
+			state->button->setClickedCallback([=] {
+				::Settings::ShowPremiumPromoToast(
+					show,
+					tr::lng_send_non_premium_message_toast(
+						tr::now,
+						lt_user,
+						TextWithEntities{ name },
+						lt_link,
+						Ui::Text::Link(
+							Ui::Text::Bold(
+								tr::lng_send_non_premium_message_toast_link(
+									tr::now))),
+						Ui::Text::RichLangValue),
+					u"require_premium"_q);
+			});
+			state->label = makeLabel(value.text, st->premiumRequired.label);
+		}
+	}, widget->lifetime());
+
+	widget->sizeValue(
+	) | rpl::start_with_next(state->updateGeometries, widget->lifetime());
+
+	widget->paintRequest() | rpl::start_with_next([=](QRect clip) {
+		auto p = QPainter(widget);
+		paintBackground(p, clip);
+	}, widget->lifetime());
+}
+
 void ComposeControls::initWriteRestriction() {
+	if (!_history) {
+		const auto was = base::take(_writeRestricted);
+		updateWrappingVisibility();
+		return;
+	}
+	_writeRestricted = std::make_unique<Ui::RpWidget>(_parent);
+	_writeRestricted->move(_wrap->pos());
+	_writeRestricted->resizeToWidth(_wrap->widthNoMargins());
+	_writeRestricted->sizeValue() | rpl::start_with_next([=] {
+		if (_like && _like->parentWidget() == _writeRestricted.get()) {
+			updateControlsGeometry(_wrap->size());
+		}
+	}, _writeRestricted->lifetime());
 	_writeRestricted->resize(
 		_writeRestricted->width(),
 		st::historyUnblock.height);
-	_writeRestricted->paintRequest(
-	) | rpl::start_with_next([=] {
-		if (const auto error = _writeRestriction.current()) {
-			auto p = Painter(_writeRestricted.get());
-			drawRestrictedWrite(p, *error);
-		}
-	}, _wrap->lifetime());
+	const auto background = [=](QPainter &p, QRect clip) {
+		paintBackground(p, _writeRestricted->rect(), clip);
+	};
+	SetupRestrictionView(
+		_writeRestricted.get(),
+		&_st,
+		_show,
+		_history->peer->shortName(),
+		_writeRestriction.value(),
+		background);
 
 	_writeRestriction.value(
-	) | rpl::filter([=] {
-		return _wrap->isHidden() || _writeRestricted->isHidden();
-	}) | rpl::start_with_next([=] {
+	) | rpl::start_with_next([=] {
 		updateWrappingVisibility();
-	}, _wrap->lifetime());
+	}, _writeRestricted->lifetime());
 }
 
 void ComposeControls::changeFocusedControl() {
@@ -2257,9 +2422,26 @@ void ComposeControls::initVoiceRecordBar() {
 
 void ComposeControls::updateWrappingVisibility() {
 	const auto hidden = _hidden.current();
-	const auto restricted = _writeRestriction.current().has_value();
-	_writeRestricted->setVisible(!hidden && restricted);
+	const auto &restriction = _writeRestriction.current();
+	const auto restricted = !restriction.empty() && _writeRestricted;
+	if (_writeRestricted) {
+		_writeRestricted->setVisible(!hidden && restricted);
+	}
 	_wrap->setVisible(!hidden && !restricted);
+	using namespace Controls;
+	if (_like) {
+		const auto hidden = _like->isHidden();
+		if (_writeRestricted
+			&& restriction.type == WriteRestrictionType::PremiumRequired) {
+			_like->setParent(_writeRestricted.get());
+		} else {
+			_like->setParent(_wrap.get());
+		}
+		if (!hidden) {
+			_like->show();
+			updateControlsGeometry(_wrap->size());
+		}
+	}
 	if (!hidden && !restricted) {
 		_wrap->raise();
 	}
@@ -2359,9 +2541,14 @@ void ComposeControls::updateControlsGeometry(QSize size) {
 	_tabbedSelectorToggle->moveToRight(right, buttonsTop);
 	right += _tabbedSelectorToggle->width();
 	if (_like) {
-		_like->moveToRight(right, buttonsTop);
-		if (_likeShown) {
-			right += _like->width();
+		using Type = Controls::WriteRestrictionType;
+		if (_writeRestriction.current().type == Type::PremiumRequired) {
+			_like->moveToRight(st::historySendRight, 0);
+		} else {
+			_like->moveToRight(right, buttonsTop);
+			if (_likeShown) {
+				right += _like->width();
+			}
 		}
 	}
 	if (_botCommandStart) {
@@ -2517,9 +2704,7 @@ void ComposeControls::updateAttachBotsMenu() {
 	}, _attachBotsMenu->lifetime());
 }
 
-void ComposeControls::paintBackground(QRect clip) {
-	Painter p(_wrap.get());
-
+void ComposeControls::paintBackground(QPainter &p, QRect full, QRect clip) {
 	if (_backgroundRect) {
 		//p.setCompositionMode(QPainter::CompositionMode_Source);
 		//p.fillRect(clip, Qt::transparent);
@@ -2528,7 +2713,7 @@ void ComposeControls::paintBackground(QRect clip) {
 		auto hq = PainterHighQualityEnabler(p);
 		p.setBrush(_st.bg);
 		p.setPen(Qt::NoPen);
-		p.drawRoundedRect(_wrap->rect(), _st.radius, _st.radius);
+		p.drawRoundedRect(full, _st.radius, _st.radius);
 	} else {
 		p.fillRect(clip, _st.bg);
 	}
@@ -2689,12 +2874,15 @@ bool ComposeControls::updateReplaceMediaButton() {
 	_replaceMedia = std::make_unique<Ui::IconButton>(
 		_wrap.get(),
 		st::historyReplaceMedia);
+	const auto hideDuration = st::historyReplaceMedia.ripple.hideDuration;
 	_replaceMedia->setClickedCallback([=] {
-		EditCaptionBox::StartMediaReplace(
-			_regularWindow,
-			_editingId,
-			_field->getTextWithTags(),
-			crl::guard(_wrap.get(), [=] { cancelEditMessage(); }));
+		base::call_delayed(hideDuration, _wrap.get(), [=] {
+			EditCaptionBox::StartMediaReplace(
+				_regularWindow,
+				_editingId,
+				_field->getTextWithTags(),
+				crl::guard(_wrap.get(), [=] { cancelEditMessage(); }));
+		});
 	});
 	return true;
 }
@@ -2918,6 +3106,10 @@ bool ComposeControls::isLockPresent() const {
 	return _voiceRecordBar->isLockPresent();
 }
 
+bool ComposeControls::isTTLButtonShown() const {
+	return _voiceRecordBar->isTTLButtonShown();
+}
+
 rpl::producer<bool> ComposeControls::lockShowStarts() const {
 	return _voiceRecordBar->lockShowStarts();
 }
@@ -3105,6 +3297,96 @@ Fn<void()> ComposeControls::restoreTextCallback(
 			_field->textCursor().insertText(insertTextOnCancel);
 		}
 	});
+}
+
+TextWithEntities ComposeControls::prepareTextForEditMsg() const {
+	if (!_history) {
+		return {};
+	}
+	const auto textWithTags = getTextWithAppliedMarkdown();
+	const auto prepareFlags = Ui::ItemTextOptions(
+		_history,
+		session().user()).flags;
+	auto left = TextWithEntities {
+		textWithTags.text,
+		TextUtilities::ConvertTextTagsToEntities(textWithTags.tags) };
+	TextUtilities::PrepareForSending(left, prepareFlags);
+	return left;
+}
+
+void ComposeControls::checkCharsLimitation() {
+	if (!_history || !isEditingMessage()) {
+		_charsLimitation = nullptr;
+		return;
+	}
+	const auto item = _history->owner().message(_header->editMsgId());
+	if (!item || !item->media() || !item->media()->allowsEditCaption()) {
+		_charsLimitation = nullptr;
+		return;
+	}
+	const auto limits = Data::PremiumLimits(&session());
+	const auto left = prepareTextForEditMsg();
+	const auto remove = left.text.size() - limits.captionLengthCurrent();
+	if (remove > 0) {
+		if (!_charsLimitation) {
+			using namespace Controls;
+			_charsLimitation = base::make_unique_q<CharactersLimitLabel>(
+				_wrap.get(),
+				_send.get(),
+				style::al_bottom);
+			_charsLimitation->show();
+			Data::AmPremiumValue(
+				&session()
+			) | rpl::start_with_next([=] {
+				checkCharsLimitation();
+			}, _charsLimitation->lifetime());
+		}
+		_charsLimitation->setLeft(remove);
+	} else {
+		_charsLimitation = nullptr;
+	}
+}
+
+rpl::producer<int> SlowmodeSecondsLeft(not_null<PeerData*> peer) {
+	return peer->session().changes().peerFlagsValue(
+		peer,
+		Data::PeerUpdate::Flag::Slowmode
+	) | rpl::map([=] {
+		return peer->slowmodeSecondsLeft();
+	}) | rpl::map([=](int delay) -> rpl::producer<int> {
+		auto start = rpl::single(delay);
+		if (!delay) {
+			return start;
+		}
+		return std::move(
+			start
+		) | rpl::then(base::timer_each(
+			kRefreshSlowmodeLabelTimeout
+		) | rpl::map([=] {
+			return peer->slowmodeSecondsLeft();
+		}) | rpl::take_while([=](int delay) {
+			return delay > 0;
+		})) | rpl::then(rpl::single(0));
+	}) | rpl::flatten_latest();
+}
+
+rpl::producer<bool> SendDisabledBySlowmode(not_null<PeerData*> peer) {
+	const auto history = peer->owner().history(peer);
+	auto hasSendingMessage = peer->session().changes().historyFlagsValue(
+		history,
+		Data::HistoryUpdate::Flag::ClientSideMessages
+	) | rpl::map([=] {
+		return history->latestSendingMessage() != nullptr;
+	}) | rpl::distinct_until_changed();
+
+	using namespace rpl::mappers;
+	const auto channel = peer->asChannel();
+	return (!channel || channel->amCreator())
+		? (rpl::single(false) | rpl::type_erased())
+		: rpl::combine(
+			channel->slowmodeAppliedValue(),
+			std::move(hasSendingMessage),
+			_1 && _2);
 }
 
 } // namespace HistoryView

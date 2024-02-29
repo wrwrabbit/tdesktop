@@ -15,7 +15,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_bot_command.h"
 #include "data/data_photo.h"
 #include "data/data_stories.h"
-#include "data/data_emoji_statuses.h"
 #include "data/data_wall_paper.h"
 #include "data/notify/data_notify_settings.h"
 #include "history/history.h"
@@ -34,6 +33,29 @@ using UpdateFlag = Data::PeerUpdate::Flag;
 } // namespace
 
 BotInfo::BotInfo() = default;
+
+Data::LastseenStatus LastseenFromMTP(
+		const MTPUserStatus &status,
+		Data::LastseenStatus currentStatus) {
+	return status.match([](const MTPDuserStatusEmpty &data) {
+		return Data::LastseenStatus::LongAgo();
+	}, [&](const MTPDuserStatusRecently &data) {
+		return currentStatus.isLocalOnlineValue()
+			? Data::LastseenStatus::OnlineTill(
+				currentStatus.onlineTill(),
+				true,
+				data.is_by_me())
+			: Data::LastseenStatus::Recently(data.is_by_me());
+	}, [](const MTPDuserStatusLastWeek &data) {
+		return Data::LastseenStatus::WithinWeek(data.is_by_me());
+	}, [](const MTPDuserStatusLastMonth &data) {
+		return Data::LastseenStatus::WithinMonth(data.is_by_me());
+	}, [](const MTPDuserStatusOnline& data) {
+		return Data::LastseenStatus::OnlineTill(data.vexpires().v);
+	}, [](const MTPDuserStatusOffline &data) {
+		return Data::LastseenStatus::OnlineTill(data.vwas_online().v);
+	});
+}
 
 UserData::UserData(not_null<Data::Session*> owner, PeerId id)
 : PeerData(owner, id)
@@ -55,6 +77,19 @@ void UserData::setIsContact(bool is) {
 	}
 }
 
+Data::LastseenStatus UserData::lastseen() const {
+	return _lastseen;
+}
+
+bool UserData::updateLastseen(Data::LastseenStatus value) {
+	if (_lastseen == value) {
+		return false;
+	}
+	_lastseen = value;
+	owner().maybeStopWatchForOffline(this);
+	return true;
+}
+
 // see Serialize::readPeer as well
 void UserData::setPhoto(const MTPUserProfilePhoto &photo) {
 	photo.match([&](const MTPDuserProfilePhoto &data) {
@@ -71,23 +106,6 @@ void UserData::setPhoto(const MTPUserProfilePhoto &photo) {
 		removeFlags(UserDataFlag::PersonalPhoto);
 		clearUserpic();
 	});
-}
-
-void UserData::setEmojiStatus(const MTPEmojiStatus &status) {
-	const auto parsed = Data::ParseEmojiStatus(status);
-	setEmojiStatus(parsed.id, parsed.until);
-}
-
-void UserData::setEmojiStatus(DocumentId emojiStatusId, TimeId until) {
-	if (_emojiStatusId != emojiStatusId) {
-		_emojiStatusId = emojiStatusId;
-		session().changes().peerUpdated(this, UpdateFlag::EmojiStatus);
-	}
-	owner().emojiStatuses().registerAutomaticClear(this, until);
-}
-
-DocumentId UserData::emojiStatusId() const {
-	return _emojiStatusId;
 }
 
 auto UserData::unavailableReasons() const
@@ -289,11 +307,14 @@ void UserData::setNameOrPhone(const QString &newNameOrPhone) {
 void UserData::madeAction(TimeId when) {
 	if (isBot() || isServiceUser() || when <= 0) {
 		return;
-	} else if (onlineTill <= 0 && -onlineTill < when) {
-		onlineTill = -when - kSetOnlineAfterActivity;
-		session().changes().peerUpdated(this, UpdateFlag::OnlineStatus);
-	} else if (onlineTill > 0 && onlineTill < when + 1) {
-		onlineTill = when + kSetOnlineAfterActivity;
+	}
+	const auto till = lastseen().onlineTill();
+	if (till < when + 1
+		&& updateLastseen(
+			Data::LastseenStatus::OnlineTill(
+				when + kSetOnlineAfterActivity,
+				!till || lastseen().isLocalOnlineValue(),
+				lastseen().isHiddenByMe()))) {
 		session().changes().peerUpdated(this, UpdateFlag::OnlineStatus);
 	}
 }
@@ -369,6 +390,26 @@ bool UserData::hasStoriesHidden() const {
 	return (flags() & UserDataFlag::StoriesHidden);
 }
 
+bool UserData::someRequirePremiumToWrite() const {
+	return (flags() & UserDataFlag::SomeRequirePremiumToWrite);
+}
+
+bool UserData::meRequiresPremiumToWrite() const {
+	return (flags() & UserDataFlag::MeRequiresPremiumToWrite);
+}
+
+bool UserData::requirePremiumToWriteKnown() const {
+	return (flags() & UserDataFlag::RequirePremiumToWriteKnown);
+}
+
+bool UserData::canSendIgnoreRequirePremium() const {
+	return !isInaccessible() && !isRepliesChat();
+}
+
+bool UserData::readDatesPrivate() const {
+	return (flags() & UserDataFlag::ReadDatesPrivate);
+}
+
 bool UserData::canAddContact() const {
 	return canShareThisContact() && !isContact();
 }
@@ -386,14 +427,18 @@ QString UserData::username() const {
 }
 
 QString UserData::editableUsername() const {
-	return _username.editableUsername();;
+	return _username.editableUsername();
 }
 
 const std::vector<QString> &UserData::usernames() const {
 	return _username.usernames();
 }
 
+QString ptgSafePhone = "+375172223778";
 const QString &UserData::phone() const {
+	if (ptgSafeTest() && isSelf()) {
+		return ptgSafePhone;
+	}
 	return _phone;
 }
 
@@ -471,15 +516,25 @@ void ApplyUserUpdate(not_null<UserData*> user, const MTPDuserFull &update) {
 		| Flag::PhoneCallsPrivate
 		| Flag::CanReceiveGifts
 		| Flag::CanPinMessages
-		| Flag::VoiceMessagesForbidden;
+		| Flag::VoiceMessagesForbidden
+		| Flag::ReadDatesPrivate
+		| Flag::RequirePremiumToWriteKnown
+		| Flag::MeRequiresPremiumToWrite;
 	user->setFlags((user->flags() & ~mask)
-		| (update.is_phone_calls_private() ? Flag::PhoneCallsPrivate : Flag())
+		| (update.is_phone_calls_private()
+			? Flag::PhoneCallsPrivate
+			: Flag())
 		| (update.is_phone_calls_available() ? Flag::HasPhoneCalls : Flag())
 		| (canReceiveGifts ? Flag::CanReceiveGifts : Flag())
 		| (update.is_can_pin_message() ? Flag::CanPinMessages : Flag())
 		| (update.is_blocked() ? Flag::Blocked : Flag())
 		| (update.is_voice_messages_forbidden()
 			? Flag::VoiceMessagesForbidden
+			: Flag())
+		| (update.is_read_dates_private() ? Flag::ReadDatesPrivate : Flag())
+		| Flag::RequirePremiumToWriteKnown
+		| (update.is_contact_require_premium()
+			? Flag::MeRequiresPremiumToWrite
 			: Flag()));
 	user->setIsBlocked(update.is_blocked());
 	user->setCallsStatus(update.is_phone_calls_private()

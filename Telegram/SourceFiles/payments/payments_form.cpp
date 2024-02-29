@@ -145,7 +145,13 @@ MTPinputStorePaymentPurpose InvoicePremiumGiftCodeGiveawayToTL(
 				: Flag::f_additional_peers)
 			| (giveaway.countries.empty()
 				? Flag()
-				: Flag::f_countries_iso2)),
+				: Flag::f_countries_iso2)
+			| (giveaway.showWinners
+				? Flag::f_winners_are_visible
+				: Flag())
+			| (giveaway.additionalPrize.isEmpty()
+				? Flag()
+				: Flag::f_prize_description)),
 		giveaway.boostPeer->input,
 		MTP_vector_from_range(ranges::views::all(
 			giveaway.additionalChannels
@@ -157,6 +163,7 @@ MTPinputStorePaymentPurpose InvoicePremiumGiftCodeGiveawayToTL(
 		) | ranges::views::transform([](QString value) {
 			return MTP_string(value);
 		})),
+		MTP_string(giveaway.additionalPrize),
 		MTP_long(invoice.randomId),
 		MTP_int(giveaway.untilDate),
 		MTP_string(invoice.currency),
@@ -668,6 +675,7 @@ void Form::fillSmartGlocalNativeMethod(QJsonObject object) {
 	_paymentMethod.native = NativePaymentMethod{
 		.data = SmartGlocalPaymentMethod{
 			.publicToken = key,
+			.tokenizeUrl = value(u"tokenize_url").toString(),
 		},
 	};
 	_paymentMethod.ui.native = Ui::NativeMethodDetails{
@@ -977,8 +985,7 @@ void Form::validateCard(
 		if (error) {
 			LOG(("Stripe Error %1: %2 (%3)"
 				).arg(int(error.code())
-				).arg(error.description()
-				).arg(error.message()));
+				).arg(error.description(), error.message()));
 			_updates.fire(Error{ Error::Type::Stripe, error.description() });
 		} else {
 			setPaymentCredentials({
@@ -1004,6 +1011,7 @@ void Form::validateCard(
 	}
 	auto configuration = SmartGlocal::PaymentConfiguration{
 		.publicToken = method.publicToken,
+		.tokenizeUrl = method.tokenizeUrl,
 		.isTest = _invoice.isTest,
 	};
 	_smartglocal = std::make_unique<SmartGlocal::APIClient>(
@@ -1027,8 +1035,7 @@ void Form::validateCard(
 		if (error) {
 			LOG(("SmartGlocal Error %1: %2 (%3)"
 				).arg(int(error.code())
-				).arg(error.description()
-				).arg(error.message()));
+				).arg(error.description(), error.message()));
 			_updates.fire(Error{
 				Error::Type::SmartGlocal,
 				error.description(),
