@@ -404,6 +404,9 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
             --format UDBZ \
             "$SetupFile" \
             "./$BundleName"
+        # do zip as well
+        bless --folder "./$BundleName/" --openfolder "$BundleName/"
+        zip -r "$BundleName.zip" "$BundleName"
       fi
     fi
 
@@ -436,6 +439,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
         cd "$ReleasePath/AlphaTemp"
         zip -r "$SetupFile" "$BinaryName"
         mv "$SetupFile" "$ReleasePath/"
+        mv "$BundleName.zip" "$ReleasePath/"
         cd "$ReleasePath"
       fi
     fi
@@ -497,6 +501,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
     mv "$ReleasePath/$UpdateFileAMD64" "$DeployPath/"
     mv "$ReleasePath/$UpdateFileARM64" "$DeployPath/"
     mv "$ReleasePath/$SetupFile" "$DeployPath/"
+    mv "$ReleasePath/$BundleName.zip" "$DeployPath/"
 
     if [ "$BuildTarget" == "mac" ]; then
       mkdir -p "$BackupPath/tmac"
