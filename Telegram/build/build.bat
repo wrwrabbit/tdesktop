@@ -56,7 +56,9 @@ if %Build64% neq 0 (
 
 FOR /F "tokens=1,2* delims= " %%i in (%FullScriptPath%version) do set "%%i=%%j"
 
-set "VersionForPacker=%AppVersion%"
+FOR /F "tokens=1,2* delims= " %%i in (%FullScriptPath%ptg_version) do set "%%i=%%j"
+
+set "VersionForPacker=%PtgAppVersion%"
 if %AlphaVersion% neq 0 (
   set "AppVersion=%AlphaVersion%"
   set "AppVersionStrFull=%AppVersionStr%_%AlphaVersion%"
@@ -92,14 +94,14 @@ set "HomePath=%FullScriptPath%.."
 set "ResourcesPath=%HomePath%\Resources"
 set "SolutionPath=%HomePath%\..\out"
 if %Build64% neq 0 (
-  set "UpdateFile=tx64upd%AppVersion%"
+  set "UpdateFile=tx64upd%PtgAppVersion%"
   set "SetupFile=tsetup-x64.%AppVersionStrFull%.exe"
   set "PortableFile=tportable-x64.%AppVersionStrFull%.zip"
   set "SetupFile=tsetup-x64.latest.exe"
   set "PortableFile=tportable-x64.latest.zip"
   set "DumpSymsPath=%SolutionPath%\..\..\Libraries\win64\breakpad\src\tools\windows\dump_syms\Release\dump_syms.exe"
 ) else (
-  set "UpdateFile=tupdate%AppVersion%"
+  set "UpdateFile=tupdate%PtgAppVersion%"
   set "SetupFile=tsetup.%AppVersionStrFull%.exe"
   set "PortableFile=tportable.%AppVersionStrFull%.zip"
   set "SetupFile=tsetup.latest.exe"
