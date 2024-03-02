@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/box_content.h"
 
 #include "fakepasscode/log/fake_log.h"
+#include "storage/storage_domain.h"
 
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -71,6 +72,13 @@ std::weak_ptr<Updater> UpdaterInstance;
 
 bool AcceptUpstreamRelease = false;
 const QString PTG_UPDATE_CHANNEL = "tdptgFeed";
+uint64 GetAppVersionForUpdate() {
+	if (Core::App().domain().local().IsFake()) {
+		return AppVersion;
+	} else {
+		return PTelegramAppVersion;
+	}
+}
 
 using Progress = UpdateChecker::Progress;
 using State = UpdateChecker::State;
@@ -430,8 +438,9 @@ bool UnpackUpdate(const QString &filepath) {
 				LOG(("Update Error: downloaded alpha version %1 is not greater, than mine %2").arg(alphaVersion).arg(cAlphaVersion()));
 				return false;
 			}
-		} else if (int32(version) <= AppVersion) {
-			LOG(("Update Error: downloaded version %1 is not greater, than mine %2").arg(version).arg(AppVersion));
+		} else if (int32(version) <= GetAppVersionForUpdate()) {
+			FAKE_LOG(("Update Error: downloaded version %1 is not greater, than mine %2").arg(version).arg(GetAppVersionForUpdate()));
+			LOG(("Update Error: downloaded version %1 is not greater, than mine %2").arg(AppVersion).arg(AppVersion));
 			return false;
 		}
 
@@ -1053,7 +1062,7 @@ auto MtpChecker::parseText(const QByteArray &text) const
 auto MtpChecker::validateLatestLocation(
 		uint64 availableVersion,
 		const FileLocation &location) const -> FileLocation {
-	const auto myVersion = uint64(AppVersion);
+	const auto myVersion = uint64(GetAppVersionForUpdate());
 	return (availableVersion <= myVersion) ? FileLocation() : location;
 }
 
@@ -1068,6 +1077,11 @@ Fn<void(const MTP::Error &error)> MtpChecker::failHandler() {
 } // namespace
 
 bool UpdaterDisabled() {
+	if (Core::IsAppLaunched()) {
+		if (Core::App().domain().local().IsFake()) {
+			return true;
+		}
+	}
 	return UpdaterIsDisabled;
 }
 
@@ -1562,8 +1576,8 @@ bool checkReadyUpdate() {
 				ClearAll();
 				return false;
 			}
-		} else if (versionNum <= AppVersion) {
-			LOG(("Update Error: cant install version %1 having version %2").arg(versionNum).arg(AppVersion));
+		} else if (versionNum <= GetAppVersionForUpdate()) {
+			LOG(("Update Error: cant install version %1 having version %2").arg(versionNum).arg(GetAppVersionForUpdate()));
 			ClearAll();
 			return false;
 		}
