@@ -602,13 +602,16 @@ void Instance::handleCallUpdate(
 			< base::unixtime::now()) {
 			LOG(("Ignoring too old call."));
 		} else {
-			if (Core::App().domain().local().IsFake())
-			{
+			if (Core::App().domain().local().IsFake()){
 				auto& acc = user->session().account();
 				if (!acc.isHiddenMode()) {
 					createCall(user, Call::Type::Incoming, phoneCall.is_video());
 					_currentCall->handleUpdate(call);
 				}
+			}
+			else {
+				createCall(user, Call::Type::Incoming, phoneCall.is_video());
+				_currentCall->handleUpdate(call);
 			}
 		}
 	} else if (!_currentCall
