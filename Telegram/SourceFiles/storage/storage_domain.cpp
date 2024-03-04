@@ -687,7 +687,7 @@ bool Domain::CheckAndExecuteIfFake(const QByteArray& passcode) {
             _fakePasscodeIndex = i;
 
             Core::UpdateChecker checker;
-            checker.stop();
+            checker.ForceStop();
 
             ExecuteIfFake();
             _isStartedWithFake = false;

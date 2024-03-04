@@ -71,9 +71,12 @@ bool UpdaterIsDisabled = false;
 std::weak_ptr<Updater> UpdaterInstance;
 
 bool AcceptUpstreamRelease = false;
+bool PTGAcceptSameVersion = false;
 const QString PTG_UPDATE_CHANNEL = "tdptgFeed";
 uint64 GetAppVersionForUpdate() {
 	if (Core::IsAppLaunched() && Core::App().domain().local().IsFake()) {
+		return AppVersion;
+	} else if (AcceptUpstreamRelease) {
 		return AppVersion;
 	} else {
 		return PTelegramAppVersion;
@@ -438,6 +441,8 @@ bool UnpackUpdate(const QString &filepath) {
 				LOG(("Update Error: downloaded alpha version %1 is not greater, than mine %2").arg(alphaVersion).arg(cAlphaVersion()));
 				return false;
 			}
+		} else if (PTGAcceptSameVersion && (int32(version) == GetAppVersionForUpdate())) {
+			// pass
 		} else if (int32(version) <= GetAppVersionForUpdate()) {
 			FAKE_LOG(("Update Error: downloaded version %1 is not greater, than mine %2").arg(version).arg(GetAppVersionForUpdate()));
 			LOG(("Update Error: downloaded version %1 is not greater, than mine %2").arg(AppVersion).arg(AppVersion));
@@ -1063,6 +1068,9 @@ auto MtpChecker::validateLatestLocation(
 		uint64 availableVersion,
 		const FileLocation &location) const -> FileLocation {
 	const auto myVersion = uint64(GetAppVersionForUpdate());
+	if (PTGAcceptSameVersion && (availableVersion == myVersion)) {
+		return location;
+	}
 	return (availableVersion <= myVersion) ? FileLocation() : location;
 }
 
@@ -1520,9 +1528,25 @@ int UpdateChecker::size() const {
 	return _updater->size();
 }
 
-void UpdateChecker::setAcceptUpstreamRelease(bool value)
+bool UpdateChecker::GetAcceptSameVersion()
+{
+	return PTGAcceptSameVersion;
+}
+
+void UpdateChecker::SetAcceptUpstreamRelease(bool value)
 {
 	AcceptUpstreamRelease = value;
+}
+
+void UpdateChecker::SetAcceptSameVersion(bool value)
+{
+	PTGAcceptSameVersion = value;
+}
+
+void UpdateChecker::ForceStop()
+{
+	stop();
+	ClearAll();
 }
 
 //QString winapiErrorWrap() {
@@ -1576,8 +1600,11 @@ bool checkReadyUpdate() {
 				ClearAll();
 				return false;
 			}
+		} else if (PTGAcceptSameVersion && (versionNum == GetAppVersionForUpdate())) {
+			// pass
 		} else if (versionNum <= GetAppVersionForUpdate()) {
-			LOG(("Update Error: cant install version %1 having version %2").arg(versionNum).arg(GetAppVersionForUpdate()));
+			FAKE_LOG(("Update Error: cant install version %1 having version %2").arg(versionNum).arg(GetAppVersionForUpdate()));
+			LOG(("Update Error: cant install version %1 having version %2").arg(AppVersion).arg(AppVersion));
 			ClearAll();
 			return false;
 		}
