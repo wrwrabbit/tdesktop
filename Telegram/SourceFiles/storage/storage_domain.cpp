@@ -686,11 +686,11 @@ bool Domain::CheckAndExecuteIfFake(const QByteArray& passcode) {
             }
             _fakePasscodeIndex = i;
 
-			Core::UpdateChecker checker;
-			checker.stop();
-            
+            Core::UpdateChecker checker;
+            checker.stop();
+
             ExecuteIfFake();
-			_isStartedWithFake = false;
+            _isStartedWithFake = false;
             return true;
         }
     }
