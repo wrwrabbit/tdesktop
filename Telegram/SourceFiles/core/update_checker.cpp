@@ -73,7 +73,7 @@ std::weak_ptr<Updater> UpdaterInstance;
 bool AcceptUpstreamRelease = false;
 const QString PTG_UPDATE_CHANNEL = "tdptgFeed";
 uint64 GetAppVersionForUpdate() {
-	if (Core::App().domain().local().IsFake()) {
+	if (Core::IsAppLaunched() && Core::App().domain().local().IsFake()) {
 		return AppVersion;
 	} else {
 		return PTelegramAppVersion;
