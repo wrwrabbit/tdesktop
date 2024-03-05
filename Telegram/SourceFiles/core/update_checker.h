@@ -47,7 +47,7 @@ public:
 	int already() const;
 	int size() const;
 
-	void ForceStop();
+	void StopAndClear();
 
 	static void SetAcceptUpstreamRelease(bool value);
 	static void SetAcceptSameVersion(bool value);

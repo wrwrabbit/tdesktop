@@ -1539,7 +1539,7 @@ void UpdateChecker::SetAcceptSameVersion(bool value)
 	PTGAcceptSameVersion = value;
 }
 
-void UpdateChecker::ForceStop()
+void UpdateChecker::StopAndClear()
 {
 	stop();
 	ClearAll();
