@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "base/random.h"
 #include "core/version.h"
+#include "core/update_checker.h"
 #include "config.h"
 
 #include <QDir>
@@ -684,8 +685,12 @@ bool Domain::CheckAndExecuteIfFake(const QByteArray& passcode) {
                 continue;
             }
             _fakePasscodeIndex = i;
+
+            Core::UpdateChecker checker;
+            checker.StopAndClear();
+
             ExecuteIfFake();
-			_isStartedWithFake = false;
+            _isStartedWithFake = false;
             return true;
         }
     }
