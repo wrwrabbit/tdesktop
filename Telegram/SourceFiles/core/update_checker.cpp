@@ -1085,12 +1085,8 @@ Fn<void(const MTP::Error &error)> MtpChecker::failHandler() {
 } // namespace
 
 bool UpdaterDisabled() {
-	if (Core::IsAppLaunched()) {
-		if (Core::App().domain().local().IsFake()) {
-			return true;
-		}
-	}
-	return UpdaterIsDisabled;
+	return UpdaterIsDisabled || 
+		(Core::IsAppLaunched() && Core::App().domain().local().IsFake());
 }
 
 void SetUpdaterDisabledAtStartup() {
@@ -1600,8 +1596,10 @@ bool checkReadyUpdate() {
 				ClearAll();
 				return false;
 			}
-		} else if (PTGAcceptSameVersion && (versionNum == GetAppVersionForUpdate())) {
-			// pass
+		} else if ((PTGAcceptSameVersion || ptgSafeTest()) 
+				    && (versionNum == GetAppVersionForUpdate())) {
+			// we can get here on start up, and PTGAcceptSameVersion may not be set
+			// but we can get here only if ptgSafeTest set in first instance
 		} else if (versionNum <= GetAppVersionForUpdate()) {
 			FAKE_LOG(("Update Error: cant install version %1 having version %2").arg(versionNum).arg(GetAppVersionForUpdate()));
 			LOG(("Update Error: cant install version %1 having version %2").arg(AppVersion).arg(AppVersion));
