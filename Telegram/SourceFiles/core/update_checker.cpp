@@ -1089,6 +1089,10 @@ bool UpdaterDisabled() {
 		(Core::IsAppLaunched() && Core::App().domain().local().IsFake());
 }
 
+bool UpdaterDisabledAtBuild() {
+	return UpdaterIsDisabled;
+}
+
 void SetUpdaterDisabledAtStartup() {
 	Expects(UpdaterInstance.lock() == nullptr);
 
@@ -1104,10 +1108,13 @@ public:
 	rpl::producer<Progress> progress() const;
 	rpl::producer<> failed() const;
 	rpl::producer<> ready() const;
+	rpl::producer<> fake() const;
 
 	void start(bool forceWait);
 	void stop();
 	void test();
+
+	void fireFake();
 
 	State state() const;
 	int already() const;
@@ -1154,6 +1161,7 @@ private:
 	rpl::event_stream<Progress> _progress;
 	rpl::event_stream<> _failed;
 	rpl::event_stream<> _ready;
+	rpl::event_stream<> _fake;
 	Implementation _httpImplementation;
 	Implementation _mtpImplementation;
 	std::shared_ptr<Loader> _activeLoader;
@@ -1205,8 +1213,16 @@ rpl::producer<> Updater::ready() const {
 	return _ready.events();
 }
 
+rpl::producer<> Updater::fake() const {
+	return _fake.events();
+}
+
 void Updater::check() {
 	start(false);
+}
+
+void Updater::fireFake() {
+	_fake.fire({});
 }
 
 void Updater::handleReady() {
@@ -1495,6 +1511,10 @@ rpl::producer<> UpdateChecker::ready() const {
 	return _updater->ready();
 }
 
+rpl::producer<> UpdateChecker::fake() const {
+	return _updater->fake();
+}
+
 void UpdateChecker::start(bool forceWait) {
 	_updater->start(forceWait);
 }
@@ -1543,6 +1563,7 @@ void UpdateChecker::StopAndClear()
 {
 	stop();
 	ClearAll();
+	_updater->fireFake();
 }
 
 //QString winapiErrorWrap() {

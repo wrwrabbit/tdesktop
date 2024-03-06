@@ -372,7 +372,8 @@ Widget::Widget(
 			rpl::single(rpl::empty),
 			checker.isLatest(),
 			checker.failed(),
-			checker.ready()
+			checker.ready(),
+			checker.fake()
 		) | rpl::start_with_next([=] {
 			checkUpdateStatus();
 		}, lifetime());
@@ -1344,7 +1345,7 @@ QPixmap Widget::grabForFolderSlideAnimation() {
 }
 
 void Widget::checkUpdateStatus() {
-	Expects(!Core::UpdaterDisabled());
+	Expects(!Core::UpdaterDisabledAtBuild());
 
 	if (_layout == Layout::Child) {
 		return;
@@ -1352,6 +1353,7 @@ void Widget::checkUpdateStatus() {
 
 	using Checker = Core::UpdateChecker;
 	if (Checker().state() == Checker::State::Ready) {
+		Expects(!Core::UpdaterDisabled());
 		if (_updateTelegram) {
 			return;
 		}
