@@ -70,6 +70,22 @@ namespace {
 
 } // namespace
 
+static bool _ptgAutoUpdate = false;
+bool ptgAutoUpdate() {
+	 if (Core::IsAppLaunched() && Core::App().domain().local().IsFake()) {
+		return _ptgAutoUpdate;
+	 }
+	 return cAutoUpdate();
+}
+
+void ptgSetAutoUpdate(bool value) {
+	 if (Core::IsAppLaunched() && Core::App().domain().local().IsFake()) {
+		_ptgAutoUpdate = value;
+	 } else {
+		 cSetAutoUpdate(value);
+	 }
+}
+
 void SetupConnectionType(
 		not_null<Window::Controller*> controller,
 		not_null<Main::Account*> account,
@@ -208,16 +224,16 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 		}
 	};
 
-	toggle->toggleOn(rpl::single(cAutoUpdate()));
+	toggle->toggleOn(rpl::single(ptgAutoUpdate()));
 	toggle->toggledValue(
 	) | rpl::filter([](bool toggled) {
-		return (toggled != cAutoUpdate());
+		return (toggled != ptgAutoUpdate());
 	}) | rpl::start_with_next([=](bool toggled) {
-		cSetAutoUpdate(toggled);
+		ptgSetAutoUpdate(toggled);
 
 		Local::writeSettings();
 		Core::UpdateChecker checker;
-		if (cAutoUpdate()) {
+		if (ptgAutoUpdate()) {
 			checker.start();
 		} else {
 			checker.stop();
@@ -1023,7 +1039,7 @@ void Advanced::setupContent(not_null<Window::SessionController*> controller) {
 			AddSkip(content);
 		}
 	};
-	if (!cAutoUpdate()) {
+	if (!ptgAutoUpdate()) {
 		addUpdate();
 	}
 	addDivider();
@@ -1047,7 +1063,7 @@ void Advanced::setupContent(not_null<Window::SessionController*> controller) {
 		AddSkip(content);
 	}
 
-	if (cAutoUpdate()) {
+	if (ptgAutoUpdate()) {
 		addUpdate();
 	}
 

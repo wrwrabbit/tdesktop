@@ -1085,8 +1085,7 @@ Fn<void(const MTP::Error &error)> MtpChecker::failHandler() {
 } // namespace
 
 bool UpdaterDisabled() {
-	return UpdaterIsDisabled || 
-		(Core::IsAppLaunched() && Core::App().domain().local().IsFake());
+	return UpdaterIsDisabled;
 }
 
 void SetUpdaterDisabledAtStartup() {
