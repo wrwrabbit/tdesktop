@@ -172,6 +172,8 @@ def get_available_builds(args):
             dl_url = "https://github.com/%s/actions/runs/%s/artifacts/%s" % (GH_REPO, r["id"], art_id)
             dl_url = art["archive_download_url"]
             try:
+                if "_tg" not in art["name"]:
+                    continue
                 if not os.path.isfile(zip_fn):
                     print("Downloading artifacts for %s of %s" % (art_id, r["id"]))
                     zip_stream = requests.get(dl_url, headers=GH_HDR)
