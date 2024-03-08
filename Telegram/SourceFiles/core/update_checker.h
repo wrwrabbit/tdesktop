@@ -16,7 +16,6 @@ class Session;
 namespace Core {
 
 bool UpdaterDisabled();
-bool UpdaterDisabledAtBuild();
 void SetUpdaterDisabledAtStartup();
 
 class Updater;
@@ -37,7 +36,6 @@ public:
 	rpl::producer<Progress> progress() const;
 	rpl::producer<> failed() const;
 	rpl::producer<> ready() const;
-	rpl::producer<> fake() const;
 
 	void start(bool forceWait = false);
 	void stop();
@@ -48,8 +46,6 @@ public:
 	State state() const;
 	int already() const;
 	int size() const;
-
-	void StopAndClear();
 
 	static void SetAcceptUpstreamRelease(bool value);
 	static void SetAcceptSameVersion(bool value);
