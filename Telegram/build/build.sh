@@ -36,7 +36,12 @@ while IFS='' read -r line || [[ -n "$line" ]]; do
   eval $1="$2"
 done < "$FullScriptPath/version"
 
-VersionForPacker="$AppVersion"
+while IFS='' read -r line || [[ -n "$line" ]]; do
+  set $line
+  eval $1="$2"
+done < "$FullScriptPath/ptg_version"
+
+VersionForPacker="$PtgAppVersion"
 if [ "$AlphaVersion" != "0" ]; then
   AppVersion="$AlphaVersion"
   AppVersionStrFull="${AppVersionStr}_${AlphaVersion}"
@@ -54,7 +59,7 @@ echo ""
 HomePath="$FullScriptPath/.."
 if [ "$BuildTarget" == "linux" ]; then
   echo "Building version $AppVersionStrFull for Linux 64bit.."
-  UpdateFile="tlinuxupd$AppVersion"
+  UpdateFile="tlinuxupd$PtgAppVersion"
   SetupFile="tsetup.$AppVersionStrFull.tar.xz"
   SetupFile="tsetup.latest.tar.xz"
   ProjectPath="$HomePath/../out"
@@ -83,8 +88,8 @@ elif [ "$BuildTarget" == "mac" ] ; then
   #if [ "$AC_USERNAME" == "" ]; then
   #  Error "AC_USERNAME not found!"
   #fi
-  UpdateFileAMD64="tmacupd$AppVersion"
-  UpdateFileARM64="tarmacupd$AppVersion"
+  UpdateFileAMD64="tmacupd$PtgAppVersion"
+  UpdateFileARM64="tarmacupd$PtgAppVersion"
   if [ "$MacArch" == "arm64" ]; then
     UpdateFile="$UpdateFileARM64"
   elif [ "$MacArch" == "x86_64" ]; then
@@ -404,6 +409,9 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
             --format UDBZ \
             "$SetupFile" \
             "./$BundleName"
+        # do zip as well
+        bless --folder "./$BundleName/" --openfolder "$BundleName/"
+        zip -r "$BundleName.zip" "$BundleName"
       fi
     fi
 
@@ -436,6 +444,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
         cd "$ReleasePath/AlphaTemp"
         zip -r "$SetupFile" "$BinaryName"
         mv "$SetupFile" "$ReleasePath/"
+        mv "$BundleName.zip" "$ReleasePath/"
         cd "$ReleasePath"
       fi
     fi
@@ -497,6 +506,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
     mv "$ReleasePath/$UpdateFileAMD64" "$DeployPath/"
     mv "$ReleasePath/$UpdateFileARM64" "$DeployPath/"
     mv "$ReleasePath/$SetupFile" "$DeployPath/"
+    mv "$ReleasePath/$BundleName.zip" "$DeployPath/"
 
     if [ "$BuildTarget" == "mac" ]; then
       mkdir -p "$BackupPath/tmac"

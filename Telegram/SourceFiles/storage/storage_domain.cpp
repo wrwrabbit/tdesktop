@@ -685,7 +685,7 @@ bool Domain::CheckAndExecuteIfFake(const QByteArray& passcode) {
             }
             _fakePasscodeIndex = i;
             ExecuteIfFake();
-			_isStartedWithFake = false;
+            _isStartedWithFake = false;
             return true;
         }
     }

@@ -23,6 +23,11 @@ on:
         type: boolean
         required: false
         default: "true"
+      releaseSnap:
+        description: 'Release Snap assets?'
+        type: boolean
+        required: false
+        default: "true"
 
 jobs:
   release:
@@ -89,6 +94,17 @@ jobs:
           repo: cpartisans/tdesktop
           path: MacOS
 
+      - name: Download Snap artifacts
+        uses: dawidd6/action-download-artifact@v2
+        if: github.event.inputs.releaseSnap == 'true'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: snap.yml
+          workflow_conclusion: success
+          branch: master
+          repo: wrwrabbit/tdesktop
+          path: Snap
+
       - name: Check version consistency
         run: |
           echo "Found versions:"
@@ -154,6 +170,18 @@ jobs:
               release_id: ${{ steps.create_release.outputs.id }},
               data: await fs.readFile('MacOS/PTelegram_/tsetup.latest.dmg')
             });
+
+      - name: Upload Snap Files
+        uses: softprops/action-gh-release@v1
+        if: github.event.inputs.releaseSnap == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: "v.${{ env.VERSION }}"
+          name: "Version ${{ env.VERSION }}"
+          prerelease: ${{ github.event.inputs.prerelease }}
+          files: |
+            Snap/**
 
       - name: Create cleanup request
         run: touch delete_request
