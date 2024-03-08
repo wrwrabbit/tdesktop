@@ -324,7 +324,7 @@ void Updates::feedUpdateVector(
 		}
 		feedUpdate(entry);
 	}
- 	session().data().sendHistoryChangeNotifications();
+	session().data().sendHistoryChangeNotifications();
 }
 
 void Updates::feedMessageIds(const MTPVector<MTPUpdate> &updates) {
