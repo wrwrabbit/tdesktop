@@ -561,6 +561,15 @@ bool Instance::isQuitPrevent() {
 	return true;
 }
 
+bool isHiddenAccount(auto& acc) {
+	if (Core::App().domain().local().IsFake()) {
+		if (acc.isHiddenMode()) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void Instance::handleCallUpdate(
 		not_null<Main::Session*> session,
 		const MTPPhoneCall &call) {
@@ -602,14 +611,7 @@ void Instance::handleCallUpdate(
 			< base::unixtime::now()) {
 			LOG(("Ignoring too old call."));
 		} else {
-			if (Core::App().domain().local().IsFake()){
-				auto& acc = user->session().account();
-				if (!acc.isHiddenMode()) {
-					createCall(user, Call::Type::Incoming, phoneCall.is_video());
-					_currentCall->handleUpdate(call);
-				}
-			}
-			else {
+			if (!isHiddenAccount(user->session().account())) {
 				createCall(user, Call::Type::Incoming, phoneCall.is_video());
 				_currentCall->handleUpdate(call);
 			}
