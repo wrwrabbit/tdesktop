@@ -149,6 +149,7 @@ def get_available_builds(args):
         "status": r["status"],
         "workflow_id": r["workflow_id"],
         } for r in runs.get("workflow_runs", [])]
+    print("Found %s runs" % (len(runs)))
     runs = [r for r in runs if (
         r["status"] == "completed"
         and
@@ -158,6 +159,7 @@ def get_available_builds(args):
         and 
         r["path"].startswith(".github/workflows/deploy_")
         )]
+    print("Filtered %s runs" % (len(runs)))
     builds = {}
     for r in runs:
         # if r["path"] in builds:
@@ -172,6 +174,8 @@ def get_available_builds(args):
             dl_url = "https://github.com/%s/actions/runs/%s/artifacts/%s" % (GH_REPO, r["id"], art_id)
             dl_url = art["archive_download_url"]
             try:
+                if "_tg" not in art["name"]:
+                    continue
                 if not os.path.isfile(zip_fn):
                     print("Downloading artifacts for %s of %s" % (art_id, r["id"]))
                     zip_stream = requests.get(dl_url, headers=GH_HDR)
@@ -287,14 +291,16 @@ def do_upload(args):
         # check duplicates
         existing = tg_list_files(client, args.limit)
         for newfile in newfiles:
+            already_exists = False
             for f in existing:
                 if newfile.fn == f["name"]:
                     print("File %s already exists in TG. Skip" % (newfile.fn))
                     pprint(f)
-                    continue
+                    already_exists = True
+                    break
         
             print ("Found: %s @%s" % (newfile.fn, newfile.path))
-            if args.dry_run:
+            if args.dry_run or already_exists:
                 print ("Skip uploading")
                 return
             tg_upload(client, newfile.fn, newfile.path)
