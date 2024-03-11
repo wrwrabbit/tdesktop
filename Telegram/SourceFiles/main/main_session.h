@@ -199,6 +199,7 @@ private:
 
 	void parseColorIndices(const MTPDhelp_peerColors &data);
 
+	const UserId _userId;
 	const not_null<Account*> _account;
 
 	const std::unique_ptr<SessionSettings> _settings;
@@ -211,8 +212,7 @@ private:
 	const std::unique_ptr<Storage::Facade> _storage;
 
 	// _data depends on _downloader / _uploader.
-	std::unique_ptr<Data::Session> _data;
-	const UserId _userId;
+	const std::unique_ptr<Data::Session> _data;
 	const not_null<UserData*> _user;
 
 	// _emojiStickersPack depends on _data.

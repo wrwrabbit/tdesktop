@@ -34,11 +34,16 @@ namespace Intro {
 namespace details {
 namespace {
 
-bool AllowPhoneAttempt(const QString &phone) {
+[[nodiscard]] bool AllowPhoneAttempt(const QString &phone) {
 	const auto digits = ranges::count_if(
 		phone,
 		[](QChar ch) { return ch.isNumber(); });
 	return (digits > 1);
+}
+
+[[nodiscard]] QString DigitsOnly(QString value) {
+	static const auto RegExp = QRegularExpression("[^0-9]");
+	return value.replace(RegExp, QString());
 }
 
 } // namespace
@@ -178,16 +183,12 @@ void PhoneWidget::submit() {
 	cancelNearestDcRequest();
 
 	// Check if such account is authorized already.
-	const auto digitsOnly = [](QString value) {
-		static const auto RegExp = QRegularExpression("[^0-9]");
-		return value.replace(RegExp, QString());
-	};
-	const auto phoneDigits = digitsOnly(phone);
+	const auto phoneDigits = DigitsOnly(phone);
 	for (const auto &[index, existing] : Core::App().domain().accounts()) {
 		const auto raw = existing.get();
 		if (const auto session = raw->maybeSession()) {
 			if (raw->mtp().environment() == account().mtp().environment()
-				&& digitsOnly(session->user()->phone()) == phoneDigits) {
+				&& DigitsOnly(session->user()->phone()) == phoneDigits) {
 				crl::on_main(raw, [=] {
 					Core::App().domain().activate(raw);
 				});
@@ -241,7 +242,7 @@ void PhoneWidget::phoneSubmitDone(const MTPauth_SentCode &result) {
 
 	result.match([&](const MTPDauth_sentCode &data) {
 		fillSentCodeData(data);
-		getData()->phone = _sentPhone;
+		getData()->phone = DigitsOnly(_sentPhone);
 		getData()->phoneHash = qba(data.vphone_code_hash());
 		const auto next = data.vnext_type();
 		if (next && next->type() == mtpc_auth_codeTypeCall) {
