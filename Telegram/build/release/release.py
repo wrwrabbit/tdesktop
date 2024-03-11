@@ -271,13 +271,16 @@ def do_list(args):
                         })
 
     pprint(artifacts)
+    return artifacts
 
 
 def do_upload(args):
-    # check id?
-    # unpack file!
+    ids = args.ids
+    if args.latest:
+        for item in do_list(args):
+            ids.append(item["ID"])
     newfiles = []
-    for fid in args.ids:
+    for fid in set(ids):
         newfiles_ = get_file_data(fid)
         if newfiles_:
             newfiles += newfiles_
@@ -289,7 +292,7 @@ def do_upload(args):
     client = tg_login()
     with client:
         # check duplicates
-        existing = tg_list_files(client, args.limit)
+        existing = tg_list_files(client, args.limit*6)
         for newfile in newfiles:
             already_exists = False
             for f in existing:
@@ -302,7 +305,7 @@ def do_upload(args):
             print ("Found: %s @%s" % (newfile.fn, newfile.path))
             if args.dry_run or already_exists:
                 print ("Skip uploading")
-                return
+                continue
             tg_upload(client, newfile.fn, newfile.path)
         print ("Done")
 
