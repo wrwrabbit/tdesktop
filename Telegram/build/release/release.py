@@ -19,7 +19,11 @@ from argparse import RawTextHelpFormatter
 
 ############### CONFIG
 
-import config
+try:
+    import config
+except:
+    print ("Copy config.tpl.py to config.py and configure it") 
+    quit(1)
 # # Original android APP_ID
 API_ID = config.API_ID
 API_HASH = config.API_HASH
