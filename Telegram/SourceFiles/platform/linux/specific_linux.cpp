@@ -35,9 +35,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <kshell.h>
 #include <ksandbox.h>
 
-#include <glibmm.h>
-#include <giomm.h>
-
 #include <xdgdbus/xdgdbus.hpp>
 #include <xdpbackground/xdpbackground.hpp>
 #include <xdprequest/xdprequest.hpp>
@@ -55,7 +52,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace {
 
 using namespace gi::repository;
-namespace Gio = gi::repository::Gio;
 using namespace Platform;
 using Platform::internal::WaylandIntegration;
 
@@ -79,8 +75,9 @@ void PortalAutostart(bool enabled, Fn<void(bool)> done) {
 
 			if (!proxy) {
 				if (done) {
+					Gio::DBusErrorNS_::strip_remote_error(proxy.error());
 					LOG(("Portal Autostart Error: %1").arg(
-						proxy.error().what()));
+						proxy.error().message_().c_str()));
 					done(false);
 				}
 				return;
@@ -117,8 +114,10 @@ void PortalAutostart(bool enabled, Fn<void(bool)> done) {
 
 					if (!requestProxy) {
 						if (done) {
+							Gio::DBusErrorNS_::strip_remote_error(
+								requestProxy.error());
 							LOG(("Portal Autostart Error: %1").arg(
-								requestProxy.error().what()));
+								requestProxy.error().message_().c_str()));
 							done(false);
 						}
 						return;
@@ -158,7 +157,7 @@ void PortalAutostart(bool enabled, Fn<void(bool)> done) {
 					commandline.push_back("-autostart");
 
 					interface.call_request_background(
-						std::string(base::Platform::XDP::ParentWindowID()),
+						base::Platform::XDP::ParentWindowID(),
 						GLib::Variant::new_array({
 							GLib::Variant::new_dict_entry(
 								GLib::Variant::new_string("handle_token"),
@@ -192,8 +191,11 @@ void PortalAutostart(bool enabled, Fn<void(bool)> done) {
 
 								if (!result) {
 									if (done) {
-										LOG(("Portal Autostart Error: %1")
-											.arg(result.error().what()));
+										const auto &error = result.error();
+										Gio::DBusErrorNS_::strip_remote_error(
+											error);
+										LOG(("Portal Autostart Error: %1").arg(
+											error.message_().c_str()));
 										done(false);
 									}
 
@@ -247,7 +249,7 @@ bool GenerateDesktopFile(
 	
 	if (!loaded) {
 		if (!silent) {
-			LOG(("App Error: %1").arg(loaded.error().what()));
+			LOG(("App Error: %1").arg(loaded.error().message_().c_str()));
 		}
 		return false;
 	}
@@ -257,7 +259,8 @@ bool GenerateDesktopFile(
 			const auto removed = target.remove_group(group);
 			if (!removed) {
 				if (!silent) {
-					LOG(("App Error: %1").arg(removed.error().what()));
+					LOG(("App Error: %1").arg(
+						removed.error().message_().c_str()));
 				}
 				return false;
 			}
@@ -320,7 +323,7 @@ bool GenerateDesktopFile(
 	const auto saved = target.save_to_file(targetFile.toStdString());
 	if (!saved) {
 		if (!silent) {
-			LOG(("App Error: %1").arg(saved.error().what()));
+			LOG(("App Error: %1").arg(saved.error().message_().c_str()));
 		}
 		return false;
 	}
@@ -411,7 +414,7 @@ bool GenerateServiceFile(bool silent = false) {
 	const auto saved = target.save_to_file(targetFile.toStdString());
 	if (!saved) {
 		if (!silent) {
-			LOG(("App Error: %1").arg(saved.error().what()));
+			LOG(("App Error: %1").arg(saved.error().message_().c_str()));
 		}
 		return false;
 	}
@@ -507,12 +510,12 @@ QString SingleInstanceLocalServerName(const QString &hash) {
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
 std::optional<bool> IsDarkMode() {
-	const auto result = base::Platform::XDP::ReadSetting<uint>(
+	const auto result = base::Platform::XDP::ReadSetting(
 		"org.freedesktop.appearance",
 		"color-scheme");
 
 	return result.has_value()
-		? std::make_optional(*result == 1)
+		? std::make_optional(result->get_uint32() == 1)
 		: std::nullopt;
 }
 #endif // Qt < 6.5.0
@@ -686,9 +689,6 @@ void start() {
 
 	GLib::set_prgname(cExeName().toStdString());
 	GLib::set_application_name(AppName.data());
-
-	Glib::init();
-	::Gio::init();
 
 	Webview::WebKitGTK::SetSocketPath(u"%1/%2-%3-webview-%4"_q.arg(
 		QDir::tempPath(),
