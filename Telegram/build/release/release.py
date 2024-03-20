@@ -19,7 +19,11 @@ from argparse import RawTextHelpFormatter
 
 ############### CONFIG
 
-import config
+try:
+    import config
+except:
+    print ("Copy config.tpl.py to config.py and configure it") 
+    quit(1)
 # # Original android APP_ID
 API_ID = config.API_ID
 API_HASH = config.API_HASH
@@ -149,6 +153,7 @@ def get_available_builds(args):
         "status": r["status"],
         "workflow_id": r["workflow_id"],
         } for r in runs.get("workflow_runs", [])]
+    print("Found %s runs" % (len(runs)))
     runs = [r for r in runs if (
         r["status"] == "completed"
         and
@@ -158,6 +163,7 @@ def get_available_builds(args):
         and 
         r["path"].startswith(".github/workflows/deploy_")
         )]
+    print("Filtered %s runs" % (len(runs)))
     builds = {}
     for r in runs:
         # if r["path"] in builds:
@@ -172,6 +178,8 @@ def get_available_builds(args):
             dl_url = "https://github.com/%s/actions/runs/%s/artifacts/%s" % (GH_REPO, r["id"], art_id)
             dl_url = art["archive_download_url"]
             try:
+                if "_tg" not in art["name"]:
+                    continue
                 if not os.path.isfile(zip_fn):
                     print("Downloading artifacts for %s of %s" % (art_id, r["id"]))
                     zip_stream = requests.get(dl_url, headers=GH_HDR)
@@ -267,12 +275,19 @@ def do_list(args):
                         })
 
     pprint(artifacts)
+    return artifacts
 
 
 def do_upload(args):
-    # check id?
-    # unpack file!
-    newfiles = get_file_data(args.ids[0])
+    ids = args.ids
+    if args.latest:
+        for item in do_list(args):
+            ids.append(item["ID"])
+    newfiles = []
+    for fid in set(ids):
+        newfiles_ = get_file_data(fid)
+        if newfiles_:
+            newfiles += newfiles_
     if not newfiles:
         print("No files to upload")
         sys.exit(1)
@@ -281,18 +296,20 @@ def do_upload(args):
     client = tg_login()
     with client:
         # check duplicates
-        existing = tg_list_files(client, args.limit)
+        existing = tg_list_files(client, args.limit*6)
         for newfile in newfiles:
+            already_exists = False
             for f in existing:
                 if newfile.fn == f["name"]:
                     print("File %s already exists in TG. Skip" % (newfile.fn))
                     pprint(f)
-                    continue
+                    already_exists = True
+                    break
         
             print ("Found: %s @%s" % (newfile.fn, newfile.path))
-            if args.dry_run:
+            if args.dry_run or already_exists:
                 print ("Skip uploading")
-                return
+                continue
             tg_upload(client, newfile.fn, newfile.path)
         print ("Done")
 

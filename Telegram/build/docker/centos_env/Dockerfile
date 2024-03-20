@@ -1,7 +1,7 @@
 {%- set GIT = "https://github.com" -%}
 {%- set GIT_FREEDESKTOP = GIT ~ "/gitlab-freedesktop-mirrors" -%}
-{%- set QT = "6.6.2" -%}
-{%- set QT_TAG = "v" ~ QT -%}
+{%- set QT = "6.7.0" -%}
+{%- set QT_TAG = "v" ~ QT ~ "-rc1" -%}
 {%- set QT_PREFIX = "/usr/local/desktop-app/Qt-" ~ QT -%}
 {%- set OPENSSL_VER = "1_1_1" -%}
 {%- set OPENSSL_PREFIX = "/usr/local/desktop-app/openssl-1.1.1" -%}
@@ -54,7 +54,7 @@ FROM builder AS patches
 RUN git init patches \
 	&& cd patches \
 	&& git remote add origin {{ GIT }}/desktop-app/patches.git \
-	&& git fetch --depth=1 origin 0edd8a93409ca24e215fc8ba1e98814893ad05cf \
+	&& git fetch --depth=1 origin b8390aef3db43f973486c6e512f4e825ffd09691 \
 	&& git reset --hard FETCH_HEAD \
 	&& rm -rf .git
 
@@ -705,27 +705,6 @@ RUN git clone -b 2.78.1 --depth=1 {{ GIT }}/GNOME/glib.git \
 	&& cd .. \
 	&& rm -rf glib
 
-FROM patches AS glibmm
-COPY --link --from=glib {{ LibrariesPath }}/glib-cache /
-
-RUN git clone -b 2.78.0 --depth=1 {{ GIT }}/GNOME/glibmm.git \
-	&& cd glibmm \
-	&& git apply ../patches/glibmm.patch \
-	&& CFLAGS="$CFLAGS {{ CFLAGS_LTO }}" CXXFLAGS="$CXXFLAGS {{ CFLAGS_LTO }}" meson build \
-		--buildtype=plain \
-		--default-library=both \
-		-Dbuild-documentation=false \
-		-Dbuild-examples=false \
-		-Dsigc++-3.0:build-documentation=false \
-		-Dsigc++-3.0:build-examples=false \
-		-Dsigc++-3.0:build-tests=false \
-		-Dsigc++-3.0:validation=false \
-		-Dmm-common:use-network=true \
-	&& meson compile -C build \
-	&& DESTDIR="{{ LibrariesPath }}/glibmm-cache" meson install -C build \
-	&& cd .. \
-	&& rm -rf glibmm
-
 FROM builder AS gobject-introspection
 COPY --link --from=glib {{ LibrariesPath }}/glib-cache /
 
@@ -785,7 +764,7 @@ RUN git clone -b {{ QT_TAG }} --depth=1 {{ GIT }}/qt/qt5.git qt_{{ QT }} \
 	&& rm -rf qt_{{ QT }}
 
 FROM builder AS breakpad
-RUN git clone -b v2023.01.27 --depth=1 https://chromium.googlesource.com/breakpad/breakpad.git \
+RUN git clone -b v2023.06.01 --depth=1 https://chromium.googlesource.com/breakpad/breakpad.git \
 	&& cd breakpad \
 	&& git clone -b v2022.10.12 --depth=1 https://chromium.googlesource.com/linux-syscall-support.git src/third_party/lss \
 	&& env -u CFLAGS -u CXXFLAGS ./configure \
@@ -873,7 +852,6 @@ COPY --link --from=openal {{ LibrariesPath }}/openal-cache /
 COPY --link --from=openssl {{ LibrariesPath }}/openssl-cache /
 COPY --link --from=xkbcommon {{ LibrariesPath }}/xkbcommon-cache /
 COPY --link --from=glib {{ LibrariesPath }}/glib-cache /
-COPY --link --from=glibmm {{ LibrariesPath }}/glibmm-cache /
 COPY --link --from=gobject-introspection {{ LibrariesPath }}/gobject-introspection-cache /
 COPY --link --from=qt {{ LibrariesPath }}/qt-cache /
 COPY --link --from=breakpad {{ LibrariesPath }}/breakpad-cache /

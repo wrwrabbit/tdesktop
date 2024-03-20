@@ -189,5 +189,9 @@ QString currentPTelegramVersionText() {
     if (Platform::IsWindows64Bit()) {
         result += " x64";
     }
+    if (ptgSafeTest()) {
+        static const char* BUILD_DATE = " @" __DATE__ " " __TIME__;
+        result += BUILD_DATE;
+    }
     return result;
 }

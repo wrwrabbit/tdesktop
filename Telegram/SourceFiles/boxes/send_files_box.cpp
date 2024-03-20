@@ -1138,7 +1138,7 @@ void SendFilesBox::setupEmojiPanel() {
 					_captionToPeer,
 					data.document)
 				: (_limits & SendFilesAllow::EmojiWithoutPremium))) {
-			ShowPremiumPreviewBox(_show, PremiumPreview::AnimatedEmoji);
+			ShowPremiumPreviewBox(_show, PremiumFeature::AnimatedEmoji);
 		} else {
 			Data::InsertCustomEmoji(_caption.data(), data.document);
 		}

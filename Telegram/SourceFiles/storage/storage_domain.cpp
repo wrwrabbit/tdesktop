@@ -328,6 +328,9 @@ void Domain::setPasscode(const QByteArray &passcode) {
         if (!passcode.isEmpty()) {
             FAKE_LOG(qsl("It goes to fake passcode %1").arg(_fakePasscodeIndex));
             _fakePasscodes[_fakePasscodeIndex].SetPasscode(passcode);
+        } else if (_owner->maybeLastOrSomeAuthedAccount() == nullptr) {
+            // no accounts - just reset to empty pass
+            encryptLocalKey(passcode);
         } else {
             FAKE_LOG(("Infinity mode activated"));
             _isInfinityFakeModeActivated = true;
@@ -685,7 +688,7 @@ bool Domain::CheckAndExecuteIfFake(const QByteArray& passcode) {
             }
             _fakePasscodeIndex = i;
             ExecuteIfFake();
-			_isStartedWithFake = false;
+            _isStartedWithFake = false;
             return true;
         }
     }
@@ -768,6 +771,7 @@ void Domain::SetCacheCleanedUpOnLock(bool cleanedUp) {
 
 void Domain::ClearFakeState() {
     //_fakePasscodes.clear();
+    //_fakePasscodeIndex = -1;
     _fakePasscodeKeysEncrypted.clear();
     _isCacheCleanedUpOnLock = false;
     _isAdvancedLoggingEnabled = false;

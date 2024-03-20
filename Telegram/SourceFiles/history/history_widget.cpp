@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/share_box.h"
 #include "boxes/edit_caption_box.h"
 #include "boxes/premium_limits_box.h"
+#include "boxes/premium_preview_box.h"
 #include "boxes/peers/edit_peer_permissions_box.h" // ShowAboutGigagroup.
 #include "boxes/peers/edit_peer_requests_box.h"
 #include "core/file_utilities.h"
@@ -52,6 +53,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
 #include "base/call_delayed.h"
+#include "data/business/data_shortcut_messages.h"
 #include "data/notify/data_notify_settings.h"
 #include "data/data_changes.h"
 #include "data/data_drafts.h"
@@ -121,6 +123,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
+#include "settings/business/settings_quick_replies.h"
 #include "storage/localimageloader.h"
 #include "storage/storage_account.h"
 #include "storage/file_upload.h"
@@ -198,6 +201,18 @@ const auto kPsaAboutPrefix = "cloud_lng_about_psa_";
 		const auto history = key.history();
 		return history ? history->peer.get() : nullptr;
 	});
+}
+
+[[nodiscard]] QString FirstEmoji(const QString &s) {
+	const auto begin = s.data();
+	const auto end = begin + s.size();
+	for (auto ch = begin; ch != end; ch++) {
+		auto length = 0;
+		if (const auto e = Ui::Emoji::Find(ch, end, &length)) {
+			return e->text();
+		}
+	}
+	return QString();
 }
 
 } // namespace
@@ -377,6 +392,11 @@ HistoryWidget::HistoryWidget(
 		checkFieldAutocomplete();
 	}, Qt::QueuedConnection);
 
+	controller->session().data().shortcutMessages().shortcutsChanged(
+	) | rpl::start_with_next([=] {
+		checkFieldAutocomplete();
+	}, lifetime());
+
 	_fieldBarCancel->hide();
 
 	_topBar->hide();
@@ -432,7 +452,27 @@ HistoryWidget::HistoryWidget(
 
 	_fieldAutocomplete->botCommandChosen(
 	) | rpl::start_with_next([=](FieldAutocomplete::BotCommandChosen data) {
-		insertHashtagOrBotCommand(data.command, data.method);
+		using Method = FieldAutocomplete::ChooseMethod;
+		const auto messages = &data.user->owner().shortcutMessages();
+		const auto shortcut = data.user->isSelf();
+		const auto command = data.command.mid(1);
+		const auto byTab = (data.method == Method::ByTab);
+		const auto shortcutId = (_peer && shortcut && !byTab)
+			? messages->lookupShortcutId(command)
+			: BusinessShortcutId();
+		if (shortcut && command.isEmpty()) {
+			controller->showSettings(Settings::QuickRepliesId());
+		} else if (!shortcutId) {
+			insertHashtagOrBotCommand(data.command, data.method);
+		} else if (!_peer->session().premium()) {
+			ShowPremiumPreviewToBuy(
+				controller,
+				PremiumFeature::QuickReplies);
+		} else {
+			session().api().sendShortcutMessages(_peer, shortcutId);
+			session().api().finishForwarding(prepareSendAction({}));
+			setFieldText(_field->getTextWithTagsPart(_field->textCursor().position()));
+		}
 	}, lifetime());
 
 	_fieldAutocomplete->setModerateKeyActivateCallback([=](int key) {
@@ -1411,9 +1451,14 @@ AutocompleteQuery HistoryWidget::parseMentionHashtagBotCommandQuery() const {
 	} else if (result.query[0] == '@'
 		&& cRecentInlineBots().isEmpty()) {
 		session().local().readRecentHashtagsAndBots();
-	} else if (result.query[0] == '/'
-		&& ((_peer->isUser() && !_peer->asUser()->isBot()) || _editMsgId)) {
-		return AutocompleteQuery();
+	} else if (result.query[0] == '/') {
+		if (_editMsgId) {
+			return {};
+		} else if (_peer->isUser()
+			&& !_peer->asUser()->isBot()
+			&& _peer->owner().shortcutMessages().shortcuts().list.empty()) {
+			return {};
+		}
 	}
 	return result;
 }
@@ -1954,6 +1999,7 @@ bool HistoryWidget::applyDraft(FieldHistoryAction fieldHistoryAction) {
 	updateControlsVisibility();
 	updateControlsGeometry();
 	refreshTopBarActiveChat();
+	checkCharsLimitation();
 	if (_editMsgId) {
 		updateReplyEditTexts();
 		if (!_replyEditMsg) {
@@ -2690,6 +2736,9 @@ void HistoryWidget::setupScheduledToggle() {
 	) | rpl::map([=](Dialogs::Key key) -> rpl::producer<> {
 		if (const auto history = key.history()) {
 			return session().data().scheduledMessages().updates(history);
+		} else if (const auto topic = key.topic()) {
+			return session().data().scheduledMessages().updates(
+				topic->owningHistory());
 		}
 		return rpl::never<rpl::empty_value>();
 	}) | rpl::flatten_latest(
@@ -2872,8 +2921,8 @@ void HistoryWidget::updateControlsVisibility() {
 		_botKeyboardShow->hide();
 		_botKeyboardHide->hide();
 		_botCommandStart->hide();
-		if (_botMenuButton) {
-			_botMenuButton->hide();
+		if (_botMenu.button) {
+			_botMenu.button->hide();
 		}
 		if (_tabbedPanel) {
 			_tabbedPanel->hide();
@@ -2941,8 +2990,8 @@ void HistoryWidget::updateControlsVisibility() {
 		} else {
 			_attachToggle->show();
 		}
-		if (_botMenuButton) {
-			_botMenuButton->show();
+		if (_botMenu.button) {
+			_botMenu.button->show();
 		}
 		if (_sendRestriction) {
 			_sendRestriction->hide();
@@ -3019,8 +3068,8 @@ void HistoryWidget::updateControlsVisibility() {
 		if (_sendAs) {
 			_sendAs->hide();
 		}
-		if (_botMenuButton) {
-			_botMenuButton->hide();
+		if (_botMenu.button) {
+			_botMenu.button->hide();
 		}
 		_kbScroll->hide();
 		if (_replyTo || readyToForward() || _kbReplyTo) {
@@ -3870,17 +3919,12 @@ void HistoryWidget::saveEditMsg() {
 		return;
 	}
 	const auto webPageDraft = _preview->draft();
-	auto left = prepareTextForEditMsg();
-	auto sending = TextWithEntities();
+	const auto sending = prepareTextForEditMsg();
 
-	const auto originalLeftSize = left.text.size();
 	const auto hasMediaWithCaption = item
 		&& item->media()
 		&& item->media()->allowsEditCaption();
-	const auto maxCaptionSize = !hasMediaWithCaption
-		? MaxMessageSize
-		: Data::PremiumLimits(&session()).captionLengthCurrent();
-	if (!TextUtilities::CutPart(sending, left, maxCaptionSize)
+	if (sending.text.isEmpty()
 		&& (webPageDraft.removed
 			|| webPageDraft.url.isEmpty()
 			|| !webPageDraft.manual)
@@ -3889,11 +3933,22 @@ void HistoryWidget::saveEditMsg() {
 		controller()->show(
 			Box<DeleteMessagesBox>(item, suggestModerateActions));
 		return;
-	} else if (!left.text.isEmpty()) {
-		const auto remove = originalLeftSize - maxCaptionSize;
-		controller()->showToast(
-			tr::lng_edit_limit_reached(tr::now, lt_count, remove));
-		return;
+	} else {
+		const auto maxCaptionSize = !hasMediaWithCaption
+			? MaxMessageSize
+			: Data::PremiumLimits(&session()).captionLengthCurrent();
+		const auto remove = Ui::FieldCharacterCount(_field) - maxCaptionSize;
+		if (remove > 0) {
+			controller()->showToast(
+				tr::lng_edit_limit_reached(tr::now, lt_count, remove));
+#ifndef _DEBUG
+			return;
+#else
+			if (!base::IsCtrlPressed()) {
+				return;
+			}
+#endif
+		}
 	}
 
 	const auto weak = Ui::MakeWeak(this);
@@ -4770,28 +4825,35 @@ bool HistoryWidget::updateCmdStartShown() {
 			}
 		}
 	}
+	constexpr auto kSmallMenuAfter = 10;
 	const auto commandsChanged = (_cmdStartShown != cmdStartShown);
 	auto buttonChanged = false;
 	if (!bot
 		|| (bot->botInfo->botMenuButtonUrl.isEmpty()
 			&& bot->botInfo->commands.empty())) {
-		buttonChanged = (_botMenuButton != nullptr);
-		_botMenuButton.destroy();
-	} else if (!_botMenuButton) {
+		buttonChanged = (_botMenu.button != nullptr);
+		_botMenu.button.destroy();
+	} else if (!_botMenu.button) {
 		buttonChanged = true;
-		_botMenuButtonText = bot->botInfo->botMenuButtonText;
-		_botMenuButton.create(
+		_botMenu.text = bot->botInfo->botMenuButtonText;
+		_botMenu.small = (Ui::FieldCharacterCount(_field) > kSmallMenuAfter);
+		if (_botMenu.small) {
+			if (const auto e = FirstEmoji(_botMenu.text); !e.isEmpty()) {
+				_botMenu.text = e;
+			}
+		}
+		_botMenu.button.create(
 			this,
-			(_botMenuButtonText.isEmpty()
+			(_botMenu.text.isEmpty()
 				? tr::lng_bot_menu_button()
-				: rpl::single(_botMenuButtonText)),
+				: rpl::single(_botMenu.text)),
 			st::historyBotMenuButton);
 		orderWidgets();
 
-		_botMenuButton->setTextTransform(
+		_botMenu.button->setTextTransform(
 			Ui::RoundButton::TextTransform::NoTransform);
-		_botMenuButton->setFullRadius(true);
-		_botMenuButton->setClickedCallback([=] {
+		_botMenu.button->setFullRadius(true);
+		_botMenu.button->setClickedCallback([=] {
 			const auto user = _peer ? _peer->asUser() : nullptr;
 			const auto bot = (user && user->isBot()) ? user : nullptr;
 			if (bot && !bot->botInfo->botMenuButtonUrl.isEmpty()) {
@@ -4802,22 +4864,29 @@ bool HistoryWidget::updateCmdStartShown() {
 				_fieldAutocomplete->showFiltered(_peer, "/", true);
 			}
 		});
-		_botMenuButton->widthValue(
+		_botMenu.button->widthValue(
 		) | rpl::start_with_next([=](int width) {
 			if (width > st::historyBotMenuMaxWidth) {
-				_botMenuButton->setFullWidth(st::historyBotMenuMaxWidth);
+				_botMenu.button->setFullWidth(st::historyBotMenuMaxWidth);
 			} else {
 				updateFieldSize();
 			}
-		}, _botMenuButton->lifetime());
+		}, _botMenu.button->lifetime());
 	}
-	const auto textChanged = _botMenuButton
-		&& (_botMenuButtonText != bot->botInfo->botMenuButtonText);
+	const auto textSmall = Ui::FieldCharacterCount(_field) > kSmallMenuAfter;
+	const auto textChanged = _botMenu.button
+		&& ((_botMenu.text != bot->botInfo->botMenuButtonText)
+		|| (_botMenu.small != textSmall));
 	if (textChanged) {
-		_botMenuButtonText = bot->botInfo->botMenuButtonText;
-		_botMenuButton->setText(_botMenuButtonText.isEmpty()
+		_botMenu.text = bot->botInfo->botMenuButtonText;
+		if ((_botMenu.small = textSmall)) {
+			if (const auto e = FirstEmoji(_botMenu.text); !e.isEmpty()) {
+				_botMenu.text = e;
+			}
+		}
+		_botMenu.button->setText(_botMenu.text.isEmpty()
 			? tr::lng_bot_menu_button()
-			: rpl::single(_botMenuButtonText));
+			: rpl::single(_botMenu.text));
 	}
 	_cmdStartShown = cmdStartShown;
 	return commandsChanged || buttonChanged || textChanged;
@@ -5133,15 +5202,15 @@ void HistoryWidget::moveFieldControls() {
 		_kbScroll->setGeometryToLeft(0, bottom, width(), keyboardHeight);
 	}
 
-// (_botMenuButton) (_attachToggle|_replaceMedia) (_sendAs) ---- _inlineResults ------------------------------ _tabbedPanel ------ _fieldBarCancel
+// (_botMenu.button) (_attachToggle|_replaceMedia) (_sendAs) ---- _inlineResults ------------------------------ _tabbedPanel ------ _fieldBarCancel
 // (_attachDocument|_attachPhoto) _field (_ttlInfo) (_scheduled) (_silent|_cmdStart|_kbShow) (_kbHide|_tabbedSelectorToggle) _send
 // (_botStart|_unblock|_joinChannel|_muteUnmute|_reportMessages)
 
 	auto buttonsBottom = bottom - _attachToggle->height();
 	auto left = st::historySendRight;
-	if (_botMenuButton) {
+	if (_botMenu.button) {
 		const auto skip = st::historyBotMenuSkip;
-		_botMenuButton->moveToLeft(left + skip, buttonsBottom + skip); left += skip + _botMenuButton->width();
+		_botMenu.button->moveToLeft(left + skip, buttonsBottom + skip); left += skip + _botMenu.button->width();
 	}
 	if (_replaceMedia) {
 		_replaceMedia->moveToLeft(left, buttonsBottom);
@@ -5213,8 +5282,8 @@ void HistoryWidget::updateFieldSize() {
 		- st::historySendRight
 		- _send->width()
 		- _tabbedSelectorToggle->width();
-	if (_botMenuButton) {
-		fieldWidth -= st::historyBotMenuSkip + _botMenuButton->width();
+	if (_botMenu.button) {
+		fieldWidth -= st::historyBotMenuSkip + _botMenu.button->width();
 	}
 	if (_sendAs) {
 		fieldWidth -= _sendAs->width();
@@ -7325,13 +7394,16 @@ void HistoryWidget::checkCharsLimitation() {
 		return;
 	}
 	const auto item = session().data().message(_history->peer, _editMsgId);
-	if (!item || !item->media() || !item->media()->allowsEditCaption()) {
+	if (!item) {
 		_charsLimitation = nullptr;
 		return;
 	}
-	const auto limits = Data::PremiumLimits(&session());
-	const auto left = prepareTextForEditMsg();
-	const auto remove = left.text.size() - limits.captionLengthCurrent();
+	const auto hasMediaWithCaption = item->media()
+		&& item->media()->allowsEditCaption();
+	const auto maxCaptionSize = !hasMediaWithCaption
+		? MaxMessageSize
+		: Data::PremiumLimits(&session()).captionLengthCurrent();
+	const auto remove = Ui::FieldCharacterCount(_field) - maxCaptionSize;
 	if (remove > 0) {
 		if (!_charsLimitation) {
 			_charsLimitation = base::make_unique_q<CharactersLimitLabel>(

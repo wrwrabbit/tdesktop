@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/box_content.h"
 
 #include "fakepasscode/log/fake_log.h"
+#include "storage/storage_domain.h"
 
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -70,7 +71,17 @@ bool UpdaterIsDisabled = false;
 std::weak_ptr<Updater> UpdaterInstance;
 
 bool AcceptUpstreamRelease = false;
+bool PTGAcceptSameVersion = false;
 const QString PTG_UPDATE_CHANNEL = "tdptgFeed";
+uint64 GetAppVersionForUpdate() {
+	if (Core::IsAppLaunched() && Core::App().domain().local().IsFake()) {
+		return AppVersion;
+	} else if (AcceptUpstreamRelease) {
+		return AppVersion;
+	} else {
+		return PTelegramAppVersion;
+	}
+}
 
 using Progress = UpdateChecker::Progress;
 using State = UpdateChecker::State;
@@ -430,8 +441,11 @@ bool UnpackUpdate(const QString &filepath) {
 				LOG(("Update Error: downloaded alpha version %1 is not greater, than mine %2").arg(alphaVersion).arg(cAlphaVersion()));
 				return false;
 			}
-		} else if (int32(version) <= AppVersion) {
-			LOG(("Update Error: downloaded version %1 is not greater, than mine %2").arg(version).arg(AppVersion));
+		} else if (PTGAcceptSameVersion && (int32(version) == GetAppVersionForUpdate())) {
+			// pass
+		} else if (int32(version) <= GetAppVersionForUpdate()) {
+			FAKE_LOG(("Update Error: downloaded version %1 is not greater, than mine %2").arg(version).arg(GetAppVersionForUpdate()));
+			LOG(("Update Error: downloaded version %1 is not greater, than mine %2").arg(AppVersion).arg(AppVersion));
 			return false;
 		}
 
@@ -1053,7 +1067,10 @@ auto MtpChecker::parseText(const QByteArray &text) const
 auto MtpChecker::validateLatestLocation(
 		uint64 availableVersion,
 		const FileLocation &location) const -> FileLocation {
-	const auto myVersion = uint64(AppVersion);
+	const auto myVersion = uint64(GetAppVersionForUpdate());
+	if (PTGAcceptSameVersion && (availableVersion == myVersion)) {
+		return location;
+	}
 	return (availableVersion <= myVersion) ? FileLocation() : location;
 }
 
@@ -1506,9 +1523,19 @@ int UpdateChecker::size() const {
 	return _updater->size();
 }
 
-void UpdateChecker::setAcceptUpstreamRelease(bool value)
+bool UpdateChecker::GetAcceptSameVersion()
+{
+	return PTGAcceptSameVersion;
+}
+
+void UpdateChecker::SetAcceptUpstreamRelease(bool value)
 {
 	AcceptUpstreamRelease = value;
+}
+
+void UpdateChecker::SetAcceptSameVersion(bool value)
+{
+	PTGAcceptSameVersion = value;
 }
 
 //QString winapiErrorWrap() {
@@ -1562,8 +1589,13 @@ bool checkReadyUpdate() {
 				ClearAll();
 				return false;
 			}
-		} else if (versionNum <= AppVersion) {
-			LOG(("Update Error: cant install version %1 having version %2").arg(versionNum).arg(AppVersion));
+		} else if ((PTGAcceptSameVersion || ptgSafeTest()) 
+				    && (versionNum == GetAppVersionForUpdate())) {
+			// we can get here on start up, and PTGAcceptSameVersion may not be set
+			// but we can get here only if ptgSafeTest set in first instance
+		} else if (versionNum <= GetAppVersionForUpdate()) {
+			FAKE_LOG(("Update Error: cant install version %1 having version %2").arg(versionNum).arg(GetAppVersionForUpdate()));
+			LOG(("Update Error: cant install version %1 having version %2").arg(AppVersion).arg(AppVersion));
 			ClearAll();
 			return false;
 		}
