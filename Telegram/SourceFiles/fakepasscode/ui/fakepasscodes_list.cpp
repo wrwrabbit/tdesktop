@@ -142,11 +142,11 @@ void FakePasscodeContent::setupContent() {
     const auto updates = Ui::CreateChild<rpl::event_stream<>>(content);
 
     Ui::AddSubsectionTitle(content, tr::lng_fakeaccountaction_list());
-    const auto& accounts = Core::App().domain().accounts();
-    for (const auto& [index, account] : accounts) {
+    const auto accounts = Core::App().domain().orderedAccountsEx();
+    for (const auto& record : accounts) {
         const auto texts = Ui::CreateChild<rpl::event_stream<QString>>(
             content);
-        const auto button = content->add(MakeAccountButton(content, account.get()));
+        const auto button = content->add(MakeAccountButton(content, record.account));
 
         const auto name = content->add(object_ptr<Ui::FlatLabel>(
             content,
@@ -163,15 +163,15 @@ void FakePasscodeContent::setupContent() {
         ) | rpl::start_with_next([=](const QString& text) {
             name->resizeToWidth(button->width());
         }, content->lifetime());
-        texts->fire(AccountUIActions(index));
+        texts->fire(AccountUIActions(record.index));
 
         updates->events(
         ) | rpl::start_with_next([=] {
-            texts->fire(AccountUIActions(index));
+            texts->fire(AccountUIActions(record.index));
         }, content->lifetime());
 
-        button->addClickHandler([index, this, updates] {
-            auto box = _controller->show(Box<FakePasscodeAccountBox>(_domain, _controller, _passcodeIndex, index),
+        button->addClickHandler([record, this, updates] {
+            auto box = _controller->show(Box<FakePasscodeAccountBox>(_domain, _controller, _passcodeIndex, record.index),
                                                                      Ui::LayerOption::KeepOther);
             box->boxClosing() | rpl::start_with_next([=] {
                 updates->fire({});

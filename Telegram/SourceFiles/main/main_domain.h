@@ -29,6 +29,14 @@ public:
 		int index = 0;
 		std::unique_ptr<Account> account;
 	};
+	struct AccountWithIndexEx {
+		int index = 0;
+		Account* account;
+		AccountWithIndexEx(const AccountWithIndex& in) {
+			index = in.index;
+			account = not_null( in.account.get() );
+		}
+	};
 
 	static int kMaxAccounts();
 	static int kPremiumMaxAccounts();
@@ -55,6 +63,7 @@ public:
 	[[nodiscard]] auto accounts() const
 		-> const std::vector<AccountWithIndex> &;
 	[[nodiscard]] std::vector<not_null<Account*>> orderedAccounts() const;
+	[[nodiscard]] std::vector<AccountWithIndexEx> orderedAccountsEx() const;
 	[[nodiscard]] rpl::producer<Account*> activeValue() const;
 	[[nodiscard]] rpl::producer<> accountsChanges() const;
 	[[nodiscard]] Account *maybeLastOrSomeAuthedAccount();

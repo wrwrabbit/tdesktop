@@ -210,14 +210,35 @@ std::vector<not_null<Account*>> Domain::orderedAccounts() const {
 			: end(order);
 		return aIt < bIt;
 	});
-	if (local().IsFake())
-	{
-		auto max_size = maxAccounts();
-        while (accounts.size() > max_size)
-		{
-			accounts.pop_back();
-		}
-	}
+	//if (local().IsFake())
+	//{
+	//	auto max_size = maxAccounts();
+ //       while (accounts.size() > max_size)
+	//	{
+	//		accounts.pop_back();
+	//	}
+	//}
+	return accounts;
+}
+
+std::vector<Domain::AccountWithIndexEx> Domain::orderedAccountsEx() const {
+	const auto order = Core::App().settings().accountsOrder();
+	auto accounts = ranges::views::all(
+		_accounts
+	) | ranges::views::transform([](const Domain::AccountWithIndex& a) {
+			return AccountWithIndexEx(a);
+	}) | ranges::to_vector;
+	ranges::stable_sort(accounts, [&](
+		AccountWithIndexEx a,
+		AccountWithIndexEx b) {
+			const auto aIt = a.account->sessionExists()
+				? ranges::find(order, a.account->session().uniqueId())
+				: end(order);
+			const auto bIt = b.account->sessionExists()
+				? ranges::find(order, b.account->session().uniqueId())
+				: end(order);
+			return aIt < bIt;
+		});
 	return accounts;
 }
 
