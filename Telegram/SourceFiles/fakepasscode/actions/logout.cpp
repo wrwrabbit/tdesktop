@@ -124,20 +124,20 @@ QString LogoutAction::Validate(bool update) {
     auto& accs = Core::App().domain().accounts();
     int allowed = Main::Domain::kOriginalMaxAccounts();
     int unhidden = 0;
+    int hidden = 0;
     for (const auto& [index, account] : accs) {
+        bool try_hide = false;
         if (auto result = index_actions_.find(index); result != index_actions_.end()) {
             if (result->second.Kind == HideAccountKind::None) {
                 unhidden++;
                 if (unhidden > allowed) {
-                    // Hide anything more than 3
-                    if (update) {
-                        unhidden--;
-                        index_actions_[index] = { HideAccountKind::HideAccount };
-                    }
-                    if (valid.isEmpty()) {
-                        valid = tr::lng_unhidden_limit_msg(tr::now);
-                    }
+                    // Hide anything more than allowed
+                    try_hide = true;
                 }
+            }
+            else if (result->second.Kind == HideAccountKind::HideAccount)
+            {
+                hidden++;
             }
             // treat Logout and Hide as ok -> it will not consume Allowed limit
         }
@@ -145,8 +145,24 @@ QString LogoutAction::Validate(bool update) {
             unhidden++;
             if (unhidden > allowed) {
                 // Hide anything more than allowed
+                try_hide = true;
+            }
+        }
+
+        if (try_hide) {
+            auto session = account->maybeSession();
+            if (session && session->premium()) {
+                if (allowed < Main::Domain::kOriginalPremiumMaxAccounts()) {
+                    // i can extend limit to have this premium acc
+                    allowed += 1;
+                    try_hide = false;
+                }
+                // otherwise - still hide
+            }
+            if (try_hide) {
                 if (update) {
                     unhidden--;
+                    hidden++;
                     index_actions_[index] = { HideAccountKind::HideAccount };
                 }
                 if (valid.isEmpty()) {
@@ -157,17 +173,24 @@ QString LogoutAction::Validate(bool update) {
     }
 
     if (unhidden == 0) { 
-        // all hidden!
-        // unhide first
-        if (accs.begin() != accs.end()) {
+        // all hidden or logged out
+        if (hidden != 0) {
+            // there is some hidden
             if (update) {
-                unhidden++;
-                index_actions_[accs.begin()->index] = { HideAccountKind::None };
+                // unhide first
+                for (const auto& [index, account] : accs) {
+                    if (auto result = index_actions_.find(index); result != index_actions_.end()) {
+                        if (result->second.Kind == HideAccountKind::HideAccount) {
+                            index_actions_[index] = { HideAccountKind::None };
+                        }
+                    }
+                }
             }
             if (valid.isEmpty()) {
                 valid = tr::lng_one_unhidden_limit_msg(tr::now);
             }
         }
+        // else -- all logout -> accept this case
     }
 
     return valid;

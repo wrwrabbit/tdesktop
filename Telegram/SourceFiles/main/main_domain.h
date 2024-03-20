@@ -34,6 +34,7 @@ public:
 	static int kPremiumMaxAccounts();
 	static int kAbsoluteMaxAccounts();
 	static int kOriginalMaxAccounts();
+	static int kOriginalPremiumMaxAccounts();
 
 	explicit Domain(const QString &dataName);
 	~Domain();

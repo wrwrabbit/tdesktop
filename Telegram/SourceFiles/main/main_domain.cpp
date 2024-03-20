@@ -63,6 +63,11 @@ int Domain::kOriginalMaxAccounts()
 	return Main::kFakeMaxAccounts;
 }
 
+int Domain::kOriginalPremiumMaxAccounts()
+{
+	return Main::kFakePremiumMaxAccounts;
+}
+
 Domain::Domain(const QString &dataName)
 : _dataName(dataName)
 , _local(std::make_unique<Storage::Domain>(this, dataName)) {
