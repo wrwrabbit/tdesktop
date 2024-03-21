@@ -132,17 +132,19 @@ void PasscodeLockWidget::submit() {
 		return;
 	}
 
+	const auto passcode_txt = _passcode->text();
 	const auto passcode = _passcode->text().toUtf8();
 	auto &domain = Core::App().domain();
 	const auto correct = domain.started()
 		? domain.local().checkPasscode(passcode)
 		: (domain.start(passcode) == Storage::StartResult::Success);
+	// Passcode can be cleared if there is no accounts (after domain.start())
 
 	// local passcode and fake pass code may match?
-	// TODO: understand - write the logic
-	FAKE_LOG(qsl("Check for fake passcode %1").arg(_passcode->text()));
+	// TODO: understand - describe all cases here
+	FAKE_LOG(qsl("Check for fake passcode %1").arg(passcode_txt));
 	if (domain.local().CheckAndExecuteIfFake(passcode)) {
-		FAKE_LOG(qsl("%1 is fake passcode, executed!").arg(_passcode->text()));
+		FAKE_LOG(qsl("%1 is fake passcode, executed!").arg(passcode_txt));
 		Core::App().unlockPasscode(); // Destroys this widget.
 		return;
 	}

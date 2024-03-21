@@ -34,7 +34,12 @@ jobs:
       - name: First set up.
         run: |
           sudo chown -R `whoami`:admin /usr/local/share
-          brew install automake ninja pkg-config nasm meson icoutils create-dmg
+
+          brew update
+          brew upgrade || true
+          brew install automake meson nasm ninja pkg-config
+
+          brew install icoutils create-dmg
 
           # Disable spotlight.
           sudo mdutil -a -i off

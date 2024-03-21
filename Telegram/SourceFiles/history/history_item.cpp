@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_helpers.h"
 #include "history/history_unread_things.h"
 #include "history/history.h"
+#include "iv/iv_data.h"
 #include "mtproto/mtproto_config.h"
 #include "ui/text/format_values.h"
 #include "ui/text/text_isolated_emoji.h"
@@ -669,6 +670,7 @@ HistoryItem::HistoryItem(
 			: nullptr),
 		nullptr,
 		WebPageCollage(),
+		nullptr,
 		0,
 		QString(),
 		false,
@@ -4635,7 +4637,7 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 	auto prepareRequestedPeer = [&](
 			const MTPDmessageActionRequestedPeer &action) {
 		auto result = PreparedServiceText{};
-		result.links.push_back(fromLink());
+		result.links.push_back(history()->peer->createOpenLink());
 
 		const auto &list = action.vpeers().v;
 		for (auto i = 0, count = int(list.size()); i != count; ++i) {
@@ -4671,7 +4673,7 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 			lt_chat,
 			result.text,
 			lt_bot,
-			Ui::Text::Link(history()->peer->name(), 2),
+			Ui::Text::Link(history()->peer->name(), 1),
 			Ui::Text::WithEntities);
 		return result;
 	};
