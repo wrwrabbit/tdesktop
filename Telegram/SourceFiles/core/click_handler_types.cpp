@@ -27,6 +27,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller_link_info.h"
 #include "styles/style_layers.h"
 
+#include <QUrlQuery>
+
 namespace {
 
 // Possible context owners: media viewer, profile, history widget.
@@ -81,6 +83,84 @@ bool UrlRequiresConfirmation(const QUrl &url) {
 		RegExOption::CaseInsensitive);
 }
 
+bool IsLabelImpersonateUrl(QString url, QString label) {
+	using namespace qthelp;
+	if (url == label) {
+		return false;
+	}
+
+	QUrl urlObj(Core::TryConvertUrlToLocal(url));
+	if (urlObj.scheme() == "tg")
+	{
+		if (label.startsWith("@") 
+			&& url.startsWith("tg://resolve", Qt::CaseInsensitive)) {
+			//
+			QUrlQuery args(urlObj);
+			if (args.queryItemValue("domain") != label.mid(1)) {
+				return true;
+			}
+		}
+	}
+
+	if (label.startsWith("@")) {
+		// possible matches to tg.me ? etc.
+		// TODO: check if link actually points to t.me/same_user_name or user_name.t.me
+		if (regex_match(
+			"^("
+			"telegram\\.(org|me|dog)"
+			"|t\\.me"
+			")$",
+			urlObj.host(),
+			RegExOption::CaseInsensitive)) {
+			if (urlObj.path().mid(1) != label.mid(1)) {
+				return true;
+			}
+		}
+		static const auto tmedomainRegexp = QRegularExpression(
+			"^([\\w\\d_]+)\\.t\\.me$",
+			QRegularExpression::CaseInsensitiveOption);
+		const auto tmeMatch = tmedomainRegexp.match(urlObj.host());
+		if (tmeMatch.hasMatch()) {
+			if (tmeMatch.capturedView(1) != label.mid(1)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	if (label.startsWith("#")) {
+
+		// hash tags should be EntityType::Hashtag, not CustomUrl
+		return true;
+	}
+
+	static const auto regexpUrl = QRegularExpression(
+		"^((https?|s?ftp)://)?(\\w[\\w\\d\\.]+\\.[\\w\\d\\.]+)",
+		QRegularExpression::CaseInsensitiveOption);
+	const auto urlMatch = regexpUrl.match(label);
+	if (urlMatch.hasMatch()) {
+		const auto urlProtoDomain = urlMatch.capturedView(0);
+		const auto urlDomain = urlMatch.capturedView(3);
+		if (!urlProtoDomain.empty() && url.left(urlProtoDomain.size()) == urlProtoDomain) {
+			return false;
+		}
+		if (!urlDomain.empty() && url.left(urlDomain.size()) == urlDomain) {
+			return false;
+		}
+		// label starts from something like a domain, but not matching actual url
+		// not sure i need to compare further up to the page
+		return true;
+	}
+	return false;
+}
+
+HiddenUrlClickHandler::HiddenUrlClickHandler(QString url, QString label)
+	: UrlClickHandler(url, false)
+	, _label(label)
+    , _isSpoof(false) {
+	_isSpoof = IsLabelImpersonateUrl(url, label);
+}
+
 QString HiddenUrlClickHandler::copyToClipboardText() const {
 	return url().startsWith(u"internal:url:"_q)
 		? url().mid(u"internal:url:"_q.size())
@@ -102,7 +182,7 @@ QString HiddenUrlClickHandler::dragText() const {
 	return result.startsWith(u"internal:"_q) ? QString() : result;
 }
 
-void HiddenUrlClickHandler::Open(QString url, QVariant context) {
+void HiddenUrlClickHandler::Open(QString url, QVariant context, bool IsSpoof, QString label) {
 	url = Core::TryConvertUrlToLocal(url);
 	if (Core::InternalPassportLink(url)) {
 		return;
@@ -111,6 +191,44 @@ void HiddenUrlClickHandler::Open(QString url, QVariant context) {
 	const auto open = [=] {
 		UrlClickHandler::Open(url, context);
 	};
+
+	if (IsSpoof) {
+		Core::App().hideMediaView();
+		const auto displayed = url;
+		const auto displayUrl = ShowEncoded(displayed);
+		const auto my = context.value<ClickHandlerContext>();
+		const auto controller = my.sessionWindow.get();
+		const auto use = controller
+			? &controller->window()
+			: Core::App().activeWindow();
+		auto box = Box([=](not_null<Ui::GenericBox*> box) {
+			Ui::ConfirmBox(box, {
+				.text = (tr::lng_open_spoof_link(tr::now)),
+				.confirmed = [=](Fn<void()> hide) { hide(); open(); },
+				.confirmText = tr::lng_open_spoof_link_confirm(),
+				});
+			const auto& st = st::boxLabel;
+			const auto& stdiv = st::boxDividerLabel;
+			box->addSkip(st.style.lineHeight - st::boxPadding.bottom());
+			box->addRow(object_ptr<Ui::FlatLabel>(box, tr::lng_open_spoof_link_label(), stdiv));
+			const auto url = box->addRow(object_ptr<Ui::FlatLabel>(box, label, st));
+			box->addRow(object_ptr<Ui::FlatLabel>(box, tr::lng_open_spoof_link_url(), stdiv));
+			const auto actual_url = box->addRow(object_ptr<Ui::FlatLabel>(box, displayUrl, st));
+			url->setSelectable(true);
+			url->setContextCopyText(tr::lng_context_copy_link(tr::now));
+			actual_url->setSelectable(true);
+			actual_url->setContextCopyText(tr::lng_context_copy_link(tr::now));
+			});
+		if (my.show) {
+			my.show->showBox(std::move(box));
+		}
+		else if (use) {
+			use->show(std::move(box));
+			use->activate();
+		}
+		return;
+	}
+
 	if (url.startsWith(u"tg://"_q, Qt::CaseInsensitive)
 		|| url.startsWith(u"internal:"_q, Qt::CaseInsensitive)) {
 		UrlClickHandler::Open(url, QVariant::fromValue([&] {
