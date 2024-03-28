@@ -121,19 +121,16 @@ QString LogoutAction::Validate(bool update) {
     // no more than 3 hidden
     QString valid;
 
-    auto& accs = Core::App().domain().accounts();
+    const auto& accs = Core::App().domain().orderedAccountsEx();
     int allowed = Main::Domain::kOriginalMaxAccounts();
     int unhidden = 0;
     int hidden = 0;
     for (const auto& [index, account] : accs) {
+        bool visible = false;
         bool try_hide = false;
         if (auto result = index_actions_.find(index); result != index_actions_.end()) {
             if (result->second.Kind == HideAccountKind::None) {
-                unhidden++;
-                if (unhidden > allowed) {
-                    // Hide anything more than allowed
-                    try_hide = true;
-                }
+                visible = true;
             }
             else if (result->second.Kind == HideAccountKind::HideAccount)
             {
@@ -142,14 +139,15 @@ QString LogoutAction::Validate(bool update) {
             // treat Logout and Hide as ok -> it will not consume Allowed limit
         }
         else {
+            visible = true;
+        }
+
+        if (visible) {
             unhidden++;
             if (unhidden > allowed) {
                 // Hide anything more than allowed
                 try_hide = true;
             }
-        }
-
-        if (try_hide) {
             auto session = account->maybeSession();
             if (session && session->premium()) {
                 if (allowed < Main::Domain::kOriginalPremiumMaxAccounts()) {
@@ -159,15 +157,16 @@ QString LogoutAction::Validate(bool update) {
                 }
                 // otherwise - still hide
             }
-            if (try_hide) {
-                if (update) {
-                    unhidden--;
-                    hidden++;
-                    index_actions_[index] = { HideAccountKind::HideAccount };
-                }
-                if (valid.isEmpty()) {
-                    valid = tr::lng_unhidden_limit_msg(tr::now);
-                }
+        }
+
+        if (try_hide) {
+            if (update) {
+                unhidden--;
+                hidden++;
+                index_actions_[index] = { HideAccountKind::HideAccount };
+            }
+            if (valid.isEmpty()) {
+                valid = tr::lng_unhidden_limit_msg(tr::now);
             }
         }
     }

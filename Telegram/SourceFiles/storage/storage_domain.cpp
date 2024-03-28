@@ -250,7 +250,6 @@ void Domain::writeAccounts() {
 	for (const auto &[index, account] : list) {
         if (account_hidden_indexes.find(index) != account_hidden_indexes.end()) {
             FAKE_LOG(qsl("We have account %1 in logout or hide action. Skip").arg(index));
-            account_indexes.push_back(-index);
             continue;
         }
         account_indexes.push_back(index);
@@ -446,10 +445,6 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
     qint32 realCount = 0;
 
     const auto createAndAddAccount = [&] (qint32 index, qint32 i) {
-        if (index < 0) {
-            FAKE_LOG(qsl("Add hidden account %1 with seq_index %2").arg(index).arg(i));
-            index = -index;
-        }
         if (index >= 0
             && index < Main::Domain::kAbsoluteMaxAccounts()
             && tried.emplace(index).second) {
