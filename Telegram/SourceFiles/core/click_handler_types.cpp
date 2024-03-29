@@ -89,67 +89,67 @@ bool IsLabelImpersonateUrl(QString url, QString label) {
 		return false;
 	}
 
+	// avoid ' @username' workaround
+	label = label.trimmed();
 	QUrl urlObj(Core::TryConvertUrlToLocal(url));
-	if (urlObj.scheme() == "tg")
-	{
-		if (label.startsWith("@") 
-			&& url.startsWith("tg://resolve", Qt::CaseInsensitive)) {
-			//
-			QUrlQuery args(urlObj);
-			if (args.queryItemValue("domain") != label.mid(1)) {
-				return true;
-			}
+	QUrl labelObj(Core::TryConvertUrlToLocal(label));
+	if (labelObj.host().isEmpty()) {
+		static const auto IsHost = QRegularExpression(
+			"^\\w[\\w\\d_]+\\.\\w[^\\s]+$",
+			QRegularExpression::CaseInsensitiveOption);
+		const auto match1 = IsHost.match(labelObj.path());
+		if (match1.hasMatch()) {
+			labelObj = QUrl("https://" + label);
 		}
 	}
 
+	// check if tg username
 	if (label.startsWith("@")) {
-		// possible matches to tg.me ? etc.
-		// TODO: check if link actually points to t.me/same_user_name or user_name.t.me
-		if (regex_match(
-			"^("
-			"telegram\\.(org|me|dog)"
-			"|t\\.me"
-			")$",
-			urlObj.host(),
-			RegExOption::CaseInsensitive)) {
-			if (urlObj.path().mid(1) != label.mid(1)) {
+		// username?
+		if (urlObj.scheme() != "tg") {
+			// external website? ok
+			return false;
+		}
+	}
+
+	if (urlObj.scheme() == "tg")
+	{
+		if (label.startsWith("@")) {
+			// check tg name
+			QUrlQuery args(urlObj);
+			if (args.queryItemValue("domain").compare(label.mid(1), Qt::CaseInsensitive) != 0) {
 				return true;
 			}
 		}
-		static const auto tmedomainRegexp = QRegularExpression(
-			"^([\\w\\d_]+)\\.t\\.me$",
-			QRegularExpression::CaseInsensitiveOption);
-		const auto tmeMatch = tmedomainRegexp.match(urlObj.host());
-		if (tmeMatch.hasMatch()) {
-			if (tmeMatch.capturedView(1) != label.mid(1)) {
-				return true;
-			}
+		else if (labelObj.scheme() == "tg") {
+			// tg:// urls should be exactly the same
+			return (labelObj != urlObj);
 		}
-		return false;
 	}
 
 	if (label.startsWith("#")) {
-
 		// hash tags should be EntityType::Hashtag, not CustomUrl
 		return true;
 	}
 
-	static const auto regexpUrl = QRegularExpression(
-		"^((https?|s?ftp)://)?(\\w[\\w\\d\\.]+\\.[\\w\\d\\.]+)",
-		QRegularExpression::CaseInsensitiveOption);
-	const auto urlMatch = regexpUrl.match(label);
-	if (urlMatch.hasMatch()) {
-		const auto urlProtoDomain = urlMatch.capturedView(0);
-		const auto urlDomain = urlMatch.capturedView(3);
-		if (!urlProtoDomain.empty() && url.left(urlProtoDomain.size()) == urlProtoDomain) {
-			return false;
+	if (!labelObj.host().isEmpty()) {
+		// check matching for schema and domain
+		if (!labelObj.scheme().isEmpty() 
+			&& (urlObj.scheme() != labelObj.scheme())) {
+			if ((urlObj.scheme() == "https") && (labelObj.scheme() == "http")) {
+				// accept this case, but not vice versa
+			}
+			else {
+				// schema is different (tg!=http, or https!=http)
+				return true;
+			}
 		}
-		if (!urlDomain.empty() && url.left(urlDomain.size()) == urlDomain) {
-			return false;
+		if (urlObj.host() != labelObj.host()) {
+			return true;
 		}
-		// label starts from something like a domain, but not matching actual url
-		// not sure i need to compare further up to the page
-		return true;
+		// urls are different somewhere in path?query - fine
+		// potentially - accept only shorten version of url
+		return false;
 	}
 	return false;
 }
