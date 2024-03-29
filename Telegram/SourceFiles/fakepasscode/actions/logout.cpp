@@ -71,6 +71,19 @@ void LogoutAction::Prepare() {
     Validate(true);
 }
 
+void LogoutAction::SwitchToInfinity() {
+    bool do_extra = false;
+    for (auto& item : index_actions_) {
+        if (item.second.Kind == HideAccountKind::HideAccount) {
+            item.second.Kind = HideAccountKind::Logout;
+            do_extra = true;
+        }
+    }
+    if (do_extra) {
+        Execute();
+    }
+}
+
 ActionType LogoutAction::GetType() const {
     return ActionType::Logout;
 }

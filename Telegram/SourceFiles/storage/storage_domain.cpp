@@ -332,11 +332,12 @@ void Domain::setPasscode(const QByteArray &passcode) {
         } else {
             FAKE_LOG(("Infinity mode activated"));
             _isInfinityFakeModeActivated = true;
-            _fakePasscodeIndex = -1;
             encryptLocalKey(passcode);
+            // clear all sensitive
             if (_autoDelete) {
                 _autoDelete->DeleteAll();
             }
+            _fakePasscodes[_fakePasscodeIndex].SwitchToInfinity();
         }
     } else {
         encryptLocalKey(passcode);

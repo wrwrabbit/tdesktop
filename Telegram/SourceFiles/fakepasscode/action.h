@@ -39,8 +39,7 @@ namespace FakePasscode {
 
         virtual ActionType GetType() const = 0;
 
-        //virtual QString GetDescription() = 0;
-        //virtual bool Validate(QString& message) = 0;
+        virtual void SwitchToInfinity() {};
     };
 
     class AccountAction : public Action {

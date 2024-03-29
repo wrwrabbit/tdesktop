@@ -60,6 +60,7 @@ namespace FakePasscode {
 	  }
 
 	  void PostInit();
+      void SwitchToInfinity();
 
    protected:
       rpl::variable<QByteArray> fake_passcode_;
