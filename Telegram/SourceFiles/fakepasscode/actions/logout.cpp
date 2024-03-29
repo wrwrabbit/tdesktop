@@ -15,7 +15,7 @@ namespace FakePasscode {
 
 void LogoutAction::ExecuteAccountAction(int index, Main::Account* account, const HideAccountKind& action) {
     // ToggleAction - if present - then enabled
-    FAKE_LOG(qsl("Account %1 setup to logout, perform %s.").arg(index).arg((int)action.Kind));
+    FAKE_LOG(qsl("Account %1 setup to logout, perform %2.").arg(index).arg((int)action.Kind));
 
     switch (action.Kind)
     {
