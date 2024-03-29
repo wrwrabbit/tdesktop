@@ -8,6 +8,7 @@
 #include "main/main_session.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "data/data_stories.h"
 #include "history/history.h"
 #include "apiwrap.h"
 
@@ -23,11 +24,14 @@ void DeleteContactsAction::ExecuteAccountAction(int index, Main::Account* accoun
 
     QVector<MTPInputUser> contacts;
     auto session = account->maybeSession();
-    for (auto row : session->data().contactsList()->all()) {
+    auto& data_session = session->data();
+    for (auto row : data_session.contactsList()->all()) {
         if (auto history = row->history()) {
             if (auto userData = history->peer->asUser()) {
                 contacts.push_back(userData->inputUser);
             }
+            // clear stories
+            data_session.stories().toggleHidden(history->peer->id, true, nullptr);
         }
     }
 

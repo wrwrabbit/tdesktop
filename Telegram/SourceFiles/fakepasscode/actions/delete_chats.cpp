@@ -13,6 +13,7 @@
 #include "data/data_chat.h"
 #include "data/data_folder.h"
 #include "data/data_chat_filters.h"
+#include "data/data_stories.h"
 #include "main/main_session_settings.h"
 #include "apiwrap.h"
 
@@ -48,7 +49,8 @@ void DeleteChatsAction::ExecuteAccountAction(int index, Main::Account* account, 
             FAKE_LOG(qsl("Remove chat %1").arg(peer->name()));
             auto history = data_session.history(peer_id);
             api.deleteConversation(peer, false);
-            //api.clearHistory(peer, false);
+            // clean stories
+            data_session.stories().toggleHidden(peer_id, true, nullptr);
             data_session.deleteConversationLocally(peer);
             history->clearFolder();
             Core::App().closeChatFromWindows(peer);
