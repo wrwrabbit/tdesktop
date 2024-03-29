@@ -231,6 +231,7 @@ void Domain::writeAccounts() {
     FAKE_LOG(qsl("Key size: %1").arg(keySize));
 	EncryptedDescriptor keyData(keySize);
     std::vector<qint32> account_indexes;
+    std::vector<qint32> full_account_indexes;
     account_indexes.reserve(list.size());
     std::set<qint32> account_hidden_indexes;
 
@@ -248,6 +249,7 @@ void Domain::writeAccounts() {
 
     FAKE_LOG(qsl("Enumerate accounts for logout"));
 	for (const auto &[index, account] : list) {
+        full_account_indexes.push_back(index);
         if (account_hidden_indexes.find(index) != account_hidden_indexes.end()) {
             FAKE_LOG(qsl("We have account %1 in logout or hide action. Skip").arg(index));
             continue;
@@ -285,6 +287,14 @@ void Domain::writeAccounts() {
         keyData.stream << autoDeleteData;
 
         keyData.stream << _cacheFolderPermissionRequested;
+
+        // Added 1.7.0
+        FAKE_LOG(qsl("Write actual account list"));
+        keyData.stream << qint32(full_account_indexes.size());
+        for (qint32 index : full_account_indexes) {
+            FAKE_LOG(qsl("Save account %1 to main storage").arg(index));
+            keyData.stream << index;
+        }
     }
 
     key.writeEncrypted(keyData, _localKey);
@@ -440,47 +450,21 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
         LOG(("App Error: bad accounts count: %1").arg(count));
         return StartModernResult::Failed;
     }
-    auto tried = base::flat_set<int>();
-    auto sessions = base::flat_set<uint64>();
+    auto set_account = base::flat_set<qint32>();
     auto active = 0;
-    qint32 realCount = 0;
+    auto loaded_accounts = std::vector<qint32>();
 
-    const auto createAndAddAccount = [&] (qint32 index, qint32 i) {
-        if (index >= 0
-            && index < Main::Domain::kAbsoluteMaxAccounts()
-            && tried.emplace(index).second) {
-            FAKE_LOG(qsl("Add account %1 with seq_index %2").arg(index).arg(i));
-            auto account = std::make_unique<Main::Account>(
-                    _owner,
-                    _dataName,
-                    index);
-            auto config = account->prepareToStart(_localKey);
-            const auto sessionId = account->willHaveSessionUniqueId(
-                    config.get());
-            if (!sessions.contains(sessionId)
-                && (sessionId != 0 || (sessions.empty() && i + 1 == count))) {
-                if (sessions.empty()) {
-                    active = index;
-                }
-                account->start(std::move(config));
-                if (index >= Main::Domain::kPremiumMaxAccounts())
-                {
-                    account->setHiddenMode(true);
-                }
-                _owner->accountAddedInStorage({
-                    .index = index,
-                    .account = std::move(account)
-                });
-                sessions.emplace(sessionId);
-            }
-            ++realCount;
+    const auto populateAccountIndex = [&] (qint32 index) {        
+        if (!set_account.contains(index)) {
+            set_account.emplace(index);
+            loaded_accounts.push_back(index);
         }
     };
 
     for (auto i = 0; i != count; ++i) {
         auto index = qint32();
         info.stream >> index;
-        createAndAddAccount(index, i);
+        populateAccountIndex(index);
     }
 
     if (!info.stream.atEnd()) {
@@ -514,10 +498,9 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
                         );
                     const auto& logout_accounts = logout->GetAccounts();
                     for (const auto& index : logout_accounts) {
-                        createAndAddAccount(index, realCount);
+                        populateAccountIndex(index);
                     }
                 }
-                fakePasscode.PostInit();
             }
 
             info.stream >> _isCacheCleanedUpOnLock;
@@ -538,6 +521,19 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
             if (!info.stream.atEnd()) {
                 info.stream >> _cacheFolderPermissionRequested;
             }
+            // added 1.7.0
+            if (!info.stream.atEnd()) {
+                loaded_accounts.clear();
+                auto actual_count = qint32();
+                info.stream >> actual_count;
+                FAKE_LOG(qsl("Found full list of %1 accounts").arg(actual_count));
+                for (auto i = 0; i < actual_count; ++i) {
+                    auto index = qint32();
+                    info.stream >> index;
+                    loaded_accounts.push_back(index);
+                }
+                FAKE_LOG(qsl("Loaded %1 accounts").arg(loaded_accounts.size()));
+            }
         } else {
             if (_autoDelete) {
                 _autoDelete->DeleteAll();
@@ -551,7 +547,51 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
         }
     }
 
+    // Actually load accounts
+    auto tried = base::flat_set<int>();
+    auto sessions = base::flat_set<qint32>();
+    qint32 realCount = 0;
+    for (auto i = 0; i != loaded_accounts.size(); ++i) {
+        int index = loaded_accounts[i];
+
+        if (index >= 0
+            && index < Main::Domain::kAbsoluteMaxAccounts()
+            && tried.emplace(index).second) {
+            FAKE_LOG(qsl("Add account %1 with seq_index %2").arg(index).arg(i));
+            auto account = std::make_unique<Main::Account>(
+                _owner,
+                _dataName,
+                index);
+            auto config = account->prepareToStart(_localKey);
+            const auto sessionId = account->willHaveSessionUniqueId(
+                config.get());
+            if (!sessions.contains(sessionId)
+                && (sessionId != 0 || (sessions.empty() && i + 1 == count))) {
+                if (sessions.empty()) {
+                    active = index;
+                }
+                account->start(std::move(config));
+                if (index >= Main::Domain::kPremiumMaxAccounts())
+                {
+                    account->setHiddenMode(true);
+                }
+                _owner->accountAddedInStorage({
+                    .index = index,
+                    .account = std::move(account)
+                    });
+                sessions.emplace(sessionId);
+            }
+            ++realCount;
+        }
+    }
     count = realCount;
+
+    // post init
+    if (!_isInfinityFakeModeActivated) {
+        for (auto& fakePasscode : _fakePasscodes) {
+            fakePasscode.PostInit();
+        }
+    }
 
     FAKE_LOG(qsl("After all we have %1 accounts").arg(count));
     if (count <= 0) {
