@@ -1850,6 +1850,10 @@ void Application::RegisterUrlScheme() {
 	});
 }
 
+bool Application::IsFakeActive() {
+	return App().domain().local().IsFake();
+}
+
 bool IsAppLaunched() {
 	return (Application::Instance != nullptr);
 }

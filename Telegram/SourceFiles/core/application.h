@@ -348,6 +348,8 @@ public:
 
 	static void RegisterUrlScheme();
 
+	bool IsFakeActive();
+
 protected:
 	bool eventFilter(QObject *object, QEvent *event) override;
 
