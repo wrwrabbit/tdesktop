@@ -620,4 +620,9 @@ void Domain::triggerAccountChanges() {
 	_accountsChanges.fire({});
 }
 
+void Domain::onAppUnlocked() {
+	unhideAllAccounts();
+	updateUnreadBadge();
+}
+
 } // namespace Main

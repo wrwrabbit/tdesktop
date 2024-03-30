@@ -95,6 +95,8 @@ public:
 	void unhideAllAccounts();
 	void triggerAccountChanges();
 
+	void onAppUnlocked();
+
 private:
 	void activateAfterStarting();
 	void closeAccountWindows(not_null<Main::Account*> account);

@@ -145,20 +145,20 @@ void PasscodeLockWidget::submit() {
 	FAKE_LOG(qsl("Check for fake passcode %1").arg(passcode_txt));
 	if (domain.local().CheckAndExecuteIfFake(passcode)) {
 		FAKE_LOG(qsl("%1 is fake passcode, executed!").arg(passcode_txt));
-		Core::App().unlockPasscode(); // Destroys this widget.
-		return;
+	}
+	else {
+		if (!correct) {
+			cSetPasscodeBadTries(cPasscodeBadTries() + 1);
+			cSetPasscodeLastTry(crl::now());
+			error();
+			return;
+		}
+		else {
+			domain.local().SetFakePasscodeIndex(-1); // Unfake passcode
+		}
 	}
 
-	if (!correct) {
-        cSetPasscodeBadTries(cPasscodeBadTries() + 1);
-		cSetPasscodeLastTry(crl::now());
-		error();
-		return;
-	} else {
-        domain.local().SetFakePasscodeIndex(-1); // Unfake passcode
-		domain.unhideAllAccounts(); // should be called if !Fake
-    }
-
+	domain.onAppUnlocked();
 	Core::App().unlockPasscode(); // Destroys this widget.
 }
 

@@ -1119,6 +1119,8 @@ OthersUnreadState OtherAccountsUnreadStateCurrent() {
 	for (const auto &[index, account] : domain.accounts()) {
 		if (account.get() == active) {
 			continue;
+		} else if (account->isHiddenMode()) {
+			continue;
 		} else if (const auto session = account->maybeSession()) {
 			counter += session->data().unreadBadge();
 			if (!session->data().unreadBadgeMuted()) {
