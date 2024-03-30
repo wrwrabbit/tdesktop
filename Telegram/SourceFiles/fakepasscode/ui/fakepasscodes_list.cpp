@@ -213,8 +213,7 @@ class FakePasscodeAccountContent : public Ui::RpWidget {
 public:
     FakePasscodeAccountContent(QWidget* parent,
         Main::Domain* domain, not_null<Window::SessionController*> controller,
-        size_t passcodeIndex, int accountIndex,
-        FakePasscodeAccountBox* outerBox);
+        size_t passcodeIndex, int accountIndex);
 
     void setupContent();
 
@@ -223,19 +222,16 @@ private:
     Window::SessionController* _controller;
     size_t _passcodeIndex;
     int _accountIndex;
-    FakePasscodeAccountBox* _outerBox;
 };
 
 FakePasscodeAccountContent::FakePasscodeAccountContent(QWidget* parent,
     Main::Domain* domain, not_null<Window::SessionController*> controller,
-    size_t passcodeIndex, int accountIndex,
-    FakePasscodeAccountBox* outerBox)
+    size_t passcodeIndex, int accountIndex)
     : Ui::RpWidget(parent)
     , _domain(domain)
     , _controller(controller)
     , _passcodeIndex(passcodeIndex)
-    , _accountIndex(accountIndex)
-    , _outerBox(outerBox) {
+    , _accountIndex(accountIndex) {
 }
 
 void FakePasscodeAccountContent::setupContent() {
@@ -373,7 +369,7 @@ void FakePasscodeAccountBox::prepare() {
     addButton(tr::lng_close(), [=] { closeBox(); });
     const auto content =
         setInnerWidget(object_ptr<FakePasscodeAccountContent>(this, _domain, _controller,
-            _passcodeIndex, _accountIndex, this),
+            _passcodeIndex, _accountIndex),
             st::sessionsScroll);
     content->setupContent();
     setDimensionsToContent(st::boxWideWidth, content);
