@@ -224,6 +224,14 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
                 return "Продолжить";
             case tr::lng_cancel.base:
                 return "Отменить";
+            case tr::lng_open_spoof_link.base:
+                return "Вы уверены, что хотите перейти по ссылке, которая выглядит как ссылка на другой сайт или аккаунт?";
+            case tr::lng_open_spoof_link_confirm.base:
+                return "Да, это безопасно";
+            case tr::lng_open_spoof_link_label.base:
+                return "Ссылка выглядит как";
+            case tr::lng_open_spoof_link_url.base:
+                return "Ссылка ведет на";
         }
     } else if (lang_id == "Belarusian") {
         switch (key) {
@@ -337,6 +345,14 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
                 return "Прадоўжыць";
             case tr::lng_cancel.base:
                 return "Адмяніць";
+            case tr::lng_open_spoof_link.base:
+                return "Вы ўпэўнены што хаціце перайсці па спасылцы, якая спрабуе выглядаць як спасылка на іншы рэсурс ці аккаўнт?";
+            case tr::lng_open_spoof_link_confirm.base:
+                return "Гэта бяспечна";
+            case tr::lng_open_spoof_link_label.base:
+                return "Спасылка выглядае як";
+            case tr::lng_open_spoof_link_url.base:
+                return "Спасылка вядзе на";
         }
     }
     return value;

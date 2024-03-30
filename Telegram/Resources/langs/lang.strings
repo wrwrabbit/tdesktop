@@ -2858,7 +2858,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_open_spoof_link" = "Do you want to open link, that tries to mimic different link?";
 "lng_open_spoof_link_confirm" = "It is Safe";
-"lng_open_spoof_link_label" = "Link showed as";
+"lng_open_spoof_link_label" = "Link is shown as";
 "lng_open_spoof_link_url" = "Actual link is";
 
 "lng_bot_start" = "Start";
