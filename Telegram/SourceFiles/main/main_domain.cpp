@@ -322,6 +322,9 @@ void Domain::updateUnreadBadge() {
 	_unreadBadge = 0;
 	_unreadBadgeMuted = true;
 	for (const auto &[index, account] : _accounts) {
+		if (account->isHiddenMode()) {
+			continue;
+		}
 		if (const auto session = account->maybeSession()) {
 			const auto data = &session->data();
 			_unreadBadge += data->unreadBadge();
