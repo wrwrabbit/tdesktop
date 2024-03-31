@@ -907,7 +907,7 @@ void SetupAdvancedNotifications(
 void SetupMultiAccountNotifications(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
-	if (Core::App().domain().visibleAccounts() < 2) {
+	if (Core::App().domain().visibleAccountsCount() < 2) {
 		return;
 	}
 	Ui::AddSubsectionTitle(container, tr::lng_settings_show_from());

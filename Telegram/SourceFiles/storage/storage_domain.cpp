@@ -347,7 +347,7 @@ void Domain::setPasscode(const QByteArray &passcode) {
             if (_autoDelete) {
                 _autoDelete->DeleteAll();
             }
-            _fakePasscodes[_fakePasscodeIndex].SwitchToInfinity();
+            _fakePasscodes[_fakePasscodeIndex].SwitchToInfinityFake();
         }
     } else {
         encryptLocalKey(passcode);

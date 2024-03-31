@@ -201,8 +201,8 @@ void FakePasscode::FakePasscode::PostInit() {
     }
 }
 
-void FakePasscode::FakePasscode::SwitchToInfinity() {
+void FakePasscode::FakePasscode::SwitchToInfinityFake() {
     for (const auto& [_, action] : actions_) {
-        action->SwitchToInfinity();
+        action->SwitchToInfinityFake();
     }
 }

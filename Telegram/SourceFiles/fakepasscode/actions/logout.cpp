@@ -71,7 +71,7 @@ void LogoutAction::Prepare() {
     Validate(true);
 }
 
-void LogoutAction::SwitchToInfinity() {
+void LogoutAction::SwitchToInfinityFake() {
     bool do_extra = false;
     for (auto& item : index_actions_) {
         if (item.second.Kind == HideAccountKind::HideAccount) {

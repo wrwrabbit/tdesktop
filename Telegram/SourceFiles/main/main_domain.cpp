@@ -210,14 +210,6 @@ std::vector<not_null<Account*>> Domain::orderedAccounts() const {
 			: end(order);
 		return aIt < bIt;
 	});
-	//if (local().IsFake())
-	//{
-	//	auto max_size = maxAccounts();
- //       while (accounts.size() > max_size)
-	//	{
-	//		accounts.pop_back();
-	//	}
-	//}
 	return accounts;
 }
 
@@ -406,7 +398,7 @@ void Domain::addActivated(MTP::Environment environment, bool newWindow) {
 			activate(account);
 		}
 	};
-	if (visibleAccounts() < maxAccounts()) {
+	if (visibleAccountsCount() < maxAccounts()) {
 		added(add(environment));
 	} else {
 		for (auto &[index, account] : accounts()) {
@@ -594,7 +586,7 @@ int Domain::maxAccounts() const {
 	return std::min(int(premiumCount) + Main::kMaxAccounts, Main::kPremiumMaxAccounts);
 }
 
-int Domain::visibleAccounts() const {
+int Domain::visibleAccountsCount() const {
 	if (local().IsFake()) {
 		const auto hiddenCount = ranges::count_if(accounts(), [](
 			const Main::Domain::AccountWithIndex &d) {

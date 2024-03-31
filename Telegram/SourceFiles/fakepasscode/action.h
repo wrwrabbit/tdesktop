@@ -39,7 +39,7 @@ namespace FakePasscode {
 
         virtual ActionType GetType() const = 0;
 
-        virtual void SwitchToInfinity() {};
+        virtual void SwitchToInfinityFake() {};
     };
 
     class AccountAction : public Action {

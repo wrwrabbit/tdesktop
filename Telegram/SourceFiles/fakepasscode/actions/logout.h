@@ -27,7 +27,7 @@ namespace FakePasscode {
 
         void HandleAccountChanges() override;
         void Prepare() override;
-        void SwitchToInfinity() override;
+        void SwitchToInfinityFake() override;
 
         const std::vector<qint32> GetAccounts() const;
 
