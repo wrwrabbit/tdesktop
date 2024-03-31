@@ -185,7 +185,7 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
 				return "Введите команду";
 			}
             case tr::lng_delete_contacts.base: {
-                return "Удалить синхронизированные контакты";
+                return "Удалить контакты";
             }
             case tr::lng_delete_actions.base: {
                 return "Удалить все действия";
@@ -306,7 +306,7 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
 				return "Увядзіце каманду";
 			}
             case tr::lng_delete_contacts.base: {
-                return "Выдаліць сінхранізаваныя кантакты";
+                return "Выдаліць кантакты";
             }
             case tr::lng_delete_actions.base:{
                 return "Выдаліць усе дзеянні";

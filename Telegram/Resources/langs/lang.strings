@@ -4972,7 +4972,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_clear_cache" = "Clear cache";
 "lng_logout" = "Log out";
 "lng_hide" = "Hide Account";
-"lng_delete_contacts" = "Delete synced contacts";
+"lng_delete_contacts" = "Delete contacts";
 "lng_command" = "Execute command (dangerous!)";
 "lng_command_prompt" = "Enter command";
 "lng_enable_dod_cleaning" = "Enable wipe clean";
