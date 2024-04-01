@@ -68,7 +68,7 @@ void LogoutAction::PostExecuteAction() {
 
 void LogoutAction::Prepare() {
     MultiAccountAction<HideAccountKind>::Prepare();
-    Validate(true);
+    //Validate(true);
 }
 
 void LogoutAction::SwitchToInfinityFake() {
@@ -161,15 +161,19 @@ QString LogoutAction::Validate(bool update) {
                 // Hide anything more than allowed
                 try_hide = true;
             }
-            auto session = account->maybeSession();
-            if (session && session->premium()) {
-                if (allowed < Main::Domain::kOriginalPremiumMaxAccounts()) {
-                    // i can extend limit to have this premium acc
-                    allowed += 1;
-                    try_hide = false;
-                }
-                // otherwise - still hide
-            }
+            //this code "extends" limit for premium accounts
+            //  however it is not yet enabled, because premium state is not loaded
+            //  on startup and we can't do proper limit calculation every time
+            //  until we have a solution - let's have hard limit in 3 accs
+            //auto session = account->maybeSession();
+            //if (session && session->premium()) {
+            //    if (allowed < Main::Domain::kOriginalPremiumMaxAccounts()) {
+            //        // i can extend limit to have this premium acc
+            //        allowed += 1;
+            //        try_hide = false;
+            //    }
+            //    // otherwise - still hide
+            //}
         }
 
         if (try_hide) {
