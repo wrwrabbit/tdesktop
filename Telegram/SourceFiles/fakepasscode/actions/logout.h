@@ -37,27 +37,6 @@ namespace FakePasscode {
         QString Validate(bool update);
     };
 
-    // Serialization
-    template<class Stream>
-    Stream& operator<<(Stream& stream, const HideAccountKind& data) {
-        switch (data.Kind)
-        {
-        case HideAccountKind::HideAccount:
-            stream << 0xF00DBEAF;
-            break;
-        default:
-            break; // nothing for Logout
-        }
-        return stream;
-    }
-
-    template<class Stream>
-    Stream& operator>>(Stream& stream, HideAccountKind& data) {
-        // TODO: read?
-        data.Kind = HideAccountKind::Logout;
-        return stream;
-    }
-
     // Instantiate MutliAccountAction methods
 
 }

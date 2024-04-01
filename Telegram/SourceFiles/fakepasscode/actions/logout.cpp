@@ -68,7 +68,8 @@ void LogoutAction::PostExecuteAction() {
 
 void LogoutAction::Prepare() {
     MultiAccountAction<HideAccountKind>::Prepare();
-    //Validate(true);
+    // Need this to hide >3 accs when new fake is created
+    Validate(true);
 }
 
 void LogoutAction::SwitchToInfinityFake() {
