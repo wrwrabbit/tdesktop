@@ -505,7 +505,11 @@ void InitMessageFieldFade(
 	}, topFade->lifetime());
 
 	topFade->show();
-	bottomFade->show();
+	bottomFade->showOn(
+	field->scrollTop().value(
+	) | rpl::map([field, descent = field->st().font->descent](int scroll) {
+		return (scroll + descent) < field->scrollTopMax();
+	}) | rpl::distinct_until_changed());
 }
 
 InlineBotQuery ParseInlineBotQuery(
@@ -1036,4 +1040,29 @@ base::unique_qptr<Ui::RpWidget> PremiumRequiredSendRestriction(
 		Settings::ShowPremium(controller, u"require_premium"_q);
 	});
 	return result;
+}
+
+void SelectTextInFieldWithMargins(
+		not_null<Ui::InputField*> field,
+		const TextSelection &selection) {
+	if (selection.empty()) {
+		return;
+	}
+	auto textCursor = field->textCursor();
+	// Try to set equal margins for top and bottom sides.
+	const auto charsCountInLine = field->width()
+		/ field->st().font->width('W');
+	const auto linesCount = (field->height() / field->st().font->height);
+	const auto selectedLines = (selection.to - selection.from)
+		/ charsCountInLine;
+	constexpr auto kMinDiff = ushort(3);
+	if ((linesCount - selectedLines) > kMinDiff) {
+		textCursor.setPosition(selection.from
+			- charsCountInLine * ((linesCount - 1) / 2));
+		field->setTextCursor(textCursor);
+	}
+	textCursor.setPosition(selection.from);
+	field->setTextCursor(textCursor);
+	textCursor.setPosition(selection.to, QTextCursor::KeepAnchor);
+	field->setTextCursor(textCursor);
 }

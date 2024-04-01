@@ -172,7 +172,9 @@ ScheduledWidget::ScheduledWidget(
 		if (const auto item = session().data().message(fullId)) {
 			const auto media = item->media();
 			if (!media || media->webpage() || media->allowsEditCaption()) {
-				_composeControls->editMessage(fullId);
+				_composeControls->editMessage(
+					fullId,
+					_inner->getSelectedTextRange(item));
 			}
 		}
 	}, _inner->lifetime());
@@ -1152,7 +1154,9 @@ Context ScheduledWidget::listContext() {
 }
 
 bool ScheduledWidget::listScrollTo(int top, bool syntetic) {
-	top = std::clamp(top, 0, _scroll->scrollTopMax());
+	top = (top == ScrollMax && syntetic)
+		? 0
+		: std::clamp(top, 0, _scroll->scrollTopMax());
 	if (_scroll->scrollTop() == top) {
 		updateInnerVisibleArea();
 		return false;
