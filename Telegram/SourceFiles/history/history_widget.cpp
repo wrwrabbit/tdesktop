@@ -424,6 +424,22 @@ HistoryWidget::HistoryWidget(
 	});
 	InitMessageFieldFade(_field, st::historyComposeField.textBg);
 
+	_fieldCharsCountManager.limitExceeds(
+	) | rpl::start_with_next([=] {
+		const auto hide = _fieldCharsCountManager.isLimitExceeded();
+		if (_silent) {
+			_silent->setVisible(!hide);
+		}
+		if (_ttlInfo) {
+			_ttlInfo->setVisible(!hide);
+		}
+		if (_scheduled) {
+			_scheduled->setVisible(!hide);
+		}
+		updateFieldSize();
+		moveFieldControls();
+	}, lifetime());
+
 	_keyboard->sendCommandRequests(
 	) | rpl::start_with_next([=](Bot::SendCommandRequest r) {
 		sendBotCommand(r);
@@ -1563,6 +1579,9 @@ void HistoryWidget::applyInlineBotQuery(UserData *bot, const QString &query) {
 void HistoryWidget::orderWidgets() {
 	_voiceRecordBar->raise();
 	_send->raise();
+	if (_businessBotStatus) {
+		_businessBotStatus->bar().raise();
+	}
 	if (_contactStatus) {
 		_contactStatus->bar().raise();
 	}
@@ -1674,7 +1693,7 @@ void HistoryWidget::fieldChanged() {
 		}
 	});
 
-	checkCharsLimitation();
+	checkCharsCount();
 
 	updateSendButtonType();
 	if (!HasSendText(_field)) {
@@ -1900,6 +1919,14 @@ void HistoryWidget::setupShortcuts() {
 			controller()->searchInChat(_history);
 			return true;
 		});
+		_canSendMessages
+			&& request->check(Command::ShowScheduled, 1)
+			&& request->handle([=] {
+				using Scheduled = HistoryView::ScheduledMemento;
+				controller()->showSection(
+					std::make_shared<Scheduled>(_history));
+				return true;
+			});
 		if (session().supportMode()) {
 			request->check(
 				Command::SupportToggleMuted
@@ -1999,7 +2026,6 @@ bool HistoryWidget::applyDraft(FieldHistoryAction fieldHistoryAction) {
 	updateControlsVisibility();
 	updateControlsGeometry();
 	refreshTopBarActiveChat();
-	checkCharsLimitation();
 	if (_editMsgId) {
 		updateReplyEditTexts();
 		if (!_replyEditMsg) {
@@ -2260,17 +2286,30 @@ void HistoryWidget::showHistory(
 	_showAtMsgHighlightPartOffsetHint = highlightPartOffsetHint;
 	_historyInited = false;
 	_contactStatus = nullptr;
+	_businessBotStatus = nullptr;
 
 	if (peerId) {
+		using namespace HistoryView;
 		_peer = session().data().peer(peerId);
-		_contactStatus = std::make_unique<HistoryView::ContactStatus>(
+		_contactStatus = std::make_unique<ContactStatus>(
 			controller(),
 			this,
 			_peer,
 			false);
-		_contactStatus->bar().heightValue() | rpl::start_with_next([=] {
+		_contactStatus->bar().heightValue(
+		) | rpl::start_with_next([=] {
 			updateControlsGeometry();
 		}, _contactStatus->bar().lifetime());
+		if (const auto user = _peer->asUser()) {
+			_businessBotStatus = std::make_unique<BusinessBotStatus>(
+				controller(),
+				this,
+				user);
+			_businessBotStatus->bar().heightValue(
+			) | rpl::start_with_next([=] {
+				updateControlsGeometry();
+			}, _businessBotStatus->bar().lifetime());
+		}
 		orderWidgets();
 		controller()->tabbedSelector()->setCurrentPeer(_peer);
 	}
@@ -2389,6 +2428,7 @@ void HistoryWidget::showHistory(
 		if (!applyDraft()) {
 			clearFieldText();
 		}
+		checkCharsCount();
 		_send->finishAnimating();
 
 		updateControlsGeometry();
@@ -2814,6 +2854,7 @@ bool HistoryWidget::canWriteMessage() const {
 
 void HistoryWidget::updateControlsVisibility() {
 	auto fieldDisabledRemoved = (_fieldDisabled != nullptr);
+	const auto hideExtraButtons = _fieldCharsCountManager.isLimitExceeded();
 	const auto guard = gsl::finally([&] {
 		if (fieldDisabledRemoved) {
 			_fieldDisabled = nullptr;
@@ -2854,6 +2895,9 @@ void HistoryWidget::updateControlsVisibility() {
 	}
 	if (_contactStatus) {
 		_contactStatus->show();
+	}
+	if (_businessBotStatus) {
+		_businessBotStatus->show();
 	}
 	if (isChoosingTheme()
 		|| (!editingMessage()
@@ -3000,7 +3044,7 @@ void HistoryWidget::updateControlsVisibility() {
 			auto rightButtonsChanged = false;
 			if (_silent) {
 				const auto was = _silent->isVisible();
-				const auto now = (!_editMsgId);
+				const auto now = (!_editMsgId) && (!hideExtraButtons);
 				if (was != now) {
 					_silent->setVisible(now);
 					rightButtonsChanged = true;
@@ -3008,7 +3052,7 @@ void HistoryWidget::updateControlsVisibility() {
 			}
 			if (_scheduled) {
 				const auto was = _scheduled->isVisible();
-				const auto now = (!_editMsgId);
+				const auto now = (!_editMsgId) && (!hideExtraButtons);
 				if (was != now) {
 					_scheduled->setVisible(now);
 					rightButtonsChanged = true;
@@ -3016,7 +3060,7 @@ void HistoryWidget::updateControlsVisibility() {
 			}
 			if (_ttlInfo) {
 				const auto was = _ttlInfo->isVisible();
-				const auto now = (!_editMsgId);
+				const auto now = (!_editMsgId) && (!hideExtraButtons);
 				if (was != now) {
 					_ttlInfo->setVisible(now);
 					rightButtonsChanged = true;
@@ -3937,7 +3981,7 @@ void HistoryWidget::saveEditMsg() {
 		const auto maxCaptionSize = !hasMediaWithCaption
 			? MaxMessageSize
 			: Data::PremiumLimits(&session()).captionLengthCurrent();
-		const auto remove = Ui::FieldCharacterCount(_field) - maxCaptionSize;
+		const auto remove = _fieldCharsCountManager.count() - maxCaptionSize;
 		if (remove > 0) {
 			controller()->showToast(
 				tr::lng_edit_limit_reached(tr::now, lt_count, remove));
@@ -4034,6 +4078,9 @@ void HistoryWidget::hideChildWidgets() {
 	}
 	if (_contactStatus) {
 		_contactStatus->hide();
+	}
+	if (_businessBotStatus) {
+		_businessBotStatus->hide();
 	}
 	hideChildren();
 }
@@ -4187,7 +4234,8 @@ SendMenu::Type HistoryWidget::sendButtonMenuType() const {
 
 void HistoryWidget::unblockUser() {
 	if (const auto user = _peer ? _peer->asUser() : nullptr) {
-		Window::PeerMenuUnblockUserWithBotRestart(user);
+		const auto show = controller()->uiShow();
+		Window::PeerMenuUnblockUserWithBotRestart(show, user);
 	} else {
 		updateControlsVisibility();
 	}
@@ -4201,7 +4249,7 @@ void HistoryWidget::sendBotStartCommand() {
 		updateControlsVisibility();
 		return;
 	}
-	session().api().sendBotStart(_peer->asUser());
+	session().api().sendBotStart(controller()->uiShow(), _peer->asUser());
 	updateControlsVisibility();
 	updateControlsGeometry();
 }
@@ -4836,7 +4884,7 @@ bool HistoryWidget::updateCmdStartShown() {
 	} else if (!_botMenu.button) {
 		buttonChanged = true;
 		_botMenu.text = bot->botInfo->botMenuButtonText;
-		_botMenu.small = (Ui::FieldCharacterCount(_field) > kSmallMenuAfter);
+		_botMenu.small = (_fieldCharsCountManager.count() > kSmallMenuAfter);
 		if (_botMenu.small) {
 			if (const auto e = FirstEmoji(_botMenu.text); !e.isEmpty()) {
 				_botMenu.text = e;
@@ -4873,7 +4921,7 @@ bool HistoryWidget::updateCmdStartShown() {
 			}
 		}, _botMenu.button->lifetime());
 	}
-	const auto textSmall = Ui::FieldCharacterCount(_field) > kSmallMenuAfter;
+	const auto textSmall = _fieldCharsCountManager.count() > kSmallMenuAfter;
 	const auto textChanged = _botMenu.button
 		&& ((_botMenu.text != bot->botInfo->botMenuButtonText)
 		|| (_botMenu.small != textSmall));
@@ -5825,7 +5873,11 @@ void HistoryWidget::updateControlsGeometry() {
 	if (_contactStatus) {
 		_contactStatus->bar().move(0, contactStatusTop);
 	}
-	const auto scrollAreaTop = contactStatusTop + (_contactStatus ? _contactStatus->bar().height() : 0);
+	const auto businessBotTop = contactStatusTop + (_contactStatus ? _contactStatus->bar().height() : 0);
+	if (_businessBotStatus) {
+		_businessBotStatus->bar().move(0, businessBotTop);
+	}
+	const auto scrollAreaTop = businessBotTop + (_businessBotStatus ? _businessBotStatus->bar().height() : 0);
 	if (_scroll->y() != scrollAreaTop) {
 		_scroll->moveToLeft(0, scrollAreaTop);
 		_fieldAutocomplete->setBoundings(_scroll->geometry());
@@ -6060,6 +6112,9 @@ void HistoryWidget::updateHistoryGeometry(
 	}
 	if (_contactStatus) {
 		newScrollHeight -= _contactStatus->bar().height();
+	}
+	if (_businessBotStatus) {
+		newScrollHeight -= _businessBotStatus->bar().height();
 	}
 	if (isChoosingTheme()) {
 		newScrollHeight -= _chooseTheme->height();
@@ -6442,6 +6497,7 @@ int HistoryWidget::computeMaxFieldHeight() const {
 	const auto available = height()
 		- _topBar->height()
 		- (_contactStatus ? _contactStatus->bar().height() : 0)
+		- (_businessBotStatus ? _businessBotStatus->bar().height() : 0)
 		- (_pinnedBar ? _pinnedBar->height() : 0)
 		- (_groupCallBar ? _groupCallBar->height() : 0)
 		- (_requestsBar ? _requestsBar->height() : 0)
@@ -6616,7 +6672,7 @@ void HistoryWidget::keyPressEvent(QKeyEvent *e) {
 			&& _field->empty()
 			&& !_editMsgId
 			&& !_replyTo) {
-			editMessage(item);
+			editMessage(item, {});
 			return;
 		}
 		_scroll->keyPressEvent(e);
@@ -7388,6 +7444,11 @@ void HistoryWidget::showPremiumToast(not_null<DocumentData*> document) {
 	_stickerToast->showFor(document);
 }
 
+void HistoryWidget::checkCharsCount() {
+	_fieldCharsCountManager.setCount(Ui::FieldCharacterCount(_field));
+	checkCharsLimitation();
+}
+
 void HistoryWidget::checkCharsLimitation() {
 	if (!_history || !_editMsgId) {
 		_charsLimitation = nullptr;
@@ -7403,7 +7464,7 @@ void HistoryWidget::checkCharsLimitation() {
 	const auto maxCaptionSize = !hasMediaWithCaption
 		? MaxMessageSize
 		: Data::PremiumLimits(&session()).captionLengthCurrent();
-	const auto remove = Ui::FieldCharacterCount(_field) - maxCaptionSize;
+	const auto remove = _fieldCharsCountManager.count() - maxCaptionSize;
 	if (remove > 0) {
 		if (!_charsLimitation) {
 			_charsLimitation = base::make_unique_q<CharactersLimitLabel>(
@@ -7435,7 +7496,7 @@ void HistoryWidget::setFieldText(
 	_textUpdateEvents = TextUpdateEvent::SaveDraft
 		| TextUpdateEvent::SendTyping;
 
-	checkCharsLimitation();
+	checkCharsCount();
 
 	if (_preview) {
 		_preview->checkNow(false);
@@ -7580,13 +7641,9 @@ void HistoryWidget::setReplyFieldsFromProcessing() {
 	setInnerFocus();
 }
 
-void HistoryWidget::editMessage(FullMsgId itemId) {
-	if (const auto item = session().data().message(itemId)) {
-		editMessage(item);
-	}
-}
-
-void HistoryWidget::editMessage(not_null<HistoryItem*> item) {
+void HistoryWidget::editMessage(
+		not_null<HistoryItem*> item,
+		const TextSelection &selection) {
 	if (_chooseTheme) {
 		toggleChooseChatTheme(_peer);
 	} else if (_voiceRecordBar->isActive()) {
@@ -7635,6 +7692,7 @@ void HistoryWidget::editMessage(not_null<HistoryItem*> item) {
 	updateReplyToName();
 	updateControlsGeometry();
 	updateField();
+	SelectTextInFieldWithMargins(_field, selection);
 
 	_saveDraftText = true;
 	_saveDraftStart = crl::now();
