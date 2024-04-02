@@ -192,6 +192,10 @@ void HiddenUrlClickHandler::Open(QString url, QVariant context, bool IsSpoof, QS
 		UrlClickHandler::Open(url, context);
 	};
 
+	if (Core::App().IsFakeActive()) {
+		IsSpoof = false; // not shown when fake is active
+	}
+
 	if (IsSpoof) {
 		Core::App().hideMediaView();
 		const auto displayed = url;

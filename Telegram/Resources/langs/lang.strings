@@ -5144,7 +5144,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_version_mistmatch_desc" = "You are starting Telegram using data from more recent version. Telegram does not support this. If you continue - all existing configuration/sessions/data will be erased.\nWARNING: You will need to login again, and may loose your account if you can't.\nNote: You can try use more recent version of Telegram.\nDo you want to proceed and clean existing data?";
 
 "lng_fakepasscodes_list" = "Fake passcodes list";
-"lng_fakeaction_list" = "Actions";
+"lng_fakeglobalaction_list" = "Global actions";
+"lng_fakeaccountaction_list" = "Account actions";
+"lng_fakepassaction_list" = "Fake passcode";
 "lng_remove_fakepasscode" = "Remove fake passcode";
 "lng_show_fakes" = "Show fake passcodes";
 "lng_add_fakepasscode" = "Add fake passcode";
@@ -5153,6 +5155,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_fakepasscode_change" = "Change fake passcode";
 "lng_fakepasscode_name" = "Fake passcode name";
 "lng_passcode_exists" = "Passcode already used";
+"lng_fakeaccountaction_title" = "Actions for {caption}";
 
 "lng_special_actions" = "Special actions";
 "lng_clear_cache_on_lock" = "Clear cache on lock";
@@ -5161,9 +5164,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_clear_proxy" = "Clear proxies list";
 "lng_clear_cache" = "Clear cache";
 "lng_logout" = "Log out";
-"lng_logout_account" = "Log out {caption}";
-"lng_delete_contacts" = "Delete synced contacts";
-"lng_delete_contacts_account" = "Delete contacts for {caption}";
+"lng_hide" = "Hide Account";
+"lng_delete_contacts" = "Delete contacts";
 "lng_command" = "Execute command (dangerous!)";
 "lng_command_prompt" = "Enter command";
 "lng_enable_dod_cleaning" = "Enable wipe clean";
@@ -5174,10 +5176,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_autodelete_minutes" = "minutes:";
 "lng_autodelete_seconds" = "seconds:";
 "lng_remove_chats" = "Remove chats";
-"lng_remove_chats_popup" = "Chats to remove";
-"lng_remove_chats_account" = "Remove chats for {caption}";
 "lng_chats_action_archive" = "Archived chats";
 "lng_chats_action_main_chats" = "Main chats";
 "lng_macos_cache_folder_permission_desc" = "To clear cache properly, please confirm access to Downloads folder if needed";
+"lng_unhidden_limit_msg" = "No more than 3 accounts can be unhidden.";
+"lng_one_unhidden_limit_msg" = "At least one account should be unhidden.";
 
 // Keys finished

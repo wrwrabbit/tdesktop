@@ -3,6 +3,7 @@
 
 #include <ui/layers/box_content.h>
 #include "window/window_session_controller.h"
+#include "settings/settings_common.h"
 
 namespace Main {
     class Domain;
@@ -35,6 +36,22 @@ private:
     Window::SessionController* _controller;
     size_t _passcodeIndex;
 
+};
+
+class FakePasscodeAccountBox : public Ui::BoxContent {
+public:
+    FakePasscodeAccountBox(QWidget* parent,
+        Main::Domain* domain, not_null<Window::SessionController*> controller,
+        size_t passcodeIndex, const int accountIndex);
+
+protected:
+    void prepare() override;
+
+private:
+    Main::Domain* _domain;
+    Window::SessionController* _controller;
+    size_t _passcodeIndex;
+    int _accountIndex;
 };
 
 #endif //TELEGRAM_FAKEPASSCODES_LIST_H

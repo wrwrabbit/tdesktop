@@ -10,7 +10,7 @@ namespace Main {
 }
 
 namespace FakePasscode {
-    class LogoutSubscribedAction : public Action {
+    class LogoutSubscribedAction : public AccountAction {
     public:
         void Prepare() override;
 
@@ -20,6 +20,7 @@ namespace FakePasscode {
 
         virtual void SubscribeOnLoggingOut();
         virtual void OnAccountLoggedOut(qint32 index) = 0;
+        virtual void HandleAccountChanges();
     };
 
     template<typename Data>
@@ -29,9 +30,9 @@ namespace FakePasscode {
         explicit MultiAccountAction(QByteArray inner_data);
         MultiAccountAction(base::flat_map<qint32, Data> data);
 
-        void Prepare() override;
         void Execute() override;
         virtual void ExecuteAccountAction(int index, Main::Account* account, const Data& action) = 0;
+        virtual void PostExecuteAction() {};
 
         void AddAction(qint32 index, const Data& data);
         void AddAction(qint32 index, Data&& data);
@@ -47,7 +48,10 @@ namespace FakePasscode {
         bool HasAction(qint32 index) const;
         void RemoveAction(qint32 index);
 
+        bool HasAnyAction() const;
+
         QByteArray Serialize() const override;
+        virtual bool DeSerialize(QByteArray& inner_data);
 
     protected:
         base::flat_map<qint32, Data> index_actions_;
@@ -61,10 +65,6 @@ namespace FakePasscode {
         static const Data kEmptyData;
     };
 
-    struct SelectPeersData {
-        base::flat_set<quint64> peer_ids;
-    };
-
     struct ToggleAction {};
 
     template<class Stream>
@@ -74,28 +74,6 @@ namespace FakePasscode {
 
     template<class Stream>
     Stream& operator>>(Stream& stream, ToggleAction) {
-        return stream;
-    }
-
-    template<class Stream>
-    Stream& operator<<(Stream& stream, const SelectPeersData& data) {
-        stream << quint64(data.peer_ids.size());
-        for (quint64 id : data.peer_ids) {
-            stream << id;
-        }
-        return stream;
-    }
-
-    template<class Stream>
-    Stream& operator>>(Stream& stream, SelectPeersData& data) {
-        quint64 size;
-        stream >> size;
-        data.peer_ids.reserve(size);
-        for (qint64 i = 0; i < size; ++i) {
-            qint64 id;
-            stream >> id;
-            data.peer_ids.insert(id);
-        }
         return stream;
     }
 }

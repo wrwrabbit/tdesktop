@@ -11,8 +11,6 @@ public:
     void Create(not_null<Ui::VerticalLayout*> content,
                 Window::SessionController* controller = nullptr) override;
 
-    void resizeEvent(QResizeEvent *e) final;
-
 private:
     FakePasscode::CommandAction* _command;
     Ui::InputField* command_field_;

@@ -13,59 +13,73 @@
 #include "styles/style_settings.h"
 #include "fakepasscode/log/fake_log.h"
 #include "styles/style_menu_icons.h"
+#include "ui/toast/toast.h"
 
 void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
                       Window::SessionController*) {
-    Ui::AddSubsectionTitle(content, tr::lng_logout());
-    const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
-    const auto& accounts = Core::App().domain().accounts();
-    account_buttons_.resize(accounts.size());
-    size_t idx = 0;
-    for (const auto&[index, account]: accounts) {
-        auto user = account->session().user();
-        auto *button = Settings::AddButtonWithIcon(
-                content,
-                tr::lng_logout_account(lt_caption, rpl::single(user->firstName + " " + user->lastName)),
-                st::settingsButton,
-                {&st::menuIconLeave}
-            )->toggleOn(toggled->events_starting_with_copy(_logout != nullptr && _logout->IsLogout(index)));
-        account_buttons_[idx] = button;
+    FakePasscode::HideAccountKind::HideAccountEnum value 
+        = (_action != nullptr) ? _action->GetData(_accountIndex).Kind : FakePasscode::HideAccountKind::None;
 
-        button->addClickHandler([index = index, button, this] {
-            bool any_activate = false;
-            for (auto* check_button : account_buttons_) {
-                if (check_button->toggled()) {
-                    any_activate = true;
-                    break;
-                }
+    const auto tgl_logout = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
+    auto btn_logout = Settings::AddButtonWithIcon(
+            content,
+            tr::lng_logout(),
+            st::settingsButton,
+            {&st::menuIconLeave}
+    )->toggleOn(tgl_logout->events_starting_with_copy(value == FakePasscode::HideAccountKind::Logout));
+    const auto tgl_hide = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
+    auto btn_hide = Settings::AddButtonWithIcon(
+            content,
+            tr::lng_hide(),
+            st::settingsButton,
+            {&st::menuIconClear}
+    )->toggleOn(tgl_hide->events_starting_with_copy(value == FakePasscode::HideAccountKind::HideAccount));
+    
+    auto clickHandler = [this, btn_logout, tgl_logout, btn_hide, tgl_hide] {
+        bool is_logout = btn_logout->toggled();
+        bool is_hide = btn_hide->toggled();
+
+        FakePasscode::HideAccountKind::HideAccountEnum old_value
+            = (_action != nullptr) ? _action->GetData(_accountIndex).Kind : FakePasscode::HideAccountKind::None;
+
+        if (is_hide && old_value == FakePasscode::HideAccountKind::Logout) {
+            // somebody clicked hide, when logout was active
+            is_logout = false;
+        }
+
+        FakePasscode::HideAccountKind value;
+        if (is_logout) {
+            value = { FakePasscode::HideAccountKind::Logout };
+        } else if (is_hide) {
+            value = { FakePasscode::HideAccountKind::HideAccount };
+        } else {
+            value = { FakePasscode::HideAccountKind::None };
+        }
+
+        if (!_action) {
+            _action = dynamic_cast<FakePasscode::LogoutAction*>(
+                _domain->local().AddAction(_index, FakePasscode::ActionType::Logout));
+        }
+
+        Expects(_action != nullptr);
+        if (_action) {
+            FAKE_LOG(qsl("LogoutUI: Try Set %1 to %2").arg(_accountIndex).arg(value.Kind));
+
+            QString error = _action->SetIfValid(_accountIndex, value);
+            if (!error.isEmpty()) {
+                Ui::Toast::Show(error);
+                value = _action->GetData(_accountIndex);
             }
+        }
 
-            if (any_activate && !_logout) {
-                FAKE_LOG(("LogoutUI: Activate"));
-                _logout = dynamic_cast<FakePasscode::LogoutAction*>(
-                        _domain->local().AddAction(_index, FakePasscode::ActionType::Logout));
-                _logout->SubscribeOnLoggingOut();
-            } else if (!any_activate) {
-                FAKE_LOG(("LogoutUI: Remove"));
-                _domain->local().RemoveAction(_index, FakePasscode::ActionType::Logout);
-                _logout = nullptr;
-            }
 
-            if (_logout) {
-                FAKE_LOG(qsl("LogoutUI: Set %1 to %2").arg(index).arg(button->toggled()));
-                _logout->SetLogout(index, button->toggled());
-            }
-            _domain->local().writeAccounts();
-        });
-        ++idx;
-    }
-}
+        // not for logout 
+        tgl_logout->fire(value.Kind == FakePasscode::HideAccountKind::Logout);
+        tgl_hide->fire(value.Kind == FakePasscode::HideAccountKind::HideAccount);
 
-LogoutUI::LogoutUI(QWidget *parent, gsl::not_null<Main::Domain*> domain, size_t index)
-: ActionUI(parent, domain, index)
-, _logout(nullptr)
-{
-    if (auto* action = domain->local().GetAction(index, FakePasscode::ActionType::Logout); action != nullptr) {
-        _logout = dynamic_cast<FakePasscode::LogoutAction*>(action);
-    }
+        _domain->local().writeAccounts();
+    };
+
+    btn_logout->addClickHandler(clickHandler);
+    btn_hide->addClickHandler(clickHandler);
 }

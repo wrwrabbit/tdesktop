@@ -1,5 +1,8 @@
 #include "delete_chats.h"
 
+#include "fakepasscode/multiaccount_action.hpp"
+
+#include "lang/lang_keys.h"
 #include "core/application.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
@@ -10,6 +13,7 @@
 #include "data/data_chat.h"
 #include "data/data_folder.h"
 #include "data/data_chat_filters.h"
+#include "data/data_stories.h"
 #include "main/main_session_settings.h"
 #include "apiwrap.h"
 
@@ -45,7 +49,8 @@ void DeleteChatsAction::ExecuteAccountAction(int index, Main::Account* account, 
             FAKE_LOG(qsl("Remove chat %1").arg(peer->name()));
             auto history = data_session.history(peer_id);
             api.deleteConversation(peer, false);
-            //api.clearHistory(peer, false);
+            // clean stories
+            data_session.stories().toggleHidden(peer_id, true, nullptr);
             data_session.deleteConversationLocally(peer);
             history->clearFolder();
             Core::App().closeChatFromWindows(peer);
@@ -110,4 +115,20 @@ void DeleteChatsAction::ExecuteAccountAction(int index, Main::Account* account, 
 
 ActionType DeleteChatsAction::GetType() const {
     return ActionType::DeleteChats;
+}
+
+QString DeleteChatsAction::GetDescriptionFor(qint32 account) const {
+    if (auto pos = index_actions_.find(account); pos != index_actions_.end()) {
+        auto size = pos->second.peer_ids.size();
+        if (size > 0) {
+            return tr::lng_filters_context_remove(tr::now) + " "
+                 + tr::lng_filters_chats_count(tr::now, lt_count, size);
+        }
+    }
+    return QString();
+}
+
+
+namespace FakePasscode {
+    template class MultiAccountAction<SelectPeersData>;
 }

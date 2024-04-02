@@ -38,77 +38,6 @@ using Action = FakePasscode::MultiAccountAction<FakePasscode::SelectPeersData>;
 
 using ButtonHandler = MultiAccountSelectChatsUi::ButtonHandler;
 
-class SelectChatsContentBox : public Ui::BoxContent {
-public:
-    SelectChatsContentBox(QWidget* parent,
-                          Main::Domain* domain, Action* action,
-                          qint64 index,
-                          MultiAccountSelectChatsUi::Description* description);
-
-protected:
-    void prepare() override;
-
-private:
-    Main::Domain* domain_;
-    Action* action_;
-    qint64 index_;
-    MultiAccountSelectChatsUi::Description* description_;
-};
-
-SelectChatsContentBox::SelectChatsContentBox(QWidget *,
-                                             Main::Domain* domain, Action* action,
-                                             qint64 index,
-                                             MultiAccountSelectChatsUi::Description* description)
-        : domain_(domain)
-        , action_(action)
-        , index_(index)
-        , description_(description) {
-}
-
-class SelectChatsContent : public Ui::RpWidget {
-public:
-    SelectChatsContent(QWidget *parent,
-                       Main::Domain* domain, Action* action,
-                       SelectChatsContentBox*, qint64 index,
-                       MultiAccountSelectChatsUi::Description* description,
-                       FakePasscode::SelectPeersData data = {});
-
-    void setupContent();
-
-private:
-    Main::Domain* domain_;
-    Action* action_;
-    std::vector<Ui::SettingsButton*> buttons_;
-    qint64 index_;
-    MultiAccountSelectChatsUi::Description* description_;
-    FakePasscode::SelectPeersData data_;
-};
-
-SelectChatsContent::SelectChatsContent(QWidget *parent,
-                                       Main::Domain* domain, Action* action,
-                                       SelectChatsContentBox*, qint64 index,
-                                       MultiAccountSelectChatsUi::Description* description,
-                                       FakePasscode::SelectPeersData data)
-        : Ui::RpWidget(parent)
-        , domain_(domain)
-        , action_(action)
-        , index_(index)
-        , description_(description)
-        , data_(std::move(data)) {
-}
-
-void SelectChatsContentBox::prepare() {
-    using namespace Settings;
-    addButton(tr::lng_close(), [=] { closeBox(); });
-    const auto content =
-            setInnerWidget(object_ptr<SelectChatsContent>(this, domain_, action_, this, index_, description_,
-                                                          action_->GetData(index_)),
-                           st::sessionsScroll);
-    content->resize(st::boxWideWidth, st::noContactsHeight);
-    content->setupContent();
-    setDimensions(st::boxWideWidth, st::sessionsHeight);
-}
-
 void AddDialogImageToButton(
     not_null<Ui::AbstractButton*> button,
     const style::SettingsButton& st,
@@ -150,58 +79,10 @@ void AddDialogImageToButton(
         }, icon->widget.lifetime());
 }
 
-
-
-void SelectChatsContent::setupContent() {
-    using ChatWithName = std::pair<not_null<const Dialogs::MainList*>, rpl::producer<QString>>;
-
-    const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
-    Ui::AddSubsectionTitle(content, description_->popup_window_title());
-
-    const auto& accounts = domain_->accounts();
-    Main::Account* cur_account = nullptr;
-    for (const auto&[index, account]: accounts) {
-        if (index == index_) {
-            cur_account = account.get();
-        }
-    }
-    if (cur_account == nullptr) {
-        return;
-    }
-    const auto& account_data = cur_account->session().data();
-
-    std::vector<ChatWithName> chat_lists;
-    if (auto archive_folder = account_data.folderLoaded(Data::Folder::kId)) {
-        chat_lists.emplace_back(account_data.chatsList(archive_folder), tr::lng_chats_action_archive());
-    }
-    chat_lists.emplace_back(account_data.chatsList(), tr::lng_chats_action_main_chats());
-    for (const auto&[list, name] : chat_lists) {
-        Ui::AddSubsectionTitle(content, name);
-        for (auto chat: list->indexed()->all()) {
-            if (chat->entry()->fixedOnTopIndex() == Dialogs::Entry::kArchiveFixOnTopIndex) {
-                continue; // Archive, skip
-            }
-
-            const auto& chat_name = chat->history()->peer->isSelf() ? tr::lng_saved_messages(tr::now) : chat->entry()->chatListName();
-            auto button = Settings::AddButtonWithIcon(content, rpl::single(chat_name), st::settingsButton);
-            AddDialogImageToButton(button, st::settingsButton, chat);
-            auto dialog_id = chat->key().peer()->id.value;
-            button->toggleOn(rpl::single(data_.peer_ids.contains(dialog_id)));
-            button->addClickHandler([this, chat, button] {
-                data_ = description_->button_handler(button, chat, std::move(data_));
-                action_->UpdateOrAddAction(index_, data_);
-                domain_->local().writeAccounts();
-            });
-            buttons_.push_back(button);
-        }
-    }
-
-    Ui::ResizeFitChild(this, content);
-}
-
-MultiAccountSelectChatsUi::MultiAccountSelectChatsUi(QWidget *parent, gsl::not_null<Main::Domain*> domain, size_t index, Description description)
+MultiAccountSelectChatsUi::MultiAccountSelectChatsUi(QWidget *parent, gsl::not_null<Main::Domain*> domain, size_t index, int accountIndex, Description description)
         : ActionUI(parent, domain, index)
-        , _description(std::move(description)) {
+        , _description(std::move(description))
+        , _accountIndex(accountIndex) {
     if (auto* action = domain->local().GetAction(_index, _description.action_type)) {
         _action = dynamic_cast<Action*>(action);
     } else {
@@ -214,26 +95,49 @@ void MultiAccountSelectChatsUi::Create(not_null<Ui::VerticalLayout *> content,
                                        Window::SessionController* controller) {
     Expects(controller != nullptr);
     Ui::AddSubsectionTitle(content, _description.title());
-    const auto& accounts = Core::App().domain().accounts();
-    for (const auto&[index, account] : accounts) {
-        Settings::AddButtonWithIcon(
-                content,
-                _description.account_title(account.get()),
-                st::settingsButton,
-                {&st::menuIconChannel}
-        )->addClickHandler([index = index, controller, this] {
-            if (!_action->HasAction(index)) {
-                _action->AddAction(index, FakePasscode::SelectPeersData{});
+
+    static FakePasscode::SelectPeersData data_;
+    data_ = _action->GetData(_accountIndex);
+
+    const auto& accounts = _domain->accounts();
+    Main::Account* cur_account = nullptr;
+    for (const auto& [index, account] : accounts) {
+        if (index == _accountIndex) {
+            cur_account = account.get();
+        }
+    }
+    if (cur_account == nullptr) {
+        return;
+    }
+    const auto& account_data = cur_account->session().data();
+
+    using ChatWithName = std::pair<not_null<const Dialogs::MainList*>, rpl::producer<QString>>;
+    std::vector<ChatWithName> chat_lists;
+    if (auto archive_folder = account_data.folderLoaded(Data::Folder::kId)) {
+        chat_lists.emplace_back(account_data.chatsList(archive_folder), tr::lng_chats_action_archive());
+    }
+    chat_lists.emplace_back(account_data.chatsList(), tr::lng_chats_action_main_chats());
+    for (const auto& [list, name] : chat_lists) {
+        Ui::AddSubsectionTitle(content, name);
+        for (auto chat : list->indexed()->all()) {
+            if (chat->entry()->fixedOnTopIndex() == Dialogs::Entry::kArchiveFixOnTopIndex) {
+                continue; // Archive, skip
             }
 
-            _domain->local().writeAccounts();
-            controller->show(Box<SelectChatsContentBox>(_domain, _action, index, &_description));
-        });
+            const auto& chat_name = chat->history()->peer->isSelf() ? tr::lng_saved_messages(tr::now) : chat->entry()->chatListName();
+            auto button = Settings::AddButtonWithIcon(content, rpl::single(chat_name), st::settingsButton);
+            AddDialogImageToButton(button, st::settingsButton, chat);
+            auto dialog_id = chat->key().peer()->id.value;
+            button->toggleOn(rpl::single(data_.peer_ids.contains(dialog_id)));
+            button->addClickHandler([this, chat, button] {
+                data_ = _description.button_handler(button, chat, std::move(data_));
+                _action->UpdateOrAddAction(_accountIndex, data_);
+                _domain->local().writeAccounts();
+                });
+            buttons_.push_back(button);
+        }
     }
+
 }
 
-rpl::producer<QString> MultiAccountSelectChatsUi::DefaultAccountNameFormat(gsl::not_null<Main::Account*> account) {
-    auto user = account->session().user();
-    return rpl::single(user->firstName + " " + user->lastName);
-}
 

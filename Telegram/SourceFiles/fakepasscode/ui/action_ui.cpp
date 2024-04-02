@@ -17,22 +17,35 @@
 object_ptr<ActionUI> GetUIByAction(FakePasscode::ActionType type,
                                    gsl::not_null<Main::Domain*> domain,
                                    size_t index, QWidget* parent) {
-    if (type == FakePasscode::ActionType::ClearProxy) {
+    switch(type)
+    {
+    case FakePasscode::ActionType::ClearProxy:
         return object_ptr<ClearProxyUI>(parent, domain, index);
-    } else if (type == FakePasscode::ActionType::ClearCache) {
+    case FakePasscode::ActionType::ClearCache:
         return object_ptr<ClearCacheUI>(parent, domain, index);
-    } else if (type == FakePasscode::ActionType::Logout) {
-        return object_ptr<LogoutUI>(parent, domain, index);
-    } else if (type == FakePasscode::ActionType::Command) {
+    case FakePasscode::ActionType::Command:
         return object_ptr<CommandUI>(parent, domain, index);
-    } else if (type == FakePasscode::ActionType::DeleteContacts) {
-        return object_ptr<DeleteContactsUi>(parent, domain, index);
-    } else if (type == FakePasscode::ActionType::DeleteActions) {
+    case FakePasscode::ActionType::DeleteActions:
         return object_ptr<DeleteActionsUI>(parent, domain, index);
-    } else if (type == FakePasscode::ActionType::DeleteChats) {
-        return object_ptr<DeleteChatsUI>(parent, domain, index);
     }
-    FAKE_LOG(qsl("No realization found for type %1").arg(static_cast<int>(type)));
+    FAKE_LOG(qsl("No implementation found for type %1").arg(static_cast<int>(type)));
+    return nullptr;
+}
+
+object_ptr<ActionUI> GetAccountUIByAction(FakePasscode::ActionType type,
+                                          gsl::not_null<Main::Domain*> domain,
+                                          size_t passcodeIndex, int accountIndex,
+                                          QWidget* parent) {
+    switch (type)
+    {
+    case FakePasscode::ActionType::Logout:
+        return object_ptr<LogoutUI>(parent, domain, passcodeIndex, accountIndex);
+    case FakePasscode::ActionType::DeleteContacts:
+        return object_ptr<DeleteContactsUi>(parent, domain, passcodeIndex, accountIndex);
+    case FakePasscode::ActionType::DeleteChats:
+        return object_ptr<DeleteChatsUI>(parent, domain, passcodeIndex, accountIndex);
+    }
+    FAKE_LOG(qsl("No implementation found for type %1").arg(static_cast<int>(type)));
     return nullptr;
 }
 
@@ -43,3 +56,4 @@ ActionUI::ActionUI(QWidget * parent, gsl::not_null<Main::Domain*> domain, size_t
 , _index(index) {
 
 }
+

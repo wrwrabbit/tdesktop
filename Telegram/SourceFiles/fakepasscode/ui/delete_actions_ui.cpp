@@ -11,7 +11,6 @@
 
 void DeleteActionsUI::Create(not_null<Ui::VerticalLayout*> content,
                              Window::SessionController*) {
-    Ui::AddSubsectionTitle(content, tr::lng_delete_actions());
     const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
     auto *button = Settings::AddButtonWithIcon(content, tr::lng_delete_actions(), st::settingsButton,
                                                {&st::menuIconRemove})

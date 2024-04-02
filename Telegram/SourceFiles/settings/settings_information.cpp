@@ -891,7 +891,7 @@ not_null<Ui::SlideWrap<Ui::SettingsButton>*> AccountsList::setupAdd() {
 				found = true;
 			}
 		}
-		if (!found && domain.accounts().size() >= domain.maxAccounts()) {
+		if (!found && domain.visibleAccountsCount() >= domain.maxAccounts()) {
 			_controller->show(
 				Box(AccountsLimitBox, &_controller->session()));
 		} else if (newWindow) {
@@ -1017,7 +1017,7 @@ void AccountsList::rebuild() {
 		std::max(1, count - premiumLimit));
 
 	_addAccount->toggle(
-		(count < Main::Domain::kPremiumMaxAccounts),
+		(count < Main::Domain::kPremiumMaxAccounts()),
 		anim::type::instant);
 
 	_reorder->start();

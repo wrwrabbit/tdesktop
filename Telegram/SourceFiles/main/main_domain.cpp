@@ -30,6 +30,44 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Main {
 
+static constexpr auto kMaxAccounts = 30; // should be 30, or 100
+static constexpr auto kPremiumMaxAccounts = 30;
+static constexpr auto kFakeMaxAccounts = 3; // should be 3
+static constexpr auto kFakePremiumMaxAccounts = 6;
+
+int Domain::kMaxAccounts()
+{
+	if (Core::App().domain().local().IsFake())
+	{
+		return Main::kFakeMaxAccounts;
+	}
+	return Main::kMaxAccounts;
+}
+
+int Domain::kPremiumMaxAccounts()
+{
+	if (Core::App().domain().local().IsFake())
+	{
+		return Main::kFakePremiumMaxAccounts;
+	}
+	return Main::kPremiumMaxAccounts;
+}
+
+int Domain::kAbsoluteMaxAccounts()
+{
+	return Main::kPremiumMaxAccounts;
+}
+
+int Domain::kOriginalMaxAccounts()
+{
+	return Main::kFakeMaxAccounts;
+}
+
+int Domain::kOriginalPremiumMaxAccounts()
+{
+	return Main::kFakePremiumMaxAccounts;
+}
+
 Domain::Domain(const QString &dataName)
 : _dataName(dataName)
 , _local(std::make_unique<Storage::Domain>(this, dataName)) {
@@ -103,6 +141,14 @@ void Domain::accountAddedInStorage(AccountWithIndex accountWithIndex) {
 			Unexpected("Repeated account index.");
 		}
 	}
+
+	if (Core::App().domain().local().IsFake())
+	{
+		if (_accounts.size() >= kFakeMaxAccounts)
+		{
+			accountWithIndex.account->setHiddenMode(true);
+		}
+	}
 	_accounts.push_back(std::move(accountWithIndex));
 }
 
@@ -148,7 +194,9 @@ std::vector<not_null<Account*>> Domain::orderedAccounts() const {
 	const auto order = Core::App().settings().accountsOrder();
 	auto accounts = ranges::views::all(
 		_accounts
-	) | ranges::views::transform([](const Domain::AccountWithIndex &a) {
+	) | ranges::views::filter([](const Domain::AccountWithIndex &a) {
+		return a.account.get() ? !a.account->isHiddenMode() : true;
+	}) | ranges::views::transform([](const Domain::AccountWithIndex &a) {
 		return not_null{ a.account.get() };
 	}) | ranges::to_vector;
 	ranges::stable_sort(accounts, [&](
@@ -162,6 +210,27 @@ std::vector<not_null<Account*>> Domain::orderedAccounts() const {
 			: end(order);
 		return aIt < bIt;
 	});
+	return accounts;
+}
+
+std::vector<Domain::AccountWithIndexEx> Domain::orderedAccountsEx() const {
+	const auto order = Core::App().settings().accountsOrder();
+	auto accounts = ranges::views::all(
+		_accounts
+	) | ranges::views::transform([](const Domain::AccountWithIndex& a) {
+			return AccountWithIndexEx(a);
+	}) | ranges::to_vector;
+	ranges::stable_sort(accounts, [&](
+		AccountWithIndexEx a,
+		AccountWithIndexEx b) {
+			const auto aIt = a.account->sessionExists()
+				? ranges::find(order, a.account->session().uniqueId())
+				: end(order);
+			const auto bIt = b.account->sessionExists()
+				? ranges::find(order, b.account->session().uniqueId())
+				: end(order);
+			return aIt < bIt;
+		});
 	return accounts;
 }
 
@@ -245,6 +314,9 @@ void Domain::updateUnreadBadge() {
 	_unreadBadge = 0;
 	_unreadBadgeMuted = true;
 	for (const auto &[index, account] : _accounts) {
+		if (account->isHiddenMode()) {
+			continue;
+		}
 		if (const auto session = account->maybeSession()) {
 			const auto data = &session->data();
 			_unreadBadge += data->unreadBadge();
@@ -269,7 +341,7 @@ void Domain::scheduleUpdateUnreadBadge() {
 
 not_null<Main::Account*> Domain::add(MTP::Environment environment) {
 	Expects(started());
-	Expects(_accounts.size() < kPremiumMaxAccounts);
+	Expects(_accounts.size() < kAbsoluteMaxAccounts());
 
 	static const auto cloneConfig = [](const MTP::Config &config) {
 		return std::make_unique<MTP::Config>(config);
@@ -326,7 +398,7 @@ void Domain::addActivated(MTP::Environment environment, bool newWindow) {
 			activate(account);
 		}
 	};
-	if (accounts().size() < maxAccounts()) {
+	if (visibleAccountsCount() < maxAccounts()) {
 		added(add(environment));
 	} else {
 		for (auto &[index, account] : accounts()) {
@@ -374,7 +446,7 @@ void Domain::closeAccountWindows(not_null<Main::Account*> account) {
 		const auto other = i->account.get();
 		if (other == account) {
 			continue;
-		} 
+		}
 		if (Core::App().separateWindowForAccount(other)) {
 			const auto that = Core::App().separateWindowForAccount(account);
 			if (that) {
@@ -505,13 +577,47 @@ int Domain::maxAccounts() const {
 			const Main::Domain::AccountWithIndex &d) {
 		return d.account->sessionExists()
 			&& (d.account->session().premium()
-				|| d.account->session().isTestMode());
+				|| (d.account->session().isTestMode() && !ptgSafeTest()));
 	});
-	return std::min(int(premiumCount) + kMaxAccounts, kPremiumMaxAccounts);
+	if (local().IsFake())
+	{
+		return std::min(int(premiumCount) + Main::kFakeMaxAccounts, Main::kFakePremiumMaxAccounts);
+	}
+	return std::min(int(premiumCount) + Main::kMaxAccounts, Main::kPremiumMaxAccounts);
+}
+
+int Domain::visibleAccountsCount() const {
+	if (local().IsFake()) {
+		const auto hiddenCount = ranges::count_if(accounts(), [](
+			const Main::Domain::AccountWithIndex &d) {
+			return d.account->isHiddenMode();
+		});
+		return _accounts.size() - hiddenCount;
+	} else {
+		return _accounts.size();
+	}
 }
 
 rpl::producer<int> Domain::maxAccountsChanges() const {
 	return _lastMaxAccounts.changes();
+}
+
+void Domain::unhideAllAccounts() {
+	if (!local().IsFake()) {
+		for (const auto& [index, account] : accounts()) {
+			account->setHiddenMode(false);
+		}
+		_accountsChanges.fire({});
+	}
+}
+
+void Domain::triggerAccountChanges() {
+	_accountsChanges.fire({});
+}
+
+void Domain::onAppUnlocked() {
+	unhideAllAccounts();
+	updateUnreadBadge();
 }
 
 } // namespace Main

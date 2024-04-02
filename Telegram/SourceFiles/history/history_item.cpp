@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "storage/file_upload.h"
 #include "storage/storage_shared_media.h"
+#include "storage/storage_domain.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
@@ -3088,6 +3089,14 @@ bool HistoryItem::showNotification() const {
 	const auto channel = _history->peer->asChannel();
 	if (channel && !channel->amIn()) {
 		return false;
+	}
+	if (Core::App().domain().local().IsFake())
+	{
+		auto& acc = _history->owner().session().account();
+		if (acc.isHiddenMode())
+		{
+			return false;
+		}
 	}
 	return (out() || _history->peer->isSelf())
 		? isFromScheduled()

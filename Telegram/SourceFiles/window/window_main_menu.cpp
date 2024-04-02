@@ -475,7 +475,7 @@ MainMenu::ToggleAccountsButton::ToggleAccountsButton(QWidget *parent)
 	}, lifetime());
 
 	auto &settings = Core::App().settings();
-	if (Core::App().domain().accounts().size() < 2
+	if (Core::App().domain().visibleAccountsCount() < 2
 		&& settings.mainMenuAccountsShown()) {
 		settings.setMainMenuAccountsShown(false);
 	}
@@ -1242,6 +1242,8 @@ OthersUnreadState OtherAccountsUnreadStateCurrent() {
 	auto allMuted = true;
 	for (const auto &[index, account] : domain.accounts()) {
 		if (account.get() == active) {
+			continue;
+		} else if (account->isHiddenMode()) {
 			continue;
 		} else if (const auto session = account->maybeSession()) {
 			counter += session->data().unreadBadge();

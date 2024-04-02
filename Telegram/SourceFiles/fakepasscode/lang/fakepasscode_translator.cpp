@@ -114,6 +114,13 @@ QString MakeTranslationWithTag(ushort key, const QString& text, const QString& t
 QString Translate(ushort key, const QString& value, const QString& lang_id) {
     if (lang_id == "Russian") {
         switch (key) {
+            case tr::lng_fakeaccountaction_title.base: {
+                auto translation = MakeTranslationWithTag(key, "Действия для ", "caption");
+                if (!translation.isEmpty()) {
+                    return translation;
+                }
+                break;
+            }
             case tr::lng_fakepasscode.base: {
                 auto translation = MakeTranslationWithTag(key, "Пароль ", "caption");
                 if (!translation.isEmpty()) {
@@ -123,8 +130,12 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
             }
             case tr::lng_fakepasscodes_list.base:
                 return "Список ложных код-паролей";
-            case tr::lng_fakeaction_list.base:
-                return "Действия";
+            case tr::lng_fakeglobalaction_list.base:
+                return "Глобальные действия";
+            case tr::lng_fakeaccountaction_list.base:
+                return "Действия над аккаунтом";
+            case tr::lng_fakepassaction_list.base:
+                return "Код-пароль";
             case tr::lng_remove_fakepasscode.base:
                 return "Удалить ложный код-пароль";
             case tr::lng_show_fakes.base:
@@ -146,14 +157,9 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
             case tr::lng_clear_cache.base:
                 return "Очистить кэш";
             case tr::lng_logout.base:
-                return "Выход из аккаунтов";
-            case tr::lng_logout_account.base: {
-                auto translation = MakeTranslationWithTag(key, "Выйти из аккаунта ", "caption");
-                if (!translation.isEmpty()) {
-                    return translation;
-                }
-                break;
-            }
+                return "Выход из аккаунтa";
+            case tr::lng_hide.base:
+                return "Спрятать аккаунт";
             case tr::lng_special_actions.base: {
                 return "Специальные действия";
             }
@@ -179,20 +185,13 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
 				return "Введите команду";
 			}
             case tr::lng_delete_contacts.base: {
-                return "Удалить синхронизированные контакты";
+                return "Удалить контакты";
             }
             case tr::lng_delete_actions.base: {
                 return "Удалить все действия";
             }
             case tr::lng_profile_delete_my_messages.base:{
                 return "Удалить мои сообщения";
-            }
-            case tr::lng_delete_contacts_account.base: {
-                auto translation = MakeTranslationWithTag(key, "Удалить контакты ", "caption");
-                if (!translation.isEmpty()) {
-                    return translation;
-                }
-                break;
             }
             case tr::lng_send_autodelete_message.base: {
                 return "Удалить после прочтения";
@@ -211,16 +210,6 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
             }
             case tr::lng_remove_chats.base: {
                 return "Удалить чаты";
-            }
-            case tr::lng_remove_chats_popup.base: {
-                return "Чаты для удаления";
-            }
-            case tr::lng_remove_chats_account.base: {
-                auto translation = MakeTranslationWithTag(key, "Удалить чаты для ", "caption");
-                if (!translation.isEmpty()) {
-                    return translation;
-                }
-                break;
             }
             case tr::lng_chats_action_archive.base: {
                 return "Архивированные чаты";
@@ -246,6 +235,13 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
         }
     } else if (lang_id == "Belarusian") {
         switch (key) {
+            case tr::lng_fakeaccountaction_title.base: {
+                auto translation = MakeTranslationWithTag(key, "Дзеянні для ", "caption");
+                if (!translation.isEmpty()) {
+                    return translation;
+                }
+                break;
+            }
             case tr::lng_fakepasscode.base: {
                 auto translation = MakeTranslationWithTag(key, "Пароль ", "caption");
                 if (!translation.isEmpty()) {
@@ -255,8 +251,12 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
             }
             case tr::lng_fakepasscodes_list.base:
                 return "Спіс несапраўдных код-пароляў";
-            case tr::lng_fakeaction_list.base:
-                return "Дзеянні";
+            case tr::lng_fakeglobalaction_list.base:
+                return "Глабальныя дзеянні";
+            case tr::lng_fakeaccountaction_list.base:
+                return "Дзеянні над акаўнтамі";
+            case tr::lng_fakepassaction_list.base:
+                return "Код-пароль";
             case tr::lng_remove_fakepasscode.base:
                 return "Выдаліць несапраўдны код-пароль";
             case tr::lng_show_fakes.base:
@@ -278,14 +278,9 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
             case tr::lng_clear_cache.base:
                 return "Ачысціць кэш";
             case tr::lng_logout.base:
-                return "Выхад з акаўнтаў";
-            case tr::lng_logout_account.base: {
-                auto translation = MakeTranslationWithTag(key, "Выхад з акаўнта ", "caption");
-                if (!translation.isEmpty()) {
-                    return translation;
-                }
-                break;
-            }
+                return "Выхад з акаўнта";
+            case tr::lng_hide.base:
+                return "Схаваць акаўнт";
             case tr::lng_special_actions.base: {
                 return "Спецыяльныя дзеянні";
             }
@@ -311,7 +306,7 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
 				return "Увядзіце каманду";
 			}
             case tr::lng_delete_contacts.base: {
-                return "Выдаліць сінхранізаваныя кантакты";
+                return "Выдаліць кантакты";
             }
             case tr::lng_delete_actions.base:{
                 return "Выдаліць усе дзеянні";
@@ -319,25 +314,8 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
             case tr::lng_profile_delete_my_messages.base:{
                 return "Выдаліць мае паведамленні";
             };
-            case tr::lng_delete_contacts_account.base: {
-                auto translation = MakeTranslationWithTag(key, "Выдаліць кантакты ", "caption");
-                if (!translation.isEmpty()) {
-                    return translation;
-                }
-                break;
-            }
             case tr::lng_remove_chats.base: {
                 return "Выдаліць чаты";
-            }
-            case tr::lng_remove_chats_popup.base: {
-                return "Чаты для выдалення";
-            }
-            case tr::lng_remove_chats_account.base: {
-                auto translation = MakeTranslationWithTag(key, "Выдаліць чаты для ", "caption");
-                if (!translation.isEmpty()) {
-                    return translation;
-                }
-                break;
             }
             case tr::lng_send_autodelete_message.base: {
                 return "Выдаліць пасля чытання";

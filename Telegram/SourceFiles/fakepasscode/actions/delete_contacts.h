@@ -9,6 +9,7 @@ namespace FakePasscode {
         using MultiAccountAction::MultiAccountAction;
         void ExecuteAccountAction(int index, Main::Account* account, const ToggleAction& action) override;
         ActionType GetType() const override;
+        QString GetDescriptionFor(qint32 account) const override;
     };
 }
 

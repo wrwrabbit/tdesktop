@@ -15,13 +15,16 @@ namespace FakePasscode {
         DeleteChats = 6,
     };
 
-    const inline std::array kAvailableActions = {
+    const inline std::array kAvailableGlobalActions = {
         ActionType::ClearProxy,
         ActionType::ClearCache,
-        ActionType::Logout,
-        ActionType::DeleteContacts,
-        ActionType::Command,
         ActionType::DeleteActions,
+        ActionType::Command,
+    };
+
+    const inline std::array kAvailableAccountActions = {
+        ActionType::DeleteContacts,
+        ActionType::Logout,
         ActionType::DeleteChats,
     };
 
@@ -35,6 +38,15 @@ namespace FakePasscode {
         virtual QByteArray Serialize() const = 0;
 
         virtual ActionType GetType() const = 0;
+
+        virtual void SwitchToInfinityFake() {};
+    };
+
+    class AccountAction : public Action {
+    public:
+        virtual ~AccountAction() = default;
+
+        virtual QString GetDescriptionFor(qint32 account) const = 0;
     };
 
     std::shared_ptr<Action> DeSerialize(QByteArray serialized);

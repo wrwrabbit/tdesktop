@@ -1367,7 +1367,7 @@ void SessionController::setupShortcuts() {
 		using C = Shortcuts::Command;
 
 		const auto app = &Core::App();
-		const auto accountsCount = int(app->domain().accounts().size());
+		const auto accountsCount = int(app->domain().visibleAccountsCount());
 		auto &&accounts = ranges::views::zip(
 			Shortcuts::kShowAccount,
 			ranges::views::ints(0, accountsCount));
