@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/delete_messages_box.h"
 #include "window/window_controller.h"
 #include "window/window_filters_menu.h"
+#include "info/channel_statistics/earn/info_earn_inner_widget.h"
 #include "info/info_memento.h"
 #include "info/info_controller.h"
 #include "inline_bots/bot_attach_web_view.h"
@@ -25,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_scheduled_section.h"
 #include "media/player/media_player_instance.h"
 #include "media/view/media_view_open_common.h"
+#include "data/stickers/data_custom_emoji.h"
 #include "data/data_document_resolver.h"
 #include "data/data_download_manager.h"
 #include "data/data_session.h"
@@ -48,6 +50,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/shortcuts.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
+#include "core/ui_integration.h"
 #include "base/unixtime.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/text/text_utilities.h"
@@ -60,7 +63,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "calls/calls_instance.h" // Core::App().calls().inCall().
 #include "ui/boxes/calendar_box.h"
+#include "ui/boxes/collectible_info_box.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/dynamic_thumbnails.h"
 #include "mainwidget.h"
 #include "main/main_app_config.h"
 #include "main/main_domain.h"
@@ -81,6 +86,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_premium.h"
 #include "settings/settings_privacy_security.h"
 #include "styles/style_window.h"
+#include "styles/style_boxes.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_layers.h" // st::boxLabel
 
@@ -151,6 +157,47 @@ private:
 		}
 	}
 	return false;
+}
+
+[[nodiscard]] Ui::CollectibleDetails PrepareCollectibleDetails(
+		not_null<Main::Session*> session) {
+	const auto makeContext = [=] {
+		return Core::MarkedTextContext{
+			.session = session,
+			.customEmojiRepaint = [] {},
+		};
+	};
+	return {
+		.tonEmoji = Ui::Text::SingleCustomEmoji(
+			session->data().customEmojiManager().registerInternalEmoji(
+				Info::ChannelEarn::IconCurrency(
+					st::collectibleInfo,
+					st::collectibleInfo.textFg->c),
+				st::collectibleInfoTonMargins,
+				true)),
+		.tonEmojiContext = makeContext,
+	};
+}
+
+[[nodiscard]] Ui::CollectibleInfo Parse(
+		const QString &entity,
+		not_null<PeerData*> owner,
+		const MTPfragment_CollectibleInfo &info) {
+	const auto &data = info.data();
+	return {
+		.entity = entity,
+		.copyText = (entity.startsWith('+')
+			? QString()
+			: owner->session().createInternalLinkFull(entity)),
+		.ownerUserpic = Ui::MakeUserpicThumbnail(owner, true),
+		.ownerName = owner->name(),
+		.cryptoAmount = data.vcrypto_amount().v,
+		.amount = data.vamount().v,
+		.cryptoCurrency = qs(data.vcrypto_currency()),
+		.currency = qs(data.vcurrency()),
+		.url = qs(data.vurl()),
+		.date = data.vpurchase_date().v,
+	};
 }
 
 MainWindowShow::MainWindowShow(not_null<SessionController*> controller)
@@ -683,6 +730,36 @@ void SessionNavigation::resolveBoostState(not_null<ChannelData*> channel) {
 	}).fail([=](const MTP::Error &error) {
 		_boostStateResolving = nullptr;
 		showToast(u"Error: "_q + error.type());
+	}).send();
+}
+
+void SessionNavigation::resolveCollectible(
+		PeerId ownerId,
+		const QString &entity,
+		Fn<void(QString)> fail) {
+	if (_collectibleEntity == entity) {
+		return;
+	} else {
+		_api.request(base::take(_collectibleRequestId)).cancel();
+	}
+	_collectibleEntity = entity;
+	_collectibleRequestId = _api.request(MTPfragment_GetCollectibleInfo(
+		((Ui::DetectCollectibleType(entity) == Ui::CollectibleType::Phone)
+			? MTP_inputCollectiblePhone(MTP_string(entity))
+			: MTP_inputCollectibleUsername(MTP_string(entity)))
+	)).done([=](const MTPfragment_CollectibleInfo &result) {
+		const auto entity = base::take(_collectibleEntity);
+		_collectibleRequestId = 0;
+		uiShow()->show(Box(
+			Ui::CollectibleInfoBox,
+			Parse(entity, _session->data().peer(ownerId), result),
+			PrepareCollectibleDetails(_session)));
+	}).fail([=](const MTP::Error &error) {
+		_collectibleEntity = QString();
+		_collectibleRequestId = 0;
+		if (fail) {
+			fail(error.type());
+		}
 	}).send();
 }
 
