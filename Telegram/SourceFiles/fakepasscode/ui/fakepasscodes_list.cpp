@@ -158,9 +158,8 @@ void FakePasscodeContent::setupContent() {
                 st::boxRowPadding.right(),
                 st::defaultVerticalListSkip * 2)
         );
-        std::move(
-            texts->events()
-        ) | rpl::start_with_next([=](const QString& text) {
+        texts->events()
+        | rpl::start_with_next([=](const QString& text) {
             name->resizeToWidth(button->width());
         }, content->lifetime());
         texts->fire(AccountUIActions(record.index));
