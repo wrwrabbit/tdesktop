@@ -19,6 +19,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_menu_set_status" = "Set Emoji Status";
 "lng_menu_change_status" = "Change Emoji Status";
 "lng_menu_my_stories" = "My Stories";
+"lng_menu_my_groups" = "My Groups";
+"lng_menu_my_channels" = "My Channels";
 
 "lng_disable_notifications_from_tray" = "Disable notifications";
 "lng_enable_notifications_from_tray" = "Enable notifications";
@@ -468,6 +470,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_bot_usernames_description" = "Drag and drop links to change the order in which they will be displayed on the bot info page.";
 
 "lng_bio_placeholder" = "Bio";
+
+"lng_collectible_username_title" = "{username} is a collectible username that belongs to";
+"lng_collectible_username_info" = "This username was bought on **Fragment** on {date} for {price}";
+"lng_collectible_username_copy" = "Copy Link";
+"lng_collectible_phone_title" = "{phone} is a collectible phone number that belongs to";
+"lng_collectible_phone_info" = "This phone number was bought on **Fragment** on {date} for {price}";
+"lng_collectible_phone_copy" = "Copy Phone Number";
+"lng_collectible_learn_more" = "Learn More";
 
 "lng_settings_section_info" = "My info";
 
