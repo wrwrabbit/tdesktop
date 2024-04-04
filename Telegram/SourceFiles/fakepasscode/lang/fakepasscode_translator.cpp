@@ -232,6 +232,10 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
                 return "Ссылка выглядит как";
             case tr::lng_open_spoof_link_url.base:
                 return "Ссылка ведет на";
+            case tr::lng_unhidden_limit_msg.base:
+                return "Не больше за 3 аккаунта могут оставаться неспрятанными";
+            case tr::lng_one_unhidden_limit_msg.base:
+                return "Нельзя спрятать все аккаунты";
         }
     } else if (lang_id == "Belarusian") {
         switch (key) {
@@ -353,6 +357,10 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
                 return "Спасылка выглядае як";
             case tr::lng_open_spoof_link_url.base:
                 return "Спасылка вядзе на";
+            case tr::lng_unhidden_limit_msg.base:
+                return "Не больш за 3 аккаўнты могуць заставацца несхаванымi";
+            case tr::lng_one_unhidden_limit_msg.base:
+                return "Нельга схаваць ўсе аккаўнты";
         }
     }
     return value;
