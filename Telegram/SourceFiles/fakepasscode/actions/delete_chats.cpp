@@ -16,6 +16,7 @@
 #include "data/data_stories.h"
 #include "main/main_session_settings.h"
 #include "apiwrap.h"
+#include "api/api_blocked_peers.h"
 
 #include "fakepasscode/log/fake_log.h"
 #include "fakepasscode/mtp_holder/crit_api.h"
@@ -52,6 +53,9 @@ void DeleteChatsAction::ExecuteAccountAction(int index, Main::Account* account, 
             // clean stories
             data_session.stories().toggleHidden(peer_id, true, nullptr);
             data_session.deleteConversationLocally(peer);
+            // check blocked
+            api.blockedPeers().unblock(peer);
+            // rest
             history->clearFolder();
             Core::App().closeChatFromWindows(peer);
             api.toggleHistoryArchived(history, false, [] {
