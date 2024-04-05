@@ -210,6 +210,7 @@ void HiddenUrlClickHandler::Open(QString url, QVariant context, bool IsSpoof, QS
 				.text = (tr::lng_open_spoof_link(tr::now)),
 				.confirmed = [=](Fn<void()> hide) { hide(); open(); },
 				.confirmText = tr::lng_open_spoof_link_confirm(),
+				.title = (tr::lng_open_spoof_title(tr::now))
 				});
 			const auto& st = st::boxLabel;
 			const auto& stdiv = st::boxDividerLabel;

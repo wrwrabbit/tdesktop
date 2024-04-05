@@ -224,6 +224,8 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
                 return "Продолжить";
             case tr::lng_cancel.base:
                 return "Отменить";
+            case tr::lng_open_spoof_title.base:
+                return "⚠️ Поддельная ссылка?";
             case tr::lng_open_spoof_link.base:
                 return "Вы уверены, что хотите перейти по ссылке, которая выглядит как ссылка на другой сайт или аккаунт?";
             case tr::lng_open_spoof_link_confirm.base:
@@ -232,10 +234,12 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
                 return "Ссылка выглядит как";
             case tr::lng_open_spoof_link_url.base:
                 return "Ссылка ведет на";
+            case tr::lng_cant_change_value_title.base:
+                return "Невозможно изменить значение";
             case tr::lng_unhidden_limit_msg.base:
-                return "Не больше за 3 аккаунта могут оставаться неспрятанными";
+                return "Вы не можете оставить не скрытыми больше чем 3 аккаунта. Если хотите убрать скрытие с этого аккаунта, скройте или настройте на выход другой аккаунт";
             case tr::lng_one_unhidden_limit_msg.base:
-                return "Нельзя спрятать все аккаунты";
+                return "Нельзя спрятать все аккаунты!";
         }
     } else if (lang_id == "Belarusian") {
         switch (key) {
@@ -301,7 +305,7 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
                 return "Падцвердзіце перазапіс існуючай канфігурацыі";
             }
             case tr::lng_version_mistmatch_desc.base: {
-                return "Вы запусцілі папярэднюю версію Тэлеграм. Калі вы працягнеце, то ўсе існуючыя налады і аккаўнты будуць выдалены.\nУВАГА: Вам спатрэбіцца аўтарызавацца нанова. Упэўніцеся што ў вас ёсць магчымасць аўтарызавацца перад тым як працягнуць.\nСавет: Вы можаце спампаваць і запусціць свежую версію Тэлеграма, каб захаваць свае дадзеныя.\nВы хочаце працягнуць і выдаліць усе існуючыя налады?";
+                return "Вы запусцілі папярэднюю версію Тэлеграм. Калі вы працягнеце, то ўсе існуючыя налады і акаўнты будуць выдалены.\nУВАГА: Вам спатрэбіцца аўтарызавацца нанова. Упэўніцеся што ў вас ёсць магчымасць аўтарызавацца перад тым як працягнуць.\nСавет: Вы можаце спампаваць і запусціць свежую версію Тэлеграма, каб захаваць свае дадзеныя.\nВы хочаце працягнуць і выдаліць усе існуючыя налады?";
             }
             case tr::lng_command.base: {
 				return "Запуск каманды (небяспечна!)";
@@ -349,18 +353,22 @@ QString Translate(ushort key, const QString& value, const QString& lang_id) {
                 return "Прадоўжыць";
             case tr::lng_cancel.base:
                 return "Адмяніць";
+            case tr::lng_open_spoof_title.base:
+                return "⚠️ Падробленая спасылка";
             case tr::lng_open_spoof_link.base:
-                return "Вы ўпэўнены што хаціце перайсці па спасылцы, якая спрабуе выглядаць як спасылка на іншы рэсурс ці аккаўнт?";
+                return "Вы ўпэўнены што хаціце перайсці па спасылцы, якая спрабуе выглядаць як спасылка на іншы рэсурс ці акаўнт?";
             case tr::lng_open_spoof_link_confirm.base:
                 return "Гэта бяспечна";
             case tr::lng_open_spoof_link_label.base:
                 return "Спасылка выглядае як";
             case tr::lng_open_spoof_link_url.base:
                 return "Спасылка вядзе на";
+            case tr::lng_cant_change_value_title.base:
+                return "Немагчыма змяніць наладу";
             case tr::lng_unhidden_limit_msg.base:
-                return "Не больш за 3 аккаўнты могуць заставацца несхаванымi";
+                return "Вы не можаце пакінуць не схаванымі больш чым 3 акаўнта. Калі жадаеце прыбраць хаванне з гэтага акаўнта, схавайце ці наладзьце выхад з іншага акаўнта";
             case tr::lng_one_unhidden_limit_msg.base:
-                return "Нельга схаваць ўсе аккаўнты";
+                return "Нельга схаваць усе акаўнты!";
         }
     }
     return value;
