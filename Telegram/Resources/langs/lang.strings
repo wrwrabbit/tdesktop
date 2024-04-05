@@ -2985,7 +2985,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_url_auth_login_option" = "Log in to {domain} as {user}";
 "lng_url_auth_allow_messages" = "Allow {bot} to send me messages";
 
-"lng_open_spoof_link" = "Do you want to open link, that tries to mimic different link?";
+"lng_open_spoof_title" = "⚠️ URL Spoofing";
+"lng_open_spoof_link" = "Do you want to open link that is masked to look like different link?";
 "lng_open_spoof_link_confirm" = "It is Safe";
 "lng_open_spoof_link_label" = "Link is shown as";
 "lng_open_spoof_link_url" = "Actual link is";
@@ -5189,7 +5190,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_chats_action_archive" = "Archived chats";
 "lng_chats_action_main_chats" = "Main chats";
 "lng_macos_cache_folder_permission_desc" = "To clear cache properly, please confirm access to Downloads folder if needed";
-"lng_unhidden_limit_msg" = "No more than 3 accounts can be unhidden.";
-"lng_one_unhidden_limit_msg" = "At least one account should be unhidden.";
+"lng_cant_change_value_title" = "Can't change value";
+"lng_unhidden_limit_msg" = "You can't leave more than 3 accounts unhidden. If you want unhide this account then you need to hide or set for logout different account";
+"lng_one_unhidden_limit_msg" = "At least one account should be unhidden";
 
 // Keys finished
