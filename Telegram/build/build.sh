@@ -336,6 +336,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
     echo "Signing the application.."
     if [ "$PTG_TESTBUILD" == "1" ]; then
       # no certification - we ok for test
+      echo "Skip certification"
     elif [ "$BuildTarget" == "mac" ]; then
       # Use PTG Certificate from GitHub Secrets
       if [ ! -f "certificate.p12" ]; then
