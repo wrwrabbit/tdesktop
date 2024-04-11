@@ -28,8 +28,8 @@ def update_source(fn):
         newdata = re.sub("-----BEGIN.*?---END RSA PUBLIC KEY-----", keydata.replace("\\", "\\\\"), data, flags = re.S + re.M)
         if newdata != data:
             print("Write new %s" % (fn))
-            # with open(fn, "w") as f:
-            #     f.write(newdata)
+            with open(fn, "w") as f:
+                f.write(newdata)
 
 update_source(SRC_PACKER)
 update_source(SRC_CONFIG)
