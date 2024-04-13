@@ -422,6 +422,8 @@ void start() {
 	}
 
 	readLangPack();
+	// after lang_id is loaded
+	Lang::GetInstance().loadPTGPack();
 }
 
 void writeSettings() {

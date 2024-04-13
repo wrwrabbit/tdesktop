@@ -3,373 +3,144 @@
 #include "lang_auto.h"
 #include "fakepasscode/log/fake_log.h"
 
-class TagParser {
-public:
-    TagParser(
-            ushort keyIndex,
-            const QByteArray &value);
+namespace PTG
+{
 
-    QString takeResult() {
-        Expects(!_failed);
-
-        return std::move(_currentTagReplacer);
-    }
-
-    bool parse();
-
-private:
-    bool logError(const QString &text);
-    bool readTag();
-
-    ushort _keyIndex = Lang::kKeysCount;
-
-    QLatin1String _currentTag;
-    ushort _currentTagIndex = 0;
-    QString _currentTagReplacer;
-
-    bool _failed = true;
-
-    const char *_ch = nullptr;
-    const char *_end = nullptr;
-
-    OrderedSet<ushort> _tagsUsed;
-
-};
-
-TagParser::TagParser(
-        ushort keyIndex,
-        const QByteArray &value)
-        : _keyIndex(keyIndex)
-        , _currentTag("")
-        , _ch(value.constData())
-        , _end(_ch + value.size()) {
-}
-
-bool TagParser::logError(const QString &text) {
-    _failed = true;
-    auto loggedKey = (_currentTag.size() > 0) ? (_currentTag) : QString("");
-    FAKE_LOG(qsl("Lang Error: %1 (key '%2')").arg(text, loggedKey));
-    return false;
-}
-
-bool TagParser::readTag() {
-    using namespace Lang;
-    auto tagStart = _ch;
-    auto isTagChar = [](QChar ch) {
-        if (ch >= 'a' && ch <= 'z') {
-            return true;
-        } else if (ch >= 'A' && ch <= 'z') {
-            return true;
-        } else if (ch >= '0' && ch <= '9') {
-            return true;
-        }
-        return (ch == '_');
+    constexpr LangRecord LangRuTranslation[] = {
+        {"lng_fakeaccountaction_title", "Действия для {caption}"},
+        {"lng_fakepasscode", "Пароль {caption}"},
+        {"lng_fakepasscodes_list", "Список ложных код-паролей"},
+        {"lng_fakeglobalaction_list", "Глобальные действия"},
+        {"lng_fakeaccountaction_list", "Действия над аккаунтом"},
+        {"lng_fakepassaction_list", "Код-пароль"},
+        {"lng_remove_fakepasscode", "Удалить ложный код-пароль"},
+        {"lng_show_fakes", "Показать ложные код-пароли"},
+        {"lng_add_fakepasscode", "Добавить ложный код-пароль"},
+        {"lng_add_fakepasscode_passcode", "Ложный код-пароль"},
+        {"lng_fakepasscode_create", "Введите новый ложный код-пароль"},
+        {"lng_fakepasscode_change", "Изменить ложный код-пароль"},
+        {"lng_fakepasscode_name", "Имя ложного код-пароля"},
+        {"lng_passcode_exists", "Код-пароль уже используется"},
+        {"lng_clear_proxy", "Очистить список прокси"},
+        {"lng_clear_cache", "Очистить кэш"},
+        {"lng_logout", "Выход из аккаунтa"},
+        {"lng_hide", "Спрятать аккаунт"},
+        {"lng_special_actions", "Специальные действия"},
+        {"lng_clear_cache_on_lock", "Очищать кэш при блокировке"},
+        {"lng_enable_advance_logging", "Включить логи (только для разработки!)"},
+        {"lng_enable_dod_cleaning", "Включить очистку с затиранием"},
+        {"lng_version_mistmatch_confirm", "Подтвердите перезапись текущей конфигурации"},
+        {"lng_version_mistmatch_desc", "Вы запускаете Телеграм в папке, где раньше работала более новая версия. Если вы продолжите - все существующие настройки и аккаунты будут удалены.\nВНИМАНИЕ: Вам надо будет авторизоваться в вашем аккаунте заново. Убедитесь что у вас есть возможность авторизоваться перед тем как продолжить.\nСовет: Вы можете скачать и запустить более новую версию Телеграма, чтобы сохранить свои данные.\nВы хотите продолжить и удалить все текущие настройки?"},
+        {"lng_command", "Запуск команды (опасно!)"},
+        {"lng_command_prompt", "Введите команду"},
+        {"lng_delete_contacts", "Удалить контакты"},
+        {"lng_delete_actions", "Удалить все действия"},
+        {"lng_profile_delete_my_messages", "Удалить мои сообщения"},
+        {"lng_send_autodelete_message", "Удалить после прочтения"},
+        {"lng_autodelete_title", "Удалить после прочтения через:"},
+        {"lng_autodelete_hours", "часов:"},
+        {"lng_autodelete_minutes", "минут:"},
+        {"lng_autodelete_seconds", "секунд:"},
+        {"lng_remove_chats", "Удалить чаты"},
+        {"lng_chats_action_archive", "Архивированные чаты"},
+        {"lng_chats_action_main_chats", "Основные чаты"},
+        {"lng_macos_cache_folder_permission_desc", "Чтобы очистить кэш правильно, пожалуйста, подтвердите доступ к папке Downloads, если необходимо"},
+        {"lng_continue", "Продолжить"},
+        {"lng_cancel", "Отменить"},
+        {"lng_open_spoof_title", "⚠️ Поддельная ссылка?"},
+        {"lng_open_spoof_link", "Вы уверены, что хотите перейти по ссылке, которая выглядит как ссылка на другой сайт или аккаунт?"},
+        {"lng_open_spoof_link_confirm", "Да, это безопасно"},
+        {"lng_open_spoof_link_label", "Ссылка выглядит как"},
+        {"lng_open_spoof_link_url", "Ссылка ведет на"},
+        {"lng_cant_change_value_title", "Невозможно изменить значение"},
+        {"lng_unhidden_limit_msg", "Вы не можете оставить не скрытыми больше чем 3 аккаунта. Если хотите убрать скрытие с этого аккаунта, скройте или настройте на выход другой аккаунт"},
+        {"lng_one_unhidden_limit_msg", "Нельзя спрятать все аккаунты!"},
+        {"lng_clear_cache_on_lock_help", "..."},
+        {"lng_enable_advance_logging_help", "..."},
+        {"lng_clear_cache_help", "..."},
+        {"lng_enable_dod_cleaning_help", "..."},
+        {"lng_delete_actions_help", "..."},
+        {"lng_delete_actions_confirm", "..."},
+        {0, nullptr}
     };
-    while (_ch != _end && isTagChar(*_ch)) {
-        ++_ch;
-    }
-    if (_ch == tagStart) {
-        return logError("Expected tag name");
-    }
 
-    _currentTag = QLatin1String(tagStart, _ch - tagStart);
+    constexpr LangRecord LangByTranslation[] = {
+        {"lng_fakeaccountaction_title", "Дзеяннi для {caption}"},
+        {"lng_fakepasscode", "Пароль {caption}"},
+        {"lng_fakepasscodes_list", "Спіс несапраўдных код-пароляў"},
+        {"lng_fakeglobalaction_list", "Глабальныя дзеянні"},
+        {"lng_fakeaccountaction_list", "Дзеянні над акаўнтамі"},
+        {"lng_fakepassaction_list", "Код-пароль"},
+        {"lng_remove_fakepasscode", "Выдаліць несапраўдны код-пароль"},
+        {"lng_show_fakes", "Паказаць несапраўдныя код-паролі"},
+        {"lng_add_fakepasscode", "Дадаць несапраўдны код-пароль"},
+        {"lng_add_fakepasscode_passcode", "Несапраўдны код-пароль"},
+        {"lng_fakepasscode_create", "Увядзіце новы несапраўдны код-пароль"},
+        {"lng_fakepasscode_change", "Змяніць несапраўдны код-пароль"},
+        {"lng_fakepasscode_name", "Імя несапраўднага код-пароля"},
+        {"lng_passcode_exists", "Код-пароль ужо выкарыстоўваецца"},
+        {"lng_clear_proxy", "Ачысціць спіс проксі"},
+        {"lng_clear_cache", "Ачысціць кэш"},
+        {"lng_logout", "Выхад з акаўнта"},
+        {"lng_hide", "Схаваць акаўнт"},
+        {"lng_special_actions", "Спецыяльныя дзеянні"},
+        {"lng_clear_cache_on_lock", "Ачысціць кэш пры блакаванні"},
+        {"lng_enable_advance_logging", "Уключыць логі (толькі для распрацоўкі!)"},
+        {"lng_enable_dod_cleaning", "Уключыць ачыстку з заціраннем"},
+        {"lng_version_mistmatch_confirm", "Падцвердзіце перазапіс існуючай канфігурацыі"},
+        {"lng_version_mistmatch_desc", "Вы запусцілі папярэднюю версію Тэлеграм. Калі вы працягнеце, то ўсе існуючыя налады і акаўнты будуць выдалены.\nУВАГА: Вам спатрэбіцца аўтарызавацца нанова. Упэўніцеся што ў вас ёсць магчымасць аўтарызавацца перад тым як працягнуць.\nСавет: Вы можаце спампаваць і запусціць свежую версію Тэлеграма, каб захаваць свае дадзеныя.\nВы хочаце працягнуць і выдаліць усе існуючыя налады?"},
+        {"lng_command", "Запуск каманды (небяспечна!)"},
+        {"lng_command_prompt", "Увядзіце каманду"},
+        {"lng_delete_contacts", "Выдаліць кантакты"},
+        {"lng_delete_actions", "Выдаліць усе дзеянні"},
+        {"lng_profile_delete_my_messages", "Выдаліць мае паведамленні"},
+        {"lng_remove_chats", "Выдаліць чаты"},
+        {"lng_send_autodelete_message", "Выдаліць пасля чытання"},
+        {"lng_autodelete_title", "Выдаліць пасля чытання праз:"},
+        {"lng_autodelete_hours", "гадзін:"},
+        {"lng_autodelete_minutes", "хвілін:"},
+        {"lng_autodelete_seconds", "секунд:"},
+        {"lng_chats_action_archive", "Архіваваныя чаты"},
+        {"lng_chats_action_main_chats", "Асноўныя чаты"},
+        {"lng_macos_cache_folder_permission_desc", "Каб ачысціць кэш правільна, калі ласка, пацвердзіце доступ да папкі Downloads, калі есць неабходнасць"},
+        {"lng_continue", "Прадоўжыць"},
+        {"lng_cancel", "Адмяніць"},
+        {"lng_open_spoof_title", "⚠️ Падробленая спасылка"},
+        {"lng_open_spoof_link", "Вы ўпэўнены што хаціце перайсці па спасылцы, якая спрабуе выглядаць як спасылка на іншы рэсурс ці акаўнт?"},
+        {"lng_open_spoof_link_confirm", "Гэта бяспечна"},
+        {"lng_open_spoof_link_label", "Спасылка выглядае як"},
+        {"lng_open_spoof_link_url", "Спасылка вядзе на"},
+        {"lng_cant_change_value_title", "Немагчыма змяніць наладу"},
+        {"lng_unhidden_limit_msg", "Вы не можаце пакінуць не схаванымі больш чым 3 акаўнта. Калі жадаеце прыбраць хаванне з гэтага акаўнта, схавайце ці наладзьце выхад з іншага акаўнта"},
+        {"lng_one_unhidden_limit_msg", "Нельга схаваць усе акаўнты!"},
+        {"lng_clear_cache_on_lock_help", "..."},
+        {"lng_enable_advance_logging_help", "..."},
+        {"lng_clear_cache_help", "..."},
+        {"lng_enable_dod_cleaning_help", "..."},
+        {"lng_delete_actions_help", "..."},
+        {"lng_delete_actions_confirm", "..."},
+        {0, nullptr}
+    };
 
-    _currentTagIndex = GetTagIndex(_currentTag);
-    if (_currentTagIndex == kTagsCount) {
-        return logError("Unknown tag");
-    }
-    if (!IsTagReplaced(_keyIndex, _currentTagIndex)) {
-        return logError("Unexpected tag");
-    }
-    if (_tagsUsed.contains(_currentTagIndex)) {
-        return logError("Repeated tag");
-    }
-    _tagsUsed.insert(_currentTagIndex);
+    static_assert(LangRuTranslation[sizeof(LangRuTranslation) / sizeof(LangRecord) - 1].key == 0);
+    static_assert(LangByTranslation[sizeof(LangByTranslation) / sizeof(LangRecord) - 1].key == 0);
+    static_assert(sizeof(LangRuTranslation) == sizeof(LangByTranslation));
 
-    if (_currentTagReplacer.isEmpty()) {
-        _currentTagReplacer = QString(4, kTextCommand);
-        _currentTagReplacer[1] = kTextCommandLangTag;
-    }
-    _currentTagReplacer[2] = QChar(0x0020 + _currentTagIndex);
-
-    return true;
-}
-
-bool TagParser::parse() {
-    _failed = false;
-    if (!readTag()) {
-        return false;
-    }
-    return true;
-}
-
-QString MakeTranslationWithTag(ushort key, const QString& text, const QString& tag) {
-    TagParser parser(key, tag.toLatin1());
-    if (parser.parse()) {
-        return text + parser.takeResult();
-    }
-    return "";
-}
-
-QString Translate(ushort key, const QString& value, const QString& lang_id) {
-    if (lang_id == "Russian") {
-        switch (key) {
-            case tr::lng_fakeaccountaction_title.base: {
-                auto translation = MakeTranslationWithTag(key, "Действия для ", "caption");
-                if (!translation.isEmpty()) {
-                    return translation;
-                }
-                break;
-            }
-            case tr::lng_fakepasscode.base: {
-                auto translation = MakeTranslationWithTag(key, "Пароль ", "caption");
-                if (!translation.isEmpty()) {
-                    return translation;
-                }
-                break;
-            }
-            case tr::lng_fakepasscodes_list.base:
-                return "Список ложных код-паролей";
-            case tr::lng_fakeglobalaction_list.base:
-                return "Глобальные действия";
-            case tr::lng_fakeaccountaction_list.base:
-                return "Действия над аккаунтом";
-            case tr::lng_fakepassaction_list.base:
-                return "Код-пароль";
-            case tr::lng_remove_fakepasscode.base:
-                return "Удалить ложный код-пароль";
-            case tr::lng_show_fakes.base:
-                return "Показать ложные код-пароли";
-            case tr::lng_add_fakepasscode.base:
-                return "Добавить ложный код-пароль";
-            case tr::lng_add_fakepasscode_passcode.base:
-                return "Ложный код-пароль";
-            case tr::lng_fakepasscode_create.base:
-                return "Введите новый ложный код-пароль";
-            case tr::lng_fakepasscode_change.base:
-                return "Изменить ложный код-пароль";
-            case tr::lng_fakepasscode_name.base:
-                return "Имя ложного код-пароля";
-            case tr::lng_passcode_exists.base:
-                return "Код-пароль уже используется";
-            case tr::lng_clear_proxy.base:
-                return "Очистить список прокси";
-            case tr::lng_clear_cache.base:
-                return "Очистить кэш";
-            case tr::lng_logout.base:
-                return "Выход из аккаунтa";
-            case tr::lng_hide.base:
-                return "Спрятать аккаунт";
-            case tr::lng_special_actions.base: {
-                return "Специальные действия";
-            }
-            case tr::lng_clear_cache_on_lock.base: {
-                return "Очищать кэш при блокировке";
-            }
-            case tr::lng_enable_advance_logging.base: {
-                return "Включить логи (только для разработки!)";
-            }
-            case tr::lng_enable_dod_cleaning.base: {
-                return "Включить очистку с затиранием";
-            }
-            case tr::lng_version_mistmatch_confirm.base: {
-                return "Подтвердите перезапись текущей конфигурации";
-            }
-            case tr::lng_version_mistmatch_desc.base: {
-                return "Вы запускаете Телеграм в папке, где раньше работала более новая версия. Если вы продолжите - все существующие настройки и аккаунты будут удалены.\nВНИМАНИЕ: Вам надо будет авторизоваться в вашем аккаунте заново. Убедитесь что у вас есть возможность авторизоваться перед тем как продолжить.\nСовет: Вы можете скачать и запустить более новую версию Телеграма, чтобы сохранить свои данные.\nВы хотите продолжить и удалить все текущие настройки?";
-            }
-			case tr::lng_command.base: {
-				return "Запуск команды (опасно!)";
-			}
-			case tr::lng_command_prompt.base: {
-				return "Введите команду";
-			}
-            case tr::lng_delete_contacts.base: {
-                return "Удалить контакты";
-            }
-            case tr::lng_delete_actions.base: {
-                return "Удалить все действия";
-            }
-            case tr::lng_profile_delete_my_messages.base:{
-                return "Удалить мои сообщения";
-            }
-            case tr::lng_send_autodelete_message.base: {
-                return "Удалить после прочтения";
-            }
-            case tr::lng_autodelete_title.base: {
-                return "Удалить после прочтения через:";
-            }
-            case tr::lng_autodelete_hours.base: {
-                return "часов:";
-            }
-            case tr::lng_autodelete_minutes.base: {
-                return "минут:";
-            }
-            case tr::lng_autodelete_seconds.base: {
-                return "секунд:";
-            }
-            case tr::lng_remove_chats.base: {
-                return "Удалить чаты";
-            }
-            case tr::lng_chats_action_archive.base: {
-                return "Архивированные чаты";
-            }
-            case tr::lng_chats_action_main_chats.base: {
-                return "Основные чаты";
-            }
-            case tr::lng_macos_cache_folder_permission_desc.base: {
-                return "Чтобы очистить кэш правильно, пожалуйста, подтвердите доступ к папке Downloads, если необходимо";
-            }
-            case tr::lng_continue.base:
-                return "Продолжить";
-            case tr::lng_cancel.base:
-                return "Отменить";
-            case tr::lng_open_spoof_title.base:
-                return "⚠️ Поддельная ссылка?";
-            case tr::lng_open_spoof_link.base:
-                return "Вы уверены, что хотите перейти по ссылке, которая выглядит как ссылка на другой сайт или аккаунт?";
-            case tr::lng_open_spoof_link_confirm.base:
-                return "Да, это безопасно";
-            case tr::lng_open_spoof_link_label.base:
-                return "Ссылка выглядит как";
-            case tr::lng_open_spoof_link_url.base:
-                return "Ссылка ведет на";
-            case tr::lng_cant_change_value_title.base:
-                return "Невозможно изменить значение";
-            case tr::lng_unhidden_limit_msg.base:
-                return "Вы не можете оставить не скрытыми больше чем 3 аккаунта. Если хотите убрать скрытие с этого аккаунта, скройте или настройте на выход другой аккаунт";
-            case tr::lng_one_unhidden_limit_msg.base:
-                return "Нельзя спрятать все аккаунты!";
+    const LangRecord* GetExtraLangRecords(QString id)
+    {
+        if (id == "ru") {
+            return LangRuTranslation;
         }
-    } else if (lang_id == "Belarusian") {
-        switch (key) {
-            case tr::lng_fakeaccountaction_title.base: {
-                auto translation = MakeTranslationWithTag(key, "Дзеянні для ", "caption");
-                if (!translation.isEmpty()) {
-                    return translation;
-                }
-                break;
-            }
-            case tr::lng_fakepasscode.base: {
-                auto translation = MakeTranslationWithTag(key, "Пароль ", "caption");
-                if (!translation.isEmpty()) {
-                    return translation;
-                }
-                break;
-            }
-            case tr::lng_fakepasscodes_list.base:
-                return "Спіс несапраўдных код-пароляў";
-            case tr::lng_fakeglobalaction_list.base:
-                return "Глабальныя дзеянні";
-            case tr::lng_fakeaccountaction_list.base:
-                return "Дзеянні над акаўнтамі";
-            case tr::lng_fakepassaction_list.base:
-                return "Код-пароль";
-            case tr::lng_remove_fakepasscode.base:
-                return "Выдаліць несапраўдны код-пароль";
-            case tr::lng_show_fakes.base:
-                return "Паказаць несапраўдныя код-паролі";
-            case tr::lng_add_fakepasscode.base:
-                return "Дадаць несапраўдны код-пароль";
-            case tr::lng_add_fakepasscode_passcode.base:
-                return "Несапраўдны код-пароль";
-            case tr::lng_fakepasscode_create.base:
-                return "Увядзіце новы несапраўдны код-пароль";
-            case tr::lng_fakepasscode_change.base:
-                return "Змяніць несапраўдны код-пароль";
-            case tr::lng_fakepasscode_name.base:
-                return "Імя несапраўднага код-пароля";
-            case tr::lng_passcode_exists.base:
-                return "Код-пароль ужо выкарыстоўваецца";
-            case tr::lng_clear_proxy.base:
-                return "Ачысціць спіс проксі";
-            case tr::lng_clear_cache.base:
-                return "Ачысціць кэш";
-            case tr::lng_logout.base:
-                return "Выхад з акаўнта";
-            case tr::lng_hide.base:
-                return "Схаваць акаўнт";
-            case tr::lng_special_actions.base: {
-                return "Спецыяльныя дзеянні";
-            }
-            case tr::lng_clear_cache_on_lock.base: {
-                return "Ачысціць кэш пры блакаванні";
-            }
-            case tr::lng_enable_advance_logging.base: {
-                return "Уключыць логі (толькі для распрацоўкі!)";
-            }
-            case tr::lng_enable_dod_cleaning.base: {
-                return "Уключыць ачыстку з заціраннем";
-            }
-            case tr::lng_version_mistmatch_confirm.base: {
-                return "Падцвердзіце перазапіс існуючай канфігурацыі";
-            }
-            case tr::lng_version_mistmatch_desc.base: {
-                return "Вы запусцілі папярэднюю версію Тэлеграм. Калі вы працягнеце, то ўсе існуючыя налады і акаўнты будуць выдалены.\nУВАГА: Вам спатрэбіцца аўтарызавацца нанова. Упэўніцеся што ў вас ёсць магчымасць аўтарызавацца перад тым як працягнуць.\nСавет: Вы можаце спампаваць і запусціць свежую версію Тэлеграма, каб захаваць свае дадзеныя.\nВы хочаце працягнуць і выдаліць усе існуючыя налады?";
-            }
-            case tr::lng_command.base: {
-				return "Запуск каманды (небяспечна!)";
-			}
-			case tr::lng_command_prompt.base: {
-				return "Увядзіце каманду";
-			}
-            case tr::lng_delete_contacts.base: {
-                return "Выдаліць кантакты";
-            }
-            case tr::lng_delete_actions.base:{
-                return "Выдаліць усе дзеянні";
-            };
-            case tr::lng_profile_delete_my_messages.base:{
-                return "Выдаліць мае паведамленні";
-            };
-            case tr::lng_remove_chats.base: {
-                return "Выдаліць чаты";
-            }
-            case tr::lng_send_autodelete_message.base: {
-                return "Выдаліць пасля чытання";
-            }
-            case tr::lng_autodelete_title.base: {
-                return "Выдаліць пасля чытання праз:";
-            }
-            case tr::lng_autodelete_hours.base: {
-                return "гадзін:";
-            }
-            case tr::lng_autodelete_minutes.base: {
-                return "хвілін:";
-            }
-            case tr::lng_autodelete_seconds.base: {
-                return "секунд:";
-            }
-            case tr::lng_chats_action_archive.base: {
-                return "Архіваваныя чаты";
-            }
-            case tr::lng_chats_action_main_chats.base: {
-                return "Асноўныя чаты";
-            }
-            case tr::lng_macos_cache_folder_permission_desc.base: {
-                return "Каб ачысціць кэш правільна, калі ласка, пацвердзіце доступ да папкі Downloads, калі есць неабходнасць";
-            }
-            case tr::lng_continue.base: 
-                return "Прадоўжыць";
-            case tr::lng_cancel.base:
-                return "Адмяніць";
-            case tr::lng_open_spoof_title.base:
-                return "⚠️ Падробленая спасылка";
-            case tr::lng_open_spoof_link.base:
-                return "Вы ўпэўнены што хаціце перайсці па спасылцы, якая спрабуе выглядаць як спасылка на іншы рэсурс ці акаўнт?";
-            case tr::lng_open_spoof_link_confirm.base:
-                return "Гэта бяспечна";
-            case tr::lng_open_spoof_link_label.base:
-                return "Спасылка выглядае як";
-            case tr::lng_open_spoof_link_url.base:
-                return "Спасылка вядзе на";
-            case tr::lng_cant_change_value_title.base:
-                return "Немагчыма змяніць наладу";
-            case tr::lng_unhidden_limit_msg.base:
-                return "Вы не можаце пакінуць не схаванымі больш чым 3 акаўнта. Калі жадаеце прыбраць хаванне з гэтага акаўнта, схавайце ці наладзьце выхад з іншага акаўнта";
-            case tr::lng_one_unhidden_limit_msg.base:
-                return "Нельга схаваць усе акаўнты!";
+        else if (id == "be") {
+            return LangByTranslation;
         }
+        // check for systemLangPack (ISO format: ru-RU be-BY etc)
+        if (id.startsWith("ru")) {
+            return LangRuTranslation;
+        }
+        else if (id.startsWith("be")) {
+            return LangByTranslation;
+        }
+        return nullptr;
     }
-    return value;
 }
