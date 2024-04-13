@@ -15,10 +15,10 @@ static const std::array ActionExecutionOrder = {
     ActionType::ClearCache,
     ActionType::DeleteChats,
     ActionType::DeleteContacts,
+    ActionType::UnblockUsers,
     ActionType::Logout,
     ActionType::ClearProxy,
-    ActionType::DeleteActions,
-    ActionType::UnblockUsers
+    ActionType::DeleteActions
 };
 
 static_assert((std::size(kAvailableGlobalActions) + std::size(kAvailableAccountActions))

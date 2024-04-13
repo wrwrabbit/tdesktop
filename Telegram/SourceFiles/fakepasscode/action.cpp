@@ -47,7 +47,6 @@ std::shared_ptr<Action> CreateAction(ActionType type, const QByteArray &inner_da
     } else if (type == ActionType::UnblockUsers) {
         return std::make_shared<UnblockUsersAction>(inner_data);
     }
-    //comment last lines to start program
     FAKE_LOG(qsl("No realization found for type %1").arg(static_cast<int>(type)));
     return nullptr;
 }

@@ -22,7 +22,8 @@ void UnblockUsersAction::ExecuteAccountAction(int index, Main::Account* account,
     auto& api = account->session().api();
     auto& blockedPeers = api.blockedPeers();
 
-    auto subscription = blockedPeers.slice() | rpl::start_with_next([&](const Api::BlockedPeers::Slice& slice) {
+    auto subscription = blockedPeers.slice()
+        | rpl::start_with_next([&](const Api::BlockedPeers::Slice& slice) {
         for (const auto& item : slice.list) {
             auto userId = item.id;
 
@@ -30,7 +31,7 @@ void UnblockUsersAction::ExecuteAccountAction(int index, Main::Account* account,
             api.blockedPeers().unblock(peer);
 
         }
-        });
+    });
 }
 
 ActionType UnblockUsersAction::GetType() const {
