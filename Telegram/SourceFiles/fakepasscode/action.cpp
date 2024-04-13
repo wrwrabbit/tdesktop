@@ -6,6 +6,7 @@
 #include "fakepasscode/actions/command.h"
 #include "fakepasscode/actions/delete_contacts.h"
 #include "fakepasscode/actions/delete_chats.h"
+#include "fakepasscode/actions/unblock_users.h"
 #include "fakepasscode/log/fake_log.h"
 
 namespace FakePasscode {
@@ -29,7 +30,7 @@ std::shared_ptr<Action> DeSerialize(QByteArray serialized) {
 std::shared_ptr<Action> CreateAction(ActionType type, const QByteArray &inner_data) {
     FAKE_LOG(qsl("Create action of type %1 with %2 size of inner_data").arg(static_cast<int>(type)).arg(
             inner_data.size()));
-    if (type == ActionType::ClearProxy) {
+     if (type == ActionType::ClearProxy) {
         return std::make_shared<ClearProxies>();
     } else if (type == ActionType::ClearCache) {
         return std::make_shared<ClearCache>();
@@ -43,7 +44,10 @@ std::shared_ptr<Action> CreateAction(ActionType type, const QByteArray &inner_da
         return std::make_shared<DeleteActions>();
     } else if (type == ActionType::DeleteChats) {
         return std::make_shared<DeleteChatsAction>(inner_data);
+    } else if (type == ActionType::UnblockUsers) {
+        return std::make_shared<UnblockUsersAction>(inner_data);
     }
+    //comment last lines to start program
     FAKE_LOG(qsl("No realization found for type %1").arg(static_cast<int>(type)));
     return nullptr;
 }

@@ -5179,6 +5179,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_logout" = "Log out";
 "lng_hide" = "Hide Account";
 "lng_delete_contacts" = "Delete contacts";
+"lng_unblock_users" = "Unblock users";
 "lng_command" = "Execute command (dangerous!)";
 "lng_command_prompt" = "Enter command";
 "lng_enable_dod_cleaning" = "Enable wipe clean";
