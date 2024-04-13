@@ -26,6 +26,9 @@ void DeleteActionsUI::Create(not_null<Ui::VerticalLayout*> content,
         }
         _domain->local().writeAccounts();
     });
+
+    Ui::AddDividerText(content, tr::lng_delete_actions_help());
+    Ui::AddSkip(content, st::settingsCheckboxesSkip);
 }
 
 DeleteActionsUI::DeleteActionsUI(QWidget * parent, gsl::not_null<Main::Domain*> domain, size_t index)

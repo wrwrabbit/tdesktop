@@ -88,6 +88,7 @@ def main():
         ["../../cmake", "init_target.cmake", "init_target.patch"],
     ]
     print("Apply patches")
+    errors = 0
     for fn_path, fn, patch_fn in patches:
         cmd = "cd %s && git checkout ./%s" % (os.path.join(_THIS_DIR, fn_path), fn)
         print("Call %s" % (cmd))
@@ -95,8 +96,11 @@ def main():
         cmd = "cd %s && git apply %s" % (os.path.join(_THIS_DIR, fn_path),
                                          os.path.join(_THIS_DIR, "patches/%s" % (patch_fn)))
         print("Call %s" % (cmd))
-        os.system(cmd)
+        errors += os.system(cmd)
     print("Patches done")
+    if errors:
+        print("Patches completed with errors")
+        sys.exit(errors)
 
     if platform.system() == "Windows":
         cmd = "build.bat"

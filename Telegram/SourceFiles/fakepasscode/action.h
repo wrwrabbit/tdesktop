@@ -30,6 +30,11 @@ namespace FakePasscode {
         ActionType::DeleteChats,
     };
 
+    enum class ActionEvent {
+        SwitchToInfinityFake,
+        ClearActions
+    };
+
     class Action {
     public:
         virtual ~Action() = default;
@@ -41,7 +46,7 @@ namespace FakePasscode {
 
         virtual ActionType GetType() const = 0;
 
-        virtual void SwitchToInfinityFake() {};
+        virtual void OnEvent(ActionEvent) {};
     };
 
     class AccountAction : public Action {

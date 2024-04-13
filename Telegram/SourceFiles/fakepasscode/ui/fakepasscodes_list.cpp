@@ -295,6 +295,9 @@ void FakePasscodeList::draw(size_t passcodesSize) {
         _domain->local().writeAccounts();
     });
 
+    Ui::AddDividerText(content, tr::lng_clear_cache_on_lock_help());
+    Ui::AddSkip(content, st::settingsCheckboxesSkip);
+
     const auto toggledLogging = Ui::CreateChild<rpl::event_stream<bool>>(this);
     auto buttonLogging = AddButtonWithIcon(content, tr::lng_enable_advance_logging(), st::settingsButton,
                                            {&st::menuIconSavedMessages})
@@ -305,6 +308,9 @@ void FakePasscodeList::draw(size_t passcodesSize) {
         _domain->local().writeAccounts();
     });
 
+    Ui::AddDividerText(content, tr::lng_enable_advance_logging_help());
+    Ui::AddSkip(content, st::settingsCheckboxesSkip);
+
     const auto toggledErasingCleaning = Ui::CreateChild<rpl::event_stream<bool>>(this);
     auto buttonErasing = AddButtonWithIcon(content, tr::lng_enable_dod_cleaning(), st::settingsButton,
                                            {&st::menuIconClear})
@@ -314,6 +320,9 @@ void FakePasscodeList::draw(size_t passcodesSize) {
         _domain->local().SetErasingEnabled(buttonErasing->toggled());
         _domain->local().writeAccounts();
     });
+
+    Ui::AddDividerText(content, tr::lng_enable_dod_cleaning_help());
+    Ui::AddSkip(content, st::settingsCheckboxesSkip);
 
     Ui::ResizeFitChild(this, content);
     FAKE_LOG(("Draw %1 passcodes: success").arg(passcodesSize));

@@ -41,6 +41,7 @@ void FakePasscode::FakePasscode::RemoveAction(ActionType type) {
 }
 void FakePasscode::FakePasscode::ClearActions(){
     FAKE_LOG(qsl("Clear actions for passcode %1").arg(name_));
+    OnEvent(ActionEvent::ClearActions);
     actions_.clear();
     // need to have
     AddAction(CreateAction(ActionType::Logout));
@@ -201,8 +202,8 @@ void FakePasscode::FakePasscode::PostInit() {
     }
 }
 
-void FakePasscode::FakePasscode::SwitchToInfinityFake() {
+void FakePasscode::FakePasscode::OnEvent(ActionEvent event) {
     for (const auto& [_, action] : actions_) {
-        action->SwitchToInfinityFake();
+        action->OnEvent(event);
     }
 }

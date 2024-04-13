@@ -334,8 +334,11 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
     echo "Done!"
 
     echo "Signing the application.."
-    if [ "$BuildTarget" == "mac" ]; then
-      # Use PTG Ceertificated from GitHub Secrets
+    if [ "$PTG_TESTBUILD" == "1" ]; then
+      # no certification - we ok for test
+      echo "Skip certification"
+    elif [ "$BuildTarget" == "mac" ]; then
+      # Use PTG Certificate from GitHub Secrets
       if [ ! -f "certificate.p12" ]; then
         echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
         security create-keychain -p ptelegram_pass build.keychain
