@@ -73,7 +73,7 @@ void LogoutAction::Prepare() {
 }
 
 void LogoutAction::OnEvent(ActionEvent) {
-	// Both ClearActions and InfinityFake -> hidden accounts should logout
+    // Both ClearActions and InfinityFake -> hidden accounts should logout
     bool do_extra = false;
     for (auto& item : index_actions_) {
         if (item.second.Kind == HideAccountKind::HideAccount) {
