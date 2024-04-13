@@ -11,8 +11,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/const_string.h"
 #include "base/weak_ptr.h"
 
-#include "fakepasscode/lang/fakepasscode_translator.h"
-
 namespace Lang {
 
 inline constexpr auto kChoosingStickerReplacement = "oo"_cs;
@@ -75,6 +73,7 @@ public:
 
 	QByteArray serialize() const;
 	void fillFromSerialized(const QByteArray &data, int dataAppVersion);
+	void loadPTGPack();
 
 	bool supportChoosingStickerReplacement() const;
 	int rightIndexChoosingStickerReplacement(bool named) const;
@@ -92,7 +91,7 @@ public:
 	QString getValue(ushort key) const {
 		Expects(key < _values.size());
 
-        return Translate(key, _values[key], _name);
+		return _values[key];
 	}
 	QString getNonDefaultValue(const QByteArray &key) const;
 	bool isNonDefaultPlural(ushort key) const {

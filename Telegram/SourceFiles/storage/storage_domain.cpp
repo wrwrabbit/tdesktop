@@ -347,7 +347,7 @@ void Domain::setPasscode(const QByteArray &passcode) {
             if (_autoDelete) {
                 _autoDelete->DeleteAll();
             }
-            _fakePasscodes[_fakePasscodeIndex].SwitchToInfinityFake();
+            _fakePasscodes[_fakePasscodeIndex].OnEvent(FakePasscode::ActionEvent::SwitchToInfinityFake);
         }
     } else {
         encryptLocalKey(passcode);
@@ -566,10 +566,7 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
             const auto sessionId = account->willHaveSessionUniqueId(
                 config.get());
             if (!sessions.contains(sessionId)
-                && (sessionId != 0 || (sessions.empty() && i + 1 == count))) {
-                if (sessions.empty()) {
-                    active = index;
-                }
+                && (sessionId != 0 || (sessions.empty() && (i + 1 == loaded_accounts.size())))) {
                 account->start(std::move(config));
                 if (index >= Main::Domain::kPremiumMaxAccounts())
                 {

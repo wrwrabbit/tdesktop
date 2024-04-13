@@ -33,6 +33,9 @@ void ClearCacheUI::Create(not_null<Ui::VerticalLayout*> content,
         }
         _domain->local().writeAccounts();
     });
+
+    Ui::AddDividerText(content, tr::lng_clear_cache_help());
+    Ui::AddSkip(content, st::settingsCheckboxesSkip);
 }
 
 ClearCacheUI::ClearCacheUI(QWidget * parent, gsl::not_null<Main::Domain*> domain, size_t index)
