@@ -13,6 +13,7 @@ namespace FakePasscode {
         DeleteContacts = 4,
         DeleteActions = 5,
         DeleteChats = 6,
+        UnblockUsers = 7,
     };
 
     const inline std::array kAvailableGlobalActions = {
@@ -25,6 +26,7 @@ namespace FakePasscode {
     const inline std::array kAvailableAccountActions = {
         ActionType::DeleteContacts,
         ActionType::Logout,
+        ActionType::UnblockUsers,
         ActionType::DeleteChats,
     };
 

@@ -12,6 +12,7 @@
 #include "delete_chats_ui.h"
 #include "base/object_ptr.h"
 #include "delete_actions_ui.h"
+#include "unblock_users_ui.h"
 #include "fakepasscode/log/fake_log.h"
 
 object_ptr<ActionUI> GetUIByAction(FakePasscode::ActionType type,
@@ -44,6 +45,8 @@ object_ptr<ActionUI> GetAccountUIByAction(FakePasscode::ActionType type,
         return object_ptr<DeleteContactsUi>(parent, domain, passcodeIndex, accountIndex);
     case FakePasscode::ActionType::DeleteChats:
         return object_ptr<DeleteChatsUI>(parent, domain, passcodeIndex, accountIndex);
+    case FakePasscode::ActionType::UnblockUsers:
+        return object_ptr<UnblockUsersUI>(parent, domain, passcodeIndex, accountIndex);
     }
     FAKE_LOG(qsl("No implementation found for type %1").arg(static_cast<int>(type)));
     return nullptr;
