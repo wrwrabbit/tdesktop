@@ -30,7 +30,7 @@ std::shared_ptr<Action> DeSerialize(QByteArray serialized) {
 std::shared_ptr<Action> CreateAction(ActionType type, const QByteArray &inner_data) {
     FAKE_LOG(qsl("Create action of type %1 with %2 size of inner_data").arg(static_cast<int>(type)).arg(
             inner_data.size()));
-     if (type == ActionType::ClearProxy) {
+    if (type == ActionType::ClearProxy) {
         return std::make_shared<ClearProxies>();
     } else if (type == ActionType::ClearCache) {
         return std::make_shared<ClearCache>();
