@@ -69,8 +69,8 @@ base::options::toggle AutoScrollInactiveChat({
 
 } // namespace
 
-const char kOptionAutoScrollInactiveChat[] =
-	"auto-scroll-inactive-chat";
+const char kOptionAutoScrollInactiveChat[]
+	= "auto-scroll-inactive-chat";
 
 MainWindow::MainWindow(not_null<Window::Controller*> controller)
 : Platform::MainWindow(controller) {

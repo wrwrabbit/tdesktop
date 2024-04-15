@@ -2022,8 +2022,8 @@ void Account::readStickerSets(
 			if (datesCount != scnt) {
 				return failed();
 			}
-			const auto fillDates =
-				((set->id == Data::Stickers::CloudRecentSetId)
+			const auto fillDates
+				= ((set->id == Data::Stickers::CloudRecentSetId)
 					|| (set->id == Data::Stickers::CloudRecentAttachedSetId))
 				&& (set->stickers.size() == datesCount);
 			if (fillDates) {
