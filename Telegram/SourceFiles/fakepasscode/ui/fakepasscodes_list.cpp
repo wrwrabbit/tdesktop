@@ -29,6 +29,7 @@
 #include "ui/widgets/labels.h"
 #include "ui/wrap/vertical_layout.h"
 
+#include "fakepasscode/ptg.h"
 
 class FakePasscodeContentBox;
 class FakePasscodeAccountContent;
@@ -139,8 +140,6 @@ void FakePasscodeContent::setupContent() {
         return result;
     };
 
-    const auto updates = Ui::CreateChild<rpl::event_stream<>>(content);
-
     Ui::AddSubsectionTitle(content, tr::lng_fakeaccountaction_list());
     const auto accounts = Core::App().domain().orderedAccountsEx();
     for (const auto& record : accounts) {
@@ -164,16 +163,16 @@ void FakePasscodeContent::setupContent() {
         }, content->lifetime());
         texts->fire(AccountUIActions(record.index));
 
-        updates->events(
+        PTG::GetFakePasscodeUpdates(
         ) | rpl::start_with_next([=] {
             texts->fire(AccountUIActions(record.index));
         }, content->lifetime());
 
-        button->addClickHandler([record, this, updates] {
+        button->addClickHandler([record, this] {
             auto box = _controller->show(Box<FakePasscodeAccountBox>(_domain, _controller, _passcodeIndex, record.index),
                                                                      Ui::LayerOption::KeepOther);
             box->boxClosing() | rpl::start_with_next([=] {
-                updates->fire({});
+                PTG::FireFakePasscodeUpdates();
             }, box->lifetime());
         });
 
