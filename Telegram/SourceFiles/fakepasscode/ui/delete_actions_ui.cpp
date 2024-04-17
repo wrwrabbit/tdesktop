@@ -45,9 +45,7 @@ void DeleteActionsUI::Create(not_null<Ui::VerticalLayout*> content,
                             hide();
 						},
 						.confirmText = tr::lng_box_yes()
-						});
-					const auto& st = st::boxLabel;
-					const auto& stdiv = st::boxDividerLabel;
+					});
     			});
     			use->show(std::move(box));
                 return;
