@@ -5172,13 +5172,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_special_actions" = "Special actions";
 "lng_clear_cache_on_lock" = "Clear cache on lock";
-"lng_clear_cache_on_lock_help" = "Clear cache on lock";
-"lng_enable_advance_logging" = "Enable logging (only debug!)";
-"lng_enable_advance_logging_help" = "Enable logging (only debug!)";
+"lng_clear_cache_on_lock_help" = "Clear media caches on lock for all accounts. Download folder is not cleared.";
+"lng_enable_advance_logging" = "Enable logging (debug only!)";
+"lng_enable_advance_logging_help" = "Enables verbose logging for developers. Use this option only if you know what you are doing.";
 
 "lng_clear_proxy" = "Clear proxies list";
 "lng_clear_cache" = "Clear cache";
-"lng_clear_cache_help" = "All Media cache and Download folder will be deleted if you activate this fake passcode.";
+"lng_clear_cache_help" = "All media cache and download folder will be deleted if you activate this fake passcode.";
 "lng_logout" = "Log out";
 "lng_hide" = "Hide Account";
 "lng_delete_contacts" = "Delete contacts";
@@ -5186,7 +5186,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_command" = "Execute command (dangerous!)";
 "lng_command_prompt" = "Enter command";
 "lng_enable_dod_cleaning" = "Enable wipe clean";
-"lng_enable_dod_cleaning_help" = "Enable wipe clean";
+"lng_enable_dod_cleaning_help" = "Use unrecoverable erase method to protect from FileUndeleter or similar tools.";
 "lng_delete_actions" = "Delete actions";
 "lng_delete_actions_help" = "All fake passcodes will be deleted. This setting is not compatible with account hiding. You can only logout from accounts if this options is enabled.";
 "lng_delete_actions_confirm" = "This setting is not compatible with account hiding. You can only logout from accounts if this options is enabled. If you click OK - all accounts that are hiding right now - will be set for logout.";
@@ -5202,5 +5202,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_cant_change_value_title" = "Can't change value";
 "lng_unhidden_limit_msg" = "You can't leave more than 3 accounts unhidden. If you want unhide this account then you need to hide or set for logout different account";
 "lng_one_unhidden_limit_msg" = "At least one account should be unhidden";
+"lng_delete_actions_hidden_conflict_err" = "Can't hide if delete actions is active";
 
 // Keys finished

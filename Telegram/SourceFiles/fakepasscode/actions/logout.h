@@ -30,6 +30,8 @@ namespace FakePasscode {
         void OnEvent(ActionEvent) override;
 
         const std::vector<qint32> GetAccounts() const;
+        bool HasHiddenAccounts() const;
+        void UpdateHiddenAccountsToLogout();
 
         QString GetDescriptionFor(qint32 account) const override;
 

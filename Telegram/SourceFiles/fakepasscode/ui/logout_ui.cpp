@@ -65,6 +65,13 @@ void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
                 _domain->local().AddAction(_index, FakePasscode::ActionType::Logout));
         }
 
+        if (value.Kind == FakePasscode::HideAccountKind::HideAccount) {
+            if (Core::App().domain().local().ContainsAction(_index, ::FakePasscode::ActionType::DeleteActions)) {
+                Ui::Toast::Show(tr::lng_delete_actions_hidden_conflict_err(tr::now));
+                value = { old_value };
+            }
+        }
+
         Expects(_action != nullptr);
         if (_action) {
             FAKE_LOG(qsl("LogoutUI: Try Set %1 to %2").arg(_accountIndex).arg(value.Kind));

@@ -214,6 +214,24 @@ QString LogoutAction::Validate(bool update) {
     return valid;
 }
 
+bool LogoutAction::HasHiddenAccounts() const {
+    for (auto pos = index_actions_.begin(); pos != index_actions_.end(); pos++) {
+        if (pos->second.Kind == HideAccountKind::HideAccount) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void LogoutAction::UpdateHiddenAccountsToLogout() {
+    for (auto pos = index_actions_.begin(); pos != index_actions_.end(); pos++) {
+        if (pos->second.Kind == HideAccountKind::HideAccount) {
+            pos->second.Kind = HideAccountKind::Logout;
+        }
+    }
+}
+
+
 // instantiate MultiAccountAction
 
 // Stream
