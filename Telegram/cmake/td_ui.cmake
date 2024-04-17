@@ -205,6 +205,7 @@ PRIVATE
     statistics/statistics_data_deserialize.h
     statistics/statistics_format_values.cpp
     statistics/statistics_format_values.h
+    statistics/statistics_types.h
     statistics/view/abstract_chart_view.cpp
     statistics/view/abstract_chart_view.h
     statistics/view/bar_chart_view.cpp
@@ -382,6 +383,8 @@ PRIVATE
     ui/widgets/discrete_sliders.h
     ui/widgets/gradient_round_button.cpp
     ui/widgets/gradient_round_button.h
+    ui/widgets/level_meter.cpp
+    ui/widgets/level_meter.h
     ui/widgets/multi_select.cpp
     ui/widgets/multi_select.h
     ui/widgets/sent_code_field.cpp

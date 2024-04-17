@@ -18,14 +18,13 @@ class Session;
 
 namespace Data {
 
-class Session;
 struct MessagesSlice;
 
 [[nodiscard]] bool IsScheduledMsgId(MsgId id);
 
 class ScheduledMessages final {
 public:
-	explicit ScheduledMessages(not_null<Session*> owner);
+	explicit ScheduledMessages(not_null<Main::Session*> session);
 	ScheduledMessages(const ScheduledMessages &other) = delete;
 	ScheduledMessages &operator=(const ScheduledMessages &other) = delete;
 	~ScheduledMessages();
@@ -55,6 +54,8 @@ public:
 	[[nodiscard]] Data::MessagesSlice list(not_null<History*> history) const;
 	[[nodiscard]] Data::MessagesSlice list(
 		not_null<const Data::ForumTopic*> topic) const;
+
+	void clear();
 
 private:
 	using OwnedItem = std::unique_ptr<HistoryItem, HistoryItem::Destroyer>;

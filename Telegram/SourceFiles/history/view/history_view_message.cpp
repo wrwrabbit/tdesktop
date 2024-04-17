@@ -27,12 +27,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/round_rect.h"
 #include "ui/text/text_utilities.h"
 #include "ui/power_saving.h"
+#include "data/components/sponsored_messages.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "data/data_channel.h"
 #include "data/data_forum_topic.h"
 #include "data/data_message_reactions.h"
-#include "data/data_sponsored_messages.h"
 #include "lang/lang_keys.h"
 #include "mainwidget.h"
 #include "main/main_session.h"
@@ -435,8 +435,9 @@ Message::Message(
 		}
 	}
 	if (data->isSponsored()) {
-		const auto &messages = data->history()->owner().sponsoredMessages();
-		const auto details = messages.lookupDetails(data->fullId());
+		const auto &session = data->history()->session();
+		const auto details = session.sponsoredMessages().lookupDetails(
+			data->fullId());
 		if (details.canReport) {
 			_rightAction = std::make_unique<RightAction>();
 			_rightAction->second = std::make_unique<SecondRightAction>();
@@ -1842,27 +1843,27 @@ void Message::clickHandlerPressedChanged(
 	Element::clickHandlerPressedChanged(handler, pressed);
 	if (!handler) {
 		return;
-	} else if (_rightAction) {
-		if (_rightAction->second && (handler == _rightAction->second->link)) {
-			const auto rightSize = rightActionSize();
-			Assert(rightSize != std::nullopt);
-			if (pressed) {
-				if (!_rightAction->second->ripple) {
-					// Create a ripple.
-					_rightAction->second->ripple =
-						std::make_unique<Ui::RippleAnimation>(
-							st::defaultRippleAnimation,
-							Ui::RippleAnimation::RoundRectMask(
-								Size(rightSize->width()),
-								rightSize->width() / 2),
-							[=] { repaint(); });
-				}
-				_rightAction->second->ripple->add(_rightAction->lastPoint);
-			} else if (_rightAction->second->ripple) {
-				_rightAction->second->ripple->lastStop();
+	} else if (_rightAction && (handler == _rightAction->link)) {
+		toggleRightActionRipple(pressed);
+	} else if (_rightAction
+		&& _rightAction->second
+		&& (handler == _rightAction->second->link)) {
+		const auto rightSize = rightActionSize();
+		Assert(rightSize != std::nullopt);
+		if (pressed) {
+			if (!_rightAction->second->ripple) {
+				// Create a ripple.
+				_rightAction->second->ripple
+					= std::make_unique<Ui::RippleAnimation>(
+						st::defaultRippleAnimation,
+						Ui::RippleAnimation::RoundRectMask(
+							Size(rightSize->width()),
+							rightSize->width() / 2),
+						[=] { repaint(); });
 			}
-		} else if (handler == _rightAction->link) {
-			toggleRightActionRipple(pressed);
+			_rightAction->second->ripple->add(_rightAction->lastPoint);
+		} else if (_rightAction->second->ripple) {
+			_rightAction->second->ripple->lastStop();
 		}
 	} else if (_comments && (handler == _comments->link)) {
 		toggleCommentsButtonRipple(pressed);

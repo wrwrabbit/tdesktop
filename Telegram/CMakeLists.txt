@@ -466,6 +466,10 @@ PRIVATE
     data/business/data_business_info.h
     data/business/data_shortcut_messages.cpp
     data/business/data_shortcut_messages.h
+    data/components/scheduled_messages.cpp
+    data/components/scheduled_messages.h
+    data/components/sponsored_messages.cpp
+    data/components/sponsored_messages.h
     data/notify/data_notify_settings.cpp
     data/notify/data_notify_settings.h
     data/notify/data_peer_notify_settings.cpp
@@ -583,14 +587,10 @@ PRIVATE
     data/data_send_action.h
     data/data_session.cpp
     data/data_session.h
-    data/data_scheduled_messages.cpp
-    data/data_scheduled_messages.h
     data/data_shared_media.cpp
     data/data_shared_media.h
     data/data_sparse_ids.cpp
     data/data_sparse_ids.h
-    data/data_sponsored_messages.cpp
-    data/data_sponsored_messages.h
     data/data_statistics.h
     data/data_stories.cpp
     data/data_stories.h
@@ -1505,8 +1505,6 @@ PRIVATE
     ui/image/image_location.h
     ui/image/image_location_factory.cpp
     ui/image/image_location_factory.h
-    ui/widgets/level_meter.cpp
-    ui/widgets/level_meter.h
     ui/countryinput.cpp
     ui/countryinput.h
     ui/dynamic_thumbnails.cpp
@@ -1522,6 +1520,8 @@ PRIVATE
     ui/search_field_controller.h
     ui/text/format_song_document_name.cpp
     ui/text/format_song_document_name.h
+    ui/widgets/label_with_custom_emoji.cpp
+    ui/widgets/label_with_custom_emoji.h
     ui/unread_badge.cpp
     ui/unread_badge.h
     window/main_window.cpp

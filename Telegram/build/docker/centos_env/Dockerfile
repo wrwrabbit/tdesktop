@@ -90,10 +90,11 @@ RUN git clone -b v21.9 --depth=1 --recursive {{ GIT }}/protocolbuffers/protobuf.
 		-Dprotobuf_BUILD_TESTS=OFF \
 		-Dprotobuf_BUILD_PROTOBUF_BINARIES=ON \
 		-Dprotobuf_BUILD_LIBPROTOC=ON \
-		-Dprotobuf_WITH_ZLIB_DEFAULT=OFF \
-		-Dprotobuf_DEBUG_POSTFIX="" \
+		-Dprotobuf_WITH_ZLIB=OFF \
 	&& cmake --build build --parallel \
-	&& rm -rf .git
+	&& DESTDIR="{{ LibrariesPath }}/protobuf-cache" cmake --install build \
+	&& cd .. \
+	&& rm -rf protobuf
 
 FROM builder AS lcms2
 RUN git clone -b lcms2.15 --depth=1 {{ GIT }}/mm2/Little-CMS.git \
@@ -262,7 +263,7 @@ COPY --link --from=lcms2 {{ LibrariesPath }}/lcms2-cache /
 COPY --link --from=brotli {{ LibrariesPath }}/brotli-cache /
 COPY --link --from=highway {{ LibrariesPath }}/highway-cache /
 
-RUN git clone -b v0.8.2 --depth=1 {{ GIT }}/libjxl/libjxl.git \
+RUN git clone -b v0.10.2 --depth=1 {{ GIT }}/libjxl/libjxl.git \
 	&& cd libjxl \
 	&& cmake -GNinja -B build . \
 		-DCMAKE_BUILD_TYPE=None \
@@ -591,6 +592,7 @@ RUN git clone -b n6.1.1 --depth=1 {{ GIT }}/FFmpeg/FFmpeg.git \
 		--enable-parser=aac \
 		--enable-parser=aac_latm \
 		--enable-parser=flac \
+		--enable-parser=gif \
 		--enable-parser=h264 \
 		--enable-parser=hevc \
 		--enable-parser=mpeg4video \
@@ -799,7 +801,7 @@ RUN cmake --build out --config Debug --parallel \
 FROM builder-base
 COPY --link --from=zlib {{ LibrariesPath }}/zlib-cache /
 COPY --link --from=xz {{ LibrariesPath }}/xz-cache /
-COPY --link --from=protobuf {{ LibrariesPath }}/protobuf protobuf
+COPY --link --from=protobuf {{ LibrariesPath }}/protobuf-cache /
 COPY --link --from=lcms2 {{ LibrariesPath }}/lcms2-cache /
 COPY --link --from=brotli {{ LibrariesPath }}/brotli-cache /
 COPY --link --from=highway {{ LibrariesPath }}/highway-cache /
