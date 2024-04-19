@@ -84,7 +84,7 @@ namespace PTG
         {"lng_passcode_exists", "Код-пароль ужо выкарыстоўваецца"},
         {"lng_clear_proxy", "Ачысціць спіс проксі"},
         {"lng_clear_cache", "Ачысціць кэш"},
-        {"lng_clear_cache_help", "Усе закэшыраваныя медыя файлы і захаваныя ў папку Загрузкі will be deleted if you activate this fake passcode."},
+        {"lng_clear_cache_help", "Усе закэшыраваныя медыя файлы і файлы спампаваныя ў папку Загрузкі будуць выдалены пры актывацыі гэтага код-пароля."},
         {"lng_logout", "Выхад з акаўнта"},
         {"lng_hide", "Схаваць акаўнт"},
         {"lng_special_actions", "Спецыяльныя дзеянні"},
