@@ -147,20 +147,18 @@ void FakePasscodeContent::setupContent() {
             content);
         const auto button = content->add(MakeAccountButton(content, record.account));
 
-        const auto name = content->add(object_ptr<Ui::FlatLabel>(
+        static style::FlatLabel stLabel(st::boxDividerLabel);
+        stLabel.textFg = st::defaultSettingsRightLabel.textFg;
+        content->add(object_ptr<Ui::FlatLabel>(
             content,
             texts->events(),
-            st::defaultSettingsRightLabel),
+            stLabel),
             style::margins(
                 st::boxRowPadding.left() + 32,
                 0,
                 st::boxRowPadding.right(),
                 st::defaultVerticalListSkip * 2)
         );
-        texts->events()
-        | rpl::start_with_next([=](const QString& text) {
-            name->resizeToWidth(button->width());
-        }, content->lifetime());
         texts->fire(AccountUIActions(record.index));
 
         PTG::GetFakePasscodeUpdates(
