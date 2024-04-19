@@ -31,7 +31,9 @@ void DeleteContactsAction::ExecuteAccountAction(int index, Main::Account* accoun
                 contacts.push_back(userData->inputUser);
             }
             // clear stories
-            data_session.stories().toggleHidden(history->peer->id, true, nullptr);
+            if (history->peer->hasActiveStories()) {
+                data_session.stories().toggleHidden(history->peer->id, true, nullptr);
+            }
         }
     }
 

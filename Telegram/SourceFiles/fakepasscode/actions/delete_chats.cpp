@@ -48,10 +48,12 @@ void DeleteChatsAction::ExecuteAccountAction(int index, Main::Account* account, 
             auto peer_id = PeerId(id);
             auto peer = data_session.peer(peer_id);
             FAKE_LOG(qsl("Remove chat %1").arg(peer->name()));
+            // clean stories
+            if (peer->hasActiveStories()) {
+                data_session.stories().toggleHidden(peer_id, true, nullptr);
+            }
             auto history = data_session.history(peer_id);
             api.deleteConversation(peer, false);
-            // clean stories
-            data_session.stories().toggleHidden(peer_id, true, nullptr);
             data_session.deleteConversationLocally(peer);
             // check blocked
             api.blockedPeers().unblock(peer);
