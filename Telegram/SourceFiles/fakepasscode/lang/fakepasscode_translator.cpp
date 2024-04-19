@@ -45,6 +45,7 @@ namespace PTG
         {"lng_profile_delete_my_messages", "Удалить мои сообщения"},
         {"lng_send_autodelete_message", "Удалить после прочтения"},
         {"lng_autodelete_title", "Удалить после прочтения через:"},
+        {"lng_autodelete_hours", "часов:"},
         {"lng_autodelete_minutes", "минут:"},
         {"lng_autodelete_seconds", "секунд:"},
         {"lng_remove_chats", "Удалить чаты"},
