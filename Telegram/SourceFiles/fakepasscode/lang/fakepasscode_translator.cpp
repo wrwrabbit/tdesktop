@@ -65,6 +65,7 @@ namespace PTG
         {"lng_delete_actions_hidden_conflict_err", "Нельзя спрятать аккаунт, потому что выбрана опция 'Удалить все действия'"},
         {0, nullptr}
     };
+    static_assert(LangRuTranslation[sizeof(LangRuTranslation) / sizeof(LangRecord) - 1].key == 0);
 
     constexpr LangRecord LangByTranslation[] = {
         {"lng_fakeaccountaction_title", "Дзеяннi для {caption}"},
@@ -83,7 +84,7 @@ namespace PTG
         {"lng_passcode_exists", "Код-пароль ужо выкарыстоўваецца"},
         {"lng_clear_proxy", "Ачысціць спіс проксі"},
         {"lng_clear_cache", "Ачысціць кэш"},
-        {"lng_clear_cache_help", "Усе закэшыраваныя медыя файлы і захаваныя ў папку Загрузкі will be deleted if you activate this fake passcode."},
+        {"lng_clear_cache_help", "Усе закэшыраваныя медыя файлы і файлы спампаваныя ў папку Загрузкі будуць выдалены пры актывацыі гэтага код-пароля."},
         {"lng_logout", "Выхад з акаўнта"},
         {"lng_hide", "Схаваць акаўнт"},
         {"lng_special_actions", "Спецыяльныя дзеянні"},
@@ -125,10 +126,71 @@ namespace PTG
         {"lng_delete_actions_hidden_conflict_err", "Нельга схаваць акаўнт, таму што выбрана опцыя 'Выдаліць усе дзеянні'"},
         {0, nullptr}
     };
-
-    static_assert(LangRuTranslation[sizeof(LangRuTranslation) / sizeof(LangRecord) - 1].key == 0);
     static_assert(LangByTranslation[sizeof(LangByTranslation) / sizeof(LangRecord) - 1].key == 0);
+
+    constexpr LangRecord LangPlTranslation[] = {
+        {"lng_fakeaccountaction_title", "Działania dla {caption}"},
+        {"lng_fakepasscode", "Hasło {caption}"},
+        {"lng_fakepasscodes_list", "Lista fałszywych kodów dostępu"},
+        {"lng_fakeglobalaction_list", "Globalne działania"},
+        {"lng_fakeaccountaction_list", "Działania na koncie"},
+        {"lng_fakepassaction_list", "Kod dostępu"},
+        {"lng_remove_fakepasscode", "Usuń fałszywy kod dostępu"},
+        {"lng_show_fakes", "Pokaż fałszywe kody dostępu"},
+        {"lng_add_fakepasscode", "Dodaj fałszywy kod dostępu"},
+        {"lng_add_fakepasscode_passcode", "Fałszywy kod dostępu"},
+        {"lng_fakepasscode_create", "Wprowadź nowy fałszywy kod dostępu"},
+        {"lng_fakepasscode_change", "Zmień fałszywy kod dostępu"},
+        {"lng_fakepasscode_name", "Nazwa fałszywego kodu dostępu"},
+        {"lng_passcode_exists", "Kod dostępu jest już używany"},
+        {"lng_clear_proxy", "Wyczyść listę proxy"},
+        {"lng_clear_cache", "Wyczyść pamięć cache"},
+        {"lng_clear_cache_help", "Podczas aktywowania fałszywego kodu dostępu wszystkie pliki multimedialne zapisane w pamięci podręcznej zostaną wyczyszczone, a pliki w folderze Pobieranie (jeśli wybrano go jako domyślne miejsce pobierania) zostaną usunięte."},
+        {"lng_logout", "Wyloguj się"},
+        {"lng_hide", "Ukryj konto"},
+        {"lng_special_actions", "Specjalne działania"},
+        {"lng_clear_cache_on_lock", "Wyczyść pamięć podręczną po zablokowaniu"},
+        {"lng_clear_cache_on_lock_help", "Po zablokowaniu programu (automatycznym lub ręcznym) wszystkie pliki multimedialne w pamięci podręcznej zostaną usunięte dla wszystkich kont. Folder Pobieranie nie zostanie wyczyszczony."},
+        {"lng_enable_advance_logging", "Włącz logi zaawansowane (debugowanie!)"},
+        {"lng_enable_advance_logging_help", "Włącza zaawansowane logi dla programistów. Włącz tę opcję tylko jeśli rozumiesz, co robisz."},
+        {"lng_enable_dod_cleaning", "Włącz czyszczenie z nadpisywaniem"},
+        {"lng_enable_dod_cleaning_help", "Do usuwania plików używane są specjalne algorytmy, które uniemożliwiają  odzyskanie usuniętych plików."},
+        {"lng_version_mistmatch_confirm", "Potwierdź nadpisanie bieżącej konfiguracji"},
+        {"lng_version_mistmatch_desc", "Uruchamiasz Telegram w folderze, w którym wcześniej działała nowsza wersja. Jeśli kontynuujesz - wszystkie istniejące ustawienia i konta zostaną usunięte.\nUWAGA: Będziesz musiał ponownie zalogować się na swoje konto. Upewnij się, że masz możliwość zalogowania się, zanim kontynuujesz.\nSugerowane: Możesz pobrać i uruchomić nowszą wersję Telegrama, aby zachować swoje dane.\nCzy chcesz kontynuować i usunąć wszystkie bieżące ustawienia?"},
+        {"lng_command", "Wykonaj polecenie (niebezpieczne!)"},
+        {"lng_command_prompt", "Wprowadź polecenie"},
+        {"lng_delete_contacts", "Usuń kontakty"},
+        {"lng_unblock_users", "Odblokuj użytkowników"},
+        {"lng_delete_actions", "Usuń wszystkie akcje"},
+        {"lng_delete_actions_help", "Wszystkie fałszywe kody dostępu zostaną usunięte. Ta opcja jest niezgodna z ukrywaniem kont. Możesz ustawić konta tylko na wyjście, jeśli ta opcja jest włączona."},
+        {"lng_delete_actions_confirm", "Ta opcja jest niezgodna z ukrywaniem kont. Możesz ustawić konta tylko na wyjście, jeśli ta opcja jest włączona. Jeśli kontynuujesz - wszystkie konta ustawione na ukrycie zostaną ustawione na wyjście. Czy chcesz kontynuować?"},
+        {"lng_profile_delete_my_messages", "Usuń moje wiadomości"},
+        {"lng_send_autodelete_message", "Usuń po przeczytaniu"},
+        {"lng_autodelete_title", "Usuń po przeczytaniu po:"},
+        {"lng_autodelete_hours", "godzinach:"},
+        {"lng_autodelete_minutes", "minutach:"},
+        {"lng_autodelete_seconds", "sekundach:"},
+        {"lng_remove_chats", "Usuń czaty"},
+        {"lng_chats_action_archive", "Czaty zarchiwizowane"},
+        {"lng_chats_action_main_chats", "Główne czaty"},
+        {"lng_macos_cache_folder_permission_desc", "Aby wyczyścić pamięć podręczną prawidłowo, potwierdź dostęp do folderu Pobieranie, jeśli to konieczne."},
+        {"lng_continue", "Kontynuuj"},
+        {"lng_cancel", "Anuluj"},
+        {"lng_open_spoof_title", "⚠️ Fałszywy link?"},
+        {"lng_open_spoof_link", "Czy na pewno chcesz przejść do linku, który wygląda jak link do innej strony internetowej lub konta?"},
+        {"lng_open_spoof_link_confirm", "Tak, to bezpieczne"},
+        {"lng_open_spoof_link_label", "Link wygląda jak"},
+        {"lng_open_spoof_link_url", "Link prowadzi do"},
+        {"lng_cant_change_value_title", "Nie można zmienić wartości"},
+        {"lng_unhidden_limit_msg", "Nie możesz pozostawić więcej niż 3 konta niewidocznych. Jeśli chcesz usunąć ukrycie z tego konta, ukryj lub ustaw na wyjście inne konto."},
+        {"lng_one_unhidden_limit_msg", "Nie można ukryć wszystkich kont!"},
+        {"lng_delete_actions_hidden_conflict_err", "Nie można ukryć konta, ponieważ wybrano opcję „Usuń wszystkie działania”"},
+        {0, nullptr}
+    };
+    static_assert(LangPlTranslation[sizeof(LangPlTranslation) / sizeof(LangRecord) - 1].key == 0);
+
     static_assert(sizeof(LangRuTranslation) == sizeof(LangByTranslation));
+    static_assert(sizeof(LangRuTranslation) == sizeof(LangPlTranslation));
 
     const LangRecord* GetExtraLangRecords(QString id)
     {
@@ -138,12 +200,18 @@ namespace PTG
         else if (id == "be") {
             return LangByTranslation;
         }
+        else if (id == "pl") {
+            return LangPlTranslation;
+        }
         // check for systemLangPack (ISO format: ru-RU be-BY etc)
         if (id.startsWith("ru")) {
             return LangRuTranslation;
         }
         else if (id.startsWith("be")) {
             return LangByTranslation;
+        }
+        else if (id.startsWith("pl")) {
+            return LangPlTranslation;
         }
         return nullptr;
     }

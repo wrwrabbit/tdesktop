@@ -257,6 +257,7 @@ void Instance::switchToId(const Language &data) {
 			_updated.fire({});
 		}
 	}
+	loadPTGPack();
 	updatePluralRules();
 }
 
