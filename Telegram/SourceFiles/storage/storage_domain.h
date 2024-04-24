@@ -101,6 +101,10 @@ public:
     bool IsErasingEnabled() const;
     void SetErasingEnabled(bool enabled);
 
+    bool IsDangerousActionsAllowed() const;
+    void SetDangerousActionsAllowed(bool enabled);
+
+
     qint32 GetFakePasscodeIndex() const;
 
 	FakePasscode::AutoDeleteService* GetAutoDelete() const;
@@ -172,6 +176,9 @@ private:
     rpl::event_stream<> _fakePasscodeChanged;
 
 	std::unique_ptr<FakePasscode::AutoDeleteService> _autoDelete;
+
+    bool _dangerousActionsAllowed = false;
+
 };
 
 } // namespace Storage

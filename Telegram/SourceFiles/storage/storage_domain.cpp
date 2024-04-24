@@ -834,6 +834,14 @@ void Domain::SetErasingEnabled(bool enabled) {
     _isErasingEnabled = enabled;
 }
 
+[[nodiscard]] bool Domain::IsDangerousActionsAllowed() const {
+    return _dangerousActionsAllowed;
+}
+
+void Domain::SetDangerousActionsAllowed(bool value) {
+    _dangerousActionsAllowed = value;
+}
+
 [[nodiscard]] QByteArray Domain::GetPasscodeSalt() const {
 	return _passcodeKeySalt;
 }
