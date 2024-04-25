@@ -79,6 +79,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 
+#include "fakepasscode/verify/verify.h"
+
 namespace Data {
 namespace {
 
@@ -575,7 +577,8 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 					? Flag()
 					: Flag::DiscardMinPhoto)
 				| (data.is_stories_hidden() ? Flag::StoriesHidden : Flag())
-				: Flag());
+				: Flag())
+			| PTG::Verify::ExtraUserFlag(result->username(), result->id);
 		result->setFlags((result->flags() & ~flagsMask) | flagsSet);
 		if (minimal) {
 			if (result->input.type() == mtpc_inputPeerEmpty) {
@@ -992,7 +995,8 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 				&& !data.is_stories_hidden_min()
 				&& data.is_stories_hidden())
 				? Flag::StoriesHidden
-				: Flag());
+				: Flag())
+			| PTG::Verify::ExtraChannelFlag(result->username(), data.vid().v);
 		channel->setFlags((channel->flags() & ~flagsMask) | flagsSet);
 		if (!minimal && storiesState) {
 			result->setStoriesState(!storiesState->maxId

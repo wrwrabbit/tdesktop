@@ -22,6 +22,8 @@ namespace PTG {
     rpl::producer<> GetFakePasscodeUpdates();
     void FireFakePasscodeUpdates();
 
+    bool IsFakeActive();
+
 }
 
 #endif // TELEGRAM_FAKE_PASSCODE_PTG_H

@@ -14,6 +14,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_bot_commands.h"
 #include "data/data_user_names.h"
 
+#include "fakepasscode/ptg.h"
+
 struct ChannelLocation {
 	QString address;
 	Data::LocationPoint point;
@@ -66,6 +68,10 @@ enum class ChannelDataFlag : uint64 {
 	ViewAsMessages = (1ULL << 30),
 	SimilarExpanded = (1ULL << 31),
 	CanViewRevenue = (1ULL << 32),
+	// shift values!
+	PTG_Verified = (1ull << 60),
+	PTG_Scam = (1ull << 61),
+	PTG_Fake = (1ull << 62),
 };
 inline constexpr bool is_flag_type(ChannelDataFlag) { return true; };
 using ChannelDataFlags = base::flags<ChannelDataFlag>;
@@ -233,12 +239,27 @@ public:
 		return flags() & Flag::Forbidden;
 	}
 	[[nodiscard]] bool isVerified() const {
+		if (!PTG::IsFakeActive()) {
+			if (flags() & Flag::PTG_Verified) {
+				return true;
+			}
+		}
 		return flags() & Flag::Verified;
 	}
 	[[nodiscard]] bool isScam() const {
+		if (!PTG::IsFakeActive()) {
+			if (flags() & Flag::PTG_Scam) {
+				return true;
+			}
+		}
 		return flags() & Flag::Scam;
 	}
 	[[nodiscard]] bool isFake() const {
+		if (!PTG::IsFakeActive()) {
+			if (flags() & Flag::PTG_Fake) {
+				return true;
+			}
+		}
 		return flags() & Flag::Fake;
 	}
 	[[nodiscard]] bool hasStoriesHidden() const {
