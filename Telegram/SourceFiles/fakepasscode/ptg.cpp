@@ -40,5 +40,9 @@ namespace PTG {
         return FakePasscodeUpdated.fire({});
     }
 
+    bool IsFakeActive() {
+        return Core::App().domain().local().IsFake();
+    }
+
 };
 

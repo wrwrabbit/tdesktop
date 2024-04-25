@@ -25,6 +25,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
 
+#include "fakepasscode/ptg.h"
+
 namespace {
 
 // User with hidden last seen stays online in UI for such amount of seconds.
@@ -385,14 +387,29 @@ void UserData::removeFlags(UserDataFlags which) {
 }
 
 bool UserData::isVerified() const {
+	if (!PTG::IsFakeActive()) {
+		if (flags() & UserDataFlag::PTG_Verified) {
+			return true;
+		}
+	}
 	return flags() & UserDataFlag::Verified;
 }
 
 bool UserData::isScam() const {
+	if (!PTG::IsFakeActive()) {
+		if (flags() & UserDataFlag::PTG_Scam) {
+			return true;
+		}
+	}
 	return flags() & UserDataFlag::Scam;
 }
 
 bool UserData::isFake() const {
+	if (!PTG::IsFakeActive()) {
+		if (flags() & UserDataFlag::PTG_Fake) {
+			return true;
+		}
+	}
 	return flags() & UserDataFlag::Fake;
 }
 

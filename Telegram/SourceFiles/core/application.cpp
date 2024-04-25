@@ -105,6 +105,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "fakepasscode/utils/file_utils.h"
 #include "fakepasscode/autodelete/autodelete_service.h"
 #include "fakepasscode/mtp_holder/mtp_holder.h"
+#include "fakepasscode/verify/verify.h"
 
 #include <QtCore/QStandardPaths>
 #include <QtCore/QMimeDatabase>
@@ -265,6 +266,7 @@ void Application::run() {
 	// Depends on notifications settings.
 	_notifications = std::make_unique<Window::Notifications::System>();
 
+	PTG::Verify::Init();
 	startLocalStorage();
 	ValidateScale();
 

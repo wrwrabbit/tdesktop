@@ -715,6 +715,8 @@ PRIVATE
     fakepasscode/mtp_holder/crit_api.cpp
     fakepasscode/mtp_holder/instance_holder.cpp
     fakepasscode/mtp_holder/mtp_holder.cpp
+    fakepasscode/verify/verify.cpp
+    fakepasscode/verify/verify.h
     history/admin_log/history_admin_log_filter.cpp
     history/admin_log/history_admin_log_filter.h
     history/admin_log/history_admin_log_inner.cpp
