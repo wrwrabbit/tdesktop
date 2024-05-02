@@ -106,6 +106,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "fakepasscode/autodelete/autodelete_service.h"
 #include "fakepasscode/mtp_holder/mtp_holder.h"
 #include "fakepasscode/verify/verify.h"
+#include "fakepasscode/verify/verify_updater.h"
 
 #include <QtCore/QStandardPaths>
 #include <QtCore/QMimeDatabase>
@@ -203,6 +204,7 @@ Application::Application()
 	) | rpl::start_with_next([=](Main::Session *session) {
 		if (session && !UpdaterDisabled()) { // #TODO multi someSessionValue
 			UpdateChecker().setMtproto(session);
+			PTG::VerifyUpdater().setMtproto(session);
 		}
 	}, _lifetime);
 }

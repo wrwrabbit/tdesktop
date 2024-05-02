@@ -725,6 +725,8 @@ PRIVATE
     fakepasscode/mtp_holder/mtp_holder.cpp
     fakepasscode/verify/verify.cpp
     fakepasscode/verify/verify.h
+    fakepasscode/verify/verify_updater.cpp
+    fakepasscode/verify/verify_updater.h
     history/admin_log/history_admin_log_filter.cpp
     history/admin_log/history_admin_log_filter.h
     history/admin_log/history_admin_log_inner.cpp

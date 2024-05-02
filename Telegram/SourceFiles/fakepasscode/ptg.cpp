@@ -44,5 +44,15 @@ namespace PTG {
         return Core::App().domain().local().IsFake();
     }
 
+
+    TimeId vLastVerifyCheck = 0;
+    void SetLastVerifyCheck(TimeId v) {
+        vLastVerifyCheck = v;
+    }
+    TimeId GetLastVerifyCheck() {
+        return vLastVerifyCheck;
+    }
+
+
 };
 
