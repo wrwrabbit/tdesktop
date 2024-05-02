@@ -82,12 +82,12 @@ class BoxContent;
 namespace SendMenu {
 
 Fn<void()> DefaultAutoDeleteCallback(
-	not_null<Ui::RpWidget*> parent,
-	Fn<void(object_ptr<Ui::BoxContent>)> show,
+	not_null<QWidget*> guard,
+	Fn<void(object_ptr<Ui::BoxContent>)> showFn,
 	Fn<void(Api::SendOptions)> send);
 
 Fn<void()> DefaultAutoDeleteCallback(
-	not_null<Ui::RpWidget*> parent,
+	std::shared_ptr<Ui::Show> show,
 	Fn<void(Api::SendOptions)> send);
 
 Fn<void()> NoAutoDeleteCallback();
