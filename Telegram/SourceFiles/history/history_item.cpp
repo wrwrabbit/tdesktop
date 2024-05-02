@@ -228,7 +228,8 @@ std::unique_ptr<Data::Media> HistoryItem::CreateMedia(
 		return media.vgeo().match([&](const MTPDgeoPoint &point) -> Result {
 			return std::make_unique<Data::MediaLocation>(
 				item,
-				Data::LocationPoint(point));
+				Data::LocationPoint(point),
+				media.vperiod().v);
 		}, [](const MTPDgeoPointEmpty &) -> Result {
 			return nullptr;
 		});
@@ -642,35 +643,22 @@ HistoryItem::HistoryItem(
 		? injectedAfter->date()
 		: 0),
 }) {
-	const auto webPageType = !from.externalLink.isEmpty()
-		? WebPageType::None
-		: from.isExactPost
-		? WebPageType::Message
-		: (from.botLinkInfo && !from.botLinkInfo->botAppName.isEmpty())
-		? WebPageType::BotApp
-		: from.botLinkInfo
-		? WebPageType::Bot
-		: from.isBroadcast
-		? WebPageType::Channel
-		: (from.peer && from.peer->isUser())
-		? WebPageType::User
-		: WebPageType::Group;
-
 	const auto webpage = history->peer->owner().webpage(
 		history->peer->owner().nextLocalMessageId().bare,
-		webPageType,
-		from.externalLink,
-		from.externalLink,
+		WebPageType::None,
+		from.link,
+		from.link,
 		from.isRecommended
 			? tr::lng_recommended_message_title(tr::now)
 			: tr::lng_sponsored_message_title(tr::now),
 		from.title,
 		textWithEntities,
-		(from.webpageOrBotPhotoId
-			? history->owner().photo(from.webpageOrBotPhotoId).get()
+		(from.photoId
+			? history->owner().photo(from.photoId).get()
 			: nullptr),
 		nullptr,
 		WebPageCollage(),
+		nullptr,
 		nullptr,
 		0,
 		QString(),
@@ -1373,8 +1361,17 @@ bool HistoryItem::markContentsRead(bool fromThisClient) {
 
 void HistoryItem::setIsPinned(bool pinned) {
 	const auto changed = (isPinned() != pinned);
+	const auto guard = gsl::finally([&] {
+		if (changed) {
+			_history->owner().notifyItemDataChange(this);
+		}
+	});
 	if (pinned) {
 		_flags |= MessageFlag::Pinned;
+		if (_flags & MessageFlag::StoryItem) {
+			return;
+		}
+
 		auto &storage = _history->session().storage();
 		storage.add(Storage::SharedMediaAddExisting(
 			_history->peer->id,
@@ -1394,13 +1391,14 @@ void HistoryItem::setIsPinned(bool pinned) {
 		}
 	} else {
 		_flags &= ~MessageFlag::Pinned;
+		if (_flags & MessageFlag::StoryItem) {
+			return;
+		}
+
 		_history->session().storage().remove(Storage::SharedMediaRemoveOne(
 			_history->peer->id,
 			Storage::SharedMediaType::Pinned,
 			id));
-	}
-	if (changed) {
-		_history->owner().notifyItemDataChange(this);
 	}
 }
 
@@ -1702,6 +1700,11 @@ void HistoryItem::setStoryFields(not_null<Data::Story*> story) {
 			/*ttlSeconds = */0);
 	}
 	setText(story->caption());
+	if (story->pinnedToTop()) {
+		_flags |= MessageFlag::Pinned;
+	} else {
+		_flags &= ~MessageFlag::Pinned;
+	}
 }
 
 void HistoryItem::applyEdition(const MTPDmessageService &message) {
@@ -3434,6 +3437,14 @@ void HistoryItem::setupForwardedComponent(const CreateConfig &config) {
 	forwarded->savedFromMsgId = config.savedFromMsgId;
 	forwarded->savedFromSender = _history->owner().peerLoaded(
 		config.savedFromSenderId);
+	if (forwarded->savedFromPeer
+		&& !forwarded->savedFromPeer->isFullLoaded()
+		&& forwarded->savedFromPeer->isChannel()) {
+		_history->session().api().requestFullPeer(forwarded->savedFromPeer);
+	} else if (config.savedFromPeer) {
+		_history->session().api().requestFullPeer(
+			_history->owner().peer(config.savedFromPeer));
+	}
 	forwarded->savedFromOutgoing = config.savedFromOutgoing;
 	if (!forwarded->savedFromSender
 		&& !config.savedFromSenderName.isEmpty()) {

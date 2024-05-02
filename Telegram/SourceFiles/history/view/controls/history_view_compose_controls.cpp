@@ -2183,8 +2183,8 @@ void ComposeControls::initSendButton() {
 		_send.get(),
 		[=] { return sendButtonMenuType(); },
 		SendMenu::DefaultSilentCallback(send),
-		SendMenu::DefaultScheduleCallback(_wrap.get(), sendMenuType(), send),
-		SendMenu::DefaultAutoDeleteCallback(_wrap.get(), send),
+		SendMenu::DefaultScheduleCallback(_show, sendMenuType(), send),
+		SendMenu::DefaultAutoDeleteCallback(_show, send),
 		SendMenu::DefaultWhenOnlineCallback(send));
 }
 
