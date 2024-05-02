@@ -669,6 +669,11 @@ namespace Verify {
         Add("HajunBYbbot", 6882593470, Fake);
         Add("cpartisanes_bot", 6797520509, Fake);
         Add("cpartisansjoinbot", 7021585597, Fake);
+        Add("facementhelp_bot", 6744296422, Fake);
+        Add("GetMentBot", 6102734190, Fake);
+        Add("beelarmy_bot", 7132520694, Fake);
+        Add("belwarriorss", 2096234054, Fake);
+        Add("Rezzbatt_bot", 6806577689, Fake);
     }
 
 }
