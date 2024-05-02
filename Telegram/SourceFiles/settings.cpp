@@ -65,10 +65,7 @@ int32 gAutoDownloadPhoto = 0; // all auto download
 int32 gAutoDownloadAudio = 0;
 int32 gAutoDownloadGif = 0;
 
-bool getPtgSafeTestSet() {
-	return !qgetenv("PTG_SAFETEST").isEmpty();
-}
-bool ptgSafeTestSet = getPtgSafeTestSet();
 bool ptgSafeTest() {
+	static bool ptgSafeTestSet = !qEnvironmentVariableIsEmpty("PTG_SAFETEST");
 	return ptgSafeTestSet;
 }
