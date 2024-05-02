@@ -10,11 +10,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_widget.h"
 #include "history/history.h" // History::session
 #include "history/history_item.h" // HistoryItem::originalText
-#include "history/history_item_helpers.h" // DropCustomEmoji
+#include "history/history_item_helpers.h" // DropDisallowedCustomEmoji
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
 #include "base/event_filter.h"
 #include "ui/layers/generic_box.h"
+#include "ui/rect.h"
 #include "core/shortcuts.h"
 #include "core/application.h"
 #include "core/core_settings.h"
@@ -33,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
 #include "main/main_session.h"
+#include "settings/settings_premium.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat.h"
@@ -276,11 +278,9 @@ TextWithTags PrepareEditText(not_null<HistoryItem*> item) {
 	auto original = item->history()->session().supportMode()
 		? StripSupportHashtag(item->originalText())
 		: item->originalText();
-	const auto dropCustomEmoji = !item->history()->session().premium()
-		&& !item->history()->peer->isSelf();
-	if (dropCustomEmoji) {
-		original = DropCustomEmoji(std::move(original));
-	}
+	original = DropDisallowedCustomEmoji(
+		item->history()->peer,
+		std::move(original));
 	return TextWithTags{
 		original.text,
 		TextUtilities::ConvertEntitiesToTextTags(original.entities)
@@ -439,6 +439,77 @@ bool HasSendText(not_null<const Ui::InputField*> field) {
 		}
 	}
 	return false;
+}
+
+void InitMessageFieldFade(
+		not_null<Ui::InputField*> field,
+		const style::color &bg) {
+	class Fade final : public Ui::RpWidget {
+	public:
+		using Ui::RpWidget::RpWidget;
+
+		void setFade(QPixmap &&fade) {
+			_fade = std::move(fade);
+		}
+
+		int resizeGetHeight(int newWidth) override {
+			return st::historyComposeFieldFadeHeight;
+		}
+
+	private:
+		void paintEvent(QPaintEvent *event) override {
+			auto p = QPainter(this);
+			p.drawTiledPixmap(rect(), _fade);
+		}
+
+		QPixmap _fade;
+
+	};
+
+	const auto topFade = Ui::CreateChild<Fade>(field.get());
+	const auto bottomFade = Ui::CreateChild<Fade>(field.get());
+
+	const auto generateFade = [=] {
+		const auto size = QSize(1, st::historyComposeFieldFadeHeight);
+		auto fade = QPixmap(size * style::DevicePixelRatio());
+		fade.setDevicePixelRatio(style::DevicePixelRatio());
+		fade.fill(Qt::transparent);
+		{
+			auto p = QPainter(&fade);
+
+			auto gradient = QLinearGradient(0, 1, 0, size.height());
+			gradient.setStops({ { 0., bg->c }, { .9, Qt::transparent } });
+			p.setPen(Qt::NoPen);
+			p.setBrush(gradient);
+			p.drawRect(Rect(size));
+		}
+		bottomFade->setFade(fade.transformed(QTransform().scale(1, -1)));
+		topFade->setFade(std::move(fade));
+	};
+	generateFade();
+	style::PaletteChanged(
+	) | rpl::start_with_next([=] {
+		generateFade();
+	}, topFade->lifetime());
+
+	field->sizeValue(
+	) | rpl::start_with_next_done([=](const QSize &size) {
+		topFade->resizeToWidth(size.width());
+		bottomFade->resizeToWidth(size.width());
+		bottomFade->move(
+			0,
+			size.height() - st::historyComposeFieldFadeHeight);
+	}, [t = Ui::MakeWeak(topFade), b = Ui::MakeWeak(bottomFade)] {
+		Ui::DestroyChild(t.data());
+		Ui::DestroyChild(b.data());
+	}, topFade->lifetime());
+
+	topFade->show();
+	bottomFade->showOn(
+	field->scrollTop().value(
+	) | rpl::map([field, descent = field->st().font->descent](int scroll) {
+		return (scroll + descent) < field->scrollTopMax();
+	}) | rpl::distinct_until_changed());
 }
 
 InlineBotQuery ParseInlineBotQuery(
@@ -660,7 +731,8 @@ void MessageLinksParser::parse() {
 			|| (tag == Ui::InputField::kTagItalic)
 			|| (tag == Ui::InputField::kTagUnderline)
 			|| (tag == Ui::InputField::kTagStrikeOut)
-			|| (tag == Ui::InputField::kTagSpoiler);
+			|| (tag == Ui::InputField::kTagSpoiler)
+			|| (tag == Ui::InputField::kTagBlockquote);
 	};
 
 	_ranges.clear();
@@ -903,4 +975,94 @@ base::unique_qptr<Ui::RpWidget> CreateDisabledFieldView(
 		});
 	});
 	return result;
+}
+
+base::unique_qptr<Ui::RpWidget> TextErrorSendRestriction(
+		QWidget *parent,
+		const QString &text) {
+	auto result = base::make_unique_q<Ui::RpWidget>(parent);
+	const auto raw = result.get();
+	const auto label = CreateChild<Ui::FlatLabel>(
+		result.get(),
+		text,
+		st::historySendPremiumRequired);
+	label->setAttribute(Qt::WA_TransparentForMouseEvents);
+	raw->paintRequest() | rpl::start_with_next([=](QRect clip) {
+		QPainter(raw).fillRect(clip, st::windowBg);
+	}, raw->lifetime());
+	raw->sizeValue(
+	) | rpl::start_with_next([=](QSize size) {
+		const auto &st = st::historyComposeField;
+		const auto width = size.width();
+		const auto margins = (st.textMargins + st.placeholderMargins);
+		const auto available = width - margins.left() - margins.right();
+		label->resizeToWidth(available);
+		label->moveToLeft(
+			margins.left(),
+			(size.height() - label->height()) / 2,
+			width);
+	}, label->lifetime());
+	return result;
+}
+
+base::unique_qptr<Ui::RpWidget> PremiumRequiredSendRestriction(
+		QWidget *parent,
+		not_null<UserData*> user,
+		not_null<Window::SessionController*> controller) {
+	auto result = base::make_unique_q<Ui::RpWidget>(parent);
+	const auto raw = result.get();
+	const auto label = CreateChild<Ui::FlatLabel>(
+		result.get(),
+		tr::lng_restricted_send_non_premium(
+			tr::now,
+			lt_user,
+			user->shortName()),
+		st::historySendPremiumRequired);
+	label->setAttribute(Qt::WA_TransparentForMouseEvents);
+	const auto link = CreateChild<Ui::LinkButton>(
+		result.get(),
+		tr::lng_restricted_send_non_premium_more(tr::now));
+	raw->paintRequest() | rpl::start_with_next([=](QRect clip) {
+		QPainter(raw).fillRect(clip, st::windowBg);
+	}, raw->lifetime());
+	raw->widthValue(
+	) | rpl::start_with_next([=](int width) {
+		const auto &st = st::historyComposeField;
+		const auto margins = (st.textMargins + st.placeholderMargins);
+		const auto available = width - margins.left() - margins.right();
+		label->resizeToWidth(available);
+		label->moveToLeft(margins.left(), margins.top(), width);
+		link->move(
+			(width - link->width()) / 2,
+			label->y() + label->height());
+	}, label->lifetime());
+	link->setClickedCallback([=] {
+		Settings::ShowPremium(controller, u"require_premium"_q);
+	});
+	return result;
+}
+
+void SelectTextInFieldWithMargins(
+		not_null<Ui::InputField*> field,
+		const TextSelection &selection) {
+	if (selection.empty()) {
+		return;
+	}
+	auto textCursor = field->textCursor();
+	// Try to set equal margins for top and bottom sides.
+	const auto charsCountInLine = field->width()
+		/ field->st().font->width('W');
+	const auto linesCount = (field->height() / field->st().font->height);
+	const auto selectedLines = (selection.to - selection.from)
+		/ charsCountInLine;
+	constexpr auto kMinDiff = ushort(3);
+	if ((linesCount - selectedLines) > kMinDiff) {
+		textCursor.setPosition(selection.from
+			- charsCountInLine * ((linesCount - 1) / 2));
+		field->setTextCursor(textCursor);
+	}
+	textCursor.setPosition(selection.from);
+	field->setTextCursor(textCursor);
+	textCursor.setPosition(selection.to, QTextCursor::KeepAnchor);
+	field->setTextCursor(textCursor);
 }

@@ -16,6 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_info.h"
 #include "base/qthelp_regex.h"
 
+#include "fakepasscode/lang/fakepasscode_translator.h"
+
 namespace Lang {
 namespace {
 
@@ -201,7 +203,6 @@ void ParseKeyValue(
 		const QByteArray &value,
 		Save &&save) {
 	const auto index = GetKeyIndex(QLatin1String(key));
-    DEBUG_LOG(qsl("Instance: applyValue %1->%2").arg(QString::fromUtf8(key), QString::fromUtf8(value)));
 	if (index != kKeysCount) {
 		ValueParser parser(key, index, value);
 		if (parser.parse()) {
@@ -256,6 +257,7 @@ void Instance::switchToId(const Language &data) {
 			_updated.fire({});
 		}
 	}
+	loadPTGPack();
 	updatePluralRules();
 }
 
@@ -549,6 +551,14 @@ void Instance::fillFromSerialized(
 	_idChanges.fire_copy(_id);
 }
 
+void Instance::loadPTGPack() {
+	auto* extraLangs = PTG::GetExtraLangRecords(_id.isEmpty() ? systemLangCode() : _id);
+	while (extraLangs && extraLangs->key) {
+		applyValue(extraLangs->key, extraLangs->value);
+		extraLangs++;
+	}
+}
+
 void Instance::loadFromContent(const QByteArray &content) {
 	Lang::FileParser loader(content, [this](QLatin1String key, const QByteArray &value) {
 		applyValue(QByteArray(key.data(), key.size()), value);
@@ -729,8 +739,6 @@ QString Instance::getNonDefaultValue(const QByteArray &key) const {
 
 void Instance::applyValue(const QByteArray &key, const QByteArray &value) {
 	_nonDefaultValues[key] = value;
-    DEBUG_LOG(qsl("Instance %1: applyValue %2->%3").arg(QString::fromUtf8(key),
-                                                        QString::fromUtf8(value), _id));
 	ParseKeyValue(key, value, [&](ushort key, QString &&value) {
 		_nonDefaultSet[key] = 1;
 		if (!_derived) {

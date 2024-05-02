@@ -148,6 +148,7 @@ std::vector<std::vector<HistoryMessageMarkupButton>> ButtonRowsFromTL(
 					qs(data.vtext()),
 					data.vurl().v
 				});
+			}, [&](const MTPDinputKeyboardButtonRequestPeer &data) {
 			});
 		}
 		if (!row.empty()) {
@@ -159,6 +160,30 @@ std::vector<std::vector<HistoryMessageMarkupButton>> ButtonRowsFromTL(
 }
 
 } // namespace
+
+QByteArray HistoryMessageMarkupButton::TypeToString(
+		const HistoryMessageMarkupButton &button) {
+	using Type = HistoryMessageMarkupButton::Type;
+	switch (button.type) {
+	case Type::Default: return "default";
+	case Type::Url: return "url";
+	case Type::Callback: return "callback";
+	case Type::CallbackWithPassword: return "callback_with_password";
+	case Type::RequestPhone: return "request_phone";
+	case Type::RequestLocation: return "request_location";
+	case Type::RequestPoll: return "request_poll";
+	case Type::RequestPeer: return "request_peer";
+	case Type::SwitchInline: return "switch_inline";
+	case Type::SwitchInlineSame: return "switch_inline_same";
+	case Type::Game: return "game";
+	case Type::Buy: return "buy";
+	case Type::Auth: return "auth";
+	case Type::UserProfile: return "user_profile";
+	case Type::WebView: return "web_view";
+	case Type::SimpleWebView: return "simple_web_view";
+	}
+	Unexpected("Type in HistoryMessageMarkupButton::Type.");
+}
 
 uint8 PeerColorIndex(BareId bareId) {
 	const uint8 map[] = { 0, 7, 4, 1, 6, 3, 5 };
@@ -1458,6 +1483,12 @@ ServiceAction ParseServiceAction(
 		content.winners = data.vwinners_count().v;
 		content.unclaimed = data.vunclaimed_count().v;
 		result.content = content;
+	}, [&](const MTPDmessageActionBoostApply &data) {
+		auto content = ActionBoostApply();
+		content.boosts = data.vboosts().v;
+		result.content = content;
+	}, [&](const MTPDmessageActionRequestedPeerSentMe &data) {
+		// Should not be in user inbox.
 	}, [](const MTPDmessageActionEmpty &data) {});
 	return result;
 }

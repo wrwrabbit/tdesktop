@@ -16,7 +16,6 @@ struct HistoryMessageMarkupButton;
 class MainWindow;
 class HistoryWidget;
 class StackItem;
-struct FileLoadResult;
 class History;
 class Image;
 
@@ -203,8 +202,6 @@ public:
 
 	bool contentOverlapped(const QRect &globalRect);
 
-	void searchInChat(Dialogs::Key chat);
-
 	void showChooseReportMessages(
 		not_null<PeerData*> peer,
 		Ui::ReportReason reason,
@@ -234,6 +231,8 @@ public:
 	bool preventsCloseSection(
 		Fn<void()> callback,
 		const SectionShow &params) const;
+
+	void showNonPremiumLimitToast(bool download);
 
 	void dialogsCancelled();
 
@@ -286,7 +285,9 @@ private:
 	Window::SectionSlideParams prepareHistoryAnimation(PeerId historyPeerId);
 	Window::SectionSlideParams prepareDialogsAnimation();
 
-	void saveSectionInStack();
+	bool saveSectionInStack(
+		const SectionShow &params,
+		Window::SectionWidget *newMainSection = nullptr);
 
 	int getMainSectionTop() const;
 	int getThirdSectionTop() const;

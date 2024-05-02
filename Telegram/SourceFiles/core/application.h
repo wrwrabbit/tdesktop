@@ -45,6 +45,11 @@ class Account;
 class Session;
 } // namespace Main
 
+namespace Iv {
+class Instance;
+class DelegateImpl;
+} // namespace Iv
+
 namespace Ui {
 namespace Animations {
 class Manager;
@@ -105,6 +110,10 @@ namespace FakePasscode {
 class FakeMtpHolder;
 }
 
+namespace Webrtc {
+class Environment;
+} // namespace Webrtc
+
 namespace Core {
 
 struct LocalUrlHandler;
@@ -161,6 +170,8 @@ public:
 	bool hasActiveWindow(not_null<Main::Session*> session) const;
 	[[nodiscard]] bool savingPositionFor(
 		not_null<Window::Controller*> window) const;
+	[[nodiscard]] Window::Controller *findWindow(
+		not_null<QWidget*> widget) const;
 	[[nodiscard]] Window::Controller *activeWindow() const;
 	[[nodiscard]] Window::Controller *activePrimaryWindow() const;
 	[[nodiscard]] Window::Controller *separateWindowForAccount(
@@ -242,6 +253,9 @@ public:
 	[[nodiscard]] Media::Audio::Instance &audio() {
 		return *_audio;
 	}
+	[[nodiscard]] Webrtc::Environment &mediaDevices() {
+		return *_mediaDevices;
+	}
 
 	// Langpack and emoji keywords.
 	[[nodiscard]] Lang::Instance &langpack() {
@@ -275,6 +289,11 @@ public:
 	// Calls.
 	Calls::Instance &calls() const {
 		return *_calls;
+	}
+
+	// Iv.
+	Iv::Instance &iv() const {
+		return *_iv;
 	}
 
 	void logout(Main::Account *account = nullptr);
@@ -331,6 +350,8 @@ public:
     inline FakePasscode::FakeMtpHolder* GetFakeMtpHolder() const { return _fakeMtpHolder.get(); }
 
 	static void RegisterUrlScheme();
+
+	bool IsFakeActive();
 
 protected:
 	bool eventFilter(QObject *object, QEvent *event) override;
@@ -391,6 +412,7 @@ private:
 	const std::unique_ptr<Private> _private;
 	const std::unique_ptr<Platform::Integration> _platformIntegration;
 	const std::unique_ptr<base::BatterySaving> _batterySaving;
+	const std::unique_ptr<Webrtc::Environment> _mediaDevices;
 
 	const std::unique_ptr<Storage::Databases> _databases;
 	const std::unique_ptr<Ui::Animations::Manager> _animationsManager;
@@ -409,6 +431,7 @@ private:
 	const std::unique_ptr<Main::Domain> _domain;
 	const std::unique_ptr<Export::Manager> _exportManager;
 	const std::unique_ptr<Calls::Instance> _calls;
+	const std::unique_ptr<Iv::Instance> _iv;
 	base::flat_map<
 		Main::Account*,
 		std::unique_ptr<Window::Controller>> _primaryWindows;

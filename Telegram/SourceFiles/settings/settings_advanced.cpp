@@ -139,6 +139,27 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 			tr::lng_settings_install_beta(),
 			st::settingsButtonNoIcon));
 
+	if (ptgSafeTest()) {
+		const auto samever = inner->add(object_ptr<Button>(
+				inner,
+				tr::lng_settings_install_same(),
+				st::settingsButtonNoIcon));
+		samever->toggleOn(rpl::single(Core::UpdateChecker::GetAcceptSameVersion()));
+		samever->toggledValue(
+		) | rpl::filter([](bool toggled) {
+			return (toggled != Core::UpdateChecker::GetAcceptSameVersion());
+		}) | rpl::start_with_next([=](bool toggled) {
+			Core::UpdateChecker::SetAcceptSameVersion(toggled);
+
+			Core::UpdateChecker checker;
+			checker.stop();
+			if (toggled) {
+				cSetLastUpdateCheck(0);
+			}
+			checker.start();
+		}, toggle->lifetime());
+	}
+
 	const auto check = inner->add(object_ptr<Button>(
 		inner,
 		tr::lng_settings_check_now(),
@@ -978,10 +999,6 @@ rpl::producer<QString> Advanced::title() {
 	return tr::lng_settings_advanced();
 }
 
-rpl::producer<Type> Advanced::sectionShowOther() {
-	return _showOther.events();
-}
-
 void Advanced::setupContent(not_null<Window::SessionController*> controller) {
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
 
@@ -1033,9 +1050,7 @@ void Advanced::setupContent(not_null<Window::SessionController*> controller) {
 	AddSkip(content);
 	AddDivider(content);
 	AddSkip(content);
-	SetupExport(controller, content, [=](Type type) {
-		_showOther.fire_copy(type);
-	});
+	SetupExport(controller, content, showOtherMethod());
 
 	Ui::ResizeFitChild(this, content);
 }

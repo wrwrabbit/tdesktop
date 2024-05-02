@@ -11,12 +11,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_media.h"
 #include "api/api_text_entities.h"
 #include "ui/boxes/confirm_box.h"
+#include "data/business/data_shortcut_messages.h"
+#include "data/components/scheduled_messages.h"
 #include "data/data_histories.h"
-#include "data/data_scheduled_messages.h"
 #include "data/data_session.h"
 #include "data/data_web_page.h"
 #include "history/history.h"
-#include "history/history_item.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "mtproto/mtproto_response.h"
@@ -28,20 +28,20 @@ namespace {
 using namespace rpl::details;
 
 template <typename T>
-constexpr auto WithId =
-	is_callable_plain_v<T, Fn<void()>, mtpRequestId>;
+constexpr auto WithId
+	= is_callable_plain_v<T, Fn<void()>, mtpRequestId>;
 template <typename T>
-constexpr auto WithoutId =
-	is_callable_plain_v<T, Fn<void()>>;
+constexpr auto WithoutId
+	= is_callable_plain_v<T, Fn<void()>>;
 template <typename T>
-constexpr auto WithoutCallback =
-	is_callable_plain_v<T>;
+constexpr auto WithoutCallback
+	= is_callable_plain_v<T>;
 template <typename T>
-constexpr auto ErrorWithId =
-	is_callable_plain_v<T, QString, mtpRequestId>;
+constexpr auto ErrorWithId
+	= is_callable_plain_v<T, QString, mtpRequestId>;
 template <typename T>
-constexpr auto ErrorWithoutId =
-	is_callable_plain_v<T, QString>;
+constexpr auto ErrorWithoutId
+	= is_callable_plain_v<T, QString>;
 
 template <typename DoneCallback, typename FailCallback>
 mtpRequestId EditMessage(
@@ -88,10 +88,15 @@ mtpRequestId EditMessage(
 		: emptyFlag)
 	| (options.scheduled
 		? MTPmessages_EditMessage::Flag::f_schedule_date
+		: emptyFlag)
+	| (item->isBusinessShortcut()
+		? MTPmessages_EditMessage::Flag::f_quick_reply_shortcut_id
 		: emptyFlag);
 
 	const auto id = item->isScheduled()
-		? session->data().scheduledMessages().lookupId(item)
+		? session->scheduledMessages().lookupId(item)
+		: item->isBusinessShortcut()
+		? session->data().shortcutMessages().lookupId(item)
 		: item->id;
 	return api->request(MTPmessages_EditMessage(
 		MTP_flags(flags),
@@ -101,7 +106,8 @@ mtpRequestId EditMessage(
 		inputMedia.value_or(Data::WebPageForMTP(webpage, text.isEmpty())),
 		MTPReplyMarkup(),
 		sentEntities,
-		MTP_int(options.scheduled)
+		MTP_int(options.scheduled),
+		MTP_int(item->shortcutId())
 	)).done([=](
 			const MTPUpdates &result,
 			[[maybe_unused]] mtpRequestId requestId) {

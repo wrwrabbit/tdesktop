@@ -20,6 +20,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtp_instance.h"
 #include "mtproto/mtproto_config.h"
 #include "mtproto/mtproto_dc_options.h"
+#include "data/business/data_shortcut_messages.h"
+#include "data/components/scheduled_messages.h"
 #include "data/notify/data_notify_settings.h"
 #include "data/stickers/data_stickers.h"
 #include "data/data_saved_messages.h"
@@ -36,7 +38,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_histories.h"
 #include "data/data_folder.h"
 #include "data/data_forum.h"
-#include "data/data_scheduled_messages.h"
 #include "data/data_send_action.h"
 #include "data/data_stories.h"
 #include "data/data_message_reactions.h"
@@ -95,7 +96,7 @@ void ProcessScheduledMessageWithElapsedTime(
 		// Note that when a message is scheduled until online
 		// while the recipient is already online, the server sends
 		// an ordinary new message with skipped "from_scheduled" flag.
-		session->data().scheduledMessages().checkEntitiesAndUpdate(data);
+		session->scheduledMessages().checkEntitiesAndUpdate(data);
 	}
 }
 
@@ -946,7 +947,9 @@ void Updates::updateOnline(crl::time lastNonIdleTime, bool gotOtherOffline) {
 		}
 
 		const auto self = session().user();
-		self->onlineTill = base::unixtime::now() + (isOnline ? (config.onlineUpdatePeriod / 1000) : -1);
+		const auto onlineFor = (config.onlineUpdatePeriod / 1000);
+		self->updateLastseen(Data::LastseenStatus::OnlineTill(
+			base::unixtime::now() + (isOnline ? onlineFor : -1)));
 		session().changes().peerUpdated(
 			self,
 			Data::PeerUpdate::Flag::OnlineStatus);
@@ -1114,10 +1117,12 @@ void Updates::applyUpdatesNoPtsCheck(const MTPUpdates &updates) {
 				(d.is_out()
 					? peerToMTP(_session->userPeerId())
 					: MTP_peerUser(d.vuser_id())),
+				MTPint(), // from_boosts_applied
 				MTP_peerUser(d.vuser_id()),
 				MTPPeer(), // saved_peer_id
 				d.vfwd_from() ? *d.vfwd_from() : MTPMessageFwdHeader(),
 				MTP_long(d.vvia_bot_id().value_or_empty()),
+				MTPlong(), // via_business_bot_id
 				d.vreply_to() ? *d.vreply_to() : MTPMessageReplyHeader(),
 				d.vdate(),
 				d.vmessage(),
@@ -1132,7 +1137,8 @@ void Updates::applyUpdatesNoPtsCheck(const MTPUpdates &updates) {
 				MTPlong(),
 				MTPMessageReactions(),
 				MTPVector<MTPRestrictionReason>(),
-				MTP_int(d.vttl_period().value_or_empty())),
+				MTP_int(d.vttl_period().value_or_empty()),
+				MTPint()), // quick_reply_shortcut_id
 			MessageFlags(),
 			NewMessageType::Unread);
 	} break;
@@ -1146,10 +1152,12 @@ void Updates::applyUpdatesNoPtsCheck(const MTPUpdates &updates) {
 				MTP_flags(flags),
 				d.vid(),
 				MTP_peerUser(d.vfrom_id()),
+				MTPint(), // from_boosts_applied
 				MTP_peerChat(d.vchat_id()),
 				MTPPeer(), // saved_peer_id
 				d.vfwd_from() ? *d.vfwd_from() : MTPMessageFwdHeader(),
 				MTP_long(d.vvia_bot_id().value_or_empty()),
+				MTPlong(), // via_business_bot_id
 				d.vreply_to() ? *d.vreply_to() : MTPMessageReplyHeader(),
 				d.vdate(),
 				d.vmessage(),
@@ -1164,7 +1172,8 @@ void Updates::applyUpdatesNoPtsCheck(const MTPUpdates &updates) {
 				MTPlong(),
 				MTPMessageReactions(),
 				MTPVector<MTPRestrictionReason>(),
-				MTP_int(d.vttl_period().value_or_empty())),
+				MTP_int(d.vttl_period().value_or_empty()),
+				MTPint()), // quick_reply_shortcut_id
 			MessageFlags(),
 			NewMessageType::Unread);
 	} break;
@@ -1213,8 +1222,8 @@ void Updates::applyUpdateNoPtsCheck(const MTPUpdate &update) {
 						if (user && !requestingDifference()) {
 							user->madeAction(base::unixtime::now());
 						}
-						ClearMediaAsExpired(item);
 					}
+					ClearMediaAsExpired(item);
 				}
 			} else {
 				// Perhaps it was an unread mention!
@@ -1457,7 +1466,9 @@ void Updates::applyUpdates(
 			if (const auto id = owner.messageIdByRandomId(randomId)) {
 				const auto local = owner.message(id);
 				if (local && local->isScheduled()) {
-					owner.scheduledMessages().sendNowSimpleMessage(d, local);
+					session().scheduledMessages().sendNowSimpleMessage(
+						d,
+						local);
 				}
 			}
 			const auto wasAlready = (lookupMessage() != nullptr);
@@ -1555,7 +1566,9 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 			auto &owner = session().data();
 			if (const auto local = owner.message(id)) {
 				if (local->isScheduled()) {
-					session().data().scheduledMessages().apply(d, local);
+					session().scheduledMessages().apply(d, local);
+				} else if (local->isBusinessShortcut()) {
+					session().data().shortcutMessages().apply(d, local);
 				} else {
 					const auto existing = session().data().message(
 						id.peer,
@@ -1764,12 +1777,37 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 
 	case mtpc_updateNewScheduledMessage: {
 		const auto &d = update.c_updateNewScheduledMessage();
-		session().data().scheduledMessages().apply(d);
+		session().scheduledMessages().apply(d);
 	} break;
 
 	case mtpc_updateDeleteScheduledMessages: {
 		const auto &d = update.c_updateDeleteScheduledMessages();
-		session().data().scheduledMessages().apply(d);
+		session().scheduledMessages().apply(d);
+	} break;
+
+	case mtpc_updateQuickReplies: {
+		const auto &d = update.c_updateQuickReplies();
+		session().data().shortcutMessages().apply(d);
+	} break;
+
+	case mtpc_updateNewQuickReply: {
+		const auto &d = update.c_updateNewQuickReply();
+		session().data().shortcutMessages().apply(d);
+	} break;
+
+	case mtpc_updateDeleteQuickReply: {
+		const auto &d = update.c_updateDeleteQuickReply();
+		session().data().shortcutMessages().apply(d);
+	} break;
+
+	case mtpc_updateQuickReplyMessage: {
+		const auto &d = update.c_updateQuickReplyMessage();
+		session().data().shortcutMessages().apply(d);
+	} break;
+
+	case mtpc_updateDeleteQuickReplyMessages: {
+		const auto &d = update.c_updateDeleteQuickReplyMessages();
+		session().data().shortcutMessages().apply(d);
 	} break;
 
 	case mtpc_updateWebPage: {
@@ -1854,23 +1892,13 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 
 	case mtpc_updateUserStatus: {
 		auto &d = update.c_updateUserStatus();
-		if (auto user = session().data().userLoaded(d.vuser_id())) {
-			switch (d.vstatus().type()) {
-			case mtpc_userStatusEmpty: user->onlineTill = 0; break;
-			case mtpc_userStatusRecently:
-				if (user->onlineTill > -10) { // don't modify pseudo-online
-					user->onlineTill = -2;
-				}
-			break;
-			case mtpc_userStatusLastWeek: user->onlineTill = -3; break;
-			case mtpc_userStatusLastMonth: user->onlineTill = -4; break;
-			case mtpc_userStatusOffline: user->onlineTill = d.vstatus().c_userStatusOffline().vwas_online().v; break;
-			case mtpc_userStatusOnline: user->onlineTill = d.vstatus().c_userStatusOnline().vexpires().v; break;
+		if (const auto user = session().data().userLoaded(d.vuser_id())) {
+			const auto now = LastseenFromMTP(d.vstatus(), user->lastseen());
+			if (user->updateLastseen(now)) {
+				session().changes().peerUpdated(
+					user,
+					Data::PeerUpdate::Flag::OnlineStatus);
 			}
-			session().changes().peerUpdated(
-				user,
-				Data::PeerUpdate::Flag::OnlineStatus);
-			session().data().maybeStopWatchForOffline(user);
 		}
 		if (UserId(d.vuser_id()) == session().userId()) {
 			if (d.vstatus().type() == mtpc_userStatusOffline
@@ -1921,7 +1949,7 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 		const auto &d = update.c_updatePeerSettings();
 		const auto peerId = peerFromMTP(d.vpeer());
 		if (const auto peer = session().data().peerLoaded(peerId)) {
-			peer->setSettings(d.vsettings());
+			peer->setBarSettings(d.vsettings());
 		}
 	} break;
 
@@ -2510,6 +2538,10 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 
 	case mtpc_updateRecentReactions: {
 		session().data().reactions().refreshRecentDelayed();
+	} break;
+
+	case mtpc_updateSavedReactionTags: {
+		session().data().reactions().refreshMyTagsDelayed();
 	} break;
 
 	////// Cloud saved GIFs

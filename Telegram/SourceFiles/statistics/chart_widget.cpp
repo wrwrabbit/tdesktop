@@ -851,6 +851,9 @@ ChartWidget::ChartWidget(not_null<Ui::RpWidget*> parent)
 }
 
 int ChartWidget::resizeGetHeight(int newWidth) {
+	if (newWidth <= 0) {
+		return 0;
+	}
 	if (_filterButtons) {
 		_filterButtons->resizeToWidth(newWidth);
 	}
@@ -1154,7 +1157,7 @@ void ChartWidget::setupDetails() {
 		return;
 	}
 	const auto maxAbsoluteValue = [&] {
-		auto maxValue = 0;
+		auto maxValue = ChartValue(0);
 		for (const auto &l : _chartData.lines) {
 			maxValue = std::max(l.maxValue, maxValue);
 		}

@@ -16,7 +16,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/prepare_short_info_box.h"
 #include "boxes/peers/replace_boost_box.h" // BoostsForGift.
 #include "boxes/premium_preview_box.h" // ShowPremiumPreviewBox.
-#include "core/ui_integration.h" // Core::MarkedTextContext.
 #include "data/data_boosts.h"
 #include "data/data_changes.h"
 #include "data/data_channel.h"
@@ -26,7 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_subscription_option.h"
 #include "data/data_user.h"
 #include "data/stickers/data_custom_emoji.h"
-#include "info/boosts/giveaway/boost_badge.h" // InfiniteRadialAnimationWidget.
+#include "info/channel_statistics/boosts/giveaway/boost_badge.h" // InfiniteRadialAnimationWidget.
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "mainwidget.h"
@@ -45,8 +44,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rect.h"
 #include "ui/vertical_list.h"
 #include "ui/text/text_utilities.h"
+#include "ui/toast/toast.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/gradient_round_button.h"
+#include "ui/widgets/label_with_custom_emoji.h"
 #include "ui/wrap/padding_wrap.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/table_layout.h"
@@ -62,7 +63,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace {
 
-constexpr auto kDiscountDivider = 5.;
 constexpr auto kUserpicsMax = size_t(3);
 
 using GiftOption = Data::SubscriptionOption;
@@ -82,6 +82,31 @@ GiftOptions GiftOptionFromTL(const MTPDuserFull &data) {
 			option.costPerMonth);
 	}
 	return result;
+}
+
+[[nodiscard]] Fn<TextWithEntities(TextWithEntities)> BoostsForGiftText(
+		const std::vector<not_null<UserData*>> users) {
+	Expects(!users.empty());
+
+	const auto session = &users.front()->session();
+	const auto emoji = Ui::Text::SingleCustomEmoji(
+		session->data().customEmojiManager().registerInternalEmoji(
+			st::premiumGiftsBoostIcon,
+			QMargins(0, st::premiumGiftsUserpicBadgeInner, 0, 0),
+			false));
+
+	return [=, count = users.size()](TextWithEntities text) {
+		text.append('\n');
+		text.append('\n');
+		text.append(tr::lng_premium_gifts_about_reward(
+			tr::now,
+			lt_count,
+			count * BoostsForGift(session),
+			lt_emoji,
+			emoji,
+			Ui::Text::RichLangValue));
+		return text;
+	};
 }
 
 using TagUser1 = lngtag_user;
@@ -294,7 +319,7 @@ void GiftBox(
 			std::move(titleLabel)),
 		st::premiumGiftTitlePadding);
 
-	auto textLabel = object_ptr<Ui::FlatLabel>(
+	auto textLabel = Ui::CreateLabelWithCustomEmoji(
 		box,
 		tr::lng_premium_gift_about(
 			lt_user,
@@ -302,7 +327,11 @@ void GiftBox(
 				user,
 				Data::PeerUpdate::Flag::Name
 			) | rpl::map([=] { return TextWithEntities{ user->firstName }; }),
-			Ui::Text::RichLangValue),
+			Ui::Text::RichLangValue
+		) | rpl::map(
+			BoostsForGiftText({ user })
+		),
+		{ .session = &user->session() },
 		st::premiumPreviewAbout);
 	textLabel->setTextColorOverride(stTitle.textFg->c);
 	textLabel->resizeToWidth(available);
@@ -357,7 +386,7 @@ void GiftBox(
 		state->buttonText.events(),
 		Ui::Premium::GiftGradientStops(),
 		[=] {
-			const auto value = group->value();
+			const auto value = group->current();
 			return (value < options.size() && value >= 0)
 				? options[value].botUrl
 				: QString();
@@ -383,7 +412,8 @@ void GiftsBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> controller,
 		std::vector<not_null<UserData*>> users,
-		not_null<Api::PremiumGiftCodeOptions*> api) {
+		not_null<Api::PremiumGiftCodeOptions*> api,
+		const QString &ref) {
 	Expects(!users.empty());
 
 	const auto boxWidth = st::boxWideWidth;
@@ -476,11 +506,6 @@ void GiftsBox(
 
 	// About.
 	{
-		const auto emoji = Ui::Text::SingleCustomEmoji(
-			session->data().customEmojiManager().registerInternalEmoji(
-				st::premiumGiftsBoostIcon,
-				QMargins(0, st::premiumGiftsUserpicBadgeInner, 0, 0),
-				false));
 		auto text = rpl::conditional(
 			state->isPaymentComplete.value(),
 			ComplexAboutLabel(
@@ -505,30 +530,17 @@ void GiftsBox(
 				tr::lng_premium_gifts_about_user2,
 				tr::lng_premium_gifts_about_user3,
 				tr::lng_premium_gifts_about_user_more
-			) | rpl::map([=, count = users.size()](TextWithEntities text) {
-				text.append('\n');
-				text.append('\n');
-				text.append(tr::lng_premium_gifts_about_reward(
-					tr::now,
-					lt_count,
-					count * BoostsForGift(session),
-					lt_emoji,
-					emoji,
-					Ui::Text::RichLangValue));
-				return text;
-			})
+			) | rpl::map(BoostsForGiftText(users))
 		);
 		const auto label = box->addRow(
 			object_ptr<Ui::CenterWrap<Ui::FlatLabel>>(
 				box,
-				object_ptr<Ui::FlatLabel>(box, st::premiumPreviewAbout)),
+				Ui::CreateLabelWithCustomEmoji(
+					box,
+					std::move(text),
+					{ .session = session },
+					st::premiumPreviewAbout)),
 			padding)->entity();
-		std::move(
-			text
-		) | rpl::start_with_next([=](const TextWithEntities &t) {
-			using namespace Core;
-			label->setMarkedText(t, MarkedTextContext{ .session = session });
-		}, label->lifetime());
 		label->setTextColorOverride(stTitle.textFg->c);
 		label->resizeToWidth(available);
 	}
@@ -573,7 +585,7 @@ void GiftsBox(
 		const auto content = box->addRow(
 			object_ptr<Ui::VerticalLayout>(box),
 			{});
-		auto buttonCallback = [=](PremiumPreview section) {
+		auto buttonCallback = [=](PremiumFeature section) {
 			stars->setPaused(true);
 			const auto previewBoxShown = [=](
 					not_null<Ui::BoxContent*> previewBox) {
@@ -592,7 +604,7 @@ void GiftsBox(
 		Settings::AddSummaryPremium(
 			content,
 			controller,
-			u"gift"_q,
+			ref,
 			std::move(buttonCallback));
 	}
 
@@ -603,7 +615,20 @@ void GiftsBox(
 				box,
 				object_ptr<Ui::FlatLabel>(
 					box,
-					session->api().premium().statusTextValue(), // TODO.
+					tr::lng_premium_gifts_terms(
+						lt_link,
+						tr::lng_payments_terms_link(
+						) | rpl::map([](const QString &t) {
+							using namespace Ui::Text;
+							return Link(t, u"https://telegram.org/tos"_q);
+						}),
+						lt_policy,
+						tr::lng_premium_gifts_terms_policy(
+						) | rpl::map([](const QString &t) {
+							using namespace Ui::Text;
+							return Link(t, u"https://telegram.org/privacy"_q);
+						}),
+						Ui::Text::RichLangValue),
 					st::premiumGiftTerms),
 				st::defaultBoxDividerLabelPadding),
 			{});
@@ -615,7 +640,7 @@ void GiftsBox(
 	auto raw = Settings::CreateSubscribeButton({
 		controller,
 		box,
-		[] { return u"gift"_q; },
+		[=] { return ref; },
 		rpl::combine(
 			state->buttonText.events(),
 			state->confirmButtonBusy.value(),
@@ -638,7 +663,7 @@ void GiftsBox(
 		}
 		auto invoice = api->invoice(
 			users.size(),
-			api->monthsFromPreset(group->value()));
+			api->monthsFromPreset(group->current()));
 		invoice.purpose = Payments::InvoicePremiumGiftCodeUsers{ users };
 
 		state->confirmButtonBusy = true;
@@ -865,6 +890,52 @@ void AddTable(
 	}
 }
 
+void ShareWithFriend(
+		not_null<Window::SessionNavigation*> navigation,
+		const QString &slug) {
+	const auto chosen = [=](not_null<Data::Thread*> thread) {
+		const auto content = navigation->parentController()->content();
+		return content->shareUrl(
+			thread,
+			MakeGiftCodeLink(&navigation->session(), slug).link,
+			QString());
+	};
+	Window::ShowChooseRecipientBox(navigation, chosen);
+}
+
+void ShowAlreadyPremiumToast(
+		not_null<Window::SessionNavigation*> navigation,
+		const QString &slug,
+		TimeId date) {
+	const auto instance = std::make_shared<
+		base::weak_ptr<Ui::Toast::Instance>
+	>();
+	const auto shareLink = [=](
+			const ClickHandlerPtr &,
+			Qt::MouseButton button) {
+		if (button == Qt::LeftButton) {
+			if (const auto strong = instance->get()) {
+				strong->hideAnimated();
+			}
+			ShareWithFriend(navigation, slug);
+		}
+		return false;
+	};
+	*instance = navigation->showToast({
+		.title = tr::lng_gift_link_already_title(tr::now),
+		.text = tr::lng_gift_link_already_about(
+			tr::now,
+			lt_date,
+			Ui::Text::Bold(langDateTime(base::unixtime::parse(date))),
+			lt_link,
+			Ui::Text::Link(
+				Ui::Text::Bold(tr::lng_gift_link_already_link(tr::now))),
+			Ui::Text::WithEntities),
+		.duration = 6 * crl::time(1000),
+		.filter = crl::guard(navigation, shareLink),
+	});
+}
+
 } // namespace
 
 GiftPremiumValidator::GiftPremiumValidator(
@@ -877,7 +948,7 @@ void GiftPremiumValidator::cancel() {
 	_requestId = 0;
 }
 
-void GiftPremiumValidator::showChoosePeerBox() {
+void GiftPremiumValidator::showChoosePeerBox(const QString &ref) {
 	if (_manyGiftsLifetime) {
 		return;
 	}
@@ -903,9 +974,13 @@ void GiftPremiumValidator::showChoosePeerBox() {
 		protected:
 			std::unique_ptr<PeerListRow> createRow(
 					not_null<UserData*> user) override {
-				return !user->isSelf()
-					? ContactsBoxController::createRow(user)
-					: nullptr;
+				if (user->isSelf()
+					|| user->isBot()
+					|| user->isServiceUser()
+					|| user->isInaccessible()) {
+					return nullptr;
+				}
+				return ContactsBoxController::createRow(user);
 			}
 
 			void rowClicked(not_null<PeerListRow*> row) override {
@@ -937,7 +1012,7 @@ void GiftPremiumValidator::showChoosePeerBox() {
 				}) | ranges::to<std::vector<not_null<UserData*>>>();
 				if (!users.empty()) {
 					const auto giftBox = show->show(
-						Box(GiftsBox, _controller, users, api));
+						Box(GiftsBox, _controller, users, api, ref));
 					giftBox->boxClosing(
 					) | rpl::start_with_next([=] {
 						_manyGiftsLifetime.destroy();
@@ -980,6 +1055,30 @@ void GiftPremiumValidator::showChoosePeerBox() {
 				std::move(initBox)),
 			Ui::LayerOption::KeepOther);
 
+	}, _manyGiftsLifetime);
+}
+
+void GiftPremiumValidator::showChosenPeerBox(
+		not_null<UserData*> user,
+		const QString &ref) {
+	if (_manyGiftsLifetime) {
+		return;
+	}
+	using namespace Api;
+	const auto api = _manyGiftsLifetime.make_state<PremiumGiftCodeOptions>(
+		_controller->session().user());
+	const auto show = _controller->uiShow();
+	api->request(
+	) | rpl::start_with_error_done([=](const QString &error) {
+		show->showToast(error);
+	}, [=] {
+		const auto users = std::vector<not_null<UserData*>>{ user };
+		const auto giftBox = show->show(
+			Box(GiftsBox, _controller, users, api, ref));
+		giftBox->boxClosing(
+		) | rpl::start_with_next([=] {
+			_manyGiftsLifetime.destroy();
+		}, giftBox->lifetime());
 	}, _manyGiftsLifetime);
 }
 
@@ -1037,7 +1136,7 @@ void GiftCodeBox(
 	state->data = session->api().premium().giftCodeValue(slug);
 	state->used = state->data.value(
 	) | rpl::map([=](const Api::GiftCode &data) {
-		return data.used;
+		return data.used != 0;
 	});
 
 	box->setWidth(st::boxWideWidth);
@@ -1102,14 +1201,7 @@ void GiftCodeBox(
 			st::giveawayGiftCodeFooter),
 		st::giveawayGiftCodeFooterMargin);
 	footer->setClickHandlerFilter([=](const auto &...) {
-		const auto chosen = [=](not_null<Data::Thread*> thread) {
-			const auto content = controller->parentController()->content();
-			return content->shareUrl(
-				thread,
-				MakeGiftCodeLink(&controller->session(), slug).link,
-				QString());
-		};
-		Window::ShowChooseRecipientBox(controller, chosen);
+		ShareWithFriend(controller, slug);
 		return false;
 	});
 
@@ -1134,14 +1226,20 @@ void GiftCodeBox(
 		} else if (!state->sent) {
 			state->sent = true;
 			const auto done = crl::guard(box, [=](const QString &error) {
+				const auto activePrefix = u"PREMIUM_SUB_ACTIVE_UNTIL_"_q;
 				if (error.isEmpty()) {
 					auto copy = state->data.current();
 					copy.used = base::unixtime::now();
 					state->data = std::move(copy);
 
 					Ui::StartFireworks(box->parentWidget());
+				} else if (error.startsWith(activePrefix)) {
+					const auto date = error.mid(activePrefix.size()).toInt();
+					ShowAlreadyPremiumToast(controller, slug, date);
+					state->sent = false;
 				} else {
 					box->uiShow()->showToast(error);
+					state->sent = false;
 				}
 			});
 			controller->session().api().premium().applyGiftCode(slug, done);
@@ -1332,20 +1430,26 @@ void GiveawayInfoBox(
 		? start->quantity
 		: (results->winnersCount + results->unclaimedCount);
 	const auto months = start ? start->months : results->months;
+	const auto group = results
+		? results->channel->isMegagroup()
+		: (!start->channels.empty()
+			&& start->channels.front()->isMegagroup());
 	text.append((finished
 		? tr::lng_prizes_end_text
 		: tr::lng_prizes_how_text)(
 			tr::now,
 			lt_admins,
-			tr::lng_prizes_admins(
-				tr::now,
-				lt_count,
-				quantity,
-				lt_channel,
-				Ui::Text::Bold(first),
-				lt_duration,
-				TextWithEntities{ GiftDuration(months) },
-				Ui::Text::RichLangValue),
+			(group
+				? tr::lng_prizes_admins_group
+				: tr::lng_prizes_admins)(
+					tr::now,
+					lt_count,
+					quantity,
+					lt_channel,
+					Ui::Text::Bold(first),
+					lt_duration,
+					TextWithEntities{ GiftDuration(months) },
+					Ui::Text::RichLangValue),
 			Ui::Text::RichLangValue));
 	const auto many = start
 		? (start->channels.size() > 1)
@@ -1356,8 +1460,12 @@ void GiveawayInfoBox(
 	const auto all = start ? start->all : results->all;
 	auto winners = all
 		? (many
-			? tr::lng_prizes_winners_all_of_many
-			: tr::lng_prizes_winners_all_of_one)(
+			? (group
+				? tr::lng_prizes_winners_all_of_many_group
+				: tr::lng_prizes_winners_all_of_many)
+			: (group
+				? tr::lng_prizes_winners_all_of_one_group
+				: tr::lng_prizes_winners_all_of_one))(
 				tr::now,
 				lt_count,
 				count,
@@ -1380,15 +1488,17 @@ void GiveawayInfoBox(
 		? results->additionalPrize
 		: start->additionalPrize;
 	if (!additionalPrize.isEmpty()) {
-		text.append("\n\n").append(tr::lng_prizes_additional_added(
-			tr::now,
-			lt_count,
-			count,
-			lt_channel,
-			Ui::Text::Bold(first),
-			lt_prize,
-			TextWithEntities{ additionalPrize },
-			Ui::Text::RichLangValue));
+		text.append("\n\n").append((group
+			? tr::lng_prizes_additional_added_group
+			: tr::lng_prizes_additional_added)(
+				tr::now,
+				lt_count,
+				count,
+				lt_channel,
+				Ui::Text::Bold(first),
+				lt_prize,
+				TextWithEntities{ additionalPrize },
+				Ui::Text::RichLangValue));
 	}
 	const auto untilDate = start
 		? start->untilDate
@@ -1417,18 +1527,25 @@ void GiveawayInfoBox(
 		if (info.adminChannelId) {
 			const auto channel = controller->session().data().channel(
 				info.adminChannelId);
-			text.append("\n\n").append(tr::lng_prizes_how_no_admin(
-				tr::now,
-				lt_channel,
-				Ui::Text::Bold(channel->name()),
-				Ui::Text::RichLangValue));
+			text.append("\n\n").append((channel->isMegagroup()
+				? tr::lng_prizes_how_no_admin_group
+				: tr::lng_prizes_how_no_admin)(
+					tr::now,
+					lt_channel,
+					Ui::Text::Bold(channel->name()),
+					Ui::Text::RichLangValue));
 		} else if (info.tooEarlyDate) {
-			text.append("\n\n").append(tr::lng_prizes_how_no_joined(
-				tr::now,
-				lt_date,
-				Ui::Text::Bold(
-					langDateTime(base::unixtime::parse(info.tooEarlyDate))),
-				Ui::Text::RichLangValue));
+			const auto channel = controller->session().data().channel(
+				info.adminChannelId);
+			text.append("\n\n").append((channel->isMegagroup()
+				? tr::lng_prizes_how_no_joined_group
+				: tr::lng_prizes_how_no_joined)(
+					tr::now,
+					lt_date,
+					Ui::Text::Bold(
+						langDateTime(
+							base::unixtime::parse(info.tooEarlyDate))),
+					Ui::Text::RichLangValue));
 		} else if (!info.disallowedCountry.isEmpty()) {
 			text.append("\n\n").append(tr::lng_prizes_how_no_country(
 				tr::now,
@@ -1468,7 +1585,9 @@ void GiveawayInfoBox(
 				box.get(),
 				object_ptr<Ui::FlatLabel>(
 					box.get(),
-					tr::lng_prizes_cancelled(),
+					(group
+						? tr::lng_prizes_cancelled_group()
+						: tr::lng_prizes_cancelled()),
 					st::giveawayRefundedLabel),
 				st::giveawayRefundedPadding),
 			{ padding.left(), 0, padding.right(), padding.bottom() });

@@ -39,12 +39,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_premium_limits.h"
 #include "data/data_user.h"
 #include "history/admin_log/history_admin_log_section.h"
-#include "info/boosts/info_boosts_widget.h"
+#include "info/channel_statistics/boosts/info_boosts_widget.h"
 #include "info/profile/info_profile_values.h"
 #include "info/info_memento.h"
 #include "lang/lang_keys.h"
 #include "mtproto/sender.h"
-#include "main/main_account.h"
 #include "main/main_app_config.h"
 #include "settings/settings_common.h"
 #include "ui/boxes/boost_box.h"
@@ -78,7 +77,7 @@ constexpr auto kBotManagerUsername = "BotFather"_cs;
 }
 
 [[nodiscard]] int EnableForumMinMembers(not_null<PeerData*> peer) {
-	return peer->session().account().appConfig().get<int>(
+	return peer->session().appConfig().get<int>(
 		u"forum_upgrade_participants_min"_q,
 		200);
 }
@@ -198,6 +197,37 @@ void SaveSlowmodeSeconds(
 	api->registerModifyRequest(key, requestId);
 }
 
+void SaveBoostsUnrestrict(
+		not_null<ChannelData*> channel,
+		int boostsUnrestrict,
+		Fn<void()> done) {
+	const auto api = &channel->session().api();
+	const auto key = Api::RequestKey("boosts_unrestrict", channel->id);
+	const auto requestId = api->request(
+		MTPchannels_SetBoostsToUnblockRestrictions(
+			channel->inputChannel,
+			MTP_int(boostsUnrestrict))
+	).done([=](const MTPUpdates &result) {
+		api->clearModifyRequest(key);
+		api->applyUpdates(result);
+		channel->setBoostsUnrestrict(
+			channel->boostsApplied(),
+			boostsUnrestrict);
+		done();
+	}).fail([=](const MTP::Error &error) {
+		api->clearModifyRequest(key);
+		if (error.type() != u"CHAT_NOT_MODIFIED"_q) {
+			return;
+		}
+		channel->setBoostsUnrestrict(
+			channel->boostsApplied(),
+			boostsUnrestrict);
+		done();
+	}).send();
+
+	api->registerModifyRequest(key, requestId);
+}
+
 void ShowEditPermissions(
 		not_null<Window::SessionNavigation*> navigation,
 		not_null<PeerData*> peer) {
@@ -215,6 +245,10 @@ void ShowEditPermissions(
 				close);
 			if (const auto channel = peer->asChannel()) {
 				SaveSlowmodeSeconds(channel, result.slowmodeSeconds, close);
+				SaveBoostsUnrestrict(
+					channel,
+					result.boostsUnrestrict,
+					close);
 			}
 		};
 		auto done = [=](EditPeerPermissionsBoxResult result) {
@@ -225,7 +259,8 @@ void ShowEditPermissions(
 
 			const auto saveFor = peer->migrateToOrMe();
 			const auto chat = saveFor->asChat();
-			if (!result.slowmodeSeconds || !chat) {
+			if (!chat
+				|| (!result.slowmodeSeconds && !result.boostsUnrestrict)) {
 				save(saveFor, result);
 				return;
 			}
@@ -595,8 +630,9 @@ object_ptr<Ui::RpWidget> Controller::createStickersEdit() {
 		tr::lng_group_stickers_add(),
 		rpl::single(QString()), //Empty count.
 		[=, controller = _navigation->parentController()] {
+			const auto isEmoji = false;
 			controller->show(
-				Box<StickersBox>(controller->uiShow(), channel));
+				Box<StickersBox>(controller->uiShow(), channel, isEmoji));
 		},
 		{ &st::menuIconStickers });
 
@@ -947,8 +983,8 @@ void Controller::fillHistoryVisibilityButton() {
 		: HistoryVisibility::Visible;
 	_channelHasLocationOriginalValue = channel && channel->hasLocation();
 
-	const auto updateHistoryVisibility =
-		std::make_shared<rpl::event_stream<HistoryVisibility>>();
+	const auto updateHistoryVisibility
+		= std::make_shared<rpl::event_stream<HistoryVisibility>>();
 
 	const auto boxCallback = crl::guard(this, [=](HistoryVisibility checked) {
 		updateHistoryVisibility->fire(std::move(checked));
@@ -1057,9 +1093,7 @@ void Controller::fillManageSection() {
 		&& (channel->hasAdminRights() || channel->amCreator());
 	const auto canEditStickers = isChannel && channel->canEditStickers();
 	const auto canDeleteChannel = isChannel && channel->canDelete();
-	const auto canEditColorIndex = isChannel
-		&& !channel->isMegagroup()
-		&& channel->canEditInformation();
+	const auto canEditColorIndex = isChannel && channel->canEditEmoji();
 	const auto canViewOrEditLinkedChat = isChannel
 		&& (channel->linkedChat()
 			|| (channel->isBroadcast() && channel->canEditInformation()));
@@ -1664,8 +1698,8 @@ void Controller::saveUsernamesOrder() {
 			channel->setUsernames(ranges::views::all(
 				newUsernames
 			) | ranges::views::transform([&](QString username) {
-				const auto editable =
-					(channel->editableUsername() == username);
+				const auto editable
+					= (channel->editableUsername() == username);
 				return Data::Username{
 					.username = std::move(username),
 					.active = true,
@@ -1929,7 +1963,8 @@ void Controller::toggleBotManager(const QString &command) {
 		const auto botPeer = _peer->owner().peerLoaded(
 			peerFromMTP(result.data().vpeer()));
 		if (const auto bot = botPeer ? botPeer->asUser() : nullptr) {
-			_peer->session().api().sendBotStart(bot, bot, command);
+			const auto show = controller->uiShow();
+			_peer->session().api().sendBotStart(show, bot, bot, command);
 			controller->showPeerHistory(bot);
 		}
 	}).send();

@@ -58,7 +58,8 @@ public:
 	ScheduledWidget(
 		QWidget *parent,
 		not_null<Window::SessionController*> controller,
-		not_null<History*> history);
+		not_null<History*> history,
+		const Data::ForumTopic *forumTopic);
 	~ScheduledWidget();
 
 	not_null<History*> history() const;
@@ -130,6 +131,9 @@ public:
 		not_null<const Element *> view) override;
 	void listSendBotCommand(
 		const QString &command,
+		const FullMsgId &context) override;
+	void listSearch(
+		const QString &query,
 		const FullMsgId &context) override;
 	void listHandleViaClick(not_null<UserData*> bot) override;
 	not_null<Ui::ChatTheme*> listChatTheme() override;
@@ -258,6 +262,7 @@ private:
 		Api::SendOptions options);
 
 	const not_null<History*> _history;
+	const Data::ForumTopic *_forumTopic;
 	std::shared_ptr<Ui::ChatTheme> _theme;
 	object_ptr<Ui::ScrollArea> _scroll;
 	QPointer<ListWidget> _inner;
@@ -275,11 +280,10 @@ private:
 
 };
 
-class ScheduledMemento : public Window::SectionMemento {
+class ScheduledMemento final : public Window::SectionMemento {
 public:
-	ScheduledMemento(not_null<History*> history)
-	: _history(history) {
-	}
+	ScheduledMemento(not_null<History*> history);
+	ScheduledMemento(not_null<Data::ForumTopic*> forumTopic);
 
 	object_ptr<Window::SectionWidget> createWidget(
 		QWidget *parent,
@@ -297,6 +301,7 @@ public:
 
 private:
 	const not_null<History*> _history;
+	const Data::ForumTopic *_forumTopic;
 	ListMemento _list;
 
 };

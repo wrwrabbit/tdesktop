@@ -38,14 +38,17 @@ namespace Passport {
 struct SavedCredentials;
 } // namespace Passport
 
+namespace Iv {
+class Data;
+} // namespace Iv
+
 namespace Data {
 
 class Folder;
 class LocationPoint;
 class WallPaper;
-class ScheduledMessages;
+class ShortcutMessages;
 class SendActionManager;
-class SponsoredMessages;
 class Reactions;
 class EmojiStatuses;
 class ForumIcons;
@@ -62,6 +65,9 @@ class NotifySettings;
 class CustomEmojiManager;
 class Stories;
 class SavedMessages;
+class Chatbots;
+class BusinessInfo;
+struct ReactionId;
 
 struct RepliesReadTillUpdate {
 	FullMsgId id;
@@ -96,8 +102,8 @@ public:
 	[[nodiscard]] ChatFilters &chatsFilters() const {
 		return *_chatsFilters;
 	}
-	[[nodiscard]] ScheduledMessages &scheduledMessages() const {
-		return *_scheduledMessages;
+	[[nodiscard]] ShortcutMessages &shortcutMessages() const {
+		return *_shortcutMessages;
 	}
 	[[nodiscard]] SendActionManager &sendActionManager() const {
 		return *_sendActionManager;
@@ -116,9 +122,6 @@ public:
 	}
 	[[nodiscard]] Stickers &stickers() const {
 		return *_stickers;
-	}
-	[[nodiscard]] SponsoredMessages &sponsoredMessages() const {
-		return *_sponsoredMessages;
 	}
 	[[nodiscard]] Reactions &reactions() const {
 		return *_reactions;
@@ -140,6 +143,12 @@ public:
 	}
 	[[nodiscard]] SavedMessages &savedMessages() const {
 		return *_savedMessages;
+	}
+	[[nodiscard]] Chatbots &chatbots() const {
+		return *_chatbots;
+	}
+	[[nodiscard]] BusinessInfo &businessInfo() const {
+		return *_businessInfo;
 	}
 
 	[[nodiscard]] MsgId nextNonHistoryEntryId() {
@@ -254,6 +263,7 @@ public:
 		not_null<bool*> isVisible;
 	};
 	[[nodiscard]] bool queryItemVisibility(not_null<HistoryItem*> item) const;
+	[[nodiscard]] bool queryDocumentVisibility(not_null<DocumentData*> document) const;
 	[[nodiscard]] rpl::producer<ItemVisibilityQuery> itemVisibilityQueries() const;
 	void itemVisibilitiesUpdated();
 
@@ -366,6 +376,7 @@ public:
 		not_null<Forum*> forum) const;
 	[[nodiscard]] rpl::producer<int> maxPinnedChatsLimitValue(
 		not_null<SavedMessages*> saved) const;
+	[[nodiscard]] int groupFreeTranscribeLevel() const;
 	[[nodiscard]] const std::vector<Dialogs::Key> &pinnedChatsOrder(
 		Folder *folder) const;
 	[[nodiscard]] const std::vector<Dialogs::Key> &pinnedChatsOrder(
@@ -567,6 +578,7 @@ public:
 		PhotoData *photo,
 		DocumentData *document,
 		WebPageCollage &&collage,
+		std::unique_ptr<Iv::Data> iv,
 		int duration,
 		const QString &author,
 		bool hasLargeMedia,
@@ -742,6 +754,11 @@ public:
 	void applyStatsDcId(not_null<ChannelData*>, MTP::DcId);
 	[[nodiscard]] MTP::DcId statsDcId(not_null<ChannelData*>);
 
+	void viewTagsChanged(
+		not_null<ViewElement*> view,
+		std::vector<ReactionId> &&was,
+		std::vector<ReactionId> &&now);
+
 	void clearLocalStorage();
 
     void resetCaches();
@@ -843,6 +860,7 @@ private:
 		PhotoData *photo,
 		DocumentData *document,
 		WebPageCollage &&collage,
+		std::unique_ptr<Iv::Data> iv,
 		int duration,
 		const QString &author,
 		bool hasLargeMedia,
@@ -885,6 +903,7 @@ private:
 	QPointer<Ui::BoxContent> _exportSuggestion;
 
 	rpl::variable<bool> _contactsLoaded = false;
+	rpl::variable<int> _groupFreeTranscribeLevel;
 	rpl::event_stream<Folder*> _chatsListLoadedEvents;
 	rpl::event_stream<Folder*> _chatsListChanged;
 	rpl::event_stream<not_null<UserData*>> _userIsBotChanges;
@@ -1009,9 +1028,14 @@ private:
 
 	base::flat_map<uint64, not_null<GroupCall*>> _groupCalls;
 	rpl::event_stream<InviteToCall> _invitesToCalls;
-	base::flat_map<uint64, base::flat_set<not_null<UserData*>>> _invitedToCallUsers;
+	base::flat_map<
+		uint64,
+		base::flat_set<not_null<UserData*>>> _invitedToCallUsers;
 
 	base::flat_set<not_null<ViewElement*>> _shownSpoilers;
+	base::flat_map<
+		ReactionId,
+		base::flat_set<not_null<ViewElement*>>> _viewsByTag;
 
 	History *_topPromoted = nullptr;
 
@@ -1041,14 +1065,12 @@ private:
 
 	Groups _groups;
 	const std::unique_ptr<ChatFilters> _chatsFilters;
-	std::unique_ptr<ScheduledMessages> _scheduledMessages;
 	const std::unique_ptr<CloudThemes> _cloudThemes;
 	const std::unique_ptr<SendActionManager> _sendActionManager;
 	const std::unique_ptr<Streaming> _streaming;
 	const std::unique_ptr<MediaRotation> _mediaRotation;
 	const std::unique_ptr<Histories> _histories;
 	const std::unique_ptr<Stickers> _stickers;
-	std::unique_ptr<SponsoredMessages> _sponsoredMessages;
 	const std::unique_ptr<Reactions> _reactions;
 	const std::unique_ptr<EmojiStatuses> _emojiStatuses;
 	const std::unique_ptr<ForumIcons> _forumIcons;
@@ -1056,8 +1078,11 @@ private:
 	const std::unique_ptr<CustomEmojiManager> _customEmojiManager;
 	const std::unique_ptr<Stories> _stories;
 	const std::unique_ptr<SavedMessages> _savedMessages;
+	const std::unique_ptr<Chatbots> _chatbots;
+	const std::unique_ptr<BusinessInfo> _businessInfo;
+	std::unique_ptr<ShortcutMessages> _shortcutMessages;
 
-	MsgId _nonHistoryEntryId = ServerMaxMsgId.bare + ScheduledMsgIdsRange;
+	MsgId _nonHistoryEntryId = ShortcutMaxMsgId;
 
 	rpl::lifetime _lifetime;
 

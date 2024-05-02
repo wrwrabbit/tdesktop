@@ -44,18 +44,6 @@ constexpr auto kUnknownVersion = -1;
 constexpr auto kNameWithCaptionsVersion = -2;
 constexpr auto kNameNoCaptionsVersion = -3;
 
-[[nodiscard]] bool HasCaptions(const HistoryItemsList &list) {
-	for (const auto &item : list) {
-		if (const auto media = item->media()) {
-			if (!item->originalText().text.isEmpty()
-				&& media->allowsEditCaption()) {
-				return true;
-			}
-		}
-	}
-	return false;
-}
-
 [[nodiscard]] bool HasOnlyForcedForwardedInfo(const HistoryItemsList &list) {
 	for (const auto &item : list) {
 		if (const auto media = item->media()) {
@@ -206,12 +194,8 @@ void ForwardPanel::updateTexts() {
 				.generateImages = false,
 				.ignoreGroup = true,
 			}).text;
-			const auto history = item->history();
-			const auto dropCustomEmoji = !history->session().premium()
-				&& !_to->peer()->isSelf()
-				&& (item->computeDropForwardedInfo() || !keepNames);
-			if (dropCustomEmoji) {
-				text = DropCustomEmoji(std::move(text));
+			if (item->computeDropForwardedInfo() || !keepNames) {
+				text = DropDisallowedCustomEmoji(_to->peer(), std::move(text));
 			}
 		} else {
 			text = Ui::Text::Colorized(
@@ -257,10 +241,10 @@ void ForwardPanel::editOptions(std::shared_ptr<ChatHelpers::Show> show) {
 	const auto now = _data.options;
 	const auto count = _data.items.size();
 	const auto dropNames = (now != Options::PreserveInfo);
-	const auto hasCaptions = HasCaptions(_data.items);
-	const auto hasOnlyForcedForwardedInfo = hasCaptions
-		? false
-		: HasOnlyForcedForwardedInfo(_data.items);
+	const auto sendersCount = ItemsForwardSendersCount(_data.items);
+	const auto captionsCount = ItemsForwardCaptionsCount(_data.items);
+	const auto hasOnlyForcedForwardedInfo = !captionsCount
+		&& HasOnlyForcedForwardedInfo(_data.items);
 	const auto dropCaptions = (now == Options::NoNamesAndCaptions);
 	const auto weak = base::make_weak(this);
 	const auto changeRecipient = crl::guard(this, [=] {
@@ -283,7 +267,7 @@ void ForwardPanel::editOptions(std::shared_ptr<ChatHelpers::Show> show) {
 		if (_data.items.empty()) {
 			return;
 		}
-		const auto newOptions = (options.hasCaptions
+		const auto newOptions = (options.captionsCount
 			&& options.dropCaptions)
 			? Options::NoNamesAndCaptions
 			: options.dropNames
@@ -302,8 +286,9 @@ void ForwardPanel::editOptions(std::shared_ptr<ChatHelpers::Show> show) {
 		Ui::ForwardOptionsBox,
 		count,
 		Ui::ForwardOptions{
+			.sendersCount = sendersCount,
+			.captionsCount = captionsCount,
 			.dropNames = dropNames,
-			.hasCaptions = hasCaptions,
 			.dropCaptions = dropCaptions,
 		},
 		optionsChanged,
@@ -312,10 +297,9 @@ void ForwardPanel::editOptions(std::shared_ptr<ChatHelpers::Show> show) {
 
 void ForwardPanel::editToNextOption() {
 	using Options = Data::ForwardOptions;
-	const auto hasCaptions = HasCaptions(_data.items);
-	const auto hasOnlyForcedForwardedInfo = hasCaptions
-		? false
-		: HasOnlyForcedForwardedInfo(_data.items);
+	const auto captionsCount = ItemsForwardCaptionsCount(_data.items);
+	const auto hasOnlyForcedForwardedInfo = !captionsCount
+		&& HasOnlyForcedForwardedInfo(_data.items);
 	if (hasOnlyForcedForwardedInfo) {
 		return;
 	}
@@ -323,7 +307,7 @@ void ForwardPanel::editToNextOption() {
 	const auto now = _data.options;
 	const auto next = (now == Options::PreserveInfo)
 		? Options::NoSenderNames
-		: ((now == Options::NoSenderNames) && hasCaptions)
+		: ((now == Options::NoSenderNames) && captionsCount)
 		? Options::NoNamesAndCaptions
 		: Options::PreserveInfo;
 

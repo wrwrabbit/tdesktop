@@ -50,3 +50,8 @@ stage
 *.*~
 .idea/
 cmake-build-debug/
+
+/build/
+.*project
+/Telegram/build/release/*.session
+/Telegram/build/release/config.py

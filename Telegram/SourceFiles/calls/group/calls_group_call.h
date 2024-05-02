@@ -12,6 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/bytes.h"
 #include "mtproto/sender.h"
 #include "mtproto/mtproto_auth_key.h"
+#include "webrtc/webrtc_device_common.h"
+#include "webrtc/webrtc_device_resolver.h"
 
 class History;
 
@@ -174,7 +176,9 @@ struct ParticipantVideoParams;
 [[nodiscard]] uint32 GetAdditionalAudioSsrc(
 	const std::shared_ptr<ParticipantVideoParams> &params);
 
-class GroupCall final : public base::has_weak_ptr {
+class GroupCall final
+	: public base::has_weak_ptr
+	, private Webrtc::CaptureMuteTracker {
 public:
 	class Delegate {
 	public:
@@ -381,7 +385,6 @@ public:
 		return _videoIsWorking.value();
 	}
 
-	void setCurrentAudioDevice(bool input, const QString &deviceId);
 	[[nodiscard]] bool isSharingScreen() const;
 	[[nodiscard]] rpl::producer<bool> isSharingScreenValue() const;
 	[[nodiscard]] bool isScreenPaused() const;
@@ -550,6 +553,9 @@ private:
 	void applySelfUpdate(const MTPDgroupCallParticipant &data);
 	void applyOtherParticipantUpdate(const MTPDgroupCallParticipant &data);
 
+	void captureMuteChanged(bool mute) override;
+	rpl::producer<Webrtc::DeviceResolvedId> captureMuteDeviceId() override;
+
 	void setupMediaDevices();
 	void setupOutgoingVideo();
 	void setScreenEndpoint(std::string endpoint);
@@ -667,6 +673,11 @@ private:
 
 	crl::time _lastSendProgressUpdate = 0;
 
+	Fn<void(Webrtc::DeviceResolvedId)> _setDeviceIdCallback;
+	Webrtc::DeviceResolver _playbackDeviceId;
+	Webrtc::DeviceResolver _captureDeviceId;
+	Webrtc::DeviceResolver _cameraDeviceId;
+
 	std::shared_ptr<GlobalShortcutManager> _shortcutManager;
 	std::shared_ptr<GlobalShortcutValue> _pushToTalk;
 	base::Timer _pushToTalkCancelTimer;
@@ -676,11 +687,6 @@ private:
 	bool _rtmp = false;
 	bool _reloadedStaleCall = false;
 	int _rtmpVolume = 0;
-
-	std::unique_ptr<Webrtc::MediaDevices> _mediaDevices;
-	QString _audioInputId;
-	QString _audioOutputId;
-	QString _cameraInputId;
 
 	rpl::lifetime _lifetime;
 

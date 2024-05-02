@@ -86,7 +86,7 @@ constexpr auto kBlurRadius = 24;
 	q.drawArc(innerRect, arc::kQuarterLength, arc::kHalfLength);
 
 	q.setClipRect(innerRect
-		- QMargins(innerRect.width() / 2, 0, -penWidth, -penWidth));
+		- QMargins(innerRect.width() / 2, -penWidth, -penWidth, -penWidth));
 	pen.setStyle(Qt::DotLine);
 	q.setPen(pen);
 	q.drawEllipse(innerRect);
@@ -448,7 +448,7 @@ void Row::paintUserpic(
 		? _cornerBadgeShown
 		: !_cornerBadgeUserpic->layersManager.isDisplayedNone();
 	const auto storiesPeer = peer
-		? ((peer->isUser() || peer->isBroadcast()) ? peer : nullptr)
+		? ((peer->isUser() || peer->isChannel()) ? peer : nullptr)
 		: nullptr;
 	const auto storiesFolder = peer ? nullptr : _id.folder();
 	const auto storiesHas = storiesPeer

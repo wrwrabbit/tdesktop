@@ -879,30 +879,20 @@ not_null<HistoryItem*> DownloadManager::generateItem(
 	const auto session = document
 		? &document->session()
 		: &photo->session();
-	const auto fromId = previousItem
-		? previousItem->from()->id
-		: session->userPeerId();
 	const auto history = previousItem
 		? previousItem->history()
 		: session->data().history(session->user());
-	const auto flags = MessageFlag::FakeHistoryItem;
-	const auto replyTo = FullReplyTo();
-	const auto viaBotId = UserId();
-	const auto date = base::unixtime::now();
-	const auto postAuthor = QString();
+	;
 	const auto caption = TextWithEntities();
 	const auto make = [&](const auto media) {
-		return history->makeMessage(
-			history->nextNonHistoryEntryId(),
-			flags,
-			replyTo,
-			viaBotId,
-			date,
-			fromId,
-			QString(),
-			media,
-			caption,
-			HistoryMessageMarkupData());
+		return history->makeMessage({
+			.id = history->nextNonHistoryEntryId(),
+			.flags = MessageFlag::FakeHistoryItem,
+			.from = (previousItem
+				? previousItem->from()->id
+				: session->userPeerId()),
+			.date = base::unixtime::now(),
+		}, media, caption);
 	};
 	const auto result = document ? make(document) : make(photo);
 	_generated.emplace(result);
@@ -1133,13 +1123,14 @@ rpl::producer<Ui::DownloadBarContent> MakeDownloadBarContent() {
 				state->thumbnail = Images::Prepare(embed->original(), 0, {
 					.options = Images::Option::Blur,
 				});
+			} else if (!state->downloadTaskLifetime) {
+				state->document->session().downloaderTaskFinished(
+				) | rpl::filter([=] {
+					return self(self);
+				}) | rpl::start_with_next(
+					state->push,
+					state->downloadTaskLifetime);
 			}
-			state->document->session().downloaderTaskFinished(
-			) | rpl::filter([=] {
-				return self(self);
-			}) | rpl::start_with_next(
-				state->push,
-				state->downloadTaskLifetime);
 			return !state->thumbnail.isNull();
 		};
 		const auto resolveThumbnail = [=] {

@@ -221,7 +221,7 @@ void DeleteMessagesBox::prepare() {
 						? QString()
 						: QString(" (%1)").arg(total));
 			});
-			search->searchMessages(QString(), _moderateFrom);
+			search->searchMessages({ .from = _moderateFrom });
 		}
 	} else {
 		details.text = (_ids.size() == 1)
@@ -232,8 +232,8 @@ void DeleteMessagesBox::prepare() {
 			if (hasScheduledMessages()) {
 			} else if (auto revoke = revokeText(peer)) {
 				const auto &settings = Core::App().settings();
-				const auto revokeByDefault =
-					!settings.rememberedDeleteMessageOnlyForYou();
+				const auto revokeByDefault
+					= !settings.rememberedDeleteMessageOnlyForYou();
 				_revoke.create(
 					this,
 					revoke->checkbox,

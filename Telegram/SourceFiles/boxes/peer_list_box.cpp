@@ -232,9 +232,7 @@ void PeerListBox::resizeEvent(QResizeEvent *e) {
 void PeerListBox::paintEvent(QPaintEvent *e) {
 	auto p = QPainter(this);
 
-	const auto &bg = (_controller->listSt()
-		? *_controller->listSt()
-		: st::peerListBox).bg;
+	const auto &bg = _controller->computeListSt().bg;
 	const auto fill = QRect(
 		0,
 		_addedTopScrollSkip,
@@ -508,6 +506,22 @@ int PeerListBox::peerListSelectedRowsCount() {
 	return _select ? _select->entity()->getItemsCount() : 0;
 }
 
+std::vector<PeerListRowId> PeerListBox::collectSelectedIds() {
+	auto result = std::vector<PeerListRowId>();
+	auto items = _select
+		? _select->entity()->getItems()
+		: QVector<uint64>();
+	if (!items.empty()) {
+		result.reserve(items.size());
+		for (const auto itemId : items) {
+			if (!_controller->isForeignRow(itemId)) {
+				result.push_back(itemId);
+			}
+		}
+	}
+	return result;
+}
+
 auto PeerListBox::collectSelectedRows()
 -> std::vector<not_null<PeerData*>> {
 	auto result = std::vector<not_null<PeerData*>>();
@@ -542,6 +556,12 @@ PeerListRow::~PeerListRow() = default;
 
 bool PeerListRow::checked() const {
 	return _checkbox && _checkbox->checked();
+}
+
+void PeerListRow::preloadUserpic() {
+	if (_peer) {
+		_peer->loadUserpic();
+	}
 }
 
 void PeerListRow::setCustomStatus(const QString &status, bool active) {
@@ -883,11 +903,15 @@ void PeerListRow::lazyInitialize(const style::PeerListItem &st) {
 	refreshStatus();
 }
 
+bool PeerListRow::useForumLikeUserpic() const {
+	return !special() && peer()->isForum();
+}
+
 void PeerListRow::createCheckbox(
 		const style::RoundImageCheckbox &st,
 		Fn<void()> updateCallback) {
 	const auto generateRadius = [=](int size) {
-		return (!special() && peer()->isForum())
+		return useForumLikeUserpic()
 			? int(size * Ui::ForumUserpicRadiusMultiplier())
 			: std::optional<int>();
 	};
@@ -1015,11 +1039,9 @@ void PeerListContent::changeCheckState(
 		not_null<PeerListRow*> row,
 		bool checked,
 		anim::type animated) {
-	row->setChecked(
-		checked,
-		_st.item.checkbox,
-		animated,
-		[=] { updateRow(row); });
+	row->setChecked(checked, _st.item.checkbox, animated, [=] {
+		updateRow(row);
+	});
 }
 
 void PeerListContent::setRowHidden(not_null<PeerListRow*> row, bool hidden) {
@@ -1249,6 +1271,16 @@ not_null<PeerListRow*> PeerListContent::rowAt(int index) const {
 	return _rows[index].get();
 }
 
+int PeerListContent::searchRowsCount() const {
+	return _searchRows.size();
+}
+
+not_null<PeerListRow*> PeerListContent::searchRowAt(int index) const {
+	Expects(index >= 0 && index < _searchRows.size());
+
+	return _searchRows[index].get();
+}
+
 void PeerListContent::setDescription(object_ptr<Ui::FlatLabel> description) {
 	_description = std::move(description);
 	if (_description) {
@@ -1343,6 +1375,7 @@ void PeerListContent::refreshRows() {
 	if (_mouseSelection) {
 		selectByMouse(QCursor::pos());
 	}
+	loadProfilePhotos();
 	update();
 }
 
@@ -1754,10 +1787,10 @@ crl::time PeerListContent::paintRow(
 	if (row->isSearchResult()
 		&& !_mentionHighlight.isEmpty()
 		&& peer
-		&& peer->userName().startsWith(
+		&& peer->username().startsWith(
 			_mentionHighlight,
 			Qt::CaseInsensitive)) {
-		const auto username = peer->userName();
+		const auto username = peer->username();
 		const auto availableWidth = statusw;
 		auto highlightedPart = '@' + username.mid(0, _mentionHighlight.size());
 		auto grayedPart = username.mid(_mentionHighlight.size());
@@ -1897,7 +1930,9 @@ void PeerListContent::mouseLeftGeometry() {
 }
 
 void PeerListContent::loadProfilePhotos() {
-	if (_visibleTop >= _visibleBottom) return;
+	if (_visibleTop >= _visibleBottom) {
+		return;
+	}
 
 	auto yFrom = _visibleTop;
 	auto yTo = _visibleBottom + (_visibleBottom - _visibleTop) * PreloadHeightsCount;
@@ -1914,10 +1949,7 @@ void PeerListContent::loadProfilePhotos() {
 			if (to > rowsCount) to = rowsCount;
 
 			for (auto index = from; index != to; ++index) {
-				const auto row = getRow(RowIndex(index));
-				if (!row->special()) {
-					row->peer()->loadUserpic();
-				}
+				getRow(RowIndex(index))->preloadUserpic();
 			}
 		}
 	}

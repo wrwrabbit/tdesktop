@@ -139,7 +139,7 @@ constexpr auto kLoadViewsPages = 2;
 RecentViewsType RecentViewsTypeFor(not_null<PeerData*> peer) {
 	return peer->isSelf()
 		? RecentViewsType::Self
-		: peer->isChannel()
+		: peer->isBroadcast()
 		? RecentViewsType::Channel
 		: peer->isServiceUser()
 		? RecentViewsType::Changelog
@@ -421,7 +421,7 @@ void RecentViews::updatePartsGeometry() {
 
 void RecentViews::updateText() {
 	const auto text = (_data.type == RecentViewsType::Channel)
-		? u"View reactions"_q
+		? tr::lng_stories_view_reactions(tr::now)
 		: _data.views
 		? (tr::lng_stories_views(tr::now, lt_count, _data.views)
 			+ (_data.reactions

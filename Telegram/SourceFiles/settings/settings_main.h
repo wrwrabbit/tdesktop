@@ -28,9 +28,8 @@ void SetupInterfaceScale(
 	not_null<Window::Controller*> window,
 	not_null<Ui::VerticalLayout*> container,
 	bool icon = true);
-void SetupFaq(
-	not_null<Ui::VerticalLayout*> container,
-	bool icon = true);
+
+void OpenFaq(base::weak_ptr<Window::SessionController> weak);
 
 class Main : public Section<Main> {
 public:
@@ -38,7 +37,8 @@ public:
 
 	[[nodiscard]] rpl::producer<QString> title() override;
 
-	rpl::producer<Type> sectionShowOther() override;
+	void fillTopBarMenu(
+		const Ui::Menu::MenuCallback &addAction) override;
 
 protected:
 	void keyPressEvent(QKeyEvent *e) override;
@@ -47,7 +47,6 @@ private:
 	void setupContent(not_null<Window::SessionController*> controller);
 
 	const not_null<Window::SessionController*> _controller;
-	rpl::event_stream<Type> _showOther;
 
 };
 

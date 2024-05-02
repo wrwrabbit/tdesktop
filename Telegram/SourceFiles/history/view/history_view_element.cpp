@@ -39,11 +39,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/item_text_options.h"
 #include "ui/painter.h"
+#include "data/components/sponsored_messages.h"
 #include "data/data_session.h"
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
-#include "data/data_sponsored_messages.h"
 #include "data/data_message_reactions.h"
+#include "data/data_user.h"
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
 
@@ -165,6 +166,11 @@ void DefaultElementDelegate::elementSendBotCommand(
 	const FullMsgId &context) {
 }
 
+void DefaultElementDelegate::elementSearchInList(
+	const QString &query,
+	const FullMsgId &context) {
+}
+
 void DefaultElementDelegate::elementHandleViaClick(
 	not_null<UserData*> bot) {
 }
@@ -273,8 +279,11 @@ QString DateTooltipText(not_null<Element*> view) {
 			dateText += '\n' + tr::lng_signed_author(
 				tr::now,
 				lt_user,
-				msgsigned->postAuthor);
+				msgsigned->author);
 		}
+	}
+	if (item->isScheduled() && item->isSilent()) {
+		dateText += '\n' + QChar(0xD83D) + QChar(0xDD15);
 	}
 	return dateText;
 }
@@ -453,7 +462,7 @@ Element::Element(
 	Flag serviceFlag)
 : _delegate(delegate)
 , _data(data)
-, _dateTime(IsItemScheduledUntilOnline(data)
+, _dateTime((IsItemScheduledUntilOnline(data) || data->shortcutId())
 	? QDateTime()
 	: ItemDateTime(data))
 , _text(st::msgMinWidth)
@@ -469,8 +478,11 @@ Element::Element(
 	if (_context == Context::History) {
 		history()->setHasPendingResizedItems();
 	}
-	if (data->isFakeBotAbout() && !data->history()->peer->isRepliesChat()) {
-		AddComponents(FakeBotAboutTop::Bit());
+	if (data->isFakeAboutView()) {
+		const auto user = data->history()->peer->asUser();
+		if (user && user->isBot() && !user->isRepliesChat()) {
+			AddComponents(FakeBotAboutTop::Bit());
+		}
 	}
 }
 
@@ -488,6 +500,10 @@ not_null<History*> Element::history() const {
 
 uint8 Element::colorIndex() const {
 	return data()->colorIndex();
+}
+
+uint8 Element::contentColorIndex() const {
+	return data()->contentColorIndex();
 }
 
 QDateTime Element::dateTime() const {
@@ -737,14 +753,16 @@ void Element::refreshMedia(Element *replacing) {
 		const auto emojiStickers = &history()->session().emojiStickersPack();
 		const auto skipPremiumEffect = false;
 		if (const auto sticker = emojiStickers->stickerForEmoji(emoji)) {
+			auto content = std::make_unique<Sticker>(
+				this,
+				sticker.document,
+				skipPremiumEffect,
+				replacing,
+				sticker.replacements);
+			content->setEmojiSticker();
 			_media = std::make_unique<UnwrappedMedia>(
 				this,
-				std::make_unique<Sticker>(
-					this,
-					sticker.document,
-					skipPremiumEffect,
-					replacing,
-					sticker.replacements));
+				std::move(content));
 		} else {
 			_media = std::make_unique<UnwrappedMedia>(
 				this,
@@ -1090,7 +1108,7 @@ ClickHandlerPtr Element::fromLink() const {
 			}
 			const auto my = context.other.value<ClickHandlerContext>();
 			if (const auto window = ContextOrSessionWindow(my, session)) {
-				auto &sponsored = session->data().sponsoredMessages();
+				auto &sponsored = session->sponsoredMessages();
 				const auto itemId = my.itemId ? my.itemId : item->fullId();
 				const auto details = sponsored.lookupDetails(itemId);
 				if (!details.externalLink.isEmpty()) {
@@ -1340,6 +1358,10 @@ bool Element::displayForwardedFrom() const {
 
 bool Element::hasOutLayout() const {
 	return false;
+}
+
+bool Element::hasRightLayout() const {
+	return hasOutLayout() && !_delegate->elementIsChatWide();
 }
 
 bool Element::drawBubble() const {

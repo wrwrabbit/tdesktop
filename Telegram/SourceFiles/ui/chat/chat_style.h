@@ -91,6 +91,7 @@ struct MessageStyle {
 	style::icon historyTranscribeIcon = { Qt::Uninitialized };
 	style::icon historyTranscribeLock = { Qt::Uninitialized };
 	style::icon historyTranscribeHide = { Qt::Uninitialized };
+	style::icon historyVoiceMessageTTL = { Qt::Uninitialized };
 	std::array<
 		std::unique_ptr<Text::QuotePaintCache>,
 		kColorPatternsCount> quoteCache;
@@ -118,6 +119,7 @@ struct MessageImageStyle {
 	style::icon historyVideoDownload = { Qt::Uninitialized };
 	style::icon historyVideoCancel = { Qt::Uninitialized };
 	style::icon historyVideoMessageMute = { Qt::Uninitialized };
+	style::icon historyVideoMessageTtlIcon = { Qt::Uninitialized };
 	style::icon historyPageEnlarge = { Qt::Uninitialized };
 };
 
@@ -395,6 +397,9 @@ public:
 	[[nodiscard]] const style::icon &historyFastCloseIcon() const {
 		return _historyFastCloseIcon;
 	}
+	[[nodiscard]] const style::icon &historyFastMoreIcon() const {
+		return _historyFastMoreIcon;
+	}
 	[[nodiscard]] const style::icon &historyMapPoint() const {
 		return _historyMapPoint;
 	}
@@ -517,6 +522,7 @@ private:
 	style::icon _msgBotKbWebviewIcon = { Qt::Uninitialized };
 	style::icon _historyFastCommentsIcon = { Qt::Uninitialized };
 	style::icon _historyFastShareIcon = { Qt::Uninitialized };
+	style::icon _historyFastMoreIcon = { Qt::Uninitialized };
 	style::icon _historyFastTranscribeIcon = { Qt::Uninitialized };
 	style::icon _historyFastTranscribeLock = { Qt::Uninitialized };
 	style::icon _historyGoToOriginalIcon = { Qt::Uninitialized };

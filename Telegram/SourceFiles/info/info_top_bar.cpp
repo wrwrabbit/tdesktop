@@ -7,12 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/info_top_bar.h"
 
-#include <rpl/never.h>
-#include <rpl/merge.h>
-#include "dialogs/ui/dialogs_stories_content.h"
 #include "dialogs/ui/dialogs_stories_list.h"
 #include "lang/lang_keys.h"
-#include "lang/lang_numbers_animation.h"
 #include "info/info_wrap_widget.h"
 #include "info/info_controller.h"
 #include "info/profile/info_profile_values.h"
@@ -687,13 +683,13 @@ void TopBar::createSelectionControls() {
 		_selectionActionRequests,
 		_cancelSelection->lifetime());
 	_delete->entity()->setVisible(_canDelete);
-	const auto archive =
-	_toggleStoryPin = wrap(Ui::CreateChild<Ui::FadeWrap<Ui::IconButton>>(
-		this,
-		object_ptr<Ui::IconButton>(
+	const auto archive = _toggleStoryPin = wrap(
+		Ui::CreateChild<Ui::FadeWrap<Ui::IconButton>>(
 			this,
-			_storiesArchive ? _st.storiesSave : _st.storiesArchive),
-		st::infoTopBarScale));
+			object_ptr<Ui::IconButton>(
+				this,
+				_storiesArchive ? _st.storiesSave : _st.storiesArchive),
+			st::infoTopBarScale));
 	registerToggleControlCallback(
 		_toggleStoryPin.data(),
 		[this] { return selectionMode() && _canToggleStoryPin; });
@@ -724,25 +720,7 @@ bool TopBar::computeCanToggleStoryPin() const {
 }
 
 Ui::StringWithNumbers TopBar::generateSelectedText() const {
-	using Type = Storage::SharedMediaType;
-	const auto phrase = [&] {
-		switch (_selectedItems.type) {
-		case Type::Photo: return tr::lng_media_selected_photo;
-		case Type::GIF: return tr::lng_media_selected_gif;
-		case Type::Video: return tr::lng_media_selected_video;
-		case Type::File: return tr::lng_media_selected_file;
-		case Type::MusicFile: return tr::lng_media_selected_song;
-		case Type::Link: return tr::lng_media_selected_link;
-		case Type::RoundVoiceFile: return tr::lng_media_selected_audio;
-		case Type::PhotoVideo: return tr::lng_stories_row_count;
-		}
-		Unexpected("Type in TopBar::generateSelectedText()");
-	}();
-	return phrase(
-		tr::now,
-		lt_count,
-		_selectedItems.list.size(),
-		Ui::StringWithNumbers::FromString);
+	return _selectedItems.title(_selectedItems.list.size());
 }
 
 bool TopBar::selectionMode() const {

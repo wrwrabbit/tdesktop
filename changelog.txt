@@ -1,3 +1,201 @@
+4.16.8 (16.04.24)
+
+- Fix in-app playing of some video and audio files.
+- Fix crash on Linux opening chats with custom backgrounds.
+- Fix crash on quit after using scheduled messages.
+
+4.16.7 (15.04.24)
+
+- Reimplement file open confirmations.
+
+4.16.6 (09.04.24)
+
+- Show custom emoji preview on long press.
+- Fix resume chat bot button disappearance.
+- Fix GIF files playback. (regression in 4.16.3.beta)
+
+4.16.5 (08.04.24)
+
+- Fix editing privacy for groups and channels invitations.
+- Possible fix for the network unresponsiveness after sleep.
+- Possible fix for wide range of memory allocator crashes on Linux.
+
+4.16.4 (06.04.24)
+
+- Bug fixes and other minor improvements.
+
+4.16.3 beta (05.04.24)
+
+- Improve media upload speed.
+- Update FFmpeg to 6.1.1.
+
+4.16.2 (04.04.24)
+
+- Use IV by default for Telegraph and some Telegram links.
+- Support IV links in bot web-apps.
+- Some bug fixes.
+
+4.16.1 (02.04.24)
+
+- Show information about Fragment phone numbers and usernames.
+- Fix jump to original story from a story repost.
+- Fix old image display in viewer in some cases.
+- Fix several crashes.
+
+4.16 (01.04.24)
+
+- Instant View on Windows 10+ and macOS.
+- Allow scheduling messages in topics.
+- Telegram Business: Links to Chats.
+- Telegram Business: Custom Intro.
+- Telegram Business: Chatbots.
+- Sharing Revenue with Channel Owners.
+
+4.15.7 beta (01.04.24)
+
+- Test crashfix on Linux.
+
+4.15.6 beta (25.03.24)
+
+- Save the Instant View window geometry.
+- Fix jump to anchors with accents in the Instant View.
+- Fix possible crash in the ElasticScroll destructor.
+
+4.15.5 beta (16.03.24)
+
+- Fix a crash in Instant View article parsing.
+- Support AirPods Mute/Unmute toggle in calls on macOS.
+- Disable system proxy on Linux to check if it fixes crashes.
+
+4.15.4 beta (14.03.24)
+
+- Fix initial text color in dark mode Instant View on macOS.
+- Fix non-English symbols encoding in Instant View on macOS.
+- Fix sharing from Instant View on macOS.
+- Fix crash with long messages on Linux.
+
+4.15.3 beta (13.03.24)
+
+- Instant View on Windows (with WebView2) and macOS.
+- Allow scheduling messages in topics.
+- Fix system proxy support on Linux.
+
+4.15.2 (12.03.24)
+
+- Telegram Business: Greeting Message.
+- Telegram Business: Away Message.
+- Telegram Business: Quick Replies.
+- Telegram Business: Working Hours.
+- Close the ongoing call window without hanging up the call.
+- Fast scroll through chats list with Ctrl or Shift pressed.
+- Several bugfixes.
+
+4.15.1 (08.03.24)
+
+- Telegram Business features.
+
+4.15 (18.02.24)
+
+- Stories from groups.
+- Group appearance settings.
+- Group emoji pack.
+- Boost groups to unlock features.
+
+4.14.16 (16.02.24)
+
+- Boost groups.
+
+4.14.15 (10.02.24)
+
+- Fix webview regression on Linux X11. (2nd attempt)
+
+4.14.14 (09.02.24)
+
+- Fix webview regression on Linux X11.
+
+4.14.13 (02.02.24)
+
+- Fix display of statistics for single posts.
+- Allow editing tag name from search tags.
+- Fix a crash in tags removal.
+
+4.14.12 (01.02.24)
+
+- Tags in Saved Messages.
+- Audio output device selection for music and videos.
+- Audio input device selection for voice messages recording.
+- Default device changes should be applied instantly. (Windows / macOS)
+
+4.14.11 beta (25.01.24)
+
+- Fix crash when accepting calls.
+- Fix possible crash in loopback audio on Windows.
+
+4.14.10 beta (25.01.24)
+
+- Allow choosing audio device for music and video files.
+- Allow choosing microphone device for voice recording.
+- Allow pause and resume voice messages recording.
+- Track audio device changes on Windows and macOS.
+
+4.14.9 (19.01.24)
+
+- Fix two possible crashes in messages history and group search.
+- Fix local online status turning off. (once again)
+
+4.14.8 (18.01.24)
+
+- Fix initial position and size of secondary windows.
+- Optimize messages loading. (load replies on demand)
+- Fix local online status turning off.
+
+4.14.7 (18.01.24)
+
+- See when your message was read in private chat.
+- Premium users can see other last seen times if they weren't hidden explicitly.
+- Premium users can allow new chats only from their contacts and other Premium users.
+
+4.14.6 (15.01.24)
+
+- Fix one-time audio tooltip showing in wrong places.
+- Fix media viewer showing above taskbar on Windows.
+- Fix crash in one-time video message playback.
+
+4.14.5 (15.01.24)
+
+- Allow sending one-time voice messages.
+- Improve playing one-time voice and video messages.
+- Remove Ctrl+Shift+[1-6] shortcuts by default, some are used in input methods.
+- Some bugs and glitches fixed.
+
+4.14.4 (08.01.24)
+
+- Switch between logged in accounts using Ctrl+Shift+[1-6] shortcuts.
+- Add poll creation in groups to the attach menu, if exists.
+- Another fix for payment card validation.
+
+4.14.3 (04.01.24)
+
+- Allow sending single-time voice messages.
+- Fix payments card validation.
+- Fix crash when trying to join channels above the limit.
+- Add "Quit Telegram" to the Taskbar context menu. (Windows)
+- Fix opened windows list in the Dock icon context menu. (macOS)
+
+4.14.2 (02.01.24)
+
+- Show original senders name in reply to forward information.
+- Use original senders color / emoji pattern in forwards.
+- Highlight active saved messages chat in list.
+- Fix chats list scrolling on X11 (Linux).
+
+4.14.1 (01.01.24)
+
+- Fix crash in "Author Hidden" chat in "Saved Messages".
+- Improve jump-to-original button layout in "Saved Messages".
+- Show my own chat as "My Notes" in "Saved Messages".
+- In screen sharing source window select first screen by default.
+
 4.14 (31.12.23)
 
 - Improved saved messages.

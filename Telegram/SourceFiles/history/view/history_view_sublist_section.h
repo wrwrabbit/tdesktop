@@ -33,6 +33,7 @@ class Element;
 class TopBarWidget;
 class SublistMemento;
 class TranslateBar;
+class ComposeSearch;
 
 class SublistWidget final
 	: public Window::SectionWidget
@@ -58,6 +59,8 @@ public:
 	bool showInternal(
 		not_null<Window::SectionMemento*> memento,
 		const Window::SectionShow &params) override;
+	bool sameTypeAs(not_null<Window::SectionMemento*> memento) override;
+
 	std::shared_ptr<Window::SectionMemento> createMemento() override;
 	bool showMessage(
 		PeerId peerId,
@@ -72,6 +75,8 @@ public:
 			Bot::SendCommandRequest request) override {
 		return Window::SectionActionResult::Fallback;
 	}
+
+	bool searchInChatEmbedded(Dialogs::Key chat, QString query) override;
 
 	// Float player interface.
 	bool floatPlayerHandleWheelEvent(QEvent *e) override;
@@ -107,6 +112,9 @@ public:
 	bool listIsGoodForAroundPosition(not_null<const Element*> view) override;
 	void listSendBotCommand(
 		const QString &command,
+		const FullMsgId &context) override;
+	void listSearch(
+		const QString &query,
 		const FullMsgId &context) override;
 	void listHandleViaClick(not_null<UserData*> bot) override;
 	not_null<Ui::ChatTheme*> listChatTheme() override;
@@ -161,15 +169,21 @@ private:
 	void showAtPosition(
 		Data::MessagePosition position,
 		FullMsgId originId = {});
+	void showAtPosition(
+		Data::MessagePosition position,
+		FullMsgId originItemId,
+		const Window::SectionShow &params);
 
 	void setupOpenChatButton();
 	void setupAboutHiddenAuthor();
 	void setupTranslateBar();
+	void setupShortcuts();
 
 	void confirmDeleteSelected();
 	void confirmForwardSelected();
 	void clearSelected();
 	void recountChatWidth();
+	void searchInSublist();
 
 	const not_null<Data::SavedSublist*> _sublist;
 	const not_null<History*> _history;
@@ -185,7 +199,9 @@ private:
 	std::unique_ptr<Ui::ScrollArea> _scroll;
 	std::unique_ptr<Ui::FlatButton> _openChatButton;
 	std::unique_ptr<Ui::RpWidget> _aboutHiddenAuthor;
+	std::unique_ptr<ComposeSearch> _composeSearch;
 
+	FullMsgId _lastShownAt;
 	CornerButtons _cornerButtons;
 
 };

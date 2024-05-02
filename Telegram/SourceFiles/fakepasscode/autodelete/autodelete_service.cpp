@@ -424,7 +424,7 @@ QByteArray AutoDeleteService::serialize(int index) const {
     TimeId old = base::unixtime::now() - 2*day;
     if (auto it = registered.find(index); it != registered.end()) {
         reg = it->second
-            | ranges::view::filter([ old ] (auto& pair) {
+            | ranges::views::filter([ old ] (auto& pair) {
                 return pair.second.created > old;
             })
             | ranges::to<RandomIdsMap>();

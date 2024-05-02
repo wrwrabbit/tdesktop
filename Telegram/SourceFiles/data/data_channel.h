@@ -32,39 +32,40 @@ struct ChannelLocation {
 	}
 };
 
-enum class ChannelDataFlag {
-	Left = (1 << 0),
-	Creator = (1 << 1),
-	Forbidden = (1 << 2),
-	CallActive = (1 << 3),
-	CallNotEmpty = (1 << 4),
-	Signatures = (1 << 5),
-	Verified = (1 << 6),
-	Scam = (1 << 7),
-	Fake = (1 << 8),
-	Megagroup = (1 << 9),
-	Broadcast = (1 << 10),
-	Gigagroup = (1 << 11),
-	Username = (1 << 12),
-	Location = (1 << 13),
-	CanSetUsername = (1 << 14),
-	CanSetStickers = (1 << 15),
-	PreHistoryHidden = (1 << 16),
-	CanViewParticipants = (1 << 17),
-	HasLink = (1 << 18),
-	SlowmodeEnabled = (1 << 19),
-	NoForwards = (1 << 20),
-	JoinToWrite = (1 << 21),
-	RequestToJoin = (1 << 22),
-	Forum = (1 << 23),
-	AntiSpam = (1 << 24),
-	ParticipantsHidden = (1 << 25),
-	StoriesHidden = (1 << 26),
-	HasActiveStories = (1 << 27),
-	HasUnreadStories = (1 << 28),
-	CanGetStatistics = (1 << 29),
-	ViewAsMessages = (1 << 30),
-	SimilarExpanded = (1 << 31),
+enum class ChannelDataFlag : uint64 {
+	Left = (1ULL << 0),
+	Creator = (1ULL << 1),
+	Forbidden = (1ULL << 2),
+	CallActive = (1ULL << 3),
+	CallNotEmpty = (1ULL << 4),
+	Signatures = (1ULL << 5),
+	Verified = (1ULL << 6),
+	Scam = (1ULL << 7),
+	Fake = (1ULL << 8),
+	Megagroup = (1ULL << 9),
+	Broadcast = (1ULL << 10),
+	Gigagroup = (1ULL << 11),
+	Username = (1ULL << 12),
+	Location = (1ULL << 13),
+	CanSetUsername = (1ULL << 14),
+	CanSetStickers = (1ULL << 15),
+	PreHistoryHidden = (1ULL << 16),
+	CanViewParticipants = (1ULL << 17),
+	HasLink = (1ULL << 18),
+	SlowmodeEnabled = (1ULL << 19),
+	NoForwards = (1ULL << 20),
+	JoinToWrite = (1ULL << 21),
+	RequestToJoin = (1ULL << 22),
+	Forum = (1ULL << 23),
+	AntiSpam = (1ULL << 24),
+	ParticipantsHidden = (1ULL << 25),
+	StoriesHidden = (1ULL << 26),
+	HasActiveStories = (1ULL << 27),
+	HasUnreadStories = (1ULL << 28),
+	CanGetStatistics = (1ULL << 29),
+	ViewAsMessages = (1ULL << 30),
+	SimilarExpanded = (1ULL << 31),
+	CanViewRevenue = (1ULL << 32),
 };
 inline constexpr bool is_flag_type(ChannelDataFlag) { return true; };
 using ChannelDataFlags = base::flags<ChannelDataFlag>;
@@ -114,6 +115,7 @@ public:
 	base::flat_map<not_null<UserData*>, Restricted> lastRestricted;
 	base::flat_set<not_null<PeerData*>> markupSenders;
 	base::flat_set<not_null<UserData*>> bots;
+	rpl::event_stream<bool> unrestrictedByBoostsChanges;
 
 	// For admin badges, full admins list with ranks.
 	base::flat_map<UserId, QString> admins;
@@ -124,6 +126,7 @@ public:
 	bool joinedMessageFound = false;
 	bool adminsLoaded = false;
 	StickerSetIdentifier stickerSet;
+	StickerSetIdentifier emojiSet;
 
 	enum LastParticipantsStatus {
 		LastParticipantsUpToDate       = 0x00,
@@ -132,6 +135,11 @@ public:
 	};
 	mutable int lastParticipantsStatus = LastParticipantsUpToDate;
 	int lastParticipantsCount = 0;
+	int boostsApplied = 0;
+	int boostsUnrestrict = 0;
+
+	int slowmodeSeconds = 0;
+	TimeId slowmodeLastMessage = 0;
 
 private:
 	ChatData *_migratedFrom = nullptr;
@@ -174,6 +182,7 @@ public:
 	[[nodiscard]] QString username() const;
 	[[nodiscard]] QString editableUsername() const;
 	[[nodiscard]] const std::vector<QString> &usernames() const;
+	[[nodiscard]] bool isUsernameEditable(QString username) const;
 
 	[[nodiscard]] int membersCount() const {
 		return std::max(_membersCount, 1);
@@ -354,6 +363,7 @@ public:
 	[[nodiscard]] bool canViewBanned() const;
 	[[nodiscard]] bool canEditSignatures() const;
 	[[nodiscard]] bool canEditStickers() const;
+	[[nodiscard]] bool canEditEmoji() const;
 	[[nodiscard]] bool canDelete() const;
 	[[nodiscard]] bool canEditAdmin(not_null<UserData*> user) const;
 	[[nodiscard]] bool canRestrictParticipant(
@@ -431,6 +441,12 @@ public:
 	void setSlowmodeSeconds(int seconds);
 	[[nodiscard]] TimeId slowmodeLastMessage() const;
 	void growSlowmodeLastMessage(TimeId when);
+
+	[[nodiscard]] int boostsApplied() const;
+	[[nodiscard]] int boostsUnrestrict() const;
+	[[nodiscard]] bool unrestrictedByBoosts() const;
+	[[nodiscard]] rpl::producer<bool> unrestrictedByBoostsValue() const;
+	void setBoostsUnrestrict(int applied, int unrestrict);
 
 	void setInvitePeek(const QString &hash, TimeId expires);
 	void clearInvitePeek();
@@ -518,9 +534,6 @@ private:
 
 	std::unique_ptr<Data::GroupCall> _call;
 	PeerId _callDefaultJoinAs = 0;
-
-	int _slowmodeSeconds = 0;
-	TimeId _slowmodeLastMessage = 0;
 
 };
 

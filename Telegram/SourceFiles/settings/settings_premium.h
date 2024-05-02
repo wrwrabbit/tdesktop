@@ -9,7 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "settings/settings_type.h"
 
-enum class PremiumPreview;
+enum class PremiumFeature;
 
 namespace style {
 struct RoundButton;
@@ -17,6 +17,7 @@ struct RoundButton;
 
 namespace ChatHelpers {
 class Show;
+enum class WindowUsage;
 } // namespace ChatHelpers
 
 namespace Ui {
@@ -28,6 +29,7 @@ class VerticalLayout;
 
 namespace Main {
 class Session;
+class SessionShow;
 } // namespace Main
 
 namespace Window {
@@ -55,10 +57,17 @@ void StartPremiumPayment(
 	not_null<Window::SessionController*> controller,
 	const QString &ref);
 
-[[nodiscard]] QString LookupPremiumRef(PremiumPreview section);
+[[nodiscard]] QString LookupPremiumRef(PremiumFeature section);
 
 void ShowPremiumPromoToast(
 	std::shared_ptr<ChatHelpers::Show> show,
+	TextWithEntities textWithLink,
+	const QString &ref);
+void ShowPremiumPromoToast(
+	std::shared_ptr<::Main::SessionShow> show,
+	Fn<Window::SessionController*(
+		not_null<::Main::Session*>,
+		ChatHelpers::WindowUsage)> resolveWindow,
 	TextWithEntities textWithLink,
 	const QString &ref);
 
@@ -70,6 +79,7 @@ struct SubscribeButtonArgs final {
 	std::optional<QGradientStops> gradientStops;
 	Fn<QString()> computeBotUrl; // nullable
 	std::shared_ptr<ChatHelpers::Show> show;
+	bool showPromo = false;
 };
 
 
@@ -82,14 +92,21 @@ struct SubscribeButtonArgs final {
 [[nodiscard]] not_null<Ui::GradientButton*> CreateSubscribeButton(
 	SubscribeButtonArgs &&args);
 
-[[nodiscard]] std::vector<PremiumPreview> PremiumPreviewOrder(
+[[nodiscard]] not_null<Ui::GradientButton*> CreateSubscribeButton(
+	std::shared_ptr<::Main::SessionShow> show,
+	Fn<Window::SessionController*(
+		not_null<::Main::Session*>,
+		ChatHelpers::WindowUsage)> resolveWindow,
+	SubscribeButtonArgs &&args);
+
+[[nodiscard]] std::vector<PremiumFeature> PremiumFeaturesOrder(
 	not_null<::Main::Session*> session);
 
 void AddSummaryPremium(
 	not_null<Ui::VerticalLayout*> content,
 	not_null<Window::SessionController*> controller,
 	const QString &ref,
-	Fn<void(PremiumPreview)> buttonCallback);
+	Fn<void(PremiumFeature)> buttonCallback);
 
 } // namespace Settings
 

@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 #include "boxes/share_box.h"
 #include "chat_helpers/compose/compose_show.h"
+#include "data/business/data_shortcut_messages.h"
 #include "data/data_chat_participant_status.h"
 #include "data/data_forum_topic.h"
 #include "data/data_histories.h"
@@ -19,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_stories.h"
 #include "data/data_thread.h"
+#include "data/data_user.h"
 #include "history/history.h"
 #include "history/history_item_helpers.h" // GetErrorTextForSending.
 #include "history/view/history_view_context_menu.h" // CopyStoryLink.
@@ -61,6 +63,11 @@ namespace Media::Stories {
 	};
 	const auto state = std::make_shared<State>();
 	auto filterCallback = [=](not_null<Data::Thread*> thread) {
+		if (const auto user = thread->peer()->asUser()) {
+			if (user->canSendIgnoreRequirePremium()) {
+				return true;
+			}
+		}
 		return Data::CanSend(thread, ChatRestriction::SendPhotos)
 			&& Data::CanSend(thread, ChatRestriction::SendVideos);
 	};
@@ -113,6 +120,7 @@ namespace Media::Stories {
 				message.action.clearDraft = false;
 				api->sendMessage(std::move(message));
 			}
+			const auto session = &thread->session();
 			const auto threadPeer = thread->peer();
 			const auto threadHistory = thread->owningHistory();
 			const auto randomId = base::RandomValue<uint64>();
@@ -125,6 +133,12 @@ namespace Media::Stories {
 				action.options);
 			if (silentPost) {
 				sendFlags |= MTPmessages_SendMedia::Flag::f_silent;
+			}
+			if (options.scheduled) {
+				sendFlags |= MTPmessages_SendMedia::Flag::f_schedule_date;
+			}
+			if (options.shortcutId) {
+				sendFlags |= MTPmessages_SendMedia::Flag::f_quick_reply_shortcut;
 			}
 			const auto done = [=] {
 				if (!--state->requests) {
@@ -148,7 +162,8 @@ namespace Media::Stories {
 					MTPReplyMarkup(),
 					MTPVector<MTPMessageEntity>(),
 					MTP_int(action.options.scheduled),
-					MTP_inputPeerEmpty()
+					MTP_inputPeerEmpty(),
+					Data::ShortcutIdToMTP(session, action.options.shortcutId)
 				), [=](
 						const MTPUpdates &result,
 						const MTP::Response &response) {
@@ -189,6 +204,7 @@ namespace Media::Stories {
 		.scheduleBoxStyle = (viewerStyle
 			? viewerScheduleStyle()
 			: HistoryView::ScheduleBoxStyleArgs()),
+		.premiumRequiredError = SharePremiumRequiredError(),
 	});
 }
 

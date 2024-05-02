@@ -9,7 +9,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
-#include "main/main_account.h"
 #include "main/main_app_config.h"
 #include "apiwrap.h"
 #include "mainwidget.h"
@@ -36,7 +35,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio.h"
 #include "boxes/abstract_box.h"
 #include "passport/passport_form_controller.h"
+#include "iv/iv_data.h"
 #include "lang/lang_keys.h" // tr::lng_deleted(tr::now) in user name
+#include "data/business/data_business_chatbots.h"
+#include "data/business/data_business_info.h"
+#include "data/business/data_shortcut_messages.h"
+#include "data/components/scheduled_messages.h"
 #include "data/stickers/data_stickers.h"
 #include "data/notify/data_notify_settings.h"
 #include "data/data_bot_app.h"
@@ -53,9 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_poll.h"
 #include "data/data_replies_list.h"
 #include "data/data_chat_filters.h"
-#include "data/data_scheduled_messages.h"
 #include "data/data_send_action.h"
-#include "data/data_sponsored_messages.h"
 #include "data/data_message_reactions.h"
 #include "data/data_emoji_statuses.h"
 #include "data/data_forum_icons.h"
@@ -238,6 +240,10 @@ Session::Session(not_null<Main::Session*> session)
 , _bigFileCache(Core::App().databases().get(
 	_session->local().cacheBigFilePath(),
 	_session->local().cacheBigFileSettings()))
+, _groupFreeTranscribeLevel(session->appConfig().value(
+) | rpl::map([limits = Data::LevelLimits(session)] {
+	return limits.groupTranscribeLevelMin();
+}))
 , _chatsList(
 	session,
 	FilterId(),
@@ -250,21 +256,22 @@ Session::Session(not_null<Main::Session*> session)
 , _watchForOfflineTimer([=] { checkLocalUsersWentOffline(); })
 , _groups(this)
 , _chatsFilters(std::make_unique<ChatFilters>(this))
-, _scheduledMessages(std::make_unique<ScheduledMessages>(this))
 , _cloudThemes(std::make_unique<CloudThemes>(session))
 , _sendActionManager(std::make_unique<SendActionManager>())
 , _streaming(std::make_unique<Streaming>(this))
 , _mediaRotation(std::make_unique<MediaRotation>())
 , _histories(std::make_unique<Histories>(this))
 , _stickers(std::make_unique<Stickers>(this))
-, _sponsoredMessages(std::make_unique<SponsoredMessages>(this))
 , _reactions(std::make_unique<Reactions>(this))
 , _emojiStatuses(std::make_unique<EmojiStatuses>(this))
 , _forumIcons(std::make_unique<ForumIcons>(this))
 , _notifySettings(std::make_unique<NotifySettings>(this))
 , _customEmojiManager(std::make_unique<CustomEmojiManager>(this))
 , _stories(std::make_unique<Stories>(this))
-, _savedMessages(std::make_unique<SavedMessages>(this)) {
+, _savedMessages(std::make_unique<SavedMessages>(this))
+, _chatbots(std::make_unique<Chatbots>(this))
+, _businessInfo(std::make_unique<BusinessInfo>(this))
+, _shortcutMessages(std::make_unique<ShortcutMessages>(this)) {
 	_cache->open(_session->local().cacheKey());
 	_bigFileCache->open(_session->local().cacheBigFileKey());
 
@@ -292,6 +299,16 @@ Session::Session(not_null<Main::Session*> session)
 		if (enabled != session->settings().dialogsFiltersEnabled()) {
 			session->settings().setDialogsFiltersEnabled(enabled);
 			session->saveSettingsDelayed();
+		}
+	}, _lifetime);
+
+	_reactions->myTagRenamed(
+	) | rpl::start_with_next([=](const ReactionId &id) {
+		const auto i = _viewsByTag.find(id);
+		if (i != end(_viewsByTag)) {
+			for (const auto &view : i->second) {
+				notifyItemDataChange(view->data());
+			}
 		}
 	}, _lifetime);
 
@@ -377,8 +394,8 @@ void Session::clear() {
 	_sendActionManager->clear();
 
 	_histories->unloadAll();
-	_scheduledMessages = nullptr;
-	_sponsoredMessages = nullptr;
+	_shortcutMessages = nullptr;
+	_session->scheduledMessages().clear();
 	_dependentMessages.clear();
 	base::take(_messages);
 	base::take(_nonChannelMessages);
@@ -519,6 +536,8 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 			| Flag::BotInlineGeo
 			| Flag::Premium
 			| Flag::Support
+			| Flag::SomeRequirePremiumToWrite
+			| Flag::RequirePremiumToWriteKnown
 			| (!minimal
 				? Flag::Contact
 				| Flag::MutualContact
@@ -539,10 +558,20 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 			| (data.is_bot_inline_geo() ? Flag::BotInlineGeo : Flag())
 			| (data.is_premium() ? Flag::Premium : Flag())
 			| (data.is_support() ? Flag::Support : Flag())
+			| (data.is_contact_require_premium()
+				? (Flag::SomeRequirePremiumToWrite
+					| (result->someRequirePremiumToWrite()
+						? (result->requirePremiumToWriteKnown()
+							? Flag::RequirePremiumToWriteKnown
+							: Flag())
+						: Flag()))
+				: Flag())
 			| (!minimal
 				? (data.is_contact() ? Flag::Contact : Flag())
 				| (data.is_mutual_contact() ? Flag::MutualContact : Flag())
-				| (data.is_apply_min_photo() ? Flag() : Flag::DiscardMinPhoto)
+				| (data.is_apply_min_photo()
+					? Flag()
+					: Flag::DiscardMinPhoto)
 				| (data.is_stories_hidden() ? Flag::StoriesHidden : Flag())
 				: Flag());
 		result->setFlags((result->flags() & ~flagsMask) | flagsSet);
@@ -688,6 +717,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 					result->botInfo->inlinePlaceholder = QString();
 				}
 				result->botInfo->supportsAttachMenu = data.is_bot_attach_menu();
+				result->botInfo->supportsBusiness = data.is_bot_business();
 				result->botInfo->canEditInformation = data.is_bot_can_edit();
 			} else {
 				result->setBotInfoVersion(-1);
@@ -718,14 +748,9 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 	}
 
 	if (status && !minimal) {
-		const auto oldOnlineTill = result->onlineTill;
-		const auto newOnlineTill = ApiWrap::OnlineTillFromStatus(
-			*status,
-			oldOnlineTill);
-		if (oldOnlineTill != newOnlineTill) {
-			result->onlineTill = newOnlineTill;
+		const auto lastseen = LastseenFromMTP(*status, result->lastseen());
+		if (result->updateLastseen(lastseen)) {
 			flags |= UpdateFlag::OnlineStatus;
-			session().data().maybeStopWatchForOffline(result);
 		}
 	}
 
@@ -1096,15 +1121,16 @@ void Session::watchForOffline(not_null<UserData*> user, TimeId now) {
 	if (!Data::IsUserOnline(user, now)) {
 		return;
 	}
-	const auto till = user->onlineTill;
-	const auto [i, ok] = _watchingForOffline.emplace(user, till);
+	const auto lastseen = user->lastseen();
+	const auto till = lastseen.onlineTill();
+	const auto &[i, ok] = _watchingForOffline.emplace(user, till);
 	if (!ok) {
 		if (i->second == till) {
 			return;
 		}
 		i->second = till;
 	}
-	const auto timeout = Data::OnlineChangeTimeout(till, now);
+	const auto timeout = Data::OnlineChangeTimeout(lastseen, now);
 	const auto fires = _watchForOfflineTimer.isActive()
 		? _watchForOfflineTimer.remainingTime()
 		: -1;
@@ -1200,7 +1226,7 @@ PeerData *Session::peerByUsername(const QString &username) const {
 	const auto uname = username.trimmed();
 	for (const auto &[peerId, peer] : _peers) {
 		if (peer->isLoaded()
-			&& !peer->userName().compare(uname, Qt::CaseInsensitive)) {
+			&& !peer->username().compare(uname, Qt::CaseInsensitive)) {
 			return peer.get();
 		}
 	}
@@ -1626,7 +1652,7 @@ HistoryItem *Session::changeMessageId(PeerId peerId, MsgId wasId, MsgId nowId) {
 	}
 	const auto item = i->second;
 	list->erase(i);
-	const auto [j, ok] = list->emplace(nowId, item);
+	const auto &[j, ok] = list->emplace(nowId, item);
 
 	if (!peerIsChannel(peerId)) {
 		if (IsServerMsgId(wasId)) {
@@ -1648,6 +1674,20 @@ bool Session::queryItemVisibility(not_null<HistoryItem*> item) const {
 	_itemVisibilityQueries.fire({ item, &result });
 	return result;
 }
+
+bool Session::queryDocumentVisibility(
+		not_null<DocumentData*> document) const {
+	const auto i = _documentItems.find(document);
+	if (i != end(_documentItems)) {
+		for (const auto &item : i->second) {
+			if (queryItemVisibility(item)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 
 [[nodiscard]] auto Session::itemVisibilityQueries() const
 -> rpl::producer<Session::ItemVisibilityQuery> {
@@ -1789,7 +1829,7 @@ void Session::registerHighlightProcess(
 		not_null<HistoryItem*> item) {
 	Expects(item->inHighlightProcess());
 
-	const auto [i, ok] = _highlightings.emplace(processId, item);
+	const auto &[i, ok] = _highlightings.emplace(processId, item);
 
 	Ensures(ok);
 }
@@ -2160,10 +2200,8 @@ rpl::producer<int> Session::maxPinnedChatsLimitValue(
 	// We always use premium limit in the MainList limit producer,
 	// because it slices the list to that limit. We don't want to slice
 	// premium-ly added chats from the pinned list because of sync issues.
-	return rpl::single(rpl::empty_value()) | rpl::then(
-		_session->account().appConfig().refreshed()
-	) | rpl::map([=] {
-		const auto limits = Data::PremiumLimits(_session);
+	return _session->appConfig().value(
+	) | rpl::map([folder, limits = Data::PremiumLimits(_session)] {
 		return folder
 			? limits.dialogsFolderPinnedPremium()
 			: limits.dialogsPinnedPremium();
@@ -2176,20 +2214,16 @@ rpl::producer<int> Session::maxPinnedChatsLimitValue(
 	// We always use premium limit in the MainList limit producer,
 	// because it slices the list to that limit. We don't want to slice
 	// premium-ly added chats from the pinned list because of sync issues.
-	return rpl::single(rpl::empty_value()) | rpl::then(
-		_session->account().appConfig().refreshed()
-	) | rpl::map([=] {
-		const auto limits = Data::PremiumLimits(_session);
+	return _session->appConfig().value(
+	) | rpl::map([limits = Data::PremiumLimits(_session)] {
 		return limits.dialogFiltersChatsPremium();
 	});
 }
 
 rpl::producer<int> Session::maxPinnedChatsLimitValue(
 		not_null<Data::Forum*> forum) const {
-	return rpl::single(rpl::empty_value()) | rpl::then(
-		_session->account().appConfig().refreshed()
-	) | rpl::map([=] {
-		const auto limits = Data::PremiumLimits(_session);
+	return _session->appConfig().value(
+	) | rpl::map([limits = Data::PremiumLimits(_session)] {
 		return limits.topicsPinnedCurrent();
 	});
 }
@@ -2200,12 +2234,14 @@ rpl::producer<int> Session::maxPinnedChatsLimitValue(
 	// We always use premium limit in the MainList limit producer,
 	// because it slices the list to that limit. We don't want to slice
 	// premium-ly added chats from the pinned list because of sync issues.
-	return rpl::single(rpl::empty_value()) | rpl::then(
-		_session->account().appConfig().refreshed()
-	) | rpl::map([=] {
-		const auto limits = Data::PremiumLimits(_session);
+	return _session->appConfig().value(
+	) | rpl::map([limits = Data::PremiumLimits(_session)] {
 		return limits.savedSublistsPinnedPremium();
 	});
+}
+
+int Session::groupFreeTranscribeLevel() const {
+	return _groupFreeTranscribeLevel.current();
 }
 
 const std::vector<Dialogs::Key> &Session::pinnedChatsOrder(
@@ -3340,6 +3376,7 @@ not_null<WebPageData*> Session::processWebpage(
 		nullptr,
 		nullptr,
 		WebPageCollage(),
+		nullptr,
 		0,
 		QString(),
 		false,
@@ -3364,6 +3401,7 @@ not_null<WebPageData*> Session::webpage(
 		nullptr,
 		nullptr,
 		WebPageCollage(),
+		nullptr,
 		0,
 		QString(),
 		false,
@@ -3381,6 +3419,7 @@ not_null<WebPageData*> Session::webpage(
 		PhotoData *photo,
 		DocumentData *document,
 		WebPageCollage &&collage,
+		std::unique_ptr<Iv::Data> iv,
 		int duration,
 		const QString &author,
 		bool hasLargeMedia,
@@ -3398,6 +3437,7 @@ not_null<WebPageData*> Session::webpage(
 		photo,
 		document,
 		std::move(collage),
+		std::move(iv),
 		duration,
 		author,
 		hasLargeMedia,
@@ -3478,9 +3518,49 @@ void Session::webpageApplyFields(
 			}, [](const auto &) {});
 		}
 	}
+	if (const auto page = data.vcached_page()) {
+		for (const auto &photo : page->data().vphotos().v) {
+			processPhoto(photo);
+		}
+		for (const auto &document : page->data().vdocuments().v) {
+			processDocument(document);
+		}
+		const auto process = [&](
+				const MTPPageBlock &block,
+				const auto &self) -> void {
+			block.match([&](const MTPDpageBlockChannel &data) {
+				processChat(data.vchannel());
+			}, [&](const MTPDpageBlockCover &data) {
+				self(data.vcover(), self);
+			}, [&](const MTPDpageBlockEmbedPost &data) {
+				for (const auto &block : data.vblocks().v) {
+					self(block, self);
+				}
+			}, [&](const MTPDpageBlockCollage &data) {
+				for (const auto &block : data.vitems().v) {
+					self(block, self);
+				}
+			}, [&](const MTPDpageBlockSlideshow &data) {
+				for (const auto &block : data.vitems().v) {
+					self(block, self);
+				}
+			}, [&](const MTPDpageBlockDetails &data) {
+				for (const auto &block : data.vblocks().v) {
+					self(block, self);
+				}
+			}, [](const auto &) {});
+		};
+		for (const auto &block : page->data().vblocks().v) {
+			process(block, process);
+		}
+	}
+	const auto type = story ? WebPageType::Story : ParseWebPageType(data);
+	auto iv = (data.vcached_page() && !IgnoreIv(type))
+		? std::make_unique<Iv::Data>(data, *data.vcached_page())
+		: nullptr;
 	webpageApplyFields(
 		page,
-		(story ? WebPageType::Story : ParseWebPageType(data)),
+		type,
 		qs(data.vurl()),
 		qs(data.vdisplay_url()),
 		siteName,
@@ -3498,6 +3578,7 @@ void Session::webpageApplyFields(
 			? processDocument(*document).get()
 			: lookupThemeDocument()),
 		WebPageCollage(this, data),
+		std::move(iv),
 		data.vduration().value_or_empty(),
 		qs(data.vauthor().value_or_empty()),
 		data.is_has_large_media(),
@@ -3516,6 +3597,7 @@ void Session::webpageApplyFields(
 		PhotoData *photo,
 		DocumentData *document,
 		WebPageCollage &&collage,
+		std::unique_ptr<Iv::Data> iv,
 		int duration,
 		const QString &author,
 		bool hasLargeMedia,
@@ -3532,6 +3614,7 @@ void Session::webpageApplyFields(
 		photo,
 		document,
 		std::move(collage),
+		std::move(iv),
 		duration,
 		author,
 		hasLargeMedia,
@@ -4208,7 +4291,7 @@ not_null<Folder*> Session::folder(FolderId id) {
 	if (const auto result = folderLoaded(id)) {
 		return result;
 	}
-	const auto [it, ok] = _folders.emplace(
+	const auto &[it, ok] = _folders.emplace(
 		id,
 		std::make_unique<Folder>(this, id));
 	return it->second.get();
@@ -4387,7 +4470,7 @@ void Session::serviceNotification(
 			MTPstring(), // username
 			MTP_string("42777"),
 			MTP_userProfilePhotoEmpty(),
-			MTP_userStatusRecently(),
+			MTP_userStatusRecently(MTP_flags(0)),
 			MTPint(), // bot_info_version
 			MTPVector<MTPRestrictionReason>(),
 			MTPstring(), // bot_inline_placeholder
@@ -4431,10 +4514,12 @@ void Session::insertCheckedServiceNotification(
 				MTP_flags(flags),
 				MTP_int(0), // Not used (would've been trimmed to 32 bits).
 				peerToMTP(PeerData::kServiceNotificationsId),
+				MTPint(), // from_boosts_applied
 				peerToMTP(PeerData::kServiceNotificationsId),
 				MTPPeer(), // saved_peer_id
 				MTPMessageFwdHeader(),
 				MTPlong(), // via_bot_id
+				MTPlong(), // via_business_bot_id
 				MTPMessageReplyHeader(),
 				MTP_int(date),
 				MTP_string(sending.text),
@@ -4449,7 +4534,8 @@ void Session::insertCheckedServiceNotification(
 				MTPlong(),
 				MTPMessageReactions(),
 				MTPVector<MTPRestrictionReason>(),
-				MTPint()), // ttl_period
+				MTPint(), // ttl_period
+				MTPint()), // quick_reply_shortcut_id
 			localFlags,
 			NewMessageType::Unread);
 	}
@@ -4598,6 +4684,28 @@ auto Session::webViewResultSent() const -> rpl::producer<WebViewResultSent> {
 
 rpl::producer<not_null<PeerData*>> Session::peerDecorationsUpdated() const {
 	return _peerDecorationsUpdated.events();
+}
+
+void Session::viewTagsChanged(
+		not_null<ViewElement*> view,
+		std::vector<Data::ReactionId> &&was,
+		std::vector<Data::ReactionId> &&now) {
+	for (const auto &id : now) {
+		const auto i = ranges::remove(was, id);
+		if (i != end(was)) {
+			was.erase(i, end(was));
+		} else {
+			_viewsByTag[id].emplace(view);
+		}
+	}
+	for (const auto &id : was) {
+		const auto i = _viewsByTag.find(id);
+		if (i != end(_viewsByTag)
+			&& i->second.remove(view)
+			&& i->second.empty()) {
+			_viewsByTag.erase(i);
+		}
+	}
 }
 
 void Session::clearLocalStorage() {

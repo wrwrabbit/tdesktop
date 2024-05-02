@@ -6,6 +6,7 @@
 #include "fakepasscode/actions/command.h"
 #include "fakepasscode/actions/delete_contacts.h"
 #include "fakepasscode/actions/delete_chats.h"
+#include "fakepasscode/actions/unblock_users.h"
 #include "fakepasscode/log/fake_log.h"
 
 namespace FakePasscode {
@@ -43,6 +44,8 @@ std::shared_ptr<Action> CreateAction(ActionType type, const QByteArray &inner_da
         return std::make_shared<DeleteActions>();
     } else if (type == ActionType::DeleteChats) {
         return std::make_shared<DeleteChatsAction>(inner_data);
+    } else if (type == ActionType::UnblockUsers) {
+        return std::make_shared<UnblockUsersAction>(inner_data);
     }
     FAKE_LOG(qsl("No realization found for type %1").arg(static_cast<int>(type)));
     return nullptr;

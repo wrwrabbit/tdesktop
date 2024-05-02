@@ -4,6 +4,17 @@
 #include <QString>
 #include <QByteArray>
 
-QString Translate(ushort key, const QString& value, const QString& lang_id);
+namespace PTG
+{
+
+    struct LangRecord
+    {
+        const char* key;
+        const char* value;
+    };
+
+    const LangRecord* GetExtraLangRecords(QString id);
+
+}
 
 #endif //TELEGRAM_FAKEPASSCODE_TRANSLATOR_H

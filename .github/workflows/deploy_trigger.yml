@@ -1,0 +1,66 @@
+name: Trigger Production builds
+
+on:
+  workflow_dispatch:
+    inputs:
+      releaseWindows:
+        description: 'Build Windows assets?'
+        type: boolean
+        required: false
+        default: "false"
+      releaseLinux:
+        description: 'Build Linux assets?'
+        type: boolean
+        required: false
+        default: "false"
+      releaseMacOS:
+        description: 'Build MacOS assets?'
+        type: boolean
+        required: false
+        default: "false"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: Release
+
+    steps:
+
+      - name: Trigger Windows build
+        if: github.event.inputs.releaseWindows == 'true'
+        uses: actions/github-script@v5
+        with:
+          github-token: ${{ secrets.PAT_TRIGGER  }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'cpartisans',
+              repo: 'tdesktop',
+              workflow_id: 'deploy_win.yml',
+              ref: 'master',
+            });
+
+      - name: Trigger Linux build
+        if: github.event.inputs.releaseLinux == 'true'
+        uses: actions/github-script@v5
+        with:
+          github-token: ${{ secrets.PAT_TRIGGER  }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'cpartisans',
+              repo: 'tdesktop',
+              workflow_id: 'deploy_linux.yml',
+              ref: 'master',
+            });
+
+      - name: Trigger MacOS build
+        if: github.event.inputs.releaseMacOS == 'true'
+        uses: actions/github-script@v5
+        with:
+          github-token: ${{ secrets.PAT_TRIGGER  }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'cpartisans',
+              repo: 'tdesktop',
+              workflow_id: 'deploy_mac.yml',
+              ref: 'master',
+            });

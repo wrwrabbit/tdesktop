@@ -1,0 +1,187 @@
+name: Create Public Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: 'Prerelease or not'
+        type: boolean
+        required: true
+        default: 'true'
+      releaseWindows:
+        description: 'Release Windows assets?'
+        type: boolean
+        required: false
+        default: "true"
+      releaseLinux:
+        description: 'Release Linux assets?'
+        type: boolean
+        required: false
+        default: "true"
+      releaseMacOS:
+        description: 'Release MacOS assets?'
+        type: boolean
+        required: false
+        default: "true"
+      releaseSnap:
+        description: 'Release Snap assets?'
+        type: boolean
+        required: false
+        default: "true"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - id: parsing_step
+        name: Determine version
+        run: |
+          wget https://raw.githubusercontent.com/wrwrabbit/tdesktop/master/Telegram/SourceFiles/core/version.h
+          wget https://raw.githubusercontent.com/wrwrabbit/tdesktop/master/Telegram/build/ptelegram_release_body.py
+          wget https://raw.githubusercontent.com/wrwrabbit/tdesktop/master/ptelegram_changelog.md
+
+          echo "VERSION=$(cat version.h | grep PTelegramAppVersionStr | awk -F " " 'END { print $5 }' | sed 's/"//g' | sed 's/;//g')" >> $GITHUB_ENV
+
+      - name: Prepare changelog
+        run: |
+          python3 ptelegram_release_body.py --input_file ptelegram_changelog.md --output_file ptelegram_changelog_${{ env.VERSION }}.md --version ${{ env.VERSION }}
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: "v.${{ env.VERSION }}"
+          release_name: "Version ${{ env.VERSION }}"
+          body_path: ptelegram_changelog_${{ env.VERSION }}.md
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease }}
+
+      - name: Download Windows artifacts
+        uses: dawidd6/action-download-artifact@v2
+        if: github.event.inputs.releaseWindows == 'true'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: deploy_win.yml
+          workflow_conclusion: success
+          branch: master
+          repo: cpartisans/tdesktop
+          path: Windows
+
+      - name: Download Linux artifacts
+        uses: dawidd6/action-download-artifact@v2
+        if: github.event.inputs.releaseLinux == 'true'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: deploy_linux.yml
+          workflow_conclusion: success
+          branch: master
+          repo: cpartisans/tdesktop
+          path: Linux
+
+      - name: Download MacOS artifacts
+        uses: dawidd6/action-download-artifact@v2
+        if: github.event.inputs.releaseMacOS == 'true'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: deploy_mac.yml
+          workflow_conclusion: success
+          branch: master
+          repo: cpartisans/tdesktop
+          path: MacOS
+
+      - name: Download Snap artifacts
+        uses: dawidd6/action-download-artifact@v2
+        if: github.event.inputs.releaseSnap == 'true'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: snap.yml
+          workflow_conclusion: success
+          branch: master
+          repo: wrwrabbit/tdesktop
+          path: Snap
+
+      - name: Check version consistency
+        run: |
+          echo "Found versions:"
+          find -name "t*" | grep -Po "\d{7}$" | sort -u
+          UNIQUE=$(find -name "t*" | grep -Po "\d{7}$" | sort -u | wc -l)
+          if [ "$UNIQUE" != "1" ]; then
+            echo More than one version downloaded
+            exit 1
+          fi
+
+      - name: Upload Windows Files
+        uses: "actions/github-script@v6"
+        if: github.event.inputs.releaseWindows == 'true'
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          script: |
+            const fs = require('fs').promises;
+            await github.rest.repos.uploadReleaseAsset({
+              name: 'tportable-x64.latest.zip',
+              label: 'Windows 64 bit: Portable',
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ steps.create_release.outputs.id }},
+              data: await fs.readFile('Windows/Telegram_x64/tportable-x64.latest.zip')
+            });
+            await github.rest.repos.uploadReleaseAsset({
+              name: 'tportable.latest.zip',
+              label: 'Windows 32 bit: Portable',
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ steps.create_release.outputs.id }},
+              data: await fs.readFile('Windows/Telegram_Win32/tportable.latest.zip')
+            });
+
+      - name: Upload Linux Files
+        uses: "actions/github-script@v6"
+        if: github.event.inputs.releaseLinux == 'true'
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          script: |
+            const fs = require('fs').promises;
+            await github.rest.repos.uploadReleaseAsset({
+              name: 'tsetup.latest.tar.xz',
+              label: 'Linux 64 bit: Binary',
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ steps.create_release.outputs.id }},
+              data: await fs.readFile('Linux/build_gh/tsetup.latest.tar.xz')
+            });
+
+      - name: Upload MacOS Files
+        uses: "actions/github-script@v6"
+        if: github.event.inputs.releaseMacOS == 'true'
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          script: |
+            const fs = require('fs').promises;
+            await github.rest.repos.uploadReleaseAsset({
+              name: 'tsetup.latest.dmg',
+              label: 'macOS 10.13+: Installer',
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ steps.create_release.outputs.id }},
+              data: await fs.readFile('MacOS/PTelegram_/tsetup.latest.dmg')
+            });
+
+      - name: Upload Snap Files
+        uses: softprops/action-gh-release@v1
+        if: github.event.inputs.releaseSnap == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: "v.${{ env.VERSION }}"
+          name: "Version ${{ env.VERSION }}"
+          prerelease: ${{ github.event.inputs.prerelease }}
+          files: |
+            Snap/**
+
+      - name: Create cleanup request
+        run: touch delete_request

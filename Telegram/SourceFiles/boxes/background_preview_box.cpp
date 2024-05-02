@@ -31,8 +31,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/history_item_helpers.h"
 #include "history/view/history_view_message.h"
-#include "main/main_account.h"
-#include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "apiwrap.h"
 #include "data/data_session.h"
@@ -42,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document_resolver.h"
 #include "data/data_file_origin.h"
 #include "data/data_peer_values.h"
+#include "data/data_premium_limits.h"
 #include "settings/settings_premium.h"
 #include "storage/file_upload.h"
 #include "storage/localimageloader.h"
@@ -57,7 +56,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace {
 
 constexpr auto kMaxWallPaperSlugLength = 255;
-constexpr auto kDefaultDimming = 50;
 
 [[nodiscard]] bool IsValidWallPaperSlug(const QString &slug) {
 	if (slug.isEmpty() || slug.size() > kMaxWallPaperSlugLength) {
@@ -83,11 +81,11 @@ constexpr auto kDefaultDimming = 50;
 	const auto flags = MessageFlag::FakeHistoryItem
 		| MessageFlag::HasFromId
 		| (out ? MessageFlag::Outgoing : MessageFlag(0));
-	const auto item = history->makeMessage(
-		history->owner().nextLocalMessageId(),
-		flags,
-		base::unixtime::now(),
-		PreparedServiceText{ { text } });
+	const auto item = history->makeMessage({
+		.id = history->owner().nextLocalMessageId(),
+		.flags = flags,
+		.date = base::unixtime::now(),
+	}, PreparedServiceText{ { text } });
 	return AdminLog::OwnedItem(delegate, item);
 }
 
@@ -98,24 +96,16 @@ constexpr auto kDefaultDimming = 50;
 		bool out) {
 	Expects(history->peer->isUser());
 
-	const auto flags = MessageFlag::FakeHistoryItem
-		| MessageFlag::HasFromId
-		| (out ? MessageFlag::Outgoing : MessageFlag(0));
-	const auto replyTo = FullReplyTo();
-	const auto viaBotId = UserId();
-	const auto groupedId = uint64();
-	const auto item = history->makeMessage(
-		history->nextNonHistoryEntryId(),
-		flags,
-		replyTo,
-		viaBotId,
-		base::unixtime::now(),
-		out ? history->session().userId() : peerToUser(history->peer->id),
-		QString(),
-		TextWithEntities{ text },
-		MTP_messageMediaEmpty(),
-		HistoryMessageMarkupData(),
-		groupedId);
+	const auto item = history->makeMessage({
+		.id = history->nextNonHistoryEntryId(),
+		.flags = (MessageFlag::FakeHistoryItem
+			| MessageFlag::HasFromId
+			| (out ? MessageFlag::Outgoing : MessageFlag(0))),
+		.from = (out
+			? history->session().userId()
+			: peerToUser(history->peer->id)),
+		.date = base::unixtime::now(),
+	}, TextWithEntities{ text }, MTP_messageMediaEmpty());
 	return AdminLog::OwnedItem(delegate, item);
 }
 
@@ -468,19 +458,23 @@ bool BackgroundPreviewBox::forChannel() const {
 	return _forPeer && _forPeer->isChannel();
 }
 
+bool BackgroundPreviewBox::forGroup() const {
+	return forChannel() && _forPeer->isMegagroup();
+}
+
 void BackgroundPreviewBox::generateBackground() {
 	if (_paper.backgroundColors().empty()) {
 		return;
 	}
 	const auto size = QSize(st::boxWideWidth, st::boxWideWidth)
-		* cIntRetinaFactor();
+		* style::DevicePixelRatio();
 	_generated = Ui::PixmapFromImage((_paper.patternOpacity() >= 0.)
 		? Ui::GenerateBackgroundImage(
 			size,
 			_paper.backgroundColors(),
 			_paper.gradientRotation())
 		: BlackImage(size));
-	_generated.setDevicePixelRatio(cRetinaFactor());
+	_generated.setDevicePixelRatio(style::DevicePixelRatio());
 }
 
 not_null<HistoryView::ElementDelegate*> BackgroundPreviewBox::delegate() {
@@ -493,7 +487,9 @@ void BackgroundPreviewBox::resetTitle() {
 
 void BackgroundPreviewBox::rebuildButtons(bool dark) {
 	clearButtons();
-	addButton(forChannel()
+	addButton(forGroup()
+		? tr::lng_background_apply_group()
+		: forChannel()
 		? tr::lng_background_apply_channel()
 		: _forPeer
 		? tr::lng_background_apply_button()
@@ -597,11 +593,11 @@ void BackgroundPreviewBox::uploadForPeer(bool both) {
 	const auto ready = Window::Theme::PrepareWallPaper(
 		session->mainDcId(),
 		_paper.localThumbnail()->original());
-	const auto documentId = ready.id;
+	const auto documentId = ready->id;
 	_uploadId = FullMsgId(
 		session->userPeerId(),
 		session->data().nextLocalMessageId());
-	session->uploader().uploadMedia(_uploadId, ready);
+	session->uploader().upload(_uploadId, ready);
 	if (_uploadLifetime) {
 		return;
 	}
@@ -694,22 +690,16 @@ void BackgroundPreviewBox::checkLevelForChannel() {
 		if (!weak) {
 			return std::optional<Ui::AskBoostReason>();
 		}
-		const auto appConfig = &_forPeer->session().account().appConfig();
-		const auto defaultRequired = appConfig->get<int>(
-			"channel_wallpaper_level_min",
-			9);
-		const auto customRequired = appConfig->get<int>(
-			"channel_custom_wallpaper_level_min",
-			10);
+		const auto limits = Data::LevelLimits(&_forPeer->session());
 		const auto required = _paperEmojiId.isEmpty()
-			? customRequired
-			: defaultRequired;
+			? limits.channelCustomWallpaperLevelMin()
+			: limits.channelWallpaperLevelMin();
 		if (level >= required) {
 			applyForPeer(false);
 			return std::optional<Ui::AskBoostReason>();
 		}
 		return std::make_optional(Ui::AskBoostReason{
-			Ui::AskBoostWallpaper{ required }
+			Ui::AskBoostWallpaper{ required, _forPeer->isMegagroup()}
 		});
 	}, [=] { _forPeerLevelCheck = false; });
 }
@@ -786,7 +776,7 @@ void BackgroundPreviewBox::applyForPeer() {
 		} else {
 			ShowPremiumPreviewBox(
 				_controller->uiShow(),
-				PremiumPreview::Wallpapers);
+				PremiumFeature::Wallpapers);
 		}
 	});
 	const auto cancel = CreateChild<RoundButton>(
@@ -899,7 +889,7 @@ void BackgroundPreviewBox::paintEvent(QPaintEvent *e) {
 void BackgroundPreviewBox::paintImage(Painter &p) {
 	Expects(!_scaled.isNull());
 
-	const auto factor = cIntRetinaFactor();
+	const auto factor = style::DevicePixelRatio();
 	const auto size = st::boxWideWidth;
 	const auto from = QRect(
 		0,
@@ -1084,7 +1074,9 @@ void BackgroundPreviewBox::updateServiceBg(const std::vector<QColor> &bg) {
 	_service = GenerateServiceItem(
 		delegate(),
 		_serviceHistory,
-		(forChannel()
+		(forGroup()
+			? tr::lng_background_other_group(tr::now)
+			: forChannel()
 			? tr::lng_background_other_channel(tr::now)
 			: (_forPeer && !_fromMessageId)
 			? tr::lng_background_other_info(

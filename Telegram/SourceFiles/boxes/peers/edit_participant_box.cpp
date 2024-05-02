@@ -143,7 +143,7 @@ void EditParticipantBox::Inner::paintEvent(QPaintEvent *e) {
 				? tr::lng_status_bot_reads_all
 				: tr::lng_status_bot_not_reads_all)(tr::now);
 		}
-		return Data::OnlineText(_user->onlineTill, base::unixtime::now());
+		return Data::OnlineText(_user->lastseen(), base::unixtime::now());
 	}();
 	p.setFont(st::contactsStatusFont);
 	p.setPen(st::contactsStatusFg);
@@ -216,6 +216,9 @@ ChatAdminRightsInfo EditAdminBox::defaultRights() const {
 		: peer()->isMegagroup()
 		? ChatAdminRightsInfo{ (Flag::ChangeInfo
 			| Flag::DeleteMessages
+			| Flag::PostStories
+			| Flag::EditStories
+			| Flag::DeleteStories
 			| Flag::BanUsers
 			| Flag::InviteByLinkOrAdd
 			| Flag::ManageTopics
@@ -225,6 +228,9 @@ ChatAdminRightsInfo EditAdminBox::defaultRights() const {
 			| Flag::PostMessages
 			| Flag::EditMessages
 			| Flag::DeleteMessages
+			| Flag::PostStories
+			| Flag::EditStories
+			| Flag::DeleteStories
 			| Flag::InviteByLinkOrAdd
 			| Flag::ManageCall) };
 }
@@ -381,11 +387,12 @@ void EditAdminBox::prepare() {
 				_rank ? _rank->getLastText().trimmed() : QString());
 		};
 		_save = [=] {
+			const auto show = uiShow();
 			if (!_saveCallback) {
 				return;
 			} else if (_addAsAdmin && !_addAsAdmin->checked()) {
 				const auto weak = Ui::MakeWeak(this);
-				AddBotToGroup(user(), peer(), _addingBot->token);
+				AddBotToGroup(show, user(), peer(), _addingBot->token);
 				if (const auto strong = weak.data()) {
 					strong->closeBox();
 				}
@@ -591,19 +598,17 @@ void EditAdminBox::requestTransferPassword(not_null<ChannelData*> channel) {
 	) | rpl::take(
 		1
 	) | rpl::start_with_next([=](const Core::CloudPasswordState &state) {
-		const auto box = std::make_shared<QPointer<PasscodeBox>>();
 		auto fields = PasscodeBox::CloudFields::From(state);
 		fields.customTitle = tr::lng_rights_transfer_password_title();
 		fields.customDescription
 			= tr::lng_rights_transfer_password_description(tr::now);
 		fields.customSubmitButton = tr::lng_passcode_submit();
 		fields.customCheckCallback = crl::guard(this, [=](
-				const Core::CloudPasswordResult &result) {
-			sendTransferRequestFrom(*box, channel, result);
+				const Core::CloudPasswordResult &result,
+				QPointer<PasscodeBox> box) {
+			sendTransferRequestFrom(box, channel, result);
 		});
-		*box = getDelegate()->show(Box<PasscodeBox>(
-			&channel->session(),
-			fields));
+		getDelegate()->show(Box<PasscodeBox>(&channel->session(), fields));
 	}, lifetime());
 }
 
@@ -662,8 +667,8 @@ void EditAdminBox::sendTransferRequestFrom(
 		}();
 		const auto recoverable = [&] {
 			return (type == u"PASSWORD_MISSING"_q)
-				|| (type == u"PASSWORD_TOO_FRESH_XXX"_q)
-				|| (type == u"SESSION_TOO_FRESH_XXX"_q);
+				|| type.startsWith(u"PASSWORD_TOO_FRESH_"_q)
+				|| type.startsWith(u"SESSION_TOO_FRESH_"_q);
 		}();
 		const auto weak = Ui::MakeWeak(this);
 		getDelegate()->show(Ui::MakeInformBox(problem));
@@ -840,7 +845,7 @@ void EditRestrictedBox::createUntilGroup() {
 
 void EditRestrictedBox::createUntilVariants() {
 	auto addVariant = [&](int value, const QString &text) {
-		if (!canSave() && _untilGroup->value() != value) {
+		if (!canSave() && _untilGroup->current() != value) {
 			return;
 		}
 		_untilVariants.emplace_back(

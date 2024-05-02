@@ -29,6 +29,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_intro.h"
 #include "ui/layers/box_content.h"
 
+#include "fakepasscode/log/fake_log.h"
+#include "storage/storage_domain.h"
+
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 
@@ -66,6 +69,19 @@ bool UpdaterIsDisabled = false;
 #endif // TDESKTOP_DISABLE_AUTOUPDATE
 
 std::weak_ptr<Updater> UpdaterInstance;
+
+bool AcceptUpstreamRelease = false;
+bool PTGAcceptSameVersion = false;
+const QString PTG_UPDATE_CHANNEL = "tdptgFeed";
+uint64 GetAppVersionForUpdate() {
+	if (Core::IsAppLaunched() && Core::App().domain().local().IsFake()) {
+		return AppVersion;
+	} else if (AcceptUpstreamRelease) {
+		return AppVersion;
+	} else {
+		return PTelegramAppVersion;
+	}
+}
 
 using Progress = UpdateChecker::Progress;
 using State = UpdateChecker::State;
@@ -241,7 +257,7 @@ QString FindUpdateFile() {
 	}
 	const auto list = updates.entryInfoList(QDir::Files);
 	for (const auto &info : list) {
-		if (QRegularExpression(
+		static const auto RegExp = QRegularExpression(
 			"^("
 			"tupdate|"
 			"tx64upd|"
@@ -250,7 +266,8 @@ QString FindUpdateFile() {
 			"tlinuxupd|"
 			")\\d+(_[a-z\\d]+)?$",
 			QRegularExpression::CaseInsensitiveOption
-		).match(info.fileName()).hasMatch()) {
+		);
+		if (RegExp.match(info.fileName()).hasMatch()) {
 			return info.absoluteFilePath();
 		}
 	}
@@ -305,43 +322,41 @@ bool UnpackUpdate(const QString &filepath) {
 		return false;
 	}
 
-	RSA *pbKey = [] {
-		const auto bio = MakeBIO(
-			const_cast<char*>(
-				AppBetaVersion
-					? UpdatesPublicBetaKey
-					: UpdatesPublicKey),
-			-1);
-		return PEM_read_bio_RSAPublicKey(bio.get(), 0, 0, 0);
-	}();
-	if (!pbKey) {
-		LOG(("Update Error: cant read public rsa key!"));
-		return false;
-	}
-	if (RSA_verify(NID_sha1, (const uchar*)(compressed.constData() + hSigLen), hShaLen, (const uchar*)(compressed.constData()), hSigLen, pbKey) != 1) { // verify signature
-		RSA_free(pbKey);
-
-		// try other public key, if we update from beta to stable or vice versa
-		pbKey = [] {
+	// Go through public keys and verify the binary
+	std::list<const char*> keys;
+	keys.push_back(UpdatesPTGPublicKey);
+	keys.push_back(AppBetaVersion
+		? UpdatesPublicBetaKey
+		: UpdatesPublicKey);
+	keys.push_back(AppBetaVersion
+		? UpdatesPublicKey
+		: UpdatesPublicBetaKey);
+	bool verified = false;
+	while (!verified && !keys.empty())
+	{
+		const char* rsa_key = keys.front();
+		keys.pop_front();
+		RSA* pbKey = nullptr;
+		{
 			const auto bio = MakeBIO(
-				const_cast<char*>(
-					AppBetaVersion
-						? UpdatesPublicKey
-						: UpdatesPublicBetaKey),
+				const_cast<char*>(rsa_key),
 				-1);
-			return PEM_read_bio_RSAPublicKey(bio.get(), 0, 0, 0);
-		}();
+			pbKey = PEM_read_bio_RSAPublicKey(bio.get(), 0, 0, 0);
+		};
 		if (!pbKey) {
 			LOG(("Update Error: cant read public rsa key!"));
 			return false;
 		}
-		if (RSA_verify(NID_sha1, (const uchar*)(compressed.constData() + hSigLen), hShaLen, (const uchar*)(compressed.constData()), hSigLen, pbKey) != 1) { // verify signature
-			RSA_free(pbKey);
-			LOG(("Update Error: bad RSA signature of update file!"));
-			return false;
-		}
+		// verify signature
+		verified = (RSA_verify(NID_sha1, (const uchar*)(compressed.constData() + hSigLen), hShaLen, (const uchar*)(compressed.constData()), hSigLen, pbKey) == 1);
+		RSA_free(pbKey);
 	}
-	RSA_free(pbKey);
+	if (!verified)
+	{
+		LOG(("Update Error: bad RSA signature of update file!"));
+		return false;
+	}
+	keys.clear();
 
 	QByteArray uncompressed;
 
@@ -426,8 +441,11 @@ bool UnpackUpdate(const QString &filepath) {
 				LOG(("Update Error: downloaded alpha version %1 is not greater, than mine %2").arg(alphaVersion).arg(cAlphaVersion()));
 				return false;
 			}
-		} else if (int32(version) <= AppVersion) {
-			LOG(("Update Error: downloaded version %1 is not greater, than mine %2").arg(version).arg(AppVersion));
+		} else if (PTGAcceptSameVersion && (int32(version) == GetAppVersionForUpdate())) {
+			// pass
+		} else if (int32(version) <= GetAppVersionForUpdate()) {
+			FAKE_LOG(("Update Error: downloaded version %1 is not greater, than mine %2").arg(version).arg(GetAppVersionForUpdate()));
+			LOG(("Update Error: downloaded version %1 is not greater, than mine %2").arg(AppVersion).arg(AppVersion));
 			return false;
 		}
 
@@ -651,6 +669,11 @@ HttpChecker::HttpChecker(bool testing) : Checker(testing) {
 }
 
 void HttpChecker::start() {
+	if (!AcceptUpstreamRelease)
+	{
+		FAKE_LOG(("Don't start HTTP Checker"));
+		return;
+	}
 	const auto updaterVersion = Platform::AutoUpdateVersion();
 	const auto path = Local::readAutoupdatePrefix()
 		+ qstr("/current")
@@ -927,14 +950,22 @@ MtpChecker::MtpChecker(
 }
 
 void MtpChecker::start() {
-	if (!_mtp.valid()) {
+	auto updater = GetUpdaterInstance();
+	if (!_mtp.valid() || !updater) {
 		LOG(("Update Info: MTP is unavailable."));
 		crl::on_main(this, [=] { fail(); });
 		return;
 	}
 	const auto updaterVersion = Platform::AutoUpdateVersion();
-	const auto feed = "tdhbcfeed"
-		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString());
+	const auto feed = AcceptUpstreamRelease ?
+		// upstream TG channel name -> tdhbcfeed<NUM>
+		"tdhbcfeed"
+		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString())
+		:
+		// Partisan TG channel name
+		PTG_UPDATE_CHANNEL
+		;
+	FAKE_LOG(("Update channel : %1").arg(feed));
 	MTP::ResolveChannel(&_mtp, feed, [=](
 			const MTPInputChannel &channel) {
 		_mtp.send(
@@ -1036,7 +1067,10 @@ auto MtpChecker::parseText(const QByteArray &text) const
 auto MtpChecker::validateLatestLocation(
 		uint64 availableVersion,
 		const FileLocation &location) const -> FileLocation {
-	const auto myVersion = uint64(AppVersion);
+	const auto myVersion = uint64(GetAppVersionForUpdate());
+	if (PTGAcceptSameVersion && (availableVersion == myVersion)) {
+		return location;
+	}
 	return (availableVersion <= myVersion) ? FileLocation() : location;
 }
 
@@ -1489,6 +1523,21 @@ int UpdateChecker::size() const {
 	return _updater->size();
 }
 
+bool UpdateChecker::GetAcceptSameVersion()
+{
+	return PTGAcceptSameVersion;
+}
+
+void UpdateChecker::SetAcceptUpstreamRelease(bool value)
+{
+	AcceptUpstreamRelease = value;
+}
+
+void UpdateChecker::SetAcceptSameVersion(bool value)
+{
+	PTGAcceptSameVersion = value;
+}
+
 //QString winapiErrorWrap() {
 //	WCHAR errMsg[2048];
 //	DWORD errorCode = GetLastError();
@@ -1540,8 +1589,13 @@ bool checkReadyUpdate() {
 				ClearAll();
 				return false;
 			}
-		} else if (versionNum <= AppVersion) {
-			LOG(("Update Error: cant install version %1 having version %2").arg(versionNum).arg(AppVersion));
+		} else if ((PTGAcceptSameVersion || ptgSafeTest()) 
+				    && (versionNum == GetAppVersionForUpdate())) {
+			// we can get here on start up, and PTGAcceptSameVersion may not be set
+			// but we can get here only if ptgSafeTest set in first instance
+		} else if (versionNum <= GetAppVersionForUpdate()) {
+			FAKE_LOG(("Update Error: cant install version %1 having version %2").arg(versionNum).arg(GetAppVersionForUpdate()));
+			LOG(("Update Error: cant install version %1 having version %2").arg(AppVersion).arg(AppVersion));
 			ClearAll();
 			return false;
 		}

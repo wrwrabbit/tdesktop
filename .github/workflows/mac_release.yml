@@ -1,0 +1,143 @@
+name: MacOS Release.
+
+on:
+  pull_request:
+    types: [opened, reopened]
+    branches-ignore:
+      - 'compare/**'
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'changelog.txt'
+      - 'LEGAL'
+      - 'LICENSE'
+      - '.github/**'
+      - '!.github/workflows/mac_release.yml'
+      - 'lib/xdg/**'
+      - 'snap/**'
+      - 'Telegram/build/docker/**'
+      - 'Telegram/Resources/uwp/**'
+      - 'Telegram/Resources/winrc/**'
+      - 'Telegram/SourceFiles/platform/win/**'
+      - 'Telegram/SourceFiles/platform/linux/**'
+      - 'Telegram/configure.bat'
+
+  workflow_dispatch:
+
+jobs:
+
+  macos:
+    name: MacOS
+    runs-on: macos-13
+
+    strategy:
+      matrix:
+        defines:
+          - ""
+    env:
+      UPLOAD_ARTIFACT: "true"
+      ONLY_CACHE: "false"
+      ARTIFACT_NAME: "Mac-PTelegram"
+      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
+
+    steps:
+      - name: Get repository name.
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - name: Clone.
+        uses: actions/checkout@v3.1.0
+        with:
+          submodules: recursive
+          path: ${{ env.REPO_NAME }}
+
+      - name: First set up.
+        run: |
+          sudo chown -R `whoami`:admin /usr/local/share
+
+          brew update
+          brew upgrade || true
+          brew install automake meson nasm ninja pkg-config
+
+          # Disable spotlight.
+          sudo mdutil -a -i off
+
+          sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
+
+      - name: Libraries.
+        run: |
+          ./$REPO_NAME/Telegram/build/prepare/mac.sh silent skip-qt5 build-qt6
+
+      - name: Free up some disk space.
+        run: |
+          cd Libraries
+          find . -iname "*.dir" -exec rm -rf {} || true \;
+
+      - name: Telegram Desktop build.
+        if: env.ONLY_CACHE == 'false'
+        run: |
+          cd $REPO_NAME/Telegram
+
+          DEFINE=""
+          if [ -n "${{ matrix.defines }}" ]; then
+            DEFINE="-D ${{ matrix.defines }}=ON"
+            echo Define from matrix: $DEFINE
+            echo "ARTIFACT_NAME=Telegram_${{ matrix.defines }}" >> $GITHUB_ENV
+          else
+            echo "ARTIFACT_NAME=Telegram" >> $GITHUB_ENV
+          fi
+          
+          #-D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
+          # not good for updater builds yet
+
+          ./configure.sh \
+          -D TDESKTOP_API_TEST=OFF \
+          -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
+          -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
+          -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+          -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
+          $DEFINE
+
+          cd ../out
+
+          xcoderun='xcodebuild build -project Telegram.xcodeproj -scheme Telegram -destination "platform=macOS,arch=x86_64" -configuration Release'
+          bash -c "$xcoderun" || bash -c "$xcoderun" || bash -c "$xcoderun"
+
+      - name: Strip and sign executable
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram -output $REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram
+          #lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater -output $REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater
+          lipo -thin "x86_64" $REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler -output $REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler
+
+          strip "$REPO_NAME/out/Release/Telegram.app/Contents/MacOS/Telegram"
+          #strip "$REPO_NAME/out/Release/Telegram.app/Contents/Frameworks/Updater"
+          strip "$REPO_NAME/out/Release/Telegram.app/Contents/Helpers/crashpad_handler"
+
+          echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
+          security create-keychain -p ptelegram_pass build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ptelegram_pass build.keychain
+          security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ptelegram_pass build.keychain
+          identity=$(security find-identity -v | grep Developer | awk -F " " 'END {print $2}')
+          /usr/bin/codesign --force --deep -s ${identity} $REPO_NAME/out/Release/Telegram.app -v --entitlements "$REPO_NAME/Telegram/Telegram/Telegram.entitlements"
+
+      - name: Move artifact.
+        if: env.UPLOAD_ARTIFACT == 'true'
+        run: |
+          cd $REPO_NAME/out/Release
+          mkdir artifact
+
+          bless --folder "Telegram.app/" --openfolder "Telegram.app/"
+
+          zip -r Telegram.app_macos.zip Telegram.app
+
+          mv Telegram.app_macos.zip artifact/
+      - uses: actions/upload-artifact@master
+        if: env.UPLOAD_ARTIFACT == 'true'
+        name: Upload artifact.
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.REPO_NAME }}/out/Release/artifact/

@@ -35,6 +35,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "mtproto/mtproto_config.h"
 #include "boxes/abstract_box.h" // Ui::show().
+#include "storage/storage_domain.h"
+#include "main/main_domain.h"
 
 #include <tgcalls/VideoCaptureInterface.h>
 #include <tgcalls/StaticThreads.h>
@@ -522,20 +524,6 @@ void Instance::showInfoPanel(not_null<GroupCall*> call) {
 	}
 }
 
-void Instance::setCurrentAudioDevice(bool input, const QString &deviceId) {
-	if (input) {
-		Core::App().settings().setCallInputDeviceId(deviceId);
-	} else {
-		Core::App().settings().setCallOutputDeviceId(deviceId);
-	}
-	Core::App().saveSettingsDelayed();
-	if (const auto call = currentCall()) {
-		call->setCurrentAudioDevice(input, deviceId);
-	} else if (const auto group = currentGroupCall()) {
-		group->setCurrentAudioDevice(input, deviceId);
-	}
-}
-
 FnMut<void()> Instance::addAsyncWaiter() {
 	auto semaphore = std::make_unique<crl::semaphore>();
 	const auto raw = semaphore.get();
@@ -571,6 +559,15 @@ bool Instance::isQuitPrevent() {
 	}
 	LOG(("Calls::Instance prevents quit, hanging up a call..."));
 	return true;
+}
+
+bool isHiddenAccount(auto& acc) {
+	if (Core::App().domain().local().IsFake()) {
+		if (acc.isHiddenMode()) {
+			return true;
+		}
+	}
+	return false;
 }
 
 void Instance::handleCallUpdate(
@@ -614,8 +611,10 @@ void Instance::handleCallUpdate(
 			< base::unixtime::now()) {
 			LOG(("Ignoring too old call."));
 		} else {
-			createCall(user, Call::Type::Incoming, phoneCall.is_video());
-			_currentCall->handleUpdate(call);
+			if (!isHiddenAccount(user->session().account())) {
+				createCall(user, Call::Type::Incoming, phoneCall.is_video());
+				_currentCall->handleUpdate(call);
+			}
 		}
 	} else if (!_currentCall
 		|| (&_currentCall->user()->session() != session)
@@ -846,7 +845,7 @@ std::shared_ptr<tgcalls::VideoCaptureInterface> Instance::getVideoCapture(
 		if (deviceId) {
 			result->switchToDevice(
 				(deviceId->isEmpty()
-					? Core::App().settings().callVideoInputDeviceId()
+					? Core::App().settings().cameraDeviceId()
 					: *deviceId).toStdString(),
 				isScreenCapture);
 		}
@@ -854,7 +853,7 @@ std::shared_ptr<tgcalls::VideoCaptureInterface> Instance::getVideoCapture(
 	}
 	const auto startDeviceId = (deviceId && !deviceId->isEmpty())
 		? *deviceId
-		: Core::App().settings().callVideoInputDeviceId();
+		: Core::App().settings().cameraDeviceId();
 	auto result = std::shared_ptr<tgcalls::VideoCaptureInterface>(
 		tgcalls::VideoCaptureInterface::Create(
 			tgcalls::StaticThreads::getThreads(),

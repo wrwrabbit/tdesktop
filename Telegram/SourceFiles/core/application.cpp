@@ -44,6 +44,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_updates.h"
 #include "calls/calls_instance.h"
 #include "countries/countries_manager.h"
+#include "iv/iv_delegate_impl.h"
+#include "iv/iv_instance.h"
 #include "lang/lang_file_parser.h"
 #include "lang/lang_translator.h"
 #include "lang/lang_cloud_manager.h"
@@ -88,6 +90,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localstorage.h"
 #include "payments/payments_checkout_process.h"
 #include "export/export_manager.h"
+#include "webrtc/webrtc_environment.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
 #include "boxes/abstract_box.h"
@@ -155,6 +158,7 @@ Application::Application()
 , _private(std::make_unique<Private>())
 , _platformIntegration(Platform::Integration::Create())
 , _batterySaving(std::make_unique<base::BatterySaving>())
+, _mediaDevices(std::make_unique<Webrtc::Environment>())
 , _databases(std::make_unique<Storage::Databases>())
 , _animationsManager(std::make_unique<Ui::Animations::Manager>())
 , _clearEmojiImageLoaderTimer([=] { clearEmojiSourceImages(); })
@@ -165,6 +169,8 @@ Application::Application()
 , _domain(std::make_unique<Main::Domain>(cDataFile()))
 , _exportManager(std::make_unique<Export::Manager>())
 , _calls(std::make_unique<Calls::Instance>())
+, _iv(std::make_unique<Iv::Instance>(
+	Ui::CreateChild<Iv::DelegateImpl>(this)))
 , _langpack(std::make_unique<Lang::Instance>())
 , _langCloudManager(std::make_unique<Lang::CloudManager>(langpack()))
 , _emojiKeywords(std::make_unique<ChatHelpers::EmojiKeywords>())
@@ -224,6 +230,7 @@ Application::~Application() {
 	// Domain::finish() and there is a violation on Ensures(started()).
 	Payments::CheckoutProcess::ClearAll();
 	InlineBots::AttachWebView::ClearAll();
+	_iv->closeAll();
 
 	_domain->finish();
 
@@ -335,7 +342,9 @@ void Application::run() {
 	) | rpl::then(
 		_domain->accountsChanges()
 	) | rpl::map([=] {
-		return (_domain->accounts().size() > Main::Domain::kMaxAccounts)
+		// TODO: handle differently if fake
+		// TODO: test
+		return (_domain->accounts().size() > Main::Domain::kMaxAccounts())
 			? _domain->activeChanges()
 			: rpl::never<not_null<Main::Account*>>();
 	}) | rpl::flatten_latest(
@@ -368,7 +377,7 @@ void Application::run() {
 	startDomain();
 	startTray();
 
-	_lastActivePrimaryWindow->widget()->show();
+	_lastActivePrimaryWindow->firstShow();
 
 	startMediaView();
 
@@ -691,7 +700,8 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 	} break;
 
 	case QEvent::ThemeChange: {
-		if (Platform::IsLinux() && object == QGuiApplication::allWindows().first()) {
+		if (Platform::IsLinux()
+				&& object == QGuiApplication::allWindows().constFirst()) {
 			Core::App().refreshApplicationIcon();
 			Core::App().tray().updateIconCounters();
 		}
@@ -968,8 +978,8 @@ void Application::handleAppDeactivated() {
 }
 
 rpl::producer<bool> Application::appDeactivatedValue() const {
-	const auto &app =
-		static_cast<QGuiApplication*>(QCoreApplication::instance());
+	const auto &app
+		= static_cast<QGuiApplication*>(QCoreApplication::instance());
 	return rpl::single(
 		app->applicationState()
 	) | rpl::then(
@@ -1325,6 +1335,8 @@ bool Application::hasActiveWindow(not_null<Main::Session*> session) const {
 		return false;
 	} else if (_calls->hasActivePanel(session)) {
 		return true;
+	} else if (_iv->hasActiveWindow(session)) {
+		return true;
 	} else if (const auto window = _lastActiveWindow) {
 		return (window->account().maybeSession() == session)
 			&& window->widget()->isActive();
@@ -1376,7 +1388,7 @@ Window::Controller *Application::ensureSeparateWindowForPeer(
 		std::make_unique<Window::Controller>(peer, showAtMsgId)
 	).first->second.get();
 	processCreatedWindow(result);
-	result->widget()->show();
+	result->firstShow();
 	result->finishFirstShow();
 	return activate(result);
 }
@@ -1396,7 +1408,7 @@ Window::Controller *Application::ensureSeparateWindowForAccount(
 		std::make_unique<Window::Controller>(account)
 	).first->second.get();
 	processCreatedWindow(result);
-	result->widget()->show();
+	result->firstShow();
 	result->finishFirstShow();
 	return activate(result);
 }
@@ -1414,6 +1426,25 @@ Window::Controller *Application::windowFor(
 		return separate;
 	}
 	return activePrimaryWindow();
+}
+
+Window::Controller *Application::findWindow(
+		not_null<QWidget*> widget) const {
+	const auto window = widget->window();
+	if (_lastActiveWindow && _lastActiveWindow->widget() == window) {
+		return _lastActiveWindow;
+	}
+	for (const auto &[account, primary] : _primaryWindows) {
+		if (primary->widget() == window) {
+			return primary.get();
+		}
+	}
+	for (const auto &[history, secondary] : _secondaryWindows) {
+		if (secondary->widget() == window) {
+			return secondary.get();
+		}
+	}
+	return nullptr;
 }
 
 Window::Controller *Application::activeWindow() const {
@@ -1595,12 +1626,12 @@ bool Application::closeActiveWindow() {
 	if (_mediaView && _mediaView->isActive()) {
 		_mediaView->close();
 		return true;
-	} else if (!calls().closeCurrentActiveCall()) {
-		if (const auto window = activeWindow()) {
-			if (window->widget()->isActive()) {
-				window->close();
-				return true;
-			}
+	} else if (_iv->closeActive() || calls().closeCurrentActiveCall()) {
+		return true;
+	} else if (const auto window = activeWindow()) {
+		if (window->widget()->isActive()) {
+			window->close();
+			return true;
 		}
 	}
 	return false;
@@ -1610,7 +1641,8 @@ bool Application::minimizeActiveWindow() {
 	if (_mediaView && _mediaView->isActive()) {
 		_mediaView->minimize();
 		return true;
-	} else if (calls().minimizeCurrentActiveCall()) {
+	} else if (_iv->minimizeActive()
+		|| calls().minimizeCurrentActiveCall()) {
 		return true;
 	} else {
 		if (const auto window = activeWindow()) {
@@ -1837,6 +1869,10 @@ void Application::RegisterUrlScheme() {
 		.displayAppName = AppName.utf16(),
 		.displayAppDescription = AppName.utf16(),
 	});
+}
+
+bool Application::IsFakeActive() {
+	return App().domain().local().IsFake();
 }
 
 bool IsAppLaunched() {

@@ -19,6 +19,7 @@ on:
         type: boolean
         description: Upload generated image
         default: false
+  workflow_call:
 
 jobs:
   docker:

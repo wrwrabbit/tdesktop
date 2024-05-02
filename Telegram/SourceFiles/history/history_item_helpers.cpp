@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_text_entities.h"
 #include "boxes/premium_preview_box.h"
 #include "calls/calls_instance.h"
+#include "data/stickers/data_custom_emoji.h"
 #include "data/notify/data_notify_settings.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
@@ -28,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
+#include "menu/menu_sponsored.h"
 #include "platform/platform_notifications_manager.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
@@ -217,13 +219,40 @@ bool LookupReplyIsTopicPost(HistoryItem *replyTo) {
 		&& (replyTo->topicRootId() != Data::ForumTopic::kGeneralId);
 }
 
-TextWithEntities DropCustomEmoji(TextWithEntities text) {
-	text.entities.erase(
-		ranges::remove(
-			text.entities,
-			EntityType::CustomEmoji,
-			&EntityInText::type),
-		text.entities.end());
+TextWithEntities DropDisallowedCustomEmoji(
+		not_null<PeerData*> to,
+		TextWithEntities text) {
+	if (to->session().premium() || to->isSelf()) {
+		return text;
+	}
+	const auto channel = to->asMegagroup();
+	const auto allowSetId = channel ? channel->mgInfo->emojiSet.id : 0;
+	if (!allowSetId) {
+		text.entities.erase(
+			ranges::remove(
+				text.entities,
+				EntityType::CustomEmoji,
+				&EntityInText::type),
+			text.entities.end());
+	} else {
+		const auto predicate = [&](const EntityInText &entity) {
+			if (entity.type() != EntityType::CustomEmoji) {
+				return false;
+			}
+			if (const auto id = Data::ParseCustomEmojiData(entity.data())) {
+				const auto document = to->owner().document(id);
+				if (const auto sticker = document->sticker()) {
+					if (sticker->set.id == allowSetId) {
+						return false;
+					}
+				}
+			}
+			return true;
+		};
+		text.entities.erase(
+			ranges::remove_if(text.entities, predicate),
+			text.entities.end());
+	}
 	return text;
 }
 
@@ -334,7 +363,19 @@ ClickHandlerPtr HideSponsoredClickHandler() {
 	return std::make_shared<LambdaClickHandler>([=](ClickContext context) {
 		const auto my = context.other.value<ClickHandlerContext>();
 		if (const auto controller = my.sessionWindow.get()) {
-			ShowPremiumPreviewBox(controller, PremiumPreview::NoAds);
+			ShowPremiumPreviewBox(controller, PremiumFeature::NoAds);
+		}
+	});
+}
+
+ClickHandlerPtr ReportSponsoredClickHandler(not_null<HistoryItem*> item) {
+	return std::make_shared<LambdaClickHandler>([=](ClickContext context) {
+		const auto my = context.other.value<ClickHandlerContext>();
+		if (const auto controller = my.sessionWindow.get()) {
+			Menu::ShowSponsored(
+				controller->widget(),
+				controller->uiShow(),
+				item);
 		}
 	});
 }
@@ -358,6 +399,9 @@ MessageFlags FlagsFromMTP(
 		| ((flags & MTP::f_from_id) ? Flag::HasFromId : Flag())
 		| ((flags & MTP::f_reply_to) ? Flag::HasReplyInfo : Flag())
 		| ((flags & MTP::f_reply_markup) ? Flag::HasReplyMarkup : Flag())
+		| ((flags & MTP::f_quick_reply_shortcut_id)
+			? Flag::ShortcutMessage
+			: Flag())
 		| ((flags & MTP::f_from_scheduled)
 			? Flag::IsOrWasScheduled
 			: Flag())
@@ -388,7 +432,7 @@ MTPMessageReplyHeader NewMessageReplyHeader(const Api::SendAction &action) {
 	if (const auto replyTo = action.replyTo) {
 		if (replyTo.storyId) {
 			return MTP_messageReplyStoryHeader(
-				MTP_long(peerToUser(replyTo.storyId.peer).bare),
+				peerToMTP(replyTo.storyId.peer),
 				MTP_int(replyTo.storyId.story));
 		}
 		using Flag = MTPDmessageReplyHeader::Flag;
@@ -570,11 +614,11 @@ not_null<HistoryItem*> GenerateJoinedMessage(
 		TimeId inviteDate,
 		not_null<UserData*> inviter,
 		bool viaRequest) {
-	return history->makeMessage(
-		history->owner().nextLocalMessageId(),
-		MessageFlag::Local | MessageFlag::ShowSimilarChannels,
-		inviteDate,
-		GenerateJoinedText(history, inviter, viaRequest));
+	return history->makeMessage({
+		.id = history->owner().nextLocalMessageId(),
+		.flags = MessageFlag::Local | MessageFlag::ShowSimilarChannels,
+		.date = inviteDate,
+	}, GenerateJoinedText(history, inviter, viaRequest));
 }
 
 std::optional<bool> PeerHasThisCall(
@@ -624,11 +668,17 @@ std::optional<bool> PeerHasThisCall(
 	});
 }
 
-[[nodiscard]] MessageFlags FinalizeMessageFlags(MessageFlags flags) {
+[[nodiscard]] MessageFlags FinalizeMessageFlags(
+		not_null<History*> history,
+		MessageFlags flags) {
 	if (!(flags & MessageFlag::FakeHistoryItem)
 		&& !(flags & MessageFlag::IsOrWasScheduled)
+		&& !(flags & MessageFlag::ShortcutMessage)
 		&& !(flags & MessageFlag::AdminLogEntry)) {
 		flags |= MessageFlag::HistoryEntry;
+		if (history->peer->isSelf()) {
+			flags |= MessageFlag::ReactionsAreTags;
+		}
 	}
 	return flags;
 }
@@ -756,7 +806,7 @@ void ShowTrialTranscribesToast(int left, TimeId until) {
 	}
 	const auto filter = [=](const auto &...) {
 		if (const auto controller = window->sessionController()) {
-			ShowPremiumPreviewBox(controller, PremiumPreview::VoiceToText);
+			ShowPremiumPreviewBox(controller, PremiumFeature::VoiceToText);
 			window->activate();
 		}
 		return false;
@@ -809,6 +859,28 @@ void ClearMediaAsExpired(not_null<HistoryItem*> item) {
 	}
 }
 
-[[nodiscard]] bool IsVoiceOncePlayable(not_null<HistoryItem*> item) {
-	return !item->out() && item->media()->ttlSeconds();
+int ItemsForwardSendersCount(const HistoryItemsList &list) {
+	auto peers = base::flat_set<not_null<PeerData*>>();
+	auto names = base::flat_set<QString>();
+	for (const auto &item : list) {
+		if (const auto peer = item->originalSender()) {
+			peers.emplace(peer);
+		} else {
+			names.emplace(item->originalHiddenSenderInfo()->name);
+		}
+	}
+	return int(peers.size()) + int(names.size());
+}
+
+int ItemsForwardCaptionsCount(const HistoryItemsList &list) {
+	auto result = 0;
+	for (const auto &item : list) {
+		if (const auto media = item->media()) {
+			if (!item->originalText().text.isEmpty()
+				&& media->allowsEditCaption()) {
+				++result;
+			}
+		}
+	}
+	return result;
 }

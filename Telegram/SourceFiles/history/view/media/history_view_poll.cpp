@@ -761,7 +761,7 @@ void Poll::draw(Painter &p, const PaintContext &context) const {
 	auto &&answers = ranges::views::zip(
 		_answers,
 		ranges::views::ints(0, int(_answers.size())));
-	for (const auto [answer, index] : answers) {
+	for (const auto &[answer, index] : answers) {
 		const auto animation = _answersAnimation
 			? &_answersAnimation->data[index]
 			: nullptr;
@@ -803,9 +803,11 @@ void Poll::paintInlineFooter(
 		p,
 		left,
 		top,
-		std::min(
-			_totalVotesLabel.maxWidth(),
-			paintw - _parent->bottomInfoFirstLineWidth()),
+		_parent->data()->reactions().empty()
+			? std::min(
+				_totalVotesLabel.maxWidth(),
+				paintw - _parent->bottomInfoFirstLineWidth())
+			: _totalVotesLabel.maxWidth(),
 		width());
 }
 

@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_user_privacy.h"
 
 namespace Ui {
+class GenericBox;
 class VerticalLayout;
 class FlatLabel;
 class LinkButton;
@@ -47,7 +48,8 @@ public:
 	[[nodiscard]] virtual rpl::producer<TextWithEntities> warning() const {
 		return nullptr;
 	}
-	virtual void prepareWarningLabel(not_null<Ui::FlatLabel*> warning) const {
+	virtual void prepareWarningLabel(
+			not_null<Ui::FlatLabel*> warning) const {
 	}
 	[[nodiscard]] virtual rpl::producer<QString> exceptionButtonTextKey(
 		Exception exception) const = 0;
@@ -55,12 +57,17 @@ public:
 		Exception exception) const = 0;
 	[[nodiscard]] virtual auto exceptionsDescription()
 		const -> rpl::producer<QString> = 0;
+	[[nodiscard]] virtual bool allowPremiumsToggle(
+			Exception exception) const {
+		return false;
+	}
 	virtual void handleExceptionsChange(
 		Exception exception,
 		rpl::producer<int> value) {
 	}
 
 	[[nodiscard]] virtual object_ptr<Ui::RpWidget> setupAboveWidget(
+			not_null<Window::SessionController*> controller,
 			not_null<QWidget*> parent,
 			rpl::producer<Option> option,
 			not_null<QWidget*> outerContainer) {
@@ -74,7 +81,8 @@ public:
 	}
 	[[nodiscard]] virtual object_ptr<Ui::RpWidget> setupBelowWidget(
 			not_null<Window::SessionController*> controller,
-			not_null<QWidget*> parent) {
+			not_null<QWidget*> parent,
+			rpl::producer<Option> option) {
 		return { nullptr };
 	}
 
@@ -84,6 +92,12 @@ public:
 		saveCallback();
 	}
 	virtual void saveAdditional() {
+	}
+
+	[[nodiscard]] virtual Fn<void()> premiumClickedCallback(
+			Option option,
+			not_null<Window::SessionController*> controller) {
+		return nullptr;
 	}
 
 	virtual ~EditPrivacyController() = default;
@@ -108,6 +122,7 @@ class EditPrivacyBox final : public Ui::BoxContent {
 public:
 	using Value = Api::UserPrivacy::Rule;
 	using Option = Api::UserPrivacy::Option;
+	using Exceptions = Api::UserPrivacy::Exceptions;
 	using Exception = EditPrivacyController::Exception;
 
 	EditPrivacyBox(
@@ -139,10 +154,14 @@ private:
 		int topSkip);
 
 	void editExceptions(Exception exception, Fn<void()> done);
-	std::vector<not_null<PeerData*>> &exceptions(Exception exception);
+	Exceptions &exceptions(Exception exception);
 
 	const not_null<Window::SessionController*> _window;
 	std::unique_ptr<EditPrivacyController> _controller;
 	Value _value;
 
 };
+
+void EditMessagesPrivacyBox(
+	not_null<Ui::GenericBox*> box,
+	not_null<Window::SessionController*> controller);

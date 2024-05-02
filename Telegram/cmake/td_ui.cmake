@@ -23,9 +23,11 @@ set(style_files
     calls/calls.style
     export/view/export.style
     info/info.style
-    info/boosts/giveaway/giveaway.style
+    info/channel_statistics/boosts/giveaway/giveaway.style
+    info/channel_statistics/earn/channel_earn.style
     info/userpic/info_userpic_builder.style
     intro/intro.style
+    iv/iv.style
     media/player/media_player.style
     passport/passport.style
     payments/ui/payments.style
@@ -62,6 +64,11 @@ PRIVATE
     calls/group/ui/desktop_capture_choose_source.cpp
     calls/group/ui/desktop_capture_choose_source.h
 
+    chat_helpers/field_characters_count_manager.cpp
+    chat_helpers/field_characters_count_manager.h
+    chat_helpers/stickers_emoji_image_loader.cpp
+    chat_helpers/stickers_emoji_image_loader.h
+
     core/file_location.cpp
     core/file_location.h
     core/mime_type.cpp
@@ -70,6 +77,9 @@ PRIVATE
     countries/countries_instance.cpp
     countries/countries_instance.h
 
+    data/data_birthday.cpp
+    data/data_birthday.h
+    data/data_channel_earn.h
     data/data_statistics_chart.cpp
     data/data_statistics_chart.h
     data/data_subscription_option.h
@@ -100,6 +110,10 @@ PRIVATE
 
     history/history_view_top_toast.cpp
     history/history_view_top_toast.h
+    history/view/controls/history_view_characters_limit.cpp
+    history/view/controls/history_view_characters_limit.h
+    history/view/controls/history_view_voice_record_button.cpp
+    history/view/controls/history_view_voice_record_button.h
 
     info/profile/info_profile_icon.cpp
     info/profile/info_profile_icon.h
@@ -110,12 +124,15 @@ PRIVATE
     info/userpic/info_userpic_emoji_builder_layer.cpp
     info/userpic/info_userpic_emoji_builder_layer.h
 
-    info/boosts/giveaway/boost_badge.cpp
-    info/boosts/giveaway/boost_badge.h
-    info/boosts/giveaway/giveaway_type_row.cpp
-    info/boosts/giveaway/giveaway_type_row.h
-    info/boosts/giveaway/select_countries_box.cpp
-    info/boosts/giveaway/select_countries_box.h
+    info/channel_statistics/boosts/giveaway/boost_badge.cpp
+    info/channel_statistics/boosts/giveaway/boost_badge.h
+    info/channel_statistics/boosts/giveaway/giveaway_type_row.cpp
+    info/channel_statistics/boosts/giveaway/giveaway_type_row.h
+    info/channel_statistics/boosts/giveaway/select_countries_box.cpp
+    info/channel_statistics/boosts/giveaway/select_countries_box.h
+
+    info/channel_statistics/earn/earn_format.cpp
+    info/channel_statistics/earn/earn_format.h
 
     intro/intro_code_input.cpp
     intro/intro_code_input.h
@@ -188,6 +205,7 @@ PRIVATE
     statistics/statistics_data_deserialize.h
     statistics/statistics_format_values.cpp
     statistics/statistics_format_values.h
+    statistics/statistics_types.h
     statistics/view/abstract_chart_view.cpp
     statistics/view/abstract_chart_view.h
     statistics/view/bar_chart_view.cpp
@@ -223,18 +241,24 @@ PRIVATE
     ui/boxes/choose_language_box.h
     ui/boxes/choose_time.cpp
     ui/boxes/choose_time.h
+    ui/boxes/collectible_info_box.cpp
+    ui/boxes/collectible_info_box.h
     ui/boxes/confirm_box.cpp
     ui/boxes/confirm_box.h
     ui/boxes/confirm_phone_box.cpp
     ui/boxes/confirm_phone_box.h
     ui/boxes/country_select_box.cpp
     ui/boxes/country_select_box.h
+    ui/boxes/edit_birthday_box.cpp
+    ui/boxes/edit_birthday_box.h
     ui/boxes/edit_invite_link.cpp
     ui/boxes/edit_invite_link.h
     ui/boxes/rate_call_box.cpp
     ui/boxes/rate_call_box.h
     ui/boxes/report_box.cpp
     ui/boxes/report_box.h
+    ui/boxes/show_or_premium_box.cpp
+    ui/boxes/show_or_premium_box.h
     ui/boxes/single_choice_box.cpp
     ui/boxes/single_choice_box.h
     ui/boxes/time_picker_box.cpp
@@ -359,6 +383,8 @@ PRIVATE
     ui/widgets/discrete_sliders.h
     ui/widgets/gradient_round_button.cpp
     ui/widgets/gradient_round_button.h
+    ui/widgets/level_meter.cpp
+    ui/widgets/level_meter.h
     ui/widgets/multi_select.cpp
     ui/widgets/multi_select.h
     ui/widgets/sent_code_field.cpp
@@ -391,6 +417,9 @@ PRIVATE
     ui/widgets/fields/special_fields.h
     ui/widgets/fields/time_part_input_with_placeholder.cpp
     ui/widgets/fields/time_part_input_with_placeholder.h
+
+    window/window_slide_animation.cpp
+    window/window_slide_animation.h
 
     ui/ui_pch.h
 )

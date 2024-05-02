@@ -7,12 +7,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/media/history_view_web_page.h"
 
+#include "core/application.h"
+#include "base/qt/qt_key_modifiers.h"
+#include "window/window_session_controller.h"
+#include "iv/iv_instance.h"
 #include "core/click_handler_types.h"
 #include "core/ui_integration.h"
+#include "data/components/sponsored_messages.h"
+#include "data/stickers/data_custom_emoji.h"
 #include "data/data_file_click_handler.h"
 #include "data/data_photo_media.h"
 #include "data/data_session.h"
-#include "data/data_sponsored_messages.h"
 #include "data/data_web_page.h"
 #include "history/history.h"
 #include "history/history_item_components.h"
@@ -22,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_media_common.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "menu/menu_sponsored.h"
 #include "ui/chat/chat_style.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
@@ -82,9 +88,69 @@ constexpr auto kMaxOriginalEntryLines = 8192;
 	return result;
 }
 
-[[nodiscard]] QString PageToPhrase(not_null<WebPageData*> webpage) {
-	const auto type = webpage->type;
-	return Ui::Text::Upper((type == WebPageType::Theme)
+[[nodiscard]] QString ExtractHash(
+		not_null<WebPageData*> webpage,
+		const TextWithEntities &text) {
+	const auto simplify = [](const QString &url) {
+		auto result = url.split('#')[0].toLower();
+		if (result.endsWith('/')) {
+			result.chop(1);
+		}
+		const auto prefixes = { u"http://"_q, u"https://"_q };
+		for (const auto &prefix : prefixes) {
+			if (result.startsWith(prefix)) {
+				result = result.mid(prefix.size());
+				break;
+			}
+		}
+		return result;
+	};
+	const auto simplified = simplify(webpage->url);
+	for (const auto &entity : text.entities) {
+		const auto link = (entity.type() == EntityType::Url)
+			? text.text.mid(entity.offset(), entity.length())
+			: (entity.type() == EntityType::CustomUrl)
+			? entity.data()
+			: QString();
+		if (simplify(link) == simplified) {
+			const auto i = link.indexOf('#');
+			return (i > 0) ? link.mid(i + 1) : QString();
+		}
+	}
+	return QString();
+}
+
+[[nodiscard]] ClickHandlerPtr IvClickHandler(
+		not_null<WebPageData*> webpage,
+		const TextWithEntities &text) {
+	return std::make_shared<LambdaClickHandler>([=](ClickContext context) {
+		const auto my = context.other.value<ClickHandlerContext>();
+		if (const auto controller = my.sessionWindow.get()) {
+			if (const auto iv = webpage->iv.get()) {
+				const auto hash = ExtractHash(webpage, text);
+				Core::App().iv().show(controller, iv, hash);
+				return;
+			} else {
+				HiddenUrlClickHandler::Open(webpage->url, context.other);
+			}
+		}
+	});
+}
+
+[[nodiscard]] ClickHandlerPtr AboutSponsoredClickHandler() {
+	return std::make_shared<LambdaClickHandler>([=](ClickContext context) {
+		const auto my = context.other.value<ClickHandlerContext>();
+		if (const auto controller = my.sessionWindow.get()) {
+			Menu::ShowSponsoredAbout(controller->uiShow());
+		}
+	});
+}
+
+[[nodiscard]] TextWithEntities PageToPhrase(not_null<WebPageData*> page) {
+	const auto type = page->type;
+	const auto text = Ui::Text::Upper(page->iv
+		? tr::lng_view_button_iv(tr::now)
+		: (type == WebPageType::Theme)
 		? tr::lng_view_button_theme(tr::now)
 		: (type == WebPageType::Story)
 		? tr::lng_view_button_story(tr::now)
@@ -114,11 +180,21 @@ constexpr auto kMaxOriginalEntryLines = 8192;
 		: (type == WebPageType::BotApp)
 		? tr::lng_view_button_bot_app(tr::now)
 		: QString());
+	if (page->iv) {
+		const auto manager = &page->owner().customEmojiManager();
+		const auto &icon = st::historyIvIcon;
+		const auto padding = st::historyIvIconPadding;
+		return Ui::Text::SingleCustomEmoji(
+			manager->registerInternalEmoji(icon, padding)
+		).append(text);
+	}
+	return { text };
 }
 
 [[nodiscard]] bool HasButton(not_null<WebPageData*> webpage) {
 	const auto type = webpage->type;
-	return (type == WebPageType::Message)
+	return webpage->iv
+		|| (type == WebPageType::Message)
 		|| (type == WebPageType::Group)
 		|| (type == WebPageType::Channel)
 		|| (type == WebPageType::ChannelBoost)
@@ -151,12 +227,13 @@ WebPage::WebPage(
 	if (!(flags & MediaWebPageFlag::Sponsored)) {
 		return std::nullopt;
 	}
-	const auto &data = _parent->data()->history()->owner();
-	const auto details = data.sponsoredMessages().lookupDetails(
+	const auto &session = _parent->data()->history()->session();
+	const auto details = session.sponsoredMessages().lookupDetails(
 		_parent->data()->fullId());
 	auto result = std::make_optional<SponsoredData>();
 	result->buttonText = details.buttonText;
 	result->hasExternalLink = (details.externalLink == _data->url);
+	result->canReport = details.canReport;
 #ifdef _DEBUG
 	if (details.peer) {
 #else
@@ -181,15 +258,23 @@ QSize WebPage::countOptimalSize() {
 	}
 
 	// Detect _openButtonWidth before counting paddings.
-	_openButton = QString();
-	_openButtonWidth = 0;
+	_openButton = Ui::Text::String();
 	if (HasButton(_data)) {
-		_openButton = PageToPhrase(_data);
-		_openButtonWidth = st::semiboldFont->width(_openButton);
+		const auto context = Core::MarkedTextContext{
+			.session = &_data->session(),
+			.customEmojiRepaint = [] {},
+			.customEmojiLoopLimit = 1,
+		};
+		_openButton.setMarkedText(
+			st::semiboldTextStyle,
+			PageToPhrase(_data),
+			kMarkupTextOptions,
+			context);
 	} else if (_sponsoredData) {
 		if (!_sponsoredData->buttonText.isEmpty()) {
-			_openButton = Ui::Text::Upper(_sponsoredData->buttonText);
-			_openButtonWidth = st::semiboldFont->width(_openButton);
+			_openButton.setText(
+				st::semiboldTextStyle,
+				Ui::Text::Upper(_sponsoredData->buttonText));
 		}
 	}
 
@@ -208,6 +293,7 @@ QSize WebPage::countOptimalSize() {
 	const auto lineHeight = UnitedLineHeight();
 
 	if (!_openl && (!_data->url.isEmpty() || _sponsoredData)) {
+		const auto original = _parent->data()->originalText();
 		const auto previewOfHiddenUrl = [&] {
 			if (_data->type == WebPageType::BotApp) {
 				// Bot Web Apps always show confirmation on hidden urls.
@@ -231,12 +317,11 @@ QSize WebPage::countOptimalSize() {
 				return result;
 			};
 			const auto simplified = simplify(_data->url);
-			const auto full = _parent->data()->originalText();
-			for (const auto &entity : full.entities) {
+			for (const auto &entity : original.entities) {
 				if (entity.type() != EntityType::Url) {
 					continue;
 				}
-				const auto link = full.text.mid(
+				const auto link = original.text.mid(
 					entity.offset(),
 					entity.length());
 				if (simplify(link) == simplified) {
@@ -245,9 +330,11 @@ QSize WebPage::countOptimalSize() {
 			}
 			return true;
 		}();
-		_openl = (previewOfHiddenUrl
-			|| UrlClickHandler::IsSuspicious(_data->url))
-			? std::make_shared<HiddenUrlClickHandler>(_data->url)
+		_openl = _data->iv
+			? IvClickHandler(_data, original)
+			: (previewOfHiddenUrl || UrlClickHandler::IsSuspicious(
+				_data->url))
+			? std::make_shared<HiddenUrlClickHandler>(_data->url, _data->url)
 			: std::make_shared<UrlClickHandler>(_data->url, true);
 		if (_data->document
 			&& (_data->document->isWallPaper()
@@ -261,6 +348,10 @@ QSize WebPage::countOptimalSize() {
 			_openl = SponsoredLink(_sponsoredData->hasExternalLink
 				? _data->url
 				: QString());
+
+			if (_sponsoredData->canReport) {
+				_sponsoredData->hintLink = AboutSponsoredClickHandler();
+			}
 		}
 	}
 
@@ -394,15 +485,25 @@ QSize WebPage::countOptimalSize() {
 		_duration = Ui::FormatDurationText(_data->duration);
 		_durationWidth = st::msgDateFont->width(_duration);
 	}
-	if (_openButtonWidth) {
+	if (!_openButton.isEmpty()) {
 		maxWidth += rect::m::sum::h(st::historyPageButtonPadding)
-			+ _openButtonWidth;
+			+ _openButton.maxWidth();
 	}
 	maxWidth += rect::m::sum::h(padding);
 	minHeight += rect::m::sum::v(padding);
 
 	if (_asArticle) {
 		minHeight = resizeGetHeight(maxWidth);
+	}
+	if (_sponsoredData && _sponsoredData->canReport) {
+		_sponsoredData->widthBeforeHint
+			= st::webPageTitleStyle.font->width(siteName);
+		const auto &font = st::webPageSponsoredHintFont;
+		_sponsoredData->hintSize = QSize(
+			font->width(tr::lng_sponsored_message_revenue_button(tr::now))
+				+ font->height,
+			font->height);
+		maxWidth += _sponsoredData->hintSize.width();
 	}
 	return { maxWidth, minHeight };
 }
@@ -584,11 +685,11 @@ void WebPage::draw(Painter &p, const PaintContext &context) const {
 
 	const auto selected = context.selected();
 	const auto view = parent();
-	const auto colorIndex = view->colorIndex();
+	const auto from = view->data()->contentColorsFrom();
+	const auto colorIndex = from ? from->colorIndex() : view->colorIndex();
 	const auto cache = context.outbg
 		? stm->replyCache[st->colorPatternIndex(colorIndex)].get()
 		: st->coloredReplyCache(selected, colorIndex).get();
-	const auto from = view->data()->displayFrom();
 	const auto backgroundEmojiId = from
 		? from->backgroundEmojiId()
 		: DocumentId();
@@ -714,6 +815,50 @@ void WebPage::draw(Painter &p, const PaintContext &context) const {
 			endskip,
 			false,
 			context.selection);
+		if (asSponsored
+			&& _sponsoredData->canReport
+			&& (paintw >
+					_sponsoredData->widthBeforeHint
+						+ _sponsoredData->hintSize.width())) {
+			if (_sponsoredData->hintRipple) {
+				_sponsoredData->hintRipple->paint(
+					p,
+					_sponsoredData->lastHintPos.x(),
+					_sponsoredData->lastHintPos.y(),
+					width(),
+					&cache->bg);
+				if (_sponsoredData->hintRipple->empty()) {
+					_sponsoredData->hintRipple = nullptr;
+				}
+			}
+
+			auto color = cache->icon;
+			color.setAlphaF(color.alphaF() * 0.15);
+
+			const auto height = st::webPageSponsoredHintFont->height;
+			const auto radius = height / 2;
+
+			_sponsoredData->lastHintPos = QPoint(
+				radius + inner.left() + _sponsoredData->widthBeforeHint,
+				tshift
+					+ (_siteName.style()->font->height - height) / 2
+					+ st::webPageSponsoredHintFont->descent / 2);
+			const auto rect = QRect(
+				_sponsoredData->lastHintPos,
+				_sponsoredData->hintSize);
+			auto hq = PainterHighQualityEnabler(p);
+			p.setPen(Qt::NoPen);
+			p.setBrush(color);
+			p.drawRoundedRect(rect, radius, radius);
+
+			p.setPen(cache->icon);
+			p.setBrush(Qt::NoBrush);
+			p.setFont(st::webPageSponsoredHintFont);
+			p.drawText(
+				rect,
+				tr::lng_sponsored_message_revenue_button(tr::now),
+				style::al_center);
+		}
 		tshift += lineHeight;
 
 		p.setTextPalette(stm->textPalette);
@@ -851,7 +996,7 @@ void WebPage::draw(Painter &p, const PaintContext &context) const {
 		}
 	}
 
-	if (_openButtonWidth) {
+	if (!_openButton.isEmpty()) {
 		p.setFont(st::semiboldFont);
 		p.setPen(cache->icon);
 		const auto end = inner.y() + inner.height() + _st.padding.bottom();
@@ -859,11 +1004,13 @@ void WebPage::draw(Painter &p, const PaintContext &context) const {
 		auto color = cache->icon;
 		color.setAlphaF(color.alphaF() * 0.3);
 		p.fillRect(inner.x(), end, inner.width(), line, color);
-		const auto top = end + st::historyPageButtonPadding.top();
-		p.drawText(
-			inner.x() + (inner.width() - _openButtonWidth) / 2,
-			top + st::semiboldFont->ascent,
-			_openButton);
+		_openButton.draw(p, {
+			.position = QPoint(
+				inner.x() + (inner.width() - _openButton.maxWidth()) / 2,
+				end + st::historyPageButtonPadding.top()),
+			.availableWidth = paintw,
+			.now = context.now,
+		});
 	}
 }
 
@@ -998,6 +1145,15 @@ TextState WebPage::textState(QPoint point, StateRequest request) const {
 	if ((!result.link || _sponsoredData) && outer.contains(point)) {
 		result.link = _openl;
 	}
+	if (_sponsoredData && _sponsoredData->canReport) {
+		const auto contains = QRect(
+			_sponsoredData->lastHintPos,
+			_sponsoredData->hintSize).contains(point
+				- QPoint(0, st::msgDateFont->height));
+		if (contains) {
+			result.link = _sponsoredData->hintLink;
+		}
+	}
 	_lastPoint = point - outer.topLeft();
 
 	result.symbol += symbolAdd;
@@ -1067,6 +1223,28 @@ void WebPage::clickHandlerActiveChanged(
 void WebPage::clickHandlerPressedChanged(
 		const ClickHandlerPtr &p,
 		bool pressed) {
+	if (_sponsoredData && _sponsoredData->hintLink == p) {
+		if (pressed) {
+			if (!_sponsoredData->hintRipple) {
+				const auto owner = &parent()->history()->owner();
+				auto ripple = std::make_unique<Ui::RippleAnimation>(
+					st::defaultRippleAnimation,
+					Ui::RippleAnimation::RoundRectMask(
+						_sponsoredData->hintSize,
+						_st.radius),
+					[=] { owner->requestViewRepaint(parent()); });
+				_sponsoredData->hintRipple = std::move(ripple);
+			}
+			const auto full = Rect(currentSize());
+			const auto outer = full - inBubblePadding();
+			_sponsoredData->hintRipple->add(_lastPoint
+				+ outer.topLeft()
+				- _sponsoredData->lastHintPos);
+		} else if (_sponsoredData->hintRipple) {
+			_sponsoredData->hintRipple->lastStop();
+		}
+		return;
+	}
 	if (p == _openl) {
 		if (pressed) {
 			if (!_ripple) {
@@ -1166,7 +1344,9 @@ QMargins WebPage::inBubblePadding() const {
 }
 
 QMargins WebPage::innerMargin() const {
-	const auto button = _openButtonWidth ? st::historyPageButtonHeight : 0;
+	const auto button = _openButton.isEmpty()
+		? 0
+		: st::historyPageButtonHeight;
 	return _st.padding + QMargins(0, 0, 0, button);
 }
 

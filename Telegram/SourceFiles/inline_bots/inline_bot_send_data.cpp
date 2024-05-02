@@ -31,29 +31,15 @@ QString SendData::getLayoutDescription(const Result *owner) const {
 void SendDataCommon::addToHistory(
 		const Result *owner,
 		not_null<History*> history,
-		MessageFlags flags,
-		MsgId msgId,
-		PeerId fromId,
-		TimeId date,
-		UserId viaBotId,
-		FullReplyTo replyTo,
-		const QString &postAuthor,
-		HistoryMessageMarkupData &&markup) const {
-	auto fields = getSentMessageFields();
-	if (replyTo) {
-		flags |= MessageFlag::HasReplyInfo;
+		HistoryItemCommonFields &&fields) const {
+	auto distinct = getSentMessageFields();
+	if (fields.replyTo) {
+		fields.flags |= MessageFlag::HasReplyInfo;
 	}
 	history->addNewLocalMessage(
-		msgId,
-		flags,
-		viaBotId,
-		replyTo,
-		date,
-		fromId,
-		postAuthor,
-		std::move(fields.text),
-		std::move(fields.media),
-		std::move(markup));
+		std::move(fields),
+		std::move(distinct.text),
+		std::move(distinct.media));
 }
 
 QString SendDataCommon::getErrorOnSend(
@@ -84,7 +70,6 @@ SendDataCommon::SentMessageFields SendGeo::getSentMessageFields() const {
 }
 
 SendDataCommon::SentMessageFields SendVenue::getSentMessageFields() const {
-	const auto venueType = QString();
 	return { .media = MTP_messageMediaVenue(
 		_location.toMTP(),
 		MTP_string(_title),
@@ -114,25 +99,11 @@ QString SendContact::getLayoutDescription(const Result *owner) const {
 void SendPhoto::addToHistory(
 		const Result *owner,
 		not_null<History*> history,
-		MessageFlags flags,
-		MsgId msgId,
-		PeerId fromId,
-		TimeId date,
-		UserId viaBotId,
-		FullReplyTo replyTo,
-		const QString &postAuthor,
-		HistoryMessageMarkupData &&markup) const {
+		HistoryItemCommonFields &&fields) const {
 	history->addNewLocalMessage(
-		msgId,
-		flags,
-		viaBotId,
-		replyTo,
-		date,
-		fromId,
-		postAuthor,
+		std::move(fields),
 		_photo,
-		{ _message, _entities },
-		std::move(markup));
+		{ _message, _entities });
 }
 
 QString SendPhoto::getErrorOnSend(
@@ -145,25 +116,11 @@ QString SendPhoto::getErrorOnSend(
 void SendFile::addToHistory(
 		const Result *owner,
 		not_null<History*> history,
-		MessageFlags flags,
-		MsgId msgId,
-		PeerId fromId,
-		TimeId date,
-		UserId viaBotId,
-		FullReplyTo replyTo,
-		const QString &postAuthor,
-		HistoryMessageMarkupData &&markup) const {
+		HistoryItemCommonFields &&fields) const {
 	history->addNewLocalMessage(
-		msgId,
-		flags,
-		viaBotId,
-		replyTo,
-		date,
-		fromId,
-		postAuthor,
+		std::move(fields),
 		_document,
-		{ _message, _entities },
-		std::move(markup));
+		{ _message, _entities });
 }
 
 QString SendFile::getErrorOnSend(
@@ -176,24 +133,8 @@ QString SendFile::getErrorOnSend(
 void SendGame::addToHistory(
 		const Result *owner,
 		not_null<History*> history,
-		MessageFlags flags,
-		MsgId msgId,
-		PeerId fromId,
-		TimeId date,
-		UserId viaBotId,
-		FullReplyTo replyTo,
-		const QString &postAuthor,
-		HistoryMessageMarkupData &&markup) const {
-	history->addNewLocalMessage(
-		msgId,
-		flags,
-		viaBotId,
-		replyTo,
-		date,
-		fromId,
-		postAuthor,
-		_game,
-		std::move(markup));
+		HistoryItemCommonFields &&fields) const {
+	history->addNewLocalMessage(std::move(fields), _game);
 }
 
 QString SendGame::getErrorOnSend(

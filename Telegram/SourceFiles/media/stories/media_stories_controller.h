@@ -141,6 +141,7 @@ public:
 		-> HistoryView::Reactions::CachedIconFactory &;
 
 	void show(not_null<Data::Story*> story, Data::StoriesContext context);
+	void jumpTo(not_null<Data::Story*> story, Data::StoriesContext context);
 	void ready();
 
 	void updateVideoPlayback(const Player::TrackState &state);
@@ -260,7 +261,7 @@ private:
 
 	[[nodiscard]] int repostSkipTop() const;
 	void updateAreas(Data::Story *story);
-	void reactionChosen(ReactionsMode mode, ChosenReaction chosen);
+	bool reactionChosen(ReactionsMode mode, ChosenReaction chosen);
 
 	const not_null<Delegate*> _delegate;
 

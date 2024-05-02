@@ -357,6 +357,7 @@ struct UserpicData {
 	QString largeLink;
 	QByteArray firstName;
 	QByteArray lastName;
+	QByteArray tooltip;
 };
 
 struct StoryData {
@@ -743,9 +744,17 @@ QByteArray HtmlWriter::Wrap::pushUserpic(const UserpicData &userpic) {
 			},
 			{ "style", sizeStyle }
 		}));
-		result.append(pushDiv(
-			"initials",
-			"line-height: " + size));
+		if (userpic.tooltip.isEmpty()) {
+			result.append(pushDiv(
+				"initials",
+				"line-height: " + size));
+		} else {
+			result.append(pushTag("div", {
+				{ "class", "initials" },
+				{ "style", "line-height: " + size },
+				{ "title", userpic.tooltip },
+			}));
+		}
 		auto character = [](const QByteArray &from) {
 			const auto utf = QString::fromUtf8(from).trimmed();
 			return utf.isEmpty()
@@ -1301,6 +1310,11 @@ auto HtmlWriter::Wrap::pushMessage(
 		return QByteArray::number(data.winners)
 			+ " of the giveaway were randomly selected by Telegram "
 			"and received private messages with giftcodes.";
+	}, [&](const ActionBoostApply &data) {
+		return serviceFrom
+			+ " boosted the group "
+			+ QByteArray::number(data.boosts)
+			+ (data.boosts > 1 ? " times" : " time");
 	}, [](v::null_t) { return QByteArray(); });
 
 	if (!serviceText.isEmpty()) {
@@ -1427,6 +1441,55 @@ auto HtmlWriter::Wrap::pushMessage(
 	if (!text.isEmpty()) {
 		block.append(pushDiv("text"));
 		block.append(text);
+		block.append(popTag());
+	}
+	if (!message.inlineButtonRows.empty()) {
+		using Type = HistoryMessageMarkupButton::Type;
+		const auto endline = u" | "_q;
+		block.append(pushTag("table", { { "class", "bot_buttons_table" } }));
+		block.append(pushTag("tbody"));
+		for (const auto &row : message.inlineButtonRows) {
+			block.append(pushTag("tr"));
+			block.append(pushTag("td", { { "class", "bot_button_row" } }));
+			for (const auto &button : row) {
+				using Attribute = std::pair<QByteArray, QByteArray>;
+				const auto content = (!button.data.isEmpty()
+						? (u"Data: "_q + button.data + endline)
+						: QString())
+					+ (!button.forwardText.isEmpty()
+						? (u"Forward text: "_q + button.forwardText + endline)
+						: QString())
+					+ (u"Type: "_q
+						+ HistoryMessageMarkupButton::TypeToString(button));
+				const auto link = (button.type == Type::Url)
+					? button.data
+					: QByteArray();
+				const auto onclick = (button.type != Type::Url)
+					? ("return ShowTextCopied('" + content + "');").toUtf8()
+					: QByteArray();
+				block.append(pushTag("div", { { "class", "bot_button" } }));
+				block.append(pushTag("a", {
+					link.isEmpty() ? Attribute() : Attribute{ "href", link },
+					onclick.isEmpty()
+						? Attribute()
+						: Attribute{ "onclick", onclick },
+				}));
+				block.append(pushTag("div"));
+				block.append(button.text.toUtf8());
+				block.append(popTag());
+				block.append(popTag());
+				block.append(popTag());
+
+				if (&button != &row.back()) {
+					block.append(pushTag("div", {
+						{ "class", "bot_button_column_separator" }
+					}));
+					block.append(popTag());
+				}
+			}
+			block.append(popTag());
+			block.append(popTag());
+		}
 		block.append(popTag());
 	}
 	if (!message.signature.isEmpty()) {
@@ -1563,7 +1626,7 @@ QByteArray HtmlWriter::Wrap::pushStickerMedia(
 		const QString &basePath) {
 	using namespace Data;
 
-	const auto [thumb, size] = WriteImageThumb(
+	const auto &[thumb, size] = WriteImageThumb(
 		basePath,
 		data.file.relativePath,
 		CalculateThumbSize(
@@ -1730,7 +1793,7 @@ QByteArray HtmlWriter::Wrap::pushPhotoMedia(
 		const QString &basePath) {
 	using namespace Data;
 
-	const auto [thumb, size] = WriteImageThumb(
+	const auto &[thumb, size] = WriteImageThumb(
 		basePath,
 		data.image.file.relativePath,
 		CalculateThumbSize(
@@ -2488,6 +2551,10 @@ Result HtmlWriter::writeSavedContacts(const Data::ContactsList &data) {
 		};
 		userpic.firstName = contact.firstName;
 		userpic.lastName = contact.lastName;
+		if (contact.userId) {
+			const auto raw = contact.userId.bare & PeerId::kChatTypeMask;
+			userpic.tooltip = (u"ID: "_q + QString::number(raw)).toUtf8();
+		}
 		block.append(file->pushListEntry(
 			userpic,
 			ComposeName(userpic, "Deleted Account"),
@@ -2790,7 +2857,7 @@ Result HtmlWriter::writeDialogSlice(const Data::MessagesSlice &data) {
 				_settings.path,
 				FormatDateText(date)));
 		}
-		const auto [info, content] = _chat->pushMessage(
+		const auto &[info, content] = _chat->pushMessage(
 			message,
 			previous,
 			_dialog,

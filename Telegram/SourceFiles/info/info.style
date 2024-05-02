@@ -304,6 +304,9 @@ InfoProfileCover {
 	status: FlatLabel;
 	statusLeft: pixels;
 	statusTop: pixels;
+	showLastSeen: RoundButton;
+	showLastSeenPosition: point;
+	showLastSeenVisible: bool;
 	rightSkip: pixels;
 }
 infoProfilePhotoInnerSize: 72px;
@@ -334,6 +337,19 @@ infoProfileCover: InfoProfileCover {
 	status: infoProfileStatus;
 	statusLeft: 109px;
 	statusTop: 58px;
+	showLastSeen: RoundButton(defaultActiveButton) {
+		textFg: windowSubTextFg;
+		textFgOver: windowSubTextFg;
+		textBg: windowBgOver;
+		textBgOver: windowBgOver;
+		width: -12px;
+		height: 18px;
+		textTop: 0px;
+		font: font(12px);
+		ripple: defaultRippleAnimation;
+	}
+	showLastSeenPosition: point(3px, 58px);
+	showLastSeenVisible: true;
 	rightSkip: 20px;
 }
 infoProfileMegagroupCover: InfoProfileCover(infoProfileCover) {
@@ -430,6 +446,8 @@ infoSharedMediaButtonIconPosition: point(20px, 3px);
 infoGroupMembersIconPosition: point(20px, 10px);
 infoChannelMembersIconPosition: point(20px, 19px);
 
+infoPersonalChannelIconPosition: point(25px, 20px);
+
 infoBlockHeaderLabel: FlatLabel(infoProfileStatus) {
 	textFg: windowBoldFg;
 	style: TextStyle(defaultTextStyle) {
@@ -461,6 +479,10 @@ infoMainButton: SettingsButton(infoProfileButton) {
 	textFg: lightButtonFg;
 	textFgOver: lightButtonFgOver;
 	style: semiboldTextStyle;
+}
+infoMainButtonAttention: SettingsButton(infoMainButton) {
+	textFg: attentionButtonFg;
+	textFgOver: attentionButtonFgOver;
 }
 infoSharedMediaButton: infoProfileButton;
 infoSharedMediaBottomSkip: 12px;
@@ -988,3 +1010,21 @@ similarChannelsLockAbout: FlatLabel(defaultFlatLabel) {
 	minWidth: 128px;
 }
 similarChannelsLockAboutPadding: margins(12px, 12px, 12px, 12px);
+
+infoHoursState: FlatLabel(infoLabeled) {
+	minWidth: 0px;
+}
+infoHoursValue: FlatLabel(infoHoursState) {
+	textFg: windowSubTextFg;
+	align: align(topright);
+}
+infoHoursDayLabel: infoHoursState;
+infoHoursOuter: RoundButton(defaultActiveButton) {
+	textBg: transparent;
+	textBgOver: transparent;
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: windowBgOver;
+	}
+}
+infoHoursOuterMargin: margins(8px, 4px, 8px, 4px);
+infoHoursDaySkip: 6px;

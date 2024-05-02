@@ -135,6 +135,13 @@ private:
 		Ui::PeerUserpicView userpicView;
 		QString buttonText;
 		bool hasExternalLink = false;
+
+		bool canReport = false;
+		QSize hintSize;
+		QPoint lastHintPos;
+		int widthBeforeHint = 0;
+		std::unique_ptr<Ui::RippleAnimation> hintRipple;
+		ClickHandlerPtr hintLink;
 	};
 	mutable std::optional<SponsoredData> _sponsoredData;
 
@@ -147,10 +154,9 @@ private:
 	Ui::Text::String _siteName;
 	Ui::Text::String _title;
 	Ui::Text::String _description;
+	Ui::Text::String _openButton;
 
-	QString _openButton;
 	QString _duration;
-	int _openButtonWidth = 0;
 	int _durationWidth = 0;
 
 	mutable QPoint _lastPoint;

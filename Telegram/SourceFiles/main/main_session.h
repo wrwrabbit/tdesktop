@@ -31,6 +31,8 @@ class Templates;
 namespace Data {
 class Session;
 class Changes;
+class ScheduledMessages;
+class SponsoredMessages;
 } // namespace Data
 
 namespace Storage {
@@ -63,6 +65,7 @@ struct ColorIndicesCompressed;
 namespace Main {
 
 class Account;
+class AppConfig;
 class Domain;
 class SessionSettings;
 class SendAsPeers;
@@ -83,10 +86,13 @@ public:
 	[[nodiscard]] Domain &domain() const;
 	[[nodiscard]] Storage::Domain &domainLocal() const;
 
+	[[nodiscard]] AppConfig &appConfig() const;
+
 	[[nodiscard]] bool premium() const;
 	[[nodiscard]] bool premiumPossible() const;
 	[[nodiscard]] rpl::producer<bool> premiumPossibleValue() const;
 	[[nodiscard]] bool premiumBadgesShown() const;
+	[[nodiscard]] bool premiumCanBuy() const;
 
 	[[nodiscard]] bool isTestMode() const;
 	[[nodiscard]] uint64 uniqueId() const; // userId() with TestDC shift.
@@ -99,6 +105,12 @@ public:
 
 	[[nodiscard]] Data::Changes &changes() const {
 		return *_changes;
+	}
+	[[nodiscard]] Data::SponsoredMessages &sponsoredMessages() const {
+		return *_sponsoredMessages;
+	}
+	[[nodiscard]] Data::ScheduledMessages &scheduledMessages() const {
+		return *_scheduledMessages;
 	}
 	[[nodiscard]] Api::Updates &updates() const {
 		return *_updates;
@@ -198,6 +210,7 @@ private:
 
 	void parseColorIndices(const MTPDhelp_peerColors &data);
 
+	const UserId _userId;
 	const not_null<Account*> _account;
 
 	const std::unique_ptr<SessionSettings> _settings;
@@ -210,8 +223,7 @@ private:
 	const std::unique_ptr<Storage::Facade> _storage;
 
 	// _data depends on _downloader / _uploader.
-	std::unique_ptr<Data::Session> _data;
-	const UserId _userId;
+	const std::unique_ptr<Data::Session> _data;
 	const not_null<UserData*> _user;
 
 	// _emojiStickersPack depends on _data.
@@ -220,6 +232,8 @@ private:
 	const std::unique_ptr<Stickers::GiftBoxPack> _giftBoxStickersPacks;
 	const std::unique_ptr<SendAsPeers> _sendAsPeers;
 	const std::unique_ptr<InlineBots::AttachWebView> _attachWebView;
+	const std::unique_ptr<Data::ScheduledMessages> _scheduledMessages;
+	const std::unique_ptr<Data::SponsoredMessages> _sponsoredMessages;
 
 	const std::unique_ptr<Support::Helper> _supportHelper;
 

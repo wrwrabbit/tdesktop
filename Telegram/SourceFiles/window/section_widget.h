@@ -138,11 +138,17 @@ public:
 	virtual bool showInternal(
 		not_null<SectionMemento*> memento,
 		const SectionShow &params) = 0;
+	virtual bool sameTypeAs(not_null<SectionMemento*> memento) {
+		return false;
+	}
 
 	virtual bool showMessage(
 			PeerId peerId,
 			const SectionShow &params,
 			MsgId messageId) {
+		return false;
+	}
+	virtual bool searchInChatEmbedded(Dialogs::Key chat, QString query) {
 		return false;
 	}
 

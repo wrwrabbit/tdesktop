@@ -100,7 +100,7 @@ void Controller::prepare() {
 			return;
 		}
 		auto row = std::make_unique<PeerListRow>(chat);
-		const auto username = chat->userName();
+		const auto username = chat->username();
 		row->setCustomStatus(!username.isEmpty()
 			? ('@' + username)
 			: (chat->isChannel() && !chat->isMegagroup())
@@ -260,11 +260,11 @@ void Controller::choose(not_null<ChatData*> chat) {
 
 	const auto init = [=](not_null<ListBox*> box) {
 		auto above = object_ptr<Ui::VerticalLayout>(box);
-		Settings::AddDividerTextWithLottie(
-			above,
-			box->showFinishes(),
-			About(channel, chat),
-			u"discussion"_q);
+		Settings::AddDividerTextWithLottie(above, {
+			.lottie = u"discussion"_q,
+			.showFinished = box->showFinishes(),
+			.about = About(channel, chat),
+		});
 		if (!chat) {
 			Assert(channel->isBroadcast());
 

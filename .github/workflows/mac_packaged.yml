@@ -1,23 +1,6 @@
 name: MacOS Packaged.
 
 on:
-  push:
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'changelog.txt'
-      - 'LEGAL'
-      - 'LICENSE'
-      - '.github/**'
-      - '!.github/workflows/mac_packaged.yml'
-      - 'lib/xdg/**'
-      - 'snap/**'
-      - 'Telegram/build/**'
-      - 'Telegram/Resources/uwp/**'
-      - 'Telegram/Resources/winrc/**'
-      - 'Telegram/SourceFiles/platform/win/**'
-      - 'Telegram/SourceFiles/platform/linux/**'
-      - 'Telegram/configure.bat'
   pull_request:
     paths-ignore:
       - 'docs/**'
@@ -49,8 +32,8 @@ jobs:
 
     env:
       GIT: "https://github.com"
-      OPENALDIR: "/usr/local/opt/openal-soft"
-      UPLOAD_ARTIFACT: "false"
+      CMAKE_PREFIX_PATH: "/usr/local/opt/ffmpeg@6:/usr/local/opt/openal-soft"
+      UPLOAD_ARTIFACT: "true"
       ONLY_CACHE: "false"
       MANUAL_CACHING: "1"
       AUTO_CACHING: "1"
@@ -69,10 +52,11 @@ jobs:
         run: |
           brew update
           brew upgrade || true
-          brew install autoconf automake boost cmake ffmpeg openal-soft openssl opus ninja pkg-config python qt yasm xz
+          brew install autoconf automake boost cmake ffmpeg@6 openal-soft openssl opus ninja pkg-config python qt yasm xz
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
           xcodebuild -version > CACHE_KEY.txt
+          brew list --versions >> CACHE_KEY.txt
           echo $MANUAL_CACHING >> CACHE_KEY.txt
           echo "$GITHUB_WORKSPACE" >> CACHE_KEY.txt
           if [ "$AUTO_CACHING" = "1" ]; then

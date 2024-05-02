@@ -32,6 +32,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_instance.h"
+#include "data/business/data_shortcut_messages.h"
+#include "data/components/scheduled_messages.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_channel.h"
 #include "data/data_media_types.h"
@@ -41,7 +43,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document.h"
 #include "data/data_web_page.h"
 #include "data/data_file_click_handler.h"
-#include "data/data_scheduled_messages.h"
 #include "data/data_session.h"
 #include "data/data_stories.h"
 #include "main/main_session.h"
@@ -300,10 +301,12 @@ ReplyFields ReplyFieldsFromMTP(
 		const auto owner = &item->history()->owner();
 		if (const auto id = data.vreply_to_msg_id().value_or_empty()) {
 			result.messageId = data.is_reply_to_scheduled()
-				? owner->scheduledMessages().localMessageId(id)
+				? owner->session().scheduledMessages().localMessageId(id)
+				: item->shortcutId()
+				? owner->shortcutMessages().localMessageId(id)
 				: id;
 			result.topMessageId
-				= data.vreply_to_top_id().value_or(id);
+				= data.vreply_to_top_id().value_or(result.messageId.bare);
 			result.topicPost = data.is_forum_topic() ? 1 : 0;
 		}
 		if (const auto header = data.vreply_from()) {
@@ -330,7 +333,7 @@ ReplyFields ReplyFieldsFromMTP(
 		return result;
 	}, [&](const MTPDmessageReplyStoryHeader &data) {
 		return ReplyFields{
-			.externalPeerId = peerFromUser(data.vuser_id()),
+			.externalPeerId = peerFromMTP(data.vpeer()),
 			.storyId = data.vstory_id().v,
 		};
 	});
@@ -362,9 +365,9 @@ FullReplyTo ReplyToFromMTP(
 		result.quoteOffset = data.vquote_offset().value_or_empty();
 		return result;
 	}, [&](const MTPDinputReplyToStory &data) {
-		if (const auto parsed = Data::UserFromInputMTP(
+		if (const auto parsed = Data::PeerFromInputMTP(
 				&history->owner(),
-				data.vuser_id())) {
+				data.vpeer())) {
 			return FullReplyTo{
 				.storyId = { parsed->id, data.vstory_id().v },
 			};
@@ -384,13 +387,14 @@ HistoryMessageReply::~HistoryMessageReply() {
 	_fields.externalMedia = nullptr;
 }
 
-bool HistoryMessageReply::updateData(
+void HistoryMessageReply::updateData(
 		not_null<HistoryItem*> holder,
 		bool force) {
 	const auto guard = gsl::finally([&] { refreshReplyToMedia(); });
 	if (!force) {
 		if (resolvedMessage || resolvedStory || _unavailable) {
-			return true;
+			_pendingResolve = 0;
+			return;
 		}
 	}
 	const auto peerId = _fields.externalPeerId
@@ -449,10 +453,15 @@ bool HistoryMessageReply::updateData(
 		}
 		holder->history()->owner().requestItemResize(holder);
 	}
-	return resolvedMessage
+	if (resolvedMessage
 		|| resolvedStory
 		|| (!_fields.messageId && !_fields.storyId && external())
-		|| _unavailable;
+		|| _unavailable) {
+		_pendingResolve = 0;
+	} else if (!force) {
+		_pendingResolve = 1;
+		_requestedResolve = 0;
+	}
 }
 
 void HistoryMessageReply::set(ReplyFields fields) {
@@ -468,17 +477,20 @@ void HistoryMessageReply::updateFields(
 	if ((_fields.messageId != messageId)
 		&& !IsServerMsgId(_fields.messageId)) {
 		_fields.messageId = messageId;
-		if (!updateData(holder)) {
-			RequestDependentMessageItem(
-				holder,
-				_fields.externalPeerId,
-				_fields.messageId);
-		}
+		updateData(holder);
 	}
 	if ((_fields.topMessageId != topMessageId)
 		&& !IsServerMsgId(_fields.topMessageId)) {
 		_fields.topMessageId = topMessageId;
 	}
+}
+
+bool HistoryMessageReply::acquireResolve() {
+	if (!_pendingResolve || _requestedResolve) {
+		return false;
+	}
+	_requestedResolve = 1;
+	return true;
 }
 
 void HistoryMessageReply::setTopMessageId(MsgId topMessageId) {

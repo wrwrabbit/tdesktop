@@ -20,6 +20,8 @@ namespace {
 
 constexpr auto kPerPage = 50;
 constexpr auto kFirstPerPage = 10;
+constexpr auto kListPerPage = 100;
+constexpr auto kListFirstPerPage = 20;
 
 } // namespace
 
@@ -28,7 +30,8 @@ SavedMessages::SavedMessages(not_null<Session*> owner)
 , _chatsList(
 	&owner->session(),
 	FilterId(),
-	owner->maxPinnedChatsLimitValue(this)) {
+	owner->maxPinnedChatsLimitValue(this))
+, _loadMore([=] { sendLoadMoreRequests(); }) {
 }
 
 SavedMessages::~SavedMessages() = default;
@@ -60,6 +63,16 @@ not_null<SavedSublist*> SavedMessages::sublist(not_null<PeerData*> peer) {
 }
 
 void SavedMessages::loadMore() {
+	_loadMoreScheduled = true;
+	_loadMore.call();
+}
+
+void SavedMessages::loadMore(not_null<SavedSublist*> sublist) {
+	_loadMoreSublistsScheduled.emplace(sublist);
+	_loadMore.call();
+}
+
+void SavedMessages::sendLoadMore() {
 	if (_loadMoreRequestId || _chatsList.loaded()) {
 		return;
 	} else if (!_pinnedLoaded) {
@@ -71,7 +84,7 @@ void SavedMessages::loadMore() {
 			MTP_int(_offsetDate),
 			MTP_int(_offsetId),
 			_offsetPeer ? _offsetPeer->input : MTP_inputPeerEmpty(),
-			MTP_int(kPerPage),
+			MTP_int(_offsetId ? kListPerPage : kListFirstPerPage),
 			MTP_long(0)) // hash
 	).done([=](const MTPmessages_SavedDialogs &result) {
 		apply(result, false);
@@ -102,7 +115,7 @@ void SavedMessages::loadPinned() {
 	}).send();
 }
 
-void SavedMessages::loadMore(not_null<SavedSublist*> sublist) {
+void SavedMessages::sendLoadMore(not_null<SavedSublist*> sublist) {
 	if (_loadMoreRequests.contains(sublist) || sublist->isFullLoaded()) {
 		return;
 	}
@@ -222,14 +235,25 @@ void SavedMessages::apply(
 		_chatsList.setLoaded();
 	} else if (result.type() == mtpc_messages_savedDialogs) {
 		_chatsList.setLoaded();
-	} else if (offsetDate < _offsetDate
-		|| (offsetDate == _offsetDate && offsetId == _offsetId && offsetPeer == _offsetPeer)) {
+	} else if ((_offsetDate > 0 && offsetDate > _offsetDate)
+		|| (offsetDate == _offsetDate
+			&& offsetId == _offsetId
+			&& offsetPeer == _offsetPeer)) {
 		LOG(("API Error: Bad order in messages.savedDialogs."));
 		_chatsList.setLoaded();
 	} else {
 		_offsetDate = offsetDate;
 		_offsetId = offsetId;
 		_offsetPeer = offsetPeer;
+	}
+}
+
+void SavedMessages::sendLoadMoreRequests() {
+	if (_loadMoreScheduled) {
+		sendLoadMore();
+	}
+	for (const auto sublist : base::take(_loadMoreSublistsScheduled)) {
+		sendLoadMore(sublist);
 	}
 }
 
@@ -253,7 +277,7 @@ void SavedMessages::apply(const MTPDupdatePinnedSavedDialogs &update) {
 	if (!ranges::none_of(order, notLoaded)) {
 		loadPinned();
 	} else {
-		_chatsList.pinned()->applyList(_owner, order);
+		_chatsList.pinned()->applyList(this, order);
 		_owner->notifyPinnedDialogsOrderUpdated();
 	}
 }

@@ -113,7 +113,8 @@ Base64UrlInput::Base64UrlInput(
 	rpl::producer<QString> placeholder,
 	const QString &val)
 : MaskedInputField(parent, st, std::move(placeholder), val) {
-	if (!QRegularExpression("^[a-zA-Z0-9_\\-]+$").match(val).hasMatch()) {
+	static const auto RegExp = QRegularExpression("^[a-zA-Z0-9_\\-]+$");
+	if (!RegExp.match(val).hasMatch()) {
 		setText(QString());
 	}
 }
@@ -716,7 +717,7 @@ void ProxiesBox::refreshProxyForCalls() {
 		return;
 	}
 	_proxyForCalls->toggle(
-		(_proxySettings->value() == ProxyData::Settings::Enabled
+		(_proxySettings->current() == ProxyData::Settings::Enabled
 			&& _currentProxySupportsCallsId != 0),
 		anim::type::normal);
 }
@@ -747,7 +748,7 @@ void ProxiesBox::applyView(View &&view) {
 		const auto wrap = _wrap
 			? _wrap.data()
 			: _initialWrap.data();
-		const auto [i, ok] = _rows.emplace(id, nullptr);
+		const auto &[i, ok] = _rows.emplace(id, nullptr);
 		i->second.reset(wrap->insert(
 			0,
 			object_ptr<ProxyRow>(
@@ -831,8 +832,9 @@ void ProxyBox::prepare() {
 	connect(_host.data(), &HostInput::changed, [=] {
 		Ui::PostponeCall(_host, [=] {
 			const auto host = _host->getLastText().trimmed();
-			static const auto mask = u"^\\d+\\.\\d+\\.\\d+\\.\\d+:(\\d*)$"_q;
-			const auto match = QRegularExpression(mask).match(host);
+			static const auto mask = QRegularExpression(
+				u"^\\d+\\.\\d+\\.\\d+\\.\\d+:(\\d*)$"_q);
+			const auto match = mask.match(host);
 			if (_host->cursorPosition() == host.size()
 				&& match.hasMatch()) {
 				const auto port = match.captured(1);
@@ -862,7 +864,7 @@ void ProxyBox::refreshButtons() {
 	addButton(tr::lng_settings_save(), [=] { save(); });
 	addButton(tr::lng_cancel(), [=] { closeBox(); });
 
-	const auto type = _type->value();
+	const auto type = _type->current();
 	if (type == Type::Socks5 || type == Type::Mtproto) {
 		addLeftButton(tr::lng_proxy_share(), [=] { share(); });
 	}
@@ -883,7 +885,7 @@ void ProxyBox::share() {
 
 ProxyData ProxyBox::collectData() {
 	auto result = ProxyData();
-	result.type = _type->value();
+	result.type = _type->current();
 	result.host = _host->getLastText().trimmed();
 	result.port = _port->getLastText().trimmed().toInt();
 	result.user = (result.type == Type::Mtproto)
@@ -1051,7 +1053,7 @@ void ProxyBox::setupControls(const ProxyData &data) {
 		handleType(type);
 		refreshButtons();
 	});
-	handleType(_type->value());
+	handleType(_type->current());
 }
 
 void ProxyBox::addLabel(
@@ -1107,6 +1109,10 @@ void ProxiesBoxController::ShowApplyConfirmation(
 		proxy.password = fields.value(u"secret"_q);
 	}
 	if (proxy) {
+		static const auto UrlStartRegExp = QRegularExpression(
+			"^https://",
+			QRegularExpression::CaseInsensitiveOption);
+		static const auto UrlEndRegExp = QRegularExpression("/$");
 		const auto displayed = "https://" + server + "/";
 		const auto parsed = QUrl::fromUserInput(displayed);
 		const auto displayUrl = !UrlClickHandler::IsSuspicious(displayed)
@@ -1117,11 +1123,9 @@ void ProxiesBoxController::ShowApplyConfirmation(
 		const auto displayServer = QString(
 			displayUrl
 		).replace(
-			QRegularExpression(
-				"^https://",
-				QRegularExpression::CaseInsensitiveOption),
+			UrlStartRegExp,
 			QString()
-		).replace(QRegularExpression("/$"), QString());
+		).replace(UrlEndRegExp, QString());
 		const auto text = tr::lng_sure_enable_socks(
 			tr::now,
 			lt_server,

@@ -34,7 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/streaming/media_streaming_player.h"
 #include "media/streaming/media_streaming_document.h"
 #include "settings/settings_calls.h" // Calls::AddCameraSubsection.
-#include "webrtc/webrtc_media_devices.h" // Webrtc::GetVideoInputList.
+#include "webrtc/webrtc_environment.h"
 #include "webrtc/webrtc_video_track.h"
 #include "ui/widgets/popup_menu.h"
 #include "window/window_controller.h"
@@ -53,7 +53,8 @@ namespace {
 
 [[nodiscard]] bool IsCameraAvailable() {
 	return (Core::App().calls().currentCall() == nullptr)
-		&& !Webrtc::GetVideoInputList().empty();
+		&& !Core::App().mediaDevices().defaultId(
+			Webrtc::DeviceType::Camera).isEmpty();
 }
 
 void CameraBox(
@@ -108,9 +109,9 @@ void CameraBox(
 
 template <typename Callback>
 QPixmap CreateSquarePixmap(int width, Callback &&paintCallback) {
-	auto size = QSize(width, width) * cIntRetinaFactor();
+	const auto size = QSize(width, width) * style::DevicePixelRatio();
 	auto image = QImage(size, QImage::Format_ARGB32_Premultiplied);
-	image.setDevicePixelRatio(cRetinaFactor());
+	image.setDevicePixelRatio(style::DevicePixelRatio());
 	image.fill(Qt::transparent);
 	{
 		Painter p(&image);
@@ -930,7 +931,7 @@ void UserpicButton::showCustom(QImage &&image) {
 	if (_userpicHasImage) {
 		auto size = QSize(_st.photoSize, _st.photoSize);
 		auto small = image.scaled(
-			size * cIntRetinaFactor(),
+			size * style::DevicePixelRatio(),
 			Qt::IgnoreAspectRatio,
 			Qt::SmoothTransformation);
 		_userpic = Ui::PixmapFromImage(useForumShape()
@@ -944,7 +945,7 @@ void UserpicButton::showCustom(QImage &&image) {
 			fillShape(p, _st.changeButton.textBg);
 		});
 	}
-	_userpic.setDevicePixelRatio(cRetinaFactor());
+	_userpic.setDevicePixelRatio(style::DevicePixelRatio());
 	_userpicUniqueKey = {};
 	_result = std::move(image);
 

@@ -580,8 +580,10 @@ void LinkController::addLinkBlock(not_null<Ui::VerticalLayout*> container) {
 			ShareInviteLinkBox(&_window->session(), link));
 	});
 	const auto getLinkQr = crl::guard(weak, [=] {
-		delegate()->peerListUiShow()->showBox(
-			InviteLinkQrBox(link, tr::lng_filters_link_qr_about()));
+		delegate()->peerListUiShow()->showBox(InviteLinkQrBox(
+			link,
+			tr::lng_group_invite_qr_title(),
+			tr::lng_filters_link_qr_about()));
 	});
 	const auto editLink = crl::guard(weak, [=] {
 		delegate()->peerListUiShow()->showBox(
@@ -886,8 +888,10 @@ base::unique_qptr<Ui::PopupMenu> LinksController::createRowContextMenu(
 			ShareInviteLinkBox(&_window->session(), link));
 	};
 	const auto getLinkQr = [=] {
-		delegate()->peerListUiShow()->showBox(
-			InviteLinkQrBox(link, tr::lng_filters_link_qr_about()));
+		delegate()->peerListUiShow()->showBox(InviteLinkQrBox(
+			link,
+			tr::lng_group_invite_qr_title(),
+			tr::lng_filters_link_qr_about()));
 	};
 	const auto editLink = [=] {
 		delegate()->peerListUiShow()->showBox(
@@ -982,8 +986,7 @@ bool GoodForExportFilterLink(
 		not_null<Window::SessionController*> window,
 		const Data::ChatFilter &filter) {
 	using Flag = Data::ChatFilter::Flag;
-	const auto listflags = Flag::Chatlist | Flag::HasMyLinks;
-	if (!filter.never().empty() || (filter.flags() & ~listflags)) {
+	if (!filter.never().empty() || (filter.flags() & Flag::RulesMask)) {
 		window->showToast(tr::lng_filters_link_cant(tr::now));
 		return false;
 	}

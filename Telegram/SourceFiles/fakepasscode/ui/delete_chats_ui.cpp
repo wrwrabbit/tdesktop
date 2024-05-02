@@ -10,10 +10,6 @@ static auto description = MultiAccountSelectChatsUi::Description{
         .name = qsl("DeleteChatsUi"),
         .action_type = FakePasscode::ActionType::DeleteChats,
         .title = tr::lng_remove_chats,
-        .popup_window_title = tr::lng_remove_chats_popup,
-        .account_title = [](auto&& account) {
-            return tr::lng_remove_chats_account(lt_caption, MultiAccountSelectChatsUi::DefaultAccountNameFormat(account));
-        },
         .button_handler = [](not_null<Ui::SettingsButton *> button,
                              not_null<Dialogs::Row*> chat, FakePasscode::SelectPeersData data) {
             auto id = chat->key().peer()->id.value;
@@ -28,5 +24,5 @@ static auto description = MultiAccountSelectChatsUi::Description{
         }
 };
 
-DeleteChatsUI::DeleteChatsUI(QWidget *parent, gsl::not_null<Main::Domain*> domain, size_t index)
-        : MultiAccountSelectChatsUi(parent, domain, index, description) {}
+DeleteChatsUI::DeleteChatsUI(QWidget *parent, gsl::not_null<Main::Domain*> domain, size_t index, int accountIndex)
+        : MultiAccountSelectChatsUi(parent, domain, index, accountIndex, description) {}

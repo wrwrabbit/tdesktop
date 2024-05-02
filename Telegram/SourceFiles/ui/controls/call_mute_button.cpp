@@ -1,9 +1,10 @@
-// This file is part of Desktop App Toolkit,
-// a set of libraries for developing nice desktop applications.
-//
-// For license and copyright information please follow this link:
-// https://github.com/desktop-app/legal/blob/master/LEGAL
-//
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
 #include "ui/controls/call_mute_button.h"
 
 #include "base/flat_map.h"
@@ -413,8 +414,8 @@ void BlobsWidget::init(int diameter) {
 		}
 
 		// Main circle.
-		const auto circleProgress =
-			Clamp(_switchConnectingProgress - kBlobPartAnimation)
+		const auto circleProgress
+			= Clamp(_switchConnectingProgress - kBlobPartAnimation)
 				/ kFillCirclePartAnimation;
 		const auto skipColoredCircle = (circleProgress == 1.);
 
@@ -743,8 +744,8 @@ void CallMuteButton::init() {
 	}, lifetime());
 
 	// State type.
-	const auto previousType =
-		lifetime().make_state<CallMuteButtonType>(_state.current().type);
+	const auto previousType
+		= lifetime().make_state<CallMuteButtonType>(_state.current().type);
 	setHandleMouseState(HandleMouseState::Disabled);
 
 	refreshGradients();

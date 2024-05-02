@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/debug_log.h"
 #include "data/data_statistics_chart.h"
+#include "statistics/statistics_types.h"
 
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
@@ -61,7 +62,8 @@ Data::StatisticalChart StatisticalChartFromJSON(const QByteArray &json) {
 			line.isHiddenOnStart = ranges::contains(hiddenLines, columnId);
 			line.y.resize(length);
 			for (auto i = 0; i < length; i++) {
-				const auto value = array.at(i + 1).toInt();
+				const auto value = ChartValue(base::SafeRound(
+					array.at(i + 1).toDouble()));
 				line.y[i] = value;
 				if (value > line.maxValue) {
 					line.maxValue = value;
@@ -136,11 +138,11 @@ Data::StatisticalChart StatisticalChartFromJSON(const QByteArray &json) {
 	const auto colors = root.value(u"colors"_q).toObject();
 	const auto names = root.value(u"names"_q).toObject();
 
-	const auto colorPattern = u"(.*)(#.*)"_q;
 	for (auto &line : result.lines) {
 		const auto colorIt = colors.constFind(line.idString);
 		if (colorIt != colors.constEnd() && (*colorIt).isString()) {
-			const auto match = QRegularExpression(colorPattern).match(
+			static const auto RegExp = QRegularExpression(u"(.*)(#.*)"_q);
+			const auto match = RegExp.match(
 				colorIt->toString());
 			if (match.hasMatch()) {
 				line.colorKey = match.captured(1);

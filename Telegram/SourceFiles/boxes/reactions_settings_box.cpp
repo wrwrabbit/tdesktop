@@ -77,20 +77,15 @@ AdminLog::OwnedItem GenerateItem(
 		const QString &text) {
 	Expects(history->peer->isUser());
 
-	const auto item = history->addNewLocalMessage(
-		history->nextNonHistoryEntryId(),
-		(MessageFlag::FakeHistoryItem
+	const auto item = history->addNewLocalMessage({
+		.id = history->nextNonHistoryEntryId(),
+		.flags = (MessageFlag::FakeHistoryItem
 			| MessageFlag::HasFromId
 			| MessageFlag::HasReplyInfo),
-		UserId(), // via
-		FullReplyTo{ .messageId = replyTo },
-		base::unixtime::now(), // date
-		from,
-		QString(), // postAuthor
-		TextWithEntities{ .text = text },
-		MTP_messageMediaEmpty(),
-		HistoryMessageMarkupData(),
-		uint64(0)); // groupedId
+		.from = from,
+		.replyTo = FullReplyTo{ .messageId = replyTo },
+		.date = base::unixtime::now(),
+	}, TextWithEntities{ .text = text }, MTP_messageMediaEmpty());
 
 	return AdminLog::OwnedItem(delegate, item);
 }
@@ -507,7 +502,6 @@ void ReactionsSettingsBox(
 	};
 
 	auto firstCheckedButton = (Ui::RpWidget*)(nullptr);
-	const auto premiumPossible = controller->session().premiumPossible();
 	auto list = reactions.list(Data::Reactions::Type::Active);
 	if (const auto favorite = reactions.favorite()) {
 		if (favorite->id.custom()) {
@@ -519,11 +513,6 @@ void ReactionsSettingsBox(
 			container,
 			rpl::single<QString>(base::duplicate(r.title)),
 			st::settingsButton));
-
-		const auto premium = r.premium;
-		if (premium && !premiumPossible) {
-			continue;
-		}
 
 		const auto iconSize = st::settingsReactionSize;
 		const auto left = button->st().iconLeft;
@@ -556,12 +545,6 @@ void ReactionsSettingsBox(
 				&button->lifetime());
 		}
 		button->setClickedCallback([=, id = r.id] {
-			if (premium && !controller->session().premium()) {
-				ShowPremiumPreviewBox(
-					controller,
-					PremiumPreview::InfiniteReactions);
-				return;
-			}
 			checkButton(button);
 			state->selectedId = id;
 		});

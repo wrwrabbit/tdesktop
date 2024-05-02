@@ -7,59 +7,252 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/edit_privacy_box.h"
 
+#include "api/api_global_privacy.h"
+#include "boxes/filters/edit_filter_chats_list.h"
+#include "ui/effects/premium_graphics.h"
+#include "ui/layers/generic_box.h"
 #include "ui/widgets/checkbox.h"
-#include "ui/widgets/labels.h"
-#include "ui/widgets/buttons.h"
+#include "ui/widgets/shadow.h"
 #include "ui/text/text_utilities.h"
+#include "ui/toast/toast.h"
 #include "ui/wrap/slide_wrap.h"
-#include "ui/wrap/vertical_layout.h"
+#include "ui/painter.h"
 #include "ui/vertical_list.h"
 #include "history/history.h"
 #include "boxes/peer_list_controllers.h"
+#include "settings/settings_premium.h"
 #include "settings/settings_privacy_security.h"
 #include "calls/calls_instance.h"
-#include "base/binary_guard.h"
 #include "lang/lang_keys.h"
 #include "apiwrap.h"
+#include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "data/data_user.h"
 #include "data/data_chat.h"
 #include "data/data_channel.h"
+#include "data/data_peer_values.h"
 #include "window/window_session_controller.h"
+#include "styles/style_boxes.h"
 #include "styles/style_settings.h"
 #include "styles/style_layers.h"
+#include "styles/style_menu_icons.h"
 
 namespace {
+
+constexpr auto kPremiumsRowId = PeerId(FakeChatId(BareId(1))).value;
+
+using Exceptions = Api::UserPrivacy::Exceptions;
+
+void CreateRadiobuttonLock(
+		not_null<Ui::RpWidget*> widget,
+		const style::Checkbox &st) {
+	const auto lock = Ui::CreateChild<Ui::RpWidget>(widget.get());
+	lock->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+	lock->resize(st::defaultRadio.diameter, st::defaultRadio.diameter);
+
+	widget->sizeValue(
+	) | rpl::start_with_next([=, &st](QSize size) {
+		lock->move(st.checkPosition);
+	}, lock->lifetime());
+
+	lock->paintRequest() | rpl::start_with_next([=] {
+		auto p = QPainter(lock);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto &icon = st::messagePrivacyLock;
+		const auto size = st::defaultRadio.diameter;
+		const auto image = icon.instance(st::checkboxFg->c);
+		p.drawImage(QRectF(
+			(size - icon.width()) / 2.,
+			(size - icon.height()) / 2.,
+			icon.width(),
+			icon.height()), image);
+	}, lock->lifetime());
+}
+
+void AddPremiumRequiredRow(
+		not_null<Ui::RpWidget*> widget,
+		not_null<Main::Session*> session,
+		Fn<void()> clickedCallback,
+		Fn<void()> setDefaultOption,
+		const style::Checkbox &st) {
+	const auto row = Ui::CreateChild<Ui::AbstractButton>(widget.get());
+
+	widget->sizeValue(
+	) | rpl::start_with_next([=](const QSize &s) {
+		row->resize(s);
+	}, row->lifetime());
+	row->setClickedCallback(std::move(clickedCallback));
+
+	CreateRadiobuttonLock(row, st);
+
+	Data::AmPremiumValue(
+		session
+	) | rpl::start_with_next([=](bool premium) {
+		row->setVisible(!premium);
+		if (!premium) {
+			setDefaultOption();
+		}
+	}, row->lifetime());
+}
 
 class PrivacyExceptionsBoxController : public ChatsListBoxController {
 public:
 	PrivacyExceptionsBoxController(
 		not_null<Main::Session*> session,
 		rpl::producer<QString> title,
-		const std::vector<not_null<PeerData*>> &selected);
+		const Exceptions &selected,
+		bool allowChoosePremiums);
 
 	Main::Session &session() const override;
 	void rowClicked(not_null<PeerListRow*> row) override;
+	bool isForeignRow(PeerListRowId itemId) override;
+	bool handleDeselectForeignRow(PeerListRowId itemId) override;
+
+	[[nodiscard]] bool premiumsSelected() const;
 
 protected:
 	void prepareViewHook() override;
 	std::unique_ptr<Row> createRow(not_null<History*> history) override;
 
 private:
+	[[nodiscard]] object_ptr<Ui::RpWidget> preparePremiumsRowList();
+
 	const not_null<Main::Session*> _session;
 	rpl::producer<QString> _title;
-	std::vector<not_null<PeerData*>> _selected;
+	Exceptions _selected;
+	bool _allowChoosePremiums = false;
+
+	PeerListContentDelegate *_typesDelegate = nullptr;
+	Fn<void(PeerListRowId)> _deselectOption;
 
 };
+
+struct RowSelectionChange {
+	not_null<PeerListRow*> row;
+	bool checked = false;
+};
+
+class PremiumsRow final : public PeerListRow {
+public:
+	PremiumsRow();
+
+	QString generateName() override;
+	QString generateShortName() override;
+	PaintRoundImageCallback generatePaintUserpicCallback(
+		bool forceRound) override;
+	bool useForumLikeUserpic() const override;
+
+};
+
+class TypesController final : public PeerListController {
+public:
+	TypesController(not_null<Main::Session*> session, bool premiums);
+
+	Main::Session &session() const override;
+	void prepare() override;
+	void rowClicked(not_null<PeerListRow*> row) override;
+
+	[[nodiscard]] bool premiumsSelected() const;
+	[[nodiscard]] rpl::producer<bool> premiumsChanges() const;
+	[[nodiscard]] auto rowSelectionChanges() const
+		-> rpl::producer<RowSelectionChange>;
+
+private:
+	const not_null<Main::Session*> _session;
+
+	rpl::event_stream<> _selectionChanged;
+	rpl::event_stream<RowSelectionChange> _rowSelectionChanges;
+
+};
+
+PremiumsRow::PremiumsRow() : PeerListRow(kPremiumsRowId) {
+	setCustomStatus(tr::lng_edit_privacy_premium_status(tr::now));
+}
+
+QString PremiumsRow::generateName() {
+	return tr::lng_edit_privacy_premium(tr::now);
+}
+
+QString PremiumsRow::generateShortName() {
+	return generateName();
+}
+
+PaintRoundImageCallback PremiumsRow::generatePaintUserpicCallback(
+		bool forceRound) {
+	return [=](QPainter &p, int x, int y, int outerWidth, int size) {
+		auto gradient = QLinearGradient(
+			QPointF(x, y),
+			QPointF(x + size, y + size));
+		gradient.setStops(Ui::Premium::ButtonGradientStops());
+
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(Qt::NoPen);
+		p.setBrush(gradient);
+		if (forceRound) {
+			p.drawEllipse(x, y, size, size);
+		} else {
+			const auto radius = size * Ui::ForumUserpicRadiusMultiplier();
+			p.drawRoundedRect(x, y, size, size, radius, radius);
+		}
+		st::settingsPrivacyPremium.paintInCenter(p, { x, y, size, size });
+	};
+}
+
+bool PremiumsRow::useForumLikeUserpic() const {
+	return true;
+}
+
+TypesController::TypesController(
+	not_null<Main::Session*> session,
+	bool premiums)
+: _session(session) {
+}
+
+Main::Session &TypesController::session() const {
+	return *_session;
+}
+
+void TypesController::prepare() {
+	delegate()->peerListAppendRow(std::make_unique<PremiumsRow>());
+	delegate()->peerListRefreshRows();
+}
+
+bool TypesController::premiumsSelected() const {
+	const auto row = delegate()->peerListFindRow(kPremiumsRowId);
+	Assert(row != nullptr);
+
+	return row->checked();
+}
+
+void TypesController::rowClicked(not_null<PeerListRow*> row) {
+	const auto checked = !row->checked();
+	delegate()->peerListSetRowChecked(row, checked);
+	_rowSelectionChanges.fire({ row, checked });
+}
+
+rpl::producer<bool> TypesController::premiumsChanges() const {
+	return _rowSelectionChanges.events(
+	) | rpl::map([=] {
+		return premiumsSelected();
+	});
+}
+
+auto TypesController::rowSelectionChanges() const
+-> rpl::producer<RowSelectionChange> {
+	return _rowSelectionChanges.events();
+}
 
 PrivacyExceptionsBoxController::PrivacyExceptionsBoxController(
 	not_null<Main::Session*> session,
 	rpl::producer<QString> title,
-	const std::vector<not_null<PeerData*>> &selected)
+	const Exceptions &selected,
+	bool allowChoosePremiums)
 : ChatsListBoxController(session)
 , _session(session)
 , _title(std::move(title))
-, _selected(selected) {
+, _selected(selected)
+, _allowChoosePremiums(allowChoosePremiums) {
 }
 
 Main::Session &PrivacyExceptionsBoxController::session() const {
@@ -68,7 +261,84 @@ Main::Session &PrivacyExceptionsBoxController::session() const {
 
 void PrivacyExceptionsBoxController::prepareViewHook() {
 	delegate()->peerListSetTitle(std::move(_title));
-	delegate()->peerListAddSelectedPeers(_selected);
+	if (_allowChoosePremiums || _selected.premiums) {
+		delegate()->peerListSetAboveWidget(preparePremiumsRowList());
+	}
+	delegate()->peerListAddSelectedPeers(_selected.peers);
+}
+
+bool PrivacyExceptionsBoxController::isForeignRow(PeerListRowId itemId) {
+	return (itemId == kPremiumsRowId);
+}
+
+bool PrivacyExceptionsBoxController::handleDeselectForeignRow(
+		PeerListRowId itemId) {
+	if (isForeignRow(itemId)) {
+		_deselectOption(itemId);
+		return true;
+	}
+	return false;
+}
+
+auto PrivacyExceptionsBoxController::preparePremiumsRowList()
+-> object_ptr<Ui::RpWidget> {
+	auto result = object_ptr<Ui::VerticalLayout>((QWidget*)nullptr);
+	const auto container = result.data();
+	container->add(CreatePeerListSectionSubtitle(
+		container,
+		tr::lng_edit_privacy_user_types()));
+	auto &lifetime = container->lifetime();
+	_typesDelegate = lifetime.make_state<PeerListContentDelegateSimple>();
+	const auto controller = lifetime.make_state<TypesController>(
+		&session(),
+		_selected.premiums);
+	const auto content = result->add(object_ptr<PeerListContent>(
+		container,
+		controller));
+	_typesDelegate->setContent(content);
+	controller->setDelegate(_typesDelegate);
+
+	if (_selected.premiums) {
+		const auto row = _typesDelegate->peerListFindRow(kPremiumsRowId);
+		Assert(row != nullptr);
+
+		content->changeCheckState(row, true, anim::type::instant);
+		this->delegate()->peerListSetForeignRowChecked(
+			row,
+			true,
+			anim::type::instant);
+	}
+	container->add(CreatePeerListSectionSubtitle(
+		container,
+		tr::lng_edit_privacy_users_and_groups()));
+
+	controller->premiumsChanges(
+	) | rpl::start_with_next([=](bool premiums) {
+		_selected.premiums = premiums;
+	}, lifetime);
+
+	controller->rowSelectionChanges(
+	) | rpl::start_with_next([=](RowSelectionChange update) {
+		this->delegate()->peerListSetForeignRowChecked(
+			update.row,
+			update.checked,
+			anim::type::normal);
+	}, lifetime);
+
+	_deselectOption = [=](PeerListRowId itemId) {
+		if (const auto row = _typesDelegate->peerListFindRow(itemId)) {
+			if (itemId == kPremiumsRowId) {
+				_selected.premiums = false;
+			}
+			_typesDelegate->peerListSetRowChecked(row, false);
+		}
+	};
+
+	return result;
+}
+
+[[nodiscard]] bool PrivacyExceptionsBoxController::premiumsSelected() const {
+	return _selected.premiums;
 }
 
 void PrivacyExceptionsBoxController::rowClicked(not_null<PeerListRow*> row) {
@@ -84,7 +354,8 @@ void PrivacyExceptionsBoxController::rowClicked(not_null<PeerListRow*> row) {
 	}
 }
 
-std::unique_ptr<PrivacyExceptionsBoxController::Row> PrivacyExceptionsBoxController::createRow(not_null<History*> history) {
+auto PrivacyExceptionsBoxController::createRow(not_null<History*> history)
+-> std::unique_ptr<Row> {
 	if (history->peer->isSelf() || history->peer->isRepliesChat()) {
 		return nullptr;
 	} else if (!history->peer->isUser()
@@ -135,6 +406,11 @@ EditPrivacyBox::EditPrivacyBox(
 : _window(window)
 , _controller(std::move(controller))
 , _value(value) {
+	if (_controller->allowPremiumsToggle(Exception::Always)
+		&& _value.option == Option::Everyone) {
+		// If we switch from Everyone to Contacts or Nobody suggest Premiums.
+		_value.always.premiums = true;
+	}
 }
 
 void EditPrivacyBox::prepare() {
@@ -149,11 +425,13 @@ void EditPrivacyBox::editExceptions(
 	auto controller = std::make_unique<PrivacyExceptionsBoxController>(
 		&_window->session(),
 		_controller->exceptionBoxTitle(exception),
-		exceptions(exception));
+		exceptions(exception),
+		_controller->allowPremiumsToggle(exception));
 	auto initBox = [=, controller = controller.get()](
 			not_null<PeerListBox*> box) {
 		box->addButton(tr::lng_settings_save(), crl::guard(this, [=] {
-			exceptions(exception) = box->collectSelectedRows();
+			exceptions(exception).peers = box->collectSelectedRows();
+			exceptions(exception).premiums = controller->premiumsSelected();
 			const auto type = [&] {
 				switch (exception) {
 				case Exception::Always: return Exception::Never;
@@ -161,8 +439,8 @@ void EditPrivacyBox::editExceptions(
 				}
 				Unexpected("Invalid exception value.");
 			}();
-			auto &removeFrom = exceptions(type);
-			for (const auto peer : exceptions(exception)) {
+			auto &removeFrom = exceptions(type).peers;
+			for (const auto peer : exceptions(exception).peers) {
 				removeFrom.erase(
 					ranges::remove(removeFrom, peer),
 					end(removeFrom));
@@ -176,7 +454,7 @@ void EditPrivacyBox::editExceptions(
 		Box<PeerListBox>(std::move(controller), std::move(initBox)));
 }
 
-std::vector<not_null<PeerData*>> &EditPrivacyBox::exceptions(Exception exception) {
+EditPrivacyBox::Exceptions &EditPrivacyBox::exceptions(Exception exception) {
 	switch (exception) {
 	case Exception::Always: return _value.always;
 	case Exception::Never: return _value.never;
@@ -279,16 +557,28 @@ void EditPrivacyBox::setupContent() {
 	const auto addExceptionLink = [=](Exception exception) {
 		const auto update = Ui::CreateChild<rpl::event_stream<>>(content);
 		auto label = update->events_starting_with({}) | rpl::map([=] {
-			return Settings::ExceptionUsersCount(exceptions(exception));
-		}) | rpl::map([](int count) {
-			return count
-				? tr::lng_edit_privacy_exceptions_count(tr::now, lt_count, count)
+			const auto &value = exceptions(exception);
+			const auto count = Settings::ExceptionUsersCount(value.peers);
+			const auto users = count
+				? tr::lng_edit_privacy_exceptions_count(
+					tr::now,
+					lt_count,
+					count)
 				: tr::lng_edit_privacy_exceptions_add(tr::now);
+			return !value.premiums
+				? users
+				: !count
+				? tr::lng_edit_privacy_premium(tr::now)
+				: tr::lng_edit_privacy_exceptions_premium_and(
+					tr::now,
+					lt_users,
+					users);
 		});
 		_controller->handleExceptionsChange(
 			exception,
 			update->events_starting_with({}) | rpl::map([=] {
-				return Settings::ExceptionUsersCount(exceptions(exception));
+				return Settings::ExceptionUsersCount(
+					exceptions(exception).peers);
 			}));
 		auto text = _controller->exceptionButtonTextKey(exception);
 		const auto button = content->add(
@@ -314,6 +604,7 @@ void EditPrivacyBox::setupContent() {
 	};
 
 	auto above = _controller->setupAboveWidget(
+		_window,
 		content,
 		rpl::duplicate(optionValue),
 		getDelegate()->outerContainer());
@@ -325,10 +616,29 @@ void EditPrivacyBox::setupContent() {
 		content,
 		_controller->optionsTitleKey(),
 		{ 0, st::settingsPrivacySkipTop, 0, 0 });
-	addOptionRow(Option::Everyone);
-	addOptionRow(Option::Contacts);
-	addOptionRow(Option::CloseFriends);
-	addOptionRow(Option::Nobody);
+
+	const auto options = {
+		Option::Everyone,
+		Option::Contacts,
+		Option::CloseFriends,
+		Option::Nobody,
+	};
+	for (const auto &option : options) {
+		if (const auto row = addOptionRow(option)) {
+			const auto premiumCallback = _controller->premiumClickedCallback(
+				option,
+				_window);
+			if (premiumCallback) {
+				AddPremiumRequiredRow(
+					row,
+					&_window->session(),
+					premiumCallback,
+					[=] { group->setValue(Option::Everyone); },
+					st::messagePrivacyCheck);
+			}
+		}
+	}
+
 	const auto warning = addLabelOrDivider(
 		content,
 		_controller->warning(),
@@ -340,7 +650,7 @@ void EditPrivacyBox::setupContent() {
 	auto middle = _controller->setupMiddleWidget(
 		_window,
 		content,
-		std::move(optionValue));
+		rpl::duplicate(optionValue));
 	if (middle) {
 		content->add(std::move(middle));
 	}
@@ -357,13 +667,17 @@ void EditPrivacyBox::setupContent() {
 		_controller->exceptionsDescription() | Ui::Text::ToWithEntities(),
 		st::defaultVerticalListSkip);
 
-	if (auto below = _controller->setupBelowWidget(_window, content)) {
+	auto below = _controller->setupBelowWidget(
+		_window,
+		content,
+		rpl::duplicate(optionValue));
+	if (below) {
 		content->add(std::move(below));
 	}
 
 	addButton(tr::lng_settings_save(), [=] {
 		const auto someAreDisallowed = (_value.option != Option::Everyone)
-			|| !_value.never.empty();
+			|| !_value.never.peers.empty();
 		_controller->confirmSave(someAreDisallowed, crl::guard(this, [=] {
 			_value.ignoreAlways = !showExceptionLink(Exception::Always);
 			_value.ignoreNever = !showExceptionLink(Exception::Never);
@@ -393,4 +707,123 @@ void EditPrivacyBox::setupContent() {
 	) | rpl::start_with_next([=](int height) {
 		setDimensions(st::boxWideWidth, height);
 	}, content->lifetime());
+}
+
+void EditMessagesPrivacyBox(
+		not_null<Ui::GenericBox*> box,
+		not_null<Window::SessionController*> controller) {
+	box->setTitle(tr::lng_messages_privacy_title());
+	box->setWidth(st::boxWideWidth);
+
+	constexpr auto kOptionAll = 0;
+	constexpr auto kOptionPremium = 1;
+
+	const auto allowed = [=] {
+		return controller->session().premium()
+			|| controller->session().appConfig().newRequirePremiumFree();
+	};
+	const auto privacy = &controller->session().api().globalPrivacy();
+	const auto inner = box->verticalLayout();
+	inner->add(object_ptr<Ui::PlainShadow>(box));
+
+	Ui::AddSkip(inner, st::messagePrivacyTopSkip);
+	Ui::AddSubsectionTitle(inner, tr::lng_messages_privacy_subtitle());
+	const auto group = std::make_shared<Ui::RadiobuttonGroup>(
+		privacy->newRequirePremiumCurrent() ? kOptionPremium : kOptionAll);
+	inner->add(
+		object_ptr<Ui::Radiobutton>(
+			inner,
+			group,
+			kOptionAll,
+			tr::lng_messages_privacy_everyone(tr::now),
+			st::messagePrivacyCheck),
+		st::settingsSendTypePadding);
+	const auto restricted = inner->add(
+		object_ptr<Ui::Radiobutton>(
+			inner,
+			group,
+			kOptionPremium,
+			tr::lng_messages_privacy_restricted(tr::now),
+			st::messagePrivacyCheck),
+		st::settingsSendTypePadding + style::margins(
+			0,
+			st::messagePrivacyRadioSkip,
+			0,
+			st::messagePrivacyBottomSkip));
+
+	using WeakToast = base::weak_ptr<Ui::Toast::Instance>;
+	const auto toast = std::make_shared<WeakToast>();
+	const auto showToast = [=] {
+		auto link = Ui::Text::Link(
+			Ui::Text::Semibold(
+				tr::lng_messages_privacy_premium_link(tr::now)));
+		(*toast) = controller->showToast({
+			.text = tr::lng_messages_privacy_premium(
+				tr::now,
+				lt_link,
+				link,
+				Ui::Text::WithEntities),
+			.st = &st::defaultMultilineToast,
+			.duration = Ui::Toast::kDefaultDuration * 2,
+			.multiline = true,
+			.filter = crl::guard(&controller->session(), [=](
+					const ClickHandlerPtr &,
+					Qt::MouseButton button) {
+				if (button == Qt::LeftButton) {
+					if (const auto strong = toast->get()) {
+						strong->hideAnimated();
+						(*toast) = nullptr;
+						Settings::ShowPremium(
+							controller,
+							u"noncontact_peers_require_premium"_q);
+						return true;
+					}
+				}
+				return false;
+			}),
+		});
+	};
+	if (!allowed()) {
+		CreateRadiobuttonLock(restricted, st::messagePrivacyCheck);
+
+		group->setChangedCallback([=](int value) {
+			if (value == kOptionPremium) {
+				group->setValue(kOptionAll);
+				showToast();
+			}
+		});
+	}
+
+	Ui::AddDividerText(inner, tr::lng_messages_privacy_about());
+	if (!allowed()) {
+		Ui::AddSkip(inner);
+		Settings::AddButtonWithIcon(
+			inner,
+			tr::lng_messages_privacy_premium_button(),
+			st::messagePrivacySubscribe,
+			{ .icon = &st::menuBlueIconPremium }
+		)->setClickedCallback([=] {
+			Settings::ShowPremium(
+				controller,
+				u"noncontact_peers_require_premium"_q);
+		});
+		Ui::AddSkip(inner);
+		Ui::AddDividerText(inner, tr::lng_messages_privacy_premium_about());
+		box->addButton(tr::lng_about_done(), [=] {
+			box->closeBox();
+		});
+	} else {
+		box->addButton(tr::lng_settings_save(), [=] {
+			if (allowed()) {
+				privacy->updateNewRequirePremium(
+					group->current() == kOptionPremium);
+				box->closeBox();
+			} else {
+				showToast();
+			}
+		});
+		box->addButton(tr::lng_cancel(), [=] {
+			box->closeBox();
+		});
+	}
 }

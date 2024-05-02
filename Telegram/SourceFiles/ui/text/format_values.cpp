@@ -357,6 +357,7 @@ CurrencyRule LookupCurrencyRule(const QString &currency) {
 
 		char do_decimal_point() const override { return decimal; }
 		char do_thousands_sep() const override { return thousands; }
+		std::string do_grouping() const override { return "\3"; }
 
 		char decimal = '.';
 		char thousands = ',';
@@ -381,14 +382,17 @@ QString FormatImageSizeText(const QSize &size) {
 		+ QString::number(size.height());
 }
 
-QString FormatPhone(const QString &phone) {
+QString FormatPhone(QString phone) {
 	if (phone.isEmpty()) {
 		return QString();
 	}
 	if (phone.at(0) == '0') {
 		return phone;
 	}
-	return Countries::Instance().format({ .phone = phone }).formatted;
+	phone = phone.remove(QChar::Space);
+	return Countries::Instance().format({
+		.phone = (phone.at(0) == '+') ? phone.mid(1) : phone,
+	}).formatted;
 }
 
 QString FormatTTL(float64 ttl) {

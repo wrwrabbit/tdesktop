@@ -3,6 +3,7 @@
     <file alias="art/background.tgv">../../art/background.tgv</file>
     <file alias="art/bg_thumbnail.png">../../art/bg_thumbnail.png</file>
     <file alias="art/bg_initial.jpg">../../art/bg_initial.jpg</file>
+    <file alias="art/business_logo.png">../../art/business_logo.png</file>
     <file alias="art/logo_256.png">../../art/logo_256.png</file>
     <file alias="art/logo_256_no_margin.png">../../art/logo_256_no_margin.png</file>
     <file alias="art/themeimage.jpg">../../art/themeimage.jpg</file>
@@ -26,6 +27,7 @@
     <file alias="recording/info_audio.svg">../../art/recording/recording_info_audio.svg</file>
     <file alias="recording/info_video_landscape.svg">../../art/recording/recording_info_video_landscape.svg</file>
     <file alias="recording/info_video_portrait.svg">../../art/recording/recording_info_video_portrait.svg</file>
+    <file alias="ttl/video_message_icon.svg">../../art/ttl/video_message_icon.svg</file>
     <file alias="icons/settings/dino.svg">../../icons/settings/dino.svg</file>
     <file alias="icons/settings/star.svg">../../icons/settings/star.svg</file>
     <file alias="icons/settings/starmini.svg">../../icons/settings/starmini.svg</file>

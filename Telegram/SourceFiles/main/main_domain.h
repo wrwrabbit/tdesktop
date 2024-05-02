@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/timer.h"
+#include "base/weak_ptr.h"
 
 namespace Storage {
 class Domain;
@@ -23,15 +24,26 @@ namespace Main {
 class Account;
 class Session;
 
-class Domain final {
+class Domain final : public base::has_weak_ptr {
 public:
 	struct AccountWithIndex {
 		int index = 0;
 		std::unique_ptr<Account> account;
 	};
+	struct AccountWithIndexEx {
+		int index = 0;
+		Account* account;
+		AccountWithIndexEx(const AccountWithIndex& in) {
+			index = in.index;
+			account = not_null( in.account.get() );
+		}
+	};
 
-	static constexpr auto kMaxAccounts = 3;
-	static constexpr auto kPremiumMaxAccounts = 6;
+	static int kMaxAccounts();
+	static int kPremiumMaxAccounts();
+	static int kAbsoluteMaxAccounts();
+	static int kOriginalMaxAccounts();
+	static int kOriginalPremiumMaxAccounts();
 
 	explicit Domain(const QString &dataName);
 	~Domain();
@@ -42,6 +54,7 @@ public:
 	void finish();
 
 	[[nodiscard]] int maxAccounts() const;
+
 	[[nodiscard]] rpl::producer<int> maxAccountsChanges() const;
 
 	[[nodiscard]] Storage::Domain &local() const {
@@ -51,10 +64,12 @@ public:
 	[[nodiscard]] auto accounts() const
 		-> const std::vector<AccountWithIndex> &;
 	[[nodiscard]] std::vector<not_null<Account*>> orderedAccounts() const;
+	[[nodiscard]] std::vector<AccountWithIndexEx> orderedAccountsEx() const;
 	[[nodiscard]] rpl::producer<Account*> activeValue() const;
 	[[nodiscard]] rpl::producer<> accountsChanges() const;
 	[[nodiscard]] Account *maybeLastOrSomeAuthedAccount();
 	[[nodiscard]] int accountsAuthedCount() const;
+	[[nodiscard]] int visibleAccountsCount() const;
 
 	// Expects(started());
 	[[nodiscard]] Account &active() const;
@@ -77,6 +92,11 @@ public:
 	void accountAddedInStorage(AccountWithIndex accountWithIndex);
 	void activateFromStorage(int index);
 	[[nodiscard]] int activeForStorage() const;
+
+	void unhideAllAccounts();
+	void triggerAccountChanges();
+
+	void onAppUnlocked();
 
 private:
 	void activateAfterStarting();

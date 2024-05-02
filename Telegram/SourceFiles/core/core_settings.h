@@ -29,10 +29,6 @@ namespace Window {
 enum class Column;
 } // namespace Window
 
-namespace Webrtc {
-enum class Backend;
-} // namespace Webrtc
-
 namespace Calls::Group {
 enum class StickedTooltip;
 } // namespace Calls::Group
@@ -261,30 +257,68 @@ public:
 	void setAutoLock(int value) {
 		_autoLock = value;
 	}
-	[[nodiscard]] QString callOutputDeviceId() const {
-		return _callOutputDeviceId.isEmpty()
-			? u"default"_q
-			: _callOutputDeviceId;
+
+	[[nodiscard]] QString playbackDeviceId() const {
+		return _playbackDeviceId.current();
 	}
-	void setCallOutputDeviceId(const QString &value) {
-		_callOutputDeviceId = value;
+	[[nodiscard]] rpl::producer<QString> playbackDeviceIdChanges() const {
+		return _playbackDeviceId.changes();
 	}
-	[[nodiscard]] QString callInputDeviceId() const {
-		return _callInputDeviceId.isEmpty()
-			? u"default"_q
-			: _callInputDeviceId;
+	[[nodiscard]] rpl::producer<QString> playbackDeviceIdValue() const {
+		return _playbackDeviceId.value();
 	}
-	void setCallInputDeviceId(const QString &value) {
-		_callInputDeviceId = value;
+	void setPlaybackDeviceId(const QString &value) {
+		_playbackDeviceId = value;
 	}
-	[[nodiscard]] QString callVideoInputDeviceId() const {
-		return _callVideoInputDeviceId.isEmpty()
-			? u"default"_q
-			: _callVideoInputDeviceId;
+	[[nodiscard]] QString captureDeviceId() const {
+		return _captureDeviceId.current();
 	}
-	void setCallVideoInputDeviceId(const QString &value) {
-		_callVideoInputDeviceId = value;
+	[[nodiscard]] rpl::producer<QString> captureDeviceIdChanges() const {
+		return _captureDeviceId.changes();
 	}
+	[[nodiscard]] rpl::producer<QString> captureDeviceIdValue() const {
+		return _captureDeviceId.value();
+	}
+	void setCaptureDeviceId(const QString &value) {
+		_captureDeviceId = value;
+	}
+	[[nodiscard]] QString cameraDeviceId() const {
+		return _cameraDeviceId.current();
+	}
+	[[nodiscard]] rpl::producer<QString> cameraDeviceIdChanges() const {
+		return _cameraDeviceId.changes();
+	}
+	[[nodiscard]] rpl::producer<QString> cameraDeviceIdValue() const {
+		return _cameraDeviceId.value();
+	}
+	void setCameraDeviceId(const QString &value) {
+		_cameraDeviceId = value;
+	}
+	[[nodiscard]] QString callPlaybackDeviceId() const {
+		return _callPlaybackDeviceId.current();
+	}
+	[[nodiscard]] rpl::producer<QString> callPlaybackDeviceIdChanges() const {
+		return _callPlaybackDeviceId.changes();
+	}
+	[[nodiscard]] rpl::producer<QString> callPlaybackDeviceIdValue() const {
+		return _callPlaybackDeviceId.value();
+	}
+	void setCallPlaybackDeviceId(const QString &value) {
+		_callPlaybackDeviceId = value;
+	}
+	[[nodiscard]] QString callCaptureDeviceId() const {
+		return _callCaptureDeviceId.current();
+	}
+	[[nodiscard]] rpl::producer<QString> callCaptureDeviceIdChanges() const {
+		return _callCaptureDeviceId.changes();
+	}
+	[[nodiscard]] rpl::producer<QString> callCaptureDeviceIdValue() const {
+		return _callCaptureDeviceId.value();
+	}
+	void setCallCaptureDeviceId(const QString &value) {
+		_callCaptureDeviceId = value;
+	}
+
 	[[nodiscard]] int callOutputVolume() const {
 		return _callOutputVolume;
 	}
@@ -303,7 +337,6 @@ public:
 	void setCallAudioDuckingEnabled(bool value) {
 		_callAudioDuckingEnabled = value;
 	}
-	[[nodiscard]] Webrtc::Backend callAudioBackend() const;
 	[[nodiscard]] bool disableCallsLegacy() const {
 		return _disableCallsLegacy;
 	}
@@ -363,11 +396,12 @@ public:
 	}
 	[[nodiscard]] QString getSoundPath(const QString &key) const;
 
-	[[nodiscard]] bool exeLaunchWarning() const {
-		return _exeLaunchWarning;
+	[[nodiscard]] auto noWarningExtensions() const
+	-> const base::flat_set<QString> & {
+		return _noWarningExtensions;
 	}
-	void setExeLaunchWarning(bool warning) {
-		_exeLaunchWarning = warning;
+	void setNoWarningExtensions(base::flat_set<QString> extensions) {
+		_noWarningExtensions = std::move(extensions);
 	}
 	[[nodiscard]] bool ipRevealWarning() const {
 		return _ipRevealWarning;
@@ -818,6 +852,22 @@ public:
 	void setStoriesClickTooltipHidden(bool value) {
 		_storiesClickTooltipHidden = value;
 	}
+	[[nodiscard]] bool ttlVoiceClickTooltipHidden() const {
+		return _ttlVoiceClickTooltipHidden.current();
+	}
+	[[nodiscard]] rpl::producer<bool> ttlVoiceClickTooltipHiddenValue() const {
+		return _ttlVoiceClickTooltipHidden.value();
+	}
+	void setTtlVoiceClickTooltipHidden(bool value) {
+		_ttlVoiceClickTooltipHidden = value;
+	}
+
+	[[nodiscard]] const WindowPosition &ivPosition() const {
+		return _ivPosition;
+	}
+	void setIvPosition(const WindowPosition &position) {
+		_ivPosition = position;
+	}
 
 	[[nodiscard]] static bool ThirdColumnByDefault();
 	[[nodiscard]] static float64 DefaultDialogsWidthRatio();
@@ -864,9 +914,11 @@ private:
 	bool _countUnreadMessages = true;
 	rpl::variable<bool> _notifyAboutPinned = true;
 	int _autoLock = 3600;
-	QString _callOutputDeviceId = u"default"_q;
-	QString _callInputDeviceId = u"default"_q;
-	QString _callVideoInputDeviceId = u"default"_q;
+	rpl::variable<QString> _playbackDeviceId;
+	rpl::variable<QString> _captureDeviceId;
+	rpl::variable<QString> _cameraDeviceId;
+	rpl::variable<QString> _callPlaybackDeviceId;
+	rpl::variable<QString> _callCaptureDeviceId;
 	int _callOutputVolume = 100;
 	int _callInputVolume = 100;
 	bool _callAudioDuckingEnabled = true;
@@ -880,7 +932,7 @@ private:
 	Ui::SendFilesWay _sendFilesWay = Ui::SendFilesWay();
 	Ui::InputSubmitSettings _sendSubmitWay = Ui::InputSubmitSettings();
 	base::flat_map<QString, QString> _soundOverrides;
-	bool _exeLaunchWarning = true;
+	base::flat_set<QString> _noWarningExtensions;
 	bool _ipRevealWarning = true;
 	bool _loopAnimatedStickers = true;
 	rpl::variable<bool> _largeEmoji = true;
@@ -931,8 +983,8 @@ private:
 #else // Q_OS_MAC
 	bool _hardwareAcceleratedVideo = false;
 #endif // Q_OS_MAC
-	HistoryView::DoubleClickQuickAction _chatQuickAction =
-		HistoryView::DoubleClickQuickAction();
+	HistoryView::DoubleClickQuickAction _chatQuickAction
+		= HistoryView::DoubleClickQuickAction();
 	bool _translateButtonEnabled = false;
 	rpl::variable<bool> _translateChatEnabled = true;
 	rpl::variable<int> _translateToRaw = 0;
@@ -943,6 +995,8 @@ private:
 	rpl::variable<bool> _ignoreBatterySaving = false;
 	std::optional<uint64> _macRoundIconDigest;
 	rpl::variable<bool> _storiesClickTooltipHidden = false;
+	rpl::variable<bool> _ttlVoiceClickTooltipHidden = false;
+	WindowPosition _ivPosition;
 
 	bool _tabbedReplacedWithInfo = false; // per-window
 	rpl::event_stream<bool> _tabbedReplacedWithInfoValue; // per-window

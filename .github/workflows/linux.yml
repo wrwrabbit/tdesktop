@@ -2,8 +2,8 @@ name: Linux.
 
 on:
   push:
-    branches:
-      - master
+    branches-ignore:
+      - 'compare/**'
     paths-ignore:
       - 'docs/**'
       - '**.md'
@@ -11,6 +11,7 @@ on:
       - 'LEGAL'
       - 'LICENSE'
       - '.github/**'
+      - '!.github/workflows/linux.yml'
       - 'snap/**'
       - 'Telegram/build/**'
       - 'Telegram/Resources/uwp/**'
@@ -20,22 +21,15 @@ on:
       - 'Telegram/Telegram/**'
       - 'Telegram/configure.bat'
       - 'Telegram/Telegram.plist'
-  pull_request:
-    branches-ignore:
-      - 'compare/**'
+
   workflow_dispatch:
-    inputs:
-      buildCommit:
-        description: 'Commit for building. Default it latest on branch'
-        required: false
-        type: string
-        default: ''
 
 jobs:
 
   linux:
     name: Rocky Linux 8
     runs-on: ubuntu-latest
+    if: github.repository != 'cpartisans/tdesktop'
 
     strategy:
       matrix:
@@ -43,7 +37,6 @@ jobs:
           - ""
 #          - "DESKTOP_APP_DISABLE_X11_INTEGRATION"
 #          - "DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION"
-        experimental: [false]
 
     env:
       UPLOAD_ARTIFACT: "true"
@@ -54,18 +47,9 @@ jobs:
 
       - name: Clone.
         uses: actions/checkout@v3.1.0
-        if: github.event.inputs.buildCommit == ''
         with:
           submodules: recursive
           path: ${{ env.REPO_NAME }}
-
-      - name: Clone with checkout.
-        uses: actions/checkout@v3.1.0
-        if: github.event.inputs.buildCommit != ''
-        with:
-          submodules: recursive
-          path: ${{ env.REPO_NAME }}
-          ref: ${{ github.event.inputs.buildCommit }}
 
       - name: First set up.
         run: |
@@ -92,30 +76,27 @@ jobs:
           else
             echo "ARTIFACT_NAME=${ARTIFACT_PREFIX}Telegram" >> $GITHUB_ENV
           fi
-          
-          #          -D CMAKE_C_FLAGS="-Werror" 
-          #          -D CMAKE_CXX_FLAGS="-Werror" 
-          # not used in actual Release build
-          # -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
-          # not good for updater builds yet
 
           docker run --rm \
           -v $PWD:/usr/src/tdesktop \
+          -e CONFIG=Debug \
           tdesktop:centos_env \
           /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
           -D CMAKE_C_FLAGS_DEBUG="" \
           -D CMAKE_CXX_FLAGS_DEBUG="" \
+          -D CMAKE_C_FLAGS="-Werror" \
+          -D CMAKE_CXX_FLAGS="-Werror" \
           -D CMAKE_EXE_LINKER_FLAGS="-s" \
           -D TDESKTOP_API_TEST=OFF \
           -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
           -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
+          -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
-          -D CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
           $DEFINE
 
       - name: Check.
         run: |
-          filePath="$REPO_NAME/out/Release/Telegram"
+          filePath="$REPO_NAME/out/Debug/Telegram"
           if test -f "$filePath"; then
             echo "Build successfully done! :)"
 
@@ -126,15 +107,14 @@ jobs:
             exit 1
           fi
 
-      - name: Move and SHA artifact.
+      - name: Move artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
           cd $REPO_NAME
           mkdir artifact
           mkdir "artifact/Telegram"
-          cp out/Release/Telegram artifact/Telegram/
+          cp out/Debug/Telegram artifact/Telegram/
           strip -s "artifact/Telegram/Telegram"
-          sha256sum artifact/Telegram/Telegram | awk -F " " 'END {print $1}' > artifact/Telegram_sha256.linux.txt
           cd artifact
           tar -cJvf "${{ env.ARTIFACT_NAME }}_linux.tar.xz" "Telegram/"
           rm -rf Telegram/

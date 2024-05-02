@@ -116,10 +116,12 @@ MTPMessage PrepareLogMessage(const MTPMessage &message, TimeId newDate) {
 			MTP_flags(data.vflags().v & ~removeFlags),
 			data.vid(),
 			data.vfrom_id() ? *data.vfrom_id() : MTPPeer(),
+			MTPint(), // from_boosts_applied
 			data.vpeer_id(),
 			MTPPeer(), // saved_peer_id
 			data.vfwd_from() ? *data.vfwd_from() : MTPMessageFwdHeader(),
 			MTP_long(data.vvia_bot_id().value_or_empty()),
+			MTP_long(data.vvia_business_bot_id().value_or_empty()),
 			MTPMessageReplyHeader(),
 			MTP_int(newDate),
 			data.vmessage(),
@@ -136,7 +138,8 @@ MTPMessage PrepareLogMessage(const MTPMessage &message, TimeId newDate) {
 			MTP_long(0), // grouped_id
 			MTPMessageReactions(),
 			MTPVector<MTPRestrictionReason>(),
-			MTPint()); // ttl_period
+			MTPint(), // ttl_period
+			MTPint()); // quick_reply_shortcut_id
 	});
 }
 
@@ -493,7 +496,7 @@ auto GenerateParticipantString(
 			data,
 		});
 	}
-	const auto username = peer->userName();
+	const auto username = peer->username();
 	if (username.isEmpty()) {
 		return name;
 	}
@@ -734,8 +737,9 @@ void GenerateItems(
 	using LogBan = MTPDchannelAdminLogEventActionParticipantToggleBan;
 	using LogPromote = MTPDchannelAdminLogEventActionParticipantToggleAdmin;
 	using LogSticker = MTPDchannelAdminLogEventActionChangeStickerSet;
-	using LogPreHistory =
-		MTPDchannelAdminLogEventActionTogglePreHistoryHidden;
+	using LogEmoji = MTPDchannelAdminLogEventActionChangeEmojiStickerSet;
+	using LogPreHistory
+		= MTPDchannelAdminLogEventActionTogglePreHistoryHidden;
 	using LogPermissions = MTPDchannelAdminLogEventActionDefaultBannedRights;
 	using LogPoll = MTPDchannelAdminLogEventActionStopPoll;
 	using LogDiscussion = MTPDchannelAdminLogEventActionChangeLinkedChat;
@@ -745,19 +749,19 @@ void GenerateItems(
 	using LogDiscardCall = MTPDchannelAdminLogEventActionDiscardGroupCall;
 	using LogMute = MTPDchannelAdminLogEventActionParticipantMute;
 	using LogUnmute = MTPDchannelAdminLogEventActionParticipantUnmute;
-	using LogCallSetting =
-		MTPDchannelAdminLogEventActionToggleGroupCallSetting;
-	using LogJoinByInvite =
-		MTPDchannelAdminLogEventActionParticipantJoinByInvite;
-	using LogInviteDelete =
-		MTPDchannelAdminLogEventActionExportedInviteDelete;
-	using LogInviteRevoke =
-		MTPDchannelAdminLogEventActionExportedInviteRevoke;
+	using LogCallSetting
+		= MTPDchannelAdminLogEventActionToggleGroupCallSetting;
+	using LogJoinByInvite
+		= MTPDchannelAdminLogEventActionParticipantJoinByInvite;
+	using LogInviteDelete
+		= MTPDchannelAdminLogEventActionExportedInviteDelete;
+	using LogInviteRevoke
+		= MTPDchannelAdminLogEventActionExportedInviteRevoke;
 	using LogInviteEdit = MTPDchannelAdminLogEventActionExportedInviteEdit;
 	using LogVolume = MTPDchannelAdminLogEventActionParticipantVolume;
 	using LogTTL = MTPDchannelAdminLogEventActionChangeHistoryTTL;
-	using LogJoinByRequest =
-		MTPDchannelAdminLogEventActionParticipantJoinByRequest;
+	using LogJoinByRequest
+		= MTPDchannelAdminLogEventActionParticipantJoinByRequest;
 	using LogNoForwards = MTPDchannelAdminLogEventActionToggleNoForwards;
 	using LogSendMessage = MTPDchannelAdminLogEventActionSendMessage;
 	using LogChangeAvailableReactions = MTPDchannelAdminLogEventActionChangeAvailableReactions;
@@ -798,13 +802,12 @@ void GenerateItems(
 		auto message = PreparedServiceText{ text };
 		message.links.push_back(fromLink);
 		addPart(
-			history->makeMessage(
-				history->nextNonHistoryEntryId(),
-				MessageFlag::AdminLogEntry,
-				date,
-				std::move(message),
-				peerToUser(from->id),
-				photo),
+			history->makeMessage({
+				.id = history->nextNonHistoryEntryId(),
+				.flags = MessageFlag::AdminLogEntry,
+				.from = from->id,
+				.date = date,
+			}, std::move(message), photo),
 			0,
 			realId);
 	};
@@ -823,23 +826,12 @@ void GenerateItems(
 	};
 
 	const auto makeSimpleTextMessage = [&](TextWithEntities &&text) {
-		const auto bodyFlags = MessageFlag::HasFromId
-			| MessageFlag::AdminLogEntry;
-		const auto bodyReplyTo = FullReplyTo();
-		const auto bodyViaBotId = UserId();
-		const auto bodyGroupedId = uint64();
-		return history->makeMessage(
-			history->nextNonHistoryEntryId(),
-			bodyFlags,
-			bodyReplyTo,
-			bodyViaBotId,
-			date,
-			peerToUser(from->id),
-			QString(),
-			std::move(text),
-			MTP_messageMediaEmpty(),
-			HistoryMessageMarkupData(),
-			bodyGroupedId);
+		return history->makeMessage({
+			.id = history->nextNonHistoryEntryId(),
+			.flags = MessageFlag::HasFromId | MessageFlag::AdminLogEntry,
+			.from = from->id,
+			.date = date,
+		}, std::move(text), MTP_messageMediaEmpty());
 	};
 
 	const auto addSimpleTextMessage = [&](TextWithEntities &&text) {
@@ -1142,12 +1134,56 @@ void GenerateItems(
 			auto message = PreparedServiceText{ text };
 			message.links.push_back(fromLink);
 			message.links.push_back(setLink);
-			addPart(history->makeMessage(
-				history->nextNonHistoryEntryId(),
-				MessageFlag::AdminLogEntry,
-				date,
-				std::move(message),
-				peerToUser(from->id)));
+			addPart(history->makeMessage({
+				.id = history->nextNonHistoryEntryId(),
+				.flags = MessageFlag::AdminLogEntry,
+				.from = from->id,
+				.date = date,
+			}, std::move(message)));
+		}
+	};
+
+	const auto createChangeEmojiSet = [&](const LogEmoji &action) {
+		const auto set = action.vnew_stickerset();
+		const auto removed = (set.type() == mtpc_inputStickerSetEmpty);
+		if (removed) {
+			const auto text = tr::lng_admin_log_removed_emoji_group(
+				tr::now,
+				lt_from,
+				fromLinkText,
+				Ui::Text::WithEntities);
+			addSimpleServiceMessage(text);
+		} else {
+			const auto text = tr::lng_admin_log_changed_emoji_group(
+				tr::now,
+				lt_from,
+				fromLinkText,
+				lt_sticker_set,
+				Ui::Text::Link(
+					tr::lng_admin_log_changed_emoji_set(tr::now),
+					QString()),
+				Ui::Text::WithEntities);
+			const auto setLink = std::make_shared<LambdaClickHandler>([=](
+					ClickContext context) {
+				const auto my = context.other.value<ClickHandlerContext>();
+				if (const auto controller = my.sessionWindow.get()) {
+					controller->show(
+						Box<StickerSetBox>(
+							controller->uiShow(),
+							Data::FromInputSet(set),
+							Data::StickersType::Emoji),
+						Ui::LayerOption::CloseOther);
+				}
+			});
+			auto message = PreparedServiceText{ text };
+			message.links.push_back(fromLink);
+			message.links.push_back(setLink);
+			addPart(history->makeMessage({
+				.id = history->nextNonHistoryEntryId(),
+				.flags = MessageFlag::AdminLogEntry,
+				.from = from->id,
+				.date = date,
+			}, std::move(message)));
 		}
 	};
 
@@ -1223,12 +1259,12 @@ void GenerateItems(
 			auto message = PreparedServiceText{ text };
 			message.links.push_back(fromLink);
 			message.links.push_back(chatLink);
-			addPart(history->makeMessage(
-				history->nextNonHistoryEntryId(),
-				MessageFlag::AdminLogEntry,
-				date,
-				std::move(message),
-				peerToUser(from->id)));
+			addPart(history->makeMessage({
+				.id = history->nextNonHistoryEntryId(),
+				.flags = MessageFlag::AdminLogEntry,
+				.from = from->id,
+				.date = date,
+			}, std::move(message)));
 		}
 	};
 
@@ -1319,12 +1355,12 @@ void GenerateItems(
 		auto message = PreparedServiceText{ text };
 		message.links.push_back(fromLink);
 		message.links.push_back(link);
-		addPart(history->makeMessage(
-			history->nextNonHistoryEntryId(),
-			MessageFlag::AdminLogEntry,
-			date,
-			std::move(message),
-			peerToUser(from->id)));
+		addPart(history->makeMessage({
+			.id = history->nextNonHistoryEntryId(),
+			.flags = MessageFlag::AdminLogEntry,
+			.from = from->id,
+			.date = date,
+		}, std::move(message)));
 	};
 
 	const auto createParticipantMute = [&](const LogMute &data) {
@@ -1394,13 +1430,12 @@ void GenerateItems(
 		if (additional) {
 			message.links.push_back(std::move(additional));
 		}
-		addPart(history->makeMessage(
-			history->nextNonHistoryEntryId(),
-			MessageFlag::AdminLogEntry,
-			date,
-			std::move(message),
-			peerToUser(from->id),
-			nullptr));
+		addPart(history->makeMessage({
+			.id = history->nextNonHistoryEntryId(),
+			.flags = MessageFlag::AdminLogEntry,
+			.from = from->id,
+			.date = date,
+		}, std::move(message)));
 	};
 
 	const auto createParticipantJoinByInvite = [&](
@@ -2003,6 +2038,7 @@ void GenerateItems(
 		createParticipantToggleBan,
 		createParticipantToggleAdmin,
 		createChangeStickerSet,
+		createChangeEmojiSet,
 		createTogglePreHistoryHidden,
 		createDefaultBannedRights,
 		createStopPoll,

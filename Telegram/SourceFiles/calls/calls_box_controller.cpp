@@ -521,6 +521,7 @@ void BoxController::loadMoreRows() {
 		MTP_string(), // q
 		MTP_inputPeerEmpty(),
 		MTPInputPeer(), // saved_peer_id
+		MTPVector<MTPReaction>(), // saved_reaction
 		MTPint(), // top_msg_id
 		MTP_inputMessagesFilterPhoneCalls(MTP_flags(0)),
 		MTP_int(0), // min_date
@@ -571,6 +572,11 @@ base::unique_qptr<Ui::PopupMenu> BoxController::rowContextMenu(
 		_window->show(
 			Box<DeleteMessagesBox>(session, base::duplicate(ids)));
 	}, &st::menuIconDelete);
+	result->addAction(tr::lng_context_to_msg(tr::now), [=, window = _window] {
+		if (const auto item = session->data().message(ids.front())) {
+			window->showMessage(item);
+		}
+	}, &st::menuIconShowInChat);
 	return result;
 }
 

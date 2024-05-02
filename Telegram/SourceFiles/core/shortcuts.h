@@ -38,6 +38,13 @@ enum class Command {
 	ChatPinned7,
 	ChatPinned8,
 
+	ShowAccount1,
+	ShowAccount2,
+	ShowAccount3,
+	ShowAccount4,
+	ShowAccount5,
+	ShowAccount6,
+
 	ShowAllChats,
 	ShowFolder1,
 	ShowFolder2,
@@ -50,6 +57,8 @@ enum class Command {
 	FolderNext,
 	FolderPrevious,
 
+	ShowScheduled,
+
 	ShowArchive,
 	ShowContacts,
 
@@ -58,6 +67,7 @@ enum class Command {
 	ScheduleMessage,
 
 	ReadChat,
+	ArchiveChat,
 
 	MediaViewerFullscreen,
 
@@ -77,6 +87,15 @@ enum class Command {
 	Command::ShowFolder5,
 	Command::ShowFolder6,
 	Command::ShowFolderLast,
+};
+
+[[maybe_unused]] constexpr auto kShowAccount = {
+	Command::ShowAccount1,
+	Command::ShowAccount2,
+	Command::ShowAccount3,
+	Command::ShowAccount4,
+	Command::ShowAccount5,
+	Command::ShowAccount6,
 };
 
 [[nodiscard]] FnMut<bool()> RequestHandler(Command command);
