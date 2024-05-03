@@ -1032,8 +1032,8 @@ void StickerSetBox::Inner::contextMenuEvent(QContextMenuEvent *e) {
 			_menu.get(),
 			type,
 			SendMenu::DefaultSilentCallback(sendSelected),
-			SendMenu::DefaultScheduleCallback(this, type, sendSelected),
-			SendMenu::DefaultAutoDeleteCallback(this, sendSelected),
+			SendMenu::DefaultScheduleCallback(_show, type, sendSelected),
+			SendMenu::DefaultAutoDeleteCallback(_show, sendSelected),
 			SendMenu::DefaultWhenOnlineCallback(sendSelected));
 
 		const auto show = _show;

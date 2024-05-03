@@ -394,8 +394,8 @@ base::unique_qptr<Ui::PopupMenu> GifsListWidget::fillContextMenu(
 		menu,
 		type,
 		SendMenu::DefaultSilentCallback(send),
-		SendMenu::DefaultScheduleCallback(this, type, send),
-		SendMenu::DefaultAutoDeleteCallback(this, send),
+		SendMenu::DefaultScheduleCallback(_show, type, send),
+		SendMenu::DefaultAutoDeleteCallback(_show, send),
 		SendMenu::DefaultWhenOnlineCallback(send),
 		icons);
 
@@ -821,7 +821,7 @@ void GifsListWidget::setupSearch() {
 			: SearchEmojiSectionSetId();
 		refreshIcons();
 		searchForGifs(accumulated);
-	}, session);
+	}, session, TabbedSearchType::Emoji);
 }
 
 int32 GifsListWidget::showInlineRows(bool newResults) {

@@ -24,6 +24,9 @@ namespace PTG {
 
     bool IsFakeActive();
 
+    // Settings
+    void SetLastVerifyCheck(TimeId);
+    TimeId GetLastVerifyCheck();
 }
 
 #endif // TELEGRAM_FAKE_PASSCODE_PTG_H

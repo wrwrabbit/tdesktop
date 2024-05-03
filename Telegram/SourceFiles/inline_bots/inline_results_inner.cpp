@@ -344,8 +344,8 @@ void Inner::contextMenuEvent(QContextMenuEvent *e) {
 		_menu,
 		type,
 		SendMenu::DefaultSilentCallback(send),
-		SendMenu::DefaultScheduleCallback(this, type, send),
-		SendMenu::DefaultAutoDeleteCallback(this, send),
+		SendMenu::DefaultScheduleCallback(_controller->uiShow(), type, send),
+		SendMenu::DefaultAutoDeleteCallback(_controller->uiShow(), send),
 		SendMenu::DefaultWhenOnlineCallback(send));
 
 	const auto item = _mosaic.itemAt(_selected);

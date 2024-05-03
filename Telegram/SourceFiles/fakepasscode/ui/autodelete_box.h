@@ -10,14 +10,13 @@ struct SendOptions;
 }
 
 namespace Ui {
-class RpWidget;
 class GenericBox;
 }
 
 namespace FakePasscode {
 
 object_ptr<Ui::GenericBox> AutoDeleteBox(
-    not_null<Ui::RpWidget*> parent,
+    not_null<QWidget*> quard,
     Fn<void(Api::SendOptions)> send,
     Ui::ChooseDateTimeStyleArgs style = Ui::ChooseDateTimeStyleArgs());
 

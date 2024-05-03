@@ -20,6 +20,7 @@ struct SendOptions;
 namespace Ui {
 class PopupMenu;
 class RpWidget;
+class Show;
 } // namespace Ui
 
 namespace Data {
@@ -43,7 +44,7 @@ enum class FillMenuResult {
 
 Fn<void()> DefaultSilentCallback(Fn<void(Api::SendOptions)> send);
 Fn<void()> DefaultScheduleCallback(
-	not_null<Ui::RpWidget*> parent,
+	std::shared_ptr<Ui::Show> show,
 	Type type,
 	Fn<void(Api::SendOptions)> send);
 Fn<void()> DefaultWhenOnlineCallback(Fn<void(Api::SendOptions)> send);
@@ -81,12 +82,12 @@ class BoxContent;
 namespace SendMenu {
 
 Fn<void()> DefaultAutoDeleteCallback(
-	not_null<Ui::RpWidget*> parent,
-	Fn<void(object_ptr<Ui::BoxContent>)> show,
+	not_null<QWidget*> guard,
+	Fn<void(object_ptr<Ui::BoxContent>)> showFn,
 	Fn<void(Api::SendOptions)> send);
 
 Fn<void()> DefaultAutoDeleteCallback(
-	not_null<Ui::RpWidget*> parent,
+	std::shared_ptr<Ui::Show> show,
 	Fn<void(Api::SendOptions)> send);
 
 Fn<void()> NoAutoDeleteCallback();

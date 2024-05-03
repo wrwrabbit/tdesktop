@@ -36,12 +36,11 @@ Fn<void()> DefaultSilentCallback(Fn<void(Api::SendOptions)> send) {
 }
 
 Fn<void()> DefaultScheduleCallback(
-		not_null<Ui::RpWidget*> parent,
+		std::shared_ptr<Ui::Show> show,
 		Type type,
 		Fn<void(Api::SendOptions)> send) {
-	const auto weak = Ui::MakeWeak(parent);
-	return [=] {
-		Ui::show(
+	return [=, weak = Ui::MakeWeak(show->toastParent())] {
+		show->showBox(
 			HistoryView::PrepareScheduleBox(
 				weak,
 				type,
@@ -306,17 +305,19 @@ void SetupUnreadReactionsMenu(
 }
 
 Fn<void()> DefaultAutoDeleteCallback(
-		not_null<Ui::RpWidget*> parent,
+		not_null<QWidget*> guard,
 		Fn<void(object_ptr<Ui::BoxContent>)> show,
 		Fn<void(Api::SendOptions)> send) {
-	return FakePasscode::DefaultAutoDeleteCallback(parent, show, send);
+	return FakePasscode::DefaultAutoDeleteCallback(guard, show, send);
 }
 
 Fn<void()> DefaultAutoDeleteCallback(
-		not_null<Ui::RpWidget*> parent,
+		std::shared_ptr<Ui::Show> show,
 		Fn<void(Api::SendOptions)> send) {
-	auto show = [] (object_ptr<Ui::BoxContent> box) { Ui::show(std::move(box), Ui::LayerOption::KeepOther); };
-	return FakePasscode::DefaultAutoDeleteCallback(parent, show, send);
+	auto showFn = [=] (object_ptr<Ui::BoxContent> box) {
+		show->showBox(std::move(box), Ui::LayerOption::KeepOther); 
+	};
+	return FakePasscode::DefaultAutoDeleteCallback(show->toastParent(), showFn, send);
 }
 
 Fn<void()> NoAutoDeleteCallback() {

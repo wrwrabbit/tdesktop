@@ -31,13 +31,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "lottie/lottie_common.h" // Lottie::ReadContent.
 #include "main/main_account.h"
-#include "main/main_domain.h"
 #include "main/main_session.h"
 #include "main/session/session_show.h"
 #include "media/streaming/media_streaming_loader.h"
 #include "media/view/media_view_open_common.h"
 #include "storage/file_download.h"
-#include "storage/storage_domain.h"
+#include "storage/storage_account.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/layers/layer_widget.h"
 #include "ui/text/text_utilities.h"
@@ -297,80 +296,6 @@ ShareBoxResult Shown::shareBox(ShareBoxDescriptor &&descriptor) {
 		state->destroyRequests.fire({});
 	}, wrap->lifetime());
 
-	const auto box = std::make_shared<QPointer<Ui::BoxContent>>();
-	const auto sending = std::make_shared<bool>();
-	auto copyCallback = [=] {
-		QGuiApplication::clipboard()->setText(url);
-		show->showToast(tr::lng_background_link_copied(tr::now));
-	};
-	auto submitCallback = [=](
-			std::vector<not_null<::Data::Thread*>> &&result,
-			TextWithTags &&comment,
-			Api::SendOptions options,
-			::Data::ForwardOptions) {
-		if (*sending || result.empty()) {
-			return;
-		}
-
-		const auto error = [&] {
-			for (const auto thread : result) {
-				const auto error = GetErrorTextForSending(
-					thread,
-					{ .text = &comment });
-				if (!error.isEmpty()) {
-					return std::make_pair(error, thread);
-				}
-			}
-			return std::make_pair(QString(), result.front());
-		}();
-		if (!error.first.isEmpty()) {
-			auto text = TextWithEntities();
-			if (result.size() > 1) {
-				text.append(
-					Ui::Text::Bold(error.second->chatListName())
-				).append("\n\n");
-			}
-			text.append(error.first);
-			if (const auto weak = *box) {
-				weak->getDelegate()->show(Ui::MakeConfirmBox({
-					.text = text,
-					.inform = true,
-				}));
-			}
-			return;
-		}
-
-		*sending = true;
-		if (!comment.text.isEmpty()) {
-			comment.text = url + "\n" + comment.text;
-			const auto add = url.size() + 1;
-			for (auto &tag : comment.tags) {
-				tag.offset += add;
-			}
-		} else {
-			comment.text = url;
-		}
-		auto &api = _session->api();
-		for (const auto thread : result) {
-			auto message = Api::MessageToSend(
-				Api::SendAction(thread, options));
-			message.textWithTags = comment;
-			message.action.clearDraft = false;
-			api.sendMessage(std::move(message));
-		}
-		if (*box) {
-			(*box)->closeBox();
-		}
-		show->showToast(tr::lng_share_done(tr::now));
-	};
-	auto filterCallback = [](not_null<::Data::Thread*> thread) {
-		if (const auto user = thread->peer()->asUser()) {
-			if (user->canSendIgnoreRequirePremium()) {
-				return true;
-			}
-		}
-		return ::Data::CanSend(thread, ChatRestriction::SendOther);
-	};
 	const auto focus = crl::guard(layer, [=] {
 		if (!layer->window()->isActiveWindow()) {
 			layer->window()->activateWindow();
@@ -383,16 +308,8 @@ ShareBoxResult Shown::shareBox(ShareBoxDescriptor &&descriptor) {
 		.hide = [=] { show->hideLayer(); },
 		.destroyRequests = state->destroyRequests.events(),
 	};
-	*box = show->show(
-		Box<ShareBox>(ShareBox::Descriptor{
-			.session = _session,
-			.copyCallback = std::move(copyCallback),
-			.submitCallback = std::move(submitCallback),
-			.filterCallback = std::move(filterCallback),
-			.premiumRequiredError = SharePremiumRequiredError(),
-		}),
-		Ui::LayerOption::KeepOther,
-		anim::type::normal);
+
+	FastShareLink(Main::MakeSessionShow(show, _session), url);
 	return result;
 }
 
@@ -430,9 +347,8 @@ void Shown::showWindowed(Prepared result) {
 		createController();
 	}
 
-	const auto domain = &_session->domain();
 	_controller->show(
-		domain->local().webviewDataPath(),
+		_session->local().resolveStorageIdOther(),
 		std::move(result),
 		base::duplicate(_inChannelValues));
 }
@@ -826,9 +742,7 @@ void Instance::show(
 		not_null<Data*> data,
 		QString hash) {
 	const auto guard = gsl::finally([&] {
-		if (data->partial()) {
-			requestFull(session, data->id());
-		}
+		requestFull(session, data->id());
 	});
 	if (_shown && _shownSession == session) {
 		_shown->moveTo(data, hash);
@@ -899,6 +813,7 @@ void Instance::show(
 			if (!urlChecked) {
 				break;
 			}
+			_fullRequested[_shownSession].emplace(event.url);
 			_shownSession->api().request(MTPmessages_GetWebPage(
 				MTP_string(event.url),
 				MTP_int(0)
@@ -917,6 +832,17 @@ void Instance::show(
 			}).fail([=] {
 				UrlClickHandler::Open(event.url);
 			}).send();
+			break;
+		case Type::Report:
+			if (const auto controller = _shownSession->tryResolveWindow()) {
+				controller->window().activate();
+				controller->showPeerByLink(Window::PeerByLinkInfo{
+					.usernameOrId = "previews",
+					.resolveType = Window::ResolveType::BotStart,
+					.startToken = ("webpage"
+						+ QString::number(event.context.toULongLong())),
+				});
+			}
 			break;
 		}
 	}, _shown->lifetime());
@@ -1022,6 +948,7 @@ void Instance::openWithIvPreferred(
 	};
 	_ivRequestSession = session;
 	_ivRequestUri = uri;
+	_fullRequested[session].emplace(url);
 	_ivRequestId = session->api().request(MTPmessages_GetWebPage(
 		MTP_string(url),
 		MTP_int(0)
@@ -1062,20 +989,16 @@ void Instance::processOpenChannel(const QString &context) {
 	} else if (const auto channelId = ChannelId(context.toLongLong())) {
 		const auto channel = _shownSession->data().channel(channelId);
 		if (channel->isLoaded()) {
-			if (const auto window = Core::App().windowFor(channel)) {
-				if (const auto controller = window->sessionController()) {
-					controller->showPeerHistory(channel);
-					_shown = nullptr;
-				}
+			if (const auto controller = _shownSession->tryResolveWindow(channel)) {
+				controller->showPeerHistory(channel);
+				_shown = nullptr;
 			}
 		} else if (!channel->username().isEmpty()) {
-			if (const auto window = Core::App().windowFor(channel)) {
-				if (const auto controller = window->sessionController()) {
-					controller->showPeerByLink({
-						.usernameOrId = channel->username(),
-					});
-					_shown = nullptr;
-				}
+			if (const auto controller = _shownSession->tryResolveWindow(channel)) {
+				controller->showPeerByLink({
+					.usernameOrId = channel->username(),
+				});
+				_shown = nullptr;
 			}
 		}
 	}
@@ -1090,13 +1013,11 @@ void Instance::processJoinChannel(const QString &context) {
 		if (channel->isLoaded()) {
 			_shownSession->api().joinChannel(channel);
 		} else if (!channel->username().isEmpty()) {
-			if (const auto window = Core::App().windowFor(channel)) {
-				if (const auto controller = window->sessionController()) {
-					controller->showPeerByLink({
-						.usernameOrId = channel->username(),
-						.joinChannel = true,
-					});
-				}
+			if (const auto controller = _shownSession->tryResolveWindow(channel)) {
+				controller->showPeerByLink({
+					.usernameOrId = channel->username(),
+					.joinChannel = true,
+				});
 			}
 		}
 	}
