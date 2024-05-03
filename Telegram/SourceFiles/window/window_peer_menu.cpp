@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "boxes/delete_messages_box.h"
 #include "boxes/max_invite_box.h"
+#include "boxes/moderate_messages_box.h"
 #include "boxes/choose_filter_box.h"
 #include "boxes/create_poll_box.h"
 #include "boxes/pin_messages_box.h"
@@ -1092,6 +1093,34 @@ void Filler::addViewStatistics() {
 }
 
 void Filler::addCreatePoll() {
+	const auto isJoinChannel = [&] {
+		if (_request.section != Section::Replies) {
+			if (const auto c = _peer->asChannel(); c && !c->amIn()) {
+				return true;
+			}
+		}
+		return false;
+	}();
+	const auto isBotStart = [&] {
+		const auto user = _peer ? _peer->asUser() : nullptr;
+		if (!user || !user->isBot()) {
+			return false;
+		} else if (!user->botInfo->startToken.isEmpty()) {
+			return true;
+		}
+		const auto history = _peer->owner().history(_peer);
+		if (history && history->isEmpty() && !history->lastMessage()) {
+			return true;
+		}
+		return false;
+	}();
+	const auto isBlocked = [&] {
+		return _peer && _peer->isUser() && _peer->asUser()->isBlocked();
+	}();
+	if (isBlocked || isJoinChannel || isBotStart) {
+		return;
+	}
+
 	const auto can = _topic
 		? Data::CanSend(_topic, ChatRestriction::SendPolls)
 		: _peer->canCreatePolls();
@@ -2085,8 +2114,8 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 			state->menu.get(),
 			type,
 			SendMenu::DefaultSilentCallback(submit),
-			SendMenu::DefaultScheduleCallback(state->box, type, submit),
-			SendMenu::DefaultAutoDeleteCallback(state->box, submit),
+			SendMenu::DefaultScheduleCallback(show, type, submit),
+			SendMenu::DefaultAutoDeleteCallback(show, submit),
 			SendMenu::DefaultWhenOnlineCallback(submit));
 		const auto success = (result == SendMenu::FillMenuResult::Success);
 		if (showForwardOptions || success) {
@@ -2293,7 +2322,9 @@ QPointer<Ui::BoxContent> ShowSendNowMessagesBox(
 	](Fn<void()> &&close) {
 		close();
 		auto ids = QVector<MTPint>();
-		for (const auto item : session->data().idsToItems(list)) {
+		auto sorted = session->data().idsToItems(list);
+		ranges::sort(sorted, ranges::less(), &HistoryItem::date);
+		for (const auto &item : sorted) {
 			if (item->allowsSendNow()) {
 				ids.push_back(
 					MTP_int(session->scheduledMessages().lookupId(item)));
@@ -2559,9 +2590,7 @@ Fn<void()> ClearHistoryHandler(
 Fn<void()> DeleteAndLeaveHandler(
 		not_null<Window::SessionController*> controller,
 		not_null<PeerData*> peer) {
-	return [=] {
-		controller->show(Box<DeleteMessagesBox>(peer, false));
-	};
+	return [=] { controller->show(Box(DeleteChatBox, peer)); };
 }
 
 void FillDialogsEntryMenu(
@@ -2648,7 +2677,9 @@ void MarkAsReadThread(not_null<Data::Thread*> thread) {
 }
 
 void AddSeparatorAndShiftUp(const PeerMenuCallback &addAction) {
-	addAction({ .isSeparator = true });
+	addAction({
+		.separatorSt = &st::popupMenuExpandedSeparator.menu.separator,
+	});
 
 	const auto &st = st::popupMenuExpandedSeparator.menu;
 	const auto shift = st::popupMenuExpandedSeparator.scrollPadding.top()
