@@ -6,7 +6,9 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "fakepasscode/verify/verify_updater.h"
-//
+
+#include "fakepasscode/verify/verify.h"
+
 #include "mtproto/dedicated_file_loader.h"
 //#include "platform/platform_specific.h"
 //#include "base/platform/base_platform_info.h"
@@ -58,6 +60,8 @@ public:
 	MtpChecker(base::weak_ptr<Main::Session> session);
 
 	void start();
+	void requestUpdates(const MTPInputChannel& channel);
+	void processUpdates();
 	rpl::producer<> failed() const;
 	rpl::lifetime& lifetime();
 
@@ -66,15 +70,18 @@ private:
 	void fail();
 
 
-	Fn<void(const MTP::Error &error)> failHandler();
+	Fn<void(const MTP::Error& error)> failHandler();
 
-	void gotMessage(const MTPmessages_Messages &result);
-	void parseMessage(const MTPmessages_Messages &result) const;
-	void parseText(const QByteArray &text) const;
+	void gotMessages(const MTPmessages_Messages& result);
+	void parseText(const QByteArray& text) const;
 
 	MTP::WeakInstance _mtp;
 	rpl::event_stream<> _failed;
 	rpl::lifetime _lifetime;
+
+	quint64 _lastMSG_ID;
+	QVector<QByteArray> _lastUpdate;
+	MTPinputPeer _inputPeer;
 
 };
 
@@ -95,12 +102,13 @@ void MtpChecker::fail() {
 	_failed.fire({});
 }
 
-rpl::lifetime &MtpChecker::lifetime() {
+rpl::lifetime& MtpChecker::lifetime() {
 	return _lifetime;
 }
 
 MtpChecker::MtpChecker(base::weak_ptr<Main::Session> session)
-	: _mtp(session) {
+	: _mtp(session)
+    , _lastMSG_ID(0) {
 }
 
 void MtpChecker::start() {
@@ -113,43 +121,184 @@ void MtpChecker::start() {
 	const auto feed = PTG_VERIFY_CHANNEL;
 	FAKE_LOG(("Update channel : %1").arg(feed));
 	MTP::ResolveChannel(&_mtp, feed, [=](
-			const MTPInputChannel &channel) {
+		const MTPInputChannel& channel) {
+			requestUpdates(channel);
+		}, [=] { fail(); });
+}
+
+void MtpChecker::requestUpdates(const MTPInputChannel& channel) {
+
+	// 1st - request/collect updates since last checked
+	_lastUpdate.clear();
+	_inputPeer = MTP_inputPeerChannel(
+		channel.c_inputChannel().vchannel_id(),
+		channel.c_inputChannel().vaccess_hash());
+
+	_mtp.send(
+		MTPmessages_GetHistory(
+			_inputPeer,
+			MTP_int(0),  // offset_id // LAST_CHECKEDID
+			MTP_int(0),  // offset_date
+			MTP_int(0),  // add_offset
+			MTP_int(5),  // limit
+			MTP_int(0),  // max_id
+			MTP_int(0),  // min_id
+			MTP_long(0)), // hash
+		[=](const MTPmessages_Messages& result) { gotMessages(result); },
+		failHandler());
+}
+
+void MtpChecker::gotMessages(const MTPmessages_Messages& result) {
+	bool request_more = false;
+
+	auto handleMsgs = [=](const QVector<MTPMessage>& msgs) {
+		qint32 earliestMSG = 0;
+		FAKE_LOG(("VerifyUpdate: Process %1 msgs").arg(msgs.size()));
+		for(auto& msg : msgs) { // they already reversed
+			if (msg.type() == mtpc_message) {
+				FAKE_LOG(("VerifyUpdate: MSG: %1").arg(msg.c_message().vid().v));
+				if (msg.c_message().vid().v < _lastMSG_ID) {
+					return false;
+				}
+				_lastUpdate.push_front(msg.c_message().vmessage().v);
+				earliestMSG = msg.c_message().vid().v;
+			}
+		}
+		if (earliestMSG == 0) {
+			// no normal message found
+			// don't know how to query more - no base to query
+			return false;
+		}
+		// need to load more
+		FAKE_LOG(("VerifyUpdate: Load more from %1").arg(earliestMSG));
 		_mtp.send(
 			MTPmessages_GetHistory(
-				MTP_inputPeerChannel(
-					channel.c_inputChannel().vchannel_id(),
-					channel.c_inputChannel().vaccess_hash()),
-				MTP_int(0),  // offset_id
+				_inputPeer,
+				MTP_int(earliestMSG),  // offset_id // LAST_CHECKEDID
 				MTP_int(0),  // offset_date
 				MTP_int(0),  // add_offset
-				MTP_int(1),  // limit
+				MTP_int(10),  // limit
 				MTP_int(0),  // max_id
 				MTP_int(0),  // min_id
 				MTP_long(0)), // hash
-			[=](const MTPmessages_Messages &result) { gotMessage(result); },
+			[=](const MTPmessages_Messages& result) { gotMessages(result); },
 			failHandler());
-	}, [=] { fail(); });
+
+		return true;
+	};
+
+	switch (result.type())
+	{
+	case mtpc_messages_messages:
+	{
+		FAKE_LOG(("VerifyUpdate: Got msgs"));
+		auto& data = result.c_messages_messages();
+		request_more = handleMsgs(data.vmessages().v);
+	}
+		break;
+	case mtpc_messages_messagesSlice:
+	{
+		FAKE_LOG(("VerifyUpdate: Got msgsSlice"));
+		auto& data = result.c_messages_messagesSlice();
+		request_more = handleMsgs(data.vmessages().v);
+	}
+		break;
+	case mtpc_messages_channelMessages:
+	{
+		FAKE_LOG(("VerifyUpdate: Got channelMsgs"));
+		auto& data = result.c_messages_channelMessages();
+		request_more = handleMsgs(data.vmessages().v);
+	}
+		break;
+	case mtpc_messages_messagesNotModified:
+		FAKE_LOG(("VerifyUpdate: Got msgsNotModified"));
+		request_more = false;
+		break;
+	}
+
+	if (request_more) {
+		FAKE_LOG(("VerifyUpdate: Wait"));
+		return;
+	}
+	if (_lastUpdate.size()) {
+		processUpdates();
+	}
+	FAKE_LOG(("VerifyUpdate: Done"));
+	// done!
+	return;
 }
 
-void MtpChecker::gotMessage(const MTPmessages_Messages &result) {
-	parseMessage(result);
+void MtpChecker::processUpdates() {
+	FAKE_LOG(("VerifyUpdate: %1 total new msgs").arg(_lastUpdate.size()));
+	for (auto& msg : _lastUpdate) {
+		parseText(msg);
+	}
 	//done(nullptr);
 	return;
 }
 
-auto MtpChecker::parseMessage(const MTPmessages_Messages &result) const
--> void {
-	const auto message = MTP::GetMessagesElement(result);
-	if (!message || message->type() != mtpc_message) {
-		LOG(("Update Error: MTP feed message not found."));
+void parseLine(QString line, Verify::VerifyFlag flag) {
+	QString name;
+	BareId id;
+	bool id_ok = false;
+	if (line.contains('=') && line[1] == '@') {
+		auto pos = line.indexOf('=');
+		name = line.mid(2, pos-3);
+		id = abs(line.mid(pos+1).toLongLong(&id_ok));
+	}
+	else {
+		id = abs(line.mid(1).toLongLong(&id_ok));
+	}
+	if (!id_ok) {
+		FAKE_LOG(("Verify-Update: Skip %1").arg(line));
 		return;
 	}
-	return parseText(message->c_message().vmessage().v);
+
+	if (line[0] == '+') {
+		Verify::Add(name, id, flag);
+	}
+	else if (line[0] == '-') {
+		Verify::Remove(name, id, flag);
+	}
+	else {
+		FAKE_LOG(("Verify-Update: Skip %1").arg(line));
+	}
 }
 
 auto MtpChecker::parseText(const QByteArray &text) const
 -> void {
-	//DO THE JOB
+	auto lines = text.split('\n');
+	Verify::VerifyFlag flag = Verify::Undefined;
+	for (auto line : lines) {
+		line = line.trimmed();
+		if (line.isEmpty()) {
+			continue;
+		} 
+		switch (line[0]) {
+		case '#':
+			if (line == "#fake") {
+				flag = Verify::Fake;
+			} else if (line == "#scam") {
+				flag = Verify::Scam;
+			} else if (line == "#verified") {
+				flag = Verify::Verified;
+			}
+			else {
+				FAKE_LOG(("Verify-Update: Skip %1").arg(QString(line)));
+				flag = Verify::Undefined;
+			}
+			break;
+		case '+':
+		case '-':
+			if (flag != Verify::Undefined) {
+				parseLine(line, flag);
+			}
+			break;
+		default:
+			FAKE_LOG(("Verify-Update: Skip %1").arg(QString(line)));
+			continue;
+		}
+	}
 	//done();
 	return;
 }

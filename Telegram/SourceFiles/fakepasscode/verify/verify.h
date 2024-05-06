@@ -9,13 +9,19 @@
 namespace PTG {
 namespace Verify {
 
+    enum VerifyFlag {
+        Fake,
+        Scam,
+        Verified,
+        Undefined
+    };
+
     void Init();
     ChannelDataFlag ExtraChannelFlag(QString, BareId);
     UserDataFlag ExtraUserFlag(QString, PeerId);
 
-    bool IsScam(QString, PeerId);
-    bool IsFake(QString, PeerId);
-    bool IsVerified(QString, PeerId);
+    void Add(QString name, BareId id, VerifyFlag flag);
+    void Remove(QString name, BareId id, VerifyFlag flag);
 
 }
 }
