@@ -600,6 +600,7 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 	const auto tillId = state.sentReadTill = base::take(state.willReadTill);
 	state.willReadWhen = 0;
 	state.sentReadDone = false;
+	/*
 	DEBUG_LOG(("Reading: sending request now with till %1."
 		).arg(tillId.bare));
 	sendRequest(history, RequestType::ReadInbox, [=](Fn<void()> finish) {
@@ -639,6 +640,7 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 			}).send();
 		}
 	});
+	*/
 }
 
 void Histories::checkEmptyState(not_null<History*> history) {
