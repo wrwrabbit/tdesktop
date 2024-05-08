@@ -51,5 +51,13 @@ namespace PTG {
     TimeId GetLastVerifyCheck() {
         return vLastVerifyCheck;
     }
+
+    quint64 vLastVerifyMSG_ID = 0;
+    void SetvLastVerifyMSG_ID(quint64 v) {
+        vLastVerifyMSG_ID = v;
+    }
+    quint64 GetvLastVerifyMSG_ID() {
+        return vLastVerifyMSG_ID;
+    }
 };
 

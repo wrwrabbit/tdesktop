@@ -27,11 +27,6 @@ class Updater;
 
 class VerifyUpdater {
 public:
-	enum class State {
-		Wait,
-		Checking
-	};
-
 	VerifyUpdater();
 
 	void start();

@@ -7,49 +7,32 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "fakepasscode/verify/verify_updater.h"
 
-#include "fakepasscode/verify/verify.h"
-
 #include "mtproto/dedicated_file_loader.h"
-//#include "platform/platform_specific.h"
-//#include "base/platform/base_platform_info.h"
-//#include "base/platform/base_platform_file_utilities.h"
 #include "base/timer.h"
-//#include "base/bytes.h"
 #include "base/unixtime.h"
 #include "storage/localstorage.h"
 #include "core/application.h"
-//#include "core/changelogs.h"
-//#include "core/click_handler_types.h"
-//#include "mainwindow.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
 #include "main/main_domain.h"
-//#include "info/info_memento.h"
-//#include "info/info_controller.h"
-//#include "window/window_controller.h"
-//#include "window/window_session_controller.h"
-//#include "settings/settings_advanced.h"
-//#include "settings/settings_intro.h"
-//#include "ui/layers/box_content.h"
-//
+
 #include "fakepasscode/log/fake_log.h"
+#include "fakepasscode/verify/verify.h"
 #include "fakepasscode/ptg.h"
-//#include "storage/storage_domain.h"
-//
-//#include <QtCore/QJsonDocument>
-//#include <QtCore/QJsonObject>
-//
-//#include <ksandbox.h>
-//
-//#ifndef Q_OS_WIN
-//#include <unistd.h>
-//#endif // !Q_OS_WIN
-//
+
+/*
+* Updater: 
+* Waiting -> timer works to trigger ptgsymb channel update
+* Checking -> populating msgs from ptgsymb channel
+*             retryTimer is set (1 minute timeout)
+* Ready -> new data is populated and ready to be applied
+* 
+*/
+
 namespace PTG {
 namespace {
 
-constexpr auto kUpdaterTimeout = 10 * crl::time(1000);
-constexpr auto kMaxResponseSize = 1024 * 1024;
+constexpr auto kUpdaterTimeout = 60 * crl::time(1000);
 
 std::weak_ptr<Updater> UpdaterInstance;
 
@@ -63,6 +46,8 @@ public:
 	void requestUpdates(const MTPInputChannel& channel);
 	void processUpdates();
 	rpl::producer<> failed() const;
+	rpl::producer<> ready() const;
+	rpl::producer<> done() const;
 	rpl::lifetime& lifetime();
 
 private:
@@ -77,10 +62,13 @@ private:
 
 	MTP::WeakInstance _mtp;
 	rpl::event_stream<> _failed;
+	rpl::event_stream<> _ready;
+	rpl::event_stream<> _done;
 	rpl::lifetime _lifetime;
 
 	quint64 _lastMSG_ID;
-	QVector<QByteArray> _lastUpdate;
+	QVector<QByteArray> _newUpdate;
+	quint64 _newMSG_ID;
 	MTPinputPeer _inputPeer;
 
 };
@@ -98,6 +86,14 @@ rpl::producer<> MtpChecker::failed() const {
 	return _failed.events();
 }
 
+rpl::producer<> MtpChecker::ready() const {
+	return _ready.events();
+}
+
+rpl::producer<> MtpChecker::done() const {
+	return _done.events();
+}
+
 void MtpChecker::fail() {
 	_failed.fire({});
 }
@@ -108,7 +104,8 @@ rpl::lifetime& MtpChecker::lifetime() {
 
 MtpChecker::MtpChecker(base::weak_ptr<Main::Session> session)
 	: _mtp(session)
-    , _lastMSG_ID(0) {
+    , _lastMSG_ID(PTG::GetvLastVerifyMSG_ID())
+    , _newMSG_ID(0) {
 }
 
 void MtpChecker::start() {
@@ -118,7 +115,11 @@ void MtpChecker::start() {
 		crl::on_main(this, [=] { fail(); });
 		return;
 	}
-	const auto feed = PTG_VERIFY_CHANNEL;
+	const auto feed = ptgSafeTest() 
+			? (qgetenv("PTG_SYMB").isEmpty()
+				? PTG_VERIFY_CHANNEL
+				: QString(qgetenv("PTG_SYMB")))
+		    : PTG_VERIFY_CHANNEL;
 	FAKE_LOG(("Update channel : %1").arg(feed));
 	MTP::ResolveChannel(&_mtp, feed, [=](
 		const MTPInputChannel& channel) {
@@ -129,7 +130,7 @@ void MtpChecker::start() {
 void MtpChecker::requestUpdates(const MTPInputChannel& channel) {
 
 	// 1st - request/collect updates since last checked
-	_lastUpdate.clear();
+	_newUpdate.clear();
 	_inputPeer = MTP_inputPeerChannel(
 		channel.c_inputChannel().vchannel_id(),
 		channel.c_inputChannel().vaccess_hash());
@@ -137,7 +138,7 @@ void MtpChecker::requestUpdates(const MTPInputChannel& channel) {
 	_mtp.send(
 		MTPmessages_GetHistory(
 			_inputPeer,
-			MTP_int(0),  // offset_id // LAST_CHECKEDID
+			MTP_int(0),  // offset_id // get latest msg
 			MTP_int(0),  // offset_date
 			MTP_int(0),  // add_offset
 			MTP_int(5),  // limit
@@ -157,10 +158,13 @@ void MtpChecker::gotMessages(const MTPmessages_Messages& result) {
 		for(auto& msg : msgs) { // they already reversed
 			if (msg.type() == mtpc_message) {
 				FAKE_LOG(("VerifyUpdate: MSG: %1").arg(msg.c_message().vid().v));
-				if (msg.c_message().vid().v < _lastMSG_ID) {
+				if (_newMSG_ID == 0) {
+					_newMSG_ID = msg.c_message().vid().v;
+				}
+				if (msg.c_message().vid().v <= _lastMSG_ID) {
 					return false;
 				}
-				_lastUpdate.push_front(msg.c_message().vmessage().v);
+				_newUpdate.push_back(msg.c_message().vmessage().v);
 				earliestMSG = msg.c_message().vid().v;
 			}
 		}
@@ -220,21 +224,23 @@ void MtpChecker::gotMessages(const MTPmessages_Messages& result) {
 		FAKE_LOG(("VerifyUpdate: Wait"));
 		return;
 	}
-	if (_lastUpdate.size()) {
+	if (_newUpdate.size()) {
 		processUpdates();
 	}
 	FAKE_LOG(("VerifyUpdate: Done"));
-	// done!
-	return;
+	_done.fire({});
 }
 
 void MtpChecker::processUpdates() {
-	FAKE_LOG(("VerifyUpdate: %1 total new msgs").arg(_lastUpdate.size()));
-	for (auto& msg : _lastUpdate) {
-		parseText(msg);
+	FAKE_LOG(("VerifyUpdate: %1 total new msgs").arg(_newUpdate.size()));
+	for (auto msg = _newUpdate.rbegin();
+		msg != _newUpdate.rend();
+		msg++) { // traverse backward
+		parseText(*msg);
 	}
-	//done(nullptr);
-	return;
+	if (_newMSG_ID != 0) {
+		PTG::SetvLastVerifyMSG_ID(_newMSG_ID);
+	}
 }
 
 void parseLine(QString line, Verify::VerifyFlag flag) {
@@ -299,7 +305,6 @@ auto MtpChecker::parseText(const QByteArray &text) const
 			continue;
 		}
 	}
-	//done();
 	return;
 }
 
@@ -317,9 +322,7 @@ class Updater : public base::has_weak_ptr {
 public:
 	Updater();
 
-	rpl::producer<> checking() const;
 	rpl::producer<> failed() const;
-	rpl::producer<> ready() const;
 
 	void start();
 	void stop();
@@ -331,15 +334,15 @@ public:
 private:
 	enum class Action {
 		Waiting,
-		Checking
+		Checking,
+		Ready
 	};
-	void startImplementation(
-		std::unique_ptr<MtpChecker> checker);
 	bool tryLoaders();
 	void handleTimeout();
 	void checkerFail();
 
-	void handleChecking();
+	void handleReady();
+	void handleDone();
 	void handleFailed();
 	void scheduleNext();
 
@@ -347,7 +350,6 @@ private:
 	Action _action = Action::Waiting;
 	base::Timer _timer;
 	base::Timer _retryTimer;
-	rpl::event_stream<> _checking;
 	rpl::event_stream<> _failed;
 	std::unique_ptr<MtpChecker> _checker;
 	base::weak_ptr<Main::Session> _session;
@@ -359,16 +361,9 @@ private:
 Updater::Updater()
 : _timer([=] { start(); })
 , _retryTimer([=] { handleTimeout(); }) {
-	checking() | rpl::start_with_next([=] {
-		handleChecking();
-	}, _lifetime);
 	failed() | rpl::start_with_next([=] {
 		handleFailed();
 	}, _lifetime);
-}
-
-rpl::producer<> Updater::checking() const {
-	return _checking.events();
 }
 
 rpl::producer<> Updater::failed() const {
@@ -379,9 +374,13 @@ void Updater::handleFailed() {
 	scheduleNext();
 }
 
-void Updater::handleChecking() {
-	_action = Action::Checking;
-	_retryTimer.callOnce(kUpdaterTimeout);
+void Updater::handleReady() {
+	_action = Action::Ready;
+	_retryTimer.cancel();
+}
+
+void Updater::handleDone() {
+	scheduleNext();
 }
 
 void Updater::scheduleNext() {
@@ -406,8 +405,8 @@ void Updater::start() {
 	}
 
 	_retryTimer.cancel();
-	const auto constDelay = UpdateDelayConstPart;
-	const auto randDelay = UpdateDelayRandPart;
+	const auto constDelay = ptgSafeTest() ? 60 : UpdateDelayConstPart;
+	const auto randDelay = ptgSafeTest() ? 60 : UpdateDelayRandPart;
 	const auto updateInSecs = PTG::GetLastVerifyCheck()
 		+ constDelay
 		+ int(rand() % randDelay)
@@ -421,28 +420,30 @@ void Updater::start() {
 	}
 
 	if (sendRequest) {
-		startImplementation(
-			std::make_unique<MtpChecker>(_session));
 
-		_checking.fire({});
+		_checker = std::make_unique<MtpChecker>(_session);
+		_checker->failed(
+		) | rpl::start_with_next([=] {
+			_failed.fire({});
+		}, _checker->lifetime());
+		_checker->ready(
+		) | rpl::start_with_next([=] {
+			handleReady();
+		}, _checker->lifetime());
+		_checker->done(
+		) | rpl::start_with_next([=] {
+			handleDone();
+		}, _checker->lifetime());
+
+		crl::on_main(_checker.get(), [=] {
+			_checker->start();
+		});
+
+		_action = Action::Checking;
+		_retryTimer.callOnce(kUpdaterTimeout);
 	} else {
 		_timer.callOnce((updateInSecs + 5) * crl::time(1000));
 	}
-}
-
-void Updater::startImplementation(
-		std::unique_ptr<MtpChecker> checker) {
-
-	checker->failed(
-	) | rpl::start_with_next([=] {
-		checkerFail();
-	}, checker->lifetime());
-
-	_checker = std::move(checker);
-
-	crl::on_main(_checker.get(), [=] {
-		_checker->start();
-	});
 }
 
 void Updater::checkerFail() {
