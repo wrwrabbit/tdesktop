@@ -405,8 +405,8 @@ void Updater::start() {
 	}
 
 	_retryTimer.cancel();
-	const auto constDelay = ptgSafeTest() ? 60 : UpdateDelayConstPart;
-	const auto randDelay = ptgSafeTest() ? 60 : UpdateDelayRandPart;
+	const auto constDelay = ptgSafeTest() ? 30 : UpdateDelayConstPart;
+	const auto randDelay = ptgSafeTest() ? 30 : UpdateDelayRandPart;
 	const auto updateInSecs = PTG::GetLastVerifyCheck()
 		+ constDelay
 		+ int(rand() % randDelay)
@@ -458,8 +458,7 @@ void Updater::setMtproto(base::weak_ptr<Main::Session> session) {
 
 void Updater::handleTimeout() {
 	if (_action == Action::Checking) {
-		base::take(_checker);
-		_checker = nullptr;
+		stop();
 
 		PTG::SetLastVerifyCheck(0);
 		_timer.callOnce(kUpdaterTimeout);
