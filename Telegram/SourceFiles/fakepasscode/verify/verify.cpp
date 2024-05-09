@@ -1,7 +1,6 @@
 #include "verify.h"
 
-namespace PTG {
-namespace Verify {
+namespace PTG::Verify {
 
     std::map<BareId, VerifyFlag> _CustomFlags;
     std::map<QString, BareId> _Name2Id;
@@ -72,5 +71,4 @@ namespace Verify {
         Add("cpartisans_sec_chat", 1394174706, VerifyFlag::Verified);
     }
 
-}
-}
+} // PTG::Verify

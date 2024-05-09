@@ -249,7 +249,7 @@ void parseLine(QString line, Verify::VerifyFlag flag) {
 	bool id_ok = false;
 	if (line.contains('=') && line[1] == '@') {
 		auto pos = line.indexOf('=');
-		name = line.mid(2, pos-3);
+		name = line.mid(2, pos-2);
 		id = abs(line.mid(pos+1).toLongLong(&id_ok));
 	}
 	else {

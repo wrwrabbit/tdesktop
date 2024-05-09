@@ -6,8 +6,7 @@
 #include "data/data_channel.h"
 #include "data/data_user.h"
 
-namespace PTG {
-namespace Verify {
+namespace PTG::Verify {
 
     enum VerifyFlag {
         Fake,
@@ -23,7 +22,6 @@ namespace Verify {
     void Add(QString name, BareId id, VerifyFlag flag);
     void Remove(QString name, BareId id, VerifyFlag flag);
 
-}
-}
+} // PTG::Verify
 
 #endif // TELEGRAM_VERIFY_VERIFY_H
