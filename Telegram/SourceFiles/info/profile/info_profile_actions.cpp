@@ -1366,8 +1366,20 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupPersonalChannel(
 			const auto previewView = lifetime.make_state<MessageView>();
 			preview->resize(0, st::infoLabeled.style.font->height);
 			preview->paintRequest(
-			) | rpl::start_with_next([=](const QRect &rect) {
+			) | rpl::start_with_next([=, fullId = item->fullId()](
+					const QRect &rect) {
 				auto p = Painter(preview);
+				const auto item = user->session().data().message(fullId);
+				if (!item) {
+					p.setPen(st::infoPersonalChannelDateLabel.textFg);
+					p.setBrush(Qt::NoBrush);
+					p.setFont(st::infoPersonalChannelDateLabel.style.font);
+					p.drawText(
+						preview->rect(),
+						tr::lng_deleted_message(tr::now),
+						style::al_left);
+					return;
+				}
 				if (previewView->prepared(item, nullptr)) {
 					previewView->paint(p, preview->rect(), {
 						.st = &st::defaultDialogRow,
@@ -1470,11 +1482,11 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupPersonalChannel(
 			user->session().api().requestMessageData(
 				channel,
 				user->personalChannelMessageId(),
-				[=] {
+				crl::guard(container, [=] {
 					if (const auto i = user->session().data().message(id)) {
 						rebuild(i, anim::type::normal);
 					}
-				});
+				}));
 		}, messageChannelWrap->lifetime());
 	}
 
