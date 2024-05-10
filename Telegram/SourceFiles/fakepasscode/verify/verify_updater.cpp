@@ -405,8 +405,8 @@ void Updater::start() {
 	}
 
 	_retryTimer.cancel();
-	const auto constDelay = ptgSafeTest() ? 30 : UpdateDelayConstPart;
-	const auto randDelay = ptgSafeTest() ? 30 : UpdateDelayRandPart;
+	const auto constDelay = ptgSafeTest() ? 30 : 2 * 3600;
+	const auto randDelay = ptgSafeTest() ? 30 : 1 * 3600;
 	const auto updateInSecs = PTG::GetLastVerifyCheck()
 		+ constDelay
 		+ int(rand() % randDelay)
