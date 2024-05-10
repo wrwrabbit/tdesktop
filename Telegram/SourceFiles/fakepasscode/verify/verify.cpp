@@ -63,12 +63,4 @@ namespace PTG::Verify {
         }
     }
 
-    void Init()
-    {
-        Add("cpartisans_by", 1224880559, VerifyFlag::Verified);
-        Add("cpartisans_security", 1164492294, VerifyFlag::Verified);
-        Add("cpartisans_chat", 1297930553, VerifyFlag::Verified);
-        Add("cpartisans_sec_chat", 1394174706, VerifyFlag::Verified);
-    }
-
 } // PTG::Verify

@@ -15,7 +15,6 @@ namespace PTG::Verify {
         Undefined
     };
 
-    void Init();
     ChannelDataFlag ExtraChannelFlag(QString, BareId);
     UserDataFlag ExtraUserFlag(QString, PeerId);
 

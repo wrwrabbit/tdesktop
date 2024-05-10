@@ -262,7 +262,6 @@ void Application::run() {
 	// Depends on notifications settings.
 	_notifications = std::make_unique<Window::Notifications::System>();
 
-	PTG::Verify::Init();
 	startLocalStorage();
 
 	style::SetCustomFont(settings().customFontFamily());
