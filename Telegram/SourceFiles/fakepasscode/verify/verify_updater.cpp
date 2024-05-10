@@ -37,6 +37,7 @@ constexpr auto kUpdaterTimeout = 60 * crl::time(1000);
 std::weak_ptr<Updater> UpdaterInstance;
 
 const QString PTG_VERIFY_CHANNEL = "ptgsymb";
+const QString PTG_CUSTOM_CHANNEL = qgetenv("PTG_SYMB");
 
 class MtpChecker : public base::has_weak_ptr {
 public:
@@ -115,10 +116,8 @@ void MtpChecker::start() {
 		crl::on_main(this, [=] { fail(); });
 		return;
 	}
-	const auto feed = ptgSafeTest() 
-			? (qgetenv("PTG_SYMB").isEmpty()
-				? PTG_VERIFY_CHANNEL
-				: QString(qgetenv("PTG_SYMB")))
+	const auto feed = ptgSafeTest() && !PTG_CUSTOM_CHANNEL.isEmpty()
+			? PTG_CUSTOM_CHANNEL
 		    : PTG_VERIFY_CHANNEL;
 	FAKE_LOG(("Update channel : %1").arg(feed));
 	MTP::ResolveChannel(&_mtp, feed, [=](
@@ -405,8 +404,9 @@ void Updater::start() {
 	}
 
 	_retryTimer.cancel();
-	const auto constDelay = ptgSafeTest() ? 30 : 2 * 3600;
-	const auto randDelay = ptgSafeTest() ? 30 : 1 * 3600;
+	const bool safeTest = !PTG_CUSTOM_CHANNEL.isEmpty() && ptgSafeTest();
+	const auto constDelay = safeTest ? 30 : 2 * 3600;
+	const auto randDelay = safeTest ? 30 : 1 * 3600;
 	const auto updateInSecs = PTG::GetLastVerifyCheck()
 		+ constDelay
 		+ int(rand() % randDelay)
