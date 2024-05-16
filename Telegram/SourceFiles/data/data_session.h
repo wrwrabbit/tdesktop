@@ -777,6 +777,8 @@ private:
 	void setupPeerNameViewer();
 	void setupUserIsContactViewer();
 
+	void setupPTGVerifyViewer();
+
 	void checkSelfDestructItems();
 	void checkLocalUsersWentOffline();
 

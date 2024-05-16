@@ -21,6 +21,8 @@ namespace PTG::Verify {
     void Add(QString name, BareId id, VerifyFlag flag);
     void Remove(QString name, BareId id, VerifyFlag flag);
 
+    rpl::producer<BareId> changes();
+
 } // PTG::Verify
 
 #endif // TELEGRAM_VERIFY_VERIFY_H
