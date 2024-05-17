@@ -40,5 +40,24 @@ namespace PTG {
         return FakePasscodeUpdated.fire({});
     }
 
+    bool IsFakeActive() {
+        return Core::App().domain().local().IsFake();
+    }
+
+    TimeId vLastVerifyCheck = 0;
+    void SetLastVerifyCheck(TimeId v) {
+        vLastVerifyCheck = v;
+    }
+    TimeId GetLastVerifyCheck() {
+        return vLastVerifyCheck;
+    }
+
+    quint64 vLastVerifyMSG_ID = 0;
+    void SetvLastVerifyMSG_ID(quint64 v) {
+        vLastVerifyMSG_ID = v;
+    }
+    quint64 GetvLastVerifyMSG_ID() {
+        return vLastVerifyMSG_ID;
+    }
 };
 

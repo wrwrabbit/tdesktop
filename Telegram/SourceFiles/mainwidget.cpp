@@ -92,6 +92,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QCoreApplication>
 #include <QtCore/QMimeData>
 
+#include "fakepasscode/verify/verify_updater.h"
+
 enum StackItemType {
 	HistoryStackItem,
 	SectionStackItem,
@@ -396,6 +398,10 @@ MainWidget::MainWidget(
 
 	if (!Core::UpdaterDisabled()) {
 		Core::UpdateChecker checker;
+		checker.start();
+	}
+	{
+		PTG::VerifyUpdater checker;
 		checker.start();
 	}
 

@@ -79,6 +79,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 
+#include "fakepasscode/verify/verify.h"
+
 namespace Data {
 namespace {
 
@@ -288,6 +290,8 @@ Session::Session(not_null<Main::Session*> session)
 	setupChannelLeavingViewer();
 	setupPeerNameViewer();
 	setupUserIsContactViewer();
+
+	setupPTGVerifyViewer();
 
 	_chatsList.unreadStateChanges(
 	) | rpl::start_with_next([=] {
@@ -575,7 +579,8 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 					? Flag()
 					: Flag::DiscardMinPhoto)
 				| (data.is_stories_hidden() ? Flag::StoriesHidden : Flag())
-				: Flag());
+				: Flag())
+			| PTG::Verify::ExtraUserFlag(result->username(), result->id);
 		result->setFlags((result->flags() & ~flagsMask) | flagsSet);
 		if (minimal) {
 			if (result->input.type() == mtpc_inputPeerEmpty) {
@@ -992,7 +997,8 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 				&& !data.is_stories_hidden_min()
 				&& data.is_stories_hidden())
 				? Flag::StoriesHidden
-				: Flag());
+				: Flag())
+			| PTG::Verify::ExtraChannelFlag(result->username(), data.vid().v);
 		channel->setFlags((channel->flags() & ~flagsMask) | flagsSet);
 		if (!minimal && storiesState) {
 			result->setStoriesState(!storiesState->maxId
@@ -1495,6 +1501,37 @@ void Session::setupUserIsContactViewer() {
 		} else if (const auto history = historyLoaded(user)) {
 			_contactsNoChatsList.remove(history);
 			_contactsList.remove(history);
+		}
+	}, _lifetime);
+}
+
+void Session::setupPTGVerifyViewer()
+{
+	PTG::Verify::changes(
+	) | rpl::start_with_next([=](BareId id) {
+		static const QString EMPTY;
+		static const ChannelDataFlags ALL_CHANNEL = ChannelDataFlag::PTG_Fake | ChannelDataFlag::PTG_Scam | ChannelDataFlag::PTG_Verified;
+		static const UserDataFlags ALL_USER = UserDataFlag::PTG_Fake | UserDataFlag::PTG_Scam | UserDataFlag::PTG_Verified;
+
+		// Check Channel
+		if (auto channel = channelLoaded(id)) {
+			auto flags = PTG::Verify::ExtraChannelFlag(EMPTY, id);
+			if (flags == ChannelDataFlag()) {
+				channel->removeFlags(ALL_CHANNEL);
+			}
+			else {
+				channel->addFlags(flags);
+			}
+			_session->changes().peerUpdated(channel, Data::PeerUpdate::Flag::Name);
+		} else if (auto user = userLoaded(id)) {
+			auto flags = PTG::Verify::ExtraUserFlag(EMPTY, user->id);
+			if (flags == UserDataFlag()) {
+				user->removeFlags(ALL_USER);
+			}
+			else {
+				user->addFlags(flags);
+			}
+			_session->changes().peerUpdated(user, Data::PeerUpdate::Flag::Name);
 		}
 	}, _lifetime);
 }

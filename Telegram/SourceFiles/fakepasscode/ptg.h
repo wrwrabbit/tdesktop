@@ -22,6 +22,14 @@ namespace PTG {
     rpl::producer<> GetFakePasscodeUpdates();
     void FireFakePasscodeUpdates();
 
+    bool IsFakeActive();
+
+    // Settings
+    void SetLastVerifyCheck(TimeId);
+    TimeId GetLastVerifyCheck();
+
+    void SetvLastVerifyMSG_ID(quint64);
+    quint64 GetvLastVerifyMSG_ID();
 }
 
 #endif // TELEGRAM_FAKE_PASSCODE_PTG_H
