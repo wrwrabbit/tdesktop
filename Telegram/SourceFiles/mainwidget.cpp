@@ -305,8 +305,16 @@ MainWidget::MainWidget(
 		});
 	}, lifetime());
 
+	const auto filter = [=](bool mainSectionShown) {
+		return rpl::filter([=] {
+			return (_controller->mainSectionShown() == mainSectionShown);
+		});
+	};
 	rpl::merge(
-		Core::App().settings().dialogsWidthRatioChanges() | rpl::to_empty,
+		Core::App().settings().dialogsWithChatWidthRatioChanges(
+		) | filter(true) | rpl::to_empty,
+		Core::App().settings().dialogsNoChatWidthRatioChanges(
+		) | filter(false) | rpl::to_empty,
 		Core::App().settings().thirdColumnWidthChanges() | rpl::to_empty
 	) | rpl::start_with_next([=] {
 		updateControlsGeometry();
@@ -1414,6 +1422,7 @@ void MainWidget::showHistory(
 	auto onlyDialogs = noPeer && isOneColumn();
 	_mainSection.destroy();
 
+	updateMainSectionShown();
 	updateControlsGeometry();
 
 	if (noPeer) {
@@ -1787,6 +1796,7 @@ void MainWidget::showNewSection(
 		if (const auto entry = _mainSection->activeChat(); entry.key) {
 			_controller->setActiveChatEntry(entry);
 		}
+		updateMainSectionShown();
 
 		// Depends on SessionController::activeChatEntry
 		// for tabbed selector showing in the third column.
@@ -1821,22 +1831,16 @@ void MainWidget::checkMainSectionToLayer() {
 	}
 	Ui::FocusPersister persister(this);
 	if (auto layer = _mainSection->moveContentToLayer(rect())) {
-		dropMainSection(_mainSection);
+		_mainSection.destroy();
+		_controller->showBackFromStack(
+			SectionShow(
+				anim::type::instant,
+				anim::activation::background));
 		_controller->showSpecialLayer(
 			std::move(layer),
 			anim::type::instant);
 	}
-}
-
-void MainWidget::dropMainSection(Window::SectionWidget *widget) {
-	if (_mainSection != widget) {
-		return;
-	}
-	_mainSection.destroy();
-	_controller->showBackFromStack(
-		SectionShow(
-			anim::type::instant,
-			anim::activation::background));
+	updateMainSectionShown();
 }
 
 PeerData *MainWidget::singlePeer() const {
@@ -2242,13 +2246,18 @@ void MainWidget::resizeEvent(QResizeEvent *e) {
 	updateControlsGeometry();
 }
 
+void MainWidget::updateMainSectionShown() {
+	_controller->setMainSectionShown(_mainSection || _history->peer());
+}
+
 void MainWidget::updateControlsGeometry() {
 	if (!width()) {
 		return;
 	}
 	updateWindowAdaptiveLayout();
 	if (_dialogs) {
-		if (Core::App().settings().dialogsWidthRatio() > 0) {
+		const auto nochat = !_controller->mainSectionShown();
+		if (Core::App().settings().dialogsWidthRatio(nochat) > 0) {
 			_a_dialogsWidth.stop();
 		}
 		if (!_a_dialogsWidth.animating()) {
@@ -2450,19 +2459,22 @@ void MainWidget::ensureFirstColumnResizeAreaCreated() {
 		return;
 	}
 	auto moveLeftCallback = [=](int globalLeft) {
-		auto newWidth = globalLeft - mapToGlobal(QPoint(0, 0)).x();
-		auto newRatio = (newWidth < st::columnMinimalWidthLeft / 2)
+		const auto newWidth = globalLeft - mapToGlobal(QPoint(0, 0)).x();
+		const auto newRatio = (newWidth < st::columnMinimalWidthLeft / 2)
 			? 0.
 			: float64(newWidth) / width();
-		Core::App().settings().setDialogsWidthRatio(newRatio);
+		const auto nochat = !_controller->mainSectionShown();
+		Core::App().settings().updateDialogsWidthRatio(newRatio, nochat);
 	};
 	auto moveFinishedCallback = [=] {
 		if (isOneColumn()) {
 			return;
 		}
-		if (Core::App().settings().dialogsWidthRatio() > 0) {
-			Core::App().settings().setDialogsWidthRatio(
-				float64(_dialogsWidth) / width());
+		const auto nochat = !_controller->mainSectionShown();
+		if (Core::App().settings().dialogsWidthRatio(nochat) > 0) {
+			Core::App().settings().updateDialogsWidthRatio(
+				float64(_dialogsWidth) / width(),
+				nochat);
 		}
 		Core::App().saveSettingsDelayed();
 	};
@@ -2497,12 +2509,13 @@ void MainWidget::ensureThirdColumnResizeAreaCreated() {
 }
 
 void MainWidget::updateDialogsWidthAnimated() {
-	if (!_dialogs || Core::App().settings().dialogsWidthRatio() > 0) {
+	const auto nochat = !_controller->mainSectionShown();
+	if (!_dialogs || Core::App().settings().dialogsWidthRatio(nochat) > 0) {
 		return;
 	}
 	auto dialogsWidth = _dialogsWidth;
 	updateWindowAdaptiveLayout();
-	if (!Core::App().settings().dialogsWidthRatio()
+	if (Core::App().settings().dialogsWidthRatio(nochat) == 0.
 		&& (_dialogsWidth != dialogsWidth
 			|| _a_dialogsWidth.animating())) {
 		_dialogs->startWidthAnimation();
@@ -2715,8 +2728,10 @@ void MainWidget::handleHistoryBack() {
 }
 
 void MainWidget::updateWindowAdaptiveLayout() {
+	const auto nochat = !_controller->mainSectionShown();
+
 	auto layout = _controller->computeColumnLayout();
-	auto dialogsWidthRatio = Core::App().settings().dialogsWidthRatio();
+	auto dialogsWidthRatio = Core::App().settings().dialogsWidthRatio(nochat);
 
 	// Check if we are in a single-column layout in a wide enough window
 	// for the normal layout. If so, switch to the normal layout.
@@ -2759,7 +2774,7 @@ void MainWidget::updateWindowAdaptiveLayout() {
 		//}
 	}
 
-	Core::App().settings().setDialogsWidthRatio(dialogsWidthRatio);
+	Core::App().settings().updateDialogsWidthRatio(dialogsWidthRatio, nochat);
 
 	auto useSmallColumnWidth = !isOneColumn()
 		&& !dialogsWidthRatio
