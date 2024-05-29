@@ -99,7 +99,7 @@ public:
 		not_null<Data::Forum*> forum,
 		const Window::SectionShow &params);
 	void searchInChat(Key chat);
-	void setInnerFocus();
+	void setInnerFocus(bool unfocusSearch = false);
 	[[nodiscard]] bool searchHasFocus() const;
 
 	void jumpToTop(bool belowPinned = false);
@@ -135,6 +135,8 @@ public:
 	bool cancelSearch();
 	bool cancelSearchByMouseBack();
 
+	QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
+
 	~Widget();
 
 protected:
@@ -144,6 +146,7 @@ protected:
 	void dropEvent(QDropEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
 	void keyPressEvent(QKeyEvent *e) override;
+	void inputMethodEvent(QInputMethodEvent *e) override;
 	void paintEvent(QPaintEvent *e) override;
 
 private:
@@ -250,7 +253,9 @@ private:
 	void updateSuggestions(anim::type animated);
 	void processSearchFocusChange();
 
+	[[nodiscard]] bool redirectToSearchPossible() const;
 	[[nodiscard]] bool redirectKeyToSearch(QKeyEvent *e) const;
+	[[nodiscard]] bool redirectImeToSearch() const;
 
 	MTP::Sender _api;
 

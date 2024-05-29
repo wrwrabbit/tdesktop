@@ -323,14 +323,15 @@ RepliesWidget::RepliesWidget(
 	}, _inner->lifetime());
 
 	_inner->replyToMessageRequested(
-	) | rpl::start_with_next([=](auto fullId) {
+	) | rpl::start_with_next([=](ListWidget::ReplyToMessageRequest request) {
 		const auto canSendReply = _topic
 			? Data::CanSendAnything(_topic)
 			: Data::CanSendAnything(_history->peer);
-		if (_joinGroup || !canSendReply) {
-			Controls::ShowReplyToChatBox(controller->uiShow(), { fullId });
+		const auto &to = request.to;
+		if (_joinGroup || !canSendReply || request.forceAnotherChat) {
+			Controls::ShowReplyToChatBox(controller->uiShow(), { to });
 		} else {
-			replyToMessage(fullId);
+			replyToMessage(to);
 			_composeControls->focus();
 		}
 	}, _inner->lifetime());
@@ -736,7 +737,8 @@ void RepliesWidget::setupComposeControls() {
 	_composeControls->editRequests(
 	) | rpl::start_with_next([=](auto data) {
 		if (const auto item = session().data().message(data.fullId)) {
-			edit(item, data.options, saveEditMsgRequestId);
+			const auto spoiler = data.spoilerMediaOverride;
+			edit(item, data.options, saveEditMsgRequestId, spoiler);
 		}
 	}, lifetime());
 
@@ -1207,7 +1209,8 @@ void RepliesWidget::send(Api::SendOptions options) {
 void RepliesWidget::edit(
 		not_null<HistoryItem*> item,
 		Api::SendOptions options,
-		mtpRequestId *const saveEditMsgRequestId) {
+		mtpRequestId *const saveEditMsgRequestId,
+		std::optional<bool> spoilerMediaOverride) {
 	if (*saveEditMsgRequestId) {
 		return;
 	}
@@ -1275,7 +1278,8 @@ void RepliesWidget::edit(
 		webpage,
 		options,
 		crl::guard(this, done),
-		crl::guard(this, fail));
+		crl::guard(this, fail),
+		spoilerMediaOverride);
 
 	_composeControls->hidePanelsAnimated();
 	doSetInnerFocus();
