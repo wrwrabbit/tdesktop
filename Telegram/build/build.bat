@@ -216,12 +216,6 @@ rem   if %AlphaVersion% equ 0 (
 rem     iscc /dMyAppVersion=%AppVersionStrSmall% /dMyAppVersionZero=%AppVersionStr% /dMyAppVersionFull=%AppVersionStrFull% "/dReleasePath=%ReleasePath%" "/dMyBuildTarget=%BuildTarget%" "%FullScriptPath%setup.iss"
 rem     if %errorlevel% neq 0 goto error
 rem     if not exist "%SetupFile%" goto error
-rem  :sign3
-rem     call "%SignPath%" "%SetupFile%"
-rem     if %errorlevel% neq 0 (
-rem       timeout /t 3
-rem       goto sign3
-rem     )
 rem   )
 
   call Packer.exe -version %VersionForPacker% -path %BinaryName%.exe -path Updater.exe -path "modules\%Platform%\d3d\d3dcompiler_47.dll" -target %BuildTarget% %AlphaBetaParam%

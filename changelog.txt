@@ -1,3 +1,34 @@
+5.1.2 (03.06.24)
+
+- Several bugs fixed including a couple of crashes.
+
+5.1.1 (01.06.24)
+
+- Fix caption display on some media.
+- Fix collapsed blockquotes rendering.
+- Fully close search in chat by "Cancel" click.
+- Allow editing caption placement and spoiler in topics.
+- Disable effects on forwarded messages and inline results.
+
+5.1 (31.05.24)
+
+- Send messages with effects.
+- Move photo or video captions above the media.
+- Chat preview on chat photo long press or Alt+Click.
+
+5.0.6 beta (30.05.24)
+
+- Fix chat preview with non-default themes.
+- Fix chat preview crash when scrolling up.
+- Jump to chat from preview only by Double-Click.
+- Show chat preview with Force Touch on macOS.
+
+5.0.5 beta (28.05.24)
+
+- Long press on chat userpic to show quick preview.
+- Alt+Click on chat to show quick preview.
+- Show author userpics in forwarded messages.
+
 5.0.4 (28.05.24)
 
 - Fix reply to last message by Ctrl+Up in topics.

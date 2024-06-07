@@ -205,6 +205,7 @@ RepliesWidget::RepliesWidget(
 	not_null<History*> history,
 	MsgId rootId)
 : Window::SectionWidget(parent, controller, history->peer)
+, WindowListDelegate(controller)
 , _history(history)
 , _rootId(rootId)
 , _root(lookupRoot())
@@ -223,9 +224,11 @@ RepliesWidget::RepliesWidget(
 			listShowPremiumToast(emoji);
 		},
 		.mode = ComposeControls::Mode::Normal,
-		.sendMenuType = _topic
-			? SendMenu::Type::Scheduled
-			: SendMenu::Type::SilentOnly,
+		.sendMenuDetails = [=] {
+			using Type = SendMenu::Type;
+			const auto type = _topic ? Type::Scheduled : Type::SilentOnly;
+			return SendMenu::Details{ .type = type };
+		},
 		.regularWindow = controller,
 		.stickerOrEmojiChosen = controller->stickerOrEmojiChosen(),
 		.scheduledToggleValue = _topic
@@ -299,7 +302,7 @@ RepliesWidget::RepliesWidget(
 
 	_inner = _scroll->setOwnedWidget(object_ptr<ListWidget>(
 		this,
-		controller,
+		&controller->session(),
 		static_cast<ListDelegate*>(this)));
 	_scroll->move(0, _topBar->height());
 	_scroll->show();
@@ -328,9 +331,12 @@ RepliesWidget::RepliesWidget(
 			? Data::CanSendAnything(_topic)
 			: Data::CanSendAnything(_history->peer);
 		const auto &to = request.to;
-		if (_joinGroup || !canSendReply || request.forceAnotherChat) {
+		const auto still = _history->owner().message(to.messageId);
+		const auto allowInAnotherChat = still && still->allowsForward();
+		if (allowInAnotherChat
+			&& (_joinGroup || !canSendReply || request.forceAnotherChat)) {
 			Controls::ShowReplyToChatBox(controller->uiShow(), { to });
-		} else {
+		} else if (!_joinGroup && canSendReply) {
 			replyToMessage(to);
 			_composeControls->focus();
 		}
@@ -737,7 +743,7 @@ void RepliesWidget::setupComposeControls() {
 	_composeControls->editRequests(
 	) | rpl::start_with_next([=](auto data) {
 		if (const auto item = session().data().message(data.fullId)) {
-			const auto spoiler = data.spoilerMediaOverride;
+			const auto spoiler = data.spoilered;
 			edit(item, data.options, saveEditMsgRequestId, spoiler);
 		}
 	}, lifetime());
@@ -949,7 +955,7 @@ bool RepliesWidget::confirmSendingFiles(
 		_composeControls->getTextWithAppliedMarkdown(),
 		_history->peer,
 		Api::SendType::Normal,
-		SendMenu::Type::SilentOnly); // #TODO replies schedule
+		SendMenu::Details{ SendMenu::Type::SilentOnly }); // #TODO replies schedule
 
 	box->setConfirmedCallback(crl::guard(this, [=](
 			Ui::PreparedList &&list,
@@ -1210,7 +1216,7 @@ void RepliesWidget::edit(
 		not_null<HistoryItem*> item,
 		Api::SendOptions options,
 		mtpRequestId *const saveEditMsgRequestId,
-		std::optional<bool> spoilerMediaOverride) {
+		bool spoilered) {
 	if (*saveEditMsgRequestId) {
 		return;
 	}
@@ -1279,7 +1285,7 @@ void RepliesWidget::edit(
 		options,
 		crl::guard(this, done),
 		crl::guard(this, fail),
-		spoilerMediaOverride);
+		spoilered);
 
 	_composeControls->hidePanelsAnimated();
 	doSetInnerFocus();
@@ -1444,13 +1450,14 @@ void RepliesWidget::sendInlineResult(
 	finishSending();
 }
 
-SendMenu::Type RepliesWidget::sendMenuType() const {
+SendMenu::Details RepliesWidget::sendMenuDetails() const {
 	// #TODO replies schedule
-	return _history->peer->isSelf()
+	const auto type = _history->peer->isSelf()
 		? SendMenu::Type::Reminder
 		: HistoryView::CanScheduleUntilOnline(_history->peer)
 		? SendMenu::Type::ScheduledToUser
 		: SendMenu::Type::Scheduled;
+	return { .type = type, .effectAllowed = _history->peer->isUser() };
 }
 
 FullReplyTo RepliesWidget::replyTo() const {
