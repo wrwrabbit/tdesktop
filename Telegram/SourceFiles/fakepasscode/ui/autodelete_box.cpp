@@ -233,12 +233,15 @@ static void MakeAutoDeleteBox(
     });
 
     SendMenu::SetupMenuAndShortcuts(
-        descriptor.submit.data(),
-        [=] { return SendMenu::Type::SilentOnly; },
-        [=] { save({ .silent = true, .ptgAutoDelete = descriptor.collect() }); },
+		descriptor.submit.data(),
         nullptr,
-        nullptr,
-        nullptr);
+        [=] { 
+            return SendMenu::Details{ .type = SendMenu::Type::SilentOnly }; 
+        },
+        [=](SendMenu::Action, SendMenu::Details) { 
+            save({ .silent = true, .ptgAutoDelete = descriptor.collect() }); 
+        }
+    );
 }
 
 namespace FakePasscode {
