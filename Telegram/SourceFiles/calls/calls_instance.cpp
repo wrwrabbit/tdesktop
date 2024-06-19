@@ -35,6 +35,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "mtproto/mtproto_config.h"
 #include "boxes/abstract_box.h" // Ui::show().
+#include "storage/storage_domain.h"
+#include "main/main_domain.h"
 
 #include <tgcalls/VideoCaptureInterface.h>
 #include <tgcalls/StaticThreads.h>
@@ -559,6 +561,15 @@ bool Instance::isQuitPrevent() {
 	return true;
 }
 
+bool isHiddenAccount(auto& acc) {
+	if (Core::App().domain().local().IsFake()) {
+		if (acc.isHiddenMode()) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void Instance::handleCallUpdate(
 		not_null<Main::Session*> session,
 		const MTPPhoneCall &call) {
@@ -600,8 +611,10 @@ void Instance::handleCallUpdate(
 			< base::unixtime::now()) {
 			LOG(("Ignoring too old call."));
 		} else {
-			createCall(user, Call::Type::Incoming, phoneCall.is_video());
-			_currentCall->handleUpdate(call);
+			if (!isHiddenAccount(user->session().account())) {
+				createCall(user, Call::Type::Incoming, phoneCall.is_video());
+				_currentCall->handleUpdate(call);
+			}
 		}
 	} else if (!_currentCall
 		|| (&_currentCall->user()->session() != session)

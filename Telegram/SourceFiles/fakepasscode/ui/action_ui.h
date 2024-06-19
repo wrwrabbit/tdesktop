@@ -9,6 +9,8 @@
 #include "fakepasscode/fake_passcode.h"
 #include "fakepasscode/action.h"
 #include "ui/wrap/vertical_layout.h"
+#include "main/main_domain.h"
+#include "storage/storage_domain.h"
 
 namespace Main {
 class Domain;
@@ -31,8 +33,30 @@ protected:
     size_t _index;
 };
 
+template<typename ActionType>
+class AccountActionUI : public ActionUI {
+public:
+    AccountActionUI(QWidget* parent, gsl::not_null<Main::Domain*> domain, size_t passcodeIndex, int accountIndex)
+        : ActionUI(parent, domain, passcodeIndex)
+        , _action(nullptr)
+        , _accountIndex(accountIndex) {
+        if (auto* action = domain->local().GetAction(passcodeIndex, ActionType::Kind); action != nullptr) {
+            _action = dynamic_cast<ActionType*>(action);
+        }
+    }
+
+protected:
+    ActionType* _action;
+    int _accountIndex;
+};
+
 object_ptr<ActionUI> GetUIByAction(FakePasscode::ActionType type,
                                    gsl::not_null<Main::Domain*> domain, size_t index,
                                    QWidget* parent);
+
+object_ptr<ActionUI> GetAccountUIByAction(FakePasscode::ActionType type,
+                                          gsl::not_null<Main::Domain*> domain,
+                                          size_t passcodeIndex, int accountIndex,
+                                          QWidget* parent);
 
 #endif //TELEGRAM_ACTION_UI_H

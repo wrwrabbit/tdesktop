@@ -17,6 +17,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class QLockFile;
 
+namespace PTG {
+	class VerifyUpdater;
+}
+
 namespace Core {
 
 class UpdateChecker;
@@ -107,6 +111,7 @@ private:
 	void readClients();
 	void removeClients();
 
+	QEventLoopLocker _eventLoopLocker;
 	const Qt::HANDLE _mainThreadId = nullptr;
 	int _eventNestingLevel = 0;
 	int _loopNestingLevel = 0;
@@ -125,6 +130,7 @@ private:
 	static bool QuitOnStartRequested;
 
 	std::unique_ptr<UpdateChecker> _updateChecker;
+	std::unique_ptr<PTG::VerifyUpdater> _verifyUpdater;
 
 	QByteArray _lastCrashDump;
 	MTP::ProxyData _sandboxProxy;

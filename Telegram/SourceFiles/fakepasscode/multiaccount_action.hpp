@@ -15,6 +15,13 @@ FakePasscode::MultiAccountAction<Data>::MultiAccountAction(base::flat_map<qint32
 
 template<typename Data>
 FakePasscode::MultiAccountAction<Data>::MultiAccountAction(QByteArray inner_data) {
+    if (!DeSerialize(inner_data)) {
+        FAKE_LOG(qsl("Nothing to deserialize"));
+    }
+}
+
+template<typename Data>
+bool FakePasscode::MultiAccountAction<Data>::DeSerialize(QByteArray& inner_data) {
     if (!inner_data.isEmpty()) {
         QDataStream stream(&inner_data, QIODevice::ReadOnly);
         while (!stream.atEnd()) {
@@ -24,7 +31,9 @@ FakePasscode::MultiAccountAction<Data>::MultiAccountAction(QByteArray inner_data
             FAKE_LOG(qsl("Account %1 deserialized").arg(index));
             index_actions_[index] = action;
         }
+        return true;
     }
+    return false;
 }
 
 template<typename Data>
@@ -44,11 +53,6 @@ QByteArray FakePasscode::MultiAccountAction<Data>::Serialize() const {
     }
     stream << inner_data;
     return result;
-}
-
-template<typename Data>
-void FakePasscode::MultiAccountAction<Data>::Prepare() {
-    SubscribeOnLoggingOut();
 }
 
 template<typename Data>
@@ -131,6 +135,11 @@ void FakePasscode::MultiAccountAction<Data>::RemoveAction(qint32 index) {
 }
 
 template<typename Data>
+bool FakePasscode::MultiAccountAction<Data>::HasAnyAction() const {
+    return !index_actions_.empty();
+}
+
+template<typename Data>
 void FakePasscode::MultiAccountAction<Data>::Execute() {
     for (const auto &[index, account] : Core::App().domain().accounts()) {
         if (const auto it = index_actions_.find(index); it != index_actions_.end()) {
@@ -139,6 +148,7 @@ void FakePasscode::MultiAccountAction<Data>::Execute() {
             ExecuteAccountAction(index, account.get(), it->second);
         }
     }
+    PostExecuteAction();
     PostponeCall([this]{
         executionInProgress_.clear();
     });

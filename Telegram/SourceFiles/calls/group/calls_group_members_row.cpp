@@ -356,11 +356,13 @@ void MembersRow::ensureUserpicCache(
 
 	const auto user = peer();
 	const auto key = user->userpicUniqueKey(view);
-	const auto full = QSize(size, size) * kWideScale * cIntRetinaFactor();
+	const auto full = QSize(size, size)
+		* kWideScale
+		* style::DevicePixelRatio();
 	auto &cache = _blobsAnimation->userpicCache;
 	if (cache.isNull()) {
 		cache = QImage(full, QImage::Format_ARGB32_Premultiplied);
-		cache.setDevicePixelRatio(cRetinaFactor());
+		cache.setDevicePixelRatio(style::DevicePixelRatio());
 	} else if (_blobsAnimation->userpicKey == key
 		&& cache.size() == full) {
 		return;
@@ -610,9 +612,9 @@ void MembersRow::paintComplexStatusText(
 	x += skip;
 	availableWidth -= skip;
 	const auto &font = st::normalFont;
-	const auto useAbout = (style == MembersRowStyle::Video)
-		? false
-		: ((_state == State::RaisedHand && !_raisedHandStatus)
+	const auto useAbout = !_about.isEmpty()
+		&& (style != MembersRowStyle::Video)
+		&& ((_state == State::RaisedHand && !_raisedHandStatus)
 			|| (_state != State::RaisedHand && !_speaking));
 	if (!useAbout
 		&& _state != State::Invited

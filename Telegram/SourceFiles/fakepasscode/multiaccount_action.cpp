@@ -12,6 +12,7 @@ void LogoutSubscribedAction::Prepare() {
     SubscribeOnLoggingOut();
     Core::App().domain().accountsChanges() | rpl::start_with_next([this] {
         SubscribeOnLoggingOut();
+        HandleAccountChanges();
     }, lifetime_);
 }
 
@@ -31,7 +32,9 @@ void LogoutSubscribedAction::SubscribeOnLoggingOut() {
     }
 }
 
+void LogoutSubscribedAction::HandleAccountChanges() {
+}
+
 namespace FakePasscode {
     template class MultiAccountAction<ToggleAction>;
-    template class MultiAccountAction<SelectPeersData>;
 }

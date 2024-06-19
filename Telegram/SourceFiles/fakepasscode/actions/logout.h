@@ -2,39 +2,44 @@
 #define TELEGRAM_LOGOUT_H
 
 #include "fakepasscode/action.h"
+#include "fakepasscode/multiaccount_action.h"
 
-#include "base/flat_map.h"
+#include <vector>
 
 namespace FakePasscode {
-    class LogoutAction : public Action {
+
+    struct HideAccountKind {
+        enum HideAccountEnum : qint32 {
+            None = 0,
+            Logout = 1,
+            HideAccount = 2
+        } Kind = None;
+    };
+
+    class LogoutAction : public MultiAccountAction<HideAccountKind> {
     public:
-        LogoutAction() = default;
-        explicit LogoutAction(QByteArray inner_data);
-        LogoutAction(base::flat_map<qint32, bool> logout_accounts);
+        using MultiAccountAction::MultiAccountAction;
+        static constexpr ActionType Kind = ActionType::Logout;
 
-        void Execute() override;
-
-        QByteArray Serialize() const override;
-
+        void ExecuteAccountAction(int index, Main::Account* account, const HideAccountKind& action) override;
+        void PostExecuteAction() override;
         ActionType GetType() const override;
 
-        void SetLogout(qint32 index, bool logout);
-
-        const base::flat_map<qint32, bool>& GetLogout() const;
-
-        bool IsLogout(qint32 index) const;
-
-        void SubscribeOnLoggingOut();
-
+        void HandleAccountChanges() override;
         void Prepare() override;
+        void OnEvent(ActionEvent) override;
 
-    private:
-        base::flat_map<qint32, bool> index_to_logout_;
+        const std::vector<qint32> GetAccounts() const;
+        bool HasHiddenAccounts() const;
+        void UpdateHiddenAccountsToLogout();
 
-        rpl::lifetime lifetime_;
-        rpl::lifetime sub_lifetime_;
+        QString GetDescriptionFor(qint32 account) const override;
 
-        void SubscribeOnAccountsChanges();
+        QString SetIfValid(qint32 index, const HideAccountKind& data);
+        QString Validate(bool update);
     };
+
+    // Instantiate MutliAccountAction methods
+
 }
 #endif //TELEGRAM_LOGOUT_H

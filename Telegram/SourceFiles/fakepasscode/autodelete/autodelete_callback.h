@@ -11,7 +11,6 @@ struct SendOptions;
 }
 
 namespace Ui {
-class RpWidget;
 class BoxContent;
 }
 
@@ -20,7 +19,7 @@ namespace FakePasscode {
 bool DisableAutoDeleteInContextMenu();
 
 Fn<void()> DefaultAutoDeleteCallback(
-        not_null<Ui::RpWidget*> parent,
+        not_null<QWidget*> quard,
         Fn<void(object_ptr<Ui::BoxContent>)> show,
         Fn<void(Api::SendOptions)> send);
 

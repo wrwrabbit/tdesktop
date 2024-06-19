@@ -5,7 +5,7 @@
 
 class DeleteContactsUi final : public MultiAccountToggleUi {
 public:
-    DeleteContactsUi(QWidget* parent, gsl::not_null<Main::Domain*> domain, size_t index);
+    DeleteContactsUi(QWidget* parent, gsl::not_null<Main::Domain*> domain, size_t index, int accountIndex);
 };
 
 

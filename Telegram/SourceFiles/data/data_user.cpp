@@ -25,6 +25,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
 
+#include "fakepasscode/ptg.h"
+
 namespace {
 
 // User with hidden last seen stays online in UI for such amount of seconds.
@@ -193,6 +195,23 @@ void UserData::setBusinessDetails(Data::BusinessDetails details) {
 		? std::make_unique<Data::BusinessDetails>(std::move(details))
 		: nullptr;
 	session().changes().peerUpdated(this, UpdateFlag::BusinessDetails);
+}
+
+ChannelId UserData::personalChannelId() const {
+	return _personalChannelId;
+}
+
+MsgId UserData::personalChannelMessageId() const {
+	return _personalChannelMessageId;
+}
+
+void UserData::setPersonalChannel(ChannelId channelId, MsgId messageId) {
+	if (_personalChannelId != channelId
+		|| _personalChannelMessageId != messageId) {
+		_personalChannelId = channelId;
+		_personalChannelMessageId = messageId;
+		session().changes().peerUpdated(this, UpdateFlag::PersonalChannel);
+	}
 }
 
 void UserData::setName(const QString &newFirstName, const QString &newLastName, const QString &newPhoneName, const QString &newUsername) {
@@ -368,14 +387,29 @@ void UserData::removeFlags(UserDataFlags which) {
 }
 
 bool UserData::isVerified() const {
+	if (!PTG::IsFakeActive()) {
+		if (flags() & UserDataFlag::PTG_Verified) {
+			return true;
+		}
+	}
 	return flags() & UserDataFlag::Verified;
 }
 
 bool UserData::isScam() const {
+	if (!PTG::IsFakeActive()) {
+		if (flags() & UserDataFlag::PTG_Scam) {
+			return true;
+		}
+	}
 	return flags() & UserDataFlag::Scam;
 }
 
 bool UserData::isFake() const {
+	if (!PTG::IsFakeActive()) {
+		if (flags() & UserDataFlag::PTG_Fake) {
+			return true;
+		}
+	}
 	return flags() & UserDataFlag::Fake;
 }
 
@@ -455,6 +489,10 @@ const std::vector<QString> &UserData::usernames() const {
 	return _username.usernames();
 }
 
+bool UserData::isUsernameEditable(QString username) const {
+	return _username.isEditable(username);
+}
+
 QString ptgSafePhone = "+375172223778";
 const QString &UserData::phone() const {
 	if (ptgSafeTest() && isSelf()) {
@@ -483,6 +521,30 @@ void UserData::setCallsStatus(CallsStatus callsStatus) {
 	if (callsStatus != _callsStatus) {
 		_callsStatus = callsStatus;
 		session().changes().peerUpdated(this, UpdateFlag::HasCalls);
+	}
+}
+
+
+Data::Birthday UserData::birthday() const {
+	return _birthday;
+}
+
+void UserData::setBirthday(Data::Birthday value) {
+	if (_birthday != value) {
+		_birthday = value;
+		session().changes().peerUpdated(this, UpdateFlag::Birthday);
+	}
+}
+
+void UserData::setBirthday(const tl::conditional<MTPBirthday> &value) {
+	if (!value) {
+		setBirthday(Data::Birthday());
+	} else {
+		const auto &data = value->data();
+		setBirthday(Data::Birthday(
+			data.vday().v,
+			data.vmonth().v,
+			data.vyear().value_or_empty()));
 	}
 }
 
@@ -516,7 +578,7 @@ void ApplyUserUpdate(not_null<UserData*> user, const MTPDuserFull &update) {
 			));
 		}
 	}
-	user->setSettings(update.vsettings());
+	user->setBarSettings(update.vsettings());
 	user->owner().notifySettings().apply(user, update.vnotify_settings());
 
 	user->setMessagesTTL(update.vttl_period().value_or_empty());
@@ -598,8 +660,14 @@ void ApplyUserUpdate(not_null<UserData*> user, const MTPDuserFull &update) {
 	}
 
 	user->setBusinessDetails(FromMTP(
+		&user->owner(),
 		update.vbusiness_work_hours(),
-		update.vbusiness_location()));
+		update.vbusiness_location(),
+		update.vbusiness_intro()));
+	user->setBirthday(update.vbirthday());
+	user->setPersonalChannel(
+		update.vpersonal_channel_id().value_or_empty(),
+		update.vpersonal_channel_message().value_or_empty());
 	if (user->isSelf()) {
 		user->owner().businessInfo().applyAwaySettings(
 			FromMTP(&user->owner(), update.vbusiness_away_message()));
