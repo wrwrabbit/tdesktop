@@ -260,6 +260,8 @@ public:
 
 	void sendReaction(FullStoryId id, Data::ReactionId reaction);
 
+	void clearStoriesForPeer(PeerId peerId);
+
 private:
 	struct Set {
 		StoriesIds ids;

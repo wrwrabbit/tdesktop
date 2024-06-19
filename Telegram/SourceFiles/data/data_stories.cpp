@@ -2250,4 +2250,15 @@ void Stories::preloadFinished(FullStoryId id, bool markAsPreloaded) {
 	});
 }
 
+void Stories::clearStoriesForPeer(PeerId peerId) {
+	applyDeletedFromSources(peerId, StorySourcesList::NotHidden);
+	applyDeletedFromSources(peerId, StorySourcesList::Hidden);
+	_all.erase(peerId);
+	_sourceChanged.fire_copy(peerId);
+	_archive.erase(peerId);
+	_archiveChanged.fire_copy(peerId);
+	_saved.erase(peerId);
+	_savedChanged.fire_copy(peerId);
+}
+
 } // namespace Data
