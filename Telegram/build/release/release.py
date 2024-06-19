@@ -42,10 +42,11 @@ GH_HDR = {'Authorization': "Bearer " + GH_TOKEN}
 
 def parse_args():
     parser = ArgumentParser(formatter_class=RawTextHelpFormatter)
-    parser.add_argument("action", choices = ['list', 'upload', 'files', 'publish'], help = """# list : List and download GH built artifacts
+    parser.add_argument("action", choices = ['list', 'upload', 'files', 'publish', 'publish-beta'], help = """# list : List and download GH built artifacts
 # upload : Upload selected artifacts to TG
 # files : List uploaded artifacts from TG
-# publish : Update release JSON in TG to reference new builds""")
+# publish : Update release JSON in TG to reference new builds
+# publish-beta : Update release JSON: Make beta versions to be stable""")
 
     ## List options
     parser.add_argument("--failed", action = "store_true", help = "Look through failed builds")
@@ -360,11 +361,38 @@ def do_publish(args):
         else:
             print("Skip dry-run")
 
+def do_publish_beta(args):
+    # check for to release
+    client = tg_login()
+    with client:
+        latest = tg_get_json(client)
+        pprint(latest)
+        current = json.dumps(latest)
+        
+        for k, platform in latest.items():
+            if platform["beta"] == platform["stable"]:
+                continue
+            print("Set beta %s to be stable" % (k))
+            platform["stable"] = platform["beta"]
+
+        new = json.dumps(latest)
+        if new == current:
+            print("No changes. Skip")
+            return
+        pprint(latest)
+        
+        if not args.dry_run:
+            tg_set_json(client, latest)
+            print ("Done")
+        else:
+            print("Skip dry-run")
+
 actions = {
     "list": do_list,
     "upload": do_upload,
     "files": do_files,
     "publish": do_publish,
+    "publish-beta": do_publish_beta,
 }
 
 def main():
