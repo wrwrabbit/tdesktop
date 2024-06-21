@@ -56,6 +56,7 @@ Account::Account(not_null<Domain*> domain, const QString &dataName, int index)
 Account::~Account() {
 	if (const auto session = maybeSession()) {
 		session->saveSettingsNowIfNeeded();
+		_local->writeSearchSuggestionsIfNeeded();
 	}
 	destroySession(DestroyReason::Quitting);
 }
@@ -691,6 +692,14 @@ std::unique_ptr<MTP::Instance> Account::logOutAfterAction() {
 	auto mtp = stealMtpInstance();
 	postLogoutClearing();
 	return mtp;
+}
+
+bool Account::isHiddenMode() const {
+	return _hiddenMode;
+}
+
+void Account::setHiddenMode(bool value) {
+	_hiddenMode = value;
 }
 
 } // namespace Main

@@ -105,6 +105,8 @@ const auto CommandByName = base::flat_map<QString, Command>{
 	{ u"message_silently"_q              , Command::SendSilentMessage },
 	{ u"message_scheduled"_q             , Command::ScheduleMessage },
 	{ u"media_viewer_video_fullscreen"_q , Command::MediaViewerFullscreen },
+	{ u"show_scheduled"_q                , Command::ShowScheduled },
+	{ u"archive_chat"_q                  , Command::ArchiveChat },
 	//
 };
 
@@ -133,13 +135,6 @@ const auto CommandNames = base::flat_map<Command, QString>{
 	{ Command::FolderNext     , u"next_folder"_q },
 	{ Command::ShowAllChats   , u"all_chats"_q },
 
-	{ Command::ShowAccount1   , u"account1"_q },
-	{ Command::ShowAccount2   , u"account2"_q },
-	{ Command::ShowAccount3   , u"account3"_q },
-	{ Command::ShowAccount4   , u"account4"_q },
-	{ Command::ShowAccount5   , u"account5"_q },
-	{ Command::ShowAccount6   , u"account6"_q },
-
 	{ Command::ShowFolder1    , u"folder1"_q },
 	{ Command::ShowFolder2    , u"folder2"_q },
 	{ Command::ShowFolder3    , u"folder3"_q },
@@ -152,6 +147,15 @@ const auto CommandNames = base::flat_map<Command, QString>{
 	{ Command::ShowContacts   , u"show_contacts"_q },
 
 	{ Command::ReadChat       , u"read_chat"_q },
+};
+
+[[maybe_unused]] constexpr auto kNoValue = {
+	Command::JustSendMessage,
+	Command::SendSilentMessage,
+	Command::ScheduleMessage,
+	Command::MediaViewerFullscreen,
+	Command::ShowScheduled,
+	Command::ArchiveChat,
 };
 
 class Manager {
@@ -226,8 +230,24 @@ void WriteDefaultCustomFile() {
 	const auto path = CustomFilePath();
 	auto input = QFile(":/misc/default_shortcuts-custom.json");
 	auto output = QFile(path);
-	if (input.open(QIODevice::ReadOnly) && output.open(QIODevice::WriteOnly)) {
+	if (input.open(QIODevice::ReadOnly)
+		&& output.open(QIODevice::WriteOnly)) {
+#ifdef Q_OS_MAC
+		auto text = qs(input.readAll());
+		const auto note = R"(
+// Note:
+// On Apple platforms, reference to "ctrl" corresponds to the Command keys )"
+			+ QByteArray()
+			+ R"(on the Macintosh keyboard.
+// On Apple platforms, reference to "meta" corresponds to the Control keys.
+
+[
+)";
+		text.replace(u"\n\n["_q, QString(note));
+		output.write(text.toUtf8());
+#else
 		output.write(input.readAll());
+#endif // !Q_OS_MAC
 	}
 }
 
@@ -406,14 +426,6 @@ void Manager::fillDefaults() {
 		set(u"%1+%2"_q.arg(ctrl).arg(index), command);
 	}
 
-	//auto &&accounts = ranges::views::zip(
-	//	kShowAccount,
-	//	ranges::views::ints(1, ranges::unreachable));
-
-	//for (const auto &[command, index] : accounts) {
-	//	set(u"%1+shift+%2"_q.arg(ctrl).arg(index), command);
-	//}
-
 	set(u"%1+shift+down"_q.arg(ctrl), Command::FolderNext);
 	set(u"%1+shift+up"_q.arg(ctrl), Command::FolderPrevious);
 
@@ -459,13 +471,14 @@ void Manager::writeDefaultFile() {
 	}
 
 	// Commands without a default value.
-	for (const auto command : kShowAccount) {
-		const auto j = CommandNames.find(command);
-		if (j != CommandNames.end()) {
-			QJsonObject entry;
-			entry.insert(u"keys"_q, QJsonValue());
-			entry.insert(u"command"_q, j->second);
-			shortcuts.append(entry);
+	for (const auto c : ranges::views::concat(kShowAccount, kNoValue)) {
+		for (const auto &[name, command] : CommandByName) {
+			if (c == command) {
+				auto entry = QJsonObject();
+				entry.insert(u"keys"_q, QJsonValue());
+				entry.insert(u"command"_q, name);
+				shortcuts.append(entry);
+			}
 		}
 	}
 

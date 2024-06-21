@@ -14,7 +14,6 @@
 
 void ClearProxyUI::Create(not_null<Ui::VerticalLayout*> content,
                           Window::SessionController*) {
-    Ui::AddSubsectionTitle(content, tr::lng_clear_proxy());
     const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
     auto *button = Settings::AddButtonWithIcon(content, tr::lng_clear_proxy(), st::settingsButton,
                                                {&st::menuIconForward})

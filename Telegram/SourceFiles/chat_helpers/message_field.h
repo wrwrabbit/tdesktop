@@ -77,6 +77,9 @@ void InitSpellchecker(
 	not_null<Ui::InputField*> field,
 	bool skipDictionariesManager = false);
 
+[[nodiscard]] Fn<void(not_null<Ui::InputField*>)> FactcheckFieldIniter(
+	std::shared_ptr<Main::SessionShow> show);
+
 bool HasSendText(not_null<const Ui::InputField*> field);
 
 void InitMessageFieldFade(
@@ -154,3 +157,7 @@ private:
 	QWidget *parent,
 	not_null<UserData*> user,
 	not_null<Window::SessionController*> controller);
+
+void SelectTextInFieldWithMargins(
+	not_null<Ui::InputField*> field,
+	const TextSelection &selection);

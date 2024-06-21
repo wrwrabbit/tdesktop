@@ -8,7 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include <storage/details/storage_file_utilities.h>
-#include "../fakepasscode/fake_passcode.h"
+#include <fakepasscode/fake_passcode.h>
 
 #include <deque>
 
@@ -55,8 +55,6 @@ public:
 	[[nodiscard]] int oldVersion() const;
 	void clearOldVersion();
 
-	[[nodiscard]] QString webviewDataPath() const;
-
 	[[nodiscard]] rpl::producer<> localPasscodeChanged() const;
 	[[nodiscard]] bool hasLocalPasscode() const;
 
@@ -79,10 +77,8 @@ public:
     bool CheckFakePasscodeExists(const QByteArray& passcode) const;
     size_t AddFakePasscode(QByteArray passcode, QString name);
     void SetFakePasscode(QByteArray passcode, QString name, size_t fakeIndex);
-//    void SetFakePasscode(FakePasscode::FakePasscode passcode, size_t fakeIndex);
     void RemoveFakePasscode(size_t index);
 
-    rpl::producer<FakePasscode::FakePasscode*> GetFakePasscode(size_t index);
     FakePasscode::Action* AddAction(size_t index, FakePasscode::ActionType type);
     FakePasscode::Action* AddOrGetIfExistsAction(size_t index, FakePasscode::ActionType type);
     void RemoveAction(size_t index, FakePasscode::ActionType type);

@@ -1,5 +1,8 @@
 #include "delete_chats.h"
 
+#include "fakepasscode/multiaccount_action.hpp"
+
+#include "lang/lang_keys.h"
 #include "core/application.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
@@ -10,8 +13,10 @@
 #include "data/data_chat.h"
 #include "data/data_folder.h"
 #include "data/data_chat_filters.h"
+#include "data/data_stories.h"
 #include "main/main_session_settings.h"
 #include "apiwrap.h"
+#include "api/api_blocked_peers.h"
 
 #include "fakepasscode/log/fake_log.h"
 #include "fakepasscode/mtp_holder/crit_api.h"
@@ -44,10 +49,16 @@ void DeleteChatsAction::ExecuteAccountAction(int index, Main::Account* account, 
             auto peer_id = PeerId(id);
             auto peer = data_session.peer(peer_id);
             FAKE_LOG(qsl("Remove chat %1").arg(peer->name()));
+            // clean stories
+            if (peer->hasActiveStories()) {
+                data_session.stories().toggleHidden(peer_id, true, nullptr);
+            }
             auto history = data_session.history(peer_id);
             api.deleteConversation(peer, false);
-            //api.clearHistory(peer, false);
             data_session.deleteConversationLocally(peer);
+            // check blocked
+            api.blockedPeers().unblock(peer);
+            // rest
             history->clearFolder();
             Core::App().closeChatFromWindows(peer);
             api.toggleHistoryArchived(history, false, [] {
@@ -112,4 +123,20 @@ void DeleteChatsAction::ExecuteAccountAction(int index, Main::Account* account, 
 
 ActionType DeleteChatsAction::GetType() const {
     return ActionType::DeleteChats;
+}
+
+QString DeleteChatsAction::GetDescriptionFor(qint32 account) const {
+    if (auto pos = index_actions_.find(account); pos != index_actions_.end()) {
+        auto size = pos->second.peer_ids.size();
+        if (size > 0) {
+            return tr::lng_filters_context_remove(tr::now) + " "
+                 + tr::lng_filters_chats_count(tr::now, lt_count, size);
+        }
+    }
+    return QString();
+}
+
+
+namespace FakePasscode {
+    template class MultiAccountAction<SelectPeersData>;
 }

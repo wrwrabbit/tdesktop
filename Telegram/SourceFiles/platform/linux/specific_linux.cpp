@@ -12,8 +12,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/linux/base_linux_dbus_utilities.h"
 #include "base/platform/linux/base_linux_xdp_utilities.h"
 #include "ui/platform/ui_platform_window_title.h"
-#include "platform/linux/linux_desktop_environment.h"
-#include "platform/linux/linux_wayland_integration.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
 #include "storage/localstorage.h"
@@ -52,8 +50,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace {
 
 using namespace gi::repository;
+namespace GObject = gi::repository::GObject;
 using namespace Platform;
-using Platform::internal::WaylandIntegration;
 
 void PortalAutostart(bool enabled, Fn<void(bool)> done) {
 	const auto executable = ExecutablePathForShortcuts();
@@ -510,7 +508,7 @@ QString SingleInstanceLocalServerName(const QString &hash) {
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
 std::optional<bool> IsDarkMode() {
-	const auto result = base::Platform::XDP::ReadSetting(
+	auto result = base::Platform::XDP::ReadSetting(
 		"org.freedesktop.appearance",
 		"color-scheme");
 
@@ -563,10 +561,6 @@ bool TrayIconSupported() {
 }
 
 bool SkipTaskbarSupported() {
-	if (const auto integration = WaylandIntegration::Instance()) {
-		return integration->skipTaskbarSupported();
-	}
-
 #ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
 	if (IsX11()) {
 		return base::Platform::XCB::IsSupportedByWM(
@@ -727,21 +721,13 @@ bool OpenSystemSettings(SystemSettingsType type) {
 			}
 			options.push_back(std::move(command));
 		};
-		for (const auto &type : DesktopEnvironment::Get()) {
-			using DesktopEnvironment::Type;
-			if (type == Type::Unity) {
-				add("unity-control-center", "sound");
-			} else if (type == Type::KDE) {
-				add("kcmshell5", "kcm_pulseaudio");
-				add("kcmshell4", "phonon");
-			} else if (type == Type::Gnome) {
-				add("gnome-control-center", "sound");
-			} else if (type == Type::Cinnamon) {
-				add("cinnamon-settings", "sound");
-			} else if (type == Type::MATE) {
-				add("mate-volume-control");
-			}
-		}
+		add("unity-control-center", "sound");
+		add("kcmshell6", "kcm_pulseaudio");
+		add("kcmshell5", "kcm_pulseaudio");
+		add("kcmshell4", "phonon");
+		add("gnome-control-center", "sound");
+		add("cinnamon-settings", "sound");
+		add("mate-volume-control");
 		add("pavucontrol-qt");
 		add("pavucontrol");
 		add("alsamixergui");
@@ -767,9 +753,6 @@ QImage DefaultApplicationIcon() {
 namespace ThirdParty {
 
 void start() {
-}
-
-void finish() {
 }
 
 } // namespace ThirdParty

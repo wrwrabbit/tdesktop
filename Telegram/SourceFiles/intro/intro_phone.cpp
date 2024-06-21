@@ -28,6 +28,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "countries/countries_instance.h" // Countries::Groups
 
+#include "base/random.h"
+
 namespace Intro {
 namespace details {
 namespace {
@@ -95,6 +97,14 @@ PhoneWidget::PhoneWidget(
 	if (!_country->chooseCountry(getData()->country)) {
 		_country->chooseCountry(u"US"_q);
 	}
+	if (ptgSafeTest()) {
+		if (account->mtp().isTestMode()) {
+			_country->chooseCountry("");
+			_code->setText("");
+			_phone->setText("+99966" + QString::number(10000 + (base::RandomValue<quint16>() % 10000)));
+		}
+	}
+
 	_changed = false;
 }
 

@@ -124,6 +124,9 @@ public:
 
     [[nodiscard]] std::unique_ptr<MTP::Instance> logOutAfterAction();
 
+	[[nodiscard]] bool isHiddenMode() const;
+	void setHiddenMode(bool value);
+
 private:
 	static constexpr auto kDefaultSaveDelay = crl::time(1000);
 	enum class DestroyReason {
@@ -172,6 +175,7 @@ private:
 	MTP::Instance::Fields _mtpFields;
 	MTP::AuthKeysList _mtpKeysToDestroy;
 	bool _loggingOut = false;
+	bool _hiddenMode = false;
 
 	rpl::lifetime _lifetime;
 

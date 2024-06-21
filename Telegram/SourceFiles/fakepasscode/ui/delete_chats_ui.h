@@ -5,7 +5,7 @@
 
 class DeleteChatsUI final : public MultiAccountSelectChatsUi {
 public:
-    DeleteChatsUI(QWidget* parent, gsl::not_null<Main::Domain*> domain, size_t index);
+    DeleteChatsUI(QWidget* parent, gsl::not_null<Main::Domain*> domain, size_t index, int accountIndex);
 };
 
 #endif //TELEGRAM_DELETE_CHATS_UI_H

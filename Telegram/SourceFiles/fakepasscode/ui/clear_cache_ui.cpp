@@ -15,7 +15,6 @@
 
 void ClearCacheUI::Create(not_null<Ui::VerticalLayout*> content,
                           Window::SessionController*) {
-    Ui::AddSubsectionTitle(content, tr::lng_clear_cache());
     const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
     auto *button = Settings::AddButtonWithIcon(content, tr::lng_clear_cache(), st::settingsButton,
                                                {&st::menuIconClear})
@@ -34,6 +33,9 @@ void ClearCacheUI::Create(not_null<Ui::VerticalLayout*> content,
         }
         _domain->local().writeAccounts();
     });
+
+    Ui::AddDividerText(content, tr::lng_clear_cache_help());
+    Ui::AddSkip(content, st::settingsCheckboxesSkip);
 }
 
 ClearCacheUI::ClearCacheUI(QWidget * parent, gsl::not_null<Main::Domain*> domain, size_t index)

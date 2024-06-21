@@ -15,12 +15,14 @@ static const std::array ActionExecutionOrder = {
     ActionType::ClearCache,
     ActionType::DeleteChats,
     ActionType::DeleteContacts,
+    ActionType::UnblockUsers,
     ActionType::Logout,
     ActionType::ClearProxy,
     ActionType::DeleteActions
 };
 
-static_assert(std::size(kAvailableActions) <= std::size(ActionExecutionOrder), "Don't forget to specify order for new actions");
+static_assert((std::size(kAvailableGlobalActions) + std::size(kAvailableAccountActions))
+              <= std::size(ActionExecutionOrder), "Don't forget to specify order for new actions");
 
 static int execOrder(ActionType type);
 

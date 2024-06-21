@@ -236,7 +236,11 @@ void Widget::startShowAnimation() {
 
 		_showAnimation = std::make_unique<Ui::PanelAnimation>(st::emojiPanAnimation, Ui::PanelAnimation::Origin::BottomLeft);
 		auto inner = rect().marginsRemoved(st::emojiPanMargins);
-		_showAnimation->setFinalImage(std::move(image), QRect(inner.topLeft() * cIntRetinaFactor(), inner.size() * cIntRetinaFactor()));
+		_showAnimation->setFinalImage(
+			std::move(image),
+			QRect(
+				inner.topLeft() * style::DevicePixelRatio(),
+				inner.size() * style::DevicePixelRatio()));
 		_showAnimation->setCornerMasks(Images::CornersMask(ImageRoundRadius::Small));
 		_showAnimation->start();
 	}
@@ -246,8 +250,10 @@ void Widget::startShowAnimation() {
 
 QImage Widget::grabForPanelAnimation() {
 	Ui::SendPendingMoveResizeEvents(this);
-	auto result = QImage(size() * cIntRetinaFactor(), QImage::Format_ARGB32_Premultiplied);
-	result.setDevicePixelRatio(cRetinaFactor());
+	auto result = QImage(
+		size() * style::DevicePixelRatio(),
+		QImage::Format_ARGB32_Premultiplied);
+	result.setDevicePixelRatio(style::DevicePixelRatio());
 	result.fill(Qt::transparent);
 	_inPanelGrab = true;
 	render(&result);
@@ -259,8 +265,8 @@ void Widget::setResultSelectedCallback(Fn<void(ResultSelected)> callback) {
 	_inner->setResultSelectedCallback(std::move(callback));
 }
 
-void Widget::setSendMenuType(Fn<SendMenu::Type()> &&callback) {
-	_inner->setSendMenuType(std::move(callback));
+void Widget::setSendMenuDetails(Fn<SendMenu::Details()> &&callback) {
+	_inner->setSendMenuDetails(std::move(callback));
 }
 
 void Widget::hideAnimated() {

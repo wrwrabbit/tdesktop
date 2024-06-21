@@ -348,8 +348,8 @@ public:
 	rpl::producer<bool> adjustShadowLeft() const override {
 		return rpl::single(false);
 	}
-	SendMenu::Type sendMenuType() const override {
-		return SendMenu::Type::SilentOnly;
+	SendMenu::Details sendMenuDetails() const override {
+		return { SendMenu::Type::SilentOnly };
 	}
 
 	bool showMediaPreview(
@@ -415,7 +415,6 @@ OverlayWidget::OverlayWidget()
 , _widget(_surface->rpWidget())
 , _fullscreen(Core::App().settings().mediaViewPosition().maximized == 2)
 , _windowed(Core::App().settings().mediaViewPosition().maximized == 0)
-, _cachedReactionIconFactory(std::make_unique<ReactionIconFactory>())
 , _layerBg(std::make_unique<Ui::LayerManager>(_body))
 , _docDownload(_body, tr::lng_media_download(tr::now), st::mediaviewFileLink)
 , _docSaveAs(_body, tr::lng_mediaview_save_as(tr::now), st::mediaviewFileLink)
@@ -443,9 +442,9 @@ OverlayWidget::OverlayWidget()
 	});
 
 	_docRectImage = QImage(
-		st::mediaviewFileSize * cIntRetinaFactor(),
+		st::mediaviewFileSize * style::DevicePixelRatio(),
 		QImage::Format_ARGB32_Premultiplied);
-	_docRectImage.setDevicePixelRatio(cIntRetinaFactor());
+	_docRectImage.setDevicePixelRatio(style::DevicePixelRatio());
 
 	Shortcuts::Requests(
 	) | rpl::start_with_next([=](not_null<Shortcuts::Request*> request) {
@@ -481,6 +480,10 @@ OverlayWidget::OverlayWidget()
 				moveToScreen(true);
 			}
 		} else if (type == QEvent::Resize) {
+			const auto size = static_cast<QResizeEvent*>(e.get())->size();
+			DEBUG_LOG(("Viewer Pos: Resized to %1, %2")
+				.arg(size.width())
+				.arg(size.height()));
 			if (_windowed) {
 				savePosition();
 			}
@@ -508,9 +511,6 @@ OverlayWidget::OverlayWidget()
 		const auto type = e->type();
 		if (type == QEvent::Resize) {
 			const auto size = static_cast<QResizeEvent*>(e.get())->size();
-			DEBUG_LOG(("Viewer Pos: Resized to %1, %2")
-				.arg(size.width())
-				.arg(size.height()));
 
 			// Somehow Windows 11 knows the geometry of first widget below
 			// the semi-native title control widgets and it uses
@@ -793,11 +793,9 @@ void OverlayWidget::moveToScreen(bool inMove) {
 		if (!widget) {
 			return nullptr;
 		}
-		if (!Platform::IsWayland()) {
-			if (const auto screen = QGuiApplication::screenAt(
+		if (const auto screen = QGuiApplication::screenAt(
 				widget->geometry().center())) {
-				return screen;
-			}
+			return screen;
 		}
 		return widget->screen();
 	};
@@ -909,7 +907,12 @@ void OverlayWidget::updateGeometry(bool inMove) {
 	if (_fullscreen && (!Platform::IsWindows11OrGreater() || !isHidden())) {
 		updateGeometryToScreen(inMove);
 	} else if (_windowed && _normalGeometryInited) {
-		_window->setGeometry(_normalGeometry);
+		DEBUG_LOG(("Viewer Pos: Setting %1, %2, %3, %4")
+			.arg(_normalGeometry.x())
+			.arg(_normalGeometry.y())
+			.arg(_normalGeometry.width())
+			.arg(_normalGeometry.height()));
+		_window->RpWidget::setGeometry(_normalGeometry);
 	}
 	if constexpr (!Platform::IsMac()) {
 		if (_fullscreen) {
@@ -1123,7 +1126,7 @@ void OverlayWidget::setStaticContent(QImage image) {
 		&& image.format() != QImage::Format_RGB32) {
 		image = std::move(image).convertToFormat(kGood);
 	}
-	image.setDevicePixelRatio(cRetinaFactor());
+	image.setDevicePixelRatio(style::DevicePixelRatio());
 	_staticContent = std::move(image);
 	_staticContentTransparent = IsSemitransparent(_staticContent);
 }
@@ -1494,17 +1497,17 @@ void OverlayWidget::fillContextMenuActions(const MenuCallback &addAction) {
 			&st::mediaMenuIconShowInChat);
 	}
 	if (story && story->peer()->isSelf()) {
-		const auto pinned = story->pinned();
-		const auto text = pinned
+		const auto inProfile = story->inProfile();
+		const auto text = inProfile
 			? tr::lng_mediaview_archive_story(tr::now)
 			: tr::lng_mediaview_save_to_profile(tr::now);
 		addAction(text, [=] {
 			if (_stories) {
-				_stories->togglePinnedRequested(!pinned);
+				_stories->toggleInProfileRequested(!inProfile);
 			}
-		}, pinned
+		}, (inProfile
 			? &st::mediaMenuIconArchiveStory
-			: &st::mediaMenuIconSaveStory);
+			: &st::mediaMenuIconSaveStory));
 	}
 	if ((!story || story->canDownloadChecked())
 		&& _document
@@ -1883,9 +1886,18 @@ void OverlayWidget::contentSizeChanged() {
 }
 
 void OverlayWidget::recountSkipTop() {
-	const auto bottom = (!_streamed || !_streamed->controls)
-		? height()
-		: (_streamed->controls->y() - st::mediaviewCaptionPadding.bottom());
+	const auto controllerBottomNoFullScreenVideo = _groupThumbs
+		? _groupThumbsTop
+		: height();
+	// We need the bottom in case of non-full-screen-video mode
+	// to count correct _availableHeight in non-full-screen-video mode.
+	//
+	// Originally this is controls->y() - padding.bottom().
+	const auto bottom = (_streamed && _streamed->controls)
+		? (controllerBottomNoFullScreenVideo
+			- _streamed->controls->height()
+			- 2 * st::mediaviewCaptionPadding.bottom())
+		: height();
 	const auto skipHeightBottom = (height() - bottom);
 	_skipTop = _minUsedTop + std::min(
 		std::max(
@@ -1951,7 +1963,7 @@ void OverlayWidget::resizeContentByScreenSize() {
 		_h = _height;
 	}
 	_x = (width() - _w) / 2;
-	_y = _skipTop + (_availableHeight - _h) / 2;
+	_y = _skipTop + (useh - _h) / 2;
 	_geometryAnimation.stop();
 }
 
@@ -4013,7 +4025,7 @@ void OverlayWidget::refreshClipControllerGeometry() {
 		st::mediaviewControllerSize.height());
 	_streamed->controls->move(
 		(width() - controllerWidth) / 2,
-		(controllerBottom
+		(controllerBottom // Duplicated in recountSkipTop().
 			- _streamed->controls->height()
 			- st::mediaviewCaptionPadding.bottom()));
 	Ui::SendPendingMoveResizeEvents(_streamed->controls.get());
@@ -4291,11 +4303,6 @@ auto OverlayWidget::storiesStickerOrEmojiChosen()
 	return _storiesStickerOrEmojiChosen.events();
 }
 
-auto OverlayWidget::storiesCachedReactionIconFactory()
--> HistoryView::Reactions::CachedIconFactory & {
-	return *_cachedReactionIconFactory;
-}
-
 void OverlayWidget::storiesJumpTo(
 		not_null<Main::Session*> session,
 		FullStoryId id,
@@ -4490,7 +4497,7 @@ void OverlayWidget::validatePhotoImage(Image *image, bool blurred) {
 		return;
 	}
 	const auto use = flipSizeByRotation({ _width, _height })
-		* cIntRetinaFactor();
+		* style::DevicePixelRatio();
 	setStaticContent(image->pixNoCache(
 		use,
 		{ .options = (blurred ? Images::Option::Blur : Images::Option()) }
@@ -4827,7 +4834,7 @@ void OverlayWidget::paintDocumentBubbleContent(
 				}
 			}
 		} else if (const auto thumbnail = _documentMedia->thumbnail()) {
-			int32 rf(cIntRetinaFactor());
+			int32 rf(style::DevicePixelRatio());
 			p.drawPixmap(icon.topLeft(), thumbnail->pix(_docThumbw), QRect(_docThumbx * rf, _docThumby * rf, st::mediaviewFileIconSize * rf, st::mediaviewFileIconSize * rf));
 		}
 	}
