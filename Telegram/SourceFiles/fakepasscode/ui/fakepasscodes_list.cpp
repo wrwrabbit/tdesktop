@@ -294,6 +294,19 @@ void FakePasscodeList::draw(size_t passcodesSize) {
 
     Ui::AddDividerText(content, tr::lng_clear_cache_on_lock_help());
     Ui::AddSkip(content, st::settingsCheckboxesSkip);
+    
+    const auto toggledDangerActions = Ui::CreateChild<rpl::event_stream<bool>>(this);
+    auto buttonDangerActions = AddButtonWithIcon(content, tr::lng_dangerous_actions(), st::settingsButton,
+                                           {&st::menuIconSavedMessages})
+            ->toggleOn(toggledDangerActions->events_starting_with_copy(_domain->local().IsDangerousActionsAllowed()));
+
+    buttonDangerActions->addClickHandler([=] {
+        _domain->local().SetDangerousActionsAllowed(buttonDangerActions->toggled());
+        _domain->local().writeAccounts();
+    });
+
+    Ui::AddDividerText(content, tr::lng_dangerous_actions_help());
+    Ui::AddSkip(content, st::settingsCheckboxesSkip);
 
     const auto toggledLogging = Ui::CreateChild<rpl::event_stream<bool>>(this);
     auto buttonLogging = AddButtonWithIcon(content, tr::lng_enable_advance_logging(), st::settingsButton,
