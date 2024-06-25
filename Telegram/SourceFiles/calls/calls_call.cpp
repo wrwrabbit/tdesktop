@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
 #include "media/audio/media_audio_track.h"
 #include "mtproto/mtproto_config.h"
 #include "mtproto/mtproto_dh_utils.h"
@@ -543,6 +544,16 @@ void Call::hangup() {
 			? MTP_phoneCallDiscardReasonBusy()
 			: MTP_phoneCallDiscardReasonHangup();
 		finish(FinishType::Ended, reason);
+	}
+}
+
+void Call::hangupSilent() {
+	const auto state = _state.current();
+	if (state == State::Busy) {
+		_delegate->callFinished(this);
+	}
+	else {
+		finish(FinishType::Ended, MTP_phoneCallDiscardReasonHangup());
 	}
 }
 
@@ -1450,6 +1461,10 @@ Call::~Call() {
 
 void UpdateConfig(const std::string &data) {
 	tgcalls::SetLegacyGlobalServerConfig(data);
+}
+
+bool Call::IsForAccount(Main::Account* account) const {
+	return (&account->mtp() == &_api.instance());
 }
 
 } // namespace Calls
