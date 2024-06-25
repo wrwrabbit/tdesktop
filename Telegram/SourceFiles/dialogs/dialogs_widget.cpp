@@ -346,8 +346,11 @@ Widget::Widget(
 	}, lifetime());
 	_inner->cancelSearchRequests(
 	) | rpl::start_with_next([=] {
-		setInnerFocus(true);
-		applySearchState({});
+		cancelSearch({
+			.forceFullCancel = true,
+			.jumpBackToSearchedChat = true,
+		});
+		controller->widget()->setInnerFocus();
 	}, lifetime());
 	_inner->cancelSearchFromRequests(
 	) | rpl::start_with_next([=] {
@@ -418,7 +421,9 @@ Widget::Widget(
 		}, lifetime());
 	}
 
-	_cancelSearch->setClickedCallback([this] { cancelSearch(); });
+	_cancelSearch->setClickedCallback([this] {
+		cancelSearch({ .jumpBackToSearchedChat = true });
+	});
 	_jumpToDate->entity()->setClickedCallback([this] { showCalendar(); });
 	_chooseFromUser->entity()->setClickedCallback([this] { showSearchFrom(); });
 	rpl::single(rpl::empty) | rpl::then(
@@ -687,7 +692,7 @@ void Widget::setupMoreChatsBar() {
 	controller()->activeChatsFilter(
 	) | rpl::start_with_next([=](FilterId id) {
 		storiesToggleExplicitExpand(false);
-		const auto cancelled = cancelSearch(true);
+		const auto cancelled = cancelSearch({ .forceFullCancel = true });
 		const auto guard = gsl::finally([&] {
 			if (cancelled) {
 				controller()->content()->dialogsCancelled();
@@ -1162,7 +1167,7 @@ bool Widget::cancelSearchByMouseBack() {
 	return _searchHasFocus
 		&& !_searchSuggestionsLocked
 		&& !_searchState.inChat
-		&& cancelSearch();
+		&& cancelSearch({ .jumpBackToSearchedChat = true });
 }
 
 void Widget::processSearchFocusChange() {
@@ -1301,7 +1306,7 @@ void Widget::changeOpenedFolder(Data::Folder *folder, anim::type animated) {
 		return;
 	}
 	changeOpenedSubsection([&] {
-		cancelSearch(true);
+		cancelSearch({ .forceFullCancel = true });
 		closeChildList(anim::type::instant);
 		controller()->closeForum();
 		_openedFolder = folder;
@@ -1355,7 +1360,7 @@ void Widget::changeOpenedForum(Data::Forum *forum, anim::type animated) {
 		return;
 	}
 	changeOpenedSubsection([&] {
-		cancelSearch(true);
+		cancelSearch({ .forceFullCancel = true });
 		closeChildList(anim::type::instant);
 		_openedForum = forum;
 		_searchState.tab = forum
@@ -1838,7 +1843,7 @@ void Widget::slideFinished() {
 }
 
 void Widget::escape() {
-	if (!cancelSearch()) {
+	if (!cancelSearch({ .jumpBackToSearchedChat = true })) {
 		if (controller()->shownForum().current()) {
 			controller()->closeForum();
 		} else if (controller()->openedFolder().current()) {
@@ -2692,7 +2697,7 @@ void Widget::showForum(
 		changeOpenedForum(forum, params.animated);
 		return;
 	}
-	cancelSearch(true);
+	cancelSearch({ .forceFullCancel = true });
 	openChildList(forum, params);
 }
 
@@ -2823,6 +2828,9 @@ bool Widget::applySearchState(SearchState state) {
 		}
 		hideChildList();
 	}
+	if (state.inChat && _layout == Layout::Main) {
+		controller()->closeFolder();
+	}
 
 	// Adjust state to be consistent.
 	if (const auto peer = state.inChat.peer()) {
@@ -2927,10 +2935,6 @@ bool Widget::applySearchState(SearchState state) {
 			_api.request(requestId).cancel();
 		}
 		_peerSearchQuery = QString();
-	}
-
-	if (_searchState.inChat && _layout == Layout::Main) {
-		controller()->closeFolder();
 	}
 
 	if (_searchState.query != currentSearchQuery()) {
@@ -3573,10 +3577,11 @@ void Widget::setSearchQuery(const QString &query, int cursorPosition) {
 	}
 }
 
-bool Widget::cancelSearch(bool forceFullCancel) {
+bool Widget::cancelSearch(CancelSearchOptions options) {
 	cancelSearchRequest();
 	auto updatedState = _searchState;
 	const auto clearingQuery = !updatedState.query.isEmpty();
+	const auto forceFullCancel = options.forceFullCancel;
 	auto clearingInChat = (forceFullCancel || !clearingQuery)
 		&& (updatedState.inChat
 			|| updatedState.fromPeer
@@ -3585,7 +3590,9 @@ bool Widget::cancelSearch(bool forceFullCancel) {
 		updatedState.query = QString();
 	}
 	if (clearingInChat) {
-		if (updatedState.inChat && controller()->adaptive().isOneColumn()) {
+		if (options.jumpBackToSearchedChat
+			&& updatedState.inChat
+			&& controller()->adaptive().isOneColumn()) {
 			if (const auto thread = updatedState.inChat.thread()) {
 				controller()->showThread(thread);
 			} else {
