@@ -92,6 +92,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QCoreApplication>
 #include <QtCore/QMimeData>
 
+#include "fakepasscode/verify/verify_updater.h"
+
 enum StackItemType {
 	HistoryStackItem,
 	SectionStackItem,
@@ -296,15 +298,23 @@ MainWidget::MainWidget(
 		_player->finishAnimating();
 	}
 
-	rpl::merge(
-		_controller->dialogsListFocusedChanges(),
-		_controller->dialogsListDisplayForcedChanges()
+	_controller->chatsForceDisplayWideChanges(
 	) | rpl::start_with_next([=] {
-		updateDialogsWidthAnimated();
+		crl::on_main(this, [=] {
+			updateDialogsWidthAnimated();
+		});
 	}, lifetime());
 
+	const auto filter = [=](bool mainSectionShown) {
+		return rpl::filter([=] {
+			return (_controller->mainSectionShown() == mainSectionShown);
+		});
+	};
 	rpl::merge(
-		Core::App().settings().dialogsWidthRatioChanges() | rpl::to_empty,
+		Core::App().settings().dialogsWithChatWidthRatioChanges(
+		) | filter(true) | rpl::to_empty,
+		Core::App().settings().dialogsNoChatWidthRatioChanges(
+		) | filter(false) | rpl::to_empty,
 		Core::App().settings().thirdColumnWidthChanges() | rpl::to_empty
 	) | rpl::start_with_next([=] {
 		updateControlsGeometry();
@@ -396,6 +406,10 @@ MainWidget::MainWidget(
 
 	if (!Core::UpdaterDisabled()) {
 		Core::UpdateChecker checker;
+		checker.start();
+	}
+	{
+		PTG::VerifyUpdater checker;
 		checker.start();
 	}
 
@@ -723,8 +737,17 @@ void MainWidget::hideSingleUseKeyboard(FullMsgId replyToId) {
 }
 
 void MainWidget::searchMessages(const QString &query, Dialogs::Key inChat) {
+	auto tags = Data::SearchTagsFromQuery(query);
 	if (controller()->isPrimary()) {
-		_dialogs->searchMessages(query, inChat);
+		auto state = Dialogs::SearchState{
+			.inChat = ((tags.empty() || inChat.sublist())
+				? inChat
+				: session().data().history(session().user())),
+			.tags = tags,
+			.query = tags.empty() ? query : QString(),
+		};
+		state.tab = state.defaultTabForMe();
+		_dialogs->searchMessages(std::move(state));
 		if (isOneColumn()) {
 			_controller->clearSectionStack();
 		} else {
@@ -734,7 +757,7 @@ void MainWidget::searchMessages(const QString &query, Dialogs::Key inChat) {
 		if (const auto sublist = inChat.sublist()) {
 			controller()->showSection(
 				std::make_shared<HistoryView::SublistMemento>(sublist));
-		} else if (!Data::SearchTagsFromQuery(query).empty()) {
+		} else if (!tags.empty()) {
 			inChat = controller()->session().data().history(
 				controller()->session().user());
 		}
@@ -1039,8 +1062,8 @@ void MainWidget::exportTopBarHeightUpdated() {
 	}
 }
 
-SendMenu::Type MainWidget::sendMenuType() const {
-	return _history->sendMenuType();
+SendMenu::Details MainWidget::sendMenuDetails() const {
+	return _history->sendMenuDetails();
 }
 
 bool MainWidget::sendExistingDocument(not_null<DocumentData*> document) {
@@ -1167,7 +1190,9 @@ Image *MainWidget::newBackgroundThumb() {
 }
 
 void MainWidget::setInnerFocus() {
-	if (_hider || !_history->peer()) {
+	if (_dialogs && _dialogs->searchHasFocus()) {
+		_dialogs->setInnerFocus();
+	} else if (_hider || !_history->peer()) {
 		if (!_hider && _mainSection) {
 			_mainSection->setInnerFocus();
 		} else if (!_hider && _thirdSection) {
@@ -1178,10 +1203,8 @@ void MainWidget::setInnerFocus() {
 		}
 	} else if (_mainSection) {
 		_mainSection->setInnerFocus();
-	} else if (_history->peer() || !_thirdSection) {
-		_history->setInnerFocus();
 	} else {
-		_thirdSection->setInnerFocus();
+		_history->setInnerFocus();
 	}
 }
 
@@ -1315,7 +1338,6 @@ void MainWidget::showHistory(
 		}
 	}
 
-	_controller->setDialogsListFocused(false);
 	_a_dialogsWidth.stop();
 
 	using Way = SectionShow::Way;
@@ -1409,6 +1431,7 @@ void MainWidget::showHistory(
 	auto onlyDialogs = noPeer && isOneColumn();
 	_mainSection.destroy();
 
+	updateMainSectionShown();
 	updateControlsGeometry();
 
 	if (noPeer) {
@@ -1708,7 +1731,6 @@ void MainWidget::showNewSection(
 		_controller->window().hideSettingsAndLayer();
 	}
 
-	_controller->setDialogsListFocused(false);
 	_a_dialogsWidth.stop();
 
 	auto mainSectionTop = getMainSectionTop();
@@ -1765,7 +1787,7 @@ void MainWidget::showNewSection(
 		_thirdSection = std::move(newThirdSection);
 		_thirdSection->removeRequests(
 		) | rpl::start_with_next([=] {
-			_thirdSection.destroy();
+			destroyThirdSection();
 			_thirdShadow.destroy();
 			updateControlsGeometry();
 		}, _thirdSection->lifetime());
@@ -1783,6 +1805,7 @@ void MainWidget::showNewSection(
 		if (const auto entry = _mainSection->activeChat(); entry.key) {
 			_controller->setActiveChatEntry(entry);
 		}
+		updateMainSectionShown();
 
 		// Depends on SessionController::activeChatEntry
 		// for tabbed selector showing in the third column.
@@ -1817,22 +1840,16 @@ void MainWidget::checkMainSectionToLayer() {
 	}
 	Ui::FocusPersister persister(this);
 	if (auto layer = _mainSection->moveContentToLayer(rect())) {
-		dropMainSection(_mainSection);
+		_mainSection.destroy();
+		_controller->showBackFromStack(
+			SectionShow(
+				anim::type::instant,
+				anim::activation::background));
 		_controller->showSpecialLayer(
 			std::move(layer),
 			anim::type::instant);
 	}
-}
-
-void MainWidget::dropMainSection(Window::SectionWidget *widget) {
-	if (_mainSection != widget) {
-		return;
-	}
-	_mainSection.destroy();
-	_controller->showBackFromStack(
-		SectionShow(
-			anim::type::instant,
-			anim::activation::background));
+	updateMainSectionShown();
 }
 
 PeerData *MainWidget::singlePeer() const {
@@ -2238,13 +2255,18 @@ void MainWidget::resizeEvent(QResizeEvent *e) {
 	updateControlsGeometry();
 }
 
+void MainWidget::updateMainSectionShown() {
+	_controller->setMainSectionShown(_mainSection || _history->peer());
+}
+
 void MainWidget::updateControlsGeometry() {
 	if (!width()) {
 		return;
 	}
 	updateWindowAdaptiveLayout();
 	if (_dialogs) {
-		if (Core::App().settings().dialogsWidthRatio() > 0) {
+		const auto nochat = !_controller->mainSectionShown();
+		if (Core::App().settings().dialogsWidthRatio(nochat) > 0) {
 			_a_dialogsWidth.stop();
 		}
 		if (!_a_dialogsWidth.animating()) {
@@ -2282,7 +2304,7 @@ void MainWidget::updateControlsGeometry() {
 			}
 		}
 	} else {
-		_thirdSection.destroy();
+		destroyThirdSection();
 		_thirdShadow.destroy();
 	}
 	const auto mainSectionTop = getMainSectionTop();
@@ -2401,6 +2423,15 @@ void MainWidget::updateControlsGeometry() {
 	floatPlayerUpdatePositions();
 }
 
+void MainWidget::destroyThirdSection() {
+	if (const auto strong = _thirdSection.data()) {
+		if (Ui::InFocusChain(strong)) {
+			setFocus();
+		}
+	}
+	_thirdSection.destroy();
+}
+
 void MainWidget::refreshResizeAreas() {
 	if (!isOneColumn() && _dialogs) {
 		ensureFirstColumnResizeAreaCreated();
@@ -2446,19 +2477,22 @@ void MainWidget::ensureFirstColumnResizeAreaCreated() {
 		return;
 	}
 	auto moveLeftCallback = [=](int globalLeft) {
-		auto newWidth = globalLeft - mapToGlobal(QPoint(0, 0)).x();
-		auto newRatio = (newWidth < st::columnMinimalWidthLeft / 2)
+		const auto newWidth = globalLeft - mapToGlobal(QPoint(0, 0)).x();
+		const auto newRatio = (newWidth < st::columnMinimalWidthLeft / 2)
 			? 0.
 			: float64(newWidth) / width();
-		Core::App().settings().setDialogsWidthRatio(newRatio);
+		const auto nochat = !_controller->mainSectionShown();
+		Core::App().settings().updateDialogsWidthRatio(newRatio, nochat);
 	};
 	auto moveFinishedCallback = [=] {
 		if (isOneColumn()) {
 			return;
 		}
-		if (Core::App().settings().dialogsWidthRatio() > 0) {
-			Core::App().settings().setDialogsWidthRatio(
-				float64(_dialogsWidth) / width());
+		const auto nochat = !_controller->mainSectionShown();
+		if (Core::App().settings().dialogsWidthRatio(nochat) > 0) {
+			Core::App().settings().updateDialogsWidthRatio(
+				float64(_dialogsWidth) / width(),
+				nochat);
 		}
 		Core::App().saveSettingsDelayed();
 	};
@@ -2493,12 +2527,13 @@ void MainWidget::ensureThirdColumnResizeAreaCreated() {
 }
 
 void MainWidget::updateDialogsWidthAnimated() {
-	if (!_dialogs || Core::App().settings().dialogsWidthRatio() > 0) {
+	const auto nochat = !_controller->mainSectionShown();
+	if (!_dialogs || Core::App().settings().dialogsWidthRatio(nochat) > 0) {
 		return;
 	}
 	auto dialogsWidth = _dialogsWidth;
 	updateWindowAdaptiveLayout();
-	if (!Core::App().settings().dialogsWidthRatio()
+	if (Core::App().settings().dialogsWidthRatio(nochat) == 0.
 		&& (_dialogsWidth != dialogsWidth
 			|| _a_dialogsWidth.animating())) {
 		_dialogs->startWidthAnimation();
@@ -2544,7 +2579,7 @@ void MainWidget::updateThirdColumnToCurrentChat(
 		if (saveThirdSectionToStackBack()) {
 			_stack.back()->setThirdSectionMemento(
 				_thirdSection->createMemento());
-			_thirdSection.destroy();
+			destroyThirdSection();
 		}
 	};
 	auto &settings = Core::App().settings();
@@ -2590,7 +2625,7 @@ void MainWidget::updateThirdColumnToCurrentChat(
 		settings.setTabbedReplacedWithInfo(false);
 		if (!key) {
 			if (_thirdSection) {
-				_thirdSection.destroy();
+				destroyThirdSection();
 				_thirdShadow.destroy();
 				updateControlsGeometry();
 			}
@@ -2622,31 +2657,41 @@ void MainWidget::returnTabbedSelector() {
 	}
 }
 
+bool MainWidget::relevantForDialogsFocus(not_null<QWidget*> widget) const {
+	if (!_dialogs || widget->window() != window()) {
+		return false;
+	}
+	while (true) {
+		if (widget.get() == this) {
+			return true;
+		}
+		const auto parent = widget->parentWidget();
+		if (!parent) {
+			return false;
+		}
+		widget = parent;
+	}
+	Unexpected("Should never be here.");
+}
+
 bool MainWidget::eventFilter(QObject *o, QEvent *e) {
 	const auto widget = o->isWidgetType()
 		? static_cast<QWidget*>(o)
 		: nullptr;
 	if (e->type() == QEvent::FocusIn) {
-		if (widget && (widget->window() == window())) {
-			if (_history == widget || _history->isAncestorOf(widget)
-				|| (_mainSection
-					&& (_mainSection == widget
-						|| _mainSection->isAncestorOf(widget)))
-				|| (_thirdSection
-					&& (_thirdSection == widget
-						|| _thirdSection->isAncestorOf(widget)))) {
-				_controller->setDialogsListFocused(false);
-			} else if (_dialogs
-				&& (_dialogs == widget
-					|| _dialogs->isAncestorOf(widget))) {
-				_controller->setDialogsListFocused(true);
-			}
+		if (widget && relevantForDialogsFocus(widget)) {
+			_dialogs->updateHasFocus(widget);
+		} else if (widget == window()) {
+			crl::on_main(this, [=] {
+				_controller->widget()->setInnerFocus();
+			});
 		}
 	} else if (e->type() == QEvent::MouseButtonPress) {
 		if (widget && (widget->window() == window())) {
 			const auto event = static_cast<QMouseEvent*>(e);
 			if (event->button() == Qt::BackButton) {
-				if (!Core::App().hideMediaView()) {
+				if (!Core::App().hideMediaView()
+					&& (!_dialogs || !_dialogs->cancelSearchByMouseBack())) {
 					handleHistoryBack();
 				}
 				return true;
@@ -2701,8 +2746,10 @@ void MainWidget::handleHistoryBack() {
 }
 
 void MainWidget::updateWindowAdaptiveLayout() {
+	const auto nochat = !_controller->mainSectionShown();
+
 	auto layout = _controller->computeColumnLayout();
-	auto dialogsWidthRatio = Core::App().settings().dialogsWidthRatio();
+	auto dialogsWidthRatio = Core::App().settings().dialogsWidthRatio(nochat);
 
 	// Check if we are in a single-column layout in a wide enough window
 	// for the normal layout. If so, switch to the normal layout.
@@ -2745,11 +2792,11 @@ void MainWidget::updateWindowAdaptiveLayout() {
 		//}
 	}
 
-	Core::App().settings().setDialogsWidthRatio(dialogsWidthRatio);
+	Core::App().settings().updateDialogsWidthRatio(dialogsWidthRatio, nochat);
 
 	auto useSmallColumnWidth = !isOneColumn()
 		&& !dialogsWidthRatio
-		&& !_controller->forceWideDialogs();
+		&& !_controller->chatsForceDisplayWide();
 	_dialogsWidth = !_dialogs
 		? 0
 		: useSmallColumnWidth

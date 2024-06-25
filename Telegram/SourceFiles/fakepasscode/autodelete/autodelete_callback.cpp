@@ -35,11 +35,11 @@ bool DisableAutoDeleteInContextMenu() {
 }
 
 Fn<void()> DefaultAutoDeleteCallback(
-        not_null<Ui::RpWidget*> parent,
+        not_null<QWidget*> quard,
         Fn<void(object_ptr<Ui::BoxContent>)> show,
         Fn<void(Api::SendOptions)> send) {
-    return crl::guard(parent, [=] {
-        show(AutoDeleteBox(parent, send));
+    return crl::guard(quard, [=] {
+        show(AutoDeleteBox(quard, send));
     });
 }
 

@@ -7,12 +7,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-namespace Platform {
-namespace File {
-namespace internal {
+namespace HistoryView {
 
-bool ShowXDPOpenWithDialog(const QString &filepath);
+class Element;
 
-} // namespace internal
-} // namespace File
-} // namespace Platform
+void InitElementTextPart(not_null<Element*> view, Ui::Text::String &text);
+
+} // namespace HistoryView

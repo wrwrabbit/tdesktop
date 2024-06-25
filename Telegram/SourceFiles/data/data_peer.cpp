@@ -104,7 +104,9 @@ bool operator<(
 bool operator==(
 		const AllowedReactions &a,
 		const AllowedReactions &b) {
-	return (a.type == b.type) && (a.some == b.some);
+	return (a.type == b.type)
+		&& (a.some == b.some)
+		&& (a.maxCount == b.maxCount);
 }
 
 AllowedReactions Parse(const MTPChatReactions &value) {
@@ -531,7 +533,9 @@ bool PeerData::canPinMessages() const {
 
 bool PeerData::canCreatePolls() const {
 	if (const auto user = asUser()) {
-		return user->isBot() && !user->isSupport();
+		return user->isBot()
+			&& !user->isSupport()
+			&& !user->isRepliesChat();
 	}
 	return Data::CanSend(this, ChatRestriction::SendPolls);
 }

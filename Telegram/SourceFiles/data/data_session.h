@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 class Image;
 class HistoryItem;
 struct WebPageCollage;
+struct WebPageStickerSet;
 enum class WebPageType : uint8;
 enum class NewMessageType;
 
@@ -579,6 +580,7 @@ public:
 		DocumentData *document,
 		WebPageCollage &&collage,
 		std::unique_ptr<Iv::Data> iv,
+		std::unique_ptr<WebPageStickerSet> stickerSet,
 		int duration,
 		const QString &author,
 		bool hasLargeMedia,
@@ -775,6 +777,8 @@ private:
 	void setupPeerNameViewer();
 	void setupUserIsContactViewer();
 
+	void setupPTGVerifyViewer();
+
 	void checkSelfDestructItems();
 	void checkLocalUsersWentOffline();
 
@@ -861,6 +865,7 @@ private:
 		DocumentData *document,
 		WebPageCollage &&collage,
 		std::unique_ptr<Iv::Data> iv,
+		std::unique_ptr<WebPageStickerSet> stickerSet,
 		int duration,
 		const QString &author,
 		bool hasLargeMedia,

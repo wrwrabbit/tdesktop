@@ -2217,6 +2217,10 @@ void FormController::startPhoneVerification(not_null<Value*> value) {
 				bad("FirebaseSms");
 			}, [&](const MTPDauth_sentCodeTypeEmailCode &) {
 				bad("EmailCode");
+			}, [&](const MTPDauth_sentCodeTypeSmsWord &) {
+				bad("SmsWord");
+			}, [&](const MTPDauth_sentCodeTypeSmsPhrase &) {
+				bad("SmsPhrase");
 			}, [&](const MTPDauth_sentCodeTypeSetUpEmailRequired &) {
 				bad("SetUpEmailRequired");
 			});
@@ -2257,8 +2261,10 @@ void FormController::requestPhoneCall(not_null<Value*> value) {
 	value->verification.call->setStatus(
 		{ Ui::SentCodeCall::State::Calling, 0 });
 	_api.request(MTPauth_ResendCode(
+		MTP_flags(0),
 		MTP_string(getPhoneFromValue(value)),
-		MTP_string(value->verification.phoneCodeHash)
+		MTP_string(value->verification.phoneCodeHash),
+		MTPstring() // reason
 	)).done([=] {
 		value->verification.call->callDone();
 	}).send();

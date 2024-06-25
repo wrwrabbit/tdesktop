@@ -29,7 +29,7 @@ struct SendOptions;
 } // namespace Api
 
 namespace SendMenu {
-enum class Type;
+struct Details;
 } // namespace SendMenu
 
 namespace Main {
@@ -108,7 +108,7 @@ class ItemBase;
 } // namespace Layout
 } // namespace InlineBots
 
-class MainWidget
+class MainWidget final
 	: public Ui::RpWidget
 	, private Media::Player::FloatDelegate {
 public:
@@ -157,7 +157,7 @@ public:
 	QPixmap grabForShowAnimation(const Window::SectionSlideParams &params);
 	void checkMainSectionToLayer();
 
-	[[nodiscard]] SendMenu::Type sendMenuType() const;
+	[[nodiscard]] SendMenu::Details sendMenuDetails() const;
 	bool sendExistingDocument(not_null<DocumentData*> document);
 	bool sendExistingDocument(
 		not_null<DocumentData*> document,
@@ -236,18 +236,21 @@ public:
 
 	void dialogsCancelled();
 
-protected:
+private:
 	void paintEvent(QPaintEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
 	bool eventFilter(QObject *o, QEvent *e) override;
 
-private:
+	[[nodiscard]] bool relevantForDialogsFocus(
+		not_null<QWidget*> widget) const;
+
 	void showFinished();
 	void handleAdaptiveLayoutUpdate();
 	void updateWindowAdaptiveLayout();
 	void handleAudioUpdate(const Media::Player::TrackState &state);
 	void updateMediaPlaylistPosition(int x);
 	void updateControlsGeometry();
+	void updateMainSectionShown();
 	void updateDialogsWidthAnimated();
 	void updateThirdColumnToCurrentChat(
 		Dialogs::Key key,
@@ -276,7 +279,7 @@ private:
 	void showNewSection(
 		std::shared_ptr<Window::SectionMemento> memento,
 		const SectionShow &params);
-	void dropMainSection(Window::SectionWidget *widget);
+	void destroyThirdSection();
 
 	Window::SectionSlideParams prepareThirdSectionAnimation(Window::SectionWidget *section);
 

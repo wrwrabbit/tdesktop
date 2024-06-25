@@ -20,6 +20,10 @@ class Track;
 } // namespace Audio
 } // namespace Media
 
+namespace Main {
+	class Account;
+} // namespace Main
+
 namespace tgcalls {
 class Instance;
 class VideoCaptureInterface;
@@ -199,6 +203,7 @@ public:
 	void answer();
 	void hangup();
 	void redial();
+	void hangupSilent();
 
 	bool isKeyShaForFingerprintReady() const;
 	bytes::vector getKeyShaForFingerprint() const;
@@ -225,6 +230,8 @@ public:
 	}
 
 	~Call();
+
+	bool IsForAccount(Main::Account* account) const;
 
 private:
 	enum class FinishType {

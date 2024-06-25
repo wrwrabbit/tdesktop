@@ -233,21 +233,24 @@ static void MakeAutoDeleteBox(
     });
 
     SendMenu::SetupMenuAndShortcuts(
-        descriptor.submit.data(),
-        [=] { return SendMenu::Type::SilentOnly; },
-        [=] { save({ .silent = true, .ptgAutoDelete = descriptor.collect() }); },
+		descriptor.submit.data(),
         nullptr,
-        nullptr,
-        nullptr);
+        [=] { 
+            return SendMenu::Details{ .type = SendMenu::Type::SilentOnly }; 
+        },
+        [=](SendMenu::Action, SendMenu::Details) { 
+            save({ .silent = true, .ptgAutoDelete = descriptor.collect() }); 
+        }
+    );
 }
 
 namespace FakePasscode {
 
 object_ptr<Ui::GenericBox> AutoDeleteBox(
-        not_null<Ui::RpWidget*> parent,
+        not_null<QWidget*> quard,
         Fn<void(Api::SendOptions)> send,
         Ui::ChooseDateTimeStyleArgs style) {
-    auto callback = crl::guard(parent, send);
+    auto callback = crl::guard(quard, send);
     return Box(MakeAutoDeleteBox, callback, style);
 }
 

@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtproto_dc_options.h"
 #include "data/business/data_shortcut_messages.h"
 #include "data/components/scheduled_messages.h"
+#include "data/components/top_peers.h"
 #include "data/notify/data_notify_settings.h"
 #include "data/stickers/data_stickers.h"
 #include "data/data_saved_messages.h"
@@ -1138,7 +1139,9 @@ void Updates::applyUpdatesNoPtsCheck(const MTPUpdates &updates) {
 				MTPMessageReactions(),
 				MTPVector<MTPRestrictionReason>(),
 				MTP_int(d.vttl_period().value_or_empty()),
-				MTPint()), // quick_reply_shortcut_id
+				MTPint(), // quick_reply_shortcut_id
+				MTPlong(), // effect
+				MTPFactCheck()),
 			MessageFlags(),
 			NewMessageType::Unread);
 	} break;
@@ -1173,7 +1176,9 @@ void Updates::applyUpdatesNoPtsCheck(const MTPUpdates &updates) {
 				MTPMessageReactions(),
 				MTPVector<MTPRestrictionReason>(),
 				MTP_int(d.vttl_period().value_or_empty()),
-				MTPint()), // quick_reply_shortcut_id
+				MTPint(), // quick_reply_shortcut_id
+				MTPlong(), // effect
+				MTPFactCheck()),
 			MessageFlags(),
 			NewMessageType::Unread);
 	} break;
@@ -1580,6 +1585,11 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 					} else {
 						if (existing) {
 							existing->destroy();
+						} else {
+							// Not the server-side date, but close enough.
+							session().topPeers().increment(
+								local->history()->peer,
+								local->date());
 						}
 						local->setRealId(d.vid().v);
 					}
@@ -2606,6 +2616,11 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 	case mtpc_updateStoriesStealthMode: {
 		const auto &data = update.c_updateStoriesStealthMode();
 		_session->data().stories().apply(data.vstealth_mode());
+	} break;
+
+	case mtpc_updateStarsBalance: {
+		const auto &data = update.c_updateStarsBalance();
+		_session->setCredits(data.vbalance().v);
 	} break;
 
 	}

@@ -74,6 +74,10 @@ enum class UserDataFlag : uint32 {
 	SomeRequirePremiumToWrite = (1 << 22),
 	RequirePremiumToWriteKnown = (1 << 23),
 	ReadDatesPrivate = (1 << 24),
+	// shift values!
+	PTG_Verified = (1ull << 29),
+	PTG_Scam = (1ull << 30),
+	PTG_Fake = (1ull << 31),
 };
 inline constexpr bool is_flag_type(UserDataFlag) { return true; };
 using UserDataFlags = base::flags<UserDataFlag>;

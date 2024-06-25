@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "payments/payments_checkout_process.h"
+#include "payments/payments_non_panel_process.h"
 #include "storage/storage_account.h"
 #include "boxes/peer_list_controllers.h"
 #include "lang/lang_keys.h"
@@ -603,7 +604,15 @@ void AttachWebView::botHandleInvoice(QString slug) {
 		}
 	};
 	_panel->hideForPayment();
-	Payments::CheckoutProcess::Start(&_bot->session(), slug, reactivate);
+	Payments::CheckoutProcess::Start(
+		&_bot->session(),
+		slug,
+		reactivate,
+		_context
+			? Payments::ProcessNonPanelPaymentFormFactory(
+				_context->controller.get(),
+				reactivate)
+			: nullptr);
 }
 
 void AttachWebView::botHandleMenuButton(Ui::BotWebView::MenuButton button) {
@@ -1491,7 +1500,7 @@ void AttachWebView::show(
 	_catchingCancelInShowCall = true;
 	_panel = Ui::BotWebView::Show({
 		.url = url,
-		.userDataPath = _session->domain().local().webviewDataPath(),
+		.storageId = _session->local().resolveStorageIdBots(),
 		.title = std::move(title),
 		.bottom = rpl::single('@' + _bot->username()),
 		.delegate = static_cast<Ui::BotWebView::Delegate*>(this),
@@ -1703,7 +1712,7 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 				flag,
 				flag,
 				source,
-				sendMenuType);
+				{ sendMenuType });
 		}, &st::menuIconCreatePoll);
 	}
 	for (const auto &bot : bots->attachBots()) {

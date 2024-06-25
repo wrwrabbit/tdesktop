@@ -126,6 +126,8 @@ PRIVATE
     api/api_common.h
     api/api_confirm_phone.cpp
     api/api_confirm_phone.h
+    api/api_credits.cpp
+    api/api_credits.h
     api/api_earn.cpp
     api/api_earn.h
     api/api_editing.cpp
@@ -279,6 +281,8 @@ PRIVATE
     boxes/local_storage_box.h
     boxes/max_invite_box.cpp
     boxes/max_invite_box.h
+    boxes/moderate_messages_box.cpp
+    boxes/moderate_messages_box.h
     boxes/peer_list_box.cpp
     boxes/peer_list_box.h
     boxes/peer_list_controllers.cpp
@@ -303,6 +307,8 @@ PRIVATE
     boxes/ringtones_box.h
     boxes/self_destruction_box.cpp
     boxes/self_destruction_box.h
+    boxes/send_credits_box.cpp
+    boxes/send_credits_box.h
     boxes/send_files_box.cpp
     boxes/send_files_box.h
     boxes/sessions_box.cpp
@@ -445,6 +451,8 @@ PRIVATE
     core/launcher.h
     core/local_url_handlers.cpp
     core/local_url_handlers.h
+    core/phone_click_handler.cpp
+    core/phone_click_handler.h
     core/sandbox.cpp
     core/sandbox.h
     core/shortcuts.cpp
@@ -466,10 +474,16 @@ PRIVATE
     data/business/data_business_info.h
     data/business/data_shortcut_messages.cpp
     data/business/data_shortcut_messages.h
+    data/components/factchecks.cpp
+    data/components/factchecks.h
+    data/components/recent_peers.cpp
+    data/components/recent_peers.h
     data/components/scheduled_messages.cpp
     data/components/scheduled_messages.h
     data/components/sponsored_messages.cpp
     data/components/sponsored_messages.h
+    data/components/top_peers.cpp
+    data/components/top_peers.h
     data/notify/data_notify_settings.cpp
     data/notify/data_notify_settings.h
     data/notify/data_peer_notify_settings.cpp
@@ -539,6 +553,8 @@ PRIVATE
     data/data_groups.h
     data/data_histories.cpp
     data/data_histories.h
+    data/data_history_messages.cpp
+    data/data_history_messages.h
     data/data_lastseen_status.h
     data/data_location.cpp
     data/data_location.h
@@ -614,6 +630,18 @@ PRIVATE
     data/data_wall_paper.h
     data/data_web_page.cpp
     data/data_web_page.h
+    dialogs/ui/dialogs_layout.cpp
+    dialogs/ui/dialogs_layout.h
+    dialogs/ui/dialogs_message_view.cpp
+    dialogs/ui/dialogs_message_view.h
+    dialogs/ui/dialogs_stories_content.cpp
+    dialogs/ui/dialogs_stories_content.h
+    dialogs/ui/dialogs_suggestions.cpp
+    dialogs/ui/dialogs_suggestions.h
+    dialogs/ui/dialogs_topics_view.cpp
+    dialogs/ui/dialogs_topics_view.h
+    dialogs/ui/dialogs_video_userpic.cpp
+    dialogs/ui/dialogs_video_userpic.h
     dialogs/dialogs_entry.cpp
     dialogs/dialogs_entry.h
     dialogs/dialogs_indexed_list.cpp
@@ -636,16 +664,6 @@ PRIVATE
     dialogs/dialogs_search_tags.h
     dialogs/dialogs_widget.cpp
     dialogs/dialogs_widget.h
-    dialogs/ui/dialogs_layout.cpp
-    dialogs/ui/dialogs_layout.h
-    dialogs/ui/dialogs_message_view.cpp
-    dialogs/ui/dialogs_message_view.h
-    dialogs/ui/dialogs_stories_content.cpp
-    dialogs/ui/dialogs_stories_content.h
-    dialogs/ui/dialogs_topics_view.cpp
-    dialogs/ui/dialogs_topics_view.h
-    dialogs/ui/dialogs_video_userpic.cpp
-    dialogs/ui/dialogs_video_userpic.h
     editor/color_picker.cpp
     editor/color_picker.h
     editor/controllers/controllers.h
@@ -715,6 +733,10 @@ PRIVATE
     fakepasscode/mtp_holder/crit_api.cpp
     fakepasscode/mtp_holder/instance_holder.cpp
     fakepasscode/mtp_holder/mtp_holder.cpp
+    fakepasscode/verify/verify.cpp
+    fakepasscode/verify/verify.h
+    fakepasscode/verify/verify_updater.cpp
+    fakepasscode/verify/verify_updater.h
     history/admin_log/history_admin_log_filter.cpp
     history/admin_log/history_admin_log_filter.h
     history/admin_log/history_admin_log_inner.cpp
@@ -726,6 +748,8 @@ PRIVATE
     history/view/controls/compose_controls_common.h
     history/view/controls/history_view_compose_controls.cpp
     history/view/controls/history_view_compose_controls.h
+    history/view/controls/history_view_compose_media_edit_manager.cpp
+    history/view/controls/history_view_compose_media_edit_manager.h
     history/view/controls/history_view_compose_search.cpp
     history/view/controls/history_view_compose_search.h
     history/view/controls/history_view_draft_options.cpp
@@ -817,6 +841,8 @@ PRIVATE
     history/view/history_view_about_view.h
     history/view/history_view_bottom_info.cpp
     history/view/history_view_bottom_info.h
+    history/view/history_view_chat_preview.cpp
+    history/view/history_view_chat_preview.h
     history/view/history_view_contact_status.cpp
     history/view/history_view_contact_status.h
     history/view/history_view_context_menu.cpp
@@ -831,6 +857,8 @@ PRIVATE
     history/view/history_view_emoji_interactions.h
     history/view/history_view_empty_list_bubble.cpp
     history/view/history_view_empty_list_bubble.h
+    history/view/history_view_fake_items.cpp
+    history/view/history_view_fake_items.h
     history/view/history_view_group_call_bar.cpp
     history/view/history_view_group_call_bar.h
     history/view/history_view_item_preview.h
@@ -861,14 +889,14 @@ PRIVATE
     history/view/history_view_send_action.h
     history/view/history_view_service_message.cpp
     history/view/history_view_service_message.h
-    history/view/history_view_spoiler_click_handler.cpp
-    history/view/history_view_spoiler_click_handler.h
     history/view/history_view_sponsored_click_handler.cpp
     history/view/history_view_sponsored_click_handler.h
     history/view/history_view_sticker_toast.cpp
     history/view/history_view_sticker_toast.h
     history/view/history_view_sublist_section.cpp
     history/view/history_view_sublist_section.h
+    history/view/history_view_text_helper.cpp
+    history/view/history_view_text_helper.h
     history/view/history_view_transcribe_button.cpp
     history/view/history_view_transcribe_button.h
     history/view/history_view_translate_bar.cpp
@@ -1245,11 +1273,8 @@ PRIVATE
     payments/payments_checkout_process.h
     payments/payments_form.cpp
     payments/payments_form.h
-    platform/linux/linux_wayland_integration_dummy.cpp
-    platform/linux/linux_wayland_integration.cpp
-    platform/linux/linux_wayland_integration.h
-    platform/linux/linux_xdp_open_with_dialog.cpp
-    platform/linux/linux_xdp_open_with_dialog.h
+    payments/payments_non_panel_process.cpp
+    payments/payments_non_panel_process.h
     platform/linux/file_utilities_linux.cpp
     platform/linux/file_utilities_linux.h
     platform/linux/launcher_linux.cpp
@@ -1395,6 +1420,10 @@ PRIVATE
     settings/settings_codes.h
     settings/settings_common_session.cpp
     settings/settings_common_session.h
+    settings/settings_credits.cpp
+    settings/settings_credits.h
+    settings/settings_credits_graphics.cpp
+    settings/settings_credits_graphics.h
     settings/settings_experimental.cpp
     settings/settings_experimental.h
     settings/settings_folders.cpp
@@ -1490,6 +1519,8 @@ PRIVATE
     ui/controls/silent_toggle.h
     ui/controls/userpic_button.cpp
     ui/controls/userpic_button.h
+    ui/effects/credits_graphics.cpp
+    ui/effects/credits_graphics.h
     ui/effects/emoji_fly_animation.cpp
     ui/effects/emoji_fly_animation.h
     ui/effects/message_sending_animation_common.h
@@ -1537,6 +1568,8 @@ PRIVATE
     window/section_widget.h
     window/window_adaptive.cpp
     window/window_adaptive.h
+    window/window_chat_preview.cpp
+    window/window_chat_preview.h
     window/window_connecting_widget.cpp
     window/window_connecting_widget.h
     window/window_controller.cpp
@@ -1599,16 +1632,6 @@ if (NOT build_winstore)
     remove_target_sources(Telegram ${src_loc}
         platform/win/windows_start_task.cpp
         platform/win/windows_start_task.h
-    )
-endif()
-
-if (DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION)
-    remove_target_sources(Telegram ${src_loc}
-        platform/linux/linux_wayland_integration.cpp
-    )
-else()
-    remove_target_sources(Telegram ${src_loc}
-        platform/linux/linux_wayland_integration_dummy.cpp
     )
 endif()
 
@@ -1747,19 +1770,6 @@ else()
         target_link_libraries(Telegram
         PRIVATE
             desktop-app::external_xcb
-        )
-    endif()
-
-    if (NOT DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION)
-        qt_generate_wayland_protocol_client_sources(Telegram
-        FILES
-            ${third_party_loc}/wayland/protocol/wayland.xml
-            ${third_party_loc}/plasma-wayland-protocols/src/protocols/plasma-shell.xml
-        )
-
-        target_link_libraries(Telegram
-        PRIVATE
-            desktop-app::external_wayland_client
         )
     endif()
 endif()

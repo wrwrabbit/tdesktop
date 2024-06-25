@@ -105,6 +105,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "fakepasscode/utils/file_utils.h"
 #include "fakepasscode/autodelete/autodelete_service.h"
 #include "fakepasscode/mtp_holder/mtp_holder.h"
+#include "fakepasscode/verify/verify.h"
+#include "fakepasscode/verify/verify_updater.h"
 
 #include <QtCore/QStandardPaths>
 #include <QtCore/QMimeDatabase>
@@ -202,6 +204,7 @@ Application::Application()
 	) | rpl::start_with_next([=](Main::Session *session) {
 		if (session && !UpdaterDisabled()) { // #TODO multi someSessionValue
 			UpdateChecker().setMtproto(session);
+			PTG::VerifyUpdater().setMtproto(session);
 		}
 	}, _lifetime);
 }
@@ -249,23 +252,21 @@ Application::~Application() {
 	_mediaControlsManager = nullptr;
 
 	Media::Player::finish(_audio.get());
-	style::stopManager();
-
-	ThirdParty::finish();
+	style::StopManager();
 
 	Instance = nullptr;
 }
 
 void Application::run() {
-	style::internal::StartFonts();
-
-	ThirdParty::start();
-
 	// Depends on OpenSSL on macOS, so on ThirdParty::start().
 	// Depends on notifications settings.
 	_notifications = std::make_unique<Window::Notifications::System>();
 
 	startLocalStorage();
+
+	style::SetCustomFont(settings().customFontFamily());
+	style::internal::StartFonts();
+
 	ValidateScale();
 
 	refreshGlobalProxy(); // Depends on app settings being read.
@@ -288,7 +289,7 @@ void Application::run() {
 	_translator = std::make_unique<Lang::Translator>();
 	QCoreApplication::instance()->installTranslator(_translator.get());
 
-	style::startManager(cScale());
+	style::StartManager(cScale());
 	Ui::InitTextOptions();
 	Ui::StartCachedCorners();
 	Ui::Emoji::Init();
@@ -395,7 +396,7 @@ void Application::run() {
 	}
 
 	SetCrashAnnotationsGL();
-	if (!Platform::IsMac() && Ui::GL::LastCrashCheckFailed()) {
+	if (Ui::GL::LastCrashCheckFailed()) {
 		showOpenGLCrashNotification();
 	}
 
@@ -439,14 +440,12 @@ void Application::checkWindowAccount(not_null<Window::Controller*> window) {
 
 void Application::showOpenGLCrashNotification() {
 	const auto enable = [=] {
-		Ui::GL::ForceDisable(false);
 		Ui::GL::CrashCheckFinish();
 		settings().setDisableOpenGL(false);
 		Local::writeSettings();
 		Restart();
 	};
 	const auto keepDisabled = [=](Fn<void()> close) {
-		Ui::GL::ForceDisable(true);
 		Ui::GL::CrashCheckFinish();
 		settings().setDisableOpenGL(true);
 		Local::writeSettings();
@@ -804,6 +803,7 @@ void Application::badMtprotoConfigurationError() {
 }
 
 void Application::startLocalStorage() {
+	Ui::GL::DetectLastCheckCrash();
 	Local::start();
 	_saveSettingsTimer.emplace([=] { saveSettings(); });
 	settings().saveDelayedRequests() | rpl::start_with_next([=] {
@@ -1583,14 +1583,14 @@ void Application::closeChatFromWindows(not_null<PeerData*> peer) {
 		}
 	}
 	if (const auto window = windowFor(&peer->account())) {
-		const auto primary = window->sessionController();
-		if ((primary->activeChatCurrent().peer() == peer)
-			&& (&primary->session() == &peer->session())) {
-			primary->clearSectionStack();
-		}
-		if (const auto forum = primary->shownForum().current()) {
-			if (peer->forum() == forum) {
-				primary->closeForum();
+		if (const auto primary = window->sessionController()) {
+			if (primary->activeChatCurrent().peer() == peer) {
+				primary->clearSectionStack();
+			}
+			if (const auto forum = primary->shownForum().current()) {
+				if (peer->forum() == forum) {
+					primary->closeForum();
+				}
 			}
 		}
 	}

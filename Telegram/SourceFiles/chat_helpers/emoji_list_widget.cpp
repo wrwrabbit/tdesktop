@@ -136,6 +136,7 @@ struct EmojiListWidget::CustomEmojiInstance {
 struct EmojiListWidget::RecentOne {
 	Ui::Text::CustomEmoji *custom = nullptr;
 	RecentEmojiId id;
+	mutable QImage premiumLock;
 };
 
 EmojiColorPicker::EmojiColorPicker(
@@ -468,7 +469,8 @@ EmojiListWidget::EmojiListWidget(
 	std::move(descriptor.paused))
 , _show(std::move(descriptor.show))
 , _features(descriptor.features)
-, _mode(descriptor.mode)
+, _onlyUnicodeEmoji(descriptor.mode == Mode::PeerTitle)
+, _mode(_onlyUnicodeEmoji ? Mode::Full : descriptor.mode)
 , _api(&session().mtp())
 , _staticCount(_mode == Mode::Full ? kEmojiSectionCount : 1)
 , _premiumIcon(_mode == Mode::EmojiStatus
@@ -477,8 +479,12 @@ EmojiListWidget::EmojiListWidget(
 , _localSetsManager(
 	std::make_unique<LocalStickersManager>(&session()))
 , _customRecentFactory(std::move(descriptor.customRecentFactory))
+, _freeEffects(std::move(descriptor.freeEffects))
 , _customTextColor(std::move(descriptor.customTextColor))
 , _overBg(st::emojiPanRadius, st().overBg)
+, _premiumMark(std::make_unique<StickerPremiumMark>(
+	&session(),
+	st::emojiPremiumLock))
 , _collapsedBg(st::emojiPanExpand.height / 2, st().headerFg)
 , _picker(this, st())
 , _showPickerTimer([=] { showPicker(); })
@@ -490,7 +496,8 @@ EmojiListWidget::EmojiListWidget(
 
 	if (_mode != Mode::RecentReactions
 		&& _mode != Mode::BackgroundEmoji
-		&& _mode != Mode::ChannelStatus) {
+		&& _mode != Mode::ChannelStatus
+		&& !_onlyUnicodeEmoji) {
 		setupSearch();
 	}
 
@@ -571,12 +578,26 @@ EmojiListWidget::~EmojiListWidget() {
 
 void EmojiListWidget::setupSearch() {
 	const auto session = &_show->session();
+	const auto type = (_mode == Mode::EmojiStatus)
+		? TabbedSearchType::Status
+		: (_mode == Mode::UserpicBuilder)
+		? TabbedSearchType::ProfilePhoto
+		: TabbedSearchType::Emoji;
 	_search = MakeSearch(this, st(), [=](std::vector<QString> &&query) {
 		_nextSearchQuery = std::move(query);
 		InvokeQueued(this, [=] {
 			applyNextSearchQuery();
 		});
-	}, session, (_mode == Mode::EmojiStatus), _mode == Mode::UserpicBuilder);
+		_searchQueries.fire_copy(_nextSearchQuery);
+	}, session, type);
+}
+
+rpl::producer<std::vector<QString>> EmojiListWidget::searchQueries() const {
+	return _searchQueries.events();
+}
+
+rpl::producer<int> EmojiListWidget::recentShownCount() const {
+	return _recentShownCount.value();
 }
 
 void EmojiListWidget::applyNextSearchQuery() {
@@ -600,6 +621,9 @@ void EmojiListWidget::applyNextSearchQuery() {
 			_searchCustomIds.clear();
 		}
 		resizeToWidth(width());
+		_recentShownCount = searching
+			? _searchResults.size()
+			: _recent.size();
 		update();
 		if (modeChanged) {
 			visibleTopBottomUpdated(getVisibleTop(), getVisibleBottom());
@@ -827,7 +851,8 @@ void EmojiListWidget::unloadCustomIn(const SectionInfo &info) {
 object_ptr<TabbedSelector::InnerFooter> EmojiListWidget::createFooter() {
 	Expects(_footer == nullptr);
 
-	if (_mode == EmojiListMode::RecentReactions) {
+	if (_mode == EmojiListMode::RecentReactions
+		|| _mode == EmojiListMode::MessageEffects) {
 		return { nullptr };
 	}
 
@@ -1011,9 +1036,10 @@ int EmojiListWidget::countDesiredHeight(int newWidth) {
 	const auto minimalLastHeight = std::max(
 		minimalHeight - padding.bottom(),
 		0);
-	return qMax(
-		minimalHeight,
-		countResult(minimalLastHeight) + padding.bottom());
+	const auto result = countResult(minimalLastHeight);
+	return result
+		? qMax(minimalHeight, result + padding.bottom())
+		: 0;
 }
 
 int EmojiListWidget::defaultMinimalHeight() const {
@@ -1052,7 +1078,7 @@ void EmojiListWidget::fillRecent() {
 	const auto test = session().isTestMode();
 	for (const auto &one : list) {
 		const auto document = std::get_if<RecentEmojiDocument>(&one.id.data);
-		if (document && document->test != test) {
+		if (document && ((document->test != test) || _onlyUnicodeEmoji)) {
 			continue;
 		}
 		_recent.push_back({
@@ -1097,7 +1123,7 @@ void EmojiListWidget::fillRecentFrom(const std::vector<DocumentId> &list) {
 }
 
 base::unique_qptr<Ui::PopupMenu> EmojiListWidget::fillContextMenu(
-		SendMenu::Type type) {
+		const SendMenu::Details &details) {
 	if (v::is_null(_selected)) {
 		return nullptr;
 	}
@@ -1127,9 +1153,7 @@ void EmojiListWidget::fillRecentMenu(
 		not_null<Ui::PopupMenu*> menu,
 		int section,
 		int index) {
-	if (section != int(Section::Recent)) {
-		return;
-	}
+	const auto recent = (section == int(Section::Recent));
 	const auto addAction = Ui::Menu::CreateAddActionCallback(menu);
 	const auto over = OverEmoji{ section, index };
 	const auto emoji = lookupOverEmoji(&over);
@@ -1150,17 +1174,20 @@ void EmojiListWidget::fillRecentMenu(
 				TextUtilities::SetClipboardText(data);
 			}, &st::menuIconCopy);
 		}
-		if (setId && _features.openStickerSets) {
+		if (recent && setId && _features.openStickerSets) {
 			addAction(
 				tr::lng_emoji_view_pack(tr::now),
 				crl::guard(this, [=] { displaySet(setId); }),
 				&st::menuIconShowAll);
 		}
-	} else if (emoji) {
+	} else if (recent && emoji) {
 		addAction(tr::lng_emoji_copy(tr::now), [=] {
 			const auto text = emoji->text();
 			TextUtilities::SetClipboardText({ text, { text } });
 		}, &st::menuIconCopy);
+	}
+	if (!recent) {
+		return;
 	}
 	auto id = RecentEmojiId{ emoji };
 	if (custom) {
@@ -1187,7 +1214,7 @@ void EmojiListWidget::fillRecentMenu(
 			.confirmed = crl::guard(this, sure),
 			.confirmText = tr::lng_emoji_reset_recent_button(tr::now),
 			.labelStyle = &st().boxLabel,
-			}));
+		}));
 	};
 	addAction({
 		.text = tr::lng_emoji_reset_recent(tr::now),
@@ -1276,6 +1303,8 @@ void EmojiListWidget::paint(
 		ExpandingContext context,
 		QRect clip) {
 	validateEmojiPaintContext(context);
+
+	_paintAsPremium = session().premium();
 
 	auto fromColumn = floorclamp(
 		clip.x() - _rowsLeft,
@@ -1441,16 +1470,44 @@ void EmojiListWidget::drawRecent(
 		QPoint position,
 		const RecentOne &recent) {
 	_recentPainted = true;
+	const auto locked = (_mode == Mode::MessageEffects)
+		&& !_paintAsPremium
+		&& v::is<RecentEmojiDocument>(recent.id.data)
+		&& !_freeEffects.contains(
+			v::get<RecentEmojiDocument>(recent.id.data).id);
+	auto lockedPainted = false;
+	if (locked) {
+		if (_premiumMarkFrameCache.isNull()) {
+			const auto ratio = style::DevicePixelRatio();
+			_premiumMarkFrameCache = QImage(
+				QSize(_customSingleSize, _customSingleSize) * ratio,
+				QImage::Format_ARGB32_Premultiplied);
+			_premiumMarkFrameCache.setDevicePixelRatio(ratio);
+		}
+		_premiumMarkFrameCache.fill(Qt::transparent);
+	}
 	if (const auto custom = recent.custom) {
-		_emojiPaintContext->scale = context.progress;
-		_emojiPaintContext->position = position
+		const auto exactPosition = position
 			+ _innerPosition
 			+ _customPosition;
+		_emojiPaintContext->scale = context.progress;
 		if (_mode == Mode::ChannelStatus) {
 			_emojiPaintContext->internal.forceFirstFrame
 				= (recent.id == _recent.front().id);
 		}
-		custom->paint(p, *_emojiPaintContext);
+		if (locked) {
+			lockedPainted = custom->ready();
+
+			auto q = Painter(&_premiumMarkFrameCache);
+			_emojiPaintContext->position = QPoint();
+			custom->paint(q, *_emojiPaintContext);
+			q.end();
+
+			p.drawImage(exactPosition, _premiumMarkFrameCache);
+		} else {
+			_emojiPaintContext->position = exactPosition;
+			custom->paint(p, *_emojiPaintContext);
+		}
 	} else if (const auto emoji = std::get_if<EmojiPtr>(&recent.id.data)) {
 		if (_mode == Mode::EmojiStatus) {
 			position += QPoint(
@@ -1463,6 +1520,16 @@ void EmojiListWidget::drawRecent(
 		}
 	} else {
 		Unexpected("Empty custom emoji in EmojiListWidget::drawRecent.");
+	}
+
+	if (locked) {
+		_premiumMark->paint(
+			p,
+			lockedPainted ? _premiumMarkFrameCache : QImage(),
+			recent.premiumLock,
+			position,
+			_singleSize,
+			width());
 	}
 }
 
@@ -2123,13 +2190,15 @@ void EmojiListWidget::refreshRecent() {
 }
 
 void EmojiListWidget::refreshCustom() {
-	if (_mode == Mode::RecentReactions) {
+	if (_mode == Mode::RecentReactions || _mode == Mode::MessageEffects) {
 		return;
 	}
 	auto old = base::take(_custom);
 	const auto session = &this->session();
 	const auto premiumPossible = session->premiumPossible();
-	const auto premiumMayBeBought = premiumPossible
+	const auto onlyUnicodeEmoji = _onlyUnicodeEmoji || !premiumPossible;
+	const auto premiumMayBeBought = (!onlyUnicodeEmoji)
+		&& premiumPossible
 		&& !session->premium()
 		&& !_allowWithoutPremium;
 	const auto owner = &session->data();
@@ -2189,7 +2258,7 @@ void EmojiListWidget::refreshCustom() {
 				}
 				return true;
 			}();
-			if (premium && !premiumPossible) {
+			if (premium && onlyUnicodeEmoji) {
 				return;
 			} else if (valid) {
 				i->thumbnailDocument = it->second->lookupThumbnailDocument();
@@ -2223,7 +2292,7 @@ void EmojiListWidget::refreshCustom() {
 				}
 			}
 		}
-		if (premium && !premiumPossible) {
+		if (premium && onlyUnicodeEmoji) {
 			return;
 		}
 		_custom.push_back({

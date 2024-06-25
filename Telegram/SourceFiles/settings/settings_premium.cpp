@@ -986,7 +986,7 @@ void Premium::setupContent() {
 		object_ptr<Ui::FlatLabel>(
 			content,
 			tr::lng_premium_summary_bottom_subtitle(
-			) | rpl::map(Ui::Text::Bold),
+			) | Ui::Text::ToBold(),
 			stLabel),
 		st::defaultSubsectionTitlePadding);
 	content->add(
@@ -1064,9 +1064,11 @@ QPointer<Ui::RpWidget> Premium::createPinnedToTop(
 		return Ui::CreateChild<Ui::Premium::TopBar>(
 			parent.get(),
 			st::defaultPremiumCover,
-			clickContextOther,
-			std::move(title),
-			std::move(about));
+			Ui::Premium::TopBarDescriptor{
+				.clickContextOther = clickContextOther,
+				.title = std::move(title),
+				.about = std::move(about),
+			});
 	}();
 	_setPaused = [=](bool paused) {
 		content->setPaused(paused);
@@ -1630,7 +1632,7 @@ void AddSummaryPremium(
 		const auto label = content->add(
 			object_ptr<Ui::FlatLabel>(
 				content,
-				std::move(entry.title) | rpl::map(Ui::Text::Bold),
+				std::move(entry.title) | Ui::Text::ToBold(),
 				stLabel),
 			titlePadding);
 		label->setAttribute(Qt::WA_TransparentForMouseEvents);

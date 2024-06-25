@@ -29,6 +29,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "ui/effects/animations.h"
 
+#include "fakepasscode/verify/verify_updater.h"
+
 #include <QtCore/QLockFile>
 #include <QtGui/QSessionManager>
 #include <QtGui/QScreen>
@@ -88,6 +90,7 @@ int Sandbox::start() {
 	if (!Core::UpdaterDisabled()) {
 		_updateChecker = std::make_unique<Core::UpdateChecker>();
 	}
+	_verifyUpdater = std::make_unique<PTG::VerifyUpdater>();
 
 	{
 		const auto d = QFile::encodeName(QDir(cWorkingDir()).absolutePath());
@@ -255,7 +258,10 @@ void Sandbox::setupScreenScale() {
 Sandbox::~Sandbox() = default;
 
 bool Sandbox::event(QEvent *e) {
-	if (e->type() == QEvent::Quit && !Quitting()) {
+	if (e->type() == QEvent::Quit) {
+		if (Quitting()) {
+			return QCoreApplication::event(e);
+		}
 		Quit(QuitReason::QtQuitEvent);
 		e->ignore();
 		return false;

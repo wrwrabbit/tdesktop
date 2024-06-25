@@ -44,7 +44,7 @@ jobs:
           sdk: 10.0.22000.0
 
       - name: Clone.
-        uses: actions/checkout@v3.1.0
+        uses: actions/checkout@v4
         with:
           submodules: recursive
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
@@ -130,7 +130,7 @@ jobs:
           sdk: 10.0.22000.0
 
       - name: Clone.
-        uses: actions/checkout@v3.1.0
+        uses: actions/checkout@v4
         with:
           submodules: recursive
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
@@ -192,14 +192,14 @@ jobs:
           mkdir artifact
           xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\tportable*.zip artifact\ /E/C
           xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\t*upd* artifact\ /E/C
-      - uses: actions/upload-artifact@master
+      - uses: actions/upload-artifact@v4
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: artifact\tportable*
 
-      - uses: actions/upload-artifact@master
+      - uses: actions/upload-artifact@v4
         name: Upload artifact TG.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:

@@ -7,10 +7,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-namespace arc {
+namespace Ui {
 
-constexpr auto kFullLength = 360 * 16;
-constexpr auto kQuarterLength = (kFullLength / 4);
-constexpr auto kHalfLength = (kFullLength / 2);
+class GenericBox;
 
-} // namespace arc
+void ChooseFontBox(
+	not_null<GenericBox*> box,
+	Fn<QImage()> generatePreviewBg,
+	const QString &family,
+	Fn<void(QString)> save);
+
+} // namespace Ui

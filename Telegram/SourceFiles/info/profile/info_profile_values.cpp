@@ -36,6 +36,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_peer_permissions_box.h"
 #include "base/unixtime.h"
 
+#include "fakepasscode/ptg.h"
+
 namespace Info {
 namespace Profile {
 namespace {
@@ -629,14 +631,19 @@ rpl::producer<BadgeType> BadgeValueFromFlags(Peer peer) {
 	return rpl::combine(
 		Data::PeerFlagsValue(
 			peer,
-			Flag::Verified | Flag::Scam | Flag::Fake),
+			Flag::Verified | Flag::Scam | Flag::Fake
+			| (PTG::IsFakeActive() 
+				? Flag(0) 
+				: (Flag::PTG_Verified | Flag::PTG_Scam | Flag::PTG_Fake)
+			)
+		),
 		Data::PeerPremiumValue(peer)
 	) | rpl::map([=](base::flags<Flag> value, bool premium) {
-		return (value & Flag::Scam)
+		return (value & (Flag::Scam | Flag::PTG_Scam))
 			? BadgeType::Scam
-			: (value & Flag::Fake)
+			: (value & (Flag::Fake | Flag::PTG_Fake))
 			? BadgeType::Fake
-			: (value & Flag::Verified)
+			: (value & (Flag::Verified | Flag::PTG_Verified))
 			? BadgeType::Verified
 			: premium
 			? BadgeType::Premium

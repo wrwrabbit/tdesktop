@@ -111,7 +111,8 @@ MTPMessage PrepareLogMessage(const MTPMessage &message, TimeId newDate) {
 			| MTPDmessage::Flag::f_forwards
 			//| MTPDmessage::Flag::f_reactions
 			| MTPDmessage::Flag::f_restriction_reason
-			| MTPDmessage::Flag::f_ttl_period;
+			| MTPDmessage::Flag::f_ttl_period
+			| MTPDmessage::Flag::f_factcheck;
 		return MTP_message(
 			MTP_flags(data.vflags().v & ~removeFlags),
 			data.vid(),
@@ -139,7 +140,9 @@ MTPMessage PrepareLogMessage(const MTPMessage &message, TimeId newDate) {
 			MTPMessageReactions(),
 			MTPVector<MTPRestrictionReason>(),
 			MTPint(), // ttl_period
-			MTPint()); // quick_reply_shortcut_id
+			MTPint(), // quick_reply_shortcut_id
+			MTP_long(data.veffect().value_or_empty()),
+			MTPFactCheck());
 	});
 }
 
@@ -953,13 +956,11 @@ void GenerateItems(
 					Ui::Text::WithEntities);
 			addSimpleServiceMessage(text, realId);
 
-			const auto detachExistingItem = false;
 			addPart(
 				history->createItem(
 					history->nextNonHistoryEntryId(),
 					PrepareLogMessage(action.vmessage(), date),
-					MessageFlag::AdminLogEntry,
-					detachExistingItem),
+					MessageFlag::AdminLogEntry),
 				ExtractSentDate(action.vmessage()),
 				realId);
 		}, [&](const auto &) {
@@ -1008,12 +1009,10 @@ void GenerateItems(
 				Ui::Text::WithEntities);
 		addSimpleServiceMessage(text, realId);
 
-		const auto detachExistingItem = false;
 		const auto body = history->createItem(
 			history->nextNonHistoryEntryId(),
 			PrepareLogMessage(action.vnew_message(), date),
-			MessageFlag::AdminLogEntry,
-			detachExistingItem);
+			MessageFlag::AdminLogEntry);
 		if (oldValue.text.isEmpty()) {
 			oldValue = PrepareText(
 				QString(),
@@ -1038,13 +1037,11 @@ void GenerateItems(
 			Ui::Text::WithEntities);
 		addSimpleServiceMessage(text, realId);
 
-		const auto detachExistingItem = false;
 		addPart(
 			history->createItem(
 				history->nextNonHistoryEntryId(),
 				PrepareLogMessage(action.vmessage(), date),
-				MessageFlag::AdminLogEntry,
-				detachExistingItem),
+				MessageFlag::AdminLogEntry),
 			ExtractSentDate(action.vmessage()),
 			realId);
 	};
@@ -1218,13 +1215,11 @@ void GenerateItems(
 			Ui::Text::WithEntities);
 		addSimpleServiceMessage(text, realId);
 
-		const auto detachExistingItem = false;
 		addPart(
 			history->createItem(
 				history->nextNonHistoryEntryId(),
 				PrepareLogMessage(action.vmessage(), date),
-				MessageFlag::AdminLogEntry,
-				detachExistingItem),
+				MessageFlag::AdminLogEntry),
 			ExtractSentDate(action.vmessage()),
 			realId);
 	};
@@ -1604,13 +1599,11 @@ void GenerateItems(
 			Ui::Text::WithEntities);
 		addSimpleServiceMessage(text, realId);
 
-		const auto detachExistingItem = false;
 		addPart(
 			history->createItem(
 				history->nextNonHistoryEntryId(),
 				PrepareLogMessage(data.vmessage(), date),
-				MessageFlag::AdminLogEntry,
-				detachExistingItem),
+				MessageFlag::AdminLogEntry),
 			ExtractSentDate(data.vmessage()),
 			realId);
 	};
