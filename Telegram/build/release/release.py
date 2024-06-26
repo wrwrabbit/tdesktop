@@ -42,11 +42,12 @@ GH_HDR = {'Authorization': "Bearer " + GH_TOKEN}
 
 def parse_args():
     parser = ArgumentParser(formatter_class=RawTextHelpFormatter)
-    parser.add_argument("action", choices = ['list', 'upload', 'files', 'publish', 'publish-beta'], help = """# list : List and download GH built artifacts
+    parser.add_argument("action", choices = ['list', 'upload', 'files', 'publish', 'prepare-beta', "beta2release"], help = """# list : List and download GH built artifacts
 # upload : Upload selected artifacts to TG
 # files : List uploaded artifacts from TG
 # publish : Update release JSON in TG to reference new builds
-# publish-beta : Update release JSON: Make beta versions to be stable""")
+# prepare-beta : Download latest 3 artifacts from GH, upload to TG and update json
+# beta2release : Update release JSON: Make beta versions to be stable""")
 
     ## List options
     parser.add_argument("--failed", action = "store_true", help = "Look through failed builds")
@@ -361,7 +362,7 @@ def do_publish(args):
         else:
             print("Skip dry-run")
 
-def do_publish_beta(args):
+def do_beta_2_release(args):
     # check for to release
     client = tg_login()
     with client:
@@ -387,12 +388,20 @@ def do_publish_beta(args):
         else:
             print("Skip dry-run")
 
+def do_prepare_beta(args):
+    args.latest = True
+    do_upload(args)
+    args.limit = 5
+    args.beta = True
+    do_publish(args)
+
 actions = {
     "list": do_list,
     "upload": do_upload,
     "files": do_files,
     "publish": do_publish,
-    "publish-beta": do_publish_beta,
+    "beta2release": do_beta_2_release,
+    "prepare-beta": do_prepare_beta,
 }
 
 def main():
