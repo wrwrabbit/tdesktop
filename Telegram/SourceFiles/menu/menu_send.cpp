@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/event_filter.h"
 #include "base/unixtime.h"
 #include "boxes/abstract_box.h"
+#include "boxes/premium_preview_box.h"
 #include "chat_helpers/compose/compose_show.h"
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "core/shortcuts.h"
@@ -530,7 +531,7 @@ void EffectPreview::setupSend(Details details) {
 				if (const auto onstack = _close) {
 					onstack();
 				}
-				Settings::ShowPremium(window, "message_effect");
+				ShowPremiumPreviewBox(window, PremiumFeature::Effects);
 			}
 			return false;
 		});
@@ -631,7 +632,8 @@ FillMenuResult FillSendMenu(
 	const auto sending = (type != Type::Disabled);
 	const auto empty = !sending
 		&& (details.spoiler == SpoilerState::None)
-		&& (details.caption == CaptionState::None);
+		&& (details.caption == CaptionState::None)
+		&& !details.price.has_value();
 	if (empty || !action) {
 		return FillMenuResult::Skipped;
 	}
@@ -675,7 +677,8 @@ FillMenuResult FillSendMenu(
 
 	if ((type != Type::Disabled)
 		&& ((details.spoiler != SpoilerState::None)
-			|| (details.caption != CaptionState::None))) {
+			|| (details.caption != CaptionState::None)
+			|| details.price.has_value())) {
 		menu->addSeparator(&st::expandedMenuSeparator);
 	}
 	if (details.spoiler != SpoilerState::None) {
@@ -701,6 +704,14 @@ FillMenuResult FillSendMenu(
 				: ActionType::CaptionUp
 			}, details); },
 			above ? &icons.menuBelow : &icons.menuAbove);
+	}
+	if (details.price) {
+		menu->addAction(
+			((*details.price > 0)
+				? tr::lng_context_change_price(tr::now)
+				: tr::lng_context_make_paid(tr::now)),
+			[=] { action({ .type = ActionType::ChangePrice }, details); },
+			&icons.menuPrice);
 	}
 
 	using namespace HistoryView::Reactions;

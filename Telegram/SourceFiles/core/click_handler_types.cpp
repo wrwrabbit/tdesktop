@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "window/window_session_controller_link_info.h"
+#include "styles/style_calls.h" // groupCallBoxLabel
 #include "styles/style_layers.h"
 
 #include <QUrlQuery>
@@ -244,7 +245,10 @@ void HiddenUrlClickHandler::Open(QString url, QVariant context, bool IsSpoof, QS
 	} else {
 		const auto parsedUrl = QUrl::fromUserInput(url);
 		if (UrlRequiresConfirmation(parsedUrl) && !base::IsCtrlPressed()) {
-			Core::App().hideMediaView();
+			const auto my = context.value<ClickHandlerContext>();
+			if (!my.show) {
+				Core::App().hideMediaView();
+			}
 			const auto displayed = parsedUrl.isValid()
 				? parsedUrl.toDisplayString()
 				: url;
@@ -253,7 +257,6 @@ void HiddenUrlClickHandler::Open(QString url, QVariant context, bool IsSpoof, QS
 				: parsedUrl.isValid()
 				? QString::fromUtf8(parsedUrl.toEncoded())
 				: ShowEncoded(displayed);
-			const auto my = context.value<ClickHandlerContext>();
 			const auto controller = my.sessionWindow.get();
 			const auto use = controller
 				? &controller->window()
@@ -263,8 +266,11 @@ void HiddenUrlClickHandler::Open(QString url, QVariant context, bool IsSpoof, QS
 					.text = (tr::lng_open_this_link(tr::now)),
 					.confirmed = [=](Fn<void()> hide) { hide(); open(); },
 					.confirmText = tr::lng_open_link(),
+					.labelStyle = my.dark ? &st::groupCallBoxLabel : nullptr,
 				});
-				const auto &st = st::boxLabel;
+				const auto &st = my.dark
+					? st::groupCallBoxLabel
+					: st::boxLabel;
 				box->addSkip(st.style.lineHeight - st::boxPadding.bottom());
 				const auto url = box->addRow(
 					object_ptr<Ui::FlatLabel>(box, displayUrl, st));
@@ -313,6 +319,7 @@ void BotGameUrlClickHandler::onClick(ClickContext context) const {
 					_bot->name()),
 				.confirmed = callback,
 				.confirmText = tr::lng_allow_bot(),
+				.labelStyle = my.dark ? &st::groupCallBoxLabel : nullptr,
 			}));
 		}
 	}
