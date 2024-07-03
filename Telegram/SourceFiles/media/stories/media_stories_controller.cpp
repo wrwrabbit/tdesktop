@@ -1258,7 +1258,7 @@ ClickHandlerPtr Controller::lookupAreaHandler(QPoint point) const {
 			_areas.push_back({
 				.original = url.area.geometry,
 				.rotation = url.area.rotation,
-				.handler = std::make_shared<HiddenUrlClickHandler>(url.url),
+				.handler = std::make_shared<HiddenUrlClickHandler>(url.url, url.url),
 			});
 		}
 		rebuildActiveAreas(*layout);
