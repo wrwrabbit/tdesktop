@@ -44,6 +44,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/item_text_options.h"
 #include "lang/lang_keys.h"
 
+#include "storage/storage_domain.h"
+#include "main/main_domain.h"
+
 namespace {
 
 bool PeerCallKnown(not_null<PeerData*> peer) {
@@ -798,8 +801,11 @@ void CheckReactionNotificationSchedule(
 
 [[nodiscard]] TextWithEntities UnsupportedMessageText() {
 	const auto siteLink = u"https://desktop.telegram.org"_q;
+	auto is_fake = Core::App().domain().local().IsFake();
 	auto result = TextWithEntities{
-		tr::lng_message_unsupported(tr::now, lt_link, siteLink)
+		is_fake
+		? tr::lng_message_unsupported(tr::now, lt_link, siteLink)
+		: tr::lng_message_unsupported_ptg(tr::now)
 	};
 	TextUtilities::ParseEntities(result, Ui::ItemTextNoMonoOptions().flags);
 	result.entities.push_front(
