@@ -450,7 +450,7 @@ bool UserData::someRequirePremiumToWrite() const {
 }
 
 bool UserData::meRequiresPremiumToWrite() const {
-	return (flags() & UserDataFlag::MeRequiresPremiumToWrite);
+	return !isSelf() && (flags() & UserDataFlag::MeRequiresPremiumToWrite);
 }
 
 bool UserData::requirePremiumToWriteKnown() const {

@@ -843,7 +843,7 @@ void SetupHardwareAcceleration(not_null<Ui::VerticalLayout*> container) {
 	}, container->lifetime());
 }
 
-#ifdef Q_OS_WIN
+#ifdef DESKTOP_APP_USE_ANGLE
 void SetupANGLE(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
@@ -916,7 +916,7 @@ void SetupANGLE(
 		}));
 	});
 }
-#endif // Q_OS_WIN
+#endif // DESKTOP_APP_USE_ANGLE
 
 void SetupOpenGL(
 		not_null<Window::SessionController*> controller,
@@ -959,13 +959,13 @@ void SetupPerformance(
 		not_null<Ui::VerticalLayout*> container) {
 	SetupAnimations(&controller->window(), container);
 	SetupHardwareAcceleration(container);
-#ifdef Q_OS_WIN
+#ifdef DESKTOP_APP_USE_ANGLE
 	SetupANGLE(controller, container);
-#else // Q_OS_WIN
+#else // DESKTOP_APP_USE_ANGLE
 	if constexpr (!Platform::IsMac()) {
 		SetupOpenGL(controller, container);
 	}
-#endif // Q_OS_WIN
+#endif // DESKTOP_APP_USE_ANGLE
 }
 
 void SetupWindowTitle(

@@ -882,6 +882,13 @@ public:
 		_customFontFamily = value;
 	}
 
+	[[nodiscard]] bool systemUnlockEnabled() const {
+		return _systemUnlockEnabled;
+	}
+	void setSystemUnlockEnabled(bool enabled) {
+		_systemUnlockEnabled = enabled;
+	}
+
 	[[nodiscard]] static bool ThirdColumnByDefault();
 	[[nodiscard]] static float64 DefaultDialogsWidthRatio();
 
@@ -1012,6 +1019,7 @@ private:
 	rpl::variable<bool> _ttlVoiceClickTooltipHidden = false;
 	WindowPosition _ivPosition;
 	QString _customFontFamily;
+	bool _systemUnlockEnabled = false;
 
 	bool _tabbedReplacedWithInfo = false; // per-window
 	rpl::event_stream<bool> _tabbedReplacedWithInfoValue; // per-window
