@@ -5,6 +5,7 @@ on:
     branches-ignore:
       - 'compare/**'
     paths:
+      - '.github/workflows/deploy_test_patches.yml'
       - 'Telegram/build/release_patch.py'
       - 'Telegram/build/patches/**'
       - 'cmake'
