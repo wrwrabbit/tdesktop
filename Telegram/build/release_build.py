@@ -81,7 +81,7 @@ def main():
             pass
 
     # Apply patches
-    errors += release_patch.main()
+    errors = release_patch.main()
     if errors:
         print("Patches completed with errors")
         sys.exit(errors)
