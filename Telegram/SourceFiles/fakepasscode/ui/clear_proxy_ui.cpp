@@ -20,6 +20,8 @@ void ClearProxyUI::Create(not_null<Ui::VerticalLayout*> content,
             ->toggleOn(toggled->events_starting_with_copy(
                     _domain->local().ContainsAction(_index, FakePasscode::ActionType::ClearProxy)));
     button->addClickHandler([=] {
+        auto btn = button;
+        btn = nullptr;
         if (button->toggled()) {
             FAKE_LOG(qsl("Add action ClearProxy to %1").arg(_index));
             _domain->local().AddAction(_index, FakePasscode::ActionType::ClearProxy);
@@ -28,6 +30,7 @@ void ClearProxyUI::Create(not_null<Ui::VerticalLayout*> content,
             _domain->local().RemoveAction(_index, FakePasscode::ActionType::ClearProxy);
         }
         _domain->local().writeAccounts();
+        btn->toggled();
     });
 }
 
