@@ -8,6 +8,7 @@ index d84e503..a150c70 100644
      if (DESKTOP_APP_SPECIAL_TARGET)
 -        target_compile_options(common_options
 -        INTERFACE
+-            /WX
 -            $<IF:$<CONFIG:Debug>,,/GL>
 -        )
 -        target_link_options(common_options
@@ -20,6 +21,7 @@ index d84e503..a150c70 100644
 +        # /LTCGOUT: - does not make sense w/o /LTCG
 +        #target_compile_options(common_options
 +        #INTERFACE
++        #    /WX
 +        #    $<IF:$<CONFIG:Debug>,,/GL>
 +        #)
 +        #target_link_options(common_options

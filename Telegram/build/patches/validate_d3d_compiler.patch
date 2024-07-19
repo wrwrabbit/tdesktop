@@ -6,8 +6,8 @@ index 40edce9..160cc2b 100644
  
  info = GetFileVersionInfo(inputPath, '\\')
  version = [ info['FileVersionMS'] // 65536, info['FileVersionMS'] % 65536, info['FileVersionLS'] // 65536, info['FileVersionLS'] % 65536 ]
--if (version != [10, 0, 22000, 832]):
-+if (version < [10, 0, 22000, 832]):
+-if (version != [10, 0, 22621, 3233]):
++if (version < [10, 0, 22621, 3233]):
      error('Bad "d3dcompiler_47.dll" version: ' + '.'.join(str(x) for x in version))
  
  bufferSize = 1024 * 1024

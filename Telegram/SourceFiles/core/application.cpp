@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 
 #include "data/data_abstract_structure.h"
+#include "data/data_forum.h"
 #include "data/data_photo.h"
 #include "data/data_document.h"
 #include "data/data_session.h"
@@ -18,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/battery_saving.h"
 #include "base/event_filter.h"
 #include "base/concurrent_timer.h"
+#include "base/options.h"
 #include "base/qt_signal_producer.h"
 #include "base/timer.h"
 #include "base/unixtime.h"
@@ -91,6 +93,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "payments/payments_checkout_process.h"
 #include "export/export_manager.h"
 #include "webrtc/webrtc_environment.h"
+#include "window/window_separate_id.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
 #include "boxes/abstract_box.h"
@@ -125,7 +128,7 @@ constexpr auto kFileOpenTimeoutMs = crl::time(1000);
 LaunchState GlobalLaunchState/* = LaunchState::Running*/;
 
 void SetCrashAnnotationsGL() {
-#ifdef Q_OS_WIN
+#ifdef DESKTOP_APP_USE_ANGLE
 	CrashReports::SetAnnotation("OpenGL ANGLE", [] {
 		if (Core::App().settings().disableOpenGL()) {
 			return "Disabled";
@@ -138,16 +141,24 @@ void SetCrashAnnotationsGL() {
 		}
 		Unexpected("Ui::GL::CurrentANGLE value in SetupANGLE.");
 	}());
-#else // Q_OS_WIN
+#else // DESKTOP_APP_USE_ANGLE
 	CrashReports::SetAnnotation(
 		"OpenGL",
 		Core::App().settings().disableOpenGL() ? "Disabled" : "Enabled");
-#endif // Q_OS_WIN
+#endif // DESKTOP_APP_USE_ANGLE
 }
+
+base::options::toggle OptionSkipUrlSchemeRegister({
+	.id = kOptionSkipUrlSchemeRegister,
+	.name = "Skip URL scheme register",
+	.description = "Don't re-register tg:// URL scheme on autoupdate.",
+});
 
 } // namespace
 
 Application *Application::Instance = nullptr;
+
+const char kOptionSkipUrlSchemeRegister[] = "skip-url-scheme-register";
 
 struct Application::Private {
 	base::Timer quitTimer;
@@ -220,8 +231,7 @@ Application::~Application() {
 	setLastActiveWindow(nullptr);
 	_windowInSettings = _lastActivePrimaryWindow = nullptr;
 	_closingAsyncWindows.clear();
-	_secondaryWindows.clear();
-	_primaryWindows.clear();
+	_windows.clear();
 	_mediaView = nullptr;
 	_notifications->clearAllFast();
 
@@ -271,9 +281,14 @@ void Application::run() {
 
 	refreshGlobalProxy(); // Depends on app settings being read.
 
-	if (const auto old = Local::oldSettingsVersion(); old < AppVersion) {
-		InvokeQueued(this, [] { RegisterUrlScheme(); });
-		Platform::NewVersionLaunched(old);
+	if (const auto old = Local::oldSettingsVersion()) {
+		if (old < AppVersion) {
+			autoRegisterUrlScheme();
+			Platform::NewVersionLaunched(old);
+		}
+	} else {
+		// Initial launch.
+		autoRegisterUrlScheme();
 	}
 
 	if (cAutoStart() && !Platform::AutostartSupported()) {
@@ -326,8 +341,8 @@ void Application::run() {
 	// Create mime database, so it won't be slow later.
 	QMimeDatabase().mimeTypeForName(u"text/plain"_q);
 
-	_primaryWindows.emplace(nullptr, std::make_unique<Window::Controller>());
-	setLastActiveWindow(_primaryWindows.front().second.get());
+	_windows.emplace(nullptr, std::make_unique<Window::Controller>());
+	setLastActiveWindow(_windows.front().second.get());
 	_windowInSettings = _lastActivePrimaryWindow = _lastActiveWindow;
 
 	_domain->activeChanges(
@@ -417,8 +432,14 @@ void Application::run() {
 	processCreatedWindow(_lastActivePrimaryWindow);
 }
 
+void Application::autoRegisterUrlScheme() {
+	if (!OptionSkipUrlSchemeRegister.value()) {
+		InvokeQueued(this, [] { RegisterUrlScheme(); });
+	}
+}
+
 void Application::showAccount(not_null<Main::Account*> account) {
-	if (const auto separate = separateWindowForAccount(account)) {
+	if (const auto separate = separateWindowFor(account)) {
 		_lastActivePrimaryWindow = separate;
 		separate->activate();
 	} else if (const auto last = activePrimaryWindow()) {
@@ -426,13 +447,13 @@ void Application::showAccount(not_null<Main::Account*> account) {
 	}
 }
 
-void Application::checkWindowAccount(not_null<Window::Controller*> window) {
-	const auto account = window->maybeAccount();
-	for (auto &[key, existing] : _primaryWindows) {
-		if (existing.get() == window && key != account) {
+void Application::checkWindowId(not_null<Window::Controller*> window) {
+	const auto id = window->id();
+	for (auto &[existingId, existing] : _windows) {
+		if (existing.get() == window && existingId != id) {
 			auto found = std::move(existing);
-			_primaryWindows.remove(key);
-			_primaryWindows.emplace(account, std::move(found));
+			_windows.remove(existingId);
+			_windows.emplace(id, std::move(found));
 			break;
 		}
 	}
@@ -508,10 +529,7 @@ void Application::startSystemDarkModeViewer() {
 
 void Application::enumerateWindows(Fn<void(
 		not_null<Window::Controller*>)> callback) const {
-	for (const auto &window : ranges::views::values(_primaryWindows)) {
-		callback(window.get());
-	}
-	for (const auto &window : ranges::views::values(_secondaryWindows)) {
+	for (const auto &window : ranges::views::values(_windows)) {
 		callback(window.get());
 	}
 }
@@ -620,10 +638,7 @@ void Application::clearEmojiSourceImages() {
 }
 
 bool Application::isActiveForTrayMenu() const {
-	return ranges::any_of(ranges::views::values(_primaryWindows), [=](
-			const std::unique_ptr<Window::Controller> &controller) {
-		return controller->widget()->isActiveForTrayMenu();
-	}) || ranges::any_of(ranges::views::values(_secondaryWindows), [=](
+	return ranges::any_of(ranges::views::values(_windows), [=](
 			const std::unique_ptr<Window::Controller> &controller) {
 		return controller->widget()->isActiveForTrayMenu();
 	});
@@ -1348,44 +1363,36 @@ Window::Controller *Application::activePrimaryWindow() const {
 	return _lastActivePrimaryWindow;
 }
 
-Window::Controller *Application::separateWindowForAccount(
-	not_null<Main::Account*> account) const {
-	for (const auto &[openedAccount, window] : _primaryWindows) {
-		if (openedAccount == account.get()) {
+Window::Controller *Application::separateWindowFor(
+		Window::SeparateId id) const {
+	for (const auto &[existingId, window] : _windows) {
+		if (existingId == id) {
 			return window.get();
 		}
 	}
 	return nullptr;
 }
 
-Window::Controller *Application::separateWindowForPeer(
-		not_null<PeerData*> peer) const {
-	for (const auto &[history, window] : _secondaryWindows) {
-		if (history->peer == peer) {
-			return window.get();
-		}
-	}
-	return nullptr;
-}
-
-Window::Controller *Application::ensureSeparateWindowForPeer(
-		not_null<PeerData*> peer,
+Window::Controller *Application::ensureSeparateWindowFor(
+		Window::SeparateId id,
 		MsgId showAtMsgId) {
 	const auto activate = [&](not_null<Window::Controller*> window) {
 		window->activate();
 		return window;
 	};
-
-	if (const auto existing = separateWindowForPeer(peer)) {
-		existing->sessionController()->showPeerHistory(
-			peer,
-			Window::SectionShow::Way::ClearStack,
-			showAtMsgId);
+	if (const auto existing = separateWindowFor(id)) {
+		if (id.thread && id.type == Window::SeparateType::Chat) {
+			existing->sessionController()->showThread(
+				id.thread,
+				showAtMsgId,
+				Window::SectionShow::Way::ClearStack);
+		}
 		return activate(existing);
 	}
-	const auto result = _secondaryWindows.emplace(
-		peer->owner().history(peer),
-		std::make_unique<Window::Controller>(peer, showAtMsgId)
+
+	const auto result = _windows.emplace(
+		id,
+		std::make_unique<Window::Controller>(id, showAtMsgId)
 	).first->second.get();
 	processCreatedWindow(result);
 	result->firstShow();
@@ -1393,39 +1400,52 @@ Window::Controller *Application::ensureSeparateWindowForPeer(
 	return activate(result);
 }
 
-Window::Controller *Application::ensureSeparateWindowForAccount(
-		not_null<Main::Account*> account) {
-	const auto activate = [&](not_null<Window::Controller*> window) {
-		window->activate();
-		return window;
-	};
-
-	if (const auto existing = separateWindowForAccount(account)) {
-		return activate(existing);
-	}
-	const auto result = _primaryWindows.emplace(
-		account,
-		std::make_unique<Window::Controller>(account)
-	).first->second.get();
-	processCreatedWindow(result);
-	result->firstShow();
-	result->finishFirstShow();
-	return activate(result);
-}
-
-Window::Controller *Application::windowFor(not_null<PeerData*> peer) const {
-	if (const auto separate = separateWindowForPeer(peer)) {
+Window::Controller *Application::windowFor(Window::SeparateId id) const {
+	if (const auto separate = separateWindowFor(id)) {
 		return separate;
-	}
-	return windowFor(&peer->account());
-}
-
-Window::Controller *Application::windowFor(
-		not_null<Main::Account*> account) const {
-	if (const auto separate = separateWindowForAccount(account)) {
-		return separate;
+	} else if (id && id.primary()) {
+		return windowFor(not_null(id.account));
 	}
 	return activePrimaryWindow();
+}
+
+Window::Controller *Application::windowForShowingHistory(
+		not_null<PeerData*> peer) const {
+	if (const auto separate = separateWindowFor(peer)) {
+		return separate;
+	}
+	auto result = (Window::Controller*)nullptr;
+	enumerateWindows([&](not_null<Window::Controller*> window) {
+		if (const auto controller = window->sessionController()) {
+			const auto current = controller->activeChatCurrent();
+			if (const auto history = current.history()) {
+				if (history->peer == peer) {
+					result = window;
+				}
+			}
+		}
+	});
+	return result;
+}
+
+Window::Controller *Application::windowForShowingForum(
+		not_null<Data::Forum*> forum) const {
+	const auto id = Window::SeparateId(
+		Window::SeparateType::Forum,
+		forum->history());
+	if (const auto separate = separateWindowFor(id)) {
+		return separate;
+	}
+	auto result = (Window::Controller*)nullptr;
+	enumerateWindows([&](not_null<Window::Controller*> window) {
+		if (const auto controller = window->sessionController()) {
+			const auto current = controller->shownForum().current();
+			if (forum == current) {
+				result = window;
+			}
+		}
+	});
+	return result;
 }
 
 Window::Controller *Application::findWindow(
@@ -1434,14 +1454,9 @@ Window::Controller *Application::findWindow(
 	if (_lastActiveWindow && _lastActiveWindow->widget() == window) {
 		return _lastActiveWindow;
 	}
-	for (const auto &[account, primary] : _primaryWindows) {
-		if (primary->widget() == window) {
-			return primary.get();
-		}
-	}
-	for (const auto &[history, secondary] : _secondaryWindows) {
-		if (secondary->widget() == window) {
-			return secondary.get();
+	for (const auto &[id, controller] : _windows) {
+		if (controller->widget() == window) {
+			return controller.get();
 		}
 	}
 	return nullptr;
@@ -1453,10 +1468,11 @@ Window::Controller *Application::activeWindow() const {
 
 bool Application::closeNonLastAsync(not_null<Window::Controller*> window) {
 	const auto hasOther = [&] {
-		for (const auto &[account, primary] : _primaryWindows) {
-			if (!_closingAsyncWindows.contains(primary.get())
-				&& primary.get() != window
-				&& primary->maybeSession()) {
+		for (const auto &[id, controller] : _windows) {
+			if (id.primary()
+				&& !_closingAsyncWindows.contains(controller.get())
+				&& controller.get() != window
+				&& controller->maybeSession()) {
 				return true;
 			}
 		}
@@ -1518,10 +1534,10 @@ void Application::closeWindow(not_null<Window::Controller*> window) {
 		: nullptr;
 	const auto next = nextFromStack
 		? nextFromStack
-		: (_primaryWindows.front().second.get() != window)
-		? _primaryWindows.front().second.get()
-		: (_primaryWindows.back().second.get() != window)
-		? _primaryWindows.back().second.get()
+		: (_windows.front().second.get() != window)
+		? _windows.front().second.get()
+		: (_windows.back().second.get() != window)
+		? _windows.back().second.get()
 		: nullptr;
 	Assert(next != window);
 
@@ -1542,20 +1558,12 @@ void Application::closeWindow(not_null<Window::Controller*> window) {
 		}
 	}
 	_closingAsyncWindows.remove(window);
-	for (auto i = begin(_primaryWindows); i != end(_primaryWindows);) {
+	for (auto i = begin(_windows); i != end(_windows);) {
 		if (i->second.get() == window) {
 			Assert(_lastActiveWindow != window);
 			Assert(_lastActivePrimaryWindow != window);
 			Assert(_windowInSettings != window);
-			i = _primaryWindows.erase(i);
-		} else {
-			++i;
-		}
-	}
-	for (auto i = begin(_secondaryWindows); i != end(_secondaryWindows);) {
-		if (i->second.get() == window) {
-			Assert(_lastActiveWindow != window);
-			i = _secondaryWindows.erase(i);
+			i = _windows.erase(i);
 		} else {
 			++i;
 		}
@@ -1563,36 +1571,34 @@ void Application::closeWindow(not_null<Window::Controller*> window) {
 	const auto account = domain().started()
 		? &domain().active()
 		: nullptr;
-	if (account && !_primaryWindows.contains(account) && _lastActiveWindow) {
+	if (account
+		&& !_windows.contains(Window::SeparateId(account))
+		&& _lastActiveWindow) {
 		domain().activate(&_lastActiveWindow->account());
 	}
 }
 
 void Application::closeChatFromWindows(not_null<PeerData*> peer) {
-	if (const auto window = windowFor(peer)
-		; window && !window->isPrimary()) {
-		closeWindow(window);
-	}
-	for (const auto &[history, window] : _secondaryWindows) {
-		if (const auto session = window->sessionController()) {
-			if (session->activeChatCurrent().peer() == peer) {
-				session->showPeerHistory(
-					window->singlePeer()->id,
-					Window::SectionShow::Way::ClearStack);
-			}
-		}
-	}
-	if (const auto window = windowFor(&peer->account())) {
-		if (const auto primary = window->sessionController()) {
-			if (primary->activeChatCurrent().peer() == peer) {
-				primary->clearSectionStack();
-			}
-			if (const auto forum = primary->shownForum().current()) {
-				if (peer->forum() == forum) {
-					primary->closeForum();
+	const auto closeOne = [&] {
+		for (const auto &[id, window] : _windows) {
+			if (id.thread && id.thread->peer() == peer) {
+				closeWindow(window.get());
+				return true;
+			} else if (const auto controller = window->sessionController()) {
+				if (controller->activeChatCurrent().peer() == peer) {
+					controller->showByInitialId();
+				}
+				if (const auto forum = controller->shownForum().current()) {
+					if (peer->forum() == forum) {
+						controller->closeForum();
+					}
 				}
 			}
 		}
+		return false;
+	};
+
+	while (closeOne()) {
 	}
 }
 
@@ -1798,11 +1804,8 @@ void Application::quitPreventFinished() {
 }
 
 void Application::quitDelayed() {
-	for (const auto &[account, window] : _primaryWindows) {
-		window->widget()->hide();
-	}
-	for (const auto &[history, window] : _secondaryWindows) {
-		window->widget()->hide();
+	for (const auto &[id, controller] : _windows) {
+		controller->widget()->hide();
 	}
 	if (!_private->quitTimer.isActive()) {
 		_private->quitTimer.setCallback([] { Sandbox::QuitWhenStarted(); });

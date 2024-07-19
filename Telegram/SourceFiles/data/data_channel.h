@@ -68,6 +68,7 @@ enum class ChannelDataFlag : uint64 {
 	ViewAsMessages = (1ULL << 30),
 	SimilarExpanded = (1ULL << 31),
 	CanViewRevenue = (1ULL << 32),
+	PaidMediaAllowed = (1ULL << 33),
 	// shift values!
 	PTG_Verified = (1ull << 60),
 	PTG_Scam = (1ull << 61),
@@ -378,6 +379,7 @@ public:
 	[[nodiscard]] bool canPostStories() const;
 	[[nodiscard]] bool canEditStories() const;
 	[[nodiscard]] bool canDeleteStories() const;
+	[[nodiscard]] bool canPostPaidMedia() const;
 	[[nodiscard]] bool hiddenPreHistory() const;
 	[[nodiscard]] bool canViewMembers() const;
 	[[nodiscard]] bool canViewAdmins() const;
