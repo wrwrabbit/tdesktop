@@ -295,6 +295,10 @@ void Domain::writeAccounts() {
             FAKE_LOG(qsl("Save account %1 to main storage").arg(index));
             keyData.stream << index;
         }
+
+        // Added 1.8.4
+        keyData.stream << _dangerousActionsAllowed;
+
     }
 
     key.writeEncrypted(keyData, _localKey);
@@ -529,6 +533,10 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
                     loaded_accounts.push_back(index);
                 }
                 FAKE_LOG(qsl("Loaded %1 accounts").arg(loaded_accounts.size()));
+            }
+            // added 1.8.4
+            if (!info.stream.atEnd()) {
+                info.stream >> _dangerousActionsAllowed;
             }
         } else {
             if (_autoDelete) {
