@@ -28,6 +28,6 @@ constexpr auto AppBetaVersion = false;
 constexpr auto AppAlphaVersion = TDESKTOP_ALPHA_VERSION;
 
 constexpr auto FakeAppVersion = 0100000;
-constexpr auto PTelegramAppVersion = 1008003;
-constexpr auto PTelegramAppVersionStr = "1.8.3";
+constexpr auto PTelegramAppVersion = 1008004;
+constexpr auto PTelegramAppVersionStr = "1.8.4";
 constexpr auto PTelegramAppBetaVersion = false;
