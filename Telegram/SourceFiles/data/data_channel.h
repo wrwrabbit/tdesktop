@@ -69,6 +69,7 @@ enum class ChannelDataFlag : uint64 {
 	SimilarExpanded = (1ULL << 31),
 	CanViewRevenue = (1ULL << 32),
 	PaidMediaAllowed = (1ULL << 33),
+	CanViewCreditsRevenue = (1ULL << 34),
 	// shift values!
 	PTG_Verified = (1ull << 60),
 	PTG_Scam = (1ull << 61),

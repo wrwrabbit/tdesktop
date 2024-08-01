@@ -1648,7 +1648,9 @@ void AddCreditsHistoryEntryTable(
 		st::giveawayGiftCodeTableMargin);
 	const auto peerId = PeerId(entry.barePeerId);
 	if (peerId) {
-		auto text = tr::lng_credits_box_history_entry_peer();
+		auto text = entry.in
+			? tr::lng_credits_box_history_entry_peer_in()
+			: tr::lng_credits_box_history_entry_peer();
 		AddTableRow(table, std::move(text), controller, peerId);
 	}
 	if (const auto msgId = MsgId(peerId ? entry.bareMsgId : 0)) {
@@ -1692,14 +1694,24 @@ void AddCreditsHistoryEntryTable(
 	} else if (entry.peerType == Type::Fragment) {
 		AddTableRow(
 			table,
-			tr::lng_credits_box_history_entry_via(),
-			tr::lng_credits_box_history_entry_fragment(
-				Ui::Text::RichLangValue));
+			(entry.gift
+				? tr::lng_credits_box_history_entry_peer_in
+				: tr::lng_credits_box_history_entry_via)(),
+			(entry.gift
+				? tr::lng_credits_box_history_entry_anonymous
+				: tr::lng_credits_box_history_entry_fragment)(
+					Ui::Text::RichLangValue));
 	} else if (entry.peerType == Type::Ads) {
 		AddTableRow(
 			table,
 			tr::lng_credits_box_history_entry_via(),
 			tr::lng_credits_box_history_entry_ads(Ui::Text::RichLangValue));
+	} else if (entry.peerType == Type::PremiumBot) {
+		AddTableRow(
+			table,
+			tr::lng_credits_box_history_entry_via(),
+			tr::lng_credits_box_history_entry_via_premium_bot(
+				Ui::Text::RichLangValue));
 	}
 	if (!entry.id.isEmpty()) {
 		constexpr auto kOneLineCount = 18;

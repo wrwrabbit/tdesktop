@@ -3291,4 +3291,18 @@ void Account::removeMtpDataFile() {
 	}
 }
 
+Webview::StorageId TonSiteStorageId() {
+	auto result = Webview::StorageId{
+		.path = BaseGlobalPath() + u"webview-tonsite"_q,
+		.token = Core::App().settings().tonsiteStorageToken(),
+	};
+	if (result.token.isEmpty()) {
+		result.token = QByteArray::fromStdString(
+			Webview::GenerateStorageToken());
+		Core::App().settings().setTonsiteStorageToken(result.token);
+		Core::App().saveSettingsDelayed();
+	}
+	return result;
+}
+
 } // namespace Storage

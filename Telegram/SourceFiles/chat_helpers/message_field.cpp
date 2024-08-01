@@ -392,6 +392,9 @@ void InitMessageFieldHandlers(
 		Fn<bool()> customEmojiPaused,
 		Fn<bool(not_null<DocumentData*>)> allowPremiumEmoji,
 		const style::InputField *fieldStyle) {
+	const auto paused = [customEmojiPaused] {
+		return customEmojiPaused && customEmojiPaused();
+	};
 	field->setTagMimeProcessor(
 		FieldTagMimeProcessor(session, allowPremiumEmoji));
 	field->setCustomTextContext([=](Fn<void()> repaint) {
@@ -399,10 +402,10 @@ void InitMessageFieldHandlers(
 			.session = session,
 			.customEmojiRepaint = std::move(repaint),
 		});
-	}, [customEmojiPaused] {
-		return On(PowerSaving::kEmojiChat) || customEmojiPaused();
-	}, [customEmojiPaused] {
-		return On(PowerSaving::kChatSpoiler) || customEmojiPaused();
+	}, [paused] {
+		return On(PowerSaving::kEmojiChat) || paused();
+	}, [paused] {
+		return On(PowerSaving::kChatSpoiler) || paused();
 	});
 	field->setInstantReplaces(Ui::InstantReplaces::Default());
 	field->setInstantReplacesEnabled(
@@ -525,7 +528,7 @@ void InitMessageFieldGeometry(not_null<Ui::InputField*> field) {
 		st::historySendSize.height() - 2 * st::historySendPadding);
 	field->setMaxHeight(st::historyComposeFieldMaxHeight);
 
-	field->document()->setDocumentMargin(4.);
+	field->setDocumentMargin(4.);
 	field->setAdditionalMargin(style::ConvertScale(4) - 4);
 }
 
