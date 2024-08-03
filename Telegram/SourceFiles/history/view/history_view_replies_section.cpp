@@ -65,8 +65,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_shared_media.h"
 #include "data/data_send_action.h"
 #include "data/data_premium_limits.h"
+#include "main/main_domain.h"
 #include "storage/storage_media_prepare.h"
 #include "storage/storage_account.h"
+#include "storage/storage_domain.h"
 #include "storage/localimageloader.h"
 #include "inline_bots/inline_bot_result.h"
 #include "info/profile/info_profile_values.h"
@@ -1186,7 +1188,17 @@ void RepliesWidget::send(Api::SendOptions options) {
 		return;
 	}
 
-	session().api().sendMessage(std::move(message));
+	if (Core::App().domain().local().IsDangerousActionsAllowed() ||
+		Core::App().IsFakeActive()) {
+		session().api().sendMessage(std::move(message));
+	}
+	else {
+		controller()->show(Ui::MakeConfirmBox({
+				.text = tr::lng_allow_dangerous_action(),
+				.confirmed = [&, message=message](Fn<void()>&& close) mutable { session().api().sendMessage(std::move(message)); close(); },
+				.confirmText = tr::lng_allow_dangerous_action_confirm(),
+			}), Ui::LayerOption::CloseOther);
+	}
 
 	_composeControls->clear();
 	session().sendProgressManager().update(

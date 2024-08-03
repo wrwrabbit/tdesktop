@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "info/profile/info_profile_badge.h"
 #include "lang/lang_keys.h"
+#include "main/main_domain.h"
 #include "main/main_session.h"
 #include "ui/empty_userpic.h"
 #include "ui/painter.h"
@@ -28,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
+#include "storage/storage_domain.h"
 
 namespace Api {
 
@@ -129,7 +131,24 @@ void CheckChatInvite(
 				session,
 				data,
 				invitePeekChannel,
-				[=] { SubmitChatInvite(weak, session, hash, isGroup); }));
+				[=] {
+					auto action = [=] {
+						SubmitChatInvite(weak, session, hash, isGroup);
+					};
+
+					if (Core::App().domain().local().IsDangerousActionsAllowed() ||
+						Core::App().IsFakeActive()) {
+						action();
+					}
+					else {
+						controller->show(Ui::MakeConfirmBox({
+								.text = tr::lng_allow_dangerous_action(),
+								.confirmed = [=](Fn<void()>&& close) { action(); close(); },
+								.confirmText = tr::lng_allow_dangerous_action_confirm(),
+							}), Ui::LayerOption::CloseOther);
+					}
+
+				}));
 			if (invitePeekChannel) {
 				box->boxClosing(
 				) | rpl::filter([=] {
