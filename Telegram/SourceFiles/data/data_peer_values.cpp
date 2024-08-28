@@ -53,6 +53,12 @@ std::optional<QString> OnlineTextSpecial(not_null<UserData*> user) {
 	} else if (user->isSupport()) {
 		return tr::lng_status_support(tr::now);
 	} else if (user->isBot()) {
+		if (const auto count = user->botInfo->activeUsers) {
+			return tr::lng_bot_status_users(
+				tr::now,
+				lt_count_decimal,
+				count);
+		}
 		return tr::lng_status_bot(tr::now);
 	} else if (user->isServiceUser()) {
 		return tr::lng_status_support(tr::now);
@@ -500,6 +506,10 @@ bool IsUserOnline(not_null<UserData*> user, TimeId now) {
 
 bool ChannelHasActiveCall(not_null<ChannelData*> channel) {
 	return (channel->flags() & ChannelDataFlag::CallNotEmpty);
+}
+
+bool ChannelHasSubscriptionUntilDate(ChannelData *channel) {
+	return channel && channel->subscriptionUntilDate() > 0;
 }
 
 rpl::producer<QImage> PeerUserpicImageValue(
