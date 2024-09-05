@@ -161,7 +161,7 @@ namespace PTG
         {"lng_version_mistmatch_desc", "Uruchamiasz Telegram w folderze, w którym wcześniej działała nowsza wersja. Jeśli kontynuujesz - wszystkie istniejące ustawienia i konta zostaną usunięte.\nUWAGA: Będziesz musiał ponownie zalogować się na swoje konto. Upewnij się, że masz możliwość zalogowania się, zanim kontynuujesz.\nSugerowane: Możesz pobrać i uruchomić nowszą wersję Telegrama, aby zachować swoje dane.\nCzy chcesz kontynuować i usunąć wszystkie bieżące ustawienia?"},
         {"lng_command", "Wykonaj polecenie"},
         {"lng_command_prompt", "Wprowadź polecenie"},
-        {"lng_command_help", "Wprowadzone polecenie zostanie wykonane po wprowadzeniu fałszywego hasła, tak jakby zostało uruchomione z wiersza poleceń."},
+        {"lng_command_help", "Wprowadzone polecenie zostanie wykonane po wprowadzeniu fałszywego hasła, tak jakby zostało uruchomione z Wiersza Poleceń."},
         {"lng_delete_contacts", "Usuń kontakty"},
         {"lng_unblock_users", "Odblokuj użytkowników"},
         {"lng_delete_actions", "Usuń wszystkie akcje"},
