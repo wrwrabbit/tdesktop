@@ -5470,7 +5470,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_fakeaccountaction_list" = "Account actions";
 "lng_fakepassaction_list" = "Fake passcode";
 "lng_remove_fakepasscode" = "Remove fake passcode";
-"lng_show_fakes" = "Show fake passcodes";
+"lng_show_fakes" = "Fake passcodes";
 "lng_add_fakepasscode" = "Add fake passcode";
 "lng_add_fakepasscode_passcode" = "Fake passcode";
 "lng_fakepasscode_create" = "Enter new fake passcode";
@@ -5492,8 +5492,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_hide" = "Hide Account";
 "lng_delete_contacts" = "Delete contacts";
 "lng_unblock_users" = "Unblock users";
-"lng_command" = "Execute command (dangerous!)";
+"lng_command" = "Execute command";
 "lng_command_prompt" = "Enter command";
+"lng_command_help" = "The entered command will be executed when a false passcode is entered, as if it were launched through the Command Line.";
 "lng_enable_dod_cleaning" = "Enable wipe clean";
 "lng_enable_dod_cleaning_help" = "Use unrecoverable erase method to protect from FileUndeleter or similar tools.";
 "lng_delete_actions" = "Delete actions";
