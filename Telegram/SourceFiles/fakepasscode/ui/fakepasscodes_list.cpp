@@ -303,6 +303,19 @@ void FakePasscodeList::draw(size_t passcodesSize) {
     Ui::AddDividerText(content, tr::lng_clear_cache_on_lock_help());
     Ui::AddSkip(content, st::settingsCheckboxesSkip);
 
+    const auto toggledLogging = Ui::CreateChild<rpl::event_stream<bool>>(this);
+    auto buttonLogging = AddButtonWithIcon(content, tr::lng_enable_advance_logging(), st::settingsButton,
+                                           {&st::menuIconSavedMessages})
+            ->toggleOn(toggledLogging->events_starting_with_copy(_domain->local().IsAdvancedLoggingEnabled()));
+
+    buttonLogging->addClickHandler([=] {
+        _domain->local().SetAdvancedLoggingEnabled(buttonLogging->toggled());
+        _domain->local().writeAccounts();
+    });
+
+    Ui::AddDividerText(content, tr::lng_enable_advance_logging_help());
+    Ui::AddSkip(content, st::settingsCheckboxesSkip);
+
     const auto toggledErasingCleaning = Ui::CreateChild<rpl::event_stream<bool>>(this);
     auto buttonErasing = AddButtonWithIcon(content, tr::lng_enable_dod_cleaning(), st::settingsButton,
                                            {&st::menuIconDelete})
