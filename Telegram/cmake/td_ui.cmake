@@ -64,6 +64,8 @@ PRIVATE
     calls/group/ui/calls_group_scheduled_labels.h
     calls/group/ui/desktop_capture_choose_source.cpp
     calls/group/ui/desktop_capture_choose_source.h
+    calls/ui/calls_device_menu.cpp
+    calls/ui/calls_device_menu.h
 
     chat_helpers/field_characters_count_manager.cpp
     chat_helpers/field_characters_count_manager.h
@@ -122,8 +124,12 @@ PRIVATE
     editor/scene/scene_item_line.cpp
     editor/scene/scene_item_line.h
 
+    history/admin_log/history_admin_log_filter_value.h
     history/history_view_top_toast.cpp
     history/history_view_top_toast.h
+    history/history_view_swipe.cpp
+    history/history_view_swipe.h
+    history/history_view_swipe_data.h
     history/view/controls/history_view_characters_limit.cpp
     history/view/controls/history_view_characters_limit.h
     history/view/controls/history_view_voice_record_button.cpp
@@ -425,6 +431,8 @@ PRIVATE
     ui/widgets/multi_select.h
     ui/widgets/sent_code_field.cpp
     ui/widgets/sent_code_field.h
+    ui/widgets/participants_check_view.cpp
+    ui/widgets/participants_check_view.h
     ui/widgets/slider_natural_width.h
     ui/widgets/vertical_drum_picker.cpp
     ui/widgets/vertical_drum_picker.h

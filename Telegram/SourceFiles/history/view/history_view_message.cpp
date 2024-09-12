@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rect.h"
 #include "ui/round_rect.h"
 #include "ui/text/text_utilities.h"
+#include "ui/text/text_extended_data.h"
 #include "ui/power_saving.h"
 #include "data/components/factchecks.h"
 #include "data/components/sponsored_messages.h"
@@ -40,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "payments/payments_reaction_process.h" // TryAddingPaidReaction.
 #include "ui/text/text_options.h"
 #include "ui/painter.h"
+#include "window/themes/window_theme.h" // IsNightMode.
 #include "window/window_session_controller.h"
 #include "apiwrap.h"
 #include "styles/style_chat.h"
@@ -1091,6 +1093,12 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 	const auto item = data();
 	const auto media = this->media();
 
+	const auto hasGesture = context.gestureHorizontal.translation
+		&& (context.gestureHorizontal.msgBareId == item->fullId().msg.bare);
+	if (hasGesture) {
+		p.translate(context.gestureHorizontal.translation, 0);
+	}
+
 	if (item->hasUnrequestedFactcheck()) {
 		item->history()->session().factchecks().requestFor(item);
 	}
@@ -1135,6 +1143,15 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 	const auto displayInfo = needInfoDisplay();
 	const auto reactionsInBubble = _reactions && embedReactionsInBubble();
 
+	const auto keyboard = item->inlineReplyKeyboard();
+	const auto fullGeometry = g;
+	if (keyboard) {
+		// We need to count geometry without keyboard for bubble selection
+		// intervals counting below.
+		const auto keyboardHeight = st::msgBotKbButton.margin + keyboard->naturalHeight();
+		g.setHeight(g.height() - keyboardHeight);
+	}
+
 	auto mediaSelectionIntervals = (!context.selected() && mediaDisplayed)
 		? media->getBubbleSelectionIntervals(context.selection)
 		: std::vector<Ui::BubbleSelectionInterval>();
@@ -1169,25 +1186,22 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 	if (customHighlight) {
 		media->drawHighlight(p, context, localMediaTop);
 	} else {
-		paintHighlight(p, context, g.height());
+		paintHighlight(p, context, fullGeometry.height());
 	}
 
 	const auto roll = media ? media->bubbleRoll() : Media::BubbleRoll();
 	if (roll) {
 		p.save();
-		p.translate(g.center());
+		p.translate(fullGeometry.center());
 		p.rotate(roll.rotate);
 		p.scale(roll.scale, roll.scale);
-		p.translate(-g.center());
+		p.translate(-fullGeometry.center());
 	}
 
 	p.setTextPalette(stm->textPalette);
 
-	const auto keyboard = item->inlineReplyKeyboard();
 	const auto messageRounding = countMessageRounding();
 	if (keyboard) {
-		const auto keyboardHeight = st::msgBotKbButton.margin + keyboard->naturalHeight();
-		g.setHeight(g.height() - keyboardHeight);
 		const auto keyboardPosition = QPoint(g.left(), g.top() + g.height() + st::msgBotKbButton.margin);
 		p.translate(keyboardPosition);
 		keyboard->paint(
@@ -1481,6 +1495,79 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 			}
 		}
 	}
+	if (hasGesture) {
+		p.translate(-context.gestureHorizontal.translation, 0);
+
+		constexpr auto kShiftRatio = 1.5;
+		constexpr auto kBouncePart = 0.25;
+		constexpr auto kMaxHeightRatio = 3.5;
+		constexpr auto kStrokeWidth = 2.;
+		constexpr auto kWaveWidth = 10.;
+		const auto isLeftSize = (!context.outbg)
+			|| delegate()->elementIsChatWide();
+		const auto ratio = std::min(context.gestureHorizontal.ratio, 1.);
+		const auto reachRatio = context.gestureHorizontal.reachRatio;
+		const auto size = st::historyFastShareSize;
+		const auto outerWidth = st::historySwipeIconSkip
+			+ (isLeftSize ? rect::right(g) : width())
+			+ ((g.height() < size * kMaxHeightRatio)
+				? rightActionSize().value_or(QSize()).width()
+				: 0);
+		const auto shift = std::min(
+			(size * kShiftRatio * context.gestureHorizontal.ratio),
+			-1. * context.gestureHorizontal.translation
+		) + (st::historySwipeIconSkip * ratio * (isLeftSize ? .7 : 1.));
+		const auto rect = QRectF(
+			outerWidth - shift,
+			g.y() + (g.height() - size) / 2,
+			size,
+			size);
+		const auto center = rect::center(rect);
+		const auto spanAngle = ratio * arc::kFullLength;
+		const auto strokeWidth = style::ConvertFloatScale(kStrokeWidth);
+
+		const auto reachScale = std::clamp(
+			(reachRatio > kBouncePart)
+				? (kBouncePart * 2 - reachRatio)
+				: reachRatio,
+			0.,
+			1.);
+		auto pen = Window::Theme::IsNightMode()
+			? QPen(anim::with_alpha(context.st->msgServiceFg()->c, 0.3))
+			: QPen(context.st->msgServiceBg());
+		pen.setWidthF(strokeWidth - (1. * (reachScale / kBouncePart)));
+		const auto arcRect = rect - Margins(strokeWidth);
+		p.save();
+		{
+			auto hq = PainterHighQualityEnabler(p);
+			p.setPen(Qt::NoPen);
+			p.setBrush(context.st->msgServiceBg());
+			p.setOpacity(ratio);
+			p.translate(center);
+			if (reachScale) {
+				p.scale(-(1. + 1. * reachScale), (1. + 1. * reachScale));
+			} else {
+				p.scale(-1., 1.);
+			}
+			p.translate(-center);
+			// All the next draws are mirrored.
+			p.drawEllipse(rect);
+			context.st->historyFastShareIcon().paintInCenter(p, rect);
+			p.setPen(pen);
+			p.setBrush(Qt::NoBrush);
+			p.drawArc(arcRect, arc::kQuarterLength, spanAngle);
+			// p.drawArc(arcRect, arc::kQuarterLength, spanAngle);
+			if (reachRatio) {
+				const auto w = style::ConvertFloatScale(kWaveWidth);
+				p.setOpacity(ratio - reachRatio);
+				p.drawArc(
+					arcRect + Margins(reachRatio * reachRatio * w),
+					arc::kQuarterLength,
+					spanAngle);
+			}
+		}
+		p.restore();
+	}
 }
 
 void Message::paintCommentsButton(
@@ -1687,7 +1774,11 @@ void Message::paintFromName(
 	}
 	p.setFont(st::msgNameFont);
 	p.setPen(nameFg);
-	nameText->drawElided(p, availableLeft, trect.top(), availableWidth);
+	nameText->draw(p, {
+		.position = { availableLeft, trect.top() },
+		.availableWidth = availableWidth,
+		.elisionLines = 1,
+	});
 	const auto skipWidth = nameText->maxWidth()
 		+ (_fromNameStatus
 			? (st::dialogsPremiumIcon.icon.width()
@@ -1929,6 +2020,7 @@ void Message::paintText(
 		.pausedSpoiler = context.paused || On(PowerSaving::kChatSpoiler),
 		.selection = context.selection,
 		.highlight = highlightRequest ? &*highlightRequest : nullptr,
+		.useFullWidth = true,
 	});
 }
 
@@ -3286,7 +3378,7 @@ void Message::refreshReactions() {
 						item,
 						weak.get(),
 						1,
-						Payments::LookupMyPaidAnonymous(item),
+						std::nullopt,
 						controller->uiShow());
 					return;
 				} else {
@@ -3484,6 +3576,9 @@ bool Message::allowTextSelectionByHandler(
 		if (media->allowTextSelectionByHandler(handler)) {
 			return true;
 		}
+	}
+	if (dynamic_cast<Ui::Text::BlockquoteClickHandler*>(handler.get())) {
+		return true;
 	}
 	return false;
 }
@@ -3826,10 +3921,10 @@ void Message::drawRightAction(
 	} else if (_rightAction->second) {
 		st->historyFastCloseIcon().paintInCenter(
 			p,
-			{ left, top, size->width(), size->width() });
+			QRect(left, top, size->width(), size->width()));
 		st->historyFastMoreIcon().paintInCenter(
 			p,
-			{ left, size->width() + top, size->width(), size->width() });
+			QRect(left, size->width() + top, size->width(), size->width()));
 	} else {
 		const auto &icon = data()->isSponsored()
 			? st->historyFastCloseIcon()
@@ -3838,7 +3933,7 @@ void Message::drawRightAction(
 				&& this->context() != Context::SavedSublist)
 			? st->historyFastShareIcon()
 			: st->historyGoToOriginalIcon();
-		icon.paintInCenter(p, { left, top, size->width(), size->height() });
+		icon.paintInCenter(p, Rect(left, top, *size));
 	}
 }
 

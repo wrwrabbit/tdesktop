@@ -100,9 +100,9 @@ struct AlbumCounts {
 	if (caption.text.isEmpty()) {
 		return Ui::Text::Colorized(attachType);
 	}
-
+	auto wrapped = st::wrap_rtl(caption);
 	return hasMiniImages
-		? caption
+		? wrapped
 		: tr::lng_dialogs_text_media(
 			tr::now,
 			lt_media_part,
@@ -112,7 +112,7 @@ struct AlbumCounts {
 				Ui::Text::Colorized(attachType),
 				Ui::Text::WithEntities),
 			lt_caption,
-			caption,
+			wrapped,
 			Ui::Text::WithEntities);
 }
 
@@ -471,7 +471,8 @@ GiveawayStart ComputeGiveawayStartData(
 	auto result = GiveawayStart{
 		.untilDate = data.vuntil_date().v,
 		.quantity = data.vquantity().v,
-		.months = data.vmonths().v,
+		.months = data.vmonths().value_or_empty(),
+		.credits = data.vstars().value_or_empty(),
 		.all = !data.is_only_new_subscribers(),
 	};
 	result.channels.reserve(data.vchannels().v.size());
@@ -502,7 +503,8 @@ GiveawayResults ComputeGiveawayResultsData(
 		.additionalPeersCount = additional.value_or_empty(),
 		.winnersCount = data.vwinners_count().v,
 		.unclaimedCount = data.vunclaimed_count().v,
-		.months = data.vmonths().v,
+		.months = data.vmonths().value_or_empty(),
+		.credits = data.vstars().value_or_empty(),
 		.refunded = data.is_refunded(),
 		.all = !data.is_only_new_subscribers(),
 	};
@@ -1722,6 +1724,10 @@ WebPageData *MediaWebPage::webpage() const {
 
 MediaWebPageFlags MediaWebPage::webpageFlags() const {
 	return _flags;
+}
+
+Storage::SharedMediaTypesMask MediaWebPage::sharedMediaTypes() const {
+	return Storage::SharedMediaType::Link;
 }
 
 bool MediaWebPage::hasReplyPreview() const {

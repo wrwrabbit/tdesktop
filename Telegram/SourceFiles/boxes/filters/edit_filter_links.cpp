@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/vertical_layout.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/painter.h"
+#include "ui/rect.h"
 #include "ui/vertical_list.h"
 #include "window/window_session_controller.h"
 #include "styles/style_info.h"
@@ -581,6 +582,7 @@ void LinkController::addLinkBlock(not_null<Ui::VerticalLayout*> container) {
 	});
 	const auto getLinkQr = crl::guard(weak, [=] {
 		delegate()->peerListUiShow()->showBox(InviteLinkQrBox(
+			nullptr,
 			link,
 			tr::lng_group_invite_qr_title(),
 			tr::lng_filters_link_qr_about()));
@@ -889,6 +891,7 @@ base::unique_qptr<Ui::PopupMenu> LinksController::createRowContextMenu(
 	};
 	const auto getLinkQr = [=] {
 		delegate()->peerListUiShow()->showBox(InviteLinkQrBox(
+			nullptr,
 			link,
 			tr::lng_group_invite_qr_title(),
 			tr::lng_filters_link_qr_about()));
@@ -965,9 +968,9 @@ void LinksController::rowPaintIcon(
 		p.setBrush(*bg);
 		{
 			auto hq = PainterHighQualityEnabler(p);
-			p.drawEllipse(QRect(0, 0, inner, inner));
+			p.drawEllipse(Rect(Size(inner)));
 		}
-		st::inviteLinkIcon.paintInCenter(p, { 0, 0, inner, inner });
+		st::inviteLinkIcon.paintInCenter(p, Rect(Size(inner)));
 	}
 	p.drawImage(x + skip, y + skip, icon);
 }
@@ -1113,7 +1116,7 @@ QString FilterChatStatusText(not_null<PeerData*> peer) {
 				? tr::lng_chat_status_subscribers
 				: tr::lng_chat_status_members)(
 					tr::now,
-					lt_count,
+					lt_count_decimal,
 					channel->membersCount());
 		}
 	}

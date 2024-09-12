@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/shadow.h"
 #include "ui/controls/window_outdated_bar.h"
 #include "ui/painter.h"
+#include "ui/ui_utility.h"
 #include "apiwrap.h"
 #include "mainwidget.h" // session->content()->windowShown().
 #include "tray.h"
@@ -73,9 +74,23 @@ base::options::toggle OptionNewWindowsSizeAsFirst({
 	.description = "Open new windows with a size of the main window.",
 });
 
+base::options::toggle OptionDisableTouchbar({
+	.id = kOptionDisableTouchbar,
+	.name = "Disable Touch Bar (macOS only).",
+	.scope = [] {
+#ifdef Q_OS_MAC
+		return true;
+#else // !Q_OS_MAC
+		return false;
+#endif // !Q_OS_MAC
+	},
+	.restartRequired = true,
+});
+
 } // namespace.
 
 const char kOptionNewWindowsSizeAsFirst[] = "new-windows-size-as-first";
+const char kOptionDisableTouchbar[] = "touchbar-disabled";
 
 const QImage &Logo() {
 	static const auto result = QImage(u":/gui/art/logo_256.png"_q);
@@ -847,7 +862,7 @@ void MainWindow::updateTitle() {
 	const auto user = (session
 		&& !settings.hideAccountName
 		&& Core::App().domain().accountsAuthedCount() > 1)
-		? session->authedName()
+		? st::wrap_rtl(session->authedName())
 		: QString();
 	const auto key = (session && !settings.hideChatName)
 		? session->activeChatCurrent()
@@ -864,10 +879,11 @@ void MainWindow::updateTitle() {
 		: history->peer->isSelf()
 		? tr::lng_saved_messages(tr::now)
 		: history->peer->name();
+	const auto wrapped = st::wrap_rtl(name);
 	const auto threadCounter = thread->chatListBadgesState().unreadCounter;
 	const auto primary = (threadCounter > 0)
-		? u"(%1) %2"_q.arg(threadCounter).arg(name)
-		: name;
+		? u"(%1) %2"_q.arg(threadCounter).arg(wrapped)
+		: wrapped;
 	const auto middle = !user.isEmpty()
 		? (u" @ "_q + user)
 		: !added.isEmpty()

@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_credits.h"
 #include "api/api_statistics.h"
 #include "boxes/peer_list_controllers.h"
+#include "chat_helpers/stickers_gift_box_pack.h"
 #include "core/ui_integration.h" // Core::MarkedTextContext.
 #include "data/data_channel.h"
 #include "data/data_credits.h"
@@ -46,6 +47,7 @@ namespace Info::Statistics {
 namespace {
 
 using BoostCallback = Fn<void(const Data::Boost &)>;
+constexpr auto kColorIndexCredits = int(1);
 constexpr auto kColorIndexUnclaimed = int(3);
 constexpr auto kColorIndexPending = int(4);
 
@@ -138,6 +140,7 @@ struct CreditsDescriptor final {
 	not_null<PeerData*> peer;
 	bool in = false;
 	bool out = false;
+	bool subscription = false;
 };
 
 class PeerListRowWithFullId : public PeerListRow {
@@ -477,6 +480,7 @@ private:
 	Ui::EmptyUserpic _userpic;
 	QImage _badge;
 	QImage _rightBadge;
+	PaintRoundImageCallback _paintUserpicCallback;
 
 };
 
@@ -491,7 +495,9 @@ BoostRow::BoostRow(const Data::Boost &boost)
 : PeerListRow(UniqueRowIdFromString(boost.id))
 , _boost(boost)
 , _userpic(
-	Ui::EmptyUserpic::UserpicColor(boost.isUnclaimed
+	Ui::EmptyUserpic::UserpicColor(boost.credits
+		? kColorIndexCredits
+		: boost.isUnclaimed
 		? kColorIndexUnclaimed
 		: kColorIndexPending),
 	QString()) {
@@ -499,8 +505,41 @@ BoostRow::BoostRow(const Data::Boost &boost)
 }
 
 void BoostRow::init() {
+	if (!PeerListRow::special()) {
+		_paintUserpicCallback = PeerListRow::generatePaintUserpicCallback(
+			false);
+	} else if (_boost.credits) {
+		const auto creditsIcon = std::make_shared<QImage>();
+		_paintUserpicCallback = [=](
+				Painter &p,
+				int x,
+				int y,
+				int outerWidth,
+				int size) mutable {
+			_userpic.paintCircle(p, x, y, outerWidth, size);
+			if (creditsIcon->isNull()) {
+				*creditsIcon = Ui::CreditsWhiteDoubledIcon(size, 1.);
+			}
+			p.drawImage(x, y, *creditsIcon);
+		};
+	} else {
+		_paintUserpicCallback = [=](
+				Painter &p,
+				int x,
+				int y,
+				int outerWidth,
+				int size) mutable {
+			_userpic.paintCircle(p, x, y, outerWidth, size);
+			(_boost.isUnclaimed
+				? st::boostsListUnclaimedIcon
+				: st::boostsListUnknownIcon).paintInCenter(
+					p,
+					Rect(x, y, Size(size)));
+		};
+	}
+
 	invalidateBadges();
-	auto status = !PeerListRow::special()
+	auto status = (!PeerListRow::special() || _boost.credits)
 		? tr::lng_boosts_list_status(
 			tr::now,
 			lt_date,
@@ -520,23 +559,18 @@ const Data::Boost &BoostRow::boost() const {
 QString BoostRow::generateName() {
 	return !PeerListRow::special()
 		? PeerListRow::generateName()
+		: _boost.credits
+		? tr::lng_giveaway_prizes_additional_credits_amount(
+			tr::now,
+			lt_count_decimal,
+			_boost.credits)
 		: _boost.isUnclaimed
 		? tr::lng_boosts_list_unclaimed(tr::now)
 		: tr::lng_boosts_list_pending(tr::now);
 }
 
 PaintRoundImageCallback BoostRow::generatePaintUserpicCallback(bool force) {
-	if (!PeerListRow::special()) {
-		return PeerListRow::generatePaintUserpicCallback(force);
-	}
-	return [=](Painter &p, int x, int y, int outerWidth, int size) mutable {
-		_userpic.paintCircle(p, x, y, outerWidth, size);
-		(_boost.isUnclaimed
-			? st::boostsListUnclaimedIcon
-			: st::boostsListUnknownIcon).paintInCenter(
-				p,
-				{ x, y, size, size });
-	};
+	return _paintUserpicCallback;
 }
 
 void BoostRow::invalidateBadges() {
@@ -560,7 +594,7 @@ void BoostRow::invalidateBadges() {
 	const auto &rightIcon = _boost.isGiveaway
 		? st::boostsListGiveawayMiniIcon
 		: st::boostsListGiftMiniIcon;
-	_rightBadge = (_boost.isGift || _boost.isGiveaway)
+	_rightBadge = ((_boost.isGift || _boost.isGiveaway) && !_boost.credits)
 		? CreateBadge(
 			st::boostsListRightBadgeTextStyle,
 			_boost.isGiveaway
@@ -809,7 +843,7 @@ void CreditsRow::init() {
 	const auto name = !isSpecial
 		? PeerListRow::generateName()
 		: Ui::GenerateEntryName(_entry).text;
-	_name = _entry.reaction
+	_name = (_entry.reaction || _entry.bareGiveawayMsgId)
 		? Ui::GenerateEntryName(_entry).text
 		: _entry.title.isEmpty()
 		? name
@@ -963,6 +997,7 @@ private:
 	void applySlice(const Data::CreditsStatusSlice &slice);
 
 	const not_null<Main::Session*> _session;
+	const bool _subscription;
 	Clicked _entryClickedCallback;
 
 	Api::CreditsHistory _api;
@@ -977,6 +1012,7 @@ private:
 
 CreditsController::CreditsController(CreditsDescriptor d)
 : _session(&d.peer->session())
+, _subscription(d.subscription)
 , _entryClickedCallback(std::move(d.entryClickedCallback))
 , _api(d.peer, d.in, d.out)
 , _firstSlice(std::move(d.firstSlice))
@@ -1017,7 +1053,7 @@ void CreditsController::loadMoreRows() {
 
 void CreditsController::applySlice(const Data::CreditsStatusSlice &slice) {
 	_allLoaded = slice.allLoaded;
-	_apiToken = slice.tokenSubscriptions;
+	_apiToken = _subscription ? slice.tokenSubscriptions : slice.token;
 
 	auto create = [&](
 			const Data::CreditsHistoryEntry &i,
@@ -1038,7 +1074,13 @@ void CreditsController::applySlice(const Data::CreditsStatusSlice &slice) {
 			return std::make_unique<CreditsRow>(descriptor);
 		}
 	};
+
+	auto giftPacksRequested = false;
 	for (const auto &item : slice.list) {
+		if (item.bareGiveawayMsgId && !giftPacksRequested) {
+			giftPacksRequested = true;
+			session().giftBoxStickersPacks().load();
+		}
 		delegate()->peerListAppendRow(create(item, {}));
 	}
 	for (const auto &item : slice.subscriptions) {
@@ -1138,13 +1180,9 @@ void AddMembersList(
 		object_ptr<PeerListContent>(container, &state->controller)));
 	state->controller.setDelegate(&state->delegate);
 
-	const auto wrap = container->add(
-		object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
-			container,
-			object_ptr<Ui::SettingsButton>(
-				container,
-				tr::lng_stories_show_more())),
-		{ 0, -st::settingsButton.padding.top(), 0, 0 });
+	const auto wrap = AddShowMoreButton(
+		container,
+		tr::lng_stories_show_more());
 
 	const auto showMore = [=] {
 		state->limit = std::min(int(max), state->limit + kPerPage);
@@ -1178,23 +1216,14 @@ void AddBoostsList(
 		object_ptr<PeerListContent>(container, &state->controller)));
 	state->controller.setDelegate(&state->delegate);
 
-	const auto wrap = container->add(
-		object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
-			container,
-			object_ptr<Ui::SettingsButton>(
-				container,
-				(firstSlice.token.gifts
-					? tr::lng_boosts_show_more_gifts
-					: tr::lng_boosts_show_more_boosts)(
-						lt_count,
-						state->controller.totalBoostsValue(
-						) | rpl::map(
-							max - rpl::mappers::_1
-						) | tr::to_count()),
-				st::statisticsShowMoreButton)),
-		{ 0, -st::settingsButton.padding.top(), 0, 0 });
-	const auto button = wrap->entity();
-	AddArrow(button);
+	const auto wrap = AddShowMoreButton(
+		container,
+		(firstSlice.token.gifts
+			? tr::lng_boosts_show_more_gifts
+			: tr::lng_boosts_show_more_boosts)(
+				lt_count,
+				state->controller.totalBoostsValue(
+				) | rpl::map(max - rpl::mappers::_1) | tr::to_count()));
 
 	const auto showMore = [=] {
 		if (!state->controller.skipRequest()) {
@@ -1206,7 +1235,7 @@ void AddBoostsList(
 		state->controller.totalBoostsValue(
 		) | rpl::map(rpl::mappers::_1 > 0 && rpl::mappers::_1 < max),
 		anim::type::instant);
-	button->setClickedCallback(showMore);
+	wrap->entity()->setClickedCallback(showMore);
 }
 
 void AddCreditsHistoryList(
@@ -1216,7 +1245,8 @@ void AddCreditsHistoryList(
 		Clicked callback,
 		not_null<PeerData*> bot,
 		bool in,
-		bool out) {
+		bool out,
+		bool subscription) {
 	struct State final {
 		State(
 			CreditsDescriptor d,
@@ -1228,23 +1258,16 @@ void AddCreditsHistoryList(
 		CreditsController controller;
 	};
 	const auto state = container->lifetime().make_state<State>(
-		CreditsDescriptor{ firstSlice, callback, bot, in, out },
+		CreditsDescriptor{ firstSlice, callback, bot, in, out, subscription },
 		show);
 
 	state->delegate.setContent(container->add(
 		object_ptr<PeerListContent>(container, &state->controller)));
 	state->controller.setDelegate(&state->delegate);
 
-	const auto wrap = container->add(
-		object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
-			container,
-			object_ptr<Ui::SettingsButton>(
-				container,
-				tr::lng_stories_show_more(),
-				st::statisticsShowMoreButton)),
-		{ 0, -st::settingsButton.padding.top(), 0, 0 });
-	const auto button = wrap->entity();
-	AddArrow(button);
+	const auto wrap = AddShowMoreButton(
+		container,
+		tr::lng_stories_show_more());
 
 	const auto showMore = [=] {
 		if (!state->controller.skipRequest()) {
@@ -1255,7 +1278,22 @@ void AddCreditsHistoryList(
 	wrap->toggleOn(
 		state->controller.allLoadedValue() | rpl::map(!rpl::mappers::_1),
 		anim::type::instant);
-	button->setClickedCallback(showMore);
+	wrap->entity()->setClickedCallback(showMore);
+}
+
+not_null<Ui::SlideWrap<Ui::SettingsButton>*> AddShowMoreButton(
+		not_null<Ui::VerticalLayout*> container,
+		rpl::producer<QString> title) {
+	const auto wrap = container->add(
+		object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
+			container,
+			object_ptr<Ui::SettingsButton>(
+				container,
+				std::move(title),
+				st::statisticsShowMoreButton)),
+		{ 0, -st::settingsButton.padding.top(), 0, 0 });
+	AddArrow(wrap->entity());
+	return wrap;
 }
 
 } // namespace Info::Statistics

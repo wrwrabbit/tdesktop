@@ -449,7 +449,7 @@ if customRunCommand:
                 tmp_zshrc_path = tmp_zshrc.name
             subprocess.run(['zsh', '--rcs', tmp_zshrc_path], env=modifiedEnv)
             os.remove(tmp_zshrc_path)
-    elif not run(command):
+    elif not run(' '.join(runCommand) + '\n'):
         print('FAILED :(')
         finish(1)
     finish(0)
@@ -457,7 +457,7 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout 85a1c4ec32
+    git checkout e66e768a5f
 """)
 
 stage('msys64', """
@@ -1539,11 +1539,20 @@ release:
     stage('qt_' + qt, """
     git clone -b v$QT-lts-lgpl https://github.com/qt/qt5.git qt_$QT
     cd qt_$QT
-    git submodule update --init --recursive qtbase qtimageformats qtsvg
+    git submodule update --init --recursive --progress qtbase qtimageformats qtsvg
 depends:patches/qtbase_""" + qt + """/*.patch
     cd qtbase
 win:
-    for /r %%i in (..\\..\\patches\\qtbase_%QT%\\*) do git apply %%i -v
+    git revert --no-edit 6ad56dce34
+    setlocal enabledelayedexpansion
+    for /r %%i in (..\\..\\patches\\qtbase_%QT%\\*) do (
+        git apply %%i -v
+        if errorlevel 1 (
+            echo ERROR: Applying patch %%~nxi failed!
+            exit /b 1
+        )
+    )
+
     cd ..
 
     SET CONFIGURATIONS=-debug
@@ -1620,7 +1629,7 @@ mac:
     make install
 """)
 else: # qt > '6'
-    branch = 'v$QT' + ('-lts-lgpl' if qt < '6.3' else '')
+    branch = 'v$QT' + ('-lts-lgpl' if qt < '6.3' else '-beta4')
     stage('qt_' + qt, """
     git clone -b """ + branch + """ https://github.com/qt/qt5.git qt_$QT
     cd qt_$QT

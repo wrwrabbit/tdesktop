@@ -51,6 +51,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "menu/menu_mute.h"
 #include "support/support_helper.h"
+#include "ui/boxes/peer_qr_box.h"
 #include "ui/boxes/report_box.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/painter.h"
@@ -1035,6 +1036,22 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 		result.text->setContextCopyText(contextCopyText);
 		return result;
 	};
+	const auto fitLabelToButton = [&](
+			not_null<Ui::RpWidget*> button,
+			not_null<Ui::FlatLabel*> label) {
+		const auto parent = label->parentWidget();
+		result->sizeValue() | rpl::start_with_next([=] {
+			const auto s = parent->size();
+			button->moveToRight(
+				0,
+				(s.height() - button->height()) / 2);
+			label->resizeToWidth(
+				s.width()
+					- label->geometry().left()
+					- st::lineWidth * 2
+					- button->width());
+		}, button->lifetime());
+	};
 	if (const auto user = _peer->asUser()) {
 		const auto controller = _controller->parentController();
 		if (user->session().supportMode()) {
@@ -1102,19 +1119,19 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 		usernameLine.subtext->overrideLinkClickHandler(callback);
 		usernameLine.text->setContextMenuHook(hook);
 		usernameLine.subtext->setContextMenuHook(hook);
-		const auto usernameLabel = usernameLine.text;
-		if (user->isBot()) {
+		if (user) {
 			const auto copyUsername = Ui::CreateChild<Ui::IconButton>(
-				usernameLabel->parentWidget(),
-				st::infoProfileLabeledButtonCopy);
-			result->sizeValue(
-			) | rpl::start_with_next([=] {
-				const auto s = usernameLabel->parentWidget()->size();
-				copyUsername->moveToRight(
-					0,
-					(s.height() - copyUsername->height()) / 2);
-			}, copyUsername->lifetime());
+				usernameLine.text->parentWidget(),
+				user->isBot()
+					? st::infoProfileLabeledButtonCopy
+					: st::infoProfileLabeledButtonQr);
+			fitLabelToButton(copyUsername, usernameLine.text);
 			copyUsername->setClickedCallback([=] {
+				if (!user->isBot()) {
+					controller->show(
+						Box(Ui::FillPeerQrBox, user, std::nullopt, nullptr));
+					return false;
+				}
 				const auto link = user->session().createInternalLinkFull(
 					user->username());
 				if (!link.isEmpty()) {
@@ -1173,7 +1190,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 						: text) + addToLink,
 					(addToLink.isEmpty() ? link.url : (text + addToLink)));
 		});
-		auto linkLine = addInfoOneLine(
+		const auto linkLine = addInfoOneLine(
 			(topicRootId
 				? tr::lng_info_link_label(Ui::Text::WithEntities)
 				: UsernamesSubtext(_peer, tr::lng_info_link_label())),
@@ -1186,6 +1203,17 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			addToLink);
 		linkLine.text->overrideLinkClickHandler(linkCallback);
 		linkLine.subtext->overrideLinkClickHandler(linkCallback);
+		{
+			const auto qr = Ui::CreateChild<Ui::IconButton>(
+				linkLine.text->parentWidget(),
+				st::infoProfileLabeledButtonQr);
+			fitLabelToButton(qr, linkLine.text);
+			qr->setClickedCallback([=, peer = _peer] {
+				controller->show(
+					Box(Ui::FillPeerQrBox, peer, std::nullopt, nullptr));
+				return false;
+			});
+		}
 
 		if (const auto channel = _topic ? nullptr : _peer->asChannel()) {
 			auto locationText = LocationValue(
