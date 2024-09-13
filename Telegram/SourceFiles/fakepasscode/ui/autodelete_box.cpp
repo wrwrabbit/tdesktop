@@ -9,6 +9,7 @@
 #include <ui/layers/generic_box.h>
 #include "ui/widgets/fields/masked_input_field.h"
 #include <ui/widgets/buttons.h>
+#include "ui/ui_utility.h" // WheelDirection
 
 #include "menu/menu_send.h"
 
