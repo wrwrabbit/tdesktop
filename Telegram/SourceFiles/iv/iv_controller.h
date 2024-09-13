@@ -76,6 +76,7 @@ public:
 		base::flat_map<QByteArray, rpl::producer<bool>> inChannelValues);
 	void update(Prepared page);
 
+	[[nodiscard]] static bool IsGoodTonSiteUrl(const QString &uri);
 	void showTonSite(const Webview::StorageId &storageId, QString uri);
 
 	[[nodiscard]] bool active() const;
@@ -132,6 +133,7 @@ private:
 	std::unique_ptr<Ui::RpWidget> _subtitleWrap;
 	rpl::variable<QString> _url;
 	rpl::variable<QString> _subtitleText;
+	rpl::variable<QString> _windowTitleText;
 	std::unique_ptr<Ui::FlatLabel> _subtitle;
 	Ui::Animations::Simple _subtitleBackShift;
 	Ui::Animations::Simple _subtitleForwardShift;
