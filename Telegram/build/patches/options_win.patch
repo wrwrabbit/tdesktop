@@ -30,5 +30,5 @@ index d84e503..a150c70 100644
 +        #    $<IF:$<CONFIG:Debug>,,/LTCGOUT:>
 +        #)
      endif()
- elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+ elseif (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
      target_compile_definitions(common_options
