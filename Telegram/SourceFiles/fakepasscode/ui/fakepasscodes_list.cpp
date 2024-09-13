@@ -177,13 +177,22 @@ void FakePasscodeContent::setupContent() {
     }
 
     // non account action_list
+    AddDivider(content);
     Ui::AddSubsectionTitle(content, tr::lng_fakeglobalaction_list(),
         style::margins(0, st::defaultVerticalListSkip, 0, 0));
-    for (const auto& type : FakePasscode::kAvailableGlobalActions) {
-        const auto ui = GetUIByAction(type, _domain, _passcodeIndex, this);
-        ui->Create(content, _controller);
-        Ui::AddDivider(content);
-    }
+    auto ui = GetUIByAction(FakePasscode::kAvailableGlobalActions[0], _domain, _passcodeIndex, this);
+    ui->Create(content, _controller);
+    AddDivider(content);
+
+    ui = GetUIByAction(FakePasscode::kAvailableGlobalActions[1], _domain, _passcodeIndex, this);
+    ui->Create(content, _controller);
+
+    ui = GetUIByAction(FakePasscode::kAvailableGlobalActions[2], _domain, _passcodeIndex, this);
+    ui->Create(content, _controller);
+
+    ui = GetUIByAction(FakePasscode::kAvailableGlobalActions[3], _domain, _passcodeIndex, this);
+    ui->Create(content, _controller);
+    AddDivider(content);
 
     // password actions
     Ui::AddSubsectionTitle(content, tr::lng_fakepassaction_list());
@@ -275,9 +284,8 @@ void FakePasscodeList::draw(size_t passcodesSize) {
                               Ui::LayerOption::KeepOther);
         });
     }
-    AddDivider(content);
-    AddButtonWithIcon(content, tr::lng_add_fakepasscode(), st::settingsButton,
-                      {&st::settingsIconAdd})->addClickHandler([this] {
+    AddButtonWithIcon(content, tr::lng_add_fakepasscode(), st::settingsButtonActive,
+                      {&st::settingsIconAdd, IconType::Round, &st::windowBgActive })->addClickHandler([this] {
         _controller->show(Box<FakePasscodeBox>(_controller, false, true, 0), // _domain
                           Ui::LayerOption::KeepOther);
     });
@@ -310,7 +318,7 @@ void FakePasscodeList::draw(size_t passcodesSize) {
 
     const auto toggledErasingCleaning = Ui::CreateChild<rpl::event_stream<bool>>(this);
     auto buttonErasing = AddButtonWithIcon(content, tr::lng_enable_dod_cleaning(), st::settingsButton,
-                                           {&st::menuIconClear})
+                                           {&st::menuIconDelete})
         ->toggleOn(toggledErasingCleaning->events_starting_with_copy(_domain->local().IsErasingEnabled()));
 
     buttonErasing->addClickHandler([=] {
