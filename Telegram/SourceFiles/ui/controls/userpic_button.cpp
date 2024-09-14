@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/menu/menu_action.h"
 #include "ui/painter.h"
+#include "ui/ui_utility.h"
 #include "editor/photo_editor_common.h"
 #include "editor/photo_editor_layer_widget.h"
 #include "info/userpic/info_userpic_emoji_builder_common.h"
@@ -1025,10 +1026,12 @@ void UserpicButton::prepareUserpicPixmap() {
 							true);
 						p.drawImage(QRect(0, 0, size, size), _userpicView.cached);
 					} else {
-						const auto empty = _peer->generateUserpicImage(
+						const auto empty = PeerData::GenerateUserpicImage(
+							_peer,
 							_userpicView,
 							size * ratio,
-							size * ratio * Ui::ForumUserpicRadiusMultiplier());
+							(size * ratio)
+								* Ui::ForumUserpicRadiusMultiplier());
 						p.drawImage(QRect(0, 0, size, size), empty);
 					}
 				} else {

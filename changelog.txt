@@ -1,3 +1,57 @@
+5.5.4 (12.09.24)
+
+- Fix channel updates stopping after difference request failing.
+- Add QR code generation for your username in Settings.
+- Fix swipe-to-reply gestures stopping. (macOS)
+
+5.5.3 (10.09.24)
+
+- Fix custom emoji sending.
+- Add mention link QR code sharing.
+- Fix sending files from network drives. (Windows)
+
+5.5.2 (09.09.24)
+
+- Support two bottom buttons in web apps.
+- Fix text layout outside of the message bubble glitch.
+- Don't stop video when dragging media viewer in window mode.
+
+5.5.1 (06.09.24)
+
+- Fix crash in peer short info box.
+
+5.5 (06.09.24)
+
+- Star Giveaways.
+- Swipe-to-Reply.
+- Audio device selection in one-on-one calls.
+- Text selection in collapsed / expanded quotes.
+
+5.4.6 beta (04.09.24)
+
+- Add Swipe-To-Reply for modern touchpads and touchscreens.
+- Add text selection in collapsed and expanded blockquotes.
+- Fix text rendering in 100% interface scale on Windows.
+
+5.4.5 beta (31.08.24)
+
+- Fix possible crash in text rendering.
+
+5.4.4 beta (29.08.24)
+
+- Fix wrong layout and crashes in text shaping.
+- Fix crashes in voice / video messages playback.
+
+5.4.3 beta (29.08.24)
+
+- Fix working on Windows 7.
+
+5.4.2 beta (28.08.24)
+
+- Select audio devices from one-on-one call window.
+- Bug fixes and other minor improvements.
+- New text layout testing.
+
 5.4.1 (17.08.24)
 
 - Fix crash when sending Star Reaction in comments.

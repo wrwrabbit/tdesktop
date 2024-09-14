@@ -587,6 +587,7 @@ base::unique_qptr<Ui::PopupMenu> LinksController::createRowContextMenu(
 		}, &st::menuIconShare);
 		result->addAction(tr::lng_group_invite_context_qr(tr::now), [=] {
 			delegate()->peerListUiShow()->showBox(InviteLinkQrBox(
+				nullptr,
 				link,
 				tr::lng_group_invite_qr_title(),
 				tr::lng_group_invite_qr_about()));
@@ -734,7 +735,7 @@ void LinksController::rowPaintIcon(
 		} else {
 			(color == Color::Revoked
 				? st::inviteLinkRevokedIcon
-				: st::inviteLinkIcon).paintInCenter(p, { 0, 0, inner, inner });
+				: st::inviteLinkIcon).paintInCenter(p, Rect(Size(inner)));
 		}
 	}
 	p.drawImage(x + skip, y + skip, icon);
