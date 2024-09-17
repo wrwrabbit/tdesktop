@@ -180,19 +180,13 @@ void FakePasscodeContent::setupContent() {
     AddDivider(content);
     Ui::AddSubsectionTitle(content, tr::lng_fakeglobalaction_list(),
         style::margins(0, st::defaultVerticalListSkip, 0, 0));
-    auto ui = GetUIByAction(FakePasscode::kAvailableGlobalActions[0], _domain, _passcodeIndex, this);
-    ui->Create(content, _controller);
-    AddDivider(content);
-
-    ui = GetUIByAction(FakePasscode::kAvailableGlobalActions[1], _domain, _passcodeIndex, this);
-    ui->Create(content, _controller);
-
-    ui = GetUIByAction(FakePasscode::kAvailableGlobalActions[2], _domain, _passcodeIndex, this);
-    ui->Create(content, _controller);
-
-    ui = GetUIByAction(FakePasscode::kAvailableGlobalActions[3], _domain, _passcodeIndex, this);
-    ui->Create(content, _controller);
-    AddDivider(content);
+    for (const auto& record : FakePasscode::kAvailableGlobalActions) {
+        const auto ui = GetUIByAction(record.Type, _domain, _passcodeIndex, this);
+        ui->Create(content, _controller);
+        if (record.HasDivider) {
+            Ui::AddDivider(content);
+        }
+    }
 
     // password actions
     Ui::AddSubsectionTitle(content, tr::lng_fakepassaction_list());
