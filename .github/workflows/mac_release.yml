@@ -130,7 +130,7 @@ jobs:
           cd $REPO_NAME/out/Release
           mkdir artifact
 
-          bless --folder "Telegram.app/" --openfolder "Telegram.app/"
+          bless --folder "Telegram.app/" # remove? --openfolder "Telegram.app/"
 
           zip -r Telegram.app_macos.zip Telegram.app
 

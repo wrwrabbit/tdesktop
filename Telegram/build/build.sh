@@ -413,7 +413,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
             "$SetupFile" \
             "./$BundleName"
         # do zip as well
-        bless --folder "./$BundleName/" --openfolder "$BundleName/"
+        bless --folder "./$BundleName/" # removed? --openfolder "$BundleName/"
         zip -r "$BundleName.zip" "$BundleName"
       fi
     fi
