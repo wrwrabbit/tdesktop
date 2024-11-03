@@ -73,11 +73,17 @@ class SpoilerAnimation;
 class ChooseThemeController;
 class ContinuousScroll;
 struct ChatPaintHighlight;
+template <typename Widget>
+class SlideWrap;
 } // namespace Ui
 
 namespace Ui::Emoji {
 class SuggestionsController;
 } // namespace Ui::Emoji
+
+namespace Webrtc {
+enum class RecordAvailability : uchar;
+} // namespace Webrtc
 
 namespace Window {
 class SessionController;
@@ -529,6 +535,11 @@ private:
 	void setupGroupCallBar();
 	void setupRequestsBar();
 
+	void checkSponsoredMessageBar();
+	[[nodiscard]] bool checkSponsoredMessageBarVisibility() const;
+	void requestSponsoredMessageBar();
+	void createSponsoredMessageBar();
+
 	void sendInlineResult(InlineBots::ResultSelected result);
 
 	void drawField(Painter &p, const QRect &rect);
@@ -662,6 +673,7 @@ private:
 	MsgId _editMsgId = 0;
 	std::shared_ptr<Data::PhotoMedia> _photoEditMedia;
 	bool _canReplaceMedia = false;
+	bool _canAddMedia = false;
 	HistoryView::MediaEditManager _mediaEditManager;
 
 	HistoryItem *_replyEditMsg = nullptr;
@@ -686,8 +698,12 @@ private:
 	std::unique_ptr<Ui::RequestsBar> _requestsBar;
 	int _requestsBarHeight = 0;
 
+	base::unique_qptr<Ui::SlideWrap<Ui::RpWidget>> _sponsoredMessageBar;
+	int _sponsoredMessageBarHeight = 0;
+
 	bool _preserveScrollTop = false;
 	bool _repaintFieldScheduled = false;
+	bool _sentFromScheduledTip = false;
 
 	mtpRequestId _saveEditMsgRequestId = 0;
 
@@ -746,6 +762,8 @@ private:
 	bool _inlineLookingUpBot = false;
 	mtpRequestId _inlineBotResolveRequestId = 0;
 	bool _isInlineBot = false;
+
+	Webrtc::RecordAvailability _recordAvailability = {};
 
 	std::unique_ptr<HistoryView::ContactStatus> _contactStatus;
 	std::unique_ptr<HistoryView::BusinessBotStatus> _businessBotStatus;

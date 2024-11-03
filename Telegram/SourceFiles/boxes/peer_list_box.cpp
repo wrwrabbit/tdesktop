@@ -764,13 +764,14 @@ int PeerListRow::paintNameIconGetWidth(
 		int availableWidth,
 		int outerWidth,
 		bool selected) {
-	if (special()
+	if (_skipPeerBadge
+		|| special()
 		|| !_savedMessagesStatus.isEmpty()
 		|| _isRepliesMessagesChat
 		|| _isVerifyCodesChat) {
 		return 0;
 	}
-	return _bagde.drawGetWidth(
+	return _badge.drawGetWidth(
 		p,
 		QRect(
 			nameLeft,
@@ -1941,6 +1942,13 @@ PeerListContent::SkipResult PeerListContent::selectSkip(int direction) {
 				break;
 			}
 		}
+	}
+
+	if (_controller->overrideKeyboardNavigation(
+			direction,
+			_selected.index.value,
+			newSelectedIndex)) {
+		return { _selected.index.value, _selected.index.value };
 	}
 
 	_selected.index.value = newSelectedIndex;

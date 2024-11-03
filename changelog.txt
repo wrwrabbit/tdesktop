@@ -1,3 +1,45 @@
+5.7.1 (01.11.24)
+
+- Fix occasional redundant newlines before message timestamp.
+- Remove playback speed change on settings button click.
+- Fix video playback settings button on hidpi screens.
+- Fix return from Picture-in-Picture to media viewer.
+- Fix video quality auto-switching in Picture-in-Picture.
+- Add message link to channel stars transaction information.
+- Fix GIF playback in media viewer.
+- Fix several possible crashes.
+
+5.7 (31.10.24)
+
+- Sending video messages.
+- New video quality selection in channels.
+- Adding media to sent text messages via Edit.
+- Ads in bots with revenue sharing with bot developers.
+- Chat-specific hashtags.
+
+5.6.4 beta (24.10.24)
+
+- Add recording of video messages in case a camera is available.
+- Add "Respect the Focus settings" for custom notifications on Windows.
+
+5.6.3 (15.10.24)
+
+- Add ability to change page scale in Instant View pages.
+- Fix unnecessary timestamp jump to a new line.
+- Fix secondary button positioning in miniapps.
+- Fix a crash in QR code copy for a chat without a photo.
+- Fix a crash in share options menu showing.
+- Fix a crash on monitor disconnect.
+
+5.6.2 (14.10.24)
+
+- Message selection marks.
+- Better copy username / public link / ID menu in profiles.
+- Keyboard navigation (Up/Down/PageUp/PageDown) in chat preview.
+- Improved QR options for profile links.
+- Fix calls color problems on Windows.
+- Fix scroll problems on Linux.
+
 5.6.1 (07.10.24)
 
 - Fix media viewer sometimes blocking the app after launch.

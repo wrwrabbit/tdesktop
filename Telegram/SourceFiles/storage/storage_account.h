@@ -174,6 +174,9 @@ public:
 	[[nodiscard]] Webview::StorageId resolveStorageIdBots();
 	[[nodiscard]] Webview::StorageId resolveStorageIdOther();
 
+	[[nodiscard]] QImage readRoundPlaceholder();
+	void writeRoundPlaceholder(const QImage &placeholder);
+
 	[[nodiscard]] bool encrypt(
 		const void *src,
 		void *dst,
@@ -313,6 +316,7 @@ private:
 	FileKey _featuredCustomEmojiKey = 0;
 	FileKey _archivedCustomEmojiKey = 0;
 	FileKey _searchSuggestionsKey = 0;
+	FileKey _roundPlaceholderKey = 0;
 
 	qint64 _cacheTotalSizeLimit = 0;
 	qint64 _cacheBigFileTotalSizeLimit = 0;
@@ -335,6 +339,8 @@ private:
 	base::Timer _writeSearchSuggestionsTimer;
 	bool _mapChanged = false;
 	bool _locationsChanged = false;
+
+	QImage _roundPlaceholder;
 
 };
 
