@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_blocked_peers.h"
 #include "api/api_chat_participants.h"
 #include "api/api_credits.h"
+#include "api/api_statistics.h"
 #include "apiwrap.h"
 #include "base/options.h"
 #include "base/timer_rpl.h"
@@ -45,13 +46,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_helpers.h"
 #include "history/view/history_view_item_preview.h"
 #include "info/bot/earn/info_bot_earn_widget.h"
-#include "info/info_controller.h"
-#include "info/info_memento.h"
+#include "info/channel_statistics/earn/earn_format.h"
+#include "info/channel_statistics/earn/earn_icons.h"
+#include "info/channel_statistics/earn/info_channel_earn_list.h"
 #include "info/profile/info_profile_icon.h"
 #include "info/profile/info_profile_phone_menu.h"
 #include "info/profile/info_profile_text.h"
 #include "info/profile/info_profile_values.h"
 #include "info/profile/info_profile_widget.h"
+#include "info/info_controller.h"
+#include "info/info_memento.h"
 #include "inline_bots/bot_attach_web_view.h"
 #include "iv/iv_instance.h"
 #include "lang/lang_keys.h"
@@ -79,6 +83,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h" // Window::Controller::show.
 #include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
+#include "styles/style_channel_earn.h" // st::channelEarnCurrencyCommonMargins
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
@@ -148,8 +153,10 @@ base::options::toggle ShowPeerIdBelowAbout({
 				+ addToLink;
 		}
 		if (!link.isEmpty()) {
+			TextUtilities::SetClipboardText({ link });
 			if (const auto strong = weak.get()) {
-				FastShareLink(strong, link);
+				strong->showToast(
+					tr::lng_channel_public_link_copied(tr::now));
 			}
 		}
 	};
@@ -186,7 +193,7 @@ base::options::toggle ShowPeerIdBelowAbout({
 		const auto raw = peer->id.value & PeerId::kChatTypeMask;
 		value.append(Link(
 			Italic(Lang::FormatCountDecimal(raw)),
-			"internal:copy:" + QString::number(raw)));
+			"internal:~peer_id~:copy:" + QString::number(raw)));
 		return std::move(value);
 	});
 }
@@ -770,6 +777,169 @@ template <typename Text, typename ToggleOn, typename Callback>
 		st));
 }
 
+rpl::producer<uint64> AddCurrencyAction(
+		not_null<UserData*> user,
+		not_null<Ui::VerticalLayout*> wrap,
+		not_null<Controller*> controller) {
+	struct State final {
+		rpl::variable<uint64> balance;
+	};
+	const auto state = wrap->lifetime().make_state<State>();
+	const auto parentController = controller->parentController();
+	const auto wrapButton = AddActionButton(
+		wrap,
+		tr::lng_manage_peer_bot_balance_currency(),
+		state->balance.value() | rpl::map(rpl::mappers::_1 > 0),
+		[=] { parentController->showSection(Info::ChannelEarn::Make(user)); },
+		nullptr);
+	{
+		const auto button = wrapButton->entity();
+		const auto icon = Ui::CreateChild<Ui::RpWidget>(button);
+		icon->resize(st::infoIconReport.size());
+		const auto image = Ui::Earn::MenuIconCurrency(icon->size());
+		icon->paintRequest() | rpl::start_with_next([=] {
+			auto p = QPainter(icon);
+			p.drawImage(0, 0, image);
+		}, icon->lifetime());
+
+		button->sizeValue(
+		) | rpl::start_with_next([=](const QSize &size) {
+			icon->move(st::infoEarnCurrencyIconPosition);
+		}, icon->lifetime());
+	}
+	const auto balance = user->session().credits().balanceCurrency(user->id);
+	if (balance) {
+		state->balance = balance;
+	}
+	{
+		const auto weak = Ui::MakeWeak(wrap);
+		const auto currencyLoadLifetime
+			= std::make_shared<rpl::lifetime>();
+		const auto currencyLoad
+			= currencyLoadLifetime->make_state<Api::EarnStatistics>(user);
+		currencyLoad->request(
+		) | rpl::start_with_error_done([=](const QString &error) {
+			currencyLoadLifetime->destroy();
+		}, [=] {
+			if (const auto strong = weak.data()) {
+				state->balance = currencyLoad->data().currentBalance;
+				currencyLoadLifetime->destroy();
+			}
+		}, *currencyLoadLifetime);
+	}
+	const auto &st = st::infoSharedMediaButton;
+	const auto button = wrapButton->entity();
+	const auto name = Ui::CreateChild<Ui::FlatLabel>(button, st.rightLabel);
+	const auto icon = Ui::Text::SingleCustomEmoji(
+		user->owner().customEmojiManager().registerInternalEmoji(
+			Ui::Earn::IconCurrencyColored(
+				st.rightLabel.style.font,
+				st.rightLabel.textFg->c),
+			st::channelEarnCurrencyCommonMargins,
+			false));
+	name->show();
+	rpl::combine(
+		button->widthValue(),
+		tr::lng_manage_peer_bot_balance_currency(),
+		state->balance.value()
+	) | rpl::start_with_next([=, &st](
+			int width,
+			const QString &button,
+			uint64 balance) {
+		const auto available = width
+			- rect::m::sum::h(st.padding)
+			- st.style.font->width(button)
+			- st::settingsButtonRightSkip;
+		name->setMarkedText(
+			base::duplicate(icon)
+				.append(QChar(' '))
+				.append(Info::ChannelEarn::MajorPart(balance))
+				.append(Info::ChannelEarn::MinorPart(balance)),
+			Core::MarkedTextContext{
+				.session = &user->session(),
+				.customEmojiRepaint = [=] { name->update(); },
+			});
+		name->resizeToNaturalWidth(available);
+		name->moveToRight(st::settingsButtonRightSkip, st.padding.top());
+	}, name->lifetime());
+	name->setAttribute(Qt::WA_TransparentForMouseEvents);
+	wrapButton->finishAnimating();
+	return state->balance.value();
+}
+
+rpl::producer<uint64> AddCreditsAction(
+		not_null<UserData*> user,
+		not_null<Ui::VerticalLayout*> wrap,
+		not_null<Controller*> controller) {
+	struct State final {
+		rpl::variable<uint64> balance;
+	};
+	const auto state = wrap->lifetime().make_state<State>();
+	const auto parentController = controller->parentController();
+	const auto wrapButton = AddActionButton(
+		wrap,
+		tr::lng_manage_peer_bot_balance_credits(),
+		state->balance.value() | rpl::map(rpl::mappers::_1 > 0),
+		[=] { parentController->showSection(Info::BotEarn::Make(user)); },
+		nullptr);
+	{
+		const auto button = wrapButton->entity();
+		const auto icon = Ui::CreateChild<Ui::RpWidget>(button);
+		const auto image = Ui::Earn::MenuIconCredits();
+		icon->resize(image.size() / style::DevicePixelRatio());
+		icon->paintRequest() | rpl::start_with_next([=] {
+			auto p = QPainter(icon);
+			p.drawImage(0, 0, image);
+		}, icon->lifetime());
+
+		button->sizeValue(
+		) | rpl::start_with_next([=](const QSize &size) {
+			icon->move(st::infoEarnCreditsIconPosition);
+		}, icon->lifetime());
+	}
+	if (const auto balance = user->session().credits().balance(user->id)) {
+		state->balance = balance;
+	}
+	{
+		const auto api = wrap->lifetime().make_state<Api::CreditsStatus>(
+			user);
+		api->request({}, [=](Data::CreditsStatusSlice data) {
+			state->balance = data.balance;
+		});
+	}
+	const auto &st = st::infoSharedMediaButton;
+	const auto button = wrapButton->entity();
+	const auto name = Ui::CreateChild<Ui::FlatLabel>(button, st.rightLabel);
+	const auto icon = user->owner().customEmojiManager().creditsEmoji();
+	name->show();
+	rpl::combine(
+		button->widthValue(),
+		tr::lng_manage_peer_bot_balance_credits(),
+		state->balance.value()
+	) | rpl::start_with_next([=, &st](
+			int width,
+			const QString &button,
+			uint64 balance) {
+		const auto available = width
+			- rect::m::sum::h(st.padding)
+			- st.style.font->width(button)
+			- st::settingsButtonRightSkip;
+		name->setMarkedText(
+			base::duplicate(icon)
+				.append(QChar(' '))
+				.append(Lang::FormatCountDecimal(balance)),
+			Core::MarkedTextContext{
+				.session = &user->session(),
+				.customEmojiRepaint = [=] { name->update(); },
+			});
+		name->resizeToNaturalWidth(available);
+		name->moveToRight(st::settingsButtonRightSkip, st.padding.top());
+	}, name->lifetime());
+	name->setAttribute(Qt::WA_TransparentForMouseEvents);
+	wrapButton->finishAnimating();
+	return state->balance.value();
+}
+
 class DetailsFiller {
 public:
 	DetailsFiller(
@@ -833,8 +1003,8 @@ public:
 	object_ptr<Ui::RpWidget> fill();
 
 private:
+	void addBalanceActions(not_null<UserData*> user);
 	void addInviteToGroupAction(not_null<UserData*> user);
-	void addCreditsAction(not_null<UserData*> user);
 	void addShareContactAction(not_null<UserData*> user);
 	void addEditContactAction(not_null<UserData*> user);
 	void addDeleteContactAction(not_null<UserData*> user);
@@ -980,6 +1150,20 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 		state->labelText = std::move(text);
 		label->setContextMenuHook([=](
 				Ui::FlatLabel::ContextMenuRequest request) {
+			if (request.link) {
+				const auto &url = request.link->url();
+				if (url.startsWith(u"internal:~peer_id~:"_q)) {
+					const auto weak = base::make_weak(controller);
+					request.menu->addAction(u"Copy ID"_q, [=] {
+						Core::App().openInternalUrl(
+							url,
+							QVariant::fromValue(ClickHandlerContext{
+								.sessionWindow = weak,
+							}));
+					});
+					return;
+				}
+			}
 			label->fillContextMenu(request);
 			if (Ui::SkipTranslate(state->labelText.current())) {
 				return;
@@ -1047,22 +1231,84 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 	};
 	const auto fitLabelToButton = [&](
 			not_null<Ui::RpWidget*> button,
-			not_null<Ui::FlatLabel*> label) {
+			not_null<Ui::FlatLabel*> label,
+			int rightSkip) {
 		const auto parent = label->parentWidget();
-		result->sizeValue() | rpl::start_with_next([=] {
+		rpl::combine(
+			label->geometryValue(),
+			button->sizeValue()
+		) | rpl::start_with_next([=](const QRect &, const QSize &buttonSize) {
 			const auto s = parent->size();
 			button->moveToRight(
-				0,
-				(s.height() - button->height()) / 2);
+				rightSkip,
+				(s.height() - buttonSize.height()) / 2);
 			label->resizeToWidth(
 				s.width()
+					- rightSkip
 					- label->geometry().left()
 					- st::lineWidth * 2
-					- button->width());
+					- buttonSize.width());
 		}, button->lifetime());
 	};
+	const auto controller = _controller->parentController();
+	const auto weak = base::make_weak(controller);
+	const auto peerIdRaw = QString::number(_peer->id.value);
+	const auto lnkHook = [=](Ui::FlatLabel::ContextMenuRequest request) {
+		const auto strong = weak.get();
+		if (!strong || !request.link) {
+			return;
+		}
+		const auto url = request.link->url();
+		if (url.startsWith(u"https://")) {
+			request.menu->addAction(
+				tr::lng_context_copy_link(tr::now),
+				[=] {
+					TextUtilities::SetClipboardText({ url });
+					if (const auto strong = weak.get()) {
+						strong->showToast(
+							tr::lng_channel_public_link_copied(tr::now));
+					}
+				});
+			request.menu->addAction(
+				tr::lng_group_invite_share(tr::now),
+				[=] {
+					if (const auto strong = weak.get()) {
+						FastShareLink(strong, url);
+					}
+				});
+			return;
+		}
+		static const auto kPrefix = QRegularExpression(u"^internal:"
+			"(collectible_username|username_link|username_regular)/"
+			"([a-zA-Z0-9\\-\\_\\.]+)@"_q);
+		const auto match = kPrefix.match(url);
+		if (!match.hasMatch()) {
+			return;
+		}
+		const auto username = match.captured(2);
+		const auto fullname = username + '@' + peerIdRaw;
+		const auto mentionLink = "internal:username_regular/" + fullname;
+		const auto linkLink = "internal:username_link/" + fullname;
+		const auto context = QVariant::fromValue(ClickHandlerContext{
+			.sessionWindow = weak,
+		});
+		const auto session = &strong->session();
+		const auto link = session->createInternalLinkFull(username);
+		request.menu->addAction(
+			tr::lng_context_copy_mention(tr::now),
+			[=] { Core::App().openInternalUrl(mentionLink, context); });
+		request.menu->addAction(
+			tr::lng_context_copy_link(tr::now),
+			[=] { Core::App().openInternalUrl(linkLink, context); });
+		request.menu->addAction(
+			tr::lng_group_invite_share(tr::now),
+			[=] {
+				if (const auto strong = weak.get()) {
+					FastShareLink(strong, link);
+				}
+			});
+	};
 	if (const auto user = _peer->asUser()) {
-		const auto controller = _controller->parentController();
 		if (user->session().supportMode()) {
 			addInfoLineGeneric(
 				user->session().supportHelper().infoLabelValue(user),
@@ -1075,7 +1321,19 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 				PhoneOrHiddenValue(user),
 				tr::lng_profile_copy_phone(tr::now)).text;
 			const auto hook = [=](Ui::FlatLabel::ContextMenuRequest request) {
-				phoneLabel->fillContextMenu(request);
+				if (request.selection.empty()) {
+					const auto callback = [=] {
+						auto phone = rpl::variable<TextWithEntities>(
+							PhoneOrHiddenValue(user)).current().text;
+						phone.replace(' ', QString()).replace('-', QString());
+						TextUtilities::SetClipboardText({ phone });
+					};
+					request.menu->addAction(
+						tr::lng_profile_copy_phone(tr::now),
+						callback);
+				} else {
+					phoneLabel->fillContextMenu(request);
+				}
 				AddPhoneMenu(request.menu, user);
 			};
 			phoneLabel->setContextMenuHook(hook);
@@ -1100,40 +1358,18 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			_peer,
 			controller,
 			QString());
-		const auto hook = [=](Ui::FlatLabel::ContextMenuRequest request) {
-			if (!request.link) {
-				return;
-			}
-			const auto text = request.link->copyToClipboardContextItemText();
-			if (text.isEmpty()) {
-				return;
-			}
-			const auto link = request.link->copyToClipboardText();
-			request.menu->addAction(
-				text,
-				[=] { QGuiApplication::clipboard()->setText(link); });
-			const auto last = link.lastIndexOf('/');
-			if (last < 0) {
-				return;
-			}
-			const auto mention = '@' + link.mid(last + 1);
-			if (mention.size() < 2) {
-				return;
-			}
-			request.menu->addAction(
-				tr::lng_context_copy_mention(tr::now),
-				[=] { QGuiApplication::clipboard()->setText(mention); });
-		};
 		usernameLine.text->overrideLinkClickHandler(callback);
 		usernameLine.subtext->overrideLinkClickHandler(callback);
-		usernameLine.text->setContextMenuHook(hook);
-		usernameLine.subtext->setContextMenuHook(hook);
+		usernameLine.text->setContextMenuHook(lnkHook);
+		usernameLine.subtext->setContextMenuHook(lnkHook);
 
-		const auto copyUsername = Ui::CreateChild<Ui::IconButton>(
+		const auto qrButton = Ui::CreateChild<Ui::IconButton>(
 			usernameLine.text->parentWidget(),
 			st::infoProfileLabeledButtonQr);
-		fitLabelToButton(copyUsername, usernameLine.text);
-		copyUsername->setClickedCallback([=] {
+		const auto rightSkip = st::infoProfileLabeledButtonQrRightSkip;
+		fitLabelToButton(qrButton, usernameLine.text, rightSkip);
+		fitLabelToButton(qrButton, usernameLine.subtext, rightSkip);
+		qrButton->setClickedCallback([=] {
 			controller->show(
 				Box(Ui::FillPeerQrBox, user, std::nullopt, nullptr));
 			return false;
@@ -1202,11 +1438,15 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			addToLink);
 		linkLine.text->overrideLinkClickHandler(linkCallback);
 		linkLine.subtext->overrideLinkClickHandler(linkCallback);
+		linkLine.text->setContextMenuHook(lnkHook);
+		linkLine.subtext->setContextMenuHook(lnkHook);
 		{
 			const auto qr = Ui::CreateChild<Ui::IconButton>(
 				linkLine.text->parentWidget(),
 				st::infoProfileLabeledButtonQr);
-			fitLabelToButton(qr, linkLine.text);
+			const auto rightSkip = st::infoProfileLabeledButtonQrRightSkip;
+			fitLabelToButton(qr, linkLine.text, rightSkip);
+			fitLabelToButton(qr, linkLine.subtext, rightSkip);
 			qr->setClickedCallback([=, peer = _peer] {
 				controller->show(
 					Box(Ui::FillPeerQrBox, peer, std::nullopt, nullptr));
@@ -1840,6 +2080,25 @@ ActionsFiller::ActionsFiller(
 , _peer(peer) {
 }
 
+void ActionsFiller::addBalanceActions(not_null<UserData*> user) {
+	const auto wrap = _wrap->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			_wrap.data(),
+			object_ptr<Ui::VerticalLayout>(_wrap.data())));
+	const auto inner = wrap->entity();
+	Ui::AddSubsectionTitle(inner, tr::lng_manage_peer_bot_balance());
+	auto currencyBalance = AddCurrencyAction(user, inner, _controller);
+	auto creditsBalance = AddCreditsAction(user, inner, _controller);
+	Ui::AddSkip(inner);
+	Ui::AddDivider(inner);
+	Ui::AddSkip(inner);
+	wrap->toggleOn(
+		rpl::combine(
+			std::move(currencyBalance),
+			std::move(creditsBalance)
+		) | rpl::map((rpl::mappers::_1 + rpl::mappers::_2) > 0));
+}
+
 void ActionsFiller::addInviteToGroupAction(not_null<UserData*> user) {
 	const auto notEmpty = [](const QString &value) {
 		return !value.isEmpty();
@@ -1862,59 +2121,6 @@ void ActionsFiller::addInviteToGroupAction(not_null<UserData*> user) {
 		InviteToChatAbout(user) | rpl::filter(notEmpty));
 	Ui::AddSkip(about->entity());
 	about->finishAnimating();
-}
-
-void ActionsFiller::addCreditsAction(not_null<UserData*> user) {
-	struct State final {
-		rpl::variable<uint64> balance;
-	};
-	const auto state = _wrap->lifetime().make_state<State>();
-	const auto controller = _controller->parentController();
-	const auto wrap = AddActionButton(
-		_wrap,
-		tr::lng_manage_peer_bot_balance(),
-		state->balance.value() | rpl::map(rpl::mappers::_1 > 0),
-		[=] { controller->showSection(Info::BotEarn::Make(user)); },
-		&st::infoIconBotBalance);
-	if (const auto balance = user->session().credits().balance(user->id)) {
-		state->balance = balance;
-	}
-	{
-		const auto api = _wrap->lifetime().make_state<Api::CreditsStatus>(
-			user);
-		api->request({}, [=](Data::CreditsStatusSlice data) {
-			state->balance = data.balance;
-		});
-	}
-	const auto &st = st::infoSharedMediaButton;
-	const auto button = wrap->entity();
-	const auto name = Ui::CreateChild<Ui::FlatLabel>(button, st.rightLabel);
-	name->show();
-	rpl::combine(
-		button->widthValue(),
-		tr::lng_manage_peer_bot_balance(),
-		state->balance.value()
-	) | rpl::start_with_next([=, &st](
-			int width,
-			const QString &button,
-			uint64 balance) {
-		const auto available = width
-			- rect::m::sum::h(st.padding)
-			- st.style.font->width(button)
-			- st::settingsButtonRightSkip;
-		name->setMarkedText(
-			user->owner().customEmojiManager().creditsEmoji()
-				.append(QChar(' '))
-				.append(QString::number(balance)),
-			Core::MarkedTextContext{
-				.session = &user->session(),
-				.customEmojiRepaint = [=] { name->update(); },
-			});
-		name->resizeToNaturalWidth(available);
-		name->moveToRight(st::settingsButtonRightSkip, st.padding.top());
-	}, name->lifetime());
-	name->setAttribute(Qt::WA_TransparentForMouseEvents);
-	wrap->finishAnimating();
 }
 
 void ActionsFiller::addShareContactAction(not_null<UserData*> user) {
@@ -2028,7 +2234,6 @@ void ActionsFiller::addBotCommandActions(not_null<UserData*> user) {
 		rpl::single(true),
 		openPrivacyPolicy,
 		nullptr);
-
 }
 
 void ActionsFiller::addReportAction() {
@@ -2139,7 +2344,7 @@ void ActionsFiller::addJoinChannelAction(
 
 void ActionsFiller::fillUserActions(not_null<UserData*> user) {
 	if (user->isBot()) {
-		addCreditsAction(user);
+		addBalanceActions(user);
 		addInviteToGroupAction(user);
 	}
 	addShareContactAction(user);

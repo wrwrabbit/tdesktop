@@ -3335,6 +3335,7 @@ void ApiWrap::forwardMessages(
 		}
 		const auto requestType = Data::Histories::RequestType::Send;
 		const auto idsCopy = localIds;
+		const auto scheduled = action.options.scheduled;
 		histories.sendRequest(history, requestType, [=](Fn<void()> finish) {
 			history->sendRequestId = request(MTPmessages_ForwardMessages(
 				MTP_flags(sendFlags),
@@ -3347,6 +3348,9 @@ void ApiWrap::forwardMessages(
 				(sendAs ? sendAs->input : MTP_inputPeerEmpty()),
 				Data::ShortcutIdToMTP(_session, action.options.shortcutId)
 			)).done([=](const MTPUpdates &result) {
+				if (!scheduled) {
+					this->updates().checkForSentToScheduled(result);
+				}
 				applyUpdates(result);
 				if (shared && !--shared->requestsLeft) {
 					shared->callback();
@@ -3509,6 +3513,7 @@ void ApiWrap::sendVoiceMessage(
 		QByteArray result,
 		VoiceWaveform waveform,
 		crl::time duration,
+		bool video,
 		const SendAction &action) {
 	const auto caption = TextWithTags();
 	const auto to = FileLoadTaskOptions(action);
@@ -3517,6 +3522,7 @@ void ApiWrap::sendVoiceMessage(
 		result,
 		duration,
 		waveform,
+		video,
 		to,
 		caption));
 }
@@ -4235,6 +4241,7 @@ void ApiWrap::sendMultiPaidMedia(
 	auto &histories = history->owner().histories();
 	const auto peer = history->peer;
 	const auto itemId = item->fullId();
+	album->sent = true;
 	histories.sendPreparedMessage(
 		history,
 		replyTo,
@@ -4307,6 +4314,9 @@ void ApiWrap::sendAlbumWithCancelled(
 }
 
 void ApiWrap::sendAlbumIfReady(not_null<SendingAlbum*> album) {
+	if (album->sent) {
+		return;
+	}
 	const auto groupId = album->groupId;
 	if (album->items.empty()) {
 		_sendingAlbums.remove(groupId);
@@ -4331,6 +4341,7 @@ void ApiWrap::sendAlbumIfReady(not_null<SendingAlbum*> album) {
 		return;
 	} else if (medias.size() < 2) {
 		const auto &single = medias.front().data();
+		album->sent = true;
 		sendMediaWithRandomId(
 			sample,
 			single.vmedia(),
@@ -4357,6 +4368,7 @@ void ApiWrap::sendAlbumIfReady(not_null<SendingAlbum*> album) {
 		| (album->options.invertCaption ? Flag::f_invert_media : Flag(0));
 	auto &histories = history->owner().histories();
 	const auto peer = history->peer;
+	album->sent = true;
 	histories.sendPreparedMessage(
 		history,
 		replyTo,

@@ -785,9 +785,9 @@ bool CopyPeerId(
 		Window::SessionController *controller,
 		const Match &match,
 		const QVariant &context) {
-	TextUtilities::SetClipboardText(TextForMimeData{ match->captured(1) });
+	TextUtilities::SetClipboardText({ match->captured(1) });
 	if (controller) {
-		controller->showToast(tr::lng_text_copied(tr::now));
+		controller->showToast(u"ID copied to clipboard."_q);
 	}
 	return true;
 }
@@ -926,6 +926,34 @@ bool ShowCollectibleUsername(
 	return true;
 }
 
+bool CopyUsernameLink(
+		Window::SessionController *controller,
+		const Match &match,
+		const QVariant &context) {
+	if (!controller) {
+		return false;
+	}
+	const auto username = match->captured(1);
+	TextUtilities::SetClipboardText({
+		controller->session().createInternalLinkFull(username)
+	});
+	controller->showToast(tr::lng_username_copied(tr::now));
+	return true;
+}
+
+bool CopyUsername(
+		Window::SessionController *controller,
+		const Match &match,
+		const QVariant &context) {
+	if (!controller) {
+		return false;
+	}
+	const auto username = match->captured(1);
+	TextUtilities::SetClipboardText({ '@' + username });
+	controller->showToast(tr::lng_username_text_copied(tr::now));
+	return true;
+}
+
 bool ShowStarsExamples(
 		Window::SessionController *controller,
 		const Match &match,
@@ -934,6 +962,17 @@ bool ShowStarsExamples(
 		return false;
 	}
 	controller->show(Dialogs::StarsExamplesBox(controller));
+	return true;
+}
+
+bool ShowPopularAppsAbout(
+		Window::SessionController *controller,
+		const Match &match,
+		const QVariant &context) {
+	if (!controller) {
+		return false;
+	}
+	controller->show(Dialogs::PopularAppsAboutBox(controller));
 	return true;
 }
 
@@ -1392,8 +1431,20 @@ const std::vector<LocalUrlHandler> &InternalUrlHandlers() {
 			ShowCollectibleUsername,
 		},
 		{
+			u"^username_link/([a-zA-Z0-9\\-\\_\\.]+)@([0-9]+)$"_q,
+			CopyUsernameLink,
+		},
+		{
+			u"^username_regular/([a-zA-Z0-9\\-\\_\\.]+)@([0-9]+)$"_q,
+			CopyUsername,
+		},
+		{
 			u"^stars_examples$"_q,
 			ShowStarsExamples,
+		},
+		{
+			u"^about_popular_apps$"_q,
+			ShowPopularAppsAbout,
 		},
 	};
 	return Result;
