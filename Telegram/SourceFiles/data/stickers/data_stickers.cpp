@@ -96,8 +96,8 @@ void MaybeShowPremiumToast(
 	};
 	show->showToast({
 		.text = std::move(text),
-		.duration = kPremiumToastDuration,
 		.filter = filter,
+		.duration = kPremiumToastDuration,
 	});
 }
 
@@ -228,7 +228,7 @@ void Stickers::incrementSticker(not_null<DocumentData*> document) {
 	auto index = set->stickers.indexOf(document);
 	if (index > 0) {
 		if (set->dates.empty()) {
-			session().api().requestRecentStickersForce();
+			session().api().requestSpecialStickersForce(false, true, false);
 		} else {
 			Assert(set->dates.size() == set->stickers.size());
 			set->dates.erase(set->dates.begin() + index);
@@ -260,7 +260,7 @@ void Stickers::incrementSticker(not_null<DocumentData*> document) {
 				set->emoji[emoji].push_front(document);
 			}
 		} else {
-			session().api().requestRecentStickersForce();
+			session().api().requestSpecialStickersForce(false, true, false);
 		}
 
 		writeRecentStickers = true;
@@ -398,7 +398,6 @@ void Stickers::applyArchivedResult(
 	Ui::Toast::Show(Ui::Toast::Config{
 		.text = { tr::lng_stickers_packs_archived(tr::now) },
 		.st = &st::stickersToast,
-		.multiline = true,
 	});
 	//Ui::show(
 	//	Box<StickersBox>(archived, &session()),

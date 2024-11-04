@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "apiwrap.h"
 #include "base/platform/base_platform_info.h"
+#include "base/qt_signal_producer.h"
 #include "boxes/share_box.h"
 #include "core/application.h"
 #include "core/file_utilities.h"
@@ -41,6 +42,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/confirm_box.h"
 #include "ui/layers/layer_widget.h"
 #include "ui/text/text_utilities.h"
+#include "ui/toast/toast.h"
 #include "ui/basic_click_handlers.h"
 #include "webview/webview_data_stream_memory.h"
 #include "webview/webview_interface.h"
@@ -49,6 +51,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller_link_info.h"
 
 #include <QtGui/QGuiApplication>
+#include <QtGui/QWindow>
 
 namespace Iv {
 namespace {
@@ -57,6 +60,7 @@ constexpr auto kGeoPointScale = 1;
 constexpr auto kGeoPointZoomMin = 13;
 constexpr auto kMaxLoadParts = 5;
 constexpr auto kKeepLoadingParts = 8;
+constexpr auto kAllowPageReloadAfter = 3 * crl::time(1000);
 
 } // namespace
 
@@ -164,6 +168,39 @@ private:
 	rpl::event_stream<Controller::Event> _events;
 
 	rpl::lifetime _documentLifetime;
+	rpl::lifetime _lifetime;
+
+};
+
+class TonSite final : public base::has_weak_ptr {
+public:
+	TonSite(not_null<Delegate*> delegate, QString uri);
+
+	[[nodiscard]] bool active() const;
+
+	void moveTo(QString uri);
+
+	void minimize();
+
+	[[nodiscard]] rpl::producer<Controller::Event> events() const {
+		return _events.events();
+	}
+
+	[[nodiscard]] rpl::lifetime &lifetime() {
+		return _lifetime;
+	}
+
+private:
+	void createController();
+
+	void showWindowed();
+
+	const not_null<Delegate*> _delegate;
+	QString _uri;
+	std::unique_ptr<Controller> _controller;
+
+	rpl::event_stream<Controller::Event> _events;
+
 	rpl::lifetime _lifetime;
 
 };
@@ -297,12 +334,33 @@ ShareBoxResult Shown::shareBox(ShareBoxDescriptor &&descriptor) {
 		state->destroyRequests.fire({});
 	}, wrap->lifetime());
 
+	const auto waiting = layer->lifetime().make_state<rpl::lifetime>();
 	const auto focus = crl::guard(layer, [=] {
-		if (!layer->window()->isActiveWindow()) {
-			layer->window()->activateWindow();
+		const auto set = [=] {
 			layer->window()->setFocus();
+			layer->setInnerFocus();
+		};
+
+		const auto handle = layer->window()->windowHandle();
+		if (!handle) {
+			waiting->destroy();
+			return;
+		} else if (QGuiApplication::focusWindow() == handle) {
+			waiting->destroy();
+			set();
+		} else {
+			*waiting = base::qt_signal_producer(
+				qApp,
+				&QGuiApplication::focusWindowChanged
+			) | rpl::filter([=](QWindow *focused) {
+				const auto handle = layer->window()->windowHandle();
+				return handle && (focused == handle);
+			}) | rpl::start_with_next([=] {
+				waiting->destroy();
+				set();
+			});
+			layer->window()->activateWindow();
 		}
-		layer->setInnerFocus();
 	});
 	auto result = ShareBoxResult{
 		.focus = focus,
@@ -718,6 +776,48 @@ void Shown::minimize() {
 	}
 }
 
+TonSite::TonSite(not_null<Delegate*> delegate, QString uri)
+: _delegate(delegate)
+, _uri(uri) {
+	showWindowed();
+}
+
+void TonSite::createController() {
+	Expects(!_controller);
+
+	const auto showShareBox = [=](ShareBoxDescriptor &&descriptor) {
+		return ShareBoxResult();
+	};
+	_controller = std::make_unique<Controller>(
+		_delegate,
+		std::move(showShareBox));
+
+	_controller->events(
+	) | rpl::start_to_stream(_events, _controller->lifetime());
+}
+
+void TonSite::showWindowed() {
+	if (!_controller) {
+		createController();
+	}
+
+	_controller->showTonSite(Storage::TonSiteStorageId(), _uri);
+}
+
+bool TonSite::active() const {
+	return _controller && _controller->active();
+}
+
+void TonSite::moveTo(QString uri) {
+	_controller->showTonSite({}, uri);
+}
+
+void TonSite::minimize() {
+	if (_controller) {
+		_controller->minimize();
+	}
+}
+
 Instance::Instance(not_null<Delegate*> delegate) : _delegate(delegate) {
 }
 
@@ -761,6 +861,7 @@ void Instance::show(
 		const auto lower = event.url.toLower();
 		const auto urlChecked = lower.startsWith("http://")
 			|| lower.startsWith("https://");
+		const auto tonsite = lower.startsWith("tonsite://");
 		switch (event.type) {
 		case Type::Close:
 			_shown = nullptr;
@@ -777,8 +878,10 @@ void Instance::show(
 		case Type::OpenLinkExternal:
 			if (urlChecked) {
 				File::OpenUrl(event.url);
+				closeAll();
+			} else if (tonsite) {
+				showTonSite(event.url);
 			}
-			closeAll();
 			break;
 		case Type::OpenMedia:
 			if (const auto window = Core::App().activeWindow()) {
@@ -815,19 +918,22 @@ void Instance::show(
 			}
 			break;
 		case Type::OpenPage:
-		case Type::OpenLink:
-			if (!urlChecked) {
+		case Type::OpenLink: {
+			if (tonsite) {
+				showTonSite(event.url);
+				break;
+			} else if (!urlChecked) {
 				break;
 			}
-			_fullRequested[_shownSession].emplace(event.url);
-			_shownSession->api().request(MTPmessages_GetWebPage(
-				MTP_string(event.url),
-				MTP_int(0)
+			const auto session = _shownSession;
+			const auto url = event.url;
+			auto &requested = _fullRequested[session][url];
+			requested.lastRequestedAt = crl::now();
+			session->api().request(MTPmessages_GetWebPage(
+				MTP_string(url),
+				MTP_int(requested.hash)
 			)).done([=](const MTPmessages_WebPage &result) {
-				_shownSession->data().processUsers(result.data().vusers());
-				_shownSession->data().processChats(result.data().vchats());
-				const auto page = _shownSession->data().processWebpage(
-					result.data().vwebpage());
+				const auto page = processReceivedPage(session, url, result);
 				if (page && page->iv) {
 					const auto parts = event.url.split('#');
 					const auto hash = (parts.size() > 1) ? parts[1] : u""_q;
@@ -838,7 +944,7 @@ void Instance::show(
 			}).fail([=] {
 				UrlClickHandler::Open(event.url);
 			}).send();
-			break;
+		} break;
 		case Type::Report:
 			if (const auto controller = _shownSession->tryResolveWindow()) {
 				controller->window().activate();
@@ -954,39 +1060,114 @@ void Instance::openWithIvPreferred(
 	};
 	_ivRequestSession = session;
 	_ivRequestUri = uri;
-	_fullRequested[session].emplace(url);
+	auto &requested = _fullRequested[session][url];
+	requested.lastRequestedAt = crl::now();
 	_ivRequestId = session->api().request(MTPmessages_GetWebPage(
 		MTP_string(url),
-		MTP_int(0)
+		MTP_int(requested.hash)
 	)).done([=](const MTPmessages_WebPage &result) {
-		const auto &data = result.data();
-		session->data().processUsers(data.vusers());
-		session->data().processChats(data.vchats());
-		finish(session->data().processWebpage(data.vwebpage()));
+		finish(processReceivedPage(session, url, result));
 	}).fail([=] {
 		finish(nullptr);
 	}).send();
 }
 
+void Instance::showTonSite(
+		const QString &uri,
+		QVariant context) {
+	if (!Controller::IsGoodTonSiteUrl(uri)) {
+		Ui::Toast::Show(tr::lng_iv_not_supported(tr::now));
+		return;
+	} else if (Platform::IsMac()) {
+		// Otherwise IV is not visible under the media viewer.
+		Core::App().hideMediaView();
+	}
+	if (_tonSite) {
+		_tonSite->moveTo(uri);
+		return;
+	}
+	_tonSite = std::make_unique<TonSite>(_delegate, uri);
+	_tonSite->events() | rpl::start_with_next([=](Controller::Event event) {
+		using Type = Controller::Event::Type;
+		const auto lower = event.url.toLower();
+		const auto urlChecked = lower.startsWith("http://")
+			|| lower.startsWith("https://");
+		const auto tonsite = lower.startsWith("tonsite://");
+		switch (event.type) {
+		case Type::Close:
+			_tonSite = nullptr;
+			break;
+		case Type::Quit:
+			Shortcuts::Launch(Shortcuts::Command::Quit);
+			break;
+		case Type::OpenLinkExternal:
+			if (urlChecked) {
+				File::OpenUrl(event.url);
+				closeAll();
+			} else if (tonsite) {
+				showTonSite(event.url);
+			}
+			break;
+		case Type::OpenPage:
+		case Type::OpenLink:
+			if (urlChecked) {
+				UrlClickHandler::Open(event.url);
+			} else if (tonsite) {
+				showTonSite(event.url);
+			}
+			break;
+		}
+	}, _tonSite->lifetime());
+}
+
 void Instance::requestFull(
 		not_null<Main::Session*> session,
 		const QString &id) {
-	if (!_tracking.contains(session)
-		|| !_fullRequested[session].emplace(id).second) {
+	if (!_tracking.contains(session)) {
 		return;
 	}
+	auto &requested = _fullRequested[session][id];
+	const auto last = requested.lastRequestedAt;
+	const auto now = crl::now();
+	if (last && (now - last) < kAllowPageReloadAfter) {
+		return;
+	}
+	requested.lastRequestedAt = now;
 	session->api().request(MTPmessages_GetWebPage(
 		MTP_string(id),
-		MTP_int(0)
+		MTP_int(requested.hash)
 	)).done([=](const MTPmessages_WebPage &result) {
-		session->data().processUsers(result.data().vusers());
-		session->data().processChats(result.data().vchats());
-		const auto page = session->data().processWebpage(
-			result.data().vwebpage());
+		const auto page = processReceivedPage(session, id, result);
 		if (page && page->iv && _shown && _shownSession == session) {
 			_shown->update(page->iv.get());
 		}
 	}).send();
+}
+
+WebPageData *Instance::processReceivedPage(
+		not_null<Main::Session*> session,
+		const QString &url,
+		const MTPmessages_WebPage &result) {
+	const auto &data = result.data();
+	const auto owner = &session->data();
+	owner->processUsers(data.vusers());
+	owner->processChats(data.vchats());
+	auto &requested = _fullRequested[session][url];
+	const auto &mtp = data.vwebpage();
+	mtp.match([&](const MTPDwebPageNotModified &data) {
+		const auto page = requested.page;
+		if (const auto views = data.vcached_page_views()) {
+			if (page && page->iv) {
+				page->iv->updateCachedViews(views->v);
+			}
+		}
+	}, [&](const MTPDwebPage &data) {
+		requested.hash = data.vhash().v;
+		requested.page = owner->processWebpage(data).get();
+	}, [&](const auto &) {
+		requested.page = owner->processWebpage(mtp).get();
+	});
+	return requested.page;
 }
 
 void Instance::processOpenChannel(const QString &context) {
@@ -1034,23 +1215,30 @@ bool Instance::hasActiveWindow(not_null<Main::Session*> session) const {
 }
 
 bool Instance::closeActive() {
-	if (!_shown || !_shown->active()) {
-		return false;
+	if (_shown && _shown->active()) {
+		_shown = nullptr;
+		return true;
+	} else if (_tonSite && _tonSite->active()) {
+		_tonSite = nullptr;
+		return true;
 	}
-	_shown = nullptr;
-	return true;
+	return false;
 }
 
 bool Instance::minimizeActive() {
-	if (!_shown || !_shown->active()) {
-		return false;
+	if (_shown && _shown->active()) {
+		_shown->minimize();
+		return true;
+	} else if (_tonSite && _tonSite->active()) {
+		_tonSite->minimize();
+		return true;
 	}
-	_shown->minimize();
-	return true;
+	return false;
 }
 
 void Instance::closeAll() {
 	_shown = nullptr;
+	_tonSite = nullptr;
 }
 
 bool PreferForUri(const QString &uri) {

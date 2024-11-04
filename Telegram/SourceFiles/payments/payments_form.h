@@ -143,6 +143,7 @@ struct InvoicePremiumGiftCodeGiveaway {
 struct InvoicePremiumGiftCodeUsers {
 	std::vector<not_null<UserData*>> users;
 	ChannelData *boostPeer = nullptr;
+	TextWithEntities message;
 };
 
 struct InvoicePremiumGiftCode {
@@ -150,10 +151,11 @@ struct InvoicePremiumGiftCode {
 		InvoicePremiumGiftCodeUsers,
 		InvoicePremiumGiftCodeGiveaway> purpose;
 
-	uint64 randomId = 0;
 	QString currency;
-	uint64 amount = 0;
 	QString storeProduct;
+	std::optional<uint64> creditsAmount;
+	uint64 randomId = 0;
+	uint64 amount = 0;
 	int storeQuantity = 0;
 	int users = 0;
 	int months = 0;
@@ -167,6 +169,15 @@ struct InvoiceCredits {
 	QString currency;
 	uint64 amount = 0;
 	bool extended = false;
+	PeerId giftPeerId = PeerId(0);
+};
+
+struct InvoiceStarGift {
+	uint64 giftId = 0;
+	uint64 randomId = 0;
+	TextWithEntities message;
+	not_null<UserData*> user;
+	bool anonymous = false;
 };
 
 struct InvoiceId {
@@ -174,10 +185,12 @@ struct InvoiceId {
 		InvoiceMessage,
 		InvoiceSlug,
 		InvoicePremiumGiftCode,
-		InvoiceCredits> value;
+		InvoiceCredits,
+		InvoiceStarGift> value;
 };
 
 struct CreditsFormData {
+	InvoiceId id;
 	uint64 formId = 0;
 	uint64 botId = 0;
 	QString title;
@@ -185,6 +198,7 @@ struct CreditsFormData {
 	PhotoData *photo = nullptr;
 	InvoiceCredits invoice;
 	MTPInputInvoice inputInvoice;
+	bool starGiftForm = false;
 };
 
 struct CreditsReceiptData {
@@ -265,6 +279,8 @@ struct FormUpdate : std::variant<
 [[nodiscard]] not_null<Main::Session*> SessionFromId(const InvoiceId &id);
 
 [[nodiscard]] MTPinputStorePaymentPurpose InvoicePremiumGiftCodeGiveawayToTL(
+	const InvoicePremiumGiftCode &invoice);
+[[nodiscard]] MTPinputStorePaymentPurpose InvoiceCreditsGiveawayToTL(
 	const InvoicePremiumGiftCode &invoice);
 
 class Form final : public base::has_weak_ptr {

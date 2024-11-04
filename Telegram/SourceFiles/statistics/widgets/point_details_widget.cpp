@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "statistics/statistics_common.h"
 #include "statistics/statistics_format_values.h"
+#include "statistics/statistics_graphics.h"
 #include "statistics/view/stack_linear_chart_common.h"
 #include "ui/cached_round_corners.h"
 #include "ui/effects/ripple_animation.h"
@@ -129,15 +130,12 @@ void PaintDetails(
 PointDetailsWidget::PointDetailsWidget(
 	not_null<Ui::RpWidget*> parent,
 	const Data::StatisticalChart &chartData,
-	float64 maxAbsoluteValue,
 	bool zoomEnabled)
 : Ui::AbstractButton(parent)
 , _zoomEnabled(zoomEnabled)
 , _chartData(chartData)
 , _textStyle(st::statisticsDetailsPopupStyle)
-, _headerStyle(st::statisticsDetailsPopupHeaderStyle)
-, _valueIcon(chartData.currencyRate ? &st::statisticsCurrencyIcon : nullptr) {
-
+, _headerStyle(st::statisticsDetailsPopupHeaderStyle) {
 	if (zoomEnabled) {
 		rpl::single(rpl::empty_value()) | rpl::then(
 			style::PaletteChanged()
@@ -174,12 +172,44 @@ PointDetailsWidget::PointDetailsWidget(
 		return 0;
 	}();
 
-	const auto calculatedWidth = [&]{
+	const auto hasUsdLine = (_chartData.currencyRate != 0)
+		&& (_chartData.currency != Data::StatisticalCurrency::None)
+		&& (_chartData.lines.size() == 1);
+
+	const auto maxValueTextWidth = [&] {
+		if (hasUsdLine) {
+			auto maxValueWidth = 0;
+			const auto multiplier = float64(Data::kEarnMultiplier);
+			for (const auto &value : _chartData.lines.front().y) {
+				const auto valueText = Ui::Text::String(
+					_textStyle,
+					QString::number(value / multiplier));
+				const auto usdText = Ui::Text::String(
+					_textStyle,
+					Info::ChannelEarn::ToUsd(value, _chartData.currencyRate));
+				const auto width = std::max(
+					usdText.maxWidth(),
+					valueText.maxWidth());
+				if (width > maxValueWidth) {
+					maxValueWidth = width;
+				}
+			}
+			return maxValueWidth;
+		}
+		const auto maxAbsoluteValue = [&] {
+			auto maxValue = ChartValue(0);
+			for (const auto &l : _chartData.lines) {
+				maxValue = std::max(l.maxValue, maxValue);
+			}
+			return maxValue;
+		}();
 		const auto maxValueText = Ui::Text::String(
 			_textStyle,
 			Lang::FormatCountDecimal(maxAbsoluteValue));
-		const auto maxValueTextWidth = maxValueText.maxWidth();
+		return maxValueText.maxWidth();
+	}();
 
+	const auto calculatedWidth = [&]{
 		auto maxNameTextWidth = 0;
 		for (const auto &dataLine : _chartData.lines) {
 			const auto maxNameText = Ui::Text::String(
@@ -188,6 +218,19 @@ PointDetailsWidget::PointDetailsWidget(
 			maxNameTextWidth = std::max(
 				maxNameText.maxWidth(),
 				maxNameTextWidth);
+			if (hasUsdLine) {
+				const auto currency = Ui::Text::String(
+					_textStyle,
+					tr::lng_channel_earn_chart_overriden_detail_currency(
+						tr::now));
+				const auto usd = Ui::Text::String(
+					_textStyle,
+					tr::lng_channel_earn_chart_overriden_detail_usd(
+						tr::now));
+				maxNameTextWidth = std::max(
+					std::max(currency.maxWidth(), usd.maxWidth()),
+					maxNameTextWidth);
+			}
 		}
 		{
 			const auto maxHeaderText = Ui::Text::String(
@@ -205,7 +248,9 @@ PointDetailsWidget::PointDetailsWidget(
 			+ rect::m::sum::h(st::statisticsDetailsPopupPadding)
 			+ st::statisticsDetailsPopupPadding.left() // Between strings.
 			+ maxNameTextWidth
-			+ (_valueIcon ? _valueIcon->width() : 0)
+			+ (_valueIcon.isNull()
+				? 0
+				: _valueIcon.width() / style::DevicePixelRatio())
 			+ _maxPercentageWidth;
 	}();
 	sizeValue(
@@ -310,6 +355,9 @@ void PointDetailsWidget::setXIndex(int xIndex) {
 		}
 		_lines.push_back(std::move(textLine));
 	}
+	if (_chartData.currencyRate && _valueIcon.isNull()) {
+		_valueIcon = ChartCurrencyIcon(_chartData, _lines.front().valueColor);
+	}
 	const auto clickable = _zoomEnabled && hasPositiveValues;
 	_hasPositiveValues = hasPositiveValues;
 	QWidget::setAttribute(
@@ -408,13 +456,12 @@ void PointDetailsWidget::paintEvent(QPaintEvent *e) {
 				.outerWidth = _textRect.width(),
 				.availableWidth = valueWidth,
 			};
-			if (!i && _valueIcon) {
-				_valueIcon->paint(
-					p,
-					valueContext.position.x() - _valueIcon->width(),
+			if (!i && !_valueIcon.isNull()) {
+				p.drawImage(
+					valueContext.position.x()
+						- _valueIcon.width() / style::DevicePixelRatio(),
 					lineY,
-					valueContext.outerWidth,
-					line.valueColor);
+					_valueIcon);
 			}
 			const auto nameContext = Ui::Text::PaintContext{
 				.position = QPoint(

@@ -145,16 +145,18 @@ void SetupExperimental(
 	addToggle(Core::kOptionFractionalScalingEnabled);
 	addToggle(Window::kOptionViewProfileInChatsListContextMenu);
 	addToggle(Info::Profile::kOptionShowPeerIdBelowAbout);
-	addToggle(Ui::GL::kOptionAllowLinuxNvidiaOpenGL);
 	addToggle(Ui::kOptionUseSmallMsgBubbleRadius);
 	addToggle(Media::Player::kOptionDisableAutoplayNext);
 	addToggle(kOptionSendLargePhotos);
 	addToggle(Webview::kOptionWebviewDebugEnabled);
+	addToggle(Webview::kOptionWebviewLegacyEdge);
 	addToggle(kOptionAutoScrollInactiveChat);
 	addToggle(Window::Notifications::kOptionGNotification);
 	addToggle(Core::kOptionFreeType);
+	addToggle(Core::kOptionSkipUrlSchemeRegister);
 	addToggle(Data::kOptionExternalVideoPlayer);
 	addToggle(Window::kOptionNewWindowsSizeAsFirst);
+	addToggle(Window::kOptionDisableTouchbar);
 }
 
 } // namespace

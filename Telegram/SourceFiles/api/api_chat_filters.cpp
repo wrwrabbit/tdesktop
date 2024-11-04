@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/filter_icons.h"
 #include "ui/vertical_list.h"
+#include "ui/ui_utility.h"
 #include "window/window_session_controller.h"
 #include "styles/style_filter_icons.h"
 #include "styles/style_layers.h"
@@ -231,12 +232,12 @@ void ImportInvite(
 		api->request(MTPchatlists_JoinChatlistInvite(
 			MTP_string(slug),
 			MTP_vector<MTPInputPeer>(std::move(inputs))
-		)).done(callback).fail(error).send();
+		)).done(callback).fail(error).handleFloodErrors().send();
 	} else {
 		api->request(MTPchatlists_JoinChatlistUpdates(
 			MTP_inputChatlistDialogFilter(MTP_int(filterId)),
 			MTP_vector<MTPInputPeer>(std::move(inputs))
-		)).done(callback).fail(error).send();
+		)).done(callback).fail(error).handleFloodErrors().send();
 	}
 }
 
@@ -516,6 +517,8 @@ void ShowImportError(
 	} else {
 		window->showToast((error == u"INVITE_SLUG_EXPIRED"_q)
 			? tr::lng_group_invite_bad_link(tr::now)
+			: error.startsWith(u"FLOOD_WAIT_"_q)
+			? tr::lng_flood_error(tr::now)
 			: error);
 	}
 }

@@ -195,7 +195,7 @@ PaintRoundImageCallback PremiumsRow::generatePaintUserpicCallback(
 			const auto radius = size * Ui::ForumUserpicRadiusMultiplier();
 			p.drawRoundedRect(x, y, size, size, radius, radius);
 		}
-		st::settingsPrivacyPremium.paintInCenter(p, { x, y, size, size });
+		st::settingsPrivacyPremium.paintInCenter(p, QRect(x, y, size, size));
 	};
 }
 
@@ -356,11 +356,12 @@ void PrivacyExceptionsBoxController::rowClicked(not_null<PeerListRow*> row) {
 
 auto PrivacyExceptionsBoxController::createRow(not_null<History*> history)
 -> std::unique_ptr<Row> {
-	if (history->peer->isSelf() || history->peer->isRepliesChat()) {
+	const auto peer = history->peer;
+	if (peer->isSelf() || peer->isRepliesChat() || peer->isVerifyCodes()) {
 		return nullptr;
-	} else if (!history->peer->isUser()
-		&& !history->peer->isChat()
-		&& !history->peer->isMegagroup()) {
+	} else if (!peer->isUser()
+		&& !peer->isChat()
+		&& !peer->isMegagroup()) {
 		return nullptr;
 	}
 	auto result = std::make_unique<Row>(history);
@@ -763,9 +764,6 @@ void EditMessagesPrivacyBox(
 				lt_link,
 				link,
 				Ui::Text::WithEntities),
-			.st = &st::defaultMultilineToast,
-			.duration = Ui::Toast::kDefaultDuration * 2,
-			.multiline = true,
 			.filter = crl::guard(&controller->session(), [=](
 					const ClickHandlerPtr &,
 					Qt::MouseButton button) {

@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/shadow.h"
 #include "ui/chat/chat_style.h"
 #include "ui/text/text_utilities.h"
+#include "ui/ui_utility.h"
 #include "api/api_editing.h"
 #include "api/api_sending.h"
 #include "apiwrap.h"
@@ -340,7 +341,15 @@ void ScheduledWidget::setupComposeControls() {
 	_composeControls->fileChosen(
 	) | rpl::start_with_next([=](ChatHelpers::FileChosen data) {
 		controller()->hideLayer(anim::type::normal);
-		sendExistingDocument(data.document);
+		const auto document = data.document;
+		const auto callback = crl::guard(this, [=](Api::SendOptions options) {
+			auto messageToSend = Api::MessageToSend(
+				prepareSendAction(options));
+			messageToSend.textWithTags = data.caption;
+			sendExistingDocument(document, std::move(messageToSend));
+		});
+		controller()->show(
+			PrepareScheduleBox(this, _show, sendMenuDetails(), callback));
 	}, lifetime());
 
 	_composeControls->photoChosen(
@@ -808,18 +817,9 @@ void ScheduledWidget::edit(
 	_composeControls->focus();
 }
 
-void ScheduledWidget::sendExistingDocument(
-		not_null<DocumentData*> document) {
-	const auto callback = [=](Api::SendOptions options) {
-		sendExistingDocument(document, options);
-	};
-	controller()->show(
-		PrepareScheduleBox(this, _show, sendMenuDetails(), callback));
-}
-
 bool ScheduledWidget::sendExistingDocument(
 		not_null<DocumentData*> document,
-		Api::SendOptions options) {
+		Api::MessageToSend messageToSend) {
 	const auto error = Data::RestrictionError(
 		_history->peer,
 		ChatRestriction::SendStickers);
@@ -830,9 +830,7 @@ bool ScheduledWidget::sendExistingDocument(
 		return false;
 	}
 
-	Api::SendExistingDocument(
-		Api::MessageToSend(prepareSendAction(options)),
-		document);
+	Api::SendExistingDocument(std::move(messageToSend), document);
 
 	_composeControls->hidePanelsAnimated();
 	_composeControls->focus();
@@ -1399,7 +1397,7 @@ CopyRestrictionType ScheduledWidget::listCopyMediaRestrictionType(
 		not_null<HistoryItem*> item) {
 	if (const auto media = item->media()) {
 		if (const auto invoice = media->invoice()) {
-			if (invoice->extendedMedia) {
+			if (HasExtendedMedia(*invoice)) {
 				return CopyMediaRestrictionTypeFor(_history->peer, item);
 			}
 		}
@@ -1448,6 +1446,11 @@ void ScheduledWidget::listPaintEmpty(
 QString ScheduledWidget::listElementAuthorRank(
 		not_null<const Element*> view) {
 	return {};
+}
+
+bool ScheduledWidget::listElementHideTopicButton(
+		not_null<const Element*> view) {
+	return true;
 }
 
 History *ScheduledWidget::listTranslateHistory() {

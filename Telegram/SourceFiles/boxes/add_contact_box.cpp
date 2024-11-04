@@ -217,7 +217,9 @@ void ShowAddParticipantsError(
 					channel,
 					user,
 					ChatAdminRightsInfo(),
-					QString());
+					QString(),
+					0,
+					nullptr);
 				box->setSaveCallback(saveCallback);
 				*weak = box.data();
 				show->showBox(std::move(box));
@@ -898,9 +900,10 @@ void GroupInfoBox::checkInviteLink() {
 		channelReady();
 	} else if (_createdChannel->isFullLoaded() && !_creatingInviteLink) {
 		_creatingInviteLink = true;
-		_createdChannel->session().api().inviteLinks().create(
+		_createdChannel->session().api().inviteLinks().create({
 			_createdChannel,
-			crl::guard(this, [=](auto&&) { channelReady(); }));
+			crl::guard(this, [=](auto&&) { channelReady(); }),
+		});
 	} else {
 		_createdChannel->session().changes().peerUpdates(
 			_createdChannel,
@@ -1243,7 +1246,7 @@ void SetupChannelBox::mousePressEvent(QMouseEvent *e) {
 		showToast(tr::lng_create_channel_link_copied(tr::now));
 	} else if (_channel->isFullLoaded() && !_creatingInviteLink) {
 		_creatingInviteLink = true;
-		_channel->session().api().inviteLinks().create(_channel);
+		_channel->session().api().inviteLinks().create({ _channel });
 	}
 }
 

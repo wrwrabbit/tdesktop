@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/media/history_view_photo.h"
 
+#include "boxes/send_credits_box.h"
 #include "history/history_item_components.h"
 #include "history/history_item.h"
 #include "history/history.h"
@@ -14,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_cursor_state.h"
 #include "history/view/media/history_view_media_common.h"
 #include "history/view/media/history_view_media_spoiler.h"
+#include "lang/lang_keys.h"
 #include "media/streaming/media_streaming_instance.h"
 #include "media/streaming/media_streaming_player.h"
 #include "media/streaming/media_streaming_document.h"
@@ -23,10 +25,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/image/image.h"
 #include "ui/effects/spoiler_mess.h"
 #include "ui/chat/chat_style.h"
+#include "ui/text/text_utilities.h"
 #include "ui/grouped_layout.h"
 #include "ui/cached_round_corners.h"
 #include "ui/painter.h"
 #include "ui/power_saving.h"
+#include "ui/ui_utility.h"
 #include "data/data_session.h"
 #include "data/data_stories.h"
 #include "data/data_streaming.h"
@@ -37,7 +41,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_auto_download.h"
 #include "data/data_web_page.h"
 #include "core/application.h"
+#include "core/ui_integration.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 
 namespace HistoryView {
 namespace {
@@ -73,7 +79,10 @@ Photo::Photo(
 , _storyId(realParent->media()
 	? realParent->media()->storyId()
 	: FullStoryId())
-, _spoiler(spoiler ? std::make_unique<MediaSpoiler>() : nullptr) {
+, _spoiler((spoiler || realParent->isMediaSensitive())
+	? std::make_unique<MediaSpoiler>()
+	: nullptr)
+, _sensitiveSpoiler(realParent->isMediaSensitive() ? 1 : 0) {
 	create(realParent->fullId());
 }
 
@@ -125,6 +134,7 @@ void Photo::create(FullMsgId contextId, PeerData *chat) {
 	if (_spoiler) {
 		createSpoilerLink(_spoiler.get());
 	}
+	_purchasedPriceTag = hasPurchasedTag() ? 1 : 0;
 }
 
 void Photo::ensureDataMediaCreated() const {
@@ -140,7 +150,8 @@ void Photo::dataMediaCreated() const {
 
 	if (_data->inlineThumbnailBytes().isEmpty()
 		&& !_dataMedia->image(PhotoSize::Large)
-		&& !_dataMedia->image(PhotoSize::Thumbnail)) {
+		&& !_dataMedia->image(PhotoSize::Thumbnail)
+		&& !_data->extendedMediaPreview()) {
 		_dataMedia->wanted(PhotoSize::Small, _realParent->fullId());
 	}
 	history()->owner().registerHeavyViewPart(_parent);
@@ -219,10 +230,14 @@ QSize Photo::countCurrentSize(int newWidth) {
 			: st::minPhotoSize),
 		thumbMaxWidth);
 	const auto dimensions = photoSize();
-	auto pix = CountPhotoMediaSize(
-		CountDesiredMediaSize(dimensions),
-		newWidth,
-		maxWidth());
+	auto pix = _data->extendedMediaVideoDuration()
+		? CountMediaSize(
+			CountDesiredMediaSize(dimensions),
+			newWidth)
+		: CountPhotoMediaSize(
+			CountDesiredMediaSize(dimensions),
+			newWidth,
+			maxWidth());
 	newWidth = qMax(pix.width(), minWidth);
 	auto newHeight = qMax(pix.height(), st::minPhotoSize);
 	if (_parent->hasBubble()) {
@@ -244,6 +259,7 @@ QSize Photo::countCurrentSize(int newWidth) {
 	const auto enlargeOuter = 2 * st::historyPageEnlargeSkip + enlargeInner;
 	const auto showEnlarge = (_parent->media() != this)
 		&& _parent->data()->media()
+		&& !_parent->data()->isSponsored()
 		&& _parent->data()->media()->webpage()
 		&& _parent->data()->media()->webpage()->suggestEnlargePhoto()
 		&& (newWidth >= enlargeOuter)
@@ -273,8 +289,9 @@ void Photo::draw(Painter &p, const PaintContext &context) const {
 	_dataMedia->automaticLoad(_realParent->fullId(), _parent->data());
 	const auto st = context.st;
 	const auto sti = context.imageStyle();
-	auto loaded = _dataMedia->loaded();
-	auto displayLoading = _data->displayLoading();
+	const auto preview = _data->extendedMediaPreview();
+	const auto loaded = preview || _dataMedia->loaded();
+	const auto displayLoading = !preview && _data->displayLoading();
 
 	auto inWebPage = (_parent->media() != this);
 	auto paintx = 0, painty = 0, paintw = width(), painth = height();
@@ -321,7 +338,8 @@ void Photo::draw(Painter &p, const PaintContext &context) const {
 	}
 
 	const auto showEnlarge = loaded && _showEnlarge;
-	const auto paintInCenter = (radial || (!loaded && !_data->loading()));
+	const auto paintInCenter = !_sensitiveSpoiler
+		&& (radial || (!loaded && !_data->loading()));
 	if (paintInCenter || showEnlarge) {
 		p.setPen(Qt::NoPen);
 		if (context.selected()) {
@@ -361,6 +379,10 @@ void Photo::draw(Painter &p, const PaintContext &context) const {
 			QRect rinner(inner.marginsRemoved(QMargins(st::msgFileRadialLine, st::msgFileRadialLine, st::msgFileRadialLine, st::msgFileRadialLine)));
 			_animation->radial.draw(p, rinner, st::msgFileRadialLine, sti->historyFileThumbRadialFg);
 		}
+	} else if (_sensitiveSpoiler || preview) {
+		drawSpoilerTag(p, rthumb, context, [&] {
+			return spoilerTagBackground();
+		});
 	}
 	if (showEnlarge) {
 		auto hq = PainterHighQualityEnabler(p);
@@ -368,6 +390,14 @@ void Photo::draw(Painter &p, const PaintContext &context) const {
 		const auto radius = st::historyPageEnlargeRadius;
 		p.drawRoundedRect(rect, radius, radius);
 		sti->historyPageEnlarge.paintInCenter(p, rect);
+	}
+	if (_purchasedPriceTag) {
+		auto geometry = rthumb;
+		if (showEnlarge) {
+			const auto rect = enlargeRect();
+			geometry.setY(rect.y() + rect.height());
+		}
+		drawPurchasedTag(p, geometry, context);
 	}
 
 	// date
@@ -391,6 +421,20 @@ void Photo::draw(Painter &p, const PaintContext &context) const {
 			_parent->drawRightAction(p, context, fastShareLeft, fastShareTop, 2 * paintx + paintw);
 		}
 	}
+}
+
+void Photo::drawSpoilerTag(
+		Painter &p,
+		QRect rthumb,
+		const PaintContext &context,
+		Fn<QImage()> generateBackground) const {
+	Media::drawSpoilerTag(
+		p,
+		_spoiler.get(),
+		_spoilerTag,
+		rthumb,
+		context,
+		std::move(generateBackground));
 }
 
 void Photo::validateUserpicImageCache(QSize size, bool forum) const {
@@ -600,6 +644,14 @@ QRect Photo::enlargeRect() const {
 	};
 }
 
+ClickHandlerPtr Photo::spoilerTagLink() const {
+	return Media::spoilerTagLink(_spoiler.get(), _spoilerTag);
+}
+
+QImage Photo::spoilerTagBackground() const {
+	return _spoiler ? _spoiler->background : QImage();
+}
+
 TextState Photo::textState(QPoint point, StateRequest request) const {
 	auto result = TextState(_parent);
 
@@ -614,7 +666,9 @@ TextState Photo::textState(QPoint point, StateRequest request) const {
 	if (QRect(paintx, painty, paintw, painth).contains(point)) {
 		ensureDataMediaCreated();
 		result.link = (_spoiler && !_spoiler->revealed)
-			? _spoiler->link
+			? ((_data->extendedMediaPreview() || _sensitiveSpoiler)
+				? spoilerTagLink()
+				: _spoiler->link)
 			: _data->uploading()
 			? _cancell
 			: _dataMedia->loaded()
@@ -678,8 +732,9 @@ void Photo::drawGrouped(
 
 	const auto st = context.st;
 	const auto sti = context.imageStyle();
-	const auto loaded = _dataMedia->loaded();
-	const auto displayLoading = _data->displayLoading();
+	const auto preview = _data->extendedMediaPreview();
+	const auto loaded = preview || _dataMedia->loaded();
+	const auto displayLoading = !preview && _data->displayLoading();
 
 	if (displayLoading) {
 		ensureAnimation();
@@ -718,10 +773,11 @@ void Photo::drawGrouped(
 		p.setOpacity(1.);
 	}
 
-	const auto displayState = radial
-		|| (!loaded && !_data->loading())
-		|| _data->waitingForAlbum();
-	if (displayState) {
+	const auto paintInCenter = !_sensitiveSpoiler
+		&& (radial
+			|| (!loaded && !_data->loading())
+			|| _data->waitingForAlbum());
+	if (paintInCenter) {
 		const auto radialOpacity = radial
 			? _animation->radial.opacity()
 			: 1.;
@@ -784,15 +840,18 @@ TextState Photo::getStateGrouped(
 		return {};
 	}
 	ensureDataMediaCreated();
-	return TextState(_parent, (_spoiler && !_spoiler->revealed)
-		? _spoiler->link
+	auto link = (_spoiler && !_spoiler->revealed)
+		? ((_data->extendedMediaPreview() || _sensitiveSpoiler)
+			? spoilerTagLink()
+			: _spoiler->link)
 		: _data->uploading()
 		? _cancell
 		: _dataMedia->loaded()
 		? _openl
 		: _data->loading()
 		? _cancell
-		: _savel);
+		: _savel;
+	return TextState(_parent, std::move(link));
 }
 
 float64 Photo::dataProgress() const {
@@ -830,7 +889,8 @@ void Photo::validateGroupedCache(
 
 	ensureDataMediaCreated();
 
-	const auto loaded = _dataMedia->loaded();
+	const auto preview = _data->extendedMediaPreview();
+	const auto loaded = preview || _dataMedia->loaded();
 	const auto loadLevel = loaded
 		? 2
 		: (_dataMedia->thumbnailInline()

@@ -13,8 +13,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_view_highlight_manager.h"
 #include "history/history_view_top_toast.h"
 #include "history/history.h"
-#include "chat_helpers/field_autocomplete.h"
 #include "chat_helpers/field_characters_count_manager.h"
+#include "data/data_report.h"
 #include "window/section_widget.h"
 #include "ui/widgets/fields/input_field.h"
 #include "mtproto/sender.h"
@@ -22,7 +22,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 enum class SendMediaType;
 class MessageLinksParser;
 struct InlineBotQuery;
-struct AutocompleteQuery;
 
 namespace MTP {
 class Error;
@@ -37,6 +36,7 @@ struct Details;
 } // namespace SendMenu
 
 namespace Api {
+struct MessageToSend;
 struct SendOptions;
 struct SendAction;
 } // namespace Api
@@ -70,11 +70,14 @@ struct PreparedList;
 class SendFilesWay;
 class SendAsButton;
 class SpoilerAnimation;
-enum class ReportReason;
 class ChooseThemeController;
 class ContinuousScroll;
 struct ChatPaintHighlight;
 } // namespace Ui
+
+namespace Ui::Emoji {
+class SuggestionsController;
+} // namespace Ui::Emoji
 
 namespace Window {
 class SessionController;
@@ -83,10 +86,13 @@ class SessionController;
 namespace ChatHelpers {
 class TabbedPanel;
 class TabbedSelector;
+class FieldAutocomplete;
+struct FileChosen;
 } // namespace ChatHelpers
 
 namespace HistoryView {
 class StickerToast;
+class PaidReactionToast;
 class TopBarWidget;
 class ContactStatus;
 class BusinessBotStatus;
@@ -123,8 +129,6 @@ public:
 		QWidget *parent,
 		not_null<Window::SessionController*> controller);
 
-	void start();
-
 	void historyLoaded();
 
 	[[nodiscard]] bool preventsClose(Fn<void()> &&continueCallback) const;
@@ -156,7 +160,6 @@ public:
 
 	bool updateReplaceMediaButton();
 	void updateFieldPlaceholder();
-	bool updateStickersByEmoji();
 
 	bool confirmSendingFiles(const QStringList &files);
 	bool confirmSendingFiles(not_null<const QMimeData*> data);
@@ -235,8 +238,8 @@ public:
 		const TextWithEntities &highlightPart = {},
 		int highlightPartOffsetHint = 0);
 	void setChooseReportMessagesDetails(
-		Ui::ReportReason reason,
-		Fn<void(MessageIdsList)> callback);
+		Data::ReportInput reportInput,
+		Fn<void(std::vector<MsgId>)> callback);
 	void clearAllLoadRequests();
 	void clearSupportPreloadRequest();
 	void clearDelayedShowAtRequest();
@@ -248,8 +251,6 @@ public:
 	[[nodiscard]] Ui::ChatTheme *customChatTheme() const;
 
 	void applyCloudDraft(History *history);
-
-	void updateFieldSubmitSettings();
 
 	void activate();
 	void setInnerFocus();
@@ -272,7 +273,7 @@ public:
 	[[nodiscard]] SendMenu::Details saveMenuDetails() const;
 	bool sendExistingDocument(
 		not_null<DocumentData*> document,
-		Api::SendOptions options,
+		Api::MessageToSend messageToSend,
 		std::optional<MsgId> localId = std::nullopt);
 	bool sendExistingPhoto(
 		not_null<PhotoData*> photo,
@@ -327,8 +328,8 @@ private:
 		int value;
 	};
 	struct ChooseMessagesForReport {
-		Ui::ReportReason reason = {};
-		Fn<void(MessageIdsList)> callback;
+		Data::ReportInput reportInput;
+		Fn<void(std::vector<MsgId>)> callback;
 		bool active = false;
 	};
 	struct ItemRevealAnimation {
@@ -366,17 +367,17 @@ private:
 	void fieldFocused();
 	void fieldResized();
 
-	void insertHashtagOrBotCommand(
-		QString str,
-		FieldAutocomplete::ChooseMethod method);
+	void initFieldAutocomplete();
 	void cancelInlineBot();
 	void saveDraft(bool delayed = false);
 	void saveCloudDraft();
 	void saveDraftDelayed();
-	void checkFieldAutocomplete();
 	void showMembersDropdown();
 	void windowIsVisibleChanged();
 	void saveFieldToHistoryLocalDraft();
+	void fileChosen(ChatHelpers::FileChosen &&data);
+
+	void updateFieldSubmitSettings();
 
 	// Checks if we are too close to the top or to the bottom
 	// in the scroll area and preloads history if needed.
@@ -483,8 +484,6 @@ private:
 	void orderWidgets();
 
 	[[nodiscard]] InlineBotQuery parseInlineBotQuery() const;
-	[[nodiscard]] auto parseMentionHashtagBotCommandQuery() const
-		-> AutocompleteQuery;
 
 	void clearInlineBot();
 	void inlineBotChanged();
@@ -505,7 +504,7 @@ private:
 	int countMembersDropdownHeightMax() const;
 
 	void updateReplyToName();
-	bool editingMessage() const {
+	[[nodiscard]] bool editingMessage() const {
 		return _editMsgId != 0;
 	}
 
@@ -738,7 +737,8 @@ private:
 
 	HistoryView::CornerButtons _cornerButtons;
 
-	const object_ptr<FieldAutocomplete> _fieldAutocomplete;
+	std::unique_ptr<ChatHelpers::FieldAutocomplete> _autocomplete;
+	std::unique_ptr<Ui::Emoji::SuggestionsController> _emojiSuggestions;
 	object_ptr<Support::Autocomplete> _supportAutocomplete;
 
 	UserData *_inlineBot = nullptr;
@@ -805,8 +805,6 @@ private:
 
 	DragArea::Areas _attachDragAreas;
 
-	Fn<void()> _raiseEmojiSuggestions;
-
 	bool _nonEmptySelection = false;
 
 	TextUpdateEvents _textUpdateEvents = (TextUpdateEvents() | TextUpdateEvent::SaveDraft | TextUpdateEvent::SendTyping);
@@ -825,6 +823,8 @@ private:
 	HistoryView::InfoTooltip _topToast;
 	std::unique_ptr<HistoryView::StickerToast> _stickerToast;
 	std::unique_ptr<ChooseMessagesForReport> _chooseForReport;
+
+	std::unique_ptr<HistoryView::PaidReactionToast> _paidReactionToast;
 
 	base::flat_set<not_null<HistoryItem*>> _itemRevealPending;
 	base::flat_map<

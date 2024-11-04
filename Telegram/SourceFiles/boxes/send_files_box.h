@@ -28,6 +28,7 @@ enum class SendType;
 namespace ChatHelpers {
 class TabbedPanel;
 class Show;
+class FieldAutocomplete;
 } // namespace ChatHelpers
 
 namespace Ui {
@@ -126,6 +127,8 @@ public:
 		_cancelledCallback = std::move(callback);
 	}
 
+	void showFinished() override;
+
 	~SendFilesBox();
 
 protected:
@@ -149,7 +152,8 @@ private:
 			int from,
 			int till,
 			Fn<bool()> gifPaused,
-			Ui::SendFilesWay way);
+			Ui::SendFilesWay way,
+			Fn<bool()> canToggleSpoiler);
 		Block(Block &&other) = default;
 		Block &operator=(Block &&other) = default;
 
@@ -160,10 +164,13 @@ private:
 		[[nodiscard]] rpl::producer<int> itemDeleteRequest() const;
 		[[nodiscard]] rpl::producer<int> itemReplaceRequest() const;
 		[[nodiscard]] rpl::producer<int> itemModifyRequest() const;
+		[[nodiscard]] rpl::producer<> orderUpdated() const;
 
 		void setSendWay(Ui::SendFilesWay way);
 		void toggleSpoilers(bool enabled);
 		void applyChanges();
+
+		[[nodiscard]] QImage generatePriceTagBackground() const;
 
 	private:
 		base::unique_qptr<Ui::RpWidget> _preview;
@@ -190,12 +197,19 @@ private:
 	void addMenuButton();
 	void applyBlockChanges();
 	void toggleSpoilers(bool enabled);
+	void changePrice();
+
+	[[nodiscard]] bool canChangePrice() const;
+	[[nodiscard]] bool hasPrice() const;
+	void refreshPriceTag();
+	[[nodiscard]] QImage preparePriceTagBg(QSize size) const;
 
 	bool validateLength(const QString &text) const;
 	void refreshButtons();
 	void refreshControls(bool initial = false);
 	void setupSendWayControls();
 	void setupCaption();
+	void setupCaptionAutocomplete();
 
 	void setupEmojiPanel();
 	void updateSendWayControls();
@@ -247,14 +261,19 @@ private:
 	SendFilesLimits _limits = {};
 	Fn<MenuDetails()> _sendMenuDetails;
 	Fn<void(MenuAction, MenuDetails)> _sendMenuCallback;
+
 	PeerData *_captionToPeer = nullptr;
 	SendFilesCheck _check;
 	SendFilesConfirmed _confirmedCallback;
 	Fn<void()> _cancelledCallback;
+	rpl::variable<uint64> _price = 0;
+	std::unique_ptr<Ui::RpWidget> _priceTag;
+	QImage _priceTagBg;
 	bool _confirmed = false;
 	bool _invertCaption = false;
 
 	object_ptr<Ui::InputField> _caption = { nullptr };
+	std::unique_ptr<ChatHelpers::FieldAutocomplete> _autocomplete;
 	TextWithTags _prefilledCaptionText;
 	object_ptr<Ui::EmojiButton> _emojiToggle = { nullptr };
 	base::unique_qptr<ChatHelpers::TabbedPanel> _emojiPanel;

@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "ui/boxes/report_box_graphics.h" // AddReportOptionButton.
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
@@ -23,11 +24,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
-#include "ui/widgets/popup_menu.h"
 #include "ui/widgets/label_with_custom_emoji.h"
+#include "ui/widgets/menu/menu_add_action_callback.h"
+#include "ui/widgets/menu/menu_add_action_callback_factory.h"
+#include "ui/widgets/popup_menu.h"
 #include "styles/style_channel_earn.h"
 #include "styles/style_chat.h"
 #include "styles/style_layers.h"
+#include "styles/style_media_view.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_premium.h"
 #include "styles/style_settings.h"
@@ -235,45 +239,10 @@ void ShowReportSponsoredBox(
 					box->setTitle(rpl::single(result.title));
 
 					for (const auto &option : result.options) {
-						const auto button = box->verticalLayout()->add(
-							object_ptr<Ui::SettingsButton>(
-								box,
-								rpl::single(QString()),
-								st::settingsButtonNoIcon));
-						const auto label = Ui::CreateChild<Ui::FlatLabel>(
-							button,
-							rpl::single(option.text),
-							st::sponsoredReportLabel);
-						const auto icon = Ui::CreateChild<Ui::RpWidget>(
-							button);
-						icon->resize(st::settingsPremiumArrow.size());
-						icon->paintRequest(
-						) | rpl::start_with_next([=, w = icon->width()] {
-							auto p = Painter(icon);
-							st::settingsPremiumArrow.paint(p, 0, 0, w);
-						}, icon->lifetime());
-						button->sizeValue(
-						) | rpl::start_with_next([=](const QSize &size) {
-							const auto left = button->st().padding.left();
-							const auto right = button->st().padding.right();
-							icon->moveToRight(
-								right,
-								(size.height() - icon->height()) / 2);
-							label->resizeToWidth(size.width()
-								- icon->width()
-								- left
-								- st::settingsButtonRightSkip
-								- right);
-							label->moveToLeft(
-								left,
-								(size.height() - label->height()) / 2);
-							button->resize(
-								button->width(),
-								rect::m::sum::v(button->st().padding)
-									+ label->height());
-						}, button->lifetime());
-						label->setAttribute(Qt::WA_TransparentForMouseEvents);
-						icon->setAttribute(Qt::WA_TransparentForMouseEvents);
+						const auto button = Ui::AddReportOptionButton(
+							box->verticalLayout(),
+							option.text,
+							nullptr);
 						button->setClickedCallback([=] {
 							repeatRequest(repeatRequest, option.id);
 						});
@@ -333,29 +302,32 @@ void ShowReportSponsoredBox(
 
 } // namespace
 
-void ShowSponsored(
+void FillSponsored(
 		not_null<Ui::RpWidget*> parent,
+		const Ui::Menu::MenuCallback &addAction,
 		std::shared_ptr<ChatHelpers::Show> show,
-		not_null<HistoryItem*> item) {
+		not_null<HistoryItem*> item,
+		bool mediaViewer) {
 	Expects(item->isSponsored());
 
 	const auto session = &item->history()->session();
 
-	const auto menu = Ui::CreateChild<Ui::PopupMenu>(
-		parent.get(),
-		st::popupMenuWithIcons);
-
-	menu->addAction(tr::lng_sponsored_menu_revenued_about(tr::now), [=] {
+	addAction(tr::lng_sponsored_menu_revenued_about(tr::now), [=] {
 		show->show(Box(AboutBox, show));
-	}, &st::menuIconInfo);
+	}, (mediaViewer ? &st::mediaMenuIconInfo : &st::menuIconInfo));
 
-	menu->addAction(tr::lng_sponsored_menu_revenued_report(tr::now), [=] {
+	addAction(tr::lng_sponsored_menu_revenued_report(tr::now), [=] {
 		ShowReportSponsoredBox(show, item);
-	}, &st::menuIconBlock);
+	}, (mediaViewer ? &st::mediaMenuIconBlock : &st::menuIconBlock));
 
-	menu->addSeparator(&st::expandedMenuSeparator);
+	addAction({
+		.separatorSt = (mediaViewer
+			? &st::mediaviewMenuSeparator
+			: &st::expandedMenuSeparator),
+		.isSeparator = true,
+	});
 
-	menu->addAction(tr::lng_sponsored_hide_ads(tr::now), [=] {
+	addAction(tr::lng_sponsored_hide_ads(tr::now), [=] {
 		if (session->premium()) {
 			using Result = Data::SponsoredReportResult;
 			session->sponsoredMessages().createReportCallback(
@@ -363,7 +335,25 @@ void ShowSponsored(
 		} else {
 			ShowPremiumPreviewBox(show, PremiumFeature::NoAds);
 		}
-	}, &st::menuIconCancel);
+	}, (mediaViewer ? &st::mediaMenuIconCancel : &st::menuIconCancel));
+}
+
+void ShowSponsored(
+		not_null<Ui::RpWidget*> parent,
+		std::shared_ptr<ChatHelpers::Show> show,
+		not_null<HistoryItem*> item) {
+	Expects(item->isSponsored());
+
+	const auto menu = Ui::CreateChild<Ui::PopupMenu>(
+		parent.get(),
+		st::popupMenuWithIcons);
+
+	FillSponsored(
+		parent,
+		Ui::Menu::CreateAddActionCallback(menu),
+		show,
+		item,
+		false);
 
 	menu->popup(QCursor::pos());
 }

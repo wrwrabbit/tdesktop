@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/animations.h"
 #include "base/timer.h"
 #include "base/object_ptr.h"
+#include "data/data_report.h"
 #include "dialogs/dialogs_key.h"
 
 namespace Main {
@@ -27,7 +28,6 @@ class UnreadBadge;
 class InputField;
 class CrossButton;
 class InfiniteRadialAnimation;
-enum class ReportReason;
 template <typename Widget>
 class FadeWrapScaled;
 } // namespace Ui
@@ -75,7 +75,7 @@ public:
 		SendActionPainter *sendAction);
 	void setCustomTitle(const QString &title);
 
-	void showChooseMessagesForReport(Ui::ReportReason reason);
+	void showChooseMessagesForReport(Data::ReportInput reportInput);
 	void clearChooseMessagesForReport();
 
 	bool toggleSearch(bool shown, anim::type animated);
@@ -131,6 +131,7 @@ protected:
 private:
 	struct EmojiInteractionSeenAnimation;
 
+	[[nodiscard]] bool rootChatsListBar() const;
 	void refreshInfoButton();
 	void refreshLang();
 	void updateSearchVisibility();
@@ -182,7 +183,7 @@ private:
 
 	void refreshUnreadBadge();
 	void updateUnreadBadge();
-	void setChooseForReportReason(std::optional<Ui::ReportReason> reason);
+	void setChooseForReportReason(std::optional<Data::ReportInput>);
 	void toggleSelectedControls(bool shown);
 	[[nodiscard]] bool showSelectedActions() const;
 
@@ -246,7 +247,7 @@ private:
 	std::unique_ptr<Ui::InfiniteRadialAnimation> _connecting;
 
 	SendActionPainter *_sendAction = nullptr;
-	std::optional<Ui::ReportReason> _chooseForReportReason;
+	std::optional<Data::ReportInput> _chooseForReportReason;
 
 	base::Timer _onlineUpdater;
 

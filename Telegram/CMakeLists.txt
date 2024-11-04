@@ -37,6 +37,10 @@ include(cmake/td_scheme.cmake)
 include(cmake/td_ui.cmake)
 include(cmake/generate_appdata_changelog.cmake)
 
+if (DESKTOP_APP_TEST_APPS)
+    include(cmake/tests.cmake)
+endif()
+
 if (WIN32)
     include(cmake/generate_midl.cmake)
     generate_midl(Telegram ${src_loc}
@@ -132,6 +136,7 @@ PRIVATE
     api/api_earn.h
     api/api_editing.cpp
     api/api_editing.h
+    api/api_filter_updates.h
     api/api_global_privacy.cpp
     api/api_global_privacy.h
     api/api_hash.cpp
@@ -170,6 +175,10 @@ PRIVATE
     api/api_single_message_search.h
     api/api_statistics.cpp
     api/api_statistics.h
+    api/api_statistics_data_deserialize.cpp
+    api/api_statistics_data_deserialize.h
+    api/api_statistics_sender.cpp
+    api/api_statistics_sender.h
     api/api_text_entities.cpp
     api/api_text_entities.h
     api/api_toggling_media.cpp
@@ -273,6 +282,8 @@ PRIVATE
     boxes/edit_caption_box.h
     boxes/edit_privacy_box.cpp
     boxes/edit_privacy_box.h
+    boxes/gift_credits_box.cpp
+    boxes/gift_credits_box.h
     boxes/gift_premium_box.cpp
     boxes/gift_premium_box.h
     boxes/language_box.cpp
@@ -309,12 +320,16 @@ PRIVATE
     boxes/self_destruction_box.h
     boxes/send_credits_box.cpp
     boxes/send_credits_box.h
+    boxes/send_gif_with_caption_box.cpp
+    boxes/send_gif_with_caption_box.h
     boxes/send_files_box.cpp
     boxes/send_files_box.h
     boxes/sessions_box.cpp
     boxes/sessions_box.h
     boxes/share_box.cpp
     boxes/share_box.h
+    boxes/star_gift_box.cpp
+    boxes/star_gift_box.h
     boxes/sticker_set_box.cpp
     boxes/sticker_set_box.h
     boxes/stickers_box.cpp
@@ -474,8 +489,12 @@ PRIVATE
     data/business/data_business_info.h
     data/business/data_shortcut_messages.cpp
     data/business/data_shortcut_messages.h
+    data/components/credits.cpp
+    data/components/credits.h
     data/components/factchecks.cpp
     data/components/factchecks.h
+    data/components/location_pickers.cpp
+    data/components/location_pickers.h
     data/components/recent_peers.cpp
     data/components/recent_peers.h
     data/components/scheduled_messages.cpp
@@ -558,6 +577,8 @@ PRIVATE
     data/data_lastseen_status.h
     data/data_location.cpp
     data/data_location.h
+    data/data_media_preload.cpp
+    data/data_media_preload.h
     data/data_media_rotation.cpp
     data/data_media_rotation.h
     data/data_media_types.cpp
@@ -593,6 +614,7 @@ PRIVATE
     data/data_replies_list.h
     data/data_reply_preview.cpp
     data/data_reply_preview.h
+    data/data_report.h
     data/data_saved_messages.cpp
     data/data_saved_messages.h
     data/data_saved_sublist.cpp
@@ -772,8 +794,6 @@ PRIVATE
     history/view/media/history_view_dice.h
     history/view/media/history_view_document.cpp
     history/view/media/history_view_document.h
-    history/view/media/history_view_extended_preview.cpp
-    history/view/media/history_view_extended_preview.h
     history/view/media/history_view_file.cpp
     history/view/media/history_view_file.h
     history/view/media/history_view_game.cpp
@@ -867,6 +887,8 @@ PRIVATE
     history/view/history_view_message.cpp
     history/view/history_view_message.h
     history/view/history_view_object.h
+    history/view/history_view_paid_reaction_toast.cpp
+    history/view/history_view_paid_reaction_toast.h
     history/view/history_view_pinned_bar.cpp
     history/view/history_view_pinned_bar.h
     history/view/history_view_pinned_section.cpp
@@ -937,6 +959,10 @@ PRIVATE
     history/history_view_highlight_manager.h
     history/history_widget.cpp
     history/history_widget.h
+    info/bot/earn/info_bot_earn_list.cpp
+    info/bot/earn/info_bot_earn_list.h
+    info/bot/earn/info_bot_earn_widget.cpp
+    info/bot/earn/info_bot_earn_widget.h
     info/channel_statistics/boosts/create_giveaway_box.cpp
     info/channel_statistics/boosts/create_giveaway_box.h
     info/channel_statistics/boosts/giveaway/giveaway_list_controllers.cpp
@@ -945,10 +971,10 @@ PRIVATE
     info/channel_statistics/boosts/info_boosts_inner_widget.h
     info/channel_statistics/boosts/info_boosts_widget.cpp
     info/channel_statistics/boosts/info_boosts_widget.h
-    info/channel_statistics/earn/info_earn_inner_widget.cpp
-    info/channel_statistics/earn/info_earn_inner_widget.h
-    info/channel_statistics/earn/info_earn_widget.cpp
-    info/channel_statistics/earn/info_earn_widget.h
+    info/channel_statistics/earn/info_channel_earn_list.cpp
+    info/channel_statistics/earn/info_channel_earn_list.h
+    info/channel_statistics/earn/info_channel_earn_widget.cpp
+    info/channel_statistics/earn/info_channel_earn_widget.h
     info/common_groups/info_common_groups_inner_widget.cpp
     info/common_groups/info_common_groups_inner_widget.h
     info/common_groups/info_common_groups_widget.cpp
@@ -976,6 +1002,10 @@ PRIVATE
     info/media/info_media_widget.h
     info/members/info_members_widget.cpp
     info/members/info_members_widget.h
+    info/peer_gifts/info_peer_gifts_common.cpp
+    info/peer_gifts/info_peer_gifts_common.h
+    info/peer_gifts/info_peer_gifts_widget.cpp
+    info/peer_gifts/info_peer_gifts_widget.h
     info/polls/info_polls_results_inner_widget.cpp
     info/polls/info_polls_results_inner_widget.h
     info/polls/info_polls_results_widget.cpp
@@ -1275,6 +1305,8 @@ PRIVATE
     payments/payments_form.h
     payments/payments_non_panel_process.cpp
     payments/payments_non_panel_process.h
+    payments/payments_reaction_process.cpp
+    payments/payments_reaction_process.h
     platform/linux/file_utilities_linux.cpp
     platform/linux/file_utilities_linux.h
     platform/linux/launcher_linux.cpp
@@ -1507,6 +1539,10 @@ PRIVATE
     support/support_preload.h
     support/support_templates.cpp
     support/support_templates.h
+    ui/boxes/edit_invite_link_session.cpp
+    ui/boxes/edit_invite_link_session.h
+    ui/boxes/peer_qr_box.cpp
+    ui/boxes/peer_qr_box.h
     ui/chat/attach/attach_item_single_file_preview.cpp
     ui/chat/attach/attach_item_single_file_preview.h
     ui/chat/attach/attach_item_single_media_preview.cpp
@@ -1515,6 +1551,10 @@ PRIVATE
     ui/chat/choose_send_as.h
     ui/chat/choose_theme_controller.cpp
     ui/chat/choose_theme_controller.h
+    ui/controls/emoji_button_factory.cpp
+    ui/controls/emoji_button_factory.h
+    ui/controls/location_picker.cpp
+    ui/controls/location_picker.h
     ui/controls/silent_toggle.cpp
     ui/controls/silent_toggle.h
     ui/controls/userpic_button.cpp
@@ -1536,6 +1576,12 @@ PRIVATE
     ui/image/image_location.h
     ui/image/image_location_factory.cpp
     ui/image/image_location_factory.h
+    ui/text/format_song_document_name.cpp
+    ui/text/format_song_document_name.h
+    ui/widgets/expandable_peer_list.cpp
+    ui/widgets/expandable_peer_list.h
+    ui/widgets/label_with_custom_emoji.cpp
+    ui/widgets/label_with_custom_emoji.h
     ui/countryinput.cpp
     ui/countryinput.h
     ui/dynamic_thumbnails.cpp
@@ -1549,10 +1595,6 @@ PRIVATE
     ui/resize_area.h
     ui/search_field_controller.cpp
     ui/search_field_controller.h
-    ui/text/format_song_document_name.cpp
-    ui/text/format_song_document_name.h
-    ui/widgets/label_with_custom_emoji.cpp
-    ui/widgets/label_with_custom_emoji.h
     ui/unread_badge.cpp
     ui/unread_badge.h
     window/main_window.cpp
@@ -1589,6 +1631,8 @@ PRIVATE
     window/window_peer_menu.cpp
     window/window_peer_menu.h
     window/window_section_common.h
+    window/window_separate_id.cpp
+    window/window_separate_id.h
     window/window_session_controller.cpp
     window/window_session_controller.h
     window/window_session_controller_link_info.h
@@ -1655,6 +1699,7 @@ PRIVATE
     qrc/telegram/animations.qrc
     qrc/telegram/export.qrc
     qrc/telegram/iv.qrc
+    qrc/telegram/picker.qrc
     qrc/telegram/telegram.qrc
     qrc/telegram/sounds.qrc
     winrc/Telegram.rc
@@ -1854,7 +1899,7 @@ endif()
 
 set_target_properties(Telegram PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${output_folder})
 
-if (WIN32)
+if (WIN32 AND CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     target_link_libraries(Telegram
     PRIVATE
         delayimp
@@ -1878,12 +1923,49 @@ if (WIN32)
         /DELAYLOAD:uxtheme.dll
         /DELAYLOAD:crypt32.dll
         /DELAYLOAD:bcrypt.dll
-        /DELAYLOAD:imm32.dll
         /DELAYLOAD:netapi32.dll
+        /DELAYLOAD:imm32.dll
         /DELAYLOAD:userenv.dll
         /DELAYLOAD:wtsapi32.dll
         /DELAYLOAD:propsys.dll
     )
+    if (QT_VERSION GREATER 6)
+        if (NOT build_winarm)
+            target_link_options(Telegram PRIVATE
+                /DELAYLOAD:API-MS-Win-EventLog-Legacy-l1-1-0.dll
+            )
+        endif()
+
+        target_link_options(Telegram
+        PRIVATE
+            /DELAYLOAD:API-MS-Win-Core-Console-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-Fibers-l2-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-Fibers-l2-1-1.dll
+            /DELAYLOAD:API-MS-Win-Core-File-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-LibraryLoader-l1-2-0.dll
+            /DELAYLOAD:API-MS-Win-Core-Localization-l1-2-0.dll
+            /DELAYLOAD:API-MS-Win-Core-Memory-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-Memory-l1-1-1.dll
+            /DELAYLOAD:API-MS-Win-Core-ProcessThreads-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-Synch-l1-2-0.dll # Synchronization.lib
+            /DELAYLOAD:API-MS-Win-Core-SysInfo-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-Timezone-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-WinRT-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-WinRT-Error-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-WinRT-String-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Security-CryptoAPI-l1-1-0.dll
+            # /DELAYLOAD:API-MS-Win-Shcore-Scaling-l1-1-1.dll # We shadowed GetDpiForMonitor
+            /DELAYLOAD:authz.dll # Authz.lib
+            /DELAYLOAD:comdlg32.dll
+            /DELAYLOAD:dwrite.dll # DWrite.lib
+            /DELAYLOAD:dxgi.dll # DXGI.lib
+            /DELAYLOAD:d3d9.dll # D3D9.lib
+            /DELAYLOAD:d3d11.dll # D3D11.lib
+            /DELAYLOAD:d3d12.dll # D3D12.lib
+            /DELAYLOAD:setupapi.dll # SetupAPI.lib
+            /DELAYLOAD:winhttp.dll
+        )
+    endif()
 endif()
 
 target_prepare_qrc(Telegram)
@@ -1914,7 +1996,7 @@ if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND NOT build_macstore AND NOT build_wins
             base/platform/win/base_windows_safe_library.h
         )
         target_include_directories(Updater PRIVATE ${lib_base_loc})
-        if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
             target_link_libraries(Updater
             PRIVATE
                 delayimp

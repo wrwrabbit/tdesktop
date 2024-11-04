@@ -127,6 +127,7 @@ public:
 		CommonGroups,
 		SimilarChannels,
 		SavedSublists,
+		PeerGifts,
 		Members,
 		Settings,
 		Downloads,
@@ -135,6 +136,7 @@ public:
 		Statistics,
 		Boosts,
 		ChannelEarn,
+		BotEarn,
 	};
 	using SettingsType = ::Settings::Type;
 	using MediaType = Storage::SharedMediaType;

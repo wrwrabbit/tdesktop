@@ -67,8 +67,8 @@ namespace {
 
 using SectionCustomTopBarData = Info::Settings::SectionCustomTopBarData;
 
-[[nodiscard]] Data::SubscriptionOptions SubscriptionOptionsForRows(
-		Data::SubscriptionOptions result) {
+[[nodiscard]] Data::PremiumSubscriptionOptions SubscriptionOptionsForRows(
+		Data::PremiumSubscriptionOptions result) {
 	for (auto &option : result) {
 		const auto total = option.costTotal;
 		const auto perMonth = option.costPerMonth;
@@ -197,6 +197,7 @@ using Order = std::vector<QString>;
 		u"animated_userpics"_q,
 		u"premium_stickers"_q,
 		u"business"_q,
+		u"effects"_q,
 	};
 }
 
@@ -374,6 +375,16 @@ using Order = std::vector<QString>;
 				tr::lng_premium_summary_subtitle_business(),
 				tr::lng_premium_summary_about_business(),
 				PremiumFeature::Business,
+				true,
+			},
+		},
+		{
+			u"effects"_q,
+			Entry{
+				&st::settingsPremiumIconEffects,
+				tr::lng_premium_summary_subtitle_effects(),
+				tr::lng_premium_summary_about_effects(),
+				PremiumFeature::Effects,
 				true,
 			},
 		},
@@ -1384,10 +1395,6 @@ void ShowPremiumPromoToast(
 	const auto toast = std::make_shared<WeakToast>();
 	(*toast) = show->showToast({
 		.text = std::move(textWithLink),
-		.st = &st::defaultMultilineToast,
-		.duration = Ui::Toast::kDefaultDuration * 2,
-		.adaptive = true,
-		.multiline = true,
 		.filter = crl::guard(&show->session(), [=](
 				const ClickHandlerPtr &,
 				Qt::MouseButton button) {
@@ -1405,6 +1412,8 @@ void ShowPremiumPromoToast(
 			}
 			return false;
 		}),
+		.adaptive = true,
+		.duration = Ui::Toast::kDefaultDuration * 2,
 	});
 }
 
@@ -1420,7 +1429,7 @@ not_null<Ui::RoundButton*> CreateLockedButton(
 
 	const auto labelSt = result->lifetime().make_state<style::FlatLabel>(
 		st::defaultFlatLabel);
-	labelSt->style.font = st.font;
+	labelSt->style.font = st.style.font;
 	labelSt->textFg = st.textFg;
 
 	const auto label = Ui::CreateChild<Ui::FlatLabel>(
@@ -1601,6 +1610,8 @@ std::vector<PremiumFeature> PremiumFeaturesOrder(
 			return PremiumFeature::RealTimeTranslation;
 		} else if (s == u"wallpapers"_q) {
 			return PremiumFeature::Wallpapers;
+		} else if (s == u"effects"_q) {
+			return PremiumFeature::Effects;
 		}
 		return PremiumFeature::kCount;
 	}) | ranges::views::filter([](PremiumFeature type) {

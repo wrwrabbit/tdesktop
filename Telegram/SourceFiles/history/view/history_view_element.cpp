@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings.h"
 #include "core/click_handler_types.h"
 #include "core/ui_integration.h"
+#include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "window/window_session_controller.h"
@@ -198,9 +199,15 @@ void DefaultElementDelegate::elementStartEffect(
 }
 
 QString DefaultElementDelegate::elementAuthorRank(
-	not_null<const Element*> view) {
+		not_null<const Element*> view) {
 	return {};
 }
+
+bool DefaultElementDelegate::elementHideTopicButton(
+		not_null<const Element*> view) {
+	return true;
+}
+
 
 SimpleElementDelegate::SimpleElementDelegate(
 	not_null<Window::SessionController*> controller,
@@ -309,6 +316,10 @@ void UnreadBar::paint(
 		int y,
 		int w,
 		bool chatWide) const {
+	const auto previousTranslation = p.transform().dx();
+	if (previousTranslation != 0) {
+		p.translate(-previousTranslation, 0);
+	}
 	const auto st = context.st;
 	const auto bottom = y + height();
 	y += marginTop();
@@ -344,6 +355,9 @@ void UnreadBar::paint(
 		(w - width) / 2,
 		y + (skip / 2) + st::historyUnreadBarFont->ascent,
 		text);
+	if (previousTranslation != 0) {
+		p.translate(previousTranslation, 0);
+	}
 }
 
 void DateBadge::init(const QString &date) {
@@ -436,8 +450,8 @@ void ServicePreMessage::paint(
 		.align = style::al_top,
 		.palette = &context.st->serviceTextPalette(),
 		.now = context.now,
-		//.selection = context.selection,
 		.fullWidthSelection = false,
+		//.selection = context.selection,
 	});
 
 	p.translate(0, -top);
@@ -482,7 +496,10 @@ Element::Element(
 	}
 	if (data->isFakeAboutView()) {
 		const auto user = data->history()->peer->asUser();
-		if (user && user->isBot() && !user->isRepliesChat()) {
+		if (user
+			&& user->isBot()
+			&& !user->isRepliesChat()
+			&& !user->isVerifyCodes()) {
 			AddComponents(FakeBotAboutTop::Bit());
 		}
 	}
@@ -715,6 +732,14 @@ void Element::overrideMedia(std::unique_ptr<Media> media) {
 	_flags |= Flag::MediaOverriden;
 }
 
+not_null<PurchasedTag*> Element::enforcePurchasedTag() {
+	if (const auto purchased = Get<PurchasedTag>()) {
+		return purchased;
+	}
+	AddComponents(PurchasedTag::Bit());
+	return Get<PurchasedTag>();
+}
+
 void Element::refreshMedia(Element *replacing) {
 	if (_flags & Flag::MediaOverriden) {
 		return;
@@ -722,6 +747,10 @@ void Element::refreshMedia(Element *replacing) {
 	_flags &= ~Flag::HiddenByGroup;
 
 	const auto item = data();
+	if (!item->computeUnavailableReason().isEmpty()) {
+		_media = nullptr;
+		return;
+	}
 	if (const auto media = item->media()) {
 		if (media->canBeGrouped()) {
 			if (const auto group = history()->owner().groups().find(item)) {
@@ -990,7 +1019,12 @@ void Element::validateText() {
 			: contextDependentText.links;
 		setTextWithLinks(markedText, customLinks);
 	} else {
-		setTextWithLinks(_textItem->translatedTextWithLocalEntities());
+		const auto unavailable = item->computeUnavailableReason();
+		if (!unavailable.isEmpty()) {
+			setTextWithLinks(Ui::Text::Italic(unavailable));
+		} else {
+			setTextWithLinks(_textItem->translatedTextWithLocalEntities());
+		}
 	}
 }
 
@@ -1073,7 +1107,7 @@ bool Element::computeIsAttachToPrevious(not_null<Element*> previous) {
 		const auto item = view->data();
 		return !item->isService()
 			&& !item->isEmpty()
-			&& !item->isPost()
+			&& !item->isPostHidingAuthor()
 			&& (!item->history()->peer->isMegagroup()
 				|| !view->hasOutLayout()
 				|| !item->from()->isChannel());
@@ -1093,8 +1127,10 @@ bool Element::computeIsAttachToPrevious(not_null<Element*> previous) {
 		if (possible) {
 			const auto forwarded = item->Get<HistoryMessageForwarded>();
 			const auto prevForwarded = prev->Get<HistoryMessageForwarded>();
-			if (item->history()->peer->isSelf()
-				|| item->history()->peer->isRepliesChat()
+			const auto peer = item->history()->peer;
+			if (peer->isSelf()
+				|| peer->isRepliesChat()
+				|| peer->isVerifyCodes()
 				|| (forwarded && forwarded->imported)
 				|| (prevForwarded && prevForwarded->imported)) {
 				return IsAttachedToPreviousInSavedMessages(
@@ -1622,6 +1658,12 @@ SelectedQuote Element::FindSelectedQuote(
 	if (modified.empty() || modified.to > result.text.size()) {
 		return {};
 	}
+	const auto session = &item->history()->session();
+	const auto limit = session->appConfig().quoteLengthMax();
+	const auto overflown = (modified.from + limit < modified.to);
+	if (overflown) {
+		modified.to = modified.from + limit;
+	}
 	result.text = result.text.mid(
 		modified.from,
 		modified.to - modified.from);
@@ -1648,7 +1690,7 @@ SelectedQuote Element::FindSelectedQuote(
 			++i;
 		}
 	}
-	return { item, result, modified.from };
+	return { item, result, modified.from, overflown };
 }
 
 TextSelection Element::FindSelectionFromQuote(

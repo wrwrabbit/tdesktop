@@ -229,7 +229,9 @@ Parser::Parser(const Source &source, const Options &options)
 	_result.name = source.name;
 	_result.rtl = source.page.data().is_rtl();
 
-	const auto views = source.page.data().vviews().value_or_empty();
+	const auto views = std::max(
+		source.page.data().vviews().value_or_empty(),
+		source.updatedCachedViews);
 	const auto content = list(source.page.data().vblocks());
 	_result.content = wrap(content, views);
 }
@@ -430,7 +432,7 @@ QByteArray Parser::block(const MTPDpageBlockFooter &data) {
 }
 
 QByteArray Parser::block(const MTPDpageBlockDivider &data) {
-	return tag("hr", { { "class", "divider" } });
+	return tag("hr", Attributes{ { "class", "divider" } });
 }
 
 QByteArray Parser::block(const MTPDpageBlockAnchor &data) {

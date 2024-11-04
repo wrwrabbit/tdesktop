@@ -14,11 +14,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
 #include "base/event_filter.h"
+#include "ui/chat/chat_style.h"
 #include "ui/layers/generic_box.h"
 #include "ui/rect.h"
 #include "core/shortcuts.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "core/ui_integration.h"
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
 #include "ui/wrap/vertical_layout.h"
@@ -40,6 +42,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
+#include "styles/style_settings.h"
 #include "base/qt/qt_common_adapters.h"
 
 #include <QtCore/QMimeData>
@@ -58,6 +61,13 @@ using EditLinkSelection = Ui::InputField::EditLinkSelection;
 
 constexpr auto kParseLinksTimeout = crl::time(1000);
 constexpr auto kTypesDuration = 4 * crl::time(1000);
+constexpr auto kCodeLanguageLimit = 32;
+
+constexpr auto kLinkProtocols = {
+    "http://",
+    "https://",
+    "tonsite://"
+};
 
 // For mention / custom emoji tags save and validate selfId,
 // ignore tags for different users.
@@ -143,13 +153,23 @@ void EditLinkBox(
 		object_ptr<Ui::RpWidget>(content),
 		st::markdownLinkFieldPadding);
 	placeholder->setAttribute(Qt::WA_TransparentForMouseEvents);
+	const auto link = [&] {
+		if (!startLink.trimmed().isEmpty()) {
+			return startLink.trimmed();
+		}
+		const auto clipboard = QGuiApplication::clipboard()->text().trimmed();
+		const auto starts = [&](const auto &protocol) {
+  			return clipboard.startsWith(protocol);
+		};
+		return std::ranges::any_of(kLinkProtocols, starts) ? clipboard : QString();
+	}();
 	const auto url = Ui::AttachParentChild(
 		content,
 		object_ptr<Ui::InputField>(
 			content,
 			fieldSt,
 			tr::lng_formatting_link_url(),
-			startLink.trimmed()));
+			link));
 	url->heightValue(
 	) | rpl::start_with_next([placeholder](int height) {
 		placeholder->resize(placeholder->width(), height);
@@ -205,6 +225,9 @@ void EditLinkBox(
 		if (startText.isEmpty()) {
 			text->setFocusFast();
 		} else {
+			if (!url->empty()) {
+				url->selectAll();
+			}
 			url->setFocusFast();
 		}
 	});
@@ -212,14 +235,78 @@ void EditLinkBox(
 	url->customTab(true);
 	text->customTab(true);
 
+	const auto clearFullSelection = [=](not_null<Ui::InputField*> input) {
+		if (input->empty()) {
+			return;
+		}
+		auto cursor = input->rawTextEdit()->textCursor();
+		const auto hasFull = (!cursor.selectionStart()
+			&& (cursor.selectionEnd()
+				== (input->rawTextEdit()->document()->characterCount() - 1)));
+		if (hasFull) {
+			cursor.clearSelection();
+			input->setTextCursor(cursor);
+		}
+	};
+
 	url->tabbed(
 	) | rpl::start_with_next([=] {
+		clearFullSelection(url);
 		text->setFocus();
 	}, url->lifetime());
 	text->tabbed(
 	) | rpl::start_with_next([=] {
+		if (!url->empty()) {
+			url->selectAll();
+		}
+		clearFullSelection(text);
 		url->setFocus();
 	}, text->lifetime());
+}
+
+void EditCodeLanguageBox(
+		not_null<Ui::GenericBox*> box,
+		QString now,
+		Fn<void(QString)> save) {
+	Expects(save != nullptr);
+
+	box->setTitle(tr::lng_formatting_code_title());
+	box->addRow(object_ptr<Ui::FlatLabel>(
+		box,
+		tr::lng_formatting_code_language(),
+		st::settingsAddReplyLabel));
+	const auto field = box->addRow(object_ptr<Ui::InputField>(
+		box,
+		st::settingsAddReplyField,
+		tr::lng_formatting_code_auto(),
+		now.trimmed()));
+	box->setFocusCallback([=] {
+		field->setFocusFast();
+	});
+	field->selectAll();
+	field->setMaxLength(kCodeLanguageLimit);
+
+	Ui::AddLengthLimitLabel(field, kCodeLanguageLimit);
+
+	const auto callback = [=] {
+		const auto name = field->getLastText().trimmed();
+		const auto check = QRegularExpression("^[a-zA-Z0-9\\+\\-]*$");
+		if (check.match(name).hasMatch()) {
+			auto weak = Ui::MakeWeak(box);
+			save(name);
+			if (const auto strong = weak.data()) {
+				strong->closeBox();
+			}
+		} else {
+			field->showError();
+		}
+	};
+	field->submits(
+	) | rpl::start_with_next(callback, field->lifetime());
+	box->addButton(tr::lng_settings_save(), callback);
+	box->addButton(tr::lng_cancel(), [=] {
+		box->closeBox();
+	});
 }
 
 TextWithEntities StripSupportHashtag(TextWithEntities text) {
@@ -274,15 +361,24 @@ TextWithTags PrepareEditText(not_null<HistoryItem*> item) {
 
 bool EditTextChanged(
 		not_null<HistoryItem*> item,
-		const TextWithTags &updated) {
+		TextWithTags updated) {
 	const auto original = PrepareEditText(item);
+
+	auto originalWithEntities = TextWithEntities{
+		std::move(original.text),
+		TextUtilities::ConvertTextTagsToEntities(original.tags)
+	};
+	auto updatedWithEntities = TextWithEntities{
+		std::move(updated.text),
+		TextUtilities::ConvertTextTagsToEntities(updated.tags)
+	};
+	TextUtilities::PrepareForSending(originalWithEntities, 0);
+	TextUtilities::PrepareForSending(updatedWithEntities, 0);
 
 	// Tags can be different for the same entities, because for
 	// animated emoji each tag contains a different random number.
 	// So we compare entities instead of tags.
-	return (original.text != updated.text)
-		|| (TextUtilities::ConvertTextTagsToEntities(original.tags)
-			!= TextUtilities::ConvertTextTagsToEntities(updated.tags));
+	return originalWithEntities != updatedWithEntities;
 }
 
 Fn<bool(
@@ -320,30 +416,52 @@ Fn<bool(
 	};
 }
 
-void InitMessageFieldHandlers(
-		not_null<Main::Session*> session,
-		std::shared_ptr<Main::SessionShow> show,
-		not_null<Ui::InputField*> field,
-		Fn<bool()> customEmojiPaused,
-		Fn<bool(not_null<DocumentData*>)> allowPremiumEmoji,
-		const style::InputField *fieldStyle) {
-	field->setTagMimeProcessor(
-		FieldTagMimeProcessor(session, allowPremiumEmoji));
-	const auto paused = [customEmojiPaused] {
-		return On(PowerSaving::kEmojiChat) || customEmojiPaused();
+Fn<void(QString now, Fn<void(QString)> save)> DefaultEditLanguageCallback(
+		std::shared_ptr<Ui::Show> show) {
+	return [=](QString now, Fn<void(QString)> save) {
+		show->showBox(Box(EditCodeLanguageBox, now, save));
 	};
-	field->setCustomEmojiFactory(
-		session->data().customEmojiManager().factory(),
-		std::move(customEmojiPaused));
+}
+
+void InitMessageFieldHandlers(MessageFieldHandlersArgs &&args) {
+	const auto paused = [passed = args.customEmojiPaused] {
+		return passed && passed();
+	};
+	const auto field = args.field;
+	const auto session = args.session;
+	field->setTagMimeProcessor(
+		FieldTagMimeProcessor(session, args.allowPremiumEmoji));
+	field->setCustomTextContext([=](Fn<void()> repaint) {
+		return std::any(Core::MarkedTextContext{
+			.session = session,
+			.customEmojiRepaint = std::move(repaint),
+		});
+	}, [paused] {
+		return On(PowerSaving::kEmojiChat) || paused();
+	}, [paused] {
+		return On(PowerSaving::kChatSpoiler) || paused();
+	});
 	field->setInstantReplaces(Ui::InstantReplaces::Default());
 	field->setInstantReplacesEnabled(
 		Core::App().settings().replaceEmojiValue());
-	field->setMarkdownReplacesEnabled(true);
-	if (show) {
+	field->setMarkdownReplacesEnabled(rpl::single(Ui::MarkdownEnabledState{
+		Ui::MarkdownEnabled{ std::move(args.allowMarkdownTags) }
+	}));
+	if (const auto &show = args.show) {
 		field->setEditLinkCallback(
-			DefaultEditLinkCallback(show, field, fieldStyle));
-		InitSpellchecker(show, field, fieldStyle != nullptr);
+			DefaultEditLinkCallback(show, field, args.fieldStyle));
+		field->setEditLanguageCallback(DefaultEditLanguageCallback(show));
+		InitSpellchecker(show, field, args.fieldStyle != nullptr);
 	}
+	const auto style = field->lifetime().make_state<Ui::ChatStyle>(
+		session->colorIndicesValue());
+	field->setPreCache([=] {
+		return style->messageStyle(false, false).preCache.get();
+	});
+	field->setBlockquoteCache([=] {
+		const auto colorIndex = session->user()->colorIndex();
+		return style->coloredQuoteCache(false, colorIndex).get();
+	});
 }
 
 [[nodiscard]] bool IsGoodFactcheckUrl(QStringView url) {
@@ -433,12 +551,15 @@ void InitMessageFieldHandlers(
 		not_null<Ui::InputField*> field,
 		ChatHelpers::PauseReason pauseReasonLevel,
 		Fn<bool(not_null<DocumentData*>)> allowPremiumEmoji) {
-	InitMessageFieldHandlers(
-		&controller->session(),
-		controller->uiShow(),
-		field,
-		[=] { return controller->isGifPausedAtLeastFor(pauseReasonLevel); },
-		allowPremiumEmoji);
+	InitMessageFieldHandlers({
+		.session = &controller->session(),
+		.show = controller->uiShow(),
+		.field = field,
+		.customEmojiPaused = [=] {
+			return controller->isGifPausedAtLeastFor(pauseReasonLevel);
+		},
+		.allowPremiumEmoji = std::move(allowPremiumEmoji),
+	});
 }
 
 void InitMessageFieldGeometry(not_null<Ui::InputField*> field) {
@@ -446,7 +567,7 @@ void InitMessageFieldGeometry(not_null<Ui::InputField*> field) {
 		st::historySendSize.height() - 2 * st::historySendPadding);
 	field->setMaxHeight(st::historyComposeFieldMaxHeight);
 
-	field->document()->setDocumentMargin(4.);
+	field->setDocumentMargin(4.);
 	field->setAdditionalMargin(style::ConvertScale(4) - 4);
 }
 
@@ -454,14 +575,16 @@ void InitMessageField(
 		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<Ui::InputField*> field,
 		Fn<bool(not_null<DocumentData*>)> allowPremiumEmoji) {
-	InitMessageFieldHandlers(
-		&show->session(),
-		show,
-		field,
-		[=] { return show->paused(ChatHelpers::PauseReason::Any); },
-		std::move(allowPremiumEmoji));
+	InitMessageFieldHandlers({
+		.session = &show->session(),
+		.show = show,
+		.field = field,
+		.customEmojiPaused = [=] {
+			return show->paused(ChatHelpers::PauseReason::Any);
+		},
+		.allowPremiumEmoji = std::move(allowPremiumEmoji),
+	});
 	InitMessageFieldGeometry(field);
-	field->customTab(true);
 }
 
 void InitMessageField(
@@ -569,12 +692,26 @@ void InitMessageFieldFade(
 		Ui::DestroyChild(b.data());
 	}, topFade->lifetime());
 
-	topFade->show();
-	bottomFade->showOn(
-	field->scrollTop().value(
-	) | rpl::map([field, descent = field->st().font->descent](int scroll) {
-		return (scroll + descent) < field->scrollTopMax();
-	}) | rpl::distinct_until_changed());
+	const auto descent = field->st().style.font->descent;
+	rpl::merge(
+		field->changes(),
+		field->scrollTop().changes() | rpl::to_empty,
+		field->sizeValue() | rpl::to_empty
+	) | rpl::start_with_next([=] {
+		// InputField::changes fires before the auto-resize is being applied,
+		// so for the scroll values to be accurate we enqueue the check.
+		InvokeQueued(field, [=] {
+			const auto topHidden = !field->scrollTop().current();
+			if (topFade->isHidden() != topHidden) {
+				topFade->setVisible(!topHidden);
+			}
+			const auto adjusted = field->scrollTop().current() + descent;
+			const auto bottomHidden = (adjusted >= field->scrollTopMax());
+			if (bottomFade->isHidden() != bottomHidden) {
+				bottomFade->setVisible(!bottomHidden);
+			}
+		});
+	}, topFade->lifetime());
 }
 
 InlineBotQuery ParseInlineBotQuery(
@@ -766,11 +903,7 @@ bool MessageLinksParser::eventFilter(QObject *object, QEvent *event) {
 			const auto text = static_cast<QKeyEvent*>(event)->text();
 			if (!text.isEmpty() && text.size() < 3) {
 				const auto ch = text[0];
-				if (false
-					|| ch == '\n'
-					|| ch == '\r'
-					|| ch.isSpace()
-					|| ch == QChar::LineSeparator) {
+				if (IsSpace(ch)) {
 					_timer.callOnce(0);
 				}
 			}
@@ -971,10 +1104,26 @@ base::unique_qptr<Ui::RpWidget> CreateDisabledFieldView(
 		st::historySendDisabled);
 	label->setAttribute(Qt::WA_TransparentForMouseEvents);
 	raw->setPointerCursor(false);
+
+	const auto &st = st::historyComposeField;
+
+	const auto metrics = QFontMetricsF(st.style.font->f);
+	const auto realAscent = int(base::SafeRound(metrics.ascent()));
+	const auto ascentAdd = st.style.font->ascent - realAscent;
+	const auto customFontMarginTop = ascentAdd;
+	const auto leading = qMax(metrics.leading(), qreal(0.0));
+	const auto adjustment = (metrics.ascent() + leading)
+		- ((st.style.font->height * 4) / 5);
+	const auto placeholderCustomFontSkip = int(base::SafeRound(-adjustment));
+
+	const auto margins = st.textMargins
+		+ st.placeholderMargins
+		+ QMargins(0, style::ConvertScale(4)
+			+ placeholderCustomFontSkip
+			+ customFontMarginTop, 0, 0);
+
 	raw->widthValue(
 	) | rpl::start_with_next([=](int width) {
-		const auto &st = st::historyComposeField;
-		const auto margins = (st.textMargins + st.placeholderMargins);
 		const auto available = width - margins.left() - margins.right();
 		const auto skip = st::historySendDisabledIconSkip;
 		label->resizeToWidth(available - skip);
@@ -983,8 +1132,6 @@ base::unique_qptr<Ui::RpWidget> CreateDisabledFieldView(
 	raw->paintRequest(
 	) | rpl::start_with_next([=] {
 		auto p = QPainter(raw);
-		const auto &st = st::historyComposeField;
-		const auto margins = (st.textMargins + st.placeholderMargins);
 		const auto &icon = st::historySendDisabledIcon;
 		icon.paint(
 			p,
@@ -1034,10 +1181,8 @@ base::unique_qptr<Ui::RpWidget> CreateDisabledFieldView(
 			: list.back();
 		*toast = Ui::Toast::Show(parent, {
 			.text = { tr::lng_send_text_no_about(tr::now, lt_types, types) },
-			.st = &st::defaultMultilineToast,
+			.attach = RectPart::Bottom,
 			.duration = kTypesDuration,
-			.multiline = true,
-			.slideSide = RectPart::Bottom,
 		});
 	});
 	return result;
@@ -1097,7 +1242,9 @@ base::unique_qptr<Ui::RpWidget> PremiumRequiredSendRestriction(
 		const auto margins = (st.textMargins + st.placeholderMargins);
 		const auto available = width - margins.left() - margins.right();
 		label->resizeToWidth(available);
-		label->moveToLeft(margins.left(), margins.top(), width);
+		const auto height = label->height() + link->height();
+		const auto top = (raw->height() - height) / 2;
+		label->moveToLeft(margins.left(), top, width);
 		link->move(
 			(width - link->width()) / 2,
 			label->y() + label->height());
@@ -1117,8 +1264,8 @@ void SelectTextInFieldWithMargins(
 	auto textCursor = field->textCursor();
 	// Try to set equal margins for top and bottom sides.
 	const auto charsCountInLine = field->width()
-		/ field->st().font->width('W');
-	const auto linesCount = (field->height() / field->st().font->height);
+		/ field->st().style.font->width('W');
+	const auto linesCount = field->height() / field->st().style.font->height;
 	const auto selectedLines = (selection.to - selection.from)
 		/ charsCountInLine;
 	constexpr auto kMinDiff = ushort(3);

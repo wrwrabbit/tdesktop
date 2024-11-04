@@ -69,11 +69,24 @@ class SavedMessages;
 class Chatbots;
 class BusinessInfo;
 struct ReactionId;
+struct UnavailableReason;
 
 struct RepliesReadTillUpdate {
 	FullMsgId id;
 	MsgId readTillId;
 	bool out = false;
+};
+
+struct GiftUpdate {
+	enum class Action : uchar {
+		Save,
+		Unsave,
+		Convert,
+		Delete,
+	};
+
+	FullMsgId itemId;
+	Action action = {};
 };
 
 class Session final {
@@ -280,6 +293,8 @@ public:
 	[[nodiscard]] rpl::producer<not_null<const ViewElement*>> viewLayoutChanged() const;
 	void notifyNewItemAdded(not_null<HistoryItem*> item);
 	[[nodiscard]] rpl::producer<not_null<HistoryItem*>> newItemAdded() const;
+	void notifyGiftUpdate(GiftUpdate &&update);
+	[[nodiscard]] rpl::producer<GiftUpdate> giftUpdates() const;
 	void requestItemRepaint(not_null<const HistoryItem*> item);
 	[[nodiscard]] rpl::producer<not_null<const HistoryItem*>> itemRepaintRequest() const;
 	void requestViewRepaint(not_null<const ViewElement*> view);
@@ -288,8 +303,8 @@ public:
 	[[nodiscard]] rpl::producer<not_null<const HistoryItem*>> itemResizeRequest() const;
 	void requestViewResize(not_null<ViewElement*> view);
 	[[nodiscard]] rpl::producer<not_null<ViewElement*>> viewResizeRequest() const;
-	void requestItemViewRefresh(not_null<HistoryItem*> item);
-	[[nodiscard]] rpl::producer<not_null<HistoryItem*>> itemViewRefreshRequest() const;
+	void requestItemViewRefresh(not_null<const HistoryItem*> item);
+	[[nodiscard]] rpl::producer<not_null<const HistoryItem*>> itemViewRefreshRequest() const;
 	void requestItemTextRefresh(not_null<HistoryItem*> item);
 	void requestUnreadReactionsAnimation(not_null<HistoryItem*> item);
 	void notifyHistoryUnloaded(not_null<const History*> history);
@@ -306,10 +321,19 @@ public:
 	[[nodiscard]] rpl::producer<not_null<const History*>> historyCleared() const;
 	void notifyHistoryChangeDelayed(not_null<History*> history);
 	[[nodiscard]] rpl::producer<not_null<History*>> historyChanged() const;
+	void notifyViewPaidReactionSent(not_null<const ViewElement*> view);
+	[[nodiscard]] rpl::producer<not_null<const ViewElement*>> viewPaidReactionSent() const;
 	void sendHistoryChangeNotifications();
 
 	void notifyPinnedDialogsOrderUpdated();
 	[[nodiscard]] rpl::producer<> pinnedDialogsOrderUpdated() const;
+
+	void registerRestricted(
+		not_null<const HistoryItem*> item,
+		const QString &reason);
+	void registerRestricted(
+		not_null<const HistoryItem*> item,
+		const std::vector<UnavailableReason> &reasons);
 
 	void registerHighlightProcess(
 		uint64 processId,
@@ -559,6 +583,8 @@ public:
 		const MTPWebDocument &data,
 		const ImageLocation &thumbnailLocation,
 		const ImageLocation &videoThumbnailLocation);
+	[[nodiscard]] not_null<DocumentData*> venueIconDocument(
+		const QString &icon);
 
 	[[nodiscard]] not_null<WebPageData*> webpage(WebPageId id);
 	not_null<WebPageData*> processWebpage(const MTPWebPage &data);
@@ -753,8 +779,8 @@ public:
 	[[nodiscard]] auto peerDecorationsUpdated() const
 		-> rpl::producer<not_null<PeerData*>>;
 
-	void applyStatsDcId(not_null<ChannelData*>, MTP::DcId);
-	[[nodiscard]] MTP::DcId statsDcId(not_null<ChannelData*>);
+	void applyStatsDcId(not_null<PeerData*>, MTP::DcId);
+	[[nodiscard]] MTP::DcId statsDcId(not_null<PeerData*>);
 
 	void viewTagsChanged(
 		not_null<ViewElement*> view,
@@ -918,15 +944,17 @@ private:
 	rpl::event_stream<not_null<const HistoryItem*>> _itemLayoutChanges;
 	rpl::event_stream<not_null<const ViewElement*>> _viewLayoutChanges;
 	rpl::event_stream<not_null<HistoryItem*>> _newItemAdded;
+	rpl::event_stream<GiftUpdate> _giftUpdates;
 	rpl::event_stream<not_null<const HistoryItem*>> _itemRepaintRequest;
 	rpl::event_stream<not_null<const ViewElement*>> _viewRepaintRequest;
 	rpl::event_stream<not_null<const HistoryItem*>> _itemResizeRequest;
 	rpl::event_stream<not_null<ViewElement*>> _viewResizeRequest;
-	rpl::event_stream<not_null<HistoryItem*>> _itemViewRefreshRequest;
+	rpl::event_stream<not_null<const HistoryItem*>> _itemViewRefreshRequest;
 	rpl::event_stream<not_null<HistoryItem*>> _itemTextRefreshRequest;
 	rpl::event_stream<not_null<HistoryItem*>> _itemDataChanges;
 	rpl::event_stream<not_null<const HistoryItem*>> _itemRemoved;
 	rpl::event_stream<not_null<const ViewElement*>> _viewRemoved;
+	rpl::event_stream<not_null<const ViewElement*>> _viewPaidReactionSent;
 	rpl::event_stream<not_null<const History*>> _historyUnloaded;
 	rpl::event_stream<not_null<const History*>> _historyCleared;
 	base::flat_set<not_null<History*>> _historiesChanged;
@@ -1008,6 +1036,7 @@ private:
 		FullStoryId,
 		base::flat_set<not_null<HistoryItem*>>> _storyItems;
 	base::flat_map<uint64, not_null<HistoryItem*>> _highlightings;
+	base::flat_map<QString, not_null<DocumentData*>> _venueIcons;
 
 	base::flat_set<not_null<WebPageData*>> _webpagesUpdated;
 	base::flat_set<not_null<GameData*>> _gamesUpdated;
@@ -1020,6 +1049,10 @@ private:
 
 	base::flat_multi_map<TimeId, not_null<PollData*>> _pollsClosings;
 	base::Timer _pollsClosingTimer;
+
+	base::flat_map<
+		not_null<const HistoryItem*>,
+		base::flat_set<QString>> _possiblyRestricted;
 
 	base::flat_map<FolderId, std::unique_ptr<Folder>> _folders;
 
@@ -1059,7 +1092,7 @@ private:
 	base::flat_map<not_null<UserData*>, TimeId> _watchingForOffline;
 	base::Timer _watchForOfflineTimer;
 
-	base::flat_map<not_null<ChannelData*>, MTP::DcId> _channelStatsDcIds;
+	base::flat_map<not_null<PeerData*>, MTP::DcId> _peerStatsDcIds;
 
 	rpl::event_stream<WebViewResultSent> _webViewResultSent;
 

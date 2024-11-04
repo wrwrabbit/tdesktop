@@ -39,9 +39,9 @@ namespace {
 	};
 }
 
-[[nodiscard]] Data::SubscriptionOptions GiftCodesFromTL(
+[[nodiscard]] Data::PremiumSubscriptionOptions GiftCodesFromTL(
 		const QVector<MTPPremiumGiftCodeOption> &tlOptions) {
-	auto options = SubscriptionOptionsFromTL(tlOptions);
+	auto options = PremiumSubscriptionOptionsFromTL(tlOptions);
 	for (auto i = 0; i < options.size(); i++) {
 		const auto &tlOption = tlOptions[i].data();
 		const auto perUserText = Ui::FillAmountAndCurrency(
@@ -143,7 +143,7 @@ void Premium::reloadPromo() {
 		const auto &data = result.data();
 		_session->data().processUsers(data.vusers());
 
-		_subscriptionOptions = SubscriptionOptionsFromTL(
+		_subscriptionOptions = PremiumSubscriptionOptionsFromTL(
 			data.vperiod_options().v);
 		for (const auto &option : data.vperiod_options().v) {
 			if (option.data().vmonths().v == 1) {
@@ -361,9 +361,10 @@ void Premium::resolveGiveawayInfo(
 				? GiveawayState::Refunded
 				: GiveawayState::Finished;
 			info.giftCode = qs(data.vgift_code_slug().value_or_empty());
-			info.activatedCount = data.vactivated_count().v;
+			info.activatedCount = data.vactivated_count().value_or_empty();
 			info.finishDate = data.vfinish_date().v;
 			info.startDate = data.vstart_date().v;
+			info.credits = data.vstars_prize().value_or_empty();
 		});
 		_giveawayInfoDone(std::move(info));
 	}).fail([=] {
@@ -372,7 +373,7 @@ void Premium::resolveGiveawayInfo(
 	}).send();
 }
 
-const Data::SubscriptionOptions &Premium::subscriptionOptions() const {
+const Data::PremiumSubscriptionOptions &Premium::subscriptionOptions() const {
 	return _subscriptionOptions;
 }
 
@@ -508,7 +509,9 @@ rpl::producer<rpl::no_value, QString> PremiumGiftCodeOptions::applyPrepaid(
 		_api.request(MTPpayments_LaunchPrepaidGiveaway(
 			_peer->input,
 			MTP_long(prepaidId),
-			Payments::InvoicePremiumGiftCodeGiveawayToTL(invoice)
+			invoice.creditsAmount
+				? Payments::InvoiceCreditsGiveawayToTL(invoice)
+				: Payments::InvoicePremiumGiftCodeGiveawayToTL(invoice)
 		)).done([=](const MTPUpdates &result) {
 			_peer->session().api().applyUpdates(result);
 			consumer.put_done();
@@ -537,17 +540,35 @@ Payments::InvoicePremiumGiftCode PremiumGiftCodeOptions::invoice(
 	const auto token = Token{ users, months };
 	const auto &store = _stores[token];
 	return Payments::InvoicePremiumGiftCode{
-		.randomId = randomId,
 		.currency = _optionsForOnePerson.currency,
-		.amount = store.amount,
 		.storeProduct = store.product,
+		.randomId = randomId,
+		.amount = store.amount,
 		.storeQuantity = store.quantity,
 		.users = token.users,
 		.months = token.months,
 	};
 }
 
-Data::SubscriptionOptions PremiumGiftCodeOptions::options(int amount) {
+std::vector<GiftOptionData> PremiumGiftCodeOptions::optionsForPeer() const {
+	auto result = std::vector<GiftOptionData>();
+
+	if (!_optionsForOnePerson.currency.isEmpty()) {
+		const auto count = int(_optionsForOnePerson.months.size());
+		result.reserve(count);
+		for (auto i = 0; i != count; ++i) {
+			Assert(i < _optionsForOnePerson.totalCosts.size());
+			result.push_back({
+				.cost = _optionsForOnePerson.totalCosts[i],
+				.currency = _optionsForOnePerson.currency,
+				.months = _optionsForOnePerson.months[i],
+			});
+		}
+	}
+	return result;
+}
+
+Data::PremiumSubscriptionOptions PremiumGiftCodeOptions::options(int amount) {
 	const auto it = _subscriptionOptions.find(amount);
 	if (it != end(_subscriptionOptions)) {
 		return it->second;
@@ -566,6 +587,41 @@ Data::SubscriptionOptions PremiumGiftCodeOptions::options(int amount) {
 		_subscriptionOptions[amount] = GiftCodesFromTL(tlOptions);
 		return _subscriptionOptions[amount];
 	}
+}
+
+auto PremiumGiftCodeOptions::requestStarGifts()
+-> rpl::producer<rpl::no_value, QString> {
+	return [=](auto consumer) {
+		auto lifetime = rpl::lifetime();
+
+		_api.request(MTPpayments_GetStarGifts(
+			MTP_int(0)
+		)).done([=](const MTPpayments_StarGifts &result) {
+			result.match([&](const MTPDpayments_starGifts &data) {
+				_giftsHash = data.vhash().v;
+				const auto &list = data.vgifts().v;
+				const auto session = &_peer->session();
+				auto gifts = std::vector<StarGift>();
+				gifts.reserve(list.size());
+				for (const auto &gift : list) {
+					if (auto parsed = FromTL(session, gift)) {
+						gifts.push_back(std::move(*parsed));
+					}
+				}
+				_gifts = std::move(gifts);
+			}, [&](const MTPDpayments_starGiftsNotModified &) {
+			});
+			consumer.put_done();
+		}).fail([=](const MTP::Error &error) {
+			consumer.put_error_copy(error.type());
+		}).send();
+
+		return lifetime;
+	};
+}
+
+const std::vector<StarGift> &PremiumGiftCodeOptions::starGifts() const {
+	return _gifts;
 }
 
 int PremiumGiftCodeOptions::giveawayBoostsPerPremium() const {
@@ -700,6 +756,58 @@ rpl::producer<DocumentData*> RandomHelloStickerValue(
 	) | rpl::filter([=] {
 		return !premium->helloStickers().empty();
 	}) | rpl::take(1) | rpl::map(random));
+}
+
+std::optional<StarGift> FromTL(
+		not_null<Main::Session*> session,
+		const MTPstarGift &gift) {
+	const auto &data = gift.data();
+	const auto document = session->data().processDocument(
+		data.vsticker());
+	const auto remaining = data.vavailability_remains();
+	const auto total = data.vavailability_total();
+	if (!document->sticker()) {
+		return {};
+	}
+	return StarGift{
+		.id = uint64(data.vid().v),
+		.stars = int64(data.vstars().v),
+		.convertStars = int64(data.vconvert_stars().v),
+		.document = document,
+		.limitedLeft = remaining.value_or_empty(),
+		.limitedCount = total.value_or_empty(),
+	};
+}
+
+std::optional<UserStarGift> FromTL(
+		not_null<UserData*> to,
+		const MTPuserStarGift &gift) {
+	const auto session = &to->session();
+	const auto &data = gift.data();
+	auto parsed = FromTL(session, data.vgift());
+	if (!parsed) {
+		return {};
+	}
+	return UserStarGift{
+		.gift = std::move(*parsed),
+		.message = (data.vmessage()
+			? TextWithEntities{
+				.text = qs(data.vmessage()->data().vtext()),
+				.entities = Api::EntitiesFromMTP(
+					session,
+					data.vmessage()->data().ventities().v),
+			}
+			: TextWithEntities()),
+		.convertStars = int64(data.vconvert_stars().value_or_empty()),
+		.fromId = (data.vfrom_id()
+			? peerFromUser(data.vfrom_id()->v)
+			: PeerId()),
+		.messageId = data.vmsg_id().value_or_empty(),
+		.date = data.vdate().v,
+		.anonymous = data.is_name_hidden(),
+		.hidden = data.is_unsaved(),
+		.mine = to->isSelf(),
+	};
 }
 
 } // namespace Api

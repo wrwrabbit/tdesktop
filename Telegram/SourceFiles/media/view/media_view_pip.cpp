@@ -24,7 +24,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "base/platform/base_platform_info.h"
 #include "base/power_save_blocker.h"
-#include "base/event_filter.h"
 #include "ui/platform/ui_platform_utility.h"
 #include "ui/platform/ui_platform_window_title.h"
 #include "ui/widgets/buttons.h"
@@ -33,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/format_values.h"
 #include "ui/gl/gl_surface.h"
 #include "ui/painter.h"
+#include "ui/ui_utility.h"
 #include "window/window_controller.h"
 #include "styles/style_widgets.h"
 #include "styles/style_window.h"
@@ -351,49 +351,29 @@ void PipPanel::init() {
 	widget()->setMouseTracking(true);
 	widget()->resize(0, 0);
 	widget()->hide();
-	widget()->createWinId();
 
-	rp()->shownValue(
-	) | rpl::filter([=](bool shown) {
-		return shown;
-	}) | rpl::start_with_next([=] {
+	rpl::merge(
+		rp()->shownValue() | rpl::to_empty,
+		rp()->paintRequest() | rpl::to_empty
+	) | rpl::map([=] {
+		return widget()->windowHandle()
+			&& widget()->windowHandle()->isExposed();
+	}) | rpl::distinct_until_changed(
+	) | rpl::filter(rpl::mappers::_1) | rpl::start_with_next([=] {
 		// Workaround Qt's forced transient parent.
 		Ui::Platform::ClearTransientParent(widget());
 	}, rp()->lifetime());
 
-	QObject::connect(
-		widget()->windowHandle(),
-		&QWindow::screenChanged,
-		[=](QScreen *screen) {
-			handleScreenChanged(screen);
-		});
+	rp()->screenValue(
+	) | rpl::skip(1) | rpl::start_with_next([=](not_null<QScreen*> screen) {
+		handleScreenChanged(screen);
+	}, rp()->lifetime());
 
 	if (Platform::IsWayland()) {
 		rp()->sizeValue(
-		) | rpl::start_with_next([=](QSize size) {
+		) | rpl::skip(1) | rpl::start_with_next([=](QSize size) {
 			handleWaylandResize(size);
 		}, rp()->lifetime());
-
-		base::install_event_filter(widget(), [=](not_null<QEvent*> event) {
-			if (event->type() == QEvent::Resize && _inHandleWaylandResize) {
-				return base::EventFilterResult::Cancel;
-			}
-			return base::EventFilterResult::Continue;
-		});
-
-		base::install_event_filter(widget()->windowHandle(), [=](not_null<QEvent*> event) {
-			if (event->type() == QEvent::Resize) {
-				if (_inHandleWaylandResize) {
-					return base::EventFilterResult::Cancel;
-				}
-				const auto newSize = static_cast<QResizeEvent*>(event.get())->size();
-				if (_suggestedWaylandSize == newSize) {
-					handleWaylandResize(newSize);
-					return base::EventFilterResult::Cancel;
-				}
-			}
-			return base::EventFilterResult::Continue;
-		});
 	}
 }
 
@@ -501,20 +481,14 @@ PipPanel::Position PipPanel::countPosition() const {
 }
 
 void PipPanel::setPositionDefault() {
-	const auto widgetScreen = [&](auto &&widget) -> QScreen* {
-		if (!widget) {
-			return nullptr;
-		}
-		if (const auto screen = QGuiApplication::screenAt(
-				widget->geometry().center())) {
-			return screen;
-		}
-		return widget->screen();
-	};
-	const auto parentScreen = widgetScreen(_parent);
+	const auto parentScreen = _parent ? _parent->screen() : nullptr;
 	const auto myScreen = widget()->screen();
 	if (parentScreen && myScreen != parentScreen) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+		widget()->setScreen(parentScreen);
+#else // Qt >= 6.0.0
 		widget()->windowHandle()->setScreen(parentScreen);
+#endif // Qt < 6.0.0
 	}
 	auto position = Position();
 	position.snapped = RectPart::Top | RectPart::Left;
@@ -608,8 +582,10 @@ void PipPanel::setGeometry(QRect geometry) {
 }
 
 void PipPanel::handleWaylandResize(QSize size) {
+	if (_inHandleWaylandResize) {
+		return;
+	}
 	_inHandleWaylandResize = true;
-	_suggestedWaylandSize = size;
 
 	// Apply aspect ratio.
 	const auto max = std::max(size.width(), size.height());
@@ -630,10 +606,12 @@ void PipPanel::handleWaylandResize(QSize size) {
 		: scaled;
 
 	widget()->resize(normalized);
+	QResizeEvent e(normalized, size);
+	QCoreApplication::sendEvent(widget()->windowHandle(), &e);
 	_inHandleWaylandResize = false;
 }
 
-void PipPanel::handleScreenChanged(QScreen *screen) {
+void PipPanel::handleScreenChanged(not_null<QScreen*> screen) {
 	const auto screenGeometry = screen->availableGeometry();
 	const auto minimalSize = _ratio.scaled(
 		st::pipMinimalSize,

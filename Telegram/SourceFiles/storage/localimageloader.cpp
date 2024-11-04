@@ -472,8 +472,9 @@ FileLoadTask::FileLoadTask(
 	const FileLoadTo &to,
 	const TextWithTags &caption,
 	bool spoiler,
-	std::shared_ptr<SendingAlbum> album)
-: _id(base::RandomValue<uint64>())
+	std::shared_ptr<SendingAlbum> album,
+	uint64 idOverride)
+: _id(idOverride ? idOverride : base::RandomValue<uint64>())
 , _session(session)
 , _dcId(session->mainDcId())
 , _to(to)
@@ -844,7 +845,9 @@ void FileLoadTask::process(Args &&args) {
 				MTP_double(realSeconds),
 				MTP_int(coverWidth),
 				MTP_int(coverHeight),
-				MTPint())); // preload_prefix_size
+				MTPint(), // preload_prefix_size
+				MTPdouble(), // video_start_ts
+				MTPstring())); // video_codec
 
 			if (args.generateGoodThumbnail) {
 				goodThumbnail = video->thumbnail;

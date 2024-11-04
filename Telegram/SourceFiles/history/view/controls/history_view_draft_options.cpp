@@ -35,7 +35,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/discrete_sliders.h"
 #include "ui/painter.h"
+#include "ui/toast/toast.h"
 #include "ui/vertical_list.h"
+#include "ui/ui_utility.h"
 #include "window/themes/window_theme.h"
 #include "window/section_widget.h"
 #include "window/window_session_controller.h"
@@ -108,6 +110,10 @@ public:
 		const std::vector<MessageLinkRange> &links,
 		const QString &usedLink);
 
+	[[nodiscard]] rpl::producer<int> draggingScrollDelta() const {
+		return _draggingScrollDelta.events();
+	}
+
 private:
 	void paintEvent(QPaintEvent *e) override;
 	void leaveEventHook(QEvent *e) override;
@@ -115,6 +121,11 @@ private:
 	void mousePressEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
 	void mouseDoubleClickEvent(QMouseEvent *e) override;
+
+	void visibleTopBottomUpdated(int top, int bottom) override {
+		_visibleTop = top;
+		_visibleBottom = bottom;
+	}
 
 	void initElement();
 	void highlightUsedLink(
@@ -139,6 +150,9 @@ private:
 	rpl::lifetime _elementLifetime;
 
 	QPoint _position;
+	rpl::event_stream<int> _draggingScrollDelta;
+	int _visibleTop = 0;
+	int _visibleBottom = 0;
 
 	base::Timer _trippleClickTimer;
 	ClickHandlerPtr _link;
@@ -370,7 +384,7 @@ void PreviewWrap::paintEvent(QPaintEvent *e) {
 				userpicTop,
 				width(),
 				st::msgPhotoSize);
-		} else if (const auto info = item->originalHiddenSenderInfo()) {
+		} else if (const auto info = item->displayHiddenSenderInfo()) {
 			if (info->customUserpic.empty()) {
 				info->emptyUserpic.paintCircle(
 					p,
@@ -421,9 +435,8 @@ void PreviewWrap::mouseMoveEvent(QMouseEvent *e) {
 			: Flag::LookupLink),
 		.onlyMessageText = (_section == Section::Link || _onlyMessageText),
 	};
-	auto resolved = _element->textState(
-		e->pos() - _position,
-		request);
+	const auto position = e->pos();
+	auto resolved = _element->textState(position - _position, request);
 	_over = true;
 	const auto text = (_section == Section::Reply)
 		&& (resolved.cursor == CursorState::Text);
@@ -448,6 +461,17 @@ void PreviewWrap::mouseMoveEvent(QMouseEvent *e) {
 			update();
 		}
 	}
+
+	_draggingScrollDelta.fire([&] {
+		if (!_selecting || _visibleTop >= _visibleBottom) {
+			return 0;
+		} else if (position.y() < _visibleTop) {
+			return position.y() - _visibleTop;
+		} else if (position.y() >= _visibleBottom) {
+			return position.y() + 1 - _visibleBottom;
+		}
+		return 0;
+	}());
 }
 
 void PreviewWrap::mousePressEvent(QMouseEvent *e) {
@@ -812,6 +836,11 @@ void DraftOptionsBox(
 	state->wrap = box->addRow(
 		object_ptr<PreviewWrap>(box, args.history),
 		{});
+	state->wrap->draggingScrollDelta(
+	) | rpl::start_with_next([=](int delta) {
+		box->scrollByDraggingDelta(delta);
+	}, state->wrap->lifetime());
+
 	const auto &linkRanges = args.links;
 	state->shown.value() | rpl::start_with_next([=](Section shown) {
 		bottom->clear();
@@ -842,7 +871,14 @@ void DraftOptionsBox(
 			: tr::lng_reply_quote_selected();
 	}) | rpl::flatten_latest();
 	box->addButton(std::move(save), [=] {
-		finish(resolveReply(), state->webpage);
+		if (state->quote.current().overflown) {
+			show->showToast({
+				.title = tr::lng_reply_quote_long_title(tr::now),
+				.text = { tr::lng_reply_quote_long_text(tr::now) },
+			});
+		} else {
+			finish(resolveReply(), state->webpage);
+		}
 	});
 
 	box->addButton(tr::lng_cancel(), [=] {

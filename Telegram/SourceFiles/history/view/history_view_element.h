@@ -117,6 +117,7 @@ public:
 		not_null<const Element*> view,
 		Element *replacing) = 0;
 	virtual QString elementAuthorRank(not_null<const Element*> view) = 0;
+	virtual bool elementHideTopicButton(not_null<const Element*> view) = 0;
 
 	virtual ~ElementDelegate() {
 	}
@@ -170,6 +171,7 @@ public:
 		not_null<const Element*> view,
 		Element *replacing) override;
 	QString elementAuthorRank(not_null<const Element*> view) override;
+	bool elementHideTopicButton(not_null<const Element*> view) override;
 
 };
 
@@ -276,6 +278,10 @@ struct FakeBotAboutTop : public RuntimeComponent<FakeBotAboutTop, Element> {
 	int height = 0;
 };
 
+struct PurchasedTag : public RuntimeComponent<PurchasedTag, Element> {
+	Ui::Text::String text;
+};
+
 struct TopicButton {
 	std::unique_ptr<Ui::RippleAnimation> ripple;
 	ClickHandlerPtr link;
@@ -288,6 +294,7 @@ struct SelectedQuote {
 	HistoryItem *item = nullptr;
 	TextWithEntities text;
 	int offset = 0;
+	bool overflown = false;
 
 	explicit operator bool() const {
 		return item && !text.empty();
@@ -561,6 +568,8 @@ public:
 	-> std::unique_ptr<Ui::ReactionFlyAnimation>;
 
 	void overrideMedia(std::unique_ptr<Media> media);
+
+	[[nodiscard]] not_null<PurchasedTag*> enforcePurchasedTag();
 
 	virtual bool consumeHorizontalScroll(QPoint position, int delta) {
 		return false;

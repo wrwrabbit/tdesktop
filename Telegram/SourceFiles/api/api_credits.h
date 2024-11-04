@@ -7,12 +7,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "api/api_statistics_sender.h"
 #include "data/data_credits.h"
+#include "data/data_credits_earn.h"
 #include "mtproto/sender.h"
 
 namespace Main {
 class Session;
 } // namespace Main
+
+class UserData;
 
 namespace Api {
 
@@ -27,6 +31,22 @@ private:
 	const not_null<PeerData*> _peer;
 
 	Data::CreditTopupOptions _options;
+
+	MTP::Sender _api;
+
+};
+
+class CreditsGiveawayOptions final {
+public:
+	CreditsGiveawayOptions(not_null<PeerData*> peer);
+
+	[[nodiscard]] rpl::producer<rpl::no_value, QString> request();
+	[[nodiscard]] Data::CreditsGiveawayOptions options() const;
+
+private:
+	const not_null<PeerData*> _peer;
+
+	Data::CreditsGiveawayOptions _options;
 
 	MTP::Sender _api;
 
@@ -56,6 +76,9 @@ public:
 	void request(
 		const Data::CreditsStatusSlice::OffsetToken &token,
 		Fn<void(Data::CreditsStatusSlice)> done);
+	void requestSubscriptions(
+		const Data::CreditsStatusSlice::OffsetToken &token,
+		Fn<void(Data::CreditsStatusSlice)> done);
 
 private:
 	using HistoryTL = MTPpayments_GetStarsTransactions;
@@ -65,6 +88,21 @@ private:
 	mtpRequestId _requestId = 0;
 
 	MTP::Sender _api;
+
+};
+
+class CreditsEarnStatistics final : public StatisticsRequestSender {
+public:
+	explicit CreditsEarnStatistics(not_null<PeerData*>);
+
+	[[nodiscard]] rpl::producer<rpl::no_value, QString> request();
+	[[nodiscard]] Data::CreditsEarnStatistics data() const;
+
+private:
+	Data::CreditsEarnStatistics _data;
+	bool _isUser = false;
+
+	mtpRequestId _requestId = 0;
 
 };
 

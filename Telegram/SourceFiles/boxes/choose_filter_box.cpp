@@ -39,6 +39,7 @@ Data::ChatFilter ChangedFilter(
 		filter.id(),
 		filter.title(),
 		filter.iconEmoji(),
+		filter.colorIndex(),
 		filter.flags(),
 		std::move(always),
 		filter.pinned(),
@@ -58,6 +59,7 @@ Data::ChatFilter ChangedFilter(
 		filter.id(),
 		filter.title(),
 		filter.iconEmoji(),
+		filter.colorIndex(),
 		filter.flags(),
 		std::move(always),
 		filter.pinned(),
@@ -81,7 +83,7 @@ void ChangeFilterById(
 			MTP_int(filter.id()),
 			filter.tl()
 		)).done([=, chat = history->peer->name(), name = filter.title()] {
-			const auto account = &history->session().account();
+			const auto account = not_null(&history->session().account());
 			if (const auto controller = Core::App().windowFor(account)) {
 				controller->showToast((add
 					? tr::lng_filters_toast_add

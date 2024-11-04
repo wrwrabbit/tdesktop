@@ -38,15 +38,22 @@ void AppConfig::start() {
 	}, _lifetime);
 }
 
-void AppConfig::refresh() {
+int AppConfig::quoteLengthMax() const {
+	return get<int>(u"quote_length_max"_q, 1024);
+}
+
+void AppConfig::refresh(bool force) {
 	if (_requestId || !_api) {
+		if (force) {
+			_pendingRefresh = true;
+		}
 		return;
 	}
+	_pendingRefresh = false;
 	_requestId = _api->request(MTPhelp_GetAppConfig(
 		MTP_int(_hash)
 	)).done([=](const MTPhelp_AppConfig &result) {
 		_requestId = 0;
-		refreshDelayed();
 		result.match([&](const MTPDhelp_appConfig &data) {
 			_hash = data.vhash().v;
 
@@ -55,15 +62,25 @@ void AppConfig::refresh() {
 				LOG(("API Error: Unexpected config type."));
 				return;
 			}
+			auto was = ignoredRestrictionReasons();
+
 			_data.clear();
 			for (const auto &element : config.c_jsonObject().vvalue().v) {
 				element.match([&](const MTPDjsonObjectValue &data) {
 					_data.emplace_or_assign(qs(data.vkey()), data.vvalue());
 				});
 			}
+			updateIgnoredRestrictionReasons(std::move(was));
+
 			DEBUG_LOG(("getAppConfig result handled."));
 			_refreshed.fire({});
 		}, [](const MTPDhelp_appConfigNotModified &) {});
+
+		if (base::take(_pendingRefresh)) {
+			refresh();
+		} else {
+			refreshDelayed();
+		}
 	}).fail([=] {
 		_requestId = 0;
 		refreshDelayed();
@@ -74,6 +91,24 @@ void AppConfig::refreshDelayed() {
 	base::call_delayed(kRefreshTimeout, _account, [=] {
 		refresh();
 	});
+}
+
+void AppConfig::updateIgnoredRestrictionReasons(std::vector<QString> was) {
+	_ignoreRestrictionReasons = get<std::vector<QString>>(
+		u"ignore_restriction_reasons"_q,
+		std::vector<QString>());
+	ranges::sort(_ignoreRestrictionReasons);
+	if (_ignoreRestrictionReasons != was) {
+		for (const auto &reason : _ignoreRestrictionReasons) {
+			const auto i = ranges::remove(was, reason);
+			if (i != end(was)) {
+				was.erase(i, end(was));
+			} else {
+				was.push_back(reason);
+			}
+		}
+		_ignoreRestrictionChanges.fire(std::move(was));
+	}
 }
 
 rpl::producer<> AppConfig::refreshed() const {
@@ -144,28 +179,22 @@ std::vector<QString> AppConfig::getStringArray(
 	});
 }
 
-std::vector<std::map<QString, QString>> AppConfig::getStringMapArray(
+base::flat_map<QString, QString> AppConfig::getStringMap(
 		const QString &key,
-		std::vector<std::map<QString, QString>> &&fallback) const {
+		base::flat_map<QString, QString> &&fallback) const {
 	return getValue(key, [&](const MTPJSONValue &value) {
-		return value.match([&](const MTPDjsonArray &data) {
-			auto result = std::vector<std::map<QString, QString>>();
+		return value.match([&](const MTPDjsonObject &data) {
+			auto result = base::flat_map<QString, QString>();
 			result.reserve(data.vvalue().v.size());
 			for (const auto &entry : data.vvalue().v) {
-				if (entry.type() != mtpc_jsonObject) {
+				const auto &data = entry.data();
+				const auto &value = data.vvalue();
+				if (value.type() != mtpc_jsonString) {
 					return std::move(fallback);
 				}
-				auto element = std::map<QString, QString>();
-				for (const auto &field : entry.c_jsonObject().vvalue().v) {
-					const auto &data = field.c_jsonObjectValue();
-					if (data.vvalue().type() != mtpc_jsonString) {
-						return std::move(fallback);
-					}
-					element.emplace(
-						qs(data.vkey()),
-						qs(data.vvalue().c_jsonString().vvalue()));
-				}
-				result.push_back(std::move(element));
+				result.emplace(
+					qs(data.vkey()),
+					qs(value.c_jsonString().vvalue()));
 			}
 			return result;
 		}, [&](const auto &data) {

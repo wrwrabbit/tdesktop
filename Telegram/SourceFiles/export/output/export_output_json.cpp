@@ -290,6 +290,17 @@ QByteArray SerializeMessage(
 		pushBare("edited_unixtime", SerializeDateRaw(message.edited));
 	}
 
+	const auto wrapPeerId = [&](PeerId peerId) {
+		if (const auto chat = peerToChat(peerId)) {
+			return SerializeString("chat"
+				+ Data::NumberToString(chat.bare));
+		} else if (const auto channel = peerToChannel(peerId)) {
+			return SerializeString("channel"
+				+ Data::NumberToString(channel.bare));
+		}
+		return SerializeString("user"
+			+ Data::NumberToString(peerToUser(peerId).bare));
+	};
 	const auto push = [&](const QByteArray &key, const auto &value) {
 		using V = std::decay_t<decltype(value)>;
 		if constexpr (std::is_same_v<V, bool>) {
@@ -297,22 +308,7 @@ QByteArray SerializeMessage(
 		} else if constexpr (std::is_arithmetic_v<V>) {
 			pushBare(key, Data::NumberToString(value));
 		} else if constexpr (std::is_same_v<V, PeerId>) {
-			if (const auto chat = peerToChat(value)) {
-				pushBare(
-					key,
-					SerializeString("chat"
-						+ Data::NumberToString(chat.bare)));
-			} else if (const auto channel = peerToChannel(value)) {
-				pushBare(
-					key,
-					SerializeString("channel"
-						+ Data::NumberToString(channel.bare)));
-			} else {
-				pushBare(
-					key,
-					SerializeString("user"
-						+ Data::NumberToString(peerToUser(value).bare)));
-			}
+			pushBare(key, wrapPeerId(value));
 		} else {
 			const auto wrapped = QByteArray(value);
 			if (!wrapped.isEmpty()) {
@@ -615,6 +611,7 @@ QByteArray SerializeMessage(
 		pushAction("giveaway_results");
 		push("winners", data.winners);
 		push("unclaimed", data.unclaimed);
+		push("stars", data.credits);
 	}, [&](const ActionSetChatWallPaper &data) {
 		pushActor();
 		pushAction(data.same
@@ -625,6 +622,39 @@ QByteArray SerializeMessage(
 		pushActor();
 		pushAction("boost_apply");
 		push("boosts", data.boosts);
+	}, [&](const ActionPaymentRefunded &data) {
+		pushAction("refunded_payment");
+		push("amount", data.amount);
+		push("currency", data.currency);
+		pushBare("peer_name", wrapPeerName(data.peerId));
+		push("peer_id", data.peerId);
+		push("charge_id", data.transactionId);
+	}, [&](const ActionGiftStars &data) {
+		pushActor();
+		pushAction("send_stars_gift");
+		if (!data.cost.isEmpty()) {
+			push("cost", data.cost);
+		}
+		if (data.credits) {
+			push("stars", data.credits);
+		}
+	}, [&](const ActionPrizeStars &data) {
+		pushActor();
+		pushAction("stars_prize");
+		push("boost_peer_id", data.peerId);
+		pushBare("boost_peer_name", wrapPeerName(data.peerId));
+		push("stars", data.amount);
+		push("is_unclaimed", data.isUnclaimed);
+		push("giveaway_msg_id", data.giveawayMsgId);
+		push("transaction_id", data.transactionId);
+	}, [&](const ActionStarGift &data) {
+		pushActor();
+		pushAction("send_star_gift");
+		push("gift_id", data.giftId);
+		push("stars", data.stars);
+		push("is_limited", data.limited);
+		push("is_anonymous", data.anonymous);
+		pushBare("text", SerializeText(context, data.text));
 	}, [](v::null_t) {});
 
 	if (v::is_null(message.action.content)) {
@@ -764,7 +794,7 @@ QByteArray SerializeMessage(
 			{ "answers", serialized }
 		}));
 	}, [&](const GiveawayStart &data) {
-		context.nesting.push_back(Context::kObject);
+		context.nesting.push_back(Context::kArray);
 		const auto channels = ranges::views::all(
 			data.channels
 		) | ranges::views::transform([&](ChannelId id) {
@@ -773,12 +803,56 @@ QByteArray SerializeMessage(
 		const auto serialized = SerializeArray(context, channels);
 		context.nesting.pop_back();
 
-		push("giveaway_information", SerializeObject(context, {
+		context.nesting.push_back(Context::kArray);
+		const auto countries = ranges::views::all(
+			data.countries
+		) | ranges::views::transform([&](const QString &code) {
+			return SerializeString(code.toUtf8());
+		}) | ranges::to_vector;
+		const auto serializedCountries = SerializeArray(context, countries);
+		context.nesting.pop_back();
+
+		const auto additionalPrize = data.additionalPrize.toUtf8();
+
+		pushBare("giveaway_information", SerializeObject(context, {
 			{ "quantity", NumberToString(data.quantity) },
 			{ "months", NumberToString(data.months) },
 			{ "until_date", SerializeDate(data.untilDate) },
 			{ "channels", serialized },
+			{ "countries", serializedCountries },
+			{ "additional_prize", SerializeString(additionalPrize) },
+			{ "stars", NumberToString(data.credits) },
+			{ "is_only_new_subscribers", (!data.all) ? "true" : "false" },
 		}));
+	}, [&](const GiveawayResults &data) {
+		context.nesting.push_back(Context::kArray);
+		const auto winners = ranges::views::all(
+			data.winners
+		) | ranges::views::transform([&](PeerId id) {
+			return NumberToString(id.value);
+		}) | ranges::to_vector;
+		const auto serialized = SerializeArray(context, winners);
+		context.nesting.pop_back();
+
+		const auto additionalPrize = data.additionalPrize.toUtf8();
+		const auto peersCount = data.additionalPeersCount;
+
+		pushBare("giveaway_results", SerializeObject(context, {
+			{ "channel", NumberToString(data.channel.bare) },
+			{ "winners", serialized },
+			{ "additional_prize", SerializeString(additionalPrize) },
+			{ "until_date", SerializeDate(data.untilDate) },
+			{ "launch_message_id", NumberToString(data.launchId) },
+			{ "additional_peers_count", NumberToString(peersCount) },
+			{ "winners_count", NumberToString(data.winnersCount) },
+			{ "unclaimed_count", NumberToString(data.unclaimedCount) },
+			{ "months", NumberToString(data.months) },
+			{ "stars", NumberToString(data.credits) },
+			{ "is_refunded", data.refunded ? "true" : "false" },
+			{ "is_only_new_subscribers", (!data.all) ? "true" : "false" },
+		}));
+	}, [&](const PaidMedia &data) {
+		push("paid_stars_amount", data.stars);
 	}, [](const UnsupportedMedia &data) {
 		Unexpected("Unsupported message.");
 	}, [](v::null_t) {});
@@ -847,6 +921,68 @@ QByteArray SerializeMessage(
 		) | ranges::views::transform(serializeRow) | ranges::to_vector;
 		context.nesting.pop_back();
 		pushBare("inline_bot_buttons", SerializeArray(context, rows));
+	}
+
+	if (!message.reactions.empty()) {
+		const auto serializeReaction = [&](const Reaction &reaction) {
+			context.nesting.push_back(Context::kObject);
+			const auto guard = gsl::finally([&] {
+				context.nesting.pop_back();
+			});
+
+			auto pairs = std::vector<std::pair<QByteArray, QByteArray>>();
+			pairs.push_back({
+				"type",
+				SerializeString(Reaction::TypeToString(reaction)),
+			});
+			pairs.push_back({
+				"count",
+				NumberToString(reaction.count),
+			});
+			switch (reaction.type) {
+				case Reaction::Type::Emoji:
+					pairs.push_back({
+						"emoji",
+						SerializeString(reaction.emoji.toUtf8()),
+					});
+					break;
+				case Reaction::Type::CustomEmoji:
+					pairs.push_back({
+						"document_id",
+						SerializeString(reaction.documentId),
+					});
+					break;
+			}
+
+			if (!reaction.recent.empty()) {
+				context.nesting.push_back(Context::kArray);
+				const auto recents = ranges::views::all(
+					reaction.recent
+				) | ranges::views::transform([&](
+						const Reaction::Recent &recent) {
+					context.nesting.push_back(Context::kArray);
+					const auto guard = gsl::finally([&] {
+						context.nesting.pop_back();
+					});
+					return SerializeObject(context, {
+						{ "from", wrapPeerName(recent.peerId) },
+						{ "from_id", wrapPeerId(recent.peerId) },
+						{ "date", SerializeDate(recent.date) },
+					});
+				}) | ranges::to_vector;
+				pairs.push_back({"recent", SerializeArray(context, recents)});
+				context.nesting.pop_back();
+			}
+
+			return SerializeObject(context, pairs);
+		};
+
+		context.nesting.push_back(Context::kArray);
+		const auto reactions = ranges::views::all(
+			message.reactions
+		) | ranges::views::transform(serializeReaction) | ranges::to_vector;
+		pushBare("reactions", SerializeArray(context, reactions));
+		context.nesting.pop_back();
 	}
 
 	return serialized();
@@ -1329,6 +1465,7 @@ Result JsonWriter::writeDialogStart(const Data::DialogInfo &data) {
 		case Type::Unknown: return "";
 		case Type::Self: return "saved_messages";
 		case Type::Replies: return "replies";
+		case Type::VerifyCodes: return "verification_codes";
 		case Type::Personal: return "personal_chat";
 		case Type::Bot: return "bot_chat";
 		case Type::PrivateGroup: return "private_group";
@@ -1344,7 +1481,9 @@ Result JsonWriter::writeDialogStart(const Data::DialogInfo &data) {
 		? QByteArray()
 		: prepareArrayItemStart();
 	block.append(pushNesting(Context::kObject));
-	if (data.type != Type::Self && data.type != Type::Replies) {
+	if (data.type != Type::Self
+		&& data.type != Type::Replies
+		&& data.type != Type::VerifyCodes) {
 		block.append(prepareObjectItemStart("name")
 			+ StringAllowNull(data.name));
 	}

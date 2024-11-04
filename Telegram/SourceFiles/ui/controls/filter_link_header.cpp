@@ -105,11 +105,22 @@ private:
 	icon->paint(p, iconLeft, myIconTop, size);
 
 	const auto paintName = [&](const QString &text, int top) {
-		const auto &font = st.style.font;
-		p.drawText(
-			QRect(0, top, column, font->height),
-			font->elided(text, available),
-			style::al_top);
+		auto string = Ui::Text::String(
+			st.style,
+			text,
+			kDefaultTextOptions,
+			available);
+		string.draw(p, {
+			.position = QPoint(
+				std::max(
+					(column - string.maxWidth()) / 2,
+					skip),
+				top),
+			.outerWidth = available,
+			.availableWidth = available,
+			.align = style::al_left,
+			.elisionLines = 1,
+		});
 	};
 	p.setFont(st.style.font);
 	p.setPen(st.textFg);
@@ -396,7 +407,7 @@ object_ptr<RoundButton> FilterLinkProcessButton(
 	const auto label = result->lifetime().make_state<Label>(result.data());
 	label->setAttribute(Qt::WA_TransparentForMouseEvents);
 	result->sizeValue() | rpl::start_with_next([=](QSize size) {
-		const auto xskip = st->font->spacew;
+		const auto xskip = st->style.font->spacew;
 		const auto yskip = xskip / 2;
 		label->setGeometry(QRect(QPoint(), size).marginsRemoved(
 			{ xskip, yskip, xskip, yskip }));

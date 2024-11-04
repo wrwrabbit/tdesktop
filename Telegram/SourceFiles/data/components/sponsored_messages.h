@@ -20,6 +20,8 @@ class Session;
 
 namespace Data {
 
+class MediaPreload;
+
 struct SponsoredReportResult final {
 	using Id = QByteArray;
 	struct Option final {
@@ -44,6 +46,8 @@ struct SponsoredFrom {
 	QString link;
 	QString buttonText;
 	PhotoId photoId = PhotoId(0);
+	PhotoId mediaPhotoId = PhotoId(0);
+	DocumentId mediaDocumentId = DocumentId(0);
 	uint64 backgroundEmojiId = 0;
 	uint8 colorIndex : 6 = 0;
 	bool isLinkInternal = false;
@@ -63,6 +67,11 @@ struct SponsoredMessage {
 
 class SponsoredMessages final {
 public:
+	enum class AppendResult {
+		None,
+		Appended,
+		MediaLoading,
+	};
 	enum class State {
 		None,
 		AppendToEnd,
@@ -73,6 +82,8 @@ public:
 		QString link;
 		QString buttonText;
 		PhotoId photoId = PhotoId(0);
+		PhotoId mediaPhotoId = PhotoId(0);
+		DocumentId mediaDocumentId = DocumentId(0);
 		uint64 backgroundEmojiId = 0;
 		uint8 colorIndex : 6 = 0;
 		bool isLinkInternal = false;
@@ -86,9 +97,9 @@ public:
 	void request(not_null<History*> history, Fn<void()> done);
 	void clearItems(not_null<History*> history);
 	[[nodiscard]] Details lookupDetails(const FullMsgId &fullId) const;
-	void clicked(const FullMsgId &fullId);
+	void clicked(const FullMsgId &fullId, bool isMedia, bool isFullscreen);
 
-	[[nodiscard]] bool append(not_null<History*> history);
+	[[nodiscard]] AppendResult append(not_null<History*> history);
 	void inject(
 		not_null<History*> history,
 		MsgId injectAfterMsgId,
@@ -110,6 +121,7 @@ private:
 		OwnedItem item;
 		FullMsgId itemFullId;
 		SponsoredMessage sponsored;
+		std::unique_ptr<MediaPreload> preload;
 	};
 	struct List {
 		std::vector<Entry> entries;

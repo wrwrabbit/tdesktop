@@ -23,8 +23,7 @@
         <category>Network</category>
         <category>InstantMessaging</category>
     </categories>
-    <update_contact>johnprestonmail_at_gmail.com</update_contact>
-    <developer_name>John Preston</developer_name>
+    <developer id="org.telegram"><name>Telegram FZ-LLC</name></developer>
     <url type="homepage">https://desktop.telegram.org/</url>
     <url type="bugtracker">https://github.com/telegramdesktop/tdesktop/issues</url>
     <url type="translate">https://translations.telegram.org/</url>
@@ -90,5 +89,6 @@
         <binary>telegram-desktop</binary>
         <dbus type="session">org.telegram.desktop</dbus>
         <mediatype>x-scheme-handler/tg</mediatype>
+        <mediatype>x-scheme-handler/tonsite</mediatype>
     </provides>
 </component>

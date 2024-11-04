@@ -55,6 +55,7 @@ struct Details {
 	Type type = Type::Disabled;
 	SpoilerState spoiler = SpoilerState::None;
 	CaptionState caption = CaptionState::None;
+	std::optional<uint64> price;
 	bool effectAllowed = false;
 };
 
@@ -72,6 +73,7 @@ enum class ActionType : uchar {
 	SpoilerOff,
 	CaptionUp,
 	CaptionDown,
+	ChangePrice,
 };
 struct Action {
 	using Type = ActionType;

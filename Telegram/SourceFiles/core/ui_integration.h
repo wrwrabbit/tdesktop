@@ -58,12 +58,9 @@ public:
 	const Ui::Emoji::One *defaultEmojiVariant(
 		const Ui::Emoji::One *emoji) override;
 	std::unique_ptr<Ui::Text::CustomEmoji> createCustomEmoji(
-		const QString &data,
+		QStringView data,
 		const std::any &context) override;
 	Fn<void()> createSpoilerRepaint(const std::any &context) override;
-	bool allowClickHandlerActivation(
-		const std::shared_ptr<ClickHandler> &handler,
-		const ClickContext &context) override;
 
 	QString phraseContextCopyText() override;
 	QString phraseContextCopyEmail() override;

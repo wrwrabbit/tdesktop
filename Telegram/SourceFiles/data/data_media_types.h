@@ -70,6 +70,8 @@ struct SharedContact final {
 	};
 
 	using VcardItems = base::flat_map<VcardItemType, QString>;
+	static VcardItems ParseVcard(const QString &);
+
 	VcardItems vcardItems;
 };
 
@@ -82,19 +84,6 @@ struct Call {
 
 };
 
-struct ExtendedPreview {
-	QByteArray inlineThumbnailBytes;
-	QSize dimensions;
-	TimeId videoDuration = -1;
-
-	[[nodiscard]] bool empty() const {
-		return dimensions.isEmpty();
-	}
-	explicit operator bool() const {
-		return !empty();
-	}
-};
-
 class Media;
 
 struct Invoice {
@@ -103,11 +92,14 @@ struct Invoice {
 	QString currency;
 	QString title;
 	TextWithEntities description;
-	ExtendedPreview extendedPreview;
-	std::unique_ptr<Media> extendedMedia;
+	std::vector<std::unique_ptr<Media>> extendedMedia;
 	PhotoData *photo = nullptr;
+	bool isPaidMedia = false;
 	bool isTest = false;
 };
+[[nodiscard]] bool HasExtendedMedia(const Invoice &invoice);
+[[nodiscard]] bool HasUnpaidMedia(const Invoice &invoice);
+[[nodiscard]] bool IsFirstVideo(const Invoice &invoice);
 
 struct GiveawayStart {
 	std::vector<not_null<ChannelData*>> channels;
@@ -116,6 +108,7 @@ struct GiveawayStart {
 	TimeId untilDate = 0;
 	int quantity = 0;
 	int months = 0;
+	uint64 credits = 0;
 	bool all = false;
 };
 
@@ -129,16 +122,33 @@ struct GiveawayResults {
 	int winnersCount = 0;
 	int unclaimedCount = 0;
 	int months = 0;
+	uint64 credits = 0;
 	bool refunded = false;
 	bool all = false;
 };
 
+enum class GiftType : uchar {
+	Premium, // count - months
+	Credits, // count - credits
+	StarGift, // count - stars
+};
+
 struct GiftCode {
 	QString slug;
+	DocumentData *document = nullptr;
+	TextWithEntities message;
 	ChannelData *channel = nullptr;
-	int months = 0;
-	bool viaGiveaway = false;
-	bool unclaimed = false;
+	MsgId giveawayMsgId = 0;
+	int convertStars = 0;
+	int limitedCount = 0;
+	int limitedLeft = 0;
+	int count = 0;
+	GiftType type = GiftType::Premium;
+	bool viaGiveaway : 1 = false;
+	bool unclaimed : 1 = false;
+	bool anonymous : 1 = false;
+	bool converted : 1 = false;
+	bool saved : 1 = false;
 };
 
 class Media {
@@ -162,6 +172,7 @@ public:
 	virtual const Call *call() const;
 	virtual GameData *game() const;
 	virtual const Invoice *invoice() const;
+	virtual const GiftCode *gift() const;
 	virtual CloudImage *location() const;
 	virtual PollData *poll() const;
 	virtual const WallPaper *paper() const;
@@ -205,7 +216,7 @@ public:
 	virtual bool updateSentMedia(const MTPMessageMedia &media) = 0;
 	virtual bool updateExtendedMedia(
 			not_null<HistoryItem*> item,
-			const MTPMessageExtendedMedia &media) {
+			const QVector<MTPMessageExtendedMedia> &media) {
 		return false;
 	}
 	virtual std::unique_ptr<HistoryView::Media> createView(
@@ -445,6 +456,8 @@ public:
 	WebPageData *webpage() const override;
 	MediaWebPageFlags webpageFlags() const override;
 
+	Storage::SharedMediaTypesMask sharedMediaTypes() const override;
+
 	bool hasReplyPreview() const override;
 	Image *replyPreview() const override;
 	bool replyPreviewLoaded() const override;
@@ -515,6 +528,7 @@ public:
 	Image *replyPreview() const override;
 	bool replyPreviewLoaded() const override;
 	TextWithEntities notificationText() const override;
+	ItemPreview toPreview(ToPreviewOptions way) const override;
 	QString pinnedTextSubstring() const override;
 	TextForMimeData clipboardText() const override;
 
@@ -522,7 +536,7 @@ public:
 	bool updateSentMedia(const MTPMessageMedia &media) override;
 	bool updateExtendedMedia(
 		not_null<HistoryItem*> item,
-		const MTPMessageExtendedMedia &media) override;
+		const QVector<MTPMessageExtendedMedia> &media) override;
 	std::unique_ptr<HistoryView::Media> createView(
 		not_null<HistoryView::Element*> message,
 		not_null<HistoryItem*> realParent,
@@ -598,7 +612,8 @@ public:
 	MediaGiftBox(
 		not_null<HistoryItem*> parent,
 		not_null<PeerData*> from,
-		int months);
+		GiftType type,
+		int count);
 	MediaGiftBox(
 		not_null<HistoryItem*> parent,
 		not_null<PeerData*> from,
@@ -607,7 +622,7 @@ public:
 	std::unique_ptr<Media> clone(not_null<HistoryItem*> parent) override;
 
 	[[nodiscard]] not_null<PeerData*> from() const;
-	[[nodiscard]] const GiftCode &data() const;
+	[[nodiscard]] const GiftCode *gift() const override;
 
 	TextWithEntities notificationText() const override;
 	QString pinnedTextSubstring() const override;
@@ -748,6 +763,9 @@ private:
 [[nodiscard]] Invoice ComputeInvoiceData(
 	not_null<HistoryItem*> item,
 	const MTPDmessageMediaInvoice &data);
+[[nodiscard]] Invoice ComputeInvoiceData(
+	not_null<HistoryItem*> item,
+	const MTPDmessageMediaPaidMedia &data);
 
 [[nodiscard]] Call ComputeCallData(const MTPDmessageActionPhoneCall &call);
 

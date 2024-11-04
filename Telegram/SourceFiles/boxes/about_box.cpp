@@ -122,6 +122,8 @@ void AboutBox::showVersionHistory() {
 			url += u"win/%1.zip"_q;
 		} else if (Platform::IsWindows64Bit()) {
 			url += u"win64/%1.zip"_q;
+		} else if (Platform::IsWindowsARM64()) {
+			url += u"winarm/%1.zip"_q;
 		} else if (Platform::IsMac()) {
 			url += u"mac/%1.zip"_q;
 		} else if (Platform::IsLinux()) {
@@ -177,6 +179,8 @@ QString currentVersionText() {
 	}
 	if (Platform::IsWindows64Bit()) {
 		result += " x64";
+	} else if (Platform::IsWindowsARM64()) {
+		result += " arm64";
 	}
 	return result;
 }

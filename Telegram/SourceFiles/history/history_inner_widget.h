@@ -8,11 +8,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/timer.h"
+#include "data/data_report.h"
 #include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
 #include "ui/dragging_scroll_manager.h"
 #include "ui/widgets/tooltip.h"
 #include "ui/widgets/scroll_area.h"
+#include "history/history_view_swipe_data.h"
 #include "history/view/history_view_top_bar_widget.h"
 
 #include <QtGui/QPainterPath>
@@ -53,7 +55,6 @@ namespace Ui {
 class ChatTheme;
 class ChatStyle;
 class PopupMenu;
-enum class ReportReason;
 struct ChatPaintContext;
 class PathShiftGradient;
 struct PeerUserpicView;
@@ -188,7 +189,7 @@ public:
 	int historyTop() const;
 	int historyDrawTop() const;
 
-	void setChooseReportReason(Ui::ReportReason reason);
+	void setChooseReportReason(Data::ReportInput reportInput);
 	void clearChooseReportReason();
 
 	// -1 if should not be visible, -2 if bad history()
@@ -200,7 +201,7 @@ public:
 	[[nodiscard]] std::pair<Element*, int> findViewForPinnedTracking(
 		int top) const;
 
-	void refreshAboutView();
+	void refreshAboutView(bool force = false);
 	void notifyMigrateUpdated();
 
 	// Ui::AbstractTooltipShower interface.
@@ -419,6 +420,7 @@ private:
 	void reactionChosen(const ChosenReaction &reaction);
 
 	void setupSharingDisallowed();
+	void setupSwipeReply();
 	[[nodiscard]] bool hasCopyRestriction(HistoryItem *item = nullptr) const;
 	[[nodiscard]] bool hasCopyMediaRestriction(
 		not_null<HistoryItem*> item) const;
@@ -466,7 +468,7 @@ private:
 
 	style::cursor _cursor = style::cur_default;
 	SelectedItems _selected;
-	std::optional<Ui::ReportReason> _chooseForReportReason;
+	std::optional<Data::ReportInput> _chooseForReportReason;
 
 	const std::unique_ptr<Ui::PathShiftGradient> _pathGradient;
 	QPainterPath _highlightPathCache;
@@ -511,6 +513,7 @@ private:
 	bool _touchSelect = false;
 	bool _touchInProgress = false;
 	QPoint _touchStart, _touchPrevPos, _touchPos;
+	rpl::variable<bool> _touchMaybeSelecting;
 	base::Timer _touchSelectTimer;
 
 	Ui::DraggingScrollManager _selectScroll;
@@ -525,6 +528,8 @@ private:
 	crl::time _touchAccelerationTime = 0;
 	crl::time _touchTime = 0;
 	base::Timer _touchScrollTimer;
+
+	HistoryView::ChatPaintGestureHorizontalData _gestureHorizontal;
 
 	// _menu must be destroyed before _whoReactedMenuLifetime.
 	rpl::lifetime _whoReactedMenuLifetime;

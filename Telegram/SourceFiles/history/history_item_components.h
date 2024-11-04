@@ -33,6 +33,7 @@ namespace Data {
 class Session;
 class Story;
 class SavedSublist;
+struct UnavailableReason;
 } // namespace Data
 
 namespace Media::Player {
@@ -596,6 +597,11 @@ struct HistoryMessageFactcheck
 	bool requested = false;
 };
 
+struct HistoryMessageRestrictions
+: public RuntimeComponent<HistoryMessageRestrictions, HistoryItem> {
+	std::vector<Data::UnavailableReason> reasons;
+};
+
 struct HistoryServiceData
 : public RuntimeComponent<HistoryServiceData, HistoryItem> {
 	std::vector<ClickHandlerPtr> textLinks;
@@ -649,7 +655,7 @@ struct HistoryServicePayment
 : public RuntimeComponent<HistoryServicePayment, HistoryItem>
 , public HistoryServiceDependentData {
 	QString slug;
-	QString amount;
+	TextWithEntities amount;
 	ClickHandlerPtr invoiceLink;
 	bool recurringInit = false;
 	bool recurringUsed = false;
@@ -669,6 +675,15 @@ struct HistoryServiceGiveawayResults
 struct HistoryServiceCustomLink
 : public RuntimeComponent<HistoryServiceCustomLink, HistoryItem> {
 	ClickHandlerPtr link;
+};
+
+struct HistoryServicePaymentRefund
+: public RuntimeComponent<HistoryServicePaymentRefund, HistoryItem> {
+	ClickHandlerPtr link;
+	PeerData *peer = nullptr;
+	QString transactionId;
+	QString currency;
+	uint64 amount = 0;
 };
 
 enum class HistorySelfDestructType {
@@ -731,8 +746,7 @@ struct HistoryDocumentCaptioned : public RuntimeComponent<HistoryDocumentCaption
 };
 
 struct HistoryDocumentNamed : public RuntimeComponent<HistoryDocumentNamed, HistoryView::Document> {
-	QString name;
-	int namew = 0;
+	Ui::Text::String name;
 };
 
 struct HistoryDocumentVoicePlayback {

@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
 #include "ui/image/image_prepare.h"
+#include "ui/integration.h"
 #include "ui/painter.h"
 #include "ui/round_rect.h"
 #include "info/profile/info_profile_values.h" // Info::Profile::Value.
@@ -383,19 +384,13 @@ void Panel::initWindow() {
 				&& _fullScreenOrMaximized.current()) {
 				toggleFullScreen();
 			}
+		} else if (e->type() == QEvent::WindowStateChange && _call->rtmp()) {
+			const auto state = window()->windowState();
+			_fullScreenOrMaximized = (state & Qt::WindowFullScreen)
+				|| (state & Qt::WindowMaximized);
 		}
 		return base::EventFilterResult::Continue;
 	});
-
-	if (_call->rtmp()) {
-		QObject::connect(
-			window()->windowHandle(),
-			&QWindow::windowStateChanged,
-			[=](Qt::WindowState state) {
-				_fullScreenOrMaximized = (state == Qt::WindowFullScreen)
-					|| (state == Qt::WindowMaximized);
-			});
-	}
 
 	window()->setBodyTitleArea([=](QPoint widgetPoint) {
 		using Flag = Ui::WindowTitleHitTestFlag;
@@ -416,7 +411,7 @@ void Panel::initWindow() {
 		}
 		const auto shown = _layerBg->topShownLayer();
 		return (!shown || !shown->geometry().contains(widgetPoint))
-			? (Flag::Move | Flag::Maximize)
+			? (Flag::Move | Flag::Menu | Flag::Maximize)
 			: Flag::None;
 	});
 

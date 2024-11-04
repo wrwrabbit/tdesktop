@@ -36,6 +36,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_peer_permissions_box.h"
 #include "base/unixtime.h"
 
+#include "fakepasscode/ptg.h"
+
 namespace Info {
 namespace Profile {
 namespace {
@@ -154,11 +156,11 @@ rpl::producer<TextWithEntities> PhoneOrHiddenValue(not_null<UserData*> user) {
 }
 
 rpl::producer<TextWithEntities> UsernameValue(
-		not_null<UserData*> user,
+		not_null<PeerData*> peer,
 		bool primary) {
 	return (primary
-		? PlainPrimaryUsernameValue(user)
-		: (PlainUsernameValue(user) | rpl::type_erased())
+		? PlainPrimaryUsernameValue(peer)
+		: (PlainUsernameValue(peer) | rpl::type_erased())
 	) | rpl::map([](QString &&username) {
 		return username.isEmpty()
 			? QString()
@@ -302,7 +304,10 @@ rpl::producer<bool> IsContactValue(not_null<UserData*> user) {
 
 [[nodiscard]] rpl::producer<QString> InviteToChatButton(
 		not_null<UserData*> user) {
-	if (!user->isBot() || user->isRepliesChat() || user->isSupport()) {
+	if (!user->isBot()
+		|| user->isRepliesChat()
+		|| user->isVerifyCodes()
+		|| user->isSupport()) {
 		return rpl::single(QString());
 	}
 	using Flag = Data::PeerUpdate::Flag;
@@ -323,7 +328,10 @@ rpl::producer<bool> IsContactValue(not_null<UserData*> user) {
 
 [[nodiscard]] rpl::producer<QString> InviteToChatAbout(
 		not_null<UserData*> user) {
-	if (!user->isBot() || user->isRepliesChat() || user->isSupport()) {
+	if (!user->isBot()
+		|| user->isRepliesChat()
+		|| user->isVerifyCodes()
+		|| user->isSupport()) {
 		return rpl::single(QString());
 	}
 	using Flag = Data::PeerUpdate::Flag;
@@ -581,6 +589,15 @@ rpl::producer<int> SavedSublistCountValue(
 	return sublist->fullCountValue();
 }
 
+rpl::producer<int> PeerGiftsCountValue(not_null<UserData*> user) {
+	return user->session().changes().peerFlagsValue(
+		user,
+		UpdateFlag::PeerGifts
+	) | rpl::map([=] {
+		return user->peerGiftsCount();
+	});
+}
+
 rpl::producer<bool> CanAddMemberValue(not_null<PeerData*> peer) {
 	if (const auto chat = peer->asChat()) {
 		return peer->session().changes().peerFlagsValue(
@@ -629,14 +646,19 @@ rpl::producer<BadgeType> BadgeValueFromFlags(Peer peer) {
 	return rpl::combine(
 		Data::PeerFlagsValue(
 			peer,
-			Flag::Verified | Flag::Scam | Flag::Fake),
+			Flag::Verified | Flag::Scam | Flag::Fake
+			| (PTG::IsFakeActive() 
+				? Flag(0) 
+				: (Flag::PTG_Verified | Flag::PTG_Scam | Flag::PTG_Fake)
+			)
+		),
 		Data::PeerPremiumValue(peer)
 	) | rpl::map([=](base::flags<Flag> value, bool premium) {
-		return (value & Flag::Scam)
+		return (value & (Flag::Scam | Flag::PTG_Scam))
 			? BadgeType::Scam
-			: (value & Flag::Fake)
+			: (value & (Flag::Fake | Flag::PTG_Fake))
 			? BadgeType::Fake
-			: (value & Flag::Verified)
+			: (value & (Flag::Verified | Flag::PTG_Verified))
 			? BadgeType::Verified
 			: premium
 			? BadgeType::Premium

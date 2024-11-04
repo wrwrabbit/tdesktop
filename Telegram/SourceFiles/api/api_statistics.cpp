@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_statistics.h"
 
+#include "api/api_statistics_data_deserialize.h"
 #include "apiwrap.h"
 #include "base/unixtime.h"
 #include "data/data_channel.h"
@@ -15,32 +16,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_story.h"
 #include "history/history.h"
 #include "main/main_session.h"
-#include "statistics/statistics_data_deserialize.h"
 
 namespace Api {
 namespace {
-
-constexpr auto kCheckRequestsTimer = 10 * crl::time(1000);
-
-[[nodiscard]] Data::StatisticalGraph StatisticalGraphFromTL(
-		const MTPStatsGraph &tl) {
-	return tl.match([&](const MTPDstatsGraph &d) {
-		using namespace Statistic;
-		const auto zoomToken = d.vzoom_token().has_value()
-			? qs(*d.vzoom_token()).toUtf8()
-			: QByteArray();
-		return Data::StatisticalGraph{
-			StatisticalChartFromJSON(qs(d.vjson().data().vdata()).toUtf8()),
-			zoomToken,
-		};
-	}, [&](const MTPDstatsGraphAsync &data) {
-		return Data::StatisticalGraph{
-			.zoomToken = qs(data.vtoken()).toUtf8(),
-		};
-	}, [&](const MTPDstatsGraphError &data) {
-		return Data::StatisticalGraph{ .error = qs(data.verror()) };
-	});
-}
 
 [[nodiscard]] Data::StatisticalValue StatisticalValueFromTL(
 		const MTPStatsAbsValueAndPrev &tl) {
@@ -221,61 +199,6 @@ constexpr auto kCheckRequestsTimer = 10 * crl::time(1000);
 
 Statistics::Statistics(not_null<ChannelData*> channel)
 : StatisticsRequestSender(channel) {
-}
-
-StatisticsRequestSender::StatisticsRequestSender(not_null<ChannelData *> channel)
-: _channel(channel)
-, _api(&_channel->session().api().instance())
-, _timer([=] { checkRequests(); }) {
-}
-
-StatisticsRequestSender::~StatisticsRequestSender() {
-	for (const auto &[dcId, ids] : _requests) {
-		for (const auto id : ids) {
-			_channel->session().api().unregisterStatsRequest(dcId, id);
-		}
-	}
-}
-
-void StatisticsRequestSender::checkRequests() {
-	for (auto i = begin(_requests); i != end(_requests);) {
-		for (auto j = begin(i->second); j != end(i->second);) {
-			if (_api.pending(*j)) {
-				++j;
-			} else {
-				_channel->session().api().unregisterStatsRequest(
-					i->first,
-					*j);
-				j = i->second.erase(j);
-			}
-		}
-		if (i->second.empty()) {
-			i = _requests.erase(i);
-		} else {
-			++i;
-		}
-	}
-	if (_requests.empty()) {
-		_timer.cancel();
-	}
-}
-
-template <typename Request, typename, typename>
-auto StatisticsRequestSender::makeRequest(Request &&request) {
-	const auto id = _api.allocateRequestId();
-	const auto dcId = _channel->owner().statsDcId(_channel);
-	if (dcId) {
-		_channel->session().api().registerStatsRequest(dcId, id);
-		_requests[dcId].emplace(id);
-		if (!_timer.isActive()) {
-			_timer.callEach(kCheckRequestsTimer);
-		}
-	}
-	return std::move(_api.request(
-		std::forward<Request>(request)
-	).toDC(
-		dcId ? MTP::ShiftDcId(dcId, MTP::kStatsDcShift) : 0
-	).overrideId(id));
 }
 
 rpl::producer<rpl::no_value, QString> Statistics::request() {
@@ -648,13 +571,22 @@ rpl::producer<rpl::no_value, QString> Boosts::request() {
 				_boostStatus.prepaidGiveaway = ranges::views::all(
 					data.vprepaid_giveaways()->v
 				) | ranges::views::transform([](const MTPPrepaidGiveaway &r) {
-					return Data::BoostPrepaidGiveaway{
-						.months = r.data().vmonths().v,
-						.id = r.data().vid().v,
-						.quantity = r.data().vquantity().v,
-						.date = QDateTime::fromSecsSinceEpoch(
-							r.data().vdate().v),
-					};
+					return r.match([&](const MTPDprepaidGiveaway &data) {
+						return Data::BoostPrepaidGiveaway{
+							.date = base::unixtime::parse(data.vdate().v),
+							.id = data.vid().v,
+							.months = data.vmonths().v,
+							.quantity = data.vquantity().v,
+						};
+					}, [&](const MTPDprepaidStarsGiveaway &data) {
+						return Data::BoostPrepaidGiveaway{
+							.date = base::unixtime::parse(data.vdate().v),
+							.id = data.vid().v,
+							.credits = data.vstars().v,
+							.quantity = data.vquantity().v,
+							.boosts = data.vboosts().v,
+						};
+					});
 				}) | ranges::to_vector;
 			}
 
@@ -712,19 +644,21 @@ void Boosts::requestBoosts(
 				}
 				: Data::GiftCodeLink();
 			list.push_back({
-				data.is_gift(),
-				data.is_giveaway(),
-				data.is_unclaimed(),
-				qs(data.vid()),
-				data.vuser_id().value_or_empty(),
-				data.vgiveaway_msg_id()
+				.id = qs(data.vid()),
+				.userId = UserId(data.vuser_id().value_or_empty()),
+				.giveawayMessage = data.vgiveaway_msg_id()
 					? FullMsgId{ _peer->id, data.vgiveaway_msg_id()->v }
 					: FullMsgId(),
-				QDateTime::fromSecsSinceEpoch(data.vdate().v),
-				QDateTime::fromSecsSinceEpoch(data.vexpires().v),
-				(data.vexpires().v - data.vdate().v) / kMonthsDivider,
-				std::move(giftCodeLink),
-				data.vmultiplier().value_or_empty(),
+				.date = base::unixtime::parse(data.vdate().v),
+				.expiresAt = base::unixtime::parse(data.vexpires().v),
+				.expiresAfterMonths = ((data.vexpires().v - data.vdate().v)
+					/ kMonthsDivider),
+				.giftCodeLink = std::move(giftCodeLink),
+				.multiplier = data.vmultiplier().value_or_empty(),
+				.credits = data.vstars().value_or_empty(),
+				.isGift = data.is_gift(),
+				.isGiveaway = data.is_giveaway(),
+				.isUnclaimed = data.is_unclaimed(),
 			});
 		}
 		done(Data::BoostsListSlice{
@@ -747,11 +681,11 @@ Data::BoostStatus Boosts::boostStatus() const {
 	return _boostStatus;
 }
 
-EarnStatistics::EarnStatistics(not_null<ChannelData*> channel)
+ChannelEarnStatistics::ChannelEarnStatistics(not_null<ChannelData*> channel)
 : StatisticsRequestSender(channel) {
 }
 
-rpl::producer<rpl::no_value, QString> EarnStatistics::request() {
+rpl::producer<rpl::no_value, QString> ChannelEarnStatistics::request() {
 	return [=](auto consumer) {
 		auto lifetime = rpl::lifetime();
 
@@ -795,7 +729,7 @@ rpl::producer<rpl::no_value, QString> EarnStatistics::request() {
 	};
 }
 
-void EarnStatistics::requestHistory(
+void ChannelEarnStatistics::requestHistory(
 		const Data::EarnHistorySlice::OffsetToken &token,
 		Fn<void(Data::EarnHistorySlice)> done) {
 	if (_requestId) {
@@ -865,7 +799,7 @@ void EarnStatistics::requestHistory(
 	}).send();
 }
 
-Data::EarnStatistics EarnStatistics::data() const {
+Data::EarnStatistics ChannelEarnStatistics::data() const {
 	return _data;
 }
 

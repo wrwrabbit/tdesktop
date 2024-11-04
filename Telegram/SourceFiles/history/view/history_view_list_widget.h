@@ -155,6 +155,7 @@ public:
 		Painter &p,
 		const Ui::ChatPaintContext &context) = 0;
 	virtual QString listElementAuthorRank(not_null<const Element*> view) = 0;
+	virtual bool listElementHideTopicButton(not_null<const Element*> view) = 0;
 	virtual History *listTranslateHistory() = 0;
 	virtual void listAddTranslatedItems(
 		not_null<TranslateTracker*> tracker) = 0;
@@ -326,6 +327,7 @@ public:
 	void selectItemAsGroup(not_null<HistoryItem*> item);
 
 	void touchScrollUpdated(const QPoint &screenPos);
+	[[nodiscard]] rpl::producer<bool> touchMaybeSelectingValue() const;
 
 	[[nodiscard]] bool loadedAtTopKnown() const;
 	[[nodiscard]] bool loadedAtTop() const;
@@ -368,7 +370,7 @@ public:
 	[[nodiscard]] auto replyToMessageRequested() const
 		-> rpl::producer<ReplyToMessageRequest>;
 	void replyToMessageRequestNotify(
-		FullReplyTo to, 
+		FullReplyTo to,
 		bool forceAnotherChat = false);
 	[[nodiscard]] rpl::producer<FullMsgId> readMessageRequested() const;
 	[[nodiscard]] rpl::producer<FullMsgId> showMessageRequested() const;
@@ -425,6 +427,7 @@ public:
 		not_null<const Element*> view,
 		Element *replacing) override;
 	QString elementAuthorRank(not_null<const Element*> view) override;
+	bool elementHideTopicButton(not_null<const Element*> view) override;
 
 	void setEmptyInfoWidget(base::unique_qptr<Ui::RpWidget> &&w);
 	void overrideIsChatWide(bool isWide);
@@ -828,6 +831,7 @@ private:
 	bool _touchSelect = false;
 	bool _touchInProgress = false;
 	QPoint _touchStart, _touchPrevPos, _touchPos;
+	rpl::variable<bool> _touchMaybeSelecting;
 	base::Timer _touchSelectTimer;
 
 	Ui::DraggingScrollManager _selectScroll;

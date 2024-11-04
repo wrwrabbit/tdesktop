@@ -75,6 +75,14 @@ public:
 		QPoint point,
 		StateRequest request) const override;
 
+	void drawSpoilerTag(
+		Painter &p,
+		QRect rthumb,
+		const PaintContext &context,
+		Fn<QImage()> generateBackground) const override;
+	ClickHandlerPtr spoilerTagLink() const override;
+	QImage spoilerTagBackground() const override;
+
 	void hideSpoilers() override;
 	bool needsBubble() const override;
 	bool customInfoLayout() const override {
@@ -106,6 +114,7 @@ private:
 
 	void ensureDataMediaCreated() const;
 	void dataMediaCreated() const;
+	void setupSpoilerTag() const;
 
 	QSize countOptimalSize() override;
 	QSize countCurrentSize(int newWidth) override;
@@ -154,9 +163,12 @@ private:
 	mutable std::shared_ptr<Data::PhotoMedia> _dataMedia;
 	mutable std::unique_ptr<Streamed> _streamed;
 	const std::unique_ptr<MediaSpoiler> _spoiler;
+	mutable std::unique_ptr<MediaSpoilerTag> _spoilerTag;
 	mutable QImage _imageCache;
 	mutable std::optional<Ui::BubbleRounding> _imageCacheRounding;
-	uint32 _serviceWidth : 28 = 0;
+	uint32 _serviceWidth : 26 = 0;
+	uint32 _purchasedPriceTag : 1 = 0;
+	const uint32 _sensitiveSpoiler : 1 = 0;
 	mutable uint32 _imageCacheForum : 1 = 0;
 	mutable uint32 _imageCacheBlurred : 1 = 0;
 	mutable uint32 _pollingStory : 1 = 0;

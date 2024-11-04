@@ -26,6 +26,7 @@ struct Details;
 } // namespace SendMenu
 
 namespace Api {
+struct MessageToSend;
 struct SendOptions;
 struct SendAction;
 } // namespace Api
@@ -159,6 +160,7 @@ public:
 		Painter &p,
 		const Ui::ChatPaintContext &context) override;
 	QString listElementAuthorRank(not_null<const Element*> view) override;
+	bool listElementHideTopicButton(not_null<const Element*> view) override;
 	History *listTranslateHistory() override;
 	void listAddTranslatedItems(
 		not_null<TranslateTracker*> tracker) override;
@@ -250,10 +252,9 @@ private:
 		Api::SendOptions options,
 		bool ctrlShiftEnter);
 
-	void sendExistingDocument(not_null<DocumentData*> document);
 	bool sendExistingDocument(
 		not_null<DocumentData*> document,
-		Api::SendOptions options);
+		Api::MessageToSend messageToSend);
 	void sendExistingPhoto(not_null<PhotoData*> photo);
 	bool sendExistingPhoto(
 		not_null<PhotoData*> photo,

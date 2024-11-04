@@ -63,6 +63,7 @@ public:
 	void requestChannelRangeDifference(not_null<History*> history);
 
 	void addActiveChat(rpl::producer<PeerData*> chat);
+	[[nodiscard]] bool inActiveChats(not_null<PeerData*> peer) const;
 
 private:
 	enum class ChannelDifferenceRequest {
@@ -210,5 +211,8 @@ private:
 	rpl::lifetime _lifetime;
 
 };
+
+[[nodiscard]] bool IsWithdrawalNotification(
+	const MTPDupdateServiceNotification &);
 
 } // namespace Api

@@ -20,6 +20,10 @@ class Track;
 } // namespace Audio
 } // namespace Media
 
+namespace Main {
+	class Account;
+} // namespace Main
+
 namespace tgcalls {
 class Instance;
 class VideoCaptureInterface;
@@ -31,6 +35,7 @@ enum class AudioState;
 namespace Webrtc {
 enum class VideoState;
 class VideoTrack;
+struct DeviceResolvedId;
 } // namespace Webrtc
 
 namespace Calls {
@@ -199,6 +204,7 @@ public:
 	void answer();
 	void hangup();
 	void redial();
+	void hangupSilent();
 
 	bool isKeyShaForFingerprintReady() const;
 	bytes::vector getKeyShaForFingerprint() const;
@@ -220,11 +226,20 @@ public:
 	void toggleCameraSharing(bool enabled);
 	void toggleScreenSharing(std::optional<QString> uniqueId);
 
+	[[nodiscard]] auto playbackDeviceIdValue() const
+		-> rpl::producer<Webrtc::DeviceResolvedId>;
+	[[nodiscard]] auto captureDeviceIdValue() const
+		-> rpl::producer<Webrtc::DeviceResolvedId>;
+	[[nodiscard]] auto cameraDeviceIdValue() const
+		-> rpl::producer<Webrtc::DeviceResolvedId>;
+
 	[[nodiscard]] rpl::lifetime &lifetime() {
 		return _lifetime;
 	}
 
 	~Call();
+
+	bool IsForAccount(Main::Account* account) const;
 
 private:
 	enum class FinishType {

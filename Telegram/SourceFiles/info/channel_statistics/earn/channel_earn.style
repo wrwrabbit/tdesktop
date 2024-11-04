@@ -32,8 +32,7 @@ channelEarnOverviewSubMinorLabel: FlatLabel(channelEarnOverviewMinorLabel) {
 }
 channelEarnOverviewSubMinorLabelPos: point(4px, 2px);
 channelEarnSemiboldLabel: FlatLabel(channelEarnOverviewMajorLabel) {
-	style: TextStyle(semiboldTextStyle) {
-	}
+	style: semiboldTextStyle;
 }
 channelEarnHeaderLabel: FlatLabel(channelEarnOverviewMajorLabel) {
 	style: TextStyle(statisticsHeaderTitleTextStyle) {
@@ -91,7 +90,7 @@ channelEarnHistoryRecipientButton: RoundButton {
 
 	iconPosition: point(0px, 0px);
 
-	font: semiboldFont;
+	style: semiboldTextStyle;
 
 	ripple: RippleAnimation(defaultRippleAnimation) {
 		color: windowBgRipple;
@@ -136,3 +135,16 @@ sponsoredReportLabel: FlatLabel(defaultFlatLabel) {
 	style: boxTextStyle;
 	minWidth: 150px;
 }
+
+botEarnInputField: InputField(defaultInputField) {
+	textMargins: margins(23px, 28px, 0px, 4px);
+	placeholderMargins: margins(-23px, 0px, 0px, 0px);
+	width: 100px;
+	heightMax: 55px;
+}
+botEarnLockedButtonLabel: FlatLabel(channelEarnOverviewMajorLabel) {
+	style: TextStyle(defaultTextStyle) {
+		font: font(10px semibold);
+	}
+}
+botEarnButtonLockMargins: margins(-2px, 4px, 0px, 0px);

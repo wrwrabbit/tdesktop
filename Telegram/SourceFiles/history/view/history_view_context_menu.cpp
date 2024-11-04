@@ -40,7 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/controls/delete_message_context_action.h"
 #include "ui/controls/who_reacted_context_action.h"
 #include "ui/boxes/edit_factcheck_box.h"
-#include "ui/boxes/report_box.h"
+#include "ui/boxes/report_box_graphics.h"
 #include "ui/ui_utility.h"
 #include "menu/menu_item_download_files.h"
 #include "menu/menu_send.h"
@@ -587,7 +587,7 @@ bool AddRescheduleAction(
 		const auto itemDate = firstItem->date();
 		const auto date = (itemDate == Api::kScheduledUntilOnlineTimestamp)
 			? HistoryView::DefaultScheduleTime()
-			: itemDate + 600;
+			: itemDate + (firstItem->isScheduled() ? 0 : crl::time(600));
 
 		const auto box = request.navigation->parentController()->show(
 			HistoryView::PrepareScheduleBox(
@@ -930,11 +930,15 @@ void AddReportAction(
 	const auto callback = crl::guard(controller, [=] {
 		if (const auto item = owner->message(itemId)) {
 			const auto group = owner->groups().find(item);
-			controller->show(ReportItemsBox(
-				item->history()->peer,
-				(group
-					? owner->itemsToIds(group->items)
-					: MessageIdsList{ 1, itemId })));
+			const auto ids = group
+				? (ranges::views::all(
+					group->items
+				) | ranges::views::transform([](const auto &i) {
+					return i->fullId().msg;
+				}) | ranges::to_vector)
+				: std::vector<MsgId>{ 1, itemId.msg };
+			const auto peer = item->history()->peer;
+			ShowReportMessageBox(controller->uiShow(), peer, ids, {});
 		}
 	});
 	menu->addAction(
@@ -1266,10 +1270,10 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 	}
 	AddMessageActions(result, request, list);
 
-	if (item) {
+	if (const auto textItem = view ? view->textItem() : item) {
 		AddEmojiPacksAction(
 			result,
-			item,
+			textItem,
 			HistoryView::EmojiPacksSource::Message,
 			list->controller());
 	}
@@ -1284,7 +1288,14 @@ void CopyPostLink(
 		not_null<Window::SessionController*> controller,
 		FullMsgId itemId,
 		Context context) {
-	const auto item = controller->session().data().message(itemId);
+	CopyPostLink(controller->uiShow(), itemId, context);
+}
+
+void CopyPostLink(
+		std::shared_ptr<Main::SessionShow> show,
+		FullMsgId itemId,
+		Context context) {
+	const auto item = show->session().data().message(itemId);
 	if (!item || !item->hasDirectLink()) {
 		return;
 	}
@@ -1311,7 +1322,7 @@ void CopyPostLink(
 		return channel->hasUsername();
 	}();
 
-	controller->showToast(isPublicLink
+	show->showToast(isPublicLink
 		? tr::lng_channel_public_link_copied(tr::now)
 		: tr::lng_context_about_private_link(tr::now));
 }
@@ -1542,9 +1553,7 @@ void ShowTagMenu(
 		if (const auto item = owner->message(itemId)) {
 			const auto &list = item->reactions();
 			if (ranges::contains(list, id, &MessageReaction::id)) {
-				item->toggleReaction(
-					id,
-					HistoryItem::ReactionSource::Quick);
+				item->toggleReaction(id, HistoryReactionSource::Quick);
 			}
 		}
 	};
@@ -1638,7 +1647,8 @@ void ShowWhoReactedMenu(
 	const auto reactions = &owner->reactions();
 	const auto &list = reactions->list(
 		Data::Reactions::Type::Active);
-	const auto activeNonQuick = (id != reactions->favoriteId())
+	const auto activeNonQuick = !id.paid()
+		&& (id != reactions->favoriteId())
 		&& (ranges::contains(list, id, &Data::Reaction::id)
 			|| (controller->session().premium() && id.custom()));
 	const auto filler = lifetime.make_state<Ui::WhoReactedListMenu>(

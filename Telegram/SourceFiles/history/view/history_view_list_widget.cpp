@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_who_reacted.h"
 #include "api/api_views.h"
 #include "layout/layout_selection.h"
+#include "payments/payments_reaction_process.h"
 #include "window/section_widget.h"
 #include "window/window_adaptive.h"
 #include "window/window_session_controller.h"
@@ -51,6 +52,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/chat_theme.h"
 #include "ui/chat/chat_style.h"
 #include "ui/painter.h"
+#include "ui/ui_utility.h"
 #include "lang/lang_keys.h"
 #include "boxes/delete_messages_box.h"
 #include "boxes/premium_preview_box.h"
@@ -1867,6 +1869,11 @@ QString ListWidget::elementAuthorRank(not_null<const Element*> view) {
 	return _delegate->listElementAuthorRank(view);
 }
 
+bool ListWidget::elementHideTopicButton(not_null<const Element*> view) {
+	return _delegate->listElementHideTopicButton(view);
+}
+
+
 void ListWidget::saveState(not_null<ListMemento*> memento) {
 	memento->setAroundPosition(_aroundPosition);
 	const auto state = countScrollState();
@@ -2258,7 +2265,7 @@ void ListWidget::paintEvent(QPaintEvent *e) {
 			}
 		}
 		session->data().reactions().poll(item, context.now);
-		if (item->hasExtendedMediaPreview()) {
+		if (item->hasUnpaidContent()) {
 			session->api().views().pollExtendedMedia(item);
 		}
 		if (_reactionsManager) {
@@ -2298,6 +2305,20 @@ void ListWidget::paintUserpics(
 		// paint the userpic if it intersects the painted rect
 		if (userpicTop + st::msgPhotoSize > clip.top()) {
 			const auto item = view->data();
+			const auto hasTranslation = context.gestureHorizontal.translation
+				&& (context.gestureHorizontal.msgBareId
+					== item->fullId().msg.bare);
+			if (hasTranslation) {
+				p.translate(context.gestureHorizontal.translation, 0);
+				update(
+					QRect(
+						st::historyPhotoLeft
+							+ context.gestureHorizontal.translation,
+						userpicTop,
+						st::msgPhotoSize
+							- context.gestureHorizontal.translation,
+						st::msgPhotoSize));
+			}
 			if (const auto from = item->displayFrom()) {
 				from->paintUserpicLeft(
 					p,
@@ -2329,6 +2350,9 @@ void ListWidget::paintUserpics(
 				}
 			} else {
 				Unexpected("Corrupt forwarded information in message.");
+			}
+			if (hasTranslation) {
+				p.translate(-context.gestureHorizontal.translation, 0);
 			}
 		}
 		return true;
@@ -2645,7 +2669,7 @@ void ListWidget::toggleFavoriteReaction(not_null<Element*> view) const {
 			view->animateReaction({ .id = favorite });
 		}
 	}
-	item->toggleReaction(favorite, HistoryItem::ReactionSource::Quick);
+	item->toggleReaction(favorite, HistoryReactionSource::Quick);
 }
 
 void ListWidget::trySwitchToWordSelection() {
@@ -2796,15 +2820,20 @@ void ListWidget::reactionChosen(ChosenReaction reaction) {
 	const auto item = session().data().message(reaction.context);
 	if (!item) {
 		return;
+	} else if (reaction.id.paid()) {
+		Payments::ShowPaidReactionDetails(
+			controller(),
+			item,
+			viewForItem(item),
+			HistoryReactionSource::Selector);
+		return;
 	} else if (_delegate->listShowReactPremiumError(item, reaction.id)) {
 		if (_menu) {
 			_menu->hideMenu();
 		}
 		return;
 	}
-	item->toggleReaction(
-		reaction.id,
-		HistoryItem::ReactionSource::Selector);
+	item->toggleReaction(reaction.id, HistoryReactionSource::Selector);
 	if (!ranges::contains(item->chosenReactions(), reaction.id)) {
 		return;
 	} else if (const auto view = viewForItem(item)) {
@@ -2920,6 +2949,7 @@ void ListWidget::touchEvent(QTouchEvent *e) {
 		_touchSelectTimer.cancel();
 		_touchScroll = _touchSelect = false;
 		_touchScrollState = Ui::TouchScrollState::Manual;
+		_touchMaybeSelecting = false;
 		mouseActionCancel();
 		return;
 	}
@@ -2940,6 +2970,7 @@ void ListWidget::touchEvent(QTouchEvent *e) {
 
 		_touchInProgress = true;
 		if (_touchScrollState == Ui::TouchScrollState::Auto) {
+			_touchMaybeSelecting = false;
 			_touchScrollState = Ui::TouchScrollState::Acceleration;
 			_touchWaitingAcceleration = true;
 			_touchAccelerationTime = crl::now();
@@ -2947,6 +2978,7 @@ void ListWidget::touchEvent(QTouchEvent *e) {
 			_touchStart = _touchPos;
 		} else {
 			_touchScroll = false;
+			_touchMaybeSelecting = true;
 			_touchSelectTimer.callOnce(QApplication::startDragTime());
 		}
 		_touchSelect = false;
@@ -2959,6 +2991,7 @@ void ListWidget::touchEvent(QTouchEvent *e) {
 			mouseActionUpdate(_touchPos);
 		} else if (!_touchScroll && (_touchPos - _touchStart).manhattanLength() >= QApplication::startDragDistance()) {
 			_touchSelectTimer.cancel();
+			_touchMaybeSelecting = false;
 			_touchScroll = true;
 			touchUpdateSpeed();
 		}
@@ -2976,13 +3009,22 @@ void ListWidget::touchEvent(QTouchEvent *e) {
 	} break;
 
 	case QEvent::TouchEnd: {
-		if (!_touchInProgress) return;
+		if (!_touchInProgress) {
+			return;
+		}
 		_touchInProgress = false;
 		auto weak = Ui::MakeWeak(this);
+		const auto notMoved = (_touchPos - _touchStart).manhattanLength()
+			< QApplication::startDragDistance();
 		if (_touchSelect) {
-			mouseActionFinish(_touchPos, Qt::RightButton);
-			QContextMenuEvent contextMenu(QContextMenuEvent::Mouse, mapFromGlobal(_touchPos), _touchPos);
-			showContextMenu(&contextMenu, true);
+			if (notMoved || _touchMaybeSelecting.current()) {
+				mouseActionFinish(_touchPos, Qt::RightButton);
+				auto contextMenu = QContextMenuEvent(
+					QContextMenuEvent::Mouse,
+					mapFromGlobal(_touchPos),
+					_touchPos);
+				showContextMenu(&contextMenu, true);
+			}
 			_touchScroll = false;
 		} else if (_touchScroll) {
 			if (_touchScrollState == Ui::TouchScrollState::Manual) {
@@ -2999,12 +3041,13 @@ void ListWidget::touchEvent(QTouchEvent *e) {
 				_touchWaitingAcceleration = false;
 				_touchPrevPosValid = false;
 			}
-		} else { // One short tap is like left mouse click.
+		} else if (notMoved) { // One short tap is like left mouse click.
 			mouseActionStart(_touchPos, Qt::LeftButton);
 			mouseActionFinish(_touchPos, Qt::LeftButton);
 		}
 		if (weak) {
 			_touchSelectTimer.cancel();
+			_touchMaybeSelecting = false;
 			_touchSelect = false;
 		}
 	} break;
@@ -3042,6 +3085,10 @@ void ListWidget::touchScrollUpdated(const QPoint &screenPos) {
 		_visibleTop - (_touchPos - _touchPrevPos).y(),
 		false);
 	touchUpdateSpeed();
+}
+
+rpl::producer<bool> ListWidget::touchMaybeSelectingValue() const {
+	return _touchMaybeSelecting.value();
 }
 
 void ListWidget::enterEventHook(QEnterEvent *e) {
@@ -3100,6 +3147,7 @@ void ListWidget::updateDragSelection() {
 
 void ListWidget::onTouchSelect() {
 	_touchSelect = true;
+	_touchMaybeSelecting = true;
 	mouseActionStart(_touchPos, Qt::LeftButton);
 }
 
@@ -3773,12 +3821,7 @@ std::unique_ptr<QMimeData> ListWidget::prepareDrag() {
 				forwardIds = MessageIdsList(1, exactItem->fullId());
 			}
 		}
-		if (forwardIds.empty()) {
-			return nullptr;
-		}
-		session().data().setMimeForwardIds(std::move(forwardIds));
-		auto result = std::make_unique<QMimeData>();
-		result->setData(u"application/x-td-forward"_q, "1");
+
 		if (pressedHandler) {
 			const auto lnkDocument = reinterpret_cast<DocumentData*>(
 				pressedHandler->property(
@@ -3786,11 +3829,22 @@ std::unique_ptr<QMimeData> ListWidget::prepareDrag() {
 			if (lnkDocument) {
 				const auto filepath = lnkDocument->filepath(true);
 				if (!filepath.isEmpty()) {
-					QList<QUrl> urls;
 					urls.push_back(QUrl::fromLocalFile(filepath));
-					result->setUrls(urls);
 				}
 			}
+		}
+
+		if (forwardIds.empty() && urls.isEmpty()) {
+			return nullptr;
+		}
+
+		auto result = std::make_unique<QMimeData>();
+		if (!forwardIds.empty()) {
+			session().data().setMimeForwardIds(std::move(forwardIds));
+			result->setData(u"application/x-td-forward"_q, "1");
+		}
+		if (!urls.isEmpty()) {
+			result->setUrls(urls);
 		}
 		return result;
 	}

@@ -121,7 +121,8 @@ public:
 	MediaGenericTextPart(
 		TextWithEntities text,
 		QMargins margins,
-		const base::flat_map<uint16, ClickHandlerPtr> &links = {});
+		const base::flat_map<uint16, ClickHandlerPtr> &links = {},
+		const std::any &context = {});
 
 	void draw(
 		Painter &p,
@@ -227,7 +228,9 @@ public:
 		Element *replacing,
 		Fn<Data()> lookup,
 		QMargins padding,
-		QString badge);
+		QString badge,
+		QImage customLeftIcon,
+		std::optional<QColor> colorOverride);
 
 	void draw(
 		Painter &p,
@@ -252,12 +255,14 @@ private:
 	void validateBadge(const PaintContext &context) const;
 	void paintBadge(Painter &p, const PaintContext &context) const;
 
+	const QImage _customLeftIcon;
 	StickerInBubblePart _sticker;
 	QString _badgeText;
 	mutable QColor _badgeFg;
 	mutable QColor _badgeBorder;
 	mutable QImage _badge;
 	mutable QImage _badgeCache;
+	std::optional<QColor> _colorOverride;
 
 };
 

@@ -371,11 +371,15 @@ themePreviewLoadingFont: font(16px);
 themePreviewLoadingFg: windowSubTextFg;
 themePreviewApplyButton: RoundButton(defaultActiveButton) {
 	height: 38px;
-	font: font(15px semibold);
+	style: TextStyle(semiboldTextStyle) {
+		font: font(15px semibold);
+	}
 }
 themePreviewCancelButton: RoundButton(defaultLightButton) {
 	height: 38px;
-	font: font(15px semibold);
+	style: TextStyle(semiboldTextStyle) {
+		font: font(15px semibold);
+	}
 }
 themePreviewButtonsSkip: 20px;
 themePreviewDialogsWidth: 312px;
@@ -638,6 +642,7 @@ storiesEmojiPan: EmojiPan(defaultEmojiPan) {
 		menuSpoilerOff: icon {{ "menu/spoiler_off", storiesComposeWhiteText }};
 		menuBelow: icon {{ "menu/link_below", storiesComposeWhiteText }};
 		menuAbove: icon {{ "menu/link_above", storiesComposeWhiteText }};
+		menuPrice: icon {{ "menu/earn", storiesComposeWhiteText }};
 
 		stripBubble: icon{
 			{ "chat/reactions_bubble_shadow", windowShadowFg },
@@ -795,7 +800,9 @@ storiesComposeControls: ComposeControls(defaultComposeControls) {
 			width: -12px;
 			height: 18px;
 			textTop: 0px;
-			font: font(12px);
+			style: TextStyle(defaultTextStyle) {
+				font: font(12px);
+			}
 			ripple: storiesComposeRipple;
 		}
 		buttonSkip: 6px;
@@ -881,11 +888,21 @@ storiesReportBox: ReportBox(defaultReportBox) {
 		textBgOver: storiesComposeBgOver;
 		ripple: storiesComposeRipple;
 	}
+	noIconButton: SettingsButton(reportReasonButton) {
+		textFg: storiesComposeWhiteText;
+		textFgOver: storiesComposeWhiteText;
+		textBg: storiesComposeBg;
+		textBgOver: storiesComposeBgOver;
+		padding: margins(22px, 7px, 8px, 7px);
+		ripple: storiesComposeRipple;
+	}
 	label: storiesBoxLabel;
 	field: InputField(storiesBoxInputField) {
 		textMargins: margins(1px, 26px, 1px, 4px);
 		heightMax: 116px;
 	}
+	dividerBg: groupCallBg;
+	dividerFg: groupCallVideoSubTextFg;
 	spam: icon {{ "menu/delete", storiesComposeWhiteText }};
 	fake: icon {{ "menu/fake", storiesComposeWhiteText }};
 	violence: icon {{ "menu/violence", storiesComposeWhiteText }};
@@ -958,7 +975,7 @@ storiesStealthBox: Box(defaultBox) {
 	button: RoundButton(defaultBoxButton) {
 		height: 42px;
 		textTop: 12px;
-		font: font(13px semibold);
+		style: semiboldTextStyle;
 
 		textFg: storiesComposeWhiteText;
 		textFgOver: storiesComposeWhiteText;
@@ -1050,3 +1067,12 @@ storiesRepostSimpleStyle: QuoteStyle(defaultQuoteStyle) {
 storiesRepostIcon: icon {{ "mediaview/mini_repost", windowFg }};
 storiesRepostIconPadding: margins(0px, 4px, 2px, 0px);
 storiesRepostUserpicPadding: margins(0px, 1px, 4px, 0px);
+
+mediaviewSponsoredButton: RoundButton(defaultActiveButton) {
+	textFg: mediaviewPlaybackIconFg;
+	textFgOver: mediaviewPlaybackIconFg;
+	textBg: mediaviewSaveMsgBg;
+	textBgOver: mediaviewSaveMsgBg;
+
+	ripple: universalRippleAnimation;
+}

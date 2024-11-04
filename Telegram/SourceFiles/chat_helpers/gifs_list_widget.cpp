@@ -21,14 +21,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document_media.h"
 #include "data/stickers/data_stickers.h"
 #include "menu/menu_send.h" // SendMenu::FillSendMenu
+#include "mtproto/mtproto_config.h"
 #include "core/click_handler_types.h"
 #include "ui/controls/tabbed_search.h"
+#include "ui/layers/generic_box.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/image/image.h"
 #include "ui/painter.h"
+#include "boxes/send_gif_with_caption_box.h"
 #include "boxes/stickers_box.h"
 #include "inline_bots/inline_bot_result.h"
 #include "storage/localstorage.h"
@@ -48,7 +51,6 @@ namespace ChatHelpers {
 namespace {
 
 constexpr auto kSearchRequestDelay = 400;
-constexpr auto kSearchBotUsername = "gif"_cs;
 constexpr auto kMinRepaintDelay = crl::time(33);
 constexpr auto kMinAfterScrollDelay = crl::time(33);
 
@@ -407,6 +409,24 @@ base::unique_qptr<Ui::PopupMenu> GifsListWidget::fillContextMenu(
 		SendMenu::DefaultCallback(_show, send),
 		icons);
 
+	if (!isInlineResult && _inlineQueryPeer) {
+		auto done = crl::guard(this, [=](
+				Api::SendOptions options,
+				TextWithTags text) {
+			selectInlineResult(selected, options, true, std::move(text));
+		});
+		const auto show = _show;
+		const auto peer = _inlineQueryPeer;
+		menu->addAction(tr::lng_send_gif_with_caption(tr::now), [=] {
+			show->show(Box(
+				Ui::SendGifWithCaptionBox,
+				item->getDocument(),
+				peer,
+				copyDetails,
+				std::move(done)));
+		}, &st::menuIconEdit);
+	}
+
 	if (const auto item = _mosaic.maybeItemAt(_selected)) {
 		const auto document = item->getDocument()
 			? item->getDocument() // Saved GIF.
@@ -457,7 +477,8 @@ void GifsListWidget::mouseReleaseEvent(QMouseEvent *e) {
 void GifsListWidget::selectInlineResult(
 		int index,
 		Api::SendOptions options,
-		bool forceSend) {
+		bool forceSend,
+		TextWithTags caption) {
 	const auto item = _mosaic.maybeItemAt(index);
 	if (!item) {
 		return;
@@ -498,6 +519,7 @@ void GifsListWidget::selectInlineResult(
 				.document = document,
 				.options = options,
 				.messageSendingFrom = messageSendingFrom(),
+				.caption = std::move(caption),
 			});
 		} else if (!preview.usingThumbnail()) {
 			if (preview.loading()) {
@@ -864,13 +886,11 @@ void GifsListWidget::searchForGifs(const QString &query) {
 	}
 
 	if (!_searchBot && !_searchBotRequestId) {
-		auto username = kSearchBotUsername.utf16();
+		const auto username = session().serverConfig().gifSearchUsername;
 		_searchBotRequestId = _api.request(MTPcontacts_ResolveUsername(
 			MTP_string(username)
 		)).done([=](const MTPcontacts_ResolvedPeer &result) {
-			Expects(result.type() == mtpc_contacts_resolvedPeer);
-
-			auto &data = result.c_contacts_resolvedPeer();
+			auto &data = result.data();
 			session().data().processUsers(data.vusers());
 			session().data().processChats(data.vchats());
 			const auto peer = session().data().peerLoaded(

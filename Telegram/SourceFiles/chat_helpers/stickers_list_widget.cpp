@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "chat_helpers/stickers_list_widget.h"
 
+#include "base/timer_rpl.h"
 #include "core/application.h"
 #include "data/data_document.h"
 #include "data/data_document_media.h"
@@ -212,11 +213,14 @@ StickersListWidget::StickersListWidget(
 	st().pathBg,
 	st().pathFg,
 	[=] { update(); }))
-, _megagroupSetAbout(st::columnMinimalWidthThird - st::emojiScroll.width - st().headerLeft)
+, _megagroupSetAbout(st::columnMinimalWidthThird
+	- st::emojiScroll.width
+	- st().headerLeft)
 , _addText(tr::lng_stickers_featured_add(tr::now))
-, _addWidth(st::stickersTrendingAdd.font->width(_addText))
+, _addWidth(st::stickersTrendingAdd.style.font->width(_addText))
 , _installedText(tr::lng_stickers_featured_installed(tr::now))
-, _installedWidth(st::stickersTrendingInstalled.font->width(_installedText))
+, _installedWidth(
+	st::stickersTrendingInstalled.style.font->width(_installedText))
 , _settings(this, tr::lng_stickers_you_have(tr::now))
 , _previewTimer([=] { showPreview(); })
 , _premiumMark(std::make_unique<StickerPremiumMark>(
@@ -932,6 +936,9 @@ void StickersListWidget::paintStickers(Painter &p, QRect clip) {
 	if (sets.empty() && _section == Section::Search) {
 		paintEmptySearchResults(p);
 	}
+	const auto badgeText = tr::lng_stickers_creator_badge(tr::now);
+	const auto &badgeFont = st::stickersHeaderBadgeFont;
+	const auto badgeWidth = badgeFont->width(badgeText);
 	enumerateSections([&](const SectionInfo &info) {
 		if (clip.top() >= info.rowsBottom) {
 			return true;
@@ -970,7 +977,7 @@ void StickersListWidget::paintStickers(Painter &p, QRect clip) {
 				const auto &st = installedSet
 					? st::stickersTrendingInstalled
 					: st::stickersTrendingAdd;
-				p.setFont(st.font);
+				p.setFont(st.style.font);
 				p.setPen(selected ? st.textFgOver : st.textFg);
 				p.drawTextLeft(
 					add.x() - (st.width / 2),
@@ -1050,6 +1057,12 @@ void StickersListWidget::paintStickers(Painter &p, QRect clip) {
 
 				widthForTitle -= remove.width();
 			}
+			const auto amCreator = (set.flags & Data::StickersSetFlag::AmCreator);
+			if (amCreator) {
+				widthForTitle -= badgeWidth
+					+ st::stickersFeaturedUnreadSkip
+					+ st::stickersHeaderBadgeFontSkip;
+			}
 			if (titleWidth > widthForTitle) {
 				titleText = st::stickersTrendingHeaderFont->elided(titleText, widthForTitle);
 				titleWidth = st::stickersTrendingHeaderFont->width(titleText);
@@ -1057,6 +1070,39 @@ void StickersListWidget::paintStickers(Painter &p, QRect clip) {
 			p.setFont(st::emojiPanHeaderFont);
 			p.setPen(st().headerFg);
 			p.drawTextLeft(st().headerLeft - st().margin.left(), info.top + st().headerTop, width(), titleText, titleWidth);
+			if (amCreator) {
+				const auto badgeLeft = st().headerLeft
+					- st().margin.left()
+					+ titleWidth
+					+ st::stickersFeaturedUnreadSkip;
+				{
+					auto color = st().headerFg->c;
+					color.setAlphaF(st().headerFg->c.alphaF() * 0.15);
+					p.setPen(Qt::NoPen);
+					p.setBrush(color);
+					auto hq = PainterHighQualityEnabler(p);
+					p.drawRoundedRect(
+						style::rtlrect(
+							badgeLeft,
+							info.top + st::stickersHeaderBadgeFontTop,
+							badgeWidth + badgeFont->height,
+							badgeFont->height,
+							width()),
+						badgeFont->height / 2.,
+						badgeFont->height / 2.);
+				}
+				p.setPen(st().headerFg);
+				p.setBrush(Qt::NoBrush);
+				p.setFont(badgeFont);
+				p.drawText(
+					QRect(
+						badgeLeft + badgeFont->height / 2,
+						info.top + st::stickersHeaderBadgeFontTop,
+						badgeWidth,
+						badgeFont->height),
+					badgeText,
+					style::al_center);
+			}
 		}
 		if (clip.top() + clip.height() <= info.rowsTop) {
 			return true;
@@ -1195,7 +1241,7 @@ void StickersListWidget::paintMegagroupEmptySet(Painter &p, int y, bool buttonSe
 			_megagroupSetButtonRipple.reset();
 		}
 	}
-	p.setFont(st::stickerGroupCategoryAdd.font);
+	p.setFont(st::stickerGroupCategoryAdd.style.font);
 	p.setPen(buttonSelected ? st::stickerGroupCategoryAdd.textFgOver : st::stickerGroupCategoryAdd.textFg);
 	p.drawTextLeft(button.x() - (st::stickerGroupCategoryAdd.width / 2), button.y() + st::stickerGroupCategoryAdd.textTop, width(), _megagroupSetButtonText, _megagroupSetButtonTextWidth);
 }
@@ -1675,12 +1721,32 @@ QPoint StickersListWidget::buttonRippleTopLeft(int section) const {
 		+ st().removeSet.rippleAreaPosition;
 }
 
-void StickersListWidget::showStickerSetBox(not_null<DocumentData*> document) {
+void StickersListWidget::showStickerSetBox(
+		not_null<DocumentData*> document,
+		uint64 setId) {
 	if (document->sticker() && document->sticker()->set) {
 		checkHideWithBox(Box<StickerSetBox>(
 			_show,
 			document->sticker()->set,
 			document->sticker()->setType));
+	} else if ((setId == Data::Stickers::FavedSetId)
+			|| (setId == Data::Stickers::RecentSetId)) {
+		const auto lifetime = std::make_shared<rpl::lifetime>();
+		constexpr auto kTimeout = 10000;
+		rpl::merge(
+			base::timer_once(kTimeout),
+			document->owner().stickers().updated(
+				Data::StickersType::Stickers)
+		) | rpl::start_with_next([=, weak = Ui::MakeWeak(this)] {
+			if (weak.data()) {
+				showStickerSetBox(document, setId);
+			}
+			lifetime->destroy();
+		}, *lifetime);
+		document->owner().session().api().requestSpecialStickersForce(
+			setId == Data::Stickers::FavedSetId,
+			setId == Data::Stickers::RecentSetId,
+			false);
 	}
 }
 
@@ -1737,8 +1803,8 @@ base::unique_qptr<Ui::PopupMenu> StickersListWidget::fillContextMenu(
 		isFaved ? &icons->menuUnfave : &icons->menuFave);
 
 	if (_features.openStickerSets) {
-		menu->addAction(tr::lng_context_pack_info(tr::now), [=] {
-			showStickerSetBox(document);
+		menu->addAction(tr::lng_context_pack_info(tr::now), [=, id = set.id] {
+			showStickerSetBox(document, id);
 		}, &icons->menuStickerSet);
 	}
 
@@ -1808,7 +1874,7 @@ void StickersListWidget::mouseReleaseEvent(QMouseEvent *e) {
 			const auto document = set.stickers[sticker->index].document;
 			if (_features.openStickerSets
 				&& (e->modifiers() & Qt::ControlModifier)) {
-				showStickerSetBox(document);
+				showStickerSetBox(document, set.id);
 			} else {
 				_chosen.fire({
 					.document = document,
@@ -2671,7 +2737,7 @@ void StickersListWidget::refreshMegagroupSetGeometry() {
 	auto left = megagroupSetInfoLeft();
 	auto availableWidth = (width() - left);
 	auto top = _megagroupSetAbout.countHeight(availableWidth) + st::stickerGroupCategoryAddMargin.top();
-	_megagroupSetButtonTextWidth = st::stickerGroupCategoryAdd.font->width(_megagroupSetButtonText);
+	_megagroupSetButtonTextWidth = st::stickerGroupCategoryAdd.style.font->width(_megagroupSetButtonText);
 	auto buttonWidth = _megagroupSetButtonTextWidth - st::stickerGroupCategoryAdd.width;
 	_megagroupSetButtonRect = QRect(left, top, buttonWidth, st::stickerGroupCategoryAdd.height);
 }

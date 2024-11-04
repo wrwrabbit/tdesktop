@@ -112,6 +112,9 @@ dialogsOnlineBadgeDuration: 150;
 dialogsCallBadgeSize: 16px;
 dialogsCallBadgeSkip: point(-3px, -3px);
 
+dialogsSubscriptionBadgeSize: 16px;
+dialogsSubscriptionBadgeSkip: point(-4px, -4px);
+
 dialogsTTLBadgeSize: 20px;
 dialogsTTLBadgeInnerMargins: margins(2px, 2px, 2px, 2px);
 // Relative to a photo place, not a whole userpic place.
@@ -285,7 +288,7 @@ dialogsFilter: InputField(defaultInputField) {
 	borderRadius: 18px;
 	borderDenominator: 2;
 
-	font: normalFont;
+	style: defaultTextStyle;
 
 	heightMin: 35px;
 }
@@ -427,6 +430,11 @@ dialogsUpdateButton: FlatButton {
 }
 dialogsInstallUpdate: icon {{ "install_update", activeButtonFg }};
 dialogsInstallUpdateOver: icon {{ "install_update", activeButtonFgOver }};
+dialogsInstallUpdateIconSkip: 7px;
+dialogsInstallUpdateIconSize: 20px;
+dialogsInstallUpdateIconInnerMargin: 5px;
+dialogsInstallUpdateIconSide1: 5px;
+dialogsInstallUpdateIconSide2: 3px;
 
 dialogsLoadMoreButton: FlatButton(dialogsUpdateButton) {
 	color: lightButtonFg;
@@ -439,6 +447,8 @@ dialogsLoadMoreButton: FlatButton(dialogsUpdateButton) {
 
 	height: 36px;
 	textTop: 9px;
+	font: semiboldFont;
+	overFont: semiboldFont;
 }
 dialogsLoadMore: icon {{ "install_update-flip_vertical", lightButtonFg }};
 dialogsLoadMoreLoading: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
@@ -492,6 +502,8 @@ dialogsMiniForward: DialogsMiniIcon {
 	skipText: 1px;
 	skipMedia: 2px;
 }
+
+dialogsMiniReplyIcon: icon {{ "mini_forward-flip_horizontal", attentionButtonFg, point(0px, 2px) }};
 
 dialogsMiniReplyStory: DialogsMiniIcon {
 	icon: ThreeStateIcon {

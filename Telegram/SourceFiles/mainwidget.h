@@ -8,25 +8,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/weak_ptr.h"
-#include "chat_helpers/bot_command.h"
 #include "media/player/media_player_float.h"
 #include "mtproto/sender.h"
 
-struct HistoryMessageMarkupButton;
-class MainWindow;
 class HistoryWidget;
 class StackItem;
-class History;
 class Image;
 
-namespace MTP {
-class Error;
-} // namespace MTP
-
-namespace Api {
-struct SendAction;
-struct SendOptions;
-} // namespace Api
+namespace Bot {
+struct SendCommandRequest;
+} // namespace Bot
 
 namespace SendMenu {
 struct Details;
@@ -41,6 +32,7 @@ class Thread;
 class WallPaper;
 struct ForwardDraft;
 class Forum;
+struct ReportInput;
 } // namespace Data
 
 namespace Dialogs {
@@ -68,11 +60,8 @@ struct Content;
 
 namespace Ui {
 class ChatTheme;
-class ConfirmBox;
 class ResizeArea;
 class PlainShadow;
-class DropdownMenu;
-enum class ReportReason;
 template <typename Widget>
 class SlideWrap;
 } // namespace Ui
@@ -83,13 +72,13 @@ template <typename Inner>
 class TopBarWrapWidget;
 class SectionMemento;
 class SectionWidget;
-class AbstractSectionWidget;
 class SlideAnimation;
 class ConnectionState;
 struct SectionSlideParams;
 struct SectionShow;
 enum class Column;
 class HistoryHider;
+struct SeparateId;
 } // namespace Window
 
 namespace Calls {
@@ -101,12 +90,6 @@ class TopBar;
 namespace Core {
 class Changelogs;
 } // namespace Core
-
-namespace InlineBots {
-namespace Layout {
-class ItemBase;
-} // namespace Layout
-} // namespace InlineBots
 
 class MainWidget final
 	: public Ui::RpWidget
@@ -121,7 +104,7 @@ public:
 
 	[[nodiscard]] Main::Session &session() const;
 	[[nodiscard]] not_null<Window::SessionController*> controller() const;
-	[[nodiscard]] PeerData *singlePeer() const;
+	[[nodiscard]] Window::SeparateId windowId() const;
 	[[nodiscard]] bool isPrimary() const;
 	[[nodiscard]] bool isMainSectionShown() const;
 	[[nodiscard]] bool isThirdSectionShown() const;
@@ -151,17 +134,12 @@ public:
 		const SectionShow &params);
 	void updateColumnLayout();
 	bool stackIsEmpty() const;
-	void showBackFromStack(
-		const SectionShow &params);
+	bool showBackFromStack(const SectionShow &params);
 	void orderWidgets();
 	QPixmap grabForShowAnimation(const Window::SectionSlideParams &params);
 	void checkMainSectionToLayer();
 
 	[[nodiscard]] SendMenu::Details sendMenuDetails() const;
-	bool sendExistingDocument(not_null<DocumentData*> document);
-	bool sendExistingDocument(
-		not_null<DocumentData*> document,
-		Api::SendOptions options);
 
 	[[nodiscard]] bool animatingShow() const;
 
@@ -195,17 +173,14 @@ public:
 	void checkChatBackground();
 	Image *newBackgroundThumb();
 
-	void clearBotStartToken(PeerData *peer);
-
-	void ctrlEnterSubmitUpdated();
 	void setInnerFocus();
 
 	bool contentOverlapped(const QRect &globalRect);
 
 	void showChooseReportMessages(
 		not_null<PeerData*> peer,
-		Ui::ReportReason reason,
-		Fn<void(MessageIdsList)> done);
+		Data::ReportInput reportInput,
+		Fn<void(std::vector<MsgId>)> done);
 	void clearChooseReportMessages();
 
 	void toggleChooseChatTheme(
@@ -350,16 +325,17 @@ private:
 	int _thirdColumnWidth = 0;
 	Ui::Animations::Simple _a_dialogsWidth;
 
-	const base::unique_qptr<Ui::PlainShadow> _sideShadow;
-	object_ptr<Ui::PlainShadow> _thirdShadow = { nullptr };
-	object_ptr<Ui::ResizeArea> _firstColumnResizeArea = { nullptr };
-	object_ptr<Ui::ResizeArea> _thirdColumnResizeArea = { nullptr };
 	const base::unique_qptr<Dialogs::Widget> _dialogs;
 	const base::unique_qptr<HistoryWidget> _history;
 	object_ptr<Window::SectionWidget> _mainSection = { nullptr };
 	object_ptr<Window::SectionWidget> _thirdSection = { nullptr };
 	std::shared_ptr<Window::SectionMemento> _thirdSectionFromStack;
 	std::unique_ptr<Window::ConnectionState> _connecting;
+
+	const base::unique_qptr<Ui::PlainShadow> _sideShadow;
+	object_ptr<Ui::PlainShadow> _thirdShadow = { nullptr };
+	object_ptr<Ui::ResizeArea> _firstColumnResizeArea = { nullptr };
+	object_ptr<Ui::ResizeArea> _thirdColumnResizeArea = { nullptr };
 
 	base::weak_ptr<Calls::Call> _currentCall;
 	base::weak_ptr<Calls::GroupCall> _currentGroupCall;
