@@ -24,13 +24,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_emoji_status_panel.h"
 #include "info/info_controller.h"
 #include "boxes/peers/edit_forum_topic_box.h"
+#include "boxes/report_messages_box.h"
 #include "history/view/media/history_view_sticker_player.h"
 #include "lang/lang_keys.h"
 #include "ui/boxes/show_or_premium_box.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/text/text_utilities.h"
+#include "base/event_filter.h"
 #include "base/unixtime.h"
 #include "window/window_session_controller.h"
 #include "main/main_session.h"
@@ -41,6 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_info.h"
 #include "styles/style_dialogs.h"
+#include "styles/style_menu_icons.h"
 
 namespace Info::Profile {
 namespace {
@@ -127,9 +131,12 @@ void TopicIconView::paintInRect(QPainter &p, QRect rect) {
 			image);
 	};
 	if (_player && _player->ready()) {
+		const auto colored = _playerUsesTextColor
+			? st::windowFg->c
+			: QColor(0, 0, 0, 0);
 		paint(_player->frame(
 			st::infoTopicCover.photo.size,
-			QColor(0, 0, 0, 0),
+			colored,
 			false,
 			crl::now(),
 			_paused()).image);
@@ -192,6 +199,7 @@ void TopicIconView::setupPlayer(not_null<Data::ForumTopic*> topic) {
 					st::infoTopicCover.photo.size);
 			}
 			result->setRepaintCallback(_update);
+			_playerUsesTextColor = media->owner()->emojiUsesTextColor();
 			return result;
 		});
 	}) | rpl::flatten_latest(
@@ -504,7 +512,7 @@ void Cover::refreshUploadPhotoOverlay() {
 		return;
 	}
 
-	_userpic->switchChangePhotoOverlay([&] {
+	const auto canChange = [&] {
 		if (const auto chat = _peer->asChat()) {
 			return chat->canEditInformation();
 		} else if (const auto channel = _peer->asChannel()) {
@@ -516,7 +524,10 @@ void Cover::refreshUploadPhotoOverlay() {
 					&& !user->isServiceUser());
 		}
 		Unexpected("Peer type in Info::Profile::Cover.");
-	}(), [=](Ui::UserpicButton::ChosenImage chosen) {
+	}();
+
+	_userpic->switchChangePhotoOverlay(canChange, [=](
+			Ui::UserpicButton::ChosenImage chosen) {
 		using ChosenType = Ui::UserpicButton::ChosenType;
 		auto result = Api::PeerPhoto::UserPhoto{
 			base::take<QImage>(chosen.image), // Strange MSVC bug with take.
@@ -536,6 +547,54 @@ void Cover::refreshUploadPhotoOverlay() {
 				std::move(result));
 			break;
 		}
+	});
+
+	const auto canReport = [=, peer = _peer] {
+		if (!peer->hasUserpic()) {
+			return false;
+		}
+		const auto user = peer->asUser();
+		if (!user) {
+			if (canChange) {
+				return false;
+			}
+		} else if (user->hasPersonalPhoto()
+				|| user->isSelf()
+				|| user->isInaccessible()
+				|| user->isRepliesChat()
+				|| user->isVerifyCodes()
+				|| (user->botInfo && user->botInfo->canEditInformation)
+				|| user->isServiceUser()) {
+			return false;
+		}
+		return true;
+	};
+
+	const auto contextMenu = _userpic->lifetime()
+		.make_state<base::unique_qptr<Ui::PopupMenu>>();
+	const auto showMenu = [=, peer = _peer, controller = _controller](
+			not_null<Ui::RpWidget*> parent) {
+		if (!canReport()) {
+			return false;
+		}
+		*contextMenu = base::make_unique_q<Ui::PopupMenu>(
+			parent,
+			st::popupMenuWithIcons);
+		contextMenu->get()->addAction(tr::lng_profile_report(tr::now), [=] {
+			controller->show(
+				ReportProfilePhotoBox(
+					peer,
+					peer->owner().photo(peer->userpicPhotoId())),
+				Ui::LayerOption::CloseOther);
+		}, &st::menuIconReport);
+		contextMenu->get()->popup(QCursor::pos());
+		return true;
+	};
+	base::install_event_filter(_userpic, [showMenu, raw = _userpic.data()](
+			not_null<QEvent*> e) {
+		return (e->type() == QEvent::ContextMenu && showMenu(raw))
+			? base::EventFilterResult::Cancel
+			: base::EventFilterResult::Continue;
 	});
 
 	if (const auto user = _peer->asUser()) {

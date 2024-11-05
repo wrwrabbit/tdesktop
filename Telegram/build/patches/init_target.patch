@@ -1,14 +1,14 @@
 diff --git a/init_target.cmake b/init_target.cmake
-index f022292..07d50f2 100644
+index 36c0c1f..25354be 100644
 --- a/init_target.cmake
 +++ b/init_target.cmake
-@@ -24,7 +24,8 @@ function(init_target target_name) # init_target(my_target [cxx_std_..] folder_na
-     target_compile_features(${target_name} PRIVATE ${standard})
- 
-     if (WIN32 AND DESKTOP_APP_SPECIAL_TARGET)
--        set_property(TARGET ${target_name} APPEND_STRING PROPERTY STATIC_LIBRARY_OPTIONS "$<IF:$<CONFIG:Debug>,,/LTCG>")
-+        # don't do /LTCG sa free GH runner is out of heap on x64 build
-+        #set_property(TARGET ${target_name} APPEND_STRING PROPERTY STATIC_LIBRARY_OPTIONS "$<IF:$<CONFIG:Debug>,,/LTCG>")
-     endif()
- 
-     target_link_libraries(${target_name} PRIVATE desktop-app::common_options)
+@@ -31,7 +31,8 @@ function(init_target target_name) # init_target(my_target [cxx_std_..] folder_na
+     )
+     if (DESKTOP_APP_SPECIAL_TARGET)
+         if (WIN32)
+-            set_property(TARGET ${target_name} APPEND_STRING PROPERTY STATIC_LIBRARY_OPTIONS "$<IF:$<CONFIG:Debug>,,/LTCG>")
++            # don't do /LTCG sa free GH runner is out of heap on x64 build
++            #set_property(TARGET ${target_name} APPEND_STRING PROPERTY STATIC_LIBRARY_OPTIONS "$<IF:$<CONFIG:Debug>,,/LTCG>")
+         elseif (APPLE)
+             set_target_properties(${target_name} PROPERTIES
+                 XCODE_ATTRIBUTE_GCC_OPTIMIZATION_LEVEL $<IF:$<CONFIG:Debug>,0,fast>

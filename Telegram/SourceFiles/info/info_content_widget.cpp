@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/fields/input_field.h"
 #include "ui/wrap/padding_wrap.h"
 #include "ui/search_field_controller.h"
+#include "ui/ui_utility.h"
 #include "lang/lang_keys.h"
 #include "info/profile/info_profile_widget.h"
 #include "info/media/info_media_widget.h"
@@ -374,12 +375,8 @@ Key ContentMemento::key() const {
 		return Settings::Tag{ self };
 	} else if (const auto peer = storiesPeer()) {
 		return Stories::Tag{ peer, storiesTab() };
-	} else if (const auto peer = statisticsPeer()) {
-		return Statistics::Tag{
-			peer,
-			statisticsContextId(),
-			statisticsStoryId(),
-		};
+	} else if (const auto peer = statisticsTag().peer) {
+		return statisticsTag();
 	} else {
 		return Downloads::Tag();
 	}
@@ -417,9 +414,7 @@ ContentMemento::ContentMemento(Stories::Tag stories)
 }
 
 ContentMemento::ContentMemento(Statistics::Tag statistics)
-: _statisticsPeer(statistics.peer)
-, _statisticsContextId(statistics.contextId)
-, _statisticsStoryId(statistics.storyId) {
+: _statisticsTag(statistics) {
 }
 
 } // namespace Info

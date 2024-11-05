@@ -80,6 +80,7 @@ struct SelectedItem {
 	bool canDelete = false;
 	bool canForward = false;
 	bool canSendNow = false;
+	bool canReschedule = false;
 };
 
 struct MessagesBar {
@@ -232,6 +233,7 @@ struct SelectionData {
 	bool canDelete = false;
 	bool canForward = false;
 	bool canSendNow = false;
+	bool canReschedule = false;
 };
 
 using SelectedMap = base::flat_map<
@@ -327,6 +329,7 @@ public:
 	void selectItemAsGroup(not_null<HistoryItem*> item);
 
 	void touchScrollUpdated(const QPoint &screenPos);
+	[[nodiscard]] rpl::producer<bool> touchMaybeSelectingValue() const;
 
 	[[nodiscard]] bool loadedAtTopKnown() const;
 	[[nodiscard]] bool loadedAtTop() const;
@@ -381,10 +384,14 @@ public:
 		const TextState &reactionState) const;
 	void toggleFavoriteReaction(not_null<Element*> view) const;
 
+
+	[[nodiscard]] auto scrollKeyEvents() const
+		-> rpl::producer<not_null<QKeyEvent*>>;
+
 	// ElementDelegate interface.
 	Context elementContext() override;
 	bool elementUnderCursor(not_null<const Element*> view) override;
-	bool elementInSelectionMode() override;
+	SelectionModeResult elementInSelectionMode() override;
 	bool elementIntersectsRange(
 		not_null<const Element*> view,
 		int from,
@@ -454,6 +461,10 @@ protected:
 	int resizeGetHeight(int newWidth) override;
 
 private:
+	[[nodiscard]] static int SelectionViewOffset(
+		not_null<const ListWidget*> inner,
+		not_null<const Element*> view);
+
 	using ScrollTopState = ListMemento::ScrollTopState;
 	using PointState = HistoryView::PointState;
 	using CursorState = HistoryView::CursorState;
@@ -613,7 +624,7 @@ private:
 		const SelectedMap::const_iterator &i);
 	bool hasSelectedText() const;
 	bool hasSelectedItems() const;
-	bool inSelectionMode() const;
+	SelectionModeResult inSelectionMode() const;
 	bool overSelectedItems() const;
 	void clearTextSelection();
 	void clearSelected();
@@ -825,11 +836,15 @@ private:
 
 	ElementHighlighter _highlighter;
 
+	mutable bool _lastInSelectionMode = false;
+	mutable Ui::Animations::Simple _inSelectionModeAnimation;
+
 	// scroll by touch support (at least Windows Surface tablets)
 	bool _touchScroll = false;
 	bool _touchSelect = false;
 	bool _touchInProgress = false;
 	QPoint _touchStart, _touchPrevPos, _touchPos;
+	rpl::variable<bool> _touchMaybeSelecting;
 	base::Timer _touchSelectTimer;
 
 	Ui::DraggingScrollManager _selectScroll;
@@ -849,6 +864,7 @@ private:
 	rpl::event_stream<ReplyToMessageRequest> _requestedToReplyToMessage;
 	rpl::event_stream<FullMsgId> _requestedToReadMessage;
 	rpl::event_stream<FullMsgId> _requestedToShowMessage;
+	rpl::event_stream<not_null<QKeyEvent*>> _scrollKeyEvents;
 
 	rpl::lifetime _viewerLifetime;
 

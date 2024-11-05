@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/timer_rpl.h"
 #include "base/unixtime.h"
+#include "boxes/filters/edit_filter_chats_list.h"
 #include "boxes/peer_list_box.h"
 #include "boxes/peer_list_controllers.h"
 #include "chat_helpers/compose/compose_show.h"
@@ -35,10 +36,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/discrete_sliders.h"
 #include "ui/painter.h"
+#include "ui/toast/toast.h"
 #include "ui/vertical_list.h"
+#include "ui/ui_utility.h"
 #include "window/themes/window_theme.h"
 #include "window/section_widget.h"
 #include "window/window_session_controller.h"
+#include "styles/style_boxes.h"
 #include "styles/style_chat.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
@@ -108,6 +112,10 @@ public:
 		const std::vector<MessageLinkRange> &links,
 		const QString &usedLink);
 
+	[[nodiscard]] rpl::producer<int> draggingScrollDelta() const {
+		return _draggingScrollDelta.events();
+	}
+
 private:
 	void paintEvent(QPaintEvent *e) override;
 	void leaveEventHook(QEvent *e) override;
@@ -115,6 +123,11 @@ private:
 	void mousePressEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
 	void mouseDoubleClickEvent(QMouseEvent *e) override;
+
+	void visibleTopBottomUpdated(int top, int bottom) override {
+		_visibleTop = top;
+		_visibleBottom = bottom;
+	}
 
 	void initElement();
 	void highlightUsedLink(
@@ -139,6 +152,9 @@ private:
 	rpl::lifetime _elementLifetime;
 
 	QPoint _position;
+	rpl::event_stream<int> _draggingScrollDelta;
+	int _visibleTop = 0;
+	int _visibleBottom = 0;
 
 	base::Timer _trippleClickTimer;
 	ClickHandlerPtr _link;
@@ -370,7 +386,7 @@ void PreviewWrap::paintEvent(QPaintEvent *e) {
 				userpicTop,
 				width(),
 				st::msgPhotoSize);
-		} else if (const auto info = item->originalHiddenSenderInfo()) {
+		} else if (const auto info = item->displayHiddenSenderInfo()) {
 			if (info->customUserpic.empty()) {
 				info->emptyUserpic.paintCircle(
 					p,
@@ -421,9 +437,8 @@ void PreviewWrap::mouseMoveEvent(QMouseEvent *e) {
 			: Flag::LookupLink),
 		.onlyMessageText = (_section == Section::Link || _onlyMessageText),
 	};
-	auto resolved = _element->textState(
-		e->pos() - _position,
-		request);
+	const auto position = e->pos();
+	auto resolved = _element->textState(position - _position, request);
 	_over = true;
 	const auto text = (_section == Section::Reply)
 		&& (resolved.cursor == CursorState::Text);
@@ -448,6 +463,17 @@ void PreviewWrap::mouseMoveEvent(QMouseEvent *e) {
 			update();
 		}
 	}
+
+	_draggingScrollDelta.fire([&] {
+		if (!_selecting || _visibleTop >= _visibleBottom) {
+			return 0;
+		} else if (position.y() < _visibleTop) {
+			return position.y() - _visibleTop;
+		} else if (position.y() >= _visibleBottom) {
+			return position.y() + 1 - _visibleBottom;
+		}
+		return 0;
+	}());
 }
 
 void PreviewWrap::mousePressEvent(QMouseEvent *e) {
@@ -812,6 +838,11 @@ void DraftOptionsBox(
 	state->wrap = box->addRow(
 		object_ptr<PreviewWrap>(box, args.history),
 		{});
+	state->wrap->draggingScrollDelta(
+	) | rpl::start_with_next([=](int delta) {
+		box->scrollByDraggingDelta(delta);
+	}, state->wrap->lifetime());
+
 	const auto &linkRanges = args.links;
 	state->shown.value() | rpl::start_with_next([=](Section shown) {
 		bottom->clear();
@@ -842,7 +873,14 @@ void DraftOptionsBox(
 			: tr::lng_reply_quote_selected();
 	}) | rpl::flatten_latest();
 	box->addButton(std::move(save), [=] {
-		finish(resolveReply(), state->webpage);
+		if (state->quote.current().overflown) {
+			show->showToast({
+				.title = tr::lng_reply_quote_long_title(tr::now),
+				.text = { tr::lng_reply_quote_long_text(tr::now) },
+			});
+		} else {
+			finish(resolveReply(), state->webpage);
+		}
 	});
 
 	box->addButton(tr::lng_cancel(), [=] {
@@ -875,6 +913,117 @@ void DraftOptionsBox(
 		}, box->lifetime());
 	}
 }
+
+struct AuthorSelector {
+	object_ptr<Ui::RpWidget> content = { nullptr };
+	Fn<bool(int, int, int)> overrideKey;
+};
+[[nodiscard]] AuthorSelector AuthorRowSelector(
+		not_null<Main::Session*> session,
+		FullReplyTo reply,
+		Fn<void(not_null<Data::Thread*>)> chosen) {
+	const auto item = session->data().message(reply.messageId);
+	if (!item) {
+		return {};
+	}
+	const auto displayFrom = item->displayFrom();
+	const auto from = displayFrom ? displayFrom : item->from().get();
+	if (!from->isUser() || from == item->history()->peer || from->isSelf()) {
+		return {};
+	}
+
+	class AuthorController final : public PeerListController {
+	public:
+		AuthorController(not_null<PeerData*> peer, Fn<void()> click)
+		: _peer(peer)
+		, _click(std::move(click)) {
+		}
+
+		void prepare() override {
+			delegate()->peerListAppendRow(
+				std::make_unique<ChatsListBoxController::Row>(
+					_peer->owner().history(_peer),
+					&computeListSt().item));
+			delegate()->peerListRefreshRows();
+			TrackPremiumRequiredChanges(this, _lifetime);
+		}
+		void loadMoreRows() override {
+		}
+		void rowClicked(not_null<PeerListRow*> row) override {
+			if (RecipientRow::ShowLockedError(this, row, WritePremiumRequiredError)) {
+				return;
+			} else if (const auto onstack = _click) {
+				onstack();
+			}
+		}
+		Main::Session &session() const override {
+			return _peer->session();
+		}
+
+	private:
+		const not_null<PeerData*> _peer;
+		Fn<void()> _click;
+		rpl::lifetime _lifetime;
+
+	};
+
+	auto result = object_ptr<Ui::VerticalLayout>((QWidget*)nullptr);
+	const auto container = result.data();
+
+	container->add(CreatePeerListSectionSubtitle(
+		container,
+		tr::lng_reply_in_author()));
+	Ui::AddSkip(container);
+
+	const auto delegate = container->lifetime().make_state<
+		PeerListContentDelegateSimple
+	>();
+	const auto controller = container->lifetime().make_state<
+		AuthorController
+	>(from, [=] { chosen(from->owner().history(from)); });
+	controller->setStyleOverrides(&st::peerListSingleRow);
+	const auto content = container->add(object_ptr<PeerListContent>(
+		container,
+		controller));
+	delegate->setContent(content);
+	controller->setDelegate(delegate);
+
+	Ui::AddSkip(container);
+	container->add(CreatePeerListSectionSubtitle(
+		container,
+		tr::lng_reply_in_chats_list()));
+
+	const auto overrideKey = [=](int direction, int from, int to) {
+		if (!content->isVisible()) {
+			return false;
+		} else if (direction > 0 && from < 0 && to >= 0) {
+			if (content->hasSelection()) {
+				const auto was = content->selectedIndex();
+				const auto now = content->selectSkip(1).reallyMovedTo;
+				if (was != now) {
+					return true;
+				}
+				content->clearSelection();
+			} else {
+				content->selectSkip(1);
+				return true;
+			}
+		} else if (direction < 0 && to < 0) {
+			if (!content->hasSelection()) {
+				content->selectLast();
+			} else if (from >= 0 || content->hasSelection()) {
+				content->selectSkip(-1);
+			}
+		}
+		return false;
+	};
+
+	return {
+		.content = std::move(result),
+		.overrideKey = overrideKey,
+	};
+}
+
 } // namespace
 
 void ShowReplyToChatBox(
@@ -885,7 +1034,7 @@ void ShowReplyToChatBox(
 	public:
 		using Chosen = not_null<Data::Thread*>;
 
-		Controller(not_null<Main::Session*> session)
+		Controller(not_null<Main::Session*> session, FullReplyTo reply)
 		: ChooseRecipientBoxController({
 			.session = session,
 			.callback = [=](Chosen thread) {
@@ -893,6 +1042,13 @@ void ShowReplyToChatBox(
 			},
 			.premiumRequiredError = WritePremiumRequiredError,
 		}) {
+			_authorRow = AuthorRowSelector(
+				session,
+				reply,
+				[=](Chosen thread) { _singleChosen.fire_copy(thread); });
+			if (_authorRow.content) {
+				setStyleOverrides(&st::peerListSmallSkips);
+			}
 		}
 
 		[[nodiscard]] rpl::producer<Chosen> singleChosen() const {
@@ -903,13 +1059,26 @@ void ShowReplyToChatBox(
 			return tr::lng_saved_quote_here(tr::now);
 		}
 
+		bool overrideKeyboardNavigation(
+				int direction,
+				int fromIndex,
+				int toIndex) override {
+			return _authorRow.overrideKey
+				&& _authorRow.overrideKey(direction, fromIndex, toIndex);
+		}
+
 	private:
 		void prepareViewHook() override {
+			if (_authorRow.content) {
+				delegate()->peerListSetAboveWidget(
+					std::move(_authorRow.content));
+			}
 			ChooseRecipientBoxController::prepareViewHook();
 			delegate()->peerListSetTitle(tr::lng_reply_in_another_title());
 		}
 
 		rpl::event_stream<Chosen> _singleChosen;
+		AuthorSelector _authorRow;
 
 	};
 
@@ -920,7 +1089,7 @@ void ShowReplyToChatBox(
 	};
 	const auto session = &show->session();
 	const auto state = [&] {
-		auto controller = std::make_unique<Controller>(session);
+		auto controller = std::make_unique<Controller>(session, reply);
 		const auto controllerRaw = controller.get();
 		auto box = Box<PeerListBox>(std::move(controller), [=](
 				not_null<PeerListBox*> box) {

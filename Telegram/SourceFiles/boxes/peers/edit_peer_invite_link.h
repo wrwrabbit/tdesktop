@@ -7,7 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "ui/layers/generic_box.h"
+template <typename Object>
+class object_ptr;
 
 class PeerData;
 
@@ -22,6 +23,7 @@ class Session;
 namespace Ui {
 class VerticalLayout;
 class Show;
+class BoxContent;
 } // namespace Ui
 
 [[nodiscard]] bool IsExpiredLink(const Api::InviteLink &data, TimeId now);
@@ -48,6 +50,7 @@ void CopyInviteLink(std::shared_ptr<Ui::Show> show, const QString &link);
 	const QString &link,
 	const QString &copied = {});
 [[nodiscard]] object_ptr<Ui::BoxContent> InviteLinkQrBox(
+	PeerData *peer,
 	const QString &link,
 	rpl::producer<QString> title,
 	rpl::producer<QString> about);

@@ -11,13 +11,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <windows.h>
 #include <shellapi.h>
+#include <ShellScalingApi.h>
 #include <dwmapi.h>
 #include <RestartManager.h>
 #include <psapi.h>
-
-#ifdef __MINGW32__
-#define __in
-#endif
 
 namespace Platform {
 namespace Dlls {
@@ -123,6 +120,13 @@ struct WINDOWCOMPOSITIONATTRIBDATA {
 inline BOOL(__stdcall *SetWindowCompositionAttribute)(
 	HWND hWnd,
 	WINDOWCOMPOSITIONATTRIBDATA*);
+
+// SHCORE.DLL
+inline HRESULT(__stdcall *GetDpiForMonitor)(
+	_In_ HMONITOR hmonitor,
+	_In_ MONITOR_DPI_TYPE dpiType,
+	_Out_ UINT *dpiX,
+	_Out_ UINT *dpiY);
 
 } // namespace Dlls
 } // namespace Platform

@@ -57,6 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/click_handler_types.h"
 #include "core/ui_integration.h"
 #include "base/unixtime.h"
+#include "info/channel_statistics/earn/earn_icons.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/text/text_utilities.h"
 #include "ui/text/format_values.h" // Ui::FormatPhone.
@@ -72,6 +73,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/collectible_info_box.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/dynamic_thumbnails.h"
+#include "ui/ui_utility.h"
 #include "mainwidget.h"
 #include "main/main_app_config.h"
 #include "main/main_domain.h"
@@ -176,8 +178,8 @@ private:
 	return {
 		.tonEmoji = Ui::Text::SingleCustomEmoji(
 			session->data().customEmojiManager().registerInternalEmoji(
-				Info::ChannelEarn::IconCurrency(
-					st::collectibleInfo,
+				Ui::Earn::IconCurrencyColored(
+					st::collectibleInfo.style.font,
 					st::collectibleInfo.textFg->c),
 				st::collectibleInfoTonMargins,
 				true)),
@@ -576,6 +578,10 @@ void SessionNavigation::showPeerByLinkResolved(
 			info.messageId,
 			commentId->id,
 			params);
+	} else if (resolveType == ResolveType::Profile) {
+		showPeerInfo(peer, params);
+	} else if (resolveType == ResolveType::HashtagSearch) {
+		searchMessages(info.text, peer->owner().history(peer));
 	} else if (peer->isForum() && resolveType != ResolveType::Boost) {
 		const auto itemId = info.messageId;
 		if (!itemId) {
@@ -613,17 +619,23 @@ void SessionNavigation::showPeerByLinkResolved(
 		const auto contextPeer = item
 			? item->history()->peer
 			: bot;
-		const auto action = bot->session().attachWebView().lookupLastAction(
-			info.clickFromAttachBotWebviewUrl
-		).value_or(Api::SendAction(bot->owner().history(contextPeer)));
+		const auto action = info.clickFromBotWebviewContext
+			? info.clickFromBotWebviewContext->action
+			: Api::SendAction(bot->owner().history(contextPeer));
 		crl::on_main(this, [=] {
-			bot->session().attachWebView().requestApp(
-				parentController(),
-				action,
-				bot,
-				info.botAppName,
-				info.startToken,
-				info.botAppForceConfirmation);
+			bot->session().attachWebView().open({
+				.bot = bot,
+				.context = {
+					.controller = parentController(),
+					.action = action,
+					.maySkipConfirmation = !info.botAppForceConfirmation,
+				},
+				.button = { .startCommand = info.startToken },
+				.source = InlineBots::WebViewSourceLinkApp{
+					.appname = info.botAppName,
+					.token = info.startToken,
+				},
+			});
 		});
 	} else if (bot && resolveType == ResolveType::ShareGame) {
 		Window::ShowShareGameBox(parentController(), bot, info.startToken);
@@ -671,20 +683,25 @@ void SessionNavigation::showPeerByLinkResolved(
 			crl::on_main(this, [=] {
 				const auto history = peer->owner().history(peer);
 				showPeerHistory(history, params, msgId);
-				peer->session().attachWebView().request(
+
+				peer->session().attachWebView().openByUsername(
 					parentController(),
 					Api::SendAction(history),
 					attachBotUsername,
 					info.attachBotToggleCommand.value_or(QString()));
 			});
-		} else if (bot && info.attachBotMenuOpen) {
+		} else if (bot && info.attachBotMainOpen) {
 			const auto startCommand = info.attachBotToggleCommand.value_or(
 				QString());
-			bot->session().attachWebView().requestAddToMenu(
-				bot,
-				InlineBots::AddToMenuOpenMenu{ startCommand },
-				parentController(),
-				std::optional<Api::SendAction>());
+			bot->session().attachWebView().open({
+				.bot = bot,
+				.context = { .controller = parentController() },
+				.button = { .startCommand = startCommand },
+				.source = InlineBots::WebViewSourceLinkBotProfile{
+					.token = startCommand,
+					.compact = info.attachBotMainCompact,
+				},
+			});
 		} else if (bot && info.attachBotToggleCommand) {
 			const auto itemId = info.clickFromMessageId;
 			const auto item = _session->data().message(itemId);
@@ -694,17 +711,21 @@ void SessionNavigation::showPeerByLinkResolved(
 			const auto contextUser = contextPeer
 				? contextPeer->asUser()
 				: nullptr;
-			bot->session().attachWebView().requestAddToMenu(
-				bot,
-				InlineBots::AddToMenuOpenAttach{
-					.startCommand = *info.attachBotToggleCommand,
-					.chooseTypes = info.attachBotChooseTypes,
+			bot->session().attachWebView().open({
+				.bot = bot,
+				.context = {
+					.controller = parentController(),
+					.action = (contextUser
+						? Api::SendAction(
+							contextUser->owner().history(contextUser))
+						: std::optional<Api::SendAction>()),
 				},
-				parentController(),
-				(contextUser
-					? Api::SendAction(
-						contextUser->owner().history(contextUser))
-					: std::optional<Api::SendAction>()));
+				.button = { .startCommand = *info.attachBotToggleCommand },
+				.source = InlineBots::WebViewSourceLinkAttachMenu{
+					.choose = info.attachBotChooseTypes,
+					.token = *info.attachBotToggleCommand,
+				},
+			});
 		} else {
 			const auto draft = info.text;
 			crl::on_main(this, [=] {
@@ -1226,8 +1247,7 @@ SessionController::SessionController(
 , _activeChatsFilter(session->data().chatsFilters().defaultId())
 , _openedFolder(window->id().folder())
 , _defaultChatTheme(std::make_shared<Ui::ChatTheme>())
-, _chatStyle(std::make_unique<Ui::ChatStyle>(session->colorIndicesValue()))
-, _giftPremiumValidator(this) {
+, _chatStyle(std::make_unique<Ui::ChatStyle>(session->colorIndicesValue())) {
 	init();
 
 	_chatStyleTheme = _defaultChatTheme;
@@ -1449,24 +1469,6 @@ bool SessionController::hasTabbedSelectorOwnership() const {
 void SessionController::showEditPeerBox(PeerData *peer) {
 	_showEditPeer = peer;
 	session().api().requestFullPeer(peer);
-}
-
-void SessionController::showGiftPremiumBox(UserData *user) {
-	if (user) {
-		_giftPremiumValidator.showBox(user);
-	} else {
-		_giftPremiumValidator.cancel();
-	}
-}
-
-void SessionController::showGiftPremiumsBox(const QString &ref) {
-	_giftPremiumValidator.showChoosePeerBox(ref);
-}
-
-void SessionController::showGiftPremiumsBox(
-		not_null<UserData*> user,
-		const QString &ref) {
-	_giftPremiumValidator.showChosenPeerBox(user, ref);
 }
 
 void SessionController::init() {
@@ -2393,9 +2395,9 @@ void SessionController::clearPassportForm() {
 
 void SessionController::showChooseReportMessages(
 		not_null<PeerData*> peer,
-		Ui::ReportReason reason,
-		Fn<void(MessageIdsList)> done) const {
-	content()->showChooseReportMessages(peer, reason, std::move(done));
+		Data::ReportInput reportInput,
+		Fn<void(std::vector<MsgId>)> done) const {
+	content()->showChooseReportMessages(peer, reportInput, std::move(done));
 }
 
 void SessionController::clearChooseReportMessages() const {
@@ -2469,11 +2471,11 @@ void SessionController::showMessage(
 					std::make_shared<HistoryView::ScheduledMemento>(
 						item->history()),
 					params);
+				if (params.activation != anim::activation::background) {
+					controller->window().activate();
+				}
 			} else {
 				controller->content()->showMessage(item, params);
-			}
-			if (params.activation != anim::activation::background) {
-				controller->window().activate();
 			}
 		});
 }

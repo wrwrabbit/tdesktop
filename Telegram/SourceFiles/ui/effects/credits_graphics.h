@@ -20,12 +20,10 @@ class Session;
 } // namespace Main
 
 namespace Ui {
+
 class MaskedInputField;
 class RpWidget;
 class VerticalLayout;
-} // namespace Ui
-
-namespace Ui {
 
 using PaintRoundImageCallback = Fn<void(
 	Painter &p,
@@ -66,11 +64,22 @@ PaintRoundImageCallback GeneratePaidMediaPaintCallback(
 	int totalCount,
 	Fn<void()> update);
 
+PaintRoundImageCallback GenerateGiftStickerUserpicCallback(
+	not_null<Main::Session*> session,
+	uint64 stickerId,
+	Fn<void()> update);
+
 Fn<PaintRoundImageCallback(Fn<void()>)> PaintPreviewCallback(
 	not_null<Main::Session*> session,
 	const Data::CreditsHistoryEntry &entry);
 
 [[nodiscard]] TextWithEntities GenerateEntryName(
 	const Data::CreditsHistoryEntry &entry);
+
+Fn<void(QPainter &)> PaintOutlinedColoredCreditsIconCallback(
+	int size,
+	float64 outlineRatio);
+
+[[nodiscard]] QImage CreditsWhiteDoubledIcon(int size, float64 outlineRatio);
 
 } // namespace Ui

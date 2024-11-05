@@ -193,6 +193,9 @@ mediaMenuIconStealthLocked: icon {{ "menu/stealth_locked", mediaviewMenuFg }};
 mediaMenuIconStealth: icon {{ "menu/stealth", mediaviewMenuFg }};
 mediaMenuIconStats: icon {{ "menu/stats", mediaviewMenuFg }};
 
+mediaMenuIconInfo: icon {{ "menu/info", mediaviewMenuFg }};
+mediaMenuIconBlock: icon {{ "menu/block", mediaviewMenuFg }};
+
 menuIconDeleteAttention: icon {{ "menu/delete", menuIconAttentionColor }};
 menuIconLeaveAttention: icon {{ "menu/leave", menuIconAttentionColor }};
 menuIconDisableAttention: icon {{ "menu/disable", menuIconAttentionColor }};
@@ -200,6 +203,7 @@ menuIconReportAttention: icon {{ "menu/report", menuIconAttentionColor }};
 menuIconRestoreAttention: icon {{ "menu/restore", menuIconAttentionColor }};
 menuIconTagRemoveAttention: icon {{ "menu/tag_remove", menuIconAttentionColor }};
 menuIconCancelAttention: icon {{ "menu/cancel", menuIconAttentionColor }};
+menuIconBlockAttention: icon {{ "menu/block", menuIconAttentionColor }};
 
 menuIconBlockSettings: icon {{ "menu/block", windowBgActive }};
 menuIconInviteSettings: icon {{ "menu/invite", windowBgActive }};

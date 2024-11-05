@@ -7,16 +7,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-namespace Data {
+class PeerData;
 
-struct SubscriptionOption {
-	QString duration;
-	QString discount;
-	QString costPerMonth;
-	QString costTotal;
-	QString total;
-	QString botUrl;
-};
-using SubscriptionOptions = std::vector<SubscriptionOption>;
+namespace Ui {
 
-} // namespace Data
+class GenericBox;
+
+void FillPeerQrBox(
+	not_null<Ui::GenericBox*> box,
+	PeerData *peer,
+	std::optional<QString> customLink,
+	rpl::producer<QString> about);
+
+} // namespace Ui

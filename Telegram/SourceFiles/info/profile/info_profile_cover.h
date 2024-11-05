@@ -71,6 +71,7 @@ private:
 	Fn<bool()> _paused;
 	Fn<void()> _update;
 	std::shared_ptr<StickerPlayer> _player;
+	bool _playerUsesTextColor = false;
 	QImage _image;
 	rpl::lifetime _lifetime;
 
@@ -149,7 +150,7 @@ private:
 	const std::unique_ptr<Badge> _badge;
 	rpl::variable<int> _onlineCount;
 
-	object_ptr<Ui::UserpicButton> _userpic;
+	const object_ptr<Ui::UserpicButton> _userpic;
 	Ui::UserpicButton *_changePersonal = nullptr;
 	std::optional<QImage> _personalChosen;
 	object_ptr<TopicIconButton> _iconButton;

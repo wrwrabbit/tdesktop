@@ -70,14 +70,12 @@ layout:
     bind: $SNAP/usr/share/X11
   /usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/gtk-3.0:
     bind: $SNAP/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/gtk-3.0
-  /usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/gtk-4.0:
-    bind: $SNAP/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/gtk-4.0
   /usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/pipewire-0.3:
     bind: $SNAP/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/pipewire-0.3
   /usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/spa-0.2:
     bind: $SNAP/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/spa-0.2
-  /usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/webkitgtk-6.0:
-    bind: $SNAP/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/webkitgtk-6.0
+  /usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/webkit2gtk-4.1:
+    bind: $SNAP/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/webkit2gtk-4.1
 
 parts:
   telegram:
@@ -121,7 +119,7 @@ parts:
       - libprotobuf-lite32t64
       - libpulse0
       - libssl3t64
-      - libwebkitgtk-6.0-4
+      - libwebkit2gtk-4.1-0
       - libxcb1
       - libxcb-keysyms1
       - libxcb-record0
@@ -156,6 +154,7 @@ parts:
       craftctl default
       rm -rf "$CRAFT_PART_INSTALL/usr/share/icons"
     after:
+      - ada
       - ffmpeg
       - libjxl
       - qt
@@ -165,7 +164,7 @@ parts:
   patches:
     source: https://github.com/desktop-app/patches.git
     source-depth: 1
-    source-commit: 20a7c5ffd8265fc6e45203ea2536f7b1965be19a
+    source-commit: 643b18c2be6424fc6f35a52891ed5a6a42502ac2
     plugin: dump
     override-pull: |
       craftctl default
@@ -208,6 +207,24 @@ parts:
       GTK_PATH=$PWD/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/gtk-3.0 /usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/libgtk-3-0t64/gtk-query-immodules-3.0 > usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/gtk-3.0/3.0.0/immodules/immodules.cache
     after:
       - telegram
+
+  ada:
+    source: https://github.com/ada-url/ada.git
+    source-depth: 1
+    source-tag: v2.9.0
+    plugin: cmake
+    build-environment:
+      - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -s
+    cmake-generator: Ninja
+    cmake-parameters:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_INSTALL_PREFIX=/usr
+      - -DADA_TESTING=OFF
+      - -DADA_TOOLS=OFF
+    prime:
+      - -./usr/include
+      - -./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/cmake
+      - -./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/*.a
 
   ffmpeg:
     plugin: nil
@@ -360,7 +377,7 @@ parts:
       - mesa-vulkan-drivers
       - xkb-data
     override-pull: |
-      QT=6.7.2
+      QT=6.8.0
 
       git clone -b v${QT} --depth=1 https://github.com/qt/qt5.git .
       git submodule update --init --recursive --depth=1 qtbase qtdeclarative qtwayland qtimageformats qtsvg qtshadertools
@@ -371,17 +388,12 @@ parts:
       find $CRAFT_STAGE/patches/qtwayland_${QT} -type f -print0 | sort -z | xargs -r0 git apply
       cd ..
     override-build: |
-      ./configure \
-        -prefix /usr \
-        -libdir /usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR \
-        -release \
-        -opensource \
-        -confirm-license \
-        -openssl-linked \
-        -nomake examples \
-        -nomake tests \
-        -- \
-        -DCMAKE_PREFIX_PATH=$CRAFT_STAGE/usr
+      cmake -GNinja -B $CRAFT_PART_BUILD \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_PREFIX_PATH=$CRAFT_STAGE/usr \
+        -DINSTALL_LIBDIR=/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR \
+        -DINPUT_openssl=linked
 
       cmake --build . -j$CRAFT_PARALLEL_BUILD_COUNT
       DESTDIR="$CRAFT_PART_INSTALL" cmake --install .
@@ -433,7 +445,7 @@ parts:
   webrtc:
     source: https://github.com/desktop-app/tg_owt.git
     source-depth: 1
-    source-commit: c9cc4390ab951f2cbc103ff783a11f398b27660b
+    source-commit: 8198c4d8b91e22d68eb5c7327fd408e3b6abcc79
     plugin: cmake
     build-environment:
       - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -s

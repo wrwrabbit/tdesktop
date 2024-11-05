@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document_media.h"
 #include "ui/widgets/tooltip.h"
 #include "ui/emoji_config.h"
+#include "ui/ui_utility.h"
 #include "lang/lang_cloud_manager.h"
 #include "lang/lang_instance.h"
 #include "core/sandbox.h"
@@ -185,7 +186,7 @@ void MainWindow::setupPasscodeLock() {
 		setInnerFocus();
 	}
 	if (const auto sessionController = controller().sessionController()) {
-		sessionController->session().attachWebView().cancel();
+		sessionController->session().attachWebView().closeAll();
 	}
 }
 

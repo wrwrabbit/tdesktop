@@ -60,13 +60,9 @@ void AddHeader(
 
 } // namespace
 
-InnerWidget::InnerWidget(
-	QWidget *parent,
-	not_null<Controller*> controller,
-	not_null<PeerData*> peer)
+InnerWidget::InnerWidget(QWidget *parent, not_null<Controller*> controller)
 : VerticalLayout(parent)
 , _controller(controller)
-, _peer(peer)
 , _show(controller->uiShow()) {
 }
 
@@ -75,7 +71,7 @@ void InnerWidget::load() {
 
 	const auto request = [=](Fn<void(Data::CreditsEarnStatistics)> done) {
 		const auto api = apiLifetime->make_state<Api::CreditsEarnStatistics>(
-			_peer->asUser());
+			peer()->asUser());
 		api->request(
 		) | rpl::start_with_error_done([show = _show](const QString &error) {
 			show->showToast(error);
@@ -87,22 +83,23 @@ void InnerWidget::load() {
 
 	Info::Statistics::FillLoading(
 		this,
+		Info::Statistics::LoadingType::Earn,
 		_loaded.events_starting_with(false) | rpl::map(!rpl::mappers::_1),
 		_showFinished.events());
 
 	_showFinished.events(
-	) | rpl::take(1) | rpl::start_with_next([=] {
+	) | rpl::take(1) | rpl::start_with_next([=, this, peer = peer()] {
 		request([=](Data::CreditsEarnStatistics state) {
 			_state = state;
 			_loaded.fire(true);
 			fill();
 
-			_peer->session().account().mtpUpdates(
+			peer->session().account().mtpUpdates(
 			) | rpl::start_with_next([=](const MTPUpdates &updates) {
 				using TL = MTPDupdateStarsRevenueStatus;
 				Api::PerformForUpdate<TL>(updates, [&](const TL &d) {
 					const auto peerId = peerFromMTP(d.vpeer());
-					if (peerId == _peer->id) {
+					if (peerId == peer->id) {
 						request([=](Data::CreditsEarnStatistics state) {
 							_state = state;
 							_stateUpdated.fire({});
@@ -119,6 +116,7 @@ void InnerWidget::fill() {
 	const auto container = this;
 	const auto &data = _state;
 	const auto multiplier = data.usdRate * Data::kEarnMultiplier;
+	constexpr auto kMinorLength = 3;
 
 	auto availableBalanceValue = rpl::single(
 		data.availableBalance
@@ -127,7 +125,7 @@ void InnerWidget::fill() {
 			return _state.availableBalance;
 		})
 	);
-	auto valueToString = [](uint64 v) { return QString::number(v); };
+	auto valueToString = [](uint64 v) { return Lang::FormatCountDecimal(v); };
 
 	if (data.revenueGraph.chart) {
 		Ui::AddSkip(container);
@@ -169,7 +167,7 @@ void InnerWidget::fill() {
 				std::move(
 					value
 				) | rpl::map([=](uint64 v) {
-					return v ? ToUsd(v, multiplier) : QString();
+					return v ? ToUsd(v, multiplier, kMinorLength) : QString();
 				}),
 				st::channelEarnOverviewSubMinorLabel);
 			rpl::combine(
@@ -232,7 +230,7 @@ void InnerWidget::fill() {
 		::Settings::AddWithdrawalWidget(
 			container,
 			_controller->parentController(),
-			_peer,
+			peer(),
 			rpl::single(
 				data.buyAdsUrl
 			) | rpl::then(
@@ -246,7 +244,7 @@ void InnerWidget::fill() {
 				return !dt.isNull() || (!_state.isWithdrawalEnabled);
 			}),
 			rpl::duplicate(availableBalanceValue) | rpl::map([=](uint64 v) {
-				return v ? ToUsd(v, multiplier) : QString();
+				return v ? ToUsd(v, multiplier, kMinorLength) : QString();
 			}));
 	}
 
@@ -261,7 +259,7 @@ void InnerWidget::fillHistory() {
 
 	const auto sectionIndex = history->lifetime().make_state<int>(0);
 
-	const auto fill = [=](
+	const auto fill = [=, peer = peer()](
 			not_null<PeerData*> premiumBot,
 			const Data::CreditsStatusSlice &fullSlice,
 			const Data::CreditsStatusSlice &inSlice,
@@ -352,24 +350,22 @@ void InnerWidget::fillHistory() {
 		}, inner->lifetime());
 
 		const auto controller = _controller->parentController();
-		const auto entryClicked = [=](const Data::CreditsHistoryEntry &e) {
+		const auto entryClicked = [=](
+				const Data::CreditsHistoryEntry &e,
+				const Data::SubscriptionEntry &s) {
 			controller->uiShow()->show(Box(
 				::Settings::ReceiptCreditsBox,
 				controller,
-				premiumBot.get(),
-				e));
+				e,
+				s));
 		};
-
-		const auto star = lifetime().make_state<QImage>(
-			Ui::GenerateStars(st::creditsTopupButton.height, 1));
 
 		Info::Statistics::AddCreditsHistoryList(
 			controller->uiShow(),
 			fullSlice,
 			fullWrap->entity(),
 			entryClicked,
-			premiumBot,
-			star,
+			peer,
 			true,
 			true);
 		Info::Statistics::AddCreditsHistoryList(
@@ -377,8 +373,7 @@ void InnerWidget::fillHistory() {
 			inSlice,
 			inWrap->entity(),
 			entryClicked,
-			premiumBot,
-			star,
+			peer,
 			true,
 			false);
 		Info::Statistics::AddCreditsHistoryList(
@@ -386,8 +381,7 @@ void InnerWidget::fillHistory() {
 			outSlice,
 			outWrap->entity(),
 			std::move(entryClicked),
-			premiumBot,
-			star,
+			peer,
 			false,
 			true);
 
@@ -398,11 +392,11 @@ void InnerWidget::fillHistory() {
 	const auto apiLifetime = history->lifetime().make_state<rpl::lifetime>();
 	rpl::single(rpl::empty) | rpl::then(
 		_stateUpdated.events()
-	) | rpl::start_with_next([=] {
+	) | rpl::start_with_next([=, peer = peer()] {
 		using Api = Api::CreditsHistory;
-		const auto apiFull = apiLifetime->make_state<Api>(_peer, true, true);
-		const auto apiIn = apiLifetime->make_state<Api>(_peer, true, false);
-		const auto apiOut = apiLifetime->make_state<Api>(_peer, false, true);
+		const auto apiFull = apiLifetime->make_state<Api>(peer, true, true);
+		const auto apiIn = apiLifetime->make_state<Api>(peer, true, false);
+		const auto apiOut = apiLifetime->make_state<Api>(peer, false, true);
 		apiFull->request({}, [=](Data::CreditsStatusSlice fullSlice) {
 			apiIn->request({}, [=](Data::CreditsStatusSlice inSlice) {
 				apiOut->request({}, [=](Data::CreditsStatusSlice outSlice) {
@@ -453,7 +447,7 @@ void InnerWidget::setInnerFocus() {
 }
 
 not_null<PeerData*> InnerWidget::peer() const {
-	return _peer;
+	return _controller->statisticsTag().peer;
 }
 
 } // namespace Info::BotEarn

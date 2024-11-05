@@ -36,6 +36,22 @@ private:
 
 };
 
+class CreditsGiveawayOptions final {
+public:
+	CreditsGiveawayOptions(not_null<PeerData*> peer);
+
+	[[nodiscard]] rpl::producer<rpl::no_value, QString> request();
+	[[nodiscard]] Data::CreditsGiveawayOptions options() const;
+
+private:
+	const not_null<PeerData*> _peer;
+
+	Data::CreditsGiveawayOptions _options;
+
+	MTP::Sender _api;
+
+};
+
 class CreditsStatus final {
 public:
 	CreditsStatus(not_null<PeerData*> peer);
@@ -60,6 +76,9 @@ public:
 	void request(
 		const Data::CreditsStatusSlice::OffsetToken &token,
 		Fn<void(Data::CreditsStatusSlice)> done);
+	void requestSubscriptions(
+		const Data::CreditsStatusSlice::OffsetToken &token,
+		Fn<void(Data::CreditsStatusSlice)> done);
 
 private:
 	using HistoryTL = MTPpayments_GetStarsTransactions;
@@ -80,8 +99,8 @@ public:
 	[[nodiscard]] Data::CreditsEarnStatistics data() const;
 
 private:
+	const bool _isUser = false;
 	Data::CreditsEarnStatistics _data;
-	bool _isUser = false;
 
 	mtpRequestId _requestId = 0;
 

@@ -21,9 +21,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_premium_limits.h"
 #include "data/data_session.h"
 #include "data/data_web_page.h"
+#include "data/data_user.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "history/view/controls/history_view_webpage_processor.h"
 #include "info/channel_statistics/earn/earn_format.h"
+#include "info/channel_statistics/earn/earn_icons.h"
 #include "info/channel_statistics/earn/info_channel_earn_widget.h"
 #include "info/info_controller.h"
 #include "info/profile/info_profile_values.h" // Info::Profile::NameValue.
@@ -63,7 +65,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_credits.h"
 #include "styles/style_window.h" // mainMenuToggleFourStrokes.
 
-#include <QtSvg/QSvgRenderer>
 #include <QtWidgets/QApplication>
 
 namespace Info::ChannelEarn {
@@ -116,31 +117,6 @@ void ShowMenu(not_null<Ui::GenericBox*> box, const QString &text) {
 			resolver->request(url);
 		}
 	});
-}
-
-[[nodiscard]] QByteArray CurrencySvg(const QColor &c) {
-	const auto color = u"rgb(%1,%2,%3)"_q
-		.arg(c.red())
-		.arg(c.green())
-		.arg(c.blue())
-		.toUtf8();
-	return R"(
-<svg width="72px" height="72px" viewBox="0 0 72 72">
-    <g stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
-        <g transform="translate(9.000000, 14.000000)
-        " stroke-width="7.2" stroke=")" + color + R"(">
-            <path d="M2.96014341,0 L50.9898193,0 C51.9732032,-7.06402744e-15
- 52.7703933,0.797190129 52.7703933,1.78057399 C52.7703933,2.08038611
- 52.6946886,2.3753442 52.5502994,2.63809702 L29.699977,44.2200383
- C28.7527832,45.9436969 26.5876295,46.5731461 24.8639708,45.6259523
- C24.2556953,45.2916896 23.7583564,44.7869606 23.4331014,44.1738213
- L1.38718565,2.61498853 C0.926351231,1.74626794 1.25700829,0.668450654
- 2.12572888,0.20761623 C2.38272962,0.0712838007 2.6692209,4.97530809e-16
- 2.96014341,0 Z"></path>
-            <line x1="27" y1="44.4532875" x2="27" y2="0"></line>
-        </g>
-    </g>
-</svg>)";
 }
 
 void AddArrow(not_null<Ui::RpWidget*> parent) {
@@ -239,23 +215,6 @@ void AddRecipient(not_null<Ui::GenericBox*> box, const TextWithEntities &t) {
 
 } // namespace
 
-QImage IconCurrency(
-		const style::FlatLabel &label,
-		const QColor &c) {
-	const auto s = Size(label.style.font->ascent);
-	auto svg = QSvgRenderer(CurrencySvg(c));
-	auto image = QImage(
-		s * style::DevicePixelRatio(),
-		QImage::Format_ARGB32_Premultiplied);
-	image.setDevicePixelRatio(style::DevicePixelRatio());
-	image.fill(Qt::transparent);
-	{
-		auto p = QPainter(&image);
-		svg.render(&p, Rect(s));
-	}
-	return image;
-}
-
 InnerWidget::InnerWidget(
 	QWidget *parent,
 	not_null<Controller*> controller,
@@ -269,11 +228,11 @@ InnerWidget::InnerWidget(
 void InnerWidget::load() {
 	struct State final {
 		State(not_null<PeerData*> peer)
-		: api(peer->asChannel())
+		: api(peer)
 		, apiCredits(peer)
 		, apiCreditsHistory(peer, true, true) {
 		}
-		Api::ChannelEarnStatistics api;
+		Api::EarnStatistics api;
 		Api::CreditsEarnStatistics apiCredits;
 		Api::CreditsHistory apiCreditsHistory;
 		rpl::lifetime apiLifetime;
@@ -281,9 +240,13 @@ void InnerWidget::load() {
 		rpl::lifetime apiPremiumBotLifetime;
 	};
 	const auto state = lifetime().make_state<State>(_peer);
+	using ChannelFlag = ChannelDataFlag;
+	const auto canViewCredits = !_peer->isChannel()
+		|| (_peer->asChannel()->flags() & ChannelFlag::CanViewCreditsRevenue);
 
 	Info::Statistics::FillLoading(
 		this,
+		Info::Statistics::LoadingType::Earn,
 		_loaded.events_starting_with(false) | rpl::map(!rpl::mappers::_1),
 		_showFinished.events());
 
@@ -363,7 +326,11 @@ void InnerWidget::load() {
 					_state.premiumBotId = bot->id;
 					state->apiCredits.request(
 					) | rpl::start_with_error_done([=](const QString &error) {
-						fail(error);
+						if (canViewCredits) {
+							fail(error);
+						} else {
+							_state.creditsEarn = {};
+						}
 						finish();
 					}, [=] {
 						_state.creditsEarn = state->apiCredits.data();
@@ -378,8 +345,19 @@ void InnerWidget::load() {
 
 void InnerWidget::fill() {
 	const auto container = this;
-	const auto &data = _state.currencyEarn;
-	const auto &creditsData = _state.creditsEarn;
+	const auto bot = (peerIsUser(_peer->id) && _peer->asUser()->botInfo)
+		? _peer->asUser()
+		: nullptr;
+	const auto channel = _peer->asChannel();
+	const auto canViewCurrencyEarn = channel
+		? (channel->flags() & ChannelDataFlag::CanViewRevenue)
+		: true;
+	const auto &data = canViewCurrencyEarn
+		? _state.currencyEarn
+		: Data::EarnStatistics();
+	const auto &creditsData = bot
+		? Data::CreditsEarnStatistics()
+		: _state.creditsEarn;
 
 	auto currencyStateValue = rpl::single(
 		data
@@ -389,12 +367,14 @@ void InnerWidget::fill() {
 		})
 	);
 
-	auto creditsStateValue = rpl::single(
-		creditsData
-	) | rpl::then(
-		_stateUpdated.events() | rpl::map([=] { return _state.creditsEarn; })
-	);
+	auto creditsStateValue = bot
+		? rpl::single(Data::CreditsEarnStatistics()) | rpl::type_erased()
+		: rpl::single(creditsData) | rpl::then(
+			_stateUpdated.events(
+			) | rpl::map([this] { return _state.creditsEarn; })
+		);
 
+	constexpr auto kMinorLength = 3;
 	constexpr auto kMinus = QChar(0x2212);
 	//constexpr auto kApproximately = QChar(0x2248);
 	const auto multiplier = data.usdRate;
@@ -402,16 +382,11 @@ void InnerWidget::fill() {
 	const auto creditsToUsdMap = [=](EarnInt c) {
 		const auto creditsMultiplier = _state.creditsEarn.usdRate
 			* Data::kEarnMultiplier;
-		return c ? ToUsd(c, creditsMultiplier) : QString();
+		return c ? ToUsd(c, creditsMultiplier, 0) : QString();
 	};
 
-	constexpr auto kNonInteractivePeriod = 1717200000;
-	const auto nonInteractive = base::unixtime::now() < kNonInteractivePeriod;
-
 	const auto session = &_peer->session();
-	const auto channel = _peer->asChannel();
-	const auto withdrawalEnabled = WithdrawalEnabled(session)
-		&& !nonInteractive;
+	const auto withdrawalEnabled = WithdrawalEnabled(session);
 	const auto makeContext = [=](not_null<Ui::FlatLabel*> l) {
 		return Core::MarkedTextContext{
 			.session = session,
@@ -426,8 +401,8 @@ void InnerWidget::fill() {
 		const auto &st = label->st();
 		auto icon = Ui::Text::SingleCustomEmoji(
 			session->data().customEmojiManager().registerInternalEmoji(
-				IconCurrency(
-					st,
+				Ui::Earn::IconCurrencyColored(
+					st.style.font,
 					!isIn
 						? st::activeButtonBg->c
 						: (*isIn)
@@ -449,7 +424,9 @@ void InnerWidget::fill() {
 
 	const auto bigCurrencyIcon = Ui::Text::SingleCustomEmoji(
 		session->data().customEmojiManager().registerInternalEmoji(
-			IconCurrency(st::boxTitle, st::activeButtonBg->c),
+			Ui::Earn::IconCurrencyColored(
+				st::boxTitle.style.font,
+				st::activeButtonBg->c),
 			st::channelEarnCurrencyLearnMargins,
 			false));
 
@@ -507,7 +484,9 @@ void InnerWidget::fill() {
 					content,
 					object_ptr<Ui::FlatLabel>(
 						content,
-						tr::lng_channel_earn_learn_title(),
+						bot
+							? tr::lng_channel_earn_bot_learn_title()
+							: tr::lng_channel_earn_learn_title(),
 						st::boxTitle)));
 				Ui::AddSkip(content);
 				Ui::AddSkip(content);
@@ -553,7 +532,9 @@ void InnerWidget::fill() {
 					};
 					addEntry(
 						tr::lng_channel_earn_learn_in_subtitle(),
-						tr::lng_channel_earn_learn_in_about(),
+						bot
+							? tr::lng_channel_earn_learn_bot_in_about()
+							: tr::lng_channel_earn_learn_in_about(),
 						st::channelEarnLearnChannelIcon);
 					Ui::AddSkip(content);
 					Ui::AddSkip(content);
@@ -649,7 +630,9 @@ void InnerWidget::fill() {
 			st::defaultBoxDividerLabelPadding,
 			RectPart::Top | RectPart::Bottom));
 	};
-	addAboutWithLearn(tr::lng_channel_earn_about);
+	addAboutWithLearn(bot
+		? tr::lng_channel_earn_about_bot
+		: tr::lng_channel_earn_about);
 	{
 		using Type = Statistic::ChartViewType;
 		Ui::AddSkip(container);
@@ -718,6 +701,7 @@ void InnerWidget::fill() {
 				rpl::producer<EarnInt> currencyValue,
 				rpl::producer<EarnInt> creditsValue,
 				const tr::phrase<> &text,
+				bool showCurrency,
 				bool showCredits) {
 			const auto line = container->add(
 				Ui::CreateSkipWidget(container, 0),
@@ -732,14 +716,18 @@ void InnerWidget::fill() {
 				{});
 			const auto minorLabel = Ui::CreateChild<Ui::FlatLabel>(
 				line,
-				rpl::duplicate(currencyValue) | rpl::map(MinorPart),
+				rpl::duplicate(currencyValue) | rpl::map([=](EarnInt v) {
+					return MinorPart(v).left(kMinorLength);
+				}),
 				st::channelEarnOverviewMinorLabel);
 			const auto secondMinorLabel = Ui::CreateChild<Ui::FlatLabel>(
 				line,
 				std::move(
 					currencyValue
 				) | rpl::map([=](EarnInt value) {
-					return value ? ToUsd(value, multiplier) : QString();
+					return value
+						? ToUsd(value, multiplier, kMinorLength)
+						: QString();
 				}),
 				st::channelEarnOverviewSubMinorLabel);
 
@@ -780,7 +768,9 @@ void InnerWidget::fill() {
 					st::channelEarnOverviewSubMinorLabelPos.y());
 
 				icon->moveToLeft(
-					available / 2 + st::boxRowPadding.left() / 2,
+					showCurrency
+						? (available / 2 + st::boxRowPadding.left() / 2)
+						: 0,
 					0);
 				creditsLabel->moveToLeft(rect::right(icon) + skip, 0);
 				creditsSecondLabel->moveToLeft(
@@ -793,6 +783,12 @@ void InnerWidget::fill() {
 					icon->moveToLeft(x, 0);
 					creditsLabel->moveToLeft(x, 0);
 					creditsSecondLabel->moveToLeft(x, 0);
+				}
+				if (!showCurrency) {
+					const auto x = std::numeric_limits<int>::max();
+					majorLabel->moveToLeft(x, 0);
+					minorLabel->moveToLeft(x, 0);
+					secondMinorLabel->moveToLeft(x, 0);
 				}
 			}, minorLabel->lifetime());
 			Ui::ToggleChildrenVisibility(line, true);
@@ -816,6 +812,7 @@ void InnerWidget::fill() {
 			rpl::duplicate(currencyStateValue) | rpl::map(availValueMap),
 			rpl::duplicate(creditsStateValue) | rpl::map(availValueMap),
 			tr::lng_channel_earn_available,
+			canViewCurrencyEarn,
 			hasAnyCredits);
 		Ui::AddSkip(container);
 		Ui::AddSkip(container);
@@ -823,6 +820,7 @@ void InnerWidget::fill() {
 			rpl::duplicate(currencyStateValue) | rpl::map(currentValueMap),
 			rpl::duplicate(creditsStateValue) | rpl::map(currentValueMap),
 			tr::lng_channel_earn_reward,
+			canViewCurrencyEarn,
 			hasAnyCredits);
 		Ui::AddSkip(container);
 		Ui::AddSkip(container);
@@ -830,6 +828,7 @@ void InnerWidget::fill() {
 			rpl::duplicate(currencyStateValue) | rpl::map(overallValueMap),
 			rpl::duplicate(creditsStateValue) | rpl::map(overallValueMap),
 			tr::lng_channel_earn_total,
+			canViewCurrencyEarn,
 			hasAnyCredits);
 		Ui::AddSkip(container);
 	}
@@ -889,7 +888,7 @@ void InnerWidget::fill() {
 				container,
 				object_ptr<Ui::FlatLabel>(
 					container,
-					ToUsd(value, multiplier),
+					ToUsd(value, multiplier, 0),
 					st::channelEarnOverviewSubMinorLabel)));
 
 		Ui::AddSkip(container);
@@ -987,8 +986,7 @@ void InnerWidget::fill() {
 			not_null<Ui::VerticalLayout*> listsContainer) {
 		const auto hasCurrencyTab
 			= !data.currencyEarn.firstHistorySlice.list.empty();
-		const auto hasCreditsTab = !data.creditsStatusSlice.list.empty()
-			&& data.premiumBotId;
+		const auto hasCreditsTab = !data.creditsStatusSlice.list.empty();
 		const auto hasOneTab = (hasCurrencyTab || hasCreditsTab)
 			&& (hasCurrencyTab != hasCreditsTab);
 
@@ -1004,7 +1002,9 @@ void InnerWidget::fill() {
 					listsContainer,
 					st::defaultTabsSlider)),
 			st::boxRowPadding);
-		slider->toggle(!hasOneTab, anim::type::instant);
+		slider->toggle(
+			((hasCurrencyTab ? 1 : 0) + (hasCreditsTab ? 1 : 0) > 1),
+			anim::type::instant);
 
 		if (hasCurrencyTab) {
 			slider->entity()->addSection(currencyTabText);
@@ -1028,11 +1028,13 @@ void InnerWidget::fill() {
 		if (hasOneTab) {
 			if (hasCurrencyTab) {
 				AddHeader(listsContainer, tr::lng_channel_earn_history_title);
+				AddSkip(listsContainer);
 			} else if (hasCreditsTab) {
 				AddHeader(
 					listsContainer,
 					tr::lng_channel_earn_credits_history);
 				slider->entity()->setActiveSectionFast(1);
+				AddSkip(listsContainer);
 			}
 		} else {
 			slider->entity()->setActiveSectionFast(*sectionIndex);
@@ -1347,7 +1349,7 @@ void InnerWidget::fill() {
 					ShowMoreState(not_null<ChannelData*> channel)
 					: api(channel) {
 					}
-					Api::ChannelEarnStatistics api;
+					Api::EarnStatistics api;
 					bool loading = false;
 					Data::EarnHistorySlice::OffsetToken token;
 					rpl::variable<int> showed = 0;
@@ -1394,26 +1396,22 @@ void InnerWidget::fill() {
 		if (hasCreditsTab) {
 			const auto controller = _controller->parentController();
 			const auto show = controller->uiShow();
-			const auto premiumBot = _peer->owner().peer(data.premiumBotId);
 			const auto entryClicked = [=](
-					const Data::CreditsHistoryEntry &e) {
+					const Data::CreditsHistoryEntry &e,
+					const Data::SubscriptionEntry &s) {
 				show->show(Box(
 					::Settings::ReceiptCreditsBox,
 					controller,
-					premiumBot.get(),
-					e));
+					e,
+					s));
 			};
-
-			const auto star = tabCreditsList->lifetime().make_state<QImage>(
-				Ui::GenerateStars(st::creditsTopupButton.height, 1));
 
 			Info::Statistics::AddCreditsHistoryList(
 				show,
 				data.creditsStatusSlice,
 				tabCreditsList->entity(),
 				entryClicked,
-				premiumBot,
-				star,
+				_peer,
 				true,
 				true);
 		}
@@ -1482,10 +1480,15 @@ void InnerWidget::fill() {
 					[] {});
 			}
 			if (!isLocked) {
-				Api::RestrictSponsored(channel, value, [=](const QString &e) {
-					toggled->fire(false);
-					_controller->uiShow()->showToast(e);
-				});
+				const auto weak = Ui::MakeWeak(this);
+				const auto show = _controller->uiShow();
+				const auto failed = [=](const QString &e) {
+					if (weak.data()) {
+						toggled->fire(false);
+						show->showToast(e);
+					}
+				};
+				Api::RestrictSponsored(channel, value, failed);
 			}
 		}, button->lifetime());
 

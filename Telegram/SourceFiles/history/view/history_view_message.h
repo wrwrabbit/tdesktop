@@ -22,6 +22,7 @@ struct ReactionId;
 
 namespace Ui {
 struct BubbleRounding;
+class RoundCheckbox;
 } // namespace Ui
 
 namespace HistoryView {
@@ -77,7 +78,6 @@ public:
 	[[nodiscard]] const HistoryMessageEdited *displayedEditBadge() const;
 	[[nodiscard]] HistoryMessageEdited *displayedEditBadge();
 
-	[[nodiscard]] bool embedReactionsInBottomInfo() const;
 	[[nodiscard]] bool embedReactionsInBubble() const;
 
 	int marginTop() const override;
@@ -286,7 +286,7 @@ private:
 
 	void ensureRightAction() const;
 	void refreshTopicButton();
-	void refreshInfoSkipBlock();
+	void refreshInfoSkipBlock(HistoryItem *textItem);
 	[[nodiscard]] int monospaceMaxWidth() const;
 
 	void validateInlineKeyboard(HistoryMessageReplyMarkup *markup);
@@ -314,12 +314,14 @@ private:
 
 	mutable Ui::Text::String _fromName;
 	mutable std::unique_ptr<FromNameStatus> _fromNameStatus;
+	mutable std::unique_ptr<Ui::RoundCheckbox> _selectionRoundCheckbox;
 	Ui::Text::String _rightBadge;
 	mutable int _fromNameVersion = 0;
-	uint32 _bubbleWidthLimit : 29 = 0;
+	uint32 _bubbleWidthLimit : 28 = 0;
 	uint32 _invertMedia : 1 = 0;
 	uint32 _hideReply : 1 = 0;
 	uint32 _rightBadgeHasBoosts : 1 = 0;
+	uint32 _postShowingAuthor : 1 = 0;
 
 	BottomInfo _bottomInfo;
 

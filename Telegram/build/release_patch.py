@@ -26,7 +26,11 @@ def main():
         print("Call %s" % (cmd))
         errors += os.system(cmd)
     print("Patches done")
-    return errors
+    if errors:
+        # by default error code == 256
+        # and it became 0 in some shells
+        return 1 
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main())

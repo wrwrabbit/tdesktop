@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/resize_area.h"
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
+#include "ui/ui_utility.h"
 #include "window/window_connecting_widget.h"
 #include "window/window_top_bar_wrap.h"
 #include "window/notifications_manager.h"
@@ -42,7 +43,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_history_hider.h"
 #include "window/window_controller.h"
 #include "window/window_peer_menu.h"
+#include "window/window_session_controller_link_info.h"
 #include "window/themes/window_theme.h"
+#include "chat_helpers/bot_command.h"
 #include "chat_helpers/tabbed_selector.h" // TabbedSelector::refreshStickers
 #include "chat_helpers/message_field.h"
 #include "info/info_memento.h"
@@ -94,6 +97,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QMimeData>
 
 #include "fakepasscode/verify/verify_updater.h"
+
+namespace {
+
+void ClearBotStartToken(PeerData *peer) {
+	if (peer && peer->isUser() && peer->asUser()->isBot()) {
+		peer->asUser()->botInfo->startToken = QString();
+	}
+}
+
+} // namespace
 
 enum StackItemType {
 	HistoryStackItem,
@@ -416,7 +429,7 @@ MainWidget::MainWidget(
 
 	cSetOtherOnline(0);
 
-	_history->start();
+	session().data().stickers().notifySavedGifsUpdated();
 }
 
 MainWidget::~MainWidget() = default;
@@ -738,6 +751,15 @@ void MainWidget::hideSingleUseKeyboard(FullMsgId replyToId) {
 }
 
 void MainWidget::searchMessages(const QString &query, Dialogs::Key inChat) {
+	const auto complex = Data::HashtagWithUsernameFromQuery(query);
+	if (!complex.username.isEmpty()) {
+		_controller->showPeerByLink(Window::PeerByLinkInfo{
+			.usernameOrId = complex.username,
+			.text = complex.hashtag,
+			.resolveType = Window::ResolveType::HashtagSearch,
+		});
+		return;
+	}
 	auto tags = Data::SearchTagsFromQuery(query);
 	if (_dialogs) {
 		auto state = Dialogs::SearchState{
@@ -1067,16 +1089,6 @@ SendMenu::Details MainWidget::sendMenuDetails() const {
 	return _history->sendMenuDetails();
 }
 
-bool MainWidget::sendExistingDocument(not_null<DocumentData*> document) {
-	return sendExistingDocument(document, {});
-}
-
-bool MainWidget::sendExistingDocument(
-		not_null<DocumentData*> document,
-		Api::SendOptions options) {
-	return _history->sendExistingDocument(document, options);
-}
-
 void MainWidget::dialogsCancelled() {
 	if (_hider) {
 		_hider->startHide();
@@ -1191,41 +1203,40 @@ Image *MainWidget::newBackgroundThumb() {
 }
 
 void MainWidget::setInnerFocus() {
+	const auto setTo = [&](auto &&widget) {
+		if (widget->isHidden()) {
+			// If we try setting focus inside a hidden widget, we may
+			// end up focusing search field in dialogs on window activation.
+			setFocus();
+		} else {
+			widget->setInnerFocus();
+		}
+	};
 	if (_dialogs && _dialogs->searchHasFocus()) {
-		_dialogs->setInnerFocus();
+		setTo(_dialogs);
 	} else if (_hider || !_history->peer()) {
 		if (!_hider && _mainSection) {
-			_mainSection->setInnerFocus();
+			setTo(_mainSection);
 		} else if (!_hider && _thirdSection) {
-			_thirdSection->setInnerFocus();
+			setTo(_thirdSection);
 		} else if (_dialogs) {
-			_dialogs->setInnerFocus();
+			setTo(_dialogs);
 		} else {
 			// Maybe we're just closing a child window, content is destroyed.
 			_history->setFocus();
 		}
 	} else if (_mainSection) {
-		_mainSection->setInnerFocus();
+		setTo(_mainSection);
 	} else {
-		_history->setInnerFocus();
+		setTo(_history);
 	}
-}
-
-void MainWidget::clearBotStartToken(PeerData *peer) {
-	if (peer && peer->isUser() && peer->asUser()->isBot()) {
-		peer->asUser()->botInfo->startToken = QString();
-	}
-}
-
-void MainWidget::ctrlEnterSubmitUpdated() {
-	_history->updateFieldSubmitSettings();
 }
 
 void MainWidget::showChooseReportMessages(
 		not_null<PeerData*> peer,
-		Ui::ReportReason reason,
-		Fn<void(MessageIdsList)> done) {
-	_history->setChooseReportMessagesDetails(reason, std::move(done));
+		Data::ReportInput reportInput,
+		Fn<void(std::vector<MsgId>)> done) {
+	_history->setChooseReportMessagesDetails(reportInput, std::move(done));
 	_controller->showPeerHistory(
 		peer,
 		SectionShow::Way::Forward,
@@ -1248,7 +1259,8 @@ bool MainWidget::showHistoryInDifferentWindow(
 		const SectionShow &params,
 		MsgId showAtMsgId) {
 	if (!peerId) {
-		return false;
+		// In case we don't have dialogs, we can't clear section stack.
+		return !_dialogs;
 	}
 	const auto peer = session().data().peer(peerId);
 	if (const auto separateChat = _controller->windowId().chat()) {
@@ -1292,12 +1304,17 @@ void MainWidget::showHistory(
 		const SectionShow &params,
 		MsgId showAtMsgId) {
 	if (peerId && _controller->window().locked()) {
+		if (params.activation != anim::activation::background) {
+			_controller->window().activate();
+		}
 		return;
 	} else if (auto peer = session().data().peerLoaded(peerId)) {
 		if (peer->migrateTo()) {
 			peer = peer->migrateTo();
 			peerId = peer->id;
-			if (showAtMsgId > 0) showAtMsgId = -showAtMsgId;
+			if (showAtMsgId > 0) {
+				showAtMsgId = -showAtMsgId;
+			}
 		}
 		const auto unavailable = peer->computeUnavailableReason();
 		if (!unavailable.isEmpty()) {
@@ -1314,6 +1331,9 @@ void MainWidget::showHistory(
 		&& _mainSection
 		&& _mainSection->showMessage(peerId, params, showAtMsgId)) {
 		session().data().hideShownSpoilers();
+		if (params.activation != anim::activation::background) {
+			_controller->window().activate();
+		}
 		return;
 	} else if (showHistoryInDifferentWindow(peerId, params, showAtMsgId)) {
 		return;
@@ -1349,7 +1369,7 @@ void MainWidget::showHistory(
 	bool foundInStack = !peerId;
 	if (foundInStack || (way == Way::ClearStack)) {
 		for (const auto &item : _stack) {
-			clearBotStartToken(item->peer());
+			ClearBotStartToken(item->peer());
 		}
 		_stack.clear();
 	} else {
@@ -1357,7 +1377,7 @@ void MainWidget::showHistory(
 			if (_stack.at(i)->type() == HistoryStackItem && _stack.at(i)->peer()->id == peerId) {
 				foundInStack = true;
 				while (int(_stack.size()) > i + 1) {
-					clearBotStartToken(_stack.back()->peer());
+					ClearBotStartToken(_stack.back()->peer());
 					_stack.pop_back();
 				}
 				_stack.pop_back();
@@ -1419,7 +1439,7 @@ void MainWidget::showHistory(
 	if (_history->peer()
 		&& _history->peer()->id != peerId
 		&& way != Way::Forward) {
-		clearBotStartToken(_history->peer());
+		ClearBotStartToken(_history->peer());
 	}
 	_history->showHistory(
 		peerId,
@@ -1499,16 +1519,26 @@ void MainWidget::showMessage(
 	if (!v::is_null(params.origin)) {
 		if (_mainSection) {
 			if (_mainSection->showMessage(peerId, params, itemId)) {
+				if (params.activation != anim::activation::background) {
+					_controller->window().activate();
+				}
 				return;
 			}
 		} else if (_history->peer() == item->history()->peer) {
+			// showHistory may be redirected to different window,
+			// so we don't call activate() on current controller's window.
 			showHistory(peerId, params, itemId);
 			return;
 		}
 	}
 	if (const auto topic = item->topic()) {
 		_controller->showTopic(topic, item->id, params);
+		if (params.activation != anim::activation::background) {
+			_controller->window().activate();
+		}
 	} else {
+		// showPeerHistory may be redirected to different window,
+		// so we don't call activate() on current controller's window.
 		_controller->showPeerHistory(
 			item->history(),
 			params,
@@ -1524,7 +1554,7 @@ void MainWidget::showForum(
 	_dialogs->showForum(forum, params);
 
 	if (params.activation != anim::activation::background) {
-		_controller->hideLayer();
+		_controller->window().hideSettingsAndLayer();
 	}
 }
 
@@ -1953,9 +1983,9 @@ void MainWidget::showNonPremiumLimitToast(bool download) {
 			? tr::lng_limit_download_title
 			: tr::lng_limit_upload_title)(tr::now),
 		.text = std::move(text),
-		.duration = 5 * crl::time(1000),
-		.slideSide = RectPart::Top,
 		.filter = std::move(filter),
+		.attach = RectPart::Top,
+		.duration = 5 * crl::time(1000),
 	});
 }
 
@@ -1975,8 +2005,8 @@ bool MainWidget::showBackFromStack(const SectionShow &params) {
 	}
 	auto item = std::move(_stack.back());
 	_stack.pop_back();
-	if (auto currentHistoryPeer = _history->peer()) {
-		clearBotStartToken(currentHistoryPeer);
+	if (const auto currentHistoryPeer = _history->peer()) {
+		ClearBotStartToken(currentHistoryPeer);
 	}
 	_thirdSectionFromStack = item->takeThirdSectionMemento();
 	if (item->type() == HistoryStackItem) {

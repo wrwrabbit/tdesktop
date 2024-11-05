@@ -31,6 +31,7 @@ struct BotInfo {
 
 	QString botMenuButtonText;
 	QString botMenuButtonUrl;
+	QString privacyPolicyUrl;
 
 	QString startToken;
 	Dialogs::EntryState inlineReturnTo;
@@ -40,12 +41,14 @@ struct BotInfo {
 
 	int version = 0;
 	int descriptionVersion = 0;
+	int activeUsers = 0;
 	bool inited : 1 = false;
 	bool readsAllHistory : 1 = false;
 	bool cantJoinGroups : 1 = false;
 	bool supportsAttachMenu : 1 = false;
 	bool canEditInformation : 1 = false;
 	bool supportsBusiness : 1 = false;
+	bool hasMainApp : 1 = false;
 };
 
 enum class UserDataFlag : uint32 {
@@ -64,7 +67,7 @@ enum class UserDataFlag : uint32 {
 	DiscardMinPhoto = (1 << 12),
 	Self = (1 << 13),
 	Premium = (1 << 14),
-	CanReceiveGifts = (1 << 15),
+	//CanReceiveGifts = (1 << 15),
 	VoiceMessagesForbidden = (1 << 16),
 	PersonalPhoto = (1 << 17),
 	StoriesHidden = (1 << 18),
@@ -147,8 +150,6 @@ public:
 	[[nodiscard]] bool canShareThisContact() const;
 	[[nodiscard]] bool canAddContact() const;
 
-	[[nodiscard]] bool canReceiveGifts() const;
-
 	// In Data::Session::processUsers() we check only that.
 	// When actually trying to share contact we perform
 	// a full check by canShareThisContact() call.
@@ -186,11 +187,11 @@ public:
 	void setBirthday(Data::Birthday value);
 	void setBirthday(const tl::conditional<MTPBirthday> &value);
 
-	void setUnavailableReasons(
-		std::vector<Data::UnavailableReason> &&reasons);
-
-	int commonChatsCount() const;
+	[[nodiscard]] int commonChatsCount() const;
 	void setCommonChatsCount(int count);
+
+	[[nodiscard]] int peerGiftsCount() const;
+	void setPeerGiftsCount(int count);
 
 	[[nodiscard]] bool hasPrivateForwardName() const;
 	[[nodiscard]] QString privateForwardName() const;
@@ -219,10 +220,14 @@ private:
 	auto unavailableReasons() const
 		-> const std::vector<Data::UnavailableReason> & override;
 
+	void setUnavailableReasonsList(
+		std::vector<Data::UnavailableReason> &&reasons) override;
+
 	Flags _flags;
 	Data::LastseenStatus _lastseen;
 	Data::Birthday _birthday;
 	int _commonChatsCount = 0;
+	int _peerGiftsCount = 0;
 	ContactStatus _contactStatus = ContactStatus::Unknown;
 	CallsStatus _callsStatus = CallsStatus::Unknown;
 

@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_drag_area.h"
 #include "history/history_item_components.h"
 #include "history/history_item_helpers.h" // GetErrorTextForSending.
+#include "history/history_view_swipe.h"
 #include "ui/chat/pinned_bar.h"
 #include "ui/chat/chat_style.h"
 #include "ui/widgets/buttons.h"
@@ -32,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/format_values.h"
 #include "ui/text/text_utilities.h"
 #include "ui/effects/message_sending_animation_controller.h"
+#include "ui/ui_utility.h"
 #include "base/timer_rpl.h"
 #include "api/api_bot.h"
 #include "api/api_editing.h"
@@ -400,6 +402,7 @@ RepliesWidget::RepliesWidget(
 
 	setupTopicViewer();
 	setupComposeControls();
+	setupSwipeReply();
 	orderWidgets();
 
 	if (_pinnedBar) {
@@ -762,8 +765,13 @@ void RepliesWidget::setupComposeControls() {
 		controller()->hideLayer(anim::type::normal);
 		controller()->sendingAnimation().appendSending(
 			data.messageSendingFrom);
-		const auto localId = data.messageSendingFrom.localId;
-		sendExistingDocument(data.document, data.options, localId);
+		auto messageToSend = Api::MessageToSend(
+			prepareSendAction(data.options));
+		messageToSend.textWithTags = base::take(data.caption);
+		sendExistingDocument(
+			data.document,
+			std::move(messageToSend),
+			data.messageSendingFrom.localId);
 	}, lifetime());
 
 	_composeControls->photoChosen(
@@ -791,7 +799,9 @@ void RepliesWidget::setupComposeControls() {
 		}
 	}, lifetime());
 
-	_composeControls->scrollKeyEvents(
+	rpl::merge(
+		_composeControls->scrollKeyEvents(),
+		_inner->scrollKeyEvents()
 	) | rpl::start_with_next([=](not_null<QKeyEvent*> e) {
 		_scroll->keyPressEvent(e);
 	}, lifetime());
@@ -859,6 +869,67 @@ void RepliesWidget::setupComposeControls() {
 			refreshJoinGroupButton();
 		}
 	}
+}
+
+void RepliesWidget::setupSwipeReply() {
+	const auto can = [=](not_null<HistoryItem*> still) {
+		const auto canSendReply = _topic
+			? Data::CanSendAnything(_topic)
+			: Data::CanSendAnything(_history->peer);
+		const auto allowInAnotherChat = still && still->allowsForward();
+		if (allowInAnotherChat && (_joinGroup || !canSendReply)) {
+			return true;
+		} else if (!_joinGroup && canSendReply) {
+			return true;
+		}
+		return false;
+	};
+	HistoryView::SetupSwipeHandler(_inner, _scroll.get(), [=](
+			HistoryView::ChatPaintGestureHorizontalData data) {
+		const auto changed = (_gestureHorizontal.msgBareId != data.msgBareId)
+			|| (_gestureHorizontal.translation != data.translation)
+			|| (_gestureHorizontal.reachRatio != data.reachRatio);
+		if (changed) {
+			_gestureHorizontal = data;
+			const auto item = _history->peer->owner().message(
+				_history->peer->id,
+				MsgId{ data.msgBareId });
+			if (item) {
+				_history->owner().requestItemRepaint(item);
+			}
+		}
+	}, [=, show = controller()->uiShow()](int cursorTop) {
+		auto result = HistoryView::SwipeHandlerFinishData();
+		if (_inner->elementInSelectionMode().inSelectionMode) {
+			return result;
+		}
+		const auto view = _inner->lookupItemByY(cursorTop);
+		if (!view
+			|| !view->data()->isRegular()
+			|| view->data()->isService()) {
+			return result;
+		}
+		if (!can(view->data())) {
+			return result;
+		}
+
+		result.msgBareId = view->data()->fullId().msg.bare;
+		result.callback = [=, itemId = view->data()->fullId()] {
+			const auto still = show->session().data().message(itemId);
+			const auto view = _inner->viewByPosition(still->position());
+			const auto selected = view->selectedQuote(
+				_inner->getSelectedTextRange(still));
+			const auto replyToItemId = (selected.item
+				? selected.item
+				: still)->fullId();
+			_inner->replyToMessageRequestNotify({
+				.messageId = replyToItemId,
+				.quote = selected.text,
+				.quoteOffset = selected.offset,
+			});
+		};
+		return result;
+	}, _inner->touchMaybeSelectingValue());
 }
 
 void RepliesWidget::chooseAttach(
@@ -1155,6 +1226,7 @@ void RepliesWidget::sendVoice(ComposeControls::VoiceToSend &&data) {
 		data.bytes,
 		data.waveform,
 		data.duration,
+		data.video,
 		std::move(action));
 
 	_composeControls->cancelReplyMessage();
@@ -1336,14 +1408,9 @@ void RepliesWidget::refreshJoinGroupButton() {
 	}
 }
 
-void RepliesWidget::sendExistingDocument(
-		not_null<DocumentData*> document) {
-	sendExistingDocument(document, {}, std::nullopt);
-}
-
 bool RepliesWidget::sendExistingDocument(
 		not_null<DocumentData*> document,
-		Api::SendOptions options,
+		Api::MessageToSend messageToSend,
 		std::optional<MsgId> localId) {
 	const auto error = Data::RestrictionError(
 		_history->peer,
@@ -1357,7 +1424,7 @@ bool RepliesWidget::sendExistingDocument(
 	}
 
 	Api::SendExistingDocument(
-		Api::MessageToSend(prepareSendAction(options)),
+		std::move(messageToSend),
 		document,
 		localId);
 
@@ -2639,6 +2706,14 @@ void RepliesWidget::listAddTranslatedItems(
 	if (_shownPinnedItem) {
 		tracker->add(_shownPinnedItem);
 	}
+}
+
+Ui::ChatPaintContext RepliesWidget::listPreparePaintContext(
+		Ui::ChatPaintContextArgs &&args) {
+	auto context = WindowListDelegate::listPreparePaintContext(
+		std::move(args));
+	context.gestureHorizontal = _gestureHorizontal;
+	return context;
 }
 
 void RepliesWidget::setupEmptyPainter() {

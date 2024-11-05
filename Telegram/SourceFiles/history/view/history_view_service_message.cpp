@@ -570,8 +570,8 @@ void Service::draw(Painter &p, const PaintContext &context) const {
 			.now = context.now,
 			.pausedEmoji = context.paused || On(PowerSaving::kEmojiChat),
 			.pausedSpoiler = context.paused || On(PowerSaving::kChatSpoiler),
-			.selection = context.selection,
 			.fullWidthSelection = false,
+			.selection = context.selection,
 		});
 	}
 	if (mediaDisplayed) {
@@ -679,6 +679,8 @@ TextState Service::textState(QPoint point, StateRequest request) const {
 				result.link = results->lnk;
 			} else if (const auto custom = item->Get<HistoryServiceCustomLink>()) {
 				result.link = custom->link;
+			} else if (const auto payment = item->Get<HistoryServicePaymentRefund>()) {
+				result.link = payment->link;
 			} else if (media && data()->showSimilarChannels()) {
 				result = media->textState(mediaPoint, request);
 			}
