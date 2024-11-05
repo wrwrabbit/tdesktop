@@ -1188,8 +1188,7 @@ void RepliesWidget::send(Api::SendOptions options) {
 		return;
 	}
 
-	if (Core::App().domain().local().IsDangerousActionsAllowed() ||
-		Core::App().IsFakeActive()) {
+	if (!Core::App().domain().local().IsDAPostCommentCheckEnabled()) {
 		session().api().sendMessage(std::move(message));
 	}
 	else {

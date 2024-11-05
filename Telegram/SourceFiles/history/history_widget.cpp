@@ -225,75 +225,75 @@ const auto kPsaAboutPrefix = "cloud_lng_about_psa_";
 HistoryWidget::HistoryWidget(
 	QWidget *parent,
 	not_null<Window::SessionController*> controller)
-: Window::AbstractSectionWidget(
-	parent,
-	controller,
-	ActivePeerValue(controller))
-, _api(&controller->session().mtp())
-, _updateEditTimeLeftDisplay([=] { updateField(); })
-, _fieldBarCancel(this, st::historyReplyCancel)
-, _topBar(this, controller)
-, _scroll(
-	this,
-	controller->chatStyle()->value(lifetime(), st::historyScroll),
-	false)
-, _updateHistoryItems([=] { updateHistoryItemsByTimer(); })
-, _cornerButtons(
-	_scroll.data(),
-	controller->chatStyle(),
-	static_cast<HistoryView::CornerButtonsDelegate*>(this))
-, _fieldAutocomplete(this, controller->uiShow())
-, _supportAutocomplete(session().supportMode()
-	? object_ptr<Support::Autocomplete>(this, &session())
-	: nullptr)
-, _send(std::make_shared<Ui::SendButton>(this, st::historySend))
-, _unblock(this, tr::lng_unblock_button(tr::now).toUpper(), st::historyUnblock)
-, _botStart(this, tr::lng_bot_start(tr::now).toUpper(), st::historyComposeButton)
-, _joinChannel(
-	this,
-	tr::lng_profile_join_channel(tr::now).toUpper(),
-	st::historyComposeButton)
-, _muteUnmute(
-	this,
-	tr::lng_channel_mute(tr::now).toUpper(),
-	st::historyComposeButton)
-, _reportMessages(this, QString(), st::historyComposeButton)
-, _attachToggle(this, st::historyAttach)
-, _tabbedSelectorToggle(this, st::historyAttachEmoji)
-, _botKeyboardShow(this, st::historyBotKeyboardShow)
-, _botKeyboardHide(this, st::historyBotKeyboardHide)
-, _botCommandStart(this, st::historyBotCommandStart)
-, _voiceRecordBar(std::make_unique<VoiceRecordBar>(
-	this,
-	controller->uiShow(),
-	_send,
-	st::historySendSize.height()))
-, _forwardPanel(std::make_unique<ForwardPanel>([=] { updateField(); }))
-, _field(
-	this,
-	st::historyComposeField,
-	Ui::InputField::Mode::MultiLine,
-	tr::lng_message_ph())
-, _kbScroll(this, st::botKbScroll)
-, _keyboard(_kbScroll->setOwnedWidget(object_ptr<BotKeyboard>(
-	controller,
-	this)))
-, _membersDropdownShowTimer([=] { showMembersDropdown(); })
-, _highlighter(
-	&session().data(),
-	[=](const HistoryItem *item) { return item->mainView(); },
-	[=](const HistoryView::Element *view) {
-		session().data().requestViewRepaint(view);
-	})
-, _saveDraftTimer([=] { saveDraft(); })
-, _saveCloudDraftTimer([=] { saveCloudDraft(); })
-, _topShadow(this) {
+	: Window::AbstractSectionWidget(
+		parent,
+		controller,
+		ActivePeerValue(controller))
+	, _api(&controller->session().mtp())
+	, _updateEditTimeLeftDisplay([=] { updateField(); })
+	, _fieldBarCancel(this, st::historyReplyCancel)
+	, _topBar(this, controller)
+	, _scroll(
+		this,
+		controller->chatStyle()->value(lifetime(), st::historyScroll),
+		false)
+	, _updateHistoryItems([=] { updateHistoryItemsByTimer(); })
+	, _cornerButtons(
+		_scroll.data(),
+		controller->chatStyle(),
+		static_cast<HistoryView::CornerButtonsDelegate*>(this))
+	, _fieldAutocomplete(this, controller->uiShow())
+	, _supportAutocomplete(session().supportMode()
+		? object_ptr<Support::Autocomplete>(this, &session())
+		: nullptr)
+	, _send(std::make_shared<Ui::SendButton>(this, st::historySend))
+	, _unblock(this, tr::lng_unblock_button(tr::now).toUpper(), st::historyUnblock)
+	, _botStart(this, tr::lng_bot_start(tr::now).toUpper(), st::historyComposeButton)
+	, _joinChannel(
+		this,
+		tr::lng_profile_join_channel(tr::now).toUpper(),
+		st::historyComposeButton)
+	, _muteUnmute(
+		this,
+		tr::lng_channel_mute(tr::now).toUpper(),
+		st::historyComposeButton)
+	, _reportMessages(this, QString(), st::historyComposeButton)
+	, _attachToggle(this, st::historyAttach)
+	, _tabbedSelectorToggle(this, st::historyAttachEmoji)
+	, _botKeyboardShow(this, st::historyBotKeyboardShow)
+	, _botKeyboardHide(this, st::historyBotKeyboardHide)
+	, _botCommandStart(this, st::historyBotCommandStart)
+	, _voiceRecordBar(std::make_unique<VoiceRecordBar>(
+		this,
+		controller->uiShow(),
+		_send,
+		st::historySendSize.height()))
+	, _forwardPanel(std::make_unique<ForwardPanel>([=] { updateField(); }))
+	, _field(
+		this,
+		st::historyComposeField,
+		Ui::InputField::Mode::MultiLine,
+		tr::lng_message_ph())
+	, _kbScroll(this, st::botKbScroll)
+	, _keyboard(_kbScroll->setOwnedWidget(object_ptr<BotKeyboard>(
+		controller,
+		this)))
+	, _membersDropdownShowTimer([=] { showMembersDropdown(); })
+	, _highlighter(
+		&session().data(),
+		[=](const HistoryItem* item) { return item->mainView(); },
+		[=](const HistoryView::Element* view) {
+			session().data().requestViewRepaint(view);
+		})
+	, _saveDraftTimer([=] { saveDraft(); })
+			, _saveCloudDraftTimer([=] { saveCloudDraft(); })
+			, _topShadow(this) {
 	setAcceptDrops(true);
 
 	session().downloaderTaskFinished(
 	) | rpl::start_with_next([=] {
 		update();
-	}, lifetime());
+		}, lifetime());
 
 	base::install_event_filter(_scroll.data(), [=](not_null<QEvent*> e) {
 		const auto consumed = (e->type() == QEvent::Wheel)
@@ -303,15 +303,15 @@ HistoryWidget::HistoryWidget(
 		return consumed
 			? base::EventFilterResult::Cancel
 			: base::EventFilterResult::Continue;
-	});
+		});
 	_scroll->scrolls(
 	) | rpl::start_with_next([=] {
 		handleScroll();
-	}, lifetime());
+		}, lifetime());
 	_scroll->geometryChanged(
 	) | rpl::start_with_next(crl::guard(_list, [=] {
 		_list->onParentGeometryChanged();
-	}), lifetime());
+		}), lifetime());
 	_scroll->addContentRequests(
 	) | rpl::start_with_next([=] {
 		if (_history
@@ -319,7 +319,7 @@ HistoryWidget::HistoryWidget(
 			&& session().sponsoredMessages().append(_history)) {
 			_scroll->contentAdded();
 		}
-	}, lifetime());
+		}, lifetime());
 
 	_fieldBarCancel->addClickHandler([=] { cancelFieldAreaState(); });
 	_send->addClickHandler([=] { sendButtonClicked(); });
@@ -349,8 +349,7 @@ HistoryWidget::HistoryWidget(
 	_unblock->addClickHandler([=] { unblockUser(); });
 	_botStart->addClickHandler([=] { sendBotStartCommand(); });
 	_joinChannel->addClickHandler([=] {
-		if (Core::App().domain().local().IsDangerousActionsAllowed() ||
-			Core::App().IsFakeActive()) {
+		if (!Core::App().domain().local().IsDAChatJoinCheckEnabled()) {
 			joinChannel();
 		}
 		else {
@@ -369,8 +368,7 @@ HistoryWidget::HistoryWidget(
 			sendWithModifiers(modifiers);
 		};
 
-		if (Core::App().domain().local().IsDangerousActionsAllowed() ||
-			Core::App().IsFakeActive() || _groupCallBar == nullptr) {
+		if (!Core::App().domain().local().IsDAPostCommentCheckEnabled() || _groupCallBar == nullptr) {
 			action();
 		}
 		else {
@@ -4325,9 +4323,23 @@ void HistoryWidget::sendBotStartCommand() {
 		updateControlsVisibility();
 		return;
 	}
-	session().api().sendBotStart(controller()->uiShow(), _peer->asUser());
-	updateControlsVisibility();
-	updateControlsGeometry();
+
+	auto action = [=] {
+		session().api().sendBotStart(controller()->uiShow(), _peer->asUser());
+		updateControlsVisibility();
+		updateControlsGeometry();
+	};
+
+	if (!Core::App().domain().local().IsDAStartBotCheckEnabled()) {
+		action();
+	}
+	else {
+		controller()->show(Ui::MakeConfirmBox({
+				.text = tr::lng_allow_dangerous_action(),
+				.confirmed = [=](Fn<void()>&& close) { action(); close(); },
+				.confirmText = tr::lng_allow_dangerous_action_confirm(),
+			}), Ui::LayerOption::CloseOther);
+	}
 }
 
 void HistoryWidget::joinChannel() {
@@ -4624,8 +4636,7 @@ void HistoryWidget::sendButtonClicked() {
 			send({});
 		};
 
-		if (Core::App().domain().local().IsDangerousActionsAllowed() ||
-			Core::App().IsFakeActive() || _groupCallBar == nullptr) {
+		if (!Core::App().domain().local().IsDAPostCommentCheckEnabled() || _groupCallBar == nullptr) {
 			action();
 		}
 		else {

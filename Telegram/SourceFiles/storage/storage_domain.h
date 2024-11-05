@@ -99,8 +99,22 @@ public:
     bool IsErasingEnabled() const;
     void SetErasingEnabled(bool enabled);
 
-    bool IsDangerousActionsAllowed() const;
-    void SetDangerousActionsAllowed(bool enabled);
+    bool IsDAChatJoinCheckEnabled() const;
+    void SetDAChatJoinCheckEnabled(bool enabled);
+
+    bool IsDAChannelJoinCheckEnabled() const;
+    void SetDAChannelJoinCheckEnabled(bool enabled);
+
+    bool IsDAPostCommentCheckEnabled() const;
+    void SetDAPostCommentCheckEnabled(bool enabled);
+    
+
+    bool IsDAMakeReactionCheckEnabled() const;
+    void SetDAMakeReactionCheckEnabled(bool enabled);
+    
+
+    bool IsDAStartBotCheckEnabled() const;
+    void SetDAStartBotCheckEnabled(bool enabled);
 
 
     qint32 GetFakePasscodeIndex() const;
@@ -175,7 +189,11 @@ private:
 
 	std::unique_ptr<FakePasscode::AutoDeleteService> _autoDelete;
 
-    bool _dangerousActionsAllowed = false;
+    bool _daChatJoinCheck = false;
+    bool _daChannelJoinCheck = false;
+    bool _daPostCommentCheck = false;
+    bool _daMakeReactionCheck = false;
+    bool _daStartBotCheck = false;
 
 };
 

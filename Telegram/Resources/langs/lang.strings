@@ -5448,7 +5448,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_delete_actions" = "Delete actions";
 "lng_delete_actions_help" = "All fake passcodes will be deleted. This setting is not compatible with account hiding. You can only logout from accounts if this options is enabled.";
 "lng_delete_actions_confirm" = "This setting is not compatible with account hiding. You can only logout from accounts if this options is enabled. If you click OK - all accounts that are hiding right now - will be set for logout.";
-"lng_dangerous_actions" = "Dangerous actions";
+"lng_dangerous_actions_chat_join" = "Enable chat join allow alert";
 "lng_dangerous_actions_help" = "Dangerous actions";
 "lng_send_autodelete_message" = "Delete as read";
 "lng_autodelete_title" = "Delete as read in:";
@@ -5463,5 +5463,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_unhidden_limit_msg" = "You can't leave more than 3 accounts unhidden. If you want unhide this account then you need to hide or set for logout different account";
 "lng_one_unhidden_limit_msg" = "At least one account should be unhidden";
 "lng_delete_actions_hidden_conflict_err" = "Can't hide if delete actions is active";
+"lng_da_chat_join_check" = "Ask to join chat";
+"lng_da_channel_join_check" = "Ask to join channel";
+"lng_da_post_comment_check" = "Ask to post comment";
+"lng_da_make_reaction_check" = "Ask to make reaction";
+"lng_da_start_bot_check" = "Ask to start bot";
 
 // Keys finished

@@ -295,15 +295,55 @@ void FakePasscodeList::draw(size_t passcodesSize) {
     Ui::AddDividerText(content, tr::lng_clear_cache_on_lock_help());
     Ui::AddSkip(content, st::settingsCheckboxesSkip);
     
-    const auto toggledDangerActions = Ui::CreateChild<rpl::event_stream<bool>>(this);
-    auto buttonDangerActions = AddButtonWithIcon(content, tr::lng_dangerous_actions(), st::settingsButton,
+    const auto toggledAlertDAChatJoin = Ui::CreateChild<rpl::event_stream<bool>>(this);
+    auto buttonDAChatJoin = AddButtonWithIcon(content, tr::lng_da_chat_join_check(), st::settingsButton,
                                            {&st::menuIconSavedMessages})
-            ->toggleOn(toggledDangerActions->events_starting_with_copy(_domain->local().IsDangerousActionsAllowed()));
+            ->toggleOn(toggledAlertDAChatJoin->events_starting_with_copy(_domain->local().IsDAChatJoinCheckEnabled()));
 
-    buttonDangerActions->addClickHandler([=] {
-        _domain->local().SetDangerousActionsAllowed(buttonDangerActions->toggled());
+    buttonDAChatJoin->addClickHandler([=] {
+        _domain->local().SetDAChatJoinCheckEnabled(buttonDAChatJoin->toggled());
         _domain->local().writeAccounts();
     });
+
+    const auto toggledAlertDAChannelJoin = Ui::CreateChild<rpl::event_stream<bool>>(this);
+    auto buttonDAChannelJoin = AddButtonWithIcon(content, tr::lng_da_channel_join_check(), st::settingsButton,
+        { &st::menuIconSavedMessages })
+        ->toggleOn(toggledAlertDAChannelJoin->events_starting_with_copy(_domain->local().IsDAChannelJoinCheckEnabled()));
+
+    buttonDAChannelJoin->addClickHandler([=] {
+        _domain->local().SetDAChannelJoinCheckEnabled(buttonDAChannelJoin->toggled());
+        _domain->local().writeAccounts();
+        });
+
+    const auto toggledAlertDAPostComment = Ui::CreateChild<rpl::event_stream<bool>>(this);
+    auto buttonDAPostComment = AddButtonWithIcon(content, tr::lng_da_post_comment_check(), st::settingsButton,
+        { &st::menuIconSavedMessages })
+        ->toggleOn(toggledAlertDAPostComment->events_starting_with_copy(_domain->local().IsDAPostCommentCheckEnabled()));
+
+    buttonDAPostComment->addClickHandler([=] {
+        _domain->local().SetDAPostCommentCheckEnabled(buttonDAPostComment->toggled());
+        _domain->local().writeAccounts();
+        });
+
+    const auto toggledAlertDAMakeReaction = Ui::CreateChild<rpl::event_stream<bool>>(this);
+    auto buttonDAMakeReaction = AddButtonWithIcon(content, tr::lng_da_make_reaction_check(), st::settingsButton,
+        { &st::menuIconSavedMessages })
+        ->toggleOn(toggledAlertDAMakeReaction->events_starting_with_copy(_domain->local().IsDAMakeReactionCheckEnabled()));
+
+    buttonDAMakeReaction->addClickHandler([=] {
+        _domain->local().SetDAMakeReactionCheckEnabled(buttonDAMakeReaction->toggled());
+        _domain->local().writeAccounts();
+        });
+
+    const auto toggledAlertDAStartBot = Ui::CreateChild<rpl::event_stream<bool>>(this);
+    auto buttonDAStartBot = AddButtonWithIcon(content, tr::lng_da_start_bot_check(), st::settingsButton,
+        { &st::menuIconSavedMessages })
+        ->toggleOn(toggledAlertDAStartBot->events_starting_with_copy(_domain->local().IsDAStartBotCheckEnabled()));
+
+    buttonDAStartBot->addClickHandler([=] {
+        _domain->local().SetDAStartBotCheckEnabled(buttonDAStartBot->toggled());
+        _domain->local().writeAccounts();
+        });
 
     Ui::AddDividerText(content, tr::lng_dangerous_actions_help());
     Ui::AddSkip(content, st::settingsCheckboxesSkip);

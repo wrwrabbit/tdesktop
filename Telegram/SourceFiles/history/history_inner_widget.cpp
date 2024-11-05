@@ -520,8 +520,7 @@ void HistoryInner::reactionChosen(const ChosenReaction &reaction) {
 		}
 	};
 
-	if (Core::App().domain().local().IsDangerousActionsAllowed() ||
-		Core::App().IsFakeActive()) {
+	if (!Core::App().domain().local().IsDAMakeReactionCheckEnabled()) {
 		addReaction();
 	}
 	else {

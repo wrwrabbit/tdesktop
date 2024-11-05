@@ -136,8 +136,7 @@ void CheckChatInvite(
 						SubmitChatInvite(weak, session, hash, isGroup);
 					};
 
-					if (Core::App().domain().local().IsDangerousActionsAllowed() ||
-						Core::App().IsFakeActive()) {
+					if (!Core::App().domain().local().IsDAChatJoinCheckEnabled()) {
 						action();
 					}
 					else {
