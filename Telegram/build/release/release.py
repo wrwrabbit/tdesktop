@@ -56,9 +56,17 @@ def parse_args():
     parser.add_argument("--testing", action = "store_true", default = None, help = "Publish test builds")
     parser.add_argument("--beta", action = "store_true", help = "Publish beta builds")
     parser.add_argument("--limit", type = int, default = 20, help = "Number of runs to look through")
+    parser.add_argument("--skip-platform", default = "", help = "Skip platform")
     # parser.add_argument("--platform", help = "Filter by platform")
     parser.add_argument("ids", type=int, action="store", nargs='*', help = "id(s) of artifacts to download/upload (for upload or publish actions)")
     return parser.parse_args()
+
+def skip_platform(platform, args):
+    if not args.skip_platform:
+        return False
+    haystack = ",%s," % (args.skip_platform)
+    needle = ",%s," % (platform)
+    return (needle in haystack)
 
 def tg_login():
     client = TelegramClient('deploy', API_ID, API_HASH)
@@ -371,6 +379,9 @@ def do_beta_2_release(args):
         current = json.dumps(latest)
         
         for k, platform in latest.items():
+            if skip_platform(k, args):
+                print("Skip %s" % (k))
+                continue
             if platform["beta"] == platform["stable"]:
                 continue
             print("Set beta %s to be stable" % (k))
