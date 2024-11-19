@@ -247,8 +247,11 @@ public:
 		FullMsgId contextId,
 		const SectionShow &params = SectionShow());
 
-	void searchInChat(Dialogs::Key inChat);
-	void searchMessages(const QString &query, Dialogs::Key inChat);
+	void searchInChat(Dialogs::Key inChat, PeerData *searchFrom = nullptr);
+	void searchMessages(
+		const QString &query,
+		Dialogs::Key inChat,
+		PeerData *searchFrom = nullptr);
 
 	void resolveBoostState(not_null<ChannelData*> channel);
 
@@ -543,6 +546,8 @@ public:
 	}
 
 	[[nodiscard]] int filtersWidth() const;
+	[[nodiscard]] bool enoughSpaceForFilters() const;
+	[[nodiscard]] rpl::producer<bool> enoughSpaceForFiltersValue() const;
 	[[nodiscard]] rpl::producer<FilterId> activeChatsFilter() const;
 	[[nodiscard]] FilterId activeChatsFilterCurrent() const;
 	void setActiveChatsFilter(
@@ -627,7 +632,6 @@ private:
 
 	void init();
 	void setupShortcuts();
-	void refreshFiltersMenu();
 	void checkOpenedFilter();
 	void suggestArchiveAndMute();
 	void activateFirstChatsFilter();

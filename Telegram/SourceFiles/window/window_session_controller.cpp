@@ -567,8 +567,16 @@ void SessionNavigation::showPeerByLinkResolved(
 
 	const auto &replies = info.repliesInfo;
 	if (const auto threadId = std::get_if<ThreadId>(&replies)) {
+		const auto history = peer->owner().history(peer);
+		const auto controller = parentController();
+		if (const auto forum = peer->forum()) {
+			if (controller->windowId().hasChatsList()
+				&& !controller->adaptive().isOneColumn()) {
+				controller->showForum(forum);
+			}
+		}
 		showRepliesForMessage(
-			session().data().history(peer),
+			history,
 			threadId->id,
 			info.messageId,
 			params);
@@ -628,6 +636,7 @@ void SessionNavigation::showPeerByLinkResolved(
 				.context = {
 					.controller = parentController(),
 					.action = action,
+					.fullscreen = info.botAppFullScreen,
 					.maySkipConfirmation = !info.botAppForceConfirmation,
 				},
 				.button = { .startCommand = info.startToken },
@@ -688,14 +697,18 @@ void SessionNavigation::showPeerByLinkResolved(
 					parentController(),
 					Api::SendAction(history),
 					attachBotUsername,
-					info.attachBotToggleCommand.value_or(QString()));
+					info.attachBotToggleCommand.value_or(QString()),
+					info.botAppFullScreen);
 			});
 		} else if (bot && info.attachBotMainOpen) {
 			const auto startCommand = info.attachBotToggleCommand.value_or(
 				QString());
 			bot->session().attachWebView().open({
 				.bot = bot,
-				.context = { .controller = parentController() },
+				.context = {
+					.controller = parentController(),
+					.fullscreen = info.botAppFullScreen,
+				},
 				.button = { .startCommand = startCommand },
 				.source = InlineBots::WebViewSourceLinkBotProfile{
 					.token = startCommand,
@@ -719,6 +732,7 @@ void SessionNavigation::showPeerByLinkResolved(
 						? Api::SendAction(
 							contextUser->owner().history(contextUser))
 						: std::optional<Api::SendAction>()),
+					.fullscreen = info.botAppFullScreen,
 				},
 				.button = { .startCommand = *info.attachBotToggleCommand },
 				.source = InlineBots::WebViewSourceLinkAttachMenu{
@@ -1174,14 +1188,17 @@ void SessionNavigation::showPollResults(
 	showSection(std::make_shared<Info::Memento>(poll, contextId), params);
 }
 
-void SessionNavigation::searchInChat(Dialogs::Key inChat) {
-	searchMessages(QString(), inChat);
+void SessionNavigation::searchInChat(
+		Dialogs::Key inChat,
+		PeerData *searchFrom) {
+	searchMessages(QString(), inChat, searchFrom);
 }
 
 void SessionNavigation::searchMessages(
 		const QString &query,
-		Dialogs::Key inChat) {
-	parentController()->content()->searchMessages(query, inChat);
+		Dialogs::Key inChat,
+		PeerData *searchFrom) {
+	parentController()->content()->searchMessages(query, inChat, searchFrom);
 }
 
 auto SessionNavigation::showToast(Ui::Toast::Config &&config)
@@ -1302,11 +1319,23 @@ SessionController::SessionController(
 		closeFolder();
 	}, lifetime());
 
-	session->data().chatsFilters().changed(
+	rpl::merge(
+		enoughSpaceForFiltersValue() | rpl::skip(1) | rpl::to_empty,
+		Core::App().settings().chatFiltersHorizontalChanges() | rpl::to_empty,
+		session->data().chatsFilters().changed()
 	) | rpl::start_with_next([=] {
 		checkOpenedFilter();
-		crl::on_main(this, [=] {
-			refreshFiltersMenu();
+		crl::on_main(this, [this] {
+			if (SessionNavigation::session().data().chatsFilters().has()) {
+				const auto isHorizontal
+					= Core::App().settings().chatFiltersHorizontal()
+						|| !enoughSpaceForFilters();
+				content()->toggleFiltersMenu(isHorizontal);
+				toggleFiltersMenu(!isHorizontal);
+			} else {
+				content()->toggleFiltersMenu(false);
+				toggleFiltersMenu(false);
+			}
 		});
 	}, lifetime());
 
@@ -1535,10 +1564,6 @@ void SessionController::toggleFiltersMenu(bool enabled) {
 		_filters = nullptr;
 	}
 	_filtersMenuChanged.fire({});
-}
-
-void SessionController::refreshFiltersMenu() {
-	toggleFiltersMenu(session().data().chatsFilters().has());
 }
 
 rpl::producer<> SessionController::filtersMenuChanged() const {
@@ -2568,6 +2593,16 @@ not_null<MainWidget*> SessionController::content() const {
 
 int SessionController::filtersWidth() const {
 	return _filters ? st::windowFiltersWidth : 0;
+}
+
+bool SessionController::enoughSpaceForFilters() const {
+	return widget()->width() >= widget()->minimumWidth() + st::windowFiltersWidth;
+}
+
+rpl::producer<bool> SessionController::enoughSpaceForFiltersValue() const {
+	return widget()->widthValue() | rpl::map([=] {
+		return enoughSpaceForFilters();
+	}) | rpl::distinct_until_changed();
 }
 
 rpl::producer<FilterId> SessionController::activeChatsFilter() const {
