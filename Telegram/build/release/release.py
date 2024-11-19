@@ -42,10 +42,12 @@ GH_HDR = {'Authorization': "Bearer " + GH_TOKEN}
 
 def parse_args():
     parser = ArgumentParser(formatter_class=RawTextHelpFormatter)
-    parser.add_argument("action", choices = ['list', 'upload', 'files', 'publish'], help = """# list : List and download GH built artifacts
+    parser.add_argument("action", choices = ['list', 'upload', 'files', 'publish', 'prepare-beta', "beta2release"], help = """# list : List and download GH built artifacts
 # upload : Upload selected artifacts to TG
 # files : List uploaded artifacts from TG
-# publish : Update release JSON in TG to reference new builds""")
+# publish : Update release JSON in TG to reference new builds
+# prepare-beta : Download latest 3 artifacts from GH, upload to TG and update json
+# beta2release : Update release JSON: Make beta versions to be stable""")
 
     ## List options
     parser.add_argument("--failed", action = "store_true", help = "Look through failed builds")
@@ -54,9 +56,17 @@ def parse_args():
     parser.add_argument("--testing", action = "store_true", default = None, help = "Publish test builds")
     parser.add_argument("--beta", action = "store_true", help = "Publish beta builds")
     parser.add_argument("--limit", type = int, default = 20, help = "Number of runs to look through")
+    parser.add_argument("--skip-platform", default = "", help = "Skip platform")
     # parser.add_argument("--platform", help = "Filter by platform")
     parser.add_argument("ids", type=int, action="store", nargs='*', help = "id(s) of artifacts to download/upload (for upload or publish actions)")
     return parser.parse_args()
+
+def skip_platform(platform, args):
+    if not args.skip_platform:
+        return False
+    haystack = ",%s," % (args.skip_platform)
+    needle = ",%s," % (platform)
+    return (needle in haystack)
 
 def tg_login():
     client = TelegramClient('deploy', API_ID, API_HASH)
@@ -360,11 +370,49 @@ def do_publish(args):
         else:
             print("Skip dry-run")
 
+def do_beta_2_release(args):
+    # check for to release
+    client = tg_login()
+    with client:
+        latest = tg_get_json(client)
+        pprint(latest)
+        current = json.dumps(latest)
+        
+        for k, platform in latest.items():
+            if skip_platform(k, args):
+                print("Skip %s" % (k))
+                continue
+            if platform["beta"] == platform["stable"]:
+                continue
+            print("Set beta %s to be stable" % (k))
+            platform["stable"] = platform["beta"]
+
+        new = json.dumps(latest)
+        if new == current:
+            print("No changes. Skip")
+            return
+        pprint(latest)
+        
+        if not args.dry_run:
+            tg_set_json(client, latest)
+            print ("Done")
+        else:
+            print("Skip dry-run")
+
+def do_prepare_beta(args):
+    args.latest = True
+    do_upload(args)
+    args.limit = 5
+    args.beta = True
+    do_publish(args)
+
 actions = {
     "list": do_list,
     "upload": do_upload,
     "files": do_files,
     "publish": do_publish,
+    "beta2release": do_beta_2_release,
+    "prepare-beta": do_prepare_beta,
 }
 
 def main():
