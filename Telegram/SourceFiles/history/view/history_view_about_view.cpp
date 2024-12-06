@@ -53,6 +53,7 @@ public:
 	TextWithEntities subtitle() override;
 	int buttonSkip() override;
 	rpl::producer<QString> button() override;
+	bool buttonMinistars() override;
 	void draw(
 		Painter &p,
 		const PaintContext &context,
@@ -168,6 +169,10 @@ rpl::producer<QString> PremiumRequiredBox::button() {
 	return tr::lng_send_non_premium_go();
 }
 
+bool PremiumRequiredBox::buttonMinistars() {
+	return true;
+}
+
 TextWithEntities PremiumRequiredBox::subtitle() {
 	return _parent->data()->notificationText();
 }
@@ -236,6 +241,13 @@ HistoryItem *AboutView::item() const {
 }
 
 bool AboutView::refresh() {
+	if (_history->peer->isVerifyCodes()) {
+		if (_item) {
+			return false;
+		}
+		setItem(makeAboutVerifyCodes(), nullptr);
+		return true;
+	}
 	const auto user = _history->peer->asUser();
 	const auto info = user ? user->botInfo.get() : nullptr;
 	if (!info) {
@@ -354,10 +366,24 @@ void AboutView::setItem(AdminLog::OwnedItem item, DocumentData *sticker) {
 	toggleStickerRegistered(true);
 }
 
+AdminLog::OwnedItem AboutView::makeAboutVerifyCodes() {
+	return makeAboutSimple(
+		tr::lng_verification_codes_about(tr::now, Ui::Text::RichLangValue));
+}
+
 AdminLog::OwnedItem AboutView::makeAboutBot(not_null<BotInfo*> info) {
-	const auto textWithEntities = TextUtilities::ParseEntities(
-		info->description,
-		Ui::ItemTextBotNoMonoOptions().flags);
+	return makeAboutSimple(
+		TextUtilities::ParseEntities(
+			info->description,
+			Ui::ItemTextBotNoMonoOptions().flags),
+		info->document,
+		info->photo);
+}
+
+AdminLog::OwnedItem AboutView::makeAboutSimple(
+		TextWithEntities textWithEntities,
+		DocumentData *document,
+		PhotoData *photo) {
 	const auto make = [&](auto &&...args) {
 		return _history->makeMessage({
 			.id = _history->nextNonHistoryEntryId(),
@@ -367,10 +393,10 @@ AdminLog::OwnedItem AboutView::makeAboutBot(not_null<BotInfo*> info) {
 			.from = _history->peer->id,
 		}, std::forward<decltype(args)>(args)...);
 	};
-	const auto item = info->document
-		? make(info->document, textWithEntities)
-		: info->photo
-		? make(info->photo, textWithEntities)
+	const auto item = document
+		? make(document, textWithEntities)
+		: photo
+		? make(photo, textWithEntities)
 		: make(textWithEntities, MTP_messageMediaEmpty());
 	return AdminLog::OwnedItem(_delegate, item);
 }

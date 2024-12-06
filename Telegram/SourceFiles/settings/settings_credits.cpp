@@ -17,9 +17,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_photo_media.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "info/bot/starref/info_bot_starref_common.h"
+#include "info/bot/starref/info_bot_starref_join_widget.h"
 #include "info/channel_statistics/boosts/giveaway/boost_badge.h" // InfiniteRadialAnimationWidget.
 #include "info/settings/info_settings_widget.h" // SectionCustomTopBarData.
 #include "info/statistics/info_statistics_list_controllers.h"
+#include "info/info_memento.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "settings/settings_common_session.h"
@@ -74,7 +77,7 @@ private:
 	void setupContent();
 	void setupHistory(not_null<Ui::VerticalLayout*> container);
 	void setupSubscriptions(not_null<Ui::VerticalLayout*> container);
-
+	void setupStarRefPromo(not_null<Ui::VerticalLayout*> container);
 	const not_null<Window::SessionController*> _controller;
 
 	QWidget *_parent = nullptr;
@@ -191,6 +194,38 @@ void Credits::setupSubscriptions(not_null<Ui::VerticalLayout*> container) {
 			fill(std::move(d));
 		});
 	}
+	{
+		using Rebuilder = Data::Session::CreditsSubsRebuilder;
+		using RebuilderPtr = std::shared_ptr<Rebuilder>;
+		const auto rebuilder = content->lifetime().make_state<RebuilderPtr>(
+			self->owner().createCreditsSubsRebuilder());
+		rebuilder->get()->events(
+		) | rpl::start_with_next([=](Data::CreditsStatusSlice slice) {
+			while (content->count()) {
+				delete content->widgetAt(0);
+			}
+			fill(std::move(slice));
+		}, content->lifetime());
+	}
+}
+
+void Credits::setupStarRefPromo(not_null<Ui::VerticalLayout*> container) {
+	const auto self = _controller->session().user();
+	if (!Info::BotStarRef::Join::Allowed(self)) {
+		return;
+	}
+	Ui::AddSkip(container);
+	const auto button = Info::BotStarRef::AddViewListButton(
+		container,
+		tr::lng_credits_summary_earn_title(),
+		tr::lng_credits_summary_earn_about(),
+		true);
+	button->setClickedCallback([=] {
+		_controller->showSection(Info::BotStarRef::Join::Make(self));
+	});
+	Ui::AddSkip(container);
+	Ui::AddDivider(container);
+	Ui::AddSkip(container);
 }
 
 void Credits::setupHistory(not_null<Ui::VerticalLayout*> container) {
@@ -222,14 +257,10 @@ void Credits::setupHistory(not_null<Ui::VerticalLayout*> container) {
 		const auto outTabText = tr::lng_credits_summary_history_tab_out(
 			tr::now);
 		if (hasOneTab) {
-			Ui::AddSkip(inner);
-			const auto header = inner->add(
-				object_ptr<Statistic::Header>(inner),
-				st::statisticsLayerMargins
-					+ st::boostsChartHeaderPadding);
-			header->resizeToWidth(header->width());
-			header->setTitle(fullTabText);
-			header->setSubTitle({});
+			Ui::AddSubsectionTitle(
+				inner,
+				tr::lng_credits_summary_history_tab_full(),
+				{ 0, 0, 0, -st::defaultSubsectionTitlePadding.bottom() });
 		}
 
 		const auto slider = inner->add(
@@ -371,7 +402,7 @@ void Credits::setupContent() {
 	const auto balanceAmount = Ui::CreateChild<Ui::FlatLabel>(
 		balanceLine,
 		_controller->session().credits().balanceValue(
-		) | rpl::map(Lang::FormatCountDecimal),
+		) | rpl::map(Lang::FormatStarsAmountDecimal),
 		st::creditsSettingsBigBalance);
 	balanceAmount->sizeValue() | rpl::start_with_next([=] {
 		balanceLine->resize(
@@ -421,7 +452,8 @@ void Credits::setupContent() {
 		const auto options = state->api
 			? state->api->options()
 			: Data::CreditTopupOptions();
-		FillCreditOptions(show, inner, self, 0, paid, nullptr, options);
+		const auto amount = StarsAmount();
+		FillCreditOptions(show, inner, self, amount, paid, nullptr, options);
 
 		const auto button = box->addButton(tr::lng_close(), [=] {
 			box->closeBox();
@@ -483,6 +515,7 @@ void Credits::setupContent() {
 	Ui::AddSkip(content);
 	Ui::AddDivider(content);
 
+	setupStarRefPromo(content);
 	setupSubscriptions(content);
 	setupHistory(content);
 

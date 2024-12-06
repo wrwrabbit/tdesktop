@@ -321,30 +321,26 @@ HistoryWidget::HistoryWidget(
 		_list->onParentGeometryChanged();
 	}), lifetime());
 
-	const auto weak = Ui::MakeWeak(this);
 	_scroll->addContentRequests(
 	) | rpl::start_with_next([=] {
 		if (_history && _history->loadedAtBottom()) {
 			using Result = Data::SponsoredMessages::AppendResult;
 			const auto tryToAppend = [=] {
-				const auto r = session().sponsoredMessages().append(_history);
-				if (r == Result::Appended) {
+				const auto sponsored = &session().sponsoredMessages();
+				const auto result = sponsored->append(_history);
+				if (result == Result::Appended) {
 					_scroll->contentAdded();
 				}
-				return r;
+				return result;
 			};
-			if (tryToAppend() == Result::MediaLoading) {
-				const auto sharedLifetime = std::make_shared<rpl::lifetime>();
+			if (tryToAppend() == Result::MediaLoading
+				&& !_historySponsoredPreloading) {
 				session().downloaderTaskFinished(
 				) | rpl::start_with_next([=] {
-					if (const auto strong = weak.data()) {
-						if (tryToAppend() != Result::MediaLoading) {
-							sharedLifetime->destroy();
-						}
-					} else {
-						sharedLifetime->destroy();
+					if (tryToAppend() != Result::MediaLoading) {
+						_historySponsoredPreloading.destroy();
 					}
-				}, *sharedLifetime);
+				}, _historySponsoredPreloading);
 			}
 		}
 	}, lifetime());
@@ -871,7 +867,7 @@ HistoryWidget::HistoryWidget(
 		}
 		if (flags & PeerUpdateFlag::FullInfo) {
 			fullInfoUpdated();
-			if (const auto channel = _peer ? _peer->asChannel() : nullptr) {
+			if (const auto channel = _peer->asChannel()) {
 				if (channel->allowedReactions().paidEnabled) {
 					session().credits().load();
 				}
@@ -1567,7 +1563,10 @@ void HistoryWidget::updateInlineBotQuery() {
 			_inlineLookingUpBot = true;
 			const auto username = _inlineBotUsername;
 			_inlineBotResolveRequestId = _api.request(
-				MTPcontacts_ResolveUsername(MTP_string(username))
+				MTPcontacts_ResolveUsername(
+					MTP_flags(0),
+					MTP_string(username),
+					MTP_string())
 			).done([=](const MTPcontacts_ResolvedPeer &result) {
 				const auto &data = result.data();
 				const auto resolvedBot = [&]() -> UserData* {
@@ -1949,24 +1948,12 @@ bool HistoryWidget::notify_switchInlineBotButtonReceived(
 		UserData *samePeerBot,
 		MsgId samePeerReplyTo) {
 	if (samePeerBot) {
-		if (_history) {
-			const auto textWithTags = TextWithTags{
-				'@' + samePeerBot->username() + ' ' + query,
-				TextWithTags::Tags(),
-			};
-			MessageCursor cursor = {
-				int(textWithTags.text.size()),
-				int(textWithTags.text.size()),
-				Ui::kQFixedMax,
-			};
-			_history->setLocalDraft(std::make_unique<Data::Draft>(
-				textWithTags,
-				FullReplyTo(),
-				cursor,
-				Data::WebPageDraft()));
-			applyDraft();
-			return true;
+		const auto to = controller()->currentDialogsEntryState();
+		if (!to.key.owningHistory()) {
+			return false;
 		}
+		controller()->switchInlineQuery(to, samePeerBot, query);
+		return true;
 	} else if (const auto bot = _peer ? _peer->asUser() : nullptr) {
 		const auto to = bot->isBot()
 			? bot->botInfo->inlineReturnTo
@@ -2194,7 +2181,7 @@ void HistoryWidget::showHistory(
 	_showAtMsgHighlightPart = {};
 	_showAtMsgHighlightPartOffsetHint = 0;
 
-	const auto wasDialogsEntryState = computeDialogsEntryState();
+	const auto wasState = controller()->currentDialogsEntryState();
 	const auto startBot = (showAtMsgId == ShowAndStartBotMsgId);
 	if (startBot) {
 		showAtMsgId = ShowAtTheEndMsgId;
@@ -2299,8 +2286,8 @@ void HistoryWidget::showHistory(
 			if (const auto user = _peer->asUser()) {
 				if (const auto &info = user->botInfo) {
 					if (startBot) {
-						if (wasDialogsEntryState.key) {
-							info->inlineReturnTo = wasDialogsEntryState;
+						if (wasState.key) {
+							info->inlineReturnTo = wasState;
 						}
 						sendBotStartCommand();
 						_history->clearLocalDraft({});
@@ -2535,8 +2522,8 @@ void HistoryWidget::showHistory(
 		if (const auto user = _peer->asUser()) {
 			if (const auto &info = user->botInfo) {
 				if (startBot) {
-					if (wasDialogsEntryState.key) {
-						info->inlineReturnTo = wasDialogsEntryState;
+					if (wasState.key) {
+						info->inlineReturnTo = wasState;
 					}
 					sendBotStartCommand();
 				}
@@ -2639,6 +2626,7 @@ void HistoryWidget::setHistory(History *history) {
 		unregisterDraftSources();
 		clearAllLoadRequests();
 		clearSupportPreloadRequest();
+		_historySponsoredPreloading.destroy();
 		const auto wasHistory = base::take(_history);
 		const auto wasMigrated = base::take(_migrated);
 		unloadHeavyViewParts(wasHistory);
@@ -3442,7 +3430,7 @@ void HistoryWidget::messagesFailed(const MTP::Error &error, int requestId) {
 		closeCurrent();
 		const auto wasAccount = not_null(&was->account());
 		if (const auto primary = Core::App().windowFor(wasAccount)) {
-			primary->showToast((was && was->isMegagroup())
+			primary->showToast(was->isMegagroup()
 				? tr::lng_group_not_accessible(tr::now)
 				: tr::lng_channel_not_accessible(tr::now));
 		}
@@ -5122,7 +5110,7 @@ bool HistoryWidget::updateCmdStartShown() {
 	const auto textSmall = _fieldCharsCountManager.count() > kSmallMenuAfter;
 	const auto textChanged = _botMenu.button
 		&& ((_botMenu.text != bot->botInfo->botMenuButtonText)
-		|| (_botMenu.small != textSmall));
+			|| (_botMenu.small != textSmall));
 	if (textChanged) {
 		_botMenu.text = bot->botInfo->botMenuButtonText;
 		if ((_botMenu.small = textSmall)) {
@@ -7907,7 +7895,15 @@ void HistoryWidget::clearFieldText(
 
 void HistoryWidget::replyToMessage(FullReplyTo id) {
 	if (const auto item = session().data().message(id.messageId)) {
-		replyToMessage(item, id.quote, id.quoteOffset);
+		if (CanSendReply(item) && !base::IsCtrlPressed()) {
+			replyToMessage(item, id.quote, id.quoteOffset);
+		} else if (item->allowsForward()) {
+			const auto show = controller()->uiShow();
+			HistoryView::Controls::ShowReplyToChatBox(show, id);
+		} else {
+			controller()->showToast(
+				tr::lng_error_cant_reply_other(tr::now));
+		}
 	}
 }
 
@@ -8570,7 +8566,7 @@ void HistoryWidget::updateReplyEditTexts(bool force) {
 			_mediaEditManager.start(_replyEditMsg);
 		}
 		_canReplaceMedia = _editMsgId && _replyEditMsg->allowsEditMedia();
-		if (editMedia) {
+		if (editMedia && editMedia->allowsEditMedia()) {
 			_canAddMedia = false;
 		} else {
 			_canAddMedia = base::take(_canReplaceMedia);

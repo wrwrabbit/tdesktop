@@ -255,8 +255,8 @@ object_ptr<Ui::RpWidget> MakeStarGiftStarsValue(
 	auto star = session->data().customEmojiManager().creditsEmoji();
 	const auto label = Ui::CreateChild<Ui::FlatLabel>(
 		raw,
-		rpl::single(
-			star.append(' ' + Lang::FormatCountDecimal(entry.credits))),
+		rpl::single(star.append(
+			' ' + Lang::FormatStarsAmountDecimal(entry.credits))),
 		st::giveawayGiftCodeValue,
 		st::defaultPopupMenu,
 		std::move(makeContext));
@@ -1146,9 +1146,43 @@ void AddCreditsHistoryEntryTable(
 		st::giveawayGiftCodeTableMargin);
 	const auto peerId = PeerId(entry.barePeerId);
 	const auto actorId = PeerId(entry.bareActorId);
+	const auto starrefRecipientId = PeerId(entry.starrefRecipientId);
 	const auto session = &controller->session();
-	if (actorId || peerId) {
-		auto text = entry.in
+	if (entry.starrefCommission) {
+		if (entry.starrefAmount) {
+			AddTableRow(
+				table,
+				tr::lng_star_ref_commission_title(),
+				rpl::single(TextWithEntities{
+					QString::number(entry.starrefCommission / 10.) + '%' }));
+		} else {
+			AddTableRow(
+				table,
+				tr::lng_gift_link_label_reason(),
+				tr::lng_credits_box_history_entry_reason_star_ref(
+					Ui::Text::WithEntities));
+		}
+	}
+	if (starrefRecipientId && entry.starrefAmount) {
+		AddTableRow(
+			table,
+			tr::lng_credits_box_history_entry_affiliate(),
+			controller,
+			starrefRecipientId);
+	}
+	if (peerId && entry.starrefCommission) {
+		AddTableRow(
+			table,
+			(entry.starrefAmount
+				? tr::lng_credits_box_history_entry_referred
+				: tr::lng_credits_box_history_entry_miniapp)(),
+			controller,
+			peerId);
+	}
+	if (actorId || (!entry.starrefCommission && peerId)) {
+		auto text = entry.starrefCommission
+			? tr::lng_credits_box_history_entry_referred()
+			: entry.in
 			? tr::lng_credits_box_history_entry_peer_in()
 			: tr::lng_credits_box_history_entry_peer();
 		AddTableRow(
@@ -1229,7 +1263,7 @@ void AddCreditsHistoryEntryTable(
 			tr::lng_gift_link_label_gift(),
 			tr::lng_gift_stars_title(
 				lt_count,
-				rpl::single(float64(entry.credits)),
+				rpl::single(entry.credits.value()),
 				Ui::Text::RichLangValue));
 	}
 	{
@@ -1247,25 +1281,20 @@ void AddCreditsHistoryEntryTable(
 				}));
 		}
 	}
+	if (!entry.subscriptionUntil.isNull() && !entry.title.isEmpty()) {
+		AddTableRow(
+			table,
+			tr::lng_gift_link_label_reason(),
+			tr::lng_credits_box_history_entry_subscription(
+				Ui::Text::WithEntities));
+	}
 	if (!entry.id.isEmpty()) {
-		constexpr auto kOneLineCount = 22;
-		const auto oneLine = entry.id.size() <= kOneLineCount;
-		auto multiLine = QString();
-		if (!oneLine) {
-			for (auto i = 0; i < entry.id.size(); ++i) {
-				multiLine.append(entry.id[i]);
-				if ((i + 1) % kOneLineCount == 0) {
-					multiLine.append('\n');
-				}
-			}
-		}
+		constexpr auto kOneLineCount = 24;
+		const auto oneLine = entry.id.length() <= kOneLineCount;
 		auto label = object_ptr<Ui::FlatLabel>(
 			table,
 			rpl::single(
-				Ui::Text::Wrapped(
-					{ oneLine ? entry.id : std::move(multiLine) },
-					EntityType::Code,
-					{})),
+				Ui::Text::Wrapped({ entry.id }, EntityType::Code, {})),
 			oneLine
 				? st::giveawayGiftCodeValue
 				: st::giveawayGiftCodeValueMultiline);
@@ -1324,11 +1353,24 @@ void AddSubscriptionEntryTable(
 			st::giveawayGiftCodeTable),
 		st::giveawayGiftCodeTableMargin);
 	const auto peerId = PeerId(s.barePeerId);
+	const auto user = peerIsUser(peerId)
+		? controller->session().data().peer(peerId)->asUser()
+		: nullptr;
 	AddTableRow(
 		table,
-		tr::lng_credits_subscription_row_to(),
+		(!s.title.isEmpty() && user && user->botInfo)
+			? tr::lng_credits_subscription_row_to_bot()
+			: (!s.title.isEmpty() && user && !user->botInfo)
+			? tr::lng_credits_subscription_row_to_business()
+			: tr::lng_credits_subscription_row_to(),
 		controller,
 		peerId);
+	if (!s.title.isEmpty()) {
+		AddTableRow(
+			table,
+			tr::lng_credits_subscription_row_to(),
+			rpl::single(Ui::Text::WithEntities(s.title)));
+	}
 	if (!s.until.isNull()) {
 		if (s.subscription.period > 0) {
 			const auto subscribed = s.until.addSecs(-s.subscription.period);

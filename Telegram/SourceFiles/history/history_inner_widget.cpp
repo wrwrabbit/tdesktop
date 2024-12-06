@@ -38,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/message_sending_animation_controller.h"
 #include "ui/effects/reaction_fly_animation.h"
 #include "ui/text/text_isolated_emoji.h"
+#include "ui/text/text_utilities.h"
 #include "ui/boxes/edit_factcheck_box.h"
 #include "ui/boxes/report_box_graphics.h"
 #include "ui/controls/delete_message_context_action.h"
@@ -122,15 +123,6 @@ int BinarySearchBlocksOrItems(const T &list, int edge) {
 		}
 	}
 	return start;
-}
-
-[[nodiscard]] bool CanSendReply(not_null<const HistoryItem*> item) {
-	const auto peer = item->history()->peer;
-	const auto topic = item->topic();
-	return topic
-		? Data::CanSendAnything(topic)
-		: (Data::CanSendAnything(peer)
-			&& (!peer->isChannel() || peer->asChannel()->amIn()));
 }
 
 } // namespace
@@ -576,21 +568,13 @@ void HistoryInner::setupSwipeReply() {
 				const auto replyToItemId = (selected.item
 					? selected.item
 					: still)->fullId();
-				if (canSendReply) {
-					_widget->replyToMessage({
-						.messageId = replyToItemId,
-						.quote = selected.text,
-						.quoteOffset = selected.offset,
-					});
-					if (!selected.text.empty()) {
-						_widget->clearSelected();
-					}
-				} else {
-					HistoryView::Controls::ShowReplyToChatBox(show, {
-						.messageId = replyToItemId,
-						.quote = selected.text,
-						.quoteOffset = selected.offset,
-					});
+				_widget->replyToMessage({
+					.messageId = replyToItemId,
+					.quote = selected.text,
+					.quoteOffset = selected.offset,
+				});
+				if (!selected.text.empty()) {
+					_widget->clearSelected();
 				}
 			};
 			return false;
@@ -2566,35 +2550,23 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		const auto canReply = canSendReply || item->allowsForward();
 		if (canReply) {
 			const auto selected = selectedQuote(item);
-			auto text = selected
-				? tr::lng_context_quote_and_reply(tr::now)
-				: tr::lng_context_reply_msg(tr::now);
+			auto text = (selected
+				? tr::lng_context_quote_and_reply
+				: tr::lng_context_reply_msg)(
+					tr::now,
+					Ui::Text::FixAmpersandInAction);
 			const auto replyToItem = selected.item ? selected.item : item;
 			const auto itemId = replyToItem->fullId();
 			const auto quote = selected.text;
 			const auto quoteOffset = selected.offset;
-			text.replace('&', u"&&"_q);
-			_menu->addAction(text, [=] {
-				const auto still = session->data().message(itemId);
-				const auto forceAnotherChat = base::IsCtrlPressed()
-					&& still
-					&& still->allowsForward();
-				if (canSendReply && !forceAnotherChat) {
-					_widget->replyToMessage({
-						.messageId = itemId,
-						.quote = quote,
-						.quoteOffset = quoteOffset,
-					});
-					if (!quote.empty()) {
-						_widget->clearSelected();
-					}
-				} else {
-					const auto show = controller->uiShow();
-					HistoryView::Controls::ShowReplyToChatBox(show, {
-						.messageId = itemId,
-						.quote = quote,
-						.quoteOffset = quoteOffset,
-					});
+			_menu->addAction(std::move(text), [=] {
+				_widget->replyToMessage({
+					.messageId = itemId,
+					.quote = quote,
+					.quoteOffset = quoteOffset,
+				});
+				if (!quote.empty()) {
+					_widget->clearSelected();
 				}
 			}, &st::menuIconReply);
 		}
@@ -4773,4 +4745,13 @@ ClickContext HistoryInner::prepareClickContext(
 auto HistoryInner::DelegateMixin()
 -> std::unique_ptr<HistoryMainElementDelegateMixin> {
 	return std::make_unique<HistoryMainElementDelegate>();
+}
+
+bool CanSendReply(not_null<const HistoryItem*> item) {
+	const auto peer = item->history()->peer;
+	const auto topic = item->topic();
+	return topic
+		? Data::CanSendAnything(topic)
+		: (Data::CanSendAnything(peer)
+			&& (!peer->isChannel() || peer->asChannel()->amIn()));
 }
