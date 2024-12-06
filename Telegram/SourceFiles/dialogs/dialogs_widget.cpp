@@ -478,6 +478,12 @@ Widget::Widget(
 	) | rpl::start_with_next([=](const ChosenRow &row) {
 		chosenRow(row);
 	}, lifetime());
+	_inner->openBotMainAppRequests(
+	) | rpl::start_with_next([=](UserId userId) {
+		if (const auto user = session().data().user(userId)) {
+			openBotMainApp(user);
+		}
+	}, lifetime());
 
 	_scroll->geometryChanged(
 	) | rpl::start_with_next(crl::guard(_inner, [=] {
@@ -1437,7 +1443,9 @@ void Widget::updateSuggestions(anim::type animated) {
 			}
 		}, _suggestions->lifetime());
 
-		_suggestions->recentAppChosen(
+		rpl::merge(
+			_suggestions->openBotMainAppRequests(),
+			_suggestions->recentAppChosen()
 		) | rpl::start_with_next([=](not_null<PeerData*> peer) {
 			if (const auto user = peer->asUser()) {
 				if (const auto info = user->botInfo.get()) {

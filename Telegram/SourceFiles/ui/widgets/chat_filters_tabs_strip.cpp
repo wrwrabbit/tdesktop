@@ -293,15 +293,18 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 		if ((list.size() <= 1 && !slider->width()) || state->ignoreRefresh) {
 			return;
 		}
+		const auto sectionsChanged = slider->setSectionsAndCheckChanged(
+			ranges::views::all(
+				list
+			) | ranges::views::transform([](const Data::ChatFilter &filter) {
+				return filter.title().isEmpty()
+					? tr::lng_filters_all_short(tr::now)
+					: filter.title();
+			}) | ranges::to_vector);
+		if (!sectionsChanged) {
+			return;
+		}
 		state->rebuildLifetime.destroy();
-		auto sections = ranges::views::all(
-			list
-		) | ranges::views::transform([](const Data::ChatFilter &filter) {
-			return filter.title().isEmpty()
-				? tr::lng_filters_all_short(tr::now)
-				: filter.title();
-		}) | ranges::to_vector;
-		slider->setSections(std::move(sections));
 		slider->fitWidthToSections();
 		{
 			const auto reorderAll = session->user()->isPremium();
@@ -334,8 +337,16 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 				) | rpl::start_with_next([=](
 						const Dialogs::UnreadState &state,
 						bool includeMuted) {
-					const auto muted = (state.chatsMuted + state.marksMuted);
-					const auto count = (state.chats + state.marks)
+					const auto chats = state.chatsTopic
+						? (state.chats - state.chatsTopic + state.forums)
+						: state.chats;
+					const auto chatsMuted = state.chatsTopicMuted
+						? (state.chatsMuted
+							- state.chatsTopicMuted
+							+ state.forumsMuted)
+						: state.chatsMuted;
+					const auto muted = (chatsMuted + state.marksMuted);
+					const auto count = (chats + state.marks)
 						- (includeMuted ? 0 : muted);
 					const auto isMuted = includeMuted && (count == muted);
 					slider->setUnreadCount(i, count, isMuted);

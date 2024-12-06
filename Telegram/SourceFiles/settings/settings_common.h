@@ -135,6 +135,7 @@ struct IconDescriptor {
 	IconType type = IconType::Rounded;
 	const style::color *background = nullptr;
 	std::optional<QBrush> backgroundBrush; // Can be useful for gradients.
+	bool newBadge = false;
 
 	explicit operator bool() const {
 		return (icon != nullptr);

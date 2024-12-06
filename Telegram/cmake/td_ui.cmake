@@ -18,6 +18,7 @@ set(style_files
     ui/chat/chat.style
     ui/effects/credits.style
     ui/effects/premium.style
+    ui/color_indices.style
     boxes/boxes.style
     dialogs/dialogs.style
     chat_helpers/chat_helpers.style
@@ -94,6 +95,7 @@ PRIVATE
     data/data_statistics_chart.h
     data/data_subscriptions.h
 
+    dialogs/dialogs_common.h
     dialogs/dialogs_three_state_icon.h
     dialogs/ui/chat_search_empty.cpp
     dialogs/ui/chat_search_empty.h
@@ -332,6 +334,8 @@ PRIVATE
     ui/chat/chat_style_radius.h
     ui/chat/chat_theme.cpp
     ui/chat/chat_theme.h
+    ui/chat/chats_filter_tag.cpp
+    ui/chat/chats_filter_tag.h
     ui/chat/continuous_scroll.cpp
     ui/chat/continuous_scroll.h
     ui/chat/forward_options_box.cpp
@@ -411,6 +415,8 @@ PRIVATE
     ui/effects/snowflakes.h
     ui/effects/toggle_arrow.cpp
     ui/effects/toggle_arrow.h
+    ui/search_field_controller.cpp
+    ui/search_field_controller.h
     ui/text/format_song_name.cpp
     ui/text/format_song_name.h
     ui/text/format_values.cpp

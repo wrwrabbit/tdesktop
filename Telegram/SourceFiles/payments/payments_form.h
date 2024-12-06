@@ -170,6 +170,7 @@ struct InvoiceCredits {
 	uint64 amount = 0;
 	bool extended = false;
 	PeerId giftPeerId = PeerId(0);
+	int subscriptionPeriod = 0;
 };
 
 struct InvoiceStarGift {
@@ -209,7 +210,7 @@ struct CreditsReceiptData {
 	QString description;
 	PhotoData *photo = nullptr;
 	PeerId peerId = PeerId(0);
-	uint64 credits = 0;
+	StarsAmount credits;
 	TimeId date = 0;
 };
 
