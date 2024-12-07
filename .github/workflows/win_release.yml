@@ -63,6 +63,7 @@ jobs:
         name: Native Tools Command Prompt.
         with:
           arch: ${{ matrix.arch }}
+          sdk: 10.0.22000.0
 
       - name: Clone.
         uses: actions/checkout@v4
