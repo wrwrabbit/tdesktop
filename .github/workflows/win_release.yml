@@ -64,6 +64,7 @@ jobs:
         with:
           arch: ${{ matrix.arch }}
           sdk: 10.0.22000.0
+          toolset: 14.42
 
       - name: Clone.
         uses: actions/checkout@v4
