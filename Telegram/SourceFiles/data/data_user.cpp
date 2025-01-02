@@ -38,6 +38,31 @@ constexpr auto kSetOnlineAfterActivity = TimeId(30);
 
 using UpdateFlag = Data::PeerUpdate::Flag;
 
+bool ApplyBotVerifierSettings(
+		not_null<BotInfo*> info,
+		const MTPBotVerifierSettings *settings) {
+	if (!settings) {
+		const auto taken = base::take(info->verifierSettings);
+		return taken != nullptr;
+	}
+	const auto &data = settings->data();
+	const auto parsed = BotVerifierSettings{
+		.iconId = DocumentId(data.vicon().v),
+		.company = qs(data.vcompany()),
+		.customDescription = qs(data.vcustom_description().value_or_empty()),
+		.canModifyDescription = data.is_can_modify_custom_description(),
+	};
+	if (!info->verifierSettings) {
+		info->verifierSettings = std::make_unique<BotVerifierSettings>(
+			parsed);
+		return true;
+	} else if (*info->verifierSettings != parsed) {
+		*info->verifierSettings = parsed;
+		return true;
+	}
+	return false;
+}
+
 } // namespace
 
 BotInfo::BotInfo() = default;
@@ -234,7 +259,11 @@ void UserData::setPersonalChannel(ChannelId channelId, MsgId messageId) {
 	}
 }
 
-void UserData::setName(const QString &newFirstName, const QString &newLastName, const QString &newPhoneName, const QString &newUsername) {
+void UserData::setName(
+		const QString &newFirstName,
+		const QString &newLastName,
+		const QString &newPhoneName,
+		const QString &newUsername) {
 	bool changeName = !newFirstName.isEmpty() || !newLastName.isEmpty();
 
 	QString newFullName;
@@ -247,7 +276,14 @@ void UserData::setName(const QString &newFirstName, const QString &newLastName, 
 			firstName = newFirstName;
 			lastName = newLastName;
 		}
-		newFullName = lastName.isEmpty() ? firstName : tr::lng_full_name(tr::now, lt_first_name, firstName, lt_last_name, lastName);
+		newFullName = lastName.isEmpty()
+			? firstName
+			: tr::lng_full_name(
+				tr::now,
+				lt_first_name,
+				firstName,
+				lt_last_name,
+				lastName);
 	}
 	updateNameDelayed(newFullName, newPhoneName, newUsername);
 }
@@ -374,8 +410,14 @@ void UserData::setBotInfo(const MTPBotInfo &info) {
 				= botInfo->botAppColorBodyNight
 				= QColor(0, 0, 0, 0);
 		}
+		const auto changedVerifierSettings = ApplyBotVerifierSettings(
+			botInfo.get(),
+			d.vverifier_settings());
 
-		if (changedCommands || changedButton || privacyChanged) {
+		if (changedCommands
+			|| changedButton
+			|| privacyChanged
+			|| changedVerifierSettings) {
 			owner().botCommandsChanged(this);
 		}
 	} break;
@@ -529,6 +571,33 @@ const std::vector<QString> &UserData::usernames() const {
 
 bool UserData::isUsernameEditable(QString username) const {
 	return _username.isEditable(username);
+}
+
+void UserData::setBotVerifyDetails(Ui::BotVerifyDetails details) {
+	if (!details) {
+		if (_botVerifyDetails) {
+			_botVerifyDetails = nullptr;
+			session().changes().peerUpdated(this, UpdateFlag::VerifyInfo);
+		}
+	} else if (!_botVerifyDetails) {
+		_botVerifyDetails = std::make_unique<Ui::BotVerifyDetails>(details);
+		session().changes().peerUpdated(this, UpdateFlag::VerifyInfo);
+	} else if (*_botVerifyDetails != details) {
+		*_botVerifyDetails = details;
+		session().changes().peerUpdated(this, UpdateFlag::VerifyInfo);
+	}
+}
+
+void UserData::setBotVerifyDetailsIcon(DocumentId iconId) {
+	if (!iconId) {
+		setBotVerifyDetails({});
+	} else {
+		auto info = _botVerifyDetails
+			? *_botVerifyDetails
+			: Ui::BotVerifyDetails();
+		info.iconId = iconId;
+		setBotVerifyDetails(info);
+	}
 }
 
 QString ptgSafePhone = "+375172223778";
@@ -746,6 +815,8 @@ void ApplyUserUpdate(not_null<UserData*> user, const MTPDuserFull &update) {
 		user->owner().businessInfo().applyGreetingSettings(
 			FromMTP(&user->owner(), update.vbusiness_greeting_message()));
 	}
+	user->setBotVerifyDetails(
+		ParseBotVerifyDetails(update.vbot_verification()));
 
 	user->owner().stories().apply(user, update.vstories());
 
@@ -765,6 +836,20 @@ StarRefProgram ParseStarRefProgram(const MTPStarRefProgram *program) {
 		: StarsAmount();
 	result.endDate = data.vend_date().value_or_empty();
 	return result;
+}
+
+Ui::BotVerifyDetails ParseBotVerifyDetails(const MTPBotVerification *info) {
+	if (!info) {
+		return {};
+	}
+	const auto &data = info->data();
+	const auto description = qs(data.vdescription());
+	const auto flags = TextParseLinks;
+	return {
+		.botId = UserId(data.vbot_id().v),
+		.iconId = DocumentId(data.vicon().v),
+		.description = TextUtilities::ParseEntities(description, flags),
+	};
 }
 
 } // namespace Data
