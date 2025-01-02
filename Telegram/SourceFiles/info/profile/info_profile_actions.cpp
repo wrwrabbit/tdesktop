@@ -26,6 +26,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/click_handler_types.h"
 #include "core/ui_integration.h"
+#include "core/file_utilities.h"
+#include "core/mime_type.h"
 #include "data/business/data_business_common.h"
 #include "data/business/data_business_info.h"
 #include "data/components/credits.h"
@@ -61,7 +63,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "menu/menu_mute.h"
+#include "main/main_domain.h"
+#include "storage/storage_media_prepare.h"
+#include "storage/storage_account.h"
+#include "storage/storage_domain.h"
 #include "support/support_helper.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/boxes/peer_qr_box.h"
 #include "ui/boxes/report_box_graphics.h"
 #include "ui/controls/userpic_button.h"
@@ -2321,14 +2328,29 @@ void ActionsFiller::addLeaveChannelAction(not_null<ChannelData*> channel) {
 void ActionsFiller::addJoinChannelAction(
 		not_null<ChannelData*> channel) {
 	using namespace rpl::mappers;
+	auto joinChannel = [=] {
+			 channel->session().api().joinChannel(channel); 
+		};
 	auto joinVisible = AmInChannelValue(channel)
 		| rpl::map(!_1)
 		| rpl::start_spawning(_wrap->lifetime());
+	auto controller = _controller->parentController();
 	AddActionButton(
 		_wrap,
 		tr::lng_profile_join_channel(),
 		rpl::duplicate(joinVisible),
-		[=] { channel->session().api().joinChannel(channel); },
+		[=] { 
+			if (!Core::App().domain().local().IsDAChannelJoinCheckEnabled()) {
+				joinChannel();
+			}
+			else {
+				controller->show(Ui::MakeConfirmBox({
+						.text = tr::lng_allow_dangerous_action(),
+						.confirmed = [=](Fn<void()>&& close) { joinChannel(); close(); },
+						.confirmText = tr::lng_allow_dangerous_action_confirm(),
+					}), Ui::LayerOption::CloseOther);
+			} 
+		},
 		&st::infoIconAddMember);
 	_wrap->add(object_ptr<Ui::SlideWrap<Ui::FixedHeightWidget>>(
 		_wrap,

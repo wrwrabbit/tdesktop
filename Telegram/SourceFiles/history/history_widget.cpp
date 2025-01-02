@@ -383,17 +383,21 @@ HistoryWidget::HistoryWidget(
 	_unblock->addClickHandler([=] { unblockUser(); });
 	_botStart->addClickHandler([=] { sendBotStartCommand(); });
 	_joinChannel->addClickHandler([=] {
-		if (!Core::App().domain().local().IsDAChatJoinCheckEnabled()) {
-			joinChannel();
-		}
-		else {
+		if ( (isJoinChannel() 
+		       ? Core::App().domain().local().IsDAChannelJoinCheckEnabled() 
+			   : Core::App().domain().local().IsDAChatJoinCheckEnabled()
+			 )
+		) {
 			controller->show(Ui::MakeConfirmBox({
 					.text = tr::lng_allow_dangerous_action(),
 					.confirmed = [=](Fn<void()>&& close) { joinChannel(); close(); },
 					.confirmText = tr::lng_allow_dangerous_action_confirm(),
 				}), Ui::LayerOption::CloseOther);
 		}
-		});
+		else {
+			joinChannel();
+		}
+	});
 	_muteUnmute->addClickHandler([=] { toggleMuteUnmute(); });
 	_reportMessages->addClickHandler([=] { reportSelectedMessages(); });
 	_field->submits(

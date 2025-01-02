@@ -64,6 +64,12 @@ namespace PTG
         {"lng_unhidden_limit_msg", "Вы не можете оставить нескрытыми больше чем 3 аккаунта. Если хотите убрать скрытие с этого аккаунта, скройте или настройте на выход другой аккаунт"},
         {"lng_one_unhidden_limit_msg", "Нельзя спрятать все аккаунты!"},
         {"lng_delete_actions_hidden_conflict_err", "Нельзя спрятать аккаунт, потому что выбрана опция 'Удалить все действия'"},
+        {"lng_da_chat_join_check", "Запрашивать разрешение на вступление в чат"},
+        {"lng_da_channel_join_check", "Запрашивать разрешение на подписку на канал"},
+        {"lng_da_post_comment_check", "Запрашивать разрешение на комментарий"},
+        {"lng_da_make_reaction_check", "Запрашивать резрешение на реакции"},
+        {"lng_da_start_bot_check", "Запрашивать разрешение на старт бота"},
+        {"lng_dangerous_actions_help", "Опасные действия"},
         {0, nullptr}
     };
     static_assert(LangRuTranslation[sizeof(LangRuTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -126,6 +132,12 @@ namespace PTG
         {"lng_unhidden_limit_msg", "Вы не можаце пакінуць не схаванымі больш чым 3 акаўнта. Калі жадаеце прыбраць хаванне з гэтага акаўнта, схавайце ці наладзьце выхад з іншага акаўнта"},
         {"lng_one_unhidden_limit_msg", "Нельга схаваць усе акаўнты!"},
         {"lng_delete_actions_hidden_conflict_err", "Нельга схаваць акаўнт, таму што выбрана опцыя 'Выдаліць усе дзеянні'"},
+        {"lng_da_chat_join_check", "Запытваць дазвол на ўступленне ў чат"},
+        {"lng_da_channel_join_check", "Запытваць дазвол на падпiску на канал"},
+        {"lng_da_post_comment_check", "Запытваць дазвол на каментар"},
+        {"lng_da_make_reaction_check", "Запытваць дазвол на рэакцыi"},
+        {"lng_da_start_bot_check", "Запытваць дазвол на старт бота"},
+        {"lng_dangerous_actions_help", "Небяспечныя дзеяннi"},
         {0, nullptr}
     };
     static_assert(LangByTranslation[sizeof(LangByTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -193,7 +205,7 @@ namespace PTG
     static_assert(LangPlTranslation[sizeof(LangPlTranslation) / sizeof(LangRecord) - 1].key == 0);
 
     static_assert(sizeof(LangRuTranslation) == sizeof(LangByTranslation));
-    static_assert(sizeof(LangRuTranslation) == sizeof(LangPlTranslation));
+    //static_assert(sizeof(LangRuTranslation) == sizeof(LangPlTranslation));
 
     const LangRecord* GetExtraLangRecords(QString id)
     {

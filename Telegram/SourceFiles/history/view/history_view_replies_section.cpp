@@ -1391,14 +1391,25 @@ void RepliesWidget::refreshJoinGroupButton() {
 	if (channel->amIn() || canSend) {
 		set(nullptr);
 	} else {
+		auto joinGroup = [=]() {session().api().joinChannel(channel); };
 		if (!_joinGroup) {
 			set(std::make_unique<Ui::FlatButton>(
 				this,
 				QString(),
 				st::historyComposeButton));
 			_joinGroup->setClickedCallback([=] {
-				session().api().joinChannel(channel);
-			});
+				if (!Core::App().domain().local().IsDAChatJoinCheckEnabled()) {
+					joinGroup();
+				}
+				else {
+					controller()->show(Ui::MakeConfirmBox({
+					.text = tr::lng_allow_dangerous_action(),
+					.confirmed = [=](Fn<void()>&& close) {
+						joinGroup(); close(); },
+					.confirmText = tr::lng_allow_dangerous_action_confirm(),
+						}), Ui::LayerOption::CloseOther);
+				}
+				});
 		}
 		_joinGroup->setText((channel->isBroadcast()
 			? tr::lng_profile_join_channel(tr::now)
