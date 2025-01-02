@@ -70,6 +70,7 @@ class Chatbots;
 class BusinessInfo;
 struct ReactionId;
 struct UnavailableReason;
+struct CreditsStatusSlice;
 
 struct RepliesReadTillUpdate {
 	FullMsgId id;
@@ -113,8 +114,6 @@ public:
 	[[nodiscard]] Main::Session &session() const {
 		return *_session;
 	}
-
-	[[nodiscard]] QString nameSortKey(const QString &name) const;
 
 	[[nodiscard]] Groups &groups() {
 		return _groups;
@@ -336,6 +335,11 @@ public:
 
 	void notifyPinnedDialogsOrderUpdated();
 	[[nodiscard]] rpl::producer<> pinnedDialogsOrderUpdated() const;
+
+	using CreditsSubsRebuilder = rpl::event_stream<Data::CreditsStatusSlice>;
+	using CreditsSubsRebuilderPtr = std::shared_ptr<CreditsSubsRebuilder>;
+	[[nodiscard]] CreditsSubsRebuilderPtr createCreditsSubsRebuilder();
+	[[nodiscard]] CreditsSubsRebuilderPtr activeCreditsSubsRebuilder() const;
 
 	void registerRestricted(
 		not_null<const HistoryItem*> item,
@@ -1100,6 +1104,8 @@ private:
 	std::unordered_map<PeerId, std::unique_ptr<PeerData>> _peers;
 
 	MessageIdsList _mimeForwardIds;
+
+	std::weak_ptr<CreditsSubsRebuilder> _creditsSubsRebuilder;
 
 	using CredentialsWithGeneration = std::pair<
 		const Passport::SavedCredentials,

@@ -206,7 +206,9 @@ void PeerListBox::keyPressEvent(QKeyEvent *e) {
 		content()->selectSkipPage(height(), 1);
 	} else if (e->key() == Qt::Key_PageUp) {
 		content()->selectSkipPage(height(), -1);
-	} else if (e->key() == Qt::Key_Escape && _select && !_select->entity()->getQuery().isEmpty()) {
+	} else if (e->key() == Qt::Key_Escape
+			&& _select
+			&& !_select->entity()->getQuery().isEmpty()) {
 		_select->entity()->clearQuery();
 	} else {
 		BoxContent::keyPressEvent(e);
@@ -541,6 +543,10 @@ auto PeerListBox::collectSelectedRows()
 		}
 	}
 	return result;
+}
+
+rpl::producer<int> PeerListBox::multiSelectHeightValue() const {
+	return _select ? _select->heightValue() : rpl::single(0);
 }
 
 PeerListRow::PeerListRow(not_null<PeerData*> peer)
@@ -1385,10 +1391,12 @@ int PeerListContent::labelHeight() const {
 
 void PeerListContent::refreshRows() {
 	if (!_hiddenRows.empty()) {
-		_filterResults.clear();
-		for (const auto &row : _rows) {
-			if (!row->hidden()) {
-				_filterResults.push_back(row.get());
+		if (!_ignoreHiddenRowsOnSearch || _normalizedSearchQuery.isEmpty()) {
+			_filterResults.clear();
+			for (const auto &row : _rows) {
+				if (!row->hidden()) {
+					_filterResults.push_back(row.get());
+				}
 			}
 		}
 	}
@@ -2053,10 +2061,13 @@ void PeerListContent::checkScrollForPreload() {
 void PeerListContent::searchQueryChanged(QString query) {
 	const auto searchWordsList = TextUtilities::PrepareSearchWords(query);
 	const auto normalizedQuery = searchWordsList.join(' ');
+	if (_ignoreHiddenRowsOnSearch && !normalizedQuery.isEmpty()) {
+		_filterResults.clear();
+	}
 	if (_normalizedSearchQuery != normalizedQuery) {
 		setSearchQuery(query, normalizedQuery);
 		if (_controller->searchInLocal() && !searchWordsList.isEmpty()) {
-			Assert(_hiddenRows.empty());
+			Assert(_hiddenRows.empty() || _ignoreHiddenRowsOnSearch);
 
 			auto minimalList = (const std::vector<not_null<PeerListRow*>>*)nullptr;
 			for (const auto &searchWord : searchWordsList) {
@@ -2190,6 +2201,10 @@ PeerListRowId PeerListContent::updateFromParentDrag(QPoint globalPosition) {
 
 void PeerListContent::dragLeft() {
 	clearSelection();
+}
+
+void PeerListContent::setIgnoreHiddenRowsOnSearch(bool value) {
+	_ignoreHiddenRowsOnSearch = value;
 }
 
 void PeerListContent::visibleTopBottomUpdated(

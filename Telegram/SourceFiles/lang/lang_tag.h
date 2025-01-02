@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+class StarsAmount;
+
 enum lngtag_count : int;
 
 namespace Lang {
@@ -22,9 +24,14 @@ constexpr auto kTagReplacementSize = 4;
 struct ShortenedCount {
 	int64 number = 0;
 	QString string;
+	bool shortened = false;
 };
 [[nodiscard]] ShortenedCount FormatCountToShort(int64 number);
 [[nodiscard]] QString FormatCountDecimal(int64 number);
+[[nodiscard]] QString FormatExactCountDecimal(float64 number);
+[[nodiscard]] ShortenedCount FormatStarsAmountToShort(StarsAmount amount);
+[[nodiscard]] QString FormatStarsAmountDecimal(StarsAmount amount);
+[[nodiscard]] QString FormatStarsAmountRounded(StarsAmount amount);
 
 struct PluralResult {
 	int keyShift = 0;

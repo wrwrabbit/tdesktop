@@ -163,7 +163,10 @@ public:
 	void sendBotCommand(Bot::SendCommandRequest request);
 	void hideSingleUseKeyboard(FullMsgId replyToId);
 
-	void searchMessages(const QString &query, Dialogs::Key inChat);
+	void searchMessages(
+		const QString &query,
+		Dialogs::Key inChat,
+		PeerData *searchFrom = nullptr);
 
 	void setChatBackground(
 		const Data::WallPaper &background,
@@ -210,6 +213,7 @@ public:
 	void showNonPremiumLimitToast(bool download);
 
 	void dialogsCancelled();
+	void toggleFiltersMenu(bool value) const;
 
 private:
 	void paintEvent(QPaintEvent *e) override;

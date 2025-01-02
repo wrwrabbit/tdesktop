@@ -211,6 +211,10 @@ public:
 		not_null<HistoryItem*> item,
 		const TextSelection &selection);
 
+	void fillSenderUserpicMenu(
+		not_null<Ui::PopupMenu*> menu,
+		not_null<PeerData*> peer);
+
 	[[nodiscard]] FullReplyTo replyTo() const;
 	bool lastForceReplyReplied(const FullMsgId &replyTo) const;
 	bool lastForceReplyReplied() const;
@@ -263,7 +267,10 @@ public:
 	[[nodiscard]] rpl::producer<> cancelRequests() const {
 		return _cancelRequests.events();
 	}
-	bool searchInChatEmbedded(Dialogs::Key chat, QString query);
+	bool searchInChatEmbedded(
+		QString query,
+		Dialogs::Key chat,
+		PeerData *searchFrom = nullptr);
 
 	void updateNotifyControls();
 
@@ -738,6 +745,8 @@ private:
 	QPointer<HistoryInner> _list;
 	History *_migrated = nullptr;
 	History *_history = nullptr;
+	rpl::lifetime _historySponsoredPreloading;
+
 	// Initial updateHistoryGeometry() was called.
 	bool _historyInited = false;
 	// If updateListSize() was called without updateHistoryGeometry().

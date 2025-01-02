@@ -563,6 +563,14 @@ void ApiWrap::sendMessageFail(
 			: tr::lng_error_noforwards_group(tr::now), kJoinErrorDuration);
 	} else if (error == u"PREMIUM_ACCOUNT_REQUIRED"_q) {
 		Settings::ShowPremium(&session(), "premium_stickers");
+	} else if (error == u"SCHEDULE_TOO_MUCH"_q) {
+		auto &scheduled = _session->scheduledMessages();
+		if (const auto item = scheduled.lookupItem(peer->id, itemId.msg)) {
+			scheduled.removeSending(item);
+		}
+		if (show) {
+			show->showToast(tr::lng_error_schedule_limit(tr::now));
+		}
 	}
 	if (const auto item = _session->data().message(itemId)) {
 		Assert(randomId != 0);
@@ -712,7 +720,8 @@ void ApiWrap::finalizeMessageDataRequest(
 
 QString ApiWrap::exportDirectMessageLink(
 		not_null<HistoryItem*> item,
-		bool inRepliesContext) {
+		bool inRepliesContext,
+		bool forceNonPublicLink) {
 	Expects(item->history()->peer->isChannel());
 
 	const auto itemId = item->fullId();
@@ -735,7 +744,7 @@ QString ApiWrap::exportDirectMessageLink(
 				const auto sender = root
 					? root->discussionPostOriginalSender()
 					: nullptr;
-				if (sender && sender->hasUsername()) {
+				if (sender && sender->hasUsername() && !forceNonPublicLink) {
 					// Comment to a public channel.
 					const auto forwarded = root->Get<HistoryMessageForwarded>();
 					linkItemId = forwarded->savedFromMsgId;
@@ -751,7 +760,7 @@ QString ApiWrap::exportDirectMessageLink(
 				}
 			}
 		}
-		const auto base = linkChannel->hasUsername()
+		const auto base = (linkChannel->hasUsername() && !forceNonPublicLink)
 			? linkChannel->username()
 			: "c/" + QString::number(peerToChannel(linkChannel->id).bare);
 		const auto post = QString::number(linkItemId.bare);
@@ -765,6 +774,7 @@ QString ApiWrap::exportDirectMessageLink(
 				? (QString::number(linkThreadId.bare) + '/' + post)
 				: post);
 		if (linkChannel->hasUsername()
+			&& !forceNonPublicLink
 			&& !linkChannel->isMegagroup()
 			&& !linkCommentId
 			&& !linkThreadId) {
@@ -778,6 +788,9 @@ QString ApiWrap::exportDirectMessageLink(
 		}
 		return session().createInternalLinkFull(query);
 	};
+	if (forceNonPublicLink) {
+		return fallback();
+	}
 	const auto i = _unlikelyMessageLinks.find(itemId);
 	const auto current = (i != end(_unlikelyMessageLinks))
 		? i->second
@@ -3950,7 +3963,8 @@ void ApiWrap::sendInlineResult(
 		not_null<UserData*> bot,
 		not_null<InlineBots::Result*> data,
 		const SendAction &action,
-		std::optional<MsgId> localMessageId) {
+		std::optional<MsgId> localMessageId,
+		Fn<void(bool)> done) {
 	sendAction(action);
 
 	const auto history = action.history;
@@ -4031,11 +4045,17 @@ void ApiWrap::sendInlineResult(
 		history->finishSavingCloudDraft(
 			topicRootId,
 			UnixtimeFromMsgId(response.outerMsgId));
+		if (done) {
+			done(true);
+		}
 	}, [=](const MTP::Error &error, const MTP::Response &response) {
 		sendMessageFail(error, peer, randomId, newId);
 		history->finishSavingCloudDraft(
 			topicRootId,
 			UnixtimeFromMsgId(response.outerMsgId));
+		if (done) {
+			done(false);
+		}
 	});
 	finishForwarding(action);
 }

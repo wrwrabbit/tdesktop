@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_peer_color_box.h" // AddLevelBadge.
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "core/application.h"
+#include "data/components/credits.h"
 #include "data/data_channel.h"
 #include "data/data_premium_limits.h"
 #include "data/data_session.h"
@@ -24,10 +25,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "history/view/controls/history_view_webpage_processor.h"
+#include "info/bot/starref/info_bot_starref_join_widget.h"
+#include "info/bot/starref/info_bot_starref_setup_widget.h"
 #include "info/channel_statistics/earn/earn_format.h"
 #include "info/channel_statistics/earn/earn_icons.h"
 #include "info/channel_statistics/earn/info_channel_earn_widget.h"
 #include "info/info_controller.h"
+#include "info/info_memento.h"
 #include "info/profile/info_profile_values.h" // Info::Profile::NameValue.
 #include "info/statistics/info_statistics_inner_widget.h" // FillLoading.
 #include "info/statistics/info_statistics_list_controllers.h"
@@ -52,6 +56,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/vertical_list.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/label_with_custom_emoji.h"
+#include "ui/widgets/peer_bubble.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/slider_natural_width.h"
 #include "ui/wrap/slide_wrap.h"
@@ -117,27 +122,6 @@ void ShowMenu(not_null<Ui::GenericBox*> box, const QString &text) {
 			resolver->request(url);
 		}
 	});
-}
-
-void AddArrow(not_null<Ui::RpWidget*> parent) {
-	const auto arrow = Ui::CreateChild<Ui::RpWidget>(parent.get());
-	arrow->paintRequest(
-	) | rpl::start_with_next([=](const QRect &r) {
-		auto p = QPainter(arrow);
-
-		const auto path = Ui::ToggleUpDownArrowPath(
-			st::statisticsShowMoreButtonArrowSize,
-			st::statisticsShowMoreButtonArrowSize,
-			st::statisticsShowMoreButtonArrowSize,
-			st::mainMenuToggleFourStrokes,
-			0.);
-
-		auto hq = PainterHighQualityEnabler(p);
-		p.fillPath(path, st::lightButtonFg);
-	}, arrow->lifetime());
-	arrow->resize(Size(st::statisticsShowMoreButtonArrowSize * 2));
-	arrow->move(st::statisticsShowMoreButtonArrowPosition);
-	arrow->show();
 }
 
 void AddHeader(
@@ -272,10 +256,9 @@ void InnerWidget::load() {
 				}
 				const auto &data = d.vstatus().data();
 				auto &e = _state.creditsEarn;
-				e.currentBalance = data.vcurrent_balance().v;
-				e.availableBalance = data.vavailable_balance().v;
-				e.overallRevenue = data.voverall_revenue().v;
-				e.overallRevenue = data.voverall_revenue().v;
+				e.currentBalance = Data::FromTL(data.vcurrent_balance());
+				e.availableBalance = Data::FromTL(data.vavailable_balance());
+				e.overallRevenue = Data::FromTL(data.voverall_revenue());
 				e.isWithdrawalEnabled = data.is_withdrawal_enabled();
 				e.nextWithdrawalAt = data.vnext_withdrawal_at()
 					? base::unixtime::parse(
@@ -379,7 +362,7 @@ void InnerWidget::fill() {
 	//constexpr auto kApproximately = QChar(0x2248);
 	const auto multiplier = data.usdRate;
 
-	const auto creditsToUsdMap = [=](EarnInt c) {
+	const auto creditsToUsdMap = [=](StarsAmount c) {
 		const auto creditsMultiplier = _state.creditsEarn.usdRate
 			* Data::kEarnMultiplier;
 		return c ? ToUsd(c, creditsMultiplier, 0) : QString();
@@ -699,7 +682,7 @@ void InnerWidget::fill() {
 
 		const auto addOverview = [&](
 				rpl::producer<EarnInt> currencyValue,
-				rpl::producer<EarnInt> creditsValue,
+				rpl::producer<StarsAmount> creditsValue,
 				const tr::phrase<> &text,
 				bool showCurrency,
 				bool showCredits) {
@@ -733,8 +716,8 @@ void InnerWidget::fill() {
 
 			const auto creditsLabel = Ui::CreateChild<Ui::FlatLabel>(
 				line,
-				rpl::duplicate(creditsValue) | rpl::map([](EarnInt value) {
-					return QString::number(value);
+				rpl::duplicate(creditsValue) | rpl::map([](StarsAmount value) {
+					return Lang::FormatStarsAmountDecimal(value);
 				}),
 				st::channelEarnOverviewMajorLabel);
 			const auto icon = Ui::CreateSingleStarWidget(
@@ -753,7 +736,7 @@ void InnerWidget::fill() {
 					int available,
 					const QSize &size,
 					const QSize &creditsSize,
-					EarnInt credits) {
+					StarsAmount credits) {
 				const auto skip = st::channelEarnOverviewSubMinorLabelPos.x();
 				line->resize(line->width(), size.height());
 				minorLabel->moveToLeft(
@@ -833,7 +816,7 @@ void InnerWidget::fill() {
 		Ui::AddSkip(container);
 	}
 #ifndef _DEBUG
-	if (!channel->amCreator()) {
+	if (channel && !channel->amCreator()) {
 		Ui::AddSkip(container);
 		Ui::AddSkip(container);
 		return;
@@ -942,7 +925,7 @@ void InnerWidget::fill() {
 			: tr::lng_channel_earn_balance_about_temp);
 		Ui::AddSkip(container);
 	}
-	if (creditsData.availableBalance > 0) {
+	if (creditsData.availableBalance.value() > 0) {
 		AddHeader(container, tr::lng_bot_earn_balance_title);
 		auto availableBalanceValue = rpl::single(
 			creditsData.availableBalance
@@ -979,6 +962,20 @@ void InnerWidget::fill() {
 				availableBalanceValue
 			) | rpl::map(creditsToUsdMap));
 	}
+
+	if (Info::BotStarRef::Join::Allowed(_peer)) {
+		const auto button = Info::BotStarRef::AddViewListButton(
+			container,
+			tr::lng_credits_summary_earn_title(),
+			tr::lng_credits_summary_earn_about(),
+			true);
+		button->setClickedCallback([=] {
+			_controller->showSection(Info::BotStarRef::Join::Make(_peer));
+		});
+		Ui::AddSkip(container);
+		Ui::AddDivider(container);
+	}
+	Ui::AddSkip(container);
 
 	const auto sectionIndex = container->lifetime().make_state<int>(0);
 	const auto rebuildLists = [=](
@@ -1034,7 +1031,6 @@ void InnerWidget::fill() {
 					listsContainer,
 					tr::lng_channel_earn_credits_history);
 				slider->entity()->setActiveSectionFast(1);
-				AddSkip(listsContainer);
 			}
 		} else {
 			slider->entity()->setActiveSectionFast(*sectionIndex);
@@ -1220,58 +1216,10 @@ void InnerWidget::fill() {
 						AddRecipient(box, recipient);
 					}
 					if (isIn) {
-						const auto peerBubble = box->addRow(
+						box->addRow(
 							object_ptr<Ui::CenterWrap<>>(
 								box,
-								object_ptr<Ui::RpWidget>(box)))->entity();
-						peerBubble->setAttribute(
-							Qt::WA_TransparentForMouseEvents);
-						const auto left = Ui::CreateChild<Ui::UserpicButton>(
-							peerBubble,
-							peer,
-							st::uploadUserpicButton);
-						const auto right = Ui::CreateChild<Ui::FlatLabel>(
-							peerBubble,
-							Info::Profile::NameValue(peer),
-							st::channelEarnSemiboldLabel);
-						rpl::combine(
-							left->sizeValue(),
-							right->sizeValue()
-						) | rpl::start_with_next([=](
-								const QSize &leftSize,
-								const QSize &rightSize) {
-							const auto padding = QMargins(
-								st::chatGiveawayPeerPadding.left() * 2,
-								st::chatGiveawayPeerPadding.top(),
-								st::chatGiveawayPeerPadding.right(),
-								st::chatGiveawayPeerPadding.bottom());
-							peerBubble->resize(
-								leftSize.width()
-									+ rightSize.width()
-									+ rect::m::sum::h(padding),
-								leftSize.height());
-							left->moveToLeft(0, 0);
-							right->moveToRight(
-								padding.right(),
-								padding.top());
-							const auto maxRightSize = box->width()
-								- rect::m::sum::h(st::boxRowPadding)
-								- rect::m::sum::h(padding)
-								- leftSize.width();
-							if (rightSize.width() > maxRightSize) {
-								right->resizeToWidth(maxRightSize);
-							}
-						}, peerBubble->lifetime());
-						peerBubble->paintRequest(
-						) | rpl::start_with_next([=] {
-							auto p = QPainter(peerBubble);
-							auto hq = PainterHighQualityEnabler(p);
-							p.setPen(Qt::NoPen);
-							p.setBrush(st::windowBgOver);
-							const auto rect = peerBubble->rect();
-							const auto radius = rect.height() / 2;
-							p.drawRoundedRect(rect, radius, radius);
-						}, peerBubble->lifetime());
+								Ui::CreatePeerBubble(box, peer)));
 					}
 					const auto closeBox = [=] { box->closeBox(); };
 					{
@@ -1346,8 +1294,8 @@ void InnerWidget::fill() {
 			handleSlice(firstSlice);
 			if (!firstSlice.allLoaded) {
 				struct ShowMoreState final {
-					ShowMoreState(not_null<ChannelData*> channel)
-					: api(channel) {
+					ShowMoreState(not_null<PeerData*> peer)
+					: api(peer) {
 					}
 					Api::EarnStatistics api;
 					bool loading = false;
@@ -1355,7 +1303,7 @@ void InnerWidget::fill() {
 					rpl::variable<int> showed = 0;
 				};
 				const auto state
-					= lifetime().make_state<ShowMoreState>(channel);
+					= lifetime().make_state<ShowMoreState>(_peer);
 				state->token = firstSlice.token;
 				state->showed = firstSlice.list.size();
 				const auto max = firstSlice.total;
@@ -1372,7 +1320,7 @@ void InnerWidget::fill() {
 								) | tr::to_count()),
 							st::statisticsShowMoreButton)));
 				const auto button = wrap->entity();
-				AddArrow(button);
+				Ui::AddToggleUpDownArrowToMoreButton(button);
 
 				wrap->toggle(true, anim::type::instant);
 				const auto handleReceived = [=](

@@ -46,8 +46,18 @@ Key::Key(Stories::Tag stories) : _value(stories) {
 Key::Key(Statistics::Tag statistics) : _value(statistics) {
 }
 
+Key::Key(BotStarRef::Tag starref) : _value(starref) {
+}
+
 Key::Key(not_null<PollData*> poll, FullMsgId contextId)
 : _value(PollKey{ poll, contextId }) {
+}
+
+Key::Key(
+	std::shared_ptr<Api::WhoReadList> whoReadIds,
+	Data::ReactionId selected,
+	FullMsgId contextId)
+: _value(ReactionsKey{ whoReadIds, selected, contextId }) {
 }
 
 PeerData *Key::peer() const {
@@ -99,6 +109,20 @@ Statistics::Tag Key::statisticsTag() const {
 	return Statistics::Tag();
 }
 
+PeerData *Key::starrefPeer() const {
+	if (const auto tag = std::get_if<BotStarRef::Tag>(&_value)) {
+		return tag->peer;
+	}
+	return nullptr;
+}
+
+BotStarRef::Type Key::starrefType() const {
+	if (const auto tag = std::get_if<BotStarRef::Tag>(&_value)) {
+		return tag->type;
+	}
+	return BotStarRef::Type();
+}
+
 PollData *Key::poll() const {
 	if (const auto data = std::get_if<PollKey>(&_value)) {
 		return data->poll;
@@ -108,6 +132,27 @@ PollData *Key::poll() const {
 
 FullMsgId Key::pollContextId() const {
 	if (const auto data = std::get_if<PollKey>(&_value)) {
+		return data->contextId;
+	}
+	return FullMsgId();
+}
+
+std::shared_ptr<Api::WhoReadList> Key::reactionsWhoReadIds() const {
+	if (const auto data = std::get_if<ReactionsKey>(&_value)) {
+		return data->whoReadIds;
+	}
+	return nullptr;
+}
+
+Data::ReactionId Key::reactionsSelected() const {
+	if (const auto data = std::get_if<ReactionsKey>(&_value)) {
+		return data->selected;
+	}
+	return Data::ReactionId();
+}
+
+FullMsgId Key::reactionsContextId() const {
+	if (const auto data = std::get_if<ReactionsKey>(&_value)) {
 		return data->contextId;
 	}
 	return FullMsgId();
@@ -181,6 +226,19 @@ PollData *AbstractController::poll() const {
 		}
 	}
 	return nullptr;
+}
+
+auto AbstractController::reactionsWhoReadIds() const
+-> std::shared_ptr<Api::WhoReadList> {
+	return key().reactionsWhoReadIds();
+}
+
+Data::ReactionId AbstractController::reactionsSelected() const {
+	return key().reactionsSelected();
+}
+
+FullMsgId AbstractController::reactionsContextId() const {
+	return key().reactionsContextId();
 }
 
 void AbstractController::showSection(
@@ -278,7 +336,9 @@ bool Controller::validateMementoPeer(
 		&& memento->migratedPeerId() == migratedPeerId()
 		&& memento->settingsSelf() == settingsSelf()
 		&& memento->storiesPeer() == storiesPeer()
-		&& memento->statisticsTag().peer == statisticsTag().peer;
+		&& memento->statisticsTag().peer == statisticsTag().peer
+		&& memento->starrefPeer() == starrefPeer()
+		&& memento->starrefType() == starrefType();
 }
 
 void Controller::setSection(not_null<ContentMemento*> memento) {
@@ -296,6 +356,7 @@ void Controller::updateSearchControllers(
 		: Section::MediaType::kCount;
 	const auto hasMediaSearch = isMedia
 		&& SharedMediaAllowSearch(mediaType);
+	const auto hasRequestsListSearch = (type == Type::RequestsList);
 	const auto hasCommonGroupsSearch = (type == Type::CommonGroups);
 	const auto hasDownloadsSearch = (type == Type::Downloads);
 	const auto hasMembersSearch = (type == Type::Members)
@@ -312,6 +373,7 @@ void Controller::updateSearchControllers(
 		_searchController = nullptr;
 	}
 	if (hasMediaSearch
+		|| hasRequestsListSearch
 		|| hasCommonGroupsSearch
 		|| hasDownloadsSearch
 		|| hasMembersSearch) {

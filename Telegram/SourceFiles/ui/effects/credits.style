@@ -11,6 +11,23 @@ using "ui/widgets/widgets.style";
 using "ui/effects/premium.style";
 using "settings/settings.style";
 
+creditsSettingsBigBalance: FlatLabel(defaultFlatLabel) {
+	style: TextStyle(defaultTextStyle) {
+		font: font(24px semibold);
+	}
+}
+creditsSettingsBigBalanceSkip: 4px;
+creditsSettingsBigBalanceButton: RoundButton(defaultActiveButton) {
+	height: 42px;
+	textTop: 12px;
+	style: semiboldTextStyle;
+}
+creditsSettingsBigBalanceButtonGift: RoundButton(defaultLightButton) {
+	height: 42px;
+	textTop: 12px;
+	style: defaultTextStyle;
+}
+
 creditsPremiumCover: PremiumCover(defaultPremiumCover) {
 	about: FlatLabel(userPremiumCoverAbout) {
 		textFg: boxTitleFg;
@@ -20,7 +37,7 @@ creditsLowBalancePremiumCover: PremiumCover(creditsPremiumCover) {
 	starSize: size(64px, 62px);
 	starTopSkip: 30px;
 }
-creditsLowBalancePremiumCoverHeight: 180px;
+creditsLowBalancePremiumCoverHeight: 162px;
 creditsTopupButton: SettingsButton(settingsButton) {
 	style: semiboldTextStyle;
 }
@@ -139,3 +156,20 @@ giftListAbout: FlatLabel(defaultFlatLabel) {
 giftListAboutMargin: margins(12px, 24px, 12px, 24px);
 giftBoxEmojiToggleTop: 7px;
 giftBoxLimitTop: 28px;
+
+creditsHistoryEntriesList: PeerList(defaultPeerList) {
+	padding: margins(
+		0px,
+		7px,
+		0px,
+		7px);
+	item: PeerListItem(defaultPeerListItem) {
+		height: 66px;
+		photoPosition: point(18px, 6px);
+		namePosition: point(70px, 6px);
+		statusPosition: point(70px, 43px);
+		photoSize: 42px;
+	}
+}
+
+subscriptionCreditsBadgePadding: margins(10px, 1px, 8px, 3px);

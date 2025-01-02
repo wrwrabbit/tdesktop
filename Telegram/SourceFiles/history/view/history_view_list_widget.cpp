@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_text.h"
 #include "history/view/media/history_view_media.h"
 #include "history/view/media/history_view_sticker.h"
+#include "history/view/reactions/history_view_reactions.h"
 #include "history/view/reactions/history_view_reactions_button.h"
 #include "history/view/reactions/history_view_reactions_selector.h"
 #include "history/view/history_view_context_menu.h"
@@ -29,9 +30,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/message_field.h"
 #include "mainwindow.h"
 #include "mainwidget.h"
-#include "core/click_handler_types.h"
 #include "core/application.h"
+#include "core/click_handler_types.h"
 #include "core/core_settings.h"
+#include "core/phone_click_handler.h"
 #include "apiwrap.h"
 #include "api/api_who_reacted.h"
 #include "api/api_views.h"
@@ -168,6 +170,11 @@ bool WindowListDelegate::listShowReactPremiumError(
 		not_null<HistoryItem*> item,
 		const Data::ReactionId &id) {
 	return Window::ShowReactPremiumError(_window, item, id);
+}
+
+auto WindowListDelegate::listFillSenderUserpicMenu(PeerId userpicPeerId)
+-> base::unique_qptr<Ui::PopupMenu> {
+	return nullptr;
 }
 
 void WindowListDelegate::listWindowSetInnerFocus() {
@@ -1781,7 +1788,11 @@ bool ListWidget::elementUnderCursor(
 	return (_overElement == view);
 }
 
-SelectionModeResult ListWidget::elementInSelectionMode() {
+SelectionModeResult ListWidget::elementInSelectionMode(
+		const HistoryView::Element *view) {
+	if (view && !_delegate->listIsItemGoodForSelection(view->data())) {
+		return {};
+	}
 	return inSelectionMode();
 }
 
@@ -1868,7 +1879,7 @@ not_null<Ui::PathShiftGradient*> ListWidget::elementPathShiftGradient() {
 }
 
 void ListWidget::elementReplyTo(const FullReplyTo &to) {
-	replyToMessageRequestNotify(to);
+	replyToMessageRequestNotify(to, base::IsCtrlPressed());
 }
 
 void ListWidget::elementStartInteraction(not_null<const Element*> view) {
@@ -2788,10 +2799,13 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		: _overElement
 		? _overElement->data().get()
 		: nullptr;
-	const auto clickedReaction = link
-		? link->property(
-			kReactionsCountEmojiProperty).value<Data::ReactionId>()
-		: Data::ReactionId();
+	const auto clickedReaction = Reactions::ReactionIdOfLink(link);
+	const auto linkPhoneNumber = link
+		? link->property(kPhoneNumberLinkProperty).toString()
+		: QString();
+	const auto linkUserpicPeerId = (link && _overSenderUserpic)
+		? PeerId(link->property(kPeerLinkPeerIdProperty).toULongLong())
+		: PeerId();
 	_whoReactedMenuLifetime.destroy();
 	if (!clickedReaction.empty()
 		&& overItem
@@ -2806,6 +2820,19 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			_whoReactedMenuLifetime);
 		e->accept();
 		return;
+	} else if (!linkPhoneNumber.isEmpty()) {
+		PhoneClickHandler(&session(), linkPhoneNumber).onClick(
+			prepareClickContext(
+				Qt::LeftButton,
+				_overItemExact ? _overItemExact->fullId() : FullMsgId()));
+		return;
+	} else if (linkUserpicPeerId) {
+		_menu = _delegate->listFillSenderUserpicMenu(linkUserpicPeerId);
+		if (_menu) {
+			_menu->popup(e->globalPos());
+			e->accept();
+			return;
+		}
 	}
 
 	auto request = ContextMenuRequest(controller());
@@ -3566,6 +3593,15 @@ ClickHandlerContext ListWidget::prepareClickHandlerContext(FullMsgId id) {
 	};
 }
 
+ClickContext ListWidget::prepareClickContext(
+		Qt::MouseButton button,
+		FullMsgId itemId) {
+	return {
+		button,
+		QVariant::fromValue(prepareClickHandlerContext(itemId)),
+	};
+}
+
 int ListWidget::SelectionViewOffset(
 		not_null<const ListWidget*> inner,
 		not_null<const Element*> view) {
@@ -3627,6 +3663,7 @@ void ListWidget::mouseActionUpdate() {
 	auto inTextSelection = (_overState.pointState != PointState::Outside)
 		&& (_overState.itemId == _pressState.itemId)
 		&& hasSelectedText();
+	auto dragStateUserpic = false;
 	const auto overReaction = reactionView && reactionState.link;
 	if (overReaction) {
 		dragState = reactionState;
@@ -3725,6 +3762,7 @@ void ListWidget::mouseActionUpdate() {
 						// stop enumeration if we've found a userpic under the cursor
 						if (point.y() >= userpicTop && point.y() < userpicTop + st::msgPhotoSize) {
 							dragState = TextState(nullptr, view->fromPhotoLink());
+							dragStateUserpic = true;
 							_overItemExact = nullptr;
 							lnkhost = view;
 							return false;
@@ -3736,6 +3774,7 @@ void ListWidget::mouseActionUpdate() {
 		}
 	}
 	const auto lnkChanged = ClickHandler::setActive(dragState.link, lnkhost);
+	_overSenderUserpic = dragStateUserpic;
 	if (lnkChanged || dragState.cursor != _mouseCursorState) {
 		Ui::Tooltip::Hide();
 	}

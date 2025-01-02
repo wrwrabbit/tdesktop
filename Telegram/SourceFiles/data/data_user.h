@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "core/stars_amount.h"
 #include "data/data_birthday.h"
 #include "data/data_peer.h"
 #include "data/data_chat_participant_status.h"
@@ -18,6 +19,17 @@ namespace Data {
 struct BotCommand;
 struct BusinessDetails;
 } // namespace Data
+
+struct StarRefProgram {
+	StarsAmount revenuePerUser;
+	TimeId endDate = 0;
+	ushort commission = 0;
+	uint8 durationMonths = 0;
+
+	friend inline constexpr bool operator==(
+		StarRefProgram,
+		StarRefProgram) = default;
+};
 
 struct BotInfo {
 	BotInfo();
@@ -33,11 +45,18 @@ struct BotInfo {
 	QString botMenuButtonUrl;
 	QString privacyPolicyUrl;
 
+	QColor botAppColorTitleDay = QColor(0, 0, 0, 0);
+	QColor botAppColorTitleNight = QColor(0, 0, 0, 0);
+	QColor botAppColorBodyDay = QColor(0, 0, 0, 0);
+	QColor botAppColorBodyNight = QColor(0, 0, 0, 0);
+
 	QString startToken;
 	Dialogs::EntryState inlineReturnTo;
 
 	ChatAdminRights groupAdminRights;
 	ChatAdminRights channelAdminRights;
+
+	StarRefProgram starRefProgram;
 
 	int version = 0;
 	int descriptionVersion = 0;
@@ -47,6 +66,7 @@ struct BotInfo {
 	bool cantJoinGroups : 1 = false;
 	bool supportsAttachMenu : 1 = false;
 	bool canEditInformation : 1 = false;
+	bool canManageEmojiStatus : 1 = false;
 	bool supportsBusiness : 1 = false;
 	bool hasMainApp : 1 = false;
 };
@@ -204,6 +224,8 @@ public:
 	[[nodiscard]] const Data::BusinessDetails &businessDetails() const;
 	void setBusinessDetails(Data::BusinessDetails details);
 
+	void setStarRefProgram(StarRefProgram program);
+
 	[[nodiscard]] ChannelId personalChannelId() const;
 	[[nodiscard]] MsgId personalChannelMessageId() const;
 	void setPersonalChannel(ChannelId channelId, MsgId messageId);
@@ -250,5 +272,8 @@ private:
 namespace Data {
 
 void ApplyUserUpdate(not_null<UserData*> user, const MTPDuserFull &update);
+
+[[nodiscard]] StarRefProgram ParseStarRefProgram(
+	const MTPStarRefProgram *program);
 
 } // namespace Data

@@ -207,6 +207,16 @@ void UserData::setBusinessDetails(Data::BusinessDetails details) {
 	session().changes().peerUpdated(this, UpdateFlag::BusinessDetails);
 }
 
+void UserData::setStarRefProgram(StarRefProgram program) {
+	const auto info = botInfo.get();
+	if (info && info->starRefProgram != program) {
+		info->starRefProgram = program;
+		session().changes().peerUpdated(
+			this,
+			Data::PeerUpdate::Flag::StarRefProgram);
+	}
+}
+
 ChannelId UserData::personalChannelId() const {
 	return _personalChannelId;
 }
@@ -346,6 +356,24 @@ void UserData::setBotInfo(const MTPBotInfo &info) {
 		const auto privacy = qs(d.vprivacy_policy_url().value_or_empty());
 		const auto privacyChanged = (botInfo->privacyPolicyUrl != privacy);
 		botInfo->privacyPolicyUrl = privacy;
+
+		if (const auto settings = d.vapp_settings()) {
+			const auto &data = settings->data();
+			botInfo->botAppColorTitleDay = Ui::MaybeColorFromSerialized(
+				data.vheader_color()).value_or(QColor(0, 0, 0, 0));
+			botInfo->botAppColorTitleNight = Ui::MaybeColorFromSerialized(
+				data.vheader_dark_color()).value_or(QColor(0, 0, 0, 0));
+			botInfo->botAppColorBodyDay = Ui::MaybeColorFromSerialized(
+				data.vbackground_color()).value_or(QColor(0, 0, 0, 0));
+			botInfo->botAppColorBodyNight = Ui::MaybeColorFromSerialized(
+				data.vbackground_dark_color()).value_or(QColor(0, 0, 0, 0));
+		} else {
+			botInfo->botAppColorTitleDay
+				= botInfo->botAppColorTitleNight
+				= botInfo->botAppColorBodyDay
+				= botInfo->botAppColorBodyNight
+				= QColor(0, 0, 0, 0);
+		}
 
 		if (changedCommands || changedButton || privacyChanged) {
 			owner().botCommandsChanged(this);
@@ -601,6 +629,11 @@ void ApplyUserUpdate(not_null<UserData*> user, const MTPDuserFull &update) {
 	} else {
 		user->setBotInfoVersion(-1);
 	}
+	if (const auto info = user->botInfo.get()) {
+		info->canManageEmojiStatus = update.is_bot_can_manage_emoji_status();
+		user->setStarRefProgram(
+			Data::ParseStarRefProgram(update.vstarref_program()));
+	}
 	if (const auto pinned = update.vpinned_msg_id()) {
 		SetTopPinnedMessageId(user, pinned->v);
 	}
@@ -717,6 +750,21 @@ void ApplyUserUpdate(not_null<UserData*> user, const MTPDuserFull &update) {
 	user->owner().stories().apply(user, update.vstories());
 
 	user->fullUpdated();
+}
+
+StarRefProgram ParseStarRefProgram(const MTPStarRefProgram *program) {
+	if (!program) {
+		return {};
+	}
+	auto result = StarRefProgram();
+	const auto &data = program->data();
+	result.commission = data.vcommission_permille().v;
+	result.durationMonths = data.vduration_months().value_or_empty();
+	result.revenuePerUser = data.vdaily_revenue_per_user()
+		? Data::FromTL(*data.vdaily_revenue_per_user())
+		: StarsAmount();
+	result.endDate = data.vend_date().value_or_empty();
+	return result;
 }
 
 } // namespace Data

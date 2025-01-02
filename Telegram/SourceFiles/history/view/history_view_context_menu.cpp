@@ -98,6 +98,7 @@ namespace {
 
 constexpr auto kRescheduleLimit = 20;
 constexpr auto kTagNameLimit = 12;
+constexpr auto kPublicPostLinkToastDuration = 4 * crl::time(1000);
 
 bool HasEditMessageAction(
 		const ContextMenuRequest &request,
@@ -634,12 +635,12 @@ bool AddReplyToMessageAction(
 	}
 
 	const auto &quote = request.quote;
-	auto text = quote.text.empty()
-		? tr::lng_context_reply_msg(tr::now)
-		: tr::lng_context_quote_and_reply(tr::now);
-	text.replace('&', u"&&"_q);
-	const auto itemId = item->fullId();
-	menu->addAction(text, [=] {
+	auto text = (quote.text.empty()
+		? tr::lng_context_reply_msg
+		: tr::lng_context_quote_and_reply)(
+			tr::now,
+			Ui::Text::FixAmpersandInAction);
+	menu->addAction(std::move(text), [=, itemId = item->fullId()] {
 		list->replyToMessageRequestNotify({
 			.messageId = itemId,
 			.quote = quote.text,
@@ -1307,12 +1308,17 @@ void CopyPostLink(
 		return;
 	}
 	const auto inRepliesContext = (context == Context::Replies);
+	const auto forceNonPublicLink = base::IsCtrlPressed();
 	QGuiApplication::clipboard()->setText(
 		item->history()->session().api().exportDirectMessageLink(
 			item,
-			inRepliesContext));
+			inRepliesContext,
+			forceNonPublicLink));
 
 	const auto isPublicLink = [&] {
+		if (forceNonPublicLink) {
+			return false;
+		}
 		const auto channel = item->history()->peer->asChannel();
 		Assert(channel != nullptr);
 		if (const auto rootId = item->replyToTop()) {
@@ -1328,10 +1334,20 @@ void CopyPostLink(
 		}
 		return channel->hasUsername();
 	}();
-
-	show->showToast(isPublicLink
-		? tr::lng_channel_public_link_copied(tr::now)
-		: tr::lng_context_about_private_link(tr::now));
+	if (isPublicLink) {
+		show->showToast({
+			.text = tr::lng_channel_public_link_copied(
+				tr::now, Ui::Text::Bold
+			).append('\n').append(Platform::IsMac()
+				? tr::lng_public_post_private_hint_cmd(tr::now)
+				: tr::lng_public_post_private_hint_ctrl(tr::now)),
+			.duration = kPublicPostLinkToastDuration,
+		});
+	} else {
+		show->showToast(isPublicLink
+			? tr::lng_channel_public_link_copied(tr::now)
+			: tr::lng_context_about_private_link(tr::now));
+	}
 }
 
 void CopyStoryLink(
@@ -1494,11 +1510,13 @@ void AddWhoReactedAction(
 			strong->hideMenu();
 		}
 		if (const auto item = controller->session().data().message(itemId)) {
-			controller->window().show(Reactions::FullListBox(
-				controller,
-				item,
-				{},
-				whoReadIds));
+			controller->showSection(
+				std::make_shared<Info::Memento>(
+					whoReadIds,
+					itemId,
+					HistoryView::Reactions::DefaultSelectedTab(
+						item,
+						whoReadIds)));
 		}
 	};
 	if (!menu->empty()) {
@@ -1669,10 +1687,10 @@ void ShowWhoReactedMenu(
 	};
 	const auto showAllChosen = [=, itemId = item->fullId()]{
 		if (const auto item = controller->session().data().message(itemId)) {
-			controller->window().show(Reactions::FullListBox(
-				controller,
-				item,
-				id));
+			controller->showSection(std::make_shared<Info::Memento>(
+				nullptr,
+				itemId,
+				HistoryView::Reactions::DefaultSelectedTab(item, id)));
 		}
 	};
 	const auto owner = &controller->session().data();
