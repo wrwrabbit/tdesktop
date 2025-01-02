@@ -49,6 +49,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
 
+#include "core/application.h"
+#include "ui/boxes/confirm_box.h"
+#include "main/main_domain.h"
+#include "storage/storage_domain.h"
+
 namespace HistoryView {
 namespace {
 
