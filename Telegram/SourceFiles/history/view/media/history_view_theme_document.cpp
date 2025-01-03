@@ -91,7 +91,8 @@ ThemeDocument::ThemeDocument(
 : File(parent, parent->data())
 , _data(document)
 , _serviceWidth(serviceWidth) {
-	Expects(params.has_value() || _data->hasThumbnail() || _data->isTheme());
+	Expects(params.has_value()
+		|| (_data && (_data->hasThumbnail() || _data->isTheme())));
 
 	if (params) {
 		_background = params->backgroundColors();
@@ -517,7 +518,7 @@ TextWithEntities ThemeDocumentBox::subtitle() {
 }
 
 rpl::producer<QString> ThemeDocumentBox::button() {
-	if (_parent->data()->out()) {
+	if (_parent->data()->out() || _parent->history()->peer->isChannel()) {
 		return {};
 	}
 	return rpl::conditional(

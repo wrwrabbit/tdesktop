@@ -129,9 +129,7 @@ infoTopBarBack: IconButton(defaultIconButton) {
 
 	rippleAreaPosition: point(6px, 6px);
 	rippleAreaSize: 42px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 infoTopBarTitle: FlatLabel(defaultFlatLabel) {
 	textFg: windowBoldFg;
@@ -167,6 +165,20 @@ infoTopBarCall: IconButton(infoTopBarMenu) {
 	icon: icon {{ "top_bar_call", boxTitleCloseFg }};
 	iconOver: icon {{ "top_bar_call", boxTitleCloseFgOver }};
 	iconPosition: point(5px, -1px);
+	rippleAreaPosition: point(0px, 6px);
+}
+infoTopBarQr: IconButton(infoTopBarMenu) {
+	width: 48px;
+	icon: icon {{ "menu/qr_code", boxTitleCloseFg }};
+	iconOver: icon {{ "menu/qr_code", boxTitleCloseFgOver }};
+	iconPosition: point(8px, -1px);
+	rippleAreaPosition: point(0px, 6px);
+}
+infoTopBarEdit: IconButton(infoTopBarMenu) {
+	width: 48px;
+	icon: icon {{ "menu/edit", boxTitleCloseFg }};
+	iconOver: icon {{ "menu/edit", boxTitleCloseFgOver }};
+	iconPosition: point(8px, -1px);
 	rippleAreaPosition: point(0px, 6px);
 }
 infoTopBarForward: IconButton(infoTopBarBack) {
@@ -261,6 +273,18 @@ infoLayerTopBarCall: IconButton(infoLayerTopBarMenu) {
 	icon: icon {{ "top_bar_call", boxTitleCloseFg }};
 	iconOver: icon {{ "top_bar_call", boxTitleCloseFgOver }};
 	iconPosition: point(3px, -1px);
+}
+infoLayerTopBarQr: IconButton(infoLayerTopBarClose) {
+	width: 40px;
+	icon: icon {{ "menu/qr_code", boxTitleCloseFg }};
+	iconOver: icon {{ "menu/qr_code", boxTitleCloseFgOver }};
+	iconPosition: point(8px, -1px);
+}
+infoLayerTopBarEdit: IconButton(infoLayerTopBarClose) {
+	width: 40px;
+	icon: icon {{ "menu/edit", boxTitleCloseFg }};
+	iconOver: icon {{ "menu/edit", boxTitleCloseFgOver }};
+	iconPosition: point(8px, -1px);
 }
 infoLayerTopBarForward: IconButton(infoLayerTopBarBack) {
 	width: 45px;
@@ -368,7 +392,9 @@ infoProfileCover: InfoProfileCover {
 		width: -12px;
 		height: 18px;
 		textTop: 0px;
-		font: font(12px);
+		style: TextStyle(defaultTextStyle) {
+			font: font(12px);
+		}
 		ripple: defaultRippleAnimation;
 	}
 	showLastSeenPosition: point(3px, 58px);
@@ -428,18 +454,20 @@ infoProfileSeparatorPadding: margins(
 	infoProfileSkip,
 	0px,
 	infoProfileSkip);
-infoProfileLabeledButtonCopy: IconButton(defaultIconButton) {
+infoProfileLabeledButtonQr: IconButton(defaultIconButton) {
 	width: 34px;
 	height: 34px;
-	icon: icon {{ "menu/copy", infoIconFg }};
-	iconOver: icon {{ "menu/copy", infoIconFg }};
+	icon: icon {{ "menu/qr_code", windowActiveTextFg }};
+	iconOver: icon {{ "menu/qr_code", windowActiveTextFg }};
 	rippleAreaPosition: point(0px, 0px);
 	rippleAreaSize: 34px;
 	ripple: defaultRippleAnimation;
 }
+infoProfileLabeledButtonQrRightSkip: 10px;
 
 infoIconInformation: icon {{ "info/info_information", infoIconFg }};
 infoIconAddMember: icon {{ "info/info_add_member", infoIconFg }};
+infoIconBotBalance: icon {{ "menu/earn", infoIconFg, point(5px, 5px) }};
 infoIconNotifications: icon {{ "info/info_notifications", infoIconFg }};
 infoIconMediaPhoto: icon {{ "info/info_media_photo", infoIconFg }};
 infoIconMediaVideo: icon {{ "info/info_media_video", infoIconFg }};
@@ -454,6 +482,8 @@ infoIconMediaStories: icon {{ "info/info_media_stories", infoIconFg }};
 infoIconMediaSaved: icon {{ "info/info_media_saved", infoIconFg }};
 infoIconMediaStoriesArchive: icon {{ "info/info_stories_archive", infoIconFg }};
 infoIconMediaStoriesRecent: icon {{ "info/info_stories_recent", infoIconFg }};
+infoIconMediaGifts: icon {{ "menu/gift_premium", infoIconFg, point(4px, 4px) }};
+infoIconEmojiStatusAccess: icon {{ "menu/read_reactions", infoIconFg, point(4px, 4px) }};
 
 infoIconShare: icon {{ "info/info_share", infoIconFg }};
 infoIconEdit: icon {{ "info/info_edit", infoIconFg }};
@@ -467,9 +497,18 @@ infoInformationIconPosition: point(25px, 12px);
 infoNotificationsIconPosition: point(20px, 5px);
 infoSharedMediaButtonIconPosition: point(20px, 3px);
 infoGroupMembersIconPosition: point(20px, 10px);
-infoChannelMembersIconPosition: point(20px, 19px);
+infoChannelMembersIconPosition: point(20px, 4px);
+infoChannelAdminsIconPosition: point(24px, 7px);
+infoEarnCreditsIconPosition: point(24px, 7px);
+infoEarnCurrencyIconPosition: point(20px, 3px);
 
-infoPersonalChannelIconPosition: point(25px, 20px);
+infoOpenApp: RoundButton(defaultActiveButton) {
+	textTop: 11px;
+	height: 40px;
+}
+infoOpenAppMargin: margins(16px, 12px, 16px, 12px);
+
+infoPersonalChannelIconPosition: point(25px, 12px);
 infoPersonalChannelNameLabel: FlatLabel(infoProfileStatus) {
 	textFg: windowBoldFg;
 	style: semiboldTextStyle;
@@ -595,20 +634,17 @@ infoMembersCancelSearch: CrossButton {
 
 	duration: 150;
 	loadingPeriod: 1000;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 infoMembersSearchTop: 15px;
 
-infoMediaHeaderStyle: TextStyle(semiboldTextStyle) {
-}
+infoMediaHeaderStyle: semiboldTextStyle;
 infoMediaHeaderHeight: 28px;
 infoMediaHeaderPosition: point(14px, 6px);
 infoMediaSkip: 2px;
 infoMediaLeft: 3px;
 infoMediaMargin: margins(0px, 6px, 0px, 2px);
-infoMediaMinGridSize: 90px;
+infoMediaMinGridSize: 82px;
 
 infoCommonGroupsMargin: margins(0px, 2px, 0px, 2px);
 infoCommonGroupsListItem: PeerListItem(defaultPeerListItem) {
@@ -650,6 +686,12 @@ manageGroupButton: SettingsCountButton(managePeerButton) {
 	button: manageGroupButtonInner;
 	labelPosition: point(22px, 10px);
 	iconPosition: point(20px, 4px);
+}
+infoSharedMediaCountButton: SettingsCountButton(managePeerButton) {
+	button: infoSharedMediaButton;
+	iconPosition: point(20px, 4px);
+	label: defaultSettingsRightLabel;
+	labelPosition: point(24px, 10px);
 }
 
 manageGroupTopButtonWithText: SettingsCountButton(manageGroupButton) {
@@ -701,7 +743,7 @@ manageGroupReactionsField: InputField(defaultInputField) {
 	placeholderScale: 0.;
 	placeholderFont: normalFont;
 	placeholderShift: -50px;
-	font: normalFont;
+	style: defaultTextStyle;
 	heightMin: 36px;
 	heightMax: 158px;
 }
@@ -764,8 +806,6 @@ editPeerDescription: InputField(defaultInputField) {
 	borderActive: 0px;
 
 	heightMin: 32px;
-
-	font: boxTextFont;
 }
 editPeerDescriptionMargins: margins(22px, 3px, 22px, 2px);
 editPeerPrivaciesMargins: margins(15px, 7px, 22px, 0px);
@@ -816,9 +856,7 @@ topBarSearch: IconButton {
 
 	rippleAreaPosition: point(0px, 7px);
 	rippleAreaSize: 40px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 topBarCloseChoose: IconButton(topBarSearch) {
 	width: 56px;
@@ -982,11 +1020,51 @@ inviteLinkRevokedIcon: icon {{ "info/edit/links_revoked", mediaviewFileExtFg }};
 inviteLinkThreeDotsSkip: 12px;
 inviteLinkRevokedTitlePadding: margins(22px, 16px, 10px, 4px);
 inviteLinkLimitMargin: margins(22px, 8px, 22px, 8px);
+inviteLinkSubscriptionSize: 18px;
 
 inviteLinkQrPixel: 8px;
 inviteLinkQrSkip: 24px;
 inviteLinkQrMargin: margins(0px, 0px, 0px, 13px);
 inviteLinkQrValuePadding: margins(22px, 0px, 22px, 12px);
+
+inviteLinkCreditsField: InputField(defaultInputField) {
+	textMargins: margins(23px, 10px, 0px, 0px);
+	textAlign: align(left);
+	textFg: historyComposeAreaFg;
+	textBg: historyComposeAreaBg;
+	heightMin: 36px;
+	heightMax: 36px;
+	placeholderFg: placeholderFg;
+	placeholderFgActive: placeholderFgActive;
+	placeholderFgError: placeholderFgActive;
+	placeholderMargins: margins(0px, 0px, 2px, 0px);
+	placeholderAlign: align(left);
+	placeholderScale: 0.;
+	placeholderFont: normalFont;
+	placeholderShift: -50px;
+	duration: 100;
+}
+
+inviteLinkSubscribeBoxTitle: FlatLabel(defaultFlatLabel) {
+	minWidth: 300px;
+	textFg: windowBoldFg;
+	align: align(top);
+	style: TextStyle(defaultTextStyle) {
+		font: font(17px semibold);
+	}
+}
+inviteLinkSubscribeBoxAbout: FlatLabel(defaultFlatLabel) {
+	minWidth: 300px;
+	align: align(top);
+}
+inviteLinkSubscribeBoxTerms: FlatLabel(defaultFlatLabel) {
+	minWidth: 300px;
+	align: align(top);
+	textFg: windowSubTextFg;
+	style: TextStyle(defaultTextStyle) {
+		font: font(11px);
+	}
+}
 
 usernamesReorderIcon: icon {{ "stickers_reorder", dialogsMenuIconFg }};
 
@@ -1056,7 +1134,7 @@ similarChannelsLockFade: 58px;
 similarChannelsLock: RoundButton(defaultActiveButton) {
 	height: 44px;
 	textTop: 12px;
-	font: font(13px semibold);
+	style: semiboldTextStyle;
 }
 similarChannelsLockLabel: FlatLabel(defaultFlatLabel) {
 	textFg: premiumButtonFg;
@@ -1081,9 +1159,13 @@ infoHoursDayLabel: infoHoursState;
 infoHoursOuter: RoundButton(defaultActiveButton) {
 	textBg: transparent;
 	textBgOver: transparent;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 infoHoursOuterMargin: margins(8px, 4px, 8px, 4px);
 infoHoursDaySkip: 6px;
+
+infoSharedMediaScroll: ScrollArea(defaultScrollArea) {
+	round: 1px;
+	width: 5px;
+	deltax: 2px;
+}

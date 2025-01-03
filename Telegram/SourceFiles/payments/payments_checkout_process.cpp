@@ -181,6 +181,30 @@ void CheckoutProcess::Start(
 	j->second->requestActivate();
 }
 
+void CheckoutProcess::Start(
+		InvoiceStarGift giftInvoice,
+		Fn<void(CheckoutResult)> reactivate,
+		Fn<void(NonPanelPaymentForm)> nonPanelPaymentFormProcess) {
+	const auto randomId = giftInvoice.randomId;
+	auto id = InvoiceId{ std::move(giftInvoice) };
+	auto &processes = LookupSessionProcesses(SessionFromId(id));
+	const auto i = processes.byRandomId.find(randomId);
+	if (i != end(processes.byRandomId)) {
+		i->second->setReactivateCallback(std::move(reactivate));
+		i->second->setNonPanelPaymentFormProcess(
+			std::move(nonPanelPaymentFormProcess));
+		return;
+	}
+	processes.byRandomId.emplace(
+		randomId,
+		std::make_unique<CheckoutProcess>(
+			std::move(id),
+			Mode::Payment,
+			std::move(reactivate),
+			std::move(nonPanelPaymentFormProcess),
+			PrivateTag{}));
+}
+
 std::optional<PaidInvoice> CheckoutProcess::InvoicePaid(
 		not_null<const HistoryItem*> item) {
 	const auto session = &item->history()->session();
@@ -536,6 +560,8 @@ void CheckoutProcess::handleError(const Error &error) {
 			showToast({ tr::lng_payments_payment_failed(tr::now) });
 		} else if (id == u"BOT_PRECHECKOUT_FAILED"_q) {
 			showToast({ tr::lng_payments_precheckout_failed(tr::now) });
+		} else if (id == u"BOT_PRECHECKOUT_TIMEOUT"_q) {
+			showToast({ tr::lng_payments_precheckout_timeout(tr::now) });
 		} else if (id == u"REQUESTED_INFO_INVALID"_q
 			|| id == u"SHIPPING_OPTION_INVALID"_q
 			|| id == u"PAYMENT_CREDENTIALS_INVALID"_q
@@ -764,6 +790,14 @@ void CheckoutProcess::showForm() {
 		_form->information(),
 		_form->paymentMethod().ui,
 		_form->shippingOptions());
+	if (_nonPanelPaymentFormProcess && !_realFormNotified) {
+		_realFormNotified = true;
+		const auto weak = base::make_weak(_panel.get());
+		_nonPanelPaymentFormProcess(RealFormPresentedNotification());
+		if (weak) {
+			requestActivate();
+		}
+	}
 }
 
 void CheckoutProcess::showEditInformation(Ui::InformationField field) {

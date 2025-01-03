@@ -35,13 +35,14 @@ class Show;
 
 namespace Ui {
 class PopupMenu;
+class Show;
 } // namespace Ui
 
 [[nodiscard]] QString PrepareMentionTag(not_null<UserData*> user);
 [[nodiscard]] TextWithTags PrepareEditText(not_null<HistoryItem*> item);
 [[nodiscard]] bool EditTextChanged(
 	not_null<HistoryItem*> item,
-	const TextWithTags &updated);
+	TextWithTags updated);
 
 Fn<bool(
 	Ui::InputField::EditLinkSelection selection,
@@ -51,13 +52,20 @@ Fn<bool(
 		std::shared_ptr<Main::SessionShow> show,
 		not_null<Ui::InputField*> field,
 		const style::InputField *fieldStyle = nullptr);
-void InitMessageFieldHandlers(
-	not_null<Main::Session*> session,
-	std::shared_ptr<Main::SessionShow> show, // may be null
-	not_null<Ui::InputField*> field,
-	Fn<bool()> customEmojiPaused,
-	Fn<bool(not_null<DocumentData*>)> allowPremiumEmoji = nullptr,
-	const style::InputField *fieldStyle = nullptr);
+Fn<void(QString now, Fn<void(QString)> save)> DefaultEditLanguageCallback(
+	std::shared_ptr<Ui::Show> show);
+
+struct MessageFieldHandlersArgs {
+	not_null<Main::Session*> session;
+	std::shared_ptr<Main::SessionShow> show; // may be null
+	not_null<Ui::InputField*> field;
+	Fn<bool()> customEmojiPaused;
+	Fn<bool(not_null<DocumentData*>)> allowPremiumEmoji;
+	const style::InputField *fieldStyle = nullptr;
+	base::flat_set<QString> allowMarkdownTags;
+};
+void InitMessageFieldHandlers(MessageFieldHandlersArgs &&args);
+
 void InitMessageFieldHandlers(
 	not_null<Window::SessionController*> controller,
 	not_null<Ui::InputField*> field,

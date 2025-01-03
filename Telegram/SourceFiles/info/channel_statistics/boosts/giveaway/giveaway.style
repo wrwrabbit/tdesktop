@@ -60,9 +60,7 @@ giveawayGiftCodeQuantitySubtitle: FlatLabel(defaultFlatLabel) {
 	align: align(right);
 }
 giveawayGiftCodeQuantityFloat: FlatLabel(defaultFlatLabel) {
-	style: TextStyle(semiboldTextStyle) {
-		font: font(13px);
-	}
+	style: semiboldTextStyle;
 	textFg: windowActiveTextFg;
 	minWidth: 50px;
 	align: align(center);
@@ -98,6 +96,14 @@ giveawayGiftCodeValue: FlatLabel(defaultFlatLabel) {
 giveawayGiftCodeValueMultiline: FlatLabel(giveawayGiftCodeValue) {
 	minWidth: 128px;
 	maxHeight: 100px;
+	style: TextStyle(defaultTextStyle) {
+		font: font(10px);
+		linkUnderline: kLinkUnderlineNever;
+	}
+}
+giveawayGiftMessage: FlatLabel(giveawayGiftCodeValue) {
+	minWidth: 128px;
+	maxHeight: 0px;
 }
 giveawayGiftCodeValueMargin: margins(13px, 9px, 13px, 9px);
 giveawayGiftCodePeerMargin: margins(11px, 6px, 11px, 4px);
@@ -164,7 +170,7 @@ giveawayGiftCodeBox: Box(defaultBox) {
 	button: RoundButton(defaultActiveButton) {
 		height: 42px;
 		textTop: 12px;
-		font: font(13px semibold);
+		style: semiboldTextStyle;
 	}
 	shadowIgnoreTopSkip: true;
 }
@@ -204,4 +210,26 @@ startGiveawayButtonTextStyle: TextStyle(defaultTextStyle) {
 startGiveawayButtonLoading: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
 	color: activeButtonFg;
 	thickness: 2px;
+}
+
+starConvertButtonLoading: InfiniteRadialAnimation(startGiveawayButtonLoading) {
+	color: windowActiveTextFg;
+	thickness: 2px;
+}
+
+starGiftSmallButton: RoundButton(defaultActiveButton) {
+	textFg: windowActiveTextFg;
+	textFgOver: windowActiveTextFg;
+	textBg: lightButtonBgOver;
+	textBgOver: lightButtonBgOver;
+	width: -12px;
+	height: 18px;
+	radius: 9px;
+	textTop: 0px;
+	style: TextStyle(defaultTextStyle) {
+		font: font(12px);
+	}
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: lightButtonBgRipple;
+	}
 }

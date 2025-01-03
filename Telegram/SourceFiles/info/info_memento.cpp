@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/info_memento.h"
 
+#include "info/global_media/info_global_media_widget.h"
 #include "info/profile/info_profile_widget.h"
 #include "info/media/info_media_widget.h"
 #include "info/members/info_members_widget.h"
@@ -14,6 +15,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/saved/info_saved_sublists_widget.h"
 #include "info/settings/info_settings_widget.h"
 #include "info/similar_channels/info_similar_channels_widget.h"
+#include "info/reactions_list/info_reactions_list_widget.h"
+#include "info/requests_list/info_requests_list_widget.h"
+#include "info/peer_gifts/info_peer_gifts_widget.h"
 #include "info/polls/info_polls_results_widget.h"
 #include "info/info_section_widget.h"
 #include "info/info_layer_widget.h"
@@ -50,6 +54,13 @@ Memento::Memento(Settings::Tag settings, Section section)
 
 Memento::Memento(not_null<PollData*> poll, FullMsgId contextId)
 : Memento(DefaultStack(poll, contextId)) {
+}
+
+Memento::Memento(
+	std::shared_ptr<Api::WhoReadList> whoReadIds,
+	FullMsgId contextId,
+	Data::ReactionId selected)
+: Memento(DefaultStack(std::move(whoReadIds), contextId, selected)) {
 }
 
 Memento::Memento(std::vector<std::shared_ptr<ContentMemento>> stack)
@@ -111,6 +122,18 @@ std::vector<std::shared_ptr<ContentMemento>> Memento::DefaultStack(
 	return result;
 }
 
+std::vector<std::shared_ptr<ContentMemento>> Memento::DefaultStack(
+		std::shared_ptr<Api::WhoReadList> whoReadIds,
+		FullMsgId contextId,
+		Data::ReactionId selected) {
+	auto result = std::vector<std::shared_ptr<ContentMemento>>();
+	result.push_back(std::make_shared<ReactionsList::Memento>(
+		std::move(whoReadIds),
+		contextId,
+		selected));
+	return result;
+}
+
 Section Memento::DefaultSection(not_null<PeerData*> peer) {
 	if (peer->savedSublistsInfo()) {
 		return Section(Section::Type::SavedSublists);
@@ -143,11 +166,19 @@ std::shared_ptr<ContentMemento> Memento::DefaultContent(
 			peer,
 			migratedPeerId,
 			section.mediaType());
+	case Section::Type::GlobalMedia:
+		return std::make_shared<GlobalMedia::Memento>(
+			peer->asUser(),
+			section.mediaType());
 	case Section::Type::CommonGroups:
 		return std::make_shared<CommonGroups::Memento>(peer->asUser());
 	case Section::Type::SimilarChannels:
 		return std::make_shared<SimilarChannels::Memento>(
 			peer->asChannel());
+	case Section::Type::RequestsList:
+		return std::make_shared<RequestsList::Memento>(peer);
+	case Section::Type::PeerGifts:
+		return std::make_shared<PeerGifts::Memento>(peer->asUser());
 	case Section::Type::SavedSublists:
 		return std::make_shared<Saved::SublistsMemento>(&peer->session());
 	case Section::Type::Members:

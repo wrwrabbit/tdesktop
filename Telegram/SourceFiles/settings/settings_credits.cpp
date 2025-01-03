@@ -7,21 +7,29 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/settings_credits.h"
 
-#include "settings/settings_credits_graphics.h"
 #include "api/api_credits.h"
+#include "boxes/star_gift_box.h"
+#include "boxes/gift_credits_box.h"
 #include "boxes/gift_premium_box.h"
 #include "core/click_handler_types.h"
+#include "data/components/credits.h"
 #include "data/data_file_origin.h"
 #include "data/data_photo_media.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "info/bot/starref/info_bot_starref_common.h"
+#include "info/bot/starref/info_bot_starref_join_widget.h"
+#include "info/channel_statistics/boosts/giveaway/boost_badge.h" // InfiniteRadialAnimationWidget.
 #include "info/settings/info_settings_widget.h" // SectionCustomTopBarData.
 #include "info/statistics/info_statistics_list_controllers.h"
+#include "info/info_memento.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "settings/settings_common_session.h"
+#include "settings/settings_credits_graphics.h"
 #include "statistics/widgets/chart_header_widget.h"
 #include "ui/boxes/boost_box.h" // Ui::StartFireworks.
+#include "ui/effects/credits_graphics.h"
 #include "ui/effects/premium_graphics.h"
 #include "ui/effects/premium_top_bar.h"
 #include "ui/layers/generic_box.h"
@@ -30,12 +38,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
-#include "ui/widgets/discrete_sliders.h"
+#include "ui/widgets/slider_natural_width.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
 #include "styles/style_credits.h"
+#include "styles/style_giveaway.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
 #include "styles/style_premium.h"
@@ -66,9 +75,9 @@ public:
 
 private:
 	void setupContent();
-	void setupOptions(not_null<Ui::VerticalLayout*> container);
 	void setupHistory(not_null<Ui::VerticalLayout*> container);
-
+	void setupSubscriptions(not_null<Ui::VerticalLayout*> container);
+	void setupStarRefPromo(not_null<Ui::VerticalLayout*> container);
 	const not_null<Window::SessionController*> _controller;
 
 	QWidget *_parent = nullptr;
@@ -93,9 +102,16 @@ Credits::Credits(
 	not_null<Window::SessionController*> controller)
 : Section(parent)
 , _controller(controller)
-, _star(GenerateStars(st::creditsTopupButton.height, 1))
-, _balanceStar(GenerateStars(st::creditsBalanceStarHeight, 1)) {
+, _star(Ui::GenerateStars(st::creditsTopupButton.height, 1))
+, _balanceStar(Ui::GenerateStars(st::creditsBalanceStarHeight, 1)) {
 	setupContent();
+
+	_controller->session().premiumPossibleValue(
+	) | rpl::start_with_next([=](bool premiumPossible) {
+		if (!premiumPossible) {
+			_showBack.fire({});
+		}
+	}, lifetime());
 }
 
 rpl::producer<QString> Credits::title() {
@@ -121,14 +137,106 @@ void Credits::setStepDataReference(std::any &data) {
 	}
 }
 
+void Credits::setupSubscriptions(not_null<Ui::VerticalLayout*> container) {
+	const auto history = container->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			container,
+			object_ptr<Ui::VerticalLayout>(container)));
+	const auto content = history->entity();
+	const auto self = _controller->session().user();
+
+	const auto fill = [=](const Data::CreditsStatusSlice &fullSlice) {
+		const auto inner = content;
+		if (fullSlice.subscriptions.empty()) {
+			return;
+		}
+		Ui::AddSkip(inner);
+		Ui::AddSubsectionTitle(
+			inner,
+			tr::lng_credits_subscription_section(),
+			{ 0, 0, 0, -st::settingsPremiumOptionsPadding.bottom() });
+
+		const auto fullWrap = inner->add(
+			object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+				inner,
+				object_ptr<Ui::VerticalLayout>(inner)));
+
+		const auto controller = _controller->parentController();
+		const auto entryClicked = [=](
+				const Data::CreditsHistoryEntry &e,
+				const Data::SubscriptionEntry &s) {
+			controller->uiShow()->show(
+				Box(ReceiptCreditsBox, controller, e, s));
+		};
+
+		Info::Statistics::AddCreditsHistoryList(
+			controller->uiShow(),
+			fullSlice,
+			fullWrap->entity(),
+			entryClicked,
+			self,
+			true,
+			true,
+			true);
+
+		Ui::AddSkip(inner);
+		Ui::AddSkip(inner);
+		Ui::AddDivider(inner);
+
+		inner->resizeToWidth(container->width());
+	};
+
+	const auto apiLifetime = content->lifetime().make_state<rpl::lifetime>();
+	{
+		using Api = Api::CreditsHistory;
+		const auto apiFull = apiLifetime->make_state<Api>(self, true, true);
+		apiFull->requestSubscriptions({}, [=](Data::CreditsStatusSlice d) {
+			fill(std::move(d));
+		});
+	}
+	{
+		using Rebuilder = Data::Session::CreditsSubsRebuilder;
+		using RebuilderPtr = std::shared_ptr<Rebuilder>;
+		const auto rebuilder = content->lifetime().make_state<RebuilderPtr>(
+			self->owner().createCreditsSubsRebuilder());
+		rebuilder->get()->events(
+		) | rpl::start_with_next([=](Data::CreditsStatusSlice slice) {
+			while (content->count()) {
+				delete content->widgetAt(0);
+			}
+			fill(std::move(slice));
+		}, content->lifetime());
+	}
+}
+
+void Credits::setupStarRefPromo(not_null<Ui::VerticalLayout*> container) {
+	const auto self = _controller->session().user();
+	if (!Info::BotStarRef::Join::Allowed(self)) {
+		return;
+	}
+	Ui::AddSkip(container);
+	const auto button = Info::BotStarRef::AddViewListButton(
+		container,
+		tr::lng_credits_summary_earn_title(),
+		tr::lng_credits_summary_earn_about(),
+		true);
+	button->setClickedCallback([=] {
+		_controller->showSection(Info::BotStarRef::Join::Make(self));
+	});
+	Ui::AddSkip(container);
+	Ui::AddDivider(container);
+	Ui::AddSkip(container);
+}
+
 void Credits::setupHistory(not_null<Ui::VerticalLayout*> container) {
 	const auto history = container->add(
 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
 			container,
 			object_ptr<Ui::VerticalLayout>(container)));
 	const auto content = history->entity();
+	const auto self = _controller->session().user();
 
-	Ui::AddSkip(content, st::settingsPremiumOptionsPadding.top());
+	Ui::AddSkip(content);
 
 	const auto fill = [=](
 			not_null<PeerData*> premiumBot,
@@ -149,35 +257,18 @@ void Credits::setupHistory(not_null<Ui::VerticalLayout*> container) {
 		const auto outTabText = tr::lng_credits_summary_history_tab_out(
 			tr::now);
 		if (hasOneTab) {
-			Ui::AddSkip(inner);
-			const auto header = inner->add(
-				object_ptr<Statistic::Header>(inner),
-				st::statisticsLayerMargins
-					+ st::boostsChartHeaderPadding);
-			header->resizeToWidth(header->width());
-			header->setTitle(fullTabText);
-			header->setSubTitle({});
+			Ui::AddSubsectionTitle(
+				inner,
+				tr::lng_credits_summary_history_tab_full(),
+				{ 0, 0, 0, -st::defaultSubsectionTitlePadding.bottom() });
 		}
 
-		class Slider final : public Ui::SettingsSlider {
-		public:
-			using Ui::SettingsSlider::SettingsSlider;
-			void setNaturalWidth(int w) {
-				_naturalWidth = w;
-			}
-			int naturalWidth() const override {
-				return _naturalWidth;
-			}
-
-		private:
-			int _naturalWidth = 0;
-
-		};
-
 		const auto slider = inner->add(
-			object_ptr<Ui::SlideWrap<Slider>>(
+			object_ptr<Ui::SlideWrap<Ui::CustomWidthSlider>>(
 				inner,
-				object_ptr<Slider>(inner, st::defaultTabsSlider)),
+				object_ptr<Ui::CustomWidthSlider>(
+					inner,
+					st::defaultTabsSlider)),
 			st::boxRowPadding);
 		slider->toggle(!hasOneTab, anim::type::instant);
 
@@ -230,12 +321,14 @@ void Credits::setupHistory(not_null<Ui::VerticalLayout*> container) {
 		}, inner->lifetime());
 
 		const auto controller = _controller->parentController();
-		const auto entryClicked = [=](const Data::CreditsHistoryEntry &e) {
+		const auto entryClicked = [=](
+				const Data::CreditsHistoryEntry &e,
+				const Data::SubscriptionEntry &s) {
 			controller->uiShow()->show(Box(
 				ReceiptCreditsBox,
 				controller,
-				premiumBot.get(),
-				e));
+				e,
+				s));
 		};
 
 		Info::Statistics::AddCreditsHistoryList(
@@ -243,8 +336,7 @@ void Credits::setupHistory(not_null<Ui::VerticalLayout*> container) {
 			fullSlice,
 			fullWrap->entity(),
 			entryClicked,
-			premiumBot,
-			&_star,
+			self,
 			true,
 			true);
 		Info::Statistics::AddCreditsHistoryList(
@@ -252,8 +344,7 @@ void Credits::setupHistory(not_null<Ui::VerticalLayout*> container) {
 			inSlice,
 			inWrap->entity(),
 			entryClicked,
-			premiumBot,
-			&_star,
+			self,
 			true,
 			false);
 		Info::Statistics::AddCreditsHistoryList(
@@ -261,8 +352,7 @@ void Credits::setupHistory(not_null<Ui::VerticalLayout*> container) {
 			outSlice,
 			outWrap->entity(),
 			std::move(entryClicked),
-			premiumBot,
-			&_star,
+			self,
 			false,
 			true);
 
@@ -275,7 +365,6 @@ void Credits::setupHistory(not_null<Ui::VerticalLayout*> container) {
 	const auto apiLifetime = content->lifetime().make_state<rpl::lifetime>();
 	{
 		using Api = Api::CreditsHistory;
-		const auto self = _controller->session().user();
 		const auto apiFull = apiLifetime->make_state<Api>(self, true, true);
 		const auto apiIn = apiLifetime->make_state<Api>(self, true, false);
 		const auto apiOut = apiLifetime->make_state<Api>(self, false, true);
@@ -301,7 +390,133 @@ void Credits::setupContent() {
 			Ui::StartFireworks(_parent);
 		}
 	};
-	FillCreditOptions(_controller, content, 0, paid);
+	Ui::AddSkip(content);
+	Ui::AddSkip(content);
+	const auto balanceLine = content->add(
+		object_ptr<Ui::CenterWrap<>>(
+			content,
+			object_ptr<Ui::RpWidget>(content)))->entity();
+	const auto balanceIcon = CreateSingleStarWidget(
+		balanceLine,
+		st::creditsSettingsBigBalance.style.font->height);
+	const auto balanceAmount = Ui::CreateChild<Ui::FlatLabel>(
+		balanceLine,
+		_controller->session().credits().balanceValue(
+		) | rpl::map(Lang::FormatStarsAmountDecimal),
+		st::creditsSettingsBigBalance);
+	balanceAmount->sizeValue() | rpl::start_with_next([=] {
+		balanceLine->resize(
+			balanceIcon->width()
+				+ st::creditsSettingsBigBalanceSkip
+				+ balanceAmount->textMaxWidth(),
+			balanceIcon->height());
+	}, balanceLine->lifetime());
+	balanceLine->widthValue() | rpl::start_with_next([=] {
+		balanceAmount->moveToRight(0, 0);
+	}, balanceLine->lifetime());
+	Ui::AddSkip(content);
+	content->add(
+		object_ptr<Ui::CenterWrap<>>(
+			content,
+			object_ptr<Ui::FlatLabel>(
+				content,
+				tr::lng_credits_balance_me(),
+				st::infoTopBar.subtitle)));
+	Ui::AddSkip(content);
+	Ui::AddSkip(content);
+	Ui::AddSkip(content);
+
+	struct State final {
+		rpl::variable<bool> confirmButtonBusy = false;
+		std::optional<Api::CreditsTopupOptions> api;
+	};
+	const auto state = content->lifetime().make_state<State>();
+
+	const auto button = content->add(
+		object_ptr<Ui::RoundButton>(
+			content,
+			rpl::conditional(
+				state->confirmButtonBusy.value(),
+				rpl::single(QString()),
+				tr::lng_credits_buy_button()),
+			st::creditsSettingsBigBalanceButton),
+		st::boxRowPadding);
+	button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+	const auto show = _controller->uiShow();
+	const auto optionsBox = [=](not_null<Ui::GenericBox*> box) {
+		box->setStyle(st::giveawayGiftCodeBox);
+		box->setWidth(st::boxWideWidth);
+		box->setTitle(tr::lng_credits_summary_options_subtitle());
+		const auto inner = box->verticalLayout();
+		const auto self = show->session().user();
+		const auto options = state->api
+			? state->api->options()
+			: Data::CreditTopupOptions();
+		const auto amount = StarsAmount();
+		FillCreditOptions(show, inner, self, amount, paid, nullptr, options);
+
+		const auto button = box->addButton(tr::lng_close(), [=] {
+			box->closeBox();
+		});
+		const auto buttonWidth = st::boxWideWidth
+			- rect::m::sum::h(st::giveawayGiftCodeBox.buttonPadding);
+		button->widthValue() | rpl::filter([=] {
+			return (button->widthNoMargins() != buttonWidth);
+		}) | rpl::start_with_next([=] {
+			button->resizeToWidth(buttonWidth);
+		}, button->lifetime());
+	};
+	button->setClickedCallback([=] {
+		if (state->api && !state->api->options().empty()) {
+			state->confirmButtonBusy = false;
+			show->show(Box(optionsBox));
+		} else {
+			state->confirmButtonBusy = true;
+			state->api.emplace(show->session().user());
+			state->api->request(
+			) | rpl::start_with_error_done([=](const QString &error) {
+				state->confirmButtonBusy = false;
+				show->showToast(error);
+			}, [=] {
+				state->confirmButtonBusy = false;
+				show->show(Box(optionsBox));
+			}, content->lifetime());
+		}
+	});
+	{
+		using namespace Info::Statistics;
+		const auto loadingAnimation = InfiniteRadialAnimationWidget(
+			button,
+			button->height() / 2);
+		AddChildToWidgetCenter(button, loadingAnimation);
+		loadingAnimation->showOn(state->confirmButtonBusy.value());
+	}
+	const auto paddings = rect::m::sum::h(st::boxRowPadding);
+	button->widthValue() | rpl::filter([=] {
+		return (button->widthNoMargins() != (content->width() - paddings));
+	}) | rpl::start_with_next([=] {
+		button->resizeToWidth(content->width() - paddings);
+	}, button->lifetime());
+
+	Ui::AddSkip(content);
+
+	const auto gift = content->add(
+		object_ptr<Ui::RoundButton>(
+			content,
+			tr::lng_credits_gift_button(),
+			st::creditsSettingsBigBalanceButtonGift),
+		st::boxRowPadding);
+	gift->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+	gift->setClickedCallback([=, controller = _controller] {
+		Ui::ShowGiftCreditsBox(controller, paid);
+	});
+
+	Ui::AddSkip(content);
+	Ui::AddSkip(content);
+	Ui::AddDivider(content);
+
+	setupStarRefPromo(content);
+	setupSubscriptions(content);
 	setupHistory(content);
 
 	Ui::ResizeFitChild(this, content);
@@ -357,13 +572,14 @@ QPointer<Ui::RpWidget> Credits::createPinnedToTop(
 	{
 		const auto balance = AddBalanceWidget(
 			content,
-			_controller->session().creditsValue(),
-			true);
-		const auto api = balance->lifetime().make_state<Api::CreditsStatus>(
-			_controller->session().user());
-		api->request({}, [=](Data::CreditsStatusSlice slice) {
-			_controller->session().setCredits(slice.balance);
-		});
+			_controller->session().credits().balanceValue(),
+			true,
+			content->heightValue() | rpl::map([=](int height) {
+				const auto ratio = float64(height - content->minimumHeight())
+					/ (content->maximumHeight() - content->minimumHeight());
+				return (1. - ratio / 0.35);
+			}));
+		_controller->session().credits().load(true);
 		rpl::combine(
 			balance->sizeValue(),
 			content->sizeValue()

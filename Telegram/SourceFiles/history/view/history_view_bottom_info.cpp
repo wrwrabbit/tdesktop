@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/click_handler_types.h"
 #include "main/main_session.h"
 #include "lottie/lottie_icon.h"
+#include "data/data_channel.h"
 #include "data/data_session.h"
 #include "data/data_message_reactions.h"
 #include "window/window_session_controller.h"
@@ -406,6 +407,8 @@ void BottomInfo::layout() {
 void BottomInfo::layoutDateText() {
 	const auto edited = (_data.flags & Data::Flag::Edited)
 		? (tr::lng_edited(tr::now) + ' ')
+		: (_data.flags & Data::Flag::EstimateDate)
+		? (tr::lng_approximate(tr::now) + ' ')
 		: QString();
 	const auto author = _data.author;
 	const auto prefix = !author.isEmpty() ? u", "_q : QString();
@@ -570,10 +573,14 @@ BottomInfo::Data BottomInfoDataFromMessage(not_null<Message*> message) {
 	if (message->context() == Context::ShortcutMessages) {
 		result.flags |= Flag::Shortcut;
 	}
-	if (const auto msgsigned = item->Get<HistoryMessageSigned>()) {
-		 if (!msgsigned->isAnonymousRank) {
-			result.author = msgsigned->author;
-		 }
+	if (!item->isPost()
+		|| !item->hasRealFromId()
+		|| !item->history()->peer->asChannel()->signatureProfiles()) {
+		if (const auto msgsigned = item->Get<HistoryMessageSigned>()) {
+			if (!msgsigned->isAnonymousRank) {
+				result.author = msgsigned->author;
+			}
+		}
 	}
 	if (message->displayedEditDate()) {
 		result.flags |= Flag::Edited;
@@ -595,6 +602,9 @@ BottomInfo::Data BottomInfoDataFromMessage(not_null<Message*> message) {
 	const auto forwarded = item->Get<HistoryMessageForwarded>();
 	if (forwarded && forwarded->imported) {
 		result.flags |= Flag::Imported;
+	}
+	if (item->awaitingVideoProcessing()) {
+		result.flags |= Flag::EstimateDate;
 	}
 	// We don't want to pass and update it in Data for now.
 	//if (item->unread()) {

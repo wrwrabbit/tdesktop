@@ -1,21 +1,16 @@
 diff --git a/options_linux.cmake b/options_linux.cmake
-index 2351d6c..07e43df 100644
+index dfafff4..d2dac83 100644
 --- a/options_linux.cmake
 +++ b/options_linux.cmake
-@@ -34,15 +34,9 @@ INTERFACE
+@@ -34,9 +34,9 @@ INTERFACE
  )
  
  if (DESKTOP_APP_SPECIAL_TARGET)
 -    target_compile_options(common_options
--    INTERFACE
--        -Werror
--        $<$<NOT:$<CONFIG:Debug>>:-g>
--        $<$<NOT:$<CONFIG:Debug>>:-flto=auto>
--    )
-     target_link_options(common_options
++    target_link_options(common_options
      INTERFACE
--        $<$<NOT:$<CONFIG:Debug>>:-flto=auto>
+-        -Werror
 +        -s
-         $<$<NOT:$<CONFIG:Debug>>:-fwhole-program>
      )
  endif()
+ 

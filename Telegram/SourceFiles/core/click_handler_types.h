@@ -16,10 +16,15 @@ constexpr auto kDocumentLinkMediaProperty = 0x03;
 constexpr auto kSendReactionEmojiProperty = 0x04;
 constexpr auto kReactionsCountEmojiProperty = 0x05;
 constexpr auto kDocumentFilenameTooltipProperty = 0x06;
+constexpr auto kPhoneNumberLinkProperty = 0x07;
 
 namespace Ui {
 class Show;
 } // namespace Ui
+
+namespace InlineBots {
+struct WebViewContext;
+} // namespace InlineBots
 
 namespace Main {
 class Session;
@@ -38,15 +43,16 @@ class SessionController;
 class PeerData;
 struct ClickHandlerContext {
 	FullMsgId itemId;
-	QString attachBotWebviewUrl;
 	// Is filled from sections.
 	Fn<HistoryView::ElementDelegate*()> elementDelegate;
 	base::weak_ptr<Window::SessionController> sessionWindow;
+	std::shared_ptr<InlineBots::WebViewContext> botWebviewContext;
 	std::shared_ptr<Ui::Show> show;
 	bool mayShowConfirmation = false;
 	bool skipBotAutoLogin = false;
 	bool botStartAutoSubmit = false;
 	bool ignoreIv = false;
+	bool dark = false;
 	// Is filled from peer info.
 	PeerData *peer = nullptr;
 };

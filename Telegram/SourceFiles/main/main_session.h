@@ -36,6 +36,8 @@ class ScheduledMessages;
 class SponsoredMessages;
 class TopPeers;
 class Factchecks;
+class LocationPickers;
+class Credits;
 } // namespace Data
 
 namespace HistoryView::Reactions {
@@ -101,9 +103,6 @@ public:
 	[[nodiscard]] bool premiumBadgesShown() const;
 	[[nodiscard]] bool premiumCanBuy() const;
 
-	[[nodiscard]] rpl::producer<uint64> creditsValue() const;
-	void setCredits(uint64 credits);
-
 	[[nodiscard]] bool isTestMode() const;
 	[[nodiscard]] uint64 uniqueId() const; // userId() with TestDC shift.
 	[[nodiscard]] UserId userId() const;
@@ -128,8 +127,17 @@ public:
 	[[nodiscard]] Data::TopPeers &topPeers() const {
 		return *_topPeers;
 	}
+	[[nodiscard]] Data::TopPeers &topBotApps() const {
+		return *_topBotApps;
+	}
 	[[nodiscard]] Data::Factchecks &factchecks() const {
 		return *_factchecks;
+	}
+	[[nodiscard]] Data::LocationPickers &locationPickers() const {
+		return *_locationPickers;
+	}
+	[[nodiscard]] Data::Credits &credits() const {
+		return *_credits;
 	}
 	[[nodiscard]] Api::Updates &updates() const {
 		return *_updates;
@@ -258,7 +266,10 @@ private:
 	const std::unique_ptr<Data::ScheduledMessages> _scheduledMessages;
 	const std::unique_ptr<Data::SponsoredMessages> _sponsoredMessages;
 	const std::unique_ptr<Data::TopPeers> _topPeers;
+	const std::unique_ptr<Data::TopPeers> _topBotApps;
 	const std::unique_ptr<Data::Factchecks> _factchecks;
+	const std::unique_ptr<Data::LocationPickers> _locationPickers;
+	const std::unique_ptr<Data::Credits> _credits;
 
 	using ReactionIconFactory = HistoryView::Reactions::CachedIconFactory;
 	const std::unique_ptr<ReactionIconFactory> _cachedReactionIconFactory;
@@ -266,7 +277,6 @@ private:
 	const std::unique_ptr<Support::Helper> _supportHelper;
 
 	std::shared_ptr<QImage> _selfUserpicView;
-	rpl::variable<uint64> _credits = 0;
 	rpl::variable<bool> _premiumPossible = false;
 
 	rpl::event_stream<bool> _termsLockChanges;

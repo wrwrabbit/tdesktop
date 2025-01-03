@@ -9,7 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "history/view/history_view_element.h"
 #include "history/admin_log/history_admin_log_item.h"
-#include "history/admin_log/history_admin_log_section.h"
+#include "history/admin_log/history_admin_log_filter_value.h"
 #include "menu/menu_antispam_validator.h"
 #include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
@@ -34,6 +34,7 @@ enum class PointState : char;
 namespace Ui {
 class PopupMenu;
 class ChatStyle;
+class ChatTheme;
 struct PeerUserpicView;
 } // namespace Ui
 
@@ -93,7 +94,8 @@ public:
 	HistoryView::Context elementContext() override;
 	bool elementUnderCursor(
 		not_null<const HistoryView::Element*> view) override;
-	bool elementInSelectionMode() override;
+	HistoryView::SelectionModeResult elementInSelectionMode(
+		const HistoryView::Element *view) override;
 	bool elementIntersectsRange(
 		not_null<const HistoryView::Element*> view,
 		int from,
@@ -140,6 +142,8 @@ public:
 		not_null<const HistoryView::Element*> view,
 		HistoryView::Element *replacing) override;
 	QString elementAuthorRank(
+		not_null<const HistoryView::Element*> view) override;
+	bool elementHideTopicButton(
 		not_null<const HistoryView::Element*> view) override;
 
 	~InnerWidget();
@@ -226,8 +230,12 @@ private:
 	void paintEmpty(Painter &p, not_null<const Ui::ChatStyle*> st);
 	void clearAfterFilterChange();
 	void clearAndRequestLog();
-	void addEvents(Direction direction, const QVector<MTPChannelAdminLogEvent> &events);
-	Element *viewForItem(const HistoryItem *item);
+	void addEvents(
+		Direction direction,
+		const QVector<MTPChannelAdminLogEvent> &events);
+	[[nodiscard]] Element *viewForItem(const HistoryItem *item);
+	[[nodiscard]] bool myView(
+		not_null<const HistoryView::Element*> view) const;
 
 	void toggleScrollDateShown();
 	void repaintScrollDateCallback();

@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "ui/vertical_list.h"
 #include "ui/unread_badge_paint.h"
+#include "ui/ui_utility.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
 #include "core/core_settings.h"
@@ -573,8 +574,7 @@ void SetupBio(
 		}
 		changed->fire(*current != text);
 		const auto limit = self->isPremium() ? premiumLimit : defaultLimit;
-		const auto countLeft = limit
-			- bio->lastTextSizeWithoutSurrogatePairsCount();
+		const auto countLeft = limit - Ui::ComputeFieldCharacterCount(bio);
 		countdown->setText(QString::number(countLeft));
 		countdown->setTextColorOverride(
 			countLeft < 0 ? st::boxTextFgError->c : std::optional<QColor>());
@@ -746,29 +746,22 @@ void SetupAccountsWrap(
 		} else if (which != Qt::RightButton) {
 			return;
 		}
-		if (!state->menu && IsAltShift(raw->clickModifiers()) && !locked) {
-			state->menu = base::make_unique_q<Ui::PopupMenu>(
-				raw,
-				st::popupMenuWithIcons);
-			Window::MenuAddMarkAsReadAllChatsAction(
-				window,
-				Ui::Menu::CreateAddActionCallback(state->menu));
-			state->menu->popup(QCursor::pos());
+		if (state->menu) {
 			return;
 		}
-		if (session == &window->session() || state->menu) {
-			return;
-		}
+		const auto isActive = session == &window->session();
 		state->menu = base::make_unique_q<Ui::PopupMenu>(
 			raw,
 			st::popupMenuExpandedSeparator);
 		const auto addAction = Ui::Menu::CreateAddActionCallback(
 			state->menu);
-		addAction(tr::lng_context_new_window(tr::now), [=] {
-			Ui::PreventDelayedActivation();
-			callback(Qt::ControlModifier);
-		}, &st::menuIconNewWindow);
-		Window::AddSeparatorAndShiftUp(addAction);
+		if (!isActive) {
+			addAction(tr::lng_context_new_window(tr::now), [=] {
+				Ui::PreventDelayedActivation();
+				callback(Qt::ControlModifier);
+			}, &st::menuIconNewWindow);
+			Window::AddSeparatorAndShiftUp(addAction);
+		}
 
 		addAction(tr::lng_profile_copy_phone(tr::now), [=] {
 			const auto phone = rpl::variable<TextWithEntities>(
@@ -777,31 +770,39 @@ void SetupAccountsWrap(
 		}, &st::menuIconCopy);
 
 		if (!locked) {
-			addAction(tr::lng_menu_activate(tr::now), [=] {
-				callback({});
-			}, &st::menuIconProfile);
+			if (!isActive) {
+				addAction(tr::lng_menu_activate(tr::now), [=] {
+					callback({});
+				}, &st::menuIconProfile);
+			}
+			Window::MenuAddMarkAsReadAllChatsAction(
+				session,
+				window->uiShow(),
+				addAction);
 		}
 
-		auto logoutCallback = [=] {
-			const auto callback = [=](Fn<void()> &&close) {
-				close();
-				Core::App().logoutWithChecks(&session->account());
+		if (!isActive) {
+			auto logoutCallback = [=] {
+				const auto callback = [=](Fn<void()> &&close) {
+					close();
+					Core::App().logoutWithChecks(&session->account());
+				};
+				window->show(
+					Ui::MakeConfirmBox({
+						.text = tr::lng_sure_logout(),
+						.confirmed = crl::guard(session, callback),
+						.confirmText = tr::lng_settings_logout(),
+						.confirmStyle = &st::attentionBoxButton,
+					}),
+					Ui::LayerOption::CloseOther);
 			};
-			window->show(
-				Ui::MakeConfirmBox({
-					.text = tr::lng_sure_logout(),
-					.confirmed = crl::guard(session, callback),
-					.confirmText = tr::lng_settings_logout(),
-					.confirmStyle = &st::attentionBoxButton,
-				}),
-				Ui::LayerOption::CloseOther);
-		};
-		addAction({
-			.text = tr::lng_settings_logout(tr::now),
-			.handler = std::move(logoutCallback),
-			.icon = &st::menuIconLeaveAttention,
-			.isAttention = true,
-		});
+			addAction({
+				.text = tr::lng_settings_logout(tr::now),
+				.handler = std::move(logoutCallback),
+				.icon = &st::menuIconLeaveAttention,
+				.isAttention = true,
+			});
+		}
 		state->menu->popup(QCursor::pos());
 	}, raw->lifetime());
 
@@ -984,13 +985,13 @@ void AccountsList::rebuild() {
 						_reorder->finishReordering();
 						if (newWindow) {
 							_closeRequests.fire({});
-							Core::App().ensureSeparateWindowForAccount(
-								account);
+							Core::App().ensureSeparateWindowFor(account);
 						}
 						Core::App().domain().maybeActivate(account);
 					}
 				};
-				if (const auto window = Core::App().separateWindowForAccount(account)) {
+				if (const auto window = Core::App().separateWindowFor(
+						account)) {
 					_closeRequests.fire({});
 					window->activate();
 				} else {

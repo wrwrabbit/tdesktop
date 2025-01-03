@@ -8,16 +8,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 
 #include "data/data_abstract_structure.h"
-#include "data/data_photo.h"
-#include "data/data_document.h"
+#include "data/data_forum.h"
+#include "data/data_message_reactions.h"
 #include "data/data_session.h"
-#include "data/data_stories.h"
-#include "data/data_user.h"
-#include "data/data_channel.h"
 #include "data/data_download_manager.h"
 #include "base/battery_saving.h"
 #include "base/event_filter.h"
 #include "base/concurrent_timer.h"
+#include "base/options.h"
 #include "base/qt_signal_producer.h"
 #include "base/timer.h"
 #include "base/unixtime.h"
@@ -30,15 +28,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/ui_integration.h"
 #include "chat_helpers/emoji_keywords.h"
 #include "chat_helpers/stickers_emoji_image_loader.h"
-#include "base/qt/qt_common_adapters.h"
 #include "base/platform/base_platform_global_shortcuts.h"
 #include "base/platform/base_platform_url_scheme.h"
 #include "base/platform/base_platform_last_input.h"
 #include "base/platform/base_platform_info.h"
 #include "platform/platform_specific.h"
 #include "platform/platform_integration.h"
-#include "mainwindow.h"
-#include "dialogs/dialogs_entry.h"
 #include "history/history.h"
 #include "apiwrap.h"
 #include "api/api_updates.h"
@@ -46,7 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "countries/countries_manager.h"
 #include "iv/iv_delegate_impl.h"
 #include "iv/iv_instance.h"
-#include "lang/lang_file_parser.h"
+#include "iv/iv_data.h"
 #include "lang/lang_translator.h"
 #include "lang/lang_cloud_manager.h"
 #include "lang/lang_hardcoded.h"
@@ -54,7 +49,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "inline_bots/bot_attach_web_view.h"
 #include "mainwidget.h"
 #include "tray.h"
-#include "core/file_utilities.h"
 #include "core/click_handler_types.h" // ClickHandlerContext.
 #include "core/crash_reports.h"
 #include "main/main_account.h"
@@ -64,8 +58,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/view/media_view_open_common.h"
 #include "mtproto/mtproto_dc_options.h"
 #include "mtproto/mtproto_config.h"
-#include "mtproto/mtp_instance.h"
-#include "media/audio/media_audio.h"
 #include "media/audio/media_audio_track.h"
 #include "media/player/media_player_instance.h"
 #include "media/player/media_player_float.h"
@@ -73,30 +65,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/system_media_controls_manager.h"
 #include "window/notifications_manager.h"
 #include "window/themes/window_theme.h"
-#include "window/window_lock_widgets.h"
-#include "history/history_location_manager.h"
 #include "ui/widgets/tooltip.h"
 #include "ui/gl/gl_detection.h"
-#include "ui/image/image.h"
 #include "ui/text/text_options.h"
-#include "ui/emoji_config.h"
-#include "ui/effects/animations.h"
 #include "ui/effects/spoiler_mess.h"
 #include "ui/cached_round_corners.h"
 #include "ui/power_saving.h"
-#include "storage/serialize_common.h"
 #include "storage/storage_domain.h"
 #include "storage/storage_databases.h"
 #include "storage/localstorage.h"
 #include "payments/payments_checkout_process.h"
 #include "export/export_manager.h"
 #include "webrtc/webrtc_environment.h"
+#include "window/window_separate_id.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
 #include "boxes/abstract_box.h"
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
-#include "boxes/connection_box.h"
 #include "boxes/premium_limits_box.h"
 #include "ui/boxes/confirm_box.h"
 #include "styles/style_window.h"
@@ -125,7 +111,7 @@ constexpr auto kFileOpenTimeoutMs = crl::time(1000);
 LaunchState GlobalLaunchState/* = LaunchState::Running*/;
 
 void SetCrashAnnotationsGL() {
-#ifdef Q_OS_WIN
+#ifdef DESKTOP_APP_USE_ANGLE
 	CrashReports::SetAnnotation("OpenGL ANGLE", [] {
 		if (Core::App().settings().disableOpenGL()) {
 			return "Disabled";
@@ -138,16 +124,24 @@ void SetCrashAnnotationsGL() {
 		}
 		Unexpected("Ui::GL::CurrentANGLE value in SetupANGLE.");
 	}());
-#else // Q_OS_WIN
+#else // DESKTOP_APP_USE_ANGLE
 	CrashReports::SetAnnotation(
 		"OpenGL",
 		Core::App().settings().disableOpenGL() ? "Disabled" : "Enabled");
-#endif // Q_OS_WIN
+#endif // DESKTOP_APP_USE_ANGLE
 }
+
+base::options::toggle OptionSkipUrlSchemeRegister({
+	.id = kOptionSkipUrlSchemeRegister,
+	.name = "Skip URL scheme register",
+	.description = "Don't re-register tg:// URL scheme on autoupdate.",
+});
 
 } // namespace
 
 Application *Application::Instance = nullptr;
+
+const char kOptionSkipUrlSchemeRegister[] = "skip-url-scheme-register";
 
 struct Application::Private {
 	base::Timer quitTimer;
@@ -185,8 +179,11 @@ Application::Application()
 	_platformIntegration->init();
 
 	passcodeLockChanges(
-	) | rpl::start_with_next([=] {
+	) | rpl::start_with_next([=](bool locked) {
 		_shouldLockAt = 0;
+		if (locked) {
+			closeAdditionalWindows();
+		}
 	}, _lifetime);
 
 	passcodeLockChanges(
@@ -209,6 +206,16 @@ Application::Application()
 	}, _lifetime);
 }
 
+void Application::closeAdditionalWindows() {
+	Payments::CheckoutProcess::ClearAll();
+	for (const auto &[index, account] : _domain->accounts()) {
+		if (account->sessionExists()) {
+			account->session().attachWebView().closeAll();
+		}
+	}
+	_iv->closeAll();
+}
+
 Application::~Application() {
 	_fakeMtpHolder.reset();
 
@@ -220,8 +227,7 @@ Application::~Application() {
 	setLastActiveWindow(nullptr);
 	_windowInSettings = _lastActivePrimaryWindow = nullptr;
 	_closingAsyncWindows.clear();
-	_secondaryWindows.clear();
-	_primaryWindows.clear();
+	_windows.clear();
 	_mediaView = nullptr;
 	_notifications->clearAllFast();
 
@@ -231,9 +237,7 @@ Application::~Application() {
 	//
 	// For example Domain::removeRedundantAccounts() is called from
 	// Domain::finish() and there is a violation on Ensures(started()).
-	Payments::CheckoutProcess::ClearAll();
-	InlineBots::AttachWebView::ClearAll();
-	_iv->closeAll();
+	closeAdditionalWindows();
 
 	_domain->finish();
 
@@ -272,7 +276,7 @@ void Application::run() {
 	refreshGlobalProxy(); // Depends on app settings being read.
 
 	if (const auto old = Local::oldSettingsVersion(); old < AppVersion) {
-		InvokeQueued(this, [] { RegisterUrlScheme(); });
+		autoRegisterUrlScheme();
 		Platform::NewVersionLaunched(old);
 	}
 
@@ -326,8 +330,11 @@ void Application::run() {
 	// Create mime database, so it won't be slow later.
 	QMimeDatabase().mimeTypeForName(u"text/plain"_q);
 
-	_primaryWindows.emplace(nullptr, std::make_unique<Window::Controller>());
-	setLastActiveWindow(_primaryWindows.front().second.get());
+	// Check now to avoid re-entrance later.
+	[[maybe_unused]] const auto ivSupported = Iv::ShowButton();
+
+	_windows.emplace(nullptr, std::make_unique<Window::Controller>());
+	setLastActiveWindow(_windows.front().second.get());
 	_windowInSettings = _lastActivePrimaryWindow = _lastActiveWindow;
 
 	_domain->activeChanges(
@@ -417,8 +424,14 @@ void Application::run() {
 	processCreatedWindow(_lastActivePrimaryWindow);
 }
 
+void Application::autoRegisterUrlScheme() {
+	if (!OptionSkipUrlSchemeRegister.value()) {
+		InvokeQueued(this, [] { RegisterUrlScheme(); });
+	}
+}
+
 void Application::showAccount(not_null<Main::Account*> account) {
-	if (const auto separate = separateWindowForAccount(account)) {
+	if (const auto separate = separateWindowFor(account)) {
 		_lastActivePrimaryWindow = separate;
 		separate->activate();
 	} else if (const auto last = activePrimaryWindow()) {
@@ -426,13 +439,13 @@ void Application::showAccount(not_null<Main::Account*> account) {
 	}
 }
 
-void Application::checkWindowAccount(not_null<Window::Controller*> window) {
-	const auto account = window->maybeAccount();
-	for (auto &[key, existing] : _primaryWindows) {
-		if (existing.get() == window && key != account) {
+void Application::checkWindowId(not_null<Window::Controller*> window) {
+	const auto id = window->id();
+	for (auto &[existingId, existing] : _windows) {
+		if (existing.get() == window && existingId != id) {
 			auto found = std::move(existing);
-			_primaryWindows.remove(key);
-			_primaryWindows.emplace(account, std::move(found));
+			_windows.remove(existingId);
+			_windows.emplace(id, std::move(found));
 			break;
 		}
 	}
@@ -508,10 +521,7 @@ void Application::startSystemDarkModeViewer() {
 
 void Application::enumerateWindows(Fn<void(
 		not_null<Window::Controller*>)> callback) const {
-	for (const auto &window : ranges::views::values(_primaryWindows)) {
-		callback(window.get());
-	}
-	for (const auto &window : ranges::views::values(_secondaryWindows)) {
+	for (const auto &window : ranges::views::values(_windows)) {
 		callback(window.get());
 	}
 }
@@ -620,10 +630,7 @@ void Application::clearEmojiSourceImages() {
 }
 
 bool Application::isActiveForTrayMenu() const {
-	return ranges::any_of(ranges::views::values(_primaryWindows), [=](
-			const std::unique_ptr<Window::Controller> &controller) {
-		return controller->widget()->isActiveForTrayMenu();
-	}) || ranges::any_of(ranges::views::values(_secondaryWindows), [=](
+	return ranges::any_of(ranges::views::values(_windows), [=](
 			const std::unique_ptr<Window::Controller> &controller) {
 		return controller->widget()->isActiveForTrayMenu();
 	});
@@ -682,7 +689,8 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 			if (const auto file = event->file(); !file.isEmpty()) {
 				_filesToOpen.append(file);
 				_fileOpenTimer.callOnce(kFileOpenTimeoutMs);
-			} else if (event->url().scheme() == u"tg"_q) {
+			} else if (event->url().scheme() == u"tg"_q
+				|| event->url().scheme() == u"tonsite"_q) {
 				const auto url = QString::fromUtf8(
 					event->url().toEncoded().trimmed());
 				cSetStartUrl(url.mid(0, 8192));
@@ -728,14 +736,12 @@ void Application::saveSettings() {
 	Local::writeSettings();
 }
 
-bool Application::canReadDefaultDownloadPath(bool always) const {
-	if (KSandbox::isInside()
-		&& (always || settings().downloadPath().isEmpty())) {
-		const auto path = QStandardPaths::writableLocation(
-			QStandardPaths::DownloadLocation);
-		return base::CanReadDirectory(path);
-	}
-	return true;
+bool Application::canReadDefaultDownloadPath() const {
+	return KSandbox::isInside()
+		? base::CanReadDirectory(
+			QStandardPaths::writableLocation(
+				QStandardPaths::DownloadLocation))
+		: true;
 }
 
 bool Application::canSaveFileWithoutAskingForPath() const {
@@ -1118,13 +1124,18 @@ void Application::checkSendPaths() {
 }
 
 void Application::checkStartUrl() {
-	if (!cStartUrl().isEmpty()
-		&& _lastActivePrimaryWindow
-		&& !_lastActivePrimaryWindow->locked()) {
+	if (!cStartUrl().isEmpty()) {
 		const auto url = cStartUrl();
-		cSetStartUrl(QString());
-		if (!openLocalUrl(url, {})) {
-			cSetStartUrl(url);
+		if (!Core::App().passcodeLocked()) {
+			if (url.startsWith("tonsite://", Qt::CaseInsensitive)) {
+				cSetStartUrl(QString());
+				iv().showTonSite(url, {});
+			} else if (_lastActivePrimaryWindow) {
+				cSetStartUrl(QString());
+				if (!openLocalUrl(url, {})) {
+					cSetStartUrl(url);
+				}
+			}
 		}
 	}
 }
@@ -1180,7 +1191,14 @@ bool Application::openCustomUrl(
 		|| passcodeLocked()) {
 		return false;
 	}
-	const auto command = base::StringViewMid(urlTrimmed, protocol.size(), 8192);
+	static const auto kTagExp = QRegularExpression(
+		u"^\\~[a-zA-Z0-9_\\-]+\\~:"_q);
+	auto skip = protocol.size();
+	const auto match = kTagExp.match(base::StringViewMid(urlTrimmed, skip));
+	if (match.hasMatch()) {
+		skip += match.capturedLength();
+	}
+	const auto command = base::StringViewMid(urlTrimmed, skip, 8192);
 	const auto my = context.value<ClickHandlerContext>();
 	const auto controller = my.sessionWindow.get()
 		? my.sessionWindow.get()
@@ -1348,44 +1366,36 @@ Window::Controller *Application::activePrimaryWindow() const {
 	return _lastActivePrimaryWindow;
 }
 
-Window::Controller *Application::separateWindowForAccount(
-	not_null<Main::Account*> account) const {
-	for (const auto &[openedAccount, window] : _primaryWindows) {
-		if (openedAccount == account.get()) {
+Window::Controller *Application::separateWindowFor(
+		Window::SeparateId id) const {
+	for (const auto &[existingId, window] : _windows) {
+		if (existingId == id) {
 			return window.get();
 		}
 	}
 	return nullptr;
 }
 
-Window::Controller *Application::separateWindowForPeer(
-		not_null<PeerData*> peer) const {
-	for (const auto &[history, window] : _secondaryWindows) {
-		if (history->peer == peer) {
-			return window.get();
-		}
-	}
-	return nullptr;
-}
-
-Window::Controller *Application::ensureSeparateWindowForPeer(
-		not_null<PeerData*> peer,
+Window::Controller *Application::ensureSeparateWindowFor(
+		Window::SeparateId id,
 		MsgId showAtMsgId) {
 	const auto activate = [&](not_null<Window::Controller*> window) {
 		window->activate();
 		return window;
 	};
-
-	if (const auto existing = separateWindowForPeer(peer)) {
-		existing->sessionController()->showPeerHistory(
-			peer,
-			Window::SectionShow::Way::ClearStack,
-			showAtMsgId);
+	if (const auto existing = separateWindowFor(id)) {
+		if (id.thread && id.type == Window::SeparateType::Chat) {
+			existing->sessionController()->showThread(
+				id.thread,
+				showAtMsgId,
+				Window::SectionShow::Way::ClearStack);
+		}
 		return activate(existing);
 	}
-	const auto result = _secondaryWindows.emplace(
-		peer->owner().history(peer),
-		std::make_unique<Window::Controller>(peer, showAtMsgId)
+
+	const auto result = _windows.emplace(
+		id,
+		std::make_unique<Window::Controller>(id, showAtMsgId)
 	).first->second.get();
 	processCreatedWindow(result);
 	result->firstShow();
@@ -1393,39 +1403,52 @@ Window::Controller *Application::ensureSeparateWindowForPeer(
 	return activate(result);
 }
 
-Window::Controller *Application::ensureSeparateWindowForAccount(
-		not_null<Main::Account*> account) {
-	const auto activate = [&](not_null<Window::Controller*> window) {
-		window->activate();
-		return window;
-	};
-
-	if (const auto existing = separateWindowForAccount(account)) {
-		return activate(existing);
-	}
-	const auto result = _primaryWindows.emplace(
-		account,
-		std::make_unique<Window::Controller>(account)
-	).first->second.get();
-	processCreatedWindow(result);
-	result->firstShow();
-	result->finishFirstShow();
-	return activate(result);
-}
-
-Window::Controller *Application::windowFor(not_null<PeerData*> peer) const {
-	if (const auto separate = separateWindowForPeer(peer)) {
+Window::Controller *Application::windowFor(Window::SeparateId id) const {
+	if (const auto separate = separateWindowFor(id)) {
 		return separate;
-	}
-	return windowFor(&peer->account());
-}
-
-Window::Controller *Application::windowFor(
-		not_null<Main::Account*> account) const {
-	if (const auto separate = separateWindowForAccount(account)) {
-		return separate;
+	} else if (id && !id.primary()) {
+		return windowFor(not_null(id.account));
 	}
 	return activePrimaryWindow();
+}
+
+Window::Controller *Application::windowForShowingHistory(
+		not_null<PeerData*> peer) const {
+	if (const auto separate = separateWindowFor(peer)) {
+		return separate;
+	}
+	auto result = (Window::Controller*)nullptr;
+	enumerateWindows([&](not_null<Window::Controller*> window) {
+		if (const auto controller = window->sessionController()) {
+			const auto current = controller->activeChatCurrent();
+			if (const auto history = current.history()) {
+				if (history->peer == peer) {
+					result = window;
+				}
+			}
+		}
+	});
+	return result;
+}
+
+Window::Controller *Application::windowForShowingForum(
+		not_null<Data::Forum*> forum) const {
+	const auto id = Window::SeparateId(
+		Window::SeparateType::Forum,
+		forum->history());
+	if (const auto separate = separateWindowFor(id)) {
+		return separate;
+	}
+	auto result = (Window::Controller*)nullptr;
+	enumerateWindows([&](not_null<Window::Controller*> window) {
+		if (const auto controller = window->sessionController()) {
+			const auto current = controller->shownForum().current();
+			if (forum == current) {
+				result = window;
+			}
+		}
+	});
+	return result;
 }
 
 Window::Controller *Application::findWindow(
@@ -1434,14 +1457,9 @@ Window::Controller *Application::findWindow(
 	if (_lastActiveWindow && _lastActiveWindow->widget() == window) {
 		return _lastActiveWindow;
 	}
-	for (const auto &[account, primary] : _primaryWindows) {
-		if (primary->widget() == window) {
-			return primary.get();
-		}
-	}
-	for (const auto &[history, secondary] : _secondaryWindows) {
-		if (secondary->widget() == window) {
-			return secondary.get();
+	for (const auto &[id, controller] : _windows) {
+		if (controller->widget() == window) {
+			return controller.get();
 		}
 	}
 	return nullptr;
@@ -1453,10 +1471,11 @@ Window::Controller *Application::activeWindow() const {
 
 bool Application::closeNonLastAsync(not_null<Window::Controller*> window) {
 	const auto hasOther = [&] {
-		for (const auto &[account, primary] : _primaryWindows) {
-			if (!_closingAsyncWindows.contains(primary.get())
-				&& primary.get() != window
-				&& primary->maybeSession()) {
+		for (const auto &[id, controller] : _windows) {
+			if (id.primary()
+				&& !_closingAsyncWindows.contains(controller.get())
+				&& controller.get() != window
+				&& controller->maybeSession()) {
 				return true;
 			}
 		}
@@ -1518,10 +1537,10 @@ void Application::closeWindow(not_null<Window::Controller*> window) {
 		: nullptr;
 	const auto next = nextFromStack
 		? nextFromStack
-		: (_primaryWindows.front().second.get() != window)
-		? _primaryWindows.front().second.get()
-		: (_primaryWindows.back().second.get() != window)
-		? _primaryWindows.back().second.get()
+		: (_windows.front().second.get() != window)
+		? _windows.front().second.get()
+		: (_windows.back().second.get() != window)
+		? _windows.back().second.get()
 		: nullptr;
 	Assert(next != window);
 
@@ -1542,20 +1561,12 @@ void Application::closeWindow(not_null<Window::Controller*> window) {
 		}
 	}
 	_closingAsyncWindows.remove(window);
-	for (auto i = begin(_primaryWindows); i != end(_primaryWindows);) {
+	for (auto i = begin(_windows); i != end(_windows);) {
 		if (i->second.get() == window) {
 			Assert(_lastActiveWindow != window);
 			Assert(_lastActivePrimaryWindow != window);
 			Assert(_windowInSettings != window);
-			i = _primaryWindows.erase(i);
-		} else {
-			++i;
-		}
-	}
-	for (auto i = begin(_secondaryWindows); i != end(_secondaryWindows);) {
-		if (i->second.get() == window) {
-			Assert(_lastActiveWindow != window);
-			i = _secondaryWindows.erase(i);
+			i = _windows.erase(i);
 		} else {
 			++i;
 		}
@@ -1563,36 +1574,34 @@ void Application::closeWindow(not_null<Window::Controller*> window) {
 	const auto account = domain().started()
 		? &domain().active()
 		: nullptr;
-	if (account && !_primaryWindows.contains(account) && _lastActiveWindow) {
+	if (account
+		&& !_windows.contains(Window::SeparateId(account))
+		&& _lastActiveWindow) {
 		domain().activate(&_lastActiveWindow->account());
 	}
 }
 
 void Application::closeChatFromWindows(not_null<PeerData*> peer) {
-	if (const auto window = windowFor(peer)
-		; window && !window->isPrimary()) {
-		closeWindow(window);
-	}
-	for (const auto &[history, window] : _secondaryWindows) {
-		if (const auto session = window->sessionController()) {
-			if (session->activeChatCurrent().peer() == peer) {
-				session->showPeerHistory(
-					window->singlePeer()->id,
-					Window::SectionShow::Way::ClearStack);
-			}
-		}
-	}
-	if (const auto window = windowFor(&peer->account())) {
-		if (const auto primary = window->sessionController()) {
-			if (primary->activeChatCurrent().peer() == peer) {
-				primary->clearSectionStack();
-			}
-			if (const auto forum = primary->shownForum().current()) {
-				if (peer->forum() == forum) {
-					primary->closeForum();
+	const auto closeOne = [&] {
+		for (const auto &[id, window] : _windows) {
+			if (id.thread && id.thread->peer() == peer) {
+				closeWindow(window.get());
+				return true;
+			} else if (const auto controller = window->sessionController()) {
+				if (controller->activeChatCurrent().peer() == peer) {
+					controller->showByInitialId();
+				}
+				if (const auto forum = controller->shownForum().current()) {
+					if (peer->forum() == forum) {
+						controller->closeForum();
+					}
 				}
 			}
 		}
+		return false;
+	};
+
+	while (closeOne()) {
 	}
 }
 
@@ -1781,6 +1790,9 @@ bool Application::readyToQuit() {
 				if (session->data().stories().isQuitPrevent()) {
 					prevented = true;
 				}
+				if (session->data().reactions().isQuitPrevent()) {
+					prevented = true;
+				}
 			}
 		}
 	}
@@ -1798,11 +1810,8 @@ void Application::quitPreventFinished() {
 }
 
 void Application::quitDelayed() {
-	for (const auto &[account, window] : _primaryWindows) {
-		window->widget()->hide();
-	}
-	for (const auto &[history, window] : _secondaryWindows) {
-		window->widget()->hide();
+	for (const auto &[id, controller] : _windows) {
+		controller->widget()->hide();
 	}
 	if (!_private->quitTimer.isActive()) {
 		_private->quitTimer.setCallback([] { Sandbox::QuitWhenStarted(); });
@@ -1857,13 +1866,26 @@ void Application::startShortcuts() {
 }
 
 void Application::RegisterUrlScheme() {
+	const auto arguments = Launcher::Instance().customWorkingDir()
+		? u"-workdir \"%1\""_q.arg(cWorkingDir())
+		: QString();
+
 	base::Platform::RegisterUrlScheme(base::Platform::UrlSchemeDescriptor{
 		.executable = Platform::ExecutablePathForShortcuts(),
-		.arguments = Launcher::Instance().customWorkingDir()
-			? u"-workdir \"%1\""_q.arg(cWorkingDir())
-			: QString(),
+		.arguments = arguments,
 		.protocol = u"tg"_q,
 		.protocolName = u"Telegram Link"_q,
+		.shortAppName = u"tdesktop"_q,
+		.longAppName = QCoreApplication::applicationName(),
+		.displayAppName = AppName.utf16(),
+		.displayAppDescription = AppName.utf16(),
+	});
+
+	base::Platform::RegisterUrlScheme(base::Platform::UrlSchemeDescriptor{
+		.executable = Platform::ExecutablePathForShortcuts(),
+		.arguments = arguments,
+		.protocol = u"tonsite"_q,
+		.protocolName = u"TonSite Link"_q,
 		.shortAppName = u"tdesktop"_q,
 		.longAppName = QCoreApplication::applicationName(),
 		.displayAppName = AppName.utf16(),

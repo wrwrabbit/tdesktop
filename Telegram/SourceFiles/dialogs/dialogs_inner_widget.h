@@ -41,6 +41,7 @@ class SessionController;
 } // namespace Window
 
 namespace Data {
+class ChatFilter;
 class Thread;
 class Folder;
 class Forum;
@@ -62,6 +63,8 @@ class IndexedList;
 class SearchTags;
 class SearchEmpty;
 class ChatSearchIn;
+enum class HashOrCashtag : uchar;
+struct RightButton;
 
 struct ChosenRow {
 	Key key;
@@ -71,13 +74,24 @@ struct ChosenRow {
 	bool newWindow : 1 = false;
 };
 
-enum class SearchRequestType {
-	FromStart,
-	FromOffset,
-	PeerFromStart,
-	PeerFromOffset,
-	MigratedFromStart,
-	MigratedFromOffset,
+struct SearchRequestType {
+	bool migrated : 1 = false;
+	bool posts : 1 = false;
+	bool start : 1 = false;
+	bool peer : 1 = false;
+
+	friend inline constexpr auto operator<=>(
+		SearchRequestType a,
+		SearchRequestType b) = default;
+	friend inline constexpr bool operator==(
+		SearchRequestType a,
+		SearchRequestType b) = default;
+};
+
+enum class SearchRequestDelay : uchar {
+	InCache,
+	Instant,
+	Delayed,
 };
 
 enum class WidgetState {
@@ -87,6 +101,8 @@ enum class WidgetState {
 
 class InnerWidget final : public Ui::RpWidget {
 public:
+	using ChatsFilterTagsKey = int64;
+
 	struct ChildListShown {
 		PeerId peerId = 0;
 		float64 shown = 0.;
@@ -145,6 +161,7 @@ public:
 	}
 	[[nodiscard]] bool hasFilteredResults() const;
 
+	void searchRequested(bool loading);
 	void applySearchState(SearchState state);
 	[[nodiscard]] auto searchTagsChanges() const
 		-> rpl::producer<std::vector<Data::ReactionId>>;
@@ -168,7 +185,7 @@ public:
 	[[nodiscard]] rpl::producer<int> scrollByDeltaRequests() const;
 	[[nodiscard]] rpl::producer<Ui::ScrollToRequest> mustScrollTo() const;
 	[[nodiscard]] rpl::producer<Ui::ScrollToRequest> dialogMoved() const;
-	[[nodiscard]] rpl::producer<> searchMessages() const;
+	[[nodiscard]] rpl::producer<SearchRequestDelay> searchRequests() const;
 	[[nodiscard]] rpl::producer<QString> completeHashtagRequests() const;
 	[[nodiscard]] rpl::producer<> refreshHashtagsRequests() const;
 
@@ -183,6 +200,8 @@ public:
 	[[nodiscard]] rpl::producer<> touchCancelRequests() const {
 		return _touchCancelRequests.events();
 	}
+
+	[[nodiscard]] rpl::producer<UserId> openBotMainAppRequests() const;
 
 protected:
 	void visibleTopBottomUpdated(
@@ -202,6 +221,7 @@ private:
 	struct CollapsedRow;
 	struct HashtagResult;
 	struct PeerSearchResult;
+	struct TagCache;
 
 	enum class JumpSkip {
 		PreviousOrBegin,
@@ -244,7 +264,7 @@ private:
 	void repaintCollapsedFolderRow(not_null<Data::Folder*> folder);
 	void refreshWithCollapsedRows(bool toTop = false);
 	bool needCollapsedRowsRefresh() const;
-	bool chooseCollapsedRow();
+	bool chooseCollapsedRow(Qt::KeyboardModifiers modifiers);
 	void switchToFilter(FilterId filterId);
 	bool chooseHashtag();
 	ChosenRow computeChosenRow() const;
@@ -270,11 +290,15 @@ private:
 	void scrollToItem(int top, int height);
 	void scrollToDefaultSelected();
 	void setCollapsedPressed(int pressed);
-	void setPressed(Row *pressed, bool pressedTopicJump);
+	void setPressed(Row *pressed, bool pressedTopicJump, bool pressedBotApp);
 	void clearPressed();
 	void setHashtagPressed(int pressed);
-	void setFilteredPressed(int pressed, bool pressedTopicJump);
+	void setFilteredPressed(
+		int pressed,
+		bool pressedTopicJump,
+		bool pressedBotApp);
 	void setPeerSearchPressed(int pressed);
+	void setPreviewPressed(int pressed);
 	void setSearchedPressed(int pressed);
 	bool isPressed() const {
 		return (_collapsedPressed >= 0)
@@ -282,7 +306,9 @@ private:
 			|| (_hashtagPressed >= 0)
 			|| (_filteredPressed >= 0)
 			|| (_peerSearchPressed >= 0)
-			|| (_searchedPressed >= 0);
+			|| (_previewPressed >= 0)
+			|| (_searchedPressed >= 0)
+			|| _pressedMorePosts;
 	}
 	bool isSelected() const {
 		return (_collapsedSelected >= 0)
@@ -290,7 +316,9 @@ private:
 			|| (_hashtagSelected >= 0)
 			|| (_filteredSelected >= 0)
 			|| (_peerSearchSelected >= 0)
-			|| (_searchedSelected >= 0);
+			|| (_previewSelected >= 0)
+			|| (_searchedSelected >= 0)
+			|| _selectedMorePosts;
 	}
 	bool uniqueSearchResults() const;
 	bool hasHistoryInResults(not_null<History*> history) const;
@@ -301,6 +329,8 @@ private:
 
 	void updateRowCornerStatusShown(not_null<History*> history);
 	void repaintDialogRowCornerStatus(not_null<History*> history);
+
+	bool addBotAppRipple(QPoint origin, Fn<void()> updateCallback);
 
 	void setupShortcuts();
 	RowDescriptor computeJump(
@@ -343,10 +373,11 @@ private:
 	[[nodiscard]] int filteredIndex(int y) const;
 	[[nodiscard]] int filteredHeight(int till = -1) const;
 	[[nodiscard]] int peerSearchOffset() const;
-	[[nodiscard]] int searchTagsOffset() const;
 	[[nodiscard]] int searchInChatOffset() const;
+	[[nodiscard]] int previewOffset() const;
 	[[nodiscard]] int searchedOffset() const;
 	[[nodiscard]] int searchInChatSkip() const;
+	[[nodiscard]] int hashtagsOffset() const;
 
 	void paintCollapsedRows(
 		Painter &p,
@@ -395,14 +426,18 @@ private:
 	//	const Ui::Text::String &text) const;
 	void updateSearchIn();
 	void repaintSearchResult(int index);
+	void repaintPreviewResult(int index);
+
+	[[nodiscard]] bool computeSearchWithPostsPreview() const;
 
 	Ui::VideoUserpic *validateVideoUserpic(not_null<Row*> row);
 	Ui::VideoUserpic *validateVideoUserpic(not_null<History*> history);
 
 	Row *shownRowByKey(Key key);
 	void clearSearchResults(bool clearPeerSearchResults = true);
+	void clearPreviewResults();
 	void updateSelectedRow(Key key = Key());
-	void trackSearchResultsHistory(not_null<History*> history);
+	void trackResultsHistory(not_null<History*> history);
 
 	[[nodiscard]] QBrush currentBg() const;
 	[[nodiscard]] RowDescriptor computeChatPreviewRow() const;
@@ -425,6 +460,16 @@ private:
 	void saveChatsFilterScrollState(FilterId filterId);
 	void restoreChatsFilterScrollState(FilterId filterId);
 
+	[[nodiscard]] bool lookupIsInBotAppButton(
+		Row *row,
+		QPoint localPosition);
+	[[nodiscard]] RightButton *maybeCacheRightButton(Row *row);
+
+	[[nodiscard]] QImage *cacheChatsFilterTag(
+		const Data::ChatFilter &filter,
+		uint8 more,
+		bool active);
+
 	const not_null<Window::SessionController*> _controller;
 
 	not_null<IndexedList*> _shownList;
@@ -441,6 +486,8 @@ private:
 	std::vector<std::unique_ptr<CollapsedRow>> _collapsedRows;
 	not_null<const style::DialogRow*> _st;
 	mutable std::unique_ptr<Ui::TopicJumpCache> _topicJumpCache;
+	bool _selectedMorePosts = false;
+	bool _pressedMorePosts = false;
 	int _collapsedSelected = -1;
 	int _collapsedPressed = -1;
 	bool _skipTopDialog = false;
@@ -449,6 +496,10 @@ private:
 	MsgId _pressedTopicJumpRootId;
 	bool _selectedTopicJump = false;
 	bool _pressedTopicJump = false;
+
+	RightButton *_pressedBotAppData = nullptr;
+	bool _selectedBotApp = false;
+	bool _pressedBotApp = false;
 
 	Row *_dragging = nullptr;
 	int _draggingIndex = -1;
@@ -479,14 +530,21 @@ private:
 
 	EmptyState _emptyState = EmptyState::None;
 
+	base::flat_set<not_null<History*>> _trackedHistories;
+	rpl::lifetime _trackedLifetime;
+
 	QString _peerSearchQuery;
 	std::vector<std::unique_ptr<PeerSearchResult>> _peerSearchResults;
 	int _peerSearchSelected = -1;
 	int _peerSearchPressed = -1;
 
+	std::vector<std::unique_ptr<FakeRow>> _previewResults;
+	int _previewCount = 0;
+	int _previewSelected = -1;
+	int _previewPressed = -1;
+	int _morePostsWidth = 0;
+
 	std::vector<std::unique_ptr<FakeRow>> _searchResults;
-	base::flat_set<not_null<History*>> _searchResultsHistories;
-	rpl::lifetime _searchResultsLifetime;
 	int _searchedCount = 0;
 	int _searchedMigratedCount = 0;
 	int _searchedSelected = -1;
@@ -507,7 +565,8 @@ private:
 	Ui::DraggingScrollManager _draggingScroll;
 
 	SearchState _searchState;
-	bool _searchingHashtag = false;
+	HashOrCashtag _searchHashOrCashtag = {};
+	bool _searchWithPostsPreview = false;
 	History *_searchInMigrated = nullptr;
 	PeerData *_searchFromShown = nullptr;
 	Ui::Text::String _searchFromUserText;
@@ -521,6 +580,12 @@ private:
 
 	base::flat_map<FilterId, int> _chatsFilterScrollStates;
 
+	std::unordered_map<ChatsFilterTagsKey, TagCache> _chatsFilterTags;
+	bool _waitingAllChatListEntryRefreshesForTags = false;
+	rpl::lifetime _handleChatListEntryTagRefreshesLifetime;
+
+	std::unordered_map<PeerId, RightButton> _rightButtons;
+
 	Fn<void()> _loadMoreCallback;
 	Fn<void()> _loadMoreFilteredCallback;
 	rpl::event_stream<> _listBottomReached;
@@ -529,9 +594,10 @@ private:
 
 	rpl::event_stream<Ui::ScrollToRequest> _mustScrollTo;
 	rpl::event_stream<Ui::ScrollToRequest> _dialogMoved;
-	rpl::event_stream<> _searchMessages;
+	rpl::event_stream<SearchRequestDelay> _searchRequests;
 	rpl::event_stream<QString> _completeHashtagRequests;
 	rpl::event_stream<> _refreshHashtagsRequests;
+	rpl::event_stream<UserId> _openBotMainAppRequests;
 
 	RowDescriptor _chatPreviewRow;
 	bool _chatPreviewScheduled = false;
@@ -547,6 +613,7 @@ private:
 
 	bool _savedSublists = false;
 	bool _searchLoading = false;
+	bool _searchWaiting = false;
 
 	base::unique_qptr<Ui::PopupMenu> _menu;
 

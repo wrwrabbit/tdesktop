@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/power_saving.h"
 #include "ui/widgets/call_button.h"
 #include "ui/widgets/labels.h"
+#include "ui/ui_utility.h"
 #include "base/random.h"
 #include "styles/palette.h"
 #include "styles/style_widgets.h"
@@ -80,6 +81,28 @@ constexpr auto kRadialFinishArcShift = 1200;
 		? CallMuteButtonType::ForceMuted
 		: type;
 };
+
+[[nodiscard]] QSize AdjustedLottieSize(
+		not_null<const style::CallMuteButton*> st) {
+	const auto &button = st->active.button;
+	const auto left = (button.width - st->lottieSize.width()) / 2;
+	const auto size = button.width - 2 * left;
+	return QSize(size, size);
+}
+
+[[nodiscard]] int AdjustedBgSize(
+		not_null<const style::CallMuteButton*> st) {
+	const auto &button = st->active.button;
+	const auto left = (button.width - st->active.bgSize) / 2;
+	return button.width - 2 * left;
+}
+
+[[nodiscard]] int AdjustedBgSkip(
+		not_null<const style::CallMuteButton*> st) {
+	const auto &button = st->active.button;
+	const auto bgSize = AdjustedBgSize(st);
+	return (button.width - bgSize) / 2;
+}
 
 auto MuteBlobs() {
 	return std::vector<Paint::Blobs::BlobData>{
@@ -514,9 +537,12 @@ CallMuteButton::CallMuteButton(
 	CallMuteButtonState initial)
 : _state(initial)
 , _st(&st)
+, _lottieSize(AdjustedLottieSize(_st))
+, _bgSize(AdjustedBgSize(_st))
+, _bgSkip(AdjustedBgSkip(_st))
 , _blobs(base::make_unique_q<BlobsWidget>(
 	parent,
-	_st->active.bgSize,
+	_bgSize,
 	rpl::combine(
 		PowerSaving::OnValue(PowerSaving::kCalls),
 		std::move(hideBlobs),
@@ -592,13 +618,13 @@ void CallMuteButton::refreshIcons() {
 	_icons[0].emplace(Lottie::IconDescriptor{
 		.path = u":/icons/calls/voice.lottie"_q,
 		.color = &st::groupCallIconFg,
-		.sizeOverride = _st->lottieSize,
+		.sizeOverride = _lottieSize,
 		.frame = (_iconState.index ? 0 : _iconState.frameTo),
 	});
 	_icons[1].emplace(Lottie::IconDescriptor{
 		.path = u":/icons/calls/hands.lottie"_q,
 		.color = &st::groupCallIconFg,
-		.sizeOverride = _st->lottieSize,
+		.sizeOverride = _lottieSize,
 		.frame = (_iconState.index ? _iconState.frameTo : 0),
 	});
 
@@ -812,7 +838,7 @@ void CallMuteButton::init() {
 	// Icon rect.
 	_content->sizeValue(
 	) | rpl::start_with_next([=](QSize size) {
-		const auto icon = _st->lottieSize;
+		const auto icon = _lottieSize;
 		_muteIconRect = QRect(
 			(size.width() - icon.width()) / 2,
 			_st->lottieTop,
@@ -857,8 +883,8 @@ void CallMuteButton::init() {
 			InfiniteRadialAnimation::Draw(
 				p,
 				r,
-				_st->active.bgPosition,
-				QSize(_st->active.bgSize, _st->active.bgSize),
+				QPoint(_bgSkip, _bgSkip),
+				QSize(_bgSize, _bgSize),
 				_content->width(),
 				QPen(_radialInfo.st.color),
 				_radialInfo.st.thickness);
@@ -869,8 +895,8 @@ void CallMuteButton::init() {
 			InfiniteRadialAnimation::Draw(
 				p,
 				std::move(state),
-				_st->active.bgPosition,
-				QSize(_st->active.bgSize, _st->active.bgSize),
+				QPoint(_bgSkip, _bgSkip),
+				QSize(_bgSize, _bgSize),
 				_content->width(),
 				QPen(_radialInfo.st.color),
 				_radialInfo.st.thickness);
@@ -1026,6 +1052,9 @@ void CallMuteButton::setStyle(const style::CallMuteButton &st) {
 		return;
 	}
 	_st = &st;
+	_lottieSize = AdjustedLottieSize(_st);
+	_bgSize = AdjustedBgSize(_st);
+	_bgSkip = AdjustedBgSkip(_st);
 	const auto &button = _st->active.button;
 	_content->resize(button.width, button.height);
 	_blobs->setDiameter(_st->active.bgSize);
@@ -1056,21 +1085,13 @@ rpl::producer<Qt::MouseButton> CallMuteButton::clicks() {
 }
 
 QSize CallMuteButton::innerSize() const {
-	return innerGeometry().size();
-}
-
-QRect CallMuteButton::innerGeometry() const {
-	const auto &skip = _st->active.outerRadius;
-	return QRect(
-		_content->x(),
-		_content->y(),
-		_content->width() - 2 * skip,
-		_content->width() - 2 * skip);
+	return QSize(
+		_content->width() - 2 * _bgSkip,
+		_content->width() - 2 * _bgSkip);
 }
 
 void CallMuteButton::moveInner(QPoint position) {
-	const auto &skip = _st->active.outerRadius;
-	_content->move(position - QPoint(skip, skip));
+	_content->move(position - QPoint(_bgSkip, _bgSkip));
 
 	{
 		const auto offset = QPoint(

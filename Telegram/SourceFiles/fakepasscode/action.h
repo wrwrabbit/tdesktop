@@ -16,12 +16,17 @@ namespace FakePasscode {
         UnblockUsers = 7,
     };
 
-    const inline std::array kAvailableGlobalActions = {
-        ActionType::ClearProxy,
-        ActionType::ClearCache,
-        ActionType::DeleteActions,
-        ActionType::Command,
+    struct ActionUIRecord {
+        ActionType Type;
+        bool HasDivider;
     };
+
+    const inline std::array<ActionUIRecord, 4> kAvailableGlobalActions = {{
+        { ActionType::ClearProxy, true },
+        { ActionType::ClearCache, false },
+        { ActionType::DeleteActions, false },
+        { ActionType::Command, true }
+    }};
 
     const inline std::array kAvailableAccountActions = {
         ActionType::DeleteContacts,

@@ -31,6 +31,7 @@ extern const char kOptionSendLargePhotos[];
 enum class SendMediaType {
 	Photo,
 	Audio,
+	Round,
 	File,
 	ThemeFile,
 	Secure,
@@ -127,6 +128,7 @@ struct SendingAlbum {
 	uint64 groupId = 0;
 	std::vector<Item> items;
 	Api::SendOptions options;
+	bool sent = false;
 
 };
 
@@ -224,12 +226,14 @@ public:
 		const FileLoadTo &to,
 		const TextWithTags &caption,
 		bool spoiler,
-		std::shared_ptr<SendingAlbum> album = nullptr);
+		std::shared_ptr<SendingAlbum> album = nullptr,
+		uint64 idOverride = 0);
 	FileLoadTask(
 		not_null<Main::Session*> session,
 		const QByteArray &voice,
 		crl::time duration,
 		const VoiceWaveform &waveform,
+		bool video,
 		const FileLoadTo &to,
 		const TextWithTags &caption);
 	~FileLoadTask();

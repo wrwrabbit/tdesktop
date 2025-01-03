@@ -7,11 +7,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_chat_filters.h"
 
+#include "api/api_text_entities.h"
 #include "apiwrap.h"
+#include "base/event_filter.h"
 #include "boxes/peer_list_box.h"
 #include "boxes/premium_limits_box.h"
 #include "boxes/filters/edit_filter_links.h" // FilterChatStatusText
 #include "core/application.h"
+#include "core/core_settings.h"
+#include "core/ui_integration.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_chat_filters.h"
@@ -23,9 +27,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/confirm_box.h"
 #include "ui/controls/filter_link_header.h"
 #include "ui/text/text_utilities.h"
+#include "ui/toast/toast.h"
 #include "ui/widgets/buttons.h"
 #include "ui/filter_icons.h"
 #include "ui/vertical_list.h"
+#include "ui/ui_utility.h"
 #include "window/window_session_controller.h"
 #include "styles/style_filter_icons.h"
 #include "styles/style_layers.h"
@@ -46,7 +52,7 @@ public:
 	ToggleChatsController(
 		not_null<Window::SessionController*> window,
 		ToggleAction action,
-		const QString &title,
+		Data::ChatFilterTitle title,
 		std::vector<not_null<PeerData*>> chats,
 		std::vector<not_null<PeerData*>> additional);
 
@@ -72,7 +78,6 @@ private:
 	Ui::RpWidget *_addedBottomWidget = nullptr;
 
 	ToggleAction _action = ToggleAction::Adding;
-	QString _filterTitle;
 	base::flat_set<not_null<PeerData*>> _checkable;
 	std::vector<not_null<PeerData*>> _chats;
 	std::vector<not_null<PeerData*>> _additional;
@@ -103,9 +108,9 @@ private:
 
 [[nodiscard]] TextWithEntities AboutText(
 		Ui::FilterLinkHeaderType type,
-		const QString &title) {
+		TextWithEntities title) {
 	using Type = Ui::FilterLinkHeaderType;
-	auto boldTitle = Ui::Text::Bold(title);
+	auto boldTitle = Ui::Text::Wrapped(title, EntityType::Bold);
 	return (type == Type::AddingFilter)
 		? tr::lng_filters_by_link_sure(
 			tr::now,
@@ -135,22 +140,33 @@ void InitFilterLinkHeader(
 		not_null<PeerListBox*> box,
 		Fn<void(int minHeight, int maxHeight, int addedTopHeight)> adjust,
 		Ui::FilterLinkHeaderType type,
-		const QString &title,
-		const QString &iconEmoji,
-		rpl::producer<int> count) {
+		Data::ChatFilterTitle title,
+		QString iconEmoji,
+		rpl::producer<int> count,
+		bool horizontalFilters) {
 	const auto icon = Ui::LookupFilterIcon(
 		Ui::LookupFilterIconByEmoji(
 			iconEmoji
 		).value_or(Ui::FilterIcon::Custom)).active;
+	const auto isStatic = title.isStatic;
+	const auto makeContext = [=](Fn<void()> repaint) {
+		return Core::MarkedTextContext{
+			.session = &box->peerListUiShow()->session(),
+			.customEmojiRepaint = std::move(repaint),
+			.customEmojiLoopLimit = isStatic ? -1 : 0,
+		};
+	};
 	auto header = Ui::MakeFilterLinkHeader(box, {
 		.type = type,
 		.title = TitleText(type)(tr::now),
-		.about = AboutText(type, title),
-		.folderTitle = title,
+		.about = AboutText(type, title.text),
+		.makeAboutContext = makeContext,
+		.folderTitle = title.text,
 		.folderIcon = icon,
 		.badge = (type == Ui::FilterLinkHeaderType::AddingChats
 			? std::move(count)
 			: rpl::single(0)),
+		.horizontalFilters = horizontalFilters,
 	});
 	const auto widget = header.widget;
 	widget->resizeToWidth(st::boxWideWidth);
@@ -231,24 +247,23 @@ void ImportInvite(
 		api->request(MTPchatlists_JoinChatlistInvite(
 			MTP_string(slug),
 			MTP_vector<MTPInputPeer>(std::move(inputs))
-		)).done(callback).fail(error).send();
+		)).done(callback).fail(error).handleFloodErrors().send();
 	} else {
 		api->request(MTPchatlists_JoinChatlistUpdates(
 			MTP_inputChatlistDialogFilter(MTP_int(filterId)),
 			MTP_vector<MTPInputPeer>(std::move(inputs))
-		)).done(callback).fail(error).send();
+		)).done(callback).fail(error).handleFloodErrors().send();
 	}
 }
 
 ToggleChatsController::ToggleChatsController(
 	not_null<Window::SessionController*> window,
 	ToggleAction action,
-	const QString &title,
+	Data::ChatFilterTitle title,
 	std::vector<not_null<PeerData*>> chats,
 	std::vector<not_null<PeerData*>> additional)
 : _window(window)
 , _action(action)
-, _filterTitle(title)
 , _chats(std::move(chats))
 , _additional(std::move(additional)) {
 	setStyleOverrides(&st::filterLinkChatsList);
@@ -516,13 +531,15 @@ void ShowImportError(
 	} else {
 		window->showToast((error == u"INVITE_SLUG_EXPIRED"_q)
 			? tr::lng_group_invite_bad_link(tr::now)
+			: error.startsWith(u"FLOOD_WAIT_"_q)
+			? tr::lng_flood_error(tr::now)
 			: error);
 	}
 }
 
 void ShowImportToast(
 		base::weak_ptr<Window::SessionController> weak,
-		const QString &title,
+		Data::ChatFilterTitle title,
 		Ui::FilterLinkHeaderType type,
 		int added) {
 	const auto strong = weak.get();
@@ -533,22 +550,55 @@ void ShowImportToast(
 	const auto phrase = created
 		? tr::lng_filters_added_title
 		: tr::lng_filters_updated_title;
-	auto text = Ui::Text::Bold(phrase(tr::now, lt_folder, title));
+	auto text = Ui::Text::Wrapped(
+		phrase(tr::now, lt_folder, title.text, Ui::Text::WithEntities),
+		EntityType::Bold);
 	if (added > 0) {
 		const auto phrase = created
 			? tr::lng_filters_added_also
 			: tr::lng_filters_updated_also;
 		text.append('\n').append(phrase(tr::now, lt_count, added));
 	}
-	strong->showToast(std::move(text));
+	const auto isStatic = title.isStatic;
+	const auto makeContext = [=](not_null<QWidget*> widget) {
+		return Core::MarkedTextContext{
+			.session = &strong->session(),
+			.customEmojiRepaint = [=] { widget->update(); },
+			.customEmojiLoopLimit = isStatic ? -1 : 0,
+		};
+	};
+	strong->showToast({
+		.text = std::move(text),
+		.textContext = makeContext,
+	});
+}
+
+void HandleEnterInBox(not_null<Ui::BoxContent*> box) {
+	const auto isEnter = [=](not_null<QEvent*> event) {
+		if (event->type() == QEvent::KeyPress) {
+			if (const auto k = static_cast<QKeyEvent*>(event.get())) {
+				return (k->key() == Qt::Key_Enter)
+					|| (k->key() == Qt::Key_Return);
+			}
+		}
+		return false;
+	};
+
+	base::install_event_filter(box, [=](not_null<QEvent*> event) {
+		if (isEnter(event)) {
+			box->triggerButton(0);
+			return base::EventFilterResult::Cancel;
+		}
+		return base::EventFilterResult::Continue;
+	});
 }
 
 void ProcessFilterInvite(
 		base::weak_ptr<Window::SessionController> weak,
 		const QString &slug,
 		FilterId filterId,
-		const QString &title,
-		const QString &iconEmoji,
+		Data::ChatFilterTitle title,
+		QString iconEmoji,
 		std::vector<not_null<PeerData*>> peers,
 		std::vector<not_null<PeerData*>> already) {
 	const auto strong = weak.get();
@@ -567,6 +617,8 @@ void ProcessFilterInvite(
 		title,
 		std::move(peers),
 		std::move(already));
+	const auto horizontalFilters = !strong->enoughSpaceForFilters()
+		|| Core::App().settings().chatFiltersHorizontal();
 	const auto raw = controller.get();
 	auto initBox = [=](not_null<PeerListBox*> box) {
 		box->setStyle(st::filterInviteBox);
@@ -583,14 +635,23 @@ void ProcessFilterInvite(
 		});
 		InitFilterLinkHeader(box, [=](int min, int max, int addedTop) {
 			raw->adjust(min, max, addedTop);
-		}, type, title, iconEmoji, rpl::duplicate(badge));
+		}, type, title, iconEmoji, rpl::duplicate(badge), horizontalFilters);
 
 		raw->setRealContentHeight(box->heightValue());
 
+		const auto isStatic = title.isStatic;
+		const auto makeContext = [=](Fn<void()> update) {
+			return Core::MarkedTextContext{
+				.session = &strong->session(),
+				.customEmojiRepaint = update,
+				.customEmojiLoopLimit = isStatic ? -1 : 0,
+			};
+		};
 		auto owned = Ui::FilterLinkProcessButton(
 			box,
 			type,
-			title,
+			title.text,
+			makeContext,
 			std::move(badge));
 
 		const auto button = owned.data();
@@ -604,6 +665,8 @@ void ProcessFilterInvite(
 		}, button->lifetime());
 
 		box->addButton(std::move(owned));
+
+		HandleEnterInBox(box);
 
 		struct State {
 			bool importing = false;
@@ -689,7 +752,7 @@ void CheckFilterInvite(
 		if (!strong) {
 			return;
 		}
-		auto title = QString();
+		auto title = Data::ChatFilterTitle();
 		auto iconEmoji = QString();
 		auto filterId = FilterId();
 		auto peers = std::vector<not_null<PeerData*>>();
@@ -708,7 +771,8 @@ void CheckFilterInvite(
 			return result;
 		};
 		result.match([&](const MTPDchatlists_chatlistInvite &data) {
-			title = qs(data.vtitle());
+			title.text = ParseTextWithEntities(session, data.vtitle());
+			title.isStatic = data.is_title_noanimate();
 			iconEmoji = data.vemoticon().value_or_empty();
 			peers = parseList(data.vpeers());
 		}, [&](const MTPDchatlists_chatlistInviteAlready &data) {
@@ -773,8 +837,8 @@ void ProcessFilterUpdate(
 
 void ProcessFilterRemove(
 		base::weak_ptr<Window::SessionController> weak,
-		const QString &title,
-		const QString &iconEmoji,
+		Data::ChatFilterTitle title,
+		QString iconEmoji,
 		std::vector<not_null<PeerData*>> all,
 		std::vector<not_null<PeerData*>> suggest,
 		Fn<void(std::vector<not_null<PeerData*>>)> done) {
@@ -793,6 +857,8 @@ void ProcessFilterRemove(
 		title,
 		std::move(suggest),
 		std::move(all));
+	const auto horizontalFilters = !strong->enoughSpaceForFilters()
+		|| Core::App().settings().chatFiltersHorizontal();
 	const auto raw = controller.get();
 	auto initBox = [=](not_null<PeerListBox*> box) {
 		box->setStyle(st::filterInviteBox);
@@ -804,12 +870,21 @@ void ProcessFilterRemove(
 		});
 		InitFilterLinkHeader(box, [=](int min, int max, int addedTop) {
 			raw->adjust(min, max, addedTop);
-		}, type, title, iconEmoji, rpl::single(0));
+		}, type, title, iconEmoji, rpl::single(0), horizontalFilters);
 
+		const auto isStatic = title.isStatic;
+		const auto makeContext = [=](Fn<void()> update) {
+			return Core::MarkedTextContext{
+				.session = &strong->session(),
+				.customEmojiRepaint = update,
+				.customEmojiLoopLimit = isStatic ? -1 : 0,
+			};
+		};
 		auto owned = Ui::FilterLinkProcessButton(
 			box,
 			type,
-			title,
+			title.text,
+			makeContext,
 			std::move(badge));
 
 		const auto button = owned.data();
@@ -823,6 +898,8 @@ void ProcessFilterRemove(
 		}, button->lifetime());
 
 		box->addButton(std::move(owned));
+
+		HandleEnterInBox(box);
 
 		raw->selectedValue(
 		) | rpl::start_with_next([=](

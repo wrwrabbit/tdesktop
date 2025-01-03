@@ -165,11 +165,12 @@ TextWithEntities ForumTopicIconWithTitle(
 		MsgId rootId,
 		DocumentId iconId,
 		const QString &title) {
+	const auto wrapped = st::wrap_rtl(title);
 	return (rootId == ForumTopic::kGeneralId)
-		? TextWithEntities{ u"# "_q + title }
+		? TextWithEntities{ u"# "_q + wrapped }
 		: iconId
-		? Data::SingleCustomEmoji(iconId).append(' ').append(title)
-		: TextWithEntities{ title };
+		? Data::SingleCustomEmoji(iconId).append(' ').append(wrapped)
+		: TextWithEntities{ wrapped };
 }
 
 QString ForumGeneralIconTitle() {
@@ -896,10 +897,12 @@ Dialogs::UnreadState ForumTopic::unreadStateFor(
 	const auto muted = this->muted();
 	result.messages = count;
 	result.chats = count ? 1 : 0;
+	result.chatsTopic = count ? 1 : 0;
 	result.mentions = unreadMentions().has() ? 1 : 0;
 	result.reactions = unreadReactions().has() ? 1 : 0;
 	result.messagesMuted = muted ? result.messages : 0;
 	result.chatsMuted = muted ? result.chats : 0;
+	result.chatsTopicMuted = muted ? result.chats : 0;
 	result.reactionsMuted = muted ? result.reactions : 0;
 	result.known = known;
 	return result;

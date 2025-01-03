@@ -171,6 +171,7 @@ ChatStyle::ChatStyle(rpl::producer<ColorIndicesCompressed> colorIndices) {
 	make(_historyPsaForwardPalette, st::historyPsaForwardPalette);
 	make(_imgReplyTextPalette, st::imgReplyTextPalette);
 	make(_serviceTextPalette, st::serviceTextPalette);
+	make(_priceTagTextPalette, st::priceTagTextPalette);
 	make(_historyRepliesInvertedIcon, st::historyRepliesInvertedIcon);
 	make(_historyViewsInvertedIcon, st::historyViewsInvertedIcon);
 	make(_historyViewsSendingIcon, st::historyViewsSendingIcon);
@@ -186,6 +187,7 @@ ChatStyle::ChatStyle(rpl::producer<ColorIndicesCompressed> colorIndices) {
 	make(_msgBotKbPaymentIcon, st::msgBotKbPaymentIcon);
 	make(_msgBotKbSwitchPmIcon, st::msgBotKbSwitchPmIcon);
 	make(_msgBotKbWebviewIcon, st::msgBotKbWebviewIcon);
+	make(_msgBotKbCopyIcon, st::msgBotKbCopyIcon);
 	make(_historyFastCommentsIcon, st::historyFastCommentsIcon);
 	make(_historyFastShareIcon, st::historyFastShareIcon);
 	make(_historyFastTranscribeIcon, st::historyFastTranscribeIcon);
@@ -605,7 +607,7 @@ std::span<Text::SpecialColor> ChatStyle::highlightColors() const {
 		// constant, symbol, deleted
 		push(statisticsChartLineRed());
 
-		// selector, attr-name, string, char, builtin, inserted
+		// selector, attr-name, string, char, builtin
 		push(statisticsChartLineOrange());
 
 		// operator, entity, url
@@ -617,8 +619,9 @@ std::span<Text::SpecialColor> ChatStyle::highlightColors() const {
 		// class-name
 		push(statisticsChartLinePurple());
 
+		// inserted
+		push(statisticsChartLineGreen());
 		//push(statisticsChartLineLightgreen());
-		//push(statisticsChartLineGreen());
 		//push(statisticsChartLineGolden());
 	}
 	return _highlightColors;

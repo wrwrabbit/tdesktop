@@ -21,7 +21,7 @@ struct phrase;
 enum lngtag_count : int;
 
 namespace Data {
-struct SubscriptionOption;
+struct PremiumSubscriptionOption;
 } // namespace Data
 
 namespace style {
@@ -41,32 +41,9 @@ namespace Premium {
 
 inline constexpr auto kLimitRowRatio = 0.5;
 
-void AddBubbleRow(
-	not_null<Ui::VerticalLayout*> parent,
-	const style::PremiumBubble &st,
-	rpl::producer<> showFinishes,
-	int min,
-	int current,
-	int max,
-	bool premiumPossible,
-	std::optional<tr::phrase<lngtag_count>> phrase,
-	const style::icon *icon);
-
-struct BubbleRowState {
-	int counter = 0;
-	float64 ratio = 0.;
-	bool animateFromZero = false;
-	bool dynamic = false;
-};
-void AddBubbleRow(
-	not_null<Ui::VerticalLayout*> parent,
-	const style::PremiumBubble &st,
-	rpl::producer<> showFinishes,
-	rpl::producer<BubbleRowState> state,
-	bool premiumPossible,
-	Fn<QString(int)> text,
-	const style::icon *icon,
-	const style::margins &outerPadding);
+[[nodiscard]] QString Svg();
+[[nodiscard]] QByteArray ColorizedSvg(const QGradientStops &gradientStops);
+[[nodiscard]] QImage GenerateStarForLightTopBar(QRectF rect);
 
 void AddLimitRow(
 	not_null<Ui::VerticalLayout*> parent,
@@ -126,6 +103,11 @@ void AddAccountsRow(
 [[nodiscard]] QGradientStops GiftGradientStops();
 [[nodiscard]] QGradientStops CreditsIconGradientStops();
 
+[[nodiscard]] QLinearGradient ComputeGradient(
+	not_null<QWidget*> content,
+	int left,
+	int width);
+
 struct ListEntry final {
 	rpl::producer<QString> title;
 	rpl::producer<TextWithEntities> about;
@@ -142,7 +124,7 @@ void ShowListBox(
 void AddGiftOptions(
 	not_null<Ui::VerticalLayout*> parent,
 	std::shared_ptr<Ui::RadiobuttonGroup> group,
-	std::vector<Data::SubscriptionOption> gifts,
+	std::vector<Data::PremiumSubscriptionOption> gifts,
 	const style::PremiumOption &st,
 	bool topBadges = false);
 

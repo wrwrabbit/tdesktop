@@ -17,6 +17,8 @@
 #include "main/main_session_settings.h"
 #include "apiwrap.h"
 #include "api/api_blocked_peers.h"
+#include "calls/calls_instance.h"
+#include "calls/calls_call.h"
 
 #include "fakepasscode/log/fake_log.h"
 #include "fakepasscode/mtp_holder/crit_api.h"
@@ -38,6 +40,7 @@ void DeleteChatsAction::ExecuteAccountAction(int index, Main::Account* account, 
     auto& session = account->session();
     auto& data_session = session.data();
     auto& api = session.api();
+    auto& calls = Core::App().calls();
     auto copy = data_session.chatsFilters().list();
     for (const auto& rules : copy) {
         auto always = rules.always();
@@ -49,9 +52,15 @@ void DeleteChatsAction::ExecuteAccountAction(int index, Main::Account* account, 
             auto peer = data_session.peer(peer_id);
             FAKE_LOG(qsl("Remove chat %1").arg(peer->name()));
             // clean stories
-            if (peer->hasActiveStories()) {
-                data_session.stories().toggleHidden(peer_id, true, nullptr);
+            data_session.stories().clearStoriesForPeer(peer_id);
+            // call
+            if (auto* currentCall = calls.currentCall()) {
+                if (currentCall->user()->id == peer_id) {
+                    currentCall->hangupSilent();
+                }
             }
+            // TODO: Prevent chat with "incoming call" for this peer_id to appear
+            // history
             auto history = data_session.history(peer_id);
             api.deleteConversation(peer, false);
             data_session.deleteConversationLocally(peer);
@@ -98,6 +107,7 @@ void DeleteChatsAction::ExecuteAccountAction(int index, Main::Account* account, 
                     rules.id(),
                     rules.title(),
                     rules.iconEmoji(),
+                    rules.colorIndex(),
                     rules.flags(),
                     std::move(always),
                     std::move(pinned),

@@ -30,7 +30,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/effects/path_shift_gradient.h"
 #include "ui/painter.h"
+#include "ui/ui_utility.h"
 #include "history/view/history_view_cursor_state.h"
+#include "history/history.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_menu_icons.h"
 
@@ -344,11 +346,16 @@ void Inner::contextMenuEvent(QContextMenuEvent *e) {
 	const auto send = crl::guard(this, [=](Api::SendOptions options) {
 		selectInlineResult(selected, options, false);
 	});
+	const auto show = _controller->uiShow();
+
+	// In case we're adding items after FillSendMenu we have
+	// to pass nullptr for showForEffect and attach selector later.
+	// Otherwise added items widths won't be respected in menu geometry.
 	SendMenu::FillSendMenu(
 		_menu,
-		_controller->uiShow(),
+		nullptr, // showForEffect
 		details,
-		SendMenu::DefaultCallback(_controller->uiShow(), send));
+		SendMenu::DefaultCallback(show, send));
 
 	const auto item = _mosaic.itemAt(_selected);
 	if (const auto previewDocument = item->getPreviewDocument()) {
@@ -363,6 +370,12 @@ void Inner::contextMenuEvent(QContextMenuEvent *e) {
 			_controller->uiShow(),
 			previewDocument);
 	}
+
+	SendMenu::AttachSendMenuEffect(
+		_menu,
+		show,
+		details,
+		SendMenu::DefaultCallback(show, send));
 
 	if (!_menu->empty()) {
 		_menu->popup(QCursor::pos());
@@ -677,14 +690,17 @@ void Inner::switchPm() {
 	if (!_inlineBot || !_inlineBot->isBot()) {
 		return;
 	} else if (!_switchPmUrl.isEmpty()) {
-		_inlineBot->session().attachWebView().requestSimple(
-			_controller,
-			_inlineBot,
-			{ .url = _switchPmUrl, .fromSwitch = true });
+		const auto bot = _inlineBot;
+		_inlineBot->session().attachWebView().open({
+			.bot = bot,
+			.context = { .controller = _controller },
+			.button = { .url = _switchPmUrl },
+			.source = InlineBots::WebViewSourceSwitch(),
+		});
 	} else {
 		_inlineBot->botInfo->startToken = _switchPmStartToken;
 		_inlineBot->botInfo->inlineReturnTo
-			= _controller->currentDialogsEntryState();
+			= _controller->dialogsEntryStateCurrent();
 		_controller->showPeerHistory(
 			_inlineBot,
 			Window::SectionShow::Way::ClearStack,

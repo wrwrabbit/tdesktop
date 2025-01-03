@@ -16,9 +16,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user_photos.h"
 #include "data/data_web_page.h"
 #include "data/data_cloud_themes.h" // Data::CloudTheme.
+#include "media/stories/media_stories_delegate.h"
 #include "media/view/media_view_playback_controls.h"
 #include "media/view/media_view_open_common.h"
-#include "media/stories/media_stories_delegate.h"
+#include "media/media_common.h"
 
 class History;
 
@@ -46,6 +47,10 @@ class Window;
 struct ChosenRenderer;
 enum class Backend;
 } // namespace Ui::GL
+
+namespace Ui::Menu {
+struct MenuCallback;
+} // namespace Ui::Menu
 
 namespace Platform {
 class OverlayWidgetHelper;
@@ -137,6 +142,7 @@ private:
 	class Renderer;
 	class RendererSW;
 	class RendererGL;
+	class SponsoredButton;
 
 	// If changing, see paintControls()!
 	enum class Over {
@@ -145,6 +151,7 @@ private:
 		Right,
 		LeftStories,
 		RightStories,
+		SponsoredButton,
 		Header,
 		Name,
 		Date,
@@ -230,6 +237,9 @@ private:
 	void playbackControlsVolumeChangeFinished() override;
 	void playbackControlsSpeedChanged(float64 speed) override;
 	float64 playbackControlsCurrentSpeed(bool lastNonDefault) override;
+	std::vector<int> playbackControlsQualities() override;
+	VideoQuality playbackControlsCurrentQuality() override;
+	void playbackControlsQualityChanged(int quality) override;
 	void playbackControlsToFullScreen() override;
 	void playbackControlsFromFullScreen() override;
 	void playbackControlsToPictureInPicture() override;
@@ -303,17 +313,17 @@ private:
 	bool moveToNext(int delta);
 	void preloadData(int delta);
 
-	void handleScreenChanged(QScreen *screen);
+	void handleScreenChanged(not_null<QScreen*> screen);
 
 	[[nodiscard]] bool computeSaveButtonVisible() const;
 	void checkForSaveLoaded();
 	void showPremiumDownloadPromo();
 
-	Entity entityForUserPhotos(int index) const;
-	Entity entityForSharedMedia(int index) const;
-	Entity entityForCollage(int index) const;
-	Entity entityByIndex(int index) const;
-	Entity entityForItemId(const FullMsgId &itemId) const;
+	[[nodiscard]] Entity entityForUserPhotos(int index) const;
+	[[nodiscard]] Entity entityForSharedMedia(int index) const;
+	[[nodiscard]] Entity entityForCollage(int index) const;
+	[[nodiscard]] Entity entityByIndex(int index) const;
+	[[nodiscard]] Entity entityForItemId(const FullMsgId &itemId) const;
 	bool moveToEntity(const Entity &entity, int preloadDelta = 0);
 
 	void setContext(std::variant<
@@ -329,23 +339,23 @@ private:
 	struct SharedMedia;
 	using SharedMediaType = SharedMediaWithLastSlice::Type;
 	using SharedMediaKey = SharedMediaWithLastSlice::Key;
-	std::optional<SharedMediaType> sharedMediaType() const;
-	std::optional<SharedMediaKey> sharedMediaKey() const;
-	std::optional<SharedMediaType> computeOverviewType() const;
+	[[nodiscard]] std::optional<SharedMediaType> sharedMediaType() const;
+	[[nodiscard]] std::optional<SharedMediaKey> sharedMediaKey() const;
+	[[nodiscard]] std::optional<SharedMediaType> computeOverviewType() const;
 	bool validSharedMedia() const;
 	void validateSharedMedia();
 	void handleSharedMediaUpdate(SharedMediaWithLastSlice &&update);
 
 	struct UserPhotos;
 	using UserPhotosKey = UserPhotosSlice::Key;
-	std::optional<UserPhotosKey> userPhotosKey() const;
+	[[nodiscard]] std::optional<UserPhotosKey> userPhotosKey() const;
 	bool validUserPhotos() const;
 	void validateUserPhotos();
 	void handleUserPhotosUpdate(UserPhotosSlice &&update);
 
 	struct Collage;
 	using CollageKey = WebPageCollage::Item;
-	std::optional<CollageKey> collageKey() const;
+	[[nodiscard]] std::optional<CollageKey> collageKey() const;
 	bool validCollage() const;
 	void validateCollage();
 
@@ -364,11 +374,7 @@ private:
 	void updateControlsGeometry();
 	void updateNavigationControlsGeometry();
 
-	using MenuCallback = Fn<void(
-		const QString &,
-		Fn<void()>,
-		const style::icon *)>;
-	void fillContextMenuActions(const MenuCallback &addAction);
+	void fillContextMenuActions(const Ui::Menu::MenuCallback &addAction);
 
 	void resizeCenteredControls();
 	void resizeContentByScreenSize();
@@ -411,6 +417,10 @@ private:
 	void destroyThemePreview();
 	void updateThemePreviewGeometry();
 
+	void initSponsoredButton();
+	void refreshSponsoredButtonGeometry();
+	void refreshSponsoredButtonWidth();
+
 	void documentUpdated(not_null<DocumentData*> document);
 	void changingMsgId(FullMsgId newId, MsgId oldId);
 
@@ -424,11 +434,11 @@ private:
 	void contentSizeChanged();
 
 	// Radial animation interface.
-	float64 radialProgress() const;
-	bool radialLoading() const;
-	QRect radialRect() const;
+	[[nodiscard]] float64 radialProgress() const;
+	[[nodiscard]] bool radialLoading() const;
+	[[nodiscard]] QRect radialRect() const;
 	void radialStart();
-	crl::time radialTimeShift() const;
+	[[nodiscard]] crl::time radialTimeShift() const;
 
 	void updateHeader();
 	void snapXY();
@@ -518,6 +528,7 @@ private:
 	void clearStreaming(bool savePosition = true);
 	[[nodiscard]] bool canInitStreaming() const;
 	[[nodiscard]] bool saveControlLocked() const;
+	void applyVideoQuality(VideoQuality value);
 
 	[[nodiscard]] bool topShadowOnTheRight() const;
 	void applyHideWindowWorkaround();
@@ -545,6 +556,8 @@ private:
 	rpl::lifetime _sessionLifetime;
 	PhotoData *_photo = nullptr;
 	DocumentData *_document = nullptr;
+	DocumentData *_chosenQuality = nullptr;
+	Media::VideoQuality _quality;
 	QString _documentLoadingTo;
 	std::shared_ptr<Data::PhotoMedia> _photoMedia;
 	std::shared_ptr<Data::DocumentMedia> _documentMedia;
@@ -619,8 +632,13 @@ private:
 
 	std::unique_ptr<Streamed> _streamed;
 	std::unique_ptr<PipWrap> _pip;
+	QImage _streamedQualityChangeFrame;
+	crl::time _streamedPosition = 0;
 	int _streamedCreated = 0;
+	bool _streamedQualityChangeFinished = false;
 	bool _showAsPip = false;
+
+	Qt::Orientations _flip;
 
 	std::unique_ptr<Stories::View> _stories;
 	std::shared_ptr<Show> _cachedShow;
@@ -692,6 +710,8 @@ private:
 	base::unique_qptr<Ui::PopupMenu> _menu;
 	object_ptr<Ui::DropdownMenu> _dropdown;
 	base::Timer _dropdownShowTimer;
+
+	base::unique_qptr<SponsoredButton> _sponsoredButton;
 
 	bool _receiveMouse = true;
 	bool _processingKeyPress = false;

@@ -553,7 +553,7 @@ bool ReadSetting(
 				const auto proxy = readProxy();
 				if (proxy) {
 					list.push_back(proxy);
-				} else if (index < -list.size()) {
+				} else if (index < -int64(list.size())) {
 					++index;
 				} else if (index > list.size()) {
 					--index;
@@ -1059,9 +1059,7 @@ bool ReadSetting(
 			auto id = Ui::Emoji::IdFromOldKey(static_cast<uint64>(i.key()));
 			if (!id.isEmpty()) {
 				auto index = Ui::Emoji::ColorIndexFromOldKey(i.value());
-				if (index >= 0) {
-					variants.insert(id, index);
-				}
+				variants.insert(id, index);
 			}
 		}
 		Core::App().settings().setLegacyEmojiVariants(std::move(variants));

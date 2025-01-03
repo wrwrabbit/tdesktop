@@ -7,10 +7,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "api/api_chat_filters_remove_manager.h"
 #include "base/timer.h"
 #include "ui/effects/animations.h"
 #include "ui/widgets/side_bar_button.h"
 #include "ui/widgets/scroll_area.h"
+
+namespace Data {
+struct ChatFilterTitle;
+} // namespace Data
 
 namespace Ui {
 class VerticalLayout;
@@ -43,14 +48,11 @@ private:
 	[[nodiscard]] base::unique_qptr<Ui::SideBarButton> prepareButton(
 		not_null<Ui::VerticalLayout*> container,
 		FilterId id,
-		const QString &title,
+		Data::ChatFilterTitle title,
 		Ui::FilterIcon icon,
 		bool toBeginning = false);
 	void setupMainMenuIcon();
 	void showMenu(QPoint position, FilterId id);
-	void showEditBox(FilterId id);
-	void showRemoveBox(FilterId id);
-	void remove(FilterId id, std::vector<not_null<PeerData*>> leave = {});
 	void scrollToButton(not_null<Ui::RpWidget*> widget);
 	void openFiltersSettings();
 
@@ -64,10 +66,13 @@ private:
 	std::unique_ptr<Ui::VerticalLayoutReorder> _reorder;
 	base::unique_qptr<Ui::SideBarButton> _setup;
 	base::flat_map<FilterId, base::unique_qptr<Ui::SideBarButton>> _filters;
+	rpl::variable<bool> _includeMuted;
 	FilterId _activeFilterId = 0;
 	int _reordering = 0;
 	bool _ignoreRefresh = false;
 	bool _waitingSuggested = false;
+
+	Api::RemoveComplexChatFilter _removeApi;
 
 	FilterId _removingId = 0;
 	mtpRequestId _removingRequestId = 0;

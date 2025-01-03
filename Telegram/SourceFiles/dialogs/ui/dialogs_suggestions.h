@@ -8,19 +8,32 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/object_ptr.h"
+#include "base/timer.h"
 #include "dialogs/ui/top_peers_strip.h"
 #include "ui/effects/animations.h"
 #include "ui/rp_widget.h"
+
+class PeerListContent;
 
 namespace Data {
 class Thread;
 } // namespace Data
 
+namespace Info {
+class WrapWidget;
+} // namespace Info
+
 namespace Main {
 class Session;
 } // namespace Main
 
+namespace Storage {
+enum class SharedMediaType : signed char;
+} // namespace Storage
+
 namespace Ui {
+class BoxContent;
+class ScrollArea;
 class ElasticScroll;
 class SettingsSlider;
 class VerticalLayout;
@@ -52,6 +65,9 @@ public:
 	void selectJump(Qt::Key direction, int pageSize = 0);
 	void chooseRow();
 
+	bool consumeSearchQuery(const QString &query);
+	[[nodiscard]] rpl::producer<> clearSearchQueryRequests() const;
+
 	[[nodiscard]] Data::Thread *updateFromParentDrag(QPoint globalPosition);
 	void dragLeft();
 
@@ -67,26 +83,68 @@ public:
 	}
 	[[nodiscard]] auto recentPeerChosen() const
 	-> rpl::producer<not_null<PeerData*>> {
-		return _recentPeerChosen.events();
+		return _recent->chosen.events();
 	}
 	[[nodiscard]] auto myChannelChosen() const
 	-> rpl::producer<not_null<PeerData*>> {
-		return _myChannelChosen.events();
+		return _myChannels->chosen.events();
 	}
 	[[nodiscard]] auto recommendationChosen() const
 	-> rpl::producer<not_null<PeerData*>> {
-		return _recommendationChosen.events();
+		return _recommendations->chosen.events();
+	}
+	[[nodiscard]] auto recentAppChosen() const
+	-> rpl::producer<not_null<PeerData*>> {
+		return _recentApps->chosen.events();
+	}
+	[[nodiscard]] auto popularAppChosen() const
+	-> rpl::producer<not_null<PeerData*>> {
+		return _popularApps->chosen.events();
+	}
+	[[nodiscard]] auto openBotMainAppRequests() const
+	-> rpl::producer<not_null<PeerData*>> {
+		return _openBotMainAppRequests.events();
 	}
 
+	class ObjectListController;
+
 private:
+	using MediaType = Storage::SharedMediaType;
 	enum class Tab : uchar {
 		Chats,
 		Channels,
+		Apps,
+		Media,
+		Downloads,
 	};
 	enum class JumpResult : uchar {
 		NotApplied,
 		Applied,
 		AppliedAndOut,
+	};
+
+	struct Key {
+		Tab tab = Tab::Chats;
+		MediaType mediaType = {};
+
+		friend inline auto operator<=>(Key, Key) = default;
+		friend inline bool operator==(Key, Key) = default;
+	};
+
+	struct ObjectList {
+		not_null<Ui::SlideWrap<PeerListContent>*> wrap;
+		rpl::variable<int> count;
+		Fn<bool()> choose;
+		Fn<JumpResult(Qt::Key, int)> selectJump;
+		Fn<uint64(QPoint)> updateFromParentDrag;
+		Fn<void()> dragLeft;
+		Fn<bool(not_null<QTouchEvent*>)> processTouch;
+		rpl::event_stream<not_null<PeerData*>> chosen;
+	};
+
+	struct MediaList {
+		Info::WrapWidget *wrap = nullptr;
+		rpl::variable<int> count;
 	};
 
 	void paintEvent(QPaintEvent *e) override;
@@ -95,79 +153,92 @@ private:
 	void setupTabs();
 	void setupChats();
 	void setupChannels();
+	void setupApps();
 
 	void selectJumpChats(Qt::Key direction, int pageSize);
 	void selectJumpChannels(Qt::Key direction, int pageSize);
+	void selectJumpApps(Qt::Key direction, int pageSize);
 
 	[[nodiscard]] Data::Thread *updateFromChatsDrag(QPoint globalPosition);
 	[[nodiscard]] Data::Thread *updateFromChannelsDrag(
 		QPoint globalPosition);
+	[[nodiscard]] Data::Thread *updateFromAppsDrag(QPoint globalPosition);
 	[[nodiscard]] Data::Thread *fromListId(uint64 peerListRowId);
 
-	[[nodiscard]] object_ptr<Ui::SlideWrap<Ui::RpWidget>> setupRecentPeers(
+	[[nodiscard]] std::unique_ptr<ObjectList> setupRecentPeers(
 		RecentPeersList recentPeers);
-	[[nodiscard]] object_ptr<Ui::SlideWrap<Ui::RpWidget>> setupEmptyRecent();
-	[[nodiscard]] object_ptr<Ui::SlideWrap<Ui::RpWidget>> setupMyChannels();
-	[[nodiscard]] auto setupRecommendations()
+	[[nodiscard]] auto setupEmptyRecent()
 		-> object_ptr<Ui::SlideWrap<Ui::RpWidget>>;
+
+	[[nodiscard]] std::unique_ptr<ObjectList> setupMyChannels();
+	[[nodiscard]] std::unique_ptr<ObjectList> setupRecommendations();
 	[[nodiscard]] auto setupEmptyChannels()
 		-> object_ptr<Ui::SlideWrap<Ui::RpWidget>>;
+
+	[[nodiscard]] std::unique_ptr<ObjectList> setupRecentApps();
+	[[nodiscard]] std::unique_ptr<ObjectList> setupPopularApps();
+
+	[[nodiscard]] std::unique_ptr<ObjectList> setupObjectList(
+		not_null<Ui::ElasticScroll*> scroll,
+		not_null<Ui::VerticalLayout*> parent,
+		not_null<ObjectListController*> controller,
+		Fn<int()> addToScroll = nullptr);
+
 	[[nodiscard]] object_ptr<Ui::SlideWrap<Ui::RpWidget>> setupEmpty(
 		not_null<QWidget*> parent,
 		SearchEmptyIcon icon,
 		rpl::producer<QString> text);
 
-	void switchTab(Tab tab);
+	void switchTab(Key key);
 	void startShownAnimation(bool shown, Fn<void()> finish);
-	void startSlideAnimation();
+	void startSlideAnimation(Key was, Key now);
+	void ensureContent(Key key);
 	void finishShow();
 
 	void handlePressForChatPreview(PeerId id, Fn<void(bool)> callback);
+	void updateControlsGeometry();
+	void applySearchQuery();
 
 	const not_null<Window::SessionController*> _controller;
 
-	const std::unique_ptr<Ui::SettingsSlider> _tabs;
-	rpl::variable<Tab> _tab = Tab::Chats;
+	const std::unique_ptr<Ui::ScrollArea> _tabsScroll;
+	const not_null<Ui::SettingsSlider*> _tabs;
+	Ui::Animations::Simple _tabsScrollAnimation;
+	const std::vector<Key> _tabKeys;
+	rpl::variable<Key> _key;
 
 	const std::unique_ptr<Ui::ElasticScroll> _chatsScroll;
 	const not_null<Ui::VerticalLayout*> _chatsContent;
+
 	const not_null<Ui::SlideWrap<TopPeersStrip>*> _topPeersWrap;
 	const not_null<TopPeersStrip*> _topPeers;
+	rpl::event_stream<not_null<PeerData*>> _topPeerChosen;
+	rpl::event_stream<not_null<PeerData*>> _openBotMainAppRequests;
 
-	rpl::variable<int> _recentCount;
-	Fn<bool()> _recentPeersChoose;
-	Fn<JumpResult(Qt::Key, int)> _recentSelectJump;
-	Fn<uint64(QPoint)> _recentUpdateFromParentDrag;
-	Fn<void()> _recentDragLeft;
-	Fn<bool(not_null<QTouchEvent*>)> _recentProcessTouch;
-	const not_null<Ui::SlideWrap<Ui::RpWidget>*> _recentPeers;
+	const std::unique_ptr<ObjectList> _recent;
+
 	const not_null<Ui::SlideWrap<Ui::RpWidget>*> _emptyRecent;
 
 	const std::unique_ptr<Ui::ElasticScroll> _channelsScroll;
 	const not_null<Ui::VerticalLayout*> _channelsContent;
 
-	rpl::variable<int> _myChannelsCount;
-	Fn<bool()> _myChannelsChoose;
-	Fn<JumpResult(Qt::Key, int)> _myChannelsSelectJump;
-	Fn<uint64(QPoint)> _myChannelsUpdateFromParentDrag;
-	Fn<void()> _myChannelsDragLeft;
-	Fn<bool(not_null<QTouchEvent*>)> _myChannelsProcessTouch;
-	const not_null<Ui::SlideWrap<Ui::RpWidget>*> _myChannels;
-
-	rpl::variable<int> _recommendationsCount;
-	Fn<bool()> _recommendationsChoose;
-	Fn<JumpResult(Qt::Key, int)> _recommendationsSelectJump;
-	Fn<uint64(QPoint)> _recommendationsUpdateFromParentDrag;
-	Fn<void()> _recommendationsDragLeft;
-	Fn<bool(not_null<QTouchEvent*>)> _recommendationsProcessTouch;
-	const not_null<Ui::SlideWrap<Ui::RpWidget>*> _recommendations;
+	const std::unique_ptr<ObjectList> _myChannels;
+	const std::unique_ptr<ObjectList> _recommendations;
 
 	const not_null<Ui::SlideWrap<Ui::RpWidget>*> _emptyChannels;
 
-	rpl::event_stream<not_null<PeerData*>> _topPeerChosen;
-	rpl::event_stream<not_null<PeerData*>> _recentPeerChosen;
-	rpl::event_stream<not_null<PeerData*>> _myChannelChosen;
-	rpl::event_stream<not_null<PeerData*>> _recommendationChosen;
+	const std::unique_ptr<Ui::ElasticScroll> _appsScroll;
+	const not_null<Ui::VerticalLayout*> _appsContent;
+
+	rpl::producer<> _recentAppsRefreshed;
+	Fn<bool(not_null<PeerData*>)> _recentAppsShows;
+	const std::unique_ptr<ObjectList> _recentApps;
+	const std::unique_ptr<ObjectList> _popularApps;
+
+	base::flat_map<Key, MediaList> _mediaLists;
+	rpl::event_stream<> _clearSearchQueryRequests;
+	QString _searchQuery;
+	base::Timer _searchQueryTimer;
 
 	Ui::Animations::Simple _shownAnimation;
 	Fn<void()> _showFinished;
@@ -179,6 +250,9 @@ private:
 	QPixmap _slideLeft;
 	QPixmap _slideRight;
 
+	int _slideLeftTop = 0;
+	int _slideRightTop = 0;
+
 };
 
 [[nodiscard]] rpl::producer<TopPeersList> TopPeersContent(
@@ -186,5 +260,11 @@ private:
 
 [[nodiscard]] RecentPeersList RecentPeersContent(
 	not_null<Main::Session*> session);
+
+[[nodiscard]] object_ptr<Ui::BoxContent> StarsExamplesBox(
+	not_null<Window::SessionController*> window);
+
+[[nodiscard]] object_ptr<Ui::BoxContent> PopularAppsAboutBox(
+	not_null<Window::SessionController*> window);
 
 } // namespace Dialogs

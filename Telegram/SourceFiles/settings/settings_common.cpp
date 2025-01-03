@@ -88,6 +88,7 @@ void AddButtonIcon(
 		std::move(descriptor));
 	icon->widget.setAttribute(Qt::WA_TransparentForMouseEvents);
 	icon->widget.resize(icon->icon.size());
+	icon->widget.show();
 	button->sizeValue(
 	) | rpl::start_with_next([=, left = st.iconLeft](QSize size) {
 		icon->widget.moveToLeft(
@@ -264,14 +265,17 @@ SliderWithLabel MakeSliderWithLabel(
 		const style::MediaSlider &sliderSt,
 		const style::FlatLabel &labelSt,
 		int skip,
-		int minLabelWidth) {
+		int minLabelWidth,
+		bool ignoreWheel) {
 	auto result = object_ptr<Ui::RpWidget>(parent);
 	const auto raw = result.data();
 	const auto height = std::max(
 		sliderSt.seekSize.height(),
 		labelSt.style.font->height);
 	raw->resize(sliderSt.seekSize.width(), height);
-	const auto slider = Ui::CreateChild<Ui::MediaSlider>(raw, sliderSt);
+	const auto slider = ignoreWheel
+		? Ui::CreateChild<Ui::MediaSliderWheelless>(raw, sliderSt)
+		: Ui::CreateChild<Ui::MediaSlider>(raw, sliderSt);
 	const auto label = Ui::CreateChild<Ui::FlatLabel>(raw, labelSt);
 	slider->resize(slider->width(), sliderSt.seekSize.height());
 	rpl::combine(

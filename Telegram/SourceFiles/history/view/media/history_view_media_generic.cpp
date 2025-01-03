@@ -18,6 +18,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/dynamic_image.h"
 #include "ui/dynamic_thumbnails.h"
 #include "ui/painter.h"
+#include "ui/power_saving.h"
+#include "ui/rect.h"
 #include "ui/round_rect.h"
 #include "styles/style_chat.h"
 
@@ -72,6 +74,7 @@ MediaGeneric::MediaGeneric(
 	Fn<void(Fn<void(std::unique_ptr<Part>)>)> generate,
 	MediaGenericDescriptor &&descriptor)
 : Media(parent)
+, _paintBg(std::move(descriptor.paintBg))
 , _maxWidthCap(descriptor.maxWidth)
 , _service(descriptor.service)
 , _hideServiceText(descriptor.hideServiceText) {
@@ -108,13 +111,21 @@ QSize MediaGeneric::countOptimalSize() {
 }
 
 QSize MediaGeneric::countCurrentSize(int newWidth) {
-	return { maxWidth(), minHeight() };
+	if (newWidth > maxWidth()) {
+		newWidth = maxWidth();
+	}
+	for (auto &entry : _entries) {
+		entry.object->resizeGetHeight(newWidth);
+	}
+	return { newWidth, minHeight() };
 }
 
 void MediaGeneric::draw(Painter &p, const PaintContext &context) const {
 	const auto outer = width();
 	if (outer < st::msgPadding.left() + st::msgPadding.right() + 1) {
 		return;
+	} else if (_paintBg) {
+		_paintBg(p, context);
 	} else if (_service) {
 		PainterHighQualityEnabler hq(p);
 		const auto radius = st::msgServiceGiftBoxRadius;
@@ -221,10 +232,16 @@ QMargins MediaGeneric::inBubblePadding() const {
 MediaGenericTextPart::MediaGenericTextPart(
 	TextWithEntities text,
 	QMargins margins,
-	const base::flat_map<uint16, ClickHandlerPtr> &links)
+	const style::TextStyle &st,
+	const base::flat_map<uint16, ClickHandlerPtr> &links,
+	const std::any &context)
 : _text(st::msgMinWidth)
 , _margins(margins) {
-	_text.setMarkedText(st::defaultTextStyle, text);
+	_text.setMarkedText(
+		st,
+		text,
+		kMarkupTextOptions,
+		context);
 	for (const auto &[index, link] : links) {
 		_text.setLink(index, link);
 	}
@@ -235,20 +252,30 @@ void MediaGenericTextPart::draw(
 		not_null<const MediaGeneric*> owner,
 		const PaintContext &context,
 		int outerWidth) const {
-	const auto service = owner->service();
-	p.setPen(service
-		? context.st->msgServiceFg()
-		: context.messageStyle()->historyTextFg);
+	setupPen(p, owner, context);
 	_text.draw(p, {
 		.position = { (outerWidth - width()) / 2, _margins.top() },
 		.outerWidth = outerWidth,
 		.availableWidth = width(),
 		.align = style::al_top,
-		.palette = &(service
+		.palette = &(owner->service()
 			? context.st->serviceTextPalette()
 			: context.messageStyle()->textPalette),
+		.spoiler = Ui::Text::DefaultSpoilerCache(),
 		.now = context.now,
+		.pausedEmoji = context.paused || On(PowerSaving::kEmojiChat),
+		.pausedSpoiler = context.paused || On(PowerSaving::kChatSpoiler),
 	});
+}
+
+void MediaGenericTextPart::setupPen(
+		Painter &p,
+		not_null<const MediaGeneric*> owner,
+		const PaintContext &context) const {
+	const auto service = owner->service();
+	p.setPen(service
+		? context.st->msgServiceFg()
+		: context.messageStyle()->historyTextFg);
 }
 
 TextState MediaGenericTextPart::textState(
@@ -425,7 +452,7 @@ void StickerInBubblePart::ensureCreated(Element *replacing) const {
 			_skipTop = data.skipTop;
 			_sticker.emplace(_parent, sticker, skipPremiumEffect, replacing);
 			if (data.singleTimePlayback) {
-				_sticker->setDiceIndex(info->alt, 1);
+				_sticker->setPlayingOnce(true);
 			}
 			_sticker->initSize(data.size);
 			_sticker->setCustomCachingTag(data.cacheTag);
@@ -438,9 +465,13 @@ StickerWithBadgePart::StickerWithBadgePart(
 	Element *replacing,
 	Fn<Data()> lookup,
 	QMargins padding,
-	QString badge)
-: _sticker(parent, replacing, std::move(lookup), padding)
-, _badgeText(badge) {
+	QString badge,
+	QImage customLeftIcon,
+	std::optional<QColor> colorOverride)
+: _customLeftIcon(std::move(customLeftIcon))
+, _sticker(parent, replacing, std::move(lookup), padding)
+, _badgeText(badge)
+, _colorOverride(std::move(colorOverride)) {
 }
 
 void StickerWithBadgePart::draw(
@@ -500,12 +531,19 @@ void StickerWithBadgePart::paintBadge(
 	{
 		auto hq = PainterHighQualityEnabler(p);
 		p.setPen(Qt::NoPen);
-		p.setBrush(context.messageStyle()->msgFileBg);
+		if (_colorOverride) {
+			p.setBrush(*_colorOverride);
+		} else {
+			p.setBrush(context.messageStyle()->msgFileBg);
+		}
 		const auto half = st::chatGiveawayBadgeStroke / 2.;
-		const auto inner = QRectF(rect).marginsRemoved(
-			{ half, half, half, half });
+		const auto inner = QRectF(rect) - Margins(half);
 		const auto radius = inner.height() / 2.;
 		p.drawRoundedRect(inner, radius, radius);
+		if (_colorOverride && context.selected()) {
+			p.setBrush(context.st->msgStickerOverlay());
+			p.drawRoundedRect(inner, radius, radius);
+		}
 	}
 
 	if (!_sticker.parent()->usesBubblePattern(context)) {
@@ -534,9 +572,12 @@ void StickerWithBadgePart::validateBadge(
 	const auto &font = st::chatGiveawayBadgeFont;
 	_badgeFg = badgeFg;
 	_badgeBorder = badgeBorder;
-	const auto width = font->width(_badgeText);
+	const auto iconWidth = _customLeftIcon.isNull()
+		? 0
+		: (_customLeftIcon.width() / style::DevicePixelRatio());
+	const auto width = font->width(_badgeText) + iconWidth;
 	const auto inner = QRect(0, 0, width, font->height);
-	const auto rect = inner.marginsAdded(st::chatGiveawayBadgePadding);
+	const auto rect = inner + st::chatGiveawayBadgePadding;
 	const auto size = rect.size();
 	const auto ratio = style::DevicePixelRatio();
 	_badge = QImage(size * ratio, QImage::Format_ARGB32_Premultiplied);
@@ -548,17 +589,29 @@ void StickerWithBadgePart::validateBadge(
 	p.setPen(QPen(_badgeBorder, st::chatGiveawayBadgeStroke * 1.));
 	p.setBrush(Qt::NoBrush);
 	const auto half = st::chatGiveawayBadgeStroke / 2.;
-	const auto smaller = QRectF(
-		rect.translated(-rect.topLeft())
-	).marginsRemoved({ half, half, half, half });
+	const auto left = _customLeftIcon.isNull()
+		? st::chatGiveawayBadgePadding.left()
+		: (st::chatGiveawayBadgePadding.left() - half * 2);
+	const auto smaller = QRectF(rect.translated(-rect.topLeft()))
+		- Margins(half);
 	const auto radius = smaller.height() / 2.;
 	p.drawRoundedRect(smaller, radius, radius);
 	p.setPen(_badgeFg);
 	p.setFont(font);
 	p.drawText(
-		st::chatGiveawayBadgePadding.left(),
+		left + iconWidth,
 		st::chatGiveawayBadgePadding.top() + font->ascent,
 		_badgeText);
+	if (!_customLeftIcon.isNull()) {
+		const auto iconHeight = _customLeftIcon.height()
+			/ style::DevicePixelRatio();
+		p.drawImage(
+			left,
+			half + (inner.height() - iconHeight) / 2,
+			context.selected()
+				? Images::Colored(base::duplicate(_customLeftIcon), _badgeFg)
+				: _customLeftIcon);
+	}
 }
 
 PeerBubbleListPart::PeerBubbleListPart(

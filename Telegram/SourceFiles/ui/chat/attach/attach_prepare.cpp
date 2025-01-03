@@ -82,6 +82,10 @@ bool CanBeInAlbumType(PreparedFile::Type type, AlbumType album) {
 	Unexpected("AlbumType in CanBeInAlbumType.");
 }
 
+bool InsertTextOnImageCancel(const QString &text) {
+	return !text.isEmpty() && !text.startsWith(u"data:image"_q);
+}
+
 PreparedList PreparedList::Reordered(
 		PreparedList &&list,
 		std::vector<int> order) {
@@ -193,6 +197,10 @@ bool PreparedList::canMoveCaption(bool sendingAlbum, bool compress) const {
 	const auto &file = files.front();
 	return (file.type == PreparedFile::Type::Video)
 		|| (file.type == PreparedFile::Type::Photo && compress);
+}
+
+bool PreparedList::canChangePrice(bool sendingAlbum, bool compress) const {
+	return canMoveCaption(sendingAlbum, compress);
 }
 
 bool PreparedList::hasGroupOption(bool slowmode) const {

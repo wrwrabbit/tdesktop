@@ -36,6 +36,8 @@ using Options = base::flags<Option>;
 
 namespace Data {
 
+struct FileOrigin;
+
 struct UploadState {
 	explicit UploadState(int64 size) : size(size) {
 	}
@@ -57,8 +59,6 @@ constexpr auto kStickerCacheTag = uint8(0x02);
 constexpr auto kVoiceMessageCacheTag = uint8(0x03);
 constexpr auto kVideoMessageCacheTag = uint8(0x04);
 constexpr auto kAnimationCacheTag = uint8(0x05);
-
-struct FileOrigin;
 
 } // namespace Data
 
@@ -313,16 +313,24 @@ enum class MessageFlag : uint64 {
 
 	// If not set then we need to refresh _displayFrom value.
 	DisplayFromChecked    = (1ULL << 40),
+	DisplayFromProfiles   = (1ULL << 41),
 
-	ShowSimilarChannels   = (1ULL << 41),
+	ShowSimilarChannels   = (1ULL << 42),
 
-	Sponsored             = (1ULL << 42),
+	Sponsored             = (1ULL << 43),
 
-	ReactionsAreTags      = (1ULL << 43),
+	ReactionsAreTags      = (1ULL << 44),
 
-	ShortcutMessage       = (1ULL << 44),
+	ShortcutMessage       = (1ULL << 45),
 
-	EffectWatched         = (1ULL << 45),
+	EffectWatched         = (1ULL << 46),
+
+	SensitiveContent      = (1ULL << 47),
+	HasRestrictions       = (1ULL << 48),
+
+	EstimatedDate         = (1ULL << 49),
+
+	ReactionsAllowed      = (1ULL << 50),
 };
 inline constexpr bool is_flag_type(MessageFlag) { return true; }
 using MessageFlags = base::flags<MessageFlag>;
@@ -336,3 +344,29 @@ enum class MediaWebPageFlag : uint8 {
 };
 inline constexpr bool is_flag_type(MediaWebPageFlag) { return true; }
 using MediaWebPageFlags = base::flags<MediaWebPageFlag>;
+
+namespace Data {
+
+enum class ForwardOptions {
+	PreserveInfo,
+	NoSenderNames,
+	NoNamesAndCaptions,
+};
+
+struct ForwardDraft {
+	MessageIdsList ids;
+	ForwardOptions options = ForwardOptions::PreserveInfo;
+
+	friend inline auto operator<=>(
+		const ForwardDraft&,
+		const ForwardDraft&) = default;
+};
+
+using ForwardDrafts = base::flat_map<MsgId, ForwardDraft>;
+
+struct ResolvedForwardDraft {
+	HistoryItemsList items;
+	ForwardOptions options = ForwardOptions::PreserveInfo;
+};
+
+} // namespace Data

@@ -68,6 +68,10 @@ enum class ChannelDataFlag : uint64 {
 	ViewAsMessages = (1ULL << 30),
 	SimilarExpanded = (1ULL << 31),
 	CanViewRevenue = (1ULL << 32),
+	PaidMediaAllowed = (1ULL << 33),
+	CanViewCreditsRevenue = (1ULL << 34),
+	SignatureProfiles = (1ULL << 35),
+
 	// shift values!
 	PTG_Verified = (1ull << 60),
 	PTG_Scam = (1ull << 61),
@@ -235,6 +239,9 @@ public:
 	[[nodiscard]] bool addsSignature() const {
 		return flags() & Flag::Signatures;
 	}
+	[[nodiscard]] bool signatureProfiles() const {
+		return flags() & Flag::SignatureProfiles;
+	}
 	[[nodiscard]] bool isForbidden() const {
 		return flags() & Flag::Forbidden;
 	}
@@ -378,6 +385,7 @@ public:
 	[[nodiscard]] bool canPostStories() const;
 	[[nodiscard]] bool canEditStories() const;
 	[[nodiscard]] bool canDeleteStories() const;
+	[[nodiscard]] bool canPostPaidMedia() const;
 	[[nodiscard]] bool hiddenPreHistory() const;
 	[[nodiscard]] bool canViewMembers() const;
 	[[nodiscard]] bool canViewAdmins() const;
@@ -389,6 +397,12 @@ public:
 	[[nodiscard]] bool canEditAdmin(not_null<UserData*> user) const;
 	[[nodiscard]] bool canRestrictParticipant(
 		not_null<PeerData*> participant) const;
+
+	void setBotVerifyDetails(Ui::BotVerifyDetails details);
+	void setBotVerifyDetailsIcon(DocumentId iconId);
+	[[nodiscard]] Ui::BotVerifyDetails *botVerifyDetails() const {
+		return _botVerifyDetails.get();
+	}
 
 	void setInviteLink(const QString &newInviteLink);
 	[[nodiscard]] QString inviteLink() const {
@@ -437,7 +451,7 @@ public:
 		return _ptsWaiter.setRequesting(isRequesting);
 	}
 	// < 0 - not waiting
-	void ptsWaitingForShortPoll(int32 ms) {
+	void ptsSetWaitingForShortPoll(int32 ms) {
 		return _ptsWaiter.setWaitingForShortPoll(this, ms);
 	}
 	[[nodiscard]] bool ptsWaitingForSkipped() const {
@@ -446,9 +460,6 @@ public:
 	[[nodiscard]] bool ptsWaitingForShortPoll() const {
 		return _ptsWaiter.waitingForShortPoll();
 	}
-
-	void setUnavailableReasons(
-		std::vector<Data::UnavailableReason> &&reason);
 
 	[[nodiscard]] MsgId availableMinId() const {
 		return _availableMinId;
@@ -503,6 +514,9 @@ public:
 	[[nodiscard]] int levelHint() const;
 	void updateLevelHint(int levelHint);
 
+	[[nodiscard]] TimeId subscriptionUntilDate() const;
+	void updateSubscriptionUntilDate(TimeId subscriptionUntilDate);
+
 	// Still public data members.
 	uint64 access = 0;
 
@@ -526,6 +540,9 @@ private:
 		-> const std::vector<Data::UnavailableReason> & override;
 	bool canEditLastAdmin(not_null<UserData*> user) const;
 
+	void setUnavailableReasonsList(
+		std::vector<Data::UnavailableReason> &&reasons) override;
+
 	Flags _flags = ChannelDataFlags(Flag::Forbidden);
 
 	PtsWaiter _ptsWaiter;
@@ -545,6 +562,7 @@ private:
 	AdminRightFlags _adminRights;
 	RestrictionFlags _restrictions;
 	TimeId _restrictedUntil;
+	TimeId _subscriptionUntilDate;
 
 	std::vector<Data::UnavailableReason> _unavailableReasons;
 	std::unique_ptr<InvitePeek> _invitePeek;
@@ -555,6 +573,8 @@ private:
 
 	std::unique_ptr<Data::GroupCall> _call;
 	PeerId _callDefaultJoinAs = 0;
+
+	std::unique_ptr<Ui::BotVerifyDetails> _botVerifyDetails;
 
 };
 

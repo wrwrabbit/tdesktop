@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/event_filter.h"
 #include "base/unixtime.h"
 #include "boxes/abstract_box.h"
+#include "boxes/premium_preview_box.h"
 #include "chat_helpers/compose/compose_show.h"
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "core/shortcuts.h"
@@ -37,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/shadow.h"
 #include "ui/wrap/padding_wrap.h"
 #include "ui/painter.h"
+#include "ui/ui_utility.h"
 #include "data/data_document.h"
 #include "data/data_document_media.h"
 #include "data/data_peer.h"
@@ -530,7 +532,7 @@ void EffectPreview::setupSend(Details details) {
 				if (const auto onstack = _close) {
 					onstack();
 				}
-				Settings::ShowPremium(window, "message_effect");
+				ShowPremiumPreviewBox(window, PremiumFeature::Effects);
 			}
 			return false;
 		});
@@ -620,6 +622,67 @@ Fn<void(Action, Details)> DefaultCallback(
 	};
 }
 
+FillMenuResult AttachSendMenuEffect(
+		not_null<Ui::PopupMenu*> menu,
+		std::shared_ptr<ChatHelpers::Show> show,
+		Details details,
+		Fn<void(Action, Details)> action,
+		std::optional<QPoint> desiredPositionOverride) {
+	Expects(show != nullptr);
+
+	using namespace HistoryView::Reactions;
+	const auto effect = std::make_shared<QPointer<EffectPreview>>();
+	const auto position = desiredPositionOverride.value_or(QCursor::pos());
+	const auto selector = (show && details.effectAllowed)
+		? AttachSelectorToMenu(
+			menu,
+			position,
+			st::reactPanelEmojiPan,
+			show,
+			LookupPossibleEffects(&show->session()),
+			{ tr::lng_effect_add_title(tr::now) },
+			nullptr, // iconFactory
+			[=] { return (*effect) != nullptr; }) // paused
+		: base::make_unexpected(AttachSelectorResult::Skipped);
+	if (!selector) {
+		if (selector.error() == AttachSelectorResult::Failed) {
+			return FillMenuResult::Failed;
+		}
+		menu->prepareGeometryFor(position);
+		return FillMenuResult::Prepared;
+	}
+
+	(*selector)->chosen(
+	) | rpl::start_with_next([=](ChosenReaction chosen) {
+		const auto &reactions = show->session().data().reactions();
+		const auto &effects = reactions.list(Data::Reactions::Type::Effects);
+		const auto i = ranges::find(effects, chosen.id, &Data::Reaction::id);
+		if (i != end(effects)) {
+			if (const auto strong = effect->data()) {
+				strong->hideAnimated();
+			}
+			const auto weak = Ui::MakeWeak(menu);
+			const auto done = [=] {
+				delete effect->data();
+				if (const auto strong = weak.data()) {
+					strong->hideMenu(true);
+				}
+			};
+			*effect = Ui::CreateChild<EffectPreview>(
+				menu,
+				show,
+				details,
+				menu->mapFromGlobal(chosen.globalGeometry.center()),
+				*i,
+				action,
+				crl::guard(menu, done));
+			(*effect)->show();
+		}
+	}, menu->lifetime());
+
+	return FillMenuResult::Prepared;
+}
+
 FillMenuResult FillSendMenu(
 		not_null<Ui::PopupMenu*> menu,
 		std::shared_ptr<ChatHelpers::Show> showForEffect,
@@ -631,7 +694,8 @@ FillMenuResult FillSendMenu(
 	const auto sending = (type != Type::Disabled);
 	const auto empty = !sending
 		&& (details.spoiler == SpoilerState::None)
-		&& (details.caption == CaptionState::None);
+		&& (details.caption == CaptionState::None)
+		&& !details.price.has_value();
 	if (empty || !action) {
 		return FillMenuResult::Skipped;
 	}
@@ -675,7 +739,8 @@ FillMenuResult FillSendMenu(
 
 	if ((type != Type::Disabled)
 		&& ((details.spoiler != SpoilerState::None)
-			|| (details.caption != CaptionState::None))) {
+			|| (details.caption != CaptionState::None)
+			|| details.price.has_value())) {
 		menu->addSeparator(&st::expandedMenuSeparator);
 	}
 	if (details.spoiler != SpoilerState::None) {
@@ -702,57 +767,25 @@ FillMenuResult FillSendMenu(
 			}, details); },
 			above ? &icons.menuBelow : &icons.menuAbove);
 	}
-
-	using namespace HistoryView::Reactions;
-	const auto effect = std::make_shared<QPointer<EffectPreview>>();
-	const auto position = desiredPositionOverride.value_or(QCursor::pos());
-	const auto selector = (showForEffect && details.effectAllowed)
-		? AttachSelectorToMenu(
-			menu,
-			position,
-			st::reactPanelEmojiPan,
-			showForEffect,
-			LookupPossibleEffects(&showForEffect->session()),
-			{ tr::lng_effect_add_title(tr::now) },
-			nullptr, // iconFactory
-			[=] { return (*effect) != nullptr; }) // paused
-		: base::make_unexpected(AttachSelectorResult::Skipped);
-	if (!selector) {
-		if (selector.error() == AttachSelectorResult::Failed) {
-			return FillMenuResult::Failed;
-		}
-		menu->prepareGeometryFor(position);
-		return FillMenuResult::Prepared;
+	if (details.price) {
+		menu->addAction(
+			((*details.price > 0)
+				? tr::lng_context_change_price(tr::now)
+				: tr::lng_context_make_paid(tr::now)),
+			[=] { action({ .type = ActionType::ChangePrice }, details); },
+			&icons.menuPrice);
 	}
 
-	(*selector)->chosen(
-	) | rpl::start_with_next([=](ChosenReaction chosen) {
-		const auto &reactions = showForEffect->session().data().reactions();
-		const auto &effects = reactions.list(Data::Reactions::Type::Effects);
-		const auto i = ranges::find(effects, chosen.id, &Data::Reaction::id);
-		if (i != end(effects)) {
-			if (const auto strong = effect->data()) {
-				strong->hideAnimated();
-			}
-			const auto weak = Ui::MakeWeak(menu);
-			const auto done = [=] {
-				delete effect->data();
-				if (const auto strong = weak.data()) {
-					strong->hideMenu(true);
-				}
-			};
-			*effect = Ui::CreateChild<EffectPreview>(
-				menu,
-				showForEffect,
-				details,
-				menu->mapFromGlobal(chosen.globalGeometry.center()),
-				*i,
-				action,
-				crl::guard(menu, done));
-			(*effect)->show();
-		}
-	}, menu->lifetime());
-
+	if (showForEffect) {
+		return AttachSendMenuEffect(
+			menu,
+			showForEffect,
+			details,
+			action,
+			desiredPositionOverride);
+	}
+	const auto position = desiredPositionOverride.value_or(QCursor::pos());
+	menu->prepareGeometryFor(position);
 	return FillMenuResult::Prepared;
 }
 

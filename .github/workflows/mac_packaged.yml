@@ -23,7 +23,7 @@ jobs:
 
   macos:
     name: MacOS
-    runs-on: macos-13
+    runs-on: macos-latest
 
     strategy:
       matrix:
@@ -32,7 +32,7 @@ jobs:
 
     env:
       GIT: "https://github.com"
-      CMAKE_PREFIX_PATH: "/usr/local/opt/ffmpeg@6:/usr/local/opt/openal-soft"
+      CMAKE_PREFIX_PATH: "/opt/homebrew/opt/ffmpeg@6:/opt/homebrew/opt/openal-soft"
       UPLOAD_ARTIFACT: "true"
       ONLY_CACHE: "false"
       MANUAL_CACHING: "1"
@@ -52,7 +52,7 @@ jobs:
         run: |
           brew update
           brew upgrade || true
-          brew install autoconf automake boost cmake ffmpeg@6 openal-soft openssl opus ninja pkg-config python qt yasm xz
+          brew install ada-url autoconf automake boost cmake ffmpeg libtool openal-soft openh264 openssl opus ninja pkg-config python qt yasm xz
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
           xcodebuild -version > CACHE_KEY.txt
@@ -78,7 +78,7 @@ jobs:
           ./autogen.sh
           ./configure --disable-examples --disable-doc
           make -j$(sysctl -n hw.logicalcpu)
-          make install
+          sudo make install
 
       - name: WebRTC cache.
         id: cache-webrtc
@@ -91,10 +91,14 @@ jobs:
         run: |
           cd $LibrariesPath
 
-          git clone --recursive --depth=1 $GIT/desktop-app/tg_owt.git
+          git clone --depth=1 --recursive --shallow-submodules $GIT/desktop-app/tg_owt.git
           cd tg_owt
 
-          cmake -B build . -GNinja -DCMAKE_BUILD_TYPE=Debug
+          cmake -Bbuild -GNinja . \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_FLAGS_DEBUG="" \
+          -DCMAKE_CXX_FLAGS_DEBUG=""
+
           cmake --build build --parallel
 
       - name: Telegram Desktop build.
@@ -115,6 +119,9 @@ jobs:
 
           cmake -Bbuild -GNinja . \
           -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_FLAGS_DEBUG="" \
+          -DCMAKE_CXX_FLAGS_DEBUG="" \
+          -DCMAKE_EXE_LINKER_FLAGS="-s" \
           -DCMAKE_FIND_FRAMEWORK=LAST \
           -DTDESKTOP_API_TEST=ON \
           -DDESKTOP_APP_USE_PACKAGED_LAZY=ON \

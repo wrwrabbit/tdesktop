@@ -1216,11 +1216,12 @@ StickersBox::Inner::Inner(
 })
 , _itemsTop(st::lineWidth)
 , _addText(tr::lng_stickers_featured_add(tr::now))
-, _addWidth(st::stickersTrendingAdd.font->width(_addText))
+, _addWidth(st::stickersTrendingAdd.style.font->width(_addText))
 , _undoText(tr::lng_stickers_return(tr::now))
-, _undoWidth(st::stickersUndoRemove.font->width(_undoText))
+, _undoWidth(st::stickersUndoRemove.style.font->width(_undoText))
 , _installedText(tr::lng_stickers_featured_installed(tr::now))
-, _installedWidth(st::stickersTrendingInstalled.font->width(_installedText)) {
+, _installedWidth(st::stickersTrendingInstalled.style.font->width(
+		_installedText)) {
 	setup();
 }
 
@@ -1666,7 +1667,7 @@ void StickersBox::Inner::paintFakeButton(Painter &p, not_null<Row*> row, int ind
 				row->ripple.reset();
 			}
 		}
-		p.setFont(st.font);
+		p.setFont(st.style.font);
 		p.setPen(st.textFg);
 		p.drawTextLeft(rect.x() - (st.width / 2), rect.y() + st.textTop, width(), text, textWidth);
 	} else {
@@ -1700,7 +1701,7 @@ void StickersBox::Inner::paintFakeButton(Painter &p, not_null<Row*> row, int ind
 					row->ripple.reset();
 				}
 			}
-			p.setFont(st.font);
+			p.setFont(st.style.font);
 			p.setPen(selected ? st.textFgOver : st.textFg);
 			p.drawTextLeft(rect.x() - (st.width / 2), rect.y() + st.textTop, width(), text, textWidth);
 		}
@@ -1825,8 +1826,8 @@ void StickersBox::Inner::setPressed(SelectedRow pressed) {
 	if (_megagroupSet && pressedIndex >= 0 && pressedIndex < _rows.size()) {
 		update(0, _itemsTop + pressedIndex * _rowHeight, width(), _rowHeight);
 		auto &set = _rows[pressedIndex];
-		auto rippleMask = Ui::RippleAnimation::RectMask(QSize(width(), _rowHeight));
 		if (!set->ripple) {
+			auto rippleMask = Ui::RippleAnimation::RectMask(QSize(width(), _rowHeight));
 			set->ripple = std::make_unique<Ui::RippleAnimation>(st::defaultRippleAnimation, std::move(rippleMask), [this, pressedIndex] {
 				update(0, _itemsTop + pressedIndex * _rowHeight, width(), _rowHeight);
 			});

@@ -29,6 +29,7 @@ void MediaEditManager::start(
 		std::optional<bool> invertCaption) {
 	const auto media = item->media();
 	if (!media) {
+		cancel();
 		return;
 	}
 	_item = item;
@@ -53,6 +54,7 @@ void MediaEditManager::apply(SendMenu::Action action) {
 	} else if (action.type == Type::SpoilerOff) {
 		_spoilered = false;
 	}
+	_updateRequests.fire({});
 }
 
 void MediaEditManager::cancel() {
@@ -143,6 +145,10 @@ SendMenu::Details MediaEditManager::sendMenuDetails(
 			? SendMenu::CaptionState::Above
 			: SendMenu::CaptionState::Below),
 	};
+}
+
+rpl::producer<> MediaEditManager::updateRequests() const {
+	return _updateRequests.events();
 }
 
 bool MediaEditManager::CanBeSpoilered(not_null<HistoryItem*> item) {

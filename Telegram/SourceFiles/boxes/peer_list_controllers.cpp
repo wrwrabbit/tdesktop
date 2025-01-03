@@ -842,6 +842,7 @@ auto ChooseRecipientBoxController::createRow(
 		? !_filter(history)
 		: ((peer->isBroadcast() && !Data::CanSendAnything(peer))
 			|| peer->isRepliesChat()
+			|| peer->isVerifyCodes()
 			|| (peer->isUser() && (_premiumRequiredError
 				? !peer->asUser()->canSendIgnoreRequirePremium()
 				: !Data::CanSendAnything(peer))));
@@ -1062,6 +1063,11 @@ std::unique_ptr<PeerListRow> ChooseTopicBoxController::createSearchRow(
 		return std::make_unique<Row>(topic);
 	}
 	return nullptr;
+}
+
+std::unique_ptr<PeerListRow> ChooseTopicBoxController::MakeRow(
+		not_null<Data::ForumTopic*> topic) {
+	return std::make_unique<Row>(topic);
 }
 
 auto ChooseTopicBoxController::createRow(not_null<Data::ForumTopic*> topic)

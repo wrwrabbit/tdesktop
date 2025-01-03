@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/controls/download_bar.h"
 #include "ui/text/format_song_document_name.h"
 #include "ui/layers/generic_box.h"
+#include "ui/ui_utility.h"
 #include "storage/serialize_common.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
@@ -143,7 +144,7 @@ void DownloadManager::trackSession(not_null<Main::Session*> session) {
 	}, data.lifetime);
 
 	session->data().itemViewRefreshRequest(
-	) | rpl::start_with_next([=](not_null<HistoryItem*> item) {
+	) | rpl::start_with_next([=](not_null<const HistoryItem*> item) {
 		changed(item);
 	}, data.lifetime);
 
@@ -531,7 +532,7 @@ void DownloadManager::loadingStopWithConfirmation(
 		return;
 	}
 	const auto window = Core::App().windowFor(
-		&item->history()->session().account());
+		not_null(&item->history()->session().account()));
 	if (!window) {
 		return;
 	}

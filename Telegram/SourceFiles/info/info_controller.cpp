@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_shared_media.h"
 #include "info/info_content_widget.h"
 #include "info/info_memento.h"
+#include "info/global_media/info_global_media_widget.h"
 #include "info/media/info_media_widget.h"
 #include "core/application.h"
 #include "data/data_changes.h"
@@ -46,8 +47,21 @@ Key::Key(Stories::Tag stories) : _value(stories) {
 Key::Key(Statistics::Tag statistics) : _value(statistics) {
 }
 
+Key::Key(BotStarRef::Tag starref) : _value(starref) {
+}
+
+Key::Key(GlobalMedia::Tag global) : _value(global) {
+}
+
 Key::Key(not_null<PollData*> poll, FullMsgId contextId)
 : _value(PollKey{ poll, contextId }) {
+}
+
+Key::Key(
+	std::shared_ptr<Api::WhoReadList> whoReadIds,
+	Data::ReactionId selected,
+	FullMsgId contextId)
+: _value(ReactionsKey{ whoReadIds, selected, contextId }) {
 }
 
 PeerData *Key::peer() const {
@@ -78,6 +92,10 @@ bool Key::isDownloads() const {
 	return v::is<Downloads::Tag>(_value);
 }
 
+bool Key::isGlobalMedia() const {
+	return v::is<GlobalMedia::Tag>(_value);
+}
+
 PeerData *Key::storiesPeer() const {
 	if (const auto tag = std::get_if<Stories::Tag>(&_value)) {
 		return tag->peer;
@@ -92,25 +110,25 @@ Stories::Tab Key::storiesTab() const {
 	return Stories::Tab();
 }
 
-PeerData *Key::statisticsPeer() const {
+Statistics::Tag Key::statisticsTag() const {
 	if (const auto tag = std::get_if<Statistics::Tag>(&_value)) {
+		return *tag;
+	}
+	return Statistics::Tag();
+}
+
+PeerData *Key::starrefPeer() const {
+	if (const auto tag = std::get_if<BotStarRef::Tag>(&_value)) {
 		return tag->peer;
 	}
 	return nullptr;
 }
 
-FullMsgId Key::statisticsContextId() const {
-	if (const auto tag = std::get_if<Statistics::Tag>(&_value)) {
-		return tag->contextId;
+BotStarRef::Type Key::starrefType() const {
+	if (const auto tag = std::get_if<BotStarRef::Tag>(&_value)) {
+		return tag->type;
 	}
-	return {};
-}
-
-FullStoryId Key::statisticsStoryId() const {
-	if (const auto tag = std::get_if<Statistics::Tag>(&_value)) {
-		return tag->storyId;
-	}
-	return {};
+	return BotStarRef::Type();
 }
 
 PollData *Key::poll() const {
@@ -122,6 +140,27 @@ PollData *Key::poll() const {
 
 FullMsgId Key::pollContextId() const {
 	if (const auto data = std::get_if<PollKey>(&_value)) {
+		return data->contextId;
+	}
+	return FullMsgId();
+}
+
+std::shared_ptr<Api::WhoReadList> Key::reactionsWhoReadIds() const {
+	if (const auto data = std::get_if<ReactionsKey>(&_value)) {
+		return data->whoReadIds;
+	}
+	return nullptr;
+}
+
+Data::ReactionId Key::reactionsSelected() const {
+	if (const auto data = std::get_if<ReactionsKey>(&_value)) {
+		return data->selected;
+	}
+	return Data::ReactionId();
+}
+
+FullMsgId Key::reactionsContextId() const {
+	if (const auto data = std::get_if<ReactionsKey>(&_value)) {
 		return data->contextId;
 	}
 	return FullMsgId();
@@ -195,6 +234,19 @@ PollData *AbstractController::poll() const {
 		}
 	}
 	return nullptr;
+}
+
+auto AbstractController::reactionsWhoReadIds() const
+-> std::shared_ptr<Api::WhoReadList> {
+	return key().reactionsWhoReadIds();
+}
+
+Data::ReactionId AbstractController::reactionsSelected() const {
+	return key().reactionsSelected();
+}
+
+FullMsgId AbstractController::reactionsContextId() const {
+	return key().reactionsContextId();
 }
 
 void AbstractController::showSection(
@@ -292,7 +344,9 @@ bool Controller::validateMementoPeer(
 		&& memento->migratedPeerId() == migratedPeerId()
 		&& memento->settingsSelf() == settingsSelf()
 		&& memento->storiesPeer() == storiesPeer()
-		&& memento->statisticsPeer() == statisticsPeer();
+		&& memento->statisticsTag().peer == statisticsTag().peer
+		&& memento->starrefPeer() == starrefPeer()
+		&& memento->starrefType() == starrefType();
 }
 
 void Controller::setSection(not_null<ContentMemento*> memento) {
@@ -304,28 +358,30 @@ void Controller::updateSearchControllers(
 		not_null<ContentMemento*> memento) {
 	using Type = Section::Type;
 	const auto type = _section.type();
-	const auto isMedia = (type == Type::Media);
+	const auto isMedia = (type == Type::Media)
+		|| (type == Type::GlobalMedia);
 	const auto mediaType = isMedia
 		? _section.mediaType()
 		: Section::MediaType::kCount;
 	const auto hasMediaSearch = isMedia
 		&& SharedMediaAllowSearch(mediaType);
+	const auto hasRequestsListSearch = (type == Type::RequestsList);
 	const auto hasCommonGroupsSearch = (type == Type::CommonGroups);
 	const auto hasDownloadsSearch = (type == Type::Downloads);
 	const auto hasMembersSearch = (type == Type::Members)
 		|| (type == Type::Profile);
 	const auto searchQuery = memento->searchFieldQuery();
-	if (isMedia) {
+	if (type == Type::Media) {
 		_searchController
 			= std::make_unique<Api::DelayedSearchController>(&session());
 		auto mediaMemento = dynamic_cast<Media::Memento*>(memento.get());
 		Assert(mediaMemento != nullptr);
-		_searchController->restoreState(
-			mediaMemento->searchState());
+		_searchController->restoreState(mediaMemento->searchState());
 	} else {
 		_searchController = nullptr;
 	}
 	if (hasMediaSearch
+		|| hasRequestsListSearch
 		|| hasCommonGroupsSearch
 		|| hasDownloadsSearch
 		|| hasMembersSearch) {
@@ -401,7 +457,8 @@ rpl::producer<QString> Controller::mediaSourceQueryValue() const {
 }
 
 rpl::producer<QString> Controller::searchQueryValue() const {
-	return searchFieldController()->queryValue();
+	const auto controller = searchFieldController();
+	return controller ? controller->queryValue() : rpl::single(QString());
 }
 
 rpl::producer<SparseIdsMergedSlice> Controller::mediaSource(

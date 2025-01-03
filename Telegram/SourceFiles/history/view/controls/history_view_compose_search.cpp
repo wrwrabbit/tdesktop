@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/shadow.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/painter.h"
+#include "ui/ui_utility.h"
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat.h"
@@ -41,6 +42,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace HistoryView {
 namespace {
 
+using Activation = ComposeSearch::Activation;
 using SearchRequest = Api::MessagesSearchMerged::Request;
 
 [[nodiscard]] inline bool HasChooseFrom(not_null<History*> history) {
@@ -389,7 +391,9 @@ rpl::producer<not_null<QKeyEvent*>> TopBar::keyEvents() const {
 }
 
 void TopBar::setInnerFocus() {
-	_select->setInnerFocus();
+	if (Ui::AppInFocus() && Ui::InFocusChain(_select->window())) {
+		_select->setInnerFocus();
+	}
 }
 
 void TopBar::updateSize() {
@@ -837,7 +841,7 @@ public:
 	void setInnerFocus();
 	void setQuery(const QString &query);
 
-	[[nodiscard]] rpl::producer<not_null<HistoryItem*>> activations() const;
+	[[nodiscard]] rpl::producer<Activation> activations() const;
 	[[nodiscard]] rpl::producer<> destroyRequests() const;
 	[[nodiscard]] rpl::lifetime &lifetime();
 
@@ -861,7 +865,7 @@ private:
 		rpl::event_stream<BottomBar::Index> jumps;
 	} _pendingJump;
 
-	rpl::event_stream<not_null<HistoryItem*>> _activations;
+	rpl::event_stream<Activation> _activations;
 	rpl::event_stream<> _destroyRequests;
 
 };
@@ -963,7 +967,7 @@ ComposeSearch::Inner::Inner(
 		const auto item = _history->owner().message(messages[index]);
 		if (item) {
 			const auto weak = Ui::MakeWeak(_topBar.get());
-			_activations.fire_copy(item);
+			_activations.fire_copy({ item, _apiSearch.request().query });
 			if (weak) {
 				hideList();
 			}
@@ -1032,7 +1036,9 @@ ComposeSearch::Inner::Inner(
 }
 
 void ComposeSearch::Inner::setInnerFocus() {
-	_topBar->setInnerFocus();
+	if (Ui::AppInFocus() && Ui::InFocusChain(_topBar->window())) {
+		_topBar->setInnerFocus();
+	}
 }
 
 void ComposeSearch::Inner::setQuery(const QString &query) {
@@ -1058,8 +1064,7 @@ void ComposeSearch::Inner::hideList() {
 	}
 }
 
-auto ComposeSearch::Inner::activations() const
--> rpl::producer<not_null<HistoryItem*>> {
+rpl::producer<Activation> ComposeSearch::Inner::activations() const {
 	return _activations.events();
 }
 
@@ -1098,7 +1103,7 @@ void ComposeSearch::setQuery(const QString &query) {
 	_inner->setQuery(query);
 }
 
-rpl::producer<not_null<HistoryItem*>> ComposeSearch::activations() const {
+rpl::producer<ComposeSearch::Activation> ComposeSearch::activations() const {
 	return _inner->activations();
 }
 

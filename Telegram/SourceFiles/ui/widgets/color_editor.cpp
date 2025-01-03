@@ -704,7 +704,7 @@ void ColorEditor::Field::correctValue(
 }
 
 void ColorEditor::Field::paintAdditionalPlaceholder(QPainter &p) {
-	p.setFont(_st.font);
+	p.setFont(_st.style.font);
 	p.setPen(_st.placeholderFg);
 	const auto inner = QRect(
 		_st.textMargins.right(),
@@ -829,7 +829,7 @@ void ColorEditor::ResultField::correctValue(
 }
 
 void ColorEditor::ResultField::paintAdditionalPlaceholder(QPainter &p) {
-	p.setFont(_st.font);
+	p.setFont(_st.style.font);
 	p.setPen(_st.placeholderFg);
 	p.drawText(
 		QRect(
@@ -997,9 +997,9 @@ void ColorEditor::updateResultField() {
 	auto text = QString();
 	const auto addHex = [&text](int value) {
 		if (value >= 0 && value <= 9) {
-			text.append('0' + value);
+			text.append(QChar('0' + value));
 		} else if (value >= 10 && value <= 15) {
-			text.append('a' + (value - 10));
+			text.append(QChar('a' + (value - 10)));
 		}
 	};
 	const auto addValue = [&](int value) {

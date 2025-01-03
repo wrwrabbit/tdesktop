@@ -7,13 +7,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "ui/layers/generic_box.h"
+template <typename Object>
+class object_ptr;
 
 class PeerData;
 
 namespace Api {
 struct InviteLink;
 } // namespace Api
+
+namespace Data {
+class Thread;
+} // namespace Data
 
 namespace Main {
 class Session;
@@ -22,6 +27,7 @@ class Session;
 namespace Ui {
 class VerticalLayout;
 class Show;
+class BoxContent;
 } // namespace Ui
 
 [[nodiscard]] bool IsExpiredLink(const Api::InviteLink &data, TimeId now);
@@ -29,7 +35,14 @@ class Show;
 void AddSinglePeerRow(
 	not_null<Ui::VerticalLayout*> container,
 	not_null<PeerData*> peer,
-	rpl::producer<QString> status);
+	rpl::producer<QString> status,
+	Fn<void()> clicked = nullptr);
+
+void AddSinglePeerRow(
+	not_null<Ui::VerticalLayout*> container,
+	not_null<Data::Thread*> thread,
+	rpl::producer<QString> status,
+	Fn<void()> clicked = nullptr);
 
 void AddPermanentLinkBlock(
 	std::shared_ptr<Ui::Show> show,
@@ -48,6 +61,7 @@ void CopyInviteLink(std::shared_ptr<Ui::Show> show, const QString &link);
 	const QString &link,
 	const QString &copied = {});
 [[nodiscard]] object_ptr<Ui::BoxContent> InviteLinkQrBox(
+	PeerData *peer,
 	const QString &link,
 	rpl::producer<QString> title,
 	rpl::producer<QString> about);

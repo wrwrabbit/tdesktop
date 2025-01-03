@@ -9,7 +9,7 @@ jobs:
   deps:
     environment: Release
     name: Libraries
-    runs-on: windows-2022
+    runs-on: windows-latest
 
     strategy:
       matrix:
@@ -94,10 +94,10 @@ jobs:
       matrix:
         include:
           - arch: "x64"
-            runner: "windows-2022"
+            runner: "windows-latest"
             #runner: "t-desktop"
           - arch: "Win32"
-            runner: "windows-2022"
+            runner: "windows-latest"
 
     runs-on: ${{ matrix.runner }}
 

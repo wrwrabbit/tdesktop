@@ -1,13 +1,16 @@
 diff --git a/options_win.cmake b/options_win.cmake
-index d84e503..a150c70 100644
+index 58d8941..e60f97d 100644
 --- a/options_win.cmake
 +++ b/options_win.cmake
-@@ -79,15 +79,18 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+@@ -91,18 +91,20 @@ if (MSVC)
+             /LARGEADDRESSAWARE # Allow more than 2 GB in 32 bit application.
+         )
      endif()
- 
+-
      if (DESKTOP_APP_SPECIAL_TARGET)
 -        target_compile_options(common_options
 -        INTERFACE
+-            /WX
 -            $<IF:$<CONFIG:Debug>,,/GL>
 -        )
 -        target_link_options(common_options
@@ -20,6 +23,7 @@ index d84e503..a150c70 100644
 +        # /LTCGOUT: - does not make sense w/o /LTCG
 +        #target_compile_options(common_options
 +        #INTERFACE
++        #    /WX
 +        #    $<IF:$<CONFIG:Debug>,,/GL>
 +        #)
 +        #target_link_options(common_options
@@ -28,5 +32,5 @@ index d84e503..a150c70 100644
 +        #    $<IF:$<CONFIG:Debug>,,/LTCGOUT:>
 +        #)
      endif()
- elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+ else()
      target_compile_definitions(common_options

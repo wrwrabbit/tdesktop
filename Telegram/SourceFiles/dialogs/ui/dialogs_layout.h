@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace style {
 struct DialogRow;
+struct VerifiedBadge;
 } // namespace style
 
 namespace st {
@@ -29,6 +30,7 @@ namespace Dialogs {
 class Row;
 class FakeRow;
 class BasicRow;
+struct RightButton;
 } // namespace Dialogs
 
 namespace Dialogs::Ui {
@@ -53,6 +55,8 @@ struct TopicJumpCache {
 };
 
 struct PaintContext {
+	RightButton *rightButton = nullptr;
+	std::vector<QImage*> *chatsFilterTags = nullptr;
 	not_null<const style::DialogRow*> st;
 	TopicJumpCache *topicJumpCache = nullptr;
 	Data::Folder *folder = nullptr;
@@ -75,6 +79,9 @@ struct PaintContext {
 	not_null<PeerData*> peer,
 	const PaintContext &context);
 [[nodiscard]] const style::icon *ChatTypeIcon(not_null<PeerData*> peer);
+
+[[nodiscard]] const style::VerifiedBadge &VerifiedStyle(
+	const PaintContext &context);
 
 class RowPainter {
 public:

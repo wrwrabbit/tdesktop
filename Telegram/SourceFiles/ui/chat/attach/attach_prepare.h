@@ -88,6 +88,7 @@ struct PreparedFile {
 };
 
 [[nodiscard]] bool CanBeInAlbumType(PreparedFile::Type type, AlbumType album);
+[[nodiscard]] bool InsertTextOnImageCancel(const QString &text);
 
 struct PreparedList {
 	enum class Error {
@@ -113,6 +114,9 @@ struct PreparedList {
 
 	[[nodiscard]] bool canAddCaption(bool sendingAlbum, bool compress) const;
 	[[nodiscard]] bool canMoveCaption(
+		bool sendingAlbum,
+		bool compress) const;
+	[[nodiscard]] bool canChangePrice(
 		bool sendingAlbum,
 		bool compress) const;
 	[[nodiscard]] bool canBeSentInSlowmode() const;

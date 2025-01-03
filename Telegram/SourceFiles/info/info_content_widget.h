@@ -7,9 +7,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include <rpl/variable.h>
-#include "ui/rp_widget.h"
 #include "info/info_wrap_widget.h"
+#include "info/statistics/info_statistics_tag.h"
+
+namespace Api {
+struct WhoReadList;
+} // namespace Api
 
 namespace Dialogs::Stories {
 struct Content;
@@ -48,6 +51,15 @@ enum class Tab;
 namespace Info::Statistics {
 struct Tag;
 } // namespace Info::Statistics
+
+namespace Info::BotStarRef {
+enum class Type : uchar;
+struct Tag;
+} // namespace Info::BotStarRef
+
+namespace Info::GlobalMedia {
+struct Tag;
+} // namespace Info::GlobalMedia
 
 namespace Info {
 
@@ -107,6 +119,7 @@ public:
 	virtual void checkBeforeClose(Fn<void()> close) {
 		close();
 	}
+	virtual void checkBeforeCloseByEscape(Fn<void()> close);
 	[[nodiscard]] virtual rpl::producer<QString> title() = 0;
 	[[nodiscard]] virtual rpl::producer<QString> subtitle() {
 		return nullptr;
@@ -188,10 +201,16 @@ public:
 	explicit ContentMemento(Downloads::Tag downloads);
 	explicit ContentMemento(Stories::Tag stories);
 	explicit ContentMemento(Statistics::Tag statistics);
+	explicit ContentMemento(BotStarRef::Tag starref);
+	explicit ContentMemento(GlobalMedia::Tag global);
 	ContentMemento(not_null<PollData*> poll, FullMsgId contextId)
 	: _poll(poll)
-	, _pollContextId(contextId) {
+	, _pollReactionsContextId(contextId) {
 	}
+	ContentMemento(
+		std::shared_ptr<Api::WhoReadList> whoReadIds,
+		FullMsgId contextId,
+		Data::ReactionId selected);
 
 	virtual object_ptr<ContentWidget> createWidget(
 		QWidget *parent,
@@ -216,20 +235,32 @@ public:
 	Stories::Tab storiesTab() const {
 		return _storiesTab;
 	}
-	PeerData *statisticsPeer() const {
-		return _statisticsPeer;
+	Statistics::Tag statisticsTag() const {
+		return _statisticsTag;
 	}
-	FullMsgId statisticsContextId() const {
-		return _statisticsContextId;
+	PeerData *starrefPeer() const {
+		return _starrefPeer;
 	}
-	FullStoryId statisticsStoryId() const {
-		return _statisticsStoryId;
+	BotStarRef::Type starrefType() const {
+		return _starrefType;
 	}
 	PollData *poll() const {
 		return _poll;
 	}
 	FullMsgId pollContextId() const {
-		return _pollContextId;
+		return _poll ? _pollReactionsContextId : FullMsgId();
+	}
+	std::shared_ptr<Api::WhoReadList> reactionsWhoReadIds() const {
+		return _reactionsWhoReadIds;
+	}
+	Data::ReactionId reactionsSelected() const {
+		return _reactionsSelected;
+	}
+	FullMsgId reactionsContextId() const {
+		return _reactionsWhoReadIds ? _pollReactionsContextId : FullMsgId();
+	}
+	UserData *globalMediaSelf() const {
+		return _globalMediaSelf;
 	}
 	Key key() const;
 
@@ -269,11 +300,14 @@ private:
 	UserData * const _settingsSelf = nullptr;
 	PeerData * const _storiesPeer = nullptr;
 	Stories::Tab _storiesTab = {};
-	PeerData * const _statisticsPeer = nullptr;
-	const FullMsgId _statisticsContextId;
-	const FullStoryId _statisticsStoryId;
+	Statistics::Tag _statisticsTag;
+	PeerData * const _starrefPeer = nullptr;
+	BotStarRef::Type _starrefType = {};
 	PollData * const _poll = nullptr;
-	const FullMsgId _pollContextId;
+	std::shared_ptr<Api::WhoReadList> _reactionsWhoReadIds;
+	Data::ReactionId _reactionsSelected;
+	const FullMsgId _pollReactionsContextId;
+	UserData * const _globalMediaSelf = nullptr;
 
 	int _scrollTop = 0;
 	QString _searchFieldQuery;

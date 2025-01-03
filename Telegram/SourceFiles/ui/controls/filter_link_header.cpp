@@ -8,11 +8,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/controls/filter_link_header.h"
 
 #include "lang/lang_keys.h"
+#include "ui/image/image_prepare.h"
+#include "ui/text/text_utilities.h"
 #include "ui/painter.h"
 #include "ui/rp_widget.h"
-#include "ui/image/image_prepare.h"
+#include "ui/ui_utility.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/chat_filters_tabs_slider.h"
 #include "ui/widgets/labels.h"
+#include "styles/style_chat_helpers.h" // defaultEmojiSuggestions
+#include "styles/style_dialogs.h" // dialogsSearchTabs
 #include "styles/style_filter_icons.h"
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
@@ -23,6 +28,11 @@ namespace {
 
 constexpr auto kBodyAnimationPart = 0.90;
 constexpr auto kTitleAdditionalScale = 0.05;
+
+struct PreviewState {
+	Fn<QImage()> frame;
+	rpl::lifetime lifetime;
+};
 
 class Widget final : public RpWidget {
 public:
@@ -57,7 +67,7 @@ private:
 	} _progress;
 
 	rpl::variable<int> _badge;
-	QImage _preview;
+	PreviewState _preview;
 	QRectF _previewRect;
 
 	QString _titleText;
@@ -66,8 +76,10 @@ private:
 	QPoint _titlePosition;
 	QPainterPath _titlePath;
 
-	QString _folderTitle;
+	TextWithEntities _folderTitle;
+	Fn<std::any(Fn<void()>)> _makeContext;
 	not_null<const style::icon*> _folderIcon;
+	bool _horizontalFilters = false;
 
 	int _maxHeight = 0;
 
@@ -75,15 +87,94 @@ private:
 
 };
 
-[[nodiscard]] QImage GeneratePreview(
-		const QString &title,
+[[nodiscard]] PreviewState GeneratePreview(
+		not_null<Ui::RpWidget*> parent,
+		const TextWithEntities &title,
+		Fn<std::any(Fn<void()>)> makeContext,
+		int badge) {
+	using Tabs = Ui::ChatsFiltersTabs;
+	auto preview = PreviewState();
+
+	struct State {
+		State(not_null<Ui::RpWidget*> parent)
+		: tabs(parent, st::dialogsSearchTabs) {
+		}
+
+		Tabs tabs;
+		QImage cache;
+		bool dirty = true;
+	};
+	const auto state = preview.lifetime.make_state<State>(parent);
+	preview.frame = [=] {
+		if (state->dirty) {
+			const auto raw = &state->tabs;
+			state->cache.fill(st::windowBg->c);
+
+			auto p = QPainter(&state->cache);
+			Ui::RenderWidget(p, raw, QPoint(), raw->rect());
+
+			const auto &r = st::defaultEmojiSuggestions.fadeRight;
+			const auto &l = st::defaultEmojiSuggestions.fadeLeft;
+			const auto padding = st::filterLinkSubsectionTitlePadding.top();
+			const auto w = raw->width();
+			const auto h = raw->height();
+			r.fill(p, QRect(w - r.width() - padding, 0, r.width(), h));
+			l.fill(p, QRect(padding, 0, l.width(), h));
+			p.fillRect(0, 0, padding, h, st::windowBg);
+			p.fillRect(w - padding, 0, padding, raw->height(), st::windowBg);
+		}
+		return state->cache;
+	};
+	const auto raw = &state->tabs;
+	const auto repaint = [=] {
+		state->dirty = true;
+	};
+	raw->setSections({
+		TextWithEntities{ tr::lng_filters_name_people(tr::now) },
+		title,
+		TextWithEntities{ tr::lng_filters_name_unread(tr::now) },
+	}, makeContext(repaint));
+	raw->fitWidthToSections();
+	raw->setActiveSectionFast(1);
+	raw->stopAnimation();
+
+	auto &result = state->cache;
+	result = QImage(
+		raw->size() * style::DevicePixelRatio(),
+		QImage::Format_ARGB32_Premultiplied);
+	result.setDevicePixelRatio(style::DevicePixelRatio());
+	raw->hide();
+
+	style::PaletteChanged(
+	) | rpl::start_with_next(repaint, preview.lifetime);
+
+	return preview;
+}
+
+[[nodiscard]] PreviewState GeneratePreview(
+		const TextWithEntities &title,
+		Fn<std::any(Fn<void()>)> makeContext,
 		not_null<const style::icon*> icon,
 		int badge) {
+	auto preview = PreviewState();
+
+	struct State {
+		QImage bg;
+		QImage composed;
+		Ui::Text::String string;
+		bool dirty = true;
+	};
+	const auto state = preview.lifetime.make_state<State>();
+	const auto repaint = [=] {
+		state->dirty = true;
+	};
+
 	const auto size = st::filterLinkPreview;
 	const auto ratio = style::DevicePixelRatio();
 	const auto radius = st::filterLinkPreviewRadius;
 	const auto full = QSize(size, size) * ratio;
-	auto result = QImage(full, QImage::Format_ARGB32_Premultiplied);
+	auto &result = state->bg;
+	result = QImage(full, QImage::Format_ARGB32_Premultiplied);
 	result.setDevicePixelRatio(ratio);
 	result.fill(st::windowBg->c);
 
@@ -104,18 +195,32 @@ private:
 	const auto myIconTop = st::filterLinkPreviewMyBottom - iconHeight;
 	icon->paint(p, iconLeft, myIconTop, size);
 
-	const auto paintName = [&](const QString &text, int top) {
-		const auto &font = st.style.font;
-		p.drawText(
-			QRect(0, top, column, font->height),
-			font->elided(text, available),
-			style::al_top);
+	const auto fillName = [=](const TextWithEntities &text) {
+		state->string = Ui::Text::String(
+			st::windowFiltersButton.style,
+			text,
+			kMarkupTextOptions,
+			available,
+			makeContext(repaint));
+	};
+	const auto paintName = [=](QPainter &p, int top) {
+		state->string.draw(p, {
+			.position = QPoint(
+				std::max(
+					(column - state->string.maxWidth()) / 2,
+					skip),
+				top),
+			.outerWidth = available,
+			.availableWidth = available,
+			.align = style::al_left,
+			.elisionLines = 1,
+		});
 	};
 	p.setFont(st.style.font);
 	p.setPen(st.textFg);
-	paintName(tr::lng_filters_all(tr::now), st::filterLinkPreviewAllTop);
-	p.setPen(st.textFgActive);
-	paintName(title, st::filterLinkPreviewMyTop);
+	fillName({ tr::lng_filters_all(tr::now) });
+	paintName(p, st::filterLinkPreviewAllTop);
+	fillName(title);
 
 	auto hq = PainterHighQualityEnabler(p);
 
@@ -170,7 +275,19 @@ private:
 	p.drawRoundedRect(0, 0, size, size, radius, radius);
 	p.end();
 
-	return Images::Round(std::move(result), Images::CornersMask(radius));
+	result = Images::Round(std::move(result), Images::CornersMask(radius));
+
+	preview.frame = [=] {
+		if (state->dirty) {
+			state->composed = state->bg;
+			auto p = QPainter(&state->composed);
+			p.setPen(st.textFgActive);
+			paintName(p, st::filterLinkPreviewMyTop);
+		}
+		return state->composed;
+	};
+
+	return preview;
 }
 
 Widget::Widget(
@@ -180,7 +297,9 @@ Widget::Widget(
 , _about(CreateChild<FlatLabel>(
 	this,
 	rpl::single(descriptor.about.value()),
-	st::filterLinkAbout))
+	st::filterLinkAbout,
+	st::defaultPopupMenu,
+	descriptor.makeAboutContext))
 , _close(CreateChild<IconButton>(this, st::boxTitleClose))
 , _aboutPadding(st::boxRowPadding)
 , _badge(std::move(descriptor.badge))
@@ -188,18 +307,15 @@ Widget::Widget(
 , _titleFont(st::boxTitle.style.font)
 , _titlePadding(st::filterLinkTitlePadding)
 , _folderTitle(descriptor.folderTitle)
-, _folderIcon(descriptor.folderIcon) {
+, _makeContext(descriptor.makeAboutContext)
+, _folderIcon(descriptor.folderIcon)
+, _horizontalFilters(descriptor.horizontalFilters) {
 	setMinimumHeight(st::boxTitleHeight);
 	refreshTitleText();
 	setTitlePosition(st::boxTitlePosition.x(), st::boxTitlePosition.y());
 
-	style::PaletteChanged(
-	) | rpl::start_with_next([=] {
-		_preview = QImage();
-	}, lifetime());
-
-	_badge.changes() | rpl::start_with_next([=] {
-		_preview = QImage();
+	_badge.changes() | rpl::start_with_next([this] {
+		_preview = PreviewState();
 		update();
 	}, lifetime());
 }
@@ -231,7 +347,9 @@ void Widget::resizeEvent(QResizeEvent *e) {
 	_about->resizeToWidth(availableWidth);
 
 	const auto minHeight = minimumHeight();
-	const auto maxHeight = st::filterLinkAboutTop
+	const auto maxHeight = (_horizontalFilters
+			? (st::filterLinkAboutTop * 0.8)
+			: st::filterLinkAboutTop)
 		+ _about->height()
 		+ st::filterLinkAboutBottom;
 	if (maxHeight <= minHeight) {
@@ -272,12 +390,23 @@ void Widget::resizeEvent(QResizeEvent *e) {
 QRectF Widget::previewRect(
 		float64 topProgress,
 		float64 sizeProgress) const {
-	const auto size = st::filterLinkPreview * sizeProgress;
-	return QRectF(
-		(width() - size) / 2.,
-		st::filterLinkPreviewTop * topProgress,
-		size,
-		size);
+	if (_horizontalFilters) {
+		const auto size = (_preview.frame
+			? (_preview.frame().size() / style::DevicePixelRatio())
+			: QSize()) * sizeProgress;
+		return QRectF(
+			(width() - size.width()) / 2.,
+			st::filterLinkPreviewTop * 1.5 * topProgress,
+			size.width(),
+			size.height());
+	} else {
+		const auto size = st::filterLinkPreview * sizeProgress;
+		return QRectF(
+			(width() - size) / 2.,
+			st::filterLinkPreviewTop * topProgress,
+			size,
+			size);
+	}
 };
 
 void Widget::paintEvent(QPaintEvent *e) {
@@ -286,13 +415,27 @@ void Widget::paintEvent(QPaintEvent *e) {
 	p.setOpacity(_progress.body);
 	if (_progress.top) {
 		auto hq = PainterHighQualityEnabler(p);
-		if (_preview.isNull()) {
-			_preview = GeneratePreview(
-				_folderTitle,
-				_folderIcon,
-				_badge.current());
+		if (!_preview.frame) {
+			const auto badge = _badge.current();
+			const auto makeContext = [=](Fn<void()> repaint) {
+				return _makeContext([=] { repaint(); update(); });
+			};
+			if (_horizontalFilters) {
+				_preview = GeneratePreview(
+					this,
+					_folderTitle,
+					makeContext,
+					badge);
+				Widget::resizeEvent(nullptr);
+			} else {
+				_preview = GeneratePreview(
+					_folderTitle,
+					makeContext,
+					_folderIcon,
+					badge);
+			}
 		}
-		p.drawImage(_previewRect, _preview);
+		p.drawImage(_previewRect, _preview.frame());
 	}
 	p.resetTransform();
 
@@ -342,14 +485,15 @@ void Widget::wheelEvent(QWheelEvent *e) {
 object_ptr<RoundButton> FilterLinkProcessButton(
 		not_null<QWidget*> parent,
 		FilterLinkHeaderType type,
-		const QString &title,
+		TextWithEntities title,
+		Fn<std::any(Fn<void()>)> makeContext,
 		rpl::producer<int> badge) {
 	const auto st = &st::filterInviteBox.button;
 	const auto badgeSt = &st::filterInviteButtonBadgeStyle;
 	auto result = object_ptr<RoundButton>(parent, rpl::single(u""_q), *st);
 
 	struct Data {
-		QString text;
+		TextWithEntities text;
 		QString badge;
 	};
 	auto data = std::move(
@@ -357,32 +501,41 @@ object_ptr<RoundButton> FilterLinkProcessButton(
 	) | rpl::map([=](int count) {
 		const auto badge = count ? QString::number(count) : QString();
 		const auto with = [&](QString badge) {
-			return rpl::map([=](QString text) {
+			return rpl::map([=](TextWithEntities text) {
 				return Data{ text, badge };
 			});
 		};
 		switch (type) {
 		case FilterLinkHeaderType::AddingFilter:
 			return badge.isEmpty()
-				? tr::lng_filters_by_link_add_no() | with(QString())
+				? tr::lng_filters_by_link_add_no(
+					Ui::Text::WithEntities
+				) | with(QString())
 				: tr::lng_filters_by_link_add_button(
 					lt_folder,
-					rpl::single(title)
+					rpl::single(title),
+					Ui::Text::WithEntities
 				) | with(badge);
 		case FilterLinkHeaderType::AddingChats:
 			return badge.isEmpty()
-				? tr::lng_filters_by_link_join_no() | with(QString())
+				? tr::lng_filters_by_link_join_no(
+					Ui::Text::WithEntities
+				) | with(QString())
 				: tr::lng_filters_by_link_and_join_button(
 					lt_count,
-					rpl::single(float64(count))) | with(badge);
+					rpl::single(float64(count)),
+					Ui::Text::WithEntities) | with(badge);
 		case FilterLinkHeaderType::AllAdded:
-			return tr::lng_box_ok() | with(QString());
+			return tr::lng_box_ok(Ui::Text::WithEntities) | with(QString());
 		case FilterLinkHeaderType::Removing:
 			return badge.isEmpty()
-				? tr::lng_filters_by_link_remove_button() | with(QString())
+				? tr::lng_filters_by_link_remove_button(
+					Ui::Text::WithEntities
+				) | with(QString())
 				: tr::lng_filters_by_link_and_quit_button(
 					lt_count,
-					rpl::single(float64(count))) | with(badge);
+					rpl::single(float64(count)),
+					Ui::Text::WithEntities) | with(badge);
 		}
 		Unexpected("Type in FilterLinkProcessButton.");
 	}) | rpl::flatten_latest();
@@ -396,7 +549,7 @@ object_ptr<RoundButton> FilterLinkProcessButton(
 	const auto label = result->lifetime().make_state<Label>(result.data());
 	label->setAttribute(Qt::WA_TransparentForMouseEvents);
 	result->sizeValue() | rpl::start_with_next([=](QSize size) {
-		const auto xskip = st->font->spacew;
+		const auto xskip = st->style.font->spacew;
 		const auto yskip = xskip / 2;
 		label->setGeometry(QRect(QPoint(), size).marginsRemoved(
 			{ xskip, yskip, xskip, yskip }));
@@ -448,7 +601,11 @@ object_ptr<RoundButton> FilterLinkProcessButton(
 	}, label->lifetime());
 
 	std::move(data) | rpl::start_with_next([=](Data data) {
-		label->text.setText(st::filterInviteButtonStyle, data.text);
+		label->text.setMarkedText(
+			st::filterInviteButtonStyle,
+			data.text,
+			kMarkupTextOptions,
+			makeContext([=] { label->update(); }));
 		label->badge.setText(st::filterInviteButtonBadgeStyle, data.badge);
 		label->update();
 	}, label->lifetime());

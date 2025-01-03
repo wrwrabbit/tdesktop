@@ -214,7 +214,10 @@ struct State {
 
 [[nodiscard]] QImage GenerateUserpic(Userpic &userpic, int size) {
 	size *= style::DevicePixelRatio();
-	auto result = userpic.peer->generateUserpicImage(userpic.view, size);
+	auto result = PeerData::GenerateUserpicImage(
+		userpic.peer,
+		userpic.view,
+		size);
 	result.setDevicePixelRatio(style::DevicePixelRatio());
 	return result;
 }
@@ -752,6 +755,33 @@ rpl::producer<Ui::WhoReadContent> WhoReacted(
 		not_null<QWidget*> context,
 		const style::WhoRead &st) {
 	return WhoReacted(item, reaction, context, st, nullptr);
+}
+
+[[nodiscard]] rpl::producer<Ui::WhoReadContent> WhenDate(
+		not_null<PeerData*> author,
+		TimeId date,
+		Ui::WhoReadType type) {
+	return rpl::single(Ui::WhoReadContent{
+		.participants = { Ui::WhoReadParticipant{
+			.name = author->name(),
+			.date = FormatReadDate(date, QDateTime::currentDateTime()),
+			.id = author->id.value,
+		} },
+		.type = type,
+		.fullReadCount = 1,
+	});
+}
+
+rpl::producer<Ui::WhoReadContent> WhenEdited(
+		not_null<PeerData*> author,
+		TimeId date) {
+	return WhenDate(author, date, Ui::WhoReadType::Edited);
+}
+
+rpl::producer<Ui::WhoReadContent> WhenOriginal(
+		not_null<PeerData*> author,
+		TimeId date) {
+	return WhenDate(author, date, Ui::WhoReadType::Original);
 }
 
 } // namespace Api

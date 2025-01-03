@@ -26,6 +26,8 @@ msgPadding: margins(11px, 8px, 11px, 8px);
 msgMargin: margins(16px, 6px, 56px, 2px);
 msgMarginTopAttached: 0px;
 msgShadow: 2px;
+msgSelectionOffset: 30px;
+msgSelectionBottomSkip: 5px;
 
 historyReplyTop: 2px;
 historyReplyBottom: 2px;
@@ -54,31 +56,8 @@ msgDateDelta: point(2px, 5px);
 msgDateImgDelta: 4px;
 msgDateImgPadding: point(8px, 2px);
 
-messageQuoteStyle: QuoteStyle(defaultQuoteStyle) {
-	padding: margins(10px, 2px, 4px, 2px);
-	verticalSkip: 4px;
-	outline: 3px;
-	outlineShift: 2px;
-	radius: 5px;
-}
-messageTextStyle: TextStyle(defaultTextStyle) {
-	blockquote: QuoteStyle(messageQuoteStyle) {
-		padding: margins(10px, 2px, 20px, 2px);
-		icon: icon{{ "chat/mini_quote", windowFg }};
-		iconPosition: point(4px, 4px);
-		expand: icon{{ "intro_country_dropdown", windowFg }};
-		expandPosition: point(6px, 4px);
-		collapse: icon{{ "intro_country_dropdown-flip_vertical", windowFg }};
-		collapsePosition: point(6px, 4px);
-	}
-	pre: QuoteStyle(messageQuoteStyle) {
-		header: 20px;
-		headerPosition: point(10px, 2px);
-		scrollable: true;
-		icon: icon{{ "chat/mini_copy", windowFg }};
-		iconPosition: point(4px, 2px);
-	}
-}
+messageQuoteStyle: historyQuoteStyle;
+messageTextStyle: historyTextStyle;
 historyPagePreview: QuoteStyle(messageQuoteStyle) {
 	padding: margins(10px, 5px, 7px, 7px);
 }
@@ -128,6 +107,9 @@ outTextPaletteSelected: TextPalette(outTextPalette) {
 	linkFg: historyLinkOutFgSelected;
 	monoFg: msgOutMonoFgSelected;
 	spoilerFg: msgOutDateFgSelected;
+}
+priceTagTextPalette: TextPalette(defaultTextPalette) {
+	linkFg: creditsBg1;
 }
 fwdTextUserpicPadding: margins(0px, 1px, 3px, 0px);
 fwdTextStyle: TextStyle(semiboldTextStyle) {
@@ -350,6 +332,7 @@ msgBotKbUrlIcon: icon {{ "inline_button_url", msgBotKbIconFg }};
 msgBotKbSwitchPmIcon: icon {{ "inline_button_switch", msgBotKbIconFg }};
 msgBotKbPaymentIcon: icon {{ "inline_button_card", msgBotKbIconFg }};
 msgBotKbWebviewIcon: icon {{ "inline_button_web", msgBotKbIconFg }};
+msgBotKbCopyIcon: icon {{ "inline_button_copy", msgBotKbIconFg }};
 msgBotKbButton: BotKeyboardButton {
 	margin: 2px;
 	padding: 10px;
@@ -568,9 +551,7 @@ historyAdminLogCancelSearch: CrossButton {
 
 	duration: 150;
 	loadingPeriod: 1000;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 historyAdminLogSearchTop: 11px;
 historyAdminLogSearchSlideDuration: 150;
@@ -589,6 +570,8 @@ historyFastTranscribeLock: icon {{ "chat/mini_lock", msgServiceFg }};
 historyFastTranscribeLockPos: point(18px, 13px);
 historyFastTranscribeLockOverlayPos: point(21px, 13px);
 historyFastTranscribeLockOverlaySize: size(6px, 10px);
+
+historySwipeIconSkip: 80px;
 
 historySavedFont: font(semibold 14px);
 
@@ -825,6 +808,10 @@ whoReadPlayedDisabled: icon {{ "menu/read_audio", menuFgDisabled }};
 whoReadReactions: icon{{ "menu/read_reactions", windowBoldFg }};
 whoReadReactionsOver: icon{{ "menu/read_reactions", windowBoldFg }};
 whoReadReactionsDisabled: icon{{ "menu/read_reactions", menuFgDisabled }};
+whenEdited: icon {{ "menu/edited_status", windowBoldFg }};
+whenEditedOver: icon {{ "menu/edited_status", windowBoldFg }};
+whenOriginal: icon {{ "menu/forwarded_status", windowBoldFg }};
+whenOriginalOver: icon {{ "menu/forwarded_status", windowBoldFg }};
 
 reactionsTabAll: icon {{ "menu/read_reactions", windowFg }};
 reactionsTabAllSelected: icon {{ "menu/read_reactions", activeButtonFg }};
@@ -992,9 +979,7 @@ backgroundSwitchToDark: IconButton(defaultIconButton) {
 
 	rippleAreaPosition: point(4px, 4px);
 	rippleAreaSize: 40px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 backgroundSwitchToLight: IconButton(backgroundSwitchToDark) {
 	icon: icon {{ "menu/header_mode_day", boxTitleCloseFg }};
@@ -1013,7 +998,7 @@ chatGiveawayStickerTop: -16px;
 chatGiveawayStickerPadding: margins(14px, -2px, 14px, 14px);
 chatGiveawayWinnersTopSkip: 25px;
 chatGiveawayBadgeFont: font(12px bold);
-chatGiveawayBadgeTop: 106px;
+chatGiveawayBadgeTop: 118px;
 chatGiveawayBadgePadding: margins(7px, 1px, 5px, 3px);
 chatGiveawayBadgeStroke: 2px;
 chatGiveawayPrizesTitleMargin: margins(11px, 16px, 11px, 4px);
@@ -1027,6 +1012,7 @@ chatGiveawayEndDateMargin: margins(11px, 0px, 11px, 16px);
 chatGiveawayPeerSize: 32px;
 chatGiveawayPeerPadding: margins(5px, 7px, 12px, 0px);
 chatGiveawayPeerSkip: 8px;
+chatGiveawayCreditsIconHeight: 19px;
 
 chatSimilarRadius: 12px;
 chatSimilarArrowSize: 6px;
@@ -1162,5 +1148,72 @@ factcheckField: InputField(defaultInputField) {
 
 	heightMin: 24px;
 
-	font: normalFont;
+	style: defaultTextStyle;
 }
+purchasedTagPadding: margins(3px, 2px, 6px, 2px);
+
+msgSelectionCheck: RoundCheckbox(defaultPeerListCheck) {
+	bgActive: boxTextFgGood;
+}
+
+sponsoredMessageBarMaxHeight: 156px;
+
+botEmojiStatusPreviewHeight: 148px;
+botEmojiStatusTitle: FlatLabel(boxTitle) {
+	style: TextStyle(defaultTextStyle) {
+		font: font(16px semibold);
+		lineHeight: 20px;
+	}
+	minWidth: 256px;
+	maxHeight: 0px;
+	align: align(top);
+}
+botEmojiStatusText: FlatLabel(defaultFlatLabel) {
+	style: boxTextStyle;
+	minWidth: 256px;
+	maxHeight: 0px;
+	align: align(top);
+}
+botEmojiStatusUserpic: UserpicButton(defaultUserpicButton) {
+	size: size(chatGiveawayPeerSize, chatGiveawayPeerSize);
+	photoSize: chatGiveawayPeerSize;
+}
+botEmojiStatusName: FlatLabel(defaultFlatLabel) {
+	minWidth: 32px;
+	maxHeight: 20px;
+}
+botEmojiStatusEmoji: FlatLabel(botEmojiStatusName) {
+	textFg: profileVerifiedCheckBg;
+}
+
+botDownloadLabel: boxLabel;
+botDownloadProgress: FlatLabel(defaultFlatLabel) {
+	textFg: windowSubTextFg;
+	style: TextStyle(defaultTextStyle) {
+		font: ttlItemTimerFont;
+	}
+}
+botDownloadCancel: IconButton {
+	width: 20px;
+	height: 20px;
+
+	icon: smallCloseIcon;
+	iconOver: smallCloseIconOver;
+	iconPosition: point(-1px, -1px);
+
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: 20px;
+	ripple: defaultRippleAnimationBgOver;
+}
+chatUniqueGiftBorder: 4px;
+
+chatUniqueStickerPadding: margins(10px, 12px, 10px, 8px);
+chatUniqueTitle: TextStyle(defaultTextStyle) {
+	font: font(16px semibold);
+}
+chatUniqueTitlePadding: margins(12px, 4px, 12px, 2px);
+chatUniqueTextPadding: margins(12px, 2px, 12px, 8px);
+chatUniqueTableSkip: 10px;
+chatUniqueTableAtBottomPadding: margins(12px, 2px, 12px, 20px);
+chatUniqueRowSkip: 4px;
+chatUniqueButtonPadding: margins(12px, 4px, 12px, 16px);

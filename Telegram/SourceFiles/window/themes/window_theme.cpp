@@ -529,6 +529,8 @@ void ChatBackground::start() {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
 	rpl::single(
 		QGuiApplication::styleHints()->colorScheme()
+	) | rpl::filter(
+		rpl::mappers::_1 != Qt::ColorScheme::Unknown
 	) | rpl::then(
 		base::qt_signal_producer(
 			QGuiApplication::styleHints(),
@@ -542,7 +544,9 @@ void ChatBackground::start() {
 		Core::App().settings().setSystemDarkMode(dark);
 	}, _lifetime);
 #else // Qt >= 6.5.0
-	Core::App().settings().setSystemDarkMode(Platform::IsDarkMode());
+	if (const auto dark = Platform::IsDarkMode()) {
+		Core::App().settings().setSystemDarkMode(dark);
+	}
 #endif // Qt < 6.5.0
 }
 
@@ -1503,23 +1507,40 @@ bool ReadPaletteValues(const QByteArray &content, Fn<bool(QLatin1String name, QL
 		{ "section_header_text_color", st::windowActiveTextFg },
 		{ "subtitle_text_color", st::windowSubTextFg },
 		{ "destructive_text_color", st::attentionButtonFg },
+		{ "bottom_bar_bg_color", st::windowBg },
 	};
 	auto object = QJsonObject();
-	for (const auto &[name, color] : colors) {
+	const auto wrap = [](QColor color) {
 		auto r = 0;
 		auto g = 0;
 		auto b = 0;
-		color->c.getRgb(&r, &g, &b);
+		color.getRgb(&r, &g, &b);
 		const auto hex = [](int component) {
 			const auto digit = [](int c) {
 				return QChar((c < 10) ? ('0' + c) : ('a' + c - 10));
 			};
 			return QString() + digit(component / 16) + digit(component % 16);
 		};
-		object.insert(name, '#' + hex(r) + hex(g) + hex(b));
+		return '#' + hex(r) + hex(g) + hex(b);
+	};
+	for (const auto &[name, color] : colors) {
+		object.insert(name, wrap(color->c));
+	}
+	{
+		const auto bg = st::windowBg->c;
+		const auto shadow = st::shadowFg->c;
+		const auto shadowAlpha = shadow.alphaF();
+		const auto mix = [&](int a, int b) {
+			return anim::interpolate(a, b, shadowAlpha);
+		};
+		object.insert("section_separator_color", wrap(QColor(
+			mix(bg.red(), shadow.red()),
+			mix(bg.green(), shadow.green()),
+			mix(bg.blue(), shadow.blue()))));
 	}
 	return {
-		.opaqueBg = st::windowBg->c,
+		.bodyBg = st::windowBg->c,
+		.titleBg = QColor(0, 0, 0, 0),
 		.scrollBg = st::scrollBg->c,
 		.scrollBgOver = st::scrollBgOver->c,
 		.scrollBarBg = st::scrollBarBg->c,

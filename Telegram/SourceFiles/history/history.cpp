@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_helpers.h"
 #include "history/history_translation.h"
 #include "history/history_unread_things.h"
+#include "core/ui_integration.h"
 #include "dialogs/ui/dialogs_layout.h"
 #include "data/business/data_shortcut_messages.h"
 #include "data/components/scheduled_messages.h"
@@ -80,13 +81,24 @@ using UpdateFlag = Data::HistoryUpdate::Flag;
 	return fields;
 }
 
+[[nodiscard]] Dialogs::UnreadState AdjustedForumUnreadState(
+		Dialogs::UnreadState state) {
+	if (state.chatsTopic) {
+		state.forums = 1;
+		if (state.chatsTopic == state.chatsTopicMuted) {
+			state.forumsMuted = 1;
+		}
+	}
+	return state;
+}
+
 } // namespace
 
 History::History(not_null<Data::Session*> owner, PeerId peerId)
 : Thread(owner, Type::History)
 , peer(owner->peer(peerId))
 , _delegateMixin(HistoryInner::DelegateMixin())
-, _chatListNameSortKey(owner->nameSortKey(peer->name()))
+, _chatListNameSortKey(TextUtilities::NameSortKey(peer->name()))
 , _sendActionPainter(this) {
 	Thread::setMuted(owner->notifySettings().isMuted(peer));
 
@@ -173,6 +185,15 @@ void History::itemVanished(not_null<HistoryItem*> item) {
 		&& item->unread(this)
 		&& unreadCount() > 0) {
 		setUnreadCount(unreadCount() - 1);
+	}
+	if (const auto media = item->media()) {
+		if (const auto gift = media->gift()) {
+			using GiftAction = Data::GiftUpdate::Action;
+			owner().notifyGiftUpdate({
+				.itemId = item->fullId(),
+				.action = GiftAction::Delete,
+			});
+		}
 	}
 }
 
@@ -430,6 +451,9 @@ not_null<HistoryItem*> History::createItem(
 		if (detachExistingItem) {
 			result->removeMainView();
 		}
+		if (result->needsUpdateForVideoQualities(message)) {
+			owner().updateEditedMessage(message);
+		}
 		return result;
 	}
 	const auto result = message.match([&](const auto &data) {
@@ -449,8 +473,15 @@ std::vector<not_null<HistoryItem*>> History::createItems(
 	const auto detachExistingItem = true;
 	for (auto i = data.cend(), e = data.cbegin(); i != e;) {
 		const auto &data = *--i;
+		const auto id = IdFromMessage(data);
+		if ((id.bare == 1) && (data.type() == mtpc_messageEmpty)) {
+			// The first message of channels should be a service message
+			// about its creation. But if channel auto-cleaning is enabled,
+			// the first message comes empty and is displayed incorrectly.
+			continue;
+		}
 		result.emplace_back(createItem(
-			IdFromMessage(data),
+			id,
 			data,
 			localFlags,
 			detachExistingItem));
@@ -700,6 +731,14 @@ not_null<HistoryItem*> History::addNewLocalMessage(
 	return addNewItem(
 		makeMessage(WithLocalFlag(std::move(fields)), game),
 		true);
+}
+
+not_null<HistoryItem*> History::addNewLocalMessage(
+		not_null<HistoryItem*> item) {
+	Expects(item->history() == this);
+	Expects(item->isLocal());
+
+	return addNewItem(item, true);
 }
 
 not_null<HistoryItem*> History::addSponsoredMessage(
@@ -1128,14 +1167,23 @@ void History::applyServiceChanges(
 			}
 			if (paid) {
 				// Toast on a current active window.
+				const auto context = [=](not_null<QWidget*> toast) {
+					return Core::MarkedTextContext{
+						.session = &session(),
+						.customEmojiRepaint = [=] { toast->update(); },
+					};
+				};
 				Ui::Toast::Show({
 					.text = tr::lng_payments_success(
 						tr::now,
 						lt_amount,
-						Ui::Text::Bold(payment->amount),
+						Ui::Text::Wrapped(
+							payment->amount,
+							EntityType::Bold),
 						lt_title,
 						Ui::Text::Bold(paid->title),
 						Ui::Text::WithEntities),
+					.textContext = context,
 				});
 			}
 		}
@@ -2161,7 +2209,7 @@ History *History::migrateSibling() const {
 
 Dialogs::UnreadState History::chatListUnreadState() const {
 	if (const auto forum = peer->forum()) {
-		return forum->topicsList()->unreadState();
+		return AdjustedForumUnreadState(forum->topicsList()->unreadState());
 	}
 	return computeUnreadState();
 }
@@ -2170,7 +2218,7 @@ Dialogs::BadgesState History::chatListBadgesState() const {
 	if (const auto forum = peer->forum()) {
 		return adjustBadgesStateByFolder(
 			Dialogs::BadgesForUnread(
-				forum->topicsList()->unreadState(),
+				AdjustedForumUnreadState(forum->topicsList()->unreadState()),
 				Dialogs::CountInBadge::Chats,
 				Dialogs::IncludeInBadge::UnmutedOrAll));
 	}
@@ -2266,7 +2314,7 @@ const QString &History::chatListNameSortKey() const {
 }
 
 void History::refreshChatListNameSortKey() {
-	_chatListNameSortKey = owner().nameSortKey(peer->name());
+	_chatListNameSortKey = TextUtilities::NameSortKey(peer->name());
 }
 
 const base::flat_set<QString> &History::chatListNameWords() const {
@@ -3034,7 +3082,7 @@ const Data::Thread *History::threadFor(MsgId topicRootId) const {
 void History::forumChanged(Data::Forum *old) {
 	if (inChatList()) {
 		notifyUnreadStateChange(old
-			? old->topicsList()->unreadState()
+			? AdjustedForumUnreadState(old->topicsList()->unreadState())
 			: computeUnreadState());
 	}
 
@@ -3044,7 +3092,8 @@ void History::forumChanged(Data::Forum *old) {
 		forum->topicsList()->unreadStateChanges(
 		) | rpl::filter([=] {
 			return (_flags & Flag::IsForum) && inChatList();
-		}) | rpl::start_with_next([=](const Dialogs::UnreadState &old) {
+		}) | rpl::map(AdjustedForumUnreadState
+		) | rpl::start_with_next([=](const Dialogs::UnreadState &old) {
 			notifyUnreadStateChange(old);
 		}, forum->lifetime());
 

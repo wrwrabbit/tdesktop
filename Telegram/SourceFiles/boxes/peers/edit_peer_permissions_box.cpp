@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_peer_permissions_box.h"
 
 #include "lang/lang_keys.h"
+#include "history/admin_log/history_admin_log_filter.h"
 #include "core/ui_integration.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_channel.h"
@@ -18,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/vertical_layout.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
+#include "ui/vertical_list.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/buttons.h"
@@ -53,6 +55,11 @@ constexpr auto kForceDisableTooltipDuration = 3 * crl::time(1000);
 [[nodiscard]] auto Dependencies(PowerSaving::Flags)
 -> std::vector<std::pair<PowerSaving::Flag, PowerSaving::Flag>> {
 	return {};
+}
+
+[[nodiscard]] auto Dependencies(AdminLog::FilterValue::Flags) {
+	using Flag = AdminLog::FilterValue::Flag;
+	return std::vector<std::pair<Flag, Flag>>{};
 }
 
 [[nodiscard]] auto NestedRestrictionLabelsList(
@@ -577,14 +584,6 @@ template <typename Flags>
 		ApplyDependencies(state->checkViews, dependencies, view);
 	};
 
-	if (descriptor.header) {
-		container->add(
-			object_ptr<Ui::FlatLabel>(
-				container,
-				std::move(descriptor.header),
-				st::rightsHeaderLabel),
-			st::rightsHeaderMargin);
-	}
 	const auto addCheckbox = [&](
 			not_null<Ui::VerticalLayout*> verticalLayout,
 			bool isInner,
@@ -1130,19 +1129,24 @@ void ShowEditPeerPermissionsBox(
 			disabledByAdminRights,
 			tr::lng_rights_permission_cant_edit(tr::now));
 		if (const auto channel = peer->asChannel()) {
-			if (channel->isPublic()
-				|| (channel->isMegagroup() && channel->linkedChat())) {
+			if (channel->isPublic()) {
 				result.emplace(
 					Flag::ChangeInfo | Flag::PinMessages,
 					tr::lng_rights_permission_unavailable(tr::now));
+			} else if (channel->isMegagroup() && channel->linkedChat()) {
+				result.emplace(
+					Flag::ChangeInfo | Flag::PinMessages,
+					tr::lng_rights_permission_in_discuss(tr::now));
 			}
 		}
 		return result;
 	}();
 
+	Ui::AddSubsectionTitle(
+		inner,
+		tr::lng_rights_default_restrictions_header());
 	auto [checkboxes, getRestrictions, changes] = CreateEditRestrictions(
 		inner,
-		tr::lng_rights_default_restrictions_header(),
 		restrictions,
 		disabledMessages,
 		{ .isForum = peer->isForum() });
@@ -1306,7 +1310,6 @@ std::vector<AdminRightLabel> AdminRightLabels(
 
 EditFlagsControl<ChatRestrictions> CreateEditRestrictions(
 		QWidget *parent,
-		rpl::producer<QString> header,
 		ChatRestrictions restrictions,
 		base::flat_map<ChatRestrictions, QString> disabledMessages,
 		Data::RestrictionsSetOptions options) {
@@ -1315,7 +1318,6 @@ EditFlagsControl<ChatRestrictions> CreateEditRestrictions(
 		widget.data(),
 		NegateRestrictions(restrictions),
 		{
-			.header = std::move(header),
 			.labels = NestedRestrictionLabelsList(options),
 			.disabledMessages = std::move(disabledMessages),
 		});
@@ -1332,7 +1334,6 @@ EditFlagsControl<ChatRestrictions> CreateEditRestrictions(
 
 EditFlagsControl<ChatAdminRights> CreateEditAdminRights(
 		QWidget *parent,
-		rpl::producer<QString> header,
 		ChatAdminRights rights,
 		base::flat_map<ChatAdminRights, QString> disabledMessages,
 		Data::AdminRightsSetOptions options) {
@@ -1341,7 +1342,6 @@ EditFlagsControl<ChatAdminRights> CreateEditAdminRights(
 		widget.data(),
 		rights,
 		{
-			.header = std::move(header),
 			.labels = NestedAdminRightLabels(options),
 			.disabledMessages = std::move(disabledMessages),
 		});
@@ -1424,6 +1424,21 @@ EditFlagsControl<PowerSaving::Flags> CreateEditPowerSaving(
 	auto widget = object_ptr<Ui::VerticalLayout>(parent);
 	auto descriptor = Settings::PowerSavingLabels();
 	descriptor.forceDisabledMessage = std::move(forceDisabledMessage);
+	auto result = CreateEditFlags(
+		widget.data(),
+		flags,
+		std::move(descriptor));
+	result.widget = std::move(widget);
+
+	return result;
+}
+
+EditFlagsControl<AdminLog::FilterValue::Flags> CreateEditAdminLogFilter(
+		QWidget *parent,
+		AdminLog::FilterValue::Flags flags,
+		bool isChannel) {
+	auto widget = object_ptr<Ui::VerticalLayout>(parent);
+	auto descriptor = AdminLog::FilterValueLabels(isChannel);
 	auto result = CreateEditFlags(
 		widget.data(),
 		flags,

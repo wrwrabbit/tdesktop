@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/search_field_controller.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/widgets/scroll_area.h"
+#include "ui/ui_utility.h"
 #include "data/data_download_manager.h"
 #include "data/data_user.h"
 #include "core/application.h"
@@ -64,9 +65,6 @@ Widget::Widget(
 }
 
 bool Widget::showInternal(not_null<ContentMemento*> memento) {
-	if (!controller()->validateMementoPeer(memento)) {
-		return false;
-	}
 	if (auto downloadsMemento = dynamic_cast<Memento*>(memento.get())) {
 		restoreState(downloadsMemento);
 		return true;

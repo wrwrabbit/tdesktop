@@ -161,6 +161,7 @@ private:
 		Painter &p,
 		const Ui::ChatPaintContext &context) override;
 	QString listElementAuthorRank(not_null<const Element*> view) override;
+	bool listElementHideTopicButton(not_null<const Element*> view) override;
 	History *listTranslateHistory() override;
 	void listAddTranslatedItems(
 		not_null<TranslateTracker*> tracker) override;
@@ -213,7 +214,6 @@ private:
 		Api::SendOptions options,
 		bool ctrlShiftEnter);
 
-	void sendExistingDocument(not_null<DocumentData*> document);
 	bool sendExistingDocument(
 		not_null<DocumentData*> document,
 		Api::SendOptions options,
@@ -695,7 +695,7 @@ void ShortcutMessages::setupComposeControls() {
 	_composeControls->fileChosen(
 	) | rpl::start_with_next([=](ChatHelpers::FileChosen data) {
 		_controller->hideLayer(anim::type::normal);
-		sendExistingDocument(data.document);
+		sendExistingDocument(data.document, {}, std::nullopt);
 	}, lifetime());
 
 	_composeControls->photoChosen(
@@ -715,7 +715,9 @@ void ShortcutMessages::setupComposeControls() {
 		}
 	}, lifetime());
 
-	_composeControls->scrollKeyEvents(
+	rpl::merge(
+		_composeControls->scrollKeyEvents(),
+		_inner->scrollKeyEvents()
 	) | rpl::start_with_next([=](not_null<QKeyEvent*> e) {
 		_scroll->keyPressEvent(e);
 	}, lifetime());
@@ -967,7 +969,7 @@ CopyRestrictionType ShortcutMessages::listCopyMediaRestrictionType(
 		not_null<HistoryItem*> item) {
 	if (const auto media = item->media()) {
 		if (const auto invoice = media->invoice()) {
-			if (invoice->extendedMedia) {
+			if (!invoice->extendedMedia.empty()) {
 				return CopyMediaRestrictionTypeFor(_history->peer, item);
 			}
 		}
@@ -1044,6 +1046,11 @@ void ShortcutMessages::listPaintEmpty(
 QString ShortcutMessages::listElementAuthorRank(
 		not_null<const Element*> view) {
 	return {};
+}
+
+bool ShortcutMessages::listElementHideTopicButton(
+		not_null<const Element*> view) {
+	return true;
 }
 
 History *ShortcutMessages::listTranslateHistory() {
@@ -1193,6 +1200,7 @@ void ShortcutMessages::sendVoice(ComposeControls::VoiceToSend &&data) {
 		data.bytes,
 		data.waveform,
 		data.duration,
+		data.video,
 		std::move(action));
 
 	_composeControls->cancelReplyMessage();
@@ -1486,11 +1494,6 @@ void ShortcutMessages::doSetInnerFocus() {
 		|| !_composeControls->focus()) {
 		_inner->setFocus();
 	}
-}
-
-void ShortcutMessages::sendExistingDocument(
-		not_null<DocumentData*> document) {
-	sendExistingDocument(document, {}, std::nullopt);
 }
 
 bool ShortcutMessages::sendExistingDocument(

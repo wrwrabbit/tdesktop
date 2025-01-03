@@ -70,6 +70,8 @@ enum class PremiumFeature {
 	LastSeen,
 	MessagePrivacy,
 	Business,
+	Effects,
+	FilterTags,
 
 	// Business features.
 	BusinessLocation,

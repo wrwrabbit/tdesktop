@@ -7,44 +7,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "base/timer.h"
+#include "api/api_statistics_sender.h"
 #include "data/data_boosts.h"
 #include "data/data_channel_earn.h"
 #include "data/data_statistics.h"
-#include "mtproto/sender.h"
 
 class ChannelData;
 class PeerData;
 
 namespace Api {
-
-class StatisticsRequestSender {
-protected:
-	explicit StatisticsRequestSender(not_null<ChannelData*> channel);
-	~StatisticsRequestSender();
-
-	template <
-		typename Request,
-		typename = std::enable_if_t<!std::is_reference_v<Request>>,
-		typename = typename Request::Unboxed>
-	[[nodiscard]] auto makeRequest(Request &&request);
-
-	[[nodiscard]] MTP::Sender &api() {
-		return _api;
-	}
-	[[nodiscard]] not_null<ChannelData*> channel() {
-		return _channel;
-	}
-
-private:
-	void checkRequests();
-
-	const not_null<ChannelData*> _channel;
-	MTP::Sender _api;
-	base::Timer _timer;
-	base::flat_map<MTP::DcId, base::flat_set<mtpRequestId>> _requests;
-
-};
 
 class Statistics final : public StatisticsRequestSender {
 public:
@@ -110,7 +81,7 @@ private:
 
 class EarnStatistics final : public StatisticsRequestSender {
 public:
-	explicit EarnStatistics(not_null<ChannelData*> channel);
+	explicit EarnStatistics(not_null<PeerData*> peer);
 
 	[[nodiscard]] rpl::producer<rpl::no_value, QString> request();
 	void requestHistory(
@@ -123,6 +94,7 @@ public:
 	static constexpr auto kLimit = int(10);
 
 private:
+	const bool _isUser = false;
 	Data::EarnStatistics _data;
 
 	mtpRequestId _requestId = 0;

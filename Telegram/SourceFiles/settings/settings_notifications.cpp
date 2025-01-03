@@ -28,7 +28,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/platform_specific.h"
 #include "platform/platform_notifications_manager.h"
 #include "base/platform/base_platform_info.h"
-#include "base/call_delayed.h"
 #include "mainwindow.h"
 #include "core/application.h"
 #include "main/main_session.h"
@@ -36,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "api/api_authorizations.h"
 #include "api/api_ringtones.h"
+#include "data/data_chat_filters.h"
 #include "data/data_session.h"
 #include "data/data_document.h"
 #include "data/notify/data_notify_settings.h"
@@ -133,13 +133,10 @@ private:
 	void startAnimation();
 	void animationCallback();
 
-	void destroyDelayed();
-
 	NotificationsCount *_owner;
 	QPixmap _cache;
 	Ui::Animations::Simple _opacity;
 	bool _hiding = false;
-	bool _deleted = false;
 
 };
 
@@ -665,18 +662,6 @@ void NotificationsCount::SampleWidget::animationCallback() {
 			_owner->removeSample(this);
 		}
 		hide();
-		destroyDelayed();
-	}
-}
-
-void NotificationsCount::SampleWidget::destroyDelayed() {
-	if (_deleted) return;
-	_deleted = true;
-
-	// Ubuntu has a lag if deleteLater() called immediately.
-	if constexpr (Platform::IsLinux()) {
-		base::call_delayed(1000, this, [this] { delete this; });
-	} else {
 		deleteLater();
 	}
 }
@@ -879,6 +864,27 @@ NotifyViewCheckboxes SetupNotifyViewOptions(
 void SetupAdvancedNotifications(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
+	if (Platform::IsWindows()) {
+		const auto skipInFocus = container->add(object_ptr<Button>(
+			container,
+			tr::lng_settings_skip_in_focus(),
+			st::settingsButtonNoIcon
+		))->toggleOn(rpl::single(Core::App().settings().skipToastsInFocus()));
+
+		skipInFocus->toggledChanges(
+		) | rpl::filter([](bool checked) {
+			return (checked != Core::App().settings().skipToastsInFocus());
+		}) | rpl::start_with_next([=](bool checked) {
+			Core::App().settings().setSkipToastsInFocus(checked);
+			Core::App().saveSettingsDelayed();
+			if (checked && Platform::Notifications::SkipToastForCustom()) {
+				using Change = Window::Notifications::ChangeType;
+				Core::App().notifications().notifySettingsChanged(
+					Change::DesktopEnabled);
+			}
+		}, skipInFocus->lifetime());
+	}
+
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 	Ui::AddDivider(container);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
@@ -1101,6 +1107,16 @@ void SetupNotificationsContent(
 		tr::lng_settings_include_muted(),
 		st::settingsButtonNoIcon));
 	muted->toggleOn(rpl::single(settings.includeMutedCounter()));
+	const auto mutedFolders = session->data().chatsFilters().has()
+		? container->add(object_ptr<Button>(
+			container,
+			tr::lng_settings_include_muted_folders(),
+			st::settingsButtonNoIcon))
+		: nullptr;
+	if (mutedFolders) {
+		mutedFolders->toggleOn(
+			rpl::single(settings.includeMutedCounterFolders()));
+	}
 	const auto count = container->add(object_ptr<Button>(
 		container,
 		tr::lng_settings_count_unread(),
@@ -1217,6 +1233,17 @@ void SetupNotificationsContent(
 		Core::App().settings().setIncludeMutedCounter(checked);
 		changed(Change::IncludeMuted);
 	}, muted->lifetime());
+
+	if (mutedFolders) {
+		mutedFolders->toggledChanges(
+		) | rpl::filter([=](bool checked) {
+			return (checked
+				!= Core::App().settings().includeMutedCounterFolders());
+		}) | rpl::start_with_next([=](bool checked) {
+			Core::App().settings().setIncludeMutedCounterFolders(checked);
+			changed(Change::IncludeMuted);
+		}, mutedFolders->lifetime());
+	}
 
 	count->toggledChanges(
 	) | rpl::filter([=](bool checked) {

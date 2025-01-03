@@ -43,9 +43,7 @@ notifyClose: IconButton {
 
 	rippleAreaPosition: point(5px, 5px);
 	rippleAreaSize: 20px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 notifyItemTop: 12px;
 notifyTextLeft: 12px;
@@ -61,7 +59,7 @@ notifyActionsDuration: 200;
 notifyHideAllHeight: 36px;
 
 notifyReplyArea: InputField(defaultInputField) {
-	font: normalFont;
+	style: defaultTextStyle;
 	textMargins: margins(8px, 8px, 8px, 6px);
 	heightMin: 36px;
 	heightMax: 72px;
@@ -235,8 +233,6 @@ createThemeLink: InputField(defaultInputField) {
 	placeholderFont: boxTextFont;
 
 	heightMin: 34px;
-
-	font: boxTextFont;
 }
 
 windowFiltersWidth: 72px;
@@ -289,8 +285,9 @@ windowFilterSmallRemoveRight: 10px;
 windowFilterNameInput: InputField(defaultInputField) {
 	textMargins: margins(0px, 26px, 36px, 4px);
 }
+windowFilterStaticTitlePosition: point(0px, 5px);
 windowFilterIconToggleSize: size(36px, 36px);
-windowFilterIconTogglePosition: point(-4px, 12px);
+windowFilterIconTogglePosition: point(-4px, 18px);
 windwoFilterIconPanelPosition: point(-2px, -1px);
 windowFilterIconSingle: size(44px, 42px);
 windowFilterIconPadding: margins(10px, 36px, 10px, 8px);

@@ -81,7 +81,7 @@ if building:
         if result != 0:
             finish(1, 'While stripping Telegram.')
 
-        result = subprocess.call('codesign --force --deep --timestamp --options runtime --sign "Developer ID Application: John Preston" Telegram.app --entitlements "../../Telegram/Telegram/Telegram.entitlements"', shell=True)
+        result = subprocess.call('codesign --force --deep --timestamp --options runtime --sign "Developer ID Application: Telegram FZ-LLC (C67CF9S4VU)" Telegram.app --entitlements "../../Telegram/Telegram/Telegram.entitlements"', shell=True)
         if result != 0:
             finish(1, 'While signing Telegram.')
 
@@ -89,8 +89,6 @@ if building:
             finish(1, 'Updater not found.')
         elif not os.path.exists('Telegram.app/Contents/Helpers/crashpad_handler'):
             finish(1, 'crashpad_handler not found.')
-        elif not os.path.exists('Telegram.app/Contents/Resources/Icon.icns'):
-            finish(1, 'Icon not found.')
         elif not os.path.exists('Telegram.app/Contents/_CodeSignature'):
             finish(1, 'Signature not found.')
 

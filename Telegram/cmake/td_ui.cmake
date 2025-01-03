@@ -18,6 +18,7 @@ set(style_files
     ui/chat/chat.style
     ui/effects/credits.style
     ui/effects/premium.style
+    ui/color_indices.style
     boxes/boxes.style
     dialogs/dialogs.style
     chat_helpers/chat_helpers.style
@@ -64,12 +65,16 @@ PRIVATE
     calls/group/ui/calls_group_scheduled_labels.h
     calls/group/ui/desktop_capture_choose_source.cpp
     calls/group/ui/desktop_capture_choose_source.h
+    calls/ui/calls_device_menu.cpp
+    calls/ui/calls_device_menu.h
 
     chat_helpers/field_characters_count_manager.cpp
     chat_helpers/field_characters_count_manager.h
     chat_helpers/stickers_emoji_image_loader.cpp
     chat_helpers/stickers_emoji_image_loader.h
 
+    core/current_geo_location.cpp
+    core/current_geo_location.h
     core/file_location.cpp
     core/file_location.h
     core/mime_type.cpp
@@ -78,14 +83,19 @@ PRIVATE
     countries/countries_instance.cpp
     countries/countries_instance.h
 
+    data/raw/raw_countries_bounds.cpp
+    data/raw/raw_countries_bounds.h
     data/data_birthday.cpp
     data/data_birthday.h
     data/data_channel_earn.h
     data/data_credits.h
+    data/data_credits_earn.h
+    data/data_premium_subscription_option.h
     data/data_statistics_chart.cpp
     data/data_statistics_chart.h
-    data/data_subscription_option.h
+    data/data_subscriptions.h
 
+    dialogs/dialogs_common.h
     dialogs/dialogs_three_state_icon.h
     dialogs/ui/chat_search_empty.cpp
     dialogs/ui/chat_search_empty.h
@@ -116,8 +126,12 @@ PRIVATE
     editor/scene/scene_item_line.cpp
     editor/scene/scene_item_line.h
 
+    history/admin_log/history_admin_log_filter_value.h
     history/history_view_top_toast.cpp
     history/history_view_top_toast.h
+    history/history_view_swipe.cpp
+    history/history_view_swipe.h
+    history/history_view_swipe_data.h
     history/view/controls/history_view_characters_limit.cpp
     history/view/controls/history_view_characters_limit.h
     history/view/controls/history_view_voice_record_button.cpp
@@ -141,6 +155,8 @@ PRIVATE
 
     info/channel_statistics/earn/earn_format.cpp
     info/channel_statistics/earn/earn_format.h
+    info/channel_statistics/earn/earn_icons.cpp
+    info/channel_statistics/earn/earn_icons.h
 
     intro/intro_code_input.cpp
     intro/intro_code_input.h
@@ -192,10 +208,19 @@ PRIVATE
     payments/ui/payments_panel.h
     payments/ui/payments_panel_data.h
     payments/ui/payments_panel_delegate.h
+    payments/ui/payments_reaction_box.cpp
+    payments/ui/payments_reaction_box.h
 
+    platform/linux/current_geo_location_linux.cpp
+    platform/linux/current_geo_location_linux.h
     platform/mac/file_bookmark_mac.h
     platform/mac/file_bookmark_mac.mm
+    platform/mac/current_geo_location_mac.h
+    platform/mac/current_geo_location_mac.mm
+    platform/win/current_geo_location_win.cpp
+    platform/win/current_geo_location_win.h
     platform/platform_file_bookmark.h
+    platform/platform_current_geo_location.h
 
     settings/settings_common.cpp
     settings/settings_common.h
@@ -213,6 +238,8 @@ PRIVATE
     statistics/statistics_data_deserialize.h
     statistics/statistics_format_values.cpp
     statistics/statistics_format_values.h
+    statistics/statistics_graphics.cpp
+    statistics/statistics_graphics.h
     statistics/statistics_types.h
     statistics/view/abstract_chart_view.cpp
     statistics/view/abstract_chart_view.h
@@ -267,8 +294,8 @@ PRIVATE
     ui/boxes/edit_invite_link.h
     ui/boxes/rate_call_box.cpp
     ui/boxes/rate_call_box.h
-    ui/boxes/report_box.cpp
-    ui/boxes/report_box.h
+    ui/boxes/report_box_graphics.cpp
+    ui/boxes/report_box_graphics.h
     ui/boxes/show_or_premium_box.cpp
     ui/boxes/show_or_premium_box.h
     ui/boxes/single_choice_box.cpp
@@ -285,6 +312,8 @@ PRIVATE
     ui/chat/attach/attach_album_preview.h
     ui/chat/attach/attach_album_thumbnail.cpp
     ui/chat/attach/attach_album_thumbnail.h
+    ui/chat/attach/attach_bot_downloads.cpp
+    ui/chat/attach/attach_bot_downloads.h
     ui/chat/attach/attach_bot_webview.cpp
     ui/chat/attach/attach_bot_webview.h
     ui/chat/attach/attach_controls.cpp
@@ -305,6 +334,8 @@ PRIVATE
     ui/chat/chat_style_radius.h
     ui/chat/chat_theme.cpp
     ui/chat/chat_theme.h
+    ui/chat/chats_filter_tag.cpp
+    ui/chat/chats_filter_tag.h
     ui/chat/continuous_scroll.cpp
     ui/chat/continuous_scroll.h
     ui/chat/forward_options_box.cpp
@@ -343,6 +374,8 @@ PRIVATE
     ui/controls/invite_link_label.h
     ui/controls/peer_list_dummy.cpp
     ui/controls/peer_list_dummy.h
+    ui/controls/round_video_recorder.cpp
+    ui/controls/round_video_recorder.h
     ui/controls/send_as_button.cpp
     ui/controls/send_as_button.h
     ui/controls/send_button.cpp
@@ -362,6 +395,8 @@ PRIVATE
     ui/effects/loading_element.h
     ui/effects/outline_segments.cpp
     ui/effects/outline_segments.h
+    ui/effects/premium_bubble.cpp
+    ui/effects/premium_bubble.h
     ui/effects/premium_graphics.cpp
     ui/effects/premium_graphics.h
     ui/effects/premium_stars.cpp
@@ -380,6 +415,8 @@ PRIVATE
     ui/effects/snowflakes.h
     ui/effects/toggle_arrow.cpp
     ui/effects/toggle_arrow.h
+    ui/search_field_controller.cpp
+    ui/search_field_controller.h
     ui/text/format_song_name.cpp
     ui/text/format_song_name.h
     ui/text/format_values.cpp
@@ -387,6 +424,15 @@ PRIVATE
     ui/text/text_options.cpp
     ui/text/text_options.h
 
+    ui/widgets/fields/special_fields.cpp
+    ui/widgets/fields/special_fields.h
+    ui/widgets/fields/time_part_input_with_placeholder.cpp
+    ui/widgets/fields/time_part_input_with_placeholder.h
+
+    ui/widgets/chat_filters_tabs_slider.cpp
+    ui/widgets/chat_filters_tabs_slider.h
+    ui/widgets/chat_filters_tabs_slider_reorder.cpp
+    ui/widgets/chat_filters_tabs_slider_reorder.h
     ui/widgets/color_editor.cpp
     ui/widgets/color_editor.h
     ui/widgets/continuous_sliders.cpp
@@ -401,6 +447,9 @@ PRIVATE
     ui/widgets/multi_select.h
     ui/widgets/sent_code_field.cpp
     ui/widgets/sent_code_field.h
+    ui/widgets/participants_check_view.cpp
+    ui/widgets/participants_check_view.h
+    ui/widgets/slider_natural_width.h
     ui/widgets/vertical_drum_picker.cpp
     ui/widgets/vertical_drum_picker.h
 
@@ -424,15 +473,19 @@ PRIVATE
     ui/unread_badge_paint.h
     ui/userpic_view.cpp
     ui/userpic_view.h
-    ui/widgets/fields/special_fields.cpp
-    ui/widgets/fields/special_fields.h
-    ui/widgets/fields/time_part_input_with_placeholder.cpp
-    ui/widgets/fields/time_part_input_with_placeholder.h
+    ui/webview_helpers.cpp
+    ui/webview_helpers.h
 
     window/window_slide_animation.cpp
     window/window_slide_animation.h
 
     ui/ui_pch.h
+)
+
+nice_target_sources(td_ui ${res_loc}
+PRIVATE
+    picker_html/picker.css
+    picker_html/picker.js
 )
 
 if (DESKTOP_APP_SPECIAL_TARGET)
@@ -463,4 +516,6 @@ PRIVATE
     desktop-app::lib_spellcheck
     desktop-app::lib_stripe
     desktop-app::external_kcoreaddons
+    desktop-app::external_openh264
+    desktop-app::external_webrtc
 )

@@ -16,15 +16,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/cloud_password/settings_cloud_password_email_confirm.h"
 #include "settings/cloud_password/settings_cloud_password_input.h"
 #include "settings/cloud_password/settings_cloud_password_start.h"
+#include "settings/settings_active_sessions.h"
 #include "settings/settings_blocked_peers.h"
 #include "settings/settings_global_ttl.h"
 #include "settings/settings_local_passcode.h"
 #include "settings/settings_premium.h" // Settings::ShowPremium.
 #include "settings/settings_privacy_controllers.h"
 #include "settings/settings_websites.h"
+#include "base/system_unlock.h"
 #include "base/timer_rpl.h"
 #include "boxes/passcode_box.h"
-#include "boxes/sessions_box.h"
 #include "ui/boxes/confirm_box.h"
 #include "boxes/self_destruction_box.h"
 #include "core/application.h"
@@ -185,16 +186,23 @@ QString PrivacyBase(Privacy::Key key, const Privacy::Rule &rule) {
 		[[fallthrough]];
 	default:
 		switch (rule.option) {
-		case Option::Everyone: return tr::lng_edit_privacy_everyone(tr::now);
+		case Option::Everyone:
+			return rule.never.miniapps
+				? tr::lng_edit_privacy_no_miniapps(tr::now)
+				: tr::lng_edit_privacy_everyone(tr::now);
 		case Option::Contacts:
 			return rule.always.premiums
 				? tr::lng_edit_privacy_contacts_and_premium(tr::now)
+				: rule.always.miniapps
+				? tr::lng_edit_privacy_contacts_and_miniapps(tr::now)
 				: tr::lng_edit_privacy_contacts(tr::now);
 		case Option::CloseFriends:
 			return tr::lng_edit_privacy_close_friends(tr::now);
 		case Option::Nobody:
 			return rule.always.premiums
 				? tr::lng_edit_privacy_premium(tr::now)
+				: rule.always.miniapps
+				? tr::lng_edit_privacy_miniapps(tr::now)
 				: tr::lng_edit_privacy_nobody(tr::now);
 		}
 		Unexpected("Value in Privacy::Option.");
@@ -307,9 +315,7 @@ void AddPremiumPrivacyButton(
 				lt_link,
 				link,
 				Ui::Text::WithEntities),
-			.st = &st::defaultMultilineToast,
 			.duration = Ui::Toast::kDefaultDuration * 2,
-			.multiline = true,
 			.filter = crl::guard(&controller->session(), [=](
 					const ClickHandlerPtr &,
 					Qt::MouseButton button) {
@@ -407,7 +413,8 @@ void SetupPrivacy(
 	add(
 		tr::lng_settings_last_seen(),
 		Key::LastSeen,
-		[=] { return std::make_unique<LastSeenPrivacyController>(session); });
+		[=] { return std::make_unique<LastSeenPrivacyController>(
+			session); });
 	add(
 		tr::lng_settings_profile_photo_privacy(),
 		Key::ProfilePhoto,
@@ -416,6 +423,10 @@ void SetupPrivacy(
 		tr::lng_settings_bio_privacy(),
 		Key::About,
 		[] { return std::make_unique<AboutPrivacyController>(); });
+	add(
+		tr::lng_settings_gifts_privacy(),
+		Key::GiftsAutoSave,
+		[=] { return std::make_unique<GiftsAutoSavePrivacyController>(); });
 	add(
 		tr::lng_settings_birthday_privacy(),
 		Key::Birthday,
@@ -444,7 +455,8 @@ void SetupPrivacy(
 	}
 	AddMessagesPrivacyButton(controller, container);
 
-	session->api().userPrivacy().reload(Api::UserPrivacy::Key::AddedByPhone);
+	session->api().userPrivacy().reload(
+		Api::UserPrivacy::Key::AddedByPhone);
 
 	Ui::AddSkip(container, st::settingsPrivacySecurityPadding);
 	Ui::AddDivider(container);
@@ -589,47 +601,6 @@ void SetupTopPeers(
 
 	Ui::AddSkip(container);
 	Ui::AddDividerText(container, tr::lng_settings_top_peers_about());
-}
-
-void SetupSensitiveContent(
-		not_null<Window::SessionController*> controller,
-		not_null<Ui::VerticalLayout*> container,
-		rpl::producer<> updateTrigger) {
-	using namespace rpl::mappers;
-
-	const auto wrap = container->add(
-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			container,
-			object_ptr<Ui::VerticalLayout>(container)));
-	const auto inner = wrap->entity();
-
-	Ui::AddSkip(inner);
-	Ui::AddSubsectionTitle(inner, tr::lng_settings_sensitive_title());
-
-	const auto session = &controller->session();
-
-	std::move(
-		updateTrigger
-	) | rpl::start_with_next([=] {
-		session->api().sensitiveContent().reload();
-	}, container->lifetime());
-	inner->add(object_ptr<Button>(
-		inner,
-		tr::lng_settings_sensitive_disable_filtering(),
-		st::settingsButtonNoIcon
-	))->toggleOn(
-		session->api().sensitiveContent().enabled()
-	)->toggledChanges(
-	) | rpl::filter([=](bool toggled) {
-		return toggled != session->api().sensitiveContent().enabledCurrent();
-	}) | rpl::start_with_next([=](bool toggled) {
-		session->api().sensitiveContent().update(toggled);
-	}, container->lifetime());
-
-	Ui::AddSkip(inner);
-	Ui::AddDividerText(inner, tr::lng_settings_sensitive_about());
-
-	wrap->toggleOn(session->api().sensitiveContent().canChange());
 }
 
 void SetupSelfDestruction(
@@ -925,6 +896,47 @@ void SetupSecurity(
 
 } // namespace
 
+void SetupSensitiveContent(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container,
+		rpl::producer<> updateTrigger) {
+	using namespace rpl::mappers;
+
+	const auto wrap = container->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			container,
+			object_ptr<Ui::VerticalLayout>(container)));
+	const auto inner = wrap->entity();
+
+	Ui::AddSkip(inner);
+	Ui::AddSubsectionTitle(inner, tr::lng_settings_sensitive_title());
+
+	const auto session = &controller->session();
+
+	std::move(
+		updateTrigger
+	) | rpl::start_with_next([=] {
+		session->api().sensitiveContent().reload();
+	}, container->lifetime());
+	inner->add(object_ptr<Button>(
+		inner,
+		tr::lng_settings_sensitive_disable_filtering(),
+		st::settingsButtonNoIcon
+	))->toggleOn(
+		session->api().sensitiveContent().enabled()
+	)->toggledChanges(
+	) | rpl::filter([=](bool toggled) {
+		return toggled != session->api().sensitiveContent().enabledCurrent();
+	}) | rpl::start_with_next([=](bool toggled) {
+		session->api().sensitiveContent().update(toggled);
+	}, container->lifetime());
+
+	Ui::AddSkip(inner);
+	Ui::AddDividerText(inner, tr::lng_settings_sensitive_about());
+
+	wrap->toggleOn(session->api().sensitiveContent().canChange());
+}
+
 int ExceptionUsersCount(const std::vector<not_null<PeerData*>> &exceptions) {
 	const auto add = [](int already, not_null<PeerData*> peer) {
 		if (const auto chat = peer->asChat()) {
@@ -1092,6 +1104,8 @@ PrivacySecurity::PrivacySecurity(
 	not_null<Window::SessionController*> controller)
 : Section(parent) {
 	setupContent(controller);
+
+	[[maybe_unused]] auto preload = base::SystemUnlockStatus();
 }
 
 rpl::producer<QString> PrivacySecurity::title() {
@@ -1111,11 +1125,6 @@ void PrivacySecurity::setupContent(
 	SetupSecurity(controller, content, trigger(), showOtherMethod());
 	SetupPrivacy(controller, content, trigger());
 	SetupTopPeers(controller, content);
-#if !defined OS_MAC_STORE && !defined OS_WIN_STORE
-	SetupSensitiveContent(controller, content, trigger());
-#else // !OS_MAC_STORE && !OS_WIN_STORE
-	AddDivider(content);
-#endif // !OS_MAC_STORE && !OS_WIN_STORE
 	SetupArchiveAndMute(controller, content);
 	SetupConfirmationExtensions(controller, content);
 	SetupBotsAndWebsites(controller, content);

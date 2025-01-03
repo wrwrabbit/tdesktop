@@ -404,6 +404,9 @@ void FillOverview(
 					- st::statisticsOverviewSubtext.style.font->height
 					+ g.y()
 					+ diffBetweenHeaders);
+			if (container->height() < rect::bottom(sub)) {
+				container->resize(container->width(), rect::bottom(sub));
+			}
 		}, primary->lifetime());
 	};
 
@@ -535,8 +538,7 @@ void FillOverview(
 		}
 	}
 	container->showChildren();
-	container->resize(container->width(), topLeftLabel->height() * 5);
-	container->sizeValue(
+	container->sizeValue() | rpl::distinct_until_changed(
 	) | rpl::start_with_next([=](const QSize &s) {
 		const auto halfWidth = s.width() / 2;
 		{
@@ -560,6 +562,7 @@ void FillOverview(
 
 void FillLoading(
 		not_null<Ui::VerticalLayout*> container,
+		LoadingType type,
 		rpl::producer<bool> toggleOn,
 		rpl::producer<> showFinished) {
 	const auto emptyWrap = container->add(
@@ -569,9 +572,14 @@ void FillLoading(
 	emptyWrap->toggleOn(std::move(toggleOn), anim::type::instant);
 
 	const auto content = emptyWrap->entity();
+	const auto iconName = (type == LoadingType::Boosts)
+		? u"stats_boosts"_q
+		: (type == LoadingType::Earn)
+		? u"stats_earn"_q
+		: u"stats"_q;
 	auto icon = ::Settings::CreateLottieIcon(
 		content,
-		{ .name = u"stats"_q, .sizeOverride = Size(st::changePhoneIconSize) },
+		{ .name = iconName, .sizeOverride = Size(st::changePhoneIconSize) },
 		st::settingsBlockedListIconPadding);
 
 	(
@@ -586,7 +594,11 @@ void FillLoading(
 			content,
 			object_ptr<Ui::FlatLabel>(
 				content,
-				tr::lng_stats_loading(),
+				(type == LoadingType::Boosts)
+					? tr::lng_stats_boosts_loading()
+					: (type == LoadingType::Earn)
+					? tr::lng_stats_earn_loading()
+					: tr::lng_stats_loading(),
 				st::changePhoneTitle)),
 		st::changePhoneTitlePadding + st::boxRowPadding);
 
@@ -595,7 +607,11 @@ void FillLoading(
 			content,
 			object_ptr<Ui::FlatLabel>(
 				content,
-				tr::lng_stats_loading_subtext(),
+				(type == LoadingType::Boosts)
+					? tr::lng_stats_boosts_loading_subtext()
+					: (type == LoadingType::Earn)
+					? tr::lng_stats_earn_loading_subtext()
+					: tr::lng_stats_loading_subtext(),
 				st::statisticsLoadingSubtext)),
 		st::changePhoneDescriptionPadding + st::boxRowPadding);
 
@@ -626,6 +642,7 @@ void InnerWidget::load() {
 
 	FillLoading(
 		inner,
+		Info::Statistics::LoadingType::Statistic,
 		_loaded.events_starting_with(false) | rpl::map(!rpl::mappers::_1),
 		_showFinished.events());
 

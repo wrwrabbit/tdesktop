@@ -76,15 +76,26 @@ struct FileReferenceAccumulator {
 		}, [](const auto &data) {
 		});
 	}
+	void push(const MTPMessageExtendedMedia &data) {
+		data.match([&](const MTPDmessageExtendedMediaPreview &data) {
+		}, [&](const MTPDmessageExtendedMedia &data) {
+			push(data.vmedia());
+		});
+	}
 	void push(const MTPMessageMedia &data) {
 		data.match([&](const MTPDmessageMediaPhoto &data) {
 			push(data.vphoto());
 		}, [&](const MTPDmessageMediaDocument &data) {
 			push(data.vdocument());
+			push(data.valt_documents());
 		}, [&](const MTPDmessageMediaWebPage &data) {
 			push(data.vwebpage());
 		}, [&](const MTPDmessageMediaGame &data) {
 			push(data.vgame());
+		}, [&](const MTPDmessageMediaInvoice &data) {
+			push(data.vextended_media());
+		}, [&](const MTPDmessageMediaPaidMedia &data) {
+			push(data.vextended_media());
 		}, [](const auto &data) {
 		});
 	}

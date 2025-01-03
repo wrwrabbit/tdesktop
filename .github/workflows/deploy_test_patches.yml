@@ -1,0 +1,40 @@
+name: Public Release - Regression
+
+on:
+  push:
+    branches-ignore:
+      - 'compare/**'
+    paths:
+      - '.github/workflows/deploy_test_patches.yml'
+      - 'Telegram/build/release_patch.py'
+      - 'Telegram/build/patches/**'
+      - 'cmake'
+  workflow_dispatch:
+
+jobs:
+
+  Linux:
+    name: Rocky Linux 8
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/centos_env
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Get repository name.
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+    
+      - name: Clone.
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: ${{ env.REPO_NAME }}
+
+      - name: Verify Release patches.
+        run: |
+          cd $REPO_NAME/Telegram/build
+
+          python3 release_patch.py linux
+

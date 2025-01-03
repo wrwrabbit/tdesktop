@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_stories.h"
 
-#include "api/api_report.h"
 #include "base/unixtime.h"
 #include "apiwrap.h"
 #include "core/application.h"
@@ -63,7 +62,9 @@ using UpdateFlag = StoryUpdate::Flag;
 	}, [&](const MTPDmessageMediaDocument &data)
 		-> std::optional<StoryMedia> {
 		if (const auto document = data.vdocument()) {
-			const auto result = owner->processDocument(*document);
+			const auto result = owner->processDocument(
+				*document,
+				data.valt_documents());
 			if (!result->isNull()
 				&& (result->isGifv() || result->isVideoFile())) {
 				result->setStoryMedia(true);
@@ -1905,17 +1906,6 @@ void Stories::togglePinnedList(
 
 }
 
-void Stories::report(
-		std::shared_ptr<Ui::Show> show,
-		FullStoryId id,
-		Ui::ReportReason reason,
-		QString text) {
-	if (const auto maybeStory = lookup(id)) {
-		const auto story = *maybeStory;
-		Api::SendReport(show, story->peer(), reason, text, story->id());
-	}
-}
-
 bool Stories::isQuitPrevent() {
 	if (!_markReadPending.empty()) {
 		sendMarkAsReadRequests();
@@ -2248,6 +2238,17 @@ void Stories::preloadFinished(FullStoryId id, bool markAsPreloaded) {
 	crl::on_main(this, [=] {
 		continuePreloading();
 	});
+}
+
+void Stories::clearStoriesForPeer(PeerId peerId) {
+	applyDeletedFromSources(peerId, StorySourcesList::NotHidden);
+	applyDeletedFromSources(peerId, StorySourcesList::Hidden);
+	_all.erase(peerId);
+	_sourceChanged.fire_copy(peerId);
+	_archive.erase(peerId);
+	_archiveChanged.fire_copy(peerId);
+	_saved.erase(peerId);
+	_savedChanged.fire_copy(peerId);
 }
 
 } // namespace Data

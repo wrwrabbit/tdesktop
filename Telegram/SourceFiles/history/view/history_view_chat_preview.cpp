@@ -19,10 +19,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_thread.h"
 #include "history/view/reactions/history_view_reactions_button.h"
+#include "history/view/history_view_corner_buttons.h"
 #include "history/view/history_view_list_widget.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
+#include "info/profile/info_profile_badge.h"
 #include "info/profile/info_profile_cover.h"
 #include "info/profile/info_profile_values.h"
 #include "lang/lang_keys.h"
@@ -36,18 +38,26 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/shadow.h"
+#include "ui/ui_utility.h"
+#include "ui/unread_badge.h"
 #include "window/themes/window_theme.h"
 #include "window/section_widget.h"
 #include "window/window_session_controller.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
+#include "styles/style_settings.h"
+
+#ifdef Q_OS_WIN
+#include "ui/platform/win/ui_windows_direct_manipulation.h"
+#endif // Q_OS_WIN
 
 namespace HistoryView {
 namespace {
 
 class Item final
 	: public Ui::Menu::ItemBase
-	, private HistoryView::ListDelegate {
+	, private ListDelegate
+	, private CornerButtonsDelegate {
 public:
 	Item(not_null<Ui::RpWidget*> parent, not_null<Data::Thread*> thread);
 
@@ -68,6 +78,7 @@ private:
 	void setupHistory();
 	void updateInnerVisibleArea();
 
+	// ListDelegate delegate.
 	Context listContext() override;
 	bool listScrollTo(int top, bool syntetic = true) override;
 	void listCancelRequest() override;
@@ -126,6 +137,7 @@ private:
 		Painter &p,
 		const Ui::ChatPaintContext &context) override;
 	QString listElementAuthorRank(not_null<const Element*> view) override;
+	bool listElementHideTopicButton(not_null<const Element*> view) override;
 	History *listTranslateHistory() override;
 	void listAddTranslatedItems(
 		not_null<TranslateTracker*> tracker) override;
@@ -152,11 +164,23 @@ private:
 	bool listShowReactPremiumError(
 		not_null<HistoryItem*> item,
 		const Data::ReactionId &id) override;
+	base::unique_qptr<Ui::PopupMenu> listFillSenderUserpicMenu(
+		PeerId userpicPeerId) override;
 	void listWindowSetInnerFocus() override;
 	bool listAllowsDragForward() override;
 	void listLaunchDrag(
 		std::unique_ptr<QMimeData> data,
 		Fn<void()> finished) override;
+
+	// CornerButtonsDelegate delegate.
+	void cornerButtonsShowAtPosition(
+		Data::MessagePosition position) override;
+	Data::Thread *cornerButtonsThread() override;
+	FullMsgId cornerButtonsCurrentId() override;
+	bool cornerButtonsIgnoreVisibility() override;
+	std::optional<bool> cornerButtonsDownShown() override;
+	bool cornerButtonsUnreadMayBeShown() override;
+	bool cornerButtonsHas(CornerButtonType type) override;
 
 	const not_null<QAction*> _dummyAction;
 	const not_null<Main::Session*> _session;
@@ -170,7 +194,10 @@ private:
 	const std::unique_ptr<Ui::ElasticScroll> _scroll;
 	const std::unique_ptr<Ui::FlatButton> _markRead;
 
-	QPointer<HistoryView::ListWidget> _inner;
+	Info::Profile::Badge _badge;
+
+	QPointer<ListWidget> _inner;
+	std::unique_ptr<CornerButtons> _cornerButtons;
 	rpl::event_stream<ChatPreviewAction> _actions;
 
 	QImage _bg;
@@ -243,7 +270,14 @@ Item::Item(not_null<Ui::RpWidget*> parent, not_null<Data::Thread*> thread)
 	std::make_unique<Ui::FlatButton>(
 		this,
 		tr::lng_context_mark_read(tr::now),
-		st::previewMarkRead)) {
+		st::previewMarkRead))
+, _badge(
+		_top.get(),
+		st::settingsInfoPeerBadge,
+		_peer,
+		nullptr,
+		nullptr,
+		1) {
 	_chatStyle->apply(_theme.get());
 	setPointerCursor(false);
 	setMinWidth(st::previewMenu.menu.widthMin);
@@ -279,6 +313,8 @@ void Item::setupTop() {
 	const auto topic = _thread->asTopic();
 	auto nameValue = (topic
 		? Info::Profile::TitleValue(topic)
+		: _thread->peer()->isSelf()
+		? tr::lng_saved_messages()
 		: Info::Profile::NameValue(_thread->peer())
 	) | rpl::start_spawning(_top->lifetime());
 	const auto name = Ui::CreateChild<Ui::FlatLabel>(
@@ -294,18 +330,24 @@ void Item::setupTop() {
 	) | rpl::map([](StatusFields &&fields) {
 		return fields.text;
 	});
-	const auto status = Ui::CreateChild<Ui::FlatLabel>(
-		_top.get(),
-		(topic
-			? Info::Profile::NameValue(topic->channel())
-			: std::move(statusText)),
-		st::previewStatus);
-	std::move(statusFields) | rpl::start_with_next([=](const StatusFields &fields) {
-		status->setTextColorOverride(fields.active
-			? st::windowActiveTextFg->c
-			: std::optional<QColor>());
-	}, status->lifetime());
-	status->setAttribute(Qt::WA_TransparentForMouseEvents);
+	const auto status = _thread->peer()->isSelf()
+		? nullptr
+		: Ui::CreateChild<Ui::FlatLabel>(
+			_top.get(),
+			(topic
+				? Info::Profile::NameValue(topic->channel())
+				: std::move(statusText)),
+			st::previewStatus);
+	if (status) {
+		std::move(
+			statusFields
+		) | rpl::start_with_next([=](const StatusFields &fields) {
+			status->setTextColorOverride(fields.active
+				? st::windowActiveTextFg->c
+				: std::optional<QColor>());
+		}, status->lifetime());
+		status->setAttribute(Qt::WA_TransparentForMouseEvents);
+	}
 	const auto userpic = topic
 		? nullptr
 		: Ui::CreateChild<Ui::UserpicButton>(
@@ -313,6 +355,7 @@ void Item::setupTop() {
 			_thread->peer(),
 			st::previewUserpic);
 	if (userpic) {
+		userpic->showSavedMessagesOnSelf(true);
 		userpic->setAttribute(Qt::WA_TransparentForMouseEvents);
 	}
 	const auto icon = topic
@@ -328,21 +371,35 @@ void Item::setupTop() {
 	const auto shadow = Ui::CreateChild<Ui::PlainShadow>(this);
 	rpl::combine(
 		_top->widthValue(),
-		std::move(nameValue)
-	) | rpl::start_with_next([=](int width, const auto &) {
+		std::move(nameValue),
+		rpl::single(rpl::empty) | rpl::then(_badge.updated())
+	) | rpl::start_with_next([=](int width, const auto &, const auto &) {
 		const auto &st = st::previewTop;
 		name->resizeToNaturalWidth(width
 			- st.namePosition.x()
-			- st.photoPosition.x());
-		name->move(st::previewTop.namePosition);
+			- st.photoPosition.x()
+			- (_badge.widget() ? _badge.widget()->width() : 0));
+		if (status) {
+			name->move(st::previewTop.namePosition);
+		} else {
+			name->move(
+				st::previewTop.namePosition.x(),
+				(st::previewTop.height - name->height()) / 2);
+		}
+		_badge.move(
+			name->x() + name->width() + st::normalFont->spacew,
+			name->y(),
+			name->y() + name->height());
 	}, name->lifetime());
 
 	_top->geometryValue() | rpl::start_with_next([=](QRect geometry) {
 		const auto &st = st::previewTop;
-		status->resizeToWidth(geometry.width()
-			- st.statusPosition.x()
-			- st.photoPosition.x());
-		status->move(st.statusPosition);
+		if (status) {
+			status->resizeToWidth(geometry.width()
+				- st.statusPosition.x()
+				- st.photoPosition.x());
+			status->move(st.statusPosition);
+		}
 		shadow->setGeometry(
 			geometry.x(),
 			geometry.y() + geometry.height(),
@@ -423,11 +480,16 @@ void Item::setupHistory() {
 		this,
 		_session,
 		static_cast<ListDelegate*>(this)));
+	_cornerButtons = std::make_unique<CornerButtons>(
+		_scroll.get(),
+		_chatStyle.get(),
+		static_cast<CornerButtonsDelegate*>(this));
 
 	_markRead->shownValue() | rpl::start_with_next([=](bool shown) {
 		const auto top = _top->height();
 		const auto bottom = shown ? _markRead->height() : 0;
 		_scroll->setGeometry(rect().marginsRemoved({ 0, top, 0, bottom }));
+		_cornerButtons->updatePositions();
 	}, _markRead->lifetime());
 
 	_scroll->scrolls(
@@ -437,6 +499,11 @@ void Item::setupHistory() {
 	_scroll->setOverscrollBg(QColor(0, 0, 0, 0));
 	using Type = Ui::ElasticScroll::OverscrollType;
 	_scroll->setOverscrollTypes(Type::Real, Type::Real);
+
+	_inner->scrollKeyEvents(
+	) | rpl::start_with_next([=](not_null<QKeyEvent*> e) {
+		_scroll->keyPressEvent(e);
+	}, lifetime());
 
 	_scroll->events() | rpl::start_with_next([=](not_null<QEvent*> e) {
 		if (e->type() == QEvent::MouseButtonDblClick) {
@@ -462,6 +529,10 @@ void Item::setupHistory() {
 	_inner->refreshViewer();
 
 	_inner->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+	crl::on_main(this, [=] {
+		_inner->setFocus();
+	});
 }
 
 void Item::paintEvent(QPaintEvent *e) {
@@ -472,6 +543,7 @@ void Item::paintEvent(QPaintEvent *e) {
 void Item::updateInnerVisibleArea() {
 	const auto scrollTop = _scroll->scrollTop();
 	_inner->setVisibleTopBottom(scrollTop, scrollTop + _scroll->height());
+	_cornerButtons->updateJumpDownVisibility();
 }
 
 Context Item::listContext() {
@@ -489,6 +561,7 @@ bool Item::listScrollTo(int top, bool syntetic) {
 }
 
 void Item::listCancelRequest() {
+	_actions.fire({ .cancel = true });
 }
 
 void Item::listDeleteRequest() {
@@ -559,24 +632,38 @@ MessagesBarData Item::listMessagesBar(
 		? _replies->computeInboxReadTillFull()
 		: MsgId();
 	const auto migrated = _replies ? nullptr : _history->migrateFrom();
-	const auto migratedTill = migrated ? migrated->inboxReadTillId() : 0;
-	const auto historyTill = _replies ? 0 : _history->inboxReadTillId();
+	const auto migratedTill = (migrated && migrated->unreadCount() > 0)
+		? migrated->inboxReadTillId()
+		: 0;
+	const auto historyTill = (_replies || !_history->unreadCount())
+		? 0
+		: _history->inboxReadTillId();
 	if (!_replies && !migratedTill && !historyTill) {
 		return {};
 	}
 
+	auto skipped = false;
 	const auto hidden = _replies && (repliesTill < 2);
 	for (auto i = 0, count = int(elements.size()); i != count; ++i) {
 		const auto item = elements[i]->data();
-		if (!item->isRegular()
-			|| item->out()
-			|| (_replies && !item->replyToId())) {
+		if (!item->isRegular() || (_replies && !item->replyToId())) {
 			continue;
 		}
 		const auto inHistory = (item->history() == _history);
-		if ((_replies && item->id > repliesTill)
+		const auto unread = (_replies && item->id > repliesTill)
 			|| (migratedTill && (inHistory || item->id > migratedTill))
-			|| (historyTill && inHistory && item->id > historyTill)) {
+			|| (historyTill && inHistory && item->id > historyTill);
+		if (!unread) {
+			skipped = true;
+		}
+		if (item->out()) {
+			continue;
+		}
+		if (unread) {
+			if (!skipped) {
+				// Don't show jumping unread bar if scrolling up from bottom.
+				return {};
+			}
 			return {
 				.bar = {
 					.element = elements[i],
@@ -673,6 +760,10 @@ QString Item::listElementAuthorRank(not_null<const Element*> view) {
 	return {};
 }
 
+bool Item::listElementHideTopicButton(not_null<const Element*> view) {
+	return _thread->asTopic() != nullptr;
+}
+
 History *Item::listTranslateHistory() {
 	return nullptr;
 }
@@ -757,6 +848,11 @@ bool Item::listShowReactPremiumError(
 	return false;
 }
 
+base::unique_qptr<Ui::PopupMenu> Item::listFillSenderUserpicMenu(
+		PeerId userpicPeerId) {
+	return nullptr;
+}
+
 void Item::listWindowSetInnerFocus() {
 }
 
@@ -767,6 +863,46 @@ bool Item::listAllowsDragForward() {
 void Item::listLaunchDrag(
 	std::unique_ptr<QMimeData> data,
 	Fn<void()> finished) {
+}
+
+void Item::cornerButtonsShowAtPosition(Data::MessagePosition position) {
+	if (position == Data::UnreadMessagePosition) {
+		position = Data::MaxMessagePosition;
+	}
+	_inner->showAtPosition(
+		position,
+		{},
+		_cornerButtons->doneJumpFrom(position.fullId, {}, true));
+}
+
+Data::Thread *Item::cornerButtonsThread() {
+	return _thread;
+}
+
+FullMsgId Item::cornerButtonsCurrentId() {
+	return {};
+}
+
+bool Item::cornerButtonsIgnoreVisibility() {
+	return false;
+}
+
+std::optional<bool> Item::cornerButtonsDownShown() {
+	const auto top = _scroll->scrollTop() + st::historyToDownShownAfter;
+	if (top < _scroll->scrollTopMax()) {
+		return true;
+	} else if (_inner->loadedAtBottomKnown()) {
+		return !_inner->loadedAtBottom();
+	}
+	return std::nullopt;
+}
+
+bool Item::cornerButtonsUnreadMayBeShown() {
+	return _inner->loadedAtBottomKnown();
+}
+
+bool Item::cornerButtonsHas(CornerButtonType type) {
+	return (type == CornerButtonType::Down);
 }
 
 } // namespace
@@ -798,6 +934,10 @@ ChatPreview MakeChatPreview(
 			}
 		}, menu->lifetime());
 	}
+
+#ifdef Q_OS_WIN
+	Ui::Platform::ActivateDirectManipulation(menu);
+#endif
 
 	return result;
 }

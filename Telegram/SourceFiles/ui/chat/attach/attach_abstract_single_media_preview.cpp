@@ -8,14 +8,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/attach/attach_abstract_single_media_preview.h"
 
 #include "editor/photo_editor_common.h"
+#include "lang/lang_keys.h"
 #include "ui/chat/attach/attach_controls.h"
 #include "ui/chat/attach/attach_prepare.h"
-#include "ui/image/image_prepare.h"
 #include "ui/effects/spoiler_mess.h"
-#include "ui/widgets/popup_menu.h"
+#include "ui/image/image_prepare.h"
 #include "ui/painter.h"
 #include "ui/power_saving.h"
-#include "lang/lang_keys.h"
+#include "ui/ui_utility.h"
+#include "ui/widgets/popup_menu.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
@@ -32,9 +33,11 @@ constexpr auto kMinPreviewWidth = 20;
 AbstractSingleMediaPreview::AbstractSingleMediaPreview(
 	QWidget *parent,
 	const style::ComposeControls &st,
-	AttachControls::Type type)
+	AttachControls::Type type,
+	Fn<bool()> canToggleSpoiler)
 : AbstractSinglePreview(parent)
 , _st(st)
+, _canToggleSpoiler(std::move(canToggleSpoiler))
 , _minThumbH(st::sendBoxAlbumGroupSize.height()
 	+ st::sendBoxAlbumGroupSkipTop * 2)
 , _controls(base::make_unique_q<AttachControlsWidget>(this, type)) {
@@ -80,6 +83,10 @@ bool AbstractSingleMediaPreview::canHaveSpoiler() const {
 
 rpl::producer<bool> AbstractSingleMediaPreview::spoileredChanges() const {
 	return _spoileredChanges.events();
+}
+
+QImage AbstractSingleMediaPreview::generatePriceTagBackground() const {
+	return (_previewBlurred.isNull() ? _preview : _previewBlurred).toImage();
 }
 
 void AbstractSingleMediaPreview::preparePreview(QImage preview) {
@@ -266,7 +273,9 @@ void AbstractSingleMediaPreview::applyCursor(style::cursor cursor) {
 }
 
 void AbstractSingleMediaPreview::showContextMenu(QPoint position) {
-	if (!_sendWay.sendImagesAsPhotos() || !supportsSpoilers()) {
+	if (!_canToggleSpoiler()
+		|| !_sendWay.sendImagesAsPhotos()
+		|| !supportsSpoilers()) {
 		return;
 	}
 	_menu = base::make_unique_q<Ui::PopupMenu>(

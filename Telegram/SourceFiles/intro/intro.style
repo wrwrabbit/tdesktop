@@ -81,7 +81,9 @@ introNextButton: RoundButton(defaultActiveButton) {
 	height: 42px;
 	radius: 6px;
 	textTop: 11px;
-	font: font(boxFontSize semibold);
+	style: TextStyle(semiboldTextStyle) {
+		font: font(boxFontSize semibold);
+	}
 }
 introFragmentIcon: icon{{ "fragment", activeButtonFg }};
 introFragmentIconOver: icon{{ "fragment", activeButtonFgOver }};
@@ -96,7 +98,9 @@ introPhoneTop: 6px;
 introLinkTop: 24px;
 introCountry: InputField(defaultInputField) {
 	textMargins: margins(3px, 27px, 3px, 6px);
-	font: font(16px);
+	style: TextStyle(defaultTextStyle) {
+		font: font(16px);
+	}
 	width: 300px;
 	heightMin: 61px;
 }
@@ -161,9 +165,7 @@ introBackButton: IconButton(defaultIconButton) {
 
 	rippleAreaPosition: point(8px, 8px);
 	rippleAreaSize: 40px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 
 introQrTop: -18px;

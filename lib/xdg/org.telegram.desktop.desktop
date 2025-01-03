@@ -1,6 +1,6 @@
 [Desktop Entry]
-Name=Telegram Desktop
-Comment=Official desktop version of Telegram messaging app
+Name=Telegram
+Comment=New era of messaging
 TryExec=telegram-desktop
 Exec=telegram-desktop -- %u
 Icon=telegram
@@ -8,7 +8,7 @@ Terminal=false
 StartupWMClass=TelegramDesktop
 Type=Application
 Categories=Chat;Network;InstantMessaging;Qt;
-MimeType=x-scheme-handler/tg;
+MimeType=x-scheme-handler/tg;x-scheme-handler/tonsite;
 Keywords=tg;chat;im;messaging;messenger;sms;tdesktop;
 Actions=quit;
 DBusActivatable=true

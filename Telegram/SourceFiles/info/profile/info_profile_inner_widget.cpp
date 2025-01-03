@@ -39,6 +39,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/box_content_divider.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
+#include "ui/ui_utility.h"
 #include "data/data_channel.h"
 #include "data/data_shared_media.h"
 #include "styles/style_info.h"
@@ -69,7 +70,6 @@ InnerWidget::InnerWidget(
 object_ptr<Ui::RpWidget> InnerWidget::setupContent(
 		not_null<RpWidget*> parent,
 		Origin origin) {
-	auto result = object_ptr<Ui::VerticalLayout>(parent);
 	if (const auto user = _peer->asUser()) {
 		user->session().changes().peerFlagsValue(
 			user,
@@ -84,36 +84,26 @@ object_ptr<Ui::RpWidget> InnerWidget::setupContent(
 			}
 		}, lifetime());
 	}
-	_cover = _topic
-		? result->add(object_ptr<Cover>(
-			result,
-			_controller->parentController(),
-			_topic))
-		: result->add(object_ptr<Cover>(
-			result,
-			_controller->parentController(),
-			_peer));
-	_cover->showSection(
-	) | rpl::start_with_next([=](Section section) {
-		_controller->showSection(_topic
-			? std::make_shared<Info::Memento>(_topic, section)
-			: std::make_shared<Info::Memento>(_peer, section));
-	}, _cover->lifetime());
-	_cover->setOnlineCount(rpl::single(0));
-	if (_topic) {
-		if (_topic->creating()) {
-			return result;
-		}
-		result->add(SetupDetails(_controller, parent, _topic));
-	} else {
-		result->add(SetupDetails(_controller, parent, _peer, origin));
+
+	auto result = object_ptr<Ui::VerticalLayout>(parent);
+	_cover = AddCover(result, _controller, _peer, _topic);
+	if (_topic && _topic->creating()) {
+		return result;
 	}
+
+	AddDetails(result, _controller, _peer, _topic, origin);
 	result->add(setupSharedMedia(result.data()));
 	if (_topic) {
 		return result;
 	}
-	if (auto members = SetupChannelMembers(_controller, result.data(), _peer)) {
-		result->add(std::move(members));
+	{
+		auto buttons = SetupChannelMembersAndManage(
+			_controller,
+			result.data(),
+			_peer);
+		if (buttons) {
+			result->add(std::move(buttons));
+		}
 	}
 	if (auto actions = SetupActions(_controller, result.data(), _peer)) {
 		result->add(object_ptr<Ui::BoxContentDivider>(result));
@@ -230,9 +220,25 @@ object_ptr<Ui::RpWidget> InnerWidget::setupSharedMedia(
 			icon,
 			st::infoSharedMediaButtonIconPosition);
 	};
+	auto addPeerGiftsButton = [&](
+			not_null<UserData*> user,
+			const style::icon &icon) {
+		auto result = Media::AddPeerGiftsButton(
+			content,
+			_controller,
+			user,
+			tracker);
+		object_ptr<Profile::FloatingIcon>(
+			result,
+			icon,
+			st::infoSharedMediaButtonIconPosition);
+	};
 
 	if (!_topic) {
 		addStoriesButton(_peer, st::infoIconMediaStories);
+		if (const auto user = _peer->asUser()) {
+			addPeerGiftsButton(user, st::infoIconMediaGifts);
+		}
 		addSavedSublistButton(_peer, st::infoIconMediaSaved);
 	}
 	addMediaButton(MediaType::Photo, st::infoIconMediaPhoto);

@@ -47,6 +47,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/unread_badge_paint.h"
 #include "ui/vertical_list.h"
+#include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/widgets/shadow.h"
@@ -158,10 +159,12 @@ void ShowCallsBox(not_null<Window::SessionController*> window) {
 				showSettings,
 				&st::menuIconSettings);
 			if (state->callsDelegate.peerListFullRowsCount() > 0) {
-				state->menu->addAction(
-					tr::lng_call_box_clear_all(tr::now),
-					clearAll,
-					&st::menuIconDelete);
+				Ui::Menu::CreateAddActionCallback(state->menu)({
+					.text = tr::lng_call_box_clear_all(tr::now),
+					.handler = clearAll,
+					.icon = &st::menuIconDeleteAttention,
+					.isAttention = true,
+				});
 			}
 			state->menu->popup(QCursor::pos());
 			return true;
@@ -191,7 +194,7 @@ void ShowCallsBox(not_null<Window::SessionController*> window) {
 
 class MainMenu::ToggleAccountsButton final : public Ui::AbstractButton {
 public:
-	explicit ToggleAccountsButton(QWidget *parent);
+	ToggleAccountsButton(QWidget *parent, not_null<Main::Account*> current);
 
 	[[nodiscard]] int rightSkip() const {
 		return _rightSkip.current();
@@ -207,6 +210,7 @@ private:
 	void validateUnreadBadge();
 	[[nodiscard]] QString computeUnreadBadge() const;
 
+	const not_null<Main::Account*> _current;
 	rpl::variable<int> _rightSkip = 0;
 	Ui::Animations::Simple _toggledAnimation;
 	bool _toggled = false;
@@ -227,8 +231,11 @@ protected:
 
 };
 
-MainMenu::ToggleAccountsButton::ToggleAccountsButton(QWidget *parent)
-: AbstractButton(parent) {
+MainMenu::ToggleAccountsButton::ToggleAccountsButton(
+	QWidget *parent,
+	not_null<Main::Account*> current)
+: AbstractButton(parent)
+, _current(current) {
 	rpl::single(rpl::empty) | rpl::then(
 		Core::App().unreadBadgeChanges()
 	) | rpl::start_with_next([=] {
@@ -317,7 +324,7 @@ void MainMenu::ToggleAccountsButton::validateUnreadBadge() {
 }
 
 QString MainMenu::ToggleAccountsButton::computeUnreadBadge() const {
-	const auto state = OtherAccountsUnreadStateCurrent();
+	const auto state = OtherAccountsUnreadStateCurrent(_current);
 	return state.allMuted
 		? QString()
 		: (state.count > 0)
@@ -378,7 +385,7 @@ MainMenu::MainMenu(
 	this,
 	_controller->session().user(),
 	st::mainMenuUserpic)
-, _toggleAccounts(this)
+, _toggleAccounts(this, &controller->session().account())
 , _setEmojiStatus(this, SetStatusLabel(&controller->session()))
 , _emojiStatusPanel(std::make_unique<Info::Profile::EmojiStatusPanel>())
 , _badge(std::make_unique<Info::Profile::Badge>(
@@ -551,9 +558,15 @@ void MainMenu::setupArchive() {
 	const auto folder = [=] {
 		return controller->session().data().folderLoaded(Data::Folder::kId);
 	};
-	const auto showArchive = [=] {
+	const auto showArchive = [=](Qt::KeyboardModifiers modifiers) {
 		if (const auto f = folder()) {
-			controller->openFolder(f);
+			if (modifiers & Qt::ControlModifier) {
+				controller->showInNewWindow(Window::SeparateId(
+					Window::SeparateType::Archive,
+					&controller->session()));
+			} else {
+				controller->openFolder(f);
+			}
 			controller->window().hideSettingsAndLayer();
 		}
 	};
@@ -583,7 +596,7 @@ void MainMenu::setupArchive() {
 	button->clicks(
 	) | rpl::start_with_next([=](Qt::MouseButton which) {
 		if (which == Qt::LeftButton) {
-			showArchive();
+			showArchive(button->clickModifiers());
 			return;
 		} else if (which != Qt::RightButton) {
 			return;
@@ -591,35 +604,13 @@ void MainMenu::setupArchive() {
 		_contextMenu = base::make_unique_q<Ui::PopupMenu>(
 			this,
 			st::popupMenuExpandedSeparator);
-		const auto addAction = PeerMenuCallback([&](
-				PeerMenuCallback::Args a) {
-			return _contextMenu->addAction(
-				a.text,
-				std::move(a.handler),
-				a.icon);
-		});
-
-		const auto hide = [=] {
-			controller->session().settings().setArchiveInMainMenu(false);
-			controller->session().saveSettingsDelayed();
-			controller->window().hideSettingsAndLayer();
-		};
-		addAction(
-			tr::lng_context_archive_to_list(tr::now),
-			std::move(hide),
-			&st::menuIconFromMainMenu);
-
-		MenuAddMarkAsReadChatListAction(
-			controller,
-			[f = folder()] { return f->chatsList(); },
-			addAction);
-
-		_contextMenu->addSeparator();
-		Settings::PreloadArchiveSettings(&controller->session());
-		addAction(tr::lng_context_archive_settings(tr::now), [=] {
-			controller->show(Box(Settings::ArchiveSettingsBox, controller));
-		}, &st::menuIconManage);
-
+		Window::FillDialogsEntryMenu(
+			_controller,
+			Dialogs::EntryState{
+				.key = folder(),
+				.section = Dialogs::EntryState::Section::ContextMenu,
+			},
+			Ui::Menu::CreateAddActionCallback(_contextMenu));
 		_contextMenu->popup(QCursor::pos());
 	}, button->lifetime());
 
@@ -731,6 +722,23 @@ void MainMenu::setupMenu() {
 			std::move(descriptor));
 	};
 	if (!_controller->session().supportMode()) {
+		_menu->add(
+			CreateButtonWithIcon(
+				_menu,
+				tr::lng_menu_my_profile(),
+				st::mainMenuButton,
+				{ &st::menuIconProfile })
+		)->setClickedCallback([=] {
+			controller->showSection(
+				Info::Stories::Make(controller->session().user()));
+		});
+
+		SetupMenuBots(_menu, controller);
+
+		_menu->add(
+			object_ptr<Ui::PlainShadow>(_menu),
+			{ 0, st::mainMenuSkip, 0, st::mainMenuSkip });
+
 		AddMyChannelsBox(addAction(
 			tr::lng_create_group_title(),
 			{ &st::menuIconGroups }
@@ -749,40 +757,9 @@ void MainMenu::setupMenu() {
 			}
 		});
 
-		const auto wrap = _menu->add(
-			object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
-				_menu,
-				CreateButtonWithIcon(
-					_menu,
-					tr::lng_menu_my_stories(),
-					st::mainMenuButton,
-					IconDescriptor{ &st::menuIconStoriesSavedSection })));
-		const auto selfId = controller->session().userPeerId();
-		const auto stories = &controller->session().data().stories();
-		if (stories->archiveCount(selfId) > 0) {
-			wrap->toggle(true, anim::type::instant);
-		} else {
-			wrap->toggle(false, anim::type::instant);
-			if (!stories->archiveCountKnown(selfId)) {
-				stories->archiveLoadMore(selfId);
-				wrap->toggleOn(stories->archiveChanged(
-				) | rpl::filter(
-					rpl::mappers::_1 == selfId
-				) | rpl::map([=] {
-					return stories->archiveCount(selfId) > 0;
-				}) | rpl::filter(rpl::mappers::_1) | rpl::take(1));
-			}
-		}
-		wrap->entity()->setClickedCallback([=] {
-			controller->showSection(
-				Info::Stories::Make(controller->session().user()));
-		});
-
-		SetupMenuBots(_menu, controller);
-
 		addAction(
 			tr::lng_menu_contacts(),
-			{ &st::menuIconProfile }
+			{ &st::menuIconUserShow }
 		)->setClickedCallback([=] {
 			controller->show(PrepareContactsBox(controller));
 		});
@@ -957,21 +934,15 @@ void MainMenu::drawName(Painter &p) {
 }
 
 void MainMenu::initResetScaleButton() {
-	if (!window() || !window()->windowHandle()) {
-		return;
-	}
-	const auto handle = window()->windowHandle();
-	rpl::single(
-		handle->screen()
-	) | rpl::then(
-		base::qt_signal_producer(handle, &QWindow::screenChanged)
-	) | rpl::filter([](QScreen *screen) {
-		return screen != nullptr;
-	}) | rpl::map([](QScreen * screen) {
+	_controller->widget()->screenValue(
+	) | rpl::map([](not_null<QScreen*> screen) {
 		return rpl::single(
 			screen->availableGeometry()
 		) | rpl::then(
-			base::qt_signal_producer(screen, &QScreen::availableGeometryChanged)
+			base::qt_signal_producer(
+				screen.get(),
+				&QScreen::availableGeometryChanged
+			)
 		);
 	}) | rpl::flatten_latest(
 	) | rpl::map([](QRect available) {
@@ -994,13 +965,13 @@ void MainMenu::initResetScaleButton() {
 	}, lifetime());
 }
 
-OthersUnreadState OtherAccountsUnreadStateCurrent() {
+OthersUnreadState OtherAccountsUnreadStateCurrent(
+		not_null<Main::Account*> current) {
 	auto &domain = Core::App().domain();
-	const auto active = &domain.active();
 	auto counter = 0;
 	auto allMuted = true;
 	for (const auto &[index, account] : domain.accounts()) {
-		if (account.get() == active) {
+		if (account.get() == current) {
 			continue;
 		} else if (account->isHiddenMode()) {
 			continue;
@@ -1017,10 +988,13 @@ OthersUnreadState OtherAccountsUnreadStateCurrent() {
 	};
 }
 
-rpl::producer<OthersUnreadState> OtherAccountsUnreadState() {
+rpl::producer<OthersUnreadState> OtherAccountsUnreadState(
+		not_null<Main::Account*> current) {
 	return rpl::single(rpl::empty) | rpl::then(
 		Core::App().unreadBadgeChanges()
-	) | rpl::map(OtherAccountsUnreadStateCurrent);
+	) | rpl::map([=] {
+		return OtherAccountsUnreadStateCurrent(current);
+	});
 }
 
 } // namespace Window
