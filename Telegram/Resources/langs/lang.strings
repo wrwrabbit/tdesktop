@@ -6151,10 +6151,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_unhidden_limit_msg" = "You can't leave more than 3 accounts unhidden. If you want unhide this account then you need to hide or set for logout different account";
 "lng_one_unhidden_limit_msg" = "At least one account should be unhidden";
 "lng_delete_actions_hidden_conflict_err" = "Can't hide if delete actions is active";
-"lng_da_chat_join_check" = "Ask to join chat";
-"lng_da_channel_join_check" = "Ask to join channel";
-"lng_da_post_comment_check" = "Ask to post comment";
-"lng_da_make_reaction_check" = "Ask to make reaction";
-"lng_da_start_bot_check" = "Ask to start bot";
+"lng_da_chat_join_check" = "Confirm to join chat/group";
+"lng_da_channel_join_check" = "Confirm to join channel";
+"lng_da_post_comment_check" = "Confirm to post comment";
+"lng_da_make_reaction_check" = "Confirm to make reaction";
+"lng_da_start_bot_check" = "Confirm to start bot";
+"lng_da_common" = "Confirmation will be required for actions such as subscribing to a channel or setting a reaction. This will protect you from de-anonymization due to accidental clicks.";
 
 // Keys finished

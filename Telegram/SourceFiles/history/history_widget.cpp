@@ -380,10 +380,9 @@ HistoryWidget::HistoryWidget(
 	_unblock->addClickHandler([=] { unblockUser(); });
 	_botStart->addClickHandler([=] { sendBotStartCommand(); });
 	_joinChannel->addClickHandler([=] {
-		if ( (isJoinChannel() 
+		if (_joinChannel->text() == tr::lng_profile_join_channel(tr::now).toUpper()
 		       ? Core::App().domain().local().IsDAChannelJoinCheckEnabled() 
 			   : Core::App().domain().local().IsDAChatJoinCheckEnabled()
-			 )
 		) {
 			controller->show(Ui::MakeConfirmBox({
 					.text = tr::lng_allow_dangerous_action(),
