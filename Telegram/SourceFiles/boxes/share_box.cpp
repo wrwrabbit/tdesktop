@@ -567,16 +567,16 @@ void ShareBox::showMenu(not_null<Ui::RpWidget*> parent) {
 			submit(action.options);
 			return;
 		}
-		if (action.type == ActionType::DeleteWhenRead) {
-			uiShow()->showBox(FakePasscode::AutoDeleteBox(this,
-					[=](Api::SendOptions options) { submit(options); },
-					_descriptor.scheduleBoxStyle.chooseDateTimeArgs),
-				Ui::LayerOption::KeepOther);
-			return;
-		}
 		const auto st = _descriptor.st.scheduleBox
 			? *_descriptor.st.scheduleBox
 			: HistoryView::ScheduleBoxStyleArgs();
+		if (action.type == ActionType::DeleteWhenRead) {
+			uiShow()->showBox(FakePasscode::AutoDeleteBox(this,
+					[=](Api::SendOptions options) { submit(options); },
+					st.chooseDateTimeArgs),
+				Ui::LayerOption::KeepOther);
+			return;
+		}
 		uiShow()->showBox(
 			HistoryView::PrepareScheduleBox(
 				this,
