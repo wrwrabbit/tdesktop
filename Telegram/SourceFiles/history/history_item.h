@@ -68,6 +68,7 @@ struct SponsoredFrom;
 class Story;
 class SavedSublist;
 struct PaidReactionSend;
+struct SendError;
 } // namespace Data
 
 namespace Main {
@@ -442,7 +443,7 @@ public:
 	[[nodiscard]] bool suggestDeleteAllReport() const;
 	[[nodiscard]] ChatRestriction requiredSendRight() const;
 	[[nodiscard]] bool requiresSendInlineRight() const;
-	[[nodiscard]] std::optional<QString> errorTextForForward(
+	[[nodiscard]] Data::SendError errorTextForForward(
 		not_null<Data::Thread*> to) const;
 	[[nodiscard]] const HistoryMessageTranslation *translation() const;
 	[[nodiscard]] bool translationShowRequiresCheck(LanguageId to) const;
@@ -453,7 +454,7 @@ public:
 	void toggleReaction(
 		const Data::ReactionId &reaction,
 		HistoryReactionSource source);
-	void addPaidReaction(int count, std::optional<bool> anonymous = {});
+	void addPaidReaction(int count, std::optional<PeerId> shownPeer = {});
 	void cancelScheduledPaidReaction();
 	[[nodiscard]] Data::PaidReactionSend startPaidReactionSending();
 	void finishPaidReactionSending(
@@ -471,7 +472,7 @@ public:
 	[[nodiscard]] auto topPaidReactionsWithLocal() const
 		-> std::vector<Data::MessageReactionsTopPaid>;
 	[[nodiscard]] int reactionsPaidScheduled() const;
-	[[nodiscard]] bool reactionsLocalAnonymous() const;
+	[[nodiscard]] PeerId reactionsLocalShownPeer() const;
 	[[nodiscard]] bool canViewReactions() const;
 	[[nodiscard]] std::vector<Data::ReactionId> chosenReactions() const;
 	[[nodiscard]] Data::ReactionId lookupUnreadReaction(

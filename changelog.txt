@@ -1,3 +1,61 @@
+5.11.1 (13.02.25)
+
+- Fix arbitrary cropping support in the image editor.
+- Fix crash on round video message playback.
+- Fix complex custom keyboard shortcuts.
+
+5.11 (12.02.25)
+
+- Copy video links at current time.
+- Set custom video covers when posting to channels.
+- Send paid reactions from the name of your channels.
+
+5.10.8 beta (12.02.25)
+
+- Edit keyboard shortcuts in Settings > Chat Settings.
+- Hide controls in calls with incoming video.
+- Fix several crashes.
+
+5.10.7 (27.01.25)
+
+- Fix some phrases for collectible gifts.
+- Fix freeze in sound reencoding on macOS and Linux.
+
+5.10.6 (26.01.25)
+
+- Fix crash in opening users gifts section.
+- Fix unintended sound in reaction notifications.
+- Fix disabling notifications sound on macOS and Linux.
+
+5.10.5 (24.01.25)
+
+- Count all unread topics as a single chat in archive unread counter.
+- Fix common groups section in bots profiles.
+- Fix crash on scheduling messages from Share box.
+- Fix silent notifications on macOS.
+- Add support for 'sound-file' notification hint on Linux.
+
+5.10.4 (22.01.25)
+
+- Add messages search in channel comments.
+- Allow sending your unique gifts to blockchain.
+- Add option for running in backround on Linux.
+- Fix possible freeze on quit on macOS.
+
+5.10.3 (09.01.25)
+
+- Fix a crash in legacy group opening.
+
+5.10.2 (07.01.25)
+
+- Fix double verification badge in profiles.
+
+5.10.1 (06.01.25)
+
+- Show "Boost group the send messages" information.
+- Fix several gifts bugs and glitches.
+- Fix several crashes.
+
 5.10 (02.01.25)
 
 - Collectible Gifts.

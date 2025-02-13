@@ -21,7 +21,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_web_page.h"
 #include "history/view/media/history_view_media_common.h"
-#include "history/view/media/history_view_sticker.h"
+#include "history/view/media/history_view_media_generic.h"
+#include "history/view/media/history_view_unique_gift.h"
 #include "history/view/history_view_cursor_state.h"
 #include "history/view/history_view_message.h"
 #include "history/view/history_view_reply.h"
@@ -49,6 +50,7 @@ constexpr auto kMaxOriginalEntryLines = 8192;
 constexpr auto kFactcheckCollapsedLines = 3;
 constexpr auto kStickerSetLines = 3;
 constexpr auto kFactcheckAboutDuration = 5 * crl::time(1000);
+constexpr auto kSponsoredUserpicLines = 2;
 
 [[nodiscard]] int ArticleThumbWidth(not_null<PhotoData*> thumb, int height) {
 	const auto size = thumb->location(Data::PhotoSize::Thumbnail);
@@ -74,15 +76,11 @@ constexpr auto kFactcheckAboutDuration = 5 * crl::time(1000);
 	const auto spoiler = false;
 	for (const auto &item : data.items) {
 		if (const auto document = std::get_if<DocumentData*>(&item)) {
-			const auto hasQualitiesList = false;
-			const auto skipPremiumEffect = false;
-			result.push_back(std::make_unique<Data::MediaFile>(
-				parent,
-				*document,
-				skipPremiumEffect,
-				hasQualitiesList,
-				spoiler,
-				/*ttlSeconds = */0));
+			using MediaFile = Data::MediaFile;
+			using Args = MediaFile::Args;
+			const auto data = *document;
+			result.push_back(
+				std::make_unique<Data::MediaFile>(parent, data, Args{}));
 		} else if (const auto photo = std::get_if<PhotoData*>(&item)) {
 			result.push_back(std::make_unique<Data::MediaPhoto>(
 				parent,
@@ -196,6 +194,8 @@ constexpr auto kFactcheckAboutDuration = 5 * crl::time(1000);
 	const auto type = page->type;
 	const auto text = Ui::Text::Upper(page->iv
 		? tr::lng_view_button_iv(tr::now)
+		: page->uniqueGift
+		? tr::lng_view_button_collectible(tr::now)
 		: (type == WebPageType::Theme)
 		? tr::lng_view_button_theme(tr::now)
 		: (type == WebPageType::Story)
@@ -245,6 +245,7 @@ constexpr auto kFactcheckAboutDuration = 5 * crl::time(1000);
 [[nodiscard]] bool HasButton(not_null<WebPageData*> webpage) {
 	const auto type = webpage->type;
 	return webpage->iv
+		|| webpage->uniqueGift
 		|| (type == WebPageType::Message)
 		|| (type == WebPageType::Group)
 		|| (type == WebPageType::GroupWithRequest)
@@ -308,12 +309,12 @@ void WebPage::setupAdditionalData() {
 			UrlClickHandler::Open(link);
 		});
 		if (!_attach) {
-			const auto maybePhoto = details.mediaPhotoId
-				? session->data().photo(details.mediaPhotoId).get()
-				: nullptr;
 			const auto maybeDocument = details.mediaDocumentId
 				? session->data().document(
 					details.mediaDocumentId).get()
+				: nullptr;
+			const auto maybePhoto = (!maybeDocument && details.mediaPhotoId)
+				? session->data().photo(details.mediaPhotoId).get()
 				: nullptr;
 			_attach = CreateAttach(
 				_parent,
@@ -371,6 +372,9 @@ QSize WebPage::countOptimalSize() {
 
 	const auto sponsored = sponsoredData();
 	const auto factcheck = factcheckData();
+	const auto stickerSet = stickerSetData();
+	const auto specialRightPix = (stickerSet
+		|| (sponsored && !sponsored->hasMedia && _data->photo));
 
 	// Detect _openButtonWidth before counting paddings.
 	_openButton = Ui::Text::String();
@@ -501,17 +505,32 @@ QSize WebPage::countOptimalSize() {
 	}
 
 	// init attach
-	if (!_attach && !_asArticle) {
+	if (!_attach && _data->uniqueGift) {
+		_attach = std::make_unique<MediaGeneric>(
+			_parent,
+			GenerateUniqueGiftPreview(
+				_parent,
+				nullptr,
+				_data->uniqueGift),
+				MediaGenericDescriptor{
+					.maxWidth = st::msgServiceGiftPreview,
+					.paintBg = UniqueGiftBg(_parent, _data->uniqueGift),
+				});
+	} else if (!_attach && !_asArticle) {
 		_attach = CreateAttach(
 			_parent,
 			_data->document,
-			_data->photo,
+			((!_data->document || _data->photoIsVideoCover)
+				? _data->photo
+				: nullptr),
 			_collage,
 			_data->url);
 	}
 
 	// init strings
-	if (_description.isEmpty() && !_data->description.text.isEmpty()) {
+	if (_description.isEmpty()
+		&& !_data->description.text.isEmpty()
+		&& !_data->uniqueGift) {
 		const auto &text = _data->description;
 
 		if (isLogEntryOriginal()) {
@@ -583,10 +602,16 @@ QSize WebPage::countOptimalSize() {
 		+ titleMinHeight
 		+ descriptionMinHeight;
 	const auto articlePhotoMaxWidth = _asArticle
-		? st::webPagePhotoDelta
+		? (st::webPagePhotoDelta
 			+ std::max(
 				ArticleThumbWidth(_data->photo, articleMinHeight),
-				lineHeight)
+				lineHeight))
+		: specialRightPix
+		? (st::webPagePhotoDelta
+			+ (lineHeight
+				* (stickerSet
+					? kStickerSetLines
+					: kSponsoredUserpicLines)))
 		: 0;
 
 	if (!_siteName.isEmpty()) {
@@ -632,11 +657,7 @@ QSize WebPage::countOptimalSize() {
 	if (!_openButton.isEmpty()) {
 		const auto w = rect::m::sum::h(st::historyPageButtonPadding)
 			+ _openButton.maxWidth();
-		if (sponsored) {
-			accumulate_max(maxWidth, w);
-		} else {
-			maxWidth += w;
-		}
+		accumulate_max(maxWidth, w);
 	}
 	maxWidth += rect::m::sum::h(padding);
 	minHeight += rect::m::sum::v(padding);
@@ -692,7 +713,6 @@ QSize WebPage::countCurrentSize(int newWidth) {
 	const auto twoTitleLines = 2 * st::webPageTitleFont->height;
 	const auto descriptionLineHeight = st::webPageDescriptionFont->height;
 	if (asArticle() || specialRightPix) {
-		constexpr auto kSponsoredUserpicLines = 2;
 		_pixh = lineHeight
 			* (stickerSet
 				? kStickerSetLines

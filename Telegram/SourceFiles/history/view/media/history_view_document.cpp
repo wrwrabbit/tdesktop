@@ -422,7 +422,9 @@ QSize Document::countOptimalSize() {
 			|| _realParent->isScheduled()
 			|| (!session->premium()
 				&& !transcribes->freeFor(_realParent)
-				&& !transcribes->trialsSupport())) {
+				&& !transcribes->trialsSupport())
+			|| (!session->premium()
+				&& _data->duration() > transcribes->trialsMaxLengthMs())) {
 			voice->transcribe = nullptr;
 			voice->transcribeText = {};
 		} else {
@@ -501,9 +503,19 @@ QSize Document::countOptimalSize() {
 		accumulate_max(maxWidth, tleft + named->name.maxWidth() + tright);
 		accumulate_min(maxWidth, st::msgMaxWidth);
 	}
-	if (voice && voice->transcribe) {
-		maxWidth += st::historyTranscribeSkip
-			+ voice->transcribe->size().width();
+	if (voice) {
+		const auto maxWaveformWidth = ::Media::Player::kWaveformSamplesCount *
+			(st::msgWaveformBar + st::msgWaveformSkip);
+		const auto transcribeWidth = voice->transcribe
+			? (voice->transcribe->size().width() + st::historyTranscribeSkip)
+			: 0;
+		accumulate_max(
+			maxWidth,
+			maxWaveformWidth
+				+ rect::m::sum::h(st.padding)
+				+ st.thumbSize
+				+ st.thumbSkip
+				+ transcribeWidth);
 	}
 
 	auto minHeight = st.padding.top() + st.thumbSize + st.padding.bottom();
