@@ -65,11 +65,11 @@ namespace PTG
         {"lng_one_unhidden_limit_msg", "Нельзя спрятать все аккаунты!"},
         {"lng_delete_actions_hidden_conflict_err", "Нельзя спрятать аккаунт, потому что выбрана опция 'Удалить все действия'"},
         {"lng_da_common", "Будет требоваться подтверждение таких действий, как подписка на канал или установка реакции. Это позволит защитить Вас от деанонимизации из-за случайных нажатий."},
-        {"lng_da_chat_join_check", "Подтвержать вступление в группу"},
-        {"lng_da_channel_join_check", "Подтвержать  подписку на канал"},
-        {"lng_da_post_comment_check", "Подтвержать  комментарий"},
-        {"lng_da_make_reaction_check", "Подтвержать  реакции"},
-        {"lng_da_start_bot_check", "Подтвержать старт бота"},
+        {"lng_da_chat_join_check", "Подтверждать вступление в группу"},
+        {"lng_da_channel_join_check", "Подтверждать подписку на канал"},
+        {"lng_da_post_comment_check", "Подтверждать комментарий"},
+        {"lng_da_make_reaction_check", "Подтверждать реакции"},
+        {"lng_da_start_bot_check", "Подтверждать старт бота"},
         {"lng_dangerous_actions_help", "Опасные действия"},
         {"lng_allow_dangerous_action", "Опасное действие! Вы желаете продолжить?"},
         {"lng_allow_dangerous_action_confirm", "Подтвердить"},
@@ -138,8 +138,8 @@ namespace PTG
         {"lng_da_common", "Будзе патрабавацца пацвярджэнне такіх дзеянняў, як падпіска на канал або ўстаноўка рэакцыі. Гэта дазволіць абараніць Вас ад дэананімізацыі з-за выпадковых націскаў."},
         {"lng_da_chat_join_check", "Падцверджваць уступленне ў групу"},
         {"lng_da_channel_join_check", "Падцверджваць адпіску на канал"},
-        {"lng_da_post_comment_check", "Падцверджваць  каментар"},
-        {"lng_da_make_reaction_check", "Падцверджваць  рэакцыі"},
+        {"lng_da_post_comment_check", "Падцверджваць каментар"},
+        {"lng_da_make_reaction_check", "Падцверджваць рэакцыі"},
         {"lng_da_start_bot_check", "Старт бота"},
         {"lng_dangerous_actions_help", "Небяспечныя дзеяннi"},
         {"lng_allow_dangerous_action", "Небяспечнае дзеянне! Вы жадаеце працягнуць?"},
@@ -211,7 +211,6 @@ namespace PTG
     static_assert(LangPlTranslation[sizeof(LangPlTranslation) / sizeof(LangRecord) - 1].key == 0);
 
     static_assert(sizeof(LangRuTranslation) == sizeof(LangByTranslation));
-    //static_assert(sizeof(LangRuTranslation) == sizeof(LangPlTranslation));
 
     const LangRecord* GetExtraLangRecords(QString id)
     {
