@@ -87,7 +87,47 @@ base::options::toggle OptionDisableTouchbar({
 	.restartRequired = true,
 });
 
-} // namespace.
+[[nodiscard]] QString TitleFromSeparateId(
+		const Core::WindowTitleContent &settings,
+		const SeparateId &id) {
+	if (id.sharedMedia == SeparateSharedMediaType::None
+		|| !id.sharedMediaPeer()) {
+		return QString();
+	}
+	const auto result = (id.sharedMedia == SeparateSharedMediaType::Photos)
+		? tr::lng_media_type_photos(tr::now)
+		: (id.sharedMedia == SeparateSharedMediaType::Videos)
+		? tr::lng_media_type_videos(tr::now)
+		: (id.sharedMedia == SeparateSharedMediaType::Files)
+		? tr::lng_media_type_files(tr::now)
+		: (id.sharedMedia == SeparateSharedMediaType::Audio)
+		? tr::lng_media_type_songs(tr::now)
+		: (id.sharedMedia == SeparateSharedMediaType::Links)
+		? tr::lng_media_type_links(tr::now)
+		: (id.sharedMedia == SeparateSharedMediaType::GIF)
+		? tr::lng_media_type_gifs(tr::now)
+		: (id.sharedMedia == SeparateSharedMediaType::Voices)
+		? tr::lng_media_type_audios(tr::now)
+		: QString();
+
+	if (settings.hideChatName) {
+		return result;
+	}
+	const auto peer = id.sharedMediaPeer();
+	const auto topicRootId = id.sharedMediaTopicRootId();
+	const auto topic = topicRootId
+		? peer->forumTopicFor(topicRootId)
+		: nullptr;
+	const auto name = topic
+		? topic->title()
+		: peer->isSelf()
+		? tr::lng_saved_messages(tr::now)
+		: peer->name();
+	const auto wrapped = st::wrap_rtl(name);
+	return name + u" @ "_q + result;
+}
+
+} // namespace
 
 const char kOptionNewWindowsSizeAsFirst[] = "new-windows-size-as-first";
 const char kOptionDisableTouchbar[] = "touchbar-disabled";
@@ -420,8 +460,8 @@ bool MainWindow::hideNoQuit() {
 		return false;
 	}
 	const auto workMode = Core::App().settings().workMode();
-	if (workMode == Core::Settings::WorkMode::TrayOnly
-		|| workMode == Core::Settings::WorkMode::WindowAndTray) {
+	using Mode = Core::Settings::WorkMode;
+	if (workMode == Mode::TrayOnly || workMode == Mode::WindowAndTray) {
 		if (minimizeToTray()) {
 			if (const auto controller = sessionController()) {
 				controller->clearSectionStack();
@@ -429,20 +469,23 @@ bool MainWindow::hideNoQuit() {
 			return true;
 		}
 	}
-	if (Platform::RunInBackground() || Core::App().settings().closeToTaskbar()) {
-		if (Platform::RunInBackground()) {
-			closeWithoutDestroy();
-		} else {
-			setWindowState(window()->windowState() | Qt::WindowMinimized);
-		}
-		controller().updateIsActiveBlur();
-		updateGlobalMenu();
-		if (const auto controller = sessionController()) {
-			controller->clearSectionStack();
-		}
-		return true;
+	using Behavior = Core::Settings::CloseBehavior;
+	const auto behavior = Platform::IsMac()
+		? Behavior::RunInBackground
+		: Core::App().settings().closeBehavior();
+	if (behavior == Behavior::RunInBackground) {
+		closeWithoutDestroy();
+	} else if (behavior == Behavior::CloseToTaskbar) {
+		setWindowState(window()->windowState() | Qt::WindowMinimized);
+	} else {
+		return false;
 	}
-	return false;
+	controller().updateIsActiveBlur();
+	updateGlobalMenu();
+	if (const auto controller = sessionController()) {
+		controller->clearSectionStack();
+	}
+	return true;
 }
 
 void MainWindow::clearWidgets() {
@@ -859,6 +902,13 @@ void MainWindow::updateTitle() {
 		&& Core::App().domain().accountsAuthedCount() > 1)
 		? st::wrap_rtl(session->authedName())
 		: QString();
+	const auto separateIdTitle = session
+		? TitleFromSeparateId(settings, session->windowId())
+		: QString();
+	if (!separateIdTitle.isEmpty()) {
+		setTitle(separateIdTitle);
+		return;
+	}
 	const auto key = (session && !settings.hideChatName)
 		? session->activeChatCurrent()
 		: Dialogs::Key();

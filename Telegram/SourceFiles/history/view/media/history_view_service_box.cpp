@@ -45,8 +45,12 @@ ServiceBox::ServiceBox(
 , _title(
 	st::defaultSubsectionTitle.style,
 	_content->title(),
-	kDefaultTextOptions,
-	_maxWidth)
+	kMarkupTextOptions,
+	_maxWidth,
+	Core::MarkedTextContext{
+		.session = &parent->history()->session(),
+		.customEmojiRepaint = [parent] { parent->customEmojiRepaint(); },
+	})
 , _subtitle(
 	st::premiumPreviewAbout.style,
 	Ui::Text::Filtered(
@@ -148,7 +152,16 @@ void ServiceBox::draw(Painter &p, const PaintContext &context) const {
 		const auto &padding = st::msgServiceGiftBoxTitlePadding;
 		top += padding.top();
 		if (!_title.isEmpty()) {
-			_title.draw(p, st::msgPadding.left(), top, _maxWidth, style::al_top);
+			_title.draw(p, {
+				.position = QPoint(st::msgPadding.left(), top),
+				.availableWidth = _maxWidth,
+				.align = style::al_top,
+				.palette = &context.st->serviceTextPalette(),
+				.spoiler = Ui::Text::DefaultSpoilerCache(),
+				.now = context.now,
+				.pausedEmoji = context.paused || On(PowerSaving::kEmojiChat),
+				.pausedSpoiler = context.paused || On(PowerSaving::kChatSpoiler),
+			});
 			top += _title.countHeight(_maxWidth) + padding.bottom();
 		}
 		_parent->prepareCustomEmojiPaint(p, context, _subtitle);
@@ -199,28 +212,9 @@ void ServiceBox::draw(Painter &p, const PaintContext &context) const {
 
 	_content->draw(p, context, content);
 
-	if (const auto tag = _content->cornerTagText(); !tag.isEmpty()) {
-		const auto font = st::semiboldFont;
-		p.setFont(font);
-		p.setPen(Qt::NoPen);
-		const auto twidth = font->width(tag);
-		const auto pos = QPoint(_innerSize.width() - twidth, font->height);
-		const auto add = 0;// style::ConvertScale(2);
-		p.save();
-		p.setClipRect(
-			-add,
-			-add,
-			_innerSize.width() + 2 * add,
-			_innerSize.height() + 2 * add);
-		p.translate(pos);
-		p.rotate(45.);
-		p.translate(-pos);
-		p.setPen(Qt::NoPen);
-		p.setBrush(context.st->msgServiceBg()); // ?
-		p.drawRect(-5 * twidth, 0, twidth * 12, font->height);
-		p.setPen(context.st->msgServiceFg());
-		p.drawText(pos - QPoint(0, font->descent), tag);
-		p.restore();
+	if (const auto tag = _content->cornerTag(context); !tag.isNull()) {
+		const auto width = tag.width() / tag.devicePixelRatio();
+		p.drawImage(_innerSize.width() - width, 0, tag);
 	}
 
 	p.translate(0, -st::msgServiceGiftBoxTopSkip);

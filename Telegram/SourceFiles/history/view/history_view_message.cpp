@@ -38,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "mainwidget.h"
 #include "main/main_session.h"
+#include "settings/settings_premium.h"
 #include "ui/text/text_options.h"
 #include "ui/painter.h"
 #include "window/themes/window_theme.h" // IsNightMode.
@@ -55,7 +56,7 @@ const auto kPsaTooltipPrefix = "cloud_lng_tooltip_psa_";
 
 class KeyboardStyle : public ReplyKeyboard::Style {
 public:
-	KeyboardStyle(const style::BotKeyboardButton &st);
+	KeyboardStyle(const style::BotKeyboardButton &st, Fn<void()> repaint);
 
 	Images::CornersMaskRef buttonRounding(
 		Ui::BubbleRounding outer,
@@ -93,12 +94,16 @@ private:
 	mutable base::flat_map<BubbleRoundingKey, QImage> _cachedBg;
 	mutable base::flat_map<BubbleRoundingKey, QPainterPath> _cachedOutline;
 	mutable std::unique_ptr<Ui::GlareEffect> _glare;
+	Fn<void()> _repaint;
 	rpl::lifetime _lifetime;
 
 };
 
-KeyboardStyle::KeyboardStyle(const style::BotKeyboardButton &st)
-: ReplyKeyboard::Style(st) {
+KeyboardStyle::KeyboardStyle(
+	const style::BotKeyboardButton &st,
+	Fn<void()> repaint)
+: ReplyKeyboard::Style(st)
+, _repaint(std::move(repaint)) {
 	style::PaletteChanged(
 	) | rpl::start_with_next([=] {
 		_cachedBg = {};
@@ -120,15 +125,6 @@ const style::TextStyle &KeyboardStyle::textStyle() const {
 
 void KeyboardStyle::repaint(not_null<const HistoryItem*> item) const {
 	item->history()->owner().requestItemRepaint(item);
-	if (_glare && !_glare->glare.birthTime) {
-		constexpr auto kTimeout = crl::time(0);
-		constexpr auto kDuration = crl::time(1100);
-		_glare->validate(
-			st::premiumButtonFg->c,
-			[=] { repaint(item); },
-			kTimeout,
-			kDuration);
-	}
 }
 
 Images::CornersMaskRef KeyboardStyle::buttonRounding(
@@ -306,6 +302,11 @@ void KeyboardStyle::paintButtonLoading(
 		} else {
 			_glare = std::make_unique<Ui::GlareEffect>();
 			_glare->width = outerWidth;
+
+			constexpr auto kTimeout = crl::time(0);
+			constexpr auto kDuration = crl::time(1100);
+			const auto color = st::premiumButtonFg->c;
+			_glare->validate(color, _repaint, kTimeout, kDuration);
 		}
 	}
 }
@@ -371,8 +372,9 @@ struct Message::CommentsButton {
 };
 
 struct Message::FromNameStatus {
-	DocumentId id = 0;
+	EmojiStatusId id;
 	std::unique_ptr<Ui::Text::CustomEmoji> custom;
+	ClickHandlerPtr link;
 	int skip = 0;
 };
 
@@ -1768,13 +1770,13 @@ void Message::paintFromName(
 		const auto y = trect.top();
 		auto color = nameFg;
 		color.setAlpha(115);
-		const auto id = from ? from->emojiStatusId() : 0;
+		const auto id = from ? from->emojiStatusId() : EmojiStatusId();
 		if (_fromNameStatus->id != id) {
 			const auto that = const_cast<Message*>(this);
 			_fromNameStatus->custom = id
 				? std::make_unique<Ui::Text::LimitedLoopsEmoji>(
 					history()->owner().customEmojiManager().create(
-						id,
+						Data::EmojiStatusCustomId(id),
 						[=] { that->customEmojiRepaint(); }),
 					kPlayStatusLimit)
 				: nullptr;
@@ -2379,7 +2381,7 @@ void Message::unloadHeavyPart() {
 	_comments = nullptr;
 	if (_fromNameStatus) {
 		_fromNameStatus->custom = nullptr;
-		_fromNameStatus->id = 0;
+		_fromNameStatus->id = EmojiStatusId();
 	}
 }
 
@@ -2770,6 +2772,25 @@ bool Message::getStateFromName(
 				Unexpected("Corrupt forwarded information in message.");
 			}
 		}();
+
+		const auto statusWidth = (from && _fromNameStatus)
+			? st::dialogsPremiumIcon.icon.width()
+			: 0;
+		if (statusWidth && availableWidth > statusWidth) {
+			const auto x = availableLeft + std::min(
+				availableWidth - statusWidth,
+				nameText->maxWidth()
+			) - (_fromNameStatus->custom ? (2 * _fromNameStatus->skip) : 0);
+			const auto checkWidth = _fromNameStatus->custom
+				? (st::emojiSize - 2 * _fromNameStatus->skip)
+				: statusWidth;
+			if (point.x() >= x && point.x() < x + checkWidth) {
+				ensureFromNameStatusLink(from);
+				outResult->link = _fromNameStatus->link;
+				return true;
+			}
+			availableWidth -= statusWidth;
+		}
 		if (point.x() >= availableLeft
 			&& point.x() < availableLeft + availableWidth
 			&& point.x() < availableLeft + nameText->maxWidth()) {
@@ -2788,6 +2809,21 @@ bool Message::getStateFromName(
 	}
 	trect.setTop(trect.top() + st::msgNameFont->height);
 	return false;
+}
+
+void Message::ensureFromNameStatusLink(not_null<PeerData*> peer) const {
+	Expects(_fromNameStatus != nullptr);
+
+	if (_fromNameStatus->link) {
+		return;
+	}
+	_fromNameStatus->link = std::make_shared<LambdaClickHandler>([=](
+			ClickContext context) {
+		const auto controller = ExtractController(context);
+		if (controller) {
+			Settings::ShowEmojiStatusPremium(controller, peer);
+		}
+	});
 }
 
 bool Message::getStateTopicButton(
@@ -2975,7 +3011,7 @@ bool Message::getStateText(
 	} else if (const auto botTop = Get<FakeBotAboutTop>()) {
 		trect.setY(trect.y() + botTop->height);
 	}
-	const auto item = data();
+	const auto item = this->textItem();
 	if (base::in_range(point.y(), trect.y(), trect.y() + trect.height())) {
 		*outResult = TextState(item, text().getState(
 			point - trect.topLeft(),
@@ -3400,9 +3436,12 @@ void Message::validateInlineKeyboard(HistoryMessageReplyMarkup *markup) {
 		|| markup->hiddenBy(data()->media())) {
 		return;
 	}
+	const auto item = data();
 	markup->inlineKeyboard = std::make_unique<ReplyKeyboard>(
-		data(),
-		std::make_unique<KeyboardStyle>(st::msgBotKbButton));
+		item,
+		std::make_unique<KeyboardStyle>(
+			st::msgBotKbButton,
+			[=] { item->history()->owner().requestItemRepaint(item); }));
 }
 
 void Message::validateFromNameText(PeerData *from) const {

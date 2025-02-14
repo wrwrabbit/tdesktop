@@ -80,7 +80,7 @@ using SendFilesCheck = Fn<bool(
 	not_null<Window::SessionController*> controller,
 	not_null<PeerData*> peer);
 [[nodiscard]] SendFilesCheck DefaultCheckForPeer(
-	std::shared_ptr<Ui::Show> show,
+	std::shared_ptr<ChatHelpers::Show> show,
 	not_null<PeerData*> peer);
 
 using SendFilesConfirmed = Fn<void(
@@ -153,7 +153,9 @@ private:
 			int till,
 			Fn<bool()> gifPaused,
 			Ui::SendFilesWay way,
-			Fn<bool()> canToggleSpoiler);
+			Fn<bool(
+				const Ui::PreparedFile &,
+				Ui::AttachActionType)> actionAllowed);
 		Block(Block &&other) = default;
 		Block &operator=(Block &&other) = default;
 
@@ -164,6 +166,8 @@ private:
 		[[nodiscard]] rpl::producer<int> itemDeleteRequest() const;
 		[[nodiscard]] rpl::producer<int> itemReplaceRequest() const;
 		[[nodiscard]] rpl::producer<int> itemModifyRequest() const;
+		[[nodiscard]] rpl::producer<int> itemEditCoverRequest() const;
+		[[nodiscard]] rpl::producer<int> itemClearCoverRequest() const;
 		[[nodiscard]] rpl::producer<> orderUpdated() const;
 
 		void setSendWay(Ui::SendFilesWay way);

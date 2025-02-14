@@ -33,6 +33,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_changes.h"
 #include "data/data_chat_filters.h"
 #include "data/data_send_action.h"
+#include "data/data_star_gift.h"
+#include "data/data_emoji_statuses.h"
 #include "data/data_folder.h"
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
@@ -83,12 +85,9 @@ using UpdateFlag = Data::HistoryUpdate::Flag;
 
 [[nodiscard]] Dialogs::UnreadState AdjustedForumUnreadState(
 		Dialogs::UnreadState state) {
-	if (state.chatsTopic) {
-		state.forums = 1;
-		if (state.chatsTopic == state.chatsTopicMuted) {
-			state.forumsMuted = 1;
-		}
-	}
+	const auto allMuted = (state.chats == state.chatsMuted);
+	state.chatsMuted = (state.chats && allMuted) ? 1 : 0;
+	state.chats = state.chats ? 1 : 0;
 	return state;
 }
 
@@ -190,7 +189,7 @@ void History::itemVanished(not_null<HistoryItem*> item) {
 		if (const auto gift = media->gift()) {
 			using GiftAction = Data::GiftUpdate::Action;
 			owner().notifyGiftUpdate({
-				.itemId = item->fullId(),
+				.id = Data::SavedStarGiftId::User(item->id),
 				.action = GiftAction::Delete,
 			});
 		}
@@ -1300,6 +1299,15 @@ void History::newItemAdded(not_null<HistoryItem*> item) {
 	if (const auto topic = item->topic()) {
 		topic->applyItemAdded(item);
 	}
+	if (const auto media = item->media()) {
+		if (const auto gift = media->gift()) {
+			if (const auto unique = gift->unique.get()) {
+				if (unique->ownerId == session().userPeerId()) {
+					owner().emojiStatuses().refreshCollectibles();
+				}
+			}
+		}
+	}
 }
 
 void History::registerClientSideMessage(not_null<HistoryItem*> item) {
@@ -2218,7 +2226,7 @@ Dialogs::BadgesState History::chatListBadgesState() const {
 	if (const auto forum = peer->forum()) {
 		return adjustBadgesStateByFolder(
 			Dialogs::BadgesForUnread(
-				AdjustedForumUnreadState(forum->topicsList()->unreadState()),
+				forum->topicsList()->unreadState(),
 				Dialogs::CountInBadge::Chats,
 				Dialogs::IncludeInBadge::UnmutedOrAll));
 	}
@@ -3092,7 +3100,8 @@ void History::forumChanged(Data::Forum *old) {
 		forum->topicsList()->unreadStateChanges(
 		) | rpl::filter([=] {
 			return (_flags & Flag::IsForum) && inChatList();
-		}) | rpl::map(AdjustedForumUnreadState
+		}) | rpl::map(
+			AdjustedForumUnreadState
 		) | rpl::start_with_next([=](const Dialogs::UnreadState &old) {
 			notifyUnreadStateChange(old);
 		}, forum->lifetime());

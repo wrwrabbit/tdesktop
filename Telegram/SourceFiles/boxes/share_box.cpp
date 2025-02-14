@@ -53,6 +53,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "styles/style_calls.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 #include "styles/style_menu_icons.h"
@@ -200,16 +201,16 @@ ShareBox::ShareBox(QWidget*, Descriptor &&descriptor)
 , _api(&_descriptor.session->mtp())
 , _select(
 	this,
-	(_descriptor.stMultiSelect
-		? *_descriptor.stMultiSelect
+	(_descriptor.st.multiSelect
+		? *_descriptor.st.multiSelect
 		: st::defaultMultiSelect),
 	tr::lng_participant_filter())
 , _comment(
 	this,
 	object_ptr<Ui::InputField>(
 		this,
-		(_descriptor.stComment
-			? *_descriptor.stComment
+		(_descriptor.st.comment
+			? *_descriptor.st.comment
 			: st::shareComment),
 		Ui::InputField::Mode::MultiLine,
 		tr::lng_photos_comment()),
@@ -254,7 +255,7 @@ void ShareBox::prepareCommentField() {
 			.session = _descriptor.session,
 			.show = Main::MakeSessionShow(show, _descriptor.session),
 			.field = field,
-			.fieldStyle = _descriptor.stLabel,
+			.fieldStyle = _descriptor.st.label,
 		});
 	}
 	field->setSubmitSettings(Core::App().settings().sendSubmitWay());
@@ -279,7 +280,9 @@ void ShareBox::prepare() {
 	_select->resizeToWidth(st::boxWideWidth);
 	Ui::SendPendingMoveResizeEvents(_select);
 
-	setTitle(tr::lng_share_title());
+	setTitle(_descriptor.titleOverride
+		? std::move(_descriptor.titleOverride)
+		: tr::lng_share_title());
 
 	_inner = setInnerWidget(
 		object_ptr<Inner>(this, _descriptor, uiShow()),
@@ -564,10 +567,13 @@ void ShareBox::showMenu(not_null<Ui::RpWidget*> parent) {
 			submit(action.options);
 			return;
 		}
+		const auto st = _descriptor.st.scheduleBox
+			? *_descriptor.st.scheduleBox
+			: HistoryView::ScheduleBoxStyleArgs();
 		if (action.type == ActionType::DeleteWhenRead) {
 			uiShow()->showBox(FakePasscode::AutoDeleteBox(this,
 					[=](Api::SendOptions options) { submit(options); },
-					_descriptor.scheduleBoxStyle.chooseDateTimeArgs),
+					st.chooseDateTimeArgs),
 				Ui::LayerOption::KeepOther);
 			return;
 		}
@@ -579,7 +585,7 @@ void ShareBox::showMenu(not_null<Ui::RpWidget*> parent) {
 				[=](Api::SendOptions options) { submit(options); },
 				action.options,
 				HistoryView::DefaultScheduleTime(),
-				_descriptor.scheduleBoxStyle));
+				st));
 	});
 	_menu->setForcedVerticalOrigin(Ui::PopupMenu::VerticalOrigin::Bottom);
 	const auto result = FillSendMenu(
@@ -714,7 +720,9 @@ ShareBox::Inner::Inner(
 : RpWidget(parent)
 , _descriptor(descriptor)
 , _show(std::move(show))
-, _st(_descriptor.st ? *_descriptor.st : st::shareBoxList)
+, _st(_descriptor.st.peerList
+	? *_descriptor.st.peerList
+	: st::shareBoxList)
 , _defaultChatsIndexed(
 	std::make_unique<Dialogs::IndexedList>(
 		Dialogs::SortMode::Add))
@@ -1499,7 +1507,8 @@ ChatHelpers::ForwardedMessagePhraseArgs CreateForwardedMessagePhraseArgs(
 ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 		std::shared_ptr<Ui::Show> show,
 		not_null<History*> history,
-		MessageIdsList msgIds) {
+		MessageIdsList msgIds,
+		std::optional<TimeId> videoTimestamp) {
 	struct State final {
 		base::flat_set<mtpRequestId> requests;
 	};
@@ -1518,26 +1527,11 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 			return;
 		}
 
-		const auto error = [&] {
-			for (const auto thread : result) {
-				const auto error = GetErrorTextForSending(
-					thread,
-					{ .forward = &items, .text = &comment });
-				if (!error.isEmpty()) {
-					return std::make_pair(error, thread);
-				}
-			}
-			return std::make_pair(QString(), result.front());
-		}();
-		if (!error.first.isEmpty()) {
-			auto text = TextWithEntities();
-			if (result.size() > 1) {
-				text.append(
-					Ui::Text::Bold(error.second->chatListName())
-				).append("\n\n");
-			}
-			text.append(error.first);
-			show->showBox(Ui::MakeInformBox(text));
+		const auto error = GetErrorForSending(
+			result,
+			{ .forward = &items, .text = &comment });
+		if (error.error) {
+			show->showBox(MakeSendErrorBox(error, result.size() > 1));
 			return;
 		}
 
@@ -1550,6 +1544,9 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 				: Flag(0))
 			| ((forwardOptions == Data::ForwardOptions::NoNamesAndCaptions)
 				? Flag::f_drop_media_captions
+				: Flag(0))
+			| (videoTimestamp.has_value()
+				? Flag::f_video_timestamp
 				: Flag(0));
 		auto mtpMsgIds = QVector<MTPint>();
 		mtpMsgIds.reserve(existingIds.size());
@@ -1607,7 +1604,8 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 						MTP_int(topMsgId),
 						MTP_int(options.scheduled),
 						MTP_inputPeerEmpty(), // send_as
-						Data::ShortcutIdToMTP(session, options.shortcutId)
+						Data::ShortcutIdToMTP(session, options.shortcutId),
+						MTP_int(videoTimestamp.value_or(0))
 				)).done([=](const MTPUpdates &updates, mtpRequestId reqId) {
 					threadHistory->session().api().applyUpdates(updates);
 					state->requests.remove(reqId);
@@ -1638,9 +1636,37 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 	};
 }
 
+ShareBoxStyleOverrides DarkShareBoxStyle() {
+	using namespace HistoryView;
+
+	const auto schedule = [&] {
+		auto date = Ui::ChooseDateTimeStyleArgs();
+		date.labelStyle = &st::groupCallBoxLabel;
+		date.dateFieldStyle = &st::groupCallScheduleDateField;
+		date.timeFieldStyle = &st::groupCallScheduleTimeField;
+		date.separatorStyle = &st::callMuteButtonLabel;
+		date.atStyle = &st::callMuteButtonLabel;
+		date.calendarStyle = &st::groupCallCalendarColors;
+
+		auto st = ScheduleBoxStyleArgs();
+		st.topButtonStyle = &st::groupCallMenuToggle;
+		st.popupMenuStyle = &st::groupCallPopupMenu;
+		st.chooseDateTimeArgs = std::move(date);
+		return st;
+	};
+	return {
+		.multiSelect = &st::groupCallMultiSelect,
+		.comment = &st::groupCallShareBoxComment,
+		.peerList = &st::groupCallShareBoxList,
+		.label = &st::groupCallField,
+		.scheduleBox = std::make_shared<ScheduleBoxStyleArgs>(schedule()),
+	};
+}
+
 void FastShareMessage(
 		std::shared_ptr<Main::SessionShow> show,
-		not_null<HistoryItem*> item) {
+		not_null<HistoryItem*> item,
+		ShareBoxStyleOverrides st) {
 	const auto history = item->history();
 	const auto owner = &history->owner();
 	const auto session = &history->session();
@@ -1709,6 +1735,7 @@ void FastShareMessage(
 			history,
 			msgIds),
 		.filterCallback = std::move(filterCallback),
+		.st = st,
 		.forwardOptions = {
 			.sendersCount = ItemsForwardSendersCount(items),
 			.captionsCount = ItemsForwardCaptionsCount(items),
@@ -1720,19 +1747,22 @@ void FastShareMessage(
 
 void FastShareMessage(
 		not_null<Window::SessionController*> controller,
-		not_null<HistoryItem*> item) {
-	FastShareMessage(controller->uiShow(), item);
+		not_null<HistoryItem*> item,
+		ShareBoxStyleOverrides st) {
+	FastShareMessage(controller->uiShow(), item, st);
 }
 
 void FastShareLink(
 		not_null<Window::SessionController*> controller,
-		const QString &url) {
-	FastShareLink(controller->uiShow(), url);
+		const QString &url,
+		ShareBoxStyleOverrides st) {
+	FastShareLink(controller->uiShow(), url, st);
 }
 
 void FastShareLink(
 		std::shared_ptr<Main::SessionShow> show,
-		const QString &url) {
+		const QString &url,
+		ShareBoxStyleOverrides st) {
 	const auto box = std::make_shared<QPointer<Ui::BoxContent>>();
 	const auto sending = std::make_shared<bool>();
 	auto copyCallback = [=] {
@@ -1748,30 +1778,13 @@ void FastShareLink(
 			return;
 		}
 
-		const auto error = [&] {
-			for (const auto thread : result) {
-				const auto error = GetErrorTextForSending(
-					thread,
-					{ .text = &comment });
-				if (!error.isEmpty()) {
-					return std::make_pair(error, thread);
-				}
-			}
-			return std::make_pair(QString(), result.front());
-		}();
-		if (!error.first.isEmpty()) {
-			auto text = TextWithEntities();
-			if (result.size() > 1) {
-				text.append(
-					Ui::Text::Bold(error.second->chatListName())
-				).append("\n\n");
-			}
-			text.append(error.first);
+		const auto error = GetErrorForSending(
+			result,
+			{ .text = &comment });
+		if (error.error) {
 			if (const auto weak = *box) {
-				weak->getDelegate()->show(Ui::MakeConfirmBox({
-					.text = text,
-					.inform = true,
-				}));
+				weak->getDelegate()->show(
+					MakeSendErrorBox(error, result.size() > 1));
 			}
 			return;
 		}
@@ -1813,6 +1826,7 @@ void FastShareLink(
 			.copyCallback = std::move(copyCallback),
 			.submitCallback = std::move(submitCallback),
 			.filterCallback = std::move(filterCallback),
+			.st = st,
 			.premiumRequiredError = SharePremiumRequiredError(),
 		}),
 		Ui::LayerOption::KeepOther,

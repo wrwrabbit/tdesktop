@@ -49,7 +49,7 @@ public:
 	int width() override;
 	int top() override;
 	QSize size() override;
-	QString title() override;
+	TextWithEntities title() override;
 	TextWithEntities subtitle() override;
 	int buttonSkip() override;
 	rpl::producer<QString> button() override;
@@ -82,8 +82,12 @@ auto GenerateChatIntro(
 	Element *replacing,
 	const Data::ChatIntro &data,
 	Fn<void(not_null<DocumentData*>)> helloChosen)
--> Fn<void(Fn<void(std::unique_ptr<MediaGenericPart>)>)> {
-	return [=](Fn<void(std::unique_ptr<MediaGenericPart>)> push) {
+-> Fn<void(
+		not_null<MediaGeneric*>,
+		Fn<void(std::unique_ptr<MediaGenericPart>)>)> {
+	return [=](
+			not_null<MediaGeneric*> media,
+			Fn<void(std::unique_ptr<MediaGenericPart>)> push) {
 		auto pushText = [&](
 				TextWithEntities text,
 				QMargins margins = {},
@@ -158,8 +162,8 @@ QSize PremiumRequiredBox::size() {
 	return { st::msgServicePhotoWidth, st::msgServicePhotoWidth };
 }
 
-QString PremiumRequiredBox::title() {
-	return QString();
+TextWithEntities PremiumRequiredBox::title() {
+	return {};
 }
 
 int PremiumRequiredBox::buttonSkip() {
