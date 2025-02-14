@@ -48,6 +48,7 @@ struct BoostBoxData {
 	QString name;
 	BoostCounters boost;
 	BoostFeatures features;
+	int lifting = 0;
 	bool allowMulti = false;
 	bool group = false;
 };
@@ -95,6 +96,10 @@ struct AskBoostCpm {
 	int requiredLevel = 0;
 };
 
+struct AskBoostWearCollectible {
+	int requiredLevel = 0;
+};
+
 struct AskBoostReason {
 	std::variant<
 		AskBoostChannelColor,
@@ -102,7 +107,8 @@ struct AskBoostReason {
 		AskBoostEmojiStatus,
 		AskBoostEmojiPack,
 		AskBoostCustomReactions,
-		AskBoostCpm> data;
+		AskBoostCpm,
+		AskBoostWearCollectible> data;
 };
 
 struct AskBoostBoxData {

@@ -416,30 +416,20 @@ bool ByDefault() {
 }
 
 void Create(Window::Notifications::System *system) {
-	if (Core::App().settings().nativeNotifications() && Supported()) {
+	system->setManager([=] {
 		auto result = std::make_unique<Manager>(system);
-		if (result->init()) {
-			system->setManager(std::move(result));
-			return;
-		}
-	}
-	system->setManager(nullptr);
+		return result->init() ? std::move(result) : nullptr;
+	});
 }
 
 class Manager::Private {
 public:
+	using Info = Window::Notifications::NativeManager::NotificationInfo;
+
 	explicit Private(Manager *instance);
 	bool init();
 
-	bool showNotification(
-		not_null<PeerData*> peer,
-		MsgId topicRootId,
-		Ui::PeerUserpicView &userpicView,
-		MsgId msgId,
-		const QString &title,
-		const QString &subtitle,
-		const QString &msg,
-		DisplayOptions options);
+	bool showNotification(Info &&info, Ui::PeerUserpicView &userpicView);
 	void clearAll();
 	void clearFromItem(not_null<HistoryItem*> item);
 	void clearFromTopic(not_null<Data::ForumTopic*> topic);
@@ -457,14 +447,8 @@ public:
 
 private:
 	bool showNotificationInTryCatch(
-		not_null<PeerData*> peer,
-		MsgId topicRootId,
-		Ui::PeerUserpicView &userpicView,
-		MsgId msgId,
-		const QString &title,
-		const QString &subtitle,
-		const QString &msg,
-		DisplayOptions options);
+		NotificationInfo &&info,
+		Ui::PeerUserpicView &userpicView);
 	void tryHide(const ToastNotification &notification);
 	[[nodiscard]] std::wstring ensureSendButtonIcon();
 
@@ -677,28 +661,14 @@ void Manager::Private::handleActivation(const ToastActivation &activation) {
 }
 
 bool Manager::Private::showNotification(
-		not_null<PeerData*> peer,
-		MsgId topicRootId,
-		Ui::PeerUserpicView &userpicView,
-		MsgId msgId,
-		const QString &title,
-		const QString &subtitle,
-		const QString &msg,
-		DisplayOptions options) {
+		Info &&info,
+		Ui::PeerUserpicView &userpicView) {
 	if (!_notifier) {
 		return false;
 	}
 
 	return base::WinRT::Try([&] {
-		return showNotificationInTryCatch(
-			peer,
-			topicRootId,
-			userpicView,
-			msgId,
-			title,
-			subtitle,
-			msg,
-			options);
+		return showNotificationInTryCatch(std::move(info), userpicView);
 	}).value_or(false);
 }
 
@@ -712,36 +682,31 @@ std::wstring Manager::Private::ensureSendButtonIcon() {
 }
 
 bool Manager::Private::showNotificationInTryCatch(
-		not_null<PeerData*> peer,
-		MsgId topicRootId,
-		Ui::PeerUserpicView &userpicView,
-		MsgId msgId,
-		const QString &title,
-		const QString &subtitle,
-		const QString &msg,
-		DisplayOptions options) {
-	const auto withSubtitle = !subtitle.isEmpty();
+		NotificationInfo &&info,
+		Ui::PeerUserpicView &userpicView) {
+	const auto withSubtitle = !info.subtitle.isEmpty();
+	const auto peer = info.peer;
 	auto toastXml = XmlDocument();
 
 	const auto key = ContextId{
 		.sessionId = peer->session().uniqueId(),
 		.peerId = peer->id,
-		.topicRootId = topicRootId,
+		.topicRootId = info.topicRootId,
 	};
 	const auto notificationId = NotificationId{
 		.contextId = key,
-		.msgId = msgId
+		.msgId = info.itemId,
 	};
 	const auto idString = u"pid=%1&session=%2&peer=%3&topic=%4&msg=%5"_q
 		.arg(GetCurrentProcessId())
 		.arg(key.sessionId)
 		.arg(key.peerId.value)
-		.arg(topicRootId.bare)
-		.arg(msgId.bare);
+		.arg(info.topicRootId.bare)
+		.arg(info.itemId.bare);
 
 	const auto modern = Platform::IsWindows10OrGreater();
 	if (modern) {
-		toastXml.LoadXml(NotificationTemplate(idString, options));
+		toastXml.LoadXml(NotificationTemplate(idString, info.options));
 	} else {
 		toastXml = ToastNotificationManager::GetTemplateContent(
 			(withSubtitle
@@ -751,7 +716,7 @@ bool Manager::Private::showNotificationInTryCatch(
 		SetAction(toastXml, idString);
 	}
 
-	const auto userpicKey = options.hideNameAndPhoto
+	const auto userpicKey = info.options.hideNameAndPhoto
 		? InMemoryKey()
 		: peer->userpicUniqueKey(userpicView);
 	const auto userpicPath = _cachedUserpics.get(
@@ -760,13 +725,13 @@ bool Manager::Private::showNotificationInTryCatch(
 		userpicView);
 	const auto userpicPathWide = QDir::toNativeSeparators(
 		userpicPath).toStdWString();
-	if (modern && !options.hideReplyButton) {
+	if (modern && !info.options.hideReplyButton) {
 		SetReplyIconSrc(toastXml, ensureSendButtonIcon());
 		SetReplyPlaceholder(
 			toastXml,
 			tr::lng_message_ph(tr::now).toStdWString());
 	}
-	if (modern && !options.hideMarkAsRead) {
+	if (modern && !info.options.hideMarkAsRead) {
 		SetMarkAsReadText(
 			toastXml,
 			tr::lng_context_mark_read(tr::now).toStdWString());
@@ -779,17 +744,20 @@ bool Manager::Private::showNotificationInTryCatch(
 		return false;
 	}
 
-	SetNodeValueString(toastXml, nodeList.Item(0), title.toStdWString());
+	SetNodeValueString(
+		toastXml,
+		nodeList.Item(0),
+		info.title.toStdWString());
 	if (withSubtitle) {
 		SetNodeValueString(
 			toastXml,
 			nodeList.Item(1),
-			subtitle.toStdWString());
+			info.subtitle.toStdWString());
 	}
 	SetNodeValueString(
 		toastXml,
 		nodeList.Item(withSubtitle ? 2 : 1),
-		msg.toStdWString());
+		info.message.toStdWString());
 
 	const auto weak = std::weak_ptr(_guarded);
 	const auto performOnMainQueue = [=](FnMut<void(Manager *manager)> task) {
@@ -860,7 +828,7 @@ bool Manager::Private::showNotificationInTryCatch(
 
 	auto i = _notifications.find(key);
 	if (i != _notifications.cend()) {
-		auto j = i->second.find(msgId);
+		auto j = i->second.find(info.itemId);
 		if (j != i->second.end()) {
 			const auto existing = j->second;
 			i->second.erase(j);
@@ -880,7 +848,7 @@ bool Manager::Private::showNotificationInTryCatch(
 		}
 		return false;
 	}
-	i->second.emplace(msgId, toast);
+	i->second.emplace(info.itemId, toast);
 	return true;
 }
 
@@ -910,23 +878,9 @@ void Manager::handleActivation(const ToastActivation &activation) {
 Manager::~Manager() = default;
 
 void Manager::doShowNativeNotification(
-		not_null<PeerData*> peer,
-		MsgId topicRootId,
-		Ui::PeerUserpicView &userpicView,
-		MsgId msgId,
-		const QString &title,
-		const QString &subtitle,
-		const QString &msg,
-		DisplayOptions options) {
-	_private->showNotification(
-		peer,
-		topicRootId,
-		userpicView,
-		msgId,
-		title,
-		subtitle,
-		msg,
-		options);
+		NotificationInfo &&info,
+		Ui::PeerUserpicView &userpicView) {
+	_private->showNotification(std::move(info), userpicView);
 }
 
 void Manager::doClearAllFast() {
