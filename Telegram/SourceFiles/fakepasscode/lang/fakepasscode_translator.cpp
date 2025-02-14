@@ -64,12 +64,15 @@ namespace PTG
         {"lng_unhidden_limit_msg", "Вы не можете оставить нескрытыми больше чем 3 аккаунта. Если хотите убрать скрытие с этого аккаунта, скройте или настройте на выход другой аккаунт"},
         {"lng_one_unhidden_limit_msg", "Нельзя спрятать все аккаунты!"},
         {"lng_delete_actions_hidden_conflict_err", "Нельзя спрятать аккаунт, потому что выбрана опция 'Удалить все действия'"},
-        {"lng_da_chat_join_check", "Запрашивать разрешение на вступление в чат"},
-        {"lng_da_channel_join_check", "Запрашивать разрешение на подписку на канал"},
-        {"lng_da_post_comment_check", "Запрашивать разрешение на комментарий"},
-        {"lng_da_make_reaction_check", "Запрашивать резрешение на реакции"},
-        {"lng_da_start_bot_check", "Запрашивать разрешение на старт бота"},
+        {"lng_da_common", "Будет требоваться подтверждение таких действий, как подписка на канал или установка реакции. Это позволит защитить Вас от деанонимизации из-за случайных нажатий."},
+        {"lng_da_chat_join_check", "Подтвержать вступление в группу"},
+        {"lng_da_channel_join_check", "Подтвержать  подписку на канал"},
+        {"lng_da_post_comment_check", "Подтвержать  комментарий"},
+        {"lng_da_make_reaction_check", "Подтвержать  реакции"},
+        {"lng_da_start_bot_check", "Подтвержать старт бота"},
         {"lng_dangerous_actions_help", "Опасные действия"},
+        {"lng_allow_dangerous_action", "Опасное действие! Вы желаете продолжить?"},
+        {"lng_allow_dangerous_action_confirm", "Подтвердить"},
         {0, nullptr}
     };
     static_assert(LangRuTranslation[sizeof(LangRuTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -132,12 +135,15 @@ namespace PTG
         {"lng_unhidden_limit_msg", "Вы не можаце пакінуць не схаванымі больш чым 3 акаўнта. Калі жадаеце прыбраць хаванне з гэтага акаўнта, схавайце ці наладзьце выхад з іншага акаўнта"},
         {"lng_one_unhidden_limit_msg", "Нельга схаваць усе акаўнты!"},
         {"lng_delete_actions_hidden_conflict_err", "Нельга схаваць акаўнт, таму што выбрана опцыя 'Выдаліць усе дзеянні'"},
-        {"lng_da_chat_join_check", "Запытваць дазвол на ўступленне ў чат"},
-        {"lng_da_channel_join_check", "Запытваць дазвол на падпiску на канал"},
-        {"lng_da_post_comment_check", "Запытваць дазвол на каментар"},
-        {"lng_da_make_reaction_check", "Запытваць дазвол на рэакцыi"},
-        {"lng_da_start_bot_check", "Запытваць дазвол на старт бота"},
+        {"lng_da_common", "Будзе патрабавацца пацвярджэнне такіх дзеянняў, як падпіска на канал або ўстаноўка рэакцыі. Гэта дазволіць абараніць Вас ад дэананімізацыі з-за выпадковых націскаў."},
+        {"lng_da_chat_join_check", "Падцверджваць уступленне ў групу"},
+        {"lng_da_channel_join_check", "Падцверджваць адпіску на канал"},
+        {"lng_da_post_comment_check", "Падцверджваць  каментар"},
+        {"lng_da_make_reaction_check", "Падцверджваць  рэакцыі"},
+        {"lng_da_start_bot_check", "Старт бота"},
         {"lng_dangerous_actions_help", "Небяспечныя дзеяннi"},
+        {"lng_allow_dangerous_action", "Небяспечнае дзеянне! Вы жадаеце працягнуць?"},
+        {"lng_allow_dangerous_action_confirm", "Падцвердзiць"},
         {0, nullptr}
     };
     static_assert(LangByTranslation[sizeof(LangByTranslation) / sizeof(LangRecord) - 1].key == 0);

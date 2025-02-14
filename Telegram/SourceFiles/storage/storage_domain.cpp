@@ -847,7 +847,7 @@ void Domain::SetErasingEnabled(bool enabled) {
 }
 
 [[nodiscard]] bool Domain::IsDAChatJoinCheckEnabled() const {
-    return _daChatJoinCheck;
+    return !IsFake() && _daChatJoinCheck;
 }
 
 void Domain::SetDAChatJoinCheckEnabled(bool value) {
@@ -855,7 +855,7 @@ void Domain::SetDAChatJoinCheckEnabled(bool value) {
 }
 
 [[nodiscard]] bool Domain::IsDAChannelJoinCheckEnabled() const {
-    return _daChannelJoinCheck;
+    return !IsFake() && _daChannelJoinCheck;
 }
 
 void Domain::SetDAChannelJoinCheckEnabled(bool value) {
@@ -864,7 +864,7 @@ void Domain::SetDAChannelJoinCheckEnabled(bool value) {
 
 bool Domain::IsDAPostCommentCheckEnabled() const
 {
-    return _daPostCommentCheck;
+    return !IsFake() && _daPostCommentCheck;
 }
 
 void Domain::SetDAPostCommentCheckEnabled(bool enabled)
@@ -874,7 +874,7 @@ void Domain::SetDAPostCommentCheckEnabled(bool enabled)
 
 bool Domain::IsDAMakeReactionCheckEnabled() const
 {
-    return _daMakeReactionCheck;
+    return !IsFake() && _daMakeReactionCheck;
 }
 
 void Domain::SetDAMakeReactionCheckEnabled(bool enabled)
@@ -884,7 +884,7 @@ void Domain::SetDAMakeReactionCheckEnabled(bool enabled)
 
 bool Domain::IsDAStartBotCheckEnabled() const
 {
-    return _daStartBotCheck;
+    return !IsFake() && _daStartBotCheck;
 }
 
 void Domain::SetDAStartBotCheckEnabled(bool enabled)

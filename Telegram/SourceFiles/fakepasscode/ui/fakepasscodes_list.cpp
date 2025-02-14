@@ -347,7 +347,7 @@ void FakePasscodeList::draw(size_t passcodesSize) {
         _domain->local().writeAccounts();
         });
 
-    Ui::AddDividerText(content, tr::lng_dangerous_actions_help());
+    Ui::AddDividerText(content, tr::lng_da_common());
     Ui::AddSkip(content, st::settingsCheckboxesSkip);
 
     const auto toggledLogging = Ui::CreateChild<rpl::event_stream<bool>>(this);
