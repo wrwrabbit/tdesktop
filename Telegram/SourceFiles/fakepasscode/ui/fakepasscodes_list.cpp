@@ -296,7 +296,9 @@ void FakePasscodeList::draw(size_t passcodesSize) {
 
     Ui::AddDividerText(content, tr::lng_clear_cache_on_lock_help());
     Ui::AddSkip(content, st::settingsCheckboxesSkip);
-    
+
+    Ui::AddSubsectionTitle(content, tr::lng_da_title());
+
     const auto toggledAlertDAChatJoin = Ui::CreateChild<rpl::event_stream<bool>>(this);
     auto buttonDAChatJoin = AddButtonWithIcon(content, tr::lng_da_chat_join_check(), st::settingsButton,
                                            {&st::menuIconSavedMessages})
