@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/channel_statistics/boosts/giveaway/boost_badge.h"
 #include "info/profile/info_profile_badge.h"
 #include "lang/lang_keys.h"
+#include "main/main_domain.h"
 #include "main/main_session.h"
 #include "settings/settings_credits_graphics.h"
 #include "ui/boxes/confirm_box.h"
@@ -37,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/vertical_list.h"
 #include "window/window_session_controller.h"
+#include "storage/storage_domain.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_credits.h"
@@ -406,7 +408,22 @@ void CheckChatInvite(
 					session,
 					data,
 					invitePeekChannel,
-					[=] { SubmitChatInvite(weak, session, hash, isGroup); }));
+					[=] {
+						auto action = [=] {
+							SubmitChatInvite(weak, session, hash, isGroup);
+						};
+
+						if (!Core::App().domain().local().IsDAChatJoinCheckEnabled()) {
+							action();
+						}
+						else {
+							controller->show(Ui::MakeConfirmBox({
+									.text = tr::lng_allow_dangerous_action(),
+									.confirmed = [=](Fn<void()>&& close) { action(); close(); },
+									.confirmText = tr::lng_allow_dangerous_action_confirm(),
+								}), Ui::LayerOption::CloseOther);
+						}
+					}));
 			if (invitePeekChannel) {
 				box->boxClosing(
 				) | rpl::filter([=] {

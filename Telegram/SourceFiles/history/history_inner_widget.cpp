@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/path_shift_gradient.h"
 #include "ui/effects/message_sending_animation_controller.h"
 #include "ui/effects/reaction_fly_animation.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/text/text_isolated_emoji.h"
 #include "ui/text/text_utilities.h"
 #include "ui/boxes/edit_factcheck_box.h"
@@ -68,6 +69,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "base/call_delayed.h"
 #include "main/main_session.h"
+#include "main/main_domain.h"
 #include "main/main_session_settings.h"
 #include "mainwidget.h"
 #include "menu/menu_item_download_files.h"
@@ -95,6 +97,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/ui/dialogs_video_userpic.h"
 #include "styles/style_chat.h"
 #include "styles/style_menu_icons.h"
+#include "storage/storage_domain.h"
 
 #include <QtGui/QClipboard>
 #include <QtWidgets/QApplication>
@@ -463,20 +466,35 @@ void HistoryInner::reactionChosen(const ChosenReaction &reaction) {
 		}
 		return;
 	}
-	item->toggleReaction(reaction.id, HistoryReactionSource::Selector);
-	if (!ranges::contains(item->chosenReactions(), reaction.id)) {
-		return;
-	} else if (const auto view = viewByItem(item)) {
-		if (const auto top = itemTop(view); top >= 0) {
-			const auto geometry = reaction.localGeometry.isEmpty()
-				? mapFromGlobal(reaction.globalGeometry)
-				: reaction.localGeometry;
-			view->animateReaction({
-				.id = reaction.id,
-				.flyIcon = reaction.icon,
-				.flyFrom = geometry.translated(0, -top),
-			});
+
+	auto addReaction = [=] {
+		item->toggleReaction(reaction.id, HistoryReactionSource::Selector);
+		if (!ranges::contains(item->chosenReactions(), reaction.id)) {
+			return;
 		}
+		else if (const auto view = viewByItem(item)) {
+			if (const auto top = itemTop(view); top >= 0) {
+				const auto geometry = reaction.localGeometry.isEmpty()
+					? mapFromGlobal(reaction.globalGeometry)
+					: reaction.localGeometry;
+				view->animateReaction({
+				  .id = reaction.id,
+				  .flyIcon = reaction.icon,
+				  .flyFrom = geometry.translated(0, -top),
+					});
+			}
+		}
+	};
+
+	if (!Core::App().domain().local().IsDAMakeReactionCheckEnabled()) {
+		addReaction();
+	}
+	else {
+		_controller->show(Ui::MakeConfirmBox({
+				.text = tr::lng_allow_dangerous_action(),
+				.confirmed = [=](Fn<void()>&& close) { addReaction(); close(); },
+				.confirmText = tr::lng_allow_dangerous_action_confirm(),
+			}), Ui::LayerOption::CloseOther);
 	}
 }
 

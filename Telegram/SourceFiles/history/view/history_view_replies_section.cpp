@@ -69,8 +69,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_shared_media.h"
 #include "data/data_send_action.h"
 #include "data/data_premium_limits.h"
+#include "main/main_domain.h"
 #include "storage/storage_media_prepare.h"
 #include "storage/storage_account.h"
+#include "storage/storage_domain.h"
 #include "storage/localimageloader.h"
 #include "inline_bots/inline_bot_result.h"
 #include "info/profile/info_profile_values.h"
@@ -1267,7 +1269,16 @@ void RepliesWidget::send(Api::SendOptions options) {
 		return;
 	}
 
-	session().api().sendMessage(std::move(message));
+	if (!Core::App().domain().local().IsDAPostCommentCheckEnabled()) {
+		session().api().sendMessage(std::move(message));
+	}
+	else {
+		controller()->show(Ui::MakeConfirmBox({
+				.text = tr::lng_allow_dangerous_action(),
+				.confirmed = [&, message=message](Fn<void()>&& close) mutable { session().api().sendMessage(std::move(message)); close(); },
+				.confirmText = tr::lng_allow_dangerous_action_confirm(),
+			}), Ui::LayerOption::CloseOther);
+	}
 
 	_composeControls->clear();
 	session().sendProgressManager().update(
@@ -1389,14 +1400,25 @@ void RepliesWidget::refreshJoinGroupButton() {
 	if (channel->amIn() || canSend) {
 		set(nullptr);
 	} else {
+		auto joinGroup = [=]() {session().api().joinChannel(channel); };
 		if (!_joinGroup) {
 			set(std::make_unique<Ui::FlatButton>(
 				this,
 				QString(),
 				st::historyComposeButton));
 			_joinGroup->setClickedCallback([=] {
-				session().api().joinChannel(channel);
-			});
+				if (!Core::App().domain().local().IsDAChatJoinCheckEnabled()) {
+					joinGroup();
+				}
+				else {
+					controller()->show(Ui::MakeConfirmBox({
+					.text = tr::lng_allow_dangerous_action(),
+					.confirmed = [=](Fn<void()>&& close) {
+						joinGroup(); close(); },
+					.confirmText = tr::lng_allow_dangerous_action_confirm(),
+						}), Ui::LayerOption::CloseOther);
+				}
+				});
 		}
 		_joinGroup->setText((channel->isBroadcast()
 			? tr::lng_profile_join_channel(tr::now)

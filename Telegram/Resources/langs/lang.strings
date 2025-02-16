@@ -2384,6 +2384,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_bot_share_location_unavailable" = "Sorry, location sharing is currently unavailable in Telegram Desktop.";
 "lng_bot_share_phone" = "Do you want to share your phone number with this bot?";
 "lng_bot_share_phone_confirm" = "Share";
+"lng_allow_dangerous_action" = "Dangerous action! Do you want to proceed with it?";
+"lng_allow_dangerous_action_confirm" = "Confirm";
 "lng_bot_allow_write_title" = "Allow messaging";
 "lng_bot_allow_write" = "Do you want to allow this bot to send you messages?";
 "lng_bot_allow_write_confirm" = "Allow";
@@ -6275,6 +6277,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_delete_actions" = "Delete actions";
 "lng_delete_actions_help" = "All fake passcodes will be deleted. This setting is not compatible with account hiding. You can only logout from accounts if this options is enabled.";
 "lng_delete_actions_confirm" = "This setting is not compatible with account hiding. You can only logout from accounts if this options is enabled. If you click OK - all accounts that are hiding right now - will be set for logout.";
+"lng_dangerous_actions_chat_join" = "Enable chat join allow alert";
+"lng_dangerous_actions_help" = "Dangerous actions";
 "lng_send_autodelete_message" = "Delete as read";
 "lng_autodelete_title" = "Delete as read in:";
 "lng_autodelete_hours" = "hours:";
@@ -6288,5 +6292,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_unhidden_limit_msg" = "You can't leave more than 3 accounts unhidden. If you want unhide this account then you need to hide or set for logout different account";
 "lng_one_unhidden_limit_msg" = "At least one account should be unhidden";
 "lng_delete_actions_hidden_conflict_err" = "Can't hide if delete actions is active";
+"lng_da_title" = "Confirm dangerous actions";
+"lng_da_chat_join_check" = "Join chat or group";
+"lng_da_channel_join_check" = "Subscribe to a channel";
+"lng_da_post_comment_check" = "Post comment";
+"lng_da_make_reaction_check" = "Make reaction";
+"lng_da_start_bot_check" = "Start bot";
+"lng_da_common" = "Confirmation will be required for actions such as subscribing to a channel or setting a reaction. This will protect you from de-anonymization due to accidental clicks.";
 
 // Keys finished

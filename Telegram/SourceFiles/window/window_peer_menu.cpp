@@ -810,8 +810,23 @@ void Filler::addJoinChat() {
 	const auto label = _peer->isMegagroup()
 		? tr::lng_profile_join_group(tr::now)
 		: tr::lng_profile_join_channel(tr::now);
+	const auto navigation = _controller;
 	_addAction(label, [=] {
-		channel->session().api().joinChannel(channel);
+		auto joinGroup = [=]() {
+			channel->session().api().joinChannel(channel);
+		};
+		if (!Core::App().domain().local().IsDAChatJoinCheckEnabled()) {
+			joinGroup();
+		}
+		else {
+			navigation->show(Ui::MakeConfirmBox({
+			.text = tr::lng_allow_dangerous_action(),
+			.confirmed = [=](Fn<void()>&& close) { 
+					joinGroup(); close(); 
+			},
+			.confirmText = tr::lng_allow_dangerous_action_confirm(),
+				}), Ui::LayerOption::CloseOther);
+		}
 	}, &st::menuIconAddToFolder);
 }
 

@@ -1894,7 +1894,7 @@ void Application::RegisterUrlScheme() {
 }
 
 bool Application::IsFakeActive() {
-	return App().domain().local().IsFake();
+	return domain().local().IsFake();
 }
 
 bool IsAppLaunched() {

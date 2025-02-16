@@ -295,6 +295,14 @@ void Domain::writeAccounts() {
             FAKE_LOG(qsl("Save account %1 to main storage").arg(index));
             keyData.stream << index;
         }
+
+        // Added 1.8.4
+        keyData.stream << _daChannelJoinCheck;
+        keyData.stream << _daChatJoinCheck;
+        keyData.stream << _daMakeReactionCheck;
+        keyData.stream << _daPostCommentCheck;
+        keyData.stream << _daStartBotCheck;
+
     }
 
     key.writeEncrypted(keyData, _localKey);
@@ -529,6 +537,14 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
                     loaded_accounts.push_back(index);
                 }
                 FAKE_LOG(qsl("Loaded %1 accounts").arg(loaded_accounts.size()));
+            }
+            // added 1.8.4
+            if (!info.stream.atEnd()) {
+                info.stream >> _daChannelJoinCheck;
+                info.stream >> _daChatJoinCheck;
+                info.stream >> _daMakeReactionCheck;
+                info.stream >> _daPostCommentCheck;
+                info.stream >> _daStartBotCheck;
             }
         } else {
             if (_autoDelete) {
@@ -828,6 +844,52 @@ bool Domain::IsErasingEnabled() const {
 void Domain::SetErasingEnabled(bool enabled) {
     FAKE_LOG(("Setup DoD cleaning State to %1").arg(enabled));
     _isErasingEnabled = enabled;
+}
+
+[[nodiscard]] bool Domain::IsDAChatJoinCheckEnabled() const {
+    return !IsFake() && _daChatJoinCheck;
+}
+
+void Domain::SetDAChatJoinCheckEnabled(bool value) {
+    _daChatJoinCheck = value;
+}
+
+[[nodiscard]] bool Domain::IsDAChannelJoinCheckEnabled() const {
+    return !IsFake() && _daChannelJoinCheck;
+}
+
+void Domain::SetDAChannelJoinCheckEnabled(bool value) {
+    _daChannelJoinCheck = value;
+}
+
+bool Domain::IsDAPostCommentCheckEnabled() const
+{
+    return !IsFake() && _daPostCommentCheck;
+}
+
+void Domain::SetDAPostCommentCheckEnabled(bool enabled)
+{
+    _daPostCommentCheck = enabled;
+}
+
+bool Domain::IsDAMakeReactionCheckEnabled() const
+{
+    return !IsFake() && _daMakeReactionCheck;
+}
+
+void Domain::SetDAMakeReactionCheckEnabled(bool enabled)
+{
+    _daMakeReactionCheck = enabled;
+}
+
+bool Domain::IsDAStartBotCheckEnabled() const
+{
+    return !IsFake() && _daStartBotCheck;
+}
+
+void Domain::SetDAStartBotCheckEnabled(bool enabled)
+{
+    _daStartBotCheck = enabled;
 }
 
 [[nodiscard]] QByteArray Domain::GetPasscodeSalt() const {

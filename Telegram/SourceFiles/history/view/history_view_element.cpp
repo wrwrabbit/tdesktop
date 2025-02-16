@@ -49,6 +49,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
 
+#include "core/application.h"
+#include "ui/boxes/confirm_box.h"
+#include "main/main_domain.h"
+#include "storage/storage_domain.h"
+
 namespace HistoryView {
 namespace {
 
@@ -1627,6 +1632,7 @@ void Element::refreshReactions() {
 			const auto weak = base::make_weak(this);
 			return std::make_shared<LambdaClickHandler>([=](
 					ClickContext context) {
+				auto addReaction = [=]() {
 				const auto strong = weak.get();
 				if (!strong) {
 					return;
@@ -1663,6 +1669,18 @@ void Element::refreshReactions() {
 							.id = id,
 						});
 					}
+				}
+				}; // end of addReactions lambda
+				if (!Core::App().domain().local().IsDAMakeReactionCheckEnabled()) {
+					addReaction();
+				}
+				else {
+					const auto controller = ExtractController(context);
+					controller->show(Ui::MakeConfirmBox({
+					.text = tr::lng_allow_dangerous_action(),
+					.confirmed = [=](Fn<void()>&& close) { addReaction(); close(); },
+					.confirmText = tr::lng_allow_dangerous_action_confirm(),
+					}), Ui::LayerOption::CloseOther);
 				}
 			});
 		};

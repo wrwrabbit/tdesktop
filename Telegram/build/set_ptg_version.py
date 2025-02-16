@@ -5,7 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 '''
-import sys, os, re, subprocess, io
+import sys, os, re
 
 def finish(code):
     global executePath
@@ -106,3 +106,9 @@ replaceInFile(scriptPath + '/../SourceFiles/core/version.h', [
   [ r'(PTelegramAppVersion\s+=\s+)\d+', r'\g<1>' + versionFull ],
   [ r'(PTelegramAppVersionStr\s+=\s+)[^;]+', r'\g<1>"' + versionStrSmall + '"' ],
 ])
+
+if "commit" in sys.argv:
+  print('Making commit...')
+  os.system("git add ptg_version")
+  os.system("git add ../SourceFiles/core/version.h")
+  os.system("git commit -m 'v%s'" % (versionStr))

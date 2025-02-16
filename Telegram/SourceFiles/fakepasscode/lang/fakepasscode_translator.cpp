@@ -64,6 +64,16 @@ namespace PTG
         {"lng_unhidden_limit_msg", "Вы не можете оставить нескрытыми больше чем 3 аккаунта. Если хотите убрать скрытие с этого аккаунта, скройте или настройте на выход другой аккаунт"},
         {"lng_one_unhidden_limit_msg", "Нельзя спрятать все аккаунты!"},
         {"lng_delete_actions_hidden_conflict_err", "Нельзя спрятать аккаунт, потому что выбрана опция 'Удалить все действия'"},
+        {"lng_da_title", "Подтверждение опасных действий"},
+        {"lng_da_common", "Будет требоваться подтверждение таких действий, как подписка на канал или установка реакции. Это позволит защитить Вас от деанонимизации из-за случайных нажатий."},
+        {"lng_da_chat_join_check", "Вступление в группу"},
+        {"lng_da_channel_join_check", "Подписка на канал"},
+        {"lng_da_post_comment_check", "Комментарий"},
+        {"lng_da_make_reaction_check", "Реакция"},
+        {"lng_da_start_bot_check", "Старт бота"},
+        {"lng_dangerous_actions_help", "Опасные действия"},
+        {"lng_allow_dangerous_action", "Опасное действие! Вы желаете продолжить?"},
+        {"lng_allow_dangerous_action_confirm", "Подтвердить"},
         {0, nullptr}
     };
     static_assert(LangRuTranslation[sizeof(LangRuTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -126,6 +136,16 @@ namespace PTG
         {"lng_unhidden_limit_msg", "Вы не можаце пакінуць не схаванымі больш чым 3 акаўнта. Калі жадаеце прыбраць хаванне з гэтага акаўнта, схавайце ці наладзьце выхад з іншага акаўнта"},
         {"lng_one_unhidden_limit_msg", "Нельга схаваць усе акаўнты!"},
         {"lng_delete_actions_hidden_conflict_err", "Нельга схаваць акаўнт, таму што выбрана опцыя 'Выдаліць усе дзеянні'"},
+        {"lng_da_title", "Пацвярджэнне небяспечных дзеянняў"},
+        {"lng_da_common", "Будзе патрабавацца пацвярджэнне такіх дзеянняў, як падпіска на канал або ўстаноўка рэакцыі. Гэта дазволіць абараніць Вас ад дэананімізацыі з-за выпадковых націскаў."},
+        {"lng_da_chat_join_check", "Уступленне ў групу"},
+        {"lng_da_channel_join_check", "Падпіска на канал"},
+        {"lng_da_post_comment_check", "Каментар"},
+        {"lng_da_make_reaction_check", "Рэакцыя"},
+        {"lng_da_start_bot_check", "Старт бота"},
+        {"lng_dangerous_actions_help", "Небяспечныя дзеяннi"},
+        {"lng_allow_dangerous_action", "Небяспечнае дзеянне! Вы жадаеце працягнуць?"},
+        {"lng_allow_dangerous_action_confirm", "Падцвердзiць"},
         {0, nullptr}
     };
     static_assert(LangByTranslation[sizeof(LangByTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -193,7 +213,6 @@ namespace PTG
     static_assert(LangPlTranslation[sizeof(LangPlTranslation) / sizeof(LangRecord) - 1].key == 0);
 
     static_assert(sizeof(LangRuTranslation) == sizeof(LangByTranslation));
-    static_assert(sizeof(LangRuTranslation) == sizeof(LangPlTranslation));
 
     const LangRecord* GetExtraLangRecords(QString id)
     {
