@@ -72,7 +72,7 @@ namespace PTG
         {"lng_da_make_reaction_check", "Реакция"},
         {"lng_da_start_bot_check", "Старт бота"},
         {"lng_dangerous_actions_help", "Опасные действия"},
-        {"lng_allow_dangerous_action", "Опасное действие! Вы желаете продолжить?"},
+        {"lng_allow_dangerous_action", "Вы действительно хотите выполнить выбранное действие?"},
         {"lng_allow_dangerous_action_confirm", "Подтвердить"},
         {0, nullptr}
     };
@@ -144,7 +144,7 @@ namespace PTG
         {"lng_da_make_reaction_check", "Рэакцыя"},
         {"lng_da_start_bot_check", "Старт бота"},
         {"lng_dangerous_actions_help", "Небяспечныя дзеяннi"},
-        {"lng_allow_dangerous_action", "Небяспечнае дзеянне! Вы жадаеце працягнуць?"},
+        {"lng_allow_dangerous_action", "Вы сапраўды хочаце выканаць выбранае дзеянне?"},
         {"lng_allow_dangerous_action_confirm", "Падцвердзiць"},
         {0, nullptr}
     };
