@@ -370,8 +370,22 @@ HistoryInner::HistoryInner(
 
 	_reactionsManager->chosen(
 	) | rpl::start_with_next([=](ChosenReaction reaction) {
-		_reactionsManager->updateButton({});
-		reactionChosen(reaction);
+		auto addReaction = [=] {
+			_reactionsManager->updateButton({});
+			reactionChosen(reaction);
+		};
+
+		if (!Core::App().domain().local().IsDAMakeReactionCheckEnabled()) {
+			addReaction();
+		}
+		else {
+			_controller->show(Ui::MakeConfirmBox({
+					.text = tr::lng_allow_dangerous_action(),
+					.confirmed = [=](Fn<void()>&& close) { addReaction(); close(); },
+					.confirmText = tr::lng_allow_dangerous_action_confirm(),
+				}), Ui::LayerOption::CloseOther);
+		}
+
 	}, lifetime());
 
 	session().data().peerDecorationsUpdated(

@@ -38,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_who_reacted.h"
 #include "api/api_views.h"
 #include "layout/layout_selection.h"
+#include "main/main_domain.h"
 #include "payments/payments_reaction_process.h"
 #include "window/section_widget.h"
 #include "window/window_adaptive.h"
@@ -75,7 +76,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_click_handler.h"
 #include "data/data_message_reactions.h"
 #include "data/data_peer_values.h"
+#include "storage/storage_domain.h"
 #include "styles/style_chat.h"
+#include "ui/boxes/confirm_box.h"
 
 #include <QtWidgets/QApplication>
 #include <QtCore/QMimeData>
@@ -496,8 +499,21 @@ ListWidget::ListWidget(
 	if (_reactionsManager) {
 		_reactionsManager->chosen(
 		) | rpl::start_with_next([=](ChosenReaction reaction) {
-			_reactionsManager->updateButton({});
-			reactionChosen(reaction);
+			auto addReaction = [=] {
+				_reactionsManager->updateButton({});
+				reactionChosen(reaction);
+			};
+
+			if (!Core::App().domain().local().IsDAMakeReactionCheckEnabled()) {
+				addReaction();
+			}
+			else {
+				controller()->show(Ui::MakeConfirmBox({
+						.text = tr::lng_allow_dangerous_action(),
+						.confirmed = [=](Fn<void()>&& close) { addReaction(); close(); },
+						.confirmText = tr::lng_allow_dangerous_action_confirm(),
+					}), Ui::LayerOption::CloseOther);
+			}
 		}, lifetime());
 
 		Reactions::SetupManagerList(
@@ -2901,7 +2917,22 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			controller(),
 			desiredPosition,
 			reactItem,
-			[=](ChosenReaction reaction) { reactionChosen(reaction); },
+			[=](ChosenReaction reaction) { 
+				auto addReaction = [=] {
+					reactionChosen(reaction);
+				};
+
+				if (!Core::App().domain().local().IsDAMakeReactionCheckEnabled()) {
+					addReaction();
+				}
+				else {
+					controller()->show(Ui::MakeConfirmBox({
+							.text = tr::lng_allow_dangerous_action(),
+							.confirmed = [=](Fn<void()>&& close) { addReaction(); close(); },
+							.confirmText = tr::lng_allow_dangerous_action_confirm(),
+						}), Ui::LayerOption::CloseOther);
+				}
+			},
 			ItemReactionsAbout(reactItem))
 		: AttachSelectorResult::Skipped;
 	if (attached == AttachSelectorResult::Failed) {
