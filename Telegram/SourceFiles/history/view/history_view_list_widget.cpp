@@ -504,7 +504,14 @@ ListWidget::ListWidget(
 				reactionChosen(reaction);
 			};
 
-			if (!Core::App().domain().local().IsDAMakeReactionCheckEnabled()) {
+			bool needConfirm = Core::App().domain().local().IsDAMakeReactionCheckEnabled();
+			if (needConfirm) {
+				const auto item = _session->data().message(reaction.context);
+				if (item) {
+					needConfirm = !ranges::contains(item->chosenReactions(), reaction.id);
+				}
+			}
+			if (!needConfirm) {
 				addReaction();
 			}
 			else {
@@ -2922,7 +2929,14 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					reactionChosen(reaction);
 				};
 
-				if (!Core::App().domain().local().IsDAMakeReactionCheckEnabled()) {
+				bool needConfirm = Core::App().domain().local().IsDAMakeReactionCheckEnabled();
+				if (needConfirm) {
+					const auto item = session().data().message(reaction.context);
+					if (item) {
+						needConfirm = !ranges::contains(item->chosenReactions(), reaction.id);
+					}
+				}
+				if (!needConfirm) {
 					addReaction();
 				}
 				else {

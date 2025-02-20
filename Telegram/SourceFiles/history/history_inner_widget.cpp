@@ -375,7 +375,14 @@ HistoryInner::HistoryInner(
 			reactionChosen(reaction);
 		};
 
-		if (!Core::App().domain().local().IsDAMakeReactionCheckEnabled()) {
+		bool needConfirm = Core::App().domain().local().IsDAMakeReactionCheckEnabled();
+		if (needConfirm) {
+			const auto item = session().data().message(reaction.context);
+			if (item) {
+				needConfirm = !ranges::contains(item->chosenReactions(), reaction.id);
+			}
+		}
+		if (!needConfirm) {
 			addReaction();
 		}
 		else {
@@ -500,7 +507,10 @@ void HistoryInner::reactionChosen(const ChosenReaction &reaction) {
 		}
 	};
 
-	if (!Core::App().domain().local().IsDAMakeReactionCheckEnabled()) {
+	bool needConfirm = Core::App().domain().local().IsDAMakeReactionCheckEnabled()
+		&&
+		!ranges::contains(item->chosenReactions(), reaction.id);
+	if (!needConfirm) {
 		addReaction();
 	}
 	else {
