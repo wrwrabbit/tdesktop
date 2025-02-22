@@ -370,8 +370,29 @@ HistoryInner::HistoryInner(
 
 	_reactionsManager->chosen(
 	) | rpl::start_with_next([=](ChosenReaction reaction) {
-		_reactionsManager->updateButton({});
-		reactionChosen(reaction);
+		auto addReaction = [=] {
+			_reactionsManager->updateButton({});
+			reactionChosen(reaction);
+		};
+
+		bool needConfirm = Core::App().domain().local().IsDAMakeReactionCheckEnabled();
+		if (needConfirm) {
+			const auto item = session().data().message(reaction.context);
+			if (item) {
+				needConfirm = !ranges::contains(item->chosenReactions(), reaction.id);
+			}
+		}
+		if (!needConfirm) {
+			addReaction();
+		}
+		else {
+			_controller->show(Ui::MakeConfirmBox({
+					.text = tr::lng_allow_dangerous_action(),
+					.confirmed = [=](Fn<void()>&& close) { addReaction(); close(); },
+					.confirmText = tr::lng_allow_dangerous_action_confirm(),
+				}), Ui::LayerOption::CloseOther);
+		}
+
 	}, lifetime());
 
 	session().data().peerDecorationsUpdated(
@@ -486,7 +507,10 @@ void HistoryInner::reactionChosen(const ChosenReaction &reaction) {
 		}
 	};
 
-	if (!Core::App().domain().local().IsDAMakeReactionCheckEnabled()) {
+	bool needConfirm = Core::App().domain().local().IsDAMakeReactionCheckEnabled()
+		&&
+		!ranges::contains(item->chosenReactions(), reaction.id);
+	if (!needConfirm) {
 		addReaction();
 	}
 	else {

@@ -1671,15 +1671,23 @@ void Element::refreshReactions() {
 					}
 				}
 				}; // end of addReactions lambda
-				if (!Core::App().domain().local().IsDAMakeReactionCheckEnabled()) {
+				bool needConfirm = Core::App().domain().local().IsDAMakeReactionCheckEnabled();
+				if (needConfirm) {
+					const auto strong = weak.get();
+					if (strong) {
+						const auto item = strong->data();
+						needConfirm = !ranges::contains(item->chosenReactions(), id);
+					}
+				}
+				if (!needConfirm) {
 					addReaction();
 				}
 				else {
 					const auto controller = ExtractController(context);
 					controller->show(Ui::MakeConfirmBox({
-					.text = tr::lng_allow_dangerous_action(),
-					.confirmed = [=](Fn<void()>&& close) { addReaction(); close(); },
-					.confirmText = tr::lng_allow_dangerous_action_confirm(),
+						.text = tr::lng_allow_dangerous_action(),
+						.confirmed = [=](Fn<void()>&& close) { addReaction(); close(); },
+						.confirmText = tr::lng_allow_dangerous_action_confirm(),
 					}), Ui::LayerOption::CloseOther);
 				}
 			});

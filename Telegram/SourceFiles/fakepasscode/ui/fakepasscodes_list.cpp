@@ -270,6 +270,7 @@ void FakePasscodeList::draw(size_t passcodesSize) {
     using namespace Settings;
     FAKE_LOG(("Draw %1 passcodes").arg(passcodesSize));
     const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+    content->setAutoFillBackground(1);
     for (size_t i = 0; i < passcodesSize; ++i) {
         AddButtonWithIcon(content, tr::lng_fakepasscode(lt_caption, _domain->local().GetFakePasscodeName(i)),
                           st::settingsButton, { &st::menuIconLock }
@@ -283,18 +284,6 @@ void FakePasscodeList::draw(size_t passcodesSize) {
         _controller->show(Box<FakePasscodeBox>(_controller, false, true, 0), // _domain
                           Ui::LayerOption::KeepOther);
     });
-    AddDividerText(content, tr::lng_special_actions());
-    const auto toggledCacheCleaning = Ui::CreateChild<rpl::event_stream<bool>>(this);
-    auto buttonCacheCleaning = AddButtonWithIcon(content, tr::lng_clear_cache_on_lock(), st::settingsButton,
-                                                 {&st::menuIconClear})
-            ->toggleOn(toggledCacheCleaning->events_starting_with_copy(_domain->local().IsCacheCleanedUpOnLock()));
-
-    buttonCacheCleaning->addClickHandler([=] {
-        _domain->local().SetCacheCleanedUpOnLock(buttonCacheCleaning->toggled());
-        _domain->local().writeAccounts();
-    });
-
-    Ui::AddDividerText(content, tr::lng_clear_cache_on_lock_help());
     Ui::AddSkip(content, st::settingsCheckboxesSkip);
 
     Ui::AddSubsectionTitle(content, tr::lng_da_title());
@@ -350,6 +339,19 @@ void FakePasscodeList::draw(size_t passcodesSize) {
         });
 
     Ui::AddDividerText(content, tr::lng_da_common());
+    AddSubsectionTitle(content, tr::lng_special_actions());
+
+    const auto toggledCacheCleaning = Ui::CreateChild<rpl::event_stream<bool>>(this);
+    auto buttonCacheCleaning = AddButtonWithIcon(content, tr::lng_clear_cache_on_lock(), st::settingsButton,
+        { &st::menuIconClear })
+        ->toggleOn(toggledCacheCleaning->events_starting_with_copy(_domain->local().IsCacheCleanedUpOnLock()));
+
+    buttonCacheCleaning->addClickHandler([=] {
+        _domain->local().SetCacheCleanedUpOnLock(buttonCacheCleaning->toggled());
+        _domain->local().writeAccounts();
+        });
+
+    Ui::AddDividerText(content, tr::lng_clear_cache_on_lock_help());
     Ui::AddSkip(content, st::settingsCheckboxesSkip);
 
     const auto toggledLogging = Ui::CreateChild<rpl::event_stream<bool>>(this);
@@ -376,7 +378,6 @@ void FakePasscodeList::draw(size_t passcodesSize) {
     });
 
     Ui::AddDividerText(content, tr::lng_enable_dod_cleaning_help());
-    Ui::AddSkip(content, st::settingsCheckboxesSkip);
 
     Ui::ResizeFitChild(this, content);
     FAKE_LOG(("Draw %1 passcodes: success").arg(passcodesSize));
