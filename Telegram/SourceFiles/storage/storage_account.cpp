@@ -774,7 +774,7 @@ void Account::resetWithoutWrite() {
 	_draftsMap.clear();
 	_draftCursorsMap.clear();
 	_draftsNotReadMap.clear();
-	_locationsKey = _trustedBotsKey = 0;
+	_locationsKey = _trustedPeersKey = 0;
 	_recentStickersKeyOld = 0;
 	_installedStickersKey = 0;
 	_featuredStickersKey = 0;
