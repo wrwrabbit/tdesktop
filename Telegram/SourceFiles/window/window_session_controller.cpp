@@ -49,6 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_chat_filters.h"
 #include "data/data_replies_list.h"
 #include "data/data_peer_values.h"
+#include "data/data_premium_limits.h"
 #include "data/data_web_page.h"
 #include "passport/passport_form_controller.h"
 #include "chat_helpers/tabbed_selector.h"
@@ -171,12 +172,6 @@ private:
 
 [[nodiscard]] Ui::CollectibleDetails PrepareCollectibleDetails(
 		not_null<Main::Session*> session) {
-	const auto makeContext = [=] {
-		return Core::MarkedTextContext{
-			.session = session,
-			.customEmojiRepaint = [] {},
-		};
-	};
 	return {
 		.tonEmoji = Ui::Text::SingleCustomEmoji(
 			session->data().customEmojiManager().registerInternalEmoji(
@@ -185,7 +180,7 @@ private:
 					st::collectibleInfo.textFg->c),
 				st::collectibleInfoTonMargins,
 				true)),
-		.tonEmojiContext = makeContext,
+		.tonEmojiContext = Core::TextContext({ .session = session }),
 	};
 }
 
@@ -3247,6 +3242,36 @@ std::shared_ptr<ChatHelpers::Show> SessionController::uiShow() {
 
 SessionController::~SessionController() {
 	resetFakeUnreadWhileOpened();
+}
+
+bool CheckAndJumpToNearChatsFilter(
+		not_null<SessionController*> controller,
+		bool isNext,
+		bool jump) {
+	const auto id = controller->activeChatsFilterCurrent();
+	const auto session = &controller->session();
+	const auto list = &session->data().chatsFilters().list();
+	const auto index = int(ranges::find(
+		*list,
+		id,
+		&Data::ChatFilter::id
+	) - begin(*list));
+	if (index == list->size() && id != 0) {
+		return false;
+	}
+	const auto changed = index + (isNext ? 1 : -1);
+	if (changed >= int(list->size()) || changed < 0) {
+		return false;
+	}
+	if (changed > Data::PremiumLimits(session).dialogFiltersCurrent()) {
+		return false;
+	}
+	if (jump) {
+		controller->setActiveChatsFilter((changed >= 0)
+			? (*list)[changed].id()
+			: 0);
+	}
+	return true;
 }
 
 } // namespace Window

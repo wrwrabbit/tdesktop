@@ -81,6 +81,7 @@ jobs:
           # not used in actual Release build
 
           docker run --rm \
+          -u $(id -u) \
           -v $PWD:/usr/src/tdesktop \
           -e CONFIG=Release \
           tdesktop:centos_env \
