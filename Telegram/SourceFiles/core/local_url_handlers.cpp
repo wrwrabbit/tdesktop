@@ -302,6 +302,42 @@ void ShowLanguagesBox(Window::SessionController *controller) {
 	Guard = LanguageBox::Show(controller);
 }
 
+void ShowPhonePrivacyBox(Window::SessionController *controller) {
+	static auto Guard = base::binary_guard();
+	auto guard = base::binary_guard();
+
+	using Privacy = Api::UserPrivacy;
+	const auto key = Privacy::Key::PhoneNumber;
+	controller->session().api().userPrivacy().reload(key);
+
+	const auto weak = base::make_weak(controller);
+	auto shared = std::make_shared<base::binary_guard>(
+		guard.make_guard());
+	auto lifetime = std::make_shared<rpl::lifetime>();
+	controller->session().api().userPrivacy().value(
+		key
+	) | rpl::take(
+		1
+	) | rpl::start_with_next([=](const Privacy::Rule &value) mutable {
+		using namespace ::Settings;
+		const auto show = shared->alive();
+		if (lifetime) {
+			base::take(lifetime)->destroy();
+		}
+		if (show) {
+			if (const auto controller = weak.get()) {
+				controller->show(Box<EditPrivacyBox>(
+					controller,
+					std::make_unique<PhoneNumberPrivacyController>(
+						controller),
+					value));
+			}
+		}
+	}, *lifetime);
+
+	Guard = std::move(guard);
+}
+
 bool SetLanguage(
 		Window::SessionController *controller,
 		const Match &match,
@@ -718,6 +754,9 @@ bool ResolveSettings(
 		if (section == u"language"_q) {
 			ShowLanguagesBox(controller);
 			return {};
+		} else if (section == u"phone_privacy"_q) {
+			ShowPhonePrivacyBox(controller);
+			return {};
 		} else if (section == u"devices"_q) {
 			return ::Settings::Sessions::Id();
 		} else if (section == u"folders"_q) {
@@ -872,6 +911,8 @@ bool ShowEditBirthday(
 		const QVariant &context) {
 	if (!controller) {
 		return false;
+	} else if (controller->showFrozenError()) {
+		return true;
 	}
 	const auto user = controller->session().user();
 	const auto save = [=](Data::Birthday result) {
@@ -928,6 +969,8 @@ bool ShowEditPersonalChannel(
 		const QVariant &context) {
 	if (!controller) {
 		return false;
+	} else if (controller->showFrozenError()) {
+		return true;
 	}
 
 	auto listController = std::make_unique<PersonalChannelController>(
@@ -1462,7 +1505,7 @@ const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
 			ResolvePrivatePost
 		},
 		{
-			u"^settings(/language|/devices|/folders|/privacy|/themes|/change_number|/auto_delete|/information|/edit_profile)?$"_q,
+			u"^settings(/language|/devices|/folders|/privacy|/themes|/change_number|/auto_delete|/information|/edit_profile|/phone_privacy)?$"_q,
 			ResolveSettings
 		},
 		{

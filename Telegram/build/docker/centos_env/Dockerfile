@@ -44,7 +44,7 @@ FROM builder AS patches
 RUN git init patches \
 	&& cd patches \
 	&& git remote add origin {{ GIT }}/desktop-app/patches.git \
-	&& git fetch --depth=1 origin 61bbacab28d377d0a2771cc87e008554e2f23ffb \
+	&& git fetch --depth=1 origin fb35ec726cf0a99eead201ddf80e1e717b9fa7c2 \
 	&& git reset --hard FETCH_HEAD \
 	&& rm -rf .git
 
@@ -807,12 +807,13 @@ RUN cmake --build out --config Debug --parallel \
 {%- endif %}
 
 FROM builder AS ada
-RUN git clone -b v2.9.0 --depth=1 {{ GIT }}/ada-url/ada.git \
+RUN git clone -b v3.2.1 --depth=1 {{ GIT }}/ada-url/ada.git \
 	&& cd ada \
 	&& cmake -GNinja -B build . \
 		-D CMAKE_BUILD_TYPE=None \
         -D ADA_TESTING=OFF \
         -D ADA_TOOLS=OFF \
+        -D ADA_INCLUDE_URL_PATTERN=OFF \
 	&& cmake --build build --parallel \
 	&& DESTDIR="{{ LibrariesPath }}/ada-cache" cmake --install build \
 	&& cd .. \

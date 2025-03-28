@@ -25,9 +25,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_drag_area.h"
 #include "history/history_item_components.h"
 #include "history/history_item_helpers.h" // GetErrorForSending.
-#include "history/history_view_swipe.h"
 #include "ui/chat/pinned_bar.h"
 #include "ui/chat/chat_style.h"
+#include "ui/controls/swipe_handler.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/scroll_area.h"
@@ -409,7 +409,7 @@ RepliesWidget::RepliesWidget(
 
 	setupTopicViewer();
 	setupComposeControls();
-	setupSwipeReply();
+	setupSwipeReplyAndBack();
 	orderWidgets();
 
 	if (_pinnedBar) {
@@ -673,12 +673,22 @@ void RepliesWidget::setupComposeControls() {
 			: tr::lng_forum_topic_closed(tr::now);
 	});
 	auto writeRestriction = rpl::combine(
+		session().frozenValue(),
 		session().changes().peerFlagsValue(
 			_history->peer,
 			Data::PeerUpdate::Flag::Rights),
 		Data::CanSendAnythingValue(_history->peer),
 		std::move(topicWriteRestrictions)
-	) | rpl::map([=](auto, auto, Data::SendError topicRestriction) {
+	) | rpl::map([=](
+			const Main::FreezeInfo &info,
+			auto,
+			auto,
+			Data::SendError topicRestriction) {
+		if (info) {
+			return Controls::WriteRestriction{
+				.type = Controls::WriteRestrictionType::Frozen,
+			};
+		}
 		const auto allWithoutPolls = Data::AllSendRestrictions()
 			& ~ChatRestriction::SendPolls;
 		const auto canSendAnything = _topic
@@ -879,7 +889,7 @@ void RepliesWidget::setupComposeControls() {
 	}
 }
 
-void RepliesWidget::setupSwipeReply() {
+void RepliesWidget::setupSwipeReplyAndBack() {
 	const auto can = [=](not_null<HistoryItem*> still) {
 		const auto canSendReply = _topic
 			? Data::CanSendAnything(_topic)
@@ -892,8 +902,27 @@ void RepliesWidget::setupSwipeReply() {
 		}
 		return false;
 	};
-	HistoryView::SetupSwipeHandler(_inner, _scroll.get(), [=](
-			HistoryView::ChatPaintGestureHorizontalData data) {
+
+	auto update = [=](Ui::Controls::SwipeContextData data) {
+		if (data.translation > 0) {
+			if (!_swipeBackData.callback) {
+				_swipeBackData = Ui::Controls::SetupSwipeBack(
+					this,
+					[=]() -> std::pair<QColor, QColor> {
+						const auto context = listPreparePaintContext({
+							.theme = listChatTheme(),
+						});
+						return {
+							context.st->msgServiceBg()->c,
+							context.st->msgServiceFg()->c,
+						};
+					});
+			}
+			_swipeBackData.callback(data);
+			return;
+		} else if (_swipeBackData.lifetime) {
+			_swipeBackData = {};
+		}
 		const auto changed = (_gestureHorizontal.msgBareId != data.msgBareId)
 			|| (_gestureHorizontal.translation != data.translation)
 			|| (_gestureHorizontal.reachRatio != data.reachRatio);
@@ -906,8 +935,17 @@ void RepliesWidget::setupSwipeReply() {
 				_history->owner().requestItemRepaint(item);
 			}
 		}
-	}, [=, show = controller()->uiShow()](int cursorTop) {
-		auto result = HistoryView::SwipeHandlerFinishData();
+	};
+
+	auto init = [=, show = controller()->uiShow()](
+			int cursorTop,
+			Qt::LayoutDirection direction) {
+		if (direction == Qt::RightToLeft) {
+			return Ui::Controls::DefaultSwipeBackHandlerFinishData([=] {
+				controller()->showBackFromStack();
+			});
+		}
+		auto result = Ui::Controls::SwipeHandlerFinishData();
 		if (_inner->elementInSelectionMode(nullptr).inSelectionMode) {
 			return result;
 		}
@@ -938,7 +976,15 @@ void RepliesWidget::setupSwipeReply() {
 			});
 		};
 		return result;
-	}, _inner->touchMaybeSelectingValue());
+	};
+
+	Ui::Controls::SetupSwipeHandler({
+		.widget = _inner,
+		.scroll = _scroll.get(),
+		.update = std::move(update),
+		.init = std::move(init),
+		.dontStart = _inner->touchMaybeSelectingValue(),
+	});
 }
 
 void RepliesWidget::chooseAttach(

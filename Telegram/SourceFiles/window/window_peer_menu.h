@@ -40,6 +40,7 @@ class MainList;
 struct EntryState;
 struct UnreadState;
 class Key;
+class Entry;
 } // namespace Dialogs
 
 namespace ChatHelpers {
@@ -88,7 +89,9 @@ void MenuAddMarkAsReadChatListAction(
 	const PeerMenuCallback &addAction,
 	Fn<Dialogs::UnreadState()> customUnreadState = nullptr);
 
-void PeerMenuExportChat(not_null<PeerData*> peer);
+void PeerMenuExportChat(
+	not_null<Window::SessionController*> controller,
+	not_null<PeerData*> peer);
 void PeerMenuDeleteContact(
 	not_null<Window::SessionController*> controller,
 	not_null<UserData*> user);
@@ -196,6 +199,10 @@ void ToggleMessagePinned(
 	not_null<Window::SessionNavigation*> navigation,
 	FullMsgId itemId,
 	bool pin);
+void TogglePinnedThread(
+	not_null<Window::SessionController*> controller,
+	not_null<Dialogs::Entry*> entry,
+	FilterId filterId);
 void HidePinnedBar(
 	not_null<Window::SessionNavigation*> navigation,
 	not_null<PeerData*> peer,
@@ -209,5 +216,8 @@ void UnpinAllMessages(
 void MarkAsReadThread(not_null<Data::Thread*> thread);
 
 void AddSeparatorAndShiftUp(const PeerMenuCallback &addAction);
+
+[[nodiscard]] bool IsArchived(not_null<History*> history);
+[[nodiscard]] bool CanArchive(History *history, PeerData *peer);
 
 } // namespace Window
