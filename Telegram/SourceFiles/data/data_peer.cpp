@@ -1349,6 +1349,10 @@ bool PeerData::isVerifyCodes() const {
 	return (id == kVerifyCodesId);
 }
 
+bool PeerData::isFreezeAppealChat() const {
+	return username().compare(u"spambot"_q, Qt::CaseInsensitive) == 0;
+}
+
 bool PeerData::sharedMediaInfo() const {
 	return isSelf() || isRepliesChat();
 }
@@ -1483,6 +1487,7 @@ bool PeerData::canRevokeFullHistory() const {
 	if (const auto user = asUser()) {
 		return !isSelf()
 			&& (!user->isBot() || user->isSupport())
+			&& !user->isInaccessible()
 			&& session().serverConfig().revokePrivateInbox
 			&& (session().serverConfig().revokePrivateTimeLimit == 0x7FFFFFFF);
 	} else if (const auto chat = asChat()) {
