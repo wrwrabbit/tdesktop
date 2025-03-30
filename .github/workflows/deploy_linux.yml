@@ -50,7 +50,7 @@ jobs:
           -u $(id -u) \
           -v $PWD:/usr/src/tdesktop \
           -e CONFIG=Release \
-          -w /usr/src/tdesktop/Telegram/build
+          -w /usr/src/tdesktop/Telegram/build \
           tdesktop:centos_env \
           python3 release_build.py linux
 
