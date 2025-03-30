@@ -12,10 +12,6 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.experimental }}
 
-    defaults:
-      run:
-        shell: scl enable gcc-toolset-12 -- bash --noprofile --norc -eo pipefail {0}
-
     strategy:
       matrix:
         defines:
