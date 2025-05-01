@@ -932,15 +932,15 @@ void MainWidget::setCurrentCall(Calls::Call *call) {
 	}
 	_currentCallLifetime.destroy();
 	_currentCall = call;
-	if (_currentCall) {
+	if (call) {
 		_callTopBar.destroy();
-		_currentCall->stateValue(
+		call->stateValue(
 		) | rpl::start_with_next([=](Calls::Call::State state) {
 			using State = Calls::Call::State;
 			if (state != State::Established) {
 				destroyCallTopBar();
 			} else if (!_callTopBar) {
-				createCallTopBar();
+				createCallTopBar(call, nullptr);
 			}
 		}, _currentCallLifetime);
 	} else {
@@ -954,7 +954,7 @@ void MainWidget::setCurrentGroupCall(Calls::GroupCall *call) {
 	}
 	_currentCallLifetime.destroy();
 	_currentGroupCall = call;
-	if (_currentGroupCall) {
+	if (call) {
 		_callTopBar.destroy();
 		_currentGroupCall->stateValue(
 		) | rpl::start_with_next([=](Calls::GroupCall::State state) {
@@ -966,7 +966,7 @@ void MainWidget::setCurrentGroupCall(Calls::GroupCall *call) {
 				&& state != State::Connecting) {
 				destroyCallTopBar();
 			} else if (!_callTopBar) {
-				createCallTopBar();
+				createCallTopBar(nullptr, call);
 			}
 		}, _currentCallLifetime);
 	} else {
@@ -974,15 +974,17 @@ void MainWidget::setCurrentGroupCall(Calls::GroupCall *call) {
 	}
 }
 
-void MainWidget::createCallTopBar() {
-	Expects(_currentCall != nullptr || _currentGroupCall != nullptr);
+void MainWidget::createCallTopBar(
+		Calls::Call *call,
+		Calls::GroupCall *group) {
+	Expects(call || group);
 
 	const auto show = controller()->uiShow();
 	_callTopBar.create(
 		this,
-		(_currentCall
-			? object_ptr<Calls::TopBar>(this, _currentCall, show)
-			: object_ptr<Calls::TopBar>(this, _currentGroupCall, show)));
+		(call
+			? object_ptr<Calls::TopBar>(this, call, show)
+			: object_ptr<Calls::TopBar>(this, group, show)));
 	_callTopBar->entity()->initBlobsUnder(this, _callTopBar->geometryValue());
 	_callTopBar->heightValue(
 	) | rpl::start_with_next([this](int value) {
@@ -1172,7 +1174,7 @@ float64 MainWidget::chatBackgroundProgress() const {
 	if (_background) {
 		if (_background->generating) {
 			return 1.;
-		} else if (const auto document = _background->data.document()) {
+		} else if (_background->data.document()) {
 			return _background->dataMedia->progress();
 		}
 	}
@@ -2608,7 +2610,7 @@ auto MainWidget::thirdSectionForCurrentMainSection(
 		return std::make_shared<Info::Memento>(
 			peer,
 			Info::Memento::DefaultSection(peer));
-	} else if (const auto sublist = key.sublist()) {
+	} else if (key.sublist()) {
 		return std::make_shared<Info::Memento>(
 			session().user(),
 			Info::Memento::DefaultSection(session().user()));
