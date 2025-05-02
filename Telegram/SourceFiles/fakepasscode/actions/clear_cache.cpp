@@ -31,7 +31,7 @@ void FakePasscode::ClearCache::Execute() {
     }
 
     FAKE_LOG(qsl("Clear download folder %1").arg(download_path));
-    FileUtils::DeleteFolderRecursively(download_path);
+    //FileUtils::DeleteFolderRecursively(download_path);
 }
 
 QByteArray FakePasscode::ClearCache::Serialize() const {
