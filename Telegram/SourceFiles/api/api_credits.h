@@ -12,6 +12,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_credits_earn.h"
 #include "mtproto/sender.h"
 
+namespace Data {
+class SavedStarGiftId;
+} // namespace Data
+
 namespace Main {
 class Session;
 } // namespace Main
@@ -99,8 +103,8 @@ public:
 	[[nodiscard]] Data::CreditsEarnStatistics data() const;
 
 private:
+	const bool _isUser = false;
 	Data::CreditsEarnStatistics _data;
-	bool _isUser = false;
 
 	mtpRequestId _requestId = 0;
 
@@ -108,5 +112,15 @@ private:
 
 [[nodiscard]] rpl::producer<not_null<PeerData*>> PremiumPeerBot(
 	not_null<Main::Session*> session);
+
+void EditCreditsSubscription(
+	not_null<Main::Session*> session,
+	const QString &id,
+	bool cancel,
+	Fn<void()> done,
+	Fn<void(QString)> fail);
+
+[[nodiscard]] MTPInputSavedStarGift InputSavedStarGiftId(
+	const Data::SavedStarGiftId &id);
 
 } // namespace Api

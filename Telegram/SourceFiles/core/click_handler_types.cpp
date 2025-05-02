@@ -312,6 +312,7 @@ void BotGameUrlClickHandler::onClick(ClickContext context) const {
 	const auto game = media ? media->game() : nullptr;
 	if (url.startsWith(u"tg://"_q, Qt::CaseInsensitive) || !_bot || !game) {
 		openLink();
+		return;
 	}
 	const auto bot = _bot;
 	const auto title = game->title;
@@ -327,13 +328,13 @@ void BotGameUrlClickHandler::onClick(ClickContext context) const {
 		});
 	};
 	if (_bot->isVerified()
-		|| _bot->session().local().isBotTrustedOpenGame(_bot->id)) {
+		|| _bot->session().local().isPeerTrustedOpenGame(_bot->id)) {
 		openGame();
 	} else {
 		if (const auto controller = my.sessionWindow.get()) {
 			const auto callback = [=, bot = _bot](Fn<void()> close) {
 				close();
-				bot->session().local().markBotTrustedOpenGame(bot->id);
+				bot->session().local().markPeerTrustedOpenGame(bot->id);
 				openGame();
 			};
 			controller->show(Ui::MakeConfirmBox({

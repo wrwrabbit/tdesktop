@@ -119,6 +119,7 @@ uint8 ContactColorIndex(const ContactInfo &data);
 struct Photo {
 	uint64 id = 0;
 	TimeId date = 0;
+	bool spoilered = false;
 
 	Image image;
 };
@@ -146,6 +147,7 @@ struct Document {
 	bool isVoiceMessage = false;
 	bool isVideoFile = false;
 	bool isAudioFile = false;
+	bool spoilered = false;
 };
 
 struct SharedContact {
@@ -501,6 +503,7 @@ struct ActionPhoneCall {
 		Disconnect,
 		Hangup,
 		Busy,
+		AllowGroupCall,
 	};
 	DiscardReason discardReason = DiscardReason::Unknown;
 	int duration = 0;
@@ -659,6 +662,15 @@ struct ActionStarGift {
 	bool limited = false;
 };
 
+struct ActionPaidMessagesRefunded {
+	int messages = 0;
+	int64 stars = 0;
+};
+
+struct ActionPaidMessagesPrice {
+	int stars = 0;
+};
+
 struct ServiceAction {
 	std::variant<
 		v::null_t,
@@ -704,7 +716,9 @@ struct ServiceAction {
 		ActionPaymentRefunded,
 		ActionGiftStars,
 		ActionPrizeStars,
-		ActionStarGift> content;
+		ActionStarGift,
+		ActionPaidMessagesRefunded,
+		ActionPaidMessagesPrice> content;
 };
 
 ServiceAction ParseServiceAction(

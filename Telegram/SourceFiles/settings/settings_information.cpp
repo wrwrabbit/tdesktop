@@ -104,7 +104,8 @@ ComposedBadge::ComposedBadge(
 , _badge(
 		this,
 		st::settingsInfoPeerBadge,
-		session->user(),
+		session,
+		Info::Profile::BadgeContentForPeer(session->user()),
 		nullptr,
 		std::move(animationPaused),
 		kPlayStatusLimit,
@@ -452,12 +453,18 @@ void SetupRows(
 
 	Ui::AddSkip(container);
 
+	const auto showEditName = [=] {
+		if (controller->showFrozenError()) {
+			return;
+		}
+		controller->show(Box<EditNameBox>(self));
+	};
 	AddRow(
 		container,
 		tr::lng_settings_name_label(),
 		Info::Profile::NameValue(self) | Ui::Text::ToWithEntities(),
 		tr::lng_profile_copy_fullname(tr::now),
-		[=] { controller->show(Box<EditNameBox>(self)); },
+		showEditName,
 		{ &st::menuIconProfile });
 
 	const auto showChangePhone = [=] {
@@ -507,6 +514,9 @@ void SetupRows(
 		std::move(value),
 		tr::lng_context_copy_mention(tr::now),
 		[=] {
+			if (controller->showFrozenError()) {
+				return;
+			}
 			const auto box = controller->show(
 				Box(UsernamesBox, session->user()));
 			box->boxClosing(
@@ -746,29 +756,22 @@ void SetupAccountsWrap(
 		} else if (which != Qt::RightButton) {
 			return;
 		}
-		if (!state->menu && IsAltShift(raw->clickModifiers()) && !locked) {
-			state->menu = base::make_unique_q<Ui::PopupMenu>(
-				raw,
-				st::popupMenuWithIcons);
-			Window::MenuAddMarkAsReadAllChatsAction(
-				window,
-				Ui::Menu::CreateAddActionCallback(state->menu));
-			state->menu->popup(QCursor::pos());
+		if (state->menu) {
 			return;
 		}
-		if (session == &window->session() || state->menu) {
-			return;
-		}
+		const auto isActive = session == &window->session();
 		state->menu = base::make_unique_q<Ui::PopupMenu>(
 			raw,
 			st::popupMenuExpandedSeparator);
 		const auto addAction = Ui::Menu::CreateAddActionCallback(
 			state->menu);
-		addAction(tr::lng_context_new_window(tr::now), [=] {
-			Ui::PreventDelayedActivation();
-			callback(Qt::ControlModifier);
-		}, &st::menuIconNewWindow);
-		Window::AddSeparatorAndShiftUp(addAction);
+		if (!isActive) {
+			addAction(tr::lng_context_new_window(tr::now), [=] {
+				Ui::PreventDelayedActivation();
+				callback(Qt::ControlModifier);
+			}, &st::menuIconNewWindow);
+			Window::AddSeparatorAndShiftUp(addAction);
+		}
 
 		addAction(tr::lng_profile_copy_phone(tr::now), [=] {
 			const auto phone = rpl::variable<TextWithEntities>(
@@ -777,31 +780,39 @@ void SetupAccountsWrap(
 		}, &st::menuIconCopy);
 
 		if (!locked) {
-			addAction(tr::lng_menu_activate(tr::now), [=] {
-				callback({});
-			}, &st::menuIconProfile);
+			if (!isActive) {
+				addAction(tr::lng_menu_activate(tr::now), [=] {
+					callback({});
+				}, &st::menuIconProfile);
+			}
+			Window::MenuAddMarkAsReadAllChatsAction(
+				session,
+				window->uiShow(),
+				addAction);
 		}
 
-		auto logoutCallback = [=] {
-			const auto callback = [=](Fn<void()> &&close) {
-				close();
-				Core::App().logoutWithChecks(&session->account());
+		if (!isActive) {
+			auto logoutCallback = [=] {
+				const auto callback = [=](Fn<void()> &&close) {
+					close();
+					Core::App().logoutWithChecks(&session->account());
+				};
+				window->show(
+					Ui::MakeConfirmBox({
+						.text = tr::lng_sure_logout(),
+						.confirmed = crl::guard(session, callback),
+						.confirmText = tr::lng_settings_logout(),
+						.confirmStyle = &st::attentionBoxButton,
+					}),
+					Ui::LayerOption::CloseOther);
 			};
-			window->show(
-				Ui::MakeConfirmBox({
-					.text = tr::lng_sure_logout(),
-					.confirmed = crl::guard(session, callback),
-					.confirmText = tr::lng_settings_logout(),
-					.confirmStyle = &st::attentionBoxButton,
-				}),
-				Ui::LayerOption::CloseOther);
-		};
-		addAction({
-			.text = tr::lng_settings_logout(tr::now),
-			.handler = std::move(logoutCallback),
-			.icon = &st::menuIconLeaveAttention,
-			.isAttention = true,
-		});
+			addAction({
+				.text = tr::lng_settings_logout(tr::now),
+				.handler = std::move(logoutCallback),
+				.icon = &st::menuIconLeaveAttention,
+				.isAttention = true,
+			});
+		}
 		state->menu->popup(QCursor::pos());
 	}, raw->lifetime());
 

@@ -20,6 +20,7 @@ struct HistoryItemCommonFields;
 
 namespace Data {
 class LocationPoint;
+struct SendError;
 } // namespace Data
 
 namespace InlineBots {
@@ -42,7 +43,7 @@ public:
 	// You should use create() static method instead.
 	Result(not_null<Main::Session*> session, const Creator &creator);
 
-	static std::unique_ptr<Result> Create(
+	static std::shared_ptr<Result> Create(
 		not_null<Main::Session*> session,
 		uint64 queryId,
 		const MTPBotInlineResult &mtpData);
@@ -66,7 +67,11 @@ public:
 	void addToHistory(
 		not_null<History*> history,
 		HistoryItemCommonFields &&fields) const;
-	QString getErrorOnSend(not_null<History*> history) const;
+	[[nodiscard]] not_null<HistoryItem*> makeMessage(
+		not_null<History*> history,
+		HistoryItemCommonFields &&fields) const;
+	[[nodiscard]] Data::SendError getErrorOnSend(
+		not_null<History*> history) const;
 
 	// interface for Layout:: usage
 	std::optional<Data::LocationPoint> getLocationPoint() const;
@@ -125,7 +130,7 @@ private:
 };
 
 struct ResultSelected {
-	not_null<Result*> result;
+	std::shared_ptr<Result> result;
 	not_null<UserData*> bot;
 	PeerData *recipientOverride = nullptr;
 	Api::SendOptions options;

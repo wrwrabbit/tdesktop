@@ -15,19 +15,12 @@ namespace Notifications {
 class Manager : public Window::Notifications::NativeManager {
 public:
 	Manager(not_null<Window::Notifications::System*> system);
-	void clearNotification(NotificationId id);
 	~Manager();
 
 protected:
 	void doShowNativeNotification(
-		not_null<PeerData*> peer,
-		MsgId topicRootId,
-		Ui::PeerUserpicView &userpicView,
-		MsgId msgId,
-		const QString &title,
-		const QString &subtitle,
-		const QString &msg,
-		DisplayOptions options) override;
+		NotificationInfo &&info,
+		Ui::PeerUserpicView &userpicView) override;
 	void doClearAllFast() override;
 	void doClearFromItem(not_null<HistoryItem*> item) override;
 	void doClearFromTopic(not_null<Data::ForumTopic*> topic) override;

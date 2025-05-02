@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/dialogs_main_list.h"
 #include "data/data_groups.h"
 #include "data/data_cloud_file.h"
+#include "data/data_star_gift.h"
 #include "history/history_location_manager.h"
 #include "base/timer.h"
 
@@ -70,6 +71,8 @@ class Chatbots;
 class BusinessInfo;
 struct ReactionId;
 struct UnavailableReason;
+struct CreditsStatusSlice;
+struct UniqueGift;
 
 struct RepliesReadTillUpdate {
 	FullMsgId id;
@@ -82,11 +85,23 @@ struct GiftUpdate {
 		Save,
 		Unsave,
 		Convert,
+		Transfer,
 		Delete,
+		Pin,
+		Unpin,
 	};
 
-	FullMsgId itemId;
+	Data::SavedStarGiftId id;
 	Action action = {};
+};
+
+struct SentToScheduled {
+	not_null<History*> history;
+	MsgId scheduledId = 0;
+};
+struct SentFromScheduled {
+	not_null<HistoryItem*> item;
+	MsgId sentId = 0;
 };
 
 class Session final {
@@ -104,8 +119,6 @@ public:
 	[[nodiscard]] Main::Session &session() const {
 		return *_session;
 	}
-
-	[[nodiscard]] QString nameSortKey(const QString &name) const;
 
 	[[nodiscard]] Groups &groups() {
 		return _groups;
@@ -328,6 +341,11 @@ public:
 	void notifyPinnedDialogsOrderUpdated();
 	[[nodiscard]] rpl::producer<> pinnedDialogsOrderUpdated() const;
 
+	using CreditsSubsRebuilder = rpl::event_stream<CreditsStatusSlice>;
+	using CreditsSubsRebuilderPtr = std::shared_ptr<CreditsSubsRebuilder>;
+	[[nodiscard]] CreditsSubsRebuilderPtr createCreditsSubsRebuilder();
+	[[nodiscard]] CreditsSubsRebuilderPtr activeCreditsSubsRebuilder() const;
+
 	void registerRestricted(
 		not_null<const HistoryItem*> item,
 		const QString &reason);
@@ -409,7 +427,7 @@ public:
 	[[nodiscard]] const std::vector<Dialogs::Key> &pinnedChatsOrder(
 		FilterId filterId) const;
 	[[nodiscard]] const std::vector<Dialogs::Key> &pinnedChatsOrder(
-		not_null<Data::SavedMessages*> saved) const;
+		not_null<SavedMessages*> saved) const;
 	void setChatPinned(Dialogs::Key key, FilterId filterId, bool pinned);
 	void setPinnedFromEntryList(Dialogs::Key key, bool pinned);
 	void clearPinnedChats(Folder *folder);
@@ -417,7 +435,7 @@ public:
 		Folder *folder,
 		const QVector<MTPDialogPeer> &list);
 	void applyPinnedTopics(
-		not_null<Data::Forum*> forum,
+		not_null<Forum*> forum,
 		const QVector<MTPint> &list);
 	void reorderTwoPinnedChats(
 		FilterId filterId,
@@ -558,8 +576,12 @@ public:
 		const ImageLocation &thumbnailLocation);
 
 	[[nodiscard]] not_null<DocumentData*> document(DocumentId id);
-	not_null<DocumentData*> processDocument(const MTPDocument &data);
-	not_null<DocumentData*> processDocument(const MTPDdocument &data);
+	not_null<DocumentData*> processDocument(
+		const MTPDocument &data,
+		const MTPVector<MTPDocument> *qualities = nullptr);
+	not_null<DocumentData*> processDocument(
+		const MTPDdocument &data,
+		const MTPVector<MTPDocument> *qualities = nullptr);
 	not_null<DocumentData*> processDocument(
 		const MTPdocument &data,
 		const ImageWithLocation &thumbnail);
@@ -607,9 +629,11 @@ public:
 		WebPageCollage &&collage,
 		std::unique_ptr<Iv::Data> iv,
 		std::unique_ptr<WebPageStickerSet> stickerSet,
+		std::shared_ptr<UniqueGift> uniqueGift,
 		int duration,
 		const QString &author,
 		bool hasLargeMedia,
+		bool photoIsVideoCover,
 		TimeId pendingTill);
 
 	[[nodiscard]] not_null<GameData*> game(GameId id);
@@ -787,6 +811,11 @@ public:
 		std::vector<ReactionId> &&was,
 		std::vector<ReactionId> &&now);
 
+	void sentToScheduled(SentToScheduled value);
+	[[nodiscard]] rpl::producer<SentToScheduled> sentToScheduled() const;
+	void sentFromScheduled(SentFromScheduled value);
+	[[nodiscard]] rpl::producer<SentFromScheduled> sentFromScheduled() const;
+
 	void clearLocalStorage();
 
     void resetCaches();
@@ -892,9 +921,11 @@ private:
 		WebPageCollage &&collage,
 		std::unique_ptr<Iv::Data> iv,
 		std::unique_ptr<WebPageStickerSet> stickerSet,
+		std::shared_ptr<UniqueGift> uniqueGift,
 		int duration,
 		const QString &author,
 		bool hasLargeMedia,
+		bool photoIsVideoCover,
 		TimeId pendingTill);
 
 	void gameApplyFields(
@@ -965,6 +996,8 @@ private:
 	rpl::event_stream<ChatListEntryRefresh> _chatListEntryRefreshes;
 	rpl::event_stream<> _unreadBadgeChanges;
 	rpl::event_stream<RepliesReadTillUpdate> _repliesReadTillUpdates;
+	rpl::event_stream<SentToScheduled> _sentToScheduled;
+	rpl::event_stream<SentFromScheduled> _sentFromScheduled;
 
 	Dialogs::MainList _chatsList;
 	Dialogs::IndexedList _contactsList;
@@ -1080,6 +1113,8 @@ private:
 	std::unordered_map<PeerId, std::unique_ptr<PeerData>> _peers;
 
 	MessageIdsList _mimeForwardIds;
+
+	std::weak_ptr<CreditsSubsRebuilder> _creditsSubsRebuilder;
 
 	using CredentialsWithGeneration = std::pair<
 		const Passport::SavedCredentials,

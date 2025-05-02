@@ -71,13 +71,16 @@ auto MediaGenericPart::stickerTakePlayer(
 
 MediaGeneric::MediaGeneric(
 	not_null<Element*> parent,
-	Fn<void(Fn<void(std::unique_ptr<Part>)>)> generate,
+	Fn<void(
+		not_null<MediaGeneric*>,
+		Fn<void(std::unique_ptr<Part>)>)> generate,
 	MediaGenericDescriptor &&descriptor)
 : Media(parent)
+, _paintBg(std::move(descriptor.paintBg))
 , _maxWidthCap(descriptor.maxWidth)
 , _service(descriptor.service)
 , _hideServiceText(descriptor.hideServiceText) {
-	generate([&](std::unique_ptr<Part> part) {
+	generate(this, [&](std::unique_ptr<Part> part) {
 		_entries.push_back({
 			.object = std::move(part),
 		});
@@ -110,13 +113,21 @@ QSize MediaGeneric::countOptimalSize() {
 }
 
 QSize MediaGeneric::countCurrentSize(int newWidth) {
-	return { maxWidth(), minHeight() };
+	if (newWidth > maxWidth()) {
+		newWidth = maxWidth();
+	}
+	for (auto &entry : _entries) {
+		entry.object->resizeGetHeight(newWidth);
+	}
+	return { newWidth, minHeight() };
 }
 
 void MediaGeneric::draw(Painter &p, const PaintContext &context) const {
 	const auto outer = width();
 	if (outer < st::msgPadding.left() + st::msgPadding.right() + 1) {
 		return;
+	} else if (_paintBg) {
+		_paintBg(p, context, this);
 	} else if (_service) {
 		PainterHighQualityEnabler hq(p);
 		const auto radius = st::msgServiceGiftBoxRadius;
@@ -223,12 +234,13 @@ QMargins MediaGeneric::inBubblePadding() const {
 MediaGenericTextPart::MediaGenericTextPart(
 	TextWithEntities text,
 	QMargins margins,
+	const style::TextStyle &st,
 	const base::flat_map<uint16, ClickHandlerPtr> &links,
-	const std::any &context)
+	const Ui::Text::MarkedContext &context)
 : _text(st::msgMinWidth)
 , _margins(margins) {
 	_text.setMarkedText(
-		st::defaultTextStyle,
+		st,
 		text,
 		kMarkupTextOptions,
 		context);
@@ -242,16 +254,13 @@ void MediaGenericTextPart::draw(
 		not_null<const MediaGeneric*> owner,
 		const PaintContext &context,
 		int outerWidth) const {
-	const auto service = owner->service();
-	p.setPen(service
-		? context.st->msgServiceFg()
-		: context.messageStyle()->historyTextFg);
+	setupPen(p, owner, context);
 	_text.draw(p, {
 		.position = { (outerWidth - width()) / 2, _margins.top() },
 		.outerWidth = outerWidth,
 		.availableWidth = width(),
 		.align = style::al_top,
-		.palette = &(service
+		.palette = &(owner->service()
 			? context.st->serviceTextPalette()
 			: context.messageStyle()->textPalette),
 		.spoiler = Ui::Text::DefaultSpoilerCache(),
@@ -259,6 +268,16 @@ void MediaGenericTextPart::draw(
 		.pausedEmoji = context.paused || On(PowerSaving::kEmojiChat),
 		.pausedSpoiler = context.paused || On(PowerSaving::kChatSpoiler),
 	});
+}
+
+void MediaGenericTextPart::setupPen(
+		Painter &p,
+		not_null<const MediaGeneric*> owner,
+		const PaintContext &context) const {
+	const auto service = owner->service();
+	p.setPen(service
+		? context.st->msgServiceFg()
+		: context.messageStyle()->historyTextFg);
 }
 
 TextState MediaGenericTextPart::textState(
@@ -285,7 +304,7 @@ QSize MediaGenericTextPart::countCurrentSize(int newWidth) {
 	const auto size = CountOptimalTextSize(
 		_text,
 		st::msgMinWidth,
-		newWidth - skip);
+		std::max(st::msgMinWidth, newWidth - skip));
 	return {
 		size.width() + skip,
 		_margins.top() + size.height() + _margins.bottom(),
@@ -435,7 +454,7 @@ void StickerInBubblePart::ensureCreated(Element *replacing) const {
 			_skipTop = data.skipTop;
 			_sticker.emplace(_parent, sticker, skipPremiumEffect, replacing);
 			if (data.singleTimePlayback) {
-				_sticker->setDiceIndex(info->alt, 1);
+				_sticker->setPlayingOnce(true);
 			}
 			_sticker->initSize(data.size);
 			_sticker->setCustomCachingTag(data.cacheTag);
@@ -545,7 +564,7 @@ void StickerWithBadgePart::paintBadge(
 void StickerWithBadgePart::validateBadge(
 		const PaintContext &context) const {
 	const auto stm = context.messageStyle();
-	const auto &badgeFg = stm->historyFileRadialFg->c;
+	const auto &badgeFg = st::premiumButtonFg->c;
 	const auto &badgeBorder = stm->msgBg->c;
 	if (!_badge.isNull()
 		&& _badgeFg == badgeFg

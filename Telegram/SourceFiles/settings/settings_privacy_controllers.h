@@ -194,7 +194,7 @@ public:
 
 };
 
-class ForwardsPrivacyController
+class ForwardsPrivacyController final
 	: public EditPrivacyController
 	, private HistoryView::SimpleElementDelegate {
 public:
@@ -337,6 +337,45 @@ public:
 		not_null<QWidget*> parent,
 		rpl::producer<Option> optionValue,
 		not_null<QWidget*> outerContainer) override;
+
+};
+
+class GiftsAutoSavePrivacyController final : public EditPrivacyController {
+public:
+	using Option = EditPrivacyBox::Option;
+	using Exception = EditPrivacyBox::Exception;
+
+	Key key() const override;
+
+	rpl::producer<QString> title() const override;
+	rpl::producer<QString> optionsTitleKey() const override;
+	rpl::producer<QString> exceptionButtonTextKey(
+		Exception exception) const override;
+	rpl::producer<QString> exceptionBoxTitle(
+		Exception exception) const override;
+	rpl::producer<QString> exceptionsDescription() const override;
+	bool allowMiniAppsToggle(Exception exception) const override;
+
+	object_ptr<Ui::RpWidget> setupAboveWidget(
+		not_null<Window::SessionController*> controller,
+		not_null<QWidget*> parent,
+		rpl::producer<Option> optionValue,
+		not_null<QWidget*> outerContainer) override;
+	object_ptr<Ui::RpWidget> setupBelowWidget(
+		not_null<Window::SessionController*> controller,
+		not_null<QWidget*> parent,
+		rpl::producer<Option> option) override;
+
+	void saveAdditional() override;
+
+private:
+	struct AdditionalState;
+
+	void ensureAdditionalState(
+		not_null<Window::SessionController*> controller,
+		rpl::lifetime &on);
+
+	AdditionalState *_state = nullptr;
 
 };
 

@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/object_ptr.h"
 #include "mtproto/sender.h"
+#include "ui/text/text_variant.h"
 #include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
 
@@ -98,9 +99,7 @@ protected:
 	void resizeEvent(QResizeEvent *e) override;
 
 	void setTitleText(rpl::producer<QString> titleText);
-	void setDescriptionText(rpl::producer<QString> descriptionText);
-	void setDescriptionText(
-		rpl::producer<TextWithEntities> richDescriptionText);
+	void setDescriptionText(v::text::data &&descriptionText);
 	bool paintAnimated(QPainter &p, QRect clip);
 
 	void fillSentCodeData(const MTPDauth_sentCode &type);
@@ -116,7 +115,8 @@ protected:
 	void createSession(
 		const MTPUser &user,
 		QImage photo,
-		const QVector<MTPDialogFilter> &filters);
+		const QVector<MTPDialogFilter> &filters,
+		bool tagsEnabled);
 
 	void goBack();
 

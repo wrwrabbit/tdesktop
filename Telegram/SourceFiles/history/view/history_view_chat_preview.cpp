@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
+#include "info/profile/info_profile_badge.h"
 #include "info/profile/info_profile_cover.h"
 #include "info/profile/info_profile_values.h"
 #include "lang/lang_keys.h"
@@ -38,11 +39,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/shadow.h"
 #include "ui/ui_utility.h"
+#include "ui/unread_badge.h"
 #include "window/themes/window_theme.h"
 #include "window/section_widget.h"
 #include "window/window_session_controller.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
+#include "styles/style_settings.h"
 
 #ifdef Q_OS_WIN
 #include "ui/platform/win/ui_windows_direct_manipulation.h"
@@ -161,6 +164,8 @@ private:
 	bool listShowReactPremiumError(
 		not_null<HistoryItem*> item,
 		const Data::ReactionId &id) override;
+	base::unique_qptr<Ui::PopupMenu> listFillSenderUserpicMenu(
+		PeerId userpicPeerId) override;
 	void listWindowSetInnerFocus() override;
 	bool listAllowsDragForward() override;
 	void listLaunchDrag(
@@ -188,6 +193,8 @@ private:
 	const std::unique_ptr<Ui::AbstractButton> _top;
 	const std::unique_ptr<Ui::ElasticScroll> _scroll;
 	const std::unique_ptr<Ui::FlatButton> _markRead;
+
+	Info::Profile::Badge _badge;
 
 	QPointer<ListWidget> _inner;
 	std::unique_ptr<CornerButtons> _cornerButtons;
@@ -244,7 +251,20 @@ struct StatusFields {
 		}
 		Unexpected("Peer type in ChatPreview Item.");
 	});
+}
 
+[[nodiscard]] rpl::producer<Info::Profile::Badge::Content> ContentForPeer(
+		not_null<PeerData*> peer) {
+	using namespace Info::Profile;
+	return rpl::combine(
+		BadgeContentForPeer(peer),
+		VerifiedContentForPeer(peer)
+	) | rpl::map([](Badge::Content &&content, Badge::Content &&verified) {
+		if (verified.badge == BadgeType::Verified) {
+			content.badge = BadgeType::Verified;
+		}
+		return content;
+	});
 }
 
 Item::Item(not_null<Ui::RpWidget*> parent, not_null<Data::Thread*> thread)
@@ -263,7 +283,15 @@ Item::Item(not_null<Ui::RpWidget*> parent, not_null<Data::Thread*> thread)
 	std::make_unique<Ui::FlatButton>(
 		this,
 		tr::lng_context_mark_read(tr::now),
-		st::previewMarkRead)) {
+		st::previewMarkRead))
+, _badge(
+		_top.get(),
+		st::settingsInfoPeerBadge,
+		_session,
+		ContentForPeer(_peer),
+		nullptr,
+		nullptr,
+		1) {
 	_chatStyle->apply(_theme.get());
 	setPointerCursor(false);
 	setMinWidth(st::previewMenu.menu.widthMin);
@@ -357,12 +385,14 @@ void Item::setupTop() {
 	const auto shadow = Ui::CreateChild<Ui::PlainShadow>(this);
 	rpl::combine(
 		_top->widthValue(),
-		std::move(nameValue)
-	) | rpl::start_with_next([=](int width, const auto &) {
+		std::move(nameValue),
+		rpl::single(rpl::empty) | rpl::then(_badge.updated())
+	) | rpl::start_with_next([=](int width, const auto &, const auto &) {
 		const auto &st = st::previewTop;
 		name->resizeToNaturalWidth(width
 			- st.namePosition.x()
-			- st.photoPosition.x());
+			- st.photoPosition.x()
+			- (_badge.widget() ? _badge.widget()->width() : 0));
 		if (status) {
 			name->move(st::previewTop.namePosition);
 		} else {
@@ -370,6 +400,10 @@ void Item::setupTop() {
 				st::previewTop.namePosition.x(),
 				(st::previewTop.height - name->height()) / 2);
 		}
+		_badge.move(
+			name->x() + name->width() + st::normalFont->spacew,
+			name->y(),
+			name->y() + name->height());
 	}, name->lifetime());
 
 	_top->geometryValue() | rpl::start_with_next([=](QRect geometry) {
@@ -480,6 +514,11 @@ void Item::setupHistory() {
 	using Type = Ui::ElasticScroll::OverscrollType;
 	_scroll->setOverscrollTypes(Type::Real, Type::Real);
 
+	_inner->scrollKeyEvents(
+	) | rpl::start_with_next([=](not_null<QKeyEvent*> e) {
+		_scroll->keyPressEvent(e);
+	}, lifetime());
+
 	_scroll->events() | rpl::start_with_next([=](not_null<QEvent*> e) {
 		if (e->type() == QEvent::MouseButtonDblClick) {
 			const auto button = static_cast<QMouseEvent*>(e.get())->button();
@@ -504,6 +543,10 @@ void Item::setupHistory() {
 	_inner->refreshViewer();
 
 	_inner->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+	crl::on_main(this, [=] {
+		_inner->setFocus();
+	});
 }
 
 void Item::paintEvent(QPaintEvent *e) {
@@ -532,6 +575,7 @@ bool Item::listScrollTo(int top, bool syntetic) {
 }
 
 void Item::listCancelRequest() {
+	_actions.fire({ .cancel = true });
 }
 
 void Item::listDeleteRequest() {
@@ -816,6 +860,11 @@ bool Item::listShowReactPremiumError(
 		not_null<HistoryItem*> item,
 		const Data::ReactionId &id) {
 	return false;
+}
+
+base::unique_qptr<Ui::PopupMenu> Item::listFillSenderUserpicMenu(
+		PeerId userpicPeerId) {
+	return nullptr;
 }
 
 void Item::listWindowSetInnerFocus() {

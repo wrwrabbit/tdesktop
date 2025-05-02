@@ -13,6 +13,10 @@ namespace Ui {
 class RippleAnimation;
 } // namespace Ui
 
+namespace Ui::Premium {
+class ColoredMiniStars;
+} // namespace Ui::Premium
+
 namespace HistoryView {
 
 class ServiceBoxContent {
@@ -22,13 +26,16 @@ public:
 	[[nodiscard]] virtual int width();
 	[[nodiscard]] virtual int top() = 0;
 	[[nodiscard]] virtual QSize size() = 0;
-	[[nodiscard]] virtual QString title() = 0;
+	[[nodiscard]] virtual TextWithEntities title() = 0;
 	[[nodiscard]] virtual TextWithEntities subtitle() = 0;
 	[[nodiscard]] virtual int buttonSkip() {
 		return top();
 	}
 	[[nodiscard]] virtual rpl::producer<QString> button() = 0;
-	[[nodiscard]] virtual QString cornerTagText() {
+	[[nodiscard]] virtual bool buttonMinistars() {
+		return false;
+	}
+	[[nodiscard]] virtual QImage cornerTag(const PaintContext &context) {
 		return {};
 	}
 	virtual void draw(
@@ -106,6 +113,8 @@ private:
 
 		ClickHandlerPtr link;
 		std::unique_ptr<Ui::RippleAnimation> ripple;
+		std::unique_ptr<Ui::Premium::ColoredMiniStars> stars;
+		std::unique_ptr<QColor> lastFg;
 
 		mutable QPoint lastPoint;
 	} _button;

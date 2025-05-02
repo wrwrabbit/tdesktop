@@ -15,7 +15,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_shared_media.h"
 #include "boxes/delete_messages_box.h"
 #include "boxes/peer_list_controllers.h"
-#include "mainwidget.h"
 #include "main/main_session.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
@@ -24,7 +23,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/fade_wrap.h"
 #include "ui/wrap/padding_wrap.h"
 #include "ui/search_field_controller.h"
-#include "window/window_peer_menu.h"
 #include "data/data_session.h"
 #include "data/data_channel.h"
 #include "data/data_user.h"
@@ -208,11 +206,25 @@ void TopBar::setSearchField(
 		rpl::producer<bool> &&shown,
 		bool startsFocused) {
 	Expects(field != nullptr);
+
 	createSearchView(field.release(), std::move(shown), startsFocused);
 }
 
 void TopBar::clearSearchField() {
 	_searchView = nullptr;
+}
+
+void TopBar::checkBeforeCloseByEscape(Fn<void()> close) {
+	if (_searchModeEnabled) {
+		if (_searchField && !_searchField->empty()) {
+			_searchField->setText({});
+		} else {
+			_searchModeEnabled = false;
+			updateControlsVisibility(anim::type::normal);
+		}
+	} else {
+		close();
+	}
 }
 
 void TopBar::createSearchView(
@@ -268,18 +280,14 @@ void TopBar::createSearchView(
 		return !selectionMode() && searchMode();
 	});
 
-	auto cancelSearch = [=] {
+	cancel->addClickHandler([=] {
 		if (!field->getLastText().isEmpty()) {
 			field->setText(QString());
 		} else {
 			_searchModeEnabled = false;
 			updateControlsVisibility(anim::type::normal);
 		}
-	};
-
-	cancel->addClickHandler(cancelSearch);
-	field->cancelled(
-	) | rpl::start_with_next(cancelSearch, field->lifetime());
+	});
 
 	wrap->widthValue(
 	) | rpl::start_with_next([=](int newWidth) {

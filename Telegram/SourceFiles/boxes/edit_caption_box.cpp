@@ -238,7 +238,7 @@ EditCaptionBox::EditCaptionBox(
 	Fn<void()> saved)
 : _controller(controller)
 , _historyItem(item)
-, _isAllowedEditMedia(item->media() && item->media()->allowsEditMedia())
+, _isAllowedEditMedia(item->allowsEditMedia())
 , _albumType(ComputeAlbumType(item))
 , _controls(base::make_unique_q<Ui::VerticalLayout>(this))
 , _scroll(base::make_unique_q<Ui::ScrollArea>(this, st::boxScroll))
@@ -253,8 +253,8 @@ EditCaptionBox::EditCaptionBox(
 , _initialText(std::move(text))
 , _initialList(std::move(list))
 , _saved(std::move(saved)) {
-	Expects(item->media() != nullptr);
-	Expects(item->media()->allowsEditCaption());
+	Expects(!_initialList.files.empty());
+	Expects(item->allowsEditMedia());
 
 	_mediaEditManager.start(item, spoilered, invertCaption);
 
@@ -422,7 +422,8 @@ void EditCaptionBox::prepare() {
 	setInitialText();
 
 	if (!setPreparedList(std::move(_initialList))) {
-		rebuildPreview();
+		crl::on_main(this, [=] { closeBox(); });
+		return;
 	}
 	setupEditEventHandler();
 	SetupShadowsToScrollContent(this, _scroll, _contentHeight.events());
@@ -466,13 +467,16 @@ void EditCaptionBox::rebuildPreview() {
 		}
 	} else {
 		const auto &file = _preparedList.files.front();
-
+		const auto isVideoFile = file.isVideoFile();
 		const auto media = Ui::SingleMediaPreview::Create(
 			this,
 			st::defaultComposeControls,
 			gifPaused,
 			file,
-			[] { return true; },
+			[=](Ui::AttachActionType type) {
+				return (type != Ui::AttachActionType::EditCover)
+					|| isVideoFile;
+			},
 			Ui::AttachControls::Type::EditOnly);
 		_isPhoto = (media && media->isPhoto());
 		const auto withCheckbox = _isPhoto && CanBeCompressed(_albumType);
@@ -718,7 +722,7 @@ void EditCaptionBox::setupPhotoEditorEventHandler() {
 				controller->uiShow(),
 				&_preparedList.files.front(),
 				st::sendMediaPreviewSize,
-				[=] { rebuildPreview(); });
+				[=](bool ok) { if (ok) rebuildPreview(); });
 		} else {
 			EditPhotoImage(_controller, _photoMedia, hasSpoiler(), [=](
 					Ui::PreparedList &&list) {

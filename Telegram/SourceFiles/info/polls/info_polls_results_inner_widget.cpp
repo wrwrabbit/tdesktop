@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "info/polls/info_polls_results_widget.h"
 #include "lang/lang_keys.h"
+#include "core/ui_integration.h"
 #include "data/data_peer.h"
 #include "data/data_poll.h"
 #include "data/data_session.h"
@@ -17,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/vertical_layout.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/text/text_utilities.h"
+#include "ui/vertical_list.h"
 #include "boxes/peer_list_box.h"
 #include "main/main_session.h"
 #include "history/history.h"
@@ -24,8 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_info.h"
 
-namespace Info {
-namespace Polls {
+namespace Info::Polls {
 namespace {
 
 constexpr auto kFirstPage = 15;
@@ -461,7 +462,9 @@ ListController *CreateAnswerRows(
 					.append(QString::fromUtf8(" \xe2\x80\x94 "))
 					.append(QString::number(percent))
 					.append('%')),
-			st::boxDividerLabel),
+			st::boxDividerLabel,
+			st::defaultPopupMenu,
+			Core::TextContext({ .session = session })),
 		style::margins(
 			st::pollResultsHeaderPadding.left(),
 			st::pollResultsHeaderPadding.top(),
@@ -610,12 +613,20 @@ void InnerWidget::setupContent() {
 		object_ptr<Ui::FlatLabel>(
 			_content,
 			rpl::single(_poll->question),
-			st::pollResultsQuestion),
-		style::margins{
-			st::boxRowPadding.left(),
-			0,
-			st::boxRowPadding.right(),
-			st::boxMediumSkip });
+			st::pollResultsQuestion,
+			st::defaultPopupMenu,
+			Core::TextContext({ .session = &_controller->session() })),
+		st::boxRowPadding);
+	Ui::AddSkip(_content, st::boxLittleSkip / 2);
+	_content->add(
+		object_ptr<Ui::FlatLabel>(
+			_content,
+			tr::lng_polls_votes_count(
+				lt_count_decimal,
+				rpl::single(float64(_poll->totalVoters))),
+			st::boxDividerLabel),
+		st::boxRowPadding);
+	Ui::AddSkip(_content, st::boxLittleSkip);
 	for (const auto &answer : _poll->answers) {
 		const auto session = &_controller->session();
 		const auto controller = CreateAnswerRows(
@@ -659,6 +670,4 @@ auto InnerWidget::showPeerInfoRequests() const
 	return _showPeerInfoRequests.events();
 }
 
-} // namespace Polls
-} // namespace Info
-
+} // namespace Info::Polls

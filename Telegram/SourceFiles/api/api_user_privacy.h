@@ -31,6 +31,8 @@ public:
 		Voices,
 		About,
 		Birthday,
+		GiftsAutoSave,
+		NoPaidMessages,
 	};
 	enum class Option {
 		Everyone,
@@ -41,6 +43,7 @@ public:
 	struct Exceptions {
 		std::vector<not_null<PeerData*>> peers;
 		bool premiums = false;
+		bool miniapps = false;
 	};
 	struct Rule {
 		Option option = Option::Everyone;

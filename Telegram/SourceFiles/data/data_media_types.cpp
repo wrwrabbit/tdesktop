@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_service_box.h"
 #include "history/view/media/history_view_story_mention.h"
 #include "history/view/media/history_view_premium_gift.h"
+#include "history/view/media/history_view_unique_gift.h"
 #include "history/view/media/history_view_userpic_suggestion.h"
 #include "dialogs/ui/dialogs_message_view.h"
 #include "ui/image/image.h"
@@ -170,8 +171,19 @@ struct AlbumCounts {
 }
 
 template <typename MediaType>
-[[nodiscard]] uint64 CountCacheKey(not_null<MediaType*> data, bool spoiler) {
-	return (reinterpret_cast<uint64>(data.get()) & ~1) | (spoiler ? 1 : 0);
+[[nodiscard]] uint64 CountCacheKey(
+		not_null<MediaType*> data,
+		ImageRoundRadius radius,
+		bool spoiler) {
+	return (reinterpret_cast<uint64>(data.get()) & ~3)
+		| ((radius == ImageRoundRadius::Ellipse) ? 2 : 0)
+		| (spoiler ? 1 : 0);
+}
+
+[[nodiscard]] uint64 SimpleCacheKey(ImageRoundRadius radius, bool spoiler) {
+	return uint64()
+		| ((radius == ImageRoundRadius::Ellipse) ? 2 : 0)
+		| (spoiler ? 1 : 0);
 }
 
 [[nodiscard]] ItemPreviewImage PreparePhotoPreviewImage(
@@ -180,7 +192,7 @@ template <typename MediaType>
 		ImageRoundRadius radius,
 		bool spoiler) {
 	const auto photo = media->owner();
-	const auto counted = CountCacheKey(photo, spoiler);
+	const auto counted = CountCacheKey(photo, radius, spoiler);
 	if (const auto small = media->image(PhotoSize::Small)) {
 		return { PreparePreviewImage(small, radius, spoiler), counted };
 	} else if (const auto thumbnail = media->image(PhotoSize::Thumbnail)) {
@@ -190,15 +202,15 @@ template <typename MediaType>
 	}
 	const auto allowedToDownload = media->autoLoadThumbnailAllowed(
 		item->history()->peer);
-	const auto spoilered = uint64(spoiler ? 1 : 0);
-	const auto cacheKey = allowedToDownload ? spoilered : counted;
+	const auto simple = SimpleCacheKey(radius, spoiler);
+	const auto cacheKey = allowedToDownload ? simple : counted;
 	if (allowedToDownload) {
 		media->owner()->load(PhotoSize::Small, item->fullId());
 	}
 	if (const auto blurred = media->thumbnailInline()) {
 		return { PreparePreviewImage(blurred, radius, spoiler), cacheKey };
 	}
-	return { QImage(), allowedToDownload ? spoilered : cacheKey };
+	return { QImage(), allowedToDownload ? simple : cacheKey };
 }
 
 [[nodiscard]] ItemPreviewImage PrepareFilePreviewImage(
@@ -209,7 +221,7 @@ template <typename MediaType>
 	Expects(media->owner()->hasThumbnail());
 
 	const auto document = media->owner();
-	const auto readyCacheKey = CountCacheKey(document, spoiler);
+	const auto readyCacheKey = CountCacheKey(document, radius, spoiler);
 	if (const auto thumbnail = media->thumbnail()) {
 		return {
 			PreparePreviewImage(thumbnail, radius, spoiler),
@@ -217,11 +229,11 @@ template <typename MediaType>
 		};
 	}
 	document->loadThumbnail(item->fullId());
-	const auto spoilered = uint64(spoiler ? 1 : 0);
+	const auto simple = SimpleCacheKey(radius, spoiler);
 	if (const auto blurred = media->thumbnailInline()) {
-		return { PreparePreviewImage(blurred, radius, spoiler), spoilered };
+		return { PreparePreviewImage(blurred, radius, spoiler), simple };
 	}
-	return { QImage(), spoilered };
+	return { QImage(), simple };
 }
 
 [[nodiscard]] QImage PutPlayIcon(QImage preview) {
@@ -273,13 +285,14 @@ template <typename MediaType>
 [[nodiscard]] ItemPreviewImage FindCachedPreview(
 		const std::vector<ItemPreviewImage> *existing,
 		not_null<MediaType*> data,
+		ImageRoundRadius radius,
 		bool spoiler) {
 	if (!existing) {
 		return {};
 	}
 	const auto i = ranges::find(
 		*existing,
-		CountCacheKey(data, spoiler),
+		CountCacheKey(data, radius, spoiler),
 		&ItemPreviewImage::cacheKey);
 	return (i != end(*existing)) ? *i : ItemPreviewImage();
 }
@@ -446,16 +459,17 @@ Call ComputeCallData(const MTPDmessageActionPhoneCall &call) {
 	auto result = Call();
 	result.finishReason = [&] {
 		if (const auto reason = call.vreason()) {
-			switch (reason->type()) {
-			case mtpc_phoneCallDiscardReasonBusy:
+			return reason->match([](const MTPDphoneCallDiscardReasonBusy &) {
 				return CallFinishReason::Busy;
-			case mtpc_phoneCallDiscardReasonDisconnect:
+			}, [](const MTPDphoneCallDiscardReasonDisconnect &) {
 				return CallFinishReason::Disconnected;
-			case mtpc_phoneCallDiscardReasonHangup:
+			}, [](const MTPDphoneCallDiscardReasonHangup &) {
 				return CallFinishReason::Hangup;
-			case mtpc_phoneCallDiscardReasonMissed:
+			}, [](const MTPDphoneCallDiscardReasonMissed &) {
 				return CallFinishReason::Missed;
-			}
+			}, [](const MTPDphoneCallDiscardReasonAllowGroupCall &) {
+				return CallFinishReason::AllowGroupCall;
+			});
 			Unexpected("Call reason type.");
 		}
 		return CallFinishReason::Hangup;
@@ -549,6 +563,18 @@ not_null<HistoryItem*> Media::parent() const {
 
 DocumentData *Media::document() const {
 	return nullptr;
+}
+
+PhotoData *Media::videoCover() const {
+	return nullptr;
+}
+
+TimeId Media::videoTimestamp() const {
+	return 0;
+}
+
+bool Media::hasQualitiesList() const {
+	return false;
 }
 
 PhotoData *Media::photo() const {
@@ -842,13 +868,17 @@ ItemPreview MediaPhoto::toPreview(ToPreviewOptions options) const {
 	}
 	auto images = std::vector<ItemPreviewImage>();
 	auto context = std::any();
-	if (auto found = FindCachedPreview(options.existing, _photo, _spoiler)) {
+	const auto radius = _chat
+		? ImageRoundRadius::Ellipse
+		: ImageRoundRadius::Small;
+	if (auto found = FindCachedPreview(
+			options.existing,
+			_photo,
+			radius,
+			_spoiler)) {
 		images.push_back(std::move(found));
 	} else {
 		const auto media = _photo->createMediaView();
-		const auto radius = _chat
-			? ImageRoundRadius::Ellipse
-			: ImageRoundRadius::Small;
 		if (auto prepared = PreparePhotoPreview(
 				parent(),
 				media,
@@ -963,15 +993,16 @@ std::unique_ptr<HistoryView::Media> MediaPhoto::createView(
 MediaFile::MediaFile(
 	not_null<HistoryItem*> parent,
 	not_null<DocumentData*> document,
-	bool skipPremiumEffect,
-	bool spoiler,
-	crl::time ttlSeconds)
+	Args &&args)
 : Media(parent)
 , _document(document)
+, _videoCover(args.videoCover)
+, _ttlSeconds(args.ttlSeconds)
 , _emoji(document->sticker() ? document->sticker()->alt : QString())
-, _skipPremiumEffect(skipPremiumEffect)
-, _spoiler(spoiler)
-, _ttlSeconds(ttlSeconds) {
+, _videoTimestamp(args.videoTimestamp)
+, _skipPremiumEffect(args.skipPremiumEffect)
+, _hasQualitiesList(args.hasQualitiesList)
+, _spoiler(args.spoiler) {
 	parent->history()->owner().registerDocumentItem(_document, parent);
 
 	if (!_emoji.isEmpty()) {
@@ -995,16 +1026,30 @@ MediaFile::~MediaFile() {
 }
 
 std::unique_ptr<Media> MediaFile::clone(not_null<HistoryItem*> parent) {
-	return std::make_unique<MediaFile>(
-		parent,
-		_document,
-		!_document->session().premium(),
-		_spoiler,
-		_ttlSeconds);
+	return std::make_unique<MediaFile>(parent, _document, MediaFile::Args{
+		.ttlSeconds = _ttlSeconds,
+		.videoCover = _videoCover,
+		.videoTimestamp = _videoTimestamp,
+		.hasQualitiesList = _hasQualitiesList,
+		.skipPremiumEffect = !_document->session().premium(),
+		.spoiler = _spoiler,
+	});
 }
 
 DocumentData *MediaFile::document() const {
 	return _document;
+}
+
+PhotoData *MediaFile::videoCover() const {
+	return _videoCover;
+}
+
+TimeId MediaFile::videoTimestamp() const {
+	return _videoTimestamp;
+}
+
+bool MediaFile::hasQualitiesList() const {
+	return _hasQualitiesList;
 }
 
 bool MediaFile::uploading() const {
@@ -1072,18 +1117,24 @@ ItemPreview MediaFile::toPreview(ToPreviewOptions options) const {
 	auto images = std::vector<ItemPreviewImage>();
 	auto context = std::any();
 	const auto existing = options.existing;
-	if (auto found = FindCachedPreview(existing, _document, _spoiler)) {
+	const auto spoilered = _spoiler
+		|| (_document->isVideoMessage() && ttlSeconds());
+	const auto radius = _document->isVideoMessage()
+		? ImageRoundRadius::Ellipse
+		: ImageRoundRadius::Small;
+	if (auto found = FindCachedPreview(
+			existing,
+			_document,
+			radius,
+			spoilered)) {
 		images.push_back(std::move(found));
 	} else if (TryFilePreview(_document)) {
 		const auto media = _document->createMediaView();
-		const auto radius = _document->isVideoMessage()
-			? ImageRoundRadius::Ellipse
-			: ImageRoundRadius::Small;
 		if (auto prepared = PrepareFilePreview(
 				parent(),
 				media,
 				radius,
-				_spoiler)
+				spoilered)
 			; prepared || !prepared.cacheKey) {
 			images.push_back(std::move(prepared));
 			if (!prepared.cacheKey) {
@@ -1273,7 +1324,11 @@ bool MediaFile::updateSentMedia(const MTPMessageMedia &media) {
 			"or with ttl_seconds in updateSentMedia()"));
 		return false;
 	}
-	parent()->history()->owner().documentConvert(_document, *content);
+	const auto owner = &parent()->history()->owner();
+	owner->documentConvert(_document, *content);
+	if (const auto cover = _videoCover ? data.vvideo_cover() : nullptr) {
+		owner->photoConvert(_videoCover, *cover);
+	}
 	return true;
 }
 
@@ -1776,13 +1831,17 @@ ItemPreview MediaWebPage::toPreview(ToPreviewOptions options) const {
 		|| _page->type == WebPageType::Video
 		|| _page->type == WebPageType::Document;
 	if (pageTypeWithPreview || !_page->collage.items.empty()) {
-		if (auto found = FindCachedPreview(options.existing, _page, false)) {
+		const auto radius = ImageRoundRadius::Small;
+		if (auto found = FindCachedPreview(
+				options.existing,
+				_page,
+				radius,
+				false)) {
 			return { .text = caption, .images = { std::move(found) } };
 		}
 		auto context = std::any();
 		auto images = std::vector<ItemPreviewImage>();
 		auto prepared = ItemPreviewImage();
-		const auto radius = ImageRoundRadius::Small;
 		if (const auto photo = MediaWebPage::photo()) {
 			const auto media = photo->createMediaView();
 			prepared = PreparePhotoPreview(parent(), media, radius, false);
@@ -2030,10 +2089,18 @@ ItemPreview MediaInvoice::toPreview(ToPreviewOptions options) const {
 		if (!photo && !document) {
 			continue;
 		} else if (images.size() < kMaxPreviewImages) {
-			auto found = photo
-				? FindCachedPreview(existing, not_null(photo), spoiler)
-				: FindCachedPreview(existing, not_null(document), spoiler);
 			const auto radius = ImageRoundRadius::Small;
+			auto found = photo
+				? FindCachedPreview(
+					existing,
+					not_null(photo),
+					radius,
+					spoiler)
+				: FindCachedPreview(
+					existing,
+					not_null(document),
+					radius,
+					spoiler);
 			if (found) {
 				images.push_back(std::move(found));
 			} else if (photo) {
@@ -2363,6 +2430,16 @@ std::unique_ptr<HistoryView::Media> MediaGiftBox::createView(
 		not_null<HistoryView::Element*> message,
 		not_null<HistoryItem*> realParent,
 		HistoryView::Element *replacing) {
+	if (const auto &unique = _data.unique) {
+		return std::make_unique<HistoryView::MediaGeneric>(
+			message,
+			HistoryView::GenerateUniqueGiftMedia(message, replacing, unique),
+			HistoryView::MediaGenericDescriptor{
+				.maxWidth = st::msgServiceGiftBoxSize.width(),
+				.paintBg = HistoryView::UniqueGiftBg(message, unique),
+				.service = true,
+			});
+	}
 	return std::make_unique<HistoryView::ServiceBox>(
 		message,
 		std::make_unique<HistoryView::PremiumGift>(message, this));

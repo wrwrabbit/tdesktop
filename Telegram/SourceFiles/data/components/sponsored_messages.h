@@ -14,9 +14,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class History;
 
+namespace Api {
+struct SponsoredSearchResult;
+} // namespace Api
+
 namespace Main {
 class Session;
 } // namespace Main
+
+namespace Ui {
+class RpWidget;
+} // namespace Ui
 
 namespace Data {
 
@@ -65,6 +73,25 @@ struct SponsoredMessage {
 	TextWithEntities additionalInfo;
 };
 
+struct SponsoredMessageDetails {
+	std::vector<TextWithEntities> info;
+	QString link;
+	QString buttonText;
+	PhotoId photoId = PhotoId(0);
+	PhotoId mediaPhotoId = PhotoId(0);
+	DocumentId mediaDocumentId = DocumentId(0);
+	uint64 backgroundEmojiId = 0;
+	uint8 colorIndex : 6 = 0;
+	bool isLinkInternal = false;
+	bool canReport = false;
+};
+
+struct SponsoredReportAction {
+	Fn<void(
+		Data::SponsoredReportResult::Id,
+		Fn<void(Data::SponsoredReportResult)>)> callback;
+};
+
 class SponsoredMessages final {
 public:
 	enum class AppendResult {
@@ -76,28 +103,29 @@ public:
 		None,
 		AppendToEnd,
 		InjectToMiddle,
+		AppendToTopBar,
 	};
-	struct Details {
-		std::vector<TextWithEntities> info;
-		QString link;
-		QString buttonText;
-		PhotoId photoId = PhotoId(0);
-		PhotoId mediaPhotoId = PhotoId(0);
-		DocumentId mediaDocumentId = DocumentId(0);
-		uint64 backgroundEmojiId = 0;
-		uint8 colorIndex : 6 = 0;
-		bool isLinkInternal = false;
-		bool canReport = false;
-	};
+	using Details = SponsoredMessageDetails;
 	using RandomId = QByteArray;
 	explicit SponsoredMessages(not_null<Main::Session*> session);
 	~SponsoredMessages();
 
 	[[nodiscard]] bool canHaveFor(not_null<History*> history) const;
+	[[nodiscard]] bool isTopBarFor(not_null<History*> history) const;
 	void request(not_null<History*> history, Fn<void()> done);
 	void clearItems(not_null<History*> history);
 	[[nodiscard]] Details lookupDetails(const FullMsgId &fullId) const;
+	[[nodiscard]] Details lookupDetails(
+		const Api::SponsoredSearchResult &data) const;
 	void clicked(const FullMsgId &fullId, bool isMedia, bool isFullscreen);
+	void clicked(
+		const QByteArray &randomId,
+		bool isMedia,
+		bool isFullscreen);
+	[[nodiscard]] FullMsgId fillTopBar(
+		not_null<History*> history,
+		not_null<Ui::RpWidget*> widget);
+	[[nodiscard]] rpl::producer<> itemRemoved(const FullMsgId &);
 
 	[[nodiscard]] AppendResult append(not_null<History*> history);
 	void inject(
@@ -107,11 +135,15 @@ public:
 		int fallbackWidth);
 
 	void view(const FullMsgId &fullId);
+	void view(const QByteArray &randomId);
 
 	[[nodiscard]] State state(not_null<History*> history) const;
 
-	[[nodiscard]] auto createReportCallback(const FullMsgId &fullId)
-	-> Fn<void(SponsoredReportResult::Id, Fn<void(SponsoredReportResult)>)>;
+	[[nodiscard]] SponsoredReportAction createReportCallback(
+		const FullMsgId &fullId);
+	[[nodiscard]] SponsoredReportAction createReportCallback(
+		const QByteArray &randomId,
+		Fn<void()> erase);
 
 	void clear();
 
@@ -122,6 +154,7 @@ private:
 		FullMsgId itemFullId;
 		SponsoredMessage sponsored;
 		std::unique_ptr<MediaPreload> preload;
+		std::unique_ptr<rpl::lifetime> optionalDestructionNotifier;
 	};
 	struct List {
 		std::vector<Entry> entries;
@@ -155,6 +188,8 @@ private:
 	base::flat_map<not_null<History*>, List> _data;
 	base::flat_map<not_null<History*>, Request> _requests;
 	base::flat_map<RandomId, Request> _viewRequests;
+
+	rpl::event_stream<FullMsgId> _itemRemoved;
 
 	rpl::lifetime _lifetime;
 

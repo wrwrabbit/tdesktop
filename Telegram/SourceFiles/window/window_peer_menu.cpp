@@ -7,7 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_peer_menu.h"
 
-#include "api/api_report.h"
+#include "base/call_delayed.h"
 #include "menu/menu_check_item.h"
 #include "boxes/share_box.h"
 #include "boxes/star_gift_box.h"
@@ -38,10 +38,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_contact_box.h"
 #include "calls/calls_instance.h"
 #include "inline_bots/bot_attach_web_view.h" // InlineBots::PeerType.
-#include "ui/boxes/report_box_graphics.h"
 #include "ui/toast/toast.h"
 #include "ui/text/format_values.h"
 #include "ui/text/text_utilities.h"
+#include "ui/widgets/chat_filters_tabs_strip.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/popup_menu.h"
@@ -62,7 +62,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_updates.h"
 #include "mtproto/mtproto_config.h"
 #include "history/history.h"
-#include "history/history_item_helpers.h" // GetErrorTextForSending.
+#include "history/history_item_helpers.h" // GetErrorForSending.
 #include "history/view/history_view_context_menu.h"
 #include "window/window_separate_id.h"
 #include "window/window_session_controller.h"
@@ -149,6 +149,7 @@ void ShareBotGame(
 			MTP_int(0), // schedule_date
 			MTPInputPeer(), // send_as
 			MTPInputQuickReplyShortcut(),
+			MTPlong(),
 			MTPlong()
 		), [=](const MTPUpdates &, const MTP::Response &) {
 	}, [=](const MTP::Error &error, const MTP::Response &) {
@@ -282,7 +283,8 @@ private:
 	void addInfo();
 	void addStoryArchive();
 	void addNewWindow();
-    //void addDeleteMyMessages();
+	// PTG: feature is not complete
+	//void addDeleteMyMessages();
 	void addToggleFolder();
 	//void addToFolder();
 	void addToggleUnreadMark();
@@ -309,7 +311,7 @@ private:
 	void addNewMembers();
 	void addDeleteContact();
 	void addTTLSubmenu(bool addSeparator);
-	void addGiftPremium();
+	void addSendGift();
 	void addCreateTopic();
 	void addViewAsMessages();
 	void addViewAsTopics();
@@ -441,40 +443,6 @@ void TogglePinnedThread(
 		//if (isPinned) {
 		//	controller->content()->dialogsToUp();
 		//}
-	}
-}
-
-void TogglePinnedThread(
-		not_null<Window::SessionController*> controller,
-		not_null<Dialogs::Entry*> entry,
-		FilterId filterId) {
-	if (!filterId) {
-		return TogglePinnedThread(controller, entry);
-	}
-	const auto history = entry->asHistory();
-	if (!history) {
-		return;
-	}
-	const auto owner = &history->owner();
-
-	// This can happen when you remove this filter from another client.
-	if (!ranges::contains(
-			(&owner->session())->data().chatsFilters().list(),
-			filterId,
-			&Data::ChatFilter::id)) {
-		controller->showToast(tr::lng_cant_do_this(tr::now));
-		return;
-	}
-
-	const auto isPinned = !history->isPinnedDialog(filterId);
-	if (isPinned && PinnedLimitReached(controller, history, filterId)) {
-		return;
-	}
-
-	owner->setChatPinned(history, filterId, isPinned);
-	Api::SaveNewFilterPinned(&owner->session(), filterId);
-	if (isPinned) {
-		controller->content()->dialogsToUp();
 	}
 }
 
@@ -626,7 +594,10 @@ void Filler::addStoryArchive() {
 void Filler::addToggleFolder() {
 	const auto controller = _controller;
 	const auto history = _request.key.history();
-	if (_topic || !history || !history->owner().chatsFilters().has()) {
+	if (_topic
+		|| !history
+		|| !history->owner().chatsFilters().has()
+		|| !history->inChatList()) {
 		return;
 	}
 	_addAction(PeerMenuCallback::Args{
@@ -636,6 +607,7 @@ void Filler::addToggleFolder() {
 		.fillSubmenu = [&](not_null<Ui::PopupMenu*> menu) {
 			FillChooseFilterMenu(controller, menu, history);
 		},
+		.submenuSt = &st::foldersMenu,
 	});
 }
 
@@ -720,15 +692,11 @@ void Filler::addToggleArchive() {
 	}
 	const auto peer = _peer;
 	const auto history = _request.key.history();
-	if (history && history->useTopPromotion()) {
+	if (!CanArchive(history, peer)) {
 		return;
-	} else if (peer->isNotificationsUser() || peer->isSelf()) {
-		if (!history || !history->folder()) {
-			return;
-		}
 	}
 	const auto isArchived = [=] {
-		return (history->folder() != nullptr);
+		return IsArchived(history);
 	};
 	const auto label = [=] {
 		return isArchived()
@@ -807,8 +775,23 @@ void Filler::addJoinChat() {
 	const auto label = _peer->isMegagroup()
 		? tr::lng_profile_join_group(tr::now)
 		: tr::lng_profile_join_channel(tr::now);
+	const auto navigation = _controller;
 	_addAction(label, [=] {
-		channel->session().api().joinChannel(channel);
+		auto joinGroup = [=]() {
+			channel->session().api().joinChannel(channel);
+		};
+		if (!Core::App().domain().local().IsDAChatJoinCheckEnabled()) {
+			joinGroup();
+		}
+		else {
+			navigation->show(Ui::MakeConfirmBox({
+			.text = tr::lng_allow_dangerous_action(),
+			.confirmed = [=](Fn<void()>&& close) { 
+					joinGroup(); close(); 
+			},
+			.confirmText = tr::lng_allow_dangerous_action_confirm(),
+				}), Ui::LayerOption::CloseOther);
+		}
 	}, &st::menuIconAddToFolder);
 }
 
@@ -821,7 +804,7 @@ void Filler::addBlockUser() {
 		|| user->isVerifyCodes()) {
 		return;
 	}
-	const auto window = &_controller->window();
+	const auto window = _controller;
 	const auto blockText = [](not_null<UserData*> user) {
 		return user->isBlocked()
 			? ((user->isBot() && !user->isSupport())
@@ -833,14 +816,16 @@ void Filler::addBlockUser() {
 	};
 	const auto blockAction = _addAction(blockText(user), [=] {
 		const auto show = window->uiShow();
-		if (user->isBlocked()) {
+		if (show->showFrozenError()) {
+			return;
+		} else if (user->isBlocked()) {
 			PeerMenuUnblockUserWithBotRestart(show, user);
 		} else if (user->isBot()) {
 			user->session().api().blockedPeers().block(user);
 		} else {
 			window->show(Box(
 				PeerMenuBlockUserBox,
-				window,
+				&window->window(),
 				user,
 				v::null,
 				v::null));
@@ -888,9 +873,10 @@ void Filler::addExportChat() {
 		return;
 	}
 	const auto peer = _peer;
+	const auto navigation = _controller;
 	_addAction(
 		tr::lng_profile_export_chat(tr::now),
-		[=] { PeerMenuExportChat(peer); },
+		[=] { PeerMenuExportChat(navigation, peer); },
 		&st::menuIconExport);
 }
 
@@ -936,9 +922,15 @@ void Filler::addNewContact() {
 		return;
 	}
 	const auto controller = _controller;
+	const auto edit = [=] {
+		if (controller->showFrozenError()) {
+			return;
+		}
+		controller->show(Box(EditContactBox, controller, user));
+	};
 	_addAction(
 		tr::lng_info_add_as_contact(tr::now),
-		[=] { controller->show(Box(EditContactBox, controller, user)); },
+		edit,
 		&st::menuIconInvite);
 }
 
@@ -960,9 +952,15 @@ void Filler::addEditContact() {
 		return;
 	}
 	const auto controller = _controller;
+	const auto edit = [=] {
+		if (controller->showFrozenError()) {
+			return;
+		}
+		controller->show(Box(EditContactBox, controller, user));
+	};
 	_addAction(
 		tr::lng_info_edit_contact(tr::now),
-		[=] { controller->show(Box(EditContactBox, controller, user)); },
+		edit,
 		&st::menuIconEdit);
 }
 
@@ -1178,7 +1176,8 @@ void Filler::addCreatePoll() {
 		: Api::SendType::Normal;
 	const auto sendMenuType = (_request.section == Section::Scheduled)
 		? SendMenu::Type::Disabled
-		: (_request.section == Section::Replies)
+		: (_request.section == Section::Replies
+			|| _peer->starsPerMessageChecked())
 		? SendMenu::Type::SilentOnly
 		: SendMenu::Type::Scheduled;
 	const auto flag = PollData::Flags();
@@ -1201,7 +1200,10 @@ void Filler::addCreatePoll() {
 
 void Filler::addThemeEdit() {
 	const auto user = _peer->asUser();
-	if (!user || user->isBot()) {
+	if (!user || user->isInaccessible()) {
+		return;
+	}
+	if (user->requiresPremiumToWrite() && !user->session().premium()) {
 		return;
 	}
 	const auto controller = _controller;
@@ -1231,22 +1233,30 @@ void Filler::addTTLSubmenu(bool addSeparator) {
 	}
 }
 
-void Filler::addGiftPremium() {
+void Filler::addSendGift() {
 	const auto user = _peer->asUser();
-	if (!user
-		|| user->isInaccessible()
-		|| user->isSelf()
-		|| user->isBot()
-		|| user->isNotificationsUser()
-		|| user->isRepliesChat()
-		|| user->isVerifyCodes()
-		|| !user->session().premiumCanBuy()) {
+	const auto channel = _peer->asBroadcast();
+	if (!user && !channel) {
+		return;
+	} else if (user
+		&& (user->isInaccessible()
+			|| user->isSelf()
+			|| user->isBot()
+			|| user->isServiceUser()
+			|| user->isNotificationsUser()
+			|| user->isRepliesChat()
+			|| user->isVerifyCodes()
+			|| !user->session().premiumCanBuy())) {
+		return;
+	} else if (channel
+		&& (channel->isForbidden() || !channel->stargiftsAvailable())) {
 		return;
 	}
 
+	const auto peer = _peer;
 	const auto navigation = _controller;
 	_addAction(tr::lng_profile_gift_premium(tr::now), [=] {
-		Ui::ShowStarGiftBox(navigation, user);
+		Ui::ShowStarGiftBox(navigation, peer);
 	}, &st::menuIconGiftPremium);
 }
 
@@ -1355,7 +1365,9 @@ void Filler::addSearchTopics() {
 	}, &st::menuIconSearch);
 }
 
-/*void Filler::addDeleteMyMessages(){
+/*
+// PTG: feature is not complete
+void Filler::addDeleteMyMessages(){
     const auto channel = _peer->asChannel();
     if (channel && !_peer->isMegagroup() && !_peer->isGigagroup()) {
         return;
@@ -1379,6 +1391,7 @@ void Filler::fillChatsListActions() {
 	}
 	addManageChat();
 	addNewMembers();
+	addBoostChat();
 	addVideoChat();
 	_addAction(PeerMenuCallback::Args{ .isSeparator = true });
 	addReport();
@@ -1439,9 +1452,9 @@ void Filler::fillHistoryActions() {
 	addToggleMuteSubmenu(true);
 	addInfo();
 	addViewAsTopics();
+	addManageChat();
 	addStoryArchive();
 	addSupportInfo();
-	addManageChat();
 	addBoostChat();
 	addCreatePoll();
 	addThemeEdit();
@@ -1455,6 +1468,7 @@ void Filler::fillHistoryActions() {
     if (!Core::App().domain().local().IsFake()) {
         addJoinChat();
     }
+	// PTG: feature is not complete
     //addDeleteMyMessages();
 }
 
@@ -1464,9 +1478,9 @@ void Filler::fillProfileActions() {
 	addNewContact();
 	addShareContact();
 	addEditContact();
-	addGiftPremium();
 	addBotToGroup();
 	addNewMembers();
+	addSendGift();
 	addViewStatistics();
 	addStoryArchive();
 	addManageChat();
@@ -1475,6 +1489,7 @@ void Filler::fillProfileActions() {
 	addToggleTopicClosed();
 	addViewDiscussion();
 	addExportChat();
+	addToggleFolder();
 	addBlockUser();
 	addReport();
 	addLeaveChat();
@@ -1484,19 +1499,21 @@ void Filler::fillProfileActions() {
 
 void Filler::fillRepliesActions() {
     if (!Core::App().domain().local().IsFake()) {
-        addInfo();
+        addInfo(); // PTG
 		if (_topic) {
 			addManageTopic();
 		}
+		addBoostChat();
         addCreatePoll();
 		addToggleTopicClosed();
 		addDeleteTopic();
-        addJoinChat();
+        addJoinChat(); // PTG
     } else {
 		if (_topic) {
 			addInfo();
 			addManageTopic();
 		}
+		addBoostChat();
 		addCreatePoll();
 		addToggleTopicClosed();
 		addDeleteTopic();
@@ -1573,13 +1590,20 @@ void Filler::fillSavedSublistActions() {
 
 } // namespace
 
-void PeerMenuExportChat(not_null<PeerData*> peer) {
-	Core::App().exportManager().start(peer);
+void PeerMenuExportChat(
+		not_null<Window::SessionController*> controller,
+		not_null<PeerData*> peer) {
+	base::call_delayed(st::defaultPopupMenu.showDuration, [=] {
+		Core::App().exportManager().start(peer);
+	});
 }
 
 void PeerMenuDeleteContact(
 		not_null<Window::SessionController*> controller,
 		not_null<UserData*> user) {
+	if (controller->showFrozenError()) {
+		return;
+	}
 	const auto text = tr::lng_sure_delete_contact(
 		tr::now,
 		lt_contact,
@@ -1676,6 +1700,9 @@ void PeerMenuDeleteTopic(
 void PeerMenuShareContactBox(
 		not_null<Window::SessionNavigation*> navigation,
 		not_null<UserData*> user) {
+	if (navigation->showFrozenError()) {
+		return;
+	}
 	// There is no async to make weak from controller.
 	const auto weak = std::make_shared<QPointer<Ui::BoxContent>>();
 	auto callback = [=](not_null<Data::Thread*> thread) {
@@ -1700,23 +1727,53 @@ void PeerMenuShareContactBox(
 		auto recipient = peer->isUser()
 			? title
 			: ('\xAB' + title + '\xBB');
-		const auto weak = base::make_weak(thread);
+		struct State {
+			base::weak_ptr<Data::Thread> weak;
+			Fn<void(Api::SendOptions)> share;
+			SendPaymentHelper sendPayment;
+		};
+		const auto state = std::make_shared<State>();
+		state->weak = thread;
+		state->share = [=](Api::SendOptions options) {
+			const auto strong = state->weak.get();
+			if (!strong) {
+				state->share = nullptr;
+				return;
+			}
+			const auto withPaymentApproved = [=](int stars) {
+				if (const auto onstack = state->share) {
+					auto copy = options;
+					copy.starsApproved = stars;
+					onstack(copy);
+				}
+			};
+			const auto checked = state->sendPayment.check(
+				navigation,
+				peer,
+				1,
+				options.starsApproved,
+				withPaymentApproved);
+			if (!checked) {
+				return;
+			}
+			navigation->showThread(
+				strong,
+				ShowAtTheEndMsgId,
+				Window::SectionShow::Way::ClearStack);
+			auto action = Api::SendAction(strong, options);
+			action.clearDraft = false;
+			strong->session().api().shareContact(user, action);
+			state->share = nullptr;
+		};
+
 		navigation->parentController()->show(
 			Ui::MakeConfirmBox({
 				.text = tr::lng_forward_share_contact(
 					tr::now,
 					lt_recipient,
 					recipient),
-				.confirmed = [weak, user, navigation](Fn<void()> &&close) {
-					if (const auto strong = weak.get()) {
-						navigation->showThread(
-							strong,
-							ShowAtTheEndMsgId,
-							Window::SectionShow::Way::ClearStack);
-						auto action = Api::SendAction(strong);
-						action.clearDraft = false;
-						strong->session().api().shareContact(user, action);
-					}
+				.confirmed = [state](Fn<void()> &&close) {
+					state->share({});
 					close();
 				},
 				.confirmText = tr::lng_forward_send(),
@@ -1728,7 +1785,7 @@ void PeerMenuShareContactBox(
 				ChooseRecipientArgs{
 					.session = &navigation->session(),
 					.callback = std::move(callback),
-					.premiumRequiredError = WritePremiumRequiredError,
+					.moneyRestrictionError = WriteMoneyRestrictionError,
 				}),
 			[](not_null<PeerListBox*> box) {
 				box->addButton(tr::lng_cancel(), [=] {
@@ -1749,17 +1806,42 @@ void PeerMenuCreatePoll(
 		chosen &= ~PollData::Flag::PublicVotes;
 		disabled |= PollData::Flag::PublicVotes;
 	}
+	auto starsRequired = peer->session().changes().peerFlagsValue(
+		peer,
+		Data::PeerUpdate::Flag::FullInfo
+		| Data::PeerUpdate::Flag::StarsPerMessage
+	) | rpl::map([=] {
+		return peer->starsPerMessageChecked();
+	});
 	auto box = Box<CreatePollBox>(
 		controller,
 		chosen,
 		disabled,
+		std::move(starsRequired),
 		sendType,
 		sendMenuDetails);
-	const auto weak = Ui::MakeWeak(box.data());
-	const auto lock = box->lifetime().make_state<bool>(false);
-	box->submitRequests(
-	) | rpl::start_with_next([=](const CreatePollBox::Result &result) {
-		if (std::exchange(*lock, true)) {
+	struct State {
+		Fn<void(const CreatePollBox::Result &)> create;
+		SendPaymentHelper sendPayment;
+		bool lock = false;
+	};
+	const auto weak = QPointer<CreatePollBox>(box);
+	const auto state = box->lifetime().make_state<State>();
+	state->create = [=](const CreatePollBox::Result &result) {
+		const auto withPaymentApproved = crl::guard(weak, [=](int stars) {
+			if (const auto onstack = state->create) {
+				auto copy = result;
+				copy.options.starsApproved = stars;
+				onstack(copy);
+			}
+		});
+		const auto checked = state->sendPayment.check(
+			controller,
+			peer,
+			1,
+			result.options.starsApproved,
+			withPaymentApproved);
+		if (!checked || std::exchange(state->lock, true)) {
 			return;
 		}
 		auto action = Api::SendAction(
@@ -1774,12 +1856,15 @@ void PeerMenuCreatePoll(
 		}
 		const auto api = &peer->session().api();
 		api->polls().create(result.poll, action, crl::guard(weak, [=] {
+			state->create = nullptr;
 			weak->closeBox();
 		}), crl::guard(weak, [=] {
-			*lock = false;
+			state->lock = false;
 			weak->submitFailed(tr::lng_attach_failed(tr::now));
 		}));
-	}, box->lifetime());
+	};
+	box->submitRequests(
+	) | rpl::start_with_next(state->create, box->lifetime());
 	controller->show(std::move(box), Ui::LayerOption::CloseOther);
 }
 
@@ -1921,13 +2006,91 @@ void BlockSenderFromRepliesBox(
 		Window::ClearReply{ id });
 }
 
-QPointer<Ui::BoxContent> ShowChooseRecipientBox(
-		not_null<Window::SessionNavigation*> navigation,
+object_ptr<Ui::BoxContent> PrepareChooseRecipientBox(
+		not_null<Main::Session*> session,
 		FnMut<bool(not_null<Data::Thread*>)> &&chosen,
 		rpl::producer<QString> titleOverride,
 		FnMut<void()> &&successCallback,
-		InlineBots::PeerTypes typesRestriction) {
-	const auto weak = std::make_shared<QPointer<Ui::BoxContent>>();
+		InlineBots::PeerTypes typesRestriction,
+		Fn<void(
+			std::vector<not_null<Data::Thread*>>,
+			Api::SendOptions)> sendMany) {
+	const auto weak = std::make_shared<QPointer<PeerListBox>>();
+	const auto selectable = (sendMany != nullptr);
+	class Controller final : public ChooseRecipientBoxController {
+	public:
+		using Chosen = not_null<Data::Thread*>;
+
+		Controller(
+			not_null<Main::Session*> session,
+			FnMut<void(Chosen)> callback,
+			Fn<bool(Chosen)> filter,
+			bool selectable)
+		: ChooseRecipientBoxController({
+			.session = session,
+			.callback = std::move(callback),
+			.filter = filter,
+			.moneyRestrictionError = WriteMoneyRestrictionError,
+		})
+		, _selectable(selectable) {
+		}
+
+		using PeerListController::setSearchNoResultsText;
+
+		void rowClicked(not_null<PeerListRow*> row) override final {
+			if (!_selectable) {
+				return ChooseRecipientBoxController::rowClicked(row);
+			}
+			const auto count = delegate()->peerListSelectedRowsCount();
+			if (showLockedError(row) || (count && row->peer()->isForum())) {
+				return;
+			} else if (row->peer()->isForum()) {
+				ChooseRecipientBoxController::rowClicked(row);
+			} else {
+				delegate()->peerListSetRowChecked(row, !row->checked());
+				_selectionChanges.fire({});
+			}
+		}
+
+		base::unique_qptr<Ui::PopupMenu> rowContextMenu(
+				QWidget *parent,
+				not_null<PeerListRow*> row) override final {
+			if (!_selectable) {
+				return ChooseRecipientBoxController::rowContextMenu(
+					parent,
+					row);
+			}
+			if (!row->checked() && !row->peer()->isForum()) {
+				auto menu = base::make_unique_q<Ui::PopupMenu>(
+					parent,
+					st::popupMenuWithIcons);
+				menu->addAction(tr::lng_bot_choose_chat(tr::now), [=] {
+					delegate()->peerListSetRowChecked(row, true);
+					_selectionChanges.fire({});
+				}, &st::menuIconSelect);
+				return menu;
+			}
+			return nullptr;
+		}
+
+		[[nodiscard]] rpl::producer<> selectionChanges() const {
+			return _selectionChanges.events_starting_with({});
+		}
+		[[nodiscard]] bool hasSelected() const {
+			return delegate()->peerListSelectedRowsCount() > 0;
+		}
+
+		[[nodiscard]] rpl::producer<Chosen> singleChosen() const {
+			return _singleChosen.events();
+		}
+
+	private:
+		rpl::event_stream<Chosen> _singleChosen;
+		rpl::event_stream<> _selectionChanges;
+		bool _selectable = false;
+
+	};
+
 	auto callback = [
 		chosen = std::move(chosen),
 		success = std::move(successCallback),
@@ -1959,23 +2122,134 @@ QPointer<Ui::BoxContent> ShowChooseRecipientBox(
 			}
 		}
 		: Fn<bool(not_null<Data::Thread*>)>();
+	auto controller = std::make_unique<Controller>(
+		session,
+		std::move(callback),
+		std::move(filter),
+		selectable);
+	const auto raw = controller.get();
+
+	struct State {
+		Fn<void(Api::SendOptions)> submit;
+		rpl::variable<int> starsToSend;
+		Fn<void()> refreshStarsToSend;
+		rpl::lifetime submitLifetime;
+	};
+	const auto state = std::make_shared<State>();
 	auto initBox = [=](not_null<PeerListBox*> box) {
-		box->addButton(tr::lng_cancel(), [box] {
-			box->closeBox();
-		});
+		state->refreshStarsToSend = [=] {
+			auto perMessage = 0;
+			for (const auto &peer : box->collectSelectedRows()) {
+				perMessage += peer->starsPerMessageChecked();
+			}
+			state->starsToSend = perMessage;
+		};
+		raw->selectionChanges(
+		) | rpl::start_with_next([=] {
+			box->clearButtons();
+			state->refreshStarsToSend();
+			const auto shown = raw->hasSelected();
+			if (shown) {
+				const auto weak = Ui::MakeWeak(box);
+				state->submit = [=](Api::SendOptions options) {
+					state->submitLifetime.destroy();
+					const auto show = box->peerListUiShow();
+					const auto peers = box->collectSelectedRows();
+					const auto withPaymentApproved = crl::guard(weak, [=](
+							int approved) {
+						auto copy = options;
+						copy.starsApproved = approved;
+						if (const auto onstack = state->submit) {
+							onstack(copy);
+						}
+					});
+
+					const auto alreadyApproved = options.starsApproved;
+					auto paid = std::vector<not_null<PeerData*>>();
+					auto waiting = base::flat_set<not_null<PeerData*>>();
+					auto totalStars = 0;
+					for (const auto &peer : peers) {
+						const auto details = ComputePaymentDetails(peer, 1);
+						if (!details) {
+							waiting.emplace(peer);
+						} else if (details->stars > 0) {
+							totalStars += details->stars;
+							paid.push_back(peer);
+						}
+					}
+					if (!waiting.empty()) {
+						session->changes().peerUpdates(
+							Data::PeerUpdate::Flag::FullInfo
+						) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
+							if (waiting.contains(update.peer)) {
+								withPaymentApproved(alreadyApproved);
+							}
+						}, state->submitLifetime);
+
+						if (!session->credits().loaded()) {
+							session->credits().loadedValue(
+							) | rpl::filter(
+								rpl::mappers::_1
+							) | rpl::take(1) | rpl::start_with_next([=] {
+								withPaymentApproved(alreadyApproved);
+							}, state->submitLifetime);
+						}
+						return;
+					} else if (totalStars > alreadyApproved) {
+						ShowSendPaidConfirm(show, paid, SendPaymentDetails{
+							.messages = 1,
+							.stars = totalStars,
+						}, [=] { withPaymentApproved(totalStars); });
+						return;
+					}
+					state->submit = nullptr;
+
+					sendMany(ranges::views::all(
+						peers
+					) | ranges::views::transform([&](
+						not_null<PeerData*> peer) -> Controller::Chosen {
+						return peer->owner().history(peer);
+					}) | ranges::to_vector, options);
+				};
+				const auto send = box->addButton(
+					tr::lng_send_button(),
+					[=] {
+						if (const auto onstack = state->submit) {
+							onstack({});
+						}
+					});
+				send->setText(PaidSendButtonText(
+					state->starsToSend.value(),
+					tr::lng_send_button()));
+			}
+			box->addButton(tr::lng_cancel(), [=] {
+				box->closeBox();
+			});
+		}, box->lifetime());
 		if (titleOverride) {
 			box->setTitle(std::move(titleOverride));
 		}
 	};
-	*weak = navigation->parentController()->show(Box<PeerListBox>(
-		std::make_unique<ChooseRecipientBoxController>(ChooseRecipientArgs{
-			.session = &navigation->session(),
-			.callback = std::move(callback),
-			.filter = std::move(filter),
-			.premiumRequiredError = WritePremiumRequiredError,
-		}),
-		std::move(initBox)));
-	return weak->data();
+	auto result = Box<PeerListBox>(
+		std::move(controller),
+		std::move(initBox));
+	*weak = result.data();
+
+	return result;
+}
+
+QPointer<Ui::BoxContent> ShowChooseRecipientBox(
+		not_null<Window::SessionNavigation*> navigation,
+		FnMut<bool(not_null<Data::Thread*>)> &&chosen,
+		rpl::producer<QString> titleOverride,
+		FnMut<void()> &&successCallback,
+		InlineBots::PeerTypes typesRestriction) {
+	return navigation->parentController()->show(PrepareChooseRecipientBox(
+		&navigation->session(),
+		std::move(chosen),
+		std::move(titleOverride),
+		std::move(successCallback),
+		typesRestriction));
 }
 
 QPointer<Ui::BoxContent> ShowForwardMessagesBox(
@@ -1994,7 +2268,17 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 
 	class ListBox final : public PeerListBox {
 	public:
-		using PeerListBox::PeerListBox;
+		ListBox(
+			QWidget *parent,
+			std::unique_ptr<PeerListController> controller,
+			Fn<void(not_null<ListBox*>)> init)
+		: PeerListBox(
+			parent,
+			std::move(controller),
+			[=](not_null<PeerListBox*> box) {
+				init(static_cast<ListBox*>(box.get()));
+			}) {
+		}
 
 		void setBottomSkip(int bottomSkip) {
 			PeerListBox::setInnerBottomSkip(bottomSkip);
@@ -2019,9 +2303,21 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 			_forwardOptions = forwardOptions;
 		}
 
+		not_null<PeerListContent*> peerListContent() const {
+			return PeerListBox::content();
+		}
+
+		void setFilterId(FilterId filterId) {
+			_filterId = filterId;
+		}
+		[[nodiscard]] FilterId filterId() const {
+			return _filterId;
+		}
+
 	private:
 		rpl::event_stream<> _focusRequests;
 		Ui::ForwardOptions _forwardOptions;
+		FilterId _filterId = 0;
 
 	};
 
@@ -2035,9 +2331,17 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 			.callback = [=](Chosen thread) {
 				_singleChosen.fire_copy(thread);
 			},
-			.premiumRequiredError = WritePremiumRequiredError,
+			.moneyRestrictionError = WriteMoneyRestrictionError,
 		}) {
 		}
+
+		std::unique_ptr<PeerListRow> createRestoredRow(
+				not_null<PeerData*> peer) override final {
+			return ChooseRecipientBoxController::createRow(
+				peer->owner().history(peer));
+		}
+
+		using PeerListController::setSearchNoResultsText;
 
 		void rowClicked(not_null<PeerListRow*> row) override final {
 			const auto count = delegate()->peerListSelectedRowsCount();
@@ -2047,31 +2351,31 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 				ChooseRecipientBoxController::rowClicked(row);
 			} else if (count) {
 				delegate()->peerListSetRowChecked(row, !row->checked());
-				_hasSelectedChanges.fire(
-					delegate()->peerListSelectedRowsCount() > 0);
+				_selectionChanges.fire({});
 			}
 		}
 
 		base::unique_qptr<Ui::PopupMenu> rowContextMenu(
 				QWidget *parent,
 				not_null<PeerListRow*> row) override final {
-			const auto count = delegate()->peerListSelectedRowsCount();
-			if (!count && !row->peer()->isForum()) {
+			if (!row->checked() && !row->peer()->isForum()) {
 				auto menu = base::make_unique_q<Ui::PopupMenu>(
 					parent,
 					st::popupMenuWithIcons);
 				menu->addAction(tr::lng_bot_choose_chat(tr::now), [=] {
-					delegate()->peerListSetRowChecked(row, !row->checked());
-					_hasSelectedChanges.fire(
-						delegate()->peerListSelectedRowsCount() > 0);
+					delegate()->peerListSetRowChecked(row, true);
+					_selectionChanges.fire({});
 				}, &st::menuIconSelect);
 				return menu;
 			}
 			return nullptr;
 		}
 
-		[[nodiscard]] rpl::producer<bool> hasSelectedChanges() const{
-			return _hasSelectedChanges.events_starting_with(false);
+		[[nodiscard]] rpl::producer<> selectionChanges() const {
+			return _selectionChanges.events_starting_with({});
+		}
+		[[nodiscard]] bool hasSelected() const {
+			return delegate()->peerListSelectedRowsCount() > 0;
 		}
 
 		[[nodiscard]] rpl::producer<Chosen> singleChosen() const{
@@ -2080,7 +2384,7 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 
 	private:
 		rpl::event_stream<Chosen> _singleChosen;
-		rpl::event_stream<bool> _hasSelectedChanges;
+		rpl::event_stream<> _selectionChanges;
 
 	};
 
@@ -2088,11 +2392,86 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 		not_null<ListBox*> box;
 		not_null<Controller*> controller;
 		base::unique_qptr<Ui::PopupMenu> menu;
+		Fn<void(Api::SendOptions options)> submit;
+		rpl::variable<int> starsToSend;
+		Fn<void()> refreshStarsToSend;
+		rpl::lifetime submitLifetime;
 	};
+
+	const auto applyFilter = [=](not_null<ListBox*> box, FilterId id) {
+		box->scrollToY(0);
+		auto &filters = session->data().chatsFilters();
+		const auto &list = filters.list();
+		if (list.size() <= 1) {
+			return;
+		}
+		if (box->filterId() == id) {
+			return;
+		}
+		box->setFilterId(id);
+
+		using SavedState = PeerListController::SavedStateBase;
+		auto state = std::make_unique<PeerListState>();
+		state->controllerState = std::make_unique<SavedState>();
+
+		const auto addList = [&](auto chats) {
+			for (const auto &row : chats->all()) {
+				if (const auto history = row->history()) {
+					state->list.push_back(history->peer);
+				}
+			}
+		};
+
+		if (!id) {
+			state->list.push_back(session->user());
+			addList(session->data().chatsList()->indexed());
+			const auto folderId = Data::Folder::kId;
+			if (const auto folder = session->data().folderLoaded(folderId)) {
+				addList(folder->chatsList()->indexed());
+			}
+			addList(session->data().contactsNoChatsList());
+		} else {
+			addList(session->data().chatsFilters().chatsList(id)->indexed());
+		}
+		box->peerListContent()->restoreState(std::move(state));
+	};
+
 	const auto state = [&] {
 		auto controller = std::make_unique<Controller>(session);
 		const auto controllerRaw = controller.get();
-		auto box = Box<ListBox>(std::move(controller), nullptr);
+		auto init = [=](not_null<ListBox*> box) {
+			controllerRaw->setSearchNoResultsText(
+				tr::lng_bot_chats_not_found(tr::now));
+			const auto lastFilterId = box->lifetime().make_state<FilterId>(0);
+			const auto chatsFilters = Ui::AddChatFiltersTabsStrip(
+				box,
+				session,
+				[=](FilterId id) {
+					*lastFilterId = id;
+					applyFilter(box, id);
+				},
+				Window::GifPauseReason::Layer);
+			chatsFilters->lower();
+			rpl::combine(
+				chatsFilters->heightValue(),
+				rpl::producer<bool>([=](auto consumer) {
+					auto lifetime = rpl::lifetime();
+					consumer.put_next(false);
+					box->appendQueryChangedCallback([=](const QString &q) {
+						const auto hasQuery = !q.isEmpty();
+						applyFilter(box, hasQuery ? 0 : (*lastFilterId));
+						consumer.put_next_copy(hasQuery);
+					});
+					return lifetime;
+				})
+			) | rpl::start_with_next([box](int h, bool hasQuery) {
+				box->setAddedTopScrollSkip(hasQuery ? 0 : h);
+			}, box->lifetime());
+			box->multiSelectHeightValue() | rpl::start_with_next([=](int h) {
+				chatsFilters->moveToLeft(0, h);
+			}, chatsFilters->lifetime());
+		};
+		auto box = Box<ListBox>(std::move(controller), std::move(init));
 		const auto boxRaw = box.data();
 		boxRaw->setForwardOptions({
 			.sendersCount = sendersCount,
@@ -2156,13 +2535,74 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 			tr::lng_photos_comment()),
 		st::shareCommentPadding);
 
+	const auto history = session->data().message(msgIds.front())->history();
 	const auto send = ShareBox::DefaultForwardCallback(
 		show,
-		session->data().message(msgIds.front())->history(),
+		history,
+		msgIds);
+	const auto countMessages = ShareBox::DefaultForwardCountMessages(
+		history,
 		msgIds);
 
-	const auto submit = [=](Api::SendOptions options) {
+	const auto weak = Ui::MakeWeak(state->box);
+	const auto field = comment->entity();
+	state->submit = [=](Api::SendOptions options) {
 		const auto peers = state->box->collectSelectedRows();
+		auto comment = field->getTextWithAppliedMarkdown();
+		const auto checkPaid = [=] {
+			const auto withPaymentApproved = crl::guard(weak, [=](
+					int approved) {
+				auto copy = options;
+				copy.starsApproved = approved;
+				if (const auto onstack = state->submit) {
+					onstack(copy);
+				}
+			});
+
+			const auto alreadyApproved = options.starsApproved;
+			const auto messagesCount = countMessages(comment);
+			auto paid = std::vector<not_null<PeerData*>>();
+			auto waiting = base::flat_set<not_null<PeerData*>>();
+			auto totalStars = 0;
+			for (const auto &peer : peers) {
+				const auto details = ComputePaymentDetails(
+					peer,
+					messagesCount);
+				if (!details) {
+					waiting.emplace(peer);
+				} else if (details->stars > 0) {
+					totalStars += details->stars;
+					paid.push_back(peer);
+				}
+			}
+			if (!waiting.empty()) {
+				session->changes().peerUpdates(
+					Data::PeerUpdate::Flag::FullInfo
+				) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
+					if (waiting.contains(update.peer)) {
+						withPaymentApproved(alreadyApproved);
+					}
+				}, state->submitLifetime);
+
+				if (!session->credits().loaded()) {
+					session->credits().loadedValue(
+					) | rpl::filter(
+						rpl::mappers::_1
+					) | rpl::take(1) | rpl::start_with_next([=] {
+						withPaymentApproved(alreadyApproved);
+					}, state->submitLifetime);
+				}
+				return false;
+			} else if (totalStars > alreadyApproved) {
+				ShowSendPaidConfirm(show, paid, SendPaymentDetails{
+					.messages = messagesCount,
+					.stars = totalStars,
+				}, [=] { withPaymentApproved(totalStars); });
+				return false;
+			}
+			state->submit = nullptr;
+			return true;
+		};
 		send(
 			ranges::views::all(
 				peers
@@ -2170,17 +2610,28 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 					not_null<PeerData*> peer) -> Controller::Chosen {
 				return peer->owner().history(peer);
 			}) | ranges::to_vector,
-			comment->entity()->getTextWithAppliedMarkdown(),
+			checkPaid,
+			std::move(comment),
 			options,
 			state->box->forwardOptionsData());
-		if (successCallback) {
+		if (!state->submit && successCallback) {
 			successCallback();
 		}
 	};
 
 	const auto sendMenuType = [=] {
 		const auto selected = state->box->collectSelectedRows();
-		return ranges::all_of(selected, HistoryView::CanScheduleUntilOnline)
+		const auto hasPaid = [&] {
+			for (const auto peer : selected) {
+				if (peer->starsPerMessageChecked()) {
+					return true;
+				}
+			}
+			return false;
+		}();
+		return hasPaid
+			? SendMenu::Type::SilentOnly
+			: ranges::all_of(selected, HistoryView::CanScheduleUntilOnline)
 			? SendMenu::Type::ScheduledToUser
 			: ((selected.size() == 1) && selected.front()->isSelf())
 			? SendMenu::Type::Reminder
@@ -2232,15 +2683,32 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 			state->menu.get(),
 			show,
 			SendMenu::Details{ sendMenuType() },
-			SendMenu::DefaultCallback(show, crl::guard(parent, submit)));
+			SendMenu::DefaultCallback(show, crl::guard(parent, [=](
+					Api::SendOptions options) {
+				if (const auto onstack = state->submit) {
+					onstack(options);
+				}
+			})));
 		if (showForwardOptions || !state->menu->empty()) {
 //>>>>>>> v5.1.2
 			state->menu->popup(QCursor::pos());
 		}
 	};
 
+	state->refreshStarsToSend = [=] {
+		auto perMessage = 0;
+		for (const auto &peer : state->box->collectSelectedRows()) {
+			perMessage += peer->starsPerMessageChecked();
+		}
+		state->starsToSend = perMessage
+			* countMessages(field->getTextWithTags());
+	};
+
 	comment->hide(anim::type::instant);
-	comment->toggleOn(state->controller->hasSelectedChanges());
+	comment->toggleOn(state->controller->selectionChanges(
+	) | rpl::map([=] {
+		return state->controller->hasSelected();
+	}));
 
 	rpl::combine(
 		state->box->sizeValue(),
@@ -2252,10 +2720,12 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 		state->box->setBottomSkip(comment->isHidden() ? 0 : commentHeight);
 	}, comment->lifetime());
 
-	const auto field = comment->entity();
-
 	field->submits(
-	) | rpl::start_with_next([=] { submit({}); }, field->lifetime());
+	) | rpl::start_with_next([=] {
+		if (const auto onstack = state->submit) {
+			onstack({});
+		}
+	}, field->lifetime());
 	InitMessageFieldHandlers({
 		.session = session,
 		.show = show,
@@ -2265,6 +2735,9 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 		},
 	});
 	field->setSubmitSettings(Core::App().settings().sendSubmitWay());
+	field->changes() | rpl::start_with_next([=] {
+		state->refreshStarsToSend();
+	}, field->lifetime());
 
 	Ui::SendPendingMoveResizeEvents(comment);
 
@@ -2275,13 +2748,20 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 		}
 	}, comment->lifetime());
 
-	state->controller->hasSelectedChanges(
-	) | rpl::start_with_next([=](bool shown) {
+	state->controller->selectionChanges(
+	) | rpl::start_with_next([=] {
+		const auto shown = state->controller->hasSelected();
+
 		state->box->clearButtons();
+		state->refreshStarsToSend();
 		if (shown) {
 			const auto send = state->box->addButton(
 				tr::lng_send_button(),
-				[=] { submit({}); });
+				[=] {
+					if (const auto onstack = state->submit) {
+						onstack({});
+					}
+				});
 			send->setAcceptBoth();
 			send->clicks(
 			) | rpl::start_with_next([=](Qt::MouseButton button) {
@@ -2289,6 +2769,9 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 					showMenu(send);
 				}
 			}, send->lifetime());
+			send->setText(PaidSendButtonText(
+				state->starsToSend.value(),
+				tr::lng_send_button()));
 		}
 		state->box->addButton(tr::lng_cancel(), [=] {
 			state->box->closeBox();
@@ -2368,7 +2851,7 @@ QPointer<Ui::BoxContent> ShowShareGameBox(
 			.session = &navigation->session(),
 			.callback = std::move(chosen),
 			.filter = std::move(filter),
-			.premiumRequiredError = WritePremiumRequiredError,
+			.moneyRestrictionError = WriteMoneyRestrictionError,
 		}),
 		std::move(initBox)));
 	return weak->data();
@@ -2425,11 +2908,11 @@ QPointer<Ui::BoxContent> ShowSendNowMessagesBox(
 		: tr::lng_scheduled_send_now(tr::now);
 
 	const auto list = session->data().idsToItems(items);
-	const auto error = GetErrorTextForSending(
+	const auto error = GetErrorForSending(
 		history->peer,
 		{ .forward = &list });
-	if (!error.isEmpty()) {
-		navigation->showToast(error);
+	if (error) {
+		Data::ShowSendErrorToast(navigation, history->peer, error);
 		return { nullptr };
 	}
 	auto done = [
@@ -2614,10 +3097,10 @@ void UnpinAllMessages(
 }
 
 void MenuAddMarkAsReadAllChatsAction(
-		not_null<Window::SessionController*> controller,
+		not_null<Main::Session*> session,
+		std::shared_ptr<Ui::Show> show,
 		const PeerMenuCallback &addAction) {
-	// There is no async to make weak from controller.
-	auto callback = [=, owner = &controller->session().data()] {
+	auto callback = [=, owner = &session->data()] {
 		auto boxCallback = [=](Fn<void()> &&close) {
 			close();
 
@@ -2626,10 +3109,37 @@ void MenuAddMarkAsReadAllChatsAction(
 				MarkAsReadChatList(folder->chatsList());
 			}
 		};
-		controller->show(
-			Ui::MakeConfirmBox({
-				tr::lng_context_mark_read_all_sure(),
-				std::move(boxCallback)
+		show->show(
+			Box([=](not_null<Ui::GenericBox*> box) {
+				Ui::AddSkip(box->verticalLayout());
+				Ui::AddSkip(box->verticalLayout());
+				const auto userpic = Ui::CreateChild<Ui::UserpicButton>(
+					box->verticalLayout(),
+					session->user(),
+					st::mainMenuUserpic);
+				Ui::IconWithTitle(
+					box->verticalLayout(),
+					userpic,
+					Ui::CreateChild<Ui::FlatLabel>(
+						box->verticalLayout(),
+						Info::Profile::NameValue(session->user()),
+						box->getDelegate()->style().title));
+				auto text = rpl::combine(
+					tr::lng_context_mark_read_all_sure(),
+					tr::lng_context_mark_read_all_sure_2(
+						Ui::Text::RichLangValue)
+				) | rpl::map([](QString t1, TextWithEntities t2) {
+					return TextWithEntities()
+						.append(std::move(t1))
+						.append('\n')
+						.append('\n')
+						.append(std::move(t2));
+				});
+				Ui::ConfirmBox(box, {
+					.text = std::move(text),
+					.confirmed = std::move(boxCallback),
+					.confirmStyle = &st::attentionBoxButton,
+				});
 			}),
 			Ui::LayerOption::CloseOther);
 	};
@@ -2699,14 +3209,20 @@ Fn<void()> ClearHistoryHandler(
 		not_null<Window::SessionController*> controller,
 		not_null<PeerData*> peer) {
 	return [=] {
-		controller->show(Box<DeleteMessagesBox>(peer, true));
+		if (!controller->showFrozenError()) {
+			controller->show(Box<DeleteMessagesBox>(peer, true));
+		}
 	};
 }
 
 Fn<void()> DeleteAndLeaveHandler(
 		not_null<Window::SessionController*> controller,
 		not_null<PeerData*> peer) {
-	return [=] { controller->show(Box(DeleteChatBox, peer)); };
+	return [=] {
+		if (!controller->showFrozenError()) {
+			controller->show(Box(DeleteChatBox, peer));
+		}
+	};
 }
 
 void FillDialogsEntryMenu(
@@ -2734,9 +3250,6 @@ bool FillVideoChatMenu(
 	const auto livestream = !peer->isMegagroup() && peer->isChannel();
 	const auto has = (peer->groupCall() != nullptr);
 	const auto manager = peer->canManageGroupCall();
-	const auto creator = peer->isChat()
-		? peer->asChat()->amCreator()
-		: peer->asChannel()->amCreator();
 	if (has) {
 		addAction(
 			tr::lng_menu_start_group_call_join(tr::now),
@@ -2748,9 +3261,9 @@ bool FillVideoChatMenu(
 				? tr::lng_menu_start_group_call_channel
 				: tr::lng_menu_start_group_call)(tr::now),
 			[=] { callback({}); },
-			creator ? &st::menuIconStartStream : &st::menuIconVideoChat);
+			&st::menuIconStartStream);
 	}
-	if (!has && creator) {
+	if (!has && manager) {
 		addAction(
 			(livestream
 				? tr::lng_menu_start_group_call_scheduled_channel
@@ -2765,6 +3278,53 @@ bool FillVideoChatMenu(
 			&st::menuIconStartStreamWith);
 	}
 	return has || manager;
+}
+
+void FillSenderUserpicMenu(
+		not_null<SessionController*> controller,
+		not_null<PeerData*> peer,
+		Ui::InputField *fieldForMention,
+		Dialogs::Key searchInEntry,
+		const PeerMenuCallback &addAction) {
+	const auto group = (peer->isChat() || peer->isMegagroup());
+	const auto channel = peer->isChannel();
+	const auto viewProfileText = group
+		? tr::lng_context_view_group(tr::now)
+		: channel
+		? tr::lng_context_view_channel(tr::now)
+		: tr::lng_context_view_profile(tr::now);
+	addAction(viewProfileText, [=] {
+		controller->showPeerInfo(peer, Window::SectionShow::Way::Forward);
+	}, channel ? &st::menuIconInfo : &st::menuIconProfile);
+
+	const auto showHistoryText = group
+		? tr::lng_context_open_group(tr::now)
+		: channel
+		? tr::lng_context_open_channel(tr::now)
+		: tr::lng_profile_send_message(tr::now);
+	addAction(showHistoryText, [=] {
+		controller->showPeerHistory(peer, Window::SectionShow::Way::Forward);
+	}, channel ? &st::menuIconChannel : &st::menuIconChatBubble);
+
+	const auto username = peer->username();
+	const auto mention = !username.isEmpty() || peer->isUser();
+	if (const auto guard = mention ? fieldForMention : nullptr) {
+		addAction(tr::lng_context_mention(tr::now), crl::guard(guard, [=] {
+			if (!username.isEmpty()) {
+				fieldForMention->insertTag('@' + username);
+			} else {
+				fieldForMention->insertTag(
+					peer->shortName(),
+					PrepareMentionTag(peer->asUser()));
+			}
+		}), &st::menuIconUsername);
+	}
+
+	if (searchInEntry) {
+		addAction(tr::lng_context_search_from(tr::now), [=] {
+			controller->searchInChat(searchInEntry, peer);
+		}, &st::menuIconSearch);
+	}
 }
 
 bool IsUnreadThread(not_null<Data::Thread*> thread) {
@@ -2807,8 +3367,9 @@ void AddSeparatorAndShiftUp(const PeerMenuCallback &addAction) {
 	addAction({ .addTopShift = -shift });
 }
 
-
-/*Fn<void()> DeleteMyMessagesHandler(
+/*
+// PTG: feature is not complete
+Fn<void()> DeleteMyMessagesHandler(
 		not_null<Window::SessionController*> controller,
 		not_null<PeerData*> peer) {
     //peer->session().data().histories().deleteMessages();
@@ -2870,5 +3431,54 @@ void AddSeparatorAndShiftUp(const PeerMenuCallback &addAction) {
         }).send();
 	};
 }*/
+
+void TogglePinnedThread(
+		not_null<Window::SessionController*> controller,
+		not_null<Dialogs::Entry*> entry,
+		FilterId filterId) {
+	if (!filterId) {
+		return TogglePinnedThread(controller, entry);
+	}
+	const auto history = entry->asHistory();
+	if (!history) {
+		return;
+	}
+	const auto owner = &history->owner();
+
+	// This can happen when you remove this filter from another client.
+	if (!ranges::contains(
+			(&owner->session())->data().chatsFilters().list(),
+			filterId,
+			&Data::ChatFilter::id)) {
+		controller->showToast(tr::lng_cant_do_this(tr::now));
+		return;
+	}
+
+	const auto isPinned = !history->isPinnedDialog(filterId);
+	if (isPinned && PinnedLimitReached(controller, history, filterId)) {
+		return;
+	}
+
+	owner->setChatPinned(history, filterId, isPinned);
+	Api::SaveNewFilterPinned(&owner->session(), filterId);
+	if (isPinned) {
+		controller->content()->dialogsToUp();
+	}
+}
+
+bool IsArchived(not_null<History*> history) {
+	return (history->folder() != nullptr);
+}
+
+bool CanArchive(History *history, PeerData *peer) {
+	if (history && history->useTopPromotion()) {
+		return false;
+	} else if (peer && (peer->isNotificationsUser() || peer->isSelf())) {
+		if (!history || !history->folder()) {
+			return false;
+		}
+	}
+	return true;
+}
 
 } // namespace Window

@@ -11,8 +11,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Ui {
 class RpWidget;
+} // namespace Ui
 
-namespace Premium {
+namespace Ui::Text {
+class CustomEmoji;
+} // namespace Ui::Text
+
+namespace Ui::Premium {
 
 class ColoredMiniStars final {
 public:
@@ -21,6 +26,7 @@ public:
 		not_null<Ui::RpWidget*> parent,
 		bool optimizeUpdate,
 		MiniStars::Type type = MiniStars::Type::MonoStars);
+	ColoredMiniStars(Fn<void(const QRect &)> update, MiniStars::Type type);
 
 	void setSize(const QSize &size);
 	void setPosition(QPoint position);
@@ -31,7 +37,7 @@ public:
 	void setPaused(bool paused);
 
 private:
-	Ui::Premium::MiniStars _ministars;
+	MiniStars _ministars;
 	QRectF _ministarsRect;
 	QImage _frame;
 	QImage _mask;
@@ -41,5 +47,12 @@ private:
 
 };
 
-} // namespace Premium
-} // namespace Ui
+[[nodiscard]] std::unique_ptr<Text::CustomEmoji> MakeCollectibleEmoji(
+	QStringView entityData,
+	QColor centerColor,
+	QColor edgeColor,
+	std::unique_ptr<Text::CustomEmoji> inner,
+	Fn<void()> update,
+	int size);
+
+} // namespace Ui::Premium

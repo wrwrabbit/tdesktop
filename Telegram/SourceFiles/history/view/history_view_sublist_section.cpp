@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_list_widget.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/history_view_swipe_back_session.h"
 #include "lang/lang_keys.h"
 #include "ui/chat/chat_style.h"
 #include "ui/widgets/buttons.h"
@@ -146,6 +147,7 @@ SublistWidget::SublistWidget(
 
 	setupShortcuts();
 	setupTranslateBar();
+	Window::SetupSwipeBackSection(this, _scroll.get(), _inner);
 }
 
 SublistWidget::~SublistWidget() = default;
@@ -329,7 +331,10 @@ void SublistWidget::setInternalState(
 	restoreState(memento);
 }
 
-bool SublistWidget::searchInChatEmbedded(Dialogs::Key chat, QString query) {
+bool SublistWidget::searchInChatEmbedded(
+		QString query,
+		Dialogs::Key chat,
+		PeerData *searchFrom) {
 	const auto sublist = chat.sublist();
 	if (!sublist || sublist != _sublist) {
 		return false;
@@ -338,7 +343,7 @@ bool SublistWidget::searchInChatEmbedded(Dialogs::Key chat, QString query) {
 		_composeSearch->setInnerFocus();
 		return true;
 	}
-	_composeSearch = std::make_unique<HistoryView::ComposeSearch>(
+	_composeSearch = std::make_unique<ComposeSearch>(
 		this,
 		controller(),
 		_history,
@@ -349,10 +354,15 @@ bool SublistWidget::searchInChatEmbedded(Dialogs::Key chat, QString query) {
 	setInnerFocus();
 
 	_composeSearch->activations(
-	) | rpl::start_with_next([=](not_null<HistoryItem*> item) {
+	) | rpl::start_with_next([=](ComposeSearch::Activation activation) {
+		const auto item = activation.item;
+		auto params = ::Window::SectionShow(
+			::Window::SectionShow::Way::ClearStack);
+		params.highlightPart = { activation.query };
+		params.highlightPartOffsetHint = kSearchQueryOffsetHint;
 		controller()->showPeerHistory(
 			item->history()->peer->id,
-			::Window::SectionShow::Way::ClearStack,
+			params,
 			item->fullId().msg);
 	}, _composeSearch->lifetime());
 

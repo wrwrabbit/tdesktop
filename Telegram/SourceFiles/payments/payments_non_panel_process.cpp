@@ -25,6 +25,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/boost_box.h" // Ui::StartFireworks.
 #include "ui/layers/generic_box.h"
 #include "ui/text/format_values.h"
+#include "ui/text/text_utilities.h"
+#include "ui/toast/toast.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 
@@ -55,11 +57,29 @@ void ProcessCreditsPayment(
 				onstack(CheckoutResult::Cancelled);
 			}
 			return;
-		} else if (form->starGiftForm) {
+		} else if (form->starGiftForm
+			|| IsPremiumForStarsInvoice(form->id)) {
 			const auto done = [=](std::optional<QString> error) {
 				const auto onstack = maybeReturnToBot;
 				if (error) {
-					show->showToast(*error);
+					if (*error == u"STARGIFT_USAGE_LIMITED"_q) {
+						if (form->starGiftLimitedCount) {
+							show->showToast({
+								.title = tr::lng_gift_sold_out_title(
+									tr::now),
+								.text = tr::lng_gift_sold_out_text(
+									tr::now,
+									lt_count_decimal,
+									form->starGiftLimitedCount,
+									Ui::Text::RichLangValue),
+							});
+						} else {
+							show->showToast(
+								tr::lng_gift_sold_out_title(tr::now));
+						}
+					} else {
+						show->showToast(*error);
+					}
 					if (onstack) {
 						onstack(CheckoutResult::Failed);
 					}
@@ -67,7 +87,7 @@ void ProcessCreditsPayment(
 					onstack(CheckoutResult::Paid);
 				}
 			};
-			Ui::SendStarGift(&show->session(), form, done);
+			Ui::SendStarsForm(&show->session(), form, done);
 			return;
 		}
 		const auto unsuccessful = std::make_shared<bool>(true);
@@ -75,14 +95,14 @@ void ProcessCreditsPayment(
 			Ui::SendCreditsBox,
 			form,
 			[=] {
-			*unsuccessful = false;
-			if (const auto widget = fireworks.data()) {
-				Ui::StartFireworks(widget);
-			}
-			if (const auto onstack = maybeReturnToBot) {
-				onstack(CheckoutResult::Paid);
-			}
-		}));
+				*unsuccessful = false;
+				if (const auto widget = fireworks.data()) {
+					Ui::StartFireworks(widget);
+				}
+				if (const auto onstack = maybeReturnToBot) {
+					onstack(CheckoutResult::Paid);
+				}
+			}));
 		box->boxClosing() | rpl::start_with_next([=] {
 			crl::on_main([=] {
 				if (*unsuccessful) {
@@ -98,7 +118,7 @@ void ProcessCreditsPayment(
 	auto source = !starGift
 		? SmallBalanceSource(SmallBalanceBot{ .botId = form->botId })
 		: SmallBalanceSource(SmallBalanceStarGift{
-			.userId = peerToUser(starGift->user->id)
+			.recipientId = starGift->recipient->id,
 		});
 	MaybeRequestBalanceIncrease(show, form->invoice.credits, source, done);
 }
@@ -138,6 +158,7 @@ Fn<void(NonPanelPaymentForm)> ProcessNonPanelPaymentFormFactory(
 				controller->content().get(),
 				form,
 				maybeReturnToBot);
+			controller->window().activate();
 		}, [&](const CreditsReceiptPtr &receipt) {
 			ProcessCreditsReceipt(controller, receipt, maybeReturnToBot);
 		}, [](RealFormPresentedNotification) {});

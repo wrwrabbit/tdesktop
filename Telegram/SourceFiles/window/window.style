@@ -43,9 +43,7 @@ notifyClose: IconButton {
 
 	rippleAreaPosition: point(5px, 5px);
 	rippleAreaSize: 20px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 notifyItemTop: 12px;
 notifyTextLeft: 12px;
@@ -287,8 +285,9 @@ windowFilterSmallRemoveRight: 10px;
 windowFilterNameInput: InputField(defaultInputField) {
 	textMargins: margins(0px, 26px, 36px, 4px);
 }
+windowFilterStaticTitlePosition: point(0px, 5px);
 windowFilterIconToggleSize: size(36px, 36px);
-windowFilterIconTogglePosition: point(-4px, 12px);
+windowFilterIconTogglePosition: point(-4px, 18px);
 windwoFilterIconPanelPosition: point(-2px, -1px);
 windowFilterIconSingle: size(44px, 42px);
 windowFilterIconPadding: margins(10px, 36px, 10px, 8px);
@@ -321,6 +320,8 @@ ivWidthMin: 380px;
 ivHeightMin: 480px;
 ivWidthDefault: 600px;
 ivHeightDefault: 800px;
+
+maxWidthSharedMediaWindow: 419px;
 
 // Windows specific
 

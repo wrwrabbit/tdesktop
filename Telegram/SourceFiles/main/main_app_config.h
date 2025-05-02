@@ -64,6 +64,20 @@ public:
 	}
 
 	[[nodiscard]] int quoteLengthMax() const;
+	[[nodiscard]] int stargiftConvertPeriodMax() const;
+
+	[[nodiscard]] const std::vector<QString> &startRefPrefixes();
+	[[nodiscard]] bool starrefSetupAllowed() const;
+	[[nodiscard]] bool starrefJoinAllowed() const;
+	[[nodiscard]] int starrefCommissionMin() const;
+	[[nodiscard]] int starrefCommissionMax() const;
+
+	[[nodiscard]] float64 starsWithdrawRate() const;
+	[[nodiscard]] bool paidMessagesAvailable() const;
+	[[nodiscard]] int paidMessageStarsMax() const;
+	[[nodiscard]] int paidMessageCommission() const;
+
+	[[nodiscard]] int pinnedGiftsLimit() const;
 
 	void refresh(bool force = false);
 
@@ -107,6 +121,11 @@ private:
 
 	std::vector<QString> _ignoreRestrictionReasons;
 	rpl::event_stream<std::vector<QString>> _ignoreRestrictionChanges;
+
+	std::vector<QString> _startRefPrefixes;
+
+	crl::time _lastFrozenRefresh = 0;
+	rpl::lifetime _frozenTrackLifetime;
 
 	rpl::lifetime _lifetime;
 

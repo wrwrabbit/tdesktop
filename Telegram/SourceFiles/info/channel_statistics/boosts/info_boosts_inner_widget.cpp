@@ -35,9 +35,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
+#include "ui/widgets/shadow.h"
 #include "ui/widgets/slider_natural_width.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/ui_utility.h"
+#include "styles/style_color_indices.h"
+#include "styles/style_dialogs.h" // dialogsSearchTabs
 #include "styles/style_giveaway.h"
 #include "styles/style_info.h"
 #include "styles/style_premium.h"
@@ -182,7 +185,7 @@ void FillShareLink(
 
 	const auto label = content->lifetime().make_state<Ui::InviteLinkLabel>(
 		content,
-		rpl::single(link),
+		rpl::single(base::duplicate(link).replace(u"https://"_q, QString())),
 		nullptr);
 	content->add(
 		label->take(),
@@ -304,6 +307,7 @@ void InnerWidget::fill() {
 			delete Ui::VerticalLayout::widgetAt(0);
 		}
 		load();
+		_showFinished.fire({});
 	});
 
 	{
@@ -337,7 +341,6 @@ void InnerWidget::fill() {
 	Ui::AddSkip(inner);
 
 	if (!status.prepaidGiveaway.empty()) {
-		constexpr auto kColorIndexCredits = int(1);
 		const auto multiplier = Api::PremiumGiftCodeOptions(_peer)
 			.giveawayBoostsPerPremium();
 		Ui::AddSkip(inner);
@@ -350,7 +353,7 @@ void InnerWidget::fill() {
 				g.credits
 					? GiveawayTypeRow::Type::PrepaidCredits
 					: GiveawayTypeRow::Type::Prepaid,
-				g.credits ? kColorIndexCredits : g.id,
+				g.credits ? st::colorIndexOrange : g.id,
 				g.credits
 					? tr::lng_boosts_prepaid_giveaway_single()
 					: tr::lng_boosts_prepaid_giveaway_quantity(
@@ -389,7 +392,9 @@ void InnerWidget::fill() {
 		}
 
 		Ui::AddSkip(inner);
-		Ui::AddDivider(inner);
+		Ui::AddDividerText(
+			inner,
+			tr::lng_boosts_prepaid_giveaway_title_subtext());
 		Ui::AddSkip(inner);
 	}
 
@@ -430,7 +435,7 @@ void InnerWidget::fill() {
 #else
 		const auto hasOneTab = (hasBoosts != hasGifts);
 #endif
-		const auto boostsTabText = tr::lng_boosts_list_title(
+		const auto boostsTabText = tr::lng_giveaway_quantity(
 			tr::now,
 			lt_count,
 			status.firstSliceBoosts.multipliedTotal);
@@ -454,8 +459,19 @@ void InnerWidget::fill() {
 				inner,
 				object_ptr<Ui::CustomWidthSlider>(
 					inner,
-					st::defaultTabsSlider)),
-			st::boxRowPadding);
+					st::dialogsSearchTabs)));
+		if (!hasOneTab) {
+			const auto shadow = Ui::CreateChild<Ui::PlainShadow>(inner);
+			shadow->show();
+			slider->geometryValue(
+			) | rpl::start_with_next([=](const QRect &r) {
+				shadow->setGeometry(
+					inner->x(),
+					rect::bottom(r) - shadow->height(),
+					inner->width(),
+					shadow->height());
+			}, shadow->lifetime());
+		}
 		slider->toggle(!hasOneTab, anim::type::instant);
 
 		slider->entity()->addSection(boostsTabText);

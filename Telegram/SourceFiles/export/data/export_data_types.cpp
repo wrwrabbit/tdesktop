@@ -920,6 +920,7 @@ StoriesSlice ParseStoriesSlice(
 				auto content = photo
 					? ParsePhoto(*photo, suggestedPath)
 					: Photo();
+				content.spoilered = data.is_spoiler();
 				media.content = content;
 			}, [&](const MTPDmessageMediaDocument &data) {
 				const auto document = data.vdocument();
@@ -948,6 +949,7 @@ StoriesSlice ParseStoriesSlice(
 						date,
 						extension);
 				content.thumb.file.suggestedPath = path + "_thumb.jpg";
+				content.spoilered = data.is_spoiler();
 				media.content = content;
 			}, [&](const auto &data) {
 				media.content = UnsupportedMedia();
@@ -1329,6 +1331,7 @@ Media ParseMedia(
 				+ "photos/"
 				+ PreparePhotoFileName(++context.photos, date))
 			: Photo();
+		content.spoilered = data.is_spoiler();
 		if (const auto ttl = data.vttl_seconds()) {
 			result.ttl = ttl->v;
 			content.image.file = File();
@@ -1349,6 +1352,7 @@ Media ParseMedia(
 			result.ttl = ttl->v;
 			content.file = File();
 		}
+		content.spoilered = data.is_spoiler();
 		result.content = content;
 	}, [&](const MTPDmessageMediaWebPage &data) {
 		// Ignore web pages.
@@ -1467,6 +1471,8 @@ ServiceAction ParseServiceAction(
 				return Reason::Hangup;
 			}, [](const MTPDphoneCallDiscardReasonBusy &data) {
 				return Reason::Busy;
+			}, [](const MTPDphoneCallDiscardReasonAllowGroupCall &) {
+				return Reason::AllowGroupCall;
 			});
 		}
 		result.content = content;
@@ -1663,17 +1669,49 @@ ServiceAction ParseServiceAction(
 			.isUnclaimed = data.is_unclaimed(),
 		};
 	}, [&](const MTPDmessageActionStarGift &data) {
-		const auto &gift = data.vgift().data();
-		result.content = ActionStarGift{
-			.giftId = uint64(gift.vid().v),
-			.stars = int64(gift.vstars().v),
-			.text = (data.vmessage()
-				? ParseText(
-					data.vmessage()->data().vtext(),
-					data.vmessage()->data().ventities().v)
-				: std::vector<TextPart>()),
-			.anonymous = data.is_name_hidden(),
-			.limited = gift.is_limited(),
+		data.vgift().match([&](const MTPDstarGift &gift) {
+			result.content = ActionStarGift{
+				.giftId = uint64(gift.vid().v),
+				.stars = int64(gift.vstars().v),
+				.text = (data.vmessage()
+					? ParseText(
+						data.vmessage()->data().vtext(),
+						data.vmessage()->data().ventities().v)
+					: std::vector<TextPart>()),
+				.anonymous = data.is_name_hidden(),
+				.limited = gift.is_limited(),
+			};
+		}, [&](const MTPDstarGiftUnique &gift) {
+			result.content = ActionStarGift{
+				.giftId = uint64(gift.vid().v),
+				.text = (data.vmessage()
+					? ParseText(
+						data.vmessage()->data().vtext(),
+						data.vmessage()->data().ventities().v)
+					: std::vector<TextPart>()),
+				.anonymous = data.is_name_hidden(),
+			};
+		});
+	}, [&](const MTPDmessageActionStarGiftUnique &data) {
+		data.vgift().match([&](const MTPDstarGift &gift) {
+			result.content = ActionStarGift{
+				.giftId = uint64(gift.vid().v),
+				.stars = int64(gift.vstars().v),
+				.limited = gift.is_limited(),
+			};
+		}, [&](const MTPDstarGiftUnique &gift) {
+			result.content = ActionStarGift{
+				.giftId = uint64(gift.vid().v),
+			};
+		});
+	}, [&](const MTPDmessageActionPaidMessagesRefunded &data) {
+		result.content = ActionPaidMessagesRefunded{
+			.messages = data.vcount().v,
+			.stars = int64(data.vstars().v),
+		};
+	}, [&](const MTPDmessageActionPaidMessagesPrice &data) {
+		result.content = ActionPaidMessagesPrice{
+			.stars = int(data.vstars().v),
 		};
 	}, [](const MTPDmessageActionEmpty &data) {});
 	return result;

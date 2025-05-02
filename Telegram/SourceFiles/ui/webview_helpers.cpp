@@ -15,9 +15,9 @@ namespace {
 [[nodiscard]] QByteArray Serialize(const QColor &qt) {
 	if (qt.alpha() == 255) {
 		return '#'
-			+ QByteArray::number(qt.red(), 16).right(2)
-			+ QByteArray::number(qt.green(), 16).right(2)
-			+ QByteArray::number(qt.blue(), 16).right(2);
+			+ QByteArray::number(qt.red(), 16).rightJustified(2, '0')
+			+ QByteArray::number(qt.green(), 16).rightJustified(2, '0')
+			+ QByteArray::number(qt.blue(), 16).rightJustified(2, '0');
 	}
 	return "rgba("
 		+ QByteArray::number(qt.red()) + ","
@@ -31,6 +31,7 @@ namespace {
 QByteArray ComputeStyles(
 		const base::flat_map<QByteArray, const style::color*> &colors,
 		const base::flat_map<QByteArray, tr::phrase<>> &phrases,
+		int zoom,
 		bool nightTheme) {
 	static const auto serialize = [](const style::color *color) {
 		return Serialize((*color)->c);
@@ -66,6 +67,9 @@ QByteArray ComputeStyles(
 		result += "--td-"_q + name + ':' + serialize(color) + ';';
 	}
 	result += "--td-night:"_q + (nightTheme ? "1" : "0") + ';';
+	result += "--td-zoom-percentage:"_q
+		+ (QString::number(zoom).toUtf8() + '%')
+		+ ';';
 	return result;
 }
 
@@ -97,9 +101,9 @@ QByteArray ComputeSemiTransparentOverStyle(
 	const auto gmina = mina(g0, g1);
 	const auto bmina = mina(b0, b1);
 	const auto a = std::max({ rmina, gmina, bmina });
-	const auto r = (r1 * 255 - r0 * (255 - a)) / a;
-	const auto g = (g1 * 255 - g0 * (255 - a)) / a;
-	const auto b = (b1 * 255 - b0 * (255 - a)) / a;
+	const auto r = (a > 0) ? ((r1 * 255 - r0 * (255 - a)) / a) : r0;
+	const auto g = (a > 0) ? ((g1 * 255 - g0 * (255 - a)) / a) : g0;
+	const auto b = (a > 0) ? ((b1 * 255 - b0 * (255 - a)) / a) : b0;
 	return result(QColor(r, g, b, a));
 }
 

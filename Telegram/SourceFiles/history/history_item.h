@@ -68,6 +68,7 @@ struct SponsoredFrom;
 class Story;
 class SavedSublist;
 struct PaidReactionSend;
+struct SendError;
 } // namespace Data
 
 namespace Main {
@@ -102,11 +103,14 @@ struct HistoryItemCommonFields {
 	FullReplyTo replyTo;
 	TimeId date = 0;
 	BusinessShortcutId shortcutId = 0;
+	int starsPaid = 0;
 	UserId viaBotId = 0;
 	QString postAuthor;
 	uint64 groupedId = 0;
 	EffectId effectId = 0;
 	HistoryMessageMarkupData markup;
+	bool ignoreForwardFrom = false;
+	bool ignoreForwardCaptions = false;
 };
 
 enum class HistoryReactionSource : char {
@@ -318,6 +322,9 @@ public:
 	[[nodiscard]] bool hideEditedBadge() const {
 		return (_flags & MessageFlag::HideEdited);
 	}
+	[[nodiscard]] bool hideDisplayDate() const {
+		return (_flags & MessageFlag::HideDisplayDate);
+	}
 	[[nodiscard]] bool isLocal() const {
 		return _flags & MessageFlag::Local;
 	}
@@ -429,8 +436,10 @@ public:
 	[[nodiscard]] bool forbidsForward() const;
 	[[nodiscard]] bool forbidsSaving() const;
 	[[nodiscard]] bool allowsSendNow() const;
+	[[nodiscard]] bool allowsReschedule() const;
 	[[nodiscard]] bool allowsForward() const;
 	[[nodiscard]] bool allowsEdit(TimeId now) const;
+	[[nodiscard]] bool allowsEditMedia() const;
 	[[nodiscard]] bool canDelete() const;
 	[[nodiscard]] bool canDeleteForEveryone(TimeId now) const;
 	[[nodiscard]] bool suggestReport() const;
@@ -438,7 +447,7 @@ public:
 	[[nodiscard]] bool suggestDeleteAllReport() const;
 	[[nodiscard]] ChatRestriction requiredSendRight() const;
 	[[nodiscard]] bool requiresSendInlineRight() const;
-	[[nodiscard]] std::optional<QString> errorTextForForward(
+	[[nodiscard]] Data::SendError errorTextForForward(
 		not_null<Data::Thread*> to) const;
 	[[nodiscard]] const HistoryMessageTranslation *translation() const;
 	[[nodiscard]] bool translationShowRequiresCheck(LanguageId to) const;
@@ -449,7 +458,7 @@ public:
 	void toggleReaction(
 		const Data::ReactionId &reaction,
 		HistoryReactionSource source);
-	void addPaidReaction(int count, std::optional<bool> anonymous = {});
+	void addPaidReaction(int count, std::optional<PeerId> shownPeer = {});
 	void cancelScheduledPaidReaction();
 	[[nodiscard]] Data::PaidReactionSend startPaidReactionSending();
 	void finishPaidReactionSending(
@@ -467,6 +476,7 @@ public:
 	[[nodiscard]] auto topPaidReactionsWithLocal() const
 		-> std::vector<Data::MessageReactionsTopPaid>;
 	[[nodiscard]] int reactionsPaidScheduled() const;
+	[[nodiscard]] PeerId reactionsLocalShownPeer() const;
 	[[nodiscard]] bool canViewReactions() const;
 	[[nodiscard]] std::vector<Data::ReactionId> chosenReactions() const;
 	[[nodiscard]] Data::ReactionId lookupUnreadReaction(
@@ -481,6 +491,7 @@ public:
 	[[nodiscard]] GlobalMsgId globalId() const;
 	[[nodiscard]] Data::MessagePosition position() const;
 	[[nodiscard]] TimeId date() const;
+	[[nodiscard]] bool awaitingVideoProcessing() const;
 
 	[[nodiscard]] Data::Media *media() const {
 		return _media.get();
@@ -541,6 +552,7 @@ public:
 	// content uses the color of the original sender.
 	[[nodiscard]] PeerData *contentColorsFrom() const;
 	[[nodiscard]] uint8 contentColorIndex() const;
+	[[nodiscard]] int starsPaid() const;
 
 	[[nodiscard]] std::unique_ptr<HistoryView::Element> createView(
 		not_null<HistoryView::ElementDelegate*> delegate,
@@ -549,6 +561,8 @@ public:
 	void updateDate(TimeId newDate);
 	[[nodiscard]] bool canUpdateDate() const;
 	void customEmojiRepaint();
+
+	[[nodiscard]] bool needsUpdateForVideoQualities(const MTPMessage &data);
 
 	[[nodiscard]] TimeId ttlDestroyAt() const {
 		return _ttlDestroyAt;
@@ -673,6 +687,7 @@ private:
 	TimeId _date = 0;
 	TimeId _ttlDestroyAt = 0;
 	int _boostsApplied = 0;
+	int _starsPaid = 0;
 	BusinessShortcutId _shortcutId = 0;
 
 	MessageGroupId _groupId = MessageGroupId();

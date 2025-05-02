@@ -77,6 +77,7 @@ jobs:
           fi
 
           docker run --rm \
+          -u $(id -u) \
           -v $PWD:/usr/src/tdesktop \
           -e CONFIG=Debug \
           tdesktop:centos_env \
@@ -118,6 +119,7 @@ jobs:
           tar -cJvf "${{ env.ARTIFACT_NAME }}_linux.tar.xz" "Telegram/"
           rm -rf Telegram/
           # mv {Telegram,Updater} artifact/
+
       - uses: actions/upload-artifact@v4
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.

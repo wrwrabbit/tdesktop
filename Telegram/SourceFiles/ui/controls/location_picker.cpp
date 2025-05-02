@@ -58,7 +58,7 @@ namespace {
 constexpr auto kResolveAddressDelay = 3 * crl::time(1000);
 constexpr auto kSearchDebounceDelay = crl::time(900);
 
-#ifdef Q_OS_MAC
+#if defined Q_OS_MAC || defined Q_OS_LINUX
 const auto kProtocolOverride = "mapboxapihelper";
 #else // Q_OS_MAC
 const auto kProtocolOverride = "";
@@ -379,7 +379,7 @@ void VenuesController::rowPaintIcon(
 	static const auto phrases = base::flat_map<QByteArray, tr::phrase<>>{
 		{ "maps-places-in-area", tr::lng_maps_places_in_area },
 	};
-	return Ui::ComputeStyles(map, phrases, Window::Theme::IsNightMode());
+	return Ui::ComputeStyles(map, phrases, 100, Window::Theme::IsNightMode());
 }
 
 [[nodiscard]] QByteArray ReadResource(const QString &name) {
@@ -778,7 +778,11 @@ std::shared_ptr<Main::SessionShow> LocationPicker::uiShow() {
 }
 
 bool LocationPicker::Available(const LocationPickerConfig &config) {
-	static const auto Supported = Webview::NavigateToDataSupported();
+	static const auto Supported = [&] {
+		const auto availability = Webview::Availability();
+		return availability.customSchemeRequests
+			&& availability.customReferer;
+	}();
 	return Supported && !config.mapsToken.isEmpty();
 }
 
@@ -1155,7 +1159,9 @@ void LocationPicker::venuesRequest(
 	}
 	const auto username = _session->serverConfig().venueSearchUsername;
 	_venuesBotRequestId = _api.request(MTPcontacts_ResolveUsername(
-		MTP_string(username)
+		MTP_flags(0),
+		MTP_string(username),
+		MTP_string()
 	)).done([=](const MTPcontacts_ResolvedPeer &result) {
 		auto &data = result.data();
 		_session->data().processUsers(data.vusers());

@@ -822,7 +822,7 @@ void StickersListFooter::mousePressEvent(QMouseEvent *e) {
 	if (e->button() != Qt::LeftButton) {
 		return;
 	}
-	_iconsMousePos = e ? e->globalPos() : QCursor::pos();
+	_iconsMousePos = e->globalPos();
 	updateSelected();
 
 	if (_selected == SpecialOver::Settings) {
@@ -1467,6 +1467,8 @@ void StickersListFooter::paintSetIconToCache(
 					return &st().icons.people;
 				} else if (const auto section = SetIdEmojiSection(icon.setId)) {
 					return sectionIcon(*section, selected);
+				} else if (icon.setId == Data::Stickers::CollectibleSetId) {
+					return &st().icons.collectibles;
 				}
 				return sectionIcon(Section::Recent, selected);
 			}());

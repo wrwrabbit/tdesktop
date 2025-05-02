@@ -8,11 +8,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "api/api_common.h"
+#include "base/object_ptr.h"
 #include "menu/menu_send.h"
 #include "data/data_poll.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
 
 class History;
+
+namespace Api {
+struct SendOptions;
+} // namespace Api
 
 namespace Ui {
 class RpWidget;
@@ -34,6 +39,8 @@ namespace Dialogs {
 class MainList;
 struct EntryState;
 struct UnreadState;
+class Key;
+class Entry;
 } // namespace Dialogs
 
 namespace ChatHelpers {
@@ -64,8 +71,16 @@ bool FillVideoChatMenu(
 	Dialogs::EntryState request,
 	const PeerMenuCallback &addAction);
 
+void FillSenderUserpicMenu(
+	not_null<SessionController*> controller,
+	not_null<PeerData*> peer,
+	Ui::InputField *fieldForMention,
+	Dialogs::Key searchInEntry,
+	const PeerMenuCallback &addAction);
+
 void MenuAddMarkAsReadAllChatsAction(
-	not_null<Window::SessionController*> controller,
+	not_null<Main::Session*> session,
+	std::shared_ptr<Ui::Show> show,
 	const PeerMenuCallback &addAction);
 
 void MenuAddMarkAsReadChatListAction(
@@ -74,7 +89,9 @@ void MenuAddMarkAsReadChatListAction(
 	const PeerMenuCallback &addAction,
 	Fn<Dialogs::UnreadState()> customUnreadState = nullptr);
 
-void PeerMenuExportChat(not_null<PeerData*> peer);
+void PeerMenuExportChat(
+	not_null<Window::SessionController*> controller,
+	not_null<PeerData*> peer);
 void PeerMenuDeleteContact(
 	not_null<Window::SessionController*> controller,
 	not_null<UserData*> user);
@@ -130,6 +147,15 @@ Fn<void()> DeleteAndLeaveHandler(
 	not_null<Window::SessionController*> controller,
 	not_null<PeerData*> peer);
 
+object_ptr<Ui::BoxContent> PrepareChooseRecipientBox(
+	not_null<Main::Session*> session,
+	FnMut<bool(not_null<Data::Thread*>)> &&chosen,
+	rpl::producer<QString> titleOverride = nullptr,
+	FnMut<void()> &&successCallback = nullptr,
+	InlineBots::PeerTypes typesRestriction = 0,
+	Fn<void(
+		std::vector<not_null<Data::Thread*>>,
+		Api::SendOptions)> sendMany = nullptr);
 QPointer<Ui::BoxContent> ShowChooseRecipientBox(
 	not_null<Window::SessionNavigation*> navigation,
 	FnMut<bool(not_null<Data::Thread*>)> &&chosen,
@@ -173,6 +199,10 @@ void ToggleMessagePinned(
 	not_null<Window::SessionNavigation*> navigation,
 	FullMsgId itemId,
 	bool pin);
+void TogglePinnedThread(
+	not_null<Window::SessionController*> controller,
+	not_null<Dialogs::Entry*> entry,
+	FilterId filterId);
 void HidePinnedBar(
 	not_null<Window::SessionNavigation*> navigation,
 	not_null<PeerData*> peer,
@@ -186,5 +216,8 @@ void UnpinAllMessages(
 void MarkAsReadThread(not_null<Data::Thread*> thread);
 
 void AddSeparatorAndShiftUp(const PeerMenuCallback &addAction);
+
+[[nodiscard]] bool IsArchived(not_null<History*> history);
+[[nodiscard]] bool CanArchive(History *history, PeerData *peer);
 
 } // namespace Window

@@ -237,8 +237,7 @@ StickersListWidget::StickersListWidget(
 	}
 
 	_settings->addClickHandler([=] {
-		if (const auto window = _show->resolveWindow(
-				WindowUsage::PremiumPromo)) {
+		if (const auto window = _show->resolveWindow()) {
 			// While media viewer can't show StickersBox.
 			using Section = StickersBox::Section;
 			window->show(
@@ -1780,9 +1779,13 @@ base::unique_qptr<Ui::PopupMenu> StickersListWidget::fillContextMenu(
 		});
 	});
 	const auto icons = &st().icons;
+
+	// In case we're adding items after FillSendMenu we have
+	// to pass nullptr for showForEffect and attach selector later.
+	// Otherwise added items widths won't be respected in menu geometry.
 	SendMenu::FillSendMenu(
 		menu,
-		_show,
+		nullptr, // showForEffect
 		details,
 		SendMenu::DefaultCallback(_show, send),
 		icons);
@@ -1816,6 +1819,13 @@ base::unique_qptr<Ui::PopupMenu> StickersListWidget::fillContextMenu(
 				false);
 		}, &icons->menuRecentRemove);
 	}
+
+	SendMenu::AttachSendMenuEffect(
+		menu,
+		_show,
+		details,
+		SendMenu::DefaultCallback(_show, send));
+
 	return menu;
 }
 

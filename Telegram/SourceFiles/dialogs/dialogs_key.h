@@ -121,8 +121,19 @@ struct EntryState {
 	FilterId filterId = 0;
 	FullReplyTo currentReplyTo;
 
-	friend inline auto operator<=>(EntryState, EntryState) noexcept
-		= default;
+	friend inline auto operator<=>(
+		const EntryState&,
+		const EntryState&) = default;
+	friend inline bool operator==(
+		const EntryState&,
+		const EntryState&) = default;
+};
+
+enum class ChatTypeFilter : uchar {
+	All,
+	Private,
+	Groups,
+	Channels,
 };
 
 struct SearchState {
@@ -130,6 +141,7 @@ struct SearchState {
 	PeerData *fromPeer = nullptr;
 	std::vector<Data::ReactionId> tags;
 	ChatSearchTab tab = {};
+	ChatTypeFilter filter = ChatTypeFilter::All;
 	QString query;
 
 	[[nodiscard]] bool empty() const;

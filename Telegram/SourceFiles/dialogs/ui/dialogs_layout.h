@@ -7,18 +7,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "dialogs/ui/dialogs_quick_action_context.h"
 #include "ui/cached_round_corners.h"
 
 namespace style {
 struct DialogRow;
+struct VerifiedBadge;
 } // namespace style
 
 namespace st {
 extern const style::DialogRow &defaultDialogRow;
 } // namespace st
-
-namespace Ui {
-} // namespace Ui
 
 namespace Data {
 class Forum;
@@ -29,6 +28,7 @@ namespace Dialogs {
 class Row;
 class FakeRow;
 class BasicRow;
+struct RightButton;
 } // namespace Dialogs
 
 namespace Dialogs::Ui {
@@ -53,6 +53,9 @@ struct TopicJumpCache {
 };
 
 struct PaintContext {
+	RightButton *rightButton = nullptr;
+	std::vector<QImage*> *chatsFilterTags = nullptr;
+	QuickActionContext *quickActionContext = nullptr;
 	not_null<const style::DialogRow*> st;
 	TopicJumpCache *topicJumpCache = nullptr;
 	Data::Folder *folder = nullptr;
@@ -75,6 +78,9 @@ struct PaintContext {
 	not_null<PeerData*> peer,
 	const PaintContext &context);
 [[nodiscard]] const style::icon *ChatTypeIcon(not_null<PeerData*> peer);
+
+[[nodiscard]] const style::VerifiedBadge &VerifiedStyle(
+	const PaintContext &context);
 
 class RowPainter {
 public:
@@ -103,5 +109,7 @@ void PaintCollapsedRow(
 	const QString &text,
 	int unread,
 	const PaintContext &context);
+
+int PaintRightButton(QPainter &p, const PaintContext &context);
 
 } // namespace Dialogs::Ui

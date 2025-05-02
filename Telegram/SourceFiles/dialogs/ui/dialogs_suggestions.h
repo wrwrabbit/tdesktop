@@ -8,7 +8,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/object_ptr.h"
+#include "base/timer.h"
 #include "dialogs/ui/top_peers_strip.h"
+#include "ui/controls/swipe_handler_data.h"
 #include "ui/effects/animations.h"
 #include "ui/rp_widget.h"
 
@@ -18,12 +20,24 @@ namespace Data {
 class Thread;
 } // namespace Data
 
+namespace Info {
+class WrapWidget;
+} // namespace Info
+
 namespace Main {
 class Session;
 } // namespace Main
 
+namespace Storage {
+enum class SharedMediaType : signed char;
+} // namespace Storage
+
 namespace Ui {
+namespace Controls {
+struct SwipeHandlerArgs;
+} // namespace Controls
 class BoxContent;
+class ScrollArea;
 class ElasticScroll;
 class SettingsSlider;
 class VerticalLayout;
@@ -54,6 +68,9 @@ public:
 
 	void selectJump(Qt::Key direction, int pageSize = 0);
 	void chooseRow();
+
+	bool consumeSearchQuery(const QString &query);
+	[[nodiscard]] rpl::producer<> clearSearchQueryRequests() const;
 
 	[[nodiscard]] Data::Thread *updateFromParentDrag(QPoint globalPosition);
 	void dragLeft();
@@ -88,19 +105,34 @@ public:
 	-> rpl::producer<not_null<PeerData*>> {
 		return _popularApps->chosen.events();
 	}
+	[[nodiscard]] auto openBotMainAppRequests() const
+	-> rpl::producer<not_null<PeerData*>> {
+		return _openBotMainAppRequests.events();
+	}
 
 	class ObjectListController;
 
 private:
+	using MediaType = Storage::SharedMediaType;
 	enum class Tab : uchar {
 		Chats,
 		Channels,
 		Apps,
+		Media,
+		Downloads,
 	};
 	enum class JumpResult : uchar {
 		NotApplied,
 		Applied,
 		AppliedAndOut,
+	};
+
+	struct Key {
+		Tab tab = Tab::Chats;
+		MediaType mediaType = {};
+
+		friend inline auto operator<=>(Key, Key) = default;
+		friend inline bool operator==(Key, Key) = default;
 	};
 
 	struct ObjectList {
@@ -114,6 +146,14 @@ private:
 		rpl::event_stream<not_null<PeerData*>> chosen;
 	};
 
+	struct MediaList {
+		Info::WrapWidget *wrap = nullptr;
+		rpl::variable<int> count;
+	};
+
+	[[nodiscard]] static std::vector<Key> TabKeysFor(
+		not_null<Window::SessionController*> controller);
+
 	void paintEvent(QPaintEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
 
@@ -121,6 +161,9 @@ private:
 	void setupChats();
 	void setupChannels();
 	void setupApps();
+	void reinstallSwipe(not_null<Ui::ElasticScroll*>);
+	[[nodiscard]] auto generateIncompleteSwipeArgs()
+	-> Ui::Controls::SwipeHandlerArgs;
 
 	void selectJumpChats(Qt::Key direction, int pageSize);
 	void selectJumpChannels(Qt::Key direction, int pageSize);
@@ -156,17 +199,23 @@ private:
 		SearchEmptyIcon icon,
 		rpl::producer<QString> text);
 
-	void switchTab(Tab tab);
+	void switchTab(Key key);
 	void startShownAnimation(bool shown, Fn<void()> finish);
-	void startSlideAnimation(Tab was, Tab now);
+	void startSlideAnimation(Key was, Key now);
+	void ensureContent(Key key);
 	void finishShow();
 
 	void handlePressForChatPreview(PeerId id, Fn<void(bool)> callback);
+	void updateControlsGeometry();
+	void applySearchQuery();
 
 	const not_null<Window::SessionController*> _controller;
 
-	const std::unique_ptr<Ui::SettingsSlider> _tabs;
-	rpl::variable<Tab> _tab = Tab::Chats;
+	const std::unique_ptr<Ui::ScrollArea> _tabsScroll;
+	const not_null<Ui::SettingsSlider*> _tabs;
+	Ui::Animations::Simple _tabsScrollAnimation;
+	const std::vector<Key> _tabKeys;
+	rpl::variable<Key> _key;
 
 	const std::unique_ptr<Ui::ElasticScroll> _chatsScroll;
 	const not_null<Ui::VerticalLayout*> _chatsContent;
@@ -174,6 +223,7 @@ private:
 	const not_null<Ui::SlideWrap<TopPeersStrip>*> _topPeersWrap;
 	const not_null<TopPeersStrip*> _topPeers;
 	rpl::event_stream<not_null<PeerData*>> _topPeerChosen;
+	rpl::event_stream<not_null<PeerData*>> _openBotMainAppRequests;
 
 	const std::unique_ptr<ObjectList> _recent;
 
@@ -195,6 +245,11 @@ private:
 	const std::unique_ptr<ObjectList> _recentApps;
 	const std::unique_ptr<ObjectList> _popularApps;
 
+	base::flat_map<Key, MediaList> _mediaLists;
+	rpl::event_stream<> _clearSearchQueryRequests;
+	QString _searchQuery;
+	base::Timer _searchQueryTimer;
+
 	Ui::Animations::Simple _shownAnimation;
 	Fn<void()> _showFinished;
 	bool _hidden = false;
@@ -204,6 +259,9 @@ private:
 	Ui::Animations::Simple _slideAnimation;
 	QPixmap _slideLeft;
 	QPixmap _slideRight;
+
+	Ui::Controls::SwipeBackResult _swipeBackData;
+	rpl::lifetime _swipeLifetime;
 
 	int _slideLeftTop = 0;
 	int _slideRightTop = 0;
@@ -217,6 +275,9 @@ private:
 	not_null<Main::Session*> session);
 
 [[nodiscard]] object_ptr<Ui::BoxContent> StarsExamplesBox(
+	not_null<Window::SessionController*> window);
+
+[[nodiscard]] object_ptr<Ui::BoxContent> PopularAppsAboutBox(
 	not_null<Window::SessionController*> window);
 
 } // namespace Dialogs

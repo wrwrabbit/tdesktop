@@ -29,8 +29,10 @@ public:
 	void clear();
 	void search(const Request &search);
 	void searchMore();
+	void disableMigrated();
 
 	[[nodiscard]] const FoundMessages &messages() const;
+	[[nodiscard]] const Request &request() const;
 
 	[[nodiscard]] rpl::producer<> newFounds() const;
 	[[nodiscard]] rpl::producer<> nextFounds() const;
@@ -39,6 +41,7 @@ private:
 	void addFound(const FoundMessages &data);
 
 	MessagesSearch _apiSearch;
+	Request _request;
 
 	std::optional<MessagesSearch> _migratedSearch;
 	FoundMessages _migratedFirstFound;

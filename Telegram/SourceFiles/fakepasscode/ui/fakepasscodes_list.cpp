@@ -270,6 +270,7 @@ void FakePasscodeList::draw(size_t passcodesSize) {
     using namespace Settings;
     FAKE_LOG(("Draw %1 passcodes").arg(passcodesSize));
     const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+    content->setAutoFillBackground(1);
     for (size_t i = 0; i < passcodesSize; ++i) {
         AddButtonWithIcon(content, tr::lng_fakepasscode(lt_caption, _domain->local().GetFakePasscodeName(i)),
                           st::settingsButton, { &st::menuIconLock }
@@ -283,16 +284,72 @@ void FakePasscodeList::draw(size_t passcodesSize) {
         _controller->show(Box<FakePasscodeBox>(_controller, false, true, 0), // _domain
                           Ui::LayerOption::KeepOther);
     });
-    AddDividerText(content, tr::lng_special_actions());
+    Ui::AddSkip(content, st::settingsCheckboxesSkip);
+
+    Ui::AddSubsectionTitle(content, tr::lng_da_title());
+
+    const auto toggledAlertDAChatJoin = Ui::CreateChild<rpl::event_stream<bool>>(this);
+    auto buttonDAChatJoin = AddButtonWithIcon(content, tr::lng_da_chat_join_check(), st::settingsButton,
+                                           {&st::menuIconSavedMessages})
+            ->toggleOn(toggledAlertDAChatJoin->events_starting_with_copy(_domain->local().IsDAChatJoinCheckEnabled()));
+
+    buttonDAChatJoin->addClickHandler([=] {
+        _domain->local().SetDAChatJoinCheckEnabled(buttonDAChatJoin->toggled());
+        _domain->local().writeAccounts();
+    });
+
+    const auto toggledAlertDAChannelJoin = Ui::CreateChild<rpl::event_stream<bool>>(this);
+    auto buttonDAChannelJoin = AddButtonWithIcon(content, tr::lng_da_channel_join_check(), st::settingsButton,
+        { &st::menuIconSavedMessages })
+        ->toggleOn(toggledAlertDAChannelJoin->events_starting_with_copy(_domain->local().IsDAChannelJoinCheckEnabled()));
+
+    buttonDAChannelJoin->addClickHandler([=] {
+        _domain->local().SetDAChannelJoinCheckEnabled(buttonDAChannelJoin->toggled());
+        _domain->local().writeAccounts();
+        });
+
+    const auto toggledAlertDAPostComment = Ui::CreateChild<rpl::event_stream<bool>>(this);
+    auto buttonDAPostComment = AddButtonWithIcon(content, tr::lng_da_post_comment_check(), st::settingsButton,
+        { &st::menuIconSavedMessages })
+        ->toggleOn(toggledAlertDAPostComment->events_starting_with_copy(_domain->local().IsDAPostCommentCheckEnabled()));
+
+    buttonDAPostComment->addClickHandler([=] {
+        _domain->local().SetDAPostCommentCheckEnabled(buttonDAPostComment->toggled());
+        _domain->local().writeAccounts();
+        });
+
+    const auto toggledAlertDAMakeReaction = Ui::CreateChild<rpl::event_stream<bool>>(this);
+    auto buttonDAMakeReaction = AddButtonWithIcon(content, tr::lng_da_make_reaction_check(), st::settingsButton,
+        { &st::menuIconSavedMessages })
+        ->toggleOn(toggledAlertDAMakeReaction->events_starting_with_copy(_domain->local().IsDAMakeReactionCheckEnabled()));
+
+    buttonDAMakeReaction->addClickHandler([=] {
+        _domain->local().SetDAMakeReactionCheckEnabled(buttonDAMakeReaction->toggled());
+        _domain->local().writeAccounts();
+        });
+
+    const auto toggledAlertDAStartBot = Ui::CreateChild<rpl::event_stream<bool>>(this);
+    auto buttonDAStartBot = AddButtonWithIcon(content, tr::lng_da_start_bot_check(), st::settingsButton,
+        { &st::menuIconSavedMessages })
+        ->toggleOn(toggledAlertDAStartBot->events_starting_with_copy(_domain->local().IsDAStartBotCheckEnabled()));
+
+    buttonDAStartBot->addClickHandler([=] {
+        _domain->local().SetDAStartBotCheckEnabled(buttonDAStartBot->toggled());
+        _domain->local().writeAccounts();
+        });
+
+    Ui::AddDividerText(content, tr::lng_da_common());
+    AddSubsectionTitle(content, tr::lng_special_actions());
+
     const auto toggledCacheCleaning = Ui::CreateChild<rpl::event_stream<bool>>(this);
     auto buttonCacheCleaning = AddButtonWithIcon(content, tr::lng_clear_cache_on_lock(), st::settingsButton,
-                                                 {&st::menuIconClear})
-            ->toggleOn(toggledCacheCleaning->events_starting_with_copy(_domain->local().IsCacheCleanedUpOnLock()));
+        { &st::menuIconClear })
+        ->toggleOn(toggledCacheCleaning->events_starting_with_copy(_domain->local().IsCacheCleanedUpOnLock()));
 
     buttonCacheCleaning->addClickHandler([=] {
         _domain->local().SetCacheCleanedUpOnLock(buttonCacheCleaning->toggled());
         _domain->local().writeAccounts();
-    });
+        });
 
     Ui::AddDividerText(content, tr::lng_clear_cache_on_lock_help());
     Ui::AddSkip(content, st::settingsCheckboxesSkip);
@@ -321,7 +378,6 @@ void FakePasscodeList::draw(size_t passcodesSize) {
     });
 
     Ui::AddDividerText(content, tr::lng_enable_dod_cleaning_help());
-    Ui::AddSkip(content, st::settingsCheckboxesSkip);
 
     Ui::ResizeFitChild(this, content);
     FAKE_LOG(("Draw %1 passcodes: success").arg(passcodesSize));

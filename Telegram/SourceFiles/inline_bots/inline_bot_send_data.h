@@ -11,6 +11,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 struct HistoryItemCommonFields;
 
+namespace Data {
+struct SendError;
+} // namespace Data
+
 namespace Main {
 class Session;
 } // namespace Main
@@ -40,11 +44,11 @@ public:
 
 	virtual bool isValid() const = 0;
 
-	virtual void addToHistory(
+	virtual not_null<HistoryItem*> makeMessage(
 		const Result *owner,
 		not_null<History*> history,
 		HistoryItemCommonFields &&fields) const = 0;
-	virtual QString getErrorOnSend(
+	virtual Data::SendError getErrorOnSend(
 		const Result *owner,
 		not_null<History*> history) const = 0;
 
@@ -75,12 +79,12 @@ public:
 	};
 	virtual SentMessageFields getSentMessageFields() const = 0;
 
-	void addToHistory(
+	not_null<HistoryItem*> makeMessage(
 		const Result *owner,
 		not_null<History*> history,
 		HistoryItemCommonFields &&fields) const override;
 
-	QString getErrorOnSend(
+	Data::SendError getErrorOnSend(
 		const Result *owner,
 		not_null<History*> history) const override;
 
@@ -236,12 +240,12 @@ public:
 		return _photo != nullptr;
 	}
 
-	void addToHistory(
+	not_null<HistoryItem*> makeMessage(
 		const Result *owner,
 		not_null<History*> history,
 		HistoryItemCommonFields &&fields) const override;
 
-	QString getErrorOnSend(
+	Data::SendError getErrorOnSend(
 		const Result *owner,
 		not_null<History*> history) const override;
 
@@ -270,12 +274,12 @@ public:
 		return _document != nullptr;
 	}
 
-	void addToHistory(
+	not_null<HistoryItem*> makeMessage(
 		const Result *owner,
 		not_null<History*> history,
 		HistoryItemCommonFields &&fields) const override;
 
-	QString getErrorOnSend(
+	Data::SendError getErrorOnSend(
 		const Result *owner,
 		not_null<History*> history) const override;
 
@@ -298,12 +302,12 @@ public:
 		return _game != nullptr;
 	}
 
-	void addToHistory(
+	not_null<HistoryItem*> makeMessage(
 		const Result *owner,
 		not_null<History*> history,
 		HistoryItemCommonFields &&fields) const override;
 
-	QString getErrorOnSend(
+	Data::SendError getErrorOnSend(
 		const Result *owner,
 		not_null<History*> history) const override;
 

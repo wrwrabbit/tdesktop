@@ -19,6 +19,11 @@ constexpr auto kReloadThreshold = 60 * crl::time(1000);
 
 } // namespace
 
+StarsAmount FromTL(const MTPStarsAmount &value) {
+	const auto &data = value.data();
+	return StarsAmount(data.vamount().v, data.vnanos().v);
+}
+
 Credits::Credits(not_null<Main::Session*> session)
 : _session(session)
 , _reload([=] { load(true); }) {
@@ -27,15 +32,12 @@ Credits::Credits(not_null<Main::Session*> session)
 Credits::~Credits() = default;
 
 void Credits::apply(const MTPDupdateStarsBalance &data) {
-	apply(data.vbalance().v);
+	apply(FromTL(data.vbalance()));
 }
 
 rpl::producer<float64> Credits::rateValue(
 		not_null<PeerData*> ownedBotOrChannel) {
-	return rpl::single(
-		_session->appConfig().get<float64>(
-			u"stars_usd_withdraw_rate_x1000"_q,
-			1200) / 1000.);
+	return rpl::single(_session->appConfig().starsWithdrawRate());
 }
 
 void Credits::load(bool force) {
@@ -65,26 +67,33 @@ rpl::producer<bool> Credits::loadedValue() const {
 	) | rpl::then(_loadedChanges.events() | rpl::map_to(true));
 }
 
-uint64 Credits::balance() const {
+StarsAmount Credits::balance() const {
 	return _nonLockedBalance.current();
 }
 
-uint64 Credits::balance(PeerId peerId) const {
+StarsAmount Credits::balance(PeerId peerId) const {
 	const auto it = _cachedPeerBalances.find(peerId);
-	return (it != _cachedPeerBalances.end()) ? it->second : 0;
+	return (it != _cachedPeerBalances.end()) ? it->second : StarsAmount();
 }
 
-rpl::producer<uint64> Credits::balanceValue() const {
+uint64 Credits::balanceCurrency(PeerId peerId) const {
+	const auto it = _cachedPeerCurrencyBalances.find(peerId);
+	return (it != _cachedPeerCurrencyBalances.end()) ? it->second : 0;
+}
+
+rpl::producer<StarsAmount> Credits::balanceValue() const {
 	return _nonLockedBalance.value();
 }
 
 void Credits::updateNonLockedValue() {
-	_nonLockedBalance = (_balance >= _locked) ? (_balance - _locked) : 0;
+	_nonLockedBalance = (_balance >= _locked)
+		? (_balance - _locked)
+		: StarsAmount();
 }
 
-void Credits::lock(int count) {
+void Credits::lock(StarsAmount count) {
 	Expects(loaded());
-	Expects(count >= 0);
+	Expects(count >= StarsAmount(0));
 	Expects(_locked + count <= _balance);
 
 	_locked += count;
@@ -92,8 +101,8 @@ void Credits::lock(int count) {
 	updateNonLockedValue();
 }
 
-void Credits::unlock(int count) {
-	Expects(count >= 0);
+void Credits::unlock(StarsAmount count) {
+	Expects(count >= StarsAmount(0));
 	Expects(_locked >= count);
 
 	_locked -= count;
@@ -101,12 +110,12 @@ void Credits::unlock(int count) {
 	updateNonLockedValue();
 }
 
-void Credits::withdrawLocked(int count) {
-	Expects(count >= 0);
+void Credits::withdrawLocked(StarsAmount count) {
+	Expects(count >= StarsAmount(0));
 	Expects(_locked >= count);
 
 	_locked -= count;
-	apply(_balance >= count ? (_balance - count) : 0);
+	apply(_balance >= count ? (_balance - count) : StarsAmount(0));
 	invalidate();
 }
 
@@ -114,7 +123,7 @@ void Credits::invalidate() {
 	_reload.call();
 }
 
-void Credits::apply(uint64 balance) {
+void Credits::apply(StarsAmount balance) {
 	_balance = balance;
 	updateNonLockedValue();
 
@@ -124,8 +133,12 @@ void Credits::apply(uint64 balance) {
 	}
 }
 
-void Credits::apply(PeerId peerId, uint64 balance) {
+void Credits::apply(PeerId peerId, StarsAmount balance) {
 	_cachedPeerBalances[peerId] = balance;
+}
+
+void Credits::applyCurrency(PeerId peerId, uint64 balance) {
+	_cachedPeerCurrencyBalances[peerId] = balance;
 }
 
 } // namespace Data

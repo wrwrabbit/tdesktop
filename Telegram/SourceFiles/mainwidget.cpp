@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_history_hider.h"
 #include "window/window_controller.h"
 #include "window/window_peer_menu.h"
+#include "window/window_session_controller_link_info.h"
 #include "window/themes/window_theme.h"
 #include "chat_helpers/bot_command.h"
 #include "chat_helpers/tabbed_selector.h" // TabbedSelector::refreshStickers
@@ -51,7 +52,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "dialogs/dialogs_widget.h"
 #include "history/history_widget.h"
-#include "history/history_item_helpers.h" // GetErrorTextForSending.
+#include "history/history_item_helpers.h" // GetErrorForSending.
 #include "history/view/media/history_view_media.h"
 #include "history/view/history_view_service_message.h"
 #include "history/view/history_view_sublist_section.h"
@@ -561,15 +562,15 @@ bool MainWidget::setForwardDraft(
 	const auto history = thread->owningHistory();
 	const auto items = session().data().idsToItems(draft.ids);
 	const auto topicRootId = thread->topicRootId();
-	const auto error = GetErrorTextForSending(
+	const auto error = GetErrorForSending(
 		history->peer,
 		{
 			.topicRootId = topicRootId,
 			.forward = &items,
 			.ignoreSlowmodeCountdown = true,
 		});
-	if (!error.isEmpty()) {
-		_controller->show(Ui::MakeInformBox(error));
+	if (error) {
+		Data::ShowSendErrorToast(_controller, history->peer, error);
 		return false;
 	}
 
@@ -616,12 +617,12 @@ bool MainWidget::sendPaths(
 		not_null<Data::Thread*> thread,
 		const QStringList &paths) {
 	if (!Data::CanSendAnyOf(thread, Data::FilesSendRestrictions())) {
-		_controller->show(Ui::MakeInformBox(
-			tr::lng_forward_send_files_cant()));
+		_controller->showToast(
+			tr::lng_forward_send_files_cant(tr::now));
 		return false;
 	} else if (const auto error = Data::AnyFileRestrictionError(
 			thread->peer())) {
-		_controller->show(Ui::MakeInformBox(*error));
+		Data::ShowSendErrorToast(controller(), thread->peer(), error);
 		return false;
 	} else {
 		_controller->showThread(
@@ -664,12 +665,12 @@ bool MainWidget::filesOrForwardDrop(
 		}
 		return false;
 	} else if (!Data::CanSendAnyOf(thread, Data::FilesSendRestrictions())) {
-		_controller->show(Ui::MakeInformBox(
-			tr::lng_forward_send_files_cant()));
+		_controller->showToast(
+			tr::lng_forward_send_files_cant(tr::now));
 		return false;
 	} else if (const auto error = Data::AnyFileRestrictionError(
 			thread->peer())) {
-		_controller->show(Ui::MakeInformBox(*error));
+		Data::ShowSendErrorToast(_controller, thread->peer(), error);
 		return false;
 	} else {
 		_controller->showThread(
@@ -749,13 +750,26 @@ void MainWidget::hideSingleUseKeyboard(FullMsgId replyToId) {
 	_history->hideSingleUseKeyboard(replyToId);
 }
 
-void MainWidget::searchMessages(const QString &query, Dialogs::Key inChat) {
+void MainWidget::searchMessages(
+		const QString &query,
+		Dialogs::Key inChat,
+		PeerData *searchFrom) {
+	const auto complex = Data::HashtagWithUsernameFromQuery(query);
+	if (!complex.username.isEmpty()) {
+		_controller->showPeerByLink(Window::PeerByLinkInfo{
+			.usernameOrId = complex.username,
+			.text = complex.hashtag,
+			.resolveType = Window::ResolveType::HashtagSearch,
+		});
+		return;
+	}
 	auto tags = Data::SearchTagsFromQuery(query);
 	if (_dialogs) {
 		auto state = Dialogs::SearchState{
 			.inChat = ((tags.empty() || inChat.sublist())
 				? inChat
 				: session().data().history(session().user())),
+			.fromPeer = inChat ? searchFrom : nullptr,
 			.tags = tags,
 			.query = tags.empty() ? query : QString(),
 		};
@@ -775,12 +789,15 @@ void MainWidget::searchMessages(const QString &query, Dialogs::Key inChat) {
 				controller()->session().user());
 		}
 		if ((!_mainSection
-			|| !_mainSection->searchInChatEmbedded(inChat, query))
-			&& !_history->searchInChatEmbedded(inChat, query)) {
+			|| !_mainSection->searchInChatEmbedded(query, inChat, searchFrom))
+			&& !_history->searchInChatEmbedded(query, inChat, searchFrom)) {
 			const auto account = not_null(&session().account());
 			if (const auto window = Core::App().windowFor(account)) {
 				if (const auto controller = window->sessionController()) {
-					controller->content()->searchMessages(query, inChat);
+					controller->content()->searchMessages(
+						query,
+						inChat,
+						searchFrom);
 					controller->widget()->activate();
 				}
 			}
@@ -1087,6 +1104,12 @@ void MainWidget::dialogsCancelled() {
 	_history->activate();
 }
 
+void MainWidget::toggleFiltersMenu(bool value) const {
+	if (_dialogs) {
+		_dialogs->toggleFiltersMenu(value);
+	}
+}
+
 void MainWidget::setChatBackground(
 		const Data::WallPaper &background,
 		QImage &&image) {
@@ -1330,6 +1353,7 @@ void MainWidget::showHistory(
 	}
 
 	if (peerId && params.activation != anim::activation::background) {
+		Core::App().hideMediaView();
 		_controller->window().activate();
 	}
 
@@ -1431,11 +1455,7 @@ void MainWidget::showHistory(
 		&& way != Way::Forward) {
 		ClearBotStartToken(_history->peer());
 	}
-	_history->showHistory(
-		peerId,
-		showAtMsgId,
-		params.highlightPart,
-		params.highlightPartOffsetHint);
+	_history->showHistory(peerId, showAtMsgId, params);
 	if (alreadyThatPeer && params.reapplyLocalDraft) {
 		_history->applyDraft(HistoryWidget::FieldHistoryAction::NewEntry);
 	}
@@ -1511,6 +1531,7 @@ void MainWidget::showMessage(
 			if (_mainSection->showMessage(peerId, params, itemId)) {
 				if (params.activation != anim::activation::background) {
 					_controller->window().activate();
+					_controller->window().hideSettingsAndLayer();
 				}
 				return;
 			}

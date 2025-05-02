@@ -62,7 +62,9 @@ using UpdateFlag = StoryUpdate::Flag;
 	}, [&](const MTPDmessageMediaDocument &data)
 		-> std::optional<StoryMedia> {
 		if (const auto document = data.vdocument()) {
-			const auto result = owner->processDocument(*document);
+			const auto result = owner->processDocument(
+				*document,
+				data.valt_documents());
 			if (!result->isNull()
 				&& (result->isGifv() || result->isVideoFile())) {
 				result->setStoryMedia(true);
@@ -310,7 +312,7 @@ void Stories::scheduleExpireTimer() {
 			const auto nearest = _expiring.front().first;
 			const auto now = base::unixtime::now();
 			const auto delay = (nearest > now)
-				? (nearest - now)
+				? std::min(nearest - now, 86'400)
 				: 0;
 			_expireTimer.callOnce(delay * crl::time(1000));
 		}

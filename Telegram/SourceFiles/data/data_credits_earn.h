@@ -7,22 +7,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "core/stars_amount.h"
 #include "data/data_statistics_chart.h"
 
 #include <QtCore/QDateTime>
 
 namespace Data {
 
-using CreditsEarnInt = uint64;
-
 struct CreditsEarnStatistics final {
 	explicit operator bool() const {
-		return !!usdRate;
+		return usdRate
+			&& currentBalance
+			&& availableBalance
+			&& overallRevenue;
 	}
 	Data::StatisticalGraph revenueGraph;
-	CreditsEarnInt currentBalance = 0;
-	CreditsEarnInt availableBalance = 0;
-	CreditsEarnInt overallRevenue = 0;
+	StarsAmount currentBalance;
+	StarsAmount availableBalance;
+	StarsAmount overallRevenue;
 	float64 usdRate = 0.;
 	bool isWithdrawalEnabled = false;
 	QDateTime nextWithdrawalAt;

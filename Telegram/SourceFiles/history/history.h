@@ -26,7 +26,6 @@ class HistoryMainElementDelegateMixin;
 struct LanguageId;
 
 namespace Data {
-
 struct Draft;
 class Session;
 class Folder;
@@ -34,29 +33,6 @@ class ChatFilter;
 struct SponsoredFrom;
 class SponsoredMessages;
 class HistoryMessages;
-
-enum class ForwardOptions {
-	PreserveInfo,
-	NoSenderNames,
-	NoNamesAndCaptions,
-};
-
-struct ForwardDraft {
-	MessageIdsList ids;
-	ForwardOptions options = ForwardOptions::PreserveInfo;
-
-	friend inline auto operator<=>(
-		const ForwardDraft&,
-		const ForwardDraft&) = default;
-};
-
-using ForwardDrafts = base::flat_map<MsgId, ForwardDraft>;
-
-struct ResolvedForwardDraft {
-	HistoryItemsList items;
-	ForwardOptions options = ForwardOptions::PreserveInfo;
-};
-
 } // namespace Data
 
 namespace Dialogs {
@@ -106,6 +82,7 @@ public:
 	[[nodiscard]] HistoryItem *joinedMessageInstance() const;
 	void checkLocalMessages();
 	void removeJoinedMessage();
+	void removeNewPeerMessages();
 
 	void reactionsEnabledChanged(bool enabled);
 
@@ -180,6 +157,7 @@ public:
 	not_null<HistoryItem*> addNewLocalMessage(
 		HistoryItemCommonFields &&fields,
 		not_null<GameData*> game);
+	not_null<HistoryItem*> addNewLocalMessage(not_null<HistoryItem*> item);
 
 	not_null<HistoryItem*> addSponsoredMessage(
 		MsgId id,
@@ -568,6 +546,7 @@ private:
 
 	HistoryItem *insertJoinedMessage();
 	void insertMessageToBlocks(not_null<HistoryItem*> item);
+	void checkNewPeerMessages();
 
 	[[nodiscard]] Dialogs::BadgesState computeBadgesState() const;
 	[[nodiscard]] Dialogs::BadgesState adjustBadgesStateByFolder(
@@ -586,6 +565,8 @@ private:
 	Element *_unreadBarView = nullptr;
 	Element *_firstUnreadView = nullptr;
 	HistoryItem *_joinedMessage = nullptr;
+	HistoryItem *_newPeerNameChange = nullptr;
+	HistoryItem *_newPeerPhotoChange = nullptr;
 	bool _loadedAtTop = false;
 	bool _loadedAtBottom = true;
 

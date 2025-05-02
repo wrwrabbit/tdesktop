@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/cloud_password/settings_cloud_password_email_confirm.h"
 #include "settings/cloud_password/settings_cloud_password_input.h"
 #include "settings/cloud_password/settings_cloud_password_start.h"
+#include "settings/settings_active_sessions.h"
 #include "settings/settings_blocked_peers.h"
 #include "settings/settings_global_ttl.h"
 #include "settings/settings_local_passcode.h"
@@ -25,7 +26,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/system_unlock.h"
 #include "base/timer_rpl.h"
 #include "boxes/passcode_box.h"
-#include "boxes/sessions_box.h"
 #include "ui/boxes/confirm_box.h"
 #include "boxes/self_destruction_box.h"
 #include "core/application.h"
@@ -186,16 +186,23 @@ QString PrivacyBase(Privacy::Key key, const Privacy::Rule &rule) {
 		[[fallthrough]];
 	default:
 		switch (rule.option) {
-		case Option::Everyone: return tr::lng_edit_privacy_everyone(tr::now);
+		case Option::Everyone:
+			return rule.never.miniapps
+				? tr::lng_edit_privacy_no_miniapps(tr::now)
+				: tr::lng_edit_privacy_everyone(tr::now);
 		case Option::Contacts:
 			return rule.always.premiums
 				? tr::lng_edit_privacy_contacts_and_premium(tr::now)
+				: rule.always.miniapps
+				? tr::lng_edit_privacy_contacts_and_miniapps(tr::now)
 				: tr::lng_edit_privacy_contacts(tr::now);
 		case Option::CloseFriends:
 			return tr::lng_edit_privacy_close_friends(tr::now);
 		case Option::Nobody:
 			return rule.always.premiums
 				? tr::lng_edit_privacy_premium(tr::now)
+				: rule.always.miniapps
+				? tr::lng_edit_privacy_miniapps(tr::now)
 				: tr::lng_edit_privacy_nobody(tr::now);
 		}
 		Unexpected("Value in Privacy::Option.");
@@ -350,10 +357,16 @@ void AddMessagesPrivacyButton(
 		not_null<Ui::VerticalLayout*> container) {
 	const auto session = &controller->session();
 	const auto privacy = &session->api().globalPrivacy();
-	auto label = rpl::conditional(
+	auto label = rpl::combine(
 		privacy->newRequirePremium(),
-		tr::lng_edit_privacy_contacts_and_premium(),
-		tr::lng_edit_privacy_everyone());
+		privacy->newChargeStars()
+	) | rpl::map([=](bool requirePremium, int chargeStars) {
+		return chargeStars
+			? tr::lng_edit_privacy_paid()
+			: requirePremium
+			? tr::lng_edit_privacy_contacts_and_premium()
+			: tr::lng_edit_privacy_everyone();
+	}) | rpl::flatten_latest();
 	const auto &st = st::settingsButtonNoIcon;
 	const auto button = AddButtonWithLabel(
 		container,
@@ -406,7 +419,8 @@ void SetupPrivacy(
 	add(
 		tr::lng_settings_last_seen(),
 		Key::LastSeen,
-		[=] { return std::make_unique<LastSeenPrivacyController>(session); });
+		[=] { return std::make_unique<LastSeenPrivacyController>(
+			session); });
 	add(
 		tr::lng_settings_profile_photo_privacy(),
 		Key::ProfilePhoto,
@@ -415,6 +429,10 @@ void SetupPrivacy(
 		tr::lng_settings_bio_privacy(),
 		Key::About,
 		[] { return std::make_unique<AboutPrivacyController>(); });
+	add(
+		tr::lng_settings_gifts_privacy(),
+		Key::GiftsAutoSave,
+		[=] { return std::make_unique<GiftsAutoSavePrivacyController>(); });
 	add(
 		tr::lng_settings_birthday_privacy(),
 		Key::Birthday,
@@ -443,7 +461,8 @@ void SetupPrivacy(
 	}
 	AddMessagesPrivacyButton(controller, container);
 
-	session->api().userPrivacy().reload(Api::UserPrivacy::Key::AddedByPhone);
+	session->api().userPrivacy().reload(
+		Api::UserPrivacy::Key::AddedByPhone);
 
 	Ui::AddSkip(container, st::settingsPrivacySecurityPadding);
 	Ui::AddDivider(container);
@@ -1022,8 +1041,7 @@ not_null<Ui::SettingsButton*> AddPrivacyButton(
 		std::move(label),
 		PrivacyString(session, key),
 		stOverride ? *stOverride : st::settingsButtonNoIcon,
-		std::move(descriptor)
-	);
+		std::move(descriptor));
 	button->addClickHandler([=] {
 		*shower = session->api().userPrivacy().value(
 			key

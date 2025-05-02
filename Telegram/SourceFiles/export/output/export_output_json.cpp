@@ -385,9 +385,15 @@ QByteArray SerializeMessage(
 	};
 	const auto pushPhoto = [&](const Image &image) {
 		pushPath(image.file, "photo");
+		push("photo_file_size", image.file.size);
 		if (image.width && image.height) {
 			push("width", image.width);
 			push("height", image.height);
+		}
+	};
+	const auto pushSpoiler = [&](const auto &media) {
+		if (media.spoilered) {
+			push("media_spoiler", true);
 		}
 	};
 
@@ -404,6 +410,7 @@ QByteArray SerializeMessage(
 		pushActor();
 		pushAction("edit_group_photo");
 		pushPhoto(data.photo.image);
+		pushSpoiler(data.photo);
 	}, [&](const ActionChatDeletePhoto &data) {
 		pushActor();
 		pushAction("delete_group_photo");
@@ -587,6 +594,7 @@ QByteArray SerializeMessage(
 		pushActor();
 		pushAction("suggest_profile_photo");
 		pushPhoto(data.photo.image);
+		pushSpoiler(data.photo);
 	}, [&](const ActionRequestedPeer &data) {
 		pushActor();
 		pushAction("requested_peer");
@@ -654,7 +662,16 @@ QByteArray SerializeMessage(
 		push("stars", data.stars);
 		push("is_limited", data.limited);
 		push("is_anonymous", data.anonymous);
-		pushBare("text", SerializeText(context, data.text));
+		pushBare("gift_text", SerializeText(context, data.text));
+	}, [&](const ActionPaidMessagesRefunded &data) {
+		pushActor();
+		pushAction("paid_messages_refund");
+		push("messages_count", data.messages);
+		push("stars_count", data.stars);
+	}, [&](const ActionPaidMessagesPrice &data) {
+		pushActor();
+		pushAction("paid_messages_price_change");
+		push("price_stars", data.stars);
 	}, [](v::null_t) {});
 
 	if (v::is_null(message.action.content)) {
@@ -684,12 +701,15 @@ QByteArray SerializeMessage(
 
 	v::match(message.media.content, [&](const Photo &photo) {
 		pushPhoto(photo.image);
+		pushSpoiler(photo);
 		pushTTL();
 	}, [&](const Document &data) {
 		pushPath(data.file, "file");
 		push("file_name", data.name);
+		push("file_size", data.file.size);
 		if (data.thumb.width > 0) {
 			pushPath(data.thumb.file, "thumbnail");
+			push("thumbnail_file_size", data.thumb.file.size);
 		}
 		const auto pushType = [&](const QByteArray &value) {
 			push("media_type", value);
@@ -718,6 +738,7 @@ QByteArray SerializeMessage(
 			push("width", data.width);
 			push("height", data.height);
 		}
+		pushSpoiler(data);
 		pushTTL();
 	}, [&](const SharedContact &data) {
 		pushBare("contact_information", SerializeObject(context, {
@@ -730,6 +751,7 @@ QByteArray SerializeMessage(
 		}));
 		if (!data.vcard.content.isEmpty()) {
 			pushPath(data.vcard, "contact_vcard");
+			push("contact_vcard_file_size", data.vcard.size);
 		}
 	}, [&](const GeoPoint &data) {
 		pushBare(

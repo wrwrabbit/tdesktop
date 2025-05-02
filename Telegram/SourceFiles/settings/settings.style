@@ -123,6 +123,8 @@ settingsBusinessPromoChatbots: icon {{ "settings/premium/promo/business_chatbot"
 settingsBusinessPromoChatIntro: icon {{ "settings/premium/promo/business_intro", premiumButtonBg1 }};
 settingsBusinessPromoChatLinks: icon {{ "settings/premium/promo/business_chatlink", premiumButtonBg1 }};
 
+settingsStarRefEarnStars: icon {{ "settings/premium/business/earn_stars", settingsIconFg }};
+
 settingsPremiumNewBadge: FlatLabel(defaultFlatLabel) {
 	style: TextStyle(semiboldTextStyle) {
 		font: font(10px semibold);
@@ -195,6 +197,10 @@ settingsInfoPhotoSkip: 7px;
 settingsInfoNameSkip: -1px;
 settingsInfoUploadLeft: 6px;
 settingsInfoPeerBadge: InfoPeerBadge {
+	verified: icon {
+		{ "dialogs/dialogs_verified_star", dialogsVerifiedIconBg },
+		{ "dialogs/dialogs_verified_check", dialogsVerifiedIconFg },
+	};
 	premium: icon {{ "dialogs/dialogs_premium", dialogsVerifiedIconBg }};
 	premiumFg: dialogsVerifiedIconBg;
 	sizeTag: 0; // Normal
@@ -484,8 +490,8 @@ settingsPremiumArrow: icon{{ "settings/premium/arrow", menuIconFg }};
 settingsPremiumArrowOver: icon{{ "settings/premium/arrow", menuIconFgOver }};
 
 settingsPremiumOptionsPadding: margins(0px, 9px, 0px, 2px);
-settingsPremiumTopHeight: 220px;
-settingsPremiumUserHeight: 223px;
+settingsPremiumTopHeight: 202px;
+settingsPremiumUserHeight: 205px;
 settingsPremiumUserTitlePadding: margins(0px, 16px, 0px, 6px);
 settingsPremiumUserTitle: FlatLabel(boxTitle) {
 	style: TextStyle(defaultTextStyle) {
@@ -675,4 +681,11 @@ settingsChatLinkField: InputField(defaultInputField) {
 	heightMin: 32px;
 
 	style: defaultTextStyle;
+}
+
+settingsQuickDialogActionsTriggerFont: font(11px);
+
+settingsGiftIconEmoji: IconEmoji {
+	icon: icon{{ "settings/mini_gift", windowFg }};
+	padding: margins(1px, 2px, 1px, 0px);
 }

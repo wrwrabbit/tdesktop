@@ -15,7 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/background_box.h"
 #include "boxes/stickers_box.h"
 #include "chat_helpers/compose/compose_show.h"
-#include "core/ui_integration.h" // Core::MarkedTextContext.
+#include "core/ui_integration.h" // TextContext
 #include "data/stickers/data_custom_emoji.h"
 #include "data/stickers/data_stickers.h"
 #include "data/data_changes.h"
@@ -165,7 +165,7 @@ private:
 
 	const uint32 _level;
 	const TextWithEntities _icon;
-	const Core::MarkedTextContext _context;
+	const Ui::Text::MarkedContext _context;
 	Ui::Text::String _text;
 	bool _minimal = false;
 
@@ -313,9 +313,11 @@ PreviewWrap::PreviewWrap(
 	WebPageCollage(),
 	nullptr, // iv
 	nullptr, // stickerSet
+	nullptr, // uniqueGift
 	0, // duration
 	QString(), // author
 	false, // hasLargeMedia
+	false, // photoIsVideoCover
 	0)) // pendingTill
 , _theme(theme)
 , _style(style)
@@ -464,7 +466,10 @@ LevelBadge::LevelBadge(
 		st::settingsLevelBadgeLock,
 		QMargins(0, st::settingsLevelBadgeLockSkip, 0, 0),
 		false)))
-, _context({ .session = session }) {
+, _context(Core::TextContext({
+	.session = session,
+	.repaint = [this] { update(); },
+})) {
 	updateText();
 }
 
@@ -525,7 +530,7 @@ void LevelBadge::paintEvent(QPaintEvent *e) {
 struct SetValues {
 	uint8 colorIndex = 0;
 	DocumentId backgroundEmojiId = 0;
-	DocumentId statusId = 0;
+	EmojiStatusId statusId;
 	TimeId statusUntil = 0;
 	bool statusChanged = false;
 };
@@ -807,7 +812,7 @@ int ColorSelector::resizeGetHeight(int newWidth) {
 	const auto state = right->lifetime().make_state<State>();
 	state->panel.someCustomChosen(
 	) | rpl::start_with_next([=](EmojiStatusPanel::CustomChosen chosen) {
-		emojiIdChosen(chosen.id);
+		emojiIdChosen(chosen.id.documentId);
 	}, raw->lifetime());
 
 	std::move(colorIndexValue) | rpl::start_with_next([=](uint8 index) {
@@ -871,13 +876,12 @@ int ColorSelector::resizeGetHeight(int newWidth) {
 		const auto customTextColor = [=] {
 			return style->coloredValues(false, state->index).name;
 		};
-		const auto controller = show->resolveWindow(
-			ChatHelpers::WindowUsage::PremiumPromo);
+		const auto controller = show->resolveWindow();
 		if (controller) {
 			state->panel.show({
 				.controller = controller,
 				.button = right,
-				.ensureAddedEmojiId = state->emojiId,
+				.ensureAddedEmojiId = { state->emojiId },
 				.customTextColor = customTextColor,
 				.backgroundEmojiMode = true,
 			});
@@ -901,8 +905,8 @@ int ColorSelector::resizeGetHeight(int newWidth) {
 		not_null<Ui::RpWidget*> parent,
 		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<ChannelData*> channel,
-		rpl::producer<DocumentId> statusIdValue,
-		Fn<void(DocumentId,TimeId)> statusIdChosen,
+		rpl::producer<EmojiStatusId> statusIdValue,
+		Fn<void(EmojiStatusId,TimeId)> statusIdChosen,
 		bool group) {
 	const auto button = ButtonStyleWithRightEmoji(
 		parent,
@@ -924,20 +928,20 @@ int ColorSelector::resizeGetHeight(int newWidth) {
 	struct State {
 		EmojiStatusPanel panel;
 		std::unique_ptr<Ui::Text::CustomEmoji> emoji;
-		DocumentId statusId = 0;
+		EmojiStatusId statusId;
 	};
 	const auto state = right->lifetime().make_state<State>();
 	state->panel.someCustomChosen(
 	) | rpl::start_with_next([=](EmojiStatusPanel::CustomChosen chosen) {
-		statusIdChosen(chosen.id, chosen.until);
+		statusIdChosen({ chosen.id }, chosen.until);
 	}, raw->lifetime());
 
 	const auto session = &show->session();
-	std::move(statusIdValue) | rpl::start_with_next([=](DocumentId id) {
+	std::move(statusIdValue) | rpl::start_with_next([=](EmojiStatusId id) {
 		state->statusId = id;
 		state->emoji = id
 			? session->data().customEmojiManager().create(
-				id,
+				Data::EmojiStatusCustomId(id),
 				[=] { right->update(); })
 			: nullptr;
 		right->resize(
@@ -985,13 +989,12 @@ int ColorSelector::resizeGetHeight(int newWidth) {
 	}, right->lifetime());
 
 	raw->setClickedCallback([=] {
-		const auto controller = show->resolveWindow(
-			ChatHelpers::WindowUsage::PremiumPromo);
+		const auto controller = show->resolveWindow();
 		if (controller) {
 			state->panel.show({
 				.controller = controller,
 				.button = right,
-				.ensureAddedEmojiId = state->statusId,
+				.ensureAddedEmojiId = { state->statusId },
 				.channelStatusMode = true,
 			});
 		}
@@ -1183,7 +1186,7 @@ void EditPeerColorBox(
 	struct State {
 		rpl::variable<uint8> index;
 		rpl::variable<DocumentId> emojiId;
-		rpl::variable<DocumentId> statusId;
+		rpl::variable<EmojiStatusId> statusId;
 		TimeId statusUntil = 0;
 		bool statusChanged = false;
 		bool changing = false;
@@ -1263,8 +1266,7 @@ void EditPeerColorBox(
 			{ &st::menuBlueIconWallpaper }
 		);
 		button->setClickedCallback([=] {
-			const auto usage = ChatHelpers::WindowUsage::PremiumPromo;
-			if (const auto strong = show->resolveWindow(usage)) {
+			if (const auto strong = show->resolveWindow()) {
 				show->show(Box<BackgroundBox>(strong, channel));
 			}
 		});
@@ -1321,7 +1323,7 @@ void EditPeerColorBox(
 			show,
 			channel,
 			state->statusId.value(),
-			[=](DocumentId id, TimeId until) {
+			[=](EmojiStatusId id, TimeId until) {
 				state->statusId = id;
 				state->statusUntil = until;
 				state->statusChanged = true;
@@ -1471,8 +1473,7 @@ void CheckBoostLevel(
 			return;
 		}
 		const auto openStatistics = [=] {
-			if (const auto controller = show->resolveWindow(
-					ChatHelpers::WindowUsage::PremiumPromo)) {
+			if (const auto controller = show->resolveWindow()) {
 				controller->showSection(Info::Boosts::Make(peer));
 			}
 		};

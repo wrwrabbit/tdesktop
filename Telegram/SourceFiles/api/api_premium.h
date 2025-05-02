@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "data/data_premium_subscription_option.h"
+#include "data/data_star_gift.h"
 #include "mtproto/sender.h"
 
 class History;
@@ -73,27 +74,6 @@ struct GiftOptionData {
 	int months = 0;
 };
 
-struct StarGift {
-	uint64 id = 0;
-	int64 stars = 0;
-	int64 convertStars = 0;
-	not_null<DocumentData*> document;
-	int limitedLeft = 0;
-	int limitedCount = 0;
-};
-
-struct UserStarGift {
-	StarGift gift;
-	TextWithEntities message;
-	int64 convertStars = 0;
-	PeerId fromId = 0;
-	MsgId messageId = 0;
-	TimeId date = 0;
-	bool anonymous = false;
-	bool hidden = false;
-	bool mine = false;
-};
-
 class Premium final {
 public:
 	explicit Premium(not_null<ApiWrap*> api);
@@ -136,8 +116,9 @@ public:
 	[[nodiscard]] auto subscriptionOptions() const
 		-> const Data::PremiumSubscriptionOptions &;
 
-	[[nodiscard]] rpl::producer<> somePremiumRequiredResolved() const;
-	void resolvePremiumRequired(not_null<UserData*> user);
+	[[nodiscard]] auto someMessageMoneyRestrictionsResolved() const
+		-> rpl::producer<>;
+	void resolveMessageMoneyRestrictions(not_null<UserData*> user);
 
 private:
 	void reloadPromo();
@@ -186,10 +167,10 @@ private:
 
 	Data::PremiumSubscriptionOptions _subscriptionOptions;
 
-	rpl::event_stream<> _somePremiumRequiredResolved;
-	base::flat_set<not_null<UserData*>> _resolvePremiumRequiredUsers;
-	base::flat_set<not_null<UserData*>> _resolvePremiumRequestedUsers;
-	bool _premiumRequiredRequestScheduled = false;
+	rpl::event_stream<> _someMessageMoneyRestrictionsResolved;
+	base::flat_set<not_null<UserData*>> _resolveMessageMoneyRequiredUsers;
+	base::flat_set<not_null<UserData*>> _resolveMessageMoneyRequestedUsers;
+	bool _messageMoneyRequestScheduled = false;
 
 };
 
@@ -216,7 +197,7 @@ public:
 	[[nodiscard]] bool giveawayGiftsPurchaseAvailable() const;
 
 	[[nodiscard]] rpl::producer<rpl::no_value, QString> requestStarGifts();
-	[[nodiscard]] const std::vector<StarGift> &starGifts() const;
+	[[nodiscard]] const std::vector<Data::StarGift> &starGifts() const;
 
 private:
 	struct Token final {
@@ -228,6 +209,7 @@ private:
 	};
 	struct Store final {
 		uint64 amount = 0;
+		QString currency;
 		QString product;
 		int quantity = 0;
 	};
@@ -238,7 +220,7 @@ private:
 	struct {
 		std::vector<int> months;
 		std::vector<int64> totalCosts;
-		QString currency;
+		std::vector<QString> currencies;
 	} _optionsForOnePerson;
 
 	std::vector<int> _availablePresets;
@@ -246,7 +228,7 @@ private:
 	base::flat_map<Token, Store> _stores;
 
 	int32 _giftsHash = 0;
-	std::vector<StarGift> _gifts;
+	std::vector<Data::StarGift> _gifts;
 
 	MTP::Sender _api;
 
@@ -264,23 +246,43 @@ private:
 
 };
 
-enum class RequirePremiumState {
-	Unknown,
-	Yes,
-	No,
+struct MessageMoneyRestriction {
+	int starsPerMessage = 0;
+	bool premiumRequired = false;
+	bool known = false;
+
+	explicit operator bool() const {
+		return starsPerMessage != 0 || premiumRequired;
+	}
+
+	friend inline bool operator==(
+		const MessageMoneyRestriction &,
+		const MessageMoneyRestriction &) = default;
 };
-[[nodiscard]] RequirePremiumState ResolveRequiresPremiumToWrite(
+[[nodiscard]] MessageMoneyRestriction ResolveMessageMoneyRestrictions(
 	not_null<PeerData*> peer,
 	History *maybeHistory);
 
 [[nodiscard]] rpl::producer<DocumentData*> RandomHelloStickerValue(
 	not_null<Main::Session*> session);
 
-[[nodiscard]] std::optional<StarGift> FromTL(
+[[nodiscard]] std::optional<Data::StarGift> FromTL(
 	not_null<Main::Session*> session,
 	const MTPstarGift &gift);
-[[nodiscard]] std::optional<UserStarGift> FromTL(
-	not_null<UserData*> to,
-	const MTPuserStarGift &gift);
+[[nodiscard]] std::optional<Data::SavedStarGift> FromTL(
+	not_null<PeerData*> to,
+	const MTPsavedStarGift &gift);
+
+[[nodiscard]] Data::UniqueGiftModel FromTL(
+	not_null<Main::Session*> session,
+	const MTPDstarGiftAttributeModel &data);
+[[nodiscard]] Data::UniqueGiftPattern FromTL(
+	not_null<Main::Session*> session,
+	const MTPDstarGiftAttributePattern &data);
+[[nodiscard]] Data::UniqueGiftBackdrop FromTL(
+	const MTPDstarGiftAttributeBackdrop &data);
+[[nodiscard]] Data::UniqueGiftOriginalDetails FromTL(
+	not_null<Main::Session*> session,
+	const MTPDstarGiftAttributeOriginalDetails &data);
 
 } // namespace Api

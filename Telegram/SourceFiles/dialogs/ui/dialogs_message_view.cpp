@@ -173,11 +173,11 @@ void MessageView::prepare(
 		: nullptr;
 	const auto hasImages = !preview.images.empty();
 	const auto history = item->history();
-	const auto context = Core::MarkedTextContext{
+	const auto context = Core::TextContext({
 		.session = &history->session(),
-		.customEmojiRepaint = customEmojiRepaint,
+		.repaint = customEmojiRepaint,
 		.customEmojiLoopLimit = kEmojiLoopCount,
-	};
+	});
 	const auto senderTill = (preview.arrowInTextPosition > 0)
 		? preview.arrowInTextPosition
 		: preview.imagesInTextPosition;
@@ -367,7 +367,18 @@ void MessageView::paint(
 			if (image.hasSpoiler()) {
 				const auto frame = DefaultImageSpoiler().frame(
 					_spoiler->index(context.now, pausedSpoiler));
-				FillSpoilerRect(p, mini, frame);
+				if (image.isEllipse()) {
+					const auto radius = st::dialogsMiniPreview / 2;
+					static auto mask = Images::CornersMask(radius);
+					FillSpoilerRect(
+						p,
+						mini,
+						Images::CornersMaskRef(mask),
+						frame,
+						_cornersCache);
+				} else {
+					FillSpoilerRect(p, mini, frame);
+				}
 			}
 		}
 		rect.setLeft(rect.x() + w);

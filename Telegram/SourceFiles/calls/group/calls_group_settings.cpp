@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/group/calls_group_menu.h" // LeaveBox.
 #include "calls/group/calls_group_common.h"
 #include "calls/group/calls_choose_join_as.h"
+#include "calls/group/calls_volume_item.h"
 #include "calls/calls_instance.h"
 #include "ui/widgets/level_meter.h"
 #include "ui/widgets/continuous_sliders.h"
@@ -23,7 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "boxes/share_box.h"
 #include "history/view/history_view_schedule_box.h"
-#include "history/history_item_helpers.h" // GetErrorTextForSending.
+#include "history/history_item_helpers.h" // GetErrorForSending.
 #include "history/history.h"
 #include "data/data_histories.h"
 #include "data/data_session.h"
@@ -44,6 +45,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "webrtc/webrtc_audio_input_tester.h"
 #include "webrtc/webrtc_device_resolver.h"
 #include "settings/settings_calls.h"
+#include "settings/settings_credits_graphics.h"
 #include "main/main_session.h"
 #include "apiwrap.h"
 #include "api/api_invite_links.h"
@@ -130,8 +132,12 @@ object_ptr<ShareBox> ShareInviteLinkBox(
 		QGuiApplication::clipboard()->setText(currentLink());
 		show->showToast(tr::lng_group_invite_copied(tr::now));
 	};
+	auto countMessagesCallback = [=](const TextWithTags &comment) {
+		return 1;
+	};
 	auto submitCallback = [=](
 			std::vector<not_null<Data::Thread*>> &&result,
+			Fn<bool()> checkPaid,
 			TextWithTags &&comment,
 			Api::SendOptions options,
 			Data::ForwardOptions) {
@@ -139,31 +145,16 @@ object_ptr<ShareBox> ShareInviteLinkBox(
 			return;
 		}
 
-		const auto error = [&] {
-			for (const auto thread : result) {
-				const auto error = GetErrorTextForSending(
-					thread,
-					{ .text = &comment });
-				if (!error.isEmpty()) {
-					return std::make_pair(error, thread);
-				}
-			}
-			return std::make_pair(QString(), result.front());
-		}();
-		if (!error.first.isEmpty()) {
-			auto text = TextWithEntities();
-			if (result.size() > 1) {
-				text.append(
-					Ui::Text::Bold(error.second->chatListName())
-				).append("\n\n");
-			}
-			text.append(error.first);
+		const auto error = GetErrorForSending(
+			result,
+			{ .text = &comment });
+		if (error.error) {
 			if (const auto weak = *box) {
-				weak->getDelegate()->show(ConfirmBox({
-					.text = text,
-					.inform = true,
-				}));
+				weak->getDelegate()->show(
+					MakeSendErrorBox(error, result.size() > 1));
 			}
+			return;
+		} else if (!checkPaid()) {
 			return;
 		}
 
@@ -193,32 +184,18 @@ object_ptr<ShareBox> ShareInviteLinkBox(
 	};
 	auto filterCallback = [](not_null<Data::Thread*> thread) {
 		if (const auto user = thread->peer()->asUser()) {
-			if (user->canSendIgnoreRequirePremium()) {
+			if (user->canSendIgnoreMoneyRestrictions()) {
 				return true;
 			}
 		}
 		return Data::CanSend(thread, ChatRestriction::SendOther);
 	};
 
-	const auto scheduleStyle = [&] {
-		auto date = Ui::ChooseDateTimeStyleArgs();
-		date.labelStyle = &st::groupCallBoxLabel;
-		date.dateFieldStyle = &st::groupCallScheduleDateField;
-		date.timeFieldStyle = &st::groupCallScheduleTimeField;
-		date.separatorStyle = &st::callMuteButtonLabel;
-		date.atStyle = &st::callMuteButtonLabel;
-		date.calendarStyle = &st::groupCallCalendarColors;
-
-		auto st = HistoryView::ScheduleBoxStyleArgs();
-		st.topButtonStyle = &st::groupCallMenuToggle;
-		st.popupMenuStyle = &st::groupCallPopupMenu;
-		st.chooseDateTimeArgs = std::move(date);
-		return st;
-	};
-
+	const auto st = ::Settings::DarkCreditsEntryBoxStyle();
 	auto result = Box<ShareBox>(ShareBox::Descriptor{
 		.session = &peer->session(),
 		.copyCallback = std::move(copyCallback),
+		.countMessagesCallback = std::move(countMessagesCallback),
 		.submitCallback = std::move(submitCallback),
 		.filterCallback = std::move(filterCallback),
 		.bottomWidget = std::move(bottom),
@@ -228,12 +205,8 @@ object_ptr<ShareBox> ShareInviteLinkBox(
 				: rpl::single(false)),
 			tr::lng_group_call_copy_speaker_link(),
 			tr::lng_group_call_copy_listener_link()),
-		.stMultiSelect = &st::groupCallMultiSelect,
-		.stComment = &st::groupCallShareBoxComment,
-		.st = &st::groupCallShareBoxList,
-		.stLabel = &st::groupCallField,
-		.scheduleBoxStyle = scheduleStyle(),
-		.premiumRequiredError = SharePremiumRequiredError(),
+		.st = st.shareBox ? *st.shareBox : ShareBoxStyleOverrides(),
+		.moneyRestrictionError = ShareMessageMoneyRestrictionError(),
 	});
 	*box = result.data();
 	return result;
@@ -747,6 +720,50 @@ void SettingsBox(
 
 		addDivider();
 		Ui::AddSkip(layout);
+	}
+	if (rtmp) {
+		const auto volumeItem = layout->add(
+			object_ptr<MenuVolumeItem>(
+				layout,
+				st::groupCallVolumeSettings,
+				st::groupCallVolumeSettingsSlider,
+				call->otherParticipantStateValue(
+				) | rpl::filter([=](const Group::ParticipantState &data) {
+					return data.peer == peer;
+				}),
+				call->rtmpVolume(),
+				Group::kMaxVolume,
+				false,
+				st::groupCallVolumeSettingsPadding));
+
+		const auto toggleMute = crl::guard(layout, [=](bool m, bool local) {
+			if (call) {
+				call->toggleMute({
+					.peer = peer,
+					.mute = m,
+					.locallyOnly = local,
+				});
+			}
+		});
+		const auto changeVolume = crl::guard(layout, [=](int v, bool local) {
+			if (call) {
+				call->changeVolume({
+					.peer = peer,
+					.volume = std::clamp(v, 1, Group::kMaxVolume),
+					.locallyOnly = local,
+				});
+			}
+		});
+
+		volumeItem->toggleMuteLocallyRequests(
+		) | rpl::start_with_next([=](bool muted) {
+			toggleMute(muted, true);
+		}, volumeItem->lifetime());
+
+		volumeItem->changeVolumeLocallyRequests(
+		) | rpl::start_with_next([=](int volume) {
+			changeVolume(volume, true);
+		}, volumeItem->lifetime());
 	}
 
 	if (peer->canManageGroupCall()) {

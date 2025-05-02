@@ -31,6 +31,12 @@ namespace {
 
 constexpr auto kDontCacheLottieAfterArea = 512 * 512;
 
+[[nodiscard]] uint64 LocalStickerId(QStringView name) {
+	auto full = u"local_sticker:"_q;
+	full.append(name);
+	return XXH64(full.data(), full.size() * sizeof(QChar), 0);
+}
+
 } // namespace
 
 uint8 LottieCacheKeyShift(uint8 replacementsTag, StickerLottieSize sizeTag) {
@@ -192,9 +198,7 @@ std::unique_ptr<Lottie::SinglePlayer> LottieThumbnail(
 	};
 	const auto session = thumb
 		? &thumb->owner()->session()
-		: media
-		? &media->owner()->session()
-		: nullptr;
+		: &media->owner()->session();
 	return LottieCachedFromContent(
 		method,
 		baseKey,
@@ -317,27 +321,21 @@ QSize ComputeStickerSize(not_null<DocumentData*> document, QSize box) {
 	return HistoryView::NonEmptySize(request.size(dimensions, 8) / ratio);
 }
 
-[[nodiscard]] uint64 LocalTgsStickerId(QStringView name) {
-	auto full = u"local_tgs_sticker:"_q;
-	full.append(name);
-	return XXH64(full.data(), full.size() * sizeof(QChar), 0);
-}
-
-not_null<DocumentData*> GenerateLocalTgsSticker(
+not_null<DocumentData*> GenerateLocalSticker(
 		not_null<Main::Session*> session,
-		const QString &name) {
-	const auto path = u":/animations/"_q + name + u".tgs"_q;
+		const QString &path) {
 	auto task = FileLoadTask(
 		session,
 		path,
 		QByteArray(),
+		nullptr,
 		nullptr,
 		SendMediaType::File,
 		FileLoadTo(0, {}, {}, 0),
 		{},
 		false,
 		nullptr,
-		LocalTgsStickerId(name));
+		LocalStickerId(path));
 	task.process({ .generateGoodThumbnail = false });
 	const auto result = task.peekResult();
 	Assert(result != nullptr);
@@ -350,8 +348,18 @@ not_null<DocumentData*> GenerateLocalTgsSticker(
 	document->setLocation(Core::FileLocation(path));
 
 	Ensures(document->sticker());
-	Ensures(document->sticker()->isLottie());
 	return document;
+}
+
+not_null<DocumentData*> GenerateLocalTgsSticker(
+		not_null<Main::Session*> session,
+		const QString &name) {
+	const auto result = GenerateLocalSticker(
+		session,
+		u":/animations/"_q + name + u".tgs"_q);
+
+	Ensures(result->sticker()->isLottie());
+	return result;
 }
 
 } // namespace ChatHelpers

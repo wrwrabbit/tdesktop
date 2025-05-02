@@ -28,6 +28,7 @@ struct VoiceToSend {
 	VoiceWaveform waveform;
 	crl::time duration = 0;
 	Api::SendOptions options;
+	bool video = false;
 };
 struct SendActionUpdate {
 	Api::SendProgressType type = Api::SendProgressType();
@@ -39,6 +40,7 @@ enum class WriteRestrictionType {
 	None,
 	Rights,
 	PremiumRequired,
+	Frozen,
 };
 
 struct WriteRestriction {
@@ -47,6 +49,7 @@ struct WriteRestriction {
 	QString text;
 	QString button;
 	Type type = Type::None;
+	int boostsToLift = false;
 
 	[[nodiscard]] bool empty() const {
 		return (type == Type::None);

@@ -7,21 +7,34 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/peer_gifts/info_peer_gifts_widget.h"
 
+#include "api/api_premium.h"
+#include "apiwrap.h"
+#include "data/data_channel.h"
+#include "data/data_credits.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "info/peer_gifts/info_peer_gifts_common.h"
 #include "info/info_controller.h"
 #include "ui/layers/generic_box.h"
 #include "ui/text/text_utilities.h"
+#include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/widgets/box_content_divider.h"
+#include "ui/widgets/checkbox.h"
 #include "ui/widgets/labels.h"
+#include "ui/widgets/popup_menu.h"
+#include "ui/widgets/scroll_area.h"
+#include "ui/wrap/slide_wrap.h"
 #include "ui/ui_utility.h"
 #include "lang/lang_keys.h"
+#include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "mtproto/sender.h"
 #include "window/window_session_controller.h"
 #include "settings/settings_credits_graphics.h"
 #include "styles/style_info.h"
+#include "styles/style_layers.h" // boxRadius
+#include "styles/style_media_player.h" // mediaPlayerMenuCheck
+#include "styles/style_menu_icons.h"
 #include "styles/style_credits.h" // giftBoxPadding
 
 namespace Info::PeerGifts {
@@ -31,18 +44,16 @@ constexpr auto kPreloadPages = 2;
 constexpr auto kPerPage = 50;
 
 [[nodiscard]] GiftDescriptor DescriptorForGift(
-		not_null<UserData*> to,
-		const Api::UserStarGift &gift) {
+		not_null<PeerData*> to,
+		const Data::SavedStarGift &gift) {
 	return GiftTypeStars{
-		.id = gift.gift.id,
-		.stars = gift.gift.stars,
-		.convertStars = gift.gift.convertStars,
-		.document = gift.gift.document,
+		.info = gift.info,
 		.from = ((gift.anonymous || !gift.fromId)
 			? nullptr
 			: to->owner().peer(gift.fromId).get()),
-		.limitedCount = gift.gift.limitedCount,
-		.userpic = true,
+		.date = gift.date,
+		.userpic = !gift.info.unique,
+		.pinned = gift.pinned,
 		.hidden = gift.hidden,
 		.mine = to->isSelf(),
 	};
@@ -55,10 +66,17 @@ public:
 	InnerWidget(
 		QWidget *parent,
 		not_null<Controller*> controller,
-		not_null<UserData*> user);
+		not_null<PeerData*> peer,
+		rpl::producer<Filter> filter);
 
-	[[nodiscard]] not_null<UserData*> user() const {
-		return _user;
+	[[nodiscard]] not_null<PeerData*> peer() const {
+		return _peer;
+	}
+	[[nodiscard]] rpl::producer<bool> notifyEnabled() const {
+		return _notifyEnabled.events();
+	}
+	[[nodiscard]] rpl::producer<> scrollToTop() const {
+		return _scrollToTop.events();
 	}
 
 	void saveState(not_null<Memento*> memento);
@@ -66,12 +84,14 @@ public:
 
 private:
 	struct Entry {
-		Api::UserStarGift gift;
+		Data::SavedStarGift gift;
 		GiftDescriptor descriptor;
 	};
 	struct View {
 		std::unique_ptr<GiftButton> button;
-		int entry = 0;
+		Data::SavedStarGiftId manageId;
+		uint64 giftId = 0;
+		int index = 0;
 	};
 
 	void visibleTopBottomUpdated(
@@ -84,22 +104,34 @@ private:
 	void refreshButtons();
 	void validateButtons();
 	void showGift(int index);
+	void showMenuFor(not_null<GiftButton*> button, QPoint point);
+	void refreshAbout();
+
+	void markPinned(std::vector<Entry>::iterator i);
+	void markUnpinned(std::vector<Entry>::iterator i);
 
 	int resizeGetHeight(int width) override;
 
+	[[nodiscard]] auto pinnedSavedGifts()
+		-> Fn<std::vector<Data::CreditsHistoryEntry>()>;
+
 	const not_null<Window::SessionController*> _window;
+	rpl::variable<Filter> _filter;
 	Delegate _delegate;
 	not_null<Controller*> _controller;
 	std::unique_ptr<Ui::FlatLabel> _about;
-	const not_null<UserData*> _user;
+	const not_null<PeerData*> _peer;
 	std::vector<Entry> _entries;
 	int _totalCount = 0;
+	rpl::event_stream<> _scrollToTop;
 
 	MTP::Sender _api;
 	mtpRequestId _loadMoreRequestId = 0;
 	QString _offset;
 	bool _allLoaded = false;
+	bool _reloading = false;
 
+	rpl::event_stream<bool> _notifyEnabled;
 	std::vector<View> _views;
 	int _viewsForWidth = 0;
 	int _viewsFromRow = 0;
@@ -111,75 +143,157 @@ private:
 	int _visibleFrom = 0;
 	int _visibleTill = 0;
 
+	base::unique_qptr<Ui::PopupMenu> _menu;
+
 };
 
 InnerWidget::InnerWidget(
 	QWidget *parent,
 	not_null<Controller*> controller,
-	not_null<UserData*> user)
+	not_null<PeerData*> peer,
+	rpl::producer<Filter> filter)
 : BoxContentDivider(parent)
 , _window(controller->parentController())
-, _delegate(_window)
+, _filter(std::move(filter))
+, _delegate(&_window->session(), GiftButtonMode::Minimal)
 , _controller(controller)
-, _about(std::make_unique<Ui::FlatLabel>(
-	this,
-	(user->isSelf()
-		? tr::lng_peer_gifts_about_mine(Ui::Text::RichLangValue)
-		: tr::lng_peer_gifts_about(
-			lt_user,
-			rpl::single(Ui::Text::Bold(user->shortName())),
-			Ui::Text::RichLangValue)),
-	st::giftListAbout))
-, _user(user)
-, _totalCount(_user->peerGiftsCount())
-, _api(&_user->session().mtp()) {
+, _peer(peer)
+, _totalCount(_peer->peerGiftsCount())
+, _api(&_peer->session().mtp()) {
 	_singleMin = _delegate.buttonSize();
 
-	if (user->isSelf()) {
+	if (peer->canManageGifts()) {
 		subscribeToUpdates();
 	}
+
+	_filter.value() | rpl::start_with_next([=] {
+		_reloading = true;
+		_api.request(base::take(_loadMoreRequestId)).cancel();
+		_allLoaded = false;
+		refreshAbout();
+		loadMore();
+	}, lifetime());
 }
 
 void InnerWidget::subscribeToUpdates() {
-	_user->owner().giftUpdates(
+	_peer->owner().giftUpdates(
 	) | rpl::start_with_next([=](const Data::GiftUpdate &update) {
-		const auto itemId = [](const Entry &entry) {
-			return FullMsgId(entry.gift.fromId, entry.gift.messageId);
+		const auto savedId = [](const Entry &entry) {
+			return entry.gift.manageId;
 		};
-		const auto i = ranges::find(_entries, update.itemId, itemId);
+		const auto i = ranges::find(_entries, update.id, savedId);
 		if (i == end(_entries)) {
 			return;
 		}
 		const auto index = int(i - begin(_entries));
 		using Action = Data::GiftUpdate::Action;
 		if (update.action == Action::Convert
+			|| update.action == Action::Transfer
 			|| update.action == Action::Delete) {
 			_entries.erase(i);
 			if (_totalCount > 0) {
 				--_totalCount;
 			}
 			for (auto &view : _views) {
-				if (view.entry >= index) {
-					--view.entry;
+				if (view.index >= index) {
+					--view.index;
 				}
 			}
 		} else if (update.action == Action::Save
 			|| update.action == Action::Unsave) {
 			i->gift.hidden = (update.action == Action::Unsave);
+
+			const auto unpin = i->gift.hidden && i->gift.pinned;
 			v::match(i->descriptor, [](GiftTypePremium &) {
 			}, [&](GiftTypeStars &data) {
 				data.hidden = i->gift.hidden;
 			});
 			for (auto &view : _views) {
-				if (view.entry == index) {
-					view.entry = -1;
+				if (view.index == index) {
+					view.index = -1;
+					view.manageId = {};
 				}
+			}
+			if (unpin) {
+				markUnpinned(i);
+			}
+		} else if (update.action == Action::Pin
+			|| update.action == Action::Unpin) {
+			if (update.action == Action::Pin) {
+				markPinned(i);
+			} else {
+				markUnpinned(i);
 			}
 		} else {
 			return;
 		}
 		refreshButtons();
+		if (update.action == Action::Pin) {
+			_scrollToTop.fire({});
+		}
 	}, lifetime());
+}
+
+void InnerWidget::markPinned(std::vector<Entry>::iterator i) {
+	const auto index = int(i - begin(_entries));
+
+	i->gift.pinned = true;
+	v::match(i->descriptor, [](const GiftTypePremium &) {
+	}, [&](GiftTypeStars &data) {
+		data.pinned = true;
+	});
+	if (index) {
+		std::rotate(begin(_entries), i, i + 1);
+	}
+	auto unpin = end(_entries);
+	const auto session = &_window->session();
+	const auto limit = session->appConfig().pinnedGiftsLimit();
+	if (limit < _entries.size()) {
+		const auto j = begin(_entries) + limit;
+		if (j->gift.pinned) {
+			unpin = j;
+		}
+	}
+	for (auto &view : _views) {
+		if (view.index <= index) {
+			view.index = -1;
+			view.manageId = {};
+		}
+	}
+	if (unpin != end(_entries)) {
+		markUnpinned(unpin);
+	}
+}
+
+void InnerWidget::markUnpinned(std::vector<Entry>::iterator i) {
+	const auto index = int(i - begin(_entries));
+
+	i->gift.pinned = false;
+	v::match(i->descriptor, [](const GiftTypePremium &) {
+	}, [&](GiftTypeStars &data) {
+		data.pinned = false;
+	});
+	auto after = index + 1;
+	for (auto j = i + 1; j != end(_entries); ++j) {
+		if (!j->gift.pinned && j->gift.date <= i->gift.date) {
+			break;
+		}
+		++after;
+	}
+	if (after == _entries.size() && !_allLoaded) {
+		// We don't know if the correct position is exactly in the end
+		// of the loaded part or later, so we hide it for now, let it
+		// be loaded later while scrolling.
+		_entries.erase(i);
+	} else if (after > index + 1) {
+		std::rotate(i, i + 1, begin(_entries) + after);
+	}
+	for (auto &view : _views) {
+		if (view.index >= index) {
+			view.index = -1;
+			view.manageId = {};
+		}
+	}
 }
 
 void InnerWidget::visibleTopBottomUpdated(
@@ -197,24 +311,39 @@ void InnerWidget::visibleTopBottomUpdated(
 void InnerWidget::paintEvent(QPaintEvent *e) {
 	auto p = QPainter(this);
 
-	const auto aboutSize = _about->size().grownBy(st::giftListAboutMargin);
+	const auto aboutSize = _about
+		? _about->size().grownBy(st::giftListAboutMargin)
+		: QSize();
 	const auto skips = QMargins(0, 0, 0, aboutSize.height());
 	p.fillRect(rect().marginsRemoved(skips), st::boxDividerBg->c);
 	paintTop(p);
-	paintBottom(p, skips.bottom());
+	if (const auto bottom = skips.bottom()) {
+		paintBottom(p, bottom);
+	}
 }
 
 void InnerWidget::loadMore() {
 	if (_allLoaded || _loadMoreRequestId) {
 		return;
 	}
-	_loadMoreRequestId = _api.request(MTPpayments_GetUserStarGifts(
-		_user->inputUser,
-		MTP_string(_offset),
+	using Flag = MTPpayments_GetSavedStarGifts::Flag;
+	const auto filter = _filter.current();
+	_loadMoreRequestId = _api.request(MTPpayments_GetSavedStarGifts(
+		MTP_flags((filter.sortByValue ? Flag::f_sort_by_value : Flag())
+			| (filter.skipLimited ? Flag::f_exclude_limited : Flag())
+			| (filter.skipUnlimited ? Flag::f_exclude_unlimited : Flag())
+			| (filter.skipUnique ? Flag::f_exclude_unique : Flag())
+			| (filter.skipSaved ? Flag::f_exclude_saved : Flag())
+			| (filter.skipUnsaved ? Flag::f_exclude_unsaved : Flag())),
+		_peer->input,
+		MTP_string(_reloading ? QString() : _offset),
 		MTP_int(kPerPage)
-	)).done([=](const MTPpayments_UserStarGifts &result) {
+	)).done([=](const MTPpayments_SavedStarGifts &result) {
 		_loadMoreRequestId = 0;
 		const auto &data = result.data();
+		if (const auto enabled = data.vchat_notifications_enabled()) {
+			_notifyEnabled.fire(mtpIsTrue(*enabled));
+		}
 		if (const auto next = data.vnext_offset()) {
 			_offset = qs(*next);
 		} else {
@@ -222,13 +351,17 @@ void InnerWidget::loadMore() {
 		}
 		_totalCount = data.vcount().v;
 
-		const auto owner = &_user->owner();
+		const auto owner = &_peer->owner();
 		owner->processUsers(data.vusers());
+		owner->processChats(data.vchats());
 
+		if (base::take(_reloading)) {
+			_entries.clear();
+		}
 		_entries.reserve(_entries.size() + data.vgifts().v.size());
 		for (const auto &gift : data.vgifts().v) {
-			if (auto parsed = Api::FromTL(_user, gift)) {
-				auto descriptor = DescriptorForGift(_user, *parsed);
+			if (auto parsed = Api::FromTL(_peer, gift)) {
+				auto descriptor = DescriptorForGift(_peer, *parsed);
 				_entries.push_back({
 					.gift = std::move(*parsed),
 					.descriptor = std::move(descriptor),
@@ -236,6 +369,7 @@ void InnerWidget::loadMore() {
 			}
 		}
 		refreshButtons();
+		refreshAbout();
 	}).fail([=] {
 		_loadMoreRequestId = 0;
 		_allLoaded = true;
@@ -274,46 +408,69 @@ void InnerWidget::validateButtons() {
 	const auto fullw = _perRow * (_single.width() + skipw) - skipw;
 	const auto left = padding.left() + (available - fullw) / 2;
 	const auto oneh = _single.height() + st::giftBoxGiftSkip.y();
+	const auto mode = GiftButton::Mode::Minimal;
 	auto x = left;
 	auto y = vskip + fromRow * oneh;
 	auto views = std::vector<View>();
 	views.reserve((tillRow - fromRow) * _perRow);
-	const auto add = [&](int index) {
-		const auto already = ranges::find(_views, index, &View::entry);
+	const auto idUsed = [&](uint64 giftId, int column, int row) {
+		for (auto j = row; j != tillRow; ++j) {
+			for (auto i = column; i != _perRow; ++i) {
+				const auto index = j * _perRow + i;
+				if (index >= _entries.size()) {
+					return false;
+				} else if (_entries[index].gift.info.id == giftId) {
+					return true;
+				}
+			}
+			column = 0;
+		}
+		return false;
+	};
+	const auto add = [&](int column, int row) {
+		const auto index = row * _perRow + column;
+		if (index >= _entries.size()) {
+			return false;
+		}
+		const auto giftId = _entries[index].gift.info.id;
+		const auto manageId = _entries[index].gift.manageId;
+		const auto &descriptor = _entries[index].descriptor;
+		const auto already = ranges::find(_views, giftId, &View::giftId);
 		if (already != end(_views)) {
 			views.push_back(base::take(*already));
-			return;
+		} else {
+			const auto unused = ranges::find_if(_views, [&](const View &v) {
+				return v.button && !idUsed(v.giftId, column, row);
+			});
+			if (unused != end(_views)) {
+				views.push_back(base::take(*unused));
+			} else {
+				auto button = std::make_unique<GiftButton>(this, &_delegate);
+				const auto raw = button.get();
+				raw->contextMenuRequests(
+				) | rpl::start_with_next([=](QPoint point) {
+					showMenuFor(raw, point);
+				}, raw->lifetime());
+				raw->show();
+				views.push_back({ .button = std::move(button) });
+			}
 		}
-		const auto &descriptor = _entries[index].descriptor;
+		auto &view = views.back();
 		const auto callback = [=] {
 			showGift(index);
 		};
-		const auto unused = ranges::find_if(_views, [&](const View &v) {
-			return v.button
-				&& ((v.entry < fromRow * _perRow)
-					|| (v.entry >= tillRow * _perRow));
-		});
-		if (unused != end(_views)) {
-			views.push_back(base::take(*unused));
-			views.back().entry = index;
-		} else {
-			auto button = std::make_unique<GiftButton>(this, &_delegate);
-			button->show();
-			views.push_back({
-				.button = std::move(button),
-				.entry = index,
-			});
-		}
-		views.back().button->setDescriptor(descriptor);
-		views.back().button->setClickedCallback(callback);
- 	};
+		view.index = index;
+		view.manageId = manageId;
+		view.giftId = giftId;
+		view.button->setDescriptor(descriptor, mode);
+		view.button->setClickedCallback(callback);
+		return true;
+	};
 	for (auto j = fromRow; j != tillRow; ++j) {
 		for (auto i = 0; i != _perRow; ++i) {
-			const auto index = j * _perRow + i;
-			if (index >= _entries.size()) {
+			if (!add(i, j)) {
 				break;
 			}
-			add(index);
 			views.back().button->setGeometry(
 				QRect(QPoint(x, y), _single),
 				_delegate.buttonExtend());
@@ -325,11 +482,103 @@ void InnerWidget::validateButtons() {
 	std::swap(_views, views);
 }
 
+auto InnerWidget::pinnedSavedGifts()
+-> Fn<std::vector<Data::CreditsHistoryEntry>()> {
+	struct Entry {
+		Data::SavedStarGiftId id;
+		std::shared_ptr<Data::UniqueGift> unique;
+	};
+	auto entries = std::vector<Entry>();
+	for (const auto &entry : _entries) {
+		if (entry.gift.pinned) {
+			Assert(entry.gift.info.unique != nullptr);
+			entries.push_back({
+				entry.gift.manageId,
+				entry.gift.info.unique,
+			});
+		} else {
+			break;
+		}
+	}
+	return [entries] {
+		auto result = std::vector<Data::CreditsHistoryEntry>();
+		result.reserve(entries.size());
+		for (const auto &entry : entries) {
+			const auto &id = entry.id;
+			result.push_back({
+				.bareMsgId = uint64(id.userMessageId().bare),
+				.bareEntryOwnerId = id.chat() ? id.chat()->id.value : 0,
+				.giftChannelSavedId = id.chatSavedId(),
+				.uniqueGift = entry.unique,
+				.stargift = true,
+			});
+		}
+		return result;
+	};
+}
+
+void InnerWidget::showMenuFor(not_null<GiftButton*> button, QPoint point) {
+	if (_menu) {
+		return;
+	}
+	const auto index = [&] {
+		for (const auto &view : _views) {
+			if (view.button.get() == button) {
+				return view.index;
+			}
+		}
+		return -1;
+	}();
+	if (index < 0) {
+		return;
+	}
+
+	auto entry = ::Settings::SavedStarGiftEntry(
+		_peer,
+		_entries[index].gift);
+	entry.pinnedSavedGifts = pinnedSavedGifts();
+	_menu = base::make_unique_q<Ui::PopupMenu>(this, st::popupMenuWithIcons);
+	::Settings::FillSavedStarGiftMenu(
+		_controller->uiShow(),
+		_menu.get(),
+		entry,
+		::Settings::SavedStarGiftMenuType::List);
+	if (_menu->empty()) {
+		return;
+	}
+	_menu->popup(point);
+}
+
 void InnerWidget::showGift(int index) {
+	Expects(index >= 0 && index < _entries.size());
+
 	_window->show(Box(
-		::Settings::UserStarGiftBox,
+		::Settings::SavedStarGiftBox,
 		_window,
-		_entries[index].gift));
+		_peer,
+		_entries[index].gift,
+		pinnedSavedGifts()));
+}
+
+void InnerWidget::refreshAbout() {
+	if (!_peer->isSelf() && _peer->canManageGifts() && !_entries.empty()) {
+		if (_about) {
+			_about = nullptr;
+			resizeToWidth(width());
+		}
+	} else if (!_about) {
+		_about = std::make_unique<Ui::FlatLabel>(
+			this,
+			(_peer->isSelf()
+				? tr::lng_peer_gifts_about_mine(Ui::Text::RichLangValue)
+				: tr::lng_peer_gifts_about(
+					lt_user,
+					rpl::single(Ui::Text::Bold(_peer->shortName())),
+					Ui::Text::RichLangValue)),
+			st::giftListAbout);
+		_about->show();
+		resizeToWidth(width());
+	}
 }
 
 int InnerWidget::resizeGetHeight(int width) {
@@ -339,7 +588,7 @@ int InnerWidget::resizeGetHeight(int width) {
 	const auto skipw = st::giftBoxGiftSkip.x();
 	_perRow = std::min(
 		(available + skipw) / (_singleMin.width() + skipw),
-		count);
+		std::max(count, 1));
 	if (!_perRow) {
 		return 0;
 	}
@@ -353,12 +602,16 @@ int InnerWidget::resizeGetHeight(int width) {
 	const auto rows = (count + _perRow - 1) / _perRow;
 	const auto skiph = st::giftBoxGiftSkip.y();
 
-	auto result = padding.bottom() * 2 + rows * (singleh + skiph) - skiph;
+	auto result = rows
+		? (padding.bottom() * 2 + rows * (singleh + skiph) - skiph)
+		: 0;
 
-	const auto margin = st::giftListAboutMargin;
-	_about->resizeToWidth(width - margin.left() - margin.right());
-	_about->moveToLeft(margin.left(), result + margin.top());
-	result += margin.top() + _about->height() + margin.bottom();
+	if (const auto about = _about.get()) {
+		const auto margin = st::giftListAboutMargin;
+		about->resizeToWidth(width - margin.left() - margin.right());
+		about->moveToLeft(margin.left(), result + margin.top());
+		result += margin.top() + about->height() + margin.bottom();
+	}
 
 	return result;
 }
@@ -374,23 +627,19 @@ void InnerWidget::restoreState(not_null<Memento*> memento) {
 	}
 }
 
-Memento::Memento(not_null<UserData*> user)
-: ContentMemento(user, nullptr, PeerId()) {
+Memento::Memento(not_null<PeerData*> peer)
+: ContentMemento(peer, nullptr, PeerId()) {
 }
 
 Section Memento::section() const {
 	return Section(Section::Type::PeerGifts);
 }
 
-not_null<UserData*> Memento::user() const {
-	return peer()->asUser();
-}
-
 object_ptr<ContentWidget> Memento::createWidget(
 		QWidget *parent,
 		not_null<Controller*> controller,
 		const QRect &geometry) {
-	auto result = object_ptr<Widget>(parent, controller, user());
+	auto result = object_ptr<Widget>(parent, controller, peer());
 	result->setInternalState(geometry, this);
 	return result;
 }
@@ -408,20 +657,175 @@ Memento::~Memento() = default;
 Widget::Widget(
 	QWidget *parent,
 	not_null<Controller*> controller,
-	not_null<UserData*> user)
+	not_null<PeerData*> peer)
 : ContentWidget(parent, controller) {
-	_inner = setInnerWidget(object_ptr<InnerWidget>(
+	_inner = setInnerWidget(
+		object_ptr<InnerWidget>(this, controller, peer, _filter.value()));
+	_inner->notifyEnabled(
+	) | rpl::take(1) | rpl::start_with_next([=](bool enabled) {
+		setupNotifyCheckbox(enabled);
+	}, _inner->lifetime());
+	_inner->scrollToTop() | rpl::start_with_next([=] {
+		scrollTo({ 0, 0 });
+	}, _inner->lifetime());
+}
+
+void Widget::showFinished() {
+	_shown = true;
+	if (const auto bottom = _pinnedToBottom.data()) {
+		bottom->toggle(true, anim::type::normal);
+	}
+}
+
+void Widget::setupNotifyCheckbox(bool enabled) {
+	_pinnedToBottom = Ui::CreateChild<Ui::SlideWrap<Ui::RpWidget>>(
 		this,
-		controller,
-		user));
+		object_ptr<Ui::RpWidget>(this));
+	const auto wrap = _pinnedToBottom.data();
+	wrap->toggle(false, anim::type::instant);
+
+	const auto bottom = wrap->entity();
+	bottom->show();
+
+	const auto notify = Ui::CreateChild<Ui::Checkbox>(
+		bottom,
+		tr::lng_peer_gifts_notify(),
+		enabled);
+	notify->show();
+
+	notify->checkedChanges() | rpl::start_with_next([=](bool checked) {
+		const auto api = &controller()->session().api();
+		const auto show = controller()->uiShow();
+		using Flag = MTPpayments_ToggleChatStarGiftNotifications::Flag;
+		api->request(MTPpayments_ToggleChatStarGiftNotifications(
+			MTP_flags(checked ? Flag::f_enabled : Flag()),
+			_inner->peer()->input
+		)).send();
+		if (checked) {
+			show->showToast(tr::lng_peer_gifts_notify_enabled(tr::now));
+		}
+	}, notify->lifetime());
+
+	const auto &checkSt = st::defaultCheckbox;
+	const auto checkTop = st::boxRadius + checkSt.margin.top();
+	bottom->widthValue() | rpl::start_with_next([=](int width) {
+		const auto normal = notify->naturalWidth()
+			- checkSt.margin.left()
+			- checkSt.margin.right();
+		notify->resizeToWidth(normal);
+		const auto checkLeft = (width - normal) / 2;
+		notify->moveToLeft(checkLeft, checkTop);
+	}, notify->lifetime());
+
+	notify->heightValue() | rpl::start_with_next([=](int height) {
+		bottom->resize(bottom->width(), st::boxRadius + height);
+	}, notify->lifetime());
+
+	const auto processHeight = [=] {
+		setScrollBottomSkip(wrap->height());
+		wrap->moveToLeft(wrap->x(), height() - wrap->height());
+	};
+
+	_inner->sizeValue(
+	) | rpl::start_with_next([=](const QSize &s) {
+		wrap->resizeToWidth(s.width());
+		crl::on_main(wrap, processHeight);
+	}, wrap->lifetime());
+
+	rpl::combine(
+		wrap->heightValue(),
+		heightValue()
+	) | rpl::start_with_next(processHeight, wrap->lifetime());
+
+	if (_shown) {
+		wrap->toggle(true, anim::type::normal);
+	}
+	_hasPinnedToBottom = true;
+}
+
+void Widget::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
+	const auto filter = _filter.current();
+	const auto change = [=](Fn<void(Filter&)> update) {
+		auto now = _filter.current();
+		update(now);
+		_filter = now;
+	};
+
+	if (filter.sortByValue) {
+		addAction(tr::lng_peer_gifts_filter_by_date(tr::now), [=] {
+			change([](Filter &filter) { filter.sortByValue = false; });
+		}, &st::menuIconSchedule);
+	} else {
+		addAction(tr::lng_peer_gifts_filter_by_value(tr::now), [=] {
+			change([](Filter &filter) { filter.sortByValue = true; });
+		}, &st::menuIconEarn);
+	}
+
+	addAction({ .isSeparator = true });
+
+	addAction(tr::lng_peer_gifts_filter_unlimited(tr::now), [=] {
+		change([](Filter &filter) {
+			filter.skipUnlimited = !filter.skipUnlimited;
+			if (filter.skipUnlimited
+				&& filter.skipLimited
+				&& filter.skipUnique) {
+				filter.skipLimited = false;
+			}
+		});
+	}, filter.skipUnlimited ? nullptr : &st::mediaPlayerMenuCheck);
+	addAction(tr::lng_peer_gifts_filter_limited(tr::now), [=] {
+		change([](Filter &filter) {
+			filter.skipLimited = !filter.skipLimited;
+			if (filter.skipUnlimited
+				&& filter.skipLimited
+				&& filter.skipUnique) {
+				filter.skipUnlimited = false;
+			}
+		});
+	}, filter.skipLimited ? nullptr : &st::mediaPlayerMenuCheck);
+	addAction(tr::lng_peer_gifts_filter_unique(tr::now), [=] {
+		change([](Filter &filter) {
+			filter.skipUnique = !filter.skipUnique;
+			if (filter.skipUnlimited
+				&& filter.skipLimited
+				&& filter.skipUnique) {
+				filter.skipUnlimited = false;
+			}
+		});
+	}, filter.skipUnique ? nullptr : &st::mediaPlayerMenuCheck);
+
+	if (_inner->peer()->canManageGifts()) {
+		addAction({ .isSeparator = true });
+
+		addAction(tr::lng_peer_gifts_filter_saved(tr::now), [=] {
+			change([](Filter &filter) {
+				filter.skipSaved = !filter.skipSaved;
+				if (filter.skipSaved && filter.skipUnsaved) {
+					filter.skipUnsaved = false;
+				}
+			});
+		}, filter.skipSaved ? nullptr : &st::mediaPlayerMenuCheck);
+		addAction(tr::lng_peer_gifts_filter_unsaved(tr::now), [=] {
+			change([](Filter &filter) {
+				filter.skipUnsaved = !filter.skipUnsaved;
+				if (filter.skipSaved && filter.skipUnsaved) {
+					filter.skipSaved = false;
+				}
+			});
+		}, filter.skipUnsaved ? nullptr : &st::mediaPlayerMenuCheck);
+	}
 }
 
 rpl::producer<QString> Widget::title() {
 	return tr::lng_peer_gifts_title();
 }
 
-not_null<UserData*> Widget::user() const {
-	return _inner->user();
+rpl::producer<bool> Widget::desiredBottomShadowVisibility() {
+	return _hasPinnedToBottom.value();
+}
+
+not_null<PeerData*> Widget::peer() const {
+	return _inner->peer();
 }
 
 bool Widget::showInternal(not_null<ContentMemento*> memento) {
@@ -429,7 +833,7 @@ bool Widget::showInternal(not_null<ContentMemento*> memento) {
 		return false;
 	}
 	if (auto similarMemento = dynamic_cast<Memento*>(memento.get())) {
-		if (similarMemento->user() == user()) {
+		if (similarMemento->peer() == peer()) {
 			restoreState(similarMemento);
 			return true;
 		}
@@ -446,7 +850,7 @@ void Widget::setInternalState(
 }
 
 std::shared_ptr<ContentMemento> Widget::doCreateMemento() {
-	auto result = std::make_shared<Memento>(user());
+	auto result = std::make_shared<Memento>(peer());
 	saveState(result.get());
 	return result;
 }

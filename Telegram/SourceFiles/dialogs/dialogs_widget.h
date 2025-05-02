@@ -7,9 +7,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "api/api_peer_search.h"
 #include "base/timer.h"
 #include "dialogs/dialogs_key.h"
 #include "window/section_widget.h"
+#include "ui/controls/swipe_handler_data.h"
 #include "ui/effects/animations.h"
 #include "ui/userpic_view.h"
 #include "mtproto/sender.h"
@@ -75,7 +77,7 @@ class FakeRow;
 class Key;
 struct ChosenRow;
 class InnerWidget;
-enum class SearchRequestType : uchar;
+struct SearchRequestType;
 enum class SearchRequestDelay : uchar;
 class Suggestions;
 class ChatSearchIn;
@@ -129,6 +131,7 @@ public:
 	[[nodiscard]] RowDescriptor resolveChatNext(RowDescriptor from = {}) const;
 	[[nodiscard]] RowDescriptor resolveChatPrevious(RowDescriptor from = {}) const;
 	void updateHasFocus(not_null<QWidget*> focused);
+	void toggleFiltersMenu(bool value);
 
 	// Float player interface.
 	bool floatPlayerHandleWheelEvent(QEvent *e) override;
@@ -151,10 +154,26 @@ protected:
 	void paintEvent(QPaintEvent *e) override;
 
 private:
+	struct SearchProcessState {
+		base::flat_map<QString, MTPmessages_Messages> cache;
+		base::flat_map<mtpRequestId, QString> queries;
+
+		PeerData *lastPeer = nullptr;
+		MsgId lastId = 0;
+		int32 nextRate = 0;
+		mtpRequestId requestId = 0;
+		bool full = false;
+	};
+
 	void chosenRow(const ChosenRow &row);
 	void listScrollUpdated();
 	void searchCursorMoved();
 	void completeHashtag(QString tag);
+	void requestPublicPosts(bool fromStart);
+	void requestMessages(bool fromStart);
+	[[nodiscard]] not_null<SearchProcessState*> currentSearchProcess();
+
+	[[nodiscard]] bool computeSearchWithPostsPreview() const;
 
 	[[nodiscard]] QString currentSearchQuery() const;
 	[[nodiscard]] int currentSearchQueryCursorPosition() const;
@@ -168,10 +187,9 @@ private:
 	void searchReceived(
 		SearchRequestType type,
 		const MTPmessages_Messages &result,
-		mtpRequestId requestId);
-	void peerSearchReceived(
-		const MTPcontacts_Found &result,
-		mtpRequestId requestId);
+		not_null<SearchProcessState*> process,
+		bool cacheResults = false);
+	void peerSearchReceived(Api::PeerSearchResult result);
 	void escape();
 	void submit();
 	void cancelSearchRequest();
@@ -182,17 +200,19 @@ private:
 
 	void setupSupportMode();
 	void setupTouchChatPreview();
+	void setupFrozenAccountBar();
 	void setupConnectingWidget();
 	void setupMainMenuToggle();
 	void setupMoreChatsBar();
 	void setupDownloadBar();
 	void setupShortcuts();
 	void setupStories();
+	void setupSwipeBack();
 	void storiesExplicitCollapse();
 	void collectStoriesUserpicsViews(Data::StorySourcesList list);
 	void storiesToggleExplicitExpand(bool expand);
 	void trackScroll(not_null<Ui::RpWidget*> widget);
-	[[nodiscard]] bool searchForPeersRequired(const QString &query) const;
+	[[nodiscard]] bool peerSearchRequired() const;
 	[[nodiscard]] bool searchForTopicsRequired(const QString &query) const;
 
 	// Child list may be unable to set specific search state.
@@ -201,8 +221,9 @@ private:
 	void showCalendar();
 	void showSearchFrom();
 	void showMainMenu();
-	void clearSearchCache();
+	void clearSearchCache(bool clearPosts);
 	void setSearchQuery(const QString &query, int cursorPosition = -1);
+	void updateFrozenAccountBar();
 	void updateControlsVisibility(bool fast = false);
 	void updateLockUnlockVisibility(
 		anim::type animated = anim::type::instant);
@@ -244,10 +265,10 @@ private:
 	void searchFailed(
 		SearchRequestType type,
 		const MTP::Error &error,
-		mtpRequestId requestId);
-	void peerSearchFailed(const MTP::Error &error, mtpRequestId requestId);
-	void searchApplyEmpty(SearchRequestType type, mtpRequestId id);
-	void peerSearchApplyEmpty(mtpRequestId id);
+		not_null<SearchProcessState*> process);
+	void searchApplyEmpty(
+		SearchRequestType type,
+		not_null<SearchProcessState*> process);
 
 	void updateForceDisplayWide();
 	void scrollToDefault(bool verytop = false);
@@ -276,8 +297,11 @@ private:
 	bool _dragForward = false;
 	base::Timer _chooseByDragTimer;
 
-	Layout _layout = Layout::Main;
+	const Layout _layout = Layout::Main;
 	int _narrowWidth = 0;
+
+	std::unique_ptr<Ui::AbstractButton> _frozenAccountBar;
+
 	object_ptr<Ui::RpWidget> _searchControls;
 	object_ptr<HistoryView::TopBarWidget> _subsectionTopBar = { nullptr };
 	struct {
@@ -297,6 +321,8 @@ private:
 	std::unique_ptr<Ui::GroupCallBar> _forumGroupCallBar;
 	std::unique_ptr<Ui::RequestsBar> _forumRequestsBar;
 	std::unique_ptr<HistoryView::ContactStatus> _forumReportBar;
+
+	base::unique_qptr<Ui::RpWidget> _chatFilters;
 
 	object_ptr<Ui::ElasticScroll> _scroll;
 	QPointer<InnerWidget> _inner;
@@ -318,6 +344,7 @@ private:
 	bool _scrollToTopIsShown = false;
 	bool _forumSearchRequested = false;
 	HashOrCashtag _searchHashOrCashtag = {};
+	bool _searchWithPostsPreview = false;
 
 	Data::Folder *_openedFolder = nullptr;
 	Data::Forum *_openedForum = nullptr;
@@ -343,10 +370,6 @@ private:
 
 	base::Timer _searchTimer;
 
-	QString _peerSearchQuery;
-	bool _peerSearchFull = false;
-	mtpRequestId _peerSearchRequest = 0;
-
 	QString _topicSearchQuery;
 	TimeId _topicSearchOffsetDate = 0;
 	MsgId _topicSearchOffsetId = 0;
@@ -358,21 +381,19 @@ private:
 	PeerData *_searchQueryFrom = nullptr;
 	std::vector<Data::ReactionId> _searchQueryTags;
 	ChatSearchTab _searchQueryTab = {};
-	int32 _searchNextRate = 0;
-	bool _searchFull = false;
-	bool _searchFullMigrated = false;
-	int _searchInHistoryRequest = 0; // Not real mtpRequestId.
-	mtpRequestId _searchRequest = 0;
+	ChatTypeFilter _searchQueryFilter = {};
 
-	PeerData *_lastSearchPeer = nullptr;
-	MsgId _lastSearchId = 0;
-	MsgId _lastSearchMigratedId = 0;
+	Ui::Controls::SwipeBackResult _swipeBackData;
+	bool _swipeBackMirrored = false;
+	bool _swipeBackIconMirrored = false;
 
-	base::flat_map<QString, MTPmessages_Messages> _searchCache;
+	SearchProcessState _searchProcess;
+	SearchProcessState _migratedProcess;
+	SearchProcessState _postsProcess;
+	int _historiesRequest = 0; // Not real mtpRequestId.
+
+	Api::PeerSearch _peerSearch;
 	Api::SingleMessageSearch _singleMessageSearch;
-	base::flat_map<mtpRequestId, QString> _searchQueries;
-	base::flat_map<QString, MTPcontacts_Found> _peerSearchCache;
-	base::flat_map<mtpRequestId, QString> _peerSearchQueries;
 
 	QPixmap _widthAnimationCache;
 

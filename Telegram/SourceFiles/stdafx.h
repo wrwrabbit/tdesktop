@@ -129,10 +129,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/emoji_config.h"
 #include "ui/qt_object_factory.h"
 #include "ui/qt_weak_factory.h"
+#include "ui/ui_rpl_filter.h"
 
 #include "styles/palette.h"
 #include "styles/style_basic.h"
 
+#include "core/stars_amount.h"
 #include "core/utils.h"
 #include "logs.h"
 #include "config.h"

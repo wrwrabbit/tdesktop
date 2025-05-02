@@ -183,10 +183,13 @@ PointDetailsWidget::PointDetailsWidget(
 			for (const auto &value : _chartData.lines.front().y) {
 				const auto valueText = Ui::Text::String(
 					_textStyle,
-					QString::number(value / multiplier));
+					Lang::FormatExactCountDecimal(value / multiplier));
 				const auto usdText = Ui::Text::String(
 					_textStyle,
-					Info::ChannelEarn::ToUsd(value, _chartData.currencyRate));
+					Info::ChannelEarn::ToUsd(
+						value,
+						_chartData.currencyRate,
+						0));
 				const auto width = std::max(
 					usdText.maxWidth(),
 					valueText.maxWidth());
@@ -211,6 +214,8 @@ PointDetailsWidget::PointDetailsWidget(
 
 	const auto calculatedWidth = [&]{
 		auto maxNameTextWidth = 0;
+		const auto isCredits
+			= _chartData.currency == Data::StatisticalCurrency::Credits;
 		for (const auto &dataLine : _chartData.lines) {
 			const auto maxNameText = Ui::Text::String(
 				_textStyle,
@@ -219,10 +224,12 @@ PointDetailsWidget::PointDetailsWidget(
 				maxNameText.maxWidth(),
 				maxNameTextWidth);
 			if (hasUsdLine) {
+				const auto text = isCredits
+					? tr::lng_channel_earn_chart_overriden_detail_credits
+					: tr::lng_channel_earn_chart_overriden_detail_currency;
 				const auto currency = Ui::Text::String(
 					_textStyle,
-					tr::lng_channel_earn_chart_overriden_detail_currency(
-						tr::now));
+					text(tr::now));
 				const auto usd = Ui::Text::String(
 					_textStyle,
 					tr::lng_channel_earn_chart_overriden_detail_usd(
@@ -319,6 +326,8 @@ void PointDetailsWidget::setXIndex(int xIndex) {
 			{ float64(xIndex), float64(xIndex) }).parts
 		: std::vector<PiePartData::Part>();
 	const auto multiplier = float64(Data::kEarnMultiplier);
+	const auto isCredits
+		= _chartData.currency == Data::StatisticalCurrency::Credits;
 	for (auto i = 0; i < _chartData.lines.size(); i++) {
 		const auto &dataLine = _chartData.lines[i];
 		auto textLine = Line();
@@ -338,11 +347,14 @@ void PointDetailsWidget::setXIndex(int xIndex) {
 			copy.valueColor = QColor(dataLine.color);
 			copy.name.setText(
 				_textStyle,
-				tr::lng_channel_earn_chart_overriden_detail_currency(
-					tr::now));
+				(isCredits
+					? tr::lng_channel_earn_chart_overriden_detail_credits
+					: tr::lng_channel_earn_chart_overriden_detail_currency)(
+						tr::now));
 			copy.value.setText(
 				_textStyle,
-				QString::number(dataLine.y[xIndex] / multiplier));
+				Lang::FormatExactCountDecimal(
+					dataLine.y[xIndex] / multiplier));
 			_lines.push_back(std::move(copy));
 			textLine.name.setText(
 				_textStyle,
@@ -351,7 +363,7 @@ void PointDetailsWidget::setXIndex(int xIndex) {
 				_textStyle,
 				Info::ChannelEarn::ToUsd(
 					dataLine.y[xIndex],
-					_chartData.currencyRate));
+					_chartData.currencyRate, 0));
 		}
 		_lines.push_back(std::move(textLine));
 	}

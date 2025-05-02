@@ -13,12 +13,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/ripple_animation.h"
 #include "ui/chat/group_call_userpics.h"
 #include "ui/text/text_custom_emoji.h"
+#include "ui/emoji_config.h"
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_menu_icons.h"
+
+#include <QtCore/QLocale>
 
 namespace Lang {
 namespace {
@@ -356,7 +359,7 @@ void Action::paint(Painter &p) {
 	if (!_custom && !_content.singleCustomEntityData.isEmpty()) {
 		_custom = _customEmojiFactory(
 			_content.singleCustomEntityData,
-			[=] { update(); });
+			{ .repaint = [=] { update(); } });
 	}
 	if (_custom) {
 		const auto ratio = style::DevicePixelRatio();
@@ -597,7 +600,11 @@ void WhenAction::paint(Painter &p) {
 		p.fillRect(0, 0, width(), _height, _st.itemBg);
 	}
 	p.fillRect(0, 0, width(), _height, _st.itemBg);
-	const auto &icon = loading
+	const auto &icon = (_content.type == WhoReadType::Edited)
+		? (selected ? st::whenEditedOver : st::whenEdited)
+		: (_content.type == WhoReadType::Original)
+		? (selected ? st::whenOriginalOver : st::whenOriginal)
+		: loading
 		? st::whoReadChecksDisabled
 		: selected
 		? st::whoReadChecksOver
@@ -765,7 +772,9 @@ void WhoReactedEntryAction::setData(Data &&data) {
 	}
 	_type = data.type;
 	_custom = _customEmojiFactory
-		? _customEmojiFactory(data.customEntityData, [=] { update(); })
+		? _customEmojiFactory(
+			data.customEntityData,
+			{ .repaint = [=] { update(); } })
 		: nullptr;
 	const auto ratio = style::DevicePixelRatio();
 	const auto size = Emoji::GetSizeNormal() / ratio;
@@ -791,7 +800,8 @@ void WhoReactedEntryAction::paint(Painter &&p) {
 	if (selected && _st.itemBgOver->c.alpha() < 255) {
 		p.fillRect(0, 0, width(), _height, _st.itemBg);
 	}
-	p.fillRect(0, 0, width(), _height, selected ? _st.itemBgOver : _st.itemBg);
+	const auto bg = selected ? _st.itemBgOver : _st.itemBg;
+	p.fillRect(0, 0, width(), _height, bg);
 	if (enabled) {
 		paintRipple(p, 0, 0);
 	}
@@ -812,6 +822,18 @@ void WhoReactedEntryAction::paint(Painter &&p) {
 		p.drawEllipse(photoLeft, photoTop, photoSize, photoSize);
 	} else if (!_userpic.isNull()) {
 		p.drawImage(photoLeft, photoTop, _userpic);
+		if (_type == WhoReactedType::RefRecipientNow) {
+			auto hq = PainterHighQualityEnabler(p);
+			p.setBrush(Qt::NoBrush);
+			auto bgPen = bg->p;
+			bgPen.setWidthF(st::lineWidth * 6.);
+			p.setPen(bgPen);
+			p.drawEllipse(photoLeft, photoTop, photoSize, photoSize);
+			auto fgPen = st::windowBgActive->p;
+			fgPen.setWidthF(st::lineWidth * 2.);
+			p.setPen(fgPen);
+			p.drawEllipse(photoLeft, photoTop, photoSize, photoSize);
+		}
 	} else if (!_custom) {
 		st::menuIconReactions.paintInCenter(
 			p,
@@ -847,7 +869,16 @@ void WhoReactedEntryAction::paint(Painter &&p) {
 			_textWidth,
 			width());
 	}
-	if (withDate) {
+	if (_type == WhoReactedType::RefRecipient
+		|| _type == WhoReactedType::RefRecipientNow) {
+		p.setPen(selected ? _st.itemFgShortcutOver : _st.itemFgShortcut);
+		_date.drawLeftElided(
+			p,
+			st::defaultWhoRead.nameLeft,
+			st::whoReadDateTop,
+			_textWidth,
+			width());
+	} else if (withDate) {
 		const auto iconPosition = QPoint(
 			st::defaultWhoRead.nameLeft,
 			st::whoReadDateTop) + st::whoReadDateChecksPosition;

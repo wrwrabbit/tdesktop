@@ -14,9 +14,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_settings.h"
 
 namespace Ui::NewBadge {
-namespace {
 
-[[nodiscard]] not_null<Ui::RpWidget*> CreateNewBadge(
+not_null<Ui::RpWidget*> CreateNewBadge(
 		not_null<Ui::RpWidget*> parent,
 		rpl::producer<QString> text) {
 	const auto badge = Ui::CreateChild<Ui::PaddingWrap<Ui::FlatLabel>>(
@@ -26,6 +25,7 @@ namespace {
 			std::move(text),
 			st::settingsPremiumNewBadge),
 		st::settingsPremiumNewBadgePadding);
+	badge->show();
 	badge->setAttribute(Qt::WA_TransparentForMouseEvents);
 	badge->paintRequest() | rpl::start_with_next([=] {
 		auto p = QPainter(badge);
@@ -37,8 +37,6 @@ namespace {
 	}, badge->lifetime());
 	return badge;
 }
-
-} // namespace
 
 void AddToRight(not_null<Ui::RpWidget*> parent) {
 	const auto badge = CreateNewBadge(parent, tr::lng_bot_side_menu_new());

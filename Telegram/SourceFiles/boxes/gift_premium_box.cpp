@@ -10,16 +10,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_premium.h"
 #include "api/api_premium_option.h"
 #include "apiwrap.h"
+#include "base/timer_rpl.h"
 #include "base/unixtime.h"
 #include "base/weak_ptr.h"
 #include "boxes/peer_list_controllers.h" // ContactsBoxController.
 #include "boxes/peers/prepare_short_info_box.h"
 #include "boxes/peers/replace_boost_box.h" // BoostsForGift.
 #include "boxes/premium_preview_box.h" // ShowPremiumPreviewBox.
+#include "boxes/star_gift_box.h" // ShowStarGiftBox.
+#include "boxes/transfer_gift_box.h" // ShowTransferGiftBox.
+#include "core/ui_integration.h"
 #include "data/data_boosts.h"
 #include "data/data_changes.h"
 #include "data/data_channel.h"
 #include "data/data_credits.h"
+#include "data/data_emoji_statuses.h"
 #include "data/data_media_types.h" // Data::GiveawayStart.
 #include "data/data_peer_values.h" // Data::PeerPremiumValue.
 #include "data/data_session.h"
@@ -27,15 +32,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "info/channel_statistics/boosts/giveaway/boost_badge.h" // InfiniteRadialAnimationWidget.
+#include "info/profile/info_profile_badge.h"
+#include "info/profile/info_profile_values.h"
 #include "lang/lang_keys.h"
+#include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "mainwidget.h"
 #include "payments/payments_checkout_process.h"
 #include "payments/payments_form.h"
+#include "settings/settings_credits_graphics.h"
 #include "settings/settings_premium.h"
 #include "ui/basic_click_handlers.h" // UrlClickHandler::Open.
 #include "ui/boxes/boost_box.h" // StartFireworks.
 #include "ui/controls/userpic_button.h"
+#include "ui/effects/credits_graphics.h"
 #include "ui/effects/premium_graphics.h"
 #include "ui/effects/premium_stars_colored.h"
 #include "ui/effects/premium_top_bar.h"
@@ -43,18 +53,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
+#include "ui/ui_utility.h"
 #include "ui/vertical_list.h"
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/gradient_round_button.h"
-#include "ui/widgets/label_with_custom_emoji.h"
+#include "ui/widgets/tooltip.h"
 #include "ui/wrap/padding_wrap.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/table_layout.h"
 #include "window/window_peer_menu.h" // ShowChooseRecipientBox.
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
+#include "styles/style_credits.h"
 #include "styles/style_giveaway.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
@@ -63,6 +75,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QGuiApplication>
 
 namespace {
+
+constexpr auto kRarityTooltipDuration = 3 * crl::time(1000);
 
 [[nodiscard]] QString CreateMessageLink(
 		not_null<Main::Session*> session,
@@ -120,46 +134,170 @@ namespace {
 		: tr::lng_premium_gift_duration_years;
 }
 
+[[nodiscard]] object_ptr<Ui::FlatLabel> MakeMaybeMultilineTokenValue(
+		not_null<Ui::TableLayout*> table,
+		const QString &token,
+		Settings::CreditsEntryBoxStyleOverrides st) {
+	constexpr auto kOneLineCount = 24;
+	const auto oneLine = token.length() <= kOneLineCount;
+	return object_ptr<Ui::FlatLabel>(
+		table,
+		rpl::single(
+			Ui::Text::Wrapped({ token }, EntityType::Code, {})),
+		(oneLine
+			? table->st().defaultValue
+			: st.tableValueMultiline
+			? *st.tableValueMultiline
+			: st::giveawayGiftCodeValueMultiline));
+}
+
 [[nodiscard]] object_ptr<Ui::RpWidget> MakePeerTableValue(
-		not_null<QWidget*> parent,
-		not_null<Window::SessionNavigation*> controller,
-		PeerId id) {
-	auto result = object_ptr<Ui::AbstractButton>(parent);
+		not_null<Ui::TableLayout*> table,
+		std::shared_ptr<ChatHelpers::Show> show,
+		PeerId id,
+		rpl::producer<QString> button = nullptr,
+		Fn<void()> handler = nullptr) {
+	auto result = object_ptr<Ui::AbstractButton>(table);
 	const auto raw = result.data();
 
 	const auto &st = st::giveawayGiftCodeUserpic;
 	raw->resize(raw->width(), st.photoSize);
 
-	const auto peer = controller->session().data().peer(id);
+	const auto peer = show->session().data().peer(id);
 	const auto userpic = Ui::CreateChild<Ui::UserpicButton>(raw, peer, st);
 	const auto label = Ui::CreateChild<Ui::FlatLabel>(
 		raw,
-		peer->name(),
-		st::giveawayGiftCodeValue);
-	raw->widthValue(
-	) | rpl::start_with_next([=](int width) {
+		(button && handler) ? peer->shortName() : peer->name(),
+		table->st().defaultValue);
+	const auto send = (button && handler)
+		? Ui::CreateChild<Ui::RoundButton>(
+			raw,
+			std::move(button),
+			table->st().smallButton)
+		: nullptr;
+	if (send) {
+		send->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+		send->setClickedCallback(std::move(handler));
+	}
+	rpl::combine(
+		raw->widthValue(),
+		send ? send->widthValue() : rpl::single(0)
+	) | rpl::start_with_next([=](int width, int sendWidth) {
 		const auto position = st::giveawayGiftCodeNamePosition;
-		label->resizeToNaturalWidth(width - position.x());
+		const auto sendSkip = sendWidth
+			? (st::normalFont->spacew + sendWidth)
+			: 0;
+		label->resizeToNaturalWidth(width - position.x() - sendSkip);
 		label->moveToLeft(position.x(), position.y(), width);
 		const auto top = (raw->height() - userpic->height()) / 2;
 		userpic->moveToLeft(0, top, width);
+		if (send) {
+			send->moveToLeft(
+				position.x() + label->width() + st::normalFont->spacew,
+				(position.y()
+					+ table->st().defaultValue.style.font->ascent
+					- table->st().smallButton.style.font->ascent),
+				width);
+		}
 	}, label->lifetime());
 
 	userpic->setAttribute(Qt::WA_TransparentForMouseEvents);
 	label->setAttribute(Qt::WA_TransparentForMouseEvents);
-	label->setTextColorOverride(st::windowActiveTextFg->c);
+	label->setTextColorOverride(table->st().defaultValue.palette.linkFg->c);
 
 	raw->setClickedCallback([=] {
-		controller->uiShow()->showBox(PrepareShortInfoBox(peer, controller));
+		show->showBox(PrepareShortInfoBox(peer, show));
+	});
+
+	return result;
+}
+
+[[nodiscard]] object_ptr<Ui::RpWidget> MakePeerWithStatusValue(
+		not_null<Ui::TableLayout*> table,
+		std::shared_ptr<ChatHelpers::Show> show,
+		PeerId id,
+		Fn<void(not_null<Ui::RpWidget*>, EmojiStatusId)> pushStatusId) {
+	auto result = object_ptr<Ui::AbstractButton>(table);
+	const auto raw = result.data();
+
+	const auto &st = st::giveawayGiftCodeUserpic;
+	raw->resize(raw->width(), st.photoSize);
+
+	const auto peer = show->session().data().peer(id);
+	const auto userpic = Ui::CreateChild<Ui::UserpicButton>(raw, peer, st);
+	const auto label = Ui::CreateChild<Ui::FlatLabel>(
+		raw,
+		peer->name(),
+		table->st().defaultValue);
+
+	using namespace Info::Profile;
+	struct State {
+		rpl::variable<Badge::Content> content;
+	};
+	const auto state = label->lifetime().make_state<State>();
+	state->content = EmojiStatusIdValue(
+		peer
+	) | rpl::map([=](EmojiStatusId emojiStatusId) {
+		if (!peer->session().premium()
+			|| (!peer->isSelf() && !emojiStatusId)) {
+			return Badge::Content();
+		}
+		return Badge::Content{
+			.badge = BadgeType::Premium,
+			.emojiStatusId = emojiStatusId,
+		};
+	});
+	const auto badge = label->lifetime().make_state<Badge>(
+		raw,
+		st::infoPeerBadge,
+		&peer->session(),
+		state->content.value(),
+		nullptr,
+		[=] { return show->paused(ChatHelpers::PauseReason::Layer); });
+	state->content.value(
+	) | rpl::start_with_next([=](const Badge::Content &content) {
+		if (const auto widget = badge->widget()) {
+			pushStatusId(widget, content.emojiStatusId);
+		}
+	}, raw->lifetime());
+
+	rpl::combine(
+		raw->widthValue(),
+		rpl::single(rpl::empty) | rpl::then(badge->updated())
+	) | rpl::start_with_next([=](int width, const auto &) {
+		const auto position = st::giveawayGiftCodeNamePosition;
+		const auto badgeWidget = badge->widget();
+		const auto badgeSkip = badgeWidget
+			? (st::normalFont->spacew + badgeWidget->width())
+			: 0;
+		label->resizeToNaturalWidth(width - position.x() - badgeSkip);
+		label->moveToLeft(position.x(), position.y(), width);
+		const auto top = (raw->height() - userpic->height()) / 2;
+		userpic->moveToLeft(0, top, width);
+		if (badgeWidget) {
+			badgeWidget->moveToLeft(
+				position.x() + label->width() + st::normalFont->spacew,
+				(position.y()
+					+ table->st().defaultValue.style.font->ascent
+					- table->st().smallButton.style.font->ascent),
+				width);
+		}
+	}, label->lifetime());
+
+	userpic->setAttribute(Qt::WA_TransparentForMouseEvents);
+	label->setAttribute(Qt::WA_TransparentForMouseEvents);
+	label->setTextColorOverride(table->st().defaultValue.palette.linkFg->c);
+
+	raw->setClickedCallback([=] {
+		show->showBox(PrepareShortInfoBox(peer, show));
 	});
 
 	return result;
 }
 
 [[nodiscard]] object_ptr<Ui::RpWidget> MakeHiddenPeerTableValue(
-		not_null<QWidget*> parent,
-		not_null<Window::SessionNavigation*> controller) {
-	auto result = object_ptr<Ui::RpWidget>(parent);
+		not_null<Ui::TableLayout*> table) {
+	auto result = object_ptr<Ui::RpWidget>(table);
 	const auto raw = result.data();
 
 	const auto &st = st::giveawayGiftCodeUserpic;
@@ -176,7 +314,7 @@ namespace {
 	const auto label = Ui::CreateChild<Ui::FlatLabel>(
 		raw,
 		tr::lng_gift_from_hidden(),
-		st::giveawayGiftCodeValue);
+		table->st().defaultValue);
 	raw->widthValue(
 	) | rpl::start_with_next([=](int width) {
 		const auto position = st::giveawayGiftCodeNamePosition;
@@ -203,21 +341,189 @@ void AddTableRow(
 			? object_ptr<Ui::FlatLabel>(
 				table,
 				std::move(label),
-				st::giveawayGiftCodeLabel)
+				table->st().defaultLabel)
 			: object_ptr<Ui::FlatLabel>(nullptr)),
 		std::move(value),
 		st::giveawayGiftCodeLabelMargin,
 		valueMargins);
 }
 
+[[nodiscard]] object_ptr<Ui::RpWidget> MakeAttributeValue(
+		not_null<Ui::TableLayout*> table,
+		const Data::UniqueGiftAttribute &attribute,
+		Fn<void(not_null<Ui::RpWidget*>, int)> showTooltip) {
+	auto result = object_ptr<Ui::RpWidget>(table);
+	const auto raw = result.data();
+
+	const auto label = Ui::CreateChild<Ui::FlatLabel>(
+		raw,
+		attribute.name,
+		table->st().defaultValue);
+	const auto permille = attribute.rarityPermille;
+
+	const auto text = QString::number(permille / 10.) + '%';
+	const auto rarity = Ui::CreateChild<Ui::RoundButton>(
+		raw,
+		rpl::single(text),
+		table->st().smallButton);
+	rarity->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+
+	rpl::combine(
+		raw->widthValue(),
+		rarity->widthValue()
+	) | rpl::start_with_next([=](int width, int convertWidth) {
+		const auto convertSkip = convertWidth
+			? (st::normalFont->spacew + convertWidth)
+			: 0;
+		label->resizeToNaturalWidth(width - convertSkip);
+		label->moveToLeft(0, 0, width);
+		rarity->moveToLeft(
+			label->width() + st::normalFont->spacew,
+			(table->st().defaultValue.style.font->ascent
+				- table->st().smallButton.style.font->ascent),
+			width);
+	}, label->lifetime());
+
+	label->heightValue() | rpl::start_with_next([=](int height) {
+		raw->resize(
+			raw->width(),
+			height + st::giveawayGiftCodeValueMargin.bottom());
+	}, raw->lifetime());
+
+	label->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+	rarity->setClickedCallback([=] {
+		showTooltip(rarity, permille);
+	});
+
+	return result;
+}
+
+[[nodiscard]] object_ptr<Ui::RpWidget> MakeStarGiftStarsValue(
+		not_null<Ui::TableLayout*> table,
+		std::shared_ptr<ChatHelpers::Show> show,
+		const Data::CreditsHistoryEntry &entry,
+		Fn<void()> convertToStars) {
+	auto result = object_ptr<Ui::RpWidget>(table);
+	const auto raw = result.data();
+
+	const auto star = Ui::CreateSingleStarWidget(
+		raw,
+		table->st().defaultValue.style.font->height);
+	const auto label = Ui::CreateChild<Ui::FlatLabel>(
+		raw,
+		Lang::FormatStarsAmountDecimal(entry.credits),
+		table->st().defaultValue,
+		st::defaultPopupMenu);
+
+	const auto convert = convertToStars
+		? Ui::CreateChild<Ui::RoundButton>(
+			raw,
+			tr::lng_gift_sell_small(
+				lt_count_decimal,
+				rpl::single(entry.starsConverted * 1.)),
+			table->st().smallButton)
+		: nullptr;
+	if (convert) {
+		using namespace Ui;
+		convert->setTextTransform(RoundButton::TextTransform::NoTransform);
+		convert->setClickedCallback(std::move(convertToStars));
+	}
+	rpl::combine(
+		raw->widthValue(),
+		convert ? convert->widthValue() : rpl::single(0)
+	) | rpl::start_with_next([=](int width, int convertWidth) {
+		const auto convertSkip = convertWidth
+			? (st::normalFont->spacew + convertWidth)
+			: 0;
+		const auto labelLeft = rect::right(star) + st::normalFont->spacew;
+		label->resizeToNaturalWidth(width - convertSkip - labelLeft);
+		star->moveToLeft(0, 0, width);
+		label->moveToLeft(labelLeft, 0, width);
+		if (convert) {
+			convert->moveToLeft(
+				rect::right(label) + st::normalFont->spacew,
+				(table->st().defaultValue.style.font->ascent
+					- table->st().smallButton.style.font->ascent),
+				width);
+		}
+	}, label->lifetime());
+
+	label->heightValue() | rpl::start_with_next([=](int height) {
+		raw->resize(
+			raw->width(),
+			height + st::giveawayGiftCodeValueMargin.bottom());
+	}, raw->lifetime());
+
+	label->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+	return result;
+}
+
+[[nodiscard]] object_ptr<Ui::RpWidget> MakeNonUniqueStatusTableValue(
+		not_null<Ui::TableLayout*> table,
+		Fn<void()> startUpgrade) {
+	auto result = object_ptr<Ui::RpWidget>(table);
+	const auto raw = result.data();
+
+	const auto label = Ui::CreateChild<Ui::FlatLabel>(
+		raw,
+		tr::lng_gift_unique_status_non(),
+		table->st().defaultValue,
+		st::defaultPopupMenu);
+
+	const auto upgrade = startUpgrade
+		? Ui::CreateChild<Ui::RoundButton>(
+			raw,
+			tr::lng_gift_unique_status_upgrade(),
+			table->st().smallButton)
+		: (Ui::RoundButton*)(nullptr);
+	if (upgrade) {
+		using namespace Ui;
+		upgrade->setTextTransform(RoundButton::TextTransform::NoTransform);
+		upgrade->setClickedCallback(startUpgrade);
+	}
+
+	rpl::combine(
+		raw->widthValue(),
+		upgrade ? upgrade->widthValue() : rpl::single(0)
+	) | rpl::start_with_next([=](int width, int toggleWidth) {
+		const auto toggleSkip = toggleWidth
+			? (st::normalFont->spacew + toggleWidth)
+			: 0;
+		label->resizeToNaturalWidth(width - toggleSkip);
+		label->moveToLeft(0, 0, width);
+		if (upgrade) {
+			upgrade->moveToLeft(
+				label->width() + st::normalFont->spacew,
+				(table->st().defaultValue.style.font->ascent
+					- table->st().smallButton.style.font->ascent),
+				width);
+		}
+	}, label->lifetime());
+
+	label->heightValue() | rpl::start_with_next([=](int height) {
+		raw->resize(
+			raw->width(),
+			height + st::giveawayGiftCodeValueMargin.bottom());
+	}, raw->lifetime());
+
+	label->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+	return result;
+}
+
 not_null<Ui::FlatLabel*> AddTableRow(
 		not_null<Ui::TableLayout*> table,
 		rpl::producer<QString> label,
-		rpl::producer<TextWithEntities> value) {
+		rpl::producer<TextWithEntities> value,
+		const Ui::Text::MarkedContext &context = {}) {
 	auto widget = object_ptr<Ui::FlatLabel>(
 		table,
 		std::move(value),
-		st::giveawayGiftCodeValue);
+		table->st().defaultValue,
+		st::defaultPopupMenu,
+		context);
 	const auto result = widget.data();
 	AddTableRow(
 		table,
@@ -230,7 +536,7 @@ not_null<Ui::FlatLabel*> AddTableRow(
 void AddTableRow(
 		not_null<Ui::TableLayout*> table,
 		rpl::producer<QString> label,
-		not_null<Window::SessionNavigation*> controller,
+		std::shared_ptr<ChatHelpers::Show> show,
 		PeerId id) {
 	if (!id) {
 		return;
@@ -238,32 +544,33 @@ void AddTableRow(
 	AddTableRow(
 		table,
 		std::move(label),
-		MakePeerTableValue(table, controller, id),
+		MakePeerTableValue(table, show, id),
 		st::giveawayGiftCodePeerMargin);
 }
 
 void AddTable(
 		not_null<Ui::VerticalLayout*> container,
-		not_null<Window::SessionNavigation*> controller,
+		std::shared_ptr<ChatHelpers::Show> show,
+		Settings::CreditsEntryBoxStyleOverrides st,
 		const Api::GiftCode &current,
 		bool skipReason) {
 	auto table = container->add(
 		object_ptr<Ui::TableLayout>(
 			container,
-			st::giveawayGiftCodeTable),
+			st.table ? *st.table : st::giveawayGiftCodeTable),
 		st::giveawayGiftCodeTableMargin);
 	if (current.from) {
 		AddTableRow(
 			table,
 			tr::lng_gift_link_label_from(),
-			controller,
+			show,
 			current.from);
 	}
 	if (current.from && current.to) {
 		AddTableRow(
 			table,
 			tr::lng_gift_link_label_to(),
-			controller,
+			show,
 			current.to);
 	} else if (current.from) {
 		AddTableRow(
@@ -295,10 +602,12 @@ void AddTable(
 					) | rpl::type_erased())
 				: tr::lng_gift_link_reason_chosen(Ui::Text::WithEntities)));
 		reason->setClickHandlerFilter([=](const auto &...) {
-			controller->showPeerHistory(
-				current.from,
-				Window::SectionShow::Way::Forward,
-				current.giveawayId);
+			if (const auto window = show->resolveWindow()) {
+				window->showPeerHistory(
+					current.from,
+					Window::SectionShow::Way::Forward,
+					current.giveawayId);
+			}
 			return false;
 		});
 	}
@@ -426,7 +735,8 @@ void GiftCodeBox(
 			MakeLinkCopyIcon(box)),
 		st::giveawayGiftCodeLinkMargin);
 
-	AddTable(box->verticalLayout(), controller, state->data.current(), false);
+	const auto show = controller->uiShow();
+	AddTable(box->verticalLayout(), show, {}, state->data.current(), false);
 
 	auto shareLink = tr::lng_gift_link_also_send_link(
 	) | rpl::map([](const QString &text) {
@@ -508,7 +818,6 @@ void GiftCodeBox(
 	}, button->lifetime());
 }
 
-
 void GiftCodePendingBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionNavigation*> controller,
@@ -586,7 +895,8 @@ void GiftCodePendingBox(
 		spoiler->show();
 	}
 
-	AddTable(box->verticalLayout(), controller, data, true);
+	const auto show = controller->uiShow();
+	AddTable(box->verticalLayout(), show, {}, data, true);
 
 	box->addRow(
 		object_ptr<Ui::FlatLabel>(
@@ -936,68 +1246,354 @@ void ResolveGiveawayInfo(
 		crl::guard(controller, show));
 }
 
+QString TonAddressUrl(
+		not_null<Main::Session*> session,
+		const QString &address) {
+	const auto prefix = session->appConfig().get<QString>(
+		u"ton_blockchain_explorer_url"_q,
+		u"https://tonviewer.com/"_q);
+	return prefix + address;
+}
+
 void AddStarGiftTable(
-		not_null<Window::SessionNavigation*> controller,
+		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<Ui::VerticalLayout*> container,
-		const Data::CreditsHistoryEntry &entry) {
+		Settings::CreditsEntryBoxStyleOverrides st,
+		const Data::CreditsHistoryEntry &entry,
+		Fn<void()> convertToStars,
+		Fn<void()> startUpgrade) {
 	auto table = container->add(
 		object_ptr<Ui::TableLayout>(
 			container,
-			st::giveawayGiftCodeTable),
+			st.table ? *st.table : st::giveawayGiftCodeTable),
 		st::giveawayGiftCodeTableMargin);
 	const auto peerId = PeerId(entry.barePeerId);
-	if (peerId) {
+	const auto session = &show->session();
+	const auto unique = entry.uniqueGift.get();
+	const auto selfBareId = session->userPeerId().value;
+	const auto giftToSelf = (peerId == session->userPeerId())
+		&& (entry.in || entry.bareGiftOwnerId == selfBareId);
+	const auto giftToChannel = entry.giftChannelSavedId
+		&& peerIsChannel(PeerId(entry.bareEntryOwnerId));
+
+	const auto raw = std::make_shared<Ui::ImportantTooltip*>(nullptr);
+	const auto showTooltip = [=](
+			not_null<Ui::RpWidget*> widget,
+			rpl::producer<TextWithEntities> text) {
+		if (*raw) {
+			(*raw)->toggleAnimated(false);
+		}
+		const auto tooltip = Ui::CreateChild<Ui::ImportantTooltip>(
+			container,
+			Ui::MakeNiceTooltipLabel(
+				container,
+				std::move(text),
+				st::boxWideWidth,
+				st::defaultImportantTooltipLabel),
+			st::defaultImportantTooltip);
+		tooltip->toggleFast(false);
+
+		const auto update = [=] {
+			const auto geometry = Ui::MapFrom(
+				container,
+				widget,
+				widget->rect());
+			const auto countPosition = [=](QSize size) {
+				const auto left = geometry.x()
+					+ (geometry.width() - size.width()) / 2;
+				const auto right = container->width()
+					- st::normalFont->spacew;
+				return QPoint(
+					std::max(std::min(left, right - size.width()), 0),
+					geometry.y() - size.height() - st::normalFont->descent);
+			};
+			tooltip->pointAt(geometry, RectPart::Top, countPosition);
+		};
+		container->widthValue(
+		) | rpl::start_with_next(update, tooltip->lifetime());
+
+		update();
+		tooltip->toggleAnimated(true);
+
+		*raw = tooltip;
+		tooltip->shownValue() | rpl::filter(
+			!rpl::mappers::_1
+		) | rpl::start_with_next([=] {
+			crl::on_main(tooltip, [=] {
+				if (tooltip->isHidden()) {
+					if (*raw == tooltip) {
+						*raw = nullptr;
+					}
+					delete tooltip;
+				}
+			});
+		}, tooltip->lifetime());
+
+		base::timer_once(
+			kRarityTooltipDuration
+		) | rpl::start_with_next([=] {
+			tooltip->toggleAnimated(false);
+		}, tooltip->lifetime());
+	};
+
+	if (unique && entry.bareGiftOwnerId) {
+		const auto ownerId = PeerId(entry.bareGiftOwnerId);
+		const auto was = std::make_shared<std::optional<CollectibleId>>();
+		const auto handleChange = [=](
+				not_null<Ui::RpWidget*> badge,
+				EmojiStatusId emojiStatusId) {
+			const auto id = emojiStatusId.collectible
+				? emojiStatusId.collectible->id
+				: 0;
+			const auto show = [&](const auto &phrase) {
+				showTooltip(badge, phrase(
+					lt_name,
+					rpl::single(Ui::Text::Bold(UniqueGiftName(*unique))),
+					Ui::Text::WithEntities));
+			};
+			if (!*was || *was == id) {
+				*was = id;
+				return;
+			} else if (*was == unique->id) {
+				show(tr::lng_gift_wear_end_toast);
+			} else if (id == unique->id) {
+				show(tr::lng_gift_wear_start_toast);
+			}
+			*was = id;
+		};
+		AddTableRow(
+			table,
+			tr::lng_gift_unique_owner(),
+			MakePeerWithStatusValue(table, show, ownerId, handleChange),
+			st::giveawayGiftCodePeerMargin);
+	} else if (unique) {
+		if (!unique->ownerName.isEmpty()) {
+			AddTableRow(
+				table,
+				tr::lng_gift_unique_owner(),
+				rpl::single(TextWithEntities{ unique->ownerName }));
+		} else if (auto address = unique->ownerAddress; !address.isEmpty()) {
+			auto label = MakeMaybeMultilineTokenValue(table, address, st);
+			label->setClickHandlerFilter([=](const auto &...) {
+				TextUtilities::SetClipboardText(
+					TextForMimeData::Simple(address));
+				show->showToast(
+					tr::lng_gift_unique_address_copied(tr::now));
+				return false;
+			});
+			AddTableRow(
+				table,
+				tr::lng_gift_unique_owner(),
+				std::move(label),
+				st::giveawayGiftCodeValueMargin);
+		}
+	} else if (giftToChannel) {
 		AddTableRow(
 			table,
 			tr::lng_credits_box_history_entry_peer_in(),
-			controller,
-			peerId);
-	} else {
+			(entry.bareActorId
+				? MakePeerTableValue(table, show, PeerId(entry.bareActorId))
+				: MakeHiddenPeerTableValue(table)),
+			st::giveawayGiftCodePeerMargin);
+		if (entry.bareEntryOwnerId) {
+			AddTableRow(
+				table,
+				tr::lng_credits_box_history_entry_peer(),
+				MakePeerTableValue(
+					table,
+					show,
+					PeerId(entry.bareEntryOwnerId)),
+				st::giveawayGiftCodePeerMargin);
+		}
+	} else if (peerId && !giftToSelf) {
+		const auto user = session->data().peer(peerId)->asUser();
+		const auto withSendButton = entry.in && user && !user->isBot();
+		auto send = withSendButton ? tr::lng_gift_send_small() : nullptr;
+		auto handler = send ? Fn<void()>([=] {
+			if (const auto window = show->resolveWindow()) {
+				Ui::ShowStarGiftBox(window, user);
+			}
+		}) : nullptr;
 		AddTableRow(
 			table,
 			tr::lng_credits_box_history_entry_peer_in(),
-			MakeHiddenPeerTableValue(table, controller),
+			MakePeerTableValue(table, show, peerId, send, handler),
+			st::giveawayGiftCodePeerMargin);
+	} else if (!entry.soldOutInfo) {
+		AddTableRow(
+			table,
+			tr::lng_credits_box_history_entry_peer_in(),
+			MakeHiddenPeerTableValue(table),
 			st::giveawayGiftCodePeerMargin);
 	}
-	if (!entry.date.isNull()) {
+	if (!unique && !entry.firstSaleDate.isNull()) {
+		AddTableRow(
+			table,
+			tr::lng_gift_link_label_first_sale(),
+			rpl::single(Ui::Text::WithEntities(
+				langDateTime(entry.firstSaleDate))));
+	}
+	if (!unique && !entry.lastSaleDate.isNull()) {
+		AddTableRow(
+			table,
+			tr::lng_gift_link_label_last_sale(),
+			rpl::single(Ui::Text::WithEntities(
+				langDateTime(entry.lastSaleDate))));
+	}
+	if (!unique && !entry.date.isNull()) {
 		AddTableRow(
 			table,
 			tr::lng_gift_link_label_date(),
 			rpl::single(Ui::Text::WithEntities(langDateTime(entry.date))));
 	}
-	if (entry.limitedCount > 0) {
-		auto amount = rpl::single(TextWithEntities{
-			QString::number(entry.limitedCount)
-		});
+	const auto marginWithButton = st::giveawayGiftCodeValueMargin
+		- QMargins(0, 0, 0, st::giveawayGiftCodeValueMargin.bottom());
+	if (unique) {
+		const auto showRarity = [=](
+				not_null<Ui::RpWidget*> widget,
+				int rarity) {
+			const auto percent = QString::number(rarity / 10.) + '%';
+			showTooltip(widget, tr::lng_gift_unique_rarity(
+				lt_percent,
+				rpl::single(TextWithEntities{ percent }),
+				Ui::Text::WithEntities));
+		};
 		AddTableRow(
 			table,
-			tr::lng_gift_availability(),
-			((entry.limitedLeft > 0)
-				? tr::lng_gift_availability_left(
-					lt_count,
-					rpl::single(entry.limitedLeft * 1.),
+			tr::lng_gift_unique_model(),
+			MakeAttributeValue(table, unique->model, showRarity),
+			marginWithButton);
+		AddTableRow(
+			table,
+			tr::lng_gift_unique_backdrop(),
+			MakeAttributeValue(table, unique->backdrop, showRarity),
+			marginWithButton);
+		AddTableRow(
+			table,
+			tr::lng_gift_unique_symbol(),
+			MakeAttributeValue(table, unique->pattern, showRarity),
+			marginWithButton);
+	} else {
+		AddTableRow(
+			table,
+			tr::lng_gift_link_label_value(),
+			MakeStarGiftStarsValue(
+				table,
+				show,
+				entry,
+				std::move(convertToStars)),
+			marginWithButton);
+	}
+	if (entry.limitedCount > 0 && !entry.giftRefunded) {
+		auto amount = rpl::single(TextWithEntities{
+			Lang::FormatCountDecimal(entry.limitedCount)
+		});
+		const auto count = unique
+			? (entry.limitedCount - entry.limitedLeft)
+			: entry.limitedLeft;
+		AddTableRow(
+			table,
+			(unique
+				? tr::lng_gift_unique_availability_label()
+				: tr::lng_gift_availability()),
+			((!unique && !count)
+				? tr::lng_gift_availability_none(
 					lt_amount,
 					std::move(amount),
 					Ui::Text::WithEntities)
-				: tr::lng_gift_availability_none(
-					lt_amount,
-					std::move(amount),
-					Ui::Text::WithEntities)));
+				: (unique
+					? tr::lng_gift_unique_availability
+					: tr::lng_gift_availability_left)(
+						lt_count_decimal,
+						rpl::single(count * 1.),
+						lt_amount,
+						std::move(amount),
+						Ui::Text::WithEntities)));
 	}
-	if (!entry.description.empty()) {
-		const auto session = &controller->session();
-		const auto makeContext = [=](Fn<void()> update) {
-			return Core::MarkedTextContext{
-				.session = session,
-				.customEmojiRepaint = std::move(update),
+	if (!unique && !entry.soldOutInfo && startUpgrade) {
+		AddTableRow(
+			table,
+			tr::lng_gift_unique_status(),
+			MakeNonUniqueStatusTableValue(table, std::move(startUpgrade)),
+			marginWithButton);
+	}
+	if (unique) {
+		const auto &original = unique->originalDetails;
+		if (original.recipientId) {
+			const auto owner = &show->session().data();
+			const auto to = owner->peer(original.recipientId);
+			const auto from = original.senderId
+				? owner->peer(original.senderId).get()
+				: nullptr;
+			const auto date = base::unixtime::parse(original.date).date();
+			const auto dateText = TextWithEntities{ langDayOfMonth(date) };
+			auto label = object_ptr<Ui::FlatLabel>(
+				table,
+				(from
+					? (original.message.empty()
+						? tr::lng_gift_unique_info_sender(
+							lt_from,
+							rpl::single(Ui::Text::Link(from->name(), 2)),
+							lt_recipient,
+							rpl::single(Ui::Text::Link(to->name(), 1)),
+							lt_date,
+							rpl::single(dateText),
+							Ui::Text::WithEntities)
+						: tr::lng_gift_unique_info_sender_comment(
+							lt_from,
+							rpl::single(Ui::Text::Link(from->name(), 2)),
+							lt_recipient,
+							rpl::single(Ui::Text::Link(to->name(), 1)),
+							lt_date,
+							rpl::single(dateText),
+							lt_text,
+							rpl::single(original.message),
+							Ui::Text::WithEntities))
+					: (original.message.empty()
+						? tr::lng_gift_unique_info_reciever(
+							lt_recipient,
+							rpl::single(Ui::Text::Link(to->name(), 1)),
+							lt_date,
+							rpl::single(dateText),
+							Ui::Text::WithEntities)
+						: tr::lng_gift_unique_info_reciever_comment(
+							lt_recipient,
+							rpl::single(Ui::Text::Link(to->name(), 1)),
+							lt_date,
+							rpl::single(dateText),
+							lt_text,
+							rpl::single(original.message),
+							Ui::Text::WithEntities))),
+				(st.tableValueMessage
+					? *st.tableValueMessage
+					: st::giveawayGiftMessage),
+				st::defaultPopupMenu,
+				Core::TextContext({ .session = session }));
+			const auto showBoxLink = [=](not_null<PeerData*> peer) {
+				return std::make_shared<LambdaClickHandler>([=] {
+					show->showBox(PrepareShortInfoBox(peer, show));
+				});
 			};
-		};
+			label->setLink(1, showBoxLink(to));
+			if (from) {
+				label->setLink(2, showBoxLink(from));
+			}
+			label->setSelectable(true);
+			table->addRow(
+				std::move(label),
+				nullptr,
+				st::giveawayGiftCodeLabelMargin,
+				st::giveawayGiftCodeValueMargin);
+		}
+	} else if (!entry.description.empty()) {
 		auto label = object_ptr<Ui::FlatLabel>(
 			table,
 			rpl::single(entry.description),
-			st::giveawayGiftMessage,
+			(st.tableValueMessage
+				? *st.tableValueMessage
+				: st::giveawayGiftMessage),
 			st::defaultPopupMenu,
-			makeContext);
+			Core::TextContext({ .session = session }));
 		label->setSelectable(true);
 		table->addRow(
 			nullptr,
@@ -1008,8 +1604,9 @@ void AddStarGiftTable(
 }
 
 void AddCreditsHistoryEntryTable(
-		not_null<Window::SessionNavigation*> controller,
+		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<Ui::VerticalLayout*> container,
+		Settings::CreditsEntryBoxStyleOverrides st,
 		const Data::CreditsHistoryEntry &entry) {
 	if (!entry) {
 		return;
@@ -1017,15 +1614,56 @@ void AddCreditsHistoryEntryTable(
 	auto table = container->add(
 		object_ptr<Ui::TableLayout>(
 			container,
-			st::giveawayGiftCodeTable),
+			st.table ? *st.table : st::giveawayGiftCodeTable),
 		st::giveawayGiftCodeTableMargin);
 	const auto peerId = PeerId(entry.barePeerId);
-	const auto session = &controller->session();
-	if (peerId) {
-		auto text = entry.in
+	const auto actorId = PeerId(entry.bareActorId);
+	const auto starrefRecipientId = PeerId(entry.starrefRecipientId);
+	const auto session = &show->session();
+	if (entry.starrefCommission) {
+		if (entry.starrefAmount) {
+			AddTableRow(
+				table,
+				tr::lng_star_ref_commission_title(),
+				rpl::single(TextWithEntities{
+					QString::number(entry.starrefCommission / 10.) + '%' }));
+		} else {
+			AddTableRow(
+				table,
+				tr::lng_gift_link_label_reason(),
+				tr::lng_credits_box_history_entry_reason_star_ref(
+					Ui::Text::WithEntities));
+		}
+	}
+	if (starrefRecipientId && entry.starrefAmount) {
+		AddTableRow(
+			table,
+			tr::lng_credits_box_history_entry_affiliate(),
+			show,
+			starrefRecipientId);
+	}
+	if (peerId && entry.starrefCommission) {
+		AddTableRow(
+			table,
+			(entry.starrefAmount
+				? tr::lng_credits_box_history_entry_referred
+				: tr::lng_credits_box_history_entry_miniapp)(),
+			show,
+			peerId);
+	}
+	if (actorId || (!entry.starrefCommission && peerId)) {
+		auto text = entry.starrefCommission
+			? tr::lng_credits_box_history_entry_referred()
+			: entry.in
 			? tr::lng_credits_box_history_entry_peer_in()
+			: entry.giftUpgraded
+			? tr::lng_credits_box_history_entry_gift_from()
 			: tr::lng_credits_box_history_entry_peer();
-		AddTableRow(table, std::move(text), controller, peerId);
+		AddTableRow(
+			table,
+			std::move(text),
+			show,
+			actorId ? actorId : peerId);
 	}
 	if (const auto msgId = MsgId(peerId ? entry.bareMsgId : 0)) {
 		const auto peer = session->data().peer(peerId);
@@ -1037,14 +1675,18 @@ void AddCreditsHistoryEntryTable(
 			auto label = object_ptr<Ui::FlatLabel>(
 				table,
 				rpl::single(Ui::Text::Link(link)),
-				st::giveawayGiftCodeValue);
+				table->st().defaultValue);
 			label->setClickHandlerFilter([=](const auto &...) {
-				controller->showPeerHistory(channel, {}, msgId);
+				if (const auto window = show->resolveWindow()) {
+					window->showPeerHistory(channel, {}, msgId);
+				}
 				return false;
 			});
 			AddTableRow(
 				table,
-				tr::lng_credits_box_history_entry_media(),
+				(entry.reaction
+					? tr::lng_credits_box_history_entry_message
+					: tr::lng_credits_box_history_entry_media)(),
 				std::move(label),
 				st::giveawayGiftCodeValueMargin);
 		}
@@ -1088,8 +1730,8 @@ void AddCreditsHistoryEntryTable(
 		AddTableRow(
 			table,
 			tr::lng_gift_link_label_to(),
-			controller,
-			controller->session().userId());
+			show,
+			show->session().userId());
 	}
 	if (entry.bareGiveawayMsgId && entry.credits) {
 		AddTableRow(
@@ -1097,7 +1739,7 @@ void AddCreditsHistoryEntryTable(
 			tr::lng_gift_link_label_gift(),
 			tr::lng_gift_stars_title(
 				lt_count,
-				rpl::single(float64(entry.credits)),
+				rpl::single(entry.credits.value()),
 				Ui::Text::RichLangValue));
 	}
 	{
@@ -1115,20 +1757,38 @@ void AddCreditsHistoryEntryTable(
 				}));
 		}
 	}
-	if (!entry.id.isEmpty()) {
-		constexpr auto kOneLineCount = 18;
-		const auto oneLine = entry.id.length() <= kOneLineCount;
-		auto label = object_ptr<Ui::FlatLabel>(
+	if (!entry.subscriptionUntil.isNull() && !entry.title.isEmpty()) {
+		AddTableRow(
 			table,
-			rpl::single(
-				Ui::Text::Wrapped({ entry.id }, EntityType::Code, {})),
-			oneLine
-				? st::giveawayGiftCodeValue
-				: st::giveawayGiftCodeValueMultiline);
+			tr::lng_gift_link_label_reason(),
+			tr::lng_credits_box_history_entry_subscription(
+				Ui::Text::WithEntities));
+	}
+	if (entry.paidMessagesAmount) {
+		auto value = Ui::Text::IconEmoji(&st::starIconEmojiColored);
+		const auto full = (entry.in ? 1 : -1)
+			* (entry.credits + entry.paidMessagesAmount);
+		const auto starsText = Lang::FormatStarsAmountDecimal(full);
+		AddTableRow(
+			table,
+			tr::lng_credits_paid_messages_full(),
+			rpl::single(value.append(' ' + starsText)));
+	}
+	if (const auto months = entry.premiumMonthsForStars) {
+		AddTableRow(
+			table,
+			tr::lng_credits_premium_gift_duration(),
+			tr::lng_months(
+				lt_count,
+				rpl::single(1. * months),
+				Ui::Text::WithEntities));
+	}
+	if (!entry.id.isEmpty()) {
+		auto label = MakeMaybeMultilineTokenValue(table, entry.id, st);
 		label->setClickHandlerFilter([=](const auto &...) {
 			TextUtilities::SetClipboardText(
 				TextForMimeData::Simple(entry.id));
-			controller->showToast(
+			show->showToast(
 				tr::lng_credits_box_history_entry_id_copied(tr::now));
 			return false;
 		});
@@ -1137,6 +1797,14 @@ void AddCreditsHistoryEntryTable(
 			tr::lng_credits_box_history_entry_id(),
 			std::move(label),
 			st::giveawayGiftCodeValueMargin);
+	}
+	if (entry.floodSkip) {
+		AddTableRow(
+			table,
+			tr::lng_credits_box_history_entry_floodskip_row(),
+			rpl::single(
+				Ui::Text::WithEntities(
+					Lang::FormatCountDecimal(entry.floodSkip))));
 	}
 	if (!entry.date.isNull()) {
 		AddTableRow(
@@ -1160,8 +1828,9 @@ void AddCreditsHistoryEntryTable(
 }
 
 void AddSubscriptionEntryTable(
-		not_null<Window::SessionNavigation*> controller,
+		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<Ui::VerticalLayout*> container,
+		Settings::CreditsEntryBoxStyleOverrides st,
 		const Data::SubscriptionEntry &s) {
 	if (!s) {
 		return;
@@ -1169,15 +1838,38 @@ void AddSubscriptionEntryTable(
 	auto table = container->add(
 		object_ptr<Ui::TableLayout>(
 			container,
-			st::giveawayGiftCodeTable),
+			st.table ? *st.table : st::giveawayGiftCodeTable),
 		st::giveawayGiftCodeTableMargin);
 	const auto peerId = PeerId(s.barePeerId);
+	const auto user = peerIsUser(peerId)
+		? show->session().data().peer(peerId)->asUser()
+		: nullptr;
 	AddTableRow(
 		table,
-		tr::lng_credits_subscription_row_to(),
-		controller,
+		(!s.title.isEmpty() && user && user->botInfo)
+			? tr::lng_credits_subscription_row_to_bot()
+			: (!s.title.isEmpty() && user && !user->botInfo)
+			? tr::lng_credits_subscription_row_to_business()
+			: tr::lng_credits_subscription_row_to(),
+		show,
 		peerId);
+	if (!s.title.isEmpty()) {
+		AddTableRow(
+			table,
+			tr::lng_credits_subscription_row_to(),
+			rpl::single(Ui::Text::WithEntities(s.title)));
+	}
 	if (!s.until.isNull()) {
+		if (s.subscription.period > 0) {
+			const auto subscribed = s.until.addSecs(-s.subscription.period);
+			if (subscribed.isValid()) {
+				AddTableRow(
+					table,
+					tr::lng_group_invite_joined_row_date(),
+					rpl::single(
+						Ui::Text::WithEntities(langDateTime(subscribed))));
+			}
+		}
 		AddTableRow(
 			table,
 			s.expired
@@ -1190,19 +1882,20 @@ void AddSubscriptionEntryTable(
 }
 
 void AddSubscriberEntryTable(
-		not_null<Window::SessionNavigation*> controller,
+		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<Ui::VerticalLayout*> container,
+		Settings::CreditsEntryBoxStyleOverrides st,
 		not_null<PeerData*> peer,
 		TimeId date) {
 	auto table = container->add(
 		object_ptr<Ui::TableLayout>(
 			container,
-			st::giveawayGiftCodeTable),
+			st.table ? *st.table : st::giveawayGiftCodeTable),
 		st::giveawayGiftCodeTableMargin);
 	AddTableRow(
 		table,
 		tr::lng_group_invite_joined_row_subscriber(),
-		controller,
+		show,
 		peer->id);
 	if (const auto d = base::unixtime::parse(date); !d.isNull()) {
 		AddTableRow(
@@ -1213,23 +1906,24 @@ void AddSubscriberEntryTable(
 }
 
 void AddCreditsBoostTable(
-		not_null<Window::SessionNavigation*> controller,
+		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<Ui::VerticalLayout*> container,
+		Settings::CreditsEntryBoxStyleOverrides st,
 		const Data::Boost &b) {
 	auto table = container->add(
 		object_ptr<Ui::TableLayout>(
 			container,
-			st::giveawayGiftCodeTable),
+			st.table ? *st.table : st::giveawayGiftCodeTable),
 		st::giveawayGiftCodeTableMargin);
 	const auto peerId = b.giveawayMessage.peer;
 	if (!peerId) {
 		return;
 	}
-	const auto from = controller->session().data().peer(peerId);
+	const auto from = show->session().data().peer(peerId);
 	AddTableRow(
 		table,
 		tr::lng_credits_box_history_entry_peer_in(),
-		controller,
+		show,
 		from->id);
 	if (b.credits) {
 		AddTableRow(
@@ -1242,7 +1936,7 @@ void AddCreditsBoostTable(
 	}
 	{
 		const auto link = CreateMessageLink(
-			&controller->session(),
+			&show->session(),
 			peerId,
 			b.giveawayMessage.msg.bare);
 		if (!link.isEmpty()) {

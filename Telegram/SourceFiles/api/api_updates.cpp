@@ -318,6 +318,9 @@ void Updates::feedUpdateVector(
 	} else if (policy == SkipUpdatePolicy::SkipExceptGroupCallParticipants) {
 		return;
 	}
+	if (policy == SkipUpdatePolicy::SkipNone) {
+		applyConvertToScheduledOnSend(updates);
+	}
 	for (const auto &entry : std::as_const(list)) {
 		const auto type = entry.type();
 		if ((policy == SkipUpdatePolicy::SkipMessageIds
@@ -329,6 +332,15 @@ void Updates::feedUpdateVector(
 		feedUpdate(entry);
 	}
 	session().data().sendHistoryChangeNotifications();
+}
+
+void Updates::checkForSentToScheduled(const MTPUpdates &updates) {
+	updates.match([&](const MTPDupdates &data) {
+		applyConvertToScheduledOnSend(data.vupdates(), true);
+	}, [&](const MTPDupdatesCombined &data) {
+		applyConvertToScheduledOnSend(data.vupdates(), true);
+	}, [](const auto &) {
+	});
 }
 
 void Updates::feedMessageIds(const MTPVector<MTPUpdate> &updates) {
@@ -434,6 +446,7 @@ void Updates::feedChannelDifference(
 	session().data().processChats(data.vchats());
 
 	_handlingChannelDifference = true;
+	applyConvertToScheduledOnSend(data.vother_updates());
 	feedMessageIds(data.vother_updates());
 	session().data().processMessages(
 		data.vnew_messages(),
@@ -598,6 +611,7 @@ void Updates::feedDifference(
 	Core::App().checkAutoLock();
 	session().data().processUsers(users);
 	session().data().processChats(chats);
+	applyConvertToScheduledOnSend(other);
 	feedMessageIds(other);
 	session().data().processMessages(msgs, NewMessageType::Unread);
 	feedUpdateVector(other, SkipUpdatePolicy::SkipMessageIds);
@@ -883,6 +897,51 @@ void Updates::mtpUpdateReceived(const MTPUpdates &updates) {
 	}
 }
 
+void Updates::applyConvertToScheduledOnSend(
+		const MTPVector<MTPUpdate> &other,
+		bool skipScheduledCheck) {
+	for (const auto &update : other.v) {
+		update.match([&](const MTPDupdateNewScheduledMessage &data) {
+			const auto &message = data.vmessage();
+			const auto id = IdFromMessage(message);
+			const auto scheduledMessages = &_session->scheduledMessages();
+			const auto scheduledId = scheduledMessages->localMessageId(id);
+			for (const auto &updateId : other.v) {
+				updateId.match([&](const MTPDupdateMessageID &dataId) {
+					if (dataId.vid().v == id) {
+						auto &owner = session().data();
+						if (skipScheduledCheck) {
+							const auto peerId = PeerFromMessage(message);
+							const auto history = owner.historyLoaded(peerId);
+							if (history) {
+								_session->data().sentToScheduled({
+									.history = history,
+									.scheduledId = scheduledId,
+								});
+							}
+							return;
+						}
+						const auto rand = dataId.vrandom_id().v;
+						const auto localId = owner.messageIdByRandomId(rand);
+						if (const auto local = owner.message(localId)) {
+							if (!local->isScheduled()) {
+								_session->data().sentToScheduled({
+									.history = local->history(),
+									.scheduledId = scheduledId,
+								});
+
+								// We've sent a non-scheduled message,
+								// but it was converted to a scheduled.
+								local->destroy();
+							}
+						}
+					}
+				}, [](const auto &) {});
+			}
+		}, [](const auto &) {});
+	}
+}
+
 void Updates::applyGroupCallParticipantUpdates(const MTPUpdates &updates) {
 	updates.match([&](const MTPDupdates &data) {
 		session().data().processUsers(data.vusers());
@@ -1161,7 +1220,9 @@ void Updates::applyUpdatesNoPtsCheck(const MTPUpdates &updates) {
 				MTP_int(d.vttl_period().value_or_empty()),
 				MTPint(), // quick_reply_shortcut_id
 				MTPlong(), // effect
-				MTPFactCheck()),
+				MTPFactCheck(),
+				MTPint(), // report_delivery_until_date
+				MTPlong()), // paid_message_stars
 			MessageFlags(),
 			NewMessageType::Unread);
 	} break;
@@ -1198,7 +1259,9 @@ void Updates::applyUpdatesNoPtsCheck(const MTPUpdates &updates) {
 				MTP_int(d.vttl_period().value_or_empty()),
 				MTPint(), // quick_reply_shortcut_id
 				MTPlong(), // effect
-				MTPFactCheck()),
+				MTPFactCheck(),
+				MTPint(), // report_delivery_until_date
+				MTPlong()), // paid_message_stars
 			MessageFlags(),
 			NewMessageType::Unread);
 	} break;
@@ -2652,8 +2715,8 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 
 	case mtpc_updatePaidReactionPrivacy: {
 		const auto &data = update.c_updatePaidReactionPrivacy();
-		_session->api().globalPrivacy().updatePaidReactionAnonymous(
-			mtpIsTrue(data.vprivate()));
+		_session->api().globalPrivacy().updatePaidReactionShownPeer(
+			Api::ParsePaidReactionShownPeer(_session, data.vprivate()));
 	} break;
 
 	}

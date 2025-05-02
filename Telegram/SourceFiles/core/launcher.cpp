@@ -106,6 +106,10 @@ void ComputeDebugMode() {
 	auto file = QFile(debugModeSettingPath);
 	if (file.exists() && file.open(QIODevice::ReadOnly)) {
 		Logs::SetDebugEnabled(file.read(1) != "0");
+#if defined _DEBUG
+	} else {
+		Logs::SetDebugEnabled(true);
+#endif
 	}
 	if (cDebugMode()) {
 		Logs::SetDebugEnabled(true);
@@ -498,6 +502,22 @@ void Launcher::initQtMessageLogging() {
 
 uint64 Launcher::installationTag() const {
 	return InstallationTag;
+}
+
+QByteArray Launcher::instanceHash() const {
+	static const auto Result = [&] {
+		QByteArray h(32, 0);
+		if (customWorkingDir()) {
+			const auto d = QFile::encodeName(
+				QDir(cWorkingDir()).absolutePath());
+			hashMd5Hex(d.constData(), d.size(), h.data());
+		} else {
+			const auto f = QFile::encodeName(cExeDir() + cExeName());
+			hashMd5Hex(f.constData(), f.size(), h.data());
+		}
+		return h;
+	}();
+	return Result;
 }
 
 void Launcher::processArguments() {

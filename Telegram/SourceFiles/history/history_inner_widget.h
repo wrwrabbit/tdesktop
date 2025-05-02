@@ -10,11 +10,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "data/data_report.h"
 #include "ui/rp_widget.h"
+#include "ui/controls/swipe_handler_data.h"
 #include "ui/effects/animations.h"
 #include "ui/dragging_scroll_manager.h"
 #include "ui/widgets/tooltip.h"
 #include "ui/widgets/scroll_area.h"
-#include "history/history_view_swipe_data.h"
 #include "history/view/history_view_top_bar_widget.h"
 
 #include <QtGui/QPainterPath>
@@ -30,6 +30,7 @@ namespace HistoryView {
 class ElementDelegate;
 class EmojiInteractions;
 struct TextState;
+struct SelectionModeResult;
 struct StateRequest;
 enum class CursorState : char;
 enum class PointState : char;
@@ -120,7 +121,7 @@ public:
 	void setItemsRevealHeight(int revealHeight);
 	void changeItemsRevealHeight(int revealHeight);
 	void checkActivation();
-	void recountHistoryGeometry();
+	void recountHistoryGeometry(bool initial = false);
 	void updateSize();
 	void setShownPinned(HistoryItem *item);
 
@@ -135,7 +136,7 @@ public:
 	void clearSelected(bool onlyTextSelection = false);
 	[[nodiscard]] MessageIdsList getSelectedItems() const;
 	[[nodiscard]] bool hasSelectedItems() const;
-	[[nodiscard]] bool inSelectionMode() const;
+	[[nodiscard]] HistoryView::SelectionModeResult inSelectionMode() const;
 	[[nodiscard]] bool elementIntersectsRange(
 		not_null<const Element*> view,
 		int from,
@@ -220,6 +221,9 @@ public:
 		Qt::MouseButton button,
 		FullMsgId itemId) const;
 
+	[[nodiscard]] auto sendIntroSticker() const
+		-> rpl::producer<not_null<DocumentData*>>;
+
 	[[nodiscard]] static auto DelegateMixin()
 	-> std::unique_ptr<HistoryMainElementDelegateMixin>;
 
@@ -242,6 +246,10 @@ protected:
 private:
 	void onTouchSelect();
 	void onTouchScrollTimer();
+
+	[[nodiscard]] static int SelectionViewOffset(
+		not_null<const HistoryInner*> inner,
+		not_null<const Element*> view);
 
 	using ChosenReaction = HistoryView::Reactions::ChosenReaction;
 	using VideoUserpic = Dialogs::Ui::VideoUserpic;
@@ -420,7 +428,7 @@ private:
 	void reactionChosen(const ChosenReaction &reaction);
 
 	void setupSharingDisallowed();
-	void setupSwipeReply();
+	void setupSwipeReplyAndBack();
 	[[nodiscard]] bool hasCopyRestriction(HistoryItem *item = nullptr) const;
 	[[nodiscard]] bool hasCopyMediaRestriction(
 		not_null<HistoryItem*> item) const;
@@ -461,6 +469,7 @@ private:
 	std::unique_ptr<HistoryView::AboutView> _aboutView;
 	std::unique_ptr<HistoryView::EmptyPainter> _emptyPainter;
 	std::unique_ptr<HistoryView::TranslateTracker> _translateTracker;
+	rpl::event_stream<not_null<DocumentData*>> _sendIntroSticker;
 
 	mutable History *_curHistory = nullptr;
 	mutable int _curBlock = 0;
@@ -494,6 +503,8 @@ private:
 	HistoryItem *_dragStateItem = nullptr;
 	CursorState _mouseCursorState = CursorState();
 	uint16 _mouseTextSymbol = 0;
+	bool _mouseActive = false;
+	bool _dragStateUserpic = false;
 	bool _pressWasInactive = false;
 	bool _recountedAfterPendingResizedItems = false;
 	bool _useCornerReaction = false;
@@ -507,6 +518,9 @@ private:
 	Element *_dragSelTo = nullptr;
 	bool _dragSelecting = false;
 	bool _wasSelectedText = false; // was some text selected in current drag action
+
+	mutable bool _lastInSelectionMode = false;
+	mutable Ui::Animations::Simple _inSelectionModeAnimation;
 
 	// scroll by touch support (at least Windows Surface tablets)
 	bool _touchScroll = false;
@@ -529,7 +543,8 @@ private:
 	crl::time _touchTime = 0;
 	base::Timer _touchScrollTimer;
 
-	HistoryView::ChatPaintGestureHorizontalData _gestureHorizontal;
+	Ui::Controls::SwipeContextData _gestureHorizontal;
+	Ui::Controls::SwipeBackResult _swipeBackData;
 
 	// _menu must be destroyed before _whoReactedMenuLifetime.
 	rpl::lifetime _whoReactedMenuLifetime;
@@ -544,3 +559,5 @@ private:
 	ClickHandlerPtr _scrollDateLink;
 
 };
+
+[[nodiscard]] bool CanSendReply(not_null<const HistoryItem*> item);

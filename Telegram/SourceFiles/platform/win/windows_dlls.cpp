@@ -74,6 +74,13 @@ SafeIniter kSafeIniter;
 
 void CheckLoadedModules() {
 #ifdef DESKTOP_APP_USE_ANGLE
+	if (!IsWindows10OrGreater()) {
+		// don't try load directx on windows 7
+		// due to missing dependencies when buildiing
+		// with latest VS
+		LOG(("Error: Could not resolve DirectX compiler library."));
+		return;
+	}
 	if (DirectXResolveCompiler()) {
 		auto LibD3DCompiler = HMODULE();
 		if (GetModuleHandleEx(0, L"d3dcompiler_47.dll", &LibD3DCompiler)) {

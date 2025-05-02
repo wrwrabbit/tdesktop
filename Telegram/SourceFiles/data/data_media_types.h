@@ -39,12 +39,14 @@ namespace Data {
 class CloudImage;
 class WallPaper;
 class Session;
+struct UniqueGift;
 
 enum class CallFinishReason : char {
 	Missed,
 	Busy,
 	Disconnected,
 	Hangup,
+	AllowGroupCall,
 };
 
 struct SharedContact final {
@@ -135,19 +137,31 @@ enum class GiftType : uchar {
 
 struct GiftCode {
 	QString slug;
+	uint64 stargiftId = 0;
 	DocumentData *document = nullptr;
+	std::shared_ptr<UniqueGift> unique;
 	TextWithEntities message;
 	ChannelData *channel = nullptr;
+	PeerData *channelFrom = nullptr;
+	uint64 channelSavedId = 0;
 	MsgId giveawayMsgId = 0;
-	int convertStars = 0;
+	MsgId upgradeMsgId = 0;
+	int starsConverted = 0;
+	int starsToUpgrade = 0;
+	int starsUpgradedBySender = 0;
 	int limitedCount = 0;
 	int limitedLeft = 0;
 	int count = 0;
 	GiftType type = GiftType::Premium;
 	bool viaGiveaway : 1 = false;
+	bool transferred : 1 = false;
+	bool upgradable : 1 = false;
 	bool unclaimed : 1 = false;
 	bool anonymous : 1 = false;
 	bool converted : 1 = false;
+	bool upgraded : 1 = false;
+	bool refunded : 1 = false;
+	bool upgrade : 1 = false;
 	bool saved : 1 = false;
 };
 
@@ -165,6 +179,9 @@ public:
 	virtual std::unique_ptr<Media> clone(not_null<HistoryItem*> parent) = 0;
 
 	virtual DocumentData *document() const;
+	virtual PhotoData *videoCover() const;
+	virtual TimeId videoTimestamp() const;
+	virtual bool hasQualitiesList() const;
 	virtual PhotoData *photo() const;
 	virtual WebPageData *webpage() const;
 	virtual MediaWebPageFlags webpageFlags() const;
@@ -283,17 +300,27 @@ private:
 
 class MediaFile final : public Media {
 public:
+	struct Args {
+		crl::time ttlSeconds = 0;
+		PhotoData *videoCover = nullptr;
+		TimeId videoTimestamp = 0;
+		bool hasQualitiesList = false;
+		bool skipPremiumEffect = false;
+		bool spoiler = false;
+	};
+
 	MediaFile(
 		not_null<HistoryItem*> parent,
 		not_null<DocumentData*> document,
-		bool skipPremiumEffect,
-		bool spoiler,
-		crl::time ttlSeconds);
+		Args &&args);
 	~MediaFile();
 
 	std::unique_ptr<Media> clone(not_null<HistoryItem*> parent) override;
 
 	DocumentData *document() const override;
+	PhotoData *videoCover() const override;
+	TimeId videoTimestamp() const override;
+	bool hasQualitiesList() const override;
 
 	bool uploading() const override;
 	Storage::SharedMediaTypesMask sharedMediaTypes() const override;
@@ -322,12 +349,16 @@ public:
 
 private:
 	not_null<DocumentData*> _document;
-	QString _emoji;
-	bool _skipPremiumEffect = false;
-	bool _spoiler = false;
+	PhotoData *_videoCover = nullptr;
 
 	// Video (unsupported) / Voice / Round.
 	crl::time _ttlSeconds = 0;
+
+	QString _emoji;
+	TimeId _videoTimestamp = 0;
+	bool _skipPremiumEffect = false;
+	bool _hasQualitiesList = false;
+	bool _spoiler = false;
 
 };
 

@@ -124,7 +124,8 @@ Uploader::Entry::Entry(
 		: file->thumbId) {
 	if (file->type == SendMediaType::File
 		|| file->type == SendMediaType::ThemeFile
-		|| file->type == SendMediaType::Audio) {
+		|| file->type == SendMediaType::Audio
+		|| file->type == SendMediaType::Round) {
 		setDocSize(file->filesize);
 	}
 }
@@ -228,6 +229,8 @@ void Uploader::processDocumentProgress(FullMsgId itemId) {
 		const auto document = media ? media->document() : nullptr;
 		const auto sendAction = (document && document->isVoiceMessage())
 			? Api::SendProgressType::UploadVoice
+			: (document && document->isVideoMessage())
+			? Api::SendProgressType::UploadRound
 			: Api::SendProgressType::UploadFile;
 		const auto progress = (document && document->uploading())
 			? ((document->uploadingData->offset * 100)
@@ -249,6 +252,8 @@ void Uploader::processDocumentFailed(FullMsgId itemId) {
 		const auto document = media ? media->document() : nullptr;
 		const auto sendAction = (document && document->isVoiceMessage())
 			? Api::SendProgressType::UploadVoice
+			: (document && document->isVideoMessage())
+			? Api::SendProgressType::UploadRound
 			: Api::SendProgressType::UploadFile;
 		sendProgressUpdate(item, sendAction, -1);
 	}
@@ -294,7 +299,8 @@ void Uploader::upload(
 			file->partssize);
 	} else if (file->type == SendMediaType::File
 		|| file->type == SendMediaType::ThemeFile
-		|| file->type == SendMediaType::Audio) {
+		|| file->type == SendMediaType::Audio
+		|| file->type == SendMediaType::Round) {
 		const auto document = file->thumb.isNull()
 			? session().data().processDocument(file->document)
 			: session().data().processDocument(
@@ -329,6 +335,11 @@ void Uploader::upload(
 		if (file->type == SendMediaType::ThemeFile) {
 			document->checkWallPaperProperties();
 		}
+		if (file->videoCover) {
+			session().data().processPhoto(
+				file->videoCover->photo,
+				file->videoCover->photoThumbs);
+		}
 	}
 	_queue.push_back({ itemId, file });
 	if (!_nextTimer.isActive()) {
@@ -342,9 +353,26 @@ void Uploader::failed(FullMsgId itemId) {
 		const auto entry = std::move(*i);
 		_queue.erase(i);
 		notifyFailed(entry);
+	} else if (const auto coverId = _videoIdToCoverId.take(itemId)) {
+		if (const auto video = _videoWaitingCover.take(*coverId)) {
+			const auto document = session().data().document(video->id);
+			if (document->uploading()) {
+				document->status = FileUploadFailed;
+			}
+			_documentFailed.fire_copy(video->fullId);
+		}
+		failed(*coverId);
+	} else if (const auto video = _videoWaitingCover.take(itemId)) {
+		_videoIdToCoverId.remove(video->fullId);
+		const auto document = session().data().document(video->id);
+		if (document->uploading()) {
+			document->status = FileUploadFailed;
+		}
+		_documentFailed.fire_copy(video->fullId);
 	}
 	cancelRequests(itemId);
 	maybeFinishFront();
+
 	crl::on_main(this, [=] {
 		maybeSend();
 	});
@@ -356,7 +384,8 @@ void Uploader::notifyFailed(const Entry &entry) {
 		_photoFailed.fire_copy(entry.itemId);
 	} else if (type == SendMediaType::File
 		|| type == SendMediaType::ThemeFile
-		|| type == SendMediaType::Audio) {
+		|| type == SendMediaType::Audio
+		|| type == SendMediaType::Round) {
 		const auto document = session().data().document(entry.file->id);
 		if (document->uploading()) {
 			document->status = FileUploadFailed;
@@ -385,7 +414,8 @@ QByteArray Uploader::readDocPart(not_null<Entry*> entry) {
 	const auto checked = [&](QByteArray result) {
 		if ((entry->file->type == SendMediaType::File
 			|| entry->file->type == SendMediaType::ThemeFile
-			|| entry->file->type == SendMediaType::Audio)
+			|| entry->file->type == SendMediaType::Audio
+			|| entry->file->type == SendMediaType::Round)
 			&& entry->docSize <= kUseBigFilesFrom) {
 			entry->md5Hash.feed(result.data(), result.size());
 		}
@@ -756,7 +786,8 @@ void Uploader::partLoaded(const MTPBool &result, mtpRequestId requestId) {
 		_photoProgress.fire_copy(itemId);
 	} else if (entry.file->type == SendMediaType::File
 		|| entry.file->type == SendMediaType::ThemeFile
-		|| entry.file->type == SendMediaType::Audio) {
+		|| entry.file->type == SendMediaType::Audio
+		|| entry.file->type == SendMediaType::Round) {
 		const auto document = session().data().document(entry.file->id);
 		if (document->uploading()) {
 			document->uploadingData->offset = std::min(
@@ -845,7 +876,8 @@ void Uploader::finishFront() {
 			MTP_int(entry.parts->size()),
 			MTP_string(photoFilename),
 			MTP_bytes(md5));
-		_photoReady.fire({
+		auto ready = UploadedMedia{
+			.id = entry.file->id,
 			.fullId = entry.itemId,
 			.info = {
 				.file = file,
@@ -853,10 +885,17 @@ void Uploader::finishFront() {
 			},
 			.options = options,
 			.edit = edit,
-		});
+		};
+		const auto i = _videoWaitingCover.find(entry.itemId);
+		if (i != end(_videoWaitingCover)) {
+			uploadCoverAsPhoto(i->second.fullId, std::move(ready));
+		} else {
+			_photoReady.fire(std::move(ready));
+		}
 	} else if (entry.file->type == SendMediaType::File
 		|| entry.file->type == SendMediaType::ThemeFile
-		|| entry.file->type == SendMediaType::Audio) {
+		|| entry.file->type == SendMediaType::Audio
+		|| entry.file->type == SendMediaType::Round) {
 		QByteArray docMd5(32, Qt::Uninitialized);
 		hashMd5Hex(entry.md5Hash.result(), docMd5.data());
 
@@ -882,7 +921,8 @@ void Uploader::finishFront() {
 				MTP_string(thumbFilename),
 				MTP_bytes(thumbMd5));
 		}();
-		_documentReady.fire({
+		auto ready = UploadedMedia{
+			.id = entry.file->id,
 			.fullId = entry.itemId,
 			.info = {
 				.file = file,
@@ -891,7 +931,12 @@ void Uploader::finishFront() {
 			},
 			.options = options,
 			.edit = edit,
-		});
+		};
+		if (entry.file->videoCover) {
+			uploadVideoCover(std::move(ready), entry.file->videoCover);
+		} else {
+			_documentReady.fire(std::move(ready));
+		}
 	} else if (entry.file->type == SendMediaType::Secure) {
 		_secureReady.fire({
 			entry.itemId,
@@ -904,6 +949,56 @@ void Uploader::finishFront() {
 void Uploader::partFailed(const MTP::Error &error, mtpRequestId requestId) {
 	const auto request = finishRequest(requestId);
 	failed(request.itemId);
+}
+
+void Uploader::uploadVideoCover(
+		UploadedMedia &&video,
+		std::shared_ptr<FilePrepareResult> videoCover) {
+	const auto coverId = FullMsgId(
+		videoCover->to.peer,
+		session().data().nextLocalMessageId());
+	_videoIdToCoverId.emplace(video.fullId, coverId);
+	_videoWaitingCover.emplace(coverId, std::move(video));
+
+	upload(coverId, videoCover);
+}
+
+void Uploader::uploadCoverAsPhoto(
+		FullMsgId videoId,
+		UploadedMedia &&cover) {
+	const auto coverId = cover.fullId;
+	_api->request(MTPmessages_UploadMedia(
+		MTP_flags(0),
+		MTPstring(), // business_connection_id
+		session().data().peer(videoId.peer)->input,
+		MTP_inputMediaUploadedPhoto(
+			MTP_flags(0),
+			cover.info.file,
+			MTP_vector<MTPInputDocument>(0),
+			MTP_int(0))
+	)).done([=](const MTPMessageMedia &result) {
+		result.match([&](const MTPDmessageMediaPhoto &data) {
+			const auto photo = data.vphoto();
+			if (!photo || photo->type() != mtpc_photo) {
+				failed(coverId);
+				return;
+			}
+			const auto &fields = photo->c_photo();
+			if (const auto coverId = _videoIdToCoverId.take(videoId)) {
+				if (auto video = _videoWaitingCover.take(*coverId)) {
+					video->info.videoCover = MTP_inputPhoto(
+						fields.vid(),
+						fields.vaccess_hash(),
+						fields.vfile_reference());
+					_documentReady.fire(std::move(*video));
+				}
+			}
+		}, [&](const auto &) {
+			failed(coverId);
+		});
+	}).fail([=] {
+		failed(coverId);
+	}).send();
 }
 
 } // namespace Storage

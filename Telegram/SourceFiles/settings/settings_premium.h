@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "settings/settings_type.h"
 
+class DocumentData;
 enum class PremiumFeature;
 
 namespace style {
@@ -17,7 +18,6 @@ struct RoundButton;
 
 namespace ChatHelpers {
 class Show;
-enum class WindowUsage;
 } // namespace ChatHelpers
 
 namespace Ui {
@@ -65,9 +65,7 @@ void ShowPremiumPromoToast(
 	const QString &ref);
 void ShowPremiumPromoToast(
 	std::shared_ptr<::Main::SessionShow> show,
-	Fn<Window::SessionController*(
-		not_null<::Main::Session*>,
-		ChatHelpers::WindowUsage)> resolveWindow,
+	Fn<Window::SessionController*(not_null<::Main::Session*>)> resolveWindow,
 	TextWithEntities textWithLink,
 	const QString &ref);
 
@@ -94,9 +92,7 @@ struct SubscribeButtonArgs final {
 
 [[nodiscard]] not_null<Ui::GradientButton*> CreateSubscribeButton(
 	std::shared_ptr<::Main::SessionShow> show,
-	Fn<Window::SessionController*(
-		not_null<::Main::Session*>,
-		ChatHelpers::WindowUsage)> resolveWindow,
+	Fn<Window::SessionController*(not_null<::Main::Session*>)> resolveWindow,
 	SubscribeButtonArgs &&args);
 
 [[nodiscard]] std::vector<PremiumFeature> PremiumFeaturesOrder(
@@ -107,6 +103,14 @@ void AddSummaryPremium(
 	not_null<Window::SessionController*> controller,
 	const QString &ref,
 	Fn<void(PremiumFeature)> buttonCallback);
+
+[[nodiscard]] std::unique_ptr<Ui::RpWidget> MakeEmojiStatusPreview(
+	not_null<QWidget*> parent,
+	not_null<DocumentData*> document);
+[[nodiscard]] std::unique_ptr<Ui::RpWidget> MakeEmojiSetStatusPreview(
+	not_null<QWidget*> parent,
+	not_null<PeerData*> peer,
+	not_null<DocumentData*> document);
 
 } // namespace Settings
 

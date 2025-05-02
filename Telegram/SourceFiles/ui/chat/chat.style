@@ -26,6 +26,8 @@ msgPadding: margins(11px, 8px, 11px, 8px);
 msgMargin: margins(16px, 6px, 56px, 2px);
 msgMarginTopAttached: 0px;
 msgShadow: 2px;
+msgSelectionOffset: 30px;
+msgSelectionBottomSkip: 5px;
 
 historyReplyTop: 2px;
 historyReplyBottom: 2px;
@@ -325,6 +327,11 @@ topicButtonArrowSkip: 8px;
 topicButtonArrowPosition: point(3px, 3px);
 topicButtonArrow: icon{{ "dialogs/dialogs_topic_arrow", historyReplyIconFg }};
 
+textMoreIconEmoji: IconEmoji {
+	icon: topicButtonArrow;
+	padding: margins(-2px, 5px, 0px, 0px);
+}
+
 msgBotKbIconPadding: 4px;
 msgBotKbUrlIcon: icon {{ "inline_button_url", msgBotKbIconFg }};
 msgBotKbSwitchPmIcon: icon {{ "inline_button_switch", msgBotKbIconFg }};
@@ -549,9 +556,7 @@ historyAdminLogCancelSearch: CrossButton {
 
 	duration: 150;
 	loadingPeriod: 1000;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 historyAdminLogSearchTop: 11px;
 historyAdminLogSearchSlideDuration: 150;
@@ -686,6 +691,7 @@ historyVideoCancelSelected: icon {{ "player/playlist_cancel", historyFileThumbIc
 historyVideoDownload: icon {{ "player/playlist_download", historyFileThumbIconFg }};
 historyVideoDownloadSelected: icon {{ "player/playlist_download", historyFileThumbIconFgSelected }};
 historyVideoRadialLine: msgFileRadialLine;
+historyVideoTimestampProgressLine: 4px;
 
 historyAudioDownloadSize: 20px;
 historyAudioRadialLine: 2px;
@@ -808,6 +814,10 @@ whoReadPlayedDisabled: icon {{ "menu/read_audio", menuFgDisabled }};
 whoReadReactions: icon{{ "menu/read_reactions", windowBoldFg }};
 whoReadReactionsOver: icon{{ "menu/read_reactions", windowBoldFg }};
 whoReadReactionsDisabled: icon{{ "menu/read_reactions", menuFgDisabled }};
+whenEdited: icon {{ "menu/edited_status", windowBoldFg }};
+whenEditedOver: icon {{ "menu/edited_status", windowBoldFg }};
+whenOriginal: icon {{ "menu/forwarded_status", windowBoldFg }};
+whenOriginalOver: icon {{ "menu/forwarded_status", windowBoldFg }};
 
 reactionsTabAll: icon {{ "menu/read_reactions", windowFg }};
 reactionsTabAllSelected: icon {{ "menu/read_reactions", activeButtonFg }};
@@ -907,15 +917,19 @@ searchInChatPeerList: PeerList(defaultPeerList) {
 }
 searchInChatTagsPadding: margins(6px, 0px, 6px, 0px);
 
+msgServiceGiftPreview: 172px;
 msgServiceGiftBoxSize: size(236px, 231px); // Plus msgServiceGiftBoxTopSkip.
 msgServiceGiftBoxRadius: 20px;
 msgServiceGiftBoxTopSkip: 4px;
 msgServiceGiftBoxButtonHeight: 32px;
 msgServiceGiftBoxButtonPadding: margins(2px, 0px, 2px, 0px);
 msgServiceGiftBoxButtonMargins: margins(0px, 13px, 0px, 17px);
-msgServiceGiftBoxTitlePadding: margins(0px, 5px, 0px, 2px);
+msgServiceGiftBoxTitlePadding: margins(0px, 20px, 0px, 6px);
 msgServiceGiftBoxStickerTop: -19px;
 msgServiceGiftBoxStickerSize: 140px;
+msgServiceStarGiftBoxWidth: 224px;
+msgServiceStarGiftStickerTop: 24px;
+msgServiceStarGiftStickerSize: 100px;
 
 historySponsorInfoItem: FlatLabel(defaultFlatLabel) {
 	style: TextStyle(defaultTextStyle) {
@@ -975,9 +989,7 @@ backgroundSwitchToDark: IconButton(defaultIconButton) {
 
 	rippleAreaPosition: point(4px, 4px);
 	rippleAreaSize: 40px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 backgroundSwitchToLight: IconButton(backgroundSwitchToDark) {
 	icon: icon {{ "menu/header_mode_day", boxTitleCloseFg }};
@@ -996,7 +1008,7 @@ chatGiveawayStickerTop: -16px;
 chatGiveawayStickerPadding: margins(14px, -2px, 14px, 14px);
 chatGiveawayWinnersTopSkip: 25px;
 chatGiveawayBadgeFont: font(12px bold);
-chatGiveawayBadgeTop: 106px;
+chatGiveawayBadgeTop: 118px;
 chatGiveawayBadgePadding: margins(7px, 1px, 5px, 3px);
 chatGiveawayBadgeStroke: 2px;
 chatGiveawayPrizesTitleMargin: margins(11px, 16px, 11px, 4px);
@@ -1149,3 +1161,89 @@ factcheckField: InputField(defaultInputField) {
 	style: defaultTextStyle;
 }
 purchasedTagPadding: margins(3px, 2px, 6px, 2px);
+
+msgSelectionCheck: RoundCheckbox(defaultPeerListCheck) {
+	bgActive: boxTextFgGood;
+}
+
+sponsoredMessageBarMaxHeight: 156px;
+
+botEmojiStatusPreviewHeight: 148px;
+botEmojiStatusTitle: FlatLabel(boxTitle) {
+	style: TextStyle(defaultTextStyle) {
+		font: font(16px semibold);
+		lineHeight: 20px;
+	}
+	minWidth: 256px;
+	maxHeight: 0px;
+	align: align(top);
+}
+botEmojiStatusText: FlatLabel(defaultFlatLabel) {
+	style: boxTextStyle;
+	minWidth: 256px;
+	maxHeight: 0px;
+	align: align(top);
+}
+botEmojiStatusUserpic: UserpicButton(defaultUserpicButton) {
+	size: size(chatGiveawayPeerSize, chatGiveawayPeerSize);
+	photoSize: chatGiveawayPeerSize;
+}
+botEmojiStatusName: FlatLabel(defaultFlatLabel) {
+	minWidth: 32px;
+	maxHeight: 20px;
+}
+botEmojiStatusEmoji: FlatLabel(botEmojiStatusName) {
+	margin: margins(4px, 4px, 4px, 4px);
+	textFg: profileVerifiedCheckBg;
+}
+
+botDownloadLabel: boxLabel;
+botDownloadProgress: FlatLabel(defaultFlatLabel) {
+	textFg: windowSubTextFg;
+	style: TextStyle(defaultTextStyle) {
+		font: ttlItemTimerFont;
+	}
+}
+botDownloadCancel: IconButton {
+	width: 20px;
+	height: 20px;
+
+	icon: smallCloseIcon;
+	iconOver: smallCloseIconOver;
+	iconPosition: point(-1px, -1px);
+
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: 20px;
+	ripple: defaultRippleAnimationBgOver;
+}
+chatUniqueGiftBorder: 4px;
+
+chatUniqueStickerPadding: margins(10px, 30px, 10px, 9px);
+chatUniquePreviewPadding: margins(10px, 30px, 10px, 32px);
+chatUniqueTitle: TextStyle(defaultTextStyle) {
+	font: font(16px semibold);
+}
+chatUniqueTitlePadding: margins(12px, 12px, 12px, 2px);
+chatUniqueTextPadding: margins(12px, 2px, 12px, 8px);
+chatUniqueTableSkip: 9px;
+chatUniqueRowSkip: 4px;
+chatUniqueButtonPadding: margins(12px, 4px, 12px, 16px);
+
+markupWebview: icon {{ "chat/markup_webview", windowFg }};
+
+newPeerTitleMargin: margins(11px, 16px, 11px, 6px);
+newPeerSubtitleMargin: margins(11px, 0px, 11px, 16px);
+newPeerNonOfficial: IconEmoji {
+	icon: icon{{ "chat/mini_info_alert", windowFg }};
+	padding: margins(0px, 2px, 0px, 0px);
+}
+newPeerUserpics: GroupCallUserpics {
+	size: 16px;
+	shift: 5px;
+	stroke: 1px;
+	align: align(left);
+}
+newPeerUserpicsPadding: margins(0px, 3px, 0px, 0px);
+newPeerWidth: 320px;
+
+swipeBackSize: 150px;

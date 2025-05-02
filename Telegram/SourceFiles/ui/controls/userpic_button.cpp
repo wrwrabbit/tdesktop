@@ -7,7 +7,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/controls/userpic_button.h"
 
+#include "apiwrap.h"
+#include "api/api_user_privacy.h"
 #include "base/call_delayed.h"
+#include "boxes/edit_privacy_box.h"
 #include "boxes/peers/edit_peer_info_box.h" // EditPeerInfoBox::Available.
 #include "ui/effects/ripple_animation.h"
 #include "ui/empty_userpic.h"
@@ -36,6 +39,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/streaming/media_streaming_player.h"
 #include "media/streaming/media_streaming_document.h"
 #include "settings/settings_calls.h" // Calls::AddCameraSubsection.
+#include "settings/settings_privacy_controllers.h"
 #include "webrtc/webrtc_environment.h"
 #include "webrtc/webrtc_video_track.h"
 #include "ui/widgets/popup_menu.h"
@@ -49,6 +53,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_premium.h"
+
+#include <QtGui/QClipboard>
+#include <QtGui/QGuiApplication>
 
 namespace Ui {
 namespace {
@@ -240,6 +247,7 @@ bool UserpicButton::canSuggestPhoto(not_null<UserData*> user) const {
 	// Server allows suggesting photos only in non-empty chats.
 	return !user->isSelf()
 		&& !user->isBot()
+		&& !user->starsPerMessageChecked()
 		&& (user->owner().history(user)->lastServerMessage() != nullptr);
 }
 
@@ -268,49 +276,55 @@ void UserpicButton::setClickHandlerByRole() {
 void UserpicButton::choosePhotoLocally() {
 	if (!_window) {
 		return;
+	} else if (const auto controller = _window->sessionController()) {
+		if (controller->showFrozenError()) {
+			return;
+		}
 	}
 	const auto callback = [=](ChosenType type) {
 		return [=](QImage &&image) {
 			_chosenImages.fire({ std::move(image), type });
 		};
 	};
-	const auto chooseFile = [=](ChosenType type = ChosenType::Set) {
+	const auto editorData = [=](ChosenType type) {
+		const auto user = _peer ? _peer->asUser() : nullptr;
+		const auto name = (user && !user->firstName.isEmpty())
+			? user->firstName
+			: _peer
+			? _peer->name()
+			: QString();
+		const auto phrase = (type == ChosenType::Suggest)
+			? &tr::lng_profile_suggest_sure
+			: (user && EditPeerInfoBox::Available(user))
+			? nullptr
+			: (user && !user->isSelf())
+			? &tr::lng_profile_set_personal_sure
+			: nullptr;
+		return Editor::EditorData{
+			.about = (phrase
+				? (*phrase)(
+					tr::now,
+					lt_user,
+					Ui::Text::Bold(name),
+					Ui::Text::WithEntities)
+				: TextWithEntities()),
+			.confirm = ((type == ChosenType::Suggest)
+				? tr::lng_profile_suggest_button(tr::now)
+				: tr::lng_profile_set_photo_button(tr::now)),
+			.cropType = (useForumShape()
+				? Editor::EditorData::CropType::RoundedRect
+				: Editor::EditorData::CropType::Ellipse),
+			.keepAspectRatio = true,
+		};
+	};
+	const auto chooseFile = [=](ChosenType type) {
 		base::call_delayed(
 			_st.changeButton.ripple.hideDuration,
 			crl::guard(this, [=] {
-				using namespace Editor;
-				const auto user = _peer ? _peer->asUser() : nullptr;
-				const auto name = (user && !user->firstName.isEmpty())
-					? user->firstName
-					: _peer
-					? _peer->name()
-					: QString();
-				const auto phrase = (type == ChosenType::Suggest)
-					? &tr::lng_profile_suggest_sure
-					: (user && EditPeerInfoBox::Available(user))
-					? nullptr
-					: (user && !user->isSelf())
-					? &tr::lng_profile_set_personal_sure
-					: nullptr;
 				PrepareProfilePhotoFromFile(
 					this,
 					_window,
-					{
-						.about = (phrase
-							? (*phrase)(
-								tr::now,
-								lt_user,
-								Ui::Text::Bold(name),
-								Ui::Text::WithEntities)
-							: TextWithEntities()),
-						.confirm = ((type == ChosenType::Suggest)
-							? tr::lng_profile_suggest_button(tr::now)
-							: tr::lng_profile_set_photo_button(tr::now)),
-						.cropType = (useForumShape()
-							? EditorData::CropType::RoundedRect
-							: EditorData::CropType::Ellipse),
-						.keepAspectRatio = true,
-					},
+					editorData(type),
 					callback(type));
 			}));
 	};
@@ -334,19 +348,43 @@ void UserpicButton::choosePhotoLocally() {
 			done,
 			_peer ? _peer->isForum() : false);
 	};
+	const auto addFromClipboard = [=](ChosenType type, tr::phrase<> text) {
+		if (const auto data = QGuiApplication::clipboard()->mimeData()) {
+			if (data->hasImage()) {
+				auto openEditor = crl::guard(this, [=, this] {
+					Editor::PrepareProfilePhoto(
+						this,
+						_window,
+						editorData(type),
+						callback(type),
+						qvariant_cast<QImage>(data->imageData()));
+				});
+				_menu->addAction(
+					std::move(text)(tr::now),
+					std::move(openEditor),
+					&st::menuIconPhoto);
+			}
+		}
+	};
 	_menu = base::make_unique_q<Ui::PopupMenu>(
 		this,
 		st::popupMenuWithIcons);
 	if (user && !user->isSelf()) {
 		_menu->addAction(
 			tr::lng_profile_set_photo_for(tr::now),
-			[=] { chooseFile(); },
+			[=] { chooseFile(ChosenType::Set); },
 			&st::menuIconPhotoSet);
+		addFromClipboard(
+			ChosenType::Set,
+			tr::lng_profile_set_photo_for_from_clipboard);
 		if (canSuggestPhoto(user)) {
 			_menu->addAction(
 				tr::lng_profile_suggest_photo(tr::now),
 				[=] { chooseFile(ChosenType::Suggest); },
 				&st::menuIconPhotoSuggest);
+			addFromClipboard(
+				ChosenType::Suggest,
+				tr::lng_profile_suggest_photo_from_clipboard);
 		}
 		addUserpicBuilder(ChosenType::Set);
 		if (hasPersonalPhotoLocally()) {
@@ -357,7 +395,7 @@ void UserpicButton::choosePhotoLocally() {
 		const auto hasCamera = IsCameraAvailable();
 		if (hasCamera || _controller) {
 			_menu->addAction(tr::lng_attach_file(tr::now), [=] {
-				chooseFile();
+				chooseFile(ChosenType::Set);
 			}, &st::menuIconPhoto);
 			if (hasCamera) {
 				_menu->addAction(tr::lng_attach_camera(tr::now), [=] {
@@ -369,9 +407,32 @@ void UserpicButton::choosePhotoLocally() {
 						callback(ChosenType::Set)));
 				}, &st::menuIconPhotoSet);
 			}
+			addFromClipboard(
+				ChosenType::Set,
+				tr::lng_profile_photo_from_clipboard);
 			addUserpicBuilder(ChosenType::Set);
 		} else {
-			chooseFile();
+			chooseFile(ChosenType::Set);
+		}
+		if (user && user->isSelf()) {
+			const auto key = Api::UserPrivacy::Key::ProfilePhoto;
+			const auto text = tr::lng_edit_privacy_profile_photo_public_set(
+				tr::now);
+			user->session().api().userPrivacy().reload(key);
+			_menu->addAction(std::move(text), [=] {
+				using namespace Api;
+				user->session().api().userPrivacy().value(
+					key
+				) | rpl::take(
+					1
+				) | rpl::start_with_next([=](const UserPrivacy::Rule &value) {
+					using namespace Settings;
+					_window->show(Box<EditPrivacyBox>(
+						_window->sessionController(),
+						std::make_unique<ProfilePhotoPrivacyController>(),
+						value));
+				}, _menu->lifetime());
+			}, &st::menuIconProfile);
 		}
 	}
 	_menu->popup(QCursor::pos());
@@ -716,14 +777,15 @@ void UserpicButton::handleStreamingUpdate(Media::Streaming::Update &&update) {
 
 	v::match(update.data, [&](Information &update) {
 		streamingReady(std::move(update));
-	}, [&](const PreloadedVideo &update) {
-	}, [&](const UpdateVideo &update) {
+	}, [](PreloadedVideo) {
+	}, [&](UpdateVideo) {
 		this->update();
-	}, [&](const PreloadedAudio &update) {
-	}, [&](const UpdateAudio &update) {
-	}, [&](const WaitingForData &update) {
-	}, [&](MutedByOther) {
-	}, [&](Finished) {
+	}, [](PreloadedAudio) {
+	}, [](UpdateAudio) {
+	}, [](WaitingForData) {
+	}, [](SpeedEstimate) {
+	}, [](MutedByOther) {
+	}, [](Finished) {
 	});
 }
 

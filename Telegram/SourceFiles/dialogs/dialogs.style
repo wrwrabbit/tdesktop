@@ -22,12 +22,22 @@ DialogRow {
 	topicsSkipBig: pixels;
 	topicsHeight: pixels;
 	unreadMarkDiameter: pixels;
+	tagTop: pixels;
+}
+DialogRightButton {
+	button: RoundButton;
+	margin: margins;
 }
 
 ThreeStateIcon {
 	icon: icon;
 	over: icon;
 	active: icon;
+}
+
+VerifiedBadge {
+	color: color;
+	height: pixels;
 }
 
 ForumTopicIcon {
@@ -89,12 +99,35 @@ defaultDialogRow: DialogRow {
 	textLeft: 68px;
 	textTop: 34px;
 }
+taggedDialogRow: DialogRow(defaultDialogRow) {
+	height: 72px;
+	textTop: 30px;
+	tagTop: 52px;
+}
 forumDialogRow: DialogRow(defaultDialogRow) {
 	height: 80px;
 	textTop: 32px;
 	topicsSkip: 8px;
 	topicsSkipBig: 14px;
 	topicsHeight: 21px;
+}
+taggedForumDialogRow: DialogRow(forumDialogRow) {
+	height: 96px;
+	tagTop: 77px;
+}
+dialogRowFilterTagSkip: 4px;
+dialogRowFilterTagStyle: TextStyle(defaultTextStyle) {
+	font: font(10px);
+}
+dialogRowOpenBot: DialogRightButton {
+	button: RoundButton(defaultActiveButton) {
+		height: 20px;
+		textTop: 1px;
+	}
+	margin: margins(0px, 32px, 10px, 0px);
+}
+dialogRowOpenBotRecent: DialogRightButton(dialogRowOpenBot) {
+	margin: margins(0px, 32px, 28px, 0px);
 }
 
 forumDialogJumpArrow: icon{{ "dialogs/dialogs_topic_arrow", dialogsTextFg }};
@@ -222,9 +255,7 @@ dialogsMenuToggle: IconButton {
 
 	rippleAreaPosition: point(0px, 0px);
 	rippleAreaSize: 40px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 dialogsMenuToggleUnread: icon {
 	{ "dialogs/dialogs_menu_unread", dialogsMenuIconFg },
@@ -384,6 +415,17 @@ dialogsLockIcon: ThreeStateIcon {
 	icon: icon {{ "emoji/premium_lock", dialogsUnreadBgMuted, point(4px, 0px) }};
 	over: icon {{ "emoji/premium_lock", dialogsUnreadBgMutedOver, point(4px, 0px) }};
 	active: icon {{ "emoji/premium_lock", dialogsUnreadBgMutedActive, point(4px, 0px) }};
+}
+
+dialogsVerifiedColors: VerifiedBadge {
+	height: 20px;
+	color: dialogsVerifiedIconBg;
+}
+dialogsVerifiedColorsOver: VerifiedBadge(dialogsVerifiedColors) {
+	color: dialogsVerifiedIconBgOver;
+}
+dialogsVerifiedColorsActive: VerifiedBadge(dialogsVerifiedColors) {
+	color: dialogsVerifiedIconBgActive;
 }
 
 dialogsVerifiedIcon: icon {
@@ -674,7 +716,11 @@ recentPeersSpecialName: PeerListItem(recentPeersItem) {
 	namePosition: point(64px, 19px);
 }
 
+dialogsTabsScroll: ScrollArea(defaultScrollArea) {
+	barHidden: true;
+}
 dialogsSearchTabs: SettingsSlider(defaultSettingsSlider) {
+	padding: 8px;
 	height: 33px;
 	barTop: 30px;
 	barSkip: 0px;
@@ -692,7 +738,10 @@ dialogsSearchTabs: SettingsSlider(defaultSettingsSlider) {
 	rippleBgActive: lightButtonBgOver;
 	ripple: defaultRippleAnimation;
 }
-dialogsSearchTabsPadding: 8px;
+
+chatsFiltersTabs: SettingsSlider(dialogsSearchTabs) {
+	rippleBottomSkip: 0px;
+}
 
 dialogsStoriesList: DialogsStoriesList {
 	small: dialogsStories;
@@ -745,3 +794,22 @@ dialogsSearchTagPromoLeft: 6px;
 dialogsSearchTagPromoRight: 1px;
 dialogsSearchTagPromoSkip: 6px;
 
+dialogsPopularAppsPadding: margins(10px, 8px, 10px, 12px);
+dialogsPopularAppsAbout: FlatLabel(boxDividerLabel) {
+	minWidth: 128px;
+}
+
+dialogsQuickActionSize: 20px;
+dialogsQuickActionRippleSize: 80px;
+
+dialogsSponsoredButton: DialogRightButton(dialogRowOpenBot) {
+	button: RoundButton(defaultLightButton) {
+		textFg: windowActiveTextFg;
+		textFgOver: windowActiveTextFg;
+		textBg: lightButtonBgOver;
+		textBgOver: lightButtonBgOver;
+		height: 20px;
+		textTop: 1px;
+	}
+	margin: margins(0px, 9px, 10px, 0px);
+}

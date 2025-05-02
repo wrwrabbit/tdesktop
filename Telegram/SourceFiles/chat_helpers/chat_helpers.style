@@ -40,6 +40,7 @@ TabbedSearch {
 
 ComposeIcons {
 	settings: icon;
+	collectibles: icon;
 
 	recent: icon;
 	recentActive: icon;
@@ -148,8 +149,11 @@ EmojiButton {
 
 SendButton {
 	inner: IconButton;
+	stars: RoundButton;
 	record: icon;
 	recordOver: icon;
+	round: icon;
+	roundOver: icon;
 	sendDisabledFg: color;
 }
 
@@ -331,9 +335,7 @@ stickersRemove: IconButton(defaultIconButton) {
 
 	rippleAreaSize: 40px;
 	rippleAreaPosition: point(0px, 0px);
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 stickersUndoRemove: RoundButton(defaultLightButton) {
 	width: -16px;
@@ -494,9 +496,7 @@ hashtagClose: IconButton {
 
 	rippleAreaPosition: point(5px, 5px);
 	rippleAreaSize: 20px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 
 stickerPanWidthMin: 64px;
@@ -589,6 +589,7 @@ sendBoxAlbumGroupButtonMediaDelete: icon {{ "send_media/send_media_delete", roun
 
 defaultComposeIcons: ComposeIcons {
 	settings: icon {{ "emoji/emoji_settings", emojiIconFg }};
+	collectibles: icon {{ "menu/unique", emojiIconFg }};
 
 	recent: icon {{ "emoji/emoji_recent", emojiIconFg }};
 	recentActive: icon {{ "emoji/emoji_recent", emojiSubIconFgActive }};
@@ -855,6 +856,21 @@ historyComposeButton: FlatButton {
 		color: historyComposeButtonBgRipple;
 	}
 }
+historyComposeButtonText: FlatLabel(defaultFlatLabel) {
+	style: semiboldTextStyle;
+	textFg: windowActiveTextFg;
+}
+historyGiftToChannel: IconButton(defaultIconButton) {
+	width: 46px;
+	height: 46px;
+
+	icon: icon{{ "menu/gift_premium", windowActiveTextFg }};
+	iconOver: icon{{ "menu/gift_premium", windowActiveTextFg }};
+
+	rippleAreaPosition: point(3px, 3px);
+	rippleAreaSize: 40px;
+	ripple: universalRippleAnimation;
+}
 historyUnblock: FlatButton(historyComposeButton) {
 	color: attentionButtonFg;
 	overColor: attentionButtonFgOver;
@@ -898,11 +914,13 @@ historyBusinessBotSettings: IconButton(defaultIconButton) {
 	iconPosition: point(-1px, -1px);
 	rippleAreaSize: 40px;
 	rippleAreaPosition: point(4px, 9px);
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 	height: 58px;
 	width: 48px;
+}
+paysStatusLabel: FlatLabel(historyBusinessBotStatus) {
+	align: align(top);
+	minWidth: 240px;
 }
 
 historyReplyCancelIcon: icon {{ "box_button_close", historyReplyCancelFg }};
@@ -927,9 +945,7 @@ historyReplyCancel: IconButton {
 
 	rippleAreaPosition: point(4px, 4px);
 	rippleAreaSize: 40px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 historyPinnedShowAll: IconButton(historyReplyCancel) {
 	icon: icon {{ "pinned_show_all", historyReplyCancelFg }};
@@ -1058,9 +1074,7 @@ historyAttach: IconButton(defaultIconButton) {
 
 	rippleAreaPosition: point(2px, 3px);
 	rippleAreaSize: 40px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 
 historyMessagesTTL: IconButtonWithText {
@@ -1078,6 +1092,13 @@ historyMessagesTTL: IconButtonWithText {
 historyReplaceMedia: IconButton(historyAttach) {
 	icon: icon {{ "chat/input_replace", windowBgActive }};
 	iconOver: icon {{ "chat/input_replace", windowBgActive }};
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: lightButtonBgOver;
+	}
+}
+historyAddMedia: IconButton(historyAttach) {
+	icon: icon {{ "chat/input_attach", windowBgActive }};
+	iconOver: icon {{ "chat/input_attach", windowBgActive }};
 	ripple: RippleAnimation(defaultRippleAnimation) {
 		color: lightButtonBgOver;
 	}
@@ -1109,6 +1130,10 @@ historyScheduledToggle: IconButton(historyAttach) {
 		{ "chat/input_scheduled", historyComposeIconFgOver },
 		{ "chat/input_scheduled_dot", attentionButtonFg }
 	};
+}
+historyGiftToUser: IconButton(historyAttach) {
+	icon: icon {{ "chat/input_gift", historyComposeIconFg }};
+	iconOver: icon {{ "chat/input_gift", historyComposeIconFgOver }};
 }
 
 historyAttachEmojiInner: IconButton(historyAttach) {
@@ -1169,6 +1194,10 @@ historyRecordVoiceOnceFg: icon {{ "voice_lock/audio_once_number", windowFgActive
 historyRecordVoiceOnceFgOver: icon {{ "voice_lock/audio_once_number", windowFgActive }};
 historyRecordVoiceOnceInactive: icon {{ "chat/audio_once", windowSubTextFg }};
 historyRecordVoiceActive: icon {{ "chat/input_record_filled", historyRecordVoiceFgActiveIcon }};
+historyRecordRound: icon {{ "chat/input_video", historyRecordVoiceFg }};
+historyRecordRoundOver: icon {{ "chat/input_video", historyRecordVoiceFgOver }};
+historyRecordRoundActive: icon {{ "chat/input_video", historyRecordVoiceFgActiveIcon }};
+historyRecordRoundIconPosition: point(0px, 0px);
 historyRecordSendIconPosition: point(2px, 0px);
 historyRecordVoiceRippleBgActive: lightButtonBgOver;
 historyRecordSignalRadius: 5px;
@@ -1214,6 +1243,7 @@ historyRecordLockBody: icon {{ "voice_lock/record_lock_body", historyToDownBg }}
 historyRecordLockMargin: margins(4px, 4px, 4px, 4px);
 historyRecordLockArrow: icon {{ "voice_lock/voice_arrow", historyToDownFg }};
 historyRecordLockInput: icon {{ "voice_lock/input_mic_s", historyToDownFg }};
+historyRecordLockRound: icon {{ "voice_lock/input_round_s", historyToDownFg }};
 historyRecordLockRippleMargin: margins(6px, 6px, 6px, 6px);
 
 historyRecordDelete: IconButton(historyAttach) {
@@ -1272,8 +1302,16 @@ historySend: SendButton {
 		icon: historySendIcon;
 		iconOver: historySendIconOver;
 	}
+	stars: RoundButton(defaultActiveButton) {
+		height: 28px;
+		padding: margins(0px, 0px, 6px, 0px);
+		textTop: 5px;
+		width: -8px;
+	}
 	record: historyRecordVoice;
 	recordOver: historyRecordVoiceOver;
+	round: historyRecordRound;
+	roundOver: historyRecordRoundOver;
 	sendDisabledFg: historyComposeIconFg;
 }
 
@@ -1287,9 +1325,7 @@ defaultComposeFilesMenu: IconButton(defaultIconButton) {
 
 	rippleAreaPosition: point(1px, 6px);
 	rippleAreaSize: 42px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 defaultComposeFilesField: InputField(defaultInputField) {
 	textMargins: margins(1px, 26px, 31px, 4px);
@@ -1349,9 +1385,7 @@ moreChatsBarClose: IconButton(defaultIconButton) {
 
 	rippleAreaPosition: point(0px, 4px);
 	rippleAreaSize: 40px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 
 reportReasonTopSkip: 8px;
@@ -1516,4 +1550,47 @@ pickLocationChooseOnMap: RoundButton(defaultActiveButton) {
 
 sendGifBox: Box(defaultBox) {
 	shadowIgnoreBottomSkip: true;
+}
+
+processingVideoTipMaxWidth: 364px;
+processingVideoTipShift: 8px;
+processingVideoToast: Toast(defaultToast) {
+	minWidth: 32px;
+	maxWidth: 380px;
+	padding: margins(19px, 17px, 19px, 17px);
+}
+processingVideoPreviewSkip: 8px;
+processingVideoView: RoundButton(defaultActiveButton) {
+	width: -24px;
+	height: 52px;
+	textTop: 17px;
+	textFg: mediaviewTextLinkFg;
+	textFgOver: mediaviewTextLinkFg;
+	textBg: transparent;
+	textBgOver: transparent;
+	ripple: emptyRippleAnimation;
+}
+
+frozenBarTitle: FlatLabel(defaultFlatLabel) {
+	style: semiboldTextStyle;
+	textFg: attentionButtonFg;
+}
+frozenRestrictionTitle: FlatLabel(frozenBarTitle) {
+	align: align(top);
+}
+frozenBarSubtitle: FlatLabel(defaultFlatLabel) {
+	textFg: windowSubTextFg;
+}
+frozenRestrictionSubtitle: FlatLabel(frozenBarSubtitle) {
+	align: align(top);
+}
+frozenInfoBox: Box(defaultBox) {
+	buttonPadding: margins(16px, 11px, 16px, 16px);
+	buttonHeight: 42px;
+	button: RoundButton(defaultActiveButton) {
+		height: 42px;
+		textTop: 12px;
+		style: semiboldTextStyle;
+	}
+	shadowIgnoreTopSkip: true;
 }

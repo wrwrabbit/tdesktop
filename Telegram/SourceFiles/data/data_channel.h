@@ -16,6 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "fakepasscode/ptg.h"
 
+class ChannelData;
+
 struct ChannelLocation {
 	QString address;
 	Data::LocationPoint point;
@@ -71,6 +73,8 @@ enum class ChannelDataFlag : uint64 {
 	PaidMediaAllowed = (1ULL << 33),
 	CanViewCreditsRevenue = (1ULL << 34),
 	SignatureProfiles = (1ULL << 35),
+	StargiftsAvailable = (1ULL << 36),
+	PaidMessagesAvailable = (1ULL << 37),
 
 	// shift values!
 	PTG_Verified = (1ull << 60),
@@ -156,6 +160,9 @@ private:
 	ChannelLocation _location;
 	Data::ChatBotCommands _botCommands;
 	std::unique_ptr<Data::Forum> _forum;
+	int _starsPerMessage = 0;
+
+	friend class ChannelData;
 
 };
 
@@ -274,6 +281,12 @@ public:
 	}
 	[[nodiscard]] bool viewForumAsMessages() const {
 		return flags() & Flag::ViewAsMessages;
+	}
+	[[nodiscard]] bool stargiftsAvailable() const {
+		return flags() & Flag::StargiftsAvailable;
+	}
+	[[nodiscard]] bool paidMessagesAvailable() const {
+		return flags() & Flag::PaidMessagesAvailable;
 	}
 
 	[[nodiscard]] static ChatRestrictionsInfo KickedRestrictedRights(
@@ -398,6 +411,12 @@ public:
 	[[nodiscard]] bool canRestrictParticipant(
 		not_null<PeerData*> participant) const;
 
+	void setBotVerifyDetails(Ui::BotVerifyDetails details);
+	void setBotVerifyDetailsIcon(DocumentId iconId);
+	[[nodiscard]] Ui::BotVerifyDetails *botVerifyDetails() const {
+		return _botVerifyDetails.get();
+	}
+
 	void setInviteLink(const QString &newInviteLink);
 	[[nodiscard]] QString inviteLink() const {
 		return _inviteLink;
@@ -467,6 +486,12 @@ public:
 	void setSlowmodeSeconds(int seconds);
 	[[nodiscard]] TimeId slowmodeLastMessage() const;
 	void growSlowmodeLastMessage(TimeId when);
+
+	void setStarsPerMessage(int stars);
+	[[nodiscard]] int starsPerMessage() const;
+
+	[[nodiscard]] int peerGiftsCount() const;
+	void setPeerGiftsCount(int count);
 
 	[[nodiscard]] int boostsApplied() const;
 	[[nodiscard]] int boostsUnrestrict() const;
@@ -538,6 +563,7 @@ private:
 		std::vector<Data::UnavailableReason> &&reasons) override;
 
 	Flags _flags = ChannelDataFlags(Flag::Forbidden);
+	int _peerGiftsCount = 0;
 
 	PtsWaiter _ptsWaiter;
 
@@ -567,6 +593,8 @@ private:
 
 	std::unique_ptr<Data::GroupCall> _call;
 	PeerId _callDefaultJoinAs = 0;
+
+	std::unique_ptr<Ui::BotVerifyDetails> _botVerifyDetails;
 
 };
 

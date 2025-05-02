@@ -16,11 +16,6 @@ jobs:
   Linux:
     name: Rocky Linux 8
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/${{ github.repository }}/centos_env
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Get repository name.

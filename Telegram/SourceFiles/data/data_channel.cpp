@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 
 #include "api/api_global_privacy.h"
+#include "data/components/credits.h"
 #include "data/data_changes.h"
 #include "data/data_channel_admins.h"
 #include "data/data_user.h"
@@ -30,6 +31,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_chat_invite.h"
 #include "api/api_invite_links.h"
 #include "apiwrap.h"
+#include "storage/storage_account.h"
+#include "ui/unread_badge.h"
 #include "window/notifications_manager.h"
 
 namespace {
@@ -713,6 +716,33 @@ bool ChannelData::canRestrictParticipant(
 	return adminRights() & AdminRight::BanUsers;
 }
 
+void ChannelData::setBotVerifyDetails(Ui::BotVerifyDetails details) {
+	if (!details) {
+		if (_botVerifyDetails) {
+			_botVerifyDetails = nullptr;
+			session().changes().peerUpdated(this, UpdateFlag::VerifyInfo);
+		}
+	} else if (!_botVerifyDetails) {
+		_botVerifyDetails = std::make_unique<Ui::BotVerifyDetails>(details);
+		session().changes().peerUpdated(this, UpdateFlag::VerifyInfo);
+	} else if (*_botVerifyDetails != details) {
+		*_botVerifyDetails = details;
+		session().changes().peerUpdated(this, UpdateFlag::VerifyInfo);
+	}
+}
+
+void ChannelData::setBotVerifyDetailsIcon(DocumentId iconId) {
+	if (!iconId) {
+		setBotVerifyDetails({});
+	} else {
+		auto info = _botVerifyDetails
+			? *_botVerifyDetails
+			: Ui::BotVerifyDetails();
+		info.iconId = iconId;
+		setBotVerifyDetails(info);
+	}
+}
+
 void ChannelData::setAdminRights(ChatAdminRights rights) {
 	if (rights == adminRights()) {
 		return;
@@ -829,6 +859,32 @@ void ChannelData::growSlowmodeLastMessage(TimeId when) {
 		info->slowmodeLastMessage = when;
 	}
 	session().changes().peerUpdated(this, UpdateFlag::Slowmode);
+}
+
+int ChannelData::starsPerMessage() const {
+	if (const auto info = mgInfo.get()) {
+		return info->_starsPerMessage;
+	}
+	return 0;
+}
+
+void ChannelData::setStarsPerMessage(int stars) {
+	if (mgInfo && starsPerMessage() != stars) {
+		mgInfo->_starsPerMessage = stars;
+		session().changes().peerUpdated(this, UpdateFlag::StarsPerMessage);
+	}
+	checkTrustedPayForMessage();
+}
+
+int ChannelData::peerGiftsCount() const {
+	return _peerGiftsCount;
+}
+
+void ChannelData::setPeerGiftsCount(int count) {
+	if (_peerGiftsCount != count) {
+		_peerGiftsCount = count;
+		session().changes().peerUpdated(this, UpdateFlag::PeerGifts);
+	}
 }
 
 int ChannelData::boostsApplied() const {
@@ -973,7 +1029,7 @@ PeerId ChannelData::groupCallDefaultJoinAs() const {
 void ChannelData::setAllowedReactions(Data::AllowedReactions value) {
 	if (_allowedReactions != value) {
 		if (value.paidEnabled) {
-			session().api().globalPrivacy().loadPaidReactionAnonymous();
+			session().api().globalPrivacy().loadPaidReactionShownPeer();
 		}
 		const auto enabled = [](const Data::AllowedReactions &allowed) {
 			return (allowed.type != Data::AllowedReactionsType::Some)
@@ -1110,7 +1166,9 @@ void ApplyChannelUpdate(
 		| Flag::ViewAsMessages
 		| Flag::CanViewRevenue
 		| Flag::PaidMediaAllowed
-		| Flag::CanViewCreditsRevenue;
+		| Flag::CanViewCreditsRevenue
+		| Flag::StargiftsAvailable
+		| Flag::PaidMessagesAvailable;
 	channel->setFlags((channel->flags() & ~mask)
 		| (update.is_can_set_username() ? Flag::CanSetUsername : Flag())
 		| (update.is_can_view_participants()
@@ -1131,6 +1189,12 @@ void ApplyChannelUpdate(
 		| (update.is_can_view_revenue() ? Flag::CanViewRevenue : Flag())
 		| (update.is_can_view_stars_revenue()
 			? Flag::CanViewCreditsRevenue
+			: Flag())
+		| (update.is_stargifts_available()
+			? Flag::StargiftsAvailable
+			: Flag())
+		| (update.is_paid_messages_available()
+			? Flag::PaidMessagesAvailable
 			: Flag()));
 	channel->setUserpicPhoto(update.vchat_photo());
 	if (const auto migratedFrom = update.vmigrated_from_chat_id()) {
@@ -1144,6 +1208,7 @@ void ApplyChannelUpdate(
 	channel->setRestrictedCount(update.vbanned_count().value_or_empty());
 	channel->setKickedCount(update.vkicked_count().value_or_empty());
 	channel->setSlowmodeSeconds(update.vslowmode_seconds().value_or_empty());
+	channel->setPeerGiftsCount(update.vstargifts_count().value_or_empty());
 	if (const auto next = update.vslowmode_next_send_date()) {
 		channel->growSlowmodeLastMessage(
 			next->v - channel->slowmodeSeconds());
@@ -1251,6 +1316,8 @@ void ApplyChannelUpdate(
 			.paidEnabled = update.is_paid_reactions_available(),
 		});
 	}
+	channel->setBotVerifyDetails(
+		ParseBotVerifyDetails(update.vbot_verification()));
 	channel->owner().stories().apply(channel, update.vstories());
 	channel->fullUpdated();
 	channel->setPendingRequestsCount(

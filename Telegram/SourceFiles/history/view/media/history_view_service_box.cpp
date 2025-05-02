@@ -16,9 +16,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "ui/chat/chat_style.h"
 #include "ui/effects/animation_value.h"
+#include "ui/effects/premium_stars_colored.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/text/text_utilities.h"
 #include "ui/painter.h"
+#include "ui/rect.h"
 #include "ui/power_saving.h"
 #include "styles/style_chat.h"
 #include "styles/style_premium.h"
@@ -43,8 +45,12 @@ ServiceBox::ServiceBox(
 , _title(
 	st::defaultSubsectionTitle.style,
 	_content->title(),
-	kDefaultTextOptions,
-	_maxWidth)
+	kMarkupTextOptions,
+	_maxWidth,
+	Core::TextContext({
+		.session = &parent->history()->session(),
+		.repaint = [parent] { parent->customEmojiRepaint(); },
+	}))
 , _subtitle(
 	st::premiumPreviewAbout.style,
 	Ui::Text::Filtered(
@@ -59,10 +65,10 @@ ServiceBox::ServiceBox(
 		}),
 	kMarkupTextOptions,
 	_maxWidth,
-	Core::MarkedTextContext{
+	Core::TextContext({
 		.session = &parent->history()->session(),
-		.customEmojiRepaint = [parent] { parent->customEmojiRepaint(); },
-	})
+		.repaint = [parent] { parent->customEmojiRepaint(); },
+	}))
 , _size(
 	_content->width(),
 	(st::msgServiceGiftBoxTopSkip
@@ -98,6 +104,12 @@ ServiceBox::ServiceBox(
 			}
 		}, _lifetime);
 	}
+	if (_content->buttonMinistars()) {
+		_button.stars = std::make_unique<Ui::Premium::ColoredMiniStars>(
+			[=](const QRect &) { repaint(); },
+			Ui::Premium::MiniStars::Type::SlowStars);
+		_button.lastFg = std::make_unique<QColor>();
+	}
 }
 
 ServiceBox::~ServiceBox() = default;
@@ -117,7 +129,21 @@ void ServiceBox::draw(Painter &p, const PaintContext &context) const {
 	const auto radius = st::msgServiceGiftBoxRadius;
 	p.setPen(Qt::NoPen);
 	p.setBrush(context.st->msgServiceBg());
-	p.drawRoundedRect(QRect(QPoint(), _innerSize), radius, radius);
+	p.drawRoundedRect(Rect(_innerSize), radius, radius);
+
+	if (_button.stars) {
+		const auto &c = context.st->msgServiceFg()->c;
+		if ((*_button.lastFg) != c) {
+			_button.lastFg->setRgb(c.red(), c.green(), c.blue());
+			const auto padding = _button.size.height() / 2;
+			_button.stars->setColorOverride(QGradientStops{
+				{ 0., anim::with_alpha(c, .3) },
+				{ 1., c },
+			});
+			_button.stars->setCenter(
+				Rect(_button.size) - QMargins(padding, 0, padding, 0));
+		}
+	}
 
 	const auto content = contentRect();
 	auto top = content.top() + content.height();
@@ -126,7 +152,16 @@ void ServiceBox::draw(Painter &p, const PaintContext &context) const {
 		const auto &padding = st::msgServiceGiftBoxTitlePadding;
 		top += padding.top();
 		if (!_title.isEmpty()) {
-			_title.draw(p, st::msgPadding.left(), top, _maxWidth, style::al_top);
+			_title.draw(p, {
+				.position = QPoint(st::msgPadding.left(), top),
+				.availableWidth = _maxWidth,
+				.align = style::al_top,
+				.palette = &context.st->serviceTextPalette(),
+				.spoiler = Ui::Text::DefaultSpoilerCache(),
+				.now = context.now,
+				.pausedEmoji = context.paused || On(PowerSaving::kEmojiChat),
+				.pausedSpoiler = context.paused || On(PowerSaving::kChatSpoiler),
+			});
 			top += _title.countHeight(_maxWidth) + padding.bottom();
 		}
 		_parent->prepareCustomEmojiPaint(p, context, _subtitle);
@@ -149,6 +184,9 @@ void ServiceBox::draw(Painter &p, const PaintContext &context) const {
 
 		p.setPen(Qt::NoPen);
 		p.setBrush(context.st->msgServiceBg()); // ?
+		if (const auto stars = _button.stars.get()) {
+			stars->setPaused(context.paused);
+		}
 		_button.drawBg(p);
 		p.setPen(context.st->msgServiceFg());
 		if (_button.ripple) {
@@ -174,28 +212,9 @@ void ServiceBox::draw(Painter &p, const PaintContext &context) const {
 
 	_content->draw(p, context, content);
 
-	if (const auto tag = _content->cornerTagText(); !tag.isEmpty()) {
-		const auto font = st::semiboldFont;
-		p.setFont(font);
-		p.setPen(Qt::NoPen);
-		const auto twidth = font->width(tag);
-		const auto pos = QPoint(_innerSize.width() - twidth, font->height);
-		const auto add = style::ConvertScale(2);
-		p.save();
-		p.setClipRect(
-			-add,
-			-add,
-			_innerSize.width() + 2 * add,
-			_innerSize.height() + 2 * add);
-		p.translate(pos);
-		p.rotate(45.);
-		p.translate(-pos);
-		p.setPen(Qt::NoPen);
-		p.setBrush(context.st->msgServiceBg()); // ?
-		p.drawRect(-5 * twidth, 0, twidth * 12, font->height);
-		p.setPen(context.st->msgServiceFg());
-		p.drawText(pos - QPoint(0, font->descent), tag);
-		p.restore();
+	if (const auto tag = _content->cornerTag(context); !tag.isNull()) {
+		const auto width = tag.width() / tag.devicePixelRatio();
+		p.drawImage(_innerSize.width() - width, 0, tag);
 	}
 
 	p.translate(0, -st::msgServiceGiftBoxTopSkip);
@@ -203,11 +222,10 @@ void ServiceBox::draw(Painter &p, const PaintContext &context) const {
 
 TextState ServiceBox::textState(QPoint point, StateRequest request) const {
 	auto result = TextState(_parent);
+	point.setY(point.y() - st::msgServiceGiftBoxTopSkip);
 	const auto content = contentRect();
 	const auto lookupSubtitleLink = [&] {
-		auto top = st::msgServiceGiftBoxTopSkip
-			+ content.top()
-			+ content.height();
+		auto top = content.top() + content.height();
 		const auto &padding = st::msgServiceGiftBoxTitlePadding;
 		top += padding.top();
 		if (!_title.isEmpty()) {
@@ -340,7 +358,15 @@ bool ServiceBox::Button::empty() const {
 
 void ServiceBox::Button::drawBg(QPainter &p) const {
 	const auto radius = size.height() / 2.;
-	p.drawRoundedRect(0, 0, size.width(), size.height(), radius, radius);
+	const auto r = Rect(size);
+	p.drawRoundedRect(r, radius, radius);
+	if (stars) {
+		auto clipPath = QPainterPath();
+		clipPath.addRoundedRect(r, radius, radius);
+		p.setClipPath(clipPath);
+		stars->paint(p);
+		p.setClipping(false);
+	}
 }
 
 } // namespace HistoryView

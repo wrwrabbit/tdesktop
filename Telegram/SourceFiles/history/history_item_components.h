@@ -54,6 +54,9 @@ namespace style {
 struct BotKeyboardButton;
 } // namespace style
 
+extern const char kOptionFastButtonsMode[];
+[[nodiscard]] bool FastButtonsMode();
+
 struct HistoryMessageVia : public RuntimeComponent<HistoryMessageVia, HistoryItem> {
 	void create(not_null<Data::Session*> owner, UserId userId);
 	void resize(int32 availw) const;
@@ -504,6 +507,7 @@ public:
 		int outerWidth,
 		const QRect &clip) const;
 	ClickHandlerPtr getLink(QPoint point) const;
+	ClickHandlerPtr getLinkByIndex(int index) const;
 
 	void clickHandlerActiveChanged(
 		const ClickHandlerPtr &p,
@@ -537,6 +541,7 @@ private:
 	};
 
 	void startAnimation(int i, int j, int direction);
+	[[nodiscard]] bool hasFastButtonMode() const;
 
 	ButtonCoords findButtonCoordsByClickHandler(const ClickHandlerPtr &p);
 

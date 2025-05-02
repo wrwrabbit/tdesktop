@@ -33,6 +33,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_changes.h"
 #include "data/data_chat_filters.h"
 #include "data/data_send_action.h"
+#include "data/data_star_gift.h"
+#include "data/data_emoji_statuses.h"
 #include "data/data_folder.h"
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
@@ -81,13 +83,21 @@ using UpdateFlag = Data::HistoryUpdate::Flag;
 	return fields;
 }
 
+[[nodiscard]] Dialogs::UnreadState AdjustedForumUnreadState(
+		Dialogs::UnreadState state) {
+	const auto allMuted = (state.chats == state.chatsMuted);
+	state.chatsMuted = (state.chats && allMuted) ? 1 : 0;
+	state.chats = state.chats ? 1 : 0;
+	return state;
+}
+
 } // namespace
 
 History::History(not_null<Data::Session*> owner, PeerId peerId)
 : Thread(owner, Type::History)
 , peer(owner->peer(peerId))
 , _delegateMixin(HistoryInner::DelegateMixin())
-, _chatListNameSortKey(owner->nameSortKey(peer->name()))
+, _chatListNameSortKey(TextUtilities::NameSortKey(peer->name()))
 , _sendActionPainter(this) {
 	Thread::setMuted(owner->notifySettings().isMuted(peer));
 
@@ -127,6 +137,10 @@ void History::setHasPendingResizedItems() {
 void History::itemRemoved(not_null<HistoryItem*> item) {
 	if (item == _joinedMessage) {
 		_joinedMessage = nullptr;
+	} else if (item == _newPeerNameChange) {
+		_newPeerNameChange = nullptr;
+	} else if (item == _newPeerPhotoChange) {
+		_newPeerPhotoChange = nullptr;
 	}
 	item->removeMainView();
 	if (_lastServerMessage == item) {
@@ -179,7 +193,7 @@ void History::itemVanished(not_null<HistoryItem*> item) {
 		if (const auto gift = media->gift()) {
 			using GiftAction = Data::GiftUpdate::Action;
 			owner().notifyGiftUpdate({
-				.itemId = item->fullId(),
+				.id = Data::SavedStarGiftId::User(item->id),
 				.action = GiftAction::Delete,
 			});
 		}
@@ -440,6 +454,9 @@ not_null<HistoryItem*> History::createItem(
 		if (detachExistingItem) {
 			result->removeMainView();
 		}
+		if (result->needsUpdateForVideoQualities(message)) {
+			owner().updateEditedMessage(message);
+		}
 		return result;
 	}
 	const auto result = message.match([&](const auto &data) {
@@ -447,6 +464,9 @@ not_null<HistoryItem*> History::createItem(
 	});
 	if (newMessage && result->out() && result->isRegular()) {
 		session().topPeers().increment(peer, result->date());
+		if (result->starsPaid()) {
+			session().credits().load(true);
+		}
 	}
 	return result;
 }
@@ -459,8 +479,15 @@ std::vector<not_null<HistoryItem*>> History::createItems(
 	const auto detachExistingItem = true;
 	for (auto i = data.cend(), e = data.cbegin(); i != e;) {
 		const auto &data = *--i;
+		const auto id = IdFromMessage(data);
+		if ((id.bare == 1) && (data.type() == mtpc_messageEmpty)) {
+			// The first message of channels should be a service message
+			// about its creation. But if channel auto-cleaning is enabled,
+			// the first message comes empty and is displayed incorrectly.
+			continue;
+		}
 		result.emplace_back(createItem(
-			IdFromMessage(data),
+			id,
 			data,
 			localFlags,
 			detachExistingItem));
@@ -710,6 +737,14 @@ not_null<HistoryItem*> History::addNewLocalMessage(
 	return addNewItem(
 		makeMessage(WithLocalFlag(std::move(fields)), game),
 		true);
+}
+
+not_null<HistoryItem*> History::addNewLocalMessage(
+		not_null<HistoryItem*> item) {
+	Expects(item->history() == this);
+	Expects(item->isLocal());
+
+	return addNewItem(item, true);
 }
 
 not_null<HistoryItem*> History::addSponsoredMessage(
@@ -1138,12 +1173,6 @@ void History::applyServiceChanges(
 			}
 			if (paid) {
 				// Toast on a current active window.
-				const auto context = [=](not_null<QWidget*> toast) {
-					return Core::MarkedTextContext{
-						.session = &session(),
-						.customEmojiRepaint = [=] { toast->update(); },
-					};
-				};
 				Ui::Toast::Show({
 					.text = tr::lng_payments_success(
 						tr::now,
@@ -1154,7 +1183,9 @@ void History::applyServiceChanges(
 						lt_title,
 						Ui::Text::Bold(paid->title),
 						Ui::Text::WithEntities),
-					.textContext = context,
+					.textContext = Core::TextContext({
+						.session = &session(),
+					}),
 				});
 			}
 		}
@@ -1202,6 +1233,8 @@ void History::mainViewRemoved(
 		not_null<HistoryBlock*> block,
 		not_null<HistoryView::Element*> view) {
 	Expects(_joinedMessage != view->data());
+	Expects(_newPeerNameChange != view->data());
+	Expects(_newPeerPhotoChange != view->data());
 
 	if (_firstUnreadView == view) {
 		getNextFirstUnreadMessage();
@@ -1270,6 +1303,15 @@ void History::newItemAdded(not_null<HistoryItem*> item) {
 	}
 	if (const auto topic = item->topic()) {
 		topic->applyItemAdded(item);
+	}
+	if (const auto media = item->media()) {
+		if (const auto gift = media->gift()) {
+			if (const auto unique = gift->unique.get()) {
+				if (unique->ownerId == session().userPeerId()) {
+					owner().emojiStatuses().refreshCollectibles();
+				}
+			}
+		}
 	}
 }
 
@@ -2180,7 +2222,7 @@ History *History::migrateSibling() const {
 
 Dialogs::UnreadState History::chatListUnreadState() const {
 	if (const auto forum = peer->forum()) {
-		return forum->topicsList()->unreadState();
+		return AdjustedForumUnreadState(forum->topicsList()->unreadState());
 	}
 	return computeUnreadState();
 }
@@ -2285,7 +2327,7 @@ const QString &History::chatListNameSortKey() const {
 }
 
 void History::refreshChatListNameSortKey() {
-	_chatListNameSortKey = owner().nameSortKey(peer->name());
+	_chatListNameSortKey = TextUtilities::NameSortKey(peer->name());
 }
 
 const base::flat_set<QString> &History::chatListNameWords() const {
@@ -3053,7 +3095,7 @@ const Data::Thread *History::threadFor(MsgId topicRootId) const {
 void History::forumChanged(Data::Forum *old) {
 	if (inChatList()) {
 		notifyUnreadStateChange(old
-			? old->topicsList()->unreadState()
+			? AdjustedForumUnreadState(old->topicsList()->unreadState())
 			: computeUnreadState());
 	}
 
@@ -3063,7 +3105,9 @@ void History::forumChanged(Data::Forum *old) {
 		forum->topicsList()->unreadStateChanges(
 		) | rpl::filter([=] {
 			return (_flags & Flag::IsForum) && inChatList();
-		}) | rpl::start_with_next([=](const Dialogs::UnreadState &old) {
+		}) | rpl::map(
+			AdjustedForumUnreadState
+		) | rpl::start_with_next([=](const Dialogs::UnreadState &old) {
 			notifyUnreadStateChange(old);
 		}, forum->lifetime());
 
@@ -3205,6 +3249,85 @@ HistoryItem *History::insertJoinedMessage() {
 	return _joinedMessage;
 }
 
+void History::checkNewPeerMessages() {
+	if (!loadedAtTop()) {
+		return;
+	}
+	const auto user = peer->asUser();
+	if (!user) {
+		return;
+	}
+	const auto photo = user->photoChangeDate();
+	const auto name = user->nameChangeDate();
+	if (!photo && _newPeerPhotoChange) {
+		_newPeerPhotoChange->destroy();
+	}
+	if (!name && _newPeerNameChange) {
+		_newPeerNameChange->destroy();
+	}
+	if ((!photo || _newPeerPhotoChange) && (!name || _newPeerNameChange)) {
+		return;
+	}
+
+	const auto when = [](TimeId date) {
+		const auto now = base::unixtime::now();
+		const auto passed = now - date;
+		if (passed < 3600) {
+			return tr::lng_new_contact_updated_now(tr::now);
+		} else if (passed < 24 * 3600) {
+			return tr::lng_new_contact_updated_hours(
+				tr::now,
+				lt_count,
+				(passed / 3600));
+		} else if (passed < 60 * 24 * 3600) {
+			return tr::lng_new_contact_updated_days(
+				tr::now,
+				lt_count,
+				(passed / (24 * 3600)));
+		}
+		return tr::lng_new_contact_updated_months(
+			tr::now,
+			lt_count,
+			(passed / (30 * 24 * 3600)));
+	};
+
+	auto firstDate = TimeId();
+	for (const auto &block : blocks) {
+		for (const auto &message : block->messages) {
+			const auto item = message->data();
+			if (item != _newPeerPhotoChange && item != _newPeerNameChange) {
+				firstDate = item->date();
+				break;
+			}
+		}
+		if (firstDate) {
+			break;
+		}
+	}
+	if (!firstDate) {
+		firstDate = base::unixtime::serialize(
+			QDateTime(QDate(2013, 8, 1), QTime(0, 0)));
+	}
+	const auto add = [&](tr::phrase<lngtag_when> phrase, TimeId date) {
+		const auto result = makeMessage({
+			.id = owner().nextLocalMessageId(),
+			.flags = MessageFlag::Local | MessageFlag::HideDisplayDate,
+			.date = (--firstDate),
+		}, PreparedServiceText{ TextWithEntities{
+			phrase(tr::now, lt_when, when(date)),
+		} });
+		insertMessageToBlocks(result);
+		return result;
+	};
+
+	if (photo && !_newPeerPhotoChange) {
+		_newPeerPhotoChange = add(tr::lng_new_contact_updated_photo, photo);
+	}
+	if (name && !_newPeerNameChange) {
+		_newPeerNameChange = add(tr::lng_new_contact_updated_name, name);
+	}
+}
+
 void History::insertMessageToBlocks(not_null<HistoryItem*> item) {
 	Expects(item->mainView() == nullptr);
 
@@ -3258,6 +3381,8 @@ void History::checkLocalMessages() {
 		&& peer->asChannel()->inviter
 		&& goodDate(peer->asChannel()->inviteDate)) {
 		insertJoinedMessage();
+	} else {
+		checkNewPeerMessages();
 	}
 }
 
@@ -3268,6 +3393,15 @@ HistoryItem *History::joinedMessageInstance() const {
 void History::removeJoinedMessage() {
 	if (_joinedMessage) {
 		_joinedMessage->destroy();
+	}
+}
+
+void History::removeNewPeerMessages() {
+	if (_newPeerNameChange) {
+		_newPeerNameChange->destroy();
+	}
+	if (_newPeerPhotoChange) {
+		_newPeerPhotoChange->destroy();
 	}
 }
 

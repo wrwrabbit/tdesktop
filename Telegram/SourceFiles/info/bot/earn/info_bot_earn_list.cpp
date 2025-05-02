@@ -16,8 +16,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "info/bot/earn/info_bot_earn_widget.h"
+#include "info/bot/starref/info_bot_starref_common.h"
+#include "info/bot/starref/info_bot_starref_join_widget.h"
 #include "info/channel_statistics/earn/earn_format.h"
 #include "info/info_controller.h"
+#include "info/info_memento.h"
 #include "info/statistics/info_statistics_inner_widget.h" // FillLoading.
 #include "info/statistics/info_statistics_list_controllers.h"
 #include "lang/lang_keys.h"
@@ -60,13 +63,9 @@ void AddHeader(
 
 } // namespace
 
-InnerWidget::InnerWidget(
-	QWidget *parent,
-	not_null<Controller*> controller,
-	not_null<PeerData*> peer)
+InnerWidget::InnerWidget(QWidget *parent, not_null<Controller*> controller)
 : VerticalLayout(parent)
 , _controller(controller)
-, _peer(peer)
 , _show(controller->uiShow()) {
 }
 
@@ -75,7 +74,7 @@ void InnerWidget::load() {
 
 	const auto request = [=](Fn<void(Data::CreditsEarnStatistics)> done) {
 		const auto api = apiLifetime->make_state<Api::CreditsEarnStatistics>(
-			_peer->asUser());
+			peer()->asUser());
 		api->request(
 		) | rpl::start_with_error_done([show = _show](const QString &error) {
 			show->showToast(error);
@@ -92,18 +91,18 @@ void InnerWidget::load() {
 		_showFinished.events());
 
 	_showFinished.events(
-	) | rpl::take(1) | rpl::start_with_next([=] {
+	) | rpl::take(1) | rpl::start_with_next([=, this, peer = peer()] {
 		request([=](Data::CreditsEarnStatistics state) {
 			_state = state;
 			_loaded.fire(true);
 			fill();
 
-			_peer->session().account().mtpUpdates(
+			peer->session().account().mtpUpdates(
 			) | rpl::start_with_next([=](const MTPUpdates &updates) {
 				using TL = MTPDupdateStarsRevenueStatus;
 				Api::PerformForUpdate<TL>(updates, [&](const TL &d) {
 					const auto peerId = peerFromMTP(d.vpeer());
-					if (peerId == _peer->id) {
+					if (peerId == peer->id) {
 						request([=](Data::CreditsEarnStatistics state) {
 							_state = state;
 							_stateUpdated.fire({});
@@ -120,6 +119,7 @@ void InnerWidget::fill() {
 	const auto container = this;
 	const auto &data = _state;
 	const auto multiplier = data.usdRate * Data::kEarnMultiplier;
+	constexpr auto kMinorLength = 3;
 
 	auto availableBalanceValue = rpl::single(
 		data.availableBalance
@@ -128,7 +128,9 @@ void InnerWidget::fill() {
 			return _state.availableBalance;
 		})
 	);
-	auto valueToString = [](uint64 v) { return QString::number(v); };
+	auto valueToString = [](StarsAmount v) {
+		return Lang::FormatStarsAmountDecimal(v);
+	};
 
 	if (data.revenueGraph.chart) {
 		Ui::AddSkip(container);
@@ -146,14 +148,13 @@ void InnerWidget::fill() {
 		Ui::AddSkip(container);
 		Ui::AddDivider(container);
 		Ui::AddSkip(container);
-		Ui::AddSkip(container);
 	}
 	{
 		AddHeader(container, tr::lng_bot_earn_overview_title);
 		Ui::AddSkip(container, st::channelEarnOverviewTitleSkip);
 
 		const auto addOverview = [&](
-				rpl::producer<uint64> value,
+				rpl::producer<StarsAmount> value,
 				const tr::phrase<> &text) {
 			const auto line = container->add(
 				Ui::CreateSkipWidget(container, 0),
@@ -169,8 +170,8 @@ void InnerWidget::fill() {
 				line,
 				std::move(
 					value
-				) | rpl::map([=](uint64 v) {
-					return v ? ToUsd(v, multiplier) : QString();
+				) | rpl::map([=](StarsAmount v) {
+					return v ? ToUsd(v, multiplier, kMinorLength) : QString();
 				}),
 				st::channelEarnOverviewSubMinorLabel);
 			rpl::combine(
@@ -233,7 +234,7 @@ void InnerWidget::fill() {
 		::Settings::AddWithdrawalWidget(
 			container,
 			_controller->parentController(),
-			_peer,
+			peer(),
 			rpl::single(
 				data.buyAdsUrl
 			) | rpl::then(
@@ -243,14 +244,25 @@ void InnerWidget::fill() {
 			),
 			rpl::duplicate(availableBalanceValue),
 			rpl::duplicate(dateValue),
-			std::move(dateValue) | rpl::map([=](const QDateTime &dt) {
-				return !dt.isNull() || (!_state.isWithdrawalEnabled);
-			}),
-			rpl::duplicate(availableBalanceValue) | rpl::map([=](uint64 v) {
-				return v ? ToUsd(v, multiplier) : QString();
+			_state.isWithdrawalEnabled,
+			rpl::duplicate(
+				availableBalanceValue
+			) | rpl::map([=](StarsAmount v) {
+				return v ? ToUsd(v, multiplier, kMinorLength) : QString();
 			}));
 	}
-
+	if (BotStarRef::Join::Allowed(peer())) {
+		const auto button = BotStarRef::AddViewListButton(
+			container,
+			tr::lng_credits_summary_earn_title(),
+			tr::lng_credits_summary_earn_about(),
+			true);
+		button->setClickedCallback([=] {
+			_controller->showSection(BotStarRef::Join::Make(peer()));
+		});
+		Ui::AddSkip(container);
+		Ui::AddDivider(container);
+	}
 	fillHistory();
 }
 
@@ -262,7 +274,7 @@ void InnerWidget::fillHistory() {
 
 	const auto sectionIndex = history->lifetime().make_state<int>(0);
 
-	const auto fill = [=, peer = _peer](
+	const auto fill = [=, peer = peer()](
 			not_null<PeerData*> premiumBot,
 			const Data::CreditsStatusSlice &fullSlice,
 			const Data::CreditsStatusSlice &inSlice,
@@ -282,7 +294,6 @@ void InnerWidget::fillHistory() {
 		const auto outTabText = tr::lng_credits_summary_history_tab_out(
 			tr::now);
 		if (hasOneTab) {
-			Ui::AddSkip(inner);
 			const auto header = inner->add(
 				object_ptr<Statistic::Header>(inner),
 				st::statisticsLayerMargins
@@ -395,7 +406,7 @@ void InnerWidget::fillHistory() {
 	const auto apiLifetime = history->lifetime().make_state<rpl::lifetime>();
 	rpl::single(rpl::empty) | rpl::then(
 		_stateUpdated.events()
-	) | rpl::start_with_next([=, peer = _peer] {
+	) | rpl::start_with_next([=, peer = peer()] {
 		using Api = Api::CreditsHistory;
 		const auto apiFull = apiLifetime->make_state<Api>(peer, true, true);
 		const auto apiIn = apiLifetime->make_state<Api>(peer, true, false);
@@ -450,7 +461,7 @@ void InnerWidget::setInnerFocus() {
 }
 
 not_null<PeerData*> InnerWidget::peer() const {
-	return _peer;
+	return _controller->statisticsTag().peer;
 }
 
 } // namespace Info::BotEarn

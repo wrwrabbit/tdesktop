@@ -447,7 +447,7 @@ if customRunCommand:
             with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp_zshrc:
                 tmp_zshrc.write(f'export PS1="{prompt}"\n')
                 tmp_zshrc_path = tmp_zshrc.name
-            subprocess.run(['zsh', '--rcs', tmp_zshrc_path], env=modifiedEnv)
+            subprocess.run(['zsh', '--rcs', tmp_zshrc_path], shell=True, env=modifiedEnv)
             os.remove(tmp_zshrc_path)
     elif not run(' '.join(runCommand) + '\n'):
         print('FAILED :(')
@@ -457,7 +457,7 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout 5943c8aca4
+    git checkout 7cb9049583
 """)
 
 stage('msys64', """
@@ -979,7 +979,7 @@ mac:
 """)
 
 stage('libheif', """
-    git clone -b v1.17.6 https://github.com/strukturag/libheif.git
+    git clone -b v1.18.2 https://github.com/strukturag/libheif.git
     cd libheif
 win:
     %THIRDPARTY_DIR%\\msys64\\usr\\bin\\sed.exe -i 's/LIBHEIF_EXPORTS/LIBDE265_STATIC_BUILD/g' libheif/CMakeLists.txt
@@ -1031,7 +1031,7 @@ mac:
 """)
 
 stage('libjxl', """
-    git clone -b v0.10.3 --recursive --shallow-submodules https://github.com/libjxl/libjxl.git
+    git clone -b v0.11.1 --recursive --shallow-submodules https://github.com/libjxl/libjxl.git
     cd libjxl
 """ + setVar("cmake_defines", """
     -DBUILD_SHARED_LIBS=OFF
@@ -1148,10 +1148,19 @@ depends:yasm/yasm
 """)
 
 stage('liblcms2', """
-mac:
     git clone -b lcms2.16 https://github.com/mm2/Little-CMS.git liblcms2
     cd liblcms2
-
+win:
+depends:python/Scripts/activate.bat
+    %THIRDPARTY_DIR%\\python\\Scripts\\activate.bat
+    meson setup --default-library=static --buildtype=debug -Db_vscrt=mtd out/Debug
+    meson compile -C out/Debug
+release:
+    meson setup --default-library=static --buildtype=release -Db_vscrt=mt out/Release
+    meson compile -C out/Release
+win:
+    deactivate
+mac:
     buildOneArch() {
         arch=$1
         folder=`pwd`/$2
@@ -1217,13 +1226,14 @@ depends:yasm/yasm
         --arch="$arch" \
         --extra-cflags="$MIN_VER -arch $arch $UNGUARDED -DCONFIG_SAFE_BITSTREAM_READER=1 -I$USED_PREFIX/include" \
         --extra-cxxflags="$MIN_VER -arch $arch $UNGUARDED -DCONFIG_SAFE_BITSTREAM_READER=1 -I$USED_PREFIX/include" \
-        --extra-ldflags="$MIN_VER -arch $arch $USED_PREFIX/lib/libopus.a" \
+        --extra-ldflags="$MIN_VER -arch $arch $USED_PREFIX/lib/libopus.a -lc++" \
         --disable-programs \
         --disable-doc \
         --disable-network \
         --disable-everything \
         --enable-protocol=file \
         --enable-libdav1d \
+        --enable-libopenh264 \
         --enable-libopus \
         --enable-libvpx \
         --enable-hwaccel=h264_videotoolbox \
@@ -1301,7 +1311,10 @@ depends:yasm/yasm
         --enable-decoder=wmav1 \
         --enable-decoder=wmav2 \
         --enable-decoder=wmavoice \
+        --enable-encoder=aac \
         --enable-encoder=libopus \
+        --enable-encoder=libopenh264 \
+        --enable-encoder=pcm_s16le \
         --enable-filter=atempo \
         --enable-parser=aac \
         --enable-parser=aac_latm \
@@ -1324,8 +1337,10 @@ depends:yasm/yasm
         --enable-demuxer=mp3 \
         --enable-demuxer=ogg \
         --enable-demuxer=wav \
+        --enable-muxer=mp4 \
         --enable-muxer=ogg \
-        --enable-muxer=opus
+        --enable-muxer=opus \
+        --enable-muxer=wav
     }
 
     configureFFmpeg arm64
@@ -1363,25 +1378,28 @@ depends:yasm/yasm
 """)
 
 stage('openal-soft', """
-version: 3
-win:
-    git clone -b wasapi_exact_device_time https://github.com/telegramdesktop/openal-soft.git
+    git clone https://github.com/telegramdesktop/openal-soft.git
     cd openal-soft
+win:
+    git checkout 5e9429354d
     cmake -B build . ^
         -A %WIN32X64% ^
         -D LIBTYPE:STRING=STATIC ^
-        -D FORCE_STATIC_VCRT=ON
+        -D FORCE_STATIC_VCRT=ON ^
+        -D ALSOFT_UTILS=OFF ^
+        -D ALSOFT_EXAMPLES=OFF ^
+        -D ALSOFT_TESTS=OFF
     cmake --build build --config Debug --parallel
 release:
     cmake --build build --config RelWithDebInfo --parallel
 mac:
-    git clone -b coreaudio_device_uid https://github.com/telegramdesktop/openal-soft.git
-    cd openal-soft
+    git checkout coreaudio_device_uid
     CFLAGS=$UNGUARDED CPPFLAGS=$UNGUARDED cmake -B build . \\
         -D CMAKE_BUILD_TYPE=RelWithDebInfo \\
         -D CMAKE_INSTALL_PREFIX:PATH=$USED_PREFIX \\
         -D ALSOFT_EXAMPLES=OFF \\
         -D ALSOFT_UTILS=OFF \\
+        -D ALSOFT_TESTS=OFF \\
         -D LIBTYPE:STRING=STATIC \\
         -D CMAKE_OSX_DEPLOYMENT_TARGET:STRING=$MACOSX_DEPLOYMENT_TARGET \\
         -D CMAKE_OSX_ARCHITECTURES="x86_64;arm64"
@@ -1629,11 +1647,11 @@ mac:
     make install
 """)
 else: # qt > '6'
-    branch = 'v$QT' + ('-lts-lgpl' if qt < '6.3' else '-rc1')
+    branch = 'v$QT' + ('-lts-lgpl' if qt < '6.3' else '')
     stage('qt_' + qt, """
     git clone -b """ + branch + """ https://github.com/qt/qt5.git qt_$QT
     cd qt_$QT
-    git submodule update --init --recursive qtbase qtimageformats qtsvg
+    git submodule update --init --recursive --progress qtbase qtimageformats qtsvg
 depends:patches/qtbase_""" + qt + """/*.patch
     cd qtbase
 mac:
@@ -1680,6 +1698,7 @@ win:
     SET OPENSSL_LIBS_DIR=%OPENSSL_DIR%\\out
     SET ZLIB_LIBS_DIR=%LIBS_DIR%\\zlib
     SET WEBP_DIR=%LIBS_DIR%\\libwebp
+    SET LCMS2_DIR=%LIBS_DIR%\\liblcms2
     configure -prefix "%LIBS_DIR%\\Qt-%QT%" ^
         %CONFIGURATIONS% ^
         -force-debug-info ^
@@ -1688,6 +1707,7 @@ win:
         -static ^
         -static-runtime ^
         -feature-c++20 ^
+        -no-sbom ^
         -openssl linked ^
         -system-webp ^
         -system-zlib ^
@@ -1716,7 +1736,10 @@ win:
         -D WebP_mux_INCLUDE_DIR="%WEBP_DIR%\\src" ^
         -D WebP_LIBRARY="%WEBP_DIR%\\out\\release-static\\$X8664\\lib\\webp.lib" ^
         -D WebP_demux_LIBRARY="%WEBP_DIR%\\out\\release-static\\$X8664\\lib\\webpdemux.lib" ^
-        -D WebP_mux_LIBRARY="%WEBP_DIR%\\out\\release-static\\$X8664\\lib\\webpmux.lib"
+        -D WebP_mux_LIBRARY="%WEBP_DIR%\\out\\release-static\\$X8664\\lib\\webpmux.lib" ^
+        -D LCMS2_FOUND=1 ^
+        -D LCMS2_INCLUDE_DIR="%LCMS2_DIR%\\include" ^
+        -D LCMS2_LIBRARIES="%LCMS2_DIR%\\out\\Release\\src\\liblcms2.a"
 
     cmake --build . --config Debug --parallel
     cmake --install . --config Debug
@@ -1841,13 +1864,14 @@ release:
 """)
 
 stage('ada', """
-    git clone -b v2.9.0 https://github.com/ada-url/ada.git
+    git clone -b v3.2.1 https://github.com/ada-url/ada.git
     cd ada
 win:
     cmake -B out . ^
         -A %WIN32X64% ^
         -D ADA_TESTING=OFF ^
         -D ADA_TOOLS=OFF ^
+        -D ADA_INCLUDE_URL_PATTERN=OFF ^
         -D CMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>" ^
         -D CMAKE_C_FLAGS_DEBUG="/MTd /Zi /Ob0 /Od /RTC1" ^
         -D CMAKE_C_FLAGS_RELEASE="/MT /O2 /Ob2 /DNDEBUG"

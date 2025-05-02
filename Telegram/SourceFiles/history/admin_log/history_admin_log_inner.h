@@ -36,6 +36,7 @@ class PopupMenu;
 class ChatStyle;
 class ChatTheme;
 struct PeerUserpicView;
+struct ChatPaintContext;
 } // namespace Ui
 
 namespace Window {
@@ -69,6 +70,8 @@ public:
 		return _channel;
 	}
 
+	Ui::ChatPaintContext preparePaintContext(QRect clip) const;
+
 	// Set the correct scroll position after being resized.
 	void restoreScrollPosition();
 
@@ -94,7 +97,8 @@ public:
 	HistoryView::Context elementContext() override;
 	bool elementUnderCursor(
 		not_null<const HistoryView::Element*> view) override;
-	bool elementInSelectionMode() override;
+	HistoryView::SelectionModeResult elementInSelectionMode(
+		const HistoryView::Element *view) override;
 	bool elementIntersectsRange(
 		not_null<const HistoryView::Element*> view,
 		int from,
@@ -229,8 +233,12 @@ private:
 	void paintEmpty(Painter &p, not_null<const Ui::ChatStyle*> st);
 	void clearAfterFilterChange();
 	void clearAndRequestLog();
-	void addEvents(Direction direction, const QVector<MTPChannelAdminLogEvent> &events);
-	Element *viewForItem(const HistoryItem *item);
+	void addEvents(
+		Direction direction,
+		const QVector<MTPChannelAdminLogEvent> &events);
+	[[nodiscard]] Element *viewForItem(const HistoryItem *item);
+	[[nodiscard]] bool myView(
+		not_null<const HistoryView::Element*> view) const;
 
 	void toggleScrollDateShown();
 	void repaintScrollDateCallback();

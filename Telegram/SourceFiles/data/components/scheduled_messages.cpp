@@ -62,6 +62,7 @@ constexpr auto kRequestTimeLimit = 60 * crl::time(1000);
 			data.vreply_to() ? *data.vreply_to() : MTPMessageReplyHeader(),
 			data.vdate(),
 			data.vaction(),
+			data.vreactions() ? *data.vreactions() : MTPMessageReactions(),
 			MTP_int(data.vttl_period().value_or_empty()));
 	}, [&](const MTPDmessage &data) {
 		return MTP_message(
@@ -93,7 +94,9 @@ constexpr auto kRequestTimeLimit = 60 * crl::time(1000);
 			MTP_int(data.vttl_period().value_or_empty()),
 			MTPint(), // quick_reply_shortcut_id
 			MTP_long(data.veffect().value_or_empty()), // effect
-			data.vfactcheck() ? *data.vfactcheck() : MTPFactCheck());
+			data.vfactcheck() ? *data.vfactcheck() : MTPFactCheck(),
+			MTP_int(data.vreport_delivery_until_date().value_or_empty()),
+			MTP_long(data.vpaid_message_stars().value_or_empty()));
 	});
 }
 
@@ -266,7 +269,9 @@ void ScheduledMessages::sendNowSimpleMessage(
 			MTP_int(update.vttl_period().value_or_empty()),
 			MTPint(), // quick_reply_shortcut_id
 			MTP_long(local->effectId()), // effect
-			MTPFactCheck()),
+			MTPFactCheck(),
+			MTPint(), // report_delivery_until_date
+			MTPlong()), // paid_message_stars
 		localFlags,
 		NewMessageType::Unread);
 
@@ -343,10 +348,20 @@ void ScheduledMessages::apply(
 	if (i == end(_data)) {
 		return;
 	}
-	for (const auto &id : update.vmessages().v) {
+	const auto sent = update.vsent_messages();
+	const auto &ids = update.vmessages().v;
+	for (auto k = 0, count = int(ids.size()); k != count; ++k) {
+		const auto id = ids[k].v;
 		const auto &list = i->second;
-		const auto j = list.itemById.find(id.v);
+		const auto j = list.itemById.find(id);
 		if (j != end(list.itemById)) {
+			if (sent && k < sent->v.size()) {
+				const auto &sentId = sent->v[k];
+				_session->data().sentFromScheduled({
+					.item = j->second,
+					.sentId = sentId.v,
+				});
+			}
 			j->second->destroy();
 			i = _data.find(history);
 			if (i == end(_data)) {

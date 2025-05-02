@@ -773,9 +773,7 @@ void StickerSetBox::updateButtons() {
 					- st.buttonPadding.left()
 					- st.buttonPadding.left());
 				button->setClickedCallback([=] {
-					using namespace ChatHelpers;
-					const auto usage = WindowUsage::PremiumPromo;
-					if (const auto window = _show->resolveWindow(usage)) {
+					if (const auto window = _show->resolveWindow()) {
 						Settings::ShowPremium(window, u"animated_emoji"_q);
 					}
 				});
@@ -1428,9 +1426,13 @@ void StickerSetBox::Inner::contextMenuEvent(QContextMenuEvent *e) {
 		const auto send = crl::guard(this, [=](Api::SendOptions options) {
 			chosen(index, document, options);
 		});
+
+		// In case we're adding items after FillSendMenu we have
+		// to pass nullptr for showForEffect and attach selector later.
+		// Otherwise added items widths won't be respected in menu geometry.
 		SendMenu::FillSendMenu(
 			_menu.get(),
-			_show,
+			nullptr, // showForEffect
 			details,
 			SendMenu::DefaultCallback(_show, send));
 
@@ -1464,6 +1466,12 @@ void StickerSetBox::Inner::contextMenuEvent(QContextMenuEvent *e) {
 				.isAttention = true,
 			});
 		}
+
+		SendMenu::AttachSendMenuEffect(
+			_menu.get(),
+			_show,
+			details,
+			SendMenu::DefaultCallback(_show, send));
 	}
 	if (_menu->empty()) {
 		_menu = nullptr;

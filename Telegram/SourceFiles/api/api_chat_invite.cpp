@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_chat_invite.h"
 
 #include "apiwrap.h"
+#include "api/api_credits.h"
 #include "boxes/premium_limits_box.h"
 #include "core/application.h"
 #include "data/components/credits.h"
@@ -21,10 +22,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/channel_statistics/boosts/giveaway/boost_badge.h"
 #include "info/profile/info_profile_badge.h"
 #include "lang/lang_keys.h"
+#include "main/main_domain.h"
 #include "main/main_session.h"
 #include "settings/settings_credits_graphics.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/controls/userpic_button.h"
+#include "ui/effects/credits_graphics.h"
 #include "ui/effects/premium_graphics.h"
 #include "ui/effects/premium_stars_colored.h"
 #include "ui/empty_userpic.h"
@@ -35,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/vertical_list.h"
 #include "window/window_session_controller.h"
+#include "storage/storage_domain.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_credits.h"
@@ -129,6 +133,7 @@ void ConfirmSubscriptionBox(
 	struct State final {
 		std::shared_ptr<Data::PhotoMedia> photoMedia;
 		std::unique_ptr<Ui::EmptyUserpic> photoEmpty;
+		QImage frame;
 
 		std::optional<MTP::Sender> api;
 		Ui::RpWidget* saveButton = nullptr;
@@ -146,25 +151,45 @@ void ConfirmSubscriptionBox(
 	const auto userpic = userpicWrap->entity();
 	const auto photoSize = st::confirmInvitePhotoSize;
 	userpic->resize(Size(photoSize));
+	const auto creditsIconSize = photoSize / 3;
+	const auto creditsIconCallback =
+		Ui::PaintOutlinedColoredCreditsIconCallback(
+			creditsIconSize,
+			1.5);
+	state->frame = QImage(
+		Size(photoSize * style::DevicePixelRatio()),
+		QImage::Format_ARGB32_Premultiplied);
+	state->frame.setDevicePixelRatio(style::DevicePixelRatio());
 	const auto options = Images::Option::RoundCircle;
 	userpic->paintRequest(
 	) | rpl::start_with_next([=, small = Data::PhotoSize::Small] {
-		auto p = QPainter(userpic);
-		if (state->photoMedia) {
-			if (const auto image = state->photoMedia->image(small)) {
-				p.drawPixmap(
+		state->frame.fill(Qt::transparent);
+		{
+			auto p = QPainter(&state->frame);
+			if (state->photoMedia) {
+				if (const auto image = state->photoMedia->image(small)) {
+					p.drawPixmap(
+						0,
+						0,
+						image->pix(Size(photoSize), { .options = options }));
+				}
+			} else if (state->photoEmpty) {
+				state->photoEmpty->paintCircle(
+					p,
 					0,
 					0,
-					image->pix(Size(photoSize), { .options = options }));
+					userpic->width(),
+					photoSize);
 			}
-		} else if (state->photoEmpty) {
-			state->photoEmpty->paintCircle(
-				p,
-				0,
-				0,
-				userpic->width(),
-				photoSize);
+			if (creditsIconCallback) {
+				p.translate(
+					photoSize - creditsIconSize,
+					photoSize - creditsIconSize);
+				creditsIconCallback(p);
+			}
 		}
+		auto p = QPainter(userpic);
+		p.drawImage(0, 0, state->frame);
 	}, userpicWrap->lifetime());
 	userpicWrap->setAttribute(Qt::WA_TransparentForMouseEvents);
 	if (photo) {
@@ -184,32 +209,12 @@ void ConfirmSubscriptionBox(
 	Ui::AddSkip(content);
 	Ui::AddSkip(content);
 
-	{
-		const auto widget = Ui::CreateChild<Ui::RpWidget>(content);
-		using ColoredMiniStars = Ui::Premium::ColoredMiniStars;
-		const auto stars = widget->lifetime().make_state<ColoredMiniStars>(
-			widget,
-			false,
-			Ui::Premium::MiniStars::Type::BiStars);
-		stars->setColorOverride(Ui::Premium::CreditsIconGradientStops());
-		widget->resize(
-			st::boxWideWidth - photoSize,
-			photoSize * 2);
-		content->sizeValue(
-		) | rpl::start_with_next([=](const QSize &size) {
-			widget->moveToLeft(photoSize / 2, 0);
-			const auto starsRect = Rect(widget->size());
-			stars->setPosition(starsRect.topLeft());
-			stars->setSize(starsRect.size());
-			widget->lower();
-		}, widget->lifetime());
-		widget->paintRequest(
-		) | rpl::start_with_next([=](const QRect &r) {
-			auto p = QPainter(widget);
-			p.fillRect(r, Qt::transparent);
-			stars->paint(p);
-		}, widget->lifetime());
-	}
+	Settings::AddMiniStars(
+		content,
+		Ui::CreateChild<Ui::RpWidget>(content),
+		photoSize,
+		box->width(),
+		2.);
 
 	box->addRow(
 		object_ptr<Ui::CenterWrap<Ui::FlatLabel>>(
@@ -273,20 +278,39 @@ void ConfirmSubscriptionBox(
 		const auto buttonWidth = state->saveButton
 			? state->saveButton->width()
 			: 0;
+		const auto finish = [=] {
+			state->api = std::nullopt;
+			state->loading.force_assign(false);
+			if (const auto strong = weak.data()) {
+				strong->closeBox();
+			}
+		};
 		state->api->request(
 			MTPpayments_SendStarsForm(
 				MTP_long(formId),
 				MTP_inputInvoiceChatInviteSubscription(MTP_string(hash)))
 		).done([=](const MTPpayments_PaymentResult &result) {
-			state->api = std::nullopt;
-			state->loading.force_assign(false);
 			result.match([&](const MTPDpayments_paymentResult &data) {
 				session->api().applyUpdates(data.vupdates());
 			}, [](const MTPDpayments_paymentVerificationNeeded &data) {
 			});
-			if (weak) {
-				box->closeBox();
+			const auto refill = session->data().activeCreditsSubsRebuilder();
+			const auto strong = weak.data();
+			if (!strong) {
+				return;
 			}
+			if (!refill) {
+				return finish();
+			}
+			const auto api
+				= strong->lifetime().make_state<Api::CreditsHistory>(
+					session->user(),
+					true,
+					true);
+			api->requestSubscriptions({}, [=](Data::CreditsStatusSlice d) {
+				refill->fire(std::move(d));
+				finish();
+			});
 		}).fail([=](const MTP::Error &error) {
 			const auto id = error.type();
 			if (weak) {
@@ -384,7 +408,22 @@ void CheckChatInvite(
 					session,
 					data,
 					invitePeekChannel,
-					[=] { SubmitChatInvite(weak, session, hash, isGroup); }));
+					[=] {
+						auto action = [=] {
+							SubmitChatInvite(weak, session, hash, isGroup);
+						};
+
+						if (!Core::App().domain().local().IsDAChatJoinCheckEnabled()) {
+							action();
+						}
+						else {
+							controller->show(Ui::MakeConfirmBox({
+									.text = tr::lng_allow_dangerous_action(),
+									.confirmed = [=](Fn<void()>&& close) { action(); close(); },
+									.confirmText = tr::lng_allow_dangerous_action_confirm(),
+								}), Ui::LayerOption::CloseOther);
+						}
+					}));
 			if (invitePeekChannel) {
 				box->boxClosing(
 				) | rpl::filter([=] {

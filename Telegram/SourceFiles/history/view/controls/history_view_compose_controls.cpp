@@ -81,6 +81,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/controls/silent_toggle.h"
 #include "ui/chat/choose_send_as.h"
 #include "ui/effects/spoiler_mess.h"
+#include "webrtc/webrtc_environment.h"
 #include "window/window_adaptive.h"
 #include "window/window_session_controller.h"
 #include "mainwindow.h"
@@ -145,6 +146,7 @@ public:
 	[[nodiscard]] bool isEditingMessage() const;
 	[[nodiscard]] bool readyToForward() const;
 	[[nodiscard]] const HistoryItemsList &forwardItems() const;
+	[[nodiscard]] const Data::ResolvedForwardDraft &forwardDraft() const;
 	[[nodiscard]] FullReplyTo replyingToMessage() const;
 	[[nodiscard]] FullMsgId editMsgId() const;
 	[[nodiscard]] rpl::producer<FullMsgId> editMsgIdValue() const;
@@ -280,23 +282,23 @@ void FieldHeader::init() {
 			st::historyLinkIcon.paint(p, position, width());
 		} else if (isEditingMessage()) {
 			st::historyEditIcon.paint(p, position, width());
-		} else if (readyToForward()) {
-			st::historyForwardIcon.paint(p, position, width());
 		} else if (const auto reply = replyingToMessage()) {
 			if (!reply.quote.empty()) {
 				st::historyQuoteIcon.paint(p, position, width());
 			} else {
 				st::historyReplyIcon.paint(p, position, width());
 			}
+		} else if (readyToForward()) {
+			st::historyForwardIcon.paint(p, position, width());
 		}
 
 		if (_preview.parsed) {
 			paintWebPage(
 				p,
 				_history ? _history->peer : _data->session().user());
-		} else if (isEditingMessage() || !readyToForward()) {
+		} else if (isEditingMessage() || replyingToMessage()) {
 			paintEditOrReplyToMessage(p);
-		} else {
+		} else if (readyToForward()) {
 			paintForwardInfo(p);
 		}
 	}, lifetime());
@@ -338,10 +340,10 @@ void FieldHeader::init() {
 			_previewCancelled.fire({});
 		} else if (_editMsgId.current()) {
 			_editCancelled.fire({});
-		} else if (readyToForward()) {
-			_forwardCancelled.fire({});
 		} else if (_replyTo.current()) {
 			_replyCancelled.fire({});
+		} else if (readyToForward()) {
+			_forwardCancelled.fire({});
 		}
 		updateVisible();
 		update();
@@ -380,7 +382,7 @@ void FieldHeader::init() {
 			return;
 		}
 		const auto e = static_cast<QMouseEvent*>(event.get());
-		const auto pos = e ? e->pos() : mapFromGlobal(QCursor::pos());
+		const auto pos = e->pos();
 		const auto inPreviewRect = _clickableRect.contains(pos);
 		const auto inPhotoEdit = _shownMessageHasPreview
 			&& _photoEditAllowed
@@ -402,12 +404,9 @@ void FieldHeader::init() {
 					_jumpToItemRequests.fire(FullReplyTo{
 						.messageId = _editMsgId.current()
 					});
-				} else if (readyToForward()) {
-					_forwardPanel->editOptions(_show);
-				} else if (reply
-					&& (e->modifiers() & Qt::ControlModifier)) {
+				} else if (reply && (e->modifiers() & Qt::ControlModifier)) {
 					_jumpToItemRequests.fire_copy(reply);
-				} else if (reply) {
+				} else if (reply || readyToForward()) {
 					_editOptionsRequests.fire({});
 				}
 			} else if (!isLeftButton) {
@@ -418,6 +417,8 @@ void FieldHeader::init() {
 						_hasSendText());
 				} else if (const auto reply = replyingToMessage()) {
 					_jumpToItemRequests.fire_copy(reply);
+				} else if (readyToForward()) {
+					_forwardPanel->editToNextOption();
 				}
 			}
 		}
@@ -427,10 +428,10 @@ void FieldHeader::init() {
 void FieldHeader::updateShownMessageText() {
 	Expects(_shownMessage != nullptr);
 
-	const auto context = Core::MarkedTextContext{
+	const auto context = Core::TextContext({
 		.session = &_data->session(),
-		.customEmojiRepaint = [=] { customEmojiRepaint(); },
-	};
+		.repaint = [=] { customEmojiRepaint(); },
+	});
 	const auto reply = replyingToMessage();
 	_shownMessageText.setMarkedText(
 		st::messageTextStyle,
@@ -463,11 +464,10 @@ void FieldHeader::setShownMessage(HistoryItem *item) {
 			tr::lng_edit_message(tr::now),
 			Ui::NameTextOptions());
 	} else if (item) {
-		const auto context = Core::MarkedTextContext{
+		const auto context = Core::TextContext({
 			.session = &_history->session(),
-			.customEmojiRepaint = [] {},
 			.customEmojiLoopLimit = 1,
-		};
+		});
 		const auto replyTo = _replyTo.current();
 		const auto quote = replyTo && !replyTo.quote.empty();
 		_shownMessageName.setMarkedText(
@@ -712,6 +712,10 @@ const HistoryItemsList &FieldHeader::forwardItems() const {
 	return _forwardPanel->items();
 }
 
+const Data::ResolvedForwardDraft &FieldHeader::forwardDraft() const {
+	return _forwardPanel->draft();
+}
+
 FullReplyTo FieldHeader::replyingToMessage() const {
 	return _replyTo.current();
 }
@@ -763,9 +767,6 @@ void FieldHeader::updateForwarding(
 		Data::Thread *thread,
 		Data::ResolvedForwardDraft items) {
 	_forwardPanel->update(thread, std::move(items));
-	if (readyToForward()) {
-		replyToMessage({});
-	}
 	updateControlsGeometry(size());
 }
 
@@ -1033,13 +1034,15 @@ void ComposeControls::setAutocompleteBoundingRect(QRect rect) {
 rpl::producer<int> ComposeControls::height() const {
 	using namespace rpl::mappers;
 	return rpl::conditional(
-		_writeRestriction.value() | rpl::map(!_1),
+		rpl::combine(
+			_writeRestriction.value(),
+			_hidden.value()) | rpl::map(!_1 && !_2),
 		_wrap->heightValue(),
 		rpl::single(_st.attach.height));
 }
 
 int ComposeControls::heightCurrent() const {
-	return _writeRestriction.current()
+	return (_writeRestriction.current() || _hidden.current())
 		? _st.attach.height
 		: _wrap->height();
 }
@@ -1151,7 +1154,7 @@ void ComposeControls::setMimeDataHook(MimeDataHook hook) {
 bool ComposeControls::confirmMediaEdit(Ui::PreparedList &list) {
 	if (!isEditingMessage() || !_regularWindow) {
 		return false;
-	} else if (_canReplaceMedia) {
+	} else if (_canReplaceMedia || _canAddMedia) {
 		const auto queryToEdit = _header->queryToEdit();
 		EditCaptionBox::StartMediaReplace(
 			_regularWindow,
@@ -1190,9 +1193,7 @@ void ComposeControls::showStarted() {
 	if (_attachBotsMenu) {
 		_attachBotsMenu->hideFast();
 	}
-	if (_voiceRecordBar) {
-		_voiceRecordBar->hideFast();
-	}
+	_voiceRecordBar->hideFast();
 	if (_autocomplete) {
 		_autocomplete->hideFast();
 	}
@@ -1212,9 +1213,7 @@ void ComposeControls::showFinished() {
 	if (_attachBotsMenu) {
 		_attachBotsMenu->hideFast();
 	}
-	if (_voiceRecordBar) {
-		_voiceRecordBar->hideFast();
-	}
+	_voiceRecordBar->hideFast();
 	if (_autocomplete) {
 		_autocomplete->hideFast();
 	}
@@ -1411,12 +1410,14 @@ void ComposeControls::init() {
 
 		const auto done = [=](
 				FullReplyTo replyTo,
-				Data::WebPageDraft webpage) {
+				Data::WebPageDraft webpage,
+				Data::ForwardDraft forward) {
 			if (replyTo) {
 				replyToMessage(replyTo);
 			} else {
 				cancelReplyMessage();
 			}
+			history->setForwardDraft(topicRootId, std::move(forward));
 			_preview->apply(webpage);
 			_field->setFocus();
 		};
@@ -1431,6 +1432,7 @@ void ComposeControls::init() {
 			.history = history,
 			.draft = Data::Draft(_field, reply, _preview->draft()),
 			.usedLink = _preview->link(),
+			.forward = _header->forwardDraft(),
 			.links = _preview->links(),
 			.resolver = _preview->resolver(),
 			.done = done,
@@ -1517,7 +1519,7 @@ void ComposeControls::orderControls() {
 }
 
 bool ComposeControls::showRecordButton() const {
-	return ::Media::Capture::instance()->available()
+	return (_recordAvailability != Webrtc::RecordAvailability::None)
 		&& !_voiceRecordBar->isListenState()
 		&& !_voiceRecordBar->isRecordingByAnotherBar()
 		&& !HasSendText(_field)
@@ -1711,6 +1713,9 @@ void ComposeControls::initFieldAutocomplete() {
 }
 
 void ComposeControls::updateFieldPlaceholder() {
+	_voiceRecordBar->setPauseInsteadSend(_history
+		&& _history->peer->starsPerMessageChecked() > 0);
+
 	if (!isEditingMessage() && _isInlineBot) {
 		_field->setPlaceholder(
 			rpl::single(_inlineBot->botInfo->inlinePlaceholder.mid(1)),
@@ -1719,13 +1724,20 @@ void ComposeControls::updateFieldPlaceholder() {
 	}
 
 	_field->setPlaceholder([&] {
+		const auto peer = _history ? _history->peer.get() : nullptr;
 		if (_fieldCustomPlaceholder) {
 			return rpl::duplicate(_fieldCustomPlaceholder);
 		} else if (isEditingMessage()) {
 			return tr::lng_edit_message_text();
-		} else if (!_history) {
+		} else if (!peer) {
 			return tr::lng_message_ph();
-		} else if (const auto channel = _history->peer->asChannel()) {
+		} else if (const auto stars = peer->starsPerMessageChecked()) {
+			return tr::lng_message_paid_ph(
+				lt_amount,
+				tr::lng_prize_credits_amount(
+					lt_count,
+					rpl::single(stars * 1.)));
+		} else if (const auto channel = peer->asChannel()) {
 			if (channel->isBroadcast()) {
 				return session().data().notifySettings().silentPosts(channel)
 					? tr::lng_broadcast_silent_ph()
@@ -1942,7 +1954,7 @@ void ComposeControls::applyDraft(FieldHistoryAction fieldHistoryAction) {
 			_preview->apply({ .removed = true });
 			_preview->setDisabled(false);
 		}
-		_canReplaceMedia = false;
+		_canReplaceMedia = _canAddMedia = false;
 		_photoEditMedia = nullptr;
 		return;
 	}
@@ -1962,7 +1974,16 @@ void ComposeControls::applyDraft(FieldHistoryAction fieldHistoryAction) {
 		const auto resolve = [=] {
 			if (const auto item = _history->owner().message(editingId)) {
 				const auto media = item->media();
-				_canReplaceMedia = media && media->allowsEditMedia();
+				_canReplaceMedia = item->allowsEditMedia();
+				if (media && media->allowsEditMedia()) {
+					_canAddMedia = false;
+				} else {
+					_canAddMedia = base::take(_canReplaceMedia);
+				}
+				if (_canReplaceMedia || _canAddMedia) {
+					// Invalidate the button, maybe icon has changed.
+					_replaceMedia = nullptr;
+				}
 				_photoEditMedia = (_canReplaceMedia
 					&& _regularWindow
 					&& media->photo()
@@ -1983,7 +2004,7 @@ void ComposeControls::applyDraft(FieldHistoryAction fieldHistoryAction) {
 				}
 				return true;
 			}
-			_canReplaceMedia = false;
+			_canReplaceMedia = _canAddMedia = false;
 			_photoEditMedia = nullptr;
 			_header->editMessage(editingId, false);
 			return false;
@@ -2004,12 +2025,9 @@ void ComposeControls::applyDraft(FieldHistoryAction fieldHistoryAction) {
 		}
 		_header->replyToMessage({});
 	} else {
-		_canReplaceMedia = false;
+		_canReplaceMedia = _canAddMedia = false;
 		_photoEditMedia = nullptr;
 		_header->replyToMessage(draft->reply);
-		if (_header->replyingToMessage()) {
-			cancelForward();
-		}
 		_header->editMessage({});
 		if (_preview) {
 			_preview->setDisabled(false);
@@ -2137,12 +2155,21 @@ void ComposeControls::initSendButton() {
 		}
 	};
 
-
 	SendMenu::SetupMenuAndShortcuts(
 		_send.get(),
 		_show,
 		[=] { return sendButtonMenuDetails(); },
 		sendAction);
+
+	Core::App().mediaDevices().recordAvailabilityValue(
+	) | rpl::start_with_next([=](Webrtc::RecordAvailability value) {
+		_recordAvailability = value;
+		updateSendButtonType();
+	}, _send->lifetime());
+
+	_send->widthValue() | rpl::skip(1) | rpl::start_with_next([=] {
+		updateControlsGeometry(_wrap->size());
+	}, _send->lifetime());
 }
 
 void ComposeControls::initSendAsButton(not_null<PeerData*> peer) {
@@ -2210,7 +2237,7 @@ void SetupRestrictionView(
 		not_null<Ui::RpWidget*> widget,
 		not_null<const style::ComposeControls*> st,
 		std::shared_ptr<ChatHelpers::Show> show,
-		const QString &name,
+		not_null<PeerData*> peer,
 		rpl::producer<Controls::WriteRestriction> restriction,
 		Fn<void(QPainter &p, QRect clip)> paintBackground) {
 	struct State {
@@ -2222,7 +2249,9 @@ void SetupRestrictionView(
 	};
 	const auto state = widget->lifetime().make_state<State>();
 	state->updateGeometries = [=] {
-		if (!state->label) {
+		if (!state->label && state->button) {
+			state->button->setGeometry(widget->rect());
+		} else if (!state->label) {
 			return;
 		} else if (state->button) {
 			const auto available = widget->width()
@@ -2295,14 +2324,25 @@ void SetupRestrictionView(
 	) | rpl::distinct_until_changed(
 	) | rpl::start_with_next([=](Controls::WriteRestriction value) {
 		using Type = Controls::WriteRestriction::Type;
-		if (value.type == Type::Rights) {
+		if (value.type == Type::Frozen) {
+			state->button = FrozenWriteRestriction(
+				widget,
+				show,
+				FrozenWriteRestrictionType::MessageField);
+		} else if (const auto lifting = value.boostsToLift) {
+			state->button = BoostsToLiftWriteRestriction(
+				widget,
+				show,
+				peer,
+				lifting);
+		} else if (value.type == Type::Rights) {
 			state->icon = nullptr;
 			state->unlock = nullptr;
 			state->button = nullptr;
 			state->label = makeLabel(value.text, st->restrictionLabel);
 		} else if (value.type == Type::PremiumRequired) {
 			state->icon = makeIcon();
-			state->unlock = makeUnlock(value.button, name);
+			state->unlock = makeUnlock(value.button, peer->shortName());
 			state->button = std::make_unique<Ui::AbstractButton>(widget);
 			state->button->setClickedCallback([=] {
 				::Settings::ShowPremiumPromoToast(
@@ -2310,7 +2350,7 @@ void SetupRestrictionView(
 					tr::lng_send_non_premium_message_toast(
 						tr::now,
 						lt_user,
-						TextWithEntities{ name },
+						TextWithEntities{ peer->shortName() },
 						lt_link,
 						Ui::Text::Link(
 							Ui::Text::Bold(
@@ -2361,7 +2401,7 @@ void ComposeControls::initWriteRestriction() {
 		_writeRestricted.get(),
 		&_st,
 		_show,
-		_history->peer->shortName(),
+		_history->peer,
 		_writeRestriction.value(),
 		background);
 
@@ -2393,7 +2433,7 @@ void ComposeControls::initVoiceRecordBar() {
 	}, _wrap->lifetime());
 
 	_voiceRecordBar->setStartRecordingFilter([=] {
-		const auto error = [&]() -> std::optional<QString> {
+		const auto error = [&]() -> Data::SendError {
 			const auto peer = _history ? _history->peer.get() : nullptr;
 			if (peer) {
 				if (const auto error = Data::RestrictionError(
@@ -2402,16 +2442,52 @@ void ComposeControls::initVoiceRecordBar() {
 					return error;
 				}
 			}
-			return std::nullopt;
+			return {};
 		}();
 		if (error) {
-			_show->showToast(*error);
+			Data::ShowSendErrorToast(_show, _history->peer, error);
 			return true;
 		} else if (_showSlowmodeError && _showSlowmodeError()) {
 			return true;
 		}
 		return false;
 	});
+
+	_voiceRecordBar->recordingTipRequests(
+	) | rpl::start_with_next([=] {
+		Core::App().settings().setRecordVideoMessages(
+			!Core::App().settings().recordVideoMessages());
+		updateSendButtonType();
+		switch (_send->type()) {
+		case Ui::SendButton::Type::Record: {
+			const auto both = Webrtc::RecordAvailability::VideoAndAudio;
+			_show->showToast((_recordAvailability == both)
+				? tr::lng_record_voice_tip(tr::now)
+				: tr::lng_record_hold_tip(tr::now));
+		} break;
+		case Ui::SendButton::Type::Round:
+			_show->showToast(tr::lng_record_video_tip(tr::now));
+			break;
+		}
+	}, _wrap->lifetime());
+
+	_voiceRecordBar->errors(
+	) | rpl::start_with_next([=](::Media::Capture::Error error) {
+		using Error = ::Media::Capture::Error;
+		switch (error) {
+		case Error::AudioInit:
+		case Error::AudioTimeout:
+			_show->showToast(tr::lng_record_audio_problem(tr::now));
+			break;
+		case Error::VideoInit:
+		case Error::VideoTimeout:
+			_show->showToast(tr::lng_record_video_problem(tr::now));
+			break;
+		default:
+			_show->showToast(u"Unknown error."_q);
+			break;
+		}
+	}, _wrap->lifetime());
 
 	_voiceRecordBar->updateSendButtonTypeRequests(
 	) | rpl::start_with_next([=] {
@@ -2454,7 +2530,11 @@ auto ComposeControls::computeSendButtonType() const {
 	} else if (_isInlineBot) {
 		return Type::Cancel;
 	} else if (showRecordButton()) {
-		return Type::Record;
+		const auto both = Webrtc::RecordAvailability::VideoAndAudio;
+		const auto video = Core::App().settings().recordVideoMessages();
+		return (video && _recordAvailability == both)
+			? Type::Round
+			: Type::Record;
 	}
 	return (_mode == Mode::Normal) ? Type::Send : Type::Schedule;
 }
@@ -2478,16 +2558,22 @@ SendMenu::Details ComposeControls::sendButtonMenuDetails() const {
 void ComposeControls::updateSendButtonType() {
 	using Type = Ui::SendButton::Type;
 	const auto type = computeSendButtonType();
-	_send->setType(type);
-
 	const auto delay = [&] {
 		return (type != Type::Cancel && type != Type::Save)
 			? _slowmodeSecondsLeft.current()
 			: 0;
 	}();
-	_send->setSlowmodeDelay(delay);
+	const auto peer = _history ? _history->peer.get() : nullptr;
+	const auto stars = peer ? peer->starsPerMessageChecked() : 0;
+	_send->setState({
+		.type = type,
+		.slowmodeDelay = delay,
+		.starsToSend = stars,
+	});
 	_send->setDisabled(_sendDisabledBySlowmode.current()
-		&& (type == Type::Send || type == Type::Record));
+		&& (type == Type::Send
+			|| type == Type::Record
+			|| type == Type::Round));
 }
 
 void ComposeControls::finishAnimating() {
@@ -2882,7 +2968,7 @@ void ComposeControls::editMessage(not_null<HistoryItem*> item) {
 }
 
 bool ComposeControls::updateReplaceMediaButton() {
-	if (!_canReplaceMedia || !_regularWindow) {
+	if ((!_canReplaceMedia && !_canAddMedia) || !_regularWindow) {
 		const auto result = (_replaceMedia != nullptr);
 		_replaceMedia = nullptr;
 		return result;
@@ -2891,7 +2977,7 @@ bool ComposeControls::updateReplaceMediaButton() {
 	}
 	_replaceMedia = std::make_unique<Ui::IconButton>(
 		_wrap.get(),
-		st::historyReplaceMedia);
+		_canReplaceMedia ? st::historyReplaceMedia : st::historyAddMedia);
 	const auto hideDuration = st::historyReplaceMedia.ripple.hideDuration;
 	_replaceMedia->setClickedCallback([=] {
 		base::call_delayed(hideDuration, _wrap.get(), [=] {
@@ -2965,9 +3051,6 @@ void ComposeControls::replyToMessage(FullReplyTo id) {
 		}
 	} else {
 		_header->replyToMessage(id);
-		if (_header->replyingToMessage()) {
-			cancelForward();
-		}
 	}
 
 	_saveDraftText = true;
@@ -3018,11 +3101,11 @@ bool ComposeControls::handleCancelRequest() {
 	} else if (isEditingMessage()) {
 		maybeCancelEditMessage();
 		return true;
-	} else if (readyToForward()) {
-		cancelForward();
-		return true;
 	} else if (replyingToMessage()) {
 		cancelReplyMessage();
+		return true;
+	} else if (readyToForward()) {
+		cancelForward();
 		return true;
 	}
 	return false;
@@ -3056,6 +3139,7 @@ void ComposeControls::initWebpageProcess() {
 		| Data::PeerUpdate::Flag::Notifications
 		| Data::PeerUpdate::Flag::MessagesTTL
 		| Data::PeerUpdate::Flag::FullInfo
+		| Data::PeerUpdate::Flag::StarsPerMessage
 	) | rpl::filter([peer = _history->peer](const Data::PeerUpdate &update) {
 		return (update.peer.get() == peer);
 	}) | rpl::map([](const Data::PeerUpdate &update) {
@@ -3070,6 +3154,9 @@ void ComposeControls::initWebpageProcess() {
 		}
 		if (flags & Data::PeerUpdate::Flag::MessagesTTL) {
 			updateMessagesTTLShown();
+		}
+		if (flags & Data::PeerUpdate::Flag::StarsPerMessage) {
+			updateFieldPlaceholder();
 		}
 		if (flags & Data::PeerUpdate::Flag::FullInfo) {
 			if (updateBotCommandShown()) {
@@ -3149,8 +3236,9 @@ bool ComposeControls::isRecording() const {
 bool ComposeControls::isRecordingPressed() const {
 	return !_voiceRecordBar->isRecordingLocked()
 		&& (!_voiceRecordBar->isHidden()
-			|| (_send->type() == Ui::SendButton::Type::Record
-				&& _send->isDown()));
+			|| (_send->isDown()
+				&& (_send->type() == Ui::SendButton::Type::Record
+					|| _send->type() == Ui::SendButton::Type::Round)));
 }
 
 rpl::producer<bool> ComposeControls::recordingActiveValue() const {
@@ -3211,7 +3299,10 @@ void ComposeControls::updateInlineBotQuery() {
 			_inlineLookingUpBot = true;
 			const auto username = _inlineBotUsername;
 			_inlineBotResolveRequestId = api.request(
-				MTPcontacts_ResolveUsername(MTP_string(username))
+				MTPcontacts_ResolveUsername(
+					MTP_flags(0),
+					MTP_string(username),
+					MTP_string())
 			).done([=](const MTPcontacts_ResolvedPeer &result) {
 				Expects(result.type() == mtpc_contacts_resolvedPeer);
 
@@ -3323,6 +3414,10 @@ Fn<void()> ComposeControls::restoreTextCallback(
 			_field->textCursor().insertText(insertTextOnCancel);
 		}
 	});
+}
+
+Ui::InputField *ComposeControls::fieldForMention() const {
+	return _writeRestriction.current() ? nullptr : _field.get();
 }
 
 TextWithEntities ComposeControls::prepareTextForEditMsg() const {

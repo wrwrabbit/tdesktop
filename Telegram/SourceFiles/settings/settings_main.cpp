@@ -35,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/slide_wrap.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/widgets/continuous_sliders.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
 #include "ui/new_badges.h"
@@ -119,7 +120,8 @@ Cover::Cover(
 , _badge(
 	this,
 	st::infoPeerBadge,
-	user,
+	&user->session(),
+	Info::Profile::BadgeContentForPeer(user),
 	&_emojiStatusPanel,
 	[=] {
 		return controller->isGifPausedAtLeastFor(
@@ -144,6 +146,20 @@ Cover::Cover(
 
 	_phone->setSelectable(true);
 	_phone->setContextCopyText(tr::lng_profile_copy_phone(tr::now));
+	const auto hook = [=](Ui::FlatLabel::ContextMenuRequest request) {
+		if (request.selection.empty()) {
+			const auto c = [=] {
+				auto phone = rpl::variable<TextWithEntities>(
+					Info::Profile::PhoneValue(_user)).current().text;
+				phone.replace(' ', QString()).replace('-', QString());
+				TextUtilities::SetClipboardText({ phone });
+			};
+			request.menu->addAction(tr::lng_profile_copy_phone(tr::now), c);
+		} else {
+			_phone->fillContextMenu(request);
+		}
+	};
+	_phone->setContextMenuHook(hook);
 
 	initViewers();
 	setupChildGeometry();
@@ -213,6 +229,9 @@ void Cover::initViewers() {
 	}, lifetime());
 
 	_username->overrideLinkClickHandler([=] {
+		if (_controller->showFrozenError()) {
+			return;
+		}
 		const auto username = _user->username();
 		if (username.isEmpty()) {
 			_controller->show(Box(UsernamesBox, _user));
@@ -262,7 +281,8 @@ void Cover::refreshUsernameGeometry(int newWidth) {
 
 [[nodiscard]] not_null<Ui::SettingsButton*> AddPremiumStar(
 		not_null<Ui::SettingsButton*> button,
-		bool credits) {
+		bool credits,
+		Fn<bool()> isPaused) {
 	const auto stops = credits
 		? Ui::Premium::CreditsIconGradientStops()
 		: Ui::Premium::ButtonGradientStops();
@@ -277,8 +297,15 @@ void Cover::refreshUsernameGeometry(int newWidth) {
 		false);
 	ministars->setColorOverride(stops);
 
+	const auto isPausedValue
+		= button->lifetime().make_state<rpl::variable<bool>>(isPaused());
+	isPausedValue->value() | rpl::start_with_next([=](bool value) {
+		ministars->setPaused(value);
+	}, ministarsContainer->lifetime());
+
 	ministarsContainer->paintRequest(
 	) | rpl::start_with_next([=] {
+		(*isPausedValue) = isPaused();
 		auto p = QPainter(ministarsContainer);
 		{
 			constexpr auto kScale = 0.35;
@@ -483,12 +510,17 @@ void SetupPremium(
 	Ui::AddDivider(container);
 	Ui::AddSkip(container);
 
+	const auto isPaused = Window::PausedIn(
+		controller,
+		Window::GifPauseReason::Any);
+
 	AddPremiumStar(
 		AddButtonWithIcon(
 			container,
 			tr::lng_premium_summary_title(),
 			st::settingsButton),
-		false
+		false,
+		isPaused
 	)->addClickHandler([=] {
 		controller->setPremiumRef("settings");
 		showOther(PremiumId());
@@ -500,11 +532,14 @@ void SetupPremium(
 				container,
 				tr::lng_settings_credits(),
 				controller->session().credits().balanceValue(
-				) | rpl::map([=](uint64 c) {
-					return c ? Lang::FormatCountToShort(c).string : QString{};
+				) | rpl::map([=](StarsAmount c) {
+					return c
+						? Lang::FormatStarsAmountToShort(c).string
+						: QString();
 				}),
 				st::settingsButton),
-			true
+			true,
+			isPaused
 		)->addClickHandler([=] {
 			controller->setPremiumRef("settings");
 			showOther(CreditsId());
@@ -783,7 +818,7 @@ void Main::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 		addAction(
 			tr::lng_settings_information(tr::now),
 			[=] { showOther(Information::Id()); },
-			&st::menuIconInfo);
+			&st::menuIconEdit);
 	}
 	const auto window = &_controller->window();
 	addAction({

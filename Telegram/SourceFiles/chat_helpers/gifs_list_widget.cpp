@@ -402,9 +402,13 @@ base::unique_qptr<Ui::PopupMenu> GifsListWidget::fillContextMenu(
 		// inline results don't have effects
 		copyDetails.effectAllowed = false;
 	}
+
+	// In case we're adding items after FillSendMenu we have
+	// to pass nullptr for showForEffect and attach selector later.
+	// Otherwise added items widths won't be respected in menu geometry.
 	SendMenu::FillSendMenu(
 		menu,
-		_show,
+		nullptr, // showForMenu
 		copyDetails,
 		SendMenu::DefaultCallback(_show, send),
 		icons);
@@ -441,6 +445,13 @@ base::unique_qptr<Ui::PopupMenu> GifsListWidget::fillContextMenu(
 			AddGifAction(std::move(callback), _show, document, icons);
 		}
 	}
+
+	SendMenu::AttachSendMenuEffect(
+		menu,
+		_show,
+		copyDetails,
+		SendMenu::DefaultCallback(_show, send));
+
 	return menu;
 }
 
@@ -655,14 +666,15 @@ GifsListWidget::LayoutItem *GifsListWidget::layoutPrepareSavedGif(
 }
 
 GifsListWidget::LayoutItem *GifsListWidget::layoutPrepareInlineResult(
-		not_null<InlineResult*> result) {
-	auto it = _inlineLayouts.find(result);
+		std::shared_ptr<InlineResult> result) {
+	const auto raw = result.get();
+	auto it = _inlineLayouts.find(raw);
 	if (it == _inlineLayouts.cend()) {
 		if (auto layout = LayoutItem::createLayout(
 				this,
-				result,
+				std::move(result),
 				_inlineWithThumb)) {
-			it = _inlineLayouts.emplace(result, std::move(layout)).first;
+			it = _inlineLayouts.emplace(raw, std::move(layout)).first;
 			it->second->initDimensions();
 		} else {
 			return nullptr;
@@ -735,8 +747,8 @@ int GifsListWidget::refreshInlineRows(const InlineCacheEntry *entry, bool result
 			from,
 			count
 		) | ranges::views::transform([&](
-				const std::unique_ptr<InlineBots::Result> &r) {
-			return layoutPrepareInlineResult(r.get());
+				const std::shared_ptr<InlineBots::Result> &r) {
+			return layoutPrepareInlineResult(r);
 		}) | ranges::views::filter([](const LayoutItem *item) {
 			return item != nullptr;
 		}) | ranges::to<std::vector<not_null<LayoutItem*>>>;
@@ -759,7 +771,7 @@ int GifsListWidget::validateExistingInlineRows(const InlineResults &results) {
 	const auto until = _mosaic.validateExistingRows([&](
 			not_null<const LayoutItem*> item,
 			int untilIndex) {
-		return item->getResult() != results[untilIndex].get();
+		return item->getResult().get() != results[untilIndex].get();
 	}, results.size());
 
 	if (_mosaic.empty()) {
@@ -888,7 +900,9 @@ void GifsListWidget::searchForGifs(const QString &query) {
 	if (!_searchBot && !_searchBotRequestId) {
 		const auto username = session().serverConfig().gifSearchUsername;
 		_searchBotRequestId = _api.request(MTPcontacts_ResolveUsername(
-			MTP_string(username)
+			MTP_flags(0),
+			MTP_string(username),
+			MTP_string()
 		)).done([=](const MTPcontacts_ResolvedPeer &result) {
 			auto &data = result.data();
 			session().data().processUsers(data.vusers());

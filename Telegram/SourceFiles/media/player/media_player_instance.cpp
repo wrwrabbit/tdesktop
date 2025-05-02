@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_account.h" // session->account().sessionChanges().
 #include "main/main_session_settings.h"
+#include "storage/storage_account.h"
 
 namespace Media {
 namespace Player {
@@ -50,7 +51,8 @@ constexpr auto kIdsPreloadAfter = 28;
 constexpr auto kShufflePlaylistLimit = 10'000;
 constexpr auto kRememberShuffledOrderItems = 16;
 
-constexpr auto kMinLengthForSavePosition = 20 * TimeId(60); // 20 minutes.
+constexpr auto kMinLengthForSavePositionVideo = TimeId(60); // 1 minute.
+constexpr auto kMinLengthForSavePositionMusic = 20 * TimeId(60); // 20.
 
 base::options::toggle OptionDisableAutoplayNext({
 	.id = kOptionDisableAutoplayNext,
@@ -108,18 +110,20 @@ void finish(not_null<Audio::Instance*> instance) {
 void SaveLastPlaybackPosition(
 		not_null<DocumentData*> document,
 		const TrackState &state) {
+	const auto limit = document->isVideoFile()
+		? kMinLengthForSavePositionVideo
+		: kMinLengthForSavePositionMusic;
 	const auto time = (state.position == kTimeUnknown
 		|| state.length == kTimeUnknown
 		|| state.state == State::PausedAtEnd
 		|| IsStopped(state.state))
 		? TimeId(0)
-		: (state.length >= kMinLengthForSavePosition * state.frequency)
+		: (state.length >= limit * state.frequency)
 		? (state.position / state.frequency) * crl::time(1000)
 		: TimeId(0);
 	auto &session = document->session();
-	if (session.settings().mediaLastPlaybackPosition(document->id) != time) {
-		session.settings().setMediaLastPlaybackPosition(document->id, time);
-		session.saveSettingsDelayed();
+	if (session.local().mediaLastPlaybackPosition(document->id) != time) {
+		session.local().setMediaLastPlaybackPosition(document->id, time);
 	}
 }
 
@@ -849,9 +853,9 @@ Streaming::PlaybackOptions Instance::streamingOptions(
 	if (position >= 0) {
 		result.position = position;
 	} else if (document) {
-		auto &settings = document->session().settings();
-		result.position = settings.mediaLastPlaybackPosition(document->id);
-		settings.setMediaLastPlaybackPosition(document->id, 0);
+		auto &local = document->session().local();
+		result.position = local.mediaLastPlaybackPosition(document->id);
+		local.setMediaLastPlaybackPosition(document->id, 0);
 	} else {
 		result.position = 0;
 	}
@@ -869,13 +873,16 @@ void Instance::pause(AudioMsgId::Type type) {
 	}
 }
 
-void Instance::stop(AudioMsgId::Type type) {
+void Instance::stop(AudioMsgId::Type type, bool asFinished) {
 	if (const auto data = getData(type)) {
 		if (data->streamed) {
 			clearStreamed(data);
 		}
 		data->resumeOnCallEnd = false;
 		_playerStopped.fire_copy({type});
+	}
+	if (asFinished) {
+		_tracksFinished.fire_copy(type);
 	}
 }
 
@@ -1200,6 +1207,21 @@ Streaming::Instance *Instance::roundVideoStreamed(HistoryItem *item) const {
 	return nullptr;
 }
 
+Streaming::Instance *Instance::roundVideoPreview(
+		not_null<DocumentData*> document) const {
+	if (const auto data = getData(AudioMsgId::Type::Voice)) {
+		if (const auto streamed = data->streamed.get()) {
+			if (streamed->id.audio() == document) {
+				const auto player = &streamed->instance.player();
+				if (player->ready() && !player->videoSize().isEmpty()) {
+					return &streamed->instance;
+				}
+			}
+		}
+	}
+	return nullptr;
+}
+
 View::PlaybackProgress *Instance::roundVideoPlayback(
 		HistoryItem *item) const {
 	return roundVideoStreamed(item)
@@ -1285,7 +1307,7 @@ void Instance::handleStreamingUpdate(
 		Streaming::Update &&update) {
 	using namespace Streaming;
 
-	v::match(update.data, [&](Information &update) {
+	v::match(update.data, [&](const Information &update) {
 		if (!update.video.size.isEmpty()) {
 			data->streamed->progress.setValueChangedCallback([=](
 					float64,
@@ -1297,16 +1319,17 @@ void Instance::handleStreamingUpdate(
 			requestRoundVideoResize();
 		}
 		emitUpdate(data->type);
-	}, [&](PreloadedVideo &update) {
+	}, [&](PreloadedVideo) {
 		//emitUpdate(data->type, [](AudioMsgId) { return true; });
-	}, [&](UpdateVideo &update) {
+	}, [&](UpdateVideo) {
 		emitUpdate(data->type);
-	}, [&](PreloadedAudio &update) {
+	}, [&](PreloadedAudio) {
 		//emitUpdate(data->type, [](AudioMsgId) { return true; });
-	}, [&](UpdateAudio &update) {
+	}, [&](UpdateAudio) {
 		emitUpdate(data->type);
-	}, [&](WaitingForData) {
-	}, [&](MutedByOther) {
+	}, [](WaitingForData) {
+	}, [](SpeedEstimate) {
+	}, [](MutedByOther) {
 	}, [&](Finished) {
 		emitUpdate(data->type);
 		if (data->streamed && data->streamed->instance.player().finished()) {

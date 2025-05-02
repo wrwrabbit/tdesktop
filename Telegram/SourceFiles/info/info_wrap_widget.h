@@ -15,6 +15,9 @@ enum class SharedMediaType : signed char;
 } // namespace Storage
 
 namespace Ui {
+namespace Controls {
+struct SwipeHandlerArgs;
+} // namespace Controls
 class FadeShadow;
 class PlainShadow;
 class PopupMenu;
@@ -49,6 +52,7 @@ enum class Wrap {
 	Layer,
 	Narrow,
 	Side,
+	Search,
 };
 
 struct SelectedItem {
@@ -121,6 +125,7 @@ public:
 
 	object_ptr<Ui::RpWidget> createTopBarSurrogate(QWidget *parent);
 
+	[[nodiscard]] bool hasBackButton() const;
 	[[nodiscard]] bool closeByOutsideClick() const;
 
 	void updateGeometry(
@@ -137,6 +142,8 @@ public:
 	[[nodiscard]] rpl::producer<> removeRequests() const override {
 		return _removeRequests.events();
 	}
+
+	void replaceSwipeHandler(Ui::Controls::SwipeHandlerArgs *incompleteArgs);
 
 	~WrapWidget();
 
@@ -161,6 +168,7 @@ private:
 	void injectActiveProfileMemento(
 		std::shared_ptr<ContentMemento> memento);
 	void checkBeforeClose(Fn<void()> close);
+	void checkBeforeCloseByEscape(Fn<void()> close);
 	void restoreHistoryStack(
 		std::vector<std::shared_ptr<ContentMemento>> stack);
 	bool hasStackHistory() const {
@@ -179,7 +187,6 @@ private:
 	void highlightTopBar();
 	void setupShortcuts();
 
-	[[nodiscard]] bool hasBackButton() const;
 	[[nodiscard]] bool willHaveBackButton(
 		const Window::SectionShow &params) const;
 
@@ -205,6 +212,8 @@ private:
 	void addTopBarMenuButton();
 	void addProfileCallsButton();
 	void showTopBarMenu(bool check);
+
+	const bool _isSeparatedWindow = false;
 
 	rpl::variable<Wrap> _wrap;
 	std::unique_ptr<Controller> _controller;

@@ -1,3 +1,250 @@
+5.13.1 (26.03.25)
+
+- Fix crash in group/channel stories.
+
+5.13 (26.03.25)
+
+- Allow transferring my unique gifts from Send Gift section.
+- Edit type of gifts you accept in Settings > Privacy and Security.
+- Swipe navigation using swipe gesture on touchpads / touchscreens.
+- Choose chat list quick action for swipe or middle click.
+
+5.12.6 beta (20.03.25)
+
+- Allow customizing chats list swipe left action.
+- Fix custom emoji in poll results view.
+- Fix crash in main menu swipe closing.
+
+5.12.5 beta (14.03.25)
+
+- Support swipe navigation on touchscreens.
+- Close main menu by swipe navigation.
+
+5.12.4 beta (12.03.25)
+
+- Touchpad swipe back to go back in navigation history.
+- Touchpad swipe between folders if they're horizontal.
+- Out-of-the-box monochrome tray icon on Linux.
+- Icons telegram{,{,-attention,-mute}-panel} are renamed
+to org.telegram.desktop{,{,-attention,-mute}-symbolic} for
+unified icon lookup in multiple (sometimes sandboxed) builds
+and GTK icon recolorization support.
+- Snap package got icon theming support,
+the icon names are snap.telegram-desktop.{,{,-attention,-mute}-symbolic}
+(notice the name ends with a dot in case of no suffix!).
+
+5.12.3 (10.03.25)
+
+- Fix a couple more crashes.
+- Fix gift disappearing on unpin.
+- Fix country emoji for Fragment numbers.
+
+5.12.2 (09.03.25)
+
+- Fix some crashes.
+
+5.12.1 (08.03.25)
+
+- Fix a crash in some chat switchings.
+- Fix crashes in empty repaint callbacks.
+
+5.12 (07.03.25)
+
+- Set a fee for incoming messages from unknown users.
+- Set a fee for messages in groups or channel comments.
+- Show some information about who's messaging you.
+- Pin gifts on your profile.
+
+5.11.1 (13.02.25)
+
+- Fix arbitrary cropping support in the image editor.
+- Fix crash on round video message playback.
+- Fix complex custom keyboard shortcuts.
+
+5.11 (12.02.25)
+
+- Copy video links at current time.
+- Set custom video covers when posting to channels.
+- Send paid reactions from the name of your channels.
+
+5.10.8 beta (12.02.25)
+
+- Edit keyboard shortcuts in Settings > Chat Settings.
+- Hide controls in calls with incoming video.
+- Fix several crashes.
+
+5.10.7 (27.01.25)
+
+- Fix some phrases for collectible gifts.
+- Fix freeze in sound reencoding on macOS and Linux.
+
+5.10.6 (26.01.25)
+
+- Fix crash in opening users gifts section.
+- Fix unintended sound in reaction notifications.
+- Fix disabling notifications sound on macOS and Linux.
+
+5.10.5 (24.01.25)
+
+- Count all unread topics as a single chat in archive unread counter.
+- Fix common groups section in bots profiles.
+- Fix crash on scheduling messages from Share box.
+- Fix silent notifications on macOS.
+- Add support for 'sound-file' notification hint on Linux.
+
+5.10.4 (22.01.25)
+
+- Add messages search in channel comments.
+- Allow sending your unique gifts to blockchain.
+- Add option for running in backround on Linux.
+- Fix possible freeze on quit on macOS.
+
+5.10.3 (09.01.25)
+
+- Fix a crash in legacy group opening.
+
+5.10.2 (07.01.25)
+
+- Fix double verification badge in profiles.
+
+5.10.1 (06.01.25)
+
+- Show "Boost group the send messages" information.
+- Fix several gifts bugs and glitches.
+- Fix several crashes.
+
+5.10 (02.01.25)
+
+- Collectible Gifts.
+- Reactions for Service Messages.
+- Verification from Third Parties.
+- Custom Emoji in Folder Names.
+
+5.9.2 beta (24.12.24)
+
+- Fix some jump-to-message highlightings.
+- Fix some long round video messages sending.
+- Fix possible crash in global photos / videos.
+- Fix streaming starting for some large video files.
+- Fix possible drop of top peers / recent chats cache.
+- Fix possible crashes in audio on macOS (rollback OpenAL).
+
+5.9.1 beta (18.12.24)
+
+- Add global media overview tabs in chats search.
+- Add main menu "My Profile" with my stories and gifts access.
+- Highlight some of search query on result message open.
+- Fix highlighting quotes from bottom parts of long messages.
+- Allow forward and reply bars together.
+- Make gift price categories scrollable.
+- Auto-send deep-link /start in existing bot chats.
+
+5.9 (04.12.24)
+
+- Affiliate programs for bots.
+- Add option to show folder tags in chats list.
+
+5.8.5 beta (29.11.24)
+
+- Fix pinned chats in folders.
+- Fix emoji in folder tags.
+- Fix several crashes.
+
+5.8.4 beta (28.11.24)
+
+- Add option to show folder tags in chats list.
+- Count group with topics as one chat in folder unread counter.
+
+5.8.3 (23.11.24)
+
+- Ctrl+Click on Reply in groups to reply in another chat.
+- Fix freeze on forward messages box opening.
+- Improve phrases in bot subscriptions.
+- Several bugfixes.
+
+5.8.2 (19.11.24)
+
+- Improve bottom label color in mini apps.
+- Fix some fullscreen issues in mini apps.
+- Fix miss-order of archived chats in forward box.
+- Fix file dialog for Windows on ARM.
+- Fix emoji status pack view from profile regression.
+
+5.8.1 (17.11.24)
+
+- Fix several possible crashes.
+
+5.8 (17.11.24)
+
+- Updates in Mini Apps platform.
+- Chat folders in forward and share boxes.
+- Horizontal strip mode for chat folders.
+
+5.7.4 beta (15.11.24)
+
+- Enable auto night mode by default.
+- Use muted chats folder badge in horizontal strip.
+- Fix custom userpic context menu in comments and topics.
+- Fix scrolling of chats folders together with the list.
+- Fix chats folders list disappearing in some cases.
+- Fix topic groups in share box with chats folders.
+- Fix bot commands list in some groups.
+- Fix crash in channel short info box display.
+- Fix crash in bot monetization section opening.
+- Fix crash in bot sponsored messages destruction.
+
+5.7.3 beta (13.11.24)
+
+- Option to show folders above the chats list.
+- Folders on top of recipients list box.
+
+5.7.2 (05.11.24)
+
+- Fix recompressed video playback cutoff.
+- Fix video message recroding on macOS.
+
+5.7.1 (01.11.24)
+
+- Fix occasional redundant newlines before message timestamp.
+- Remove playback speed change on settings button click.
+- Fix video playback settings button on hidpi screens.
+- Fix return from Picture-in-Picture to media viewer.
+- Fix video quality auto-switching in Picture-in-Picture.
+- Add message link to channel stars transaction information.
+- Fix GIF playback in media viewer.
+- Fix several possible crashes.
+
+5.7 (31.10.24)
+
+- Sending video messages.
+- New video quality selection in channels.
+- Adding media to sent text messages via Edit.
+- Ads in bots with revenue sharing with bot developers.
+- Chat-specific hashtags.
+
+5.6.4 beta (24.10.24)
+
+- Add recording of video messages in case a camera is available.
+- Add "Respect the Focus settings" for custom notifications on Windows.
+
+5.6.3 (15.10.24)
+
+- Add ability to change page scale in Instant View pages.
+- Fix unnecessary timestamp jump to a new line.
+- Fix secondary button positioning in miniapps.
+- Fix a crash in QR code copy for a chat without a photo.
+- Fix a crash in share options menu showing.
+- Fix a crash on monitor disconnect.
+
+5.6.2 (14.10.24)
+
+- Message selection marks.
+- Better copy username / public link / ID menu in profiles.
+- Keyboard navigation (Up/Down/PageUp/PageDown) in chat preview.
+- Improved QR options for profile links.
+- Fix calls color problems on Windows.
+- Fix scroll problems on Linux.
+
 5.6.1 (07.10.24)
 
 - Fix media viewer sometimes blocking the app after launch.

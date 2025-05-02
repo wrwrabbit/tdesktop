@@ -273,13 +273,13 @@ InnerWidget::InnerWidget(
 	_scrollDateHideTimer.setCallback([=] { scrollDateHideByTimer(); });
 	session().data().viewRepaintRequest(
 	) | rpl::start_with_next([=](auto view) {
-		if (view->delegate() == this) {
+		if (myView(view)) {
 			repaintItem(view);
 		}
 	}, lifetime());
 	session().data().viewResizeRequest(
 	) | rpl::start_with_next([=](auto view) {
-		if (view->delegate() == this) {
+		if (myView(view)) {
 			resizeItem(view);
 		}
 	}, lifetime());
@@ -291,7 +291,7 @@ InnerWidget::InnerWidget(
 	}, lifetime());
 	session().data().viewLayoutChanged(
 	) | rpl::start_with_next([=](auto view) {
-		if (view->delegate() == this) {
+		if (myView(view)) {
 			if (view->isUnderCursor()) {
 				updateSelected();
 			}
@@ -331,6 +331,10 @@ InnerWidget::InnerWidget(
 	_antiSpamValidator.resolveUser(crl::guard(
 		this,
 		[=] { requestAdmins(); }));
+}
+
+bool InnerWidget::myView(not_null<const HistoryView::Element*> view) const {
+	return !_items.empty() && (view->delegate().get() == this);
 }
 
 Main::Session &InnerWidget::session() const {
@@ -662,8 +666,9 @@ bool InnerWidget::elementUnderCursor(
 	return (Element::Hovered() == view);
 }
 
-bool InnerWidget::elementInSelectionMode() {
-	return false;
+HistoryView::SelectionModeResult InnerWidget::elementInSelectionMode(
+		const HistoryView::Element *) {
+	return {};
 }
 
 bool InnerWidget::elementIntersectsRange(
@@ -790,11 +795,16 @@ void InnerWidget::saveState(not_null<SectionMemento*> memento) {
 }
 
 void InnerWidget::restoreState(not_null<SectionMemento*> memento) {
-	_items = memento->takeItems();
-	for (auto &item : _items) {
+	// OwnedItem::refreshView may call requestItemResize.
+	// So we postpone resizing until all views are created.
+	_items.clear();
+	auto items = memento->takeItems();
+	for (auto &item : items) {
 		item.refreshView(this);
 		_itemsByData.emplace(item->data(), item.get());
 	}
+	_items = std::move(items);
+
 	_eventIds = memento->takeEventIds();
 	_admins = memento->takeAdmins();
 	_adminsCanEdit = memento->takeAdminsCanEdit();
@@ -1029,6 +1039,16 @@ void InnerWidget::restoreScrollPosition() {
 	_scrollToSignal.fire_copy(newVisibleTop);
 }
 
+Ui::ChatPaintContext InnerWidget::preparePaintContext(QRect clip) const {
+	return _controller->preparePaintContext({
+		.theme = _theme.get(),
+		.clip = clip,
+		.visibleAreaPositionGlobal = mapToGlobal(QPoint(0, _visibleTop)),
+		.visibleAreaTop = _visibleTop,
+		.visibleAreaWidth = width(),
+	});
+}
+
 void InnerWidget::paintEvent(QPaintEvent *e) {
 	if (_controller->contentOverlapped(this, e)) {
 		return;
@@ -1041,13 +1061,7 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
 	auto clip = e->rect();
-	auto context = _controller->preparePaintContext({
-		.theme = _theme.get(),
-		.clip = clip,
-		.visibleAreaPositionGlobal = mapToGlobal(QPoint(0, _visibleTop)),
-		.visibleAreaTop = _visibleTop,
-		.visibleAreaWidth = width(),
-	});
+	auto context = preparePaintContext(clip);
 	if (_items.empty() && _upLoaded && _downLoaded) {
 		paintEmpty(p, context.st);
 	} else {

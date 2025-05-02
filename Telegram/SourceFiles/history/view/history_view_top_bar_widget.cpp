@@ -41,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "window/window_peer_menu.h"
 #include "calls/calls_instance.h"
+#include "data/stickers/data_custom_emoji.h"
 #include "data/data_peer_values.h"
 #include "data/data_group_call.h" // GroupCall::input.
 #include "data/data_folder.h"
@@ -76,10 +77,8 @@ namespace {
 
 constexpr auto kEmojiInteractionSeenDuration = 3 * crl::time(1000);
 
-inline bool HasGroupCallMenu(const not_null<PeerData*> &peer) {
-	return !peer->groupCall()
-		&& ((peer->isChannel() && peer->asChannel()->amCreator())
-			|| (peer->isChat() && peer->asChat()->amCreator()));
+[[nodiscard]] inline bool HasGroupCallMenu(not_null<PeerData*> peer) {
+	return !peer->groupCall() && peer->canManageGroupCall();
 }
 
 QString TopBarNameText(
@@ -276,7 +275,9 @@ void TopBarWidget::refreshLang() {
 }
 
 void TopBarWidget::call() {
-	if (const auto peer = _activeChat.key.peer()) {
+	if (_controller->showFrozenError()) {
+		return;
+	} else if (const auto peer = _activeChat.key.peer()) {
 		if (const auto user = peer->asUser()) {
 			Core::App().calls().startOutgoingCall(user, false);
 		}
@@ -284,7 +285,9 @@ void TopBarWidget::call() {
 }
 
 void TopBarWidget::groupCall() {
-	if (const auto peer = _activeChat.key.peer()) {
+	if (_controller->showFrozenError()) {
+		return;
+	} else if (const auto peer = _activeChat.key.peer()) {
 		if (HasGroupCallMenu(peer)) {
 			showGroupCallMenu(peer);
 		} else {
@@ -454,12 +457,14 @@ void TopBarWidget::paintTopBar(Painter &p) {
 		return;
 	}
 	auto nameleft = _leftTaken;
+	auto statusleft = nameleft;
 	auto nametop = st::topBarArrowPadding.top();
 	auto statustop = st::topBarHeight - st::topBarArrowPadding.bottom() - st::dialogsTextFont->height;
-	auto availableWidth = width()
+	auto namewidth = width()
 		- _rightTaken
 		- nameleft
 		- st::topBarNameRightPadding;
+	auto statuswidth = namewidth;
 
 	if (_chooseForReportReason) {
 		const auto text = _chooseForReportReason->optionText;
@@ -495,7 +500,7 @@ void TopBarWidget::paintTopBar(Painter &p) {
 			p,
 			nameleft,
 			nametop,
-			availableWidth);
+			namewidth);
 
 		p.setFont(st::dialogsTextFont);
 		if (!paintConnectingState(p, nameleft, statustop, width())
@@ -503,7 +508,7 @@ void TopBarWidget::paintTopBar(Painter &p) {
 				p,
 				nameleft,
 				statustop,
-				availableWidth,
+				namewidth,
 				width(),
 				st::historyStatusFgTyping,
 				now)) {
@@ -530,8 +535,8 @@ void TopBarWidget::paintTopBar(Painter &p) {
 			? tr::lng_verification_codes(tr::now)
 			: peer->name();
 		const auto textWidth = st::historySavedFont->width(text);
-		if (availableWidth < textWidth) {
-			text = st::historySavedFont->elided(text, availableWidth);
+		if (namewidth < textWidth) {
+			text = st::historySavedFont->elided(text, namewidth);
 		}
 		p.setPen(st::dialogsNameFg);
 		p.setFont(st::historySavedFont);
@@ -550,16 +555,16 @@ void TopBarWidget::paintTopBar(Painter &p) {
 			tr::lng_manage_discussion_group(tr::now));
 
 		p.setFont(st::dialogsTextFont);
-		if (!paintConnectingState(p, nameleft, statustop, width())
+		if (!paintConnectingState(p, statusleft, statustop, width())
 			&& !paintSendAction(
 				p,
-				nameleft,
+				statusleft,
 				statustop,
-				availableWidth,
+				statuswidth,
 				width(),
 				st::historyStatusFgTyping,
 				now)) {
-			paintStatus(p, nameleft, statustop, availableWidth, width());
+			paintStatus(p, statusleft, statustop, statuswidth, width());
 		}
 	} else if (namePeer) {
 		if (_titleNameVersion < namePeer->nameVersion()) {
@@ -569,27 +574,38 @@ void TopBarWidget::paintTopBar(Painter &p) {
 				TopBarNameText(namePeer, _activeChat.section),
 				Ui::NameTextOptions());
 		}
-		const auto badgeWidth = _titleBadge.drawGetWidth(
-			p,
-			QRect(
+		if (const auto info = namePeer->botVerifyDetails()) {
+			if (!_titleBadge.ready(info)) {
+				_titleBadge.set(
+					info,
+					namePeer->owner().customEmojiManager().factory(),
+					[=] { update(); });
+			}
+			const auto position = QPoint{ nameleft, nametop };
+			const auto skip = _titleBadge.drawVerified(p, position, st::dialogsVerifiedColors);
+			nameleft += skip + st::dialogsChatTypeSkip;
+			namewidth -= skip + st::dialogsChatTypeSkip;
+		}
+		const auto badgeWidth = _titleBadge.drawGetWidth(p, {
+			.peer = namePeer,
+			.rectForName = QRect(
 				nameleft,
 				nametop,
-				availableWidth,
+				namewidth,
 				st::msgNameStyle.font->height),
-			_title.maxWidth(),
-			width(),
-			{
-				.peer = namePeer,
-				.verified = &st::dialogsVerifiedIcon,
-				.premium = &st::dialogsPremiumIcon.icon,
-				.scam = &st::attentionButtonFg,
-				.premiumFg = &st::dialogsVerifiedIconBg,
-				.customEmojiRepaint = [=] { update(); },
-				.now = now,
-				.paused = _controller->isGifPausedAtLeastFor(
-					Window::GifPauseReason::Any),
-			});
-		const auto namewidth = availableWidth - badgeWidth;
+			.nameWidth = _title.maxWidth(),
+			.outerWidth = width(),
+			.verified = &st::dialogsVerifiedIcon,
+			.premium = &st::dialogsPremiumIcon.icon,
+			.scam = &st::attentionButtonFg,
+			.premiumFg = &st::dialogsVerifiedIconBg,
+			.customEmojiRepaint = [=] { update(); },
+			.now = now,
+			.bothVerifyAndStatus = true,
+			.paused = _controller->isGifPausedAtLeastFor(
+				Window::GifPauseReason::Any),
+		});
+		namewidth -= badgeWidth;
 
 		p.setPen(st::dialogsNameFg);
 		_title.draw(p, {
@@ -599,16 +615,16 @@ void TopBarWidget::paintTopBar(Painter &p) {
 		});
 
 		p.setFont(st::dialogsTextFont);
-		if (!paintConnectingState(p, nameleft, statustop, width())
+		if (!paintConnectingState(p, statusleft, statustop, width())
 			&& !paintSendAction(
 				p,
-				nameleft,
+				statusleft,
 				statustop,
-				availableWidth,
+				statuswidth,
 				width(),
 				st::historyStatusFgTyping,
 				now)) {
-			paintStatus(p, nameleft, statustop, availableWidth, width());
+			paintStatus(p, statusleft, statustop, statuswidth, width());
 		}
 	}
 }
@@ -928,8 +944,7 @@ int TopBarWidget::countSelectedButtonsTop(float64 selectedShown) {
 
 void TopBarWidget::updateSearchVisibility() {
 	const auto searchAllowedMode = (_activeChat.section == Section::History)
-		|| (_activeChat.section == Section::Replies
-			&& _activeChat.key.topic())
+		|| (_activeChat.section == Section::Replies)
 		|| (_activeChat.section == Section::SavedSublist
 			&& _activeChat.key.sublist());
 	_search->setVisible(searchAllowedMode && !_chooseForReportReason);
@@ -1173,6 +1188,7 @@ void TopBarWidget::updateControlsVisibility() {
 			if (const auto user = peer->asUser()) {
 				return !user->isSelf()
 					&& !user->isBot()
+					&& !user->isInaccessible()
 					&& !peer->isServiceUser();
 			}
 		}

@@ -12,19 +12,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "boxes/gift_premium_box.h"
 #include "boxes/peer_list_box.h"
+#include "boxes/peer_list_controllers.h"
 #include "boxes/share_box.h"
 #include "core/application.h"
-#include "core/ui_integration.h" // Core::MarkedTextContext.
+#include "core/ui_integration.h" // TextContext
 #include "data/components/credits.h"
 #include "data/data_changes.h"
 #include "data/data_channel.h"
+#include "data/data_forum_topic.h"
 #include "data/data_histories.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "history/history.h"
-#include "history/history_item_helpers.h" // GetErrorTextForSending.
+#include "history/history_item_helpers.h" // GetErrorForSending.
 #include "history/view/history_view_group_call_bar.h" // GenerateUserpics...
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
@@ -51,6 +53,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_credits.h"
+#include "styles/style_dialogs.h"
 #include "styles/style_giveaway.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h" // st::boxDividerLabel.
@@ -264,8 +267,9 @@ private:
 class SingleRowController final : public PeerListController {
 public:
 	SingleRowController(
-		not_null<PeerData*> peer,
-		rpl::producer<QString> status);
+		not_null<Data::Thread*> thread,
+		rpl::producer<QString> status,
+		Fn<void()> clicked);
 
 	void prepare() override;
 	void loadMoreRows() override;
@@ -273,8 +277,10 @@ public:
 	Main::Session &session() const override;
 
 private:
-	const not_null<PeerData*> _peer;
+	const not_null<Main::Session*> _session;
+	const base::weak_ptr<Data::Thread> _thread;
 	rpl::producer<QString> _status;
+	Fn<void()> _clicked;
 	rpl::lifetime _lifetime;
 
 };
@@ -734,10 +740,10 @@ void Controller::setupAboveJoinedWidget() {
 					{ QString::number(current.subscription.credits) },
 					Ui::Text::WithEntities),
 			kMarkupTextOptions,
-			Core::MarkedTextContext{
+			Core::TextContext({
 				.session = &session(),
-				.customEmojiRepaint = [=] { widget->update(); },
-			});
+				.repaint = [=] { widget->update(); },
+			}));
 		auto &lifetime = widget->lifetime();
 		const auto rateValue = lifetime.make_state<rpl::variable<float64>>(
 			session().credits().rateValue(_peer));
@@ -956,12 +962,11 @@ void Controller::rowClicked(not_null<PeerListRow*> row) {
 		Ui::AddSkip(content);
 		Ui::AddSkip(content);
 
-		const auto &stUser = st::boostReplaceUserpic;
+		const auto photoSize = st::boostReplaceUserpic.photoSize;
 		const auto session = &row->peer()->session();
 		content->add(object_ptr<Ui::CenterWrap<>>(
 			content,
-			object_ptr<Ui::UserpicButton>(content, channel, stUser))
-		)->setAttribute(Qt::WA_TransparentForMouseEvents);
+			Settings::SubscriptionUserpic(content, channel, photoSize)));
 
 		Ui::AddSkip(content);
 		Ui::AddSkip(content);
@@ -989,10 +994,7 @@ void Controller::rowClicked(not_null<PeerListRow*> row) {
 				lt_cost,
 				{ QString::number(data.subscription.credits) },
 				Ui::Text::WithEntities),
-			Core::MarkedTextContext{
-				.session = session,
-				.customEmojiRepaint = [=] { subtitle1->update(); },
-			});
+			Core::TextContext({ .session = session }));
 		const auto subtitle2 = box->addRow(
 			object_ptr<Ui::CenterWrap<Ui::FlatLabel>>(
 				box,
@@ -1014,7 +1016,8 @@ void Controller::rowClicked(not_null<PeerListRow*> row) {
 		Ui::AddSkip(content);
 		Ui::AddSkip(content);
 
-		AddSubscriberEntryTable(controller, content, row->peer(), data.date);
+		const auto show = controller->uiShow();
+		AddSubscriberEntryTable(show, content, {}, row->peer(), data.date);
 
 		Ui::AddSkip(content);
 		Ui::AddSkip(content);
@@ -1145,36 +1148,59 @@ int Controller::descriptionTopSkipMin() const {
 }
 
 SingleRowController::SingleRowController(
-	not_null<PeerData*> peer,
-	rpl::producer<QString> status)
-: _peer(peer)
-, _status(std::move(status)) {
+	not_null<Data::Thread*> thread,
+	rpl::producer<QString> status,
+	Fn<void()> clicked)
+: _session(&thread->session())
+, _thread(thread)
+, _status(std::move(status))
+, _clicked(std::move(clicked)) {
 }
 
 void SingleRowController::prepare() {
-	auto row = std::make_unique<PeerListRow>(_peer);
-
+	const auto strong = _thread.get();
+	if (!strong) {
+		return;
+	}
+	const auto topic = strong->asTopic();
+	auto row = topic
+		? ChooseTopicBoxController::MakeRow(topic)
+		: std::make_unique<PeerListRow>(strong->peer());
 	const auto raw = row.get();
-	std::move(
-		_status
-	) | rpl::start_with_next([=](const QString &status) {
-		raw->setCustomStatus(status);
-		delegate()->peerListUpdateRow(raw);
-	}, _lifetime);
-
+	if (_status) {
+		std::move(
+			_status
+		) | rpl::start_with_next([=](const QString &status) {
+			raw->setCustomStatus(status);
+			delegate()->peerListUpdateRow(raw);
+		}, _lifetime);
+	}
 	delegate()->peerListAppendRow(std::move(row));
 	delegate()->peerListRefreshRows();
+
+	if (topic) {
+		topic->destroyed() | rpl::start_with_next([=] {
+			while (delegate()->peerListFullRowsCount()) {
+				delegate()->peerListRemoveRow(delegate()->peerListRowAt(0));
+			}
+			delegate()->peerListRefreshRows();
+		}, _lifetime);
+	}
 }
 
 void SingleRowController::loadMoreRows() {
 }
 
 void SingleRowController::rowClicked(not_null<PeerListRow*> row) {
-	ShowPeerInfoSync(row->peer());
+	if (const auto onstack = _clicked) {
+		onstack();
+	} else {
+		ShowPeerInfoSync(row->peer());
+	}
 }
 
 Main::Session &SingleRowController::session() const {
-	return _peer->session();
+	return *_session;
 }
 
 } // namespace
@@ -1187,14 +1213,29 @@ bool IsExpiredLink(const Api::InviteLink &data, TimeId now) {
 void AddSinglePeerRow(
 		not_null<Ui::VerticalLayout*> container,
 		not_null<PeerData*> peer,
-		rpl::producer<QString> status) {
+		rpl::producer<QString> status,
+		Fn<void()> clicked) {
+	AddSinglePeerRow(
+		container,
+		peer->owner().history(peer),
+		std::move(status),
+		std::move(clicked));
+}
+
+void AddSinglePeerRow(
+		not_null<Ui::VerticalLayout*> container,
+		not_null<Data::Thread*> thread,
+		rpl::producer<QString> status,
+		Fn<void()> clicked) {
 	const auto delegate = container->lifetime().make_state<
 		PeerListContentDelegateSimple
 	>();
 	const auto controller = container->lifetime().make_state<
 		SingleRowController
-	>(peer, std::move(status));
-	controller->setStyleOverrides(&st::peerListSingleRow);
+	>(thread, std::move(status), std::move(clicked));
+	controller->setStyleOverrides(thread->asTopic()
+		? &st::chooseTopicList
+		: &st::peerListSingleRow);
 	const auto content = container->add(object_ptr<PeerListContent>(
 		container,
 		controller));
@@ -1440,8 +1481,12 @@ object_ptr<Ui::BoxContent> ShareInviteLinkBox(
 			? tr::lng_group_invite_copied(tr::now)
 			: copied);
 	};
+	auto countMessagesCallback = [=](const TextWithTags &comment) {
+		return 1;
+	};
 	auto submitCallback = [=](
 			std::vector<not_null<Data::Thread*>> &&result,
+			Fn<bool()> checkPaid,
 			TextWithTags &&comment,
 			Api::SendOptions options,
 			Data::ForwardOptions) {
@@ -1449,28 +1494,17 @@ object_ptr<Ui::BoxContent> ShareInviteLinkBox(
 			return;
 		}
 
-		const auto error = [&] {
-			for (const auto thread : result) {
-				const auto error = GetErrorTextForSending(
-					thread,
-					{ .text = &comment });
-				if (!error.isEmpty()) {
-					return std::make_pair(error, thread);
-				}
-			}
-			return std::make_pair(QString(), result.front());
-		}();
-		if (!error.first.isEmpty()) {
-			auto text = TextWithEntities();
-			if (result.size() > 1) {
-				text.append(
-					Ui::Text::Bold(error.second->chatListName())
-				).append("\n\n");
-			}
-			text.append(error.first);
+		const auto errorWithThread = GetErrorForSending(
+			result,
+			{ .text = &comment });
+		if (errorWithThread.error) {
 			if (*box) {
-				(*box)->uiShow()->showBox(Ui::MakeInformBox(text));
+				(*box)->uiShow()->showBox(MakeSendErrorBox(
+					errorWithThread,
+					result.size() > 1));
 			}
+			return;
+		} else if (!checkPaid()) {
 			return;
 		}
 
@@ -1499,7 +1533,7 @@ object_ptr<Ui::BoxContent> ShareInviteLinkBox(
 	};
 	auto filterCallback = [](not_null<Data::Thread*> thread) {
 		if (const auto user = thread->peer()->asUser()) {
-			if (user->canSendIgnoreRequirePremium()) {
+			if (user->canSendIgnoreMoneyRestrictions()) {
 				return true;
 			}
 		}
@@ -1508,9 +1542,10 @@ object_ptr<Ui::BoxContent> ShareInviteLinkBox(
 	auto object = Box<ShareBox>(ShareBox::Descriptor{
 		.session = session,
 		.copyCallback = std::move(copyCallback),
+		.countMessagesCallback = std::move(countMessagesCallback),
 		.submitCallback = std::move(submitCallback),
 		.filterCallback = std::move(filterCallback),
-		.premiumRequiredError = SharePremiumRequiredError(),
+		.moneyRestrictionError = ShareMessageMoneyRestrictionError(),
 	});
 	*box = Ui::MakeWeak(object.data());
 	return object;

@@ -11,15 +11,6 @@ jobs:
     name: Rocky Linux 8
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.experimental }}
-    container:
-      image: ghcr.io/${{ github.repository }}/centos_env
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    defaults:
-      run:
-        shell: scl enable gcc-toolset-12 -- bash --noprofile --norc -eo pipefail {0}
 
     strategy:
       matrix:
@@ -41,10 +32,11 @@ jobs:
           submodules: recursive
           path: ${{ env.REPO_NAME }}
 
-      - name: First set up.
+      - name: Docker set up.
         run: |
-          gcc --version
-          ln -s /usr/src/Libraries
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
+          docker pull ghcr.io/$GITHUB_REPOSITORY/centos_env
+          docker tag ghcr.io/$GITHUB_REPOSITORY/centos_env tdesktop:centos_env
 
       - name: Telegram Desktop build.
         env:
@@ -52,8 +44,19 @@ jobs:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
         run: |
-          cd $REPO_NAME/Telegram/build
+          cd $REPO_NAME
+          mkdir DesktopPrivate
 
+          docker run --rm \
+          -u $(id -u) \
+          -v $PWD:/usr/src/tdesktop \
+          -v $PWD/DesktopPrivate:/usr/src/DesktopPrivate \
+          -e CONFIG=Release \
+          -e RSA_PRIVATE="${{ secrets.RSA_PRIVATE }}" \
+          -e API_ID=${{ secrets.API_ID }} \
+          -e API_HASH=${{ secrets.API_HASH }} \
+          -w /usr/src/tdesktop/Telegram/build \
+          tdesktop:centos_env \
           python3 release_build.py linux
 
       - name: Check.
