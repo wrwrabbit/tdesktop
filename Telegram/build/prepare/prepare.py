@@ -473,7 +473,7 @@ win:
     del msys64.exe
 
     bash -c "pacman-key --init; pacman-key --populate; pacman -Syu --noconfirm"
-    pacman -Syu --noconfirm mingw-w64-x86_64-perl mingw-w64-x86_64-nasm mingw-w64-x86_64-yasm mingw-w64-x86_64-ninja msys/make diffutils pkg-config
+    pacman -Syu --noconfirm mingw-w64-x86_64-perl mingw-w64-x86_64-nasm mingw-w64-x86_64-yasm mingw-w64-x86_64-ninja msys/make diffutils pkg-config gperf
 
     SET PATH=%PATH_BACKUP_%
 """, 'ThirdParty')
@@ -1941,7 +1941,7 @@ win:
         -DOPENSSL_FOUND=1 ^
         -DOPENSSL_INCLUDE_DIR=%OPENSSL_DIR%\\include ^
         -DOPENSSL_CRYPTO_LIBRARY="%OPENSSL_LIBS_DIR%.dbg\\libcrypto.lib" ^
-        -DGPERF_EXECUTABLE=%ROOT_DIR%\\ThirdParty\\gperf\\bin\\gperf ^
+        -DGPERF_EXECUTABLE=%ROOT_DIR%\\ThirdParty\\msys64\\usr\\bin\\gperf ^
         -DZLIB_FOUND=1 ^
         -DZLIB_INCLUDE_DIR=%ZLIB_LIBS_DIR% ^
         -DZLIB_LIBRARIES="%ZLIB_LIBS_DIR%\\Debug\\zlibstaticd.lib" ^
@@ -1960,7 +1960,7 @@ release:
         -DOPENSSL_FOUND=1 ^
         -DOPENSSL_INCLUDE_DIR=%OPENSSL_DIR%\\include ^
         -DOPENSSL_CRYPTO_LIBRARY="%OPENSSL_LIBS_DIR%\\libcrypto.lib" ^
-        -DGPERF_EXECUTABLE=%ROOT_DIR%\\ThirdParty\\gperf\\bin\\gperf ^
+        -DGPERF_EXECUTABLE=%ROOT_DIR%\\ThirdParty\\msys64\\usr\\bin\\gperf ^
         -DZLIB_FOUND=1 ^
         -DZLIB_INCLUDE_DIR=%ZLIB_LIBS_DIR% ^
         -DZLIB_LIBRARIES="%ZLIB_LIBS_DIR%\\Release\\zlibstatic.lib" ^
