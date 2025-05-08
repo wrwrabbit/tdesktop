@@ -129,7 +129,8 @@ void CreateRightLabel(
 		not_null<Button*> button,
 		v::text::data &&label,
 		const style::SettingsButton &st,
-		rpl::producer<QString> buttonText) {
+		rpl::producer<QString> buttonText,
+		Ui::Text::MarkedContext context) {
 	const auto name = Ui::CreateChild<Ui::FlatLabel>(
 		button.get(),
 		st.rightLabel);
@@ -166,7 +167,7 @@ void CreateRightLabel(
 				- st.padding.right()
 				- st.style.font->width(button)
 				- st::settingsButtonRightSkip;
-			name->setMarkedText(text);
+			name->setMarkedText(text, context);
 			name->resizeToNaturalWidth(available);
 			name->moveToRight(st::settingsButtonRightSkip, st.padding.top());
 		}, name->lifetime());

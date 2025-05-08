@@ -170,7 +170,7 @@ constexpr auto kMaxUnreadWithoutConfirmation = 1000;
 base::options::toggle ViewProfileInChatsListContextMenu({
 	.id = kOptionViewProfileInChatsListContextMenu,
 	.name = "Add \"View Profile\"",
-	.description = "Add \"View Profile\" to context menu in chats list",
+	.description = "Add \"View Profile\" to context menu in chat list",
 });
 
 void SetActionText(not_null<QAction*> action, rpl::producer<QString> &&text) {
@@ -862,7 +862,7 @@ void Filler::addViewDiscussion() {
 	if (!channel) {
 		return;
 	}
-	const auto chat = channel->linkedChat();
+	const auto chat = channel->discussionLink();
 	if (!chat) {
 		return;
 	}
@@ -1209,7 +1209,7 @@ void Filler::addCreatePoll() {
 }
 
 void Filler::addThemeEdit() {
-	if (_peer->isVerifyCodes()) {
+	if (_peer->isVerifyCodes() || _peer->isRepliesChat()) {
 		return;
 	}
 	const auto user = _peer->asUser();
