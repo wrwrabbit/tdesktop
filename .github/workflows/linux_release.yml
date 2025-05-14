@@ -134,7 +134,7 @@ jobs:
           cd out/Release
           mkdir artifact
           mkdir "artifact/Telegram"
-          cp out/Release/Telegram artifact/Telegram/
+          cp Telegram artifact/Telegram/
           strip -s "artifact/Telegram/Telegram"
           cd artifact
           tar -cJvf "${{ env.ARTIFACT_NAME }}_linux.tar.xz" "Telegram/"
