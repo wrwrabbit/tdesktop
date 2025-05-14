@@ -32,5 +32,5 @@ index 58d8941..e60f97d 100644
 +        #    $<IF:$<CONFIG:Debug>,,/LTCGOUT:>
 +        #)
      endif()
- else()
-     target_compile_definitions(common_options
+ endif()
+ 

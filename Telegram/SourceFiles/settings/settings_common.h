@@ -182,9 +182,10 @@ not_null<Button*> AddButtonWithLabel(
 	IconDescriptor &&descriptor = {});
 void CreateRightLabel(
 	not_null<Button*> button,
-	rpl::producer<QString> label,
+	v::text::data &&label,
 	const style::SettingsButton &st,
-	rpl::producer<QString> buttonText);
+	rpl::producer<QString> buttonText,
+	Ui::Text::MarkedContext context = {});
 
 struct DividerWithLottieDescriptor {
 	QString lottie;

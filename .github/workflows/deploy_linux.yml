@@ -21,6 +21,7 @@ jobs:
 
     env:
       UPLOAD_ARTIFACT: "true"
+      IMAGE_TAG: tdesktop:centos_env
 
     steps:
       - name: Get repository name.
@@ -30,13 +31,32 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          path: ${{ env.REPO_NAME }}
 
-      - name: Docker set up.
+      - name: First set up.
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
-          docker pull ghcr.io/$GITHUB_REPOSITORY/centos_env
-          docker tag ghcr.io/$GITHUB_REPOSITORY/centos_env tdesktop:centos_env
+          sudo apt update
+          curl -sSL https://install.python-poetry.org | python3 -
+          cd Telegram/build/docker/centos_env
+          poetry install
+          DOCKERFILE=$(DEBUG= LTO= poetry run gen_dockerfile)
+          echo "$DOCKERFILE" > Dockerfile
+
+      - name: Free up some disk space.
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        with:
+          tool-cache: true
+
+      - name: Set up Docker Buildx.
+        uses: docker/setup-buildx-action@v3
+
+      - name: Libraries.
+        uses: docker/build-push-action@v6
+        with:
+          context: Telegram/build/docker/centos_env
+          load: ${{ env.ONLY_CACHE == 'false' }}
+          tags: ${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Telegram Desktop build.
         env:
@@ -44,7 +64,6 @@ jobs:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
         run: |
-          cd $REPO_NAME
           mkdir DesktopPrivate
 
           docker run --rm \
@@ -61,7 +80,7 @@ jobs:
 
       - name: Check.
         run: |
-          filePath="$REPO_NAME/out/Release/deploy"
+          filePath="out/Release/deploy"
           if test -d "$filePath"; then
             echo "Build successfully done! :)"
 
@@ -75,7 +94,7 @@ jobs:
       - name: Move artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
-          cd $REPO_NAME/out/Release/deploy
+          cd out/Release/deploy
           mkdir ../artifact
           mv -t ../artifact tlinux*
           mv -t ../artifact tsetup*
@@ -85,11 +104,11 @@ jobs:
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: build_gh
-          path: ${{ env.REPO_NAME }}/out/Release/artifact/tsetup*
+          path: out/Release/artifact/tsetup*
 
       - uses: actions/upload-artifact@v4
         name: Upload artifact for TG.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: build_tg
-          path: ${{ env.REPO_NAME }}/out/Release/artifact/tlinux*
+          path: out/Release/artifact/tlinux*
