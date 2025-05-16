@@ -21,6 +21,7 @@ jobs:
 
     env:
       UPLOAD_ARTIFACT: "true"
+      ONLY_CACHE: "false"
       IMAGE_TAG: tdesktop:centos_env
 
     steps:
