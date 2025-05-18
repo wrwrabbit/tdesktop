@@ -131,7 +131,7 @@ jobs:
           mkdir artifact
 
           #bless --folder "Telegram.app/" --openfolder "Telegram.app/"
-          bless --folder "Telegram.app/"
+          #bless --folder "Telegram.app/"
 
           zip -r Telegram.app_macos.zip Telegram.app
 
