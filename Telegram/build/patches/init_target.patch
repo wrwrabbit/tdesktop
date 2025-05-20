@@ -2,13 +2,13 @@ diff --git a/init_target.cmake b/init_target.cmake
 index 36c0c1f..25354be 100644
 --- a/init_target.cmake
 +++ b/init_target.cmake
-@@ -31,7 +31,8 @@ function(init_target target_name) # init_target(my_target [cxx_std_..] folder_na
+@@ -52,7 +52,8 @@ function(init_target target_name) # init_target(my_target [cxx_std_..] folder_na
      endif()
      if (DESKTOP_APP_SPECIAL_TARGET)
          if (MSVC)
--            set_property(TARGET ${target_name} APPEND_STRING PROPERTY STATIC_LIBRARY_OPTIONS "$<IF:$<CONFIG:Debug>,,/LTCG>")
+-            set_property(TARGET ${target_name} APPEND_STRING PROPERTY STATIC_LIBRARY_OPTIONS "$<$<NOT:$<CONFIG:Debug>>:/LTCG>")
 +            # don't do /LTCG sa free GH runner is out of heap on x64 build
-+            #set_property(TARGET ${target_name} APPEND_STRING PROPERTY STATIC_LIBRARY_OPTIONS "$<IF:$<CONFIG:Debug>,,/LTCG>")
++            #set_property(TARGET ${target_name} APPEND_STRING PROPERTY STATIC_LIBRARY_OPTIONS "$<$<NOT:$<CONFIG:Debug>>:/LTCG>")
          elseif (APPLE)
              set_target_properties(${target_name} PROPERTIES
                  XCODE_ATTRIBUTE_GCC_OPTIMIZATION_LEVEL $<IF:$<CONFIG:Debug>,0,fast>

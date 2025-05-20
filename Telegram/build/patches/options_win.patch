@@ -1,22 +1,20 @@
 diff --git a/options_win.cmake b/options_win.cmake
-index 58d8941..e60f97d 100644
+index 8a8265c..33a4ba5 100644
 --- a/options_win.cmake
 +++ b/options_win.cmake
-@@ -91,18 +91,20 @@ if (MSVC)
-             /LARGEADDRESSAWARE # Allow more than 2 GB in 32 bit application.
-         )
+@@ -96,16 +96,19 @@ if (MSVC)
      endif()
--
+ 
      if (DESKTOP_APP_SPECIAL_TARGET)
 -        target_compile_options(common_options
 -        INTERFACE
 -            /WX
--            $<IF:$<CONFIG:Debug>,,/GL>
+-            $<$<NOT:$<CONFIG:Debug>>:/GL>
 -        )
 -        target_link_options(common_options
 -        INTERFACE
--            $<IF:$<CONFIG:Debug>,,/LTCG>
--            $<IF:$<CONFIG:Debug>,,/LTCGOUT:>
+-            $<$<NOT:$<CONFIG:Debug>>:/LTCG>
+-            $<$<NOT:$<CONFIG:Debug>>:/LTCGOUT:>
 -        )
 +        # don't do /LTCG sa free GH runner is out of heap on x64 build
 +        # /GL implicitly enables /LTCG
@@ -24,12 +22,12 @@ index 58d8941..e60f97d 100644
 +        #target_compile_options(common_options
 +        #INTERFACE
 +        #    /WX
-+        #    $<IF:$<CONFIG:Debug>,,/GL>
++        #    $<$<NOT:$<CONFIG:Debug>>:/GL>
 +        #)
 +        #target_link_options(common_options
 +        #INTERFACE
-+        #    $<IF:$<CONFIG:Debug>,,/LTCG>
-+        #    $<IF:$<CONFIG:Debug>,,/LTCGOUT:>
++        #    $<$<NOT:$<CONFIG:Debug>>:/LTCG>
++        #    $<$<NOT:$<CONFIG:Debug>>:/LTCGOUT:>
 +        #)
      endif()
  endif()
