@@ -28,7 +28,7 @@ jobs:
 
   macos:
     name: MacOS
-    runs-on: macos-13
+    runs-on: macos-latest
 
     strategy:
       matrix:
@@ -130,7 +130,8 @@ jobs:
           cd $REPO_NAME/out/Release
           mkdir artifact
 
-          bless --folder "Telegram.app/" --openfolder "Telegram.app/"
+          #bless --folder "Telegram.app/" --openfolder "Telegram.app/"
+          #bless --folder "Telegram.app/"
 
           zip -r Telegram.app_macos.zip Telegram.app
 

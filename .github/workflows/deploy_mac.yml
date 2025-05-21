@@ -9,7 +9,7 @@ jobs:
   macos:
     environment: Release
     name: MacOS
-    runs-on: macos-13
+    runs-on: macos-latest
 
     strategy:
       matrix:

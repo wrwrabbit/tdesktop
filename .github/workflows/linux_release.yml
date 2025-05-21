@@ -104,15 +104,16 @@ jobs:
           $IMAGE_TAG \
           /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
           -D CMAKE_CONFIGURATION_TYPES=Release \
-          -D CMAKE_C_FLAGS_DEBUG="" \
-          -D CMAKE_CXX_FLAGS_DEBUG="" \
+          -D CMAKE_C_FLAGS="-O0 -U_FORTIFY_SOURCE" \
+          -D CMAKE_CXX_FLAGS="-O0 -U_FORTIFY_SOURCE" \
           -D CMAKE_EXE_LINKER_FLAGS="-s" \
+          -D CMAKE_COMPILE_WARNING_AS_ERROR=OFF \
           -D TDESKTOP_API_TEST=OFF \
-          -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
-          -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
           -D CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+          -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
+          -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
           $DEFINE
 
       - name: Check.
