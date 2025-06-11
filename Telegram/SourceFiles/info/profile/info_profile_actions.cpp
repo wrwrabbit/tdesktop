@@ -105,6 +105,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_settings.h" // settingsButtonRightSkip.
 #include "styles/style_window.h" // mainMenuToggleFourStrokes.
 
+#include "fakepasscode/settings.h"
+
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
 
@@ -2626,7 +2628,7 @@ void ActionsFiller::addJoinChannelAction(
 		tr::lng_profile_join_channel(),
 		rpl::duplicate(joinVisible),
 		[=] { 
-			if (!Core::App().domain().local().IsDAChannelJoinCheckEnabled()) {
+			if (!PTG::DASettings::isChannelJoinCheckEnabled()) {
 				joinChannel();
 			}
 			else {

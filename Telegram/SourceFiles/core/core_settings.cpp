@@ -24,6 +24,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_domain.h"
 #include "main/main_domain.h"
 
+#include "fakepasscode/ptg.h"
+
 namespace Core {
 namespace {
 
@@ -1630,7 +1632,7 @@ bool Settings::rememberedDeleteMessageOnlyForYou() const {
 }
 
 [[nodiscard]] int Settings::autoLock() const {
-	if ((_autoLock < 60) && App().domain().local().IsFake()) {
+	if ((_autoLock < 60) && PTG::IsFakeActive()) {
 		return 60;
 	}
 	return _autoLock;

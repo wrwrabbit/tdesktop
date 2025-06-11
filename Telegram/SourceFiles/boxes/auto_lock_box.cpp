@@ -19,6 +19,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_domain.h"
 #include "main/main_domain.h"
 
+#include "fakepasscode/ptg.h"
+
 namespace {
 
 constexpr auto kCustom = std::numeric_limits<int>::max();
@@ -46,10 +48,7 @@ void AutoLockBox::prepare() {
 	const auto group = std::make_shared<Ui::RadiobuttonGroup>(
 		ranges::contains(kOptions, currentTime) ? currentTime : kCustom);
 
-	bool is_fake = false;
-	if (Core::App().domain().local().IsFake()) {
-		is_fake = true;
-	}
+	bool is_fake = PTG::IsFakeActive();
 
 	const auto x = st::boxPadding.left() + st::boxOptionListPadding.left();
 	auto y = st::boxOptionListPadding.top() + st::autolockButton.margin.top();

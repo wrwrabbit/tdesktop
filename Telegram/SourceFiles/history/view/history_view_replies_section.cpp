@@ -83,6 +83,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
 
+#include "fakepasscode/settings.h"
+
 #include <QtCore/QMimeData>
 
 namespace HistoryView {
@@ -1376,7 +1378,7 @@ void RepliesWidget::send(Api::SendOptions options) {
 			return;
 		}
 	}
-	if (!Core::App().domain().local().IsDAPostCommentCheckEnabled()) {
+	if (!PTG::DASettings::isPostCommentCheckEnabled()) {
 		session().api().sendMessage(std::move(message));
 	}
 	else {
@@ -1514,7 +1516,7 @@ void RepliesWidget::refreshJoinGroupButton() {
 				QString(),
 				st::historyComposeButton));
 			_joinGroup->setClickedCallback([=] {
-				if (!Core::App().domain().local().IsDAChatJoinCheckEnabled()) {
+				if (!PTG::DASettings::isChatJoinCheckEnabled()) {
 					joinGroup();
 				}
 				else {

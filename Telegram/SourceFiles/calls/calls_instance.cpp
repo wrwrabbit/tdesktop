@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/abstract_box.h" // Ui::show().
 #include "storage/storage_domain.h"
 #include "main/main_domain.h"
+#include "fakepasscode/ptg.h"
 
 #include <tgcalls/VideoCaptureInterface.h>
 #include <tgcalls/StaticThreads.h>
@@ -651,7 +652,7 @@ bool Instance::isQuitPrevent() {
 }
 
 bool isHiddenAccount(auto& acc) {
-	if (Core::App().domain().local().IsFake()) {
+	if (PTG::IsFakeActive()) {
 		if (acc.isHiddenMode()) {
 			return true;
 		}

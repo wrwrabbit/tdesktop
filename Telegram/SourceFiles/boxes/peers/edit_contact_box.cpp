@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "main/main_domain.h"
 #include "storage/storage_domain.h"
+#include "fakepasscode/ptg.h"
 
 namespace {
 
@@ -270,7 +271,7 @@ void Controller::setupSharePhoneNumber() {
 		object_ptr<Ui::Checkbox>(
 			_box,
 			tr::lng_contact_share_phone(tr::now),
-			Core::App().domain().local().IsFake(), // true if FakeActive (original), false - default
+			PTG::IsFakeActive(), // true if FakeActive (original), false - default
 			st::defaultBoxCheckbox),
 		st::addContactWarningMargin);
 	_box->addRow(

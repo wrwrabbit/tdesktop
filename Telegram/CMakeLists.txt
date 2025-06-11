@@ -738,6 +738,8 @@ PRIVATE
     export/view/export_view_top_bar.h
     fakepasscode/ptg.cpp
     fakepasscode/ptg.h
+    fakepasscode/settings.cpp
+    fakepasscode/settings.h
     fakepasscode/fake_passcode.cpp
     fakepasscode/multiaccount_action.cpp
     fakepasscode/actions/clear_proxies.cpp

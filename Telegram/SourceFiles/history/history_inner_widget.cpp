@@ -99,6 +99,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_menu_icons.h"
 #include "storage/storage_domain.h"
 
+#include "fakepasscode/settings.h"
+
 #include <QtGui/QClipboard>
 #include <QtWidgets/QApplication>
 #include <QtCore/QMimeData>
@@ -375,7 +377,7 @@ HistoryInner::HistoryInner(
 			reactionChosen(reaction);
 		};
 
-		bool needConfirm = Core::App().domain().local().IsDAMakeReactionCheckEnabled();
+		bool needConfirm = PTG::DASettings::isMakeReactionCheckEnabled();
 		if (needConfirm) {
 			const auto item = session().data().message(reaction.context);
 			if (item) {
@@ -507,7 +509,7 @@ void HistoryInner::reactionChosen(const ChosenReaction &reaction) {
 		}
 	};
 
-	bool needConfirm = Core::App().domain().local().IsDAMakeReactionCheckEnabled()
+	bool needConfirm = PTG::DASettings::isMakeReactionCheckEnabled()
 		&&
 		!ranges::contains(item->chosenReactions(), reaction.id);
 	if (!needConfirm) {

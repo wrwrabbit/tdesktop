@@ -54,6 +54,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "storage/storage_domain.h"
 
+#include "fakepasscode/settings.h"
+
 namespace HistoryView {
 namespace {
 
@@ -1693,7 +1695,7 @@ void Element::refreshReactions() {
 					}
 				}
 				}; // end of addReactions lambda
-				bool needConfirm = Core::App().domain().local().IsDAMakeReactionCheckEnabled();
+				bool needConfirm = PTG::DASettings::isMakeReactionCheckEnabled();
 				if (needConfirm) {
 					const auto strong = weak.get();
 					if (strong) {

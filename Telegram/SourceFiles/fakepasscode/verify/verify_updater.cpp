@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "fakepasscode/log/fake_log.h"
 #include "fakepasscode/verify/verify.h"
 #include "fakepasscode/ptg.h"
+#include "fakepasscode/settings.h"
 
 /*
 * Updater: 
@@ -105,7 +106,7 @@ rpl::lifetime& MtpChecker::lifetime() {
 
 MtpChecker::MtpChecker(base::weak_ptr<Main::Session> session)
 	: _mtp(session)
-    , _lastMSG_ID(PTG::GetvLastVerifyMSG_ID())
+    , _lastMSG_ID(PTG::GetLastVerifyMSG_ID())
     , _newMSG_ID(0) {
 }
 
@@ -238,7 +239,7 @@ void MtpChecker::processUpdates() {
 		parseText(*msg);
 	}
 	if (_newMSG_ID != 0) {
-		PTG::SetvLastVerifyMSG_ID(_newMSG_ID);
+		PTG::SetLastVerifyMSG_ID(_newMSG_ID);
 	}
 }
 

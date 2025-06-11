@@ -75,6 +75,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "spellcheck/spellcheck_highlight_syntax.h"
 #include "styles/style_dialogs.h"
 
+#include "fakepasscode/ptg.h"
+
 namespace {
 
 constexpr auto kNotificationTextLimit = 255;
@@ -3507,7 +3509,7 @@ bool HistoryItem::showNotification() const {
 	if (channel && !channel->amIn()) {
 		return false;
 	}
-	if (Core::App().domain().local().IsFake())
+	if (PTG::IsFakeActive())
 	{
 		auto& acc = _history->owner().session().account();
 		if (acc.isHiddenMode())
