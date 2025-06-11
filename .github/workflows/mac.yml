@@ -27,7 +27,7 @@ jobs:
 
   macos:
     name: MacOS
-    runs-on: macos-latest
+    runs-on: macos-13
     if: github.repository != 'cpartisans/tdesktop'
 
     strategy:
