@@ -66,14 +66,26 @@ jobs:
       - name: Set up Docker Buildx.
         uses: docker/setup-buildx-action@v3
 
+      - name: Libraries cache.
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/.buildx-cache
+          key: ${{ runner.OS }}-libs-${{ hashFiles('Telegram/build/docker/centos_env/**') }}
+          restore-keys: ${{ runner.OS }}-libs-
+
       - name: Libraries.
         uses: docker/build-push-action@v6
         with:
           context: Telegram/build/docker/centos_env
           load: ${{ env.ONLY_CACHE == 'false' }}
           tags: ${{ env.IMAGE_TAG }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=local,src=${{ runner.temp }}/.buildx-cache
+          cache-to: type=local,dest=${{ runner.temp }}/.buildx-cache-new,mode=max
+
+      - name: Move cache.
+        run: |
+          rm -rf ${{ runner.temp }}/.buildx-cache
+          mv ${{ runner.temp }}/.buildx-cache{-new,}
 
       - name: Telegram Desktop build.
         run: |
@@ -104,15 +116,16 @@ jobs:
           $IMAGE_TAG \
           /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
           -D CMAKE_CONFIGURATION_TYPES=Release \
-          -D CMAKE_C_FLAGS_DEBUG="" \
-          -D CMAKE_CXX_FLAGS_DEBUG="" \
+          -D CMAKE_C_FLAGS="-O0" \
+          -D CMAKE_CXX_FLAGS="-O0" \
           -D CMAKE_EXE_LINKER_FLAGS="-s" \
+          -D CMAKE_COMPILE_WARNING_AS_ERROR=OFF \
           -D TDESKTOP_API_TEST=OFF \
-          -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
-          -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
           -D CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+          -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
+          -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
           $DEFINE
 
       - name: Check.

@@ -3,9 +3,7 @@ name: Needs user action.
 on:
   issue_comment:
     types: [created]
-  schedule:
-    - cron: '0 2 * * *'
-
+    
 jobs:
   needs-user-action:
     runs-on: ubuntu-latest
