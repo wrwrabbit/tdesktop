@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_credits_graphics.h" // ShowRefundInfoBox.
 #include "storage/file_upload.h"
 #include "storage/storage_shared_media.h"
+#include "main/main_account.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "menu/menu_ttl_validator.h"
