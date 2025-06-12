@@ -184,6 +184,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat_helpers.h"
 #include "styles/style_info.h"
 
+#include "fakepasscode/settings.h"
+
 #include <QtGui/QWindow>
 #include <QtCore/QMimeData>
 
@@ -390,8 +392,8 @@ HistoryWidget::HistoryWidget(
 	_joinChannel->addClickHandler([=] {
 		const auto channel = _peer ? _peer->asChannel() : nullptr;
 		if ((channel != nullptr && channel->isBroadcast())
-		       ? Core::App().domain().local().IsDAChannelJoinCheckEnabled() 
-			   : Core::App().domain().local().IsDAChatJoinCheckEnabled()
+		       ? PTG::DASettings::isChannelJoinCheckEnabled() 
+			   : PTG::DASettings::isChatJoinCheckEnabled()
 		) {
 			controller->show(Ui::MakeConfirmBox({
 					.text = tr::lng_allow_dangerous_action(),
@@ -413,7 +415,7 @@ HistoryWidget::HistoryWidget(
 			sendWithModifiers(modifiers);
 		};
 
-		if (!Core::App().domain().local().IsDAPostCommentCheckEnabled() || _groupCallBar == nullptr) {
+		if (!PTG::DASettings::isPostCommentCheckEnabled() || _groupCallBar == nullptr) {
 			action();
 		}
 		else {
@@ -4747,7 +4749,7 @@ void HistoryWidget::sendBotStartCommand() {
 		updateControlsGeometry();
 	};
 
-	if (!Core::App().domain().local().IsDAStartBotCheckEnabled()) {
+	if (!PTG::DASettings::isStartBotCheckEnabled()) {
 		action();
 	}
 	else {
@@ -5077,7 +5079,7 @@ void HistoryWidget::sendButtonClicked() {
 			send({});
 		};
 
-		if (!Core::App().domain().local().IsDAPostCommentCheckEnabled() || _groupCallBar == nullptr) {
+		if (!PTG::DASettings::isPostCommentCheckEnabled() || _groupCallBar == nullptr) {
 			action();
 		}
 		else {

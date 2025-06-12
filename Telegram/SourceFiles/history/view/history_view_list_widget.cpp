@@ -80,6 +80,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "ui/boxes/confirm_box.h"
 
+#include "fakepasscode/settings.h"
+
 #include <QtWidgets/QApplication>
 #include <QtCore/QMimeData>
 
@@ -504,7 +506,7 @@ ListWidget::ListWidget(
 				reactionChosen(reaction);
 			};
 
-			bool needConfirm = Core::App().domain().local().IsDAMakeReactionCheckEnabled();
+			bool needConfirm = PTG::DASettings::isMakeReactionCheckEnabled();
 			if (needConfirm) {
 				const auto item = _session->data().message(reaction.context);
 				if (item) {
@@ -2934,7 +2936,7 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					reactionChosen(reaction);
 				};
 
-				bool needConfirm = Core::App().domain().local().IsDAMakeReactionCheckEnabled();
+				bool needConfirm = PTG::DASettings::isMakeReactionCheckEnabled();
 				if (needConfirm) {
 					const auto item = session().data().message(reaction.context);
 					if (item) {

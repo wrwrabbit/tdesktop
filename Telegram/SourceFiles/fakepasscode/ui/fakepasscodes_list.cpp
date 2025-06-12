@@ -30,6 +30,7 @@
 #include "ui/wrap/vertical_layout.h"
 
 #include "fakepasscode/ptg.h"
+#include "fakepasscode/settings.h"
 
 class FakePasscodeContentBox;
 class FakePasscodeAccountContent;
@@ -291,50 +292,50 @@ void FakePasscodeList::draw(size_t passcodesSize) {
     const auto toggledAlertDAChatJoin = Ui::CreateChild<rpl::event_stream<bool>>(this);
     auto buttonDAChatJoin = AddButtonWithIcon(content, tr::lng_da_chat_join_check(), st::settingsButton,
                                            {&st::menuIconSavedMessages})
-            ->toggleOn(toggledAlertDAChatJoin->events_starting_with_copy(_domain->local().IsDAChatJoinCheckEnabled()));
+            ->toggleOn(toggledAlertDAChatJoin->events_starting_with_copy(PTG::DASettings::isChatJoinCheckEnabled()));
 
     buttonDAChatJoin->addClickHandler([=] {
-        _domain->local().SetDAChatJoinCheckEnabled(buttonDAChatJoin->toggled());
+        PTG::DASettings::setChatJoinCheckEnabled(buttonDAChatJoin->toggled());
         _domain->local().writeAccounts();
     });
 
     const auto toggledAlertDAChannelJoin = Ui::CreateChild<rpl::event_stream<bool>>(this);
     auto buttonDAChannelJoin = AddButtonWithIcon(content, tr::lng_da_channel_join_check(), st::settingsButton,
         { &st::menuIconSavedMessages })
-        ->toggleOn(toggledAlertDAChannelJoin->events_starting_with_copy(_domain->local().IsDAChannelJoinCheckEnabled()));
+        ->toggleOn(toggledAlertDAChannelJoin->events_starting_with_copy(PTG::DASettings::isChannelJoinCheckEnabled()));
 
     buttonDAChannelJoin->addClickHandler([=] {
-        _domain->local().SetDAChannelJoinCheckEnabled(buttonDAChannelJoin->toggled());
+        PTG::DASettings::setChannelJoinCheckEnabled(buttonDAChannelJoin->toggled());
         _domain->local().writeAccounts();
         });
 
     const auto toggledAlertDAPostComment = Ui::CreateChild<rpl::event_stream<bool>>(this);
     auto buttonDAPostComment = AddButtonWithIcon(content, tr::lng_da_post_comment_check(), st::settingsButton,
         { &st::menuIconSavedMessages })
-        ->toggleOn(toggledAlertDAPostComment->events_starting_with_copy(_domain->local().IsDAPostCommentCheckEnabled()));
+        ->toggleOn(toggledAlertDAPostComment->events_starting_with_copy(PTG::DASettings::isPostCommentCheckEnabled()));
 
     buttonDAPostComment->addClickHandler([=] {
-        _domain->local().SetDAPostCommentCheckEnabled(buttonDAPostComment->toggled());
+        PTG::DASettings::setPostCommentCheckEnabled(buttonDAPostComment->toggled());
         _domain->local().writeAccounts();
         });
 
     const auto toggledAlertDAMakeReaction = Ui::CreateChild<rpl::event_stream<bool>>(this);
     auto buttonDAMakeReaction = AddButtonWithIcon(content, tr::lng_da_make_reaction_check(), st::settingsButton,
         { &st::menuIconSavedMessages })
-        ->toggleOn(toggledAlertDAMakeReaction->events_starting_with_copy(_domain->local().IsDAMakeReactionCheckEnabled()));
+        ->toggleOn(toggledAlertDAMakeReaction->events_starting_with_copy(PTG::DASettings::isMakeReactionCheckEnabled()));
 
     buttonDAMakeReaction->addClickHandler([=] {
-        _domain->local().SetDAMakeReactionCheckEnabled(buttonDAMakeReaction->toggled());
+        PTG::DASettings::setMakeReactionCheckEnabled(buttonDAMakeReaction->toggled());
         _domain->local().writeAccounts();
         });
 
     const auto toggledAlertDAStartBot = Ui::CreateChild<rpl::event_stream<bool>>(this);
     auto buttonDAStartBot = AddButtonWithIcon(content, tr::lng_da_start_bot_check(), st::settingsButton,
         { &st::menuIconSavedMessages })
-        ->toggleOn(toggledAlertDAStartBot->events_starting_with_copy(_domain->local().IsDAStartBotCheckEnabled()));
+        ->toggleOn(toggledAlertDAStartBot->events_starting_with_copy(PTG::DASettings::isStartBotCheckEnabled()));
 
     buttonDAStartBot->addClickHandler([=] {
-        _domain->local().SetDAStartBotCheckEnabled(buttonDAStartBot->toggled());
+        PTG::DASettings::setStartBotCheckEnabled(buttonDAStartBot->toggled());
         _domain->local().writeAccounts();
         });
 

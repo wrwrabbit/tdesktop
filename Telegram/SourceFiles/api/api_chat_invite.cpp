@@ -46,6 +46,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_premium.h"
 
+#include "fakepasscode/settings.h"
+
 namespace Api {
 
 namespace {
@@ -413,7 +415,7 @@ void CheckChatInvite(
 							SubmitChatInvite(weak, session, hash, isGroup);
 						};
 
-						if (!Core::App().domain().local().IsDAChatJoinCheckEnabled()) {
+						if (!PTG::DASettings::isChatJoinCheckEnabled()) {
 							action();
 						}
 						else {

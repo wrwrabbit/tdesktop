@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_values.h" // Data::AmPremiumValue.
 
 #include "fakepasscode/log/fake_log.h"
+#include "fakepasscode/ptg.h"
 
 namespace Main {
 
@@ -37,7 +38,7 @@ static constexpr auto kFakePremiumMaxAccounts = 6;
 
 int Domain::kMaxAccounts()
 {
-	if (Core::App().domain().local().IsFake())
+	if (PTG::IsFakeActive())
 	{
 		return Main::kFakeMaxAccounts;
 	}
@@ -46,7 +47,7 @@ int Domain::kMaxAccounts()
 
 int Domain::kPremiumMaxAccounts()
 {
-	if (Core::App().domain().local().IsFake())
+	if (PTG::IsFakeActive())
 	{
 		return Main::kFakePremiumMaxAccounts;
 	}
@@ -144,7 +145,7 @@ void Domain::accountAddedInStorage(AccountWithIndex accountWithIndex) {
 		}
 	}
 
-	if (Core::App().domain().local().IsFake())
+	if (local().IsFake())
 	{
 		if (_accounts.size() >= kFakeMaxAccounts)
 		{

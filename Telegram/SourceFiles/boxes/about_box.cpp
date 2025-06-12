@@ -28,6 +28,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
 
+#include "fakepasscode/ptg.h"
+
 namespace {
 
 rpl::producer<TextWithEntities> Text1() {
@@ -82,7 +84,7 @@ void AboutBox::prepare() {
 	_version->setClickedCallback([this] { showVersionHistory(); });
 
     int height = st::aboutTextTop;
-    if (Core::App().domain().local().IsFake()) {
+    if (PTG::IsFakeActive()) {
         _ptelegram_version->hide();
         _ptelegram_version->mask();
     } else {
@@ -101,7 +103,7 @@ void AboutBox::resizeEvent(QResizeEvent *e) {
 	_version->moveToLeft(st::boxPadding.left(), st::aboutVersionTop);
     _text1->resizeToWidth(available);
 
-    if (Core::App().domain().local().IsFake()) {
+    if (PTG::IsFakeActive()) {
         _text1->moveToLeft(st::boxPadding.left(), st::aboutTextTop);
     } else {
         _ptelegram_version->moveToLeft(st::boxPadding.left(), st::aboutTextTop);

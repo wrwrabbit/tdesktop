@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_intro.h"
 #include "ui/layers/box_content.h"
 
+#include "fakepasscode/ptg.h"
 #include "fakepasscode/log/fake_log.h"
 #include "storage/storage_domain.h"
 
@@ -74,7 +75,7 @@ bool AcceptUpstreamRelease = false;
 bool PTGAcceptSameVersion = false;
 const QString PTG_UPDATE_CHANNEL = "tdptgFeed";
 uint64 GetAppVersionForUpdate() {
-	if (Core::IsAppLaunched() && Core::App().domain().local().IsFake()) {
+	if (Core::IsAppLaunched() && PTG::IsFakeActive()) {
 		return AppVersion;
 	} else if (AcceptUpstreamRelease) {
 		return AppVersion;

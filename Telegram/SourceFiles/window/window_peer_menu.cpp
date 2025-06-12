@@ -103,6 +103,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_menu_icons.h"
 
 #include "fakepasscode/ptg.h"
+#include "fakepasscode/settings.h"
 #include "fakepasscode/log/fake_log.h"
 
 #include <QAction>
@@ -809,7 +810,7 @@ void Filler::addJoinChat() {
 		auto joinGroup = [=]() {
 			channel->session().api().joinChannel(channel);
 		};
-		if (!Core::App().domain().local().IsDAChatJoinCheckEnabled()) {
+		if (!PTG::DASettings::isChatJoinCheckEnabled()) {
 			joinGroup();
 		}
 		else {
@@ -1487,7 +1488,7 @@ void Filler::fillContextMenuActions() {
 	addHidePromotion();
 	addToggleArchive();
 	addTogglePin();
-	if (!Core::App().domain().local().IsFake() || ViewProfileInChatsListContextMenu.value()) {
+	if (!PTG::IsFakeActive() || ViewProfileInChatsListContextMenu.value()) {
 		addInfo();
 	}
 	addToggleMuteSubmenu(false);
@@ -1524,7 +1525,7 @@ void Filler::fillHistoryActions() {
 	addClearHistory();
 	addDeleteChat();
 	addLeaveChat();
-    if (!Core::App().domain().local().IsFake()) {
+    if (!PTG::IsFakeActive()) {
         addJoinChat();
     }
 	// PTG: feature is not complete
@@ -1558,7 +1559,7 @@ void Filler::fillProfileActions() {
 }
 
 void Filler::fillRepliesActions() {
-    if (!Core::App().domain().local().IsFake()) {
+    if (!PTG::IsFakeActive()) {
         addInfo(); // PTG
 		if (_topic) {
 			addManageTopic();
@@ -1581,7 +1582,7 @@ void Filler::fillRepliesActions() {
 }
 
 void Filler::fillScheduledActions() {
-    if (!Core::App().domain().local().IsFake()) {
+    if (!PTG::IsFakeActive()) {
         addInfo();
         addCreatePoll();
         addJoinChat();
