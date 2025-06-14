@@ -82,6 +82,7 @@ jobs:
           branch: master
           repo: cpartisans/tdesktop
           path: Linux
+          name: build_gh
 
       - name: Download MacOS artifacts
         uses: dawidd6/action-download-artifact@v2
@@ -93,6 +94,7 @@ jobs:
           branch: master
           repo: cpartisans/tdesktop
           path: MacOS
+          name: PTelegram_
 
       - name: Download Snap artifacts
         uses: dawidd6/action-download-artifact@v2
