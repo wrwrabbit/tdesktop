@@ -36,7 +36,7 @@ jobs:
           curl -sSL https://install.python-poetry.org | python3 -
           cd Telegram/build/docker/centos_env
           poetry install
-          DOCKERFILE=$(DEBUG= LTO= poetry run gen_dockerfile)
+          DOCKERFILE=$(DEBUG= LTO=1 poetry run gen_dockerfile)
           echo "$DOCKERFILE" > Dockerfile
 
       - name: Free up some disk space.
