@@ -85,6 +85,8 @@ enum class ChannelDataFlag : uint64 {
 	MonoforumAdmin = (1ULL << 40),
 	MonoforumDisabled = (1ULL << 41),
 	ForumTabs = (1ULL << 42),
+	HasStarsPerMessage = (1ULL << 43),
+	StarsPerMessageKnown = (1ULL << 44),
 
 	// shift values!
 	PTG_Verified = (1ull << 60),
@@ -301,6 +303,12 @@ public:
 	}
 	[[nodiscard]] bool paidMessagesAvailable() const {
 		return flags() & Flag::PaidMessagesAvailable;
+	}
+	[[nodiscard]] bool hasStarsPerMessage() const {
+		return flags() & Flag::HasStarsPerMessage;
+	}
+	[[nodiscard]] bool starsPerMessageKnown() const {
+		return flags() & Flag::StarsPerMessageKnown;
 	}
 	[[nodiscard]] bool useSubsectionTabs() const;
 
