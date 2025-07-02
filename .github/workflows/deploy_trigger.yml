@@ -13,6 +13,11 @@ on:
         type: boolean
         required: false
         default: "false"
+      releaseLinuxFree:
+        description: 'Build Linux assets (free)?'
+        type: boolean
+        required: false
+        default: "false"
       releaseMacOS:
         description: 'Build MacOS assets?'
         type: boolean
@@ -50,6 +55,25 @@ jobs:
               repo: 'tdesktop',
               workflow_id: 'deploy_linux.yml',
               ref: 'master',
+              inputs: {
+                runner: 'ubuntu-latest-large',
+              }
+            });
+
+      - name: Trigger Linux build Free
+        if: github.event.inputs.releaseLinuxFree == 'true'
+        uses: actions/github-script@v5
+        with:
+          github-token: ${{ secrets.PAT_TRIGGER  }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'cpartisans',
+              repo: 'tdesktop',
+              workflow_id: 'deploy_linux.yml',
+              ref: 'master',
+              inputs: {
+                runner: 'ubuntu-latest',
+              }
             });
 
       - name: Trigger MacOS build
