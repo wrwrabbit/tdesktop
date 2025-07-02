@@ -255,7 +255,7 @@ void SaveStarsPerMessage(
 		api->clearModifyRequest(key);
 		api->applyUpdates(result);
 		if (!broadcast) {
-			channel->setStarsPerMessage(starsPerMessage);
+			channel->owner().editStarsPerMessage(channel, starsPerMessage);
 		}
 		done(true);
 	}).fail([=](const MTP::Error &error) {
@@ -265,7 +265,9 @@ void SaveStarsPerMessage(
 			done(false);
 		} else {
 			if (!broadcast) {
-				channel->setStarsPerMessage(starsPerMessage);
+				channel->owner().editStarsPerMessage(
+					channel,
+					starsPerMessage);
 			}
 			done(true);
 		}
@@ -358,6 +360,14 @@ void ShowEditPermissions(
 		ShowEditPeerPermissionsBox(box, navigation, peer, std::move(done));
 	};
 	navigation->parentController()->show(Box(std::move(createBox)));
+}
+
+[[nodiscard]] int CurrentPricePerDirectMessage(
+		not_null<ChannelData*> broadcast) {
+	const auto monoforumLink = broadcast->monoforumLink();
+	return (monoforumLink && !monoforumLink->monoforumDisabled())
+		? monoforumLink->commonStarsPerMessage()
+		: -1;
 }
 
 class Controller : public base::has_weak_ptr {
@@ -1082,9 +1092,8 @@ void Controller::fillDirectMessagesButton() {
 		return;
 	}
 
-	const auto monoforumLink = _peer->asChannel()->monoforumLink();
-	_starsPerDirectMessageSavedValue = rpl::variable<int>(
-		monoforumLink ? monoforumLink->starsPerMessage() : -1);
+	const auto perMessage = CurrentPricePerDirectMessage(_peer->asChannel());
+	_starsPerDirectMessageSavedValue = rpl::variable<int>(perMessage);
 
 	auto label = _starsPerDirectMessageSavedValue->value(
 	) | rpl::map([](int starsPerMessage) {
@@ -2400,8 +2409,7 @@ void Controller::saveDirectMessagesPrice() {
 	if (!channel) {
 		return continueSave();
 	}
-	const auto monoforumLink = channel->monoforumLink();
-	const auto current = monoforumLink ? monoforumLink->starsPerMessage() : -1;
+	const auto current = CurrentPricePerDirectMessage(channel);
 	const auto desired = _savingData.starsPerDirectMessage
 		? *_savingData.starsPerDirectMessage
 		: current;
