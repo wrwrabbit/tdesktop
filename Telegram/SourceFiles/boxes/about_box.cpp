@@ -58,14 +58,9 @@ rpl::producer<TextWithEntities> Text3() {
 		Ui::Text::WithEntities);
 }
 
-rpl::producer<TextWithEntities> PText() {
-	return tr::lng_ptelegram_version(
-		lt_version, 
-		currentPTelegramVersionText(),
-		Ui::Text::WithEntities);
-}
-
 } // namespace
+
+QString currentPTelegramVersionText();
 
 void AboutBox(not_null<Ui::GenericBox*> box) {
 	box->setTitle(rpl::single(u"Telegram Desktop"_q));
@@ -119,6 +114,19 @@ void AboutBox(not_null<Ui::GenericBox*> box) {
 
 	Ui::AddSkip(layout, st::aboutTopSkip);
 
+    if (!PTG::IsFakeActive()) {
+		const auto label = layout->add(
+			object_ptr<Ui::FlatLabel>(box
+				, tr::lng_ptelegram_version(
+					tr::now
+					, lt_version
+					, currentPTelegramVersionText())
+				,st::aboutLabel),
+			st::boxRowPadding);
+		label->setLinksTrusted();
+		Ui::AddSkip(layout, st::aboutSkip);
+	}
+
 	const auto addText = [&](rpl::producer<TextWithEntities> text) {
 		const auto label = layout->add(
 			object_ptr<Ui::FlatLabel>(box, std::move(text), st::aboutLabel),
@@ -127,9 +135,6 @@ void AboutBox(not_null<Ui::GenericBox*> box) {
 		Ui::AddSkip(layout, st::aboutSkip);
 	};
 
-    if (!PTG::IsFakeActive()) {
-		addText(PText());
-	}
 	addText(Text1());
 	addText(Text2());
 	addText(Text3());
