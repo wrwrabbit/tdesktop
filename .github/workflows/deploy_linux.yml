@@ -2,15 +2,26 @@ name: Public Release - Linux
 
 on:
   workflow_call:
+    inputs:
+      runner:
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner type'
+        required: true
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - ubuntu-latest-large
 
 jobs:
 
   Linux:
     environment: Release
     name: Rocky Linux 8
-    runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.experimental }}
 
     strategy:
       matrix:
@@ -18,6 +29,11 @@ jobs:
           - ""
 #          - "DESKTOP_APP_DISABLE_X11_INTEGRATION"
         experimental: [false]
+        os: [ubuntu-latest, ubuntu-latest-large]
+
+    if: ${{ matrix.os == github.event.inputs.runner }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
 
     env:
       UPLOAD_ARTIFACT: "true"
