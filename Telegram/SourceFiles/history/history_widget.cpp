@@ -98,8 +98,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/history_view_compose_search.h"
 #include "history/view/controls/history_view_forward_panel.h"
 #include "history/view/controls/history_view_draft_options.h"
-#include "history/view/controls/history_view_voice_record_bar.h"
+#include "history/view/controls/history_view_suggest_options.h"
 #include "history/view/controls/history_view_ttl_button.h"
+#include "history/view/controls/history_view_voice_record_bar.h"
 #include "history/view/controls/history_view_webpage_processor.h"
 #include "history/view/reactions/history_view_reactions_button.h"
 #include "history/view/history_view_cursor_state.h"
@@ -1016,7 +1017,7 @@ HistoryWidget::HistoryWidget(
 			action.replyTo.messageId);
 		if (action.replaceMediaOf) {
 		} else if (action.options.scheduled) {
-			cancelReply(lastKeyboardUsed);
+			cancelReplyOrSuggest(lastKeyboardUsed);
 			crl::on_main(this, [=, history = action.history] {
 				controller->showSection(
 					std::make_shared<HistoryView::ScheduledMemento>(history));
@@ -1024,7 +1025,7 @@ HistoryWidget::HistoryWidget(
 		} else {
 			fastShowAtEnd(action.history);
 			if (!_justMarkingAsRead
-				&& cancelReply(lastKeyboardUsed)
+				&& cancelReplyOrSuggest(lastKeyboardUsed)
 				&& !action.clearDraft) {
 				saveCloudDraft();
 			}
@@ -1075,6 +1076,7 @@ Dialogs::EntryState HistoryWidget::computeDialogsEntryState() const {
 		.key = _history,
 		.section = Dialogs::EntryState::Section::History,
 		.currentReplyTo = replyTo(),
+		.currentSuggest = suggestOptions(),
 	};
 }
 
@@ -1936,13 +1938,16 @@ void HistoryWidget::saveFieldToHistoryLocalDraft() {
 				.topicRootId = topicRootId,
 				.monoforumPeerId = monoforumPeerId,
 			},
+			suggestOptions(true),
 			_preview->draft(),
 			_saveEditMsgRequestId));
 	} else {
-		if (_replyTo || !_field->empty()) {
+		const auto suggest = suggestOptions();
+		if (_replyTo || suggest.exists || !_field->empty()) {
 			_history->setLocalDraft(std::make_unique<Data::Draft>(
 				_field,
 				_replyTo,
+				suggest,
 				_preview->draft()));
 		} else {
 			_history->clearLocalDraft(topicRootId, monoforumPeerId);
@@ -2231,6 +2236,10 @@ void HistoryWidget::fastShowAtEnd(not_null<History*> history) {
 	_pinnedClickedId = FullMsgId();
 	_minPinnedId = std::nullopt;
 	if (_history->isReadyFor(_showAtMsgId)) {
+		_history->forgetScrollState();
+		if (_migrated) {
+			_migrated->forgetScrollState();
+		}
 		historyLoaded();
 	} else {
 		firstLoadMessages();
@@ -2300,12 +2309,21 @@ bool HistoryWidget::applyDraft(FieldHistoryAction fieldHistoryAction) {
 		if (!_replyEditMsg) {
 			requestMessageData(_editMsgId);
 		}
+		if (editDraft && editDraft->suggest) {
+			using namespace HistoryView;
+			applySuggestOptions(editDraft->suggest, SuggestMode::Change);
+		} else {
+			cancelSuggestPost();
+		}
 	} else {
 		const auto draft = _history->localDraft(MsgId(), PeerId());
 		_processingReplyTo = draft ? draft->reply : FullReplyTo();
 		if (_processingReplyTo) {
 			_processingReplyItem = session().data().message(
 				_processingReplyTo.messageId);
+		} else if (draft && draft->suggest) {
+			using namespace HistoryView;
+			applySuggestOptions(draft->suggest, SuggestMode::New);
 		}
 		processReply();
 	}
@@ -2381,7 +2399,9 @@ void HistoryWidget::showHistory(
 		if (_peer->id == peerId) {
 			updateForwarding();
 
-			if (showAtMsgId == ShowAtUnreadMsgId
+			if (params.reapplyLocalDraft) {
+				return;
+			} else if (showAtMsgId == ShowAtUnreadMsgId
 				&& insideJumpToEndInsteadOfToUnread()) {
 				DEBUG_LOG(("JumpToEnd(%1, %2, %3): "
 					"Jumping to end instead of unread."
@@ -2516,6 +2536,7 @@ void HistoryWidget::showHistory(
 		setHistory(nullptr);
 		_list = nullptr;
 		_peer = nullptr;
+		_suggestOptions = nullptr;
 		_sendPayment.clear();
 		_topicsRequested.clear();
 		_canSendMessages = false;
@@ -2642,6 +2663,7 @@ void HistoryWidget::showHistory(
 		} else if (_peer->isRepliesChat() || _peer->isVerifyCodes()) {
 			updateNotifyControls();
 		}
+		refreshSuggestPostToggle();
 		refreshScheduledToggle();
 		refreshSendGiftToggle();
 		refreshSendAsToggle();
@@ -2953,6 +2975,7 @@ void HistoryWidget::registerDraftSource() {
 			(editMsgId
 				? FullReplyTo{ FullMsgId(peerId, editMsgId) }
 				: _replyTo),
+			suggestOptions(editMsgId != 0),
 			_field->getTextWithTags(),
 			_preview->draft(),
 		};
@@ -3047,6 +3070,7 @@ bool HistoryWidget::updateReplaceMediaButton() {
 				controller(),
 				{ _history->peer->id, _editMsgId },
 				_field->getTextWithTags(),
+				suggestOptions(),
 				_mediaEditManager.spoilered(),
 				_mediaEditManager.invertCaption(),
 				crl::guard(_list, [=] { cancelEdit(); }));
@@ -3190,6 +3214,53 @@ void HistoryWidget::refreshSendGiftToggle() {
 	}
 }
 
+void HistoryWidget::applySuggestOptions(
+		SuggestPostOptions suggest,
+		HistoryView::SuggestMode mode) {
+	Expects(suggest.exists);
+
+	using namespace HistoryView;
+	_suggestOptions = std::make_unique<SuggestOptions>(
+		controller()->uiShow(),
+		_peer,
+		suggest,
+		mode);
+	_suggestOptions->updates() | rpl::start_with_next([=] {
+		updateField();
+		saveDraftWithTextNow();
+	}, _suggestOptions->lifetime());
+	saveDraftWithTextNow();
+}
+
+void HistoryWidget::saveDraftWithTextNow() {
+	_saveDraftText = true;
+	_saveDraftStart = crl::now();
+	saveDraft();
+}
+
+void HistoryWidget::refreshSuggestPostToggle() {
+	const auto has = _peer
+		&& _peer->isMonoforum()
+		&& !_peer->amMonoforumAdmin();
+	if (!_toggleSuggestPost && has) {
+		_toggleSuggestPost.create(this, st::historySuggestPostToggle);
+		_toggleSuggestPost->setVisible(!_suggestOptions);
+		_toggleSuggestPost->addClickHandler([=] {
+			using namespace HistoryView;
+			applySuggestOptions({ .exists = 1 }, SuggestMode::New);
+			cancelReply();
+			_processingReplyTo = FullReplyTo();
+			_processingReplyItem = nullptr;
+			updateControlsVisibility();
+			updateControlsGeometry();
+		});
+		orderWidgets();
+	} else if (_toggleSuggestPost && !has) {
+		_toggleSuggestPost.destroy();
+		cancelSuggestPost();
+	}
+}
+
 void HistoryWidget::setupSendAsToggle() {
 	session().sendAsPeers().updated(
 	) | rpl::filter([=](not_null<PeerData*> peer) {
@@ -3330,6 +3401,9 @@ void HistoryWidget::updateControlsVisibility() {
 		if (_scheduled) {
 			_scheduled->hide();
 		}
+		if (_toggleSuggestPost) {
+			_toggleSuggestPost->hide();
+		}
 		if (_giftToUser) {
 			_giftToUser->hide();
 		}
@@ -3444,6 +3518,14 @@ void HistoryWidget::updateControlsVisibility() {
 					rightButtonsChanged = true;
 				}
 			}
+			if (_toggleSuggestPost) {
+				const auto was = _toggleSuggestPost->isVisible();
+				const auto now = !_suggestOptions;
+				if (was != now) {
+					_toggleSuggestPost->setVisible(now);
+					rightButtonsChanged = true;
+				}
+			}
 			if (_giftToUser) {
 				const auto was = _giftToUser->isVisible();
 				const auto now = (!_editMsgId) && (!hideExtraButtons);
@@ -3473,7 +3555,8 @@ void HistoryWidget::updateControlsVisibility() {
 			|| _replyTo
 			|| readyToForward()
 			|| _previewDrawPreview
-			|| _kbReplyTo) {
+			|| _kbReplyTo
+			|| _suggestOptions) {
 			if (_fieldBarCancel->isHidden()) {
 				_fieldBarCancel->show();
 				updateControlsGeometry();
@@ -3501,6 +3584,9 @@ void HistoryWidget::updateControlsVisibility() {
 		}
 		if (_scheduled) {
 			_scheduled->hide();
+		}
+		if (_toggleSuggestPost) {
+			_toggleSuggestPost->hide();
 		}
 		if (_giftToUser) {
 			_giftToUser->hide();
@@ -4387,7 +4473,7 @@ TextWithEntities HistoryWidget::prepareTextForEditMsg() const {
 	return left;
 }
 
-void HistoryWidget::saveEditMsg() {
+void HistoryWidget::saveEditMessage(Api::SendOptions options) {
 	Expects(_history != nullptr);
 
 	if (_saveEditMsgRequestId) {
@@ -4410,9 +4496,11 @@ void HistoryWidget::saveEditMsg() {
 			|| webPageDraft.url.isEmpty()
 			|| !webPageDraft.manual)
 		&& !hasMediaWithCaption) {
-		const auto suggestModerateActions = false;
-		controller()->show(
-			Box<DeleteMessagesBox>(item, suggestModerateActions));
+		if (item->computeSuggestionActions() == SuggestionActions::None) {
+			const auto suggestModerateActions = false;
+			controller()->show(
+				Box<DeleteMessagesBox>(item, suggestModerateActions));
+		}
 		return;
 	} else {
 		const auto maxCaptionSize = !hasMediaWithCaption
@@ -4474,11 +4562,27 @@ void HistoryWidget::saveEditMsg() {
 		})();
 	};
 
+	options.invertCaption = _mediaEditManager.invertCaption();
+	options.suggest = suggestOptions(true);
+
+	const auto withPaymentApproved = [=](int approved) {
+		auto copy = options;
+		copy.starsApproved = approved;
+		saveEditMessage(copy);
+	};
+	const auto checked = checkSendPayment(
+		1 + int(_forwardPanel->items().size()),
+		options,
+		withPaymentApproved);
+	if (!checked) {
+		return;
+	}
+
 	_saveEditMsgRequestId = Api::EditTextMessage(
 		item,
 		sending,
 		webPageDraft,
-		{ .invertCaption = _mediaEditManager.invertCaption() },
+		options,
 		done,
 		fail,
 		_mediaEditManager.spoilered());
@@ -4539,6 +4643,7 @@ Api::SendAction HistoryWidget::prepareSendAction(
 		Api::SendOptions options) const {
 	auto result = Api::SendAction(_history, options);
 	result.replyTo = replyTo();
+	result.options.suggest = suggestOptions();
 	result.options.sendAs = _sendAs
 		? _history->session().sendAsPeers().resolveChosen(
 			_history->peer).get()
@@ -4556,15 +4661,15 @@ void HistoryWidget::sendVoice(const VoiceToSend &data) {
 		copy.options.starsApproved = approved;
 		sendVoice(copy);
 	};
+	auto action = prepareSendAction(data.options);
 	const auto checked = checkSendPayment(
 		1 + int(_forwardPanel->items().size()),
-		data.options.starsApproved,
+		action.options,
 		withPaymentApproved);
 	if (!checked) {
 		return;
 	}
 
-	auto action = prepareSendAction(data.options);
 	session().api().sendVoiceMessage(
 		data.bytes,
 		data.waveform,
@@ -4578,7 +4683,7 @@ void HistoryWidget::send(Api::SendOptions options) {
 	if (!_history) {
 		return;
 	} else if (_editMsgId) {
-		saveEditMsg();
+		saveEditMessage({});
 		return;
 	} else if (!options.scheduled && showSlowmodeError()) {
 		return;
@@ -4605,7 +4710,7 @@ void HistoryWidget::send(Api::SendOptions options) {
 			message.textWithTags,
 			ignoreSlowmodeCountdown,
 			withPaymentApproved,
-			options.starsApproved)) {
+			message.action.options)) {
 		return;
 	}
 
@@ -4619,9 +4724,7 @@ void HistoryWidget::send(Api::SendOptions options) {
 	if (_preview) {
 		_preview->apply({ .removed = true });
 	}
-	_saveDraftText = true;
-	_saveDraftStart = crl::now();
-	saveDraft();
+	saveDraftWithTextNow();
 
 	hideSelectorControlsAnimated();
 
@@ -4963,14 +5066,14 @@ FullMsgId HistoryWidget::cornerButtonsCurrentId() {
 
 bool HistoryWidget::checkSendPayment(
 		int messagesCount,
-		int starsApproved,
+		Api::SendOptions options,
 		Fn<void(int)> withPaymentApproved) {
 	return _peer
 		&& _sendPayment.check(
 			controller(),
 			_peer,
+			options,
 			messagesCount,
-			starsApproved,
 			std::move(withPaymentApproved));
 }
 
@@ -5112,7 +5215,11 @@ void HistoryWidget::updateOverStates(QPoint pos) {
 		st::historyReplyHeight);
 	const auto hasWebPage = !!_previewDrawPreview;
 	const auto inDetails = detailsRect.contains(pos)
-		&& (_editMsgId || replyTo() || isReadyToForward || hasWebPage);
+		&& (_editMsgId
+			|| replyTo()
+			|| isReadyToForward
+			|| hasWebPage
+			|| _suggestOptions);
 	const auto inPhotoEdit = inDetails
 		&& _photoEditMedia
 		&& QRect(
@@ -5170,9 +5277,11 @@ void HistoryWidget::sendBotCommand(
 		copy.starsApproved = approved;
 		sendBotCommand(request, copy);
 	};
+
+	const auto action = prepareSendAction(options);
 	const auto checked = checkSendPayment(
 		1,
-		options.starsApproved,
+		action.options,
 		withPaymentApproved);
 	if (!checked) {
 		return;
@@ -5187,7 +5296,7 @@ void HistoryWidget::sendBotCommand(
 		? request.command
 		: Bot::WrapCommandInChat(_peer, request.command, request.context);
 
-	auto message = Api::MessageToSend(prepareSendAction(options));
+	auto message = Api::MessageToSend(action);
 	message.textWithTags = { toSend, TextWithTags::Tags() };
 	message.action.replyTo = request.replyTo
 		? ((!_peer->isUser()/* && (botStatus == 0 || botStatus == 2)*/)
@@ -5657,7 +5766,8 @@ void HistoryWidget::toggleKeyboard(bool manual) {
 			if (!readyToForward()
 				&& !_previewDrawPreview
 				&& !_editMsgId
-				&& !_replyTo) {
+				&& !_replyTo
+				&& !_suggestOptions) {
 				_fieldBarCancel->hide();
 				updateMouseTracking();
 			}
@@ -5878,7 +5988,7 @@ void HistoryWidget::moveFieldControls() {
 	}
 
 // (_botMenu.button) (_attachToggle|_replaceMedia) (_sendAs) ---- _inlineResults ------------------------------ _tabbedPanel ------ _fieldBarCancel
-// (_attachDocument|_attachPhoto) _field (_ttlInfo) (_scheduled) (_giftToUser) (_silent|_cmdStart|_kbShow) (_kbHide|_tabbedSelectorToggle) _send
+// (_attachDocument|_attachPhoto) _field (_ttlInfo) (_scheduled) (_giftToUser) (_silent|_cmdStart|_kbShow) (_toggleSuggestPost) (_kbHide|_tabbedSelectorToggle) _send
 // (_botStart|_unblock|_joinChannel|_muteUnmute|_reportMessages)
 
 	auto buttonsBottom = bottom - _attachToggle->height();
@@ -5919,6 +6029,10 @@ void HistoryWidget::moveFieldControls() {
 	const auto kbShowShown = _history && !_kbShown && _keyboard->hasMarkup();
 	if (kbShowShown || _cmdStartShown || _silent) {
 		right += _botCommandStart->width();
+	}
+	if (_toggleSuggestPost) {
+		_toggleSuggestPost->moveToRight(right, buttonsBottom);
+		right += _toggleSuggestPost->width();
 	}
 	if (_giftToUser) {
 		_giftToUser->moveToRight(right, buttonsBottom);
@@ -5983,6 +6097,9 @@ void HistoryWidget::updateFieldSize() {
 	}
 	if (_silent && !_silent->isHidden()) {
 		fieldWidth -= _silent->width();
+	}
+	if (_toggleSuggestPost && !_toggleSuggestPost->isHidden()) {
+		fieldWidth -= _toggleSuggestPost->width();
 	}
 	if (_giftToUser && !_giftToUser->isHidden()) {
 		fieldWidth -= _giftToUser->width();
@@ -6062,11 +6179,9 @@ void HistoryWidget::updateFieldPlaceholder() {
 			&& !_keyboard->placeholder().isEmpty()) {
 			return rpl::single(_keyboard->placeholder());
 		} else if (const auto stars = peer->starsPerMessageChecked()) {
-			return tr::lng_message_paid_ph(
-				lt_amount,
-				tr::lng_prize_credits_amount(
-					lt_count,
-					rpl::single(stars * 1.)));
+			return tr::lng_message_stars_ph(
+				lt_count,
+				rpl::single(stars * 1.));
 		} else if (const auto channel = peer->asChannel()) {
 			const auto topic = resolveReplyToTopic();
 			const auto topicRootId = topic
@@ -6186,7 +6301,7 @@ bool HistoryWidget::showSendMessageError(
 		const TextWithTags &textWithTags,
 		bool ignoreSlowmodeCountdown,
 		Fn<void(int starsApproved)> withPaymentApproved,
-		int starsApproved) {
+		Api::SendOptions options) {
 	if (!_canSendMessages) {
 		return false;
 	}
@@ -6207,7 +6322,7 @@ bool HistoryWidget::showSendMessageError(
 	return withPaymentApproved
 		&& !checkSendPayment(
 			request.messagesCount,
-			starsApproved,
+			options,
 			withPaymentApproved);
 }
 
@@ -6238,6 +6353,7 @@ bool HistoryWidget::confirmSendingFiles(
 				{ _history->peer->id, _editMsgId },
 				std::move(list),
 				_field->getTextWithTags(),
+				suggestOptions(),
 				_mediaEditManager.spoilered(),
 				_mediaEditManager.invertCaption(),
 				crl::guard(_list, [=] { cancelEdit(); }));
@@ -6321,6 +6437,11 @@ void HistoryWidget::sendingFilesConfirmed(
 void HistoryWidget::sendingFilesConfirmed(
 		std::shared_ptr<Ui::PreparedBundle> bundle,
 		Api::SendOptions options) {
+	const auto compress = bundle->way.sendImagesAsPhotos();
+	const auto type = compress ? SendMediaType::Photo : SendMediaType::File;
+	auto action = prepareSendAction(options);
+	action.clearDraft = false;
+
 	const auto withPaymentApproved = [=](int approved) {
 		auto copy = options;
 		copy.starsApproved = approved;
@@ -6328,16 +6449,12 @@ void HistoryWidget::sendingFilesConfirmed(
 	};
 	const auto checked = checkSendPayment(
 		bundle->totalCount,
-		options.starsApproved,
+		action.options,
 		withPaymentApproved);
 	if (!checked) {
 		return;
 	}
 
-	const auto compress = bundle->way.sendImagesAsPhotos();
-	const auto type = compress ? SendMediaType::Photo : SendMediaType::File;
-	auto action = prepareSendAction(options);
-	action.clearDraft = false;
 	if (bundle->sendComment) {
 		auto message = Api::MessageToSend(action);
 		message.textWithTags = base::take(bundle->caption);
@@ -6662,6 +6779,15 @@ FullReplyTo HistoryWidget::replyTo() const {
 		: FullReplyTo();
 }
 
+SuggestPostOptions HistoryWidget::suggestOptions(
+		bool skipNoAdminCheck) const {
+	const auto checked = skipNoAdminCheck
+		|| (_history && _history->suggestDraftAllowed());
+	return (checked && _suggestOptions)
+		? _suggestOptions->values()
+		: SuggestPostOptions();
+}
+
 bool HistoryWidget::hasSavedScroll() const {
 	Expects(_history != nullptr);
 
@@ -6869,7 +6995,8 @@ void HistoryWidget::updateHistoryGeometry(
 		if (_editMsgId
 			|| replyTo()
 			|| readyToForward()
-			|| _previewDrawPreview) {
+			|| _previewDrawPreview
+			|| _suggestOptions) {
 			newScrollHeight -= st::historyReplyHeight;
 		}
 		if (_kbShown) {
@@ -7215,7 +7342,8 @@ void HistoryWidget::updateBotKeyboard(History *h, bool force) {
 			_kbReplyTo = nullptr;
 			if (!readyToForward()
 				&& !_previewDrawPreview
-				&& !_replyTo) {
+				&& !_replyTo
+				&& !_suggestOptions) {
 				_fieldBarCancel->hide();
 				updateMouseTracking();
 			}
@@ -7234,7 +7362,8 @@ void HistoryWidget::updateBotKeyboard(History *h, bool force) {
 		if (!readyToForward()
 			&& !_previewDrawPreview
 			&& !_replyTo
-			&& !_editMsgId) {
+			&& !_editMsgId
+			&& !_suggestOptions) {
 			_fieldBarCancel->hide();
 			updateMouseTracking();
 		}
@@ -7362,6 +7491,7 @@ void HistoryWidget::mousePressEvent(QMouseEvent *e) {
 			_photoEditMedia,
 			{ _history->peer->id, _editMsgId },
 			_field->getTextWithTags(),
+			suggestOptions(),
 			_mediaEditManager.spoilered(),
 			_mediaEditManager.invertCaption(),
 			crl::guard(_list, [=] { cancelEdit(); }));
@@ -7370,10 +7500,14 @@ void HistoryWidget::mousePressEvent(QMouseEvent *e) {
 	} else if (_previewDrawPreview) {
 		editDraftOptions();
 	} else if (_editMsgId) {
-		controller()->showPeerHistory(
-			_peer,
-			Window::SectionShow::Way::Forward,
-			_editMsgId);
+		if (_suggestOptions) {
+			_suggestOptions->edit();
+		} else {
+			controller()->showPeerHistory(
+				_peer,
+				Window::SectionShow::Way::Forward,
+				_editMsgId);
+		}
 	} else if (_replyTo
 		&& ((e->modifiers() & Qt::ControlModifier)
 			|| (e->button() != Qt::LeftButton))) {
@@ -7388,6 +7522,8 @@ void HistoryWidget::mousePressEvent(QMouseEvent *e) {
 			_kbReplyTo->history()->peer->id,
 			Window::SectionShow::Way::Forward,
 			_kbReplyTo->id);
+	} else if (_suggestOptions) {
+		_suggestOptions->edit();
 	}
 }
 
@@ -7396,6 +7532,7 @@ void HistoryWidget::editDraftOptions() {
 
 	const auto history = _history;
 	const auto reply = _replyTo;
+	const auto suggest = suggestOptions();
 	const auto webpage = _preview->draft();
 	const auto forward = _forwardPanel->draft();
 
@@ -7420,7 +7557,7 @@ void HistoryWidget::editDraftOptions() {
 	EditDraftOptions({
 		.show = controller()->uiShow(),
 		.history = history,
-		.draft = Data::Draft(_field, reply, _preview->draft()),
+		.draft = Data::Draft(_field, reply, suggest, _preview->draft()),
 		.usedLink = _preview->link(),
 		.forward = _forwardPanel->draft(),
 		.links = _preview->links(),
@@ -7647,9 +7784,13 @@ void HistoryWidget::sendInlineResult(InlineBots::ResultSelected result) {
 		copy.options.starsApproved = approved;
 		sendInlineResult(copy);
 	};
+
+	auto action = prepareSendAction(result.options);
+	action.generateLocal = true;
+
 	const auto checked = checkSendPayment(
 		1,
-		result.options.starsApproved,
+		action.options,
 		withPaymentApproved);
 	if (!checked) {
 		return;
@@ -7657,9 +7798,6 @@ void HistoryWidget::sendInlineResult(InlineBots::ResultSelected result) {
 
 	controller()->sendingAnimation().appendSending(
 		result.messageSendingFrom);
-
-	auto action = prepareSendAction(result.options);
-	action.generateLocal = true;
 	session().api().sendInlineResult(
 		result.bot,
 		result.result.get(),
@@ -7667,9 +7805,7 @@ void HistoryWidget::sendInlineResult(InlineBots::ResultSelected result) {
 		result.messageSendingFrom.localId);
 
 	clearFieldText();
-	_saveDraftText = true;
-	_saveDraftStart = crl::now();
-	saveDraft();
+	saveDraftWithTextNow();
 
 	auto &bots = cRefRecentInlineBots();
 	const auto index = bots.indexOf(result.bot);
@@ -8270,7 +8406,7 @@ bool HistoryWidget::sendExistingDocument(
 	};
 	const auto checked = checkSendPayment(
 		1,
-		messageToSend.action.options.starsApproved,
+		messageToSend.action.options,
 		withPaymentApproved);
 	if (!checked) {
 		return false;
@@ -8283,9 +8419,7 @@ bool HistoryWidget::sendExistingDocument(
 
 	if (_autocomplete && _autocomplete->stickersShown()) {
 		clearFieldText();
-		//_saveDraftText = true;
-		//_saveDraftStart = crl::now();
-		//saveDraft();
+		//saveDraftWithTextNow();
 
 		// won't be needed if SendInlineBotResult will clear the cloud draft
 		saveCloudDraft();
@@ -8311,6 +8445,7 @@ bool HistoryWidget::sendExistingPhoto(
 	} else if (showSlowmodeError()) {
 		return false;
 	}
+	const auto action = prepareSendAction(options);
 
 	const auto withPaymentApproved = [=](int approved) {
 		auto copy = options;
@@ -8319,15 +8454,13 @@ bool HistoryWidget::sendExistingPhoto(
 	};
 	const auto checked = checkSendPayment(
 		1,
-		options.starsApproved,
+		action.options,
 		withPaymentApproved);
 	if (!checked) {
 		return false;
 	}
 
-	Api::SendExistingPhoto(
-		Api::MessageToSend(prepareSendAction(options)),
-		photo);
+	Api::SendExistingPhoto(Api::MessageToSend(action), photo);
 
 	hideSelectorControlsAnimated();
 
@@ -8537,7 +8670,9 @@ void HistoryWidget::processReply() {
 
 	if (!_peer || !_processingReplyTo) {
 		return processCancel();
-	} else if (!_processingReplyItem) {
+	}
+	cancelSuggestPost();
+	if (!_processingReplyItem) {
 		session().api().requestMessageData(
 			session().data().peer(_processingReplyTo.messageId.peer),
 			_processingReplyTo.messageId.msg,
@@ -8596,16 +8731,19 @@ void HistoryWidget::setReplyFieldsFromProcessing() {
 	if (_editMsgId) {
 		if (const auto localDraft = _history->localDraft({}, {})) {
 			localDraft->reply = id;
+			localDraft->suggest = SuggestPostOptions();
 		} else {
 			_history->setLocalDraft(std::make_unique<Data::Draft>(
 				TextWithTags(),
 				id,
+				SuggestPostOptions(),
 				MessageCursor(),
 				Data::WebPageDraft()));
 		}
 	} else {
 		_replyEditMsg = item;
 		_replyTo = id;
+		cancelSuggestPost();
 		updateReplyEditText(_replyEditMsg);
 		updateCanSendMessage();
 		updateBotKeyboard();
@@ -8616,10 +8754,7 @@ void HistoryWidget::setReplyFieldsFromProcessing() {
 		refreshTopBarActiveChat();
 	}
 
-	_saveDraftText = true;
-	_saveDraftStart = crl::now();
-	saveDraft();
-
+	saveDraftWithTextNow();
 	setInnerFocus();
 }
 
@@ -8631,6 +8766,11 @@ void HistoryWidget::editMessage(
 	} else if (_voiceRecordBar->isActive()) {
 		controller()->showToast(tr::lng_edit_caption_voice(tr::now));
 		return;
+	} else if (const auto media = item->media()) {
+		if (const auto todolist = media->todolist()) {
+			Window::PeerMenuEditTodoList(controller(), item);
+			return;
+		}
 	} else if (_composeSearch) {
 		_composeSearch->hideAnimated();
 	}
@@ -8640,10 +8780,12 @@ void HistoryWidget::editMessage(
 		_send->clearState();
 	}
 	if (!_editMsgId) {
-		if (_replyTo || !_field->empty()) {
+		const auto suggest = suggestOptions();
+		if (_replyTo || suggest.exists || !_field->empty()) {
 			_history->setLocalDraft(std::make_unique<Data::Draft>(
 				_field,
 				_replyTo,
+				suggest,
 				_preview->draft()));
 		} else {
 			_history->clearLocalDraft(MsgId(), PeerId());
@@ -8660,6 +8802,7 @@ void HistoryWidget::editMessage(
 	_history->setLocalEditDraft(std::make_unique<Data::Draft>(
 		editData,
 		FullReplyTo{ item->fullId() },
+		SuggestPostOptions(),
 		cursor,
 		previewDraft));
 	applyDraft();
@@ -8676,10 +8819,7 @@ void HistoryWidget::editMessage(
 	updateField();
 	SelectTextInFieldWithMargins(_field, selection);
 
-	_saveDraftText = true;
-	_saveDraftStart = crl::now();
-	saveDraft();
-
+	saveDraftWithTextNow();
 	setInnerFocus();
 }
 
@@ -8736,6 +8876,12 @@ bool HistoryWidget::lastForceReplyReplied() const {
 			== FullMsgId(_peer->id, _history->lastKeyboardId));
 }
 
+bool HistoryWidget::cancelReplyOrSuggest(bool lastKeyboardUsed) {
+	const auto ok1 = cancelReply(lastKeyboardUsed);
+	const auto ok2 = cancelSuggestPost();
+	return ok1 || ok2;
+}
+
 bool HistoryWidget::cancelReply(bool lastKeyboardUsed) {
 	bool wasReply = false;
 	if (_replyTo) {
@@ -8746,7 +8892,8 @@ bool HistoryWidget::cancelReply(bool lastKeyboardUsed) {
 		mouseMoveEvent(0);
 		if (!readyToForward()
 			&& !_previewDrawPreview
-			&& !_kbReplyTo) {
+			&& !_kbReplyTo
+			&& !_suggestOptions) {
 			_fieldBarCancel->hide();
 			updateMouseTracking();
 		}
@@ -8767,9 +8914,7 @@ bool HistoryWidget::cancelReply(bool lastKeyboardUsed) {
 		}
 	}
 	if (wasReply) {
-		_saveDraftText = true;
-		_saveDraftStart = crl::now();
-		saveDraft();
+		saveDraftWithTextNow();
 	}
 	if (!_editMsgId
 		&& _keyboard->singleUse()
@@ -8783,7 +8928,7 @@ bool HistoryWidget::cancelReply(bool lastKeyboardUsed) {
 }
 
 void HistoryWidget::cancelReplyAfterMediaSend(bool lastKeyboardUsed) {
-	if (cancelReply(lastKeyboardUsed)) {
+	if (cancelReplyOrSuggest(lastKeyboardUsed)) {
 		saveCloudDraft();
 	}
 }
@@ -8807,6 +8952,7 @@ void HistoryWidget::cancelEdit() {
 	_replyEditMsg = nullptr;
 	setEditMsgId(0);
 	_history->clearLocalEditDraft(MsgId(), PeerId());
+	cancelSuggestPost();
 	applyDraft();
 
 	if (_saveEditMsgRequestId) {
@@ -8814,14 +8960,13 @@ void HistoryWidget::cancelEdit() {
 		_saveEditMsgRequestId = 0;
 	}
 
-	_saveDraftText = true;
-	_saveDraftStart = crl::now();
-	saveDraft();
+	saveDraftWithTextNow();
 
 	mouseMoveEvent(nullptr);
 	if (!readyToForward()
 		&& !_previewDrawPreview
-		&& !replyTo()) {
+		&& !replyTo()
+		&& !_suggestOptions) {
 		_fieldBarCancel->hide();
 		updateMouseTracking();
 	}
@@ -8851,7 +8996,20 @@ void HistoryWidget::cancelFieldAreaState() {
 		_history->setForwardDraft(MsgId(), PeerId(), {});
 	} else if (_kbReplyTo) {
 		toggleKeyboard();
+	} else if (_suggestOptions) {
+		cancelSuggestPost();
 	}
+}
+
+bool HistoryWidget::cancelSuggestPost() {
+	if (!_suggestOptions) {
+		return false;
+	}
+	_suggestOptions = nullptr;
+	updateControlsVisibility();
+	updateControlsGeometry();
+	saveDraftWithTextNow();
+	return true;
 }
 
 void HistoryWidget::fullInfoUpdated() {
@@ -8956,8 +9114,9 @@ bool HistoryWidget::updateCanSendMessage() {
 	_canSendMessages = newCanSendMessages;
 	_canSendTexts = newCanSendTexts;
 	if (!_canSendMessages) {
-		cancelReply();
+		cancelReplyOrSuggest();
 	}
+	refreshSuggestPostToggle();
 	refreshScheduledToggle();
 	refreshSendGiftToggle();
 	refreshSilentToggle();
@@ -9030,8 +9189,9 @@ void HistoryWidget::escape() {
 		}
 	} else if (_autocomplete && !_autocomplete->isHidden()) {
 		_autocomplete->hideAnimated();
-	} else if (_replyTo && _field->getTextWithTags().text.isEmpty()) {
-		cancelReply();
+	} else if ((_replyTo || _suggestOptions)
+		&& _field->getTextWithTags().empty()) {
+		cancelReplyOrSuggest();
 	} else if (auto &voice = _voiceRecordBar; voice->isActive()) {
 		voice->showDiscardBox(nullptr, anim::type::normal);
 	} else {
@@ -9257,13 +9417,12 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 	auto backh = fieldHeight() + 2 * st::historySendPadding;
 	auto hasForward = readyToForward();
 	auto drawMsgText = (_editMsgId || _replyTo) ? _replyEditMsg : _kbReplyTo;
-	if (_editMsgId || _replyTo || (!hasForward && _kbReplyTo)) {
-		backy -= st::historyReplyHeight;
-		backh += st::historyReplyHeight;
-	} else if (hasForward) {
-		backy -= st::historyReplyHeight;
-		backh += st::historyReplyHeight;
-	} else if (_previewDrawPreview) {
+	if (_editMsgId
+		|| _replyTo
+		|| hasForward
+		|| _kbReplyTo
+		|| _previewDrawPreview
+		|| _suggestOptions) {
 		backy -= st::historyReplyHeight;
 		backh += st::historyReplyHeight;
 	}
@@ -9327,14 +9486,18 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 		const auto paused = p.inactive();
 		const auto pausedSpoiler = paused || On(PowerSaving::kChatSpoiler);
 		auto replyLeft = st::historyReplySkip;
-		(_editMsgId
-			? st::historyEditIcon
-			: (_replyTo && !_replyTo.quote.empty())
-			? st::historyQuoteIcon
-			: st::historyReplyIcon).paint(
-				p,
-				st::historyReplyIconPosition + QPoint(0, backy),
-				width());
+		if (_suggestOptions) {
+			_suggestOptions->paintIcon(p, 0, backy, width());
+		} else {
+			(_editMsgId
+				? st::historyEditIcon
+				: (_replyTo && !_replyTo.quote.empty())
+				? st::historyQuoteIcon
+				: st::historyReplyIcon).paint(
+					p,
+					st::historyReplyIconPosition + QPoint(0, backy),
+					width());
+		}
 		if (drawMsgText) {
 			if (hasPreview) {
 				if (preview) {
@@ -9372,37 +9535,41 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 				}
 				replyLeft += st::historyReplyPreview + st::msgReplyBarSkip;
 			}
-			p.setPen(st::historyReplyNameFg);
-			if (_editMsgId) {
-				paintEditHeader(p, rect, replyLeft, backy);
+			if (_suggestOptions) {
+				_suggestOptions->paintLines(p, replyLeft, backy, width());
 			} else {
-				_replyToName.drawElided(
-					p,
-					replyLeft,
-					backy + st::msgReplyPadding.top(),
-					width()
+				p.setPen(st::historyReplyNameFg);
+				if (_editMsgId) {
+					paintEditHeader(p, rect, replyLeft, backy);
+				} else {
+					_replyToName.drawElided(
+						p,
+						replyLeft,
+						backy + st::msgReplyPadding.top(),
+						width()
+							- replyLeft
+							- _fieldBarCancel->width()
+							- st::msgReplyPadding.right());
+				}
+				p.setPen(st::historyComposeAreaFg);
+				_replyEditMsgText.draw(p, {
+					.position = QPoint(
+						replyLeft,
+						st::msgReplyPadding.top()
+							+ st::msgServiceNameFont->height
+							+ backy),
+					.availableWidth = width()
 						- replyLeft
 						- _fieldBarCancel->width()
-						- st::msgReplyPadding.right());
+						- st::msgReplyPadding.right(),
+					.palette = &st::historyComposeAreaPalette,
+					.spoiler = Ui::Text::DefaultSpoilerCache(),
+					.now = now,
+					.pausedEmoji = paused || On(PowerSaving::kEmojiChat),
+					.pausedSpoiler = pausedSpoiler,
+					.elisionLines = 1,
+				});
 			}
-			p.setPen(st::historyComposeAreaFg);
-			_replyEditMsgText.draw(p, {
-				.position = QPoint(
-					replyLeft,
-					st::msgReplyPadding.top()
-						+ st::msgServiceNameFont->height
-						+ backy),
-				.availableWidth = width()
-					- replyLeft
-					- _fieldBarCancel->width()
-					- st::msgReplyPadding.right(),
-				.palette = &st::historyComposeAreaPalette,
-				.spoiler = Ui::Text::DefaultSpoilerCache(),
-				.now = now,
-				.pausedEmoji = paused || On(PowerSaving::kEmojiChat),
-				.pausedSpoiler = pausedSpoiler,
-				.elisionLines = 1,
-			});
 		} else {
 			p.setFont(st::msgDateFont);
 			p.setPen(st::historyComposeAreaFgService);
@@ -9428,6 +9595,8 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 			- _fieldBarCancel->width()
 			- st::msgReplyPadding.right();
 		_forwardPanel->paint(p, x, backy, available, width());
+	} else if (_suggestOptions) {
+		_suggestOptions->paintBar(p, 0, backy, width());
 	}
 }
 
@@ -9529,7 +9698,8 @@ void HistoryWidget::paintEvent(QPaintEvent *e) {
 		if (restrictionHidden
 			|| replyTo()
 			|| readyToForward()
-			|| _kbShown) {
+			|| _kbShown
+			|| _suggestOptions) {
 			if (!isSearching()) {
 				drawField(p, clip);
 			}
