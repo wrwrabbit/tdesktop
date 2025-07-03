@@ -29,10 +29,8 @@ jobs:
           - ""
 #          - "DESKTOP_APP_DISABLE_X11_INTEGRATION"
         experimental: [false]
-        os: [ubuntu-latest, ubuntu-latest-large]
 
-    if: ${{ matrix.os == github.event.inputs.runner }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ github.event.inputs.runner}}
     continue-on-error: ${{ matrix.experimental }}
 
     env:
