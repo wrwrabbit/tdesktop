@@ -82,6 +82,7 @@ jobs:
           branch: master
           repo: cpartisans/tdesktop
           path: Linux
+          name: build_gh
 
       - name: Download MacOS artifacts
         uses: dawidd6/action-download-artifact@v2
@@ -93,6 +94,7 @@ jobs:
           branch: master
           repo: cpartisans/tdesktop
           path: MacOS
+          name: PTelegram_
 
       - name: Download Snap artifacts
         uses: dawidd6/action-download-artifact@v2
@@ -152,7 +154,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: ${{ steps.create_release.outputs.id }},
-              data: await fs.readFile('Linux/build_gh/tsetup.latest.tar.xz')
+              data: await fs.readFile('Linux/tsetup.latest.tar.xz')
             });
 
       - name: Upload MacOS Files
@@ -168,7 +170,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: ${{ steps.create_release.outputs.id }},
-              data: await fs.readFile('MacOS/PTelegram_/tsetup.latest.dmg')
+              data: await fs.readFile('MacOS/tsetup.latest.dmg')
             });
 
       - name: Upload Snap Files
