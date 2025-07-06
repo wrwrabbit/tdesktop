@@ -6,6 +6,7 @@
 
 namespace Ui {
     class SettingsButton;
+    class FlatLabel;
 }
 
 namespace Dialogs {
@@ -37,6 +38,7 @@ private:
     Action* _action = nullptr;
     int _accountIndex;
     std::vector<Ui::SettingsButton*> buttons_;
+    std::vector<Ui::FlatLabel*> labels_;
 };
 
 
