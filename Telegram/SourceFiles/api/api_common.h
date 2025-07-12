@@ -19,6 +19,8 @@ namespace Api {
 
 inline constexpr auto kScheduledUntilOnlineTimestamp = TimeId(0x7FFFFFFE);
 
+[[nodiscard]] MTPSuggestedPost SuggestToMTP(SuggestPostOptions suggest);
+
 struct SendOptions {
 	uint64 price = 0;
 	PeerData *sendAs = nullptr;
@@ -33,6 +35,7 @@ struct SendOptions {
 
     std::optional<TimeId> ptgAutoDelete = std::nullopt;
 	crl::time ttlSeconds = 0;
+	SuggestPostOptions suggest;
 
 	friend inline bool operator==(
 		const SendOptions &,

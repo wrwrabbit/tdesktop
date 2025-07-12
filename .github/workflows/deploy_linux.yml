@@ -2,15 +2,26 @@ name: Public Release - Linux
 
 on:
   workflow_call:
+    inputs:
+      runner:
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner type'
+        required: true
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - ubuntu-latest-large
 
 jobs:
 
   Linux:
     environment: Release
     name: Rocky Linux 8
-    runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.experimental }}
 
     strategy:
       matrix:
@@ -18,6 +29,9 @@ jobs:
           - ""
 #          - "DESKTOP_APP_DISABLE_X11_INTEGRATION"
         experimental: [false]
+
+    runs-on: ${{ github.event.inputs.runner}}
+    continue-on-error: ${{ matrix.experimental }}
 
     env:
       UPLOAD_ARTIFACT: "true"
@@ -36,7 +50,7 @@ jobs:
           curl -sSL https://install.python-poetry.org | python3 -
           cd Telegram/build/docker/centos_env
           poetry install
-          DOCKERFILE=$(DEBUG= LTO= poetry run gen_dockerfile)
+          DOCKERFILE=$(DEBUG= LTO=1 poetry run gen_dockerfile)
           echo "$DOCKERFILE" > Dockerfile
 
       - name: Free up some disk space.
