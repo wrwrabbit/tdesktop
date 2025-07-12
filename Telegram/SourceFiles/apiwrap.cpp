@@ -4879,28 +4879,21 @@ Api::PeerColors &ApiWrap::peerColors() {
 	return *_peerColors;
 }
 
-void ApiWrap::getDhConfig(int version, int random_length, Fn<void(const MTPmessages_DhConfig &)> done, Fn<void(const MTP::Error &)> fail) {
-    request(MTPmessages_GetDhConfig(
-        MTP_int(version),
-        MTP_int(random_length)
-    )).done([=](const MTPmessages_DhConfig &result) {
-        // Optionally: validate p and g here, and cache if valid
-        done(result);
-    }).fail([=](const MTP::Error &error) {
-        if (fail) fail(error);
-    }).send();
-}
-
 void ApiWrap::requestSecretChat(not_null<UserData*> user) {
     // Generate random_id for the request
     const int32_t random_id = base::RandomValue<int32_t>();
 
     // Lambda to execute after successful DH config retrieval
-    auto doRequestEncryption = [=](const MTPmessages_DhConfig &config) {
+    auto doRequestEncryption = [=](const MTPDmessages_dhConfig&config) {
         // Use config.vp() (prime), config.vg() (generator), etc.
-        // TODO: Validate p and g here if needed
+        const auto p = config.vp().v;
+        const auto g = config.vg().v;
 
-        auto myKey = openssl::DHKey::Generate();
+        // Generate DH key pair using server-provided p and g
+        auto myKey = openssl::DHKey::Generate(
+            bytes::const_span(reinterpret_cast<const bytes::type*>(p.constData()), p.size()),
+            g
+        );
         auto publicValue = myKey->publicKey();
 
         // Send the requestEncryption MTProto call
@@ -4920,13 +4913,20 @@ void ApiWrap::requestSecretChat(not_null<UserData*> user) {
         }).send();
     };
 
-    // Request DH config, then proceed with secret chat request
-    getDhConfig(
-        0,   // version (0 to force fetch)
-        256, // random_length (0 for none, or as needed)
-        doRequestEncryption,
-        [=](const MTP::Error &error) {
-            LOG(("Failed to get DH config for secret chat: %1").arg(error.type()));
-        }
-    );
+	request(MTPmessages_GetDhConfig(
+		MTP_int(0),
+		MTP_int(256)
+	)).done([=](const MTPmessages_DhConfig& result) {
+		// Optionally: validate p and g here, and cache if valid
+		result.match([doRequestEncryption](
+			const MTPDmessages_dhConfig& config) {
+				LOG(("new DhConfig received for requested dialogs."));
+				doRequestEncryption(config);
+			}, [&](const MTPDmessages_dhConfigNotModified& no_config) {
+				LOG(("API Warning?: not-modified received for requested dialogs."));
+				});
+		}).fail([=](const MTP::Error& error) {
+			LOG(("API Error: Failed to get DH config for secret chat: %1").arg(error.type()));
+		}
+	).send();
 }

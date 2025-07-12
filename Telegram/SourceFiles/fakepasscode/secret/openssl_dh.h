@@ -9,15 +9,11 @@ namespace openssl {
 
 class DHKey {
 public:
-    // Standard Telegram DH params (2048 bits, see https://core.telegram.org/api/end-to-end)
-    static const bytes::const_span kDefaultG();
-    static const bytes::const_span kDefaultP();
+    // Generate a new DH key pair (private and public) with custom p/g
+    static std::unique_ptr<DHKey> Generate(bytes::const_span p, int32_t g);
 
-    // Generate a new DH key pair (private and public)
-    static std::unique_ptr<DHKey> Generate();
-
-    // Construct from existing private value
-    explicit DHKey(const openssl::BigNum &privateValue);
+    // Construct from existing private value and custom p/g
+    DHKey(const openssl::BigNum &privateValue, const openssl::BigNum &p, const openssl::BigNum &g);
 
     // Get the public key (g^a mod p)
     bytes::vector publicKey() const;

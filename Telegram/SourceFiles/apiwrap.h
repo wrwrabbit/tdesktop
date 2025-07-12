@@ -429,10 +429,6 @@ public:
 	static constexpr auto kJoinErrorDuration = 5 * crl::time(1000);
 
 	// Secret Chats
-	void getDhConfig(int version, 
-		int random_length, 
-		Fn<void(const MTPmessages_DhConfig &)> done, 
-		Fn<void(const MTP::Error &)> fail = {});
 	void requestSecretChat(not_null<UserData*> user);
 
 private:

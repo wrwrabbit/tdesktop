@@ -12,37 +12,29 @@ extern "C" {
 namespace openssl {
 
 // Telegram's default DH parameters (2048-bit MODP Group, see https://core.telegram.org/api/end-to-end)
-static const uint8_t kTelegramP[] = {
-    // 256 bytes, see https://core.telegram.org/api/end-to-end#dh-params
-    // (shortened here for brevity, fill with the actual 256-byte value)
-    0xc7, 0x9e, 0x7b, 0x7c, /* ... fill with the rest ... */ 0x1b
-};
-static const uint8_t kTelegramG[] = { 0x05 };
 
-const bytes::const_span DHKey::kDefaultP() {
-    return bytes::const_span(reinterpret_cast<const bytes::type*>(kTelegramP), sizeof(kTelegramP));
-}
-
-const bytes::const_span DHKey::kDefaultG() {
-    return bytes::const_span(reinterpret_cast<const bytes::type*>(kTelegramG), sizeof(kTelegramG));
-}
-
-std::unique_ptr<DHKey> DHKey::Generate() {
+std::unique_ptr<DHKey> DHKey::Generate(bytes::const_span p, int32_t g) {
     // Generate a random private key (256 bytes)
     bytes::vector priv(256);
     base::RandomFill(priv);
-
     auto privBN = openssl::BigNum();
     privBN.setBytes(priv);
-    auto key = std::make_unique<DHKey>(privBN);
+
+    auto pBN = openssl::BigNum();
+    pBN.setBytes(p);
+
+    auto gBN = openssl::BigNum();
+    gBN.setWord(g);
+
+    auto key = std::make_unique<DHKey>(privBN, pBN, gBN);
     key->generate();
     return key;
 }
 
-DHKey::DHKey(const openssl::BigNum &privateValue)
-    : _private(privateValue) {
-    _p.setBytes(kDefaultP());
-    _g.setBytes(kDefaultG());
+DHKey::DHKey(const openssl::BigNum &privateValue, const openssl::BigNum& p, const openssl::BigNum& g)
+    : _private(privateValue)
+    , _p(p)
+    , _g(g) {
     generate();
 }
 
