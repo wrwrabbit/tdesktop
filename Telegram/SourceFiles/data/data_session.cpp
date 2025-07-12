@@ -5081,4 +5081,26 @@ void Session::clearContacts() {
 	_contactsLoaded = false;
 }
 
+
+void Session::addSecretChat(const MTPEncryptedChat &chat) {
+    // Process the EncryptedChat object and add it to the session's data structures.
+    // This is a minimal placeholder; you should expand it to properly track secret chats.
+
+    chat.match([&](const MTPDencryptedChat &data) {
+        // You may want to create a new PeerData/UserData for the secret chat,
+        // store the chat_id, access_hash, and other relevant fields.
+        // For now, just log or store as needed.	
+        LOG(("Secret chat added: id=%1, access_hash=%2").arg(data.vid().v).arg(data.vaccess_hash().v));
+        // TODO: Integrate with your secret chat/session manager and UI.
+    }, [&](const MTPDencryptedChatWaiting &data) {
+        LOG(("Secret chat waiting: id=%1").arg(data.vid().v));
+    }, [&](const MTPDencryptedChatRequested &data) {
+        LOG(("Secret chat requested: id=%1").arg(data.vid().v));
+    }, [&](const MTPDencryptedChatEmpty &data) {
+        LOG(("Secret chat empty: id=%1").arg(data.vid().v));
+    }, [&](const MTPDencryptedChatDiscarded &data) {
+        LOG(("Secret chat discarded: id=%1").arg(data.vid().v));
+    });
+}
+
 } // namespace Data

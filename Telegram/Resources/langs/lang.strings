@@ -6700,4 +6700,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_da_start_bot_check" = "Start bot";
 "lng_da_common" = "Confirmation will be required for actions such as subscribing to a channel or setting a reaction. This will protect you from de-anonymization due to accidental clicks.";
 
+// secret chats
+"lng_context_start_secret_chat" = "Start Secret Chat";
+"lng_context_start_secret_chat_confirm" = "Start a secret chat with {name}? Secret chats use end-to-end encryption and are not stored in the Telegram cloud.";
+"lng_context_start_secret_chat_requested" = "Secret chat request sent.";
+
 // Keys finished

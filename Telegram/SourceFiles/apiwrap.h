@@ -426,6 +426,13 @@ public:
 
 	static constexpr auto kJoinErrorDuration = 5 * crl::time(1000);
 
+	// Secret Chats
+	void getDhConfig(int version, 
+		int random_length, 
+		Fn<void(const MTPmessages_DhConfig &)> done, 
+		Fn<void(const MTP::Error &)> fail = {});
+	void requestSecretChat(not_null<UserData*> user);
+
 private:
 	struct MessageDataRequest {
 		using Callbacks = std::vector<Fn<void()>>;
@@ -592,6 +599,8 @@ private:
 	void migrateFail(not_null<PeerData*> peer, const QString &error);
 
 	void checkStatsSessions();
+
+	// Data Members
 
 	const not_null<Main::Session*> _session;
 

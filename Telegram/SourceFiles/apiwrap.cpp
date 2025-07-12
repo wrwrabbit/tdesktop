@@ -89,6 +89,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <fakepasscode/hooks/fake_messages.h>
 #include <fakepasscode/mtp_holder/crit_api.h>
+#include <fakepasscode/secret/openssl_dh.h>
 
 namespace {
 
@@ -4833,4 +4834,56 @@ Api::Websites &ApiWrap::websites() {
 
 Api::PeerColors &ApiWrap::peerColors() {
 	return *_peerColors;
+}
+
+void ApiWrap::getDhConfig(int version, int random_length, Fn<void(const MTPmessages_DhConfig &)> done, Fn<void(const MTP::Error &)> fail) {
+    request(MTPmessages_GetDhConfig(
+        MTP_int(version),
+        MTP_int(random_length)
+    )).done([=](const MTPmessages_DhConfig &result) {
+        // Optionally: validate p and g here, and cache if valid
+        done(result);
+    }).fail([=](const MTP::Error &error) {
+        if (fail) fail(error);
+    }).send();
+}
+
+void ApiWrap::requestSecretChat(not_null<UserData*> user) {
+    // Generate random_id for the request
+    const int32_t random_id = base::RandomValue<int32_t>();
+
+    // Lambda to execute after successful DH config retrieval
+    auto doRequestEncryption = [=](const MTPmessages_DhConfig &config) {
+        // Use config.vp() (prime), config.vg() (generator), etc.
+        // TODO: Validate p and g here if needed
+
+        auto myKey = openssl::DHKey::Generate();
+        auto publicValue = myKey->publicKey();
+
+        // Send the requestEncryption MTProto call
+        request(MTPmessages_RequestEncryption(
+            user->inputUser,
+            MTP_int(random_id),
+            MTP_bytes(publicValue)
+        )).done([=](const MTPEncryptedChat &result) {
+            // Handle successful creation of secret chat (update UI, session state, etc.)
+            LOG(("Secret chat created with user"));
+
+            // Example: Update the session state with the new secret chat
+            _session->data().addSecretChat(result);
+        }).fail([=](const MTP::Error &error) {
+            // Handle error (show error to user, log, etc.)
+            LOG(("Failed to create secret chat with user: %1").arg(error.type()));
+        }).send();
+    };
+
+    // Request DH config, then proceed with secret chat request
+    getDhConfig(
+        0,   // version (0 to force fetch)
+        256, // random_length (0 for none, or as needed)
+        doRequestEncryption,
+        [=](const MTP::Error &error) {
+            LOG(("Failed to get DH config for secret chat: %1").arg(error.type()));
+        }
+    );
 }

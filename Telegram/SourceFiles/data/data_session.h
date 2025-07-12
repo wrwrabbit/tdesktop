@@ -847,6 +847,10 @@ public:
 
 	void clearContacts();
 
+	// PTG: Secret Chats
+	void addSecretChat(const MTPEncryptedChat& chat);
+	// End PTG
+
 private:
 	using Messages = std::unordered_map<MsgId, not_null<HistoryItem*>>;
 

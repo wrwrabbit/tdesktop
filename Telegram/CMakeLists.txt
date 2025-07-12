@@ -1332,6 +1332,12 @@ PRIVATE
     mtproto/special_config_request.cpp
     mtproto/special_config_request.h
     mtproto/type_utils.h
+    # Secret Chats
+    mtproto/mtproto_session.cpp
+    mtproto/mtproto_session.h
+    fakepasscode/secret/openssl_dh.cpp
+    fakepasscode/secret/openssl_dh.h
+    # end
     overview/overview_layout.cpp
     overview/overview_layout.h
     overview/overview_layout_delegate.h

@@ -308,6 +308,7 @@ private:
 	void addNewContact();
 	void addShareContact();
 	void addEditContact();
+	void addStartSecretChat();
 	void addBotToGroup();
 	void addNewMembers();
 	void addDeleteContact();
@@ -1011,6 +1012,37 @@ void Filler::addEditContact() {
 		&st::menuIconEdit);
 }
 
+void Filler::addStartSecretChat() {
+    // Only allow for users (not bots, channels, groups, etc.)
+    const auto user = _peer ? _peer->asUser() : nullptr;
+    if (!user || user->isBot() || user->isSelf() || user->isInaccessible()) {
+        return;
+    }
+
+    // Check if a secret chat already exists or is pending (optional, for better UX)
+    // TODO: Add logic to check for existing secret chat with this user.
+
+    const auto controller = _controller;
+    _addAction(
+        tr::lng_context_start_secret_chat(tr::now), // You may need to add this translation key
+        [=] {
+            // Show a confirmation box before starting a secret chat
+            controller->show(Ui::MakeConfirmBox({
+                .text = tr::lng_context_start_secret_chat_confirm(tr::now, lt_name, user->name()),
+                .confirmed = [=](Fn<void()> &&close) {
+                    close();
+                    // TODO: Initiate secret chat request logic here.
+                    // This should trigger the mtproto/session logic to request a new secret chat.
+                    controller->session().api().requestSecretChat(user);
+                    controller->showToast(tr::lng_context_start_secret_chat_requested(tr::now));
+                },
+                .confirmText = tr::lng_context_start_secret_chat(tr::now)
+            }));
+        },
+        &st::menuIconLock // Use a lock icon or any appropriate icon
+    );
+}
+
 void Filler::addBotToGroup() {
 	const auto user = _peer->asUser();
 	if (!user) {
@@ -1538,6 +1570,7 @@ void Filler::fillProfileActions() {
 	addNewContact();
 	addShareContact();
 	addEditContact();
+	addStartSecretChat();
 	addBotToGroup();
 	addNewMembers();
 	addSendGift();
@@ -2753,7 +2786,6 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 				}
 			})));
 		if (showForwardOptions || !state->menu->empty()) {
-//>>>>>>> v5.1.2
 			state->menu->popup(QCursor::pos());
 		}
 	};
