@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_polls.h"
 #include "api/api_sending.h"
 #include "api/api_text_entities.h"
+#include "api/api_todo_lists.h"
 #include "api/api_self_destruct.h"
 #include "api/api_sensitive_content.h"
 #include "api/api_global_privacy.h"
@@ -182,6 +183,7 @@ ApiWrap::ApiWrap(not_null<Main::Session*> session)
 , _confirmPhone(std::make_unique<Api::ConfirmPhone>(this))
 , _peerPhoto(std::make_unique<Api::PeerPhoto>(this))
 , _polls(std::make_unique<Api::Polls>(this))
+, _todoLists(std::make_unique<Api::TodoLists>(this))
 , _chatParticipants(std::make_unique<Api::ChatParticipants>(this))
 , _unreadThings(std::make_unique<Api::UnreadThings>(this))
 , _ringtones(std::make_unique<Api::Ringtones>(this))
@@ -326,7 +328,7 @@ void ApiWrap::checkChatInvite(
 	request(base::take(_checkInviteRequestId)).cancel();
 	_checkInviteRequestId = request(MTPmessages_CheckChatInvite(
 		MTP_string(hash)
-	)).done(std::move(done)).fail(std::move(fail)).send();
+	)).done(std::move(done)).fail(std::move(fail)).handleFloodErrors().send();
 }
 
 void ApiWrap::checkFilterInvite(
@@ -2159,6 +2161,9 @@ void ApiWrap::saveDraftsToCloud() {
 		if (!textWithTags.tags.isEmpty()) {
 			flags |= MTPmessages_SaveDraft::Flag::f_entities;
 		}
+		if (cloudDraft->suggest) {
+			flags |= MTPmessages_SaveDraft::Flag::f_suggested_post;
+		}
 		auto entities = Api::EntitiesToMTP(
 			_session,
 			TextUtilities::ConvertTextTagsToEntities(textWithTags.tags),
@@ -2174,7 +2179,8 @@ void ApiWrap::saveDraftsToCloud() {
 			Data::WebPageForMTP(
 				cloudDraft->webpage,
 				textWithTags.text.isEmpty()),
-			MTP_long(0) // effect
+			MTP_long(0), // effect
+			Api::SuggestToMTP(cloudDraft->suggest)
 		)).done([=](const MTPBool &result, const MTP::Response &response) {
 			const auto requestId = response.requestId;
 			history->finishSavingCloudDraft(
@@ -2581,7 +2587,10 @@ void ApiWrap::refreshFileReference(
 	});
 }
 
-void ApiWrap::gotWebPages(ChannelData *channel, const MTPmessages_Messages &result, mtpRequestId req) {
+void ApiWrap::gotWebPages(
+		ChannelData *channel,
+		const MTPmessages_Messages &result,
+		mtpRequestId req) {
 	WebPageData::ApplyChanges(_session, channel, result);
 	for (auto i = _webPagesPending.begin(); i != _webPagesPending.cend();) {
 		if (i->second == req) {
@@ -2595,7 +2604,7 @@ void ApiWrap::gotWebPages(ChannelData *channel, const MTPmessages_Messages &resu
 			++i;
 		}
 	}
-	_session->data().sendWebPageGamePollNotifications();
+	_session->data().sendWebPageGamePollTodoListNotifications();
 }
 
 void ApiWrap::updateStickers() {
@@ -3408,6 +3417,9 @@ void ApiWrap::forwardMessages(
 	if (sendAs) {
 		sendFlags |= SendFlag::f_send_as;
 	}
+	if (action.options.suggest) {
+		sendFlags |= SendFlag::f_suggested_post;
+	}
 	const auto kGeneralId = Data::ForumTopic::kGeneralId;
 	const auto topicRootId = action.replyTo.topicRootId;
 	const auto topMsgId = (topicRootId == kGeneralId)
@@ -3420,7 +3432,7 @@ void ApiWrap::forwardMessages(
 	const auto monoforumPeer = monoforumPeerId
 		? session().data().peer(monoforumPeerId).get()
 		: nullptr;
-	if (monoforumPeer) {
+	if (monoforumPeer || (action.options.suggest && action.replyTo)) {
 		sendFlags |= SendFlag::f_reply_to;
 	}
 
@@ -3452,14 +3464,17 @@ void ApiWrap::forwardMessages(
 				MTP_vector<MTPlong>(randomIds),
 				peer->input,
 				MTP_int(topMsgId),
-				(monoforumPeer
+				(action.options.suggest
+					? ReplyToForMTP(history, action.replyTo)
+					: monoforumPeer
 					? MTP_inputReplyToMonoForum(monoforumPeer->input)
 					: MTPInputReplyTo()),
 				MTP_int(action.options.scheduled),
 				(sendAs ? sendAs->input : MTP_inputPeerEmpty()),
 				Data::ShortcutIdToMTP(_session, action.options.shortcutId),
 				MTPint(), // video_timestamp
-				MTP_long(starsPaid)
+				MTP_long(starsPaid),
+				Api::SuggestToMTP(action.options.suggest)
 			)).done([=](const MTPUpdates &result) {
 				if (!scheduled) {
 					this->updates().checkForSentToScheduled(result);
@@ -3509,7 +3524,7 @@ void ApiWrap::forwardMessages(
 				.shortcutId = action.options.shortcutId,
 				.starsPaid = action.options.starsApproved,
 				.postAuthor = NewMessagePostAuthor(action),
-
+				.suggest = HistoryMessageSuggestInfo(action.options),
 				// forwarded messages don't have effects
 				//.effectId = action.options.effectId,
 			}, item);
@@ -3605,6 +3620,7 @@ void ApiWrap::sendSharedContact(
 		.starsPaid = action.options.starsApproved,
 		.postAuthor = NewMessagePostAuthor(action),
 		.effectId = action.options.effectId,
+		.suggest = HistoryMessageSuggestInfo(action.options),
 	}, TextWithEntities(), MTP_messageMediaContact(
 		MTP_string(phone),
 		MTP_string(firstName),
@@ -3653,7 +3669,19 @@ void ApiWrap::editMedia(
 	if (list.files.empty()) return;
 
 	auto &file = list.files.front();
-	const auto to = FileLoadTaskOptions(action);
+	auto to = FileLoadTaskOptions(action);
+	const auto existing = to.replaceMediaOf
+		? session().data().message(action.history->peer, to.replaceMediaOf)
+		: nullptr;
+	if (existing && existing->computeSuggestionActions()
+		== SuggestionActions::AcceptAndDecline) {
+		to.replyTo.messageId = {
+			action.history->peer->id,
+			to.replaceMediaOf
+		};
+		to.replyTo.monoforumPeerId = existing->sublistPeerId();
+		to.replaceMediaOf = MsgId();
+	}
 	_fileLoader->addTask(std::make_unique<FileLoadTask>(
 		&session(),
 		file.path,
@@ -3967,6 +3995,10 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 			sendFlags |= MTPmessages_SendMessage::Flag::f_effect;
 			mediaFlags |= MTPmessages_SendMedia::Flag::f_effect;
 		}
+		if (action.options.suggest) {
+			sendFlags |= MTPmessages_SendMessage::Flag::f_suggested_post;
+			mediaFlags |= MTPmessages_SendMedia::Flag::f_suggested_post;
+		}
 		const auto starsPaid = std::min(
 			peer->starsPerMessageChecked(),
 			action.options.starsApproved);
@@ -3985,6 +4017,7 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 			.starsPaid = starsPaid,
 			.postAuthor = NewMessagePostAuthor(action),
 			.effectId = action.options.effectId,
+			.suggest = HistoryMessageSuggestInfo(action.options),
 		}, sending, media);
 		const auto done = [=](
 				const MTPUpdates &result,
@@ -4034,7 +4067,8 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 					(sendAs ? sendAs->input : MTP_inputPeerEmpty()),
 					mtpShortcut,
 					MTP_long(action.options.effectId),
-					MTP_long(starsPaid)
+					MTP_long(starsPaid),
+					Api::SuggestToMTP(action.options.suggest)
 				), done, fail);
 		} else {
 			histories.sendPreparedMessage(
@@ -4053,7 +4087,8 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 					(sendAs ? sendAs->input : MTP_inputPeerEmpty()),
 					mtpShortcut,
 					MTP_long(action.options.effectId),
-					MTP_long(starsPaid)
+					MTP_long(starsPaid),
+					Api::SuggestToMTP(action.options.suggest)
 				), done, fail);
 		}
 		isFirst = false;
@@ -4361,6 +4396,7 @@ void ApiWrap::sendMediaWithRandomId(
 		| (options.sendAs ? Flag::f_send_as : Flag(0))
 		| (options.shortcutId ? Flag::f_quick_reply_shortcut : Flag(0))
 		| (options.effectId ? Flag::f_effect : Flag(0))
+		| (options.suggest ? Flag::f_suggested_post : Flag(0))
 		| (options.invertCaption ? Flag::f_invert_media : Flag(0))
 		| (starsPaid ? Flag::f_allow_paid_stars : Flag(0));
 
@@ -4389,7 +4425,8 @@ void ApiWrap::sendMediaWithRandomId(
 			(options.sendAs ? options.sendAs->input : MTP_inputPeerEmpty()),
 			Data::ShortcutIdToMTP(_session, options.shortcutId),
 			MTP_long(options.effectId),
-			MTP_long(starsPaid)
+			MTP_long(starsPaid),
+			Api::SuggestToMTP(options.suggest)
 		), [=](const MTPUpdates &result, const MTP::Response &response) {
 		if (done) done(true);
 		if (updateRecentStickers) {
@@ -4444,6 +4481,7 @@ void ApiWrap::sendMultiPaidMedia(
 		| (options.sendAs ? Flag::f_send_as : Flag(0))
 		| (options.shortcutId ? Flag::f_quick_reply_shortcut : Flag(0))
 		| (options.effectId ? Flag::f_effect : Flag(0))
+		| (options.suggest ? Flag::f_suggested_post : Flag(0))
 		| (options.invertCaption ? Flag::f_invert_media : Flag(0))
 		| (starsPaid ? Flag::f_allow_paid_stars : Flag(0));
 
@@ -4471,7 +4509,8 @@ void ApiWrap::sendMultiPaidMedia(
 			(options.sendAs ? options.sendAs->input : MTP_inputPeerEmpty()),
 			Data::ShortcutIdToMTP(_session, options.shortcutId),
 			MTP_long(options.effectId),
-			MTP_long(starsPaid)
+			MTP_long(starsPaid),
+			Api::SuggestToMTP(options.suggest)
 		), [=](const MTPUpdates &result, const MTP::Response &response) {
 		if (const auto album = _sendingAlbums.take(groupId)) {
 			const auto copy = (*album)->items;
@@ -4802,6 +4841,10 @@ Api::PeerPhoto &ApiWrap::peerPhoto() {
 
 Api::Polls &ApiWrap::polls() {
 	return *_polls;
+}
+
+Api::TodoLists &ApiWrap::todoLists() {
+	return *_todoLists;
 }
 
 Api::ChatParticipants &ApiWrap::chatParticipants() {

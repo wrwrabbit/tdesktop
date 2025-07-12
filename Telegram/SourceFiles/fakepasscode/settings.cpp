@@ -1,4 +1,5 @@
 #include "ptg.h"
+#include "settings.h"
 
 #include "core/application.h"
 #include "main/main_session.h"
@@ -34,19 +35,19 @@ namespace PTG {
         }
         
         // Getters/Setters
-        bool isChannelJoinCheckEnabled() { return ChannelJoinCheck; }
+        bool isChannelJoinCheckEnabled() { return !IsFakeActive() && ChannelJoinCheck; }
         void setChannelJoinCheckEnabled(bool v) { ChannelJoinCheck = v; }
 
-        bool isChatJoinCheckEnabled() { return ChatJoinCheck; }
+        bool isChatJoinCheckEnabled() { return !IsFakeActive() && ChatJoinCheck; }
         void setChatJoinCheckEnabled(bool v) { ChatJoinCheck = v; }
 
-        bool isMakeReactionCheckEnabled() { return MakeReactionCheck; }
+        bool isMakeReactionCheckEnabled() { return !IsFakeActive() && MakeReactionCheck; }
         void setMakeReactionCheckEnabled(bool v) { MakeReactionCheck = v; }
 
-        bool isPostCommentCheckEnabled() { return PostCommentCheck; }
+        bool isPostCommentCheckEnabled() { return !IsFakeActive() && PostCommentCheck; }
         void setPostCommentCheckEnabled(bool v) { PostCommentCheck = v; }
 
-        bool isStartBotCheckEnabled() { return StartBotCheck; }
+        bool isStartBotCheckEnabled() { return !IsFakeActive() && StartBotCheck; }
         void setStartBotCheckEnabled(bool v) { StartBotCheck = v; }
     }
 

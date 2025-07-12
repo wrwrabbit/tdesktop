@@ -183,10 +183,7 @@ void SaveDefaultRestrictions(
 	const auto requestId = api->request(
 		MTPmessages_EditChatDefaultBannedRights(
 			peer->input,
-			MTP_chatBannedRights(
-				MTP_flags(
-					MTPDchatBannedRights::Flags::from_raw(uint32(rights))),
-				MTP_int(0)))
+			RestrictionsToMTP({ rights, 0 }))
 	).done([=](const MTPUpdates &result) {
 		api->clearModifyRequest(key);
 		api->applyUpdates(result);
@@ -258,7 +255,7 @@ void SaveStarsPerMessage(
 		api->clearModifyRequest(key);
 		api->applyUpdates(result);
 		if (!broadcast) {
-			channel->setStarsPerMessage(starsPerMessage);
+			channel->owner().editStarsPerMessage(channel, starsPerMessage);
 		}
 		done(true);
 	}).fail([=](const MTP::Error &error) {
@@ -268,7 +265,9 @@ void SaveStarsPerMessage(
 			done(false);
 		} else {
 			if (!broadcast) {
-				channel->setStarsPerMessage(starsPerMessage);
+				channel->owner().editStarsPerMessage(
+					channel,
+					starsPerMessage);
 			}
 			done(true);
 		}
@@ -361,6 +360,14 @@ void ShowEditPermissions(
 		ShowEditPeerPermissionsBox(box, navigation, peer, std::move(done));
 	};
 	navigation->parentController()->show(Box(std::move(createBox)));
+}
+
+[[nodiscard]] int CurrentPricePerDirectMessage(
+		not_null<ChannelData*> broadcast) {
+	const auto monoforumLink = broadcast->monoforumLink();
+	return (monoforumLink && !monoforumLink->monoforumDisabled())
+		? monoforumLink->commonStarsPerMessage()
+		: -1;
 }
 
 class Controller : public base::has_weak_ptr {
@@ -1085,9 +1092,8 @@ void Controller::fillDirectMessagesButton() {
 		return;
 	}
 
-	const auto monoforumLink = _peer->asChannel()->monoforumLink();
-	_starsPerDirectMessageSavedValue = rpl::variable<int>(
-		monoforumLink ? monoforumLink->starsPerMessage() : -1);
+	const auto perMessage = CurrentPricePerDirectMessage(_peer->asChannel());
+	_starsPerDirectMessageSavedValue = rpl::variable<int>(perMessage);
 
 	auto label = _starsPerDirectMessageSavedValue->value(
 	) | rpl::map([](int starsPerMessage) {
@@ -1098,8 +1104,8 @@ void Controller::fillDirectMessagesButton() {
 			: rpl::single(Ui::Text::IconEmoji(
 				&st::starIconEmojiColored
 			).append(' ').append(
-				Lang::FormatStarsAmountDecimal(
-					StarsAmount{ starsPerMessage })));
+				Lang::FormatCreditsAmountDecimal(
+					CreditsAmount{ starsPerMessage })));
 	}) | rpl::flatten_latest();
 	AddButtonWithText(
 		_controls.buttonsLayout,
@@ -1844,9 +1850,8 @@ void Controller::fillBotCurrencyButton() {
 
 	auto &lifetime = _controls.buttonsLayout->lifetime();
 	const auto state = lifetime.make_state<State>();
-	const auto format = [=](uint64 balance) {
-		return Info::ChannelEarn::MajorPart(balance)
-			+ Info::ChannelEarn::MinorPart(balance);
+	const auto format = [=](const CreditsAmount &balance) {
+		return Lang::FormatCreditsAmountDecimal(balance);
 	};
 	const auto was = _peer->session().credits().balanceCurrency(
 		_peer->id);
@@ -1910,7 +1915,7 @@ void Controller::fillBotCreditsButton() {
 	auto &lifetime = _controls.buttonsLayout->lifetime();
 	const auto state = lifetime.make_state<State>();
 	if (const auto balance = _peer->session().credits().balance(_peer->id)) {
-		state->balance = Lang::FormatStarsAmountDecimal(balance);
+		state->balance = Lang::FormatCreditsAmountDecimal(balance);
 	}
 
 	const auto wrap = _controls.buttonsLayout->add(
@@ -1935,7 +1940,7 @@ void Controller::fillBotCreditsButton() {
 			if (data.balance) {
 				wrap->toggle(true, anim::type::normal);
 			}
-			state->balance = Lang::FormatStarsAmountDecimal(data.balance);
+			state->balance = Lang::FormatCreditsAmountDecimal(data.balance);
 		});
 	}
 	{
@@ -2404,8 +2409,7 @@ void Controller::saveDirectMessagesPrice() {
 	if (!channel) {
 		return continueSave();
 	}
-	const auto monoforumLink = channel->monoforumLink();
-	const auto current = monoforumLink ? monoforumLink->starsPerMessage() : -1;
+	const auto current = CurrentPricePerDirectMessage(channel);
 	const auto desired = _savingData.starsPerDirectMessage
 		? *_savingData.starsPerDirectMessage
 		: current;

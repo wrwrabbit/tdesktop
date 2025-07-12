@@ -89,15 +89,12 @@ parts:
       - clang
       - libtool-bin
       - python3
-      - libasound2-dev
       - libavif-dev
       - libboost-regex-dev
       - libgirepository1.0-dev
       - libglib2.0-dev
       - libheif-dev
       - libopenal-dev
-      - libopus-dev
-      - libpulse-dev
       - libssl-dev
       - libxcb1-dev
       - libxcb-keysyms1-dev
@@ -105,7 +102,6 @@ parts:
       - libxcb-screensaver0-dev
       - zlib1g-dev
     stage-packages:
-      - libasound2t64
       - libavif16
       - libboost-regex1.83.0
       - libgeoclue-2-0
@@ -113,8 +109,6 @@ parts:
       - libglib2.0-0t64
       - libheif1
       - libopenal1
-      - libopus0
-      - libpulse0
       - libssl3t64
       - libwebkit2gtk-4.1-0
       - libxcb1
@@ -170,7 +164,7 @@ parts:
   patches:
     source: https://github.com/desktop-app/patches.git
     source-depth: 1
-    source-commit: a405719f0963abf7cb93354a390617c0f0d90f17
+    source-commit: 1ffcb17817a2cab167061d530703842395291e69
     plugin: dump
     override-pull: |
       craftctl default
@@ -217,7 +211,7 @@ parts:
   ada:
     source: https://github.com/ada-url/ada.git
     source-depth: 1
-    source-tag: v3.2.2
+    source-tag: v3.2.4
     plugin: cmake
     build-environment:
       - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -s
@@ -318,7 +312,17 @@ parts:
       - -./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/*.so
 
   qt:
-    plugin: nil
+    source: https://github.com/qt/qt5.git
+    source-depth: 1
+    source-tag: v6.9.1
+    source-submodules:
+      - qtbase
+      - qtdeclarative
+      - qtimageformats
+      - qtshadertools
+      - qtsvg
+      - qtwayland
+    plugin: cmake
     build-environment:
       - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -s
     build-packages:
@@ -404,28 +408,21 @@ parts:
       - zlib1g
       - mesa-vulkan-drivers
       - xkb-data
+    cmake-generator: Ninja
+    cmake-parameters:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_INSTALL_PREFIX=/usr
+      - -DCMAKE_PREFIX_PATH=$CRAFT_STAGE/usr
+      - -DINSTALL_LIBDIR=/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR
+      - -DINPUT_openssl=linked
     override-pull: |
-      QT=6.9.1
-
-      git clone -b v${QT} --depth=1 https://github.com/qt/qt5.git .
-      git submodule update --init --recursive --depth=1 qtbase qtdeclarative qtwayland qtimageformats qtsvg qtshadertools
-
+      craftctl default
+      QT="$(grep 'set(QT_REPO_MODULE_VERSION' qtbase/.cmake.conf | sed -r 's/.*"(.*)".*/\1/')"
       cd qtbase
       find $CRAFT_STAGE/patches/qtbase_${QT} -type f -print0 | sort -z | xargs -r0 git apply
       cd ../qtwayland
       find $CRAFT_STAGE/patches/qtwayland_${QT} -type f -print0 | sort -z | xargs -r0 git apply
       cd ..
-    override-build: |
-      cmake -GNinja -B $CRAFT_PART_BUILD \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=/usr \
-        -DCMAKE_PREFIX_PATH=$CRAFT_STAGE/usr \
-        -DINSTALL_LIBDIR=/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR \
-        -DQT_GENERATE_SBOM=OFF \
-        -DINPUT_openssl=linked
-
-      cmake --build . -j$CRAFT_PARALLEL_BUILD_COUNT
-      DESTDIR="$CRAFT_PART_INSTALL" cmake --install .
     prime:
       - -./usr/bin
       - -./usr/doc
@@ -440,6 +437,7 @@ parts:
       - -./usr/metatypes
       - -./usr/mkspecs
       - -./usr/modules
+      - -./usr/sbom
       - -./**/objects-*
     after:
       - libjxl
@@ -506,7 +504,6 @@ parts:
     build-environment:
       - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -s
     build-packages:
-      - yasm
       - libdrm-dev
       - libegl-dev
       - libgbm-dev
