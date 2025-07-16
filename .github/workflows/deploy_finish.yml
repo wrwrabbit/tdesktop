@@ -7,27 +7,27 @@ on:
         description: 'Prerelease or not'
         type: boolean
         required: true
-        default: 'true'
+        default: true
       releaseWindows:
         description: 'Release Windows assets?'
         type: boolean
         required: false
-        default: "true"
+        default: true
       releaseLinux:
         description: 'Release Linux assets?'
         type: boolean
         required: false
-        default: "true"
+        default: true
       releaseMacOS:
         description: 'Release MacOS assets?'
         type: boolean
         required: false
-        default: "true"
+        default: true
       releaseSnap:
         description: 'Release Snap assets?'
         type: boolean
         required: false
-        default: "true"
+        default: true
 
 jobs:
   release:
@@ -48,18 +48,6 @@ jobs:
       - name: Prepare changelog
         run: |
           python3 ptelegram_release_body.py --input_file ptelegram_changelog.md --output_file ptelegram_changelog_${{ env.VERSION }}.md --version ${{ env.VERSION }}
-
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: "v.${{ env.VERSION }}"
-          release_name: "Version ${{ env.VERSION }}"
-          body_path: ptelegram_changelog_${{ env.VERSION }}.md
-          draft: false
-          prerelease: ${{ github.event.inputs.prerelease }}
 
       - name: Download Windows artifacts
         uses: dawidd6/action-download-artifact@v2
@@ -89,12 +77,12 @@ jobs:
         if: github.event.inputs.releaseMacOS == 'true'
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: deploy_mac.yml
+          workflow: deploy_mac_post.yml
           workflow_conclusion: success
           branch: master
-          repo: cpartisans/tdesktop
+          repo: wrwrabbit/tdesktop
           path: MacOS
-          name: PTelegram_
+          name: telegram-dmg
 
       - name: Download Snap artifacts
         uses: dawidd6/action-download-artifact@v2
@@ -116,6 +104,18 @@ jobs:
             echo More than one version downloaded
             exit 1
           fi
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: "v.${{ env.VERSION }}"
+          release_name: "Version ${{ env.VERSION }}"
+          body_path: ptelegram_changelog_${{ env.VERSION }}.md
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease }}
 
       - name: Upload Windows Files
         uses: "actions/github-script@v6"

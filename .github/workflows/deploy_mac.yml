@@ -67,6 +67,7 @@ jobs:
           API_HASH: ${{ secrets.API_HASH }}
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          CP_MAC_SKIPDMG: 1
         run: |
           cd $REPO_NAME/Telegram/build
 
@@ -90,13 +91,6 @@ jobs:
           cd $REPO_NAME/out/Release/deploy
           mkdir ../artifact
           mv * ../artifact
-
-      - uses: actions/upload-artifact@v4
-        if: env.UPLOAD_ARTIFACT == 'true'
-        name: Upload artifact.
-        with:
-          name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.REPO_NAME }}/out/Release/artifact/tsetup*
 
       - uses: actions/upload-artifact@v4
         if: env.UPLOAD_ARTIFACT == 'true'
