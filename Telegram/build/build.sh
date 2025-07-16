@@ -8,6 +8,8 @@ arg1="$1"
 arg2="$2"
 arg3="$3"
 
+CP_MAC_SKIPDMG="${CP_MAC_SKIPDMG:-0}"
+
 if [ ! -d "$FullScriptPath/../../../DesktopPrivate" ]; then
   echo ""
   echo "This script is for building the production version of Telegram Desktop."
@@ -402,16 +404,25 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
         #hdiutil convert tsetup.temp.dmg -format UDBZ -ov -o "$SetupFile"
         #rm tsetup.temp.dmg
         # Do simple
-        create-dmg \
-            --volname "Telegram Desktop" \
-            --volicon "./$BundleName/Contents/Resources/AppIcon.icns" \
-            --hide-extension "$BundleName" \
-            --icon-size 100 \
-            --app-drop-link 400 20 \
-            --bless \
-            --format UDBZ \
-            "$SetupFile" \
-            "./$BundleName"
+        if [ "$CP_MAC_SKIPDMG" != "1" ]; then
+          create-dmg \
+              --volname "Telegram Desktop" \
+              --volicon "./$BundleName/Contents/Resources/AppIcon.icns" \
+              --hide-extension "$BundleName" \
+              --icon-size 100 \
+              --app-drop-link 400 20 \
+              --bless \
+              --format UDBZ \
+              "$SetupFile" \
+              "./$BundleName"
+        else
+          echo "CP_MAC_SKIPDMG=1: Skipping DMG creation."
+          # create fake DMG file so the rest of the script works
+          if [ ! -f "$ReleasePath/$SetupFile" ]; then
+            touch "$ReleasePath/$SetupFile"
+          fi
+          echo "Fake DMG file created: $ReleasePath/$SetupFile"
+        fi
         # do zip as well
         bless --folder "./$BundleName/" --openfolder "$BundleName/"
         zip -r "$BundleName.zip" "$BundleName"
@@ -508,7 +519,9 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
     rm "$ReleasePath/$BinaryName.app/Contents/Frameworks/Updater"
     mv "$ReleasePath/$UpdateFileAMD64" "$DeployPath/"
     mv "$ReleasePath/$UpdateFileARM64" "$DeployPath/"
-    mv "$ReleasePath/$SetupFile" "$DeployPath/"
+    if [ "$CP_MAC_SKIPDMG" != "1" ]; then
+      mv "$ReleasePath/$SetupFile" "$DeployPath/"
+    fi
     mv "$ReleasePath/$BundleName.zip" "$DeployPath/"
 
     if [ "$BuildTarget" == "mac" ]; then
