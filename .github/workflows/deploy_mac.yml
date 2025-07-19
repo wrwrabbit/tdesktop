@@ -36,7 +36,7 @@ jobs:
       - name: Free up some disk space.
         run: |
           cd Libraries
-          find . -iname "*.dir" -exec rm -rf {} || true \;
+          find . -iname "*.dir" -exec rm -rf {} \; || true
 
       - name: Cache Libraries.
         uses: actions/cache@v4
