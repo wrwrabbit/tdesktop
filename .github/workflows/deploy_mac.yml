@@ -48,6 +48,7 @@ jobs:
 
   macos:
     environment: Release
+    needs: build-libraries
     name: Telegram
     runs-on: macos-13
 
