@@ -42,9 +42,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ${{ env.REPO_NAME }}/../Libraries
-            ${{ env.REPO_NAME }}/../ThirdParty
-          key: mac-libraries-${{ hashFiles('${{ env.REPO_NAME }}/Telegram/build/prepare') }}
+            ./Libraries
+            ./ThirdParty
+          key: mac-libraries-${{ hashFiles('${{ env.REPO_NAME }}/Telegram/build/prepare/prepare.py') }}
 
   macos:
     environment: Release
@@ -84,9 +84,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ${{ env.REPO_NAME }}/../Libraries
-            ${{ env.REPO_NAME }}/../ThirdParty
-          key: mac-libraries-${{ hashFiles('${{ env.REPO_NAME }}/Telegram/build/prepare') }}
+            ./Libraries
+            ./ThirdParty
+          key: mac-libraries-${{ hashFiles('${{ env.REPO_NAME }}/Telegram/build/prepare/prepare.py') }}
 
       - name: Telegram Desktop build.
         env:
