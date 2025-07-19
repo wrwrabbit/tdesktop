@@ -44,7 +44,7 @@ jobs:
           path: |
             ./Libraries
             ./ThirdParty
-          key: mac-libraries-${{ hashFiles('${{ env.REPO_NAME }}/Telegram/build/prepare/prepare.py') }}
+          key: mac-libraries-${{ hashFiles('tdesktop/Telegram/build/prepare/prepare.py') }}
 
   macos:
     environment: Release
@@ -86,7 +86,7 @@ jobs:
           path: |
             ./Libraries
             ./ThirdParty
-          key: mac-libraries-${{ hashFiles('${{ env.REPO_NAME }}/Telegram/build/prepare/prepare.py') }}
+          key: mac-libraries-${{ hashFiles('tdesktop/Telegram/build/prepare/prepare.py') }}
 
       - name: Telegram Desktop build.
         env:
