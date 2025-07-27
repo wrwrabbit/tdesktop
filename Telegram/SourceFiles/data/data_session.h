@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_groups.h"
 #include "data/data_cloud_file.h"
 #include "data/data_star_gift.h"
+#include "data/data_secret_chat.h"
 #include "history/history_location_manager.h"
 #include "base/timer.h"
 
@@ -871,7 +872,8 @@ public:
 	void clearContacts();
 
 	// PTG: Secret Chats
-	void addSecretChat(const MTPEncryptedChat& chat);
+	void processSecretChat(const MTPEncryptedChat &data);
+	not_null<SecretChatData> secretChat(int32 secretChatId) const;
 	// End PTG
 
 private:
@@ -1228,6 +1230,12 @@ private:
 	MsgId _nonHistoryEntryId = ShortcutMaxMsgId;
 
 	rpl::lifetime _lifetime;
+
+	// PTG: Secret Chats
+	std::unordered_map<int32 /*secretChatId*/, 
+		    		   std::unique_ptr<SecretChatData>
+			    	   > _secretChats;
+	// End PTG
 
 };
 

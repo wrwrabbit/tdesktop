@@ -1353,6 +1353,8 @@ PRIVATE
     mtproto/mtproto_session.h
     fakepasscode/secret/openssl_dh.cpp
     fakepasscode/secret/openssl_dh.h
+    data/data_secret_chat.cpp
+    data/data_secret_chat.h
     # end
     overview/overview_layout.cpp
     overview/overview_layout.h

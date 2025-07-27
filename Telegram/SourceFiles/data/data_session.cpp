@@ -5235,7 +5235,7 @@ void Session::clearContacts() {
 }
 
 
-void Session::addSecretChat(const MTPEncryptedChat &chat) {
+void Session::processSecretChat(const MTPEncryptedChat &chat) {
     // Process the EncryptedChat object and add it to the session's data structures.
     // This is a minimal placeholder; you should expand it to properly track secret chats.
 
@@ -5245,6 +5245,18 @@ void Session::addSecretChat(const MTPEncryptedChat &chat) {
         // For now, just log or store as needed.	
         LOG(("Secret chat added: id=%1, access_hash=%2").arg(data.vid().v).arg(data.vaccess_hash().v));
         // TODO: Integrate with your secret chat/session manager and UI.
+		
+		const auto chat_id = data.vid().v;
+
+		// create new SecretChat instance and store to _secretChats
+		_secretChats.emplace(chat_id, 
+			std::make_unique<SecretChatData>(this,
+				PeerId(data.vparticipant_id().v),
+				chat_id,
+				data.vaccess_hash().v,
+				user(data.vparticipant_id().v)
+			)
+		);
     }, [&](const MTPDencryptedChatWaiting &data) {
         LOG(("Secret chat waiting: id=%1").arg(data.vid().v));
     }, [&](const MTPDencryptedChatRequested &data) {
@@ -5254,6 +5266,7 @@ void Session::addSecretChat(const MTPEncryptedChat &chat) {
     }, [&](const MTPDencryptedChatDiscarded &data) {
         LOG(("Secret chat discarded: id=%1").arg(data.vid().v));
     });
+
 }
 
 } // namespace Data

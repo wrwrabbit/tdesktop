@@ -4904,9 +4904,7 @@ void ApiWrap::requestSecretChat(not_null<UserData*> user) {
         )).done([=](const MTPEncryptedChat &result) {
             // Handle successful creation of secret chat (update UI, session state, etc.)
             LOG(("Secret chat created with user"));
-
-            // Example: Update the session state with the new secret chat
-            _session->data().addSecretChat(result);
+            _session->data().processSecretChat(result);
         }).fail([=](const MTP::Error &error) {
             // Handle error (show error to user, log, etc.)
             LOG(("Failed to create secret chat with user: %1").arg(error.type()));
