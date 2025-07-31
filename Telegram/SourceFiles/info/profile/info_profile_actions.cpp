@@ -895,13 +895,13 @@ rpl::producer<CreditsAmount> AddCurrencyAction(
 		state->balance = balance;
 	}
 	{
-		const auto weak = Ui::MakeWeak(wrap);
+		const auto weak = base::make_weak(wrap);
 		const auto currencyLoadLifetime
 			= std::make_shared<rpl::lifetime>();
 		const auto currencyLoad
 			= currencyLoadLifetime->make_state<Api::EarnStatistics>(user);
 		const auto done = [=](CreditsAmount balance) {
-			if ([[maybe_unused]] const auto strong = weak.data()) {
+			if ([[maybe_unused]] const auto strong = weak.get()) {
 				state->balance = balance;
 				currencyLoadLifetime->destroy();
 			}
@@ -918,6 +918,7 @@ rpl::producer<CreditsAmount> AddCurrencyAction(
 	const auto name = Ui::CreateChild<Ui::FlatLabel>(button, st.rightLabel);
 	const auto icon = Ui::Text::SingleCustomEmoji(
 		user->owner().customEmojiManager().registerInternalEmoji(
+			u"profile_ton_section_icon"_q,
 			Ui::Earn::IconCurrencyColored(
 				st.rightLabel.style.font,
 				st.rightLabel.textFg->c),

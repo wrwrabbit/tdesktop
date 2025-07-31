@@ -41,7 +41,7 @@ QString UserPhone(not_null<UserData*> user) {
 }
 
 void SendRequest(
-		QPointer<Ui::GenericBox> box,
+		base::weak_qptr<Ui::GenericBox> box,
 		not_null<UserData*> user,
 		bool sharePhone,
 		const QString &first,
@@ -223,7 +223,7 @@ void Controller::initNameFields(
 			}
 		};
 		SendRequest(
-			Ui::MakeWeak(_box),
+			base::make_weak(_box),
 			user,
 			_sharePhone && _sharePhone->checked(),
 			firstValue,
