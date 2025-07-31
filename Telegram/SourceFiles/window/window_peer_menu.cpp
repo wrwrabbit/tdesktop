@@ -623,7 +623,7 @@ void Filler::addStoryArchive() {
 		if ([[maybe_unused]] const auto strong = weak.get()) {
 			controller->showSection(Info::Stories::Make(
 				channel,
-				Info::Stories::Tab::Archive));
+				Info::Stories::ArchiveId()));
 		}
 	}, &st::menuIconStoriesArchiveSection);
 }
@@ -1883,7 +1883,7 @@ void PeerMenuShareContactBox(
 		return;
 	}
 	// There is no async to make weak from controller.
-	const auto weak = std::make_shared<QPointer<Ui::BoxContent>>();
+	const auto weak = std::make_shared<base::weak_qptr<Ui::BoxContent>>();
 	auto callback = [=](not_null<Data::Thread*> thread) {
 		const auto peer = thread->peer();
 		if (!Data::CanSend(thread, ChatRestriction::SendOther)) {
@@ -2007,7 +2007,7 @@ void PeerMenuCreatePoll(
 		SendPaymentHelper sendPayment;
 		bool lock = false;
 	};
-	const auto weak = QPointer<CreatePollBox>(box);
+	const auto weak = base::make_weak(box);
 	const auto state = box->lifetime().make_state<State>();
 	state->create = [=](const CreatePollBox::Result &result) {
 		auto action = Api::SendAction(
@@ -2117,7 +2117,7 @@ void PeerMenuCreateTodoList(
 		SendPaymentHelper sendPayment;
 		bool lock = false;
 	};
-	const auto weak = QPointer<EditTodoListBox>(box);
+	const auto weak = base::make_weak(box);
 	const auto state = box->lifetime().make_state<State>();
 	state->create = [=](const EditTodoListBox::Result &result) {
 		const auto withPaymentApproved = crl::guard(weak, [=](int stars) {
@@ -2177,7 +2177,7 @@ void PeerMenuEditTodoList(
 		return;
 	}
 	auto box = Box<EditTodoListBox>(controller, item);
-	const auto weak = QPointer<EditTodoListBox>(box);
+	const auto weak = base::make_weak(box);
 	box->submitRequests(
 	) | rpl::start_with_next([=](const EditTodoListBox::Result &result) {
 		const auto api = &item->history()->session().api();
@@ -2379,7 +2379,7 @@ object_ptr<Ui::BoxContent> PrepareChooseRecipientBox(
 		Fn<void(
 			std::vector<not_null<Data::Thread*>>,
 			Api::SendOptions)> sendMany) {
-	const auto weak = std::make_shared<QPointer<PeerListBox>>();
+	const auto weak = std::make_shared<base::weak_qptr<PeerListBox>>();
 	const auto selectable = (sendMany != nullptr);
 	class Controller final : public ChooseRecipientBoxController {
 	public:
@@ -2514,7 +2514,7 @@ object_ptr<Ui::BoxContent> PrepareChooseRecipientBox(
 			state->refreshStarsToSend();
 			const auto shown = raw->hasSelected();
 			if (shown) {
-				const auto weak = Ui::MakeWeak(box);
+				const auto weak = base::make_weak(box);
 				state->submit = [=](Api::SendOptions options) {
 					state->submitLifetime.destroy();
 					const auto show = box->peerListUiShow();
@@ -2602,7 +2602,7 @@ object_ptr<Ui::BoxContent> PrepareChooseRecipientBox(
 	return result;
 }
 
-QPointer<Ui::BoxContent> ShowChooseRecipientBox(
+base::weak_qptr<Ui::BoxContent> ShowChooseRecipientBox(
 		not_null<Window::SessionNavigation*> navigation,
 		FnMut<bool(not_null<Data::Thread*>)> &&chosen,
 		rpl::producer<QString> titleOverride,
@@ -2616,7 +2616,7 @@ QPointer<Ui::BoxContent> ShowChooseRecipientBox(
 		typesRestriction));
 }
 
-QPointer<Ui::BoxContent> ShowForwardMessagesBox(
+base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 		std::shared_ptr<ChatHelpers::Show> show,
 		Data::ForwardDraft &&draft,
 		Fn<void()> &&successCallback) {
@@ -2876,10 +2876,10 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 		};
 		auto callback = [=, chosen = std::move(chosen)](
 				Controller::Chosen thread) mutable {
-			const auto weak = Ui::MakeWeak(state->box);
+			const auto weak = base::make_weak(state->box);
 			if (!chosen(thread)) {
 				return;
-			} else if (const auto strong = weak.data()) {
+			} else if (const auto strong = weak.get()) {
 				strong->closeBox();
 			}
 			if (successCallback) {
@@ -2908,7 +2908,7 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 		history,
 		msgIds);
 
-	const auto weak = Ui::MakeWeak(state->box);
+	const auto weak = base::make_weak(state->box);
 	const auto field = comment->entity();
 	state->submit = [=](Api::SendOptions options) {
 		const auto peers = state->box->collectSelectedRows();
@@ -3142,10 +3142,10 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 		});
 	}, state->box->lifetime());
 
-	return QPointer<Ui::BoxContent>(state->box);
+	return base::make_weak(state->box);
 }
 
-QPointer<Ui::BoxContent> ShowForwardMessagesBox(
+base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 		not_null<Window::SessionNavigation*> navigation,
 		Data::ForwardDraft &&draft,
 		Fn<void()> &&successCallback) {
@@ -3155,7 +3155,7 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 		std::move(successCallback));
 }
 
-QPointer<Ui::BoxContent> ShowForwardMessagesBox(
+base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 		not_null<Window::SessionNavigation*> navigation,
 		MessageIdsList &&items,
 		Fn<void()> &&successCallback) {
@@ -3165,13 +3165,13 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 		std::move(successCallback));
 }
 
-QPointer<Ui::BoxContent> ShowShareGameBox(
+base::weak_qptr<Ui::BoxContent> ShowShareGameBox(
 		not_null<Window::SessionNavigation*> navigation,
 		not_null<UserData*> bot,
 		QString shortName) {
-	const auto weak = std::make_shared<QPointer<Ui::BoxContent>>();
+	const auto weak = std::make_shared<base::weak_qptr<Ui::BoxContent>>();
 	auto chosen = [=](not_null<Data::Thread*> thread) mutable {
-		const auto confirm = std::make_shared<QPointer<Ui::BoxContent>>();
+		const auto confirm = std::make_shared<base::weak_qptr<Ui::BoxContent>>();
 		auto send = crl::guard(thread, [=] {
 			ShareBotGame(bot, thread, shortName);
 			if (const auto strong = *weak) {
@@ -3218,15 +3218,15 @@ QPointer<Ui::BoxContent> ShowShareGameBox(
 			.moneyRestrictionError = WriteMoneyRestrictionError,
 		}),
 		std::move(initBox)));
-	return weak->data();
+	return weak->get();
 }
 
-QPointer<Ui::BoxContent> ShowDropMediaBox(
+base::weak_qptr<Ui::BoxContent> ShowDropMediaBox(
 		not_null<Window::SessionNavigation*> navigation,
 		std::shared_ptr<QMimeData> data,
 		not_null<Data::Forum*> forum,
 		FnMut<void()> &&successCallback) {
-	const auto weak = std::make_shared<QPointer<Ui::BoxContent>>();
+	const auto weak = std::make_shared<base::weak_qptr<Ui::BoxContent>>();
 	auto chosen = [
 		data = std::move(data),
 		callback = std::move(successCallback),
@@ -3258,15 +3258,15 @@ QPointer<Ui::BoxContent> ShowDropMediaBox(
 			forum,
 			std::move(chosen)),
 		std::move(initBox)));
-	return weak->data();
+	return weak->get();
 }
 
-QPointer<Ui::BoxContent> ShowDropMediaBox(
+base::weak_qptr<Ui::BoxContent> ShowDropMediaBox(
 		not_null<Window::SessionNavigation*> navigation,
 		std::shared_ptr<QMimeData> data,
 		not_null<Data::SavedMessages*> monoforum,
 		FnMut<void()> &&successCallback) {
-	const auto weak = std::make_shared<QPointer<Ui::BoxContent>>();
+	const auto weak = std::make_shared<base::weak_qptr<Ui::BoxContent>>();
 	auto chosen = [
 		data = std::move(data),
 		callback = std::move(successCallback),
@@ -3298,10 +3298,10 @@ QPointer<Ui::BoxContent> ShowDropMediaBox(
 			monoforum,
 			std::move(chosen)),
 		std::move(initBox)));
-	return weak->data();
+	return weak->get();
 }
 
-QPointer<Ui::BoxContent> ShowSendNowMessagesBox(
+base::weak_qptr<Ui::BoxContent> ShowSendNowMessagesBox(
 		not_null<Window::SessionNavigation*> navigation,
 		not_null<History*> history,
 		MessageIdsList &&items,
@@ -3350,7 +3350,7 @@ QPointer<Ui::BoxContent> ShowSendNowMessagesBox(
 		.text = text,
 		.confirmed = std::move(done),
 		.confirmText = tr::lng_send_button(),
-	})).data();
+	}));
 }
 
 void PeerMenuAddChannelMembers(
@@ -3943,7 +3943,7 @@ void PeerMenuConfirmToggleFee(
 		return;
 	}
 	navigation->uiShow()->show(Box([=](not_null<Ui::GenericBox*> box) {
-		const auto refund = std::make_shared<QPointer<Ui::Checkbox>>();
+		const auto refund = std::make_shared<base::weak_qptr<Ui::Checkbox>>();
 		Ui::ConfirmBox(box, {
 			.text = tr::lng_payment_refund_text(
 				tr::now,
@@ -3963,7 +3963,7 @@ void PeerMenuConfirmToggleFee(
 		*paid = paidAmount->value();
 		paid->value() | rpl::start_with_next([=](int already) {
 			if (!already) {
-				delete base::take(*refund);
+				delete base::take(*refund).get();
 			} else if (!*refund) {
 				const auto skip = st::defaultCheckbox.margin.top();
 				*refund = box->addRow(

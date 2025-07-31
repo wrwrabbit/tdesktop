@@ -109,6 +109,8 @@ PRIVATE
     dialogs/ui/dialogs_stories_list.h
     dialogs/ui/dialogs_top_bar_suggestion_content.cpp
     dialogs/ui/dialogs_top_bar_suggestion_content.h
+    dialogs/ui/posts_search_intro.cpp
+    dialogs/ui/posts_search_intro.h
     dialogs/ui/top_peers_strip.cpp
     dialogs/ui/top_peers_strip.h
 
@@ -361,6 +363,8 @@ PRIVATE
     ui/chat/pinned_bar.h
     ui/chat/requests_bar.cpp
     ui/chat/requests_bar.h
+    ui/controls/button_labels.cpp
+    ui/controls/button_labels.h
     ui/controls/call_mute_button.cpp
     ui/controls/call_mute_button.h
     ui/controls/chat_service_checkbox.cpp
@@ -388,8 +392,12 @@ PRIVATE
     ui/controls/send_as_button.h
     ui/controls/send_button.cpp
     ui/controls/send_button.h
+    ui/controls/stars_rating.cpp
+    ui/controls/stars_rating.h
     ui/controls/subsection_tabs_slider.cpp
     ui/controls/subsection_tabs_slider.h
+    ui/controls/sub_tabs.cpp
+    ui/controls/sub_tabs.h
     ui/controls/swipe_handler.cpp
     ui/controls/swipe_handler.h
     ui/controls/swipe_handler_data.h

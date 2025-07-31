@@ -45,11 +45,22 @@ struct Filter {
 	friend inline bool operator==(Filter, Filter) = default;
 };
 
+struct Descriptor {
+	Filter filter;
+	int collectionId = 0;
+
+	friend inline bool operator==(
+		const Descriptor &,
+		const Descriptor &) = default;
+};
+
 class InnerWidget;
 
 class Memento final : public ContentMemento {
 public:
-	explicit Memento(not_null<PeerData*> peer);
+	Memento(not_null<Controller*> controller);
+	Memento(not_null<PeerData*> peer, int collectionId);
+	~Memento();
 
 	object_ptr<ContentWidget> createWidget(
 		QWidget *parent,
@@ -61,8 +72,6 @@ public:
 	void setListState(std::unique_ptr<ListState> state);
 	std::unique_ptr<ListState> listState();
 
-	~Memento();
-
 private:
 	std::unique_ptr<ListState> _listState;
 
@@ -70,10 +79,7 @@ private:
 
 class Widget final : public ContentWidget {
 public:
-	Widget(
-		QWidget *parent,
-		not_null<Controller*> controller,
-		not_null<PeerData*> peer);
+	Widget(QWidget *parent, not_null<Controller*> controller);
 
 	[[nodiscard]] not_null<PeerData*> peer() const;
 
@@ -98,14 +104,21 @@ private:
 
 	std::shared_ptr<ContentMemento> doCreateMemento() override;
 
-	void setupNotifyCheckbox(bool enabled);
+	void setupNotifyCheckbox(int wasBottomHeight, bool enabled);
+	void setupBottomButton(int wasBottomHeight, rpl::producer<bool> hidden);
+	void refreshBottom();
 
 	InnerWidget *_inner = nullptr;
 	QPointer<Ui::SlideWrap<Ui::RpWidget>> _pinnedToBottom;
 	rpl::variable<bool> _hasPinnedToBottom;
-	rpl::variable<Filter> _filter;
+	rpl::variable<Descriptor> _descriptor;
+	std::optional<bool> _notifyEnabled;
 	bool _shown = false;
 
 };
+
+[[nodiscard]] std::shared_ptr<Info::Memento> Make(
+	not_null<PeerData*> peer,
+	int collectionId = 0);
 
 } // namespace Info::PeerGifts

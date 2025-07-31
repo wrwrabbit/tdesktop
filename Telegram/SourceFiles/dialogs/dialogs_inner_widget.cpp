@@ -164,7 +164,8 @@ constexpr auto kPreviewPostsLimit = 3;
 		: state.fromPeer;
 	const auto waiting = trimmed.isEmpty()
 		&& state.tags.empty()
-		&& !fromPeer;
+		&& !fromPeer
+		&& state.tab != ChatSearchTab::PublicPosts;
 	const auto suggestAllChats = !waiting
 		&& state.tab == ChatSearchTab::MyMessages
 		&& state.filter != ChatTypeFilter::All;
@@ -1276,6 +1277,10 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 		if (!_searchResults.empty()) {
 			const auto text = showUnreadInSearchResults
 				? u"Search results"_q
+				: (_searchState.tab == ChatSearchTab::PublicPosts && !_searchIn)
+				? (_searchState.query.isEmpty()
+					? tr::lng_posts_subtitle_empty(tr::now)
+					: tr::lng_posts_subtitle(tr::now))
 				: tr::lng_search_found_results(
 					tr::now,
 					lt_count,
@@ -1966,9 +1971,9 @@ void InnerWidget::mousePressEvent(QMouseEvent *e) {
 		});
 	} else if (_pressed) {
 		auto row = _pressed;
-		const auto weak = Ui::MakeWeak(this);
+		const auto weak = base::make_weak(this);
 		const auto updateCallback = [weak, row] {
-			const auto strong = weak.data();
+			const auto strong = weak.get();
 			if (!strong || !strong->_pinnedShiftAnimation.animating()) {
 				row->entry()->updateChatListEntry();
 			}
@@ -3089,7 +3094,8 @@ void InnerWidget::fillArchiveSearchMenu(not_null<Ui::PopupMenu*> menu) {
 		|| (_searchState.tab == ChatSearchTab::PublicPosts);
 	if (!folder
 		|| !folder->chatsList()->fullSize().current()
-		|| (!globalSearch && _searchState.inChat)) {
+		|| (!globalSearch && _searchState.inChat)
+		|| (_searchState.tab == ChatSearchTab::PublicPosts)) {
 		return;
 	}
 	const auto skip = session().settings().skipArchiveInSearch();
@@ -3468,7 +3474,8 @@ void InnerWidget::applySearchState(SearchState state) {
 		_filter = newFilter;
 		if (_filter.isEmpty()
 			&& !_searchState.fromPeer
-			&& _searchState.tags.empty()) {
+			&& _searchState.tags.empty()
+			&& _searchState.tab != ChatSearchTab::PublicPosts) {
 			clearFilter();
 		} else {
 			setState(WidgetState::Filtered);
@@ -4083,7 +4090,7 @@ void InnerWidget::refreshEmpty() {
 		_empty->setVisible(_state == WidgetState::Default);
 		if (_emptyList) {
 			_emptyList->setVisible(_state == WidgetState::Default);
-			_empty->setVisible(!_emptyList->isVisible());
+			_empty->setVisible(false);
 		}
 		if (_emptyButton) {
 			_emptyButton->setVisible(_state == WidgetState::Default);

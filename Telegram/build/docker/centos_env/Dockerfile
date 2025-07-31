@@ -31,7 +31,7 @@ for i in "\$@"; do
 done
 exec /usr/bin/pkg-config --static "\$@"
 EOF
-RUN sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/")/ -O0 {% if LTO %}-fno-lto -fno-use-linker-plugin -fuse-ld=lld{% endif %}")/' /usr/share/cmake/Modules/Compiler/GNU.cmake
+RUN sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/")/ -O0 {% if LTO %}-fno-lto -fno-use-linker-plugin{% endif %} -fuse-ld=lld")/' /usr/share/cmake/Modules/Compiler/GNU.cmake
 RUN sed -i 's/NO_DEFAULT_PATH//g; s/PKG_CONFIG_ALLOW_SYSTEM_LIBS/PKG_CONFIG_IS_DUMB/g' /usr/share/cmake/Modules/FindPkgConfig.cmake
 RUN sed -i 's/set(OpenGL_GL_PREFERENCE "")/set(OpenGL_GL_PREFERENCE "LEGACY")/' /usr/share/cmake/Modules/FindOpenGL.cmake
 RUN sed -i '/Requires.private: valgrind/d' /usr/lib64/pkgconfig/libdrm.pc
@@ -46,7 +46,7 @@ ENV RANLIB=gcc-ranlib
 ENV NM=gcc-nm
 ENV CFLAGS='{% if DEBUG %}-g{% endif %} -O3 {% if LTO %}-flto=auto -ffat-lto-objects{% endif %} -pipe -fPIC -fno-strict-aliasing -fexceptions -fasynchronous-unwind-tables -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -fhardened -Wno-hardened'
 ENV CXXFLAGS=$CFLAGS
-ENV LDFLAGS='{% if not LTO %}-fuse-ld=lld{% endif %} -static-libstdc++ -static-libgcc -static-libasan -pthread -ldl -Wl,--as-needed -Wl,-z,muldefs'
+ENV LDFLAGS='-static-libstdc++ -static-libgcc -static-libasan -pthread -Wl,--push-state,--no-as-needed,-ldl,--pop-state -Wl,--as-needed -Wl,-z,muldefs'
 
 ENV CMAKE_GENERATOR=Ninja
 ENV CMAKE_BUILD_TYPE=None
@@ -91,7 +91,7 @@ FROM builder AS patches
 RUN git init patches \
 	&& cd patches \
 	&& git remote add origin https://github.com/desktop-app/patches.git \
-	&& git fetch --depth=1 origin 1ffcb17817a2cab167061d530703842395291e69 \
+	&& git fetch --depth=1 origin e15b5d87c565e516aad5bcafdfe40315f84e5459 \
 	&& git reset --hard FETCH_HEAD \
 	&& rm -rf .git
 
@@ -533,7 +533,7 @@ RUN git clone -b n6.1.1 --depth=1 https://github.com/FFmpeg/FFmpeg.git \
 	&& ./configure \
 		--extra-cflags="-fno-lto -DCONFIG_SAFE_BITSTREAM_READER=1" \
 		--extra-cxxflags="-fno-lto -DCONFIG_SAFE_BITSTREAM_READER=1" \
-		--extra-ldflags="-lstdc++" \
+		--extra-ldflags="-Wl,--push-state,--no-as-needed,-lstdc++,--pop-state" \
 		--disable-debug \
 		--disable-programs \
 		--disable-doc \

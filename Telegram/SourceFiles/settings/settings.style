@@ -141,6 +141,7 @@ settingsPremiumNewBadge: FlatLabel(defaultFlatLabel) {
 }
 settingsPremiumNewBadgePosition: point(4px, 1px);
 settingsPremiumNewBadgePadding: margins(4px, 1px, 4px, 1px);
+badgeEmojiMargin: margins(0px, 2px, 0px, 0px);
 
 settingsTTLChatsOff: icon {{ "settings/ttl/autodelete_off", windowSubTextFg }};
 settingsTTLChatsOn: icon {{ "settings/ttl/autodelete_on", windowActiveTextFg }};
@@ -705,3 +706,18 @@ settingsCreditsButton: SettingsButton(settingsButton) {
 }
 settingsButtonIconGift: icon {{ "settings/gift", menuIconColor }};
 settingsButtonIconEarn: icon {{ "settings/earn", menuIconColor }};
+
+settingsAgeVerifyBox: Box(filterInviteBox) {
+	buttonPadding: margins(24px, 24px, 24px, 24px);
+}
+settingsAgeVerifyText: FlatLabel(defaultFlatLabel) {
+	minWidth: 200px;
+	align: align(top);
+}
+settingsAgeVerifyMargin: margins(0px, 6px, 0px, 6px);
+settingsAgeVerifyTitle: FlatLabel(boxTitle) {
+	align: align(top);
+}
+settingsAgeVerifyIcon: icon {{ "settings/filled_verify_age-48x48", windowFgActive }};
+settingsAgeVerifyIconPadding: margins(16px, 16px, 16px, 16px);
+settingsAgeVerifyIconMargin: margins(0px, 24px, 0px, 14px);
