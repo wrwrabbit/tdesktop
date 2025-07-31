@@ -3742,4 +3742,44 @@ Webview::StorageId TonSiteStorageId() {
 	return result;
 }
 
+// PTG: Secret Chats
+void Account::loadSecretChats()
+{
+	// Load secret chat data from storage
+	// storage file tdata/ACC/id -> list of secret chats
+	// open file
+	FileReadDescriptor secretChat;
+	// TODO: _storageKey is hash of account_id
+	QString _storageKey = "secret";
+	if (ReadEncryptedFile(secretChat, _storageKey, _basePath, _localKey)) {
+		// Deserialize secret chat data
+		_owner->session().data().loadSecretChat(secretChat.stream);
+	}
+	else {
+		// TODO: Debug
+		// fake load to start with
+		QDataStream fake;
+		fake << (uint32)1;
+		fake << (uint32)1;
+		fake << (uint32)1;
+		fake << (uint32)1;
+		_owner->session().data().loadSecretChat(fake);
+		dumpSecretChats();
+	}
+}
+
+void Account::dumpSecretChats() const
+{
+	// Serialize secret chat data
+	qint32 count = 0;
+	QByteArray data = _owner->session().data().dumpSecretChat(count);
+	EncryptedDescriptor enc_data(sizeof(qint32) + data.size());
+	enc_data.stream << count << data;
+	// TODO: _storageKey is hash of account_id
+	QString _storageKey = "secret";
+	FileWriteDescriptor secretChat(_storageKey, _basePath);
+	secretChat.writeEncrypted(enc_data, _localKey);
+}
+// End PTG
+
 } // namespace Storage

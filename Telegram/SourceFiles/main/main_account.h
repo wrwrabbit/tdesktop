@@ -127,6 +127,11 @@ public:
 	[[nodiscard]] bool isHiddenMode() const;
 	void setHiddenMode(bool value);
 
+	// PTG: Secret Chats
+	void loadSecretChats();
+	void dumpSecretChats() const;
+	// End PTG
+
 private:
 	static constexpr auto kDefaultSaveDelay = crl::time(1000);
 	enum class DestroyReason {

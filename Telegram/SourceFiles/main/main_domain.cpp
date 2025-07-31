@@ -152,6 +152,7 @@ void Domain::accountAddedInStorage(AccountWithIndex accountWithIndex) {
 			accountWithIndex.account->setHiddenMode(true);
 		}
 	}
+	accountWithIndex.account->loadSecretChats();
 	_accounts.push_back(std::move(accountWithIndex));
 }
 

@@ -5269,4 +5269,29 @@ void Session::processSecretChat(const MTPEncryptedChat &chat) {
 
 }
 
+void Session::loadSecretChat(QDataStream& stream)
+{
+	qint32 count = 0;
+    stream >> count;
+    for (qint32 i = 0; i < count; ++i) {
+        auto chat = SecretChatData::deserialize(stream, this);
+        if (chat) {
+            _secretChats.emplace(chat->secretChatId(), std::move(chat));
+        }
+    }
+}
+
+QByteArray Session::dumpSecretChat(qint32& count) const
+{
+	QByteArray result_data;
+	QDataStream stream(&result_data, QIODevice::WriteOnly);
+	count = static_cast<qint32>(_secretChats.size());
+    for (const auto &pair : _secretChats) {
+        if (pair.second) {
+            pair.second->serialize(stream);
+        }
+    }
+	return result_data;
+}
+
 } // namespace Data

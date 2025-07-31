@@ -219,6 +219,11 @@ public:
     void removeAccountSpecificData();
 	void removeMtpDataFile();
 
+	// PTG: Secret Chats
+	void loadSecretChats();
+	void dumpSecretChats() const;
+	// End PTG
+
 private:
 	enum class ReadMapResult {
 		Success,

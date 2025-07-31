@@ -873,6 +873,8 @@ public:
 
 	// PTG: Secret Chats
 	void processSecretChat(const MTPEncryptedChat &data);
+	void loadSecretChat(QDataStream&);
+	QByteArray dumpSecretChat(qint32& count) const;
 	not_null<SecretChatData> secretChat(int32 secretChatId) const;
 	// End PTG
 

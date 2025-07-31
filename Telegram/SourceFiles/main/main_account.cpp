@@ -706,4 +706,14 @@ void Account::setHiddenMode(bool value) {
 	_hiddenMode = value;
 }
 
+void Account::loadSecretChats()
+{
+	local().loadSecretChats();
+}
+
+void Account::dumpSecretChats() const
+{
+	local().dumpSecretChats();
+}
+
 } // namespace Main
