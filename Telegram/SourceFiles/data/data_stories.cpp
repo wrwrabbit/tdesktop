@@ -2534,7 +2534,7 @@ void Stories::clearStoriesForPeer(PeerId peerId) {
 	_archive.erase(peerId);
 	_albumIdsChanged.fire({ peerId, kStoriesAlbumIdArchive });
 	_saved.erase(peerId);
-	_savedChanged.fire_copy(peerId);
+	_albumIdsChanged.fire({ peerId, kStoriesAlbumIdSaved });
 }
 
 } // namespace Data
