@@ -73,3 +73,4 @@ python3 ./set_ptg_version.py "$new_version" commit
 git push --set-upstream origin "$merge_branch"
 
 echo "Done. Branch $merge_branch pushed with new tag $new_tag."
+echo "Create PR: https://github.com/wrwrabbit/tdesktop/compare/master...wrwrabbit:tdesktop:$merge_branch?expand=1"
