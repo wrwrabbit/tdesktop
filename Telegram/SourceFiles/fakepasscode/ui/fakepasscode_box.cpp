@@ -253,7 +253,7 @@ void FakePasscodeBox::save(bool force) {
         update();
         return;
     } else {
-        const auto weak = Ui::MakeWeak(this);
+        const auto weak = base::make_weak(this);
         cSetPasscodeBadTries(0);
         if (_turningOn) {
             _fakeIndex = _session->domain().local().AddFakePasscode(pwd.toUtf8(), name);

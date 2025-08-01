@@ -601,9 +601,9 @@ Fn<void(Action, Details)> DefaultCallback(
 		}
 		if (action.type == ActionType::DeleteWhenRead) {
 			auto box = FakePasscode::AutoDeleteBox(guard, send);
-			const auto weak = Ui::MakeWeak(box.data());
+			const auto weak = base::make_weak(box.data());
 			show->showBox(std::move(box));
-			if (const auto strong = weak.data()) {
+			if (const auto strong = weak.get()) {
 				strong->setCloseByOutsideClick(false);
 			}
 			return;
