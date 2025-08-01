@@ -63,9 +63,11 @@ fi
 latest_local_tag=$(git tag | grep '^v\.[0-9]\+\.[0-9]\+\.[0-9]\+$' | sort -V | tail -n1)
 IFS='.' read -r _ major minor patch <<<"${latest_local_tag//v./}"
 new_tag="v.$major.$minor.$((patch+1))"
+new_version="$major.$minor.$((patch+1))"
 
 # 14. Run set_ptg_version.py
-python3 ./set_ptg_version.py "$new_tag" commit
+echo "Setting PTG version to $new_version"
+python3 ./set_ptg_version.py "$new_version" commit
 
 # 15. git push with set-upstream
 git push --set-upstream origin "$merge_branch"

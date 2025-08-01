@@ -2532,7 +2532,7 @@ void Stories::clearStoriesForPeer(PeerId peerId) {
 	_all.erase(peerId);
 	_sourceChanged.fire_copy(peerId);
 	_archive.erase(peerId);
-	_archiveChanged.fire_copy(peerId);
+	_albumIdsChanged.fire({ peerId, kStoriesAlbumIdArchive });
 	_saved.erase(peerId);
 	_savedChanged.fire_copy(peerId);
 }
