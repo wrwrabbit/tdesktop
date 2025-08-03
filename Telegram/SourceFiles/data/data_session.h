@@ -72,6 +72,7 @@ class BusinessInfo;
 struct ReactionId;
 struct UnavailableReason;
 struct CreditsStatusSlice;
+struct StarsRatingPending;
 struct UniqueGift;
 
 struct RepliesReadTillUpdate {
@@ -872,6 +873,9 @@ public:
 	[[nodiscard]] int commonStarsPerMessage(
 		not_null<const ChannelData*> channel) const;
 
+	void setPendingStarsRating(StarsRatingPending value);
+	[[nodiscard]] StarsRatingPending pendingStarsRating() const;
+
 	void clearLocalStorage();
 
     void resetCaches();
@@ -1231,6 +1235,8 @@ private:
 	std::unique_ptr<ShortcutMessages> _shortcutMessages;
 
 	MsgId _nonHistoryEntryId = ShortcutMaxMsgId;
+
+	std::unique_ptr<StarsRatingPending> _pendingStarsRating;
 
 	rpl::lifetime _lifetime;
 
