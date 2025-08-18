@@ -97,6 +97,7 @@ bool operator>=(PeerIdZero, ChatIdType<Shift>) = delete;
 using UserId = ChatIdType<0>;
 using ChatId = ChatIdType<1>;
 using ChannelId = ChatIdType<2>;
+using SecretChatId = ChatIdType<0x7E>;
 using FakeChatId = ChatIdType<0x7F>;
 
 struct PeerIdHelper {
@@ -183,6 +184,10 @@ bool operator>=(PeerIdZero, PeerId) = delete;
 	return id.is<ChatId>();
 }
 
+[[nodiscard]] inline constexpr bool peerIsSecretChat(PeerId id) noexcept {
+	return id.is<SecretChatId>();
+}
+
 [[nodiscard]] inline constexpr bool peerIsChannel(PeerId id) noexcept {
 	return id.is<ChannelId>();
 }
@@ -192,6 +197,10 @@ bool operator>=(PeerIdZero, PeerId) = delete;
 }
 
 [[nodiscard]] inline constexpr PeerId peerFromChat(ChatId chatId) noexcept {
+	return chatId;
+}
+
+[[nodiscard]] inline constexpr PeerId peerFromSecretChat(SecretChatId chatId) noexcept {
 	return chatId;
 }
 
@@ -219,6 +228,10 @@ bool operator>=(PeerIdZero, PeerId) = delete;
 
 [[nodiscard]] inline constexpr ChatId peerToChat(PeerId id) noexcept {
 	return id.to<ChatId>();
+}
+
+[[nodiscard]] inline constexpr SecretChatId peerToSecretChat(PeerId id) noexcept {
+	return id.to<SecretChatId>();
 }
 
 [[nodiscard]] inline constexpr ChannelId peerToChannel(PeerId id) noexcept {

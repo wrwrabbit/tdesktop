@@ -66,6 +66,7 @@ struct PaintContext {
 	crl::time now = 0;
 	int width = 0;
 	bool active = false;
+	bool secret_chat = false;
 	bool selected = false;
 	bool topicJumpSelected = false;
 	bool paused = false;

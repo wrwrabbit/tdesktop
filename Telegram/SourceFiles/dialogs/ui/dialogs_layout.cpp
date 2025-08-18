@@ -804,6 +804,8 @@ void PaintRow(
 		}
 		p.setPen(context.active
 			? st::dialogsNameFgActive
+			: context.secret_chat
+			? st::historyPeer2NameFg
 			: context.selected
 			? st::dialogsNameFgOver
 			: st::dialogsNameFg);

@@ -17,6 +17,7 @@ struct BotInfo;
 class PeerData;
 class UserData;
 class ChatData;
+class SecretChatData;
 class ChannelData;
 
 enum class ChatRestriction;
@@ -231,6 +232,9 @@ public:
 	[[nodiscard]] bool isChannel() const {
 		return peerIsChannel(id);
 	}
+	[[nodiscard]] bool isSecretChat() const {
+		return peerIsSecretChat(id);
+	}
 	[[nodiscard]] bool isBot() const;
 	[[nodiscard]] bool isSelf() const;
 	[[nodiscard]] bool isVerified() const;
@@ -309,6 +313,9 @@ public:
 	[[nodiscard]] const ChannelData *asChannelOrMigrated() const;
 	[[nodiscard]] ChannelData *asMonoforum();
 	[[nodiscard]] const ChannelData *asMonoforum() const;
+
+	[[nodiscard]] SecretChatData* asSecretChat();
+	[[nodiscard]] const SecretChatData* asSecretChat() const;
 
 	[[nodiscard]] ChatData *migrateFrom() const;
 	[[nodiscard]] ChannelData *migrateTo() const;

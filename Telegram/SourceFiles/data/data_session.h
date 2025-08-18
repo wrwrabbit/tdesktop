@@ -215,10 +215,12 @@ public:
 	[[nodiscard]] not_null<PeerData*> peer(UserId id) = delete;
 	[[nodiscard]] not_null<UserData*> user(UserId id);
 	[[nodiscard]] not_null<ChatData*> chat(ChatId id);
+	[[nodiscard]] not_null<SecretChatData*> secret_chat(SecretChatId id);
 	[[nodiscard]] not_null<ChannelData*> channel(ChannelId id);
 	[[nodiscard]] not_null<UserData*> user(PeerId id) = delete;
 	[[nodiscard]] not_null<ChatData*> chat(PeerId id) = delete;
 	[[nodiscard]] not_null<ChannelData*> channel(PeerId id) = delete;
+	[[nodiscard]] not_null<SecretChatData*> secret_chat(PeerId id) = delete;
 
 	[[nodiscard]] PeerData *peerLoaded(PeerId id) const;
 	[[nodiscard]] PeerData *peerLoaded(UserId id) const = delete;

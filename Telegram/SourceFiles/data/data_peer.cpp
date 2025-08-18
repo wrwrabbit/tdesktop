@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
 #include "data/data_saved_messages.h"
+#include "data/data_secret_chat.h"
 #include "data/data_session.h"
 #include "data/data_file_origin.h"
 #include "data/data_histories.h"
@@ -1081,6 +1082,14 @@ ChatData *PeerData::asChat() {
 
 const ChatData *PeerData::asChat() const {
 	return isChat() ? static_cast<const ChatData*>(this) : nullptr;
+}
+
+SecretChatData* PeerData::asSecretChat() {
+	return isSecretChat() ? static_cast<SecretChatData*>(this) : nullptr;
+}
+
+const SecretChatData* PeerData::asSecretChat() const {
+	return isSecretChat() ? static_cast<const SecretChatData*>(this) : nullptr;
 }
 
 ChannelData *PeerData::asChannel() {

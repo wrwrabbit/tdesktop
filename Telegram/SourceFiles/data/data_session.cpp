@@ -481,6 +481,10 @@ not_null<ChatData*> Session::chat(ChatId id) {
 	return peer(peerFromChat(id))->asChat();
 }
 
+not_null<SecretChatData*> Session::secret_chat(SecretChatId id) {
+	return peer(peerFromSecretChat(id))->asSecretChat();
+}
+
 not_null<ChannelData*> Session::channel(ChannelId id) {
 	return peer(peerFromChannel(id))->asChannel();
 }
@@ -5276,6 +5280,8 @@ void Session::loadSecretChat(QDataStream& stream)
     for (qint32 i = 0; i < count; ++i) {
         auto chat = SecretChatData::deserialize(stream, this);
         if (chat) {
+			auto hist = history(chat.get());
+            _chatsList.addEntry(hist);
             _secretChats.emplace(chat->secretChatId(), std::move(chat));
         }
     }

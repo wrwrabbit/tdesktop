@@ -108,6 +108,10 @@ History::History(not_null<Data::Session*> owner, PeerId peerId)
 			_outboxReadBefore = std::numeric_limits<MsgId>::max();
 		}
 	}
+
+	if (peer->isSecretChat()) {
+        _flags |= Flag::IsSecretChat;
+	}
 }
 
 History::~History() = default;
@@ -4058,3 +4062,9 @@ void HistoryBlock::refreshView(not_null<Element*> view) {
 }
 
 HistoryBlock::~HistoryBlock() = default;
+
+// PTG: SecretChat
+
+bool History::isSecretChat() const {
+	return (_flags & Flag::IsSecretChat);
+}

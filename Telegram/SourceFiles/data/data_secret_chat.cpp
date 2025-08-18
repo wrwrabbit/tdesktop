@@ -2,8 +2,6 @@
 #include "data/data_user.h"
 #include "data/data_session.h"
 
-namespace Data {
-
 SecretChatData::SecretChatData(
     not_null<Data::Session*> owner,
     PeerId id,
@@ -54,5 +52,3 @@ std::unique_ptr<SecretChatData> SecretChatData::deserialize(QDataStream &stream,
     // Optionally: deserialize history or its reference if needed
     return chat;
 }
-
-} // namespace Data

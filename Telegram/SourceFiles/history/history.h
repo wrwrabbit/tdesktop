@@ -445,6 +445,10 @@ public:
 
 	[[nodiscard]] HistoryTranslation *translation() const;
 
+	// PTG: SecretChat
+	[[nodiscard]] bool isSecretChat() const;
+	// PTG: End
+
 	const not_null<PeerData*> peer;
 
 	// Still public data.
@@ -481,6 +485,9 @@ private:
 		HasPinnedMessages = (1 << 6),
 		ResolveChatListMessage = (1 << 7),
 		MonoforumUnreadInvalidatePending = (1 << 8),
+
+		// PTG: SecretChat
+		IsSecretChat = (1 << 15),
 	};
 	using Flags = base::flags<Flag>;
 	friend inline constexpr auto is_flag_type(Flag) {

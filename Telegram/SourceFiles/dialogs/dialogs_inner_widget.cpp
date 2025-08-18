@@ -861,6 +861,7 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 		const auto expanding = (forum || monoforum)
 			&& (history->peer->id == childListShown.peerId);
 		context.rightButton = maybeCacheRightButton(row);
+		context.secret_chat = history && history->isSecretChat();
 		if (history) {
 			if (_activeQuickAction
 				&& (_activeQuickAction->data.msgBareId

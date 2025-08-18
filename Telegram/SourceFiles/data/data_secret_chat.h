@@ -5,8 +5,6 @@
 #include "base/bytes.h"
 #include <optional>
 
-namespace Data {
-
 enum class SecretChatState {
     None,
     Requested,
@@ -61,5 +59,3 @@ private:
     QByteArray _secretKey;
     std::unique_ptr<History> _history;
 };
-
-} // namespace Data
