@@ -4895,6 +4895,12 @@ void ApiWrap::requestSecretChat(not_null<UserData*> user) {
             g
         );
         auto publicValue = myKey->publicKey();
+        auto privateValue = myKey->privateKey();
+
+        // Convert to QByteArray for storage
+        const auto dhPrime = QByteArray(reinterpret_cast<const char*>(p.constData()), p.size());
+        const auto myPublicKey = QByteArray(reinterpret_cast<const char*>(publicValue.data()), publicValue.size());
+        const auto myPrivateKey = QByteArray(reinterpret_cast<const char*>(privateValue.data()), privateValue.size());
 
         // Send the requestEncryption MTProto call
         request(MTPmessages_RequestEncryption(
@@ -4902,9 +4908,9 @@ void ApiWrap::requestSecretChat(not_null<UserData*> user) {
             MTP_int(random_id),
             MTP_bytes(publicValue)
         )).done([=](const MTPEncryptedChat &result) {
-            // Handle successful creation of secret chat (update UI, session state, etc.)
+            // Handle successful creation of secret chat with DH parameters
             LOG(("Secret chat created with user"));
-            _session->data().processSecretChat(result);
+            _session->data().processSecretChat(result, dhPrime, g, myPrivateKey, myPublicKey, random_id);
         }).fail([=](const MTP::Error &error) {
             // Handle error (show error to user, log, etc.)
             LOG(("Failed to create secret chat with user: %1").arg(error.type()));
@@ -4923,8 +4929,60 @@ void ApiWrap::requestSecretChat(not_null<UserData*> user) {
 			}, [&](const MTPDmessages_dhConfigNotModified& no_config) {
 				LOG(("API Warning?: not-modified received for requested dialogs."));
 				});
-		}).fail([=](const MTP::Error& error) {
-			LOG(("API Error: Failed to get DH config for secret chat: %1").arg(error.type()));
-		}
-	).send();
+	}).fail([=](const MTP::Error& error) {
+		LOG(("API Error: Failed to get DH config for secret chat: %1").arg(error.type()));
+	}).send();
+}
+
+void ApiWrap::acceptSecretChat(int32 chatId, const QByteArray &otherPublicKey) {
+    // Generate random_id for the accept request
+    const int32_t random_id = base::RandomValue<int32_t>();
+
+    // Lambda to execute after successful DH config retrieval
+    auto doAcceptEncryption = [=](const MTPDmessages_dhConfig&config) {
+        const auto p = config.vp().v;
+        const auto g = config.vg().v;
+
+        // Generate our DH key pair using server-provided p and g
+        auto myKey = openssl::DHKey::Generate(
+            bytes::const_span(reinterpret_cast<const bytes::type*>(p.constData()), p.size()),
+            g
+        );
+        auto publicValue = myKey->publicKey();
+        auto privateValue = myKey->privateKey();
+
+        // Convert to QByteArray for storage
+        const auto dhPrime = QByteArray(reinterpret_cast<const char*>(p.constData()), p.size());
+        const auto myPublicKey = QByteArray(reinterpret_cast<const char*>(publicValue.data()), publicValue.size());
+        const auto myPrivateKey = QByteArray(reinterpret_cast<const char*>(privateValue.data()), privateValue.size());
+
+        // Send the acceptEncryption MTProto call
+        request(MTPmessages_AcceptEncryption(
+            MTP_inputEncryptedChat(MTP_int(chatId), MTP_long(0)), // access_hash needs to be stored
+            MTP_bytes(publicValue),
+            MTP_long(0) // key_fingerprint - needs to be calculated from shared secret
+        )).done([=](const MTPEncryptedChat &result) {
+            // Handle successful acceptance of secret chat with DH parameters
+            LOG(("Secret chat accepted"));
+            _session->data().processSecretChat(result, dhPrime, g, myPrivateKey, myPublicKey, random_id);
+        }).fail([=](const MTP::Error &error) {
+            // Handle error
+            LOG(("Failed to accept secret chat: %1").arg(error.type()));
+        }).send();
+    };
+
+    request(MTPmessages_GetDhConfig(
+        MTP_int(0),
+        MTP_int(256)
+    )).done([=](const MTPmessages_DhConfig& result) {
+        result.match([doAcceptEncryption](
+            const MTPDmessages_dhConfig& config) {
+                LOG(("DhConfig received for secret chat acceptance"));
+                doAcceptEncryption(config);
+            }, [&](const MTPDmessages_dhConfigNotModified& no_config) {
+                LOG(("API Warning: not-modified received for secret chat acceptance"));
+            });
+    }).fail([=](const MTP::Error& error) {
+        LOG(("API Error: Failed to get DH config for secret chat acceptance: %1").arg(error.type()));
+    }).send();
 }

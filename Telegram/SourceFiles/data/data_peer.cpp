@@ -311,6 +311,9 @@ void PeerData::updateNameDelayed(
 			}
 		} else if (isChat()) {
 			return;
+		} else if (isSecretChat()) {
+			// Secret chat names are derived from the other party
+			return;
 		}
 	}
 	_name = newName;
@@ -339,6 +342,9 @@ void PeerData::updateNameDelayed(
 			}
 			flags |= UpdateFlag::Username;
 		}
+	} else if (isSecretChat()) {
+		// Secret chats don't have usernames and names are derived
+		// from the other party, so no updates needed
 	}
 	fillNames();
 	if (nameUpdated) {
@@ -350,6 +356,9 @@ void PeerData::updateNameDelayed(
 }
 
 not_null<Ui::EmptyUserpic*> PeerData::ensureEmptyUserpic() const {
+	if (const auto secretChat = asSecretChat()) {
+		return secretChat->user()->ensureEmptyUserpic();
+	}
 	if (!_userpicEmpty) {
 		const auto user = asUser();
 		_userpicEmpty = std::make_unique<Ui::EmptyUserpic>(
@@ -559,6 +568,9 @@ Data::FileOrigin PeerData::userpicOrigin() const {
 }
 
 Data::FileOrigin PeerData::userpicPhotoOrigin() const {
+	if (const auto secretChat = asSecretChat()) {
+		return secretChat->user()->userpicPhotoOrigin();
+	}
 	return (isUser() && userpicPhotoId())
 		? Data::FileOriginUserPhoto(peerToUser(id).bare, userpicPhotoId())
 		: Data::FileOrigin();
@@ -668,6 +680,8 @@ bool PeerData::canPinMessages() const {
 			? !channel->amRestricted(ChatRestriction::PinMessages)
 			: ((channel->amCreator()
 				|| channel->adminRights() & ChatAdminRight::EditMessages));
+	} else if (const auto secretChat = asSecretChat()) {
+		return secretChat->canPinMessages();
 	}
 	Unexpected("Peer type in PeerData::canPinMessages.");
 }
@@ -1195,6 +1209,8 @@ not_null<const PeerData*> PeerData::migrateToOrMe() const {
 not_null<PeerData*> PeerData::userpicPaintingPeer() {
 	if (const auto broadcast = monoforumBroadcast()) {
 		return broadcast;
+	} else if (const auto secretChat = asSecretChat()) {
+		return secretChat->userpicPaintingPeer();
 	}
 	return this;
 }
@@ -1208,6 +1224,8 @@ Ui::PeerUserpicShape PeerData::userpicShape() const {
 		? Ui::PeerUserpicShape::Forum
 		: isMonoforum()
 		? Ui::PeerUserpicShape::Monoforum
+		: isSecretChat()
+		? Ui::PeerUserpicShape::Circle
 		: Ui::PeerUserpicShape::Circle;
 }
 
@@ -1261,6 +1279,8 @@ QString PeerData::username() const {
 		return user->username();
 	} else if (const auto channel = asChannel()) {
 		return channel->username();
+	} else if (const auto secretChat = asSecretChat()) {
+		return secretChat->username();
 	}
 	return QString();
 }
@@ -1360,6 +1380,8 @@ bool PeerData::isVerified() const {
 		return user->isVerified();
 	} else if (const auto channel = asChannel()) {
 		return channel->isVerified();
+	} else if (const auto secretChat = asSecretChat()) {
+		return secretChat->isVerified();
 	}
 	return false;
 }
@@ -1367,6 +1389,8 @@ bool PeerData::isVerified() const {
 bool PeerData::isPremium() const {
 	if (const auto user = asUser()) {
 		return user->isPremium();
+	} else if (const auto secretChat = asSecretChat()) {
+		return secretChat->isPremium();
 	}
 	return false;
 }
@@ -1376,6 +1400,8 @@ bool PeerData::isScam() const {
 		return user->isScam();
 	} else if (const auto channel = asChannel()) {
 		return channel->isScam();
+	} else if (const auto secretChat = asSecretChat()) {
+		return secretChat->isScam();
 	}
 	return false;
 }
@@ -1385,6 +1411,8 @@ bool PeerData::isFake() const {
 		return user->isFake();
 	} else if (const auto channel = asChannel()) {
 		return channel->isFake();
+	} else if (const auto secretChat = asSecretChat()) {
+		return secretChat->isFake();
 	}
 	return false;
 }

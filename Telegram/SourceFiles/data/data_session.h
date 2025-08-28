@@ -874,7 +874,16 @@ public:
 	void clearContacts();
 
 	// PTG: Secret Chats
-	void processSecretChat(const MTPEncryptedChat &data);
+	void processSecretChat(
+		const MTPEncryptedChat &data,
+		const QByteArray &dhPrime,
+		int32 dhG,
+		const QByteArray &myPrivateKey,
+		const QByteArray &myPublicKey,
+		int32 randomId);
+	
+	// Handle incoming secret chat requests (when other party initiates)
+	void processIncomingSecretChat(const MTPEncryptedChat &data);
 	void loadSecretChat(QDataStream&);
 	QByteArray dumpSecretChat(qint32& count) const;
 	not_null<SecretChatData> secretChat(int32 secretChatId) const;

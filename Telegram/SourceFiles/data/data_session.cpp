@@ -5239,38 +5239,83 @@ void Session::clearContacts() {
 }
 
 
-void Session::processSecretChat(const MTPEncryptedChat &chat) {
-    // Process the EncryptedChat object and add it to the session's data structures.
-    // This is a minimal placeholder; you should expand it to properly track secret chats.
+void Session::processSecretChat(
+		const MTPEncryptedChat &chat,
+		const QByteArray &dhPrime,
+		int32 dhG,
+		const QByteArray &myPrivateKey,
+		const QByteArray &myPublicKey,
+		int32 randomId) {
+    // Process secret chat with DH parameters for initiated chats
 
     chat.match([&](const MTPDencryptedChat &data) {
-        // You may want to create a new PeerData/UserData for the secret chat,
-        // store the chat_id, access_hash, and other relevant fields.
-        // For now, just log or store as needed.	
-        LOG(("Secret chat added: id=%1, access_hash=%2").arg(data.vid().v).arg(data.vaccess_hash().v));
-        // TODO: Integrate with your secret chat/session manager and UI.
+        LOG(("Secret chat created with DH params: id=%1, access_hash=%2").arg(data.vid().v).arg(data.vaccess_hash().v));
 		
 		const auto chat_id = data.vid().v;
+		const auto participant_id = data.vparticipant_id().v;
 
-		// create new SecretChat instance and store to _secretChats
+		// Create new SecretChat instance with DH parameters
 		_secretChats.emplace(chat_id, 
 			std::make_unique<SecretChatData>(this,
-				PeerId(data.vparticipant_id().v),
+				PeerId(participant_id),
 				chat_id,
 				data.vaccess_hash().v,
-				user(data.vparticipant_id().v)
+				user(participant_id),
+				dhPrime,
+				dhG,
+				myPrivateKey,
+				myPublicKey,
+				randomId
 			)
 		);
+        
+        // Set initial state
+        auto &secretChat = _secretChats[chat_id];
+        secretChat->setState(SecretChatState::WaitingForAccept);
+        
     }, [&](const MTPDencryptedChatWaiting &data) {
-        LOG(("Secret chat waiting: id=%1").arg(data.vid().v));
+        LOG(("Secret chat waiting with DH params: id=%1").arg(data.vid().v));
+        // Handle waiting state if needed
     }, [&](const MTPDencryptedChatRequested &data) {
-        LOG(("Secret chat requested: id=%1").arg(data.vid().v));
+        LOG(("Secret chat requested with DH params: id=%1").arg(data.vid().v));
+        // When other party initiates, we need to generate our key pair and respond
+        // This should be handled by a separate method that gets DH config and generates keys
     }, [&](const MTPDencryptedChatEmpty &data) {
         LOG(("Secret chat empty: id=%1").arg(data.vid().v));
     }, [&](const MTPDencryptedChatDiscarded &data) {
         LOG(("Secret chat discarded: id=%1").arg(data.vid().v));
     });
+}
 
+void Session::processIncomingSecretChat(const MTPEncryptedChat &chat) {
+    // Handle incoming secret chat requests (when other party initiates)
+    
+    chat.match([&](const MTPDencryptedChatRequested &data) {
+        LOG(("Incoming secret chat request: id=%1, access_hash=%2").arg(data.vid().v).arg(data.vaccess_hash().v));
+        
+        const auto chat_id = data.vid().v;
+        const auto participant_id = data.vparticipant_id().v;
+        const auto otherPublicKey = data.vg_a().v; // Other party's public key
+        
+        // We need to get DH config, generate our key pair, and accept the chat
+        // This should trigger a call to ApiWrap to get DH config and accept
+        // For now, just log that we received the request
+        LOG(("Need to accept secret chat request from user %1").arg(participant_id));
+        
+        // TODO: Implement automatic acceptance or show UI prompt
+        // For automatic acceptance:
+        _session->api().acceptSecretChat(chat_id, otherPublicKey);
+        
+    }, [&](const MTPDencryptedChat &data) {
+        LOG(("Incoming established secret chat: id=%1").arg(data.vid().v));
+        // This case should be handled by regular processSecretChat with DH params
+    }, [&](const MTPDencryptedChatWaiting &data) {
+        LOG(("Incoming secret chat waiting: id=%1").arg(data.vid().v));
+    }, [&](const MTPDencryptedChatEmpty &data) {
+        LOG(("Incoming secret chat empty: id=%1").arg(data.vid().v));
+    }, [&](const MTPDencryptedChatDiscarded &data) {
+        LOG(("Incoming secret chat discarded: id=%1").arg(data.vid().v));
+    });
 }
 
 void Session::loadSecretChat(QDataStream& stream)
@@ -5282,7 +5327,7 @@ void Session::loadSecretChat(QDataStream& stream)
         if (chat) {
 			auto hist = history(chat.get());
             _chatsList.addEntry(hist);
-            _secretChats.emplace(chat->secretChatId(), std::move(chat));
+			_secretChats.emplace(chat->secretChatId(), std::move(chat));
         }
     }
 }

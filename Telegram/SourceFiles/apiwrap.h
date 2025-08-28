@@ -430,6 +430,7 @@ public:
 
 	// Secret Chats
 	void requestSecretChat(not_null<UserData*> user);
+	void acceptSecretChat(int32 chatId, const QByteArray &otherPublicKey);
 
 private:
 	struct MessageDataRequest {
