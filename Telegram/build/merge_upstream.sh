@@ -61,7 +61,7 @@ fi
 
 # 13. Generate new tag (next iteration)
 latest_local_tag=$(git tag | grep '^v\.[0-9]\+\.[0-9]\+\.[0-9]\+$' | sort -V | tail -n1)
-IFS='.' read -r _ major minor patch <<<"${latest_local_tag//v./}"
+IFS='.' read -r _ major minor patch <<<"${latest_local_tag}"
 new_tag="v.$major.$minor.$((patch+1))"
 new_version="$major.$minor.$((patch+1))"
 
