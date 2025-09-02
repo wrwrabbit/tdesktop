@@ -201,6 +201,7 @@ private:
 	const not_null<Window::SessionController*> _window;
 	const not_null<PeerData*> _peer;
 	const int _addingToCollectionId = 0;
+	const GiftButtonMode _mode;
 
 	rpl::variable<Descriptor> _descriptor;
 	Delegate _delegate;
@@ -267,8 +268,11 @@ InnerWidget::InnerWidget(
 , _window(window)
 , _peer(peer)
 , _addingToCollectionId(addingToCollectionId)
+, _mode(_addingToCollectionId
+	? GiftButtonMode::Selection
+	: GiftButtonMode::Minimal)
 , _descriptor(std::move(descriptor))
-, _delegate(&_window->session(), GiftButtonMode::Minimal)
+, _delegate(&_window->session(), _mode)
 , _all(std::move(all))
 , _entries(&_all)
 , _list(&_entries->list)
@@ -557,7 +561,8 @@ void InnerWidget::loadMore() {
 	const auto collectionId = descriptor.collectionId;
 	_loadMoreRequestId = _api.request(MTPpayments_GetSavedStarGifts(
 		MTP_flags((filter.sortByValue ? Flag::f_sort_by_value : Flag())
-			| (filter.skipLimited ? Flag::f_exclude_limited : Flag())
+			| (filter.skipLimited ? Flag::f_exclude_unupgradable : Flag())
+			| (filter.skipUpgradable ? Flag::f_exclude_upgradable : Flag())
 			| (filter.skipUnlimited ? Flag::f_exclude_unlimited : Flag())
 			| (filter.skipUnique ? Flag::f_exclude_unique : Flag())
 			| (filter.skipSaved ? Flag::f_exclude_saved : Flag())
@@ -750,7 +755,7 @@ void InnerWidget::validateButtons() {
 		view.button->toggleSelected(
 			_addingToCollectionId && _inCollection.contains(manageId),
 			anim::type::instant);
-		view.button->setDescriptor(descriptor, GiftButton::Mode::Minimal);
+		view.button->setDescriptor(descriptor, _mode);
 		view.button->setClickedCallback(callback);
 		return true;
 	};
@@ -936,13 +941,11 @@ void InnerWidget::showGift(int index) {
 		}
 		return;
 	}
-
-	_window->show(Box(
-		::Settings::SavedStarGiftBox,
+	::Settings::ShowSavedStarGiftBox(
 		_window,
 		_peer,
 		(*_list)[index].gift,
-		pinnedSavedGifts()));
+		pinnedSavedGifts());
 }
 
 void InnerWidget::refreshAbout() {
@@ -979,30 +982,27 @@ void InnerWidget::refreshAbout() {
 	} else if (collectionCanAdd) {
 		auto about = std::make_unique<Ui::VerticalLayout>(this);
 		about->add(
-			object_ptr<Ui::CenterWrap<>>(
+			object_ptr<Ui::FlatLabel>(
 				about.get(),
-				object_ptr<Ui::FlatLabel>(
-					about.get(),
-					tr::lng_gift_collection_empty_title(),
-					st::collectionEmptyTitle)),
-			st::collectionEmptyTitleMargin);
+				tr::lng_gift_collection_empty_title(),
+				st::collectionEmptyTitle),
+			st::collectionEmptyTitleMargin,
+			style::al_top);
 		about->add(
-			object_ptr<Ui::CenterWrap<>>(
+			object_ptr<Ui::FlatLabel>(
 				about.get(),
-				object_ptr<Ui::FlatLabel>(
-					about.get(),
-					tr::lng_gift_collection_empty_text(),
-					st::collectionEmptyText)),
-			st::collectionEmptyTextMargin);
+				tr::lng_gift_collection_empty_text(),
+				st::collectionEmptyText),
+			st::collectionEmptyTextMargin,
+			style::al_top);
 
 		const auto button = about->add(
-			object_ptr<Ui::CenterWrap<Ui::RoundButton>>(
+			object_ptr<Ui::RoundButton>(
 				about.get(),
-				object_ptr<Ui::RoundButton>(
-					about.get(),
-					rpl::single(QString()),
-					st::collectionEmptyButton)),
-			st::collectionEmptyAddMargin)->entity();
+				rpl::single(QString()),
+				st::collectionEmptyButton),
+			st::collectionEmptyAddMargin,
+			style::al_top);
 		button->setText(tr::lng_gift_collection_add_button(
 		) | rpl::map([](const QString &text) {
 			return Ui::Text::IconEmoji(&st::collectionAddIcon).append(text);
@@ -1081,7 +1081,7 @@ void InnerWidget::editCollectionGifts(int id) {
 				state->descriptor.value(),
 				id,
 				(_all.filter == Filter()) ? _all : Entries()),
-			{});
+			style::margins());
 		state->changes = content->changes();
 
 		content->descriptorChanges(
@@ -1421,17 +1421,30 @@ void InnerWidget::fillMenu(const Ui::Menu::MenuCallback &addAction) {
 	addAction(tr::lng_peer_gifts_filter_limited(tr::now), [=] {
 		change([](Filter &filter) {
 			filter.skipLimited = !filter.skipLimited;
-			if (filter.skipUnlimited
+			if (filter.skipUpgradable
+				&& filter.skipUnlimited
 				&& filter.skipLimited
 				&& filter.skipUnique) {
 				filter.skipUnlimited = false;
 			}
 		});
 	}, filter.skipLimited ? nullptr : &st::mediaPlayerMenuCheck);
+	addAction(tr::lng_peer_gifts_filter_upgradable(tr::now), [=] {
+		change([](Filter &filter) {
+			filter.skipUpgradable = !filter.skipUpgradable;
+			if (filter.skipUpgradable
+				&& filter.skipUnlimited
+				&& filter.skipLimited
+				&& filter.skipUnique) {
+				filter.skipUnlimited = false;
+			}
+		});
+	}, filter.skipUpgradable ? nullptr: &st::mediaPlayerMenuCheck);
 	addAction(tr::lng_peer_gifts_filter_unique(tr::now), [=] {
 		change([](Filter &filter) {
 			filter.skipUnique = !filter.skipUnique;
-			if (filter.skipUnlimited
+			if (filter.skipUpgradable
+				&& filter.skipUnlimited
 				&& filter.skipLimited
 				&& filter.skipUnique) {
 				filter.skipUnlimited = false;
@@ -1505,6 +1518,7 @@ Widget::Widget(QWidget *parent, not_null<Controller*> controller)
 			controller->parentController(),
 			controller->giftsPeer(),
 			_descriptor.value()));
+	_emptyCollectionShown = _inner->collectionEmptyValue();
 	_inner->notifyEnabled(
 	) | rpl::take(1) | rpl::start_with_next([=](bool enabled) {
 		_notifyEnabled = enabled;
@@ -1518,7 +1532,10 @@ Widget::Widget(QWidget *parent, not_null<Controller*> controller)
 		scrollTo({ 0, 0 });
 	}, _inner->lifetime());
 
-	_descriptor.value() | rpl::start_with_next([=] {
+	rpl::combine(
+		_descriptor.value(),
+		_emptyCollectionShown.value()
+	) | rpl::start_with_next([=] {
 		refreshBottom();
 	}, _inner->lifetime());
 }
@@ -1527,22 +1544,22 @@ void Widget::refreshBottom() {
 	const auto notify = _notifyEnabled.has_value();
 	const auto descriptor = _descriptor.current();
 	const auto shownId = descriptor.collectionId;
-	const auto withButton = shownId && peer()->canManageGifts();
+	const auto withButton = shownId
+		&& peer()->canManageGifts()
+		&& !_emptyCollectionShown.current();
 	const auto wasBottom = _pinnedToBottom ? _pinnedToBottom->height() : 0;
 	delete _pinnedToBottom.data();
 	if (!notify && !withButton) {
 		setScrollBottomSkip(0);
 		_hasPinnedToBottom = false;
 	} else if (withButton) {
-		setupBottomButton(wasBottom, _inner->collectionEmptyValue());
+		setupBottomButton(wasBottom);
 	} else {
 		setupNotifyCheckbox(wasBottom, *_notifyEnabled);
 	}
 }
 
-void Widget::setupBottomButton(
-		int wasBottomHeight,
-		rpl::producer<bool> hidden) {
+void Widget::setupBottomButton(int wasBottomHeight) {
 	_pinnedToBottom = Ui::CreateChild<Ui::SlideWrap<Ui::RpWidget>>(
 		this,
 		object_ptr<Ui::RpWidget>(this));
@@ -1561,10 +1578,8 @@ void Widget::setupBottomButton(
 	) | rpl::map([](const QString &text) {
 		return Ui::Text::IconEmoji(&st::collectionAddIcon).append(text);
 	}));
-	std::move(hidden) | rpl::start_with_next([=](bool hidden) {
-		button->setVisible(!hidden);
-		_hasPinnedToBottom = !hidden;
-	}, button->lifetime());
+	button->show();
+	_hasPinnedToBottom = true;
 
 	button->setClickedCallback([=] {
 		if (const auto id = _descriptor.current().collectionId) {

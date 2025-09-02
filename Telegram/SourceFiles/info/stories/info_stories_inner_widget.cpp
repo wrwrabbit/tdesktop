@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "boxes/share_box.h"
 #include "data/data_peer.h"
+#include "data/data_saved_music.h"
 #include "data/data_session.h"
 #include "data/data_stories.h"
 #include "data/data_user.h"
@@ -586,30 +587,27 @@ void InnerWidget::refreshEmpty() {
 	if (albumCanAdd) {
 		auto empty = object_ptr<Ui::VerticalLayout>(this);
 		empty->add(
-			object_ptr<Ui::CenterWrap<>>(
+			object_ptr<Ui::FlatLabel>(
 				empty.get(),
-				object_ptr<Ui::FlatLabel>(
-					empty.get(),
-					tr::lng_stories_album_empty_title(),
-					st::collectionEmptyTitle)),
-			st::collectionEmptyTitleMargin);
+				tr::lng_stories_album_empty_title(),
+				st::collectionEmptyTitle),
+			st::collectionEmptyTitleMargin,
+			style::al_top);
 		empty->add(
-			object_ptr<Ui::CenterWrap<>>(
+			object_ptr<Ui::FlatLabel>(
 				empty.get(),
-				object_ptr<Ui::FlatLabel>(
-					empty.get(),
-					tr::lng_stories_album_empty_text(),
-					st::collectionEmptyText)),
-			st::collectionEmptyTextMargin);
+				tr::lng_stories_album_empty_text(),
+				st::collectionEmptyText),
+			st::collectionEmptyTextMargin,
+			style::al_top);
 
 		const auto button = empty->add(
-			object_ptr<Ui::CenterWrap<Ui::RoundButton>>(
+			object_ptr<Ui::RoundButton>(
 				empty.get(),
-				object_ptr<Ui::RoundButton>(
-					empty.get(),
-					rpl::single(QString()),
-					st::collectionEmptyButton)),
-			st::collectionEmptyAddMargin)->entity();
+				rpl::single(QString()),
+				st::collectionEmptyButton),
+			st::collectionEmptyAddMargin,
+			style::al_top);
 		button->setText(tr::lng_stories_album_add_button(
 		) | rpl::map([](const QString &text) {
 			return Ui::Text::IconEmoji(&st::collectionAddIcon).append(text);

@@ -2232,8 +2232,7 @@ ItemPreview MediaInvoice::toPreview(ToPreviewOptions options) const {
 			? parent()->translatedText()
 			: parent()->originalText());
 	const auto hasMiniImages = !images.empty();
-	auto nice = Ui::Text::Colorized(
-		Ui::CreditsEmojiSmall(&parent()->history()->session()));
+	auto nice = Ui::Text::Colorized(Ui::CreditsEmojiSmall());
 	nice.append(WithCaptionNotificationText(type, caption, hasMiniImages));
 	return {
 		.text = std::move(nice),
@@ -2586,7 +2585,11 @@ std::unique_ptr<HistoryView::Media> MediaGiftBox::createView(
 		not_null<HistoryView::Element*> message,
 		not_null<HistoryItem*> realParent,
 		HistoryView::Element *replacing) {
-	if (const auto &unique = _data.unique) {
+	if (_data.type == GiftType::ChatTheme) {
+		return std::make_unique<HistoryView::ServiceBox>(
+			message,
+			std::make_unique<HistoryView::GiftThemeBox>(message, this));
+	} else if (const auto &unique = _data.unique) {
 		return std::make_unique<HistoryView::MediaGeneric>(
 			message,
 			HistoryView::GenerateUniqueGiftMedia(message, replacing, unique),
