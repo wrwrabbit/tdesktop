@@ -511,7 +511,7 @@ mac:
     git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
     cd depot_tools
     git checkout 0e9c00fe9f9783104836bd68870b5253c8c76121
-    ./update_depot_tools
+    DEPOT_TOOLS_UPDATE=0 ./update_depot_tools
 """, 'ThirdParty')
 
 if not mac or 'build-stackwalk' in options:
