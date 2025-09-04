@@ -120,6 +120,10 @@ public:
 	[[nodiscard]] QString cacheBigFilePath() const;
 	[[nodiscard]] Cache::Database::Settings cacheBigFileSettings() const;
 
+	[[nodiscard]] EncryptionKey cacheSecretMessagesKey() const;
+	[[nodiscard]] QString cacheSecretMessagesPath() const;
+	[[nodiscard]] Cache::Database::Settings cacheSecretMessagesSettings() const;
+
 	void writeInstalledStickers();
 	void writeFeaturedStickers();
 	void writeRecentStickers();

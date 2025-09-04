@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "inline_bots/inline_bot_layout_item.h"
 #include "storage/storage_account.h"
 #include "storage/storage_encrypted_file.h"
+#include "storage/storage_secret_messages.h"
 #include "media/player/media_player_instance.h" // instance()->play()
 #include "media/audio/media_audio.h"
 #include "boxes/abstract_box.h"
@@ -222,6 +223,9 @@ Session::Session(not_null<Main::Session*> session)
 , _bigFileCache(Core::App().databases().get(
 	_session->local().cacheBigFilePath(),
 	_session->local().cacheBigFileSettings()))
+, _secretMessagesCache(Core::App().databases().get(
+	_session->local().cacheSecretMessagesPath(),
+	_session->local().cacheSecretMessagesSettings()))
 , _groupFreeTranscribeLevel(session->appConfig().value(
 ) | rpl::map([limits = Data::LevelLimits(session)] {
 	return limits.groupTranscribeLevelMin();
@@ -1536,6 +1540,17 @@ Storage::Cache::Database &Session::cache() {
 
 Storage::Cache::Database &Session::cacheBigFile() {
 	return *_bigFileCache;
+}
+
+Storage::Cache::Database &Session::cacheSecretMessages() {
+	return *_secretMessagesCache;
+}
+
+Storage::SecretMessagesStorage &Session::secretMessagesStorage() {
+	if (!_secretMessagesStorage) {
+		_secretMessagesStorage = std::make_unique<Storage::SecretMessagesStorage>(*_secretMessagesCache);
+	}
+	return *_secretMessagesStorage;
 }
 
 void Session::suggestStartExport(TimeId availableAt) {

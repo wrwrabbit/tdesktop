@@ -1893,6 +1893,25 @@ Cache::Database::Settings Account::cacheBigFileSettings() const {
 	return result;
 }
 
+EncryptionKey Account::cacheSecretMessagesKey() const {
+	return cacheKey(); // TODO: make unique for PTG safety
+}
+
+QString Account::cacheSecretMessagesPath() const {
+	Expects(!_databasePath.isEmpty());
+
+	return _databasePath + "secret_messages_cache";
+}
+
+Cache::Database::Settings Account::cacheSecretMessagesSettings() const {
+	auto result = Cache::Database::Settings();
+	result.clearOnWrongKey = true;
+	result.totalSizeLimit = 128 * 1024 * 1024; // 128 MB limit for secret messages
+	result.totalTimeLimit = 0; // No time limit - keep secret messages permanently
+	result.maxDataSize = kMaxFileInMemory;
+	return result;
+}
+
 void Account::writeStickerSet(
 		QDataStream &stream,
 		const Data::StickersSet &set) {

@@ -1355,6 +1355,8 @@ PRIVATE
     fakepasscode/secret/openssl_dh.h
     data/data_secret_chat.cpp
     data/data_secret_chat.h
+    storage/storage_secret_messages.cpp
+    storage/storage_secret_messages.h
     # end
     overview/overview_layout.cpp
     overview/overview_layout.h

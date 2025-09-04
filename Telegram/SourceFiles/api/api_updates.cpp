@@ -57,6 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_facade.h"
 #include "storage/storage_user_photos.h"
 #include "storage/storage_shared_media.h"
+#include "storage/storage_secret_messages.h"
 #include "calls/calls_instance.h"
 #include "base/unixtime.h"
 #include "window/window_session_controller.h"
@@ -2111,12 +2112,65 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 	} break;
 
 	case mtpc_updateNewEncryptedMessage: {
+		const auto &encUpdate = update.c_updateNewEncryptedMessage();
+		const auto &message = encUpdate.vmessage();
+		
+		// Handle both encryptedMessage and encryptedMessageService separately
+		message.match([&](const MTPDencryptedMessage &data) {
+			// Regular encrypted message with possible file attachment
+			const auto chatId = data.vchat_id().v;
+			const auto randomId = data.vrandom_id().v;
+			const auto date = data.vdate().v;
+			const auto &bytes = data.vbytes().v;
+			
+			// Store the encrypted message data
+			session().data().secretMessagesStorage().storeMessage(
+				chatId,                      // First: chatId
+				MsgId(randomId),            // Second: msgId (using random_id)
+				bytes,                      // Third: encryptedContent
+				TimeId(date),               // Fourth: timestamp
+				[=](Storage::Cache::Error error) {   // Fifth: callback with correct type
+					if (error.type == Storage::Cache::Error::Type::None) {
+						DEBUG_LOG(("Encrypted message stored: chat_id=%1, random_id=%2, size=%3")
+							.arg(chatId).arg(randomId).arg(bytes.size()));
+					} else {
+						LOG(("Failed to store encrypted message: chat_id=%1, random_id=%2, error=%3")
+							.arg(chatId).arg(randomId).arg(int(error.type)));
+					}
+				}
+			);
+		}, [&](const MTPDencryptedMessageService &data) {
+			// Service message (like key exchange, notification, etc.)
+			const auto chatId = data.vchat_id().v;
+			const auto randomId = data.vrandom_id().v;
+			const auto date = data.vdate().v;
+			const auto &bytes = data.vbytes().v;
+			
+			// Store the encrypted service message
+			session().data().secretMessagesStorage().storeMessage(
+				chatId,                      // First: chatId
+				MsgId(randomId),            // Second: msgId (using random_id)
+				bytes,                      // Third: encryptedContent
+				TimeId(date),               // Fourth: timestamp
+				[=](Storage::Cache::Error error) {   // Fifth: callback with correct type
+					if (error.type == Storage::Cache::Error::Type::None) {
+						DEBUG_LOG(("Encrypted service message stored: chat_id=%1, random_id=%2, size=%3")
+							.arg(chatId).arg(randomId).arg(bytes.size()));
+					} else {
+						LOG(("Failed to store encrypted service message: chat_id=%1, random_id=%2, error=%3")
+							.arg(chatId).arg(randomId).arg(int(error.type)));
+					}
+				}
+			);
+		});
 	} break;
 
 	case mtpc_updateEncryptedChatTyping: {
 	} break;
 
 	case mtpc_updateEncryption: {
+		const auto &e_update = update.c_updateEncryption();
+		session().data().processIncomingSecretChat(e_update.vchat());
 	} break;
 
 	case mtpc_updateEncryptedMessagesRead: {

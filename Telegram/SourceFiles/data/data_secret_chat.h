@@ -6,6 +6,10 @@
 #include "base/bytes.h"
 #include <optional>
 
+namespace Storage {
+struct SecretMessage;
+} // namespace Storage
+
 enum class SecretChatState {
     None,
     Requested,
@@ -62,6 +66,10 @@ public:
     // History
     History *history() const { return _history.get(); }
     void setHistory(std::unique_ptr<History> history) { _history = std::move(history); }
+
+    // Secret message storage
+    void storeSecretMessage(MsgId msgId, const QByteArray &encryptedContent, TimeId timestamp);
+    void loadSecretMessages(Fn<void(const std::vector<Storage::SecretMessage>&)> callback);
 
     // Serialization/deserialization (to be implemented)
     void serialize(QDataStream &stream) const;

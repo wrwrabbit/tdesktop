@@ -45,6 +45,10 @@ namespace Iv {
 class Data;
 } // namespace Iv
 
+namespace Storage {
+class SecretMessagesStorage;
+} // namespace Storage
+
 namespace Data {
 
 class Folder;
@@ -70,6 +74,7 @@ class Stories;
 class SavedMessages;
 class Chatbots;
 class BusinessInfo;
+
 struct ReactionId;
 struct UnavailableReason;
 struct CreditsStatusSlice;
@@ -210,6 +215,9 @@ public:
 
 	[[nodiscard]] Storage::Cache::Database &cache();
 	[[nodiscard]] Storage::Cache::Database &cacheBigFile();
+	[[nodiscard]] Storage::Cache::Database &cacheSecretMessages();
+
+	[[nodiscard]] Storage::SecretMessagesStorage &secretMessagesStorage();
 
 	[[nodiscard]] not_null<PeerData*> peer(PeerId id);
 	[[nodiscard]] not_null<PeerData*> peer(UserId id) = delete;
@@ -1031,6 +1039,8 @@ private:
 
 	Storage::DatabasePointer _cache;
 	Storage::DatabasePointer _bigFileCache;
+	Storage::DatabasePointer _secretMessagesCache;
+	std::unique_ptr<Storage::SecretMessagesStorage> _secretMessagesStorage;
 
 	TimeId _exportAvailableAt = 0;
 	QPointer<Ui::BoxContent> _exportSuggestion;
