@@ -128,6 +128,12 @@ jobs:
         shell: bash
         run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
 
+      - name: Clone.
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
       - name: Detect SDK
         shell: bash
         run: |
@@ -141,12 +147,6 @@ jobs:
         with:
           arch: ${{ matrix.arch }}
           sdk: ${{ env.SDK }}
-
-      - name: Clone.
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
       - name: Set up environment paths.
         shell: bash
