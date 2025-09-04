@@ -432,6 +432,7 @@ public:
 	// Secret Chats
 	void requestSecretChat(not_null<UserData*> user);
 	void acceptSecretChat(int32 chatId, const QByteArray &otherPublicKey);
+	void discardSecretChat(int32 chatId, bool deleteHistory = false);
 
 private:
 	// Secret chat message sending helper

@@ -896,6 +896,7 @@ public:
 	QByteArray dumpSecretChat(qint32& count) const;
 	not_null<SecretChatData> secretChat(int32 secretChatId) const;
 	SecretChatData* secretChatLoaded(int32 secretChatId) const;
+	SecretChatData* findSecretChat(int32 secretChatId) const;
 	// End PTG
 
 private:

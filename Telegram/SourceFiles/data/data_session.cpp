@@ -5306,6 +5306,14 @@ void Session::processSecretChat(
         LOG(("Secret chat empty: id=%1").arg(data.vid().v));
     }, [&](const MTPDencryptedChatDiscarded &data) {
         LOG(("Secret chat discarded: id=%1").arg(data.vid().v));
+        
+        const auto chat_id = data.vid().v;
+        auto it = _secretChats.find(chat_id);
+        if (it != _secretChats.end()) {
+            // Clear all encryption keys for security  
+            it->second->clearKeys();
+            it->second->setState(SecretChatState::Terminated);
+        }
     });
 }
 
@@ -5340,9 +5348,22 @@ void Session::processIncomingSecretChat(const MTPEncryptedChat &chat) {
             
             // If we have the other party's public key (from g_a or g_b), compute shared secret
 			const auto otherPublicKey = data.vg_a_or_b().v;
+            const auto keyFingerprint = data.vkey_fingerprint().v;
+            
             if (!otherPublicKey.isEmpty()) {
                 it->second->setOtherPublicKey(otherPublicKey);
                 it->second->computeSharedSecret();
+                
+                // Verify the key fingerprint
+                if (!it->second->verifyKeyFingerprint(keyFingerprint)) {
+                    LOG(("SecretChat: Key fingerprint verification failed! Terminating chat_id=%1")
+                        .arg(chat_id));
+                    it->second->setState(SecretChatState::Terminated);
+                    return;
+                }
+                
+                LOG(("SecretChat: Key fingerprint verified successfully for chat_id=%1")
+                    .arg(chat_id));
             }
         } else {
             LOG(("Warning: Received established secret chat that we don't have locally"));
@@ -5358,6 +5379,8 @@ void Session::processIncomingSecretChat(const MTPEncryptedChat &chat) {
         const auto chat_id = data.vid().v;
         auto it = _secretChats.find(chat_id);
         if (it != _secretChats.end()) {
+            // Clear all encryption keys for security
+            it->second->clearKeys();
             it->second->setState(SecretChatState::Terminated);
         }
     });
@@ -5393,6 +5416,10 @@ QByteArray Session::dumpSecretChat(qint32& count) const
 SecretChatData* Session::secretChatLoaded(int32 secretChatId) const {
     auto it = _secretChats.find(secretChatId);
     return (it != _secretChats.end()) ? it->second.get() : nullptr;
+}
+
+SecretChatData* Session::findSecretChat(int32 secretChatId) const {
+    return secretChatLoaded(secretChatId);
 }
 
 } // namespace Data

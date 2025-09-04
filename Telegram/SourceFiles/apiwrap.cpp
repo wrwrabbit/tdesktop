@@ -5048,6 +5048,8 @@ void ApiWrap::acceptSecretChat(int32 chatId, const QByteArray &otherPublicKey) {
             keyFingerprint |= (static_cast<int64>(hash[hash.size() - 8 + i]) << (i * 8));
         }
 
+        LOG(("SecretChat: Calculated key fingerprint: %1").arg(keyFingerprint));
+
         // Convert to QByteArray for storage
         const auto dhPrime = QByteArray(reinterpret_cast<const char*>(p.constData()), p.size());
         const auto myPublicKey = QByteArray(reinterpret_cast<const char*>(publicValue.data()), publicValue.size());
@@ -5082,4 +5084,26 @@ void ApiWrap::acceptSecretChat(int32 chatId, const QByteArray &otherPublicKey) {
     }).fail([=](const MTP::Error& error) {
         LOG(("API Error: Failed to get DH config for secret chat acceptance: %1").arg(error.type()));
     }).send();
+}
+
+void ApiWrap::discardSecretChat(int32 chatId, bool deleteHistory) {
+	auto secretChat = _session->data().findSecretChat(chatId);
+	if (!secretChat) {
+		return;
+	}
+
+	// Clear keys immediately for security
+	secretChat->clearKeys();
+	secretChat->setState(SecretChatState::Terminated);
+
+	request(MTPmessages_DiscardEncryption(
+		MTP_flags(deleteHistory 
+			? MTPmessages_DiscardEncryption::Flag::f_delete_history 
+			: MTPmessages_DiscardEncryption::Flag(0)),
+		MTP_int(chatId)
+	)).done([=](const MTPBool& result) {
+		LOG(("SecretChat: Successfully discarded chat %1").arg(chatId));
+	}).fail([=](const MTP::Error &error) {
+		LOG(("API Error: Failed to discard secret chat %1: %2").arg(chatId).arg(error.type()));
+	}).send();
 }

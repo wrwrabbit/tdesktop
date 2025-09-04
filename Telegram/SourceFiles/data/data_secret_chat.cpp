@@ -5,6 +5,7 @@
 #include "base/openssl_help.h"
 #include "base/bytes.h"
 #include "base/random.h"
+#include "base/unixtime.h"
 #include "mtproto/mtproto_auth_key.h"
 #include "logs.h"
 
@@ -29,11 +30,18 @@ SecretChatData::SecretChatData(
     _dhG(dhG),
     _myPrivateKey(myPrivateKey),
     _myPublicKey(myPublicKey),
-    _randomId(randomId) {
+    _randomId(randomId),
+    _keyCreationTime(base::unixtime::now()),
+    _messagesWithCurrentKey(0) {
     // Set display name for the secret chat
     updateNameDelayed(QString("Secret Chat with %1").arg(_user->name()), 
         QString("Secret Chat with %1").arg(_user->name()), 
         _user->name());
+}
+
+SecretChatData::~SecretChatData() {
+    // Automatically clear all cryptographic material on destruction
+    clearKeys();
 }
 
     
@@ -211,6 +219,190 @@ int64 SecretChatData::calculateKeyFingerprint() const {
     return fingerprint;
 }
 
+bool SecretChatData::verifyKeyFingerprint(int64 expectedFingerprint) const {
+    if (_secretKey.isEmpty()) {
+        LOG(("SecretChat: Cannot verify fingerprint - no secret key"));
+        return false;
+    }
+
+    int64 actualFingerprint = calculateKeyFingerprint();
+    bool isValid = (actualFingerprint == expectedFingerprint);
+
+    LOG(("SecretChat: Key fingerprint verification - expected=%1, actual=%2, valid=%3")
+        .arg(expectedFingerprint).arg(actualFingerprint).arg(isValid));
+
+    if (!isValid) {
+        LOG(("SecretChat: SECURITY WARNING - Key fingerprint mismatch! Expected: %1, Got: %2")
+            .arg(expectedFingerprint).arg(actualFingerprint));
+    }
+
+    return isValid;
+}
+
+void SecretChatData::regenerateKeys() {
+    LOG(("SecretChat: Regenerating DH keys for chat_id=%1").arg(_secretChatId));
+
+    // Clear current keys
+    _myPrivateKey.clear();
+    _myPublicKey.clear();
+    _otherPublicKey.clear();
+    _secretKey.clear();
+
+    // Reset sequence numbers for new key exchange
+    _outSeqNo = 0;
+    _inSeqNo = -1;
+    
+    // Reset key rotation tracking
+    _keyFingerprint = 0;
+    _keyCreationTime = base::unixtime::now();
+    _messagesWithCurrentKey = 0;
+
+    // Set state back to key exchange
+    _state = SecretChatState::Requested;
+
+    try {
+        // Generate new DH key pair
+        auto dhKey = openssl::DHKey::Generate(
+            bytes::const_span(reinterpret_cast<const bytes::type*>(_dhPrime.constData()), _dhPrime.size()),
+            _dhG
+        );
+
+        // Store new private key (big-endian format)
+        auto privateKey = dhKey->privateKey();
+        _myPrivateKey = QByteArray(reinterpret_cast<const char*>(privateKey.data()), privateKey.size());
+
+        // Store new public key (big-endian format)
+        auto publicKey = dhKey->publicKey();
+        _myPublicKey = QByteArray(reinterpret_cast<const char*>(publicKey.data()), publicKey.size());
+
+        LOG(("SecretChat: Successfully regenerated DH keys (private=%1 bytes, public=%2 bytes)")
+            .arg(_myPrivateKey.size()).arg(_myPublicKey.size()));
+
+    } catch (const std::exception &e) {
+        LOG(("SecretChat: Failed to regenerate DH keys: %1").arg(e.what()));
+        _state = SecretChatState::Terminated;
+    }
+}
+
+void SecretChatData::setState(SecretChatState newState) {
+    SecretChatState oldState = _state;
+    _state = newState;
+
+    LOG(("SecretChat: State change chat_id=%1, %2 -> %3")
+        .arg(_secretChatId)
+        .arg(static_cast<int>(oldState))
+        .arg(static_cast<int>(newState)));
+
+    // Handle key regeneration on state changes that require it
+    if (shouldRegenerateKeys(oldState, newState)) {
+        LOG(("SecretChat: State change requires key regeneration"));
+        regenerateKeys();
+    }
+
+    // Clear sensitive data when terminating
+    if (newState == SecretChatState::Terminated) {
+        LOG(("SecretChat: Clearing sensitive data due to termination"));
+        _secretKey.clear();
+        _myPrivateKey.clear();
+        _otherPublicKey.clear();
+        // Keep _myPublicKey for potential verification needs
+    }
+}
+
+bool SecretChatData::shouldRegenerateKeys(SecretChatState oldState, SecretChatState newState) const {
+    // Regenerate keys when:
+    // 1. Moving from Terminated back to any active state (re-initiation)
+    // 2. Security incidents requiring fresh keys
+    // 3. Explicit restart of key exchange
+    
+    if (oldState == SecretChatState::Terminated && 
+        (newState == SecretChatState::Requested || newState == SecretChatState::WaitingForAccept)) {
+        return true;
+    }
+
+    // If we're starting fresh from None state
+    if (oldState == SecretChatState::None && newState == SecretChatState::Requested) {
+        return false; // Keys should already be generated during initial creation
+    }
+
+    return false;
+}
+
+void SecretChatData::forceKeyRegeneration() {
+    LOG(("SecretChat: Force key regeneration requested for chat_id=%1").arg(_secretChatId));
+    
+    // This is a security feature - immediately regenerate keys regardless of state
+    SecretChatState currentState = _state;
+    
+    // Regenerate the keys
+    regenerateKeys();
+    
+    // If we were in an established state, we need to restart the key exchange
+    if (currentState == SecretChatState::Established) {
+        LOG(("SecretChat: Was established, restarting key exchange"));
+        _state = SecretChatState::Requested;
+        
+        // TODO: Notify the UI that key exchange is restarting
+        // TODO: Send new requestEncryption to other party
+    }
+    
+    LOG(("SecretChat: Force key regeneration completed"));
+}
+
+void SecretChatData::clearKeys() {
+    LOG(("SecretChat: Clearing all cryptographic keys for chat_id=%1").arg(_secretChatId));
+    
+    // Clear all sensitive cryptographic material
+    _secretKey.clear();
+    _dhPrime.clear();
+    _myPrivateKey.clear();
+    _myPublicKey.clear();
+    _otherPublicKey.clear();
+    
+    // Reset sequence numbers
+    _inSeqNo = 0;
+    _outSeqNo = 0;
+    
+    // Clear key fingerprint and rotation tracking
+    _keyFingerprint = 0;
+    _keyCreationTime = 0;
+    _messagesWithCurrentKey = 0;
+    
+    LOG(("SecretChat: All cryptographic material cleared"));
+}
+
+bool SecretChatData::shouldRotateKeys() const {
+    if (!hasValidSecretKey()) {
+        return false; // No keys to rotate
+    }
+    
+    const auto currentTime = base::unixtime::now();
+    const auto keyAgeHours = (currentTime - _keyCreationTime) / 3600;
+    
+    // Security policy for key rotation:
+    // - Rotate after 7 days (168 hours) regardless of usage
+    // - Rotate after 1000 messages with the same key
+    // - Rotate after 24 hours if very active (>100 messages)
+    
+    if (keyAgeHours >= 168) {  // 7 days
+        LOG(("SecretChat: Key rotation needed - age limit reached (%1 hours)").arg(keyAgeHours));
+        return true;
+    }
+    
+    if (_messagesWithCurrentKey >= 1000) {
+        LOG(("SecretChat: Key rotation needed - message limit reached (%1 messages)").arg(_messagesWithCurrentKey));
+        return true;
+    }
+    
+    if (keyAgeHours >= 24 && _messagesWithCurrentKey >= 100) {
+        LOG(("SecretChat: Key rotation needed - active use threshold (%1 hours, %2 messages)")
+            .arg(keyAgeHours).arg(_messagesWithCurrentKey));
+        return true;
+    }
+    
+    return false;
+}
+
 QByteArray SecretChatData::encryptMessage(const QByteArray &plaintext) const {
     if (_secretKey.isEmpty()) {
         LOG(("SecretChat: Cannot encrypt - no secret key"));
@@ -220,6 +412,12 @@ QByteArray SecretChatData::encryptMessage(const QByteArray &plaintext) const {
     if (plaintext.isEmpty()) {
         LOG(("SecretChat: Cannot encrypt - empty plaintext"));
         return QByteArray();
+    }
+    
+    // Check if keys should be rotated for security
+    if (shouldRotateKeys()) {
+        LOG(("SecretChat: Warning - keys should be rotated before encrypting more messages"));
+        // TODO: Trigger key rotation notification to UI
     }
 
     // Prepare the key - Telegram uses the first 32 bytes of the secret key for AES-256
@@ -265,7 +463,11 @@ QByteArray SecretChatData::encryptMessage(const QByteArray &plaintext) const {
     result.append(reinterpret_cast<const char*>(iv.data()), iv.size());
     result.append(reinterpret_cast<const char*>(data.data()), data.size());
 
-    LOG(("SecretChat: Message encrypted with HMAC (size: %1 -> %2)").arg(plaintext.size()).arg(result.size()));
+    // Increment message counter for key rotation tracking
+    ++_messagesWithCurrentKey;
+
+    LOG(("SecretChat: Message encrypted with HMAC (size: %1 -> %2, msg_count: %3)")
+        .arg(plaintext.size()).arg(result.size()).arg(_messagesWithCurrentKey));
     return result;
 }
 
@@ -334,7 +536,11 @@ QByteArray SecretChatData::decryptMessage(const QByteArray &ciphertext) const {
     // Convert back to QByteArray
     QByteArray result(reinterpret_cast<const char*>(encryptedData.data()), encryptedData.size());
 
-    LOG(("SecretChat: Message decrypted and authenticated (size: %1 -> %2)").arg(ciphertext.size()).arg(result.size()));
+    // Increment message counter for key rotation tracking
+    ++_messagesWithCurrentKey;
+
+    LOG(("SecretChat: Message decrypted and authenticated (size: %1 -> %2, msg_count: %3)")
+        .arg(ciphertext.size()).arg(result.size()).arg(_messagesWithCurrentKey));
     return result;
 }
 

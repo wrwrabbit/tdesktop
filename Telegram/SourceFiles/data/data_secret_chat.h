@@ -31,12 +31,15 @@ public:
         const QByteArray &myPrivateKey,
         const QByteArray &myPublicKey,
         int32 randomId);
+    
+    // Destructor to ensure keys are cleared
+    ~SecretChatData();
 
     // Chat/session info
     int32 secretChatId() const { return _secretChatId; }
     int64 accessHash() const { return _accessHash; }
     SecretChatState state() const { return _state; }
-    void setState(SecretChatState state) { _state = state; }
+    void setState(SecretChatState state);
 
     // Participants
     not_null<UserData*> user() const { return _user; }
@@ -80,6 +83,11 @@ public:
     // Cryptographic operations
     void computeSharedSecret();
     int64 calculateKeyFingerprint() const;
+    bool verifyKeyFingerprint(int64 expectedFingerprint) const;
+    void regenerateKeys();
+    void forceKeyRegeneration(); // Manual key regeneration for security
+    void clearKeys(); // Clear all cryptographic material for security
+    bool shouldRotateKeys() const; // Check if keys should be rotated for security
     QByteArray encryptMessage(const QByteArray &plaintext) const;
     QByteArray decryptMessage(const QByteArray &ciphertext) const;
     bool hasValidSecretKey() const;
@@ -106,6 +114,9 @@ public:
     not_null<PeerData*> userpicPaintingPeer();
 
 private:
+    // Internal helper methods
+    bool shouldRegenerateKeys(SecretChatState oldState, SecretChatState newState) const;
+
     int32 _secretChatId = 0;
     int64 _accessHash = 0;
     SecretChatState _state = SecretChatState::None;
@@ -122,4 +133,9 @@ private:
     // MTProto sequence numbers (mutable because they're updated during encrypt/decrypt)
     mutable int32 _outSeqNo = 0;  // Our outgoing sequence number
     mutable int32 _inSeqNo = -1;  // Their incoming sequence number
+    
+    // Key rotation tracking for security
+    mutable int64 _keyFingerprint = 0;
+    mutable TimeId _keyCreationTime = 0;   // When current keys were created
+    mutable int32 _messagesWithCurrentKey = 0; // Messages sent/received with current key
 };
