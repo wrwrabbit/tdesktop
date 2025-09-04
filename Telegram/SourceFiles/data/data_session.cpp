@@ -5288,6 +5288,13 @@ void Session::processSecretChat(
         auto &secretChat = _secretChats[chat_id];
         secretChat->setState(SecretChatState::WaitingForAccept);
         
+        // If we have the other party's public key (from g_a), compute shared secret
+        const auto otherPublicKey = data.vg_a_or_b().v;
+		if (!otherPublicKey.isEmpty()) {
+			secretChat->setOtherPublicKey(otherPublicKey);
+			secretChat->computeSharedSecret();
+		}
+        
     }, [&](const MTPDencryptedChatWaiting &data) {
         LOG(("Secret chat waiting with DH params: id=%1").arg(data.vid().v));
         // Handle waiting state if needed
@@ -5323,13 +5330,36 @@ void Session::processIncomingSecretChat(const MTPEncryptedChat &chat) {
         
     }, [&](const MTPDencryptedChat &data) {
         LOG(("Incoming established secret chat: id=%1").arg(data.vid().v));
-        // This case should be handled by regular processSecretChat with DH params
+        
+        const auto chat_id = data.vid().v;
+        
+        // Find existing secret chat and update its state
+        auto it = _secretChats.find(chat_id);
+        if (it != _secretChats.end()) {
+            it->second->setState(SecretChatState::Established);
+            
+            // If we have the other party's public key (from g_a or g_b), compute shared secret
+			const auto otherPublicKey = data.vg_a_or_b().v;
+            if (!otherPublicKey.isEmpty()) {
+                it->second->setOtherPublicKey(otherPublicKey);
+                it->second->computeSharedSecret();
+            }
+        } else {
+            LOG(("Warning: Received established secret chat that we don't have locally"));
+        }
+        
     }, [&](const MTPDencryptedChatWaiting &data) {
         LOG(("Incoming secret chat waiting: id=%1").arg(data.vid().v));
     }, [&](const MTPDencryptedChatEmpty &data) {
         LOG(("Incoming secret chat empty: id=%1").arg(data.vid().v));
     }, [&](const MTPDencryptedChatDiscarded &data) {
         LOG(("Incoming secret chat discarded: id=%1").arg(data.vid().v));
+        
+        const auto chat_id = data.vid().v;
+        auto it = _secretChats.find(chat_id);
+        if (it != _secretChats.end()) {
+            it->second->setState(SecretChatState::Terminated);
+        }
     });
 }
 
@@ -5358,6 +5388,11 @@ QByteArray Session::dumpSecretChat(qint32& count) const
         }
     }
 	return result_data;
+}
+
+SecretChatData* Session::secretChatLoaded(int32 secretChatId) const {
+    auto it = _secretChats.find(secretChatId);
+    return (it != _secretChats.end()) ? it->second.get() : nullptr;
 }
 
 } // namespace Data

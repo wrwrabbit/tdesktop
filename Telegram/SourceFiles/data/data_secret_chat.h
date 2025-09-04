@@ -59,6 +59,12 @@ public:
     int32 randomId() const { return _randomId; }
     void setRandomId(int32 id) { _randomId = id; }
 
+    // Sequence numbers for MTProto
+    int32 nextOutSeqNo() { return _outSeqNo += 2; } // Outgoing messages use even numbers
+    int32 nextInSeqNo() { return _inSeqNo += 2; }   // Incoming messages use odd numbers
+    int32 currentOutSeqNo() const { return _outSeqNo; }
+    int32 currentInSeqNo() const { return _inSeqNo; }
+
     // Secret key
     const QByteArray &secretKey() const { return _secretKey; }
     void setSecretKey(const QByteArray &key) { _secretKey = key; }
@@ -70,6 +76,17 @@ public:
     // Secret message storage
     void storeSecretMessage(MsgId msgId, const QByteArray &encryptedContent, TimeId timestamp);
     void loadSecretMessages(Fn<void(const std::vector<Storage::SecretMessage>&)> callback);
+
+    // Cryptographic operations
+    void computeSharedSecret();
+    int64 calculateKeyFingerprint() const;
+    QByteArray encryptMessage(const QByteArray &plaintext) const;
+    QByteArray decryptMessage(const QByteArray &ciphertext) const;
+    bool hasValidSecretKey() const;
+    
+    // MTProto message formatting
+    QByteArray encryptMTProtoMessage(const QByteArray &plaintext);
+    QByteArray decryptMTProtoMessage(const QByteArray &ciphertext);
 
     // Serialization/deserialization (to be implemented)
     void serialize(QDataStream &stream) const;
@@ -101,4 +118,8 @@ private:
     int32 _randomId = 0;
     QByteArray _secretKey;
     std::unique_ptr<History> _history;
+    
+    // MTProto sequence numbers (mutable because they're updated during encrypt/decrypt)
+    mutable int32 _outSeqNo = 0;  // Our outgoing sequence number
+    mutable int32 _inSeqNo = -1;  // Their incoming sequence number
 };

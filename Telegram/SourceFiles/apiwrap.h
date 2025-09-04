@@ -19,6 +19,7 @@ struct SendingAlbum;
 enum class SendMediaType;
 struct FileLoadTo;
 struct ChatRestrictionsInfo;
+class SecretChatData;
 
 namespace Main {
 class Session;
@@ -433,6 +434,9 @@ public:
 	void acceptSecretChat(int32 chatId, const QByteArray &otherPublicKey);
 
 private:
+	// Secret chat message sending helper
+	void sendSecretMessage(MessageToSend &&message, not_null<SecretChatData*> secretChat);
+
 	struct MessageDataRequest {
 		using Callbacks = std::vector<Fn<void()>>;
 

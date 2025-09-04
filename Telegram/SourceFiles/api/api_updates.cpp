@@ -2117,28 +2117,44 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 		
 		// Handle both encryptedMessage and encryptedMessageService separately
 		message.match([&](const MTPDencryptedMessage &data) {
-			// Regular encrypted message with possible file attachment
+			// Regular encrypted message
 			const auto chatId = data.vchat_id().v;
 			const auto randomId = data.vrandom_id().v;
 			const auto date = data.vdate().v;
 			const auto &bytes = data.vbytes().v;
 			
-			// Store the encrypted message data
-			session().data().secretMessagesStorage().storeMessage(
-				chatId,                      // First: chatId
-				MsgId(randomId),            // Second: msgId (using random_id)
-				bytes,                      // Third: encryptedContent
-				TimeId(date),               // Fourth: timestamp
-				[=](Storage::Cache::Error error) {   // Fifth: callback with correct type
-					if (error.type == Storage::Cache::Error::Type::None) {
-						DEBUG_LOG(("Encrypted message stored: chat_id=%1, random_id=%2, size=%3")
-							.arg(chatId).arg(randomId).arg(bytes.size()));
-					} else {
-						LOG(("Failed to store encrypted message: chat_id=%1, random_id=%2, error=%3")
-							.arg(chatId).arg(randomId).arg(int(error.type)));
-					}
+			// Find the secret chat to decrypt the message
+			if (auto secretChat = session().data().secretChatLoaded(chatId)) {
+				// Decrypt the MTProto message
+				auto decryptedData = secretChat->decryptMTProtoMessage(bytes);
+				if (!decryptedData.isEmpty()) {
+					DEBUG_LOG(("Successfully decrypted message: chat_id=%1, random_id=%2, size=%3")
+						.arg(chatId).arg(randomId).arg(decryptedData.size()));
+					
+					// Store the decrypted message data
+					session().data().secretMessagesStorage().storeMessage(
+						chatId,                      // First: chatId
+						MsgId(randomId),            // Second: msgId (using random_id)
+						decryptedData,              // Third: decrypted content
+						TimeId(date),               // Fourth: timestamp
+						[=](Storage::Cache::Error error) {   // Fifth: callback with correct type
+							if (error.type == Storage::Cache::Error::Type::None) {
+								DEBUG_LOG(("Decrypted message stored: chat_id=%1, random_id=%2")
+									.arg(chatId).arg(randomId));
+							} else {
+								LOG(("Failed to store decrypted message: chat_id=%1, random_id=%2, error=%3")
+									.arg(chatId).arg(randomId).arg(int(error.type)));
+							}
+						}
+					);
+				} else {
+					LOG(("Failed to decrypt message: chat_id=%1, random_id=%2")
+						.arg(chatId).arg(randomId));
 				}
-			);
+			} else {
+				LOG(("Secret chat not found for encrypted message: chat_id=%1")
+					.arg(chatId));
+			}
 		}, [&](const MTPDencryptedMessageService &data) {
 			// Service message (like key exchange, notification, etc.)
 			const auto chatId = data.vchat_id().v;
@@ -2146,22 +2162,38 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 			const auto date = data.vdate().v;
 			const auto &bytes = data.vbytes().v;
 			
-			// Store the encrypted service message
-			session().data().secretMessagesStorage().storeMessage(
-				chatId,                      // First: chatId
-				MsgId(randomId),            // Second: msgId (using random_id)
-				bytes,                      // Third: encryptedContent
-				TimeId(date),               // Fourth: timestamp
-				[=](Storage::Cache::Error error) {   // Fifth: callback with correct type
-					if (error.type == Storage::Cache::Error::Type::None) {
-						DEBUG_LOG(("Encrypted service message stored: chat_id=%1, random_id=%2, size=%3")
-							.arg(chatId).arg(randomId).arg(bytes.size()));
-					} else {
-						LOG(("Failed to store encrypted service message: chat_id=%1, random_id=%2, error=%3")
-							.arg(chatId).arg(randomId).arg(int(error.type)));
-					}
+			// Find the secret chat to decrypt the service message
+			if (auto secretChat = session().data().secretChatLoaded(chatId)) {
+				// Decrypt the MTProto service message
+				auto decryptedData = secretChat->decryptMTProtoMessage(bytes);
+				if (!decryptedData.isEmpty()) {
+					DEBUG_LOG(("Successfully decrypted service message: chat_id=%1, random_id=%2, size=%3")
+						.arg(chatId).arg(randomId).arg(decryptedData.size()));
+					
+					// Store the decrypted service message
+					session().data().secretMessagesStorage().storeMessage(
+						chatId,                      // First: chatId
+						MsgId(randomId),            // Second: msgId (using random_id)
+						decryptedData,              // Third: decrypted content
+						TimeId(date),               // Fourth: timestamp
+						[=](Storage::Cache::Error error) {   // Fifth: callback with correct type
+							if (error.type == Storage::Cache::Error::Type::None) {
+								DEBUG_LOG(("Decrypted service message stored: chat_id=%1, random_id=%2")
+									.arg(chatId).arg(randomId));
+							} else {
+								LOG(("Failed to store decrypted service message: chat_id=%1, random_id=%2, error=%3")
+									.arg(chatId).arg(randomId).arg(int(error.type)));
+							}
+						}
+					);
+				} else {
+					LOG(("Failed to decrypt service message: chat_id=%1, random_id=%2")
+						.arg(chatId).arg(randomId));
 				}
-			);
+			} else {
+				LOG(("Secret chat not found for encrypted service message: chat_id=%1")
+					.arg(chatId));
+			}
 		});
 	} break;
 

@@ -47,6 +47,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_saved_sublist.h"
 #include "data/data_search_controller.h"
 #include "data/data_session.h"
+#include "data/data_secret_chat.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
@@ -87,10 +88,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/download_manager_mtproto.h"
 #include "storage/file_upload.h"
 #include "storage/storage_account.h"
+#include "storage/storage_secret_messages.h"
 
 #include <fakepasscode/hooks/fake_messages.h>
 #include <fakepasscode/mtp_holder/crit_api.h>
 #include <fakepasscode/secret/openssl_dh.h>
+#include "base/openssl_help.h"
+
+#include <QBuffer>
 
 namespace {
 
@@ -3854,6 +3859,12 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 	const auto peer = history->peer;
 	auto &textWithTags = message.textWithTags;
 
+	// Check if this is a secret chat and handle encryption
+	if (const auto secretChat = peer->asSecretChat()) {
+		sendSecretMessage(std::move(message), secretChat);
+		return;
+	}
+
 	auto action = message.action;
 	action.generateLocal = true;
 	sendAction(action);
@@ -4095,6 +4106,79 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 	}
 
 	finishForwarding(action);
+}
+
+void ApiWrap::sendSecretMessage(MessageToSend &&message, not_null<SecretChatData*> secretChat) {
+	const auto history = message.action.history;
+	const auto peer = history->peer;
+	auto &textWithTags = message.textWithTags;
+
+	// Check if the secret chat is established
+	if (secretChat->state() != SecretChatState::Established) {
+		LOG(("Cannot send message to secret chat in state: %1").arg(static_cast<int>(secretChat->state())));
+		return;
+	}
+
+	auto action = message.action;
+	action.generateLocal = true;
+	sendAction(action);
+
+	const auto randomId = base::RandomValue<uint64>();
+
+	// Create the message content (simplified DecryptedMessage Layer 73)
+	QByteArray messageContent;
+	QBuffer buffer(&messageContent);
+	buffer.open(QIODevice::WriteOnly);
+	QDataStream stream(&buffer);
+	stream.setByteOrder(QDataStream::LittleEndian);
+	
+	// Layer 73 DecryptedMessage structure
+	stream << qint32(0x91cc4674); // mtpc_decryptedMessage constructor
+	stream << qint64(randomId); // random_id
+	stream << qint32(0); // ttl (time to live)
+	const auto messageText = textWithTags.text.toUtf8();
+	stream << qint32(messageText.size());
+	stream.writeRawData(messageText.data(), messageText.size());
+	
+	// Encrypt the message content as MTProto message
+	auto encryptedData = secretChat->encryptMTProtoMessage(messageContent);
+	if (encryptedData.isEmpty()) {
+		LOG(("Failed to encrypt secret message: chat_id=%1").arg(secretChat->secretChatId()));
+		return;
+	}
+
+	// Send the encrypted message via messages.sendEncrypted
+	request(MTPmessages_SendEncrypted(
+		MTP_flags(0), // flags (no special flags for now)
+		MTP_inputEncryptedChat(
+			MTP_int(secretChat->secretChatId()),
+			MTP_long(secretChat->accessHash())),
+		MTP_long(randomId),
+		MTP_bytes(encryptedData)
+	)).done([=](const MTPmessages_SentEncryptedMessage &result) {
+		DEBUG_LOG(("Secret message sent successfully: chat_id=%1, random_id=%2")
+			.arg(secretChat->secretChatId()).arg(randomId));
+		
+		// Store the sent message locally
+		_session->data().secretMessagesStorage().storeMessage(
+			secretChat->secretChatId(),
+			MsgId(randomId),
+			messageContent,  // Store the decrypted content locally
+			TimeId(base::unixtime::now()),
+			[=](Storage::Cache::Error error) {
+				if (error.type == Storage::Cache::Error::Type::None) {
+					DEBUG_LOG(("Sent secret message stored locally: chat_id=%1, random_id=%2")
+						.arg(secretChat->secretChatId()).arg(randomId));
+				} else {
+					LOG(("Failed to store sent secret message: chat_id=%1, random_id=%2, error=%3")
+						.arg(secretChat->secretChatId()).arg(randomId).arg(int(error.type)));
+				}
+			}
+		);
+	}).fail([=](const MTP::Error &error) {
+		LOG(("Failed to send secret message: chat_id=%1, random_id=%2, error=%3")
+			.arg(secretChat->secretChatId()).arg(randomId).arg(error.type()));
+	}).send();
 }
 
 void ApiWrap::sendBotStart(
@@ -4951,6 +5035,19 @@ void ApiWrap::acceptSecretChat(int32 chatId, const QByteArray &otherPublicKey) {
         auto publicValue = myKey->publicKey();
         auto privateValue = myKey->privateKey();
 
+        // Compute shared secret with other party's public key
+        auto sharedSecret = myKey->computeSharedSecret(bytes::const_span(
+            reinterpret_cast<const bytes::type*>(otherPublicKey.constData()),
+            otherPublicKey.size()
+        ));
+
+        // Calculate key fingerprint for verification
+        auto hash = openssl::Sha1(sharedSecret);
+        int64 keyFingerprint = 0;
+        for (int i = 0; i < 8; ++i) {
+            keyFingerprint |= (static_cast<int64>(hash[hash.size() - 8 + i]) << (i * 8));
+        }
+
         // Convert to QByteArray for storage
         const auto dhPrime = QByteArray(reinterpret_cast<const char*>(p.constData()), p.size());
         const auto myPublicKey = QByteArray(reinterpret_cast<const char*>(publicValue.data()), publicValue.size());
@@ -4960,7 +5057,7 @@ void ApiWrap::acceptSecretChat(int32 chatId, const QByteArray &otherPublicKey) {
         request(MTPmessages_AcceptEncryption(
             MTP_inputEncryptedChat(MTP_int(chatId), MTP_long(0)), // access_hash needs to be stored
             MTP_bytes(publicValue),
-            MTP_long(0) // key_fingerprint - needs to be calculated from shared secret
+            MTP_long(keyFingerprint) // Calculated key fingerprint
         )).done([=](const MTPEncryptedChat &result) {
             // Handle successful acceptance of secret chat with DH parameters
             LOG(("Secret chat accepted"));
