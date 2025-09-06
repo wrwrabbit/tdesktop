@@ -13,7 +13,7 @@ index ad92872..d72b571 100644
 +    )
 +    target_link_options(common_options
 +    INTERFACE
-+        -Wl,-no_demangle
++        -Wl,-S
      )
  endif()
  
