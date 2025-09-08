@@ -1,10 +1,13 @@
 diff --git a/options_mac.cmake b/options_mac.cmake
-index ad92872..aaeb7d7 100644
+index ad92872..24fc0b2 100644
 --- a/options_mac.cmake
 +++ b/options_mac.cmake
-@@ -45,6 +45,11 @@ if (DESKTOP_APP_SPECIAL_TARGET)
+@@ -43,8 +43,13 @@ INTERFACE
+ if (DESKTOP_APP_SPECIAL_TARGET)
+     target_compile_options(common_options
      INTERFACE
-         -g
+-        -g
++        -g0
          -Werror
 +        -O2
 +    )
