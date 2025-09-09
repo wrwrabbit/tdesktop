@@ -740,7 +740,7 @@ void Filler::addToggleArchive() {
 }
 
 void Filler::addClearHistory() {
-	if (_topic || _peer->isMonoforum() || _peer->isRepliesChat()) {
+	if (_topic || _peer->isMonoforum()) {
 		return;
 	}
 	const auto channel = _peer->asChannel();
