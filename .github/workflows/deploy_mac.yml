@@ -7,7 +7,7 @@ on:
 jobs:
   build-libraries:
     name: Libraries
-    runs-on: macos-13
+    runs-on: macos-15-intel
     env:
       REPO_NAME: ${{ github.event.repository.name }}
 
@@ -50,7 +50,7 @@ jobs:
     environment: Release
     needs: build-libraries
     name: Telegram
-    runs-on: macos-13
+    runs-on: macos-15-intel
 
     env:
       UPLOAD_ARTIFACT: "true"

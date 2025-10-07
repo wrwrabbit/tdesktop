@@ -5,7 +5,7 @@ on:
 
 jobs:
   build-dmg:
-    runs-on: macos-13
+    runs-on: macos-15-intel
     env:
       setupFile: tsetup.latest.dmg  # Set this to your DMG output name
 
