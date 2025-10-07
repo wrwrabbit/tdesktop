@@ -21,7 +21,7 @@ jobs:
           # Disable spotlight.
           sudo mdutil -a -i off
 
-          sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
       - name: Download Telegram.app zip artifact
         uses: dawidd6/action-download-artifact@v2
