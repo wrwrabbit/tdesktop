@@ -2,6 +2,8 @@
 
 set -e
 
+git fetch --all
+
 # 1. Ensure two remotes: origin and upstream
 if ! git remote | grep -q '^origin$'; then
   echo "Remote 'origin' not found."
