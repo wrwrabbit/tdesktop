@@ -918,8 +918,8 @@ OthersUnreadState OtherAccountsUnreadStateCurrent(
 		} else if (account->isHiddenMode()) {
 			continue;
 		} else if (const auto session = account->maybeSession()) {
-			counter += session->data().unreadBadge();
-			if (!session->data().unreadBadgeMuted()) {
+			counter += session->data().unreadWithMentionsBadge();
+			if (!session->data().unreadWithMentionsBadgeMuted()) {
 				allMuted = false;
 			}
 		}

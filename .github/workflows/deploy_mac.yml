@@ -7,7 +7,7 @@ on:
 jobs:
   build-libraries:
     name: Libraries
-    runs-on: macos-13
+    runs-on: macos-15-intel
     env:
       REPO_NAME: ${{ github.event.repository.name }}
 
@@ -26,7 +26,7 @@ jobs:
           brew install automake meson nasm ninja pkg-config
           brew install icoutils create-dmg
           sudo mdutil -a -i off
-          sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
       - name: Build Libraries.
         run: |
@@ -50,7 +50,7 @@ jobs:
     environment: Release
     needs: build-libraries
     name: Telegram
-    runs-on: macos-13
+    runs-on: macos-15-intel
 
     env:
       UPLOAD_ARTIFACT: "true"
@@ -78,7 +78,7 @@ jobs:
           # Disable spotlight.
           sudo mdutil -a -i off
 
-          sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
       - name: Restore Libraries Cache.
         uses: actions/cache@v4

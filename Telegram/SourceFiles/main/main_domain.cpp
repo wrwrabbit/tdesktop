@@ -322,8 +322,8 @@ void Domain::updateUnreadBadge() {
 		}
 		if (const auto session = account->maybeSession()) {
 			const auto data = &session->data();
-			_unreadBadge += data->unreadBadge();
-			if (!data->unreadBadgeMuted()) {
+			_unreadBadge += data->unreadWithMentionsBadge();
+			if (!data->unreadWithMentionsBadgeMuted()) {
 				_unreadBadgeMuted = false;
 			}
 		}

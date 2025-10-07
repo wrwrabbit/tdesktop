@@ -657,6 +657,11 @@ bool AddTodoListAction(
 	}
 	const auto itemId = item->fullId();
 	const auto controller = list->controller();
+	menu->addAction(tr::lng_context_edit_msg(tr::now), [=] {
+		if (const auto item = controller->session().data().message(itemId)) {
+			Window::PeerMenuEditTodoList(controller, item);
+		}
+	}, &st::menuIconEdit);
 	menu->addAction(tr::lng_todo_add_title(tr::now), [=] {
 		if (const auto item = controller->session().data().message(itemId)) {
 			Window::PeerMenuAddTodoListTasks(controller, item);
@@ -2053,8 +2058,8 @@ void AddSelectRestrictionAction(
 			: (peer->isChannel())
 			? tr::lng_context_noforwards_info_channel
 			: (peer->isUser() && peer->asUser()->isBot())
-			? tr::lng_context_noforwards_info_channel
-			: tr::lng_context_noforwards_info_bot)(
+			? tr::lng_context_noforwards_info_bot
+			: tr::lng_context_noforwards_info_channel)(
 			tr::now,
 			Ui::Text::RichLangValue),
 		addIcon ? &st::menuIconCopyright : nullptr);

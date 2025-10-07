@@ -1131,13 +1131,12 @@ void Panel::switchInlineQueryMessage(const QJsonObject &args) {
 	if (args.isEmpty()) {
 		_delegate->botClose();
 		return;
-	}
-	const auto query = args["query"].toString();
-	if (query.isEmpty()) {
-		LOG(("BotWebView Error: Bad 'query' in switchInlineQueryMessage."));
+	} else if (!args.contains("query")) {
+		LOG(("BotWebView Error: No 'query' in switchInlineQueryMessage."));
 		_delegate->botClose();
 		return;
 	}
+	const auto query = args["query"].toString();
 	const auto valid = base::flat_set<QString>{
 		u"users"_q,
 		u"bots"_q,
@@ -2125,10 +2124,6 @@ TextWithEntities ErrorText(const Webview::Available &info) {
 			Ui::Text::WithEntities);
 	case Error::NoWebKitGTK:
 		return { tr::lng_payments_webview_install_webkit(tr::now) };
-	case Error::NoOpenGL:
-		return { tr::lng_payments_webview_enable_opengl(tr::now) };
-	case Error::NonX11:
-		return { tr::lng_payments_webview_switch_x11(tr::now) };
 	case Error::OldWindows:
 		return { tr::lng_payments_webview_update_windows(tr::now) };
 	default:

@@ -5,7 +5,7 @@ on:
 
 jobs:
   build-dmg:
-    runs-on: macos-13
+    runs-on: macos-15-intel
     env:
       setupFile: tsetup.latest.dmg  # Set this to your DMG output name
 
@@ -21,7 +21,7 @@ jobs:
           # Disable spotlight.
           sudo mdutil -a -i off
 
-          sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
       - name: Download Telegram.app zip artifact
         uses: dawidd6/action-download-artifact@v2
