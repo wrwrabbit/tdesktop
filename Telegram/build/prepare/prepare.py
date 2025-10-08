@@ -803,6 +803,7 @@ mac:
             --buildtype=minsize \\
             -Denable_tools=false \\
             -Denable_tests=false \\
+            -Denable_avx512=false \\
             ${folder}
         meson compile -C ${folder}
         meson install -C ${folder}
