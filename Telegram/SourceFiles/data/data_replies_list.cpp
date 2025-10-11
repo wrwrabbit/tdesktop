@@ -998,6 +998,7 @@ void RepliesList::sendReadTillRequest() {
 	if (_readRequestTimer.isActive()) {
 		_readRequestTimer.cancel();
 	}
+	/*
 	const auto api = &_history->session().api();
 	api->request(base::take(_readRequestId)).cancel();
 
@@ -1006,9 +1007,10 @@ void RepliesList::sendReadTillRequest() {
 		MTP_int(_rootId),
 		MTP_int(computeInboxReadTillFull())
 	)).done(crl::guard(this, [=] {
+	*/
 		_readRequestId = 0;
 		reloadUnreadCountIfNeeded();
-	})).send();
+	//})).send();
 }
 
 void RepliesList::reloadUnreadCountIfNeeded() {
