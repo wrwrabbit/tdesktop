@@ -24,13 +24,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "fakepasscode/hooks/fake_messages.h"
 
 namespace Api {
-namespace {
-
-[[nodiscard]] TimeId UnixtimeFromMsgId(mtpMsgId msgId) {
-	return TimeId(msgId >> 32);
-}
-
-} // namespace
 
 Polls::Polls(not_null<ApiWrap*> api)
 : _session(&api->session())
