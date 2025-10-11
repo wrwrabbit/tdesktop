@@ -136,3 +136,10 @@ jobs:
         with:
           name: build_tg
           path: out/Release/artifact/tlinux*
+
+      - uses: actions/upload-artifact@v4
+        name: Upload symbols artifact.
+        if: (env.UPLOAD_ARTIFACT == 'true')
+        with:
+          name: symbols
+          path: out/Dropbox/Telegram/symbols/Telegram/*

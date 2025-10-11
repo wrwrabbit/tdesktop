@@ -203,8 +203,10 @@ jobs:
         if: (env.UPLOAD_ARTIFACT == 'true') || ${{ github.ref == 'refs/heads/nightly' }}
         run: |
           mkdir artifact
+          mkdir symbols
           xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\tportable*.zip artifact\ /E/C
           xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\t*upd* artifact\ /E/C
+          xcopy %TBUILD%\%REPO_NAME%\out\Dropbox\Telegram\symbols\Telegram\* symbols\ /E/C
       - uses: actions/upload-artifact@v4
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true')
@@ -219,3 +221,9 @@ jobs:
           name: ${{ env.ARTIFACT_NAME }}_tg
           path: artifact\t*upd*
           
+      - uses: actions/upload-artifact@v4
+        name: Upload symbols artifact.
+        if: (env.UPLOAD_ARTIFACT == 'true')
+        with:
+          name: symbols
+          path: symbols\*
