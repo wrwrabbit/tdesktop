@@ -139,4 +139,4 @@ jobs:
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: symbols
-          path: ${{ env.REPO_NAME }}/out/Dropbox/Telegram/symbols/Telegram/*
+          path: ${{ env.REPO_NAME }}/out/Dropbox/Telegram/symbols/*
