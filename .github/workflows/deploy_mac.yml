@@ -133,3 +133,10 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}_extra
           path: ${{ env.REPO_NAME }}/out/Release/artifact/*.zip
+
+      - uses: actions/upload-artifact@v4
+        name: Upload symbols artifact.
+        if: (env.UPLOAD_ARTIFACT == 'true')
+        with:
+          name: symbols
+          path: ${{ env.REPO_NAME }}/out/Dropbox/Telegram/symbols/Telegram/*
