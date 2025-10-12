@@ -78,8 +78,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_values.h"
 #include "storage/storage_domain.h"
 #include "styles/style_chat.h"
-#include "ui/boxes/confirm_box.h"
+#include "styles/style_window.h" // columnMaximalWidthLeft
 
+#include "ui/boxes/confirm_box.h"
 #include "fakepasscode/settings.h"
 
 #include <QtWidgets/QApplication>
@@ -2044,6 +2045,11 @@ void ListWidget::startItemRevealAnimations() {
 
 void ListWidget::startMessageSendingAnimation(
 		not_null<HistoryItem*> item) {
+	if (elementChatMode() == HistoryView::ElementChatMode::Default
+		&& width() > st::columnMaximalWidthLeft
+		&& !item->media()) {
+		return;
+	}
 	const auto sendingAnimation = _delegate->listSendingAnimation();
 	if (!sendingAnimation || !sendingAnimation->checkExpectedType(item)) {
 		return;
