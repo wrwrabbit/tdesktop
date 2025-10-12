@@ -142,4 +142,4 @@ jobs:
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: symbols
-          path: out/Dropbox/Telegram/symbols/Telegram/*
+          path: out/Dropbox/Telegram/symbols/*
