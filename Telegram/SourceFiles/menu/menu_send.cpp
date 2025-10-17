@@ -738,11 +738,6 @@ FillMenuResult FillSendMenu(
 		? *iconsOverride
 		: st::defaultComposeIcons;
 
-	if (sending && type != Type::Reminder) {
-		menu->addAction(
-			tr::lng_send_silent_message(tr::now),
-			[=] { action({ Api::SendOptions{ .silent = true } }, details); },
-			&icons.menuMute);
 	}
 	if (sending && type != Type::SilentOnly) {
 		menu->addAction(
@@ -760,6 +755,11 @@ FillMenuResult FillSendMenu(
 				details); },
 			&icons.menuWhenOnline);
 	}
+	if (sending && type != Type::Reminder) {
+		menu->addAction(
+			tr::lng_send_silent_message(tr::now),
+			[=] { action({ Api::SendOptions{ .silent = true } }, details); },
+			&icons.menuMute);
 
 	if ((type != Type::Disabled)
 		&& ((details.spoiler != SpoilerState::None)
