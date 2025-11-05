@@ -86,6 +86,15 @@ public:
 	[[nodiscard]] rpl::producer<int> albumIdChanges() const;
 	[[nodiscard]] rpl::producer<Data::StoryAlbumUpdate> changes() const;
 
+	bool hasFlexibleTopBar() const;
+	base::weak_qptr<Ui::RpWidget> createPinnedToTop(
+		not_null<Ui::RpWidget*> parent);
+	base::weak_qptr<Ui::RpWidget> createPinnedToBottom(
+		not_null<Ui::RpWidget*> parent);
+
+	void enableBackButton();
+	void showFinished();
+
 protected:
 	int resizeGetHeight(int newWidth) override;
 	void visibleTopBottomUpdated(
@@ -151,6 +160,10 @@ private:
 	rpl::event_stream<rpl::producer<int>> _listTops;
 	rpl::variable<int> _topHeight;
 	rpl::variable<bool> _albumEmpty;
+
+	rpl::variable<bool> _backToggles;
+	rpl::event_stream<> _showFinished;
+	rpl::variable<std::optional<QColor>> _topBarColor;
 
 };
 

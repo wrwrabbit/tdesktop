@@ -535,7 +535,22 @@ void StarsRating::moveTo(int x, int y) {
 	_widget->move(x - st::levelMargin.left(), y - st::levelMargin.top());
 }
 
+void StarsRating::setOpacity(float64 opacity) {
+	_opacity = opacity;
+	_widget->update();
+}
+
+void StarsRating::setCustomColors(
+		std::optional<QColor> textColor,
+		std::optional<QColor> shapeColor) {
+	_customTextColor = textColor;
+	_customShapeColor = shapeColor;
+	_cachedLevel = std::numeric_limits<int>::min();
+	_widget->update();
+}
+
 void StarsRating::paint(QPainter &p) {
+	p.setOpacity(_opacity);
 	if (!_shape) {
 		return;
 	}
@@ -548,10 +563,16 @@ void StarsRating::paint(QPainter &p) {
 		_cache.fill(Qt::transparent);
 
 		auto q = QPainter(&_cache);
-		_shape->icon.paint(q, 0, 0, _widget->width());
+		if (_customShapeColor) {
+			_shape->icon.paint(q, 0, 0, _widget->width(), *_customShapeColor);
+		} else {
+			_shape->icon.paint(q, 0, 0, _widget->width());
+		}
 
 		if (!_collapsedText.isEmpty()) {
-			q.setPen(st::levelTextFg);
+			q.setPen(_customTextColor
+				? *_customTextColor
+				: st::levelTextFg->c);
 			q.setFont(st::levelStyle.font);
 			q.drawText(
 				Rect(_shape->icon.size()),
@@ -562,11 +583,16 @@ void StarsRating::paint(QPainter &p) {
 		_cachedLevel = _currentLevel;
 	}
 
+	p.setOpacity(_opacity);
 	p.drawImage(0, 0, _cache);
 }
 
 rpl::producer<int> StarsRating::widthValue() const {
 	return _widthValue.value();
+}
+
+int StarsRating::width() const {
+	return _widthValue.current();
 }
 
 rpl::lifetime &StarsRating::lifetime() {

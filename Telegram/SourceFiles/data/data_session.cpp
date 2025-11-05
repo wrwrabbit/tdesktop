@@ -797,6 +797,9 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 				_peerDecorationsUpdated.fire_copy(result);
 			}
 		}
+		if (result->changeColorProfile(data.vprofile_color())) {
+			flags |= UpdateFlag::ColorProfile;
+		}
 	});
 
 	if (minimal) {
@@ -1111,6 +1114,9 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 			if (result->isMinimalLoaded()) {
 				_peerDecorationsUpdated.fire_copy(result);
 			}
+		}
+		if (result->changeColorProfile(data.vprofile_color())) {
+			flags |= UpdateFlag::ColorProfile;
 		}
 	}, [&](const MTPDchannelForbidden &data) {
 		const auto channel = result->asChannel();

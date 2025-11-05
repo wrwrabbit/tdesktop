@@ -12,7 +12,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/event_filter.h"
 #include "base/unixtime.h"
 #include "boxes/peer_list_box.h"
-#include "boxes/star_gift_box.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_premium_limits.h"
 #include "data/data_channel.h"
@@ -36,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/empty_userpic.h"
 #include "ui/dynamic_image.h"
 #include "ui/painter.h"
+#include "ui/top_background_gradient.h"
 #include "styles/style_boxes.h"
 #include "styles/style_credits.h"
 #include "styles/style_premium.h"
@@ -895,9 +895,9 @@ public:
 			auto p = QPainter(&_backgroundCache);
 			p.setClipRect(inner);
 			const auto skip = inner.width() / 3;
-			Ui::PaintPoints(
+			Ui::PaintBgPoints(
 				p,
-				Ui::PatternPointsSmall(),
+				Ui::PatternBgPointsSmall(),
 				_patternCache,
 				_patternEmoji.get(),
 				*_unique,

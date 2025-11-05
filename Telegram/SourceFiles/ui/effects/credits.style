@@ -249,6 +249,11 @@ giftBoxPinIcon: icon {{ "dialogs/dialogs_pinned", premiumButtonFg }};
 giftBoxLockIcon: icon{{ "limits/mini_gift_lock-18x18", attentionButtonFg }};
 giftBoxLockIconPosition: point(4px, 4px);
 
+giftBoxGiftEmptyLabel: FlatLabel(defaultFlatLabel) {
+	minWidth: 156px;
+	align: align(top);
+}
+
 creditsHistoryEntriesList: PeerList(defaultPeerList) {
 	padding: margins(0px, 7px, 0px, 7px);
 	item: PeerListItem(defaultPeerListItem) {

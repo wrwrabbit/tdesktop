@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/peer_gifts/info_peer_gifts_widget.h"
 #include "info/profile/info_profile_actions.h"
 #include "info/profile/info_profile_icon.h"
+#include "info/profile/info_profile_top_bar.h"
 #include "info/profile/info_profile_values.h"
 #include "info/profile/info_profile_widget.h"
 #include "info/stories/info_stories_albums.h"
@@ -293,7 +294,6 @@ void InnerWidget::createProfileTop() {
 	startTop();
 
 	using namespace Profile;
-	AddCover(_top, _controller, _peer, nullptr, nullptr);
 	AddDetails(_top, _controller, _peer, nullptr, nullptr, { v::null });
 
 	auto tracker = Ui::MultiSlideTracker();
@@ -479,6 +479,46 @@ void InnerWidget::addGiftsButton(Ui::MultiSlideTracker &tracker) {
 		st::infoIconMediaGifts,
 		st::infoSharedMediaButtonIconPosition)->show();
 	tracker.track(giftsWrap);
+}
+
+bool InnerWidget::hasFlexibleTopBar() const {
+	return (_controller->key().storiesAlbumId() != Stories::ArchiveId()
+		&& _controller->key().storiesPeer()
+		&& _controller->key().storiesPeer()->isSelf());
+}
+
+base::weak_qptr<Ui::RpWidget> InnerWidget::createPinnedToTop(
+		not_null<Ui::RpWidget*> parent) {
+	if (!hasFlexibleTopBar()) {
+		return nullptr;
+	}
+
+	const auto content = Ui::CreateChild<Profile::TopBar>(
+		parent,
+		Profile::TopBar::Descriptor{
+			.controller = _controller->parentController(),
+			.key = _controller->key(),
+			.wrap = _controller->wrapValue(),
+			.source = Profile::TopBar::Source::Stories,
+			.peer = _peer,
+			.backToggles = _backToggles.value(),
+			.showFinished = _showFinished.events(),
+		});
+	_topBarColor = content->edgeColor();
+	return base::make_weak(not_null<Ui::RpWidget*>{ content });
+}
+
+base::weak_qptr<Ui::RpWidget> InnerWidget::createPinnedToBottom(
+		not_null<Ui::RpWidget*> parent) {
+	return nullptr;
+}
+
+void InnerWidget::enableBackButton() {
+	_backToggles.force_assign(true);
+}
+
+void InnerWidget::showFinished() {
+	_showFinished.fire({});
 }
 
 void InnerWidget::finalizeTop() {

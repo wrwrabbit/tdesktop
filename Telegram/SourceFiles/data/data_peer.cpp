@@ -1054,6 +1054,17 @@ bool PeerData::changeColor(
 	return changed1 || changed2 || changed3;
 }
 
+bool PeerData::changeColorProfile(
+		const tl::conditional<MTPPeerColor> &cloudColor) {
+	const auto changed1 = cloudColor
+		? changeColorProfileIndex(Data::ColorIndexFromColor(cloudColor))
+		: clearColorProfileIndex();
+	const auto changed2 = changeProfileBackgroundEmojiId(
+		Data::BackgroundEmojiIdFromColor(cloudColor));
+	const auto changed3 = changeColorProfileCollectible(cloudColor);
+	return changed1 || changed2 || changed3;
+}
+
 void PeerData::fillNames() {
 	_nameWords.clear();
 	_nameFirstLetters.clear();
@@ -1407,6 +1418,66 @@ bool PeerData::changeBackgroundEmojiId(DocumentId id) {
 		return false;
 	}
 	_backgroundEmojiId = id;
+	return true;
+}
+
+bool PeerData::changeColorProfileCollectible(Ui::ColorCollectible data) {
+	if (!_colorProfileCollectible || (*_colorProfileCollectible != data)) {
+		_colorProfileCollectible = std::make_shared<Ui::ColorCollectible>(
+			std::move(data));
+		return true;
+	}
+	return false;
+}
+
+bool PeerData::changeColorProfileCollectible(
+		const tl::conditional<MTPPeerColor> &cloudColor) {
+	if (!cloudColor) {
+		return clearColorProfileCollectible();
+	}
+	return cloudColor->match([&](const MTPDpeerColorCollectible &data) {
+		return changeColorProfileCollectible(Data::ParseColorCollectible(data));
+	}, [&](const MTPDpeerColor &) {
+		return clearColorProfileCollectible();
+	}, [&](const MTPDinputPeerColorCollectible &) {
+		return clearColorProfileCollectible();
+	});
+}
+
+bool PeerData::clearColorProfileCollectible() {
+	if (!_colorProfileCollectible) {
+		return false;
+	}
+	_colorProfileCollectible = nullptr;
+	return true;
+}
+
+bool PeerData::changeColorProfileIndex(uint8 index) {
+	index %= Ui::kColorIndexCount;
+	if (_colorProfileIndex == index) {
+		return false;
+	}
+	_colorProfileIndex = index;
+	return true;
+}
+
+bool PeerData::clearColorProfileIndex() {
+	if (!_colorProfileIndex.has_value()) {
+		return false;
+	}
+	_colorProfileIndex = std::nullopt;
+	return true;
+}
+
+DocumentId PeerData::profileBackgroundEmojiId() const {
+	return _profileBackgroundEmojiId;
+}
+
+bool PeerData::changeProfileBackgroundEmojiId(DocumentId id) {
+	if (_profileBackgroundEmojiId == id) {
+		return false;
+	}
+	_profileBackgroundEmojiId = id;
 	return true;
 }
 

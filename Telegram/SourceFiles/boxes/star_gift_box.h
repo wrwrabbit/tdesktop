@@ -87,23 +87,6 @@ void ShowUniqueGiftSellBox(
 
 void GiftReleasedByHandler(not_null<PeerData*> peer);
 
-struct PatternPoint {
-	QPointF position;
-	float64 scale = 1.;
-	float64 opacity = 1.;
-};
-[[nodiscard]] const std::vector<PatternPoint> &PatternPoints();
-[[nodiscard]] const std::vector<PatternPoint> &PatternPointsSmall();
-
-void PaintPoints(
-	QPainter &p,
-	const std::vector<PatternPoint> &points,
-	base::flat_map<float64, QImage> &cache,
-	not_null<Text::CustomEmoji*> emoji,
-	const Data::UniqueGift &gift,
-	const QRect &rect,
-	float64 shown = 1.);
-
 struct StarGiftUpgradeArgs {
 	not_null<Window::SessionController*> controller;
 	base::required<uint64> stargiftId;

@@ -11,7 +11,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_premium.h"
 #include "base/unixtime.h"
 #include "boxes/send_credits_box.h" // SetButtonMarkedLabel
-#include "boxes/star_gift_box.h"
 #include "boxes/sticker_set_box.h"
 #include "chat_helpers/stickers_gift_box_pack.h"
 #include "chat_helpers/stickers_lottie.h"
@@ -36,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/dynamic_thumbnails.h"
 #include "ui/effects/premium_graphics.h"
 #include "ui/painter.h"
+#include "ui/top_background_gradient.h"
 #include "window/window_session_controller.h"
 #include "styles/style_chat.h"
 #include "styles/style_credits.h"
@@ -620,9 +620,9 @@ void GiftButton::cacheUniqueBackground(
 		auto p = QPainter(&_uniqueBackgroundCache);
 		p.setClipRect(inner);
 		const auto skip = inner.width() / 3;
-		Ui::PaintPoints(
+		Ui::PaintBgPoints(
 			p,
-			Ui::PatternPointsSmall(),
+			Ui::PatternBgPointsSmall(),
 			_uniquePatternCache,
 			_uniquePatternEmoji.get(),
 			*unique,
