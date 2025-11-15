@@ -21,8 +21,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/peer_gifts/info_peer_gifts_widget.h"
 #include "info/profile/info_profile_actions.h"
 #include "info/profile/info_profile_icon.h"
+#include "info/profile/info_profile_top_bar.h"
 #include "info/profile/info_profile_values.h"
 #include "info/profile/info_profile_widget.h"
+#include "info/saved/info_saved_music_common.h"
 #include "info/stories/info_stories_albums.h"
 #include "info/stories/info_stories_widget.h"
 #include "info/info_controller.h"
@@ -262,6 +264,10 @@ void InnerWidget::setupAlbums() {
 
 InnerWidget::~InnerWidget() = default;
 
+rpl::producer<> InnerWidget::backRequest() const {
+	return _backClicks.events();
+}
+
 void InnerWidget::setupTop() {
 	const auto albumId = _albumId.current();
 	if (_addingToAlbumId) {
@@ -292,9 +298,24 @@ void InnerWidget::startTop() {
 void InnerWidget::createProfileTop() {
 	startTop();
 
+	Info::Saved::SetupSavedMusic(
+		_top,
+		_controller,
+		_peer,
+		_topBarColor.value());
+
 	using namespace Profile;
-	AddCover(_top, _controller, _peer, nullptr, nullptr);
-	AddDetails(_top, _controller, _peer, nullptr, nullptr, { v::null });
+	auto mainTracker = Ui::MultiSlideTracker();
+	auto dividerOverridden = rpl::variable<bool>(false);
+	AddDetails(
+		_top,
+		_controller,
+		_peer,
+		nullptr,
+		nullptr,
+		{ v::null },
+		mainTracker,
+		dividerOverridden);
 
 	auto tracker = Ui::MultiSlideTracker();
 	const auto dividerWrap = _top->add(
@@ -479,6 +500,48 @@ void InnerWidget::addGiftsButton(Ui::MultiSlideTracker &tracker) {
 		st::infoIconMediaGifts,
 		st::infoSharedMediaButtonIconPosition)->show();
 	tracker.track(giftsWrap);
+}
+
+bool InnerWidget::hasFlexibleTopBar() const {
+	return (_controller->key().storiesAlbumId() != Stories::ArchiveId()
+		&& _controller->key().storiesPeer()
+		&& _controller->key().storiesPeer()->isSelf());
+}
+
+base::weak_qptr<Ui::RpWidget> InnerWidget::createPinnedToTop(
+		not_null<Ui::RpWidget*> parent) {
+	if (!hasFlexibleTopBar()) {
+		return nullptr;
+	}
+
+	const auto content = Ui::CreateChild<Profile::TopBar>(
+		parent,
+		Profile::TopBar::Descriptor{
+			.controller = _controller->parentController(),
+			.key = _controller->key(),
+			.wrap = _controller->wrapValue(),
+			.source = Profile::TopBar::Source::Stories,
+			.peer = _peer,
+			.backToggles = _backToggles.value(),
+			.showFinished = _showFinished.events(),
+		});
+	content->backRequest(
+	) | rpl::start_to_stream(_backClicks, content->lifetime());
+	_topBarColor = content->edgeColor();
+	return base::make_weak(not_null<Ui::RpWidget*>{ content });
+}
+
+base::weak_qptr<Ui::RpWidget> InnerWidget::createPinnedToBottom(
+		not_null<Ui::RpWidget*> parent) {
+	return nullptr;
+}
+
+void InnerWidget::enableBackButton() {
+	_backToggles.force_assign(true);
+}
+
+void InnerWidget::showFinished() {
+	_showFinished.fire({});
 }
 
 void InnerWidget::finalizeTop() {

@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_message_reactions.h"
 
 #include "api/api_global_privacy.h"
+#include "calls/group/calls_group_call.h"
+#include "calls/group/calls_group_messages.h"
 #include "chat_helpers/stickers_lottie.h"
 #include "core/application.h"
 #include "history/history.h"
@@ -1661,6 +1663,24 @@ crl::time Reactions::sendingScheduledPaidAt(
 	return (i != end(_sendPaidItems)) ? i->second : crl::time();
 }
 
+void Reactions::schedulePaid(not_null<Calls::GroupCall*> call) {
+	_sendPaidCalls[call] = crl::now() + kPaidAccumulatePeriod;
+	if (!_sendPaidTimer.isActive()) {
+		_sendPaidTimer.callOnce(kPaidAccumulatePeriod);
+	}
+}
+
+void Reactions::undoScheduledPaid(not_null<Calls::GroupCall*> call) {
+	_sendPaidCalls.remove(call);
+	call->messages()->reactionsPaidScheduledCancel();
+}
+
+crl::time Reactions::sendingScheduledPaidAt(
+		not_null<Calls::GroupCall*> call) const {
+	const auto i = _sendPaidCalls.find(call);
+	return (i != end(_sendPaidCalls)) ? i->second : crl::time();
+}
+
 crl::time Reactions::ScheduledPaidDelay() {
 	return kPaidAccumulatePeriod;
 }
@@ -1754,13 +1774,27 @@ void Reactions::CheckUnknownForUnread(
 }
 
 void Reactions::sendPaid() {
-	if (!_sendingPaid.empty()) {
-		return;
-	}
 	auto next = crl::time();
 	const auto now = crl::now();
-	for (auto i = begin(_sendPaidItems); i != end(_sendPaidItems);) {
-		const auto item = i->first;
+	if (_sendingPaid.empty()) {
+		for (auto i = begin(_sendPaidItems); i != end(_sendPaidItems);) {
+			const auto item = i->first;
+			const auto when = i->second;
+			if (when > now) {
+				if (!next || next > when) {
+					next = when;
+				}
+				++i;
+			} else {
+				i = _sendPaidItems.erase(i);
+				if (sendPaid(item)) {
+					return;
+				}
+			}
+		}
+	}
+	for (auto i = begin(_sendPaidCalls); i != end(_sendPaidCalls);) {
+		const auto call = i->first;
 		const auto when = i->second;
 		if (when > now) {
 			if (!next || next > when) {
@@ -1768,10 +1802,8 @@ void Reactions::sendPaid() {
 			}
 			++i;
 		} else {
-			i = _sendPaidItems.erase(i);
-			if (sendPaid(item)) {
-				return;
-			}
+			i = _sendPaidCalls.erase(i);
+			call->messages()->reactionsPaidSend();
 		}
 	}
 	if (next) {
