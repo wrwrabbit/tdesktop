@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "info/info_flexible_scroll.h"
 #include "info/info_wrap_widget.h"
 #include "info/statistics/info_statistics_tag.h"
 #include "ui/controls/swipe_handler_data.h"
@@ -152,6 +153,42 @@ protected:
 	Widget *setInnerWidget(object_ptr<Widget> inner) {
 		return static_cast<Widget*>(
 			doSetInnerWidget(std::move(inner)));
+	}
+
+	template <typename Widget, typename FlexibleData>
+	Widget *setupFlexibleInnerWidget(
+			object_ptr<Widget> inner,
+			FlexibleData &flexibleScroll,
+			Fn<void(Ui::RpWidget*)> customSetup = nullptr) {
+		if (inner->hasFlexibleTopBar()) {
+			auto filler = setInnerWidget(object_ptr<Ui::RpWidget>(this));
+			filler->resize(1, 1);
+
+			flexibleScroll.contentHeightValue.events(
+			) | rpl::start_with_next([=](int h) {
+				filler->resize(filler->width(), h);
+			}, filler->lifetime());
+
+			filler->widthValue(
+			) | rpl::start_to_stream(
+				flexibleScroll.fillerWidthValue,
+				lifetime());
+
+			if (customSetup) {
+				customSetup(filler);
+			}
+
+			// ScrollArea -> PaddingWrap -> RpWidget.
+			inner->setParent(filler->parentWidget()->parentWidget());
+			inner->raise();
+
+			using InnerPtr = base::unique_qptr<Widget>;
+			auto owner = filler->lifetime().make_state<InnerPtr>(
+				std::move(inner.release()));
+			return owner->get();
+		} else {
+			return setInnerWidget(std::move(inner));
+		}
 	}
 
 	[[nodiscard]] not_null<Controller*> controller() const {

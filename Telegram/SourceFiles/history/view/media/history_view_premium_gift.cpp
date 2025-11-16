@@ -318,8 +318,8 @@ ClickHandlerPtr PremiumGift::createViewLink() {
 				data.count,
 				date));
 		} else if (data.slug.isEmpty()) {
-			const auto months = data.count;
-			Settings::ShowGiftPremium(controller, peer, months, sent);
+			const auto days = data.count;
+			Settings::ShowGiftPremium(controller, peer, days, sent);
 		} else {
 			const auto fromId = from->id;
 			const auto toId = sent ? peer->id : selfId;

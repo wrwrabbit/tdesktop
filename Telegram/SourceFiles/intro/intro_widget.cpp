@@ -116,6 +116,7 @@ Widget::Widget(
 	default: Unexpected("Enter point in Intro::Widget::Widget.");
 	}
 
+	setupStep();
 	fixOrder();
 
 	if (_account->mtp().isTestMode()) {
@@ -141,6 +142,7 @@ Widget::Widget(
 	}, lifetime());
 
 	_back->entity()->setClickedCallback([=] { backRequested(); });
+	_back->entity()->accessibilitySetName(tr::lng_go_back(tr::now));
 	_back->hide(anim::type::instant);
 
 	if (_changeLanguage) {
@@ -341,6 +343,32 @@ void Widget::setInnerFocus() {
 	}
 }
 
+void Widget::setupStep() {
+	getStep()->nextButtonStyle(
+	) | rpl::start_with_next([=](const style::RoundButton *st) {
+		const auto nextStyle = st ? st : &st::introNextButton;
+		if (_nextStyle != nextStyle) {
+			_nextStyle = nextStyle;
+			const auto wasShown = _next->toggled();
+			_next.destroy();
+			_next.create(
+				this,
+				object_ptr<Ui::RoundButton>(this, nullptr, *nextStyle));
+			showControls();
+			updateControlsGeometry();
+			_next->toggle(wasShown, anim::type::instant);
+		}
+	}, getStep()->lifetime());
+
+	getStep()->nextButtonFocusRequests() | rpl::start_with_next([=] {
+		if (_next && !_next->isHidden()) {
+			_next->entity()->setFocus(Qt::OtherFocusReason);
+		}
+	}, getStep()->lifetime());
+
+	getStep()->finishInit();
+}
+
 void Widget::historyMove(StackAction action, Animate animate) {
 	Expects(_stepHistory.size() > 1);
 
@@ -362,25 +390,8 @@ void Widget::historyMove(StackAction action, Animate animate) {
 	if (_terms) {
 		hideAndDestroy(std::exchange(_terms, { nullptr }));
 	}
-	{
-		getStep()->nextButtonStyle(
-		) | rpl::start_with_next([=](const style::RoundButton *st) {
-			const auto nextStyle = st ? st : &st::introNextButton;
-			if (_nextStyle != nextStyle) {
-				_nextStyle = nextStyle;
-				const auto wasShown = _next->toggled();
-				_next.destroy();
-				_next.create(
-					this,
-					object_ptr<Ui::RoundButton>(this, nullptr, *nextStyle));
-				showControls();
-				updateControlsGeometry();
-				_next->toggle(wasShown, anim::type::instant);
-			}
-		}, _next->lifetime());
-	}
+	setupStep();
 
-	getStep()->finishInit();
 	getStep()->prepareShowAnimated(wasStep);
 	if (wasStep->hasCover() != getStep()->hasCover()) {
 		_nextTopFrom = wasStep->contentTop() + st::introNextTop;
