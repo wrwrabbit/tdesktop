@@ -200,7 +200,7 @@ void AddDividerTextWithLottie(
 	const auto divider = Ui::CreateChild<Ui::BoxContentDivider>(
 		container.get(),
 		0,
-		st::boxDividerBg,
+		st::defaultDividerBar,
 		descriptor.parts);
 	const auto verticalLayout = container->add(
 		object_ptr<Ui::VerticalLayout>(container.get()));
@@ -226,14 +226,13 @@ void AddDividerTextWithLottie(
 
 	if (descriptor.about) {
 		verticalLayout->add(
-			object_ptr<Ui::CenterWrap<>>(
+			object_ptr<Ui::FlatLabel>(
 				verticalLayout,
-				object_ptr<Ui::FlatLabel>(
-					verticalLayout,
-					std::move(descriptor.about),
-					st::settingsFilterDividerLabel)),
+				std::move(descriptor.about),
+				st::settingsFilterDividerLabel),
 			descriptor.aboutMargins.value_or(
-				st::settingsFilterDividerLabelPadding));
+				st::settingsFilterDividerLabelPadding),
+			style::al_top)->setTryMakeSimilarLines(true);
 	}
 
 	verticalLayout->geometryValue(

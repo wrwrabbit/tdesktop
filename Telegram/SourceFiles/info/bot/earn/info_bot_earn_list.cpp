@@ -35,7 +35,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
-#include "ui/widgets/label_with_custom_emoji.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/slider_natural_width.h"
 #include "ui/wrap/slide_wrap.h"
@@ -248,14 +247,11 @@ void InnerWidget::fill() {
 					return _state.buyAdsUrl;
 				})
 			),
-			peer()->isSelf()
-				? rpl::duplicate(overallBalanceValue) | rpl::type_erased()
-				: rpl::duplicate(availableBalanceValue),
+			rpl::duplicate(availableBalanceValue),
 			rpl::duplicate(dateValue),
 			_state.isWithdrawalEnabled,
-			(peer()->isSelf()
-				? rpl::duplicate(overallBalanceValue) | rpl::type_erased()
-				: rpl::duplicate(availableBalanceValue)
+			rpl::duplicate(
+				availableBalanceValue
 			) | rpl::map([=](CreditsAmount v) {
 				return v ? ToUsd(v, multiplier, kMinorLength) : QString();
 			}));

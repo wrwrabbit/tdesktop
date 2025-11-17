@@ -1011,6 +1011,16 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 			secureStorageFailed(arguments);
 		} else if (command == "web_app_secure_storage_clear") {
 			secureStorageFailed(arguments);
+		} else if (command == "web_app_verify_age") {
+			const auto passed = arguments["passed"];
+			const auto detected = arguments["age"];
+			const auto valid = passed.isBool()
+				&& passed.toBool()
+				&& detected.isDouble();
+			const auto age = valid
+				? int(std::floor(detected.toDouble()))
+				: 0;
+			_delegate->botVerifyAge(age);
 		} else if (command == "share_score") {
 			_delegate->botHandleMenuButton(MenuButton::ShareGame);
 		}
@@ -1121,13 +1131,12 @@ void Panel::switchInlineQueryMessage(const QJsonObject &args) {
 	if (args.isEmpty()) {
 		_delegate->botClose();
 		return;
-	}
-	const auto query = args["query"].toString();
-	if (query.isEmpty()) {
-		LOG(("BotWebView Error: Bad 'query' in switchInlineQueryMessage."));
+	} else if (!args.contains("query")) {
+		LOG(("BotWebView Error: No 'query' in switchInlineQueryMessage."));
 		_delegate->botClose();
 		return;
 	}
+	const auto query = args["query"].toString();
 	const auto valid = base::flat_set<QString>{
 		u"users"_q,
 		u"bots"_q,
@@ -2004,10 +2013,13 @@ void Panel::hideLayer(anim::type animated) {
 void Panel::showCriticalError(const TextWithEntities &text) {
 	_progress = nullptr;
 	_webviewProgress = false;
-	auto error = base::make_unique_q<PaddingWrap<FlatLabel>>(
-		_widget.get(),
+	auto wrap = base::make_unique_q<RpWidget>(_widget.get());
+	const auto raw = wrap.get();
+
+	const auto error = CreateChild<PaddingWrap<FlatLabel>>(
+		raw,
 		object_ptr<FlatLabel>(
-			_widget.get(),
+			raw,
 			rpl::single(text),
 			st::paymentsCriticalError),
 		st::paymentsCriticalErrorPadding);
@@ -2021,7 +2033,13 @@ void Panel::showCriticalError(const TextWithEntities &text) {
 		File::OpenUrl(entity.data);
 		return false;
 	});
-	_widget->showInner(std::move(error));
+
+	raw->widthValue() | rpl::start_with_next([=](int width) {
+		error->resizeToWidth(width);
+		raw->resize(width, error->height());
+	}, raw->lifetime());
+
+	_widget->showInner(std::move(wrap));
 }
 
 void Panel::updateThemeParams(const Webview::ThemeParams &params) {
@@ -2106,10 +2124,6 @@ TextWithEntities ErrorText(const Webview::Available &info) {
 			Ui::Text::WithEntities);
 	case Error::NoWebKitGTK:
 		return { tr::lng_payments_webview_install_webkit(tr::now) };
-	case Error::NoOpenGL:
-		return { tr::lng_payments_webview_enable_opengl(tr::now) };
-	case Error::NonX11:
-		return { tr::lng_payments_webview_switch_x11(tr::now) };
 	case Error::OldWindows:
 		return { tr::lng_payments_webview_update_windows(tr::now) };
 	default:

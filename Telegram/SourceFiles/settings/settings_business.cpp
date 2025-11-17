@@ -41,12 +41,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/checkbox.h" // Ui::RadiobuttonGroup.
 #include "ui/widgets/gradient_round_button.h"
-#include "ui/widgets/label_with_custom_emoji.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/new_badges.h"
 #include "ui/vertical_list.h"
+#include "ui/controls/swipe_handler.h"
+#include "ui/controls/swipe_handler_data.h"
 #include "window/window_session_controller.h"
 #include "apiwrap.h"
 #include "api/api_premium.h"
@@ -332,9 +333,9 @@ public:
 
 	[[nodiscard]] rpl::producer<QString> title() override;
 
-	[[nodiscard]] QPointer<Ui::RpWidget> createPinnedToTop(
+	[[nodiscard]] base::weak_qptr<Ui::RpWidget> createPinnedToTop(
 		not_null<QWidget*> parent) override;
-	[[nodiscard]] QPointer<Ui::RpWidget> createPinnedToBottom(
+	[[nodiscard]] base::weak_qptr<Ui::RpWidget> createPinnedToBottom(
 		not_null<Ui::RpWidget*> parent) override;
 
 	void showFinished() override;
@@ -347,6 +348,7 @@ public:
 
 private:
 	void setupContent();
+	void setupSwipeBack();
 
 	const not_null<Window::SessionController*> _controller;
 
@@ -373,6 +375,7 @@ Business::Business(
 , _controller(controller)
 , _radioGroup(std::make_shared<Ui::RadiobuttonGroup>()) {
 	setupContent();
+	setupSwipeBack();
 	_controller->session().api().premium().reload();
 }
 
@@ -397,6 +400,46 @@ void Business::setStepDataReference(std::any &data) {
 		) | rpl::map_to(true);
 		_wrap = std::move(my->wrapValue);
 	}
+}
+
+void Business::setupSwipeBack() {
+	using namespace Ui::Controls;
+
+	auto swipeBackData = lifetime().make_state<SwipeBackResult>();
+
+	auto update = [=](SwipeContextData data) {
+		if (data.translation > 0) {
+			if (!swipeBackData->callback) {
+				(*swipeBackData) = SetupSwipeBack(
+					this,
+					[]() -> std::pair<QColor, QColor> {
+						return {
+							st::historyForwardChooseBg->c,
+							st::historyForwardChooseFg->c,
+						};
+					});
+			}
+			swipeBackData->callback(data);
+			return;
+		} else if (swipeBackData->lifetime) {
+			(*swipeBackData) = {};
+		}
+	};
+
+	auto init = [=](int, Qt::LayoutDirection direction) {
+		return (direction == Qt::RightToLeft)
+			? DefaultSwipeBackHandlerFinishData([=] {
+				_showBack.fire({});
+			})
+			: SwipeHandlerFinishData();
+	};
+
+	SetupSwipeHandler({
+		.widget = this,
+		.scroll = v::null,
+		.update = std::move(update),
+		.init = std::move(init),
+	});
 }
 
 void Business::setupContent() {
@@ -524,27 +567,25 @@ void Business::setupContent() {
 
 		const auto session = &_controller->session();
 		{
-			const auto arrow = Ui::Text::IconEmoji(&st::textMoreIconEmoji);
 			inner->add(object_ptr<Ui::DividerLabel>(
 				inner,
-				Ui::CreateLabelWithCustomEmoji(
+				object_ptr<Ui::FlatLabel>(
 					inner,
 					tr::lng_business_about_sponsored(
 						lt_link,
 						rpl::combine(
 							tr::lng_business_about_sponsored_link(
 								lt_emoji,
-								rpl::single(arrow),
+								rpl::single(Ui::Text::IconEmoji(
+									&st::textMoreIconEmoji)),
 								Ui::Text::RichLangValue),
 							tr::lng_business_about_sponsored_url()
 						) | rpl::map([](TextWithEntities text, QString url) {
 							return Ui::Text::Link(text, url);
 						}),
 						Ui::Text::RichLangValue),
-					Core::TextContext({ .session = session }),
 					st::boxDividerLabel),
-				st::defaultBoxDividerLabelPadding,
-				RectPart::Top | RectPart::Bottom));
+				st::defaultBoxDividerLabelPadding));
 		}
 
 		const auto api = inner->lifetime().make_state<Api::SponsoredToggle>(
@@ -582,7 +623,7 @@ void Business::setupContent() {
 	Ui::ResizeFitChild(this, content);
 }
 
-QPointer<Ui::RpWidget> Business::createPinnedToTop(
+base::weak_qptr<Ui::RpWidget> Business::createPinnedToTop(
 		not_null<QWidget*> parent) {
 	auto title = tr::lng_business_title();
 	auto about = [&]() -> rpl::producer<TextWithEntities> {
@@ -671,14 +712,14 @@ QPointer<Ui::RpWidget> Business::createPinnedToTop(
 		}
 	}, content->lifetime());
 
-	return Ui::MakeWeak(not_null<Ui::RpWidget*>{ content });
+	return base::make_weak(not_null<Ui::RpWidget*>{ content });
 }
 
 void Business::showFinished() {
 	_showFinished.fire({});
 }
 
-QPointer<Ui::RpWidget> Business::createPinnedToBottom(
+base::weak_qptr<Ui::RpWidget> Business::createPinnedToBottom(
 		not_null<Ui::RpWidget*> parent) {
 	const auto content = Ui::CreateChild<Ui::RpWidget>(parent.get());
 
@@ -747,7 +788,7 @@ QPointer<Ui::RpWidget> Business::createPinnedToBottom(
 		_subscribe->setVisible(!premium && premiumPossible);
 	}, _subscribe->lifetime());
 
-	return Ui::MakeWeak(not_null<Ui::RpWidget*>{ content });
+	return base::make_weak(not_null<Ui::RpWidget*>{ content });
 }
 
 } // namespace

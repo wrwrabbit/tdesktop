@@ -1271,15 +1271,15 @@ auto HtmlWriter::Wrap::pushMessage(
 			+ SerializeString(data.text)
 			+ "&raquo; button to the bot";
 	}, [&](const ActionGiftPremium &data) {
-		if (!data.months || data.cost.isEmpty()) {
+		if (!data.days || data.cost.isEmpty()) {
 			return serviceFrom + " sent you a gift.";
 		}
 		return serviceFrom
 			+ " sent you a gift for "
 			+ data.cost
 			+ ": Telegram Premium for "
-			+ QString::number(data.months).toUtf8()
-			+ " months.";
+			+ QString::number(data.days).toUtf8()
+			+ " days.";
 	}, [&](const ActionTopicCreate &data) {
 		return serviceFrom
 			+ " created topic &laquo;"
@@ -1312,17 +1312,17 @@ auto HtmlWriter::Wrap::pushMessage(
 	}, [&](const ActionGiftCode &data) {
 		return data.unclaimed
 			? ("This is an unclaimed Telegram Premium for "
-				+ NumberToString(data.months)
-				+ (data.months > 1 ? " months" : "month")
+				+ NumberToString(data.days)
+				+ (data.days > 1 ? " days" : " day")
 				+ " prize in a giveaway organized by a channel.")
 			: data.viaGiveaway
 			? ("You won a Telegram Premium for "
-				+ NumberToString(data.months)
-				+ (data.months > 1 ? " months" : "month")
+				+ NumberToString(data.days)
+				+ (data.days > 1 ? " days" : " day")
 				+ " prize in a giveaway organized by a channel.")
 			: ("You've received a Telegram Premium for "
-				+ NumberToString(data.months)
-				+ (data.months > 1 ? " months" : "month")
+				+ NumberToString(data.days)
+				+ (data.days > 1 ? " days" : " day")
 				+ " gift from a channel.");
 	}, [&](const ActionGiveawayLaunch &data) {
 		return serviceFrom + " just started a giveaway "
@@ -1475,6 +1475,29 @@ auto HtmlWriter::Wrap::pushMessage(
 		return QByteArray() + (data.payerInitiated
 			? "The user refunded the payment, post was deleted."
 			: "The admin deleted the post early, the payment was refunded.");
+	}, [&](const ActionSuggestBirthday &data) {
+		return serviceFrom
+			+ " suggests to add a date of birth: "
+			+ QByteArray::number(data.birthday.day())
+			+ [&] {
+				switch (data.birthday.month()) {
+				case 1: return " January";
+				case 2: return " February";
+				case 3: return " March";
+				case 4: return " April";
+				case 5: return " May";
+				case 6: return " June";
+				case 7: return " July";
+				case 8: return " August";
+				case 9: return " September";
+				case 10: return " October";
+				case 11: return " November";
+				case 12: return " December";
+				}
+				return "";
+			}() + (data.birthday.year()
+				? (' ' + QByteArray::number(data.birthday.year()))
+				: QByteArray());
 	}, [](v::null_t) { return QByteArray(); });
 
 	if (!serviceText.isEmpty()) {

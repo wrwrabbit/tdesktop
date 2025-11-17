@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
 #include "styles/style_calls.h"
+#include "styles/style_chat_helpers.h"
 
 namespace Calls::Group {
 namespace {
@@ -224,7 +225,7 @@ void ChooseJoinAsBox(
 			&st::groupCallMultiSelect);
 	} else {
 		controller->setStyleOverrides(
-			&st::peerListJoinAsList,
+			&st::defaultChooseSendAs.list,
 			nullptr);
 	}
 	const auto content = box->addRow(
@@ -393,7 +394,7 @@ void ChooseJoinAsProcess::finish(JoinInfo info) {
 	const auto box = _request->box;
 	_request = nullptr;
 	done(std::move(info));
-	if (const auto strong = box.data()) {
+	if (const auto strong = box.get()) {
 		strong->closeBox();
 	}
 }

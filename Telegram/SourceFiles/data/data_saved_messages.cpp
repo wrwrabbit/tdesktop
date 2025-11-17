@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "apiwrap.h"
 #include "core/application.h"
+#include "data/components/recent_peers.h"
 #include "data/data_changes.h"
 #include "data/data_channel.h"
 #include "data/data_histories.h"
@@ -96,17 +97,6 @@ Thread *SavedMessages::activeSubsectionThread() const {
 	return _activeSubsectionSublist;
 }
 
-Dialogs::UnreadState SavedMessages::unreadStateWithParentMuted() const {
-	auto result = _chatsList.unreadState();
-	if (_owningHistory->muted()) {
-		result.chatsMuted = result.chats;
-		result.marksMuted = result.marks;
-		result.messagesMuted = result.messages;
-		result.reactionsMuted = result.reactions;
-	}
-	return result;
-}
-
 SavedMessages::~SavedMessages() {
 	clear();
 }
@@ -185,6 +175,14 @@ void SavedMessages::requestSomeStale() {
 	const auto call = [=] {
 		for (const auto &peer : peers) {
 			finishSublistRequest(peer);
+		}
+		for (const auto &peer : peers) {
+			if (const auto sublist = sublistLoaded(peer)) {
+				if (!sublist->lastMessage()
+					&& !sublist->lastServerMessage()) {
+					applySublistDeleted(peer);
+				}
+			}
 		}
 	};
 	auto &histories = owner().histories();
@@ -458,8 +456,12 @@ void SavedMessages::applySublistDeleted(not_null<PeerData*> sublistPeer) {
 	if (ranges::contains(_lastSublists, not_null(raw))) {
 		reorderLastSublists();
 	}
+	if (_activeSubsectionSublist == raw) {
+		_activeSubsectionSublist = nullptr;
+	}
 
 	_sublistDestroyed.fire(raw);
+	_owner->session().recentPeers().chatOpenRemove(raw);
 	session().changes().sublistUpdated(
 		raw,
 		Data::SublistUpdate::Flag::Destroyed);

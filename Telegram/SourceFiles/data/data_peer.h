@@ -7,10 +7,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "data/notify/data_peer_notify_settings.h"
 #include "data/data_types.h"
 #include "data/data_flags.h"
-#include "data/notify/data_peer_notify_settings.h"
 #include "data/data_cloud_file.h"
+#include "data/data_peer_common.h"
 #include "ui/userpic_view.h"
 
 struct BotInfo;
@@ -24,6 +25,7 @@ enum class ChatRestriction;
 namespace Ui {
 class EmptyUserpic;
 struct BotVerifyDetails;
+struct ColorCollectible;
 } // namespace Ui
 
 namespace Main {
@@ -141,6 +143,9 @@ struct AllowedReactions {
 	not_null<Session*> owner,
 	const MTPInputUser &input);
 
+[[nodiscard]] Ui::ColorCollectible ParseColorCollectible(
+	const MTPDpeerColorCollectible &data);
+
 } // namespace Data
 
 class PeerClickHandler : public ClickHandler {
@@ -213,10 +218,32 @@ public:
 	[[nodiscard]] uint8 colorIndex() const {
 		return _colorIndex;
 	}
+	[[nodiscard]] auto colorCollectible() const
+	-> const std::shared_ptr<Ui::ColorCollectible> & {
+		return _colorCollectible;
+	}
+	bool changeColorCollectible(Ui::ColorCollectible data);
+	bool clearColorCollectible();
 	bool changeColorIndex(uint8 index);
 	bool clearColorIndex();
 	[[nodiscard]] DocumentId backgroundEmojiId() const;
 	bool changeBackgroundEmojiId(DocumentId id);
+
+	[[nodiscard]] std::optional<uint8> colorProfileIndex() const {
+		return _colorProfileIndex;
+	}
+	[[nodiscard]] auto colorProfileCollectible() const
+	-> const std::shared_ptr<Ui::ColorCollectible> & {
+		return _colorProfileCollectible;
+	}
+	bool changeColorProfileCollectible(Ui::ColorCollectible data);
+	bool changeColorProfileCollectible(
+		const tl::conditional<MTPPeerColor> &cloudColor);
+	bool clearColorProfileCollectible();
+	bool changeColorProfileIndex(uint8 index);
+	bool clearColorProfileIndex();
+	[[nodiscard]] DocumentId profileBackgroundEmojiId() const;
+	bool changeProfileBackgroundEmojiId(DocumentId id);
 
 	void setEmojiStatus(const MTPEmojiStatus &status);
 	void setEmojiStatus(EmojiStatusId emojiStatusId, TimeId until = 0);
@@ -270,6 +297,10 @@ public:
 	[[nodiscard]] Data::SavedSublist *monoforumSublistFor(
 		PeerId sublistPeerId) const;
 
+	[[nodiscard]] bool useSubsectionTabs() const;
+	[[nodiscard]] bool viewForumAsMessages() const;
+	void processTopics(const MTPVector<MTPForumTopic> &topics);
+
 	[[nodiscard]] Data::PeerNotifySettings &notify() {
 		return _notify;
 	}
@@ -290,6 +321,7 @@ public:
 
 	[[nodiscard]] int starsPerMessage() const;
 	[[nodiscard]] int starsPerMessageChecked() const;
+	[[nodiscard]] Data::StarsRating starsRating() const;
 
 	[[nodiscard]] UserData *asBot();
 	[[nodiscard]] const UserData *asBot() const;
@@ -432,6 +464,9 @@ public:
 	[[nodiscard]] bool canCreateTodoLists() const;
 	[[nodiscard]] bool canCreateTopics() const;
 	[[nodiscard]] bool canManageTopics() const;
+	[[nodiscard]] bool canPostStories() const;
+	[[nodiscard]] bool canEditStories() const;
+	[[nodiscard]] bool canDeleteStories() const;
 	[[nodiscard]] bool canManageGifts() const;
 	[[nodiscard]] bool canTransferGifts() const;
 	[[nodiscard]] bool canExportChatHistory() const;
@@ -445,9 +480,7 @@ public:
 
 	void checkFolder(FolderId folderId);
 
-	void setBarSettings(PeerBarSettings which) {
-		_barSettings.set(which);
-	}
+	void setBarSettings(PeerBarSettings which);
 	[[nodiscard]] auto barSettings() const {
 		return (_barSettings.current() & PeerBarSetting::Unknown)
 			? std::nullopt
@@ -460,6 +493,7 @@ public:
 	}
 	[[nodiscard]] int paysPerMessage() const;
 	void clearPaysPerMessage();
+	[[nodiscard]] bool hideLinks() const;
 	[[nodiscard]] QString requestChatTitle() const;
 	[[nodiscard]] TimeId requestChatDate() const;
 	[[nodiscard]] UserData *businessBot() const;
@@ -481,10 +515,12 @@ public:
 	void saveTranslationDisabled(bool disabled);
 
 	void setBarSettings(const MTPPeerSettings &data);
-	bool changeColorIndex(const tl::conditional<MTPint> &cloudColorIndex);
 	bool changeBackgroundEmojiId(
 		const tl::conditional<MTPlong> &cloudBackgroundEmoji);
+	bool changeColorCollectible(
+		const tl::conditional<MTPPeerColor> &cloudColor);
 	bool changeColor(const tl::conditional<MTPPeerColor> &cloudColor);
+	bool changeColorProfile(const tl::conditional<MTPPeerColor> &cloudColor);
 
 	enum class BlockStatus : char {
 		Unknown,
@@ -525,8 +561,8 @@ public:
 	[[nodiscard]] Data::GroupCall *groupCall() const;
 	[[nodiscard]] PeerId groupCallDefaultJoinAs() const;
 
-	void setThemeEmoji(const QString &emoticon);
-	[[nodiscard]] const QString &themeEmoji() const;
+	void setThemeToken(const QString &token);
+	[[nodiscard]] const QString &themeToken() const;
 
 	void setWallPaper(
 		std::optional<Data::WallPaper> paper,
@@ -539,9 +575,11 @@ public:
 		None,
 		HasRead,
 		HasUnread,
+		HasVideoStream,
 	};
 	[[nodiscard]] bool hasActiveStories() const;
 	[[nodiscard]] bool hasUnreadStories() const;
+	[[nodiscard]] bool hasActiveVideoStream() const;
 	void setStoriesState(StoriesState state);
 
 	[[nodiscard]] int peerGiftsCount() const;
@@ -589,6 +627,7 @@ private:
 
 	EmojiStatusId _emojiStatusId;
 	DocumentId _backgroundEmojiId = 0;
+	DocumentId _profileBackgroundEmojiId = 0;
 	crl::time _lastFullUpdate = 0;
 
 	QString _name;
@@ -601,16 +640,19 @@ private:
 
 	BarSettings _barSettings = PeerBarSettings(PeerBarSetting::Unknown);
 	std::unique_ptr<PeerBarDetails> _barDetails;
+	std::shared_ptr<Ui::ColorCollectible> _colorCollectible;
+	std::shared_ptr<Ui::ColorCollectible> _colorProfileCollectible;
 
 	BlockStatus _blockStatus = BlockStatus::Unknown;
 	LoadedStatus _loadedStatus = LoadedStatus::Not;
 	TranslationFlag _translationFlag = TranslationFlag::Unknown;
 	uint8 _colorIndex : 6 = 0;
 	uint8 _colorIndexCloud : 1 = 0;
+	std::optional<uint8> _colorProfileIndex;
 	uint8 _userpicHasVideo : 1 = 0;
 
 	QString _about;
-	QString _themeEmoticon;
+	QString _themeToken;
 	std::unique_ptr<Data::WallPaper> _wallPaper;
 
 };
@@ -630,5 +672,8 @@ void SetTopPinnedMessageId(
 	MsgId topicRootId,
 	PeerId monoforumPeerId,
 	PeerData *migrated = nullptr);
+
+[[nodiscard]] uint64 BackgroundEmojiIdFromColor(const MTPPeerColor *color);
+[[nodiscard]] uint8 ColorIndexFromColor(const MTPPeerColor *color);
 
 } // namespace Data

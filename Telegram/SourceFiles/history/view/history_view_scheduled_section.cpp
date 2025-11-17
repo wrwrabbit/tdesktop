@@ -384,7 +384,9 @@ void ScheduledWidget::setupComposeControls() {
 		if (const auto item = session().data().message(data.fullId)) {
 			if (item->isScheduled()) {
 				const auto spoiler = data.spoilered;
-				edit(item, data.options, saveEditMsgRequestId, spoiler);
+				auto &options = data.options;
+				options.scheduleRepeatPeriod = item->scheduleRepeatPeriod();
+				edit(item, options, saveEditMsgRequestId, spoiler);
 			}
 		}
 	}, lifetime());
@@ -430,12 +432,8 @@ void ScheduledWidget::setupComposeControls() {
 			if (item->isScheduled() && item->history() == _history) {
 				showAtPosition(item->position());
 			} else {
-				JumpToMessageClickHandler(
-					item,
-					{},
-					to.quote,
-					to.quoteOffset
-				)->onClick({});
+				const auto highlight = to.highlight();
+				JumpToMessageClickHandler(item, {}, highlight)->onClick({});
 			}
 		}
 	}, lifetime());
@@ -1344,9 +1342,9 @@ void ScheduledWidget::showProcessingVideoTooltip() {
 			st::defaultImportantTooltipLabel),
 		st::defaultImportantTooltip);
 	const auto tooltip = _processingVideoTooltip.get();
-	const auto weak = QPointer<QWidget>(tooltip);
+	const auto weak = base::make_weak(tooltip);
 	const auto destroy = [=] {
-		delete weak.data();
+		delete weak.get();
 	};
 	tooltip->setAttribute(Qt::WA_TransparentForMouseEvents);
 	tooltip->setHiddenCallback([=] {

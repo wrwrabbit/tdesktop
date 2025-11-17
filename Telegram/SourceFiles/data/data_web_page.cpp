@@ -173,6 +173,10 @@ WebPageType ParseWebPageType(
 		return WebPageType::Giftcode;
 	} else if (type == u"telegram_stickerset"_q) {
 		return WebPageType::StickerSet;
+	} else if (type == u"telegram_story_album"_q) {
+		return WebPageType::StoryAlbum;
+	} else if (type == u"telegram_collection"_q) {
+		return WebPageType::GiftCollection;
 	} else if (hasIV) {
 		return WebPageType::ArticleWithIV;
 	} else {
@@ -336,6 +340,16 @@ void WebPageData::ApplyChanges(
 		not_null<Main::Session*> session,
 		ChannelData *channel,
 		const MTPmessages_Messages &result) {
+	const auto list = result.match([](
+			const MTPDmessages_messagesNotModified &) {
+		LOG(("API Error: received messages.messagesNotModified! "
+			"(WebPageData::ApplyChanges)"));
+		return static_cast<const QVector<MTPMessage>*>(nullptr);
+	}, [&](const auto &data) {
+		session->data().processUsers(data.vusers());
+		session->data().processChats(data.vchats());
+		return &data.vmessages().v;
+	});
 	result.match([&](
 			const MTPDmessages_channelMessages &data) {
 		if (channel) {
@@ -347,15 +361,12 @@ void WebPageData::ApplyChanges(
 		}
 	}, [&](const auto &) {
 	});
-	const auto list = result.match([](
+	result.match([](
 			const MTPDmessages_messagesNotModified &) {
-		LOG(("API Error: received messages.messagesNotModified! "
-			"(WebPageData::ApplyChanges)"));
-		return static_cast<const QVector<MTPMessage>*>(nullptr);
 	}, [&](const auto &data) {
-		session->data().processUsers(data.vusers());
-		session->data().processChats(data.vchats());
-		return &data.vmessages().v;
+		if (channel) {
+			channel->processTopics(data.vtopics());
+		}
 	});
 	if (!list) {
 		return;

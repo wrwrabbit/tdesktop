@@ -75,16 +75,43 @@ void SaveCallJoinMuted(
 	const auto call = peer->groupCall();
 	if (!call
 		|| call->id() != callId
+		|| peer->isUser()
 		|| !peer->canManageGroupCall()
 		|| !call->canChangeJoinMuted()
 		|| call->joinMuted() == joinMuted) {
 		return;
 	}
+	using Flag = MTPphone_ToggleGroupCallSettings::Flag;
 	call->setJoinMutedLocally(joinMuted);
 	peer->session().api().request(MTPphone_ToggleGroupCallSettings(
-		MTP_flags(MTPphone_ToggleGroupCallSettings::Flag::f_join_muted),
+		MTP_flags(Flag::f_join_muted),
 		call->input(),
-		MTP_bool(joinMuted)
+		MTP_bool(joinMuted),
+		MTPBool(), // messages_enabled
+		MTPlong() // send_paid_messages_stars
+	)).send();
+}
+
+void SaveCallMessagesEnabled(
+		not_null<PeerData*> peer,
+		CallId callId,
+		bool messagesEnabled) {
+	const auto call = peer->groupCall();
+	if (!call
+		|| call->id() != callId
+		|| !peer->canManageGroupCall()
+		|| !call->canChangeMessagesEnabled()
+		|| call->messagesEnabled() == messagesEnabled) {
+		return;
+	}
+	using Flag = MTPphone_ToggleGroupCallSettings::Flag;
+	call->setMessagesEnabledLocally(messagesEnabled);
+	peer->session().api().request(MTPphone_ToggleGroupCallSettings(
+		MTP_flags(Flag::f_messages_enabled),
+		call->input(),
+		MTPBool(), // join_muted
+		MTP_bool(messagesEnabled),
+		MTPlong() // send_paid_messages_stars
 	)).send();
 }
 
@@ -110,7 +137,7 @@ object_ptr<ShareBox> ShareInviteLinkBox(
 		const QString &linkListener,
 		std::shared_ptr<Ui::Show> show) {
 	const auto sending = std::make_shared<bool>();
-	const auto box = std::make_shared<QPointer<ShareBox>>();
+	const auto box = std::make_shared<base::weak_qptr<ShareBox>>();
 
 	auto bottom = linkSpeaker.isEmpty()
 		? nullptr
@@ -220,7 +247,7 @@ void SettingsBox(
 	using namespace Settings;
 
 	const auto weakCall = base::make_weak(call);
-	const auto weakBox = Ui::MakeWeak(box);
+	const auto weakBox = base::make_weak(box);
 
 	struct State {
 		std::unique_ptr<Webrtc::DeviceResolver> deviceId;
@@ -233,7 +260,9 @@ void SettingsBox(
 	};
 	const auto peer = call->peer();
 	const auto state = box->lifetime().make_state<State>();
-	const auto real = peer->groupCall();
+	const auto real = call->conference()
+		? call->lookupReal()
+		: peer->groupCall();
 	const auto rtmp = call->rtmp();
 	const auto id = call->id();
 	const auto goodReal = (real && real->id() == id);
@@ -241,20 +270,28 @@ void SettingsBox(
 	const auto layout = box->verticalLayout();
 	const auto &settings = Core::App().settings();
 
-	const auto joinMuted = goodReal ? real->joinMuted() : false;
+	const auto joinMuted = !call->conference()
+		&& goodReal
+		&& real->joinMuted();
+	const auto messagesEnabled = goodReal && real->messagesEnabled();
 	const auto canChangeJoinMuted = !rtmp
 		&& goodReal
 		&& real->canChangeJoinMuted();
-	const auto addCheck = (peer->canManageGroupCall() && canChangeJoinMuted);
+	const auto canChangeMessagesEnabled = !rtmp
+		&& goodReal
+		&& real->canChangeMessagesEnabled();
+	const auto addCheck = canChangeJoinMuted && peer->canManageGroupCall();
+	const auto addMessages = canChangeMessagesEnabled
+		&& (call->conference() || peer->canManageGroupCall());
 
 	const auto addDivider = [&] {
 		layout->add(object_ptr<Ui::BoxContentDivider>(
 			layout,
 			st::boxDividerHeight,
-			st::groupCallDividerBg));
+			st::groupCallDividerBar));
 	};
 
-	if (addCheck) {
+	if (addCheck || addMessages) {
 		Ui::AddSkip(layout);
 	}
 	const auto muteJoined = addCheck
@@ -263,7 +300,14 @@ void SettingsBox(
 			tr::lng_group_call_new_muted(),
 			st::groupCallSettingsButton))->toggleOn(rpl::single(joinMuted))
 		: nullptr;
-	if (addCheck) {
+	const auto enableMessages = addMessages
+		? layout->add(object_ptr<Ui::SettingsButton>(
+			layout,
+			tr::lng_group_call_enable_messages(),
+			st::groupCallSettingsButton))->toggleOn(
+				rpl::single(messagesEnabled))
+		: nullptr;
+	if (addCheck || addMessages) {
 		Ui::AddSkip(layout);
 	}
 
@@ -649,6 +693,7 @@ void SettingsBox(
 			const auto session = &peer->session();
 			state->requestId = session->api().request(
 				MTPphone_GetGroupCallStreamRtmpUrl(
+					MTP_flags(0),
 					peer->input,
 					MTP_bool(true)
 			)).done([=](const MTPphone_GroupCallStreamRtmpUrl &result) {
@@ -810,6 +855,16 @@ void SettingsBox(
 			&& muteJoined->toggled() != joinMuted) {
 			SaveCallJoinMuted(peer, id, muteJoined->toggled());
 		}
+		if (canChangeMessagesEnabled
+			&& enableMessages
+			&& enableMessages->toggled() != messagesEnabled) {
+			const auto value = enableMessages->toggled();
+			if (!call->conference()) {
+				SaveCallMessagesEnabled(peer, id, value);
+			} else if (const auto real = call->lookupReal()) {
+				real->setMessagesEnabledLocally(value);
+			}
+		}
 	}, box->lifetime());
 	box->addButton(tr::lng_box_done(), [=] {
 		box->closeBox();
@@ -836,7 +891,7 @@ std::pair<Fn<void()>, rpl::lifetime> ShareInviteLinkAction(
 		bool generatingLink = false;
 	};
 	const auto state = lifetime.make_state<State>(&peer->session());
-	if (!peer->canManageGroupCall()) {
+	if (peer->isUser() || !peer->canManageGroupCall()) {
 		state->linkSpeaker = QString();
 	}
 

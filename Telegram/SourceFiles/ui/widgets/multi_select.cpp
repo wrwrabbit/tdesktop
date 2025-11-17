@@ -409,7 +409,7 @@ void Item::setOver(bool over) {
 
 } // namespace
 
-class MultiSelect::Inner : public TWidget {
+class MultiSelect::Inner : public RpWidget {
 public:
 	using ScrollCallback = Fn<void(int activeTop, int activeBottom)>;
 	Inner(
@@ -652,7 +652,7 @@ MultiSelect::Inner::Inner(
 	rpl::producer<QString> placeholder,
 	const QString &query,
 	ScrollCallback callback)
-: TWidget(parent)
+: RpWidget(parent)
 , _st(st)
 , _scrollCallback(std::move(callback))
 , _field(this, _st.field, std::move(placeholder), query)
@@ -790,6 +790,9 @@ void MultiSelect::Inner::setActiveItemNext() {
 }
 
 int MultiSelect::Inner::resizeGetHeight(int newWidth) {
+	if (newWidth <= 0) {
+		return height();
+	}
 	computeItemsGeometry(newWidth);
 	updateFieldGeometry();
 

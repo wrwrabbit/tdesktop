@@ -63,7 +63,7 @@ jobs:
 
     steps:
       - name: Clone.
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -168,7 +168,7 @@ jobs:
           rm -rf Telegram/
           # mv {Telegram,Updater} artifact/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.
         with:

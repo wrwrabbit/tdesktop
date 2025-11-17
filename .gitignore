@@ -54,7 +54,19 @@ stage
 .idea/
 cmake-build-debug/
 
+# PTG
 /build/
 .*project
 /Telegram/build/release/*.session
 /Telegram/build/release/config.py
+
+# Local configuration files
+settings.local.json
+*.local.json
+.env
+.env.local
+.env.*.local
+
+# Cursor IDE local settings (but keep .cursor/rules/)
+.cursor/*
+!.cursor/rules/

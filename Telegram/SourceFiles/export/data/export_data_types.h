@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/optional.h"
 #include "base/variant.h"
 #include "core/credits_amount.h"
+#include "data/data_birthday.h"
 #include "data/data_peer_id.h"
 
 #include <QtCore/QSize>
@@ -44,6 +45,8 @@ inline auto NumberToString(Type value, int length = 0, char filler = '0')
 		length,
 		filler).replace(',', '.');
 }
+
+using Birthday = ::Data::Birthday;
 
 struct TextPart {
 	enum class Type {
@@ -319,14 +322,19 @@ struct Chat {
 	Utf8String title;
 	Utf8String username;
 	uint8 colorIndex = 0;
+	bool isMonoforum = false;
 	bool isBroadcast = false;
 	bool isSupergroup = false;
+	bool isMonoforumAdmin = false;
+	bool hasMonoforumAdminRights = false;
+	bool isMonoforumOfPublicBroadcast = false;
+	BareId monoforumLinkId = 0;
 
 	MTPInputPeer input = MTP_inputPeerEmpty();
+	MTPInputPeer monoforumBroadcastInput = MTP_inputPeerEmpty();
 };
 
 Chat ParseChat(const MTPChat &data);
-std::map<PeerId, Chat> ParseChatsList(const MTPVector<MTPChat> &data);
 
 struct Peer {
 	PeerId id() const;
@@ -604,7 +612,7 @@ struct ActionWebViewDataSent {
 
 struct ActionGiftPremium {
 	Utf8String cost;
-	int months = 0;
+	int days = 0;
 };
 
 struct ActionTopicCreate {
@@ -629,7 +637,7 @@ struct ActionSetChatWallPaper {
 struct ActionGiftCode {
 	QByteArray code;
 	PeerId boostPeerId = 0;
-	int months = 0;
+	int days = 0;
 	bool viaGiveaway = false;
 	bool unclaimed = false;
 };
@@ -715,6 +723,10 @@ struct ActionSuggestedPostRefund {
 	bool payerInitiated = false;
 };
 
+struct ActionSuggestBirthday {
+	Birthday birthday;
+};
+
 struct ServiceAction {
 	std::variant<
 		v::null_t,
@@ -767,7 +779,8 @@ struct ServiceAction {
 		ActionTodoAppendTasks,
 		ActionSuggestedPostApproval,
 		ActionSuggestedPostSuccess,
-		ActionSuggestedPostRefund> content;
+		ActionSuggestedPostRefund,
+		ActionSuggestBirthday> content;
 };
 
 ServiceAction ParseServiceAction(
@@ -952,12 +965,15 @@ struct DialogInfo {
 	MTPInputPeer migratedFromInput = MTP_inputPeerEmpty();
 	ChannelId migratedToChannelId = 0;
 
+	MTPInputPeer monoforumBroadcastInput = MTP_inputPeerEmpty();
+
 	// User messages splits which contained that dialog.
 	std::vector<int> splits;
 
 	// Filled after the whole dialogs list is accumulated.
 	bool onlyMyMessages = false;
 	bool isLeftChannel = false;
+	bool isMonoforum = false;
 	QString relativePath;
 
 	// Filled when requesting dialog messages.

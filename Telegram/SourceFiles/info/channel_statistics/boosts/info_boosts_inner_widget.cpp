@@ -174,7 +174,7 @@ void FillShareLink(
 		std::shared_ptr<Ui::Show> show,
 		const QString &link,
 		not_null<PeerData*> peer) {
-	const auto weak = Ui::MakeWeak(content);
+	const auto weak = base::make_weak(content);
 	const auto copyLink = crl::guard(weak, [=] {
 		QGuiApplication::clipboard()->setText(link);
 		show->showToast(tr::lng_channel_public_link_copied(tr::now));
@@ -411,7 +411,7 @@ void InnerWidget::fill() {
 						.from = _peer->id,
 						.to = user->id,
 						.date = TimeId(boost.date.toSecsSinceEpoch()),
-						.months = boost.expiresAfterMonths,
+						.days = boost.expiresAfterMonths * 30,
 					};
 					_show->showBox(Box(GiftCodePendingBox, _controller, d));
 				} else {

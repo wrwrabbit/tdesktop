@@ -80,7 +80,9 @@ namespace {
 constexpr auto kEmojiInteractionSeenDuration = 3 * crl::time(1000);
 
 [[nodiscard]] inline bool HasGroupCallMenu(not_null<PeerData*> peer) {
-	return !peer->groupCall() && peer->canManageGroupCall();
+	return !peer->isUser()
+		&& !peer->groupCall()
+		&& peer->canManageGroupCall();
 }
 
 QString TopBarNameText(
@@ -340,8 +342,8 @@ bool TopBarWidget::createMenu(not_null<Ui::IconButton*> button) {
 		this,
 		st::popupMenuExpandedSeparator);
 	_menu->setDestroyedCallback([
-			weak = Ui::MakeWeak(this),
-			weakButton = Ui::MakeWeak(button),
+			weak = base::make_weak(this),
+			weakButton = base::make_weak(button),
 			menu = _menu.get()] {
 		if (weak && weak->_menu == menu) {
 			if (weakButton) {
@@ -828,9 +830,12 @@ void TopBarWidget::setActiveChat(
 
 			if (const auto channel = peer->asChannel()) {
 				if (channel->canEditStories()
-					&& !channel->owner().stories().archiveCountKnown(
-						channel->id)) {
-					channel->owner().stories().archiveLoadMore(channel->id);
+					&& !channel->owner().stories().albumIdsCountKnown(
+						channel->id,
+						Data::kStoriesAlbumIdArchive)) {
+					channel->owner().stories().albumIdsLoadMore(
+						channel->id,
+						Data::kStoriesAlbumIdArchive);
 				}
 			}
 		}
@@ -847,7 +852,7 @@ void TopBarWidget::setActiveChat(
 
 		if (const auto topic = _activeChat.key.topic()) {
 			Info::Profile::NameValue(
-				topic->channel()
+				topic->peer()
 			) | rpl::start_with_next([=](const QString &name) {
 				_titlePeerText.setText(st::dialogsTextStyle, name);
 				_titlePeerTextOnline = false;
@@ -1229,7 +1234,7 @@ void TopBarWidget::updateControlsVisibility() {
 		&& !_chooseForReportReason);
 	const auto groupCallsEnabled = [&] {
 		if (const auto peer = _activeChat.key.peer()) {
-			if (peer->canManageGroupCall()) {
+			if (!peer->isUser() && peer->canManageGroupCall()) {
 				return true;
 			} else if (const auto call = peer->groupCall()) {
 				return (call->fullCount() == 0);

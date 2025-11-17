@@ -917,7 +917,7 @@ int NonZeroPartToInt(QString value) {
 		: (value.isEmpty() ? 0 : value.toInt());
 }
 
-ShortenedCount FormatCountToShort(int64 number) {
+ShortenedCount FormatCountToShort(int64 number, bool onlyK) {
 	auto result = ShortenedCount{ number };
 	const auto abs = std::abs(number);
 	const auto shorten = [&](int64 divider, char multiplier) {
@@ -934,7 +934,7 @@ ShortenedCount FormatCountToShort(int64 number) {
 		result.number = rounded * divider;
 		result.shortened = true;
 	};
-	if (abs >= 1'000'000) {
+	if (!onlyK && abs >= 1'000'000) {
 		shorten(1'000'000, 'M');
 	} else if (abs >= 10'000) {
 		shorten(1'000, 'K');
@@ -949,7 +949,20 @@ QString FormatCountDecimal(int64 number) {
 }
 
 QString FormatExactCountDecimal(float64 number) {
-	return QLocale().toString(number, 'f', QLocale::FloatingPointShortest);
+	const auto locale = QLocale();
+	if (qFuzzyCompare(number, base::SafeRound(number))) {
+		return locale.toString(int64(base::SafeRound(number)));
+	}
+
+	// Somehow using QLocale::FloatingPointShortest sometimes produces
+	// "0.8500000000000001" on some systems / locales,
+	// so I want to stick to 6 digits max (default third argument value).
+	auto result = locale.toString(number, 'f');
+	const auto zero = locale.zeroDigit();
+	while (result.endsWith(zero)) {
+		result.chop(1);
+	}
+	return result;
 }
 
 ShortenedCount FormatCreditsAmountToShort(CreditsAmount amount) {
@@ -991,14 +1004,11 @@ PluralResult Plural(
 	const auto t = f;
 
 	const auto useNonDefaultPlural = (ChoosePlural != ChoosePluralDefault)
-		&& Lang::details::IsNonDefaultPlural(keyBase);
-	const auto shift = (useNonDefaultPlural ? ChoosePlural : ChoosePluralDefault)(
-		(integer ? i : -1),
-		i,
-		v,
-		w,
-		f,
-		t);
+		&& (keyBase == kPluralKeyBaseForCloudValue
+			|| Lang::details::IsNonDefaultPlural(keyBase));
+	const auto shift = (useNonDefaultPlural
+		? ChoosePlural
+		: ChoosePluralDefault)((integer ? i : -1), i, v, w, f, t);
 	if (integer) {
 		const auto round = qRound(value);
 		if (type == lt_count_short) {

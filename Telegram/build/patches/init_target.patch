@@ -1,8 +1,8 @@
 diff --git a/init_target.cmake b/init_target.cmake
-index 36c0c1f..25354be 100644
+index 3f330f4..a9aeb5a 100644
 --- a/init_target.cmake
 +++ b/init_target.cmake
-@@ -52,7 +52,8 @@ function(init_target target_name) # init_target(my_target [cxx_std_..] folder_na
+@@ -45,7 +45,8 @@ function(init_target target_name) # init_target(my_target [cxx_std_..] folder_na
      endif()
      if (DESKTOP_APP_SPECIAL_TARGET)
          if (MSVC)
@@ -11,4 +11,4 @@ index 36c0c1f..25354be 100644
 +            #set_property(TARGET ${target_name} APPEND_STRING PROPERTY STATIC_LIBRARY_OPTIONS "$<$<NOT:$<CONFIG:Debug>>:/LTCG>")
          elseif (APPLE)
              set_target_properties(${target_name} PROPERTIES
-                 XCODE_ATTRIBUTE_GCC_OPTIMIZATION_LEVEL $<IF:$<CONFIG:Debug>,0,fast>
+                 XCODE_ATTRIBUTE_LLVM_LTO $<IF:$<CONFIG:Debug>,NO,YES>

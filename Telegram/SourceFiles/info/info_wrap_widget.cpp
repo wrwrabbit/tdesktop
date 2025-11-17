@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_widget.h"
 #include "info/profile/info_profile_values.h"
 #include "info/media/info_media_widget.h"
+#include "info/stories/info_stories_widget.h"
 #include "info/info_content_widget.h"
 #include "info/info_controller.h"
 #include "info/info_memento.h"
@@ -65,8 +66,13 @@ const style::InfoTopBar &TopBarStyle(Wrap wrap) {
 [[nodiscard]] bool HasCustomTopBar(not_null<const Controller*> controller) {
 	const auto section = controller->section();
 	return (section.type() == Section::Type::BotStarRef)
+		|| (section.type() == Section::Type::Profile)
 		|| ((section.type() == Section::Type::Settings)
-			&& section.settingsType()->hasCustomTopBar());
+			&& section.settingsType()->hasCustomTopBar())
+		|| (section.type() == Section::Type::Stories
+			&& controller->key().storiesAlbumId() != Stories::ArchiveId()
+			&& controller->key().storiesPeer()
+			&& controller->key().storiesPeer()->isSelf());
 }
 
 [[nodiscard]] Fn<Ui::StringWithNumbers(int)> SelectedTitleForMedia(
@@ -286,11 +292,19 @@ Dialogs::RowDescriptor WrapWidget::activeChat() const {
 			peer->owner().history(peer),
 			FullMsgId());
 	} else if (const auto storiesPeer = key().storiesPeer()) {
-		return (key().storiesTab() == Stories::Tab::Saved)
-			? Dialogs::RowDescriptor(
+		return (key().storiesAlbumId() == Stories::ArchiveId())
+			? Dialogs::RowDescriptor()
+			: Dialogs::RowDescriptor(
 				storiesPeer->owner().history(storiesPeer),
-				FullMsgId())
-			: Dialogs::RowDescriptor();
+				FullMsgId());
+	} else if (const auto giftsPeer = key().giftsPeer()) {
+		return Dialogs::RowDescriptor(
+			giftsPeer->owner().history(giftsPeer),
+			FullMsgId());
+	} else if (const auto musicPeer = key().musicPeer()) {
+		return Dialogs::RowDescriptor(
+			musicPeer->owner().history(musicPeer),
+			FullMsgId());
 	} else if (key().settingsSelf()
 			|| key().isDownloads()
 			|| key().reactionsContextId()
@@ -312,7 +326,9 @@ void WrapWidget::forceContentRepaint() {
 }
 
 void WrapWidget::setupTop() {
-	if (HasCustomTopBar(_controller.get()) || wrap() == Wrap::Search) {
+	if (HasCustomTopBar(_controller.get())
+		|| wrap() == Wrap::Search
+		|| wrap() == Wrap::StoryAlbumEdit) {
 		_topBar.destroy();
 		return;
 	}
@@ -412,7 +428,7 @@ void WrapWidget::setupTopBarMenuToggle() {
 		}
 	} else if (key.storiesPeer()
 		&& key.storiesPeer()->isSelf()
-		&& key.storiesTab() == Stories::Tab::Saved) {
+		&& key.storiesAlbumId() != Stories::ArchiveId()) {
 		const auto &st = (wrap() == Wrap::Layer)
 			? st::infoLayerTopBarEdit
 			: st::infoTopBarEdit;
@@ -444,7 +460,7 @@ void WrapWidget::setupTopBarMenuToggle() {
 				addTopBarMenuButton();
 			}
 		}, _topBar->lifetime());
-	} else if (section.type() == Section::Type::PeerGifts && key.peer()) {
+	} else if (key.giftsPeer()) {
 		addTopBarMenuButton();
 	}
 }
@@ -655,8 +671,6 @@ void WrapWidget::finishShowContent() {
 			.subtitle = _content->subtitle(),
 		});
 		_topBar->setStories(_content->titleStories());
-		_topBar->setStoriesArchive(
-			_controller->key().storiesTab() == Stories::Tab::Archive);
 	}
 	_desiredHeights.fire(desiredHeightForContent());
 	_desiredShadowVisibilities.fire(_content->desiredShadowVisibility());
@@ -696,7 +710,13 @@ rpl::producer<int> WrapWidget::desiredHeightForContent() const {
 }
 
 rpl::producer<SelectedItems> WrapWidget::selectedListValue() const {
-	return _selectedLists.events() | rpl::flatten_latest();
+	auto current = _content
+		? _content->selectedListValue()
+		: nullptr;
+	return _selectedLists.events_starting_with(current
+		? std::move(current)
+		: rpl::single(SelectedItems(Storage::SharedMediaType::Photo))
+	) | rpl::flatten_latest();
 }
 
 object_ptr<ContentWidget> WrapWidget::createContent(
@@ -779,7 +799,6 @@ bool WrapWidget::showInternal(
 			&& (params.way == Window::SectionShow::Way::ClearStack);
 		if (_controller->validateMementoPeer(content)) {
 			if (!skipInternal && _content->showInternal(content)) {
-				highlightTopBar();
 				return true;
 			}
 		}
@@ -824,7 +843,7 @@ rpl::producer<int> WrapWidget::desiredHeightValue() const {
 
 QRect WrapWidget::contentGeometry() const {
 	const auto top = _topBar ? _topBar->height() : 0;
-	return rect().marginsRemoved({ 0, top, 0, 0 });
+	return rect().marginsRemoved({ 0, std::min(top, height()), 0, 0});
 }
 
 bool WrapWidget::returnToFirstStackFrame(
@@ -979,7 +998,7 @@ object_ptr<Ui::RpWidget> WrapWidget::createTopBarSurrogate(
 		Assert(_topBar != nullptr);
 
 		auto result = object_ptr<Ui::AbstractButton>(parent);
-		result->addClickHandler([weak = Ui::MakeWeak(this)]{
+		result->addClickHandler([weak = base::make_weak(this)]{
 			if (weak) {
 				weak->_controller->showBackFromStack();
 			}

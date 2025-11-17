@@ -89,9 +89,9 @@ void EditPeriodBox(
 	const auto take = TimePickerBox(box, values, phrases, days);
 
 	box->addButton(tr::lng_settings_save(), [=] {
-		const auto weak = Ui::MakeWeak(box);
+		const auto weak = base::make_weak(box);
 		save(take());
-		if (const auto strong = weak.data()) {
+		if (const auto strong = weak.get()) {
 			strong->closeBox();
 		}
 	});
@@ -177,7 +177,7 @@ void Greeting::setupContent(
 			object_ptr<Ui::BoxContentDivider>(
 				content,
 				st::boxDividerHeight,
-				st::boxDividerBg,
+				st::defaultDividerBar,
 				RectPart::Top))
 	)->setDuration(0)->toggleOn(enabled->toggledValue() | rpl::map(!_1));
 	content->add(
@@ -256,6 +256,7 @@ void Greeting::setupContent(
 		inner,
 		tr::lng_greeting_period_about(),
 		st::settingsChatbotsBottomTextMargin,
+		st::defaultDividerLabel,
 		RectPart::Top);
 
 	wrap->toggleOn(enabled->toggledValue());

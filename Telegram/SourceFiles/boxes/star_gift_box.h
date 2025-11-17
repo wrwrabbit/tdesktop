@@ -9,6 +9,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "data/data_star_gift.h"
 
+namespace Api {
+class PremiumGiftCodeOptions;
+} // namespace Api
+
 namespace ChatHelpers {
 class Show;
 } // namespace ChatHelpers
@@ -18,9 +22,15 @@ struct UniqueGift;
 struct GiftCode;
 struct CreditsHistoryEntry;
 class SavedStarGiftId;
+struct GiftAuctionState;
 } // namespace Data
 
+namespace Info::PeerGifts {
+struct GiftDescriptor;
+} // namespace Info::PeerGifts
+
 namespace Main {
+class Session;
 class SessionShow;
 } // namespace Main
 
@@ -43,6 +53,7 @@ class CustomEmoji;
 
 namespace Ui {
 
+class RpWidget;
 class PopupMenu;
 class GenericBox;
 class VerticalLayout;
@@ -58,7 +69,7 @@ void AddUniqueGiftCover(
 	not_null<VerticalLayout*> container,
 	rpl::producer<Data::UniqueGift> data,
 	rpl::producer<QString> subtitleOverride = nullptr,
-	rpl::producer<int> resalePrice = nullptr,
+	rpl::producer<CreditsAmount> resalePrice = nullptr,
 	Fn<void()> resaleClick = nullptr);
 void AddWearGiftCover(
 	not_null<VerticalLayout*> container,
@@ -71,11 +82,13 @@ void ShowUniqueGiftWearBox(
 	const Data::UniqueGift &gift,
 	Settings::GiftWearBoxStyleOverride st);
 
+void PreloadUniqueGiftResellPrices(not_null<Main::Session*> session);
+
 void UpdateGiftSellPrice(
 	std::shared_ptr<ChatHelpers::Show> show,
 	std::shared_ptr<Data::UniqueGift> unique,
 	Data::SavedStarGiftId savedId,
-	int price);
+	CreditsAmount price);
 void ShowUniqueGiftSellBox(
 	std::shared_ptr<ChatHelpers::Show> show,
 	std::shared_ptr<Data::UniqueGift> unique,
@@ -84,29 +97,13 @@ void ShowUniqueGiftSellBox(
 
 void GiftReleasedByHandler(not_null<PeerData*> peer);
 
-struct PatternPoint {
-	QPointF position;
-	float64 scale = 1.;
-	float64 opacity = 1.;
-};
-[[nodiscard]] const std::vector<PatternPoint> &PatternPoints();
-[[nodiscard]] const std::vector<PatternPoint> &PatternPointsSmall();
-
-void PaintPoints(
-	QPainter &p,
-	const std::vector<PatternPoint> &points,
-	base::flat_map<float64, QImage> &cache,
-	not_null<Text::CustomEmoji*> emoji,
-	const Data::UniqueGift &gift,
-	const QRect &rect,
-	float64 shown = 1.);
-
 struct StarGiftUpgradeArgs {
 	not_null<Window::SessionController*> controller;
 	base::required<uint64> stargiftId;
 	Fn<void(bool)> ready;
 	not_null<PeerData*> peer;
 	Data::SavedStarGiftId savedId;
+	QString giftPrepayUpgradeHash;
 	int cost = 0;
 	bool canAddSender = false;
 	bool canAddComment = false;
@@ -126,12 +123,18 @@ void SubmitStarsForm(
 	uint64 formId,
 	uint64 price,
 	Fn<void(Payments::CheckoutResult, const MTPUpdates *)> done);
-void RequestStarsForm(
+void SubmitTonForm(
+	std::shared_ptr<Main::SessionShow> show,
+	MTPInputInvoice invoice,
+	uint64 formId,
+	CreditsAmount ton,
+	Fn<void(Payments::CheckoutResult, const MTPUpdates *)> done);
+void RequestOurForm(
 	std::shared_ptr<Main::SessionShow> show,
 	MTPInputInvoice invoice,
 	Fn<void(
 		uint64 formId,
-		uint64 price,
+		CreditsAmount price,
 		std::optional<Payments::CheckoutResult> failure)> done);
 void RequestStarsFormAndSubmit(
 	std::shared_ptr<Main::SessionShow> show,
@@ -143,9 +146,29 @@ void ShowGiftTransferredToast(
 	not_null<PeerData*> to,
 	const Data::UniqueGift &gift);
 
-void ShowResaleGiftBoughtToast(
-	std::shared_ptr<Main::SessionShow> show,
-	not_null<PeerData*> to,
-	const Data::UniqueGift &gift);
+[[nodiscard]] CreditsAmount StarsFromTon(
+	not_null<Main::Session*> session,
+	CreditsAmount ton);
+[[nodiscard]] CreditsAmount TonFromStars(
+	not_null<Main::Session*> session,
+	CreditsAmount stars);
+
+struct GiftsDescriptor {
+	std::vector<Info::PeerGifts::GiftDescriptor> list;
+	std::shared_ptr<Api::PremiumGiftCodeOptions> api;
+};
+[[nodiscard]] object_ptr<RpWidget> MakeGiftsSendList(
+	not_null<Window::SessionController*> window,
+	not_null<PeerData*> peer,
+	rpl::producer<GiftsDescriptor> gifts,
+	Fn<void()> loadMore);
+
+void SendGiftBox(
+	not_null<GenericBox*> box,
+	not_null<Window::SessionController*> window,
+	not_null<PeerData*> peer,
+	std::shared_ptr<Api::PremiumGiftCodeOptions> api,
+	const Info::PeerGifts::GiftDescriptor &descriptor,
+	rpl::producer<Data::GiftAuctionState> auctionState);
 
 } // namespace Ui

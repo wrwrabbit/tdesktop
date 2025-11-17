@@ -77,13 +77,16 @@ object_ptr<Ui::GenericBox> ScreenSharingPrivacyRequestBox() {
 #endif // Q_OS_MAC
 }
 
-object_ptr<Ui::RpWidget> MakeJoinCallLogo(not_null<QWidget*> parent) {
-	const auto logoSize = st::confcallJoinLogo.size();
-	const auto logoOuter = logoSize.grownBy(st::confcallJoinLogoPadding);
+object_ptr<Ui::RpWidget> MakeRoundActiveLogo(
+		not_null<QWidget*> parent,
+		const style::icon &icon,
+		const style::margins &padding) {
+	const auto logoSize = icon.size();
+	const auto logoOuter = logoSize.grownBy(padding);
 	auto result = object_ptr<Ui::RpWidget>(parent);
 	const auto logo = result.data();
 	logo->resize(logo->width(), logoOuter.height());
-	logo->paintRequest() | rpl::start_with_next([=] {
+	logo->paintRequest() | rpl::start_with_next([=, &icon] {
 		if (logo->width() < logoOuter.width()) {
 			return;
 		}
@@ -94,9 +97,16 @@ object_ptr<Ui::RpWidget> MakeJoinCallLogo(not_null<QWidget*> parent) {
 		p.setBrush(st::windowBgActive);
 		p.setPen(Qt::NoPen);
 		p.drawEllipse(outer);
-		st::confcallJoinLogo.paintInCenter(p, outer);
+		icon.paintInCenter(p, outer);
 	}, logo->lifetime());
 	return result;
+}
+
+object_ptr<Ui::RpWidget> MakeJoinCallLogo(not_null<QWidget*> parent) {
+	return MakeRoundActiveLogo(
+		parent,
+		st::confcallJoinLogo,
+		st::confcallJoinLogoPadding);
 }
 
 void ConferenceCallJoinConfirm(
@@ -116,13 +126,12 @@ void ConferenceCallJoinConfirm(
 		st::boxRowPadding + st::confcallLinkHeaderIconPadding);
 
 	box->addRow(
-		object_ptr<Ui::CenterWrap<Ui::FlatLabel>>(
+		object_ptr<Ui::FlatLabel>(
 			box,
-			object_ptr<Ui::FlatLabel>(
-				box,
-				tr::lng_confcall_join_title(),
-				st::boxTitle)),
-		st::boxRowPadding + st::confcallLinkTitlePadding);
+			tr::lng_confcall_join_title(),
+			st::boxTitle),
+		st::boxRowPadding + st::confcallLinkTitlePadding,
+		style::al_top);
 	const auto wrapName = [&](not_null<PeerData*> peer) {
 		return rpl::single(Ui::Text::Bold(peer->shortName()));
 	};
@@ -136,7 +145,8 @@ void ConferenceCallJoinConfirm(
 					Ui::Text::RichLangValue)
 				: tr::lng_confcall_join_text(Ui::Text::RichLangValue)),
 			st::confcallLinkCenteredText),
-		st::boxRowPadding
+		st::boxRowPadding,
+		style::al_top
 	)->setTryMakeSimilarLines(true);
 
 	const auto &participants = call->participants();
@@ -209,12 +219,13 @@ void ConferenceCallJoinConfirm(
 				box,
 				std::move(text),
 				st::confcallLinkCenteredText),
-			st::boxRowPadding
+			st::boxRowPadding,
+			style::al_top
 		)->setTryMakeSimilarLines(true);
 	}
 	const auto joinAndClose = [=] {
-		join([weak = Ui::MakeWeak(box)] {
-			if (const auto strong = weak.data()) {
+		join([weak = base::make_weak(box)] {
+			if (const auto strong = weak.get()) {
 				strong->closeBox();
 			}
 		});
@@ -275,16 +286,18 @@ void ShowConferenceCallLinkBox(
 				}
 				state->resetting = true;
 				using Flag = MTPphone_ToggleGroupCallSettings::Flag;
-				const auto weak = Ui::MakeWeak(box);
+				const auto weak = base::make_weak(box);
 				call->session().api().request(
 					MTPphone_ToggleGroupCallSettings(
 						MTP_flags(Flag::f_reset_invite_hash),
 						call->input(),
-						MTPbool()) // join_muted
+						MTPBool(), // join_muted
+						MTPBool(), // messages_enabled
+						MTPlong()) // send_paid_messages_stars
 				).done([=](const MTPUpdates &result) {
 					call->session().api().applyUpdates(result);
 					ShowConferenceCallLinkBox(show, call, args);
-					if (const auto strong = weak.data()) {
+					if (const auto strong = weak.get()) {
 						strong->closeBox();
 					}
 					show->showToast({
@@ -321,13 +334,12 @@ void ShowConferenceCallLinkBox(
 			Info::BotStarRef::CreateLinkHeaderIcon(box, &call->session()),
 			st::boxRowPadding + st::confcallLinkHeaderIconPadding);
 		box->addRow(
-			object_ptr<Ui::CenterWrap<Ui::FlatLabel>>(
+			object_ptr<Ui::FlatLabel>(
 				box,
-				object_ptr<Ui::FlatLabel>(
-					box,
-					tr::lng_confcall_link_title(),
-					st.box ? st.box->title : st::boxTitle)),
-			st::boxRowPadding + st::confcallLinkTitlePadding);
+				tr::lng_confcall_link_title(),
+				st.box ? st.box->title : st::boxTitle),
+			st::boxRowPadding + st::confcallLinkTitlePadding,
+			style::al_top);
 		box->addRow(
 			object_ptr<Ui::FlatLabel>(
 				box,
@@ -335,7 +347,8 @@ void ShowConferenceCallLinkBox(
 				(st.centerLabel
 					? *st.centerLabel
 					: st::confcallLinkCenteredText)),
-			st::boxRowPadding
+			st::boxRowPadding,
+			style::al_top
 		)->setTryMakeSimilarLines(true);
 
 		Ui::AddSkip(box->verticalLayout(), st::defaultVerticalListSkip * 2);

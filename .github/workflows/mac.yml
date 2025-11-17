@@ -27,7 +27,7 @@ jobs:
 
   macos:
     name: MacOS
-    runs-on: macos-13
+    runs-on: macos-15-intel
     if: github.repository != 'cpartisans/tdesktop'
 
     strategy:
@@ -45,7 +45,7 @@ jobs:
         run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
 
       - name: Clone.
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
           path: ${{ env.REPO_NAME }}
@@ -61,7 +61,7 @@ jobs:
           # Disable spotlight.
           sudo mdutil -a -i off
 
-          sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
       - name: ThirdParty cache.
         id: cache-third-party
@@ -115,7 +115,7 @@ jobs:
           mkdir artifact
           mv Telegram.app artifact/
           mv Updater artifact/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.
         with:

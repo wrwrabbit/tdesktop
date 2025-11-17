@@ -91,6 +91,10 @@ public:
 		not_null<Main::Account*> account,
 		const Layout &layout);
 
+	QAccessible::Role accessibilityRole() override {
+		return QAccessible::Role::StatusBar;
+	}
+
 	void refreshRetryLink(bool hasRetry);
 	void setLayout(const Layout &layout);
 	void setProgressVisibility(bool visible);
@@ -206,6 +210,7 @@ void ConnectionState::Widget::ProxyIcon::paintEvent(QPaintEvent *e) {
 bool ConnectionState::State::operator==(const State &other) const {
 	return (type == other.type)
 		&& (useProxy == other.useProxy)
+		&& (exposed == other.exposed)
 		&& (underCursor == other.underCursor)
 		&& (updateReady == other.updateReady)
 		&& (waitTillRetry == other.waitTillRetry);
@@ -618,6 +623,7 @@ void ConnectionState::Widget::setLayout(const Layout &layout) {
 	_currentLayout = layout;
 	_proxyIcon->setToggled(_currentLayout.proxyEnabled);
 	refreshRetryLink(_currentLayout.hasRetry);
+	setAccessibleName(_currentLayout.text);
 }
 
 void ConnectionState::Widget::setProgressVisibility(bool visible) {

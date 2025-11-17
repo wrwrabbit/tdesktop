@@ -87,6 +87,7 @@ enum class ChannelDataFlag : uint64 {
 	ForumTabs = (1ULL << 42),
 	HasStarsPerMessage = (1ULL << 43),
 	StarsPerMessageKnown = (1ULL << 44),
+	HasActiveVideoStream = (1ULL << 45),
 
 	// shift values!
 	PTG_Verified = (1ull << 60),
@@ -558,6 +559,7 @@ public:
 
 	[[nodiscard]] bool hasActiveStories() const;
 	[[nodiscard]] bool hasUnreadStories() const;
+	[[nodiscard]] bool hasActiveVideoStream() const;
 	void setStoriesState(StoriesState state);
 
 	[[nodiscard]] Data::Forum *forum() const {
@@ -566,8 +568,6 @@ public:
 	[[nodiscard]] Data::SavedMessages *monoforum() const {
 		return mgInfo ? mgInfo->monoforum() : nullptr;
 	}
-
-	void processTopics(const MTPVector<MTPForumTopic> &topics);
 
 	[[nodiscard]] int levelHint() const;
 	void updateLevelHint(int levelHint);

@@ -27,6 +27,7 @@ set(style_files
     info/info.style
     info/channel_statistics/boosts/giveaway/giveaway.style
     info/channel_statistics/earn/channel_earn.style
+    info/profile/info_levels.style
     info/userpic/info_userpic_builder.style
     intro/intro.style
     iv/iv.style
@@ -65,6 +66,8 @@ PRIVATE
     calls/group/ui/calls_group_recording_box.h
     calls/group/ui/calls_group_scheduled_labels.cpp
     calls/group/ui/calls_group_scheduled_labels.h
+    calls/group/ui/calls_group_stars_coloring.cpp
+    calls/group/ui/calls_group_stars_coloring.h
     calls/group/ui/desktop_capture_choose_source.cpp
     calls/group/ui/desktop_capture_choose_source.h
     calls/ui/calls_device_menu.cpp
@@ -87,11 +90,13 @@ PRIVATE
 
     data/raw/raw_countries_bounds.cpp
     data/raw/raw_countries_bounds.h
+    data/data_authorization.h
     data/data_birthday.cpp
     data/data_birthday.h
     data/data_channel_earn.h
     data/data_credits.h
     data/data_credits_earn.h
+    data/data_peer_colors.h
     data/data_premium_subscription_option.h
     data/data_statistics_chart.cpp
     data/data_statistics_chart.h
@@ -109,6 +114,8 @@ PRIVATE
     dialogs/ui/dialogs_stories_list.h
     dialogs/ui/dialogs_top_bar_suggestion_content.cpp
     dialogs/ui/dialogs_top_bar_suggestion_content.h
+    dialogs/ui/posts_search_intro.cpp
+    dialogs/ui/posts_search_intro.h
     dialogs/ui/top_peers_strip.cpp
     dialogs/ui/top_peers_strip.h
 
@@ -140,8 +147,17 @@ PRIVATE
     history/view/controls/history_view_voice_record_button.cpp
     history/view/controls/history_view_voice_record_button.h
 
+    info/info_flexible_scroll.cpp
+    info/info_flexible_scroll.h
+
     info/profile/info_profile_icon.cpp
     info/profile/info_profile_icon.h
+    info/profile/info_profile_music_button.cpp
+    info/profile/info_profile_music_button.h
+    info/profile/info_profile_text.cpp
+    info/profile/info_profile_text.h
+    info/profile/info_profile_top_bar_action_button.cpp
+    info/profile/info_profile_top_bar_action_button.h
     info/userpic/info_userpic_bubble_wrap.cpp
     info/userpic/info_userpic_bubble_wrap.h
     info/userpic/info_userpic_color_circle_button.cpp
@@ -193,6 +209,8 @@ PRIVATE
     menu/gift_resale_filter.h
     menu/menu_check_item.cpp
     menu/menu_check_item.h
+    menu/menu_item_rate_transcribe.cpp
+    menu/menu_item_rate_transcribe.h
     menu/menu_ttl.cpp
     menu/menu_ttl.h
 
@@ -361,6 +379,8 @@ PRIVATE
     ui/chat/pinned_bar.h
     ui/chat/requests_bar.cpp
     ui/chat/requests_bar.h
+    ui/controls/button_labels.cpp
+    ui/controls/button_labels.h
     ui/controls/call_mute_button.cpp
     ui/controls/call_mute_button.h
     ui/controls/chat_service_checkbox.cpp
@@ -371,6 +391,8 @@ PRIVATE
     ui/controls/download_bar.h
     ui/controls/emoji_button.cpp
     ui/controls/emoji_button.h
+    ui/controls/feature_list.cpp
+    ui/controls/feature_list.h
     ui/controls/filter_link_header.cpp
     ui/controls/filter_link_header.h
     ui/controls/jump_down_button.cpp
@@ -388,8 +410,14 @@ PRIVATE
     ui/controls/send_as_button.h
     ui/controls/send_button.cpp
     ui/controls/send_button.h
+    ui/controls/stars_rating.cpp
+    ui/controls/stars_rating.h
     ui/controls/subsection_tabs_slider.cpp
     ui/controls/subsection_tabs_slider.h
+    ui/controls/subsection_tabs_slider_reorder.cpp
+    ui/controls/subsection_tabs_slider_reorder.h
+    ui/controls/sub_tabs.cpp
+    ui/controls/sub_tabs.h
     ui/controls/swipe_handler.cpp
     ui/controls/swipe_handler.h
     ui/controls/swipe_handler_data.h
@@ -408,6 +436,8 @@ PRIVATE
     ui/effects/glare.h
     ui/effects/loading_element.cpp
     ui/effects/loading_element.h
+    ui/effects/ministar_particles.cpp
+    ui/effects/ministar_particles.h
     ui/effects/outline_segments.cpp
     ui/effects/outline_segments.h
     ui/effects/premium_bubble.cpp
@@ -436,6 +466,8 @@ PRIVATE
     ui/text/format_song_name.h
     ui/text/format_values.cpp
     ui/text/format_values.h
+    ui/text/text_lottie_custom_emoji.cpp
+    ui/text/text_lottie_custom_emoji.h
     ui/text/text_options.cpp
     ui/text/text_options.h
 
@@ -456,6 +488,8 @@ PRIVATE
     ui/widgets/discrete_sliders.h
     ui/widgets/gradient_round_button.cpp
     ui/widgets/gradient_round_button.h
+    ui/widgets/horizontal_fit_container.cpp
+    ui/widgets/horizontal_fit_container.h
     ui/widgets/level_meter.cpp
     ui/widgets/level_meter.h
     ui/widgets/multi_select.cpp
@@ -480,12 +514,16 @@ PRIVATE
     ui/grouped_layout.h
     ui/new_badges.cpp
     ui/new_badges.h
+    ui/peer/color_sample.cpp
+    ui/peer/color_sample.h
     ui/power_saving.cpp
     ui/power_saving.h
     ui/vertical_list.cpp
     ui/vertical_list.h
     ui/unread_badge_paint.cpp
     ui/unread_badge_paint.h
+    ui/unread_counter_format.cpp
+    ui/unread_counter_format.h
     ui/userpic_view.cpp
     ui/userpic_view.h
     ui/webview_helpers.cpp

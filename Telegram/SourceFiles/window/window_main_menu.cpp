@@ -751,7 +751,7 @@ void MainMenu::setupMenu() {
 				tr::lng_theme_editor_cant_change_theme()));
 			return;
 		}
-		const auto weak = MakeWeak(this);
+		const auto weak = base::make_weak(this);
 		const auto toggle = [=] {
 			if (!weak) {
 				Window::Theme::ToggleNightMode();
@@ -918,8 +918,8 @@ OthersUnreadState OtherAccountsUnreadStateCurrent(
 		} else if (account->isHiddenMode()) {
 			continue;
 		} else if (const auto session = account->maybeSession()) {
-			counter += session->data().unreadBadge();
-			if (!session->data().unreadBadgeMuted()) {
+			counter += session->data().unreadWithMentionsBadge();
+			if (!session->data().unreadWithMentionsBadgeMuted()) {
 				allMuted = false;
 			}
 		}
@@ -943,7 +943,7 @@ base::EventFilterResult MainMenu::redirectToInnerChecked(not_null<QEvent*> e) {
 	if (_insideEventRedirect) {
 		return base::EventFilterResult::Continue;
 	}
-	const auto weak = Ui::MakeWeak(this);
+	const auto weak = base::make_weak(this);
 	_insideEventRedirect = true;
 	QGuiApplication::sendEvent(_inner, e);
 	if (weak) {

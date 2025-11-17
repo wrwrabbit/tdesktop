@@ -78,8 +78,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_values.h"
 #include "storage/storage_domain.h"
 #include "styles/style_chat.h"
-#include "ui/boxes/confirm_box.h"
+#include "styles/style_window.h" // columnMaximalWidthLeft
 
+#include "ui/boxes/confirm_box.h"
 #include "fakepasscode/settings.h"
 
 #include <QtWidgets/QApplication>
@@ -100,8 +101,6 @@ constexpr auto kClearUserpicsAfter = 50;
 }
 
 } // namespace
-
-const crl::time ListWidget::kItemRevealDuration = crl::time(150);
 
 WindowListDelegate::WindowListDelegate(
 	not_null<Window::SessionController*> window)
@@ -741,12 +740,21 @@ std::optional<int> ListWidget::scrollTopForView(
 	const auto heightLeft = (available - height);
 	if (heightLeft >= 0) {
 		return std::max(top - (heightLeft / 2), 0);
-	} else if (const auto sel = _highlighter.state(view->data()).range
-		; !sel.empty() && !IsSubGroupSelection(sel)) {
+	} else if (const auto highlight = _highlighter.state(view->data())
+		; (!highlight.range.empty() || highlight.todoItemId)
+		&& !IsSubGroupSelection(highlight.range)) {
+		const auto sel = highlight.range;
 		const auto single = st::messageTextStyle.font->height;
-		const auto begin = HistoryView::FindViewY(view, sel.from) - single;
-		const auto end = HistoryView::FindViewY(view, sel.to, begin + single)
-			+ 2 * single;
+		const auto todoy = sel.empty()
+			? HistoryView::FindViewTaskY(view, highlight.todoItemId)
+			: 0;
+		const auto begin = sel.empty()
+			? (todoy - 4 * single)
+			: HistoryView::FindViewY(view, sel.from) - single;
+		const auto end = sel.empty()
+			? (todoy + 4 * single)
+			: (HistoryView::FindViewY(view, sel.to, begin + single)
+				+ 2 * single);
 		auto result = top;
 		if (end > available) {
 			result = std::max(result, top + end - available);
@@ -843,10 +851,9 @@ bool ListWidget::isBelowPosition(Data::MessagePosition position) const {
 
 void ListWidget::highlightMessage(
 		FullMsgId itemId,
-		const TextWithEntities &part,
-		int partOffsetHint) {
+		const MessageHighlightId &highlight) {
 	if (const auto view = viewForItem(itemId)) {
-		_highlighter.highlight({ view->data(), part, partOffsetHint });
+		_highlighter.highlight({ view->data(), highlight });
 	}
 }
 
@@ -924,11 +931,8 @@ bool ListWidget::showAtPositionNow(
 	}
 	if (position != Data::MaxMessagePosition
 		&& position != Data::UnreadMessagePosition) {
-		const auto hasHighlight = !params.highlightPart.empty();
-		highlightMessage(
-			position.fullId,
-			params.highlightPart,
-			params.highlightPartOffsetHint);
+		const auto hasHighlight = !params.highlight.empty();
+		highlightMessage(position.fullId, params.highlight);
 		if (hasHighlight) {
 			// We may want to scroll to a different part of the message.
 			scrollTop = scrollTopForPosition(position);
@@ -2013,7 +2017,7 @@ void ListWidget::updateSize() {
 
 void ListWidget::resizeToWidth(int newWidth, int minHeight) {
 	_minHeight = minHeight;
-	TWidget::resizeToWidth(newWidth);
+	RpWidget::resizeToWidth(newWidth);
 	restoreScrollPosition();
 }
 
@@ -2029,8 +2033,8 @@ void ListWidget::startItemRevealAnimations() {
 					[=] { revealItemsCallback(); },
 					0.,
 					1.,
-					kItemRevealDuration,
-					anim::easeOutCirc);
+					st::itemRevealDuration,
+					anim::easeOutQuint);
 				if (view->data()->out()) {
 					_delegate->listChatTheme()->rotateComplexGradientBackground();
 				}
@@ -2041,6 +2045,11 @@ void ListWidget::startItemRevealAnimations() {
 
 void ListWidget::startMessageSendingAnimation(
 		not_null<HistoryItem*> item) {
+	if (elementChatMode() == HistoryView::ElementChatMode::Default
+		&& width() > st::columnMaximalWidthLeft
+		&& !item->media()) {
+		return;
+	}
 	const auto sendingAnimation = _delegate->listSendingAnimation();
 	if (!sendingAnimation || !sendingAnimation->checkExpectedType(item)) {
 		return;
@@ -3165,7 +3174,7 @@ void ListWidget::touchEvent(QTouchEvent *e) {
 			return;
 		}
 		_touchInProgress = false;
-		auto weak = Ui::MakeWeak(this);
+		auto weak = base::make_weak(this);
 		const auto notMoved = (_touchPos - _touchStart).manhattanLength()
 			< QApplication::startDragDistance();
 		if (_touchSelect) {
@@ -3247,7 +3256,7 @@ rpl::producer<bool> ListWidget::touchMaybeSelectingValue() const {
 void ListWidget::enterEventHook(QEnterEvent *e) {
 	_mouseActive = true;
 	mouseActionUpdate(QCursor::pos());
-	return TWidget::enterEventHook(e);
+	return RpWidget::enterEventHook(e);
 }
 
 void ListWidget::leaveEventHook(QEvent *e) {
@@ -3267,7 +3276,7 @@ void ListWidget::leaveEventHook(QEvent *e) {
 		setCursor(_cursor);
 	}
 	_mouseActive = false;
-	return TWidget::leaveEventHook(e);
+	return RpWidget::leaveEventHook(e);
 }
 
 void ListWidget::updateDragSelection() {
@@ -3667,10 +3676,8 @@ void ListWidget::mouseActionFinish(
 ClickHandlerContext ListWidget::prepareClickHandlerContext(FullMsgId id) {
 	return {
 		.itemId = id,
-		.elementDelegate = [weak = Ui::MakeWeak(this)] {
-			return weak
-				? (ElementDelegate*)weak
-				: nullptr;
+		.elementDelegate = [weak = base::make_weak(this)] {
+			return (ElementDelegate*)weak.get();
 		},
 		.sessionWindow = base::make_weak(controller()),
 	};
@@ -4389,9 +4396,9 @@ void ConfirmForwardSelectedItems(not_null<ListWidget*> widget) {
 		}
 	}
 	auto ids = widget->getSelectedIds();
-	const auto weak = Ui::MakeWeak(widget);
+	const auto weak = base::make_weak(widget);
 	Window::ShowForwardMessagesBox(widget->controller(), std::move(ids), [=] {
-		if (const auto strong = weak.data()) {
+		if (const auto strong = weak.get()) {
 			strong->cancelSelection();
 		}
 	});
@@ -4420,8 +4427,8 @@ void ConfirmSendNowSelectedItems(not_null<ListWidget*> widget) {
 	if (!history) {
 		return;
 	}
-	const auto clearSelection = [weak = Ui::MakeWeak(widget)] {
-		if (const auto strong = weak.data()) {
+	const auto clearSelection = [weak = base::make_weak(widget)] {
+		if (const auto strong = weak.get()) {
 			strong->cancelSelection();
 		}
 	};

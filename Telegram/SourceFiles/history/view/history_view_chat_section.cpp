@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_pinned_section.h"
 #include "history/view/history_view_translate_bar.h"
 #include "history/view/history_view_translate_tracker.h"
+#include "history/view/history_view_self_forwards_tagger.h"
 #include "history/history.h"
 #include "history/history_drag_area.h"
 #include "history/history_item_components.h"
@@ -36,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/format_values.h"
 #include "ui/text/text_utilities.h"
 #include "ui/effects/message_sending_animation_controller.h"
+#include "ui/rect.h"
 #include "ui/ui_utility.h"
 #include "base/timer_rpl.h"
 #include "api/api_bot.h"
@@ -43,6 +45,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_sending.h"
 #include "apiwrap.h"
 #include "ui/boxes/confirm_box.h"
+#include "chat_helpers/message_field.h"
 #include "chat_helpers/tabbed_selector.h"
 #include "boxes/delete_messages_box.h"
 #include "boxes/send_files_box.h"
@@ -123,12 +126,10 @@ rpl::producer<Ui::MessageBarContent> RootViewContent(
 ChatMemento::ChatMemento(
 	ChatViewId id,
 	MsgId highlightId,
-	const TextWithEntities &highlightPart,
-	int highlightPartOffsetHint)
+	MessageHighlightId highlight)
 : _id(id)
-, _highlightPart(highlightPart)
-, _highlightPartOffsetHint(highlightPartOffsetHint)
-, _highlightId(highlightId) {
+, _highlightId(highlightId)
+, _highlight(std::move(highlight)) {
 	if (highlightId || _id.sublist) {
 		_list.setAroundPosition({
 			.fullId = FullMsgId(_id.history->peer->id, highlightId),
@@ -444,6 +445,13 @@ ChatWidget::ChatWidget(
 		}, lifetime());
 	}
 
+	_selfForwardsTagger = std::make_unique<HistoryView::SelfForwardsTagger>(
+		controller,
+		this,
+		[=] { return _inner.data(); },
+		_scroll.get(),
+		[=] { return _history; });
+
 	setupTopicViewer();
 	setupComposeControls();
 	setupSwipeReplyAndBack();
@@ -462,7 +470,7 @@ ChatWidget::~ChatWidget() {
 	if (_repliesRootId) {
 		controller()->sendingAnimation().clear();
 	}
-	if (_subsectionTabs) {
+	if (_subsectionTabs && !_subsectionTabs->dying()) {
 		_subsectionTabsLifetime.destroy();
 		controller()->saveSubsectionTabs(base::take(_subsectionTabs));
 	}
@@ -816,6 +824,11 @@ void ChatWidget::setupComposeControls() {
 		send(options);
 	}, lifetime());
 
+	_composeControls->scrollToMaxRequests(
+	) | rpl::start_with_next([=] {
+		listScrollTo(_scroll->scrollTopMax());
+	}, lifetime());
+
 	_composeControls->sendVoiceRequests(
 	) | rpl::start_with_next([=](const ComposeControls::VoiceToSend &data) {
 		sendVoice(data);
@@ -880,12 +893,7 @@ void ChatWidget::setupComposeControls() {
 	_composeControls->jumpToItemRequests(
 	) | rpl::start_with_next([=](FullReplyTo to) {
 		if (const auto item = session().data().message(to.messageId)) {
-			JumpToMessageClickHandler(
-				item,
-				{},
-				to.quote,
-				to.quoteOffset
-			)->onClick({});
+			JumpToMessageClickHandler(item, {}, to.highlight())->onClick({});
 		}
 	}, lifetime());
 
@@ -1043,8 +1051,9 @@ void ChatWidget::setupSwipeReplyAndBack() {
 				: still)->fullId();
 			_inner->replyToMessageRequestNotify({
 				.messageId = replyToItemId,
-				.quote = selected.text,
-				.quoteOffset = selected.offset,
+				.quote = selected.highlight.quote,
+				.quoteOffset = selected.highlight.quoteOffset,
+				.todoItemId = selected.highlight.todoItemId,
 			});
 		};
 		return result;
@@ -1450,13 +1459,31 @@ void ChatWidget::send(Api::SendOptions options) {
 			return;
 		}
 	}
+	const auto nextLocalMessageId = session().data().nextLocalMessageId();
+
+	// TODO: Create a lambda with next sendMessage
+	if (const auto field = _composeControls->fieldForMention(); field
+		&& HasSendText(field)
+		&& message.webPage.url.isEmpty()
+		&& (field->document()->size().height() <= field->height())) {
+		controller()->sendingAnimation().appendSending({
+			.type = Ui::MessageSendingAnimationFrom::Type::Text,
+			.localId = nextLocalMessageId,
+			.globalStartGeometry = field->mapToGlobal(
+				Rect(field->size())),
+		});
+	}
+
 	if (!PTG::DASettings::isPostCommentCheckEnabled()) {
-		session().api().sendMessage(std::move(message));
+		session().api().sendMessage(std::move(message), nextLocalMessageId);
 	}
 	else {
 		controller()->show(Ui::MakeConfirmBox({
 				.text = tr::lng_allow_dangerous_action(),
-				.confirmed = [&, message=message](Fn<void()>&& close) mutable { session().api().sendMessage(std::move(message)); close(); },
+				.confirmed = [&, message=message](Fn<void()>&& close) mutable { 
+					session().api().sendMessage(std::move(message), nextLocalMessageId);
+					close(); 
+				},
 				.confirmText = tr::lng_allow_dangerous_action_confirm(),
 			}), Ui::LayerOption::CloseOther);
 	}
@@ -1615,7 +1642,7 @@ void ChatWidget::validateSubsectionTabs() {
 }
 
 void ChatWidget::refreshJoinGroupButton() {
-	if (!_repliesRootId) {
+	if (!_repliesRootId || !_peer->isChannel()) {
 		return;
 	}
 	const auto set = [&](std::unique_ptr<Ui::FlatButton> button) {
@@ -2346,9 +2373,9 @@ bool ChatWidget::preventsClose(Fn<void()> &&continueCallback) const {
 	} else if (!_newTopicDiscarded
 		&& _topic
 		&& _topic->creating()) {
-		const auto weak = Ui::MakeWeak(this);
+		const auto weak = base::make_weak(this);
 		auto sure = [=](Fn<void()> &&close) {
-			if (const auto strong = weak.data()) {
+			if (const auto strong = weak.get()) {
 				strong->_newTopicDiscarded = true;
 			}
 			close();
@@ -2633,7 +2660,7 @@ void ChatWidget::subscribeToSublist() {
 void ChatWidget::unreadCountUpdated() {
 	if (_sublist && _sublist->unreadMark()) {
 		crl::on_main(this, [=] {
-			const auto guard = Ui::MakeWeak(this);
+			const auto guard = base::make_weak(this);
 			controller()->showPeerHistory(_sublist->owningHistory());
 			if (guard) {
 				closeCurrent();
@@ -2664,8 +2691,7 @@ void ChatWidget::restoreState(not_null<ChatMemento*> memento) {
 		auto params = Window::SectionShow(
 			Window::SectionShow::Way::Forward,
 			anim::type::instant);
-		params.highlightPart = memento->highlightPart();
-		params.highlightPartOffsetHint = memento->highlightPartOffsetHint();
+		params.highlight = memento->highlight();
 		showAtPosition(Data::MessagePosition{
 			.fullId = FullMsgId(_peer->id, highlight),
 			.date = TimeId(0),
@@ -3468,8 +3494,7 @@ bool ChatWidget::searchInChatEmbedded(
 		const auto item = activation.item;
 		auto params = ::Window::SectionShow(
 			::Window::SectionShow::Way::ClearStack);
-		params.highlightPart = { activation.query };
-		params.highlightPartOffsetHint = kSearchQueryOffsetHint;
+		params.highlight = Window::SearchHighlightId(activation.query);
 		controller()->showPeerHistory(
 			item->history()->peer->id,
 			params,

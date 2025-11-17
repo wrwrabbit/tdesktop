@@ -196,22 +196,13 @@ void RecordingInfo::prepareVideo() {
 }
 
 void RecordingInfo::setLabel(const QString &text) {
-	const auto label = _container->add(
+	_container->add(
 		object_ptr<Ui::FlatLabel>(
 			_container,
 			text,
 			st::groupCallRecordingSubLabel),
-		st::groupCallRecordingSubLabelMargins);
-
-	rpl::combine(
-		sizeValue(),
-		label->sizeValue()
-	) | rpl::start_with_next([=](QSize my, QSize labelSize) {
-		label->moveToLeft(
-			(my.width() - labelSize.width()) / 2,
-			label->y(),
-			my.width());
-	}, label->lifetime());
+		st::groupCallRecordingSubLabelMargins,
+		style::al_top);
 }
 
 RecordingType RecordingInfo::type() const {
@@ -222,7 +213,10 @@ Switcher::Switcher(
 	not_null<Ui::RpWidget*> parent,
 	rpl::producer<bool> &&toggled)
 : RpWidget(parent)
-, _background(this, st::groupCallRecordingInfoHeight, st::groupCallBg)
+, _background(
+	this,
+	st::groupCallRecordingInfoHeight,
+	st::groupCallDividerBar)
 , _audio(this)
 , _video(this) {
 	_audio->prepareAudio();

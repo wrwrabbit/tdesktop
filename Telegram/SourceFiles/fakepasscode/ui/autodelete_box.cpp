@@ -248,7 +248,7 @@ static void MakeAutoDeleteBox(
 namespace FakePasscode {
 
 object_ptr<Ui::GenericBox> AutoDeleteBox(
-        not_null<QWidget*> quard,
+        const base::weak_qptr<QWidget> quard,
         Fn<void(Api::SendOptions)> send,
         Ui::ChooseDateTimeStyleArgs style) {
     auto callback = crl::guard(quard, send);

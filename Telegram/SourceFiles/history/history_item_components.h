@@ -277,6 +277,7 @@ struct ReplyFields {
 	MsgId messageId = 0;
 	MsgId topMessageId = 0;
 	StoryId storyId = 0;
+	int todoItemId = 0;
 	uint32 quoteOffset : 30 = 0;
 	uint32 manualQuote : 1 = 0;
 	uint32 topicPost : 1 = 0;
@@ -867,4 +868,9 @@ private:
 	mutable int _seekingStart = 0;
 	mutable int _seekingCurrent = 0;
 
+};
+
+struct HistoryMessageSchedulePeriod
+: RuntimeComponent<HistoryMessageSchedulePeriod, HistoryItem> {
+	TimeId schedulePeriod = 0;
 };

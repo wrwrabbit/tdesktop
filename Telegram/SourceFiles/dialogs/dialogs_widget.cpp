@@ -50,6 +50,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
+#include "api/api_authorizations.h"
 #include "api/api_chat_filters.h"
 #include "apiwrap.h"
 #include "chat_helpers/message_field.h"
@@ -874,7 +875,7 @@ void Widget::chosenRow(const ChosenRow &row) {
 			controller()->showInNewWindow(Window::SeparateId(topicJump));
 		} else {
 			if (!controller()->adaptive().isOneColumn()
-				&& !topicJump->channel()->useSubsectionTabs()) {
+				&& !topicJump->peer()->useSubsectionTabs()) {
 				controller()->showForum(
 					topicJump->forum(),
 					Window::SectionShow().withChildColumn());
@@ -898,10 +899,7 @@ void Widget::chosenRow(const ChosenRow &row) {
 	} else if (const auto topic = row.key.topic()) {
 		auto params = Window::SectionShow(
 			Window::SectionShow::Way::ClearStack);
-		params.highlightPart.text = _searchState.query;
-		if (!params.highlightPart.empty()) {
-			params.highlightPartOffsetHint = kSearchQueryOffsetHint;
-		}
+		params.highlight = Window::SearchHighlightId(_searchState.query);
 		if (row.newWindow) {
 			controller()->showInNewWindow(
 				Window::SeparateId(topic),
@@ -921,13 +919,13 @@ void Widget::chosenRow(const ChosenRow &row) {
 		&& history->isForum()
 		&& !row.message.fullId
 		&& (!controller()->adaptive().isOneColumn()
-			|| !history->peer->forum()->channel()->viewForumAsMessages()
-			|| history->peer->forum()->channel()->useSubsectionTabs())) {
+			|| !history->peer->viewForumAsMessages()
+			|| history->peer->useSubsectionTabs())) {
 		const auto forum = history->peer->forum();
 		if (controller()->shownForum().current() == forum) {
 			controller()->closeForum();
 		} else if (row.newWindow) {
-			const auto type = forum->channel()->useSubsectionTabs()
+			const auto type = forum->peer()->useSubsectionTabs()
 				? Window::SeparateType::Chat
 				: Window::SeparateType::Forum;
 			controller()->showInNewWindow(Window::SeparateId(type, history));
@@ -937,7 +935,7 @@ void Widget::chosenRow(const ChosenRow &row) {
 				Window::SectionShow(
 					Window::SectionShow::Way::ClearStack).withChildColumn());
 			if (controller()->shownForum().current() == forum
-				&& forum->channel()->viewForumAsMessages()) {
+				&& forum->peer()->viewForumAsMessages()) {
 				controller()->showThread(
 					history,
 					ShowAtUnreadMsgId,
@@ -967,17 +965,15 @@ void Widget::chosenRow(const ChosenRow &row) {
 		return;
 	} else if (history) {
 		const auto peer = history->peer;
-		const auto showAtMsgId = controller()->uniqueChatsInSearchResults()
-			? ShowAtUnreadMsgId
-			: row.message.fullId.msg;
+		const auto showAtMsgId = controller()->uniqueChatsInSearchResults(
+			_searchState
+		) ? ShowAtUnreadMsgId : row.message.fullId.msg;
 		auto params = Window::SectionShow(
 			Window::SectionShow::Way::ClearStack);
-		params.highlightPart.text = _searchState.query;
-		if (!params.highlightPart.empty()) {
-			params.highlightPartOffsetHint = kSearchQueryOffsetHint;
-		}
+		params.highlight = Window::SearchHighlightId(_searchState.query);
 		if (row.newWindow) {
 			controller()->showInNewWindow(peer, showAtMsgId);
+			closeSuggestions();
 		} else {
 			controller()->showThread(history, showAtMsgId, params);
 			hideChildList();
@@ -1016,7 +1012,7 @@ void Widget::setGeometryWithTopMoved(
 	_topDelta = topDelta;
 	bool willBeResized = (size() != newGeometry.size());
 	if (geometry() != newGeometry) {
-		auto weak = Ui::MakeWeak(this);
+		auto weak = base::make_weak(this);
 		setGeometry(newGeometry);
 		if (!weak) {
 			return;
@@ -1067,6 +1063,10 @@ void Widget::setupTopBarSuggestions(not_null<Ui::VerticalLayout*> dialogs) {
 	}
 	using namespace rpl::mappers;
 	crl::on_main(&session(), [=, session = &session()] {
+		session->api().authorizations().unreviewedChanges(
+		) | rpl::start_with_next([=] {
+			updateForceDisplayWide();
+		}, lifetime());
 		(session->data().chatsListLoaded(nullptr)
 			? rpl::single<Data::Folder*>(nullptr)
 			: session->data().chatsListLoadedEvents()
@@ -1754,7 +1754,7 @@ void Widget::updateSuggestions(anim::type animated) {
 			_suggestions = nullptr;
 			_hidingSuggestions.clear();
 			storiesExplicitCollapse();
-			updateStoriesVisibility();
+			updateControlsVisibility();
 			_scroll->show();
 		}
 	} else if (suggest && !_suggestions) {
@@ -1816,6 +1816,10 @@ void Widget::updateSuggestions(anim::type animated) {
 			controller()->showPeerInfo(peer);
 		}, _suggestions->lifetime());
 
+		_suggestions->closeRequests() | rpl::start_with_next([=] {
+			closeSuggestions();
+		}, _suggestions->lifetime());
+
 		updateControlsGeometry();
 
 		_suggestions->show(animated, [=] {
@@ -1825,6 +1829,15 @@ void Widget::updateSuggestions(anim::type animated) {
 	} else {
 		updateStoriesVisibility();
 	}
+}
+
+void Widget::closeSuggestions() {
+	_searchSuggestionsLocked = false;
+	_searchHasFocus = false;
+	setFocus();
+	updateForceDisplayWide();
+	updateCancelSearch();
+	updateSuggestions(anim::type::normal);
 }
 
 void Widget::openBotMainApp(not_null<UserData*> bot) {
@@ -2016,25 +2029,25 @@ void Widget::refreshTopBars() {
 		updateSearchFromVisibility(true);
 	}
 	_forumSearchRequested = false;
-	if (_openedForum) {
-		const auto channel = _openedForum->channel();
-		channel->updateFull();
+	if (_openedForum && _openedForum->peer()->isChannel()) {
+		const auto peer = _openedForum->peer();
+		peer->updateFull();
 
 		_forumReportBar = std::make_unique<HistoryView::ContactStatus>(
 			controller(),
 			this,
-			channel,
+			peer,
 			true);
 		_forumRequestsBar = std::make_unique<Ui::RequestsBar>(
 			this,
 			HistoryView::RequestsBarContentByPeer(
-				channel,
+				peer,
 				st::historyRequestsUserpics.size,
 				true));
 		_forumGroupCallBar = std::make_unique<Ui::GroupCallBar>(
 			this,
 			HistoryView::GroupCallBarContentByPeer(
-				channel,
+				peer,
 				st::historyGroupCallUserpics.size,
 				true),
 			Core::App().appDeactivatedValue());
@@ -2042,15 +2055,15 @@ void Widget::refreshTopBars() {
 
 		_forumRequestsBar->barClicks(
 		) | rpl::start_with_next([=] {
-			RequestsBoxController::Start(controller(), channel);
+			RequestsBoxController::Start(controller(), peer);
 		}, _forumRequestsBar->lifetime());
 
 		rpl::merge(
 			_forumGroupCallBar->barClicks(),
 			_forumGroupCallBar->joinClicks()
 		) | rpl::start_with_next([=] {
-			if (channel->groupCall()) {
-				controller()->startOrJoinGroupCall(channel);
+			if (peer->groupCall()) {
+				controller()->startOrJoinGroupCall(peer);
 			}
 		}, _forumGroupCallBar->lifetime());
 
@@ -2748,6 +2761,11 @@ void Widget::showMainMenu() {
 }
 
 void Widget::searchMessages(SearchState state) {
+	if (const auto peer = state.inChat.peer()) {
+		if (_openedForum && peer->forum() != _openedForum) {
+			controller()->closeForum();
+		}
+	}
 	applySearchState(std::move(state));
 	session().local().saveRecentSearchHashtags(_searchState.query);
 }
@@ -2757,9 +2775,9 @@ void Widget::searchTopics() {
 		return;
 	}
 	_api.request(base::take(_topicSearchRequest)).cancel();
-	_topicSearchRequest = _api.request(MTPchannels_GetForumTopics(
-		MTP_flags(MTPchannels_GetForumTopics::Flag::f_q),
-		_openedForum->channel()->inputChannel,
+	_topicSearchRequest = _api.request(MTPmessages_GetForumTopics(
+		MTP_flags(MTPmessages_GetForumTopics::Flag::f_q),
+		_openedForum->peer()->input,
 		MTP_string(_topicSearchQuery),
 		MTP_int(_topicSearchOffsetDate),
 		MTP_int(_topicSearchOffsetId),
@@ -2923,15 +2941,19 @@ void Widget::requestPublicPosts(bool fromStart) {
 		.posts = true,
 		.start = fromStart,
 	};
+	using Flag = MTPchannels_SearchPosts::Flag;
 	_postsProcess.requestId = session().api().request(
 		MTPchannels_SearchPosts(
+			MTP_flags(Flag::f_hashtag),
 			MTP_string(_searchState.query.trimmed().mid(1)),
+			MTP_string(), // query
 			MTP_int(fromStart ? 0 : _postsProcess.nextRate),
 			(fromStart
 				? MTP_inputPeerEmpty()
 				: _postsProcess.lastPeer->input),
 			MTP_int(fromStart ? 0 : _postsProcess.lastId),
-			MTP_int(kSearchPerPage))
+			MTP_int(kSearchPerPage),
+			MTP_long(0)) // allow_paid_stars
 	).done([=](const MTPmessages_Messages &result) {
 		searchReceived(type, result, &_postsProcess);
 	}).fail([=](const MTP::Error &error) {
@@ -3057,6 +3079,9 @@ void Widget::searchReceived(
 			// Don't apply cached data!
 			session().data().processUsers(data.vusers());
 			session().data().processChats(data.vchats());
+			if (const auto peer = searchInPeer()) {
+				peer->processTopics(data.vtopics());
+			}
 		}
 		process->full = true;
 		auto list = processList(data.vmessages());
@@ -3067,6 +3092,9 @@ void Widget::searchReceived(
 			// Don't apply cached data!
 			session().data().processUsers(data.vusers());
 			session().data().processChats(data.vchats());
+			if (const auto peer = searchInPeer()) {
+				peer->processTopics(data.vtopics());
+			}
 		}
 		auto list = processList(data.vmessages());
 		const auto nextRate = data.vnext_rate();
@@ -3084,24 +3112,24 @@ void Widget::searchReceived(
 		fullCount = data.vcount().v;
 		return list;
 	}, [&](const MTPDmessages_channelMessages &data) {
-		if (const auto peer = searchInPeer()) {
-			if (const auto channel = peer->asChannel()) {
-				channel->ptsReceived(data.vpts().v);
-				channel->processTopics(data.vtopics());
+		if (!cacheResults) {
+			// Don't apply cached data!
+			session().data().processUsers(data.vusers());
+			session().data().processChats(data.vchats());
+			if (const auto peer = searchInPeer()) {
+				if (const auto channel = peer->asChannel()) {
+					channel->ptsReceived(data.vpts().v);
+				} else {
+					LOG(("API Error: "
+						"received messages.channelMessages when no channel "
+						"was passed! (Widget::searchReceived)"));
+				}
+				peer->processTopics(data.vtopics());
 			} else {
 				LOG(("API Error: "
 					"received messages.channelMessages when no channel "
 					"was passed! (Widget::searchReceived)"));
 			}
-		} else {
-			LOG(("API Error: "
-				"received messages.channelMessages when no channel "
-				"was passed! (Widget::searchReceived)"));
-		}
-		if (!cacheResults) {
-			// Don't apply cached data!
-			session().data().processUsers(data.vusers());
-			session().data().processChats(data.vchats());
 		}
 		auto list = processList(data.vmessages());
 		if (list.empty()) {
@@ -3136,6 +3164,7 @@ void Widget::searchApplyEmpty(
 		type,
 		MTP_messages_messages(
 			MTP_vector<MTPMessage>(),
+			MTP_vector<MTPForumTopic>(),
 			MTP_vector<MTPChat>(),
 			MTP_vector<MTPUser>()),
 		process);
@@ -3310,7 +3339,8 @@ void Widget::updateForceDisplayWide() {
 		|| (_subsectionTopBar && _subsectionTopBar->searchHasFocus())
 		|| _searchSuggestionsLocked
 		|| !_searchState.query.isEmpty()
-		|| _searchState.inChat);
+		|| _searchState.inChat
+		|| !session().api().authorizations().unreviewed().empty());
 }
 
 void Widget::showForum(
@@ -3355,7 +3385,7 @@ void Widget::openChildList(
 			controller(),
 			Layout::Child);
 		_childList->showForum(forum, copy);
-		_childListPeerId = forum->channel()->id;
+		_childListPeerId = forum->peer()->id;
 	}
 
 	_childListShadow = std::make_unique<Ui::RpWidget>(this);
@@ -4214,7 +4244,7 @@ PeerData *Widget::searchInPeer() const {
 		|| _searchState.tab == ChatSearchTab::PublicPosts)
 		? nullptr
 		: _openedForum
-		? _openedForum->channel().get()
+		? _openedForum->peer().get()
 		: _searchState.inChat.sublist()
 		? _searchState.inChat.sublist()->owningHistory()->peer.get()
 		: _searchState.inChat.peer();
@@ -4350,7 +4380,7 @@ bool Widget::cancelSearch(CancelSearchOptions options) {
 	updateForceDisplayWide();
 	if (clearingInChat) {
 		if (const auto forum = controller()->shownForum().current()) {
-			if (forum->channel()->useSubsectionTabs()) {
+			if (forum->peer()->useSubsectionTabs()) {
 				const auto id = controller()->windowId();
 				const auto initial = id.forum();
 				if (!initial) {

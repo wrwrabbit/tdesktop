@@ -22,6 +22,7 @@ class FlatLabel;
 template <typename Widget>
 class SlideWrap;
 class RoundButton;
+class StarsRating;
 } // namespace Ui
 
 namespace HistoryView {
@@ -43,8 +44,12 @@ struct InfoProfileCover;
 
 namespace Info::Profile {
 
+class BadgeTooltip;
 class EmojiStatusPanel;
 class Badge;
+class StatusLabel;
+
+[[nodiscard]] QMargins LargeCustomEmojiMargins();
 
 class TopicIconView final {
 public:
@@ -126,7 +131,6 @@ public:
 	[[nodiscard]] std::optional<QImage> updatedPersonalPhoto() const;
 
 private:
-	class BadgeTooltip;
 
 	Cover(
 		QWidget *parent,
@@ -140,7 +144,6 @@ private:
 	void setupShowLastSeen();
 	void setupChildGeometry();
 	void initViewers(rpl::producer<QString> title);
-	void refreshStatusText();
 	void refreshNameGeometry(int newWidth);
 	void refreshStatusGeometry(int newWidth);
 	void refreshUploadPhotoOverlay();
@@ -158,7 +161,6 @@ private:
 	rpl::variable<Badge::Content> _badgeContent;
 	const std::unique_ptr<Badge> _badge;
 	const std::unique_ptr<Badge> _verified;
-	rpl::variable<int> _onlineCount;
 
 	const Fn<not_null<QWidget*>()> _parentForTooltip;
 	std::unique_ptr<BadgeTooltip> _badgeTooltip;
@@ -171,10 +173,12 @@ private:
 	std::optional<QImage> _personalChosen;
 	object_ptr<TopicIconButton> _iconButton;
 	object_ptr<Ui::FlatLabel> _name = { nullptr };
+	std::unique_ptr<Ui::StarsRating> _starsRating;
 	object_ptr<Ui::FlatLabel> _status = { nullptr };
+	std::unique_ptr<StatusLabel> _statusLabel;
+	rpl::variable<int> _statusShift = 0;
 	object_ptr<Ui::RoundButton> _showLastSeen = { nullptr };
 	//object_ptr<CoverDropArea> _dropArea = { nullptr };
-	base::Timer _refreshStatusTimer;
 
 	rpl::event_stream<Section> _showSection;
 

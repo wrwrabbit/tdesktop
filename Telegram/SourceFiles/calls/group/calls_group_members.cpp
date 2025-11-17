@@ -545,8 +545,8 @@ bool Members::Controller::appendWithAccessUsers() {
 }
 
 void Members::Controller::setupWithAccessUsers() {
-	const auto conference = _call->conferenceCall().get();
-	if (!conference) {
+	const auto conference = _call->sharedCall().get();
+	if (!_call->conference() || !conference) {
 		return;
 	}
 	conference->participantsWithAccessValue(
@@ -1333,7 +1333,7 @@ base::unique_qptr<Ui::PopupMenu> Members::Controller::createRowContextMenu(
 	}
 	const auto muted = (muteState == Row::State::Muted)
 		|| (muteState == Row::State::RaisedHand);
-	const auto addCover = !_call->rtmp();
+	const auto addCover = !_call->rtmp() && !_call->videoStream();
 	const auto addVolumeItem = (!muted || isMe(participantPeer));
 	const auto admin = IsGroupCallAdmin(_peer, participantPeer);
 	const auto session = &_peer->session();
@@ -1346,16 +1346,16 @@ base::unique_qptr<Ui::PopupMenu> Members::Controller::createRowContextMenu(
 			: addVolumeItem
 			? st::groupCallPopupMenuWithVolume
 			: st::groupCallPopupMenu));
-	const auto weakMenu = Ui::MakeWeak(result.get());
+	const auto weakMenu = base::make_weak(result.get());
 	const auto withActiveWindow = [=](auto callback) {
 		if (const auto window = Core::App().activePrimaryWindow()) {
-			if (const auto menu = weakMenu.data()) {
+			if (const auto menu = weakMenu.get()) {
 				menu->discardParentReActivate();
 
 				// We must hide PopupMenu before we activate the MainWindow,
 				// otherwise we set focus in field inside MainWindow and then
 				// PopupMenu::hide activates back the group call panel :(
-				delete weakMenu;
+				delete weakMenu.get();
 			}
 			window->invokeForSessionController(
 				account,
@@ -1452,7 +1452,7 @@ base::unique_qptr<Ui::PopupMenu> Members::Controller::createRowContextMenu(
 			}
 		}
 
-		if (_call->rtmp()) {
+		if (_call->rtmp() || _call->videoStream()) {
 			addMuteActionsToContextMenu(
 				result,
 				row->peer(),
@@ -1484,8 +1484,9 @@ base::unique_qptr<Ui::PopupMenu> Members::Controller::createRowContextMenu(
 	} else {
 		const auto invited = (muteState == Row::State::Invited)
 			|| (muteState == Row::State::Calling);
-		const auto conference = _call->conferenceCall().get();
-		if (conference
+		const auto conference = _call->sharedCall().get();
+		if (_call->conference()
+			&& conference
 			&& participantPeer->isUser()
 			&& invited) {
 			const auto id = conference->id();
@@ -1645,7 +1646,9 @@ void Members::Controller::addMuteActionsToContextMenu(
 
 		menu->addAction(std::move(volumeItem));
 
-		if (!_call->rtmp() && !isMe(participantPeer)) {
+		if (!_call->rtmp()
+			&& !_call->videoStream()
+			&& !isMe(participantPeer)) {
 			menu->addSeparator();
 		}
 	};
@@ -1655,6 +1658,7 @@ void Members::Controller::addMuteActionsToContextMenu(
 			|| muteState == Row::State::Calling
 			|| muteState == Row::State::WithAccess
 			|| _call->rtmp()
+			|| _call->videoStream()
 			|| isMe(participantPeer)
 			|| (muteState == Row::State::Inactive
 				&& participantIsCallAdmin

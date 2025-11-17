@@ -478,7 +478,7 @@ void SetupValidatePhoneNumberSuggestion(
 		st::inviteLinkButton);
 	no->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 	no->setClickedCallback([=] {
-		const auto sharedLabel = std::make_shared<QPointer<Ui::FlatLabel>>();
+		const auto sharedLabel = std::make_shared<base::weak_qptr<Ui::FlatLabel>>();
 		const auto height = st::boxLabel.style.font->height;
 		const auto customEmojiFactory = [=](
 			QStringView data,
@@ -772,30 +772,12 @@ void SetupPremium(
 					? Lang::FormatCreditsAmountToShort(c).string
 					: QString();
 			}),
-			st::settingsButton);
+			st::settingsButton,
+			{ &st::menuIconTon });
 		button->addClickHandler([=] {
 			controller->setPremiumRef("settings");
 			showOther(CurrencyId());
 		});
-
-		const auto badge = Ui::CreateChild<Ui::RpWidget>(button.get());
-		const auto image = Ui::Earn::IconCurrencyColored(
-			st::tonFieldIconSize,
-			st::menuIconColor->c);
-
-		badge->resize(Size(st::tonFieldIconSize));
-		badge->paintRequest(
-		) | rpl::start_with_next([=] {
-			auto p = QPainter(badge);
-			p.drawImage(0, 0, image);
-		}, badge->lifetime());
-
-		button->sizeValue() | rpl::start_with_next([=](const QSize &s) {
-			badge->moveToLeft(
-				button->st().iconLeft
-					+ (st::menuIconShop.width() - badge->width()) / 2,
-				(s.height() - badge->height()) / 2);
-		}, badge->lifetime());
 	}
 	const auto button = AddButtonWithIcon(
 		container,
@@ -805,7 +787,6 @@ void SetupPremium(
 	button->addClickHandler([=] {
 		showOther(BusinessId());
 	});
-	Ui::NewBadge::AddToRight(button);
 
 	if (controller->session().premiumCanBuy()) {
 		const auto button = AddButtonWithIcon(
@@ -814,6 +795,8 @@ void SetupPremium(
 			st::settingsButton,
 			{ .icon = &st::menuIconGiftPremium }
 		);
+		Ui::NewBadge::AddToRight(button);
+
 		button->addClickHandler([=] {
 			Ui::ChooseStarGiftRecipient(controller);
 		});
@@ -884,6 +867,7 @@ void SetupInterfaceScale(
 		icon ? st::settingsScalePadding : st::settingsBigScalePadding);
 	const auto slider = sliderWithLabel.slider;
 	const auto label = sliderWithLabel.label;
+	slider->setAccessibleName(tr::lng_settings_scale(tr::now));
 
 	const auto updateLabel = [=](int scale) {
 		const auto labelText = [&](int scale) {

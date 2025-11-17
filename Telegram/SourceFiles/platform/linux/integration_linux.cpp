@@ -176,7 +176,13 @@ LinuxIntegration::LinuxIntegration()
 	QObject::connect(
 		QCoreApplication::eventDispatcher(),
 		&QAbstractEventDispatcher::aboutToBlock,
-		[] { malloc_trim(0); });
+		[] {
+			static auto since = crl::now();
+			if (crl::now() - since >= 10000) {
+				malloc_trim(0);
+				since = crl::now();
+			}
+		});
 #endif // __GLIBC__
 }
 

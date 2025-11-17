@@ -16,11 +16,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/premium_preview_box.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
 #include "chat_helpers/message_field.h"
+#include "chat_helpers/tabbed_panel.h"
+#include "chat_helpers/tabbed_selector.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "core/ui_integration.h"
+#include "data/stickers/data_custom_emoji.h"
+#include "data/stickers/data_stickers.h"
 #include "data/data_channel.h"
 #include "data/data_chat_filters.h"
+#include "data/data_document.h"
 #include "data/data_peer.h"
 #include "data/data_peer_values.h" // Data::AmPremiumValue.
 #include "data/data_premium_limits.h"
@@ -32,6 +37,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "settings/settings_common.h"
 #include "ui/chat/chats_filter_tag.h"
+#include "ui/controls/emoji_button_factory.h"
+#include "ui/controls/emoji_button.h"
 #include "ui/effects/animation_value_f.h"
 #include "ui/effects/animations.h"
 #include "ui/effects/panel_animation.h"
@@ -40,6 +47,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/filter_icons.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
+#include "ui/rect.h"
 #include "ui/power_saving.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
@@ -53,6 +61,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_window.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_info_userpic_builder.h"
 
 namespace {
@@ -356,6 +365,7 @@ void EditFilterBox(
 		rpl::variable<TextWithEntities> title;
 		rpl::variable<bool> staticTitle;
 		rpl::variable<int> colorIndex;
+		base::unique_qptr<ChatHelpers::TabbedPanel> emojiPanel;
 	};
 	const auto owner = &window->session().data();
 	const auto state = box->lifetime().make_state<State>(State{
@@ -422,7 +432,22 @@ void EditFilterBox(
 		current.text,
 		TextUtilities::ConvertEntitiesToTextTags(current.entities),
 	}, Ui::InputField::HistoryAction::Clear);
-	name->setMaxLength(kMaxFilterTitleLength);
+	Ui::AddLengthLimitLabel(
+		name,
+		kMaxFilterTitleLength,
+		Ui::LengthLimitLabelOptions{
+			.customThreshold = 0,
+			.customUpdatePosition = [=](QSize parent, QSize label) {
+				return QPoint(
+					parent.width()
+						- st::windowFilterNameCharsLimitRightPosition.x()
+						- label.width() / 2,
+					st::windowFilterNameCharsLimitRightPosition.y());
+			},
+			.customCharactersCount = [=] {
+				return Ui::ComputeFieldCharacterCount(name);
+			},
+		});
 
 	const auto nameEditing = box->lifetime().make_state<NameEditing>(
 		NameEditing{ name });
@@ -466,6 +491,47 @@ void EditFilterBox(
 	) | rpl::filter(!_1) | rpl::start_with_next([=] {
 		nameEditing->custom = true;
 	}, box->lifetime());
+
+	using Selector = ChatHelpers::TabbedSelector;
+	state->emojiPanel = base::make_unique_q<ChatHelpers::TabbedPanel>(
+		box->getDelegate()->outerContainer(),
+		window,
+		object_ptr<Selector>(
+			nullptr,
+			window->uiShow(),
+			Window::GifPauseReason::Layer,
+			Selector::Mode::EmojiOnly));
+	state->emojiPanel->setDesiredHeightValues(
+		1.,
+		st::emojiPanMinHeight / 2,
+		st::emojiPanMinHeight);
+	state->emojiPanel->hide();
+	state->emojiPanel->selector()->setCurrentPeer(window->session().user());
+	state->emojiPanel->selector()->emojiChosen(
+	) | rpl::start_with_next([=](ChatHelpers::EmojiChosen data) {
+		Ui::InsertEmojiAtCursor(name->textCursor(), data.emoji);
+	}, name->lifetime());
+	state->emojiPanel->selector()->customEmojiChosen(
+	) | rpl::start_with_next([=](ChatHelpers::FileChosen data) {
+		const auto info = data.document->sticker();
+		if (info
+			&& info->setType == Data::StickersType::Emoji
+			&& !window->session().premium()) {
+			ShowPremiumPreviewBox(
+				window,
+				PremiumFeature::AnimatedEmoji);
+		} else {
+			Data::InsertCustomEmoji(name, data.document);
+		}
+	}, name->lifetime());
+
+	const auto emojiButton = Ui::AddEmojiToggleToField(
+		name,
+		box,
+		window,
+		state->emojiPanel.get(),
+		st::windowFilterNameEmojiPosition);
+	emojiButton->show();
 
 	name->changes(
 	) | rpl::start_with_next([=] {
@@ -593,7 +659,7 @@ void EditFilterBox(
 		) | rpl::start_with_next([=](const QRect &r) {
 			const auto h = st::normalFont->height;
 			preview->setGeometry(
-				colors->x(),
+				rect::right(colors) - st::settingsFilterTagPreviewSkip,
 				r.y() + (r.height() - h) / 2 + st::lineWidth,
 				colors->width(),
 				h);
@@ -740,7 +806,8 @@ void EditFilterBox(
 		const auto staticTitle = !title.entities.isEmpty()
 			&& state->staticTitle.current();
 		const auto rules = data->current();
-		if (title.empty()) {
+		if (Ui::ComputeFieldCharacterCount(name) > kMaxFilterTitleLength
+			|| title.empty()) {
 			name->showError();
 			box->scrollToY(0);
 			return {};

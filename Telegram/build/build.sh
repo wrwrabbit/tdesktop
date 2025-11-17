@@ -8,6 +8,8 @@ arg1="$1"
 arg2="$2"
 arg3="$3"
 
+CP_MAC_SKIPDMG="${CP_MAC_SKIPDMG:-0}"
+
 if [ ! -d "$FullScriptPath/../../../DesktopPrivate" ]; then
   echo ""
   echo "This script is for building the production version of Telegram Desktop."
@@ -169,6 +171,7 @@ if [ "$BuildTarget" == "linux" ]; then
 
   echo "Dumping debug symbols.."
   #"$ReleasePath/dump_syms" "$ReleasePath/$BinaryName" > "$ReleasePath/$BinaryName.sym"
+  touch "$ReleasePath/$BinaryName.sym"
   echo "Done!"
 
   echo "Stripping the executable.."
@@ -193,11 +196,11 @@ if [ "$BuildTarget" == "linux" ]; then
     SetupFile="talpha${AlphaVersion}_${AlphaSignature}.tar.xz"
   fi
 
-  #SymbolsHash=`head -n 1 "$ReleasePath/$BinaryName.sym" | awk -F " " 'END {print $4}'`
-  #echo "Copying $BinaryName.sym to $DropboxSymbolsPath/$BinaryName/$SymbolsHash"
-  #mkdir -p "$DropboxSymbolsPath/$BinaryName/$SymbolsHash"
-  #cp "$ReleasePath/$BinaryName.sym" "$DropboxSymbolsPath/$BinaryName/$SymbolsHash/"
-  #echo "Done!"
+  SymbolsHash=`head -n 1 "$ReleasePath/$BinaryName.sym" | awk -F " " 'END {print $4}'`
+  echo "Copying $BinaryName.sym to $DropboxSymbolsPath/$BinaryName/$SymbolsHash"
+  mkdir -p "$DropboxSymbolsPath/$BinaryName/$SymbolsHash"
+  cp "$ReleasePath/$BinaryName.sym" "$DropboxSymbolsPath/$BinaryName/$SymbolsHash/"
+  echo "Done!"
 
   if [ ! -d "$ReleasePath/deploy" ]; then
     mkdir "$ReleasePath/deploy"
@@ -305,24 +308,24 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
 
     if [ "$MacArch" == "" ]; then
       echo "Dumping debug symbols x86_64 from universal.."
-      #"$HomePath/../../Libraries/breakpad/src/tools/mac/dump_syms/build/Release/dump_syms" "-a" "x86_64" "$ReleasePath/$BinaryName.app/Contents/MacOS/$BinaryName" > "$ReleasePath/$BinaryName.x86_64.sym" 2>/dev/null
+      "$HomePath/../../Libraries/breakpad/src/tools/mac/dump_syms/build/Release/dump_syms" "-a" "x86_64" "$ReleasePath/$BinaryName.app/Contents/MacOS/$BinaryName" > "$ReleasePath/$BinaryName.x86_64.sym" 2>/dev/null
       echo "Done!"
 
-      #SymbolsHash=`head -n 1 "$ReleasePath/$BinaryName.x86_64.sym" | awk -F " " 'END {print $4}'`
-      #echo "Copying $BinaryName.x86_64.sym to $DropboxSymbolsPath/$BinaryName/$SymbolsHash"
-      #mkdir -p "$DropboxSymbolsPath/$BinaryName/$SymbolsHash"
-      #cp "$ReleasePath/$BinaryName.x86_64.sym" "$DropboxSymbolsPath/$BinaryName/$SymbolsHash/$BinaryName.sym"
-      #echo "Done!"
+      SymbolsHash=`head -n 1 "$ReleasePath/$BinaryName.x86_64.sym" | awk -F " " 'END {print $4}'`
+      echo "Copying $BinaryName.x86_64.sym to $DropboxSymbolsPath/$BinaryName/$SymbolsHash"
+      mkdir -p "$DropboxSymbolsPath/$BinaryName/$SymbolsHash"
+      cp "$ReleasePath/$BinaryName.x86_64.sym" "$DropboxSymbolsPath/$BinaryName/$SymbolsHash/$BinaryName.sym"
+      echo "Done!"
 
       echo "Dumping debug symbols arm64 from universal.."
-      #"$HomePath/../../Libraries/breakpad/src/tools/mac/dump_syms/build/Release/dump_syms" "-a" "arm64" "$ReleasePath/$BinaryName.app/Contents/MacOS/$BinaryName" > "$ReleasePath/$BinaryName.arm64.sym" 2>/dev/null
+      "$HomePath/../../Libraries/breakpad/src/tools/mac/dump_syms/build/Release/dump_syms" "-a" "arm64" "$ReleasePath/$BinaryName.app/Contents/MacOS/$BinaryName" > "$ReleasePath/$BinaryName.arm64.sym" 2>/dev/null
       echo "Done!"
 
-      #SymbolsHash=`head -n 1 "$ReleasePath/$BinaryName.arm64.sym" | awk -F " " 'END {print $4}'`
-      #echo "Copying $BinaryName.arm64.sym to $DropboxSymbolsPath/$BinaryName/$SymbolsHash"
-      #mkdir -p "$DropboxSymbolsPath/$BinaryName/$SymbolsHash"
-      #cp "$ReleasePath/$BinaryName.arm64.sym" "$DropboxSymbolsPath/$BinaryName/$SymbolsHash/$BinaryName.sym"
-      #echo "Done!"
+      SymbolsHash=`head -n 1 "$ReleasePath/$BinaryName.arm64.sym" | awk -F " " 'END {print $4}'`
+      echo "Copying $BinaryName.arm64.sym to $DropboxSymbolsPath/$BinaryName/$SymbolsHash"
+      mkdir -p "$DropboxSymbolsPath/$BinaryName/$SymbolsHash"
+      cp "$ReleasePath/$BinaryName.arm64.sym" "$DropboxSymbolsPath/$BinaryName/$SymbolsHash/$BinaryName.sym"
+      echo "Done!"
     fi
 
     echo "Stripping the executable.."
@@ -402,16 +405,25 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
         #hdiutil convert tsetup.temp.dmg -format UDBZ -ov -o "$SetupFile"
         #rm tsetup.temp.dmg
         # Do simple
-        create-dmg \
-            --volname "Telegram Desktop" \
-            --volicon "./$BundleName/Contents/Resources/AppIcon.icns" \
-            --hide-extension "$BundleName" \
-            --icon-size 100 \
-            --app-drop-link 400 20 \
-            --bless \
-            --format UDBZ \
-            "$SetupFile" \
-            "./$BundleName"
+        if [ "$CP_MAC_SKIPDMG" != "1" ]; then
+          create-dmg \
+              --volname "Telegram Desktop" \
+              --volicon "./$BundleName/Contents/Resources/AppIcon.icns" \
+              --hide-extension "$BundleName" \
+              --icon-size 100 \
+              --app-drop-link 400 20 \
+              --bless \
+              --format UDBZ \
+              "$SetupFile" \
+              "./$BundleName"
+        else
+          echo "CP_MAC_SKIPDMG=1: Skipping DMG creation."
+          # create fake DMG file so the rest of the script works
+          if [ ! -f "$ReleasePath/$SetupFile" ]; then
+            touch "$ReleasePath/$SetupFile"
+          fi
+          echo "Fake DMG file created: $ReleasePath/$SetupFile"
+        fi
         # do zip as well
         bless --folder "./$BundleName/" --openfolder "$BundleName/"
         zip -r "$BundleName.zip" "$BundleName"
@@ -508,7 +520,9 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
     rm "$ReleasePath/$BinaryName.app/Contents/Frameworks/Updater"
     mv "$ReleasePath/$UpdateFileAMD64" "$DeployPath/"
     mv "$ReleasePath/$UpdateFileARM64" "$DeployPath/"
-    mv "$ReleasePath/$SetupFile" "$DeployPath/"
+    if [ "$CP_MAC_SKIPDMG" != "1" ]; then
+      mv "$ReleasePath/$SetupFile" "$DeployPath/"
+    fi
     mv "$ReleasePath/$BundleName.zip" "$DeployPath/"
 
     if [ "$BuildTarget" == "mac" ]; then

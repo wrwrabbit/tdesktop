@@ -235,7 +235,8 @@ void ChannelData::setFlags(ChannelDataFlags which) {
 		| Flag::CallNotEmpty
 		| Flag::SimilarExpanded
 		| Flag::Signatures
-		| Flag::SignatureProfiles)) {
+		| Flag::SignatureProfiles
+		| Flag::ForumTabs)) {
 		if (const auto history = this->owner().historyLoaded(this)) {
 			if (diff & Flag::CallNotEmpty) {
 				history->updateChatListEntry();
@@ -261,6 +262,9 @@ void ChannelData::setFlags(ChannelDataFlags which) {
 			}
 			if (diff & (Flag::Signatures | Flag::SignatureProfiles)) {
 				session().changes().peerUpdated(this, UpdateFlag::Rights);
+			}
+			if (diff & Flag::ForumTabs) {
+				history->forumTabsChanged(which & Flag::ForumTabs);
 			}
 		}
 	}
@@ -1095,7 +1099,7 @@ void ChannelData::setGroupCall(
 			data.vaccess_hash().v,
 			scheduleDate,
 			rtmp,
-			false); // conference
+			Data::GroupCallOrigin::Group);
 		owner().registerGroupCall(_call.get());
 		session().changes().peerUpdated(this, UpdateFlag::GroupCall);
 		addFlags(Flag::CallActive);
@@ -1154,20 +1158,34 @@ bool ChannelData::hasUnreadStories() const {
 	return flags() & Flag::HasUnreadStories;
 }
 
+bool ChannelData::hasActiveVideoStream() const {
+	return flags() & Flag::HasActiveVideoStream;
+}
+
 void ChannelData::setStoriesState(StoriesState state) {
 	Expects(state != StoriesState::Unknown);
 
 	const auto was = flags();
 	switch (state) {
 	case StoriesState::None:
-		_flags.remove(Flag::HasActiveStories | Flag::HasUnreadStories);
+		_flags.remove(Flag::HasActiveStories
+			| Flag::HasUnreadStories
+			| Flag::HasActiveVideoStream);
 		break;
 	case StoriesState::HasRead:
-		_flags.set(
-			(flags() & ~Flag::HasUnreadStories) | Flag::HasActiveStories);
+		_flags.set(Flag::HasActiveStories
+			| (was
+				& ~(Flag::HasUnreadStories | Flag::HasActiveVideoStream)));
 		break;
 	case StoriesState::HasUnread:
-		_flags.add(Flag::HasActiveStories | Flag::HasUnreadStories);
+		_flags.set((was & ~Flag::HasActiveVideoStream)
+			| Flag::HasActiveStories
+			| Flag::HasUnreadStories);
+		break;
+	case StoriesState::HasVideoStream:
+		_flags.set((was & ~Flag::HasUnreadStories)
+			| Flag::HasActiveStories
+			| Flag::HasActiveVideoStream);
 		break;
 	}
 	if (flags() != was) {
@@ -1175,12 +1193,6 @@ void ChannelData::setStoriesState(StoriesState state) {
 			history->updateChatListEntryPostponed();
 		}
 		session().changes().peerUpdated(this, UpdateFlag::StoriesState);
-	}
-}
-
-void ChannelData::processTopics(const MTPVector<MTPForumTopic> &topics) {
-	if (const auto forum = this->forum()) {
-		forum->applyReceivedTopics(topics);
 	}
 }
 
@@ -1402,7 +1414,7 @@ void ApplyChannelUpdate(
 			update.vboosts_applied().value_or_empty(),
 			update.vboosts_unrestrict().value_or_empty());
 	}
-	channel->setThemeEmoji(qs(update.vtheme_emoticon().value_or_empty()));
+	channel->setThemeToken(qs(update.vtheme_emoticon().value_or_empty()));
 	channel->setTranslationDisabled(update.is_translations_disabled());
 
 	const auto reactionsLimit = update.vreactions_limit().value_or_empty();

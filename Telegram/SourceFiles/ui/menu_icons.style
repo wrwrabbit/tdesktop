@@ -185,6 +185,15 @@ menuIconPayment: icon {{ "payments/payment_card", menuIconColor }};
 menuIconOrderPrice: icon {{ "menu/order_price", menuIconColor }};
 menuIconOrderDate: icon {{ "menu/order_date", menuIconColor }};
 menuIconOrderNumber: icon {{ "menu/order_number", menuIconColor }};
+menuIconAdd: icon {{ "menu/add", menuIconColor }};
+menuIconRatingGifts: icon {{ "menu/rating_gifts-24x24", menuIconColor }};
+menuIconRatingUsers: icon {{ "menu/users_stars-24x24", menuIconColor }};
+menuIconRatingRefund: icon {{ "menu/rating_refund-24x24", menuIconColor }};
+menuIconAuctionDrop: icon {{ "menu/auction_drop", menuIconColor }};
+menuIconStarsRefund: icon {{ "menu/auction_refund", menuIconColor }};
+menuIconStarsCarryover: icon {{ "menu/auction_carry", menuIconColor }};
+menuIconTon: icon{{ "payments/ton_emoji-18x18", menuIconColor, point(3px, 2px) }};
+menuIconReorder: icon{{ "menu/reorder-24x24", menuIconColor }};
 
 menuIconTTLAny: icon {{ "menu/auto_delete_plain", menuIconColor }};
 menuIconTTLAnyTextPosition: point(11px, 22px);
@@ -195,6 +204,7 @@ menuIconMuteForAnyTextPosition: point(14px, 9px);
 menuIconMuteForAnyTextFont: font(8px semibold);
 
 menuBlueIconPhotoSet: icon {{ "menu/photo_set", lightButtonFg }};
+menuBlueIconPhotoSuggest: icon {{ "menu/photo_suggest", lightButtonFg }};
 menuBlueIconPremium: icon{{ "menu/premium", lightButtonFg }};
 menuBlueIconColorNames: icon{{ "settings/premium/features/feature_color_names", lightButtonFg }};
 menuBlueIconWallpaper: icon{{ "settings/premium/features/feature_wallpaper", lightButtonFg }};
@@ -204,6 +214,7 @@ menuBlueIconGroupCreate: icon {{ "menu/groups_create", lightButtonFg }};
 
 mediaMenuIconStickers: icon {{ "menu/stickers", mediaviewMenuFg }};
 mediaMenuIconCancel: icon {{ "menu/cancel", mediaviewMenuFg }};
+mediaMenuIconChannel: icon {{ "menu/channel", mediaviewMenuFg }};
 mediaMenuIconShowInChat: icon {{ "menu/show_in_chat", mediaviewMenuFg }};
 mediaMenuIconShowInFolder: icon {{ "menu/show_in_folder", mediaviewMenuFg }};
 mediaMenuIconDownload: icon {{ "menu/download", mediaviewMenuFg }};

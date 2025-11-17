@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "lang/lang_keys.h"
 #include "intro/intro_code.h"
+#include "intro/intro_email.h"
 #include "intro/intro_qr.h"
 #include "styles/style_intro.h"
 #include "ui/widgets/buttons.h"
@@ -63,6 +64,8 @@ PhoneWidget::PhoneWidget(
 	st::introPhone,
 	[](const QString &s) { return Countries::Groups(s); })
 , _checkRequestTimer([=] { checkRequest(); }) {
+	_code->setAccessibleName(tr::lng_country_code(tr::now));
+	_phone->setAccessibleName(tr::lng_phone_number(tr::now));
 	_phone->frontBackspaceEvent(
 	) | rpl::start_with_next([=](not_null<QKeyEvent*> e) {
 		_code->startErasing(e);
@@ -109,6 +112,10 @@ PhoneWidget::PhoneWidget(
 	}
 
 	_changed = false;
+}
+
+QString PhoneWidget::accessibilityName() {
+	return tr::lng_phone_title(tr::now);
 }
 
 void PhoneWidget::setupQrLogin() {
@@ -247,6 +254,9 @@ void PhoneWidget::phoneSubmitDone(const MTPauth_SentCode &result) {
 		fillSentCodeData(data);
 		getData()->phone = DigitsOnly(_sentPhone);
 		getData()->phoneHash = qba(data.vphone_code_hash());
+		if (getData()->emailStatus == EmailStatus::SetupRequired) {
+			return goNext<EmailWidget>();
+		}
 		const auto next = data.vnext_type();
 		if (next && next->type() == mtpc_auth_codeTypeCall) {
 			getData()->callStatus = CallStatus::Waiting;

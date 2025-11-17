@@ -74,6 +74,7 @@ class EmptyPainter;
 class PinnedTracker;
 class TranslateBar;
 class SubsectionTabs;
+class SelfForwardsTagger;
 
 struct ChatViewId {
 	not_null<History*> history;
@@ -454,6 +455,8 @@ private:
 
 	bool _loaded = false;
 
+	std::unique_ptr<HistoryView::SelfForwardsTagger> _selfForwardsTagger;
+
 };
 
 class ChatMemento final : public Window::SectionMemento {
@@ -461,8 +464,7 @@ public:
 	explicit ChatMemento(
 		ChatViewId id,
 		MsgId highlightId = 0,
-		const TextWithEntities &highlightPart = {},
-		int highlightPartOffsetHint = 0);
+		MessageHighlightId highlight = {});
 
 	struct Comments {
 	};
@@ -511,20 +513,16 @@ public:
 	[[nodiscard]] MsgId highlightId() const {
 		return _highlightId;
 	}
-	[[nodiscard]] const TextWithEntities &highlightPart() const {
-		return _highlightPart;
-	}
-	[[nodiscard]] int highlightPartOffsetHint() const {
-		return _highlightPartOffsetHint;
+	[[nodiscard]] const MessageHighlightId &highlight() const {
+		return _highlight;
 	}
 
 private:
 	void setupTopicViewer();
 
 	ChatViewId _id;
-	const TextWithEntities _highlightPart;
-	const int _highlightPartOffsetHint = 0;
 	const MsgId _highlightId = 0;
+	const MessageHighlightId _highlight;
 	ListMemento _list;
 	std::shared_ptr<Data::RepliesList> _replies;
 	QVector<FullMsgId> _replyReturns;

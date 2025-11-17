@@ -1,0 +1,61 @@
+name: Public Release - MacOS (post)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-dmg:
+    runs-on: macos-15-intel
+    env:
+      setupFile: tsetup.latest.dmg  # Set this to your DMG output name
+
+    steps:
+      - name: First set up.
+        run: |
+          sudo chown -R `whoami`:admin /usr/local/share
+
+          brew update
+          brew upgrade || true
+          brew install icoutils create-dmg
+
+          # Disable spotlight.
+          sudo mdutil -a -i off
+
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Download Telegram.app zip artifact
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: deploy_mac.yml
+          workflow_conclusion: success
+          branch: master
+          repo: cpartisans/tdesktop
+          path: artifact
+          name: PTelegram__extra
+
+      - name: Unzip Telegram.app bundle
+        run: |
+          cd artifact
+          unzip -o *.zip
+          # Now Telegram.app should be in ./artifact
+
+      - name: Build DMG
+        run: |
+          create-dmg \
+            --volname "Telegram Desktop" \
+            --volicon "./Telegram.app/Contents/Resources/AppIcon.icns" \
+            --hide-extension "Telegram.app" \
+            --icon-size 100 \
+            --app-drop-link 400 20 \
+            --bless \
+            --format UDBZ \
+            "$setupFile" \
+            "./Telegram.app"
+        working-directory: ./artifact
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-dmg
+          path: ./artifact/${{ env.setupFile }}

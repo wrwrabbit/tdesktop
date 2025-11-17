@@ -8,18 +8,23 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_schedule_box.h"
 
 #include "api/api_common.h"
+#include "chat_helpers/compose/compose_show.h"
 #include "data/data_peer.h"
+#include "data/data_peer_values.h"
 #include "data/data_user.h"
 #include "lang/lang_keys.h"
 #include "base/event_filter.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
+#include "ui/text/text_utilities.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/wrap/padding_wrap.h"
+#include "main/main_session.h"
 #include "menu/menu_send.h"
+#include "settings/settings_premium.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
 #include "styles/style_chat.h"
@@ -76,6 +81,8 @@ void ScheduleBox(
 		Fn<void(Api::SendOptions)> done,
 		TimeId time,
 		ScheduleBoxStyleArgs style) {
+	const auto repeat = std::make_shared<TimeId>(
+		initialOptions.scheduleRepeatPeriod);
 	const auto submit = [=](Api::SendOptions options) {
 		if (!options.scheduled) {
 			return;
@@ -83,6 +90,9 @@ void ScheduleBox(
 		// Pro tip: Hold Ctrl key to send a silent scheduled message!
 		if (base::IsCtrlPressed()) {
 			options.silent = true;
+		}
+		if (repeat) {
+			options.scheduleRepeatPeriod = *repeat;
 		}
 		const auto copy = done;
 		box->closeBox();
@@ -102,6 +112,40 @@ void ScheduleBox(
 		.time = time,
 		.style = style.chooseDateTimeArgs,
 	});
+
+	if (repeat) {
+		const auto showPremiumPromo = [=] {
+			if (show->session().premium()) {
+				return false;
+			}
+			Settings::ShowPremiumPromoToast(
+				show,
+				tr::lng_schedule_repeat_promo(
+					tr::now,
+					lt_link,
+					Ui::Text::Link(
+						Ui::Text::Bold(
+							tr::lng_schedule_repeat_promo_link(tr::now))),
+					Ui::Text::RichLangValue),
+				u"schedule_repeat"_q);
+			return true;
+		};
+		auto locked = Data::AmPremiumValue(
+			&show->session()
+		) | rpl::map([=](bool premium) {
+			return !premium;
+		});
+		const auto row = box->addRow(Ui::ChooseRepeatPeriod(box, {
+			.value = show->session().premium() ? *repeat : TimeId(),
+			.locked = std::move(locked),
+			.filter = showPremiumPromo,
+			.changed = [=](TimeId value) { *repeat = value; },
+			.test = show->session().isTestMode(),
+		}), style::al_top);
+		std::move(descriptor.width) | rpl::start_with_next([=](int width) {
+			row->setNaturalWidth(width);
+		}, row->lifetime());
+	}
 
 	using namespace SendMenu;
 	const auto childType = (details.type == Type::Disabled)

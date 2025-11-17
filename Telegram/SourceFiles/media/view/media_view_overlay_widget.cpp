@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "menu/menu_sponsored.h"
 #include "boxes/premium_preview_box.h"
+#include "calls/calls_instance.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
 #include "core/file_utilities.h"
@@ -51,6 +52,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/view/media_view_pip.h"
 #include "media/view/media_view_overlay_raster.h"
 #include "media/view/media_view_overlay_opengl.h"
+#include "media/view/media_view_playback_sponsored.h"
+#include "media/view/media_view_video_stream.h"
 #include "media/stories/media_stories_share.h"
 #include "media/stories/media_stories_view.h"
 #include "media/streaming/media_streaming_document.h"
@@ -61,6 +64,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_media.h"
 #include "history/view/reactions/history_view_reactions_selector.h"
 #include "data/components/sponsored_messages.h"
+#include "data/data_group_call.h"
 #include "data/data_session.h"
 #include "data/data_changes.h"
 #include "data/data_channel.h"
@@ -89,7 +93,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/platform_overlay_widget.h"
 #include "storage/file_download.h"
 #include "storage/storage_account.h"
-#include "calls/calls_instance.h"
 #include "styles/style_media_view.h"
 #include "styles/style_calls.h"
 #include "styles/style_chat.h"
@@ -335,6 +338,7 @@ struct OverlayWidget::Streamed {
 
 	Streaming::Instance instance;
 	std::unique_ptr<PlaybackControls> controls;
+	std::unique_ptr<PlaybackSponsored> sponsored;
 	std::unique_ptr<base::PowerSaveBlocker> powerSaveBlocker;
 
 	bool ready = false;
@@ -1028,7 +1032,7 @@ void OverlayWidget::updateGeometryToScreen(bool inMove) {
 		.arg(available.y())
 		.arg(available.width())
 		.arg(available.height()));
-	_window->setGeometry(available);
+	_window->Ui::RpWidget::setGeometry(available);
 }
 
 void OverlayWidget::updateControlsGeometry() {
@@ -1106,6 +1110,9 @@ QSize OverlayWidget::flipSizeByRotation(QSize size) const {
 
 bool OverlayWidget::hasCopyMediaRestriction(bool skipPremiumCheck) const {
 	if (const auto story = _stories ? _stories->story() : nullptr) {
+		if (story->call()) {
+			return true;
+		}
 		return skipPremiumCheck
 			? !story->canDownloadIfPremium()
 			: !story->canDownloadChecked();
@@ -1608,7 +1615,11 @@ void OverlayWidget::fillContextMenuActions(
 		if (const auto window = findWindow()) {
 			const auto show = window->uiShow();
 			const auto fullId = _message->fullId();
-			Menu::FillSponsored(_body, addAction, show, fullId, true);
+			Menu::FillSponsored(
+				addAction,
+				show,
+				fullId,
+				{ .dark = true, .skipInfo = true });
 		}
 		return;
 	}
@@ -1845,7 +1856,8 @@ void OverlayWidget::fillContextMenuActions(
 	if (_stories
 		&& _stories->allowStealthMode()
 		&& story
-		&& story->peer()->isUser()) {
+		&& story->peer()->isUser()
+		&& !story->call()) {
 		const auto now = base::unixtime::now();
 		const auto stealth = _session->data().stories().stealthMode();
 		addAction(tr::lng_stealth_mode_menu_item(tr::now), [=] {
@@ -2089,6 +2101,16 @@ void OverlayWidget::resizeContentByScreenSize() {
 		_h = content.height();
 		_zoom = 0;
 		updateNavigationControlsGeometry();
+		if (_videoStream) {
+			_videoStream->updateGeometry(_x, _y, _w, _h);
+		}
+		return;
+	} else if (_videoStream) {
+		_w = _body->width() / 2;
+		_h = _body->height() / 2;
+		_x = (_body->width() - _w) / 2;
+		_y = (_body->height() - _h) / 2;
+		_videoStream->updateGeometry(_x, _y, _w, _h);
 		return;
 	}
 	recountSkipTop();
@@ -2129,7 +2151,9 @@ void OverlayWidget::resizeContentByScreenSize() {
 		_h = _height;
 	}
 	_x = (width() - _w) / 2;
-	_y = _skipTop + (useh - _h) / 2;
+	_y = _fullScreenVideo
+		? (_minUsedTop + (_maxUsedHeight - _h) / 2)
+		: (_skipTop + (useh - _h) / 2);
 	_geometryAnimation.stop();
 }
 
@@ -2325,6 +2349,7 @@ void OverlayWidget::assignMediaPointer(DocumentData *document) {
 	_flip = {};
 	_photo = nullptr;
 	_photoMedia = nullptr;
+	_videoStream = nullptr;
 	if (_document != document) {
 		_streamedQualityChangeFrame = QImage();
 		_streamedQualityChangeFinished = false;
@@ -2363,6 +2388,7 @@ void OverlayWidget::assignMediaPointer(not_null<PhotoData*> photo) {
 	_documentLoadingTo = QString();
 	_videoCover = nullptr;
 	_videoCoverMedia = nullptr;
+	_videoStream = nullptr;
 	if (_photo != photo) {
 		_flip = {};
 		_photo = photo;
@@ -2372,6 +2398,41 @@ void OverlayWidget::assignMediaPointer(not_null<PhotoData*> photo) {
 			_photo->load(fileOrigin(), LoadFromCloudOrLocal, true);
 		}
 	}
+}
+
+void OverlayWidget::assignMediaPointer(
+		std::shared_ptr<Data::GroupCall> call) {
+	_savePhotoVideoWhenLoaded = SavePhotoVideo::None;
+	_chosenQuality = nullptr;
+	_streamedQualityChangeFrame = QImage();
+	_streamedQualityChangeFinished = false;
+	_document = nullptr;
+	_documentMedia = nullptr;
+	_documentLoadingTo = QString();
+	_videoCover = nullptr;
+	_videoCoverMedia = nullptr;
+	_flip = {};
+	_photo = nullptr;
+	_photoMedia = nullptr;
+
+	_videoStream = nullptr;
+	_videoStream = std::make_unique<VideoStream>(
+		_body,
+		_surface.get(),
+		_opengl,
+		_wrap->backend(),
+		uiShow(),
+		std::move(call),
+		_callLinkSlug,
+		_callJoinMessageId);
+	_videoStream->closeRequests() | rpl::start_with_next([=] {
+		close();
+	}, _videoStream->lifetime());
+	if (const auto stories = _stories.get()) {
+		stories->updateVideoStream(_videoStream->call());
+		_videoStream->toggleCommentsOn(stories->commentsShownValue());
+	}
+	_widget->lower();
 }
 
 void OverlayWidget::clickHandlerActiveChanged(
@@ -2589,8 +2650,9 @@ void OverlayWidget::saveAs() {
 					QFile(location.name()).copy(file);
 				} else {
 					QFile f(file);
-					f.open(QIODevice::WriteOnly);
-					f.write(bytes);
+					if (f.open(QIODevice::WriteOnly)) {
+						f.write(bytes);
+					}
 				}
 				if (_message) {
 					auto &manager = Core::App().downloadManager();
@@ -3375,7 +3437,7 @@ void OverlayWidget::refreshCaption() {
 			: Ui::ItemTextDefaultOptions()),
 		context);
 	if (_caption.hasSpoilers()) {
-		const auto weak = Ui::MakeWeak(widget());
+		const auto weak = base::make_weak(widget());
 		_caption.setSpoilerLinkFilter([=](const ClickContext &context) {
 			return (weak != nullptr);
 		});
@@ -3541,6 +3603,7 @@ void OverlayWidget::show(OpenRequest request) {
 	const auto story = request.story();
 	const auto document = story ? story->document() : request.document();
 	const auto photo = story ? story->photo() : request.photo();
+	const auto call = story ? story->call() : request.call();
 	const auto contextItem = request.item();
 	const auto contextPeer = request.peer();
 	const auto contextTopicRootId = request.topicRootId();
@@ -3591,8 +3654,12 @@ void OverlayWidget::show(OpenRequest request) {
 		displayPhoto(photo);
 		preloadData(0);
 		activateControls();
-	} else if (story || document) {
-		setSession(document ? &document->session() : &story->session());
+	} else if (story || document || call) {
+		setSession(document
+			? &document->session()
+			: story
+			? &story->session()
+			: &call->session());
 
 		if (story) {
 			setContext(StoriesContext{
@@ -3609,13 +3676,19 @@ void OverlayWidget::show(OpenRequest request) {
 		clearControlsState();
 
 		_streamingStartPaused = false;
-		displayDocument(
-			document,
-			anim::activation::normal,
-			request.cloudTheme()
-				? *request.cloudTheme()
-				: Data::CloudTheme(),
-			{ request.continueStreaming(), request.startTime() });
+		if (call) {
+			_callLinkSlug = request.callLinkSlug();
+			_callJoinMessageId = request.callJoinMessageId();
+			displayVideoStream(call, anim::activation::normal);
+		} else {
+			displayDocument(
+				document,
+				anim::activation::normal,
+				(request.cloudTheme()
+					? *request.cloudTheme()
+					: Data::CloudTheme()),
+				{ request.continueStreaming(), request.startTime() });
+		}
 		if (!isHidden()) {
 			preloadData(0);
 			activateControls();
@@ -3831,6 +3904,26 @@ void OverlayWidget::displayDocument(
 	}
 }
 
+// Empty messages shown as docs: doc can be nullptr.
+void OverlayWidget::displayVideoStream(
+		const std::shared_ptr<Data::GroupCall> &call,
+		anim::activation activation) {
+	_fullScreenVideo = false;
+	_staticContent = QImage();
+	clearStreaming(true);
+	destroyThemePreview();
+	assignMediaPointer(call);
+
+	_rotation = 0;
+	_radial.stop();
+
+	_touchbarDisplay.fire(TouchBarItemType::None);
+
+	contentSizeChanged();
+	_blurred = false;
+	displayFinished(activation);
+}
+
 void OverlayWidget::initSponsoredButton() {
 	const auto has = _message && _message->isSponsored() && _session;
 	if (has && _sponsoredButton) {
@@ -3966,7 +4059,11 @@ bool OverlayWidget::initStreaming(const StartStreaming &startStreaming) {
 			&& !_streamed->instance.player().finished())) {
 		startStreamingPlayer(startStreaming);
 	} else {
-		_streamed->ready = _streamed->instance.player().ready();
+		if (_streamed->instance.player().ready()) {
+			markStreamedReady();
+		} else {
+			_streamed->ready = false;
+		}
 		updatePlaybackState();
 	}
 	return true;
@@ -3979,7 +4076,7 @@ void OverlayWidget::startStreamingPlayer(
 	const auto &player = _streamed->instance.player();
 	if (player.playing()) {
 		if (!_streamed->withSound) {
-			_streamed->ready = true;
+			markStreamedReady();
 			return;
 		}
 		_pip = nullptr;
@@ -3995,6 +4092,18 @@ void OverlayWidget::startStreamingPlayer(
 		? _photo->videoStartPosition()
 		: 0;
 	restartAtSeekPosition(_streamedPosition);
+}
+
+void OverlayWidget::markStreamedReady() {
+	Expects(_streamed != nullptr);
+
+	if (_streamed->ready) {
+		return;
+	}
+	_streamed->ready = true;
+	if (const auto sponsored = _streamed->sponsored.get()) {
+		sponsored->start();
+	}
 }
 
 void OverlayWidget::initStreamingThumbnail() {
@@ -4068,7 +4177,7 @@ void OverlayWidget::initStreamingThumbnail() {
 }
 
 void OverlayWidget::streamingReady(Streaming::Information &&info) {
-	_streamed->ready = true;
+	markStreamedReady();
 	if (videoShown()) {
 		applyVideoSize();
 		_streamedQualityChangeFrame = QImage();
@@ -4090,6 +4199,7 @@ void OverlayWidget::applyVideoSize() {
 
 bool OverlayWidget::createStreamingObjects() {
 	Expects(_photo || _document);
+	Expects(!_streamed);
 
 	const auto origin = fileOrigin();
 	const auto callback = [=] { waitingAnimationCallback(); };
@@ -4122,6 +4232,18 @@ bool OverlayWidget::createStreamingObjects() {
 			_body,
 			static_cast<PlaybackControls::Delegate*>(this));
 		_streamed->controls->show();
+		_streamed->sponsored = PlaybackSponsored::Has(_message)
+			? std::make_unique<PlaybackSponsored>(
+				_streamed->controls.get(),
+				uiShow(),
+				_message)
+			: nullptr;
+		if (const auto sponsored = _streamed->sponsored.get()) {
+			_layerBg->layerShownValue(
+			) | rpl::start_with_next([=](bool shown) {
+				sponsored->setPaused(shown);
+			}, sponsored->lifetime());
+		}
 		refreshClipControllerGeometry();
 	}
 	return true;
@@ -4251,7 +4373,7 @@ void OverlayWidget::initThemePreview() {
 	const auto weakSession = base::make_weak(&_document->session());
 	const auto path = _document->location().name();
 	const auto id = _themePreviewId = base::RandomValue<uint64>();
-	const auto weak = Ui::MakeWeak(_widget);
+	const auto weak = base::make_weak(_widget);
 	crl::async([=, data = std::move(current)]() mutable {
 		auto preview = GeneratePreview(
 			bytes,
@@ -4509,6 +4631,8 @@ void OverlayWidget::playbackControlsSeekFinished(crl::time position) {
 void OverlayWidget::playbackControlsVolumeChanged(float64 volume) {
 	if (_streamed) {
 		Player::mixer()->setVideoVolume(volume);
+	} else if (_videoStream) {
+		_videoStream->setVolume(volume);
 	}
 	Core::App().settings().setVideoVolume(volume);
 	Core::App().saveSettingsDelayed();
@@ -4716,6 +4840,8 @@ void OverlayWidget::storiesJumpTo(
 		displayPhoto(photo, anim::activation::background);
 	}, [&](not_null<DocumentData*> document) {
 		displayDocument(document, anim::activation::background);
+	}, [&](const std::shared_ptr<Data::GroupCall> &call) {
+		displayVideoStream(call, anim::activation::background);
 	}, [&](v::null_t) {
 		displayDocument(nullptr, anim::activation::background);
 	});
@@ -4730,6 +4856,8 @@ void OverlayWidget::storiesRedisplay(not_null<Data::Story*> story) {
 		displayPhoto(photo, anim::activation::background);
 	}, [&](not_null<DocumentData*> document) {
 		displayDocument(document, anim::activation::background);
+	}, [&](const std::shared_ptr<Data::GroupCall> &call) {
+		displayVideoStream(call, anim::activation::background);
 	}, [&](v::null_t) {
 		displayDocument(nullptr, anim::activation::background);
 	});
@@ -4989,7 +5117,11 @@ void OverlayWidget::paint(not_null<Renderer*> renderer) {
 			}
 		}
 	} else if (_stories) {
-		// Unsupported story.
+		if (_videoStream) {
+			renderer->paintVideoStream();
+		} else {
+			// Unsupported story.
+		}
 	} else if (_themePreviewShown) {
 		renderer->paintThemePreview(_themePreviewRect);
 	} else if (documentBubbleShown() && !_docRect.isEmpty()) {
@@ -5559,7 +5691,7 @@ void OverlayWidget::handleKeyPress(not_null<QKeyEvent*> e) {
 			activateControls();
 		}
 		moveToNext(-1);
-	} else if (key == Qt::Key_H) {
+	} else if (key == Qt::Key_H && !_stories) {
 		if (_flip & Qt::Horizontal) {
 			_flip &= ~Qt::Horizontal;
 		} else {
@@ -5569,7 +5701,7 @@ void OverlayWidget::handleKeyPress(not_null<QKeyEvent*> e) {
 			validatePhotoCurrentImage();
 			redisplayContent();
 		}
-	} else if (key == Qt::Key_V) {
+	} else if (key == Qt::Key_V && !_stories) {
 		if (_flip & Qt::Vertical) {
 			_flip &= ~Qt::Vertical;
 		} else {
@@ -5806,12 +5938,15 @@ void OverlayWidget::setStoriesPeer(PeerData *peer) {
 	const auto session = peer ? &peer->session() : nullptr;
 	if (!session && !_storiesSession) {
 		Assert(!_stories);
+		Assert(!_videoStream);
 	} else if (!peer) {
+		_videoStream = nullptr;
 		_stories = nullptr;
 		_storiesSession = nullptr;
 		_storiesChanged.fire({});
 		updateNavigationControlsGeometry();
 	} else if (_storiesSession != session) {
+		_videoStream = nullptr;
 		_stories = nullptr;
 		_storiesSession = session;
 		const auto delegate = static_cast<Stories::Delegate*>(this);
@@ -6007,8 +6142,11 @@ void OverlayWidget::snapXY() {
 	auto ymin = height() - _h, ymax = _minUsedTop;
 	accumulate_min(xmin, (width() - _w) / 2);
 	accumulate_max(xmax, (width() - _w) / 2);
-	accumulate_min(ymin, _skipTop + (_availableHeight - _h) / 2);
-	accumulate_max(ymax, _skipTop + (_availableHeight - _h) / 2);
+	const auto centerY = _fullScreenVideo
+		? (_minUsedTop + (_maxUsedHeight - _h) / 2)
+		: (_skipTop + (_availableHeight - _h) / 2);
+	accumulate_min(ymin, centerY);
+	accumulate_max(ymax, centerY);
 	accumulate_max(_x, xmin);
 	accumulate_min(_x, xmax);
 	accumulate_max(_y, ymin);
@@ -6413,7 +6551,7 @@ bool OverlayWidget::handleTouchEvent(not_null<QTouchEvent*> e) {
 		if (!_touchPress) {
 			break;
 		}
-		auto weak = Ui::MakeWeak(_widget);
+		auto weak = base::make_weak(_widget);
 		if (!_touchMove) {
 			const auto button = _touchRightButton
 				? Qt::RightButton

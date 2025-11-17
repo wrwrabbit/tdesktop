@@ -1068,10 +1068,17 @@ ContactInfo ParseContactInfo(const MTPUser &data) {
 	auto result = ContactInfo();
 	data.match([&](const MTPDuser &data) {
 		result.userId = data.vid().v;
-		const auto color = data.vcolor();
-		result.colorIndex = (color && color->data().vcolor())
-			? color->data().vcolor()->v
-			: PeerColorIndex(result.userId);
+		result.colorIndex = PeerColorIndex(result.userId);
+		if (const auto color = data.vcolor()) {
+			color->match([&](const MTPDpeerColor &data) {
+				if (const auto color = data.vcolor()) {
+					result.colorIndex = color->v;
+				}
+			}, [](const MTPDpeerColorCollectible &) {
+				// themes
+			}, [](const MTPDinputPeerColorCollectible &) {
+			});
+		}
 		if (const auto firstName = data.vfirst_name()) {
 			result.firstName = ParseString(*firstName);
 		}
@@ -1101,10 +1108,17 @@ User ParseUser(const MTPUser &data) {
 	result.info = ParseContactInfo(data);
 	data.match([&](const MTPDuser &data) {
 		result.bareId = data.vid().v;
-		const auto color = data.vcolor();
-		result.colorIndex = (color && color->data().vcolor())
-			? color->data().vcolor()->v
-			: PeerColorIndex(result.bareId);
+		result.colorIndex = PeerColorIndex(result.bareId);
+		if (const auto color = data.vcolor()) {
+			color->match([&](const MTPDpeerColor &data) {
+				if (const auto color = data.vcolor()) {
+					result.colorIndex = color->v;
+				}
+			}, [](const MTPDpeerColorCollectible &) {
+				// themes
+			}, [](const MTPDinputPeerColorCollectible &) {
+			});
+		}
 		if (const auto username = data.vusername()) {
 			result.username = ParseString(*username);
 		}
@@ -1163,12 +1177,25 @@ Chat ParseChat(const MTPChat &data) {
 		result.input = MTP_inputPeerChat(MTP_long(result.bareId));
 	}, [&](const MTPDchannel &data) {
 		result.bareId = data.vid().v;
-		const auto color = data.vcolor();
-		result.colorIndex = (color && color->data().vcolor())
-			? color->data().vcolor()->v
-			: PeerColorIndex(result.bareId);
+		result.colorIndex = PeerColorIndex(result.bareId);
+		if (const auto color = data.vcolor()) {
+			color->match([&](const MTPDpeerColor &data) {
+				if (const auto color = data.vcolor()) {
+					result.colorIndex = color->v;
+				}
+			}, [](const MTPDpeerColorCollectible &) {
+			}, [](const MTPDinputPeerColorCollectible &) {
+			});
+		}
+		result.isMonoforum = data.is_monoforum();
 		result.isBroadcast = data.is_broadcast();
 		result.isSupergroup = data.is_megagroup();
+		result.hasMonoforumAdminRights = data.is_broadcast()
+			&& (data.is_creator()
+				|| (data.vadmin_rights()
+					&& data.vadmin_rights()->data().is_manage_direct_messages()));
+		result.monoforumLinkId
+			= data.vlinked_monoforum_id().value_or_empty();
 		result.title = ParseString(data.vtitle());
 		if (const auto username = data.vusername()) {
 			result.username = ParseString(*username);
@@ -1185,15 +1212,6 @@ Chat ParseChat(const MTPChat &data) {
 			MTP_long(result.bareId),
 			data.vaccess_hash());
 	});
-	return result;
-}
-
-std::map<PeerId, Chat> ParseChatsList(const MTPVector<MTPChat> &data) {
-	auto result = std::map<PeerId, Chat>();
-	for (const auto &chat : data.v) {
-		auto parsed = ParseChat(chat);
-		result.emplace(parsed.id(), std::move(parsed));
-	}
 	return result;
 }
 
@@ -1272,6 +1290,20 @@ std::map<PeerId, Peer> ParsePeersLists(
 	for (const auto &chat : chats.v) {
 		auto parsed = ParseChat(chat);
 		result.emplace(parsed.id(), Peer{ std::move(parsed) });
+	}
+	for (auto &[peerId, parsed] : result) {
+		if (const auto chat = std::get_if<Chat>(&parsed.data)) {
+			if (chat->isMonoforum) {
+				const auto i = result.find(
+					PeerId(ChannelId(chat->monoforumLinkId)));
+				if (i != end(result)) {
+					chat->isMonoforumAdmin
+						= i->second.chat()->hasMonoforumAdminRights;
+					chat->isMonoforumOfPublicBroadcast
+						= !i->second.chat()->username.isEmpty();
+				}
+			}
+		}
 	}
 	return result;
 }
@@ -1404,6 +1436,8 @@ Media ParseMedia(
 		result.content = ParseGiveaway(data);
 	}, [&](const MTPDmessageMediaPaidMedia &data) {
 		result.content = ParsePaidMedia(context, data, folder, date);
+	}, [](const MTPDmessageMediaVideoStream &data) {
+		// Live stories.
 	}, [](const MTPDmessageMediaEmpty &data) {});
 	return result;
 }
@@ -1596,9 +1630,13 @@ ServiceAction ParseServiceAction(
 			.date = data.vschedule_date().v,
 		};
 	}, [&](const MTPDmessageActionSetChatTheme &data) {
-		result.content = ActionSetChatTheme{
-			.emoji = qs(data.vemoticon()),
-		};
+		data.vtheme().match([&](const MTPDchatTheme &data) {
+			result.content = ActionSetChatTheme{
+				.emoji = qs(data.vemoticon()),
+			};
+		}, [&](const MTPDchatThemeUniqueGift &data) {
+			result.content = ActionSetChatTheme{};
+		});
 	}, [&](const MTPDmessageActionChatJoinedByRequest &data) {
 		result.content = ActionChatJoinedByRequest();
 	}, [&](const MTPDmessageActionWebViewDataSentMe &data) {
@@ -1612,7 +1650,7 @@ ServiceAction ParseServiceAction(
 		content.cost = Ui::FillAmountAndCurrency(
 			data.vamount().v,
 			qs(data.vcurrency())).toUtf8();
-		content.months = data.vmonths().v;
+		content.days = data.vdays().v;
 		result.content = content;
 	}, [&](const MTPDmessageActionTopicCreate &data) {
 		auto content = ActionTopicCreate();
@@ -1655,7 +1693,7 @@ ServiceAction ParseServiceAction(
 			: PeerId();
 		content.viaGiveaway = data.is_via_giveaway();
 		content.unclaimed = data.is_unclaimed();
-		content.months = data.vmonths().v;
+		content.days = data.vdays().v;
 		content.code = data.vslug().v;
 		result.content = content;
 	}, [&](const MTPDmessageActionGiveawayLaunch &data) {
@@ -1797,6 +1835,14 @@ ServiceAction ParseServiceAction(
 			: data.vduration().value_or_empty()
 			? State::Hangup
 			: State::Invitation;
+		result.content = content;
+	}, [&](const MTPDmessageActionSuggestBirthday &data) {
+		auto content = ActionSuggestBirthday();
+		const auto &fields = data.vbirthday().data();
+		content.birthday = Birthday(
+			fields.vday().v,
+			fields.vmonth().v,
+			fields.vyear().value_or_empty());
 		result.content = content;
 	}, [](const MTPDmessageActionEmpty &data) {});
 	return result;
@@ -2191,7 +2237,13 @@ const DialogInfo *DialogsInfo::item(int index) const {
 
 DialogInfo::Type DialogTypeFromChat(const Chat &chat) {
 	using Type = DialogInfo::Type;
-	return chat.username.isEmpty()
+	return (chat.isMonoforum && !chat.isMonoforumAdmin)
+		? Type::Personal
+		: (chat.isMonoforumAdmin && chat.isMonoforumOfPublicBroadcast)
+		? Type::PublicSupergroup
+		: chat.isMonoforumAdmin
+		? Type::PrivateSupergroup
+		: chat.username.isEmpty()
 		? (chat.isBroadcast
 			? Type::PrivateChannel
 			: chat.isSupergroup
@@ -2252,6 +2304,11 @@ DialogsInfo ParseDialogsInfo(const MTPmessages_Dialogs &data) {
 				info.migratedToChannelId = peer.chat()
 					? peer.chat()->migratedToChannelId
 					: 0;
+				info.isMonoforum = peer.chat()
+					&& peer.chat()->isMonoforum;
+				info.monoforumBroadcastInput = peer.chat()
+					? peer.chat()->monoforumBroadcastInput
+					: MTPInputPeer(MTP_inputPeerEmpty());
 			}
 			info.topMessageId = fields.vtop_message().v;
 			const auto messageIt = messages.find(MessageId{
@@ -2290,6 +2347,10 @@ DialogInfo DialogInfoFromChat(const Chat &data) {
 	result.topMessageId = 0;
 	result.type = DialogTypeFromChat(data);
 	result.migratedToChannelId = data.migratedToChannelId;
+	result.isMonoforum = data.isMonoforum;
+	if (data.isMonoforumAdmin) {
+		result.monoforumBroadcastInput = data.monoforumBroadcastInput;
+	}
 	return result;
 }
 
@@ -2424,7 +2485,8 @@ void FinalizeDialogsInfo(DialogsInfo &info, const Settings &settings) {
 			}
 			Unexpected("Type in ApiWrap::onlyMyMessages.");
 		}();
-		dialog.onlyMyMessages = ((settings.fullChats & setting) != setting);
+		dialog.onlyMyMessages = (dialog.type != DialogType::Personal)
+			&& ((settings.fullChats & setting) != setting);
 
 		ranges::sort(dialog.splits);
 	}
