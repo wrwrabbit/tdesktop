@@ -401,10 +401,12 @@ void Viewport::RendererGL::deinit(QOpenGLFunctions *f) {
 	_noiseFramebuffer.destroy(f);
 	for (auto &data : _tileData) {
 		data.textures.destroy(f);
+		data.framebuffers.destroy(f);
 	}
 	_tileData.clear();
 	_tileDataIndices.clear();
 	_buttons.destroy(f);
+	_names.destroy(f);
 }
 
 void Viewport::RendererGL::setDefaultViewport(QOpenGLFunctions &f) {

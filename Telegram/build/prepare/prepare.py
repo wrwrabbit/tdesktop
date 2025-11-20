@@ -518,7 +518,7 @@ if not mac or 'build-stackwalk' in options:
 win:
     git clone https://github.com/desktop-app/gyp.git
     cd gyp
-    git checkout b5ef901cf1
+    git checkout 5e2425c47b
 mac:
     python3 -m pip install \\
         --ignore-installed \\

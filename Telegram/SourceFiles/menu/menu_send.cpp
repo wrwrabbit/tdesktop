@@ -634,7 +634,7 @@ FillMenuResult AttachSendMenuEffect(
 	using namespace HistoryView::Reactions;
 	const auto effect = std::make_shared<base::weak_qptr<EffectPreview>>();
 	const auto position = desiredPositionOverride.value_or(QCursor::pos());
-	const auto selector = (show && details.effectAllowed)
+	const auto selector = details.effectAllowed
 		? AttachSelectorToMenu(
 			menu,
 			position,
@@ -691,6 +691,8 @@ FillMenuResult FillEditCommentPriceMenu(
 		Fn<void(Action, Details)> action,
 		const style::ComposeIcons *iconsOverride,
 		std::optional<QPoint> desiredPositionOverride) {
+	Expects(show != nullptr);
+
 	const auto &icons = iconsOverride
 		? *iconsOverride
 		: st::defaultComposeIcons;
@@ -722,7 +724,7 @@ FillMenuResult FillEditCommentPriceMenu(
 
 FillMenuResult FillSendMenu(
 		not_null<Ui::PopupMenu*> menu,
-		std::shared_ptr<ChatHelpers::Show> show,
+		std::shared_ptr<ChatHelpers::Show> maybeShow,
 		Details details,
 		Fn<void(Action, Details)> action,
 		const style::ComposeIcons *iconsOverride,
@@ -738,7 +740,7 @@ FillMenuResult FillSendMenu(
 	} else if (type == Type::EditCommentPrice) {
 		return FillEditCommentPriceMenu(
 			menu,
-			show,
+			maybeShow,
 			details,
 			action,
 			iconsOverride,
@@ -821,10 +823,10 @@ FillMenuResult FillSendMenu(
 			&icons.menuPrice);
 	}
 
-	if (show) {
+	if (maybeShow) {
 		return AttachSendMenuEffect(
 			menu,
-			show,
+			maybeShow,
 			details,
 			action,
 			desiredPositionOverride);
@@ -836,7 +838,7 @@ FillMenuResult FillSendMenu(
 
 void SetupMenuAndShortcuts(
 		not_null<Ui::RpWidget*> button,
-		std::shared_ptr<ChatHelpers::Show> show,
+		std::shared_ptr<ChatHelpers::Show> maybeShow,
 		Fn<Details()> details,
 		Fn<void(Action, Details)> action,
 		const style::PopupMenu *stOverride,
@@ -848,7 +850,7 @@ void SetupMenuAndShortcuts(
 			stOverride ? *stOverride : st::popupMenuWithIcons);
 		const auto result = FillSendMenu(
 			*menu,
-			show,
+			maybeShow,
 			details(),
 			action,
 			iconsOverride);

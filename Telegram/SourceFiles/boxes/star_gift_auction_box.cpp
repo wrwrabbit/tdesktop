@@ -300,9 +300,13 @@ object_ptr<RpWidget> MakeAuctionInfoBlocks(
 	auto bidTitle = rpl::duplicate(
 		stateValue
 	) | rpl::map([=](const Data::GiftAuctionState &state) {
-		return TextWithEntities{
-			star
-		}.append(' ').append(Lang::FormatCountDecimal(state.minBidAmount));
+		const auto count = int(state.minBidAmount);
+		const auto text = (count >= 10'000'000)
+			? Lang::FormatCountToShort(count).string
+			: (count >= 1000'000)
+			? Lang::FormatCountToShort(count, true).string
+			: Lang::FormatCountDecimal(count);
+		return tr::marked(star).append(' ').append(text);
 	});
 	auto minimal = rpl::duplicate(
 		stateValue
@@ -841,6 +845,8 @@ void AuctionGotGiftsBox(
 		tr::lng_auction_bought_title(lt_count, rpl::single(count * 1.)));
 	box->setWidth(st::boxWideWidth);
 	box->setMaxHeight(st::boxWideWidth * 2);
+	box->addButton(tr::lng_box_ok(), [=] { box->closeBox(); });
+	box->addTopButton(st::boxTitleClose, [=] { box->closeBox(); });
 
 	auto helper = Text::CustomEmojiHelper(Core::TextContext({
 		.session = &show->session(),

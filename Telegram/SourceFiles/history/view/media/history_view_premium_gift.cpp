@@ -114,7 +114,7 @@ TextWithEntities PremiumGift::title() {
 		? tr::lng_action_gift_premium_months(
 			tr::now,
 			lt_count,
-			_data.count,
+			premiumMonths(),
 			WithEntities)
 		: _data.unclaimed
 		? tr::lng_prize_unclaimed_title(tr::now, WithEntities)
@@ -242,7 +242,7 @@ TextWithEntities PremiumGift::subtitle() {
 			: tr::lng_prize_gift_duration)(
 				tr::now,
 				lt_duration,
-				Ui::Text::Bold(GiftDuration(_data.count)),
+				Ui::Text::Bold(GiftDuration(premiumDays())),
 				Ui::Text::RichLangValue));
 	return result;
 }
@@ -457,6 +457,14 @@ int PremiumGift::credits() const {
 	return (_data.type == Data::GiftType::Credits) ? _data.count : 0;
 }
 
+int PremiumGift::premiumDays() const {
+	return (_data.type == Data::GiftType::Premium) ? _data.count : 0;
+}
+
+int PremiumGift::premiumMonths() const {
+	return premiumDays() / 30;
+}
+
 void PremiumGift::ensureStickerCreated() const {
 	if (_sticker) {
 		return;
@@ -485,7 +493,9 @@ void PremiumGift::ensureStickerCreated() const {
 	const auto &session = _parent->history()->session();
 	auto &packs = session.giftBoxStickersPacks();
 	const auto count = credits();
-	const auto months = count ? packs.monthsForStars(count) : _data.count;
+	const auto months = count
+		? packs.monthsForStars(count)
+		: premiumMonths();
 	if (const auto document = packs.lookup(months)) {
 		if (document->sticker()) {
 			const auto skipPremiumEffect = false;

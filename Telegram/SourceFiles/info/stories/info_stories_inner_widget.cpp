@@ -595,6 +595,29 @@ void InnerWidget::setupList() {
 		this,
 		_controller);
 	const auto raw = _list.data();
+	const auto albumId = _albumId.current();
+	if (albumId && albumId != Data::kStoriesAlbumIdArchive) {
+		raw->setReorderDescriptor({
+			// .filter = [=](HistoryItem *item) {
+			// 	const auto stories = &_peer->owner().stories();
+			// 	const auto &albumIds = stories->albumIds(_peer->id, albumId);
+			// 	const auto storyId = StoryIdFromMsgId(item->id);
+			// 	return !ranges::contains(albumIds.pinnedToTop, storyId);
+			// },
+			.save = [=](
+					int oldPosition,
+					int newPosition,
+					Fn<void()> done,
+					Fn<void()> fail) {
+				reorderAlbumStories(
+					albumId,
+					oldPosition,
+					newPosition,
+					done,
+					fail);
+			}
+		});
+	}
 
 	using namespace rpl::mappers;
 	raw->scrollToRequests(
@@ -1097,6 +1120,54 @@ void InnerWidget::flushAlbumReorder() {
 	}).send();
 
 	_pendingAlbumReorder = false;
+}
+
+void InnerWidget::reorderAlbumStories(
+		int albumId,
+		int oldPosition,
+		int newPosition,
+		Fn<void()> done,
+		Fn<void()> fail) {
+	const auto &stories = _controller->session().data().stories();
+	const auto ids = stories.albumIds(_peer->id, albumId);
+	const auto list = Data::RespectingPinned(ids);
+
+	if (oldPosition < 0 || newPosition < 0
+		|| oldPosition >= list.size() || newPosition >= list.size()) {
+		fail();
+		return;
+	}
+
+	if (_reorderStoriesRequestId) {
+		_controller->session().api().request(
+			base::take(_reorderStoriesRequestId)).cancel();
+	}
+
+	auto reorderedList = list;
+	base::reorder(reorderedList, oldPosition, newPosition);
+
+	auto order = QVector<MTPint>();
+	order.reserve(reorderedList.size());
+	for (const auto id : reorderedList) {
+		order.push_back(MTP_int(id));
+	}
+
+	_reorderStoriesRequestId = _controller->session().api().request(
+		MTPstories_UpdateAlbum(
+			MTP_flags(MTPstories_UpdateAlbum::Flag::f_order),
+			_peer->input,
+			MTP_int(albumId),
+			MTPstring(),
+			MTPVector<MTPint>(),
+			MTPVector<MTPint>(),
+			MTP_vector<MTPint>(order)
+	)).done([=](const MTPStoryAlbum &result) {
+		_reorderStoriesRequestId = 0;
+		done();
+	}).fail([=] {
+		_reorderStoriesRequestId = 0;
+		fail();
+	}).send();
 }
 
 } // namespace Info::Stories

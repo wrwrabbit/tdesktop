@@ -234,7 +234,7 @@ giftBoxTextField: InputField(defaultInputField) {
 	style: defaultTextStyle;
 }
 giftBoxTextPadding: margins(20px, 15px, 20px, 11px);
-giftBoxHiddenMark: icon{{ "menu/stealth", premiumButtonFg }};
+giftBoxHiddenMark: icon{{ "chat/mini_gift_hidden", premiumButtonFg, margins(4px, 4px, 4px, 4px) }};
 giftListAbout: FlatLabel(defaultFlatLabel) {
 	minWidth: 240px;
 	textFg: membersAboutLimitFg;
