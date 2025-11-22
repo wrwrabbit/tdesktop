@@ -45,6 +45,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/vertical_list.h"
+#include "ui/ui_utility.h"
 #include "styles/style_credits.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_info.h"
@@ -577,6 +578,7 @@ void InnerWidget::createAboutArchive() {
 void InnerWidget::visibleTopBottomUpdated(
 		int visibleTop,
 		int visibleBottom) {
+	_visibleRange = { visibleTop, visibleBottom };
 	setChildVisibleTopBottom(_list, visibleTop, visibleBottom);
 }
 
@@ -595,6 +597,30 @@ void InnerWidget::setupList() {
 		this,
 		_controller);
 	const auto raw = _list.data();
+	const auto albumId = _albumId.current();
+	if (albumId && albumId != Data::kStoriesAlbumIdArchive) {
+		raw->setReorderDescriptor({
+			// .filter = [=](HistoryItem *item) {
+			// 	const auto stories = &_peer->owner().stories();
+			// 	const auto &albumIds = stories->albumIds(_peer->id, albumId);
+			// 	const auto storyId = StoryIdFromMsgId(item->id);
+			// 	return !ranges::contains(albumIds.pinnedToTop, storyId);
+			// },
+			.save = [=](
+					int oldPosition,
+					int newPosition,
+					Fn<void()> done,
+					Fn<void()> fail) {
+				_peer->owner().stories().albumReorderStories(
+					_peer,
+					albumId,
+					oldPosition,
+					newPosition,
+					done,
+					fail);
+			}
+		});
+	}
 
 	using namespace rpl::mappers;
 	raw->scrollToRequests(
@@ -608,6 +634,10 @@ void InnerWidget::setupList() {
 	_listTops.fire(raw->topValue());
 
 	raw->show();
+
+	Ui::PostponeCall(crl::guard(this, [=] {
+		visibleTopBottomUpdated(_visibleRange.top, _visibleRange.bottom);
+	}));
 }
 
 void InnerWidget::setupEmpty() {

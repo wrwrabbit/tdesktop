@@ -18,6 +18,7 @@ extern const char kAlternativeScrollProcessing[];
 struct FlexibleScrollData {
 	rpl::event_stream<int> contentHeightValue;
 	rpl::event_stream<int> fillerWidthValue;
+	rpl::event_stream<> backButtonEnables;
 };
 
 class FlexibleScrollHelper final {
@@ -34,6 +35,8 @@ private:
 	void setupScrollAnimation();
 	void setupScrollHandling();
 	void setupScrollHandlingWithFilter();
+	void scrollToY(int value);
+	void applyScrollToPinnedLayout(int scrollCurrent);
 
 	const not_null<Ui::ScrollArea*> _scroll;
 	const not_null<Ui::RpWidget*> _inner;

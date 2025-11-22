@@ -30,6 +30,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_menu_icons.h"
 
+namespace HistoryView::details {
+
+not_null<Main::Session*> SessionFromShow(
+		const std::shared_ptr<ChatHelpers::Show> &show) {
+	return &show->session();
+}
+
+} // namespace HistoryView::details
+
 namespace HistoryView {
 namespace {
 
@@ -75,7 +84,8 @@ bool CanScheduleUntilOnline(not_null<PeerData*> peer) {
 
 void ScheduleBox(
 		not_null<Ui::GenericBox*> box,
-		std::shared_ptr<ChatHelpers::Show> show,
+		not_null<Main::Session*> session,
+		std::shared_ptr<ChatHelpers::Show> maybeShow,
 		const Api::SendOptions &initialOptions,
 		const SendMenu::Details &details,
 		Fn<void(Api::SendOptions)> done,
@@ -114,12 +124,14 @@ void ScheduleBox(
 	});
 
 	if (repeat) {
+		const auto boxShow = box->uiShow();
 		const auto showPremiumPromo = [=] {
-			if (show->session().premium()) {
+			if (session->premium()) {
 				return false;
 			}
 			Settings::ShowPremiumPromoToast(
-				show,
+				Main::MakeSessionShow(boxShow, session),
+				ChatHelpers::ResolveWindowDefault(),
 				tr::lng_schedule_repeat_promo(
 					tr::now,
 					lt_link,
@@ -131,16 +143,16 @@ void ScheduleBox(
 			return true;
 		};
 		auto locked = Data::AmPremiumValue(
-			&show->session()
+			session
 		) | rpl::map([=](bool premium) {
 			return !premium;
 		});
 		const auto row = box->addRow(Ui::ChooseRepeatPeriod(box, {
-			.value = show->session().premium() ? *repeat : TimeId(),
+			.value = session->premium() ? *repeat : TimeId(),
 			.locked = std::move(locked),
 			.filter = showPremiumPromo,
 			.changed = [=](TimeId value) { *repeat = value; },
-			.test = show->session().isTestMode(),
+			.test = session->isTestMode(),
 		}), style::al_top);
 		std::move(descriptor.width) | rpl::start_with_next([=](int width) {
 			row->setNaturalWidth(width);
@@ -169,7 +181,7 @@ void ScheduleBox(
 	});
 	SetupMenuAndShortcuts(
 		descriptor.submit.data(),
-		show,
+		maybeShow,
 		[=] { return childDetails; },
 		sendAction);
 

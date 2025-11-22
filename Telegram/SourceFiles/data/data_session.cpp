@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/mime_type.h" // Core::IsMimeSticker
 #include "ui/image/image_location_factory.h" // Images::FromPhotoSize
 #include "ui/text/format_values.h" // Ui::FormatPhone
+#include "ui/color_int_conversion.h"
 #include "export/export_manager.h"
 #include "export/view/export_view_panel_controller.h"
 #include "mtproto/mtproto_config.h"
@@ -1912,6 +1913,14 @@ void Session::notifyGiftsUpdate(GiftsUpdate &&update) {
 
 rpl::producer<GiftsUpdate> Session::giftsUpdates() const {
 	return _giftsUpdates.events();
+}
+
+void Session::notifyGiftAuctionGot(GiftAuctionGot &&update) {
+	_giftAuctionGots.fire(std::move(update));
+}
+
+rpl::producer<GiftAuctionGot> Session::giftAuctionGots() const {
+	return _giftAuctionGots.events();
 }
 
 HistoryItem *Session::changeMessageId(PeerId peerId, MsgId wasId, MsgId nowId) {
@@ -3819,6 +3828,7 @@ not_null<WebPageData*> Session::processWebpage(
 		nullptr,
 		nullptr,
 		nullptr,
+		nullptr,
 		0,
 		QString(),
 		false,
@@ -3889,6 +3899,7 @@ not_null<WebPageData*> Session::webpage(
 		std::move(iv),
 		std::move(stickerSet),
 		std::move(uniqueGift),
+		nullptr,
 		duration,
 		author,
 		hasLargeMedia,
@@ -3996,6 +4007,35 @@ void Session::webpageApplyFields(
 		return nullptr;
 	};
 
+	using WebPageAuctionPtr = std::unique_ptr<WebPageAuction>;
+	const auto lookupAuction = [&]() -> WebPageAuctionPtr {
+		const auto toUint = [](const MTPint &c) {
+			return (uint32(1) << 24) | uint32(c.v);
+		};
+		if (const auto attributes = data.vattributes()) {
+			for (const auto &attribute : attributes->v) {
+				return attribute.match([&](
+						const MTPDwebPageAttributeStarGiftAuction &data) {
+					const auto gift = Api::FromTL(_session, data.vgift());
+					if (!gift) {
+						return WebPageAuctionPtr(nullptr);
+					}
+					auto auction = std::make_unique<WebPageAuction>();
+					auction->auctionGift = std::make_shared<StarGift>(*gift);
+					auction->endDate = data.vend_date().v;
+					auction->centerColor = Ui::ColorFromSerialized(
+						toUint(data.vcenter_color()));
+					auction->edgeColor = Ui::ColorFromSerialized(
+						toUint(data.vedge_color()));
+					auction->textColor = Ui::ColorFromSerialized(
+						toUint(data.vtext_color()));
+					return auction;
+				}, [](const auto &) -> WebPageAuctionPtr { return nullptr; });
+			}
+		}
+		return nullptr;
+	};
+
 	auto story = (Data::Story*)nullptr;
 	auto storyId = FullStoryId();
 	if (const auto attributes = data.vattributes()) {
@@ -4089,6 +4129,7 @@ void Session::webpageApplyFields(
 		std::move(iv),
 		lookupStickerSet(),
 		lookupUniqueGift(),
+		lookupAuction(),
 		data.vduration().value_or_empty(),
 		qs(data.vauthor().value_or_empty()),
 		data.is_has_large_media(),
@@ -4111,6 +4152,7 @@ void Session::webpageApplyFields(
 		std::unique_ptr<Iv::Data> iv,
 		std::unique_ptr<WebPageStickerSet> stickerSet,
 		std::shared_ptr<UniqueGift> uniqueGift,
+		std::unique_ptr<WebPageAuction> auction,
 		int duration,
 		const QString &author,
 		bool hasLargeMedia,
@@ -4131,6 +4173,7 @@ void Session::webpageApplyFields(
 		std::move(iv),
 		std::move(stickerSet),
 		std::move(uniqueGift),
+		std::move(auction),
 		duration,
 		author,
 		hasLargeMedia,

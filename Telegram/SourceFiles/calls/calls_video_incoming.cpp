@@ -163,6 +163,7 @@ void Panel::Incoming::RendererGL::init(QOpenGLFunctions &f) {
 }
 
 void Panel::Incoming::RendererGL::deinit(QOpenGLFunctions *f) {
+	_controlsShadowImage.destroy(f);
 	_textures.destroy(f);
 	_imageProgram = std::nullopt;
 	_texturedVertexShader = nullptr;

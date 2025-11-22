@@ -13,6 +13,7 @@ class Show;
 
 namespace Data {
 struct GiftAuctionState;
+struct ActiveAuctions;
 } // namespace Data
 
 namespace Info::PeerGifts {
@@ -27,6 +28,7 @@ namespace Ui {
 
 class BoxContent;
 class RoundButton;
+class GenericBox;
 
 [[nodiscard]] rpl::lifetime ShowStarGiftAuction(
 	not_null<Window::SessionController*> controller,
@@ -52,5 +54,25 @@ void SetAuctionButtonCountdownText(
 	not_null<RoundButton*> button,
 	AuctionButtonCountdownType type,
 	rpl::producer<Data::GiftAuctionState> value);
+
+void AuctionAboutBox(
+	not_null<GenericBox*> box,
+	int rounds,
+	int giftsPerRound,
+	Fn<void(Fn<void()> close)> understood);
+
+[[nodiscard]] TextWithEntities ActiveAuctionsTitle(
+	const Data::ActiveAuctions &auctions);
+struct ManyAuctionsState {
+	TextWithEntities text;
+	bool someOutbid = false;
+};
+[[nodiscard]] ManyAuctionsState ActiveAuctionsState(
+	const Data::ActiveAuctions &auctions);
+[[nodiscard]] rpl::producer<TextWithEntities> ActiveAuctionsButton(
+	const Data::ActiveAuctions &auctions);
+[[nodiscard]] Fn<void()> ActiveAuctionsCallback(
+	not_null<Window::SessionController*> window,
+	const Data::ActiveAuctions &auctions);
 
 } // namespace Ui

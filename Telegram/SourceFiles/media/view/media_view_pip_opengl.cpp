@@ -232,6 +232,11 @@ void Pip::RendererGL::init(QOpenGLFunctions &f) {
 }
 
 void Pip::RendererGL::deinit(QOpenGLFunctions *f) {
+	_radialImage.destroy(f);
+	_controlsImage.destroy(f);
+	_playbackImage.destroy(f);
+	_volumeControllerImage.destroy(f);
+	_shadowImage.destroy(f);
 	_textures.destroy(f);
 	_imageProgram = std::nullopt;
 	_texturedVertexShader = nullptr;

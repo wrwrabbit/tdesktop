@@ -38,11 +38,22 @@ namespace tr {
 namespace details {
 
 struct MarkedProjection {
+	[[nodiscard]] TextWithEntities operator()() const {
+		return {};
+	}
 	[[nodiscard]] TextWithEntities operator()(const QString &value) const {
 		return TextWithEntities{ value };
 	}
 	[[nodiscard]] TextWithEntities operator()(QString &&value) const {
 		return TextWithEntities{ std::move(value) };
+	}
+	[[nodiscard]] TextWithEntities operator()(
+			const TextWithEntities &value) const {
+		return value;
+	}
+	[[nodiscard]] TextWithEntities operator()(
+			TextWithEntities &&value) const {
+		return std::move(value);
 	}
 };
 

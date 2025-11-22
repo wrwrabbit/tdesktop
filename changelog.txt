@@ -1,3 +1,22 @@
+6.3.3 (21.11.25)
+
+- Some more improvements for gift auctions.
+
+6.3.2 (20.11.25)
+
+- Improved support for gift auctions.
+- Reorder stories in stories albums in My Profile.
+- Bug fixes in new profile cover design.
+- Add your Saved Music to data export.
+
+6.3.1 (17.11.25)
+
+- Reorder saved music in My Profile.
+- Fix new cover overlapping information in My Profile.
+- Fix opening stories from My Profile.
+- Fix media viewer breaking after viewing Live Stories.
+- Fix several possible crashes.
+
 6.3 (15.11.25)
 
 - Support for Gift auctions.

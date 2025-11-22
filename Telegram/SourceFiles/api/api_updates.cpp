@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/notify/data_notify_settings.h"
 #include "data/stickers/data_stickers.h"
 #include "data/data_saved_messages.h"
+#include "data/data_saved_sublist.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "data/data_chat.h"
@@ -43,6 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_histories.h"
 #include "data/data_folder.h"
 #include "data/data_forum.h"
+#include "data/data_forum_topic.h"
 #include "data/data_send_action.h"
 #include "data/data_stories.h"
 #include "data/data_message_reactions.h"
@@ -1704,7 +1706,13 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 								local->history()->peer,
 								local->date());
 						}
-						local->setRealId(d.vid().v);
+						local->setRealId(newId);
+						if (const auto topic = local->topic()) {
+							topic->applyMaybeLast(local);
+						}
+						if (const auto sublist = local->savedSublist()) {
+							sublist->applyMaybeLast(local);
+						}
 					}
 				}
 			} else {
