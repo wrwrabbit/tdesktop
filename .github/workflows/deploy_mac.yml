@@ -7,7 +7,7 @@ on:
 jobs:
   build-libraries:
     name: Libraries
-    runs-on: macos-15-intel
+    runs-on: macos-latest
     env:
       REPO_NAME: ${{ github.event.repository.name }}
 
@@ -50,7 +50,7 @@ jobs:
     environment: Release
     needs: build-libraries
     name: Telegram (${{ matrix.arch }})
-    runs-on: macos-15-latest
+    runs-on: macos-latest
 
     strategy:
       matrix:
