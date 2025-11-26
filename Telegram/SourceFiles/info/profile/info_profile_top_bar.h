@@ -183,6 +183,7 @@ private:
 	void updateStoryOutline(std::optional<QColor> edgeColor);
 	void paintStoryOutline(QPainter &p, const QRect &geometry);
 	void updateStatusPosition(float64 progressCurrent);
+	[[nodiscard]] int calculateRightButtonsWidth() const;
 	[[nodiscard]] const style::FlatLabel &statusStyle() const;
 	void setupStatusWithRating();
 	[[nodiscard]] TopBarActionButtonStyle mapActionStyle(
@@ -244,12 +245,15 @@ private:
 	std::vector<AnimatedPatternPoint> _animatedPoints;
 	QRect _lastUserpicRect;
 
+	base::unique_qptr<Ui::AbstractButton> _userpicButton;
+
 	Ui::PeerUserpicView _userpicView;
 	InMemoryKey _userpicUniqueKey;
 	QImage _cachedUserpic;
 	QImage _monoforumMask;
 	std::unique_ptr<Ui::VideoUserpicPlayer> _videoUserpicPlayer;
 	std::unique_ptr<TopicIconView> _topicIconView;
+	rpl::lifetime _userpicLoadingLifetime;
 
 	base::unique_qptr<Ui::IconButton> _close;
 	base::unique_qptr<Ui::FadeWrap<Ui::IconButton>> _back;
@@ -260,8 +264,6 @@ private:
 	base::unique_qptr<Ui::PopupMenu> _peerMenu;
 
 	Ui::RpWidget *_actionMore = nullptr;
-
-	base::unique_qptr<Ui::AbstractButton> _userpicButton;
 
 	base::unique_qptr<Ui::HorizontalFitContainer> _actions;
 

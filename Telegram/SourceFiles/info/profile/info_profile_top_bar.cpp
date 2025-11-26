@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/unixtime.h"
 #include "boxes/peers/edit_peer_info_box.h" // EditPeerInfoBox::Available.
+#include "boxes/peers/edit_forum_topic_box.h"
 #include "boxes/moderate_messages_box.h"
 #include "boxes/report_messages_box.h"
 #include "boxes/star_gift_box.h"
@@ -84,10 +85,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/widgets/tooltip.h"
 #include "ui/wrap/fade_wrap.h"
 #include "window/themes/window_theme.h"
 #include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
+#include "ui/text/text_utilities.h"
+#include "ui/toast/toast.h"
+#include "boxes/sticker_set_box.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_chat.h"
@@ -102,6 +107,41 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Info::Profile {
 namespace {
+
+class Userpic final
+	: public Ui::AbstractButton
+	, public Ui::AbstractTooltipShower {
+public:
+	Userpic(QWidget *parent, Fn<bool()> hasStories)
+	: Ui::AbstractButton(parent)
+	, _hasStories(std::move(hasStories)) {
+		installEventFilter(this);
+	}
+
+	QString tooltipText() const override {
+		return _hasStories() ? tr::lng_view_button_story(tr::now) : QString();
+	}
+
+	QPoint tooltipPos() const override {
+		return QCursor::pos();
+	}
+
+	bool tooltipWindowActive() const override {
+		return Ui::AppInFocus() && Ui::InFocusChain(window());
+	}
+
+protected:
+	bool eventFilter(QObject *obj, QEvent *e) override {
+		if (obj == this && e->type() == QEvent::Enter && _hasStories()) {
+			Ui::Tooltip::Show(1000, this);
+		}
+		return Ui::AbstractButton::eventFilter(obj, e);
+	}
+
+private:
+	Fn<bool()> _hasStories;
+
+};
 
 constexpr auto kWaitBeforeGiftBadge = crl::time(1000);
 constexpr auto kGiftBadgeGlares = 3;
@@ -461,9 +501,12 @@ void TopBar::adjustColors(const std::optional<QColor> &edgeColor) {
 		return edgeColor
 			&& (kMinContrast > Ui::CountContrast(color->c, *edgeColor));
 	};
+	const auto collectible = effectiveCollectible();
 	const auto shouldOverrideTitle = shouldOverride(_title->st().textFg);
-	const auto shouldOverrideStatus = shouldOverride(_status->st().textFg);
-	_title->setTextColorOverride(shouldOverrideTitle
+	const auto shouldOverrideStatus = shouldOverrideTitle; // shouldOverride(_status->st().textFg);
+	_title->setTextColorOverride(collectible
+		? collectible->textColor
+		: shouldOverrideTitle
 		? std::optional<QColor>(st::groupCallMembersFg->c)
 		: std::nullopt);
 	if (!_showLastSeen->isHidden()) {
@@ -503,7 +546,9 @@ void TopBar::adjustColors(const std::optional<QColor> &edgeColor) {
 		}, _status->lifetime());
 		_statusLabel = std::make_unique<StatusLabel>(_status.data(), _peer);
 		_statusLabel->setMembersLinkCallback(membersLinkCallback);
-		_status->setTextColorOverride(shouldOverrideStatus
+		_status->setTextColorOverride(collectible
+			? collectible->textColor
+			: shouldOverrideStatus
 			? std::optional<QColor>(st::groupCallVideoSubTextFg->c)
 			: std::nullopt);
 		_statusLabel->setColorized(!shouldOverrideStatus);
@@ -542,6 +587,9 @@ void TopBar::adjustColors(const std::optional<QColor> &edgeColor) {
 }
 
 void TopBar::updateCollectibleStatus() {
+	if (width() <= 0) {
+		return;
+	}
 	const auto collectible = effectiveCollectible();
 	const auto colorProfile = effectiveColorProfile();
 	_hasGradientBg = (collectible != nullptr)
@@ -831,13 +879,21 @@ void TopBar::setupActions(not_null<Window::SessionController*> controller) {
 	if (chechMax()) {
 		return;
 	}
-	if (EditPeerInfoBox::Available(peer)) {
+	if ((topic && topic->canEdit()) || EditPeerInfoBox::Available(peer)) {
 		const auto manage = Ui::CreateChild<TopBarActionButton>(
 			this,
 			tr::lng_profile_action_short_manage(tr::now),
 			st::infoProfileTopBarActionManage);
 		manage->setClickedCallback([=, window = controller] {
-			window->showEditPeerBox(peer);
+			if (topic) {
+				window->show(Box(
+					EditForumTopicBox,
+					window,
+					peer->owner().history(peer),
+					topic->rootId()));
+			} else {
+				window->showEditPeerBox(peer);
+			}
 		});
 		buttons.push_back(manage);
 		_actions->add(manage);
@@ -908,32 +964,9 @@ void TopBar::setupActions(not_null<Window::SessionController*> controller) {
 
 void TopBar::setupUserpicButton(
 		not_null<Window::SessionController*> controller) {
-	_userpicButton = base::make_unique_q<Ui::AbstractButton>(this);
-
-	const auto invalidate = [=] {
-		_userpicUniqueKey = InMemoryKey();
-		_userpicButton->setAttribute(
-			Qt::WA_TransparentForMouseEvents,
-			!_peer->userpicPhotoId() && !_hasStories);
-		updateVideoUserpic();
-	};
-
-	rpl::single(
-		rpl::empty_value()
-	) | rpl::then(
-		_peer->session().changes().peerFlagsValue(
-			_peer,
-			Data::PeerUpdate::Flag::Photo
-				| Data::PeerUpdate::Flag::FullInfo) | rpl::to_empty
-	) | rpl::start_with_next(invalidate, lifetime());
-
-	if (const auto broadcast = _peer->monoforumBroadcast()) {
-		_peer->session().changes().peerFlagsValue(
-			broadcast,
-			Data::PeerUpdate::Flag::Photo
-				| Data::PeerUpdate::Flag::FullInfo
-		) | rpl::to_empty | rpl::start_with_next(invalidate, lifetime());
-	}
+	_userpicButton = base::make_unique_q<Userpic>(
+		this,
+		[=] { return _hasStories; });
 
 	const auto openPhoto = [=, peer = _peer] {
 		if (const auto id = peer->userpicPhotoId()) {
@@ -967,12 +1000,21 @@ void TopBar::setupUserpicButton(
 		return true;
 	};
 
-	const auto isContact = [=, peer = _peer] {
+	const auto canChangePhoto = [=, peer = _peer] {
+		if (_topicIconView) {
+			return false;
+		}
 		if (const auto user = peer->asUser()) {
 			return user->isContact()
 				&& !user->isSelf()
 				&& !user->isInaccessible()
 				&& !user->isServiceUser();
+		}
+		if (const auto chat = peer->asChat()) {
+			return chat->canEditInformation();
+		}
+		if (const auto channel = peer->asChannel()) {
+			return channel->canEditInformation();
 		}
 		return false;
 	};
@@ -987,9 +1029,60 @@ void TopBar::setupUserpicButton(
 		return false;
 	};
 
-	const auto choosePhotoCallback = [=](Ui::UserpicButton::ChosenType type) {
+	const auto hasMenu = [=] {
+		if (canChangePhoto()) {
+			return true;
+		}
+		if (canSuggestPhoto()) {
+			return true;
+		}
+		if (_hasStories || canReport()) {
+			return !!_peer->userpicPhotoId();
+		}
+		return false;
+	};
+
+	const auto invalidate = [=] {
+		_userpicUniqueKey = InMemoryKey();
+		const auto hasLeftButton = _peer->userpicPhotoId() || _hasStories;
+		_userpicButton->setAttribute(
+			Qt::WA_TransparentForMouseEvents,
+			!hasLeftButton && !hasMenu());
+		_userpicButton->setPointerCursor(hasLeftButton);
+		updateVideoUserpic();
+		_peer->session().downloaderTaskFinished(
+		) | rpl::filter([=] {
+			return !Ui::PeerUserpicLoading(_userpicView);
+		}) | rpl::start_with_next([=] {
+			update();
+			_userpicLoadingLifetime.destroy();
+		}, _userpicLoadingLifetime);
+		Ui::PostponeCall(this, [=] {
+			update();
+		});
+	};
+
+	rpl::single(
+		rpl::empty_value()
+	) | rpl::then(
+		_peer->session().changes().peerFlagsValue(
+			_peer,
+			Data::PeerUpdate::Flag::Photo
+				| Data::PeerUpdate::Flag::FullInfo) | rpl::to_empty
+	) | rpl::start_with_next(invalidate, lifetime());
+
+	if (const auto broadcast = _peer->monoforumBroadcast()) {
+		_peer->session().changes().peerFlagsValue(
+			broadcast,
+			Data::PeerUpdate::Flag::Photo
+				| Data::PeerUpdate::Flag::FullInfo
+		) | rpl::to_empty | rpl::start_with_next(invalidate, lifetime());
+	}
+
+	using ChosenType = Ui::UserpicButton::ChosenType;
+
+	const auto choosePhotoCallback = [=](ChosenType type) {
 		return [=](QImage &&image) {
-			using ChosenType = Ui::UserpicButton::ChosenType;
 			auto result = Api::PeerPhoto::UserPhoto{
 				std::move(image),
 				0,
@@ -1010,12 +1103,12 @@ void TopBar::setupUserpicButton(
 		};
 	};
 
-	const auto editorData = [=](Ui::UserpicButton::ChosenType type) {
+	const auto editorData = [=](ChosenType type) {
 		const auto user = _peer->asUser();
 		const auto name = (user && !user->firstName.isEmpty())
 			? user->firstName
 			: _peer->name();
-		const auto phrase = (type == Ui::UserpicButton::ChosenType::Suggest)
+		const auto phrase = (type == ChosenType::Suggest)
 			? &tr::lng_profile_suggest_sure
 			: &tr::lng_profile_set_personal_sure;
 		return Editor::EditorData{
@@ -1024,7 +1117,7 @@ void TopBar::setupUserpicButton(
 				lt_user,
 				Ui::Text::Bold(name),
 				Ui::Text::WithEntities),
-			.confirm = ((type == Ui::UserpicButton::ChosenType::Suggest)
+			.confirm = ((type == ChosenType::Suggest)
 				? tr::lng_profile_suggest_button(tr::now)
 				: tr::lng_profile_set_photo_button(tr::now)),
 			.cropType = Editor::EditorData::CropType::Ellipse,
@@ -1032,7 +1125,7 @@ void TopBar::setupUserpicButton(
 		};
 	};
 
-	const auto chooseFile = [=](Ui::UserpicButton::ChosenType type) {
+	const auto chooseFile = [=](ChosenType type) {
 		base::call_delayed(
 			st::defaultRippleAnimation.hideDuration,
 			crl::guard(this, [=] {
@@ -1046,7 +1139,7 @@ void TopBar::setupUserpicButton(
 
 	const auto addFromClipboard = [=](
 			Ui::PopupMenu *menu,
-			Ui::UserpicButton::ChosenType type,
+			ChosenType type,
 			tr::phrase<> text) {
 		if (const auto data = QGuiApplication::clipboard()->mimeData()) {
 			if (data->hasImage()) {
@@ -1068,9 +1161,7 @@ void TopBar::setupUserpicButton(
 
 	_userpicButton->clicks() | rpl::start_with_next([=](
 			Qt::MouseButton button) {
-		if (button == Qt::RightButton
-			&& (_hasStories || canReport() || isContact())
-			&& _peer->userpicPhotoId()) {
+		if (button == Qt::RightButton && hasMenu()) {
 			*menu = base::make_unique_q<Ui::PopupMenu>(
 				this,
 				st::popupMenuWithIcons);
@@ -1095,32 +1186,48 @@ void TopBar::setupUserpicButton(
 					&st::menuIconReport);
 			}
 
-			if (isContact()) {
+			if (canChangePhoto()) {
 				if (!(*menu)->empty()) {
 					(*menu)->addSeparator(&st::expandedMenuSeparator);
 				}
-				(*menu)->addAction(
-					tr::lng_profile_set_photo_for(tr::now),
-					[=] { chooseFile(Ui::UserpicButton::ChosenType::Set); },
-					&st::menuIconPhotoSet);
-				addFromClipboard(
-					menu->get(),
-					Ui::UserpicButton::ChosenType::Set,
-					tr::lng_profile_set_photo_for_from_clipboard);
-				if (canSuggestPhoto()) {
+				const auto isUser = _peer->asUser();
+				if (isUser) {
 					(*menu)->addAction(
-						tr::lng_profile_suggest_photo(tr::now),
-						[=] {
-							chooseFile(
-								Ui::UserpicButton::ChosenType::Suggest);
-						},
-						&st::menuIconPhotoSuggest);
+						tr::lng_profile_set_photo_for(tr::now),
+						[=] { chooseFile(ChosenType::Set); },
+						&st::menuIconPhotoSet);
 					addFromClipboard(
 						menu->get(),
-						Ui::UserpicButton::ChosenType::Suggest,
-						tr::lng_profile_suggest_photo_from_clipboard);
+						ChosenType::Set,
+						tr::lng_profile_set_photo_for_from_clipboard);
+					if (canSuggestPhoto()) {
+						(*menu)->addAction(
+							tr::lng_profile_suggest_photo(tr::now),
+							[=] {
+								chooseFile(
+									ChosenType::Suggest);
+							},
+							&st::menuIconPhotoSuggest);
+						addFromClipboard(
+								menu->get(),
+								ChosenType::Suggest,
+								tr::lng_profile_suggest_photo_from_clipboard);
+					}
+				} else {
+					const auto channel = _peer->asChannel();
+					const auto isChannel = channel && !channel->isMegagroup();
+					(*menu)->addAction(
+						isChannel
+							? tr::lng_profile_set_photo_for_channel(tr::now)
+							: tr::lng_profile_set_photo_for_group(tr::now),
+						[=] { chooseFile(ChosenType::Set); },
+						&st::menuIconPhotoSet);
+					addFromClipboard(
+						menu->get(),
+						ChosenType::Set,
+						tr::lng_profile_set_photo_for_from_clipboard);
 				}
-				if (controller) {
+				if (controller && isUser) {
 					const auto done = [=](UserpicBuilder::Result data) {
 						auto result = Api::PeerPhoto::UserPhoto{
 							base::take(data.image),
@@ -1140,10 +1247,43 @@ void TopBar::setupUserpicButton(
 						false);
 				}
 			}
-
-			(*menu)->popup(QCursor::pos());
+			if (!(*menu)->empty()) {
+				(*menu)->popup(QCursor::pos());
+			}
 		} else if (button == Qt::LeftButton) {
-			if (_hasStories) {
+			if (_topicIconView && _topic && _topic->iconId()) {
+				const auto document = _peer->owner().document(
+					_topic->iconId());
+				if (const auto sticker = document->sticker()) {
+					const auto packName
+						= _peer->owner().customEmojiManager().lookupSetName(
+							sticker->set.id);
+					if (!packName.isEmpty()) {
+						const auto text = tr::lng_profile_topic_toast(
+							tr::now,
+							lt_name,
+							Ui::Text::Link(packName, u"internal:"_q),
+							Ui::Text::WithEntities);
+						const auto weak = base::make_weak(controller);
+						controller->showToast(Ui::Toast::Config{
+							.text = text,
+							.filter = [=, set = sticker->set](
+									const ClickHandlerPtr &handler,
+									Qt::MouseButton) {
+								if (const auto strong = weak.get()) {
+									strong->show(
+										Box<StickerSetBox>(
+											strong->uiShow(),
+											set,
+											Data::StickersType::Emoji));
+								}
+								return false;
+							},
+							.duration = crl::time(3000),
+						});
+					}
+				}
+			} else if (_hasStories) {
 				controller->openPeerStories(_peer->id);
 			} else {
 				openPhoto();
@@ -1312,7 +1452,21 @@ int TopBar::statusMostLeft() const {
 		: _st.subtitlePosition.x();
 }
 
+int TopBar::calculateRightButtonsWidth() const {
+	auto width = 0;
+	if (_close) {
+		width += _close->width();
+	}
+	if (_topBarButton) {
+		width += _topBarButton->width();
+	}
+	return width;
+}
+
 void TopBar::updateLabelsPosition() {
+	if (width() <= 0) {
+		return;
+	}
 	_progress = [&] {
 		const auto max = QWidget::maximumHeight();
 		const auto min = _minForProgress;
@@ -1323,13 +1477,7 @@ void TopBar::updateLabelsPosition() {
 	}();
 	const auto progressCurrent = _progress.current();
 
-	auto rightButtonsWidth = 0;
-	if (_close) {
-		rightButtonsWidth += _close->width();
-	}
-	if (_topBarButton) {
-		rightButtonsWidth += _topBarButton->width();
-	}
+	const auto rightButtonsWidth = calculateRightButtonsWidth();
 
 	const auto reservedRight = anim::interpolate(
 		0,
@@ -1431,13 +1579,29 @@ void TopBar::updateLabelsPosition() {
 }
 
 void TopBar::updateStatusPosition(float64 progressCurrent) {
+	if (width() <= 0) {
+		return;
+	}
 	if (_forumButton) {
 		const auto buttonTop = anim::interpolate(
 			_st.subtitlePosition.y(),
 			st::infoProfileTopBarStatusTop,
 			progressCurrent);
+		const auto mostLeft = statusMostLeft();
+		const auto buttonMostLeft = anim::interpolate(
+			mostLeft,
+			st::infoProfileTopBarActionButtonsPadding.left(),
+			progressCurrent);
+		const auto buttonMostRight = anim::interpolate(
+			calculateRightButtonsWidth(),
+			st::infoProfileTopBarActionButtonsPadding.right(),
+			progressCurrent);
+		const auto maxWidth = width() - buttonMostLeft - buttonMostRight;
+		if (_forumButton->contentWidth() > maxWidth) {
+			_forumButton->setFullWidth(maxWidth);
+		}
 		const auto buttonLeft = anim::interpolate(
-			statusMostLeft(),
+			mostLeft,
 			(width() - _forumButton->width()) / 2,
 			progressCurrent);
 		_forumButton->moveToLeft(buttonLeft, buttonTop);
@@ -1516,6 +1680,9 @@ QRect TopBar::userpicGeometry() const {
 void TopBar::updateGiftButtonsGeometry(
 		float64 progressCurrent,
 		const QRect &userpicRect) {
+	if (width() <= 0) {
+		return;
+	}
 	const auto sz = st::infoProfileTopBarGiftSize;
 	const auto halfSz = sz / 2.;
 	for (const auto &gift : _pinnedToTopGifts) {
@@ -1812,6 +1979,9 @@ void TopBar::fillTopBarMenu(
 }
 
 void TopBar::updateVideoUserpic() {
+	if (width() <= 0) {
+		return;
+	}
 	const auto id = _peer->userpicPhotoId();
 	if (!id) {
 		_videoUserpicPlayer = nullptr;
@@ -2343,7 +2513,8 @@ void TopBar::paintPinnedToTopGifts(
 
 void TopBar::setupStoryOutline(const QRect &geometry) {
 	const auto user = _peer->asUser();
-	if (!user) {
+	const auto channel = _peer->asChannel();
+	if (!user && !channel) {
 		return;
 	}
 
@@ -2352,18 +2523,18 @@ void TopBar::setupStoryOutline(const QRect &geometry) {
 		rpl::merge(
 			rpl::single(rpl::empty_value()),
 			style::PaletteChanged(),
-			user->session().changes().peerUpdates(
+			_peer->session().changes().peerUpdates(
 				Data::PeerUpdate::Flag::StoriesState
 					| Data::PeerUpdate::Flag::ColorProfile
 			) | rpl::filter([=](const Data::PeerUpdate &update) {
-				return update.peer == user;
+				return update.peer == _peer;
 			}) | rpl::to_empty)
 	) | rpl::start_with_next([=](
 			std::optional<QColor> edgeColor,
 			rpl::empty_value) {
 		const auto geometry = QRectF(userpicGeometry());
 		const auto colorProfile
-			= user->session().api().peerColors().colorProfileFor(user);
+			= _peer->session().api().peerColors().colorProfileFor(_peer);
 		const auto hasProfileColor = colorProfile
 			&& colorProfile->story.size() > 1;
 		if (hasProfileColor) {
@@ -2380,17 +2551,21 @@ void TopBar::setupStoryOutline(const QRect &geometry) {
 }
 
 void TopBar::updateStoryOutline(std::optional<QColor> edgeColor) {
+	if (width() <= 0) {
+		return;
+	}
 	const auto user = _peer->asUser();
-	if (!user) {
+	const auto channel = _peer->asChannel();
+	if (!user && !channel) {
 		return;
 	}
 
 	const auto hasActiveStories = (_source == Source::Preview)
 		? true
-		: user->hasActiveStories();
+		: (user ? user->hasActiveStories() : channel->hasActiveStories());
 	const auto hasLiveStories = (_source == Source::Preview)
 		? false
-		: user->hasActiveVideoStream();
+		: (user ? user->hasActiveVideoStream() : false);
 
 	if (_hasStories != hasActiveStories
 		|| _hasLiveStories != hasLiveStories) {
@@ -2429,8 +2604,8 @@ void TopBar::updateStoryOutline(std::optional<QColor> edgeColor) {
 		return;
 	}
 
-	const auto &stories = user->owner().stories();
-	const auto source = stories.source(user->id);
+	const auto &stories = _peer->owner().stories();
+	const auto source = stories.source(_peer->id);
 	if (!source) {
 		return;
 	}

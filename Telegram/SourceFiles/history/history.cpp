@@ -752,7 +752,7 @@ not_null<HistoryItem*> History::addNewItem(
 	}
 
 	if (const auto sublist = item->savedSublist()) {
-		sublist->applyMaybeLast(item, unread);
+		sublist->applyMaybeLast(item);
 	}
 
 	return item;
@@ -1372,6 +1372,13 @@ void History::applyServiceChanges(
 					todolist->apply(data);
 				}
 			}
+		}
+	}, [&](const MTPDmessageActionStarGift &data) {
+		if (data.is_auction_acquired() && data.vto_id()) {
+			const auto to = peer->owner().peer(peerFromMTP(*data.vto_id()));
+			data.vgift().match([&](const MTPDstarGift &data) {
+				peer->owner().notifyGiftAuctionGot({ data.vid().v, to });
+			}, [](const auto &) {});
 		}
 	}, [](const auto &) {
 	});

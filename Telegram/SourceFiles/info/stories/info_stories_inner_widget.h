@@ -168,6 +168,8 @@ private:
 	rpl::event_stream<> _showFinished;
 	rpl::variable<std::optional<QColor>> _topBarColor;
 
+	Ui::VisibleRange _visibleRange;
+
 };
 
 } // namespace Info::Stories

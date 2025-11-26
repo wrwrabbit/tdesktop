@@ -77,6 +77,7 @@ namespace Info {
 
 class ContentMemento;
 class Controller;
+struct FlexibleScrollData;
 
 class ContentWidget : public Ui::RpWidget {
 public:
@@ -155,40 +156,18 @@ protected:
 			doSetInnerWidget(std::move(inner)));
 	}
 
-	template <typename Widget, typename FlexibleData>
+	template <typename Widget>
 	Widget *setupFlexibleInnerWidget(
 			object_ptr<Widget> inner,
-			FlexibleData &flexibleScroll,
+			FlexibleScrollData &flexibleScroll,
 			Fn<void(Ui::RpWidget*)> customSetup = nullptr) {
-		if (inner->hasFlexibleTopBar()) {
-			auto filler = setInnerWidget(object_ptr<Ui::RpWidget>(this));
-			filler->resize(1, 1);
-
-			flexibleScroll.contentHeightValue.events(
-			) | rpl::start_with_next([=](int h) {
-				filler->resize(filler->width(), h);
-			}, filler->lifetime());
-
-			filler->widthValue(
-			) | rpl::start_to_stream(
-				flexibleScroll.fillerWidthValue,
-				lifetime());
-
-			if (customSetup) {
-				customSetup(filler);
-			}
-
-			// ScrollArea -> PaddingWrap -> RpWidget.
-			inner->setParent(filler->parentWidget()->parentWidget());
-			inner->raise();
-
-			using InnerPtr = base::unique_qptr<Widget>;
-			auto owner = filler->lifetime().make_state<InnerPtr>(
-				std::move(inner.release()));
-			return owner->get();
-		} else {
+		if (!inner->hasFlexibleTopBar()) {
 			return setInnerWidget(std::move(inner));
 		}
+		return static_cast<Widget*>(doSetupFlexibleInnerWidget(
+			std::move(inner),
+			flexibleScroll,
+			std::move(customSetup)));
 	}
 
 	[[nodiscard]] not_null<Controller*> controller() const {
@@ -214,7 +193,12 @@ protected:
 	void setViewport(rpl::producer<not_null<QEvent*>> &&events) const;
 
 private:
-	RpWidget *doSetInnerWidget(object_ptr<RpWidget> inner);
+	Ui::RpWidget *doSetInnerWidget(object_ptr<Ui::RpWidget> inner);
+	Ui::RpWidget *doSetupFlexibleInnerWidget(
+		object_ptr<Ui::RpWidget> inner,
+		FlexibleScrollData &flexibleScroll,
+		Fn<void(Ui::RpWidget*)> customSetup);
+
 	void updateControlsGeometry();
 	void refreshSearchField(bool shown);
 	void setupSwipeHandler(not_null<Ui::RpWidget*> widget);

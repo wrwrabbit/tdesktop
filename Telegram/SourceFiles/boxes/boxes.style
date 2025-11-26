@@ -378,10 +378,8 @@ connectionPortInputField: InputField(defaultInputField) {
 	width: 55px;
 }
 connectionUserInputField: InputField(defaultInputField) {
-	width: 95px;
 }
 connectionPasswordInputField: InputField(defaultInputField) {
-	width: 120px;
 }
 connectionIPv6Skip: 11px;
 
