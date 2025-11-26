@@ -7,7 +7,7 @@ on:
 jobs:
   build-libraries:
     name: Libraries
-    runs-on: macos-15-intel
+    runs-on: macos-latest
     env:
       REPO_NAME: ${{ github.event.repository.name }}
 
@@ -46,17 +46,24 @@ jobs:
             ./ThirdParty
           key: mac-libraries-${{ hashFiles('tdesktop/Telegram/build/prepare/prepare.py') }}
 
-  macos:
+  macos-build:
     environment: Release
     needs: build-libraries
-    name: Telegram
-    runs-on: macos-15-intel
+    name: Telegram (${{ matrix.arch }})
+    runs-on: macos-latest
+
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+          - arch: x86_64
 
     env:
       UPLOAD_ARTIFACT: "true"
       ONLY_CACHE: "false"
       ARTIFACT_NAME: "PTelegram_"
       REPO_NAME: ${{ github.event.repository.name }}
+      CP_ARCH: ${{ matrix.arch }}
 
     steps:
       - name: Clone.
@@ -88,14 +95,13 @@ jobs:
             ./ThirdParty
           key: mac-libraries-${{ hashFiles('tdesktop/Telegram/build/prepare/prepare.py') }}
 
-      - name: Telegram Desktop build.
+      - name: Telegram Desktop build (${{ matrix.arch }}).
         env:
           RSA_PRIVATE: ${{ secrets.RSA_PRIVATE }}
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
-          CP_MAC_SKIPDMG: 1
         run: |
           cd $REPO_NAME/Telegram/build
 
@@ -105,7 +111,7 @@ jobs:
         run: |
           filePath="$REPO_NAME/out/Release/deploy"
           if test -d "$filePath"; then
-            echo "Build successfully done! :)"
+            echo "${{ matrix.arch }} build successfully done! :)"
 
             ls $filePath
           else
@@ -122,21 +128,134 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         if: env.UPLOAD_ARTIFACT == 'true'
-        name: Upload artifact TG.
+        name: Upload ${{ matrix.arch }} update files.
         with:
           name: ${{ env.ARTIFACT_NAME }}_tg
           path: ${{ env.REPO_NAME }}/out/Release/artifact/t*macupd*
 
       - uses: actions/upload-artifact@v4
         if: env.UPLOAD_ARTIFACT == 'true'
-        name: Upload artifact Extra.
+        name: Upload ${{ matrix.arch }} app bundle.
         with:
-          name: ${{ env.ARTIFACT_NAME }}_extra
+          name: ${{ env.ARTIFACT_NAME }}${{ matrix.arch }}_app
           path: ${{ env.REPO_NAME }}/out/Release/artifact/*.zip
 
       - uses: actions/upload-artifact@v4
-        name: Upload symbols artifact.
-        if: (env.UPLOAD_ARTIFACT == 'true')
+        name: Upload ${{ matrix.arch }} symbols artifact.
+        if: false
         with:
-          name: symbols
+          name: symbols_${{ matrix.arch }}
           path: ${{ env.REPO_NAME }}/out/Dropbox/Telegram/symbols/*
+
+  macos-combine:
+    environment: Release
+    needs: macos-build
+    name: Telegram (Universal)
+    runs-on: macos-latest
+
+    env:
+      UPLOAD_ARTIFACT: "true"
+      ARTIFACT_NAME: "PTelegram_"
+      REPO_NAME: ${{ github.event.repository.name }}
+
+    steps:
+      - name: Clone.
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          path: ${{ env.REPO_NAME }}
+
+      - name: First set up.
+        run: |
+          sudo chown -R `whoami`:admin /usr/local/share
+
+          brew update
+          brew upgrade || true
+          brew install icoutils create-dmg
+
+          # Disable spotlight.
+          sudo mdutil -a -i off
+
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Create work directory.
+        run: |
+          mkdir -p combine_work
+
+      - name: Download ARM64 artifacts.
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}arm64_app
+          path: combine_work
+
+      - name: Download x86_64 artifacts.
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}x86_64_app
+          path: combine_work
+
+      - name: Extract architecture-specific bundles.
+        run: |
+          cd combine_work
+          ls -la
+          
+          # Extract ARM64 bundle
+          unzip -q Telegram.arm64.app.zip 2>/dev/null || true
+          
+          # Rename extracted ARM64 app if needed
+          if [ -d "Telegram.app" ]; then
+            mv Telegram.app Telegram.arm64.app
+          fi
+          
+          # Extract x86_64 bundle
+          unzip -q Telegram.x86_64.app.zip 2>/dev/null || true
+          
+          # Rename extracted x86_64 app if needed
+          if [ -d "Telegram.app" ]; then
+            mv Telegram.app Telegram.x86_64.app
+          fi
+          
+          # Verify both bundles exist
+          if [ ! -d "Telegram.arm64.app" ] || [ ! -d "Telegram.x86_64.app" ]; then
+            echo "ERROR: Missing one or both architecture bundles"
+            ls -la
+            exit 1
+          fi
+          
+          ls -la
+
+      - name: Combine architectures.
+        run: |
+          cd combine_work
+          ${{ github.workspace }}/${{ env.REPO_NAME }}/Telegram/build/build_mac_release.sh .
+
+      - name: Create output directory.
+        run: |
+          mkdir -p output
+          cd combine_work
+          
+          # Copy universal app zip
+          if [ -f "Telegram.app.zip" ]; then
+            cp Telegram.app.zip ../output/
+          fi
+          
+          # Copy DMG
+          if [ -f "tsetup.latest.dmg" ]; then
+            cp tsetup.latest.dmg ../output/
+          fi
+          
+          ls -la ../output
+
+      - uses: actions/upload-artifact@v4
+        if: env.UPLOAD_ARTIFACT == 'true'
+        name: Upload universal app.
+        with:
+          name: ${{ env.ARTIFACT_NAME }}_universal_app
+          path: output/Telegram.app.zip
+
+      - uses: actions/upload-artifact@v4
+        if: env.UPLOAD_ARTIFACT == 'true'
+        name: Upload universal DMG.
+        with:
+          name: ${{ env.ARTIFACT_NAME }}_universal_dmg
+          path: output/tsetup.latest.dmg
