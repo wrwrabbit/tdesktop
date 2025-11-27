@@ -373,6 +373,10 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
       # Use PTG Certificate from GitHub Secrets
       if [ ! -f "certificate.p12" ]; then
         echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
+        
+        # Delete keychain if it already exists to avoid conflicts
+        security delete-keychain build.keychain 2>/dev/null || true
+        
         security create-keychain -p ptelegram_pass build.keychain
         security default-keychain -s build.keychain
         security unlock-keychain -p ptelegram_pass build.keychain
