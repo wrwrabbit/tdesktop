@@ -2616,7 +2616,9 @@ std::unique_ptr<HistoryView::Media> MediaGiftBox::createView(
 			HistoryView::GenerateUniqueGiftMedia(message, replacing, unique),
 			HistoryView::MediaGenericDescriptor{
 				.maxWidth = st::msgServiceGiftBoxSize.width(),
-				.paintBg = HistoryView::UniqueGiftBg(message, unique),
+				.paintBgFactory = [=] {
+					return HistoryView::UniqueGiftBg(message, unique);
+				},
 				.service = true,
 			});
 	}
@@ -2693,7 +2695,7 @@ MediaStory::MediaStory(
 	if (!maybeStory && maybeStory.error() == NoStory::Unknown) {
 		stories->resolve(storyId, crl::guard(this, [=] {
 			if (const auto maybeStory = stories->lookup(storyId)) {
-				if ((*maybeStory)->unsupported()) {
+				if ((*maybeStory)->unsupported() || (*maybeStory)->call()) {
 					_unsupported = true;
 				} else if (!_mention && _viewMayExist) {
 					parent->setText((*maybeStory)->caption());
@@ -2728,7 +2730,7 @@ bool MediaStory::storyExpired(bool revalidate) {
 	if (revalidate) {
 		const auto stories = &parent()->history()->owner().stories();
 		if (const auto maybeStory = stories->lookup(_storyId)) {
-			if ((*maybeStory)->unsupported()) {
+			if ((*maybeStory)->unsupported() || (*maybeStory)->call()) {
 				_unsupported = true;
 			}
 			_expired = false;
@@ -2819,7 +2821,7 @@ std::unique_ptr<HistoryView::Media> MediaStory::createView(
 	_expired = false;
 	_viewMayExist = true;
 	const auto story = *maybeStory;
-	if (story->unsupported()) {
+	if (story->unsupported() || story->call()) {
 		_unsupported = true;
 		return nullptr;
 	} else if (_mention) {
@@ -2834,13 +2836,14 @@ std::unique_ptr<HistoryView::Media> MediaStory::createView(
 				realParent,
 				photo,
 				spoiler);
-		} else {
+		} else if (const auto document = story->document()) {
 			return std::make_unique<HistoryView::Gif>(
 				message,
 				realParent,
-				story->document(),
+				document,
 				spoiler);
 		}
+		return nullptr;
 	}
 }
 

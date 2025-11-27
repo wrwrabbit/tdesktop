@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_authorization.h"
 #include "lang/lang_keys.h"
 #include "ui/rect.h"
+#include "ui/power_saving.h"
 #include "ui/text/format_values.h"
 #include "ui/text/text_custom_emoji.h"
 #include "ui/ui_rpl_filter.h"
@@ -155,15 +156,19 @@ not_null<Ui::SlideWrap<Ui::VerticalLayout>*> CreateUnconfirmedAuthContent(
 	return wrap;
 }
 
-TopBarSuggestionContent::TopBarSuggestionContent(not_null<Ui::RpWidget*> p)
-: Ui::RippleButton(p, st::defaultRippleAnimationBgOver)
+TopBarSuggestionContent::TopBarSuggestionContent(
+	not_null<Ui::RpWidget*> parent,
+	Fn<bool()> emojiPaused)
+: Ui::RippleButton(parent, st::defaultRippleAnimationBgOver)
 , _titleSt(st::semiboldTextStyle)
 , _contentTitleSt(st::dialogsTopBarSuggestionTitleStyle)
-, _contentTextSt(st::dialogsTopBarSuggestionAboutStyle) {
+, _contentTextSt(st::dialogsTopBarSuggestionAboutStyle)
+, _emojiPaused(std::move(emojiPaused)) {
 	setRightIcon(RightIcon::Close);
 }
 
 void TopBarSuggestionContent::setRightIcon(RightIcon icon) {
+	_rightButton = nullptr;
 	if (icon == _rightIcon) {
 		return;
 	}
@@ -200,6 +205,35 @@ void TopBarSuggestionContent::setRightIcon(RightIcon icon) {
 	}
 }
 
+void TopBarSuggestionContent::setRightButton(
+		rpl::producer<TextWithEntities> text,
+		Fn<void()> callback) {
+	_rightHide = nullptr;
+	_rightArrow = nullptr;
+	_rightIcon = RightIcon::None;
+	if (!text) {
+		_rightButton = nullptr;
+		return;
+	}
+	using namespace Ui;
+	_rightButton = base::make_unique_q<RoundButton>(
+		this,
+		rpl::single(QString()),
+		st::dialogsTopBarRightButton);
+	_rightButton->setText(std::move(text));
+	rpl::combine(
+		sizeValue(),
+		_rightButton->sizeValue()
+	) | rpl::start_with_next([=](QSize outer, QSize inner) {
+		const auto top = (outer.height() - inner.height()) / 2;
+		_rightButton->moveToRight(top, top, outer.width());
+	}, _rightButton->lifetime());
+	_rightButton->setFullRadius(true);
+	_rightButton->setTextTransform(RoundButton::TextTransform::NoTransform);
+	_rightButton->setClickedCallback(std::move(callback));
+	_rightButton->show();
+}
+
 void TopBarSuggestionContent::draw(QPainter &p) {
 	const auto kLinesForPhoto = 3;
 
@@ -225,6 +259,8 @@ void TopBarSuggestionContent::draw(QPainter &p) {
 		- (_rightHide ? _rightHide->width() : 0);
 	const auto titleRight = leftPadding;
 	const auto hasSecondLineTitle = availableWidth < _contentTitle.maxWidth();
+	const auto paused = On(PowerSaving::kEmojiChat)
+		|| (_emojiPaused && _emojiPaused());
 	p.setPen(st::windowActiveTextFg);
 	p.setPen(st::windowFg);
 	{
@@ -236,6 +272,7 @@ void TopBarSuggestionContent::draw(QPainter &p) {
 				? availableWidth
 				: (availableWidth - titleRight),
 			.availableWidth = availableWidth,
+			.pausedEmoji = paused,
 			.elisionLines = hasSecondLineTitle ? 2 : 1,
 		});
 	}
@@ -268,7 +305,7 @@ void TopBarSuggestionContent::draw(QPainter &p) {
 					: availableWidth,
 			};
 		};
-		p.setPen(st::windowSubTextFg);
+		p.setPen(_descriptionColorOverride.value_or(st::windowSubTextFg->c));
 		_contentText.draw(p, {
 			.position = QPoint(left, top),
 			.outerWidth = availableWidth,
@@ -276,6 +313,7 @@ void TopBarSuggestionContent::draw(QPainter &p) {
 			.geometry = Ui::Text::GeometryDescriptor{
 				.layout = std::move(lineLayout),
 			},
+			.pausedEmoji = paused,
 		});
 		_lastPaintedContentTop = top;
 		_lastPaintedContentLineAmount = lastContentLineAmount;
@@ -285,7 +323,9 @@ void TopBarSuggestionContent::draw(QPainter &p) {
 void TopBarSuggestionContent::setContent(
 		TextWithEntities title,
 		TextWithEntities description,
-		std::optional<Ui::Text::MarkedContext> context) {
+		std::optional<Ui::Text::MarkedContext> context,
+		std::optional<QColor> descriptionColorOverride) {
+	_descriptionColorOverride = descriptionColorOverride;
 	if (context) {
 		context->repaint = [=] { update(); };
 		_contentTitle.setMarkedText(
@@ -302,6 +342,7 @@ void TopBarSuggestionContent::setContent(
 		_contentTitle.setMarkedText(_contentTitleSt, std::move(title));
 		_contentText.setMarkedText(_contentTextSt, std::move(description));
 	}
+	update();
 }
 
 void TopBarSuggestionContent::paintEvent(QPaintEvent *) {
