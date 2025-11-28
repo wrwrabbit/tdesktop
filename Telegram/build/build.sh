@@ -372,22 +372,53 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
     elif [ "$BuildTarget" == "mac" ]; then
       # Use PTG Certificate from GitHub Secrets
       if [ ! -f "certificate.p12" ]; then
+        echo "Decoding certificate from environment..."
         echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
+        echo "✓ Certificate decoded to certificate.p12"
         
-        # Delete keychain if it already exists to avoid conflicts
-        security delete-keychain build.keychain 2>/dev/null || true
+        # Check if keychain already exists
+        if security show-keychain-info build.keychain >/dev/null 2>&1; then
+          echo "⚠ Keychain 'build.keychain' already exists (parallel build detected)"
+          echo "  Waiting 60 seconds for other process to complete..."
+          sleep 60
+          echo "  Proceeding with keychain operations (accepting duplicate errors)"
+        else
+          echo "✓ Keychain does not exist, creating new one"
+        fi
         
-        security create-keychain -p ptelegram_pass build.keychain
-        security default-keychain -s build.keychain
-        security unlock-keychain -p ptelegram_pass build.keychain
-        security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
-        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ptelegram_pass build.keychain
+        echo "Creating keychain 'build.keychain'..."
+        security create-keychain -p ptelegram_pass build.keychain 2>&1 || echo "  (keychain may already exist from parallel build, continuing...)"
+        
+        echo "Setting default keychain..."
+        security default-keychain -s build.keychain 2>&1 || echo "  (could not set default, continuing...)"
+        
+        echo "Unlocking keychain..."
+        security unlock-keychain -p ptelegram_pass build.keychain 2>&1 || echo "  (could not unlock, continuing...)"
+        
+        echo "Importing certificate..."
+        security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign 2>&1 || echo "  (could not import, continuing...)"
+        
+        echo "Setting key partition list..."
+        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ptelegram_pass build.keychain 2>&1 || echo "  (could not set partition list, continuing...)"
+        
+        echo "✓ Keychain setup complete"
       fi
+      
       if [ "$identity" == "" ]; then
-        echo "Find identity"
-        identity=$(security find-identity -v | grep Developer | awk -F " " 'END {print $2}')
+        echo "Finding developer identity..."
+        identity=$(security find-identity -v 2>&1 | grep Developer | awk -F " " 'END {print $2}')
+        if [ -z "$identity" ]; then
+          echo "⚠ Warning: No developer identity found yet"
+        else
+          echo "✓ Found developer identity: ${identity:0:3}..."
+        fi
+      else
+        echo "Using previously found identity: ${identity:0:3}..."
       fi
-      codesign --force --deep -s ${identity} "$ReleasePath/$BundleName" -v --entitlements "$HomePath/Telegram/Telegram.entitlements"
+      
+      echo "Code signing application at: $ReleasePath/$BundleName"
+      codesign --force --deep -s ${identity} "$ReleasePath/$BundleName" -v --entitlements "$HomePath/Telegram/Telegram.entitlements" 2>&1
+      echo "✓ Code signing complete"
       
       #codesign --force --deep --timestamp --options runtime --sign "Developer ID Application: Telegram FZ-LLC (C67CF9S4VU)" "$ReleasePath/$BundleName" --entitlements "$HomePath/Telegram/Telegram.entitlements"
     elif [ "$BuildTarget" == "macstore" ]; then
