@@ -77,10 +77,10 @@ jobs:
         if: github.event.inputs.releaseMacOS == 'true'
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: deploy_mac_post.yml
+          workflow: deploy_mac.yml
           workflow_conclusion: success
           branch: master
-          repo: wrwrabbit/tdesktop
+          repo: cpartisans/tdesktop
           path: MacOS
           name: telegram-dmg
 

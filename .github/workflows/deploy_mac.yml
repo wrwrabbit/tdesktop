@@ -130,7 +130,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload ${{ matrix.arch }} update files.
         with:
-          name: ${{ env.ARTIFACT_NAME }}_tg
+          name: ${{ env.ARTIFACT_NAME }}${{ matrix.arch }}_tg
           path: ${{ env.REPO_NAME }}/out/Release/artifact/t*macupd*
 
       - uses: actions/upload-artifact@v4
@@ -257,5 +257,5 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload universal DMG.
         with:
-          name: ${{ env.ARTIFACT_NAME }}_universal_dmg
+          name: telegram-dmg
           path: output/tsetup.latest.dmg
