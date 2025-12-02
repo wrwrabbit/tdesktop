@@ -24,12 +24,6 @@ on:
     branches-ignore:
       - 'compare/**'
   workflow_dispatch:
-    inputs:
-      buildCommit:
-        description: 'Commit for building. Default it latest on branch'
-        required: false
-        type: string
-        default: ''
 
 jobs:
 
@@ -44,19 +38,10 @@ jobs:
 
     steps:
       - name: Clone.
-        uses: actions/checkout@v5
-        if: github.event.inputs.buildCommit == ''
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: recursive
-
-      - name: Clone with checkout.
-        uses: actions/checkout@v5
-        if: github.event.inputs.buildCommit != ''
-        with:
-          fetch-depth: 0
-          submodules: recursive
-          ref: ${{ github.event.inputs.buildCommit }}
 
       - name: First set up.
         run: |
