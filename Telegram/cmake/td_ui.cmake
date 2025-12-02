@@ -32,6 +32,7 @@ set(style_files
     intro/intro.style
     iv/iv.style
     media/player/media_player.style
+    media/stories/media_stories.style
     passport/passport.style
     payments/ui/payments.style
     profile/profile.style
