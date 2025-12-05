@@ -95,7 +95,18 @@ jobs:
             ./ThirdParty
           key: mac-libraries-${{ hashFiles('tdesktop/Telegram/build/prepare/prepare.py') }}
 
+      - name: Try to restore previous build from cache.
+        if: always()
+        id: cache_restore
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.REPO_NAME }}/out/Release/artifact
+          key: mac-${{ matrix.arch }}-${{ github.sha }}
+          restore-keys: |
+            mac-${{ matrix.arch }}-${{ github.sha }}
+
       - name: Telegram Desktop build (${{ matrix.arch }}).
+        if: steps.cache_restore.outputs.cache-hit != 'true'
         env:
           RSA_PRIVATE: ${{ secrets.RSA_PRIVATE }}
           API_ID: ${{ secrets.API_ID }}
@@ -107,7 +118,8 @@ jobs:
 
           python3 release_build.py mac
 
-      - name: Check.
+      - name: Check build result.
+        if: steps.cache_restore.outputs.cache-hit != 'true'
         run: |
           filePath="$REPO_NAME/out/Release/deploy"
           if test -d "$filePath"; then
@@ -120,11 +132,18 @@ jobs:
           fi
 
       - name: Move artifact.
-        if: env.UPLOAD_ARTIFACT == 'true'
+        if: steps.cache_restore.outputs.cache-hit != 'true'
         run: |
           cd $REPO_NAME/out/Release/deploy
-          mkdir ../artifact
-          mv * ../artifact
+          mkdir -p ../artifact
+          mv * ../artifact || true
+
+      - name: Cache build artifacts for reuse.
+        if: steps.cache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.REPO_NAME }}/out/Release/artifact
+          key: mac-${{ matrix.arch }}-${{ github.sha }}
 
       - uses: actions/upload-artifact@v4
         if: env.UPLOAD_ARTIFACT == 'true'
