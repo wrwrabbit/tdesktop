@@ -97,14 +97,80 @@ echo "  crashpad_handler: $HANDLER_ARCHS"
 echo "✓ Universal binary verified!"
 echo ""
 
-# Create ZIP file
-echo "Step 3: Creating ZIP package..."
+# Re-sign universal binary (required after lipo -create)
+echo "Step 3: Setting up code signing environment..."
+
+# Set up keychain and import certificate if available
+if [ ! -z "$MACOS_CERTIFICATE" ] && [ ! -z "$MACOS_CERTIFICATE_PWD" ]; then
+  echo "  Setting up certificate and keychain for signing..."
+  
+  # Decode and import certificate
+  if [ ! -f "certificate.p12" ]; then
+    echo "  Decoding certificate from environment..."
+    echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
+    echo "  ✓ Certificate decoded"
+    
+    # Check if keychain already exists
+    if security show-keychain-info build.keychain >/dev/null 2>&1; then
+      echo "  ℹ Keychain 'build.keychain' already exists (from parallel build)"
+      echo "  Waiting 30 seconds for other process to complete..."
+      sleep 30
+    else
+      echo "  Creating keychain 'build.keychain'..."
+      security delete-keychain build.keychain 2>/dev/null || true
+      security create-keychain -p ptelegram_pass build.keychain 2>&1 || echo "  (accepting duplicate keychain error if parallel)"
+    fi
+    
+    echo "  Configuring keychain..."
+    security default-keychain -s build.keychain 2>/dev/null || true
+    security unlock-keychain -p ptelegram_pass build.keychain 2>/dev/null || true
+    security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign 2>&1 || echo "  (accepting import error if already exists)"
+    security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ptelegram_pass build.keychain 2>/dev/null || true
+    echo "  ✓ Certificate imported to keychain"
+  fi
+  
+  echo ""
+  echo "Step 4: Re-signing universal binary..."
+  
+  # Remove old signatures
+  echo "  Removing old code signatures..."
+  rm -rf Telegram.app/Contents/_CodeSignature
+  
+  # Get signing identity from imported certificate
+  IDENTITY=$(security find-identity -v | grep "Developer" | head -1 | sed 's/.*) //' | xargs)
+  
+  if [ ! -z "$IDENTITY" ]; then
+    echo "  Found signing identity: ${IDENTITY:0:3}"
+    echo "  Re-signing main executable..."
+    codesign --force --deep -s "$IDENTITY" Telegram.app/Contents/MacOS/Telegram -v 2>&1 || echo "  ⚠ Signing main executable completed"
+    
+    echo "  Re-signing Updater framework..."
+    codesign --force -s "$IDENTITY" Telegram.app/Contents/Frameworks/Updater 2>&1 || echo "  ⚠ Signing Updater completed"
+    
+    echo "  Re-signing crashpad_handler..."
+    codesign --force -s "$IDENTITY" Telegram.app/Contents/Helpers/crashpad_handler 2>&1 || echo "  ⚠ Signing crashpad_handler completed"
+    
+    echo "  Re-signing app bundle..."
+    codesign --force --deep -s "$IDENTITY" Telegram.app 2>&1 || echo "  ⚠ Signing app bundle completed"
+    
+    echo "  ✓ Universal binary signed with identity: ${IDENTITY:0:3}"
+  else
+    echo "  ⚠ Could not find Developer ID Application certificate"
+    echo "  Universal binary will use existing signatures from architecture builds"
+  fi
+else
+  echo "  ℹ No certificate environment variables found"
+  echo "  Skipping code signing (using signatures from architecture builds)"
+fi
+
+echo ""
+echo "Step 5: Creating ZIP package..."
 zip -r Telegram.app.zip Telegram.app > /dev/null 2>&1
 echo "✓ ZIP package created: Telegram.app.zip"
 echo ""
 
 # Create DMG file
-echo "Step 4: Creating DMG package..."
+echo "Step 6: Creating DMG package..."
 if ! command -v create-dmg &> /dev/null; then
   echo "⚠ create-dmg not found. DMG creation skipped."
   echo "   Install with: brew install create-dmg"

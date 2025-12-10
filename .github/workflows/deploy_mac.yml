@@ -244,6 +244,9 @@ jobs:
           ls -la
 
       - name: Combine architectures.
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
         run: |
           cd combine_work
           ${{ github.workspace }}/${{ env.REPO_NAME }}/Telegram/build/build_mac_release.sh .
