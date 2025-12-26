@@ -360,7 +360,7 @@ auto GenerateUniqueGiftMedia(
 			st::chatUniqueStickerPadding));
 		const auto peer = parent->history()->peer;
 		pushText(
-			Ui::Text::Bold(peer->isSelf()
+			tr::bold(peer->isSelf()
 				? tr::lng_action_gift_self_subtitle(tr::now)
 				: peer->isServiceUser()
 				? tr::lng_gift_link_label_gift(tr::now)
@@ -374,7 +374,7 @@ auto GenerateUniqueGiftMedia(
 			white,
 			st::chatUniqueTitlePadding);
 		pushText(
-			Ui::Text::Bold(Data::UniqueGiftName(*gift)),
+			tr::bold(Data::UniqueGiftName(*gift)),
 			st::chatUniqueTextStyle,
 			gift->backdrop.textColor,
 			st::chatUniqueTextPadding);
@@ -387,20 +387,20 @@ auto GenerateUniqueGiftMedia(
 				tr::lng_gift_released_by(
 					tr::now,
 					lt_name,
-					Ui::Text::Link('@' + by->username()),
-					Ui::Text::WithEntities),
+					tr::link('@' + by->username()),
+					tr::marked),
 				st::giftBoxReleasedByMargin,
 				gift->backdrop,
 				handler));
 		}
 
 		const auto name = [](const Data::UniqueGiftAttribute &value) {
-			return Ui::Text::Bold(value.name);
+			return tr::bold(value.name);
 		};
 		auto attributes = std::vector<AttributeTable::Entry>{
 			{ tr::lng_gift_unique_model(tr::now), name(gift->model) },
-			{ tr::lng_gift_unique_backdrop(tr::now), name(gift->backdrop) },
 			{ tr::lng_gift_unique_symbol(tr::now), name(gift->pattern) },
+			{ tr::lng_gift_unique_backdrop(tr::now), name(gift->backdrop) },
 		};
 		const auto tableAddedMargins = gift->releasedBy
 			? QMargins(0, st::chatUniqueAuthorSkip, 0, 0)
@@ -543,8 +543,7 @@ auto GenerateAuctionPreview(
 	not_null<Element*> parent,
 	Element *replacing,
 	std::shared_ptr<Data::StarGift> gift,
-	Data::UniqueGiftBackdrop backdrop,
-	TimeId endDate)
+	Data::UniqueGiftBackdrop backdrop)
 -> Fn<void(
 		not_null<MediaGeneric*>,
 		Fn<void(std::unique_ptr<MediaGenericPart>)>)> {
@@ -569,7 +568,7 @@ auto GenerateAuctionPreview(
 			: gift->resellTitle;
 		if (!name.isEmpty()) {
 			push(std::make_unique<TextPartColored>(
-				Ui::Text::Bold(name),
+				tr::bold(name),
 				QMargins(0, 0, 0, st::defaultVerticalListSkip),
 				[c = backdrop.textColor](const auto&) { return c; },
 				st::chatUniqueTitle));
@@ -578,9 +577,9 @@ auto GenerateAuctionPreview(
 			push(std::make_unique<TextPartColored>(
 				tr::lng_boosts_list_tab_gifts(
 					tr::now,
-					lt_count,
+					lt_count_decimal,
 					all,
-					Ui::Text::WithEntities),
+					tr::marked),
 				QMargins(0, 0, 0, st::webPageAuctionPreviewPadding.top()),
 				[c = backdrop.textColor](const auto&) { return c; },
 				st::chatUniqueTextStyle));
@@ -592,6 +591,7 @@ auto AuctionBg(
 	not_null<Element*> view,
 	Data::UniqueGiftBackdrop backdrop,
 	std::shared_ptr<Data::StarGift> gift,
+	TimeId startDate,
 	TimeId endDate)
 -> Fn<void(
 		Painter&,
@@ -677,22 +677,31 @@ auto AuctionBg(
 		}
 
 		const auto now = base::unixtime::now();
+		const auto startsIn = std::max(startDate - now, 0);
 		const auto left = std::max(endDate - now, 0);
-		if (left > 0) {
+		if (startsIn > 0 || left > 0) {
 			if (!state->timer) {
 				state->timer = std::make_unique<base::Timer>([=] {
 					view->repaint();
 				});
 			}
 			state->timer->callOnce(1000);
-		} else if (left <= 0 && state->timer) {
+		} else if (state->timer) {
 			state->timer = nullptr;
 		}
-		const auto text = left > 0
-			? QString("%1:%2:%3")
-				.arg(left / 3600, 2, 10, QChar('0'))
-				.arg((left % 3600) / 60, 2, 10, QChar('0'))
-				.arg(left % 60, 2, 10, QChar('0'))
+		const auto still = (startsIn > 0) ? startsIn : left;
+		const auto time = (still >= 3600)
+			? u"%1:%2:%3"_q
+			.arg(still / 3600)
+			.arg((still % 3600) / 60, 2, 10, QChar('0'))
+			.arg(still % 60, 2, 10, QChar('0'))
+			: u"%1:%2"_q
+			.arg(still / 60)
+			.arg(still % 60, 2, 10, QChar('0'));
+		const auto text = (startsIn > 0)
+			? tr::lng_auction_join_starts_in(tr::now, lt_time, time)
+			: (left > 0)
+			? time
 			: tr::lng_auctino_preview_finished(tr::now);
 
 		const auto &font = st::webPageAuctionTimeFont;

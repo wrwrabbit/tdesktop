@@ -586,7 +586,7 @@ bool AddRescheduleAction(
 				date));
 
 		owner->itemRemoved(
-		) | rpl::start_with_next([=](not_null<const HistoryItem*> item) {
+		) | rpl::on_next([=](not_null<const HistoryItem*> item) {
 			if (ranges::contains(ids, item->fullId())) {
 				box->closeBox();
 			}
@@ -1103,7 +1103,7 @@ void EditTagBox(
 	} else {
 		owner->reactions().preloadReactionImageFor(id);
 	}
-	field->paintRequest() | rpl::start_with_next([=](QRect clip) {
+	field->paintRequest() | rpl::on_next([=](QRect clip) {
 		auto p = QPainter(field);
 		const auto top = st::editTagField.textMargins.top();
 		if (const auto custom = state->custom.get()) {
@@ -1143,7 +1143,7 @@ void EditTagBox(
 	};
 
 	field->submits(
-	) | rpl::start_with_next(save, field->lifetime());
+	) | rpl::on_next(save, field->lifetime());
 
 	box->addButton(tr::lng_settings_save(), save);
 	box->addButton(tr::lng_cancel(), [=] {
@@ -1208,7 +1208,7 @@ void ShowWhoReadInfo(
 				}
 			};
 			session->api().request(MTPchannels_GetMessageAuthor(
-				channel->inputChannel,
+				channel->inputChannel(),
 				MTP_int(id.msg.bare)
 			)).done([=](const MTPUser &result) {
 				finishWith(session->data().processUser(result));
@@ -1248,7 +1248,7 @@ void ShowWhoReadInfo(
 	action->setDisabled(true);
 	auto lifetime = LookupMessageAuthor(
 		item
-	) | rpl::start_with_next([=](not_null<UserData*> author) {
+	) | rpl::on_next([=](not_null<UserData*> author) {
 		action->setText(
 			tr::lng_context_sent_by(tr::now, lt_user, author->name()));
 		action->setDisabled(false);
@@ -1457,7 +1457,7 @@ void CopyPostLink(
 	if (isPublicLink && !videoTimestamp) {
 		show->showToast({
 			.text = tr::lng_channel_public_link_copied(
-				tr::now, Ui::Text::Bold
+				tr::now, tr::bold
 			).append('\n').append(Platform::IsMac()
 				? tr::lng_public_post_private_hint_cmd(tr::now)
 				: tr::lng_public_post_private_hint_ctrl(tr::now)),
@@ -1857,7 +1857,7 @@ void ShowWhoReactedMenu(
 		st::defaultWhoRead
 	) | rpl::filter([=](const Ui::WhoReadContent &content) {
 		return content.state != Ui::WhoReadState::Unknown;
-	}) | rpl::start_with_next([=, &lifetime](Ui::WhoReadContent &&content) {
+	}) | rpl::on_next([=, &lifetime](Ui::WhoReadContent &&content) {
 		const auto creating = !*menu;
 		const auto refillTop = [=] {
 			if (activeNonQuick) {
@@ -1963,25 +1963,25 @@ void AddEmojiPacksAction(
 					tr::now,
 					lt_count,
 					count,
-					Ui::Text::RichLangValue)
+					tr::rich)
 				: tr::lng_context_animated_emoji(
 					tr::now,
 					lt_name,
 					TextWithEntities{ name },
-					Ui::Text::RichLangValue);
+					tr::rich);
 		case EmojiPacksSource::Tag:
 			return tr::lng_context_animated_tag(
 				tr::now,
 				lt_name,
 				TextWithEntities{ name },
-				Ui::Text::RichLangValue);
+				tr::rich);
 		case EmojiPacksSource::Reaction:
 			if (!name.text.isEmpty()) {
 				return tr::lng_context_animated_reaction(
 					tr::now,
 					lt_name,
 					TextWithEntities{ name },
-					Ui::Text::RichLangValue);
+					tr::rich);
 			}
 			[[fallthrough]];
 		case EmojiPacksSource::Reactions:
@@ -1990,12 +1990,12 @@ void AddEmojiPacksAction(
 					tr::now,
 					lt_count,
 					count,
-					Ui::Text::RichLangValue)
+					tr::rich)
 				: tr::lng_context_animated_reactions(
 					tr::now,
 					lt_name,
 					TextWithEntities{ name },
-					Ui::Text::RichLangValue);
+					tr::rich);
 		}
 		Unexpected("Source in AddEmojiPacksAction.");
 	}();
@@ -2062,7 +2062,7 @@ void AddSelectRestrictionAction(
 			? tr::lng_context_noforwards_info_bot
 			: tr::lng_context_noforwards_info_channel)(
 			tr::now,
-			Ui::Text::RichLangValue),
+			tr::rich),
 		addIcon ? &st::menuIconCopyright : nullptr);
 	button->setAttribute(Qt::WA_TransparentForMouseEvents);
 	menu->addAction(std::move(button));

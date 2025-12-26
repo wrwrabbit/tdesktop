@@ -22,7 +22,7 @@ Manager::Manager() = default;
 Manager::~Manager() = default;
 
 void Manager::start(not_null<PeerData*> peer) {
-	start(&peer->session(), peer->input);
+	start(&peer->session(), peer->input());
 }
 
 void Manager::startTopic(
@@ -35,7 +35,7 @@ void Manager::startTopic(
 	}
 	_controller = std::make_unique<Controller>(
 		&peer->session().mtp(),
-		peer->input,
+		peer->input(),
 		int32(topicRootId.bare),
 		uint64(peer->id.value),
 		topicTitle);
@@ -62,14 +62,14 @@ void Manager::setupPanel(not_null<Main::Session*> session) {
 	session->account().sessionChanges(
 	) | rpl::filter([=](Main::Session *value) {
 		return (value != session);
-	}) | rpl::start_with_next([=] {
+	}) | rpl::on_next([=] {
 		stop();
 	}, _panel->lifetime());
 
 	_viewChanges.fire(_panel.get());
 
 	_panel->stopRequests(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		LOG(("Export Info: Stop requested."));
 		stop();
 	}, _controller->lifetime());

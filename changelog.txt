@@ -1,3 +1,35 @@
+6.3.10 beta (22.12.25)
+
+- Fix user info showing from large group messages.
+- Fix sent state of outgoing messages in forums.
+- Show who sent your unique collectible gifts.
+- Update Qt on all platforms.
+
+6.3.9 (15.12.25)
+
+- Fix possible crash in audio playback speed menu.
+- Fix possible crash in forum or bot topic deletion.
+
+6.3.8 (15.12.25)
+
+- Fix crash on older Linux.
+
+6.3.7 (12.12.25)
+
+- Fix login with passkey visibility on Windows.
+- Improve gift upgrading experience.
+
+6.3.6 (06.12.25)
+
+- Fix crash in media viewer.
+- Fix crash in experimental settings.
+
+6.3.5 (05.12.25)
+
+- Offer stars or TON for unique gifts.
+- Preview gift auctions before they start.
+- Support passkey login on Windows.
+
 6.3.4 (26.11.25)
 
 - Show active auctions above chats list.

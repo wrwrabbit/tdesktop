@@ -97,7 +97,7 @@ Widget::Widget(
 	getData()->country = ComputeNewAccountCountry();
 
 	_account->mtpValue(
-	) | rpl::start_with_next([=](not_null<MTP::Instance*> instance) {
+	) | rpl::on_next([=](not_null<MTP::Instance*> instance) {
 		_api.emplace(instance);
 		crl::on_main(this, [=] { createLanguageLink(); });
 	}, lifetime());
@@ -132,12 +132,12 @@ Widget::Widget(
 	}
 
 	Lang::CurrentCloudManager().firstLanguageSuggestion(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		createLanguageLink();
 	}, lifetime());
 
 	_account->mtpUpdates(
-	) | rpl::start_with_next([=](const MTPUpdates &updates) {
+	) | rpl::on_next([=](const MTPUpdates &updates) {
 		handleUpdates(updates);
 	}, lifetime());
 
@@ -150,7 +150,7 @@ Widget::Widget(
 	}
 
 	Lang::Updated(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		refreshLang();
 	}, lifetime());
 
@@ -169,7 +169,7 @@ Widget::Widget(
 			checker.isLatest(),
 			checker.failed(),
 			checker.ready()
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			checkUpdateStatus();
 		}, lifetime());
 	}
@@ -345,7 +345,7 @@ void Widget::setInnerFocus() {
 
 void Widget::setupStep() {
 	getStep()->nextButtonStyle(
-	) | rpl::start_with_next([=](const style::RoundButton *st) {
+	) | rpl::on_next([=](const style::RoundButton *st) {
 		const auto nextStyle = st ? st : &st::introNextButton;
 		if (_nextStyle != nextStyle) {
 			_nextStyle = nextStyle;
@@ -360,7 +360,7 @@ void Widget::setupStep() {
 		}
 	}, getStep()->lifetime());
 
-	getStep()->nextButtonFocusRequests() | rpl::start_with_next([=] {
+	getStep()->nextButtonFocusRequests() | rpl::on_next([=] {
 		if (_next && !_next->isHidden()) {
 			_next->entity()->setFocus(Qt::OtherFocusReason);
 		}
@@ -432,7 +432,7 @@ void Widget::hideAndDestroy(object_ptr<Ui::FadeWrap<Ui::RpWidget>> widget) {
 	const auto weak = base::make_weak(widget.data());
 	widget->hide(anim::type::normal);
 	widget->shownValue(
-	) | rpl::start_with_next([=](bool shown) {
+	) | rpl::on_next([=](bool shown) {
 		if (!shown && weak) {
 			weak->deleteLater();
 		}
@@ -512,8 +512,8 @@ void Widget::showTerms() {
 			this,
 			tr::lng_terms_signup(
 				lt_link,
-				tr::lng_terms_signup_link() | Ui::Text::ToLink(),
-				Ui::Text::WithEntities),
+				tr::lng_terms_signup_link(tr::link),
+				tr::marked),
 			st::introTermsLabel);
 		_terms.create(this, std::move(entity));
 		_terms->entity()->overrideLinkClickHandler([=] {
@@ -666,7 +666,7 @@ void Widget::showTerms(Fn<void()> callback) {
 	box->setCloseByOutsideClick(false);
 
 	box->agreeClicks(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		if (callback) {
 			callback();
 		}
@@ -676,19 +676,19 @@ void Widget::showTerms(Fn<void()> callback) {
 	}, box->lifetime());
 
 	box->cancelClicks(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		const auto box = Ui::show(Box<Window::TermsBox>(
 			TextWithEntities{ tr::lng_terms_signup_sorry(tr::now) },
 			tr::lng_intro_finish(),
 			tr::lng_terms_decline()));
 		box->agreeClicks(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			if (weak) {
 				showTerms(callback);
 			}
 		}, box->lifetime());
 		box->cancelClicks(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			if (box) {
 				box->closeBox();
 			}
@@ -735,7 +735,7 @@ void Widget::setupNextButton() {
 		return !text.isEmpty();
 	}) | rpl::filter([=](bool visible) {
 		return visible != _nextShown;
-	}) | rpl::start_with_next([=](bool visible) {
+	}) | rpl::on_next([=](bool visible) {
 		_next->toggle(visible, anim::type::normal);
 		_nextShown = visible;
 		if (_changeLanguage) {

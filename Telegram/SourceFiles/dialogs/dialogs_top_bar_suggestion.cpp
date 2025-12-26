@@ -90,8 +90,8 @@ void ShowAuthToast(
 		auto text = tr::lng_unconfirmed_auth_confirmed_message(
 			tr::now,
 			lt_link,
-			Ui::Text::Link(tr::lng_settings_sessions_title(tr::now)),
-			Ui::Text::RichLangValue);
+			tr::link(tr::lng_settings_sessions_title(tr::now)),
+			tr::rich);
 		auto filter = [=](
 				ClickHandlerPtr handler,
 				Qt::MouseButton button) {
@@ -130,21 +130,7 @@ void ShowAuthToast(
 		}
 		if (const auto controller = FindSessionController(parent)) {
 			const auto count = float64(list.size());
-			controller->show(Box([=](not_null<Ui::GenericBox*> box) {
-				box->setTitle(tr::lng_unconfirmed_auth_denied_title(
-					lt_count,
-					rpl::single(count)));
-				Ui::InformBox(box, {
-					.text = TextWithEntities()
-						.append(messageText)
-						.append('\n')
-						.append(
-							tr::lng_unconfirmed_auth_denied_warning(
-								tr::now,
-								Ui::Text::Bold)),
-					.confirmText = tr::lng_archive_hint_button(tr::now),
-				});
-			}));
+			controller->show(Box(ShowAuthDeniedBox, count, messageText));
 		}
 	}
 }
@@ -204,7 +190,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 				rpl::combine(
 					parent->widthValue(),
 					state->content->desiredHeightValue()
-				) | rpl::start_with_next([=](int width, int height) {
+				) | rpl::on_next([=](int width, int height) {
 					state->content->resize(width, height);
 				}, state->content->lifetime());
 			}
@@ -292,7 +278,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 				const auto button = lifetime.template make_state<Button>();
 				const auto window = FindSessionController(parent);
 				auctions->active(
-				) | rpl::start_with_next([=](ActiveAuctions &&active) {
+				) | rpl::on_next([=](ActiveAuctions &&active) {
 					const auto empty = active.list.empty();
 					state->desiredWrapToggle.force_assign(
 						Toggle{ !empty, anim::type::normal });
@@ -365,7 +351,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 				content->setContent(
 					tr::lng_dialogs_suggestions_premium_grace_title(
 						tr::now,
-						Ui::Text::Bold),
+						tr::bold),
 					tr::lng_dialogs_suggestions_premium_grace_about(
 						tr::now,
 						TextWithEntities::Simple));
@@ -413,7 +399,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 							Ui::MakeCreditsIconEntity(),
 							lt_channels,
 							{ peers },
-							Ui::Text::Bold),
+							tr::bold),
 						tr::lng_dialogs_suggestions_credits_sub_low_about(
 							tr::now,
 							TextWithEntities::Simple),
@@ -425,7 +411,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 				};
 				session->credits().load();
 				state->creditsLifetime.destroy();
-				session->credits().balanceValue() | rpl::start_with_next([=] {
+				session->credits().balanceValue() | rpl::on_next([=] {
 					state->creditsLifetime.destroy();
 					state->creditsHistory->requestSubscriptions(
 						Data::CreditsStatusSlice::OffsetToken(),
@@ -483,12 +469,12 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 							tr::now,
 							lt_text,
 							{ first->shortName() },
-							Ui::Text::RichLangValue)
+							tr::rich)
 						: tr::lng_dialogs_suggestions_birthday_contacts_title(
 							tr::now,
 							lt_count,
 							users.size(),
-							Ui::Text::RichLangValue);
+							tr::rich);
 					auto text = isSingle
 						? tr::lng_dialogs_suggestions_birthday_contact_about(
 							tr::now,
@@ -513,7 +499,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 						widget->setAttribute(
 							Qt::WA_TransparentForMouseEvents);
 						content->sizeValue() | rpl::filter_size(
-						) | rpl::start_with_next([=](const QSize &size) {
+						) | rpl::on_next([=](const QSize &size) {
 							widget->resize(size);
 							widget->show();
 							widget->raise();
@@ -523,7 +509,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 								s->inRow.push_back({ .peer = user });
 							}
 						}
-						widget->paintRequest() | rpl::start_with_next([=] {
+						widget->paintRequest() | rpl::on_next([=] {
 							auto p = QPainter(widget);
 							const auto regenerate = [&] {
 								if (s->userpics.isNull()) {
@@ -573,7 +559,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 						rpl::combine(
 							state->leftPadding.value(),
 							content->sizeValue() | rpl::filter_size()
-						) | rpl::start_with_next([=](int p, const QSize &s) {
+						) | rpl::on_next([=](int p, const QSize &s) {
 							fake->raise();
 							fake->show();
 							fake->moveToLeft(
@@ -605,7 +591,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 						Data::IsBirthdayTodayValue
 					) | rpl::flatten_latest(
 					) | rpl::distinct_until_changed(
-					) | rpl::start_with_next([=] {
+					) | rpl::on_next([=] {
 						repeat(repeat);
 					});
 				});
@@ -616,7 +602,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 				content->setContent(
 					tr::lng_dialogs_suggestions_birthday_title(
 						tr::now,
-						Ui::Text::Bold),
+						tr::bold),
 					tr::lng_dialogs_suggestions_birthday_about(
 						tr::now,
 						TextWithEntities::Simple));
@@ -648,7 +634,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 							tr::now,
 							lt_text,
 							{ discount.replace(kMinus, QChar()) },
-							Ui::Text::Bold),
+							tr::bold),
 						description(tr::now, TextWithEntities::Simple));
 					content->setClickedCallback([=] {
 						const auto controller = FindSessionController(parent);
@@ -667,7 +653,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 					content->setRightIcon(RightIcon::Arrow);
 					content->setLeftPadding(state->leftPadding.value());
 					const auto api = &session->api().premium();
-					api->statusTextValue() | rpl::start_with_next([=] {
+					api->statusTextValue() | rpl::on_next([=] {
 						for (const auto &o : api->subscriptionOptions()) {
 							if (o.months == 12) {
 								set(o.discount);
@@ -692,7 +678,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 				rpl::combine(
 					state->leftPadding.value(),
 					content->sizeValue() | rpl::filter_size()
-				) | rpl::start_with_next([=](int padding, const QSize &s) {
+				) | rpl::on_next([=](int padding, const QSize &s) {
 					upload->raise();
 					upload->show();
 					upload->moveToLeft(
@@ -700,7 +686,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 						(s.height() - upload->height()) / 2);
 				}, content->lifetime());
 				setLeftPaddingRelativeTo(content, upload);
-				upload->chosenImages() | rpl::start_with_next([=](
+				upload->chosenImages() | rpl::on_next([=](
 						Ui::UserpicButton::ChosenImage &&chosen) {
 					if (chosen.type == Ui::UserpicButton::ChosenType::Set) {
 						session->api().peerPhoto().upload(
@@ -716,7 +702,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 				state->userpicLifetime = session->changes().peerUpdates(
 					session->user(),
 					Data::PeerUpdate::Flag::Photo
-				) | rpl::start_with_next([=] {
+				) | rpl::on_next([=] {
 					if (session->user()->userpicPhotoId()) {
 						repeat(repeat);
 					}
@@ -742,7 +728,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 				content->setContent(
 					tr::lng_dialogs_suggestions_userpics_title(
 						tr::now,
-						Ui::Text::Bold),
+						tr::bold),
 					tr::lng_dialogs_suggestions_userpics_about(
 						tr::now,
 						TextWithEntities::Simple));
@@ -762,7 +748,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 		state->desiredWrapToggle.value() | rpl::combine_previous(
 		) | rpl::filter([=] {
 			return state->wrap != nullptr;
-		}) | rpl::start_with_next([=](Toggle was, Toggle now) {
+		}) | rpl::on_next([=](Toggle was, Toggle now) {
 			state->wrap->toggle(
 				state->outerWrapToggle.current() && now.value,
 				(was.value == now.value)
@@ -773,7 +759,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 		state->outerWrapToggle.value() | rpl::combine_previous(
 		) | rpl::filter([=] {
 			return state->wrap != nullptr;
-		}) | rpl::start_with_next([=](bool was, bool now) {
+		}) | rpl::on_next([=](bool was, bool now) {
 			const auto toggle = state->desiredWrapToggle.current();
 			state->wrap->toggle(
 				toggle.value && now,
@@ -785,7 +771,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			session->api().authorizations().unreviewedChanges(),
 			Data::AmPremiumValue(session) | rpl::skip(1) | rpl::to_empty,
 			session->giftAuctions().hasActiveChanges() | rpl::to_empty
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			const auto was = state->wrap.get();
 			const auto weak = base::make_weak(was);
 			processCurrentSuggestion(processCurrentSuggestion);

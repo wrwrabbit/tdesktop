@@ -325,12 +325,12 @@ Instance::Private::Private(
 	_fileSessionThreads.resize(2 * std::max(idealThreadPoolSize / 2, 1));
 
 	details::unpaused(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		unpaused();
 	}, _lifetime);
 
 	_networkReachability->availableChanges(
-	) | rpl::start_with_next([=](bool available) {
+	) | rpl::on_next([=](bool available) {
 		restart();
 	}, _lifetime);
 
@@ -339,7 +339,7 @@ Instance::Private::Private(
 
 	_customDeviceModel = Core::App().settings().customDeviceModel();
 	Core::App().settings().customDeviceModelChanges(
-	) | rpl::start_with_next([=](const QString &value) {
+	) | rpl::on_next([=](const QString &value) {
 		QMutexLocker lock(&_deviceModelMutex);
 		_customDeviceModel = value;
 		lock.unlock();
@@ -369,7 +369,7 @@ Instance::Private::Private(
 	}
 
 	_proxySettings.connectionTypeChanges(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		if (_configLoader) {
 			_configLoader->setProxyEnabled(_proxySettings.isEnabled());
 		}

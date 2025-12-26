@@ -184,7 +184,7 @@ Application::Application()
 	_platformIntegration->init();
 
 	passcodeLockChanges(
-	) | rpl::start_with_next([=](bool locked) {
+	) | rpl::on_next([=](bool locked) {
 		_shouldLockAt = 0;
 		if (locked) {
 			closeAdditionalWindows();
@@ -192,18 +192,18 @@ Application::Application()
 	}, _lifetime);
 
 	passcodeLockChanges(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_notifications->updateAll();
 		updateWindowTitles();
 	}, _lifetime);
 
 	settings().windowTitleContentChanges(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		updateWindowTitles();
 	}, _lifetime);
 
 	_domain->activeSessionChanges(
-	) | rpl::start_with_next([=](Main::Session *session) {
+	) | rpl::on_next([=](Main::Session *session) {
 		if (session && !UpdaterDisabled()) { // #TODO multi someSessionValue
 			UpdateChecker().setMtproto(session);
 			PTG::VerifyUpdater().setMtproto(session);
@@ -316,12 +316,12 @@ void Application::run() {
 	rpl::combine(
 		_batterySaving->value(),
 		settings().ignoreBatterySavingValue()
-	) | rpl::start_with_next([=](bool saving, bool ignore) {
+	) | rpl::on_next([=](bool saving, bool ignore) {
 		PowerSaving::SetForceAll(saving && !ignore);
 	}, _lifetime);
 
 	style::ShortAnimationPlaying(
-	) | rpl::start_with_next([=](bool playing) {
+	) | rpl::on_next([=](bool playing) {
 		if (playing) {
 			MTP::details::pause();
 		} else {
@@ -346,7 +346,7 @@ void Application::run() {
 	_windowInSettings = _lastActivePrimaryWindow = _lastActiveWindow;
 
 	_domain->activeChanges(
-	) | rpl::start_with_next([=](not_null<Main::Account*> account) {
+	) | rpl::on_next([=](not_null<Main::Account*> account) {
 		showAccount(account);
 	}, _lifetime);
 
@@ -364,7 +364,7 @@ void Application::run() {
 			? _domain->activeChanges()
 			: rpl::never<not_null<Main::Account*>>();
 	}) | rpl::flatten_latest(
-	) | rpl::start_with_next([=](not_null<Main::Account*> account) {
+	) | rpl::on_next([=](not_null<Main::Account*> account) {
 		const auto ordered = _domain->orderedAccounts();
 		const auto it = ranges::find(ordered, account);
 		if (_lastActivePrimaryWindow && it != end(ordered)) {
@@ -380,7 +380,7 @@ void Application::run() {
 	QCoreApplication::instance()->installEventFilter(this);
 
 	appDeactivatedValue(
-	) | rpl::start_with_next([=](bool deactivated) {
+	) | rpl::on_next([=](bool deactivated) {
 		if (deactivated) {
 			handleAppDeactivated();
 		} else {
@@ -416,7 +416,7 @@ void Application::run() {
 	}
 
 	_openInMediaViewRequests.events(
-	) | rpl::start_with_next([=](Media::View::OpenRequest &&request) {
+	) | rpl::on_next([=](Media::View::OpenRequest &&request) {
 		if (_mediaView) {
 			_mediaView->show(std::move(request));
 		}
@@ -522,7 +522,7 @@ void Application::startSystemDarkModeViewer() {
 	rpl::merge(
 		settings().systemDarkModeChanges() | rpl::to_empty,
 		settings().systemDarkModeEnabledChanges() | rpl::to_empty
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		checkSystemDarkMode();
 	}, _lifetime);
 }
@@ -577,18 +577,18 @@ void Application::createTray() {
 	using WindowRaw = not_null<Window::Controller*>;
 	_tray->create();
 	_tray->aboutToShowRequests(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		enumerateWindows([&](WindowRaw w) { w->updateIsActive(); });
 		_tray->updateMenuText();
 	}, _lifetime);
 
 	_tray->showFromTrayRequests(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		activate();
 	}, _lifetime);
 
 	_tray->hideToTrayRequests(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		enumerateWindows([&](WindowRaw w) {
 			w->widget()->minimizeToTray();
 		});
@@ -826,7 +826,7 @@ void Application::badMtprotoConfigurationError() {
 		_badProxyDisableBox = Ui::show(
 			Ui::MakeInformBox(Lang::Hard::ProxyConfigError()));
 		_badProxyDisableBox->boxClosing(
-		) | rpl::start_with_next(
+		) | rpl::on_next(
 			disableCallback,
 			_badProxyDisableBox->lifetime());
 	}
@@ -836,7 +836,7 @@ void Application::startLocalStorage() {
 	Ui::GL::DetectLastCheckCrash();
 	Local::start();
 	_saveSettingsTimer.emplace([=] { saveSettings(); });
-	settings().saveDelayedRequests() | rpl::start_with_next([=] {
+	settings().saveDelayedRequests() | rpl::on_next([=] {
 		saveSettingsDelayed();
 	}, _lifetime);
 }
@@ -850,7 +850,7 @@ void Application::startEmojiImageLoader() {
 	});
 
 	settings().largeEmojiChanges(
-	) | rpl::start_with_next([=](bool large) {
+	) | rpl::on_next([=](bool large) {
 		if (large) {
 			_clearEmojiImageLoaderTimer.cancel();
 		} else {
@@ -860,7 +860,7 @@ void Application::startEmojiImageLoader() {
 	}, _lifetime);
 
 	Ui::Emoji::Updated(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_emojiImageLoader.with([
 			source = prepareEmojiSourceImages()
 		](Stickers::EmojiImageLoader &loader) mutable {
@@ -1546,7 +1546,7 @@ void Application::setLastActiveWindow(Window::Controller *window) {
 		return;
 	}
 	window->floatPlayerDelegateValue(
-	) | rpl::start_with_next([=](Media::Player::FloatDelegate *value) {
+	) | rpl::on_next([=](Media::Player::FloatDelegate *value) {
 		if (!value) {
 			_floatPlayers = nullptr;
 		} else if (_floatPlayers) {
@@ -1873,12 +1873,12 @@ void Application::startShortcuts() {
 	Shortcuts::Start();
 
 	_domain->activeSessionChanges(
-	) | rpl::start_with_next([=](Main::Session *session) {
+	) | rpl::on_next([=](Main::Session *session) {
 		refreshApplicationIcon(session);
 	}, _lifetime);
 
 	Shortcuts::Requests(
-	) | rpl::start_with_next([=](not_null<Shortcuts::Request*> request) {
+	) | rpl::on_next([=](not_null<Shortcuts::Request*> request) {
 		using Command = Shortcuts::Command;
 		request->check(Command::Quit) && request->handle([] {
 			Quit();

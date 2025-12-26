@@ -80,7 +80,7 @@ Messages::Messages(not_null<GroupCall*> call, not_null<MTP::Sender*> api)
 , _starsStatsTimer([=] { requestStarsStats(); }) {
 	Ui::PostponeCall(_call, [=] {
 		_call->real(
-		) | rpl::start_with_next([=](not_null<Data::GroupCall*> call) {
+		) | rpl::on_next([=](not_null<Data::GroupCall*> call) {
 			_real = call;
 			if (ready()) {
 				sendPending();
@@ -179,7 +179,7 @@ void Messages::send(TextWithTags text, int stars) {
 			MTP_long(randomId),
 			serialized,
 			MTP_long(stars),
-			from->input
+			from->input()
 		)).done([=](
 				const MTPUpdates &result,
 				const MTP::Response &response) {
@@ -636,7 +636,7 @@ void Messages::reactionsPaidSend() {
 		MTP_long(randomId),
 		MTP_textWithEntities(MTP_string(), MTP_vector<MTPMessageEntity>()),
 		MTP_long(stars),
-		from->input
+		from->input()
 	)).done([=](
 			const MTPUpdates &result,
 			const MTP::Response &response) {
@@ -679,7 +679,7 @@ void Messages::deleteConfirmed(MessageDeleteRequest request) {
 		_api->request(MTPphone_DeleteGroupCallParticipantMessages(
 			MTP_flags(request.reportSpam ? Flag::f_report_spam : Flag()),
 			_call->inputCall(),
-			from->input
+			from->input()
 		)).send();
 		eraseFrom(ranges::remove(_messages, not_null(from), &Message::peer));
 	} else {

@@ -489,7 +489,7 @@ public:
 	[[nodiscard]] auto barSettingsValue() const {
 		return (_barSettings.current() & PeerBarSetting::Unknown)
 			? _barSettings.changes()
-			: (_barSettings.value() | rpl::type_erased());
+			: (_barSettings.value() | rpl::type_erased);
 	}
 	[[nodiscard]] int paysPerMessage() const;
 	void clearPaysPerMessage();
@@ -584,8 +584,9 @@ public:
 
 	[[nodiscard]] int peerGiftsCount() const;
 
+	[[nodiscard]] MTPInputPeer input() const;
+
 	const PeerId id;
-	MTPinputPeer input = MTP_inputPeerEmpty();
 
 protected:
 	void updateNameDelayed(

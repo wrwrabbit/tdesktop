@@ -67,9 +67,9 @@ auto PlainPrimaryUsernameValue(not_null<PeerData*> peer) {
 		peer
 	) | rpl::map([=](std::vector<TextWithEntities> usernames) {
 		if (!usernames.empty()) {
-			return rpl::single(usernames.front().text) | rpl::type_erased();
+			return rpl::single(usernames.front().text) | rpl::type_erased;
 		} else {
-			return PlainUsernameValue(peer) | rpl::type_erased();
+			return PlainUsernameValue(peer) | rpl::type_erased;
 		}
 	}) | rpl::flatten_latest();
 }
@@ -132,8 +132,8 @@ rpl::producer<TextWithEntities> PhoneValue(not_null<UserData*> user) {
 			user,
 			UpdateFlag::PhoneNumber) | rpl::to_empty
 	) | rpl::map([=] {
-		return Ui::FormatPhone(user->phone());
-	}) | Ui::Text::ToWithEntities();
+		return tr::marked(Ui::FormatPhone(user->phone()));
+	});
 }
 
 rpl::producer<TextWithEntities> PhoneOrHiddenValue(not_null<UserData*> user) {
@@ -148,9 +148,9 @@ rpl::producer<TextWithEntities> PhoneOrHiddenValue(not_null<UserData*> user) {
 			const QString &about,
 			const QString &hidden) {
 		if (phone.text.isEmpty() && username.isEmpty() && about.isEmpty()) {
-			return Ui::Text::WithEntities(hidden);
+			return tr::marked(hidden);
 		} else if (IsCollectiblePhone(user)) {
-			return Ui::Text::Link(phone, u"internal:collectible_phone/"_q
+			return tr::link(phone, u"internal:collectible_phone/"_q
 				+ user->phone() + '@' + QString::number(user->id.value));
 		} else {
 			return phone;
@@ -163,12 +163,12 @@ rpl::producer<TextWithEntities> UsernameValue(
 		bool primary) {
 	return (primary
 		? PlainPrimaryUsernameValue(peer)
-		: (PlainUsernameValue(peer) | rpl::type_erased())
+		: (PlainUsernameValue(peer) | rpl::type_erased)
 	) | rpl::map([](QString &&username) {
 		return username.isEmpty()
-			? QString()
-			: ('@' + username);
-	}) | Ui::Text::ToWithEntities();
+			? tr::marked()
+			: tr::marked('@' + username);
+	});
 }
 
 QString UsernameUrl(
@@ -194,7 +194,7 @@ rpl::producer<std::vector<TextWithEntities>> UsernamesValue(
 		return ranges::views::all(
 			usernames
 		) | ranges::views::transform([&](const QString &u) {
-			return Ui::Text::Link(u, UsernameUrl(peer, u));
+			return tr::link(u, UsernameUrl(peer, u));
 		}) | ranges::to_vector;
 	};
 	auto value = rpl::merge(
@@ -262,7 +262,7 @@ rpl::producer<LinkWithUrl> LinkValue(
 		MsgId rootId) {
 	return (primary
 		? PlainPrimaryUsernameValue(peer)
-		: PlainUsernameValue(peer) | rpl::type_erased()
+		: PlainUsernameValue(peer) | rpl::type_erased
 	) | rpl::map([=](QString &&username) {
 		if (username.isEmpty()) {
 			if (const auto topic

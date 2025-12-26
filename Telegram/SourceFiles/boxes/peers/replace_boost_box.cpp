@@ -217,13 +217,13 @@ void Controller::prepare() {
 			above.data(),
 			tr::lng_boost_reassign_text(
 				lt_channel,
-				rpl::single(Ui::Text::Bold(_to->name())),
+				rpl::single(tr::bold(_to->name())),
 				lt_gift,
 				tr::lng_boost_reassign_gift(
 					lt_count,
 					rpl::single(1. * BoostsForGift(session)),
-					Ui::Text::RichLangValue),
-				Ui::Text::RichLangValue),
+					tr::rich),
+				tr::rich),
 			st::boostReassignText),
 		st::boxRowPadding,
 		style::al_top);
@@ -278,7 +278,7 @@ void Controller::rowClicked(not_null<PeerListRow*> row) {
 				tr::now,
 				lt_count,
 				BoostsForGift(&session()),
-				Ui::Text::RichLangValue),
+				tr::rich),
 			.adaptive = true,
 		});
 		return;
@@ -331,14 +331,14 @@ object_ptr<Ui::BoxContent> ReassignBoostFloodBox(int seconds, bool group) {
 			? tr::lng_boost_error_flood_text_group
 			: tr::lng_boost_error_flood_text)(
 				lt_left,
-				rpl::single(Ui::Text::Bold((days > 1)
+				rpl::single(tr::bold((days > 1)
 					? tr::lng_days(tr::now, lt_count, days)
 					: (hours > 1)
 					? tr::lng_hours(tr::now, lt_count, hours)
 					: (minutes > 1)
 					? tr::lng_minutes(tr::now, lt_count, minutes)
 					: tr::lng_seconds(tr::now, lt_count, seconds))),
-				Ui::Text::RichLangValue),
+				tr::rich),
 		.title = tr::lng_boost_error_flood_title(),
 	});
 }
@@ -362,10 +362,10 @@ object_ptr<Ui::BoxContent> ReassignBoostSingleBox(
 		Ui::ConfirmBox(box, {
 			.text = tr::lng_boost_now_instead(
 				lt_channel,
-				rpl::single(Ui::Text::Bold(peer->name())),
+				rpl::single(tr::bold(peer->name())),
 				lt_other,
-				rpl::single(Ui::Text::Bold(to->name())),
-				Ui::Text::WithEntities),
+				rpl::single(tr::bold(to->name())),
+				tr::marked),
 			.confirmed = confirmed,
 			.confirmText = tr::lng_boost_now_replace(),
 			.labelPadding = st::boxRowPadding,
@@ -382,7 +382,7 @@ object_ptr<Ui::BoxContent> ReassignBoostSingleBox(
 
 	result->boxClosing() | rpl::filter([=] {
 		return !*reassigned;
-	}) | rpl::start_with_next(cancel, result->lifetime());
+	}) | rpl::on_next(cancel, result->lifetime());
 
 	return result;
 }
@@ -551,7 +551,7 @@ object_ptr<Ui::BoxContent> ReassignBoostsBox(
 	const auto raw = controller.get();
 	auto initBox = [=](not_null<Ui::BoxContent*> box) {
 		raw->selectedValue(
-		) | rpl::start_with_next([=](std::vector<int> slots) {
+		) | rpl::on_next([=](std::vector<int> slots) {
 			box->clearButtons();
 			if (!slots.empty()) {
 				const auto sources = SourcesCount(to, from, slots);
@@ -567,7 +567,7 @@ object_ptr<Ui::BoxContent> ReassignBoostsBox(
 
 		box->boxClosing() | rpl::filter([=] {
 			return !*reassigned;
-		}) | rpl::start_with_next(cancel, box->lifetime());
+		}) | rpl::on_next(cancel, box->lifetime());
 	};
 	return Box<PeerListBox>(std::move(controller), std::move(initBox));
 }
@@ -597,7 +597,7 @@ object_ptr<Ui::RpWidget> CreateUserpicsTransfer(
 	const auto state = raw->lifetime().make_state<State>();
 	std::move(
 		from
-	) | rpl::start_with_next([=](
+	) | rpl::on_next([=](
 			const std::vector<not_null<PeerData*>> &list) {
 		auto was = base::take(state->from);
 		auto buttons = base::take(state->buttons);
@@ -628,7 +628,7 @@ object_ptr<Ui::RpWidget> CreateUserpicsTransfer(
 	rpl::combine(
 		raw->widthValue(),
 		state->count.value()
-	) | rpl::start_with_next([=](int width, int count) {
+	) | rpl::on_next([=](int width, int count) {
 		const auto skip = st::boostReplaceUserpicsSkip;
 		const auto left = width - 2 * right->width() - skip;
 		const auto shift = std::min(
@@ -651,7 +651,7 @@ object_ptr<Ui::RpWidget> CreateUserpicsTransfer(
 	overlay->paintRequest(
 	) | rpl::filter([=] {
 		return !state->buttons.empty();
-	}) | rpl::start_with_next([=] {
+	}) | rpl::on_next([=] {
 		const auto outerw = overlay->width();
 		const auto ratio = style::DevicePixelRatio();
 		if (state->layer.size() != QSize(outerw, full) * ratio) {
@@ -737,7 +737,7 @@ object_ptr<Ui::RpWidget> CreateUserpicsWithMoreBadge(
 	const auto state = raw->lifetime().make_state<State>();
 	std::move(
 		peers
-	) | rpl::start_with_next([=, &st](
+	) | rpl::on_next([=, &st](
 			const std::vector<not_null<PeerData*>> &list) {
 		auto was = base::take(state->from);
 		auto buttons = base::take(state->buttons);
@@ -774,7 +774,7 @@ object_ptr<Ui::RpWidget> CreateUserpicsWithMoreBadge(
 	rpl::combine(
 		raw->widthValue(),
 		state->count.value()
-	) | rpl::start_with_next([=, &st](int width, int count) {
+	) | rpl::on_next([=, &st](int width, int count) {
 		const auto single = st.button.size.width();
 		const auto left = width - single;
 		const auto used = std::min(count, int(state->buttons.size()));
@@ -793,7 +793,7 @@ object_ptr<Ui::RpWidget> CreateUserpicsWithMoreBadge(
 	overlay->paintRequest(
 	) | rpl::filter([=] {
 		return !state->buttons.empty();
-	}) | rpl::start_with_next([=, &st] {
+	}) | rpl::on_next([=, &st] {
 		const auto outerw = overlay->width();
 		const auto ratio = style::DevicePixelRatio();
 		if (state->layer.size() != QSize(outerw, full) * ratio) {
@@ -986,7 +986,7 @@ object_ptr<Ui::RpWidget> CreateGiftTransfer(
 	overlay->update();
 
 	raw->widthValue(
-	) | rpl::start_with_next([=](int width) {
+	) | rpl::on_next([=](int width) {
 		const auto skip = st::boostReplaceUserpicsSkip;
 		const auto total = right->width() + skip + right->width();
 		auto x = (width - total) / 2;
@@ -997,7 +997,7 @@ object_ptr<Ui::RpWidget> CreateGiftTransfer(
 	}, raw->lifetime());
 
 	overlay->paintRequest(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		const auto outerw = overlay->width();
 		const auto ratio = style::DevicePixelRatio();
 		if (state->layer.size() != QSize(outerw, full) * ratio) {

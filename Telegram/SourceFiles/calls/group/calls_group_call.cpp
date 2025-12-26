@@ -635,7 +635,7 @@ GroupCall::GroupCall(
 
 	_muted.value(
 	) | rpl::combine_previous(
-	) | rpl::start_with_next([=](MuteState previous, MuteState state) {
+	) | rpl::on_next([=](MuteState previous, MuteState state) {
 		if (_instance) {
 			updateInstanceMuteState();
 		}
@@ -649,7 +649,7 @@ GroupCall::GroupCall(
 	_instanceState.value(
 	) | rpl::filter([=] {
 		return _hadJoinedState;
-	}) | rpl::start_with_next([=](InstanceState state) {
+	}) | rpl::on_next([=](InstanceState state) {
 		if (state == InstanceState::Disconnected) {
 			playConnectingSound();
 		} else {
@@ -676,7 +676,7 @@ GroupCall::GroupCall(
 			return not_null{ real };
 		}) | rpl::take(
 			1
-		) | rpl::start_with_next([=](not_null<Data::GroupCall*> real) {
+		) | rpl::on_next([=](not_null<Data::GroupCall*> real) {
 			subscribeToReal(real);
 			_realChanges.fire_copy(real);
 		}, _lifetime);
@@ -769,16 +769,16 @@ void GroupCall::initConferenceE2E() {
 	_e2e = std::make_unique<TdE2E::Call>(tde2eUserId);
 
 	_e2e->subchainRequests(
-	) | rpl::start_with_next([=](TdE2E::Call::SubchainRequest request) {
+	) | rpl::on_next([=](TdE2E::Call::SubchainRequest request) {
 		requestSubchainBlocks(request.subchain, request.height);
 	}, _e2e->lifetime());
 
 	_e2e->sendOutboundBlock(
-	) | rpl::start_with_next([=](QByteArray &&block) {
+	) | rpl::on_next([=](QByteArray &&block) {
 		sendOutboundBlock(std::move(block));
 	}, _e2e->lifetime());
 
-	_e2e->failures() | rpl::start_with_next([=] {
+	_e2e->failures() | rpl::on_next([=] {
 		LOG(("TdE2E: Got failure, scheduling rejoin!"));
 		crl::on_main(this, [=] { startRejoin(); });
 	}, _e2e->lifetime());
@@ -792,7 +792,7 @@ void GroupCall::setupConferenceCall() {
 	Expects(_sharedCall != nullptr);
 
 	_sharedCall->staleParticipantIds(
-	) | rpl::start_with_next([=](const base::flat_set<UserId> &staleIds) {
+	) | rpl::on_next([=](const base::flat_set<UserId> &staleIds) {
 		removeConferenceParticipants(staleIds, true);
 	}, _lifetime);
 }
@@ -803,7 +803,7 @@ void GroupCall::trackParticipantsWithAccess() {
 	}
 
 	_e2e->participantsSetValue(
-	) | rpl::start_with_next([=](const TdE2E::ParticipantsSet &set) {
+	) | rpl::on_next([=](const TdE2E::ParticipantsSet &set) {
 		auto users = base::flat_set<UserId>();
 		users.reserve(set.list.size());
 		for (const auto &id : set.list) {
@@ -967,12 +967,12 @@ void GroupCall::subscribeToReal(not_null<Data::GroupCall*> real) {
 	_listenersHidden = real->listenersHidden();
 
 	real->scheduleDateValue(
-	) | rpl::start_with_next([=](TimeId date) {
+	) | rpl::on_next([=](TimeId date) {
 		setScheduledDate(date);
 	}, _lifetime);
 
 	real->messagesEnabledValue(
-	) | rpl::start_with_next([=](bool enabled) {
+	) | rpl::on_next([=](bool enabled) {
 		setMessagesEnabled(enabled);
 	}, _lifetime);
 
@@ -981,7 +981,7 @@ void GroupCall::subscribeToReal(not_null<Data::GroupCall*> real) {
 	Ui::PostponeCall(this, [=] {
 		if (const auto real = lookupReal()) {
 			real->participantsReloaded(
-			) | rpl::start_with_next([=] {
+			) | rpl::on_next([=] {
 				fillActiveVideoEndpoints();
 			}, _lifetime);
 			fillActiveVideoEndpoints();
@@ -990,7 +990,7 @@ void GroupCall::subscribeToReal(not_null<Data::GroupCall*> real) {
 
 	using Update = Data::GroupCall::ParticipantUpdate;
 	real->participantUpdated(
-	) | rpl::start_with_next([=](const Update &data) {
+	) | rpl::on_next([=](const Update &data) {
 		const auto regularEndpoint = [&](const std::string &endpoint)
 		-> const std::string & {
 			return (endpoint.empty()
@@ -1067,7 +1067,7 @@ void GroupCall::subscribeToReal(not_null<Data::GroupCall*> real) {
 	}, _lifetime);
 
 	real->participantsResolved(
-	) | rpl::start_with_next([=](
+	) | rpl::on_next([=](
 		not_null<const base::flat_map<
 			uint32,
 			Data::LastSpokeTimes>*> ssrcs) {
@@ -1079,7 +1079,7 @@ void GroupCall::subscribeToReal(not_null<Data::GroupCall*> real) {
 	real->participantSpeaking(
 	) | rpl::filter([=] {
 		return _videoEndpointLarge.current();
-	}) | rpl::start_with_next([=](not_null<Data::GroupCallParticipant*> p) {
+	}) | rpl::on_next([=](not_null<Data::GroupCallParticipant*> p) {
 		const auto now = crl::now();
 		if (_videoEndpointLarge.current().peer == p->peer) {
 			_videoLargeTillTime = std::max(
@@ -1305,7 +1305,7 @@ void GroupCall::start(TimeId scheduleDate, bool rtmp) {
 	_createRequestId = _api.request(MTPphone_CreateGroupCall(
 		MTP_flags((scheduleDate ? Flag::f_schedule_date : Flag(0))
 			| (rtmp ? Flag::f_rtmp_stream : Flag(0))),
-		_peer->input,
+		_peer->input(),
 		MTP_int(base::RandomValue<int32>()),
 		MTPstring(), // title
 		MTP_int(scheduleDate)
@@ -1350,7 +1350,7 @@ void GroupCall::initialJoinRequested() {
 	real->participantUpdated(
 	) | rpl::filter([=](const Update &update) {
 		return (_instance != nullptr);
-	}) | rpl::start_with_next([=](const Update &update) {
+	}) | rpl::on_next([=](const Update &update) {
 		if (!update.now) {
 			_instance->removeSsrcs({
 				update.was->ssrc,
@@ -1472,7 +1472,7 @@ void GroupCall::markEndpointActive(
 		const auto track = &i->second->track;
 
 		track->renderNextFrame(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			const auto activeTrack = _activeVideoTracks[endpoint].get();
 			const auto size = track->frameSize();
 			if (size.isEmpty()) {
@@ -1494,7 +1494,7 @@ void GroupCall::markEndpointActive(
 			) | rpl::filter([=](Webrtc::VideoState state) {
 				return (state == Webrtc::VideoState::Paused)
 					&& !_activeVideoTracks[endpoint]->shown;
-			}) | rpl::start_with_next([=] {
+			}) | rpl::on_next([=] {
 				_activeVideoTracks[endpoint]->shown = true;
 				markTrackShown(endpoint, true);
 			}, i->second->lifetime);
@@ -1584,8 +1584,8 @@ void GroupCall::setJoinAs(not_null<PeerData*> as) {
 void GroupCall::saveDefaultJoinAs(not_null<PeerData*> as) {
 	setJoinAs(as);
 	_api.request(MTPphone_SaveDefaultGroupCallJoinAs(
-		_peer->input,
-		joinAs()->input
+		_peer->input(),
+		joinAs()->input()
 	)).send();
 }
 
@@ -1664,7 +1664,7 @@ void GroupCall::sendJoinRequest() {
 	_api.request(MTPphone_JoinGroupCall(
 		MTP_flags(flags),
 		inputCallSafe(),
-		joinAs()->input,
+		joinAs()->input(),
 		MTP_string(_joinHash),
 		(_e2e ? TdE2E::PublicKeyToMTP(_e2e->myKey()) : MTPint256()),
 		MTP_bytes(joinBlock),
@@ -2671,7 +2671,7 @@ void GroupCall::applyOtherParticipantUpdate(
 void GroupCall::setupMediaDevices() {
 	_playbackDeviceId.changes() | rpl::filter([=] {
 		return _instance && _setDeviceIdCallback;
-	}) | rpl::start_with_next([=](const Webrtc::DeviceResolvedId &deviceId) {
+	}) | rpl::on_next([=](const Webrtc::DeviceResolvedId &deviceId) {
 		_setDeviceIdCallback(deviceId);
 
 		// Value doesn't matter here, just trigger reading of the new value.
@@ -2680,7 +2680,7 @@ void GroupCall::setupMediaDevices() {
 
 	_captureDeviceId.changes() | rpl::filter([=] {
 		return _instance && _setDeviceIdCallback;
-	}) | rpl::start_with_next([=](const Webrtc::DeviceResolvedId &deviceId) {
+	}) | rpl::on_next([=](const Webrtc::DeviceResolvedId &deviceId) {
 		_setDeviceIdCallback(deviceId);
 
 		// Value doesn't matter here, just trigger reading of the new value.
@@ -2689,12 +2689,12 @@ void GroupCall::setupMediaDevices() {
 
 	_cameraDeviceId.changes() | rpl::filter([=] {
 		return _cameraCapture != nullptr;
-	}) | rpl::start_with_next([=](const Webrtc::DeviceResolvedId &deviceId) {
+	}) | rpl::on_next([=](const Webrtc::DeviceResolvedId &deviceId) {
 		_cameraCapture->switchToDevice(deviceId.value.toStdString(), false);
 	}, _lifetime);
 
 	if (!_rtmp) {
-		_muted.value() | rpl::start_with_next([=](MuteState state) {
+		_muted.value() | rpl::on_next([=](MuteState state) {
 			const auto devices = &Core::App().mediaDevices();
 			const auto muted = (state != MuteState::Active)
 				&& (state != MuteState::PushToTalk);
@@ -2804,7 +2804,7 @@ void GroupCall::setupOutgoingVideo() {
 	) | rpl::filter([=](VideoState previous, VideoState state) {
 		// Recursive entrance may happen if error happens when activating.
 		return (previous != state);
-	}) | rpl::start_with_next([=](VideoState previous, VideoState state) {
+	}) | rpl::on_next([=](VideoState previous, VideoState state) {
 		const auto wasActive = (previous != VideoState::Inactive);
 		const auto nowPaused = (state == VideoState::Paused);
 		const auto nowActive = (state != VideoState::Inactive);
@@ -2860,7 +2860,7 @@ void GroupCall::setupOutgoingVideo() {
 	) | rpl::filter([=](VideoState previous, VideoState state) {
 		// Recursive entrance may happen if error happens when activating.
 		return (previous != state);
-	}) | rpl::start_with_next([=](VideoState previous, VideoState state) {
+	}) | rpl::on_next([=](VideoState previous, VideoState state) {
 		const auto wasActive = (previous != VideoState::Inactive);
 		const auto nowPaused = (state == VideoState::Paused);
 		const auto nowActive = (state != VideoState::Inactive);
@@ -3915,7 +3915,7 @@ void GroupCall::sendSelfUpdate(SendUpdateType type) {
 			? Flag::f_presentation_paused
 			: Flag::f_muted),
 		inputCall(),
-		joinAs()->input,
+		joinAs()->input(),
 		MTP_bool(muted() != MuteState::Active),
 		MTP_int(100000), // volume
 		MTP_bool(muted() == MuteState::RaisedHand),
@@ -4012,7 +4012,7 @@ void GroupCall::editParticipant(
 	_api.request(MTPphone_EditGroupCallParticipant(
 		MTP_flags(flags),
 		inputCall(),
-		participantPeer->input,
+		participantPeer->input(),
 		MTP_bool(mute),
 		MTP_int(std::clamp(volume.value_or(0), 1, Group::kMaxVolume)),
 		MTPBool(), // raise_hand
@@ -4039,7 +4039,7 @@ void GroupCall::inviteToConference(
 	_api.request(MTPphone_InviteConferenceCallParticipant(
 		MTP_flags(request.video ? Flag::f_video : Flag()),
 		inputCall(),
-		user->inputUser
+		user->inputUser()
 	)).done([=](const MTPUpdates &result) {
 		const auto call = _sharedCall.get();
 		user->owner().registerInvitedToCallUser(_id, call, user, true);
@@ -4129,7 +4129,7 @@ void GroupCall::inviteUsers(
 		const auto user = request.user;
 		owner->registerInvitedToCallUser(_id, _peer, user, false);
 		usersSlice.push_back(user);
-		slice.push_back(user->inputUser);
+		slice.push_back(user->inputUser());
 		if (slice.size() == kMaxInvitePerSlice) {
 			sendSlice();
 		}
@@ -4290,66 +4290,66 @@ TextWithEntities ComposeInviteResultToast(
 		append(tr::lng_confcall_invite_done_user(
 			tr::now,
 			lt_user,
-			Ui::Text::Bold(result.invited.front()->shortName()),
-			Ui::Text::RichLangValue));
+			tr::bold(result.invited.front()->shortName()),
+			tr::rich));
 	} else if (invited > 1) {
 		append(tr::lng_confcall_invite_done_many(
 			tr::now,
 			lt_count,
 			invited,
-			Ui::Text::RichLangValue));
+			tr::rich));
 	}
 	if (already == 1) {
 		append(tr::lng_confcall_invite_already_user(
 			tr::now,
 			lt_user,
-			Ui::Text::Bold(result.alreadyIn.front()->shortName()),
-			Ui::Text::RichLangValue));
+			tr::bold(result.alreadyIn.front()->shortName()),
+			tr::rich));
 	} else if (already > 1) {
 		append(tr::lng_confcall_invite_already_many(
 			tr::now,
 			lt_count,
 			already,
-			Ui::Text::RichLangValue));
+			tr::rich));
 	}
 	if (restricted == 1) {
 		append(tr::lng_confcall_invite_fail_user(
 			tr::now,
 			lt_user,
-			Ui::Text::Bold(result.privacyRestricted.front()->shortName()),
-			Ui::Text::RichLangValue));
+			tr::bold(result.privacyRestricted.front()->shortName()),
+			tr::rich));
 	} else if (restricted > 1) {
 		append(tr::lng_confcall_invite_fail_many(
 			tr::now,
 			lt_count,
 			restricted,
-			Ui::Text::RichLangValue));
+			tr::rich));
 	}
 	if (kicked == 1) {
 		append(tr::lng_confcall_invite_kicked_user(
 			tr::now,
 			lt_user,
-			Ui::Text::Bold(result.kicked.front()->shortName()),
-			Ui::Text::RichLangValue));
+			tr::bold(result.kicked.front()->shortName()),
+			tr::rich));
 	} else if (kicked > 1) {
 		append(tr::lng_confcall_invite_kicked_many(
 			tr::now,
 			lt_count,
 			kicked,
-			Ui::Text::RichLangValue));
+			tr::rich));
 	}
 	if (failed == 1) {
 		append(tr::lng_confcall_invite_fail_user(
 			tr::now,
 			lt_user,
-			Ui::Text::Bold(result.failed.front()->shortName()),
-			Ui::Text::RichLangValue));
+			tr::bold(result.failed.front()->shortName()),
+			tr::rich));
 	} else if (failed > 1) {
 		append(tr::lng_confcall_invite_fail_many(
 			tr::now,
 			lt_count,
 			failed,
-			Ui::Text::RichLangValue));
+			tr::rich));
 	}
 	return text;
 }

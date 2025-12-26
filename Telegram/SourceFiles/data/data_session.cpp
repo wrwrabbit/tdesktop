@@ -278,12 +278,12 @@ Session::Session(not_null<Main::Session*> session)
 	setupPTGVerifyViewer();
 
 	_chatsList.unreadStateChanges(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		notifyUnreadBadgeChanged();
 	}, _lifetime);
 
 	_chatsFilters->changed(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		const auto enabled = _chatsFilters->has();
 		if (enabled != session->settings().dialogsFiltersEnabled()) {
 			session->settings().setDialogsFiltersEnabled(enabled);
@@ -292,7 +292,7 @@ Session::Session(not_null<Main::Session*> session)
 	}, _lifetime);
 
 	_reactions->myTagRenamed(
-	) | rpl::start_with_next([=](const ReactionId &id) {
+	) | rpl::on_next([=](const ReactionId &id) {
 		const auto i = _viewsByTag.find(id);
 		if (i != end(_viewsByTag)) {
 			for (const auto &view : i->second) {
@@ -302,7 +302,7 @@ Session::Session(not_null<Main::Session*> session)
 	}, _lifetime);
 
 	Spellchecker::HighlightReady(
-	) | rpl::start_with_next([=](uint64 processId) {
+	) | rpl::on_next([=](uint64 processId) {
 		highlightProcessDone(processId);
 	}, _lifetime);
 
@@ -311,7 +311,7 @@ Session::Session(not_null<Main::Session*> session)
 	crl::on_main(_session, [=] {
 		AmPremiumValue(
 			_session
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			for (const auto &[document, items] : _documentItems) {
 				if (document->isVoiceMessage()) {
 					for (const auto &item : items) {
@@ -325,7 +325,7 @@ Session::Session(not_null<Main::Session*> session)
 	});
 
 	session->appConfig().ignoredRestrictionReasonsChanges(
-	) | rpl::start_with_next([=](std::vector<QString> &&changed) {
+	) | rpl::on_next([=](std::vector<QString> &&changed) {
 		auto refresh = std::vector<not_null<const HistoryItem*>>();
 		for (const auto &[item, reasons] : _possiblyRestricted) {
 			for (const auto &reason : changed) {
@@ -343,7 +343,7 @@ Session::Session(not_null<Main::Session*> session)
 
 void Session::subscribeForTopicRepliesLists() {
 	repliesReadTillUpdates(
-	) | rpl::start_with_next([=](const RepliesReadTillUpdate &update) {
+	) | rpl::on_next([=](const RepliesReadTillUpdate &update) {
 		if (const auto peer = peerLoaded(update.id.peer)) {
 			if (const auto topic = peer->forumTopicFor(update.id.msg)) {
 				topic->replies()->apply(update);
@@ -352,7 +352,7 @@ void Session::subscribeForTopicRepliesLists() {
 	}, _lifetime);
 
 	sublistReadTillUpdates(
-	) | rpl::start_with_next([=](const SublistReadTillUpdate &update) {
+	) | rpl::on_next([=](const SublistReadTillUpdate &update) {
 		if (const auto parentChat = channelLoaded(update.parentChatId)) {
 			if (const auto monoforum = parentChat->monoforum()) {
 				const auto sublistPeerId = update.sublistPeerId;
@@ -369,7 +369,7 @@ void Session::subscribeForTopicRepliesLists() {
 		| MessageUpdate::Flag::NewMaybeAdded
 		| MessageUpdate::Flag::ReplyToTopAdded
 		| MessageUpdate::Flag::Destroyed
-	) | rpl::start_with_next([=](const MessageUpdate &update) {
+	) | rpl::on_next([=](const MessageUpdate &update) {
 		if (const auto topic = update.item->topic()) {
 			topic->replies()->apply(update);
 		} else if (update.flags == MessageUpdate::Flag::ReplyToTopAdded) {
@@ -382,12 +382,12 @@ void Session::subscribeForTopicRepliesLists() {
 
 	session().changes().topicUpdates(
 		TopicUpdate::Flag::Creator
-	) | rpl::start_with_next([=](const TopicUpdate &update) {
+	) | rpl::on_next([=](const TopicUpdate &update) {
 		update.topic->replies()->apply(update);
 	}, _lifetime);
 
 	channelDifferenceTooLong(
-	) | rpl::start_with_next([=](not_null<ChannelData*> channel) {
+	) | rpl::on_next([=](not_null<ChannelData*> channel) {
 		if (const auto forum = channel->forum()) {
 			forum->enumerateTopics([](not_null<ForumTopic*> topic) {
 				topic->replies()->applyDifferenceTooLong();
@@ -483,8 +483,6 @@ not_null<PeerData*> Session::peer(PeerId id) {
 		}
 		Unexpected("Peer id type.");
 	}();
-
-	result->input = MTPinputPeer(MTP_inputPeerEmpty());
 	return _peers.emplace(id, std::move(result)).first->second.get();
 }
 
@@ -544,8 +542,6 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 	data.match([&](const MTPDuserEmpty &data) {
 		const auto canShareThisContact = result->canShareThisContactFast();
 
-		result->input = MTP_inputPeerUser(data.vid(), MTP_long(0));
-		result->inputUser = MTP_inputUser(data.vid(), MTP_long(0));
 		result->setName(tr::lng_deleted(tr::now), QString(), QString(), QString());
 		result->setPhoto(MTP_userProfilePhotoEmpty());
 		result->setFlags(UserDataFlag::Deleted);
@@ -639,18 +635,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 		result->setFlags((result->flags() & ~flagsMask) | flagsSet);
 		result->setBotVerifyDetailsIcon(
 			data.vbot_verification_icon().value_or_empty());
-		if (minimal) {
-			if (result->input.type() == mtpc_inputPeerEmpty) {
-				result->input = MTP_inputPeerUser(
-					data.vid(),
-					MTP_long(data.vaccess_hash().value_or_empty()));
-			}
-			if (result->inputUser.type() == mtpc_inputUserEmpty) {
-				result->inputUser = MTP_inputUser(
-					data.vid(),
-					MTP_long(data.vaccess_hash().value_or_empty()));
-			}
-		} else {
+		if (!minimal) {
 			if (storiesState) {
 				result->setStoriesState(storiesState->hasVideoStream
 					? PeerData::StoriesState::HasVideoStream
@@ -659,16 +644,6 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 					: (storiesState->maxId > storiesState->readTill)
 					? PeerData::StoriesState::HasUnread
 					: PeerData::StoriesState::HasRead);
-			}
-			if (data.is_self()) {
-				result->input = MTP_inputPeerSelf();
-				result->inputUser = MTP_inputUserSelf();
-			} else if (const auto accessHash = data.vaccess_hash()) {
-				result->input = MTP_inputPeerUser(data.vid(), *accessHash);
-				result->inputUser = MTP_inputUser(data.vid(), *accessHash);
-			} else {
-				result->input = MTP_inputPeerUser(data.vid(), MTP_long(result->accessHash()));
-				result->inputUser = MTP_inputUser(data.vid(), MTP_long(result->accessHash()));
 			}
 			result->setUnavailableReasons(Data::UnavailableReason::Extract(
 				data.vrestriction_reason()));
@@ -682,6 +657,12 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 			result->setPhoto(MTP_userProfilePhotoEmpty());
 			status = &emptyStatus;
 		} else {
+			if (const auto accessHash = data.vaccess_hash()) {
+				if (!minimal || !result->accessHash()) {
+					result->setAccessHash(accessHash->v);
+				}
+			}
+
 			// apply first_name and last_name from minimal user only if we don't have
 			// local values for first name and last name already, otherwise skip
 			const auto noLocalName = result->firstName.isEmpty()
@@ -745,9 +726,6 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 				} else {
 					result->setPhoto(MTP_userProfilePhotoEmpty());
 				}
-			}
-			if (const auto accessHash = data.vaccess_hash()) {
-				result->setAccessHash(accessHash->v);
 			}
 			status = data.vstatus();
 			if (!minimal) {
@@ -854,7 +832,6 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 			chat->invalidateParticipants();
 		}
 
-		chat->input = MTP_inputPeerChat(data.vid());
 		chat->setName(qs(data.vtitle()));
 		chat->setPhoto(data.vphoto());
 		chat->date = data.vdate().v;
@@ -874,7 +851,7 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 			migratedTo->match([&](const MTPDinputChannel &input) {
 				const auto channel = this->channel(input.vchannel_id().v);
 				channel->addFlags(ChannelDataFlag::Megagroup);
-				if (!channel->access) {
+				if (!channel->accessHash()) {
 					channel->setAccessHash(input.vaccess_hash().v);
 				}
 				ApplyMigration(chat, channel);
@@ -914,7 +891,6 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 
 		const auto canAddMembers = chat->canAddMembers();
 
-		chat->input = MTP_inputPeerChat(data.vid());
 		chat->setName(qs(data.vtitle()));
 		chat->setPhoto(MTP_chatPhotoEmpty());
 		chat->date = 0;
@@ -933,6 +909,12 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 		minimal = data.is_min();
 		if (minimal && !result->isLoaded()) {
 			LOG(("API Warning: not loaded minimal channel applied."));
+		}
+
+		if (const auto accessHash = data.vaccess_hash()) {
+			if (!minimal || !channel->accessHash()) {
+				channel->setAccessHash(accessHash->v);
+			}
 		}
 
 		const auto wasInChannel = channel->amIn();
@@ -959,12 +941,7 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 		} else {
 			channel->setEmojiStatus(EmojiStatusId());
 		}
-		if (minimal) {
-			if (channel->input.type() == mtpc_inputPeerEmpty
-				|| channel->inputChannel.type() == mtpc_inputChannelEmpty) {
-				channel->setAccessHash(data.vaccess_hash().value_or_empty());
-			}
-		} else {
+		if (!minimal) {
 			if (const auto rights = data.vadmin_rights()) {
 				channel->setAdminRights(ChatAdminRightsInfo(*rights).flags);
 			} else if (channel->hasAdminRights()) {
@@ -975,8 +952,6 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 			} else if (channel->hasRestrictions()) {
 				channel->setRestrictions(ChatRestrictionsInfo());
 			}
-			channel->setAccessHash(
-				data.vaccess_hash().value_or(channel->access));
 			channel->date = data.vdate().v;
 			channel->setUnavailableReasons(Data::UnavailableReason::Extract(
 				data.vrestriction_reason()));
@@ -1628,7 +1603,7 @@ void Session::setupMigrationViewer() {
 		return update.peer->asChat();
 	}) | rpl::filter([=](ChatData *chat) {
 		return (chat != nullptr);
-	}) | rpl::start_with_next([=](not_null<ChatData*> chat) {
+	}) | rpl::on_next([=](not_null<ChatData*> chat) {
 		const auto channel = chat->migrateTo();
 		if (!channel) {
 			return;
@@ -1650,7 +1625,7 @@ void Session::setupChannelLeavingViewer() {
 		PeerUpdate::Flag::ChannelAmIn
 	) | rpl::map([](const PeerUpdate &update) {
 		return update.peer->asChannel();
-	}) | rpl::start_with_next([=](not_null<ChannelData*> channel) {
+	}) | rpl::on_next([=](not_null<ChannelData*> channel) {
 		if (channel->amIn()) {
 			channel->clearInvitePeek();
 		} else {
@@ -1668,7 +1643,7 @@ void Session::setupChannelLeavingViewer() {
 
 void Session::setupPeerNameViewer() {
 	session().changes().realtimeNameUpdates(
-	) | rpl::start_with_next([=](const NameUpdate &update) {
+	) | rpl::on_next([=](const NameUpdate &update) {
 		const auto peer = update.peer;
 		if (const auto history = historyLoaded(peer)) {
 			history->refreshChatListNameSortKey();
@@ -1684,7 +1659,7 @@ void Session::setupUserIsContactViewer() {
 		PeerUpdate::Flag::IsContact
 	) | rpl::map([](const PeerUpdate &update) {
 		return update.peer->asUser();
-	}) | rpl::start_with_next([=](not_null<UserData*> user) {
+	}) | rpl::on_next([=](not_null<UserData*> user) {
 		const auto i = _contactViews.find(peerToUser(user->id));
 		if (i != _contactViews.end()) {
 			for (const auto &view : i->second) {
@@ -2265,7 +2240,7 @@ void Session::nextForUpgradeGiftRequest(
 			MTP_flags(Flag::f_exclude_unique
 				| Flag::f_exclude_unlimited
 				| Flag::f_exclude_unupgradable),
-			owner->input,
+			owner->input(),
 			MTPint(), // collection_id
 			MTP_string(), // offset
 			MTP_int(1)) // limit
@@ -4009,9 +3984,6 @@ void Session::webpageApplyFields(
 
 	using WebPageAuctionPtr = std::unique_ptr<WebPageAuction>;
 	const auto lookupAuction = [&]() -> WebPageAuctionPtr {
-		const auto toUint = [](const MTPint &c) {
-			return (uint32(1) << 24) | uint32(c.v);
-		};
 		if (const auto attributes = data.vattributes()) {
 			for (const auto &attribute : attributes->v) {
 				return attribute.match([&](
@@ -4023,12 +3995,6 @@ void Session::webpageApplyFields(
 					auto auction = std::make_unique<WebPageAuction>();
 					auction->auctionGift = std::make_shared<StarGift>(*gift);
 					auction->endDate = data.vend_date().v;
-					auction->centerColor = Ui::ColorFromSerialized(
-						toUint(data.vcenter_color()));
-					auction->edgeColor = Ui::ColorFromSerialized(
-						toUint(data.vedge_color()));
-					auction->textColor = Ui::ColorFromSerialized(
-						toUint(data.vtext_color()));
 					return auction;
 				}, [](const auto &) -> WebPageAuctionPtr { return nullptr; });
 			}
@@ -5298,7 +5264,7 @@ void Session::saveViewAsMessages(
 	}
 	_viewAsMessagesRequests[channel] = _session->api().request(
 		MTPchannels_ToggleViewForumAsMessages(
-			channel->inputChannel,
+			channel->inputChannel(),
 			MTP_bool(viewAsMessages))
 	).done([=] {
 		_viewAsMessagesRequests.remove(channel);
@@ -5433,6 +5399,141 @@ void Session::clearContacts() {
 	clearIndexedList(contactsNoChatsList());
 	_contactItems.clear();
 	_contactsLoaded = false;
+}
+
+void Session::fillMessagePeer(FullMsgId fullId, PeerId peerId) {
+	if (!peerLoaded(peerId) && fullId.peer != peerId) {
+		_messagesWithPeer[peerId].push_back(fullId);
+	}
+}
+
+void Session::fillForwardedInfo(
+		FullMsgId fullId,
+		const MTPMessageFwdHeader &header) {
+	return header.match([&](const MTPDmessageFwdHeader &data) {
+		if (const auto fromId = data.vfrom_id()) {
+			fillMessagePeer(fullId, peerFromMTP(*fromId));
+		}
+	});
+}
+
+void Session::fillMentionUsers(
+		FullMsgId fullId,
+		const MTPVector<MTPMessageEntity> &entities) {
+	for (const auto &entity : entities.v) {
+		entity.match([&](const MTPDmessageEntityMentionName &data) {
+			fillMessagePeer(fullId, peerFromUser(data.vuser_id()));
+		}, [&](const MTPDinputMessageEntityMentionName &data) {
+			data.vuser_id().match([&](const MTPDinputUser &data) {
+				fillMessagePeer(fullId, peerFromUser(data.vuser_id()));
+			}, [](const auto &) {});
+		}, [](const auto &) {});
+	}
+}
+
+void Session::fillMessagePeers(PeerId peerId, const MTPMessage &message) {
+	const auto id = IdFromMessage(message);
+	if (!IsServerMsgId(id)) {
+		return;
+	}
+	const auto fullId = FullMsgId(peerId, id);
+	fillMessagePeer(fullId, peerId);
+	return message.match([&](const MTPDmessage &data) {
+		if (const auto fromId = data.vfrom_id()) {
+			fillMessagePeer(fullId, peerFromMTP(*fromId));
+		}
+		if (const auto viaBotId = data.vvia_bot_id()) {
+			fillMessagePeer(fullId, peerFromUser(*viaBotId));
+		}
+		if (const auto fwd = data.vfwd_from()) {
+			fillForwardedInfo(fullId, *fwd);
+		}
+		if (const auto entities = data.ventities()) {
+			fillMentionUsers(fullId, *entities);
+		}
+	}, [&](const MTPDmessageService &data) {
+		if (const auto fromId = data.vfrom_id()) {
+			fillMessagePeer(fullId, peerFromMTP(*fromId));
+		}
+		return data.vaction().match(
+		[&](const MTPDmessageActionChatAddUser &data) {
+			for (const auto &userId : data.vusers().v) {
+				fillMessagePeer(fullId, peerFromUser(userId));
+			}
+		}, [&](const MTPDmessageActionChatJoinedByLink &data) {
+			fillMessagePeer(fullId, peerFromUser(data.vinviter_id()));
+		}, [&](const MTPDmessageActionChatDeleteUser &data) {
+			fillMessagePeer(fullId, peerFromUser(data.vuser_id()));
+		}, [](const auto &) {
+		});
+	}, [](const MTPDmessageEmpty &) {
+	});
+}
+
+void Session::fillMessagePeers(const MTPDupdateShortMessage &data) {
+	const auto id = MsgId(data.vid().v);
+	const auto peerId = peerFromUser(data.vuser_id());
+	if (!id || !peerId) {
+		return;
+	}
+	const auto fullId = FullMsgId(peerId, id);
+	fillMessagePeer(fullId, peerId);
+	if (const auto viaBotId = data.vvia_bot_id()) {
+		fillMessagePeer(fullId, peerFromUser(*viaBotId));
+	}
+	if (const auto fwd = data.vfwd_from()) {
+		fillForwardedInfo(fullId, *fwd);
+	}
+	if (const auto entities = data.ventities()) {
+		fillMentionUsers(fullId, *entities);
+	}
+}
+
+void Session::fillMessagePeers(const MTPDupdateShortChatMessage &data) {
+	const auto id = MsgId(data.vid().v);
+	const auto peerId = peerFromChat(data.vchat_id());
+	if (!id || !peerId) {
+		return;
+	}
+	const auto fullId = FullMsgId(peerId, id);
+	fillMessagePeer(fullId, peerId);
+	fillMessagePeer(fullId, peerFromUser(data.vfrom_id()));
+	if (const auto viaBotId = data.vvia_bot_id()) {
+		fillMessagePeer(fullId, peerFromUser(*viaBotId));
+	}
+	if (const auto fwd = data.vfwd_from()) {
+		fillForwardedInfo(fullId, *fwd);
+	}
+	if (const auto entities = data.ventities()) {
+		fillMentionUsers(fullId, *entities);
+	}
+}
+
+void Session::fillMessagePeers(
+		FullMsgId fullId,
+		const MTPDupdateShortSentMessage &data) {
+	if (const auto entities = data.ventities()) {
+		fillMentionUsers(fullId, *entities);
+	}
+}
+
+HistoryItem *Session::messageWithPeer(PeerId id) const {
+	if (id == _session->userPeerId()) {
+		return nullptr;
+	}
+	const auto i = _messagesWithPeer.find(id);
+	if (i == end(_messagesWithPeer)) {
+		return nullptr;
+	}
+	auto &list = i->second;
+	for (auto j = begin(list); j != end(list);) {
+		if (const auto item = message(*j)) {
+			return item;
+		}
+		j = list.erase(j);
+	}
+	_messagesWithPeer.erase(i);
+	return nullptr;
 }
 
 } // namespace Data

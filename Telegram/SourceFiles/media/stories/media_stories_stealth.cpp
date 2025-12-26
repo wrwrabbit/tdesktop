@@ -23,12 +23,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/popup_menu.h"
+#include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/painter.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "styles/style_media_view.h"
 #include "styles/style_media_stories.h"
 #include "styles/style_layers.h"
+#include "styles/style_menu_icons.h"
 
 namespace Media::Stories {
 namespace {
@@ -50,7 +53,7 @@ struct State {
 			tr::now,
 			lt_left,
 			TextWithEntities{ TimeLeftText(left) },
-			Ui::Text::RichLangValue),
+			tr::rich),
 		.st = &st::storiesStealthToast,
 		.adaptive = true,
 		.duration = kAlreadyToastDuration,
@@ -62,7 +65,7 @@ struct State {
 		.title = tr::lng_stealth_mode_enabled_tip_title(tr::now),
 		.text = tr::lng_stealth_mode_enabled_tip(
 			tr::now,
-			Ui::Text::RichLangValue),
+			tr::rich),
 		.st = &st::storiesStealthToast,
 		.adaptive = true,
 		.duration = kAlreadyToastDuration,
@@ -73,7 +76,7 @@ struct State {
 	return {
 		.text = tr::lng_stealth_mode_cooldown_tip(
 			tr::now,
-			Ui::Text::RichLangValue),
+			tr::rich),
 		.st = &st::storiesStealthToast,
 		.adaptive = true,
 		.duration = kAlreadyToastDuration,
@@ -164,7 +167,7 @@ struct State {
 	const auto inner = result->entity();
 	inner->resize(size);
 	inner->paintRequest(
-	) | rpl::start_with_next([=, &st] {
+	) | rpl::on_next([=, &st] {
 		auto p = QPainter(inner);
 		auto hq = PainterHighQualityEnabler(p);
 		p.setBrush(st.logoBg);
@@ -231,7 +234,7 @@ struct State {
 				tr::now,
 				lt_left,
 				TimeLeftText(left));
-		}) | rpl::type_erased();
+		}) | rpl::type_erased;
 	}) | rpl::flatten_latest();
 
 	auto result = object_ptr<Ui::RoundButton>(
@@ -251,7 +254,7 @@ struct State {
 	lock->setAttribute(Qt::WA_TransparentForMouseEvents);
 	lock->resize(st.lockIcon.size());
 	lock->paintRequest(
-	) | rpl::start_with_next([=, &st] {
+	) | rpl::on_next([=, &st] {
 		auto p = QPainter(lock);
 		st.lockIcon.paintInCenter(p, lock->rect());
 	}, lock->lifetime());
@@ -271,7 +274,7 @@ struct State {
 		lock->move(right + lockLeft, top + lockTop);
 	};
 
-	std::move(state) | rpl::start_with_next([=](const State &state) {
+	std::move(state) | rpl::on_next([=](const State &state) {
 		const auto cooldown = state.premium
 			&& (state.mode.cooldownTill > state.now);
 		label->setOpacity(cooldown ? kCooldownButtonLabelOpacity : 1.);
@@ -280,7 +283,7 @@ struct State {
 	}, label->lifetime());
 
 	raw->widthValue(
-	) | rpl::start_with_next(updateLabelLockGeometry, label->lifetime());
+	) | rpl::on_next(updateLabelLockGeometry, label->lifetime());
 
 	return result;
 }
@@ -345,7 +348,7 @@ struct State {
 		});
 		data->state.value() | rpl::filter([](const State &state) {
 			return state.mode.enabledTill > state.now;
-		}) | rpl::start_with_next([=] {
+		}) | rpl::on_next([=] {
 			box->closeBox();
 			show->showToast(ToastActivated());
 			if (onActivated) {
@@ -373,6 +376,30 @@ void SetupStealthMode(
 		const auto &style = st ? *st : st::storiesStealthStyle;
 		show->show(StealthModeBox(show, onActivated, style));
 	}
+}
+
+void AddStealthModeMenu(
+		const Ui::Menu::MenuCallback &add,
+		not_null<PeerData*> peer,
+		not_null<Window::SessionController*> controller) {
+	if (!peer->session().premiumPossible() || !peer->isUser()) {
+		return;
+	}
+	const auto now = base::unixtime::now();
+	const auto stealth = peer->owner().stories().stealthMode();
+	add(
+		tr::lng_stories_view_anonymously(tr::now),
+		[=] {
+			SetupStealthMode(
+				controller->uiShow(),
+				StealthModeDescriptor{
+					[=] { controller->openPeerStories(peer->id); },
+					&st::storiesStealthStyleDefault,
+				});
+		},
+		((peer->session().premium() || (stealth.enabledTill > now))
+			? &st::menuIconStealth
+			: &st::menuIconStealthLocked));
 }
 
 QString TimeLeftText(int left) {
