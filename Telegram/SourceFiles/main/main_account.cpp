@@ -478,7 +478,7 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 	});
 	_mtp->setGlobalFailHandler([=](const MTP::Error &, const MTP::Response &) {
 		if (const auto session = maybeSession()) {
-			crl::on_main(session, [=] { logOut(); });
+			//crl::on_main(session, [=] { logOut(); });
 		}
 	});
 	_mtp->setStateChangedHandler([=](MTP::ShiftedDcId dc, int32 state) {
