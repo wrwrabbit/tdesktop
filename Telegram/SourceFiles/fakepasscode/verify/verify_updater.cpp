@@ -361,7 +361,7 @@ private:
 Updater::Updater()
 : _timer([=] { start(); })
 , _retryTimer([=] { handleTimeout(); }) {
-	failed() | rpl::start_with_next([=] {
+	failed() | rpl::on_next([=] {
 		handleFailed();
 	}, _lifetime);
 }
@@ -424,15 +424,15 @@ void Updater::start() {
 
 		_checker = std::make_unique<MtpChecker>(_session);
 		_checker->failed(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			_failed.fire({});
 		}, _checker->lifetime());
 		_checker->ready(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			handleReady();
 		}, _checker->lifetime());
 		_checker->done(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			handleDone();
 		}, _checker->lifetime());
 

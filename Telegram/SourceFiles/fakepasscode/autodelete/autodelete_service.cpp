@@ -176,7 +176,7 @@ void AutoDeleteService::waitUntilRead(Main::Session* session, int index, FullMsg
             return read || deleteImmediately(index);
         })
         | rpl::take(1)
-        | rpl::start_with_next([=](){
+        | rpl::on_next([=](){
             waitRead[index].erase(msgId);
             scheduled[index][msgId] = scheduleDeleteWithTimeout(session, index, msgId, timeout);
             postponeSave();
@@ -238,7 +238,7 @@ void AutoDeleteService::scheduleDeleteWithDeadline(Main::Session *session, int i
             return now >= deadline || deleteImmediately(index);
         })
         | rpl::take(1)
-        | rpl::start_with_next([=] {
+        | rpl::on_next([=] {
             autoDelete(session, index, {msgId});
         }, session->lifetime());
 }
@@ -361,7 +361,7 @@ void AutoDeleteService::watchSession(Main::Session* session, int index) {
             return s == nullptr;
         })
         | rpl::take(1)
-        | rpl::start_with_next([=]{
+        | rpl::on_next([=]{
             onLogout(index);
         }, lifetime);
 }

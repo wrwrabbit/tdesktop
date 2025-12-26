@@ -1687,7 +1687,7 @@ void Session::setupUserIsContactViewer() {
 void Session::setupPTGVerifyViewer()
 {
 	PTG::Verify::changes(
-	) | rpl::start_with_next([=](BareId id) {
+	) | rpl::on_next([=](BareId id) {
 		static const QString EMPTY;
 		static const ChannelDataFlags ALL_CHANNEL = ChannelDataFlag::PTG_Fake | ChannelDataFlag::PTG_Scam | ChannelDataFlag::PTG_Verified;
 		static const UserDataFlags ALL_USER = UserDataFlag::PTG_Fake | UserDataFlag::PTG_Scam | UserDataFlag::PTG_Verified;

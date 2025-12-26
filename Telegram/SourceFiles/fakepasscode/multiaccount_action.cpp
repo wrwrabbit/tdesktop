@@ -10,7 +10,7 @@ using namespace FakePasscode;
 
 void LogoutSubscribedAction::Prepare() {
     SubscribeOnLoggingOut();
-    Core::App().domain().accountsChanges() | rpl::start_with_next([this] {
+    Core::App().domain().accountsChanges() | rpl::on_next([this] {
         SubscribeOnLoggingOut();
         HandleAccountChanges();
     }, lifetime_);
@@ -25,7 +25,7 @@ void LogoutSubscribedAction::SubscribeOnLoggingOut() {
                     return session == nullptr;
                 })
                 | rpl::take(1)
-                | rpl::start_with_next([index = index, this] (const Main::Session*) {
+                | rpl::on_next([index = index, this] (const Main::Session*) {
                     FAKE_LOG(qsl("Account %1 logged out, calling OnAccountLoggedOut for action %2.").arg(index).arg(int(GetType())));
                     OnAccountLoggedOut(index);
                 }, sub_lifetime_);

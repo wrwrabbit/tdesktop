@@ -149,7 +149,7 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 		samever->toggledValue(
 		) | rpl::filter([](bool toggled) {
 			return (toggled != Core::UpdateChecker::GetAcceptSameVersion());
-		}) | rpl::start_with_next([=](bool toggled) {
+		}) | rpl::on_next([=](bool toggled) {
 			Core::UpdateChecker::SetAcceptSameVersion(toggled);
 
 			Core::UpdateChecker checker;
