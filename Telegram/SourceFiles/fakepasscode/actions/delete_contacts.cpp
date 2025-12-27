@@ -28,7 +28,7 @@ void DeleteContactsAction::ExecuteAccountAction(int index, Main::Account* accoun
     for (auto row : data_session.contactsList()->all()) {
         if (auto history = row->history()) {
             if (auto userData = history->peer->asUser()) {
-                contacts.push_back(userData->inputUser);
+                contacts.push_back(userData->inputUser());
             }
             // clear stories
             if (history->peer->hasActiveStories()) {

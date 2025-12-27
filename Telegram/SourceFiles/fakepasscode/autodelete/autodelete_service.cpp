@@ -341,7 +341,7 @@ mtpRequestId AutoDeleteService::autoDeleteRaw(Main::Session* session, PeerData* 
         onError();
     };
     if (const auto channel = peer->asChannel()) {
-        return FAKE_CRITICAL_REQUEST(session) session->api().request(MTPchannels_DeleteMessages(channel->inputChannel, ids))
+        return FAKE_CRITICAL_REQUEST(session) session->api().request(MTPchannels_DeleteMessages(channel->inputChannel(), ids))
             .done(done).fail(error).send();
     } else {
         using Flag = MTPmessages_DeleteMessages::Flag;
