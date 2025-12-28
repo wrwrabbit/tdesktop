@@ -145,21 +145,21 @@ jobs:
           path: ${{ env.REPO_NAME }}/out/Release/artifact
           key: mac-${{ matrix.arch }}-${{ github.sha }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload ${{ matrix.arch }} update files.
         with:
           name: ${{ env.ARTIFACT_NAME }}${{ matrix.arch }}_tg
           path: ${{ env.REPO_NAME }}/out/Release/artifact/t*macupd*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload ${{ matrix.arch }} app bundle.
         with:
           name: ${{ env.ARTIFACT_NAME }}${{ matrix.arch }}_app
           path: ${{ env.REPO_NAME }}/out/Release/artifact/*.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         name: Upload ${{ matrix.arch }} symbols artifact.
         if: false
         with:
@@ -268,14 +268,14 @@ jobs:
           
           ls -la ../output
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload universal app.
         with:
           name: ${{ env.ARTIFACT_NAME }}_universal_app
           path: output/Telegram.app.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload universal DMG.
         with:

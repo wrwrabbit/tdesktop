@@ -123,7 +123,7 @@ rpl::producer<std::vector<GiftTypeStars>> GiftsStars(
 		using namespace Api;
 		const auto api = lifetime.make_state<PremiumGiftCodeOptions>(peer);
 		api->requestStarGifts(
-		) | rpl::start_with_error_done([=](QString error) {
+		) | rpl::on_error_done([=](QString error) {
 			consumer.put_next({});
 		}, [=] {
 			auto list = std::vector<GiftTypeStars>();
@@ -159,6 +159,10 @@ GiftButton::GiftButton(
 : AbstractButton(parent)
 , _delegate(delegate)
 , _lockedTimer([=] { refreshLocked(); }) {
+	style::PaletteChanged() | rpl::on_next([=] {
+		_delegate->invalidateCache();
+		update();
+	}, lifetime());
 }
 
 GiftButton::~GiftButton() {
@@ -205,6 +209,11 @@ void GiftButton::setDescriptor(const GiftDescriptor &descriptor, Mode mode) {
 			: Lang::FormatCountDecimal(number);
 	};
 
+	const auto auctionStartDate = v::is<GiftTypeStars>(descriptor)
+		? v::get<GiftTypeStars>(descriptor).info.auctionStartDate
+		: TimeId();
+	const auto upcomingAuction = (auctionStartDate > base::unixtime::now());
+
 	_descriptor = descriptor;
 	_resalePrice = resalePrice;
 	const auto resale = (_resalePrice > 0);
@@ -213,7 +222,7 @@ void GiftButton::setDescriptor(const GiftDescriptor &descriptor, Mode mode) {
 		_text = Ui::Text::String(st::giftBoxGiftHeight / 4);
 		_text.setMarkedText(
 			st::defaultTextStyle,
-			Ui::Text::Bold(
+			tr::bold(
 				tr::lng_months(tr::now, lt_count, months)
 			).append('\n').append(
 				tr::lng_gift_premium_label(tr::now)
@@ -232,7 +241,7 @@ void GiftButton::setDescriptor(const GiftDescriptor &descriptor, Mode mode) {
 					tr::now,
 					lt_amount,
 					_delegate->ministar().append(' ' + starsText),
-					Ui::Text::WithEntities),
+					tr::marked),
 				kMarkupTextOptions,
 				_delegate->textContext());
 		}
@@ -274,13 +283,11 @@ void GiftButton::setDescriptor(const GiftDescriptor &descriptor, Mode mode) {
 				: (small() && unique && unique->starsForResale)
 				? Data::FormatGiftResaleAsked(*unique)
 				: unique
-				? tr::lng_gift_transfer_button(
-					tr::now,
-					Ui::Text::WithEntities)
-				: (data.info.auction() && !data.info.soldOut)
-				? tr::lng_gift_stars_auction_join(
-					tr::now,
-					Ui::Text::WithEntities)
+				? tr::lng_gift_transfer_button(tr::now, tr::marked)
+				: data.info.auction()
+				? ((data.info.soldOut || upcomingAuction)
+					? tr::lng_gift_stars_auction_view
+					: tr::lng_gift_stars_auction_join)(tr::now, tr::marked)
 				: _delegate->star().append(' ' + format(data.info.stars))),
 			kMarkupTextOptions,
 			_delegate->textContext());
@@ -310,7 +317,7 @@ void GiftButton::setDescriptor(const GiftDescriptor &descriptor, Mode mode) {
 	_resolvedDocument = nullptr;
 	_documentLifetime = _delegate->sticker(
 		descriptor
-	) | rpl::start_with_next([=](not_null<DocumentData*> document) {
+	) | rpl::on_next([=](not_null<DocumentData*> document) {
 		_documentLifetime.destroy();
 		setDocument(document);
 	});
@@ -378,10 +385,10 @@ void GiftButton::setDocument(not_null<DocumentData*> document) {
 	const auto destroyed = base::take(_player);
 	_playerDocument = nullptr;
 	_mediaLifetime = rpl::single() | rpl::then(
-		document->owner().session().downloaderTaskFinished()
+		document->session().downloaderTaskFinished()
 	) | rpl::filter([=] {
 		return media->loaded();
-	}) | rpl::start_with_next([=] {
+	}) | rpl::on_next([=] {
 		_mediaLifetime.destroy();
 
 		auto result = std::unique_ptr<HistoryView::StickerPlayer>();
@@ -791,6 +798,9 @@ void GiftButton::paintEvent(QPaintEvent *e) {
 	}, [&](const GiftTypeStars &data) {
 		const auto count = data.info.limitedCount;
 		const auto pinned = data.pinned || data.pinnedSelection;
+		const auto now = base::unixtime::now();
+		const auto upcomingAuction = (data.info.auctionStartDate > 0)
+			&& (data.info.auctionStartDate > now);
 		if (count || pinned) {
 			const auto yourLeft = data.info.perUserTotal
 				? (data.info.perUserRemains
@@ -807,10 +817,12 @@ void GiftButton::paintEvent(QPaintEvent *e) {
 					? ('#' + QString::number(unique->number))
 					: data.resale
 					? tr::lng_gift_stars_resale(tr::now)
-					: (!unique && data.info.auction())
-					? tr::lng_gift_stars_auction(tr::now)
 					: soldOut
 					? tr::lng_gift_stars_sold_out(tr::now)
+					: (!unique && data.info.auction())
+					? (upcomingAuction
+						? tr::lng_gift_stars_auction_soon
+						: tr::lng_gift_stars_auction)(tr::now)
 					: (!data.userpic
 						&& !data.info.unique
 						&& data.info.requirePremium)
@@ -1122,6 +1134,11 @@ bool Delegate::amPremium() {
 	return _session->premium();
 }
 
+void Delegate::invalidateCache() {
+	_bg = QImage();
+	_badges.clear();
+}
+
 DocumentData *LookupGiftSticker(
 		not_null<Main::Session*> session,
 		const GiftDescriptor &descriptor) {
@@ -1143,7 +1160,7 @@ rpl::producer<not_null<DocumentData*>> GiftStickerValue(
 		packs.load();
 		if (const auto result = packs.lookup(months)) {
 			return result->sticker()
-				? (rpl::single(not_null(result)) | rpl::type_erased())
+				? (rpl::single(not_null(result)) | rpl::type_erased)
 				: rpl::never<not_null<DocumentData*>>();
 		}
 		return packs.updated(
@@ -1153,9 +1170,9 @@ rpl::producer<not_null<DocumentData*>> GiftStickerValue(
 			return document && document->sticker();
 		}) | rpl::take(1) | rpl::map([=](DocumentData *document) {
 			return not_null(document);
-		}) | rpl::type_erased();
+		}) | rpl::type_erased;
 	}, [&](GiftTypeStars data) {
-		return rpl::single(data.info.document) | rpl::type_erased();
+		return rpl::single(data.info.document) | rpl::type_erased;
 	});
 }
 
@@ -1304,12 +1321,12 @@ void SelectGiftToUnpin(
 
 		state->selected.value(
 		) | rpl::combine_previous(
-		) | rpl::start_with_next([=](int old, int now) {
+		) | rpl::on_next([=](int old, int now) {
 			if (old >= 0) state->buttons[old]->toggleSelected(false);
 			if (now >= 0) state->buttons[now]->toggleSelected(true);
 		}, gifts->lifetime());
 
-		gifts->widthValue() | rpl::start_with_next([=](int width) {
+		gifts->widthValue() | rpl::on_next([=](int width) {
 			const auto singleMin = state->delegate.buttonSize();
 			if (width < singleMin.width()) {
 				return;
@@ -1358,12 +1375,12 @@ void SelectGiftToUnpin(
 		});
 		const auto label = Ui::SetButtonMarkedLabel(
 			button,
-			tr::lng_context_unpin_from_top(Ui::Text::WithEntities),
+			tr::lng_context_unpin_from_top(tr::marked),
 			&show->session(),
 			st::creditsBoxButtonLabel,
 			&st::giftTooManyPinnedBox.button.textFg);
 
-		state->selected.value() | rpl::start_with_next([=](int value) {
+		state->selected.value() | rpl::on_next([=](int value) {
 			const auto has = (value >= 0);
 			label->setOpacity(has ? 1. : 0.5);
 			button->setAttribute(Qt::WA_TransparentForMouseEvents, !has);
@@ -1374,7 +1391,7 @@ void SelectGiftToUnpin(
 			- buttonPadding.left()
 			- buttonPadding.right();
 		button->resizeToWidth(buttonWidth);
-		button->widthValue() | rpl::start_with_next([=](int width) {
+		button->widthValue() | rpl::on_next([=](int width) {
 			if (width != buttonWidth) {
 				button->resizeToWidth(buttonWidth);
 			}

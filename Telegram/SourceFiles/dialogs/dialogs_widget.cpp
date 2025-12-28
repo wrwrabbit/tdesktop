@@ -223,7 +223,7 @@ Widget::BottomButton::BottomButton(
 	if (_hasTextIcon) {
 		rpl::single(rpl::empty_value()) | rpl::then(
 			style::PaletteChanged()
-		) | rpl::start_with_next([this] {
+		) | rpl::on_next([this] {
 			_textIcon = UpdateIcon();
 		}, lifetime());
 	}
@@ -392,12 +392,12 @@ Widget::Widget(
 	rpl::combine(
 		_scroll->heightValue(),
 		_topBarSuggestionHeightChanged.events_starting_with(0)
-	) | rpl::start_with_next([=](int height, int topBarHeight) {
+	) | rpl::on_next([=](int height, int topBarHeight) {
 		innerList->setMinimumHeight(height);
 		_inner->setMinimumHeight(height - topBarHeight);
 		_inner->refresh();
 	}, innerList->lifetime());
-	_scroll->widthValue() | rpl::start_with_next([=](int width) {
+	_scroll->widthValue() | rpl::on_next([=](int width) {
 		innerList->resizeToWidth(width);
 	}, innerList->lifetime());
 	_scrollToTop->raise();
@@ -405,14 +405,14 @@ Widget::Widget(
 
 
 	_inner->updated(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		listScrollUpdated();
 	}, lifetime());
 
 	rpl::combine(
 		session().api().dialogsLoadMayBlockByDate(),
 		session().api().dialogsLoadBlockedByDate()
-	) | rpl::start_with_next([=](bool mayBlock, bool isBlocked) {
+	) | rpl::on_next([=](bool mayBlock, bool isBlocked) {
 		refreshLoadMoreButton(mayBlock, isBlocked);
 	}, lifetime());
 
@@ -429,7 +429,7 @@ Widget::Widget(
 				&& !update.history->isPinnedDialog(
 					controller->activeChatsFilterCurrent());
 		}
-	}) | rpl::start_with_next([=](const Data::HistoryUpdate &update) {
+	}) | rpl::on_next([=](const Data::HistoryUpdate &update) {
 		jumpToTop(true);
 	}, lifetime());
 
@@ -437,20 +437,20 @@ Widget::Widget(
 	) | rpl::to_empty);
 
 	_inner->scrollByDeltaRequests(
-	) | rpl::start_with_next([=](int delta) {
+	) | rpl::on_next([=](int delta) {
 		if (_scroll) {
 			_scroll->scrollToY(_scroll->scrollTop() + delta);
 		}
 	}, lifetime());
 
 	_inner->mustScrollTo(
-	) | rpl::start_with_next([=](const Ui::ScrollToRequest &data) {
+	) | rpl::on_next([=](const Ui::ScrollToRequest &data) {
 		if (_scroll) {
 			_scroll->scrollToY(data.ymin, data.ymax);
 		}
 	}, lifetime());
 	_inner->dialogMoved(
-	) | rpl::start_with_next([=](const Ui::ScrollToRequest &data) {
+	) | rpl::on_next([=](const Ui::ScrollToRequest &data) {
 		const auto movedFrom = data.ymin;
 		const auto movedTo = data.ymax;
 		const auto st = _scroll->scrollTop();
@@ -459,21 +459,21 @@ Widget::Widget(
 		}
 	}, lifetime());
 	_inner->searchRequests(
-	) | rpl::start_with_next([=](SearchRequestDelay delay) {
+	) | rpl::on_next([=](SearchRequestDelay delay) {
 		searchRequested(delay);
 	}, lifetime());
 	_inner->completeHashtagRequests(
-	) | rpl::start_with_next([=](const QString &tag) {
+	) | rpl::on_next([=](const QString &tag) {
 		completeHashtag(tag);
 	}, lifetime());
 	_inner->refreshHashtagsRequests(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		searchCursorMoved();
 	}, lifetime());
 	_inner->changeSearchTabRequests(
 	) | rpl::filter([=](ChatSearchTab tab) {
 		return _searchState.tab != tab;
-	}) | rpl::start_with_next([=](ChatSearchTab tab) {
+	}) | rpl::on_next([=](ChatSearchTab tab) {
 		auto copy = _searchState;
 		copy.tab = tab;
 		applySearchState(std::move(copy));
@@ -482,13 +482,13 @@ Widget::Widget(
 	) | rpl::filter([=](ChatTypeFilter filter) {
 		return (_searchState.filter != filter)
 			&& (_searchState.tab == ChatSearchTab::MyMessages);
-	}) | rpl::start_with_next([=](ChatTypeFilter filter) {
+	}) | rpl::on_next([=](ChatTypeFilter filter) {
 		auto copy = _searchState;
 		copy.filter = filter;
 		applySearchState(copy);
 	}, lifetime());
 	_inner->cancelSearchRequests(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		cancelSearch({
 			.forceFullCancel = true,
 			.jumpBackToSearchedChat = true,
@@ -496,7 +496,7 @@ Widget::Widget(
 		controller->widget()->setInnerFocus();
 	}, lifetime());
 	_inner->cancelSearchFromRequests(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		auto copy = _searchState;
 		copy.fromPeer = nullptr;
 		if (copy.inChat.sublist()) {
@@ -505,33 +505,33 @@ Widget::Widget(
 		applySearchState(std::move(copy));
 	}, lifetime());
 	_inner->changeSearchFromRequests(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		showSearchFrom();
 	}, lifetime());
 	_inner->chosenRow(
-	) | rpl::start_with_next([=](const ChosenRow &row) {
+	) | rpl::on_next([=](const ChosenRow &row) {
 		chosenRow(row);
 	}, lifetime());
 	_inner->openBotMainAppRequests(
-	) | rpl::start_with_next([=](UserId userId) {
+	) | rpl::on_next([=](UserId userId) {
 		if (const auto user = session().data().user(userId)) {
 			openBotMainApp(user);
 		}
 	}, lifetime());
 
 	_scroll->geometryChanged(
-	) | rpl::start_with_next(crl::guard(_inner, [=] {
+	) | rpl::on_next(crl::guard(_inner, [=] {
 		_inner->parentGeometryChanged();
 	}), lifetime());
 	_scroll->scrolls(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		listScrollUpdated();
 	}, lifetime());
 
 	session().data().chatsListChanges(
 	) | rpl::filter([=](Data::Folder *folder) {
 		return (folder == _inner->shownFolder());
-	}) | rpl::start_with_next([=] {
+	}) | rpl::on_next([=] {
 		Ui::PostponeCall(this, [=] { listScrollUpdated(); });
 	}, lifetime());
 
@@ -539,17 +539,17 @@ Widget::Widget(
 	controller->widget()->imeCompositionStarts(
 	) | rpl::filter([=] {
 		return redirectImeToSearch();
-	}) | rpl::start_with_next([=] {
+	}) | rpl::on_next([=] {
 		_search->setFocusFast();
 	}, lifetime());
 
 	_search->changes(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		crl::on_main(this, [=] { applySearchUpdate(); });
 	}, _search->lifetime());
 
 	_search->submits(
-	) | rpl::start_with_next([=] { submit(); }, _search->lifetime());
+	) | rpl::on_next([=] { submit(); }, _search->lifetime());
 
 	QObject::connect(
 		_search->rawTextEdit().get(),
@@ -565,7 +565,7 @@ Widget::Widget(
 			checker.isLatest(),
 			checker.failed(),
 			checker.ready()
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			checkUpdateStatus();
 		}, lifetime());
 	}
@@ -577,7 +577,7 @@ Widget::Widget(
 	_chooseFromUser->entity()->setClickedCallback([=] { showSearchFrom(); });
 	rpl::single(rpl::empty) | rpl::then(
 		session().domain().local().localPasscodeChanged()
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		updateLockUnlockVisibility();
 	}, lifetime());
 	const auto lockUnlock = _lockUnlock->entity();
@@ -629,7 +629,7 @@ Widget::Widget(
 		}
 	});
 	_inner->listBottomReached(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		loadMoreBlockedByDate();
 	}, lifetime());
 
@@ -649,7 +649,7 @@ Widget::Widget(
 	};
 	_scroll->setOverscrollBg(overscrollBg());
 	style::PaletteChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_scroll->setOverscrollBg(overscrollBg());
 	}, lifetime());
 
@@ -661,12 +661,12 @@ Widget::Widget(
 			anim::type::instant);
 
 		controller->openedFolder().changes(
-		) | rpl::start_with_next([=](Data::Folder *folder) {
+		) | rpl::on_next([=](Data::Folder *folder) {
 			changeOpenedFolder(folder, anim::type::normal);
 		}, lifetime());
 
 		controller->shownForum().changes(
-		) | rpl::filter(!rpl::mappers::_1) | rpl::start_with_next([=] {
+		) | rpl::filter(!rpl::mappers::_1) | rpl::on_next([=] {
 			if (_openedForum) {
 				changeOpenedForum(nullptr, anim::type::normal);
 			} else if (_childList) {
@@ -675,14 +675,14 @@ Widget::Widget(
 		}, lifetime());
 
 		_childListShown.changes(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			_scroll->setOverscrollBg(overscrollBg());
 			updateControlsGeometry();
 		}, lifetime());
 
 		_childListShown.changes(
 		) | rpl::filter((rpl::mappers::_1 == 0.) || (rpl::mappers::_1 == 1.)
-		) | rpl::start_with_next([=](float64 shown) {
+		) | rpl::on_next([=](float64 shown) {
 			const auto color = (shown > 0.) ? &st::dialogsRippleBg : nullptr;
 			_mainMenu.toggle->setRippleColorOverride(color);
 			_searchForNarrowLayout->setRippleColorOverride(color);
@@ -1042,7 +1042,7 @@ void Widget::setupTouchChatPreview() {
 	_scroll->setCustomTouchProcess([=](not_null<QTouchEvent*> e) {
 		return _inner->processTouchEvent(e);
 	});
-	_inner->touchCancelRequests() | rpl::start_with_next([=] {
+	_inner->touchCancelRequests() | rpl::on_next([=] {
 		QTouchEvent ev(QEvent::TouchCancel);
 		ev.setTimestamp(crl::now());
 		QGuiApplication::sendEvent(_scroll, &ev);
@@ -1051,7 +1051,7 @@ void Widget::setupTouchChatPreview() {
 
 void Widget::setupFrozenAccountBar() {
 	session().frozenValue(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		updateFrozenAccountBar();
 		updateControlsGeometry();
 	}, lifetime());
@@ -1065,7 +1065,7 @@ void Widget::setupTopBarSuggestions(not_null<Ui::VerticalLayout*> dialogs) {
 	crl::on_main(dialogs, [=] {
 		const auto owner = &session().data();
 		session().api().authorizations().unreviewedChanges(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			updateForceDisplayWide();
 		}, lifetime());
 		(owner->chatsListLoaded(nullptr)
@@ -1094,7 +1094,7 @@ void Widget::setupTopBarSuggestions(not_null<Ui::VerticalLayout*> dialogs) {
 					&& (id == owner->chatsFilters().defaultId());
 			});
 			return TopBarSuggestionValue(dialogs, &session(), std::move(on));
-		}) | rpl::flatten_latest() | rpl::start_with_next([=](
+		}) | rpl::flatten_latest() | rpl::on_next([=](
 				Ui::SlideWrap<Ui::RpWidget> *raw) {
 			if (raw) {
 				_topBarSuggestion = dialogs->insert(
@@ -1107,7 +1107,7 @@ void Widget::setupTopBarSuggestions(not_null<Ui::VerticalLayout*> dialogs) {
 				rpl::combine(
 					_topBarSuggestion->entity()->desiredHeightValue(),
 					_childListShown.value()
-				) | rpl::start_with_next([=](
+				) | rpl::on_next([=](
 						int desiredHeight,
 						float64 shown) {
 					const auto newHeight = desiredHeight * (1. - shown);
@@ -1153,7 +1153,7 @@ void Widget::setupMoreChatsBar() {
 		return;
 	}
 	controller()->activeChatsFilter(
-	) | rpl::start_with_next([=](FilterId id) {
+	) | rpl::on_next([=](FilterId id) {
 		storiesToggleExplicitExpand(false);
 		const auto cancelled = cancelSearch({ .forceFullCancel = true });
 		const auto guard = gsl::finally([&] {
@@ -1175,7 +1175,7 @@ void Widget::setupMoreChatsBar() {
 		trackScroll(_moreChatsBar->wrap());
 
 		_moreChatsBar->barClicks(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			if (const auto missing = filters->moreChats(id)
 				; !missing.empty()) {
 				Api::ProcessFilterUpdate(controller(), id, missing);
@@ -1183,7 +1183,7 @@ void Widget::setupMoreChatsBar() {
 		}, _moreChatsBar->lifetime());
 
 		_moreChatsBar->closeClicks(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			Api::ProcessFilterUpdate(controller(), id, {});
 		}, _moreChatsBar->lifetime());
 
@@ -1195,7 +1195,7 @@ void Widget::setupMoreChatsBar() {
 		}
 
 		_moreChatsBar->heightValue(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			updateControlsGeometry();
 		}, _moreChatsBar->lifetime());
 	}, lifetime());
@@ -1207,7 +1207,7 @@ void Widget::setupDownloadBar() {
 	}
 
 	Data::MakeDownloadBarContent(
-	) | rpl::start_with_next([=](Ui::DownloadBarContent &&content) {
+	) | rpl::on_next([=](Ui::DownloadBarContent &&content) {
 		const auto create = (content.count && !_downloadBar);
 		if (create) {
 			_downloadBar = std::make_unique<Ui::DownloadBar>(
@@ -1219,20 +1219,20 @@ void Widget::setupDownloadBar() {
 		}
 		if (create) {
 			_downloadBar->heightValue(
-			) | rpl::start_with_next([=] {
+			) | rpl::on_next([=] {
 				updateControlsGeometry();
 			}, _downloadBar->lifetime());
 
 			_downloadBar->shownValue(
 			) | rpl::filter(
 				!rpl::mappers::_1
-			) | rpl::start_with_next([=] {
+			) | rpl::on_next([=] {
 				_downloadBar = nullptr;
 				updateControlsGeometry();
 			}, _downloadBar->lifetime());
 
 			_downloadBar->clicks(
-			) | rpl::start_with_next([=] {
+			) | rpl::on_next([=] {
 				auto &&list = Core::App().downloadManager().loadingList();
 				const auto guard = gsl::finally([] {
 					Core::App().downloadManager().clearIfFinished();
@@ -1323,10 +1323,11 @@ void Widget::setupMainMenuToggle() {
 	});
 	_mainMenu.under->stackUnder(_mainMenu.toggle);
 	_mainMenu.toggle->setClickedCallback([=] { showMainMenu(); });
+	_mainMenu.toggle->setAccessibleName(tr::lng_main_menu(tr::now));
 
 	rpl::single(rpl::empty) | rpl::then(
 		controller()->filtersMenuChanged()
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		const auto filtersHidden = !controller()->filtersWidth();
 		_mainMenu.toggle->setVisible(filtersHidden);
 		_mainMenu.under->setVisible(filtersHidden);
@@ -1336,7 +1337,7 @@ void Widget::setupMainMenuToggle() {
 
 	Window::OtherAccountsUnreadState(
 		&controller()->session().account()
-	) | rpl::start_with_next([=](const Window::OthersUnreadState &state) {
+	) | rpl::on_next([=](const Window::OthersUnreadState &state) {
 		const auto icon = !state.count
 			? nullptr
 			: !state.allMuted
@@ -1348,7 +1349,7 @@ void Widget::setupMainMenuToggle() {
 
 void Widget::setupStories() {
 	_stories->verticalScrollEvents(
-	) | rpl::start_with_next([=](not_null<QWheelEvent*> e) {
+	) | rpl::on_next([=](not_null<QWheelEvent*> e) {
 		_scroll->viewportEvent(e);
 	}, _stories->lifetime());
 
@@ -1383,7 +1384,7 @@ void Widget::setupStories() {
 		_scroll->positionValue(),
 		_scroll->movementValue(),
 		_storiesExplicitExpandValue.value()
-	) | rpl::start_with_next([=](
+	) | rpl::on_next([=](
 			Ui::ElasticScrollPosition position,
 			Ui::ElasticScrollMovement movement,
 			int explicitlyExpanded) {
@@ -1425,27 +1426,27 @@ void Widget::setupStories() {
 	}, lifetime());
 
 	_stories->collapsedGeometryChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		updateLockUnlockPosition();
 	}, lifetime());
 
 	_stories->clicks(
-	) | rpl::start_with_next([=](uint64 id) {
+	) | rpl::on_next([=](uint64 id) {
 		controller()->openPeerStories(PeerId(int64(id)), currentSource());
 	}, lifetime());
 
 	_stories->showMenuRequests(
-	) | rpl::start_with_next([=](const Stories::ShowMenuRequest &request) {
+	) | rpl::on_next([=](const Stories::ShowMenuRequest &request) {
 		FillSourceMenu(controller(), request);
 	}, lifetime());
 
 	_stories->loadMoreRequests(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		session().data().stories().loadMore(currentSource());
 	}, lifetime());
 
 	_stories->toggleExpandedRequests(
-	) | rpl::start_with_next([=](bool expanded) {
+	) | rpl::on_next([=](bool expanded) {
 		const auto position = _scroll->position();
 		if (!expanded) {
 			_scroll->setOverscrollDefaults(0, 0);
@@ -1459,11 +1460,11 @@ void Widget::setupStories() {
 		}
 	}, lifetime());
 
-	_stories->emptyValue() | rpl::skip(1) | rpl::start_with_next([=] {
+	_stories->emptyValue() | rpl::skip(1) | rpl::on_next([=] {
 		updateStoriesVisibility();
 	}, lifetime());
 
-	_stories->widthValue() | rpl::start_with_next([=] {
+	_stories->widthValue() | rpl::on_next([=] {
 		updateLockUnlockPosition();
 	}, lifetime());
 }
@@ -1486,7 +1487,7 @@ void Widget::storiesToggleExplicitExpand(bool expand) {
 
 void Widget::trackScroll(not_null<Ui::RpWidget*> widget) {
 	widget->events(
-	) | rpl::start_with_next([=](not_null<QEvent*> e) {
+	) | rpl::on_next([=](not_null<QEvent*> e) {
 		const auto type = e->type();
 		if (type == QEvent::TouchBegin
 			|| type == QEvent::TouchUpdate
@@ -1506,7 +1507,7 @@ void Widget::setupShortcuts() {
 			&& !_childList
 			&& !controller()->isLayerShown()
 			&& !controller()->window().locked();
-	}) | rpl::start_with_next([=](not_null<Shortcuts::Request*> request) {
+	}) | rpl::on_next([=](not_null<Shortcuts::Request*> request) {
 		using Command = Shortcuts::Command;
 
 		if (!controller()->activeChatCurrent()) {
@@ -1547,7 +1548,7 @@ void Widget::fullSearchRefreshOn(rpl::producer<> events) {
 		events
 	) | rpl::filter([=] {
 		return !_searchQuery.isEmpty();
-	}) | rpl::start_with_next([=] {
+	}) | rpl::on_next([=] {
 		_searchTimer.cancel();
 		_searchProcess.cache.clear();
 		const auto queries = base::take(_searchProcess.queries);
@@ -1677,6 +1678,7 @@ void Widget::toggleFiltersMenu(bool enabled) {
 
 		_chatFilters = base::make_unique_q<NoScrollPropagationWidget>(this);
 		const auto raw = _chatFilters.get();
+		const auto idBeforeTabs = controller()->activeChatsFilterCurrent();
 		const auto inner = Ui::AddChatFiltersTabsStrip(
 			_chatFilters.get(),
 			&session(),
@@ -1689,12 +1691,15 @@ void Widget::toggleFiltersMenu(bool enabled) {
 			Window::GifPauseReason::Any,
 			controller(),
 			true);
+		if (controller()->activeChatsFilterCurrent() != idBeforeTabs) {
+			controller()->setActiveChatsFilter(idBeforeTabs);
+		}
 		raw->show();
 		raw->stackUnder(_scroll);
 		raw->resizeToWidth(width());
 		const auto shadow = Ui::CreateChild<Ui::PlainShadow>(raw);
 		shadow->show();
-		inner->sizeValue() | rpl::start_with_next([=, this](const QSize &s) {
+		inner->sizeValue() | rpl::on_next([=, this](const QSize &s) {
 			raw->resize(s);
 			shadow->setGeometry(
 				0,
@@ -1769,7 +1774,7 @@ void Widget::updateSuggestions(anim::type animated) {
 			controller(),
 			TopPeersContent(&session()),
 			RecentPeersContent(&session()));
-		_suggestions->clearSearchQueryRequests() | rpl::start_with_next([=] {
+		_suggestions->clearSearchQueryRequests() | rpl::on_next([=] {
 			setSearchQuery(QString());
 		}, _suggestions->lifetime());
 		_searchSuggestionsLocked = false;
@@ -1779,7 +1784,7 @@ void Widget::updateSuggestions(anim::type animated) {
 			_suggestions->recentPeerChosen(),
 			_suggestions->myChannelChosen(),
 			_suggestions->recommendationChosen()
-		) | rpl::start_with_next([=](not_null<PeerData*> peer) {
+		) | rpl::on_next([=](not_null<PeerData*> peer) {
 			if (_searchSuggestionsLocked
 				&& (!_suggestions || !_suggestions->persist())) {
 				processSearchFocusChange();
@@ -1797,7 +1802,7 @@ void Widget::updateSuggestions(anim::type animated) {
 		rpl::merge(
 			_suggestions->openBotMainAppRequests(),
 			_suggestions->recentAppChosen()
-		) | rpl::start_with_next([=](not_null<PeerData*> peer) {
+		) | rpl::on_next([=](not_null<PeerData*> peer) {
 			if (const auto user = peer->asUser()) {
 				if (const auto info = user->botInfo.get()) {
 					if (info->hasMainApp) {
@@ -1813,11 +1818,11 @@ void Widget::updateSuggestions(anim::type animated) {
 		}, _suggestions->lifetime());
 
 		_suggestions->popularAppChosen(
-		) | rpl::start_with_next([=](not_null<PeerData*> peer) {
+		) | rpl::on_next([=](not_null<PeerData*> peer) {
 			controller()->showPeerInfo(peer);
 		}, _suggestions->lifetime());
 
-		_suggestions->closeRequests() | rpl::start_with_next([=] {
+		_suggestions->closeRequests() | rpl::on_next([=] {
 			closeSuggestions();
 		}, _suggestions->lifetime());
 
@@ -1988,23 +1993,23 @@ void Widget::refreshTopBars() {
 				_stories->raise();
 			}
 			_subsectionTopBar->searchCancelled(
-			) | rpl::start_with_next([=] {
+			) | rpl::on_next([=] {
 				escape();
 			}, _subsectionTopBar->lifetime());
 			_subsectionTopBar->searchSubmitted(
-			) | rpl::start_with_next([=] {
+			) | rpl::on_next([=] {
 				submit();
 			}, _subsectionTopBar->lifetime());
 			_subsectionTopBar->searchQuery(
-			) | rpl::start_with_next([=](QString query) {
+			) | rpl::on_next([=](QString query) {
 				applySearchUpdate();
 			}, _subsectionTopBar->lifetime());
 			_subsectionTopBar->jumpToDateRequest(
-			) | rpl::start_with_next([=] {
+			) | rpl::on_next([=] {
 				showCalendar();
 			}, _subsectionTopBar->lifetime());
 			_subsectionTopBar->chooseFromUserRequest(
-			) | rpl::start_with_next([=] {
+			) | rpl::on_next([=] {
 				showSearchFrom();
 			}, _subsectionTopBar->lifetime());
 			updateControlsGeometry();
@@ -2055,14 +2060,14 @@ void Widget::refreshTopBars() {
 		_forumTopShadow = std::make_unique<Ui::PlainShadow>(this);
 
 		_forumRequestsBar->barClicks(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			RequestsBoxController::Start(controller(), peer);
 		}, _forumRequestsBar->lifetime());
 
 		rpl::merge(
 			_forumGroupCallBar->barClicks(),
 			_forumGroupCallBar->joinClicks()
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			if (peer->groupCall()) {
 				controller()->startOrJoinGroupCall(peer);
 			}
@@ -2086,7 +2091,7 @@ void Widget::refreshTopBars() {
 			_forumGroupCallBar->heightValue(),
 			_forumRequestsBar->heightValue(),
 			_forumReportBar->bar().heightValue()
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			updateControlsGeometry();
 		}, _forumRequestsBar->lifetime());
 	} else {
@@ -2665,10 +2670,10 @@ bool Widget::search(bool inCache, SearchRequestDelay delay) {
 							| (_searchQueryTags.empty()
 								? Flag()
 								: Flag::f_saved_reaction)),
-						inPeer->input,
+						inPeer->input(),
 						MTP_string(_searchQuery),
-						(fromPeer ? fromPeer->input : MTP_inputPeerEmpty()),
-						(savedPeer ? savedPeer->input : MTP_inputPeerEmpty()),
+						(fromPeer ? fromPeer->input() : MTP_inputPeerEmpty()),
+						(savedPeer ? savedPeer->input() : MTP_inputPeerEmpty()),
 						MTP_vector_from_range(
 							_searchQueryTags | ranges::views::transform(
 								Data::ReactionToMTP
@@ -2778,7 +2783,7 @@ void Widget::searchTopics() {
 	_api.request(base::take(_topicSearchRequest)).cancel();
 	_topicSearchRequest = _api.request(MTPmessages_GetForumTopics(
 		MTP_flags(MTPmessages_GetForumTopics::Flag::f_q),
-		_openedForum->peer()->input,
+		_openedForum->peer()->input(),
 		MTP_string(_topicSearchQuery),
 		MTP_int(_topicSearchOffsetDate),
 		MTP_int(_topicSearchOffsetId),
@@ -2846,11 +2851,11 @@ void Widget::searchMore() {
 							| (_searchQueryTags.empty()
 								? Flag()
 								: Flag::f_saved_reaction)),
-						peer->input,
+						peer->input(),
 						MTP_string(_searchQuery),
-						(fromPeer ? fromPeer->input : MTP_inputPeerEmpty()),
+						(fromPeer ? fromPeer->input() : MTP_inputPeerEmpty()),
 						(savedPeer
-							? savedPeer->input
+							? savedPeer->input()
 							: MTP_inputPeerEmpty()),
 						MTP_vector_from_range(
 							_searchQueryTags | ranges::views::transform(
@@ -2903,10 +2908,10 @@ void Widget::searchMore() {
 			_migratedProcess.requestId = session().api().request(
 				MTPmessages_Search(
 					flags,
-					_searchInMigrated->peer->input,
+					_searchInMigrated->peer->input(),
 					MTP_string(_searchQuery),
 					(_searchQueryFrom
-						? _searchQueryFrom->input
+						? _searchQueryFrom->input()
 						: MTP_inputPeerEmpty()),
 					MTPInputPeer(), // saved_peer_id
 					MTPVector<MTPReaction>(), // saved_reaction
@@ -2951,7 +2956,7 @@ void Widget::requestPublicPosts(bool fromStart) {
 			MTP_int(fromStart ? 0 : _postsProcess.nextRate),
 			(fromStart
 				? MTP_inputPeerEmpty()
-				: _postsProcess.lastPeer->input),
+				: _postsProcess.lastPeer->input()),
 			MTP_int(fromStart ? 0 : _postsProcess.lastId),
 			MTP_int(kSearchPerPage),
 			MTP_long(0)) // allow_paid_stars
@@ -2996,7 +3001,7 @@ void Widget::requestMessages(bool fromStart) {
 			MTP_int(fromStart ? 0 : _searchProcess.nextRate),
 			(fromStart
 				? MTP_inputPeerEmpty()
-				: _searchProcess.lastPeer->input),
+				: _searchProcess.lastPeer->input()),
 			MTP_int(fromStart ? 0 : _searchProcess.lastId),
 			MTP_int(kSearchPerPage))
 	).done([=](const MTPmessages_Messages &result) {
@@ -3394,12 +3399,12 @@ void Widget::openChildList(
 	const auto opacity = shadow->lifetime().make_state<float64>(0.);
 	shadow->setAttribute(Qt::WA_TransparentForMouseEvents);
 	shadow->paintRequest(
-	) | rpl::start_with_next([=](QRect clip) {
+	) | rpl::on_next([=](QRect clip) {
 		auto p = QPainter(shadow);
 		p.setOpacity(*opacity);
 		p.fillRect(clip, st::shadowFg);
 	}, shadow->lifetime());
-	_childListShown.value() | rpl::start_with_next([=](float64 value) {
+	_childListShown.value() | rpl::on_next([=](float64 value) {
 		*opacity = value;
 		update();
 		_inner->update();
@@ -3441,7 +3446,7 @@ void Widget::closeChildList(anim::type animated) {
 			Window::SlideAnimation
 		>();
 		_hideChildListCanvas->paintRequest(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			QPainter p(_hideChildListCanvas.get());
 			animation->paintContents(p);
 		}, _hideChildListCanvas->lifetime());
@@ -3632,7 +3637,7 @@ bool Widget::applySearchState(SearchState state) {
 	}
 
 	_searchTagsLifetime = _inner->searchTagsChanges(
-	) | rpl::start_with_next([=](std::vector<Data::ReactionId> &&list) {
+	) | rpl::on_next([=](std::vector<Data::ReactionId> &&list) {
 		auto copy = _searchState;
 		copy.tags = std::move(list);
 		applySearchState(std::move(copy));

@@ -135,7 +135,7 @@ void Greeting::setupContent(
 		.lottieSize = st::settingsCloudPasswordIconSize,
 		.lottieMargins = st::peerAppearanceIconPadding,
 		.showFinished = showFinishes(),
-		.about = tr::lng_greeting_about(Ui::Text::WithEntities),
+		.about = tr::lng_greeting_about(tr::marked),
 		.aboutMargins = st::peerAppearanceCoverLabelMargin,
 	});
 
@@ -159,7 +159,7 @@ void Greeting::setupContent(
 	)));
 
 	_enabled = enabled->toggledValue();
-	_enabled.value() | rpl::filter(_1) | rpl::start_with_next([=] {
+	_enabled.value() | rpl::filter(_1) | rpl::on_next([=] {
 		if (!_canHave.current()) {
 			controller->showToast({
 				.text = { tr::lng_greeting_limit_reached(tr::now) },

@@ -181,7 +181,7 @@ MTP::AuthKeyPtr FakePasscode::FakePasscode::EncryptPasscode(const QByteArray& pa
 }
 
 void FakePasscode::FakePasscode::SetEncryptedChangeOnPasscode() {
-    fake_passcode_.changes() | rpl::start_with_next([=](QByteArray passcode) {
+    fake_passcode_.changes() | rpl::on_next([=](QByteArray passcode) {
         FAKE_LOG(qsl("Change and encrypt pass to %1").arg(QString::fromUtf8(passcode)));
         encrypted_passcode_ = EncryptPasscode(passcode);
     }, lifetime_);

@@ -117,7 +117,7 @@ void AutoLockBox::prepare() {
 	};
 
 	timeInput->focuses(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		group->setValue(kCustom);
 	}, lifetime());
 
@@ -134,7 +134,7 @@ void AutoLockBox::prepare() {
 			[=] { return group->current() == kCustom; }
 		),
 		timeInput->submitRequests()
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		if (const auto result = collect()) {
 			durationChanged(result);
 		} else {

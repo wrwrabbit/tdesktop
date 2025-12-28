@@ -100,18 +100,18 @@ void FakePasscodeBox::prepare() {
     connect(_reenterPasscode, &Ui::MaskedInputField::changed, [=] { newChanged(); });
 
     _passwordName->changes(
-    ) | rpl::start_with_next([=] { newChanged(); }, _passwordName->lifetime());
+    ) | rpl::on_next([=] { newChanged(); }, _passwordName->lifetime());
     _passwordHint->changes(
-    ) | rpl::start_with_next([=] { newChanged(); }, _passwordHint->lifetime());
+    ) | rpl::on_next([=] { newChanged(); }, _passwordHint->lifetime());
 
     const auto fieldSubmit = [=] { submit(); };
     connect(_oldPasscode, &Ui::MaskedInputField::submitted, fieldSubmit);
     connect(_newPasscode, &Ui::MaskedInputField::submitted, fieldSubmit);
     connect(_reenterPasscode, &Ui::MaskedInputField::submitted, fieldSubmit);
     _passwordName->submits(
-    ) | rpl::start_with_next(fieldSubmit, _passwordName->lifetime());
+    ) | rpl::on_next(fieldSubmit, _passwordName->lifetime());
     _passwordHint->submits(
-    ) | rpl::start_with_next(fieldSubmit, _passwordHint->lifetime());
+    ) | rpl::on_next(fieldSubmit, _passwordHint->lifetime());
 
     const auto has = currentlyHave();
     _oldPasscode->setVisible(onlyCheck || has);

@@ -154,10 +154,10 @@ void PersonalChannelController::prepare() {
 		}
 		if (!delegate()->peerListFullRowsCount()) {
 			auto none = rpl::combine(
-				tr::lng_settings_channel_no_yet(Ui::Text::WithEntities),
+				tr::lng_settings_channel_no_yet(tr::marked),
 				tr::lng_settings_channel_start()
 			) | rpl::map([](TextWithEntities &&text, const QString &link) {
-				return text.append('\n').append(Ui::Text::Link(link));
+				return text.append('\n').append(tr::link(link));
 			});
 			auto label = object_ptr<Ui::FlatLabel>(
 				nullptr,
@@ -231,7 +231,7 @@ void SavePersonalChannel(
 			&& self->personalChannelMessageId() != messageId)) {
 		self->setPersonalChannel(channelId, messageId);
 		self->session().api().request(MTPaccount_UpdatePersonalChannel(
-			channel ? channel->inputChannel : MTP_inputChannelEmpty()
+			channel ? channel->inputChannel() : MTP_inputChannelEmpty()
 		)).done(crl::guard(window, [=] {
 			window->showToast((channel
 				? tr::lng_settings_channel_saved
@@ -322,7 +322,7 @@ void ShowPhonePrivacyBox(Window::SessionController *controller) {
 		key
 	) | rpl::take(
 		1
-	) | rpl::start_with_next([=](const Privacy::Rule &value) mutable {
+	) | rpl::on_next([=](const Privacy::Rule &value) mutable {
 		using namespace ::Settings;
 		const auto show = shared->alive();
 		if (lifetime) {
@@ -993,7 +993,7 @@ bool ShowEditBirthday(
 		const auto save = [=](Data::Birthday result) {
 			using BFlag = MTPDbirthday::Flag;
 			controller->session().api().request(MTPusers_SuggestBirthday(
-				targetUser->inputUser,
+				targetUser->inputUser(),
 				MTP_birthday(
 					MTP_flags(result.year() ? BFlag::f_year : BFlag()),
 					MTP_int(result.day()),
@@ -1085,14 +1085,12 @@ bool ShowEditBirthday(
 				std::move(isExactlyContacts),
 				tr::lng_settings_birthday_contacts(
 					lt_link,
-					tr::lng_settings_birthday_contacts_link(
-					) | Ui::Text::ToLink(link),
-					Ui::Text::WithEntities),
+					tr::lng_settings_birthday_contacts_link(tr::url(link)),
+					tr::marked),
 				tr::lng_settings_birthday_about(
 					lt_link,
-					tr::lng_settings_birthday_about_link(
-					) | Ui::Text::ToLink(link),
-					Ui::Text::WithEntities)));
+					tr::lng_settings_birthday_about_link(tr::url(link)),
+					tr::marked)));
 		}));
 
 	}
@@ -1111,7 +1109,7 @@ bool ShowEditBirthdayPrivacy(
 		Api::UserPrivacy::Key::Birthday
 	) | rpl::take(
 		1
-	) | rpl::start_with_next([=](const Api::UserPrivacy::Rule &value) {
+	) | rpl::on_next([=](const Api::UserPrivacy::Rule &value) {
 		if (isFromBox) {
 			using namespace ::Settings;
 			class Controller final : public BirthdayPrivacyController {
@@ -1146,6 +1144,22 @@ bool ShowEditPersonalChannel(
 	} else if (controller->showFrozenError()) {
 		return true;
 	}
+	const auto maybePeerId = match->captured(1);
+	const auto maybeRemove = match->captured(2);
+
+	if (!maybePeerId.isEmpty()) {
+		if (const auto peerId = PeerId(maybePeerId.toULongLong())) {
+			if (const auto peer = controller->session().data().peer(peerId)) {
+				if (const auto channel = peer->asChannel()) {
+					SavePersonalChannel(controller, channel);
+					return true;
+				}
+			}
+		}
+	} else if (!maybeRemove.isEmpty()) {
+		SavePersonalChannel(controller, nullptr);
+		return true;
+	}
 
 	auto listController = std::make_unique<PersonalChannelController>(
 		controller);
@@ -1162,7 +1176,7 @@ bool ShowEditPersonalChannel(
 		};
 
 		rawController->chosen(
-		) | rpl::start_with_next([=](not_null<ChannelData*> channel) {
+		) | rpl::on_next([=](not_null<ChannelData*> channel) {
 			save(channel);
 		}, box->lifetime());
 
@@ -1581,10 +1595,10 @@ bool ResolveTopUp(
 					.text = tr::lng_credits_enough(
 						tr::now,
 						lt_link,
-						Ui::Text::Link(
-							Ui::Text::Bold(
+						tr::link(
+							tr::bold(
 								tr::lng_credits_enough_link(tr::now))),
-						Ui::Text::RichLangValue),
+						tr::rich),
 					.filter = filter,
 					.duration = 4 * crl::time(1000),
 				});
@@ -1840,7 +1854,7 @@ const std::vector<LocalUrlHandler> &InternalUrlHandlers() {
 			ShowEditBirthdayPrivacy,
 		},
 		{
-			u"^edit_personal_channel$"_q,
+			u"^edit_personal_channel(?::(?:(\\d{2,})|(remove)))?$"_q,
 			ShowEditPersonalChannel,
 		},
 		{

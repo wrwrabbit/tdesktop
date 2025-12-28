@@ -135,10 +135,10 @@ void ScheduleBox(
 				tr::lng_schedule_repeat_promo(
 					tr::now,
 					lt_link,
-					Ui::Text::Link(
-						Ui::Text::Bold(
+					tr::link(
+						tr::bold(
 							tr::lng_schedule_repeat_promo_link(tr::now))),
-					Ui::Text::RichLangValue),
+					tr::rich),
 				u"schedule_repeat"_q);
 			return true;
 		};
@@ -154,7 +154,7 @@ void ScheduleBox(
 			.changed = [=](TimeId value) { *repeat = value; },
 			.test = session->isTestMode(),
 		}), style::al_top);
-		std::move(descriptor.width) | rpl::start_with_next([=](int width) {
+		std::move(descriptor.width) | rpl::on_next([=](int width) {
 			row->setNaturalWidth(width);
 		}, row->lifetime());
 	}

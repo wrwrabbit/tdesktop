@@ -118,7 +118,7 @@ ModerateOptions CalculateModerateOptions(const HistoryItemsList &items) {
 			const auto peer = from[state->index];
 			const auto peerId = peer->id;
 			state->apiLifetime = search->messagesFounds(
-			) | rpl::start_with_next([=](const Api::FoundMessages &found) {
+			) | rpl::on_next([=](const Api::FoundMessages &found) {
 				state->messagesCounts[peerId] = found.total;
 				state->index++;
 				repeat(repeat);
@@ -201,7 +201,7 @@ void CreateModerateMessagesBox(
 			not_null<Ui::Checkbox*> checkbox,
 			not_null<Controller*> controller,
 			Request request) {
-		confirms->events() | rpl::start_with_next([=] {
+		confirms->events() | rpl::on_next([=] {
 			if (checkbox->checked() && controller->collectRequests) {
 				sequentiallyRequest(request, controller->collectRequests());
 			}
@@ -280,8 +280,8 @@ void CreateModerateMessagesBox(
 			}) | ranges::to<QVector<MTPint>>();
 			c->session().api().request(
 				MTPchannels_ReportSpam(
-					c->inputChannel,
-					p->input,
+					c->inputChannel(),
+					p->input(),
 					MTP_vector<MTPint>(std::move(filtered)))
 			).send();
 		});
@@ -297,12 +297,12 @@ void CreateModerateMessagesBox(
 				!(isSingle)
 					? tr::lng_delete_all_from_users(
 						tr::now,
-						Ui::Text::WithEntities)
+						tr::marked)
 					: tr::lng_delete_all_from_user(
 						tr::now,
 						lt_user,
-						Ui::Text::Bold(firstItem->from()->name()),
-						Ui::Text::WithEntities),
+						tr::bold(firstItem->from()->name()),
+						tr::marked),
 				false,
 				st::defaultBoxCheckbox),
 			st::boxRowPadding + buttonPadding);
@@ -354,7 +354,7 @@ void CreateModerateMessagesBox(
 					}
 					return float64(result);
 				})
-			) | rpl::start_with_next([=](const QString &text) {
+			) | rpl::on_next([=](const QString &text) {
 				title->setText(text);
 				title->resizeToWidth(inner->width()
 					- rect::m::sum::h(st::boxRowPadding));
@@ -386,7 +386,7 @@ void CreateModerateMessagesBox(
 				rpl::conditional(
 					(ownedWrap
 						? ownedWrap->toggledValue()
-						: rpl::single(false) | rpl::type_erased()),
+						: rpl::single(false) | rpl::type_erased),
 					tr::lng_restrict_user(
 						lt_count,
 						rpl::single(participants.size()) | tr::to_count()),
@@ -432,7 +432,7 @@ void CreateModerateMessagesBox(
 				}
 				wrap->toggle(!wrap->toggled(), anim::type::normal);
 				{
-					inner->heightValue() | rpl::start_with_next([=] {
+					inner->heightValue() | rpl::on_next([=] {
 						if (!wrap->animating()) {
 							scrollLifetime->destroy();
 							Ui::PostponeCall(crl::guard(box, [=] {
@@ -456,10 +456,10 @@ void CreateModerateMessagesBox(
 					: tr::lng_restrict_users_full)(
 						lt_emoji,
 						rpl::single(toggled ? emojiUp : emojiDown),
-						Ui::Text::WithEntities);
+						tr::marked);
 			}) | rpl::flatten_latest(
-			) | rpl::start_with_next([=](const TextWithEntities &text) {
-				raw->setMarkedText(Ui::Text::Link(text, u"internal:"_q));
+			) | rpl::on_next([=](const TextWithEntities &text) {
+				raw->setMarkedText(tr::link(text, u"internal:"_q));
 			}, label->lifetime());
 
 			Ui::AddSkip(inner);
@@ -509,7 +509,7 @@ void CreateModerateMessagesBox(
 				disabledMessages,
 				{ .isForum = peer->isForum() });
 			computeRestrictions = getRestrictions;
-			std::move(changes) | rpl::start_with_next([=] {
+			std::move(changes) | rpl::on_next([=] {
 				ban->setChecked(true);
 			}, ban->lifetime());
 			Ui::AddSkip(container);
@@ -519,7 +519,7 @@ void CreateModerateMessagesBox(
 		}
 
 		// Handle confirmation manually.
-		confirms->events() | rpl::start_with_next([=] {
+		confirms->events() | rpl::on_next([=] {
 			if (ban->checked() && controller->collectRequests) {
 				const auto kick = !wrap || !wrap->toggled();
 				const auto restrictions = computeRestrictions
@@ -622,12 +622,12 @@ void DeleteChatBox(not_null<Ui::GenericBox*> box, not_null<PeerData*> peer) {
 		Ui::CreateChild<Ui::FlatLabel>(
 			container,
 			peer->isSelf()
-				? tr::lng_saved_messages() | Ui::Text::ToBold()
+				? tr::lng_saved_messages(tr::bold)
 				: maybeUser
-				? tr::lng_profile_delete_conversation() | Ui::Text::ToBold()
+				? tr::lng_profile_delete_conversation(tr::bold)
 				: rpl::single(
-					userpicPeer->name()
-				) | Ui::Text::ToBold() | rpl::type_erased(),
+					tr::bold(userpicPeer->name())
+				) | rpl::type_erased,
 			box->getDelegate()->style().title));
 
 	Ui::AddSkip(container);
@@ -661,10 +661,10 @@ void DeleteChatBox(not_null<Ui::GenericBox*> box, not_null<PeerData*> peer) {
 						tr::now,
 						lt_user,
 						TextWithEntities{ maybeUser->firstName },
-						Ui::Text::RichLangValue)
+						tr::rich)
 					: tr::lng_delete_for_everyone_check(
 						tr::now,
-						Ui::Text::WithEntities),
+						tr::marked),
 				false,
 				st::defaultBoxCheckbox));
 	}();
@@ -678,7 +678,7 @@ void DeleteChatBox(not_null<Ui::GenericBox*> box, not_null<PeerData*> peer) {
 		return box->addRow(
 			object_ptr<Ui::Checkbox>(
 				container,
-				tr::lng_profile_block_bot(tr::now, Ui::Text::WithEntities),
+				tr::lng_profile_block_bot(tr::now, tr::marked),
 				false,
 				st::defaultBoxCheckbox));
 	}();
@@ -712,7 +712,7 @@ void DeleteChatBox(not_null<Ui::GenericBox*> box, not_null<PeerData*> peer) {
 					? tr::lng_filters_checkbox_remove_channel
 					: tr::lng_filters_checkbox_remove_group)(
 						tr::now,
-						Ui::Text::WithEntities),
+						tr::marked),
 				false,
 				st::defaultBoxCheckbox));
 	}();
@@ -794,7 +794,7 @@ void DeleteSublistBox(
 		userpic,
 		Ui::CreateChild<Ui::FlatLabel>(
 			container,
-			tr::lng_profile_delete_conversation() | Ui::Text::ToBold(),
+			tr::lng_profile_delete_conversation(tr::bold),
 			box->getDelegate()->style().title));
 
 	Ui::AddSkip(container);

@@ -42,7 +42,7 @@ object_ptr<RpWidget> MakeShowOrLabel(
 	const auto raw = result.data();
 
 	raw->paintRequest(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		auto p = QPainter(raw);
 
 		const auto full = st::showOrLineWidth;
@@ -83,14 +83,14 @@ void ShowOrPremiumBox(
 			tr::lng_lastseen_show_about(
 				lt_user,
 				rpl::single(TextWithEntities{ shortName }),
-				Text::RichLangValue),
+				tr::rich),
 			tr::lng_lastseen_show_button(),
 			tr::lng_lastseen_or(),
 			tr::lng_lastseen_premium_title(),
 			tr::lng_lastseen_premium_about(
 				lt_user,
 				rpl::single(TextWithEntities{ shortName }),
-				Text::RichLangValue),
+				tr::rich),
 			tr::lng_lastseen_premium_button(),
 			tr::lng_lastseen_shown_toast(tr::now),
 			u"show_or_premium_lastseen"_q,
@@ -100,14 +100,14 @@ void ShowOrPremiumBox(
 			tr::lng_readtime_show_about(
 				lt_user,
 				rpl::single(TextWithEntities{ shortName }),
-				Text::RichLangValue),
+				tr::rich),
 			tr::lng_readtime_show_button(),
 			tr::lng_readtime_or(),
 			tr::lng_readtime_premium_title(),
 			tr::lng_readtime_premium_about(
 				lt_user,
 				rpl::single(TextWithEntities{ shortName }),
-				Text::RichLangValue),
+				tr::rich),
 			tr::lng_readtime_premium_button(),
 			tr::lng_readtime_shown_toast(tr::now),
 			u"show_or_premium_readtime"_q,
@@ -133,30 +133,11 @@ void ShowOrPremiumBox(
 				- Size(st::showOrTitleIconMargin * 2),
 		},
 		{ 0, st::showOrTitleIconMargin, 0, st::showOrTitleIconMargin });
-	{
-		const auto iconRow = box->addRow(
-			std::move(icon.widget),
-			st::settingsBlockedListIconPadding,
-			style::al_top);
-
-		const auto circle = Ui::CreateChild<Ui::RpWidget>(
-			iconRow->parentWidget());
-		circle->lower();
-		circle->paintRequest() | rpl::start_with_next([=] {
-			auto p = QPainter(circle);
-			auto hq = PainterHighQualityEnabler(p);
-			const auto size = st::normalBoxLottieSize;
-			const auto left = (circle->width() - size.width()) / 2;
-			const auto top = (circle->height() - size.height()) / 2;
-			p.setPen(Qt::NoPen);
-			p.setBrush(st::activeButtonBg);
-			p.drawEllipse(QRect(QPoint(left, top), size));
-		}, circle->lifetime());
-
-		iconRow->geometryValue() | rpl::start_with_next([=](const QRect &g) {
-			circle->setGeometry(g);
-		}, circle->lifetime());
-	}
+	Settings::AddLottieIconWithCircle(
+		box->verticalLayout(),
+		std::move(icon.widget),
+		st::settingsBlockedListIconPadding,
+		st::normalBoxLottieSize);
 	Ui::AddSkip(box->verticalLayout());
 	box->addRow(
 		object_ptr<FlatLabel>(
@@ -212,7 +193,7 @@ void ShowOrPremiumBox(
 	rpl::combine(
 		premium->widthValue(),
 		label->widthValue()
-	) | rpl::start_with_next([=](int outer, int width) {
+	) | rpl::on_next([=](int outer, int width) {
 		label->moveToLeft(
 			(outer - width) / 2,
 			st::premiumPreviewBox.button.textTop,

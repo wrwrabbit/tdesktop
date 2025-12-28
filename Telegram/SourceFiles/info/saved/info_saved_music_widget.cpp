@@ -154,7 +154,7 @@ void MusicInner::setupEmpty() {
 			) | rpl::to_empty
 		),
 		_list->heightValue()
-	) | rpl::start_with_next([=](auto, int listHeight) {
+	) | rpl::on_next([=](auto, int listHeight) {
 		const auto padding = st::infoMediaMargin;
 		if (const auto raw = _empty.release()) {
 			raw->hide();
@@ -176,9 +176,9 @@ void MusicInner::refreshEmpty() {
 	_empty = object_ptr<Ui::FlatLabel>(
 		this,
 		(!knownEmpty
-			? tr::lng_contacts_loading(Ui::Text::WithEntities)
+			? tr::lng_contacts_loading(tr::marked)
 			: rpl::single(
-				tr::lng_media_song_empty(tr::now, Ui::Text::WithEntities))),
+				tr::lng_media_song_empty(tr::now, tr::marked))),
 		st::giftListAbout);
 	_empty->show();
 	_emptyLoading = !knownEmpty;
@@ -288,7 +288,7 @@ MusicWidget::MusicWidget(
 	_inner = setInnerWidget(object_ptr<MusicInner>(this, controller));
 	_inner->setScrollHeightValue(scrollHeightValue());
 	_inner->scrollToRequests(
-	) | rpl::start_with_next([this](Ui::ScrollToRequest request) {
+	) | rpl::on_next([this](Ui::ScrollToRequest request) {
 		scrollTo(request);
 	}, _inner->lifetime());
 }

@@ -201,6 +201,10 @@ public:
 	void setUsername(const QString &username);
 	void setUsernames(const Data::Usernames &newUsernames);
 	void setPhoto(const MTPChatPhoto &photo);
+
+	[[nodiscard]] uint64 accessHash() const {
+		return _accessHash;
+	}
 	void setAccessHash(uint64 accessHash);
 
 	void setFlags(ChannelDataFlags which);
@@ -575,11 +579,9 @@ public:
 	[[nodiscard]] TimeId subscriptionUntilDate() const;
 	void updateSubscriptionUntilDate(TimeId subscriptionUntilDate);
 
+	[[nodiscard]] MTPInputChannel inputChannel() const;
+
 	// Still public data members.
-	uint64 access = 0;
-
-	MTPinputChannel inputChannel = MTP_inputChannelEmpty();
-
 	int32 date = 0;
 	std::unique_ptr<MegagroupInfo> mgInfo;
 
@@ -609,6 +611,8 @@ private:
 
 	std::vector<UserId> _recentRequesters;
 	MsgId _availableMinId = 0;
+
+	uint64 _accessHash = 0;
 
 	RestrictionFlags _defaultRestrictions;
 	AdminRightFlags _adminRights;

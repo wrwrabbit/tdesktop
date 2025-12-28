@@ -153,7 +153,7 @@ static ChooseTimeoutBoxDescriptor ChooseTimeoutBox(
     installScrollEvent(state->seconds);
 
     content->widthValue()
-        | rpl::start_with_next([=](int width) {
+        | rpl::on_next([=](int width) {
             const auto paddings = width
                 - state->labelHours->width()
                 - state->labelMinutes->width()
@@ -189,7 +189,7 @@ static ChooseTimeoutBoxDescriptor ChooseTimeoutBox(
         return result;
     };
     /*state->time->submitRequests(
-    ) | rpl::start_with_next(save, state->time->lifetime());*/
+    ) | rpl::on_next(save, state->time->lifetime());*/
 
     auto result = ChooseTimeoutBoxDescriptor();
     result.submit = box->addButton(std::move(args.submit), [=, done = args.done] {
