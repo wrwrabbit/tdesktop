@@ -32,7 +32,7 @@ jobs:
     steps:
 
       - name: Check deploy_test_patches.yml status
-        uses: actions/github-script@v5
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -58,7 +58,7 @@ jobs:
 
       - name: Trigger Windows build
         if: github.event.inputs.releaseWindows == 'true'
-        uses: actions/github-script@v5
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.PAT_TRIGGER  }}
           script: |
@@ -71,7 +71,7 @@ jobs:
 
       - name: Trigger Linux build
         if: github.event.inputs.releaseLinux == 'true'
-        uses: actions/github-script@v5
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.PAT_TRIGGER  }}
           script: |
@@ -87,7 +87,7 @@ jobs:
 
       - name: Trigger Linux build Free
         if: github.event.inputs.releaseLinuxFree == 'true'
-        uses: actions/github-script@v5
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.PAT_TRIGGER  }}
           script: |
@@ -103,7 +103,7 @@ jobs:
 
       - name: Trigger MacOS build
         if: github.event.inputs.releaseMacOS == 'true'
-        uses: actions/github-script@v5
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.PAT_TRIGGER  }}
           script: |
