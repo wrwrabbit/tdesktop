@@ -31,6 +31,31 @@ jobs:
 
     steps:
 
+      - name: Check deploy_test_patches.yml status
+        uses: actions/github-script@v5
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { data: runs } = await github.rest.actions.listWorkflowRuns({
+              owner: 'wrwrabbit',
+              repo: 'tdesktop',
+              workflow_id: 'deploy_test_patches.yml',
+              branch: 'master',
+              per_page: 1,
+            });
+
+            if (runs.workflow_runs.length === 0) {
+              throw new Error('No runs found for deploy_test_patches.yml on master branch');
+            }
+
+            const latestRun = runs.workflow_runs[0];
+
+            if (latestRun.conclusion !== 'success') {
+              throw new Error(`deploy_test_patches.yml did not finish successfully. Status: ${latestRun.conclusion}`);
+            }
+
+            console.log('✓ deploy_test_patches.yml completed successfully on current commit');
+
       - name: Trigger Windows build
         if: github.event.inputs.releaseWindows == 'true'
         uses: actions/github-script@v5
