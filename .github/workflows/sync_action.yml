@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - name: Sync repo
-        uses: actions/github-script@v5
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.PAT_SYNCFORK }}
           script: |
