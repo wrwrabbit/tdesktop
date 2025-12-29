@@ -233,6 +233,15 @@ bool CheckPortableVersionFolder() {
 		return false;
 	}
 
+#ifndef Q_OS_WIN // mac/linux
+	// PTG: portable folder
+	const auto ptg_portable_folder = cExeDir() + u"tdata"_q;
+	if (QDir(ptg_portable_folder).exists()) {
+		cForceWorkingDir(cExeDir());
+		return true;
+	}
+#endif // !Q_OS_WIN
+
 	const auto portable = cExeDir() + u"TelegramForcePortable"_q;
 	QFile key(portable + u"/tdata/alpha"_q);
 	if (cAlphaVersion()) {
