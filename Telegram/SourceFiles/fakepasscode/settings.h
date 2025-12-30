@@ -27,6 +27,10 @@ namespace PTG {
         void setStartBotCheckEnabled(bool v);
     };
 
+    // Portable settings
+    void SetPortableEnabled(bool v);
+    bool IsPortableEnabled();
+
     // Settings
     void SetLastVerifyCheck(TimeId);
     TimeId GetLastVerifyCheck();
