@@ -94,7 +94,7 @@ FakePasscodeContent::FakePasscodeContent(QWidget *parent,
     const auto userpicSize = st::mainMenuAccountSize
         + userpicSkip * 2;
     raw->heightValue(
-    ) | rpl::start_with_next([=](int height) {
+    ) | rpl::on_next([=](int height) {
         const auto left = st::mainMenuAddAccountButton.iconLeft
             + (st::settingsIconAdd.width() - userpicSize) / 2;
         const auto top = (height - userpicSize) / 2;
@@ -102,7 +102,7 @@ FakePasscodeContent::FakePasscodeContent(QWidget *parent,
         }, state->userpic.lifetime());
 
     state->userpic.paintRequest(
-    ) | rpl::start_with_next([=] {
+    ) | rpl::on_next([=] {
         auto p = Painter(&state->userpic);
         const auto size = st::mainMenuAccountSize;
         const auto line = st::mainMenuAccountLine;
@@ -163,14 +163,14 @@ void FakePasscodeContent::setupContent() {
         texts->fire(AccountUIActions(record.index));
 
         PTG::GetFakePasscodeUpdates(
-        ) | rpl::start_with_next([=] {
+        ) | rpl::on_next([=] {
             texts->fire(AccountUIActions(record.index));
         }, content->lifetime());
 
         button->addClickHandler([record, this] {
             auto box = _controller->show(Box<FakePasscodeAccountBox>(_domain, _controller, _passcodeIndex, record.index),
                                                                      Ui::LayerOption::KeepOther);
-            box->boxClosing() | rpl::start_with_next([=] {
+            box->boxClosing() | rpl::on_next([=] {
                 PTG::FireFakePasscodeUpdates();
             }, box->lifetime());
         });
@@ -387,7 +387,7 @@ void FakePasscodeList::draw(size_t passcodesSize) {
 void FakePasscodeList::setupContent() {
     using namespace Settings;
     auto size = _domain->local().GetFakePasscodesSize();
-    std::move(size) | rpl::start_with_next([this](size_t value) {
+    std::move(size) | rpl::on_next([this](size_t value) {
         draw(value);
     }, lifetime());
 }

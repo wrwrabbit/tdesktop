@@ -65,7 +65,7 @@ auto TopVideoStreamDonors(not_null<Calls::GroupCall*> call)
 -> rpl::producer<std::vector<Data::MessageReactionsTopPaid>> {
 	const auto messages = call->messages();
 	return rpl::single(rpl::empty) | rpl::then(
-		messages->starsValueChanges()
+		messages->starsValueChanges() | rpl::to_empty
 	) | rpl::map([=] {
 		const auto &list = messages->starsTop().topDonors;
 		auto still = Ui::MaxTopPaidDonorsShown();
@@ -160,7 +160,7 @@ void VideoStream::Loading::setup(not_null<QWidget*> parent) {
 		[=] { _bg->update(); });
 
 	_bg->show();
-	_bg->paintRequest() | rpl::start_with_next([=] {
+	_bg->paintRequest() | rpl::on_next([=] {
 		auto p = QPainter(_bg.get());
 		auto hq = PainterHighQualityEnabler(p);
 
@@ -237,10 +237,7 @@ VideoStream::VideoStream(
 		TopDonorPlaces(_call.get()),
 		_call->messages()->idUpdates(),
 		_call->canManageValue(),
-		rpl::combine(
-			_call->messagesEnabledValue(),
-			_commentsShown.value(),
-			rpl::mappers::_1 && rpl::mappers::_2))) {
+		_commentsShown.value())) {
 	Core::App().calls().registerVideoStream(_call.get());
 	setupMembers();
 	setupVideo();
@@ -275,12 +272,12 @@ void VideoStream::ensureBorrowedRenderer(QOpenGLFunctions &f) {
 	_viewport->ensureBorrowedRenderer(f);
 }
 
-void VideoStream::ensureBorrowedCleared(QOpenGLFunctions *f) {
-	_viewport->ensureBorrowedCleared(f);
-}
-
 void VideoStream::borrowedPaint(QOpenGLFunctions &f) {
 	_viewport->borrowedPaint(f);
+}
+
+void VideoStream::ensureBorrowedRenderer() {
+	_viewport->ensureBorrowedRenderer();
 }
 
 void VideoStream::borrowedPaint(Painter &p, const QRegion &clip) {
@@ -323,7 +320,7 @@ void VideoStream::setupVideo() {
 		setupTile(endpoint, track);
 	}
 	_call->videoStreamActiveUpdates(
-	) | rpl::start_with_next([=](const Calls::VideoStateToggle &update) {
+	) | rpl::on_next([=](const Calls::VideoStateToggle &update) {
 		if (update.value) {
 			// Add async (=> the participant row is definitely in Members).
 			const auto endpoint = update.endpoint;
@@ -341,7 +338,7 @@ void VideoStream::setupVideo() {
 	}, _viewport->lifetime());
 
 	_viewport->qualityRequests(
-	) | rpl::start_with_next([=](const Calls::VideoQualityRequest &request) {
+	) | rpl::on_next([=](const Calls::VideoQualityRequest &request) {
 		_call->requestVideoQuality(request.endpoint, request.quality);
 	}, _viewport->lifetime());
 
@@ -350,7 +347,7 @@ void VideoStream::setupVideo() {
 	_viewport->setControlsShown(0.);
 
 	_call->hasVideoWithFramesValue(
-	) | rpl::start_with_next([=](bool has) {
+	) | rpl::on_next([=](bool has) {
 		if (has) {
 			_loading = nullptr;
 		}
@@ -360,13 +357,13 @@ void VideoStream::setupVideo() {
 }
 
 void VideoStream::setupMessages() {
-	_messages->hiddenShowRequested() | rpl::start_with_next([=] {
+	_messages->hiddenShowRequested() | rpl::on_next([=] {
 		_call->messages()->requestHiddenShow();
 	}, _messages->lifetime());
 
 
 	_messages->deleteRequests(
-	) | rpl::start_with_next([=](Calls::Group::MessageDeleteRequest event) {
+	) | rpl::on_next([=](Calls::Group::MessageDeleteRequest event) {
 		_call->messages()->deleteConfirmed(event);
 	}, _messages->lifetime());
 }

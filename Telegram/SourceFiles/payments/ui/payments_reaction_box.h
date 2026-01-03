@@ -19,8 +19,13 @@ namespace Main {
 class Session;
 } // namespace Main
 
+namespace Ui::Premium {
+class BubbleWidget;
+} // namespace Ui::Premium
+
 namespace Ui {
 
+class AbstractButton;
 class BoxContent;
 class GenericBox;
 class DynamicImage;
@@ -51,6 +56,7 @@ struct PaidReactionBoxArgs {
 	Fn<void(int, uint64)> send;
 	bool videoStreamChoosing = false;
 	bool videoStreamSending = false;
+	bool videoStreamAdmin = false;
 	bool dark = false;
 };
 
@@ -82,7 +88,7 @@ void PaidReactionSlider(
 	const style::MediaSlider &st,
 	int min,
 	int explicitlyAllowed,
-	int current,
+	rpl::producer<int> current,
 	int max,
 	Fn<void(int)> changed,
 	Fn<QColor(int)> activeFgOverride = nullptr);
@@ -93,8 +99,9 @@ void AddStarSelectBalance(
 	rpl::producer<CreditsAmount> balanceValue,
 	bool dark = false);
 
-void AddStarSelectBubble(
-	not_null<GenericBox*> box,
+not_null<Premium::BubbleWidget*> AddStarSelectBubble(
+	not_null<VerticalLayout*> container,
+	rpl::producer<> showFinishes,
 	rpl::producer<int> value,
 	int max,
 	Fn<QColor(int)> activeFgOverride = nullptr);
@@ -102,6 +109,7 @@ void AddStarSelectBubble(
 struct StarSelectInfoBlock {
 	rpl::producer<TextWithEntities> title;
 	rpl::producer<QString> subtext;
+	Fn<void()> click;
 };
 [[nodiscard]] object_ptr<RpWidget> MakeStarSelectInfoBlocks(
 	not_null<RpWidget*> parent,

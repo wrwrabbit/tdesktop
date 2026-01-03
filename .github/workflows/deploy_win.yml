@@ -38,7 +38,7 @@ jobs:
         run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
 
       - name: Clone.
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           submodules: recursive
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
@@ -129,7 +129,7 @@ jobs:
         run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
 
       - name: Clone.
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           submodules: recursive
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
@@ -207,21 +207,21 @@ jobs:
           xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\tportable*.zip artifact\ /E/C
           xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\t*upd* artifact\ /E/C
           xcopy %TBUILD%\Dropbox\Telegram\symbols\* symbols\ /E/S/C
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: artifact\tportable*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         name: Upload artifact TG.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: ${{ env.ARTIFACT_NAME }}_tg
           path: artifact\t*upd*
           
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         name: Upload symbols artifact.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:

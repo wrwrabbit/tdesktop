@@ -18,6 +18,7 @@ class HistoryBlock;
 class HistoryItem;
 struct HistoryMessageReply;
 struct PreparedServiceText;
+struct HistoryMessageReplyMarkup;
 
 namespace Data {
 class Thread;
@@ -594,7 +595,6 @@ public:
 	void itemTextUpdated();
 	void blockquoteExpandChanged();
 
-	[[nodiscard]] virtual bool hasHeavyPart() const;
 	virtual void unloadHeavyPart();
 	void checkHeavyPart();
 
@@ -687,12 +687,14 @@ protected:
 
 	[[nodiscard]] ClickHandlerPtr fromLink() const;
 
+	[[nodiscard]] virtual bool hasHeavyPart() const;
 	virtual void refreshDataIdHook();
 
 	[[nodiscard]] const Ui::Text::String &text() const;
 	[[nodiscard]] int textHeightFor(int textWidth);
 	void validateText();
 	void validateTextSkipBlock(bool has, int width, int height);
+	void validateInlineKeyboard(HistoryMessageReplyMarkup *markup);
 
 	void clearSpecialOnlyEmoji();
 	void checkSpecialOnlyEmoji();

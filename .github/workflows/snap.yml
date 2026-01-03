@@ -24,12 +24,6 @@ on:
     branches-ignore:
       - 'compare/**'
   workflow_dispatch:
-    inputs:
-      buildCommit:
-        description: 'Commit for building. Default it latest on branch'
-        required: false
-        type: string
-        default: ''
 
 jobs:
 
@@ -44,19 +38,10 @@ jobs:
 
     steps:
       - name: Clone.
-        uses: actions/checkout@v5
-        if: github.event.inputs.buildCommit == ''
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: recursive
-
-      - name: Clone with checkout.
-        uses: actions/checkout@v5
-        if: github.event.inputs.buildCommit != ''
-        with:
-          fetch-depth: 0
-          submodules: recursive
-          ref: ${{ github.event.inputs.buildCommit }}
 
       - name: First set up.
         run: |
@@ -70,16 +55,11 @@ jobs:
           sed -i 's/$API_HASH/${{ secrets.API_HASH }}/g' snap/snapcraft.yaml
 
       - name: Free up some disk space.
-        uses: endersonmenezes/free-disk-space@713d134e243b926eba4a5cce0cf608bfd1efb89a
+        uses: samueldr/more-space-action@97048bd0df83fb05b5257887bdbaffc848887673
         with:
-          remove_android: true
-          remove_dotnet: true
-          remove_haskell: true
-          remove_tool_cache: true
-          remove_swap: true
-          remove_packages: "azure-cli google-cloud-cli microsoft-edge-stable google-chrome-stable firefox postgresql* temurin-* *llvm* mysql* dotnet-sdk-*"
-          remove_packages_one_command: true
-          remove_folders: "/usr/share/swift /usr/share/miniconda /usr/share/az* /usr/share/glade* /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell"
+          enable-remove-default-apt-patterns: false
+          enable-lvm-span: true
+          lvm-span-mountpoint: /var/snap/lxd/common/lxd/storage-pools/default/containers
 
       - name: Telegram Desktop snap build.
         run: sudo -u $USER snap run snapcraft --verbosity=debug
@@ -93,7 +73,7 @@ jobs:
           mkdir artifact
           mv $artifact_name artifact/
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.
         with:

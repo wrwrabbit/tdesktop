@@ -154,7 +154,6 @@ private:
 	void setupActions(not_null<Window::SessionController*> controller);
 	void setupButtons(
 		not_null<Window::SessionController*> controller,
-		rpl::producer<bool> backToggles,
 		Source source);
 	void setupShowLastSeen(not_null<Window::SessionController*> controller);
 	void setupUniqueBadgeTooltip();
@@ -183,6 +182,7 @@ private:
 	void updateStoryOutline(std::optional<QColor> edgeColor);
 	void paintStoryOutline(QPainter &p, const QRect &geometry);
 	void updateStatusPosition(float64 progressCurrent);
+	[[nodiscard]] int calculateRightButtonsWidth() const;
 	[[nodiscard]] const style::FlatLabel &statusStyle() const;
 	void setupStatusWithRating();
 	[[nodiscard]] TopBarActionButtonStyle mapActionStyle(
@@ -256,6 +256,7 @@ private:
 
 	base::unique_qptr<Ui::IconButton> _close;
 	base::unique_qptr<Ui::FadeWrap<Ui::IconButton>> _back;
+	rpl::variable<bool> _backToggles;
 
 	rpl::event_stream<> _backClicks;
 

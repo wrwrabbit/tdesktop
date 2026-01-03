@@ -684,7 +684,7 @@ bool Suggestions::ObjectListController::processTouchEvent(
 
 void Suggestions::ObjectListController::setupTouchChatPreview(
 		not_null<Ui::ElasticScroll*> scroll) {
-	_touchCancelRequests.events() | rpl::start_with_next([=] {
+	_touchCancelRequests.events() | rpl::on_next([=] {
 		QTouchEvent ev(QEvent::TouchCancel);
 		ev.setTimestamp(crl::now());
 		QGuiApplication::sendEvent(scroll, &ev);
@@ -731,13 +731,13 @@ void Suggestions::ObjectListController::setupPlainDivider(
 		std::move(title),
 		st::searchedBarLabel);
 	raw->sizeValue(
-	) | rpl::start_with_next([=](QSize size) {
+	) | rpl::on_next([=](QSize size) {
 		const auto x = st::searchedBarPosition.x();
 		const auto y = st::searchedBarPosition.y();
 		label->resizeToWidth(size.width() - x * 2);
 		label->moveToLeft(x, y, size.width());
 	}, raw->lifetime());
-	raw->paintRequest() | rpl::start_with_next([=](QRect clip) {
+	raw->paintRequest() | rpl::on_next([=](QRect clip) {
 		QPainter(raw).fillRect(clip, st::searchedBarBg);
 	}, raw->lifetime());
 
@@ -757,7 +757,7 @@ void Suggestions::ObjectListController::setupExpandDivider(
 	count(
 	) | rpl::map(
 		rpl::mappers::_1 > kCollapsedChannelsCount
-	) | rpl::distinct_until_changed() | rpl::start_with_next([=](bool more) {
+	) | rpl::distinct_until_changed() | rpl::on_next([=](bool more) {
 		_expanded = false;
 		if (!more) {
 			const auto toggle = _toggleExpanded.current();
@@ -782,7 +782,7 @@ void Suggestions::ObjectListController::setupExpandDivider(
 		rpl::combine(
 			raw->sizeValue(),
 			toggle->widthValue()
-		) | rpl::start_with_next([=](QSize size, int width) {
+		) | rpl::on_next([=](QSize size, int width) {
 			const auto x = st::searchedBarPosition.x();
 			const auto y = st::searchedBarPosition.y();
 			toggle->moveToRight(0, 0, size.width());
@@ -797,14 +797,14 @@ void Suggestions::ObjectListController::setupExpandDivider(
 		_toggleExpanded.value()
 	) | rpl::filter(
 		rpl::mappers::_2 == nullptr
-	) | rpl::start_with_next([=](QSize size, const auto) {
+	) | rpl::on_next([=](QSize size, const auto) {
 		const auto x = st::searchedBarPosition.x();
 		const auto y = st::searchedBarPosition.y();
 		label->resizeToWidth(size.width() - x * 2);
 		label->moveToLeft(x, y, size.width());
 	}, raw->lifetime());
 
-	raw->paintRequest() | rpl::start_with_next([=](QRect clip) {
+	raw->paintRequest() | rpl::on_next([=](QRect clip) {
 		QPainter(raw).fillRect(clip, st::searchedBarBg);
 	}, raw->lifetime());
 
@@ -918,14 +918,14 @@ void RecentsController::setupDivider() {
 	rpl::combine(
 		raw->sizeValue(),
 		clear->widthValue()
-	) | rpl::start_with_next([=](QSize size, int width) {
+	) | rpl::on_next([=](QSize size, int width) {
 		const auto x = st::searchedBarPosition.x();
 		const auto y = st::searchedBarPosition.y();
 		clear->moveToRight(0, 0, size.width());
 		label->resizeToWidth(size.width() - x - width);
 		label->moveToLeft(x, y, size.width());
 	}, raw->lifetime());
-	raw->paintRequest() | rpl::start_with_next([=](QRect clip) {
+	raw->paintRequest() | rpl::on_next([=](QRect clip) {
 		QPainter(raw).fillRect(clip, st::searchedBarBg);
 	}, raw->lifetime());
 
@@ -937,7 +937,7 @@ void RecentsController::subscribeToEvents() {
 	session().changes().peerUpdates(
 		Flag::Notifications
 		| Flag::OnlineStatus
-	) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
+	) | rpl::on_next([=](const Data::PeerUpdate &update) {
 		const auto peer = update.peer;
 		if (peer->isSelf()) {
 			return;
@@ -961,7 +961,7 @@ void RecentsController::subscribeToEvents() {
 	}, _lifetime);
 
 	session().data().unreadBadgeChanges(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		for (auto i = 0; i != countCurrent(); ++i) {
 			const auto row = delegate()->peerListRowAt(i);
 			if (static_cast<RecentRow*>(row.get())->refreshBadge()) {
@@ -981,7 +981,7 @@ void MyChannelsController::prepare() {
 
 	session().changes().peerUpdates(
 		Data::PeerUpdate::Flag::ChannelAmIn
-	) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
+	) | rpl::on_next([=](const Data::PeerUpdate &update) {
 		const auto channel = update.peer->asBroadcast();
 		if (!channel || channel->amIn()) {
 			return;
@@ -1019,7 +1019,7 @@ void MyChannelsController::prepare() {
 	ranges::sort(_channels, ranges::greater(), &History::chatListTimeId);
 	setCount(_channels.size());
 
-	expanded() | rpl::start_with_next([=] {
+	expanded() | rpl::on_next([=] {
 		fill();
 	}, _lifetime);
 
@@ -1030,7 +1030,7 @@ void MyChannelsController::prepare() {
 	rpl::merge(
 		std::move(loading),
 		owner->chatsListLoadedEvents()
-	) | rpl::start_with_next([=](Data::Folder *folder) {
+	) | rpl::on_next([=](Data::Folder *folder) {
 		const auto list = owner->chatsList(folder);
 		for (const auto &row : list->indexed()->all()) {
 			if (const auto history = row->history()) {
@@ -1120,7 +1120,7 @@ void RecommendationsController::load() {
 	const auto participants = &session().api().chatParticipants();
 	participants->loadRecommendations();
 	participants->recommendationsLoaded(
-	) | rpl::take(1) | rpl::start_with_next([=] {
+	) | rpl::take(1) | rpl::on_next([=] {
 		fill();
 	}, _lifetime);
 }
@@ -1139,7 +1139,7 @@ void RecommendationsController::fill() {
 	delegate()->peerListRefreshRows();
 	setCount(delegate()->peerListFullRowsCount());
 
-	window()->activeChatValue() | rpl::start_with_next([=](const Key &key) {
+	window()->activeChatValue() | rpl::on_next([=](const Key &key) {
 		const auto history = key.history();
 		if (_activeHistory == history) {
 			return;
@@ -1185,7 +1185,7 @@ void RecentAppsController::prepare() {
 	_bots.reserve(kProbablyMaxApps);
 	rpl::single() | rpl::then(
 		session().topBotApps().updates()
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_bots.clear();
 		for (const auto &peer : session().topBotApps().list()) {
 			if (const auto bot = peer->asUser()) {
@@ -1201,7 +1201,7 @@ void RecentAppsController::prepare() {
 		fill();
 	}, _lifetime);
 
-	expanded() | rpl::skip(1) | rpl::start_with_next([=] {
+	expanded() | rpl::skip(1) | rpl::on_next([=] {
 		fill();
 	}, _lifetime);
 }
@@ -1299,7 +1299,7 @@ void PopularAppsController::prepare() {
 	}
 	rpl::single() | rpl::then(
 		std::move(_filterOutRefreshes)
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		fill();
 	}, _lifetime);
 }
@@ -1312,7 +1312,7 @@ void PopularAppsController::load() {
 	const auto attachWebView = &session().attachWebView();
 	attachWebView->loadPopularAppBots();
 	attachWebView->popularAppBotsLoaded(
-	) | rpl::take(1) | rpl::start_with_next([=] {
+	) | rpl::take(1) | rpl::on_next([=] {
 		fill();
 	}, _lifetime);
 }
@@ -1336,8 +1336,8 @@ void PopularAppsController::fill() {
 				tr::lng_bot_apps_which(
 					lt_link,
 					tr::lng_bot_apps_which_link(
-					) | Ui::Text::ToLink(u"internal:about_popular_apps"_q),
-					Ui::Text::WithEntities),
+						tr::url(u"internal:about_popular_apps"_q)),
+					tr::marked),
 				st::dialogsPopularAppsAbout),
 			st::dialogsPopularAppsPadding));
 	}
@@ -1429,7 +1429,7 @@ void Suggestions::setupTabs() {
 	rpl::single(-1) | rpl::then(
 		_tabs->sectionActivated()
 	) | rpl::combine_previous(
-	) | rpl::start_with_next([=](int was, int index) {
+	) | rpl::on_next([=](int was, int index) {
 		if (was != index) {
 			scrollToIndex(index, anim::type::normal);
 		}
@@ -1443,7 +1443,7 @@ void Suggestions::setupTabs() {
 	rpl::combine(
 		widthValue(),
 		_tabs->heightValue()
-	) | rpl::start_with_next([=](int width, int height) {
+	) | rpl::on_next([=](int width, int height) {
 		const auto line = st::lineWidth;
 		shadow->setGeometry(0, height - line, width, line);
 	}, shadow->lifetime());
@@ -1478,39 +1478,39 @@ void Suggestions::setupTabs() {
 	}
 	_tabs->setSections(sections);
 	_tabs->sectionActivated(
-	) | rpl::start_with_next([=](int section) {
+	) | rpl::on_next([=](int section) {
 		Assert(section >= 0 && section < _tabKeys.size());
 		switchTab(_tabKeys[section]);
 	}, _tabs->lifetime());
 }
 
 void Suggestions::setupChats() {
-	_recent->count.value() | rpl::start_with_next([=](int count) {
+	_recent->count.value() | rpl::on_next([=](int count) {
 		_recent->wrap->toggle(count > 0, anim::type::instant);
 		_emptyRecent->toggle(count == 0, anim::type::instant);
 	}, _recent->wrap->lifetime());
 
-	_topPeers->emptyValue() | rpl::start_with_next([=](bool empty) {
+	_topPeers->emptyValue() | rpl::on_next([=](bool empty) {
 		_topPeersWrap->toggle(!empty, anim::type::instant);
 	}, _topPeers->lifetime());
 
-	_topPeers->clicks() | rpl::start_with_next([=](uint64 peerIdRaw) {
+	_topPeers->clicks() | rpl::on_next([=](uint64 peerIdRaw) {
 		const auto peerId = PeerId(peerIdRaw);
 		_topPeerChosen.fire(_controller->session().data().peer(peerId));
 	}, _topPeers->lifetime());
 
-	_topPeers->pressed() | rpl::start_with_next([=](uint64 peerIdRaw) {
+	_topPeers->pressed() | rpl::on_next([=](uint64 peerIdRaw) {
 		handlePressForChatPreview(PeerId(peerIdRaw), [=](bool shown) {
 			_topPeers->pressLeftToContextMenu(shown);
 		});
 	}, _topPeers->lifetime());
 
-	_topPeers->pressCancelled() | rpl::start_with_next([=] {
+	_topPeers->pressCancelled() | rpl::on_next([=] {
 		_controller->cancelScheduledPreview();
 	}, _topPeers->lifetime());
 
 	_topPeers->showMenuRequests(
-	) | rpl::start_with_next([=](const ShowTopPeerMenuRequest &request) {
+	) | rpl::on_next([=](const ShowTopPeerMenuRequest &request) {
 		const auto weak = base::make_weak(this);
 		const auto owner = &_controller->session().data();
 		const auto peer = owner->peer(PeerId(request.id));
@@ -1544,12 +1544,12 @@ void Suggestions::setupChats() {
 	}, _topPeers->lifetime());
 
 	_topPeers->scrollToRequests(
-	) | rpl::start_with_next([this](Ui::ScrollToRequest request) {
+	) | rpl::on_next([this](Ui::ScrollToRequest request) {
 		_chatsScroll->scrollToY(request.ymin, request.ymax);
 	}, _topPeers->lifetime());
 
 	_topPeers->verticalScrollEvents(
-	) | rpl::start_with_next([=](not_null<QWheelEvent*> e) {
+	) | rpl::on_next([=](not_null<QWheelEvent*> e) {
 		_chatsScroll->viewportEvent(e);
 	}, _topPeers->lifetime());
 
@@ -1572,11 +1572,11 @@ void Suggestions::handlePressForChatPreview(
 }
 
 void Suggestions::setupChannels() {
-	_myChannels->count.value() | rpl::start_with_next([=](int count) {
+	_myChannels->count.value() | rpl::on_next([=](int count) {
 		_myChannels->wrap->toggle(count > 0, anim::type::instant);
 	}, _myChannels->wrap->lifetime());
 
-	_recommendations->count.value() | rpl::start_with_next([=](int count) {
+	_recommendations->count.value() | rpl::on_next([=](int count) {
 		_recommendations->wrap->toggle(count > 0, anim::type::instant);
 	}, _recommendations->wrap->lifetime());
 
@@ -1596,11 +1596,11 @@ void Suggestions::setupChannels() {
 }
 
 void Suggestions::setupApps() {
-	_recentApps->count.value() | rpl::start_with_next([=](int count) {
+	_recentApps->count.value() | rpl::on_next([=](int count) {
 		_recentApps->wrap->toggle(count > 0, anim::type::instant);
 	}, _recentApps->wrap->lifetime());
 
-	_popularApps->count.value() | rpl::start_with_next([=](int count) {
+	_popularApps->count.value() | rpl::on_next([=](int count) {
 		_popularApps->wrap->toggle(count > 0, anim::type::instant);
 	}, _popularApps->wrap->lifetime());
 
@@ -1901,7 +1901,7 @@ void Suggestions::setupPostsSearch() {
 	_postsSearch = std::make_unique<PostsSearch>(&_controller->session());
 
 	_postsSearch->stateUpdates(
-	) | rpl::start_with_next([=](const PostsSearchState &state) {
+	) | rpl::on_next([=](const PostsSearchState &state) {
 		if (state.intro) {
 			if (!_postsSearchIntro) {
 				setupPostsIntro(*state.intro);
@@ -1931,7 +1931,7 @@ void Suggestions::setupPostsSearch() {
 	}, _postsWrap->lifetime());
 
 	_postsSearch->pagesUpdates(
-	) | rpl::start_with_next([=](const PostsSearchState &state) {
+	) | rpl::on_next([=](const PostsSearchState &state) {
 		Expects(!state.intro && !state.loading);
 
 		if (!_postsContent) {
@@ -1974,7 +1974,7 @@ void Suggestions::setupPostsResults() {
 	_postsContent->searchRequested(true);
 
 	_postsContent->chosenRow(
-	) | rpl::start_with_next([=](const ChosenRow &row) {
+	) | rpl::on_next([=](const ChosenRow &row) {
 		const auto history = row.key.history();
 		if (!history) {
 			return;
@@ -1992,14 +1992,14 @@ void Suggestions::setupPostsResults() {
 		}
 	}, _postsContent->lifetime());
 
-	_postsContent->heightValue() | rpl::start_with_next([=](int height) {
+	_postsContent->heightValue() | rpl::on_next([=](int height) {
 		_postsWrap->resize(_postsWrap->width(), height);
 	}, _postsContent->lifetime());
 
 	rpl::combine(
 		rpl::single(rpl::empty) | rpl::then(_postsScroll->scrolls()),
 		_postsScroll->heightValue()
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		updatePostsSearchVisibleRange();
 	}, _postsContent->lifetime());
 
@@ -2027,7 +2027,7 @@ void Suggestions::setupPostsIntro(const PostsSearchIntroState &intro) {
 	_postsSearchIntro = Ui::CreateChild<PostsSearchIntro>(_postsWrap, intro);
 
 	_postsSearchIntro->searchWithStars(
-	) | rpl::start_with_next([=](int stars) {
+	) | rpl::on_next([=](int stars) {
 		if (!_controller->session().premium()) {
 			Settings::ShowPremium(
 				_controller,
@@ -2046,7 +2046,7 @@ void Suggestions::setupPostsIntro(const PostsSearchIntroState &intro) {
 								tr::now,
 								lt_count,
 								spent,
-								Ui::Text::RichLangValue),
+								tr::rich),
 							.attach = RectPart::Top,
 							.duration = Ui::Toast::kDefaultDuration * 2,
 						});
@@ -2061,7 +2061,7 @@ void Suggestions::setupPostsIntro(const PostsSearchIntroState &intro) {
 		}
 	}, _postsSearchIntro->lifetime());
 
-	_postsScroll->heightValue() | rpl::start_with_next([=](int height) {
+	_postsScroll->heightValue() | rpl::on_next([=](int height) {
 		_postsWrap->resize(_postsWrap->width(), height);
 	}, _postsSearchIntro->lifetime());
 
@@ -2432,7 +2432,7 @@ auto Suggestions::setupRecentPeers(RecentPeersList recentPeers)
 	};
 
 	raw->chosen.events(
-	) | rpl::start_with_next([=](not_null<PeerData*> peer) {
+	) | rpl::on_next([=](not_null<PeerData*> peer) {
 		_controller->session().recentPeers().bump(peer);
 	}, list->lifetime());
 
@@ -2492,7 +2492,7 @@ auto Suggestions::setupMyChannels() -> std::unique_ptr<ObjectList> {
 	};
 
 	raw->chosen.events(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_persist = false;
 	}, list->lifetime());
 
@@ -2538,13 +2538,13 @@ auto Suggestions::setupRecommendations() -> std::unique_ptr<ObjectList> {
 	};
 
 	raw->chosen.events(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_persist = true;
 	}, list->lifetime());
 
 	_key.value() | rpl::filter(
 		rpl::mappers::_1 == Key{ Tab::Channels }
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		controller->load();
 	}, list->lifetime());
 
@@ -2606,7 +2606,7 @@ auto Suggestions::setupRecentApps() -> std::unique_ptr<ObjectList> {
 	};
 
 	raw->chosen.events(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_persist = false;
 	}, list->lifetime());
 
@@ -2656,13 +2656,13 @@ auto Suggestions::setupPopularApps() -> std::unique_ptr<ObjectList> {
 	};
 
 	raw->chosen.events(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_persist = true;
 	}, list->lifetime());
 
 	_key.value() | rpl::filter(
 		rpl::mappers::_1 == Key{ Tab::Apps }
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		controller->load();
 	}, list->lifetime());
 
@@ -2697,7 +2697,7 @@ auto Suggestions::setupObjectList(
 	};
 
 	controller->chosen(
-	) | rpl::start_with_next([=](not_null<PeerData*> peer) {
+	) | rpl::on_next([=](not_null<PeerData*> peer) {
 		raw->chosen.fire_copy(peer);
 	}, lifetime);
 
@@ -2712,7 +2712,7 @@ auto Suggestions::setupObjectList(
 	};
 
 	list->scrollToRequests(
-	) | rpl::start_with_next([=](Ui::ScrollToRequest request) {
+	) | rpl::on_next([=](Ui::ScrollToRequest request) {
 		const auto add = addToScroll ? addToScroll() : 0;
 		scroll->scrollToY(request.ymin + add, request.ymax + add);
 	}, list->lifetime());
@@ -2736,13 +2736,13 @@ object_ptr<Ui::SlideWrap<>> Suggestions::setupEmpty(
 	auto content = object_ptr<SearchEmpty>(
 		parent,
 		icon,
-		std::move(text) | Ui::Text::ToWithEntities());
+		std::move(text) | rpl::map(tr::marked));
 
 	const auto raw = content.data();
 	rpl::combine(
 		_chatsScroll->heightValue(),
 		_topPeersWrap->heightValue()
-	) | rpl::start_with_next([=](int height, int top) {
+	) | rpl::on_next([=](int height, int top) {
 		raw->setMinimalHeight(height - top);
 	}, raw->lifetime());
 
@@ -2753,7 +2753,7 @@ object_ptr<Ui::SlideWrap<>> Suggestions::setupEmpty(
 
 	result->toggledValue() | rpl::filter([=](bool shown) {
 		return shown && _controller->session().data().chatsListLoaded();
-	}) | rpl::start_with_next([=] {
+	}) | rpl::on_next([=] {
 		raw->animate();
 	}, raw->lifetime());
 
@@ -2841,7 +2841,7 @@ rpl::producer<TopPeersList> TopPeersContent(
 			| Flag::Photo
 			| Flag::Notifications
 			| Flag::OnlineStatus
-		) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
+		) | rpl::on_next([=](const Data::PeerUpdate &update) {
 			const auto peer = update.peer;
 			if (peer->isSelf()) {
 				return;
@@ -2890,7 +2890,7 @@ rpl::producer<TopPeersList> TopPeersContent(
 		}, lifetime);
 
 		session->data().unreadBadgeChanges(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			auto changed = false;
 			auto &entries = state->data.entries;
 			for (const auto &[peer, data] : state->indices) {
@@ -2931,7 +2931,7 @@ object_ptr<Ui::BoxContent> StarsExamplesBox(
 		});
 
 		raw->load();
-		raw->chosen() | rpl::start_with_next([=](not_null<PeerData*> peer) {
+		raw->chosen() | rpl::on_next([=](not_null<PeerData*> peer) {
 			if (const auto user = peer->asUser()) {
 				if (const auto info = user->botInfo.get()) {
 					if (info->hasMainApp) {
@@ -2958,13 +2958,13 @@ object_ptr<Ui::BoxContent> PopularAppsAboutBox(
 	return Ui::MakeInformBox({
 		.text = tr::lng_popular_apps_info_text(
 			lt_bot,
-			rpl::single(Ui::Text::Link(
+			rpl::single(tr::link(
 				u"@botfather"_q,
 				u"https://t.me/botfather"_q)),
 			lt_link,
 			tr::lng_popular_apps_info_here(
-			) | Ui::Text::ToLink(tr::lng_popular_apps_info_url(tr::now)),
-			Ui::Text::RichLangValue),
+				tr::url(tr::lng_popular_apps_info_url(tr::now))),
+			tr::rich),
 		.confirmText = tr::lng_popular_apps_info_confirm(),
 		.title = tr::lng_popular_apps_info_title(),
 	});

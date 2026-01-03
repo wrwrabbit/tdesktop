@@ -116,10 +116,10 @@ struct AlbumCounts {
 				tr::now,
 				lt_media,
 				Ui::Text::Colorized(attachType),
-				Ui::Text::WithEntities),
+				tr::marked),
 			lt_caption,
 			wrapped,
-			Ui::Text::WithEntities);
+			tr::marked);
 }
 
 [[nodiscard]] QImage PreparePreviewImage(
@@ -2510,7 +2510,7 @@ ClickHandlerPtr MediaDice::MakeHandler(
 			.duration = Ui::Toast::kDefaultDuration * 2,
 		};
 		if (CanSend(history->peer, ChatRestriction::SendOther)) {
-			auto link = Ui::Text::Link(tr::lng_about_random_send(tr::now));
+			auto link = tr::link(tr::lng_about_random_send(tr::now));
 			link.entities.push_back(
 				EntityInText(EntityType::Semibold, 0, link.text.size()));
 			config.text.append(' ').append(std::move(link));
@@ -2606,17 +2606,20 @@ std::unique_ptr<HistoryView::Media> MediaGiftBox::createView(
 				.service = true,
 				.hideServiceText = true,
 			});
-	} else if (_data.type == GiftType::ChatTheme) {
+	} else if (_data.type == GiftType::ChatTheme
+		|| _data.type == GiftType::GiftOffer) {
 		return std::make_unique<HistoryView::ServiceBox>(
 			message,
-			std::make_unique<HistoryView::GiftThemeBox>(message, this));
+			std::make_unique<HistoryView::GiftServiceBox>(message, this));
 	} else if (const auto &unique = _data.unique) {
 		return std::make_unique<HistoryView::MediaGeneric>(
 			message,
 			HistoryView::GenerateUniqueGiftMedia(message, replacing, unique),
 			HistoryView::MediaGenericDescriptor{
 				.maxWidth = st::msgServiceGiftBoxSize.width(),
-				.paintBg = HistoryView::UniqueGiftBg(message, unique),
+				.paintBgFactory = [=] {
+					return HistoryView::UniqueGiftBg(message, unique);
+				},
 				.service = true,
 			});
 	}

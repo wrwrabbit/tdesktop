@@ -19,6 +19,7 @@ class Image;
 class HistoryItem;
 struct WebPageCollage;
 struct WebPageStickerSet;
+struct WebPageAuction;
 enum class WebPageType : uint8;
 enum class NewMessageType;
 
@@ -114,6 +115,10 @@ struct GiftsUpdate {
 	int collectionId = 0;
 	std::vector<Data::SavedStarGiftId> added;
 	std::vector<Data::SavedStarGiftId> removed;
+};
+struct GiftAuctionGot {
+	uint64 giftId = 0;
+	not_null<PeerData*> to;
 };
 
 struct SentToScheduled {
@@ -361,6 +366,8 @@ public:
 	[[nodiscard]] rpl::producer<GiftUpdate> giftUpdates() const;
 	void notifyGiftsUpdate(GiftsUpdate &&update);
 	[[nodiscard]] rpl::producer<GiftsUpdate> giftsUpdates() const;
+	void notifyGiftAuctionGot(GiftAuctionGot &&update);
+	[[nodiscard]] rpl::producer<GiftAuctionGot> giftAuctionGots() const;
 	void requestItemRepaint(not_null<const HistoryItem*> item);
 	[[nodiscard]] rpl::producer<not_null<const HistoryItem*>> itemRepaintRequest() const;
 	void requestViewRepaint(not_null<const ViewElement*> view);
@@ -915,6 +922,14 @@ public:
 
 	void clearContacts();
 
+	void fillMessagePeers(PeerId peerId, const MTPMessage &message);
+	void fillMessagePeers(const MTPDupdateShortMessage &data);
+	void fillMessagePeers(const MTPDupdateShortChatMessage &data);
+	void fillMessagePeers(
+		FullMsgId fullId,
+		const MTPDupdateShortSentMessage &data);
+	[[nodiscard]] HistoryItem *messageWithPeer(PeerId id) const;
+
 private:
 	using Messages = std::unordered_map<MsgId, not_null<HistoryItem*>>;
 
@@ -1022,6 +1037,7 @@ private:
 		std::unique_ptr<Iv::Data> iv,
 		std::unique_ptr<WebPageStickerSet> stickerSet,
 		std::shared_ptr<UniqueGift> uniqueGift,
+		std::unique_ptr<WebPageAuction> auction,
 		int duration,
 		const QString &author,
 		bool hasLargeMedia,
@@ -1060,6 +1076,14 @@ private:
 
 	void checkPollsClosings();
 
+	void fillMessagePeer(FullMsgId fullId, PeerId peerId);
+	void fillForwardedInfo(
+		FullMsgId fullId,
+		const MTPMessageFwdHeader &header);
+	void fillMentionUsers(
+		FullMsgId fullId,
+		const MTPVector<MTPMessageEntity> &entities);
+
 	const not_null<Main::Session*> _session;
 
 	Storage::DatabasePointer _cache;
@@ -1081,6 +1105,7 @@ private:
 	rpl::event_stream<not_null<HistoryItem*>> _newItemAdded;
 	rpl::event_stream<GiftUpdate> _giftUpdates;
 	rpl::event_stream<GiftsUpdate> _giftsUpdates;
+	rpl::event_stream<GiftAuctionGot> _giftAuctionGots;
 	rpl::event_stream<not_null<const HistoryItem*>> _itemRepaintRequest;
 	rpl::event_stream<not_null<const ViewElement*>> _viewRepaintRequest;
 	rpl::event_stream<not_null<const HistoryItem*>> _itemResizeRequest;
@@ -1255,6 +1280,8 @@ private:
 	base::flat_map<
 		not_null<ChannelData*>,
 		mtpRequestId> _viewAsMessagesRequests;
+
+	mutable base::flat_map<PeerId, std::vector<FullMsgId>> _messagesWithPeer;
 
 	Groups _groups;
 	const std::unique_ptr<ChatFilters> _chatsFilters;

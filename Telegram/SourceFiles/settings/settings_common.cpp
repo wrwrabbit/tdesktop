@@ -90,14 +90,14 @@ void AddButtonIcon(
 	icon->widget.resize(icon->icon.size());
 	icon->widget.show();
 	button->sizeValue(
-	) | rpl::start_with_next([=, left = st.iconLeft](QSize size) {
+	) | rpl::on_next([=, left = st.iconLeft](QSize size) {
 		icon->widget.moveToLeft(
 			left,
 			(size.height() - icon->widget.height()) / 2,
 			size.width());
 	}, icon->widget.lifetime());
 	icon->widget.paintRequest(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		auto p = QPainter(&icon->widget);
 		icon->icon.paint(p, 0, 0);
 	}, icon->widget.lifetime());
@@ -144,7 +144,7 @@ void CreateRightLabel(
 			button->widthValue(),
 			std::move(buttonText),
 			v::text::take_plain(std::move(label))
-		) | rpl::start_with_next([=, &st](
+		) | rpl::on_next([=, &st](
 				int width,
 				const QString &button,
 				const QString &text) {
@@ -162,7 +162,7 @@ void CreateRightLabel(
 			button->widthValue(),
 			std::move(buttonText),
 			v::text::take_marked(std::move(label))
-		) | rpl::start_with_next([=, &st](
+		) | rpl::on_next([=, &st](
 				int width,
 				const QString &button,
 				const TextWithEntities &text) {
@@ -218,7 +218,7 @@ void AddDividerTextWithLottie(
 			anim::repeat::once);
 		std::move(
 			descriptor.showFinished
-		) | rpl::start_with_next([animate = std::move(icon.animate), repeat] {
+		) | rpl::on_next([animate = std::move(icon.animate), repeat] {
 			animate(repeat);
 		}, verticalLayout->lifetime());
 	}
@@ -236,7 +236,7 @@ void AddDividerTextWithLottie(
 	}
 
 	verticalLayout->geometryValue(
-	) | rpl::start_with_next([=](const QRect &r) {
+	) | rpl::on_next([=](const QRect &r) {
 		divider->setGeometry(r);
 	}, divider->lifetime());
 }
@@ -274,7 +274,7 @@ LottieIcon CreateLottieIcon(
 		start();
 	};
 	raw->paintRequest(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		auto p = QPainter(raw);
 		const auto left = (raw->width() - width) / 2;
 		icon->paint(p, left, padding.top(), colorOverride
@@ -310,7 +310,7 @@ SliderWithLabel MakeSliderWithLabel(
 	rpl::combine(
 		raw->sizeValue(),
 		label->sizeValue()
-	) | rpl::start_with_next([=](QSize outer, QSize size) {
+	) | rpl::on_next([=](QSize outer, QSize size) {
 		const auto right = std::max(size.width(), minLabelWidth) + skip;
 		label->moveToRight(0, (outer.height() - size.height()) / 2);
 		const auto width = std::max(
@@ -324,6 +324,33 @@ SliderWithLabel MakeSliderWithLabel(
 		.slider = slider,
 		.label = label,
 	};
+}
+
+void AddLottieIconWithCircle(
+		not_null<Ui::VerticalLayout*> layout,
+		object_ptr<Ui::RpWidget> icon,
+		QMargins iconPadding,
+		QSize circleSize) {
+	const auto iconRow = layout->add(
+		std::move(icon),
+		iconPadding,
+		style::al_top);
+
+	const auto circle = Ui::CreateChild<Ui::RpWidget>(
+		iconRow->parentWidget());
+	circle->lower();
+	circle->paintOn([=](QPainter &p) {
+		auto hq = PainterHighQualityEnabler(p);
+		const auto left = (circle->width() - circleSize.width()) / 2;
+		const auto top = (circle->height() - circleSize.height()) / 2;
+		p.setPen(Qt::NoPen);
+		p.setBrush(st::activeButtonBg);
+		p.drawEllipse(QRect(QPoint(left, top), circleSize));
+	});
+
+	iconRow->geometryValue() | rpl::on_next([=](const QRect &g) {
+		circle->setGeometry(g);
+	}, circle->lifetime());
 }
 
 } // namespace Settings

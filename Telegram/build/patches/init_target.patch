@@ -1,5 +1,5 @@
 diff --git a/init_target.cmake b/init_target.cmake
-index 3f330f4..a9aeb5a 100644
+index 9d4468e..fc0d100 100644
 --- a/init_target.cmake
 +++ b/init_target.cmake
 @@ -45,7 +45,8 @@ function(init_target target_name) # init_target(my_target [cxx_std_..] folder_na
@@ -8,7 +8,7 @@ index 3f330f4..a9aeb5a 100644
          if (MSVC)
 -            set_property(TARGET ${target_name} APPEND_STRING PROPERTY STATIC_LIBRARY_OPTIONS "$<$<NOT:$<CONFIG:Debug>>:/LTCG>")
 +            # don't do /LTCG sa free GH runner is out of heap on x64 build
-+            #set_property(TARGET ${target_name} APPEND_STRING PROPERTY STATIC_LIBRARY_OPTIONS "$<$<NOT:$<CONFIG:Debug>>:/LTCG>")
-         elseif (APPLE)
++            # set_property(TARGET ${target_name} APPEND_STRING PROPERTY STATIC_LIBRARY_OPTIONS "$<$<NOT:$<CONFIG:Debug>>:/LTCG>")
+         elseif (CMAKE_GENERATOR STREQUAL Xcode)
              set_target_properties(${target_name} PROPERTIES
                  XCODE_ATTRIBUTE_LLVM_LTO $<IF:$<CONFIG:Debug>,NO,YES>

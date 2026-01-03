@@ -269,7 +269,7 @@ void SavedMusic::loadMore(PeerId peerId, bool reload) {
 
 	entry.reloading = reload;
 	entry.requestId = _owner->session().api().request(MTPusers_GetSavedMusic(
-		user->inputUser,
+		user->inputUser(),
 		MTP_int(reload ? 0 : entry.list.size()),
 		MTP_int(kPerPage),
 		MTP_long(reload ? firstPageHash(entry) : 0)
@@ -402,7 +402,7 @@ rpl::producer<SavedMusicSlice> SavedMusicList(
 		savedMusic->changed(
 		) | rpl::filter(
 			rpl::mappers::_1 == peerId
-		) | rpl::start_with_next(schedule, lifetime);
+		) | rpl::on_next(schedule, lifetime);
 
 		if (!savedMusic->countKnown(peerId)) {
 			savedMusic->loadMore(peerId);

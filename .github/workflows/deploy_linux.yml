@@ -40,7 +40,7 @@ jobs:
 
     steps:
       - name: Clone.
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -123,21 +123,21 @@ jobs:
           mv -t ../artifact tlinux*
           mv -t ../artifact tsetup*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: build_gh
           path: out/Release/artifact/tsetup*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         name: Upload artifact for TG.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: build_tg
           path: out/Release/artifact/tlinux*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         name: Upload symbols artifact.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:

@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/message_bubble.h"
 #include "ui/chat/chat_style.h"
 #include "ui/effects/reaction_fly_animation.h"
+#include "ui/text/format_values.h"
 #include "ui/text/text_options.h"
 #include "ui/text/text_utilities.h"
 #include "ui/painter.h"
@@ -453,7 +454,7 @@ void BottomInfo::layoutDateText() {
 	const auto author = _data.author;
 	const auto prefix = !author.isEmpty() ? u", "_q : QString();
 	const auto date = edited + ((_data.flags & Data::Flag::ForwardedDate)
-		? langDateTime(_data.date)
+		? Ui::FormatDateTimeSavedFrom(_data.date)
 		: QLocale().toString(_data.date.time(), QLocale::ShortFormat));
 	const auto afterAuthor = prefix + date;
 	const auto afterAuthorWidth = st::msgDateFont->width(afterAuthor);
@@ -655,10 +656,16 @@ BottomInfo::Data BottomInfoDataFromMessage(not_null<Message*> message) {
 	if (item->isScheduled()) {
 		result.scheduleRepeatPeriod = item->scheduleRepeatPeriod();
 	}
-	if (forwarded
-			&& forwarded->savedFromPeer
-			&& forwarded->savedFromMsgId
-			&& !item->externalReply()) {
+	if (!forwarded) {
+		return result;
+	}
+	if (forwarded->savedFromMsgId && forwarded->savedFromDate) {
+		result.date = base::unixtime::parse(forwarded->savedFromDate);
+		result.flags |= Flag::ForwardedDate;
+	} else if (forwarded->originalDate
+		&& (message->context() == Context::SavedSublist
+			|| item->history()->peer->isSelf())
+		&& !item->externalReply()) {
 		result.date = base::unixtime::parse(forwarded->originalDate);
 		result.flags |= Flag::ForwardedDate;
 	}

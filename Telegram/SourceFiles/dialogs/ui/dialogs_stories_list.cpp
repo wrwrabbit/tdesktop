@@ -66,7 +66,7 @@ constexpr auto kMaxTooltipNames = 3;
 		result.data(),
 		st::dialogsStoriesTooltipHide);
 	result->sizeValue(
-	) | rpl::start_with_next([=](QSize size) {
+	) | rpl::on_next([=](QSize size) {
 		button->resize(button->width(), size.height());
 		button->moveToRight(0, 0, size.width());
 	}, button->lifetime());
@@ -106,7 +106,7 @@ List::List(
 , _st(st) {
 	setCursor(style::cur_default);
 
-	std::move(content) | rpl::start_with_next([=](Content &&content) {
+	std::move(content) | rpl::on_next([=](Content &&content) {
 		showContent(std::move(content));
 	}, lifetime());
 
@@ -926,7 +926,7 @@ TextWithEntities List::computeTooltipText() const {
 			break;
 		}
 	}
-	auto sequence = Ui::Text::Bold(names.front());
+	auto sequence = tr::bold(names.front());
 	if (names.size() > 1) {
 		for (auto i = 1; i + 1 != names.size(); ++i) {
 			sequence = tr::lng_stories_click_to_view_and_one(
@@ -934,22 +934,22 @@ TextWithEntities List::computeTooltipText() const {
 				lt_accumulated,
 				sequence,
 				lt_user,
-				Ui::Text::Bold(names[i]),
-				Ui::Text::WithEntities);
+				tr::bold(names[i]),
+				tr::marked);
 		}
 		sequence = tr::lng_stories_click_to_view_and_last(
 			tr::now,
 			lt_accumulated,
 			sequence,
 			lt_user,
-			Ui::Text::Bold(names.back()),
-			Ui::Text::WithEntities);
+			tr::bold(names.back()),
+			tr::marked);
 	}
 	return tr::lng_stories_click_to_view(
 		tr::now,
 		lt_users,
 		sequence,
-		Ui::Text::WithEntities);
+		tr::marked);
 }
 
 void List::setShowTooltip(
@@ -996,7 +996,7 @@ void List::setShowTooltip(
 			notEmpty
 		) | rpl::distinct_until_changed(),
 		tooltipParent->windowActiveValue()
-	) | rpl::start_with_next([=](bool, bool, bool active) {
+	) | rpl::on_next([=](bool, bool, bool active) {
 		_tooltipWindowActive = active;
 		if (!isHidden()) {
 			toggleTooltip(false);
@@ -1004,7 +1004,7 @@ void List::setShowTooltip(
 	}, tooltip->lifetime());
 
 	shownValue(
-	) | rpl::skip(1) | rpl::start_with_next([=](bool shown) {
+	) | rpl::skip(1) | rpl::on_next([=](bool shown) {
 		toggleTooltip(true);
 	}, tooltip->lifetime());
 }

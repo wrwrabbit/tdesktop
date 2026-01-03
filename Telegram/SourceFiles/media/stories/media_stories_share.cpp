@@ -132,7 +132,7 @@ namespace Media::Stories {
 			return;
 		}
 
-		const auto api = &story->owner().session().api();
+		const auto api = &story->session().api();
 		auto &histories = story->owner().histories();
 		for (const auto thread : result) {
 			const auto action = Api::SendAction(thread, options);
@@ -194,9 +194,9 @@ namespace Media::Stories {
 				randomId,
 				Data::Histories::PrepareMessage<MTPmessages_SendMedia>(
 					MTP_flags(sendFlags),
-					threadPeer->input,
+					threadPeer->input(),
 					Data::Histories::ReplyToPlaceholder(),
-					MTP_inputMediaStory(peer->input, MTP_int(id.story)),
+					MTP_inputMediaStory(peer->input(), MTP_int(id.story)),
 					MTPstring(),
 					MTP_long(randomId),
 					MTPReplyMarkup(),

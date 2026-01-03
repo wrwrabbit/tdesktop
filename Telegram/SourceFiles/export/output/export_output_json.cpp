@@ -752,6 +752,7 @@ QByteArray SerializeMessage(
 			pushBare(
 				"forwarded_from",
 				wrapPeerName(message.forwardedFromId));
+			push("forwarded_from_id", message.forwardedFromId);
 		} else if (!message.forwardedFromName.isEmpty()) {
 			pushBare(
 				"forwarded_from",
@@ -1313,6 +1314,34 @@ Result JsonWriter::writeStoriesSlice(const Data::StoriesSlice &data) {
 }
 
 Result JsonWriter::writeStoriesEnd() {
+	Expects(_output != nullptr);
+
+	return _output->writeBlock(popNesting());
+}
+
+Result JsonWriter::writeProfileMusicStart(const Data::ProfileMusicInfo &data) {
+	Expects(_output != nullptr);
+
+	auto block = prepareObjectItemStart("profile_music");
+	return _output->writeBlock(block + pushNesting(Context::kArray));
+}
+
+Result JsonWriter::writeProfileMusicSlice(const Data::ProfileMusicSlice &data) {
+	Expects(_output != nullptr);
+
+	if (data.list.empty()) {
+		return Result::Success();
+	}
+
+	auto block = QByteArray();
+	for (const auto &message : data.list) {
+		block.append(prepareArrayItemStart());
+		block.append(SerializeMessage(_context, message, {}, QString()));
+	}
+	return _output->writeBlock(block);
+}
+
+Result JsonWriter::writeProfileMusicEnd() {
 	Expects(_output != nullptr);
 
 	return _output->writeBlock(popNesting());

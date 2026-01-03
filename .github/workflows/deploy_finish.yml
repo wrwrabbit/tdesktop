@@ -77,10 +77,10 @@ jobs:
         if: github.event.inputs.releaseMacOS == 'true'
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: deploy_mac_post.yml
+          workflow: deploy_mac.yml
           workflow_conclusion: success
           branch: master
-          repo: wrwrabbit/tdesktop
+          repo: cpartisans/tdesktop
           path: MacOS
           name: telegram-dmg
 
@@ -118,7 +118,7 @@ jobs:
           prerelease: ${{ github.event.inputs.prerelease }}
 
       - name: Upload Windows Files
-        uses: "actions/github-script@v6"
+        uses: "actions/github-script@v8"
         if: github.event.inputs.releaseWindows == 'true'
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
@@ -142,7 +142,7 @@ jobs:
             });
 
       - name: Upload Linux Files
-        uses: "actions/github-script@v6"
+        uses: "actions/github-script@v8"
         if: github.event.inputs.releaseLinux == 'true'
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
@@ -158,7 +158,7 @@ jobs:
             });
 
       - name: Upload MacOS Files
-        uses: "actions/github-script@v6"
+        uses: "actions/github-script@v8"
         if: github.event.inputs.releaseMacOS == 'true'
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"

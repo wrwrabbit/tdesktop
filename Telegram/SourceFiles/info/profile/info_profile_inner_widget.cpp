@@ -57,15 +57,23 @@ void AddAboutVerification(
 	peer->session().changes().peerFlagsValue(
 		peer,
 		Data::PeerUpdate::Flag::VerifyInfo
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		const auto info = peer->botVerifyDetails();
 		while (inner->count()) {
 			delete inner->widgetAt(0);
 		}
 		if (!info) {
 			Ui::AddDivider(inner);
-		} else if (!info->description.empty()) {
-			Ui::AddDividerText(inner, rpl::single(info->description));
+		} else {
+			auto hasMainApp = false;
+			if (const auto user = peer->asUser()) {
+				if (user->botInfo) {
+					hasMainApp = user->botInfo->hasMainApp;
+				}
+			}
+			if (!hasMainApp && !info->description.empty()) {
+				Ui::AddDividerText(inner, rpl::single(info->description));
+			}
 		}
 		inner->resizeToWidth(inner->width());
 	}, inner->lifetime());
@@ -85,7 +93,7 @@ InnerWidget::InnerWidget(
 , _sublist(_controller->key().sublist())
 , _content(setupContent(this, origin)) {
 	_content->heightValue(
-	) | rpl::start_with_next([this](int height) {
+	) | rpl::on_next([this](int height) {
 		if (!_inResize) {
 			resizeToWidth(width());
 			updateDesiredHeight();
@@ -104,7 +112,7 @@ object_ptr<Ui::RpWidget> InnerWidget::setupContent(
 		user->session().changes().peerFlagsValue(
 			user,
 			Data::PeerUpdate::Flag::FullInfo
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			auto &photos = user->session().api().peerPhoto();
 			if (const auto original = photos.nonPersonalPhoto(user)) {
 				// Preload it for the edit contact box.
@@ -166,6 +174,9 @@ object_ptr<Ui::RpWidget> InnerWidget::setupContent(
 		addAboutVerificationOrDivider(result, rpl::duplicate(showNext));
 		result->add(std::move(actions));
 	}
+	if (!_aboutVerificationAdded) {
+		AddAboutVerification(result, _peer);
+	}
 	if (_peer->isChat() || _peer->isMegagroup()) {
 		if (!_peer->isMonoforum()) {
 			setupMembers(result.data(), rpl::duplicate(showNext));
@@ -184,7 +195,7 @@ void InnerWidget::setupMembers(
 	addAboutVerificationOrDivider(inner, std::move(showDivider));
 	_members = inner->add(object_ptr<Members>(inner, _controller));
 	_members->scrollToRequests(
-	) | rpl::start_with_next([this](Ui::ScrollToRequest request) {
+	) | rpl::on_next([this](Ui::ScrollToRequest request) {
 		auto min = (request.ymin < 0)
 			? request.ymin
 			: MapFrom(this, _members, QPoint(0, request.ymin)).y();
@@ -196,7 +207,7 @@ void InnerWidget::setupMembers(
 		_scrollToRequests.fire({ min, max });
 	}, _members->lifetime());
 	_members->onlineCountValue(
-	) | rpl::start_with_next([=](int count) {
+	) | rpl::on_next([=](int count) {
 		_onlineCount.fire_copy(count);
 	}, _members->lifetime());
 
@@ -210,7 +221,7 @@ void InnerWidget::setupSavedMusic(not_null<Ui::VerticalLayout*> container) {
 	Info::Saved::SetupSavedMusic(
 		container,
 		_controller,
-		_peer,
+		_sublist ? _sublist->sublistPeer() : _peer,
 		_topBarColor.value());
 }
 
@@ -243,6 +254,7 @@ object_ptr<Ui::RpWidget> InnerWidget::setupSharedMedia(
 	using namespace rpl::mappers;
 	using MediaType = Media::Type;
 
+	const auto peer = _sublist ? _sublist->sublistPeer() : _peer;
 	auto content = object_ptr<Ui::VerticalLayout>(parent);
 	auto &tracker = sharedTracker;
 	auto addMediaButton = [&](
@@ -251,7 +263,7 @@ object_ptr<Ui::RpWidget> InnerWidget::setupSharedMedia(
 		auto result = Media::AddButton(
 			content,
 			_controller,
-			_peer,
+			peer,
 			_topic ? _topic->rootId() : MsgId(),
 			_sublist ? _sublist->sublistPeer()->id : PeerId(),
 			_migrated,
@@ -332,9 +344,9 @@ object_ptr<Ui::RpWidget> InnerWidget::setupSharedMedia(
 	};
 
 	if (!_topic) {
-		addStoriesButton(_peer, st::infoIconMediaStories);
-		addPeerGiftsButton(_peer, st::infoIconMediaGifts);
-		addSavedSublistButton(_peer, st::infoIconMediaSaved);
+		addStoriesButton(peer, st::infoIconMediaStories);
+		addPeerGiftsButton(peer, st::infoIconMediaGifts);
+		addSavedSublistButton(peer, st::infoIconMediaSaved);
 	}
 	addMediaButton(MediaType::Photo, st::infoIconMediaPhoto);
 	addMediaButton(MediaType::Video, st::infoIconMediaVideo);
@@ -343,12 +355,12 @@ object_ptr<Ui::RpWidget> InnerWidget::setupSharedMedia(
 	addMediaButton(MediaType::Link, st::infoIconMediaLink);
 	addMediaButton(MediaType::RoundVoiceFile, st::infoIconMediaVoice);
 	addMediaButton(MediaType::GIF, st::infoIconMediaGif);
-	if (const auto bot = _peer->asBot()) {
+	if (const auto bot = peer->asBot()) {
 		addCommonGroupsButton(bot, st::infoIconMediaGroup);
 		addSimilarPeersButton(bot, st::infoIconMediaBot);
-	} else if (const auto channel = _peer->asBroadcast()) {
+	} else if (const auto channel = peer->asBroadcast()) {
 		addSimilarPeersButton(channel, st::infoIconMediaChannel);
-	} else if (const auto user = _peer->asUser()) {
+	} else if (const auto user = peer->asUser()) {
 		addCommonGroupsButton(user, st::infoIconMediaGroup);
 	}
 
@@ -439,6 +451,7 @@ base::weak_qptr<Ui::RpWidget> InnerWidget::createPinnedToTop(
 			.controller = _controller->parentController(),
 			.key = _controller->key(),
 			.wrap = _controller->wrapValue(),
+			.peer = _sublist ? _sublist->sublistPeer().get() : nullptr,
 			.backToggles = _backToggles.value(),
 			.showFinished = _showFinished.events(),
 		});

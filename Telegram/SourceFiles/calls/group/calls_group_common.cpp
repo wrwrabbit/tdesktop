@@ -57,8 +57,8 @@ object_ptr<Ui::GenericBox> ScreenSharingPrivacyRequestBox() {
 					tr::lng_group_call_mac_screencast_access(),
 					tr::lng_group_call_mac_recording()
 				) | rpl::map([](QString a, QString b) {
-					auto result = Ui::Text::RichLangValue(a);
-					result.append("\n\n").append(Ui::Text::RichLangValue(b));
+					auto result = tr::rich(a);
+					result.append("\n\n").append(tr::rich(b));
 					return result;
 				}),
 				st::groupCallBoxLabel),
@@ -86,7 +86,7 @@ object_ptr<Ui::RpWidget> MakeRoundActiveLogo(
 	auto result = object_ptr<Ui::RpWidget>(parent);
 	const auto logo = result.data();
 	logo->resize(logo->width(), logoOuter.height());
-	logo->paintRequest() | rpl::start_with_next([=, &icon] {
+	logo->paintRequest() | rpl::on_next([=, &icon] {
 		if (logo->width() < logoOuter.width()) {
 			return;
 		}
@@ -133,7 +133,7 @@ void ConferenceCallJoinConfirm(
 		st::boxRowPadding + st::confcallLinkTitlePadding,
 		style::al_top);
 	const auto wrapName = [&](not_null<PeerData*> peer) {
-		return rpl::single(Ui::Text::Bold(peer->shortName()));
+		return rpl::single(tr::bold(peer->shortName()));
 	};
 	box->addRow(
 		object_ptr<Ui::FlatLabel>(
@@ -142,8 +142,8 @@ void ConferenceCallJoinConfirm(
 				? tr::lng_confcall_join_text_inviter(
 					lt_user,
 					wrapName(maybeInviter),
-					Ui::Text::RichLangValue)
-				: tr::lng_confcall_join_text(Ui::Text::RichLangValue)),
+					tr::rich)
+				: tr::lng_confcall_join_text(tr::rich)),
 			st::confcallLinkCenteredText),
 		st::boxRowPadding,
 		style::al_top
@@ -156,7 +156,7 @@ void ConferenceCallJoinConfirm(
 			object_ptr<Ui::RpWidget>(box),
 			st::boxRowPadding + st::confcallJoinSepPadding);
 		sep->resize(sep->width(), st::normalFont->height);
-		sep->paintRequest() | rpl::start_with_next([=] {
+		sep->paintRequest() | rpl::on_next([=] {
 			auto p = QPainter(sep);
 			const auto line = st::lineWidth;
 			const auto top = st::confcallLinkFooterOrLineTop;
@@ -189,14 +189,14 @@ void ConferenceCallJoinConfirm(
 			? tr::lng_confcall_already_joined_one(
 				lt_user,
 				wrapByIndex(0),
-				Ui::Text::RichLangValue)
+				tr::rich)
 			: (known == 2)
 			? tr::lng_confcall_already_joined_two(
 				lt_user,
 				wrapByIndex(0),
 				lt_other,
 				wrapByIndex(1),
-				Ui::Text::RichLangValue)
+				tr::rich)
 			: (known == 3)
 			? tr::lng_confcall_already_joined_three(
 				lt_user,
@@ -205,7 +205,7 @@ void ConferenceCallJoinConfirm(
 				wrapByIndex(1),
 				lt_third,
 				wrapByIndex(2),
-				Ui::Text::RichLangValue)
+				tr::rich)
 			: tr::lng_confcall_already_joined_many(
 				lt_count,
 				rpl::single(1. * (std::max(known, call->fullCount()) - 2)),
@@ -213,7 +213,7 @@ void ConferenceCallJoinConfirm(
 				wrapByIndex(0),
 				lt_other,
 				wrapByIndex(1),
-				Ui::Text::RichLangValue);
+				tr::rich);
 		box->addRow(
 			object_ptr<Ui::FlatLabel>(
 				box,
@@ -223,18 +223,13 @@ void ConferenceCallJoinConfirm(
 			style::al_top
 		)->setTryMakeSimilarLines(true);
 	}
-	const auto joinAndClose = [=] {
+	box->addButton(tr::lng_confcall_join_button(), [=] {
 		join([weak = base::make_weak(box)] {
 			if (const auto strong = weak.get()) {
 				strong->closeBox();
 			}
 		});
-	};
-	Info::BotStarRef::AddFullWidthButton(
-		box,
-		tr::lng_confcall_join_button(),
-		joinAndClose,
-		&st::confcallLinkButton);
+	});
 }
 
 ConferenceCallLinkStyleOverrides DarkConferenceCallLinkStyle() {
@@ -279,7 +274,7 @@ void ShowConferenceCallLinkBox(
 		if (!args.initial && call->canManage()) {
 			const auto toggle = Ui::CreateChild<Ui::IconButton>(
 				close->parentWidget(),
-				st.menuToggle ? *st.menuToggle : st::confcallLinkMenu);
+				st.menuToggle ? *st.menuToggle : st::boxTitleMenu);
 			const auto handler = [=] {
 				if (state->resetting) {
 					return;
@@ -323,7 +318,7 @@ void ShowConferenceCallLinkBox(
 			});
 
 			close->geometryValue(
-			) | rpl::start_with_next([=](QRect geometry) {
+			) | rpl::on_next([=](QRect geometry) {
 				toggle->moveToLeft(
 					geometry.x() - toggle->width(),
 					geometry.y());
@@ -380,7 +375,7 @@ void ShowConferenceCallLinkBox(
 			box->widthValue(),
 			copy->widthValue(),
 			share->widthValue()
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			const auto width = st::boxWideWidth;
 			const auto padding = st::confcallLinkBox.buttonPadding;
 			const auto available = width - 2 * padding.right();
@@ -399,7 +394,7 @@ void ShowConferenceCallLinkBox(
 			copy->parentWidget(),
 			tr::lng_confcall_link_or(),
 			st::confcallLinkFooterOr);
-		sep->paintRequest() | rpl::start_with_next([=] {
+		sep->paintRequest() | rpl::on_next([=] {
 			auto p = QPainter(sep);
 			const auto text = sep->textMaxWidth();
 			const auto white = (sep->width() - 2 * text) / 2;
@@ -418,8 +413,8 @@ void ShowConferenceCallLinkBox(
 				tr::lng_confcall_link_join_link(
 					lt_arrow,
 					rpl::single(Ui::Text::IconEmoji(&st::textMoreIconEmoji)),
-					[](QString v) { return Ui::Text::Link(v); }),
-				Ui::Text::WithEntities),
+					[](QString v) { return tr::link(v); }),
+				tr::marked),
 			(st.centerLabel
 				? *st.centerLabel
 				: st::confcallLinkCenteredText));
@@ -433,7 +428,7 @@ void ShowConferenceCallLinkBox(
 			}
 			return false;
 		});
-		copy->geometryValue() | rpl::start_with_next([=](QRect geometry) {
+		copy->geometryValue() | rpl::on_next([=](QRect geometry) {
 			const auto width = st::boxWideWidth
 				- st::boxRowPadding.left()
 				- st::boxRowPadding.right();

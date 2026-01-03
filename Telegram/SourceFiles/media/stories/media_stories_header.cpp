@@ -272,7 +272,7 @@ struct MadePrivacyBadge {
 			from,
 			st::storiesRepostUserpicPadding));
 	result.append(from->name());
-	return Ui::Text::Link(result);
+	return tr::link(result);
 }
 
 [[nodiscard]] TextWithEntities RepostNameValue(
@@ -287,7 +287,7 @@ struct MadePrivacyBadge {
 				st::storiesRepostUserpicPadding)));
 	}
 	result.append(name);
-	return Ui::Text::Link(result);
+	return tr::link(result);
 }
 
 } // namespace
@@ -364,13 +364,13 @@ void Header::show(HeaderData data, rpl::producer<int> videoStreamViewers) {
 		rpl::combine(
 			_name->widthValue(),
 			raw->heightValue()
-		) | rpl::start_with_next(updateInfoGeometry, _name->lifetime());
+		) | rpl::on_next(updateInfoGeometry, _name->lifetime());
 
 		raw->show();
 		_widget = std::move(widget);
 
 		_controller->layoutValue(
-		) | rpl::start_with_next([=](const Layout &layout) {
+		) | rpl::on_next([=](const Layout &layout) {
 			raw->setGeometry(layout.header);
 			_contentGeometry = layout.content;
 			updateTooltipGeometry();
@@ -387,7 +387,7 @@ void Header::show(HeaderData data, rpl::producer<int> videoStreamViewers) {
 	setVideoStreamViewers(std::move(videoStreamViewers));
 
 	_date->widthValue(
-	) | rpl::start_with_next(updateInfoGeometry, _date->lifetime());
+	) | rpl::on_next(updateInfoGeometry, _date->lifetime());
 
 	if (!data.fromPeer && data.repostFrom.isEmpty()) {
 		_repost = nullptr;
@@ -403,7 +403,7 @@ void Header::show(HeaderData data, rpl::producer<int> videoStreamViewers) {
 				data.repostFrom);
 		const auto prefix = data.fromPeer ? data.fromPeer : data.repostPeer;
 		_repost->setMarkedText(
-			(prefix ? Ui::Text::Link(prefixName) : prefixName),
+			(prefix ? tr::link(prefixName) : prefixName),
 			Core::TextContext({ .session = &data.peer->session() }));
 		if (prefix) {
 			_repost->setClickHandlerFilter([=](const auto &...) {
@@ -413,7 +413,7 @@ void Header::show(HeaderData data, rpl::producer<int> videoStreamViewers) {
 		}
 		_repost->show();
 		_repost->widthValue(
-		) | rpl::start_with_next(updateInfoGeometry, _repost->lifetime());
+		) | rpl::on_next(updateInfoGeometry, _repost->lifetime());
 	}
 
 	auto counter = ComposeCounter(data);
@@ -448,7 +448,7 @@ void Header::show(HeaderData data, rpl::producer<int> videoStreamViewers) {
 				&& _privacyBadgeGeometry.contains(
 					static_cast<QMouseEvent*>(e.get())->pos());
 			return (_privacyBadgeOver != over);
-		}) | rpl::start_with_next([=] {
+		}) | rpl::on_next([=] {
 			_privacyBadgeOver = !_privacyBadgeOver;
 			toggleTooltip(Tooltip::Privacy, _privacyBadgeOver);
 		}, _privacy->lifetime());
@@ -460,7 +460,7 @@ void Header::show(HeaderData data, rpl::producer<int> videoStreamViewers) {
 		}
 		createVolumeToggle();
 
-		_widget->widthValue() | rpl::start_with_next([=](int width) {
+		_widget->widthValue() | rpl::on_next([=](int width) {
 			if (_playPause) {
 				const auto playPause = st::storiesPlayButtonPosition;
 				_playPause->moveToRight(playPause.x(), playPause.y(), width);
@@ -484,7 +484,7 @@ void Header::show(HeaderData data, rpl::producer<int> videoStreamViewers) {
 		_widget->widthValue(),
 		_counter ? _counter->widthValue() : rpl::single(0),
 		_dateUpdated.events_starting_with_copy(rpl::empty)
-	) | rpl::start_with_next([=](int outer, int counter, auto) {
+	) | rpl::on_next([=](int outer, int counter, auto) {
 		const auto right = _playPause
 			? _playPause->x()
 			: (outer - st::storiesHeaderMargin.right());
@@ -555,7 +555,7 @@ void Header::setVideoStreamViewers(rpl::producer<int> viewers) {
 	const auto context = helper.context();
 	_videoStreamViewersLifetime = std::move(
 		viewers
-	) | rpl::start_with_next([=](int count) {
+	) | rpl::on_next([=](int count) {
 		auto text = badge;
 		if (count) {
 			text.append(' ').append(tr::lng_group_call_rtmp_viewers(
@@ -579,7 +579,7 @@ void Header::createPlayPause() {
 	const auto state = lifetime.make_state<PlayPauseState>();
 
 	_playPause->events(
-	) | rpl::start_with_next([=](not_null<QEvent*> e) {
+	) | rpl::on_next([=](not_null<QEvent*> e) {
 		const auto type = e->type();
 		if (type == QEvent::Enter || type == QEvent::Leave) {
 			const auto over = (e->type() == QEvent::Enter);
@@ -603,7 +603,7 @@ void Header::createPlayPause() {
 		}
 	}, lifetime);
 
-	_playPause->paintRequest() | rpl::start_with_next([=] {
+	_playPause->paintRequest() | rpl::on_next([=] {
 		auto p = QPainter(_playPause.get());
 		const auto paused = (_pauseState == PauseState::Paused)
 			|| (_pauseState == PauseState::InactivePaused);
@@ -649,7 +649,7 @@ void Header::createVolumeToggle() {
 	});
 
 	_volumeToggle->events(
-	) | rpl::start_with_next([=](not_null<QEvent*> e) {
+	) | rpl::on_next([=](not_null<QEvent*> e) {
 		const auto type = e->type();
 		if (type == QEvent::Enter || type == QEvent::Leave) {
 			const auto over = (e->type() == QEvent::Enter);
@@ -667,7 +667,7 @@ void Header::createVolumeToggle() {
 		}
 	}, lifetime);
 
-	_volumeToggle->paintRequest() | rpl::start_with_next([=] {
+	_volumeToggle->paintRequest() | rpl::on_next([=] {
 		auto p = QPainter(_volumeToggle.get());
 		p.setOpacity(state->silent
 			? kControlOpacityDisabled
@@ -681,7 +681,7 @@ void Header::createVolumeToggle() {
 
 	_volume->toggle(false, anim::type::instant);
 	_volume->events(
-	) | rpl::start_with_next([=](not_null<QEvent*> e) {
+	) | rpl::on_next([=](not_null<QEvent*> e) {
 		const auto type = e->type();
 		if (type == QEvent::Enter || type == QEvent::Leave) {
 			const auto over = (e->type() == QEvent::Enter);
@@ -702,7 +702,7 @@ void Header::createVolumeToggle() {
 		_widget->positionValue(),
 		_volumeToggle->positionValue(),
 		rpl::mappers::_1 + rpl::mappers::_2
-	) | rpl::start_with_next([=](QPoint position) {
+	) | rpl::on_next([=](QPoint position) {
 		_volume->move(position);
 	}, _volume->lifetime());
 
@@ -727,7 +727,7 @@ void Header::toggleTooltip(Tooltip type, bool show) {
 	}
 	const auto text = [&]() -> TextWithEntities {
 		using Privacy = Data::StoryPrivacy;
-		const auto boldName = Ui::Text::Bold(_data->peer->shortName());
+		const auto boldName = tr::bold(_data->peer->shortName());
 		const auto self = _data->peer->isSelf();
 		switch (type) {
 		case Tooltip::SilentVideo:
@@ -737,32 +737,32 @@ void Header::toggleTooltip(Tooltip type, bool show) {
 				return self
 					? tr::lng_stories_about_close_friends_my(
 						tr::now,
-						Ui::Text::RichLangValue)
+						tr::rich)
 					: tr::lng_stories_about_close_friends(
 						tr::now,
 						lt_user,
 						boldName,
-						Ui::Text::RichLangValue);
+						tr::rich);
 			case Privacy::Contacts:
 				return self
 					? tr::lng_stories_about_contacts_my(
 						tr::now,
-						Ui::Text::RichLangValue)
+						tr::rich)
 					: tr::lng_stories_about_contacts(
 						tr::now,
 						lt_user,
 						boldName,
-						Ui::Text::RichLangValue);
+						tr::rich);
 			case Privacy::SelectedContacts:
 				return self
 					? tr::lng_stories_about_selected_contacts_my(
 						tr::now,
-						Ui::Text::RichLangValue)
+						tr::rich)
 					: tr::lng_stories_about_selected_contacts(
 						tr::now,
 						lt_user,
 						boldName,
-						Ui::Text::RichLangValue);
+						tr::rich);
 			}
 		}
 		return {};
@@ -851,7 +851,7 @@ void Header::rebuildVolumeControls(
 		dropdown.get(),
 		st::storiesVolumeButton);
 	_volumeIcon.value(
-	) | rpl::start_with_next([=](const style::icon *icon) {
+	) | rpl::on_next([=](const style::icon *icon) {
 		button->setIconOverride(icon, icon);
 	}, button->lifetime());
 
@@ -902,7 +902,7 @@ void Header::rebuildVolumeControls(
 	}
 
 	dropdown->paintRequest(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		auto p = QPainter(dropdown);
 		auto hq = PainterHighQualityEnabler(p);
 		const auto radius = button->width() / 2.;

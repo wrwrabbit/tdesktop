@@ -262,7 +262,7 @@ void Instance::startOrJoinConferenceCall(StartConferenceInfo args) {
 	const auto raw = call.get();
 
 	session->account().sessionChanges(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		destroyGroupCall(raw);
 	}, raw->lifetime());
 
@@ -435,7 +435,7 @@ void Instance::createCall(
 		const auto raw = call.get();
 
 		user->session().account().sessionChanges(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			destroyCall(raw);
 		}, raw->lifetime());
 
@@ -449,7 +449,7 @@ void Instance::createCall(
 		}
 		if (raw->state() == Call::State::WaitingUserConfirmation) {
 			_currentCallPanel->startOutgoingRequests(
-			) | rpl::start_with_next([=](bool video) {
+			) | rpl::on_next([=](bool video) {
 				repeater.callback(video, true, repeater);
 			}, raw->lifetime());
 		} else {
@@ -491,7 +491,7 @@ void Instance::createGroupCall(
 	const auto raw = call.get();
 
 	info.peer->session().account().sessionChanges(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		destroyGroupCall(raw);
 	}, raw->lifetime());
 
@@ -1196,7 +1196,7 @@ void Instance::showConferenceInvite(
 		const auto raw = call.get();
 
 		user->session().account().sessionChanges(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			destroyCall(raw);
 		}, raw->lifetime());
 

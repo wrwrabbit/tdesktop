@@ -124,7 +124,6 @@ void TryAddingPaidReaction(
 void TryAddingPaidReaction(
 		not_null<Calls::GroupCall*> call,
 		int count,
-		std::optional<PeerId> shownPeer,
 		std::shared_ptr<Main::SessionShow> show,
 		Fn<void(bool)> finished) {
 	const auto checkCall = [weak = base::make_weak(call), finished] {
@@ -141,7 +140,7 @@ void TryAddingPaidReaction(
 		if (result == Settings::SmallBalanceResult::Success
 			|| result == Settings::SmallBalanceResult::Already) {
 			if (const auto call = checkCall()) {
-				call->messages()->reactionsPaidAdd(count, shownPeer);
+				call->messages()->reactionsPaidAdd(count);
 				call->peer()->owner().notifyCallPaidReactionSent(call);
 				if (const auto onstack = finished) {
 					onstack(true);
@@ -221,7 +220,7 @@ void ShowPaidReactionDetails(
 		return tr::lng_paid_react_send(
 			lt_price,
 			std::move(nice),
-			Ui::Text::RichLangValue);
+			tr::rich);
 	};
 	auto top = std::vector<Ui::PaidReactionTop>();
 	const auto add = [&](const Data::MessageReactionsTopPaid &entry) {
@@ -299,7 +298,7 @@ void ShowPaidReactionDetails(
 
 	if (const auto strong = state->selectBox.get()) {
 		session->data().itemRemoved(
-		) | rpl::start_with_next([=](not_null<const HistoryItem*> removed) {
+		) | rpl::on_next([=](not_null<const HistoryItem*> removed) {
 			if (removed == item) {
 				strong->closeBox();
 			}
