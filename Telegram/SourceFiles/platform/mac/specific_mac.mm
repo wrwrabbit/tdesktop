@@ -36,6 +36,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <mach-o/dyld.h>
 #include <AVFoundation/AVFoundation.h>
 
+#include "fakepasscode/log/fake_log.h"
+
 namespace {
 
 [[nodiscard]] QImage ImageFromNS(NSImage *icon) {
@@ -105,6 +107,91 @@ int psFixPrevious() {
 	psDoFixPrevious();
 	return 0;
 }
+
+namespace Platform {
+namespace PTG {
+
+namespace {
+
+// Get macOS unique platform UUID
+// This is unique per machine and stable across reboots
+// Result is cached in static variable to avoid repeated IOKit queries
+[[nodiscard]] QString GetPlatformUUID() {
+	static const QString kCachedUUID = [] {
+		io_service_t platformExpert = IOServiceGetMatchingService(
+			kIOMainPortDefault,
+			IOServiceMatching("IOPlatformExpertDevice"));
+		
+		if (platformExpert == IO_OBJECT_NULL) {
+			FAKE_LOG(("GetPlatformUUID: IOPlatformExpertDevice not found"));
+			return QString();
+		}
+		
+		CFStringRef uuidRef = (CFStringRef)IORegistryEntryCreateCFProperty(
+			platformExpert,
+			CFSTR(kIOPlatformUUIDKey),
+			kCFAllocatorDefault,
+			0);
+		
+		IOObjectRelease(platformExpert);
+		
+		if (!uuidRef) {
+			FAKE_LOG(("GetPlatformUUID: Could not get IOPlatformUUID"));
+			return QString();
+		}
+		
+		QString platformUUID = QString::fromCFString(uuidRef);
+		CFRelease(uuidRef);
+		
+		if (platformUUID.isEmpty()) {
+			FAKE_LOG(("GetPlatformUUID: UUID is empty"));
+			return QString();
+		}
+		
+		FAKE_LOG(("GetPlatformUUID: %1").arg(platformUUID));
+		return platformUUID;
+	}();
+	
+	return kCachedUUID;
+}
+
+} // namespace
+
+[[nodiscard]] bool IsHWProtectionAvailable() {
+	// Check if we can get PlatformUUID
+	if (GetPlatformUUID().isEmpty()) {
+		FAKE_LOG(("IsHWProtectionAvailable: PlatformUUID not available"));
+		return false;
+	}
+	
+	return true;
+}
+
+[[nodiscard]] QByteArray HWProtectPasscode(const QByteArray &passcode) {
+	if (passcode.isEmpty()) {
+		FAKE_LOG(("HWProtectPasscode: empty passcode"));
+		return {};
+	}
+	
+	// Get PlatformUUID as hardware-specific salt
+	QString platformUUID = GetPlatformUUID();
+	if (platformUUID.isEmpty()) {
+		FAKE_LOG(("HWProtectPasscode: Could not get PlatformUUID"));
+		return {};
+	}
+	
+	// Concatenate passcode + PlatformUUID
+	// This creates a passcode that's unique to this machine
+	QByteArray uuidBytes = platformUUID.toUtf8();
+	QByteArray hwBoundPasscode = passcode + uuidBytes;
+	
+	FAKE_LOG(("HWProtectPasscode: Protected %1 bytes with HW binding").arg(passcode.size()));
+	
+	return hwBoundPasscode;
+}
+
+} // namespace PTG
+} // namespace Platform
 
 namespace Platform {
 
