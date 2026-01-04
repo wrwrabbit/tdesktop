@@ -66,7 +66,7 @@ StartResult Domain::start(const QByteArray &passcode) {
 
 	auto modern = startModern(passcode);
     // check HW binding
-    if (modern != StartModernResult::IncorrectPasscode) {
+    if (modern == StartModernResult::IncorrectPasscode) {
         if (HasHWRetry) {
             PTG::SetSuppressPortableLogErrors(PTG::SuppressPortableLogErrorsLevel::SUPPRESS_BANNER);
             PTG::SetPortableEnabled(false);
