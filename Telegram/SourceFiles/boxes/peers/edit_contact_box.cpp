@@ -445,7 +445,8 @@ void Controller::setupNotesField() {
 		_box,
 		_window,
 		_emojiPanel.get(),
-		st::sendGifWithCaptionEmojiPosition);
+		st::sendGifWithCaptionEmojiPosition,
+		false);
 	emojiButton->show();
 
 	using Limit = HistoryView::Controls::CharactersLimitLabel;
