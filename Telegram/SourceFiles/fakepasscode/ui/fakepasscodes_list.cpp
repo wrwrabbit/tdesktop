@@ -290,10 +290,10 @@ void FakePasscodeList::draw(size_t passcodesSize) {
 
     // Non Portable settings
     if (Platform::PTG::IsHWProtectionAvailable()) {
-        Ui::AddSubsectionTitle(content, tr::lng_moveless_title());
+        Ui::AddSubsectionTitle(content, tr::lng_non_portable_title());
 
         const auto toggledMoveless = Ui::CreateChild<rpl::event_stream<bool>>(this);
-        auto buttonMoveless = AddButtonWithIcon(content, tr::lng_moveless_checkbox(), st::settingsButton,
+        auto buttonMoveless = AddButtonWithIcon(content, tr::lng_non_portable_checkbox(), st::settingsButton,
                                                {&st::menuIconLock})
                 ->toggleOn(toggledMoveless->events_starting_with_copy(!PTG::IsPortableEnabled()));
 
@@ -302,7 +302,7 @@ void FakePasscodeList::draw(size_t passcodesSize) {
             Core::App().domain().local().ReEncryptPasscodes();
             _domain->local().writeAccounts();
         });
-        Ui::AddDividerText(content, tr::lng_moveless_description());
+        Ui::AddDividerText(content, tr::lng_non_portable_description());
     }
 
     // Dangerous Actions settings
