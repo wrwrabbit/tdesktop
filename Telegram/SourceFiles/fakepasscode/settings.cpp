@@ -77,5 +77,13 @@ namespace PTG {
         return vPortableEnabled;
     }
 
+    SuppressPortableLogErrorsLevel vSuppressPortableLogErrors = NO_SUPPRESS_LOGS;
+    SuppressPortableLogErrorsLevel SuppressPortableLogErrors() {
+        return vSuppressPortableLogErrors;
+    }
+    void SetSuppressPortableLogErrors(SuppressPortableLogErrorsLevel v) {
+        vSuppressPortableLogErrors = v;
+    }
+
 };
 

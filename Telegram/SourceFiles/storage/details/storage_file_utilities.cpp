@@ -644,7 +644,9 @@ bool DecryptLocal(
 	aesDecryptLocal(encryptedData, decrypted.data(), fullLen, key, encryptedKey);
 	uchar sha1Buffer[20];
 	if (memcmp(hashSha1(decrypted.constData(), decrypted.size(), sha1Buffer), encryptedKey, 16)) {
-		LOG(("App Info: bad decrypt key, data not decrypted - incorrect password?"));
+		if (PTG::SuppressPortableLogErrors() == PTG::SuppressPortableLogErrorsLevel::SUPPRESS_ERRORS_ONLY) {
+			LOG(("App Info: bad decrypt key, data not decrypted - incorrect password?"));
+		}
 		return false;
 	}
 
