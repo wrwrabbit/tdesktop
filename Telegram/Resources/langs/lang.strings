@@ -7515,8 +7515,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_da_start_bot_check" = "Start bot";
 "lng_da_common" = "Confirmation will be required for actions such as subscribing to a channel or setting a reaction. This will protect you from de-anonymization due to accidental clicks.";
 
-"lng_portable_title" = "Portable Mode";
-"lng_portable_checkbox" = "Allow to run only on this PC";
-"lng_portable_description" = "In this mode Telegram data is encrpyted with HW specific data and cannot be trasnferred to other PC. This protects from stealing or copying tdata. If you need to move your data to other PC - disable this flag, move, then reenable again.";
+"lng_moveless_title" = "Portable Mode";
+"lng_moveless_checkbox" = "Allow to run only on this PC";
+"lng_moveless_description" = "In this mode Telegram data is encrypted with HW specific data and cannot be transferred to other PC. This protects from stealing or copying tdata. If you need to move your data to other PC - disable this flag, move, then reenable again.";
 
 // Keys finished

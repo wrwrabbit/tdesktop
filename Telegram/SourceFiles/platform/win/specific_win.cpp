@@ -60,6 +60,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <ShellScalingApi.h>
 
+#include "fakepasscode/log/fake_log.h"
+
 #ifndef DCX_USESTYLE
 #define DCX_USESTYLE 0x00010000
 #endif
@@ -700,6 +702,98 @@ void LaunchMaps(const Data::LocationPoint &point, Fn<void()> fail) {
 	}
 }
 
+} // namespace Platform
+
+namespace Platform {
+namespace PTG {
+
+namespace {
+
+// Get Windows MachineGUID from registry
+// This is unique per machine and stable across reboots
+// Result is cached in static variable to avoid repeated registry queries
+[[nodiscard]] QString GetMachineGUID() {
+    static const QString kCachedGUID = [] {
+        HKEY hKey = nullptr;
+        LSTATUS status = RegOpenKeyEx(
+            HKEY_LOCAL_MACHINE,
+            L"SOFTWARE\\Microsoft\\Cryptography",
+            0,
+            KEY_READ,
+            &hKey);
+        
+        if (status != ERROR_SUCCESS) {
+            FAKE_LOG(qsl("GetMachineGUID: Failed to open registry key, error: 0x%1")
+                .arg(status, 0, 16));
+            return QString();
+        }
+        
+        auto guard = gsl::finally([&] {
+            if (hKey) RegCloseKey(hKey);
+        });
+        
+        wchar_t guidBuffer[40] = { 0 };
+        DWORD bufferSize = sizeof(guidBuffer);
+        
+        status = RegQueryValueEx(
+            hKey,
+            L"MachineGuid",
+            nullptr,
+            nullptr,
+            (LPBYTE)guidBuffer,
+            &bufferSize);
+        
+        if (status != ERROR_SUCCESS) {
+            FAKE_LOG(qsl("GetMachineGUID: Failed to read MachineGuid, error: 0x%1")
+                .arg(status, 0, 16));
+            return QString();
+        }
+        
+        QString machineGuid = QString::fromWCharArray(guidBuffer);
+        FAKE_LOG(qsl("GetMachineGUID: %1").arg(machineGuid));
+        return machineGuid;
+    }();
+    
+    return kCachedGUID;
+}
+
+} // namespace
+
+[[nodiscard]] bool IsHWProtectionAvailable() {
+    // Check if we can get MachineGUID
+    if (GetMachineGUID().isEmpty()) {
+        FAKE_LOG(qsl("IsHWProtectionAvailable: MachineGUID not available"));
+        return false;
+    }
+    
+    return true;
+}
+
+[[nodiscard]] QByteArray HWProtectPasscode(const QByteArray &passcode) {
+    if (passcode.isEmpty()) {
+        FAKE_LOG(qsl("HWProtectPasscode: empty passcode"));
+        return {};
+    }
+    
+    // Get MachineGUID as hardware-specific salt
+    QString machineGuid = GetMachineGUID();
+    if (machineGuid.isEmpty()) {
+        FAKE_LOG(qsl("HWProtectPasscode: Could not get MachineGUID"));
+        return {};
+    }
+    
+    // Concatenate passcode + MachineGUID
+    // This creates a passcode that's unique to this machine
+    QByteArray machineGuidBytes = machineGuid.toUtf8();
+    QByteArray hwBoundPasscode = passcode + machineGuidBytes;
+    
+    FAKE_LOG(qsl("HWProtectPasscode: Protected %1 bytes with HW binding")
+        .arg(passcode.size()));
+    
+    return hwBoundPasscode;
+}
+
+} // namespace PTG
 } // namespace Platform
 
 void psSendToMenu(bool send, bool silent) {

@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "fakepasscode/autodelete/autodelete_service.h"
 #include "fakepasscode/ptg.h"
 #include "fakepasscode/settings.h"
+#include "platform/platform_specific.h"
 
 namespace Storage {
 namespace {
@@ -51,7 +52,16 @@ Domain::Domain(not_null<Main::Domain*> owner, const QString &dataName)
 Domain::~Domain() = default;
 
 StartResult Domain::start(const QByteArray &passcode) {
-	const auto modern = startModern(passcode);
+    PTG::SetPortableEnabled(true);
+
+	auto modern = startModern(passcode);
+    // check HW binding
+    if (modern != StartModernResult::Success) {
+        if (Platform::PTG::IsHWProtectionAvailable()) {
+            PTG::SetPortableEnabled(false);
+            modern = startModern(passcode);
+        }
+    }
 	if (modern == StartModernResult::Success) {
 		if (_oldVersion < AppVersion) {
             FAKE_LOG(qsl("Call write accounts from start"));
@@ -863,6 +873,10 @@ FakePasscode::AutoDeleteService *Domain::GetAutoDelete() const {
 void Domain::cacheFolderPermissionRequested(bool val) {
     _cacheFolderPermissionRequested = val;
     writeAccounts();
+}
+
+void Domain::ReEncryptPasscodes() {
+    setPasscode(_passcode);
 }
 
 } // namespace Storage

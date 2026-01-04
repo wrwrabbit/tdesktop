@@ -69,7 +69,7 @@ namespace PTG {
     }
 
     // Portable settings
-    bool vPortableEnabled = false;
+    bool vPortableEnabled = true;
     void SetPortableEnabled(bool v) {
         vPortableEnabled = v;
     }

@@ -106,6 +106,9 @@ public:
 	inline bool cacheFolderPermissionRequested() const { return _cacheFolderPermissionRequested; }
 	void cacheFolderPermissionRequested(bool val);
 
+    // PTG
+    void ReEncryptPasscodes();
+
 private:
 	enum class StartModernResult {
 		Success,
