@@ -43,14 +43,12 @@ SummaryHeader::~SummaryHeader() = default;
 void SummaryHeader::update(not_null<Element*> view) {
 	const auto item = view->data();
 
-	using namespace Ui;
-	_animation = std::make_unique<Animation>(Animation{
-		.particles = StarParticles(
-			StarParticles::Type::Right,
-			15,
-			st::lineWidth * 8),
-	});
-	_animation->particles.setSpeed(0.05);
+	if (!_animation) {
+		ensureAnimation();
+	}
+	if (!_lottie) {
+		ensureLottie();
+	}
 
 	_text.setText(
 		st::defaultTextStyle,
@@ -63,14 +61,6 @@ void SummaryHeader::update(not_null<Element*> view) {
 	_maxWidth = st::historyReplyPadding.left()
 		+ st::maxSignatureSize / 2
 		+ st::historyReplyPadding.right();
-
-	_lottie = Lottie::MakeIcon(Lottie::IconDescriptor{
-		.name = u"cocoon"_q,
-		.sizeOverride = Size(st::historySummaryHeaderIconSize
-			- st::historySummaryHeaderIconSizeInner * 2),
-		.color = &st::attentionButtonFg,
-		.colorizeUsingAlpha = true,
-	});
 
 	const auto session = &item->history()->session();
 	const auto itemId = item->fullId();
@@ -140,7 +130,10 @@ void SummaryHeader::paint(
 		cache->bg = rippleColor;
 	}
 
-	if (_lottie) {
+	if (!_lottie) {
+		ensureLottie();
+	}
+	{
 		const auto r = iconRect().translated(x, y);
 		const auto lottieX = r.x() + st::historySummaryHeaderIconSizeInner;
 		const auto lottieY = r.y() + st::historySummaryHeaderIconSizeInner;
@@ -159,7 +152,10 @@ void SummaryHeader::paint(
 		}
 	}
 
-	if (_animation) {
+	if (!_animation) {
+		ensureAnimation();
+	}
+	{
 		const auto size = QSize(w, _height);
 		if (_animation->cachedSize != size) {
 			_animation->path = QPainterPath();
@@ -287,6 +283,7 @@ void SummaryHeader::stopLastRipple() {
 }
 
 void SummaryHeader::unloadHeavyPart() {
+	_unloadTime = crl::now();
 	_animation = nullptr;
 	_ripple.animation = nullptr;
 	_iconRipple.animation = nullptr;
@@ -297,6 +294,27 @@ QRect SummaryHeader::iconRect() const {
 	const auto size = st::historySummaryHeaderIconSize;
 	const auto shift = st::historySummaryHeaderIconSizeInner;
 	return QRect(_width - size - shift, (_height - size) / 2, size, size);
+}
+
+void SummaryHeader::ensureAnimation() const {
+	using namespace Ui;
+	_animation = std::make_unique<Animation>(Animation{
+		.particles = StarParticles(
+			StarParticles::Type::Right,
+			15,
+			st::lineWidth * 8),
+	});
+	_animation->particles.setSpeed(0.05);
+}
+
+void SummaryHeader::ensureLottie() const {
+	_lottie = Lottie::MakeIcon(Lottie::IconDescriptor{
+		.name = u"cocoon"_q,
+		.sizeOverride = Size(st::historySummaryHeaderIconSize
+			- st::historySummaryHeaderIconSizeInner * 2),
+		.color = &st::attentionButtonFg,
+		.colorizeUsingAlpha = true,
+	});
 }
 
 } // namespace HistoryView
