@@ -68,6 +68,8 @@ void SummaryHeader::update(not_null<Element*> view) {
 		.name = u"cocoon"_q,
 		.sizeOverride = Size(st::historySummaryHeaderIconSize
 			- st::historySummaryHeaderIconSizeInner * 2),
+		.color = &st::attentionButtonFg,
+		.colorizeUsingAlpha = true,
 	});
 
 	const auto session = &item->history()->session();
@@ -126,6 +128,9 @@ void SummaryHeader::paint(
 		: stm->replyCache[colorPattern].get();
 	const auto &quoteSt = st::messageQuoteStyle;
 	const auto rippleColor = cache->bg;
+	const auto nameColor = !inBubble
+		? st->msgImgReplyBarColor()->c
+		: stm->msgServiceFg->c;
 	if (!inBubble) {
 		cache->bg = QColor(0, 0, 0, 0);
 	}
@@ -139,7 +144,8 @@ void SummaryHeader::paint(
 		const auto r = iconRect().translated(x, y);
 		const auto lottieX = r.x() + st::historySummaryHeaderIconSizeInner;
 		const auto lottieY = r.y() + st::historySummaryHeaderIconSizeInner;
-		_lottie->paint(p, lottieX, lottieY);
+		const auto stm = context.messageStyle();
+		_lottie->paint(p, lottieX, lottieY, nameColor);
 		if (_iconRipple.animation) {
 			_iconRipple.animation->paint(
 				p,
@@ -165,9 +171,6 @@ void SummaryHeader::paint(
 		}
 		p.translate(x, y);
 		p.setClipPath(_animation->path);
-		const auto nameColor = !inBubble
-			? st->msgImgReplyBarColor()->c
-			: stm->msgServiceFg->c;
 		_animation->particles.setColor(nameColor);
 		const auto paused = context.paused || On(PowerSaving::kChatEffects);
 		_animation->particles.paint(
@@ -200,9 +203,7 @@ void SummaryHeader::paint(
 			- iconSpace;
 		const auto namew = textw;
 		if (namew > 0) {
-			p.setPen(!inBubble
-				? st->msgImgReplyBarColor()->c
-				: stm->msgServiceFg->c);
+			p.setPen(nameColor);
 			_name.drawLeftElided(
 				p,
 				x + st::historyReplyPadding.left(),
