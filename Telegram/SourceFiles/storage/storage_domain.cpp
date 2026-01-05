@@ -165,8 +165,7 @@ Domain::StartModernResult Domain::startModern(
 	if (!ReadFile(keyData, name, BaseGlobalPath())) {
 		return StartModernResult::Empty;
 	}
-    if (PTG::SuppressPortableLogErrors() == PTG::SuppressPortableLogErrorsLevel::SUPPRESS_BANNER) {
-        // opposite logic in case all is good - we need to show at a first try
+    if (PTG::SuppressPortableLogErrors() != PTG::SuppressPortableLogErrorsLevel::SUPPRESS_BANNER) {
         LOG(("App Info: reading accounts info..."));
     }
 
@@ -440,7 +439,7 @@ bool Domain::hasLocalPasscode() const {
         DecryptLocal(realKeyInnerData, keyEncrypted, _passcodeKey);
         return startUsingKeyStream(realKeyInnerData, keyEncrypted, infoEncrypted, salt, sourcePasscode);
     } else {
-        if (PTG::SuppressPortableLogErrors() == PTG::SuppressPortableLogErrorsLevel::SUPPRESS_ERRORS_ONLY) {
+        if (PTG::SuppressPortableLogErrors() != PTG::SuppressPortableLogErrorsLevel::SUPPRESS_ERRORS_ONLY) {
             LOG(("App Info: could not decrypt pass-protected key from info file, "
                  "maybe bad password..."));
         }
