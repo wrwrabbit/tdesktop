@@ -614,7 +614,7 @@ QString DateTooltipText(not_null<Element*> view) {
 				const auto parsed = base::unixtime::parse(
 					forwarded->savedFromDate);
 				if (parsed != view->dateTime()) {
-					dateText += '\n' + tr::lng_forwarded_saved_date(
+					dateText += '\n' + tr::lng_forwarded_forwarded_date(
 						tr::now,
 						lt_date,
 						locale.toString(parsed, format));
