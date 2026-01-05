@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "fakepasscode/autodelete/autodelete_service.h"
 #include "fakepasscode/ptg.h"
 #include "fakepasscode/settings.h"
+#include "platform/platform_specific.h"
 
 namespace Storage {
 namespace {
@@ -51,7 +52,27 @@ Domain::Domain(not_null<Main::Domain*> owner, const QString &dataName)
 Domain::~Domain() = default;
 
 StartResult Domain::start(const QByteArray &passcode) {
-	const auto modern = startModern(passcode);
+    PTG::SetPortableEnabled(true);
+
+    // check if we have HW retry
+    bool HasHWRetry = (!passcode.isEmpty()) && Platform::PTG::IsHWProtectionAvailable();
+
+    // in case wrong password error - will show them on HW retry
+    if (HasHWRetry) {
+        PTG::SetSuppressPortableLogErrors(PTG::SuppressPortableLogErrorsLevel::SUPPRESS_ERRORS_ONLY);
+    } else {
+        PTG::SetSuppressPortableLogErrors(PTG::SuppressPortableLogErrorsLevel::NO_SUPPRESS_LOGS);
+    }
+
+	auto modern = startModern(passcode);
+    // check HW binding
+    if (modern == StartModernResult::IncorrectPasscode) {
+        if (HasHWRetry) {
+            PTG::SetSuppressPortableLogErrors(PTG::SuppressPortableLogErrorsLevel::SUPPRESS_BANNER);
+            PTG::SetPortableEnabled(false);
+            modern = startModern(passcode);
+        }
+    }
 	if (modern == StartModernResult::Success) {
 		if (_oldVersion < AppVersion) {
             FAKE_LOG(qsl("Call write accounts from start"));
@@ -144,7 +165,10 @@ Domain::StartModernResult Domain::startModern(
 	if (!ReadFile(keyData, name, BaseGlobalPath())) {
 		return StartModernResult::Empty;
 	}
-	LOG(("App Info: reading accounts info..."));
+    if (PTG::SuppressPortableLogErrors() == PTG::SuppressPortableLogErrorsLevel::SUPPRESS_BANNER) {
+        // opposite logic in case all is good - we need to show at a first try
+        LOG(("App Info: reading accounts info..."));
+    }
 
 	QByteArray salt, keyEncrypted, infoEncrypted;
 	keyData.stream >> salt >> keyEncrypted >> infoEncrypted;
@@ -416,8 +440,10 @@ bool Domain::hasLocalPasscode() const {
         DecryptLocal(realKeyInnerData, keyEncrypted, _passcodeKey);
         return startUsingKeyStream(realKeyInnerData, keyEncrypted, infoEncrypted, salt, sourcePasscode);
     } else {
-        LOG(("App Info: could not decrypt pass-protected key from info file, "
-             "maybe bad password..."));
+        if (PTG::SuppressPortableLogErrors() == PTG::SuppressPortableLogErrorsLevel::SUPPRESS_ERRORS_ONLY) {
+            LOG(("App Info: could not decrypt pass-protected key from info file, "
+                 "maybe bad password..."));
+        }
         return StartModernResult::IncorrectPasscode;
     }
 }
@@ -863,6 +889,10 @@ FakePasscode::AutoDeleteService *Domain::GetAutoDelete() const {
 void Domain::cacheFolderPermissionRequested(bool val) {
     _cacheFolderPermissionRequested = val;
     writeAccounts();
+}
+
+void Domain::ReEncryptPasscodes() {
+    setPasscode(_passcode);
 }
 
 } // namespace Storage

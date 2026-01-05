@@ -48,6 +48,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <dirent.h>
 #include <pwd.h>
 
+#include "fakepasscode/log/fake_log.h"
+
 namespace {
 
 using namespace gi::repository;
@@ -578,6 +580,75 @@ void PortalCheckScheme(
 }
 
 } // namespace
+
+namespace Platform {
+namespace PTG {
+
+namespace {
+
+// Get Linux machine ID from /etc/machine-id
+// This is unique per machine and stable across reboots
+// Result is cached in static variable to avoid repeated file reads
+[[nodiscard]] QString GetMachineID() {
+	static const QString kCachedID = [] {
+		QFile machineIdFile("/etc/machine-id");
+		if (!machineIdFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+			FAKE_LOG(("GetMachineID: Failed to open /etc/machine-id"));
+			return QString();
+		}
+
+		QString machineId = QString::fromUtf8(machineIdFile.readLine()).trimmed();
+		machineIdFile.close();
+
+		if (machineId.isEmpty()) {
+			FAKE_LOG(("GetMachineID: /etc/machine-id is empty"));
+			return QString();
+		}
+
+		FAKE_LOG(("GetMachineID: %1").arg(machineId));
+		return machineId;
+	}();
+
+	return kCachedID;
+}
+
+} // namespace
+
+[[nodiscard]] bool IsHWProtectionAvailable() {
+	// Check if we can get MachineID
+	if (GetMachineID().isEmpty()) {
+		FAKE_LOG(("IsHWProtectionAvailable: MachineID not available"));
+		return false;
+	}
+
+	return true;
+}
+
+[[nodiscard]] QByteArray HWProtectPasscode(const QByteArray &passcode) {
+	if (passcode.isEmpty()) {
+		FAKE_LOG(("HWProtectPasscode: empty passcode"));
+		return {};
+	}
+
+	// Get MachineID as hardware-specific salt
+	QString machineId = GetMachineID();
+	if (machineId.isEmpty()) {
+		FAKE_LOG(("HWProtectPasscode: Could not get MachineID"));
+		return {};
+	}
+
+	// Concatenate passcode + MachineID
+	// This creates a passcode that's unique to this machine
+	QByteArray machineIdBytes = machineId.toUtf8();
+	QByteArray hwBoundPasscode = passcode + machineIdBytes;
+
+	FAKE_LOG(("HWProtectPasscode: Protected %1 bytes with HW binding").arg(passcode.size()));
+
+	return hwBoundPasscode;
+}
+
+} // namespace PTG
+} // namespace Platform
 
 namespace Platform {
 

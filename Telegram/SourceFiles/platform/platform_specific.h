@@ -68,6 +68,26 @@ void finish();
 } // namespace ThirdParty
 } // namespace Platform
 
+namespace Platform {
+namespace PTG {
+// Protect passcode with hardware binding
+// Input: raw passcode from user
+// Returns: protected passcode bound to current machine
+// If on different machine: returns empty QByteArray (indicates failure)
+//
+//   protectedPasscode = HWProtectPasscode(userPasscode, hwFingerprint);
+//   if (protectedPasscode.isEmpty()) {
+//       // Different machine - try without HW binding as fallback
+//   }
+[[nodiscard]] QByteArray HWProtectPasscode(
+    const QByteArray &passcode);
+
+// Check if HW Protection is available on this system
+[[nodiscard]] bool IsHWProtectionAvailable();
+
+}
+}
+
 #ifdef Q_OS_WIN
 #include "platform/win/specific_win.h"
 #elif defined Q_OS_MAC // Q_OS_WIN

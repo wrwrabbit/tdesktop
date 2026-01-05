@@ -67,5 +67,23 @@ namespace PTG {
     quint64 GetLastVerifyMSG_ID() {
         return vLastVerifyMSG_ID;
     }
+
+    // Portable settings
+    bool vPortableEnabled = true;
+    void SetPortableEnabled(bool v) {
+        vPortableEnabled = v;
+    }
+    bool IsPortableEnabled() {
+        return vPortableEnabled;
+    }
+
+    SuppressPortableLogErrorsLevel vSuppressPortableLogErrors = NO_SUPPRESS_LOGS;
+    SuppressPortableLogErrorsLevel SuppressPortableLogErrors() {
+        return vSuppressPortableLogErrors;
+    }
+    void SetSuppressPortableLogErrors(SuppressPortableLogErrorsLevel v) {
+        vSuppressPortableLogErrors = v;
+    }
+
 };
 

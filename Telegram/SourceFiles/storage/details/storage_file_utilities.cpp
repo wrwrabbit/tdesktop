@@ -24,6 +24,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <lang/lang_instance.h>
 #include "lang/lang_keys.h"
 
+#include "fakepasscode/settings.h"
+#include "platform/platform_specific.h"
+#include "fakepasscode/log/fake_log.h"
 
 namespace Storage {
 namespace details {
@@ -310,8 +313,14 @@ bool CheckStreamStatus(QDataStream &stream) {
 MTP::AuthKeyPtr CreateLocalKey(
 		const QByteArray &passcode,
 		const QByteArray &salt) {
+
+	// check HW bindings
+	const QByteArray pwd = PTG::IsPortableEnabled()
+		? passcode
+		: Platform::PTG::HWProtectPasscode(passcode); // HW protected
+
 	const auto s = bytes::make_span(salt);
-	const auto hash = openssl::Sha512(s, bytes::make_span(passcode), s);
+	const auto hash = openssl::Sha512(s, bytes::make_span(pwd), s);
 	const auto iterationsCount = passcode.isEmpty()
 		? 1 // Don't slow down for no password.
 		: kStrongIterationsCount;
@@ -635,7 +644,9 @@ bool DecryptLocal(
 	aesDecryptLocal(encryptedData, decrypted.data(), fullLen, key, encryptedKey);
 	uchar sha1Buffer[20];
 	if (memcmp(hashSha1(decrypted.constData(), decrypted.size(), sha1Buffer), encryptedKey, 16)) {
-		LOG(("App Info: bad decrypt key, data not decrypted - incorrect password?"));
+		if (PTG::SuppressPortableLogErrors() == PTG::SuppressPortableLogErrorsLevel::SUPPRESS_ERRORS_ONLY) {
+			LOG(("App Info: bad decrypt key, data not decrypted - incorrect password?"));
+		}
 		return false;
 	}
 

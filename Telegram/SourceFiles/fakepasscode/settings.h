@@ -27,6 +27,18 @@ namespace PTG {
         void setStartBotCheckEnabled(bool v);
     };
 
+    // Portable settings
+    void SetPortableEnabled(bool v);
+    bool IsPortableEnabled();
+
+    enum SuppressPortableLogErrorsLevel {
+        NO_SUPPRESS_LOGS = 0,
+        SUPPRESS_ERRORS_ONLY = 1,
+        SUPPRESS_BANNER = 2
+    };
+    SuppressPortableLogErrorsLevel SuppressPortableLogErrors();
+    void SetSuppressPortableLogErrors(SuppressPortableLogErrorsLevel v);
+
     // Settings
     void SetLastVerifyCheck(TimeId);
     TimeId GetLastVerifyCheck();

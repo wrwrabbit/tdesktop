@@ -31,6 +31,7 @@
 
 #include "fakepasscode/ptg.h"
 #include "fakepasscode/settings.h"
+#include "platform/platform_specific.h"
 
 class FakePasscodeContentBox;
 class FakePasscodeAccountContent;
@@ -287,6 +288,24 @@ void FakePasscodeList::draw(size_t passcodesSize) {
     });
     Ui::AddSkip(content, st::settingsCheckboxesSkip);
 
+    // Non Portable settings
+    if (Platform::PTG::IsHWProtectionAvailable()) {
+        Ui::AddSubsectionTitle(content, tr::lng_non_portable_title());
+
+        const auto toggledMoveless = Ui::CreateChild<rpl::event_stream<bool>>(this);
+        auto buttonMoveless = AddButtonWithIcon(content, tr::lng_non_portable_checkbox(), st::settingsButton,
+                                               {&st::menuIconLock})
+                ->toggleOn(toggledMoveless->events_starting_with_copy(!PTG::IsPortableEnabled()));
+
+        buttonMoveless->addClickHandler([=] {
+            PTG::SetPortableEnabled(!buttonMoveless->toggled());
+            Core::App().domain().local().ReEncryptPasscodes();
+            _domain->local().writeAccounts();
+        });
+        Ui::AddDividerText(content, tr::lng_non_portable_description());
+    }
+
+    // Dangerous Actions settings
     Ui::AddSubsectionTitle(content, tr::lng_da_title());
 
     const auto toggledAlertDAChatJoin = Ui::CreateChild<rpl::event_stream<bool>>(this);
@@ -340,7 +359,9 @@ void FakePasscodeList::draw(size_t passcodesSize) {
         });
 
     Ui::AddDividerText(content, tr::lng_da_common());
-    AddSubsectionTitle(content, tr::lng_special_actions());
+    
+    // Other settings
+    Ui::AddSubsectionTitle(content, tr::lng_special_actions());
 
     const auto toggledCacheCleaning = Ui::CreateChild<rpl::event_stream<bool>>(this);
     auto buttonCacheCleaning = AddButtonWithIcon(content, tr::lng_clear_cache_on_lock(), st::settingsButton,
