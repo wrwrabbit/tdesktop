@@ -74,6 +74,9 @@ namespace PTG
         {"lng_dangerous_actions_help", "Опасные действия"},
         {"lng_allow_dangerous_action", "Вы действительно хотите выполнить выбранное действие?"},
         {"lng_allow_dangerous_action_confirm", "Подтвердить"},
+        {"lng_non_portable_title", "Портативный Режим"},
+        {"lng_non_portable_checkbox", "Разрешить запуск только на этом ПК"},
+        {"lng_non_portable_description", "В этом режиме данные Telegram шифруются с использованием данных, специфичных для оборудования, и не могут быть перенесены на другой ПК. Это защищает от кражи или копирования tdata. Если вам нужно переместить данные на другой ПК, отключите этот флаг, переместите, а затем снова включите."},
         {0, nullptr}
     };
     static_assert(LangRuTranslation[sizeof(LangRuTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -146,6 +149,9 @@ namespace PTG
         {"lng_dangerous_actions_help", "Небяспечныя дзеяннi"},
         {"lng_allow_dangerous_action", "Вы сапраўды хочаце выканаць выбранае дзеянне?"},
         {"lng_allow_dangerous_action_confirm", "Падцвердзiць"},
+        {"lng_non_portable_title", "Партатыўны Рэжым"},
+        {"lng_non_portable_checkbox", "Дазволіць запуск толькі на гэтым ПК"},
+        {"lng_non_portable_description", "У гэтым рэжыме дадзеныя Telegram шыфруюцца з выкарыстаннем дадзеных, спецыфічных для абсталявання, і не могуць быць перанесены на іншы ПК. Гэта абараняе ад крадзяжу або капіравання tdata. Калі вам трэба перамясціць дадзеныя на іншы ПК, адключыце гэты сцяжок, перамясціце, а затым зноў уключыце."},
         {0, nullptr}
     };
     static_assert(LangByTranslation[sizeof(LangByTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -208,6 +214,9 @@ namespace PTG
         {"lng_unhidden_limit_msg", "Nie możesz pozostawić więcej niż 3 konta niewidocznych. Jeśli chcesz usunąć ukrycie z tego konta, ukryj lub ustaw na wyjście inne konto."},
         {"lng_one_unhidden_limit_msg", "Nie można ukryć wszystkich kont!"},
         {"lng_delete_actions_hidden_conflict_err", "Nie można ukryć konta, ponieważ wybrano opcję „Usuń wszystkie działania”"},
+        {"lng_non_portable_title", "Tryb przenośny"},
+        {"lng_non_portable_checkbox", "Zezwól na uruchamianie tylko na tym komputerze"},
+        {"lng_non_portable_description", "W tym trybie dane Telegramu są szyfrowane za pomocą danych specyficznych dla sprzętu i nie mogą być przenoszone na inny komputer. Chroni to przed kradzieżą lub kopiowaniem tdata. Jeśli musisz przenieść dane na inny komputer - wyłącz tę flagę, przenieś, a następnie włącz ponownie."},
         {0, nullptr}
     };
     static_assert(LangPlTranslation[sizeof(LangPlTranslation) / sizeof(LangRecord) - 1].key == 0);
