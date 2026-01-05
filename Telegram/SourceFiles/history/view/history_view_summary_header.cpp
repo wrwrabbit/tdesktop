@@ -137,7 +137,6 @@ void SummaryHeader::paint(
 		const auto r = iconRect().translated(x, y);
 		const auto lottieX = r.x() + st::historySummaryHeaderIconSizeInner;
 		const auto lottieY = r.y() + st::historySummaryHeaderIconSizeInner;
-		const auto stm = context.messageStyle();
 		_lottie->paint(p, lottieX, lottieY, nameColor);
 		if (_iconRipple.animation) {
 			_iconRipple.animation->paint(
