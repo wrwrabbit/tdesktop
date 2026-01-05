@@ -310,9 +310,9 @@ void SummaryHeader::ensureAnimation() const {
 void SummaryHeader::ensureLottie() const {
 	_lottie = Lottie::MakeIcon(Lottie::IconDescriptor{
 		.name = u"cocoon"_q,
+		.color = &st::attentionButtonFg,
 		.sizeOverride = Size(st::historySummaryHeaderIconSize
 			- st::historySummaryHeaderIconSizeInner * 2),
-		.color = &st::attentionButtonFg,
 		.colorizeUsingAlpha = true,
 	});
 }
