@@ -340,7 +340,7 @@ void CreateModerateMessagesBox(
 	if (ModerateCommonGroups.value() || session->supportMode()) {
 	ProccessCommonGroups(
 		items,
-		[=](CommonGroups groups) {
+		crl::guard(box, [=](CommonGroups groups) {
 			using namespace Ui;
 			const auto top = box->addTopButton(st::infoTopBarMenu);
 			auto &lifetime = top->lifetime();
@@ -362,7 +362,7 @@ void CreateModerateMessagesBox(
 				const auto point = QPoint(top->width(), top->height());
 				(*menu)->popup(top->mapToGlobal(point));
 			});
-		});
+		}));
 	}
 
 	using Request = Fn<void(not_null<PeerData*>, not_null<ChannelData*>)>;
