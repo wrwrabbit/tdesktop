@@ -95,7 +95,7 @@ TextItem::TextItem(
 	}, lifetime());
 
 	_label->resizeToWidth(parent->width() - added);
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 }
 
 not_null<QAction*> TextItem::action() const {

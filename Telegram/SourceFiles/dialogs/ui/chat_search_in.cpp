@@ -100,7 +100,7 @@ Action::Action(
 	_text.setText(st::semiboldTextStyle, label);
 	_icon->subscribeToUpdates([=] { update(); });
 
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 	resolveMinWidth();
 
 	paintRequest(

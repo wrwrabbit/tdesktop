@@ -214,7 +214,7 @@ Action::Action(
 	};
 
 	setAcceptBoth(true);
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 
 	std::move(
 		content
@@ -519,7 +519,7 @@ WhenAction::WhenAction(
 	const auto parent = parentMenu->menu();
 
 	setAcceptBoth(true);
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 
 	std::move(
 		content
@@ -735,7 +735,7 @@ WhoReactedEntryAction::WhoReactedEntryAction(
 , _height(st::defaultWhoRead.photoSkip * 2 + st::defaultWhoRead.photoSize) {
 	setAcceptBoth(true);
 
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 	setData(std::move(data));
 
 	paintRequest(

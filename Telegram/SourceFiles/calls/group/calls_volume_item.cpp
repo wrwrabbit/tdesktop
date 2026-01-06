@@ -65,7 +65,7 @@ MenuVolumeItem::MenuVolumeItem(
 	_localMuted ? 0. : (startVolume / float(maxVolume)),
 	Ui::Paint::ArcsAnimation::Direction::Right)) {
 
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 	enableMouseSelecting();
 	enableMouseSelecting(_slider.get());
 

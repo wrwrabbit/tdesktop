@@ -107,7 +107,7 @@ TwoTextAction::TwoTextAction(
 	+ _st.itemStyle.font->height
 	+ st::ttlItemTimerFont->height
 	+ st::ttlItemPadding.bottom()) {
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 	setClickedCallback(std::move(callback));
 
 	paintRequest(

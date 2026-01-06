@@ -69,7 +69,7 @@ Action::Action(
 	+ st::ttlItemTimerFont->height
 	+ st::ttlItemPadding.bottom()) {
 	setAcceptBoth(true);
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 	setClickedCallback([=] {
 		if (isEnabled()) {
 			callback(DownloadsAction::Open);

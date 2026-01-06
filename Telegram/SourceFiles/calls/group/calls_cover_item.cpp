@@ -32,7 +32,7 @@ CoverItem::CoverItem(
 , _st(st) {
 	setPointerCursor(false);
 
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 	enableMouseSelecting();
 	enableMouseSelecting(_cover.widget());
 
@@ -66,7 +66,7 @@ AboutItem::AboutItem(
 , _dummyAction(new QAction(parent)) {
 	setPointerCursor(false);
 
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 	enableMouseSelecting();
 	enableMouseSelecting(_text.get());
 

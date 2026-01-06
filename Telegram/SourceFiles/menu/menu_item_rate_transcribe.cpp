@@ -35,7 +35,7 @@ RateTranscribe::RateTranscribe(
 , _dummyAction(Ui::CreateChild<QAction>(this)) {
 	setAcceptBoth(true);
 
-	initResizeHook(popupMenu->menu()->sizeValue());
+	fitToMenuWidth();
 
 	enableMouseSelecting();
 

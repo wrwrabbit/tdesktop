@@ -78,7 +78,7 @@ Subsection::Subsection(
 , _dummyAction(Ui::CreateChild<QAction>(parent)) {
 	setPointerCursor(false);
 
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 
 	_text->resizeToWidth(st::callDeviceSelectionLabel.minWidth);
 	_text->moveToLeft(st.itemPadding.left(), st.itemPadding.top());
@@ -110,7 +110,7 @@ Selector::Selector(
 , _dummyAction(Ui::CreateChild<QAction>(parent)) {
 	setPointerCursor(false);
 
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 
 	const auto padding = st.itemPadding;
 	const auto group = std::make_shared<Ui::RadiobuttonGroup>();

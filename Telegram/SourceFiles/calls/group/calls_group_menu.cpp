@@ -128,7 +128,7 @@ JoinAsAction::JoinAsAction(
 	+ st::groupCallJoinAsPhotoSize
 	+ st::groupCallJoinAsPadding.bottom()) {
 	setAcceptBoth(true);
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 	setClickedCallback(std::move(callback));
 
 	paintRequest(
@@ -262,7 +262,7 @@ RecordingAction::RecordingAction(
 	}, lifetime());
 
 	setAcceptBoth(true);
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 	setClickedCallback(std::move(callback));
 
 	paintRequest(

@@ -92,7 +92,7 @@ ResolvePhoneAction::ResolvePhoneAction(
 , _height(rect::m::sum::v(st::groupCallJoinAsPadding)
 	+ st::groupCallJoinAsPhotoSize) {
 	setAcceptBoth(true);
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 	setClickedCallback([=] {
 		if (const auto peer = _peer.current()) {
 			controller->showPeerInfo(peer);

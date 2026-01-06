@@ -105,7 +105,7 @@ ResolveBankCardAction::ResolveBankCardAction(
 , _st(st)
 , _height(st::groupCallJoinAsPhotoSize) {
 	setAcceptBoth(true);
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 	setStatus(Status::Loading);
 }
 

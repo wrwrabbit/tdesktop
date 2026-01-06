@@ -95,7 +95,7 @@ SpeedSliderItem::SpeedSliderItem(
 	+ st.dropdown.menu.itemStyle.font->height
 	+ st.sliderPadding.bottom())
 , _debounceTimer([=] { _debounced.fire(current()); }) {
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 	enableMouseSelecting();
 	enableMouseSelecting(_slider.get());
 
