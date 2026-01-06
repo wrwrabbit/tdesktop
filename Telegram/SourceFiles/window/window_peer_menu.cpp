@@ -1712,7 +1712,8 @@ void Filler::addToggleFee() {
 			removeFee);
 	}, feeRemoved ? &st::menuIconEarn : &st::menuIconCancelFee);
 	_addAction({ .isSeparator = true });
-	_addAction({ .make = [=](not_null<Ui::RpWidget*> actionParent) {
+	_addAction({ .make = [=](not_null<Ui::PopupMenu*> menuParent) {
+		const auto actionParent = menuParent->menu();
 		auto helper = Ui::Text::CustomEmojiHelper();
 		const auto text = feeRemoved
 			? tr::lng_context_fee_free(
@@ -1731,7 +1732,7 @@ void Filler::addToggleFee() {
 					user->owner().commonStarsPerMessage(parent)
 				)),
 				tr::marked);
-		const auto action = new QAction(actionParent);
+		const auto action = Ui::CreateChild<QAction>(actionParent);
 		action->setDisabled(true);
 		auto result = base::make_unique_q<Ui::Menu::Action>(
 			actionParent,

@@ -14,7 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Calls {
 
 CoverItem::CoverItem(
-	not_null<RpWidget*> parent,
+	not_null<Ui::Menu::Menu*> parent,
 	const style::Menu &stMenu,
 	const style::ShortInfoCover &st,
 	rpl::producer<QString> name,
@@ -54,7 +54,7 @@ int CoverItem::contentHeight() const {
 }
 
 AboutItem::AboutItem(
-	not_null<RpWidget*> parent,
+	not_null<Ui::Menu::Menu*> parent,
 	const style::Menu &st,
 	TextWithEntities &&about)
 : Ui::Menu::ItemBase(parent, st)

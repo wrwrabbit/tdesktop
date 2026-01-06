@@ -41,7 +41,7 @@ constexpr auto kVolumeStickedValues
 } // namespace
 
 MenuVolumeItem::MenuVolumeItem(
-	not_null<RpWidget*> parent,
+	not_null<Ui::Menu::Menu*> parent,
 	const style::Menu &st,
 	const style::MediaSlider &stSlider,
 	rpl::producer<Group::ParticipantState> participantState,

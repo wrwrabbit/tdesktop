@@ -152,7 +152,7 @@ struct ResaleTabs {
 				not_null<const style::icon*> icon,
 				bool checked = false) {
 			auto action = base::make_unique_q<Ui::GiftResaleFilterAction>(
-				menu,
+				menu->menu(),
 				menu->st().menu,
 				TextWithEntities{ text },
 				Ui::Text::MarkedContext(),
@@ -176,7 +176,7 @@ struct ResaleTabs {
 				QString data,
 				bool checked) {
 			auto action = base::make_unique_q<Ui::GiftResaleFilterAction>(
-				menu,
+				menu->menu(),
 				menu->st().menu,
 				std::move(text),
 				context,

@@ -39,7 +39,7 @@ namespace {
 class ResolvePhoneAction final : public Ui::Menu::ItemBase {
 public:
 	ResolvePhoneAction(
-		not_null<Ui::RpWidget*> parent,
+		not_null<Ui::Menu::Menu*> parent,
 		const style::PopupMenu &st,
 		const QString &phone,
 		not_null<Window::SessionController*> controller);
@@ -80,12 +80,12 @@ private:
 };
 
 ResolvePhoneAction::ResolvePhoneAction(
-	not_null<Ui::RpWidget*> parent,
+	not_null<Ui::Menu::Menu*> parent,
 	const style::PopupMenu &st,
 	const QString &phone,
 	not_null<Window::SessionController*> controller)
 : ItemBase(parent, st.menu)
-, _dummyAction(new QAction(parent))
+, _dummyAction(Ui::CreateChild<QAction>(parent))
 , _st(st.menu)
 , _shadowPadding(rect::m::sum::h(st.shadow.extend))
 , _api(&controller->session().mtp())
@@ -336,7 +336,7 @@ void PhoneClickHandler::onClick(ClickContext context) const {
 	}, &st::menuIconCopy);
 
 	auto resolvePhoneAction = base::make_unique_q<ResolvePhoneAction>(
-		menu,
+		menu->menu(),
 		menu->st(),
 		phone,
 		controller);

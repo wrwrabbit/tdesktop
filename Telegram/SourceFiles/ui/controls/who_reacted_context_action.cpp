@@ -724,7 +724,7 @@ int WhenAction::contentHeight() const {
 } // namespace
 
 WhoReactedEntryAction::WhoReactedEntryAction(
-	not_null<RpWidget*> parent,
+	not_null<Ui::Menu::Menu*> parent,
 	CustomEmojiFactory customEmojiFactory,
 	const style::Menu &st,
 	Data &&data)

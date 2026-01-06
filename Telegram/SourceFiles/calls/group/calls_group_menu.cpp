@@ -36,7 +36,7 @@ namespace {
 class JoinAsAction final : public Ui::Menu::ItemBase {
 public:
 	JoinAsAction(
-		not_null<Ui::RpWidget*> parent,
+		not_null<Ui::Menu::Menu*> parent,
 		const style::Menu &st,
 		not_null<PeerData*> peer,
 		Fn<void()> callback);
@@ -72,7 +72,7 @@ private:
 class RecordingAction final : public Ui::Menu::ItemBase {
 public:
 	RecordingAction(
-		not_null<Ui::RpWidget*> parent,
+		not_null<Ui::Menu::Menu*> parent,
 		const style::Menu &st,
 		rpl::producer<QString> text,
 		rpl::producer<TimeId> startAtValues,
@@ -116,7 +116,7 @@ TextParseOptions MenuTextOptions = {
 };
 
 JoinAsAction::JoinAsAction(
-	not_null<Ui::RpWidget*> parent,
+	not_null<Ui::Menu::Menu*> parent,
 	const style::Menu &st,
 	not_null<PeerData*> peer,
 	Fn<void()> callback)
@@ -235,7 +235,7 @@ void JoinAsAction::handleKeyPress(not_null<QKeyEvent*> e) {
 }
 
 RecordingAction::RecordingAction(
-	not_null<Ui::RpWidget*> parent,
+	not_null<Ui::Menu::Menu*> parent,
 	const style::Menu &st,
 	rpl::producer<QString> text,
 	rpl::producer<TimeId> startAtValues,

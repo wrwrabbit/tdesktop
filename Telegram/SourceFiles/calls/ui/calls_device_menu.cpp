@@ -25,7 +25,7 @@ namespace {
 class Subsection final : public Ui::Menu::ItemBase {
 public:
 	Subsection(
-		not_null<RpWidget*> parent,
+		not_null<Ui::Menu::Menu*> parent,
 		const style::Menu &st,
 		const QString &text);
 
@@ -44,7 +44,7 @@ private:
 class Selector final : public Ui::Menu::ItemBase {
 public:
 	Selector(
-		not_null<RpWidget*> parent,
+		not_null<Ui::Menu::Menu*> parent,
 		const style::Menu &st,
 		rpl::producer<std::vector<Webrtc::DeviceInfo>> devices,
 		rpl::producer<Webrtc::DeviceResolvedId> chosen,
@@ -66,7 +66,7 @@ private:
 };
 
 Subsection::Subsection(
-	not_null<RpWidget*> parent,
+	not_null<Ui::Menu::Menu*> parent,
 	const style::Menu &st,
 	const QString &text)
 : Ui::Menu::ItemBase(parent, st)
@@ -75,7 +75,7 @@ Subsection::Subsection(
 	this,
 	text,
 	st::callDeviceSelectionLabel))
-, _dummyAction(new QAction(parent)) {
+, _dummyAction(Ui::CreateChild<QAction>(parent)) {
 	setPointerCursor(false);
 
 	initResizeHook(parent->sizeValue());
@@ -99,7 +99,7 @@ int Subsection::contentHeight() const {
 }
 
 Selector::Selector(
-	not_null<RpWidget*> parent,
+	not_null<Ui::Menu::Menu*> parent,
 	const style::Menu &st,
 	rpl::producer<std::vector<Webrtc::DeviceInfo>> devices,
 	rpl::producer<Webrtc::DeviceResolvedId> chosen,
@@ -107,7 +107,7 @@ Selector::Selector(
 : Ui::Menu::ItemBase(parent, st)
 , _scroll(base::make_unique_q<Ui::ScrollArea>(this))
 , _list(_scroll->setOwnedWidget(object_ptr<Ui::VerticalLayout>(this)))
-, _dummyAction(new QAction(parent)) {
+, _dummyAction(Ui::CreateChild<QAction>(parent)) {
 	setPointerCursor(false);
 
 	initResizeHook(parent->sizeValue());
@@ -214,10 +214,13 @@ void AddDeviceSelection(
 		Unexpected("Type in AddDeviceSelection.");
 	}();
 	menu->addAction(
-		base::make_unique_q<Subsection>(menu, menu->st().menu, title));
+		base::make_unique_q<Subsection>(
+			menu->menu(),
+			menu->st().menu,
+			title));
 	menu->addAction(
 		base::make_unique_q<Selector>(
-			menu,
+			menu->menu(),
 			menu->st().menu,
 			environment->devicesValue(type.type),
 			std::move(type.chosen),

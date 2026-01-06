@@ -23,7 +23,7 @@ namespace {
 class ActionWithTimer final : public Menu::ItemBase {
 public:
 	ActionWithTimer(
-		not_null<RpWidget*> parent,
+		not_null<Menu::Menu*> parent,
 		const style::Menu &st,
 		TimeId destroyAt,
 		Fn<void()> callback,
@@ -66,7 +66,7 @@ TextParseOptions MenuTextOptions = {
 };
 
 ActionWithTimer::ActionWithTimer(
-	not_null<RpWidget*> parent,
+	not_null<Menu::Menu*> parent,
 	const style::Menu &st,
 	TimeId destroyAt,
 	Fn<void()> callback,

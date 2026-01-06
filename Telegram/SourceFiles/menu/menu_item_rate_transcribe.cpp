@@ -28,14 +28,14 @@ constexpr auto kDuration = crl::time(5000);
 } // namespace
 
 RateTranscribe::RateTranscribe(
-	not_null<Ui::PopupMenu*> parent,
+	not_null<Ui::PopupMenu*> popupMenu,
 	const style::Menu &st,
 	Fn<void(bool)> rate)
-: Ui::Menu::ItemBase(parent, st)
+: Ui::Menu::ItemBase(popupMenu->menu(), st)
 , _dummyAction(Ui::CreateChild<QAction>(this)) {
 	setAcceptBoth(true);
 
-	initResizeHook(parent->sizeValue());
+	initResizeHook(popupMenu->menu()->sizeValue());
 
 	enableMouseSelecting();
 
@@ -53,8 +53,8 @@ RateTranscribe::RateTranscribe(
 	setMinWidth(
 		label->st().style.font->width(
 			tr::lng_context_rate_transcription(tr::now)));
-	widthValue() | rpl::on_next([=](int w) {
-		content->resizeToWidth(parentWidget()->width());
+	widthValue() | rpl::on_next([=, menu = popupMenu->menu()](int w) {
+		content->resizeToWidth(menu->width());
 	}, content->lifetime());
 	Ui::AddSkip(content);
 
@@ -96,7 +96,7 @@ RateTranscribe::RateTranscribe(
 	}
 	{
 		const auto showToast = [=,
-				weak = base::make_weak(parent->parentWidget())]{
+				weak = base::make_weak(popupMenu->parentWidget())]{
 			if (const auto strong = weak.get()) {
 				base::call_delayed(
 					st::universalDuration * 1.1,
@@ -110,7 +110,7 @@ RateTranscribe::RateTranscribe(
 					}));
 			}
 		};
-		const auto hideMenu = [=, weak = base::make_weak(parent)] {
+		const auto hideMenu = [=, weak = base::make_weak(popupMenu)] {
 			if (const auto strong = weak.get()) {
 				base::call_delayed(
 					st::universalDuration,
