@@ -64,7 +64,6 @@ private:
 
 	const not_null<QAction*> _dummyAction;
 	const style::Menu &_st;
-	const int _shadowPadding;
 	rpl::variable<PeerData*> _peer;
 	rpl::variable<bool> _loaded;
 	Ui::PeerUserpicView _userpicView;
@@ -87,7 +86,6 @@ ResolvePhoneAction::ResolvePhoneAction(
 : ItemBase(parent, st.menu)
 , _dummyAction(Ui::CreateChild<QAction>(parent))
 , _st(st.menu)
-, _shadowPadding(rect::m::sum::h(st.shadow.extend))
 , _api(&controller->session().mtp())
 , _height(rect::m::sum::v(st::groupCallJoinAsPadding)
 	+ st::groupCallJoinAsPhotoSize) {
@@ -186,9 +184,7 @@ void ResolvePhoneAction::paint(Painter &p) {
 			width());
 	} else {
 		p.setPen(selected ? _st.itemFgShortcutOver : _st.itemFgShortcut);
-		const auto w = width()
-			- rect::m::sum::h(padding)
-			- _shadowPadding;
+		const auto w = width() - rect::m::sum::h(padding);
 		_below.draw(p, Ui::Text::PaintContext{
 			.position = QPoint(
 				padding.left(),
