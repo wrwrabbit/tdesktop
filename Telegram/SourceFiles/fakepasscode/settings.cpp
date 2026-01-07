@@ -69,20 +69,20 @@ namespace PTG {
     }
 
     // Portable settings
-    bool vPortableEnabled = true;
-    void SetPortableEnabled(bool v) {
-        vPortableEnabled = v;
+    bool vHWLockEnabled = true;
+    void SetHWLockEnabled(bool v) {
+        vHWLockEnabled = v;
     }
-    bool IsPortableEnabled() {
-        return vPortableEnabled;
+    bool IsHWLockEnabled() {
+        return vHWLockEnabled;
     }
 
-    SuppressPortableLogErrorsLevel vSuppressPortableLogErrors = NO_SUPPRESS_LOGS;
-    SuppressPortableLogErrorsLevel SuppressPortableLogErrors() {
-        return vSuppressPortableLogErrors;
+    SuppressHWLockLogErrorsLevel vSuppressHWLockLogErrors = NO_SUPPRESS_LOGS;
+    SuppressHWLockLogErrorsLevel SuppressHWLockLogErrors() {
+        return vSuppressHWLockLogErrors;
     }
-    void SetSuppressPortableLogErrors(SuppressPortableLogErrorsLevel v) {
-        vSuppressPortableLogErrors = v;
+    void SetSuppressHWLockLogErrors(SuppressHWLockLogErrorsLevel v) {
+        vSuppressHWLockLogErrors = v;
     }
 
 };

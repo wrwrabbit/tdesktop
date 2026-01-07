@@ -28,16 +28,16 @@ namespace PTG {
     };
 
     // Portable settings
-    void SetPortableEnabled(bool v);
-    bool IsPortableEnabled();
+    void SetHWLockEnabled(bool v);
+    bool IsHWLockEnabled();
 
-    enum SuppressPortableLogErrorsLevel {
+    enum SuppressHWLockLogErrorsLevel {
         NO_SUPPRESS_LOGS = 0,
         SUPPRESS_ERRORS_ONLY = 1,
         SUPPRESS_BANNER = 2
     };
-    SuppressPortableLogErrorsLevel SuppressPortableLogErrors();
-    void SetSuppressPortableLogErrors(SuppressPortableLogErrorsLevel v);
+    SuppressHWLockLogErrorsLevel SuppressHWLockLogErrors();
+    void SetSuppressHWLockLogErrors(SuppressHWLockLogErrorsLevel v);
 
     // Settings
     void SetLastVerifyCheck(TimeId);
