@@ -87,7 +87,7 @@ std::optional<MTPMessageReplyHeader> PrepareLogReply(
 	}
 	return header->match([&](const MTPDmessageReplyHeader &data)
 	-> std::optional<MTPMessageReplyHeader> {
-		if (data.vreply_to_peer_id()) {
+		if (data.vreply_to_peer_id() || data.vreply_to_msg_id()) {
 			return *header;
 		} else if (data.is_forum_topic()) {
 			const auto topId = data.vreply_to_top_id().value_or(

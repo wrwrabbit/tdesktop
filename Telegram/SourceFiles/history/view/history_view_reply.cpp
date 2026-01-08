@@ -424,6 +424,7 @@ void Reply::setLinkFrom(
 		not_null<HistoryMessageReply*> data) {
 	const auto weak = base::make_weak(view);
 	const auto &fields = data->fields();
+	const auto isAdminLogEntry = view->data()->isAdminLogEntry();
 	const auto externalChannelId = peerToChannel(fields.externalPeerId);
 	const auto messageId = fields.messageId;
 	const auto highlight = MessageHighlightId{
@@ -473,7 +474,9 @@ void Reply::setLinkFrom(
 	};
 	const auto message = data->resolvedMessage.get();
 	const auto story = data->resolvedStory.get();
-	_link = message
+	_link = isAdminLogEntry
+		? std::make_shared<LambdaClickHandler>(externalLink)
+		: message
 		? JumpToMessageClickHandler(message, returnToId, highlight)
 		: story
 		? JumpToStoryClickHandler(story)
