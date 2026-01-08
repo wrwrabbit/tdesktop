@@ -1,3 +1,9 @@
+6.4.2 (08.01.25)
+
+- Fix non-closing popup menu items.
+- Fix crash in my profile section resize.
+- Fix some text glitches because of render optimizations.
+
 6.4.1 (05.01.25)
 
 - Fix context menu double activations.
