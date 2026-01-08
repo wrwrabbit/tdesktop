@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "lang/lang_keys.h"
+#include "lottie/lottie_icon.h"
 #include "main/main_session.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/controls/userpic_button.h"
@@ -40,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "ui/rect.h"
 #include "ui/rect_part.h"
+#include "ui/text/text_lottie_custom_emoji.h"
 #include "ui/text/text_utilities.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/checkbox.h"
@@ -516,43 +518,69 @@ void CreateModerateMessagesBox(
 					const auto &item) {
 				return item->from()->id;
 			}) | ranges::to_vector;
-			tr::lng_selected_delete_sure(
-				lt_count,
-				rpl::combine(
-					std::move(messagesCounts),
-					isSingle
-						? deleteAll->checkedValue()
-						: rpl::merge(
-							controller->toggleRequestsFromInner.events(),
-							controller->checkAllRequests.events())
-				) | rpl::map([=](const auto &map, bool c) {
-					const auto checked = (isSingle && !c)
-						? Participants()
-						: controller->collectRequests
-						? controller->collectRequests()
-						: Participants();
-					auto result = 0;
-					for (const auto &[peerId, count] : map) {
-						for (const auto &peer : checked) {
-							if (peer->id == peerId) {
-								result += count;
-								break;
-							}
+			const auto peer = items.front()->history()->peer;
+
+			rpl::combine(
+				std::move(messagesCounts),
+				isSingle
+					? deleteAll->checkedValue()
+					: rpl::merge(
+						controller->toggleRequestsFromInner.events(),
+						controller->checkAllRequests.events())
+			) | rpl::map([=](const auto &map, bool c) {
+				const auto checked = (isSingle && !c)
+					? Participants()
+					: controller->collectRequests
+					? controller->collectRequests()
+					: Participants();
+				auto result = 0;
+				for (const auto &[peerId, count] : map) {
+					for (const auto &peer : checked) {
+						if (peer->id == peerId) {
+							result += count;
+							break;
 						}
 					}
-					for (const auto &fromId : itemFromIds) {
-						for (const auto &peer : checked) {
-							if (peer->id == fromId) {
-								result--;
-								break;
-							}
+				}
+				for (const auto &fromId : itemFromIds) {
+					for (const auto &peer : checked) {
+						if (peer->id == fromId) {
+							result--;
+							break;
 						}
-						result++;
 					}
-					return float64(result);
-				})
-			) | rpl::on_next([=](const QString &text) {
-				title->setText(text);
+					result++;
+				}
+				return float64(result);
+			}) | rpl::on_next([=](int amount) {
+				auto text = tr::lng_selected_delete_sure(
+					tr::now,
+					lt_count,
+					float64(amount));
+				if (amount > 0) {
+					title->setText(std::move(text));
+				} else {
+					const auto zeroIndex = text.indexOf('0');
+					if (zeroIndex != -1) {
+						auto descriptor = Lottie::IconDescriptor{
+							.name = u"transcribe_loading"_q,
+							.color = &st::attentionButtonFg, // Any contrast.
+							.sizeOverride = Size(
+								st::historyTranscribeLoadingSize),
+							.colorizeUsingAlpha = true,
+						};
+						auto result = TextWithEntities()
+							.append(text.mid(0, zeroIndex))
+							.append(Ui::Text::LottieEmoji(descriptor))
+							.append(text.mid(zeroIndex + 1));
+						using namespace Ui::Text;
+						title->setMarkedText(
+							std::move(result),
+							LottieEmojiContext(std::move(descriptor)));
+					} else {
+						title->setText(std::move(text));
+					}
+				}
 				title->resizeToWidth(inner->width()
 					- rect::m::sum::h(st::boxRowPadding));
 			}, title->lifetime());
