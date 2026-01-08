@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/media/info_media_provider.h"
 
+#include "apiwrap.h"
 #include "info/media/info_media_widget.h"
 #include "info/media/info_media_list_section.h"
 #include "info/info_controller.h"
@@ -343,6 +344,43 @@ void Provider::setSearchQuery(QString query) {
 }
 
 void Provider::jumpToDate(const QDate &date, Fn<void(FullMsgId)> callback) {
+	_viewerLifetime.destroy();
+
+	const auto peer = _controller->session().data().peer(_peer->id);
+	const auto request = Api::PrepareSearchRequestByDate(
+		peer,
+		_topicRootId,
+		_monoforumPeerId,
+		_type,
+		date,
+		Data::LoadDirection::Around);
+
+	if (!request) {
+		return;
+	}
+
+	_controller->session().api().request(
+		std::move(*request)
+	).done([=](const Api::SearchRequestResult &result) {
+		const auto byDate = Api::ParseSearchResultByDate(
+			peer,
+			date,
+			Api::ParseSearchResult(
+				peer,
+				_type,
+				0,
+				Data::LoadDirection::Around,
+				result));
+
+		if (byDate.first) {
+			_universalAroundId = GetUniversalId(byDate.first.fullId);
+			if (callback) {
+				callback(byDate.closestToDate.fullId);
+			}
+			_idsLimit = kMinimalIdsLimit * 2;
+			refreshViewer();
+		}
+	}).send();
 }
 
 SparseIdsMergedSlice::Key Provider::sliceKey(

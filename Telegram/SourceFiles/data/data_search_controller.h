@@ -44,6 +44,11 @@ struct GlobalMediaResult {
 	int fullCount = 0;
 };
 
+struct SearchResultByDate {
+	Data::MessagePosition first;
+	Data::MessagePosition closestToDate;
+};
+
 [[nodiscard]] MTPMessagesFilter PrepareSearchFilter(
 	Storage::SharedMediaType type);
 
@@ -73,6 +78,19 @@ struct GlobalMediaResult {
 	MsgId messageId,
 	Data::LoadDirection direction,
 	const SearchRequestResult &data);
+
+[[nodiscard]] std::optional<SearchRequest> PrepareSearchRequestByDate(
+	not_null<PeerData*> peer,
+	MsgId topicRootId,
+	PeerId monoforumPeerId,
+	Storage::SharedMediaType type,
+	const QDate &date,
+	Data::LoadDirection direction);
+
+[[nodiscard]] SearchResultByDate ParseSearchResultByDate(
+	not_null<PeerData*> peer,
+	const QDate &date,
+	const SearchResult &parsed);
 
 [[nodiscard]] HistoryRequest PrepareHistoryRequest(
 	not_null<PeerData*> peer,

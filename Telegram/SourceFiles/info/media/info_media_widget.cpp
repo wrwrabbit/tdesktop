@@ -198,4 +198,8 @@ void Widget::restoreState(not_null<Memento*> memento) {
 	_inner->restoreState(memento);
 }
 
+void Widget::jumpToDate(const QDate &date, Fn<void(FullMsgId)> c) {
+	_inner->jumpToDate(date, std::move(c));
+}
+
 } // namespace Info::Media

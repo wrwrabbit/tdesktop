@@ -49,6 +49,8 @@ public:
 	rpl::producer<SelectedItems> selectedListValue() const;
 	void selectionAction(SelectionAction action);
 
+	void jumpToDate(const QDate &date, Fn<void(FullMsgId)> callback);
+
 	~InnerWidget();
 
 protected:

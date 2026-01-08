@@ -245,5 +245,9 @@ rpl::producer<Ui::ScrollToRequest> InnerWidget::scrollToRequests() const {
 	return _scrollToRequests.events();
 }
 
+void InnerWidget::jumpToDate(const QDate &date, Fn<void(FullMsgId)> c) {
+	_list->jumpToDate(date, std::move(c));
+}
+
 } // namespace Media
 } // namespace Info

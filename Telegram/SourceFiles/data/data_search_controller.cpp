@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_search_controller.h"
 
+#include "base/unixtime.h"
 #include "main/main_session.h"
 #include "data/data_session.h"
 #include "data/data_messages.h"
@@ -332,6 +333,79 @@ HistoryResult ParseHistoryResult(
 		messageId,
 		direction,
 		data);
+}
+
+std::optional<SearchRequest> PrepareSearchRequestByDate(
+		not_null<PeerData*> peer,
+		MsgId topicRootId,
+		PeerId monoforumPeerId,
+		Storage::SharedMediaType type,
+		const QDate &date,
+		Data::LoadDirection direction) {
+	const auto filter = PrepareSearchFilter(type);
+	const auto minDate = base::unixtime::serialize(
+		QDateTime(date, QTime(0, 0)));
+	const auto maxDate = base::unixtime::serialize(
+		QDateTime(date.addDays(1), QTime(0, 0))) - 1;
+	const auto limit = kSharedMediaLimit;
+	const auto offsetId = 0;
+	const auto addOffset = 0;
+	const auto hash = uint64(0);
+
+	using Flag = MTPmessages_Search::Flag;
+	return MTPmessages_Search(
+		MTP_flags((topicRootId ? Flag::f_top_msg_id : Flag(0))
+			| (monoforumPeerId ? Flag::f_saved_peer_id : Flag(0))),
+		peer->input(),
+		MTP_string(""),
+		MTP_inputPeerEmpty(),
+		(monoforumPeerId
+			? peer->owner().peer(monoforumPeerId)->input()
+			: MTPInputPeer()),
+		MTPVector<MTPReaction>(),
+		MTP_int(topicRootId),
+		filter,
+		MTP_int(minDate),
+		MTP_int(maxDate),
+		MTP_int(offsetId),
+		MTP_int(addOffset),
+		MTP_int(limit),
+		MTP_int(0),
+		MTP_int(0),
+		MTP_long(hash));
+}
+
+SearchResultByDate ParseSearchResultByDate(
+		not_null<PeerData*> peer,
+		const QDate &date,
+		const SearchResult &parsed) {
+	const auto targetDate = base::unixtime::serialize(
+		QDateTime(date, QTime(0, 0)));
+	auto result = SearchResultByDate();
+	if (parsed.messageIds.empty()) {
+		return result;
+	}
+	const auto firstMsgId = parsed.messageIds.front();
+	result.first = Data::MessagePosition{
+		.fullId = FullMsgId(peer->id, firstMsgId),
+		.date = TimeId(0),
+	};
+	auto closestMsgId = firstMsgId;
+	auto minDiff = std::numeric_limits<TimeId>::max();
+	for (const auto msgId : parsed.messageIds) {
+		if (const auto item = peer->owner().message(peer->id, msgId)) {
+			const auto diff = std::abs(item->date() - targetDate);
+			if (diff < minDiff) {
+				minDiff = diff;
+				closestMsgId = msgId;
+			}
+		}
+	}
+	result.closestToDate = Data::MessagePosition{
+		.fullId = FullMsgId(peer->id, closestMsgId),
+		.date = TimeId(0),
+	};
+	return result;
 }
 
 SearchController::CacheEntry::CacheEntry(
