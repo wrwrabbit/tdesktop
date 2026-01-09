@@ -332,7 +332,7 @@ void ChatSearchIn::showMenu() {
 			tab.icon,
 			TabLabel(value, _peerTabType),
 			(value == active));
-		action->setClickedCallback([=] {
+		action->setActionTriggered([=] {
 			_active = value;
 		});
 		_menu->addAction(std::move(action));

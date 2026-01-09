@@ -759,7 +759,7 @@ int WhoReactedEntryAction::contentHeight() const {
 }
 
 void WhoReactedEntryAction::setData(Data &&data) {
-	setClickedCallback(std::move(data.callback));
+	setActionTriggered(std::move(data.callback));
 	_userpic = std::move(data.userpic);
 	_text.setMarkedText(_st.itemStyle, { data.text }, MenuTextOptions);
 	if (data.date.isEmpty()) {

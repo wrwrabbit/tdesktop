@@ -159,7 +159,7 @@ struct ResaleTabs {
 				QString(),
 				icon);
 			action->setChecked(checked);
-			action->setClickedCallback(std::move(callback));
+			action->setActionTriggered(std::move(callback));
 			menu->addAction(std::move(action));
 		};
 		auto context = Core::TextContext({ .session = &show->session() });
@@ -183,7 +183,7 @@ struct ResaleTabs {
 				data,
 				nullptr);
 			action->setChecked(checked);
-			action->setClickedCallback(std::move(callback));
+			action->setActionTriggered(std::move(callback));
 			menu->addAction(std::move(action));
 		};
 		const auto actionWithDocument = [=](

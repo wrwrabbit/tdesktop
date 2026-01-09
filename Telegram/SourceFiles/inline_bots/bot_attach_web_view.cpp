@@ -666,7 +666,7 @@ BotAction::BotAction(
 		+ _st.itemPadding.bottom()) {
 	setAcceptBoth(false);
 	fitToMenuWidth();
-	setClickedCallback(std::move(callback));
+	setActionTriggered(std::move(callback));
 
 	_icon.move(_st.itemIconPosition);
 

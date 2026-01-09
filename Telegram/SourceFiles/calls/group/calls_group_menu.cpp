@@ -129,7 +129,7 @@ JoinAsAction::JoinAsAction(
 	+ st::groupCallJoinAsPadding.bottom()) {
 	setAcceptBoth(true);
 	fitToMenuWidth();
-	setClickedCallback(std::move(callback));
+	setActionTriggered(std::move(callback));
 
 	paintRequest(
 	) | rpl::on_next([=] {
@@ -263,7 +263,7 @@ RecordingAction::RecordingAction(
 
 	setAcceptBoth(true);
 	fitToMenuWidth();
-	setClickedCallback(std::move(callback));
+	setActionTriggered(std::move(callback));
 
 	paintRequest(
 	) | rpl::on_next([=] {

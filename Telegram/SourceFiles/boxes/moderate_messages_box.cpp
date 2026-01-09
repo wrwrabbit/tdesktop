@@ -202,7 +202,7 @@ void FillMenuModerateCommonGroups(
 			nullptr);
 		const auto state = item->lifetime().make_state<State>();
 		item->AbstractButton::setDisabled(true);
-		item->Ui::Menu::ItemBase::setClickedCallback([=, peerId = group->id] {
+		item->Ui::Menu::ItemBase::setActionTriggered([=, peerId = group->id] {
 			state->checkbox->setChecked(!state->checkbox->checked());
 			if (state->checkbox->checked()) {
 				resultList->insert(peerId);
@@ -252,7 +252,7 @@ void FillMenuModerateCommonGroups(
 			nullptr,
 			nullptr);
 		item->AbstractButton::setDisabled(true);
-		item->Ui::Menu::ItemBase::setClickedCallback([=] {
+		item->Ui::Menu::ItemBase::setActionTriggered([=] {
 			rememberCheckbox->setChecked(!rememberCheckbox->checked());
 		});
 		rememberCheckbox->setParent(item.get());
