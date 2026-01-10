@@ -207,7 +207,6 @@ Action::Action(
 , _height(st::defaultWhoRead.itemPadding.top()
 		+ _st.itemStyle.font->height
 		+ st::defaultWhoRead.itemPadding.bottom()) {
-	const auto parent = parentMenu->menu();
 	const auto delay = anim::Disabled() ? 0 : parentMenu->st().duration;
 	const auto checkAppeared = [=, now = crl::now()](bool force = false) {
 		_appeared = force || ((crl::now() - now) >= delay);
@@ -516,8 +515,6 @@ WhenAction::WhenAction(
 , _height(st::whenReadPadding.top()
 		+ st::whenReadStyle.font->height
 		+ st::whenReadPadding.bottom()) {
-	const auto parent = parentMenu->menu();
-
 	setAcceptBoth(true);
 	fitToMenuWidth();
 

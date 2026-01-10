@@ -95,8 +95,6 @@ Action::Action(
 , _height(st::dialogsSearchInHeight)
 , _icon(std::move(icon))
 , _checked(chosen) {
-	const auto parent = parentMenu->menu();
-
 	_text.setText(st::semiboldTextStyle, label);
 	_icon->subscribeToUpdates([=] { update(); });
 

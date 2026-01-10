@@ -202,7 +202,7 @@ void FillMenuModerateCommonGroups(
 			nullptr);
 		const auto state = item->lifetime().make_state<State>();
 		item->AbstractButton::setDisabled(true);
-		item->Ui::Menu::ItemBase::setActionTriggered([=, peerId = group->id] {
+		item->setActionTriggered([=, peerId = group->id] {
 			state->checkbox->setChecked(!state->checkbox->checked());
 			if (state->checkbox->checked()) {
 				resultList->insert(peerId);
@@ -252,7 +252,7 @@ void FillMenuModerateCommonGroups(
 			nullptr,
 			nullptr);
 		item->AbstractButton::setDisabled(true);
-		item->Ui::Menu::ItemBase::setActionTriggered([=] {
+		item->setActionTriggered([=] {
 			rememberCheckbox->setChecked(!rememberCheckbox->checked());
 		});
 		rememberCheckbox->setParent(item.get());
@@ -518,7 +518,6 @@ void CreateModerateMessagesBox(
 					const auto &item) {
 				return item->from()->id;
 			}) | ranges::to_vector;
-			const auto peer = items.front()->history()->peer;
 
 			rpl::combine(
 				std::move(messagesCounts),
