@@ -106,9 +106,6 @@ public:
 	inline bool cacheFolderPermissionRequested() const { return _cacheFolderPermissionRequested; }
 	void cacheFolderPermissionRequested(bool val);
 
-    // PTG
-    void ReEncryptPasscodes();
-
 private:
 	enum class StartModernResult {
 		Success,
@@ -148,7 +145,6 @@ private:
 	MTP::AuthKeyPtr _passcodeKey;
 	QByteArray _passcodeKeySalt;
 	QByteArray _passcodeKeyEncrypted;
-    QByteArray _passcode;
 
     std::vector<QByteArray> _fakePasscodeKeysEncrypted;
     std::deque<FakePasscode::FakePasscode> _fakePasscodes;

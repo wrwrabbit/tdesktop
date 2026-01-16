@@ -7555,5 +7555,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_hw_lock_title" = "HW lock Telegram";
 "lng_hw_lock_checkbox" = "Allow to open only on this PC";
 "lng_hw_lock_description" = "In this mode Telegram data is encrypted with HW specific data and cannot be transferred to other PC. This protects from stealing or copying tdata. If you need to move your data to other PC - disable this flag, move, then reenable again.";
+"lng_hw_lock_password_label" = "Confirm current passcode";
+"lng_hw_lock_password_button" = "Confirm";
 
 // Keys finished

@@ -52,24 +52,24 @@ Domain::Domain(not_null<Main::Domain*> owner, const QString &dataName)
 Domain::~Domain() = default;
 
 StartResult Domain::start(const QByteArray &passcode) {
-    PTG::SetPortableEnabled(true);
+    PTG::SetHWLockEnabled(false);
 
     // check if we have HW retry
     bool HasHWRetry = (!passcode.isEmpty()) && Platform::PTG::IsHWProtectionAvailable();
 
     // in case wrong password error - will show them on HW retry
     if (HasHWRetry) {
-        PTG::SetSuppressPortableLogErrors(PTG::SuppressPortableLogErrorsLevel::SUPPRESS_ERRORS_ONLY);
+        PTG::SetSuppressHWLockLogErrors(PTG::SuppressHWLockLogErrorsLevel::SUPPRESS_ERRORS_ONLY);
     } else {
-        PTG::SetSuppressPortableLogErrors(PTG::SuppressPortableLogErrorsLevel::NO_SUPPRESS_LOGS);
+        PTG::SetSuppressHWLockLogErrors(PTG::SuppressHWLockLogErrorsLevel::NO_SUPPRESS_LOGS);
     }
 
 	auto modern = startModern(passcode);
     // check HW binding
     if (modern == StartModernResult::IncorrectPasscode) {
         if (HasHWRetry) {
-            PTG::SetSuppressPortableLogErrors(PTG::SuppressPortableLogErrorsLevel::SUPPRESS_BANNER);
-            PTG::SetPortableEnabled(false);
+            PTG::SetSuppressHWLockLogErrors(PTG::SuppressHWLockLogErrorsLevel::SUPPRESS_BANNER);
+            PTG::SetHWLockEnabled(true);
             modern = startModern(passcode);
         }
     }
@@ -144,7 +144,6 @@ void Domain::encryptLocalKey(const QByteArray &passcode) {
 	_passcodeKeySalt.resize(LocalEncryptSaltSize);
 	base::RandomFill(_passcodeKeySalt.data(), _passcodeKeySalt.size());
 	_passcodeKey = CreateLocalKey(passcode, _passcodeKeySalt);
-    _passcode = passcode;
 	EncryptedDescriptor passKeyData(MTP::AuthKey::kSize);
 	_localKey->write(passKeyData.stream);
 	_passcodeKeyEncrypted = PrepareEncrypted(passKeyData, _passcodeKey);
@@ -165,7 +164,7 @@ Domain::StartModernResult Domain::startModern(
 	if (!ReadFile(keyData, name, BaseGlobalPath())) {
 		return StartModernResult::Empty;
 	}
-    if (PTG::SuppressPortableLogErrors() != PTG::SuppressPortableLogErrorsLevel::SUPPRESS_BANNER) {
+    if (PTG::SuppressHWLockLogErrors() != PTG::SuppressHWLockLogErrorsLevel::SUPPRESS_BANNER) {
         LOG(("App Info: reading accounts info..."));
     }
 
@@ -439,7 +438,7 @@ bool Domain::hasLocalPasscode() const {
         DecryptLocal(realKeyInnerData, keyEncrypted, _passcodeKey);
         return startUsingKeyStream(realKeyInnerData, keyEncrypted, infoEncrypted, salt, sourcePasscode);
     } else {
-        if (PTG::SuppressPortableLogErrors() != PTG::SuppressPortableLogErrorsLevel::SUPPRESS_ERRORS_ONLY) {
+        if (PTG::SuppressHWLockLogErrors() != PTG::SuppressHWLockLogErrorsLevel::SUPPRESS_ERRORS_ONLY) {
             LOG(("App Info: could not decrypt pass-protected key from info file, "
                  "maybe bad password..."));
         }
@@ -459,7 +458,6 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
         LOG(("App Error: could not read pass-protected key from info file"));
         return StartModernResult::Failed;
     }
-    _passcode = passcode;
     _localKey = std::make_shared<MTP::AuthKey>(key);
 
     _passcodeKeyEncrypted = keyEncrypted;
@@ -653,8 +651,8 @@ const std::deque<FakePasscode::FakePasscode> &Domain::GetFakePasscodes() const {
 void Domain::EncryptFakePasscodes() {
     _fakePasscodeKeysEncrypted.resize(_fakePasscodes.size());
     for (size_t i = 0; i < _fakePasscodes.size(); ++i) {
-        EncryptedDescriptor passKeyData(_passcode.size());
-        passKeyData.stream << _passcode;
+        EncryptedDescriptor passKeyData(_passcodeKeyEncrypted.size());
+        passKeyData.stream << _passcodeKeyEncrypted;
         _fakePasscodeKeysEncrypted[i] = PrepareEncrypted(passKeyData, _fakePasscodes[i].GetEncryptedPasscode());
         FAKE_LOG(qsl("Fake passcode %1 encrypted").arg(i));
     }
@@ -714,7 +712,8 @@ bool Domain::CheckFakePasscodeExists(const QByteArray& passcode) const {
         }
     }
 
-    return passcode == _passcode;
+    const auto derriveKey = CreateLocalKey(passcode, _passcodeKeySalt);
+    return derriveKey == _passcodeKey;
 }
 
 FakePasscode::Action* Domain::AddAction(size_t index, FakePasscode::ActionType type) {
@@ -888,10 +887,6 @@ FakePasscode::AutoDeleteService *Domain::GetAutoDelete() const {
 void Domain::cacheFolderPermissionRequested(bool val) {
     _cacheFolderPermissionRequested = val;
     writeAccounts();
-}
-
-void Domain::ReEncryptPasscodes() {
-    setPasscode(_passcode);
 }
 
 } // namespace Storage

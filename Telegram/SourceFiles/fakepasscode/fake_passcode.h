@@ -63,6 +63,8 @@ namespace FakePasscode {
       void OnEvent(ActionEvent);
 
    protected:
+      // Need plain-text passcode 
+      // to reencrpyt when salt or master password changes
       rpl::variable<QByteArray> fake_passcode_;
       base::flat_map<ActionType, std::shared_ptr<Action>> actions_;
       QString name_;

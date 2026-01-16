@@ -9,6 +9,7 @@
 #include "fakepasscode/log/fake_log.h"
 #include "fakepasscode/ui/action_ui.h"
 #include "fakepasscode/ui/fakepasscode_box.h"
+#include "fakepasscode/ui/fakepasscode_hwlock_box.h"
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
@@ -295,12 +296,12 @@ void FakePasscodeList::draw(size_t passcodesSize) {
         const auto toggledHWLock = Ui::CreateChild<rpl::event_stream<bool>>(this);
         auto buttonHWLock = AddButtonWithIcon(content, tr::lng_hw_lock_checkbox(), st::settingsButton,
                                                {&st::menuIconLock})
-                ->toggleOn(toggledHWLock->events_starting_with_copy(PTG::IsHWLockEnabled()));
+                ->toggleOn(toggledHWLock->events_starting_with_copy(PTG::IsHWLockEnabled()), true);
 
         buttonHWLock->addClickHandler([=] {
-            PTG::SetHWLockEnabled(buttonHWLock->toggled());
-            Core::App().domain().local().setPasscode("haha");
-            _domain->local().writeAccounts();
+            _controller->show(Box<FakePasscodeHWLockBox>(_controller,
+                                                         toggledHWLock),
+                            Ui::LayerOption::KeepOther);
         });
         Ui::AddDividerText(content, tr::lng_hw_lock_description());
     }
