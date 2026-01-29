@@ -26,7 +26,7 @@ namespace FakePasscode {
 
       void Execute();
 
-      [[nodiscard]] MTP::AuthKeyPtr GetEncryptedPasscode() const;
+      [[nodiscard]] MTP::AuthKeyPtr GetFakePasscodeKey() const;
       void ReEncryptPasscode();
       [[nodiscard]] QByteArray GetPasscode() const;
       void SetPasscode(QByteArray passcode);
@@ -69,12 +69,12 @@ namespace FakePasscode {
       base::flat_map<ActionType, std::shared_ptr<Action>> actions_;
       QString name_;
       
-      mutable MTP::AuthKeyPtr encrypted_passcode_;
+      mutable MTP::AuthKeyPtr fake_passcode_key_;
 
       rpl::event_stream<> state_changed_;
 	  rpl::lifetime lifetime_;
 
-	  static MTP::AuthKeyPtr EncryptPasscode(const QByteArray& passcode);
+	  static MTP::AuthKeyPtr GetFakePasscodeKey(const QByteArray& passcode);
 
       void SetEncryptedChangeOnPasscode();
   };

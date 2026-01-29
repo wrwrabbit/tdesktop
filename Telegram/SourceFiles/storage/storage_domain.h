@@ -131,7 +131,7 @@ private:
             const QByteArray& keyEncrypted,
             const QByteArray& infoEncrypted,
             const QByteArray& salt,
-            const QByteArray& passcode);
+            bool hasPasscode);
 
     void EncryptFakePasscodes();
     void PrepareEncryptedFakePasscodes();

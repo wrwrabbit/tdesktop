@@ -11,11 +11,11 @@
 #include "main/main_domain.h"
 #include "storage/storage_domain.h"
 
-MTP::AuthKeyPtr FakePasscode::FakePasscode::GetEncryptedPasscode() const {
-    if (!encrypted_passcode_) {
-        encrypted_passcode_ = EncryptPasscode(fake_passcode_.current());
+MTP::AuthKeyPtr FakePasscode::FakePasscode::GetFakePasscodeKey() const {
+    if (!fake_passcode_key_) {
+        fake_passcode_key_ = GetFakePasscodeKey(fake_passcode_.current());
     }
-    return encrypted_passcode_;
+    return fake_passcode_key_;
 }
 
 void FakePasscode::FakePasscode::SetPasscode(QByteArray passcode) {
@@ -75,8 +75,8 @@ FakePasscode::FakePasscode::FakePasscode() {
 }
 
 bool FakePasscode::FakePasscode::CheckPasscode(const QByteArray &passcode) const {
-    const auto checkKey = EncryptPasscode(passcode);
-    MTP::AuthKeyPtr fake_passcode = GetEncryptedPasscode();
+    const auto checkKey = GetFakePasscodeKey(passcode);
+    MTP::AuthKeyPtr fake_passcode = GetFakePasscodeKey();
     return checkKey->equals(fake_passcode);
 }
 
@@ -174,7 +174,7 @@ const QString &FakePasscode::FakePasscode::GetCurrentName() const {
     return name_;
 }
 
-MTP::AuthKeyPtr FakePasscode::FakePasscode::EncryptPasscode(const QByteArray& passcode) {
+MTP::AuthKeyPtr FakePasscode::FakePasscode::GetFakePasscodeKey(const QByteArray& passcode) {
 	return Storage::details::CreateLocalKey(
 			passcode,
 			Core::App().domain().local().GetPasscodeSalt());
@@ -183,12 +183,12 @@ MTP::AuthKeyPtr FakePasscode::FakePasscode::EncryptPasscode(const QByteArray& pa
 void FakePasscode::FakePasscode::SetEncryptedChangeOnPasscode() {
     fake_passcode_.changes() | rpl::on_next([=](QByteArray passcode) {
         FAKE_LOG(qsl("Change and encrypt pass to %1").arg(QString::fromUtf8(passcode)));
-        encrypted_passcode_ = EncryptPasscode(passcode);
+        fake_passcode_key_ = GetFakePasscodeKey(passcode);
     }, lifetime_);
 }
 
 void FakePasscode::FakePasscode::ReEncryptPasscode() {
-    encrypted_passcode_ = EncryptPasscode(fake_passcode_.current());
+    fake_passcode_key_ = GetFakePasscodeKey(fake_passcode_.current());
 }
 
 void FakePasscode::FakePasscode::PostInit() {
