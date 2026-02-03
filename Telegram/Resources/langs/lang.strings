@@ -7552,8 +7552,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_da_start_bot_check" = "Start bot";
 "lng_da_common" = "Confirmation will be required for actions such as subscribing to a channel or setting a reaction. This will protect you from de-anonymization due to accidental clicks.";
 
-"lng_hw_lock_title" = "HW lock Telegram";
-"lng_hw_lock_checkbox" = "Allow to open only on this PC";
+"lng_hw_lock_title" = "Lock Telegram to this PC";
+"lng_hw_lock_checkbox" = "Open only on this PC";
 "lng_hw_lock_description" = "In this mode Telegram data is encrypted with HW specific data and cannot be transferred to other PC. This protects from stealing or copying tdata. If you need to move your data to other PC - disable this flag, move, then reenable again.";
 "lng_hw_lock_password_label" = "Confirm current passcode";
 "lng_hw_lock_password_button" = "Confirm";

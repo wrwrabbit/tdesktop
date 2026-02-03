@@ -74,9 +74,11 @@ namespace PTG
         {"lng_dangerous_actions_help", "Опасные действия"},
         {"lng_allow_dangerous_action", "Вы действительно хотите выполнить выбранное действие?"},
         {"lng_allow_dangerous_action_confirm", "Подтвердить"},
-        {"lng_hw_lock_title", "Привязать к ПК"},
-        {"lng_hw_lock_checkbox", "Разрешить запуск только на этом ПК"},
+        {"lng_hw_lock_title", "Привязка Telegram к ПК"},
+        {"lng_hw_lock_checkbox", "Запуск только на этом ПК"},
         {"lng_hw_lock_description", "В этом режиме данные Telegram шифруются с использованием данных, специфичных для оборудования, и не могут быть перенесены на другой ПК. Это защищает от кражи или копирования tdata. Если вам нужно переместить данные на другой ПК, отключите этот флаг, переместите, а затем снова включите."},
+        {"lng_hw_lock_password_label", "Подтвердите текущий пароль"},
+        {"lng_hw_lock_password_button", "Подтвердить"},
         {0, nullptr}
     };
     static_assert(LangRuTranslation[sizeof(LangRuTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -149,9 +151,11 @@ namespace PTG
         {"lng_dangerous_actions_help", "Небяспечныя дзеяннi"},
         {"lng_allow_dangerous_action", "Вы сапраўды хочаце выканаць выбранае дзеянне?"},
         {"lng_allow_dangerous_action_confirm", "Падцвердзiць"},
-        {"lng_hw_lock_title", "Прывязаць да ПК"},
-        {"lng_hw_lock_checkbox", "Дазволіць запуск толькі на гэтым ПК"},
+        {"lng_hw_lock_title", "Прывязаць Telegram да ПК"},
+        {"lng_hw_lock_checkbox", "Запуск толькі на гэтым ПК"},
         {"lng_hw_lock_description", "У гэтым рэжыме дадзеныя Telegram шыфруюцца з выкарыстаннем дадзеных, спецыфічных для абсталявання, і не могуць быць перанесены на іншы ПК. Гэта абараняе ад крадзяжу або капіравання tdata. Калі вам трэба перамясціць дадзеныя на іншы ПК, адключыце гэты сцяжок, перамясціце, а затым зноў уключыце."},
+        {"lng_hw_lock_password_label", "Падцвердзіце бягучы пароль"},
+        {"lng_hw_lock_password_button", "Падцвердзіць"},
         {0, nullptr}
     };
     static_assert(LangByTranslation[sizeof(LangByTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -214,9 +218,11 @@ namespace PTG
         {"lng_unhidden_limit_msg", "Nie możesz pozostawić więcej niż 3 konta niewidocznych. Jeśli chcesz usunąć ukrycie z tego konta, ukryj lub ustaw na wyjście inne konto."},
         {"lng_one_unhidden_limit_msg", "Nie można ukryć wszystkich kont!"},
         {"lng_delete_actions_hidden_conflict_err", "Nie można ukryć konta, ponieważ wybrano opcję „Usuń wszystkie działania”"},
-        {"lng_hw_lock_title", "Przypiąć do komputera"},
-        {"lng_hw_lock_checkbox", "Zezwól na uruchamianie tylko na tym komputerze"},
+        {"lng_hw_lock_title", "Przypiąć Telegrama do komputera"},
+        {"lng_hw_lock_checkbox", "Uruchomienie tylko na tym PC"},
         {"lng_hw_lock_description", "W tym trybie dane Telegramu są szyfrowane za pomocą danych specyficznych dla sprzętu i nie mogą być przenoszone na inny komputer. Chroni to przed kradzieżą lub kopiowaniem tdata. Jeśli musisz przenieść dane na inny komputer - wyłącz tę flagę, przenieś, a następnie włącz ponownie."},
+        {"lng_hw_lock_password_label", "Potwierdź bieżące hasło"},
+        {"lng_hw_lock_password_button", "Potwierdź"},
         {0, nullptr}
     };
     static_assert(LangPlTranslation[sizeof(LangPlTranslation) / sizeof(LangRecord) - 1].key == 0);
