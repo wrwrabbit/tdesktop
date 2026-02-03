@@ -429,7 +429,7 @@ bool Domain::hasLocalPasscode() const {
         if (keyInnerData.data.size() < sizeof(MTP::AuthKey::Data)) {
             QByteArray fullPasscode;
             keyInnerData.stream >> fullPasscode;
-            _passcodeKey = CreateLocalKey(fullPasscode, _passcodeKeySalt);
+            _passcodeKey = CreateLocalKey(fullPasscode, salt);
         } else {
             auto sourcePasscodeKey = Serialize::read<MTP::AuthKey::Data>(keyInnerData.stream);
             _passcodeKey = std::make_shared<MTP::AuthKey>(sourcePasscodeKey);
