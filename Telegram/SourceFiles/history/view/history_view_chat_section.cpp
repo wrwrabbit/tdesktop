@@ -1462,9 +1462,29 @@ void ChatWidget::send(Api::SendOptions options) {
 			return;
 		}
 	}
+
+	// Check PTG DA
+	if (!options.ptg_DA_confirmed 
+		&& PTG::DASettings::isPostCommentCheckEnabled()) {
+		const auto withDAApproved = [=]() {
+			auto copy = options;
+			copy.ptg_DA_confirmed = 1;
+			send(copy);
+		};
+		controller()->show(Ui::MakeConfirmBox({
+				.text = tr::lng_allow_dangerous_action(),
+				.confirmed = [withDAApproved = withDAApproved](Fn<void()>&& close) mutable {
+					withDAApproved();
+					close();
+				},
+				.confirmText = tr::lng_allow_dangerous_action_confirm(),
+			}), Ui::LayerOption::CloseOther);
+		return;
+	}
+
+
 	const auto nextLocalMessageId = session().data().nextLocalMessageId();
 
-	// TODO: Create a lambda with next sendMessage
 	if (const auto field = _composeControls->fieldForMention(); field
 		&& HasSendText(field)
 		&& message.webPage.url.isEmpty()
@@ -1477,19 +1497,7 @@ void ChatWidget::send(Api::SendOptions options) {
 		});
 	}
 
-	if (!PTG::DASettings::isPostCommentCheckEnabled()) {
-		session().api().sendMessage(std::move(message), nextLocalMessageId);
-	}
-	else {
-		controller()->show(Ui::MakeConfirmBox({
-				.text = tr::lng_allow_dangerous_action(),
-				.confirmed = [&, message=message](Fn<void()>&& close) mutable { 
-					session().api().sendMessage(std::move(message), nextLocalMessageId);
-					close(); 
-				},
-				.confirmText = tr::lng_allow_dangerous_action_confirm(),
-			}), Ui::LayerOption::CloseOther);
-	}
+	session().api().sendMessage(std::move(message), nextLocalMessageId);
 
 	_composeControls->clear();
 	if (_repliesRootId) {

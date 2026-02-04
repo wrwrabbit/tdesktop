@@ -797,6 +797,8 @@ PRIVATE
     fakepasscode/ui/fakepasscodes_list.cpp
     fakepasscode/ui/fakepasscode_box.h
     fakepasscode/ui/fakepasscode_box.cpp
+    fakepasscode/ui/fakepasscode_hwlock_box.h
+    fakepasscode/ui/fakepasscode_hwlock_box.cpp
     fakepasscode/ui/command_ui.cpp
     fakepasscode/ui/clear_proxy_ui.cpp
     fakepasscode/ui/delete_actions_ui.cpp

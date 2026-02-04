@@ -315,9 +315,9 @@ MTP::AuthKeyPtr CreateLocalKey(
 		const QByteArray &salt) {
 
 	// check HW bindings
-	const QByteArray pwd = PTG::IsPortableEnabled()
-		? passcode
-		: Platform::PTG::HWProtectPasscode(passcode); // HW protected
+	const QByteArray pwd = PTG::IsHWLockEnabled()
+		? Platform::PTG::HWProtectPasscode(passcode) // HW Locked
+		: passcode;
 
 	const auto s = bytes::make_span(salt);
 	const auto hash = openssl::Sha512(s, bytes::make_span(pwd), s);
@@ -644,7 +644,7 @@ bool DecryptLocal(
 	aesDecryptLocal(encryptedData, decrypted.data(), fullLen, key, encryptedKey);
 	uchar sha1Buffer[20];
 	if (memcmp(hashSha1(decrypted.constData(), decrypted.size(), sha1Buffer), encryptedKey, 16)) {
-		if (PTG::SuppressPortableLogErrors() != PTG::SuppressPortableLogErrorsLevel::SUPPRESS_ERRORS_ONLY) {
+		if (PTG::SuppressHWLockLogErrors() != PTG::SuppressHWLockLogErrorsLevel::SUPPRESS_ERRORS_ONLY) {
 			LOG(("App Info: bad decrypt key, data not decrypted - incorrect password?"));
 		}
 		return false;

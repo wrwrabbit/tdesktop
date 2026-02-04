@@ -108,6 +108,11 @@ int psFixPrevious() {
 	return 0;
 }
 
+// compatibility macro for 10.13 targeting
+#ifndef kIOMainPortDefault
+#define kIOMainPortDefault kIOMasterPortDefault
+#endif
+
 namespace Platform {
 namespace PTG {
 

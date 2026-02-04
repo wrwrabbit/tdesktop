@@ -9,6 +9,7 @@
 #include "fakepasscode/log/fake_log.h"
 #include "fakepasscode/ui/action_ui.h"
 #include "fakepasscode/ui/fakepasscode_box.h"
+#include "fakepasscode/ui/fakepasscode_hwlock_box.h"
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
@@ -290,19 +291,19 @@ void FakePasscodeList::draw(size_t passcodesSize) {
 
     // Non Portable settings
     if (Platform::PTG::IsHWProtectionAvailable()) {
-        Ui::AddSubsectionTitle(content, tr::lng_non_portable_title());
+        Ui::AddSubsectionTitle(content, tr::lng_hw_lock_title());
 
-        const auto toggledMoveless = Ui::CreateChild<rpl::event_stream<bool>>(this);
-        auto buttonMoveless = AddButtonWithIcon(content, tr::lng_non_portable_checkbox(), st::settingsButton,
+        const auto toggledHWLock = Ui::CreateChild<rpl::event_stream<bool>>(this);
+        auto buttonHWLock = AddButtonWithIcon(content, tr::lng_hw_lock_checkbox(), st::settingsButton,
                                                {&st::menuIconLock})
-                ->toggleOn(toggledMoveless->events_starting_with_copy(!PTG::IsPortableEnabled()));
+                ->toggleOn(toggledHWLock->events_starting_with_copy(PTG::IsHWLockEnabled()), true);
 
-        buttonMoveless->addClickHandler([=] {
-            PTG::SetPortableEnabled(!buttonMoveless->toggled());
-            Core::App().domain().local().ReEncryptPasscodes();
-            _domain->local().writeAccounts();
+        buttonHWLock->addClickHandler([=] {
+            _controller->show(Box<FakePasscodeHWLockBox>(_controller,
+                                                         toggledHWLock),
+                            Ui::LayerOption::KeepOther);
         });
-        Ui::AddDividerText(content, tr::lng_non_portable_description());
+        Ui::AddDividerText(content, tr::lng_hw_lock_description());
     }
 
     // Dangerous Actions settings
