@@ -1713,8 +1713,8 @@ void PeerData::processTopics(const MTPVector<MTPForumTopic> &topics) {
 }
 
 bool PeerData::allowsForwarding() const {
-	if (isUser()) {
-		return true;
+	if (const auto user = asUser()) {
+		return user->allowsForwarding();
 	} else if (const auto channel = asChannel()) {
 		return channel->allowsForwarding();
 	} else if (const auto chat = asChat()) {

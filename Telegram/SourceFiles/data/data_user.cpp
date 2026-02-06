@@ -646,6 +646,18 @@ bool UserData::readDatesPrivate() const {
 	return (flags() & UserDataFlag::ReadDatesPrivate);
 }
 
+bool UserData::allowsForwarding() const {
+	return !(flags() & Flag::NoForwardsMyEnabled)
+		&& !(flags() & Flag::NoForwardsPeerEnabled);
+}
+
+void UserData::setNoForwardsFlags(bool myEnabled, bool peerEnabled) {
+	const auto mask = Flag::NoForwardsMyEnabled | Flag::NoForwardsPeerEnabled;
+	setFlags((flags() & ~mask)
+		| (myEnabled ? Flag::NoForwardsMyEnabled : Flag())
+		| (peerEnabled ? Flag::NoForwardsPeerEnabled : Flag()));
+}
+
 int UserData::starsPerMessage() const {
 	return _starsPerMessage;
 }
@@ -1035,6 +1047,10 @@ void ApplyUserUpdate(not_null<UserData*> user, const MTPDuserFull &update) {
 	} else {
 		user->setNote(TextWithEntities());
 	}
+
+	user->setNoForwardsFlags(
+		update.is_noforwards_my_enabled(),
+		update.is_noforwards_peer_enabled());
 
 	user->fullUpdated();
 }

@@ -504,40 +504,65 @@ Main::Session &HistoryInner::session() const {
 void HistoryInner::setupSharingDisallowed() {
 	Expects(_peer != nullptr);
 
-	if (_peer->isUser()) {
-		_sharingDisallowed = false;
-		return;
+	if (const auto user = _peer->asUser()) {
+		_sharingDisallowed = rpl::combine(
+			Data::PeerFlagValue(user, UserDataFlag::NoForwardsMyEnabled),
+			Data::PeerFlagValue(user, UserDataFlag::NoForwardsPeerEnabled)
+		) | rpl::map([](bool my, bool peer) {
+			return my || peer;
+		});
+	} else {
+		const auto chat = _peer->asChat();
+		const auto channel = _peer->asChannel();
+		_sharingDisallowed = chat
+			? Data::PeerFlagValue(chat, ChatDataFlag::NoForwards)
+			: Data::PeerFlagValue(
+				channel,
+				ChannelDataFlag::NoForwards
+			) | rpl::type_erased;
 	}
-	const auto chat = _peer->asChat();
-	const auto channel = _peer->asChannel();
-	_sharingDisallowed = chat
-		? Data::PeerFlagValue(chat, ChatDataFlag::NoForwards)
-		: Data::PeerFlagValue(
-			channel,
-			ChannelDataFlag::NoForwards
-		) | rpl::type_erased;
 
-	auto rights = chat
-		? chat->adminRightsValue()
-		: channel->adminRightsValue();
-	auto canDelete = std::move(
-		rights
-	) | rpl::map([=] {
-		return chat
-			? chat->canDeleteMessages()
-			: channel->canDeleteMessages();
-	});
-	rpl::combine(
-		_sharingDisallowed.value(),
-		std::move(canDelete)
-	) | rpl::filter([=](bool disallowed, bool canDelete) {
-		return hasSelectRestriction() && !getSelectedItems().empty();
-	}) | rpl::on_next([=] {
-		_widget->clearSelected();
-		if (_mouseAction == MouseAction::PrepareSelect) {
-			mouseActionCancel();
+	const auto clearIfRestricted = [=] {
+		if (hasSelectRestriction() && !getSelectedItems().empty()) {
+			_widget->clearSelected();
+			if (_mouseAction == MouseAction::PrepareSelect) {
+				mouseActionCancel();
+			}
 		}
-	}, lifetime());
+	};
+
+	if (const auto chat = _peer->asChat()) {
+		auto rights = chat->adminRightsValue();
+		auto canDelete = std::move(
+			rights
+		) | rpl::map([=] {
+			return chat->canDeleteMessages();
+		});
+		rpl::combine(
+			_sharingDisallowed.value(),
+			std::move(canDelete)
+		) | rpl::on_next([=] {
+			clearIfRestricted();
+		}, lifetime());
+	} else if (const auto channel = _peer->asChannel()) {
+		auto rights = channel->adminRightsValue();
+		auto canDelete = std::move(
+			rights
+		) | rpl::map([=] {
+			return channel->canDeleteMessages();
+		});
+		rpl::combine(
+			_sharingDisallowed.value(),
+			std::move(canDelete)
+		) | rpl::on_next([=] {
+			clearIfRestricted();
+		}, lifetime());
+	} else {
+		_sharingDisallowed.value(
+		) | rpl::on_next([=] {
+			clearIfRestricted();
+		}, lifetime());
+	}
 }
 
 void HistoryInner::setupSwipeReplyAndBack() {
@@ -3322,6 +3347,8 @@ bool HistoryInner::showCopyRestriction(HistoryItem *item) {
 	}
 	_controller->showToast(_peer->isBroadcast()
 		? tr::lng_error_nocopy_channel(tr::now)
+		: _peer->isUser()
+		? tr::lng_error_nocopy_user(tr::now)
 		: tr::lng_error_nocopy_group(tr::now));
 	return true;
 }
@@ -3332,6 +3359,8 @@ bool HistoryInner::showCopyMediaRestriction(not_null<HistoryItem*> item) {
 	}
 	_controller->showToast(_peer->isBroadcast()
 		? tr::lng_error_nocopy_channel(tr::now)
+		: _peer->isUser()
+		? tr::lng_error_nocopy_user(tr::now)
 		: tr::lng_error_nocopy_group(tr::now));
 	return true;
 }

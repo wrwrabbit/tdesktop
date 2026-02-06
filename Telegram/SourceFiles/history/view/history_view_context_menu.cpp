@@ -2061,6 +2061,8 @@ void AddSelectRestrictionAction(
 			? tr::lng_context_noforwards_info_channel
 			: (peer->isUser() && peer->asUser()->isBot())
 			? tr::lng_context_noforwards_info_bot
+			: peer->isUser()
+			? tr::lng_context_noforwards_info_user
 			: tr::lng_context_noforwards_info_channel)(
 			tr::now,
 			tr::rich),

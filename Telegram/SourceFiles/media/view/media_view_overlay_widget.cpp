@@ -1164,6 +1164,8 @@ bool OverlayWidget::showCopyMediaRestriction(bool skipPRemiumCheck) {
 	} else if (_history) {
 		uiShow()->showToast(_history->peer->isBroadcast()
 			? tr::lng_error_nocopy_channel(tr::now)
+			: _history->peer->isUser()
+			? tr::lng_error_nocopy_user(tr::now)
 			: tr::lng_error_nocopy_group(tr::now));
 	}
 	return true;

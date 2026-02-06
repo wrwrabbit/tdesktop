@@ -71,6 +71,7 @@ enum class CopyRestrictionType : char {
 	None,
 	Group,
 	Channel,
+	User,
 };
 
 struct SelectedItem {

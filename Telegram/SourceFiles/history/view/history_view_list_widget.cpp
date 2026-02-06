@@ -1617,6 +1617,8 @@ bool ListWidget::showCopyRestriction(HistoryItem *item) {
 	}
 	_delegate->listUiShow()->showToast((type == CopyRestrictionType::Channel)
 		? tr::lng_error_nocopy_channel(tr::now)
+		: (type == CopyRestrictionType::User)
+		? tr::lng_error_nocopy_user(tr::now)
 		: tr::lng_error_nocopy_group(tr::now));
 	return true;
 }
@@ -1628,6 +1630,8 @@ bool ListWidget::showCopyMediaRestriction(not_null<HistoryItem*> item) {
 	}
 	_delegate->listUiShow()->showToast((type == CopyRestrictionType::Channel)
 		? tr::lng_error_nocopy_channel(tr::now)
+		: (type == CopyRestrictionType::User)
+		? tr::lng_error_nocopy_user(tr::now)
 		: tr::lng_error_nocopy_group(tr::now));
 	return true;
 }
@@ -4508,6 +4512,8 @@ CopyRestrictionType CopyRestrictionTypeFor(
 		HistoryItem *item) {
 	return (peer->allowsForwarding() && (!item || !item->forbidsForward()))
 		? CopyRestrictionType::None
+		: peer->isUser()
+		? CopyRestrictionType::User
 		: peer->isBroadcast()
 		? CopyRestrictionType::Channel
 		: CopyRestrictionType::Group;
@@ -4522,6 +4528,8 @@ CopyRestrictionType CopyMediaRestrictionTypeFor(
 	}
 	return !item->forbidsSaving()
 		? CopyRestrictionType::None
+		: peer->isUser()
+		? CopyRestrictionType::User
 		: peer->isBroadcast()
 		? CopyRestrictionType::Channel
 		: CopyRestrictionType::Group;
@@ -4538,7 +4546,7 @@ CopyRestrictionType SelectRestrictionTypeFor(
 			? CopyRestrictionType::None
 			: CopyRestrictionTypeFor(peer);
 	}
-	return CopyRestrictionType::None;
+	return CopyRestrictionTypeFor(peer);
 }
 
 } // namespace HistoryView

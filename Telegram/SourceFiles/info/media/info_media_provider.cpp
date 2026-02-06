@@ -91,8 +91,13 @@ bool Provider::hasSelectRestriction() {
 }
 
 rpl::producer<bool> Provider::hasSelectRestrictionChanges() {
-	if (_peer->isUser()) {
-		return rpl::never<bool>();
+	if (const auto user = _peer->asUser()) {
+		return rpl::combine(
+			Data::PeerFlagValue(user, UserDataFlag::NoForwardsMyEnabled),
+			Data::PeerFlagValue(user, UserDataFlag::NoForwardsPeerEnabled)
+		) | rpl::map([=] {
+			return hasSelectRestriction();
+		}) | rpl::distinct_until_changed() | rpl::skip(1);
 	}
 	const auto chat = _peer->asChat();
 	const auto channel = _peer->asChannel();

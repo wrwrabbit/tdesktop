@@ -2685,6 +2685,18 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 		const auto &data = update.c_updateEmojiGameInfo();
 		_session->diceStickersPacks().apply(data);
 	} break;
+
+	case mtpc_updatePeerHistoryNoForwards: {
+		const auto &d = update.c_updatePeerHistoryNoForwards();
+		const auto peerId = peerFromMTP(d.vpeer());
+		if (const auto peer = session().data().peerLoaded(peerId)) {
+			if (const auto user = peer->asUser()) {
+				user->setNoForwardsFlags(
+					d.is_my_enabled(),
+					d.is_peer_enabled());
+			}
+		}
+	} break;
 	}
 }
 

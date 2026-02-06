@@ -524,6 +524,8 @@ void ApiWrap::sendMessageFail(
 	} else if (show && error == u"CHAT_FORWARDS_RESTRICTED"_q) {
 		show->showToast(peer->isBroadcast()
 			? tr::lng_error_noforwards_channel(tr::now)
+			: peer->isUser()
+			? tr::lng_error_noforwards_user(tr::now)
 			: tr::lng_error_noforwards_group(tr::now), kJoinErrorDuration);
 	} else if (error == u"PREMIUM_ACCOUNT_REQUIRED"_q) {
 		Settings::ShowPremium(&session(), "premium_stickers");
