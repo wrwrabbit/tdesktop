@@ -1655,6 +1655,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_leave_next_owner_box_title_group" = "Leave Group?";
 "lng_leave_next_owner_box_about" = "If you leave, **{user}** will become the new owner of **{chat}** in **1 week**.";
 "lng_leave_next_owner_box_about_admin" = "If you leave, **{user}** will become the new admin of **{chat}** in **1 week**.";
+"lng_leave_next_owner_box_about_legacy" = "If you leave, **{user}** will immediately become the new owner of **{chat}**.";
+"lng_leave_next_owner_box_about_admin_legacy" = "If you leave, **{user}** will immediately become the new admin of **{chat}**.";
 "lng_select_next_owner_box" = "Appoint Another Owner";
 "lng_select_next_owner_box_admin" = "Appoint Another Admin";
 "lng_select_next_owner_box_title" = "Appoint New Owner";

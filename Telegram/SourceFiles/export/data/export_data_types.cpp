@@ -303,7 +303,8 @@ std::vector<TextPart> ParseText(
 				return Type::Blockquote; },
 			[](const MTPDmessageEntityBankCard&) { return Type::BankCard; },
 			[](const MTPDmessageEntitySpoiler&) { return Type::Spoiler; },
-			[](const MTPDmessageEntityCustomEmoji&) { return Type::CustomEmoji; });
+			[](const MTPDmessageEntityCustomEmoji&) { return Type::CustomEmoji; },
+			[](const MTPDmessageEntityFormattedDate&) { return Type::Unknown; });
 		part.text = mid(start, length);
 		part.additional = entity.match(
 		[](const MTPDmessageEntityPre &data) {

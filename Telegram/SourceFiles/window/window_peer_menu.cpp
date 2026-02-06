@@ -3656,20 +3656,27 @@ Fn<void()> ClearHistoryHandler(
 Fn<void()> DeleteAndLeaveHandler(
 		not_null<Window::SessionController*> controller,
 		not_null<PeerData*> peer) {
-	if (const auto channel = peer->asChannel();
-			channel && channel->amCreator()) {
+	const auto isCreator = [&] {
+		if (const auto channel = peer->asChannel()) {
+			return channel->amCreator();
+		} else if (const auto chat = peer->asChat()) {
+			return chat->amCreator();
+		}
+		return false;
+	}();
+	if (isCreator) {
 		const auto requestId = std::make_shared<mtpRequestId>(0);
 		return [=] {
 			if (controller->showFrozenError() || (*requestId > 0)) {
 				return;
 			}
 			*requestId = peer->session().api().request(
-				MTPchannels_GetFutureCreatorAfterLeave(
-					channel->inputChannel()
+				MTPmessages_GetFutureChatCreatorAfterLeave(
+					peer->input()
 			)).done([=](const MTPUser &result) {
 				*requestId = 0;
 				const auto user = peer->owner().processUser(result);
-				controller->show(Box(SelectFutureOwnerbox, channel, user));
+				controller->show(Box(SelectFutureOwnerbox, peer, user));
 			}).fail([=](const MTP::Error &error) {
 				*requestId = 0;
 				controller->show(Box(DeleteChatBox, peer));
