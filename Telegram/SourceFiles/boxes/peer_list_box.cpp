@@ -185,10 +185,7 @@ void PeerListBox::prepare() {
 		object_ptr<PeerListContent>(
 			this,
 			_controller.get()),
-		st::boxScroll,
-		0,
-		0,
-		true /*alwaysKeepDimensionsToInner*/));
+		st::boxScroll));
 	content()->resizeToWidth(_controller->contentWidth());
 
 	_controller->setDelegate(this);
@@ -212,6 +209,15 @@ void PeerListBox::prepare() {
 
 	if (_init) {
 		_init(this);
+	}
+
+	{
+		setDimensions(
+			_controller->contentWidth(),
+			std::clamp(
+				content()->height(),
+				st::boxMaxListHeight,
+				st::boxMaxListHeight * 3));
 	}
 }
 

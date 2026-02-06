@@ -99,8 +99,7 @@ protected:
 			p.drawImage(
 				width()
 					- size.width()
-					- st::menuWithIcons.itemPadding.right()
-					- st::popupMenuWithIcons.shadow.extend.right(),
+					- st::menuWithIcons.itemPadding.right(),
 				(height() - size.height()) / 2,
 				_icon);
 		}
@@ -286,7 +285,7 @@ void FillChooseFilterMenu(
 		const auto contains = filter.contains(history);
 		const auto title = filter.title();
 		auto item = base::make_unique_q<FilterAction>(
-			menu.get(),
+			menu->menu(),
 			menu->st().menu,
 			Ui::Menu::CreateAction(
 				menu.get(),
