@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/cached_round_corners.h"
 #include "ui/layers/generic_box.h"
 #include "ui/dynamic_image.h"
+#include "ui/image/image_prepare.h"
 #include "lang/lang_keys.h"
 #include "base/flat_map.h"
 #include "styles/style_boxes.h"
@@ -825,18 +826,34 @@ void CalendarBox::Inner::paintRows(QPainter &p, QRect clip) {
 			const auto innerLeft = x + innerSkipLeft;
 			const auto innerTop = y + innerSkipTop;
 			const auto date = _context->dateFromIndex(index);
-			if (const auto it = _dynamicImageStates.find(date); it != end(_dynamicImageStates)) {
+			auto dynamicImageProgress = -1.;
+			if (const auto it = _dynamicImageStates.find(date);
+					it != end(_dynamicImageStates)) {
 				const auto &state = it->second;
 				if (state.image) {
-					const auto image = state.image->image(_st.cellInner);
+					auto image = state.image->image(_st.cellInner);
 					if (!image.isNull()) {
+						const auto opacity = grayedOut ? 0.5 : 1.;
 						const auto alpha = state.animating()
 							? state.animation.current()
 							: 1.;
+						dynamicImageProgress = alpha;
 						if (alpha > 0.) {
 							auto hq = PainterHighQualityEnabler(p);
-							p.setOpacity(alpha);
-							p.drawImage(myrtlrect(innerLeft, innerTop, _st.cellInner, _st.cellInner), image);
+							p.setOpacity(alpha * opacity);
+							const auto imgRect = myrtlrect(
+								innerLeft,
+								innerTop,
+								_st.cellInner,
+								_st.cellInner);
+							p.drawImage(
+								imgRect,
+								Images::Circle(std::move(image)));
+							p.setOpacity(1. * opacity);
+							p.setPen(Qt::NoPen);
+							p.setBrush(st::songCoverOverlayFg);
+							p.drawEllipse(imgRect);
+							p.setBrush(Qt::NoBrush);
 							p.setOpacity(1.);
 						}
 					}
@@ -851,7 +868,9 @@ void CalendarBox::Inner::paintRows(QPainter &p, QRect clip) {
 			}
 			const auto it = _ripples.find(index);
 			if (it != _ripples.cend() && !selectionMode) {
-				const auto colorOverride = (!highlighted
+				const auto colorOverride = ((dynamicImageProgress != -1)
+					? st::shadowFg
+					: !highlighted
 					? _styleColors.rippleColor
 					: grayedOut
 					? _styleColors.rippleGrayedOutColor
@@ -872,6 +891,15 @@ void CalendarBox::Inner::paintRows(QPainter &p, QRect clip) {
 					? _styleColors.dayTextGrayedOutColor
 					: _styleColors.dayTextColor)
 				: st::windowSubTextFg);
+			if (dynamicImageProgress != -1) {
+				auto pen = p.pen();
+				pen.setColor(
+					anim::color(
+						pen.color(),
+						st::activeButtonFg->c,
+						dynamicImageProgress));
+				p.setPen(std::move(pen));
+			}
 			p.drawText(rect, _context->labelFromIndex(index), style::al_center);
 		}
 	}
