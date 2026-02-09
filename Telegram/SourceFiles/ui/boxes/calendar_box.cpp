@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/scroll_area.h"
 #include "ui/widgets/vertical_drum_picker.h"
 #include "ui/effects/ripple_animation.h"
+#include "ui/effects/animations.h"
 #include "ui/chat/chat_style.h"
 #include "ui/ui_utility.h"
 #include "ui/painter.h"
@@ -556,9 +557,21 @@ private:
 	bool _twoPressSelectionStarted = false;
 	Fn<void(QDate, CalendarImageSetter)> _dynamicImageForDate;
 
+	struct DynamicImageState {
+		std::shared_ptr<DynamicImage> image;
+		bool requested = false;
+		bool animationFinished = false;
+		anim::value animation;
+		crl::time animationStart = 0;
+
+		[[nodiscard]] bool animating() const {
+			return animationStart > 0;
+		}
+	};
+
 	std::map<int, std::unique_ptr<RippleAnimation>> _ripples;
-	base::flat_map<QDate, std::shared_ptr<DynamicImage>> _dynamicImages;
-	base::flat_set<QDate> _dynamicImagesRequested;
+	base::flat_map<QDate, DynamicImageState> _dynamicImageStates;
+	Ui::Animations::Basic _animation;
 
 	Fn<void(QDate)> _dateChosenCallback;
 
@@ -654,7 +667,30 @@ CalendarBox::Inner::Inner(
 , _st(st)
 , _styleColors(styleColors)
 , _context(context)
-, _dynamicImageForDate(std::move(dynamicImageForDate)) {
+, _dynamicImageForDate(std::move(dynamicImageForDate))
+, _animation([=](crl::time now) {
+	auto animating = false;
+	for (auto &[date, state] : _dynamicImageStates) {
+		if (!state.animating()) {
+			continue;
+		}
+		const auto dt = std::clamp(
+			(now - state.animationStart) / float64(st::fadeWrapDuration),
+			0.,
+			1.);
+		state.animation.update(dt, anim::linear);
+		if (dt >= 1.) {
+			state.animationStart = 0;
+			state.animationFinished = true;
+		} else {
+			animating = true;
+		}
+	}
+	if (animating) {
+		update();
+	}
+	return animating;
+}) {
 	setMouseTracking(true);
 
 	context->monthValue(
@@ -671,7 +707,9 @@ CalendarBox::Inner::Inner(
 void CalendarBox::Inner::monthChanged(QDate month) {
 	setSelected(kEmptySelection);
 	_ripples.clear();
-	_dynamicImagesRequested.clear();
+	for (auto &[date, state] : _dynamicImageStates) {
+		state.requested = false;
+	}
 	loadDynamicImages();
 	resizeToCurrent();
 	update();
@@ -696,11 +734,11 @@ void CalendarBox::Inner::loadDynamicImages() {
 		if (matchesMonth(date, currentMonth)
 			|| matchesMonth(date, prevMonth)
 			|| matchesMonth(date, nextMonth)) {
-			if (_dynamicImages.contains(date)
-				|| _dynamicImagesRequested.contains(date)) {
+			auto &state = _dynamicImageStates[date];
+			if (state.image || state.requested) {
 				continue;
 			}
-			_dynamicImagesRequested.emplace(date);
+			state.requested = true;
 			_dynamicImageForDate(
 				date,
 				[=](QDate imageDate, std::shared_ptr<DynamicImage> image) {
@@ -787,11 +825,21 @@ void CalendarBox::Inner::paintRows(QPainter &p, QRect clip) {
 			const auto innerLeft = x + innerSkipLeft;
 			const auto innerTop = y + innerSkipTop;
 			const auto date = _context->dateFromIndex(index);
-			if (const auto it = _dynamicImages.find(date); it != end(_dynamicImages)) {
-				const auto image = it->second->image(_st.cellInner);
-				if (!image.isNull()) {
-					auto hq = PainterHighQualityEnabler(p);
-					p.drawImage(myrtlrect(innerLeft, innerTop, _st.cellInner, _st.cellInner), image);
+			if (const auto it = _dynamicImageStates.find(date); it != end(_dynamicImageStates)) {
+				const auto &state = it->second;
+				if (state.image) {
+					const auto image = state.image->image(_st.cellInner);
+					if (!image.isNull()) {
+						const auto alpha = state.animating()
+							? state.animation.current()
+							: 1.;
+						if (alpha > 0.) {
+							auto hq = PainterHighQualityEnabler(p);
+							p.setOpacity(alpha);
+							p.drawImage(myrtlrect(innerLeft, innerTop, _st.cellInner, _st.cellInner), image);
+							p.setOpacity(1.);
+						}
+					}
 				}
 			}
 			if (highlighted) {
@@ -959,11 +1007,20 @@ void CalendarBox::Inner::setDateChosenCallback(Fn<void(QDate)> callback) {
 void CalendarBox::Inner::setDynamicImage(
 		QDate date,
 		std::shared_ptr<DynamicImage> image) {
+	auto &state = _dynamicImageStates[date];
 	if (image) {
-		_dynamicImages[date] = std::move(image);
-		_dynamicImages[date]->subscribeToUpdates([=] { update(); });
+		state.image = std::move(image);
+		state.image->subscribeToUpdates([=] {
+			auto &animState = _dynamicImageStates[date];
+			if (!animState.animating() && !state.animationFinished) {
+				animState.animation = anim::value(0., 1.);
+				animState.animationStart = crl::now();
+				_animation.start();
+			}
+			update();
+		});
 	} else {
-		_dynamicImages.remove(date);
+		_dynamicImageStates.remove(date);
 	}
 	update();
 }
