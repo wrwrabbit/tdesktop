@@ -7528,6 +7528,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_summarize_header_title" = "AI summary";
 "lng_summarize_header_about" = "Click to see original text";
 
+"lng_calendar" = "Calendar";
+
 // Wnd specific
 
 "lng_wnd_choose_program_menu" = "Choose Default Program...";

@@ -61,6 +61,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_values.h"
 #include "data/data_premium_limits.h"
 #include "data/data_web_page.h"
+#include "data/data_search_calendar.h"
 #include "dialogs/ui/chat_search_in.h"
 #include "passport/passport_form_controller.h"
 #include "chat_helpers/tabbed_selector.h"
@@ -350,9 +351,9 @@ void DateClickHandler::onClick(ClickContext context) const {
 	const auto my = context.other.value<ClickHandlerContext>();
 	if (const auto window = my.sessionWindow.get()) {
 		if (!_chat.topic()) {
-			window->showCalendar({ _chat, _date });
+			window->showCalendar({ _chat, _date, true, true });
 		} else if (const auto strong = _weak.get()) {
-			window->showCalendar({ strong, _date });
+			window->showCalendar({ strong, _date, true, true });
 		}
 	}
 }
@@ -2810,6 +2811,31 @@ void SessionController::showCalendar(ShowCalendarDescriptor &&descriptor) {
 			button->setPointerCursor(false);
 		}
 	};
+	const auto dynamicImageForDate = [&, peerId = history->peer->id] {
+		using ReturnType = Fn<void(QDate, Ui::CalendarImageSetter)>;
+		if (!descriptor.mediaPhoto && !descriptor.mediaVideo) {
+			return ReturnType(nullptr);
+		}
+		const auto search = std::make_shared<Api::SearchCalendarController>(
+			&session(),
+			(descriptor.mediaPhoto && descriptor.mediaVideo)
+				? Storage::SharedMediaType::PhotoVideo
+				: descriptor.mediaPhoto
+				? Storage::SharedMediaType::Photo
+				: Storage::SharedMediaType::Video);
+		return (ReturnType)[=](QDate date, Ui::CalendarImageSetter set) {
+			search->monthThumbnails(
+				peerId,
+				base::unixtime::serialize(QDateTime(date, QTime())),
+				[=](const std::vector<Api::DayThumbnail> &thumbnails) {
+					for (const auto &thumb : thumbnails) {
+						set(
+							base::unixtime::parse(thumb.date).date(),
+							thumb.image);
+					}
+				});
+		};
+	}();
 	const auto weak = base::make_weak(this);
 	const auto weakTopic = base::make_weak(topic);
 	const auto jump = [=](const QDate &date, Fn<void()> close) {
@@ -2836,11 +2862,12 @@ void SessionController::showCalendar(ShowCalendarDescriptor &&descriptor) {
 	show(Box<Ui::CalendarBox>(Ui::CalendarBoxArgs{
 		.month = highlighted,
 		.highlighted = highlighted,
-		.callback = jump,
+		.callback = descriptor.customJump ? descriptor.customJump : jump,
 		.minDate = minPeerDate,
 		.maxDate = maxPeerDate,
 		.allowsSelection = history->peer->isUser(),
 		.selectionChanged = selectionChanged,
+		.dynamicImageForDate = dynamicImageForDate,
 	}));
 }
 

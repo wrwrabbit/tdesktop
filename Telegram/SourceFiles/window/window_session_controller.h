@@ -545,6 +545,9 @@ public:
 	struct ShowCalendarDescriptor {
 		Dialogs::Key chat;
 		QDate date;
+		bool mediaPhoto = false;
+		bool mediaVideo = false;
+		Fn<void(const QDate &, Fn<void()>)> customJump;
 	};
 	void showCalendar(ShowCalendarDescriptor &&descriptor);
 
