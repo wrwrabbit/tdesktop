@@ -42,10 +42,10 @@ class SearchCalendarController final {
 public:
 	SearchCalendarController(
 		not_null<Main::Session*> session,
+		PeerId peerId,
 		Storage::SharedMediaType type);
 
 	void monthThumbnails(
-		PeerId peerId,
 		TimeId date,
 		Fn<void(std::vector<DayThumbnail>)> onFinish);
 
@@ -81,6 +81,7 @@ private:
 		bool noMoreData);
 
 	const not_null<Main::Session*> _session;
+	const PeerId _peerId;
 	const Storage::SharedMediaType _type;
 
 	base::flat_map<MonthKey, MonthData> _months;

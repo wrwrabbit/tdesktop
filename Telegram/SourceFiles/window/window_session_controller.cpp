@@ -2818,6 +2818,7 @@ void SessionController::showCalendar(ShowCalendarDescriptor &&descriptor) {
 		}
 		const auto search = std::make_shared<Api::SearchCalendarController>(
 			&session(),
+			history->peer->id,
 			(descriptor.mediaPhoto && descriptor.mediaVideo)
 				? Storage::SharedMediaType::PhotoVideo
 				: descriptor.mediaPhoto
@@ -2825,7 +2826,6 @@ void SessionController::showCalendar(ShowCalendarDescriptor &&descriptor) {
 				: Storage::SharedMediaType::Video);
 		return (ReturnType)[=](QDate date, Ui::CalendarImageSetter set) {
 			search->monthThumbnails(
-				peerId,
 				base::unixtime::serialize(QDateTime(date, QTime())),
 				[=](const std::vector<Api::DayThumbnail> &thumbnails) {
 					for (const auto &thumb : thumbnails) {

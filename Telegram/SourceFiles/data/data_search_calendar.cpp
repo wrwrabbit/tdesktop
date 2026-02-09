@@ -23,18 +23,19 @@ namespace Api {
 
 SearchCalendarController::SearchCalendarController(
 	not_null<Main::Session*> session,
+	PeerId peerId,
 	Storage::SharedMediaType type)
 : _session(session)
+, _peerId(peerId)
 , _type(type) {
 }
 
 void SearchCalendarController::monthThumbnails(
-		PeerId peerId,
 		TimeId date,
 		Fn<void(std::vector<DayThumbnail>)> onFinish) {
 	const auto parsed = base::unixtime::parse(date).date();
 	const auto key = MonthKey{
-		.peerId = peerId,
+		.peerId = _peerId,
 		.year = parsed.year(),
 		.month = parsed.month(),
 	};
