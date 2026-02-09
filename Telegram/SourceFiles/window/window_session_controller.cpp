@@ -2875,6 +2875,7 @@ void SessionController::showCalendar(ShowCalendarDescriptor &&descriptor) {
 			session().api().resolveJumpToDate(chat, date, open);
 		}
 	};
+	const auto requireImage = !!searchCalendarResult.customJump;
 	show(Box<Ui::CalendarBox>(Ui::CalendarBoxArgs{
 		.month = highlighted,
 		.highlighted = highlighted,
@@ -2886,6 +2887,7 @@ void SessionController::showCalendar(ShowCalendarDescriptor &&descriptor) {
 		.allowsSelection = history->peer->isUser(),
 		.selectionChanged = selectionChanged,
 		.dynamicImageForDate = std::move(searchCalendarResult.factory),
+		.requireImage = requireImage,
 	}));
 }
 

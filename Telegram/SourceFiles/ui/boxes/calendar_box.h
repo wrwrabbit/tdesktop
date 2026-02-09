@@ -51,6 +51,7 @@ struct CalendarBoxArgs {
 		std::optional<int>)> selectionChanged;
 	const style::CalendarColors &stColors = st::defaultCalendarColors;
 	Fn<void(QDate, CalendarImageSetter)> dynamicImageForDate;
+	bool requireImage = false;
 };
 
 class CalendarBox final : public BoxContent, private AbstractTooltipShower {

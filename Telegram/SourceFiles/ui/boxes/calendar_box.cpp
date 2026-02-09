@@ -532,6 +532,7 @@ public:
 	[[nodiscard]] int countMaxHeight() const;
 	void setDateChosenCallback(Fn<void(QDate)> callback);
 	void setDynamicImage(QDate date, std::shared_ptr<DynamicImage> image);
+	void setRequireImage(bool require);
 
 	~Inner();
 
@@ -556,6 +557,7 @@ private:
 	const style::CalendarColors &_styleColors;
 	const not_null<Context*> _context;
 	bool _twoPressSelectionStarted = false;
+	bool _requireImage = false;
 	Fn<void(QDate, CalendarImageSetter)> _dynamicImageForDate;
 
 	struct DynamicImageState {
@@ -945,6 +947,13 @@ void CalendarBox::Inner::setSelected(int selected) {
 	if (selected != kEmptySelection && !_context->isEnabled(selected)) {
 		selected = kEmptySelection;
 	}
+	if (selected != kEmptySelection && _requireImage) {
+		const auto date = _context->dateFromIndex(selected);
+		const auto it = _dynamicImageStates.find(date);
+		if (it == end(_dynamicImageStates) || !it->second.image) {
+			selected = kEmptySelection;
+		}
+	}
 	_selected = selected;
 	const auto pointer = (_selected != kEmptySelection);
 	const auto force = (_mouseMoved && _cursorSetWithoutMouseMove);
@@ -1051,6 +1060,10 @@ void CalendarBox::Inner::setDynamicImage(
 		_dynamicImageStates.remove(date);
 	}
 	update();
+}
+
+void CalendarBox::Inner::setRequireImage(bool require) {
+	_requireImage = require;
 }
 
 CalendarBox::Inner::~Inner() = default;
@@ -1185,6 +1198,7 @@ CalendarBox::CalendarBox(QWidget*, CalendarBoxArgs &&args)
 , _finalize(std::move(args.finalize))
 , _jumpTimer([=] { jump(_jumpButton); })
 , _selectionChanged(std::move(args.selectionChanged)) {
+	_inner->setRequireImage(args.requireImage);
 	_context->setAllowsSelection(args.allowsSelection);
 	_context->setMinDate(args.minDate);
 	_context->setMaxDate(args.maxDate);
