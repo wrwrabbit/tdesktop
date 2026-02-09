@@ -162,6 +162,9 @@ void MusicProvider::checkPreload(
 void MusicProvider::setSearchQuery(QString query) {
 }
 
+void MusicProvider::jumpToDate(const QDate &date, Fn<void(FullMsgId)>) {
+}
+
 void MusicProvider::refreshViewer() {
 	_viewerLifetime.destroy();
 	const auto aroundId = _aroundId;

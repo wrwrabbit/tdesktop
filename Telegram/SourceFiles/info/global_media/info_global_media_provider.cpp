@@ -423,6 +423,10 @@ void Provider::setSearchQuery(QString query) {
 	Unexpected("Media::Provider::setSearchQuery.");
 }
 
+void Provider::jumpToDate(const QDate &date, Fn<void(FullMsgId)>) {
+	Unexpected("GlobalMedia::Provider::jumpToDate.");
+}
+
 GlobalMediaKey Provider::sliceKey(Data::MessagePosition aroundId) const {
 	return GlobalMediaKey{ aroundId };
 }

@@ -342,6 +342,9 @@ void Provider::setSearchQuery(QString query) {
 	Unexpected("Media::Provider::setSearchQuery.");
 }
 
+void Provider::jumpToDate(const QDate &date, Fn<void(FullMsgId)> callback) {
+}
+
 SparseIdsMergedSlice::Key Provider::sliceKey(
 		UniversalMsgId universalId) const {
 	using Key = SparseIdsMergedSlice::Key;
