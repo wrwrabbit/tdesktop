@@ -115,7 +115,7 @@ void Provider::setSearchQuery(QString query) {
 	_refreshed.fire({});
 }
 
-void Provider::jumpToDate(const QDate &date, Fn<void(FullMsgId)>) {
+void Provider::jumpToMessage(MsgId messageId, Fn<void(FullMsgId)>) {
 }
 
 void Provider::refreshViewer() {

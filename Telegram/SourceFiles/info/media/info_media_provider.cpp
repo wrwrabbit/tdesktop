@@ -343,16 +343,19 @@ void Provider::setSearchQuery(QString query) {
 	Unexpected("Media::Provider::setSearchQuery.");
 }
 
-void Provider::jumpToDate(const QDate &date, Fn<void(FullMsgId)> callback) {
+void Provider::jumpToMessage(
+		MsgId messageId,
+		Fn<void(FullMsgId)> callback) {
 	_viewerLifetime.destroy();
 
 	const auto peer = _controller->session().data().peer(_peer->id);
-	const auto request = Api::PrepareSearchRequestByDate(
+	const auto request = Api::PrepareSearchRequest(
 		peer,
 		_topicRootId,
 		_monoforumPeerId,
 		_type,
-		date,
+		QString(),
+		messageId,
 		Data::LoadDirection::Around);
 
 	if (!request) {
@@ -362,20 +365,18 @@ void Provider::jumpToDate(const QDate &date, Fn<void(FullMsgId)> callback) {
 	_controller->session().api().request(
 		std::move(*request)
 	).done([=](const Api::SearchRequestResult &result) {
-		const auto byDate = Api::ParseSearchResultByDate(
+		const auto parsed = Api::ParseSearchResult(
 			peer,
-			date,
-			Api::ParseSearchResult(
-				peer,
-				_type,
-				0,
-				Data::LoadDirection::Around,
-				result));
+			_type,
+			messageId,
+			Data::LoadDirection::Around,
+			result);
 
-		if (byDate.first) {
-			_universalAroundId = GetUniversalId(byDate.first.fullId);
+		if (!parsed.messageIds.empty()) {
+			const auto fullId = FullMsgId(_peer->id, messageId);
+			_universalAroundId = GetUniversalId(fullId);
 			if (callback) {
-				callback(byDate.closestToDate.fullId);
+				callback(fullId);
 			}
 			_idsLimit = kMinimalIdsLimit * 2;
 			refreshViewer();

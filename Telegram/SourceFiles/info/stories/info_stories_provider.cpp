@@ -177,7 +177,7 @@ void Provider::checkPreload(
 void Provider::setSearchQuery(QString query) {
 }
 
-void Provider::jumpToDate(const QDate &date, Fn<void(FullMsgId)>) {
+void Provider::jumpToMessage(MsgId messageId, Fn<void(FullMsgId)>) {
 }
 
 void Provider::refreshViewer() {

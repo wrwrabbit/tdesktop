@@ -48,7 +48,7 @@ public:
 
 	void setSearchQuery(QString query) override;
 
-	void jumpToDate(const QDate &date, Fn<void(FullMsgId)> callback) override;
+	void jumpToMessage(MsgId, Fn<void(FullMsgId)> done) override;
 
 	ListItemSelectionData computeSelectionData(
 		not_null<const HistoryItem*> item,

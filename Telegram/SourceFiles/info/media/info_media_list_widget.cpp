@@ -2714,17 +2714,6 @@ ListWidget::~ListWidget() {
 }
 
 void ListWidget::jumpToDate(const QDate &date, Fn<void(FullMsgId)> c) {
-	_provider->jumpToDate(date, [=](FullMsgId fullId) {
-		const auto item = session().data().message(fullId);
-		if (!item) {
-			return;
-		}
-		_scrollTopState.position = _provider->scrollTopStatePosition(item);
-		_scrollTopState.item = item;
-		if (c) {
-			c(fullId);
-		}
-	});
 }
 
 } // namespace Media
