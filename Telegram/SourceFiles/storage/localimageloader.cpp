@@ -477,6 +477,7 @@ FileLoadTask::FileLoadTask(
 	const TextWithTags &caption,
 	bool spoiler,
 	std::shared_ptr<SendingAlbum> album,
+	bool forceFile,
 	uint64 idOverride)
 : _id(idOverride ? idOverride : base::RandomValue<uint64>())
 , _session(session)
@@ -489,7 +490,8 @@ FileLoadTask::FileLoadTask(
 , _information(std::move(information))
 , _type(type)
 , _caption(caption)
-, _spoiler(spoiler) {
+, _spoiler(spoiler)
+, _forceFile(forceFile) {
 	Expects(to.options.scheduled
 		|| to.options.shortcutId
 		|| !to.replaceMediaOf
@@ -1062,6 +1064,7 @@ void FileLoadTask::process(Args &&args) {
 	_result->photo = photo;
 	_result->document = document;
 	_result->photoThumbs = photoThumbs;
+	_result->forceFile = _forceFile;
 }
 
 void FileLoadTask::finish() {
