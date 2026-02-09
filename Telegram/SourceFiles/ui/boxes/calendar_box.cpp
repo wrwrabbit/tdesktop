@@ -16,7 +16,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "ui/cached_round_corners.h"
 #include "ui/layers/generic_box.h"
+#include "ui/dynamic_image.h"
 #include "lang/lang_keys.h"
+#include "base/flat_map.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat.h"
 #include "styles/style_settings.h"
@@ -522,10 +524,12 @@ public:
 		QWidget *parent,
 		not_null<Context*> context,
 		const style::CalendarSizes &st,
-		const style::CalendarColors &styleColors);
+		const style::CalendarColors &styleColors,
+		Fn<void(QDate, CalendarImageSetter)> dynamicImageForDate);
 
 	[[nodiscard]] int countMaxHeight() const;
 	void setDateChosenCallback(Fn<void(QDate)> callback);
+	void setDynamicImage(QDate date, std::shared_ptr<DynamicImage> image);
 
 	~Inner();
 
@@ -539,6 +543,7 @@ private:
 	void monthChanged(QDate month);
 	void setSelected(int selected);
 	void setPressed(int pressed);
+	void loadDynamicImages();
 
 	int rowsLeft() const;
 	int rowsTop() const;
@@ -549,8 +554,11 @@ private:
 	const style::CalendarColors &_styleColors;
 	const not_null<Context*> _context;
 	bool _twoPressSelectionStarted = false;
+	Fn<void(QDate, CalendarImageSetter)> _dynamicImageForDate;
 
 	std::map<int, std::unique_ptr<RippleAnimation>> _ripples;
+	base::flat_map<QDate, std::shared_ptr<DynamicImage>> _dynamicImages;
+	base::flat_set<QDate> _dynamicImagesRequested;
 
 	Fn<void(QDate)> _dateChosenCallback;
 
@@ -640,11 +648,13 @@ CalendarBox::Inner::Inner(
 	QWidget *parent,
 	not_null<Context*> context,
 	const style::CalendarSizes &st,
-	const style::CalendarColors &styleColors)
+	const style::CalendarColors &styleColors,
+	Fn<void(QDate, CalendarImageSetter)> dynamicImageForDate)
 : RpWidget(parent)
 , _st(st)
 , _styleColors(styleColors)
-, _context(context) {
+, _context(context)
+, _dynamicImageForDate(std::move(dynamicImageForDate)) {
 	setMouseTracking(true);
 
 	context->monthValue(
@@ -661,9 +671,43 @@ CalendarBox::Inner::Inner(
 void CalendarBox::Inner::monthChanged(QDate month) {
 	setSelected(kEmptySelection);
 	_ripples.clear();
+	_dynamicImagesRequested.clear();
+	loadDynamicImages();
 	resizeToCurrent();
 	update();
 	SendSynteticMouseEvent(this, QEvent::MouseMove, Qt::NoButton);
+}
+
+void CalendarBox::Inner::loadDynamicImages() {
+	if (!_dynamicImageForDate) {
+		return;
+	}
+	const auto currentMonth = _context->month();
+	const auto prevMonth = currentMonth.addMonths(-1);
+	const auto nextMonth = currentMonth.addMonths(1);
+
+	const auto matchesMonth = [&](const QDate &d, const QDate &month) {
+		return d.year() == month.year() && d.month() == month.month();
+	};
+	const auto from = -_context->daysShift();
+	const auto till = from + _context->rowsCount() * kDaysInWeek;
+	for (auto i = from; i != till; ++i) {
+		const auto date = _context->dateFromIndex(i);
+		if (matchesMonth(date, currentMonth)
+			|| matchesMonth(date, prevMonth)
+			|| matchesMonth(date, nextMonth)) {
+			if (_dynamicImages.contains(date)
+				|| _dynamicImagesRequested.contains(date)) {
+				continue;
+			}
+			_dynamicImagesRequested.emplace(date);
+			_dynamicImageForDate(
+				date,
+				[=](QDate imageDate, std::shared_ptr<DynamicImage> image) {
+					setDynamicImage(imageDate, std::move(image));
+				});
+		}
+	}
 }
 
 void CalendarBox::Inner::resizeToCurrent() {
@@ -742,6 +786,14 @@ void CalendarBox::Inner::paintRows(QPainter &p, QRect clip) {
 			const auto enabled = _context->isEnabled(index);
 			const auto innerLeft = x + innerSkipLeft;
 			const auto innerTop = y + innerSkipTop;
+			const auto date = _context->dateFromIndex(index);
+			if (const auto it = _dynamicImages.find(date); it != end(_dynamicImages)) {
+				const auto image = it->second->image(_st.cellInner);
+				if (!image.isNull()) {
+					auto hq = PainterHighQualityEnabler(p);
+					p.drawImage(myrtlrect(innerLeft, innerTop, _st.cellInner, _st.cellInner), image);
+				}
+			}
 			if (highlighted) {
 				auto hq = PainterHighQualityEnabler(p);
 				p.setPen(Qt::NoPen);
@@ -904,6 +956,18 @@ void CalendarBox::Inner::setDateChosenCallback(Fn<void(QDate)> callback) {
 	_dateChosenCallback = std::move(callback);
 }
 
+void CalendarBox::Inner::setDynamicImage(
+		QDate date,
+		std::shared_ptr<DynamicImage> image) {
+	if (image) {
+		_dynamicImages[date] = std::move(image);
+		_dynamicImages[date]->subscribeToUpdates([=] { update(); });
+	} else {
+		_dynamicImages.remove(date);
+	}
+	update();
+}
+
 CalendarBox::Inner::~Inner() = default;
 
 class CalendarBox::Title final : public AbstractButton {
@@ -1027,7 +1091,8 @@ CalendarBox::CalendarBox(QWidget*, CalendarBoxArgs &&args)
 	this,
 	_context.get(),
 	_st,
-	_styleColors)))
+	_styleColors,
+	std::move(args.dynamicImageForDate))))
 , _title(this, _context.get(), _st, _styleColors)
 , _previous(this, _styleColors.iconButtonPrevious)
 , _next(this, _styleColors.iconButtonNext)
@@ -1129,6 +1194,12 @@ QDate CalendarBox::selectedFirstDate() const {
 QDate CalendarBox::selectedLastDate() const {
 	const auto max = _context->selectedMax();
 	return max.has_value() ? _context->dateFromIndex(*max) : QDate();
+}
+
+void CalendarBox::setDynamicImage(
+		QDate date,
+		std::shared_ptr<DynamicImage> image) {
+	_inner->setDynamicImage(date, std::move(image));
 }
 
 void CalendarBox::showJumpTooltip(not_null<IconButton*> button) {

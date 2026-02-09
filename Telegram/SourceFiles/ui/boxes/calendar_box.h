@@ -29,7 +29,9 @@ namespace Ui {
 class IconButton;
 class ScrollArea;
 class CalendarBox;
+class DynamicImage;
 
+using CalendarImageSetter = Fn<void(QDate, std::shared_ptr<DynamicImage>)>;
 using JumpCallback = Fn<void(QDate date, Fn<void()> close)>;
 
 struct CalendarBoxArgs {
@@ -48,6 +50,7 @@ struct CalendarBoxArgs {
 		not_null<Ui::CalendarBox*>,
 		std::optional<int>)> selectionChanged;
 	const style::CalendarColors &stColors = st::defaultCalendarColors;
+	Fn<void(QDate, CalendarImageSetter)> dynamicImageForDate;
 };
 
 class CalendarBox final : public BoxContent, private AbstractTooltipShower {
@@ -59,6 +62,8 @@ public:
 
 	[[nodiscard]] QDate selectedFirstDate() const;
 	[[nodiscard]] QDate selectedLastDate() const;
+
+	void setDynamicImage(QDate date, std::shared_ptr<DynamicImage> image);
 
 protected:
 	void prepare() override;
