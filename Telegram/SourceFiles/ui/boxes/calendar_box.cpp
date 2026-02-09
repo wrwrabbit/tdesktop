@@ -1161,7 +1161,10 @@ void CalendarBox::prepare() {
 	_previous->setClickedCallback([=] { goPreviousMonth(); });
 	_next->setClickedCallback([=] { goNextMonth(); });
 
-	_inner->setDateChosenCallback(std::move(_callback));
+	_inner->setDateChosenCallback([=, c = std::move(_callback)](
+			const QDate &date) {
+		c(date, crl::guard(this, [=] { closeBox(); }));
+	});
 
 	_context->monthValue(
 	) | rpl::on_next([=](QDate month) {

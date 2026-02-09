@@ -172,9 +172,11 @@ ChooseDateTimeBoxDescriptor ChooseDateTimeBox(
 			Box<CalendarBox>(Ui::CalendarBoxArgs{
 				.month = state->date.current(),
 				.highlighted = state->date.current(),
-				.callback = crl::guard(box, [=](QDate chosen) {
+				.callback = crl::guard(box, [=](
+						QDate chosen,
+						Fn<void()> close) {
 					state->date = chosen;
-					(*calendar)->closeBox();
+					close();
 				}),
 				.minDate = minDate(),
 				.maxDate = maxDate(),

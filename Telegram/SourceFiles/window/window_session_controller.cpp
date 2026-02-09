@@ -2810,7 +2810,7 @@ void SessionController::showCalendar(Dialogs::Key chat, QDate requestedDate) {
 	};
 	const auto weak = base::make_weak(this);
 	const auto weakTopic = base::make_weak(topic);
-	const auto jump = [=](const QDate &date) {
+	const auto jump = [=](const QDate &date, Fn<void()> close) {
 		const auto open = [=](not_null<PeerData*> peer, MsgId id) {
 			if (const auto strong = weak.get()) {
 				if (!topic) {
@@ -2834,7 +2834,7 @@ void SessionController::showCalendar(Dialogs::Key chat, QDate requestedDate) {
 	show(Box<Ui::CalendarBox>(Ui::CalendarBoxArgs{
 		.month = highlighted,
 		.highlighted = highlighted,
-		.callback = [=](const QDate &date) { jump(date); },
+		.callback = jump,
 		.minDate = minPeerDate,
 		.maxDate = maxPeerDate,
 		.allowsSelection = history->peer->isUser(),

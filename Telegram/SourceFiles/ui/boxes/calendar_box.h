@@ -30,13 +30,15 @@ class IconButton;
 class ScrollArea;
 class CalendarBox;
 
+using JumpCallback = Fn<void(QDate date, Fn<void()> close)>;
+
 struct CalendarBoxArgs {
 	template <typename T>
 	using required = base::required<T>;
 
 	required<QDate> month;
 	required<QDate> highlighted;
-	required<Fn<void(QDate date)>> callback;
+	required<JumpCallback> callback;
 	FnMut<void(not_null<CalendarBox*>)> finalize;
 	const style::CalendarSizes &st = st::defaultCalendarSizes;
 	QDate minDate;
@@ -105,7 +107,7 @@ private:
 	bool _previousEnabled = false;
 	bool _nextEnabled = false;
 
-	Fn<void(QDate date)> _callback;
+	JumpCallback _callback;
 	FnMut<void(not_null<CalendarBox*>)> _finalize;
 	bool _watchScroll = false;
 
