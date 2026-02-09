@@ -169,8 +169,8 @@ void Widget::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 			.date = QDate::currentDate(),
 			.mediaPhoto = (type == Type::Photo),
 			.mediaVideo = (type == Type::Video),
-			.customJump = [=](const QDate &date, Fn<void()> close) {
-				_inner->jumpToDate(date, [](auto){});
+			.customJump = [=](MsgId msgId, Fn<void()> close) {
+				_inner->jumpToMessage(msgId);
 				close();
 			},
 		});
@@ -221,10 +221,6 @@ void Widget::saveState(not_null<Memento*> memento) {
 
 void Widget::restoreState(not_null<Memento*> memento) {
 	_inner->restoreState(memento);
-}
-
-void Widget::jumpToDate(const QDate &date, Fn<void(FullMsgId)> c) {
-	_inner->jumpToDate(date, std::move(c));
 }
 
 } // namespace Info::Media

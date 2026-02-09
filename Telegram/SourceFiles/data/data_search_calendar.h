@@ -36,6 +36,7 @@ struct CalendarResult {
 struct DayThumbnail {
 	TimeId date = 0;
 	std::shared_ptr<Ui::DynamicImage> image;
+	MsgId msgId = 0;
 };
 
 class SearchCalendarController final {
@@ -48,6 +49,8 @@ public:
 	void monthThumbnails(
 		TimeId date,
 		Fn<void(std::vector<DayThumbnail>)> onFinish);
+
+	[[nodiscard]] std::optional<MsgId> resolveMsgIdByDate(TimeId date) const;
 
 private:
 	struct MonthKey {

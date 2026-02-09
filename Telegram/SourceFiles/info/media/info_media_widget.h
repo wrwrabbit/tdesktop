@@ -129,8 +129,6 @@ public:
 
 	rpl::producer<QString> title() override;
 
-	void jumpToDate(const QDate &date, Fn<void(FullMsgId)> callback);
-
 private:
 	void saveState(not_null<Memento*> memento);
 	void restoreState(not_null<Memento*> memento);

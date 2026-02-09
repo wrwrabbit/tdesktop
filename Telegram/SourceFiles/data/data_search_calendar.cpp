@@ -173,6 +173,7 @@ void SearchCalendarController::processMonthMessages(
 			result.push_back(DayThumbnail{
 				.date = dayStart,
 				.image = std::move(image),
+				.msgId = fullId.msg,
 			});
 		}
 	}
@@ -190,6 +191,32 @@ void SearchCalendarController::processMonthMessages(
 		}
 		data.callbacks.clear();
 	}
+}
+
+std::optional<MsgId> SearchCalendarController::resolveMsgIdByDate(
+		TimeId date) const {
+	const auto parsed = base::unixtime::parse(date).date();
+	const auto key = MonthKey{
+		.peerId = _peerId,
+		.year = parsed.year(),
+		.month = parsed.month(),
+	};
+
+	const auto it = _months.find(key);
+	if (it == _months.end() || it->second.cache.empty()) {
+		return std::nullopt;
+	}
+
+	const auto dayStart = base::unixtime::serialize(
+		QDateTime(parsed, QTime()));
+
+	for (const auto &thumb : it->second.cache) {
+		if (thumb.date == dayStart) {
+			return thumb.msgId;
+		}
+	}
+
+	return std::nullopt;
 }
 
 } // namespace Api

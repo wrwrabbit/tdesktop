@@ -87,7 +87,7 @@ public:
 	void saveState(not_null<Memento*> memento);
 	void restoreState(not_null<Memento*> memento);
 
-	void jumpToDate(const QDate &date, Fn<void(FullMsgId)> callback);
+	void jumpToMessage(MsgId msgId);
 
 	// Overview::Layout::Delegate
 	void registerHeavyItem(not_null<const BaseLayout*> item) override;

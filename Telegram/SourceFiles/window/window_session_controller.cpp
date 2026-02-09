@@ -2811,10 +2811,15 @@ void SessionController::showCalendar(ShowCalendarDescriptor &&descriptor) {
 			button->setPointerCursor(false);
 		}
 	};
-	const auto dynamicImageForDate = [&, peerId = history->peer->id] {
-		using ReturnType = Fn<void(QDate, Ui::CalendarImageSetter)>;
+	struct SearchCalendarResult {
+		Fn<void(QDate, Ui::CalendarImageSetter)> factory;
+		Fn<void(const QDate &, Fn<void()>)> customJump;
+	};
+	const auto searchCalendarResult = [&]() -> SearchCalendarResult {
+		using Factory = Fn<void(QDate, Ui::CalendarImageSetter)>;
+		using CustomJump = Fn<void(const QDate &, Fn<void()>)>;
 		if (!descriptor.mediaPhoto && !descriptor.mediaVideo) {
-			return ReturnType(nullptr);
+			return {};
 		}
 		const auto search = std::make_shared<Api::SearchCalendarController>(
 			&session(),
@@ -2824,7 +2829,7 @@ void SessionController::showCalendar(ShowCalendarDescriptor &&descriptor) {
 				: descriptor.mediaPhoto
 				? Storage::SharedMediaType::Photo
 				: Storage::SharedMediaType::Video);
-		return (ReturnType)[=](QDate date, Ui::CalendarImageSetter set) {
+		const auto factory = [=](QDate date, Ui::CalendarImageSetter set) {
 			search->monthThumbnails(
 				base::unixtime::serialize(QDateTime(date, QTime())),
 				[=](const std::vector<Api::DayThumbnail> &thumbnails) {
@@ -2835,6 +2840,17 @@ void SessionController::showCalendar(ShowCalendarDescriptor &&descriptor) {
 					}
 				});
 		};
+		auto customJump = CustomJump(nullptr);
+		if (const auto performJump = descriptor.customJump) {
+			customJump = [=](const QDate &d, Fn<void()> close) {
+				const auto date = base::unixtime::serialize(
+					QDateTime(d, QTime()));
+				if (const auto msgId = search->resolveMsgIdByDate(date)) {
+					performJump(*msgId, close);
+				}
+			};
+		}
+		return { Factory(factory), std::move(customJump) };
 	}();
 	const auto weak = base::make_weak(this);
 	const auto weakTopic = base::make_weak(topic);
@@ -2862,12 +2878,14 @@ void SessionController::showCalendar(ShowCalendarDescriptor &&descriptor) {
 	show(Box<Ui::CalendarBox>(Ui::CalendarBoxArgs{
 		.month = highlighted,
 		.highlighted = highlighted,
-		.callback = descriptor.customJump ? descriptor.customJump : jump,
+		.callback = searchCalendarResult.customJump
+			? std::move(searchCalendarResult.customJump)
+			: jump,
 		.minDate = minPeerDate,
 		.maxDate = maxPeerDate,
 		.allowsSelection = history->peer->isUser(),
 		.selectionChanged = selectionChanged,
-		.dynamicImageForDate = dynamicImageForDate,
+		.dynamicImageForDate = std::move(searchCalendarResult.factory),
 	}));
 }
 
