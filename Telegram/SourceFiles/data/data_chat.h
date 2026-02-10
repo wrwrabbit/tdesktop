@@ -23,6 +23,7 @@ enum class ChatDataFlag {
 	CallNotEmpty = (1 << 6),
 	CanSetUsername = (1 << 7),
 	NoForwards = (1 << 8),
+	CustomRanksEnabled = (1 << 9),
 };
 inline constexpr bool is_flag_type(ChatDataFlag) { return true; };
 using ChatDataFlags = base::flags<ChatDataFlag>;
@@ -99,6 +100,7 @@ public:
 
 	// Like in ChannelData.
 	[[nodiscard]] bool allowsForwarding() const;
+	[[nodiscard]] bool customRanksEnabled() const;
 	[[nodiscard]] bool canEditInformation() const;
 	[[nodiscard]] bool canEditPermissions() const;
 	[[nodiscard]] bool canEditUsername() const;
@@ -178,6 +180,7 @@ public:
 	base::flat_set<not_null<UserData*>> admins;
 	std::deque<not_null<UserData*>> lastAuthors;
 	base::flat_set<not_null<PeerData*>> markupSenders;
+	base::flat_map<UserId, QString> memberRanks;
 	int botStatus = 0; // -1 - no bots, 0 - unknown, 1 - one bot, that sees all history, 2 - other
 
 private:
@@ -215,6 +218,9 @@ void ApplyChatUpdate(
 void ApplyChatUpdate(
 	not_null<ChatData*> chat,
 	const MTPDupdateChatParticipantAdmin &update);
+void ApplyChatUpdate(
+	not_null<ChatData*> chat,
+	const MTPDupdateChatParticipantRank &update);
 void ApplyChatUpdate(
 	not_null<ChatData*> chat,
 	const MTPDupdateChatDefaultBannedRights &update);

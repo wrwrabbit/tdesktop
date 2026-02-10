@@ -5981,6 +5981,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_rights_edit_admin_header" = "What can this admin do?";
 "lng_rights_edit_admin_rank_name" = "Custom title";
 "lng_rights_edit_admin_rank_about" = "A title that members will see instead of '{title}'.";
+"lng_manage_peer_custom_ranks_title" = "Custom Member Titles";
+"lng_manage_peer_custom_ranks" = "Allow Custom Titles";
+"lng_manage_peer_custom_ranks_about" = "Allow members to set custom titles that will be shown next to their names in messages.";
 "lng_rights_about_add_admins_yes" = "This admin will be able to add new admins with equal or fewer rights.";
 "lng_rights_about_add_admins_no" = "This admin will not be able to add new admins.";
 "lng_rights_about_by" = "This admin promoted by {user} on {date}.";

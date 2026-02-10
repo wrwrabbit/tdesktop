@@ -405,6 +405,7 @@ private:
 		std::optional<bool> signatures;
 		std::optional<bool> signatureProfiles;
 		std::optional<bool> noForwards;
+		std::optional<bool> customRanks;
 		std::optional<bool> joinToWrite;
 		std::optional<bool> requestToJoin;
 		std::optional<ChannelData*> discussionLink;
@@ -465,6 +466,7 @@ private:
 	[[nodiscard]] bool validateAutotranslate(Saving &to) const;
 	[[nodiscard]] bool validateSignatures(Saving &to) const;
 	[[nodiscard]] bool validateForwards(Saving &to) const;
+	[[nodiscard]] bool validateCustomRanks(Saving &to) const;
 	[[nodiscard]] bool validateJoinToWrite(Saving &to) const;
 	[[nodiscard]] bool validateRequestToJoin(Saving &to) const;
 
@@ -480,6 +482,7 @@ private:
 	void saveAutotranslate();
 	void saveSignatures();
 	void saveForwards();
+	void saveCustomRanks();
 	void saveJoinToWrite();
 	void saveRequestToJoin();
 	void savePhoto();
@@ -999,6 +1002,11 @@ void Controller::fillPrivacyTypeButton() {
 			? _peer->asChannel()->usernames()
 			: std::vector<QString>()),
 		.noForwards = !_peer->allowsForwarding(),
+		.customRanks = (_peer->isChat()
+			? _peer->asChat()->customRanksEnabled()
+			: _peer->isChannel()
+			? _peer->asChannel()->customRanksEnabled()
+			: false),
 		.joinToWrite = (_peer->isMegagroup()
 			&& _peer->asChannel()->joinToWrite()),
 		.requestToJoin = (_peer->isMegagroup()
@@ -2096,6 +2104,7 @@ std::optional<Controller::Saving> Controller::validate() const {
 		&& validateAutotranslate(result)
 		&& validateSignatures(result)
 		&& validateForwards(result)
+		&& validateCustomRanks(result)
 		&& validateJoinToWrite(result)
 		&& validateRequestToJoin(result)) {
 		return result;
@@ -2218,6 +2227,14 @@ bool Controller::validateForwards(Saving &to) const {
 	return true;
 }
 
+bool Controller::validateCustomRanks(Saving &to) const {
+	if (!_typeDataSavedValue) {
+		return true;
+	}
+	to.customRanks = _typeDataSavedValue->customRanks;
+	return true;
+}
+
 bool Controller::validateJoinToWrite(Saving &to) const {
 	if (!_typeDataSavedValue) {
 		return true;
@@ -2253,6 +2270,7 @@ void Controller::save() {
 		pushSaveStage([=] { saveAutotranslate(); });
 		pushSaveStage([=] { saveSignatures(); });
 		pushSaveStage([=] { saveForwards(); });
+		pushSaveStage([=] { saveCustomRanks(); });
 		pushSaveStage([=] { saveJoinToWrite(); });
 		pushSaveStage([=] { saveRequestToJoin(); });
 		pushSaveStage([=] { savePhoto(); });
@@ -2748,6 +2766,32 @@ void Controller::saveForwards() {
 	_api.request(MTPmessages_ToggleNoForwards(
 		_peer->input(),
 		MTP_bool(*_savingData.noForwards)
+	)).done([=](const MTPUpdates &result) {
+		_peer->session().api().applyUpdates(result);
+		continueSave();
+	}).fail([=](const MTP::Error &error) {
+		if (error.type() == u"CHAT_NOT_MODIFIED"_q) {
+			continueSave();
+		} else {
+			_navigation->showToast(error.type());
+			cancelSave();
+		}
+	}).send();
+}
+
+void Controller::saveCustomRanks() {
+	const auto isEnabled = _peer->isChat()
+		? _peer->asChat()->customRanksEnabled()
+		: _peer->isChannel()
+		? _peer->asChannel()->customRanksEnabled()
+		: false;
+	if (!_savingData.customRanks
+		|| *_savingData.customRanks == isEnabled) {
+		return continueSave();
+	}
+	_api.request(MTPmessages_ToggleChatCustomRanks(
+		_peer->input(),
+		MTP_bool(*_savingData.customRanks)
 	)).done([=](const MTPUpdates &result) {
 		_peer->session().api().applyUpdates(result);
 		continueSave();

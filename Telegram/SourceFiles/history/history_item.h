@@ -604,6 +604,8 @@ public:
 		return _boostsApplied;
 	}
 
+	[[nodiscard]] QString fromRank() const;
+
 	MsgId id;
 
 private:

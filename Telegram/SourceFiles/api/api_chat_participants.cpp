@@ -112,6 +112,7 @@ void ApplyLastList(
 	channel->mgInfo->lastAdmins.clear();
 	channel->mgInfo->lastRestricted.clear();
 	channel->mgInfo->lastParticipants.clear();
+	channel->mgInfo->memberRanks.clear();
 	channel->mgInfo->lastParticipantsStatus
 		= MegagroupInfo::LastParticipantsUpToDate
 			| MegagroupInfo::LastParticipantsOnceReceived;
@@ -147,6 +148,9 @@ void ApplyLastList(
 					&& (channel->mgInfo->botStatus < 2)) {
 					channel->mgInfo->botStatus = 2;
 				}
+			}
+			if (!p.rank().isEmpty() && !p.isCreatorOrAdmin()) {
+				channel->mgInfo->memberRanks[p.userId()] = p.rank();
 			}
 		}
 	}
@@ -287,12 +291,14 @@ ChatParticipant::ChatParticipant(
 		_type = Type::Member;
 		_date = data.vdate().v;
 		_by = peerToUser(peerFromUser(data.vinviter_id()));
+		_rank = qs(data.vrank().value_or_empty());
 		if (data.vsubscription_until_date()) {
 			_subscriptionDate = data.vsubscription_until_date()->v;
 		}
 	}, [&](const MTPDchannelParticipant &data) {
 		_type = Type::Member;
 		_date = data.vdate().v;
+		_rank = qs(data.vrank().value_or_empty());
 		if (data.vsubscription_until_date()) {
 			_subscriptionDate = data.vsubscription_until_date()->v;
 		}

@@ -103,6 +103,11 @@ struct HistoryMessageSigned
 	bool isAnonymousRank = false;
 };
 
+struct HistoryMessageFromRank
+: RuntimeComponent<HistoryMessageFromRank, HistoryItem> {
+	QString rank;
+};
+
 struct HistoryMessageEdited
 : RuntimeComponent<HistoryMessageEdited, HistoryItem> {
 	TimeId date = 0;

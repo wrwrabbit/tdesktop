@@ -866,7 +866,8 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 			| Flag::Forbidden
 			| Flag::CallActive
 			| Flag::CallNotEmpty
-			| Flag::NoForwards;
+			| Flag::NoForwards
+			| Flag::CustomRanksEnabled;
 		const auto flagsSet = (data.is_left() ? Flag::Left : Flag())
 			| (data.is_creator() ? Flag::Creator : Flag())
 			| (data.is_deactivated() ? Flag::Deactivated : Flag())
@@ -876,7 +877,8 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 					&& chat->groupCall()->fullCount() > 0))
 				? Flag::CallNotEmpty
 				: Flag())
-			| (data.is_noforwards() ? Flag::NoForwards : Flag());
+			| (data.is_noforwards() ? Flag::NoForwards : Flag())
+			| (data.is_custom_ranks_enabled() ? Flag::CustomRanksEnabled : Flag());
 		chat->setFlags((chat->flags() & ~flagsMask) | flagsSet);
 		chat->count = data.vparticipants_count().v;
 
@@ -997,7 +999,8 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 			| Flag::AutoTranslation
 			| Flag::Monoforum
 			| Flag::HasStarsPerMessage
-			| Flag::StarsPerMessageKnown;
+			| Flag::StarsPerMessageKnown
+			| Flag::CustomRanksEnabled;
 		const auto hasStarsPerMessage
 			= data.vsend_paid_messages_stars().has_value();
 		if (!hasStarsPerMessage) {
@@ -1055,7 +1058,8 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 					| (channel->starsPerMessageKnown()
 						? Flag::StarsPerMessageKnown
 						: Flag()))
-				: Flag::StarsPerMessageKnown);
+				: Flag::StarsPerMessageKnown)
+			| (data.is_custom_ranks_enabled() ? Flag::CustomRanksEnabled : Flag());
 		channel->setFlags((channel->flags() & ~flagsMask) | flagsSet);
 		channel->setBotVerifyDetailsIcon(
 			data.vbot_verification_icon().value_or_empty());
@@ -4402,6 +4406,12 @@ void Session::applyUpdate(const MTPDupdateChatParticipantDelete &update) {
 }
 
 void Session::applyUpdate(const MTPDupdateChatParticipantAdmin &update) {
+	if (const auto chat = chatLoaded(update.vchat_id().v)) {
+		ApplyChatUpdate(chat, update);
+	}
+}
+
+void Session::applyUpdate(const MTPDupdateChatParticipantRank &update) {
 	if (const auto chat = chatLoaded(update.vchat_id().v)) {
 		ApplyChatUpdate(chat, update);
 	}

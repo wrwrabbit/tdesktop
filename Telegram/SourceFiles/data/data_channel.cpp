@@ -701,6 +701,10 @@ bool ChannelData::allowsForwarding() const {
 	return !(flags() & Flag::NoForwards);
 }
 
+bool ChannelData::customRanksEnabled() const {
+	return flags() & Flag::CustomRanksEnabled;
+}
+
 bool ChannelData::canViewMembers() const {
 	return (flags() & Flag::CanViewParticipants)
 		&& (!(flags() & Flag::ParticipantsHidden)

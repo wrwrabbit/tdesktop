@@ -107,6 +107,7 @@ public:
 	[[nodiscard]] std::optional<ChatAdminRightsInfo> adminRights(
 		not_null<UserData*> user) const;
 	[[nodiscard]] QString adminRank(not_null<UserData*> user) const;
+	[[nodiscard]] QString memberRank(not_null<UserData*> user) const;
 	[[nodiscard]] std::optional<ChatRestrictionsInfo> restrictedRights(
 		not_null<PeerData*> participant) const;
 	[[nodiscard]] bool isCreator(not_null<UserData*> user) const;
@@ -149,6 +150,7 @@ private:
 	// Data for channels.
 	base::flat_map<not_null<UserData*>, ChatAdminRightsInfo> _adminRights;
 	base::flat_map<not_null<UserData*>, QString> _adminRanks;
+	base::flat_map<not_null<UserData*>, QString> _memberRanks;
 	base::flat_map<not_null<UserData*>, TimeId> _adminPromotedSince;
 	base::flat_map<not_null<PeerData*>, TimeId> _restrictedSince;
 	base::flat_map<not_null<UserData*>, TimeId> _memberSince;

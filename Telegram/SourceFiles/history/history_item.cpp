@@ -478,6 +478,13 @@ HistoryItem::HistoryItem(
 		}
 	}
 
+	if (const auto rank = data.vfrom_rank()) {
+		if (!rank->v.isEmpty()) {
+			AddComponents(HistoryMessageFromRank::Bit());
+			Get<HistoryMessageFromRank>()->rank = qs(*rank);
+		}
+	}
+
 	if (const auto until = data.vreport_delivery_until_date()) {
 		if (base::unixtime::now() < TimeId(until->v)) {
 			history->owner().histories().reportDelivery(this);
@@ -3272,6 +3279,13 @@ QString HistoryItem::originalPostAuthor() const {
 		if (!msgsigned->isAnonymousRank && !msgsigned->viaBusinessBot) {
 			return msgsigned->author;
 		}
+	}
+	return QString();
+}
+
+QString HistoryItem::fromRank() const {
+	if (const auto component = Get<HistoryMessageFromRank>()) {
+		return component->rank;
 	}
 	return QString();
 }

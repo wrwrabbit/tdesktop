@@ -389,6 +389,12 @@ QString ParticipantsAdditionalData::adminRank(
 	return (i != end(_adminRanks)) ? i->second : QString();
 }
 
+QString ParticipantsAdditionalData::memberRank(
+		not_null<UserData*> user) const {
+	const auto i = _memberRanks.find(user);
+	return (i != end(_memberRanks)) ? i->second : QString();
+}
+
 TimeId ParticipantsAdditionalData::adminPromotedSince(
 		not_null<UserData*> user) const {
 	const auto i = _adminPromotedSince.find(user);
@@ -626,43 +632,53 @@ PeerData *ParticipantsAdditionalData::applyParticipant(
 		return nullptr;
 	};
 
-	switch (data.type()) {
-	case Api::ChatParticipant::Type::Creator: {
-		if (overrideRole != Role::Profile
-			&& overrideRole != Role::Members
-			&& overrideRole != Role::Admins) {
-			return logBad();
+	const auto result = [&]() -> PeerData* {
+		switch (data.type()) {
+		case Api::ChatParticipant::Type::Creator: {
+			if (overrideRole != Role::Profile
+				&& overrideRole != Role::Members
+				&& overrideRole != Role::Admins) {
+				return logBad();
+			}
+			return applyCreator(data);
 		}
-		return applyCreator(data);
+		case Api::ChatParticipant::Type::Admin: {
+			if (overrideRole != Role::Profile
+				&& overrideRole != Role::Members
+				&& overrideRole != Role::Admins) {
+				return logBad();
+			}
+			return applyAdmin(data);
+		}
+		case Api::ChatParticipant::Type::Member: {
+			if (overrideRole != Role::Profile
+				&& overrideRole != Role::Members) {
+				return logBad();
+			}
+			return applyRegular(data.userId());
+		}
+		case Api::ChatParticipant::Type::Restricted:
+		case Api::ChatParticipant::Type::Banned:
+			if (overrideRole != Role::Profile
+				&& overrideRole != Role::Members
+				&& overrideRole != Role::Restricted
+				&& overrideRole != Role::Kicked) {
+				return logBad();
+			}
+			return applyBanned(data);
+		case Api::ChatParticipant::Type::Left:
+			return logBad();
+		};
+		Unexpected("Api::ChatParticipant::type in applyParticipant.");
+	}();
+	if (const auto user = result ? result->asUser() : nullptr) {
+		if (!data.rank().isEmpty() && !data.isCreatorOrAdmin()) {
+			_memberRanks[user] = data.rank();
+		} else {
+			_memberRanks.remove(user);
+		}
 	}
-	case Api::ChatParticipant::Type::Admin: {
-		if (overrideRole != Role::Profile
-			&& overrideRole != Role::Members
-			&& overrideRole != Role::Admins) {
-			return logBad();
-		}
-		return applyAdmin(data);
-	}
-	case Api::ChatParticipant::Type::Member: {
-		if (overrideRole != Role::Profile
-			&& overrideRole != Role::Members) {
-			return logBad();
-		}
-		return applyRegular(data.userId());
-	}
-	case Api::ChatParticipant::Type::Restricted:
-	case Api::ChatParticipant::Type::Banned:
-		if (overrideRole != Role::Profile
-			&& overrideRole != Role::Members
-			&& overrideRole != Role::Restricted
-			&& overrideRole != Role::Kicked) {
-			return logBad();
-		}
-		return applyBanned(data);
-	case Api::ChatParticipant::Type::Left:
-		return logBad();
-	};
-	Unexpected("Api::ChatParticipant::type in applyParticipant.");
+	return result;
 }
 
 UserData *ParticipantsAdditionalData::applyCreator(
@@ -2135,7 +2151,10 @@ auto ParticipantsBoxController::computeType(
 		&& user
 		&& user->isInaccessible();
 	if (!result.canRemove) {
-		result.adminRank = user ? _additional.adminRank(user) : QString();
+		const auto aRank = user ? _additional.adminRank(user) : QString();
+		result.adminRank = !aRank.isEmpty()
+			? aRank
+			: (user ? _additional.memberRank(user) : QString());
 	}
 	return result;
 }

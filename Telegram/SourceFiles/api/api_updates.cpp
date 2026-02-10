@@ -1894,6 +1894,10 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 		session().data().applyUpdate(update.c_updateChatParticipantAdmin());
 	} break;
 
+	case mtpc_updateChatParticipantRank: {
+		session().data().applyUpdate(update.c_updateChatParticipantRank());
+	} break;
+
 	case mtpc_updateChatDefaultBannedRights: {
 		session().data().applyUpdate(update.c_updateChatDefaultBannedRights());
 	} break;

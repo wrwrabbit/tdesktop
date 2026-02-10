@@ -39,6 +39,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/components/sponsored_messages.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "data/data_chat.h"
 #include "data/data_channel.h"
 #include "data/data_forum_topic.h"
 #include "data/data_message_reactions.h"
@@ -272,23 +273,47 @@ void Message::refreshRightBadge() {
 		}
 		const auto channel = item->history()->peer->asMegagroup();
 		const auto user = item->author()->asUser();
-		if (!channel || !user) {
+		if (!channel) {
+			if (const auto chat = item->history()->peer->asChat()) {
+				if (user) {
+					const auto j = chat->memberRanks.find(
+						peerToUser(user->id));
+					if (j != chat->memberRanks.end()) {
+						return j->second;
+					}
+				}
+			}
+			return QString();
+		}
+		if (!user) {
 			return QString();
 		}
 		const auto info = channel->mgInfo.get();
-		const auto i = info->admins.find(peerToUser(user->id));
+		const auto userId = peerToUser(user->id);
+		const auto i = info->admins.find(userId);
 		const auto custom = (i != info->admins.end())
 			? i->second
 			: (info->creator == user)
 			? info->creatorRank
 			: QString();
-		return !custom.isEmpty()
-			? custom
-			: (info->creator == user)
-			? tr::lng_owner_badge(tr::now)
-			: (i != info->admins.end())
-			? tr::lng_admin_badge(tr::now)
-			: QString();
+		if (!custom.isEmpty()) {
+			return custom;
+		}
+		if (info->creator == user) {
+			return tr::lng_owner_badge(tr::now);
+		}
+		if (i != info->admins.end()) {
+			return tr::lng_admin_badge(tr::now);
+		}
+		const auto fromRank = item->fromRank();
+		if (!fromRank.isEmpty()) {
+			return fromRank;
+		}
+		const auto j = info->memberRanks.find(userId);
+		if (j != info->memberRanks.end()) {
+			return j->second;
+		}
+		return QString();
 	}();
 	auto badge = TextWithEntities{
 		(text.isEmpty()

@@ -83,6 +83,10 @@ public:
 	[[nodiscard]] bool noForwards() const {
 		return _controls.noForwards->toggled();
 	}
+	[[nodiscard]] bool customRanks() const {
+		return _controls.customRanks
+			&& _controls.customRanks->toggled();
+	}
 	[[nodiscard]] bool joinToWrite() const {
 		return _controls.joinToWrite && _controls.joinToWrite->toggled();
 	}
@@ -112,6 +116,7 @@ private:
 
 		Ui::SlideWrap<Ui::VerticalLayout> *whoSendWrap = nullptr;
 		Ui::SettingsButton *noForwards = nullptr;
+		Ui::SettingsButton *customRanks = nullptr;
 		Ui::SettingsButton *joinToWrite = nullptr;
 		Ui::SettingsButton *requestToJoin = nullptr;
 	};
@@ -296,6 +301,35 @@ void Controller::createContent() {
 			(_isGroup
 				? tr::lng_manage_peer_no_forwards_about
 				: tr::lng_manage_peer_no_forwards_about_channel)());
+
+		const auto amCreator = (_peer->isChat()
+			&& _peer->asChat()->amCreator())
+			|| (_peer->isChannel()
+				&& _peer->asChannel()->amCreator());
+		if (amCreator) {
+			Ui::AddSkip(_wrap.get());
+			Ui::AddSubsectionTitle(
+				_wrap.get(),
+				tr::lng_manage_peer_custom_ranks_title());
+			_controls.customRanks = _wrap->add(
+				EditPeerInfoBox::CreateButton(
+					_wrap.get(),
+					tr::lng_manage_peer_custom_ranks(),
+					rpl::single(QString()),
+					[] {},
+					st::peerPermissionsButton,
+					{}));
+			_controls.customRanks->toggleOn(
+				rpl::single(_dataSavedValue->customRanks)
+			)->toggledValue(
+			) | rpl::on_next([=](bool toggled) {
+				_dataSavedValue->customRanks = toggled;
+			}, _wrap->lifetime());
+			Ui::AddSkip(_wrap.get());
+			Ui::AddDividerText(
+				_wrap.get(),
+				tr::lng_manage_peer_custom_ranks_about());
+		}
 	}
 	if (_linkOnly) {
 		_controls.inviteLinkWrap->show(anim::type::instant);
@@ -777,6 +811,7 @@ void EditPeerTypeBox::prepare() {
 					? controller->usernamesOrder()
 					: std::vector<QString>()),
 				.noForwards = controller->noForwards(),
+				.customRanks = controller->customRanks(),
 				.joinToWrite = controller->joinToWrite(),
 				.requestToJoin = controller->requestToJoin(),
 			}); // We don't need username with private type.

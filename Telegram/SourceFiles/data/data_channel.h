@@ -86,6 +86,7 @@ enum class ChannelDataFlag : uint64 {
 	HasStarsPerMessage = (1ULL << 43),
 	StarsPerMessageKnown = (1ULL << 44),
 	HasActiveVideoStream = (1ULL << 45),
+	CustomRanksEnabled = (1ULL << 46),
 };
 inline constexpr bool is_flag_type(ChannelDataFlag) { return true; };
 using ChannelDataFlags = base::flags<ChannelDataFlag>;
@@ -143,6 +144,7 @@ public:
 
 	// For admin badges, full admins list with ranks.
 	base::flat_map<UserId, QString> admins;
+	base::flat_map<UserId, QString> memberRanks;
 
 	UserData *creator = nullptr; // nullptr means unknown
 	QString creatorRank;
@@ -355,6 +357,7 @@ public:
 	[[nodiscard]] bool autoTranslation() const {
 		return flags() & Flag::AutoTranslation;
 	}
+	[[nodiscard]] bool customRanksEnabled() const;
 
 	[[nodiscard]] auto adminRights() const {
 		return _adminRights.current();
