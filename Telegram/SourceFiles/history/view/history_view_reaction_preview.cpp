@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_reaction_preview.h"
 
 #include "base/call_delayed.h"
+#include "base/event_filter.h"
 #include "boxes/sticker_set_box.h"
 #include "data/data_document.h"
 #include "data/data_message_reactions.h"
@@ -76,6 +77,18 @@ bool ShowReactionPreview(
 			}));
 	};
 	state->clickable->setClickedCallback(hideAll);
+	base::install_event_filter(QCoreApplication::instance(), [=](
+			not_null<QEvent*> e) {
+		if (e->type() == QEvent::KeyPress
+			&& state->clickable->window()->isActiveWindow()) {
+			const auto k = static_cast<QKeyEvent*>(e.get());
+			if (k->key() == Qt::Key_Escape) {
+				hideAll();
+				return base::EventFilterResult::Cancel;
+			}
+		}
+		return base::EventFilterResult::Continue;
+	}, state->clickable->lifetime());
 	state->mediaPreview->showPreview(origin, document);
 	state->clickable->show();
 	const auto mediaPreviewRaw = state->mediaPreview.get();
