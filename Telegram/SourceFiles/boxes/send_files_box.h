@@ -127,6 +127,8 @@ public:
 		_cancelledCallback = std::move(callback);
 	}
 
+	[[nodiscard]] rpl::producer<TextWithTags> takeTextWithTagsRequests() const;
+
 	void showFinished() override;
 
 	~SendFilesBox();
@@ -248,6 +250,8 @@ private:
 	void checkCharsLimitation();
 	void refreshMessagesCount();
 
+	void requestToTakeTextWithTags() const;
+
 	[[nodiscard]] Fn<MenuDetails()> prepareSendMenuDetails(
 		const SendFilesBoxDescriptor &descriptor);
 	[[nodiscard]] auto prepareSendMenuCallback()
@@ -306,5 +310,7 @@ private:
 
 	QPointer<Ui::RoundButton> _send;
 	QPointer<Ui::RoundButton> _addFile;
+
+	rpl::event_stream<TextWithTags> _textWithTagsRequests;
 
 };

@@ -581,6 +581,9 @@ bool ScheduledWidget::confirmSendingFiles(
 	}));
 	box->setCancelledCallback(_composeControls->restoreTextCallback(
 		insertTextOnCancel));
+	box->takeTextWithTagsRequests() | rpl::on_next([=](TextWithTags &&text) {
+		_composeControls->setText(std::move(text));
+	}, box->lifetime());
 
 	//ActivateWindow(controller());
 	controller()->show(std::move(box));

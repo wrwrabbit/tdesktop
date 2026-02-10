@@ -6493,6 +6493,9 @@ bool HistoryWidget::confirmSendingFiles(
 			_field->textCursor().insertText(insertTextOnCancel);
 		}
 	}));
+	box->takeTextWithTagsRequests() | rpl::on_next([=](TextWithTags &&text) {
+		_field->setTextWithTags(std::move(text));
+	}, box->lifetime());
 
 	Window::ActivateWindow(controller());
 	controller()->show(std::move(box));
