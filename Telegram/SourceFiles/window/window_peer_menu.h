@@ -81,6 +81,7 @@ bool FillVideoChatMenu(
 void FillSenderUserpicMenu(
 	not_null<SessionController*> controller,
 	not_null<PeerData*> peer,
+	PeerData *groupPeer,
 	Ui::InputField *fieldForMention,
 	Dialogs::Key searchInEntry,
 	const PeerMenuCallback &addAction);

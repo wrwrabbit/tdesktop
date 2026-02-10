@@ -3323,9 +3323,15 @@ base::unique_qptr<Ui::PopupMenu> ChatWidget::listFillSenderUserpicMenu(
 	auto menu = base::make_unique_q<Ui::PopupMenu>(
 		this,
 		st::popupMenuWithIcons);
+	const auto senderPeer = _history->owner().peer(userpicPeerId);
+	const auto groupPeer = (_history->peer->isChat()
+		|| _history->peer->isMegagroup())
+		? _history->peer.get()
+		: nullptr;
 	Window::FillSenderUserpicMenu(
 		controller(),
-		_history->owner().peer(userpicPeerId),
+		senderPeer,
+		groupPeer,
 		_composeControls->fieldForMention(),
 		searchInEntry,
 		Ui::Menu::CreateAddActionCallback(menu.get()));

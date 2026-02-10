@@ -30,12 +30,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_changes.h"
 #include "base/unixtime.h"
 #include "ui/effects/outline_segments.h"
+#include "ui/layers/generic_box.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/menu/menu_multiline_action.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/text/text_utilities.h"
 #include "info/profile/info_profile_values.h"
 #include "window/window_session_controller.h"
 #include "history/history.h"
+#include "styles/style_boxes.h"
 #include "styles/style_chat.h"
 #include "styles/style_menu_icons.h"
 
@@ -162,6 +165,48 @@ void SaveChannelAdmin(
 		}
 	}).fail([=](const MTP::Error &error) {
 		ShowAddParticipantsError(show, error.type(), channel, user);
+		if (onFail) {
+			onFail();
+		}
+	}).send();
+}
+
+void SaveMemberRank(
+		std::shared_ptr<Ui::Show> show,
+		not_null<PeerData*> peer,
+		not_null<UserData*> user,
+		const QString &rank,
+		Fn<void()> onDone,
+		Fn<void()> onFail) {
+	peer->session().api().request(MTPmessages_EditChatParticipantRank(
+		peer->input(),
+		user->input(),
+		MTP_string(rank)
+	)).done([=](const MTPUpdates &result) {
+		peer->session().api().applyUpdates(result);
+		if (const auto channel = peer->asChannel()) {
+			channel->applyEditMemberRank(user, rank);
+		} else if (const auto chat = peer->asChat()) {
+			if (rank.isEmpty()) {
+				chat->memberRanks.remove(peerToUser(user->id));
+			} else {
+				chat->memberRanks[peerToUser(user->id)] = rank;
+			}
+			chat->session().changes().peerUpdated(
+				chat,
+				Data::PeerUpdate::Flag::Members);
+		}
+		peer->session().changes().chatMemberRankChanged(
+			peer,
+			user,
+			rank);
+		if (onDone) {
+			onDone();
+		}
+	}).fail([=](const MTP::Error &error) {
+		if (show) {
+			show->showToast(error.type());
+		}
 		if (onFail) {
 			onFail();
 		}
@@ -613,6 +658,16 @@ void ParticipantsAdditionalData::applyBannedLocally(
 				: participant->session().userId(),
 			std::move(rights),
 			ChatAdminRightsInfo()));
+	}
+}
+
+void ParticipantsAdditionalData::applyMemberRankLocally(
+		not_null<UserData*> user,
+		const QString &rank) {
+	if (rank.isEmpty()) {
+		_memberRanks.remove(user);
+	} else {
+		_memberRanks[user] = rank;
 	}
 }
 
@@ -1316,6 +1371,16 @@ void ParticipantsBoxController::prepare() {
 		recomputeTypeFor(user);
 		refreshRows();
 	}, lifetime());
+
+	_peer->session().changes().chatMemberRankChanges(
+	) | rpl::on_next([=](const Data::ChatMemberRankChange &update) {
+		if (update.peer != _peer) {
+			return;
+		}
+		_additional.applyMemberRankLocally(update.user, update.rank);
+		recomputeTypeFor(update.user);
+		refreshRows();
+	}, lifetime());
 }
 
 void ParticipantsBoxController::unload() {
@@ -1753,6 +1818,57 @@ base::unique_qptr<Ui::PopupMenu> ParticipantsBoxController::rowContextMenu(
 			(participant->isUser()
 				? &st::menuIconProfile
 				: &st::menuIconInfo));
+	}
+	if (user) {
+		const auto isAdmin = _peer->isChat()
+			? (_peer->asChat()->hasAdminRights()
+				|| _peer->asChat()->amCreator())
+			: (_peer->isChannel()
+				? (_peer->asChannel()->hasAdminRights()
+					|| _peer->asChannel()->amCreator())
+				: false);
+		const auto isSelf = user->isSelf();
+		const auto canEditSelf = isSelf
+			&& (isAdmin
+				|| (_peer->isChat()
+					? _peer->asChat()->customRanksEnabled()
+					: (_peer->isChannel()
+						? _peer->asChannel()->customRanksEnabled()
+						: false)));
+		const auto targetIsAdmin = _additional.adminRights(user).has_value()
+			|| _additional.isCreator(user);
+		const auto canEditTarget = !isSelf
+			&& isAdmin
+			&& (!targetIsAdmin || _additional.canEditAdmin(user));
+		if (canEditSelf || canEditTarget) {
+			const auto currentRank = _additional.memberRank(user);
+			const auto show = delegate()->peerListUiShow();
+			const auto peer = _peer;
+			const auto actionText = canEditSelf
+				? (currentRank.isEmpty()
+					? tr::lng_context_add_my_tag(tr::now)
+					: tr::lng_context_edit_my_tag(tr::now))
+				: (currentRank.isEmpty()
+					? tr::lng_context_add_member_tag(tr::now)
+					: tr::lng_context_edit_member_tag(tr::now));
+			result->addAction(
+				actionText,
+				crl::guard(this, [=] {
+					_editBox = show->show(Box(
+						EditCustomRankBox,
+						show,
+						peer,
+						user,
+						currentRank,
+						canEditSelf,
+						crl::guard(this, [=](const QString &rank) {
+							_additional.applyMemberRankLocally(user, rank);
+							recomputeTypeFor(user);
+							refreshRows();
+						})));
+				}),
+				&st::menuIconEdit);
+		}
 	}
 	if (_role == Role::Kicked) {
 		if (_peer->isMegagroup()
@@ -2463,4 +2579,72 @@ void ParticipantsBoxSearchController::searchDone(
 	});
 
 	delegate()->peerListSearchRefreshRows();
+}
+
+void EditCustomRankBox(
+		not_null<Ui::GenericBox*> box,
+		std::shared_ptr<Ui::Show> show,
+		not_null<PeerData*> peer,
+		not_null<UserData*> user,
+		const QString &currentRank,
+		bool isSelf,
+		Fn<void(QString rank)> onSaved) {
+	constexpr auto kRankLimit = 16;
+	struct State {
+		bool saving = false;
+	};
+	const auto state = box->lifetime().make_state<State>();
+
+	const auto hasRank = !currentRank.isEmpty();
+	box->setTitle(isSelf
+		? (hasRank
+			? tr::lng_context_edit_my_tag()
+			: tr::lng_context_add_my_tag())
+		: (hasRank
+			? tr::lng_context_edit_member_tag()
+			: tr::lng_context_add_member_tag()));
+
+	const auto field = box->addRow(object_ptr<Ui::InputField>(
+		box,
+		st::customBadgeField,
+		tr::lng_rights_edit_admin_rank_name(),
+		TextUtilities::RemoveEmoji(currentRank)));
+	field->setMaxLength(kRankLimit);
+	field->setInstantReplaces(Ui::InstantReplaces::TextOnly());
+	field->changes(
+	) | rpl::on_next([=] {
+		const auto text = field->getLastText();
+		const auto removed = TextUtilities::RemoveEmoji(text);
+		if (removed != text) {
+			field->setText(removed);
+		}
+	}, field->lifetime());
+
+	box->setFocusCallback([=] { field->setFocusFast(); });
+
+	const auto close = crl::guard(box, [=] { box->closeBox(); });
+	const auto save = [=] {
+		if (state->saving) {
+			return;
+		}
+		state->saving = true;
+		const auto rank = TextUtilities::RemoveEmoji(
+			TextUtilities::SingleLine(field->getLastText().trimmed()));
+		SaveMemberRank(
+			show,
+			peer,
+			user,
+			rank,
+			[=] {
+				if (onSaved) {
+					onSaved(rank);
+				}
+				close();
+			},
+			[=] { state->saving = false; });
+	};
+	field->submits(
+	) | rpl::on_next([=] { save(); }, field->lifetime());
+	box->addButton(tr::lng_settings_save(), save);
+	box->addButton(tr::lng_cancel(), close);
 }

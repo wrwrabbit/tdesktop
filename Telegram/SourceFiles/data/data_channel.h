@@ -308,6 +308,9 @@ public:
 		ChatAdminRightsInfo oldRights,
 		ChatAdminRightsInfo newRights,
 		const QString &rank);
+	void applyEditMemberRank(
+		not_null<UserData*> user,
+		const QString &rank);
 	void applyEditBanned(
 		not_null<PeerData*> participant,
 		ChatRestrictionsInfo oldRights,

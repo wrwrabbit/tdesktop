@@ -49,6 +49,15 @@ Fn<void(
 		Fn<void(ChatRestrictionsInfo newRights)> onDone,
 		Fn<void()> onFail);
 
+void EditCustomRankBox(
+	not_null<Ui::GenericBox*> box,
+	std::shared_ptr<Ui::Show> show,
+	not_null<PeerData*> peer,
+	not_null<UserData*> user,
+	const QString &currentRank,
+	bool isSelf,
+	Fn<void(QString rank)> onSaved);
+
 void SubscribeToMigration(
 	not_null<PeerData*> peer,
 	rpl::lifetime &lifetime,
@@ -130,6 +139,9 @@ public:
 	void applyBannedLocally(
 		not_null<PeerData*> participant,
 		ChatRestrictionsInfo rights);
+	void applyMemberRankLocally(
+		not_null<UserData*> user,
+		const QString &rank);
 
 private:
 	UserData *applyCreator(const Api::ChatParticipant &data);

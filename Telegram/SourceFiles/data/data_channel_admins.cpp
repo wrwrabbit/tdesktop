@@ -44,4 +44,37 @@ ChannelAdminChanges::~ChannelAdminChanges() {
 	}
 }
 
+ChannelMemberRankChanges::ChannelMemberRankChanges(
+		not_null<ChannelData*> channel)
+: _channel(channel)
+, _memberRanks(_channel->mgInfo->memberRanks) {
+}
+
+void ChannelMemberRankChanges::feed(
+		UserId userId,
+		const QString &rank) {
+	if (rank.isEmpty()) {
+		if (_memberRanks.remove(userId)) {
+			_changes.emplace(userId);
+		}
+	} else {
+		const auto i = _memberRanks.find(userId);
+		if (i == end(_memberRanks) || i->second != rank) {
+			_memberRanks[userId] = rank;
+			_changes.emplace(userId);
+		}
+	}
+}
+
+ChannelMemberRankChanges::~ChannelMemberRankChanges() {
+	if (_changes.size() > 1
+		|| (!_changes.empty()
+			&& _changes.front() != _channel->session().userId())) {
+		if (const auto history
+			= _channel->owner().historyLoaded(_channel)) {
+			history->applyGroupAdminChanges(_changes);
+		}
+	}
+}
+
 } // namespace Data

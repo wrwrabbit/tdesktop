@@ -39,7 +39,6 @@ struct EditPeerTypeData {
 	std::vector<QString> usernamesOrder;
 	bool hasDiscussionLink = false;
 	bool noForwards = false;
-	bool customRanks = false;
 	bool joinToWrite = false;
 	bool requestToJoin = false;
 };

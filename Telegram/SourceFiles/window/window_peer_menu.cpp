@@ -109,6 +109,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/ui_integration.h"
 #include "export/export_manager.h"
+#include "boxes/peers/edit_participants_box.h"
 #include "boxes/peers/edit_peer_info_box.h"
 #include "boxes/premium_preview_box.h"
 #include "styles/style_chat.h"
@@ -180,6 +181,24 @@ namespace {
 
 constexpr auto kArchivedToastDuration = crl::time(5000);
 constexpr auto kMaxUnreadWithoutConfirmation = 1000;
+
+[[nodiscard]] QString LookupMemberRank(
+		not_null<PeerData*> peer,
+		not_null<UserData*> user) {
+	if (const auto chat = peer->asChat()) {
+		const auto i = chat->memberRanks.find(peerToUser(user->id));
+		return (i != chat->memberRanks.end()) ? i->second : QString();
+	} else if (const auto channel = peer->asChannel()) {
+		if (channel->mgInfo) {
+			const auto i = channel->mgInfo->memberRanks.find(
+				peerToUser(user->id));
+			return (i != channel->mgInfo->memberRanks.end())
+				? i->second
+				: QString();
+		}
+	}
+	return QString();
+}
 
 base::options::toggle ViewProfileInChatsListContextMenu({
 	.id = kOptionViewProfileInChatsListContextMenu,
@@ -3761,6 +3780,7 @@ bool FillVideoChatMenu(
 void FillSenderUserpicMenu(
 		not_null<SessionController*> controller,
 		not_null<PeerData*> peer,
+		PeerData *groupPeer,
 		Ui::InputField *fieldForMention,
 		Dialogs::Key searchInEntry,
 		const PeerMenuCallback &addAction) {
@@ -3802,6 +3822,57 @@ void FillSenderUserpicMenu(
 		addAction(tr::lng_context_search_from(tr::now), [=] {
 			controller->searchInChat(searchInEntry, peer);
 		}, &st::menuIconSearch);
+	}
+
+	if (const auto user = peer->asUser()) {
+		if (groupPeer) {
+			const auto isAdmin = groupPeer->isChat()
+				? (groupPeer->asChat()->hasAdminRights()
+					|| groupPeer->asChat()->amCreator())
+				: (groupPeer->isChannel()
+					? (groupPeer->asChannel()->hasAdminRights()
+						|| groupPeer->asChannel()->amCreator())
+					: false);
+			const auto canEditTarget = [&] {
+				if (const auto chat = groupPeer->asChat()) {
+					if (peerToUser(user->id) == chat->creator) {
+						return chat->amCreator();
+					}
+					if (chat->admins.contains(user)) {
+						return chat->amCreator();
+					}
+					return true;
+				} else if (const auto channel = groupPeer->asChannel()) {
+					if (channel->mgInfo
+					&& (channel->mgInfo->lastAdmins.contains(user)
+						|| channel->mgInfo->creator == user)) {
+					return channel->canEditAdmin(user);
+				}
+				return true;
+				}
+				return false;
+			}();
+			if (isAdmin && canEditTarget && !user->isSelf()) {
+				const auto currentRank = LookupMemberRank(
+					groupPeer,
+					user);
+				addAction(
+					(currentRank.isEmpty()
+						? tr::lng_context_add_member_tag(tr::now)
+						: tr::lng_context_edit_member_tag(tr::now)),
+					[=] {
+						controller->show(Box(
+							EditCustomRankBox,
+							controller->uiShow(),
+							groupPeer,
+							user,
+							currentRank,
+							false,
+							nullptr));
+					},
+					&st::menuIconEdit);
+			}
+		}
 	}
 }
 

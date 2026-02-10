@@ -8964,6 +8964,7 @@ void HistoryWidget::fillSenderUserpicMenu(
 	Window::FillSenderUserpicMenu(
 		controller(),
 		peer,
+		inGroup ? _peer : nullptr,
 		(inGroup && _canSendTexts) ? _field.data() : nullptr,
 		inGroup ? _peer->owner().history(_peer) : Dialogs::Key(),
 		Ui::Menu::CreateAddActionCallback(menu));
