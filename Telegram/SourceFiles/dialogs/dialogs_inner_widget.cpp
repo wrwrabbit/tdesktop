@@ -1727,6 +1727,10 @@ void InnerWidget::performDrag() {
 		u"application/x-telegram-dialog"_q,
 		std::move(byteArray));
 
+	if (const auto u = history->peer->username(); !u.isEmpty()) {
+		mimeData->setText(history->peer->session().createInternalLinkFull(u));
+	}
+
 	const auto &st = st::defaultDialogRow;
 	auto pixmap = QPixmap(Size(st.height * style::DevicePixelRatio()));
 	pixmap.setDevicePixelRatio(style::DevicePixelRatio());
