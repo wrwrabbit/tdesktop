@@ -1701,7 +1701,7 @@ void InnerWidget::mouseMoveEvent(QMouseEvent *e) {
 }
 
 void InnerWidget::performDrag() {
-	if (!_qdragging) {
+	if (!_qdragging || !session().data().chatsFilters().has()) {
 		return;
 	}
 	const auto history = _qdragging->history();
