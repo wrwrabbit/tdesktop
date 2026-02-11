@@ -470,28 +470,29 @@ bool FillChooseFilterWithAdminedGroupsMenu(
 	return added;
 }
 
+History *HistoryFromMimeData(
+		const QMimeData *mime,
+		not_null<Main::Session*> session) {
+	const auto mimeFormat = u"application/x-telegram-dialog"_q;
+	if (!mime->hasFormat(mimeFormat)) {
+		return nullptr;
+	}
+	auto peerId = int64(-1);
+	auto isTestMode = false;
+	auto stream = QDataStream(mime->data(mimeFormat));
+	stream >> peerId;
+	stream >> isTestMode;
+	if (isTestMode != session->isTestMode()) {
+		return nullptr;
+	}
+	return session->data().historyLoaded(PeerId(peerId));
+}
+
 void SetupFilterDragAndDrop(
 		not_null<Ui::RpWidget*> outer,
 		not_null<Main::Session*> session,
 		Fn<std::optional<FilterId>(QPoint)> filterIdAtPosition,
 		Fn<FilterId()> activeFilterId) {
-	const auto mimeFormat = u"application/x-telegram-dialog"_q;
-	const auto peerIdFromMime = [=](const QMimeData *mimeData) {
-		auto peerId = int64(-1);
-		auto isTestMode = false;
-		if (mimeData->hasFormat(mimeFormat)) {
-			auto stream = QDataStream(mimeData->data(mimeFormat));
-			stream >> peerId;
-			stream >> isTestMode;
-			if (isTestMode != session->isTestMode()) {
-				return int64(-1);
-			}
-		}
-		return peerId;
-	};
-	const auto historyFromMime = [=](const QMimeData *mime) {
-		return session->data().historyLoaded(PeerId(peerIdFromMime(mime)));
-	};
 	const auto hasAction = [=](not_null<QDropEvent*> drop, bool perform) {
 		const auto mimeData = drop->mimeData();
 		const auto filterId = filterIdAtPosition(
@@ -500,7 +501,7 @@ void SetupFilterDragAndDrop(
 			return false;
 		}
 		const auto id = *filterId;
-		if (const auto h = historyFromMime(mimeData)) {
+		if (const auto h = HistoryFromMimeData(mimeData, session)) {
 			auto v = ChooseFilterValidator(h);
 			if (id) {
 				if (v.canAdd(id)) {

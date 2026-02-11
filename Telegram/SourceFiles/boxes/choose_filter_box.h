@@ -63,3 +63,7 @@ void SetupFilterDragAndDrop(
 	not_null<Main::Session*> session,
 	Fn<std::optional<FilterId>(QPoint)> filterIdAtPosition,
 	Fn<FilterId()> activeFilterId);
+
+[[nodiscard]] History *HistoryFromMimeData(
+	const QMimeData *mime,
+	not_null<Main::Session*> session);
