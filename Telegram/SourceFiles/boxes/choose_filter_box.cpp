@@ -474,18 +474,31 @@ History *HistoryFromMimeData(
 		const QMimeData *mime,
 		not_null<Main::Session*> session) {
 	const auto mimeFormat = u"application/x-telegram-dialog"_q;
-	if (!mime->hasFormat(mimeFormat)) {
-		return nullptr;
+	if (mime->hasFormat(mimeFormat)) {
+		auto peerId = int64(-1);
+		auto isTestMode = false;
+		auto stream = QDataStream(mime->data(mimeFormat));
+		stream >> peerId;
+		stream >> isTestMode;
+		if (isTestMode != session->isTestMode()) {
+			return nullptr;
+		}
+		return session->data().historyLoaded(PeerId(peerId));
 	}
-	auto peerId = int64(-1);
-	auto isTestMode = false;
-	auto stream = QDataStream(mime->data(mimeFormat));
-	stream >> peerId;
-	stream >> isTestMode;
-	if (isTestMode != session->isTestMode()) {
-		return nullptr;
+	if (mime->hasText()) {
+		auto text = mime->text().trimmed();
+		if (text.startsWith('@')) {
+			text = text.mid(1);
+		} else if (text.startsWith(u"https://t.me/"_q)) {
+			text = text.mid(13);
+		} else {
+			return nullptr;
+		}
+		if (const auto peer = session->data().peerByUsername(text)) {
+			return session->data().historyLoaded(peer->id);
+		}
 	}
-	return session->data().historyLoaded(PeerId(peerId));
+	return nullptr;
 }
 
 void SetupFilterDragAndDrop(
