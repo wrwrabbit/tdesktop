@@ -1803,7 +1803,8 @@ rpl::producer<std::optional<bool>> ComposeControls::attachRequests() const {
 }
 
 void ComposeControls::setMimeDataHook(MimeDataHook hook) {
-	_field->setMimeDataHook(std::move(hook));
+	_field->setMimeDataHook(
+		WrappedMessageFieldMimeHook(std::move(hook), _field));
 }
 
 bool ComposeControls::confirmMediaEdit(Ui::PreparedList &list) {

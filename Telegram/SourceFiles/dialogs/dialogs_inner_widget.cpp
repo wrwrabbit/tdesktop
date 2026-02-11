@@ -1729,6 +1729,9 @@ void InnerWidget::performDrag() {
 
 	if (const auto u = history->peer->username(); !u.isEmpty()) {
 		mimeData->setText(history->peer->session().createInternalLinkFull(u));
+		mimeData->setData(
+			u"application/x-telegram-input-field"_q,
+			('@' + u).toUtf8());
 	}
 
 	const auto &st = st::defaultDialogRow;

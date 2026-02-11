@@ -528,7 +528,7 @@ HistoryWidget::HistoryWidget(
 		supportInitAutocomplete();
 	}
 	_field->rawTextEdit()->installEventFilter(this);
-	_field->setMimeDataHook([=](
+	_field->setMimeDataHook(WrappedMessageFieldMimeHook([=](
 			not_null<const QMimeData*> data,
 			Ui::InputField::MimeAction action) {
 		if (action == Ui::InputField::MimeAction::Check) {
@@ -540,7 +540,7 @@ HistoryWidget::HistoryWidget(
 				Core::ReadMimeText(data));
 		}
 		Unexpected("action in MimeData hook.");
-	});
+	}, _field));
 
 	updateFieldSubmitSettings();
 
