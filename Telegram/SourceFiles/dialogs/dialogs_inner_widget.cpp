@@ -97,7 +97,8 @@ namespace {
 
 constexpr auto kHashtagResultsLimit = 5;
 constexpr auto kStartReorderThreshold = 30;
-constexpr auto kStartDragToFilterThreshold = 35;
+constexpr auto kStartDragToFilterThresholdX = kStartReorderThreshold;
+constexpr auto kStartDragToFilterThresholdY = 75;
 constexpr auto kQueryPreviewLimit = 32;
 constexpr auto kPreviewPostsLimit = 3;
 
@@ -1679,8 +1680,13 @@ void InnerWidget::mouseMoveEvent(QMouseEvent *e) {
 	if (_pressed && (e->buttons() & Qt::LeftButton)) {
 		const auto local = e->pos();
 		const auto outside = _dragging ? !rect().contains(local) : true;
-		const auto distanceExceeded = (local - _dragStart).manhattanLength()
-			>= style::ConvertScale(kStartDragToFilterThreshold);
+		const auto delta = local - _dragStart;
+		const auto thresholdY = _pressed->entry()->isPinnedDialog(_filterId)
+			? kStartDragToFilterThresholdY
+			: kStartDragToFilterThresholdX;
+		const auto distanceExceeded = std::abs(delta.x())
+				>= style::ConvertScale(kStartDragToFilterThresholdX)
+			|| std::abs(delta.y()) >= style::ConvertScale(thresholdY);
 
 		if (!_qdragging && outside && distanceExceeded) {
 			if (_pressed->history()) {
