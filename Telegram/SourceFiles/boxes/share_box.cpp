@@ -1379,24 +1379,26 @@ void ShareBox::Inner::changeCheckState(Chat *chat) {
 void ShareBox::Inner::chooseForumTopic(not_null<Data::Forum*> forum) {
 	const auto guard = base::make_weak(this);
 	const auto weak = std::make_shared<base::weak_qptr<Ui::BoxContent>>();
-	auto chosen = [=](not_null<Data::ForumTopic*> topic) {
+	auto chosen = [=](not_null<Data::Thread*> thread) {
 		if (const auto strong = *weak) {
 			strong->closeBox();
 		}
 		if (!guard) {
 			return;
 		}
-		const auto row = _chatsIndexed->getRow(topic->owningHistory());
+		const auto row = _chatsIndexed->getRow(thread->owningHistory());
 		if (!row) {
 			return;
 		}
 		const auto chat = getChat(row);
-		Assert(!chat->topic);
-		chat->topic = topic;
-		chat->topic->destroyed(
-		) | rpl::on_next([=] {
-			changePeerCheckState(chat, false);
-		}, chat->topicLifetime);
+		if (const auto topic = thread->asTopic()) {
+			Assert(!chat->topic);
+			chat->topic = topic;
+			chat->topic->destroyed(
+			) | rpl::on_next([=] {
+				changePeerCheckState(chat, false);
+			}, chat->topicLifetime);
+		}
 		updateChatName(chat);
 		changePeerCheckState(chat, true);
 	};
@@ -1410,8 +1412,8 @@ void ShareBox::Inner::chooseForumTopic(not_null<Data::Forum*> forum) {
 			box->closeBox();
 		}, box->lifetime());
 	};
-	auto filter = [=](not_null<Data::ForumTopic*> topic) {
-		return guard && _descriptor.filterCallback(topic);
+	auto filter = [=](not_null<Data::Thread*> thread) {
+		return guard && _descriptor.filterCallback(thread);
 	};
 	auto box = Box<PeerListBox>(
 		std::make_unique<ChooseTopicBoxController>(

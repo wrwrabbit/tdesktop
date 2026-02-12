@@ -3276,9 +3276,9 @@ base::weak_qptr<Ui::BoxContent> ShowDropMediaBox(
 		callback = std::move(successCallback),
 		weak,
 		navigation
-	](not_null<Data::ForumTopic*> topic) mutable {
+	](not_null<Data::Thread*> thread) mutable {
 		const auto content = navigation->parentController()->content();
-		if (!content->filesOrForwardDrop(topic, data.get())) {
+		if (!content->filesOrForwardDrop(thread, data.get())) {
 			return;
 		} else if (const auto strong = *weak) {
 			strong->closeBox();
