@@ -27,7 +27,8 @@ SearchCalendarController::SearchCalendarController(
 	Storage::SharedMediaType type)
 : _session(session)
 , _peerId(peerId)
-, _type(type) {
+, _type(type)
+, _api(&session->mtp()) {
 }
 
 void SearchCalendarController::monthThumbnails(
@@ -65,7 +66,7 @@ void SearchCalendarController::performMonthRequest(const MonthKey &key) {
 
 	auto &state = _months[key].state;
 
-	_months[key].requestId = _session->api().request(
+	_months[key].requestId = _api.request(
 		MTPmessages_GetSearchResultsCalendar(
 			MTP_flags(0),
 			peer->input(),

@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "mtproto/sender.h"
 #include "storage/storage_shared_media.h"
 
 namespace Main {
@@ -86,6 +87,8 @@ private:
 	const not_null<Main::Session*> _session;
 	const PeerId _peerId;
 	const Storage::SharedMediaType _type;
+
+	MTP::Sender _api;
 
 	base::flat_map<MonthKey, MonthData> _months;
 
