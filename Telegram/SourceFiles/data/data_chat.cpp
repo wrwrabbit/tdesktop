@@ -67,10 +67,6 @@ bool ChatData::allowsForwarding() const {
 	return !(flags() & Flag::NoForwards);
 }
 
-bool ChatData::customRanksEnabled() const {
-	return flags() & Flag::CustomRanksEnabled;
-}
-
 bool ChatData::canEditInformation() const {
 	return amIn() && !amRestricted(ChatRestriction::ChangeInfo);
 }

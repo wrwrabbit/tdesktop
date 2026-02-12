@@ -37,8 +37,7 @@ namespace {
 	const auto min = EnableHideMembersMin(megagroup);
 	const auto showHideMembers = megagroup->canBanMembers()
 		&& megagroup->membersCount() >= min;
-	const auto showCustomTags = megagroup->amCreator();
-	if (!showHideMembers && !showCustomTags) {
+	if (!showHideMembers) {
 		return { nullptr };
 	}
 
@@ -78,35 +77,6 @@ namespace {
 				megagroup->session().api().applyUpdates(result);
 			}).send();
 		}, button->lifetime());
-	}
-
-	if (showCustomTags) {
-		Ui::AddSkip(container);
-		const auto tagsButton = container->add(
-			EditPeerInfoBox::CreateButton(
-				container,
-				tr::lng_manage_peer_custom_tags(),
-				rpl::single(QString()),
-				[] {},
-				st::manageGroupNoIconButton,
-				{}
-		))->toggleOn(rpl::single(megagroup->customRanksEnabled()));
-		Ui::AddSkip(container);
-		Ui::AddDividerText(
-			container,
-			tr::lng_manage_peer_custom_tags_about());
-
-		tagsButton->toggledValue(
-		) | rpl::on_next([=](bool toggled) {
-			megagroup->session().api().request(
-				MTPmessages_ToggleChatCustomRanks(
-					megagroup->input(),
-					MTP_bool(toggled)
-				)
-			).done([=](const MTPUpdates &result) {
-				megagroup->session().api().applyUpdates(result);
-			}).send();
-		}, tagsButton->lifetime());
 	}
 
 	return result;

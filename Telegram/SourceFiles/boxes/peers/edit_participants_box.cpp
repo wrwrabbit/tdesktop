@@ -1820,25 +1820,13 @@ base::unique_qptr<Ui::PopupMenu> ParticipantsBoxController::rowContextMenu(
 				: &st::menuIconInfo));
 	}
 	if (user) {
-		const auto isAdmin = _peer->isChat()
-			? (_peer->asChat()->hasAdminRights()
-				|| _peer->asChat()->amCreator())
-			: (_peer->isChannel()
-				? (_peer->asChannel()->hasAdminRights()
-					|| _peer->asChannel()->amCreator())
-				: false);
 		const auto isSelf = user->isSelf();
 		const auto canEditSelf = isSelf
-			&& (isAdmin
-				|| (_peer->isChat()
-					? _peer->asChat()->customRanksEnabled()
-					: (_peer->isChannel()
-						? _peer->asChannel()->customRanksEnabled()
-						: false)));
+			&& !_peer->amRestricted(ChatRestriction::EditRank);
 		const auto targetIsAdmin = _additional.adminRights(user).has_value()
 			|| _additional.isCreator(user);
 		const auto canEditTarget = !isSelf
-			&& isAdmin
+			&& _peer->canManageRanks()
 			&& (!targetIsAdmin || _additional.canEditAdmin(user));
 		if (canEditSelf || canEditTarget) {
 			const auto currentRank = _additional.memberRank(user);

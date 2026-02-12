@@ -3826,13 +3826,6 @@ void FillSenderUserpicMenu(
 
 	if (const auto user = peer->asUser()) {
 		if (groupPeer) {
-			const auto isAdmin = groupPeer->isChat()
-				? (groupPeer->asChat()->hasAdminRights()
-					|| groupPeer->asChat()->amCreator())
-				: (groupPeer->isChannel()
-					? (groupPeer->asChannel()->hasAdminRights()
-						|| groupPeer->asChannel()->amCreator())
-					: false);
 			const auto canEditTarget = [&] {
 				if (const auto chat = groupPeer->asChat()) {
 					if (peerToUser(user->id) == chat->creator) {
@@ -3852,7 +3845,7 @@ void FillSenderUserpicMenu(
 				}
 				return false;
 			}();
-			if (isAdmin && canEditTarget && !user->isSelf()) {
+			if (groupPeer->canManageRanks() && canEditTarget && !user->isSelf()) {
 				const auto currentRank = LookupMemberRank(
 					groupPeer,
 					user);

@@ -281,7 +281,8 @@ void RequestButton(
 				inputPeer,
 				MTP_int(itemId.msg),
 				MTP_int(buttonId),
-				MTPstring() // #TODO auth url
+				MTPstring(), // #TODO auth url
+				MTPstring()
 			)).done([=](const MTPUrlAuthResult &result) {
 				const auto accepted = result.match(
 				[](const MTPDurlAuthResultAccepted &data) {
@@ -357,7 +358,8 @@ void RequestUrl(
 				MTPInputPeer(),
 				MTPint(), // msg_id
 				MTPint(), // button_id
-				MTP_string(url)
+				MTP_string(url),
+				MTPstring()
 			)).done([=](const MTPUrlAuthResult &result) {
 				const auto accepted = result.match(
 				[](const MTPDurlAuthResultAccepted &data) {

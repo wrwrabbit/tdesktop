@@ -1869,6 +1869,17 @@ bool PeerData::canManageGroupCall() const {
 	Unexpected("Peer type in PeerData::canManageGroupCall.");
 }
 
+bool PeerData::canManageRanks() const {
+	if (const auto chat = asChat()) {
+		return chat->amCreator()
+			|| (chat->adminRights() & ChatAdminRight::ManageRanks);
+	} else if (const auto channel = asChannel()) {
+		return channel->amCreator()
+			|| (channel->adminRights() & ChatAdminRight::ManageRanks);
+	}
+	return false;
+}
+
 bool PeerData::amMonoforumAdmin() const {
 	if (const auto channel = asChannel()) {
 		return channel->flags() & ChannelDataFlag::MonoforumAdmin;
