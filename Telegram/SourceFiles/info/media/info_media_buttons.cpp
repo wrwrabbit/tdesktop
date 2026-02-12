@@ -324,6 +324,7 @@ not_null<Ui::SettingsButton*> AddPeerGiftsButton(
 		rpl::event_stream<> textRefreshed;
 		QPointer<Ui::SettingsButton> button;
 		rpl::lifetime appearedLifetime;
+		bool giftsLoaded = false;
 	};
 	const auto state = parent->lifetime().make_state<State>();
 
@@ -364,7 +365,13 @@ not_null<Ui::SettingsButton*> AddPeerGiftsButton(
 					.customEmojiLoopLimit = 1,
 				}))));
 	wrap->setDuration(st::infoSlideDuration);
-	wrap->toggleOn(rpl::duplicate(forked) | rpl::map(rpl::mappers::_1 > 0));
+	wrap->toggleOn(
+		rpl::combine(
+			rpl::duplicate(forked),
+			state->textRefreshed.events_starting_with({})
+		) | rpl::map([=](int count, auto) {
+			return count > 0 && state->giftsLoaded;
+		}));
 	tracker.track(wrap);
 
 	rpl::duplicate(forked) | rpl::filter(
@@ -380,6 +387,7 @@ not_null<Ui::SettingsButton*> AddPeerGiftsButton(
 						gift.info.document->id,
 						refresh));
 			}
+			state->giftsLoaded = true;
 			state->textRefreshed.fire({});
 		});
 		navigation->session().recentSharedGifts().request(peer, requestDone);
