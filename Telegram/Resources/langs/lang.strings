@@ -4733,6 +4733,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_url_auth_phone_toast_bad_title" = "Login failed";
 "lng_url_auth_phone_toast_bad" = "Please try logging in to {domain} again.";
 "lng_url_auth_phone_toast_bad_expired" = "This link is expired.";
+"lng_url_auth_match_code_title" = "Tap the emoji shown on your other device";
+"lng_url_auth_match_code_info" = "Login request from {domain}";
 
 "lng_bot_start" = "Start";
 "lng_bot_choose_group" = "Select a Group";

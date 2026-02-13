@@ -809,9 +809,22 @@ backgroundConfirmCancel: RoundButton(backgroundConfirm) {
 urlAuthCheckbox: Checkbox(defaultBoxCheckbox) {
 	width: 240px;
 }
+urlAuthCodesTitle: FlatLabel(defaultPeerListAbout) {
+	textFg: boxTitleFg;
+	style: TextStyle(defaultTextStyle) {
+		font: boxTitleFont;
+	}
+}
 urlAuthCheckboxAbout: FlatLabel(defaultPeerListAbout) {
 	style: TextStyle(boxTextStyle) {
 		font: font(12px);
+	}
+}
+urlAuthCodesButton: RoundButton(defaultLightButton) {
+	height: 58px;
+	textTop: 19px;
+	style: TextStyle(semiboldTextStyle) {
+		font: font(20px semibold);
 	}
 }
 urlAuthBoxRowTopLabel: FlatLabel(boxLabel) {

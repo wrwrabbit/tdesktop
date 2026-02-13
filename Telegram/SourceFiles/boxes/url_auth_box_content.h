@@ -20,6 +20,7 @@ struct Result {
 	bool auth : 1 = false;
 	bool allowWrite : 1 = false;
 	bool sharePhone : 1 = false;
+	QString matchCode;
 };
 
 class SwitchableUserpicButton final : public Ui::RippleButton {
@@ -69,6 +70,7 @@ void ShowDetails(
 	const QString &browser,
 	const QString &platform,
 	const QString &ip,
-	const QString &region);
+	const QString &region,
+	rpl::producer<QStringList> matchCodes = rpl::single(QStringList()));
 
 } // namespace UrlAuthBox

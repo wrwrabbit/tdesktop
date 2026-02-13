@@ -14,8 +14,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
+#include "ui/widgets/horizontal_fit_container.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/tooltip.h"
+#include "ui/emoji_config.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/ui_utility.h"
 #include "styles/style_boxes.h"
@@ -25,6 +27,118 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace UrlAuthBox {
 namespace {
+
+void PrepareFullWidthRoundButton(
+		not_null<Ui::RoundButton*> button,
+		not_null<Ui::VerticalLayout*> content,
+		const style::margins &padding) {
+	button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+	button->setFullRadius(true);
+	const auto paddingHorizontal = padding.left() + padding.right();
+	content->widthValue() | rpl::on_next([=](int w) {
+		button->resize(w - paddingHorizontal, button->height());
+	}, button->lifetime());
+}
+
+void ShowMatchCodesBox(
+		not_null<Ui::GenericBox*> box,
+		const QString &domain,
+		const QStringList &codes,
+		Fn<void(QString)> callback) {
+	box->setWidth(st::boxWidth);
+	box->setStyle(st::futureOwnerBox);
+
+	const auto content = box->verticalLayout();
+	const auto &buttonStyle = st::defaultLightButton;
+
+	Ui::AddSkip(content);
+	content->add(
+		object_ptr<Ui::FlatLabel>(
+			content,
+			tr::lng_url_auth_match_code_title(),
+			st::urlAuthCodesTitle),
+		st::boxRowPadding,
+		style::al_top);
+
+	Ui::AddSkip(content);
+	Ui::AddSkip(content);
+
+	const auto buttons = content->add(
+		object_ptr<Ui::HorizontalFitContainer>(
+			content,
+			st::boxRowPadding.left() * 2),
+		st::boxRowPadding);
+	buttons->resize(0, st::urlAuthCodesButton.height);
+
+	for (const auto &code : codes) {
+		auto emojiLength = 0;
+		const auto emoji = Ui::Emoji::Find(code, &emojiLength);
+		const auto emojiCode = (emoji && (emojiLength == code.size()));
+		const auto button = Ui::CreateChild<Ui::RoundButton>(
+			buttons,
+			rpl::single(emojiCode ? QString() : code),
+			st::urlAuthCodesButton);
+		if (emojiCode) {
+			button->setTextFgOverride(QColor(Qt::transparent));
+			const auto overlay = Ui::CreateChild<Ui::RpWidget>(button);
+			overlay->setAttribute(Qt::WA_TransparentForMouseEvents);
+			overlay->show();
+			button->sizeValue() | rpl::on_next([=](QSize size) {
+				overlay->resize(size);
+			}, overlay->lifetime());
+			overlay->paintOn([=](QPainter &p) {
+				const auto size = Ui::Emoji::GetSizeLarge();
+				const auto visible = size / style::DevicePixelRatio();
+				Ui::Emoji::Draw(
+					p,
+					emoji,
+					size,
+					(overlay->width() - visible) / 2,
+					(overlay->height() - visible) / 2);
+			});
+		}
+		button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+		button->setFullRadius(true);
+		button->setClickedCallback([=] {
+			box->closeBox();
+			callback(code);
+		});
+		buttons->add(button);
+	}
+
+	Ui::AddSkip(content);
+
+	const auto domainUrl = qthelp::validate_url(domain);
+	if (!domainUrl.isEmpty()) {
+		Ui::AddSkip(content);
+		Ui::AddSkip(content);
+		content->add(
+			object_ptr<Ui::FlatLabel>(
+				content,
+				tr::lng_url_auth_login_title(
+					lt_domain,
+					rpl::single(Ui::Text::Link(domain, domainUrl)),
+					tr::marked),
+				st::urlAuthCheckboxAbout),
+			st::boxRowPadding,
+			style::al_top);
+	}
+	Ui::AddSkip(content);
+	Ui::AddSkip(content);
+	{
+		const auto &padding = st::boxRowPadding;
+		const auto button = content->add(
+			object_ptr<Ui::RoundButton>(
+				content,
+				tr::lng_cancel(),
+				st::attentionBoxButton),
+			padding);
+		PrepareFullWidthRoundButton(button, content, padding);
+		button->setClickedCallback([=] {
+			box->closeBox();
+		});
+	}
+}
 
 } // namespace
 
@@ -252,8 +366,10 @@ void ShowDetails(
 		const QString &browser,
 		const QString &platform,
 		const QString &ip,
-		const QString &region) {
+		const QString &region,
+		rpl::producer<QStringList> matchCodes) {
 	box->setWidth(st::boxWidth);
+	box->setStyle(st::futureOwnerBox);
 
 	const auto content = box->verticalLayout();
 
@@ -342,13 +458,61 @@ void ShowDetails(
 		Ui::AddSkip(content);
 	}
 
-	box->addButton(tr::lng_url_auth_login_button(), [=] {
-		callback({
-			.auth = true,
-			.allowWrite = (allowMessages && allowMessages->toggled()),
+	struct State {
+		QStringList matchCodes;
+	};
+	const auto state = box->lifetime().make_state<State>();
+	std::move(matchCodes) | rpl::on_next([=](const QStringList &codes) {
+		state->matchCodes = codes;
+	}, box->lifetime());
+
+	{
+		const auto &padding = st::boxRowPadding;
+		const auto button = content->add(
+			object_ptr<Ui::RoundButton>(
+				content,
+				tr::lng_url_auth_login_button(),
+				st::defaultLightButton),
+			padding);
+		PrepareFullWidthRoundButton(button, content, padding);
+		button->setClickedCallback([=] {
+			if (state->matchCodes.isEmpty()) {
+				callback({
+					.auth = true,
+					.allowWrite = (allowMessages && allowMessages->toggled()),
+				});
+				return;
+			}
+			box->uiShow()->show(Box([=](
+					not_null<Ui::GenericBox*> matchCodesBox) {
+				ShowMatchCodesBox(
+					matchCodesBox,
+					domain,
+					state->matchCodes,
+					[=](QString matchCode) {
+						callback({
+							.auth = true,
+							.allowWrite = (allowMessages
+								&& allowMessages->toggled()),
+							.matchCode = std::move(matchCode),
+						});
+					});
+			}));
 		});
-	});
-	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	}
+	{
+		const auto &padding = st::boxRowPadding;
+		const auto button = content->add(
+			object_ptr<Ui::RoundButton>(
+				content,
+				tr::lng_suggest_action_decline(),
+				st::attentionBoxButton),
+			padding);
+		PrepareFullWidthRoundButton(button, content, padding);
+		button->setClickedCallback([=] {
+			box->closeBox();
+		});
+	}
 }
 
 } // namespace UrlAuthBox
