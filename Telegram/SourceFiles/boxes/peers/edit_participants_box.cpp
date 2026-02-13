@@ -1863,7 +1863,9 @@ base::unique_qptr<Ui::PopupMenu> ParticipantsBoxController::rowContextMenu(
 							refreshRows();
 						})));
 				}),
-				&st::menuIconEdit);
+				(currentRank.isEmpty()
+					? &st::menuIconTagAdd
+					: &st::menuIconTagEdit));
 		}
 	}
 	if (_role == Role::Kicked) {
