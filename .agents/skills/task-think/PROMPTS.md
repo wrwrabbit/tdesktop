@@ -1,86 +1,42 @@
----
-description: Implement a feature or fix using multi-agent workflow with fresh context at each phase
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task, AskUserQuestion, TodoWrite
----
+# Phase Prompts
 
-# Task - Multi-Agent Implementation Workflow
-
-You orchestrate a multi-phase implementation workflow that uses fresh agent spawns to work within context window limits on a large codebase.
-
-**Arguments:** `$ARGUMENTS` = "$ARGUMENTS"
-
-If `$ARGUMENTS` is provided, it's the task description. If empty, ask the user what they want implemented.
-
-## Overview
-
-The workflow is organized around **projects**. Each project lives in `.ai/<project-name>/` and can contain multiple sequential **tasks** (labeled `a`, `b`, `c`, ... `z`).
-
-Project structure:
-```
-.ai/<project-name>/
-  about.md              # Single source of truth for the entire project
-  a/                    # First task
-    context.md          # Gathered codebase context for this task
-    plan.md             # Implementation plan
-    review1.md          # Code review documents (up to 3)
-    review2.md
-    review3.md
-  b/                    # Follow-up task
-    context.md
-    plan.md
-    review1.md
-  c/                    # Another follow-up task
-    ...
-```
-
-- `about.md` is the project-level blueprint — a single comprehensive document describing what this project does and how it works, written as if everything is already fully implemented. It contains no temporal state ("current state", "pending changes", "not yet implemented"). It is **rewritten** (not appended to) each time a new task starts, incorporating the new task's changes as if they were always part of the design.
-- Each task folder (`a/`, `b/`, ...) contains self-contained files for that task. The task's `context.md` carries all task-specific information: what specifically needs to change, the delta from the current codebase, gathered file references and code patterns. Planning, implementation, and review agents only read the current task's folder.
+Use these templates for `codex exec --json` child runs. Replace `<TASK>`, `<PROJECT>`, `<LETTER>`, and `<REPO_ROOT>`.
 
 ## Phase 0: Setup
 
-**Record the current time now** (using `Get-Date` in PowerShell or equivalent) and store it as `$START_TIME`. You will use this at the end to display total elapsed time.
+**Record the current time now** and store it as `$START_TIME`. You will use this at the end to display total elapsed time.
 
-⚠️ **CRITICAL: Follow-up detection MUST happen FIRST, before anything else.**
+Before running any phase prompts, the orchestrator must determine whether this is a new project or a follow-up task.
 
-### Step 0a: Follow-up detection (MANDATORY — do this BEFORE understanding the task)
+**Follow-up detection (MANDATORY — do this BEFORE anything else):**
+1. Extract the first word/token from the task description. Call it `FIRST_TOKEN`.
+2. Run these two checks IN PARALLEL:
+   - `ls .ai/` — to see all existing project names
+   - `ls .ai/<FIRST_TOKEN>/about.md` — to check if this specific project exists
+3. If check 2 **succeeds** (the file exists): this is a **follow-up task**. The project name is `FIRST_TOKEN`. The task description is everything after `FIRST_TOKEN`.
+4. If check 2 **fails** (file not found): this is a **new project**. The full input is the task description.
 
-Extract the first word/token from `$ARGUMENTS` (everything before the first space or newline). Call it `FIRST_TOKEN`.
-
-Then run these TWO commands using the Bash tool, IN PARALLEL, right now:
-1. `ls .ai/` — to see all existing project names
-2. `ls .ai/<FIRST_TOKEN>/about.md` — to check if this specific project exists
-
-**Evaluate the results:**
-- If command 2 **succeeds** (the file exists): this is a **follow-up task**. The project name is `FIRST_TOKEN`. The task description is everything in `$ARGUMENTS` AFTER `FIRST_TOKEN` (strip leading whitespace).
-- If command 2 **fails** (file not found): this is a **new project**. The full `$ARGUMENTS` is the task description.
-
-**Do NOT proceed to step 0b until you have run these commands and determined follow-up vs new.**
-
-### Step 0b: Project setup
+**Do NOT proceed until you have run these checks and determined follow-up vs new.**
 
 **For new projects:**
-- Using the list from command 1, pick a unique short name (1-2 lowercase words, hyphen-separated) that doesn't collide with existing projects.
-- Create `.ai/<project-name>/` and `.ai/<project-name>/a/`.
-- Set current task letter = `a`.
+- Using the list from check 1, pick a unique short name (1-2 lowercase words, hyphen-separated) that doesn't collide with existing projects.
+- Create `.ai/<PROJECT>/` and `.ai/<PROJECT>/a/` and `logs/`.
+- Set `<LETTER>` = `a`.
 
 **For follow-up tasks:**
-- Scan `.ai/<project-name>/` for existing task folders (`a/`, `b/`, ...). Find the latest one (highest letter).
+- Scan `.ai/<PROJECT>/` for existing task folders (`a/`, `b/`, ...). Find the latest one (highest letter).
 - The previous task letter = that highest letter.
 - The new task letter = next letter in sequence.
-- Create `.ai/<project-name>/<new-letter>/`.
+- Create `.ai/<PROJECT>/<LETTER>/` and `logs/`.
 
-Then proceed to Phase 1 (Context Gathering) in both cases. Follow-up tasks do NOT skip context gathering — they go through a modified version of it.
+Then proceed to Phase 1. Follow-up tasks do NOT skip context gathering — they go through a modified version of it.
 
-## Phase 1: Context Gathering
+## Phase 1: Context (New Project, letter = `a`)
 
-### For New Projects (task letter = `a`)
-
-Spawn an agent (Task tool, subagent_type=`general-purpose`) with this prompt structure:
-
-```
+```text
 You are a context-gathering agent for a large C++ codebase (Telegram Desktop).
 
-TASK: <paste the user's task description here>
+TASK: <TASK>
 
 YOUR JOB: Read AGENTS.md, inspect the codebase, find ALL files and code relevant to this task, and write two documents.
 
@@ -100,7 +56,7 @@ Steps:
 
 Write TWO files:
 
-### File 1: .ai/<project-name>/about.md
+### File 1: .ai/<PROJECT>/about.md
 
 NOTE: This file is NOT used by any agent in the current task. It exists solely as a starting point for a FUTURE follow-up task's context gatherer. No planning, implementation, or review agent will ever read it. Only the context-gathering agent of the next follow-up task reads about.md (together with the latest context.md) to produce a fresh context.md for that next task.
 
@@ -112,7 +68,7 @@ Write it as if the project is already fully implemented and working. It should c
 
 Do NOT include temporal state like "Current State", "Pending Changes", "Not yet implemented", "TODO", or any other framing that distinguishes between "done" and "not done". Describe the project as a complete, coherent whole — as if everything is already working. This is a project overview, not a status tracker. Task-specific work belongs exclusively in context.md.
 
-### File 2: .ai/<project-name>/a/context.md
+### File 2: .ai/<PROJECT>/a/context.md
 
 This is the task-specific implementation context. This is the PRIMARY document — all downstream agents (planning, implementation, review) will read ONLY this file. It must be completely self-contained. It should contain:
 - **Task Description**: The full task restated clearly
@@ -126,32 +82,30 @@ This is the task-specific implementation context. This is the PRIMARY document �
 - **Reference Implementations**: Similar features that can serve as templates
 
 Be extremely thorough. Another agent with NO prior context will read this file and must be able to understand everything needed to implement the task.
+
+Do not implement code in this phase.
 ```
 
-After this agent completes, read both `about.md` and `a/context.md` to verify they were written properly.
+## Phase 1F: Context (Follow-up Task, letter = `b`, `c`, ...)
 
-### For Follow-up Tasks (task letter = `b`, `c`, ...)
-
-Spawn an agent (Task tool, subagent_type=`general-purpose`) with this prompt structure:
-
-```
+```text
 You are a context-gathering agent for a follow-up task on an existing project in a large C++ codebase (Telegram Desktop).
 
-NEW TASK: <paste the follow-up task description here>
+NEW TASK: <TASK>
 
 YOUR JOB: Read the existing project state, gather any additional context needed, and produce fresh documents for the new task.
 
 Steps:
 1. Read AGENTS.md for project conventions and build instructions.
-2. Read .ai/<project-name>/about.md — this is the project-level blueprint describing everything done so far.
-3. Read .ai/<project-name>/<previous-letter>/context.md — this is the previous task's gathered context.
+2. Read .ai/<PROJECT>/about.md — this is the project-level blueprint describing everything done so far.
+3. Read .ai/<PROJECT>/<PREV_LETTER>/context.md — this is the previous task's gathered context.
 4. Understand what has already been implemented by reading the actual source files referenced in about.md and the previous context.
 5. Based on the NEW TASK description, search the codebase for any ADDITIONAL files, classes, functions, and patterns that are relevant to the new task but not already covered.
 6. Read all newly relevant files thoroughly.
 
 Write TWO files:
 
-### File 1: .ai/<project-name>/about.md (REWRITE)
+### File 1: .ai/<PROJECT>/about.md (REWRITE)
 
 NOTE: This file is NOT used by any agent in the current task. It exists solely as a starting point for a FUTURE follow-up task's context gatherer. No planning, implementation, or review agent will ever read it. You are rewriting it now so that the next follow-up has an accurate project overview to start from.
 
@@ -170,9 +124,7 @@ It should NOT contain:
 - Any distinction between "what was done before" and "what this task adds"
 - Information that contradicts the new task requirements (if the new task changes direction, the about.md should reflect the NEW direction as if it was always the plan)
 
-Think of about.md as "the complete description of what this project does and how it works." Someone reading it should understand the full project as a finished product, without knowing it went through multiple tasks.
-
-### File 2: .ai/<project-name>/<new-letter>/context.md
+### File 2: .ai/<PROJECT>/<LETTER>/context.md
 
 This is the PRIMARY document — all downstream agents (planning, implementation, review) will read ONLY this file. It must be completely self-contained. about.md will NOT be available to them.
 
@@ -188,24 +140,20 @@ It should contain:
 - **Reference Implementations**: Similar features that can serve as templates
 
 Be extremely thorough. Another agent with NO prior context will read ONLY this file and must be able to understand everything needed to implement the new task. Do NOT assume the reader has seen about.md or any previous task files. The context.md is the single source of truth for all downstream agents — it must include all relevant project background, not just the delta.
+
+Do not implement code in this phase.
 ```
 
-After this agent completes, read both `about.md` and `<new-letter>/context.md` to verify they were written properly.
+## Phase 2: Plan
 
-## Phase 2: Planning
-
-Spawn an agent (Task tool, subagent_type=`general-purpose`) with this prompt structure:
-
-```
+```text
 You are a planning agent. You must create a detailed implementation plan.
 
 Read these files:
-- .ai/<project-name>/<letter>/context.md - Contains all gathered context for this task
+- .ai/<PROJECT>/<LETTER>/context.md - Contains all gathered context for this task
 - Then read the specific source files referenced in context.md to understand the code deeply.
 
-Use /ultrathink to reason carefully about the implementation approach.
-
-Create a detailed plan in: .ai/<project-name>/<letter>/plan.md
+Create a detailed plan in: .ai/<PROJECT>/<LETTER>/plan.md
 
 The plan.md should contain:
 
@@ -248,23 +196,21 @@ Number every step. Group steps into phases if there are more than ~8 steps.
 - [ ] Phase 2: <name> (if applicable)
 - [ ] Build verification
 - [ ] Code review
-```
 
-After this agent completes, read `plan.md` to verify it was written properly.
+Do not implement code in this phase.
+```
 
 ## Phase 3: Plan Assessment
 
-Spawn an agent (Task tool, subagent_type=`general-purpose`) with this prompt structure:
-
-```
+```text
 You are a plan assessment agent. Review and refine an implementation plan.
 
 Read these files:
-- .ai/<project-name>/<letter>/context.md
-- .ai/<project-name>/<letter>/plan.md
+- .ai/<PROJECT>/<LETTER>/context.md
+- .ai/<PROJECT>/<LETTER>/plan.md
 - Then read the actual source files referenced to verify the plan makes sense.
 
-Use /ultrathink to assess the plan:
+Assess the plan:
 
 1. **Correctness**: Are the file paths and line references accurate? Does the plan reference real functions and types?
 2. **Completeness**: Are there missing steps? Edge cases not handled?
@@ -281,22 +227,20 @@ Update plan.md with your refinements. Keep the same structure but:
 - Add `Assessed: yes` at the bottom of the file
 
 If the plan is small enough for a single agent (roughly <=8 steps), mark it as a single phase.
-```
 
-After this agent completes, read `plan.md` to verify it was assessed.
+Do not implement code in this phase.
+```
 
 ## Phase 4: Implementation
 
-Now read `plan.md` yourself to understand the phases.
+For each phase in the plan that is not yet marked as done, run a separate child session:
 
-For each phase in the plan that is not yet marked as done, spawn an implementation agent (Task tool, subagent_type=`general-purpose`):
-
-```
+```text
 You are an implementation agent working on phase <N> of an implementation plan.
 
 Read these files first:
-- .ai/<project-name>/<letter>/context.md - Full codebase context
-- .ai/<project-name>/<letter>/plan.md - Implementation plan
+- .ai/<PROJECT>/<LETTER>/context.md - Full codebase context
+- .ai/<PROJECT>/<LETTER>/plan.md - Implementation plan
 
 Then read the source files you'll be modifying.
 
@@ -315,21 +259,19 @@ When finished, report what you did and any issues encountered.
 
 After each implementation agent returns:
 1. Read `plan.md` to check the status was updated.
-2. If more phases remain, spawn the next implementation agent.
+2. If more phases remain, run the next implementation child session.
 3. If all phases are done, proceed to build verification.
 
 ## Phase 5: Build Verification
 
 Only run this phase if the task involved modifying project source code (not just docs or config).
 
-Spawn a build verification agent (Task tool, subagent_type=`general-purpose`):
-
-```
+```text
 You are a build verification agent.
 
 Read these files:
-- .ai/<project-name>/<letter>/context.md
-- .ai/<project-name>/<letter>/plan.md
+- .ai/<PROJECT>/<LETTER>/context.md
+- .ai/<PROJECT>/<LETTER>/plan.md
 
 The implementation is complete. Your job is to build the project and fix any build errors.
 
@@ -351,8 +293,6 @@ Rules:
 When finished, report the build result.
 ```
 
-After the build agent returns, read `plan.md` to confirm the final status. Then proceed to Phase 6.
-
 ## Phase 6: Code Review Loop
 
 After build verification passes, run up to 3 review-fix iterations to improve code quality. Set iteration counter `R = 1`.
@@ -361,10 +301,10 @@ After build verification passes, run up to 3 review-fix iterations to improve co
 
 ```
 LOOP:
-  1. Spawn review agent (Step 6a) with iteration R
+  1. Run review agent (Step 6a) with iteration R
   2. Read review<R>.md verdict:
      - "APPROVED" → go to FINISH
-     - Has improvement suggestions → spawn fix agent (Step 6b)
+     - Has improvement suggestions → run fix agent (Step 6b)
   3. After fix agent completes and build passes:
      R = R + 1
      If R > 3 → go to FINISH (stop iterating, accept current state)
@@ -377,23 +317,21 @@ FINISH:
 
 ### Step 6a: Code Review Agent
 
-Spawn an agent (Task tool, subagent_type=`general-purpose`):
-
-```
+```text
 You are a code review agent for Telegram Desktop (C++ / Qt).
 
 Read these files:
-- .ai/<project-name>/<letter>/context.md - Codebase context
-- .ai/<project-name>/<letter>/plan.md - Implementation plan
+- .ai/<PROJECT>/<LETTER>/context.md - Codebase context
+- .ai/<PROJECT>/<LETTER>/plan.md - Implementation plan
 - REVIEW.md - Style and formatting rules to enforce
 <if R > 1, also read:>
-- .ai/<project-name>/<letter>/review<R-1>.md - Previous review (to see what was already addressed)
+- .ai/<PROJECT>/<LETTER>/review<R-1>.md - Previous review (to see what was already addressed)
 
 Then run `git diff` to see all uncommitted changes made by the implementation. Implementation agents do not commit, so `git diff` shows exactly the current feature's changes.
 
 Then read the modified source files in full to understand changes in context.
 
-Use /ultrathink to perform a thorough code review.
+Perform a thorough code review.
 
 REVIEW CRITERIA (in order of importance):
 
@@ -419,7 +357,7 @@ IMPORTANT GUIDELINES:
 - Don't suggest adding comments, docstrings, or type annotations — the codebase style avoids these.
 - Don't suggest error handling for impossible scenarios or over-engineering.
 
-Write your review to: .ai/<project-name>/<letter>/review<R>.md
+Write your review to: .ai/<PROJECT>/<LETTER>/review<R>.md
 
 The review document should contain:
 
@@ -450,19 +388,15 @@ Keep the list focused. Only include issues that genuinely improve the code. If y
 When finished, report your verdict clearly as: APPROVED or NEEDS_CHANGES.
 ```
 
-After the review agent returns, read `review<R>.md`. If the verdict is APPROVED, proceed to Completion. If NEEDS_CHANGES, spawn the fix agent.
-
 ### Step 6b: Review Fix Agent
 
-Spawn an agent (Task tool, subagent_type=`general-purpose`):
-
-```
+```text
 You are a review fix agent. You implement improvements identified during code review.
 
 Read these files:
-- .ai/<project-name>/<letter>/context.md - Codebase context
-- .ai/<project-name>/<letter>/plan.md - Original implementation plan
-- .ai/<project-name>/<letter>/review<R>.md - Code review with required changes
+- .ai/<PROJECT>/<LETTER>/context.md - Codebase context
+- .ai/<PROJECT>/<LETTER>/plan.md - Original implementation plan
+- .ai/<PROJECT>/<LETTER>/review<R>.md - Code review with required changes
 
 Then read the source files mentioned in the review.
 
@@ -486,8 +420,6 @@ Rules:
 When finished, report what changes were made.
 ```
 
-After the fix agent returns, increment R and loop back to Step 6a (unless R > 3, in which case proceed to Completion).
-
 ## Completion
 
 When all phases including build verification and code review are done:
@@ -496,11 +428,27 @@ When all phases including build verification and code review are done:
 3. Note any issues encountered during implementation.
 4. Summarize code review iterations: how many rounds, what was found and fixed, or if it was approved on first pass.
 5. Calculate and display the total elapsed time since `$START_TIME` (format as `Xh Ym Zs`, omitting zero components — e.g. `12m 34s` or `1h 5m 12s`).
-6. Remind the user of the project name so they can use `/task <project-name> <follow-up description>` for follow-up changes.
+6. Remind the user of the project name so they can request follow-up tasks within the same project.
 
 ## Error Handling
 
-- If any agent fails or gets stuck, report the issue to the user and ask how to proceed.
-- If context.md or plan.md is not written properly by an agent, re-spawn that agent with more specific instructions.
-- If build errors persist after the build agent's attempts, report the remaining errors to the user.
-- If a review fix agent introduces new build errors that it cannot resolve, report to the user.
+- If any phase fails or gets stuck, report the issue to the user and ask how to proceed.
+- If context.md or plan.md is not written properly by a phase, re-run that phase with more specific instructions.
+- If build errors persist after the build phase's attempts, report the remaining errors to the user.
+- If a review fix phase introduces new build errors that it cannot resolve, report to the user.
+
+## Reasoning Effort
+
+Phases 2 (Plan), 3 (Assessment), and 6a (Review) require elevated reasoning. Pass `-c model_reasoning_effort="xhigh"` on those `codex exec` invocations. All other phases use the default reasoning effort.
+
+## Example Runner Commands
+
+```powershell
+codex exec --json -C <REPO_ROOT> "<PHASE_PROMPT>" | Tee-Object .ai/<PROJECT>/<LETTER>/logs/phase-1-context.jsonl
+codex exec --json -C <REPO_ROOT> -c model_reasoning_effort="xhigh" "<PHASE_PROMPT>" | Tee-Object .ai/<PROJECT>/<LETTER>/logs/phase-2-plan.jsonl
+codex exec --json -C <REPO_ROOT> -c model_reasoning_effort="xhigh" "<PHASE_PROMPT>" | Tee-Object .ai/<PROJECT>/<LETTER>/logs/phase-3-assess.jsonl
+codex exec --json -C <REPO_ROOT> "<PHASE_PROMPT>" | Tee-Object .ai/<PROJECT>/<LETTER>/logs/phase-4-impl-N.jsonl
+codex exec --json -C <REPO_ROOT> "<PHASE_PROMPT>" | Tee-Object .ai/<PROJECT>/<LETTER>/logs/phase-5-build.jsonl
+codex exec --json -C <REPO_ROOT> -c model_reasoning_effort="xhigh" "<PHASE_PROMPT>" | Tee-Object .ai/<PROJECT>/<LETTER>/logs/phase-6a-review-R.jsonl
+codex exec --json -C <REPO_ROOT> "<PHASE_PROMPT>" | Tee-Object .ai/<PROJECT>/<LETTER>/logs/phase-6b-fix-R.jsonl
+```
