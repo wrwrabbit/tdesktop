@@ -678,6 +678,6 @@ void SetTopPinnedMessageId(
 [[nodiscard]] uint64 BackgroundEmojiIdFromColor(const MTPPeerColor *color);
 [[nodiscard]] std::optional<uint8> ColorIndexFromColor(const MTPPeerColor *);
 
-[[nodiscard]] bool IsBotCanManageTopics(not_null<PeerData*>);
+[[nodiscard]] bool IsBotUserCreatesTopics(not_null<PeerData*>);
 
 } // namespace Data

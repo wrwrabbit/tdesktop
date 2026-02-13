@@ -1096,10 +1096,16 @@ auto ChooseTopicBoxController::Row::generateNameWords() const
 	return _topic->chatListNameWords();
 }
 
-ChooseTopicBoxController::AllMessagesRow::AllMessagesRow()
-: PeerListRow(PeerListRowId(0)) {
-	const auto name = tr::lng_forum_all_messages(tr::now);
-	const auto words = TextUtilities::PrepareSearchWords(name);
+QString ChooseTopicBoxController::AllMessagesRow::name() const {
+	return _userCreatesTopics
+		? tr::lng_forum_create_new_topic(tr::now)
+		: tr::lng_forum_all_messages(tr::now);
+}
+
+ChooseTopicBoxController::AllMessagesRow::AllMessagesRow(bool userCreatesTopics)
+: PeerListRow(PeerListRowId(0))
+, _userCreatesTopics(userCreatesTopics) {
+	const auto words = TextUtilities::PrepareSearchWords(name());
 	for (const auto &word : words) {
 		_nameWords.emplace(word);
 		_nameFirstLetters.emplace(word[0]);
@@ -1107,23 +1113,26 @@ ChooseTopicBoxController::AllMessagesRow::AllMessagesRow()
 }
 
 QString ChooseTopicBoxController::AllMessagesRow::generateName() {
-	return tr::lng_forum_all_messages(tr::now);
+	return name();
 }
 
 QString ChooseTopicBoxController::AllMessagesRow::generateShortName() {
-	return tr::lng_forum_all_messages(tr::now);
+	return name();
 }
 
 auto ChooseTopicBoxController::AllMessagesRow::generatePaintUserpicCallback(
 	bool forceRound)
 -> PaintRoundImageCallback {
-	return [](
+	return [userCreatesTopics = _userCreatesTopics](
 			Painter &p,
 			int x,
 			int y,
 			int outerWidth,
 			int size) {
-		st::menuIconChats.paintInCenter(
+		const auto &icon = userCreatesTopics
+			? st::menuIconDiscussion
+			: st::menuIconChats;
+		icon.paintInCenter(
 			p,
 			QRect(x, y - st::lineWidth, size, size));
 	};
@@ -1206,8 +1215,10 @@ void ChooseTopicBoxController::refreshRows(bool initial) {
 	if (_forum->bot()
 		&& !delegate()->peerListFindRow(PeerListRowId(0))
 		&& (!_filter || _filter(_forum->history()))) {
+		const auto userCreatesTopics = Data::IsBotUserCreatesTopics(
+			_forum->peer());
 		delegate()->peerListAppendRow(
-			std::make_unique<AllMessagesRow>());
+			std::make_unique<AllMessagesRow>(userCreatesTopics));
 		added = true;
 	}
 	for (const auto &row : _forum->topicsList()->indexed()->all()) {

@@ -3278,7 +3278,7 @@ base::weak_qptr<Ui::BoxContent> ShowDropMediaBox(
 		navigation
 	](not_null<Data::Thread*> thread) mutable {
 		const auto content = navigation->parentController()->content();
-		if (!content->filesOrForwardDrop(thread, data.get())) {
+		if (!content->filesOrForwardDrop(thread, data.get(), true)) {
 			return;
 		} else if (const auto strong = *weak) {
 			strong->closeBox();
@@ -3318,7 +3318,7 @@ base::weak_qptr<Ui::BoxContent> ShowDropMediaBox(
 		navigation
 	](not_null<Data::SavedSublist*> sublist) mutable {
 		const auto content = navigation->parentController()->content();
-		if (!content->filesOrForwardDrop(sublist, data.get())) {
+		if (!content->filesOrForwardDrop(sublist, data.get(), true)) {
 			return;
 		} else if (const auto strong = *weak) {
 			strong->closeBox();

@@ -564,6 +564,28 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 			result->setStarsPerMessage(0);
 		}
 
+		if (!minimal) {
+			result->setBotInfoVersion(data.vbot_info_version().value_or(-1));
+			if (const auto info = result->botInfo.get()) {
+				info->readsAllHistory = data.is_bot_chat_history();
+				if (info->cantJoinGroups != data.is_bot_nochats()) {
+					info->cantJoinGroups = data.is_bot_nochats();
+					flags |= UpdateFlag::BotCanBeInvited;
+				}
+				if (const auto value = data.vbot_inline_placeholder()) {
+					info->inlinePlaceholder = '_' + qs(*value);
+				} else {
+					info->inlinePlaceholder = QString();
+				}
+				info->supportsAttachMenu = data.is_bot_attach_menu();
+				info->supportsBusiness = data.is_bot_business();
+				info->canEditInformation = data.is_bot_can_edit();
+				info->activeUsers = data.vbot_active_users().value_or_empty();
+				info->hasMainApp = data.is_bot_has_main_app();
+				info->userCreatesTopics = data.is_bot_forum_can_manage_topics();
+			}
+		}
+
 		using Flag = UserDataFlag;
 		const auto flagsMask = Flag::Deleted
 			| Flag::Verified
@@ -739,28 +761,6 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 			result->setEmojiStatus(EmojiStatusId());
 		}
 		if (!minimal) {
-			if (const auto botInfoVersion = data.vbot_info_version()) {
-				result->setBotInfoVersion(botInfoVersion->v);
-				result->botInfo->readsAllHistory = data.is_bot_chat_history();
-				if (result->botInfo->cantJoinGroups != data.is_bot_nochats()) {
-					result->botInfo->cantJoinGroups = data.is_bot_nochats();
-					flags |= UpdateFlag::BotCanBeInvited;
-				}
-				if (const auto placeholder = data.vbot_inline_placeholder()) {
-					result->botInfo->inlinePlaceholder = '_' + qs(*placeholder);
-				} else {
-					result->botInfo->inlinePlaceholder = QString();
-				}
-				result->botInfo->supportsAttachMenu = data.is_bot_attach_menu();
-				result->botInfo->supportsBusiness = data.is_bot_business();
-				result->botInfo->canEditInformation = data.is_bot_can_edit();
-				result->botInfo->activeUsers = data.vbot_active_users().value_or_empty();
-				result->botInfo->hasMainApp = data.is_bot_has_main_app();
-				result->botInfo->canManageTopics
-					= data.is_bot_forum_can_manage_topics();
-			} else {
-				result->setBotInfoVersion(-1);
-			}
 			result->setIsContact(data.is_contact()
 				|| data.is_mutual_contact());
 		}

@@ -4719,12 +4719,12 @@ void HistoryWidget::hideSelectorControlsAnimated() {
 }
 
 Api::SendAction HistoryWidget::prepareSendAction(
-		Api::SendOptions options) const {
+		Api::SendOptions options) {
 	auto result = Api::SendAction(_history, options);
 	result.replyTo = replyTo();
 
 	if (const auto forum = _history->asForum()) {
-		if (Data::IsBotCanManageTopics(_history->peer)) {
+		if (forum->bot() && Data::IsBotUserCreatesTopics(_history->peer)) {
 			const auto readyRootId = [&]() -> MsgId {
 				if (const auto id = result.replyTo.messageId) {
 					if (const auto item = session().data().message(id)) {
@@ -4737,14 +4737,15 @@ Api::SendAction HistoryWidget::prepareSendAction(
 				result.replyTo.topicRootId = readyRootId;
 			} else {
 				if (!_creatingBotTopic) {
-					const auto &colors = Data::ForumTopicColorIds();
-					const auto colorId
-						= colors[base::RandomIndex(colors.size())];
-					_creatingBotTopic = forum->topicFor(
-						forum->reserveCreatingId(
-							tr::lng_bot_new_chat(tr::now),
-							colorId,
-							DocumentId()));
+					_creatingBotTopic = forum->reserveNewBotTopic();
+					auto draft = _history->forwardDraft(MsgId(0), PeerId());
+					if (!draft.ids.empty()) {
+						_history->setForwardDraft(MsgId(0), PeerId(), {});
+						_history->setForwardDraft(
+							_creatingBotTopic->rootId(),
+							PeerId(),
+							std::move(draft));
+					}
 				}
 				result = Api::SendAction(_creatingBotTopic, options);
 				result.replyTo.topicRootId = _creatingBotTopic->rootId();
@@ -6302,7 +6303,7 @@ void HistoryWidget::updateFieldPlaceholder() {
 			}
 		} else if (const auto user = peer->asUser()) {
 			if (const auto &info = user->botInfo) {
-				if (info->forum() && !info->canManageTopics) {
+				if (info->forum() && !info->userCreatesTopics) {
 					return tr::lng_bot_off_thread_ph();
 				}
 			}

@@ -2231,9 +2231,9 @@ std::optional<uint8> ColorIndexFromColor(const MTPPeerColor *color) {
 	});
 }
 
-bool IsBotCanManageTopics(not_null<PeerData*> peer) {
+bool IsBotUserCreatesTopics(not_null<PeerData*> peer) {
 	if (const auto user = peer->asUser()) {
-		return user->botInfo && user->botInfo->canManageTopics;
+		return user->botInfo && user->botInfo->userCreatesTopics;
 	}
 	return false;
 }

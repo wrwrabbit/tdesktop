@@ -3529,7 +3529,6 @@ void ApiWrap::forwardMessages(
 		if (shared) {
 			++shared->requestsLeft;
 		}
-		const auto requestType = Data::Histories::RequestType::Send;
 		const auto idsCopy = localIds;
 		const auto scheduled = action.options.scheduled;
 		const auto starsPaid = std::min(
@@ -3540,57 +3539,80 @@ void ApiWrap::forwardMessages(
 			action.options.starsApproved -= starsPaid;
 			oneFlags |= SendFlag::f_allow_paid_stars;
 		}
-		histories.sendRequest(history, requestType, [=](Fn<void()> finish) {
-			history->sendRequestId = request(MTPmessages_ForwardMessages(
-				MTP_flags(oneFlags),
+		auto buildMessage = [=](
+				not_null<History*> history,
+				FullReplyTo replyTo)
+			-> Data::Histories::PreparedMessage {
+			const auto kGeneralId = Data::ForumTopic::kGeneralId;
+			const auto realTopMsgId = (replyTo.topicRootId == kGeneralId)
+				? MsgId(0)
+				: replyTo.topicRootId;
+			auto flags = oneFlags;
+			if (realTopMsgId) {
+				flags |= SendFlag::f_top_msg_id;
+			} else {
+				flags &= ~SendFlag::f_top_msg_id;
+			}
+			return MTPmessages_ForwardMessages(
+				MTP_flags(flags),
 				forwardFrom->input(),
 				MTP_vector<MTPint>(ids),
 				MTP_vector<MTPlong>(randomIds),
-				peer->input(),
-				MTP_int(topMsgId),
+				history->peer->input(),
+				MTP_int(realTopMsgId),
 				(action.options.suggest
-					? ReplyToForMTP(history, action.replyTo)
+					? ReplyToForMTP(history, replyTo)
 					: monoforumPeer
-					? MTP_inputReplyToMonoForum(monoforumPeer->input())
+					? MTP_inputReplyToMonoForum(
+						monoforumPeer->input())
 					: MTPInputReplyTo()),
 				MTP_int(action.options.scheduled),
 				MTP_int(action.options.scheduleRepeatPeriod),
-				(sendAs ? sendAs->input() : MTP_inputPeerEmpty()),
-				Data::ShortcutIdToMTP(_session, action.options.shortcutId),
+				(sendAs
+					? sendAs->input()
+					: MTP_inputPeerEmpty()),
+				Data::ShortcutIdToMTP(
+					&history->session(),
+					action.options.shortcutId),
 				MTP_long(action.options.effectId),
-				MTPint(), // video_timestamp
+				MTPint(),
 				MTP_long(starsPaid),
-				Api::SuggestToMTP(action.options.suggest)
-			)).done([=](const MTPUpdates &result) {
+				Api::SuggestToMTP(action.options.suggest));
+		};
+		histories.sendPreparedMessage(
+			history,
+			FullReplyTo{ .topicRootId = topicRootId },
+			uint64(0),
+			std::move(buildMessage),
+			[=](const MTPUpdates &result, const MTP::Response &) {
 				if (!scheduled) {
-					this->updates().checkForSentToScheduled(result);
+					_session->api().updates().checkForSentToScheduled(
+						result);
 				}
-				applyUpdates(result);
 				if (shared && !--shared->requestsLeft) {
 					shared->callback();
 				}
-				finish();
-				if (peer->isSelf() && session().premium()) {
+				if (peer->isSelf() && _session->premium()) {
 					ProcessRecentSelfForwards(
 						_session,
 						result,
 						peer->id,
 						forwardFrom->id);
 				}
-			}).fail([=](const MTP::Error &error) {
+			},
+			[=](const MTP::Error &error, const MTP::Response &) {
 				if (idsCopy) {
 					for (const auto &[randomId, itemId] : *idsCopy) {
-						sendMessageFail(error, peer, randomId, itemId);
+						_session->api().sendMessageFail(
+							error,
+							peer,
+							randomId,
+							itemId);
 					}
 				} else {
-					sendMessageFail(error, peer);
+					_session->api().sendMessageFail(error, peer);
 				}
-				finish();
-			}).afterRequest(
-				history->sendRequestId
-			).send();
-			return history->sendRequestId;
-		});
+			});
 
 		ids.resize(0);
 		randomIds.resize(0);

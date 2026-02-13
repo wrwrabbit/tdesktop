@@ -393,7 +393,7 @@ private:
 
 	class AllMessagesRow final : public PeerListRow {
 	public:
-		AllMessagesRow();
+		explicit AllMessagesRow(bool userCreatesTopics);
 
 		QString generateName() override;
 		QString generateShortName() override;
@@ -406,8 +406,11 @@ private:
 			-> const base::flat_set<QString> & override;
 
 	private:
+		[[nodiscard]] QString name() const;
+
 		base::flat_set<QChar> _nameFirstLetters;
 		base::flat_set<QString> _nameWords;
+		bool _userCreatesTopics = false;
 
 	};
 
