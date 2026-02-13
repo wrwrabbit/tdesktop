@@ -38,6 +38,8 @@ Project structure:
 
 ## Phase 0: Setup
 
+**Record the current time now** (using `Get-Date` in PowerShell or equivalent) and store it as `$START_TIME`. You will use this at the end to display total elapsed time.
+
 ⚠️ **CRITICAL: Follow-up detection MUST happen FIRST, before anything else.**
 
 ### Step 0a: Follow-up detection (MANDATORY — do this BEFORE understanding the task)
@@ -493,7 +495,8 @@ When all phases including build verification and code review are done:
 2. Show which files were modified/created.
 3. Note any issues encountered during implementation.
 4. Summarize code review iterations: how many rounds, what was found and fixed, or if it was approved on first pass.
-5. Remind the user of the project name so they can use `/task <project-name> <follow-up description>` for follow-up changes.
+5. Calculate and display the total elapsed time since `$START_TIME` (format as `Xh Ym Zs`, omitting zero components — e.g. `12m 34s` or `1h 5m 12s`).
+6. Remind the user of the project name so they can use `/task <project-name> <follow-up description>` for follow-up changes.
 
 ## Error Handling
 
