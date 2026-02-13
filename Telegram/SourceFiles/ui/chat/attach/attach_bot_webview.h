@@ -32,6 +32,10 @@ namespace Webview {
 struct Available;
 } // namespace Webview
 
+namespace Ui::Text {
+struct MarkedContext;
+} // namespace Ui::Text
+
 namespace Ui::BotWebView {
 
 struct DownloadsProgress;
@@ -77,6 +81,7 @@ struct SendPreparedMessageRequest {
 class Delegate {
 public:
 	[[nodiscard]] virtual Webview::ThemeParams botThemeParams() = 0;
+	[[nodiscard]] virtual Ui::Text::MarkedContext botTextContext() = 0;
 	[[nodiscard]] virtual auto botDownloads(bool forceCheck = false)
 		-> const std::vector<DownloadsEntry> & = 0;
 	virtual void botDownloadsAction(uint32 id, DownloadsAction type) = 0;

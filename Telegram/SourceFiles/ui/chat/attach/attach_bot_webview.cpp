@@ -58,6 +58,7 @@ struct ButtonArgs {
 	bool isActive = false;
 	bool isVisible = false;
 	bool isProgressVisible = false;
+	uint64 iconCustomEmojiId = 0;
 	QString text;
 };
 
@@ -138,7 +139,10 @@ struct ButtonArgs {
 
 class Panel::Button final : public RippleButton {
 public:
-	Button(QWidget *parent, const style::RoundButton &st);
+	Button(
+		QWidget *parent,
+		const style::RoundButton &st,
+		Text::MarkedContext textContext);
 	~Button();
 
 	void updateBg(QColor bg);
@@ -156,11 +160,12 @@ private:
 
 	void toggleProgress(bool shown);
 	void setupProgressGeometry();
+	void updateText(uint64 iconCustomEmojiId, const QString &text);
 
 	std::unique_ptr<Progress> _progress;
-	rpl::variable<QString> _textFull;
 	Ui::Text::String _text;
 
+	Text::MarkedContext _textContext;
 	const style::RoundButton &_st;
 	QColor _fg;
 	style::owned_color _bg;
@@ -192,23 +197,42 @@ struct Panel::WebviewWithLifetime {
 	rpl::lifetime lifetime;
 };
 
-Panel::Button::Button(QWidget *parent, const style::RoundButton &st)
+Panel::Button::Button(
+	QWidget *parent,
+	const style::RoundButton &st,
+	Text::MarkedContext textContext)
 : RippleButton(parent, st.ripple)
+, _textContext(std::move(textContext))
 , _st(st)
 , _bg(st::windowBgActive->c)
 , _roundRect(st::callRadius, st::windowBgActive) {
-	_textFull.value(
-	) | rpl::on_next([=](const QString &text) {
-		_text.setText(st::semiboldTextStyle, text);
-		update();
-	}, lifetime());
-
 	resize(
 		_st.padding.left() + _text.maxWidth() + _st.padding.right(),
 		_st.padding.top() + _st.height + _st.padding.bottom());
 }
 
 Panel::Button::~Button() = default;
+
+void Panel::Button::updateText(
+		uint64 iconCustomEmojiId,
+		const QString &text) {
+	if (iconCustomEmojiId) {
+		auto result = Text::SingleCustomEmoji(
+			QString::number(iconCustomEmojiId));
+		if (!text.isEmpty()) {
+			result.append(' ').append(text);
+		}
+		auto context = _textContext;
+		context.repaint = [=] { update(); };
+		_text.setMarkedText(
+			st::semiboldTextStyle,
+			result,
+			kMarkupTextOptions,
+			context);
+	} else {
+		_text.setText(st::semiboldTextStyle, text);
+	}
+}
 
 void Panel::Button::updateBg(QColor bg) {
 	_bg.update(bg);
@@ -240,7 +264,7 @@ void Panel::Button::updateFg(not_null<const style::color*> paletteFg) {
 }
 
 void Panel::Button::updateArgs(ButtonArgs &&args) {
-	_textFull = std::move(args.text);
+	updateText(args.iconCustomEmojiId, args.text);
 	setDisabled(!args.isActive);
 	setPointerCursor(false);
 	setCursor(args.isActive ? style::cur_pointer : Qt::ForbiddenCursor);
@@ -337,13 +361,18 @@ void Panel::Button::paintEvent(QPaintEvent *e) {
 
 	const auto height = rect().height();
 	const auto progress = st::paymentsLoading.size;
-	const auto skip = (height - progress.height()) / 2;
-	const auto padding = skip + progress.width() + skip;
-
-	const auto space = width() - padding * 2;
-	const auto textWidth = std::min(space, _text.maxWidth());
+	const auto minPad = (height - progress.height()) / 2;
+	const auto rightReserved = _progress
+		? (minPad + progress.width() + minPad)
+		: minPad;
+	const auto maxTextEnd = width() - rightReserved;
+	const auto maxSpace = std::max(maxTextEnd - minPad, 0);
+	const auto textWidth = std::min(_text.maxWidth(), maxSpace);
+	const auto centered = (width() - textWidth) / 2;
+	const auto textLeft = std::max(
+		std::min(centered, maxTextEnd - textWidth),
+		minPad);
 	const auto textTop = _st.padding.top() + _st.textTop;
-	const auto textLeft = padding + (space - textWidth) / 2;
 	p.setPen(_fg);
 	_text.drawLeftElided(p, textLeft, textTop, textWidth, width());
 }
@@ -1637,7 +1666,10 @@ void Panel::processButtonMessage(
 	});
 
 	const auto text = args["text"].toString().trimmed();
-	const auto visible = args["is_visible"].toBool() && !text.isEmpty();
+	const auto iconCustomEmojiId
+		= args["icon_custom_emoji_id"].toString().toULongLong();
+	const auto visible = args["is_visible"].toBool()
+		&& (!text.isEmpty() || iconCustomEmojiId);
 	if (!button) {
 		if (visible) {
 			createButton(button);
@@ -1663,6 +1695,7 @@ void Panel::processButtonMessage(
 		.isActive = args["is_active"].toBool(),
 		.isVisible = visible,
 		.isProgressVisible = args["is_progress_visible"].toBool(),
+		.iconCustomEmojiId = iconCustomEmojiId,
 		.text = args["text"].toString(),
 	});
 	if (button.get() == _secondaryButton.get()) {
@@ -1820,7 +1853,8 @@ void Panel::createButton(std::unique_ptr<Button> &button) {
 	}
 	button = std::make_unique<Button>(
 		_bottomButtonsBg.get(),
-		st::botWebViewBottomButton);
+		st::botWebViewBottomButton,
+		_delegate->botTextContext());
 	const auto raw = button.get();
 
 	raw->setClickedCallback([=] {

@@ -1483,6 +1483,10 @@ Webview::ThemeParams WebViewInstance::botThemeParams() {
 	return result;
 }
 
+Ui::Text::MarkedContext WebViewInstance::botTextContext() {
+	return Core::TextContext({ .session = _session });
+}
+
 auto WebViewInstance::botDownloads(bool forceCheck)
 -> const std::vector<Ui::BotWebView::DownloadsEntry> & {
 	return _session->attachWebView().downloads().list(_bot, forceCheck);
