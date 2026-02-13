@@ -381,13 +381,9 @@ AbstractButton *MakeRemoveButton(
 				},
 			}, GiftButton::Mode::CraftPreview);
 			entry.button->show();
-			if (index > 0) {
-				entry.button->setClickedCallback([=] {
-					state->editRequests.fire_copy(index);
-				});
-			} else {
-				entry.button->setAttribute(Qt::WA_TransparentForMouseEvents);
-			}
+			entry.button->setClickedCallback([=] {
+				state->editRequests.fire_copy(index);
+			});
 			entry.button->setGeometry(
 				geometry,
 				state->delegate.buttonExtend());
