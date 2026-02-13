@@ -115,7 +115,6 @@ public:
 		not_null<PeerData*> participant) const;
 	[[nodiscard]] std::optional<ChatAdminRightsInfo> adminRights(
 		not_null<UserData*> user) const;
-	[[nodiscard]] QString adminRank(not_null<UserData*> user) const;
 	[[nodiscard]] QString memberRank(not_null<UserData*> user) const;
 	[[nodiscard]] std::optional<ChatRestrictionsInfo> restrictedRights(
 		not_null<PeerData*> participant) const;
@@ -161,7 +160,6 @@ private:
 
 	// Data for channels.
 	base::flat_map<not_null<UserData*>, ChatAdminRightsInfo> _adminRights;
-	base::flat_map<not_null<UserData*>, QString> _adminRanks;
 	base::flat_map<not_null<UserData*>, QString> _memberRanks;
 	base::flat_map<not_null<UserData*>, TimeId> _adminPromotedSince;
 	base::flat_map<not_null<PeerData*>, TimeId> _restrictedSince;
@@ -192,6 +190,7 @@ public:
 		not_null<Window::SessionNavigation*> navigation,
 		not_null<PeerData*> peer,
 		Role role);
+	~ParticipantsBoxController();
 
 	Main::Session &session() const override;
 	void prepare() override;
@@ -321,6 +320,9 @@ private:
 	base::weak_qptr<Ui::BoxContent> _editParticipantBox;
 
 	std::unique_ptr<PeerListStories> _stories;
+
+	std::unique_ptr<Ui::ChatStyle> _chatStyle;
+	mutable base::flat_map<QRgb, QImage> _pillCircleCache;
 
 };
 

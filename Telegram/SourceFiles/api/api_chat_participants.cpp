@@ -56,35 +56,43 @@ void ApplyMegagroupAdmins(not_null<ChannelData*> channel, Members list) {
 		i->tryApplyCreatorTo(channel);
 	} else {
 		channel->mgInfo->creator = nullptr;
-		channel->mgInfo->creatorRank = QString();
 	}
 
-	auto adding = base::flat_map<UserId, QString>();
+	auto adding = base::flat_set<UserId>();
+	auto addingRanks = base::flat_map<UserId, QString>();
 	for (const auto &p : list) {
 		if (p.isUser()) {
-			adding.emplace(p.userId(), p.rank());
+			adding.emplace(p.userId());
+			if (!p.rank().isEmpty()) {
+				addingRanks.emplace(p.userId(), p.rank());
+			}
 		}
 	}
 	if (channel->mgInfo->creator) {
-		adding.emplace(
-			peerToUser(channel->mgInfo->creator->id),
-			channel->mgInfo->creatorRank);
+		const auto creatorId = peerToUser(channel->mgInfo->creator->id);
+		adding.emplace(creatorId);
+		const auto r = channel->mgInfo->memberRanks.find(creatorId);
+		if (r != channel->mgInfo->memberRanks.end()
+			&& !r->second.isEmpty()) {
+			addingRanks.emplace(creatorId, r->second);
+		}
 	}
 	auto removing = channel->mgInfo->admins;
 	if (removing.empty() && adding.empty()) {
-		// Add some admin-placeholder so we don't DDOS
-		// server with admins list requests.
 		LOG(("API Error: Got empty admins list from server."));
-		adding.emplace(0, QString());
+		adding.emplace(UserId(0));
 	}
 
 	Data::ChannelAdminChanges changes(channel);
-	for (const auto &[addingId, rank] : adding) {
-		if (!removing.remove(addingId)) {
-			changes.add(addingId, rank);
-		}
+	for (const auto &addingId : adding) {
+		const auto r = addingRanks.find(addingId);
+		const auto rank = (r != end(addingRanks))
+			? r->second
+			: QString();
+		removing.remove(addingId);
+		changes.add(addingId, rank);
 	}
-	for (const auto &[removingId, rank] : removing) {
+	for (const auto &removingId : removing) {
 		changes.remove(removingId);
 	}
 }
@@ -149,7 +157,7 @@ void ApplyLastList(
 					channel->mgInfo->botStatus = 2;
 				}
 			}
-			if (!p.rank().isEmpty() && !p.isCreatorOrAdmin()) {
+			if (!p.rank().isEmpty()) {
 				channel->mgInfo->memberRanks[p.userId()] = p.rank();
 			}
 		}
@@ -337,7 +345,11 @@ void ChatParticipant::tryApplyCreatorTo(
 	if (isCreator() && isUser()) {
 		if (const auto info = channel->mgInfo.get()) {
 			info->creator = channel->owner().userLoaded(userId());
-			info->creatorRank = rank();
+			if (!rank().isEmpty()) {
+				info->memberRanks[userId()] = rank();
+			} else {
+				info->memberRanks.remove(userId());
+			}
 		}
 	}
 }

@@ -258,16 +258,19 @@ void Message::initPaidInformation() {
 
 void Message::refreshRightBadge() {
 	const auto item = data();
-	const auto text = [&] {
+	const auto [text, isAdmin] = [&]() -> std::pair<QString, bool> {
 		if (item->isDiscussionPost()) {
-			return (delegate()->elementContext() == Context::Replies)
-				? QString()
-				: tr::lng_channel_badge(tr::now);
+			return {
+				(delegate()->elementContext() == Context::Replies)
+					? QString()
+					: tr::lng_channel_badge(tr::now),
+				false,
+			};
 		} else if (item->author()->isMegagroup()) {
 			if (const auto msgsigned = item->Get<HistoryMessageSigned>()) {
 				if (!msgsigned->viaBusinessBot) {
 					Assert(msgsigned->isAnonymousRank);
-					return msgsigned->author;
+					return { msgsigned->author, false };
 				}
 			}
 		}
@@ -279,47 +282,43 @@ void Message::refreshRightBadge() {
 					const auto j = chat->memberRanks.find(
 						peerToUser(user->id));
 					if (j != chat->memberRanks.end()) {
-						return j->second;
+						return { j->second, false };
 					}
 				}
 			}
-			return QString();
+			return { QString(), false };
 		}
 		if (!user) {
-			return QString();
+			return { QString(), false };
 		}
 		const auto info = channel->mgInfo.get();
 		const auto userId = peerToUser(user->id);
-		const auto i = info->admins.find(userId);
-		const auto custom = (i != info->admins.end())
-			? i->second
-			: (info->creator == user)
-			? info->creatorRank
+		const auto isAdmin = info->admins.contains(userId);
+		const auto r = info->memberRanks.find(userId);
+		const auto custom = (r != info->memberRanks.end())
+			? r->second
 			: QString();
 		if (!custom.isEmpty()) {
-			return custom;
+			return { custom, isAdmin || info->creator == user };
 		}
 		if (info->creator == user) {
-			return tr::lng_owner_badge(tr::now);
+			return { tr::lng_owner_badge(tr::now), true };
 		}
-		if (i != info->admins.end()) {
-			return tr::lng_admin_badge(tr::now);
+		if (isAdmin) {
+			return { tr::lng_admin_badge(tr::now), true };
 		}
 		const auto fromRank = item->fromRank();
 		if (!fromRank.isEmpty()) {
-			return fromRank;
+			return { fromRank, false };
 		}
-		const auto j = info->memberRanks.find(userId);
-		if (j != info->memberRanks.end()) {
-			return j->second;
-		}
-		return QString();
+		return { QString(), false };
 	}();
 	auto badge = TextWithEntities{
 		(text.isEmpty()
 			? delegate()->elementAuthorRank(this)
 			: TextUtilities::RemoveEmoji(TextUtilities::SingleLine(text)))
 	};
+	_rightBadgeIsAdmin = isAdmin ? 1 : 0;
 	_rightBadgeHasBoosts = 0;
 	if (const auto boosts = item->boostsApplied()) {
 		_rightBadgeHasBoosts = 1;
@@ -339,6 +338,20 @@ void Message::refreshRightBadge() {
 			badge,
 			Ui::NameTextOptions());
 	}
+}
+
+int Message::rightBadgeWidth() const {
+	if (!_rightBadgeIsAdmin) {
+		return _rightBadge.maxWidth();
+	}
+	const auto &padding = st::msgTagBadgePadding;
+	const auto textWidth = padding.left()
+		+ _rightBadge.maxWidth()
+		+ padding.right();
+	const auto pillHeight = padding.top()
+		+ st::msgFont->height
+		+ padding.bottom();
+	return std::max(textWidth, pillHeight);
 }
 
 void Message::applyGroupAdminChanges(
@@ -713,9 +726,8 @@ QSize Message::performCountOptimalSize() {
 					? st::msgFont->width(FastReplyText())
 					: 0;
 				if (!_rightBadge.isEmpty()) {
-					const auto badgeWidth = _rightBadge.maxWidth();
 					namew += st::msgPadding.right()
-						+ std::max(badgeWidth, replyWidth);
+						+ std::max(rightBadgeWidth(), replyWidth);
 				} else if (replyWidth) {
 					namew += st::msgPadding.right() + replyWidth;
 				}
@@ -1602,7 +1614,9 @@ void Message::paintFromName(
 	if (!displayFromName()) {
 		return;
 	}
-	const auto badgeWidth = _rightBadge.isEmpty() ? 0 : _rightBadge.maxWidth();
+	const auto badgeWidth = _rightBadge.isEmpty()
+		? 0
+		: rightBadgeWidth();
 	const auto replyWidth = [&] {
 		if (isUnderCursor()) {
 			if (displayFastForward()) {
@@ -1710,6 +1724,56 @@ void Message::paintFromName(
 				trect.left() + trect.width() - rightWidth,
 				trect.top() + st::msgFont->ascent,
 				hasFastForward() ? FastForwardText() : FastReplyText());
+		} else if (_rightBadgeIsAdmin) {
+			const auto nameColor = FromNameFg(
+				context,
+				colorIndex(),
+				colorCollectible());
+			auto bgColor = nameColor;
+			bgColor.setAlphaF(0.15);
+			const auto &padding = st::msgTagBadgePadding;
+			const auto textWidth = _rightBadge.maxWidth();
+			const auto contentWidth = padding.left()
+				+ textWidth
+				+ padding.right();
+			const auto pillHeight = padding.top()
+				+ st::msgFont->height
+				+ padding.bottom();
+			const auto totalWidth = std::max(contentWidth, pillHeight);
+			const auto badgeLeft = trect.left()
+				+ trect.width()
+				- totalWidth;
+			const auto badgeTop = trect.top()
+				+ (st::msgNameFont->height - pillHeight) / 2;
+			const auto pillRect = QRect(
+				badgeLeft,
+				badgeTop,
+				totalWidth,
+				pillHeight);
+			p.setPen(Qt::NoPen);
+			p.setBrush(bgColor);
+			{
+				auto hq = PainterHighQualityEnabler(p);
+				p.drawRoundedRect(
+					pillRect,
+					pillHeight / 2.,
+					pillHeight / 2.);
+			}
+			p.setPen(nameColor);
+			const auto boostPen = !_rightBadgeHasBoosts
+				? QPen()
+				: QPen(nameColor);
+			auto colored = std::array<Ui::Text::SpecialColor, 1>{
+				{ { &boostPen, &boostPen } },
+			};
+			_rightBadge.draw(p, {
+				.position = QPoint(
+					badgeLeft + (totalWidth - textWidth) / 2,
+					badgeTop + padding.top()),
+				.availableWidth = textWidth,
+				.colors = colored,
+				.now = context.now,
+			});
 		} else {
 			const auto shift = QPoint(trect.width() - rightWidth, 0);
 			const auto pen = !_rightBadgeHasBoosts
@@ -4195,8 +4259,8 @@ void Message::fromNameUpdated(int width) const {
 		? st::msgFont->width(FastReplyText())
 		: 0;
 	if (!_rightBadge.isEmpty()) {
-		const auto badgeWidth = _rightBadge.maxWidth();
-		width -= st::msgPadding.right() + std::max(badgeWidth, replyWidth);
+		width -= st::msgPadding.right()
+			+ std::max(rightBadgeWidth(), replyWidth);
 	} else if (replyWidth) {
 		width -= st::msgPadding.right() + replyWidth;
 	}

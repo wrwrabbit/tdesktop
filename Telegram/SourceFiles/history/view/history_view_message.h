@@ -323,6 +323,7 @@ private:
 	void psaTooltipToggled(bool shown) const;
 
 	void refreshRightBadge();
+	[[nodiscard]] int rightBadgeWidth() const;
 	void validateFromNameText(PeerData *from) const;
 	void ensureFromNameStatusLink(not_null<PeerData*> peer) const;
 
@@ -338,10 +339,11 @@ private:
 	mutable std::unique_ptr<Ui::RoundCheckbox> _selectionRoundCheckbox;
 	Ui::Text::String _rightBadge;
 	mutable int _fromNameVersion = 0;
-	uint32 _bubbleWidthLimit : 28 = 0;
+	uint32 _bubbleWidthLimit : 27 = 0;
 	uint32 _invertMedia : 1 = 0;
 	uint32 _hideReply : 1 = 0;
 	uint32 _rightBadgeHasBoosts : 1 = 0;
+	uint32 _rightBadgeIsAdmin : 1 = 0;
 	uint32 _postShowingAuthor : 1 = 0;
 
 	BottomInfo _bottomInfo;

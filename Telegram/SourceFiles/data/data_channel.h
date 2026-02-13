@@ -141,12 +141,10 @@ public:
 	base::flat_set<not_null<UserData*>> bots;
 	rpl::event_stream<bool> unrestrictedByBoostsChanges;
 
-	// For admin badges, full admins list with ranks.
-	base::flat_map<UserId, QString> admins;
+	base::flat_set<UserId> admins;
 	base::flat_map<UserId, QString> memberRanks;
 
 	UserData *creator = nullptr; // nullptr means unknown
-	QString creatorRank;
 	int botStatus = 0; // -1 - no bots, 0 - unknown, 1 - one bot, that sees all history, 2 - other
 	bool joinedMessageFound = false;
 	bool adminsLoaded = false;

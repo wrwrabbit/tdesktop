@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "data/data_changes.h"
 #include "base/unixtime.h"
+#include "ui/chat/chat_style.h"
 #include "ui/effects/outline_segments.h"
 #include "ui/layers/generic_box.h"
 #include "ui/widgets/fields/input_field.h"
@@ -428,12 +429,6 @@ auto ParticipantsAdditionalData::adminRights(
 		: std::nullopt;
 }
 
-QString ParticipantsAdditionalData::adminRank(
-		not_null<UserData*> user) const {
-	const auto i = _adminRanks.find(user);
-	return (i != end(_adminRanks)) ? i->second : QString();
-}
-
 QString ParticipantsAdditionalData::memberRank(
 		not_null<UserData*> user) const {
 	const auto i = _memberRanks.find(user);
@@ -511,7 +506,6 @@ void ParticipantsAdditionalData::setExternal(
 		_adminRights.erase(user);
 		_adminCanEdit.erase(user);
 		_adminPromotedBy.erase(user);
-		_adminRanks.erase(user);
 		_admins.erase(user);
 	}
 	_restrictedRights.erase(participant);
@@ -565,11 +559,10 @@ void ParticipantsAdditionalData::fillFromChannel(
 	}
 	if (information->creator) {
 		_creator = information->creator;
-		_adminRanks[information->creator] = information->creatorRank;
 	}
 	for (const auto user : information->lastParticipants) {
 		const auto admin = information->lastAdmins.find(user);
-		const auto rank = information->admins.find(peerToUser(user->id));
+		const auto rank = information->memberRanks.find(peerToUser(user->id));
 		const auto restricted = information->lastRestricted.find(user);
 		if (admin != information->lastAdmins.cend()) {
 			_restrictedRights.erase(user);
@@ -581,15 +574,14 @@ void ParticipantsAdditionalData::fillFromChannel(
 				_adminCanEdit.erase(user);
 			}
 			_adminRights.emplace(user, admin->second.rights);
-			if (rank != end(information->admins)
+			if (rank != end(information->memberRanks)
 				&& !rank->second.isEmpty()) {
-				_adminRanks[user] = rank->second;
+				_memberRanks[user] = rank->second;
 			}
 		} else if (restricted != information->lastRestricted.cend()) {
 			_adminRights.erase(user);
 			_adminCanEdit.erase(user);
 			_adminPromotedBy.erase(user);
-			_adminRanks.erase(user);
 			_restrictedRights.emplace(user, restricted->second.rights);
 		}
 	}
@@ -727,7 +719,7 @@ PeerData *ParticipantsAdditionalData::applyParticipant(
 		Unexpected("Api::ChatParticipant::type in applyParticipant.");
 	}();
 	if (const auto user = result ? result->asUser() : nullptr) {
-		if (!data.rank().isEmpty() && !data.isCreatorOrAdmin()) {
+		if (!data.rank().isEmpty()) {
 			_memberRanks[user] = data.rank();
 		} else {
 			_memberRanks.remove(user);
@@ -745,11 +737,6 @@ UserData *ParticipantsAdditionalData::applyCreator(
 			_adminCanEdit.emplace(user);
 		} else {
 			_adminCanEdit.erase(user);
-		}
-		if (!data.rank().isEmpty()) {
-			_adminRanks[user] = data.rank();
-		} else {
-			_adminRanks.remove(user);
 		}
 		return user;
 	}
@@ -776,11 +763,6 @@ UserData *ParticipantsAdditionalData::applyAdmin(
 		_adminCanEdit.emplace(user);
 	} else {
 		_adminCanEdit.erase(user);
-	}
-	if (!data.rank().isEmpty()) {
-		_adminRanks[user] = data.rank();
-	} else {
-		_adminRanks.remove(user);
 	}
 	if (data.promotedSince()) {
 		_adminPromotedSince[user] = data.promotedSince();
@@ -815,7 +797,6 @@ UserData *ParticipantsAdditionalData::applyRegular(UserId userId) {
 	_adminRights.erase(user);
 	_adminCanEdit.erase(user);
 	_adminPromotedBy.erase(user);
-	_adminRanks.erase(user);
 	_restrictedRights.erase(user);
 	_kicked.erase(user);
 	_restrictedBy.erase(user);
@@ -834,7 +815,6 @@ PeerData *ParticipantsAdditionalData::applyBanned(
 		_adminRights.erase(user);
 		_adminCanEdit.erase(user);
 		_adminPromotedBy.erase(user);
-		_adminRanks.erase(user);
 	}
 	if (data.isKicked()) {
 		_kicked.emplace(participant);
@@ -949,6 +929,8 @@ ParticipantsBoxController::ParticipantsBoxController(
 : ParticipantsBoxController(CreateTag(), navigation, peer, role) {
 }
 
+ParticipantsBoxController::~ParticipantsBoxController() = default;
+
 ParticipantsBoxController::ParticipantsBoxController(
 	CreateTag,
 	Window::SessionNavigation *navigation,
@@ -959,7 +941,9 @@ ParticipantsBoxController::ParticipantsBoxController(
 , _peer(peer)
 , _api(&_peer->session().mtp())
 , _role(role)
-, _additional(peer, _role) {
+, _additional(peer, _role)
+, _chatStyle(
+	std::make_unique<Ui::ChatStyle>(peer->session().colorIndicesValue())) {
 	subscribeToMigration();
 	if (_role == Role::Profile) {
 		setupListChangeViewers();
@@ -1381,6 +1365,10 @@ void ParticipantsBoxController::prepare() {
 		recomputeTypeFor(update.user);
 		refreshRows();
 	}, lifetime());
+
+	style::PaletteChanged() | rpl::on_next([=] {
+		_pillCircleCache.clear();
+	}, lifetime());
 }
 
 void ParticipantsBoxController::unload() {
@@ -1741,6 +1729,26 @@ void ParticipantsBoxController::rowRightActionClicked(
 	const auto participant = row->peer();
 	const auto user = participant->asUser();
 	if (_role == Role::Members || _role == Role::Profile) {
+		if (_role == Role::Profile && user) {
+			const auto memberRow = static_cast<Row*>(row.get());
+			if (memberRow->type().canAddTag) {
+				const auto show = delegate()->peerListUiShow();
+				const auto peer = _peer;
+				_editBox = show->show(Box(
+					EditCustomRankBox,
+					show,
+					peer,
+					user,
+					QString(),
+					true,
+					crl::guard(this, [=](const QString &rank) {
+						_additional.applyMemberRankLocally(user, rank);
+						recomputeTypeFor(user);
+						refreshRows();
+					})));
+				return;
+			}
+		}
 		kickParticipant(participant);
 	} else if (_role == Role::Admins) {
 		Assert(user != nullptr);
@@ -1921,7 +1929,7 @@ void ParticipantsBoxController::showAdmin(not_null<UserData*> user) {
 		_peer,
 		user,
 		currentRights,
-		_additional.adminRank(user),
+		_additional.memberRank(user),
 		_additional.adminPromotedSince(user),
 		_additional.adminPromotedBy(user));
 	if (_additional.canAddOrEditAdmin(user)) {
@@ -2245,7 +2253,10 @@ std::unique_ptr<PeerListRow> ParticipantsBoxController::createRow(
 auto ParticipantsBoxController::computeType(
 		not_null<PeerData*> participant) const -> Type {
 	const auto user = participant->asUser();
-	auto result = Type();
+	auto result = Type{
+		.chatStyle = _chatStyle.get(),
+		.circleCache = &_pillCircleCache,
+	};
 	result.rights = (user && _additional.isCreator(user))
 		? Rights::Creator
 		: (user && _additional.adminRights(user).has_value())
@@ -2255,10 +2266,15 @@ auto ParticipantsBoxController::computeType(
 		&& user
 		&& user->isInaccessible();
 	if (!result.canRemove) {
-		const auto aRank = user ? _additional.adminRank(user) : QString();
-		result.adminRank = !aRank.isEmpty()
-			? aRank
-			: (user ? _additional.memberRank(user) : QString());
+		result.rank = user ? _additional.memberRank(user) : QString();
+	}
+	if (user
+		&& user->isSelf()
+		&& result.rank.isEmpty()
+		&& !result.canRemove
+		&& result.rights == Rights::Normal
+		&& !_peer->amRestricted(ChatRestriction::EditRank)) {
+		result.canAddTag = true;
 	}
 	return result;
 }
@@ -2271,6 +2287,7 @@ void ParticipantsBoxController::recomputeTypeFor(
 	const auto row = delegate()->peerListFindRow(participant->id.value);
 	if (row) {
 		static_cast<Row*>(row)->setType(computeType(participant));
+		delegate()->peerListUpdateRow(row);
 	}
 }
 

@@ -20,16 +20,25 @@ ChannelAdminChanges::ChannelAdminChanges(not_null<ChannelData*> channel)
 }
 
 void ChannelAdminChanges::add(UserId userId, const QString &rank) {
-	const auto i = _admins.find(userId);
-	if (i == end(_admins) || i->second != rank) {
-		_admins[userId] = rank;
+	if (_admins.emplace(userId).second) {
 		_changes.emplace(userId);
+	}
+	auto &ranks = _channel->mgInfo->memberRanks;
+	if (!rank.isEmpty()) {
+		const auto i = ranks.find(userId);
+		if (i == end(ranks) || i->second != rank) {
+			ranks[userId] = rank;
+			_changes.emplace(userId);
+		}
+	} else {
+		if (ranks.remove(userId)) {
+			_changes.emplace(userId);
+		}
 	}
 }
 
 void ChannelAdminChanges::remove(UserId userId) {
-	if (_admins.contains(userId)) {
-		_admins.remove(userId);
+	if (_admins.remove(userId)) {
 		_changes.emplace(userId);
 	}
 }
