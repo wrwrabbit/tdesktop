@@ -7531,6 +7531,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_calendar" = "Calendar";
 
+"lng_new_window_tooltip_ctrl" = "Use Ctrl+Click to open in New Window.";
+"lng_new_window_tooltip_cmd" = "Use Cmd+Click to open in New Window.";
+
 // Wnd specific
 
 "lng_wnd_choose_program_menu" = "Choose Default Program...";

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/media/info_media_buttons.h"
 
 #include "base/call_delayed.h"
+#include "base/platform/base_platform_info.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "core/application.h"
 #include "core/ui_integration.h"
@@ -173,6 +174,11 @@ not_null<Ui::SettingsButton*> AddButton(
 	const auto openInWindow = separateId
 		? [=] { navigation->parentController()->showInNewWindow(separateId); }
 		: Fn<void()>(nullptr);
+	Ui::InstallTooltip(result, [=] {
+		return Platform::IsMac()
+			? tr::lng_new_window_tooltip_cmd(tr::now)
+			: tr::lng_new_window_tooltip_ctrl(tr::now);
+	});
 	AddContextMenuToButton(result, openInWindow);
 	result->addClickHandler([=](Qt::MouseButton mouse) {
 		if (mouse == Qt::RightButton) {
