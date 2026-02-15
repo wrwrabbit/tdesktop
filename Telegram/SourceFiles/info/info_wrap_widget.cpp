@@ -611,8 +611,9 @@ void WrapWidget::showTopBarMenu(bool check) {
 	}
 	_topBarMenu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
 	_topBarMenuToggle->setForceRippled(true);
-	_topBarMenu->popup(_topBarMenuToggle->mapToGlobal(
-		st::infoLayerTopBarMenuPosition));
+	_topBarMenu->popup(Ui::PopupMenu::ConstrainToParentScreen(
+		_topBarMenu,
+		_topBarMenuToggle->mapToGlobal(st::infoLayerTopBarMenuPosition)));
 }
 
 bool WrapWidget::requireTopBarSearch() const {
