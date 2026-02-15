@@ -689,9 +689,7 @@ CalendarBox::Inner::Inner(
 			animating = true;
 		}
 	}
-	if (animating) {
-		update();
-	}
+	update();
 	return animating;
 }) {
 	setMouseTracking(true);
@@ -831,8 +829,15 @@ void CalendarBox::Inner::paintRows(QPainter &p, QRect clip) {
 			auto dynamicImageProgress = -1.;
 			if (const auto it = _dynamicImageStates.find(date);
 					it != end(_dynamicImageStates)) {
-				const auto &state = it->second;
+				auto &state = it->second;
 				if (state.image) {
+					if (!state.animating() && !state.animationFinished) {
+						state.animation = anim::value(0., 1.);
+						state.animationStart = crl::now();
+						if (!_animation.animating()) {
+							_animation.start();
+						}
+					}
 					auto image = state.image->image(_st.cellInner);
 					if (!image.isNull()) {
 						const auto opacity = grayedOut ? 0.5 : 1.;
@@ -851,7 +856,6 @@ void CalendarBox::Inner::paintRows(QPainter &p, QRect clip) {
 							p.drawImage(
 								imgRect,
 								Images::Circle(std::move(image)));
-							p.setOpacity(1. * opacity);
 							p.setPen(Qt::NoPen);
 							p.setBrush(st::songCoverOverlayFg);
 							p.drawEllipse(imgRect);
@@ -1047,15 +1051,7 @@ void CalendarBox::Inner::setDynamicImage(
 	auto &state = _dynamicImageStates[date];
 	if (image) {
 		state.image = std::move(image);
-		state.image->subscribeToUpdates([=] {
-			auto &animState = _dynamicImageStates[date];
-			if (!animState.animating() && !state.animationFinished) {
-				animState.animation = anim::value(0., 1.);
-				animState.animationStart = crl::now();
-				_animation.start();
-			}
-			update();
-		});
+		state.image->subscribeToUpdates([=] { update(); });
 	} else {
 		_dynamicImageStates.remove(date);
 	}
