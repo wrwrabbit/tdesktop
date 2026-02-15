@@ -505,7 +505,8 @@ void SetupFilterDragAndDrop(
 		not_null<Ui::RpWidget*> outer,
 		not_null<Main::Session*> session,
 		Fn<std::optional<FilterId>(QPoint)> filterIdAtPosition,
-		Fn<FilterId()> activeFilterId) {
+		Fn<FilterId()> activeFilterId,
+		Fn<void(FilterId)> selectByFilterId) {
 	const auto hasAction = [=](not_null<QDropEvent*> drop, bool perform) {
 		const auto mimeData = drop->mimeData();
 		const auto filterId = filterIdAtPosition(
@@ -522,6 +523,7 @@ void SetupFilterDragAndDrop(
 						if (perform) {
 							v.add(id);
 						}
+						selectByFilterId(perform ? FilterId(-1) : id);
 						return true;
 					}
 				}
@@ -531,10 +533,12 @@ void SetupFilterDragAndDrop(
 					if (perform) {
 						v.remove(active);
 					}
+					selectByFilterId(perform ? FilterId(-1) : active);
 					return true;
 				}
 			}
 		}
+		selectByFilterId(-1);
 		return false;
 	};
 	outer->setAcceptDrops(true);
@@ -560,6 +564,7 @@ void SetupFilterDragAndDrop(
 				dm->ignore();
 			}
 		} else if (e->type() == QEvent::DragLeave) {
+			selectByFilterId(-1);
 		} else if (e->type() == QEvent::Drop) {
 			const auto drop = static_cast<QDropEvent*>(e.get());
 			if (hasAction(drop, true)) {
