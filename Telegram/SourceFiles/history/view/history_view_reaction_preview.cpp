@@ -35,7 +35,8 @@ namespace HistoryView {
 bool ShowReactionPreview(
 		not_null<Window::SessionController*> controller,
 		FullMsgId origin,
-		Data::ReactionId reactionId) {
+		Data::ReactionId reactionId,
+		bool emojiPreview) {
 	auto document = (DocumentData*)(nullptr);
 	if (const auto custom = reactionId.custom()) {
 		document = controller->session().data().document(custom);
@@ -112,10 +113,12 @@ bool ShowReactionPreview(
 			});
 			state->label = base::make_unique_q<Ui::FlatLabel>(
 				state->background.get(),
-				tr::lng_context_animated_reaction(
-					lt_name,
-					rpl::single(Ui::Text::Colorized(packName)),
-					tr::rich));
+				(emojiPreview
+					? tr::lng_context_animated_emoji_preview
+					: tr::lng_context_animated_reaction)(
+						lt_name,
+						rpl::single(Ui::Text::Colorized(packName)),
+						tr::rich));
 			state->label->setAttribute(Qt::WA_TransparentForMouseEvents);
 			const auto backgroundRaw = state->background.get();
 			const auto labelRaw = state->label.get();
