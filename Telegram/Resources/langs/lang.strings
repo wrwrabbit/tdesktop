@@ -7917,4 +7917,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_mac_hold_to_quit" = "Hold {text} to Quit";
 
+"lng_sr_country_column_name" = "Country name";
+
 // Keys finished
