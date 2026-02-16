@@ -258,19 +258,19 @@ void Message::initPaidInformation() {
 
 void Message::refreshRightBadge() {
 	const auto item = data();
-	const auto [text, isAdmin] = [&]() -> std::pair<QString, bool> {
+	const auto [text, role] = [&]() -> std::pair<QString, BadgeRole> {
 		if (item->isDiscussionPost()) {
 			return {
 				(delegate()->elementContext() == Context::Replies)
 					? QString()
 					: tr::lng_channel_badge(tr::now),
-				false,
+				BadgeRole::User,
 			};
 		} else if (item->author()->isMegagroup()) {
 			if (const auto msgsigned = item->Get<HistoryMessageSigned>()) {
 				if (!msgsigned->viaBusinessBot) {
 					Assert(msgsigned->isAnonymousRank);
-					return { msgsigned->author, false };
+					return { msgsigned->author, BadgeRole::User };
 				}
 			}
 		}
@@ -282,14 +282,20 @@ void Message::refreshRightBadge() {
 					const auto j = chat->memberRanks.find(
 						peerToUser(user->id));
 					if (j != chat->memberRanks.end()) {
-						return { j->second, false };
+						const auto basicRole
+							= (peerToUser(user->id) == chat->creator)
+							? BadgeRole::Creator
+							: chat->admins.contains(user)
+							? BadgeRole::Admin
+							: BadgeRole::User;
+						return { j->second, basicRole };
 					}
 				}
 			}
-			return { QString(), false };
+			return { QString(), BadgeRole::User };
 		}
 		if (!user) {
-			return { QString(), false };
+			return { QString(), BadgeRole::User };
 		}
 		const auto info = channel->mgInfo.get();
 		const auto userId = peerToUser(user->id);
@@ -298,18 +304,21 @@ void Message::refreshRightBadge() {
 		if (isCreator || isAdmin) {
 			const auto r = info->memberRanks.find(userId);
 			if (r != info->memberRanks.end() && !r->second.isEmpty()) {
-				return { r->second, true };
+				return {
+					r->second,
+					isCreator ? BadgeRole::Creator : BadgeRole::Admin,
+				};
 			}
 			if (isCreator) {
-				return { tr::lng_owner_badge(tr::now), true };
+				return { tr::lng_owner_badge(tr::now), BadgeRole::Creator };
 			}
-			return { tr::lng_admin_badge(tr::now), true };
+			return { tr::lng_admin_badge(tr::now), BadgeRole::Admin };
 		}
 		const auto fromRank = item->fromRank();
 		if (!fromRank.isEmpty()) {
-			return { fromRank, false };
+			return { fromRank, BadgeRole::User };
 		}
-		return { QString(), false };
+		return { QString(), BadgeRole::User };
 	}();
 	auto tagText = TextWithEntities{
 		(text.isEmpty()
@@ -328,7 +337,7 @@ void Message::refreshRightBadge() {
 		AddComponents(RightBadge::Bit());
 	}
 	const auto badge = Get<RightBadge>();
-	badge->isAdmin = isAdmin;
+	badge->role = role;
 	if (tagText.empty()) {
 		badge->tag.clear();
 	} else {
@@ -353,7 +362,7 @@ void Message::refreshRightBadge() {
 	const auto boostWidth = badge->boosts.isEmpty()
 		? 0
 		: (st::msgTagBadgeBoostSkip + badge->boosts.maxWidth());
-	if (!badge->isAdmin) {
+	if (badge->role == BadgeRole::User) {
 		const auto tagWidth = badge->tag.isEmpty()
 			? 0
 			: badge->tag.maxWidth();
@@ -1745,15 +1754,16 @@ void Message::paintFromName(
 				trect.top() + st::msgFont->ascent,
 				hasFastForward() ? FastForwardText() : FastReplyText());
 		} else if (const auto badge = Get<RightBadge>()) {
-			const auto nameColor = FromNameFg(
-				context,
-				colorIndex(),
-				colorCollectible());
+			const auto badgeColor = (badge->role == BadgeRole::Creator)
+				? st::rankOwnerFg->c
+				: (badge->role == BadgeRole::Admin)
+				? st::rankAdminFg->c
+				: st::rankUserFg->c;
 			const auto badgeLeft = trect.left()
 				+ trect.width()
 				- badge->width;
-			if (badge->isAdmin) {
-				auto bgColor = nameColor;
+			if (badge->role != BadgeRole::User) {
+				auto bgColor = badgeColor;
 				bgColor.setAlphaF(0.15);
 				const auto &padding = st::msgTagBadgePadding;
 				const auto tagTextWidth = badge->tag.maxWidth();
@@ -1780,7 +1790,7 @@ void Message::paintFromName(
 						pillHeight / 2.,
 						pillHeight / 2.);
 				}
-				p.setPen(nameColor);
+				p.setPen(badgeColor);
 				badge->tag.draw(p, {
 					.position = QPoint(
 						badgeLeft + (pillWidth - tagTextWidth) / 2,
@@ -1789,7 +1799,7 @@ void Message::paintFromName(
 					.now = context.now,
 				});
 			} else if (!badge->tag.isEmpty()) {
-				p.setPen(stm->msgDateFg);
+				p.setPen(st::rankUserFg);
 				badge->tag.draw(p, {
 					.position = QPoint(badgeLeft, trect.top()),
 					.availableWidth = badge->tag.maxWidth(),
@@ -1798,7 +1808,7 @@ void Message::paintFromName(
 			}
 			if (!badge->boosts.isEmpty()) {
 				const auto boostWidth = badge->boosts.maxWidth();
-				p.setPen(nameColor);
+				p.setPen(badgeColor);
 				badge->boosts.draw(p, {
 					.position = QPoint(
 						trect.left() + trect.width() - boostWidth,

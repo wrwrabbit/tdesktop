@@ -13,7 +13,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "ui/unread_badge.h"
 #include "lang/lang_keys.h"
-#include "ui/chat/chat_style.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/painter.h"
 #include "styles/style_info.h"
@@ -201,11 +200,9 @@ void MemberListRow::rightActionPaint(
 	const auto &pad = st::memberTagPillPadding;
 	switch (_tagMode) {
 	case TagMode::AdminPill: {
-		const auto nameColor = Ui::FromNameFg(
-			_type.chatStyle,
-			false,
-			user()->colorIndex(),
-			user()->colorCollectible());
+		const auto nameColor = (_type.rights == Rights::Creator)
+			? st::rankOwnerFg->c
+			: st::rankAdminFg->c;
 		auto bgColor = nameColor;
 		bgColor.setAlphaF(0.15);
 		const auto h = pillHeight();
@@ -223,7 +220,7 @@ void MemberListRow::rightActionPaint(
 	} break;
 	case TagMode::NormalText: {
 		p.setFont(st::normalFont);
-		p.setPen(st::windowSubTextFg);
+		p.setPen(st::rankUserFg);
 		p.drawTextLeft(
 			x, y, outerWidth, _actionText, _actionTextWidth);
 	} break;

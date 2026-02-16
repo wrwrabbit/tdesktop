@@ -59,11 +59,17 @@ struct PsaTooltipState : RuntimeComponent<PsaTooltipState, Element> {
 	mutable bool buttonVisible = true;
 };
 
+enum class BadgeRole : uchar {
+	User,
+	Admin,
+	Creator,
+};
+
 struct RightBadge : RuntimeComponent<RightBadge, Element> {
 	Ui::Text::String tag;
 	Ui::Text::String boosts;
 	int width = 0;
-	bool isAdmin = false;
+	BadgeRole role = BadgeRole::User;
 };
 
 struct BottomRippleMask {

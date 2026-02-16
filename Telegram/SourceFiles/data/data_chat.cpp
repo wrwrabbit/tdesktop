@@ -451,6 +451,13 @@ void ApplyChatUpdate(
 	} else {
 		chat->memberRanks[userId] = rank;
 	}
+	if (userId != chat->session().userId()) {
+		if (const auto history = chat->owner().historyLoaded(chat)) {
+			auto changes = base::flat_set<UserId>();
+			changes.emplace(userId);
+			history->applyGroupAdminChanges(changes);
+		}
+	}
 	chat->session().changes().peerUpdated(
 		chat,
 		Data::PeerUpdate::Flag::Members);

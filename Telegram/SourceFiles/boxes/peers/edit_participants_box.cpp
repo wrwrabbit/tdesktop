@@ -188,10 +188,18 @@ void SaveMemberRank(
 		if (const auto channel = peer->asChannel()) {
 			channel->applyEditMemberRank(user, rank);
 		} else if (const auto chat = peer->asChat()) {
+			const auto userId = peerToUser(user->id);
 			if (rank.isEmpty()) {
-				chat->memberRanks.remove(peerToUser(user->id));
+				chat->memberRanks.remove(userId);
 			} else {
-				chat->memberRanks[peerToUser(user->id)] = rank;
+				chat->memberRanks[userId] = rank;
+			}
+			if (userId != chat->session().userId()) {
+				if (const auto history = chat->owner().historyLoaded(chat)) {
+					auto changes = base::flat_set<UserId>();
+					changes.emplace(userId);
+					history->applyGroupAdminChanges(changes);
+				}
 			}
 			chat->session().changes().peerUpdated(
 				chat,
