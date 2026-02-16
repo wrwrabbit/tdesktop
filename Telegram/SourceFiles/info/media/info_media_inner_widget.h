@@ -85,6 +85,9 @@ private:
 	rpl::event_stream<rpl::producer<SelectedItems>> _selectedLists;
 	rpl::event_stream<rpl::producer<int>> _listTops;
 
+	int _emptyHeightThreshold = 0;
+	rpl::lifetime _emptyLoadingLifetime;
+
 };
 
 } // namespace Info::Media
