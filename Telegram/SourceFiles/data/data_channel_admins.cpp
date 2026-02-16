@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "data/data_channel.h"
 #include "data/data_session.h"
+#include "data/data_user.h"
 #include "main/main_session.h"
 
 namespace Data {
@@ -76,12 +77,24 @@ void ChannelMemberRankChanges::feed(
 }
 
 ChannelMemberRankChanges::~ChannelMemberRankChanges() {
-	if (_changes.size() > 1
-		|| (!_changes.empty()
-			&& _changes.front() != _channel->session().userId())) {
+	if (_changes.empty()) {
+		return;
+	}
+	const auto info = _channel->mgInfo.get();
+	auto adminChanges = base::flat_set<UserId>();
+	for (const auto &userId : _changes) {
+		if (info->admins.contains(userId)
+			|| (info->creator
+				&& peerToUser(info->creator->id) == userId)) {
+			adminChanges.emplace(userId);
+		}
+	}
+	if (adminChanges.size() > 1
+		|| (!adminChanges.empty()
+			&& adminChanges.front() != _channel->session().userId())) {
 		if (const auto history
 			= _channel->owner().historyLoaded(_channel)) {
-			history->applyGroupAdminChanges(_changes);
+			history->applyGroupAdminChanges(adminChanges);
 		}
 	}
 }

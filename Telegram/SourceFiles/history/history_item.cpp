@@ -2117,6 +2117,15 @@ void HistoryItem::applyEdition(HistoryMessageEdition &&edition) {
 	applyTTL(edition.ttl);
 	setFactcheck(FromMTP(this, edition.mtpFactcheck));
 
+	if (!edition.fromRank.isEmpty()) {
+		if (!Has<HistoryMessageFromRank>()) {
+			AddComponents(HistoryMessageFromRank::Bit());
+		}
+		Get<HistoryMessageFromRank>()->rank = edition.fromRank;
+	} else {
+		RemoveComponents(HistoryMessageFromRank::Bit());
+	}
+
 	finishEdition(keyboardTop);
 }
 

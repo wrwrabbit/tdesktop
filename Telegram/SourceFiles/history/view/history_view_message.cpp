@@ -293,18 +293,16 @@ void Message::refreshRightBadge() {
 		}
 		const auto info = channel->mgInfo.get();
 		const auto userId = peerToUser(user->id);
+		const auto isCreator = (info->creator == user);
 		const auto isAdmin = info->admins.contains(userId);
-		const auto r = info->memberRanks.find(userId);
-		const auto custom = (r != info->memberRanks.end())
-			? r->second
-			: QString();
-		if (!custom.isEmpty()) {
-			return { custom, isAdmin || info->creator == user };
-		}
-		if (info->creator == user) {
-			return { tr::lng_owner_badge(tr::now), true };
-		}
-		if (isAdmin) {
+		if (isCreator || isAdmin) {
+			const auto r = info->memberRanks.find(userId);
+			if (r != info->memberRanks.end() && !r->second.isEmpty()) {
+				return { r->second, true };
+			}
+			if (isCreator) {
+				return { tr::lng_owner_badge(tr::now), true };
+			}
 			return { tr::lng_admin_badge(tr::now), true };
 		}
 		const auto fromRank = item->fromRank();
