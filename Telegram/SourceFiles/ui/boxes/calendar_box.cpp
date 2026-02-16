@@ -1144,10 +1144,24 @@ void CalendarBox::Title::paintEvent(QPaintEvent *e) {
 
 	const auto clip = e->rect();
 
+	const auto triangleSize = st::lineWidth * 6;
+	const auto triangleX = _textLeft;
+	const auto triangleY = (st::calendarTitleHeight
+		- st::calendarTitleFont->height) / 2
+		+ st::calendarTitleFont->height / 2;
+	auto triangle = QPainterPath();
+	triangle.moveTo(triangleX, triangleY - triangleSize / 2);
+	triangle.lineTo(triangleX + triangleSize, triangleY);
+	triangle.lineTo(triangleX, triangleY + triangleSize / 2);
+	triangle.closeSubpath();
+	p.setPen(Qt::NoPen);
+	p.setBrush(st::windowSubTextFg);
+	p.drawPath(triangle);
+
 	p.setFont(st::calendarTitleFont);
 	p.setPen(_styleColors.titleTextColor);
 	p.drawTextLeft(
-		_textLeft,
+		_textLeft + triangleSize * 2,
 		(st::calendarTitleHeight - st::calendarTitleFont->height) / 2,
 		width(),
 		_text,
