@@ -53,8 +53,16 @@ bool ShowReactionPreview(
 		base::unique_qptr<Ui::AbstractButton> clickable;
 		base::unique_qptr<Ui::AbstractButton> background;
 		base::unique_qptr<Ui::FlatLabel> label;
+
+		void clear() {
+			mediaPreview.reset();
+			clickable.reset();
+			background.reset();
+			label.reset();
+		};
+
 	};
-	const auto state = std::make_shared<State>();
+	const auto state = std::make_shared<PrintDead<State>>();
 
 	const auto mainwidget = controller->widget();
 	state->mediaPreview = base::make_unique_q<Window::MediaPreviewWidget>(
@@ -73,9 +81,7 @@ bool ShowReactionPreview(
 		}
 		base::call_delayed(
 			st::defaultToggle.duration,
-			crl::guard(state->clickable.get(), [=] {
-				state->clickable.reset();
-			}));
+			[=] { state->clear(); });
 	};
 	state->clickable->setClickedCallback(hideAll);
 	base::install_event_filter(QCoreApplication::instance(), [=](
@@ -150,8 +156,6 @@ bool ShowReactionPreview(
 
 	mainwidget->sizeValue() | rpl::on_next([=](QSize size) {
 		mediaPreviewRaw->setGeometry(Rect(size));
-		clickableRaw->setGeometry(Rect(size));
-		clickableRaw->raise();
 
 		if (backgroundRaw && labelRaw) {
 			const auto maxLabelWidth = labelRaw->textMaxWidth() / 2;
@@ -174,6 +178,11 @@ bool ShowReactionPreview(
 			backgroundRaw->raise();
 		}
 	}, mediaPreviewRaw->lifetime());
+
+	mainwidget->sizeValue() | rpl::on_next([=](QSize size) {
+		clickableRaw->setGeometry(Rect(size));
+		clickableRaw->raise();
+	}, clickableRaw->lifetime());
 	return true;
 }
 
