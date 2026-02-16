@@ -314,6 +314,7 @@ ChatParticipant::ChatParticipant(
 		_restrictions = ChatRestrictionsInfo(data.vbanned_rights());
 		_by = peerToUser(peerFromUser(data.vkicked_by()));
 		_date = data.vdate().v;
+		_rank = qs(data.vrank().value_or_empty());
 
 		_type = (_restrictions.flags & ChatRestriction::ViewMessages)
 			? Type::Banned
