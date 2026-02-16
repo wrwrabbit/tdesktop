@@ -783,7 +783,10 @@ ReplyKeyboard::ReplyKeyboard(
 					auto result = TextWithEntities();
 					if (const auto iconId = row[j].visual.iconId) {
 						using namespace Data;
-						result.append(SingleCustomEmoji(iconId)).append(' ');
+						result.append(SingleCustomEmoji(iconId));
+						if (!text.isEmpty()) {
+							result.append(' ');
+						}
 					}
 					if (type == Type::Buy) {
 						auto firstPart = true;
