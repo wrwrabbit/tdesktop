@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_chat_participants.h"
 #include "api/api_global_privacy.h"
 #include "lang/lang_keys.h"
+#include "lottie/lottie_icon.h"
 #include "ui/boxes/confirm_box.h"
 #include "base/random.h"
 #include "base/options.h"
@@ -57,6 +58,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/generic_box.h"
 #include "ui/delayed_activation.h"
 #include "ui/vertical_list.h"
+#include "ui/controls/feature_list.h"
 #include "ui/ui_utility.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
@@ -79,6 +81,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
 #include "settings/sections/settings_advanced.h"
+#include "settings/sections/settings_premium.h"
+#include "settings/settings_common.h"
 #include "support/support_helper.h"
 #include "info/info_controller.h"
 #include "info/info_memento.h"
@@ -105,6 +109,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_saved_sublist.h"
 #include "data/data_histories.h"
 #include "data/data_chat_filters.h"
+#include "data/data_peer_values.h"
 #include "dialogs/dialogs_key.h"
 #include "core/application.h"
 #include "core/ui_integration.h"
@@ -118,6 +123,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_window.h" // st::windowMinWidth
 #include "styles/style_menu_icons.h"
+#include "styles/style_premium.h"
+#include "styles/style_settings.h"
 
 #include <QAction>
 #include <QtWidgets/QApplication>
@@ -304,6 +311,7 @@ private:
 	void addCreatePoll();
 	void addCreateTodoList();
 	void addThemeEdit();
+	void addToggleNoForwards();
 	void addBlockUser();
 	void addViewDiscussion();
 	void addDirectMessages();
@@ -1340,6 +1348,141 @@ void Filler::addThemeEdit() {
 		&st::menuIconChangeColors);
 }
 
+void ShowDisableSharingBox(
+		not_null<SessionController*> controller,
+		not_null<PeerData*> peer,
+		Fn<void(bool)> toggleNoForwards) {
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setStyle(st::showOrBox);
+		box->setWidth(st::boxWideWidth);
+		box->addTopButton(st::boxTitleClose, [=] {
+			box->closeBox();
+		});
+
+		const auto buttonPadding = QMargins(
+			st::showOrBox.buttonPadding.left(),
+			0,
+			st::showOrBox.buttonPadding.right(),
+			0);
+
+		auto icon = Settings::CreateLottieIcon(
+			box,
+			{
+				.name = u"stop"_q,
+				.sizeOverride = st::normalBoxLottieSize,
+			},
+			{});
+		box->verticalLayout()->add(
+			std::move(icon.widget),
+			st::disableSharingIconPadding,
+			style::al_top);
+
+		Ui::AddSkip(box->verticalLayout());
+
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				tr::lng_disable_sharing_title(),
+				st::boostCenteredTitle),
+			QMargins(0, 0, 0, st::showOrTitleIconMargin) + buttonPadding,
+			style::al_top);
+
+		const auto features = std::vector<Ui::FeatureListEntry>{
+			{
+				st::menuIconShareOff,
+				tr::lng_disable_sharing_no_forwarding(tr::now),
+				{ tr::lng_disable_sharing_no_forwarding_about(tr::now) },
+			},
+			{
+				st::menuIconDownloadOff,
+				tr::lng_disable_sharing_no_saving(tr::now),
+				{ tr::lng_disable_sharing_no_saving_about(tr::now) },
+			},
+		};
+		for (const auto &feature : features) {
+			box->addRow(
+				Ui::MakeFeatureListEntry(box, feature),
+				st::boxRowPadding);
+		}
+
+		const auto button = box->addButton(rpl::single(QString()), [=] {
+			if (peer->session().premium()) {
+				toggleNoForwards(true);
+				box->closeBox();
+			} else {
+				Settings::ShowPremium(controller, u"no_forwards"_q);
+			}
+		});
+		button->setText(
+			Data::AmPremiumValue(&peer->session())
+			| rpl::map([](bool premium) {
+				if (premium) {
+					return TextWithEntities{
+						tr::lng_disable_sharing_button(tr::now) };
+				}
+				return Ui::Text::IconEmoji(
+					&st::disableSharingButtonLock
+				).append(
+					' ' + tr::lng_disable_sharing_unlock(tr::now));
+			}));
+
+		box->setShowFinishedCallback([animate = std::move(icon.animate)] {
+			animate(anim::repeat::once);
+		});
+	}));
+}
+
+void Filler::addToggleNoForwards() {
+	const auto user = _peer->asUser();
+	if (!user || user->isInaccessible() || user->isBot() || user->isSelf()) {
+		return;
+	}
+	const auto controller = _controller;
+	const auto peer = _peer;
+	const auto toggleNoForwards = [=](bool enabled) {
+		using Flag = MTPmessages_ToggleNoForwards::Flag;
+		peer->session().api().request(MTPmessages_ToggleNoForwards(
+			MTP_flags(Flag()),
+			peer->input(),
+			MTP_bool(enabled),
+			MTPint()
+		)).done([=](const MTPUpdates &result) {
+			peer->session().api().applyUpdates(result);
+		}).fail([=](const MTP::Error &error) {
+			if (error.type() != u"CHAT_NOT_MODIFIED"_q) {
+				controller->showToast(error.type());
+			}
+		}).send();
+	};
+	const auto disabledNow = !user->allowsForwarding();
+	_addAction(disabledNow
+		? tr::lng_enable_sharing(tr::now)
+		: tr::lng_disable_sharing(tr::now), [=] {
+		if (controller->showFrozenError()) {
+			return;
+		} else if (disabledNow) {
+			toggleNoForwards(false);
+			return;
+		}
+		auto &settings = peer->session().settings();
+		if (!settings.shouldShowDisableSharingBox()) {
+#ifdef _DEBUG
+			settings.resetDisableSharingBoxShown();
+			peer->session().saveSettingsDelayed();
+#endif
+			if (peer->session().premium()) {
+				toggleNoForwards(true);
+			} else {
+				Settings::ShowPremium(controller, u"no_forwards"_q);
+			}
+			return;
+		}
+		settings.incrementDisableSharingBoxShown();
+		peer->session().saveSettingsDelayed();
+		ShowDisableSharingBox(controller, peer, toggleNoForwards);
+	}, disabledNow ? &st::menuIconShareOn : &st::menuIconShareOff);
+}
+
 void Filler::addTTLSubmenu(bool addSeparator) {
 	if (_thread->asTopic() || !_peer || _peer->isMonoforum()) {
 		return; // #TODO later forum
@@ -1596,6 +1739,7 @@ void Filler::fillHistoryActions() {
 	addCreatePoll();
 	addCreateTodoList();
 	addThemeEdit();
+	addToggleNoForwards();
 	addViewDiscussion();
 	addDirectMessages();
 	addExportChat();
@@ -1625,6 +1769,7 @@ void Filler::fillProfileActions() {
 	addViewDiscussion();
 	addDirectMessages();
 	addExportChat();
+	addToggleNoForwards();
 	addToggleFolder();
 	addBlockUser();
 	addReport();

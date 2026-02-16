@@ -1858,6 +1858,15 @@ ServiceAction ParseServiceAction(
 		auto content = ActionChangeCreator();
 		content.newCreatorId = data.vnew_creator_id().v;
 		result.content = content;
+	}, [&](const MTPDmessageActionNoForwardsToggle &data) {
+		auto content = ActionNoForwardsToggle();
+		content.newValue = (data.vnew_value().type() == mtpc_boolTrue);
+		result.content = content;
+	}, [&](const MTPDmessageActionNoForwardsRequest &data) {
+		auto content = ActionNoForwardsRequest();
+		content.expired = data.is_expired();
+		content.newValue = (data.vnew_value().type() == mtpc_boolTrue);
+		result.content = content;
 	}, [](const MTPDmessageActionEmpty &data) {});
 	return result;
 }

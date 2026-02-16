@@ -858,6 +858,8 @@ PRIVATE
     history/view/media/history_view_media_spoiler.h
     history/view/media/history_view_media_unwrapped.cpp
     history/view/media/history_view_media_unwrapped.h
+    history/view/media/history_view_no_forwards_request.cpp
+    history/view/media/history_view_no_forwards_request.h
     history/view/media/history_view_photo.cpp
     history/view/media/history_view_photo.h
     history/view/media/history_view_poll.cpp

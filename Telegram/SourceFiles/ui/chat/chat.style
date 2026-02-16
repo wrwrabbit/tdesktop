@@ -1100,6 +1100,7 @@ chatSuggestInfoWidth: 272px;
 chatSuggestInfoTitleMargin: margins(16px, 16px, 16px, 6px);
 chatSuggestInfoMiddleMargin: margins(16px, 4px, 16px, 4px);
 chatSuggestInfoLastMargin: margins(16px, 4px, 16px, 16px);
+chatSuggestBulletLeftExtra: 16px;
 chatSuggestTableMiddleMargin: margins(8px, 4px, 8px, 4px);
 chatSuggestTableLastMargin: margins(8px, 4px, 8px, 16px);
 chatSuggestInfoFullMargin: margins(16px, 16px, 16px, 16px);

@@ -63,6 +63,7 @@ enum class SuggestionActions : uchar {
 	Decline,
 	AcceptAndDecline,
 	GiftOfferActions,
+	NoForwardsRequest,
 };
 
 struct HistoryMessageVia : RuntimeComponent<HistoryMessageVia, HistoryItem> {
@@ -736,6 +737,13 @@ struct HistoryServiceSuggestFinish
 , HistoryServiceDependentData {
 	CreditsAmount price;
 	SuggestRefundType refundType = SuggestRefundType::None;
+};
+
+struct HistoryServiceNoForwardsRequest
+: RuntimeComponent<HistoryServiceNoForwardsRequest, HistoryItem> {
+	TimeId expiresAt = 0;
+	mtpRequestId requestId = 0;
+	bool expired = false;
 };
 
 struct HistoryServiceGameScore

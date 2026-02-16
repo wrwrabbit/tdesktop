@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/file_upload.h"
 #include "storage/storage_shared_media.h"
 #include "main/main_session.h"
+#include "main/main_app_config.h"
 #include "main/main_session_settings.h"
 #include "menu/menu_ttl_validator.h"
 #include "apiwrap.h"
@@ -4946,6 +4947,29 @@ void HistoryItem::createServiceFromMtp(const MTPDmessageService &message) {
 			? SuggestRefundType::Expired
 			: SuggestRefundType::User;
 		finish->price = CreditsAmountFromTL(data.vprice());
+	} else if (type == mtpc_messageActionNoForwardsRequest) {
+		const auto &data = action.c_messageActionNoForwardsRequest();
+		const auto expired = data.is_expired();
+		const auto period = _history->session().appConfig()
+			.noForwardsRequestExpirePeriod();
+		const auto expiresAt = TimeId(_date + period);
+		const auto isExpired = expired
+			|| (expiresAt <= base::unixtime::now());
+		auto mask = HistoryServiceNoForwardsRequest::Bit();
+		const auto actions = (!isExpired && !out())
+			? SuggestionActions::NoForwardsRequest
+			: SuggestionActions::None;
+		if (actions != SuggestionActions::None) {
+			mask |= HistoryMessageReplyMarkup::Bit();
+		}
+		UpdateComponents(mask);
+		const auto request = Get<HistoryServiceNoForwardsRequest>();
+		request->expired = isExpired;
+		request->expiresAt = expiresAt;
+		if (actions != SuggestionActions::None) {
+			const auto markup = Get<HistoryMessageReplyMarkup>();
+			markup->updateSuggestControls(actions);
+		}
 	}
 	if (const auto replyTo = message.vreply_to()) {
 		replyTo->match([&](const MTPDmessageReplyHeader &data) {
@@ -6654,6 +6678,50 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 		return result;
 	};
 
+	auto prepareNoForwardsToggle = [this](const MTPDmessageActionNoForwardsToggle &action) {
+		auto result = PreparedServiceText();
+		const auto enabled = mtpIsTrue(action.vnew_value());
+		const auto prevEnabled = mtpIsTrue(action.vprev_value());
+		if (enabled == prevEnabled) {
+			result.text = tr::lng_action_no_forwards_still_disabled(
+				tr::now,
+				tr::marked);
+		} else if (out()) {
+			result.text = (enabled
+				? tr::lng_action_no_forwards_you_disabled
+				: tr::lng_action_no_forwards_you_enabled)(
+					tr::now,
+					tr::marked);
+		} else {
+			result.links.push_back(fromLink());
+			result.text = (enabled
+				? tr::lng_action_no_forwards_disabled
+				: tr::lng_action_no_forwards_enabled)(
+					tr::now,
+					lt_from,
+					fromLinkText(),
+					tr::marked);
+		}
+		return result;
+	};
+
+	auto prepareNoForwardsRequest = [this](const MTPDmessageActionNoForwardsRequest &action) {
+		auto result = PreparedServiceText();
+		if (_from->isSelf()) {
+			result.text = tr::lng_action_no_forwards_request_you(
+				tr::now,
+				tr::marked);
+		} else {
+			result.links.push_back(fromLink());
+			result.text = tr::lng_action_no_forwards_request(
+				tr::now,
+				lt_from,
+				fromLinkText(),
+				tr::marked);
+		}
+		return result;
+	};
+
 	setServiceText(action.match(
 		prepareChatAddUserText,
 		prepareChatJoinedByLink,
@@ -6715,14 +6783,15 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 		prepareStarGiftPurchaseOfferDeclined,
 		prepareNewCreatorPending,
 		prepareChangeCreator,
+		prepareNoForwardsToggle,
+		prepareNoForwardsRequest,
 		PrepareEmptyText<MTPDmessageActionRequestedPeerSentMe>,
 		PrepareErrorText<MTPDmessageActionEmpty>));
 
-	// Additional information.
-	applyAction(action);
+	processAction(action);
 }
 
-void HistoryItem::applyAction(const MTPMessageAction &action) {
+void HistoryItem::processAction(const MTPMessageAction &action) {
 	action.match([&](const MTPDmessageActionChatAddUser &data) {
 		if (const auto channel = _history->peer->asMegagroup()) {
 			const auto selfUserId = _history->session().userId();

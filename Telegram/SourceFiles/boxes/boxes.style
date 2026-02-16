@@ -1200,3 +1200,9 @@ futureOwnerBox: Box(defaultBox) {
 	buttonHeight: 0px;
 }
 futureOwnerBoxSelect: collectibleBox;
+
+disableSharingIconPadding: margins(12px, 12px, 12px, 8px);
+disableSharingButtonLock: IconEmoji {
+	icon: icon {{ "emoji/premium_lock", activeButtonFg }};
+	padding: margins(-2px, 1px, 0px, 0px);
+}

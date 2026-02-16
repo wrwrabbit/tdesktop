@@ -1382,6 +1382,13 @@ void History::applyServiceChanges(
 				peer->owner().notifyGiftAuctionGot({ data.vid().v, to });
 			}, [](const auto &) {});
 		}
+	}, [&](const MTPDmessageActionNoForwardsToggle &data) {
+		if (const auto user = peer->asUser()) {
+			const auto enabled = mtpIsTrue(data.vnew_value());
+			user->setNoForwardsFlags(
+				enabled && item->out(),
+				enabled && !item->out());
+		}
 	}, [](const auto &) {
 	});
 }

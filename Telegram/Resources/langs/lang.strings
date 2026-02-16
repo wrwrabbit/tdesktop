@@ -1898,6 +1898,31 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_manage_peer_no_forwards_about" = "Members won't be able to copy, save or forward content from this group.";
 "lng_manage_peer_no_forwards_about_channel" = "Subscribers won't be able to copy, save or forward content from this channel.";
 
+"lng_disable_sharing" = "Disable Sharing";
+"lng_enable_sharing" = "Enable Sharing";
+"lng_disable_sharing_title" = "Disable Sharing";
+"lng_disable_sharing_no_forwarding" = "No Forwarding";
+"lng_disable_sharing_no_forwarding_about" = "Disable message forwarding to other chats.";
+"lng_disable_sharing_no_saving" = "No Saving";
+"lng_disable_sharing_no_saving_about" = "Disable copying texts and saving photos and videos to gallery.";
+"lng_disable_sharing_unlock" = "Unlock with Telegram Premium";
+"lng_disable_sharing_button" = "Disable Sharing";
+"lng_disable_sharing_toast" = "Sharing disabled for this chat.";
+"lng_enable_sharing_toast" = "Sharing enabled for this chat.";
+
+"lng_action_no_forwards_you_disabled" = "You disabled sharing in this chat.";
+"lng_action_no_forwards_you_enabled" = "You enabled sharing in this chat.";
+"lng_action_no_forwards_disabled" = "{from} disabled sharing in this chat.";
+"lng_action_no_forwards_enabled" = "{from} enabled sharing in this chat.";
+"lng_action_no_forwards_still_disabled" = "Sharing in this chat is still disabled.";
+"lng_action_no_forwards_request" = "{from} would like to enable sharing in this chat, which includes:";
+"lng_action_no_forwards_request_you" = "You requested to enable sharing in this chat, which includes:";
+"lng_action_no_forwards_feature_forwarding" = "Forwarding messages";
+"lng_action_no_forwards_feature_saving" = "Saving photos and videos";
+"lng_action_no_forwards_feature_copying" = "Copying messages";
+"lng_action_no_forwards_accept" = "Accept";
+"lng_action_no_forwards_reject" = "Reject";
+
 "lng_manage_peer_bot_public_link" = "Public Link";
 "lng_manage_peer_bot_public_links" = "Public Links";
 "lng_manage_peer_bot_balance" = "Balance";
@@ -5005,7 +5030,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_context_noforwards_info_channel" = "Copying and forwarding is not allowed in this channel.";
 "lng_context_noforwards_info_group" = "Copying and forwarding is not allowed in this group.";
 "lng_context_noforwards_info_bot" = "Copying and forwarding is not allowed from this bot.";
-"lng_context_noforwards_info_user" = "Copying and forwarding is not allowed in this chat.";
+"lng_context_noforwards_info_his" = "{user} disabled copying and forwarding in this chat.";
+"lng_context_noforwards_info_mine" = "You disabled copying and forwarding in this chat.";
 
 "lng_context_spoiler_effect" = "Hide with Spoiler";
 "lng_context_disable_spoiler" = "Remove Spoiler";
