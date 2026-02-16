@@ -4,7 +4,7 @@ This file contains style and formatting rules that the review subagent must chec
 
 ## Empty line before closing brace
 
-Always add an empty line before the closing brace of a class (after all private fields):
+Always add an empty line before the closing brace of a **class** (which has one or more sections like `public:` / `private:`). Plain **structs** with just data members do NOT get a trailing empty line — they are compact: `struct Foo { data lines; };`.
 
 ```cpp
 // BAD:
