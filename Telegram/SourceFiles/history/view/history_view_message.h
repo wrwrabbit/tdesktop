@@ -59,6 +59,13 @@ struct PsaTooltipState : RuntimeComponent<PsaTooltipState, Element> {
 	mutable bool buttonVisible = true;
 };
 
+struct RightBadge : RuntimeComponent<RightBadge, Element> {
+	Ui::Text::String tag;
+	Ui::Text::String boosts;
+	int width = 0;
+	bool isAdmin = false;
+};
+
 struct BottomRippleMask {
 	QImage image;
 	int shift = 0;
@@ -337,13 +344,10 @@ private:
 	mutable Ui::Text::String _fromName;
 	mutable std::unique_ptr<FromNameStatus> _fromNameStatus;
 	mutable std::unique_ptr<Ui::RoundCheckbox> _selectionRoundCheckbox;
-	Ui::Text::String _rightBadge;
 	mutable int _fromNameVersion = 0;
 	uint32 _bubbleWidthLimit : 27 = 0;
 	uint32 _invertMedia : 1 = 0;
 	uint32 _hideReply : 1 = 0;
-	uint32 _rightBadgeHasBoosts : 1 = 0;
-	uint32 _rightBadgeIsAdmin : 1 = 0;
 	uint32 _postShowingAuthor : 1 = 0;
 
 	BottomInfo _bottomInfo;
