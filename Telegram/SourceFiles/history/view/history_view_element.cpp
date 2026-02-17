@@ -210,10 +210,10 @@ void KeyboardStyle::paintButtonBg(
 			using Color = HistoryMessageMarkupButton::Color;
 			const auto normal = (color == Color::Normal);
 			const auto colored = style::owned_color((color == Color::Primary)
-				? QColor(0x37, 0x8e, 0xae)
+				? st::botKbInlinePrimaryBg->c
 				: (color == Color::Danger)
-				? QColor(0xc9, 0x54, 0x3e)
-				: QColor(0x48, 0x9d, 0x38));
+				? st::botKbInlineDangerBg->c
+				: st::botKbInlineSuccessBg->c);
 			const auto smallColored = normal
 				? Ui::CornersPixmaps()
 				: Ui::PrepareCornerPixmaps(
