@@ -528,17 +528,18 @@ InnerWidget::InnerWidget(
 			RowDescriptor previous,
 			RowDescriptor next) {
 		const auto update = [&](const RowDescriptor &descriptor) {
+			const auto msgId = descriptor.fullId;
 			if (const auto topic = descriptor.key.topic()) {
 				if (_openedForum == topic->forum()) {
 					updateDialogRow(descriptor);
 				} else {
-					updateDialogRow({ { topic->owningHistory() }, {} });
+					updateDialogRow({ { topic->owningHistory() }, msgId });
 				}
 			} else if (const auto sublist = descriptor.key.sublist()) {
 				if (_savedSublists == sublist->parent()) {
 					updateDialogRow(descriptor);
 				} else {
-					updateDialogRow({ { sublist->owningHistory() }, {} });
+					updateDialogRow({ { sublist->owningHistory() }, msgId });
 				}
 			} else {
 				updateDialogRow(descriptor);
