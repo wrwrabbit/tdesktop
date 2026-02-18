@@ -1135,6 +1135,9 @@ void FillUniqueGiftMenu(
 			if (Ui::ShowCraftLaterError(show, unique)) {
 				return;
 			}
+			if (Ui::ShowCraftAddressError(show, unique)) {
+				return;
+			}
 			const auto savedId = EntryToSavedStarGiftId(&show->session(), e);
 			if (const auto window = show->resolveWindow()) {
 				Ui::ShowGiftCraftInfoBox(window, unique, savedId);
@@ -1602,6 +1605,9 @@ void GenericCreditsEntryBody(
 		const auto craft = canCraft ? [=] {
 			const auto unique = e.uniqueGift;
 			if (Ui::ShowCraftLaterError(show, unique)) {
+				return;
+			}
+			if (Ui::ShowCraftAddressError(show, unique)) {
 				return;
 			}
 			const auto savedId = EntryToSavedStarGiftId(&show->session(), e);

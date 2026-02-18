@@ -4201,6 +4201,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_gift_craft_another_button" = "Craft Another Gift";
 "lng_gift_craft_unavailable" = "Crafting unavailable";
 "lng_gift_craft_when" = "This gift will become available for crafting on {date} at {time}.";
+"lng_gift_craft_address_error" = "This gift has been exported to the blockchain and can't be used as the primary gift for crafting.";
 
 "lng_auction_about_title" = "Auction";
 "lng_auction_about_subtitle" = "Join the battle for exclusive gifts.";
