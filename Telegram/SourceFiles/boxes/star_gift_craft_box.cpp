@@ -292,13 +292,12 @@ AbstractButton *MakeRemoveButton(
 		int size,
 		const GiftForCraft &gift,
 		Fn<void()> onClick,
-		rpl::producer<QColor> edgeColor) {
+		rpl::producer<QColor> edgeColor,
+		const style::icon &icon) {
 	auto remove = object_ptr<RpWidget>(parent);
-	const auto &icon = st::stickerPanDeleteIconFg;
 	const auto add = (size - icon.width()) / 2;
 	remove->resize(icon.size() + QSize(add, add) * 2);
-	remove->paintOn([=](QPainter &p) {
-		const auto &icon = st::stickerPanDeleteIconFg;
+	remove->paintOn([=, &icon](QPainter &p) {
 		icon.paint(p, add, add, add * 2 + icon.width(), st::white->c);
 	});
 	remove->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -419,19 +418,32 @@ AbstractButton *MakeRemoveButton(
 			nullptr,
 			&Entry::button);
 		const auto canRemove = (count > 1);
+		const auto secondHasAddress = state->entries[1].gift
+			&& !state->entries[1].gift.unique->giftAddress.isEmpty();
 		for (auto i = 0; i != 4; ++i) {
 			auto &entry = state->entries[i];
 			if (entry.button) {
-				if (!canRemove) {
-					delete base::take(entry.remove);
-				} else if (!entry.remove) {
+				delete base::take(entry.remove);
+				if (canRemove) {
+					const auto needReplace = (i == 0) && secondHasAddress;
+					const auto callback = [=] {
+						if (needReplace) {
+							state->editRequests.fire_copy(0);
+						} else {
+							state->removeRequests.fire_copy(i);
+						}
+					};
+					const auto &icon = needReplace
+						? st::craftReplaceIcon
+						: st::stickerPanDeleteIconFg;
 					entry.remove = MakeRemoveButton(
 						raw,
 						entry.button,
 						entry.percent->height(),
 						entry.gift,
-						[=] { state->removeRequests.fire_copy(i); },
-						state->edgeColor.value());
+						callback,
+						state->edgeColor.value(),
+						icon);
 				}
 			}
 		}
