@@ -71,6 +71,9 @@ public:
 		bool selected,
 		int selectedElement) override;
 
+	QSize rightActionSize() const override;
+	QMargins rightActionMargins() const override;
+
 private:
 	enum class TagMode {
 		None,
@@ -81,13 +84,13 @@ private:
 
 	[[nodiscard]] bool tagInteractive() const;
 	[[nodiscard]] int pillHeight() const;
-	[[nodiscard]] const QImage &ensurePillCircle(QRgb color) const;
+	[[nodiscard]] const QImage &ensurePillCircle(const QColor &color) const;
 	void paintPill(
 		Painter &p,
 		int x,
 		int y,
 		int width,
-		QRgb bgColor) const;
+		const QColor &bgColor) const;
 	void paintColoredPill(
 		Painter &p,
 		int x,
@@ -95,12 +98,10 @@ private:
 		int w,
 		int textWidth,
 		const QString &text,
-		QColor color,
+		const QColor &color,
 		bool over,
 		std::unique_ptr<Ui::RippleAnimation> &ripple,
-		int outerWidth,
-		float64 baseAlpha = 0.12,
-		float64 overAlpha = 0.24);
+		int outerWidth);
 	void paintTag(
 		Painter &p,
 		QRect geometry,

@@ -2344,8 +2344,6 @@ auto ParticipantsBoxController::computeType(
 			&& result.rights == Rights::Normal
 			&& canEditSelf) {
 			result.canAddTag = true;
-		} else if (canEditTarget && result.rank.isEmpty()) {
-			result.canAddTag = true;
 		}
 	}
 

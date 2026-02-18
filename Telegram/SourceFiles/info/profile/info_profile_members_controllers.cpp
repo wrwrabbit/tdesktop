@@ -103,6 +103,24 @@ QSize MemberListRow::tagSize() const {
 	return QSize(_tagTextWidth, st::normalFont->height);
 }
 
+QSize MemberListRow::rightActionSize() const {
+	const auto tag = tagSize();
+	const auto remove = removeSize();
+	const auto w = std::max(tag.width(), remove.width());
+	return (w > 0)
+		? QSize(w, st::defaultPeerListItem.height)
+		: QSize();
+}
+
+QMargins MemberListRow::rightActionMargins() const {
+	const auto skip = st::contactsCheckPosition.x();
+	return QMargins(
+		skip,
+		0,
+		st::defaultPeerListItem.photoPosition.x() + skip,
+		0);
+}
+
 QSize MemberListRow::removeSize() const {
 	if (_removeTextWidth == 0) {
 		return QSize();
@@ -245,9 +263,10 @@ int MemberListRow::pillHeight() const {
 	return p.top() + st::normalFont->height + p.bottom();
 }
 
-const QImage &MemberListRow::ensurePillCircle(QRgb color) const {
+const QImage &MemberListRow::ensurePillCircle(const QColor &color) const {
 	auto &cache = *_type.circleCache;
-	const auto it = cache.find(color);
+	const auto rgba = color.rgba();
+	const auto it = cache.find(rgba);
 	if (it != end(cache)) {
 		return it->second;
 	}
@@ -262,10 +281,10 @@ const QImage &MemberListRow::ensurePillCircle(QRgb color) const {
 		auto p = QPainter(&image);
 		auto hq = PainterHighQualityEnabler(p);
 		p.setPen(Qt::NoPen);
-		p.setBrush(QColor::fromRgba(color));
+		p.setBrush(color);
 		p.drawEllipse(0, 0, h, h);
 	}
-	return cache.emplace(color, std::move(image)).first->second;
+	return cache.emplace(rgba, std::move(image)).first->second;
 }
 
 void MemberListRow::paintPill(
@@ -273,7 +292,7 @@ void MemberListRow::paintPill(
 		int x,
 		int y,
 		int width,
-		QRgb bgColor) const {
+		const QColor &bgColor) const {
 	const auto h = pillHeight();
 	const auto &circle = ensurePillCircle(bgColor);
 	const auto ratio = style::DevicePixelRatio();
@@ -289,7 +308,7 @@ void MemberListRow::paintPill(
 			y,
 			width - h,
 			h,
-			QColor::fromRgba(bgColor));
+			bgColor);
 	}
 	p.drawImage(
 		QRect(x + width - otherHalf, y, otherHalf, h),
@@ -304,16 +323,14 @@ void MemberListRow::paintColoredPill(
 		int w,
 		int textWidth,
 		const QString &text,
-		QColor color,
+		const QColor &color,
 		bool over,
 		std::unique_ptr<Ui::RippleAnimation> &ripple,
-		int outerWidth,
-		float64 baseAlpha,
-		float64 overAlpha) {
+		int outerWidth) {
 	const auto &pad = st::memberTagPillPadding;
 	auto bgColor = color;
-	bgColor.setAlphaF(over ? overAlpha : baseAlpha);
-	paintPill(p, x, y, w, bgColor.rgba());
+	bgColor.setAlphaF(over ? 0.16 : 0.12);
+	paintPill(p, x, y, w, bgColor);
 	if (ripple) {
 		auto rippleColor = color;
 		rippleColor.setAlphaF(0.12);
@@ -352,18 +369,44 @@ void MemberListRow::paintTag(
 		const auto cw = pad.left() + _tagTextWidth + pad.right();
 		const auto w = std::max(cw, h);
 		paintColoredPill(
-			p, x, y, w, _tagTextWidth, _tagText,
-			nameColor, over, _tagRipple, outerWidth,
-			0.15, 0.15);
+			p,
+			x,
+			y,
+			w,
+			_tagTextWidth,
+			_tagText,
+			nameColor,
+			over,
+			_tagRipple,
+			outerWidth);
 	} break;
 	case TagMode::NormalText: {
 		if (tagInteractive()) {
 			const auto h = pillHeight();
 			const auto cw = pad.left() + _tagTextWidth + pad.right();
 			const auto w = std::max(cw, h);
-			paintColoredPill(
-				p, x, y, w, _tagTextWidth, _tagText,
-				st::rankUserFg->c, over, _tagRipple, outerWidth);
+			if (over) {
+				auto bgColor = st::rankUserFg->c;
+				bgColor.setAlphaF(0.12);
+				paintPill(p, x, y, w, bgColor);
+			}
+			if (_tagRipple) {
+				auto rippleColor = st::rankUserFg->c;
+				rippleColor.setAlphaF(0.12);
+				_tagRipple->paint(
+					p, x, y, outerWidth, &rippleColor);
+				if (_tagRipple->empty()) {
+					_tagRipple.reset();
+				}
+			}
+			p.setFont(st::normalFont);
+			p.setPen(st::rankUserFg);
+			p.drawTextLeft(
+				x + (w - _tagTextWidth) / 2,
+				y + pad.top(),
+				outerWidth,
+				_tagText,
+				_tagTextWidth);
 		} else {
 			p.setFont(st::normalFont);
 			p.setPen(st::rankUserFg);
@@ -375,29 +418,20 @@ void MemberListRow::paintTag(
 		const auto h = pillHeight();
 		const auto cw = pad.left() + _tagTextWidth + pad.right();
 		const auto w = std::max(cw, h);
-		const auto self = user() && user()->isSelf();
-		if (self) {
-			if (over) {
-				paintPill(
-					p, x, y, w, st::lightButtonBgOver->c.rgba());
-			}
-			if (_tagRipple) {
-				const auto color = st::lightButtonBgRipple->c;
-				_tagRipple->paint(p, x, y, outerWidth, &color);
-				if (_tagRipple->empty()) {
-					_tagRipple.reset();
-				}
-			}
-			p.setFont(st::normalFont);
-			p.setPen(over
-				? st::lightButtonFgOver
-				: st::lightButtonFg);
-		} else {
-			paintColoredPill(
-				p, x, y, w, _tagTextWidth, _tagText,
-				st::rankUserFg->c, over, _tagRipple, outerWidth);
-			break;
+		if (over) {
+			paintPill(p, x, y, w, st::lightButtonBgOver->c);
 		}
+		if (_tagRipple) {
+			const auto color = st::lightButtonBgRipple->c;
+			_tagRipple->paint(p, x, y, outerWidth, &color);
+			if (_tagRipple->empty()) {
+				_tagRipple.reset();
+			}
+		}
+		p.setFont(st::normalFont);
+		p.setPen(over
+			? st::lightButtonFgOver
+			: st::lightButtonFg);
 		p.drawTextLeft(
 			x + (w - _tagTextWidth) / 2,
 			y + pad.top(),
@@ -434,7 +468,7 @@ void MemberListRow::paintRemove(
 	p.setOpacity(o * progress);
 
 	if (over) {
-		paintPill(p, x, y, w, st::lightButtonBgOver->c.rgba());
+		paintPill(p, x, y, w, st::lightButtonBgOver->c);
 	}
 	if (_removeRipple) {
 		const auto color = st::lightButtonBgRipple->c;
