@@ -945,13 +945,13 @@ ParticipantsBoxController::ParticipantsBoxController(
 	not_null<PeerData*> peer,
 	Role role)
 : PeerListController(CreateSearchController(peer, role, &_additional))
+, _chatStyle(
+	std::make_unique<Ui::ChatStyle>(peer->session().colorIndicesValue()))
 , _navigation(navigation)
 , _peer(peer)
 , _api(&_peer->session().mtp())
 , _role(role)
-, _additional(peer, _role)
-, _chatStyle(
-	std::make_unique<Ui::ChatStyle>(peer->session().colorIndicesValue())) {
+, _additional(peer, _role) {
 	subscribeToMigration();
 	if (_role == Role::Profile) {
 		setupListChangeViewers();
@@ -1157,18 +1157,20 @@ void ParticipantsBoxController::peerListSearchAddRow(
 
 std::unique_ptr<PeerListRow> ParticipantsBoxController::createSearchRow(
 		not_null<PeerData*> peer) {
-	if (const auto user = peer->asUser()) {
-		return createRow(user);
+	if (_role == Role::Profile
+		|| _role == Role::Members
+		|| _role == Role::Admins) {
+		if (const auto user = peer->asUser()) {
+			return createRow(user);
+		}
+		return nullptr;
 	}
-	return nullptr;
+	return createRow(peer);
 }
 
 std::unique_ptr<PeerListRow> ParticipantsBoxController::createRestoredRow(
 		not_null<PeerData*> peer) {
-	if (const auto user = peer->asUser()) {
-		return createRow(user);
-	}
-	return nullptr;
+	return createSearchRow(peer);
 }
 
 auto ParticipantsBoxController::saveState() const
@@ -1550,14 +1552,11 @@ void ParticipantsBoxController::chatListReady() {
 }
 
 void ParticipantsBoxController::rebuildRowTypes() {
-	if (_role != Role::Profile) {
-		return;
-	}
 	const auto count = delegate()->peerListFullRowsCount();
 	for (auto i = 0; i != count; ++i) {
 		const auto row = static_cast<Row*>(
 			delegate()->peerListRowAt(i).get());
-		row->setType(computeType(row->user()));
+		row->setType(computeType(row->peer()));
 	}
 	refreshRows();
 }
@@ -1734,35 +1733,46 @@ void ParticipantsBoxController::rowClicked(not_null<PeerListRow*> row) {
 
 void ParticipantsBoxController::rowRightActionClicked(
 		not_null<PeerListRow*> row) {
+	rowElementClicked(row, Row::kRemoveElement);
+}
+
+void ParticipantsBoxController::rowElementClicked(
+		not_null<PeerListRow*> row,
+		int element) {
 	const auto participant = row->peer();
 	const auto user = participant->asUser();
-	if (_role == Role::Members || _role == Role::Profile) {
-		if (_role == Role::Profile && user) {
-			const auto memberRow = static_cast<Row*>(row.get());
-			if (memberRow->type().canAddTag) {
-				const auto show = delegate()->peerListUiShow();
-				const auto peer = _peer;
-				_editBox = show->show(Box(
-					EditCustomRankBox,
-					show,
-					peer,
-					user,
-					QString(),
-					true,
-					crl::guard(this, [=](const QString &rank) {
-						_additional.applyMemberRankLocally(user, rank);
-						recomputeTypeFor(user);
-						refreshRows();
-					})));
-				return;
-			}
+	const auto memberRow = static_cast<Row*>(row.get());
+	if (element == Row::kTagElement) {
+		if (!user) {
+			return;
 		}
-		kickParticipant(participant);
-	} else if (_role == Role::Admins) {
-		Assert(user != nullptr);
-		removeAdmin(user);
-	} else {
-		removeKicked(row, participant);
+		if (memberRow->type().canAddTag || memberRow->type().canEditTag) {
+			const auto show = delegate()->peerListUiShow();
+			const auto peer = _peer;
+			const auto currentRank = _additional.memberRank(user);
+			const auto isSelf = user->isSelf();
+			_editBox = show->show(Box(
+				EditCustomRankBox,
+				show,
+				peer,
+				user,
+				currentRank,
+				isSelf,
+				crl::guard(this, [=](const QString &rank) {
+					_additional.applyMemberRankLocally(user, rank);
+					recomputeTypeFor(user);
+					refreshRows();
+				})));
+		}
+	} else if (element == Row::kRemoveElement) {
+		if (_role == Role::Members || _role == Role::Profile) {
+			kickParticipant(participant);
+		} else if (_role == Role::Admins) {
+			Assert(user != nullptr);
+			removeAdmin(user);
+		} else {
+			removeKicked(row, participant);
+		}
 	}
 }
 
@@ -2223,40 +2233,26 @@ bool ParticipantsBoxController::removeRow(not_null<PeerData*> participant) {
 
 std::unique_ptr<PeerListRow> ParticipantsBoxController::createRow(
 		not_null<PeerData*> participant) const {
-	const auto user = participant->asUser();
 	if (_role == Role::Profile) {
-		Assert(user != nullptr);
-		return std::make_unique<Row>(user, computeType(user));
+		Assert(participant->asUser() != nullptr);
 	}
-	const auto chat = _peer->asChat();
-	const auto channel = _peer->asChannel();
-	auto row = std::make_unique<PeerListRowWithLink>(participant);
+	auto row = std::make_unique<Row>(participant, computeType(participant));
 	refreshCustomStatus(row.get());
-	if (_role == Role::Admins
-		&& user
-		&& !_additional.isCreator(user)
-		&& _additional.adminRights(user).has_value()
-		&& _additional.canEditAdmin(user)) {
-		row->setActionLink(tr::lng_profile_kick(tr::now));
-	} else if (_role == Role::Kicked || _role == Role::Restricted) {
-		if (_additional.canRestrictParticipant(participant)) {
-			row->setActionLink(tr::lng_profile_delete_removed(tr::now));
-		}
-	} else if (_role == Role::Members) {
-		Assert(user != nullptr);
-		if ((chat ? chat->canBanMembers() : channel->canBanMembers())
-			&& !_additional.isCreator(user)
-			&& (!_additional.adminRights(user)
-				|| _additional.canEditAdmin(user))) {
-			row->setActionLink(tr::lng_profile_kick(tr::now));
-		}
-		if (_role == Role::Members && user->isBot()) {
-			auto seesAllMessages = (user->botInfo->readsAllHistory || _additional.adminRights(user).has_value());
+	if (const auto user = participant->asUser()) {
+		if ((_role == Role::Members || _role == Role::Profile)
+				&& user->isBot()) {
+			const auto seesAllMessages =
+				(user->botInfo->readsAllHistory
+					|| _additional.adminRights(user).has_value());
 			row->setCustomStatus(seesAllMessages
 				? tr::lng_status_bot_reads_all(tr::now)
 				: tr::lng_status_bot_not_reads_all(tr::now));
 		}
 	}
+	const auto raw = row.get();
+	row->setRefreshCallback(crl::guard(this, [=] {
+		delegate()->peerListUpdateRow(raw);
+	}));
 	return row;
 }
 
@@ -2272,28 +2268,92 @@ auto ParticipantsBoxController::computeType(
 		: (user && _additional.adminRights(user).has_value())
 		? Rights::Admin
 		: Rights::Normal;
-	result.canRemove = _additional.canRemoveParticipant(participant)
-		&& user
-		&& user->isInaccessible();
-	if (!result.canRemove) {
-		result.rank = user ? _additional.memberRank(user) : QString();
+
+	if (user) {
+		result.rank = _additional.memberRank(user);
 	}
-	if (user
-		&& user->isSelf()
-		&& result.rank.isEmpty()
-		&& !result.canRemove
-		&& result.rights == Rights::Normal
-		&& !_peer->amRestricted(ChatRestriction::EditRank)) {
-		result.canAddTag = true;
+
+	const auto chat = _peer->asChat();
+	const auto channel = _peer->asChannel();
+
+	switch (_role) {
+	case Role::Profile: {
+		if (user
+			&& (chat
+				? chat->canBanMembers()
+				: (channel && channel->canBanMembers()))
+			&& !_additional.isCreator(user)
+			&& (!_additional.adminRights(user)
+				|| _additional.canEditAdmin(user))) {
+			result.canRemove = true;
+			result.removeText = tr::lng_profile_kick(tr::now);
+		} else if (_additional.canRemoveParticipant(participant)
+			&& user
+			&& user->isInaccessible()) {
+			result.canRemove = true;
+			result.rank = QString();
+			result.removeText = tr::lng_profile_delete_removed(tr::now);
+		}
+	} break;
+	case Role::Members: {
+		if (user
+			&& (chat
+				? chat->canBanMembers()
+				: channel->canBanMembers())
+			&& !_additional.isCreator(user)
+			&& (!_additional.adminRights(user)
+				|| _additional.canEditAdmin(user))) {
+			result.canRemove = true;
+			result.removeText = tr::lng_profile_kick(tr::now);
+		}
+	} break;
+	case Role::Admins: {
+		if (user
+			&& !_additional.isCreator(user)
+			&& _additional.adminRights(user).has_value()
+			&& _additional.canEditAdmin(user)) {
+			result.canRemove = true;
+			result.removeText = tr::lng_profile_kick(tr::now);
+		}
+	} break;
+	case Role::Restricted:
+	case Role::Kicked: {
+		if (_additional.canRestrictParticipant(participant)) {
+			result.canRemove = true;
+			result.removeText = tr::lng_profile_delete_removed(tr::now);
+		}
+	} break;
 	}
+
+	if (user) {
+		const auto isSelf = user->isSelf();
+		const auto canEditSelf = isSelf
+			&& !_peer->amRestricted(ChatRestriction::EditRank);
+		const auto targetIsAdmin =
+			_additional.adminRights(user).has_value()
+			|| _additional.isCreator(user);
+		const auto canEditTarget = !isSelf
+			&& _peer->canManageRanks()
+			&& (!targetIsAdmin || _additional.canEditAdmin(user));
+		if (canEditSelf || canEditTarget) {
+			result.canEditTag = true;
+		}
+		if (isSelf
+			&& result.rank.isEmpty()
+			&& !result.canRemove
+			&& result.rights == Rights::Normal
+			&& canEditSelf) {
+			result.canAddTag = true;
+		} else if (canEditTarget && result.rank.isEmpty()) {
+			result.canAddTag = true;
+		}
+	}
+
 	return result;
 }
 
 void ParticipantsBoxController::recomputeTypeFor(
 		not_null<PeerData*> participant) {
-	if (_role != Role::Profile) {
-		return;
-	}
 	const auto row = delegate()->peerListFindRow(participant->id.value);
 	if (row) {
 		static_cast<Row*>(row)->setType(computeType(participant));

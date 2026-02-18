@@ -196,6 +196,9 @@ public:
 	void prepare() override;
 	void rowClicked(not_null<PeerListRow*> row) override;
 	void rowRightActionClicked(not_null<PeerListRow*> row) override;
+	void rowElementClicked(
+		not_null<PeerListRow*> row,
+		int element) override;
 	base::unique_qptr<Ui::PopupMenu> rowContextMenu(
 		QWidget *parent,
 		not_null<PeerListRow*> row) override;
@@ -219,8 +222,10 @@ public:
 	void setStoriesShown(bool shown);
 
 protected:
-	// Allow child controllers not providing navigation.
-	// This is their responsibility to override all methods that use it.
+	using Row = Info::Profile::MemberListRow;
+	using Type = Row::Type;
+	using Rights = Row::Rights;
+
 	struct CreateTag {
 	};
 	ParticipantsBoxController(
@@ -232,10 +237,10 @@ protected:
 	virtual std::unique_ptr<PeerListRow> createRow(
 		not_null<PeerData*> participant) const;
 
+	std::unique_ptr<Ui::ChatStyle> _chatStyle;
+	mutable base::flat_map<QRgb, QImage> _pillCircleCache;
+
 private:
-	using Row = Info::Profile::MemberListRow;
-	using Type = Row::Type;
-	using Rights = Row::Rights;
 	struct SavedState : SavedStateBase {
 		explicit SavedState(const ParticipantsAdditionalData &additional);
 
@@ -320,9 +325,6 @@ private:
 	base::weak_qptr<Ui::BoxContent> _editParticipantBox;
 
 	std::unique_ptr<PeerListStories> _stories;
-
-	std::unique_ptr<Ui::ChatStyle> _chatStyle;
-	mutable base::flat_map<QRgb, QImage> _pillCircleCache;
 
 };
 
