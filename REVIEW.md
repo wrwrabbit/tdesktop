@@ -94,6 +94,26 @@ if (const auto peer = session().data().peerLoaded(peerId)
 if (const auto peer = session().data().peerLoaded(peerId)) {
 	if (const auto user = peer->asUser()) {
 
+## Always initialize variables of basic types
+
+Never leave variables of basic types (`int`, `float`, `bool`, pointers, etc.) uninitialized. Custom types with constructors are fine — they initialize themselves. But for any basic type, always provide a default value (`= 0`, `= false`, `= nullptr`, etc.). This applies especially to class fields, where uninitialized members are a persistent source of bugs.
+
+The only exception is performance-critical hot paths where you can prove no read-from-uninitialized-memory occurs. For class fields there is no such exception — always initialize.
+
+```cpp
+// BAD:
+int _bulletLeft;
+int _bulletTop;
+bool _expanded;
+SomeType *_pointer;
+
+// GOOD:
+int _bulletLeft = 0;
+int _bulletTop = 0;
+bool _expanded = false;
+SomeType *_pointer = nullptr;
+```
+
 ## std::optional access — avoid value()
 
 Do not call `std::optional::value()` because it throws an exception that is not available on older macOS targets. Use `has_value()`, `value_or()`, `operator bool()`, or `operator*` instead.
