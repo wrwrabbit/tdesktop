@@ -79,6 +79,7 @@ struct PreparedFile {
 	[[nodiscard]] bool isGifv() const;
 
 	QString path;
+	QString displayName;
 	QByteArray content;
 	int64 size = 0;
 	std::unique_ptr<PreparedFileInformation> information;

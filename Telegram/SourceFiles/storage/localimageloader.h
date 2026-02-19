@@ -233,6 +233,7 @@ public:
 		std::shared_ptr<SendingAlbum> album;
 		bool forceFile = false;
 		uint64 idOverride = 0;
+		QString displayName;
 	};
 
 	struct VoiceArgs {
@@ -292,6 +293,7 @@ private:
 	FileLoadTo _to;
 	const std::shared_ptr<SendingAlbum> _album;
 	QString _filepath;
+	QString _displayName;
 	QByteArray _content;
 	std::unique_ptr<FileLoadTask> _videoCover;
 	std::unique_ptr<Ui::PreparedFileInformation> _information;

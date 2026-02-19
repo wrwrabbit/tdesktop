@@ -7600,4 +7600,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_mac_hold_to_quit" = "Hold {text} to Quit";
 
+"lng_rename_file" = "Rename file";
+
 // Keys finished

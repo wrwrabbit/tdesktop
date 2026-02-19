@@ -62,12 +62,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_layers.h"
+#include "styles/style_settings.h"
+#include "styles/style_menu_icons.h"
 
 #include <QtCore/QMimeData>
 
 namespace {
 
 constexpr auto kMaxMessageLength = 4096;
+constexpr auto kMaxDisplayNameLength = 64;
 
 using Ui::SendFilesWay;
 
@@ -111,6 +114,55 @@ rpl::producer<QString> FieldPlaceholder(
 			way.sendImagesAsPhotos())
 		? tr::lng_photo_caption()
 		: tr::lng_photos_comment();
+}
+
+void RenameFileBox(
+		not_null<Ui::GenericBox*> box,
+		const QString &currentName,
+		Fn<void(QString)> apply) {
+	box->setTitle(tr::lng_rename_file());
+	const auto field = box->addRow(object_ptr<Ui::InputField>(
+		box,
+		st::settingsDeviceName,
+		rpl::single(QString()),
+		currentName));
+	const auto extension = [&] {
+		const auto dot = currentName.lastIndexOf('.');
+		return (dot >= 0) ? currentName.mid(dot) : QString();
+	}();
+	const auto nameWithoutExt = extension.isEmpty()
+		? currentName
+		: currentName.left(currentName.size() - extension.size());
+	const auto maxNameLength = kMaxDisplayNameLength - extension.size();
+	field->setMaxLength((maxNameLength > 0) ? maxNameLength : 0);
+	field->setText(nameWithoutExt);
+	field->selectAll();
+	box->setFocusCallback([=] {
+		field->setFocusFast();
+	});
+	const auto save = [=] {
+		const auto newName = field->getLastText().trimmed();
+		if (newName.isEmpty()) {
+			field->showError();
+			return;
+		}
+		if ((newName.size() + extension.size()) > kMaxDisplayNameLength) {
+			field->showError();
+			return;
+		}
+		const auto weak = base::make_weak(box);
+		apply(newName + extension);
+		if (const auto strong = weak.get()) {
+			strong->closeBox();
+		}
+	};
+	field->submits() | rpl::on_next([=] {
+		save();
+	}, box->lifetime());
+	box->addButton(tr::lng_settings_save(), save);
+	box->addButton(tr::lng_cancel(), [=] {
+		box->closeBox();
+	});
 }
 
 void EditPriceBox(
@@ -469,6 +521,16 @@ QImage SendFilesBox::Block::generatePriceTagBackground() const {
 	return QImage();
 }
 
+bool SendFilesBox::Block::setSingleFileDisplayName(
+		const QString &displayName) {
+	if (_isAlbum || _isSingleMedia) {
+		return false;
+	}
+	const auto single = static_cast<Ui::SingleFilePreview*>(_preview.get());
+	single->setDisplayName(displayName);
+	return true;
+}
+
 SendFilesBox::SendFilesBox(
 	QWidget*,
 	not_null<Window::SessionController*> controller,
@@ -687,6 +749,18 @@ void SendFilesBox::refreshAllAfterChanges(int fromItem, Fn<void()> perform) {
 	_inner->resizeToWidth(st::boxWideWidth);
 	refreshControls();
 	captionResized();
+}
+
+bool SendFilesBox::setDisplayNameInSingleFilePreview(
+		int fileIndex,
+		const QString &displayName) {
+	for (auto &block : _blocks) {
+		if (fileIndex < block.fromIndex() || fileIndex >= block.tillIndex()) {
+			continue;
+		}
+		return block.setSingleFileDisplayName(displayName);
+	}
+	return false;
 }
 
 void SendFilesBox::openDialogToAddFileToAlbum() {
@@ -1282,6 +1356,40 @@ void SendFilesBox::pushBlock(int from, int till) {
 			_priceTagBg = QImage();
 			_priceTag->update();
 		}
+	}, widget->lifetime());
+
+	struct State {
+		base::unique_qptr<Ui::PopupMenu> menu;
+	};
+	const auto state = widget->lifetime().make_state<State>();
+	base::install_event_filter(widget, [=, from = from, till = till](
+			not_null<QEvent*> e) {
+		if (e->type() == QEvent::ContextMenu) {
+			const auto mouse = static_cast<QContextMenuEvent*>(e.get());
+			if (from >= till || from >= _list.files.size()) {
+				return base::EventFilterResult::Continue;
+			}
+			const auto fileIndex = from;
+			state->menu = base::make_unique_q<Ui::PopupMenu>(
+				widget,
+				_st.tabbed.menu);
+			state->menu->addAction(tr::lng_rename_file(tr::now), [=] {
+				auto &file = _list.files[fileIndex];
+				_show->show(Box(RenameFileBox, file.displayName, [=](
+						QString newName) {
+					const auto displayName = std::move(newName);
+					_list.files[fileIndex].displayName = displayName;
+					if (!setDisplayNameInSingleFilePreview(
+							fileIndex,
+							displayName)) {
+						refreshAllAfterChanges(from);
+					}
+				}));
+			}, &st::menuIconEdit);
+			state->menu->popup(mouse->globalPos());
+			return base::EventFilterResult::Cancel;
+		}
+		return base::EventFilterResult::Continue;
 	}, widget->lifetime());
 }
 

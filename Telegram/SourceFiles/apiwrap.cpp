@@ -3804,6 +3804,7 @@ void ApiWrap::editMedia(
 		.album = nullptr,
 		.forceFile = forceFile,
 		.idOverride = 0,
+		.displayName = file.displayName,
 	}));
 }
 
@@ -3867,6 +3868,7 @@ void ApiWrap::sendFiles(
 			.album = album,
 			.forceFile = forceFile,
 			.idOverride = 0,
+			.displayName = file.displayName,
 		}));
 		caption = TextWithTags();
 	}

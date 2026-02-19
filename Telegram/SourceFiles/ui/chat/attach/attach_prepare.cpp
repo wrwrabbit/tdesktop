@@ -15,6 +15,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "core/mime_type.h"
 
+#include <QFileInfo>
+
 namespace Ui {
 namespace {
 
@@ -23,6 +25,8 @@ constexpr auto kMaxAlbumCount = 10;
 } // namespace
 
 PreparedFile::PreparedFile(const QString &path) : path(path) {
+	const auto fileInfo = QFileInfo(path);
+	displayName = fileInfo.fileName();
 }
 
 PreparedFile::PreparedFile(PreparedFile &&other) = default;

@@ -473,6 +473,7 @@ FileLoadTask::FileLoadTask(Args &&args)
 , _to(std::move(args.to))
 , _album(std::move(args.album))
 , _filepath(std::move(args.filepath))
+, _displayName(std::move(args.displayName))
 , _content(std::move(args.content))
 , _videoCover(std::move(args.videoCover))
 , _information(std::move(args.information))
@@ -810,7 +811,11 @@ void FileLoadTask::process(ProcessArgs &&args) {
 	QImage goodThumbnail;
 	QByteArray goodThumbnailBytes;
 
-	QVector<MTPDocumentAttribute> attributes(1, MTP_documentAttributeFilename(MTP_string(filename)));
+	auto attributes = QVector<MTPDocumentAttribute>(
+		1,
+		MTP_documentAttributeFilename(MTP_string(_displayName.isEmpty()
+			? filename
+			: _displayName)));
 
 	auto thumbnail = PreparedFileThumbnail();
 
