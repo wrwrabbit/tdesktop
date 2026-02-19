@@ -381,6 +381,20 @@ void CreateModerateMessagesBox(
 	const auto historyPeerId = history->peer->id;
 	const auto ids = session->data().itemsToIds(items);
 
+	{
+		const auto remainingIds
+			= box->lifetime().make_state<base::flat_set<FullMsgId>>(
+				ids.begin(),
+				ids.end());
+		session->data().itemRemoved(
+		) | rpl::on_next([=](not_null<const HistoryItem*> item) {
+			remainingIds->erase(item->fullId());
+			if (remainingIds->empty()) {
+				box->closeBox();
+			}
+		}, box->lifetime());
+	}
+
 	if (ModerateCommonGroups.value() || session->supportMode()) {
 	ProccessCommonGroups(
 		items,
