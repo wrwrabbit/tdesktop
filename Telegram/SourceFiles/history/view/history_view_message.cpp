@@ -257,6 +257,9 @@ void Message::initPaidInformation() {
 }
 
 void Message::refreshRightBadge() {
+	if (const auto badge = Get<RightBadge>(); badge && badge->overridden) {
+		return;
+	}
 	const auto item = data();
 	const auto [text, role] = [&]() -> std::pair<QString, BadgeRole> {
 		if (item->isDiscussionPost()) {

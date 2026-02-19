@@ -852,6 +852,10 @@ customBadgeField: InputField(defaultInputField) {
 	heightMin: 32px;
 }
 
+tagPreviewLineHeight: 8px;
+tagPreviewLineSpacing: 4px;
+tagPreviewInputSkip: 16px;
+
 pollResultsQuestion: FlatLabel(defaultFlatLabel) {
 	minWidth: 320px;
 	textFg: windowBoldFg;

@@ -1582,6 +1582,7 @@ void AddSpecialBoxController::showRestricted(
 		user,
 		_additional.adminRights(user).has_value(),
 		currentRights,
+		_additional.memberRank(user),
 		_additional.restrictedBy(user),
 		_additional.restrictedSince(user));
 	if (_additional.canRestrictParticipant(user)) {

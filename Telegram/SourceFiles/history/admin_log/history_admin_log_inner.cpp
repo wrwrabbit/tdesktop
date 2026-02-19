@@ -1579,6 +1579,7 @@ void InnerWidget::suggestRestrictParticipant(
 				user,
 				hasAdminRights,
 				currentRights,
+				QString(),
 				by,
 				since);
 			box->setSaveCallback([=](

@@ -58,6 +58,14 @@ void EditCustomRankBox(
 	bool isSelf,
 	Fn<void(QString rank)> onSaved);
 
+void SaveMemberRank(
+	std::shared_ptr<Ui::Show> show,
+	not_null<PeerData*> peer,
+	not_null<UserData*> user,
+	const QString &rank,
+	Fn<void()> onDone,
+	Fn<void()> onFail);
+
 void SubscribeToMigration(
 	not_null<PeerData*> peer,
 	rpl::lifetime &lifetime,

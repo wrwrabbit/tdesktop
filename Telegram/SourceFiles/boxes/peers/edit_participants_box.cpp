@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_chat_participants.h"
 #include "boxes/peers/edit_participant_box.h"
+#include "boxes/peers/edit_tag_control.h"
 #include "boxes/peers/add_participants_box.h"
 #include "boxes/peers/prepare_short_info_box.h" // PrepareShortInfoBox
 #include "boxes/peers/edit_members_visible.h"
@@ -39,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_values.h"
 #include "window/window_session_controller.h"
 #include "history/history.h"
+#include "history/view/history_view_message.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat.h"
 #include "styles/style_menu_icons.h"
@@ -172,6 +174,29 @@ void SaveChannelAdmin(
 	}).send();
 }
 
+void SaveChatParticipantKick(
+		not_null<ChatData*> chat,
+		not_null<UserData*> user,
+		Fn<void()> onDone,
+		Fn<void()> onFail) {
+	chat->session().api().request(MTPmessages_DeleteChatUser(
+		MTP_flags(0),
+		chat->inputChat(),
+		user->inputUser()
+	)).done([=](const MTPUpdates &result) {
+		chat->session().api().applyUpdates(result);
+		if (onDone) {
+			onDone();
+		}
+	}).fail([=] {
+		if (onFail) {
+			onFail();
+		}
+	}).send();
+}
+
+} // namespace
+
 void SaveMemberRank(
 		std::shared_ptr<Ui::Show> show,
 		not_null<PeerData*> peer,
@@ -221,29 +246,6 @@ void SaveMemberRank(
 		}
 	}).send();
 }
-
-void SaveChatParticipantKick(
-		not_null<ChatData*> chat,
-		not_null<UserData*> user,
-		Fn<void()> onDone,
-		Fn<void()> onFail) {
-	chat->session().api().request(MTPmessages_DeleteChatUser(
-		MTP_flags(0),
-		chat->inputChat(),
-		user->inputUser()
-	)).done([=](const MTPUpdates &result) {
-		chat->session().api().applyUpdates(result);
-		if (onDone) {
-			onDone();
-		}
-	}).fail([=] {
-		if (onFail) {
-			onFail();
-		}
-	}).send();
-}
-
-} // namespace
 
 Fn<void(
 	ChatAdminRightsInfo oldRights,
@@ -1993,6 +1995,7 @@ void ParticipantsBoxController::showRestricted(not_null<UserData*> user) {
 		user,
 		hasAdminRights,
 		currentRights,
+		_additional.memberRank(user),
 		_additional.restrictedBy(user),
 		_additional.restrictedSince(user));
 	if (_additional.canRestrictParticipant(user)) {
@@ -2662,7 +2665,6 @@ void EditCustomRankBox(
 		const QString &currentRank,
 		bool isSelf,
 		Fn<void(QString rank)> onSaved) {
-	constexpr auto kRankLimit = 16;
 	struct State {
 		bool saving = false;
 	};
@@ -2677,21 +2679,16 @@ void EditCustomRankBox(
 			? tr::lng_context_edit_member_tag()
 			: tr::lng_context_add_member_tag()));
 
-	const auto field = box->addRow(object_ptr<Ui::InputField>(
-		box,
-		st::customBadgeField,
-		tr::lng_rights_edit_admin_rank_name(),
-		TextUtilities::RemoveEmoji(currentRank)));
-	field->setMaxLength(kRankLimit);
-	field->setInstantReplaces(Ui::InstantReplaces::TextOnly());
-	field->changes(
-	) | rpl::on_next([=] {
-		const auto text = field->getLastText();
-		const auto removed = TextUtilities::RemoveEmoji(text);
-		if (removed != text) {
-			field->setText(removed);
-		}
-	}, field->lifetime());
+	const auto role = LookupBadgeRole(peer, user);
+	const auto control = box->addRow(
+		object_ptr<EditTagControl>(
+			box,
+			&peer->session(),
+			user,
+			currentRank,
+			role),
+		style::margins());
+	const auto field = control->field();
 
 	box->setFocusCallback([=] { field->setFocusFast(); });
 
@@ -2701,8 +2698,7 @@ void EditCustomRankBox(
 			return;
 		}
 		state->saving = true;
-		const auto rank = TextUtilities::RemoveEmoji(
-			TextUtilities::SingleLine(field->getLastText().trimmed()));
+		const auto rank = control->currentRank();
 		SaveMemberRank(
 			show,
 			peer,

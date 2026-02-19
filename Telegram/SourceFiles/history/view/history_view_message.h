@@ -70,6 +70,7 @@ struct RightBadge : RuntimeComponent<RightBadge, Element> {
 	Ui::Text::String boosts;
 	int width = 0;
 	BadgeRole role = BadgeRole::User;
+	bool overridden = false;
 };
 
 struct BottomRippleMask {

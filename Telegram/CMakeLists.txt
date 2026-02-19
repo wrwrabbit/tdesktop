@@ -228,6 +228,8 @@ PRIVATE
     boxes/peers/edit_members_visible.h
     boxes/peers/edit_participant_box.cpp
     boxes/peers/edit_participant_box.h
+    boxes/peers/edit_tag_control.cpp
+    boxes/peers/edit_tag_control.h
     boxes/peers/edit_participants_box.cpp
     boxes/peers/edit_participants_box.h
     boxes/peers/edit_peer_color_box.cpp

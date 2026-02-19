@@ -23,7 +23,7 @@ msgMinWidth: 160px;
 msgPhotoSize: 33px;
 msgPhotoSkip: 40px;
 msgPadding: margins(11px, 8px, 11px, 8px);
-msgTagBadgePadding: margins(5px, 0px, 5px, 0px);
+msgTagBadgePadding: margins(5px, -1px, 5px, 0px);
 msgTagBadgeBoostSkip: 2px;
 msgMargin: margins(16px, 6px, 56px, 2px);
 msgMarginTopAttached: 0px;

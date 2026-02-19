@@ -49,6 +49,7 @@ class InlineList;
 namespace HistoryView {
 
 using PaintContext = Ui::ChatPaintContext;
+enum class BadgeRole : uchar;
 enum class PointState : char;
 enum class InfoDisplayType : char;
 struct StateRequest;
@@ -661,6 +662,7 @@ public:
 	-> std::unique_ptr<Ui::ReactionFlyAnimation>;
 
 	void overrideMedia(std::unique_ptr<Media> media);
+	void overrideRightBadge(const QString &text, BadgeRole role);
 
 	[[nodiscard]] not_null<PurchasedTag*> enforcePurchasedTag();
 
