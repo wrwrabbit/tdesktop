@@ -3741,14 +3741,16 @@ void ApiWrap::sendVoiceMessage(
 		const SendAction &action) {
 	const auto caption = TextWithTags();
 	const auto to = FileLoadTaskOptions(action);
-	_fileLoader->addTask(std::make_unique<FileLoadTask>(
-		&session(),
-		result,
-		duration,
-		waveform,
-		video,
-		to,
-		caption));
+	_fileLoader->addTask(
+		std::make_unique<FileLoadTask>(FileLoadTask::VoiceArgs{
+			.session = &session(),
+			.voice = result,
+			.duration = duration,
+			.waveform = waveform,
+			.video = video,
+			.to = to,
+			.caption = caption,
+		}));
 }
 
 void ApiWrap::editMedia(
@@ -3774,29 +3776,35 @@ void ApiWrap::editMedia(
 	}
 	const auto forceFile = (type == SendMediaType::File)
 		&& (file.type == Ui::PreparedFile::Type::Video);
-	_fileLoader->addTask(std::make_unique<FileLoadTask>(
-		&session(),
-		file.path,
-		file.content,
-		std::move(file.information),
-		(file.videoCover
-			? std::make_unique<FileLoadTask>(
-				&session(),
-				file.videoCover->path,
-				file.videoCover->content,
-				std::move(file.videoCover->information),
-				nullptr,
-				SendMediaType::Photo,
-				to,
-				TextWithTags(),
-				false)
+	_fileLoader->addTask(std::make_unique<FileLoadTask>(FileLoadTask::Args{
+		.session = &session(),
+		.filepath = file.path,
+		.content = file.content,
+		.information = std::move(file.information),
+		.videoCover = (file.videoCover
+			? std::make_unique<FileLoadTask>(FileLoadTask::Args{
+				.session = &session(),
+				.filepath = file.videoCover->path,
+				.content = file.videoCover->content,
+				.information = std::move(file.videoCover->information),
+				.videoCover = nullptr,
+				.type = SendMediaType::Photo,
+				.to = to,
+				.caption = TextWithTags(),
+				.spoiler = false,
+				.album = nullptr,
+				.forceFile = false,
+				.idOverride = 0,
+			})
 			: nullptr),
-		type,
-		to,
-		caption,
-		file.spoiler,
-		nullptr,
-		forceFile));
+		.type = type,
+		.to = to,
+		.caption = caption,
+		.spoiler = file.spoiler,
+		.album = nullptr,
+		.forceFile = forceFile,
+		.idOverride = 0,
+	}));
 }
 
 void ApiWrap::sendFiles(
@@ -3831,30 +3839,35 @@ void ApiWrap::sendFiles(
 			: SendMediaType::File;
 		const auto forceFile = (type == SendMediaType::File)
 			&& (file.type == Ui::PreparedFile::Type::Video);
-		tasks.push_back(std::make_unique<FileLoadTask>(
-			&session(),
-			file.path,
-			file.content,
-			std::move(file.information),
-			(file.videoCover
-				? std::make_unique<FileLoadTask>(
-					&session(),
-					file.videoCover->path,
-					file.videoCover->content,
-					std::move(file.videoCover->information),
-					nullptr,
-					SendMediaType::Photo,
-					to,
-					TextWithTags(),
-					false,
-					nullptr)
+		tasks.push_back(std::make_unique<FileLoadTask>(FileLoadTask::Args{
+			.session = &session(),
+			.filepath = file.path,
+			.content = file.content,
+			.information = std::move(file.information),
+			.videoCover = (file.videoCover
+				? std::make_unique<FileLoadTask>(FileLoadTask::Args{
+					.session = &session(),
+					.filepath = file.videoCover->path,
+					.content = file.videoCover->content,
+					.information = std::move(file.videoCover->information),
+					.videoCover = nullptr,
+					.type = SendMediaType::Photo,
+					.to = to,
+					.caption = TextWithTags(),
+					.spoiler = false,
+					.album = nullptr,
+					.forceFile = false,
+					.idOverride = 0,
+				})
 				: nullptr),
-			uploadWithType,
-			to,
-			caption,
-			file.spoiler,
-			album,
-			forceFile));
+			.type = uploadWithType,
+			.to = to,
+			.caption = caption,
+			.spoiler = file.spoiler,
+			.album = album,
+			.forceFile = forceFile,
+			.idOverride = 0,
+		}));
 		caption = TextWithTags();
 	}
 	if (album) {
@@ -3874,18 +3887,20 @@ void ApiWrap::sendFile(
 	const auto to = FileLoadTaskOptions(action);
 	auto caption = TextWithTags();
 	const auto spoiler = false;
-	const auto information = nullptr;
-	const auto videoCover = nullptr;
-	_fileLoader->addTask(std::make_unique<FileLoadTask>(
-		&session(),
-		QString(),
-		fileContent,
-		information,
-		videoCover,
-		type,
-		to,
-		caption,
-		spoiler));
+	_fileLoader->addTask(std::make_unique<FileLoadTask>(FileLoadTask::Args{
+		.session = &session(),
+		.filepath = QString(),
+		.content = fileContent,
+		.information = nullptr,
+		.videoCover = nullptr,
+		.type = type,
+		.to = to,
+		.caption = caption,
+		.spoiler = spoiler,
+		.album = nullptr,
+		.forceFile = false,
+		.idOverride = 0
+	}));
 }
 
 void ApiWrap::sendUploadedPhoto(
