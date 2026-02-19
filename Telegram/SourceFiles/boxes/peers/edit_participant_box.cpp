@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/add_bot_to_chat_box.h"
 #include "boxes/peers/edit_peer_permissions_box.h"
 #include "boxes/peers/edit_peer_info_box.h"
+#include "settings/settings_common.h"
 #include "data/data_peer_values.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
@@ -44,6 +45,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 #include "styles/style_info.h"
+#include "styles/style_settings.h"
 
 namespace {
 
@@ -320,7 +322,8 @@ ChatAdminRightsInfo EditAdminBox::defaultRights() const {
 			| Flag::InviteByLinkOrAdd
 			| Flag::ManageTopics
 			| Flag::PinMessages
-			| Flag::ManageCall) }
+			| Flag::ManageCall
+			| Flag::ManageRanks) }
 		: ChatAdminRightsInfo{ (Flag::ChangeInfo
 			| Flag::PostMessages
 			| Flag::EditMessages
@@ -486,7 +489,6 @@ void EditAdminBox::prepare() {
 		Ui::AddSkip(emptyAboutAddAdminsInner->entity());
 		if (hasRank) {
 			Ui::AddDivider(emptyAboutAddAdminsInner->entity());
-			Ui::AddSkip(emptyAboutAddAdminsInner->entity());
 		}
 		Ui::AddSkip(aboutAddAdminsInner->entity());
 		Ui::AddDividerText(
@@ -525,7 +527,9 @@ void EditAdminBox::prepare() {
 
 	if (canSave()) {
 		if (hasRank) {
-			const auto role = LookupBadgeRole(peer(), user());
+			const auto role = _oldRights.flags
+				? LookupBadgeRole(peer(), user())
+				: HistoryView::BadgeRole::Admin;
 			_tagControl = inner->add(
 				object_ptr<EditTagControl>(
 					inner,
@@ -534,6 +538,52 @@ void EditAdminBox::prepare() {
 					_oldRank,
 					role),
 				style::margins());
+		}
+		if (_tagControl) {
+			Ui::AddSkip(inner);
+			Ui::AddDividerText(
+				inner,
+				user()->isSelf()
+					? tr::lng_rights_tag_about_self()
+					: tr::lng_rights_tag_about(
+						lt_name,
+						rpl::single(user()->shortName())));
+		}
+		if (_oldRights.flags && !_addingBot) {
+			const auto isTargetCreator = (LookupBadgeRole(peer(), user())
+				== HistoryView::BadgeRole::Creator);
+			if (!isTargetCreator) {
+				if (!_tagControl) {
+					Ui::AddSkip(inner);
+					inner->add(
+						object_ptr<Ui::BoxContentDivider>(inner),
+						{ 0, st::infoProfileSkip, 0, st::infoProfileSkip });
+				}
+				Ui::AddSkip(inner);
+				const auto dismissButton = Settings::AddButtonWithIcon(
+					inner,
+					tr::lng_rights_dismiss_admin(),
+					st::settingsAttentionButton,
+					{ nullptr });
+				dismissButton->setClickedCallback([=] {
+					if (const auto callback = _saveCallback) {
+						const auto old = _oldRights;
+						const auto confirmed = [=](Fn<void()> close) {
+							callback(old, ChatAdminRightsInfo(), QString());
+							close();
+						};
+						uiShow()->showBox(
+							Ui::MakeConfirmBox({
+								.text = tr::lng_profile_sure_remove_admin(
+									tr::now,
+									lt_user,
+									user()->firstName),
+								.confirmed = confirmed,
+								.confirmText = tr::lng_box_remove(),
+							}));
+					}
+				});
+			}
 		}
 		_finishSave = [=, value = getChecked] {
 			const auto newFlags = (value() | ChatAdminRight::Other)
@@ -722,6 +772,8 @@ void EditRestrictedBox::prepare() {
 	addControl(std::move(checkboxes), QMargins());
 
 	if (canSave() && peer()->canManageRanks()) {
+		Ui::AddSkip(verticalLayout());
+		Ui::AddDivider(verticalLayout());
 		_tagControl = addControl(
 			object_ptr<EditTagControl>(
 				this,
@@ -730,12 +782,22 @@ void EditRestrictedBox::prepare() {
 				_oldRank,
 				HistoryView::BadgeRole::User),
 			style::margins());
+		Ui::AddSkip(verticalLayout());
+		Ui::AddDividerText(
+			verticalLayout(),
+			user()->isSelf()
+				? tr::lng_rights_tag_about_self()
+				: tr::lng_rights_tag_about(
+					lt_name,
+					rpl::single(user()->shortName())));
 	}
 
 	_until = prepareRights.until;
-	addControl(
-		object_ptr<Ui::FixedHeightWidget>(this, st::defaultVerticalListSkip));
-	Ui::AddDivider(verticalLayout());
+	if (!_tagControl) {
+		addControl(
+			object_ptr<Ui::FixedHeightWidget>(this, st::defaultVerticalListSkip));
+		Ui::AddDivider(verticalLayout());
+	}
 	addControl(
 		object_ptr<Ui::FlatLabel>(
 			this,
@@ -774,6 +836,85 @@ void EditRestrictedBox::prepare() {
 	}
 
 	if (canSave()) {
+		Ui::AddSkip(verticalLayout());
+		Ui::AddDivider(verticalLayout());
+		Ui::AddSkip(verticalLayout());
+
+		const auto canAddAdmins = (chat && chat->canAddAdmins())
+			|| (channel && channel->canAddAdmins());
+		if (canAddAdmins) {
+			const auto promoteButton = Settings::AddButtonWithIcon(
+				verticalLayout(),
+				tr::lng_rights_promote_member(),
+				st::settingsButtonNoIcon,
+				{ nullptr });
+			promoteButton->setClickedCallback([=] {
+				const auto rank = _tagControl
+					? _tagControl->currentRank()
+					: _oldRank;
+				auto adminBox = Box<EditAdminBox>(
+					peer(),
+					user(),
+					ChatAdminRightsInfo(),
+					rank,
+					TimeId(0),
+					nullptr);
+				const auto adminBoxWeak = QPointer<Ui::BoxContent>(
+					adminBox.data());
+				const auto show = uiShow();
+				const auto restrictWeak = QPointer<EditRestrictedBox>(
+					this);
+				const auto closeBoth = [=] {
+					if (adminBoxWeak) {
+						adminBoxWeak->closeBox();
+					}
+					if (restrictWeak) {
+						restrictWeak->closeBox();
+					}
+				};
+				const auto done = [=](
+						ChatAdminRightsInfo,
+						const QString &) {
+					closeBoth();
+				};
+				const auto fail = closeBoth;
+				adminBox->setSaveCallback(
+					SaveAdminCallback(
+						show,
+						peer(),
+						user(),
+						done,
+						fail));
+				show->showBox(std::move(adminBox));
+			});
+		}
+
+		const auto removeButton = Settings::AddButtonWithIcon(
+			verticalLayout(),
+			tr::lng_rights_remove_member(),
+			st::settingsAttentionButton,
+			{ nullptr });
+		removeButton->setClickedCallback([=] {
+			if (const auto callback = _saveCallback) {
+				const auto old = _oldRights;
+				const auto confirmed = [=](Fn<void()> close) {
+					callback(
+						old,
+						ChannelData::KickedRestrictedRights(user()));
+					close();
+				};
+				uiShow()->show(
+					Ui::MakeConfirmBox({
+						.text = tr::lng_profile_sure_kick(
+							tr::now,
+							lt_user,
+							user()->firstName),
+						.confirmed = confirmed,
+						.confirmText = tr::lng_box_remove(),
+					}));
+			}
+		});
+
 		const auto save = [=, value = getRestrictions] {
 			if (!_saveCallback) {
 				return;

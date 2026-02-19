@@ -1595,8 +1595,9 @@ void AddSpecialBoxController::showRestricted(
 				_editParticipantBox->closeBox();
 			}
 		});
+		const auto show = delegate()->peerListUiShow();
 		box->setSaveCallback(
-			SaveRestrictedCallback(_peer, user, done, fail));
+			SaveRestrictedCallback(show, _peer, user, done, fail));
 	}
 	_editParticipantBox = showBox(std::move(box));
 }
@@ -1669,7 +1670,9 @@ void AddSpecialBoxController::kickUser(
 	const auto fail = crl::guard(this, [=] {
 		_editBox = nullptr;
 	});
+	const auto show = delegate()->peerListUiShow();
 	const auto callback = SaveRestrictedCallback(
+		show,
 		_peer,
 		participant,
 		done,

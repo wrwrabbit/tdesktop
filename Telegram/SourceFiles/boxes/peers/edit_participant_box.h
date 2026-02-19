@@ -97,12 +97,12 @@ private:
 	[[nodiscard]] ChatAdminRightsInfo defaultRights() const;
 
 	void transferOwnership();
-	bool canSave() const {
+	[[nodiscard]] bool canSave() const {
 		return _saveCallback != nullptr;
 	}
 	void finishAddAdmin();
 	void refreshButtons();
-	bool canTransferOwnership() const;
+	[[nodiscard]] bool canTransferOwnership() const;
 	not_null<Ui::SlideWrap<Ui::RpWidget>*> setupTransferButton(
 		not_null<Ui::VerticalLayout*> container,
 		bool isGroup);

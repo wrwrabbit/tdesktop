@@ -203,7 +203,8 @@ private:
 	const std::unique_ptr<Ui::ChatStyle> _style;
 	const std::unique_ptr<TagPreviewDelegate> _delegate;
 	AdminLog::OwnedItem _item;
-	QPoint _position;
+	int _topSkip = 0;
+	int _bottomSkip = 0;
 	Ui::PeerUserpicView _userpic;
 
 };
@@ -225,7 +226,8 @@ EditTagControl::PreviewWidget::PreviewWidget(
 	this,
 	_style.get(),
 	[=] { update(); }))
-, _position(0, st::msgMargin.bottom()) {
+, _topSkip(st::msgMargin.bottom() * 2)
+, _bottomSkip(st::msgMargin.bottom() + st::msgMargin.top()) {
 	_style->apply(_theme.get());
 	_delegate->setTagText(initialText);
 
@@ -242,18 +244,18 @@ EditTagControl::PreviewWidget::PreviewWidget(
 	) | rpl::filter([=](int w) {
 		return w >= st::msgMinWidth;
 	}) | rpl::on_next([=](int w) {
-		const auto h = _position.y()
+		const auto h = _topSkip
 			+ _item->resizeGetHeight(w)
-			+ _position.y();
+			+ _bottomSkip;
 		resize(w, h);
 	}, lifetime());
 
 	_history->owner().itemResizeRequest(
 	) | rpl::on_next([=](not_null<const HistoryItem*> item) {
 		if (_item && item == _item->data() && width() >= st::msgMinWidth) {
-			const auto h = _position.y()
+			const auto h = _topSkip
 				+ _item->resizeGetHeight(width())
-				+ _position.y();
+				+ _bottomSkip;
 			resize(width(), h);
 		}
 	}, lifetime());
@@ -282,17 +284,26 @@ void EditTagControl::PreviewWidget::createItem() {
 	_item = std::move(owned);
 	applyBadge(_delegate->tagText());
 	if (width() >= st::msgMinWidth) {
-		const auto h = _position.y()
+		const auto h = _topSkip
 			+ _item->resizeGetHeight(width())
-			+ _position.y();
+			+ _bottomSkip;
 		resize(width(), h);
 	}
 }
 
 void EditTagControl::PreviewWidget::applyBadge(const QString &text) {
-	if (_item) {
-		_item->overrideRightBadge(text, _role);
+	if (!_item) {
+		return;
 	}
+	auto badgeText = text;
+	if (badgeText.isEmpty()) {
+		if (_role == HistoryView::BadgeRole::Admin) {
+			badgeText = tr::lng_admin_badge(tr::now);
+		} else if (_role == HistoryView::BadgeRole::Creator) {
+			badgeText = tr::lng_owner_badge(tr::now);
+		}
+	}
+	_item->overrideRightBadge(badgeText, _role);
 }
 
 void EditTagControl::PreviewWidget::setTagText(const QString &text) {
@@ -320,11 +331,12 @@ void EditTagControl::PreviewWidget::paintEvent(QPaintEvent *e) {
 		rect(),
 		e->rect(),
 		!window()->isActiveWindow());
-	p.translate(_position);
+	p.translate(0, _topSkip);
 	_item->draw(p, context);
 
 	if (_item->displayFromPhoto()) {
 		auto userpicBottom = height()
+			- _bottomSkip
 			- _item->marginBottom()
 			- _item->marginTop();
 		const auto userpicTop = userpicBottom - st::msgPhotoSize;
@@ -354,7 +366,11 @@ EditTagControl::EditTagControl(
 , _field(Ui::CreateChild<Ui::InputField>(
 	this,
 	st::customBadgeField,
-	tr::lng_rights_edit_admin_rank_name(),
+	(role == HistoryView::BadgeRole::Admin
+		? tr::lng_admin_badge()
+		: role == HistoryView::BadgeRole::Creator
+		? tr::lng_owner_badge()
+		: tr::lng_rights_edit_admin_rank_name()),
 	TextUtilities::RemoveEmoji(currentRank))) {
 	_field->setMaxLength(kRankLimit);
 	_field->setInstantReplaces(Ui::InstantReplaces::TextOnly());

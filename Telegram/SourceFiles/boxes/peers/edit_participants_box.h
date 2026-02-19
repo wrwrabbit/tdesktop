@@ -44,6 +44,7 @@ Fn<void(
 Fn<void(
 	ChatRestrictionsInfo oldRights,
 	ChatRestrictionsInfo newRights)> SaveRestrictedCallback(
+		std::shared_ptr<Ui::Show> show,
 		not_null<PeerData*> peer,
 		not_null<PeerData*> participant,
 		Fn<void(ChatRestrictionsInfo newRights)> onDone,

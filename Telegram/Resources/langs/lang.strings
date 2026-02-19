@@ -6016,6 +6016,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_context_edit_my_tag" = "Edit tag";
 "lng_context_add_member_tag" = "Add member tag";
 "lng_context_edit_member_tag" = "Edit member tag";
+"lng_rights_edit_tag_title" = "Edit tag";
+"lng_rights_tag_about" = "Add short tag next to {name}'s name.";
+"lng_rights_tag_about_self" = "Share your role, title, or how you're known in this group. Your tag is visible to all members.";
+"lng_rights_promote_member" = "Promote to Admin";
+"lng_rights_remove_member" = "Remove from Group";
+"lng_rights_dismiss_admin" = "Dismiss Admin";
 "lng_rights_about_add_admins_yes" = "This admin will be able to add new admins with equal or fewer rights.";
 "lng_rights_about_add_admins_no" = "This admin will not be able to add new admins.";
 "lng_rights_about_by" = "This admin promoted by {user} on {date}.";

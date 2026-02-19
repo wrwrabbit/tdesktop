@@ -670,7 +670,7 @@ void ChatParticipants::Restrict(
 		ChatRestrictionsInfo oldRights,
 		ChatRestrictionsInfo newRights,
 		Fn<void()> onDone,
-		Fn<void()> onFail) {
+		Fn<void(const QString&)> onFail) {
 	channel->session().api().request(MTPchannels_EditBanned(
 		channel->inputChannel(),
 		participant->input(),
@@ -681,9 +681,9 @@ void ChatParticipants::Restrict(
 		if (onDone) {
 			onDone();
 		}
-	}).fail([=] {
+	}).fail([=](const MTP::Error &error) {
 		if (onFail) {
-			onFail();
+			onFail(error.type());
 		}
 	}).send();
 }

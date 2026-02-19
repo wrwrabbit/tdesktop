@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/chat_style.h"
 #include "ui/effects/outline_segments.h"
 #include "ui/layers/generic_box.h"
+#include "ui/vertical_list.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/menu/menu_multiline_action.h"
 #include "ui/widgets/popup_menu.h"
@@ -56,6 +57,7 @@ constexpr auto kParticipantsPerPage = 200;
 constexpr auto kSortByOnlineDelay = crl::time(1000);
 
 void RemoveAdmin(
+		std::shared_ptr<Ui::Show> show,
 		not_null<ChannelData*> channel,
 		not_null<UserData*> user,
 		ChatAdminRightsInfo oldRights,
@@ -73,7 +75,10 @@ void RemoveAdmin(
 		if (onDone) {
 			onDone();
 		}
-	}).fail([=] {
+	}).fail([=](const MTP::Error &error) {
+		if (show) {
+			show->showToast(error.type());
+		}
 		if (onFail) {
 			onFail();
 		}
@@ -140,8 +145,13 @@ void SaveChatAdmin(
 					onFail,
 					false);
 			}, onFail);
-		} else if (onFail) {
-			onFail();
+		} else {
+			if (show) {
+				show->showToast(error.type());
+			}
+			if (onFail) {
+				onFail();
+			}
 		}
 	}).send();
 }
@@ -175,6 +185,7 @@ void SaveChannelAdmin(
 }
 
 void SaveChatParticipantKick(
+		std::shared_ptr<Ui::Show> show,
 		not_null<ChatData*> chat,
 		not_null<UserData*> user,
 		Fn<void()> onDone,
@@ -188,7 +199,10 @@ void SaveChatParticipantKick(
 		if (onDone) {
 			onDone();
 		}
-	}).fail([=] {
+	}).fail([=](const MTP::Error &error) {
+		if (show) {
+			show->showToast(error.type());
+		}
 		if (onFail) {
 			onFail();
 		}
@@ -297,6 +311,7 @@ Fn<void(
 Fn<void(
 	ChatRestrictionsInfo oldRights,
 	ChatRestrictionsInfo newRights)> SaveRestrictedCallback(
+		std::shared_ptr<Ui::Show> show,
 		not_null<PeerData*> peer,
 		not_null<PeerData*> participant,
 		Fn<void(ChatRestrictionsInfo newRights)> onDone,
@@ -312,12 +327,20 @@ Fn<void(
 				oldRights,
 				newRights,
 				done,
-				onFail);
+				[=](const QString &errorType) {
+					if (show) {
+						show->showToast(errorType);
+					}
+					if (onFail) {
+						onFail();
+					}
+				});
 		};
 		if (const auto chat = peer->asChatNotMigrated()) {
 			if (participant->isUser()
 				&& (newRights.flags & ChatRestriction::ViewMessages)) {
 				SaveChatParticipantKick(
+					show,
 					chat,
 					participant->asUser(),
 					done,
@@ -1721,6 +1744,16 @@ void ParticipantsBoxController::rowClicked(not_null<PeerListRow*> row) {
 		&& (_peer->isChat() || _peer->isMegagroup())
 		&& user) {
 		showRestricted(user);
+	} else if (_role == Role::Members
+		&& user
+		&& (_additional.adminRights(user).has_value()
+			|| _additional.isCreator(user))
+		&& _additional.canAddOrEditAdmin(user)) {
+		showAdmin(user);
+	} else if (_role == Role::Members
+		&& user
+		&& _additional.canRestrictParticipant(participant)) {
+		showRestricted(user);
 	} else {
 		Assert(_navigation != nullptr);
 		if (_role != Role::Profile) {
@@ -2008,8 +2041,9 @@ void ParticipantsBoxController::showRestricted(not_null<UserData*> user) {
 				_editParticipantBox->closeBox();
 			}
 		});
+		const auto show = delegate()->peerListUiShow();
 		box->setSaveCallback(
-			SaveRestrictedCallback(_peer, user, done, fail));
+			SaveRestrictedCallback(show, _peer, user, done, fail));
 	}
 	_editParticipantBox = showBox(std::move(box));
 }
@@ -2134,7 +2168,8 @@ void ParticipantsBoxController::removeAdminSure(not_null<UserData*> user) {
 		if (!adminRights) {
 			return;
 		}
-		RemoveAdmin(channel, user, *adminRights, crl::guard(this, [=] {
+		const auto show = delegate()->peerListUiShow();
+		RemoveAdmin(show, channel, user, *adminRights, crl::guard(this, [=] {
 			editAdminDone(
 				user,
 				ChatAdminRightsInfo(),
@@ -2670,14 +2705,7 @@ void EditCustomRankBox(
 	};
 	const auto state = box->lifetime().make_state<State>();
 
-	const auto hasRank = !currentRank.isEmpty();
-	box->setTitle(isSelf
-		? (hasRank
-			? tr::lng_context_edit_my_tag()
-			: tr::lng_context_add_my_tag())
-		: (hasRank
-			? tr::lng_context_edit_member_tag()
-			: tr::lng_context_add_member_tag()));
+	box->setTitle(tr::lng_rights_edit_tag_title());
 
 	const auto role = LookupBadgeRole(peer, user);
 	const auto control = box->addRow(
@@ -2688,6 +2716,14 @@ void EditCustomRankBox(
 			currentRank,
 			role),
 		style::margins());
+	Ui::AddSkip(box->verticalLayout());
+	Ui::AddDividerText(
+		box->verticalLayout(),
+		(isSelf
+			? tr::lng_rights_tag_about_self()
+			: tr::lng_rights_tag_about(
+				lt_name,
+				rpl::single(user->shortName()))));
 	const auto field = control->field();
 
 	box->setFocusCallback([=] { field->setFocusFast(); });
