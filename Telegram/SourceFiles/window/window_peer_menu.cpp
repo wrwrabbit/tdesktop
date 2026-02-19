@@ -1410,7 +1410,7 @@ void ShowDisableSharingBox(
 				toggleNoForwards(true);
 				box->closeBox();
 			} else {
-				Settings::ShowPremium(controller, u"no_forwards"_q);
+				ShowPremiumPreviewBox(controller, PremiumFeature::NoForwards);
 			}
 		});
 		button->setText(
@@ -1473,7 +1473,7 @@ void Filler::addToggleNoForwards() {
 			if (peer->session().premium()) {
 				toggleNoForwards(true);
 			} else {
-				Settings::ShowPremium(controller, u"no_forwards"_q);
+				ShowPremiumPreviewBox(controller, PremiumFeature::NoForwards);
 			}
 			return;
 		}
