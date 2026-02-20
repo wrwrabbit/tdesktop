@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_common.h"
 #include "data/data_peer_values.h"
 #include "data/data_channel.h"
+#include "data/data_changes.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
 #include "base/unixtime.h"
@@ -872,10 +873,17 @@ void EditRestrictedBox::prepare() {
 						restrictWeak->closeBox();
 					}
 				};
+				const auto savedUser = user();
+				const auto savedPeer = peer();
 				const auto done = [=](
-						ChatAdminRightsInfo,
-						const QString &) {
+						ChatAdminRightsInfo newRights,
+						const QString &rank) {
 					closeBoth();
+					savedUser->session().changes().chatAdminChanged(
+						savedPeer,
+						savedUser,
+						newRights.flags,
+						rank);
 				};
 				const auto fail = closeBoth;
 				adminBox->setSaveCallback(

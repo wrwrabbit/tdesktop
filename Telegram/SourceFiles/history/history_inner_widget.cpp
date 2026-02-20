@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_message.h"
 #include "history/view/history_view_service_message.h"
 #include "history/view/history_view_cursor_state.h"
+#include "history/view/history_view_reply_button.h"
 #include "history/view/history_view_context_menu.h"
 #include "history/view/history_view_reaction_preview.h"
 #include "history/view/history_view_quick_action.h"
@@ -330,6 +331,9 @@ HistoryInner::HistoryInner(
 , _reactionsManager(
 	std::make_unique<HistoryView::Reactions::Manager>(
 		this,
+		[=](QRect updated) { update(updated); }))
+, _replyButtonManager(
+	std::make_unique<HistoryView::ReplyButton::Manager>(
 		[=](QRect updated) { update(updated); }))
 , _touchSelectTimer([=] { onTouchSelect(); })
 , _touchScrollTimer([=] { onTouchScrollTimer(); })
@@ -1475,6 +1479,7 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 		return true;
 	});
 
+	_replyButtonManager->paint(p, context);
 	_reactionsManager->paint(p, context);
 }
 
@@ -2086,6 +2091,7 @@ void HistoryInner::performDrag() {
 	if (auto mimeData = prepareDrag()) {
 		// This call enters event loop and can destroy any QObject.
 		_reactionsManager->updateButton({});
+		_replyButtonManager->updateButton({});
 		_controller->widget()->launchDrag(
 			std::move(mimeData),
 			crl::guard(this, [=] { mouseActionUpdate(QCursor::pos()); }));
@@ -2104,6 +2110,7 @@ void HistoryInner::itemRemoved(not_null<const HistoryItem*> item) {
 	}
 	_animatedStickersPlayed.remove(item);
 	_reactionsManager->remove(item->fullId());
+	_replyButtonManager->remove(item->fullId());
 
 	auto i = _selected.find(item);
 	if (i != _selected.cend()) {
@@ -3937,6 +3944,7 @@ void HistoryInner::enterEventHook(QEnterEvent *e) {
 
 void HistoryInner::leaveEventHook(QEvent *e) {
 	_reactionsManager->updateButton({ .cursorLeft = true });
+	_replyButtonManager->updateButton({});
 	if (auto item = Element::Hovered()) {
 		repaintItem(item);
 		Element::Hovered(nullptr);
@@ -4293,7 +4301,28 @@ auto HistoryInner::reactionButtonParameters(
 	auto result = view->reactionButtonParameters(
 		position,
 		reactionState
-	).translated({ 0, itemTop(view) });
+	).translated({ 0, top });
+	result.visibleTop = _visibleAreaTop;
+	result.visibleBottom = _visibleAreaBottom;
+	result.globalPointer = _mousePosition;
+	return result;
+}
+
+auto HistoryInner::replyButtonParameters(
+	not_null<const Element*> view,
+	QPoint position,
+	const HistoryView::TextState &replyState) const
+-> HistoryView::ReplyButton::ButtonParameters {
+	const auto top = itemTop(view);
+	if (top < 0
+		|| _mouseAction == MouseAction::Dragging
+		|| inSelectionMode().inSelectionMode) {
+		return {};
+	}
+	auto result = view->replyButtonParameters(
+		position,
+		replyState
+	).translated({ 0, top });
 	result.visibleTop = _visibleAreaTop;
 	result.visibleBottom = _visibleAreaBottom;
 	result.globalPointer = _mousePosition;
@@ -4315,8 +4344,15 @@ void HistoryInner::mouseActionUpdate() {
 	const auto reactionState = _reactionsManager->buttonTextState(point);
 	const auto reactionItem = session().data().message(reactionState.itemId);
 	const auto reactionView = viewByItem(reactionItem);
+	const auto replyBtnState = reactionView
+		? HistoryView::TextState()
+		: _replyButtonManager->buttonTextState(point);
+	const auto replyBtnItem = session().data().message(replyBtnState.itemId);
+	const auto replyBtnView = viewByItem(replyBtnItem);
 	const auto view = reactionView
 		? reactionView
+		: replyBtnView
+		? replyBtnView
 		: (_aboutView
 			&& _aboutView->view()
 			&& point.y() >= _aboutView->top
@@ -4342,6 +4378,10 @@ void HistoryInner::mouseActionUpdate() {
 			view,
 			m,
 			reactionState));
+		_replyButtonManager->updateButton(replyButtonParameters(
+			view,
+			m,
+			replyBtnState));
 		if (changed) {
 			_reactionsItem = item;
 		}
@@ -4361,6 +4401,7 @@ void HistoryInner::mouseActionUpdate() {
 			Element::Moused(nullptr);
 		}
 		_reactionsManager->updateButton({});
+		_replyButtonManager->updateButton({});
 	}
 	if (_mouseActionItem && !viewByItem(_mouseActionItem)) {
 		mouseActionCancel();
@@ -4374,9 +4415,13 @@ void HistoryInner::mouseActionUpdate() {
 		&& !_selected.empty()
 		&& (_selected.cbegin()->second != FullSelection);
 	const auto overReaction = reactionView && reactionState.link;
+	const auto overReplyBtn = replyBtnView && replyBtnState.link;
 	if (overReaction) {
 		dragState = reactionState;
 		lnkhost = reactionView;
+	} else if (overReplyBtn) {
+		dragState = replyBtnState;
+		lnkhost = replyBtnView;
 	} else if (item) {
 		if (item != _mouseActionItem || ((m + selectionViewOffset) - _dragStartPosition).manhattanLength() >= QApplication::startDragDistance()) {
 			if (_mouseAction == MouseAction::PrepareDrag) {

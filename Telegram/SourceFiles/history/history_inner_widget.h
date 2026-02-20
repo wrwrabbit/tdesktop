@@ -51,6 +51,11 @@ struct ChosenReaction;
 struct ButtonParameters;
 } // namespace HistoryView::Reactions
 
+namespace HistoryView::ReplyButton {
+class Manager;
+struct ButtonParameters;
+} // namespace HistoryView::ReplyButton
+
 namespace Window {
 class SessionController;
 } // namespace Window
@@ -439,6 +444,11 @@ private:
 		QPoint position,
 		const HistoryView::TextState &reactionState) const
 	-> HistoryView::Reactions::ButtonParameters;
+	[[nodiscard]] auto replyButtonParameters(
+		not_null<const Element*> view,
+		QPoint position,
+		const HistoryView::TextState &replyState) const
+	-> HistoryView::ReplyButton::ButtonParameters;
 	void toggleFavoriteReaction(not_null<Element*> view) const;
 	void reactionChosen(const ChosenReaction &reaction);
 
@@ -512,6 +522,7 @@ private:
 
 	std::unique_ptr<HistoryView::Reactions::Manager> _reactionsManager;
 	rpl::variable<HistoryItem*> _reactionsItem;
+	std::unique_ptr<HistoryView::ReplyButton::Manager> _replyButtonManager;
 	HistoryItem *_pinnedItem = nullptr;
 
 	MouseAction _mouseAction = MouseAction::None;

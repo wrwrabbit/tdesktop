@@ -916,6 +916,11 @@ reactionMainAppearShift: 20px;
 reactionCollapseFadeThreshold: 40px;
 reactionFlyUp: 50px;
 
+replyCornerHeight: 20px;
+replyCornerShadow: margins(4px, 8px, 4px, 8px);
+replyCornerCenter: point(7px, -2px);
+replyCornerTextPadding: margins(6px, 0px, 6px, 0px);
+
 effectInfoImage: 12px;
 
 searchInChatMultiSelectItem: MultiSelectItem(defaultMultiSelectItem) {

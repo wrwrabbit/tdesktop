@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_sticker.h"
 #include "history/view/reactions/history_view_reactions.h"
 #include "history/view/reactions/history_view_reactions_button.h"
+#include "history/view/history_view_reply_button.h"
 #include "history/view/reactions/history_view_reactions_selector.h"
 #include "history/view/history_view_context_menu.h"
 #include "history/view/history_view_element.h"
@@ -404,6 +405,8 @@ ListWidget::ListWidget(
 		[=] { update(); }))
 , _reactionsManager(_delegate->listMakeReactionsManager(
 	this,
+	[=](QRect updated) { update(updated); }))
+, _replyButtonManager(std::make_unique<ReplyButton::Manager>(
 	[=](QRect updated) { update(updated); }))
 , _translateTracker(MaybeTranslateTracker(_delegate->listTranslateHistory()))
 , _scrollDateCheck([this] { scrollDateCheck(); })
@@ -2384,6 +2387,9 @@ void ListWidget::paintEvent(QPaintEvent *e) {
 	paintUserpics(p, context, clip);
 	paintDates(p, context, clip);
 
+	if (_replyButtonManager) {
+		_replyButtonManager->paint(p, context);
+	}
 	if (_reactionsManager) {
 		_reactionsManager->paint(p, context);
 	}
@@ -3298,6 +3304,9 @@ void ListWidget::leaveEventHook(QEvent *e) {
 	if (_reactionsManager) {
 		_reactionsManager->updateButton({ .cursorLeft = true });
 	}
+	if (_replyButtonManager) {
+		_replyButtonManager->updateButton({});
+	}
 	if (const auto view = _overElement) {
 		if (_overState.pointState != PointState::Outside) {
 			repaintItem(view);
@@ -3604,7 +3613,27 @@ Reactions::ButtonParameters ListWidget::reactionButtonParameters(
 	auto result = view->reactionButtonParameters(
 		position,
 		reactionState
-	).translated({ 0, itemTop(view) });
+	).translated({ 0, top });
+	result.visibleTop = _visibleTop;
+	result.visibleBottom = _visibleBottom;
+	result.globalPointer = _mousePosition;
+	return result;
+}
+
+ReplyButton::ButtonParameters ListWidget::replyButtonParameters(
+		not_null<const Element*> view,
+		QPoint position,
+		const TextState &replyState) const {
+	const auto top = itemTop(view);
+	if (top < 0
+		|| _mouseAction == MouseAction::Dragging
+		|| inSelectionMode().inSelectionMode) {
+		return {};
+	}
+	auto result = view->replyButtonParameters(
+		position,
+		replyState
+	).translated({ 0, top });
 	result.visibleTop = _visibleTop;
 	result.visibleBottom = _visibleBottom;
 	result.globalPointer = _mousePosition;
@@ -3757,8 +3786,15 @@ void ListWidget::mouseActionUpdate() {
 		: TextState();
 	const auto reactionItem = session().data().message(reactionState.itemId);
 	const auto reactionView = viewForItem(reactionItem);
+	const auto replyBtnState = (_replyButtonManager && !reactionView)
+		? _replyButtonManager->buttonTextState(point)
+		: TextState();
+	const auto replyBtnItem = session().data().message(replyBtnState.itemId);
+	const auto replyBtnView = viewForItem(replyBtnItem);
 	const auto view = reactionView
 		? reactionView
+		: replyBtnView
+		? replyBtnView
 		: strictFindItemByY(point.y());
 	const auto item = view ? view->data().get() : nullptr;
 	if (view) {
@@ -3785,6 +3821,11 @@ void ListWidget::mouseActionUpdate() {
 				reactionState)
 			: Reactions::ButtonParameters());
 	}
+	if (_replyButtonManager) {
+		_replyButtonManager->updateButton(view
+			? replyButtonParameters(view, itemPoint, replyBtnState)
+			: ReplyButton::ButtonParameters());
+	}
 	if (viewChanged && view) {
 		_reactionsItem = item;
 	}
@@ -3795,10 +3836,14 @@ void ListWidget::mouseActionUpdate() {
 		&& (_overState.itemId == _pressState.itemId)
 		&& hasSelectedText();
 	auto dragStateUserpic = false;
+	const auto overReplyBtn = replyBtnView && replyBtnState.link;
 	const auto overReaction = reactionView && reactionState.link;
 	if (overReaction) {
 		dragState = reactionState;
 		lnkhost = reactionView;
+	} else if (overReplyBtn) {
+		dragState = replyBtnState;
+		lnkhost = replyBtnView;
 	} else if (view) {
 		auto cursorDeltaLength = [&] {
 			auto cursorDelta = (_overState.point - _pressState.point);
@@ -4300,6 +4345,9 @@ void ListWidget::itemRemoved(not_null<const HistoryItem*> item) {
 
 	if (_reactionsManager) {
 		_reactionsManager->remove(item->fullId());
+	}
+	if (_replyButtonManager) {
+		_replyButtonManager->remove(item->fullId());
 	}
 	updateItemsGeometry();
 }

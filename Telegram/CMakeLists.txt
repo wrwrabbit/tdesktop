@@ -957,6 +957,8 @@ PRIVATE
     history/view/history_view_reaction_preview.h
     history/view/history_view_reply.cpp
     history/view/history_view_reply.h
+    history/view/history_view_reply_button.cpp
+    history/view/history_view_reply_button.h
     history/view/history_view_requests_bar.cpp
     history/view/history_view_requests_bar.h
     history/view/history_view_schedule_box.cpp

@@ -46,6 +46,10 @@ struct ButtonParameters;
 class InlineList;
 } // namespace HistoryView::Reactions
 
+namespace HistoryView::ReplyButton {
+struct ButtonParameters;
+} // namespace HistoryView::ReplyButton
+
 namespace HistoryView {
 
 using PaintContext = Ui::ChatPaintContext;
@@ -542,6 +546,9 @@ public:
 	[[nodiscard]] virtual auto reactionButtonParameters(
 		QPoint position,
 		const TextState &reactionState) const -> Reactions::ButtonParameters;
+	[[nodiscard]] virtual auto replyButtonParameters(
+		QPoint position,
+		const TextState &replyState) const -> ReplyButton::ButtonParameters;
 	[[nodiscard]] virtual int reactionsOptimalWidth() const;
 
 	// ClickHandlerHost interface.

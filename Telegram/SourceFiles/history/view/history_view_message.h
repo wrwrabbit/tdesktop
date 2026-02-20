@@ -37,6 +37,10 @@ namespace Reactions {
 class InlineList;
 } // namespace Reactions
 
+namespace ReplyButton {
+struct ButtonParameters;
+} // namespace ReplyButton
+
 // Special type of Component for the channel actions log.
 struct LogEntryOriginal : RuntimeComponent<LogEntryOriginal, Element> {
 	LogEntryOriginal();
@@ -68,6 +72,8 @@ enum class BadgeRole : uchar {
 struct RightBadge : RuntimeComponent<RightBadge, Element> {
 	Ui::Text::String tag;
 	Ui::Text::String boosts;
+	mutable ClickHandlerPtr tagLink;
+	mutable ClickHandlerPtr boostsLink;
 	int width = 0;
 	BadgeRole role = BadgeRole::User;
 	bool overridden = false;
@@ -126,6 +132,9 @@ public:
 	Reactions::ButtonParameters reactionButtonParameters(
 		QPoint position,
 		const TextState &reactionState) const override;
+	ReplyButton::ButtonParameters replyButtonParameters(
+		QPoint position,
+		const TextState &replyState) const override;
 	int reactionsOptimalWidth() const override;
 
 	void unloadHeavyPart() override;
@@ -300,9 +309,7 @@ private:
 	[[nodiscard]] bool needInfoDisplay() const;
 	[[nodiscard]] bool invertMedia() const;
 	[[nodiscard]] bool hasFastReply() const;
-	[[nodiscard]] bool hasFastForward() const;
 	[[nodiscard]] bool displayFastReply() const;
-	[[nodiscard]] bool displayFastForward() const;
 
 	[[nodiscard]] bool isPinnedContext() const;
 	[[nodiscard]] bool isCommentsRootView() const;

@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_no_forwards_request.h"
 #include "history/view/media/history_view_suggest_decision.h"
 #include "history/view/reactions/history_view_reactions_button.h"
+#include "history/view/history_view_reply_button.h"
 #include "history/view/reactions/history_view_reactions.h"
 #include "history/view/history_view_cursor_state.h"
 #include "history/view/history_view_reply.h"
@@ -2797,6 +2798,12 @@ TextSelection Element::FindSelectionFromQuote(
 Reactions::ButtonParameters Element::reactionButtonParameters(
 		QPoint position,
 		const TextState &reactionState) const {
+	return {};
+}
+
+ReplyButton::ButtonParameters Element::replyButtonParameters(
+		QPoint position,
+		const TextState &replyState) const {
 	return {};
 }
 

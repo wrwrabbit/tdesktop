@@ -53,6 +53,11 @@ struct ChosenReaction;
 struct ButtonParameters;
 } // namespace HistoryView::Reactions
 
+namespace HistoryView::ReplyButton {
+class Manager;
+struct ButtonParameters;
+} // namespace HistoryView::ReplyButton
+
 namespace Window {
 struct SectionShow;
 } // namespace Window
@@ -388,6 +393,10 @@ public:
 		not_null<const Element*> view,
 		QPoint position,
 		const TextState &reactionState) const;
+	[[nodiscard]] ReplyButton::ButtonParameters replyButtonParameters(
+		not_null<const Element*> view,
+		QPoint position,
+		const TextState &replyState) const;
 	void toggleFavoriteReaction(not_null<Element*> view) const;
 
 
@@ -780,6 +789,8 @@ private:
 	std::unique_ptr<HistoryView::Reactions::Manager> _reactionsManager;
 	rpl::variable<HistoryItem*> _reactionsItem;
 	bool _useCornerReaction = false;
+
+	std::unique_ptr<ReplyButton::Manager> _replyButtonManager;
 
 	std::unique_ptr<TranslateTracker> _translateTracker;
 

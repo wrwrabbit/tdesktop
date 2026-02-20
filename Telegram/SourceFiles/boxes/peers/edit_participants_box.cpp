@@ -2013,6 +2013,11 @@ void ParticipantsBoxController::editAdminDone(
 	if (_editParticipantBox) {
 		_editParticipantBox->closeBox();
 	}
+
+	_additional.applyAdminLocally(user, rights, rank);
+	recomputeTypeFor(user);
+	refreshRows();
+
 	const auto flags = rights.flags;
 	user->session().changes().chatAdminChanged(_peer, user, flags, rank);
 }
