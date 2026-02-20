@@ -9,10 +9,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "apiwrap.h"
 #include "boxes/url_auth_box_content.h"
+#include "chat_helpers/stickers_emoji_pack.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
+#include "data/stickers/data_custom_emoji.h"
 #include "data/data_user.h"
 #include "history/history_item_components.h"
 #include "history/history_item.h"
@@ -24,6 +26,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/controls/userpic_button.h"
+#include "ui/dynamic_thumbnails.h"
+#include "ui/emoji_config.h"
 #include "ui/layers/generic_box.h"
 #include "ui/toast/toast.h"
 #include "ui/widgets/menu/menu_action.h"
@@ -546,6 +550,39 @@ void RequestUrl(
 			box,
 			url,
 			domain,
+			[=](QString code) -> std::shared_ptr<Ui::DynamicImage> {
+				auto emojiLength = 0;
+				const auto emoji = Ui::Emoji::Find(code, &emojiLength);
+				if (!emoji || emojiLength != code.size()) {
+					return nullptr;
+				}
+				const auto makeFor = [&](not_null<Main::Session*> source) {
+					if (const auto sticker = source->emojiStickersPack()
+							.stickerForEmoji(emoji)) {
+						return Ui::MakeEmojiThumbnail(
+							&source->data(),
+							Data::SerializeCustomEmojiId(sticker.document),
+							nullptr,
+							nullptr,
+							1);
+					}
+					return std::shared_ptr<Ui::DynamicImage>();
+				};
+				const auto session = resolveSession();
+				if (session->isTestMode()) {
+					for (const auto &account : Core::App().domain()
+							.orderedAccounts()) {
+						if (!account->sessionExists()
+							|| account->session().isTestMode()) {
+							continue;
+						}
+						if (const auto image = makeFor(&account->session())) {
+							return image;
+						}
+					}
+				}
+				return makeFor(session);
+			},
 			callback,
 			bot
 				? object_ptr<Ui::UserpicButton>(

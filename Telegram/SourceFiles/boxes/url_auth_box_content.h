@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 
 namespace Ui {
+class DynamicImage;
 class GenericBox;
 class VerticalLayout;
 } // namespace Ui
@@ -64,6 +65,7 @@ void ShowDetails(
 	not_null<Ui::GenericBox*> box,
 	const QString &url,
 	const QString &domain,
+	Fn<std::shared_ptr<Ui::DynamicImage>(QString)> emojiImageFactory,
 	Fn<void(Result)> callback,
 	object_ptr<Ui::RpWidget> userpicOwned,
 	rpl::producer<QString> botName,

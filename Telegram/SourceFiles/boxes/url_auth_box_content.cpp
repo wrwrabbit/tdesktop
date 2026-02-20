@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/qthelp_url.h"
 #include "lang/lang_keys.h"
+#include "ui/dynamic_image.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/layers/generic_box.h"
 #include "ui/vertical_list.h"
@@ -28,6 +29,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace UrlAuthBox {
 namespace {
 
+constexpr auto kEmojiAnimationActiveFor = crl::time(250);
+
 void PrepareFullWidthRoundButton(
 		not_null<Ui::RoundButton*> button,
 		not_null<Ui::VerticalLayout*> content,
@@ -42,6 +45,7 @@ void PrepareFullWidthRoundButton(
 
 void ShowMatchCodesBox(
 		not_null<Ui::GenericBox*> box,
+		Fn<std::shared_ptr<Ui::DynamicImage>(QString)> emojiImageFactory,
 		const QString &domain,
 		const QStringList &codes,
 		Fn<void(QString)> callback) {
@@ -83,10 +87,72 @@ void ShowMatchCodesBox(
 			const auto overlay = Ui::CreateChild<Ui::RpWidget>(button);
 			overlay->setAttribute(Qt::WA_TransparentForMouseEvents);
 			overlay->show();
+			struct State {
+				std::shared_ptr<Ui::DynamicImage> image;
+				bool hovered = false;
+				crl::time lastFrameUpdate = 0;
+			};
+			const auto state = overlay->lifetime().make_state<State>();
+			const auto animationActive = [=] {
+				return state->lastFrameUpdate
+					&& (crl::now() - state->lastFrameUpdate
+						<= kEmojiAnimationActiveFor);
+			};
+			const auto refreshImage = [=] {
+				if (state->image) {
+					state->image->subscribeToUpdates(nullptr);
+				}
+				state->image = emojiImageFactory
+					? emojiImageFactory(code)
+					: nullptr;
+				if (state->image) {
+					state->image->subscribeToUpdates([=] {
+						state->lastFrameUpdate = crl::now();
+						overlay->update();
+					});
+				}
+				overlay->update();
+			};
+			refreshImage();
+			overlay->lifetime().add([=] {
+				if (state->image) {
+					state->image->subscribeToUpdates(nullptr);
+				}
+			});
+			button->events() | rpl::on_next([=](not_null<QEvent*> e) {
+				switch (e->type()) {
+				case QEvent::Enter:
+					if (!state->hovered) {
+						state->hovered = true;
+						if (!animationActive()) {
+							refreshImage();
+						}
+					}
+					break;
+				case QEvent::Leave:
+					state->hovered = false;
+					break;
+				default:
+					break;
+				}
+			}, overlay->lifetime());
 			button->sizeValue() | rpl::on_next([=](QSize size) {
 				overlay->resize(size);
 			}, overlay->lifetime());
 			overlay->paintOn([=](QPainter &p) {
+				if (state->image) {
+					const auto side = st::urlAuthCodesButton.height;
+					const auto frame = state->image->image(side);
+					const auto visible = frame.isNull()
+						? 0
+						: (frame.width() / frame.devicePixelRatio());
+					p.drawImage(
+						QPoint(
+							(overlay->width() - visible) / 2,
+							(overlay->height() - visible) / 2),
+						frame);
+					return;
+				}
 				const auto size = Ui::Emoji::GetSizeLarge();
 				const auto visible = size / style::DevicePixelRatio();
 				Ui::Emoji::Draw(
@@ -360,6 +426,7 @@ void ShowDetails(
 		not_null<Ui::GenericBox*> box,
 		const QString &url,
 		const QString &domain,
+		Fn<std::shared_ptr<Ui::DynamicImage>(QString)> emojiImageFactory,
 		Fn<void(Result)> callback,
 		object_ptr<Ui::RpWidget> userpicOwned,
 		rpl::producer<QString> botName,
@@ -487,6 +554,7 @@ void ShowDetails(
 					not_null<Ui::GenericBox*> matchCodesBox) {
 				ShowMatchCodesBox(
 					matchCodesBox,
+					emojiImageFactory,
 					domain,
 					state->matchCodes,
 					[=](QString matchCode) {
