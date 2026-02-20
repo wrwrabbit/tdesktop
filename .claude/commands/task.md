@@ -203,7 +203,7 @@ Read these files:
 - .ai/<project-name>/<letter>/context.md - Contains all gathered context for this task
 - Then read the specific source files referenced in context.md to understand the code deeply.
 
-Use /ultrathink to reason carefully about the implementation approach.
+Think carefully about the implementation approach.
 
 Create a detailed plan in: .ai/<project-name>/<letter>/plan.md
 
@@ -264,7 +264,7 @@ Read these files:
 - .ai/<project-name>/<letter>/plan.md
 - Then read the actual source files referenced to verify the plan makes sense.
 
-Use /ultrathink to assess the plan:
+Carefully assess the plan:
 
 1. **Correctness**: Are the file paths and line references accurate? Does the plan reference real functions and types?
 2. **Completeness**: Are there missing steps? Edge cases not handled?
@@ -393,7 +393,7 @@ Then run `git diff` to see all uncommitted changes made by the implementation. I
 
 Then read the modified source files in full to understand changes in context.
 
-Use /ultrathink to perform a thorough code review.
+Perform a thorough code review.
 
 REVIEW CRITERIA (in order of importance):
 
