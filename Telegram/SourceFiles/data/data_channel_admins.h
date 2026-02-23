@@ -22,6 +22,7 @@ private:
 	not_null<ChannelData*> _channel;
 	base::flat_set<UserId> &_admins;
 	base::flat_set<UserId> _changes;
+	UserData *_oldCreator = nullptr;
 
 };
 

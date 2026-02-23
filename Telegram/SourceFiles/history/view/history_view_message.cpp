@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "boxes/premium_preview_box.h"
 #include "boxes/share_box.h"
+#include "boxes/peers/tag_info_box.h"
 #include "ui/effects/reaction_fly_animation.h"
 #include "ui/text/text_utilities.h"
 #include "ui/text/text_extended_data.h"
@@ -248,20 +249,27 @@ void Message::refreshRightBadge() {
 	if (const auto badge = Get<RightBadge>(); badge && badge->overridden) {
 		return;
 	}
+	if (hasOutLayout()) {
+		if (Has<RightBadge>()) {
+			RemoveComponents(RightBadge::Bit());
+		}
+		return;
+	}
 	const auto item = data();
-	const auto [text, role] = [&]() -> std::pair<QString, BadgeRole> {
+	const auto [text, role, special] = [&]() -> std::tuple<QString, BadgeRole, bool> {
 		if (item->isDiscussionPost()) {
 			return {
 				(delegate()->elementContext() == Context::Replies)
 					? QString()
 					: tr::lng_channel_badge(tr::now),
 				BadgeRole::User,
+				true,
 			};
 		} else if (item->author()->isMegagroup()) {
 			if (const auto msgsigned = item->Get<HistoryMessageSigned>()) {
 				if (!msgsigned->viaBusinessBot) {
 					Assert(msgsigned->isAnonymousRank);
-					return { msgsigned->author, BadgeRole::User };
+					return { msgsigned->author, BadgeRole::User, false };
 				}
 			}
 		}
@@ -279,14 +287,14 @@ void Message::refreshRightBadge() {
 							: chat->admins.contains(user)
 							? BadgeRole::Admin
 							: BadgeRole::User;
-						return { j->second, basicRole };
+						return { j->second, basicRole, false };
 					}
 				}
 			}
-			return { QString(), BadgeRole::User };
+			return { QString(), BadgeRole::User, false };
 		}
 		if (!user) {
-			return { QString(), BadgeRole::User };
+			return { QString(), BadgeRole::User, false };
 		}
 		const auto info = channel->mgInfo.get();
 		const auto userId = peerToUser(user->id);
@@ -298,18 +306,19 @@ void Message::refreshRightBadge() {
 				return {
 					r->second,
 					isCreator ? BadgeRole::Creator : BadgeRole::Admin,
+					false,
 				};
 			}
 			if (isCreator) {
-				return { tr::lng_owner_badge(tr::now), BadgeRole::Creator };
+				return { tr::lng_owner_badge(tr::now), BadgeRole::Creator, false };
 			}
-			return { tr::lng_admin_badge(tr::now), BadgeRole::Admin };
+			return { tr::lng_admin_badge(tr::now), BadgeRole::Admin, false };
 		}
 		const auto fromRank = item->fromRank();
 		if (!fromRank.isEmpty()) {
-			return { fromRank, BadgeRole::User };
+			return { fromRank, BadgeRole::User, false };
 		}
-		return { QString(), BadgeRole::User };
+		return { QString(), BadgeRole::User, false };
 	}();
 	auto tagText = TextWithEntities{
 		(text.isEmpty()
@@ -329,6 +338,8 @@ void Message::refreshRightBadge() {
 	}
 	const auto badge = Get<RightBadge>();
 	badge->role = role;
+	badge->special = special || (text.isEmpty() && !tagText.empty());
+	badge->tagLink = nullptr;
 	if (tagText.empty()) {
 		badge->tag.clear();
 	} else {
@@ -2811,10 +2822,16 @@ bool Message::getStateFromName(
 				&& point.x() >= boostLeft
 				&& point.x() < badgeRight) {
 				if (!badge->boostsLink) {
-					badge->boostsLink = std::make_shared<LambdaClickHandler>([=](
-							ClickContext context) {
+					const auto fullId = item->fullId();
+					badge->boostsLink = std::make_shared<LambdaClickHandler>([
+						fullId
+					](ClickContext context) {
 						if (const auto controller = ExtractController(context)) {
-							controller->showToast(u"Boosts clicked"_q);
+							if (const auto item = controller->session().data().message(fullId)) {
+								if (const auto channel = item->history()->peer->asChannel()) {
+									controller->resolveBoostState(channel);
+								}
+							}
 						}
 					});
 				}
@@ -2825,11 +2842,31 @@ bool Message::getStateFromName(
 				? (boostLeft - st::msgTagBadgeBoostSkip)
 				: badgeRight;
 			if (point.x() >= badgeLeft && point.x() < tagRight) {
+				if (badge->special) {
+					return false;
+				}
 				if (!badge->tagLink) {
-					badge->tagLink = std::make_shared<LambdaClickHandler>([=](
-							ClickContext context) {
+					const auto weak = base::make_weak(this);
+					badge->tagLink = std::make_shared<LambdaClickHandler>([
+						weak
+					](ClickContext context) {
 						if (const auto controller = ExtractController(context)) {
-							controller->showToast(u"Tag clicked"_q);
+							if (const auto view = weak.get()) {
+								const auto badge = view->Get<RightBadge>();
+								if (!badge) {
+									return;
+								}
+								const auto item = view->data();
+								const auto peer = item->history()->peer;
+								const auto author = item->author();
+								controller->uiShow()->show(Box(
+									TagInfoBox,
+									controller->uiShow(),
+									peer,
+									author,
+									badge->tag.toString(),
+									badge->role));
+							}
 						}
 					});
 				}

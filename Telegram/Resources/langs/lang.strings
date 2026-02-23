@@ -6021,6 +6021,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_rights_edit_tag_title" = "Edit tag";
 "lng_rights_tag_about" = "Add short tag next to {name}'s name.";
 "lng_rights_tag_about_self" = "Share your role, title, or how you're known in this group. Your tag is visible to all members.";
+
+"lng_tag_info_title_user" = "Member Tags";
+"lng_tag_info_title_admin" = "Admin Tags";
+"lng_tag_info_title_owner" = "Owner Tags";
+"lng_tag_info_text_user" = "This grey tag {emoji} is {author}'s member tag in {group}.";
+"lng_tag_info_text_admin" = "This green tag {emoji} is {author}'s admin tag in {group}.";
+"lng_tag_info_text_owner" = "This purple tag {emoji} is {author}'s owner tag in {group}.";
+"lng_tag_info_preview_member" = "Member Tag";
+"lng_tag_info_preview_admin" = "Admin Tag";
+"lng_tag_info_preview_owner" = "Owner Tag";
+"lng_tag_info_add_my_tag" = "Add My Tag";
+"lng_tag_info_edit_my_tag" = "Edit My Tag";
+"lng_tag_info_admins_only" = "Only admins can change tags in this group.";
+
 "lng_rights_promote_member" = "Promote to Admin";
 "lng_rights_remove_member" = "Remove from Group";
 "lng_rights_dismiss_admin" = "Dismiss Admin";

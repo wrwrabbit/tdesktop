@@ -17,7 +17,8 @@ namespace Data {
 
 ChannelAdminChanges::ChannelAdminChanges(not_null<ChannelData*> channel)
 : _channel(channel)
-, _admins(_channel->mgInfo->admins) {
+, _admins(_channel->mgInfo->admins)
+, _oldCreator(_channel->mgInfo->creator) {
 }
 
 void ChannelAdminChanges::add(UserId userId, const QString &rank) {
@@ -45,6 +46,15 @@ void ChannelAdminChanges::remove(UserId userId) {
 }
 
 ChannelAdminChanges::~ChannelAdminChanges() {
+	const auto creator = _channel->mgInfo->creator;
+	if (creator != _oldCreator) {
+		if (creator) {
+			_changes.emplace(peerToUser(creator->id));
+		}
+		if (_oldCreator) {
+			_changes.emplace(peerToUser(_oldCreator->id));
+		}
+	}
 	if (_changes.size() > 1
 		|| (!_changes.empty()
 			&& _changes.front() != _channel->session().userId())) {

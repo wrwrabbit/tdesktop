@@ -2080,8 +2080,7 @@ void ParticipantsBoxController::editRestrictedDone(
 			if (_role == Role::Restricted) {
 				prependRow(participant);
 			} else if (_role == Role::Kicked
-				|| _role == Role::Admins
-				|| _role == Role::Members) {
+				|| _role == Role::Admins) {
 				removeRow(participant);
 			}
 		}

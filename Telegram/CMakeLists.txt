@@ -257,6 +257,8 @@ PRIVATE
     boxes/peers/prepare_short_info_box.h
     boxes/peers/replace_boost_box.cpp
     boxes/peers/replace_boost_box.h
+    boxes/peers/tag_info_box.cpp
+    boxes/peers/tag_info_box.h
     boxes/peers/verify_peers_box.cpp
     boxes/peers/verify_peers_box.h
     boxes/about_box.cpp

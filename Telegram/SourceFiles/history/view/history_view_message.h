@@ -77,6 +77,7 @@ struct RightBadge : RuntimeComponent<RightBadge, Element> {
 	int width = 0;
 	BadgeRole role = BadgeRole::User;
 	bool overridden = false;
+	bool special = false;
 };
 
 struct BottomRippleMask {

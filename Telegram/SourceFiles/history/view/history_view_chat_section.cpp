@@ -41,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "base/timer_rpl.h"
 #include "api/api_bot.h"
+#include "api/api_chat_participants.h"
 #include "api/api_editing.h"
 #include "api/api_sending.h"
 #include "apiwrap.h"
@@ -299,6 +300,11 @@ ChatWidget::ChatWidget(
 	setupTranslateBar();
 
 	_peer->updateFull();
+	if (const auto channel = _peer->asMegagroup()) {
+		if (!channel->mgInfo->adminsLoaded) {
+			session().api().chatParticipants().requestAdmins(channel);
+		}
+	}
 
 	refreshTopBarActiveChat();
 

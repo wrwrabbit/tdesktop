@@ -51,12 +51,9 @@ std::vector<ChatParticipant> ParseList(
 void ApplyMegagroupAdmins(not_null<ChannelData*> channel, Members list) {
 	Expects(channel->isMegagroup());
 
-	const auto i = ranges::find_if(list, &Api::ChatParticipant::isCreator);
-	if (i != list.end()) {
-		i->tryApplyCreatorTo(channel);
-	} else {
-		channel->mgInfo->creator = nullptr;
-	}
+	const auto creatorIt = ranges::find_if(
+		list,
+		&Api::ChatParticipant::isCreator);
 
 	auto adding = base::flat_set<UserId>();
 	auto addingRanks = base::flat_map<UserId, QString>();
@@ -68,13 +65,10 @@ void ApplyMegagroupAdmins(not_null<ChannelData*> channel, Members list) {
 			}
 		}
 	}
-	if (channel->mgInfo->creator) {
-		const auto creatorId = peerToUser(channel->mgInfo->creator->id);
-		adding.emplace(creatorId);
-		const auto r = channel->mgInfo->memberRanks.find(creatorId);
-		if (r != channel->mgInfo->memberRanks.end()
-			&& !r->second.isEmpty()) {
-			addingRanks.emplace(creatorId, r->second);
+	if (creatorIt != list.end() && creatorIt->isUser()) {
+		adding.emplace(creatorIt->userId());
+		if (!creatorIt->rank().isEmpty()) {
+			addingRanks.emplace(creatorIt->userId(), creatorIt->rank());
 		}
 	}
 	auto removing = channel->mgInfo->admins;
@@ -84,6 +78,11 @@ void ApplyMegagroupAdmins(not_null<ChannelData*> channel, Members list) {
 	}
 
 	Data::ChannelAdminChanges changes(channel);
+	if (creatorIt != list.end()) {
+		creatorIt->tryApplyCreatorTo(channel);
+	} else {
+		channel->mgInfo->creator = nullptr;
+	}
 	for (const auto &addingId : adding) {
 		const auto r = addingRanks.find(addingId);
 		const auto rank = (r != end(addingRanks))
