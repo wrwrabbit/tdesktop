@@ -29,8 +29,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "window/window_session_controller_link_info.h"
+#include "apiwrap.h"
+#include "history/view/history_view_schedule_box.h"
+#include "menu/menu_send.h"
+#include "data/data_types.h"
 #include "styles/style_calls.h" // groupCallBoxLabel
 #include "styles/style_layers.h"
+#include "styles/style_menu_icons.h"
+
+#include <QtCore/QDateTime>
+#include <QtCore/QLocale>
 
 namespace {
 
@@ -437,4 +445,82 @@ auto MonospaceClickHandler::getTextEntity() const -> TextEntity {
 
 QString MonospaceClickHandler::url() const {
 	return _text;
+}
+
+FormattedDateClickHandler::FormattedDateClickHandler(
+	int32 date,
+	FormattedDateFlags flags)
+: _date(date)
+, _entityData(SerializeFormattedDateData(date, flags)) {
+}
+
+void FormattedDateClickHandler::onClick(ClickContext context) const {
+	if (context.button != Qt::LeftButton) {
+		return;
+	}
+	const auto my = context.other.value<ClickHandlerContext>();
+	const auto controller = my.sessionWindow.get();
+	if (!controller) {
+		return;
+	}
+	const auto menu = Ui::CreateChild<Ui::PopupMenu>(
+		controller->content(),
+		st::popupMenuWithIcons);
+
+	const auto date = _date;
+	const auto show = controller->uiShow();
+
+	menu->addAction(
+		tr::lng_context_copy_date(tr::now),
+		[date, show] {
+			const auto dateTime = QDateTime::fromSecsSinceEpoch(date);
+			const auto text = QLocale().toString(
+				dateTime,
+				QLocale::LongFormat);
+			TextUtilities::SetClipboardText(
+				TextForMimeData::Simple(text));
+			show->showToast(tr::lng_date_copied(tr::now));
+		},
+		&st::menuIconCopy);
+
+	const auto itemId = my.itemId;
+	const auto &owner = controller->session().data();
+	const auto item = owner.message(itemId);
+	const auto canForward = item
+		&& !item->forbidsForward()
+		&& item->history()->peer->allowsForwarding();
+	if (canForward) {
+		menu->addAction(
+			tr::lng_context_set_reminder(tr::now),
+			[itemId, show] {
+				const auto session = &show->session();
+				const auto item = session->data().message(itemId);
+				if (!item) {
+					return;
+				}
+				const auto self = session->user();
+				const auto history = self->owner().history(self);
+				show->showBox(HistoryView::PrepareScheduleBox(
+					session,
+					show,
+					SendMenu::Details{ .type = SendMenu::Type::Reminder },
+					[=](Api::SendOptions options) {
+						auto action = Api::SendAction(history, options);
+						action.clearDraft = false;
+						action.generateLocal = false;
+						session->api().forwardMessages(
+							Data::ResolvedForwardDraft{
+								.items = { item },
+							},
+							action);
+					}));
+			},
+			&st::menuIconSchedule);
+	}
+
+	menu->popup(QCursor::pos());
+}
+
+auto FormattedDateClickHandler::getTextEntity() const -> TextEntity {
+	return { EntityType::FormattedDate, _entityData };
 }

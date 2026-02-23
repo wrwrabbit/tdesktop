@@ -444,7 +444,7 @@ int KeyboardStyle::minButtonWidth(
 			break;
 		}
 		if (modification.added) {
-			++result.to;
+			result.to += modification.added;
 		}
 		const auto shiftTo = std::min(
 			int(modification.skipped),
@@ -452,7 +452,7 @@ int KeyboardStyle::minButtonWidth(
 		result.to -= shiftTo;
 		if (modification.position <= result.from) {
 			if (modification.added) {
-				++result.from;
+				result.from += modification.added;
 			}
 			const auto shiftFrom = std::min(
 				int(modification.skipped),
@@ -1866,6 +1866,9 @@ void Element::setTextWithLinks(
 		}
 	}
 	InitElementTextPart(this, _text);
+	if (const auto next = _text.nextFormattedDateUpdate()) {
+		history()->session().data().registerFormattedDateUpdate(next, this);
+	}
 	_textWidth = -1;
 	_textHeight = 0;
 }
@@ -2668,12 +2671,16 @@ SelectedQuote Element::FindSelectedQuote(
 			modified.from += modification.skipped;
 			if (modification.added
 				&& modification.position < selection.from) {
-				--modified.from;
+				modified.from = uint16(std::max(
+					0,
+					int(modified.from) - int(modification.added)));
 			}
 		}
 		modified.to += modification.skipped;
 		if (modification.added && modified.to > modified.from) {
-			--modified.to;
+			modified.to = uint16(std::max(
+				int(modified.from),
+				int(modified.to) - int(modification.added)));
 		}
 	}
 	auto result = item->originalText();

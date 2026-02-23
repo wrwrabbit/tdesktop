@@ -5542,6 +5542,38 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_text_copied" = "Text copied to clipboard.";
 "lng_code_copied" = "Code copied to clipboard.";
+"lng_date_copied" = "Date copied to clipboard.";
+
+"lng_date_relative_now" = "now";
+
+"lng_date_relative_seconds_ago#one" = "{count} second ago";
+"lng_date_relative_seconds_ago#other" = "{count} seconds ago";
+"lng_date_relative_minutes_ago#one" = "{count} minute ago";
+"lng_date_relative_minutes_ago#other" = "{count} minutes ago";
+"lng_date_relative_hours_ago#one" = "{count} hour ago";
+"lng_date_relative_hours_ago#other" = "{count} hours ago";
+"lng_date_relative_days_ago#one" = "{count} day ago";
+"lng_date_relative_days_ago#other" = "{count} days ago";
+"lng_date_relative_months_ago#one" = "{count} month ago";
+"lng_date_relative_months_ago#other" = "{count} months ago";
+"lng_date_relative_years_ago#one" = "{count} year ago";
+"lng_date_relative_years_ago#other" = "{count} years ago";
+
+"lng_date_relative_in_seconds#one" = "in {count} second";
+"lng_date_relative_in_seconds#other" = "in {count} seconds";
+"lng_date_relative_in_minutes#one" = "in {count} minute";
+"lng_date_relative_in_minutes#other" = "in {count} minutes";
+"lng_date_relative_in_hours#one" = "in {count} hour";
+"lng_date_relative_in_hours#other" = "in {count} hours";
+"lng_date_relative_in_days#one" = "in {count} day";
+"lng_date_relative_in_days#other" = "in {count} days";
+"lng_date_relative_in_months#one" = "in {count} month";
+"lng_date_relative_in_months#other" = "in {count} months";
+"lng_date_relative_in_years#one" = "in {count} year";
+"lng_date_relative_in_years#other" = "in {count} years";
+
+"lng_context_copy_date" = "Copy Date";
+"lng_context_set_reminder" = "Set a Reminder";
 
 "lng_spellchecker_submenu" = "Spelling";
 "lng_spellchecker_add" = "Add to Dictionary";

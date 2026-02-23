@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "ui/basic_click_handlers.h"
+#include "ui/text/text_entity.h"
 #include "data/data_msg_id.h"
 
 constexpr auto kPeerLinkPeerIdProperty = 0x01;
@@ -235,5 +236,18 @@ protected:
 private:
 	const QString _text;
 	const TextEntity _entity;
+
+};
+
+class FormattedDateClickHandler : public ClickHandler {
+public:
+	FormattedDateClickHandler(int32 date, FormattedDateFlags flags);
+
+	void onClick(ClickContext context) const override;
+	TextEntity getTextEntity() const override;
+
+private:
+	int32 _date = 0;
+	QString _entityData;
 
 };

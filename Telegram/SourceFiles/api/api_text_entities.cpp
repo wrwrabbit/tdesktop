@@ -239,6 +239,31 @@ EntitiesInText EntitiesFromMTP(
 				d.is_collapsed() ? u"1"_q : QString(),
 			});
 		}, [&](const MTPDmessageEntityFormattedDate &d) {
+			auto flags = FormattedDateFlags();
+			if (d.is_relative()) {
+				flags |= FormattedDateFlag::Relative;
+			}
+			if (d.is_short_time()) {
+				flags |= FormattedDateFlag::ShortTime;
+			}
+			if (d.is_long_time()) {
+				flags |= FormattedDateFlag::LongTime;
+			}
+			if (d.is_short_date()) {
+				flags |= FormattedDateFlag::ShortDate;
+			}
+			if (d.is_long_date()) {
+				flags |= FormattedDateFlag::LongDate;
+			}
+			if (d.is_day_of_week()) {
+				flags |= FormattedDateFlag::DayOfWeek;
+			}
+			result.push_back({
+				EntityType::FormattedDate,
+				d.voffset().v,
+				d.vlength().v,
+				SerializeFormattedDateData(d.vdate().v, flags),
+			});
 		});
 	}
 	return result;
@@ -357,6 +382,37 @@ MTPVector<MTPMessageEntity> EntitiesToMTP(
 				entity.data());
 			if (valid) {
 				v.push_back(*valid);
+			}
+		} break;
+		case EntityType::FormattedDate: {
+			const auto [date, dateFlags] = DeserializeFormattedDateData(
+				entity.data());
+			if (date) {
+				using Flag = MTPDmessageEntityFormattedDate::Flag;
+				auto mtpFlags = MTPDmessageEntityFormattedDate::Flags();
+				if (dateFlags & FormattedDateFlag::Relative) {
+					mtpFlags |= Flag::f_relative;
+				}
+				if (dateFlags & FormattedDateFlag::ShortTime) {
+					mtpFlags |= Flag::f_short_time;
+				}
+				if (dateFlags & FormattedDateFlag::LongTime) {
+					mtpFlags |= Flag::f_long_time;
+				}
+				if (dateFlags & FormattedDateFlag::ShortDate) {
+					mtpFlags |= Flag::f_short_date;
+				}
+				if (dateFlags & FormattedDateFlag::LongDate) {
+					mtpFlags |= Flag::f_long_date;
+				}
+				if (dateFlags & FormattedDateFlag::DayOfWeek) {
+					mtpFlags |= Flag::f_day_of_week;
+				}
+				v.push_back(MTP_messageEntityFormattedDate(
+					MTP_flags(mtpFlags),
+					offset,
+					length,
+					MTP_int(date)));
 			}
 		} break;
 		}

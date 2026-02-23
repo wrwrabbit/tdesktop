@@ -528,6 +528,10 @@ public:
 	void registerMessageTTL(TimeId when, not_null<HistoryItem*> item);
 	void unregisterMessageTTL(TimeId when, not_null<HistoryItem*> item);
 
+	void registerFormattedDateUpdate(
+		TimeId when,
+		not_null<HistoryView::Element*> view);
+
 	// Returns true if item found and it is not detached.
 	bool updateExistingMessage(const MTPDmessage &data);
 	void updateEditedMessage(const MTPMessage &data);
@@ -958,6 +962,9 @@ private:
 	void scheduleNextTTLs();
 	void checkTTLs();
 
+	void scheduleNextFormattedDateUpdate();
+	void checkFormattedDateUpdates();
+
 	int computeUnreadBadge(const Dialogs::UnreadState &state) const;
 	bool computeUnreadBadgeMuted(const Dialogs::UnreadState &state) const;
 
@@ -1146,6 +1153,9 @@ private:
 		base::flat_set<not_null<HistoryItem*>>> _dependentMessages;
 	std::map<TimeId, base::flat_set<not_null<HistoryItem*>>> _ttlMessages;
 	base::Timer _ttlCheckTimer;
+
+	std::map<TimeId, std::vector<base::weak_ptr<HistoryView::Element>>> _formattedDateUpdates;
+	base::Timer _formattedDateTimer;
 
 	std::unordered_map<MsgId, not_null<HistoryItem*>> _nonChannelMessages;
 

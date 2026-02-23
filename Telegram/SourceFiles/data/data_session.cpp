@@ -235,6 +235,7 @@ Session::Session(not_null<Main::Session*> session)
 , _contactsList(Dialogs::SortMode::Name)
 , _contactsNoChatsList(Dialogs::SortMode::Name)
 , _ttlCheckTimer([=] { checkTTLs(); })
+, _formattedDateTimer([=] { checkFormattedDateUpdates(); })
 , _selfDestructTimer([=] { checkSelfDestructItems(); })
 , _pollsClosingTimer([=] { checkPollsClosings(); })
 , _watchForOfflineTimer([=] { checkLocalUsersWentOffline(); })
@@ -2803,6 +2804,49 @@ void Session::checkTTLs() {
 		_ttlMessages.begin()->second.front()->destroy();
 	}
 	scheduleNextTTLs();
+}
+
+void Session::registerFormattedDateUpdate(
+		TimeId when,
+		not_null<HistoryView::Element*> view) {
+	_formattedDateUpdates[when].push_back(
+		base::make_weak(view.get()));
+	const auto nearest = _formattedDateUpdates.begin()->first;
+	if (nearest < when && _formattedDateTimer.isActive()) {
+		return;
+	}
+	scheduleNextFormattedDateUpdate();
+}
+
+void Session::scheduleNextFormattedDateUpdate() {
+	if (_formattedDateUpdates.empty()) {
+		return;
+	}
+	const auto nearest = _formattedDateUpdates.begin()->first;
+	const auto now = base::unixtime::now();
+	const auto maxTimeout = TimeId(86400);
+	const auto timeout = std::min(
+		std::max(now, nearest) - now,
+		maxTimeout);
+	_formattedDateTimer.callOnce(timeout * crl::time(1000));
+}
+
+void Session::checkFormattedDateUpdates() {
+	_formattedDateTimer.cancel();
+	const auto now = base::unixtime::now();
+	auto expired = std::vector<base::weak_ptr<HistoryView::Element>>();
+	while (!_formattedDateUpdates.empty()
+		&& _formattedDateUpdates.begin()->first <= now) {
+		auto &list = _formattedDateUpdates.begin()->second;
+		expired.insert(expired.end(), list.begin(), list.end());
+		_formattedDateUpdates.erase(_formattedDateUpdates.begin());
+	}
+	for (const auto &weak : expired) {
+		if (const auto strong = weak.get()) {
+			requestItemTextRefresh(strong->data());
+		}
+	}
+	scheduleNextFormattedDateUpdate();
 }
 
 void Session::processMessagesDeleted(
