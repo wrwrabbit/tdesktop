@@ -114,6 +114,62 @@ bool _expanded = false;
 SomeType *_pointer = nullptr;
 ```
 
+## Prefer tr:: projections over Ui::Text:: in localization calls
+
+Inside `tr::lng_...()` calls, always use the `tr::` projection helpers instead of their `Ui::Text::` equivalents. The `tr::` helpers are shorter and work uniformly as both placeholder wrappers and final projectors.
+
+| Instead of | Use |
+|---|---|
+| `Ui::Text::Bold(x)` | `tr::bold(x)` |
+| `Ui::Text::Italic(x)` | `tr::italic(x)` |
+| `Ui::Text::RichLangValue` | `tr::rich` |
+| `Ui::Text::WithEntities` | `tr::marked` |
+
+```cpp
+// BAD - verbose Ui::Text:: functions:
+tr::lng_some_key(
+    tr::now,
+    lt_name,
+    Ui::Text::Bold(name),
+    lt_group,
+    Ui::Text::Bold(group),
+    Ui::Text::RichLangValue)
+
+// GOOD - concise tr:: helpers:
+tr::lng_some_key(
+    tr::now,
+    lt_name,
+    tr::bold(name),
+    lt_group,
+    tr::bold(group),
+    tr::rich)
+```
+
+## Multi-line calls — one argument per line
+
+When a function call doesn't fit on one line, put each argument on its own line. Don't group "logical pairs" on the same line — it creates inconsistent line lengths and makes diffs noisier.
+
+```cpp
+// BAD - pairs of arguments sharing lines:
+tr::lng_some_key(
+    tr::now,
+    lt_name, tr::bold(name),
+    lt_group, tr::bold(group),
+    tr::rich)
+
+// GOOD - one argument per line:
+tr::lng_some_key(
+    tr::now,
+    lt_name,
+    tr::bold(name),
+    lt_group,
+    tr::bold(group),
+    tr::rich)
+
+// Single-line is fine when everything fits:
+auto text = tr::lng_settings_title(tr::now);
+```
+
 ## std::optional access — avoid value()
 
 Do not call `std::optional::value()` because it throws an exception that is not available on older macOS targets. Use `has_value()`, `value_or()`, `operator bool()`, or `operator*` instead.
