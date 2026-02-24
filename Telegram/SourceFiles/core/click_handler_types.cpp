@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/bot_command.h"
 #include "core/application.h"
 #include "core/local_url_handlers.h"
+#include "core/file_utilities.h"
 #include "mainwidget.h"
 #include "main/main_session.h"
 #include "ui/boxes/confirm_box.h"
@@ -18,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/popup_menu.h"
 #include "base/qthelp_regex.h"
 #include "base/qt/qt_key_modifiers.h"
+#include "base/random.h"
 #include "storage/storage_account.h"
 #include "history/history.h"
 #include "history/view/history_view_element.h"
@@ -482,6 +484,58 @@ void FormattedDateClickHandler::onClick(ClickContext context) const {
 			show->showToast(tr::lng_date_copied(tr::now));
 		},
 		&st::menuIconCopy);
+
+	menu->addAction(
+		tr::lng_context_add_to_calendar(tr::now),
+		[date] {
+			const auto start = QDateTime::fromSecsSinceEpoch(
+				date,
+				Qt::UTC);
+			const auto end = QDateTime::fromSecsSinceEpoch(
+				date + 3600,
+				Qt::UTC);
+			const auto now = QDateTime::currentDateTimeUtc();
+			const auto format = u"yyyyMMdd'T'HHmmss'Z'"_q;
+			const auto locale = QLocale();
+			const auto raw = locale.toString(
+				QDateTime::fromSecsSinceEpoch(date),
+				QLocale::LongFormat);
+			auto summary = raw;
+			summary.replace('\\', u"\\\\"_q);
+			summary.replace(';', u"\\;"_q);
+			summary.replace(',', u"\\,"_q);
+			summary.replace('\n', u"\\n"_q);
+			const auto uid = base::RandomValue<uint64>();
+			const auto content = u"BEGIN:VCALENDAR\r\n"
+				"VERSION:2.0\r\n"
+				"PRODID:-//Telegram Desktop//EN\r\n"
+				"BEGIN:VEVENT\r\n"
+				"DTSTART:%1\r\n"
+				"DTEND:%2\r\n"
+				"DTSTAMP:%3\r\n"
+				"UID:telegram-%4-%6@telegram.org\r\n"
+				"SUMMARY:%5\r\n"
+				"END:VEVENT\r\n"
+				"END:VCALENDAR\r\n"_q
+					.arg(start.toString(format))
+					.arg(end.toString(format))
+					.arg(now.toString(format))
+					.arg(date)
+					.arg(summary)
+					.arg(uid, 0, 16);
+			const auto dir = cWorkingDir() + u"tdata/temp"_q;
+			QDir().mkpath(dir);
+			const auto path = u"%1/event_%2.ics"_q
+				.arg(dir)
+				.arg(date);
+			auto file = QFile(path);
+			if (file.open(QIODevice::WriteOnly)) {
+				file.write(content.toUtf8());
+				file.close();
+				File::Launch(path);
+			}
+		},
+		&st::menuIconSchedule);
 
 	const auto itemId = my.itemId;
 	const auto &owner = controller->session().data();

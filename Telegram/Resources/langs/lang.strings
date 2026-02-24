@@ -5573,6 +5573,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_date_relative_in_years#other" = "in {count} years";
 
 "lng_context_copy_date" = "Copy Date";
+"lng_context_add_to_calendar" = "Add to Calendar";
 "lng_context_set_reminder" = "Set a Reminder";
 
 "lng_spellchecker_submenu" = "Spelling";
