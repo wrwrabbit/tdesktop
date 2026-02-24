@@ -1544,7 +1544,8 @@ void Element::refreshMedia(Element *replacing) {
 				this,
 				std::make_unique<LargeEmoji>(this, emoji));
 		}
-	} else if (const auto nfr = item->Get<HistoryServiceNoForwardsRequest>()) {
+	} else if (const auto nfr = item->Get<HistoryServiceNoForwardsRequest>()
+		; nfr && !nfr->expired) {
 		_media = std::make_unique<MediaGeneric>(
 			this,
 			GenerateNoForwardsRequestMedia(this, nfr),

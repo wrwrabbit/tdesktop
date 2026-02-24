@@ -6707,7 +6707,12 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 
 	auto prepareNoForwardsRequest = [this](const MTPDmessageActionNoForwardsRequest &action) {
 		auto result = PreparedServiceText();
-		if (_from->isSelf()) {
+		const auto nfr = Get<HistoryServiceNoForwardsRequest>();
+		if (nfr && nfr->expired) {
+			result.text = tr::lng_action_no_forwards_request_expired(
+				tr::now,
+				tr::marked);
+		} else if (_from->isSelf()) {
 			result.text = tr::lng_action_no_forwards_request_you(
 				tr::now,
 				tr::marked);

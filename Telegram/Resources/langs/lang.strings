@@ -1922,6 +1922,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_action_no_forwards_feature_copying" = "Copying messages";
 "lng_action_no_forwards_accept" = "Accept";
 "lng_action_no_forwards_reject" = "Reject";
+"lng_action_no_forwards_request_expired" = "Sharing enable request has expired.";
 
 "lng_manage_peer_bot_public_link" = "Public Link";
 "lng_manage_peer_bot_public_links" = "Public Links";
