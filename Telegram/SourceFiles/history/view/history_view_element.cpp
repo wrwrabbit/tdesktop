@@ -450,7 +450,7 @@ int KeyboardStyle::minButtonWidth(
 			int(modification.skipped),
 			result.to - modification.position);
 		result.to -= shiftTo;
-		if (modification.position <= result.from) {
+		if (modification.position < result.from) {
 			if (modification.added) {
 				result.from += modification.added;
 			}
@@ -458,6 +458,10 @@ int KeyboardStyle::minButtonWidth(
 				int(modification.skipped),
 				result.from - modification.position);
 			result.from -= shiftFrom;
+		} else if (modification.position == result.from) {
+			if (!modification.skipped) {
+				result.from += modification.added;
+			}
 		}
 	}
 	return result;
@@ -2667,13 +2671,16 @@ SelectedQuote Element::FindSelectedQuote(
 	for (const auto &modification : text.modifications()) {
 		if (modification.position >= selection.to) {
 			break;
-		} else if (modification.position <= selection.from) {
+		} else if (modification.position < selection.from) {
 			modified.from += modification.skipped;
-			if (modification.added
-				&& modification.position < selection.from) {
+			if (modification.added) {
 				modified.from = uint16(std::max(
 					0,
 					int(modified.from) - int(modification.added)));
+			}
+		} else if (modification.position == selection.from) {
+			if (!modification.added) {
+				modified.from += modification.skipped;
 			}
 		}
 		modified.to += modification.skipped;
@@ -2703,6 +2710,7 @@ SelectedQuote Element::FindSelectedQuote(
 		EntityType::StrikeOut,
 		EntityType::Spoiler,
 		EntityType::CustomEmoji,
+		EntityType::FormattedDate,
 	};
 	for (auto i = result.entities.begin(); i != result.entities.end();) {
 		const auto offset = i->offset();

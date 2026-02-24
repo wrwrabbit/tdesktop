@@ -291,7 +291,8 @@ MTPVector<MTPMessageEntity> EntitiesToMTP(
 			&& entity.type() != EntityType::Spoiler
 			&& entity.type() != EntityType::MentionName
 			&& entity.type() != EntityType::CustomUrl
-			&& entity.type() != EntityType::CustomEmoji) {
+			&& entity.type() != EntityType::CustomEmoji
+			&& entity.type() != EntityType::FormattedDate) {
 			continue;
 		}
 
