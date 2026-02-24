@@ -1507,7 +1507,7 @@ void AddSpecialBoxController::showAdmin(
 	if (_additional.canAddOrEditAdmin(user)) {
 		const auto done = crl::guard(this, [=](
 				ChatAdminRightsInfo newRights,
-				const QString &rank) {
+				const std::optional<QString> &rank) {
 			editAdminDone(user, newRights, rank);
 		});
 		const auto fail = crl::guard(this, [=] {
@@ -1524,12 +1524,15 @@ void AddSpecialBoxController::showAdmin(
 void AddSpecialBoxController::editAdminDone(
 		not_null<UserData*> user,
 		ChatAdminRightsInfo rights,
-		const QString &rank) {
+		const std::optional<QString> &rank) {
 	if (_editParticipantBox) {
 		_editParticipantBox->closeBox();
 	}
 
-	_additional.applyAdminLocally(user, rights, rank);
+	_additional.applyAdminLocally(
+		user,
+		rights,
+		rank.value_or(_additional.memberRank(user)));
 	// _adminDoneCallback should call changes().chatAdminUpdated.
 	if (const auto callback = _adminDoneCallback) {
 		callback(user, rights, rank);

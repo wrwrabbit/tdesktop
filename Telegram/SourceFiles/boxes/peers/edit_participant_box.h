@@ -86,7 +86,7 @@ public:
 			Fn<void(
 				ChatAdminRightsInfo,
 				ChatAdminRightsInfo,
-				const QString &rank)> callback) {
+				const std::optional<QString> &rank)> callback) {
 		_saveCallback = std::move(callback);
 	}
 
@@ -112,7 +112,7 @@ private:
 	Fn<void(
 		ChatAdminRightsInfo,
 		ChatAdminRightsInfo,
-		const QString &rank)> _saveCallback;
+		const std::optional<QString> &rank)> _saveCallback;
 
 	base::weak_qptr<Ui::BoxContent> _confirmBox;
 	Ui::Checkbox *_addAsAdmin = nullptr;

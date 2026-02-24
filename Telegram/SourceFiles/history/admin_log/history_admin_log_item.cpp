@@ -852,6 +852,7 @@ void GenerateItems(
 	using LogToggleSignatureProfiles = MTPDchannelAdminLogEventActionToggleSignatureProfiles;
 	using LogParticipantSubExtend = MTPDchannelAdminLogEventActionParticipantSubExtend;
 	using LogToggleAutotranslation = MTPDchannelAdminLogEventActionToggleAutotranslation;
+	using LogParticipantEditRank = MTPDchannelAdminLogEventActionParticipantEditRank;
 
 	const auto session = &history->session();
 	const auto id = event.vid().v;
@@ -2156,6 +2157,81 @@ void GenerateItems(
 		addSimpleServiceMessage(text);
 	};
 
+	const auto createParticipantEditRank = [&](const LogParticipantEditRank &action) {
+		const auto user = history->owner().user(action.vuser_id().v);
+		const auto prevRank = qs(action.vprev_rank());
+		const auto newRank = qs(action.vnew_rank());
+		const auto isSelf = (user == from);
+		const auto text = [&] {
+			if (isSelf) {
+				if (newRank.isEmpty()) {
+					return tr::lng_admin_log_removed_own_rank(
+						tr::now,
+						lt_from,
+						fromLinkText,
+						lt_previous,
+						{ prevRank },
+						tr::marked);
+				} else if (prevRank.isEmpty()) {
+					return tr::lng_admin_log_set_own_rank(
+						tr::now,
+						lt_from,
+						fromLinkText,
+						lt_tag,
+						{ newRank },
+						tr::marked);
+				}
+				return tr::lng_admin_log_changed_own_rank_from(
+					tr::now,
+					lt_from,
+					fromLinkText,
+					lt_previous,
+					{ prevRank },
+					lt_tag,
+					{ newRank },
+					tr::marked);
+			}
+			const auto userLinkText = tr::link(user->name(), QString());
+			if (newRank.isEmpty()) {
+				return tr::lng_admin_log_removed_rank(
+					tr::now,
+					lt_from,
+					fromLinkText,
+					lt_user,
+					userLinkText,
+					lt_previous,
+					{ prevRank },
+					tr::marked);
+			} else if (prevRank.isEmpty()) {
+				return tr::lng_admin_log_set_rank(
+					tr::now,
+					lt_from,
+					fromLinkText,
+					lt_user,
+					userLinkText,
+					lt_tag,
+					{ newRank },
+					tr::marked);
+			}
+			return tr::lng_admin_log_changed_rank_from(
+				tr::now,
+				lt_from,
+				fromLinkText,
+				lt_user,
+				userLinkText,
+				lt_previous,
+				{ prevRank },
+				lt_tag,
+				{ newRank },
+				tr::marked);
+		}();
+		if (isSelf) {
+			addSimpleServiceMessage(text);
+		} else {
+			addServiceMessageWithLink(text, user->createOpenLink());
+		}
+	};
+
 	action.match(
 		createChangeTitle,
 		createChangeAbout,
@@ -2207,7 +2283,8 @@ void GenerateItems(
 		createChangeEmojiStatus,
 		createToggleSignatureProfiles,
 		createParticipantSubExtend,
-		createToggleAutotranslation);
+		createToggleAutotranslation,
+		createParticipantEditRank);
 }
 
 } // namespace AdminLog

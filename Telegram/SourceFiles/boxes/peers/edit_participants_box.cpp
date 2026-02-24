@@ -64,7 +64,9 @@ void RemoveAdmin(
 		Fn<void()> onDone,
 		Fn<void()> onFail) {
 	const auto newRights = MTP_chatAdminRights(MTP_flags(0));
+	using Flag = MTPchannels_editAdmin::Flag;
 	channel->session().api().request(MTPchannels_EditAdmin(
+		MTP_flags(Flag::f_rank),
 		channel->inputChannel(),
 		user->inputUser(),
 		newRights,
@@ -162,17 +164,31 @@ void SaveChannelAdmin(
 		not_null<UserData*> user,
 		ChatAdminRightsInfo oldRights,
 		ChatAdminRightsInfo newRights,
-		const QString &rank,
+		const std::optional<QString> &rank,
 		Fn<void()> onDone,
 		Fn<void()> onFail) {
+	using Flag = MTPchannels_editAdmin::Flag;
+	const auto flags = Flag(0)
+		| (rank.has_value() ? Flag::f_rank : Flag(0));
 	channel->session().api().request(MTPchannels_EditAdmin(
+		MTP_flags(flags),
 		channel->inputChannel(),
 		user->inputUser(),
 		AdminRightsToMTP(newRights),
-		MTP_string(rank)
+		rank ? MTP_string(*rank) : MTPstring()
 	)).done([=](const MTPUpdates &result) {
 		channel->session().api().applyUpdates(result);
-		channel->applyEditAdmin(user, oldRights, newRights, rank);
+		const auto effectiveRank = rank.value_or([&] {
+			if (const auto info = channel->mgInfo.get()) {
+				const auto i = info->memberRanks.find(
+					peerToUser(user->id));
+				if (i != end(info->memberRanks)) {
+					return i->second;
+				}
+			}
+			return QString();
+		}());
+		channel->applyEditAdmin(user, oldRights, newRights, effectiveRank);
 		if (onDone) {
 			onDone();
 		}
@@ -264,18 +280,18 @@ void SaveMemberRank(
 Fn<void(
 	ChatAdminRightsInfo oldRights,
 	ChatAdminRightsInfo newRights,
-	const QString &rank)> SaveAdminCallback(
+	const std::optional<QString> &rank)> SaveAdminCallback(
 		std::shared_ptr<Ui::Show> show,
 		not_null<PeerData*> peer,
 		not_null<UserData*> user,
 		Fn<void(
 			ChatAdminRightsInfo newRights,
-			const QString &rank)> onDone,
+			const std::optional<QString> &rank)> onDone,
 		Fn<void()> onFail) {
 	return [=](
 			ChatAdminRightsInfo oldRights,
 			ChatAdminRightsInfo newRights,
-			const QString &rank) {
+			const std::optional<QString> &rank) {
 		const auto done = [=] { if (onDone) onDone(newRights, rank); };
 		const auto saveForChannel = [=](not_null<ChannelData*> channel) {
 			SaveChannelAdmin(
@@ -293,7 +309,7 @@ Fn<void(
 				SaveChatAdmin(show, chat, user, isAdmin, done, onFail);
 			};
 			if (newRights.flags == chat->defaultAdminRights(user).flags
-				&& rank.isEmpty()) {
+				&& (!rank.has_value() || rank->isEmpty())) {
 				saveChatAdmin(true);
 			} else if (!newRights.flags) {
 				saveChatAdmin(false);
@@ -1121,7 +1137,7 @@ void ParticipantsBoxController::addNewItem() {
 	const auto adminDone = crl::guard(this, [=](
 			not_null<UserData*> user,
 			ChatAdminRightsInfo rights,
-			const QString &rank) {
+			const std::optional<QString> &rank) {
 		editAdminDone(user, rights, rank);
 	});
 	const auto restrictedDone = crl::guard(this, [=](
@@ -1990,7 +2006,7 @@ void ParticipantsBoxController::showAdmin(not_null<UserData*> user) {
 	if (_additional.canAddOrEditAdmin(user)) {
 		const auto done = crl::guard(this, [=](
 				ChatAdminRightsInfo newRights,
-				const QString &rank) {
+				const std::optional<QString> &rank) {
 			editAdminDone(user, newRights, rank);
 		});
 		const auto fail = crl::guard(this, [=] {
@@ -2008,18 +2024,20 @@ void ParticipantsBoxController::showAdmin(not_null<UserData*> user) {
 void ParticipantsBoxController::editAdminDone(
 		not_null<UserData*> user,
 		ChatAdminRightsInfo rights,
-		const QString &rank) {
+		const std::optional<QString> &rank) {
 	_addBox = nullptr;
 	if (_editParticipantBox) {
 		_editParticipantBox->closeBox();
 	}
 
-	_additional.applyAdminLocally(user, rights, rank);
+	const auto effectiveRank = rank.value_or(
+		_additional.memberRank(user));
+	_additional.applyAdminLocally(user, rights, effectiveRank);
 	recomputeTypeFor(user);
 	refreshRows();
 
 	const auto flags = rights.flags;
-	user->session().changes().chatAdminChanged(_peer, user, flags, rank);
+	user->session().changes().chatAdminChanged(_peer, user, flags, effectiveRank);
 }
 
 void ParticipantsBoxController::showRestricted(not_null<UserData*> user) {
@@ -2162,10 +2180,7 @@ void ParticipantsBoxController::removeAdminSure(not_null<UserData*> user) {
 	if (const auto chat = _peer->asChat()) {
 		const auto show = delegate()->peerListUiShow();
 		SaveChatAdmin(show, chat, user, false, crl::guard(this, [=] {
-			editAdminDone(
-				user,
-				ChatAdminRightsInfo(),
-				QString());
+			editAdminDone(user, {}, {});
 		}), nullptr);
 	} else if (const auto channel = _peer->asChannel()) {
 		const auto adminRights = _additional.adminRights(user);
@@ -2174,10 +2189,7 @@ void ParticipantsBoxController::removeAdminSure(not_null<UserData*> user) {
 		}
 		const auto show = delegate()->peerListUiShow();
 		RemoveAdmin(show, channel, user, *adminRights, crl::guard(this, [=] {
-			editAdminDone(
-				user,
-				ChatAdminRightsInfo(),
-				QString());
+			editAdminDone(user, {}, {});
 		}), nullptr);
 	}
 }

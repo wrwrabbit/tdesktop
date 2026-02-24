@@ -32,13 +32,13 @@ class ChatParticipant;
 Fn<void(
 	ChatAdminRightsInfo oldRights,
 	ChatAdminRightsInfo newRights,
-	const QString &rank)> SaveAdminCallback(
+	const std::optional<QString> &rank)> SaveAdminCallback(
 		std::shared_ptr<Ui::Show> show,
 		not_null<PeerData*> peer,
 		not_null<UserData*> user,
 		Fn<void(
 			ChatAdminRightsInfo newRights,
-			const QString &rank)> onDone,
+			const std::optional<QString> &rank)> onDone,
 		Fn<void()> onFail);
 
 Fn<void(
@@ -287,7 +287,7 @@ private:
 	void editAdminDone(
 		not_null<UserData*> user,
 		ChatAdminRightsInfo rights,
-		const QString &rank);
+		const std::optional<QString> &rank);
 	void showRestricted(not_null<UserData*> user);
 	void editRestrictedDone(
 		not_null<PeerData*> participant,

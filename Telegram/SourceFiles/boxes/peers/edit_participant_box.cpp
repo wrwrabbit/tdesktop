@@ -570,7 +570,7 @@ void EditAdminBox::prepare() {
 					if (const auto callback = _saveCallback) {
 						const auto old = _oldRights;
 						const auto confirmed = [=](Fn<void()> close) {
-							callback(old, ChatAdminRightsInfo(), QString());
+							callback(old, {}, {});
 							close();
 						};
 						uiShow()->showBox(
@@ -595,8 +595,8 @@ void EditAdminBox::prepare() {
 				_oldRights,
 				ChatAdminRightsInfo(newFlags),
 				_tagControl
-					? _tagControl->currentRank()
-					: QString());
+					? std::optional<QString>(_tagControl->currentRank())
+					: std::nullopt);
 		};
 		_save = [=] {
 			const auto show = uiShow();
@@ -877,13 +877,28 @@ void EditRestrictedBox::prepare() {
 				const auto savedPeer = peer();
 				const auto done = [=](
 						ChatAdminRightsInfo newRights,
-						const QString &rank) {
+						const std::optional<QString> &rank) {
 					closeBoth();
+					const auto effectiveRank = rank.value_or([&] {
+						const auto ch = savedPeer->asChannel();
+						if (!ch) {
+							return QString();
+						}
+						const auto info = ch->mgInfo.get();
+						if (!info) {
+							return QString();
+						}
+						const auto i = info->memberRanks.find(
+							peerToUser(savedUser->id));
+						return (i != end(info->memberRanks))
+							? i->second
+							: QString();
+					}());
 					savedUser->session().changes().chatAdminChanged(
 						savedPeer,
 						savedUser,
 						newRights.flags,
-						rank);
+						effectiveRank);
 				};
 				const auto fail = closeBoth;
 				adminBox->setSaveCallback(
