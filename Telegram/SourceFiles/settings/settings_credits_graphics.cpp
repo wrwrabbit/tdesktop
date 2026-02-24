@@ -215,7 +215,9 @@ void ToggleStarGiftSaved(
 		if (const auto onstack = done) {
 			onstack(false);
 		}
-		show->showToast(error.type());
+		if (!Ui::ShowGiftErrorToast(show, error)) {
+			show->showToast(error.type());
+		}
 	}).send();
 }
 
@@ -271,7 +273,9 @@ void ConvertStarGift(
 				tr::rich));
 		done(true);
 	}).fail([=](const MTP::Error &error) {
-		show->showToast(error.type());
+		if (!Ui::ShowGiftErrorToast(show, error)) {
+			show->showToast(error.type());
+		}
 		done(false);
 	}).send();
 }

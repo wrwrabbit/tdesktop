@@ -2031,7 +2031,9 @@ void ResolveAndShowUniqueGift(
 		}
 	}).fail([=](const MTP::Error &error) {
 		clear();
-		show->showToast(u"Error: "_q + error.type());
+		if (!Ui::ShowGiftErrorToast(show, error)) {
+			show->showToast(u"Error: "_q + error.type());
+		}
 	}).send();
 }
 
