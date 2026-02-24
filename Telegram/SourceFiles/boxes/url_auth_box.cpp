@@ -207,7 +207,8 @@ void ActivateButton(
 		inputPeer,
 		MTP_int(itemId.msg),
 		MTP_int(buttonId),
-		MTPstring() // #TODO auth url
+		MTPstring(), // #TODO auth url
+		MTPstring() // in_app_origin
 	)).done([=](const MTPUrlAuthResult &result) {
 		const auto button = HistoryMessageMarkupButton::Get(
 			&session->data(),
@@ -262,7 +263,8 @@ void ActivateUrl(
 		MTPInputPeer(),
 		MTPint(), // msg_id
 		MTPint(), // button_id
-		MTP_string(url)
+		MTP_string(url),
+		MTPstring() // in_app_origin
 	)).done([=](const MTPUrlAuthResult &result) {
 		result.match([&](const MTPDurlAuthResultAccepted &data) {
 			UrlClickHandler::Open(qs(data.vurl().value_or_empty()), context);
@@ -494,7 +496,8 @@ void RequestUrl(
 				MTPInputPeer(),
 				MTPint(), // msg_id
 				MTPint(), // button_id
-				MTP_string(url)
+				MTP_string(url),
+				MTPstring() // in_app_origin
 			)).done([=](const MTPUrlAuthResult &result) {
 				result.match([&](const MTPDurlAuthResultRequest &data) {
 					const auto newUserId = data.vuser_id_hint()

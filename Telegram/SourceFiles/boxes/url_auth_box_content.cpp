@@ -53,7 +53,6 @@ void ShowMatchCodesBox(
 	box->setStyle(st::futureOwnerBox);
 
 	const auto content = box->verticalLayout();
-	const auto &buttonStyle = st::defaultLightButton;
 
 	Ui::AddSkip(content);
 	content->add(
