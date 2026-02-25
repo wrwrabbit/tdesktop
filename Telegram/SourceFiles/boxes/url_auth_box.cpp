@@ -51,6 +51,40 @@ struct SwitchAccountResult {
 	Fn<void(UserId)> updateUserIdHint;
 };
 
+[[nodiscard]] std::shared_ptr<Ui::DynamicImage> MakeMatchCodeImage(
+		not_null<Main::Session*> session,
+		const QString &code) {
+	auto emojiLength = 0;
+	const auto emoji = Ui::Emoji::Find(code, &emojiLength);
+	if (!emoji || emojiLength != code.size()) {
+		return nullptr;
+	}
+	const auto makeFor = [&](not_null<Main::Session*> source) {
+		if (const auto sticker = source->emojiStickersPack()
+				.stickerForEmoji(emoji)) {
+			return Ui::MakeEmojiThumbnail(
+				&source->data(),
+				Data::SerializeCustomEmojiId(sticker.document),
+				nullptr,
+				nullptr,
+				1);
+		}
+		return std::shared_ptr<Ui::DynamicImage>();
+	};
+	if (session->isTestMode()) {
+		for (const auto &account : Core::App().domain().orderedAccounts()) {
+			if (!account->sessionExists()
+				|| account->session().isTestMode()) {
+				continue;
+			}
+			if (const auto image = makeFor(&account->session())) {
+				return image;
+			}
+		}
+	}
+	return makeFor(session);
+}
+
 [[nodiscard]] SwitchAccountResult AddAccountsMenu(
 		not_null<Ui::RpWidget*> parent,
 		UserId userIdHint = UserId()) {
@@ -379,10 +413,18 @@ void RequestUrl(
 		not_null<Main::Session*> session,
 		const QString &url,
 		QVariant context) {
+	struct State {
+		base::weak_qptr<Ui::BoxContent> box;
+		AnotherSessionFactory anotherSession = nullptr;
+		QString firstMatchCode;
+		rpl::lifetime boxDeclineLifetime;
+		rpl::lifetime matchCodesBoxDeclineLifetime;
+	};
 	const auto bot = request.is_request_write_access()
 		? session->data().processUser(request.vbot()).get()
 		: nullptr;
 	const auto requestPhone = request.is_request_phone_number();
+	const auto matchCodesFirst = request.is_match_codes_first();
 	const auto domain = qs(request.vdomain());
 	const auto userIdHint = request.vuser_id_hint()
 		? peerToUser(peerFromUser(*request.vuser_id_hint()))
@@ -396,29 +438,28 @@ void RequestUrl(
 		}
 		return result;
 	}();
-	const auto box = std::make_shared<base::weak_qptr<Ui::BoxContent>>();
-	const auto authAccepted = std::make_shared<bool>(false);
-	const auto finishWithUrl = [=](const QString &url, bool accepted) {
-		*authAccepted = accepted;
-		if (*box) {
-			(*box)->closeBox();
+	const auto state = std::make_shared<State>();
+	const auto finishWithUrl = [=](const QString &to, bool accepted) {
+		if (state->box) {
+			state->box->closeBox();
 		}
 
-		if (url.isEmpty() && accepted) {
+		if ((to.isEmpty() && accepted) || (to == url)) {
 		} else {
-			UrlClickHandler::Open(url, context);
+			UrlClickHandler::Open(to, context);
 		}
 	};
-	const auto anotherSessionFactory
-		= std::make_shared<AnotherSessionFactory>(nullptr);
 	const auto resolveSession = [=] {
-		return (*anotherSessionFactory) ? (*anotherSessionFactory)() : session;
+		return state->anotherSession ? state->anotherSession() : session;
+	};
+	const auto requestDecline = [=] {
+		resolveSession()->api().request(MTPmessages_DeclineUrlAuth(
+			MTP_string(url)
+		)).send();
 	};
 	const auto sendRequest = [=](Result result) {
 		if (!result.auth) {
-			resolveSession()->api().request(MTPmessages_DeclineUrlAuth(
-				MTP_string(url)
-			)).send();
+			requestDecline();
 			finishWithUrl(url, false);
 		} else {
 			const auto sharePhone = result.sharePhone;
@@ -483,141 +524,157 @@ void RequestUrl(
 	const auto device = qs(request.vplatform().value_or("Unknown platform"));
 	const auto ip = qs(request.vip().value_or("Unknown IP"));
 	const auto region = qs(request.vregion().value_or("Unknown region"));
-	*box = show->show(Box([=](not_null<Ui::GenericBox*> box) {
-		const auto accountResult = box->lifetime().make_state<
-			SwitchAccountResult>(nullptr);
-		const auto matchCodesShared = box->lifetime().make_state<
-			rpl::variable<QStringList>>(matchCodes);
-		const auto reloadRequest = [=] {
-			using Flag = MTPmessages_RequestUrlAuth::Flag;
-			const auto currentSession = resolveSession();
-			currentSession->api().request(MTPmessages_RequestUrlAuth(
-				MTP_flags(Flag::f_url),
-				MTPInputPeer(),
-				MTPint(), // msg_id
-				MTPint(), // button_id
-				MTP_string(url),
-				MTPstring() // in_app_origin
-			)).done([=](const MTPUrlAuthResult &result) {
-				result.match([&](const MTPDurlAuthResultRequest &data) {
-					const auto newUserId = data.vuser_id_hint()
-						? peerToUser(peerFromUser(*data.vuser_id_hint()))
-						: UserId();
-					accountResult->updateUserIdHint(newUserId);
-					auto newCodes = QStringList();
-					if (const auto codes = data.vmatch_codes()) {
-						for (const auto &code : codes->v) {
-							newCodes.push_back(qs(code));
-						}
-					}
-					*matchCodesShared = newCodes;
-				}, [](const auto &) {});
-			}).send();
-		};
-		const auto callback = [=](Result result) {
-			if (!requestPhone) {
-				return sendRequest(result);
-			}
-			box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> box) {
-				box->setTitle(tr::lng_url_auth_phone_sure_title());
-				const auto confirm = [=](bool confirmed) {
-					return [=](Fn<void()> close) {
-						auto copy = result;
-						copy.sharePhone = confirmed;
-						sendRequest(copy);
-						close();
-					};
-				};
+	const auto showAuthBox = [=] {
+		state->box = show->show(Box([=](not_null<Ui::GenericBox*> box) {
+			const auto accountResult = box->lifetime().make_state<
+				SwitchAccountResult>(nullptr);
+			const auto matchCodesShared = box->lifetime().make_state<
+				rpl::variable<QStringList>>(matchCodes);
+			const auto reloadRequest = [=] {
+				using Flag = MTPmessages_RequestUrlAuth::Flag;
 				const auto currentSession = resolveSession();
-				const auto capitalized = [=](const QString &value) {
-					return value.left(1).toUpper() + value.mid(1).toLower();
-				};
-				using namespace Info::Profile;
-				Ui::ConfirmBox(
-					box,
-					Ui::ConfirmBoxArgs{
-						.text = tr::lng_url_auth_phone_sure_text(
-							lt_domain,
-							rpl::single(tr::bold(capitalized(domain))),
-							lt_phone,
-							PhoneValue(currentSession->user()),
-							tr::rich),
-						.confirmed = confirm(true),
-						.cancelled = confirm(false),
-						.confirmText = tr::lng_allow_bot(),
-						.cancelText = tr::lng_url_auth_phone_sure_deny(),
-					});
-			}));
-		};
-		ShowDetails(
-			box,
-			url,
-			domain,
-			[=](QString code) -> std::shared_ptr<Ui::DynamicImage> {
-				auto emojiLength = 0;
-				const auto emoji = Ui::Emoji::Find(code, &emojiLength);
-				if (!emoji || emojiLength != code.size()) {
-					return nullptr;
-				}
-				const auto makeFor = [&](not_null<Main::Session*> source) {
-					if (const auto sticker = source->emojiStickersPack()
-							.stickerForEmoji(emoji)) {
-						return Ui::MakeEmojiThumbnail(
-							&source->data(),
-							Data::SerializeCustomEmojiId(sticker.document),
-							nullptr,
-							nullptr,
-							1);
-					}
-					return std::shared_ptr<Ui::DynamicImage>();
-				};
-				const auto session = resolveSession();
-				if (session->isTestMode()) {
-					for (const auto &account : Core::App().domain()
-							.orderedAccounts()) {
-						if (!account->sessionExists()
-							|| account->session().isTestMode()) {
-							continue;
+				currentSession->api().request(MTPmessages_RequestUrlAuth(
+					MTP_flags(Flag::f_url),
+					MTPInputPeer(),
+					MTPint(), // msg_id
+					MTPint(), // button_id
+					MTP_string(url),
+					MTPstring() // in_app_origin
+				)).done(crl::guard(box, [=](const MTPUrlAuthResult &result) {
+					result.match([&](const MTPDurlAuthResultRequest &data) {
+						const auto newUserId = data.vuser_id_hint()
+							? peerToUser(peerFromUser(*data.vuser_id_hint()))
+							: UserId();
+						accountResult->updateUserIdHint(newUserId);
+						auto newCodes = QStringList();
+						if (const auto codes = data.vmatch_codes()) {
+							for (const auto &code : codes->v) {
+								newCodes.push_back(qs(code));
+							}
 						}
-						if (const auto image = makeFor(&account->session())) {
-							return image;
-						}
-					}
+						*matchCodesShared = newCodes;
+					}, [](const auto &) {});
+				})).send();
+			};
+			const auto callback = [=](Result result) {
+				state->boxDeclineLifetime.destroy();
+				if (result.matchCode.isEmpty()
+					&& !state->firstMatchCode.isEmpty()) {
+					result.matchCode = state->firstMatchCode;
 				}
-				return makeFor(session);
-			},
-			callback,
-			bot
-				? object_ptr<Ui::UserpicButton>(
-					box->verticalLayout(),
-					bot,
-					st::defaultUserpicButton,
-					Ui::PeerUserpicShape::Forum)
-				: nullptr,
-			bot ? Info::Profile::NameValue(bot) : nullptr,
-			browser,
-			device,
-			ip,
-			region,
-			matchCodesShared->value());
+				if (!requestPhone) {
+					return sendRequest(result);
+				}
+				box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> box) {
+					box->setTitle(tr::lng_url_auth_phone_sure_title());
+					const auto confirm = [=](bool confirmed) {
+						return [=](Fn<void()> close) {
+							auto copy = result;
+							copy.sharePhone = confirmed;
+							sendRequest(copy);
+							close();
+						};
+					};
+					const auto currentSession = resolveSession();
+					const auto capitalized = [=](const QString &v) {
+						return v.left(1).toUpper() + v.mid(1).toLower();
+					};
+					using namespace Info::Profile;
+					Ui::ConfirmBox(
+						box,
+						Ui::ConfirmBoxArgs{
+							.text = tr::lng_url_auth_phone_sure_text(
+								lt_domain,
+								rpl::single(tr::bold(capitalized(domain))),
+								lt_phone,
+								PhoneValue(currentSession->user()),
+								tr::rich),
+							.confirmed = confirm(true),
+							.cancelled = confirm(false),
+							.confirmText = tr::lng_allow_bot(),
+							.cancelText = tr::lng_url_auth_phone_sure_deny(),
+						});
+				}));
+			};
+			ShowDetails(
+				box,
+				url,
+				domain,
+				[=](QString code) -> std::shared_ptr<Ui::DynamicImage> {
+					return MakeMatchCodeImage(resolveSession(), code);
+				},
+				callback,
+				bot
+					? object_ptr<Ui::UserpicButton>(
+						box->verticalLayout(),
+						bot,
+						st::defaultUserpicButton,
+						Ui::PeerUserpicShape::Forum)
+					: nullptr,
+				bot ? Info::Profile::NameValue(bot) : nullptr,
+				browser,
+				device,
+				ip,
+				region,
+				matchCodesFirst
+					? rpl::single(QStringList())
+					: matchCodesShared->value());
 
-		*accountResult = AddAccountsMenu(box->verticalLayout(), userIdHint);
-		box->verticalLayout()->widthValue(
-		) | rpl::on_next([=, w = (*accountResult).widget] {
-			w->moveToRight(st::lineWidth * 4, 0);
-		}, (*accountResult).widget->lifetime());
-		*anotherSessionFactory = (*accountResult).anotherSession;
-		(*accountResult).setOnUserChanged(reloadRequest);
-	}));
-	if (*box) {
-		(*box)->boxClosing() | rpl::on_next([=] {
-			if (!(*authAccepted)) {
-				resolveSession()->api().request(MTPmessages_DeclineUrlAuth(
-					MTP_string(url)
-				)).send();
-			}
-		}, (*box)->lifetime());
+			*accountResult = AddAccountsMenu(
+				box->verticalLayout(),
+				userIdHint);
+			box->verticalLayout()->widthValue(
+			) | rpl::on_next([=, w = (*accountResult).widget] {
+				w->moveToRight(st::lineWidth * 4, 0);
+			}, (*accountResult).widget->lifetime());
+			state->anotherSession = (*accountResult).anotherSession;
+			(*accountResult).setOnUserChanged(reloadRequest);
+		}));
+		state->box->boxClosing() | rpl::on_next([=] {
+			requestDecline();
+		}, state->boxDeclineLifetime);
+	};
+	if (!matchCodesFirst || matchCodes.isEmpty()) {
+		showAuthBox();
+		return;
 	}
+	auto matchCodesBox = base::weak_qptr<Ui::BoxContent>();
+	matchCodesBox = show->show(
+		Box([=](not_null<Ui::GenericBox*> matchBox) {
+			ShowMatchCodesBox(
+				matchBox,
+				[=](QString code) -> std::shared_ptr<Ui::DynamicImage> {
+					return MakeMatchCodeImage(resolveSession(), code);
+				},
+				domain,
+				matchCodes,
+				[=](QString matchCode) {
+					state->matchCodesBoxDeclineLifetime.destroy();
+					resolveSession()->api().request(
+						MTPmessages_CheckUrlAuthMatchCode(
+							MTP_string(url),
+							MTP_string(matchCode))
+					).done([=](const MTPBool &result) {
+						if (!mtpIsTrue(result)) {
+							show->showToast(
+								tr::lng_url_auth_phone_toast_bad_expired(
+									tr::now));
+							return;
+						}
+						state->firstMatchCode = std::move(matchCode);
+						showAuthBox();
+					}).fail([=](const MTP::Error &error) {
+						show->showToast((error.type() == u"URL_EXPIRED"_q)
+							? tr::lng_url_auth_phone_toast_bad_expired(
+								tr::now)
+							: error.type());
+					}).send();
+				});
+		}),
+		Ui::LayerOption::KeepOther);
+	matchCodesBox->boxClosing() | rpl::on_next([=] {
+		requestDecline();
+	}, state->matchCodesBoxDeclineLifetime);
 }
 
 } // namespace UrlAuthBox

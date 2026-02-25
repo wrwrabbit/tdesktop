@@ -43,6 +43,8 @@ void PrepareFullWidthRoundButton(
 	}, button->lifetime());
 }
 
+} // namespace
+
 void ShowMatchCodesBox(
 		not_null<Ui::GenericBox*> box,
 		Fn<std::shared_ptr<Ui::DynamicImage>(QString)> emojiImageFactory,
@@ -50,7 +52,7 @@ void ShowMatchCodesBox(
 		const QStringList &codes,
 		Fn<void(QString)> callback) {
 	box->setWidth(st::boxWidth);
-	box->setStyle(st::futureOwnerBox);
+	box->setStyle(st::urlAuthBox);
 
 	const auto content = box->verticalLayout();
 
@@ -165,8 +167,8 @@ void ShowMatchCodesBox(
 		button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 		button->setFullRadius(true);
 		button->setClickedCallback([=] {
-			box->closeBox();
 			callback(code);
+			box->closeBox();
 		});
 		buttons->add(button);
 	}
@@ -204,8 +206,6 @@ void ShowMatchCodesBox(
 		});
 	}
 }
-
-} // namespace
 
 SwitchableUserpicButton::SwitchableUserpicButton(
 	not_null<Ui::RpWidget*> parent,
@@ -435,7 +435,7 @@ void ShowDetails(
 		const QString &region,
 		rpl::producer<QStringList> matchCodes) {
 	box->setWidth(st::boxWidth);
-	box->setStyle(st::futureOwnerBox);
+	box->setStyle(st::urlAuthBox);
 
 	const auto content = box->verticalLayout();
 
@@ -532,6 +532,7 @@ void ShowDetails(
 		state->matchCodes = codes;
 	}, box->lifetime());
 
+	Ui::AddSkip(content);
 	{
 		const auto &padding = st::boxRowPadding;
 		const auto button = content->add(
@@ -567,6 +568,7 @@ void ShowDetails(
 			}));
 		});
 	}
+	Ui::AddSkip(content);
 	{
 		const auto &padding = st::boxRowPadding;
 		const auto button = content->add(

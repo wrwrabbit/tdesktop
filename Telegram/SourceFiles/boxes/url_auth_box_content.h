@@ -53,6 +53,13 @@ void AddAuthInfoRow(
 	const QString &leftText,
 	const style::icon &icon);
 
+void ShowMatchCodesBox(
+	not_null<Ui::GenericBox*> box,
+	Fn<std::shared_ptr<Ui::DynamicImage>(QString)> emojiImageFactory,
+	const QString &domain,
+	const QStringList &codes,
+	Fn<void(QString)> callback);
+
 void Show(
 	not_null<Ui::GenericBox*> box,
 	const QString &url,

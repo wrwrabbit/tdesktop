@@ -806,6 +806,10 @@ backgroundConfirmCancel: RoundButton(backgroundConfirm) {
 		color: shadowFg;
 	}
 }
+urlAuthBox: Box(defaultBox) {
+	buttonPadding: margins(0px, 0px, 0px, 12px);
+	buttonHeight: 0px;
+}
 urlAuthCheckbox: Checkbox(defaultBoxCheckbox) {
 	width: 240px;
 }
