@@ -485,9 +485,14 @@ void FormattedDateClickHandler::onClick(ClickContext context) const {
 		},
 		&st::menuIconCopy);
 
+	const auto itemId = my.itemId;
+	const auto &owner = controller->session().data();
+	const auto item = owner.message(itemId);
+
+	const auto messageText = item ? item->originalText().text : QString();
 	menu->addAction(
 		tr::lng_context_add_to_calendar(tr::now),
-		[date] {
+		[date, messageText] {
 			const auto start = QDateTime::fromSecsSinceEpoch(
 				date,
 				Qt::UTC);
@@ -505,6 +510,11 @@ void FormattedDateClickHandler::onClick(ClickContext context) const {
 			summary.replace(';', u"\\;"_q);
 			summary.replace(',', u"\\,"_q);
 			summary.replace('\n', u"\\n"_q);
+			auto description = messageText;
+			description.replace('\\', u"\\\\"_q);
+			description.replace(';', u"\\;"_q);
+			description.replace(',', u"\\,"_q);
+			description.replace('\n', u"\\n"_q);
 			const auto uid = base::RandomValue<uint64>();
 			const auto content = u"BEGIN:VCALENDAR\r\n"
 				"VERSION:2.0\r\n"
@@ -513,8 +523,9 @@ void FormattedDateClickHandler::onClick(ClickContext context) const {
 				"DTSTART:%1\r\n"
 				"DTEND:%2\r\n"
 				"DTSTAMP:%3\r\n"
-				"UID:telegram-%4-%6@telegram.org\r\n"
+				"UID:telegram-%4-%7@telegram.org\r\n"
 				"SUMMARY:%5\r\n"
+				"DESCRIPTION:%6\r\n"
 				"END:VEVENT\r\n"
 				"END:VCALENDAR\r\n"_q
 					.arg(start.toString(format))
@@ -522,6 +533,7 @@ void FormattedDateClickHandler::onClick(ClickContext context) const {
 					.arg(now.toString(format))
 					.arg(date)
 					.arg(summary)
+					.arg(description)
 					.arg(uid, 0, 16);
 			const auto dir = cWorkingDir() + u"tdata/temp"_q;
 			QDir().mkpath(dir);
@@ -537,9 +549,6 @@ void FormattedDateClickHandler::onClick(ClickContext context) const {
 		},
 		&st::menuIconSchedule);
 
-	const auto itemId = my.itemId;
-	const auto &owner = controller->session().data();
-	const auto item = owner.message(itemId);
 	const auto canForward = item
 		&& !item->forbidsForward()
 		&& item->history()->peer->allowsForwarding();

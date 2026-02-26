@@ -769,7 +769,7 @@ void EditRestrictedBox::prepare() {
 		this,
 		prepareFlags,
 		disabledMessages,
-		{ .isForum = peer()->isForum() });
+		{ .isForum = peer()->isForum(), .isUserSpecific = true });
 	addControl(std::move(checkboxes), QMargins());
 
 	if (canSave() && peer()->canManageRanks()) {

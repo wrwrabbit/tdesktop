@@ -96,7 +96,9 @@ constexpr auto kDefaultChargeStars = 10;
 		{ Flag::AddParticipants, tr::lng_rights_chat_add_members(tr::now) },
 		{ Flag::CreateTopics, tr::lng_rights_group_add_topics(tr::now) },
 		{ Flag::PinMessages, tr::lng_rights_group_pin(tr::now) },
-		{ Flag::EditRank, tr::lng_rights_group_edit_rank(tr::now) },
+		{ Flag::EditRank, (options.isUserSpecific
+			? tr::lng_rights_group_edit_rank_single
+			: tr::lng_rights_group_edit_rank)(tr::now) },
 		{ Flag::ChangeInfo, tr::lng_rights_group_info(tr::now) },
 	};
 	if (!options.isForum) {

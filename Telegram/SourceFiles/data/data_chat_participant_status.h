@@ -107,6 +107,7 @@ struct AdminRightsSetOptions {
 
 struct RestrictionsSetOptions {
 	bool isForum = false;
+	bool isUserSpecific = false;
 };
 
 [[nodiscard]] std::vector<ChatRestrictions> ListOfRestrictions(

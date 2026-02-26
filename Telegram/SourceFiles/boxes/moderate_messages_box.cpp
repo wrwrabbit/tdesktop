@@ -835,7 +835,7 @@ void CreateModerateMessagesBox(
 				box,
 				prepareFlags,
 				disabledMessages,
-				{ .isForum = peer->isForum() });
+				{ .isForum = peer->isForum(), .isUserSpecific = true });
 			computeRestrictions = getRestrictions;
 			std::move(changes) | rpl::on_next([=] {
 				ban->setChecked(true);

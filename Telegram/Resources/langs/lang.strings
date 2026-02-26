@@ -6165,6 +6165,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_rights_group_topics" = "Manage topics";
 "lng_rights_group_add_topics" = "Create topics";
 "lng_rights_group_edit_rank" = "Edit own tags";
+"lng_rights_group_edit_rank_single" = "Edit own tag";
 "lng_rights_group_manage_calls" = "Manage video chats";
 "lng_rights_group_delete" = "Delete messages";
 "lng_rights_group_anonymous" = "Remain anonymous";
@@ -6481,6 +6482,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_admin_log_admin_invite_link" = "Invite users via link";
 "lng_admin_log_admin_pin_messages" = "Pin messages";
 "lng_admin_log_banned_edit_rank" = "Edit own tags";
+"lng_admin_log_banned_edit_rank_single" = "Edit own tag";
 "lng_admin_log_admin_manage_topics" = "Manage topics";
 "lng_admin_log_admin_create_topics" = "Create topics";
 "lng_admin_log_admin_manage_calls" = "Manage video chats";

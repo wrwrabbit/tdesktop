@@ -313,11 +313,12 @@ TextWithEntities GenerateAdminChangeText(
 
 QString GeneratePermissionsChangeText(
 		ChatRestrictionsInfo newRights,
-		ChatRestrictionsInfo prevRights) {
+		ChatRestrictionsInfo prevRights,
+		bool isUserSpecific = false) {
 	using Flag = ChatRestriction;
 	using Flags = ChatRestrictions;
 
-	static auto phraseMap = std::map<Flags, tr::phrase<>>{
+	auto phraseMap = std::map<Flags, tr::phrase<>>{
 		{ Flag::ViewMessages, tr::lng_admin_log_banned_view_messages },
 		{ Flag::SendOther, tr::lng_admin_log_banned_send_messages },
 		{ Flag::SendPhotos, tr::lng_admin_log_banned_send_photos },
@@ -340,7 +341,9 @@ QString GeneratePermissionsChangeText(
 		{ Flag::AddParticipants, tr::lng_admin_log_admin_invite_users },
 		{ Flag::CreateTopics, tr::lng_admin_log_admin_create_topics },
 		{ Flag::PinMessages, tr::lng_admin_log_admin_pin_messages },
-		{ Flag::EditRank, tr::lng_admin_log_banned_edit_rank },
+		{ Flag::EditRank, isUserSpecific
+			? tr::lng_admin_log_banned_edit_rank_single
+			: tr::lng_admin_log_banned_edit_rank },
 	};
 	return CollectChanges(phraseMap, prevRights.flags, newRights.flags);
 }
@@ -397,7 +400,10 @@ TextWithEntities GeneratePermissionsChangeText(
 		lt_until,
 		TextWithEntities { untilText },
 		tr::marked);
-	const auto changes = GeneratePermissionsChangeText(newRights, prevRights);
+	const auto changes = GeneratePermissionsChangeText(
+		newRights,
+		prevRights,
+		true);
 	if (!changes.isEmpty()) {
 		result.text.append('\n' + changes);
 	}
