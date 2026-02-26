@@ -897,6 +897,11 @@ pollResultsShowMore: SettingsButton(defaultSettingsButton) {
 
 	ripple: defaultRippleAnimation;
 }
+pollResultsVoteTimeFont: font(fsize);
+pollResultsVoteTimeDateFont: font(fsize);
+pollResultsVoteTimeRightSkip: 16px;
+pollResultsVoteTimeLeftSkip: 8px;
+pollResultsVoteTimeGap: 2px;
 
 inviteViaLinkButton: SettingsButton(defaultSettingsButton) {
 	textFg: lightButtonFg;
