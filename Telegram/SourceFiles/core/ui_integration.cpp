@@ -528,6 +528,10 @@ QString UiIntegration::phraseFormattingSpoiler() {
 	return tr::lng_menu_formatting_spoiler(tr::now);
 }
 
+QString UiIntegration::phraseFormattingDate() {
+	return tr::lng_menu_formatting_date(tr::now);
+}
+
 QString UiIntegration::phraseButtonOk() {
 	return tr::lng_box_ok(tr::now);
 }

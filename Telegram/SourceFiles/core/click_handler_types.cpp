@@ -578,7 +578,7 @@ void FormattedDateClickHandler::onClick(ClickContext context) const {
 							action);
 					}));
 			},
-			&st::menuIconSchedule);
+			&st::menuIconNotifications);
 	}
 
 	menu->popup(QCursor::pos());
