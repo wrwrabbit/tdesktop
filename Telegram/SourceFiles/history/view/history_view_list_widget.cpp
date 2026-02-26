@@ -2600,14 +2600,15 @@ TextForMimeData ListWidget::getSelectedText() const {
 	const auto wrapItem = [&](
 			not_null<HistoryItem*> item,
 			TextForMimeData &&unwrapped) {
-		auto time = QString(", [%1]\n").arg(
+		auto time = QString("[%1] ").arg(
 			QLocale().toString(ItemDateTime(item), QLocale::ShortFormat));
 		auto part = TextForMimeData();
-		auto size = item->author()->name().size()
-			+ time.size()
+		auto size = time.size()
+			+ item->author()->name().size()
+			+ 2
 			+ unwrapped.expanded.size();
 		part.reserve(size);
-		part.append(item->author()->name()).append(time);
+		part.append(time).append(item->author()->name()).append(u": "_q);
 		part.append(std::move(unwrapped));
 		texts.emplace_back(std::move(item), std::move(part));
 		fullSize += size;
@@ -2645,7 +2646,7 @@ TextForMimeData ListWidget::getSelectedText() const {
 	});
 
 	auto result = TextForMimeData();
-	auto sep = u"\n\n"_q;
+	auto sep = u"\n"_q;
 	result.reserve(fullSize + (texts.size() - 1) * sep.size());
 	for (auto i = begin(texts), e = end(texts); i != e;) {
 		result.append(std::move(i->second));
