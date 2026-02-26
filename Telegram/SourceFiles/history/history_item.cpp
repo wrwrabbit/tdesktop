@@ -2162,6 +2162,8 @@ void HistoryItem::setStoryFields(not_null<Data::Story*> story) {
 }
 
 void HistoryItem::applyEdition(const MTPDmessageService &message) {
+	const auto wasNfr = Get<HistoryServiceNoForwardsRequest>();
+	const auto wasActionTaken = wasNfr && wasNfr->actionTaken;
 	const auto wasSublist = savedSublist();
 	if (message.vaction().type() == mtpc_messageActionHistoryClear) {
 		const auto wasGrouped = history()->owner().groups().isGrouped(this);
@@ -2217,6 +2219,9 @@ void HistoryItem::applyEdition(const MTPDmessageService &message) {
 		_flags &= ~MessageFlag::DisplayFromChecked;
 
 		updateReactions(message.vreactions());
+	}
+	if (const auto nowNfr = Get<HistoryServiceNoForwardsRequest>()) {
+		nowNfr->actionTaken = wasActionTaken;
 	}
 	const auto nowSublist = savedSublist();
 	if (wasSublist && nowSublist != wasSublist) {
@@ -4947,6 +4952,8 @@ void HistoryItem::createServiceFromMtp(const MTPDmessageService &message) {
 			? SuggestRefundType::Expired
 			: SuggestRefundType::User;
 		finish->price = CreditsAmountFromTL(data.vprice());
+	} else if (type == mtpc_messageActionNoForwardsToggle) {
+		AddComponents(HistoryServiceNoForwardsToggle::Bit());
 	} else if (type == mtpc_messageActionNoForwardsRequest) {
 		const auto &data = action.c_messageActionNoForwardsRequest();
 		const auto expired = data.is_expired();
@@ -6708,7 +6715,7 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 	auto prepareNoForwardsRequest = [this](const MTPDmessageActionNoForwardsRequest &action) {
 		auto result = PreparedServiceText();
 		const auto nfr = Get<HistoryServiceNoForwardsRequest>();
-		if (nfr && nfr->expired) {
+		if (nfr && nfr->expired && !nfr->actionTaken) {
 			result.text = tr::lng_action_no_forwards_request_expired(
 				tr::now,
 				tr::marked);

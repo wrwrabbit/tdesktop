@@ -1561,6 +1561,19 @@ void History::addItemToBlock(not_null<HistoryItem*> item) {
 	const auto view = block->messages.back().get();
 	view->attachToBlock(block, block->messages.size() - 1);
 
+	if (item->Has<HistoryServiceNoForwardsToggle>()) {
+		if (const auto prev = view->previousInBlocks()) {
+			if (const auto nfr = prev->data()->Get<HistoryServiceNoForwardsRequest>()) {
+				if (!nfr->actionTaken) {
+					nfr->actionTaken = true;
+					if (nfr->expired) {
+						owner().requestItemViewRefresh(prev->data());
+					}
+				}
+			}
+		}
+	}
+
 	if (isBuildingFrontBlock() && _buildingFrontBlock->expectedItemsCount > 0) {
 		--_buildingFrontBlock->expectedItemsCount;
 	}
@@ -2574,6 +2587,18 @@ void History::finishBuildingFrontBlock() {
 			// we've added a new front block, so previous item for
 			// the old first item of a first block was changed
 			first->previousInBlocksChanged();
+
+			if (first->data()->Has<HistoryServiceNoForwardsToggle>()) {
+				const auto last = block->messages.back()->data();
+				if (const auto nfr = last->Get<HistoryServiceNoForwardsRequest>()) {
+					if (!nfr->actionTaken) {
+						nfr->actionTaken = true;
+						if (nfr->expired) {
+							owner().requestItemViewRefresh(last);
+						}
+					}
+				}
+			}
 		} else {
 			block->messages.back()->nextInBlocksRemoved();
 		}

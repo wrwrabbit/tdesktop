@@ -744,6 +744,11 @@ struct HistoryServiceNoForwardsRequest
 	TimeId expiresAt = 0;
 	mtpRequestId requestId = 0;
 	bool expired = false;
+	bool actionTaken = false;
+};
+
+struct HistoryServiceNoForwardsToggle
+: RuntimeComponent<HistoryServiceNoForwardsToggle, HistoryItem> {
 };
 
 struct HistoryServiceGameScore
