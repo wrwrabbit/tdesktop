@@ -103,6 +103,62 @@ void SearchByHashtag(ClickContext context, const QString &tag) {
 			: Dialogs::Key());
 }
 
+void ExportToCalendar(int32 date, const QString &messageText) {
+	const auto start = QDateTime::fromSecsSinceEpoch(
+		date,
+		Qt::UTC);
+	const auto end = QDateTime::fromSecsSinceEpoch(
+		date + 3600,
+		Qt::UTC);
+	const auto now = QDateTime::currentDateTimeUtc();
+	const auto format = u"yyyyMMdd'T'HHmmss'Z'"_q;
+	const auto locale = QLocale();
+	const auto raw = locale.toString(
+		QDateTime::fromSecsSinceEpoch(date),
+		QLocale::LongFormat);
+	auto summary = raw;
+	summary.replace('\\', u"\\\\"_q);
+	summary.replace(';', u"\\;"_q);
+	summary.replace(',', u"\\,"_q);
+	summary.replace('\n', u"\\n"_q);
+	auto description = messageText;
+	description.replace('\\', u"\\\\"_q);
+	description.replace(';', u"\\;"_q);
+	description.replace(',', u"\\,"_q);
+	description.replace('\n', u"\\n"_q);
+	const auto uid = base::RandomValue<uint64>();
+	const auto content = u"BEGIN:VCALENDAR\r\n"
+		"VERSION:2.0\r\n"
+		"PRODID:-//Telegram Desktop//EN\r\n"
+		"BEGIN:VEVENT\r\n"
+		"DTSTART:%1\r\n"
+		"DTEND:%2\r\n"
+		"DTSTAMP:%3\r\n"
+		"UID:telegram-%4-%7@telegram.org\r\n"
+		"SUMMARY:%5\r\n"
+		"DESCRIPTION:%6\r\n"
+		"END:VEVENT\r\n"
+		"END:VCALENDAR\r\n"_q
+			.arg(start.toString(format))
+			.arg(end.toString(format))
+			.arg(now.toString(format))
+			.arg(date)
+			.arg(summary)
+			.arg(description)
+			.arg(uid, 0, 16);
+	const auto dir = cWorkingDir() + u"tdata/temp"_q;
+	QDir().mkpath(dir);
+	const auto path = u"%1/event_%2.ics"_q
+		.arg(dir)
+		.arg(date);
+	auto file = QFile(path);
+	if (file.open(QIODevice::WriteOnly)) {
+		file.write(content.toUtf8());
+		file.close();
+		File::Launch(path);
+	}
+}
+
 } // namespace
 
 bool UrlRequiresConfirmation(const QUrl &url) {
@@ -492,61 +548,7 @@ void FormattedDateClickHandler::onClick(ClickContext context) const {
 	const auto messageText = item ? item->originalText().text : QString();
 	menu->addAction(
 		tr::lng_context_add_to_calendar(tr::now),
-		[date, messageText] {
-			const auto start = QDateTime::fromSecsSinceEpoch(
-				date,
-				Qt::UTC);
-			const auto end = QDateTime::fromSecsSinceEpoch(
-				date + 3600,
-				Qt::UTC);
-			const auto now = QDateTime::currentDateTimeUtc();
-			const auto format = u"yyyyMMdd'T'HHmmss'Z'"_q;
-			const auto locale = QLocale();
-			const auto raw = locale.toString(
-				QDateTime::fromSecsSinceEpoch(date),
-				QLocale::LongFormat);
-			auto summary = raw;
-			summary.replace('\\', u"\\\\"_q);
-			summary.replace(';', u"\\;"_q);
-			summary.replace(',', u"\\,"_q);
-			summary.replace('\n', u"\\n"_q);
-			auto description = messageText;
-			description.replace('\\', u"\\\\"_q);
-			description.replace(';', u"\\;"_q);
-			description.replace(',', u"\\,"_q);
-			description.replace('\n', u"\\n"_q);
-			const auto uid = base::RandomValue<uint64>();
-			const auto content = u"BEGIN:VCALENDAR\r\n"
-				"VERSION:2.0\r\n"
-				"PRODID:-//Telegram Desktop//EN\r\n"
-				"BEGIN:VEVENT\r\n"
-				"DTSTART:%1\r\n"
-				"DTEND:%2\r\n"
-				"DTSTAMP:%3\r\n"
-				"UID:telegram-%4-%7@telegram.org\r\n"
-				"SUMMARY:%5\r\n"
-				"DESCRIPTION:%6\r\n"
-				"END:VEVENT\r\n"
-				"END:VCALENDAR\r\n"_q
-					.arg(start.toString(format))
-					.arg(end.toString(format))
-					.arg(now.toString(format))
-					.arg(date)
-					.arg(summary)
-					.arg(description)
-					.arg(uid, 0, 16);
-			const auto dir = cWorkingDir() + u"tdata/temp"_q;
-			QDir().mkpath(dir);
-			const auto path = u"%1/event_%2.ics"_q
-				.arg(dir)
-				.arg(date);
-			auto file = QFile(path);
-			if (file.open(QIODevice::WriteOnly)) {
-				file.write(content.toUtf8());
-				file.close();
-				File::Launch(path);
-			}
-		},
+		[date, messageText] { ExportToCalendar(date, messageText); },
 		&st::menuIconSchedule);
 
 	const auto canForward = item
