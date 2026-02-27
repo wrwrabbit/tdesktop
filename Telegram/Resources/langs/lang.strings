@@ -2418,7 +2418,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_action_gift_premium_about" = "Subscription for exclusive Telegram features.";
 "lng_action_gift_refunded" = "This gift was downgraded because a request to refund the payment related to this gift was made, and the money was returned.";
 "lng_action_gift_got_ton" = "Use TON to suggest posts to channels.";
-"lng_action_gift_offer" = "{user} offered you {cost} for {name}.";
+"lng_action_gift_offer_incoming" = "An offer to buy this gift for {amount}.";
 "lng_action_gift_offer_you" = "You offered {cost} for {name}.";
 "lng_action_gift_offer_state_expires" = "This offer expires in {time}.";
 "lng_action_gift_offer_time_large" = "{hours} h";
