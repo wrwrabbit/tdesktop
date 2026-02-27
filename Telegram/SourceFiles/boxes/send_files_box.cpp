@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/call_delayed.h"
 #include "boxes/premium_limits_box.h"
 #include "boxes/premium_preview_box.h"
+#include "boxes/send_gif_with_caption_box.h"
 #include "boxes/send_credits_box.h"
 #include "ui/effects/scroll_content_shadow.h"
 #include "ui/widgets/fields/number_input.h"
@@ -57,6 +58,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/stickers/data_stickers.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "window/window_session_controller.h"
+#include "window/window_controller.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "styles/style_boxes.h"
@@ -154,6 +156,58 @@ void RenameFileBox(
 		if (const auto strong = weak.get()) {
 			strong->closeBox();
 		}
+	};
+	field->submits() | rpl::on_next([=] {
+		save();
+	}, box->lifetime());
+	box->addButton(tr::lng_settings_save(), save);
+	box->addButton(tr::lng_cancel(), [=] {
+		box->closeBox();
+	});
+}
+
+void EditFileCaptionBox(
+		not_null<Ui::GenericBox*> box,
+		const style::ComposeControls &st,
+		PeerData *captionToPeer,
+		TextWithTags currentCaption,
+		Fn<bool(TextWithTags)> apply) {
+	box->setTitle(tr::lng_context_upload_edit_caption());
+	const auto wrap = box->addRow(
+		object_ptr<Ui::RpWidget>(box),
+		st::boxRowPadding);
+	const auto field = Ui::CreateChild<Ui::InputField>(
+		wrap,
+		st.files.caption,
+		Ui::InputField::Mode::MultiLine,
+		tr::lng_photo_caption());
+	field->setMaxLength(kMaxMessageLength);
+	field->setSubmitSettings(Core::App().settings().sendSubmitWay());
+	Ui::ResizeFitChild(wrap, field);
+	if (const auto window = Core::App().findWindow(box)) {
+		const auto controller = window->sessionController();
+		Ui::SetupCaptionFieldInBox(
+			box,
+			controller,
+			field,
+			captionToPeer,
+			[=](not_null<DocumentData*> emoji) {
+				return captionToPeer
+					&& Data::AllowEmojiWithoutPremium(captionToPeer, emoji);
+			},
+			PremiumFeature::EmojiStatus);
+	}
+	field->setTextWithTags(std::move(currentCaption));
+
+	box->setFocusCallback([=] {
+		field->setFocusFast();
+	});
+	const auto save = [=] {
+		const auto text = field->getTextWithAppliedMarkdown();
+		if (!apply(text)) {
+			return;
+		}
+		box->closeBox();
 	};
 	field->submits() | rpl::on_next([=] {
 		save();
@@ -1449,23 +1503,80 @@ void SendFilesBox::pushBlock(int from, int till) {
 			if (from >= till || from >= _list.files.size()) {
 				return base::EventFilterResult::Continue;
 			}
-			const auto fileIndex = from;
+			auto fileIndex = from;
+			if (const auto album = dynamic_cast<Ui::AlbumPreview*>(widget)) {
+				const auto indexInBlock = album->indexFromPoint(mouse->pos());
+				if (indexInBlock < 0) {
+					return base::EventFilterResult::Continue;
+				}
+				fileIndex += indexInBlock;
+			}
+			if (fileIndex >= till || fileIndex >= _list.files.size()) {
+				return base::EventFilterResult::Continue;
+			}
 			state->menu = base::make_unique_q<Ui::PopupMenu>(
 				widget,
 				_st.tabbed.menu);
-			state->menu->addAction(tr::lng_rename_file(tr::now), [=] {
-				auto &file = _list.files[fileIndex];
-				_show->show(Box(RenameFileBox, file.displayName, [=](
-						QString newName) {
-					const auto displayName = std::move(newName);
-					_list.files[fileIndex].displayName = displayName;
-					if (!setDisplayNameInSingleFilePreview(
-							fileIndex,
-							displayName)) {
-						refreshAllAfterChanges(from);
-					}
-				}));
-			}, &st::menuIconEdit);
+			const auto &file = _list.files[fileIndex];
+			const auto canEditFileData
+				= !_sendWay.current().sendImagesAsPhotos()
+					|| (file.type != Ui::PreparedFile::Type::Photo
+						&& file.type != Ui::PreparedFile::Type::Video);
+			if (canEditFileData) {
+				state->menu->addAction(tr::lng_rename_file(tr::now), [=] {
+					auto &file = _list.files[fileIndex];
+					_show->show(Box(RenameFileBox, file.displayName, [=](
+							QString newName) {
+						const auto displayName = std::move(newName);
+						_list.files[fileIndex].displayName = displayName;
+						if (!setDisplayNameInSingleFilePreview(
+								fileIndex,
+								displayName)) {
+							refreshAllAfterChanges(from);
+						}
+					}));
+				}, &st::menuIconEdit);
+				state->menu->addAction(
+					tr::lng_context_upload_edit_caption(tr::now),
+					[=] {
+						auto &file = _list.files[fileIndex];
+						_show->show(Box(
+							EditFileCaptionBox,
+							_st,
+							_captionToPeer,
+							file.caption,
+							[=](TextWithTags text) {
+								if (!validateSingleCaptionLength(text.text)) {
+									return false;
+								}
+								auto updated = text;
+								const auto syncMainCaption = (fileIndex == 0)
+									&& _caption
+									&& !_caption->isHidden()
+									&& mainCaptionWillBeAttached();
+								if (fileIndex == 0) {
+									_mainCaptionAttachedToFirstFile = false;
+									_firstFileCaptionBackup = text;
+								}
+								_list.files[fileIndex].caption
+									= std::move(text);
+								if (syncMainCaption) {
+									_caption->setTextWithTags(updated);
+								}
+								if (!setCaptionInSingleFilePreview(
+										fileIndex,
+										updated)) {
+									refreshAllAfterChanges(from);
+								}
+								return true;
+							}));
+					},
+					&st::menuIconCaptionShow);
+			}
+			if (state->menu->empty()) {
+				state->menu = nullptr;
+				return base::EventFilterResult::Continue;
+			}
 			state->menu->popup(mouse->globalPos());
 			return base::EventFilterResult::Cancel;
 		}
