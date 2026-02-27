@@ -290,6 +290,7 @@ SendFilesBox::Block::Block(
 	not_null<std::vector<Ui::PreparedFile>*> items,
 	int from,
 	int till,
+	const Ui::Text::MarkedContext &captionContext,
 	Fn<bool()> gifPaused,
 	SendFilesWay way,
 	Fn<bool(const Ui::PreparedFile &, Ui::AttachActionType)> actionAllowed)
@@ -309,6 +310,7 @@ SendFilesBox::Block::Block(
 			parent.get(),
 			st,
 			my,
+			captionContext,
 			way,
 			[=](int index, Ui::AttachActionType type) {
 				return actionAllowed((*_items)[from + index], type);
@@ -332,7 +334,8 @@ SendFilesBox::Block::Block(
 			_preview.reset(Ui::CreateChild<Ui::SingleFilePreview>(
 				parent.get(),
 				st,
-				first));
+				first,
+				captionContext));
 		}
 	}
 	_preview->show();
@@ -527,6 +530,22 @@ bool SendFilesBox::Block::setSingleFileDisplayName(
 	}
 	const auto single = static_cast<Ui::SingleFilePreview*>(_preview.get());
 	single->setDisplayName(displayName);
+	return true;
+}
+
+bool SendFilesBox::Block::setSingleFileCaption(
+		int index,
+		const TextWithTags &caption) {
+	if (_isSingleMedia || index < _from || index >= _till) {
+		return false;
+	}
+	if (_isAlbum) {
+		const auto album = static_cast<Ui::AlbumPreview*>(_preview.get());
+		album->setCaption(index - _from, caption);
+		return true;
+	}
+	const auto single = static_cast<Ui::SingleFilePreview*>(_preview.get());
+	single->setCaption(caption);
 	return true;
 }
 
@@ -1138,12 +1157,16 @@ void SendFilesBox::pushBlock(int from, int till) {
 	const auto gifPaused = [show = _show] {
 		return show->paused(Window::GifPauseReason::Layer);
 	};
+	const auto captionContext = Core::TextContext({
+		.session = &_show->session(),
+	});
 	_blocks.emplace_back(
 		_inner.data(),
 		_st,
 		&_list.files,
 		from,
 		till,
+		captionContext,
 		gifPaused,
 		_sendWay.current(),
 		[=](const Ui::PreparedFile &file, Ui::AttachActionType type) {

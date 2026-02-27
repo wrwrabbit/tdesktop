@@ -16,6 +16,10 @@ namespace style {
 struct ComposeControls;
 } // namespace style
 
+namespace Ui::Text {
+struct MarkedContext;
+} // namespace Ui::Text
+
 namespace Window {
 class SessionController;
 } // namespace Window
@@ -153,6 +157,7 @@ private:
 			not_null<std::vector<Ui::PreparedFile>*> items,
 			int from,
 			int till,
+			const Ui::Text::MarkedContext &captionContext,
 			Fn<bool()> gifPaused,
 			Ui::SendFilesWay way,
 			Fn<bool(
@@ -179,6 +184,9 @@ private:
 		[[nodiscard]] QImage generatePriceTagBackground() const;
 		[[nodiscard]] bool setSingleFileDisplayName(
 			const QString &displayName);
+		[[nodiscard]] bool setSingleFileCaption(
+			int index,
+			const TextWithTags &caption);
 
 	private:
 		base::unique_qptr<Ui::RpWidget> _preview;

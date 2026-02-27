@@ -534,6 +534,8 @@ attachPreviewThumbLayout: HistoryFileLayout {
 	thumbSize: 64px;
 	thumbSkip: 10px;
 }
+attachPreviewCaptionTopOffset: 6px;
+attachPreviewCaptionRepaintMargin: margins(0px, 2px, 0px, 2px);
 
 msgFileMinWidth: 268px;
 msgFileTopMinus: 6px;

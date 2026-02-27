@@ -80,6 +80,7 @@ struct PreparedFile {
 
 	QString path;
 	QString displayName;
+	TextWithTags caption;
 	QByteArray content;
 	int64 size = 0;
 	std::unique_ptr<PreparedFileInformation> information;
