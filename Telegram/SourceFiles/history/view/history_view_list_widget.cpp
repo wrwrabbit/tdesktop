@@ -3713,6 +3713,20 @@ void ListWidget::mouseActionFinish(
 		}
 	} else if (needTextSelectionClear) {
 		clearTextSelection();
+	} else if (simpleSelectionChange
+		&& _mouseCursorState == CursorState::Date
+		&& !hasSelectRestriction()) {
+		if (const auto item = session().data().message(pressState.itemId)) {
+			if (_delegate->listIsItemGoodForSelection(item)) {
+				clearTextSelection();
+				changeSelectionAsGroup(
+					_selected,
+					item,
+					SelectAction::Select);
+				pushSelectedItems();
+				update();
+			}
+		}
 	} else if (_mouseAction == MouseAction::Selecting) {
 		if (!_dragSelected.empty()) {
 			applyDragSelection();

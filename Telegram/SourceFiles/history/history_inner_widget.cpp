@@ -2217,6 +2217,15 @@ void HistoryInner::mouseActionFinish(
 				_selected.emplace(_dragStateItem, FullSelection);
 				repaintItem(_mouseActionItem);
 			}
+		} else if (_mouseCursorState == CursorState::Date
+			&& !hasSelectRestriction()
+			&& _dragStateItem->isRegular()
+			&& !_dragStateItem->isService()) {
+			changeSelectionAsGroup(
+				&_selected,
+				_dragStateItem,
+				SelectAction::Select);
+			repaintItem(_mouseActionItem);
 		} else {
 			_selected.clear();
 			update();
