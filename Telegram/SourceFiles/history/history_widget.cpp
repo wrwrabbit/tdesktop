@@ -932,6 +932,7 @@ HistoryWidget::HistoryWidget(
 		}
 		if (flags & PeerUpdateFlag::FullInfo) {
 			fullInfoUpdated();
+			updateSendButtonType();
 			if (_peer->starsPerMessageChecked()) {
 				session().credits().load();
 			} else if (const auto channel = _peer->asChannel()) {
@@ -5613,6 +5614,18 @@ void HistoryWidget::updateSendButtonType() {
 	using Type = Ui::SendButton::Type;
 
 	const auto type = computeSendButtonType();
+	const auto forbidden = [&] {
+		if (type != Type::Record && type != Type::Round) {
+			return false;
+		}
+		if (!_peer) {
+			return false;
+		}
+		const auto restriction = (type == Type::Record)
+			? ChatRestriction::SendVoiceMessages
+			: ChatRestriction::SendVideoMessages;
+		return !!Data::RestrictionError(_peer, restriction);
+	}();
 	// This logic is duplicated in ChatWidget.
 	const auto disabledBySlowmode = _peer
 		&& _peer->slowmodeApplied()
@@ -5636,6 +5649,7 @@ void HistoryWidget::updateSendButtonType() {
 		.type = (delay > 0) ? Type::Slowmode : type,
 		.slowmodeDelay = delay,
 		.starsToSend = stars,
+		.forbidden = forbidden,
 	});
 	_send->setDisabled(disabledBySlowmode
 		&& (type == Type::Send
