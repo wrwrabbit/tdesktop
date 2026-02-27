@@ -256,6 +256,9 @@ private:
 	[[nodiscard]] bool setDisplayNameInSingleFilePreview(
 		int fileIndex,
 		const QString &displayName);
+	[[nodiscard]] bool setCaptionInSingleFilePreview(
+		int fileIndex,
+		const TextWithTags &caption);
 
 	void enqueueNextPrepare();
 	void addPreparedAsyncFile(Ui::PreparedFile &&file);
@@ -264,6 +267,9 @@ private:
 	void refreshMessagesCount();
 
 	void requestToTakeTextWithTags() const;
+	bool validateSingleCaptionLength(const QString &text) const;
+	bool mainCaptionWillBeAttached() const;
+	void applyMainCaptionToFirstFile();
 
 	[[nodiscard]] Fn<MenuDetails()> prepareSendMenuDetails(
 		const SendFilesBoxDescriptor &descriptor);
@@ -294,6 +300,8 @@ private:
 	QImage _priceTagBg;
 	bool _confirmed = false;
 	bool _invertCaption = false;
+	bool _mainCaptionAttachedToFirstFile = false;
+	std::optional<TextWithTags> _firstFileCaptionBackup;
 
 	object_ptr<Ui::InputField> _caption = { nullptr };
 	std::unique_ptr<ChatHelpers::FieldAutocomplete> _autocomplete;

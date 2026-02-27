@@ -3838,7 +3838,8 @@ void ApiWrap::sendFiles(
 		TextWithTags &&caption,
 		std::shared_ptr<SendingAlbum> album,
 		const SendAction &action) {
-	const auto haveCaption = !caption.text.isEmpty();
+	auto sharedCaption = std::move(caption);
+	const auto haveCaption = !sharedCaption.text.isEmpty();
 	const auto captionAttached = !haveCaption
 		? false
 		: (list.files.size() == 1)
@@ -3856,10 +3857,12 @@ void ApiWrap::sendFiles(
 			false);
 	if (haveCaption && !captionAttached) {
 		auto message = MessageToSend(action);
-		message.textWithTags = base::take(caption);
+		message.textWithTags = base::take(sharedCaption);
 		message.action.clearDraft = false;
 		sendMessage(std::move(message));
 	}
+	auto attachSharedCaption = haveCaption && captionAttached;
+	auto sharedCaptionConsumed = false;
 
 	const auto to = FileLoadTaskOptions(action);
 	if (album) {
@@ -3868,6 +3871,13 @@ void ApiWrap::sendFiles(
 	auto tasks = std::vector<std::unique_ptr<Task>>();
 	tasks.reserve(list.files.size());
 	for (auto &file : list.files) {
+		auto fileCaption = std::move(file.caption);
+		if (attachSharedCaption && !sharedCaptionConsumed) {
+			sharedCaptionConsumed = true;
+			if (fileCaption.text.isEmpty()) {
+				fileCaption = base::take(sharedCaption);
+			}
+		}
 		const auto uploadWithType = !album
 			? type
 			: (file.type == Ui::PreparedFile::Type::Photo
@@ -3899,14 +3909,13 @@ void ApiWrap::sendFiles(
 				: nullptr),
 			.type = uploadWithType,
 			.to = to,
-			.caption = caption,
+			.caption = std::move(fileCaption),
 			.spoiler = file.spoiler,
 			.album = album,
 			.forceFile = forceFile,
 			.idOverride = 0,
 			.displayName = file.displayName,
 		}));
-		caption = TextWithTags();
 	}
 	if (album) {
 		_sendingAlbums.emplace(album->groupId, album);

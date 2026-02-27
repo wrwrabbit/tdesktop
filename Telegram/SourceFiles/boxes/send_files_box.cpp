@@ -781,6 +781,65 @@ bool SendFilesBox::setDisplayNameInSingleFilePreview(
 	return false;
 }
 
+bool SendFilesBox::setCaptionInSingleFilePreview(
+		int fileIndex,
+		const TextWithTags &caption) {
+	for (auto &block : _blocks) {
+		if (fileIndex < block.fromIndex() || fileIndex >= block.tillIndex()) {
+			continue;
+		}
+		return block.setSingleFileCaption(fileIndex, caption);
+	}
+	return false;
+}
+
+bool SendFilesBox::mainCaptionWillBeAttached() const {
+	const auto way = _sendWay.current();
+	const auto slowmode = (_limits & SendFilesAllow::OnlyOne)
+		&& (_list.files.size() > 1);
+	return Ui::CaptionWillBeAttached(_list, way, slowmode);
+}
+
+void SendFilesBox::applyMainCaptionToFirstFile() {
+	if (!_caption
+		|| _caption->isHidden()
+		|| (_list.files.size() <= 1)
+		|| _list.files.empty()) {
+		if (_mainCaptionAttachedToFirstFile && !_list.files.empty()) {
+			_list.files.front().caption = _firstFileCaptionBackup.value_or(
+				TextWithTags());
+			if (!setCaptionInSingleFilePreview(
+				0,
+				_list.files.front().caption)) {
+			}
+		}
+		_mainCaptionAttachedToFirstFile = false;
+		_firstFileCaptionBackup = std::nullopt;
+		return;
+	}
+	if (mainCaptionWillBeAttached()) {
+		if (!_mainCaptionAttachedToFirstFile) {
+			_firstFileCaptionBackup = _list.files.front().caption;
+		}
+		auto text = _caption->getTextWithAppliedMarkdown();
+		_list.files.front().caption = text;
+		_mainCaptionAttachedToFirstFile = true;
+		if (!setCaptionInSingleFilePreview(
+			0,
+			text)) {
+		}
+	} else if (_mainCaptionAttachedToFirstFile) {
+		_list.files.front().caption = _firstFileCaptionBackup.value_or(
+			TextWithTags());
+		_mainCaptionAttachedToFirstFile = false;
+		_firstFileCaptionBackup = std::nullopt;
+		if (!setCaptionInSingleFilePreview(
+			0,
+			_list.files.front().caption)) {
+		}
+	}
+}
+
 void SendFilesBox::openDialogToAddFileToAlbum() {
 	const auto show = uiShow();
 	const auto checkResult = [=](const Ui::PreparedList &list) {
@@ -810,10 +869,7 @@ void SendFilesBox::openDialogToAddFileToAlbum() {
 }
 
 void SendFilesBox::refreshMessagesCount() {
-	const auto way = _sendWay.current();
-	const auto slowmode = (_limits & SendFilesAllow::OnlyOne)
-		&& (_list.files.size() > 1);
-	const auto withCaption = Ui::CaptionWillBeAttached(_list, way, slowmode);
+	const auto withCaption = mainCaptionWillBeAttached();
 	const auto withComment = !withCaption
 		&& _caption
 		&& !_caption->isHidden()
@@ -1423,6 +1479,7 @@ void SendFilesBox::refreshControls(bool initial) {
 	refreshTitleText();
 	updateSendWayControls();
 	updateCaptionPlaceholder();
+	applyMainCaptionToFirstFile();
 }
 
 void SendFilesBox::setupSendWayControls() {
@@ -1613,6 +1670,7 @@ void SendFilesBox::setupCaption() {
 		_caption->changes()
 	) | rpl::on_next([=] {
 		checkCharsLimitation();
+		applyMainCaptionToFirstFile();
 		refreshMessagesCount();
 	}, _caption->lifetime());
 }
@@ -2028,14 +2086,20 @@ void SendFilesBox::saveSendWaySettings() {
 }
 
 bool SendFilesBox::validateLength(const QString &text) const {
+	const auto way = _sendWay.current();
+	if (!_list.canAddCaption(
+			way.groupFiles() && way.sendImagesAsPhotos(),
+			way.sendImagesAsPhotos())) {
+		return true;
+	}
+	return validateSingleCaptionLength(text);
+}
+
+bool SendFilesBox::validateSingleCaptionLength(const QString &text) const {
 	const auto session = &_show->session();
 	const auto limit = Data::PremiumLimits(session).captionLengthCurrent();
 	const auto remove = int(text.size()) - limit;
-	const auto way = _sendWay.current();
-	if (remove <= 0
-		|| !_list.canAddCaption(
-			way.groupFiles() && way.sendImagesAsPhotos(),
-			way.sendImagesAsPhotos())) {
+	if (remove <= 0) {
 		return true;
 	}
 	_show->showBox(
@@ -2074,6 +2138,7 @@ void SendFilesBox::send(
 	applyBlockChanges();
 
 	Storage::ApplyModifications(_list);
+	applyMainCaptionToFirstFile();
 
 	_confirmed = true;
 	if (_confirmedCallback) {
@@ -2082,6 +2147,11 @@ void SendFilesBox::send(
 			: TextWithTags();
 		if (!validateLength(caption.text)) {
 			return;
+		}
+		for (const auto &file : _list.files) {
+			if (!validateSingleCaptionLength(file.caption.text)) {
+				return;
+			}
 		}
 		options.invertCaption = _invertCaption;
 		options.price = hasPrice() ? _price.current() : 0;
