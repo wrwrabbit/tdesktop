@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/toast/toast.h"
+#include "ui/toast/toast_lottie_icon.h"
 #include "ui/widgets/popup_menu.h"
 #include "base/qthelp_regex.h"
 #include "base/qt/qt_key_modifiers.h"
@@ -33,9 +34,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller_link_info.h"
 #include "apiwrap.h"
 #include "history/view/history_view_schedule_box.h"
+#include "history/view/history_view_scheduled_section.h"
 #include "menu/menu_send.h"
 #include "data/data_types.h"
 #include "styles/style_calls.h" // groupCallBoxLabel
+#include "styles/style_chat_helpers.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 
@@ -43,6 +46,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QLocale>
 
 namespace {
+
+constexpr auto kReminderSetToastDuration = 4 * crl::time(1000);
 
 [[nodiscard]] TextWithEntities BoldDomainInUrl(const QString &url) {
 	auto result = TextWithEntities{ .text = url };
@@ -158,6 +163,42 @@ void ExportToCalendar(int32 date, const QString &messageText) {
 		File::Launch(path);
 	}
 }
+
+void DoneSetReminder(std::shared_ptr<ChatHelpers::Show> show) {
+	if (!show->valid()) {
+		return;
+	}
+	const auto text = tr::lng_reminder_scheduled_in(
+		tr::now,
+		lt_link,
+		tr::link(tr::bold(tr::lng_saved_messages(tr::now))),
+		tr::marked);
+	const auto session = &show->session();
+	const auto filter = [=](
+			const ClickHandlerPtr &,
+			Qt::MouseButton) {
+		if (const auto controller = show->resolveWindow()) {
+			controller->showSection(
+				std::make_shared<HistoryView::ScheduledMemento>(
+					session->data().history(session->user())));
+		}
+		return false;
+	};
+	const auto toast = show->showToast({
+		.text = text,
+		.filter = filter,
+		.st = &st::selfForwardsTaggerToast,
+		.attach = RectPart::Top,
+		.duration = kReminderSetToastDuration,
+	});
+	if (const auto strong = toast.get()) {
+		Ui::AddLottieToToast(
+			strong->widget(),
+			st::selfForwardsTaggerToast,
+			st::selfForwardsTaggerIcon,
+			u"toast/saved_messages"_q);
+	}
+};
 
 } // namespace
 
@@ -577,7 +618,8 @@ void FormattedDateClickHandler::onClick(ClickContext context) const {
 							Data::ResolvedForwardDraft{
 								.items = { item },
 							},
-							action);
+							action,
+							[=] { DoneSetReminder(show); });
 					}));
 			},
 			&st::menuIconNotifications);

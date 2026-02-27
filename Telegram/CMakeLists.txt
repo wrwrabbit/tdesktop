@@ -1724,6 +1724,8 @@ PRIVATE
     ui/image/image_location_factory.h
     ui/text/format_song_document_name.cpp
     ui/text/format_song_document_name.h
+    ui/toast/toast_lottie_icon.cpp
+    ui/toast/toast_lottie_icon.h
     ui/widgets/expandable_peer_list.cpp
     ui/widgets/expandable_peer_list.h
     ui/widgets/chat_filters_tabs_strip.cpp
