@@ -49,6 +49,7 @@ namespace Ui::BotWebView {
 namespace {
 
 constexpr auto kProcessClickTimeout = crl::time(1000);
+constexpr auto kClipboardReadTimeout = crl::time(10000);
 constexpr auto kProgressDuration = crl::time(200);
 constexpr auto kProgressOpacity = 0.3;
 constexpr auto kLightnessThreshold = 128;
@@ -902,6 +903,10 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 		!raw->widget()->inherits("QWindowContainer"));
 #endif // !Q_OS_WIN && !Q_OS_MAC
 
+	raw->setInteractionHandler([=] {
+		_lastWebviewInteraction = crl::now();
+	});
+
 	QObject::connect(raw->widget(), &QObject::destroyed, [=] {
 		const auto parent = _webviewParent.data();
 		if (!_webview
@@ -1597,13 +1602,9 @@ bool Panel::allowClipboardQuery() const {
 	if (!_allowClipboardRead) {
 		return false;
 	}
-	//const auto now = crl::now();
-	//if (_mainButtonLastClick
-	//	&& _mainButtonLastClick + kProcessClickTimeout >= now) {
-	//	_mainButtonLastClick = 0;
-	//	return true;
-	//}
-	return true;
+	const auto now = crl::now();
+	return _lastWebviewInteraction
+		&& (_lastWebviewInteraction + kClipboardReadTimeout >= now);
 }
 
 void Panel::scheduleCloseWithConfirmation() {

@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rect_part.h"
 #include "ui/round_rect.h"
 #include "webview/webview_common.h"
+#include <crl/crl_time.h>
 
 class QJsonObject;
 class QJsonValue;
@@ -255,6 +256,7 @@ private:
 	rpl::lifetime _bottomBarColorLifetime;
 	rpl::event_stream<> _downloadsUpdated;
 	rpl::variable<bool> _fullscreen = false;
+	crl::time _lastWebviewInteraction = 0;
 	bool _layerShown : 1 = false;
 	bool _webviewProgress : 1 = false;
 	bool _themeUpdateScheduled : 1 = false;
