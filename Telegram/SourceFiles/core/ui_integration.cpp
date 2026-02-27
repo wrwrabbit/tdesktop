@@ -409,7 +409,7 @@ bool UiIntegration::handleUrlClick(
 		const QString &url,
 		const QVariant &context) {
 	const auto local = Core::TryConvertUrlToLocal(url);
-	if (Core::InternalPassportLink(local)) {
+	if (Core::InternalPassportOrOAuthLink(local)) {
 		return true;
 	}
 

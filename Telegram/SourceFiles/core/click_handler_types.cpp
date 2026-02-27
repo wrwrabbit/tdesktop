@@ -144,7 +144,7 @@ QString HiddenUrlClickHandler::dragText() const {
 
 void HiddenUrlClickHandler::Open(QString url, QVariant context) {
 	url = Core::TryConvertUrlToLocal(url);
-	if (Core::InternalPassportLink(url)) {
+	if (Core::InternalPassportOrOAuthLink(url)) {
 		return;
 	}
 
@@ -241,7 +241,7 @@ void HiddenUrlClickHandler::Open(QString url, QVariant context) {
 
 void BotGameUrlClickHandler::onClick(ClickContext context) const {
 	const auto url = Core::TryConvertUrlToLocal(this->url());
-	if (Core::InternalPassportLink(url)) {
+	if (Core::InternalPassportOrOAuthLink(url)) {
 		return;
 	}
 	const auto openLink = [=] {

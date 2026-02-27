@@ -1500,7 +1500,7 @@ void WebViewInstance::botDownloadsAction(
 
 bool WebViewInstance::botHandleLocalUri(QString uri, bool keepOpen) {
 	const auto local = Core::TryConvertUrlToLocal(uri);
-	if (Core::InternalPassportLink(local)) {
+	if (Core::InternalPassportOrOAuthLink(local)) {
 		return true;
 	} else if (!local.startsWith(u"tg://"_q, Qt::CaseInsensitive)
 		&& !local.startsWith(u"tonsite://"_q, Qt::CaseInsensitive)
