@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/click_handler_types.h"
 
+#include "base/unixtime.h"
 #include "lang/lang_keys.h"
 #include "chat_helpers/bot_command.h"
 #include "core/application.h"
@@ -108,7 +109,7 @@ void SearchByHashtag(ClickContext context, const QString &tag) {
 			: Dialogs::Key());
 }
 
-void ExportToCalendar(int32 date, const QString &messageText) {
+void ExportToCalendar(TimeId date, const QString &messageText) {
 	const auto start = QDateTime::fromSecsSinceEpoch(
 		date,
 		Qt::UTC);
@@ -119,7 +120,7 @@ void ExportToCalendar(int32 date, const QString &messageText) {
 	const auto format = u"yyyyMMdd'T'HHmmss'Z'"_q;
 	const auto locale = QLocale();
 	const auto raw = locale.toString(
-		QDateTime::fromSecsSinceEpoch(date),
+		base::unixtime::parse(date),
 		QLocale::LongFormat);
 	auto summary = raw;
 	summary.replace('\\', u"\\\\"_q);
@@ -572,12 +573,10 @@ void FormattedDateClickHandler::onClick(ClickContext context) const {
 	menu->addAction(
 		tr::lng_context_copy_date(tr::now),
 		[date, show] {
-			const auto dateTime = QDateTime::fromSecsSinceEpoch(date);
 			const auto text = QLocale().toString(
-				dateTime,
+				base::unixtime::parse(date),
 				QLocale::LongFormat);
-			TextUtilities::SetClipboardText(
-				TextForMimeData::Simple(text));
+			TextUtilities::SetClipboardText(TextForMimeData::Simple(text));
 			show->showToast(tr::lng_date_copied(tr::now));
 		},
 		&st::menuIconCopy);
@@ -630,4 +629,10 @@ void FormattedDateClickHandler::onClick(ClickContext context) const {
 
 auto FormattedDateClickHandler::getTextEntity() const -> TextEntity {
 	return { EntityType::FormattedDate, _entityData };
+}
+
+QString FormattedDateClickHandler::tooltip() const {
+	return QLocale().toString(
+		base::unixtime::parse(_date),
+		QLocale::LongFormat);
 }

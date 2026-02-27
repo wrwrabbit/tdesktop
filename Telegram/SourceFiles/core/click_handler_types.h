@@ -241,13 +241,14 @@ private:
 
 class FormattedDateClickHandler : public ClickHandler {
 public:
-	FormattedDateClickHandler(int32 date, FormattedDateFlags flags);
+	FormattedDateClickHandler(TimeId date, FormattedDateFlags flags);
 
 	void onClick(ClickContext context) const override;
 	TextEntity getTextEntity() const override;
+	QString tooltip() const override;
 
 private:
-	int32 _date = 0;
+	TimeId _date = 0;
 	QString _entityData;
 
 };

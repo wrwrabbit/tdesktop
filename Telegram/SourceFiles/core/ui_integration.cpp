@@ -195,35 +195,23 @@ const auto kBadPrefix = u"http://"_q;
 	if (flags & FormattedDateFlag::Relative) {
 		return FormatDateRelative(date);
 	}
-	const auto dateTime = QDateTime::fromSecsSinceEpoch(date);
+	const auto dateTime = base::unixtime::parse(date);
 	const auto locale = QLocale();
 	auto parts = QStringList();
-	const auto hasDayOfWeek = (flags
-		& FormattedDateFlag::DayOfWeek);
-	const auto hasShortDate = (flags
-		& FormattedDateFlag::ShortDate);
-	const auto hasLongDate = (flags
-		& FormattedDateFlag::LongDate);
-	const auto hasShortTime = (flags
-		& FormattedDateFlag::ShortTime);
-	const auto hasLongTime = (flags
-		& FormattedDateFlag::LongTime);
-	if (hasDayOfWeek && !hasShortDate) {
-		parts.push_back(locale.dayName(
-			dateTime.date().dayOfWeek()));
-	} else if (hasDayOfWeek) {
-		parts.push_back(locale.dayName(
-			dateTime.date().dayOfWeek(),
-			QLocale::ShortFormat));
+	const auto hasDayOfWeek = (flags & FormattedDateFlag::DayOfWeek);
+	const auto hasShortDate = (flags & FormattedDateFlag::ShortDate);
+	const auto hasLongDate = (flags & FormattedDateFlag::LongDate);
+	const auto hasShortTime = (flags & FormattedDateFlag::ShortTime);
+	const auto hasLongTime = (flags & FormattedDateFlag::LongTime);
+	if (hasDayOfWeek) {
+		parts.push_back(hasLongDate
+			? langDayOfWeekFull(dateTime.date())
+			: langDayOfWeek(dateTime.date()));
 	}
 	if (hasLongDate) {
-		parts.push_back(locale.toString(
-			dateTime.date(),
-			QLocale::LongFormat));
+		parts.push_back(langDayOfMonthFull(dateTime.date()));
 	} else if (hasShortDate) {
-		parts.push_back(locale.toString(
-			dateTime.date(),
-			QLocale::ShortFormat));
+		parts.push_back(langDayOfMonth(dateTime.date()));
 	}
 	if (hasLongTime) {
 		parts.push_back(locale.toString(
