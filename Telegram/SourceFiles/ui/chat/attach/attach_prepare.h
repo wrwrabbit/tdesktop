@@ -154,6 +154,12 @@ struct PreparedGroup {
 	PreparedList &&list,
 	SendFilesWay way,
 	bool slowmode);
+[[nodiscard]] bool CaptionWillBeAttached(
+	const std::vector<PreparedGroup> &groups);
+[[nodiscard]] bool CaptionWillBeAttached(
+	const PreparedList &list,
+	SendFilesWay way,
+	bool slowmode);
 
 struct PreparedBundle {
 	std::vector<PreparedGroup> groups;

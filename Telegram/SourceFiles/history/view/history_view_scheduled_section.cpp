@@ -603,13 +603,13 @@ void ScheduledWidget::sendingFilesConfirmed(
 		return;
 	}
 	auto groups = DivideByGroups(std::move(list), way, false);
+	const auto captionAttached = CaptionWillBeAttached(groups);
 	const auto type = way.sendImagesAsPhotos()
 		? SendMediaType::Photo
 		: SendMediaType::File;
 	auto action = prepareSendAction(options);
 	action.clearDraft = false;
-	if ((groups.size() != 1 || !groups.front().sentWithCaption())
-		&& !caption.text.isEmpty()) {
+	if (!captionAttached && !caption.text.isEmpty()) {
 		auto message = Api::MessageToSend(action);
 		message.textWithTags = base::take(caption);
 		session().api().sendMessage(std::move(message));

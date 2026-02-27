@@ -3815,10 +3815,22 @@ void ApiWrap::sendFiles(
 		std::shared_ptr<SendingAlbum> album,
 		const SendAction &action) {
 	const auto haveCaption = !caption.text.isEmpty();
-	if (haveCaption
-		&& !list.canAddCaption(
+	const auto captionAttached = !haveCaption
+		? false
+		: (list.files.size() == 1)
+		? list.canAddCaption(
 			album != nullptr,
-			type == SendMediaType::Photo)) {
+			type == SendMediaType::Photo)
+		: Ui::CaptionWillBeAttached(
+			list,
+			[&] {
+				auto way = Ui::SendFilesWay();
+				way.setGroupFiles(album != nullptr);
+				way.setSendImagesAsPhotos(type == SendMediaType::Photo);
+				return way;
+			}(),
+			false);
+	if (haveCaption && !captionAttached) {
 		auto message = MessageToSend(action);
 		message.textWithTags = base::take(caption);
 		message.action.clearDraft = false;

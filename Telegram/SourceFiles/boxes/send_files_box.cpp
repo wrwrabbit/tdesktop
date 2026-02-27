@@ -108,10 +108,9 @@ void FileDialogCallback(
 
 rpl::producer<QString> FieldPlaceholder(
 		const Ui::PreparedList &list,
-		SendFilesWay way) {
-	return list.canAddCaption(
-			way.groupFiles() && way.sendImagesAsPhotos(),
-			way.sendImagesAsPhotos())
+		SendFilesWay way,
+		bool slowmode) {
+	return Ui::CaptionWillBeAttached(list, way, slowmode)
 		? tr::lng_photo_caption()
 		: tr::lng_photos_comment();
 }
@@ -793,9 +792,9 @@ void SendFilesBox::openDialogToAddFileToAlbum() {
 
 void SendFilesBox::refreshMessagesCount() {
 	const auto way = _sendWay.current();
-	const auto withCaption = _list.canAddCaption(
-		way.groupFiles() && way.sendImagesAsPhotos(),
-		way.sendImagesAsPhotos());
+	const auto slowmode = (_limits & SendFilesAllow::OnlyOne)
+		&& (_list.files.size() > 1);
+	const auto withCaption = Ui::CaptionWillBeAttached(_list, way, slowmode);
 	const auto withComment = !withCaption
 		&& _caption
 		&& !_caption->isHidden()
@@ -1082,7 +1081,9 @@ void SendFilesBox::updateCaptionPlaceholder() {
 			_emojiToggle->hide();
 		}
 	} else {
-		_caption->setPlaceholder(FieldPlaceholder(_list, way));
+		const auto slowmode = (_limits & SendFilesAllow::OnlyOne)
+			&& (_list.files.size() > 1);
+		_caption->setPlaceholder(FieldPlaceholder(_list, way, slowmode));
 		_caption->show();
 		if (_emojiToggle) {
 			_emojiToggle->show();
