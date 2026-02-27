@@ -1909,6 +1909,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_disable_sharing_button" = "Disable Sharing";
 "lng_disable_sharing_toast" = "Sharing disabled for this chat.";
 "lng_enable_sharing_toast" = "Sharing enabled for this chat.";
+"lng_enable_sharing_request_title" = "Enable Sharing";
+"lng_enable_sharing_request_text" = "You need **{name}'s** approval to enable sharing. Send a request?";
+"lng_enable_sharing_request_button" = "Send Request";
 
 "lng_action_no_forwards_you_disabled" = "You disabled sharing in this chat.";
 "lng_action_no_forwards_you_enabled" = "You enabled sharing in this chat.";

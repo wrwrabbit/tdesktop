@@ -656,6 +656,9 @@ void UserData::setNoForwardsFlags(bool myEnabled, bool peerEnabled) {
 	setFlags((flags() & ~mask)
 		| (myEnabled ? Flag::NoForwardsMyEnabled : Flag())
 		| (peerEnabled ? Flag::NoForwardsPeerEnabled : Flag()));
+	if (!myEnabled && !peerEnabled) {
+		owner().clearSharingDisabledTime(this);
+	}
 }
 
 int UserData::starsPerMessage() const {

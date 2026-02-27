@@ -1309,6 +1309,21 @@ void Session::maybeStopWatchForOffline(not_null<UserData*> user) {
 	}
 }
 
+void Session::recordSharingDisabledTime(not_null<UserData*> user) {
+	_sharingDisabledTimes[user] = base::unixtime::now();
+}
+
+bool Session::sharingRecentlyDisabledByMe(
+		not_null<UserData*> user) const {
+	const auto i = _sharingDisabledTimes.find(user);
+	return (i != end(_sharingDisabledTimes))
+		&& (base::unixtime::now() - i->second < 86400);
+}
+
+void Session::clearSharingDisabledTime(not_null<UserData*> user) {
+	_sharingDisabledTimes.remove(user);
+}
+
 void Session::checkLocalUsersWentOffline() {
 	_watchForOfflineTimer.cancel();
 

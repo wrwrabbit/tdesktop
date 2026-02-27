@@ -1448,6 +1448,11 @@ void Filler::addToggleNoForwards() {
 			MTPint()
 		)).done([=](const MTPUpdates &result) {
 			peer->session().api().applyUpdates(result);
+			if (enabled) {
+				if (const auto user = peer->asUser()) {
+					peer->session().data().recordSharingDisabledTime(user);
+				}
+			}
 		}).fail([=](const MTP::Error &error) {
 			if (error.type() != u"CHAT_NOT_MODIFIED"_q) {
 				controller->showToast(error.type());
@@ -1461,7 +1466,27 @@ void Filler::addToggleNoForwards() {
 		if (controller->showFrozenError()) {
 			return;
 		} else if (disabledNow) {
-			toggleNoForwards(false);
+			const auto willBeRequest = true
+				&& (user->flags() & UserDataFlag::NoForwardsPeerEnabled)
+				&& !peer->session().data().sharingRecentlyDisabledByMe(user);
+			if (willBeRequest) {
+				controller->show(Ui::MakeConfirmBox({
+					.text = tr::lng_enable_sharing_request_text(
+						tr::now,
+						lt_name,
+						tr::marked(user->shortName()),
+						tr::rich),
+					.confirmed = [=](Fn<void()> close) {
+						toggleNoForwards(false);
+						controller->showPeerHistory(peer->id);
+						close();
+					},
+					.confirmText = tr::lng_enable_sharing_request_button(),
+					.title = tr::lng_enable_sharing_request_title(),
+				}));
+			} else {
+				toggleNoForwards(false);
+			}
 			return;
 		}
 		auto &settings = peer->session().settings();
