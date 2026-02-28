@@ -13,9 +13,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "ui/painter.h"
+#include "ui/dynamic_image.h"
 #include "styles/style_window.h"
 
 #include <QtWidgets/QMenu>
+#include <QtGui/QIcon>
 
 #import <AppKit/NSMenu.h>
 #import <AppKit/NSStatusItem.h>
@@ -387,16 +389,61 @@ void Tray::destroyMenu() {
 }
 
 void Tray::addAction(rpl::producer<QString> text, Fn<void()> &&callback) {
+	addAction(std::move(text), std::move(callback), QIcon());
+}
+
+void Tray::addAction(
+		rpl::producer<QString> text,
+		Fn<void()> &&callback,
+		const QIcon &icon) {
 	if (!_menu) {
 		return;
 	}
 
 	const auto action = _menu->addAction(QString(), std::move(callback));
+	action->setIcon(icon);
 	std::move(
 		text
 	) | rpl::on_next([=](const QString &text) {
 		action->setText(text);
 	}, _actionsLifetime);
+}
+
+void Tray::addAction(
+		rpl::producer<QString> text,
+		Fn<void()> &&callback,
+		std::shared_ptr<Ui::DynamicImage> icon,
+		int size) {
+	if (!_menu) {
+		return;
+	}
+
+	const auto action = _menu->addAction(QString(), std::move(callback));
+	if (icon) {
+		const auto updateIcon = crl::guard(action, [=] {
+			action->setIcon(QIcon(QPixmap::fromImage(icon->image(size))));
+		});
+		icon->subscribeToUpdates([=] {
+			Core::Sandbox::Instance().customEnterFromEventLoop([=] {
+				updateIcon();
+			});
+		});
+		updateIcon();
+		_actionsLifetime.add([icon = std::move(icon)] {
+			icon->subscribeToUpdates(nullptr);
+		});
+	}
+	std::move(
+		text
+	) | rpl::on_next([=](const QString &text) {
+		action->setText(text);
+	}, _actionsLifetime);
+}
+
+void Tray::addSeparator() {
+	if (_menu) {
+		_menu->addSeparator();
+	}
 }
 
 void Tray::showTrayMessage() const {
