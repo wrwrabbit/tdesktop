@@ -82,6 +82,11 @@ namespace Platform {
 
 namespace {
 
+enum class TrayClickType {
+	Left,
+	Right,
+};
+
 [[nodiscard]] bool IsAnyActiveForTrayMenu() {
 	for (const NSWindow *w in [[NSApplication sharedApplication] windows]) {
 		if (w.isKeyWindow) {
@@ -233,14 +238,14 @@ public:
 	void showMenu(not_null<QMenu*> menu);
 	void deactivateButton();
 
-	[[nodiscard]] rpl::producer<> clicks() const;
+	[[nodiscard]] rpl::producer<TrayClickType> clicks() const;
 	[[nodiscard]] rpl::producer<> aboutToShowRequests() const;
 
 private:
 	CommonDelegate *_delegate;
 	NSStatusItem *_status;
 
-	rpl::event_stream<> _clicks;
+	rpl::event_stream<TrayClickType> _clicks;
 
 	rpl::lifetime _lifetime;
 
@@ -276,12 +281,17 @@ NativeIcon::NativeIcon()
 	[_status.button sendActionOn:masks];
 
 	id buttonCallback = [^{
-		const auto type = NSApp.currentEvent.type;
+		const auto event = NSApp.currentEvent;
+		const auto type = event.type;
 
-		if ((type == NSEventTypeLeftMouseDown)
-			|| (type == NSEventTypeRightMouseDown)) {
+		if (type == NSEventTypeLeftMouseDown) {
 			Core::Sandbox::Instance().customEnterFromEventLoop([=] {
-				_clicks.fire({});
+				_clicks.fire(TrayClickType::Left);
+			});
+		} else if (type == NSEventTypeRightMouseDown
+			|| type == NSEventTypeRightMouseUp) {
+			Core::Sandbox::Instance().customEnterFromEventLoop([=] {
+				_clicks.fire(TrayClickType::Right);
 			});
 		}
 	} copy];
@@ -319,7 +329,7 @@ void NativeIcon::deactivateButton() {
 	[_status.button highlight:false];
 }
 
-rpl::producer<> NativeIcon::clicks() const {
+rpl::producer<TrayClickType> NativeIcon::clicks() const {
 	return _clicks.events();
 }
 
@@ -336,8 +346,13 @@ void Tray::createIcon() {
 		// On macOS we are activating the window on click
 		// instead of showing the menu, when the window is not activated.
 		_nativeIcon->clicks(
-		) | rpl::on_next([=] {
-			if (IsAnyActiveForTrayMenu()) {
+		) | rpl::on_next([=](TrayClickType type) {
+			if (!_menu) {
+				return;
+			}
+			if (type == TrayClickType::Right) {
+				_nativeIcon->showMenu(_menu.get());
+			} else if (IsAnyActiveForTrayMenu()) {
 				_nativeIcon->showMenu(_menu.get());
 			} else {
 				_nativeIcon->deactivateButton();
