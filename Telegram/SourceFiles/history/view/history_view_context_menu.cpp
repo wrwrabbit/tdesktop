@@ -893,7 +893,7 @@ bool AddDeleteMessageAction(
 			}
 			const auto list = HistoryItemsList{ item };
 			if (CanCreateModerateMessagesBox(list)) {
-				const auto opt = ModerateMessagesBoxOptions();
+				const auto opt = DefaultModerateMessagesBoxOptions();
 				controller->show(
 					Box(CreateModerateMessagesBox, list, nullptr, opt));
 			} else {

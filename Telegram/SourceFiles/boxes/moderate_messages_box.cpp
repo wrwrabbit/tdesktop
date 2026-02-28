@@ -1170,3 +1170,13 @@ void DeleteSublistBox(
 	}, st::attentionBoxButton);
 	box->addButton(tr::lng_cancel(), close);
 }
+
+ModerateMessagesBoxOptions DefaultModerateMessagesBoxOptions() {
+	return base::IsCtrlPressed()
+		? ModerateMessagesBoxOptions{
+			.reportSpam = true,
+			.deleteAll = true,
+			.banUser = true,
+		}
+		: ModerateMessagesBoxOptions{};
+}

@@ -25,6 +25,8 @@ struct ModerateMessagesBoxOptions final {
 	bool banUser = false;
 };
 
+[[nodiscard]] ModerateMessagesBoxOptions DefaultModerateMessagesBoxOptions();
+
 void CreateModerateMessagesBox(
 	not_null<Ui::GenericBox*> box,
 	const HistoryItemsList &items,

@@ -9288,11 +9288,12 @@ void HistoryWidget::confirmDeleteSelected() {
 	}
 	const auto items = session().data().idsToItems(ids);
 	if (CanCreateModerateMessagesBox(items)) {
+		const auto opt = DefaultModerateMessagesBoxOptions();
 		controller()->show(Box(
 			CreateModerateMessagesBox,
 			items,
 			crl::guard(this, [=] { clearSelected(); }),
-			ModerateMessagesBoxOptions{}));
+			opt));
 	} else {
 		auto box = Box<DeleteMessagesBox>(&session(), std::move(ids));
 		box->setDeleteConfirmedCallback(crl::guard(this, [=] {

@@ -4970,7 +4970,7 @@ void HistoryInner::deleteItem(not_null<HistoryItem*> item) {
 	}
 	const auto list = HistoryItemsList{ item };
 	if (CanCreateModerateMessagesBox(list)) {
-		const auto opt = ModerateMessagesBoxOptions();
+		const auto opt = DefaultModerateMessagesBoxOptions();
 		_controller->show(Box(CreateModerateMessagesBox, list, nullptr, opt));
 	} else {
 		const auto suggestModerate = false;
