@@ -798,7 +798,6 @@ void BuildSpellcheckerSection(SectionBuilder &builder) {
 	const auto session = builder.session();
 	const auto settings = &Core::App().settings();
 	const auto isSystem = Platform::Spellchecker::IsSystemSpellchecker();
-	const auto container = builder.container();
 
 	builder.addDivider();
 	builder.addSkip();

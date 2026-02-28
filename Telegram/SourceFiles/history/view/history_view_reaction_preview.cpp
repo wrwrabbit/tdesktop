@@ -62,7 +62,7 @@ bool ShowReactionPreview(
 		};
 
 	};
-	const auto state = std::make_shared<PrintDead<State>>();
+	const auto state = std::make_shared<State>();
 
 	const auto mainwidget = controller->widget();
 	state->mediaPreview = base::make_unique_q<Window::MediaPreviewWidget>(

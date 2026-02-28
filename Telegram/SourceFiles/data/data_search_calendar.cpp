@@ -125,8 +125,6 @@ void SearchCalendarController::processMonthMessages(
 		bool noMoreData) {
 	auto result = std::vector<DayThumbnail>();
 	auto seenDays = base::flat_set<TimeId>();
-	const auto peer = _session->data().peer(key.peerId);
-	const auto history = peer->owner().history(peer);
 
 	const auto targetMonth = QDate(key.year, key.month, 1);
 	const auto targetStart = base::unixtime::serialize(
