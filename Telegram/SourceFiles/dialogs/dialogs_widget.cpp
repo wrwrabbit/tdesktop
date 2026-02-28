@@ -622,7 +622,6 @@ Widget::Widget(
 			controller->closeForum();
 		}
 	});
-	_searchForNarrowLayout->setAccessibleName(tr::lng_dlg_filter(tr::now));
 
 	setAcceptDrops(true);
 

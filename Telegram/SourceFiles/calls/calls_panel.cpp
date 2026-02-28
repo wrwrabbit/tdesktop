@@ -1453,24 +1453,17 @@ void Panel::stateChanged(State state) {
 void Panel::refreshAnswerHangupRedialLabel() {
 	Expects(_answerHangupRedialState.has_value());
 
-	_answerHangupRedial->setText([&] {
+	const auto phrase = [&] {
 		switch (*_answerHangupRedialState) {
-		case AnswerHangupRedialState::Answer: return tr::lng_call_accept();
-		case AnswerHangupRedialState::Hangup: return tr::lng_call_end_call();
-		case AnswerHangupRedialState::Redial: return tr::lng_call_redial();
-		case AnswerHangupRedialState::StartCall: return tr::lng_call_start();
+		case AnswerHangupRedialState::Answer: return tr::lng_call_accept;
+		case AnswerHangupRedialState::Hangup: return tr::lng_call_end_call;
+		case AnswerHangupRedialState::Redial: return tr::lng_call_redial;
+		case AnswerHangupRedialState::StartCall: return tr::lng_call_start;
 		}
 		Unexpected("AnswerHangupRedialState value.");
-	}());
-	_answerHangupRedial->setAccessibleName([&] {
-		switch (*_answerHangupRedialState) {
-		case AnswerHangupRedialState::Answer: return tr::lng_call_accept(tr::now);
-		case AnswerHangupRedialState::Hangup: return tr::lng_call_end_call(tr::now);
-		case AnswerHangupRedialState::Redial: return tr::lng_call_redial(tr::now);
-		case AnswerHangupRedialState::StartCall: return tr::lng_call_start(tr::now);
-		}
-		Unexpected("AnswerHangupRedialState value.");
-	}());
+	}();
+	_answerHangupRedial->setText(phrase());
+	_answerHangupRedial->setAccessibleName(phrase(tr::now));
 }
 
 void Panel::updateStatusText(State state) {
