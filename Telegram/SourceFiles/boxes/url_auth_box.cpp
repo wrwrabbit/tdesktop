@@ -604,21 +604,21 @@ void RequestUrl(
 					return MakeMatchCodeImage(resolveSession(), code);
 				},
 				callback,
-				bot
+				(bot
 					? object_ptr<Ui::UserpicButton>(
 						box->verticalLayout(),
 						bot,
 						st::defaultUserpicButton,
 						Ui::PeerUserpicShape::Forum)
-					: nullptr,
+					: nullptr),
 				bot ? Info::Profile::NameValue(bot) : nullptr,
 				browser,
 				device,
 				ip,
 				region,
-				matchCodesFirst
-					? rpl::single(QStringList())
-					: matchCodesShared->value());
+				(matchCodesFirst
+					? (rpl::single(QStringList()) | rpl::type_erased)
+					: matchCodesShared->value()));
 
 			*accountResult = AddAccountsMenu(
 				box->verticalLayout(),
