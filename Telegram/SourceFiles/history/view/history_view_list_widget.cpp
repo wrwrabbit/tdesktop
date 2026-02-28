@@ -2935,6 +2935,7 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					return contextView ? contextView->data().get() : overItem;
 				}(),
 				Ui::Menu::CreateAddActionCallback(_menu.get()));
+			_menu->setForcedOrigin(Ui::PanelAnimation::Origin::BottomLeft);
 			_menu->popup(e->globalPos());
 			e->accept();
 			return;
