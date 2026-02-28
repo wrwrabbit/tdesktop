@@ -46,6 +46,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_peer_menu.h"
 #include "main/main_session.h"
 #include "ui/layers/generic_box.h"
+#include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/toast/toast.h"
@@ -2914,6 +2915,15 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	} else if (linkUserpicPeerId) {
 		_menu = _delegate->listFillSenderUserpicMenu(linkUserpicPeerId);
 		if (_menu) {
+			Window::AddSenderUserpicModerateAction(
+				controller(),
+				[&] {
+					const auto contextY = _visibleTop
+						+ mapFromGlobal(e->globalPos()).y();
+					const auto contextView = strictFindItemByY(contextY);
+					return contextView ? contextView->data().get() : overItem;
+				}(),
+				Ui::Menu::CreateAddActionCallback(_menu.get()));
 			_menu->popup(e->globalPos());
 			e->accept();
 			return;

@@ -3798,6 +3798,44 @@ void FillSenderUserpicMenu(
 	}
 }
 
+void AddSenderUserpicModerateAction(
+		not_null<SessionController*> controller,
+		HistoryItem *moderateItem,
+		const PeerMenuCallback &addAction) {
+	const auto moderateChannel = moderateItem
+		? moderateItem->history()->peer->asChannel()
+		: nullptr;
+	const auto moderateUser = moderateItem
+		? moderateItem->from()->asUser()
+		: nullptr;
+	const auto canDeleteAndBan = moderateItem
+		&& moderateChannel
+		&& moderateChannel->isMegagroup()
+		&& moderateUser
+		&& !moderateChannel->isGroupAdmin(moderateUser)
+		&& moderateItem->suggestBanReport()
+		&& moderateItem->suggestDeleteAllReport();
+	if (canDeleteAndBan) {
+		addAction({ .isSeparator = true });
+		addAction({
+			.text = tr::lng_context_delete_and_ban(tr::now),
+			.handler = [=] {
+				controller->show(Box(
+					CreateModerateMessagesBox,
+					HistoryItemsList{ not_null<HistoryItem*>(moderateItem) },
+					nullptr,
+					ModerateMessagesBoxOptions{
+						.reportSpam = true,
+						.deleteAll = true,
+						.banUser = true,
+					}));
+			},
+			.icon = &st::menuIconBlockAttention,
+			.isAttention = true,
+		});
+	}
+}
+
 bool IsUnreadThread(not_null<Data::Thread*> thread) {
 	return thread->chatListBadgesState().unread;
 }

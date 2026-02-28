@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/menu/menu_add_action_callback.h"
 
 class History;
+class HistoryItem;
 
 namespace Api {
 struct SendOptions;
@@ -82,6 +83,11 @@ void FillSenderUserpicMenu(
 	not_null<PeerData*> peer,
 	Ui::InputField *fieldForMention,
 	Dialogs::Key searchInEntry,
+	const PeerMenuCallback &addAction);
+
+void AddSenderUserpicModerateAction(
+	not_null<SessionController*> controller,
+	HistoryItem *moderateItem,
 	const PeerMenuCallback &addAction);
 
 void MenuAddMarkAsReadAllChatsAction(

@@ -2459,6 +2459,27 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		_widget->fillSenderUserpicMenu(
 			_menu.get(),
 			session->data().peer(PeerId(linkUserpicPeerId)));
+		Window::AddSenderUserpicModerateAction(
+			_controller,
+			[&] {
+				auto moderateItem = _dragStateItem;
+				const auto contextY = mapFromGlobal(e->globalPos()).y();
+				enumerateItems<EnumItemsDirection::TopToBottom>(
+					[&](not_null<Element*> view, int top, int bottom) {
+						if (bottom <= contextY) {
+							return true;
+						} else if (top > contextY) {
+							return false;
+						}
+						const auto item = view->data();
+						if (item->from()->id == PeerId(linkUserpicPeerId)) {
+							moderateItem = item;
+						}
+						return false;
+					});
+				return moderateItem;
+			}(),
+			Ui::Menu::CreateAddActionCallback(_menu.get()));
 		if (_menu->empty()) {
 			_menu = nullptr;
 		} else {
