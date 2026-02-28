@@ -4949,7 +4949,8 @@ void HistoryInner::deleteItem(not_null<HistoryItem*> item) {
 	}
 	const auto list = HistoryItemsList{ item };
 	if (CanCreateModerateMessagesBox(list)) {
-		_controller->show(Box(CreateModerateMessagesBox, list, nullptr));
+		const auto opt = ModerateMessagesBoxOptions();
+		_controller->show(Box(CreateModerateMessagesBox, list, nullptr, opt));
 	} else {
 		const auto suggestModerate = false;
 		_controller->show(Box<DeleteMessagesBox>(item, suggestModerate));
@@ -4970,7 +4971,8 @@ void HistoryInner::deleteAsGroup(FullMsgId itemId) {
 			_controller->show(Box(
 				CreateModerateMessagesBox,
 				group->items,
-				nullptr));
+				nullptr,
+				ModerateMessagesBoxOptions{}));
 		} else {
 			_controller->show(Box<DeleteMessagesBox>(
 				&session(),

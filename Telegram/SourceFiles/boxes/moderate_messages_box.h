@@ -19,10 +19,17 @@ class GenericBox;
 
 extern const char kModerateCommonGroups[];
 
+struct ModerateMessagesBoxOptions final {
+	bool reportSpam = false;
+	bool deleteAll = false;
+	bool banUser = false;
+};
+
 void CreateModerateMessagesBox(
 	not_null<Ui::GenericBox*> box,
 	const HistoryItemsList &items,
-	Fn<void()> confirmed);
+	Fn<void()> confirmed,
+	ModerateMessagesBoxOptions options);
 
 [[nodiscard]] bool CanCreateModerateMessagesBox(const HistoryItemsList &);
 
