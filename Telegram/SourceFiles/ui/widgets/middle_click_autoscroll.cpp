@@ -204,7 +204,7 @@ void MiddleClickAutoscroll::onTimer() {
 		return;
 	}
 	const auto now = crl::now();
-	const auto elapsed = std::max(now - _time, 1LL);
+	const auto elapsed = std::max(now - _time, crl::time(1));
 	_time = now;
 	const auto delta = QCursor::pos().y() - _startPosition.y();
 	updateCursor(delta);

@@ -356,7 +356,7 @@ void BuildWindowCloseBehaviorSection(SectionBuilder &builder) {
 		? (Core::App().settings().workModeValue(
 			) | rpl::map([](Core::Settings::WorkMode mode) {
 				return (mode == Core::Settings::WorkMode::WindowOnly);
-			}) | rpl::distinct_until_changed() | rpl::type_erased())
+			}) | rpl::distinct_until_changed() | rpl::type_erased)
 		: rpl::producer<bool>(nullptr);
 
 	builder.scope([&] {
