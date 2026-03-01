@@ -1802,7 +1802,7 @@ void ParticipantsBoxController::rowElementClicked(
 			const auto peer = _peer;
 			const auto currentRank = _additional.memberRank(user);
 			const auto isSelf = user->isSelf();
-			_editBox = show->show(Box(
+			show->show(Box(
 				EditCustomRankBox,
 				show,
 				peer,
@@ -1916,22 +1916,23 @@ base::unique_qptr<Ui::PopupMenu> ParticipantsBoxController::rowContextMenu(
 				: (currentRank.isEmpty()
 					? tr::lng_context_add_member_tag(tr::now)
 					: tr::lng_context_edit_member_tag(tr::now));
+			const auto weak = base::make_weak(this);
 			result->addAction(
 				actionText,
-				crl::guard(this, [=] {
-					_editBox = show->show(Box(
+				[=] {
+					show->show(Box(
 						EditCustomRankBox,
 						show,
 						peer,
 						user,
 						currentRank,
 						canEditSelf,
-						crl::guard(this, [=](const QString &rank) {
+						crl::guard(weak, [=](const QString &rank) {
 							_additional.applyMemberRankLocally(user, rank);
 							recomputeTypeFor(user);
 							refreshRows();
 						})));
-				}),
+				},
 				(currentRank.isEmpty()
 					? &st::menuIconTagAdd
 					: &st::menuIconTagEdit));
@@ -2109,8 +2110,33 @@ void ParticipantsBoxController::editRestrictedDone(
 
 void ParticipantsBoxController::kickParticipant(not_null<PeerData*> participant) {
 	const auto user = participant->asUser();
+	const auto kickFrom = _peer;
+	const auto restrictedRights = _additional.restrictedRights(participant);
+	const auto removeLocal = crl::guard(this, [=] {
+		const auto id = participant->id;
+		if (const auto row = delegate()->peerListFindRow(id.value)) {
+			delegate()->peerListRemoveRow(row);
+			refreshRows();
+		}
+	});
+	const auto kick = [=] {
+		const auto currentRights = restrictedRights
+			? *restrictedRights
+			: ChatRestrictionsInfo();
+		removeLocal();
+		auto &session = kickFrom->session();
+		if (const auto chat = kickFrom->asChat()) {
+			session.api().chatParticipants().kick(chat, participant);
+		} else if (const auto channel = kickFrom->asChannel()) {
+			session.api().chatParticipants().kick(
+				channel,
+				participant,
+				currentRights);
+		}
+	};
+
 	if (user && user->isInaccessible()) {
-		return kickParticipantSure(participant);
+		return kick();
 	}
 	const auto text = ((_peer->isChat() || _peer->isMegagroup())
 		? tr::lng_profile_sure_kick
@@ -2118,12 +2144,10 @@ void ParticipantsBoxController::kickParticipant(not_null<PeerData*> participant)
 			tr::now,
 			lt_user,
 			user ? user->firstName : participant->name());
-	_editBox = showBox(
+	showBox(
 		Ui::MakeConfirmBox({
 			.text = text,
-			.confirmed = crl::guard(this, [=] {
-				kickParticipantSure(participant);
-			}),
+			.confirmed = [=](Fn<void()> close) { kick(); close(); },
 			.confirmText = tr::lng_box_remove(),
 		}));
 }
@@ -2136,30 +2160,6 @@ void ParticipantsBoxController::unkickParticipant(not_null<UserData*> user) {
 	}
 	const auto show = delegate()->peerListUiShow();
 	_peer->session().api().chatParticipants().add(show, _peer, { 1, user });
-}
-
-void ParticipantsBoxController::kickParticipantSure(
-		not_null<PeerData*> participant) {
-	_editBox = nullptr;
-
-	const auto restrictedRights = _additional.restrictedRights(participant);
-	const auto currentRights = restrictedRights
-		? *restrictedRights
-		: ChatRestrictionsInfo();
-
-	if (const auto row = delegate()->peerListFindRow(participant->id.value)) {
-		delegate()->peerListRemoveRow(row);
-		refreshRows();
-	}
-	auto &session = _peer->session();
-	if (const auto chat = _peer->asChat()) {
-		session.api().chatParticipants().kick(chat, participant);
-	} else if (const auto channel = _peer->asChannel()) {
-		session.api().chatParticipants().kick(
-			channel,
-			participant,
-			currentRights);
-	}
 }
 
 void ParticipantsBoxController::removeAdmin(not_null<UserData*> user) {

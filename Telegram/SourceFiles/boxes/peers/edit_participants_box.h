@@ -298,7 +298,6 @@ private:
 	void removeKickedWithRow(not_null<PeerData*> participant);
 	void removeKicked(not_null<PeerData*> participant);
 	void kickParticipant(not_null<PeerData*> participant);
-	void kickParticipantSure(not_null<PeerData*> participant);
 	void unkickParticipant(not_null<UserData*> user);
 	void removeAdmin(not_null<UserData*> user);
 	void removeAdminSure(not_null<UserData*> user);
