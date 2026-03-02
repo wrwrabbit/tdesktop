@@ -2379,7 +2379,7 @@ auto ParticipantsBoxController::computeType(
 	} break;
 	}
 
-	if (user && !channel->isBroadcast()) {
+	if (user && !_peer->isBroadcast()) {
 		const auto isSelf = user->isSelf();
 		const auto canEditSelf = isSelf
 			&& !_peer->amRestricted(ChatRestriction::EditRank);
