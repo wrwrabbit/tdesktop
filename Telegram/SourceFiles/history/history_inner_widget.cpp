@@ -1837,15 +1837,10 @@ void HistoryInner::mousePressEvent(QMouseEvent *e) {
 		e->accept();
 		return; // ignore mouse press, that was hiding context menu
 	}
-	if (_middleClickAutoscroll.active()) {
-		_middleClickAutoscroll.stop();
-		e->accept();
-		return;
-	}
 	if (e->button() == Qt::MiddleButton) {
 		mouseActionCancel();
 		ClickHandler::unpressed();
-		_middleClickAutoscroll.start(e->globalPos());
+		_middleClickAutoscroll.toggleOrBeginHold(e->globalPos());
 		e->accept();
 		return;
 	}
@@ -2270,6 +2265,10 @@ void HistoryInner::mouseActionFinish(
 }
 
 void HistoryInner::mouseReleaseEvent(QMouseEvent *e) {
+	if (_middleClickAutoscroll.finishHold(e->button())) {
+		e->accept();
+		return;
+	}
 	if (_middleClickAutoscroll.active()) {
 		e->accept();
 		return;
