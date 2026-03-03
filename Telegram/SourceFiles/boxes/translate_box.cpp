@@ -7,8 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/translate_box.h"
 #include "boxes/translate_box_content.h"
+#include "lang/translate_provider.h"
 
-#include "api/api_text_entities.h" // Api::EntitiesToMTP / EntitiesFromMTP.
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "core/ui_integration.h"
@@ -18,7 +18,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
-#include "mtproto/sender.h"
 #include "spellcheck/platform/platform_language.h"
 #include "ui/boxes/choose_language_box.h"
 #include "ui/layers/generic_box.h"
@@ -39,29 +38,24 @@ void TranslateBox(
 		TextWithEntities text,
 		bool hasCopyRestriction) {
 	struct State {
-		State(not_null<Main::Session*> session) : api(&session->mtp()) {
+		State(not_null<Main::Session*> session)
+		: provider(CreateTranslateProvider(session)) {
 		}
 
-		MTP::Sender api;
+		std::unique_ptr<TranslateProvider> provider;
 		rpl::variable<LanguageId> to;
 	};
 	const auto state = box->lifetime().make_state<State>(&peer->session());
 	state->to = ChooseTranslateTo(peer->owner().history(peer));
-
-	if (!IsServerMsgId(msgId)) {
-		msgId = 0;
-	}
-
-	using Flag = MTPmessages_TranslateText::Flag;
-	const auto flags = msgId
-		? (Flag::f_peer | Flag::f_id)
-		: !text.text.isEmpty()
-		? Flag::f_text
-		: Flag(0);
-	const auto requestText = text;
+	const auto request = std::make_shared<TranslateProviderRequest>(
+		PrepareTranslateProviderRequest(
+			state->provider.get(),
+			peer,
+			msgId,
+			std::move(text)));
 
 	TranslateBoxContent(box, {
-		.text = std::move(text),
+		.text = request->text,
 		.hasCopyRestriction = hasCopyRestriction,
 		.textContext = Core::TextContext({ .session = &peer->session() }),
 		.to = state->to.value(),
@@ -71,33 +65,7 @@ void TranslateBox(
 				crl::guard(box, [=](LanguageId id) { state->to = id; })));
 		},
 		.request = [=](LanguageId to, Fn<void(std::optional<TextWithEntities>)> done) {
-			const auto callback = std::make_shared<
-				Fn<void(std::optional<TextWithEntities>)>>(std::move(done));
-			state->api.request(MTPmessages_TranslateText(
-				MTP_flags(flags),
-				msgId ? peer->input() : MTP_inputPeerEmpty(),
-				(msgId
-					? MTP_vector<MTPint>(1, MTP_int(msgId))
-					: MTPVector<MTPint>()),
-				(msgId
-					? MTPVector<MTPTextWithEntities>()
-					: MTP_vector<MTPTextWithEntities>(1, MTP_textWithEntities(
-						MTP_string(requestText.text),
-						Api::EntitiesToMTP(
-							&peer->session(),
-							requestText.entities,
-							Api::ConvertOption::SkipLocal)))),
-				MTP_string(to.twoLetterCode())
-			)).done([=](const MTPmessages_TranslatedText &result) {
-				const auto &data = result.data();
-				const auto &list = data.vresult().v;
-				(*callback)(list.isEmpty()
-					? std::optional<TextWithEntities>()
-					: std::optional<TextWithEntities>(
-						Api::ParseTextWithEntities(&peer->session(), list.front())));
-			}).fail([=](const MTP::Error &) {
-				(*callback)(std::nullopt);
-			}).send();
+			state->provider->request(*request, to, std::move(done));
 		},
 	});
 }

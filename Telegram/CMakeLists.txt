@@ -1230,6 +1230,8 @@ PRIVATE
     lang/lang_numbers_animation.h
     lang/lang_translator.cpp
     lang/lang_translator.h
+    lang/translate_provider.cpp
+    lang/translate_provider.h
     layout/layout_document_generic_preview.cpp
     layout/layout_document_generic_preview.h
     layout/layout_item_base.cpp
