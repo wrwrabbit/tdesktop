@@ -1219,7 +1219,7 @@ void LanguageBox::setupTop(not_null<Ui::VerticalLayout*> container) {
 		Core::App().saveSettingsDelayed();
 	}, translateEnabled->lifetime());
 
-	if (Platform::IsMac() && Platform::IsTranslateProviderAvailable()) {
+	if (Platform::IsTranslateProviderAvailable()) {
 		const auto platformTranslateWrap = container->add(
 			object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
 				container,
@@ -1231,7 +1231,9 @@ void LanguageBox::setupTop(not_null<Ui::VerticalLayout*> container) {
 		const auto platformTranslateEnabled = platformTranslateWrap->entity()->add(
 			object_ptr<Ui::SettingsButton>(
 				platformTranslateWrap->entity(),
-				tr::lng_translate_settings_use_platform_mac(),
+				Platform::IsMac()
+					? tr::lng_translate_settings_use_platform_mac()
+					: tr::lng_translate_settings_use_platform_linux(),
 				st::settingsButtonNoIcon))->toggleOn(
 					rpl::single(
 						Core::App().settings().usePlatformTranslation()));
@@ -1243,10 +1245,12 @@ void LanguageBox::setupTop(not_null<Ui::VerticalLayout*> container) {
 			Core::App().settings().setUsePlatformTranslation(checked);
 			Core::App().saveSettingsDelayed();
 		}, platformTranslateEnabled->lifetime());
-		Ui::AddSkip(platformTranslateWrap->entity());
-		Ui::AddDividerText(
-			platformTranslateWrap->entity(),
-			tr::lng_translate_settings_use_platform_mac_about());
+		if (Platform::IsMac()) {
+			Ui::AddSkip(platformTranslateWrap->entity());
+			Ui::AddDividerText(
+				platformTranslateWrap->entity(),
+				tr::lng_translate_settings_use_platform_mac_about());
+		}
 	}
 
 	using namespace rpl::mappers;
