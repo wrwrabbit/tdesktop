@@ -128,6 +128,9 @@ void RenameFileBox(
 		rpl::single(QString()),
 		currentName));
 	const auto extension = [&] {
+		if (currentName.isEmpty()) {
+			return u".png"_q;
+		}
 		const auto dot = currentName.lastIndexOf('.');
 		return (dot >= 0) ? currentName.mid(dot) : QString();
 	}();
