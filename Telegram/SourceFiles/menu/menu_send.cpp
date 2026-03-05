@@ -737,8 +737,6 @@ FillMenuResult FillSendMenu(
 	const auto &icons = iconsOverride
 		? *iconsOverride
 		: st::defaultComposeIcons;
-
-	}
 	if (sending && type != Type::SilentOnly) {
 		menu->addAction(
 			((type == Type::Reminder)
@@ -761,6 +759,7 @@ FillMenuResult FillSendMenu(
 			[=] { action({ Api::SendOptions{ .silent = true } }, details); },
 			&icons.menuMute);
 
+	}
 	if ((type != Type::Disabled)
 		&& ((details.spoiler != SpoilerState::None)
 			|| (details.caption != CaptionState::None)
