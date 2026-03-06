@@ -37,7 +37,7 @@ public:
 			to,
 			[done = std::move(done)](
 					int,
-					TranslateProviderResult result) mutable {
+					TranslateProviderResult result) {
 				done(std::move(result));
 			},
 			[] {});
@@ -62,25 +62,29 @@ public:
 			}
 			doneAll();
 		};
-		const auto doneFromList = [=](
+		const auto doneFromList = [=, session = _session](
 				const QVector<MTPTextWithEntities> &list) {
 			for (auto i = 0; i != requests.size(); ++i) {
-				doneOne(i, (i < list.size())
-					? TranslateProviderResult{
-						.text = Api::ParseTextWithEntities(_session, list[i]),
-					}
-					: TranslateProviderResult{
-						.error = TranslateProviderError::Unknown,
-					});
+				doneOne(
+					i,
+					(i < list.size())
+						? TranslateProviderResult{
+							.text = Api::ParseTextWithEntities(
+								session,
+								list[i]),
+						}
+						: TranslateProviderResult{
+							.error = TranslateProviderError::Unknown,
+						});
 			}
 			doneAll();
 		};
 
-		const auto firstPeer = PeerId(PeerIdHelper(requests.front().peerId));
+		const auto firstPeer = PeerId(requests.front().peerId);
 		const auto allWithIds = ranges::all_of(
 			requests,
 			[&](const TranslateProviderRequest &request) {
-				return (PeerId(PeerIdHelper(request.peerId)) == firstPeer)
+				return (PeerId(request.peerId) == firstPeer)
 					&& (request.msgId != 0);
 			});
 		if (allWithIds) {
@@ -92,7 +96,7 @@ public:
 			auto ids = QVector<MTPint>();
 			ids.reserve(requests.size());
 			for (const auto &request : requests) {
-				ids.push_back(MTP_int(MsgId(request.msgId).bare));
+				ids.push_back(MTP_int(MsgId(request.msgId)));
 			}
 			_api.request(MTPmessages_TranslateText(
 				MTP_flags(Flag::f_peer | Flag::f_id),
