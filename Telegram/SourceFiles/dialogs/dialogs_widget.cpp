@@ -123,9 +123,11 @@ base::options::toggle OptionForumHideChatsList({
 
 [[nodiscard]] QImage UpdateIcon() {
 	const auto iconSize = st::dialogsInstallUpdateIconSize;
+	const auto ratio = style::DevicePixelRatio();
 	auto result = QImage(
-		Size(iconSize) * style::DevicePixelRatio(),
+		Size(iconSize) * ratio,
 		QImage::Format_ARGB32_Premultiplied);
+	result.setDevicePixelRatio(ratio);
 	result.fill(Qt::transparent);
 	{
 		auto p = QPainter(&result);
