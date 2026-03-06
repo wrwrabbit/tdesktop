@@ -102,7 +102,7 @@ constexpr auto kCustomColorButtonParts = 7;
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 	return true;
 #else
-	return !Platform::IsWindows() || !Platform::IsWindows8OrGreater();
+	return !Platform::IsWindows() || Platform::IsWindows8OrGreater();
 #endif
 }
 

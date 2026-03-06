@@ -484,21 +484,14 @@ private:
 		Ui::PreparedList &&list,
 		const QString &insertTextOnCancel = QString());
 	bool showSendingFilesError(const Ui::PreparedList &list) const;
-	bool showSendingFilesError(
-		const Ui::PreparedList &list,
-		std::optional<bool> compress) const;
+	bool showSendingFilesError(const Ui::PreparedBundle &bundle) const;
+
 	bool showSendMessageError(
 		const TextWithTags &textWithTags,
 		bool ignoreSlowmodeCountdown,
 		Fn<void(int starsApproved)> withPaymentApproved = nullptr,
 		Api::SendOptions options = {});
 
-	void sendingFilesConfirmed(
-		Ui::PreparedList &&list,
-		Ui::SendFilesWay way,
-		TextWithTags &&caption,
-		Api::SendOptions options,
-		bool ctrlShiftEnter);
 	void sendingFilesConfirmed(
 		std::shared_ptr<Ui::PreparedBundle> bundle,
 		Api::SendOptions options);

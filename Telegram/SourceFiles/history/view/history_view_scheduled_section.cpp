@@ -567,17 +567,9 @@ bool ScheduledWidget::confirmSendingFiles(
 		SendMenu::Details());
 
 	box->setConfirmedCallback(crl::guard(this, [=](
-		Ui::PreparedList &&list,
-		Ui::SendFilesWay way,
-		TextWithTags &&caption,
-		Api::SendOptions options,
-		bool ctrlShiftEnter) {
-		sendingFilesConfirmed(
-			std::move(list),
-			way,
-			std::move(caption),
-			options,
-			ctrlShiftEnter);
+			std::shared_ptr<Ui::PreparedBundle> bundle,
+			Api::SendOptions options) {
+		sendingFilesConfirmed(std::move(bundle), options);
 	}));
 	box->setCancelledCallback(_composeControls->restoreTextCallback(
 		insertTextOnCancel));
@@ -592,46 +584,29 @@ bool ScheduledWidget::confirmSendingFiles(
 }
 
 void ScheduledWidget::sendingFilesConfirmed(
-	Ui::PreparedList &&list,
-	Ui::SendFilesWay way,
-	TextWithTags &&caption,
-	Api::SendOptions options,
-	bool ctrlShiftEnter) {
-	Expects(list.filesToProcess.empty());
-
-	if (showSendingFilesError(list, way.sendImagesAsPhotos())) {
+		std::shared_ptr<Ui::PreparedBundle> bundle,
+		Api::SendOptions options) {
+	if (showSendingFilesError(*bundle)) {
 		return;
 	}
-	auto groups = DivideByGroups(std::move(list), way, false);
-	const auto captionAttached = CaptionWillBeAttached(groups);
-	const auto type = way.sendImagesAsPhotos()
-		? SendMediaType::Photo
-		: SendMediaType::File;
+	const auto compress = bundle->way.sendImagesAsPhotos();
+	const auto type = compress ? SendMediaType::Photo : SendMediaType::File;
 	auto action = prepareSendAction(options);
 	action.clearDraft = false;
-	if (!captionAttached && !caption.text.isEmpty()) {
-		auto message = Api::MessageToSend(action);
-		message.textWithTags = base::take(caption);
-		session().api().sendMessage(std::move(message));
-	}
-	for (auto &group : groups) {
+	auto &api = session().api();
+	for (auto &group : bundle->groups) {
 		const auto album = (group.type != Ui::AlbumType::None)
 			? std::make_shared<SendingAlbum>()
 			: nullptr;
-		session().api().sendFiles(
-			std::move(group.list),
-			type,
-			base::take(caption),
-			album,
-			action);
+		api.sendFiles(std::move(group.list), type, album, action);
 	}
 }
 
 bool ScheduledWidget::confirmSendingFiles(
-	QImage &&image,
-	QByteArray &&content,
-	std::optional<bool> overrideSendImagesAsPhotos,
-	const QString &insertTextOnCancel) {
+		QImage &&image,
+		QByteArray &&content,
+		std::optional<bool> overrideSendImagesAsPhotos,
+		const QString &insertTextOnCancel) {
 	if (image.isNull()) {
 		return false;
 	}
@@ -667,8 +642,8 @@ void ScheduledWidget::checkReplyReturns() {
 }
 
 void ScheduledWidget::uploadFile(
-	const QByteArray &fileContent,
-	SendMediaType type) {
+		const QByteArray &fileContent,
+		SendMediaType type) {
 	const auto callback = [=](Api::SendOptions options) {
 		session().api().sendFile(
 			fileContent,
@@ -680,46 +655,20 @@ void ScheduledWidget::uploadFile(
 }
 
 bool ScheduledWidget::showSendingFilesError(
-	const Ui::PreparedList &list) const {
-	return showSendingFilesError(list, std::nullopt);
+		const Ui::PreparedList &list) const {
+	const auto peer = _history->peer;
+	const auto show = controller()->uiShow();
+	return Data::ShowSendError(show, peer, list, std::nullopt, true);
 }
 
 bool ScheduledWidget::showSendingFilesError(
-	const Ui::PreparedList &list,
-	std::optional<bool> compress) const {
-	const auto error = [&]() -> Data::SendError {
-		using Error = Ui::PreparedList::Error;
-		const auto peer = _history->peer;
-		const auto error = Data::FileRestrictionError(peer, list, compress);
-		if (error) {
-			return error;
-		} else switch (list.error) {
-		case Error::None: return QString();
-		case Error::EmptyFile:
-		case Error::Directory:
-		case Error::NonLocalUrl: return tr::lng_send_image_empty(
-			tr::now,
-			lt_name,
-			list.errorData);
-		case Error::TooLargeFile: return u"(toolarge)"_q;
-		}
-		return tr::lng_forward_send_files_cant(tr::now);
-	}();
-	if (!error) {
-		return false;
-	} else if (error.text == u"(toolarge)"_q) {
-		const auto fileSize = list.files.back().size;
-		controller()->show(
-			Box(FileSizeLimitBox, &session(), fileSize, nullptr));
-		return true;
-	}
-
-	Data::ShowSendErrorToast(controller(), _history->peer, error);
-	return true;
+		const Ui::PreparedBundle &bundle) const {
+	const auto show = controller()->uiShow();
+	return Data::ShowSendError(show, _history->peer, bundle, true);
 }
 
 Api::SendAction ScheduledWidget::prepareSendAction(
-	Api::SendOptions options) const {
+		Api::SendOptions options) const {
 	auto result = Api::SendAction(_history, options);
 	result.options.sendAs = _composeControls->sendAsPeer();
 	if (_forumTopic) {

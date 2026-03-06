@@ -40,6 +40,7 @@ class Checkbox;
 class RoundButton;
 class InputField;
 struct GroupMediaLayout;
+struct PreparedBundle;
 class EmojiButton;
 class AlbumPreview;
 class VerticalLayout;
@@ -88,17 +89,14 @@ using SendFilesCheck = Fn<bool(
 	not_null<PeerData*> peer);
 
 using SendFilesConfirmed = Fn<void(
-	Ui::PreparedList &&list,
-	Ui::SendFilesWay way,
-	TextWithTags &&caption,
-	Api::SendOptions options,
-	bool ctrlShiftEnter)>;
+	std::shared_ptr<Ui::PreparedBundle>,
+	Api::SendOptions)>;
 
 struct SendFilesBoxDescriptor {
 	std::shared_ptr<ChatHelpers::Show> show;
 	Ui::PreparedList list;
 	TextWithTags caption;
-	PeerData *captionToPeer = nullptr;
+	not_null<PeerData*> toPeer;
 	SendFilesLimits limits = {};
 	SendFilesCheck check;
 	Api::SendType sendType = {};
@@ -220,7 +218,6 @@ private:
 	void refreshPriceTag();
 	[[nodiscard]] QImage preparePriceTagBg(QSize size) const;
 
-	bool validateLength(const QString &text) const;
 	void refreshButtons();
 	void refreshControls(bool initial = false);
 	void setupSendWayControls();
@@ -244,7 +241,7 @@ private:
 	void refreshTitleText();
 	void updateBoxSize();
 	void updateControlsGeometry();
-	void updateCaptionPlaceholder();
+	void updateCaptionVisibility();
 
 	bool addFiles(not_null<const QMimeData*> data);
 	bool addFiles(Ui::PreparedList list);
@@ -267,15 +264,13 @@ private:
 	void refreshMessagesCount();
 
 	void requestToTakeTextWithTags() const;
-	bool validateSingleCaptionLength(const QString &text) const;
-	bool mainCaptionWillBeAttached() const;
+	bool validateLength(const QString &text) const;
 
 	[[nodiscard]] Fn<MenuDetails()> prepareSendMenuDetails(
 		const SendFilesBoxDescriptor &descriptor);
 	[[nodiscard]] auto prepareSendMenuCallback()
 		-> Fn<void(MenuAction, MenuDetails)>;
 
-	[[nodiscard]] bool syncMainCaption() const;
 	[[nodiscard]] TextWithTags fieldText() const;
 
 	const std::shared_ptr<ChatHelpers::Show> _show;
@@ -293,7 +288,7 @@ private:
 	Fn<MenuDetails()> _sendMenuDetails;
 	Fn<void(MenuAction, MenuDetails)> _sendMenuCallback;
 
-	PeerData *_captionToPeer = nullptr;
+	not_null<PeerData*> _toPeer;
 	SendFilesCheck _check;
 	SendFilesConfirmed _confirmedCallback;
 	Fn<void()> _cancelledCallback;

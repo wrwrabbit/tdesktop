@@ -108,15 +108,6 @@ void FileDialogCallback(
 	callback(std::move(*list));
 }
 
-rpl::producer<QString> FieldPlaceholder(
-		const Ui::PreparedList &list,
-		SendFilesWay way,
-		bool slowmode) {
-	return Ui::CaptionWillBeAttached(list, way, slowmode)
-		? tr::lng_photo_caption()
-		: tr::lng_photos_comment();
-}
-
 void RenameFileBox(
 		not_null<Ui::GenericBox*> box,
 		const QString &currentName,
@@ -302,8 +293,9 @@ void EditPriceBox(
 		const Ui::PreparedFile &file,
 		const Ui::SendFilesWay &way) {
 	return way.sendImagesAsPhotos()
-		&& (file.type == Ui::PreparedFile::Type::Photo
-			|| file.type == Ui::PreparedFile::Type::Video);
+		? (file.type == Ui::PreparedFile::Type::Photo
+			|| file.type == Ui::PreparedFile::Type::Video)
+		: file.isSticker();
 }
 
 } // namespace
@@ -626,7 +618,7 @@ SendFilesBox::SendFilesBox(
 	.show = controller->uiShow(),
 	.list = std::move(list),
 	.caption = caption,
-	.captionToPeer = toPeer,
+	.toPeer = toPeer,
 	.limits = DefaultLimitsForPeer(toPeer),
 	.check = DefaultCheckForPeer(controller, toPeer),
 	.sendType = sendType,
@@ -645,11 +637,15 @@ SendFilesBox::SendFilesBox(QWidget*, SendFilesBoxDescriptor &&descriptor)
 , _limits(descriptor.limits)
 , _sendMenuDetails(prepareSendMenuDetails(descriptor))
 , _sendMenuCallback(prepareSendMenuCallback())
-, _captionToPeer(descriptor.captionToPeer)
+, _toPeer(descriptor.toPeer)
 , _check(std::move(descriptor.check))
 , _confirmedCallback(std::move(descriptor.confirmed))
 , _cancelledCallback(std::move(descriptor.cancelled))
-, _caption(this, _st.files.caption, Ui::InputField::Mode::MultiLine)
+, _caption(
+	this,
+	_st.files.caption,
+	Ui::InputField::Mode::MultiLine,
+	tr::lng_photo_caption())
 , _prefilledCaptionText(std::move(descriptor.caption))
 , _scroll(this, st::boxScroll)
 , _inner(
@@ -858,13 +854,6 @@ bool SendFilesBox::setCaptionInSingleFilePreview(
 	return false;
 }
 
-bool SendFilesBox::mainCaptionWillBeAttached() const {
-	const auto way = _sendWay.current();
-	const auto slowmode = (_limits & SendFilesAllow::OnlyOne)
-		&& (_list.files.size() > 1);
-	return Ui::CaptionWillBeAttached(_list, way, slowmode);
-}
-
 void SendFilesBox::openDialogToAddFileToAlbum() {
 	const auto show = uiShow();
 	const auto checkResult = [=](const Ui::PreparedList &list) {
@@ -894,11 +883,7 @@ void SendFilesBox::openDialogToAddFileToAlbum() {
 }
 
 void SendFilesBox::refreshMessagesCount() {
-	const auto withCaption = mainCaptionWillBeAttached();
-	const auto withComment = !withCaption
-		&& !_caption->isHidden()
-		&& !_caption->getTextWithTags().text.isEmpty();
-	_messagesCount = _list.files.size() + (withComment ? 1 : 0);
+	_messagesCount = _list.files.size();
 }
 
 void SendFilesBox::refreshButtons() {
@@ -911,9 +896,7 @@ void SendFilesBox::refreshButtons() {
 		[=] { send({}); });
 	refreshMessagesCount();
 
-	const auto perMessage = _captionToPeer
-		? _captionToPeer->starsPerMessageChecked()
-		: 0;
+	const auto perMessage = _toPeer->starsPerMessageChecked();
 	if (perMessage > 0) {
 		_send->setText(PaidSendButtonText(_messagesCount.value(
 		) | rpl::map(rpl::mappers::_1 * perMessage)));
@@ -953,9 +936,7 @@ bool SendFilesBox::hasSpoilerMenu() const {
 
 bool SendFilesBox::canChangePrice() const {
 	const auto way = _sendWay.current();
-	const auto broadcast = _captionToPeer
-		? _captionToPeer->asBroadcast()
-		: nullptr;
+	const auto broadcast = _toPeer->asBroadcast();
 	return broadcast
 		&& broadcast->canPostPaidMedia()
 		&& _list.canChangePrice(
@@ -1150,7 +1131,7 @@ void SendFilesBox::initSendWay() {
 			return _caption->isHidden();
 		};
 		const auto was = hidden();
-		updateCaptionPlaceholder();
+		updateCaptionVisibility();
 		updateEmojiPanelGeometry();
 		applyBlockChanges();
 		generatePreviewFrom(0);
@@ -1165,25 +1146,12 @@ void SendFilesBox::initSendWay() {
 	}, lifetime());
 }
 
-void SendFilesBox::updateCaptionPlaceholder() {
+void SendFilesBox::updateCaptionVisibility() {
 	const auto way = _sendWay.current();
-	if (!_list.canAddCaption(
-			way.groupFiles() && way.sendImagesAsPhotos(),
-			way.sendImagesAsPhotos())
-		&& ((_limits & SendFilesAllow::OnlyOne)
-			|| !(_limits & SendFilesAllow::Texts))) {
-		_caption->hide();
-		if (_emojiToggle) {
-			_emojiToggle->hide();
-		}
-	} else {
-		const auto slowmode = (_limits & SendFilesAllow::OnlyOne)
-			&& (_list.files.size() > 1);
-		_caption->setPlaceholder(FieldPlaceholder(_list, way, slowmode));
-		_caption->show();
-		if (_emojiToggle) {
-			_emojiToggle->show();
-		}
+	const auto can = _list.canAddCaption(way.sendImagesAsPhotos());
+	_caption->setVisible(can);
+	if (_emojiToggle) {
+		_emojiToggle->setVisible(can);
 	}
 }
 
@@ -1251,9 +1219,7 @@ void SendFilesBox::pushBlock(int from, int till) {
 				? !hasPrice()
 				: (type == Ui::AttachActionType::EditCover)
 				? (file.isVideoFile()
-					&& _captionToPeer
-					&& (_captionToPeer->isBroadcast()
-						|| _captionToPeer->isSelf()))
+					&& (_toPeer->isBroadcast() || _toPeer->isSelf()))
 				: (file.videoCover != nullptr);
 		});
 	auto &block = _blocks.back();
@@ -1281,9 +1247,10 @@ void SendFilesBox::pushBlock(int from, int till) {
 			}
 			refreshAllAfterChanges(index, [&] {
 				_list.files.erase(_list.files.begin() + index);
-				if (syncMainCaption()) {
-					const auto was = base::take(_list.files.front().caption);
-					if (fieldText().empty()) {
+				if (index == _list.files.size()) {
+					auto &last = _list.files.back();
+					const auto was = base::take(last.caption);
+					if (fieldText().empty() && !last.isSticker()) {
 						_caption->setTextWithTags(was);
 					}
 				}
@@ -1491,7 +1458,9 @@ void SendFilesBox::pushBlock(int from, int till) {
 				widget,
 				_st.tabbed.menu);
 			const auto &file = _list.files[fileIndex];
-			const auto canEditFileData = !SkipCaption(file, _sendWay.current());
+			const auto canEditFileData = !SkipCaption(
+				file,
+				_sendWay.current());
 			if (canEditFileData) {
 				state->menu->addAction(tr::lng_rename_file(tr::now), [=] {
 					auto &file = _list.files[fileIndex];
@@ -1510,14 +1479,15 @@ void SendFilesBox::pushBlock(int from, int till) {
 					tr::lng_context_upload_edit_caption(tr::now),
 					[=] {
 						auto &file = _list.files[fileIndex];
-						const auto sync = syncMainCaption();
+						const auto count = int(_list.files.size());
+						const auto sync = (fileIndex + 1 == count);
 						_show->show(Box(
 							EditFileCaptionBox,
 							_st,
-							_captionToPeer,
+							_toPeer,
 							sync ? fieldText() : file.caption,
 							[=](TextWithTags text) {
-								if (!validateSingleCaptionLength(text.text)) {
+								if (!validateLength(text.text)) {
 									return false;
 								}
 								if (sync) {
@@ -1551,7 +1521,7 @@ void SendFilesBox::refreshControls(bool initial) {
 	refreshPriceTag();
 	refreshTitleText();
 	updateSendWayControls();
-	updateCaptionPlaceholder();
+	updateCaptionVisibility();
 }
 
 void SendFilesBox::setupSendWayControls() {
@@ -1669,9 +1639,7 @@ void SendFilesBox::updateSendWayControls() {
 
 void SendFilesBox::setupCaption() {
 	const auto allow = [=](not_null<DocumentData*> emoji) {
-		return _captionToPeer
-			? Data::AllowEmojiWithoutPremium(_captionToPeer, emoji)
-			: (_limits & SendFilesAllow::EmojiWithoutPremium);
+		return Data::AllowEmojiWithoutPremium(_toPeer, emoji);
 	};
 	const auto show = _show;
 	InitMessageFieldHandlers({
@@ -1735,7 +1703,7 @@ void SendFilesBox::setupCaption() {
 		Unexpected("action in MimeData hook.");
 	});
 
-	updateCaptionPlaceholder();
+	updateCaptionVisibility();
 	setupEmojiPanel();
 
 	rpl::single(rpl::empty_value()) | rpl::then(
@@ -1747,15 +1715,12 @@ void SendFilesBox::setupCaption() {
 }
 
 void SendFilesBox::setupCaptionAutocomplete() {
-	if (!_captionToPeer) {
-		return;
-	}
 	const auto parent = getDelegate()->outerContainer();
 	ChatHelpers::InitFieldAutocomplete(_autocomplete, {
 		.parent = parent,
 		.show = _show,
 		.field = _caption.data(),
-		.peer = _captionToPeer,
+		.peer = _toPeer,
 		.features = [=] {
 			auto result = ChatHelpers::ComposeFeatures();
 			result.autocompleteCommands = false;
@@ -1803,13 +1768,6 @@ TextWithTags SendFilesBox::fieldText() const {
 	return !_caption->isHidden()
 		? _caption->getTextWithAppliedMarkdown()
 		: TextWithTags();
-}
-
-bool SendFilesBox::syncMainCaption() const {
-	return (_list.files.size() == 1)
-		&& !SkipCaption(_list.files.front(), _sendWay.current())
-		&& !_caption->isHidden()
-		&& mainCaptionWillBeAttached();
 }
 
 void SendFilesBox::checkCharsLimitation() {
@@ -1861,7 +1819,7 @@ void SendFilesBox::setupEmojiPanel() {
 		st::emojiPanMinHeight / 2,
 		st::emojiPanMinHeight);
 	_emojiPanel->hide();
-	_emojiPanel->selector()->setCurrentPeer(_captionToPeer);
+	_emojiPanel->selector()->setCurrentPeer(_toPeer);
 	_emojiPanel->selector()->setAllowEmojiWithoutPremium(
 		_limits & SendFilesAllow::EmojiWithoutPremium);
 	_emojiPanel->selector()->emojiChosen(
@@ -1874,11 +1832,7 @@ void SendFilesBox::setupEmojiPanel() {
 		if (info
 			&& info->setType == Data::StickersType::Emoji
 			&& !_show->session().premium()
-			&& !(_captionToPeer
-				? Data::AllowEmojiWithoutPremium(
-					_captionToPeer,
-					data.document)
-				: (_limits & SendFilesAllow::EmojiWithoutPremium))) {
+			&& !Data::AllowEmojiWithoutPremium(_toPeer, data.document)) {
 			ShowPremiumPreviewBox(_show, PremiumFeature::AnimatedEmoji);
 		} else {
 			Data::InsertCustomEmoji(_caption.data(), data.document);
@@ -2166,16 +2120,6 @@ void SendFilesBox::saveSendWaySettings() {
 }
 
 bool SendFilesBox::validateLength(const QString &text) const {
-	const auto way = _sendWay.current();
-	if (!_list.canAddCaption(
-			way.groupFiles() && way.sendImagesAsPhotos(),
-			way.sendImagesAsPhotos())) {
-		return true;
-	}
-	return validateSingleCaptionLength(text);
-}
-
-bool SendFilesBox::validateSingleCaptionLength(const QString &text) const {
 	const auto session = &_show->session();
 	const auto limit = Data::PremiumLimits(session).captionLengthCurrent();
 	const auto remove = int(text.size()) - limit;
@@ -2227,9 +2171,8 @@ void SendFilesBox::send(
 			return;
 		}
 		for (const auto &file : _list.files) {
-			if (SkipCaption(file, way)) {
-				continue;
-			} else if (!validateSingleCaptionLength(file.caption.text)) {
+			if (!SkipCaption(file, way)
+				&& !validateLength(file.caption.text)) {
 				return;
 			}
 		}
@@ -2245,12 +2188,32 @@ void SendFilesBox::send(
 				file.caption = {};
 			}
 		}
-		_confirmedCallback(
+
+		Assert(_list.filesToProcess.empty());
+
+		auto groups = DivideByGroups(
 			std::move(_list),
 			way,
-			std::move(caption),
-			options,
+			(_limits & SendFilesAllow::OnlyOne));
+		auto bundle = PrepareFilesBundle(
+			std::move(groups),
+			way,
 			ctrlShiftEnter);
+
+		if (!bundle->groups.empty()) {
+			auto &group = bundle->groups.back();
+			auto &files = group.list.files;
+			if (!files.empty()) {
+				auto &captioned = (group.type == Ui::AlbumType::PhotoVideo)
+					? files.front()
+					: files.back();
+				if (!captioned.isSticker() || way.sendImagesAsPhotos()) {
+					captioned.caption = std::move(caption);
+				}
+			}
+		}
+
+		_confirmedCallback(std::move(bundle), options);
 	}
 	closeBox();
 }
