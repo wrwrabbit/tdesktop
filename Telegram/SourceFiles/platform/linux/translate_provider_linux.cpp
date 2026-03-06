@@ -27,7 +27,7 @@ namespace {
 	return it != end(commands) ? *it : QString();
 }
 
-class TranslateProvider final : public Ui::TranslateProvider {
+class TranslateProvider final : public QObject, public Ui::TranslateProvider {
 public:
 	[[nodiscard]] bool supportsMessageId() const override {
 		return false;
@@ -38,14 +38,15 @@ public:
 			LanguageId to,
 			Fn<void(Ui::TranslateProviderResult)> done) override {
 		const auto from = Platform::Language::Recognize(request.text.text);
-		_process.setProgram(Command());
-		_process.setArguments(
+		const auto process = QPointer(new QProcess(this));
+		process->setProgram(Command());
+		process->setArguments(
 			QStringList{ u"-i"_q, u"-b"_q, u"-t"_q, to.twoLetterCode() }
 				+ (from.known()
 					? QStringList{ u"-s"_q, from.twoLetterCode() }
 					: QStringList()));
-		QObject::connect(&_process, &QProcess::finished, [=] {
-			_document.setHtml(_process.readAllStandardOutput());
+		connect(process, &QProcess::finished, this, [=] {
+			_document.setHtml(process->readAllStandardOutput());
 			const auto text = _document.toPlainText();
 			done(!text.isEmpty()
 				? Ui::TranslateProviderResult{
@@ -55,14 +56,14 @@ public:
 					.error = Ui::TranslateProviderError::Unknown,
 				}
 			);
+			delete process;
 		});
-		_process.start();
-		_process.write(request.text.text.toUtf8());
-		_process.closeWriteChannel();
+		process->start();
+		process->write(request.text.text.toUtf8());
+		process->closeWriteChannel();
 	}
 
 private:
-	QProcess _process;
 	QTextDocument _document;
 };
 
