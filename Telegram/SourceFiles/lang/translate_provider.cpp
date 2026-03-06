@@ -51,7 +51,7 @@ TranslateProviderRequest PrepareTranslateProviderRequest(
 		MsgId msgId,
 		TextWithEntities text) {
 	auto result = TranslateProviderRequest{
-		.peerId = int64(peer->id.value),
+		.peerId = uint64(peer->id.value),
 		.msgId = IsServerMsgId(msgId) ? msgId.bare : 0,
 		.text = std::move(text),
 	};

@@ -32,54 +32,116 @@ public:
 			TranslateProviderRequest request,
 			LanguageId to,
 			Fn<void(TranslateProviderResult)> done) override {
-		const auto msgId = MsgId(request.msgId);
-		const auto peerId = PeerId(PeerIdHelper(request.peerId));
-		const auto peer = msgId
-			? _session->data().peerLoaded(peerId)
-			: nullptr;
+		requestBatch(
+			{ std::move(request) },
+			to,
+			[done = std::move(done)](
+					int,
+					TranslateProviderResult result) mutable {
+				done(std::move(result));
+			},
+			[] {});
+	}
+
+	void requestBatch(
+			std::vector<TranslateProviderRequest> requests,
+			const LanguageId &to,
+			Fn<void(int, TranslateProviderResult)> doneOne,
+			Fn<void()> doneAll) override {
 		using Flag = MTPmessages_TranslateText::Flag;
-		const auto flags = msgId
-			? (Flag::f_peer | Flag::f_id)
-			: !request.text.text.isEmpty()
-			? Flag::f_text
-			: Flag(0);
-		if (!flags || (msgId && !peer)) {
-			done(TranslateProviderResult{
-				.error = TranslateProviderError::Unknown,
-			});
+		if (requests.empty()) {
+			doneAll();
 			return;
 		}
+
+		const auto failAll = [=] {
+			for (auto i = 0; i != requests.size(); ++i) {
+				doneOne(i, TranslateProviderResult{
+					.error = TranslateProviderError::Unknown,
+				});
+			}
+			doneAll();
+		};
+		const auto doneFromList = [=](
+				const QVector<MTPTextWithEntities> &list) {
+			for (auto i = 0; i != requests.size(); ++i) {
+				doneOne(i, (i < list.size())
+					? TranslateProviderResult{
+						.text = Api::ParseTextWithEntities(_session, list[i]),
+					}
+					: TranslateProviderResult{
+						.error = TranslateProviderError::Unknown,
+					});
+			}
+			doneAll();
+		};
+
+		const auto firstPeer = PeerId(PeerIdHelper(requests.front().peerId));
+		const auto allWithIds = ranges::all_of(
+			requests,
+			[&](const TranslateProviderRequest &request) {
+				return (PeerId(PeerIdHelper(request.peerId)) == firstPeer)
+					&& (request.msgId != 0);
+			});
+		if (allWithIds) {
+			const auto peer = _session->data().peerLoaded(firstPeer);
+			if (!peer) {
+				failAll();
+				return;
+			}
+			auto ids = QVector<MTPint>();
+			ids.reserve(requests.size());
+			for (const auto &request : requests) {
+				ids.push_back(MTP_int(MsgId(request.msgId).bare));
+			}
+			_api.request(MTPmessages_TranslateText(
+				MTP_flags(Flag::f_peer | Flag::f_id),
+				peer->input(),
+				MTP_vector<MTPint>(ids),
+				MTPVector<MTPTextWithEntities>(),
+				MTP_string(to.twoLetterCode())
+			)).done([=](const MTPmessages_TranslatedText &result) {
+				doneFromList(result.data().vresult().v);
+			}).fail([=](const MTP::Error &) {
+				failAll();
+			}).send();
+			return;
+		}
+
+		const auto allWithText = ranges::all_of(
+			requests,
+			[](const TranslateProviderRequest &request) {
+				return !request.text.text.isEmpty();
+			});
+		if (!allWithText) {
+			TranslateProvider::requestBatch(
+				std::move(requests),
+				to,
+				std::move(doneOne),
+				std::move(doneAll));
+			return;
+		}
+
+		auto text = QVector<MTPTextWithEntities>();
+		text.reserve(requests.size());
+		for (const auto &request : requests) {
+			text.push_back(MTP_textWithEntities(
+				MTP_string(request.text.text),
+				Api::EntitiesToMTP(
+					_session,
+					request.text.entities,
+					Api::ConvertOption::SkipLocal)));
+		}
 		_api.request(MTPmessages_TranslateText(
-			MTP_flags(flags),
-			msgId ? peer->input() : MTP_inputPeerEmpty(),
-			(msgId
-				? MTP_vector<MTPint>(1, MTP_int(msgId.bare))
-				: MTPVector<MTPint>()),
-			(msgId
-				? MTPVector<MTPTextWithEntities>()
-				: MTP_vector<MTPTextWithEntities>(1, MTP_textWithEntities(
-					MTP_string(request.text.text),
-					Api::EntitiesToMTP(
-						_session,
-						request.text.entities,
-						Api::ConvertOption::SkipLocal)))),
+			MTP_flags(Flag::f_text),
+			MTP_inputPeerEmpty(),
+			MTPVector<MTPint>(),
+			MTP_vector<MTPTextWithEntities>(text),
 			MTP_string(to.twoLetterCode())
 		)).done([=](const MTPmessages_TranslatedText &result) {
-			const auto &data = result.data();
-			const auto &list = data.vresult().v;
-			done(list.isEmpty()
-				? TranslateProviderResult{
-					.error = TranslateProviderError::Unknown,
-				}
-				: TranslateProviderResult{
-					.text = Api::ParseTextWithEntities(
-						_session,
-						list.front()),
-				});
+			doneFromList(result.data().vresult().v);
 		}).fail([=](const MTP::Error &) {
-			done(TranslateProviderResult{
-				.error = TranslateProviderError::Unknown,
-			});
+			failAll();
 		}).send();
 	}
 

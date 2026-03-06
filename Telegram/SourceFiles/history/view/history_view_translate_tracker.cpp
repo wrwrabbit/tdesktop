@@ -279,43 +279,52 @@ void TranslateTracker::requestSome() {
 		return;
 	}
 	const auto owner = &session->data();
+	auto requests = std::vector<Ui::TranslateProviderRequest>();
+	requests.reserve(_requested.size());
+	auto ids = std::vector<FullMsgId>();
+	ids.reserve(_requested.size());
+	for (const auto &id : _requested) {
+		if (const auto item = owner->message(id)) {
+			requests.push_back(Ui::PrepareTranslateProviderRequest(
+				_provider.get(),
+				session->data().peer(id.peer),
+				id.msg,
+				item->originalText()));
+			ids.push_back(id);
+		}
+	}
+	_requested = std::move(ids);
+	if (_requested.empty()) {
+		requestSome();
+		return;
+	}
 	_requestInProcess = true;
 	const auto requestToken = ++_requestToken;
-	const auto remaining = std::make_shared<int>(_requested.size());
-	for (const auto &id : _requested) {
-		const auto item = owner->message(id);
-		if (!item) {
-			if (!--*remaining) {
-				_requestInProcess = false;
-				_requested.clear();
-				requestSome();
-			}
-			continue;
-		}
-		auto request = Ui::PrepareTranslateProviderRequest(
-			_provider.get(),
-			session->data().peer(id.peer),
-			id.msg,
-			item->originalText());
-		_provider->request(
-				std::move(request),
-				to,
-				[=](Ui::TranslateProviderResult result) {
+	_provider->requestBatch(
+		std::move(requests),
+		to,
+		[=](int index, Ui::TranslateProviderResult result) {
 			if (!_requestInProcess || (_requestToken != requestToken)) {
 				return;
 			}
+			if (index < 0 || index >= _requested.size()) {
+				return;
+			}
+			const auto &id = _requested[index];
 			if (const auto item = owner->message(id)) {
 				item->translationDone(
 					to,
 					result.text.value_or(TextWithEntities()));
 			}
-			if (!--*remaining) {
-				_requestInProcess = false;
-				_requested.clear();
-				requestSome();
+		},
+		[=] {
+			if (!_requestInProcess || (_requestToken != requestToken)) {
+				return;
 			}
+			_requestInProcess = false;
+			_requested.clear();
+			requestSome();
 		});
-	}
 }
 
 void TranslateTracker::applyLimit() {
