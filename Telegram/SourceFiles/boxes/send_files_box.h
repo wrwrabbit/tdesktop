@@ -269,12 +269,14 @@ private:
 	void requestToTakeTextWithTags() const;
 	bool validateSingleCaptionLength(const QString &text) const;
 	bool mainCaptionWillBeAttached() const;
-	void applyMainCaptionToFirstFile();
 
 	[[nodiscard]] Fn<MenuDetails()> prepareSendMenuDetails(
 		const SendFilesBoxDescriptor &descriptor);
 	[[nodiscard]] auto prepareSendMenuCallback()
 		-> Fn<void(MenuAction, MenuDetails)>;
+
+	[[nodiscard]] bool syncMainCaption() const;
+	[[nodiscard]] TextWithTags fieldText() const;
 
 	const std::shared_ptr<ChatHelpers::Show> _show;
 	const style::ComposeControls &_st;
@@ -300,10 +302,8 @@ private:
 	QImage _priceTagBg;
 	bool _confirmed = false;
 	bool _invertCaption = false;
-	bool _mainCaptionAttachedToFirstFile = false;
-	std::optional<TextWithTags> _firstFileCaptionBackup;
 
-	object_ptr<Ui::InputField> _caption = { nullptr };
+	const object_ptr<Ui::InputField> _caption;
 	std::unique_ptr<ChatHelpers::FieldAutocomplete> _autocomplete;
 	TextWithTags _prefilledCaptionText;
 	object_ptr<Ui::EmojiButton> _emojiToggle = { nullptr };

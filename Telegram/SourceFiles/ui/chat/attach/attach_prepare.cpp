@@ -96,11 +96,13 @@ struct GroupRange {
 [[nodiscard]] bool CaptionWillBeAttachedFromRanges(
 		const std::vector<GroupRange> &ranges,
 		int filesCount) {
-	const auto hasGroupedFileAlbum = ranges::any_of(ranges, [](const auto &r) {
-		return (r.size() > 1) && (r.type == AlbumType::File);
-	});
-	return ((filesCount > 1) && hasGroupedFileAlbum)
-		|| ((ranges.size() == 1) && ranges.front().sentWithCaption());
+	// Let's send text after media, as it is shown in SendFilesBox.
+
+	//const auto hasGroupedFileAlbum = ranges::any_of(ranges, [](const auto &r) {
+	//	return (r.size() > 1) && (r.type == AlbumType::File);
+	//});
+	return /*((filesCount > 1) && hasGroupedFileAlbum)
+		|| */((ranges.size() == 1) && ranges.front().sentWithCaption());
 }
 
 } // namespace
@@ -359,16 +361,18 @@ bool PreparedList::hasSpoilerMenu(bool compress) const {
 
 bool AttachCaptionToFirstAsFile(
 		const std::vector<PreparedGroup> &groups) {
-	auto filesCount = 0;
-	auto hasGroupedFileAlbum = false;
-	for (const auto &group : groups) {
-		filesCount += group.list.files.size();
-		hasGroupedFileAlbum = hasGroupedFileAlbum
-			|| ((group.list.files.size() > 1)
-			&& (group.type == AlbumType::File));
-	}
-	const auto result = (filesCount > 1) && hasGroupedFileAlbum;
-	return result;
+	// Let's send text after media, as it is shown in SendFilesBox.
+	return false;
+	//auto filesCount = 0;
+	//auto hasGroupedFileAlbum = false;
+	//for (const auto &group : groups) {
+	//	filesCount += group.list.files.size();
+	//	hasGroupedFileAlbum = hasGroupedFileAlbum
+	//		|| ((group.list.files.size() > 1)
+	//		&& (group.type == AlbumType::File));
+	//}
+	//const auto result = (filesCount > 1) && hasGroupedFileAlbum;
+	//return result;
 }
 
 bool CaptionWillBeAttached(const std::vector<PreparedGroup> &groups) {
