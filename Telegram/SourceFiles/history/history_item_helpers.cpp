@@ -887,6 +887,8 @@ MTPMessageReplyHeader NewMessageReplyHeader(const Api::SendAction &action) {
 			? PeerId()
 			: replyTo.messageId.peer;
 		const auto replyToTop = LookupReplyToTop(action.history, replyTo);
+		const auto topicPost = replyTo.topicRootId
+			&& (replyTo.topicRootId != Data::ForumTopic::kGeneralId);
 		auto quoteEntities = Api::EntitiesToMTP(
 			&action.history->session(),
 			replyTo.quote.entities,
@@ -903,7 +905,8 @@ MTPMessageReplyHeader NewMessageReplyHeader(const Api::SendAction &action) {
 				| (quoteEntities.v.empty()
 					? Flag()
 					: Flag::f_quote_entities)
-				| (replyTo.todoItemId ? Flag::f_todo_item_id : Flag())),
+				| (replyTo.todoItemId ? Flag::f_todo_item_id : Flag())
+				| (topicPost ? Flag::f_forum_topic : Flag())),
 			MTP_int(replyTo.messageId.msg),
 			peerToMTP(externalPeerId),
 			MTPMessageFwdHeader(), // reply_from
