@@ -52,10 +52,47 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Settings {
 namespace {
 
-[[nodiscard]] bool CanImportOptionsFromText(const QString &text) {
+const auto kOptionsClipboardPrefix = u"tdesktop-flags:"_q;
+
+struct DecodeOptionsResult {
+	bool ok = false;
+	QString json;
+};
+
+[[nodiscard]] QString EncodeOptionsToText(const QString &json) {
+	const auto flags = QByteArray::Base64UrlEncoding
+		| QByteArray::OmitTrailingEquals;
+	return kOptionsClipboardPrefix
+		+ qs(qCompress(json.toLatin1(), 9).toBase64(flags));
+}
+
+[[nodiscard]] DecodeOptionsResult DecodeOptionsFromText(const QString &text) {
+	auto result = DecodeOptionsResult();
+	if (!text.startsWith(kOptionsClipboardPrefix)) {
+		return result;
+	}
+	auto encoded = QStringView(text).mid(
+		kOptionsClipboardPrefix.size()).toLatin1();
+	const auto compressed = QByteArray::fromBase64Encoding(
+		std::move(encoded),
+		QByteArray::Base64UrlEncoding
+			| QByteArray::AbortOnBase64DecodingErrors);
+	if (!compressed || (*compressed).isEmpty()) {
+		return result;
+	}
+	const auto decoded = qUncompress(*compressed);
+	if (decoded.isEmpty()) {
+		return result;
+	}
+
 	auto error = QJsonParseError();
-	const auto parsed = QJsonDocument::fromJson(text.toUtf8(), &error);
-	return (error.error == QJsonParseError::NoError) && parsed.isObject();
+	const auto parsed = QJsonDocument::fromJson(decoded, &error);
+	if ((error.error != QJsonParseError::NoError) || !parsed.isObject()) {
+		return result;
+	}
+	result.ok = true;
+	result.json = QString::fromUtf8(decoded);
+	return result;
 }
 
 void AddOption(
@@ -216,30 +253,32 @@ void Experimental::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 	addAction(
 		tr::lng_theme_editor_menu_export(tr::now),
 		[=] {
-			TextUtilities::SetClipboardText({ base::options::serialize() });
-			window->showToast(
-				u"Experimental settings JSON copied to clipboard."_q);
+			TextUtilities::SetClipboardText(
+				{ EncodeOptionsToText(base::options::serialize()) });
+			window->showToast(u"Experimental settings code copied to clipboard."_q);
 		},
 		&st::menuIconCopy);
-	if (!CanImportOptionsFromText(QGuiApplication::clipboard()->text())) {
+	if (!DecodeOptionsFromText(QGuiApplication::clipboard()->text()).ok) {
 		return;
 	}
 	addAction(
 		tr::lng_theme_editor_menu_import(tr::now),
 		[=] {
-			const auto text = QGuiApplication::clipboard()->text();
-			if (!CanImportOptionsFromText(text)) {
-				window->showToast(u"Clipboard JSON is not valid."_q);
+			const auto decoded = DecodeOptionsFromText(
+				QGuiApplication::clipboard()->text());
+			if (!decoded.ok) {
+				window->showToast(u"Clipboard does not contain "
+					"a valid experimental settings code."_q);
 				return;
 			}
-			if (!base::options::deserialize(text)) {
-				window->showToast(u"Clipboard JSON does not match "
-					"experimental settings format."_q);
+			if (!base::options::deserialize(decoded.json)) {
+				window->showToast(u"Experimental settings code is valid"
+					", but data format is not supported."_q);
 				return;
 			}
 			_reloadOptionsRequests.fire({});
 			window->showToast(u"Experimental settings imported "
-				"from clipboard."_q);
+				"from code in clipboard."_q);
 		},
 		&st::menuIconImportTheme);
 }
