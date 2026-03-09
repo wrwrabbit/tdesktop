@@ -16,6 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "styles/style_editor.h"
 
+#include <QRegion>
+
 namespace Editor {
 
 class EdgeButton final : public Ui::RippleButton {
@@ -329,6 +331,24 @@ PhotoEditorControls::PhotoEditorControls(
 		_paintTopButtons->setVisible(shown);
 	}, _paintBottomButtons->lifetime());
 
+	auto aboutChanges = _about
+		? rpl::merge(
+			_about->geometryValue() | rpl::to_empty,
+			_about->shownValue() | rpl::to_empty)
+		: rpl::never<>() | rpl::type_erased;
+	rpl::merge(
+		geometryValue() | rpl::to_empty,
+		_transformButtons->geometryValue() | rpl::to_empty,
+		_transformButtons->shownValue() | rpl::to_empty,
+		_paintBottomButtons->geometryValue() | rpl::to_empty,
+		_paintBottomButtons->shownValue() | rpl::to_empty,
+		_paintTopButtons->geometryValue() | rpl::to_empty,
+		_paintTopButtons->shownValue() | rpl::to_empty,
+		std::move(aboutChanges)
+	) | rpl::on_next([=] {
+		updateInputMask();
+	}, lifetime());
+
 	controllers->undoController->setPerformRequestChanges(rpl::merge(
 		_undoButton->clicks() | rpl::map_to(Undo::Undo),
 		_redoButton->clicks() | rpl::map_to(Undo::Redo),
@@ -402,6 +422,8 @@ PhotoEditorControls::PhotoEditorControls(
 		const auto icon = _flipped ? &st::photoEditorFlipIconActive : nullptr;
 		_flipButton->setIconOverride(icon, icon);
 	}, _flipButton->lifetime());
+
+	updateInputMask();
 
 }
 
@@ -514,6 +536,33 @@ void PhotoEditorControls::showAnimated(
 			0.,
 			1.,
 			duration);
+	}
+}
+
+void PhotoEditorControls::updateInputMask() {
+	auto region = QRegion();
+	const auto visibleRect = rect();
+	const auto add = [&](not_null<const QWidget*> widget) {
+		if (!widget->isHidden()) {
+			const auto geometry = widget->geometry() & visibleRect;
+			if (!geometry.isEmpty()) {
+				region += geometry;
+			}
+		}
+	};
+	add(_transformButtons);
+	add(_paintBottomButtons);
+	add(_paintTopButtons);
+	if (_about && !_about->isHidden()) {
+		const auto geometry = _about->geometry() & visibleRect;
+		if (!geometry.isEmpty()) {
+			region += geometry;
+		}
+	}
+	if (region.isEmpty()) {
+		clearMask();
+	} else {
+		setMask(region);
 	}
 }
 
