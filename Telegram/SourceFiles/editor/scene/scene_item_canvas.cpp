@@ -177,12 +177,17 @@ void ItemCanvas::addStrokePoint(const QPointF &point, int64 time) {
 		const auto distance = PointDistance(
 			point,
 			_currentStroke.back().pos);
-		const auto minDistance = kMinPointDistanceBase * std::min(1.0, _zoom);
+		const auto minDistance = (_zoom > 1.0)
+			? (kMinPointDistanceBase / _zoom)
+			: (kMinPointDistanceBase * _zoom);
 		if (distance < minDistance) {
 			return;
 		}
-		if (distance > kMaxPointDistance) {
-			const auto steps = int(std::ceil(distance / kMaxPointDistance));
+		const auto maxDistance = (_zoom > 1.0)
+			? (kMaxPointDistance / _zoom)
+			: kMaxPointDistance;
+		if (distance > maxDistance) {
+			const auto steps = int(std::ceil(distance / maxDistance));
 			const auto &lastPos = _currentStroke.back().pos;
 			const auto &lastPressure = _currentStroke.back().pressure;
 			for (auto i = 1; i < steps; ++i) {
