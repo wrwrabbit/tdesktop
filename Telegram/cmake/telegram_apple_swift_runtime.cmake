@@ -9,8 +9,18 @@ function(telegram_add_apple_swift_runtime target_name)
         return()
     endif()
 
+    execute_process(
+        COMMAND xcode-select -p
+        OUTPUT_VARIABLE DEVELOPER_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+
+    set(SWIFT_LIB_DIR
+        "${DEVELOPER_DIR}/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx")
+
     target_link_options(${target_name}
     PRIVATE
+        "-L${SWIFT_LIB_DIR}"
         "-Wl,-rpath,/usr/lib/swift"
         "-Wl,-rpath,@executable_path/../Frameworks"
     )
