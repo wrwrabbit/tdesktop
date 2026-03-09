@@ -40,14 +40,19 @@ public:
 	void updateUndoState();
 
 	void handleMimeData(const QMimeData *data);
+	void paintImage(QPainter &p, const QPixmap &image) const;
+	void resetView();
 
 private:
+	bool eventFilter(QObject *obj, QEvent *e) override;
+
 	struct SavedItem {
 		std::shared_ptr<QGraphicsItem> item;
 		bool undid = false;
 	};
 
 	ItemBase::Data itemBaseData() const;
+	void applyViewTransform();
 
 	void clearRedoList();
 
@@ -60,7 +65,16 @@ private:
 		int angle = 0;
 		bool flipped = false;
 		float64 zoom = 0.;
+		float64 fitZoom = 0.;
+		float64 ratioW = 0.;
+		float64 ratioH = 0.;
+		float64 userZoom = 1.;
 	} _transform;
+
+	struct {
+		bool active = false;
+		QPoint point;
+	} _pan;
 
 	rpl::variable<bool> _hasUndo = true;
 	rpl::variable<bool> _hasRedo = true;

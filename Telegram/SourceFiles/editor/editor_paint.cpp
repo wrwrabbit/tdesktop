@@ -8,19 +8,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/editor_paint.h"
 
 #include "core/mime_type.h"
-#include "ui/boxes/confirm_box.h"
 #include "editor/controllers/controllers.h"
-#include "editor/scene/scene.h"
 #include "editor/scene/scene_item_canvas.h"
 #include "editor/scene/scene_item_image.h"
 #include "editor/scene/scene_item_sticker.h"
+#include "editor/scene/scene.h"
 #include "lang/lang_keys.h"
 #include "lottie/lottie_single_player.h"
 #include "storage/storage_media_prepare.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/chat/attach/attach_prepare.h"
+#include "ui/rect.h"
 #include "ui/ui_utility.h"
 
 #include <QGraphicsView>
+#include <QScrollBar>
+#include <QWheelEvent>
 #include <QtCore/QMimeData>
 
 namespace Editor {
@@ -28,6 +31,9 @@ namespace {
 
 constexpr auto kMaxBrush = 25.;
 constexpr auto kMinBrush = 1.;
+constexpr auto kMinCanvasZoom = 1.;
+constexpr auto kMaxCanvasZoom = 8.;
+constexpr auto kCanvasZoomStep = 1.15;
 
 std::shared_ptr<Scene> EnsureScene(
 		PhotoModifications &mods,
@@ -61,6 +67,7 @@ Paint::Paint(
 	_view->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 	_view->setFrameStyle(int(QFrame::NoFrame) | QFrame::Plain);
 	_view->viewport()->setAutoFillBackground(false);
+	_view->viewport()->installEventFilter(this);
 
 	// Undo / Redo.
 	controllers->undoController->performRequestChanges(
@@ -128,6 +135,9 @@ void Paint::applyTransform(QRect geometry, int angle, bool flipped) {
 	if (geometry.isEmpty()) {
 		return;
 	}
+	const auto center = _view->viewport()->rect().isEmpty()
+		? rect::center(_scene->sceneRect())
+		: _view->mapToScene(_view->viewport()->rect().center());
 	setGeometry(geometry);
 	const auto size = geometry.size();
 
@@ -139,15 +149,21 @@ void Paint::applyTransform(QRect geometry, int angle, bool flipped) {
 		* (flipped ? -1 : 1);
 	const auto ratioH = size.height() / float64(rotatedImageSize.height());
 
-	_view->setTransform(QTransform().scale(ratioW, ratioH).rotate(angle));
 	_view->setGeometry(QRect(QPoint(), size));
 
 	_transform = {
 		.angle = angle,
 		.flipped = flipped,
-		.zoom = size.width() / float64(_scene->sceneRect().width()),
+		.fitZoom = ((std::abs(ratioW) + std::abs(ratioH)) / 2.),
+		.ratioW = ratioW,
+		.ratioH = ratioH,
+		.userZoom = _transform.userZoom,
 	};
-	_scene->updateZoom(_transform.zoom);
+	applyViewTransform();
+	_view->centerOn(center);
+	if (const auto parent = parentWidget()) {
+		parent->update(geometry);
+	}
 }
 
 std::shared_ptr<Scene> Paint::saveScene() const {
@@ -220,6 +236,30 @@ void Paint::handleMimeData(const QMimeData *data) {
 	}
 }
 
+void Paint::paintImage(QPainter &p, const QPixmap &image) const {
+	if (_view->geometry().isEmpty()) {
+		return;
+	}
+	p.save();
+	p.setClipRect(geometry(), Qt::IntersectClip);
+	p.translate(pos());
+	p.setTransform(_view->viewportTransform(), true);
+	p.drawPixmap(Rect(_imageSize), image);
+	p.restore();
+}
+
+void Paint::resetView() {
+	if (_transform.userZoom == kMinCanvasZoom) {
+		return;
+	}
+	_transform.userZoom = kMinCanvasZoom;
+	applyViewTransform();
+	_view->centerOn(rect::center(_scene->sceneRect()));
+	if (const auto parent = parentWidget()) {
+		parent->update(geometry());
+	}
+}
+
 ItemBase::Data Paint::itemBaseData() const {
 	const auto s = _scene->sceneRect().toRect().size();
 	const auto size = std::min(s.width(), s.height()) / 2;
@@ -235,6 +275,91 @@ ItemBase::Data Paint::itemBaseData() const {
 		.rotation = -_transform.angle,
 		.imageSize = _imageSize,
 	};
+}
+
+void Paint::applyViewTransform() {
+	_view->setTransform(QTransform()
+		.scale(
+			_transform.ratioW * _transform.userZoom,
+			_transform.ratioH * _transform.userZoom)
+		.rotate(_transform.angle));
+	_transform.zoom = _transform.fitZoom * _transform.userZoom;
+	_scene->updateZoom(_transform.zoom);
+}
+
+bool Paint::eventFilter(QObject *obj, QEvent *e) {
+	if (obj != _view->viewport()) {
+		return RpWidget::eventFilter(obj, e);
+	}
+	if (e->type() == QEvent::Wheel) {
+		const auto wheel = static_cast<QWheelEvent*>(e);
+		const auto delta = wheel->angleDelta().y();
+		if (!delta) {
+			return true;
+		}
+
+		const auto step = delta / float64(QWheelEvent::DefaultDeltasPerStep);
+		const auto factor = std::pow(kCanvasZoomStep, step);
+		const auto newZoom = std::clamp(
+			_transform.userZoom * factor,
+			kMinCanvasZoom,
+			kMaxCanvasZoom);
+		if (std::abs(newZoom - _transform.userZoom) < 0.0001) {
+			return true;
+		}
+
+		const auto viewportPoint = wheel->position().toPoint();
+		const auto scenePoint = _view->mapToScene(viewportPoint);
+		_transform.userZoom = newZoom;
+		applyViewTransform();
+		const auto scenePointAfter = _view->mapToScene(viewportPoint);
+		const auto center = _view->mapToScene(rect::center(_view->viewport()->rect()));
+		_view->centerOn(center - (scenePointAfter - scenePoint));
+		if (const auto parent = parentWidget()) {
+			parent->update(geometry());
+		}
+		return true;
+	} else if (e->type() == QEvent::MouseButtonPress) {
+		const auto mouse = static_cast<QMouseEvent*>(e);
+		if (mouse->button() == Qt::MiddleButton) {
+			_pan = {
+				.active = (_transform.userZoom > kMinCanvasZoom),
+				.point = mouse->pos(),
+			};
+			if (_pan.active) {
+				_view->viewport()->setCursor(Qt::ClosedHandCursor);
+			}
+			return true;
+		}
+	} else if (e->type() == QEvent::MouseMove) {
+		const auto mouse = static_cast<QMouseEvent*>(e);
+		if (_pan.active) {
+			const auto point = mouse->pos();
+			const auto delta = point - _pan.point;
+			_pan.point = point;
+
+			if (_transform.userZoom > kMinCanvasZoom) {
+				_view->horizontalScrollBar()->setValue(
+					_view->horizontalScrollBar()->value() - delta.x());
+				_view->verticalScrollBar()->setValue(
+					_view->verticalScrollBar()->value() - delta.y());
+				if (const auto parent = parentWidget()) {
+					parent->update(geometry());
+				}
+			}
+			return true;
+		}
+	} else if (e->type() == QEvent::MouseButtonRelease) {
+		const auto mouse = static_cast<QMouseEvent*>(e);
+		if (mouse->button() == Qt::MiddleButton) {
+			if (_pan.active) {
+				_view->viewport()->unsetCursor();
+			}
+			_pan.active = false;
+			return true;
+		}
+	}
+	return RpWidget::eventFilter(obj, e);
 }
 
 } // namespace Editor
