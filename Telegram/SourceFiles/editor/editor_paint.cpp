@@ -57,6 +57,7 @@ Paint::Paint(
 , _controllers(controllers)
 , _scene(EnsureScene(modifications, imageSize))
 , _view(base::make_unique_q<QGraphicsView>(_scene.get(), this))
+, _viewport(_view->viewport())
 , _imageSize(imageSize) {
 	Expects(modifications.paint != nullptr);
 
@@ -66,8 +67,8 @@ Paint::Paint(
 	_view->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 	_view->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 	_view->setFrameStyle(int(QFrame::NoFrame) | QFrame::Plain);
-	_view->viewport()->setAutoFillBackground(false);
-	_view->viewport()->installEventFilter(this);
+	_viewport->setAutoFillBackground(false);
+	_viewport->installEventFilter(this);
 
 	// Undo / Redo.
 	controllers->undoController->performRequestChanges(
@@ -129,6 +130,12 @@ Paint::Paint(
 		updateUndoState();
 	}, lifetime());
 
+}
+
+Paint::~Paint() {
+	if (_viewport) {
+		_viewport->removeEventFilter(this);
+	}
 }
 
 void Paint::applyTransform(QRect geometry, int angle, bool flipped) {
@@ -288,8 +295,12 @@ void Paint::applyViewTransform() {
 }
 
 bool Paint::eventFilter(QObject *obj, QEvent *e) {
-	if (obj != _view->viewport()) {
+	if (obj != _viewport) {
 		return RpWidget::eventFilter(obj, e);
+	}
+	const auto view = _view.get();
+	if (!view || !_viewport) {
+		return true;
 	}
 	if (e->type() == QEvent::Wheel) {
 		const auto wheel = static_cast<QWheelEvent*>(e);
@@ -309,12 +320,12 @@ bool Paint::eventFilter(QObject *obj, QEvent *e) {
 		}
 
 		const auto viewportPoint = wheel->position().toPoint();
-		const auto scenePoint = _view->mapToScene(viewportPoint);
+		const auto scenePoint = view->mapToScene(viewportPoint);
 		_transform.userZoom = newZoom;
 		applyViewTransform();
-		const auto scenePointAfter = _view->mapToScene(viewportPoint);
-		const auto center = _view->mapToScene(rect::center(_view->viewport()->rect()));
-		_view->centerOn(center - (scenePointAfter - scenePoint));
+		const auto scenePointAfter = view->mapToScene(viewportPoint);
+		const auto center = view->mapToScene(rect::center(_viewport->rect()));
+		view->centerOn(center - (scenePointAfter - scenePoint));
 		if (const auto parent = parentWidget()) {
 			parent->update(geometry());
 		}
@@ -327,7 +338,7 @@ bool Paint::eventFilter(QObject *obj, QEvent *e) {
 				.point = mouse->pos(),
 			};
 			if (_pan.active) {
-				_view->viewport()->setCursor(Qt::ClosedHandCursor);
+				_viewport->setCursor(Qt::ClosedHandCursor);
 			}
 			return true;
 		}
@@ -339,10 +350,10 @@ bool Paint::eventFilter(QObject *obj, QEvent *e) {
 			_pan.point = point;
 
 			if (_transform.userZoom > kMinCanvasZoom) {
-				_view->horizontalScrollBar()->setValue(
-					_view->horizontalScrollBar()->value() - delta.x());
-				_view->verticalScrollBar()->setValue(
-					_view->verticalScrollBar()->value() - delta.y());
+				view->horizontalScrollBar()->setValue(
+					view->horizontalScrollBar()->value() - delta.x());
+				view->verticalScrollBar()->setValue(
+					view->verticalScrollBar()->value() - delta.y());
 				if (const auto parent = parentWidget()) {
 					parent->update(geometry());
 				}
@@ -353,7 +364,7 @@ bool Paint::eventFilter(QObject *obj, QEvent *e) {
 		const auto mouse = static_cast<QMouseEvent*>(e);
 		if (mouse->button() == Qt::MiddleButton) {
 			if (_pan.active) {
-				_view->viewport()->unsetCursor();
+				_viewport->unsetCursor();
 			}
 			_pan.active = false;
 			return true;

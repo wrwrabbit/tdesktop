@@ -29,6 +29,7 @@ public:
 		PhotoModifications &modifications,
 		const QSize &imageSize,
 		std::shared_ptr<Controllers> controllers);
+	~Paint() override;
 
 	[[nodiscard]] std::shared_ptr<Scene> saveScene() const;
 	void restoreScene();
@@ -59,6 +60,7 @@ private:
 	const std::shared_ptr<Controllers> _controllers;
 	const std::shared_ptr<Scene> _scene;
 	const base::unique_qptr<QGraphicsView> _view;
+	QPointer<QWidget> _viewport;
 	const QSize _imageSize;
 
 	struct {
