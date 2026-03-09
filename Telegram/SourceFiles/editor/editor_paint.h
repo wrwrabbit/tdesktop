@@ -46,6 +46,7 @@ public:
 
 private:
 	bool eventFilter(QObject *obj, QEvent *e) override;
+	void updateViewGeometry();
 
 	struct SavedItem {
 		std::shared_ptr<QGraphicsItem> item;
@@ -62,6 +63,8 @@ private:
 	const base::unique_qptr<QGraphicsView> _view;
 	QPointer<QWidget> _viewport;
 	const QSize _imageSize;
+	QRect _imageGeometry;
+	QRect _outerGeometry;
 
 	struct {
 		int angle = 0;

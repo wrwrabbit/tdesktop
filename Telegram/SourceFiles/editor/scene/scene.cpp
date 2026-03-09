@@ -73,7 +73,7 @@ void Scene::removeItem(const ItemPtr &item) {
 
 void Scene::mousePressEvent(QGraphicsSceneMouseEvent *event) {
 	QGraphicsScene::mousePressEvent(event);
-	if (SkipMouseEvent(event)) {
+	if (SkipMouseEvent(event) || !sceneRect().contains(event->scenePos())) {
 		return;
 	}
 	_canvas->handleMousePressEvent(event);

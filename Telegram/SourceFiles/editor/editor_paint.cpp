@@ -34,6 +34,7 @@ constexpr auto kMinBrush = 1.;
 constexpr auto kMinCanvasZoom = 1.;
 constexpr auto kMaxCanvasZoom = 8.;
 constexpr auto kCanvasZoomStep = 1.15;
+constexpr auto kZoomEpsilon = 0.0001;
 
 std::shared_ptr<Scene> EnsureScene(
 		PhotoModifications &mods,
@@ -138,14 +139,30 @@ Paint::~Paint() {
 	}
 }
 
+void Paint::updateViewGeometry() {
+	if (_imageGeometry.isEmpty()) {
+		return;
+	}
+	const auto target = (_transform.userZoom - kMinCanvasZoom) > kZoomEpsilon
+		? _outerGeometry
+		: _imageGeometry;
+	if (geometry() != target) {
+		setGeometry(target);
+	}
+	_view->setGeometry(rect());
+}
+
 void Paint::applyTransform(QRect geometry, int angle, bool flipped) {
 	if (geometry.isEmpty()) {
 		return;
 	}
-	const auto center = _view->viewport()->rect().isEmpty()
+	_imageGeometry = geometry;
+	_outerGeometry = parentWidget() ? parentWidget()->rect() : geometry;
+
+	const auto center = (_transform.fitZoom <= 0.)
+		|| _view->viewport()->rect().isEmpty()
 		? rect::center(_scene->sceneRect())
 		: _view->mapToScene(_view->viewport()->rect().center());
-	setGeometry(geometry);
 	const auto size = geometry.size();
 
 	const auto rotatedImageSize = QTransform()
@@ -156,7 +173,7 @@ void Paint::applyTransform(QRect geometry, int angle, bool flipped) {
 		* (flipped ? -1 : 1);
 	const auto ratioH = size.height() / float64(rotatedImageSize.height());
 
-	_view->setGeometry(QRect(QPoint(), size));
+	_view->setGeometry(rect());
 
 	_transform = {
 		.angle = angle,
@@ -166,10 +183,11 @@ void Paint::applyTransform(QRect geometry, int angle, bool flipped) {
 		.ratioH = ratioH,
 		.userZoom = _transform.userZoom,
 	};
+	updateViewGeometry();
 	applyViewTransform();
 	_view->centerOn(center);
 	if (const auto parent = parentWidget()) {
-		parent->update(geometry);
+		parent->update();
 	}
 }
 
@@ -260,6 +278,7 @@ void Paint::resetView() {
 		return;
 	}
 	_transform.userZoom = kMinCanvasZoom;
+	updateViewGeometry();
 	applyViewTransform();
 	_view->centerOn(rect::center(_scene->sceneRect()));
 	if (const auto parent = parentWidget()) {
@@ -320,10 +339,13 @@ bool Paint::eventFilter(QObject *obj, QEvent *e) {
 		}
 
 		const auto viewportPoint = wheel->position().toPoint();
+		const auto globalPoint = _viewport->mapToGlobal(viewportPoint);
 		const auto scenePoint = view->mapToScene(viewportPoint);
 		_transform.userZoom = newZoom;
+		updateViewGeometry();
 		applyViewTransform();
-		const auto scenePointAfter = view->mapToScene(viewportPoint);
+		const auto scenePointAfter = view->mapToScene(
+			_viewport->mapFromGlobal(globalPoint));
 		const auto center = view->mapToScene(rect::center(_viewport->rect()));
 		view->centerOn(center - (scenePointAfter - scenePoint));
 		if (const auto parent = parentWidget()) {
