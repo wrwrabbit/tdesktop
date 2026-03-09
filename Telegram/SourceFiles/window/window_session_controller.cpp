@@ -616,6 +616,14 @@ void SessionNavigation::showPeerByLinkResolved(
 	using Scope = AddBotToGroupBoxController::Scope;
 	const auto user = peer->asUser();
 	const auto bot = (user && user->isBot()) ? user : nullptr;
+	const auto applyBotStartToken = [&] {
+		if (bot && bot->botInfo->startToken != info.startToken) {
+			bot->botInfo->startToken = info.startToken;
+			bot->session().changes().peerUpdated(
+				bot,
+				Data::PeerUpdate::Flag::BotStartToken);
+		}
+	};
 
 	// t.me/username/012345 - we thought it was a channel post link, but
 	// after resolving the username we found out it is a bot.
@@ -624,6 +632,16 @@ void SessionNavigation::showPeerByLinkResolved(
 		&& info.resolveType == ResolveType::Default)
 		? ResolveType::BotApp
 		: info.resolveType;
+
+	// Show specific posts only in channels / supergroups.
+	const auto useRequestedMessageId = peer->isChannel();
+	const auto msgId = useRequestedMessageId
+		? info.messageId
+		: info.startAutoSubmit
+		? ShowAndStartBotMsgId
+		: (bot && !info.startToken.isEmpty())
+		? ShowAndMaybeStartBotMsgId
+		: ShowAtUnreadMsgId;
 
 	const auto &replies = info.repliesInfo;
 	if (const auto threadId = std::get_if<ThreadId>(&replies)) {
@@ -637,39 +655,29 @@ void SessionNavigation::showPeerByLinkResolved(
 				controller->showForum(forum);
 			}
 		}
-		showRepliesForMessage(
-			history,
-			threadId->id,
-			info.messageId,
-			params);
+		showRepliesForMessage(history, threadId->id, msgId, params);
 	} else if (const auto commentId = std::get_if<CommentId>(&replies)) {
-		showRepliesForMessage(
-			session().data().history(peer),
-			info.messageId,
-			commentId->id,
-			params);
+		const auto history = peer->owner().history(peer);
+		showRepliesForMessage(history, msgId, commentId->id, params);
 	} else if (resolveType == ResolveType::Profile) {
 		showPeerInfo(peer, params);
 	} else if (resolveType == ResolveType::HashtagSearch) {
 		searchMessages(info.text, peer->owner().history(peer));
 	} else if (peer->isForum() && resolveType != ResolveType::Boost) {
-		const auto itemId = info.messageId;
-		if (!itemId) {
-			parentController()->showForum(peer->forum(), params);
-		} else if (const auto item = peer->owner().message(peer, itemId)) {
+		if (!msgId || !useRequestedMessageId) {
+			applyBotStartToken();
+			parentController()->showForum(peer->forum(), params, msgId);
+		} else if (const auto item = peer->owner().message(peer, msgId)) {
 			showMessageByLinkResolved(item, info);
 		} else {
 			const auto callback = crl::guard(this, [=] {
-				if (const auto item = peer->owner().message(peer, itemId)) {
+				if (const auto item = peer->owner().message(peer, msgId)) {
 					showMessageByLinkResolved(item, info);
 				} else {
-					showPeerHistory(peer, params, itemId);
+					showPeerHistory(peer, params, msgId);
 				}
 			});
-			peer->session().api().requestMessageData(
-				peer,
-				info.messageId,
-				callback);
+			peer->session().api().requestMessageData(peer, msgId, callback);
 		}
 	} else if (info.storyParam == u"live"_q) {
 		parentController()->openPeerStories(peer->id, std::nullopt, true);
@@ -752,21 +760,8 @@ void SessionNavigation::showPeerByLinkResolved(
 		; monoforum && resolveType == ResolveType::ChannelDirect) {
 		showPeerHistory(monoforum, params, ShowAtUnreadMsgId);
 	} else {
-		// Show specific posts only in channels / supergroups.
-		const auto msgId = peer->isChannel()
-			? info.messageId
-			: info.startAutoSubmit
-			? ShowAndStartBotMsgId
-			: (bot && !info.startToken.isEmpty())
-			? ShowAndMaybeStartBotMsgId
-			: ShowAtUnreadMsgId;
 		const auto attachBotUsername = info.attachBotUsername;
-		if (bot && bot->botInfo->startToken != info.startToken) {
-			bot->botInfo->startToken = info.startToken;
-			bot->session().changes().peerUpdated(
-				bot,
-				Data::PeerUpdate::Flag::BotStartToken);
-		}
+		applyBotStartToken();
 		if (!attachBotUsername.isEmpty()) {
 			crl::on_main(this, [=] {
 				const auto history = peer->owner().history(peer);
@@ -2021,12 +2016,13 @@ void SessionController::closeFolder() {
 
 bool SessionController::showForumInDifferentWindow(
 		not_null<Data::Forum*> forum,
-		const SectionShow &params) {
+		const SectionShow &params,
+		MsgId showAtMsgId) {
 	const auto window = Core::App().windowForShowingForum(forum);
 	if (window == _window) {
 		return false;
 	} else if (window) {
-		window->sessionController()->showForum(forum, params);
+		window->sessionController()->showForum(forum, params, showAtMsgId);
 		window->activate();
 		return true;
 	} else if (windowId().hasChatsList()) {
@@ -2039,7 +2035,7 @@ bool SessionController::showForumInDifferentWindow(
 		primary = Core::App().separateWindowFor(account);
 	}
 	if (primary && &primary->account() == account) {
-		primary->sessionController()->showForum(forum, params);
+		primary->sessionController()->showForum(forum, params, showAtMsgId);
 		primary->activate();
 	}
 	return true;
@@ -2047,15 +2043,19 @@ bool SessionController::showForumInDifferentWindow(
 
 void SessionController::showForum(
 		not_null<Data::Forum*> forum,
-		const SectionShow &params) {
+		const SectionShow &params,
+		MsgId showAtMsgId) {
 	const auto forced = params.forceTopicsList;
-	if (showForumInDifferentWindow(forum, params)) {
+	if (showForumInDifferentWindow(forum, params, showAtMsgId)) {
 		return;
 	} else if (!forced && forum->peer()->useSubsectionTabs()) {
-		if (const auto active = forum->activeSubsectionThread()) {
-			showThread(active, ShowAtUnreadMsgId, params);
+		const auto active = (showAtMsgId == ShowAtUnreadMsgId)
+			? forum->activeSubsectionThread()
+			: nullptr;
+		if (active) {
+			showThread(active, showAtMsgId, params);
 		} else {
-			showPeerHistory(forum->peer(), params);
+			showPeerHistory(forum->peer(), params, showAtMsgId);
 		}
 		return;
 	}
