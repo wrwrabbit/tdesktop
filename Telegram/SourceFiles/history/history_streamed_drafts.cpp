@@ -56,7 +56,6 @@ void HistoryStreamedDrafts::apply(
 			.flags = MessageFlag::Local | MessageFlag::HasReplyInfo,
 			.from = fromId,
 			.replyTo = {
-				.messageId = { _history->peer->id, rootId },
 				.topicRootId = rootId,
 			},
 			.date = when,
