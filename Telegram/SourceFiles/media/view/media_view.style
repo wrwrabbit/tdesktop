@@ -725,6 +725,7 @@ storiesComposeControls: ComposeControls(defaultComposeControls) {
 			rippleAreaPosition: point(1px, 1px);
 		}
 		sendDisabledFg: storiesComposeGrayText;
+		sendIconFg: windowFgActive;
 	}
 	attach: storiesAttach;
 	emoji: storiesAttachEmoji;

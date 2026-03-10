@@ -155,6 +155,7 @@ SendButton {
 	stars: RoundButton;
 	recordSize: size;
 	sendDisabledFg: color;
+	sendIconFg: color;
 }
 
 RecordBarLock {
@@ -1403,6 +1404,7 @@ historySend: SendButton {
 	}
 	recordSize: size(26px, 26px);
 	sendDisabledFg: historyComposeIconFg;
+	sendIconFg: historySendIconFg;
 }
 historyRecordFrameIndex: 30;
 
