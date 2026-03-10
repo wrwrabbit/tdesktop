@@ -29,7 +29,7 @@ public:
 
 	Scene(const QRectF &rect);
 	~Scene();
-	void applyBrush(const QColor &color, float size);
+	void applyBrush(const QColor &color, float size, Brush::Tool tool);
 
 	[[nodiscard]] std::vector<ItemPtr> items(
 		Qt::SortOrder order = Qt::DescendingOrder) const;

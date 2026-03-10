@@ -35,7 +35,8 @@ Scene::Scene(const QRectF &rect)
 	_canvas->grabContentRequests(
 	) | rpl::on_next([=](ItemCanvas::Content &&content) {
 		const auto item = std::make_shared<ItemLine>(
-			std::move(content.pixmap));
+			std::move(content.pixmap),
+			content.clear);
 		item->setPos(content.position);
 		addItem(item);
 		_canvas->setZValue(++_lastLineZ);
@@ -95,8 +96,8 @@ void Scene::mouseMoveEvent(QGraphicsSceneMouseEvent *event) {
 	_canvas->handleMouseMoveEvent(event);
 }
 
-void Scene::applyBrush(const QColor &color, float size) {
-	_canvas->applyBrush(color, size);
+void Scene::applyBrush(const QColor &color, float size, Brush::Tool tool) {
+	_canvas->applyBrush(color, size, tool);
 }
 
 rpl::producer<> Scene::addsItem() const {

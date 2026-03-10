@@ -13,7 +13,7 @@ namespace Editor {
 
 class ItemLine : public NumberedItem {
 public:
-	ItemLine(QPixmap &&pixmap);
+	ItemLine(QPixmap &&pixmap, bool clear = false);
 	QRectF boundingRect() const override;
 	void paint(
 		QPainter *p,
@@ -33,6 +33,7 @@ protected:
 private:
 	const QPixmap _pixmap;
 	const QRectF _rect;
+	const bool _clear = false;
 
 	struct {
 		bool saved = false;

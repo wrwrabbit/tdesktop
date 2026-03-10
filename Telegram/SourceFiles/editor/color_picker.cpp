@@ -188,6 +188,7 @@ ColorPicker::ColorPicker(
 	.color = (savedBrush.color.isValid()
 		? savedBrush.color
 		: QColor(234, 39, 57)),
+	.tool = savedBrush.tool,
 }) {
 	_colorButton->resize(
 		st::photoEditorColorButtonSize,
@@ -212,6 +213,27 @@ ColorPicker::ColorPicker(
 			st::photoEditorToolButtonSize,
 			st::photoEditorToolButtonSize);
 		button->show();
+	}
+	const auto setTool = [=](Brush::Tool tool) {
+		if (_brush.tool == tool) {
+			return;
+		}
+		_brush.tool = tool;
+		_saveBrushRequests.fire_copy(_brush);
+	};
+	if (_toolButtons.size() >= 4) {
+		_toolButtons[0]->setClickedCallback([=] {
+			setTool(Brush::Tool::Pen);
+		});
+		_toolButtons[1]->setClickedCallback([=] {
+			setTool(Brush::Tool::Arrow);
+		});
+		_toolButtons[2]->setClickedCallback([=] {
+			setTool(Brush::Tool::Marker);
+		});
+		_toolButtons[3]->setClickedCallback([=] {
+			setTool(Brush::Tool::Eraser);
+		});
 	}
 	_paletteWrap->setVisible(false);
 	_sizeControl->resize(

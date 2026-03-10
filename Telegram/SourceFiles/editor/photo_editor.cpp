@@ -27,7 +27,9 @@ constexpr auto kPrecision = 100000;
 	auto result = QByteArray();
 	auto stream = QDataStream(&result, QIODevice::WriteOnly);
 	stream.setVersion(QDataStream::Qt_5_3);
-	stream << qint32(brush.sizeRatio * kPrecision) << brush.color;
+	stream << qint32(brush.sizeRatio * kPrecision)
+		<< brush.color
+		<< qint32(int(brush.tool));
 	stream.device()->close();
 
 	return result;
@@ -37,11 +39,26 @@ constexpr auto kPrecision = 100000;
 	auto stream = QDataStream(data);
 	auto result = Brush();
 	auto size = qint32(0);
+	auto tool = qint32(int(Brush::Tool::Pen));
 	stream >> size >> result.color;
+	if (stream.status() != QDataStream::Ok) {
+		return Brush();
+	}
+	if (!stream.atEnd()) {
+		stream >> tool;
+		if (stream.status() == QDataStream::Ok) {
+			switch (tool) {
+			case int(Brush::Tool::Pen):
+			case int(Brush::Tool::Arrow):
+			case int(Brush::Tool::Marker):
+			case int(Brush::Tool::Eraser):
+				result.tool = Brush::Tool(tool);
+				break;
+			}
+		}
+	}
 	result.sizeRatio = size / float(kPrecision);
-	return (stream.status() != QDataStream::Ok)
-		? Brush()
-		: result;
+	return result;
 }
 
 } // namespace

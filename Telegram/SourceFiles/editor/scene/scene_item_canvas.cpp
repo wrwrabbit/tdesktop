@@ -6,9 +6,11 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "editor/scene/scene_item_canvas.h"
+#include "styles/style_editor.h"
 
 #include <QGraphicsScene>
 #include <QGraphicsSceneMouseEvent>
+#include <QtMath>
 
 namespace Editor {
 namespace {
@@ -50,11 +52,17 @@ void ItemCanvas::clearPixmap() {
 	_p->setBrush(_brushData.color);
 }
 
-void ItemCanvas::applyBrush(const QColor &color, float size) {
+void ItemCanvas::applyBrush(const QColor &color, float size, Brush::Tool tool) {
 	_brushData.color = color;
 	_brushData.size = size;
+	_brushData.tool = tool;
 	_p->setBrush(color);
-	_brushMargins = QMarginsF(size, size, size, size);// / 2.;
+	const auto width = strokeWidth(1.0);
+	const auto extra = (tool == Brush::Tool::Arrow)
+		? arrowHeadLength()
+		: 0.;
+	const auto margin = width + extra;
+	_brushMargins = QMarginsF(margin, margin, margin, margin);
 }
 
 QRectF ItemCanvas::boundingRect() const {
@@ -106,6 +114,29 @@ std::vector<ItemCanvas::StrokePoint> ItemCanvas::smoothStroke(
 	return result;
 }
 
+float64 ItemCanvas::strokeWidth(float64 pressure) const {
+	auto width = _brushData.size * pressure;
+	if (_brushData.tool == Brush::Tool::Marker) {
+		width *= st::photoEditorMarkerSizeMultiplier;
+	}
+	return width;
+}
+
+QColor ItemCanvas::strokeColor() const {
+	if (_brushData.tool == Brush::Tool::Eraser) {
+		return QColor(0, 0, 0, 255);
+	}
+	auto color = _brushData.color;
+	if (_brushData.tool == Brush::Tool::Marker) {
+		color.setAlphaF(color.alphaF() * st::photoEditorMarkerOpacity);
+	}
+	return color;
+}
+
+float64 ItemCanvas::arrowHeadLength() const {
+	return _brushData.size * st::photoEditorArrowHeadLengthFactor;
+}
+
 void ItemCanvas::renderSegment(
 		const std::vector<StrokePoint> &points,
 		int startIdx) {
@@ -136,13 +167,21 @@ void ItemCanvas::renderSegment(
 				return sum + p.pressure;
 			}) / count
 		: 1.0;
-	const auto width = _brushData.size * avgPressure;
+	const auto width = strokeWidth(avgPressure);
 	auto stroker = QPainterPathStroker();
 	stroker.setWidth(width);
 	stroker.setCapStyle(Qt::RoundCap);
 	stroker.setJoinStyle(Qt::RoundJoin);
 	const auto outline = stroker.createStroke(path);
-	_p->fillPath(outline, _brushData.color);
+	const auto color = strokeColor();
+	if (_brushData.tool == Brush::Tool::Marker) {
+		_p->save();
+		_p->setCompositionMode(QPainter::CompositionMode_Source);
+		_p->fillPath(outline, color);
+		_p->restore();
+	} else {
+		_p->fillPath(outline, color);
+	}
 	_rectToUpdate |= outline.boundingRect() + _brushMargins;
 }
 
@@ -170,6 +209,59 @@ void ItemCanvas::drawIncrementalStroke() {
 	_lastRenderedIndex = std::max(
 		0,
 		int(_currentStroke.size()) - kSegmentOverlap);
+}
+
+void ItemCanvas::drawArrowHead() {
+	if (_brushData.tool != Brush::Tool::Arrow) {
+		return;
+	}
+	if (_currentStroke.size() < 2) {
+		return;
+	}
+	const auto tip = _currentStroke.back().pos;
+	const auto minDistance = _brushData.size
+		* st::photoEditorArrowHeadMinDistanceFactor;
+	auto base = _currentStroke.front().pos;
+	for (auto i = int(_currentStroke.size()) - 2; i >= 0; --i) {
+		const auto &p = _currentStroke[i].pos;
+		if (PointDistance(tip, p) >= minDistance) {
+			base = p;
+			break;
+		}
+	}
+	auto direction = tip - base;
+	const auto length = std::sqrt(
+		direction.x() * direction.x()
+			+ direction.y() * direction.y());
+	if (length <= 0.) {
+		return;
+	}
+	direction /= length;
+	const auto angle = qDegreesToRadians(
+		double(st::photoEditorArrowHeadAngleDegrees));
+	const auto sinA = std::sin(angle);
+	const auto cosA = std::cos(angle);
+	const auto rotate = [&](const QPointF &v, float64 s, float64 c) {
+		return QPointF(v.x() * c - v.y() * s, v.x() * s + v.y() * c);
+	};
+	const auto headLength = arrowHeadLength();
+	const auto left = tip - rotate(direction, sinA, cosA) * headLength;
+	const auto right = tip - rotate(direction, -sinA, cosA) * headLength;
+
+	auto arrow = QPainterPath();
+	arrow.moveTo(tip);
+	arrow.lineTo(left);
+	arrow.moveTo(tip);
+	arrow.lineTo(right);
+	auto stroker = QPainterPathStroker();
+	stroker.setWidth(strokeWidth(_currentStroke.back().pressure));
+	stroker.setCapStyle(Qt::RoundCap);
+	stroker.setJoinStyle(Qt::RoundJoin);
+	const auto outline = stroker.createStroke(arrow);
+	_p->fillPath(outline, strokeColor());
+	_rectToUpdate |= outline.boundingRect() + _brushMargins;
+	computeContentRect(left);
+	computeContentRect(right);
 }
 
 void ItemCanvas::addStrokePoint(const QPointF &point, int64 time) {
@@ -261,6 +353,7 @@ void ItemCanvas::handleMouseReleaseEvent(
 	}
 	_drawing = false;
 	drawIncrementalStroke();
+	drawArrowHead();
 	update(_rectToUpdate);
 	if (_contentRect.isValid()) {
 		const auto scaledContentRect = QRectF(
@@ -271,6 +364,7 @@ void ItemCanvas::handleMouseReleaseEvent(
 		_grabContentRequests.fire({
 			.pixmap = _pixmap.copy(scaledContentRect.toRect()),
 			.position = _contentRect.topLeft(),
+			.clear = (_brushData.tool == Brush::Tool::Eraser),
 		});
 	}
 	_currentStroke.clear();
@@ -286,7 +380,14 @@ void ItemCanvas::paint(
 		const QStyleOptionGraphicsItem *,
 		QWidget *) {
 	p->fillRect(_rectToUpdate, Qt::transparent);
-	p->drawPixmap(0, 0, _pixmap);
+	if (_brushData.tool == Brush::Tool::Eraser) {
+		p->save();
+		p->setCompositionMode(QPainter::CompositionMode_Clear);
+		p->drawPixmap(0, 0, _pixmap);
+		p->restore();
+	} else {
+		p->drawPixmap(0, 0, _pixmap);
+	}
 	_rectToUpdate = QRectF();
 }
 

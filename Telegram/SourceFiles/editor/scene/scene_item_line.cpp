@@ -11,9 +11,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Editor {
 
-ItemLine::ItemLine(QPixmap &&pixmap)
+ItemLine::ItemLine(QPixmap &&pixmap, bool clear)
 : _pixmap(std::move(pixmap))
-, _rect(QPointF(), _pixmap.size() / float64(style::DevicePixelRatio())) {
+, _rect(QPointF(), _pixmap.size() / float64(style::DevicePixelRatio()))
+, _clear(clear) {
 }
 
 QRectF ItemLine::boundingRect() const {
@@ -24,6 +25,13 @@ void ItemLine::paint(
 		QPainter *p,
 		const QStyleOptionGraphicsItem *,
 		QWidget *) {
+	if (_clear) {
+		p->save();
+		p->setCompositionMode(QPainter::CompositionMode_Clear);
+		p->drawPixmap(0, 0, _pixmap);
+		p->restore();
+		return;
+	}
 	p->drawPixmap(0, 0, _pixmap);
 }
 

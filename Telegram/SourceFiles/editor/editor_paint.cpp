@@ -224,7 +224,8 @@ void Paint::updateUndoState() {
 void Paint::applyBrush(const Brush &brush) {
 	_scene->applyBrush(
 		brush.color,
-		(kMinBrush + float64(kMaxBrush - kMinBrush) * brush.sizeRatio));
+		(kMinBrush + float64(kMaxBrush - kMinBrush) * brush.sizeRatio),
+		brush.tool);
 }
 
 void Paint::handleMimeData(const QMimeData *data) {

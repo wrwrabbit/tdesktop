@@ -105,6 +105,12 @@ photoEditorToolButtonIconSize: 20px;
 photoEditorToolButtonGap: 6px;
 photoEditorToolButtonHoverDuration: 350;
 
+photoEditorMarkerOpacity: 0.35;
+photoEditorMarkerSizeMultiplier: 2.5;
+photoEditorArrowHeadLengthFactor: 2.5;
+photoEditorArrowHeadMinDistanceFactor: 1.5;
+photoEditorArrowHeadAngleDegrees: 26;
+
 photoEditorBrushSizeControlLeftSkip: 0px;
 photoEditorBrushSizeControlHeight: 280px;
 photoEditorBrushSizeControlCollapsedWidth: 2px;
