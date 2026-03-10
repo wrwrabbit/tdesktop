@@ -66,6 +66,17 @@ constexpr auto kSummarizeThreshold = 512;
 constexpr auto kPlayStatusLimit = 2;
 const auto kPsaTooltipPrefix = "cloud_lng_tooltip_psa_";
 
+struct SecondRightAction {
+	std::unique_ptr<Ui::RippleAnimation> ripple;
+	ClickHandlerPtr link;
+};
+
+struct BadgePillGeometry {
+	int textWidth = 0;
+	int width = 0;
+	int height = 0;
+};
+
 [[nodiscard]] bool IsRippleLink(const ClickHandlerPtr &handler) {
 	switch (handler->getTextEntity().type) {
 	case EntityType::Url:
@@ -102,10 +113,22 @@ const auto kPsaTooltipPrefix = "cloud_lng_tooltip_psa_";
 	});
 }
 
-struct SecondRightAction final {
-	std::unique_ptr<Ui::RippleAnimation> ripple;
-	ClickHandlerPtr link;
-};
+[[nodiscard]] BadgePillGeometry ComputeBadgePillGeometry(
+		not_null<const RightBadge*> badge) {
+	const auto &padding = st::msgTagBadgePadding;
+	const auto textWidth = badge->tag.maxWidth();
+	const auto contentWidth = padding.left()
+		+ textWidth
+		+ padding.right();
+	const auto height = padding.top()
+		+ st::msgFont->height
+		+ padding.bottom();
+	return {
+		.textWidth = textWidth,
+		.width = std::max(contentWidth, height),
+		.height = height,
+	};
+}
 
 } // namespace
 
@@ -367,6 +390,7 @@ void Message::refreshRightBadge() {
 	badge->role = role;
 	badge->special = special || (text.isEmpty() && !tagText.empty());
 	badge->tagLink = nullptr;
+	badge->ripple = nullptr;
 	if (tagText.empty()) {
 		badge->tag.clear();
 	} else {
@@ -398,9 +422,9 @@ void Message::refreshRightBadge() {
 		badge->width = tagWidth + boostWidth;
 	} else {
 		const auto &padding = st::msgTagBadgePadding;
-		const auto tagTextWidth = badge->tag.maxWidth();
+		const auto textWidth = badge->tag.maxWidth();
 		const auto contentWidth = padding.left()
-			+ tagTextWidth
+			+ textWidth
 			+ padding.right();
 		const auto pillHeight = padding.top()
 			+ st::msgFont->height
@@ -1781,40 +1805,64 @@ void Message::paintFromName(
 			if (badge->role != BadgeRole::User) {
 				auto bgColor = badgeColor;
 				bgColor.setAlphaF(0.15);
+				const auto pill = ComputeBadgePillGeometry(badge);
 				const auto &padding = st::msgTagBadgePadding;
-				const auto tagTextWidth = badge->tag.maxWidth();
-				const auto contentWidth = padding.left()
-					+ tagTextWidth
-					+ padding.right();
-				const auto pillHeight = padding.top()
-					+ st::msgFont->height
-					+ padding.bottom();
-				const auto pillWidth = std::max(contentWidth, pillHeight);
 				const auto badgeTop = trect.top()
-					+ (st::msgNameFont->height - pillHeight) / 2;
+					+ (st::msgNameFont->height - pill.height) / 2;
 				const auto pillRect = QRect(
 					badgeLeft,
 					badgeTop,
-					pillWidth,
-					pillHeight);
+					pill.width,
+					pill.height);
 				p.setPen(Qt::NoPen);
 				p.setBrush(bgColor);
 				{
 					auto hq = PainterHighQualityEnabler(p);
 					p.drawRoundedRect(
 						pillRect,
-						pillHeight / 2.,
-						pillHeight / 2.);
+						pill.height / 2.,
+						pill.height / 2.);
+				}
+				if (badge->ripple) {
+					auto rippleColor = badgeColor;
+					rippleColor.setAlphaF(0.1);
+					badge->ripple->paint(
+						p,
+						badgeLeft,
+						badgeTop,
+						width(),
+						&rippleColor);
+					if (badge->ripple->empty()) {
+						badge->ripple.reset();
+					}
 				}
 				p.setPen(badgeColor);
 				badge->tag.draw(p, {
 					.position = QPoint(
-						badgeLeft + (pillWidth - tagTextWidth) / 2,
+						badgeLeft + (pill.width - pill.textWidth) / 2,
 						badgeTop + padding.top()),
-					.availableWidth = tagTextWidth,
+					.availableWidth = pill.textWidth,
 					.now = context.now,
 				});
 			} else if (!badge->tag.isEmpty()) {
+				if (badge->ripple) {
+					const auto pill = ComputeBadgePillGeometry(badge);
+					const auto &padding = st::msgTagBadgePadding;
+					const auto pillLeft = badgeLeft
+						- (pill.width - pill.textWidth) / 2;
+					const auto pillTop = trect.top() - padding.top();
+					auto rippleColor = badgeColor;
+					rippleColor.setAlphaF(0.1);
+					badge->ripple->paint(
+						p,
+						pillLeft,
+						pillTop,
+						width(),
+						&rippleColor);
+					if (badge->ripple->empty()) {
+						badge->ripple.reset();
+					}
+				}
 				p.setPen(st::rankUserFg);
 				badge->tag.draw(p, {
 					.position = QPoint(badgeLeft, trect.top()),
@@ -2311,6 +2359,9 @@ void Message::clickHandlerPressedChanged(
 		} else {
 			_summarize->stopRipple();
 		}
+	} else if (const auto badge = Get<RightBadge>()
+		; badge && badge->tagLink && handler == badge->tagLink) {
+		toggleBadgeRipple(pressed);
 	} else if (displayFromName() && handler == fromLink()) {
 		startLinkRipple();
 	} else if (const auto via = data()->Get<HistoryMessageVia>()
@@ -2371,6 +2422,27 @@ void Message::toggleRightActionRipple(bool pressed) {
 		_rightAction->ripple->add(_rightAction->lastPoint);
 	} else if (_rightAction->ripple) {
 		_rightAction->ripple->lastStop();
+	}
+}
+
+void Message::toggleBadgeRipple(bool pressed) {
+	const auto badge = Get<RightBadge>();
+	if (!badge) {
+		return;
+	} else if (pressed) {
+		if (!badge->ripple) {
+			const auto pill = ComputeBadgePillGeometry(badge);
+			auto mask = Ui::RippleAnimation::RoundRectMask(
+				QSize(pill.width, pill.height),
+				pill.height / 2);
+			badge->ripple = std::make_unique<Ui::RippleAnimation>(
+				st::defaultRippleAnimation,
+				std::move(mask),
+				[=] { repaint(); });
+		}
+		badge->ripple->add(badge->lastPoint);
+	} else if (badge->ripple) {
+		badge->ripple->lastStop();
 	}
 }
 
@@ -3154,6 +3226,22 @@ bool Message::getStateFromName(
 							}
 						}
 					});
+				}
+				{
+					const auto pill = ComputeBadgePillGeometry(badge);
+					const auto &padding = st::msgTagBadgePadding;
+					if (badge->role != BadgeRole::User) {
+						const auto badgeTop = trect.top()
+							+ (st::msgNameFont->height - pill.height) / 2;
+						badge->lastPoint = point
+							- QPoint(badgeLeft, badgeTop);
+					} else {
+						const auto pillLeft = badgeLeft
+							- (pill.width - pill.textWidth) / 2;
+						const auto pillTop = trect.top() - padding.top();
+						badge->lastPoint = point
+							- QPoint(pillLeft, pillTop);
+					}
 				}
 				outResult->link = badge->tagLink;
 				return true;

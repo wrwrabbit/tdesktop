@@ -78,6 +78,8 @@ struct RightBadge : RuntimeComponent<RightBadge, Element> {
 	BadgeRole role = BadgeRole::User;
 	bool overridden = false;
 	bool special = false;
+	mutable std::unique_ptr<Ui::RippleAnimation> ripple;
+	mutable QPoint lastPoint;
 };
 
 struct BottomRippleMask {
@@ -242,6 +244,7 @@ private:
 		int radius) const;
 
 	void toggleRightActionRipple(bool pressed);
+	void toggleBadgeRipple(bool pressed);
 
 	void toggleReplyRipple(bool pressed);
 	void toggleSummaryHeaderRipple(bool pressed);
