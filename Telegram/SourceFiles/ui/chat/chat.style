@@ -149,6 +149,10 @@ priceTagTextPalette: TextPalette(defaultTextPalette) {
 	linkFg: creditsBg1;
 }
 fwdTextUserpicPadding: margins(0px, 1px, 3px, 0px);
+nameRippleRadius: 4px;
+nameRipplePadding: margins(3px, 1px, 3px, 1px);
+linkRippleRadius: 3px;
+linkRipplePadding: margins(3px, 0px, 3px, 0px);
 fwdTextStyle: TextStyle(semiboldTextStyle) {
 	linkUnderline: kLinkUnderlineNever;
 }

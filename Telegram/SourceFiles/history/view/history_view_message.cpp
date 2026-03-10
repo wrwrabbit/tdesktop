@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/share_box.h"
 #include "boxes/peers/tag_info_box.h"
 #include "ui/effects/reaction_fly_animation.h"
+#include "ui/effects/ripple_animation.h"
 #include "ui/text/text_utilities.h"
 #include "ui/text/text_extended_data.h"
 #include "ui/power_saving.h"
@@ -64,6 +65,25 @@ namespace {
 constexpr auto kSummarizeThreshold = 512;
 constexpr auto kPlayStatusLimit = 2;
 const auto kPsaTooltipPrefix = "cloud_lng_tooltip_psa_";
+
+[[nodiscard]] bool IsRippleLink(const ClickHandlerPtr &handler) {
+	switch (handler->getTextEntity().type) {
+	case EntityType::Url:
+	case EntityType::CustomUrl:
+	case EntityType::Email:
+	case EntityType::Hashtag:
+	case EntityType::Cashtag:
+	case EntityType::Mention:
+	case EntityType::MentionName:
+	case EntityType::BotCommand:
+	case EntityType::Phone:
+	case EntityType::BankCard:
+	case EntityType::FormattedDate:
+		return true;
+	default:
+		return false;
+	}
+}
 
 [[nodiscard]] ClickHandlerPtr MakeTopicButtonLink(
 		not_null<Data::ForumTopic*> topic,
@@ -110,6 +130,13 @@ struct Message::RightAction {
 	ClickHandlerPtr link;
 	QPoint lastPoint;
 	std::unique_ptr<SecondRightAction> second;
+};
+
+struct Message::LinkRipple {
+	std::unique_ptr<Ui::RippleAnimation> ripple;
+	ClickHandlerPtr link;
+	QPoint maskOffset;
+	int cachedWidth = 0;
 };
 
 LogEntryOriginal::LogEntryOriginal() = default;
@@ -1704,6 +1731,15 @@ void Message::paintFromName(
 	}
 	p.setFont(st::msgNameFont);
 	p.setPen(nameFg);
+	const auto nameLinkHandler = fromLink();
+	const auto nameWidth = std::min(
+		nameText->maxWidth(),
+		availableWidth);
+	paintLinkRipple(
+		p,
+		nameLinkHandler,
+		QRect(availableLeft, trect.top(), nameWidth, st::msgNameFont->height),
+		trect.topLeft());
 	nameText->draw(p, {
 		.position = { availableLeft, trect.top() },
 		.availableWidth = availableWidth,
@@ -1721,6 +1757,11 @@ void Message::paintFromName(
 	auto via = item->Get<HistoryMessageVia>();
 	if (via && !displayForwardedFrom() && availableWidth > 0) {
 		p.setPen(stm->msgServiceFg);
+		paintLinkRipple(
+			p,
+			via->link,
+			QRect(availableLeft, trect.top(), via->width, st::msgServiceFont->height),
+			trect.topLeft());
 		p.drawText(availableLeft, trect.top() + st::msgServiceFont->ascent, via->text);
 		auto skipWidth = via->width + st::msgServiceFont->spacew;
 		availableLeft += skipWidth;
@@ -1888,10 +1929,60 @@ void Message::paintForwardedInfo(
 			? st->boxTextFgGood()
 			: stm->msgServiceFg);
 		p.setFont(serviceFont);
-		p.setTextPalette(!forwarded->psaType.isEmpty()
+		const auto &fwdPalette = !forwarded->psaType.isEmpty()
 			? st->historyPsaForwardPalette()
-			: stm->fwdTextPalette);
-		forwarded->text.drawElided(p, trect.x(), trect.y(), useWidth, 2, style::al_left, 0, -1, 0, breakEverywhere);
+			: stm->fwdTextPalette;
+		const auto rippleLinkRange = (_linkRipple && _linkRipple->link)
+			? forwarded->text.linkRangeFor(_linkRipple->link)
+			: TextSelection();
+		const auto rippleBelongsHere = !rippleLinkRange.empty();
+		if (_linkRipple
+			&& _linkRipple->ripple
+			&& _linkRipple->cachedWidth != useWidth
+			&& rippleBelongsHere) {
+			_linkRipple = nullptr;
+		}
+		if (_linkRipple && _linkRipple->ripple && rippleBelongsHere) {
+			auto color = p.pen().color();
+			color.setAlphaF(0.1);
+			_linkRipple->ripple->paint(
+				p,
+				trect.x() + _linkRipple->maskOffset.x(),
+				trect.y() + _linkRipple->maskOffset.y(),
+				width(),
+				&color);
+			if (_linkRipple->ripple->empty()) {
+				_linkRipple = nullptr;
+			}
+		}
+		const auto needRippleMask = _linkRipple
+			&& _linkRipple->link
+			&& !_linkRipple->ripple
+			&& rippleBelongsHere;
+		auto highlightPath = QPainterPath();
+		auto highlightRequest = Ui::Text::HighlightInfoRequest{
+			.range = rippleLinkRange,
+			.outPath = &highlightPath,
+		};
+		forwarded->text.draw(p, {
+			.position = { trect.x(), trect.y() },
+			.availableWidth = useWidth,
+			.palette = &fwdPalette,
+			.paused = p.inactive(),
+			.highlight = needRippleMask ? &highlightRequest : nullptr,
+			.elisionLines = 2,
+			.elisionBreakEverywhere = breakEverywhere,
+		});
+		if (needRippleMask && !highlightPath.isEmpty()) {
+			createLinkRippleMask(
+				highlightPath,
+				trect.topLeft(),
+				useWidth,
+				st::nameRipplePadding,
+				st::nameRippleRadius);
+		} else if (needRippleMask) {
+			_linkRipple = nullptr;
+		}
 		p.setTextPalette(stm->textPalette);
 
 		if (!forwarded->psaType.isEmpty()) {
@@ -1967,6 +2058,11 @@ void Message::paintViaBotIdInfo(
 			const auto stm = context.messageStyle();
 			p.setFont(st::msgServiceNameFont);
 			p.setPen(stm->msgServiceFg);
+			paintLinkRipple(
+				p,
+				via->link,
+				QRect(trect.x(), trect.y(), via->width, st::msgServiceNameFont->height),
+				trect.topLeft());
 			p.drawTextLeft(trect.left(), trect.top(), width(), via->text);
 			trect.setY(trect.y() + st::msgServiceNameFont->height);
 		}
@@ -1998,6 +2094,40 @@ void Message::paintText(
 		return;
 	}
 	prepareCustomEmojiPaint(p, context, text());
+
+	const auto rippleLinkRange = (_linkRipple && _linkRipple->link)
+		? text().linkRangeFor(_linkRipple->link)
+		: TextSelection();
+	const auto rippleBelongsHere = !rippleLinkRange.empty();
+	if (_linkRipple
+		&& _linkRipple->ripple
+		&& _linkRipple->cachedWidth != trect.width()
+		&& rippleBelongsHere) {
+		_linkRipple = nullptr;
+	}
+	if (_linkRipple && _linkRipple->ripple && rippleBelongsHere) {
+		auto color = stm->textPalette.linkFg->c;
+		color.setAlphaF(0.1);
+		_linkRipple->ripple->paint(
+			p,
+			trect.x() + _linkRipple->maskOffset.x(),
+			trect.y() + _linkRipple->maskOffset.y(),
+			width(),
+			&color);
+		if (_linkRipple->ripple->empty()) {
+			_linkRipple = nullptr;
+		}
+	}
+	const auto needRippleMask = _linkRipple
+		&& _linkRipple->link
+		&& !_linkRipple->ripple
+		&& rippleBelongsHere;
+	auto ripplePath = QPainterPath();
+	auto rippleRequest = Ui::Text::HighlightInfoRequest{
+		.range = rippleLinkRange,
+		.outPath = &ripplePath,
+	};
+
 	auto highlightRequest = context.computeHighlightCache();
 	text().draw(p, {
 		.position = trect.topLeft(),
@@ -2013,9 +2143,21 @@ void Message::paintText(
 		.pausedEmoji = context.paused || On(PowerSaving::kEmojiChat),
 		.pausedSpoiler = context.paused || On(PowerSaving::kChatSpoiler),
 		.selection = context.selection,
-		.highlight = highlightRequest ? &*highlightRequest : nullptr,
+		.highlight = needRippleMask
+			? &rippleRequest
+			: (highlightRequest ? &*highlightRequest : nullptr),
 		.useFullWidth = true,
 	});
+	if (needRippleMask && !ripplePath.isEmpty()) {
+		createLinkRippleMask(
+			ripplePath,
+			trect.topLeft(),
+			trect.width(),
+			st::linkRipplePadding,
+			st::linkRippleRadius);
+	} else if (needRippleMask) {
+		_linkRipple = nullptr;
+	}
 }
 
 PointState Message::pointState(QPoint point) const {
@@ -2108,6 +2250,13 @@ bool Message::displayFromPhoto() const {
 void Message::clickHandlerPressedChanged(
 		const ClickHandlerPtr &handler,
 		bool pressed) {
+	const auto startLinkRipple = [&] {
+		if (!_linkRipple) {
+			_linkRipple = std::make_unique<LinkRipple>();
+		}
+		_linkRipple->link = handler;
+		toggleLinkRipple(pressed);
+	};
 	if (const auto markup = data()->Get<HistoryMessageReplyMarkup>()) {
 		if (const auto keyboard = markup->inlineKeyboard.get()) {
 			keyboard->clickHandlerPressedChanged(
@@ -2162,6 +2311,22 @@ void Message::clickHandlerPressedChanged(
 		} else {
 			_summarize->stopRipple();
 		}
+	} else if (displayFromName() && handler == fromLink()) {
+		startLinkRipple();
+	} else if (const auto via = data()->Get<HistoryMessageVia>()
+		; via
+		&& (handler == via->link)
+		&& !displayForwardedFrom()) {
+		startLinkRipple();
+	} else if (const auto forwarded = data()->Get<HistoryMessageForwarded>()
+		; forwarded
+		&& displayForwardedFrom()
+		&& !forwarded->text.linkRangeFor(handler).empty()) {
+		startLinkRipple();
+	} else if (hasVisibleText()
+		&& IsRippleLink(handler)
+		&& !text().linkRangeFor(handler).empty()) {
+		startLinkRipple();
 	} else if (_reactions) {
 		_reactions->clickHandlerPressedChanged(
 			handler,
@@ -2342,6 +2507,119 @@ void Message::toggleTopicButtonRipple(bool pressed) {
 	} else if (_topicButton->ripple) {
 		_topicButton->ripple->lastStop();
 	}
+}
+
+void Message::paintLinkRipple(
+		Painter &p,
+		const ClickHandlerPtr &handler,
+		QRect linkRect,
+		QPoint textPosition) const {
+	const auto raw = _linkRipple.get();
+	if (!raw || raw->link != handler) {
+		return;
+	}
+	if (const auto ripple = raw->ripple.get()) {
+		auto color = p.pen().color();
+		color.setAlpha(25);
+		ripple->paint(
+			p,
+			textPosition.x() + raw->maskOffset.x(),
+			textPosition.y() + raw->maskOffset.y(),
+			width(),
+			&color);
+		if (ripple->empty()) {
+			_linkRipple = nullptr;
+		}
+	} else {
+		createLinkRippleMask(
+			linkRect,
+			textPosition,
+			st::nameRipplePadding,
+			st::nameRippleRadius);
+	}
+}
+
+void Message::toggleLinkRipple(bool pressed) {
+	if (!drawBubble()) {
+		return;
+	} else if (pressed) {
+		repaint();
+	} else if (const auto ripple = _linkRipple
+		? _linkRipple->ripple.get()
+		: nullptr) {
+		ripple->lastStop();
+	}
+}
+
+void Message::recordLinkRipplePoint(
+		QPoint point,
+		QPoint textOrigin) const {
+	_linkRippleLastPoint = point - textOrigin;
+}
+
+void Message::createLinkRippleMask(
+		const QPainterPath &path,
+		QPoint textPosition,
+		int useWidth,
+		style::margins padding,
+		int radius) const {
+	auto rects = std::vector<QRect>();
+	for (const auto &polygon : path.toSubpathPolygons()) {
+		rects.push_back(polygon.boundingRect().toAlignedRect());
+	}
+	auto boundingRect = QRect();
+	for (auto &rect : rects) {
+		rect = rect.marginsAdded(padding);
+		if (boundingRect.isEmpty()) {
+			boundingRect = rect;
+		} else {
+			boundingRect = boundingRect.united(rect);
+		}
+	}
+	if (boundingRect.isEmpty()) {
+		return;
+	}
+	const auto topLeft = boundingRect.topLeft();
+	const auto maskOrigin = topLeft - textPosition;
+	auto mask = Ui::RippleAnimation::MaskByDrawer(
+		boundingRect.size(),
+		false,
+		[&](QPainter &p) {
+			for (const auto &rect : rects) {
+				const auto shifted = rect.translated(-topLeft);
+				p.drawRoundedRect(shifted, radius, radius);
+			}
+		});
+	_linkRipple->maskOffset = maskOrigin;
+	_linkRipple->cachedWidth = useWidth;
+	_linkRipple->ripple = std::make_unique<Ui::RippleAnimation>(
+		st::defaultRippleAnimation,
+		std::move(mask),
+		[=] { repaint(); });
+	_linkRipple->ripple->add(_linkRippleLastPoint - maskOrigin);
+}
+
+void Message::createLinkRippleMask(
+		QRect linkRect,
+		QPoint textPosition,
+		style::margins padding,
+		int radius) const {
+	auto rect = linkRect.marginsAdded(padding);
+	const auto maskOrigin = rect.topLeft() - textPosition;
+	const auto size = rect.size();
+	auto mask = Ui::RippleAnimation::MaskByDrawer(
+		size,
+		false,
+		[&](QPainter &p) {
+			p.drawRoundedRect(QRect(QPoint(), size), radius, radius);
+		});
+	_linkRipple->maskOffset = maskOrigin;
+	_linkRipple->cachedWidth = 0;
+	_linkRipple->ripple = std::make_unique<Ui::RippleAnimation>(
+		st::defaultRippleAnimation,
+		std::move(mask),
+		[=] { repaint(); });
+	_linkRipple->ripple->add(_linkRippleLastPoint - maskOrigin);
 }
 
 void Message::createTopicButtonRipple() {
@@ -2798,6 +3076,7 @@ bool Message::getStateFromName(
 			&& point.x() < availableLeft + availableWidth
 			&& point.x() < availableLeft + nameText->maxWidth()) {
 			outResult->link = fromLink();
+			recordLinkRipplePoint(point, trect.topLeft());
 			return true;
 		}
 		auto via = item->Get<HistoryMessageVia>();
@@ -2807,6 +3086,7 @@ bool Message::getStateFromName(
 			&& point.x() < availableLeft + availableWidth
 			&& point.x() < availableLeft + nameText->maxWidth() + st::msgServiceFont->spacew + via->width) {
 			outResult->link = via->link;
+			recordLinkRipplePoint(point, trect.topLeft());
 			return true;
 		}
 		if (badgeWidth) {
@@ -2976,6 +3256,9 @@ bool Message::getStateForwardedInfo(
 			point - trect.topLeft(),
 			useWidth,
 			textRequest));
+		if (outResult->link) {
+			recordLinkRipplePoint(point, trect.topLeft());
+		}
 		outResult->symbol = 0;
 		outResult->afterSymbol = false;
 		if (breakEverywhere) {
@@ -3092,6 +3375,7 @@ bool Message::getStateViaBotIdInfo(
 		if (!displayFromName() && !displayForwardedFrom()) {
 			if (QRect(trect.x(), trect.y(), via->width, st::msgNameFont->height).contains(point)) {
 				outResult->link = via->link;
+				recordLinkRipplePoint(point, trect.topLeft());
 				return true;
 			}
 			trect.setTop(trect.top() + st::msgNameFont->height);
@@ -3116,6 +3400,11 @@ bool Message::getStateText(
 			point - trect.topLeft(),
 			trect.width(),
 			request.forText()));
+		if (outResult->link
+			&& IsRippleLink(outResult->link)
+			&& !text().linkRangeFor(outResult->link).empty()) {
+			recordLinkRipplePoint(point, trect.topLeft());
+		}
 		return true;
 	}
 	return false;
