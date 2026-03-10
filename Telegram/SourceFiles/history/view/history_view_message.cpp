@@ -2162,6 +2162,11 @@ void Message::clickHandlerPressedChanged(
 		} else {
 			_summarize->stopRipple();
 		}
+	} else if (_reactions) {
+		_reactions->clickHandlerPressedChanged(
+			handler,
+			pressed,
+			[=] { repaint(); });
 	}
 }
 
