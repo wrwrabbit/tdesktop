@@ -171,6 +171,9 @@ void History::itemRemoved(not_null<HistoryItem*> item) {
 	if (const auto sublist = item->savedSublist()) {
 		sublist->applyItemRemoved(item->id);
 	}
+	if (const auto streamed = _streamedDrafts.get()) {
+		streamed->applyItemRemoved(item);
+	}
 	if (const auto chat = peer->asChat()) {
 		if (const auto to = chat->getMigrateToChannel()) {
 			if (const auto history = owner().historyLoaded(to)) {
