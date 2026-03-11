@@ -420,9 +420,12 @@ void ActivateBotCommand(ClickHandlerContext context, int row, int column) {
 		const auto itemId = item->id;
 		const auto id = int32(button->buttonId);
 		const auto chosen = [=](std::vector<not_null<PeerData*>> result) {
+			using Flag = MTPmessages_SendBotRequestedPeer::Flag;
 			peer->session().api().request(MTPmessages_SendBotRequestedPeer(
+				MTP_flags(Flag::f_msg_id),
 				peer->input(),
 				MTP_int(itemId),
+				MTPstring(), // request_id
 				MTP_int(id),
 				MTP_vector_from_range(
 					result | ranges::views::transform([](

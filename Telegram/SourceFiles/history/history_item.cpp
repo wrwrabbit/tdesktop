@@ -6743,6 +6743,21 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 		return result;
 	};
 
+	auto prepareManagedBotCreated = [this](const MTPDmessageActionManagedBotCreated &action) {
+		auto result = PreparedServiceText();
+		auto bot = _history->owner().user(action.vbot_id().v);
+		result.links.push_back(fromLink());
+		result.links.push_back(bot->createOpenLink());
+		result.text = tr::lng_action_managed_bot_created(
+			tr::now,
+			lt_from,
+			fromLinkText(),
+			lt_bot,
+			tr::link(bot->name(), 2),
+			tr::marked);
+		return result;
+	};
+
 	setServiceText(action.match(
 		prepareChatAddUserText,
 		prepareChatJoinedByLink,
@@ -6806,6 +6821,7 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 		prepareChangeCreator,
 		prepareNoForwardsToggle,
 		prepareNoForwardsRequest,
+		prepareManagedBotCreated,
 		PrepareEmptyText<MTPDmessageActionRequestedPeerSentMe>,
 		PrepareErrorText<MTPDmessageActionEmpty>));
 

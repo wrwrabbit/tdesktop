@@ -1571,6 +1571,10 @@ auto HtmlWriter::Wrap::pushMessage(
 			+ " made "
 			+ peers.wrapUserName(data.newCreatorId)
 			+ " the new main admin of the group";
+	}, [&](const ActionManagedBotCreated &data) {
+		return serviceFrom
+			+ " created a bot "
+			+ peers.wrapUserName(data.botId);
 	}, [](v::null_t) { return QByteArray(); });
 
 	if (!serviceText.isEmpty()) {

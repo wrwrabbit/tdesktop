@@ -70,6 +70,7 @@ namespace {
 		result.hasUsername = restriction(data.vhas_username());
 		result.myRights = rights(data.vuser_admin_rights());
 		result.botRights = rights(data.vbot_admin_rights());
+	}, [](const MTPDrequestPeerTypeCreateBot &) {
 	});
 	return result;
 }

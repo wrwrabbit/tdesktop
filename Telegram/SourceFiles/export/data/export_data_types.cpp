@@ -787,10 +787,12 @@ Poll ParsePoll(const MTPDmessageMediaPoll &data) {
 		result.answers = ranges::views::all(
 			poll.vanswers().v
 		) | ranges::views::transform([](const MTPPollAnswer &answer) {
-			const auto &data = answer.data();
 			auto result = Poll::Answer();
-			result.text = ParseText(data.vtext());
-			result.option = data.voption().v;
+			answer.match([&](const MTPDpollAnswer &data) {
+				result.text = ParseText(data.vtext());
+				result.option = data.voption().v;
+			}, [](const auto &) {
+			});
 			return result;
 		}) | ranges::to_vector;
 	});
@@ -808,7 +810,9 @@ Poll ParsePoll(const MTPDmessageMediaPoll &data) {
 				if (i == end(result.answers)) {
 					continue;
 				}
-				i->votes = voters.vvoters().v;
+				if (const auto votes = voters.vvoters()) {
+					i->votes = votes->v;
+				}
 				if (voters.is_chosen()) {
 					i->my = true;
 				}
@@ -1866,6 +1870,10 @@ ServiceAction ParseServiceAction(
 		auto content = ActionNoForwardsRequest();
 		content.expired = data.is_expired();
 		content.newValue = (data.vnew_value().type() == mtpc_boolTrue);
+		result.content = content;
+	}, [&](const MTPDmessageActionManagedBotCreated &data) {
+		auto content = ActionManagedBotCreated();
+		content.botId = data.vbot_id().v;
 		result.content = content;
 	}, [](const MTPDmessageActionEmpty &data) {});
 	return result;

@@ -2544,6 +2544,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_action_stake_game_lost_you" = "You lost {amount}";
 "lng_action_change_creator" = "{from} made {user} the new main admin of the group.";
 "lng_action_new_creator_pending" = "{user} will become the new main admin in 7 days if {from} does not return.";
+"lng_action_managed_bot_created" = "{from} created a bot {bot}.";
 
 "lng_stake_game_title" = "Emoji Stake";
 "lng_stake_game_beta" = "Beta";

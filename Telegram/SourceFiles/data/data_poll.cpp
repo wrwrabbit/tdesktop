@@ -89,6 +89,8 @@ bool PollData::applyChanges(const MTPDpoll &poll) {
 				&session(),
 				answer.vtext());
 			return result;
+		}, [](const auto &) {
+			return PollAnswer();
 		});
 	}) | ranges::views::take(
 		kMaxOptions
@@ -206,9 +208,12 @@ bool PollData::applyResultToAnswers(
 		if (!answer) {
 			return false;
 		}
-		auto changed = (answer->votes != voters.vvoters().v);
+		const auto newVotes = voters.vvoters()
+			? voters.vvoters()->v
+			: 0;
+		auto changed = (answer->votes != newVotes);
 		if (changed) {
-			answer->votes = voters.vvoters().v;
+			answer->votes = newVotes;
 		}
 		if (!isMinResults) {
 			if (answer->chosen != voters.is_chosen()) {
@@ -258,10 +263,12 @@ bool PollData::quiz() const {
 MTPPoll PollDataToMTP(not_null<const PollData*> poll, bool close) {
 	const auto convert = [&](const PollAnswer &answer) {
 		return MTP_pollAnswer(
+			MTP_flags(0),
 			MTP_textWithEntities(
 				MTP_string(answer.text.text),
 				Api::EntitiesToMTP(&poll->session(), answer.text.entities)),
-			MTP_bytes(answer.option));
+			MTP_bytes(answer.option),
+			MTPMessageMedia()); // media
 	};
 	auto answers = QVector<MTPPollAnswer>();
 	answers.reserve(poll->answers.size());
@@ -319,6 +326,8 @@ MTPInputMedia PollDataToInputMedia(
 		MTP_flags(inputFlags),
 		PollDataToMTP(poll, close),
 		MTP_vector<MTPbytes>(correct),
+		MTPInputMedia(), // attached_media
 		MTP_string(solution.text),
-		sentEntities);
+		sentEntities,
+		MTPInputMedia()); // solution_media
 }

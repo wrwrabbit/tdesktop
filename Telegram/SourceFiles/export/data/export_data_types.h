@@ -755,6 +755,10 @@ struct ActionChangeCreator {
 	UserId newCreatorId = 0;
 };
 
+struct ActionManagedBotCreated {
+	UserId botId = 0;
+};
+
 struct ServiceAction {
 	std::variant<
 		v::null_t,
@@ -812,7 +816,8 @@ struct ServiceAction {
 		ActionNoForwardsToggle,
 		ActionNoForwardsRequest,
 		ActionNewCreatorPending,
-		ActionChangeCreator> content;
+		ActionChangeCreator,
+		ActionManagedBotCreated> content;
 };
 
 ServiceAction ParseServiceAction(
