@@ -27,6 +27,7 @@ constexpr auto kMinBrushWidth = 1.;
 constexpr auto kMaxBrushWidth = 25.;
 
 constexpr auto kCircleDuration = crl::time(200);
+constexpr auto kSizeControlSwitchDuration = crl::time(140);
 
 inline float64 InterpolateF(float64 a, float64 b, float64 b_ratio) {
 	return a + float64(b - a) * b_ratio;
@@ -284,7 +285,7 @@ ColorPicker::ColorPicker(
 	_sizeControlHoverArea->setMouseTracking(true);
 	_sizeControl->setMouseTracking(true);
 
-	updateSizeControlPositionFromRatio();
+	updateSizeControlPositionFromRatio(false);
 	moveSizeControl(_parent->size());
 
 	_colorButton->setClickedCallback([=] {
@@ -346,6 +347,7 @@ ColorPicker::ColorPicker(
 			if (!inHandle && !inControl) {
 				return;
 			}
+			_sizeControlPositionAnimation.stop();
 			_sizeDown.pressed = true;
 			updateSizeControlMousePosition(e->pos().y());
 			updateSizeControlExpanded();
@@ -452,7 +454,7 @@ void ColorPicker::setTool(Brush::Tool tool) {
 	storeCurrentBrush();
 	_brush = _toolBrushes[ToolIndex(tool)];
 	_brush.tool = tool;
-	updateSizeControlPositionFromRatio();
+	updateSizeControlPositionFromRatio(true);
 	if (_paletteVisible) {
 		rebuildPalette();
 	} else {
@@ -492,6 +494,7 @@ void ColorPicker::setVisible(bool visible) {
 		_sizeControlHovered = false;
 		_sizeControlExpanded = false;
 		_sizeControlAnimation.stop();
+		_sizeControlPositionAnimation.stop();
 		_toolSelectionAnimation.stop();
 	}
 	_colorButton->setVisible(visible && !_paletteVisible);
@@ -701,8 +704,28 @@ void ColorPicker::updateSizeControlMousePosition(int y) {
 	storeCurrentBrush();
 }
 
-void ColorPicker::updateSizeControlPositionFromRatio() {
-	_sizeDown.y = sizeControlYFromRatio(_brush.sizeRatio);
+void ColorPicker::updateSizeControlPositionFromRatio(bool animated) {
+	const auto target = sizeControlYFromRatio(_brush.sizeRatio);
+	if (!animated || _sizeDown.pressed) {
+		_sizeControlPositionAnimation.stop();
+		_sizeDown.y = target;
+		return;
+	}
+	if (_sizeDown.y == target) {
+		return;
+	}
+	_sizeControlPositionFrom = _sizeDown.y;
+	_sizeControlPositionTo = target;
+	_sizeControlPositionAnimation.stop();
+	_sizeControlPositionAnimation.start([=] {
+		const auto progress = _sizeControlPositionAnimation.value(1.);
+		_sizeDown.y = anim::interpolate(
+			_sizeControlPositionFrom,
+			_sizeControlPositionTo,
+			progress);
+		_sizeControl->update();
+	}, 0., 1., kSizeControlSwitchDuration, anim::easeOutCirc);
+	_sizeControl->update();
 }
 
 int ColorPicker::sizeControlShapeTop() const {

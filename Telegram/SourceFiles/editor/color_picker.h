@@ -46,7 +46,7 @@ private:
 	void moveSizeControl(const QSize &size);
 	void updateSizeControlExpanded();
 	void updateSizeControlMousePosition(int y);
-	void updateSizeControlPositionFromRatio();
+	void updateSizeControlPositionFromRatio(bool animated);
 	[[nodiscard]] int sizeControlShapeTop() const;
 	[[nodiscard]] int sizeControlShapeBottom() const;
 	[[nodiscard]] int sizeControlTop() const;
@@ -76,6 +76,8 @@ private:
 	bool _sizeHoverAreaHovered = false;
 	bool _sizeControlHovered = false;
 	bool _sizeControlExpanded = false;
+	int _sizeControlPositionFrom = 0;
+	int _sizeControlPositionTo = 0;
 	QRect _canvasRect;
 	QPoint _colorButtonCenter;
 	bool _paletteVisible = false;
@@ -83,6 +85,7 @@ private:
 	std::array<Brush, 4> _toolBrushes;
 
 	Ui::Animations::Simple _sizeControlAnimation;
+	Ui::Animations::Simple _sizeControlPositionAnimation;
 	Ui::Animations::Simple _toolSelectionAnimation;
 
 	rpl::event_stream<Brush> _saveBrushRequests;
