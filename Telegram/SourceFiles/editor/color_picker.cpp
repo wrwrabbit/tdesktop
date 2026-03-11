@@ -13,69 +13,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rp_widget.h"
 #include "styles/style_editor.h"
 
-#include <QtGui/QLinearGradient>
 
 namespace Editor {
 namespace {
 
-constexpr auto kPrecision = 1000;
 constexpr auto kMinBrushSize = 0.1;
-constexpr auto kMouseSkip = 1.4;
 constexpr auto kMinBrushWidth = 1.;
 constexpr auto kMaxBrushWidth = 25.;
 
-constexpr auto kMinInnerHeight = 0.2;
-constexpr auto kMaxInnerHeight = 0.8;
-
 constexpr auto kCircleDuration = crl::time(200);
-
-constexpr auto kMax = 1.0;
-
-ColorPicker::OutlinedStop FindOutlinedStop(
-		const QColor &color,
-		const QGradientStops &stops,
-		int width) {
-	for (auto i = 0; i < stops.size(); i++) {
-		const auto &current = stops[i];
-		if (current.second == color) {
-			const auto prev = ((i - 1) < 0)
-				? std::nullopt
-				: std::make_optional<int>(stops[i - 1].first * width);
-			const auto next = ((i + 1) >= stops.size())
-				? std::nullopt
-				: std::make_optional<int>(stops[i + 1].first * width);
-			return ColorPicker::OutlinedStop{
-				.stopPos = (current.first * width),
-				.prevStopPos = prev,
-				.nextStopPos = next,
-			};
-		}
-	}
-	return ColorPicker::OutlinedStop();
-}
-
-QGradientStops Colors() {
-	return QGradientStops{
-		{ 0.00f, QColor(234, 39, 57) },
-		{ 0.14f, QColor(219, 58, 210) },
-		{ 0.24f, QColor(48, 81, 227) },
-		{ 0.39f, QColor(73, 197, 237) },
-		{ 0.49f, QColor(128, 200, 100) },
-		{ 0.62f, QColor(252, 222, 101) },
-		{ 0.73f, QColor(252, 150, 77) },
-		{ 0.85f, QColor(0, 0, 0) },
-		{ 1.00f, QColor(255, 255, 255) } };
-}
-
-QBrush GradientBrush(const QPoint &p, const QGradientStops &stops) {
-	auto gradient = QLinearGradient(0, p.y(), p.x(), p.y());
-	gradient.setStops(stops);
-	return QBrush(std::move(gradient));
-}
-
-float64 RatioPrecise(float64 a) {
-	return int(a * kPrecision) / float64(kPrecision);
-}
 
 inline float64 InterpolateF(float64 a, float64 b, float64 b_ratio) {
 	return a + float64(b - a) * b_ratio;
@@ -91,29 +37,20 @@ ColorPicker::ColorPicker(
 	not_null<Ui::RpWidget*> parent,
 	const Brush &savedBrush)
 : _parent(parent)
-, _circleColor(Qt::white)
-, _width(st::photoEditorColorPickerWidth)
-, _lineHeight(st::photoEditorColorPickerLineHeight)
-, _colorLine(base::make_unique_q<Ui::RpWidget>(parent))
-, _canvasForCircle(base::make_unique_q<Ui::RpWidget>(parent))
+, _colorButton(std::in_place, parent)
 , _sizeControlHoverArea(std::in_place, parent)
 , _sizeControl(std::in_place, parent)
-, _gradientStops(Colors())
-, _outlinedStop(FindOutlinedStop(_circleColor, _gradientStops, _width))
-, _gradientBrush(
-	GradientBrush(QPoint(_width, _lineHeight / 2), _gradientStops))
 , _brush(Brush{
 	.sizeRatio = (savedBrush.sizeRatio
 		? savedBrush.sizeRatio
 		: kMinBrushSize),
 	.color = (savedBrush.color.isValid()
 		? savedBrush.color
-		: _gradientStops.front().second),
+		: QColor(234, 39, 57)),
 }) {
-	_colorLine->resize(_width, _lineHeight);
-	_canvasForCircle->resize(
-		_width + circleHeight(kMax),
-		st::photoEditorColorPickerCanvasHeight);
+	_colorButton->resize(
+		st::photoEditorColorButtonSize,
+		st::photoEditorColorButtonSize);
 	_sizeControl->resize(
 		st::photoEditorBrushSizeControlHitPadding * 2
 			+ st::photoEditorBrushSizeControlExpandShift
@@ -122,29 +59,14 @@ ColorPicker::ColorPicker(
 	_sizeControlHoverArea->setMouseTracking(true);
 	_sizeControl->setMouseTracking(true);
 
-	_canvasForCircle->setAttribute(Qt::WA_TransparentForMouseEvents);
-
-	_down.pos = QPoint(colorToPosition(savedBrush.color), 0);
 	updateSizeControlPositionFromRatio();
 	moveSizeControl(_parent->size());
 
-	_colorLine->paintRequest(
+	_colorButton->paintRequest(
 	) | rpl::on_next([=] {
-		auto p = QPainter(_colorLine);
-		PainterHighQualityEnabler hq(p);
-
-		p.setPen(Qt::NoPen);
-		p.setBrush(_gradientBrush);
-
-		const auto radius = _colorLine->height() / 2.;
-		p.drawRoundedRect(_colorLine->rect(), radius, radius);
-	}, _colorLine->lifetime());
-
-	_canvasForCircle->paintRequest(
-	) | rpl::on_next([=] {
-		auto p = QPainter(_canvasForCircle);
-		paintCircle(p);
-	}, _canvasForCircle->lifetime());
+		auto p = QPainter(_colorButton);
+		paintColorButton(p);
+	}, _colorButton->lifetime());
 
 	_sizeControl->paintOn([=](QPainter &p) {
 		paintSizeControl(p);
@@ -166,41 +88,6 @@ ColorPicker::ColorPicker(
 			updateSizeControlExpanded();
 		}
 	}, _sizeControlHoverArea->lifetime());
-
-	_colorLine->events(
-	) | rpl::on_next([=](not_null<QEvent*> event) {
-		const auto type = event->type();
-		const auto isPress = (type == QEvent::MouseButtonPress)
-			|| (type == QEvent::MouseButtonDblClick);
-		const auto isMove = (type == QEvent::MouseMove);
-		const auto isRelease = (type == QEvent::MouseButtonRelease);
-		if (!isPress && !isMove && !isRelease) {
-			return;
-		}
-		_down.pressed = !isRelease;
-
-		const auto progress = _circleAnimation.value(isPress ? 0. : 1.);
-		if (!isMove) {
-			const auto from = progress;
-			const auto to = isPress ? 1. : 0.;
-			_circleAnimation.stop();
-
-			_circleAnimation.start(
-				[=] { _canvasForCircle->update(); },
-				from,
-				to,
-				kCircleDuration * std::abs(to - from),
-				anim::easeOutCirc);
-		}
-		const auto e = static_cast<QMouseEvent*>(event.get());
-		updateMousePosition(e->pos(), progress);
-		if (isRelease) {
-			_saveBrushRequests.fire_copy(_brush);
-		}
-
-		_canvasForCircle->update();
-		_sizeControl->update();
-	}, _colorLine->lifetime());
 
 	_sizeControl->events(
 	) | rpl::on_next([=](not_null<QEvent*> event) {
@@ -239,7 +126,6 @@ ColorPicker::ColorPicker(
 			_sizeDown.pressed = true;
 			updateSizeControlMousePosition(e->pos().y());
 			updateSizeControlExpanded();
-			_canvasForCircle->update();
 			_sizeControl->update();
 			return;
 		}
@@ -248,7 +134,6 @@ ColorPicker::ColorPicker(
 		}
 		if (isMove) {
 			updateSizeControlMousePosition(e->pos().y());
-			_canvasForCircle->update();
 			_sizeControl->update();
 			return;
 		}
@@ -257,50 +142,14 @@ ColorPicker::ColorPicker(
 			_sizeDown.pressed = false;
 			updateSizeControlExpanded();
 			_saveBrushRequests.fire_copy(_brush);
-			_canvasForCircle->update();
 			_sizeControl->update();
 		}
 	}, _sizeControl->lifetime());
 }
 
-void ColorPicker::updateMousePosition(const QPoint &pos, float64 progress) {
-	const auto mapped = _canvasForCircle->mapFromParent(
-		_colorLine->mapToParent(pos));
-
-	const auto height = circleHeight(progress);
-	const auto mappedY = int(mapped.y() - height * kMouseSkip);
-	const auto bottom = _canvasForCircle->height() - circleHeight(kMax);
-	const auto &skip = st::photoEditorColorPickerCircleSkip;
-
-	_down.pos = QPoint(
-		std::clamp(pos.x(), 0, _width),
-		std::clamp(mappedY, 0, bottom - skip));
-
-	// Convert Y to the brush size.
-	const auto from = 0;
-	const auto to = bottom - skip;
-
-	// Don't change the brush size when we are on the color line.
-	if (mappedY <= to) {
-		_brush.sizeRatio = std::clamp(
-			float64(1. - InterpolationRatio(from, to, _down.pos.y())),
-			kMinBrushSize,
-			1.);
-		updateSizeControlPositionFromRatio();
-	}
-	_brush.color = positionToColor(_down.pos.x());
-}
-
 void ColorPicker::moveLine(const QPoint &position) {
-	_colorLine->move(position
-		- QPoint(_colorLine->width() / 2, _colorLine->height() / 2));
-
-	_canvasForCircle->move(
-		_colorLine->x() - circleHeight(kMax) / 2,
-		_colorLine->y()
-			+ _colorLine->height()
-			+ ((circleHeight() - _colorLine->height()) / 2)
-			- _canvasForCircle->height());
+	_colorButton->move(position
+		- QPoint(_colorButton->width() / 2, _colorButton->height() / 2));
 }
 
 void ColorPicker::setCanvasRect(const QRect &rect) {
@@ -308,63 +157,21 @@ void ColorPicker::setCanvasRect(const QRect &rect) {
 	moveSizeControl(_parent->size());
 }
 
-QColor ColorPicker::positionToColor(int x) const {
-	const auto from = 0;
-	const auto to = _width;
-	const auto gradientRatio = InterpolationRatio(from, to, x);
-
-	for (auto i = 1; i < _gradientStops.size(); i++) {
-		const auto &previous = _gradientStops[i - 1];
-		const auto &current = _gradientStops[i];
-		const auto &fromStop = previous.first;
-		const auto &toStop = current.first;
-		const auto &fromColor = previous.second;
-		const auto &toColor = current.second;
-
-		if ((fromStop <= gradientRatio) && (toStop >= gradientRatio)) {
-			const auto stopRatio = RatioPrecise(
-				(gradientRatio - fromStop) / float64(toStop - fromStop));
-			return anim::color(fromColor, toColor, stopRatio);
-		}
-	}
-	return QColor();
-}
-
-void ColorPicker::paintCircle(QPainter &p) {
+void ColorPicker::paintColorButton(QPainter &p) {
 	PainterHighQualityEnabler hq(p);
 
-	p.setPen(Qt::NoPen);
-	p.setBrush(_circleColor);
+	const auto border = st::photoEditorColorButtonBorder;
+	const auto half = border / 2.;
+	const auto rect = QRectF(_colorButton->rect())
+		.adjusted(half, half, -half, -half);
 
-	const auto progress = _circleAnimation.value(_down.pressed ? 1. : 0.);
-	const auto h = circleHeight(progress);
-	const auto bottom = _canvasForCircle->height() - h;
-
-	const auto circleX = _down.pos.x() + (circleHeight(kMax) - h) / 2;
-	const auto circleY = _circleAnimation.animating()
-		? anim::interpolate(bottom, _down.pos.y(), progress)
-		: _down.pressed
-		? _down.pos.y()
-		: bottom;
-
-	const auto r = QRect(circleX, circleY, h, h);
-	p.drawEllipse(r);
-
-	const auto innerH = InterpolateF(
-		h * kMinInnerHeight,
-		h * kMaxInnerHeight,
-		_brush.sizeRatio);
-
+	if (border > 0) {
+		p.setPen(QPen(st::photoEditorColorButtonBorderFg, border));
+	} else {
+		p.setPen(Qt::NoPen);
+	}
 	p.setBrush(_brush.color);
-
-	const auto innerRect = QRectF(
-		r.x() + (r.width() - innerH) / 2.,
-		r.y() + (r.height() - innerH) / 2.,
-		innerH,
-		innerH);
-
-	paintOutline(p, innerRect);
-	p.drawEllipse(innerRect);
+	p.drawEllipse(rect);
 }
 
 void ColorPicker::paintSizeControl(QPainter &p) {
@@ -384,44 +191,6 @@ void ColorPicker::paintSizeControl(QPainter &p) {
 	p.drawEllipse(handleRect);
 }
 
-void ColorPicker::paintOutline(QPainter &p, const QRectF &rect) {
-	const auto &s = _outlinedStop;
-	if (!s.stopPos) {
-		return;
-	}
-	const auto draw = [&](float64 opacity) {
-		p.save();
-		p.setOpacity(opacity);
-		p.setPen(Qt::lightGray);
-		p.setPen(Qt::NoBrush);
-		p.drawEllipse(rect);
-		p.restore();
-	};
-	const auto x = _down.pos.x();
-	if (s.prevStopPos && (x >= s.prevStopPos && x <= s.stopPos)) {
-		const auto from = *s.prevStopPos;
-		const auto to = *s.stopPos;
-		const auto ratio = InterpolationRatio(from, to, x);
-		if (ratio >= 0. && ratio <= 1.) {
-			draw(ratio);
-		}
-	} else if (s.nextStopPos && (x >= s.stopPos && x <= s.nextStopPos)) {
-		const auto from = *s.stopPos;
-		const auto to = *s.nextStopPos;
-		const auto ratio = InterpolationRatio(from, to, x);
-		if (ratio >= 0. && ratio <= 1.) {
-			draw(1. - ratio);
-		}
-	}
-}
-
-int ColorPicker::circleHeight(float64 progress) const {
-	return anim::interpolate(
-		st::photoEditorColorPickerCircleSize,
-		st::photoEditorColorPickerCircleBigSize,
-		progress);
-}
-
 void ColorPicker::setVisible(bool visible) {
 	if (!visible) {
 		_sizeDown.pressed = false;
@@ -430,8 +199,7 @@ void ColorPicker::setVisible(bool visible) {
 		_sizeControlExpanded = false;
 		_sizeControlAnimation.stop();
 	}
-	_colorLine->setVisible(visible);
-	_canvasForCircle->setVisible(visible);
+	_colorButton->setVisible(visible);
 	_sizeControlHoverArea->setVisible(visible);
 	_sizeControl->setVisible(visible);
 }
@@ -440,22 +208,9 @@ rpl::producer<Brush> ColorPicker::saveBrushRequests() const {
 	return _saveBrushRequests.events_starting_with_copy(_brush);
 }
 
-int ColorPicker::colorToPosition(const QColor &color) const {
-	const auto step = 1. / kPrecision;
-	for (auto i = 0.; i <= 1.; i += step) {
-		if (positionToColor(i * _width) == color) {
-			return i * _width;
-		}
-	}
-	return 0;
-}
-
 bool ColorPicker::preventHandleKeyPress() const {
-	return _canvasForCircle->isVisible()
-		&& (_circleAnimation.animating()
-			|| _sizeControlAnimation.animating()
-			|| _down.pressed
-			|| _sizeDown.pressed);
+	return _sizeControl->isVisible()
+		&& (_sizeControlAnimation.animating() || _sizeDown.pressed);
 }
 
 void ColorPicker::moveSizeControl(const QSize &size) {
@@ -537,28 +292,26 @@ int ColorPicker::sizeControlBottom() const {
 		- (st::photoEditorBrushSizeControlExpandedBottomWidth / 2);
 }
 
-float64 ColorPicker::sizeControlRatioFromY(int y) const {
+float ColorPicker::sizeControlRatioFromY(int y) const {
 	const auto top = sizeControlTop();
 	const auto bottom = sizeControlBottom();
 	if (bottom <= top) {
-		return 1.;
+		return 1.f;
 	}
-	return std::clamp(
-		float64(1. - InterpolationRatio(top, bottom, y)),
-		kMinBrushSize,
-		1.);
+	const auto ratio = 1. - InterpolationRatio(top, bottom, y);
+	return std::clamp(ratio, kMinBrushSize, 1.0);
 }
 
-int ColorPicker::sizeControlYFromRatio(float64 ratio) const {
+int ColorPicker::sizeControlYFromRatio(float ratio) const {
 	const auto top = sizeControlTop();
 	const auto bottom = sizeControlBottom();
 	if (bottom <= top) {
 		return top;
 	}
 	const auto normalized = std::clamp(
-		(ratio - kMinBrushSize) / (1. - kMinBrushSize),
-		0.,
-		1.);
+		(ratio - kMinBrushSize) / (1.0 - kMinBrushSize),
+		0.0,
+		1.0);
 	return std::clamp(
 		anim::interpolate(bottom, top, normalized),
 		top,
