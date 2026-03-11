@@ -36,6 +36,7 @@ public:
 private:
 	void paintSizeControl(QPainter &p);
 	void rebuildPalette();
+	void updateToolButtonsGeometry();
 	void updatePaletteGeometry();
 	void setPaletteVisible(bool visible);
 	void moveSizeControl(const QSize &size);
@@ -61,6 +62,7 @@ private:
 	const base::unique_qptr<Ui::RpWidget> _paletteWrap;
 	const base::unique_qptr<Ui::RpWidget> _sizeControlHoverArea;
 	const base::unique_qptr<Ui::RpWidget> _sizeControl;
+	std::vector<base::unique_qptr<Ui::AbstractButton>> _toolButtons;
 
 	struct {
 		int y = 0;

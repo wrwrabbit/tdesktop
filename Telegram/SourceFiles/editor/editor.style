@@ -100,6 +100,11 @@ photoEditorColorPaletteSelectionFg: mediaviewCaptionFg;
 photoEditorColorPalettePlusLine: 2px;
 photoEditorColorPalettePlusFg: mediaviewCaptionFg;
 
+photoEditorToolButtonSize: 20px;
+photoEditorToolButtonIconSize: 20px;
+photoEditorToolButtonGap: 6px;
+photoEditorToolButtonHoverDuration: 350;
+
 photoEditorBrushSizeControlLeftSkip: 0px;
 photoEditorBrushSizeControlHeight: 280px;
 photoEditorBrushSizeControlCollapsedWidth: 2px;

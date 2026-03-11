@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/basic_types.h"
 #include "lang/lang_keys.h"
+#include "lottie/lottie_icon.h"
 #include "ui/abstract_button.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
@@ -66,6 +67,84 @@ private:
 	}
 };
 
+class ToolLottieButton final : public Ui::AbstractButton {
+public:
+	ToolLottieButton(
+		not_null<QWidget*> parent,
+		const QString &path)
+	: AbstractButton(parent)
+	, _icon(Lottie::MakeIcon({
+		.path = path,
+		.sizeOverride = Size(st::photoEditorToolButtonIconSize),
+		.frame = 0,
+	})) {
+		events(
+		) | rpl::on_next([=](not_null<QEvent*> event) {
+			const auto type = event->type();
+			if (type == QEvent::Enter) {
+				if (_hovered) {
+					return;
+				}
+				_hovered = true;
+				_resetPending = false;
+				if (_icon && _icon->valid() && !_icon->animating()) {
+					if (_icon->frameIndex() != 0) {
+						_icon->jumpTo(0, [=] { update(); });
+					}
+				}
+				playOnce();
+			} else if (type == QEvent::Leave) {
+				_hovered = false;
+				if (_icon && _icon->animating()) {
+					_resetPending = true;
+				} else {
+					reset();
+				}
+			}
+		}, lifetime());
+	}
+
+private:
+	void paintEvent(QPaintEvent *event) override {
+		auto p = Painter(this);
+		if (_icon) {
+			_icon->paintInCenter(p, rect());
+			if (_resetPending && !_icon->animating()) {
+				_resetPending = false;
+				reset();
+			}
+		}
+	}
+
+	void playOnce() {
+		if (!_icon || !_icon->valid()) {
+			return;
+		}
+		const auto count = _icon->framesCount();
+		if (count <= 0) {
+			return;
+		}
+		_icon->animate(
+			[=] { update(); },
+			0,
+			count - 1,
+			crl::time(st::photoEditorToolButtonHoverDuration));
+	}
+
+	void reset() {
+		if (!_icon || !_icon->valid()) {
+			return;
+		}
+		if (_icon->frameIndex() != 0) {
+			_icon->jumpTo(0, [=] { update(); });
+		}
+	}
+
+	std::unique_ptr<Lottie::Icon> _icon;
+	bool _hovered = false;
+	bool _resetPending = false;
+};
+
 std::vector<QColor> PaletteColors() {
 	return {
 		QColor(0, 0, 0),
@@ -115,6 +194,25 @@ ColorPicker::ColorPicker(
 		st::photoEditorColorButtonSize);
 	_colorButton->setSelectionCutout(true);
 	_colorButton->setForceCircle(true);
+
+	_toolButtons.push_back(base::make_unique_q<ToolLottieButton>(
+		parent,
+		u":/animations/photo_editor_pen.tgs"_q));
+	_toolButtons.push_back(base::make_unique_q<ToolLottieButton>(
+		parent,
+		u":/animations/photo_editor_arrow.tgs"_q));
+	_toolButtons.push_back(base::make_unique_q<ToolLottieButton>(
+		parent,
+		u":/animations/photo_editor_marker.tgs"_q));
+	_toolButtons.push_back(base::make_unique_q<ToolLottieButton>(
+		parent,
+		u":/animations/photo_editor_eraser.tgs"_q));
+	for (const auto &button : _toolButtons) {
+		button->resize(
+			st::photoEditorToolButtonSize,
+			st::photoEditorToolButtonSize);
+		button->show();
+	}
 	_paletteWrap->setVisible(false);
 	_sizeControl->resize(
 		st::photoEditorBrushSizeControlHitPadding * 2
@@ -214,14 +312,35 @@ ColorPicker::ColorPicker(
 
 void ColorPicker::moveLine(const QPoint &position) {
 	_colorButtonCenter = position;
-	_colorButton->move(position
-		- QPoint(_colorButton->width() / 2, _colorButton->height() / 2));
+	const auto gap = st::photoEditorToolButtonGap;
+	const auto colorWidth = _colorButton->width();
+	const auto colorHeight = _colorButton->height();
+	const auto toolSize = st::photoEditorToolButtonSize;
+	const auto tools = int(_toolButtons.size());
+	const auto totalWidth = colorWidth + tools * toolSize + tools * gap;
+	const auto left = position.x() - totalWidth / 2;
+	const auto top = position.y() - colorHeight / 2;
+	_colorButton->move(left, top);
+	updateToolButtonsGeometry();
 	updatePaletteGeometry();
 }
 
 void ColorPicker::setCanvasRect(const QRect &rect) {
 	_canvasRect = rect;
 	moveSizeControl(_parent->size());
+}
+
+void ColorPicker::updateToolButtonsGeometry() {
+	const auto size = st::photoEditorToolButtonSize;
+	const auto gap = st::photoEditorToolButtonGap;
+	auto x = _colorButton->x() + _colorButton->width() + gap;
+	const auto y = _colorButton->y()
+		+ (_colorButton->height() - size) / 2;
+	for (const auto &button : _toolButtons) {
+		button->resize(size, size);
+		button->move(x, y);
+		x += size + gap;
+	}
 }
 
 void ColorPicker::paintSizeControl(QPainter &p) {
@@ -250,10 +369,13 @@ void ColorPicker::setVisible(bool visible) {
 		_sizeControlExpanded = false;
 		_sizeControlAnimation.stop();
 	}
-	_colorButton->setVisible(visible);
+	_colorButton->setVisible(visible && !_paletteVisible);
 	_paletteWrap->setVisible(visible && _paletteVisible);
 	_sizeControlHoverArea->setVisible(visible);
 	_sizeControl->setVisible(visible);
+	for (const auto &button : _toolButtons) {
+		button->setVisible(visible && !_paletteVisible);
+	}
 }
 
 rpl::producer<Brush> ColorPicker::saveBrushRequests() const {
@@ -379,6 +501,9 @@ void ColorPicker::setPaletteVisible(bool visible) {
 	_paletteVisible = visible;
 	_paletteWrap->setVisible(visible);
 	_colorButton->setVisible(!visible);
+	for (const auto &button : _toolButtons) {
+		button->setVisible(!visible);
+	}
 	if (visible) {
 		rebuildPalette();
 	}
