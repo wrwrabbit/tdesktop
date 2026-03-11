@@ -3247,7 +3247,8 @@ void SessionController::openPhoto(
 		photo,
 		item,
 		message.topicRootId,
-		message.monoforumPeerId));
+		message.monoforumPeerId,
+		message.showDrawButton));
 }
 
 void SessionController::openPhoto(
@@ -3307,7 +3308,8 @@ void SessionController::openDocument(
 			message.topicRootId,
 			message.monoforumPeerId,
 			false,
-			usedTimestamp));
+			usedTimestamp,
+			message.showDrawButton));
 		return;
 	}
 	Data::ResolveDocument(
@@ -3315,7 +3317,8 @@ void SessionController::openDocument(
 		document,
 		item,
 		message.topicRootId,
-		message.monoforumPeerId);
+		message.monoforumPeerId,
+		message.showDrawButton);
 }
 
 bool SessionController::openSharedStory(HistoryItem *item) {

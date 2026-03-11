@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "core/click_handler_types.h"
 #include "core/phone_click_handler.h"
+#include "data/data_chat_participant_status.h"
 #include "history/history_item_helpers.h"
 #include "history/view/controls/history_view_forward_panel.h"
 #include "history/view/controls/history_view_draft_options.h"
@@ -4157,14 +4158,23 @@ void HistoryInner::elementShowPollResults(
 void HistoryInner::elementOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) {
-	_controller->openPhoto(photo, { context });
+	const auto draw = Data::CanSendAnyOf(
+		_history->peer,
+		Data::FilesSendRestrictions());
+	_controller->openPhoto(photo, { .id = context, .showDrawButton = draw });
 }
 
 void HistoryInner::elementOpenDocument(
 		not_null<DocumentData*> document,
 		FullMsgId context,
 		bool showInMediaView) {
-	_controller->openDocument(document, showInMediaView, { context });
+	const auto showDrawButton = Data::CanSendAnyOf(
+		_history->peer,
+		Data::FilesSendRestrictions());
+	_controller->openDocument(
+		document,
+		showInMediaView,
+		{ .id = context, .showDrawButton = showDrawButton });
 }
 
 void HistoryInner::elementCancelUpload(const FullMsgId &context) {

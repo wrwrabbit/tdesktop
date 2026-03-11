@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_peer_requests_box.h"
 #include "core/file_utilities.h"
 #include "core/mime_type.h"
+#include "history/view/history_view_draw_to_reply.h"
 #include "ui/emoji_config.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/chat/choose_theme_controller.h"
@@ -72,6 +73,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_todo_list.h"
 #include "data/data_web_page.h"
 #include "data/data_document.h"
+#include "data/data_document_media.h"
 #include "data/data_photo.h"
 #include "data/data_photo_media.h"
 #include "data/data_channel.h"
@@ -645,6 +647,11 @@ HistoryWidget::HistoryWidget(
 		return !_list && (item->mainView() != nullptr);
 	}) | rpl::on_next([=](not_null<HistoryItem*> item) {
 		item->mainView()->itemDataChanged();
+	}, lifetime());
+
+	session().data().drawToReplyRequests(
+	) | rpl::on_next([=](Data::DrawToReplyRequest request) {
+		handleDrawToReplyRequest(std::move(request));
 	}, lifetime());
 
 	Core::App().settings().largeEmojiChanges(
@@ -1764,10 +1771,16 @@ void HistoryWidget::applyInlineBotQuery(UserData *bot, const QString &query) {
 					InlineBots::ResultSelected result) {
 				if (result.open) {
 					const auto request = result.result->openRequest();
+					const auto showDrawButton = canWriteMessage();
 					if (const auto photo = request.photo()) {
-						controller()->openPhoto(photo, {});
+						controller()->openPhoto(
+							photo,
+							{ .showDrawButton = showDrawButton });
 					} else if (const auto document = request.document()) {
-						controller()->openDocument(document, false, {});
+						controller()->openDocument(
+							document,
+							false,
+							{ .showDrawButton = showDrawButton });
 					}
 				} else {
 					sendInlineResult(result);
@@ -3844,6 +3857,36 @@ void HistoryWidget::maybeMarkReactionsRead(not_null<HistoryItem*> item) {
 		return;
 	}
 	session().api().markContentsRead(item);
+}
+
+void HistoryWidget::handleDrawToReplyRequest(
+		Data::DrawToReplyRequest request) {
+	if (!_peer || request.messageId.peer != _peer->id) {
+		return;
+	}
+	auto image = HistoryView::ResolveDrawToReplyImage(
+		&session().data(),
+		request);
+	if (image.isNull()) {
+		return;
+	}
+	const auto replyTo = request.messageId;
+	HistoryView::OpenDrawToReplyEditor(
+		controller(),
+		std::move(image),
+		crl::guard(this, [=](QImage &&result) {
+			if (result.isNull()) {
+				return;
+			}
+			if (replyTo) {
+				replyToMessage({ .messageId = replyTo });
+			}
+			auto list = Storage::PrepareMediaFromImage(
+				std::move(result),
+				QByteArray(),
+				st::sendMediaPreviewSize);
+			confirmSendingFiles(std::move(list));
+		}));
 }
 
 void HistoryWidget::unreadCountUpdated() {
@@ -7105,10 +7148,11 @@ void HistoryWidget::updateHistoryGeometry(
 			const auto media = item ? item->media() : nullptr;
 			const auto document = media ? media->document() : nullptr;
 			if (document && document->isVideoFile()) {
+				const auto draw = canWriteMessage();
 				controller()->openDocument(
 					document,
 					true,
-					{ item->fullId() },
+					{ .id = item->fullId(), .showDrawButton = draw },
 					nullptr,
 					timestamp);
 			}

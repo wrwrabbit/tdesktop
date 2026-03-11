@@ -566,6 +566,7 @@ public:
 		FullMsgId id;
 		MsgId topicRootId;
 		PeerId monoforumPeerId;
+		bool showDrawButton = false;
 	};
 	void openPhoto(
 		not_null<PhotoData*> photo,

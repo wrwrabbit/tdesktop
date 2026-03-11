@@ -30,6 +30,7 @@ void ResolveDocument(
 	not_null<DocumentData*> document,
 	HistoryItem *item,
 	MsgId topicRootId,
-	PeerId monoforumPeerId);
+	PeerId monoforumPeerId,
+	bool showDrawButton);
 
 } // namespace Data

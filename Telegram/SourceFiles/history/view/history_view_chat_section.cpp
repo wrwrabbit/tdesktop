@@ -3198,19 +3198,25 @@ void ChatWidget::listShowPremiumToast(not_null<DocumentData*> document) {
 void ChatWidget::listOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) {
+	const auto showDrawButton = _topic
+		? Data::CanSendAnyOf(_topic, Data::FilesSendRestrictions())
+		: Data::CanSendAnyOf(_peer, Data::FilesSendRestrictions());
 	controller()->openPhoto(
 		photo,
-		{ context, _repliesRootId, _monoforumPeerId });
+		{ context, _repliesRootId, _monoforumPeerId, showDrawButton });
 }
 
 void ChatWidget::listOpenDocument(
 		not_null<DocumentData*> document,
 		FullMsgId context,
 		bool showInMediaView) {
+	const auto showDrawButton = _topic
+		? Data::CanSendAnyOf(_topic, Data::FilesSendRestrictions())
+		: Data::CanSendAnyOf(_peer, Data::FilesSendRestrictions());
 	controller()->openDocument(
 		document,
 		showInMediaView,
-		{ context, _repliesRootId, _monoforumPeerId });
+		{ context, _repliesRootId, _monoforumPeerId, showDrawButton });
 }
 
 void ChatWidget::listPaintEmpty(

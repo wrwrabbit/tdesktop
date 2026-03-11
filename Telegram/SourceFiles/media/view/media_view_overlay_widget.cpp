@@ -2812,7 +2812,8 @@ void OverlayWidget::handleDocumentClick() {
 			_document,
 			_message,
 			_topicRootId,
-			_monoforumPeerId);
+			_monoforumPeerId,
+			_drawButtonEnabled);
 		if (_document && _document->loading() && !_radial.animating()) {
 			_radial.start(_documentMedia->progress());
 		}
@@ -3092,6 +3093,22 @@ void OverlayWidget::recognize() {
 }
 
 void OverlayWidget::draw() {
+	if (!_session) {
+		return;
+	}
+	const auto photoId = _photo ? _photo->id : PhotoId();
+	const auto documentId = (_document && _document->isImage())
+		? _document->id
+		: DocumentId();
+	if (!photoId && !documentId) {
+		return;
+	}
+	_session->data().requestDrawToReply({
+		_message ? _message->fullId() : FullMsgId(),
+		photoId,
+		documentId,
+	});
+	close();
 }
 
 void OverlayWidget::copyMedia() {

@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_top_bar_widget.h"
 #include "history/view/history_view_schedule_box.h"
 #include "history/view/history_view_sticker_toast.h"
+#include "data/data_chat_participant_status.h"
 #include "history/history.h"
 #include "history/history_drag_area.h"
 #include "history/history_item_helpers.h" // GetErrorForSending.
@@ -1603,14 +1604,27 @@ void ScheduledWidget::listShowPremiumToast(
 void ScheduledWidget::listOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) {
-	controller()->openPhoto(photo, { context });
+	const auto draw = _forumTopic
+		? Data::CanSendAnyOf(_forumTopic, Data::FilesSendRestrictions())
+		: Data::CanSendAnyOf(
+			_history->peer,
+			Data::FilesSendRestrictions());
+	controller()->openPhoto(photo, { .id = context, .showDrawButton = draw });
 }
 
 void ScheduledWidget::listOpenDocument(
 		not_null<DocumentData*> document,
 		FullMsgId context,
 		bool showInMediaView) {
-	controller()->openDocument(document, showInMediaView, { context });
+	const auto draw = _forumTopic
+		? Data::CanSendAnyOf(_forumTopic, Data::FilesSendRestrictions())
+		: Data::CanSendAnyOf(
+			_history->peer,
+			Data::FilesSendRestrictions());
+	controller()->openDocument(
+		document,
+		showInMediaView,
+		{ .id = context, .showDrawButton = draw });
 }
 
 void ScheduledWidget::listPaintEmpty(

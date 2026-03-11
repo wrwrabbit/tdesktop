@@ -182,7 +182,8 @@ void ResolveDocument(
 		not_null<DocumentData*> document,
 		HistoryItem *item,
 		MsgId topicRootId,
-		PeerId monoforumPeerId) {
+		PeerId monoforumPeerId,
+		bool showDrawButton) {
 	if (document->isNull()) {
 		return;
 	}
@@ -193,7 +194,7 @@ void ResolveDocument(
 			controller->openDocument(
 				document,
 				true,
-				{ msgId, topicRootId, monoforumPeerId });
+				{ msgId, topicRootId, monoforumPeerId, showDrawButton });
 		}
 	};
 
