@@ -85,8 +85,13 @@ void List::adjustByDate(not_null<Row*> row) {
 	Expects(_sortMode == SortMode::Date);
 
 	if (_frozen) {
-		_pendingAdjust.emplace(row);
-		return;
+		const auto canAdjustWhileFrozen = _pendingAdjust.empty()
+			&& (row->entry()->fixedOnTopIndex()
+				|| row->entry()->isPinnedDialog(_filterId));
+		if (!canAdjustWhileFrozen) {
+			_pendingAdjust.emplace(row);
+			return;
+		}
 	}
 
 	const auto key = row->sortKey(_filterId);
@@ -114,8 +119,44 @@ void List::freeze() {
 
 void List::unfreeze() {
 	_frozen = false;
-	for (const auto &row : base::take(_pendingAdjust)) {
+	auto pending = base::take(_pendingAdjust);
+	if (pending.empty()) {
+		return;
+	} else if (pending.size() == 1) {
+		adjustByDate(*pending.begin());
+		return;
+	}
+	for (const auto &row : pending) {
 		adjustByDate(row);
+	}
+	if (!sortedByDate()) {
+		sortByDate();
+	}
+}
+
+bool List::sortedByDate() const {
+	Expects(_sortMode == SortMode::Date);
+
+	for (auto i = 1, count = int(_rows.size()); i != count; ++i) {
+		if (_rows[i - 1]->sortKey(_filterId) < _rows[i]->sortKey(_filterId)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void List::sortByDate() {
+	Expects(_sortMode == SortMode::Date);
+
+	ranges::stable_sort(_rows, [&](Row *a, Row *b) {
+		return a->sortKey(_filterId) > b->sortKey(_filterId);
+	});
+	auto top = 0;
+	for (auto i = 0, count = int(_rows.size()); i != count; ++i) {
+		const auto row = _rows[i];
+		row->_index = i;
+		row->_top = top;
+		top += row->height();
 	}
 }
 

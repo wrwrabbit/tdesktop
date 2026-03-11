@@ -487,6 +487,8 @@ private:
 	void startReorderPinned(QPoint localPosition);
 	int updateReorderIndexGetCount();
 	bool updateReorderPinned(QPoint localPosition);
+	[[nodiscard]] bool skipChatsListFreeze() const;
+	void unfreezeShownList(bool updateIfWasFrozen);
 	void finishReorderPinned();
 	bool finishReorderOnRelease();
 	void stopReorderPinned();
