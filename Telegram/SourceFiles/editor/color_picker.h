@@ -41,6 +41,8 @@ private:
 	void updateToolSelection(bool animated);
 	void setTool(Brush::Tool tool);
 	void storeCurrentBrush();
+	void updateColorButtonColor(const QColor &color, bool animated);
+	[[nodiscard]] QColor colorButtonColor() const;
 	void updatePaletteGeometry();
 	void setPaletteVisible(bool visible);
 	void moveSizeControl(const QSize &size);
@@ -82,10 +84,13 @@ private:
 	QPoint _colorButtonCenter;
 	bool _paletteVisible = false;
 	Brush _brush;
+	QColor _colorButtonFrom;
+	QColor _colorButtonTo;
 	std::array<Brush, 4> _toolBrushes;
 
 	Ui::Animations::Simple _sizeControlAnimation;
 	Ui::Animations::Simple _sizeControlPositionAnimation;
+	Ui::Animations::Simple _colorButtonAnimation;
 	Ui::Animations::Simple _toolSelectionAnimation;
 
 	rpl::event_stream<Brush> _saveBrushRequests;

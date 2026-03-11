@@ -28,6 +28,7 @@ constexpr auto kMaxBrushWidth = 25.;
 
 constexpr auto kCircleDuration = crl::time(200);
 constexpr auto kSizeControlSwitchDuration = crl::time(140);
+constexpr auto kColorButtonSwitchDuration = crl::time(140);
 
 inline float64 InterpolateF(float64 a, float64 b, float64 b_ratio) {
 	return a + float64(b - a) * b_ratio;
@@ -195,7 +196,7 @@ ColorPicker::ColorPicker(
 	parent,
 	[=](uint8) {
 		auto set = Data::ColorProfileSet();
-		set.palette = { _brush.color };
+		set.palette = { colorButtonColor() };
 		return set;
 	},
 	uint8(0),
@@ -217,6 +218,8 @@ ColorPicker::ColorPicker(
 	}
 	_brush = _toolBrushes[ToolIndex(savedTool)];
 	_brush.tool = savedTool;
+	_colorButtonFrom = _brush.color;
+	_colorButtonTo = _brush.color;
 
 	_toolSelection->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_toolSelection->setAttribute(Qt::WA_TranslucentBackground, true);
@@ -455,6 +458,7 @@ void ColorPicker::setTool(Brush::Tool tool) {
 	_brush = _toolBrushes[ToolIndex(tool)];
 	_brush.tool = tool;
 	updateSizeControlPositionFromRatio(true);
+	updateColorButtonColor(_brush.color, true);
 	if (_paletteVisible) {
 		rebuildPalette();
 	} else {
@@ -467,6 +471,36 @@ void ColorPicker::setTool(Brush::Tool tool) {
 
 void ColorPicker::storeCurrentBrush() {
 	_toolBrushes[ToolIndex(_brush.tool)] = _brush;
+}
+
+void ColorPicker::updateColorButtonColor(const QColor &color, bool animated) {
+	const auto hasValid = _colorButtonFrom.isValid() && _colorButtonTo.isValid();
+	const auto from = hasValid ? colorButtonColor() : color;
+	const auto to = color.isValid() ? color : from;
+	if (from == to) {
+		_colorButtonAnimation.stop();
+		_colorButtonFrom = from;
+		_colorButtonTo = to;
+		return;
+	}
+	_colorButtonFrom = from;
+	_colorButtonTo = to;
+	_colorButtonAnimation.stop();
+	if (animated) {
+		_colorButtonAnimation.start(
+			[=] { _colorButton->update(); },
+			0.,
+			1.,
+			kColorButtonSwitchDuration,
+			anim::easeOutCirc);
+	} else {
+		_colorButton->update();
+	}
+}
+
+QColor ColorPicker::colorButtonColor() const {
+	const auto progress = _colorButtonAnimation.value(1.);
+	return anim::color(_colorButtonFrom, _colorButtonTo, progress);
 }
 
 void ColorPicker::paintSizeControl(QPainter &p) {
@@ -550,6 +584,7 @@ void ColorPicker::rebuildPalette() {
 		button->setClickedCallback([=] {
 			_brush.color = c;
 			storeCurrentBrush();
+			updateColorButtonColor(_brush.color, true);
 			rebuildPalette();
 			_colorButton->update();
 			_saveBrushRequests.fire_copy(_brush);
@@ -584,6 +619,7 @@ void ColorPicker::rebuildPalette() {
 			box->addButton(tr::lng_box_done(), [=] {
 				_brush.color = state->color;
 				storeCurrentBrush();
+				updateColorButtonColor(_brush.color, true);
 				rebuildPalette();
 				_colorButton->update();
 				_saveBrushRequests.fire_copy(_brush);
