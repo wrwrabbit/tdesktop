@@ -10,16 +10,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unique_qptr.h"
 #include "editor/photo_editor_inner_common.h"
 #include "ui/effects/animations.h"
+#include "ui/peer/color_sample.h"
 
 namespace Ui {
 class RpWidget;
+class Show;
 } // namespace Ui
 
 namespace Editor {
 
 class ColorPicker final {
 public:
-	ColorPicker(not_null<Ui::RpWidget*> parent, const Brush &savedBrush);
+	ColorPicker(
+		not_null<Ui::RpWidget*> parent,
+		std::shared_ptr<Ui::Show> show,
+		const Brush &savedBrush);
 
 	void moveLine(const QPoint &position);
 	void setCanvasRect(const QRect &rect);
@@ -29,8 +34,10 @@ public:
 	rpl::producer<Brush> saveBrushRequests() const;
 
 private:
-	void paintColorButton(QPainter &p);
 	void paintSizeControl(QPainter &p);
+	void rebuildPalette();
+	void updatePaletteGeometry();
+	void setPaletteVisible(bool visible);
 	void moveSizeControl(const QSize &size);
 	void updateSizeControlExpanded();
 	void updateSizeControlMousePosition(int y);
@@ -48,8 +55,10 @@ private:
 	[[nodiscard]] float64 sizeControlHandleSize() const;
 
 	const not_null<Ui::RpWidget*> _parent;
+	const std::shared_ptr<Ui::Show> _show;
 
-	const base::unique_qptr<Ui::RpWidget> _colorButton;
+	const base::unique_qptr<Ui::ColorSample> _colorButton;
+	const base::unique_qptr<Ui::RpWidget> _paletteWrap;
 	const base::unique_qptr<Ui::RpWidget> _sizeControlHoverArea;
 	const base::unique_qptr<Ui::RpWidget> _sizeControl;
 
@@ -61,11 +70,16 @@ private:
 	bool _sizeControlHovered = false;
 	bool _sizeControlExpanded = false;
 	QRect _canvasRect;
+	QPoint _colorButtonCenter;
+	bool _paletteVisible = false;
 	Brush _brush;
 
 	Ui::Animations::Simple _sizeControlAnimation;
 
 	rpl::event_stream<Brush> _saveBrushRequests;
+
+	std::vector<base::unique_qptr<Ui::ColorSample>> _paletteButtons;
+	base::unique_qptr<Ui::AbstractButton> _palettePlus;
 
 };
 

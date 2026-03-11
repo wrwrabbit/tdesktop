@@ -79,7 +79,7 @@ PhotoEditor::PhotoEditor(
 			std::move(sessionShow))
 		: nullptr,
 	std::make_unique<UndoController>(),
-	std::move(show)))
+	show))
 , _content(base::make_unique_q<PhotoEditorContent>(
 	this,
 	photo,
@@ -93,6 +93,7 @@ PhotoEditor::PhotoEditor(
 	data))
 , _colorPicker(std::make_unique<ColorPicker>(
 	this,
+	std::move(show),
 	Deserialize(Core::App().settings().photoEditorBrush()))) {
 
 	sizeValue(

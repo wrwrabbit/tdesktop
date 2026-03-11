@@ -8,9 +8,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/color_picker.h"
 
 #include "base/basic_types.h"
+#include "lang/lang_keys.h"
+#include "ui/abstract_button.h"
+#include "ui/layers/generic_box.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
 #include "ui/rp_widget.h"
+#include "ui/widgets/color_editor.h"
 #include "styles/style_editor.h"
 
 
@@ -31,13 +35,71 @@ inline float64 InterpolationRatio(int from, int to, int result) {
 	return (result - from) / float64(to - from);
 };
 
+class PlusCircle final : public Ui::AbstractButton {
+public:
+	using Ui::AbstractButton::AbstractButton;
+
+private:
+	void paintEvent(QPaintEvent *event) override {
+		auto p = QPainter(this);
+		PainterHighQualityEnabler hq(p);
+
+		const auto border = st::photoEditorColorButtonBorder;
+		const auto half = border / 2.;
+		const auto rect = QRectF(QWidget::rect())
+			.adjusted(half, half, -half, -half);
+
+		p.setPen(border > 0
+			? QPen(st::photoEditorColorButtonBorderFg, border)
+			: Qt::NoPen);
+		p.setBrush(Qt::NoBrush);
+
+		const auto lineWidth = st::photoEditorColorPalettePlusLine;
+		auto pen = QPen(st::photoEditorColorPalettePlusFg, lineWidth);
+		pen.setCapStyle(Qt::RoundCap);
+		p.setPen(pen);
+
+		const auto c = rect::center(rect);
+		const auto r = rect.width() / 2. - lineWidth * 1.75;
+		p.drawLine(QPointF(c.x() - r, c.y()), QPointF(c.x() + r, c.y()));
+		p.drawLine(QPointF(c.x(), c.y() - r), QPointF(c.x(), c.y() + r));
+	}
+};
+
+std::vector<QColor> PaletteColors() {
+	return {
+		QColor(0, 0, 0),
+		QColor(255, 255, 255),
+		QColor(234, 39, 57),
+		QColor(252, 150, 77),
+		QColor(252, 222, 101),
+		QColor(128, 200, 100),
+		QColor(73, 197, 237),
+		QColor(48, 81, 227),
+		QColor(219, 58, 210),
+		QColor(255, 114, 169),
+	};
+}
+
 } // namespace
 
 ColorPicker::ColorPicker(
 	not_null<Ui::RpWidget*> parent,
+	std::shared_ptr<Ui::Show> show,
 	const Brush &savedBrush)
 : _parent(parent)
-, _colorButton(std::in_place, parent)
+, _show(std::move(show))
+, _colorButton(
+	std::in_place,
+	parent,
+	[=](uint8) {
+		auto set = Data::ColorProfileSet();
+		set.palette = { _brush.color };
+		return set;
+	},
+	uint8(0),
+	true)
+, _paletteWrap(std::in_place, parent)
 , _sizeControlHoverArea(std::in_place, parent)
 , _sizeControl(std::in_place, parent)
 , _brush(Brush{
@@ -51,6 +113,9 @@ ColorPicker::ColorPicker(
 	_colorButton->resize(
 		st::photoEditorColorButtonSize,
 		st::photoEditorColorButtonSize);
+	_colorButton->setSelectionCutout(true);
+	_colorButton->setForceCircle(true);
+	_paletteWrap->setVisible(false);
 	_sizeControl->resize(
 		st::photoEditorBrushSizeControlHitPadding * 2
 			+ st::photoEditorBrushSizeControlExpandShift
@@ -62,11 +127,9 @@ ColorPicker::ColorPicker(
 	updateSizeControlPositionFromRatio();
 	moveSizeControl(_parent->size());
 
-	_colorButton->paintRequest(
-	) | rpl::on_next([=] {
-		auto p = QPainter(_colorButton);
-		paintColorButton(p);
-	}, _colorButton->lifetime());
+	_colorButton->setClickedCallback([=] {
+		setPaletteVisible(!_paletteVisible);
+	});
 
 	_sizeControl->paintOn([=](QPainter &p) {
 		paintSizeControl(p);
@@ -145,33 +208,20 @@ ColorPicker::ColorPicker(
 			_sizeControl->update();
 		}
 	}, _sizeControl->lifetime());
+
+	rebuildPalette();
 }
 
 void ColorPicker::moveLine(const QPoint &position) {
+	_colorButtonCenter = position;
 	_colorButton->move(position
 		- QPoint(_colorButton->width() / 2, _colorButton->height() / 2));
+	updatePaletteGeometry();
 }
 
 void ColorPicker::setCanvasRect(const QRect &rect) {
 	_canvasRect = rect;
 	moveSizeControl(_parent->size());
-}
-
-void ColorPicker::paintColorButton(QPainter &p) {
-	PainterHighQualityEnabler hq(p);
-
-	const auto border = st::photoEditorColorButtonBorder;
-	const auto half = border / 2.;
-	const auto rect = QRectF(_colorButton->rect())
-		.adjusted(half, half, -half, -half);
-
-	if (border > 0) {
-		p.setPen(QPen(st::photoEditorColorButtonBorderFg, border));
-	} else {
-		p.setPen(Qt::NoPen);
-	}
-	p.setBrush(_brush.color);
-	p.drawEllipse(rect);
 }
 
 void ColorPicker::paintSizeControl(QPainter &p) {
@@ -193,6 +243,7 @@ void ColorPicker::paintSizeControl(QPainter &p) {
 
 void ColorPicker::setVisible(bool visible) {
 	if (!visible) {
+		_paletteVisible = false;
 		_sizeDown.pressed = false;
 		_sizeHoverAreaHovered = false;
 		_sizeControlHovered = false;
@@ -200,6 +251,7 @@ void ColorPicker::setVisible(bool visible) {
 		_sizeControlAnimation.stop();
 	}
 	_colorButton->setVisible(visible);
+	_paletteWrap->setVisible(visible && _paletteVisible);
 	_sizeControlHoverArea->setVisible(visible);
 	_sizeControl->setVisible(visible);
 }
@@ -211,6 +263,125 @@ rpl::producer<Brush> ColorPicker::saveBrushRequests() const {
 bool ColorPicker::preventHandleKeyPress() const {
 	return _sizeControl->isVisible()
 		&& (_sizeControlAnimation.animating() || _sizeDown.pressed);
+}
+
+void ColorPicker::rebuildPalette() {
+	_paletteButtons.clear();
+	_palettePlus = nullptr;
+
+	auto colors = PaletteColors();
+	auto hasCurrent = false;
+	for (const auto &c : colors) {
+		if (c == _brush.color) {
+			hasCurrent = true;
+			break;
+		}
+	}
+	if (!hasCurrent) {
+		colors.push_back(_brush.color);
+	}
+
+	auto index = uint8(0);
+	for (const auto &c : colors) {
+		auto button = base::make_unique_q<Ui::ColorSample>(
+			_paletteWrap,
+			[c](uint8) {
+				auto set = Data::ColorProfileSet();
+				set.palette = { c };
+				return set;
+			},
+			index++,
+			c == _brush.color);
+		button->setSelectionCutout(true);
+		button->setClickedCallback([=] {
+			_brush.color = c;
+			rebuildPalette();
+			_colorButton->update();
+			_saveBrushRequests.fire_copy(_brush);
+			setPaletteVisible(false);
+		});
+		button->show();
+		_paletteButtons.push_back(std::move(button));
+	}
+
+	_palettePlus = base::make_unique_q<PlusCircle>(_paletteWrap);
+	_palettePlus->setClickedCallback([=] {
+		if (!_show) {
+			return;
+		}
+		_show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+			struct State {
+				QColor color;
+			};
+			const auto state = box->lifetime().make_state<State>();
+			state->color = _brush.color;
+			auto editor = box->addRow(
+				object_ptr<ColorEditor>(
+					box,
+					ColorEditor::Mode::HSL,
+					_brush.color),
+				style::margins());
+			box->setWidth(editor->width());
+			editor->colorValue(
+			) | rpl::on_next([=](QColor c) {
+				state->color = c;
+			}, editor->lifetime());
+			box->addButton(tr::lng_box_done(), [=] {
+				_brush.color = state->color;
+				rebuildPalette();
+				_colorButton->update();
+				_saveBrushRequests.fire_copy(_brush);
+				setPaletteVisible(false);
+				box->closeBox();
+			});
+			box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+		}));
+	});
+	_palettePlus->show();
+	updatePaletteGeometry();
+}
+
+void ColorPicker::updatePaletteGeometry() {
+	if (!_paletteWrap) {
+		return;
+	}
+	const auto size = st::photoEditorColorPaletteItemSize;
+	const auto gap = st::photoEditorColorPaletteGap;
+	const auto count = int(_paletteButtons.size());
+	const auto plusSize = size;
+	const auto width = (count * size)
+		+ ((count > 0) ? (count - 1) * gap : 0)
+		+ gap + plusSize;
+	const auto height = std::max(size, plusSize);
+
+	_paletteWrap->resize(width, height);
+	auto x = 0;
+	for (const auto &button : _paletteButtons) {
+		button->resize(size, size);
+		button->move(x, (height - size) / 2);
+		x += size + gap;
+	}
+	if (_palettePlus) {
+		_palettePlus->resize(plusSize, plusSize);
+		_palettePlus->move(x, (height - plusSize) / 2);
+	}
+
+	if (_colorButtonCenter.isNull()) {
+		return;
+	}
+	_paletteWrap->move(_colorButtonCenter - QPoint(width / 2, height / 2));
+}
+
+void ColorPicker::setPaletteVisible(bool visible) {
+	if (_paletteVisible == visible) {
+		return;
+	}
+	_paletteVisible = visible;
+	_paletteWrap->setVisible(visible);
+	_colorButton->setVisible(!visible);
+	if (visible) {
+		rebuildPalette();
+	}
 }
 
 void ColorPicker::moveSizeControl(const QSize &size) {
