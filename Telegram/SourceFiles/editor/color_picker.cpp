@@ -36,6 +36,26 @@ inline float64 InterpolationRatio(int from, int to, int result) {
 	return (result - from) / float64(to - from);
 };
 
+[[nodiscard]] int ToolIndex(Brush::Tool tool) {
+	switch (tool) {
+	case Brush::Tool::Pen: return 0;
+	case Brush::Tool::Arrow: return 1;
+	case Brush::Tool::Marker: return 2;
+	case Brush::Tool::Eraser: return 3;
+	}
+	return 0;
+}
+
+[[nodiscard]] Brush::Tool ToolFromIndex(int index) {
+	switch (index) {
+	case 0: return Brush::Tool::Pen;
+	case 1: return Brush::Tool::Arrow;
+	case 2: return Brush::Tool::Marker;
+	case 3: return Brush::Tool::Eraser;
+	}
+	return Brush::Tool::Pen;
+}
+
 class PlusCircle final : public Ui::AbstractButton {
 public:
 	using Ui::AbstractButton::AbstractButton;
@@ -165,7 +185,8 @@ std::vector<QColor> PaletteColors() {
 ColorPicker::ColorPicker(
 	not_null<Ui::RpWidget*> parent,
 	std::shared_ptr<Ui::Show> show,
-	const Brush &savedBrush)
+	const std::array<Brush, 4> &savedBrushes,
+	Brush::Tool savedTool)
 : _parent(parent)
 , _show(std::move(show))
 , _colorButton(
@@ -182,20 +203,19 @@ ColorPicker::ColorPicker(
 , _sizeControlHoverArea(std::in_place, parent)
 , _sizeControl(std::in_place, parent)
 , _toolSelection(std::in_place, parent)
-, _brush(Brush{
-	.sizeRatio = (savedBrush.sizeRatio
-		? savedBrush.sizeRatio
-		: kMinBrushSize),
-	.color = (savedBrush.color.isValid()
-		? savedBrush.color
-		: QColor(234, 39, 57)),
-	.tool = savedBrush.tool,
-}) {
+, _brush(savedBrushes[ToolIndex(savedTool)])
+, _toolBrushes(savedBrushes) {
 	_colorButton->resize(
 		st::photoEditorColorButtonSize,
 		st::photoEditorColorButtonSize);
 	_colorButton->setSelectionCutout(true);
 	_colorButton->setForceCircle(true);
+
+	for (auto i = 0; i != int(_toolBrushes.size()); ++i) {
+		_toolBrushes[i].tool = ToolFromIndex(i);
+	}
+	_brush = _toolBrushes[ToolIndex(savedTool)];
+	_brush.tool = savedTool;
 
 	_toolSelection->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_toolSelection->setAttribute(Qt::WA_TranslucentBackground, true);
@@ -237,26 +257,21 @@ ColorPicker::ColorPicker(
 			st::photoEditorToolButtonSize);
 		button->show();
 	}
-	const auto setTool = [=](Brush::Tool tool) {
-		if (_brush.tool == tool) {
-			return;
-		}
-		_brush.tool = tool;
-		updateToolSelection(true);
-		_saveBrushRequests.fire_copy(_brush);
+	const auto setToolRequest = [=](Brush::Tool tool) {
+		setTool(tool);
 	};
 	if (_toolButtons.size() >= 4) {
 		_toolButtons[0]->setClickedCallback([=] {
-			setTool(Brush::Tool::Pen);
+			setToolRequest(Brush::Tool::Pen);
 		});
 		_toolButtons[1]->setClickedCallback([=] {
-			setTool(Brush::Tool::Arrow);
+			setToolRequest(Brush::Tool::Arrow);
 		});
 		_toolButtons[2]->setClickedCallback([=] {
-			setTool(Brush::Tool::Marker);
+			setToolRequest(Brush::Tool::Marker);
 		});
 		_toolButtons[3]->setClickedCallback([=] {
-			setTool(Brush::Tool::Eraser);
+			setToolRequest(Brush::Tool::Eraser);
 		});
 	}
 	updateToolSelection(false);
@@ -397,15 +412,7 @@ void ColorPicker::updateToolSelection(bool animated) {
 	if (_toolButtons.size() < 4) {
 		return;
 	}
-	const auto index = [&] {
-		switch (_brush.tool) {
-		case Brush::Tool::Pen: return 0;
-		case Brush::Tool::Arrow: return 1;
-		case Brush::Tool::Marker: return 2;
-		case Brush::Tool::Eraser: return 3;
-		}
-		return 0;
-	}();
+	const auto index = ToolIndex(_brush.tool);
 	if (index < 0 || index >= int(_toolButtons.size())) {
 		return;
 	}
@@ -436,6 +443,28 @@ void ColorPicker::updateToolSelection(bool animated) {
 		_toolSelection->update();
 	}, 0., 1., crl::time(st::photoEditorToolButtonSelectDuration),
 		anim::easeOutCirc);
+}
+
+void ColorPicker::setTool(Brush::Tool tool) {
+	if (_brush.tool == tool) {
+		return;
+	}
+	storeCurrentBrush();
+	_brush = _toolBrushes[ToolIndex(tool)];
+	_brush.tool = tool;
+	updateSizeControlPositionFromRatio();
+	if (_paletteVisible) {
+		rebuildPalette();
+	} else {
+		_colorButton->update();
+	}
+	updateToolSelection(true);
+	_sizeControl->update();
+	_saveBrushRequests.fire_copy(_brush);
+}
+
+void ColorPicker::storeCurrentBrush() {
+	_toolBrushes[ToolIndex(_brush.tool)] = _brush;
 }
 
 void ColorPicker::paintSizeControl(QPainter &p) {
@@ -517,6 +546,7 @@ void ColorPicker::rebuildPalette() {
 		button->setSelectionCutout(true);
 		button->setClickedCallback([=] {
 			_brush.color = c;
+			storeCurrentBrush();
 			rebuildPalette();
 			_colorButton->update();
 			_saveBrushRequests.fire_copy(_brush);
@@ -550,6 +580,7 @@ void ColorPicker::rebuildPalette() {
 			}, editor->lifetime());
 			box->addButton(tr::lng_box_done(), [=] {
 				_brush.color = state->color;
+				storeCurrentBrush();
 				rebuildPalette();
 				_colorButton->update();
 				_saveBrushRequests.fire_copy(_brush);
@@ -667,6 +698,7 @@ void ColorPicker::updateSizeControlExpanded() {
 void ColorPicker::updateSizeControlMousePosition(int y) {
 	_sizeDown.y = std::clamp(y, sizeControlTop(), sizeControlBottom());
 	_brush.sizeRatio = sizeControlRatioFromY(_sizeDown.y);
+	storeCurrentBrush();
 }
 
 void ColorPicker::updateSizeControlPositionFromRatio() {

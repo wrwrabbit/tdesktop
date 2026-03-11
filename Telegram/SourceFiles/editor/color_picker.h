@@ -24,7 +24,8 @@ public:
 	ColorPicker(
 		not_null<Ui::RpWidget*> parent,
 		std::shared_ptr<Ui::Show> show,
-		const Brush &savedBrush);
+		const std::array<Brush, 4> &savedBrushes,
+		Brush::Tool savedTool);
 
 	void moveLine(const QPoint &position);
 	void setCanvasRect(const QRect &rect);
@@ -38,6 +39,8 @@ private:
 	void rebuildPalette();
 	void updateToolButtonsGeometry();
 	void updateToolSelection(bool animated);
+	void setTool(Brush::Tool tool);
+	void storeCurrentBrush();
 	void updatePaletteGeometry();
 	void setPaletteVisible(bool visible);
 	void moveSizeControl(const QSize &size);
@@ -77,6 +80,7 @@ private:
 	QPoint _colorButtonCenter;
 	bool _paletteVisible = false;
 	Brush _brush;
+	std::array<Brush, 4> _toolBrushes;
 
 	Ui::Animations::Simple _sizeControlAnimation;
 	Ui::Animations::Simple _toolSelectionAnimation;
