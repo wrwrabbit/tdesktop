@@ -102,8 +102,14 @@ photoEditorColorPalettePlusFg: mediaviewCaptionFg;
 
 photoEditorToolButtonSize: 20px;
 photoEditorToolButtonIconSize: 20px;
-photoEditorToolButtonGap: 6px;
+photoEditorToolButtonGap: 18px;
 photoEditorToolButtonHoverDuration: 350;
+photoEditorToolButtonSelectDuration: 120;
+photoEditorToolButtonSelectedFg: mediaviewCaptionFg;
+photoEditorToolButtonSelectedWidth: 2px;
+photoEditorToolButtonSelectedPadding: 2px;
+photoEditorToolButtonSelectedOpacity: 0.35;
+photoEditorToolButtonSelectedExtra: 8px;
 
 photoEditorMarkerOpacity: 0.35;
 photoEditorMarkerSizeMultiplier: 2.5;

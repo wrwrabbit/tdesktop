@@ -37,6 +37,7 @@ private:
 	void paintSizeControl(QPainter &p);
 	void rebuildPalette();
 	void updateToolButtonsGeometry();
+	void updateToolSelection(bool animated);
 	void updatePaletteGeometry();
 	void setPaletteVisible(bool visible);
 	void moveSizeControl(const QSize &size);
@@ -62,6 +63,7 @@ private:
 	const base::unique_qptr<Ui::RpWidget> _paletteWrap;
 	const base::unique_qptr<Ui::RpWidget> _sizeControlHoverArea;
 	const base::unique_qptr<Ui::RpWidget> _sizeControl;
+	const base::unique_qptr<Ui::RpWidget> _toolSelection;
 	std::vector<base::unique_qptr<Ui::AbstractButton>> _toolButtons;
 
 	struct {
@@ -77,11 +79,14 @@ private:
 	Brush _brush;
 
 	Ui::Animations::Simple _sizeControlAnimation;
+	Ui::Animations::Simple _toolSelectionAnimation;
 
 	rpl::event_stream<Brush> _saveBrushRequests;
 
 	std::vector<base::unique_qptr<Ui::ColorSample>> _paletteButtons;
 	base::unique_qptr<Ui::AbstractButton> _palettePlus;
+	QPoint _toolSelectionFrom;
+	QPoint _toolSelectionTo;
 
 };
 

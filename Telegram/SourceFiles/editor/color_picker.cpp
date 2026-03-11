@@ -181,6 +181,7 @@ ColorPicker::ColorPicker(
 , _paletteWrap(std::in_place, parent)
 , _sizeControlHoverArea(std::in_place, parent)
 , _sizeControl(std::in_place, parent)
+, _toolSelection(std::in_place, parent)
 , _brush(Brush{
 	.sizeRatio = (savedBrush.sizeRatio
 		? savedBrush.sizeRatio
@@ -195,6 +196,28 @@ ColorPicker::ColorPicker(
 		st::photoEditorColorButtonSize);
 	_colorButton->setSelectionCutout(true);
 	_colorButton->setForceCircle(true);
+
+	_toolSelection->setAttribute(Qt::WA_TransparentForMouseEvents);
+	_toolSelection->setAttribute(Qt::WA_TranslucentBackground, true);
+	_toolSelection->setVisible(false);
+	_toolSelection->paintOn([=](QPainter &p) {
+		auto hq = PainterHighQualityEnabler(p);
+		p.setOpacity(st::photoEditorToolButtonSelectedOpacity);
+		auto pen = QPen(
+			st::photoEditorToolButtonSelectedFg,
+			st::photoEditorToolButtonSelectedWidth);
+		pen.setCapStyle(Qt::RoundCap);
+		p.setPen(Qt::NoPen);
+		p.setBrush(st::photoEditorToolButtonSelectedFg);
+		const auto padding = st::photoEditorToolButtonSelectedPadding;
+		const auto half = pen.widthF() / 2.;
+		const auto rect = QRectF(_toolSelection->rect()).adjusted(
+			padding + half,
+			padding + half,
+			-padding - half,
+			-padding - half);
+		p.drawEllipse(rect);
+	});
 
 	_toolButtons.push_back(base::make_unique_q<ToolLottieButton>(
 		parent,
@@ -219,6 +242,7 @@ ColorPicker::ColorPicker(
 			return;
 		}
 		_brush.tool = tool;
+		updateToolSelection(true);
 		_saveBrushRequests.fire_copy(_brush);
 	};
 	if (_toolButtons.size() >= 4) {
@@ -235,6 +259,7 @@ ColorPicker::ColorPicker(
 			setTool(Brush::Tool::Eraser);
 		});
 	}
+	updateToolSelection(false);
 	_paletteWrap->setVisible(false);
 	_sizeControl->resize(
 		st::photoEditorBrushSizeControlHitPadding * 2
@@ -344,6 +369,7 @@ void ColorPicker::moveLine(const QPoint &position) {
 	const auto top = position.y() - colorHeight / 2;
 	_colorButton->move(left, top);
 	updateToolButtonsGeometry();
+	updateToolSelection(false);
 	updatePaletteGeometry();
 }
 
@@ -354,15 +380,62 @@ void ColorPicker::setCanvasRect(const QRect &rect) {
 
 void ColorPicker::updateToolButtonsGeometry() {
 	const auto size = st::photoEditorToolButtonSize;
+	const auto extra = st::photoEditorToolButtonSelectedExtra;
+	const auto hit = size + extra * 2;
 	const auto gap = st::photoEditorToolButtonGap;
 	auto x = _colorButton->x() + _colorButton->width() + gap;
 	const auto y = _colorButton->y()
 		+ (_colorButton->height() - size) / 2;
 	for (const auto &button : _toolButtons) {
-		button->resize(size, size);
-		button->move(x, y);
+		button->resize(hit, hit);
+		button->move(x - extra, y - extra);
 		x += size + gap;
 	}
+}
+
+void ColorPicker::updateToolSelection(bool animated) {
+	if (_toolButtons.size() < 4) {
+		return;
+	}
+	const auto index = [&] {
+		switch (_brush.tool) {
+		case Brush::Tool::Pen: return 0;
+		case Brush::Tool::Arrow: return 1;
+		case Brush::Tool::Marker: return 2;
+		case Brush::Tool::Eraser: return 3;
+		}
+		return 0;
+	}();
+	if (index < 0 || index >= int(_toolButtons.size())) {
+		return;
+	}
+	const auto &button = _toolButtons[index];
+	const auto target = button->pos();
+	_toolSelection->resize(button->size());
+	_toolSelection->raise();
+	if (!animated || !_toolSelection->isVisible()) {
+		_toolSelectionAnimation.stop();
+		_toolSelection->move(target);
+		_toolSelection->update();
+		return;
+	}
+	_toolSelectionFrom = _toolSelection->pos();
+	_toolSelectionTo = target;
+	_toolSelectionAnimation.stop();
+	_toolSelectionAnimation.start([=] {
+		const auto progress = _toolSelectionAnimation.value(1.);
+		_toolSelection->move(
+			anim::interpolate(
+				_toolSelectionFrom.x(),
+				_toolSelectionTo.x(),
+				progress),
+			anim::interpolate(
+				_toolSelectionFrom.y(),
+				_toolSelectionTo.y(),
+				progress));
+		_toolSelection->update();
+	}, 0., 1., crl::time(st::photoEditorToolButtonSelectDuration),
+		anim::easeOutCirc);
 }
 
 void ColorPicker::paintSizeControl(QPainter &p) {
@@ -390,13 +463,18 @@ void ColorPicker::setVisible(bool visible) {
 		_sizeControlHovered = false;
 		_sizeControlExpanded = false;
 		_sizeControlAnimation.stop();
+		_toolSelectionAnimation.stop();
 	}
 	_colorButton->setVisible(visible && !_paletteVisible);
 	_paletteWrap->setVisible(visible && _paletteVisible);
 	_sizeControlHoverArea->setVisible(visible);
 	_sizeControl->setVisible(visible);
+	_toolSelection->setVisible(visible && !_paletteVisible);
 	for (const auto &button : _toolButtons) {
 		button->setVisible(visible && !_paletteVisible);
+	}
+	if (visible && !_paletteVisible) {
+		updateToolSelection(false);
 	}
 }
 
@@ -523,11 +601,14 @@ void ColorPicker::setPaletteVisible(bool visible) {
 	_paletteVisible = visible;
 	_paletteWrap->setVisible(visible);
 	_colorButton->setVisible(!visible);
+	_toolSelection->setVisible(!visible);
 	for (const auto &button : _toolButtons) {
 		button->setVisible(!visible);
 	}
 	if (visible) {
 		rebuildPalette();
+	} else {
+		updateToolSelection(false);
 	}
 }
 
