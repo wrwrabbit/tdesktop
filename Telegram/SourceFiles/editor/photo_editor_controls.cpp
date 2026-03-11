@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/painter.h"
+#include "ui/rect.h"
 #include "styles/style_editor.h"
 
 #include <QRegion>
@@ -26,7 +27,6 @@ public:
 		not_null<Ui::RpWidget*> parent,
 		const QString &text,
 		int height,
-		bool left,
 		const style::color &bg,
 		const style::color &fg,
 		const style::RippleAnimation &st);
@@ -43,7 +43,6 @@ private:
 	const int _width;
 	const QRect _rippleRect;
 	const QColor _bg;
-	const bool _left;
 
 	QImage rounded(std::optional<QColor> color) const;
 
@@ -53,7 +52,6 @@ EdgeButton::EdgeButton(
 	not_null<Ui::RpWidget*> parent,
 	const QString &text,
 	int height,
-	bool left,
 	const style::color &bg,
 	const style::color &fg,
 	const style::RippleAnimation &st)
@@ -63,27 +61,40 @@ EdgeButton::EdgeButton(
 , _width(_text.maxWidth()
 	+ st::photoEditorTextButtonPadding.left()
 	+ st::photoEditorTextButtonPadding.right())
-, _rippleRect(QRect(0, 0, _width, height))
-, _bg(bg->c)
-, _left(left) {
-	resize(_width, height);
+, _rippleRect(QRect(
+	rect::m::pos::tl(st::photoEditorEdgeButtonMargins),
+	QSize(
+		_width,
+		height - rect::m::sum::v(st::photoEditorEdgeButtonMargins))))
+, _bg(bg->c) {
+	resize(
+		_width + rect::m::sum::h(st::photoEditorEdgeButtonMargins),
+		height);
 	init();
 }
 
 void EdgeButton::init() {
-	// const auto bg = rounded(_bg);
+	const auto bg = rounded(_bg);
 
 	paintRequest(
 	) | rpl::on_next([=] {
 		Painter p(this);
 
-		// p.drawImage(QPoint(), bg);
+		if (isOver()) {
+			p.drawImage(_rippleRect.topLeft(), bg);
+		}
 
 		paintRipple(p, _rippleRect.x(), _rippleRect.y());
 
 		p.setPen(_fg);
-		const auto textTop = st::photoEditorButtonTextTop;
-		_text.draw(p, 0, textTop, width(), style::al_center);
+		const auto textTop = _rippleRect.y()
+			+ (_rippleRect.height() - _text.minHeight()) / 2;
+		_text.draw(
+			p,
+			_rippleRect.x(),
+			textTop,
+			_rippleRect.width(),
+			style::al_center);
 	}, lifetime());
 }
 
@@ -94,10 +105,10 @@ QImage EdgeButton::rounded(std::optional<QColor> color) const {
 	result.setDevicePixelRatio(style::DevicePixelRatio());
 	result.fill(color.value_or(Qt::white));
 
-	const auto parts = RectPart::None
-		| (_left ? RectPart::TopLeft : RectPart::TopRight)
-		| (_left ? RectPart::BottomLeft : RectPart::BottomRight);
-	return Images::Round(std::move(result), ImageRoundRadius::Large, parts);
+	const auto radius = std::min(_rippleRect.width(), _rippleRect.height())
+		/ 2;
+	const auto mask = Images::CornersMask(radius);
+	return Images::Round(std::move(result), mask);
 }
 
 QImage EdgeButton::prepareRippleMask() const {
@@ -177,9 +188,9 @@ ButtonBar::ButtonBar(
 		result.setDevicePixelRatio(style::DevicePixelRatio());
 		result.fill(bg->c);
 
-		_roundedBg = Images::Round(
-			std::move(result),
-			ImageRoundRadius::Large);
+		const auto radius = std::min(size.width(), size.height()) / 2;
+		const auto mask = Images::CornersMask(radius);
+		_roundedBg = Images::Round(std::move(result), mask);
 	}, lifetime());
 
 	paintRequest(
@@ -212,8 +223,7 @@ PhotoEditorControls::PhotoEditorControls(
 	_transformButtons,
 	tr::lng_cancel(tr::now),
 	_buttonHeight,
-	true,
-	_bg,
+	st::photoEditorEdgeButtonBg,
 	st::mediaviewCaptionFg,
 	st::photoEditorRotateButton.ripple))
 , _flipButton(base::make_unique_q<Ui::IconButton>(
@@ -229,16 +239,14 @@ PhotoEditorControls::PhotoEditorControls(
 	_transformButtons,
 	(data.confirm.isEmpty() ? tr::lng_box_done(tr::now) : data.confirm),
 	_buttonHeight,
-	false,
-	_bg,
+	st::photoEditorEdgeButtonBg,
 	st::mediaviewTextLinkFg,
 	st::photoEditorRotateButton.ripple))
 , _paintCancel(base::make_unique_q<EdgeButton>(
 	_paintBottomButtons,
 	tr::lng_cancel(tr::now),
 	_buttonHeight,
-	true,
-	_bg,
+	st::photoEditorEdgeButtonBg,
 	st::mediaviewCaptionFg,
 	st::photoEditorRotateButton.ripple))
 , _undoButton(base::make_unique_q<Ui::IconButton>(
@@ -259,8 +267,7 @@ PhotoEditorControls::PhotoEditorControls(
 	_paintBottomButtons,
 	tr::lng_box_done(tr::now),
 	_buttonHeight,
-	false,
-	_bg,
+	st::photoEditorEdgeButtonBg,
 	st::mediaviewTextLinkFg,
 	st::photoEditorRotateButton.ripple)) {
 

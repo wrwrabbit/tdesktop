@@ -30,6 +30,8 @@ photoEditorButtonIconFgOver: mediaviewPipControlsFgOver;
 
 photoEditorButtonIconFgActive: lightButtonFg;
 photoEditorButtonIconFgInactive: mediaviewPipPlaybackInactive;
+photoEditorEdgeButtonBg: shadowFg;
+photoEditorEdgeButtonMargins: margins(4px, 4px, 4px, 4px);
 
 photoEditorButtonBarHeight: 48px;
 photoEditorButtonBarWidth: 422px;
