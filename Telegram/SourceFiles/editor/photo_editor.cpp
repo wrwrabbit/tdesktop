@@ -108,6 +108,7 @@ PhotoEditor::PhotoEditor(
 		if (inner.isEmpty()) {
 			return;
 		}
+		_colorPicker->setCanvasRect(inner.translated(_content->pos()));
 		const auto innerTop = _content->y() + inner.top();
 		const auto skip = st::photoEditorCropPointSize;
 		const auto controlsRect = rect()

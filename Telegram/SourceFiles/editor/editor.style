@@ -98,6 +98,14 @@ photoEditorColorPickerCircleBigSize: 50px;
 
 photoEditorColorPickerCircleSkip: 50px;
 
+photoEditorBrushSizeControlHeight: 280px;
+photoEditorBrushSizeControlCollapsedWidth: 2px;
+photoEditorBrushSizeControlExpandedTopWidth: 25px;
+photoEditorBrushSizeControlExpandedBottomWidth: 4px;
+photoEditorBrushSizeControlExpandShift: 14px;
+photoEditorBrushSizeControlHitPadding: 24px;
+photoEditorBrushSizeControlTopInset: 1px;
+
 photoEditorCropPointSize: 10px;
 photoEditorCropMinSize: 20px;
 

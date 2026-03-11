@@ -26,7 +26,7 @@ struct PhotoEditorMode {
 };
 
 struct Brush {
-	float sizeRatio = 0.;
+	float64 sizeRatio = 0.;
 	QColor color;
 };
 
