@@ -8,13 +8,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/scene/scene_item_line.h"
 
 #include <QGraphicsScene>
+#include <QtGui/QPainter>
 
 namespace Editor {
 
-ItemLine::ItemLine(QPixmap &&pixmap, bool clear)
+ItemLine::ItemLine(QPixmap &&pixmap)
 : _pixmap(std::move(pixmap))
-, _rect(QPointF(), _pixmap.size() / float64(style::DevicePixelRatio()))
-, _clear(clear) {
+, _rect(QPointF(), _pixmap.size() / float64(style::DevicePixelRatio())) {
 }
 
 QRectF ItemLine::boundingRect() const {
@@ -25,14 +25,37 @@ void ItemLine::paint(
 		QPainter *p,
 		const QStyleOptionGraphicsItem *,
 		QWidget *) {
-	if (_clear) {
-		p->save();
-		p->setCompositionMode(QPainter::CompositionMode_Clear);
-		p->drawPixmap(0, 0, _pixmap);
-		p->restore();
-		return;
-	}
 	p->drawPixmap(0, 0, _pixmap);
+}
+
+const QPixmap &ItemLine::pixmap() const {
+	return _pixmap;
+}
+
+void ItemLine::setPixmap(QPixmap pixmap) {
+	_pixmap = std::move(pixmap);
+	update();
+}
+
+bool ItemLine::applyEraser(const QPixmap &mask, const QPointF &maskPos) {
+	if (mask.isNull()) {
+		return false;
+	}
+	const auto maskSize = mask.size() / float64(mask.devicePixelRatio());
+	const auto localTopLeft = maskPos - pos();
+	const auto localRect = QRectF(localTopLeft, maskSize);
+	if (!localRect.intersects(_rect)) {
+		return false;
+	}
+	auto image = _pixmap.toImage().convertToFormat(
+		QImage::Format_ARGB32_Premultiplied);
+	auto p = QPainter(&image);
+	p.setCompositionMode(QPainter::CompositionMode_DestinationOut);
+	p.drawPixmap(localTopLeft, mask);
+	p.end();
+	_pixmap = QPixmap::fromImage(std::move(image));
+	update();
+	return true;
 }
 
 bool ItemLine::collidesWithItem(

@@ -68,7 +68,10 @@ Paint::Paint(
 	_view->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 	_view->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 	_view->setFrameStyle(int(QFrame::NoFrame) | QFrame::Plain);
+	_view->setBackgroundBrush(Qt::transparent);
+	_view->setAttribute(Qt::WA_TranslucentBackground, true);
 	_viewport->setAutoFillBackground(false);
+	_viewport->setAttribute(Qt::WA_TranslucentBackground, true);
 	_viewport->installEventFilter(this);
 
 	// Undo / Redo.

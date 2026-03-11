@@ -382,7 +382,7 @@ void ItemCanvas::paint(
 	p->fillRect(_rectToUpdate, Qt::transparent);
 	if (_brushData.tool == Brush::Tool::Eraser) {
 		p->save();
-		p->setCompositionMode(QPainter::CompositionMode_Clear);
+		p->setOpacity(st::photoEditorEraserPreviewOpacity);
 		p->drawPixmap(0, 0, _pixmap);
 		p->restore();
 	} else {

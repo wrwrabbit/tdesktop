@@ -13,12 +13,15 @@ namespace Editor {
 
 class ItemLine : public NumberedItem {
 public:
-	ItemLine(QPixmap &&pixmap, bool clear = false);
+	ItemLine(QPixmap &&pixmap);
 	QRectF boundingRect() const override;
 	void paint(
 		QPainter *p,
 		const QStyleOptionGraphicsItem *option,
 		QWidget *widget) override;
+	[[nodiscard]] const QPixmap &pixmap() const;
+	void setPixmap(QPixmap pixmap);
+	bool applyEraser(const QPixmap &mask, const QPointF &maskPos);
 
 	bool hasState(SaveState state) const override;
 	void save(SaveState state) override;
@@ -31,9 +34,8 @@ protected:
 		const QPainterPath &,
 		Qt::ItemSelectionMode) const override;
 private:
-	const QPixmap _pixmap;
+	QPixmap _pixmap;
 	const QRectF _rect;
-	const bool _clear = false;
 
 	struct {
 		bool saved = false;

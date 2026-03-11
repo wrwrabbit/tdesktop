@@ -110,6 +110,7 @@ photoEditorMarkerSizeMultiplier: 2.5;
 photoEditorArrowHeadLengthFactor: 2.5;
 photoEditorArrowHeadMinDistanceFactor: 1.5;
 photoEditorArrowHeadAngleDegrees: 26;
+photoEditorEraserPreviewOpacity: 0.25;
 
 photoEditorBrushSizeControlLeftSkip: 0px;
 photoEditorBrushSizeControlHeight: 280px;
