@@ -737,6 +737,13 @@ FillMenuResult FillSendMenu(
 	const auto &icons = iconsOverride
 		? *iconsOverride
 		: st::defaultComposeIcons;
+
+	if (sending && type != Type::Reminder) {
+		menu->addAction(
+			tr::lng_send_silent_message(tr::now),
+			[=] { action({ Api::SendOptions{ .silent = true } }, details); },
+			&icons.menuMute);
+	}
 	if (sending && type != Type::SilentOnly) {
 		menu->addAction(
 			((type == Type::Reminder)
@@ -753,13 +760,7 @@ FillMenuResult FillSendMenu(
 				details); },
 			&icons.menuWhenOnline);
 	}
-	if (sending && type != Type::Reminder) {
-		menu->addAction(
-			tr::lng_send_silent_message(tr::now),
-			[=] { action({ Api::SendOptions{ .silent = true } }, details); },
-			&icons.menuMute);
 
-	}
 	if ((type != Type::Disabled)
 		&& ((details.spoiler != SpoilerState::None)
 			|| (details.caption != CaptionState::None)
