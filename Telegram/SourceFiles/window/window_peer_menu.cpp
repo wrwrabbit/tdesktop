@@ -4049,7 +4049,7 @@ void AddSenderUserpicModerateAction(
 		? moderateItem->history()->peer->asChannel()
 		: nullptr;
 	const auto moderateFrom = moderateItem
-		? moderateItem->from()
+		? moderateItem->from().get()
 		: nullptr;
 	const auto moderateUser = moderateFrom
 		? moderateFrom->asUser()
