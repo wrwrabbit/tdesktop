@@ -259,7 +259,7 @@ QByteArray Settings::serialize() const {
 		+ sizeof(ushort)
 		+ sizeof(qint32) // _notificationsDisplayChecksum
 		+ Serialize::bytearraySize(callPanelPosition)
-		+ sizeof(qint32) * 3; // _cornerReply + _systemAccentColorEnabled + _usePlatformTranslation
+		+ sizeof(qint32) * 4;
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -427,7 +427,8 @@ QByteArray Settings::serialize() const {
 			<< callPanelPosition
 			<< qint32(_cornerReply.current() ? 1 : 0)
 			<< qint32(_systemAccentColorEnabled ? 1 : 0)
-			<< qint32(_usePlatformTranslation ? 1 : 0);
+			<< qint32(_usePlatformTranslation ? 1 : 0)
+			<< qint32(_systemTextReplace.current() ? 1 : 0);
 	}
 
 	Ensures(result.size() == size);
@@ -565,6 +566,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 		? 1
 		: 0;
 	qint32 usePlatformTranslation = _usePlatformTranslation ? 1 : 0;
+	qint32 systemTextReplace = _systemTextReplace.current() ? 1 : 0;
 
 	stream >> themesAccentColors;
 	if (!stream.atEnd()) {
@@ -914,6 +916,9 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> usePlatformTranslation;
 	}
+	if (!stream.atEnd()) {
+		stream >> systemTextReplace;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -989,6 +994,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_loopAnimatedStickers = (loopAnimatedStickers == 1);
 	_largeEmoji = (largeEmoji == 1);
 	_replaceEmoji = (replaceEmoji == 1);
+	_systemTextReplace = (systemTextReplace == 1);
 	_suggestEmoji = (suggestEmoji == 1);
 	_suggestStickersByEmoji = (suggestStickersByEmoji == 1);
 	_spellcheckerEnabled = (spellcheckerEnabled == 1);
@@ -1508,6 +1514,7 @@ void Settings::resetOnLastLogout() {
 	_loopAnimatedStickers = true;
 	_largeEmoji = true;
 	_replaceEmoji = true;
+	_systemTextReplace = true;
 	_suggestEmoji = true;
 	_suggestStickersByEmoji = true;
 	_suggestAnimatedEmoji = true;

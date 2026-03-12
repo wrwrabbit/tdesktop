@@ -660,6 +660,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_settings_section_chat_settings" = "Chat Settings";
 "lng_settings_replace_emojis" = "Replace emoji automatically";
+"lng_settings_system_text_replace" = "System text replacements";
 "lng_settings_suggest_emoji" = "Suggest emoji replacements";
 "lng_settings_suggest_animated_emoji" = "Suggest animated emoji";
 "lng_settings_suggest_by_emoji" = "Suggest popular stickers by emoji";
