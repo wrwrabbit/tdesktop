@@ -116,7 +116,7 @@ namespace Media {
 		const auto packetStart = (packet.pts != AV_NOPTS_VALUE)
 			? packet.pts
 			: packet.dts;
-		const auto packetDuration = std::max(packet.duration, int64(0));
+		const auto packetDuration = std::max(int64(packet.duration), int64());
 		const auto packetEnd = (packetStart != AV_NOPTS_VALUE)
 			? (packetStart + packetDuration)
 			: AV_NOPTS_VALUE;
@@ -160,7 +160,7 @@ namespace Media {
 		if (packetPosition != AV_NOPTS_VALUE) {
 			durationPts = std::max(
 				durationPts,
-				packetPosition + std::max(packet.duration, int64(0)));
+				packetPosition + std::max(int64(packet.duration), int64()));
 		}
 
 		packet.stream_index = outStream->index;
@@ -364,7 +364,7 @@ namespace Media {
 				: packet.dts;
 			if (packetPosition != AV_NOPTS_VALUE) {
 				const auto packetEnd = packetPosition
-					+ std::max(packet.duration, int64(0));
+					+ std::max(int64(packet.duration), int64());
 				durationPts = std::max(durationPts, packetEnd);
 				sourceEndPts = std::max(sourceEndPts, packetEnd);
 			}
