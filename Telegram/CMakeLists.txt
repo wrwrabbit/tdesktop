@@ -1287,6 +1287,8 @@ PRIVATE
     media/player/media_player_float.h
     media/player/media_player_instance.cpp
     media/player/media_player_instance.h
+    media/player/media_player_listen_tracker.cpp
+    media/player/media_player_listen_tracker.h
     media/player/media_player_panel.cpp
     media/player/media_player_panel.h
     media/player/media_player_volume_controller.cpp

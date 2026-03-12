@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/power_save_blocker.h"
 #include "media/audio/media_audio.h"
 #include "media/audio/media_audio_capture.h"
+#include "media/player/media_player_listen_tracker.h"
 #include "media/streaming/media_streaming_instance.h"
 #include "media/streaming/media_streaming_player.h"
 #include "media/view/media_view_playback_progress.h"
@@ -187,9 +188,13 @@ Instance::Instance()
 	}, _lifetime);
 
 	setupShortcuts();
+
+	_listenTracker = std::make_unique<MusicListenTracker>();
 }
 
-Instance::~Instance() = default;
+Instance::~Instance() {
+	_listenTracker->finalize();
+}
 
 AudioMsgId::Type Instance::getActiveType() const {
 	if (const auto data = getData(AudioMsgId::Type::Voice)) {
@@ -891,6 +896,9 @@ void Instance::stop(AudioMsgId::Type type, bool asFinished) {
 		if (data->streamed) {
 			clearStreamed(data);
 		}
+		if (type == AudioMsgId::Type::Song) {
+			_listenTracker->finalize();
+		}
 		data->resumeOnCallEnd = false;
 		_playerStopped.fire_copy({type});
 	}
@@ -1265,6 +1273,9 @@ void Instance::emitUpdate(AudioMsgId::Type type, CheckCallback check) {
 			}
 		}
 		updatePowerSaveBlocker(data, state);
+		if (type == AudioMsgId::Type::Song) {
+			_listenTracker->update(state);
+		}
 
 		auto finished = false;
 		_updatedNotifier.fire_copy({state});
@@ -1316,6 +1327,7 @@ void Instance::setupShortcuts() {
 }
 
 void Instance::stopAndClose() {
+	_listenTracker->finalize();
 	_closePlayerRequests.fire({});
 
 	stop(AudioMsgId::Type::Voice);
