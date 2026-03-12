@@ -18,10 +18,8 @@ namespace {
 constexpr auto kMinPointDistanceBase = 2.0;
 constexpr auto kMaxPointDistance = 15.0;
 constexpr auto kSmoothingStrength = 0.5;
-constexpr auto kPressureDecay = 0.95;
-constexpr auto kMinPressure = 0.3;
-constexpr auto kBatchUpdateInterval = 16;
 constexpr auto kSegmentOverlap = 3;
+constexpr auto kOriginStartJumpRatio = 0.25;
 constexpr auto kHalfStrength = kSmoothingStrength / 2.0;
 constexpr auto kInvStrength = 1.0 - kSmoothingStrength;
 
@@ -29,6 +27,10 @@ constexpr auto kInvStrength = 1.0 - kSmoothingStrength;
 	const auto dx = a.x() - b.x();
 	const auto dy = a.y() - b.y();
 	return std::sqrt(dx * dx + dy * dy);
+}
+
+[[nodiscard]] bool IsValidPoint(const QPointF &point) {
+	return std::isfinite(point.x()) && std::isfinite(point.y());
 }
 
 } // namespace
@@ -70,7 +72,7 @@ QRectF ItemCanvas::boundingRect() const {
 }
 
 void ItemCanvas::computeContentRect(const QPointF &p) {
-	if (!scene()) {
+	if (!scene() || !IsValidPoint(p)) {
 		return;
 	}
 	const auto sceneSize = scene()->sceneRect().size();
@@ -143,13 +145,25 @@ void ItemCanvas::renderSegment(
 	if (points.size() < 2 || startIdx >= int(points.size()) - 1) {
 		return;
 	}
+	if (!IsValidPoint(points.back().pos)) {
+		return;
+	}
 	auto path = QPainterPath();
 	const auto effectiveStart = std::max(0, startIdx);
+	if (!IsValidPoint(points[effectiveStart].pos)) {
+		return;
+	}
 	path.moveTo(points[effectiveStart].pos);
 	for (auto i = effectiveStart; i < int(points.size()) - 1; ++i) {
 		const auto &p0 = points[i].pos;
 		const auto &p1 = points[i + 1].pos;
+		if (!IsValidPoint(p0) || !IsValidPoint(p1)) {
+			return;
+		}
 		const auto ctrl = (p0 + p1) / 2.0;
+		if (!IsValidPoint(ctrl)) {
+			return;
+		}
 		if (i == effectiveStart) {
 			path.lineTo(ctrl);
 		} else {
@@ -265,6 +279,29 @@ void ItemCanvas::drawArrowHead() {
 }
 
 void ItemCanvas::addStrokePoint(const QPointF &point, int64 time) {
+	if (!IsValidPoint(point)) {
+		return;
+	}
+	if ((_currentStroke.size() == 1)
+		&& (_currentStroke.front().pos == QPointF())
+		&& (point != QPointF())) {
+		if (const auto currentScene = scene()) {
+			const auto size = currentScene->sceneRect().size();
+			const auto maxStartJump = std::max(size.width(), size.height())
+				* kOriginStartJumpRatio;
+			if (PointDistance(_currentStroke.front().pos, point)
+				> maxStartJump) {
+				_currentStroke.front() = {
+					.pos = point,
+					.pressure = 1.0,
+					.time = time,
+				};
+				_lastPointTime = time;
+				_contentRect = QRectF(point, point) + _brushMargins;
+				return;
+			}
+		}
+	}
 	if (!_currentStroke.empty()) {
 		const auto distance = PointDistance(
 			point,
@@ -295,23 +332,9 @@ void ItemCanvas::addStrokePoint(const QPointF &point, int64 time) {
 			}
 		}
 	}
-	const auto timeDelta = _lastPointTime
-		? std::max(int64(1), time - _lastPointTime)
-		: kBatchUpdateInterval;
-	const auto speed = !_currentStroke.empty()
-		? PointDistance(point, _currentStroke.back().pos) / timeDelta
-		: 0.0;
-	const auto pressureFromSpeed = std::clamp(
-		1.0 - speed * 0.1,
-		kMinPressure,
-		1.0);
-	const auto pressure = _currentStroke.empty()
-		? 1.0
-		: _currentStroke.back().pressure * kPressureDecay
-			+ pressureFromSpeed * (1.0 - kPressureDecay);
 	_currentStroke.push_back({
 		.pos = point,
-		.pressure = pressure,
+		.pressure = 1.0,
 		.time = time,
 	});
 	_lastPointTime = time;
@@ -321,7 +344,12 @@ void ItemCanvas::addStrokePoint(const QPointF &point, int64 time) {
 void ItemCanvas::handleMousePressEvent(
 		not_null<QGraphicsSceneMouseEvent*> e) {
 	_lastPoint = e->scenePos();
+	if (!IsValidPoint(_lastPoint)) {
+		_drawing = false;
+		return;
+	}
 	_rectToUpdate = QRectF();
+	_contentRect = QRectF();
 	_currentStroke.clear();
 	_lastRenderedIndex = 0;
 	_lastPointTime = 0;
@@ -337,6 +365,9 @@ void ItemCanvas::handleMouseMoveEvent(
 		return;
 	}
 	const auto scenePos = e->scenePos();
+	if (!IsValidPoint(scenePos)) {
+		return;
+	}
 	const auto now = crl::now();
 	addStrokePoint(scenePos, now);
 	_lastPoint = scenePos;
