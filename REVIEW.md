@@ -269,3 +269,15 @@ if (!document || duration <= 0) {
     return;
 }
 ```
+
+## Static member functions use PascalCase
+
+Non-static member functions use camelCase (`startBatch`, `finalize`). Static member functions use PascalCase (`ShouldTrack`, `Parse`, `Create`), matching the convention for free functions.
+
+```cpp
+// BAD - camelCase for static method:
+[[nodiscard]] static bool shouldTrack(not_null<HistoryItem*> item);
+
+// GOOD - PascalCase for static method:
+[[nodiscard]] static bool ShouldTrack(not_null<HistoryItem*> item);
+```
