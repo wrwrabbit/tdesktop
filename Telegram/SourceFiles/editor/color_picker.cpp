@@ -18,6 +18,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/color_editor.h"
 #include "styles/style_editor.h"
 
+#include <QConicalGradient>
+
 
 namespace Editor {
 namespace {
@@ -87,6 +89,83 @@ private:
 		p.drawLine(QPointF(c.x() - r, c.y()), QPointF(c.x() + r, c.y()));
 		p.drawLine(QPointF(c.x(), c.y() - r), QPointF(c.x(), c.y() + r));
 	}
+};
+
+class ColorButton final : public Ui::AbstractButton {
+public:
+	ColorButton(
+		not_null<QWidget*> parent,
+		Fn<QColor()> color)
+	: AbstractButton(parent)
+	, _color(std::move(color)) {
+	}
+
+private:
+	void paintEvent(QPaintEvent *event) override {
+		auto p = QPainter(this);
+		auto hq = PainterHighQualityEnabler(p);
+
+		const auto size = std::min(width(), height());
+		if (size <= 0) {
+			return;
+		}
+
+		const auto left = (width() - size) / 2.;
+		const auto top = (height() - size) / 2.;
+		const auto outer = QRectF(left, top, size, size);
+		const auto ringWidth = float64(std::max(
+			st::photoEditorColorButtonBorder,
+			st::photoEditorColorPaletteSelectionWidth));
+		const auto ringHalf = ringWidth / 2.;
+		const auto ringRect = outer.adjusted(
+			ringHalf,
+			ringHalf,
+			-ringHalf,
+			-ringHalf);
+
+		auto gradient = QConicalGradient(outer.center(), 15.);
+		gradient.setColorAt(0. / 7., QColor(0xEB, 0x4B, 0x4B));
+		gradient.setColorAt(1. / 7., QColor(0xFF, 0xA5, 0x00));
+		gradient.setColorAt(2. / 7., QColor(0xFF, 0xFF, 0x00));
+		gradient.setColorAt(3. / 7., QColor(0x8F, 0xCE, 0x00));
+		gradient.setColorAt(4. / 7., QColor(0x00, 0xFF, 0xFF));
+		gradient.setColorAt(5. / 7., QColor(0x60, 0x80, 0xE4));
+		gradient.setColorAt(6. / 7., QColor(0xEE, 0x82, 0xEE));
+		gradient.setColorAt(7. / 7., QColor(0xEB, 0x4B, 0x4B));
+
+		auto pen = QPen(QBrush(gradient), ringWidth);
+		pen.setCapStyle(Qt::RoundCap);
+		p.setPen(pen);
+		p.setBrush(Qt::NoBrush);
+		p.drawEllipse(ringRect);
+
+		const auto innerInset = ringWidth
+			+ st::photoEditorColorButtonBorder * 1.5;
+		if (outer.width() <= innerInset * 2.
+			|| outer.height() <= innerInset * 2.) {
+			return;
+		}
+		auto innerRect = outer.adjusted(
+			innerInset,
+			innerInset,
+			-innerInset,
+			-innerInset);
+		const auto innerBorder = float64(st::photoEditorColorButtonBorder);
+		if (innerBorder > 0.) {
+			const auto innerHalf = innerBorder / 2.;
+			innerRect = innerRect.adjusted(
+				innerHalf,
+				innerHalf,
+				-innerHalf,
+				-innerHalf);
+		}
+		p.setPen(Qt::NoPen);
+		p.setBrush(_color());
+		p.drawEllipse(innerRect);
+	}
+
+	Fn<QColor()> _color;
+
 };
 
 class ToolLottieButton final : public Ui::AbstractButton {
@@ -191,27 +270,16 @@ ColorPicker::ColorPicker(
 	Brush::Tool savedTool)
 : _parent(parent)
 , _show(std::move(show))
-, _colorButton(
-	std::in_place,
-	parent,
-	[=](uint8) {
-		auto set = Data::ColorProfileSet();
-		set.palette = { colorButtonColor() };
-		return set;
-	},
-	uint8(0),
-	true)
+, _colorButton(base::make_unique_q<ColorButton>(parent, [=] {
+	return colorButtonColor();
+}))
 , _paletteWrap(std::in_place, parent)
 , _sizeControlHoverArea(std::in_place, parent)
 , _sizeControl(std::in_place, parent)
 , _toolSelection(std::in_place, parent)
 , _brush(savedBrushes[ToolIndex(savedTool)])
 , _toolBrushes(savedBrushes) {
-	_colorButton->resize(
-		st::photoEditorColorButtonSize,
-		st::photoEditorColorButtonSize);
-	_colorButton->setSelectionCutout(true);
-	_colorButton->setForceCircle(true);
+	_colorButton->resize(Size(st::photoEditorColorButtonSize));
 
 	for (auto i = 0; i != int(_toolBrushes.size()); ++i) {
 		_toolBrushes[i].tool = ToolFromIndex(i);

@@ -92,7 +92,7 @@ photoEditorStickersIconActive: icon {{ "settings/settings_stickers", photoEditor
 photoEditorUndoButtonInactive: icon {{ "photo_editor/undo", photoEditorButtonIconFgInactive }};
 photoEditorRedoButtonInactive: icon {{ "photo_editor/undo-flip_horizontal", photoEditorButtonIconFgInactive }};
 
-photoEditorColorButtonSize: 20px;
+photoEditorColorButtonSize: 24px;
 photoEditorColorButtonBorder: 1px;
 photoEditorColorButtonBorderFg: mediaviewCaptionFg;
 photoEditorColorPaletteItemSize: 20px;

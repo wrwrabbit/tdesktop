@@ -64,7 +64,7 @@ private:
 	const not_null<Ui::RpWidget*> _parent;
 	const std::shared_ptr<Ui::Show> _show;
 
-	const base::unique_qptr<Ui::ColorSample> _colorButton;
+	const base::unique_qptr<Ui::AbstractButton> _colorButton;
 	const base::unique_qptr<Ui::RpWidget> _paletteWrap;
 	const base::unique_qptr<Ui::RpWidget> _sizeControlHoverArea;
 	const base::unique_qptr<Ui::RpWidget> _sizeControl;
