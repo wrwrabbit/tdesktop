@@ -208,6 +208,7 @@ menuIconTagEdit: icon{{ "menu/tag_edit-24x24", menuIconColor }};
 menuIconDownloadOff: icon {{ "menu/download_off-24x24", menuIconColor }};
 menuIconShareOff: icon {{ "menu/share_off-24x24", menuIconColor }};
 menuIconShareOn: icon {{ "menu/share_on-24x24", menuIconColor }};
+menuIconStar: icon {{ "menu/star", menuIconColor }};
 
 menuIconTTLAny: icon {{ "menu/auto_delete_plain", menuIconColor }};
 menuIconTTLAnyTextPosition: point(11px, 22px);

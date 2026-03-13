@@ -4133,9 +4133,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_gift_resale_date" = "Date";
 "lng_gift_resale_count#one" = "{count} gift in resale";
 "lng_gift_resale_count#other" = "{count} gifts in resale";
+"lng_gift_resale_count_none" = "No listings";
 "lng_gift_resale_sort_price" = "Sort by Price";
 "lng_gift_resale_sort_date" = "Sort by Date";
 "lng_gift_resale_sort_number" = "Sort by Number";
+"lng_gift_resale_all_listings" = "All Listings";
+"lng_gift_resale_stars_only" = "For Stars Only";
 "lng_gift_resale_filter_all" = "Select All";
 "lng_gift_resale_model" = "Model";
 "lng_gift_resale_models#one" = "{count} Model";
@@ -4148,6 +4151,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_gift_resale_symbols#other" = "{count} Symbols";
 "lng_gift_resale_switch_to_ton" = "Switch to Ton";
 "lng_gift_resale_switch_to_stars" = "Switch to Stars";
+"lng_gift_resale_search_none" = "No gifts found for your search.";
 "lng_gift_resale_early" = "You will be able to resell this gift in {duration}.";
 "lng_gift_transfer_early" = "You will be able to transfer this gift in {duration}.";
 "lng_gift_resale_transfer_early_title" = "Try Later";

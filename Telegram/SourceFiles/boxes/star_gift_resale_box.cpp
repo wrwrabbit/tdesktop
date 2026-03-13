@@ -248,6 +248,18 @@ struct ResaleTabs {
 			actionWithIcon(tr::lng_gift_resale_sort_number(tr::now), [=] {
 				sort(ResaleGiftsSort::Number);
 			}, &st::menuIconOrderNumber, is(ResaleGiftsSort::Number));
+			menu->addSeparator();
+			const auto starsOnly = state->filter.current().starsOnly;
+			actionWithIcon(tr::lng_gift_resale_all_listings(tr::now), [=] {
+				modify([&](ResaleGiftsFilter &filter) {
+					filter.starsOnly = false;
+				});
+			}, &st::menuIconTopics, !starsOnly);
+			actionWithIcon(tr::lng_gift_resale_stars_only(tr::now), [=] {
+				modify([&](ResaleGiftsFilter &filter) {
+					filter.starsOnly = true;
+				});
+			}, &st::menuIconStar, starsOnly);
 		} else {
 			const auto now = state->filter.current().attributes;
 			const auto type = IndexToType(index);
@@ -503,7 +515,12 @@ void GiftResaleBox(
 	const auto countLabel = titleWrap->add(
 		object_ptr<Ui::FlatLabel>(
 			titleWrap,
-			tr::lng_gift_resale_count(tr::now, lt_count, descriptor.count),
+			(descriptor.count
+				? tr::lng_gift_resale_count(
+					tr::now,
+					lt_count,
+					descriptor.count)
+				: tr::lng_gift_resale_count_none(tr::now)),
 			st::defaultFlatLabel),
 		QMargins(
 			st::boxRowPadding.left(),
@@ -547,7 +564,17 @@ void GiftResaleBox(
 		peer,
 		content,
 		std::move(descriptor),
-		state->ton.value());
+		state->ton.value(),
+		nullptr,
+		false,
+		[=](int count) {
+			countLabel->setText(count
+				? tr::lng_gift_resale_count(
+					tr::now,
+					lt_count,
+					count)
+				: tr::lng_gift_resale_count_none(tr::now));
+		});
 }
 
 } // namespace
@@ -559,7 +586,8 @@ void AddResaleGiftsList(
 		Data::ResaleGiftsDescriptor descriptor,
 		rpl::producer<bool> forceTon,
 		Fn<void(std::shared_ptr<Data::UniqueGift>)> bought,
-		bool forCraft) {
+		bool forCraft,
+		Fn<void(int)> countChanged) {
 	struct State {
 		rpl::event_stream<> updated;
 		ResaleGiftsDescriptor data;
@@ -606,7 +634,11 @@ void AddResaleGiftsList(
 			state->data.offset = slice.list.empty()
 				? QString()
 				: slice.offset;
+			state->data.count = slice.count;
 			state->data.list = std::move(slice.list);
+			if (countChanged) {
+				countChanged(state->data.count);
+			}
 			state->updated.fire({});
 		});
 	}, container->lifetime());
@@ -712,7 +744,9 @@ void AddResaleGiftsList(
 			container,
 			object_ptr<FlatLabel>(
 				container,
-				tr::lng_gift_craft_search_none(),
+				(forCraft
+					? tr::lng_gift_craft_search_none()
+					: tr::lng_gift_resale_search_none()),
 				st::craftYourListEmpty),
 			(st::boxRowPadding + QMargins(0, 0, 0, skip))),
 		style::al_top);

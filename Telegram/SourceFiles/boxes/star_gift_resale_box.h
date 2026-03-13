@@ -48,6 +48,7 @@ void AddResaleGiftsList(
 	Data::ResaleGiftsDescriptor descriptor,
 	rpl::producer<bool> forceTon,
 	Fn<void(std::shared_ptr<Data::UniqueGift>)> bought = nullptr,
-	bool forCraft = false);
+	bool forCraft = false,
+	Fn<void(int)> countChanged = nullptr);
 
 } // namespace Ui
