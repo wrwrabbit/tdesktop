@@ -319,8 +319,8 @@ void ItemCanvas::addStrokePoint(const QPointF &point, int64 time) {
 			: kMaxPointDistance;
 		if (distance > maxDistance) {
 			const auto steps = int(std::ceil(distance / maxDistance));
-			const auto &lastPos = _currentStroke.back().pos;
-			const auto &lastPressure = _currentStroke.back().pressure;
+			const auto lastPos = _currentStroke.back().pos;
+			const auto lastPressure = _currentStroke.back().pressure;
 			for (auto i = 1; i < steps; ++i) {
 				const auto t = float64(i) / steps;
 				const auto interpolated = lastPos * (1.0 - t) + point * t;
