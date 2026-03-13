@@ -64,6 +64,7 @@ namespace {
 
 constexpr auto kSummarizeThreshold = 512;
 constexpr auto kPlayStatusLimit = 2;
+constexpr auto kMaxNiceToReadLines = 6;
 const auto kPsaTooltipPrefix = "cloud_lng_tooltip_psa_";
 
 struct SecondRightAction {
@@ -673,6 +674,9 @@ QSize Message::performCountOptimalSize() {
 	const auto botTop = item->isFakeAboutView()
 		? Get<FakeBotAboutTop>()
 		: nullptr;
+	const auto bubble = drawBubble();
+	auto withVisibleText = false;
+	auto fullTextualWidth = 0;
 	if (botTop) {
 		botTop->init();
 	}
@@ -696,7 +700,7 @@ QSize Message::performCountOptimalSize() {
 		}
 	}
 
-	if (drawBubble()) {
+	if (bubble) {
 		const auto forwarded = item->Get<HistoryMessageForwarded>();
 		const auto via = item->Get<HistoryMessageVia>();
 		const auto entry = logEntryOriginal();
@@ -718,8 +722,9 @@ QSize Message::performCountOptimalSize() {
 		}
 
 		// Entry page is always a bubble bottom.
-		const auto withVisibleText = hasVisibleText();
-		const auto textualWidth = textualMaxWidth();
+		withVisibleText = hasVisibleText();
+		fullTextualWidth = textualMaxWidth();
+		const auto textualWidth = bubbleTextualWidth();
 		auto mediaOnBottom = (mediaDisplayed && media->isBubbleBottom()) || check || (entry/* && entry->isBubbleBottom()*/);
 		auto mediaOnTop = (mediaDisplayed && media->isBubbleTop()) || (entry && entry->isBubbleTop());
 		maxWidth = textualWidth;
@@ -770,12 +775,6 @@ QSize Message::performCountOptimalSize() {
 				const auto innerWidth = maxWidth
 					- st::msgPadding.left()
 					- st::msgPadding.right();
-				if (withVisibleText) {
-					if (maxWidth < textualWidth) {
-						minHeight -= text().minHeight();
-						minHeight += text().countHeight(innerWidth);
-					}
-				}
 				if (reactionsInBubble) {
 					minHeight -= _reactions->minHeight();
 					minHeight
@@ -868,6 +867,10 @@ QSize Message::performCountOptimalSize() {
 	// but if we have only media we don't do that
 	if (markup && markup->inlineKeyboard && hasVisibleText()) {
 		accumulate_max(maxWidth, markup->inlineKeyboard->naturalWidth());
+	}
+	if (bubble && withVisibleText && maxWidth < fullTextualWidth) {
+		minHeight -= text().minHeight();
+		minHeight += textHeightFor(bubbleTextWidth(maxWidth));
 	}
 	return QSize(maxWidth, minHeight);
 }
@@ -4021,6 +4024,52 @@ int Message::monospaceMaxWidth() const {
 		+ st::msgPadding.right();
 }
 
+int Message::bubbleTextWidth(int bubbleWidth) const {
+	return std::max(bubbleWidth, st::msgMinWidth)
+		- st::msgPadding.left()
+		- st::msgPadding.right();
+}
+
+int Message::bubbleTextualWidth() const {
+	const auto full = textualMaxWidth();
+	const auto media = this->media();
+	if (!hasVisibleText()
+		|| !media
+		|| !media->allowsNarrowBubble()) {
+		return full;
+	}
+	const auto minimum = std::max(
+		media->minBubbleWidthForNarrowBubble(),
+		st::msgMinWidth);
+	if (_bubbleTextualWidthMinimum != minimum) {
+		_bubbleTextualWidthMinimum = minimum;
+		if (minimum >= full) {
+			_bubbleTextualWidthCache = minimum;
+		} else {
+			const auto lineHeight = text().style()->font->height;
+			const auto fullTextHeight = textHeightFor(bubbleTextWidth(full));
+			if (fullTextHeight > kMaxNiceToReadLines * lineHeight) {
+				_bubbleTextualWidthCache = full;
+			} else {
+				auto left = minimum;
+				auto right = full;
+				while (left < right) {
+					const auto middle = left + (right - left) / 2;
+					const auto middleHeight = textHeightFor(
+						bubbleTextWidth(middle));
+					if (middleHeight <= kMaxNiceToReadLines * lineHeight) {
+						right = middle;
+					} else {
+						left = middle + 1;
+					}
+				}
+				_bubbleTextualWidthCache = right;
+			}
+		}
+	}
+	return _bubbleTextualWidthCache;
+}
+
 int Message::viewButtonHeight() const {
 	return _viewButton ? _viewButton->height() : 0;
 }
@@ -4801,7 +4850,7 @@ QRect Message::countGeometry() const {
 	accumulate_min(contentWidth, maxWidth());
 	accumulate_min(contentWidth, int(_bubbleWidthLimit));
 	if (mediaWidth < contentWidth) {
-		const auto textualWidth = textualMaxWidth();
+		const auto textualWidth = bubbleTextualWidth();
 		if (mediaWidth < textualWidth
 			&& (!media || !media->enforceBubbleWidth())) {
 			accumulate_min(contentWidth, textualWidth);
@@ -4930,10 +4979,10 @@ int Message::resizeContentGetHeight(int newWidth) {
 	accumulate_min(contentWidth, maxWidth());
 	_bubbleWidthLimit = std::max(st::msgMaxWidth, monospaceMaxWidth());
 	accumulate_min(contentWidth, int(_bubbleWidthLimit));
+	const auto textualWidth = bubbleTextualWidth();
 	if (mediaDisplayed) {
 		media->resizeGetHeight(contentWidth);
 		if (media->width() < contentWidth) {
-			const auto textualWidth = textualMaxWidth();
 			if (media->width() < textualWidth
 				&& !media->enforceBubbleWidth()) {
 				accumulate_min(contentWidth, textualWidth);
@@ -4942,12 +4991,17 @@ int Message::resizeContentGetHeight(int newWidth) {
 			}
 		}
 	}
-	const auto textWidth = qMax(contentWidth - st::msgPadding.left() - st::msgPadding.right(), 1);
+	const auto bottomInfoWidth = qMax(
+		contentWidth - st::msgPadding.left() - st::msgPadding.right(),
+		1);
+	const auto textWidth = bubble
+		? bubbleTextWidth(contentWidth)
+		: bottomInfoWidth;
 	const auto reactionsInBubble = _reactions && embedReactionsInBubble();
 	const auto bottomInfoHeight = _bottomInfo.resizeGetHeight(
 		std::min(
 			_bottomInfo.optimalSize().width(),
-			textWidth - 2 * st::msgDateDelta.x()));
+			bottomInfoWidth - 2 * st::msgDateDelta.x()));
 
 	if (bubble) {
 		auto reply = Get<Reply>();
@@ -5092,6 +5146,11 @@ int Message::resizeContentGetHeight(int newWidth) {
 
 	newHeight += marginTop() + marginBottom();
 	return newHeight;
+}
+
+void Message::invalidateTextDependentCache() {
+	_bubbleTextualWidthMinimum = -1;
+	_bubbleTextualWidthCache = 0;
 }
 
 bool Message::needInfoDisplay() const {
