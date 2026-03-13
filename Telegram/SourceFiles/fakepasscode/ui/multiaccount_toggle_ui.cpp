@@ -25,18 +25,17 @@ MultiAccountToggleUi::MultiAccountToggleUi(QWidget *parent, gsl::not_null<Main::
 
 void MultiAccountToggleUi::Create(not_null<Ui::VerticalLayout *> content,
                                   Window::SessionController*) {
-    const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
     auto *button = Settings::AddButtonWithIcon(
             content,
             _description.title(),
             st::settingsButton,
             {&st::menuIconRemove}
-    )->toggleOn(toggled->events_starting_with_copy(_action != nullptr && _action->HasAction(_accountIndex)));
+    )->toggleOn(rpl::single(_action != nullptr && _action->HasAction(_accountIndex)));
 
-    button->addClickHandler([button, this] {
-        bool current_active = button->toggled();
-        SetActionValue(current_active, FakePasscode::ToggleAction{});
-    });
+    button->toggledChanges(
+    ) | rpl::on_next([this](bool value) {
+        SetActionValue(value, FakePasscode::ToggleAction{});
+    }, button->lifetime());
 }
 
 void MultiAccountToggleUi::SetActionValue(bool current_active, FakePasscode::ToggleAction value) {

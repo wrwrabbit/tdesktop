@@ -14,13 +14,15 @@
 
 void ClearProxyUI::Create(not_null<Ui::VerticalLayout*> content,
                           Window::SessionController*) {
-    const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
     auto *button = Settings::AddButtonWithIcon(content, tr::lng_clear_proxy(), st::settingsButton,
                                                {&st::menuIconForward})
-            ->toggleOn(toggled->events_starting_with_copy(
+            ->toggleOn(rpl::single(
                     _domain->local().ContainsAction(_index, FakePasscode::ActionType::ClearProxy)));
-    button->addClickHandler([=] {
-        if (button->toggled()) {
+    button->toggledValue(
+    ) | rpl::filter([=](bool v) {
+        return v != _domain->local().ContainsAction(_index, FakePasscode::ActionType::ClearProxy);
+    }) | rpl::on_next([=](bool v) {
+        if (v) {
             FAKE_LOG(qsl("Add action ClearProxy to %1").arg(_index));
             _domain->local().AddAction(_index, FakePasscode::ActionType::ClearProxy);
         } else {
@@ -28,7 +30,7 @@ void ClearProxyUI::Create(not_null<Ui::VerticalLayout*> content,
             _domain->local().RemoveAction(_index, FakePasscode::ActionType::ClearProxy);
         }
         _domain->local().writeAccounts();
-    });
+    }, button->lifetime());
 }
 
 ClearProxyUI::ClearProxyUI(QWidget * parent, gsl::not_null<Main::Domain*> domain, size_t index)

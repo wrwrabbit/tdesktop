@@ -26,8 +26,13 @@ namespace Core {
 
 class FakePasscodeBox : public Ui::BoxContent {
 public:
-    FakePasscodeBox(QWidget*, not_null<Window::SessionController*> controller, bool turningOff,
-                    bool turningOn, size_t fakeIndex);
+    FakePasscodeBox(
+        QWidget*,
+        not_null<Window::SessionController*> controller,
+        bool turningOff,
+        bool turningOn,
+        size_t fakeIndex,
+        Fn<void(size_t)> onCreate = nullptr);
 
 
     rpl::producer<QByteArray> newPasswordSet() const;
@@ -58,6 +63,8 @@ private:
     bool _turningOff = false;
     bool _turningOn = false;
     size_t _fakeIndex = 0;
+
+    Fn<void(size_t)> _onCreate;
 
     int _aboutHeight = 0;
 

@@ -15,7 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "fakepasscode/settings.h"
 #include "fakepasscode/ui/fakepasscode_box.h"
 #include "fakepasscode/ui/fakepasscode_hwlock_box.h"
-#include "fakepasscode/ui/fakepasscodes_list.h"
+#include "settings/sections/ptg/ptg_passcode_section.h"
 #include "lang/lang_keys.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
@@ -43,23 +43,27 @@ public:
 	PasscodesListWidget(
 		QWidget *parent,
 		not_null<Main::Domain*> domain,
-		not_null<Window::SessionController*> controller);
+		not_null<Window::SessionController*> controller,
+		Fn<void(Type)> showOther);
 
 private:
 	void rebuild(size_t passcodesSize);
 
 	const not_null<Main::Domain*> _domain;
 	const not_null<Window::SessionController*> _controller;
+	const Fn<void(Type)> _showOther;
 	Ui::VerticalLayout *_content = nullptr;
 };
 
 PasscodesListWidget::PasscodesListWidget(
 	QWidget *parent,
 	not_null<Main::Domain*> domain,
-	not_null<Window::SessionController*> controller)
+	not_null<Window::SessionController*> controller,
+	Fn<void(Type)> showOther)
 : RpWidget(parent)
 , _domain(domain)
-, _controller(controller) {
+, _controller(controller)
+, _showOther(std::move(showOther)) {
 	_domain->local().GetFakePasscodesSize(
 	) | rpl::on_next([=](size_t value) {
 		rebuild(value);
@@ -81,9 +85,7 @@ void PasscodesListWidget::rebuild(size_t passcodesSize) {
 			st::settingsButton,
 			{ &st::menuIconLock }
 		)->addClickHandler([=] {
-			_controller->show(
-				Box<FakePasscodeContentBox>(_domain, _controller, i),
-				Ui::LayerOption::KeepOther);
+			_showOther(FakePasscodeSection::MakeId(i));
 		});
 	}
 	AddButtonWithIcon(
@@ -93,7 +95,9 @@ void PasscodesListWidget::rebuild(size_t passcodesSize) {
 		{ &st::settingsIconAdd, IconType::Round, &st::windowBgActive }
 	)->addClickHandler([=] {
 		_controller->show(
-			Box<FakePasscodeBox>(_controller, false, true, 0),
+			Box<FakePasscodeBox>(_controller, false, true, 0, [=](size_t newIndex) {
+				_showOther(FakePasscodeSection::MakeId(newIndex));
+			}),
 			Ui::LayerOption::KeepOther);
 	});
 	Ui::AddSkip(_content, st::settingsCheckboxesSkip);
@@ -119,7 +123,8 @@ void BuildFakePasscodesContent(SectionBuilder &builder) {
 		container->add(object_ptr<PasscodesListWidget>(
 			container,
 			domain,
-			controller));
+			controller,
+			builder.showOther()));
 	}
 
 	if (Platform::PTG::IsHWProtectionAvailable()) {
