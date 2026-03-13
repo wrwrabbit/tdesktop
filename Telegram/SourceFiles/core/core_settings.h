@@ -958,6 +958,7 @@ public:
 	[[nodiscard]] int ivZoom() const;
 	[[nodiscard]] rpl::producer<int> ivZoomValue() const;
 	void setIvZoom(int value);
+	bool normalizeIvZoom();
 
 	[[nodiscard]] bool chatFiltersHorizontal() const;
 	[[nodiscard]] rpl::producer<bool> chatFiltersHorizontalChanges() const;
@@ -1117,7 +1118,7 @@ private:
 	bool _systemUnlockEnabled = false;
 	std::optional<bool> _weatherInCelsius;
 	QByteArray _tonsiteStorageToken;
-	rpl::variable<int> _ivZoom = 100;
+	rpl::variable<int> _ivZoom = 0;
 	Media::VideoQuality _videoQuality;
 	rpl::variable<bool> _chatFiltersHorizontal = false;
 
