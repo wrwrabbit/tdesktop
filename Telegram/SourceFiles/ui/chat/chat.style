@@ -1376,7 +1376,12 @@ chatTabsToggle: IconButton(defaultIconButton) {
 	iconOver: icon {{ "top_bar_profile-flip_horizontal", menuIconFgOver }};
 	ripple: emptyRippleAnimation;
 }
-chatTabsToggleActive: icon {{ "top_bar_profile-flip_horizontal", windowActiveTextFg }};
+chatTabsToggleIconTop: icon {{ "chat/menu_sidebar2-24x24", menuIconFg }};
+chatTabsToggleIconTopOver: icon {{ "chat/menu_sidebar2-24x24", menuIconFgOver }};
+chatTabsToggleIconLeft: icon {{ "chat/menu_sidebar3-24x24", menuIconFg }};
+chatTabsToggleIconLeftOver: icon {{ "chat/menu_sidebar3-24x24", menuIconFgOver }};
+chatTabsToggleIconBottom: icon {{ "chat/menu_sidebar1-24x24", menuIconFg }};
+chatTabsToggleIconBottomOver: icon {{ "chat/menu_sidebar1-24x24", menuIconFgOver }};
 chatTabsScroll: ScrollArea(defaultScrollArea) {
 	barHidden: true;
 }

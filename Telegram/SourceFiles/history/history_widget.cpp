@@ -7034,7 +7034,8 @@ void HistoryWidget::updateHistoryGeometry(
 	const auto subsectionTabsTop = _topBar->bottomNoMargins();
 	auto newScrollHeight = height()
 		- subsectionTabsTop
-		- (_subsectionTabs ? _subsectionTabs->topSkip() : 0);
+		- (_subsectionTabs ? _subsectionTabs->topSkip() : 0)
+		- (_subsectionTabs ? _subsectionTabs->bottomSkip() : 0);
 	if (_translateBar) {
 		newScrollHeight -= _translateBar->height();
 	}
@@ -7113,8 +7114,11 @@ void HistoryWidget::updateHistoryGeometry(
 		controller()->floatPlayerAreaUpdated();
 	}
 	if (_subsectionTabs) {
+		const auto tabsBottomSkip = _subsectionTabs->bottomSkip();
 		const auto scrollBottom = _scroll->y() + newScrollHeight;
-		const auto areaHeight = scrollBottom - subsectionTabsTop;
+		const auto areaHeight = scrollBottom
+			+ tabsBottomSkip
+			- subsectionTabsTop;
 		_subsectionTabs->setBoundingRect(
 			{ 0, subsectionTabsTop, width(), areaHeight });
 	}

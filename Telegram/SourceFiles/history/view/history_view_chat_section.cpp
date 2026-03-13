@@ -2645,6 +2645,9 @@ void ChatWidget::updateControlsGeometry() {
 	const auto tabsLeftSkip = _subsectionTabs
 		? _subsectionTabs->leftSkip()
 		: 0;
+	const auto tabsBottomSkip = _subsectionTabs
+		? _subsectionTabs->bottomSkip()
+		: 0;
 	const auto innerWidth = contentWidth - tabsLeftSkip;
 	const auto subsectionTabsTop = _topBar->bottomNoMargins();
 	_topBars->move(tabsLeftSkip, subsectionTabsTop
@@ -2682,6 +2685,8 @@ void ChatWidget::updateControlsGeometry() {
 	} else {
 		bottom -= _composeControls->heightCurrent();
 	}
+	const auto composeTop = bottom;
+	bottom -= tabsBottomSkip;
 
 	_topBars->resize(innerWidth, top + st::lineWidth);
 	top += _topBars->y();
@@ -2704,12 +2709,14 @@ void ChatWidget::updateControlsGeometry() {
 		}
 		updateInnerVisibleArea();
 	}
-	_composeControls->move(0, bottom);
+	_composeControls->move(0, composeTop);
 	_composeControls->setAutocompleteBoundingRect(_scroll->geometry());
 
 	if (_subsectionTabs) {
 		const auto scrollBottom = _scroll->y() + scrollHeight;
-		const auto areaHeight = scrollBottom - subsectionTabsTop;
+		const auto areaHeight = scrollBottom
+			+ tabsBottomSkip
+			- subsectionTabsTop;
 		_subsectionTabs->setBoundingRect(
 			{ 0, subsectionTabsTop, width(), areaHeight });
 	}
