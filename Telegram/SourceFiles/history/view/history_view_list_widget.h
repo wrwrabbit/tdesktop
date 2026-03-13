@@ -68,6 +68,7 @@ struct TextState;
 struct StateRequest;
 class EmojiInteractions;
 class TranslateTracker;
+class ReadMetricsTracker;
 enum class CursorState : char;
 enum class PointState : char;
 enum class Context : char;
@@ -541,6 +542,8 @@ private:
 
 	void onTouchSelect();
 	void onTouchScrollTimer();
+	void markReadMetricsStale();
+	void registerReadMetricsActivity();
 
 	void updateAroundPositionFromNearest(int nearestIndex);
 	void refreshRows(const Data::MessagesSlice &old);
@@ -599,7 +602,6 @@ private:
 	[[nodiscard]] Element *strictFindItemByY(int y) const;
 	[[nodiscard]] int findNearestItem(Data::MessagePosition position) const;
 	void viewReplaced(not_null<const Element*> was, Element *now);
-	[[nodiscard]] HistoryItemsList collectVisibleItems() const;
 
 	void checkMoveToOtherViewer();
 	void updateVisibleTopItem();
@@ -794,6 +796,8 @@ private:
 	std::unique_ptr<ReplyButton::Manager> _replyButtonManager;
 
 	std::unique_ptr<TranslateTracker> _translateTracker;
+	std::unique_ptr<ReadMetricsTracker> _readMetricsTracker;
+	bool _readMetricsStale = false;
 
 	int _minHeight = 0;
 	int _visibleTop = 0;

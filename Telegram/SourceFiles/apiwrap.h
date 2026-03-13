@@ -83,6 +83,7 @@ class UnreadThings;
 class Ringtones;
 class Transcribes;
 class Premium;
+class ReadMetrics;
 class Usernames;
 class Websites;
 
@@ -414,6 +415,7 @@ public:
 	[[nodiscard]] Api::InviteLinks &inviteLinks();
 	[[nodiscard]] Api::ChatLinks &chatLinks();
 	[[nodiscard]] Api::ViewsManager &views();
+	[[nodiscard]] Api::ReadMetrics &readMetrics();
 	[[nodiscard]] Api::ConfirmPhone &confirmPhone();
 	[[nodiscard]] Api::PeerPhoto &peerPhoto();
 	[[nodiscard]] Api::Polls &polls();
@@ -772,6 +774,7 @@ private:
 	const std::unique_ptr<Api::InviteLinks> _inviteLinks;
 	const std::unique_ptr<Api::ChatLinks> _chatLinks;
 	const std::unique_ptr<Api::ViewsManager> _views;
+	const std::unique_ptr<Api::ReadMetrics> _readMetrics;
 	const std::unique_ptr<Api::ConfirmPhone> _confirmPhone;
 	const std::unique_ptr<Api::PeerPhoto> _peerPhoto;
 	const std::unique_ptr<Api::Polls> _polls;

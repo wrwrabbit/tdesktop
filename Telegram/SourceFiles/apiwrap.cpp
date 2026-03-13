@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_global_privacy.h"
 #include "api/api_updates.h"
 #include "api/api_user_privacy.h"
+#include "api/api_read_metrics.h"
 #include "api/api_views.h"
 #include "api/api_confirm_phone.h"
 #include "api/api_unread_things.h"
@@ -181,6 +182,7 @@ ApiWrap::ApiWrap(not_null<Main::Session*> session)
 , _inviteLinks(std::make_unique<Api::InviteLinks>(this))
 , _chatLinks(std::make_unique<Api::ChatLinks>(this))
 , _views(std::make_unique<Api::ViewsManager>(this))
+, _readMetrics(std::make_unique<Api::ReadMetrics>(this))
 , _confirmPhone(std::make_unique<Api::ConfirmPhone>(this))
 , _peerPhoto(std::make_unique<Api::PeerPhoto>(this))
 , _polls(std::make_unique<Api::Polls>(this))
@@ -4974,6 +4976,10 @@ Api::ChatLinks &ApiWrap::chatLinks() {
 
 Api::ViewsManager &ApiWrap::views() {
 	return *_views;
+}
+
+Api::ReadMetrics &ApiWrap::readMetrics() {
+	return *_readMetrics;
 }
 
 Api::ConfirmPhone &ApiWrap::confirmPhone() {

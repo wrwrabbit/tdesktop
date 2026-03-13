@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_inner_widget.h"
 
 #include "chat_helpers/stickers_emoji_pack.h"
+#include "core/application.h"
 #include "core/file_utilities.h"
 #include "core/click_handler_types.h"
 #include "core/phone_click_handler.h"
@@ -69,6 +70,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/emoji_interactions.h"
 #include "history/history_widget.h"
 #include "history/view/history_view_translate_tracker.h"
+#include "history/view/history_view_read_metrics_tracker.h"
 #include "base/platform/base_platform_info.h"
 #include "base/qt/qt_common_adapters.h"
 #include "base/qt/qt_key_modifiers.h"
@@ -111,6 +113,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtGui/QClipboard>
 #include <QtWidgets/QApplication>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QMimeData>
 
 namespace {
@@ -325,6 +328,8 @@ HistoryInner::HistoryInner(
 	[=](not_null<const Element*> view) { return itemTop(view); }))
 , _migrated(history->migrateFrom())
 , _translateTracker(std::make_unique<HistoryView::TranslateTracker>(history))
+, _readMetricsTracker(std::make_unique<HistoryView::ReadMetricsTracker>(
+	_peer))
 , _pathGradient(
 	HistoryView::MakePathShiftGradient(
 		controller->chatStyle(),
@@ -365,6 +370,10 @@ HistoryInner::HistoryInner(
 	refreshAboutView();
 
 	setMouseTracking(true);
+	Core::App().inAppKeyPressed(
+	) | rpl::on_next([=] {
+		registerReadMetricsActivity();
+	}, lifetime());
 	_controller->gifPauseLevelChanged(
 	) | rpl::on_next([=] {
 		if (!elementAnimationsPaused()) {
@@ -419,9 +428,12 @@ HistoryInner::HistoryInner(
 	}, lifetime());
 	session().data().viewLayoutChanged(
 	) | rpl::filter([=](not_null<const Element*> view) {
-		return (view == viewByItem(view->data())) && view->isUnderCursor();
+		return (view == viewByItem(view->data()));
 	}) | rpl::on_next([=](not_null<const Element*> view) {
-		mouseActionUpdate();
+		markReadMetricsStale();
+		if (view->isUnderCursor()) {
+			mouseActionUpdate();
+		}
 	}, lifetime());
 
 	session().data().itemDataChanges(
@@ -1134,8 +1146,12 @@ void HistoryInner::startEffectOnRead(not_null<HistoryItem*> item) {
 }
 
 void HistoryInner::paintEvent(QPaintEvent *e) {
-	if (_controller->contentOverlapped(this, e)
-		|| hasPendingResizedItems()) {
+	const auto overlapped = _controller->contentOverlapped(this, e);
+	const auto pendingResized = hasPendingResizedItems();
+	_readMetricsTracker->setScreenActive(!overlapped
+		&& !pendingResized
+		&& _widget->markingContentsRead());
+	if (overlapped || pendingResized) {
 		return;
 	} else if (_recountedAfterPendingResizedItems) {
 		_recountedAfterPendingResizedItems = false;
@@ -1179,6 +1195,10 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 	}
 
 	_translateTracker->startBunch();
+	const auto metricsStale = base::take(_readMetricsStale);
+	if (metricsStale) {
+		_readMetricsTracker->startBatch(_visibleAreaTop, _visibleAreaBottom);
+	}
 	auto readTill = (HistoryItem*)nullptr;
 	auto readContents = base::flat_set<not_null<HistoryItem*>>();
 	auto startEffects = base::flat_set<not_null<const Element*>>();
@@ -1186,6 +1206,9 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 	const auto guard = gsl::finally([&] {
 		if (_pinnedItem) {
 			_translateTracker->add(_pinnedItem);
+		}
+		if (metricsStale) {
+			_readMetricsTracker->endBatch();
 		}
 		_translateTracker->finishBunch();
 		if (!startEffects.empty()) {
@@ -1208,6 +1231,9 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 			int height) {
 		_translateTracker->add(view);
 		const auto item = view->data();
+		if (metricsStale && height > 0) {
+			_readMetricsTracker->push(item, top, height);
+		}
 		const auto isSponsored = item->isSponsored();
 		const auto isUnread = !item->out()
 			&& item->unread(_history)
@@ -1670,6 +1696,7 @@ void HistoryInner::touchEvent(QTouchEvent *e) {
 		_touchPrevPos = _touchPos;
 		_touchPos = e->touchPoints().cbegin()->screenPos().toPoint();
 	}
+	registerReadMetricsActivity();
 
 	switch (e->type()) {
 	case QEvent::TouchBegin: {
@@ -1792,6 +1819,7 @@ void HistoryInner::mouseMoveEvent(QMouseEvent *e) {
 	}
 	if (reallyMoved) {
 		_mouseActive = true;
+		registerReadMetricsActivity();
 		lastGlobalPosition = e->globalPos();
 		if (!buttonsPressed || (_scrollDateLink && ClickHandler::getPressed() == _scrollDateLink)) {
 			keepScrollDateForNow();
@@ -1851,6 +1879,7 @@ void HistoryInner::mousePressEvent(QMouseEvent *e) {
 		return;
 	}
 	_mouseActive = true;
+	registerReadMetricsActivity();
 	mouseActionStart(e->globalPos(), e->button());
 }
 
@@ -2279,6 +2308,7 @@ void HistoryInner::mouseReleaseEvent(QMouseEvent *e) {
 		e->accept();
 		return;
 	}
+	registerReadMetricsActivity();
 	mouseActionFinish(e->globalPos(), e->button());
 	if (!rect().contains(e->pos())) {
 		leaveEvent(e);
@@ -2286,6 +2316,7 @@ void HistoryInner::mouseReleaseEvent(QMouseEvent *e) {
 }
 
 void HistoryInner::mouseDoubleClickEvent(QMouseEvent *e) {
+	registerReadMetricsActivity();
 	mouseActionStart(e->globalPos(), e->button());
 
 	const auto mouseActionView = viewByItem(_mouseActionItem);
@@ -3641,6 +3672,17 @@ void HistoryInner::keyPressEvent(QKeyEvent *e) {
 	}
 }
 
+void HistoryInner::markReadMetricsStale() {
+	_readMetricsStale = true;
+	update();
+}
+
+void HistoryInner::registerReadMetricsActivity() {
+	if (_widget->markingContentsRead()) {
+		_readMetricsTracker->registerActivity();
+	}
+}
+
 void HistoryInner::checkActivation() {
 	if (!_widget->markingMessagesRead()) {
 		return;
@@ -3771,6 +3813,8 @@ void HistoryInner::visibleAreaUpdated(int top, int bottom) {
 	auto scrolledUp = (top < _visibleAreaTop);
 	_visibleAreaTop = top;
 	_visibleAreaBottom = bottom;
+	markReadMetricsStale();
+	registerReadMetricsActivity();
 	const auto visibleAreaHeight = bottom - top;
 
 	// if history has pending resize events we should not update scrollTopItem

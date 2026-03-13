@@ -645,6 +645,7 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 	switch (e->type()) {
 	case QEvent::KeyPress: {
 		updateNonIdle();
+		_inAppKeyPressed.fire({});
 		const auto event = static_cast<QKeyEvent*>(e);
 		if (base::Platform::GlobalShortcuts::IsToggleFullScreenKey(event)
 			&& toggleActiveWindowFullScreen()) {
@@ -1222,6 +1223,10 @@ crl::time Application::lastNonIdleTime() const {
 	return std::max(
 		base::Platform::LastUserInputTime().value_or(0),
 		_lastNonIdleTime);
+}
+
+rpl::producer<> Application::inAppKeyPressed() const {
+	return _inAppKeyPressed.events();
 }
 
 rpl::producer<bool> Application::passcodeLockChanges() const {
