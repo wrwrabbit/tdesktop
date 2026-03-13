@@ -76,18 +76,20 @@ void ItemCanvas::computeContentRect(const QPointF &p) {
 		return;
 	}
 	const auto sceneSize = scene()->sceneRect().size();
+	const auto contentLeft = std::max(0., _contentRect.x());
+	const auto contentTop = std::max(0., _contentRect.y());
 	_contentRect = QRectF(
 		QPointF(
-			std::clamp(p.x() - _brushMargins.left(), 0., _contentRect.x()),
-			std::clamp(p.y() - _brushMargins.top(), 0., _contentRect.y())),
+			std::clamp(p.x() - _brushMargins.left(), 0., contentLeft),
+			std::clamp(p.y() - _brushMargins.top(), 0., contentTop)),
 		QPointF(
 			std::clamp(
 				p.x() + _brushMargins.right(),
-				_contentRect.x() + _contentRect.width(),
+				contentLeft + _contentRect.width(),
 				sceneSize.width()),
 			std::clamp(
 				p.y() + _brushMargins.bottom(),
-				_contentRect.y() + _contentRect.height(),
+				contentTop + _contentRect.height(),
 				sceneSize.height())));
 }
 
