@@ -312,6 +312,18 @@ auto filesTextProducer = tr::lng_files_selected(
 - For `{count}`: immediate uses `int`, reactive uses `rpl::producer<float64>` with `| tr::to_count()`
 - Move producers with `std::move` when passing to placeholders
 
+### PTG-specific strings and translations
+
+PTG adds its own strings to `lang.strings` (the block near the bottom, starting from `"lng_fakepasscode"`). These strings are **never** translated by Telegram's server, so every PTG-created string requires a manual translation entry.
+
+**Mandatory rule:** Whenever you add a new string to the PTG block in `lang.strings`, you MUST also add matching entries to all three translation arrays in `Telegram/SourceFiles/fakepasscode/lang/fakepasscode_translator.cpp`:
+
+- `LangRuTranslation` — Russian
+- `LangByTranslation` — Belarusian
+- `LangPlTranslation` — Polish
+
+All three arrays must stay in sync (same keys, same count — enforced by `static_assert`). See `.github/skills/ptg-translation/SKILL.md` for the full workflow.
+
 ## RPL (Reactive Programming Library)
 
 ### Core Concepts
