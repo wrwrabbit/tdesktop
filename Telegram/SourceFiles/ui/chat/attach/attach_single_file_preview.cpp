@@ -51,7 +51,7 @@ void SingleFilePreview::preparePreview(const PreparedFile &file) {
 	auto preview = QImage();
 	if (const auto image = std::get_if<PreparedFileInformation::Image>(
 		&file.information->media)) {
-		preview = image->data;
+		preview = file.preview.isNull() ? image->data : file.preview;
 	} else if (const auto video = std::get_if<PreparedFileInformation::Video>(
 		&file.information->media)) {
 		preview = video->thumbnail;

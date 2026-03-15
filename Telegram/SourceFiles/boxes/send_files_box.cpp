@@ -1084,6 +1084,7 @@ void SendFilesBox::addMenuButton() {
 	top->setClickedCallback([=] {
 		const auto &tabbed = _st.tabbed;
 		_menu = base::make_unique_q<Ui::PopupMenu>(top, tabbed.menu);
+		_menu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
 		const auto position = QCursor::pos();
 		SendMenu::FillSendMenu(
 			_menu.get(),
@@ -1226,41 +1227,31 @@ void SendFilesBox::pushBlock(int from, int till) {
 	const auto widget = _inner->add(
 		block.takeWidget(),
 		QMargins(0, _inner->count() ? st::sendMediaRowSkip : 0, 0, 0));
-
-	block.itemDeleteRequest(
-	) | rpl::filter([=] {
-		return !_removingIndex;
-	}) | rpl::on_next([=](int index) {
+	struct State {
+		base::unique_qptr<Ui::PopupMenu> menu;
+	};
+	const auto state = widget->lifetime().make_state<State>();
+	const auto openedOnce = widget->lifetime().make_state<bool>(false);
+	const auto openInPhotoEditor = [=, show = _show](int index) {
 		applyBlockChanges();
 
-		_removingIndex = index;
-		crl::on_main(this, [=] {
-			const auto index = base::take(_removingIndex).value_or(-1);
-			if (index < 0 || index >= _list.files.size()) {
-				return;
-			}
-			// Just close the box if it is the only one.
-			if (_list.files.size() == 1) {
-				requestToTakeTextWithTags();
-				closeBox();
-				return;
-			}
-			refreshAllAfterChanges(index, [&] {
-				_list.files.erase(_list.files.begin() + index);
-				if (index == _list.files.size()) {
-					auto &last = _list.files.back();
-					const auto was = base::take(last.caption);
-					if (fieldText().empty() && !last.isSticker()) {
-						_caption->setTextWithTags(was);
-					}
+		if (!(*openedOnce)) {
+			show->session().settings().incrementPhotoEditorHintShown();
+			show->session().saveSettings();
+		}
+		*openedOnce = true;
+		Editor::OpenWithPreparedFile(
+			this,
+			show,
+			&_list.files[index],
+			st::sendMediaPreviewSize,
+			[=](bool ok) {
+				if (ok) {
+					refreshAllAfterChanges(from);
 				}
 			});
-		});
-	}, widget->lifetime());
-
-	const auto show = uiShow();
-	block.itemReplaceRequest(
-	) | rpl::on_next([=](int index) {
+	};
+	const auto replaceAttachment = [=, show = _show](int index) {
 		applyBlockChanges();
 
 		const auto replace = [=](Ui::PreparedList list) {
@@ -1333,28 +1324,8 @@ void SendFilesBox::pushBlock(int from, int till) {
 			tr::lng_choose_file(tr::now),
 			FileDialog::AllOrImagesFilter(),
 			crl::guard(this, callback));
-	}, widget->lifetime());
-
-	const auto openedOnce = widget->lifetime().make_state<bool>(false);
-	block.itemModifyRequest(
-	) | rpl::on_next([=, show = _show](int index) {
-		applyBlockChanges();
-
-		if (!(*openedOnce)) {
-			show->session().settings().incrementPhotoEditorHintShown();
-			show->session().saveSettings();
-		}
-		*openedOnce = true;
-		Editor::OpenWithPreparedFile(
-			this,
-			show,
-			&_list.files[index],
-			st::sendMediaPreviewSize,
-			[=](bool ok) { if (ok) refreshAllAfterChanges(from); });
-	}, widget->lifetime());
-
-	block.itemEditCoverRequest(
-	) | rpl::on_next([=, show = _show](int index) {
+	};
+	const auto editCover = [=, show = _show](int index) {
 		applyBlockChanges();
 
 		const auto replace = [=](Ui::PreparedList list) {
@@ -1414,15 +1385,170 @@ void SendFilesBox::pushBlock(int from, int till) {
 			tr::lng_choose_cover(tr::now),
 			FileDialog::ImagesFilter(),
 			crl::guard(this, callback));
-	}, widget->lifetime());
-
-	block.itemClearCoverRequest(
-	) | rpl::on_next([=](int index) {
+	};
+	const auto clearCover = [=](int index) {
 		applyBlockChanges();
 		refreshAllAfterChanges(from, [&] {
 			auto &entry = _list.files[index];
 			entry.videoCover = nullptr;
 		});
+	};
+	const auto showContextMenu = [=](int fileIndex, QPoint globalPosition) {
+		if (from >= till
+			|| fileIndex < from
+			|| fileIndex >= till
+			|| fileIndex >= _list.files.size()) {
+			return false;
+		}
+		state->menu = base::make_unique_q<Ui::PopupMenu>(
+			widget,
+			_st.tabbed.menu);
+		state->menu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
+		const auto &file = _list.files[fileIndex];
+		state->menu->addAction(tr::lng_attach_replace(tr::now), [=] {
+			replaceAttachment(fileIndex);
+		}, &st::menuIconReplace);
+		const auto canOpenPhotoEditor = true
+			&& _sendWay.current().sendImagesAsPhotos()
+			&& (file.type == Ui::PreparedFile::Type::Photo);
+		if (canOpenPhotoEditor) {
+			state->menu->addAction(tr::lng_context_draw(tr::now), [=] {
+				openInPhotoEditor(fileIndex);
+			}, &st::menuIconDraw);
+		}
+		const auto canEditFileData = !SkipCaption(
+			file,
+			_sendWay.current());
+		if (canEditFileData) {
+			state->menu->addAction(tr::lng_rename_file(tr::now), [=] {
+				auto &file = _list.files[fileIndex];
+				_show->show(Box(RenameFileBox, file.displayName, [=](
+						QString newName) {
+					const auto displayName = std::move(newName);
+					_list.files[fileIndex].displayName = displayName;
+					if (!setDisplayNameInSingleFilePreview(
+							fileIndex,
+							displayName)) {
+						refreshAllAfterChanges(from);
+					}
+				}));
+			}, &st::menuIconEdit);
+			state->menu->addAction(
+				tr::lng_context_upload_edit_caption(tr::now),
+				[=] {
+					auto &file = _list.files[fileIndex];
+					const auto count = int(_list.files.size());
+					const auto sync = (fileIndex + 1 == count);
+					_show->show(Box(
+						EditFileCaptionBox,
+						_st,
+						_toPeer,
+						sync ? fieldText() : file.caption,
+						[=](TextWithTags text) {
+							if (!validateLength(text.text)) {
+								return false;
+							}
+							if (sync) {
+								_caption->setTextWithTags(
+									base::take(text));
+							}
+							_list.files[fileIndex].caption = text;
+							if (!setCaptionInSingleFilePreview(
+									fileIndex,
+									text)) {
+								refreshAllAfterChanges(from);
+							}
+							return true;
+						}));
+				},
+					&st::menuIconCaptionShow);
+		}
+		const auto canToggleSpoiler = !hasPrice()
+			&& _sendWay.current().sendImagesAsPhotos();
+		if (canToggleSpoiler) {
+			const auto spoilered = file.spoiler;
+			const auto &icons = _st.tabbed.icons;
+			state->menu->addAction(spoilered
+				? tr::lng_context_disable_spoiler(tr::now)
+				: tr::lng_context_spoiler_effect(tr::now), [=] {
+				applyBlockChanges();
+				refreshAllAfterChanges(from, [&] {
+					auto &entry = _list.files[fileIndex];
+					entry.spoiler = !spoilered;
+				});
+			}, spoilered ? &icons.menuSpoilerOff : &icons.menuSpoiler);
+		}
+		const auto canEditCover = file.isVideoFile()
+			&& (_toPeer->isBroadcast() || _toPeer->isSelf());
+		if (canEditCover) {
+			state->menu->addAction(tr::lng_context_edit_cover(tr::now), [=] {
+				editCover(fileIndex);
+			}, &st::menuIconEdit);
+
+			if (file.videoCover != nullptr) {
+				state->menu->addAction(
+					tr::lng_context_clear_cover(tr::now),
+					[=] { clearCover(fileIndex); },
+					&st::menuIconCancel);
+			}
+		}
+		if (state->menu->empty()) {
+			state->menu = nullptr;
+			return false;
+		}
+		state->menu->popup(globalPosition);
+		return true;
+	};
+
+	block.itemDeleteRequest(
+	) | rpl::filter([=] {
+		return !_removingIndex;
+	}) | rpl::on_next([=](int index) {
+		applyBlockChanges();
+
+		_removingIndex = index;
+		crl::on_main(this, [=] {
+			const auto index = base::take(_removingIndex).value_or(-1);
+			if (index < 0 || index >= _list.files.size()) {
+				return;
+			}
+			// Just close the box if it is the only one.
+			if (_list.files.size() == 1) {
+				requestToTakeTextWithTags();
+				closeBox();
+				return;
+			}
+			refreshAllAfterChanges(index, [&] {
+				_list.files.erase(_list.files.begin() + index);
+				if (index == _list.files.size()) {
+					auto &last = _list.files.back();
+					const auto was = base::take(last.caption);
+					if (fieldText().empty() && !last.isSticker()) {
+						_caption->setTextWithTags(was);
+					}
+				}
+			});
+		});
+	}, widget->lifetime());
+
+	block.itemReplaceRequest(
+	) | rpl::on_next([=](int index) {
+		showContextMenu(index, QCursor::pos());
+	}, widget->lifetime());
+
+	block.itemModifyRequest(
+	) | rpl::on_next([=](int index) {
+		openInPhotoEditor(index);
+	}, widget->lifetime());
+
+	block.itemEditCoverRequest(
+	) | rpl::on_next([=](int index) {
+		editCover(index);
+	}, widget->lifetime());
+
+	block.itemClearCoverRequest(
+	) | rpl::on_next([=](int index) {
+		clearCover(index);
 	}, widget->lifetime());
 
 	block.orderUpdated() | rpl::on_next([=]{
@@ -1432,11 +1558,7 @@ void SendFilesBox::pushBlock(int from, int till) {
 		}
 	}, widget->lifetime());
 
-	struct State {
-		base::unique_qptr<Ui::PopupMenu> menu;
-	};
-	const auto state = widget->lifetime().make_state<State>();
-	base::install_event_filter(widget, [=, from = from, till = till](
+	base::install_event_filter(widget, [=](
 			not_null<QEvent*> e) {
 		if (e->type() == QEvent::ContextMenu) {
 			const auto mouse = static_cast<QContextMenuEvent*>(e.get());
@@ -1454,63 +1576,9 @@ void SendFilesBox::pushBlock(int from, int till) {
 			if (fileIndex >= till || fileIndex >= _list.files.size()) {
 				return base::EventFilterResult::Continue;
 			}
-			state->menu = base::make_unique_q<Ui::PopupMenu>(
-				widget,
-				_st.tabbed.menu);
-			const auto &file = _list.files[fileIndex];
-			const auto canEditFileData = !SkipCaption(
-				file,
-				_sendWay.current());
-			if (canEditFileData) {
-				state->menu->addAction(tr::lng_rename_file(tr::now), [=] {
-					auto &file = _list.files[fileIndex];
-					_show->show(Box(RenameFileBox, file.displayName, [=](
-							QString newName) {
-						const auto displayName = std::move(newName);
-						_list.files[fileIndex].displayName = displayName;
-						if (!setDisplayNameInSingleFilePreview(
-								fileIndex,
-								displayName)) {
-							refreshAllAfterChanges(from);
-						}
-					}));
-				}, &st::menuIconEdit);
-				state->menu->addAction(
-					tr::lng_context_upload_edit_caption(tr::now),
-					[=] {
-						auto &file = _list.files[fileIndex];
-						const auto count = int(_list.files.size());
-						const auto sync = (fileIndex + 1 == count);
-						_show->show(Box(
-							EditFileCaptionBox,
-							_st,
-							_toPeer,
-							sync ? fieldText() : file.caption,
-							[=](TextWithTags text) {
-								if (!validateLength(text.text)) {
-									return false;
-								}
-								if (sync) {
-									_caption->setTextWithTags(
-										base::take(text));
-								}
-								_list.files[fileIndex].caption = text;
-								if (!setCaptionInSingleFilePreview(
-										fileIndex,
-										text)) {
-									refreshAllAfterChanges(from);
-								}
-								return true;
-							}));
-					},
-					&st::menuIconCaptionShow);
+			if (showContextMenu(fileIndex, mouse->globalPos())) {
+				return base::EventFilterResult::Cancel;
 			}
-			if (state->menu->empty()) {
-				state->menu = nullptr;
-				return base::EventFilterResult::Continue;
-			}
-			state->menu->popup(mouse->globalPos());
-			return base::EventFilterResult::Cancel;
 		}
 		return base::EventFilterResult::Continue;
 	}, widget->lifetime());
