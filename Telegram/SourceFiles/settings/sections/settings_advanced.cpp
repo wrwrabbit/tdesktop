@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_privacy_security.h"
 #include "storage/localstorage.h"
 #include "storage/storage_domain.h"
+#include "storage/storage_location_switch.h"
 #include "tray.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/boxes/single_choice_box.h"
@@ -202,6 +203,84 @@ void BuildDataStorageSection(SectionBuilder &builder) {
 				*showDownloadPath = !checked;
 			}
 		}, askDownloadPath->lifetime());
+	}
+
+	builder.addSkip(st::settingsCheckboxesSkip);
+}
+
+void BuildStorageLocationSection(SectionBuilder &builder) {
+	const auto controller = builder.controller();
+	const auto isPortable = Storage::IsCurrentlyPortable();
+
+	builder.addDivider();
+	builder.addSkip();
+	builder.addSubsectionTitle({
+		.id = u"advanced/storage_location"_q,
+		.title = tr::lng_settings_storage_section(),
+		.keywords = { u"storage"_q, u"portable"_q, u"location"_q, u"data"_q },
+	});
+
+	builder.addButton({
+		.id = u"advanced/storage_state"_q,
+		.title = isPortable
+			? tr::lng_settings_storage_current_portable()
+			: tr::lng_settings_storage_current_appdata(),
+		.st = &st::settingsButtonNoIcon,
+		.onClick = [] {},
+		.keywords = { u"storage"_q, u"location"_q, u"data"_q },
+	});
+
+	if (!isPortable) {
+		builder.addButton({
+			.id = u"advanced/storage_make_portable"_q,
+			.title = tr::lng_settings_storage_make_portable(),
+			.icon = { &st::menuIconStorage },
+			.onClick = [=] {
+				const auto confirmed = [=] {
+					if (Storage::ScheduleSwitchToPortable()) {
+						Core::Restart();
+					} else {
+						controller->show(Ui::MakeInformBox(
+							tr::lng_settings_storage_move_failed(
+								lt_path,
+								rpl::single(cExeDir()))));
+					}
+				};
+				controller->show(Ui::MakeConfirmBox({
+					.text = tr::lng_settings_storage_make_portable_about(),
+					.confirmed = confirmed,
+					.confirmText = tr::lng_settings_restart_now(),
+				}));
+			},
+			.keywords = { u"portable"_q, u"usb"_q, u"data"_q },
+		});
+	} else {
+		builder.addButton({
+			.id = u"advanced/storage_move_to_appdata"_q,
+			.title = tr::lng_settings_storage_move_to_appdata(),
+			.icon = { &st::menuIconStorage },
+			.onClick = [=] {
+				const auto home = psAppDataPath();
+				const auto confirmed = [=] {
+					if (Storage::ScheduleSwitchToHome()) {
+						Core::Restart();
+					} else {
+						controller->show(Ui::MakeInformBox(
+							tr::lng_settings_storage_move_failed(
+								lt_path,
+								rpl::single(home))));
+					}
+				};
+				controller->show(Ui::MakeConfirmBox({
+					.text = tr::lng_settings_storage_move_to_appdata_about(
+						lt_path,
+						rpl::single(home)),
+					.confirmed = confirmed,
+					.confirmText = tr::lng_settings_restart_now(),
+				}));
+			},
+			.keywords = { u"appdata"_q, u"system"_q, u"location"_q, u"data"_q },
+		});
 	}
 
 	builder.addSkip(st::settingsCheckboxesSkip);
@@ -1139,6 +1218,7 @@ const auto kMeta = BuildHelper({
 		BuildUpdateSection(builder, true);
 	}
 	BuildDataStorageSection(builder);
+	BuildStorageLocationSection(builder);
 	BuildAutoDownloadSection(builder);
 	BuildWindowTitleSection(builder);
 	BuildSystemIntegrationSection(builder);

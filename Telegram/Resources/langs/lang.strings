@@ -1253,6 +1253,28 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_device_name" = "Device name";
 "lng_settings_rename_device_title" = "Rename current device";
 "lng_settings_manage_local_storage" = "Manage local storage";
+
+"lng_settings_storage_section" = "Data storage location";
+"lng_settings_storage_current_appdata" = "Data is stored in the standard system location.";
+"lng_settings_storage_current_portable" = "Data is stored next to the Telegram executable (portable mode).";
+"lng_settings_storage_move_to_appdata" = "Move data to system location";
+"lng_settings_storage_move_to_appdata_about" = "Move Telegram data to the standard system location ({path}). Telegram will restart.";
+"lng_settings_storage_make_portable" = "Switch to portable mode";
+"lng_settings_storage_make_portable_about" = "Move data to the folder next to Telegram. Useful for running from a USB drive. Telegram will restart.";
+"lng_settings_storage_move_failed_title" = "Could not move data";
+"lng_settings_storage_move_failed" = "Failed to move the data folder. Please move the tdata folder manually to:\n{path}";
+
+"lng_first_start_downloads_title" = "Telegram is in your Downloads folder";
+"lng_first_start_downloads_body" = "Downloads is a temporary location. Your settings and data could be lost or overwritten.\n\nWhere would you like to set up Telegram?";
+"lng_first_start_move_to_programs" = "Install to Program Files";
+"lng_first_start_move_to_applications" = "Move to Applications folder";
+"lng_first_start_choose_folder" = "Choose a folder\u2026";
+"lng_first_start_continue_downloads" = "Continue in Downloads (not recommended)";
+"lng_first_start_removable_title" = "Running from a removable drive";
+"lng_first_start_removable_body" = "Telegram is running from a removable drive. Use portable mode to keep your data on the drive, or store it in the standard system location.";
+"lng_first_start_use_portable" = "Use portable mode (keep data on drive)";
+"lng_first_start_use_system" = "Use standard system location";
+
 "lng_settings_ask_question" = "Ask a Question";
 "lng_settings_ask_sure" = "Please note that Telegram Support is done by volunteers. We try to respond as quickly as possible, but it may take a while.\n\nPlease take a look at the Telegram FAQ: it has important troubleshooting tips and answers to most questions.";
 "lng_settings_faq_button" = "Go to FAQ";

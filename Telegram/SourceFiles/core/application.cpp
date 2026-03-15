@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/sandbox.h"
 #include "core/local_url_handlers.h"
 #include "core/launcher.h"
+#include "core/first_start_prompt.h"
 #include "core/ui_integration.h"
 #include "chat_helpers/emoji_keywords.h"
 #include "chat_helpers/stickers_emoji_image_loader.h"
@@ -340,6 +341,8 @@ void Application::run() {
 	[[maybe_unused]] const auto ivSupported = Iv::ShowButton();
 	[[maybe_unused]] const auto lpAvailable = Ui::LocationPicker::Available(
 		{});
+
+	ShowFirstStartPromptIfNeeded();
 
 	_windows.emplace(nullptr, std::make_unique<Window::Controller>());
 	setLastActiveWindow(_windows.front().second.get());
