@@ -169,7 +169,7 @@ jobs:
           rm -rf Telegram/
           # mv {Telegram,Updater} artifact/
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.
         with:

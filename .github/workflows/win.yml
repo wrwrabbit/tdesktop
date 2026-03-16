@@ -235,7 +235,7 @@ jobs:
           set OUT=%TBUILD%\%REPO_NAME%\out\Debug
           mkdir artifact_${{ matrix.arch }}
           move %OUT%\Telegram.exe artifact_${{ matrix.arch }}/Telegram_${{ matrix.arch }}.exe
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || ${{ github.ref == 'refs/heads/nightly' }}
         with:
