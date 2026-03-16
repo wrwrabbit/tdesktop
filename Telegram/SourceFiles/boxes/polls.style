@@ -1,0 +1,26 @@
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+using "ui/basic.style";
+
+using "ui/widgets/widgets.style";
+using "boxes/boxes.style";
+
+pollBoxOutlinePollEmojiIcon: icon{{ "poll/general/outline_poll_emoji", activeButtonFg }};
+pollBoxOutlinePollAddIcon: icon{{ "poll/general/outline_poll_add", activeButtonFg }};
+pollBoxOutlinePollAttachIcon: icon{{ "poll/general/outline_poll_attach", activeButtonFg }};
+pollBoxMenuPollOrderIcon: icon{{ "poll/general/menu_poll_order", activeButtonFg }};
+pollBoxFilledPollDeadlineIcon: icon{{ "poll/filled/filled_poll_deadline", activeButtonFg }};
+pollBoxFilledPollViewIcon: icon{{ "poll/filled/filled_poll_view", activeButtonFg }};
+pollBoxFilledPollAddIcon: icon{{ "poll/filled/filled_poll_add", activeButtonFg }};
+pollBoxFilledChatlistPollIcon: icon{{ "poll/filled/filled_chatlist_poll", activeButtonFg }};
+pollBoxFilledPollCorrectIcon: icon{{ "poll/filled/filled_poll_correct", activeButtonFg }};
+pollBoxFilledChatlistReactionIcon: icon{{ "poll/filled/filled_chatlist_reaction", activeButtonFg }};
+pollBoxFilledPollRevoteIcon: icon{{ "poll/filled/filled_poll_revote", activeButtonFg }};
+pollBoxFilledPollShuffleIcon: icon{{ "poll/filled/filled_poll_shuffle", activeButtonFg }};
+pollBoxFilledChatlistMentionIcon: icon{{ "poll/filled/filled_chatlist_mention", activeButtonFg }};
+pollBoxFilledPollMultipleIcon: icon{{ "poll/filled/filled_poll_multiple", activeButtonFg }};

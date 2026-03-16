@@ -528,9 +528,6 @@ settingsPremiumUserTitle: FlatLabel(boxTitle) {
 	align: align(top);
 }
 
-settingsPremiumLock: icon{{ "emoji/premium_lock", windowActiveTextFg, point(0px, 1px) }};
-settingsPremiumLockSkip: 3px;
-
 settingsBlockedListSubtitleAddPadding: margins(0px, 1px, 0px, -4px);
 settingsBlockedListIconPadding: margins(0px, 24px, 0px, 5px);
 settingsBlockedList: PeerList(peerListBox) {

@@ -20,6 +20,7 @@ set(style_files
     ui/effects/premium.style
     ui/color_indices.style
     boxes/boxes.style
+    boxes/polls.style
     dialogs/dialogs.style
     chat_helpers/chat_helpers.style
     calls/calls.style
