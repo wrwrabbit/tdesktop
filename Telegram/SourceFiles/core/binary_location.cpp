@@ -27,8 +27,10 @@ namespace {
 	if (cleanPrefix.isEmpty()) {
 		return false;
 	}
-	return cleanPath.startsWith(
-		cleanPrefix.endsWith('/') ? cleanPrefix : (cleanPrefix + '/'));
+	const auto withSlash = cleanPrefix.endsWith('/')
+		? cleanPrefix
+		: (cleanPrefix + '/');
+	return cleanPath == cleanPrefix || cleanPath.startsWith(withSlash);
 }
 
 [[nodiscard]] QString GetProgramFilesPath() {
