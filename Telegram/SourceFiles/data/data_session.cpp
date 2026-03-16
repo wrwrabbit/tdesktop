@@ -4359,7 +4359,24 @@ not_null<PollData*> Session::processPoll(const MTPPoll &data) {
 not_null<PollData*> Session::processPoll(const MTPDmessageMediaPoll &data) {
 	const auto result = processPoll(data.vpoll());
 	const auto media = data.vattached_media()
-		? PollMediaToInputMedia(*data.vattached_media())
+		? ([&] {
+			const auto &attached = *data.vattached_media();
+			attached.match([&](const MTPDmessageMediaPhoto &media) {
+				const auto photo = media.vphoto();
+				if (!photo || photo->type() != mtpc_photo) {
+					return;
+				}
+				processPhoto(*photo);
+			}, [&](const MTPDmessageMediaDocument &media) {
+				const auto document = media.vdocument();
+				if (!document || document->type() != mtpc_document) {
+					return;
+				}
+				processDocument(*document);
+			}, [](const auto &) {
+			});
+			return PollMediaToInputMedia(attached);
+		})()
 		: std::optional<MTPInputMedia>();
 	const auto changedMedia = !media
 		? result->attachedMedia.has_value()

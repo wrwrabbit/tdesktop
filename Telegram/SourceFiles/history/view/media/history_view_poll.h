@@ -83,6 +83,9 @@ private:
 	[[nodiscard]] int countAnswerTop(
 		const Answer &answer,
 		int innerWidth) const;
+	[[nodiscard]] int countAnswerContentWidth(
+		const Answer &answer,
+		int innerWidth) const;
 	[[nodiscard]] int countAnswerHeight(
 		const Answer &answer,
 		int innerWidth) const;
@@ -149,6 +152,7 @@ private:
 		int left,
 		int top,
 		int width,
+		int contentWidth,
 		int height,
 		const PaintContext &context) const;
 	void paintInlineFooter(

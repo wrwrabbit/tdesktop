@@ -25,10 +25,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/fireworks_animation.h"
 #include "ui/toast/toast.h"
 #include "ui/painter.h"
+#include "ui/dynamic_image.h"
+#include "ui/dynamic_thumbnails.h"
 #include "data/data_media_types.h"
+#include "data/data_document.h"
 #include "data/data_poll.h"
 #include "data/data_user.h"
 #include "data/data_session.h"
+#include "data/stickers/data_custom_emoji.h"
 #include "base/crc32hash.h"
 #include "base/unixtime.h"
 #include "base/timer.h"
@@ -51,6 +55,14 @@ constexpr auto kScaleAmplitude = 0.03;
 constexpr auto kRollDuration = crl::time(400);
 constexpr auto kLargestRadialDuration = 30 * crl::time(1000);
 constexpr auto kCriticalCloseDuration = 5 * crl::time(1000);
+
+[[nodiscard]] int PollAnswerMediaSize() {
+	return st::historyPollRadio.diameter * 2;
+}
+
+[[nodiscard]] int PollAnswerMediaSkip() {
+	return st::historyPollPercentSkip * 2;
+}
 
 struct PercentCounterItem {
 	int index = 0;
@@ -171,6 +183,18 @@ struct Poll::Answer {
 		not_null<PollData*> poll,
 		const PollAnswer &original,
 		Ui::Text::MarkedContext context);
+	void fillMedia(
+		not_null<PollData*> poll,
+		const PollAnswer &original,
+		FullMsgId fullId,
+		Fn<void()> repaint);
+
+	enum class ThumbnailKind {
+		None,
+		Photo,
+		Document,
+		Emoji,
+	};
 
 	Ui::Text::String text;
 	QByteArray option;
@@ -184,6 +208,10 @@ struct Poll::Answer {
 	bool selected = false;
 	ClickHandlerPtr handler;
 	Ui::Animations::Simple selectedAnimation;
+	std::shared_ptr<Ui::DynamicImage> thumbnail;
+	bool thumbnailRounded = false;
+	ThumbnailKind thumbnailKind = ThumbnailKind::None;
+	uint64 thumbnailId = 0;
 	mutable std::unique_ptr<Ui::RippleAnimation> ripple;
 };
 
@@ -231,6 +259,67 @@ void Poll::Answer::fillData(
 		context);
 }
 
+void Poll::Answer::fillMedia(
+		not_null<PollData*> poll,
+		const PollAnswer &original,
+		FullMsgId fullId,
+		Fn<void()> repaint) {
+	auto updated = std::shared_ptr<Ui::DynamicImage>();
+	auto rounded = false;
+	auto kind = ThumbnailKind::None;
+	auto id = uint64(0);
+	if (const auto media = original.media) {
+		media->match([&](const MTPDinputMediaPhoto &media) {
+			const auto input = media.vid();
+			if (input.type() != mtpc_inputPhoto) {
+				return;
+			}
+			const auto &photo = input.c_inputPhoto();
+			id = uint64(photo.vid().v);
+			updated = Ui::MakePhotoThumbnailCenterCrop(
+				poll->owner().photo(id),
+				fullId);
+			rounded = true;
+			kind = ThumbnailKind::Photo;
+		}, [&](const MTPDinputMediaDocument &media) {
+			const auto input = media.vid();
+			if (input.type() != mtpc_inputDocument) {
+				return;
+			}
+			const auto &document = input.c_inputDocument();
+			id = uint64(document.vid().v);
+			const auto parsed = poll->owner().document(id);
+			if (parsed->sticker()) {
+				updated = Ui::MakeEmojiThumbnail(
+					&poll->owner(),
+					Data::SerializeCustomEmojiId(parsed));
+				kind = ThumbnailKind::Emoji;
+			} else {
+				updated = Ui::MakeDocumentThumbnailCenterCrop(parsed, fullId);
+				rounded = true;
+				kind = ThumbnailKind::Document;
+			}
+		}, [](const auto &) {
+		});
+	}
+	const auto same = (kind == thumbnailKind)
+		&& (id == thumbnailId)
+		&& (rounded == thumbnailRounded);
+	if (same) {
+		return;
+	}
+	if (thumbnail) {
+		thumbnail->subscribeToUpdates(nullptr);
+	}
+	thumbnail = std::move(updated);
+	thumbnailRounded = rounded;
+	thumbnailKind = kind;
+	thumbnailId = id;
+	if (thumbnail) {
+		thumbnail->subscribeToUpdates(std::move(repaint));
+	}
+}
+
 Poll::CloseInformation::CloseInformation(
 	TimeId date,
 	TimeId period,
@@ -266,19 +355,24 @@ QSize Poll::countOptimalSize() {
 	auto maxWidth = st::msgFileMinWidth;
 	accumulate_max(maxWidth, paddings + _question.maxWidth());
 	for (const auto &answer : _answers) {
+		const auto media = answer.thumbnail
+			? (PollAnswerMediaSize() + PollAnswerMediaSkip())
+			: 0;
 		accumulate_max(
 			maxWidth,
 			paddings
 			+ st::historyPollAnswerPadding.left()
 			+ answer.text.maxWidth()
+			+ media
 			+ st::historyPollAnswerPadding.right());
 	}
 
 	const auto answersHeight = ranges::accumulate(ranges::views::all(
 		_answers
 	) | ranges::views::transform([](const Answer &answer) {
+		const auto media = answer.thumbnail ? PollAnswerMediaSize() : 0;
 		return st::historyPollAnswerPadding.top()
-			+ answer.text.minHeight()
+			+ std::max(answer.text.minHeight(), media)
 			+ st::historyPollAnswerPadding.bottom();
 	}), 0);
 
@@ -352,14 +446,25 @@ int Poll::countAnswerTop(
 	return tshift;
 }
 
-int Poll::countAnswerHeight(
+int Poll::countAnswerContentWidth(
 		const Answer &answer,
 		int innerWidth) const {
 	const auto answerWidth = innerWidth
 		- st::historyPollAnswerPadding.left()
 		- st::historyPollAnswerPadding.right();
+	const auto mediaWidth = answer.thumbnail
+		? (PollAnswerMediaSize() + PollAnswerMediaSkip())
+		: 0;
+	return std::max(1, answerWidth - mediaWidth);
+}
+
+int Poll::countAnswerHeight(
+		const Answer &answer,
+		int innerWidth) const {
+	const auto media = answer.thumbnail ? PollAnswerMediaSize() : 0;
+	const auto textWidth = countAnswerContentWidth(answer, innerWidth);
 	return st::historyPollAnswerPadding.top()
-		+ answer.text.countHeight(answerWidth)
+		+ std::max(answer.text.countHeight(textWidth), media)
 		+ st::historyPollAnswerPadding.bottom();
 }
 
@@ -545,6 +650,8 @@ void Poll::updateAnswers() {
 		.repaint = [=] { repaint(); },
 		.customEmojiLoopLimit = 2,
 	});
+	const auto repaintThumbnail = crl::guard(this, [=] { repaint(); });
+	const auto fullId = _parent->data()->fullId();
 	auto options = ranges::views::all(
 		_poll->answers
 	) | ranges::views::transform(&PollAnswer::option) | ranges::to_vector;
@@ -571,6 +678,7 @@ void Poll::updateAnswers() {
 				&PollAnswer::option);
 			Assert(i != end(_poll->answers));
 			answer.fillData(_poll, *i, context);
+			answer.fillMedia(_poll, *i, fullId, repaintThumbnail);
 		}
 		return;
 	}
@@ -584,6 +692,7 @@ void Poll::updateAnswers() {
 			&PollAnswer::option);
 		Assert(i != end(_poll->answers));
 		result.fillData(_poll, *i, context);
+		result.fillMedia(_poll, *i, fullId, repaintThumbnail);
 		return result;
 	}) | ranges::to_vector;
 
@@ -1100,6 +1209,8 @@ int Poll::paintAnswer(
 	const auto awidth = width
 		- st::historyPollAnswerPadding.left()
 		- st::historyPollAnswerPadding.right();
+	const auto media = answer.thumbnail ? PollAnswerMediaSize() : 0;
+	const auto textWidth = countAnswerContentWidth(answer, width);
 
 	if (answer.ripple) {
 		p.setOpacity(st::historyPollRippleOpacity);
@@ -1144,6 +1255,7 @@ int Poll::paintAnswer(
 				left,
 				top,
 				width,
+				textWidth,
 				height,
 				context);
 			p.setOpacity(1.);
@@ -1167,13 +1279,49 @@ int Poll::paintAnswer(
 			left,
 			top,
 			width,
+			textWidth,
 			height,
 			context);
 	}
 
 	top += st::historyPollAnswerPadding.top();
+	if (answer.thumbnail) {
+		const auto target = QRect(
+			aleft + awidth - media,
+			top,
+			media,
+			media);
+		if (!target.isEmpty()) {
+			const auto image = answer.thumbnail->image(media);
+			if (!image.isNull()) {
+				const auto source = QRectF(QPointF(), QSizeF(image.size()));
+				const auto kx = target.width() / source.width();
+				const auto ky = target.height() / source.height();
+				const auto scale = std::max(kx, ky);
+				const auto size = QSizeF(
+					source.width() * scale,
+					source.height() * scale);
+				const auto geometry = QRectF(
+					target.x() + (target.width() - size.width()) / 2.,
+					target.y() + (target.height() - size.height()) / 2.,
+					size.width(),
+					size.height());
+				p.save();
+				if (answer.thumbnailRounded) {
+					auto path = QPainterPath();
+					path.addRoundedRect(
+						target,
+						st::roundRadiusSmall,
+						st::roundRadiusSmall);
+					p.setClipPath(path);
+				}
+				p.drawImage(geometry, image, source);
+				p.restore();
+			}
+		}
+	}
 	p.setPen(stm->historyTextFg);
-	answer.text.drawLeft(p, aleft, top, awidth, outerWidth);
+	answer.text.drawLeft(p, aleft, top, textWidth, outerWidth);
 
 	return height;
 }
@@ -1268,20 +1416,18 @@ void Poll::paintFilling(
 		int left,
 		int top,
 		int width,
+		int contentWidth,
 		int height,
 		const PaintContext &context) const {
 	const auto bottom = top + height;
 	const auto st = context.st;
 	const auto stm = context.messageStyle();
 	const auto aleft = left + st::historyPollAnswerPadding.left();
-	const auto awidth = width
-		- st::historyPollAnswerPadding.left()
-		- st::historyPollAnswerPadding.right();
 
 	top += st::historyPollAnswerPadding.top();
 
 	const auto thickness = st::historyPollFillingHeight;
-	const auto max = awidth - st::historyPollFillingRight;
+	const auto max = contentWidth - st::historyPollFillingRight;
 	const auto size = anim::interpolate(st::historyPollFillingMin, max, filling);
 	const auto radius = st::historyPollFillingRadius;
 	const auto ftop = bottom - st::historyPollFillingBottom - thickness;

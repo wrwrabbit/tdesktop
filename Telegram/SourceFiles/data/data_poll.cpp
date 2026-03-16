@@ -20,6 +20,27 @@ namespace {
 constexpr auto kShortPollTimeout = 30 * crl::time(1000);
 constexpr auto kReloadAfterAutoCloseDelay = crl::time(1000);
 
+void ProcessPollMedia(
+		not_null<Data::Session*> owner,
+		const MTPMessageMedia &media) {
+	media.match([&](const MTPDmessageMediaPhoto &media) {
+		if (const auto photo = media.vphoto()) {
+			photo->match([&](const MTPDphoto &) {
+				owner->processPhoto(*photo);
+			}, [](const auto &) {
+			});
+		}
+	}, [&](const MTPDmessageMediaDocument &media) {
+		if (const auto document = media.vdocument()) {
+			document->match([&](const MTPDdocument &) {
+				owner->processDocument(*document);
+			}, [](const auto &) {
+			});
+		}
+	}, [](const auto &) {
+	});
+}
+
 const PollAnswer *AnswerByOption(
 		const std::vector<PollAnswer> &list,
 		const QByteArray &option) {
@@ -95,6 +116,7 @@ bool PollData::applyChanges(const MTPDpoll &poll) {
 				&session(),
 				answer.vtext());
 			if (const auto media = answer.vmedia()) {
+				ProcessPollMedia(_owner, *media);
 				result.media = PollMediaToInputMedia(*media);
 			}
 			return result;
@@ -190,6 +212,7 @@ bool PollData::applyResults(const MTPPollResults &results) {
 			}
 		}
 		if (const auto media = results.vsolution_media()) {
+			ProcessPollMedia(_owner, *media);
 			const auto parsed = PollMediaToInputMedia(*media);
 			const auto changedMedia = !parsed
 				? solutionMedia.has_value()
