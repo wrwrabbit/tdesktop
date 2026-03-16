@@ -6822,6 +6822,7 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 		prepareNoForwardsToggle,
 		prepareNoForwardsRequest,
 		prepareManagedBotCreated,
+		PrepareEmptyText<MTPDmessageActionPollAppendAnswer>,
 		PrepareEmptyText<MTPDmessageActionRequestedPeerSentMe>,
 		PrepareErrorText<MTPDmessageActionEmpty>));
 

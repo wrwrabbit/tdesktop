@@ -915,7 +915,8 @@ MTPMessageReplyHeader NewMessageReplyHeader(const Api::SendAction &action) {
 			MTP_string(replyTo.quote.text),
 			quoteEntities,
 			MTP_int(replyTo.quoteOffset),
-			MTP_int(replyTo.todoItemId));
+			MTP_int(replyTo.todoItemId),
+			MTPbytes()); // poll_option
 	}
 	return MTPMessageReplyHeader();
 }

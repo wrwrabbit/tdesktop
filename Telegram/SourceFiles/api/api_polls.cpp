@@ -213,7 +213,8 @@ void Polls::reloadResults(not_null<HistoryItem*> item) {
 	}
 	const auto requestId = _api.request(MTPmessages_GetPollResults(
 		item->history()->peer->input(),
-		MTP_int(item->id)
+		MTP_int(item->id),
+		MTP_long(0)
 	)).done([=](const MTPUpdates &result) {
 		_pollReloadRequestIds.erase(itemId);
 		_session->updates().applyUpdates(result);

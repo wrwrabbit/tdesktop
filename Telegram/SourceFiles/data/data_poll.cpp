@@ -291,7 +291,8 @@ MTPPoll PollDataToMTP(not_null<const PollData*> poll, bool close) {
 			Api::EntitiesToMTP(&poll->session(), poll->question.entities)),
 		MTP_vector<MTPPollAnswer>(answers),
 		MTP_int(poll->closePeriod),
-		MTP_int(poll->closeDate));
+		MTP_int(poll->closeDate),
+		MTP_long(0));
 }
 
 MTPInputMedia PollDataToInputMedia(

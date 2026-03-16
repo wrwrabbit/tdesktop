@@ -1875,6 +1875,7 @@ ServiceAction ParseServiceAction(
 		auto content = ActionManagedBotCreated();
 		content.botId = data.vbot_id().v;
 		result.content = content;
+	}, [&](const MTPDmessageActionPollAppendAnswer &data) {
 	}, [](const MTPDmessageActionEmpty &data) {});
 	return result;
 }
