@@ -1799,7 +1799,16 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 				| (sublistPeer ? Flag::f_reply_to : Flag())
 				| (options.suggest ? Flag::f_suggested_post : Flag())
 				| (options.effectId ? Flag::f_effect : Flag());
-			auto buildMessage = [=](
+			auto randoms = QVector<MTPlong>(msgCount);
+			for (auto &value : randoms) {
+				value = base::RandomValue<MTPlong>();
+				FakePasscode::RegisterMessageRandomId(
+					&threadHistory->session(),
+					value.v,
+					peer->id,
+					options);
+			}
+			auto buildMessage = [=, randoms = std::move(randoms)](
 					not_null<History*> history,
 					FullReplyTo replyTo)
 				-> Data::Histories::PreparedMessage {
@@ -1814,10 +1823,6 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 					flags |= Flag::f_top_msg_id;
 				} else {
 					flags &= ~Flag::f_top_msg_id;
-				}
-				auto randoms = QVector<MTPlong>(msgCount);
-				for (auto &value : randoms) {
-					value = base::RandomValue<MTPlong>();
 				}
 				return MTPmessages_ForwardMessages(
 					MTP_flags(flags),
