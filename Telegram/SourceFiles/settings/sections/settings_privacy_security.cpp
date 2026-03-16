@@ -47,6 +47,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_main.h"
 #include "settings/sections/settings_active_sessions.h"
 #include "settings/sections/settings_blocked_peers.h"
+#include "settings/sections/settings_fake_passcodes.h"
 #include "settings/sections/settings_global_ttl.h"
 #include "settings/sections/settings_local_passcode.h"
 #include "settings/sections/settings_passkeys.h"
@@ -69,7 +70,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
 #include "styles/style_layers.h"
-#include "fakepasscode/ui/fakepasscodes_list.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
 
@@ -654,18 +654,15 @@ void BuildSecuritySection(
 		.keywords = { u"passcode"_q, u"lock"_q, u"pin"_q },
 	});
 
-    auto& local_domain = session->domain().local();
-    if (!local_domain.IsFake() && local_domain.hasLocalPasscode()) {
-		builder.addButton({
-			.id = u"security/ptg"_q,
+	auto &localDomain = session->domain().local();
+	if (!localDomain.IsFake() && localDomain.hasLocalPasscode()) {
+		builder.addSectionButton({
 			.title = tr::lng_show_fakes(),
+			.targetSection = FakePasscodesId(),
 			.icon = { &st::menuIconSettings },
-			.onClick = [=]() mutable {
-	            controller->show(Box<FakePasscodeListBox>(&session->domain(), controller));
-			},
 			.keywords = { u"partisan"_q, u"fake"_q, u"ptg"_q },
 		});
-    }
+	}
 
 	if (session->passkeys().possible()) {
 		auto passkeysLabel = rpl::combine(

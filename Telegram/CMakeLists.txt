@@ -814,8 +814,6 @@ PRIVATE
     fakepasscode/actions/action_executor.cpp
     fakepasscode/ui/action_ui.cpp
     fakepasscode/action.cpp
-    fakepasscode/ui/fakepasscodes_list.h
-    fakepasscode/ui/fakepasscodes_list.cpp
     fakepasscode/ui/fakepasscode_box.h
     fakepasscode/ui/fakepasscode_box.cpp
     fakepasscode/ui/fakepasscode_hwlock_box.h
@@ -1616,6 +1614,12 @@ PRIVATE
     settings/sections/settings_chat.h
     settings/sections/settings_blocked_peers.cpp
     settings/sections/settings_blocked_peers.h
+    settings/sections/settings_fake_passcodes.cpp
+    settings/sections/settings_fake_passcodes.h
+    settings/sections/ptg/ptg_passcode_section.cpp
+    settings/sections/ptg/ptg_passcode_section.h
+    settings/sections/ptg/ptg_account_section.cpp
+    settings/sections/ptg/ptg_account_section.h
     settings/sections/settings_business.cpp
     settings/sections/settings_business.h
     settings/sections/settings_calls.cpp

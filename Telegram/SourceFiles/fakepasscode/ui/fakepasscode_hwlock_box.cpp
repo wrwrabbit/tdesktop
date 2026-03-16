@@ -26,7 +26,6 @@
 #include "styles/style_passport.h"
 #include "styles/style_boxes.h"
 #include "fakepasscode/log/fake_log.h"
-#include "fakepasscodes_list.h"
 #include "fakepasscode/settings.h"
 
 FakePasscodeHWLockBox::FakePasscodeHWLockBox(
