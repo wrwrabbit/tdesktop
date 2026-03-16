@@ -76,7 +76,8 @@ bool PollData::applyChanges(const MTPDpoll &poll) {
 	const auto newFlags = (poll.is_closed() ? Flag::Closed : Flag(0))
 		| (poll.is_public_voters() ? Flag::PublicVotes : Flag(0))
 		| (poll.is_multiple_choice() ? Flag::MultiChoice : Flag(0))
-		| (poll.is_quiz() ? Flag::Quiz : Flag(0));
+		| (poll.is_quiz() ? Flag::Quiz : Flag(0))
+		| (poll.is_shuffle_answers() ? Flag::ShuffleAnswers : Flag(0));
 	const auto newCloseDate = poll.vclose_date().value_or_empty();
 	const auto newClosePeriod = poll.vclose_period().value_or_empty();
 	auto newAnswers = ranges::views::all(
@@ -260,6 +261,10 @@ bool PollData::quiz() const {
 	return (_flags & Flag::Quiz);
 }
 
+bool PollData::shuffleAnswers() const {
+	return (_flags & Flag::ShuffleAnswers);
+}
+
 MTPPoll PollDataToMTP(not_null<const PollData*> poll, bool close) {
 	const auto convert = [&](const PollAnswer &answer) {
 		return MTP_pollAnswer(
@@ -283,6 +288,7 @@ MTPPoll PollDataToMTP(not_null<const PollData*> poll, bool close) {
 		| (poll->multiChoice() ? Flag::f_multiple_choice : Flag(0))
 		| (poll->publicVotes() ? Flag::f_public_voters : Flag(0))
 		| (poll->quiz() ? Flag::f_quiz : Flag(0))
+		| (poll->shuffleAnswers() ? Flag::f_shuffle_answers : Flag(0))
 		| (poll->closePeriod > 0 ? Flag::f_close_period : Flag(0))
 		| (poll->closeDate > 0 ? Flag::f_close_date : Flag(0));
 	return MTP_poll(
