@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_poll.h"
 #include "data/data_user.h"
 #include "data/data_session.h"
+#include "base/crc32hash.h"
 #include "base/unixtime.h"
 #include "base/timer.h"
 #include "main/main_session.h"
@@ -37,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_widgets.h"
 #include "styles/style_window.h"
+
 
 namespace HistoryView {
 namespace {
@@ -125,6 +127,16 @@ void CountNicePercent(
 	for (const auto &item : items) {
 		result[item.index] = item.percent;
 	}
+}
+
+[[nodiscard]] uint32 HashPollShuffleValue(
+		UserId userId,
+		PollId pollId,
+		const QByteArray &option) {
+	auto hash = QByteArray::number(quint64(userId.bare))
+		+ option
+		+ QByteArray::number(quint64(pollId));
+	return uint32(base::crc32(hash.constData(), hash.size()));
 }
 
 } // namespace
@@ -530,27 +542,56 @@ void Poll::updateAnswers() {
 		.repaint = [=] { repaint(); },
 		.customEmojiLoopLimit = 2,
 	});
-	const auto changed = !ranges::equal(
-		_answers,
-		_poll->answers,
-		ranges::equal_to(),
-		&Answer::option,
-		&PollAnswer::option);
+	auto options = ranges::views::all(
+		_poll->answers
+	) | ranges::views::transform(&PollAnswer::option) | ranges::to_vector;
+	if (_flags & PollData::Flag::ShuffleAnswers) {
+		const auto userId = _poll->session().userId();
+		const auto pollId = _poll->id;
+		ranges::sort(options, [&](const QByteArray &a, const QByteArray &b) {
+			const auto hashA = HashPollShuffleValue(userId, pollId, a);
+			const auto hashB = HashPollShuffleValue(userId, pollId, b);
+			return (hashA == hashB) ? (a < b) : (hashA < hashB);
+		});
+	}
+	const auto changed = (_answers.size() != options.size())
+		|| !ranges::equal(
+			_answers,
+			options,
+			ranges::equal_to(),
+			&Answer::option);
 	if (!changed) {
-		auto &&answers = ranges::views::zip(_answers, _poll->answers);
-		for (auto &&[answer, original] : answers) {
-			answer.fillData(_poll, original, context);
+		for (auto &answer : _answers) {
+			const auto i = ranges::find(
+				_poll->answers,
+				answer.option,
+				&PollAnswer::option);
+			Assert(i != end(_poll->answers));
+			answer.fillData(_poll, *i, context);
 		}
 		return;
 	}
-	_answers = ranges::views::all(
-		_poll->answers
-	) | ranges::views::transform([&](const PollAnswer &answer) {
+	_answers = ranges::views::all(options) | ranges::views::transform([&](
+			const QByteArray &option) {
 		auto result = Answer();
-		result.option = answer.option;
-		result.fillData(_poll, answer, context);
+		result.option = option;
+		const auto i = ranges::find(
+			_poll->answers,
+			option,
+			&PollAnswer::option);
+		Assert(i != end(_poll->answers));
+		result.fillData(_poll, *i, context);
 		return result;
 	}) | ranges::to_vector;
+
+	if (_flags & PollData::Flag::ShuffleAnswers) {
+		const auto visitorId = _poll->session().userId();
+		const auto pollId = _poll->id;
+		ranges::sort(_answers, [&](const Answer &a, const Answer &b) {
+			return HashPollShuffleValue(visitorId, pollId, a.option)
+				< HashPollShuffleValue(visitorId, pollId, b.option);
+		});
+	}
 
 	for (auto &answer : _answers) {
 		answer.handler = createAnswerClickHandler(answer);
@@ -726,15 +767,17 @@ void Poll::updateAnswerVotes() {
 		totalVotes,
 		gsl::make_span(PercentsStorage).subspan(0, count));
 
-	auto &&answers = ranges::views::zip(
-		_answers,
-		_poll->answers,
-		PercentsStorage);
-	for (auto &&[answer, original, percent] : answers) {
+	for (auto &answer : _answers) {
+		const auto i = ranges::find(
+			_poll->answers,
+			answer.option,
+			&PollAnswer::option);
+		Assert(i != end(_poll->answers));
+		const auto index = int(i - begin(_poll->answers));
 		updateAnswerVotesFromOriginal(
 			answer,
-			original,
-			percent,
+			*i,
+			PercentsStorage[index],
 			maxVotes);
 	}
 }
@@ -1308,12 +1351,18 @@ bool Poll::answerVotesChanged() const {
 		|| _poll->answers.empty()) {
 		return false;
 	}
-	return !ranges::equal(
-		_answers,
-		_poll->answers,
-		ranges::equal_to(),
-		&Answer::votes,
-		&PollAnswer::votes);
+	for (const auto &answer : _answers) {
+		const auto i = ranges::find(
+			_poll->answers,
+			answer.option,
+			&PollAnswer::option);
+		if (i == end(_poll->answers)) {
+			return false;
+		} else if (answer.votes != i->votes) {
+			return true;
+		}
+	}
+	return false;
 }
 
 void Poll::saveStateInAnimation() const {
