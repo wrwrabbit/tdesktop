@@ -61,6 +61,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/streaming/media_streaming_utility.h"
 #include "window/main_window.h"
 #include "window/window_controller.h"
+#include "webrtc/webrtc_create_adm.h"
 #include "webrtc/webrtc_environment.h"
 #include "webrtc/webrtc_video_track.h"
 #include "styles/style_calls.h"
@@ -145,11 +146,17 @@ Panel::Panel(not_null<Call*> call)
 , _controlsShownForceTimer([=] { controlsShownForce(false); }) {
 	_decline->setDuration(st::callPanelDuration);
 	_decline->entity()->setText(tr::lng_call_decline());
+	_decline->entity()->setAccessibleName(tr::lng_call_decline(tr::now));
 	_cancel->setDuration(st::callPanelDuration);
 	_cancel->entity()->setText(tr::lng_call_cancel());
+	_cancel->entity()->setAccessibleName(tr::lng_call_cancel(tr::now));
 	_screencast->setDuration(st::callPanelDuration);
+	_screencast->entity()->setAccessibleName(tr::lng_call_screencast(tr::now));
 	_addPeople->setDuration(st::callPanelDuration);
 	_addPeople->entity()->setText(tr::lng_call_add_people());
+	_addPeople->entity()->setAccessibleName(tr::lng_call_add_people(tr::now));
+	_camera->setAccessibleName(tr::lng_call_start_video(tr::now));
+	_mute->entity()->setAccessibleName(tr::lng_call_mute_audio(tr::now));
 
 	initWindow();
 	initWidget();
@@ -395,6 +402,13 @@ void Panel::initControls() {
 		} else if (const auto source = env->uniqueDesktopCaptureSource()) {
 			if (!chooseSourceActiveDeviceId().isEmpty()) {
 				chooseSourceStop();
+			} else if (chooseSourceWithAudioSupported()) {
+				const auto sourceId = *source;
+				Group::ShowUniqueCaptureOptions(
+					uiShow(),
+					crl::guard(this, [=](bool audio) {
+						chooseSourceAccepted(sourceId, audio);
+					}));
 			} else {
 				chooseSourceAccepted(*source, false);
 			}
@@ -564,15 +578,11 @@ QString Panel::chooseSourceActiveDeviceId() {
 }
 
 bool Panel::chooseSourceActiveWithAudio() {
-	return false;// _call->screenSharingWithAudio();
+	return _call->screenSharingWithAudio();
 }
 
 bool Panel::chooseSourceWithAudioSupported() {
-//#ifdef Q_OS_WIN
-//	return true;
-//#else // Q_OS_WIN
-	return false;
-//#endif // Q_OS_WIN
+	return Webrtc::LoopbackAudioCaptureSupported();
 }
 
 rpl::lifetime &Panel::chooseSourceInstanceLifetime() {
@@ -589,7 +599,7 @@ rpl::producer<bool> Panel::startOutgoingRequests() const {
 void Panel::chooseSourceAccepted(
 		const QString &deviceId,
 		bool withAudio) {
-	_call->toggleScreenSharing(deviceId/*, withAudio*/);
+	_call->toggleScreenSharing(deviceId, withAudio);
 }
 
 void Panel::chooseSourceStop() {
@@ -732,6 +742,9 @@ void Panel::reinitWithCall(Call *call) {
 		_mute->entity()->setText(mute
 			? tr::lng_call_unmute_audio()
 			: tr::lng_call_mute_audio());
+		_mute->entity()->setAccessibleName(mute
+			? tr::lng_call_unmute_audio(tr::now)
+			: tr::lng_call_mute_audio(tr::now));
 	}, _callLifetime);
 
 	_call->videoOutgoing()->stateValue(
@@ -742,6 +755,9 @@ void Panel::reinitWithCall(Call *call) {
 			_camera->setText(active
 				? tr::lng_call_stop_video()
 				: tr::lng_call_start_video());
+			_camera->setAccessibleName(active
+				? tr::lng_call_stop_video(tr::now)
+				: tr::lng_call_start_video(tr::now));
 		}
 		{
 			const auto active = _call->isSharingScreen();
@@ -1030,12 +1046,14 @@ void Panel::initMediaDeviceToggles() {
 			{ Webrtc::DeviceType::Camera, _call->cameraDeviceIdValue() },
 		});
 	});
+	_cameraDeviceToggle->setAccessibleName(tr::lng_settings_call_camera(tr::now));
 	_audioDeviceToggle->setClickedCallback([=] {
 		showDevicesMenu(_audioDeviceToggle, {
 			{ Webrtc::DeviceType::Playback, _call->playbackDeviceIdValue() },
 			{ Webrtc::DeviceType::Capture, _call->captureDeviceIdValue() },
 		});
 	});
+	_audioDeviceToggle->setAccessibleName(tr::lng_settings_call_section_output(tr::now));
 }
 
 void Panel::showDevicesMenu(
@@ -1381,6 +1399,7 @@ void Panel::stateChanged(State state) {
 				st::callStartVideo);
 			_startVideo->show();
 			_startVideo->setText(tr::lng_call_start_video());
+			_startVideo->setAccessibleName(tr::lng_call_start_video(tr::now));
 			_startVideo->clicks() | rpl::map_to(true) | rpl::start_to_stream(
 				_startOutgoingRequests,
 				_startVideo->lifetime());
@@ -1438,15 +1457,17 @@ void Panel::stateChanged(State state) {
 void Panel::refreshAnswerHangupRedialLabel() {
 	Expects(_answerHangupRedialState.has_value());
 
-	_answerHangupRedial->setText([&] {
+	const auto phrase = [&] {
 		switch (*_answerHangupRedialState) {
-		case AnswerHangupRedialState::Answer: return tr::lng_call_accept();
-		case AnswerHangupRedialState::Hangup: return tr::lng_call_end_call();
-		case AnswerHangupRedialState::Redial: return tr::lng_call_redial();
-		case AnswerHangupRedialState::StartCall: return tr::lng_call_start();
+		case AnswerHangupRedialState::Answer: return tr::lng_call_accept;
+		case AnswerHangupRedialState::Hangup: return tr::lng_call_end_call;
+		case AnswerHangupRedialState::Redial: return tr::lng_call_redial;
+		case AnswerHangupRedialState::StartCall: return tr::lng_call_start;
 		}
 		Unexpected("AnswerHangupRedialState value.");
-	}());
+	}();
+	_answerHangupRedial->setText(phrase());
+	_answerHangupRedial->setAccessibleName(phrase(tr::now));
 }
 
 void Panel::updateStatusText(State state) {

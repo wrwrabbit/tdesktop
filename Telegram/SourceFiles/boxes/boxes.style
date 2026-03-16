@@ -806,12 +806,29 @@ backgroundConfirmCancel: RoundButton(backgroundConfirm) {
 		color: shadowFg;
 	}
 }
+urlAuthBox: Box(defaultBox) {
+	buttonPadding: margins(0px, 0px, 0px, 12px);
+	buttonHeight: 0px;
+}
 urlAuthCheckbox: Checkbox(defaultBoxCheckbox) {
 	width: 240px;
+}
+urlAuthCodesTitle: FlatLabel(defaultPeerListAbout) {
+	textFg: boxTitleFg;
+	style: TextStyle(defaultTextStyle) {
+		font: boxTitleFont;
+	}
 }
 urlAuthCheckboxAbout: FlatLabel(defaultPeerListAbout) {
 	style: TextStyle(boxTextStyle) {
 		font: font(12px);
+	}
+}
+urlAuthCodesButton: RoundButton(defaultLightButton) {
+	height: 58px;
+	textTop: 19px;
+	style: TextStyle(semiboldTextStyle) {
+		font: font(20px semibold);
 	}
 }
 urlAuthBoxRowTopLabel: FlatLabel(boxLabel) {
@@ -840,7 +857,7 @@ boostsUnrestrictLabel: FlatLabel(defaultFlatLabel) {
 }
 
 customBadgeField: InputField(defaultInputField) {
-	textMargins: margins(2px, 7px, 2px, 0px);
+	textMargins: margins(2px, 0px, 2px, 0px);
 
 	placeholderFg: placeholderFg;
 	placeholderFgActive: placeholderFgActive;
@@ -849,8 +866,15 @@ customBadgeField: InputField(defaultInputField) {
 	placeholderScale: 0.;
 	placeholderFont: normalFont;
 
+	border: 0px;
+	borderActive: 0px;
+
 	heightMin: 32px;
 }
+
+tagPreviewLineHeight: 8px;
+tagPreviewLineSpacing: 4px;
+tagPreviewInputSkip: 16px;
 
 pollResultsQuestion: FlatLabel(defaultFlatLabel) {
 	minWidth: 320px;
@@ -876,6 +900,11 @@ pollResultsShowMore: SettingsButton(defaultSettingsButton) {
 
 	ripple: defaultRippleAnimation;
 }
+pollResultsVoteTimeFont: font(fsize);
+pollResultsVoteTimeDateFont: font(fsize);
+pollResultsVoteTimeRightSkip: 16px;
+pollResultsVoteTimeLeftSkip: 8px;
+pollResultsVoteTimeGap: 2px;
 
 inviteViaLinkButton: SettingsButton(defaultSettingsButton) {
 	textFg: lightButtonFg;
@@ -1200,3 +1229,9 @@ futureOwnerBox: Box(defaultBox) {
 	buttonHeight: 0px;
 }
 futureOwnerBoxSelect: collectibleBox;
+
+disableSharingIconPadding: margins(12px, 12px, 12px, 8px);
+disableSharingButtonLock: IconEmoji {
+	icon: icon {{ "emoji/premium_lock", activeButtonFg }};
+	padding: margins(-2px, 1px, 0px, 0px);
+}
