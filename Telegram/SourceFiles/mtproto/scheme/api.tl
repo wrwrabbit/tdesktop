@@ -735,6 +735,9 @@ messageEntitySpoiler#32ca960f offset:int length:int = MessageEntity;
 messageEntityCustomEmoji#c8cf05f8 offset:int length:int document_id:long = MessageEntity;
 messageEntityBlockquote#f1ccaaac flags:# collapsed:flags.0?true offset:int length:int = MessageEntity;
 messageEntityFormattedDate#904ac7c7 flags:# relative:flags.0?true short_time:flags.1?true long_time:flags.2?true short_date:flags.3?true long_date:flags.4?true day_of_week:flags.5?true offset:int length:int date:int = MessageEntity;
+messageEntityDiffInsert#71777116 offset:int length:int = MessageEntity;
+messageEntityDiffReplace#c6c1e5a7 offset:int length:int old_text:string = MessageEntity;
+messageEntityDiffDelete#652c1c5 offset:int length:int = MessageEntity;
 
 inputChannelEmpty#ee8c1e86 = InputChannel;
 inputChannel#f35aec28 channel_id:long access_hash:long = InputChannel;
@@ -2139,7 +2142,9 @@ inputMessageReadMetric#402b4495 msg_id:int view_id:long time_in_view_ms:int acti
 
 bots.exportedBotToken#3c60b621 token:string = bots.ExportedBotToken;
 
-bots.requestedButton#21f96ca7 request_id:string = bots.RequestedButton;
+bots.requestedButton#f13bbcd7 webapp_req_id:string = bots.RequestedButton;
+
+messages.composedMessageWithAI#90d7adfa flags:# result_text:TextWithEntities diff_text:flags.0?TextWithEntities = messages.ComposedMessageWithAI;
 
 ---functions---
 
@@ -2521,7 +2526,7 @@ messages.clearRecentReactions#9dfeefb4 = Bool;
 messages.getExtendedMedia#84f80814 peer:InputPeer id:Vector<int> = Updates;
 messages.setDefaultHistoryTTL#9eb51445 period:int = Bool;
 messages.getDefaultHistoryTTL#658b7188 = DefaultHistoryTTL;
-messages.sendBotRequestedPeer#9ce417c8 flags:# peer:InputPeer msg_id:flags.0?int request_id:flags.1?string button_id:int requested_peers:Vector<InputPeer> = Updates;
+messages.sendBotRequestedPeer#6c5cf2a7 flags:# peer:InputPeer msg_id:flags.0?int webapp_req_id:flags.1?string button_id:int requested_peers:Vector<InputPeer> = Updates;
 messages.getEmojiGroups#7488ce5b hash:int = messages.EmojiGroups;
 messages.getEmojiStatusGroups#2ecd56cd hash:int = messages.EmojiGroups;
 messages.getEmojiProfilePhotoGroups#21a548f3 hash:int = messages.EmojiGroups;
@@ -2587,7 +2592,7 @@ messages.getFutureChatCreatorAfterLeave#3b7d0ea6 peer:InputPeer = User;
 messages.editChatParticipantRank#a00f32b0 peer:InputPeer participant:InputPeer rank:string = Updates;
 messages.declineUrlAuth#35436bbc url:string = Bool;
 messages.checkUrlAuthMatchCode#c9a47b0b url:string match_code:string = Bool;
-messages.composeMessageWithAI#bf97c7f6 flags:# proofread:flags.0?true emojify:flags.3?true text:TextWithEntities translate_to_lang:flags.1?string change_tone:flags.2?string = TextWithEntities;
+messages.composeMessageWithAI#fd426afe flags:# proofread:flags.0?true emojify:flags.3?true text:TextWithEntities translate_to_lang:flags.1?string change_tone:flags.2?string = messages.ComposedMessageWithAI;
 messages.reportReadMetrics#4067c5e6 peer:InputPeer metrics:Vector<InputMessageReadMetric> = Bool;
 messages.reportMusicListen#ddbcd819 id:InputDocument listened_duration:int = Bool;
 messages.addPollAnswer#19bc4b6d peer:InputPeer msg_id:int answer:PollAnswer = Updates;
@@ -2730,7 +2735,7 @@ bots.checkUsername#87f2219b username:string = Bool;
 bots.createBot#e5b17f2b flags:# via_deeplink:flags.0?true name:string username:string manager_id:InputUser = User;
 bots.exportBotToken#bd0d99eb bot:InputUser revoke:Bool = bots.ExportedBotToken;
 bots.requestWebViewButton#31a2a35e user_id:InputUser button:KeyboardButton = bots.RequestedButton;
-bots.getRequestedWebViewButton#b2c948b9 bot:InputUser request_id:string = KeyboardButton;
+bots.getRequestedWebViewButton#bf25b7f3 bot:InputUser webapp_req_id:string = KeyboardButton;
 
 payments.getPaymentForm#37148dbb flags:# invoice:InputInvoice theme_params:flags.0?DataJSON = payments.PaymentForm;
 payments.getPaymentReceipt#2478d1cc peer:InputPeer msg_id:int = payments.PaymentReceipt;

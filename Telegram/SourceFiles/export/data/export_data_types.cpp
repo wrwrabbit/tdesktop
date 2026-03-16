@@ -304,7 +304,10 @@ std::vector<TextPart> ParseText(
 			[](const MTPDmessageEntityBankCard&) { return Type::BankCard; },
 			[](const MTPDmessageEntitySpoiler&) { return Type::Spoiler; },
 			[](const MTPDmessageEntityCustomEmoji&) { return Type::CustomEmoji; },
-			[](const MTPDmessageEntityFormattedDate&) { return Type::Unknown; });
+			[](const MTPDmessageEntityFormattedDate&) { return Type::Unknown; },
+			[](const MTPDmessageEntityDiffInsert&) { return Type::Unknown; },
+			[](const MTPDmessageEntityDiffReplace&) { return Type::Unknown; },
+			[](const MTPDmessageEntityDiffDelete&) { return Type::Unknown; });
 		part.text = mid(start, length);
 		part.additional = entity.match(
 		[](const MTPDmessageEntityPre &data) {
