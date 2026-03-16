@@ -25,9 +25,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "menu/menu_send.h"
+#include "settings/detailed_settings_button.h"
+#include "settings/settings_common.h"
 #include "ui/controls/emoji_button.h"
 #include "ui/controls/emoji_button_factory.h"
-#include "ui/rect.h"
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
 #include "ui/vertical_list.h"
@@ -44,6 +45,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h" // defaultComposeFiles.
 #include "styles/style_layers.h"
+#include "styles/style_polls.h"
 #include "styles/style_settings.h"
 
 namespace {
@@ -222,6 +224,22 @@ void FocusAtEnd(not_null<Ui::InputField*> field) {
 	field->setFocus();
 	field->setCursorPosition(field->getLastText().size());
 	field->ensureCursorVisible();
+}
+
+not_null<DetailedSettingsButton*> AddPollToggleButton(
+		not_null<Ui::VerticalLayout*> container,
+		rpl::producer<QString> title,
+		rpl::producer<QString> description,
+		Settings::IconDescriptor icon,
+		rpl::producer<bool> toggled,
+		const style::DetailedSettingsButtonStyle &rowStyle) {
+	return AddDetailedSettingsButton(
+		container,
+		std::move(title),
+		std::move(description),
+		std::move(icon),
+		std::move(toggled),
+		rowStyle);
 }
 
 Options::Option::Option(
@@ -1063,31 +1081,44 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	Ui::AddSkip(container);
 	Ui::AddSubsectionTitle(container, tr::lng_polls_create_settings());
 
-	const auto anonymous = (!(_disabled & PollData::Flag::PublicVotes))
-		? container->add(
-			object_ptr<Ui::SettingsButton>(
-				container,
-				tr::lng_polls_create_anonymous(),
-				st::settingsButtonNoIcon))->toggleOn(
-					rpl::single(!(_chosen & PollData::Flag::PublicVotes)))
+	const auto showWhoVoted = (!(_disabled & PollData::Flag::PublicVotes))
+		? AddPollToggleButton(
+			container,
+			tr::lng_polls_create_show_who_voted(),
+			tr::lng_polls_create_show_who_voted_about(),
+			{
+				.icon = &st::pollBoxFilledPollViewIcon,
+				.background = &st::settingsIconBg4,
+			},
+			rpl::single(!!(_chosen & PollData::Flag::PublicVotes)),
+			st::detailedSettingsButtonStyle)
 		: nullptr;
 	const auto hasMultiple = !(_chosen & PollData::Flag::Quiz)
 		|| !(_disabled & PollData::Flag::Quiz);
 	const auto multiple = hasMultiple
-		? container->add(
-			object_ptr<Ui::SettingsButton>(
-				container,
-				tr::lng_polls_create_multiple_choice(),
-				st::settingsButtonNoIconLocked))->toggleOn(
-					rpl::single(!!(_chosen & PollData::Flag::MultiChoice))
-						| rpl::then(state->multipleForceOff.events()))
+		? AddPollToggleButton(
+			container,
+			tr::lng_polls_create_allow_multiple_answers(),
+			tr::lng_polls_create_allow_multiple_answers_about(),
+			{
+				.icon = &st::pollBoxFilledPollMultipleIcon,
+				.background = &st::settingsIconBg3,
+			},
+			rpl::single(!!(_chosen & PollData::Flag::MultiChoice))
+				| rpl::then(state->multipleForceOff.events()),
+			st::detailedSettingsButtonStyle)
 		: nullptr;
-	const auto quiz = container->add(object_ptr<Ui::SettingsButton>(
+	const auto quiz = AddPollToggleButton(
 		container,
-		tr::lng_polls_create_quiz_mode(),
-		st::settingsButtonNoIconLocked))->toggleOn(
-			rpl::single(!!(_chosen & PollData::Flag::Quiz))
-				| rpl::then(state->quizForceOff.events()));
+		tr::lng_polls_create_set_correct_answer(),
+		tr::lng_polls_create_set_correct_answer_about(),
+		{
+			.icon = &st::pollBoxFilledPollCorrectIcon,
+			.background = &st::settingsIconBg2,
+		},
+		rpl::single(!!(_chosen & PollData::Flag::Quiz))
+			| rpl::then(state->quizForceOff.events()),
+		st::detailedSettingsButtonStyle);
 
 	const auto solution = setupSolution(
 		container,
@@ -1112,7 +1143,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	if (multiple) {
 		multiple->setToggleLocked((_disabled & PollData::Flag::MultiChoice)
 			|| (_chosen & PollData::Flag::Quiz));
-		multiple->events(
+		multiple->clickAreaEvents(
 		) | rpl::filter([=](not_null<QEvent*> e) {
 			return (e->type() == QEvent::MouseButtonPress)
 				&& quiz->toggled();
@@ -1177,7 +1208,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			solutionWithTags.text,
 			TextUtilities::ConvertTextTagsToEntities(solutionWithTags.tags)
 		};
-		const auto publicVotes = (anonymous && !anonymous->toggled());
+		const auto publicVotes = (showWhoVoted && showWhoVoted->toggled());
 		const auto multiChoice = (multiple && multiple->toggled());
 		result.setFlags(Flag(0)
 			| (publicVotes ? Flag::PublicVotes : Flag(0))

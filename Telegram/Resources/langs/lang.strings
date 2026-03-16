@@ -6851,6 +6851,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_polls_create_limit#other" = "You can add {count} more options.";
 "lng_polls_create_maximum" = "You have added the maximum number of options.";
 "lng_polls_create_settings" = "Settings";
+"lng_polls_create_show_who_voted" = "Show Who Voted";
+"lng_polls_create_show_who_voted_about" = "Display voter name on each option.";
+"lng_polls_create_allow_multiple_answers" = "Allow Multiple Answers";
+"lng_polls_create_allow_multiple_answers_about" = "Voters can select more than one option.";
+"lng_polls_create_set_correct_answer" = "Set Correct Answer";
+"lng_polls_create_set_correct_answer_about" = "Mark one option as the right answer.";
 "lng_polls_create_anonymous" = "Anonymous Voting";
 "lng_polls_create_multiple_choice" = "Multiple Answers";
 "lng_polls_create_quiz_mode" = "Quiz Mode";
