@@ -6855,6 +6855,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_polls_create_show_who_voted_about" = "Display voter name on each option.";
 "lng_polls_create_allow_multiple_answers" = "Allow Multiple Answers";
 "lng_polls_create_allow_multiple_answers_about" = "Voters can select more than one option.";
+"lng_polls_create_allow_revoting" = "Allow Revoting";
+"lng_polls_create_allow_revoting_about" = "Voters can change their vote.";
 "lng_polls_create_shuffle_options" = "Shuffle Options";
 "lng_polls_create_shuffle_options_about" = "Answers appear in random order for each voter.";
 "lng_polls_create_set_correct_answer" = "Set Correct Answer";

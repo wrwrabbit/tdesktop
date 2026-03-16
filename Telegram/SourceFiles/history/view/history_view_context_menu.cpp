@@ -1519,7 +1519,7 @@ void AddPollActions(
 		return;
 	}
 	const auto itemId = item->fullId();
-	if (poll->voted() && !poll->quiz()) {
+	if (poll->voted() && !poll->quiz() && !poll->revotingDisabled()) {
 		menu->addAction(tr::lng_polls_retract(tr::now), [=] {
 			poll->session().api().polls().sendVotes(itemId, {});
 		}, &st::menuIconRetractVote);

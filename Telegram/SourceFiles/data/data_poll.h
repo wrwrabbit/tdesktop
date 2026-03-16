@@ -39,11 +39,12 @@ struct PollData {
 	[[nodiscard]] Main::Session &session() const;
 
 	enum class Flag {
-		Closed         = 0x01,
-		PublicVotes    = 0x02,
-		MultiChoice    = 0x04,
-		Quiz           = 0x08,
-		ShuffleAnswers = 0x10,
+		Closed           = 0x01,
+		PublicVotes      = 0x02,
+		MultiChoice      = 0x04,
+		Quiz             = 0x08,
+		ShuffleAnswers   = 0x10,
+		RevotingDisabled = 0x20,
 	};
 	friend inline constexpr bool is_flag_type(Flag) { return true; };
 	using Flags = base::flags<Flag>;
@@ -65,6 +66,7 @@ struct PollData {
 	[[nodiscard]] bool multiChoice() const;
 	[[nodiscard]] bool quiz() const;
 	[[nodiscard]] bool shuffleAnswers() const;
+	[[nodiscard]] bool revotingDisabled() const;
 
 	PollId id = 0;
 	TextWithEntities question;
