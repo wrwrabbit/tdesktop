@@ -1006,7 +1006,13 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	using namespace Settings;
 
 	const auto id = base::RandomValue<uint64>();
-	const auto error = lifetime().make_state<Errors>(Error::Question);
+	struct State final {
+		Errors error = Error::Question;
+		std::unique_ptr<Options> options;
+		rpl::event_stream<bool> multipleForceOff;
+		rpl::event_stream<bool> quizForceOff;
+	};
+	const auto state = lifetime().make_state<State>();
 
 	auto result = object_ptr<Ui::VerticalLayout>(this);
 	const auto container = result.data();
@@ -1020,12 +1026,13 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			tr::lng_polls_create_options(),
 			st::defaultSubsectionTitle),
 		st::createPollFieldTitlePadding);
-	const auto options = lifetime().make_state<Options>(
+	state->options = std::make_unique<Options>(
 		this,
 		container,
 		_controller,
 		_emojiPanel ? _emojiPanel.get() : nullptr,
 		(_chosen & PollData::Flag::Quiz));
+	const auto options = state->options.get();
 	auto limit = options->usedCount() | rpl::after_next([=](int count) {
 		setCloseByEscape(!count);
 		setCloseByOutsideClick(!count);
@@ -1058,39 +1065,37 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 
 	const auto anonymous = (!(_disabled & PollData::Flag::PublicVotes))
 		? container->add(
-			object_ptr<Ui::Checkbox>(
+			object_ptr<Ui::SettingsButton>(
 				container,
-				tr::lng_polls_create_anonymous(tr::now),
-				!(_chosen & PollData::Flag::PublicVotes),
-				st::defaultCheckbox),
-			st::createPollCheckboxMargin)
+				tr::lng_polls_create_anonymous(),
+				st::settingsButtonNoIcon))->toggleOn(
+					rpl::single(!(_chosen & PollData::Flag::PublicVotes)))
 		: nullptr;
 	const auto hasMultiple = !(_chosen & PollData::Flag::Quiz)
 		|| !(_disabled & PollData::Flag::Quiz);
 	const auto multiple = hasMultiple
 		? container->add(
-			object_ptr<Ui::Checkbox>(
+			object_ptr<Ui::SettingsButton>(
 				container,
-				tr::lng_polls_create_multiple_choice(tr::now),
-				(_chosen & PollData::Flag::MultiChoice),
-				st::defaultCheckbox),
-			st::createPollCheckboxMargin)
+				tr::lng_polls_create_multiple_choice(),
+				st::settingsButtonNoIconLocked))->toggleOn(
+					rpl::single(!!(_chosen & PollData::Flag::MultiChoice))
+						| rpl::then(state->multipleForceOff.events()))
 		: nullptr;
-	const auto quiz = container->add(
-		object_ptr<Ui::Checkbox>(
-			container,
-			tr::lng_polls_create_quiz_mode(tr::now),
-			(_chosen & PollData::Flag::Quiz),
-			st::defaultCheckbox),
-		st::createPollCheckboxMargin);
+	const auto quiz = container->add(object_ptr<Ui::SettingsButton>(
+		container,
+		tr::lng_polls_create_quiz_mode(),
+		st::settingsButtonNoIconLocked))->toggleOn(
+			rpl::single(!!(_chosen & PollData::Flag::Quiz))
+				| rpl::then(state->quizForceOff.events()));
 
 	const auto solution = setupSolution(
 		container,
-		rpl::single(quiz->checked()) | rpl::then(quiz->checkedChanges()));
+		rpl::single(quiz->toggled()) | rpl::then(quiz->toggledChanges()));
 
 	options->tabbed(
 	) | rpl::on_next([=] {
-		if (quiz->checked()) {
+		if (quiz->toggled()) {
 			solution->setFocus();
 		} else {
 			question->setFocus();
@@ -1103,27 +1108,39 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		*handled = true;
 	}, solution->lifetime());
 
-	quiz->setDisabled(_disabled & PollData::Flag::Quiz);
+	quiz->setToggleLocked(_disabled & PollData::Flag::Quiz);
 	if (multiple) {
-		multiple->setDisabled((_disabled & PollData::Flag::MultiChoice)
+		multiple->setToggleLocked((_disabled & PollData::Flag::MultiChoice)
 			|| (_chosen & PollData::Flag::Quiz));
 		multiple->events(
 		) | rpl::filter([=](not_null<QEvent*> e) {
 			return (e->type() == QEvent::MouseButtonPress)
-				&& quiz->checked();
+				&& quiz->toggled();
 		}) | rpl::on_next([show = uiShow()] {
 			show->showToast(tr::lng_polls_create_one_answer(tr::now));
+		}, multiple->lifetime());
+		multiple->toggledChanges(
+		) | rpl::on_next([=](bool checked) {
+			if (checked
+				&& (quiz->toggled()
+					|| (_disabled & PollData::Flag::MultiChoice))) {
+				state->multipleForceOff.fire(false);
+			}
 		}, multiple->lifetime());
 	}
 
 	using namespace rpl::mappers;
-	quiz->checkedChanges(
+	quiz->toggledChanges(
 	) | rpl::on_next([=](bool checked) {
+		if (checked && (_disabled & PollData::Flag::Quiz)) {
+			state->quizForceOff.fire(false);
+			return;
+		}
 		if (multiple) {
-			if (checked && multiple->checked()) {
-				multiple->setChecked(false);
+			if (checked && multiple->toggled()) {
+				state->multipleForceOff.fire(false);
 			}
-			multiple->setDisabled(checked
+			multiple->setToggleLocked(checked
 				|| (_disabled & PollData::Flag::MultiChoice));
 		}
 		options->enableChooseCorrect(checked);
@@ -1153,44 +1170,44 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			textWithTags.tags);
 		TextUtilities::Trim(result.question);
 		result.answers = options->toPollAnswers();
-		const auto solutionWithTags = quiz->checked()
+		const auto solutionWithTags = quiz->toggled()
 			? solution->getTextWithAppliedMarkdown()
 			: TextWithTags();
 		result.solution = TextWithEntities{
 			solutionWithTags.text,
 			TextUtilities::ConvertTextTagsToEntities(solutionWithTags.tags)
 		};
-		const auto publicVotes = (anonymous && !anonymous->checked());
-		const auto multiChoice = (multiple && multiple->checked());
+		const auto publicVotes = (anonymous && !anonymous->toggled());
+		const auto multiChoice = (multiple && multiple->toggled());
 		result.setFlags(Flag(0)
 			| (publicVotes ? Flag::PublicVotes : Flag(0))
 			| (multiChoice ? Flag::MultiChoice : Flag(0))
-			| (quiz->checked() ? Flag::Quiz : Flag(0)));
+			| (quiz->toggled() ? Flag::Quiz : Flag(0)));
 		return result;
 	};
 	const auto collectError = [=] {
 		if (isValidQuestion()) {
-			*error &= ~Error::Question;
+			state->error &= ~Error::Question;
 		} else {
-			*error |= Error::Question;
+			state->error |= Error::Question;
 		}
 		if (!options->hasOptions()) {
-			*error |= Error::Options;
+			state->error |= Error::Options;
 		} else if (!options->isValid()) {
-			*error |= Error::Other;
+			state->error |= Error::Other;
 		} else {
-			*error &= ~(Error::Options | Error::Other);
+			state->error &= ~(Error::Options | Error::Other);
 		}
-		if (quiz->checked() && !options->hasCorrect()) {
-			*error |= Error::Correct;
+		if (quiz->toggled() && !options->hasCorrect()) {
+			state->error |= Error::Correct;
 		} else {
-			*error &= ~Error::Correct;
+			state->error &= ~Error::Correct;
 		}
-		if (quiz->checked()
+		if (quiz->toggled()
 			&& solution->getLastText().trimmed().size() > kSolutionLimit) {
-			*error |= Error::Solution;
+			state->error |= Error::Solution;
 		} else {
-			*error &= ~Error::Solution;
+			state->error &= ~Error::Solution;
 		}
 	};
 	const auto showError = [show = uiShow()](
@@ -1199,17 +1216,17 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	};
 	const auto send = [=](Api::SendOptions sendOptions) {
 		collectError();
-		if (*error & Error::Question) {
+		if (state->error & Error::Question) {
 			showError(tr::lng_polls_choose_question);
 			question->setFocus();
-		} else if (*error & Error::Options) {
+		} else if (state->error & Error::Options) {
 			showError(tr::lng_polls_choose_answers);
 			options->focusFirst();
-		} else if (*error & Error::Correct) {
+		} else if (state->error & Error::Correct) {
 			showError(tr::lng_polls_choose_correct);
-		} else if (*error & Error::Solution) {
+		} else if (state->error & Error::Solution) {
 			solution->showError();
-		} else if (!*error) {
+		} else if (!state->error) {
 			_submitRequests.fire({ collectResult(), sendOptions });
 		}
 	};
@@ -1241,7 +1258,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		: tr::lng_schedule_button()));
 	const auto sendMenuDetails = [=] {
 		collectError();
-		return (*error) ? SendMenu::Details() : _sendMenuDetails();
+		return (state->error) ? SendMenu::Details() : _sendMenuDetails();
 	};
 	SendMenu::SetupMenuAndShortcuts(
 		submit.data(),
