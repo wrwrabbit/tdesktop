@@ -3998,6 +3998,12 @@ void FillSenderUserpicMenu(
 
 	if (const auto user = peer->asUser()) {
 		if (groupPeer) {
+			// Discussion group users may not be members,
+			// so editing their tag is not available.
+			const auto groupChannel = groupPeer->asChannel();
+			const auto isDiscussionGroup = groupChannel
+				&& groupChannel->isMegagroup()
+				&& groupChannel->discussionLink();
 			const auto canEditTarget = [&] {
 				if (const auto chat = groupPeer->asChat()) {
 					if (peerToUser(user->id) == chat->creator) {
@@ -4017,7 +4023,10 @@ void FillSenderUserpicMenu(
 				}
 				return false;
 			}();
-			if (groupPeer->canManageRanks() && canEditTarget && !user->isSelf()) {
+			if (!isDiscussionGroup
+				&& canEditTarget
+				&& groupPeer->canManageRanks()
+				&& !user->isSelf()) {
 				const auto currentRank = LookupMemberRank(
 					groupPeer,
 					user);
