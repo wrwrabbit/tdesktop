@@ -1,3 +1,7 @@
+6.6.4 beta (16.03.26)
+
+- Fix launch on Linux.
+
 6.6.3 beta (12.03.26)
 
 - Drawing tools in image editor (brush, marker, eraser, arrow).
