@@ -24,3 +24,12 @@ pollBoxFilledPollRevoteIcon: icon{{ "poll/filled/filled_poll_revote", activeButt
 pollBoxFilledPollShuffleIcon: icon{{ "poll/filled/filled_poll_shuffle", activeButtonFg }};
 pollBoxFilledChatlistMentionIcon: icon{{ "poll/filled/filled_chatlist_mention", activeButtonFg }};
 pollBoxFilledPollMultipleIcon: icon{{ "poll/filled/filled_poll_multiple", activeButtonFg }};
+
+pollAttachTextSkip: 28px;
+
+pollDescriptionFieldPadding: margins(22px, 5px, 11px, 5px);
+pollDescriptionField: InputField(createPollField) {
+	textMargins: margins(0px, 4px, pollAttachTextSkip, 4px);
+	border: 0px;
+	borderActive: 0px;
+}

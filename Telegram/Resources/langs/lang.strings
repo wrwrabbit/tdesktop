@@ -6845,6 +6845,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_polls_create_title" = "New poll";
 "lng_polls_create_question" = "Question";
 "lng_polls_create_question_placeholder" = "Ask a question";
+"lng_polls_create_description_placeholder" = "Add Description (optional)";
 "lng_polls_create_options" = "Poll options";
 "lng_polls_create_option_add" = "Add an option...";
 "lng_polls_create_limit#one" = "You can add {count} more option.";

@@ -34,6 +34,7 @@ class CreatePollBox : public Ui::BoxContent {
 public:
 	struct Result {
 		PollData poll;
+		TextWithEntities text;
 		Api::SendOptions options;
 	};
 
@@ -67,6 +68,8 @@ private:
 
 	[[nodiscard]] object_ptr<Ui::RpWidget> setupContent();
 	[[nodiscard]] not_null<Ui::InputField*> setupQuestion(
+		not_null<Ui::VerticalLayout*> container);
+	[[nodiscard]] not_null<Ui::InputField*> setupDescription(
 		not_null<Ui::VerticalLayout*> container);
 	[[nodiscard]] not_null<Ui::InputField*> setupSolution(
 		not_null<Ui::VerticalLayout*> container,

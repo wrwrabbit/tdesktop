@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_polls.h"
 
 #include "api/api_common.h"
+#include "api/api_text_entities.h"
 #include "api/api_updates.h"
 #include "apiwrap.h"
 #include "base/random.h"
@@ -30,6 +31,7 @@ Polls::Polls(not_null<ApiWrap*> api)
 
 void Polls::create(
 		const PollData &data,
+		const TextWithEntities &text,
 		SendAction action,
 		Fn<void()> done,
 		Fn<void()> fail) {
@@ -82,6 +84,13 @@ void Polls::create(
 	if (sendAs) {
 		sendFlags |= MTPmessages_SendMedia::Flag::f_send_as;
 	}
+	auto sentEntities = Api::EntitiesToMTP(
+		_session,
+		text.entities,
+		Api::ConvertOption::SkipLocal);
+	if (!sentEntities.v.isEmpty()) {
+		sendFlags |= MTPmessages_SendMedia::Flag::f_entities;
+	}
 	auto &histories = history->owner().histories();
 	const auto randomId = base::RandomValue<uint64>();
 	histories.sendPreparedMessage(
@@ -93,10 +102,10 @@ void Polls::create(
 			peer->input(),
 			Data::Histories::ReplyToPlaceholder(),
 			PollDataToInputMedia(&data),
-			MTP_string(),
+			MTP_string(text.text),
 			MTP_long(randomId),
 			MTPReplyMarkup(),
-			MTPVector<MTPMessageEntity>(),
+			sentEntities,
 			MTP_int(action.options.scheduled),
 			MTP_int(action.options.scheduleRepeatPeriod),
 			(sendAs ? sendAs->input() : MTP_inputPeerEmpty()),

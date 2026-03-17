@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "mtproto/sender.h"
+#include "ui/text/text_entity.h"
 
 class ApiWrap;
 class HistoryItem;
@@ -27,6 +28,7 @@ public:
 
 	void create(
 		const PollData &data,
+		const TextWithEntities &text,
 		SendAction action,
 		Fn<void()> done,
 		Fn<void()> fail);

@@ -947,6 +947,21 @@ not_null<Ui::InputField*> CreatePollBox::setupQuestion(
 	return question;
 }
 
+not_null<Ui::InputField*> CreatePollBox::setupDescription(
+		not_null<Ui::VerticalLayout*> container) {
+	const auto session = &_controller->session();
+	const auto description = container->add(
+		object_ptr<Ui::InputField>(
+			container,
+			st::pollDescriptionField,
+			Ui::InputField::Mode::MultiLine,
+			tr::lng_polls_create_description_placeholder()),
+		st::pollDescriptionFieldPadding);
+	InitField(getDelegate()->outerContainer(), description, session);
+	description->setSubmitSettings(Ui::InputField::SubmitSettings::Both);
+	return description;
+}
+
 not_null<Ui::InputField*> CreatePollBox::setupSolution(
 		not_null<Ui::VerticalLayout*> container,
 		rpl::producer<bool> shown) {
@@ -1036,6 +1051,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	const auto container = result.data();
 
 	const auto question = setupQuestion(container);
+	const auto description = setupDescription(container);
 	Ui::AddDivider(container);
 	Ui::AddSkip(container);
 	container->add(
@@ -1074,9 +1090,15 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 
 	question->tabbed(
 	) | rpl::on_next([=](not_null<bool*> handled) {
-		options->focusFirst();
+		description->setFocus();
 		*handled = true;
 	}, question->lifetime());
+
+	description->tabbed(
+	) | rpl::on_next([=](not_null<bool*> handled) {
+		options->focusFirst();
+		*handled = true;
+	}, description->lifetime());
 
 	Ui::AddSkip(container);
 	Ui::AddSubsectionTitle(container, tr::lng_polls_create_settings());
@@ -1221,9 +1243,14 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	question->submits(
 	) | rpl::on_next([=] {
 		if (isValidQuestion()) {
-			options->focusFirst();
+			description->setFocus();
 		}
 	}, question->lifetime());
+
+	description->submits(
+	) | rpl::on_next([=] {
+		options->focusFirst();
+	}, description->lifetime());
 
 	_setInnerFocus = [=] {
 		question->setFocusFast();
@@ -1231,6 +1258,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 
 	const auto collectResult = [=] {
 		const auto textWithTags = question->getTextWithTags();
+		const auto descriptionWithTags = description->getTextWithTags();
 		using Flag = PollData::Flag;
 		auto result = PollData(&_controller->session().data(), id);
 		result.question.text = textWithTags.text;
@@ -1254,7 +1282,17 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			| (!revoting->toggled() ? Flag::RevotingDisabled : Flag(0))
 			| (shuffle->toggled() ? Flag::ShuffleAnswers : Flag(0))
 			| (quiz->toggled() ? Flag::Quiz : Flag(0)));
-		return result;
+		auto text = TextWithEntities{
+			descriptionWithTags.text,
+			TextUtilities::ConvertTextTagsToEntities(
+				descriptionWithTags.tags),
+		};
+		TextUtilities::Trim(text);
+		return Result{
+			std::move(result),
+			std::move(text),
+			Api::SendOptions(),
+		};
 	};
 	const auto collectError = [=] {
 		if (isValidQuestion()) {
@@ -1298,7 +1336,9 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		} else if (state->error & Error::Solution) {
 			solution->showError();
 		} else if (!state->error) {
-			_submitRequests.fire({ collectResult(), sendOptions });
+			auto result = collectResult();
+			result.options = sendOptions;
+			_submitRequests.fire(std::move(result));
 		}
 	};
 	const auto sendAction = SendMenu::DefaultCallback(
@@ -1312,7 +1352,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 
 	options->backspaceInFront(
 	) | rpl::on_next([=] {
-		FocusAtEnd(question);
+		FocusAtEnd(description);
 	}, lifetime());
 
 	const auto isNormal = (_sendType == Api::SendType::Normal);

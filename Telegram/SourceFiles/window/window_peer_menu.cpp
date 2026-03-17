@@ -2259,13 +2259,18 @@ void PeerMenuCreatePoll(
 			action.clearDraft = false;
 		}
 		const auto api = &peer->session().api();
-		api->polls().create(result.poll, action, crl::guard(weak, [=] {
-			state->create = nullptr;
-			weak->closeBox();
-		}), crl::guard(weak, [=] {
-			state->lock = false;
-			weak->submitFailed(tr::lng_attach_failed(tr::now));
-		}));
+		api->polls().create(
+			result.poll,
+			result.text,
+			action,
+			crl::guard(weak, [=] {
+				state->create = nullptr;
+				weak->closeBox();
+			}),
+			crl::guard(weak, [=] {
+				state->lock = false;
+				weak->submitFailed(tr::lng_attach_failed(tr::now));
+			}));
 	};
 	box->submitRequests(
 	) | rpl::on_next(state->create, box->lifetime());
