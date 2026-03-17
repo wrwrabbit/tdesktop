@@ -69,11 +69,9 @@ ComposeIcons {
 	menuSchedule: icon;
 	menuWhenOnline: icon;
 	menuSpoiler: icon;
-	menuSpoilerOff: icon;
 	menuBelow: icon;
 	menuAbove: icon;
 	menuQualityHigh: icon;
-	menuQualityStandard: icon;
 	menuPrice: icon;
 	menuEditStars: icon;
 
@@ -657,11 +655,9 @@ defaultComposeIcons: ComposeIcons {
 	menuSchedule: menuIconSchedule;
 	menuWhenOnline: menuIconWhenOnline;
 	menuSpoiler: menuIconSpoiler;
-	menuSpoilerOff: menuIconSpoilerOff;
 	menuBelow: menuIconBelow;
 	menuAbove: menuIconAbove;
 	menuQualityHigh: menuIconQualityHigh;
-	menuQualityStandard: menuIconQualityStandard;
 	menuPrice: menuIconEarn;
 
 	stripBubble: icon{

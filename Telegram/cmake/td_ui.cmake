@@ -218,6 +218,8 @@ PRIVATE
 
     menu/gift_resale_filter.cpp
     menu/gift_resale_filter.h
+    menu/menu_checked_action.cpp
+    menu/menu_checked_action.h
     menu/menu_check_item.cpp
     menu/menu_check_item.h
     menu/menu_item_rate_transcribe.cpp

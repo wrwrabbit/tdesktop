@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "mtproto/mtproto_config.h"
 #include "chat_helpers/message_field.h"
+#include "menu/menu_checked_action.h"
 #include "menu/menu_send.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
 #include "chat_helpers/field_autocomplete.h"
@@ -1496,15 +1497,18 @@ void SendFilesBox::pushBlock(int from, int till) {
 		if (canToggleSpoiler) {
 			const auto spoilered = file.spoiler;
 			const auto &icons = _st.tabbed.icons;
-			state->menu->addAction(spoilered
-				? tr::lng_context_disable_spoiler(tr::now)
-				: tr::lng_context_spoiler_effect(tr::now), [=] {
-				applyBlockChanges();
-				refreshAllAfterChanges(from, [&] {
-					auto &entry = _list.files[fileIndex];
-					entry.spoiler = !spoilered;
-				});
-			}, spoilered ? &icons.menuSpoilerOff : &icons.menuSpoiler);
+			Menu::AddCheckedAction(
+				state->menu.get(),
+				tr::lng_context_spoiler_effect(tr::now),
+				[=] {
+					applyBlockChanges();
+					refreshAllAfterChanges(from, [&] {
+						auto &entry = _list.files[fileIndex];
+						entry.spoiler = !spoilered;
+					});
+				},
+				&icons.menuSpoiler,
+				spoilered);
 		}
 		const auto canEditCover = file.isVideoFile()
 			&& (_toPeer->isBroadcast() || _toPeer->isSelf());

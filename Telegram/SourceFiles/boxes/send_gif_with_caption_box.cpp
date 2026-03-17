@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "media/clip/media_clip_reader.h"
+#include "menu/menu_checked_action.h"
 #include "menu/menu_send.h"
 #include "ui/controls/emoji_button.h"
 #include "ui/controls/emoji_button_factory.h"
@@ -257,10 +258,9 @@ struct State final {
 			const auto menu = Ui::CreateChild<Ui::PopupMenu>(
 				widget,
 				st::popupMenuWithIcons);
-			menu->addAction(
-				state->hasSpoiler
-					? tr::lng_context_disable_spoiler(tr::now)
-					: tr::lng_context_spoiler_effect(tr::now),
+			::Menu::AddCheckedAction(
+				menu,
+				tr::lng_context_spoiler_effect(tr::now),
 				[=] {
 					state->hasSpoiler = !state->hasSpoiler;
 					if (!state->hasSpoiler) {
@@ -273,9 +273,8 @@ struct State final {
 					}
 					widget->update();
 				},
-				state->hasSpoiler
-					? &st::menuIconSpoilerOff
-					: &st::menuIconSpoiler);
+				&st::menuIconSpoiler,
+				state->hasSpoiler);
 			menu->popup(QCursor::pos());
 			return base::EventFilterResult::Cancel;
 		}

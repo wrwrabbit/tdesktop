@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/chat/attach/attach_album_preview.h"
 
+#include "menu/menu_checked_action.h"
 #include "ui/chat/attach/attach_album_thumbnail.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/effects/spoiler_mess.h"
@@ -643,11 +644,14 @@ void AlbumPreview::showContextMenu(
 	if (_actionAllowed(index, AttachActionType::ToggleSpoiler)
 		&& _sendWay.sendImagesAsPhotos()) {
 		const auto spoilered = thumb->hasSpoiler();
-		_menu->addAction(spoilered
-			? tr::lng_context_disable_spoiler(tr::now)
-			: tr::lng_context_spoiler_effect(tr::now), [=] {
-			thumb->setSpoiler(!spoilered);
-		}, spoilered ? &st::menuIconSpoilerOff : &st::menuIconSpoiler);
+		::Menu::AddCheckedAction(
+			_menu.get(),
+			tr::lng_context_spoiler_effect(tr::now),
+			[=] {
+				thumb->setSpoiler(!spoilered);
+			},
+			&st::menuIconSpoiler,
+			spoilered);
 	}
 	if (_actionAllowed(index, AttachActionType::EditCover)) {
 		_menu->addAction(tr::lng_context_edit_cover(tr::now), [=] {

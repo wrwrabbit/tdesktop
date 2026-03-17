@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/history.h"
 #include "lang/lang_keys.h"
+#include "menu/menu_checked_action.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "mainwidget.h" // controller->content() -> QWidget*
@@ -760,36 +761,30 @@ void EditCaptionBox::setupEditEventHandler() {
 		if (!_asFile && (_isPhoto || _isVideo)) {
 			if (hasSendLargePhotosOption()) {
 				const auto enabled = _sendLargePhotos;
-				(*menu)->addAction(
-					(enabled
-						? tr::lng_send_standard_quality(tr::now)
-						: tr::lng_send_high_quality(tr::now)),
+				Menu::AddCheckedAction(
+					menu->get(),
+					tr::lng_send_high_quality(tr::now),
 					[=] {
 						_sendLargePhotos = !enabled;
 						rebuildPreview();
 					},
-					enabled
-						? &st::menuIconQualityStandard
-						: &st::menuIconQualityHigh);
+					&st::menuIconQualityHigh,
+					enabled);
 			}
 			if (_preparedList.hasSpoilerMenu(!_asFile)) {
 				const auto spoilered = hasSpoiler();
-				auto text = spoilered
-					? tr::lng_context_disable_spoiler(tr::now)
-					: tr::lng_context_spoiler_effect(tr::now);
-				auto callback = [=] {
-					_mediaEditManager.apply({ .type = spoilered
-						? SendMenu::ActionType::SpoilerOff
-						: SendMenu::ActionType::SpoilerOn
-					});
-					rebuildPreview();
-				};
-				(*menu)->addAction(
-					std::move(text),
-					std::move(callback),
-					spoilered
-						? &st::menuIconSpoilerOff
-						: &st::menuIconSpoiler);
+				Menu::AddCheckedAction(
+					menu->get(),
+					tr::lng_context_spoiler_effect(tr::now),
+					[=] {
+						_mediaEditManager.apply({ .type = spoilered
+							? SendMenu::ActionType::SpoilerOff
+							: SendMenu::ActionType::SpoilerOn
+						});
+						rebuildPreview();
+					},
+					&st::menuIconSpoiler,
+					spoilered);
 			}
 			if (_isVideo && !_preparedList.files.empty()) {
 				(*menu)->addAction(tr::lng_context_edit_cover(tr::now), [=] {

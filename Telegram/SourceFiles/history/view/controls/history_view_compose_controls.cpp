@@ -75,6 +75,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/session/send_as_peers.h"
 #include "media/audio/media_audio_capture.h"
 #include "media/audio/media_audio.h"
+#include "menu/menu_checked_action.h"
 #include "menu/menu_send.h"
 #include "settings/sections/settings_premium.h"
 #include "ui/item_text_options.h"
@@ -4367,12 +4368,12 @@ void ShowPhotoEditSpoilerMenu(
 	const auto menu = Ui::CreateChild<Ui::PopupMenu>(
 		parent,
 		st::popupMenuWithIcons);
-	menu->addAction(
-		spoilered
-			? tr::lng_context_disable_spoiler(tr::now)
-			: tr::lng_context_spoiler_effect(tr::now),
+	Menu::AddCheckedAction(
+		menu,
+		tr::lng_context_spoiler_effect(tr::now),
 		[=] { callback(!spoilered); },
-		spoilered ? &st::menuIconSpoilerOff : &st::menuIconSpoiler);
+		&st::menuIconSpoiler,
+		spoilered);
 	menu->popup(QCursor::pos());
 }
 

@@ -656,11 +656,9 @@ storiesEmojiPan: EmojiPan(defaultEmojiPan) {
 		menuSchedule: icon {{ "menu/calendar", storiesComposeWhiteText }};
 		menuWhenOnline: icon {{ "menu/send_when_online", storiesComposeWhiteText }};
 		menuSpoiler: icon {{ "menu/spoiler_on", storiesComposeWhiteText }};
-		menuSpoilerOff: icon {{ "menu/spoiler_off", storiesComposeWhiteText }};
 		menuBelow: icon {{ "menu/link_below", storiesComposeWhiteText }};
 		menuAbove: icon {{ "menu/link_above", storiesComposeWhiteText }};
 		menuQualityHigh: icon {{ "menu/quality_hd", storiesComposeWhiteText }};
-		menuQualityStandard: icon {{ "menu/quality_sd", storiesComposeWhiteText }};
 		menuPrice: icon {{ "menu/earn", storiesComposeWhiteText }};
 		menuEditStars: icon {{ "chat/input_paid", storiesComposeWhiteText, point(-8px, -8px) }};
 

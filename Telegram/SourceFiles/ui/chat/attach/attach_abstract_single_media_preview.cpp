@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "editor/photo_editor_common.h"
 #include "lang/lang_keys.h"
+#include "menu/menu_checked_action.h"
 #include "ui/chat/attach/attach_controls.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/effects/spoiler_mess.h"
@@ -301,12 +302,15 @@ void AbstractSingleMediaPreview::showContextMenu(QPoint position) {
 		&& _sendWay.sendImagesAsPhotos()
 		&& supportsSpoilers()) {
 		const auto spoilered = hasSpoiler();
-		_menu->addAction(spoilered
-			? tr::lng_context_disable_spoiler(tr::now)
-			: tr::lng_context_spoiler_effect(tr::now), [=] {
-			setSpoiler(!spoilered);
-			_spoileredChanges.fire_copy(!spoilered);
-		}, spoilered ? &icons.menuSpoilerOff : &icons.menuSpoiler);
+		::Menu::AddCheckedAction(
+			_menu.get(),
+			tr::lng_context_spoiler_effect(tr::now),
+			[=] {
+				setSpoiler(!spoilered);
+				_spoileredChanges.fire_copy(!spoilered);
+			},
+			&icons.menuSpoiler,
+			spoilered);
 	}
 	if (_actionAllowed(AttachActionType::EditCover)) {
 		_menu->addAction(tr::lng_context_edit_cover(tr::now), [=] {

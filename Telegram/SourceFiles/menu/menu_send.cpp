@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "menu/menu_send.h"
 
+#include "menu/menu_checked_action.h"
+
 #include "api/api_common.h"
 #include "base/event_filter.h"
 #include "base/unixtime.h"
@@ -771,29 +773,27 @@ FillMenuResult FillSendMenu(
 	}
 	if (details.photoQuality != PhotoQualityState::None) {
 		const auto high = (details.photoQuality == PhotoQualityState::High);
-		menu->addAction(
-			(high
-				? tr::lng_send_standard_quality(tr::now)
-				: tr::lng_send_high_quality(tr::now)),
+		Menu::AddCheckedAction(
+			menu,
+			tr::lng_send_high_quality(tr::now),
 			[=] { action({ .type = high
 				? ActionType::PhotoQualityOff
 				: ActionType::PhotoQualityOn
 			}, details); },
-			(high
-				? &icons.menuQualityStandard
-				: &icons.menuQualityHigh));
+			&icons.menuQualityHigh,
+			high);
 	}
 	if (details.spoiler != SpoilerState::None) {
 		const auto spoilered = (details.spoiler == SpoilerState::Enabled);
-		menu->addAction(
-			(spoilered
-				? tr::lng_context_disable_spoiler(tr::now)
-				: tr::lng_context_spoiler_effect(tr::now)),
+		Menu::AddCheckedAction(
+			menu,
+			tr::lng_context_spoiler_effect(tr::now),
 			[=] { action({ .type = spoilered
 				? ActionType::SpoilerOff
 				: ActionType::SpoilerOn
 			}, details); },
-			spoilered ? &icons.menuSpoilerOff : &icons.menuSpoiler);
+			&icons.menuSpoiler,
+			spoilered);
 	}
 	if (details.caption != CaptionState::None) {
 		const auto above = (details.caption == CaptionState::Above);

@@ -5054,7 +5054,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_context_noforwards_info_mine" = "You disabled copying and forwarding in this chat.";
 
 "lng_context_spoiler_effect" = "Hide with Spoiler";
-"lng_context_disable_spoiler" = "Remove Spoiler";
 "lng_context_make_paid" = "Make This Content Paid";
 "lng_context_change_price" = "Change Price";
 "lng_context_edit_cover" = "Edit Cover";
@@ -5171,10 +5170,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_send_grouped" = "Group items";
 "lng_send_compressed_one" = "Compress the image";
 "lng_send_compressed" = "Compress images";
-"lng_send_high_quality" = "Send in High Quality";
+"lng_send_high_quality" = "High Quality";
 "lng_send_as_documents_one" = "Send as a document";
 "lng_send_as_documents" = "Send as documents";
-"lng_send_standard_quality" = "Standard Quality";
 "lng_send_media_invalid_files" = "Sorry, no valid files found.";
 "lng_send_image" = "Send an image";
 "lng_send_file" = "Send as a file";
