@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/media/history_view_poll.h"
 
+#include "core/click_handler_types.h"
 #include "core/ui_integration.h" // TextContext
 #include "lang/lang_keys.h"
 #include "history/history.h"
@@ -39,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "apiwrap.h"
 #include "api/api_polls.h"
+#include "window/window_session_controller.h"
 #include "styles/style_chat.h"
 #include "styles/style_widgets.h"
 #include "styles/style_window.h"
@@ -186,7 +188,7 @@ struct Poll::Answer {
 	void fillMedia(
 		not_null<PollData*> poll,
 		const PollAnswer &original,
-		FullMsgId fullId,
+		Window::SessionController::MessageContext messageContext,
 		Fn<void()> repaint);
 
 	enum class ThumbnailKind {
@@ -207,6 +209,7 @@ struct Poll::Answer {
 	bool correct = false;
 	bool selected = false;
 	ClickHandlerPtr handler;
+	ClickHandlerPtr mediaHandler;
 	Ui::Animations::Simple selectedAnimation;
 	std::shared_ptr<Ui::DynamicImage> thumbnail;
 	bool thumbnailRounded = false;
@@ -262,7 +265,7 @@ void Poll::Answer::fillData(
 void Poll::Answer::fillMedia(
 		not_null<PollData*> poll,
 		const PollAnswer &original,
-		FullMsgId fullId,
+		Window::SessionController::MessageContext messageContext,
 		Fn<void()> repaint) {
 	auto updated = std::shared_ptr<Ui::DynamicImage>();
 	auto rounded = false;
@@ -270,37 +273,70 @@ void Poll::Answer::fillMedia(
 	auto id = uint64(0);
 	if (const auto media = original.media) {
 		media->match([&](const MTPDinputMediaPhoto &media) {
-			const auto input = media.vid();
-			if (input.type() != mtpc_inputPhoto) {
-				return;
-			}
-			const auto &photo = input.c_inputPhoto();
-			id = uint64(photo.vid().v);
-			updated = Ui::MakePhotoThumbnailCenterCrop(
-				poll->owner().photo(id),
-				fullId);
-			rounded = true;
-			kind = ThumbnailKind::Photo;
-		}, [&](const MTPDinputMediaDocument &media) {
-			const auto input = media.vid();
-			if (input.type() != mtpc_inputDocument) {
-				return;
-			}
-			const auto &document = input.c_inputDocument();
-			id = uint64(document.vid().v);
-			const auto parsed = poll->owner().document(id);
-			if (parsed->sticker()) {
-				updated = Ui::MakeEmojiThumbnail(
-					&poll->owner(),
-					Data::SerializeCustomEmojiId(parsed));
-				kind = ThumbnailKind::Emoji;
-			} else {
-				updated = Ui::MakeDocumentThumbnailCenterCrop(parsed, fullId);
+			media.vid().match([&](const MTPDinputPhoto &photo) {
+				id = uint64(photo.vid().v);
+				updated = Ui::MakePhotoThumbnailCenterCrop(
+					poll->owner().photo(id),
+					messageContext.id);
 				rounded = true;
-				kind = ThumbnailKind::Document;
-			}
+				kind = ThumbnailKind::Photo;
+			}, [](const auto &) {
+			});
+		}, [&](const MTPDinputMediaDocument &media) {
+			media.vid().match([&](const MTPDinputDocument &document) {
+				id = uint64(document.vid().v);
+				const auto parsed = poll->owner().document(id);
+				if (parsed->sticker()) {
+					updated = Ui::MakeEmojiThumbnail(
+						&poll->owner(),
+						Data::SerializeCustomEmojiId(parsed));
+					kind = ThumbnailKind::Emoji;
+				} else {
+					updated = Ui::MakeDocumentThumbnailCenterCrop(
+						parsed,
+						messageContext.id);
+					rounded = true;
+					kind = ThumbnailKind::Document;
+				}
+			}, [](const auto &) {
+			});
 		}, [](const auto &) {
 		});
+	}
+	if (kind == ThumbnailKind::Photo && id) {
+		const auto photoId = PhotoId(id);
+		const auto session = &poll->session();
+		mediaHandler = std::make_shared<LambdaClickHandler>(
+			[=](ClickContext context) {
+				const auto my = context.other.value<ClickHandlerContext>();
+				const auto controller = my.sessionWindow.get();
+				if (!controller || (&controller->session() != session)) {
+					return;
+				}
+				controller->openPhoto(
+					poll->owner().photo(photoId),
+					messageContext);
+			});
+	} else if (kind == ThumbnailKind::Document && id) {
+		const auto documentId = DocumentId(id);
+		const auto session = &poll->session();
+		mediaHandler = std::make_shared<LambdaClickHandler>(
+			[=](ClickContext context) {
+				const auto my = context.other.value<ClickHandlerContext>();
+				const auto controller = my.sessionWindow.get();
+				if (!controller || (&controller->session() != session)) {
+					return;
+				}
+				controller->openDocument(
+					poll->owner().document(documentId),
+					true,
+					messageContext);
+			});
+	} else if (kind != ThumbnailKind::None) {
+		mediaHandler = std::make_shared<LambdaClickHandler>([] {
+		});
+	} else {
+		mediaHandler = nullptr;
 	}
 	const auto same = (kind == thumbnailKind)
 		&& (id == thumbnailId)
@@ -651,7 +687,12 @@ void Poll::updateAnswers() {
 		.customEmojiLoopLimit = 2,
 	});
 	const auto repaintThumbnail = crl::guard(this, [=] { repaint(); });
-	const auto fullId = _parent->data()->fullId();
+	const auto item = _parent->data();
+	const auto messageContext = Window::SessionController::MessageContext{
+		.id = item->fullId(),
+		.topicRootId = item->topicRootId(),
+		.monoforumPeerId = item->sublistPeerId(),
+	};
 	auto options = ranges::views::all(
 		_poll->answers
 	) | ranges::views::transform(&PollAnswer::option) | ranges::to_vector;
@@ -678,7 +719,7 @@ void Poll::updateAnswers() {
 				&PollAnswer::option);
 			Assert(i != end(_poll->answers));
 			answer.fillData(_poll, *i, context);
-			answer.fillMedia(_poll, *i, fullId, repaintThumbnail);
+			answer.fillMedia(_poll, *i, messageContext, repaintThumbnail);
 		}
 		return;
 	}
@@ -692,7 +733,7 @@ void Poll::updateAnswers() {
 			&PollAnswer::option);
 		Assert(i != end(_poll->answers));
 		result.fillData(_poll, *i, context);
-		result.fillMedia(_poll, *i, fullId, repaintThumbnail);
+		result.fillMedia(_poll, *i, messageContext, repaintThumbnail);
 		return result;
 	}) | ranges::to_vector;
 
@@ -1617,7 +1658,19 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 	for (const auto &answer : _answers) {
 		const auto height = countAnswerHeight(answer, paintw);
 		if (point.y() >= tshift && point.y() < tshift + height) {
-			if (can) {
+			const auto media = answer.thumbnail ? PollAnswerMediaSize() : 0;
+			if (media
+				&& answer.mediaHandler
+				&& QRect(
+					padding.left()
+						+ paintw
+						- st::historyPollAnswerPadding.right()
+						- media,
+					tshift + st::historyPollAnswerPadding.top(),
+					media,
+					media).contains(point)) {
+				result.link = answer.mediaHandler;
+			} else if (can) {
 				_lastLinkPoint = point;
 				result.link = answer.handler;
 			} else if (show) {
