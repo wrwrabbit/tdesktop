@@ -25,7 +25,8 @@ class Poll final : public Media {
 public:
 	Poll(
 		not_null<Element*> parent,
-		not_null<PollData*> poll);
+		not_null<PollData*> poll,
+		const TextWithEntities &consumed);
 	~Poll();
 
 	void draw(Painter &p, const PaintContext &context) const override;
@@ -64,12 +65,14 @@ public:
 
 	void unloadHeavyPart() override;
 	bool hasHeavyPart() const override;
+	void parentTextUpdated() override;
 
 private:
 	struct AnswerAnimation;
 	struct AnswersAnimation;
 	struct SendingAnimation;
 	struct Answer;
+	struct AttachedMedia;
 	struct CloseInformation;
 	struct RecentVoter;
 
@@ -79,6 +82,19 @@ private:
 	[[nodiscard]] bool showVotes() const;
 	[[nodiscard]] bool canVote() const;
 	[[nodiscard]] bool canSendVotes() const;
+	void updateDescription();
+	void updateAttachedMedia();
+	[[nodiscard]] int countTopContentSkip() const;
+	[[nodiscard]] int countTopMediaHeight() const;
+	[[nodiscard]] QRect countTopMediaRect(int top) const;
+	[[nodiscard]] Ui::BubbleRounding topMediaRounding() const;
+	void validateTopMediaCache(QSize size) const;
+	[[nodiscard]] int countDescriptionHeight(int innerWidth) const;
+	[[nodiscard]] int countQuestionTop(int innerWidth) const;
+	[[nodiscard]] TextSelection toQuestionSelection(
+		TextSelection selection) const;
+	[[nodiscard]] TextSelection fromQuestionSelection(
+		TextSelection selection) const;
 
 	[[nodiscard]] int countAnswerTop(
 		const Answer &answer,
@@ -200,8 +216,12 @@ private:
 	bool _voted = false;
 	PollData::Flags _flags = PollData::Flags();
 
+	Ui::Text::String _description;
 	Ui::Text::String _question;
 	Ui::Text::String _subtitle;
+	std::unique_ptr<AttachedMedia> _attachedMedia;
+	mutable QImage _attachedMediaCache;
+	mutable Ui::BubbleRounding _attachedMediaCacheRounding;
 	std::vector<RecentVoter> _recentVoters;
 	QImage _recentVotersImage;
 

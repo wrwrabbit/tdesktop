@@ -673,6 +673,11 @@ historyPollQuestionStyle: TextStyle(defaultTextStyle) {
 }
 historyPollAnswerStyle: defaultTextStyle;
 historyPollQuestionTop: 7px;
+historyPollMediaHeight: 180px;
+historyPollMediaTopSkip: 1px;
+historyPollMediaSideSkip: 1px;
+historyPollMediaSkip: 10px;
+historyPollDescriptionSkip: 8px;
 historyPollSubtitleSkip: 4px;
 historyPollAnswerPadding: margins(32px, 10px, 0px, 10px);
 historyPollAnswersSkip: 2px;

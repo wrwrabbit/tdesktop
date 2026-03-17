@@ -17,6 +17,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_instance.h"
 #include "ui/chat/message_bubble.h"
 #include "ui/chat/chat_style.h"
+#include "ui/image/image.h"
+#include "ui/item_text_options.h"
 #include "ui/text/text_options.h"
 #include "ui/text/text_utilities.h"
 #include "ui/text/format_values.h"
@@ -65,6 +67,13 @@ constexpr auto kCriticalCloseDuration = 5 * crl::time(1000);
 [[nodiscard]] int PollAnswerMediaSkip() {
 	return st::historyPollPercentSkip * 2;
 }
+
+enum class PollThumbnailKind {
+	None,
+	Photo,
+	Document,
+	Emoji,
+};
 
 struct PercentCounterItem {
 	int index = 0;
@@ -153,6 +162,88 @@ void CountNicePercent(
 	return uint32(base::crc32(hash.constData(), hash.size()));
 }
 
+struct PollThumbnailData {
+	std::shared_ptr<Ui::DynamicImage> thumbnail;
+	ClickHandlerPtr handler;
+	PollThumbnailKind kind = PollThumbnailKind::None;
+	bool rounded = false;
+	uint64 id = 0;
+};
+
+[[nodiscard]] PollThumbnailData MakePollThumbnail(
+		not_null<PollData*> poll,
+		const std::optional<MTPInputMedia> &media,
+		Window::SessionController::MessageContext messageContext) {
+	auto result = PollThumbnailData();
+	if (!media) {
+		return result;
+	}
+	media->match([&](const MTPDinputMediaPhoto &media) {
+		media.vid().match([&](const MTPDinputPhoto &photo) {
+			result.id = uint64(photo.vid().v);
+			result.thumbnail = Ui::MakePhotoThumbnailCenterCrop(
+				poll->owner().photo(result.id),
+				messageContext.id);
+			result.rounded = true;
+			result.kind = PollThumbnailKind::Photo;
+		}, [](const auto &) {
+		});
+	}, [&](const MTPDinputMediaDocument &media) {
+		media.vid().match([&](const MTPDinputDocument &document) {
+			result.id = uint64(document.vid().v);
+			const auto parsed = poll->owner().document(result.id);
+			if (parsed->sticker()) {
+				result.thumbnail = Ui::MakeEmojiThumbnail(
+					&poll->owner(),
+					Data::SerializeCustomEmojiId(parsed));
+				result.kind = PollThumbnailKind::Emoji;
+			} else {
+				result.thumbnail = Ui::MakeDocumentThumbnailCenterCrop(
+					parsed,
+					messageContext.id);
+				result.rounded = true;
+				result.kind = PollThumbnailKind::Document;
+			}
+		}, [](const auto &) {
+		});
+	}, [](const auto &) {
+	});
+	if (result.kind == PollThumbnailKind::Photo && result.id) {
+		const auto photoId = PhotoId(result.id);
+		const auto session = &poll->session();
+		result.handler = std::make_shared<LambdaClickHandler>(
+			[=](ClickContext context) {
+				const auto my = context.other.value<ClickHandlerContext>();
+				const auto controller = my.sessionWindow.get();
+				if (!controller || (&controller->session() != session)) {
+					return;
+				}
+				controller->openPhoto(
+					poll->owner().photo(photoId),
+					messageContext);
+			});
+	} else if (result.kind == PollThumbnailKind::Document && result.id) {
+		const auto documentId = DocumentId(result.id);
+		const auto session = &poll->session();
+		result.handler = std::make_shared<LambdaClickHandler>(
+			[=](ClickContext context) {
+				const auto my = context.other.value<ClickHandlerContext>();
+				const auto controller = my.sessionWindow.get();
+				if (!controller || (&controller->session() != session)) {
+					return;
+				}
+				controller->openDocument(
+					poll->owner().document(documentId),
+					true,
+					messageContext);
+			});
+	} else if (result.kind != PollThumbnailKind::None) {
+		result.handler = std::make_shared<LambdaClickHandler>([] {
+		});
+	}
+	return result;
+}
+
 } // namespace
 
 struct Poll::AnswerAnimation {
@@ -191,13 +282,6 @@ struct Poll::Answer {
 		Window::SessionController::MessageContext messageContext,
 		Fn<void()> repaint);
 
-	enum class ThumbnailKind {
-		None,
-		Photo,
-		Document,
-		Emoji,
-	};
-
 	Ui::Text::String text;
 	QByteArray option;
 	int votes = 0;
@@ -213,9 +297,17 @@ struct Poll::Answer {
 	Ui::Animations::Simple selectedAnimation;
 	std::shared_ptr<Ui::DynamicImage> thumbnail;
 	bool thumbnailRounded = false;
-	ThumbnailKind thumbnailKind = ThumbnailKind::None;
+	PollThumbnailKind thumbnailKind = PollThumbnailKind::None;
 	uint64 thumbnailId = 0;
 	mutable std::unique_ptr<Ui::RippleAnimation> ripple;
+};
+
+struct Poll::AttachedMedia {
+	ClickHandlerPtr handler;
+	std::shared_ptr<Ui::DynamicImage> thumbnail;
+	PollThumbnailKind kind = PollThumbnailKind::None;
+	bool rounded = false;
+	uint64 id = 0;
 };
 
 struct Poll::CloseInformation {
@@ -267,90 +359,24 @@ void Poll::Answer::fillMedia(
 		const PollAnswer &original,
 		Window::SessionController::MessageContext messageContext,
 		Fn<void()> repaint) {
-	auto updated = std::shared_ptr<Ui::DynamicImage>();
-	auto rounded = false;
-	auto kind = ThumbnailKind::None;
-	auto id = uint64(0);
-	if (const auto media = original.media) {
-		media->match([&](const MTPDinputMediaPhoto &media) {
-			media.vid().match([&](const MTPDinputPhoto &photo) {
-				id = uint64(photo.vid().v);
-				updated = Ui::MakePhotoThumbnailCenterCrop(
-					poll->owner().photo(id),
-					messageContext.id);
-				rounded = true;
-				kind = ThumbnailKind::Photo;
-			}, [](const auto &) {
-			});
-		}, [&](const MTPDinputMediaDocument &media) {
-			media.vid().match([&](const MTPDinputDocument &document) {
-				id = uint64(document.vid().v);
-				const auto parsed = poll->owner().document(id);
-				if (parsed->sticker()) {
-					updated = Ui::MakeEmojiThumbnail(
-						&poll->owner(),
-						Data::SerializeCustomEmojiId(parsed));
-					kind = ThumbnailKind::Emoji;
-				} else {
-					updated = Ui::MakeDocumentThumbnailCenterCrop(
-						parsed,
-						messageContext.id);
-					rounded = true;
-					kind = ThumbnailKind::Document;
-				}
-			}, [](const auto &) {
-			});
-		}, [](const auto &) {
-		});
-	}
-	if (kind == ThumbnailKind::Photo && id) {
-		const auto photoId = PhotoId(id);
-		const auto session = &poll->session();
-		mediaHandler = std::make_shared<LambdaClickHandler>(
-			[=](ClickContext context) {
-				const auto my = context.other.value<ClickHandlerContext>();
-				const auto controller = my.sessionWindow.get();
-				if (!controller || (&controller->session() != session)) {
-					return;
-				}
-				controller->openPhoto(
-					poll->owner().photo(photoId),
-					messageContext);
-			});
-	} else if (kind == ThumbnailKind::Document && id) {
-		const auto documentId = DocumentId(id);
-		const auto session = &poll->session();
-		mediaHandler = std::make_shared<LambdaClickHandler>(
-			[=](ClickContext context) {
-				const auto my = context.other.value<ClickHandlerContext>();
-				const auto controller = my.sessionWindow.get();
-				if (!controller || (&controller->session() != session)) {
-					return;
-				}
-				controller->openDocument(
-					poll->owner().document(documentId),
-					true,
-					messageContext);
-			});
-	} else if (kind != ThumbnailKind::None) {
-		mediaHandler = std::make_shared<LambdaClickHandler>([] {
-		});
-	} else {
-		mediaHandler = nullptr;
-	}
-	const auto same = (kind == thumbnailKind)
-		&& (id == thumbnailId)
-		&& (rounded == thumbnailRounded);
+	const auto updated = MakePollThumbnail(
+		poll,
+		original.media,
+		messageContext);
+	const auto same = (updated.kind == thumbnailKind)
+		&& (updated.id == thumbnailId)
+		&& (updated.rounded == thumbnailRounded);
 	if (same) {
 		return;
 	}
 	if (thumbnail) {
 		thumbnail->subscribeToUpdates(nullptr);
 	}
-	thumbnail = std::move(updated);
-	thumbnailRounded = rounded;
-	thumbnailKind = kind;
-	thumbnailId = id;
+	thumbnail = updated.thumbnail;
+	mediaHandler = updated.handler;
+	thumbnailRounded = updated.rounded;
+	thumbnailKind = updated.kind;
+	thumbnailId = updated.id;
 	if (thumbnail) {
 		thumbnail->subscribeToUpdates(std::move(repaint));
 	}
@@ -368,10 +394,13 @@ Poll::CloseInformation::CloseInformation(
 
 Poll::Poll(
 	not_null<Element*> parent,
-	not_null<PollData*> poll)
+	not_null<PollData*> poll,
+	const TextWithEntities &consumed)
 : Media(parent)
 , _poll(poll)
+, _description(st::msgMinWidth / 2)
 , _question(st::msgMinWidth / 2)
+, _attachedMedia(std::make_unique<AttachedMedia>())
 , _showResultsLink(
 	std::make_shared<LambdaClickHandler>(crl::guard(
 		this,
@@ -380,6 +409,9 @@ Poll::Poll(
 	std::make_shared<LambdaClickHandler>(crl::guard(
 		this,
 		[=] { sendMultiOptions(); }))) {
+	if (!consumed.text.isEmpty()) {
+		updateDescription();
+	}
 	history()->owner().registerPollView(_poll, _parent);
 }
 
@@ -389,6 +421,7 @@ QSize Poll::countOptimalSize() {
 	const auto paddings = st::msgPadding.left() + st::msgPadding.right();
 
 	auto maxWidth = st::msgFileMinWidth;
+	accumulate_max(maxWidth, paddings + _description.maxWidth());
 	accumulate_max(maxWidth, paddings + _question.maxWidth());
 	for (const auto &answer : _answers) {
 		const auto media = answer.thumbnail
@@ -415,7 +448,7 @@ QSize Poll::countOptimalSize() {
 	const auto bottomButtonHeight = inlineFooter()
 		? 0
 		: st::historyPollBottomButtonSkip;
-	auto minHeight = st::historyPollQuestionTop
+	auto minHeight = countQuestionTop(maxWidth - paddings)
 		+ _question.minHeight()
 		+ st::historyPollSubtitleSkip
 		+ st::msgDateFont->height
@@ -425,9 +458,6 @@ QSize Poll::countOptimalSize() {
 		+ bottomButtonHeight
 		+ st::msgDateFont->height
 		+ st::msgPadding.bottom();
-	if (!isBubbleTop()) {
-		minHeight -= st::msgFileTopMinus;
-	}
 	return { maxWidth, minHeight };
 }
 
@@ -460,11 +490,9 @@ bool Poll::inlineFooter() const {
 int Poll::countAnswerTop(
 		const Answer &answer,
 		int innerWidth) const {
-	auto tshift = st::historyPollQuestionTop;
-	if (!isBubbleTop()) {
-		tshift -= st::msgFileTopMinus;
-	}
-	tshift += _question.countHeight(innerWidth) + st::historyPollSubtitleSkip;
+	auto tshift = countQuestionTop(innerWidth)
+		+ _question.countHeight(innerWidth)
+		+ st::historyPollSubtitleSkip;
 	tshift += st::msgDateFont->height + st::historyPollAnswersSkip;
 	const auto i = ranges::find(
 		_answers,
@@ -519,7 +547,7 @@ QSize Poll::countCurrentSize(int newWidth) {
 	const auto bottomButtonHeight = inlineFooter()
 		? 0
 		: st::historyPollBottomButtonSkip;
-	auto newHeight = st::historyPollQuestionTop
+	auto newHeight = countQuestionTop(innerWidth)
 		+ _question.countHeight(innerWidth)
 		+ st::historyPollSubtitleSkip
 		+ st::msgDateFont->height
@@ -529,9 +557,6 @@ QSize Poll::countCurrentSize(int newWidth) {
 		+ bottomButtonHeight
 		+ st::msgDateFont->height
 		+ st::msgPadding.bottom();
-	if (!isBubbleTop()) {
-		newHeight -= st::msgFileTopMinus;
-	}
 	return { newWidth, newHeight };
 }
 
@@ -545,6 +570,7 @@ void Poll::updateTexts() {
 	const auto willStartAnimation = checkAnimationStart();
 	const auto voted = _voted;
 
+	updateDescription();
 	if (_question.toTextWithEntities() != _poll->question) {
 		auto options = Ui::WebpageTextTitleOptions();
 		options.maxw = options.maxh = 0;
@@ -575,6 +601,7 @@ void Poll::updateTexts() {
 	}
 	updateRecentVoters();
 	updateAnswers();
+	updateAttachedMedia();
 	updateVotes();
 
 	if (willStartAnimation) {
@@ -586,6 +613,159 @@ void Poll::updateTexts() {
 	solutionToggled(
 		_solutionShown,
 		first ? anim::type::instant : anim::type::normal);
+}
+
+void Poll::updateDescription() {
+	const auto media = _parent->data()->media();
+	const auto consumed = media
+		? media->consumedMessageText()
+		: TextWithEntities();
+	if (consumed.text.isEmpty()) {
+		_description = Ui::Text::String(st::msgMinWidth / 2);
+		return;
+	}
+	if (_description.toTextWithEntities() == consumed) {
+		return;
+	}
+	const auto context = Core::TextContext({
+		.session = &_poll->session(),
+		.repaint = [=] { _parent->customEmojiRepaint(); },
+		.customEmojiLoopLimit = 2,
+	});
+	_description.setMarkedText(
+		st::webPageDescriptionStyle,
+		consumed,
+		Ui::ItemTextOptions(_parent->data()),
+		context);
+}
+
+void Poll::updateAttachedMedia() {
+	const auto item = _parent->data();
+	const auto messageContext = Window::SessionController::MessageContext{
+		.id = item->fullId(),
+		.topicRootId = item->topicRootId(),
+		.monoforumPeerId = item->sublistPeerId(),
+	};
+	const auto updated = MakePollThumbnail(
+		_poll,
+		_poll->attachedMedia,
+		messageContext);
+	const auto same = (_attachedMedia->kind == updated.kind)
+		&& (_attachedMedia->id == updated.id)
+		&& (_attachedMedia->rounded == updated.rounded);
+	if (same) {
+		return;
+	}
+	if (_attachedMedia->thumbnail) {
+		_attachedMedia->thumbnail->subscribeToUpdates(nullptr);
+	}
+	_attachedMediaCache = QImage();
+	_attachedMedia->thumbnail = updated.thumbnail;
+	_attachedMedia->handler = updated.handler;
+	_attachedMedia->kind = updated.kind;
+	_attachedMedia->rounded = updated.rounded;
+	_attachedMedia->id = updated.id;
+	if (_attachedMedia->thumbnail) {
+		_attachedMedia->thumbnail->subscribeToUpdates(
+			crl::guard(this, [=] {
+				_attachedMediaCache = QImage();
+				repaint();
+			}));
+	}
+}
+
+int Poll::countTopContentSkip() const {
+	return countTopMediaHeight()
+		? st::historyPollMediaTopSkip
+		: isBubbleTop()
+		? st::historyPollQuestionTop
+		: (st::historyPollQuestionTop - st::msgFileTopMinus);
+}
+
+int Poll::countTopMediaHeight() const {
+	return (_attachedMedia && _attachedMedia->thumbnail)
+		? st::historyPollMediaHeight
+		: 0;
+}
+
+QRect Poll::countTopMediaRect(int top) const {
+	const auto sideSkip = st::historyPollMediaSideSkip;
+	const auto mediaHeight = countTopMediaHeight();
+	return mediaHeight
+		? QRect(
+			sideSkip,
+			top,
+			std::max(1, width() - 2 * sideSkip),
+			mediaHeight)
+		: QRect();
+}
+
+Ui::BubbleRounding Poll::topMediaRounding() const {
+	using Corner = Ui::BubbleCornerRounding;
+	auto result = adjustedBubbleRounding(
+		RectPart::BottomLeft | RectPart::BottomRight);
+	const auto normalize = [](Corner value) {
+		return (value == Corner::Large)
+			? Corner::Large
+			: (value == Corner::None)
+			? Corner::None
+			: Corner::Small;
+	};
+	result.topLeft = normalize(result.topLeft);
+	result.topRight = normalize(result.topRight);
+	result.bottomLeft = Corner::Small;
+	result.bottomRight = Corner::Small;
+	return result;
+}
+
+void Poll::validateTopMediaCache(QSize size) const {
+	if (!_attachedMedia || !_attachedMedia->thumbnail || size.isEmpty()) {
+		return;
+	}
+	const auto ratio = style::DevicePixelRatio();
+	const auto rounding = topMediaRounding();
+	if ((_attachedMediaCache.size() == (size * ratio))
+		&& (_attachedMediaCacheRounding == rounding)) {
+		return;
+	}
+	const auto source = _attachedMedia->thumbnail->image(
+		std::max(size.width(), size.height()) * ratio);
+	if (source.isNull()) {
+		return;
+	}
+	auto prepared = Images::Prepare(
+		source,
+		size * ratio,
+		{ .outer = size });
+	prepared = Images::Round(
+		std::move(prepared),
+		MediaRoundingMask(rounding));
+	prepared.setDevicePixelRatio(ratio);
+	_attachedMediaCache = std::move(prepared);
+	_attachedMediaCacheRounding = rounding;
+}
+
+int Poll::countDescriptionHeight(int innerWidth) const {
+	return _description.isEmpty() ? 0 : _description.countHeight(innerWidth);
+}
+
+int Poll::countQuestionTop(int innerWidth) const {
+	auto result = countTopContentSkip();
+	if (const auto mediaHeight = countTopMediaHeight()) {
+		result += mediaHeight + st::historyPollMediaSkip;
+	}
+	if (const auto descriptionHeight = countDescriptionHeight(innerWidth)) {
+		result += descriptionHeight + st::historyPollDescriptionSkip;
+	}
+	return result;
+}
+
+TextSelection Poll::toQuestionSelection(TextSelection selection) const {
+	return UnshiftItemSelection(selection, _description);
+}
+
+TextSelection Poll::fromQuestionSelection(TextSelection selection) const {
+	return ShiftItemSelection(selection, _description);
 }
 
 void Poll::checkQuizAnswered() {
@@ -946,14 +1126,81 @@ void Poll::draw(Painter &p, const PaintContext &context) const {
 
 	const auto stm = context.messageStyle();
 	const auto padding = st::msgPadding;
-	auto tshift = st::historyPollQuestionTop;
-	if (!isBubbleTop()) {
-		tshift -= st::msgFileTopMinus;
-	}
+	auto tshift = countTopContentSkip();
 	paintw -= padding.left() + padding.right();
 
+	if (const auto mediaHeight = countTopMediaHeight()) {
+		const auto target = countTopMediaRect(tshift);
+		p.setPen(Qt::NoPen);
+		p.setBrush(stm->msgFileBg);
+		PainterHighQualityEnabler hq(p);
+		if (_attachedMedia->kind == PollThumbnailKind::Emoji) {
+			p.drawRoundedRect(
+				target,
+				st::roundRadiusLarge,
+				st::roundRadiusLarge);
+			const auto image = _attachedMedia->thumbnail->image(
+				std::max(target.width(), target.height()));
+			if (!image.isNull()) {
+				const auto source = QRectF(QPointF(), QSizeF(image.size()));
+				const auto kx = target.width() / source.width();
+				const auto ky = target.height() / source.height();
+				const auto scale = std::min(kx, ky);
+				const auto imageSize = QSizeF(
+					source.width() * scale,
+					source.height() * scale);
+				const auto geometry = QRectF(
+					target.x() + (target.width() - imageSize.width()) / 2.,
+					target.y() + (target.height() - imageSize.height()) / 2.,
+					imageSize.width(),
+					imageSize.height());
+				p.save();
+				auto path = QPainterPath();
+				path.addRoundedRect(
+					target,
+					st::roundRadiusLarge,
+					st::roundRadiusLarge);
+				p.setClipPath(path);
+				p.drawImage(geometry, image, source);
+				p.restore();
+			}
+		} else {
+			validateTopMediaCache(target.size());
+			if (!_attachedMediaCache.isNull()) {
+				p.drawImage(target.topLeft(), _attachedMediaCache);
+			}
+		}
+		tshift += mediaHeight + st::historyPollMediaSkip;
+	}
+
+	if (const auto descriptionHeight = countDescriptionHeight(paintw)) {
+		p.setPen(stm->historyTextFg);
+		_parent->prepareCustomEmojiPaint(p, context, _description);
+		_description.draw(p, {
+			.position = { padding.left(), tshift },
+			.outerWidth = width(),
+			.availableWidth = paintw,
+			.spoiler = Ui::Text::DefaultSpoilerCache(),
+			.now = context.now,
+			.pausedEmoji = context.paused,
+			.pausedSpoiler = context.paused,
+			.selection = context.selection,
+			.useFullWidth = true,
+		});
+		tshift += descriptionHeight + st::historyPollDescriptionSkip;
+	}
+
 	p.setPen(stm->historyTextFg);
-	_question.drawLeft(p, padding.left(), tshift, paintw, width(), style::al_left, 0, -1, context.selection);
+	_question.drawLeft(
+		p,
+		padding.left(),
+		tshift,
+		paintw,
+		width(),
+		style::al_left,
+		0,
+		-1,
+		toQuestionSelection(context.selection));
 	tshift += _question.countHeight(paintw) + st::historyPollSubtitleSkip;
 
 	p.setPen(stm->msgDateFg);
@@ -1614,15 +1861,40 @@ void Poll::startAnswersAnimation() const {
 TextSelection Poll::adjustSelection(
 		TextSelection selection,
 		TextSelectType type) const {
-	return _question.adjustSelection(selection, type);
+	if (_description.isEmpty()) {
+		return _question.adjustSelection(selection, type);
+	} else if (selection.to <= _description.length()) {
+		return _description.adjustSelection(selection, type);
+	}
+	const auto questionSelection = _question.adjustSelection(
+		toQuestionSelection(selection),
+		type);
+	if (selection.from >= _description.length()) {
+		return fromQuestionSelection(questionSelection);
+	}
+	const auto descriptionSelection = _description.adjustSelection(
+		selection,
+		type);
+	return {
+		descriptionSelection.from,
+		fromQuestionSelection(questionSelection).to
+	};
 }
 
 uint16 Poll::fullSelectionLength() const {
-	return _question.length();
+	return _description.length() + _question.length();
 }
 
 TextForMimeData Poll::selectedText(TextSelection selection) const {
-	return _question.toTextForMimeData(selection);
+	auto description = _description.toTextForMimeData(selection);
+	auto question = _question.toTextForMimeData(
+		toQuestionSelection(selection));
+	if (description.empty()) {
+		return question;
+	} else if (question.empty()) {
+		return description;
+	}
+	return description.append('\n').append(std::move(question));
 }
 
 TextState Poll::textState(QPoint point, StateRequest request) const {
@@ -1635,11 +1907,37 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 	const auto show = showVotes();
 	const auto padding = st::msgPadding;
 	auto paintw = width();
-	auto tshift = st::historyPollQuestionTop;
-	if (!isBubbleTop()) {
-		tshift -= st::msgFileTopMinus;
-	}
+	auto tshift = countTopContentSkip();
 	paintw -= padding.left() + padding.right();
+
+	if (const auto mediaHeight = countTopMediaHeight()) {
+		if (_attachedMedia->handler
+			&& countTopMediaRect(tshift).contains(point)) {
+			result.link = _attachedMedia->handler;
+			return result;
+		}
+		tshift += mediaHeight + st::historyPollMediaSkip;
+	}
+
+	auto symbolAdd = 0;
+	if (const auto descriptionHeight = countDescriptionHeight(paintw)) {
+		if (QRect(
+			padding.left(),
+			tshift,
+			paintw,
+			descriptionHeight).contains(point)) {
+			result = TextState(_parent, _description.getStateLeft(
+				point - QPoint(padding.left(), tshift),
+				paintw,
+				width(),
+				request.forText()));
+			return result;
+		}
+		if (point.y() >= tshift + descriptionHeight) {
+			symbolAdd += _description.length();
+		}
+		tshift += descriptionHeight + st::historyPollDescriptionSkip;
+	}
 
 	const auto questionH = _question.countHeight(paintw);
 	if (QRect(padding.left(), tshift, paintw, questionH).contains(point)) {
@@ -1647,7 +1945,11 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 			point - QPoint(padding.left(), tshift),
 			paintw,
 			request.forText()));
+		result.symbol += symbolAdd;
 		return result;
+	}
+	if (point.y() >= tshift + questionH) {
+		symbolAdd += _question.length();
 	}
 	tshift += questionH + st::historyPollSubtitleSkip;
 	if (inShowSolution(point, padding.left() + paintw, tshift)) {
@@ -1711,6 +2013,11 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 		}
 	}
 	return result;
+}
+
+void Poll::parentTextUpdated() {
+	updateDescription();
+	history()->owner().requestViewResize(_parent);
 }
 
 auto Poll::bubbleRoll() const -> BubbleRoll {

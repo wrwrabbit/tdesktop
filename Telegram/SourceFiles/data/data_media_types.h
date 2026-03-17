@@ -637,6 +637,8 @@ public:
 	TextWithEntities notificationText() const override;
 	QString pinnedTextSubstring() const override;
 	TextForMimeData clipboardText() const override;
+	bool consumeMessageText(const TextWithEntities &text) override;
+	TextWithEntities consumedMessageText() const override;
 
 	bool updateInlineResultMedia(const MTPMessageMedia &media) override;
 	bool updateSentMedia(const MTPMessageMedia &media) override;
@@ -647,6 +649,7 @@ public:
 
 private:
 	not_null<PollData*> _poll;
+	TextWithEntities _consumedText;
 
 };
 
