@@ -76,6 +76,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document_resolver.h"
 #include "data/data_file_click_handler.h"
 #include "data/data_download_manager.h"
+#include "data/data_poll.h"
 #include "window/themes/window_theme_preview.h"
 #include "window/window_peer_menu.h"
 #include "window/window_controller.h"
@@ -249,6 +250,63 @@ QWidget *PipDelegate::pipParentWidget() {
 		ints += add;
 	}
 	return false;
+}
+
+[[nodiscard]] std::optional<WebPageCollage::Item> PollInputMediaItem(
+		not_null<PollData*> poll,
+		const std::optional<MTPInputMedia> &media) {
+	if (!media) {
+		return std::nullopt;
+	}
+	return media->match([&](const MTPDinputMediaPhoto &media)
+			-> std::optional<WebPageCollage::Item> {
+		return media.vid().match([&](const MTPDinputPhoto &photo) {
+			return std::make_optional<WebPageCollage::Item>(
+				poll->owner().photo(photo.vid().v).get());
+		}, [](const auto &) -> std::optional<WebPageCollage::Item> {
+			return std::nullopt;
+		});
+	}, [&](const MTPDinputMediaDocument &media)
+			-> std::optional<WebPageCollage::Item> {
+		return media.vid().match([&](const MTPDinputDocument &document) {
+			const auto parsed = poll->owner().document(document.vid().v);
+			return parsed->sticker()
+				? std::optional<WebPageCollage::Item>()
+				: std::make_optional<WebPageCollage::Item>(parsed.get());
+		}, [](const auto &) -> std::optional<WebPageCollage::Item> {
+			return std::nullopt;
+		});
+	}, [](const auto &) -> std::optional<WebPageCollage::Item> {
+		return std::nullopt;
+	});
+}
+
+[[nodiscard]] std::optional<WebPageCollage::Item> PollAnswerMediaItem(
+		not_null<PollData*> poll,
+		const PollAnswer &answer) {
+	return PollInputMediaItem(poll, answer.media);
+}
+
+[[nodiscard]] bool IsPollAnswerMediaItem(
+		not_null<PollData*> poll,
+		const WebPageCollage::Item &item) {
+	return ranges::any_of(poll->answers, [&](const PollAnswer &answer) {
+		const auto candidate = PollAnswerMediaItem(poll, answer);
+		return candidate && (*candidate == item);
+	});
+}
+
+[[nodiscard]] std::optional<WebPageCollage> PollAnswersCollage(
+		not_null<PollData*> poll) {
+	auto result = WebPageCollage();
+	for (const auto &answer : poll->answers) {
+		if (const auto item = PollAnswerMediaItem(poll, answer)) {
+			result.items.push_back(*item);
+		}
+	}
+	return result.items.empty()
+		? std::nullopt
+		: std::make_optional(std::move(result));
 }
 
 } // namespace
@@ -3164,6 +3222,19 @@ auto OverlayWidget::sharedMediaType() const
 		if (const auto media = _message->media()) {
 			if (media->webpage() || media->invoice()) {
 				return std::nullopt;
+			} else if (const auto poll = media->poll()) {
+				const auto isPollMedia = [&](const auto &item) {
+					return IsPollAnswerMediaItem(poll, item)
+						|| (PollInputMediaItem(poll, poll->solutionMedia)
+							== item);
+				};
+				if ((_photo
+						&& isPollMedia(WebPageCollage::Item(_photo)))
+					|| (_document
+						&& isPollMedia(
+							WebPageCollage::Item(_document)))) {
+					return std::nullopt;
+				}
 			}
 		}
 		if (_photo) {
@@ -3400,6 +3471,18 @@ std::optional<OverlayWidget::CollageKey> OverlayWidget::collageKey() const {
 						return _document;
 					}
 				}
+			} else if (const auto poll = media->poll()) {
+				if (_photo
+					&& IsPollAnswerMediaItem(
+						poll,
+						WebPageCollage::Item(_photo))) {
+					return _photo;
+				} else if (_document
+					&& IsPollAnswerMediaItem(
+						poll,
+						WebPageCollage::Item(_document))) {
+					return _document;
+				}
 			}
 		}
 	}
@@ -3443,6 +3526,8 @@ void OverlayWidget::validateCollage() {
 							data.items.push_back(document);
 						}
 					}
+				} else if (const auto poll = media->poll()) {
+					_collageData = PollAnswersCollage(poll);
 				}
 			}
 		}
@@ -3497,6 +3582,25 @@ void OverlayWidget::refreshCaption() {
 							.append(tr::bold(media->webpage()->title))
 							.append('\n')
 							.append(media->webpage()->description);
+					}
+					return TextWithEntities();
+				} else if (const auto poll = media->poll()) {
+					const auto current = _photo
+						? WebPageCollage::Item(_photo)
+						: WebPageCollage::Item(_document);
+					for (const auto &answer : poll->answers) {
+						const auto candidate = PollAnswerMediaItem(
+							poll,
+							answer);
+						if (candidate && (*candidate == current)) {
+							return answer.text;
+						}
+					}
+					const auto solution = PollInputMediaItem(
+						poll,
+						poll->solutionMedia);
+					if (solution && (*solution == current)) {
+						return poll->solution;
 					}
 					return TextWithEntities();
 				}

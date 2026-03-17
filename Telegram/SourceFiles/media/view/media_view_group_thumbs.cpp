@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/view/media_view_group_thumbs.h"
 
+#include "base/variant.h"
 #include "data/data_shared_media.h"
 #include "data/data_user_photos.h"
 #include "data/data_photo.h"
@@ -14,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document.h"
 #include "data/data_document_media.h"
 #include "data/data_media_types.h"
+#include "data/data_poll.h"
 #include "data/data_session.h"
 #include "data/data_web_page.h"
 #include "data/data_file_origin.h"
@@ -153,6 +155,50 @@ Key ComputeKey(const UserPhotosSlice &slice, int index) {
 
 Key ComputeKey(const GroupThumbs::CollageSlice &slice, int index) {
 	return GroupThumbs::CollageKey{ index };
+}
+
+std::optional<WebPageCollage::Item> PollAnswerMediaItemByIndex(
+		not_null<PollData*> poll,
+		int index) {
+	using MaybeItem = std::optional<WebPageCollage::Item>;
+	auto current = 0;
+	for (const auto &answer : poll->answers) {
+		if (const auto media = answer.media) {
+			const auto item = media->match(
+				[&](const MTPDinputMediaPhoto &media) -> MaybeItem {
+					return media.vid().match(
+						[&](const MTPDinputPhoto &p) -> MaybeItem {
+							return poll->owner().photo(p.vid().v).get();
+						},
+						[](const auto &) -> MaybeItem {
+							return std::nullopt;
+						});
+				},
+				[&](const MTPDinputMediaDocument &media) -> MaybeItem {
+					return media.vid().match(
+						[&](const MTPDinputDocument &d) -> MaybeItem {
+							const auto parsed
+								= poll->owner().document(d.vid().v);
+							if (parsed->sticker()) {
+								return std::nullopt;
+							}
+							return parsed.get();
+						},
+						[](const auto &) -> MaybeItem {
+							return std::nullopt;
+						});
+				},
+				[](const auto &) -> MaybeItem {
+					return std::nullopt;
+				});
+			if (item) {
+				if (current++ == index) {
+					return item;
+				}
+			}
+		}
+	}
+	return std::nullopt;
 }
 
 int ComputeThumbsLimit(int availableWidth) {
@@ -674,6 +720,16 @@ auto GroupThumbs::createThumb(Key key)
 							key,
 							*invoice,
 							collageKey->index);
+					} else if (const auto poll = media->poll()) {
+						if (const auto item = PollAnswerMediaItemByIndex(
+								poll,
+								collageKey->index)) {
+							return v::match(*item, [&](PhotoData *photo) {
+								return createThumb(key, photo);
+							}, [&](DocumentData *document) {
+								return createThumb(key, document);
+							});
+						}
 					}
 				}
 			}
@@ -691,13 +747,11 @@ auto GroupThumbs::createThumb(
 	if (index < 0 || index >= collage.items.size()) {
 		return createThumb(key, nullptr);
 	}
-	const auto &item = collage.items[index];
-	if (const auto photo = std::get_if<PhotoData*>(&item)) {
-		return createThumb(key, (*photo));
-	} else if (const auto document = std::get_if<DocumentData*>(&item)) {
-		return createThumb(key, (*document));
-	}
-	return createThumb(key, nullptr);
+	return v::match(collage.items[index], [&](PhotoData *photo) {
+		return createThumb(key, photo);
+	}, [&](DocumentData *document) {
+		return createThumb(key, document);
+	});
 }
 
 auto GroupThumbs::createThumb(
