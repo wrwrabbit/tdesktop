@@ -48,6 +48,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h" // defaultComposeFiles.
 #include "styles/style_layers.h"
+#include "styles/style_polls.h"
 #include "styles/style_settings.h"
 
 namespace {
