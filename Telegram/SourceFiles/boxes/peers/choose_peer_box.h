@@ -9,6 +9,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 struct RequestPeerQuery;
 
+namespace Main {
+class Session;
+class SessionShow;
+} // namespace Main
+
 namespace Ui {
 class BoxContent;
 } // namespace Ui
@@ -19,6 +24,12 @@ class SessionNavigation;
 
 void ShowChoosePeerBox(
 	not_null<Window::SessionNavigation*> navigation,
+	not_null<UserData*> bot,
+	RequestPeerQuery query,
+	Fn<void(std::vector<not_null<PeerData*>>)> chosen);
+
+void ShowChoosePeerBox(
+	std::shared_ptr<Main::SessionShow> show,
 	not_null<UserData*> bot,
 	RequestPeerQuery query,
 	Fn<void(std::vector<not_null<PeerData*>>)> chosen);

@@ -291,6 +291,9 @@ public:
 	[[nodiscard]] MsgId personalChannelMessageId() const;
 	void setPersonalChannel(ChannelId channelId, MsgId messageId);
 
+	[[nodiscard]] UserId botManagerId() const;
+	void setBotManagerId(UserId managerId);
+
 	[[nodiscard]] MTPInputUser inputUser() const;
 
 	QString firstName;
@@ -334,6 +337,7 @@ private:
 
 	ChannelId _personalChannelId = 0;
 	MsgId _personalChannelMessageId = 0;
+	UserId _botManagerId = 0;
 
 	uint64 _accessHash = 0;
 	static constexpr auto kInaccessibleAccessHashOld

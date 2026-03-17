@@ -11,10 +11,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_cloud_password.h"
 #include "api/api_send_progress.h"
 #include "api/api_suggest_post.h"
-#include "boxes/share_box.h"
-#include "boxes/passcode_box.h"
-#include "boxes/url_auth_box.h"
 #include "boxes/peers/choose_peer_box.h"
+#include "boxes/peers/create_managed_bot_box.h"
+#include "boxes/passcode_box.h"
+#include "boxes/share_box.h"
+#include "boxes/url_auth_box.h"
 #include "lang/lang_keys.h"
 #include "chat_helpers/bot_command.h"
 #include "core/core_cloud_password.h"
@@ -40,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/generic_box.h"
 #include "ui/text/text_utilities.h"
 
+#include <QtCore/QDataStream>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
 
@@ -544,6 +546,46 @@ void ActivateBotCommand(ClickHandlerContext context, int row, int column) {
 		Api::SuggestChangesClickHandler(item)->onClick(ClickContext{
 			Qt::LeftButton,
 			QVariant::fromValue(context),
+		});
+	} break;
+
+	case ButtonType::CreateBot: {
+		HideSingleUseKeyboard(controller, item);
+
+		auto suggestedName = QString();
+		auto suggestedUsername = QString();
+		{
+			auto stream = QDataStream(button->data);
+			stream >> suggestedName >> suggestedUsername;
+		}
+		const auto peer = item->history()->peer;
+		const auto itemId = item->id;
+		const auto id = int32(button->buttonId);
+		const auto bot = item->getMessageBot();
+		if (!bot) {
+			break;
+		}
+		ShowCreateManagedBotBox({
+			.show = controller->uiShow(),
+			.manager = bot,
+			.suggestedName = suggestedName,
+			.suggestedUsername = suggestedUsername,
+			.done = [=](not_null<UserData*> createdBot) {
+				using Flag = MTPmessages_SendBotRequestedPeer::Flag;
+				peer->session().api().request(
+					MTPmessages_SendBotRequestedPeer(
+						MTP_flags(Flag::f_msg_id),
+						peer->input(),
+						MTP_int(itemId),
+						MTPstring(),
+						MTP_int(id),
+						MTP_vector<MTPInputPeer>(
+							1,
+							createdBot->input()))
+				).done([=](const MTPUpdates &result) {
+					peer->session().api().applyUpdates(result);
+				}).send();
+			},
 		});
 	} break;
 	}

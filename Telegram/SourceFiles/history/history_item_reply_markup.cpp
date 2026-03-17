@@ -12,6 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_components.h"
 #include "inline_bots/bot_attach_web_view.h"
 
+#include <QtCore/QDataStream>
+
 namespace {
 
 [[nodiscard]] HistoryMessageMarkupButton::Visual ParseVisual(
@@ -36,7 +38,9 @@ namespace {
 	};
 }
 
-[[nodiscard]] RequestPeerQuery RequestPeerQueryFromTL(
+} // namespace
+
+RequestPeerQuery RequestPeerQueryFromTL(
 		const MTPDkeyboardButtonRequestPeer &query) {
 	using Type = RequestPeerQuery::Type;
 	using Restriction = RequestPeerQuery::Restriction;
@@ -74,8 +78,6 @@ namespace {
 	});
 	return result;
 }
-
-} // namespace
 
 InlineBots::PeerTypes PeerTypesFromMTP(
 		const MTPvector<MTPInlineQueryPeerType> &types) {
@@ -170,16 +172,38 @@ void HistoryMessageMarkupData::fillRows(
 						qs(data.vtext()),
 						ParseVisual(data.vstyle()));
 				}, [&](const MTPDkeyboardButtonRequestPeer &data) {
-					const auto query = RequestPeerQueryFromTL(data);
-					row.emplace_back(
-						Type::RequestPeer,
-						qs(data.vtext()),
-						ParseVisual(data.vstyle()),
-						QByteArray(
-							reinterpret_cast<const char*>(&query),
-							sizeof(query)),
-						QString(),
-						int64(data.vbutton_id().v));
+					data.vpeer_type().match([&](
+							const MTPDrequestPeerTypeCreateBot &createData) {
+						auto serialized = QByteArray();
+						{
+							auto stream = QDataStream(
+								&serialized,
+								QIODevice::WriteOnly);
+							stream
+								<< qs(createData.vsuggested_name()
+									.value_or_empty())
+								<< qs(createData.vsuggested_username()
+									.value_or_empty());
+						}
+						row.emplace_back(
+							Type::CreateBot,
+							qs(data.vtext()),
+							ParseVisual(data.vstyle()),
+							serialized,
+							QString(),
+							int64(data.vbutton_id().v));
+					}, [&](const auto &) {
+						const auto query = RequestPeerQueryFromTL(data);
+						row.emplace_back(
+							Type::RequestPeer,
+							qs(data.vtext()),
+							ParseVisual(data.vstyle()),
+							QByteArray(
+								reinterpret_cast<const char*>(&query),
+								sizeof(query)),
+							QString(),
+							int64(data.vbutton_id().v));
+					});
 				}, [&](const MTPDkeyboardButtonUrl &data) {
 					row.emplace_back(
 						Type::Url,

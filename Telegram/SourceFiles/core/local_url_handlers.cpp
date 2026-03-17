@@ -1887,6 +1887,18 @@ QString TryConvertUrlToLocal(QString url) {
 		} else if (const auto callMatch = regex_match(u"^call/([a-zA-Z0-9\\.\\_\\-]+)(\\?|$)"_q, query, matchOptions)) {
 			const auto slug = callMatch->captured(1);
 			return u"tg://call?slug="_q + slug;
+		} else if (const auto newbotMatch = regex_match(u"^newbot/([a-zA-Z0-9\\.\\_]+)(/([a-zA-Z0-9\\.\\_]+))?(\\?(.+))?$"_q, query, matchOptions)) {
+			const auto manager = newbotMatch->captured(1);
+			const auto username = newbotMatch->captured(3);
+			const auto params = newbotMatch->captured(5);
+			auto result = u"tg://newbot?manager="_q + url_encode(manager);
+			if (!username.isEmpty()) {
+				result += u"&username="_q + url_encode(username);
+			}
+			if (!params.isEmpty()) {
+				result += '&' + params;
+			}
+			return result;
 		} else if (const auto privateMatch = regex_match(u"^"
 			"c/(\\-?\\d+)"
 			"("

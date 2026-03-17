@@ -2546,6 +2546,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_action_new_creator_pending" = "{user} will become the new main admin in 7 days if {from} does not return.";
 "lng_action_managed_bot_created" = "{from} created a bot {bot}.";
 
+"lng_create_bot_title" = "Create Bot";
+"lng_create_bot_subtitle" = "{bot} would like to create and manage a chatbot on your behalf.";
+"lng_create_bot_name_placeholder" = "Bot Name";
+"lng_create_bot_username_placeholder" = "Bot Username";
+"lng_create_bot_username_available" = "{username} is available.";
+"lng_create_bot_username_taken" = "This username is already taken.";
+"lng_create_bot_username_bad_symbols" = "Username can only contain a-z, 0-9, and underscores.";
+"lng_create_bot_username_too_short" = "Username must be at least 5 characters.";
+"lng_create_bot_button" = "Create";
+"lng_managed_bot_label" = "{icon} Created and managed by {bot}.";
+"lng_managed_bot_ready" = "**{name}** is ready!\n\nClick **Start** below to test your new chatbot. Its behavior is defined by **{parent}**.";
+
 "lng_stake_game_title" = "Emoji Stake";
 "lng_stake_game_beta" = "Beta";
 "lng_stake_game_about" = "A limited play-test of the upcoming emoji mini-game platform for a small group of users.";

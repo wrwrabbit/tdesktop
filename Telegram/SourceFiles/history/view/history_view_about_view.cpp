@@ -7,10 +7,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_about_view.h"
 
+#include "api/api_peer_colors.h"
 #include "api/api_premium.h"
 #include "api/api_sending.h"
 #include "apiwrap.h"
 #include "base/random.h"
+#include "base/unixtime.h"
 #include "ui/effects/premium_stars.h"
 #include "boxes/premium_preview_box.h"
 #include "chat_helpers/stickers_lottie.h"
@@ -21,6 +23,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_channel.h"
 #include "data/data_document.h"
+#include "data/data_emoji_statuses.h"
+#include "data/data_photo.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "history/view/history_view_group_call_bar.h"
@@ -40,15 +44,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_credits.h" // BuyStarsHandler
 #include "settings/sections/settings_premium.h"
 #include "ui/chat/chat_style.h"
+#include "ui/image/image_location_factory.h"
 #include "ui/text/custom_emoji_instance.h"
 #include "ui/text/text_utilities.h"
 #include "ui/text/text_options.h"
 #include "ui/dynamic_image.h"
+#include "ui/empty_userpic.h"
 #include "ui/painter.h"
+#include "ui/top_background_gradient.h"
 #include "window/window_session_controller.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h" // GroupCallUserpics
 #include "styles/style_credits.h"
+#include "styles/style_menu_icons.h"
 
 namespace HistoryView {
 namespace {
@@ -603,6 +611,83 @@ bool EmptyChatLockedBox::hasHeavyPart() {
 void EmptyChatLockedBox::unloadHeavyPart() {
 }
 
+QImage GenerateManagedBotImage(not_null<UserData*> user) {
+	auto centerColor = QColor();
+	auto edgeColor = QColor();
+	if (const auto collectible = user->emojiStatusId().collectible) {
+		centerColor = collectible->centerColor;
+		edgeColor = collectible->edgeColor;
+	} else if (const auto color
+		= user->session().api().peerColors().colorProfileFor(user)) {
+		if (color->bg.size() > 1) {
+			centerColor = color->bg[1];
+			edgeColor = color->bg[0];
+		}
+	}
+	if (!centerColor.isValid()) {
+		const auto colorIndex = Ui::EmptyUserpic::ColorIndex(
+			user->id.value);
+		const auto colors = Ui::EmptyUserpic::UserpicColor(colorIndex);
+		centerColor = colors.color1->c;
+		edgeColor = colors.color2->c;
+	}
+
+	const auto size = QSize(
+		st::managedBotImageWidth,
+		st::managedBotImageHeight);
+	auto image = Ui::CreateTopBgGradient(
+		size,
+		centerColor,
+		edgeColor,
+		false);
+	if (image.isNull()) {
+		return image;
+	}
+
+	auto p = QPainter(&image);
+	auto hq = PainterHighQualityEnabler(p);
+
+	auto iconColor = edgeColor.toHsv();
+	iconColor.setHsv(
+		iconColor.hsvHue(),
+		iconColor.hsvSaturation(),
+		std::max(iconColor.value() - 64, 0));
+	iconColor = iconColor.toRgb();
+	const auto width = size.width();
+	const auto height = size.height();
+	const auto &icon = st::menuIconBot;
+	const auto &points = Ui::PatternBgPoints();
+	for (const auto &point : points) {
+		const auto cx = point.position.x() * width;
+		const auto cy = point.position.y() * height;
+		p.save();
+		p.setOpacity(point.opacity);
+		if (point.scale < 1.) {
+			p.translate(cx, cy);
+			p.scale(point.scale, point.scale);
+			p.translate(-cx, -cy);
+		}
+		const auto x = int(cx) - icon.width() / 2;
+		const auto y = int(cy) - icon.height() / 2;
+		icon.paint(p, x, y, width, iconColor);
+		p.restore();
+	}
+
+	const auto ratio = style::DevicePixelRatio();
+	const auto iheight = st::managedBotCodeIcon.height();
+	const auto scale = (size.height() * ratio * 100) / iheight;
+	auto iconImage = st::managedBotCodeIcon.instance(Qt::white, scale, true);
+	iconImage.setDevicePixelRatio(ratio);
+	const auto iw = iconImage.width() / ratio;
+	const auto ih = iconImage.height() / ratio;
+	p.drawImage(
+		QRect((width - iw) / 2, (height - ih) / 2, iw, ih),
+		iconImage);
+
+	p.end();
+	return image;
+}
+
 } // namespace
 
 AboutView::AboutView(
@@ -703,6 +788,12 @@ bool AboutView::refresh() {
 			return false;
 		}
 		setItem(makeNewBotThread(), nullptr);
+		return true;
+	} else if (user->botManagerId() && info->description.isEmpty()) {
+		if (_item) {
+			return false;
+		}
+		setItem(makeManagedBotInfo(user), nullptr);
 		return true;
 	}
 	const auto version = info->descriptionVersion;
@@ -1060,6 +1151,43 @@ AdminLog::OwnedItem AboutView::makeNewBotThread() {
 			.hideServiceText = true,
 		}));
 	return result;
+}
+
+AdminLog::OwnedItem AboutView::makeManagedBotInfo(
+		not_null<UserData*> user) {
+	const auto image = GenerateManagedBotImage(user);
+	const auto photoImage = image.isNull()
+		? ImageWithLocation()
+		: Images::FromImageInMemory(image, "PNG");
+	const auto photo = _history->session().data().photo(
+		base::RandomValue<PhotoId>(),
+		uint64(0),
+		QByteArray(),
+		base::unixtime::now(),
+		0,
+		false,
+		QByteArray(),
+		ImageWithLocation{},
+		photoImage,
+		photoImage,
+		ImageWithLocation{},
+		ImageWithLocation{},
+		crl::time(0));
+
+	const auto managerId = user->botManagerId();
+	const auto managerUser = user->owner().userLoaded(managerId);
+	const auto parentName = managerUser
+		? managerUser->name()
+		: QString();
+	const auto text = tr::lng_managed_bot_ready(
+		tr::now,
+		lt_name,
+		tr::bold(user->name()),
+		lt_parent,
+		tr::bold(parentName),
+		tr::rich);
+
+	return makeAboutSimple(text, nullptr, photo);
 }
 
 } // namespace HistoryView

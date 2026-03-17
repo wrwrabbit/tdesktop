@@ -1235,3 +1235,29 @@ disableSharingButtonLock: IconEmoji {
 	icon: icon {{ "emoji/premium_lock", activeButtonFg }};
 	padding: margins(-2px, 1px, 0px, 0px);
 }
+
+createBotBox: Box(defaultBox) {
+	shadowIgnoreTopSkip: true;
+}
+createBotUserpicPadding: margins(0px, 16px, 0px, 10px);
+createBotTitlePadding: margins(0px, 0px, 0px, 8px);
+createBotSubtitlePadding: margins(0px, 0px, 0px, 4px);
+createBotCenteredText: FlatLabel(defaultFlatLabel) {
+	align: align(top);
+	minWidth: 40px;
+}
+createBotFieldSpacing: 8px;
+createBotUsernameField: InputField(defaultInputField) {
+	textMargins: margins(0px, 28px, 0px, 4px);
+}
+createBotUsernamePrefix: FlatLabel(defaultFlatLabel) {
+	style: boxTextStyle;
+}
+createBotUsernameSuffix: FlatLabel(createBotUsernamePrefix) {
+	textFg: windowSubTextFg;
+}
+
+managedBotIconEmoji: IconEmoji {
+	icon: icon {{ "chat/code_tags", windowSubTextFg }};
+	padding: margins(-2px, -2px, -2px, 0px);
+}
