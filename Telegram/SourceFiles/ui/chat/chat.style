@@ -667,63 +667,6 @@ webPageAuctionTimeFont: font(11px);
 webPageAuctionSubtextFont: font(12px);
 webPageAuctionPreviewPadding: margins(10px, 30px, 10px, 5px);
 
-historyPollQuestionFont: semiboldFont;
-historyPollQuestionStyle: TextStyle(defaultTextStyle) {
-	font: historyPollQuestionFont;
-}
-historyPollAnswerStyle: defaultTextStyle;
-historyPollQuestionTop: 7px;
-historyPollMediaHeight: 180px;
-historyPollMediaTopSkip: 1px;
-historyPollMediaSideSkip: 1px;
-historyPollMediaSkip: 10px;
-historyPollDescriptionSkip: 8px;
-historyPollSubtitleSkip: 4px;
-historyPollAnswerPadding: margins(32px, 10px, 0px, 10px);
-historyPollAnswersSkip: 2px;
-historyPollPercentFont: semiboldFont;
-historyPollPercentSkip: 5px;
-historyPollPercentTop: 0px;
-historyPollTotalVotesSkip: 5px;
-historyPollFillingMin: 4px;
-historyPollFillingHeight: 4px;
-historyPollFillingRadius: 1px;
-historyPollFillingBottom: 2px;
-historyPollFillingRight: 4px;
-historyPollRadio: Radio(defaultRadio) {
-	bg: transparent;
-	untoggledFg: checkboxFg;
-	toggledFg: windowBgActive;
-	diameter: 18px;
-	thickness: 2px;
-	skip: 65px; // * 0.1
-	duration: universalDuration;
-	rippleAreaPadding: 8px;
-}
-historyPollRadioOpacity: 0.7;
-historyPollRadioOpacityOver: 1.;
-historyPollDuration: 300;
-historyPollRadialAnimation: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
-	thickness: 2px;
-	size: size(18px, 18px);
-}
-historyPollRippleOpacity: 0.3;
-historyPollRecentVotersSkip: 4px;
-historyPollRecentVoterSize: 18px;
-historyPollRecentVoterSkip: 13px;
-historyPollBottomButtonSkip: 15px;
-historyPollBottomButtonTop: 4px;
-historyPollChoiceRight: icon {{ "poll_choice_right", activeButtonFg }};
-historyPollChoiceWrong: icon {{ "poll_choice_wrong", activeButtonFg }};
-historyPollOutChoiceRight: icon {{ "poll_choice_right", historyFileOutIconFg }};
-historyPollOutChoiceRightSelected: icon {{ "poll_choice_right", historyFileOutIconFgSelected }};
-historyPollInChoiceRight: icon {{ "poll_choice_right", historyFileInIconFg }};
-historyPollInChoiceRightSelected: icon {{ "poll_choice_right", historyFileInIconFgSelected }};
-historyPollOutChosen: icon {{ "poll_select_check", historyFileOutIconFg }};
-historyPollOutChosenSelected: icon {{ "poll_select_check", historyFileOutIconFgSelected }};
-historyPollInChosen: icon {{ "poll_select_check", historyFileInIconFg }};
-historyPollInChosenSelected: icon {{ "poll_select_check", historyFileInIconFgSelected }};
-
 historyChecklistTaskPadding: margins(32px, 12px, 0px, 12px);
 historyChecklistCheckedTop: 4px;
 historyChecklistBottomTop: -4px;
