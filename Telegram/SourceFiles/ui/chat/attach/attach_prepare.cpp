@@ -12,8 +12,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ui/chat/attach/attach_send_files_way.h"
 #include "ui/image/image_prepare.h"
+#include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "core/mime_type.h"
+#include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
+#include "styles/style_media_player.h"
 
 #include <QFileInfo>
 
@@ -21,6 +25,7 @@ namespace Ui {
 namespace {
 
 constexpr auto kMaxAlbumCount = 10;
+constexpr auto kStandardPhotoSideLimit = 1280;
 
 struct GroupRange {
 	int from = 0;
@@ -31,6 +36,69 @@ struct GroupRange {
 		return till - from;
 	}
 };
+
+struct HighQualityBadgeCache {
+	QRgb bg = 0;
+	QRgb fg = 0;
+	qreal ratio = 0.;
+	int width = 0;
+	int height = 0;
+	QImage image;
+};
+
+[[nodiscard]] const QImage &HighQualityBadgeImage(
+		const style::ComposeControls &st) {
+	static auto cache = HighQualityBadgeCache();
+	const auto text = u"HD"_q;
+	const auto &font = st::mediaPlayerSpeedButton.font;
+	const auto xpadding = style::ConvertScale(2.);
+	const auto ypadding = 0;
+	const auto stroke = style::ConvertScaleExact(1.);
+	const auto width = font->width(text);
+	const auto height = font->height;
+	const auto ratio = style::DevicePixelRatio();
+	const auto bg = st::roundedBg->c.rgba();
+	const auto fg = st::roundedFg->c.rgba();
+	if (cache.image.isNull()
+		|| (cache.bg != bg)
+		|| (cache.fg != fg)
+		|| (cache.ratio != ratio)
+		|| (cache.width != width)
+		|| (cache.height != height)) {
+		cache.bg = bg;
+		cache.fg = fg;
+		cache.ratio = ratio;
+		cache.width = width;
+		cache.height = height;
+		cache.image = QImage(
+			(width + 2 * xpadding + stroke) * ratio,
+			(height + 2 * ypadding + stroke) * ratio,
+			QImage::Format_ARGB32_Premultiplied);
+		cache.image.setDevicePixelRatio(ratio);
+		cache.image.fill(Qt::transparent);
+		auto painter = QPainter(&cache.image);
+		auto hq = PainterHighQualityEnabler(painter);
+		painter.setCompositionMode(QPainter::CompositionMode_Source);
+		painter.setPen(QPen(Qt::transparent, stroke));
+		painter.setBrush(st::roundedBg);
+		painter.setFont(font);
+		painter.drawRoundedRect(
+			QRectF(
+				0,
+				0,
+				width + 2 * xpadding + stroke,
+				height + 2 * ypadding + stroke),
+			height / 3.,
+			height / 3.);
+		painter.setPen(st::roundedFg);
+		painter.drawText(
+			QPointF(
+				xpadding + stroke / 2.,
+				ypadding + font->ascent + stroke / 2.),
+			text);
+	}
+	return cache.image;
+}
 
 [[nodiscard]] AlbumType GroupTypeForFile(
 		PreparedFile::Type type,
@@ -130,6 +198,14 @@ bool PreparedFile::isGifv() const {
 	return (type == PreparedFile::Type::Video)
 		&& v::is<Video>(information->media)
 		&& v::get<Video>(information->media).isGifv;
+}
+
+bool PreparedFile::canUseHighQualityPhoto() const {
+	return (type == PreparedFile::Type::Photo)
+		&& (information != nullptr)
+		&& !isSticker()
+		&& ((originalDimensions.width() > kStandardPhotoSideLimit)
+			|| (originalDimensions.height() > kStandardPhotoSideLimit));
 }
 
 AlbumType PreparedFile::albumType(bool sendImagesAsPhotos) const {
@@ -332,6 +408,11 @@ bool PreparedList::hasSpoilerMenu(bool compress) const {
 	return allAreVideo || (allAreMedia && compress);
 }
 
+bool PreparedList::hasSendLargePhotosOption(bool compress) const {
+	return compress
+		&& ranges::any_of(files, &PreparedFile::canUseHighQualityPhoto);
+}
+
 std::shared_ptr<PreparedBundle> PrepareFilesBundle(
 		std::vector<PreparedGroup> groups,
 		SendFilesWay way,
@@ -416,6 +497,27 @@ QPixmap BlurredPreviewFromPixmap(QPixmap pixmap, RectParts corners) {
 		Blur(std::move(small), true),
 		image.size(),
 		{ .options = RoundOptions(ImageRoundRadius::Large, corners) }));
+}
+
+void PaintHighQualityBadge(
+		QPainter &p,
+		const style::ComposeControls &st,
+		QRect rect,
+		RectPart origin) {
+	const auto outerSkip = st.photoQualityBadgeOuterSkip;
+	const auto &badge = HighQualityBadgeImage(st);
+	const auto size = badge.size() / badge.devicePixelRatio();
+	const auto left = (origin == RectPart::TopLeft)
+		|| (origin == RectPart::BottomLeft);
+	const auto top = (origin == RectPart::TopLeft)
+		|| (origin == RectPart::TopRight);
+	const auto x = left
+		? (rect.x() + outerSkip)
+		: (rect.x() + rect.width() - size.width() - outerSkip);
+	const auto y = top
+		? (rect.y() + outerSkip)
+		: (rect.y() + rect.height() - size.height() - outerSkip);
+	p.drawImage(QPointF(x, y), badge);
 }
 
 } // namespace Ui

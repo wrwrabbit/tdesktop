@@ -211,10 +211,12 @@ private:
 	void addMenuButton();
 	void applyBlockChanges();
 	void toggleSpoilers(bool enabled);
+	void setSendLargePhotos(bool enabled);
 	void changePrice();
 
 	[[nodiscard]] bool canChangePrice() const;
 	[[nodiscard]] bool hasPrice() const;
+	[[nodiscard]] bool hasSendLargePhotosOption() const;
 	void refreshPriceTag();
 	[[nodiscard]] QImage preparePriceTagBg(QSize size) const;
 
@@ -235,7 +237,7 @@ private:
 	void send(Api::SendOptions options, bool ctrlShiftEnter = false);
 	[[nodiscard]] Fn<void(Api::SendOptions)> sendCallback();
 	void captionResized();
-	void saveSendWaySettings();
+	void saveSendWaySettings(bool rememberAll);
 
 	void setupDragArea();
 	void refreshTitleText();

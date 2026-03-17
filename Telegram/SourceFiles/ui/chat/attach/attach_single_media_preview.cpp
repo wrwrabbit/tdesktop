@@ -45,7 +45,7 @@ SingleMediaPreview *SingleMediaPreview::Create(
 		&& !hasModifications) {
 		return nullptr;
 	}
-	return CreateChild<SingleMediaPreview>(
+	const auto result = CreateChild<SingleMediaPreview>(
 		parent,
 		st,
 		std::move(gifPaused),
@@ -56,6 +56,8 @@ SingleMediaPreview *SingleMediaPreview::Create(
 		animationPreview ? file.path : QString(),
 		type,
 		std::move(actionAllowed));
+	result->setCanShowHighQualityBadge(file.canUseHighQualityPhoto());
+	return result;
 }
 
 SingleMediaPreview::SingleMediaPreview(

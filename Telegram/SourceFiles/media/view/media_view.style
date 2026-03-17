@@ -659,6 +659,8 @@ storiesEmojiPan: EmojiPan(defaultEmojiPan) {
 		menuSpoilerOff: icon {{ "menu/spoiler_off", storiesComposeWhiteText }};
 		menuBelow: icon {{ "menu/link_below", storiesComposeWhiteText }};
 		menuAbove: icon {{ "menu/link_above", storiesComposeWhiteText }};
+		menuQualityHigh: icon {{ "menu/quality_hd", storiesComposeWhiteText }};
+		menuQualityStandard: icon {{ "menu/quality_sd", storiesComposeWhiteText }};
 		menuPrice: icon {{ "menu/earn", storiesComposeWhiteText }};
 		menuEditStars: icon {{ "chat/input_paid", storiesComposeWhiteText, point(-8px, -8px) }};
 

@@ -3820,6 +3820,7 @@ void ApiWrap::editMedia(
 				.spoiler = false,
 				.album = nullptr,
 				.forceFile = false,
+				.sendLargePhotos = false,
 				.idOverride = 0,
 			})
 			: nullptr),
@@ -3829,6 +3830,7 @@ void ApiWrap::editMedia(
 		.spoiler = file.spoiler,
 		.album = nullptr,
 		.forceFile = forceFile,
+		.sendLargePhotos = file.sendLargePhotos,
 		.idOverride = 0,
 		.displayName = file.displayName,
 	}));
@@ -3872,6 +3874,7 @@ void ApiWrap::sendFiles(
 					.spoiler = false,
 					.album = nullptr,
 					.forceFile = false,
+					.sendLargePhotos = false,
 					.idOverride = 0,
 				})
 				: nullptr),
@@ -3881,6 +3884,7 @@ void ApiWrap::sendFiles(
 			.spoiler = file.spoiler,
 			.album = album,
 			.forceFile = forceFile,
+			.sendLargePhotos = file.sendLargePhotos,
 			.idOverride = 0,
 			.displayName = file.displayName,
 		}));

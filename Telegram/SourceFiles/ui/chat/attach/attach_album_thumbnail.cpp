@@ -42,6 +42,7 @@ AlbumThumbnail::AlbumThumbnail(
 , _shrinkSize(int(std::ceil(st::roundRadiusLarge / 1.4)))
 , _isPhoto(file.type == PreparedFile::Type::Photo)
 , _isVideo(file.type == PreparedFile::Type::Video)
+, _canShowHighQualityBadge(file.canUseHighQualityPhoto())
 , _isCompressedSticker(Core::IsMimeSticker(file.information->filemime))
 , _repaint(std::move(repaint))
 , _repaintRect(std::move(repaintRect)) {
@@ -250,7 +251,8 @@ void AlbumThumbnail::paintInAlbum(
 		int left,
 		int top,
 		float64 shrinkProgress,
-		float64 moveProgress) {
+		float64 moveProgress,
+		bool showHighQualityBadge) {
 	const auto shrink = anim::interpolate(0, _shrinkSize, shrinkProgress);
 	_lastShrinkValue = shrink;
 	const auto geometry = countCurrentGeometry(
@@ -314,6 +316,9 @@ void AlbumThumbnail::paintInAlbum(
 		geometry,
 		shrinkProgress);
 	_lastRectOfModify = geometry;
+	if (showHighQualityBadge && _canShowHighQualityBadge) {
+		PaintHighQualityBadge(p, _st, paintedTo);
+	}
 }
 
 void AlbumThumbnail::paintPlayVideo(QPainter &p, QRect geometry) {
@@ -476,7 +481,12 @@ void AlbumThumbnail::drawSimpleFrame(QPainter &p, QRect to, QSize size) const {
 	}
 }
 
-void AlbumThumbnail::paintPhoto(Painter &p, int left, int top, int outerWidth) {
+void AlbumThumbnail::paintPhoto(
+		Painter &p,
+		int left,
+		int top,
+		int outerWidth,
+		bool showHighQualityBadge) {
 	const auto size = _photo.size() / style::DevicePixelRatio();
 	if (_spoiler && _photoBlurred.isNull()) {
 		_photoBlurred = BlurredPreviewFromPixmap(
@@ -515,6 +525,9 @@ void AlbumThumbnail::paintPhoto(Painter &p, int left, int top, int outerWidth) {
 		0);
 
 	_lastRectOfModify = QRect(topLeft, size);
+	if (showHighQualityBadge && _canShowHighQualityBadge) {
+		PaintHighQualityBadge(p, _st, rect);
+	}
 }
 
 void AlbumThumbnail::paintFile(
@@ -525,7 +538,7 @@ void AlbumThumbnail::paintFile(
 
 	if (isCompressedSticker()) {
 		auto spoiler = base::take(_spoiler);
-		paintPhoto(p, left, top, outerWidth);
+		paintPhoto(p, left, top, outerWidth, false);
 		_spoiler = base::take(spoiler);
 		return;
 	}

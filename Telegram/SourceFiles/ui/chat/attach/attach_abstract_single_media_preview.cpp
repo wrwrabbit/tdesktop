@@ -81,6 +81,11 @@ void AbstractSingleMediaPreview::setSpoiler(bool spoiler) {
 	update();
 }
 
+void AbstractSingleMediaPreview::setCanShowHighQualityBadge(bool value) {
+	_canShowHighQualityBadge = value;
+	update();
+}
+
 bool AbstractSingleMediaPreview::hasSpoiler() const {
 	return _spoiler != nullptr;
 }
@@ -248,6 +253,12 @@ void AbstractSingleMediaPreview::paintEvent(QPaintEvent *e) {
 
 		auto icon = &st::historyFileInPlay;
 		icon->paintInCenter(p, inner);
+	}
+	if (_canShowHighQualityBadge && _sendWay.sendLargePhotos()) {
+		PaintHighQualityBadge(
+			p,
+			_st,
+			QRect(_previewLeft, _previewTop, _previewWidth, _previewHeight));
 	}
 }
 

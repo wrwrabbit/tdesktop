@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/send_files_box.h"
 
 #include "lang/lang_keys.h"
+#include "storage/localimageloader.h"
 #include "storage/localstorage.h"
 #include "storage/storage_media_prepare.h"
 #include "iv/iv_instance.h"
@@ -386,6 +387,8 @@ SendFilesBox::Block::Block(
 			: nullptr;
 		if (media) {
 			_isSingleMedia = true;
+			media->setSendWay(way);
+			media->setCanShowHighQualityBadge(first.canUseHighQualityPhoto());
 			_preview.reset(media);
 		} else {
 			_preview.reset(Ui::CreateChild<Ui::SingleFilePreview>(
@@ -674,6 +677,11 @@ Fn<SendMenu::Details()> SendFilesBox::prepareSendMenuDetails(
 			: _invertCaption
 			? SendMenu::CaptionState::Above
 			: SendMenu::CaptionState::Below;
+		result.photoQuality = !hasSendLargePhotosOption()
+			? SendMenu::PhotoQualityState::None
+			: way.sendLargePhotos()
+			? SendMenu::PhotoQualityState::High
+			: SendMenu::PhotoQualityState::Standard;
 		result.price = canChangePrice()
 			? _price.current()
 			: std::optional<uint64>();
@@ -688,6 +696,8 @@ auto SendFilesBox::prepareSendMenuCallback()
 		switch (action.type) {
 		case Type::CaptionDown: _invertCaption = false; break;
 		case Type::CaptionUp: _invertCaption = true; break;
+		case Type::PhotoQualityOn: setSendLargePhotos(true); break;
+		case Type::PhotoQualityOff: setSendLargePhotos(false); break;
 		case Type::SpoilerOn: toggleSpoilers(true); break;
 		case Type::SpoilerOff: toggleSpoilers(false); break;
 		case Type::ChangePrice: changePrice(); break;
@@ -742,7 +752,7 @@ void SendFilesBox::enqueueNextPrepare() {
 	_list.filesToProcess.pop_front();
 	const auto weak = base::make_weak(this);
 	_preparing = true;
-	const auto sideLimit = PhotoSideLimit(); // Get on main thread.
+	const auto sideLimit = PhotoSideLimit(_sendWay.current().sendLargePhotos());
 	crl::async([weak, sideLimit, file = std::move(file)]() mutable {
 		Storage::PrepareDetails(file, st::sendMediaPreviewSize, sideLimit);
 		crl::on_main([weak, file = std::move(file)]() mutable {
@@ -926,12 +936,19 @@ void SendFilesBox::refreshButtons() {
 bool SendFilesBox::hasSendMenu(const MenuDetails &details) const {
 	return (details.type != SendMenu::Type::Disabled)
 		|| (details.spoiler != SendMenu::SpoilerState::None)
-		|| (details.caption != SendMenu::CaptionState::None);
+		|| (details.caption != SendMenu::CaptionState::None)
+		|| (details.photoQuality != SendMenu::PhotoQualityState::None)
+		|| details.price.has_value();
 }
 
 bool SendFilesBox::hasSpoilerMenu() const {
 	return !hasPrice()
 		&& _list.hasSpoilerMenu(_sendWay.current().sendImagesAsPhotos());
+}
+
+bool SendFilesBox::hasSendLargePhotosOption() const {
+	return _list.hasSendLargePhotosOption(
+		_sendWay.current().sendImagesAsPhotos());
 }
 
 bool SendFilesBox::canChangePrice() const {
@@ -962,6 +979,15 @@ void SendFilesBox::toggleSpoilers(bool enabled) {
 	for (auto &block : _blocks) {
 		block.toggleSpoilers(enabled);
 	}
+}
+
+void SendFilesBox::setSendLargePhotos(bool enabled) {
+	auto way = _sendWay.current();
+	if (way.sendLargePhotos() == enabled) {
+		return;
+	}
+	way.setSendLargePhotos(enabled);
+	_sendWay = way;
 }
 
 void SendFilesBox::changePrice() {
@@ -1249,7 +1275,8 @@ void SendFilesBox::pushBlock(int from, int till) {
 				if (ok) {
 					refreshAllAfterChanges(from);
 				}
-			});
+			},
+			PhotoSideLimit(true));
 	};
 	const auto replaceAttachment = [=, show = _show](int index) {
 		applyBlockChanges();
@@ -1358,6 +1385,7 @@ void SendFilesBox::pushBlock(int from, int till) {
 					}
 					refreshAllAfterChanges(from);
 				}),
+				PhotoSideLimit(true),
 				video->thumbnail.size());
 		};
 		const auto checkResult = [=](const Ui::PreparedList &list) {
@@ -2171,14 +2199,18 @@ void SendFilesBox::setInnerFocus() {
 	}
 }
 
-void SendFilesBox::saveSendWaySettings() {
+void SendFilesBox::saveSendWaySettings(bool rememberAll) {
 	auto way = _sendWay.current();
 	auto oldWay = Core::App().settings().sendFilesWay();
-	if (_groupFiles->isHidden()) {
+	if (!rememberAll) {
+		way.setGroupFiles(oldWay.groupFiles());
+		way.setSendImagesAsPhotos(oldWay.sendImagesAsPhotos());
+	} else if (_groupFiles->isHidden()) {
 		way.setGroupFiles(oldWay.groupFiles());
 	}
-	if (_list.overrideSendImagesAsPhotos == way.sendImagesAsPhotos()
-		|| _sendImagesAsPhotos->isHidden()) {
+	if (rememberAll
+		&& (_list.overrideSendImagesAsPhotos == way.sendImagesAsPhotos()
+			|| _sendImagesAsPhotos->isHidden())) {
 		way.setSendImagesAsPhotos(oldWay.sendImagesAsPhotos());
 	}
 	if (way != oldWay) {
@@ -2208,6 +2240,7 @@ void SendFilesBox::send(
 		auto child = _sendMenuDetails();
 		child.spoiler = SendMenu::SpoilerState::None;
 		child.caption = SendMenu::CaptionState::None;
+		child.photoQuality = SendMenu::PhotoQualityState::None;
 		child.price = std::nullopt;
 		return SendMenu::DefaultCallback(_show, sendCallback())(
 			{ .type = SendMenu::ActionType::Schedule },
@@ -2220,20 +2253,20 @@ void SendFilesBox::send(
 		return;
 	}
 
-	if (_wayRemember && _wayRemember->checked()) {
-		saveSendWaySettings();
-	}
+	const auto way = _sendWay.current();
 
 	for (auto &item : _list.files) {
 		item.spoiler = false;
 	}
 	applyBlockChanges();
+	for (auto &item : _list.files) {
+		item.sendLargePhotos = way.sendLargePhotos();
+	}
 
 	Storage::ApplyModifications(_list);
 
 	_confirmed = true;
 	if (_confirmedCallback) {
-		const auto way = _sendWay.current();
 		auto caption = fieldText();
 		if (!validateLength(caption.text)) {
 			return;
@@ -2244,6 +2277,7 @@ void SendFilesBox::send(
 				return;
 			}
 		}
+		saveSendWaySettings(_wayRemember && _wayRemember->checked());
 		options.invertCaption = _invertCaption;
 		options.price = hasPrice() ? _price.current() : 0;
 		if (options.price > 0) {

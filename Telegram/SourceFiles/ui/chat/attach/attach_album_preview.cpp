@@ -381,11 +381,23 @@ void AlbumPreview::paintAlbum(Painter &p) const {
 	const auto top = contentTop();
 	for (const auto &thumb : _thumbs) {
 		if (thumb.get() != _paintedAbove) {
-			thumb->paintInAlbum(p, left, top, shrink, moveProgress);
+			thumb->paintInAlbum(
+				p,
+				left,
+				top,
+				shrink,
+				moveProgress,
+				_sendWay.sendLargePhotos());
 		}
 	}
 	if (_paintedAbove) {
-		_paintedAbove->paintInAlbum(p, left, top, shrink, moveProgress);
+		_paintedAbove->paintInAlbum(
+			p,
+			left,
+			top,
+			shrink,
+			moveProgress,
+			_sendWay.sendLargePhotos());
 	}
 }
 
@@ -403,7 +415,12 @@ void AlbumPreview::paintPhotos(Painter &p, QRect clip) const {
 		} else if (bottom <= clip.y()) {
 			continue;
 		}
-		thumb->paintPhoto(p, left, top, outerWidth);
+		thumb->paintPhoto(
+			p,
+			left,
+			top,
+			outerWidth,
+			_sendWay.sendLargePhotos());
 	}
 }
 
@@ -698,7 +715,7 @@ QImage AlbumPreview::generatePriceTagBackground() const {
 		p.translate(geometry.center());
 		p.scale(wscale, hscale);
 		p.translate(-geometry.center());
-		thumb->paintInAlbum(p, 0, 0, 1., 1.);
+		thumb->paintInAlbum(p, 0, 0, 1., 1., _sendWay.sendLargePhotos());
 		p.restore();
 	}
 	p.end();

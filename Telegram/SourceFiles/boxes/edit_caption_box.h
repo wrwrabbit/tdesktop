@@ -112,6 +112,9 @@ private:
 
 	[[nodiscard]] int errorTopSkip() const;
 	[[nodiscard]] bool hasSpoiler() const;
+	[[nodiscard]] bool hasSendLargePhotosOption() const;
+	[[nodiscard]] Ui::SendFilesWay currentSendWay() const;
+	void saveSendWaySettings();
 
 	bool setPreparedList(Ui::PreparedList &&list);
 
@@ -147,6 +150,7 @@ private:
 	bool _isPhoto = false;
 	bool _isVideo = false;
 	bool _asFile = false;
+	bool _sendLargePhotos = false;
 
 	QString _error;
 

@@ -42,6 +42,7 @@ public:
 	[[nodiscard]] bool isPhoto() const;
 
 	void setSpoiler(bool spoiler);
+	void setCanShowHighQualityBadge(bool value);
 	[[nodiscard]] bool hasSpoiler() const;
 	[[nodiscard]] bool canHaveSpoiler() const;
 	[[nodiscard]] rpl::producer<bool> spoileredChanges() const;
@@ -87,6 +88,7 @@ private:
 
 	std::unique_ptr<SpoilerAnimation> _spoiler;
 	rpl::event_stream<bool> _spoileredChanges;
+	bool _canShowHighQualityBadge = false;
 
 	const int _minThumbH;
 	const base::unique_qptr<AttachControlsWidget> _controls;

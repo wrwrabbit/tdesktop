@@ -72,6 +72,8 @@ ComposeIcons {
 	menuSpoilerOff: icon;
 	menuBelow: icon;
 	menuAbove: icon;
+	menuQualityHigh: icon;
+	menuQualityStandard: icon;
 	menuPrice: icon;
 	menuEditStars: icon;
 
@@ -242,6 +244,7 @@ ComposeControls {
 	tabbedHeightMax: pixels;
 	record: RecordBar;
 	files: ComposeFiles;
+	photoQualityBadgeOuterSkip: pixels;
 	premium: PremiumLimits;
 	boxField: InputField;
 	restrictionLabel: FlatLabel;
@@ -657,6 +660,8 @@ defaultComposeIcons: ComposeIcons {
 	menuSpoilerOff: menuIconSpoilerOff;
 	menuBelow: menuIconBelow;
 	menuAbove: menuIconAbove;
+	menuQualityHigh: menuIconQualityHigh;
+	menuQualityStandard: menuIconQualityStandard;
 	menuPrice: menuIconEarn;
 
 	stripBubble: icon{
@@ -1511,6 +1516,7 @@ defaultComposeControls: ComposeControls {
 	tabbedHeightMax: emojiPanMaxHeight;
 	record: defaultRecordBar;
 	files: defaultComposeFiles;
+	photoQualityBadgeOuterSkip: 3px;
 	premium: defaultPremiumLimits;
 	boxField: defaultInputField;
 	restrictionLabel: defaultRestrictionLabel;

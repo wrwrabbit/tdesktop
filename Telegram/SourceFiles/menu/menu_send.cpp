@@ -722,6 +722,7 @@ FillMenuResult FillSendMenu(
 	const auto empty = !sending
 		&& (details.spoiler == SpoilerState::None)
 		&& (details.caption == CaptionState::None)
+		&& (details.photoQuality == PhotoQualityState::None)
 		&& !details.price.has_value();
 	if (empty || !action) {
 		return FillMenuResult::Skipped;
@@ -764,8 +765,23 @@ FillMenuResult FillSendMenu(
 	if ((type != Type::Disabled)
 		&& ((details.spoiler != SpoilerState::None)
 			|| (details.caption != CaptionState::None)
+			|| (details.photoQuality != PhotoQualityState::None)
 			|| details.price.has_value())) {
 		menu->addSeparator(&st::expandedMenuSeparator);
+	}
+	if (details.photoQuality != PhotoQualityState::None) {
+		const auto high = (details.photoQuality == PhotoQualityState::High);
+		menu->addAction(
+			(high
+				? tr::lng_send_standard_quality(tr::now)
+				: tr::lng_send_high_quality(tr::now)),
+			[=] { action({ .type = high
+				? ActionType::PhotoQualityOff
+				: ActionType::PhotoQualityOn
+			}, details); },
+			(high
+				? &icons.menuQualityStandard
+				: &icons.menuQualityHigh));
 	}
 	if (details.spoiler != SpoilerState::None) {
 		const auto spoilered = (details.spoiler == SpoilerState::Enabled);
