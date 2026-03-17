@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/tabbed_panel.h"
 #include "chat_helpers/tabbed_selector.h"
 #include "core/file_utilities.h"
+#include "core/mime_type.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "data/data_document.h"
@@ -67,6 +68,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_polls.h"
 #include "styles/style_settings.h"
 
+#include <QtCore/QMimeData>
+
 namespace {
 
 constexpr auto kQuestionLimit = 255;
@@ -77,6 +80,28 @@ constexpr auto kWarnOptionLimit = 30;
 constexpr auto kSolutionLimit = 200;
 constexpr auto kWarnSolutionLimit = 60;
 constexpr auto kErrorLimit = 99;
+
+[[nodiscard]] Ui::PreparedList PhotoListFromMimeData(
+		not_null<const QMimeData*> data,
+		bool premium) {
+	using Error = Ui::PreparedList::Error;
+	const auto urls = Core::ReadMimeUrls(data);
+	auto result = !urls.isEmpty()
+		? Storage::PrepareMediaList(
+			urls.mid(0, 1),
+			st::sendMediaPreviewSize,
+			premium)
+		: Ui::PreparedList(Error::EmptyFile, QString());
+	if (result.error == Error::None) {
+		return result;
+	} else if (auto read = Core::ReadMimeImage(data)) {
+		return Storage::PrepareMediaFromImage(
+			std::move(read.image),
+			std::move(read.content),
+			st::sendMediaPreviewSize);
+	}
+	return result;
+}
 
 struct PollMediaState {
 	std::optional<MTPInputMedia> media;
@@ -340,6 +365,12 @@ public:
 	using AttachCallback = Fn<void(
 		not_null<Ui::RpWidget*>,
 		std::shared_ptr<PollMediaState>)>;
+	using FieldDropCallback = Fn<void(
+		not_null<Ui::InputField*>,
+		std::shared_ptr<PollMediaState>)>;
+	using WidgetDropCallback = Fn<void(
+		not_null<QWidget*>,
+		std::shared_ptr<PollMediaState>)>;
 
 	Options(
 		not_null<Ui::BoxContent*> box,
@@ -347,7 +378,9 @@ public:
 		not_null<Window::SessionController*> controller,
 		ChatHelpers::TabbedPanel *emojiPanel,
 		bool chooseCorrectEnabled,
-		AttachCallback attachCallback);
+		AttachCallback attachCallback,
+		FieldDropCallback fieldDropCallback,
+		WidgetDropCallback widgetDropCallback);
 
 	[[nodiscard]] bool hasOptions() const;
 	[[nodiscard]] bool isValid() const;
@@ -372,7 +405,9 @@ private:
 			not_null<Main::Session*> session,
 			int position,
 			std::shared_ptr<Ui::RadiobuttonGroup> group,
-			AttachCallback attachCallback);
+			AttachCallback attachCallback,
+			FieldDropCallback fieldDropCallback,
+			WidgetDropCallback widgetDropCallback);
 
 		Option(const Option &other) = delete;
 		Option &operator=(const Option &other) = delete;
@@ -424,6 +459,8 @@ private:
 		base::unique_qptr<Ui::CrossButton> _remove;
 		rpl::variable<bool> *_removeAlways = nullptr;
 		AttachCallback _attachCallback;
+		FieldDropCallback _fieldDropCallback;
+		WidgetDropCallback _widgetDropCallback;
 		std::shared_ptr<PollMediaState> _media;
 
 	};
@@ -447,6 +484,8 @@ private:
 	const not_null<Window::SessionController*> _controller;
 	ChatHelpers::TabbedPanel * const _emojiPanel;
 	const AttachCallback _attachCallback;
+	const FieldDropCallback _fieldDropCallback;
+	const WidgetDropCallback _widgetDropCallback;
 	std::shared_ptr<Ui::RadiobuttonGroup> _chooseCorrectGroup;
 	int _position = 0;
 	std::vector<std::unique_ptr<Option>> _list;
@@ -537,7 +576,9 @@ Options::Option::Option(
 	not_null<Main::Session*> session,
 	int position,
 	std::shared_ptr<Ui::RadiobuttonGroup> group,
-	AttachCallback attachCallback)
+	AttachCallback attachCallback,
+	FieldDropCallback fieldDropCallback,
+	WidgetDropCallback widgetDropCallback)
 : _wrap(container->insert(
 	position,
 	object_ptr<Ui::SlideWrap<Ui::RpWidget>>(
@@ -553,10 +594,15 @@ Options::Option::Option(
 		Ui::InputField::Mode::NoNewlines,
 		tr::lng_polls_create_option_add()))
 , _attachCallback(std::move(attachCallback))
+, _fieldDropCallback(std::move(fieldDropCallback))
+, _widgetDropCallback(std::move(widgetDropCallback))
 , _media(std::make_shared<PollMediaState>()) {
 	InitField(outer, _field, session);
 	_field->setMaxLength(kOptionLimit + kErrorLimit);
 	_field->show();
+	if (_fieldDropCallback) {
+		_fieldDropCallback(_field, _media);
+	}
 
 	_wrap->hide(anim::type::instant);
 
@@ -682,6 +728,9 @@ void Options::Option::createAttach() {
 			_attachCallback(not_null<Ui::RpWidget*>(attach), _media);
 		}
 	}, attach->lifetime());
+	if (_widgetDropCallback) {
+		_widgetDropCallback(attach, _media);
+	}
 	_attach.reset(attach);
 }
 
@@ -842,12 +891,16 @@ Options::Options(
 	not_null<Window::SessionController*> controller,
 	ChatHelpers::TabbedPanel *emojiPanel,
 	bool chooseCorrectEnabled,
-	AttachCallback attachCallback)
+	AttachCallback attachCallback,
+	FieldDropCallback fieldDropCallback,
+	WidgetDropCallback widgetDropCallback)
 : _box(box)
 , _container(container)
 , _controller(controller)
 , _emojiPanel(emojiPanel)
 , _attachCallback(std::move(attachCallback))
+, _fieldDropCallback(std::move(fieldDropCallback))
+, _widgetDropCallback(std::move(widgetDropCallback))
 , _chooseCorrectGroup(chooseCorrectEnabled
 	? createChooseCorrectGroup()
 	: nullptr)
@@ -1027,7 +1080,9 @@ void Options::addEmptyOption() {
 		&_controller->session(),
 		_position + _list.size() + _destroyed.size(),
 		_chooseCorrectGroup,
-		_attachCallback));
+		_attachCallback,
+		_fieldDropCallback,
+		_widgetDropCallback));
 	const auto field = _list.back()->field();
 	if (const auto emojiPanel = _emojiPanel) {
 		const auto emojiToggle = Ui::AddEmojiToggleToField(
@@ -1594,9 +1649,9 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 					if (type == QEvent::Move || type == QEvent::Resize) {
 						crl::on_main(this, updateStickerPanelGeometry);
 					}
-					return base::EventFilterResult::Continue;
-				},
-				lifetime());
+			return base::EventFilterResult::Continue;
+		},
+		lifetime());
 			state->stickerPanel->selector()->fileChosen(
 			) | rpl::on_next([=](ChatHelpers::FileChosen data) {
 				const auto target = state->stickerTarget.lock();
@@ -1626,6 +1681,119 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		updateStickerPanelGeometry();
 		panel->toggleAnimated();
 	};
+	const auto startPreparedPhotoUpload = [=](
+			std::shared_ptr<PollMediaState> media,
+			Ui::PreparedFile file) {
+		const auto token = ++media->token;
+		media->media = std::nullopt;
+		media->thumbnail = std::make_shared<LocalImageThumbnail>(
+			std::move(file.preview));
+		media->rounded = true;
+		media->uploading = true;
+		media->progress = 0.;
+		media->uploadDataId = 0;
+		updateMedia(media);
+		using PreparePoll = PreparePollMediaTask;
+		state->prepareQueue->addTask(std::make_unique<PreparePoll>(
+			FileLoadTask::Args{
+				.session = &_controller->session(),
+				.filepath = file.path,
+				.content = file.content,
+				.information = std::move(file.information),
+				.videoCover = nullptr,
+				.type = SendMediaType::Photo,
+				.to = FileLoadTo(
+					_peer->id,
+					Api::SendOptions(),
+					FullReplyTo(),
+					MsgId()),
+				.caption = TextWithTags(),
+				.spoiler = false,
+				.album = nullptr,
+				.forceFile = false,
+				.idOverride = 0,
+				.displayName = file.displayName,
+			},
+			[=](std::shared_ptr<FilePrepareResult> prepared) {
+				if ((media->token != token)
+					|| !prepared
+					|| (prepared->type != SendMediaType::Photo)) {
+					if (media->token == token) {
+						setMedia(media, std::nullopt, nullptr, false);
+						showToast(tr::lng_attach_failed(tr::now));
+					}
+					return;
+				}
+				const auto uploadId = FullMsgId(
+					_peer->id,
+					_controller->session().data().nextLocalMessageId());
+				state->uploads.emplace(uploadId, UploadContext{
+					.media = media,
+					.token = token,
+				});
+				media->uploadDataId = prepared->id;
+				_controller->session().uploader().upload(
+					uploadId,
+					prepared);
+			}));
+	};
+	const auto applyPreparedPhotoList = [=](
+			std::shared_ptr<PollMediaState> media,
+			Ui::PreparedList &&list) {
+		if (list.error != Ui::PreparedList::Error::None
+			|| (list.files.size() != 1)
+			|| (list.files.front().type != Ui::PreparedFile::Type::Photo)) {
+			return false;
+		}
+		startPreparedPhotoUpload(media, std::move(list.files.front()));
+		return true;
+	};
+	const auto applyPhotoDrop = [=](
+			std::shared_ptr<PollMediaState> media,
+			not_null<const QMimeData*> data) {
+		return applyPreparedPhotoList(
+			media,
+			PhotoListFromMimeData(
+				data,
+				_controller->session().premium()));
+	};
+	const auto installPhotoDropToWidget = [=](
+			not_null<QWidget*> widget,
+			std::shared_ptr<PollMediaState> media) {
+		widget->setAcceptDrops(true);
+		base::install_event_filter(widget, [=](not_null<QEvent*> event) {
+			const auto type = event->type();
+			if (type != QEvent::DragEnter
+				&& type != QEvent::DragMove
+				&& type != QEvent::Drop) {
+				return base::EventFilterResult::Continue;
+			}
+			const auto drop = static_cast<QDropEvent*>(event.get());
+			const auto data = drop->mimeData();
+			if (!data || !Storage::ValidatePhotoEditorMediaDragData(data)) {
+				return base::EventFilterResult::Continue;
+			}
+			if (type == QEvent::Drop && !applyPhotoDrop(media, data)) {
+				return base::EventFilterResult::Continue;
+			}
+			drop->acceptProposedAction();
+			return base::EventFilterResult::Cancel;
+		});
+	};
+	const auto installPhotoDropToField = [=](
+			not_null<Ui::InputField*> field,
+			std::shared_ptr<PollMediaState> media) {
+		field->setMimeDataHook([=](
+				not_null<const QMimeData*> data,
+				Ui::InputField::MimeAction action) {
+			if (action == Ui::InputField::MimeAction::Check) {
+				return Storage::ValidatePhotoEditorMediaDragData(data);
+			} else if (action == Ui::InputField::MimeAction::Insert) {
+				return applyPhotoDrop(media, data);
+			}
+			Unexpected("Polls: action in MimeData hook.");
+		});
+	};
 	const auto choosePhoto = [=](std::shared_ptr<PollMediaState> media) {
 		const auto callback = crl::guard(this, [=](
 				FileDialog::OpenResult &&result) {
@@ -1643,62 +1811,9 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 				showError,
 				st::sendMediaPreviewSize,
 				_controller->session().premium());
-			if (!list) {
-				return;
+			if (list) {
+				applyPreparedPhotoList(media, std::move(*list));
 			}
-			auto file = std::move(list->files.front());
-			const auto token = ++media->token;
-			media->media = std::nullopt;
-			media->thumbnail = std::make_shared<LocalImageThumbnail>(
-				std::move(file.preview));
-			media->rounded = true;
-			media->uploading = true;
-			media->progress = 0.;
-			media->uploadDataId = 0;
-			updateMedia(media);
-			using PreparePoll = PreparePollMediaTask;
-			state->prepareQueue->addTask(std::make_unique<PreparePoll>(
-				FileLoadTask::Args{
-					.session = &_controller->session(),
-					.filepath = file.path,
-					.content = file.content,
-					.information = std::move(file.information),
-					.videoCover = nullptr,
-					.type = SendMediaType::Photo,
-					.to = FileLoadTo(
-						_peer->id,
-						Api::SendOptions(),
-						FullReplyTo(),
-						MsgId()),
-					.caption = TextWithTags(),
-					.spoiler = false,
-					.album = nullptr,
-					.forceFile = false,
-					.idOverride = 0,
-					.displayName = file.displayName,
-				},
-				[=](std::shared_ptr<FilePrepareResult> prepared) {
-					if ((media->token != token)
-						|| !prepared
-						|| (prepared->type != SendMediaType::Photo)) {
-						if (media->token == token) {
-							setMedia(media, std::nullopt, nullptr, false);
-							showToast(tr::lng_attach_failed(tr::now));
-						}
-						return;
-					}
-					const auto uploadId = FullMsgId(
-						_peer->id,
-						_controller->session().data().nextLocalMessageId());
-					state->uploads.emplace(uploadId, UploadContext{
-						.media = media,
-						.token = token,
-					});
-					media->uploadDataId = prepared->id;
-					_controller->session().uploader().upload(
-						uploadId,
-						prepared);
-				}));
 		});
 		FileDialog::GetOpenPath(
 			this,
@@ -1756,6 +1871,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			st::pollAttach,
 			media);
 		button->show();
+		installPhotoDropToField(field, media);
+		installPhotoDropToWidget(button, media);
 		field->sizeValue(
 		) | rpl::on_next([=](QSize size) {
 			button->moveToRight(
@@ -1790,7 +1907,9 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		_controller,
 		_emojiPanel ? _emojiPanel.get() : nullptr,
 		(_chosen & PollData::Flag::Quiz),
-		showMediaMenu);
+		showMediaMenu,
+		installPhotoDropToField,
+		installPhotoDropToWidget);
 	const auto options = state->options.get();
 	auto limit = options->usedCount() | rpl::after_next([=](int count) {
 		setCloseByEscape(!count);
