@@ -121,6 +121,12 @@ mediaviewMore: icon {{ "title_menu_dots", mediaviewControlFg }};
 mediaviewRecognize: icon {{ "mediaview/recognize", mediaviewControlFg }};
 mediaviewDraw: icon {{ "mediaview/draw", mediaviewControlFg }};
 
+mediaviewVoteButton: RoundButton(defaultActiveButton) {
+	height: 36px;
+	radius: 18px;
+}
+mediaviewVoteButtonMargin: 8px;
+
 mediaviewFileRed: icon {
 	{ size(25px, 25px), mediaviewFileBg },
 	{ "mediaview/file_corner", mediaviewFileRedCornerFg },

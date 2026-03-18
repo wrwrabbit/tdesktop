@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "api/api_attached_stickers.h"
 #include "api/api_peer_photo.h"
+#include "api/api_polls.h"
 #include "base/qt/qt_common_adapters.h"
 #include "base/timer_rpl.h"
 #include "lang/lang_keys.h"
@@ -99,6 +100,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_menu_icons.h"
 #include "platform/platform_text_recognition.h"
+
+#include <QGraphicsOpacityEffect>
 
 #ifdef Q_OS_MAC
 #include "platform/mac/touchbar/mac_touchbar_media_view.h"
@@ -1629,6 +1632,8 @@ void OverlayWidget::resizeCenteredControls() {
 
 	refreshClipControllerGeometry();
 	refreshSponsoredButtonGeometry();
+	refreshVoteButton();
+	refreshVoteButtonGeometry();
 	refreshCaptionGeometry();
 	refreshSponsoredButtonWidth();
 }
@@ -1657,6 +1662,8 @@ void OverlayWidget::refreshCaptionGeometry() {
 		? (_y + _h)
 		: _sponsoredButton
 		? (_sponsoredButton->y() - st::mediaviewCaptionMargin.height())
+		: _voteButton
+		? (_voteButton->y() - st::mediaviewCaptionMargin.height())
 		: (_streamed && _streamed->controls)
 		? (_streamed->controls->y() - st::mediaviewCaptionMargin.height())
 		: _groupThumbs
@@ -1733,6 +1740,88 @@ void OverlayWidget::refreshSponsoredButtonWidth() {
 	_sponsoredButton->move(
 		(width() - captionWidth) / 2,
 		_sponsoredButton->y());
+}
+
+const PollAnswer *OverlayWidget::currentPollAnswer() const {
+	if (!_message || !_session) {
+		return nullptr;
+	}
+	const auto media = _message->media();
+	if (!media) {
+		return nullptr;
+	}
+	const auto poll = media->poll();
+	if (!poll || (!_photo && !_document)) {
+		return nullptr;
+	}
+	const auto current = _photo
+		? WebPageCollage::Item(_photo)
+		: WebPageCollage::Item(_document);
+	for (const auto &answer : poll->answers) {
+		const auto candidate = PollAnswerMediaItem(poll, answer);
+		if (candidate && (*candidate == current)) {
+			return &answer;
+		}
+	}
+	return nullptr;
+}
+
+void OverlayWidget::refreshVoteButton() {
+	const auto answer = currentPollAnswer();
+	const auto media = _message ? _message->media() : nullptr;
+	const auto poll = media ? media->poll() : nullptr;
+	const auto show = answer
+		&& poll
+		&& !answer->chosen
+		&& !poll->closed()
+		&& !poll->voted()
+		&& poll->sendingVotes.empty();
+	if (!show) {
+		if (_voteButton) {
+			_voteButton.destroy();
+		}
+		return;
+	}
+	if (!_voteButton) {
+		using TextTransform = Ui::RoundButton::TextTransform;
+		_voteButton.create(
+			_body,
+			tr::lng_polls_submit_votes(),
+			st::mediaviewVoteButton);
+		_voteButton->setTextTransform(TextTransform::NoTransform);
+		const auto effect = Ui::CreateChild<PrintDead<QGraphicsOpacityEffect>>(
+			_voteButton.data());
+		effect->setOpacity(_controlsOpacity.current());
+		_voteButton->setGraphicsEffect(effect);
+		const auto itemId = _message->fullId();
+		const auto option = answer->option;
+		_voteButton->setClickedCallback([=] {
+			if (_session) {
+				_session->api().polls().sendVotes(itemId, { option });
+				_voteButton.destroy();
+				refreshCaptionGeometry();
+			}
+		});
+	}
+	_voteButton->show();
+}
+
+void OverlayWidget::refreshVoteButtonGeometry() {
+	if (!_voteButton) {
+		return;
+	}
+	const auto controllerBottom = (_groupThumbs && !_fullScreenVideo)
+		? _groupThumbsTop
+		: height();
+	_voteButton->moveToLeft(
+		(width() - _voteButton->width()) / 2,
+		controllerBottom
+			- ((_streamed && _streamed->controls)
+				? (_streamed->controls->height()
+					+ st::mediaviewCaptionPadding.bottom())
+				: 0)
+			- _voteButton->height()
+			- st::mediaviewVoteButtonMargin);
 }
 
 void OverlayWidget::fillContextMenuActions(
@@ -2057,6 +2146,15 @@ bool OverlayWidget::updateControlsAnimation(crl::time now) {
 		const auto value = _controlsOpacity.current();
 		_sponsoredButton->setOpacity(value);
 		_sponsoredButton->setAttribute(
+			Qt::WA_TransparentForMouseEvents,
+			value < 1);
+	}
+	if (_voteButton) {
+		const auto value = _controlsOpacity.current();
+		if (const auto e = _voteButton->graphicsEffect()) {
+			static_cast<QGraphicsOpacityEffect*>(e)->setOpacity(value);
+		}
+		_voteButton->setAttribute(
 			Qt::WA_TransparentForMouseEvents,
 			value < 1);
 	}
@@ -7156,6 +7254,7 @@ void OverlayWidget::clearBeforeHide() {
 	_groupThumbs = nullptr;
 	_groupThumbsRect = QRect();
 	_sponsoredButton = nullptr;
+	_voteButton.destroy();
 	_showRecognitionResults = false;
 }
 
@@ -7170,6 +7269,7 @@ void OverlayWidget::clearAfterHide() {
 	_radial.stop();
 	_staticContent = QImage();
 	_themePreview = nullptr;
+	_voteButton.destroyDelayed();
 	_themeApply.destroyDelayed();
 	_themeCancel.destroyDelayed();
 	_themeShare.destroyDelayed();
