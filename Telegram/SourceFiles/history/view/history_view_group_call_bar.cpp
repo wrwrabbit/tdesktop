@@ -83,6 +83,25 @@ bool NeedRegenerateUserpics(
 	return false;
 }
 
+PreparedUserpicsInRow PrepareUserpicsInRow(
+		const std::vector<not_null<PeerData*>> &peers,
+		const style::GroupCallUserpics &st,
+		int limit) {
+	auto rows = std::vector<UserpicInRow>();
+	rows.reserve(peers.size());
+	for (const auto &peer : peers) {
+		rows.push_back({ .peer = peer });
+	}
+	auto result = PreparedUserpicsInRow();
+	if (!rows.empty()) {
+		GenerateUserpicsInRow(result.image, rows, st, limit);
+	}
+	result.width = result.image.isNull()
+		? 0
+		: (result.image.width() / style::DevicePixelRatio());
+	return result;
+}
+
 rpl::producer<Ui::GroupCallBarContent> GroupCallBarContentByCall(
 		not_null<Data::GroupCall*> call,
 		int userpicSize) {
