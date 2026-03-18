@@ -16,11 +16,28 @@ class Session;
 } // namespace Main
 
 class PeerData;
+class PhotoData;
+class DocumentData;
+
+struct PollMedia {
+	PhotoData *photo = nullptr;
+	DocumentData *document = nullptr;
+
+	explicit operator bool() const { return photo || document; }
+};
+
+inline bool operator==(const PollMedia &a, const PollMedia &b) {
+	return (a.photo == b.photo) && (a.document == b.document);
+}
+
+inline bool operator!=(const PollMedia &a, const PollMedia &b) {
+	return !(a == b);
+}
 
 struct PollAnswer {
 	TextWithEntities text;
 	QByteArray option;
-	std::optional<MTPInputMedia> media;
+	PollMedia media;
 	std::vector<not_null<PeerData*>> recentVoters;
 	int votes = 0;
 	bool chosen = false;
@@ -82,8 +99,8 @@ struct PollData {
 	std::vector<not_null<PeerData*>> recentVoters;
 	std::vector<QByteArray> sendingVotes;
 	TextWithEntities solution;
-	std::optional<MTPInputMedia> attachedMedia;
-	std::optional<MTPInputMedia> solutionMedia;
+	PollMedia attachedMedia;
+	PollMedia solutionMedia;
 	TimeId closePeriod = 0;
 	TimeId closeDate = 0;
 	int totalVoters = 0;
@@ -108,5 +125,10 @@ private:
 [[nodiscard]] MTPInputMedia PollDataToInputMedia(
 	not_null<const PollData*> poll,
 	bool close = false);
-[[nodiscard]] std::optional<MTPInputMedia> PollMediaToInputMedia(
+[[nodiscard]] MTPInputMedia PollMediaToMTP(const PollMedia &media);
+[[nodiscard]] PollMedia PollMediaFromMTP(
+	not_null<Data::Session*> owner,
 	const MTPMessageMedia &media);
+[[nodiscard]] PollMedia PollMediaFromInputMTP(
+	not_null<Data::Session*> owner,
+	const MTPInputMedia &media);

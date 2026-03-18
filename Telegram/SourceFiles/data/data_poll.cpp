@@ -8,11 +8,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_poll.h"
 
 #include "api/api_text_entities.h"
+#include "data/data_document.h"
+#include "data/data_photo.h"
 #include "data/data_user.h"
 #include "data/data_session.h"
 #include "base/call_delayed.h"
 #include "main/main_session.h"
-#include "api/api_text_entities.h"
 #include "ui/text/text_options.h"
 
 namespace {
@@ -117,7 +118,7 @@ bool PollData::applyChanges(const MTPDpoll &poll) {
 				answer.vtext());
 			if (const auto media = answer.vmedia()) {
 				ProcessPollMedia(_owner, *media);
-				result.media = PollMediaToInputMedia(*media);
+				result.media = PollMediaFromMTP(_owner, *media);
 			}
 			return result;
 		}, [&](const MTPDinputPollAnswer &answer) {
@@ -126,7 +127,7 @@ bool PollData::applyChanges(const MTPDpoll &poll) {
 				&session(),
 				answer.vtext());
 			if (const auto media = answer.vmedia()) {
-				result.media = *media;
+				result.media = PollMediaFromInputMTP(_owner, *media);
 			}
 			return result;
 		}, [](const auto &) {
@@ -213,12 +214,9 @@ bool PollData::applyResults(const MTPPollResults &results) {
 		}
 		if (const auto media = results.vsolution_media()) {
 			ProcessPollMedia(_owner, *media);
-			const auto parsed = PollMediaToInputMedia(*media);
-			const auto changedMedia = !parsed
-				? solutionMedia.has_value()
-				: (!solutionMedia || (solutionMedia->type() != parsed->type()));
-			solutionMedia = parsed;
-			if (changedMedia) {
+			const auto parsed = PollMediaFromMTP(_owner, *media);
+			if (solutionMedia != parsed) {
+				solutionMedia = parsed;
 				changed = true;
 			}
 		}
@@ -351,51 +349,65 @@ bool PollData::hideResultsUntilClose() const {
 	return (_flags & Flag::HideResultsUntilClose);
 }
 
-std::optional<MTPInputMedia> PollMediaToInputMedia(
-		const MTPMessageMedia &media) {
-	return media.match([&](const MTPDmessageMediaPhoto &media) {
-		const auto photo = media.vphoto();
-		if (!photo || photo->type() != mtpc_photo) {
-			return std::optional<MTPInputMedia>();
-		}
-		const auto &fields = photo->c_photo();
-		using Flag = MTPDinputMediaPhoto::Flag;
-		const auto flags = media.vttl_seconds()
-			? Flag::f_ttl_seconds
-			: Flag(0);
-		return std::optional<MTPInputMedia>(MTP_inputMediaPhoto(
-			MTP_flags(flags),
-			MTP_inputPhoto(
-				fields.vid(),
-				fields.vaccess_hash(),
-				fields.vfile_reference()),
-			MTP_int(media.vttl_seconds().value_or_empty()),
-			MTPInputDocument()));
-	}, [&](const MTPDmessageMediaDocument &media) {
-		const auto document = media.vdocument();
-		if (!document || document->type() != mtpc_document) {
-			return std::optional<MTPInputMedia>();
-		}
-		const auto &fields = document->c_document();
-		using Flag = MTPDinputMediaDocument::Flag;
-		const auto flags = Flag()
-			| (media.vttl_seconds() ? Flag::f_ttl_seconds : Flag())
-			| (media.vvideo_timestamp()
-				? Flag::f_video_timestamp
-				: Flag());
-		return std::optional<MTPInputMedia>(MTP_inputMediaDocument(
-			MTP_flags(flags),
-			MTP_inputDocument(
-				fields.vid(),
-				fields.vaccess_hash(),
-				fields.vfile_reference()),
+MTPInputMedia PollMediaToMTP(const PollMedia &media) {
+	if (media.photo) {
+		return MTP_inputMediaPhoto(
+			MTP_flags(MTPDinputMediaPhoto::Flag(0)),
+			media.photo->mtpInput(),
+			MTP_int(0),
+			MTPInputDocument());
+	} else if (media.document) {
+		return MTP_inputMediaDocument(
+			MTP_flags(MTPDinputMediaDocument::Flag(0)),
+			media.document->mtpInput(),
 			MTPInputPhoto(),
-			MTP_int(media.vvideo_timestamp().value_or_empty()),
-			MTP_int(media.vttl_seconds().value_or_empty()),
-			MTPstring()));
+			MTP_int(0),
+			MTP_int(0),
+			MTPstring());
+	}
+	return MTPInputMedia();
+}
+
+PollMedia PollMediaFromMTP(
+		not_null<Data::Session*> owner,
+		const MTPMessageMedia &media) {
+	auto result = PollMedia();
+	media.match([&](const MTPDmessageMediaPhoto &data) {
+		if (const auto photo = data.vphoto()) {
+			photo->match([&](const MTPDphoto &d) {
+				result.photo = owner->photo(d.vid().v);
+			}, [](const auto &) {
+			});
+		}
+	}, [&](const MTPDmessageMediaDocument &data) {
+		if (const auto document = data.vdocument()) {
+			document->match([&](const MTPDdocument &d) {
+				result.document = owner->document(d.vid().v);
+			}, [](const auto &) {
+			});
+		}
 	}, [](const auto &) {
-		return std::optional<MTPInputMedia>();
 	});
+	return result;
+}
+
+PollMedia PollMediaFromInputMTP(
+		not_null<Data::Session*> owner,
+		const MTPInputMedia &media) {
+	auto result = PollMedia();
+	media.match([&](const MTPDinputMediaPhoto &data) {
+		data.vid().match([&](const MTPDinputPhoto &photo) {
+			result.photo = owner->photo(photo.vid().v);
+		}, [](const auto &) {
+		});
+	}, [&](const MTPDinputMediaDocument &data) {
+		data.vid().match([&](const MTPDinputDocument &document) {
+			result.document = owner->document(document.vid().v);
+		}, [](const auto &) {
+		});
+	}, [](const auto &) {
+	});
+	return result;
 }
 
 MTPPoll PollDataToMTP(not_null<const PollData*> poll, bool close) {
@@ -408,7 +420,9 @@ MTPPoll PollDataToMTP(not_null<const PollData*> poll, bool close) {
 			MTP_textWithEntities(
 				MTP_string(answer.text.text),
 				Api::EntitiesToMTP(&poll->session(), answer.text.entities)),
-			answer.media ? *answer.media : MTPInputMedia());
+			answer.media
+				? PollMediaToMTP(answer.media)
+				: MTPInputMedia());
 	};
 	auto answers = QVector<MTPPollAnswer>();
 	answers.reserve(poll->answers.size());
@@ -479,8 +493,12 @@ MTPInputMedia PollDataToInputMedia(
 		MTP_flags(inputFlags),
 		PollDataToMTP(poll, close),
 		MTP_vector<MTPint>(correct),
-		poll->attachedMedia ? *poll->attachedMedia : MTPInputMedia(),
+		poll->attachedMedia
+			? PollMediaToMTP(poll->attachedMedia)
+			: MTPInputMedia(),
 		MTP_string(solution.text),
 		sentEntities,
-		poll->solutionMedia ? *poll->solutionMedia : MTPInputMedia());
+		poll->solutionMedia
+			? PollMediaToMTP(poll->solutionMedia)
+			: MTPInputMedia());
 }

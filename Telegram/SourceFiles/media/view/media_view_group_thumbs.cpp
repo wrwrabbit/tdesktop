@@ -160,41 +160,18 @@ Key ComputeKey(const GroupThumbs::CollageSlice &slice, int index) {
 std::optional<WebPageCollage::Item> PollAnswerMediaItemByIndex(
 		not_null<PollData*> poll,
 		int index) {
-	using MaybeItem = std::optional<WebPageCollage::Item>;
 	auto current = 0;
 	for (const auto &answer : poll->answers) {
-		if (const auto media = answer.media) {
-			const auto item = media->match(
-				[&](const MTPDinputMediaPhoto &media) -> MaybeItem {
-					return media.vid().match(
-						[&](const MTPDinputPhoto &p) -> MaybeItem {
-							return poll->owner().photo(p.vid().v).get();
-						},
-						[](const auto &) -> MaybeItem {
-							return std::nullopt;
-						});
-				},
-				[&](const MTPDinputMediaDocument &media) -> MaybeItem {
-					return media.vid().match(
-						[&](const MTPDinputDocument &d) -> MaybeItem {
-							const auto parsed
-								= poll->owner().document(d.vid().v);
-							if (parsed->sticker()) {
-								return std::nullopt;
-							}
-							return parsed.get();
-						},
-						[](const auto &) -> MaybeItem {
-							return std::nullopt;
-						});
-				},
-				[](const auto &) -> MaybeItem {
-					return std::nullopt;
-				});
-			if (item) {
-				if (current++ == index) {
-					return item;
-				}
+		const auto &media = answer.media;
+		auto item = std::optional<WebPageCollage::Item>();
+		if (media.photo) {
+			item = WebPageCollage::Item(media.photo);
+		} else if (media.document && !media.document->sticker()) {
+			item = WebPageCollage::Item(media.document);
+		}
+		if (item) {
+			if (current++ == index) {
+				return item;
 			}
 		}
 	}

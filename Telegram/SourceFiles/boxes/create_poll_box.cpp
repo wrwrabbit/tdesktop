@@ -105,7 +105,7 @@ constexpr auto kErrorLimit = 99;
 }
 
 struct PollMediaState {
-	std::optional<MTPInputMedia> media;
+	PollMedia media;
 	std::shared_ptr<Ui::DynamicImage> thumbnail;
 	bool rounded = false;
 	bool uploading = false;
@@ -1464,14 +1464,14 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	};
 	const auto setMedia = [=](
 			const std::shared_ptr<PollMediaState> &media,
-			std::optional<MTPInputMedia> value,
+			PollMedia value,
 			std::shared_ptr<Ui::DynamicImage> thumbnail,
 			bool rounded) {
 		media->token++;
-		media->media = std::move(value);
+		media->media = value;
 		media->thumbnail = std::move(thumbnail);
 		media->rounded = rounded;
-		media->progress = (media->uploading && media->media.has_value())
+		media->progress = (media->uploading && media->media)
 			? 1.
 			: 0.;
 		media->uploadDataId = 0;
@@ -1479,21 +1479,20 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		updateMedia(media);
 	};
 	struct UploadedMedia final {
-		std::optional<MTPInputMedia> input;
+		PollMedia input;
 		std::shared_ptr<Ui::DynamicImage> thumbnail;
 	};
 	const auto parseUploaded = [=](
 			const MTPMessageMedia &result,
 			FullMsgId fullId) {
-		auto parsed = UploadedMedia{
-			.input = PollMediaToInputMedia(result),
-		};
+		auto parsed = UploadedMedia();
+		auto &owner = _controller->session().data();
 		result.match([&](const MTPDmessageMediaPhoto &media) {
 			if (const auto photo = media.vphoto()) {
 				photo->match([&](const MTPDphoto &) {
+					parsed.input.photo = owner.processPhoto(*photo);
 					parsed.thumbnail = Ui::MakePhotoThumbnail(
-						_controller->session().data().processPhoto(
-							*photo),
+						parsed.input.photo,
 						fullId);
 				}, [](const auto &) {
 				});
@@ -1501,9 +1500,12 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		}, [&](const MTPDmessageMediaDocument &media) {
 			if (const auto document = media.vdocument()) {
 				document->match([&](const MTPDdocument &) {
-					parsed.thumbnail = Ui::MakeDocumentThumbnail(
-						_controller->session().data().processDocument(*document),
-						fullId);
+					parsed.input.document = owner.processDocument(
+						*document);
+					parsed.thumbnail
+						= Ui::MakeDocumentThumbnail(
+							parsed.input.document,
+							fullId);
 				}, [](const auto &) {
 				});
 			}
@@ -1533,13 +1535,13 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			}
 			auto parsed = parseUploaded(result, fullId);
 			if (!parsed.input) {
-				setMedia(media, std::nullopt, nullptr, false);
+				setMedia(media, PollMedia(), nullptr, false);
 				showToast(tr::lng_attach_failed(tr::now));
 				return;
 			}
 			setMedia(
 				media,
-				std::move(parsed.input),
+				parsed.input,
 				media->thumbnail
 					? media->thumbnail
 					: std::move(parsed.thumbnail),
@@ -1548,7 +1550,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			if (media->token != token) {
 				return;
 			}
-			setMedia(media, std::nullopt, nullptr, false);
+			setMedia(media, PollMedia(), nullptr, false);
 			showToast(tr::lng_attach_failed(tr::now));
 		}).send();
 	};
@@ -1591,7 +1593,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		if (!media || (media->token != context->token)) {
 			return;
 		}
-		setMedia(media, std::nullopt, nullptr, false);
+		setMedia(media, PollMedia(), nullptr, false);
 		showToast(tr::lng_attach_failed(tr::now));
 	}, lifetime());
 	const auto emojiPaused = [=] {
@@ -1664,16 +1666,9 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 				if (!target) {
 					return;
 				}
-				using Flag = MTPDinputMediaDocument::Flag;
 				setMedia(
 					target,
-					MTP_inputMediaDocument(
-						MTP_flags(Flag(0)),
-						data.document->mtpInput(),
-						MTPInputPhoto(),
-						MTP_int(0),
-						MTP_int(0),
-						MTPstring()),
+					PollMedia{ .document = data.document },
 					Ui::MakeEmojiThumbnail(
 						&_controller->session().data(),
 						Data::SerializeCustomEmojiId(data.document),
@@ -1691,7 +1686,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			std::shared_ptr<PollMediaState> media,
 			Ui::PreparedFile file) {
 		const auto token = ++media->token;
-		media->media = std::nullopt;
+		media->media = PollMedia();
 		media->thumbnail = std::make_shared<LocalImageThumbnail>(
 			std::move(file.preview));
 		media->rounded = true;
@@ -1725,7 +1720,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 					|| !prepared
 					|| (prepared->type != SendMediaType::Photo)) {
 					if (media->token == token) {
-						setMedia(media, std::nullopt, nullptr, false);
+						setMedia(media, PollMedia(), nullptr, false);
 						showToast(tr::lng_attach_failed(tr::now));
 					}
 					return;
@@ -1840,7 +1835,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		for (const auto &id : toCancel) {
 			_controller->session().uploader().cancel(id);
 		}
-		setMedia(media, std::nullopt, nullptr, false);
+		setMedia(media, PollMedia(), nullptr, false);
 	};
 	const auto showMediaMenu = [=](
 			not_null<Ui::RpWidget*> button,

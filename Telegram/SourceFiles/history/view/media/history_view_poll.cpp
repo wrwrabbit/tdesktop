@@ -183,44 +183,36 @@ struct PollThumbnailData {
 
 [[nodiscard]] PollThumbnailData MakePollThumbnail(
 		not_null<PollData*> poll,
-		const std::optional<MTPInputMedia> &media,
+		const PollMedia &media,
 		Window::SessionController::MessageContext messageContext) {
 	auto result = PollThumbnailData();
 	if (!media) {
 		return result;
 	}
-	media->match([&](const MTPDinputMediaPhoto &media) {
-		media.vid().match([&](const MTPDinputPhoto &photo) {
-			result.id = uint64(photo.vid().v);
-			result.thumbnail = Ui::MakePhotoThumbnailCenterCrop(
-				poll->owner().photo(result.id),
+	if (media.photo) {
+		result.id = uint64(media.photo->id);
+		result.thumbnail = Ui::MakePhotoThumbnailCenterCrop(
+			media.photo,
+			messageContext.id);
+		result.rounded = true;
+		result.kind = PollThumbnailKind::Photo;
+	} else if (media.document) {
+		result.id = uint64(media.document->id);
+		if (media.document->sticker()) {
+			result.thumbnail = Ui::MakeEmojiThumbnail(
+				&poll->owner(),
+				Data::SerializeCustomEmojiId(media.document));
+			result.kind = PollThumbnailKind::Emoji;
+		} else {
+			result.thumbnail = Ui::MakeDocumentThumbnailCenterCrop(
+				media.document,
 				messageContext.id);
 			result.rounded = true;
-			result.kind = PollThumbnailKind::Photo;
-		}, [](const auto &) {
-		});
-	}, [&](const MTPDinputMediaDocument &media) {
-		media.vid().match([&](const MTPDinputDocument &document) {
-			result.id = uint64(document.vid().v);
-			const auto parsed = poll->owner().document(result.id);
-			if (parsed->sticker()) {
-				result.thumbnail = Ui::MakeEmojiThumbnail(
-					&poll->owner(),
-					Data::SerializeCustomEmojiId(parsed));
-				result.kind = PollThumbnailKind::Emoji;
-			} else {
-				result.thumbnail = Ui::MakeDocumentThumbnailCenterCrop(
-					parsed,
-					messageContext.id);
-				result.rounded = true;
-				result.kind = PollThumbnailKind::Document;
-			}
-		}, [](const auto &) {
-		});
-	}, [](const auto &) {
-	});
+			result.kind = PollThumbnailKind::Document;
+		}
+	}
 	if (result.kind == PollThumbnailKind::Photo && result.id) {
-		const auto photoId = PhotoId(result.id);
+		const auto photo = media.photo;
 		const auto session = &poll->session();
 		result.handler = std::make_shared<LambdaClickHandler>(
 			[=](ClickContext context) {
@@ -229,12 +221,10 @@ struct PollThumbnailData {
 				if (!controller || (&controller->session() != session)) {
 					return;
 				}
-				controller->openPhoto(
-					poll->owner().photo(photoId),
-					messageContext);
+				controller->openPhoto(photo, messageContext);
 			});
 	} else if (result.kind == PollThumbnailKind::Document && result.id) {
-		const auto documentId = DocumentId(result.id);
+		const auto document = media.document;
 		const auto session = &poll->session();
 		result.handler = std::make_shared<LambdaClickHandler>(
 			[=](ClickContext context) {
@@ -243,10 +233,7 @@ struct PollThumbnailData {
 				if (!controller || (&controller->session() != session)) {
 					return;
 				}
-				controller->openDocument(
-					poll->owner().document(documentId),
-					true,
-					messageContext);
+				controller->openDocument(document, true, messageContext);
 			});
 	}
 	return result;

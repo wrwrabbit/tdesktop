@@ -258,45 +258,25 @@ QWidget *PipDelegate::pipParentWidget() {
 }
 
 [[nodiscard]] std::optional<WebPageCollage::Item> PollInputMediaItem(
-		not_null<PollData*> poll,
-		const std::optional<MTPInputMedia> &media) {
-	if (!media) {
-		return std::nullopt;
+		const PollMedia &media) {
+	if (media.photo) {
+		return WebPageCollage::Item(media.photo);
+	} else if (media.document && !media.document->sticker()) {
+		return WebPageCollage::Item(media.document);
 	}
-	return media->match([&](const MTPDinputMediaPhoto &media)
-			-> std::optional<WebPageCollage::Item> {
-		return media.vid().match([&](const MTPDinputPhoto &photo) {
-			return std::make_optional<WebPageCollage::Item>(
-				poll->owner().photo(photo.vid().v).get());
-		}, [](const auto &) -> std::optional<WebPageCollage::Item> {
-			return std::nullopt;
-		});
-	}, [&](const MTPDinputMediaDocument &media)
-			-> std::optional<WebPageCollage::Item> {
-		return media.vid().match([&](const MTPDinputDocument &document) {
-			const auto parsed = poll->owner().document(document.vid().v);
-			return parsed->sticker()
-				? std::optional<WebPageCollage::Item>()
-				: std::make_optional<WebPageCollage::Item>(parsed.get());
-		}, [](const auto &) -> std::optional<WebPageCollage::Item> {
-			return std::nullopt;
-		});
-	}, [](const auto &) -> std::optional<WebPageCollage::Item> {
-		return std::nullopt;
-	});
+	return std::nullopt;
 }
 
 [[nodiscard]] std::optional<WebPageCollage::Item> PollAnswerMediaItem(
-		not_null<PollData*> poll,
 		const PollAnswer &answer) {
-	return PollInputMediaItem(poll, answer.media);
+	return PollInputMediaItem(answer.media);
 }
 
 [[nodiscard]] bool IsPollAnswerMediaItem(
 		not_null<PollData*> poll,
 		const WebPageCollage::Item &item) {
 	return ranges::any_of(poll->answers, [&](const PollAnswer &answer) {
-		const auto candidate = PollAnswerMediaItem(poll, answer);
+		const auto candidate = PollAnswerMediaItem(answer);
 		return candidate && (*candidate == item);
 	});
 }
@@ -305,7 +285,7 @@ QWidget *PipDelegate::pipParentWidget() {
 		not_null<PollData*> poll) {
 	auto result = WebPageCollage();
 	for (const auto &answer : poll->answers) {
-		if (const auto item = PollAnswerMediaItem(poll, answer)) {
+		if (const auto item = PollAnswerMediaItem(answer)) {
 			result.items.push_back(*item);
 		}
 	}
@@ -1782,7 +1762,7 @@ const PollAnswer *OverlayWidget::currentPollAnswer() const {
 		? WebPageCollage::Item(_photo)
 		: WebPageCollage::Item(_document);
 	for (const auto &answer : poll->answers) {
-		const auto candidate = PollAnswerMediaItem(poll, answer);
+		const auto candidate = PollAnswerMediaItem(answer);
 		if (candidate && (*candidate == current)) {
 			return &answer;
 		}
@@ -3467,7 +3447,7 @@ auto OverlayWidget::sharedMediaType() const
 			} else if (const auto poll = media->poll()) {
 				const auto isPollMedia = [&](const auto &item) {
 					return IsPollAnswerMediaItem(poll, item)
-						|| (PollInputMediaItem(poll, poll->solutionMedia)
+						|| (PollInputMediaItem(poll->solutionMedia)
 							== item);
 				};
 				if ((_photo
@@ -3831,15 +3811,12 @@ void OverlayWidget::refreshCaption() {
 						? WebPageCollage::Item(_photo)
 						: WebPageCollage::Item(_document);
 					for (const auto &answer : poll->answers) {
-						const auto candidate = PollAnswerMediaItem(
-							poll,
-							answer);
+						const auto candidate = PollAnswerMediaItem(answer);
 						if (candidate && (*candidate == current)) {
 							return answer.text;
 						}
 					}
 					const auto solution = PollInputMediaItem(
-						poll,
 						poll->solutionMedia);
 					if (solution && (*solution == current)) {
 						return poll->solution;
