@@ -58,6 +58,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/ui_utility.h"
+#include "window/section_widget.h"
 #include "window/window_session_controller.h"
 #include "apiwrap.h"
 #include "styles/style_boxes.h"
@@ -1654,6 +1655,11 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		lifetime());
 			state->stickerPanel->selector()->fileChosen(
 			) | rpl::on_next([=](ChatHelpers::FileChosen data) {
+				if (Window::ShowSendPremiumError(
+						_controller,
+						data.document)) {
+					return;
+				}
 				const auto target = state->stickerTarget.lock();
 				if (!target) {
 					return;

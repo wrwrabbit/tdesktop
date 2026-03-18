@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/cached_special_layer_shadow_corners.h"
 #include "ui/effects/show_animation.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/dropdown_menu.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/shadow.h"
 #include "ui/painter.h"
@@ -31,38 +32,35 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 
 namespace HistoryView {
+namespace {
 
-bool ShowReactionPreview(
+struct PreviewOverlayState {
+	base::unique_qptr<Window::MediaPreviewWidget> mediaPreview;
+	base::unique_qptr<Ui::AbstractButton> clickable;
+	base::unique_qptr<Ui::DropdownMenu> menu;
+	base::unique_qptr<Ui::AbstractButton> background;
+	base::unique_qptr<Ui::FlatLabel> label;
+	Fn<void()> extraHide;
+
+	void clear() {
+		menu.reset();
+		background.reset();
+		label.reset();
+		mediaPreview.reset();
+		clickable.reset();
+	}
+};
+
+struct PreviewOverlay {
+	std::shared_ptr<PreviewOverlayState> state;
+	Fn<void()> hideAll;
+};
+
+[[nodiscard]] PreviewOverlay CreatePreviewOverlay(
 		not_null<Window::SessionController*> controller,
 		FullMsgId origin,
-		Data::ReactionId reactionId,
-		bool emojiPreview) {
-	auto document = (DocumentData*)(nullptr);
-	if (const auto custom = reactionId.custom()) {
-		document = controller->session().data().document(custom);
-	} else if (const auto resolved
-			= controller->session().data().reactions().lookupTemporary(
-				reactionId)) {
-		document = resolved->selectAnimation;
-	}
-	if (!document) {
-		return false;
-	}
-	struct State {
-		base::unique_qptr<Window::MediaPreviewWidget> mediaPreview;
-		base::unique_qptr<Ui::AbstractButton> clickable;
-		base::unique_qptr<Ui::AbstractButton> background;
-		base::unique_qptr<Ui::FlatLabel> label;
-
-		void clear() {
-			mediaPreview.reset();
-			clickable.reset();
-			background.reset();
-			label.reset();
-		};
-
-	};
-	const auto state = std::make_shared<State>();
+		not_null<DocumentData*> document) {
+	const auto state = std::make_shared<PreviewOverlayState>();
 
 	const auto mainwidget = controller->widget();
 	state->mediaPreview = base::make_unique_q<Window::MediaPreviewWidget>(
@@ -73,11 +71,8 @@ bool ShowReactionPreview(
 	const auto hideAll = [=] {
 		state->clickable->setAttribute(Qt::WA_TransparentForMouseEvents);
 		state->mediaPreview->hidePreview();
-		if (state->label && state->background) {
-			Ui::Animations::HideWidgets({
-				state->background.get(),
-				state->label.get(),
-			});
+		if (state->extraHide) {
+			state->extraHide();
 		}
 		base::call_delayed(
 			st::defaultToggle.duration,
@@ -98,8 +93,84 @@ bool ShowReactionPreview(
 	}, state->clickable->lifetime());
 	state->mediaPreview->showPreview(origin, document);
 	state->clickable->show();
-	const auto mediaPreviewRaw = state->mediaPreview.get();
 	const auto clickableRaw = state->clickable.get();
+
+	mainwidget->sizeValue() | rpl::on_next([=](QSize size) {
+		clickableRaw->setGeometry(Rect(size));
+		clickableRaw->raise();
+	}, clickableRaw->lifetime());
+
+	return { state, hideAll };
+}
+
+} // namespace
+
+bool ShowStickerPreview(
+		not_null<Window::SessionController*> controller,
+		FullMsgId origin,
+		not_null<DocumentData*> document,
+		Fn<void(not_null<Ui::DropdownMenu*>)> fillMenu) {
+	const auto overlay = CreatePreviewOverlay(controller, origin, document);
+	const auto &state = overlay.state;
+
+	const auto mainwidget = controller->widget();
+	if (fillMenu) {
+		state->mediaPreview->setHideEmoji(true);
+		state->menu = base::make_unique_q<Ui::DropdownMenu>(
+			mainwidget,
+			st::dropdownMenuWithIcons);
+		state->menu->setAutoHiding(false);
+		state->menu->setHiddenCallback(
+			crl::guard(state->clickable.get(), overlay.hideAll));
+		fillMenu(state->menu.get());
+	}
+	const auto menuRaw = state->menu.get();
+	state->extraHide = [=] {
+		if (menuRaw) {
+			menuRaw->hideAnimated();
+		}
+	};
+
+	const auto mediaPreviewRaw = state->mediaPreview.get();
+	mainwidget->sizeValue() | rpl::on_next([=](QSize size) {
+		mediaPreviewRaw->setGeometry(Rect(size));
+
+		if (menuRaw) {
+			const auto gap = st::defaultMenu.itemPadding.top();
+			const auto menuH = menuRaw->height();
+			const auto shift = -(gap + menuH) / 2;
+			mediaPreviewRaw->setContentShift(shift);
+
+			const auto menuX = (size.width() - menuRaw->width()) / 2;
+			const auto menuY = mediaPreviewRaw->contentBottom() + gap;
+			menuRaw->move(menuX, menuY);
+			menuRaw->showAnimated(Ui::PanelAnimation::Origin::TopLeft);
+			menuRaw->raise();
+		}
+	}, mediaPreviewRaw->lifetime());
+	return true;
+}
+
+bool ShowReactionPreview(
+		not_null<Window::SessionController*> controller,
+		FullMsgId origin,
+		Data::ReactionId reactionId,
+		bool emojiPreview) {
+	auto document = (DocumentData*)(nullptr);
+	if (const auto custom = reactionId.custom()) {
+		document = controller->session().data().document(custom);
+	} else if (const auto resolved
+			= controller->session().data().reactions().lookupTemporary(
+				reactionId)) {
+		document = resolved->selectAnimation;
+	}
+	if (!document) {
+		return false;
+	}
+	const auto overlay = CreatePreviewOverlay(controller, origin, document);
+	const auto &state = overlay.state;
+
+	const auto mainwidget = controller->widget();
 	const auto shadowExtend = st::boxRoundShadow.extend;
 
 	if (reactionId.custom() && document->sticker()) {
@@ -110,6 +181,7 @@ bool ShowReactionPreview(
 			state->background = base::make_unique_q<Ui::AbstractButton>(
 				mainwidget);
 			const auto show = controller->uiShow();
+			const auto hideAll = overlay.hideAll;
 			state->background->setClickedCallback([=] {
 				hideAll();
 				show->show(Box<StickerSetBox>(
@@ -153,12 +225,16 @@ bool ShowReactionPreview(
 	}
 	const auto backgroundRaw = state->background.get();
 	const auto labelRaw = state->label.get();
+	state->extraHide = [=] {
+		if (backgroundRaw && labelRaw) {
+			Ui::Animations::HideWidgets({
+				backgroundRaw,
+				labelRaw,
+			});
+		}
+	};
 
-	mainwidget->sizeValue() | rpl::on_next([=](QSize size) {
-		clickableRaw->setGeometry(Rect(size));
-		clickableRaw->raise();
-	}, clickableRaw->lifetime());
-
+	const auto mediaPreviewRaw = state->mediaPreview.get();
 	mainwidget->sizeValue() | rpl::on_next([=](QSize size) {
 		mediaPreviewRaw->setGeometry(Rect(size));
 

@@ -14,7 +14,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/view/history_view_message.h"
 #include "history/view/history_view_cursor_state.h"
+#include "history/view/history_view_reaction_preview.h"
+#include "history/view/media/menu/history_view_poll_menu.h"
 #include "calls/calls_instance.h"
+#include "ui/widgets/dropdown_menu.h"
+#include "ui/widgets/menu/menu_action.h"
 #include "ui/chat/message_bubble.h"
 #include "ui/chat/chat_style.h"
 #include "ui/image/image.h"
@@ -174,6 +178,11 @@ struct PollThumbnailData {
 
 [[nodiscard]] PollThumbnailData MakePollThumbnail(
 		not_null<PollData*> poll,
+		const PollAnswer &answer,
+		Window::SessionController::MessageContext messageContext);
+
+[[nodiscard]] PollThumbnailData MakePollThumbnail(
+		not_null<PollData*> poll,
 		const std::optional<MTPInputMedia> &media,
 		Window::SessionController::MessageContext messageContext) {
 	auto result = PollThumbnailData();
@@ -239,9 +248,42 @@ struct PollThumbnailData {
 					true,
 					messageContext);
 			});
-	} else if (result.kind != PollThumbnailKind::None) {
-		result.handler = std::make_shared<LambdaClickHandler>([] {
-		});
+	}
+	return result;
+}
+
+PollThumbnailData MakePollThumbnail(
+		not_null<PollData*> poll,
+		const PollAnswer &answer,
+		Window::SessionController::MessageContext messageContext) {
+	auto result = MakePollThumbnail(poll, answer.media, messageContext);
+	if (result.kind == PollThumbnailKind::Emoji && result.id) {
+		const auto documentId = DocumentId(result.id);
+		const auto option = answer.option;
+		const auto session = &poll->session();
+		result.handler = std::make_shared<LambdaClickHandler>(
+			[=](ClickContext context) {
+				const auto my = context.other.value<ClickHandlerContext>();
+				const auto controller = my.sessionWindow.get();
+				if (!controller || (&controller->session() != session)) {
+					return;
+				}
+				const auto document = poll->owner().document(documentId);
+				const auto itemId = messageContext.id;
+				ShowStickerPreview(
+					controller,
+					itemId,
+					document,
+					[=](not_null<Ui::DropdownMenu*> menu) {
+						FillPollAnswerMenu(
+							menu,
+							poll,
+							option,
+							document,
+							itemId,
+							controller);
+					});
+			});
 	}
 	return result;
 }
@@ -368,7 +410,7 @@ void Poll::Answer::fillMedia(
 		Fn<void()> repaint) {
 	const auto updated = MakePollThumbnail(
 		poll,
-		original.media,
+		original,
 		messageContext);
 	const auto same = (updated.kind == thumbnailKind)
 		&& (updated.id == thumbnailId)

@@ -62,7 +62,7 @@ QRect MediaPreviewWidget::updateArea() const {
 	const auto size = currentDimensions();
 	const auto position = QPoint(
 		(width() - size.width()) / 2,
-		(height() - size.height()) / 2);
+		(height() - size.height()) / 2 + _contentShiftY);
 	const auto premium = _document && _document->isPremiumSticker();
 	const auto adjusted = position
 		- (premium
@@ -181,7 +181,7 @@ QPoint MediaPreviewWidget::innerPosition(QSize size) const {
 	if (!_document || !_document->isPremiumSticker()) {
 		return QPoint(
 			(width() - size.width()) / 2,
-			(height() - size.height()) / 2);
+			(height() - size.height()) / 2 + _contentShiftY);
 	}
 	const auto outer = size * kPremiumMultiplier;
 	const auto shift = size.width() * kPremiumShift;
@@ -195,7 +195,7 @@ QPoint MediaPreviewWidget::outerPosition(QSize size) const {
 	const auto outer = size * kPremiumMultiplier;
 	return QPoint(
 		(width() - outer.width()) / 2,
-		(height() - outer.height()) / 2);
+		(height() - outer.height()) / 2 + _contentShiftY);
 }
 
 void MediaPreviewWidget::showPreview(
@@ -273,7 +273,7 @@ void MediaPreviewWidget::hidePreview() {
 
 void MediaPreviewWidget::fillEmojiString() {
 	_emojiList.clear();
-	if (_photo) {
+	if (_photo || _hideEmoji) {
 		return;
 	}
 	if (const auto sticker = _document->sticker()) {
@@ -317,6 +317,23 @@ void MediaPreviewWidget::setCustomRadius(int radius) {
 
 void MediaPreviewWidget::setCustomDuration(crl::time duration) {
 	_customDuration = duration;
+}
+
+void MediaPreviewWidget::setHideEmoji(bool hide) {
+	_hideEmoji = hide;
+	if (hide) {
+		_emojiList.clear();
+	}
+}
+
+void MediaPreviewWidget::setContentShift(int y) {
+	_contentShiftY = y;
+	update();
+}
+
+int MediaPreviewWidget::contentBottom() const {
+	const auto s = currentDimensions();
+	return (height() + s.height()) / 2 + _contentShiftY;
 }
 
 QSize MediaPreviewWidget::currentDimensions() const {
@@ -610,6 +627,10 @@ void MediaPreviewWidget::clipCallback(
 }
 
 MediaPreviewWidget::~MediaPreviewWidget() {
+	if (!isHidden()) {
+		_controller->disableGifPauseReason(
+			Window::GifPauseReason::MediaPreview);
+	}
 }
 
 } // namespace Window
