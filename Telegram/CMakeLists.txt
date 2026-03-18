@@ -523,6 +523,8 @@ PRIVATE
     core/first_start_prompt.h
     core/binary_location.cpp
     core/binary_location.h
+    core/location_choice_box.cpp
+    core/location_choice_box.h
     core/launcher.cpp
     core/launcher.h
     core/local_url_handlers.cpp

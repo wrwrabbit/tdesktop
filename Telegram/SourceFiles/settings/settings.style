@@ -754,3 +754,30 @@ settingsAgeVerifyTitle: FlatLabel(boxTitle) {
 settingsAgeVerifyIcon: icon {{ "settings/filled_verify_age-48x48", windowFgActive }};
 settingsAgeVerifyIconPadding: margins(16px, 16px, 16px, 16px);
 settingsAgeVerifyIconMargin: margins(0px, 24px, 0px, 14px);
+ptgLocationWarningLabel: FlatLabel(defaultFlatLabel) {
+	textFg: attentionButtonFg;
+	minWidth: 240px;
+}
+ptgLocationLabel: FlatLabel(defaultFlatLabel) {
+	minWidth: 240px;
+}
+ptgLocationSectionSkip: 8px;
+ptgLocationCardPadding: margins(14px, 12px, 14px, 12px);
+ptgLocationCardInnerSkip: 6px;
+ptgLocationCardTitleStyle: semiboldTextStyle;
+ptgLocationCardTitle: FlatLabel(defaultFlatLabel) {
+	style: ptgLocationCardTitleStyle;
+}
+ptgLocationCardDesc: FlatLabel(defaultFlatLabel) {
+	textFg: windowSubTextFg;
+	minWidth: 240px;
+}
+ptgLocationCardBullet: FlatLabel(defaultFlatLabel) {
+	textFg: windowSubTextFg;
+	minWidth: 240px;
+}
+ptgLocationCardButton: RoundButton(defaultActiveButton) {
+	height: 32px;
+	textTop: 7px;
+}
+ptgLocationCardSkip: 12px;
