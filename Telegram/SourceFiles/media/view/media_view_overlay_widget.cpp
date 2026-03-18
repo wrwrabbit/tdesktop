@@ -63,6 +63,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item_helpers.h"
 #include "history/view/media/history_view_media.h"
+#include "history/view/history_view_group_call_bar.h"
 #include "history/view/reactions/history_view_reactions_selector.h"
 #include "data/components/sponsored_messages.h"
 #include "data/data_group_call.h"
@@ -98,6 +99,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_media_view.h"
 #include "styles/style_calls.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_menu_icons.h"
 #include "platform/platform_text_recognition.h"
 
@@ -1633,9 +1635,29 @@ void OverlayWidget::resizeCenteredControls() {
 	refreshClipControllerGeometry();
 	refreshSponsoredButtonGeometry();
 	refreshVoteButton();
+	refreshPollVotersWidget();
 	refreshVoteButtonGeometry();
+	refreshPollVotersWidgetGeometry();
 	refreshCaptionGeometry();
 	refreshSponsoredButtonWidth();
+
+	_pollUpdateLifetime.destroy();
+	if (currentPollAnswer()) {
+		const auto media = _message ? _message->media() : nullptr;
+		const auto poll = media ? media->poll() : nullptr;
+		if (poll && _session) {
+			_session->data().pollUpdates(
+			) | rpl::filter([=](not_null<PollData*> updated) {
+				return updated == poll;
+			}) | rpl::on_next([=] {
+				refreshVoteButton();
+				refreshPollVotersWidget();
+				refreshVoteButtonGeometry();
+				refreshPollVotersWidgetGeometry();
+				refreshCaptionGeometry();
+			}, _pollUpdateLifetime);
+		}
+	}
 }
 
 void OverlayWidget::refreshCaptionGeometry() {
@@ -1664,6 +1686,8 @@ void OverlayWidget::refreshCaptionGeometry() {
 		? (_sponsoredButton->y() - st::mediaviewCaptionMargin.height())
 		: _voteButton
 		? (_voteButton->y() - st::mediaviewCaptionMargin.height())
+		: _pollVotersWidget
+		? (_pollVotersWidget->y() - st::mediaviewCaptionMargin.height())
 		: (_streamed && _streamed->controls)
 		? (_streamed->controls->y() - st::mediaviewCaptionMargin.height())
 		: _groupThumbs
@@ -1789,18 +1813,23 @@ void OverlayWidget::refreshVoteButton() {
 			tr::lng_polls_submit_votes(),
 			st::mediaviewVoteButton);
 		_voteButton->setTextTransform(TextTransform::NoTransform);
-		const auto effect = Ui::CreateChild<PrintDead<QGraphicsOpacityEffect>>(
+		const auto effect = Ui::CreateChild<QGraphicsOpacityEffect>(
 			_voteButton.data());
 		effect->setOpacity(_controlsOpacity.current());
 		_voteButton->setGraphicsEffect(effect);
-		const auto itemId = _message->fullId();
-		const auto option = answer->option;
 		_voteButton->setClickedCallback([=] {
-			if (_session) {
-				_session->api().polls().sendVotes(itemId, { option });
-				_voteButton.destroy();
-				refreshCaptionGeometry();
+			if (!_session) {
+				return;
 			}
+			const auto current = currentPollAnswer();
+			if (!current) {
+				return;
+			}
+			_session->api().polls().sendVotes(
+				_message->fullId(),
+				{ current->option });
+			_voteButton.destroy();
+			refreshCaptionGeometry();
 		});
 	}
 	_voteButton->show();
@@ -1821,6 +1850,97 @@ void OverlayWidget::refreshVoteButtonGeometry() {
 					+ st::mediaviewCaptionPadding.bottom())
 				: 0)
 			- _voteButton->height()
+			- st::mediaviewVoteButtonMargin);
+}
+
+void OverlayWidget::refreshPollVotersWidget() {
+	const auto answer = currentPollAnswer();
+	const auto show = answer
+		&& (answer->votes > 0)
+		&& !_voteButton;
+	if (!show) {
+		_pollVotersWidget.destroy();
+		return;
+	}
+
+	_pollVotersWidget.destroy();
+	_pollVotersWidget.create(_body);
+
+	const auto effect = Ui::CreateChild<QGraphicsOpacityEffect>(
+		_pollVotersWidget.data());
+	effect->setOpacity(_controlsOpacity.current());
+	_pollVotersWidget->setGraphicsEffect(effect);
+
+	auto prepared = HistoryView::PrepareUserpicsInRow(
+		answer->recentVoters,
+		st::mediaviewPollVotersUserpics,
+		3);
+
+	const auto votesText = tr::lng_polls_votes_count(
+		tr::now,
+		lt_count,
+		answer->votes);
+	const auto &font = st::semiboldFont;
+	const auto textWidth = font->width(votesText);
+
+	const auto userpicsWidth = prepared.width;
+	const auto spacing = (userpicsWidth > 0)
+		? st::mediaviewPollVotersSpacing
+		: 0;
+	const auto &padding = st::mediaviewPollVotersPadding;
+	const auto widgetWidth = padding.left()
+		+ userpicsWidth
+		+ spacing
+		+ textWidth
+		+ padding.right();
+	const auto widgetHeight = st::mediaviewVoteButton.height;
+
+	_pollVotersWidget->resize(widgetWidth, widgetHeight);
+
+	const auto userpicSize = st::mediaviewPollVotersUserpics.size;
+	const auto raw = _pollVotersWidget.data();
+	raw->paintRequest() | rpl::on_next([=,
+			image = std::move(prepared.image)] {
+		auto p = QPainter(raw);
+		auto hq = PainterHighQualityEnabler(p);
+
+		const auto radius = st::mediaviewCaptionRadius;
+		p.setPen(Qt::NoPen);
+		p.setBrush(st::mediaviewCaptionBg);
+		p.drawRoundedRect(raw->rect(), radius, radius);
+
+		auto left = padding.left();
+
+		if (!image.isNull()) {
+			const auto top = (widgetHeight - userpicSize) / 2;
+			p.drawImage(left, top, image);
+			left += userpicsWidth + spacing;
+		}
+
+		p.setFont(font);
+		p.setPen(st::mediaviewCaptionFg);
+		const auto textTop = (widgetHeight + font->ascent - font->descent) / 2;
+		p.drawText(left, textTop, votesText);
+	}, raw->lifetime());
+
+	_pollVotersWidget->show();
+}
+
+void OverlayWidget::refreshPollVotersWidgetGeometry() {
+	if (!_pollVotersWidget) {
+		return;
+	}
+	const auto controllerBottom = (_groupThumbs && !_fullScreenVideo)
+		? _groupThumbsTop
+		: height();
+	_pollVotersWidget->moveToLeft(
+		(width() - _pollVotersWidget->width()) / 2,
+		controllerBottom
+			- ((_streamed && _streamed->controls)
+				? (_streamed->controls->height()
+					+ st::mediaviewCaptionPadding.bottom())
+				: 0)
+			- _pollVotersWidget->height()
 			- st::mediaviewVoteButtonMargin);
 }
 
@@ -2155,6 +2275,15 @@ bool OverlayWidget::updateControlsAnimation(crl::time now) {
 			static_cast<QGraphicsOpacityEffect*>(e)->setOpacity(value);
 		}
 		_voteButton->setAttribute(
+			Qt::WA_TransparentForMouseEvents,
+			value < 1);
+	}
+	if (_pollVotersWidget) {
+		const auto value = _controlsOpacity.current();
+		if (const auto e = _pollVotersWidget->graphicsEffect()) {
+			static_cast<QGraphicsOpacityEffect*>(e)->setOpacity(value);
+		}
+		_pollVotersWidget->setAttribute(
 			Qt::WA_TransparentForMouseEvents,
 			value < 1);
 	}
@@ -7255,6 +7384,8 @@ void OverlayWidget::clearBeforeHide() {
 	_groupThumbsRect = QRect();
 	_sponsoredButton = nullptr;
 	_voteButton.destroy();
+	_pollVotersWidget.destroy();
+	_pollUpdateLifetime.destroy();
 	_showRecognitionResults = false;
 }
 
@@ -7270,6 +7401,7 @@ void OverlayWidget::clearAfterHide() {
 	_staticContent = QImage();
 	_themePreview = nullptr;
 	_voteButton.destroyDelayed();
+	_pollVotersWidget.destroyDelayed();
 	_themeApply.destroyDelayed();
 	_themeCancel.destroyDelayed();
 	_themeShare.destroyDelayed();

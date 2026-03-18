@@ -276,6 +276,30 @@ bool PollData::applyResultToAnswers(
 			answer->correct = voters.is_correct();
 			changed = true;
 		}
+		if (const auto recent = voters.vrecent_voters()) {
+			const auto recentChanged = !ranges::equal(
+				answer->recentVoters,
+				recent->v,
+				ranges::equal_to(),
+				&PeerData::id,
+				peerFromMTP);
+			if (recentChanged) {
+				changed = true;
+				answer->recentVoters = ranges::views::all(
+					recent->v
+				) | ranges::views::transform([&](MTPPeer peerId) {
+					const auto peer = _owner->peer(
+						peerFromMTP(peerId));
+					return peer->isMinimalLoaded()
+						? peer.get()
+						: nullptr;
+				}) | ranges::views::filter([](PeerData *peer) {
+					return peer != nullptr;
+				}) | ranges::views::transform([](PeerData *peer) {
+					return not_null(peer);
+				}) | ranges::to_vector;
+			}
+		}
 		return changed;
 	});
 }

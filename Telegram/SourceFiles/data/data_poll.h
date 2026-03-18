@@ -15,10 +15,13 @@ namespace Main {
 class Session;
 } // namespace Main
 
+class PeerData;
+
 struct PollAnswer {
 	TextWithEntities text;
 	QByteArray option;
 	std::optional<MTPInputMedia> media;
+	std::vector<not_null<PeerData*>> recentVoters;
 	int votes = 0;
 	bool chosen = false;
 	bool correct = false;

@@ -440,6 +440,8 @@ private:
 
 	void refreshVoteButton();
 	void refreshVoteButtonGeometry();
+	void refreshPollVotersWidget();
+	void refreshPollVotersWidgetGeometry();
 	[[nodiscard]] const PollAnswer *currentPollAnswer() const;
 
 	void documentUpdated(not_null<DocumentData*> document);
@@ -747,6 +749,8 @@ private:
 
 	base::unique_qptr<SponsoredButton> _sponsoredButton;
 	object_ptr<Ui::RoundButton> _voteButton = { nullptr };
+	object_ptr<Ui::RpWidget> _pollVotersWidget = { nullptr };
+	rpl::lifetime _pollUpdateLifetime;
 
 	bool _receiveMouse = true;
 	bool _processingKeyPress = false;

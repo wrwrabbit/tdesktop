@@ -127,6 +127,15 @@ mediaviewVoteButton: RoundButton(defaultActiveButton) {
 }
 mediaviewVoteButtonMargin: 8px;
 
+mediaviewPollVotersUserpics: GroupCallUserpics {
+	size: 24px;
+	shift: 8px;
+	stroke: 2px;
+	align: align(left);
+}
+mediaviewPollVotersPadding: margins(12px, 0px, 14px, 0px);
+mediaviewPollVotersSpacing: 6px;
+
 mediaviewFileRed: icon {
 	{ size(25px, 25px), mediaviewFileBg },
 	{ "mediaview/file_corner", mediaviewFileRedCornerFg },
