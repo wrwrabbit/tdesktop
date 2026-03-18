@@ -1971,6 +1971,21 @@ void OverlayWidget::fillContextMenuActions(
 			[=] { toMessage(); },
 			&st::mediaMenuIconShowInChat);
 	}
+	if (currentPollAnswer()) {
+		const auto media = _message ? _message->media() : nullptr;
+		const auto poll = media ? media->poll() : nullptr;
+		if (poll
+			&& !poll->closed()
+			&& !poll->quiz()
+			&& !poll->revotingDisabled()) {
+			const auto itemId = _message->fullId();
+			addAction(tr::lng_polls_retract(tr::now), [=] {
+				if (_session) {
+					_session->api().polls().sendVotes(itemId, {});
+				}
+			}, &st::mediaMenuIconRetractVote);
+		}
+	}
 	if (story && story->peer()->isSelf()) {
 		const auto inProfile = story->inProfile();
 		const auto text = inProfile
