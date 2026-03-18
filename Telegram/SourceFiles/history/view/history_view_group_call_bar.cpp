@@ -65,6 +65,24 @@ void GenerateUserpicsInRow(
 	}
 }
 
+bool NeedRegenerateUserpics(
+		const QImage &image,
+		const std::vector<UserpicInRow> &list) {
+	if (image.isNull()) {
+		return true;
+	}
+	for (auto &entry : list) {
+		const auto peer = entry.peer;
+		auto &view = entry.view;
+		const auto wasView = view.cloud.get();
+		if (peer->userpicUniqueKey(view) != entry.uniqueKey
+			|| view.cloud.get() != wasView) {
+			return true;
+		}
+	}
+	return false;
+}
+
 rpl::producer<Ui::GroupCallBarContent> GroupCallBarContentByCall(
 		not_null<Data::GroupCall*> call,
 		int userpicSize) {

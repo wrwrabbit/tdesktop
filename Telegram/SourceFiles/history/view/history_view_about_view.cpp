@@ -181,20 +181,11 @@ QImage UserpicsList::image(int size) {
 
 	const auto regenerate = [&] {
 		const auto version = style::PaletteVersion();
-		if (_frame.isNull() || _subscribed->paletteVersion != version) {
+		if (_subscribed->paletteVersion != version) {
 			_subscribed->paletteVersion = version;
 			return true;
 		}
-		for (auto &entry : _subscribed->list) {
-			const auto peer = entry.peer;
-			auto &view = entry.view;
-			const auto wasView = view.cloud.get();
-			if (peer->userpicUniqueKey(view) != entry.uniqueKey
-				|| view.cloud.get() != wasView) {
-				return true;
-			}
-		}
-		return false;
+		return NeedRegenerateUserpics(_frame, _subscribed->list);
 	}();
 	if (regenerate) {
 		const auto max = std::max(_countOverride, int(_peers.size()));

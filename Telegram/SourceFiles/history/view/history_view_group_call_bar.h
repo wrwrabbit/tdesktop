@@ -37,6 +37,10 @@ void GenerateUserpicsInRow(
 	const style::GroupCallUserpics &st,
 	int maxElements = 0);
 
+[[nodiscard]] bool NeedRegenerateUserpics(
+	const QImage &image,
+	const std::vector<UserpicInRow> &list);
+
 [[nodiscard]] auto GroupCallBarContentByCall(
 	not_null<Data::GroupCall*> call,
 	int userpicSize)
