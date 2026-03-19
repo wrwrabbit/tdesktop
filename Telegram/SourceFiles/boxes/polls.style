@@ -9,6 +9,7 @@ using "ui/basic.style";
 
 using "ui/widgets/widgets.style";
 using "boxes/boxes.style";
+using "chat_helpers/chat_helpers.style";
 
 historyPollQuestionFont: semiboldFont;
 historyPollQuestionStyle: TextStyle(defaultTextStyle) {
@@ -22,7 +23,8 @@ historyPollMediaSideSkip: 1px;
 historyPollMediaSkip: 10px;
 historyPollDescriptionSkip: 8px;
 historyPollSubtitleSkip: 4px;
-historyPollAnswerPadding: margins(32px, 10px, 0px, 10px);
+historyPollAnswerPadding: margins(32px, 6px, 0px, 6px);
+historyPollAnswerPaddingNoMedia: margins(32px, 10px, 0px, 10px);
 historyPollAnswersSkip: 2px;
 historyPollPercentFont: semiboldFont;
 historyPollPercentSkip: 5px;
@@ -30,8 +32,10 @@ historyPollPercentTop: 0px;
 historyPollTotalVotesSkip: 5px;
 historyPollFillingMin: 4px;
 historyPollFillingHeight: 4px;
-historyPollFillingRadius: 1px;
+historyPollFillingRadius: 2px;
+historyPollFillingBgOpacity: 0.15;
 historyPollFillingBottom: 2px;
+historyPollFillingTop: 6px;
 historyPollFillingRight: 4px;
 historyPollRadio: Radio(defaultRadio) {
 	bg: transparent;
@@ -43,6 +47,7 @@ historyPollRadio: Radio(defaultRadio) {
 	duration: universalDuration;
 	rippleAreaPadding: 8px;
 }
+historyPollCheckboxRadius: 3px;
 historyPollRadioOpacity: 0.7;
 historyPollRadioOpacityOver: 1.;
 historyPollDuration: 300;
@@ -54,6 +59,13 @@ historyPollRippleOpacity: 0.3;
 historyPollRecentVotersSkip: 4px;
 historyPollRecentVoterSize: 18px;
 historyPollRecentVoterSkip: 13px;
+historyPollAnswerUserpics: GroupCallUserpics {
+	size: 16px;
+	shift: 5px;
+	stroke: 1px;
+	align: align(left);
+}
+historyPollAnswerUserpicsSkip: 4px;
 historyPollBottomButtonSkip: 15px;
 historyPollBottomButtonTop: 4px;
 historyPollExplanationSkip: 8px;

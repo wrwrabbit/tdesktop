@@ -159,6 +159,7 @@ private:
 		int percentWidth,
 		int left,
 		int top,
+		int topPadding,
 		int outerWidth,
 		const PaintContext &context) const;
 	void paintFilling(
@@ -168,9 +169,9 @@ private:
 		float64 filling,
 		int left,
 		int top,
+		int topPadding,
 		int width,
 		int contentWidth,
-		int height,
 		const PaintContext &context) const;
 	void paintInlineFooter(
 		Painter &p,
@@ -265,6 +266,7 @@ private:
 	std::unique_ptr<Media> _solutionAttach;
 
 	bool _hasSelected = false;
+	bool _anyAnswerHasMedia = false;
 	bool _votedFromHere = false;
 	mutable bool _wrongAnswerAnimated = false;
 

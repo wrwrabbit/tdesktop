@@ -32,9 +32,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/fireworks_animation.h"
 #include "ui/toast/toast.h"
 #include "ui/painter.h"
+#include "ui/rect.h"
 #include "ui/dynamic_image.h"
 #include "ui/dynamic_thumbnails.h"
 #include "history/view/media/history_view_media_common.h"
+#include "history/view/history_view_group_call_bar.h"
 #include "data/data_media_types.h"
 #include "data/data_document.h"
 #include "data/data_photo.h"
@@ -50,6 +52,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_polls.h"
 #include "window/window_session_controller.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_widgets.h"
 #include "styles/style_window.h"
 
@@ -320,6 +323,8 @@ struct Poll::Answer {
 	int votesPercentWidth = 0;
 	float64 filling = 0.;
 	QString votesPercentString;
+	QString votesCountString;
+	int votesCountWidth = 0;
 	bool chosen = false;
 	bool correct = false;
 	bool selected = false;
@@ -331,6 +336,8 @@ struct Poll::Answer {
 	PollThumbnailKind thumbnailKind = PollThumbnailKind::None;
 	uint64 thumbnailId = 0;
 	mutable std::unique_ptr<Ui::RippleAnimation> ripple;
+	std::vector<UserpicInRow> recentVoters;
+	mutable QImage recentVotersImage;
 };
 
 struct Poll::AttachedMedia {
@@ -476,9 +483,12 @@ QSize Poll::countOptimalSize() {
 		_answers
 	) | ranges::views::transform([](const Answer &answer) {
 		const auto media = answer.thumbnail ? PollAnswerMediaSize() : 0;
-		return st::historyPollAnswerPadding.top()
+		const auto &padding = answer.thumbnail
+			? st::historyPollAnswerPadding
+			: st::historyPollAnswerPaddingNoMedia;
+		return padding.top()
 			+ std::max(answer.text.minHeight(), media)
-			+ st::historyPollAnswerPadding.bottom();
+			+ padding.bottom();
 	}), 0);
 
 	const auto bottomButtonHeight = inlineFooter()
@@ -563,9 +573,12 @@ int Poll::countAnswerHeight(
 		int innerWidth) const {
 	const auto media = answer.thumbnail ? PollAnswerMediaSize() : 0;
 	const auto textWidth = countAnswerContentWidth(answer, innerWidth);
-	return st::historyPollAnswerPadding.top()
+	const auto &padding = answer.thumbnail
+		? st::historyPollAnswerPadding
+		: st::historyPollAnswerPaddingNoMedia;
+	return padding.top()
 		+ std::max(answer.text.countHeight(textWidth), media)
-		+ st::historyPollAnswerPadding.bottom();
+		+ padding.bottom();
 }
 
 QSize Poll::countCurrentSize(int newWidth) {
@@ -1022,6 +1035,9 @@ void Poll::updateAnswers() {
 			answer.fillData(_poll, *i, context);
 			answer.fillMedia(_poll, *i, messageContext, repaintThumbnail);
 		}
+		_anyAnswerHasMedia = ranges::any_of(_answers, [](const Answer &a) {
+			return a.thumbnail != nullptr;
+		});
 		return;
 	}
 	_answers = ranges::views::all(options) | ranges::views::transform([&](
@@ -1050,6 +1066,9 @@ void Poll::updateAnswers() {
 	for (auto &answer : _answers) {
 		answer.handler = createAnswerClickHandler(answer);
 	}
+	_anyAnswerHasMedia = ranges::any_of(_answers, [](const Answer &a) {
+		return a.thumbnail != nullptr;
+	});
 
 	resetAnswersAnimation();
 }
@@ -1191,6 +1210,36 @@ void Poll::updateAnswerVotesFromOriginal(
 	}
 	answer.votes = original.votes;
 	answer.filling = answer.votes / float64(maxVotes);
+	if (showVotes() && answer.votes) {
+		answer.votesCountString = QString::number(answer.votes);
+		answer.votesCountWidth = st::normalFont->width(
+			answer.votesCountString);
+	} else {
+		answer.votesCountString.clear();
+		answer.votesCountWidth = 0;
+	}
+	const auto changed = !ranges::equal(
+		answer.recentVoters,
+		original.recentVoters,
+		ranges::equal_to(),
+		&UserpicInRow::peer);
+	if (changed) {
+		auto updated = std::vector<UserpicInRow>();
+		updated.reserve(original.recentVoters.size());
+		for (const auto &peer : original.recentVoters) {
+			const auto i = ranges::find(
+				answer.recentVoters,
+				peer,
+				&UserpicInRow::peer);
+			if (i != end(answer.recentVoters)) {
+				updated.push_back(std::move(*i));
+			} else {
+				updated.push_back({ .peer = peer });
+			}
+		}
+		answer.recentVoters = std::move(updated);
+		answer.recentVotersImage = QImage();
+	}
 }
 
 void Poll::updateAnswerVotes() {
@@ -1384,15 +1433,13 @@ void Poll::paintInlineFooter(
 		const PaintContext &context) const {
 	const auto stm = context.messageStyle();
 	p.setPen(stm->msgDateFg);
+	const auto labelWidth = _totalVotesLabel.maxWidth();
+	const auto labelLeft = left + (paintw - labelWidth) / 2;
 	_totalVotesLabel.drawLeftElided(
 		p,
-		left,
+		labelLeft,
 		top,
-		_parent->data()->reactions().empty()
-			? std::min(
-				_totalVotesLabel.maxWidth(),
-				paintw - _parent->bottomInfoFirstLineWidth())
-			: _totalVotesLabel.maxWidth(),
+		labelWidth,
 		width());
 }
 
@@ -1408,7 +1455,14 @@ void Poll::paintBottom(
 	const auto stm = context.messageStyle();
 	if (showVotersCount()) {
 		p.setPen(stm->msgDateFg);
-		_totalVotesLabel.draw(p, left, stringtop, paintw, style::al_top);
+		const auto labelWidth = _totalVotesLabel.maxWidth();
+		const auto labelLeft = left + (paintw - labelWidth) / 2;
+		_totalVotesLabel.draw(
+			p,
+			labelLeft,
+			stringtop,
+			labelWidth,
+			style::al_top);
 	} else {
 		const auto link = showVotes()
 			? _showResultsLink
@@ -1713,12 +1767,19 @@ int Poll::paintAnswer(
 		const PaintContext &context) const {
 	const auto height = countAnswerHeight(answer, width);
 	const auto stm = context.messageStyle();
+	const auto &answerPadding = answer.thumbnail
+		? st::historyPollAnswerPadding
+		: st::historyPollAnswerPaddingNoMedia;
 	const auto aleft = left + st::historyPollAnswerPadding.left();
 	const auto awidth = width
 		- st::historyPollAnswerPadding.left()
 		- st::historyPollAnswerPadding.right();
 	const auto media = answer.thumbnail ? PollAnswerMediaSize() : 0;
 	const auto textWidth = countAnswerContentWidth(answer, width);
+	const auto anyMediaWidth = _anyAnswerHasMedia
+		? (PollAnswerMediaSize() + PollAnswerMediaSkip())
+		: 0;
+	const auto barContentWidth = std::max(1, awidth - anyMediaWidth);
 
 	if (answer.ripple) {
 		p.setOpacity(st::historyPollRippleOpacity);
@@ -1733,6 +1794,57 @@ int Poll::paintAnswer(
 		}
 		p.setOpacity(1.);
 	}
+
+	const auto paintVotesCount = [&](float64 opacity = 1.) {
+		if (answer.votesCountString.isEmpty()) {
+			return;
+		}
+		if (!answer.recentVoters.empty()) {
+			if (NeedRegenerateUserpics(
+					answer.recentVotersImage,
+					answer.recentVoters)) {
+				const auto was = !answer.recentVotersImage.isNull();
+				GenerateUserpicsInRow(
+					answer.recentVotersImage,
+					answer.recentVoters,
+					st::historyPollAnswerUserpics);
+				if (!was) {
+					history()->owner().registerHeavyViewPart(
+						_parent);
+				}
+			}
+		}
+		const auto userpicsWidth = answer.recentVotersImage.isNull()
+			? 0
+			: (answer.recentVotersImage.width()
+				/ style::DevicePixelRatio());
+		const auto userpicsExtra = userpicsWidth
+			? (st::historyPollAnswerUserpicsSkip + userpicsWidth)
+			: 0;
+		const auto rightEdge = aleft + awidth
+			- anyMediaWidth
+			- st::historyPollFillingRight;
+		const auto countX = rightEdge
+			- answer.votesCountWidth
+			- userpicsExtra;
+		const auto atop = top + answerPadding.top();
+		p.setOpacity(opacity);
+		p.setFont(st::normalFont);
+		p.setPen(stm->msgDateFg);
+		p.drawTextLeft(
+			countX,
+			atop,
+			outerWidth,
+			answer.votesCountString,
+			answer.votesCountWidth);
+		if (userpicsWidth) {
+			const auto userpicsX = rightEdge - userpicsWidth;
+			const auto userpicsY = atop
+				+ (st::normalFont->height
+					- st::historyPollAnswerUserpics.size) / 2;
+			p.drawImage(userpicsX, userpicsY, answer.recentVotersImage);
+		}
+	};
 
 	if (animation) {
 		const auto opacity = animation->opacity.current();
@@ -1752,8 +1864,10 @@ int Poll::paintAnswer(
 				percentWidth,
 				left,
 				top,
+				answerPadding.top(),
 				outerWidth,
 				context);
+			paintVotesCount(opacity);
 			p.setOpacity(sqrt(opacity));
 			paintFilling(
 				p,
@@ -1762,9 +1876,9 @@ int Poll::paintAnswer(
 				animation->filling.current(),
 				left,
 				top,
+				answerPadding.top(),
 				width,
-				textWidth,
-				height,
+				barContentWidth,
 				context);
 			p.setOpacity(1.);
 		}
@@ -1777,8 +1891,10 @@ int Poll::paintAnswer(
 			answer.votesPercentWidth,
 			left,
 			top,
+			answerPadding.top(),
 			outerWidth,
 			context);
+		paintVotesCount();
 		paintFilling(
 			p,
 			answer.chosen,
@@ -1786,13 +1902,13 @@ int Poll::paintAnswer(
 			answer.filling,
 			left,
 			top,
+			answerPadding.top(),
 			width,
-			textWidth,
-			height,
+			barContentWidth,
 			context);
 	}
 
-	top += st::historyPollAnswerPadding.top();
+	top += answerPadding.top();
 	if (answer.thumbnail) {
 		const auto target = QRect(
 			aleft + awidth - media,
@@ -1840,7 +1956,10 @@ void Poll::paintRadio(
 		int left,
 		int top,
 		const PaintContext &context) const {
-	top += st::historyPollAnswerPadding.top();
+	const auto &answerPadding = answer.thumbnail
+		? st::historyPollAnswerPadding
+		: st::historyPollAnswerPaddingNoMedia;
+	top += answerPadding.top();
 
 	const auto stm = context.messageStyle();
 
@@ -1857,7 +1976,9 @@ void Poll::paintRadio(
 		p.setOpacity(o * (over ? st::historyPollRadioOpacityOver : st::historyPollRadioOpacity));
 	}
 
+	const auto multiChoice = (_flags & PollData::Flag::MultiChoice);
 	const auto rect = QRectF(left, top, radio.diameter, radio.diameter).marginsRemoved(QMarginsF(radio.thickness / 2., radio.thickness / 2., radio.thickness / 2., radio.thickness / 2.));
+	const auto radius = st::historyPollCheckboxRadius;
 	if (_sendingAnimation && _sendingAnimation->option == answer.option) {
 		const auto &active = stm->msgServiceFg;
 		if (anim::Disabled()) {
@@ -1868,17 +1989,25 @@ void Poll::paintRadio(
 			pen.setWidth(radio.thickness);
 			pen.setCapStyle(Qt::RoundCap);
 			p.setPen(pen);
-			p.drawArc(
-				rect,
-				state.arcFrom,
-				state.arcLength);
+			if (multiChoice) {
+				p.drawRoundedRect(rect, radius, radius);
+			} else {
+				p.drawArc(
+					rect,
+					state.arcFrom,
+					state.arcLength);
+			}
 		}
 	} else {
 		if (checkmark < 1.) {
 			auto pen = regular->p;
 			pen.setWidth(radio.thickness);
 			p.setPen(pen);
-			p.drawEllipse(rect);
+			if (multiChoice) {
+				p.drawRoundedRect(rect, radius, radius);
+			} else {
+				p.drawEllipse(rect);
+			}
 		}
 		if (checkmark > 0.) {
 			const auto removeFull = (radio.diameter / 2 - radio.thickness);
@@ -1888,7 +2017,12 @@ void Poll::paintRadio(
 			pen.setWidth(radio.thickness);
 			p.setPen(pen);
 			p.setBrush(color);
-			p.drawEllipse(rect.marginsRemoved({ removeNow, removeNow, removeNow, removeNow }));
+			const auto inner = rect - Margins(removeNow);
+			if (multiChoice) {
+				p.drawRoundedRect(inner, radius, radius);
+			} else {
+				p.drawEllipse(inner);
+			}
 			const auto &icon = stm->historyPollChosen;
 			icon.paint(p, left + (radio.diameter - icon.width()) / 2, top + (radio.diameter - icon.height()) / 2, width());
 		}
@@ -1903,12 +2037,13 @@ void Poll::paintPercent(
 		int percentWidth,
 		int left,
 		int top,
+		int topPadding,
 		int outerWidth,
 		const PaintContext &context) const {
 	const auto stm = context.messageStyle();
 	const auto aleft = left + st::historyPollAnswerPadding.left();
 
-	top += st::historyPollAnswerPadding.top();
+	top += topPadding;
 
 	p.setFont(st::historyPollPercentFont);
 	p.setPen(stm->historyTextFg);
@@ -1923,22 +2058,23 @@ void Poll::paintFilling(
 		float64 filling,
 		int left,
 		int top,
+		int topPadding,
 		int width,
 		int contentWidth,
-		int height,
 		const PaintContext &context) const {
-	const auto bottom = top + height;
 	const auto st = context.st;
 	const auto stm = context.messageStyle();
 	const auto aleft = left + st::historyPollAnswerPadding.left();
 
-	top += st::historyPollAnswerPadding.top();
+	top += topPadding;
 
 	const auto thickness = st::historyPollFillingHeight;
 	const auto max = contentWidth - st::historyPollFillingRight;
 	const auto size = anim::interpolate(st::historyPollFillingMin, max, filling);
 	const auto radius = st::historyPollFillingRadius;
-	const auto ftop = bottom - st::historyPollFillingBottom - thickness;
+	const auto ftop = top
+		+ st::historyPollPercentFont->height
+		+ st::historyPollFillingTop;
 
 	enum class Style {
 		Incorrect,
@@ -1962,8 +2098,12 @@ void Poll::paintFilling(
 		? st->boxTextFgGood()
 		: stm->msgFileBg;
 	p.setPen(Qt::NoPen);
-	p.setBrush(color);
 	PainterHighQualityEnabler hq(p);
+	{
+		p.setBrush(anim::with_alpha(color->c, st::historyPollFillingBgOpacity));
+		p.drawRoundedRect(barleft, ftop, max, thickness, radius, radius);
+	}
+	p.setBrush(color);
 	if (chosen || correct) {
 		const auto &icon = (style == Style::Incorrect)
 			? st->historyPollChoiceWrong()
@@ -1972,7 +2112,17 @@ void Poll::paintFilling(
 			: stm->historyPollChoiceRight;
 		const auto cleft = aleft - st::historyPollPercentSkip - icon.width();
 		const auto ctop = ftop - (icon.height() - thickness) / 2;
-		p.drawEllipse(cleft, ctop, icon.width(), icon.height());
+		if (_flags & PollData::Flag::MultiChoice) {
+			p.drawRoundedRect(
+				cleft,
+				ctop,
+				icon.width(),
+				icon.height(),
+				st::historyPollCheckboxRadius,
+				st::historyPollCheckboxRadius);
+		} else {
+			p.drawEllipse(cleft, ctop, icon.width(), icon.height());
+		}
 
 		const auto paintContent = [&](QPainter &p) {
 			icon.paint(p, cleft, ctop, width);
@@ -2256,7 +2406,9 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 						+ paintw
 						- st::historyPollAnswerPadding.right()
 						- media,
-					tshift + st::historyPollAnswerPadding.top(),
+					tshift + (answer.thumbnail
+						? st::historyPollAnswerPadding
+						: st::historyPollAnswerPaddingNoMedia).top(),
 					media,
 					media).contains(point)) {
 				result.link = answer.mediaHandler;
@@ -2370,11 +2522,22 @@ void Poll::unloadHeavyPart() {
 	for (auto &recent : _recentVoters) {
 		recent.userpic = {};
 	}
+	for (auto &answer : _answers) {
+		for (auto &recent : answer.recentVoters) {
+			recent.view = {};
+		}
+		answer.recentVotersImage = QImage();
+	}
 }
 
 bool Poll::hasHeavyPart() const {
 	for (auto &recent : _recentVoters) {
 		if (!recent.userpic.null()) {
+			return true;
+		}
+	}
+	for (const auto &answer : _answers) {
+		if (!answer.recentVotersImage.isNull()) {
 			return true;
 		}
 	}
