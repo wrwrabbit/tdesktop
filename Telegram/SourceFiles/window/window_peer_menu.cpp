@@ -2214,6 +2214,7 @@ void PeerMenuCreatePoll(
 	});
 	auto box = Box<CreatePollBox>(
 		controller,
+		peer,
 		chosen,
 		disabled,
 		std::move(starsRequired),

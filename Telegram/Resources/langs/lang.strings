@@ -6875,6 +6875,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_polls_solution_title" = "Explanation";
 "lng_polls_solution_placeholder" = "Add a Comment (Optional)";
 "lng_polls_solution_about" = "Users will see this comment after choosing a wrong answer, good for educational purposes.";
+"lng_polls_media_uploading" = "Please wait until media upload is complete.";
 
 "lng_polls_poll_results_title" = "Poll results";
 "lng_polls_quiz_results_title" = "Quiz results";

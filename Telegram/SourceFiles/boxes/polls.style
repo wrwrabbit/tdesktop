@@ -26,10 +26,28 @@ pollBoxFilledChatlistMentionIcon: icon{{ "poll/filled/filled_chatlist_mention", 
 pollBoxFilledPollMultipleIcon: icon{{ "poll/filled/filled_poll_multiple", activeButtonFg }};
 
 pollAttachTextSkip: 28px;
+pollAttachProgressMargin: 4px;
+pollAttachShift: point(-11px, -2px);
 
 pollDescriptionFieldPadding: margins(22px, 5px, 11px, 5px);
 pollDescriptionField: InputField(createPollField) {
 	textMargins: margins(0px, 4px, pollAttachTextSkip, 4px);
 	border: 0px;
 	borderActive: 0px;
+}
+
+pollAttach: IconButton(defaultIconButton) {
+	width: pollAttachTextSkip;
+	height: pollAttachTextSkip;
+
+	icon: icon {{ "poll/general/outline_poll_attach-24x24", historyComposeIconFg }};
+	iconOver: icon {{ "poll/general/outline_poll_attach-24x24", historyComposeIconFgOver }};
+
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: pollAttachTextSkip;
+	ripple: defaultRippleAnimationBgOver;
+}
+
+pollMediaField: InputField(createPollSolutionField) {
+	textMargins: margins(0px, 4px, pollAttachTextSkip, 4px);
 }

@@ -302,6 +302,9 @@ QSize Poll::countOptimalSize() {
 }
 
 bool Poll::showVotes() const {
+	if (_flags & PollData::Flag::HideResultsUntilClose) {
+		return (_flags & PollData::Flag::Closed) || _parent->data()->out();
+	}
 	return _voted || (_flags & PollData::Flag::Closed);
 }
 

@@ -30,6 +30,8 @@ namespace SendMenu {
 struct Details;
 } // namespace SendMenu
 
+class PeerData;
+
 class CreatePollBox : public Ui::BoxContent {
 public:
 	struct Result {
@@ -41,6 +43,7 @@ public:
 	CreatePollBox(
 		QWidget*,
 		not_null<Window::SessionController*> controller,
+		not_null<PeerData*> peer,
 		PollData::Flags chosen,
 		PollData::Flags disabled,
 		rpl::producer<int> starsRequired,
@@ -62,6 +65,7 @@ private:
 		Correct  = 0x04,
 		Other    = 0x08,
 		Solution = 0x10,
+		Media    = 0x20,
 	};
 	friend constexpr inline bool is_flag_type(Error) { return true; }
 	using Errors = base::flags<Error>;
@@ -76,6 +80,7 @@ private:
 		rpl::producer<bool> shown);
 
 	const not_null<Window::SessionController*> _controller;
+	const not_null<PeerData*> _peer;
 	const PollData::Flags _chosen = PollData::Flags();
 	const PollData::Flags _disabled = PollData::Flags();
 	const Api::SendType _sendType = Api::SendType();

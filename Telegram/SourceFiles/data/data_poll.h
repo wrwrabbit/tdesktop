@@ -18,6 +18,7 @@ class Session;
 struct PollAnswer {
 	TextWithEntities text;
 	QByteArray option;
+	std::optional<MTPInputMedia> media;
 	int votes = 0;
 	bool chosen = false;
 	bool correct = false;
@@ -39,13 +40,14 @@ struct PollData {
 	[[nodiscard]] Main::Session &session() const;
 
 	enum class Flag {
-		Closed           = 0x01,
-		PublicVotes      = 0x02,
-		MultiChoice      = 0x04,
-		Quiz             = 0x08,
-		ShuffleAnswers   = 0x10,
-		RevotingDisabled = 0x20,
-		OpenAnswers      = 0x40,
+		Closed                = 0x01,
+		PublicVotes           = 0x02,
+		MultiChoice           = 0x04,
+		Quiz                  = 0x08,
+		ShuffleAnswers        = 0x10,
+		RevotingDisabled      = 0x20,
+		OpenAnswers           = 0x40,
+		HideResultsUntilClose = 0x80,
 	};
 	friend inline constexpr bool is_flag_type(Flag) { return true; };
 	using Flags = base::flags<Flag>;
@@ -69,6 +71,7 @@ struct PollData {
 	[[nodiscard]] bool shuffleAnswers() const;
 	[[nodiscard]] bool revotingDisabled() const;
 	[[nodiscard]] bool openAnswers() const;
+	[[nodiscard]] bool hideResultsUntilClose() const;
 
 	PollId id = 0;
 	TextWithEntities question;
@@ -76,6 +79,8 @@ struct PollData {
 	std::vector<not_null<PeerData*>> recentVoters;
 	std::vector<QByteArray> sendingVotes;
 	TextWithEntities solution;
+	std::optional<MTPInputMedia> attachedMedia;
+	std::optional<MTPInputMedia> solutionMedia;
 	TimeId closePeriod = 0;
 	TimeId closeDate = 0;
 	int totalVoters = 0;
@@ -100,3 +105,5 @@ private:
 [[nodiscard]] MTPInputMedia PollDataToInputMedia(
 	not_null<const PollData*> poll,
 	bool close = false);
+[[nodiscard]] std::optional<MTPInputMedia> PollMediaToInputMedia(
+	const MTPMessageMedia &media);

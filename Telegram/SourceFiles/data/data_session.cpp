@@ -4358,6 +4358,18 @@ not_null<PollData*> Session::processPoll(const MTPPoll &data) {
 
 not_null<PollData*> Session::processPoll(const MTPDmessageMediaPoll &data) {
 	const auto result = processPoll(data.vpoll());
+	const auto media = data.vattached_media()
+		? PollMediaToInputMedia(*data.vattached_media())
+		: std::optional<MTPInputMedia>();
+	const auto changedMedia = !media
+		? result->attachedMedia.has_value()
+		: (!result->attachedMedia
+			|| (result->attachedMedia->type() != media->type()));
+	result->attachedMedia = media;
+	if (changedMedia) {
+		++result->version;
+		notifyPollUpdateDelayed(result);
+	}
 	const auto changed = result->applyResults(data.vresults());
 	if (changed) {
 		notifyPollUpdateDelayed(result);

@@ -79,7 +79,10 @@ bool PollData::applyChanges(const MTPDpoll &poll) {
 		| (poll.is_quiz() ? Flag::Quiz : Flag(0))
 		| (poll.is_shuffle_answers() ? Flag::ShuffleAnswers : Flag(0))
 		| (poll.is_revoting_disabled() ? Flag::RevotingDisabled : Flag(0))
-		| (poll.is_open_answers() ? Flag::OpenAnswers : Flag(0));
+		| (poll.is_open_answers() ? Flag::OpenAnswers : Flag(0))
+		| (poll.is_hide_results_until_close()
+			? Flag::HideResultsUntilClose
+			: Flag(0));
 	const auto newCloseDate = poll.vclose_date().value_or_empty();
 	const auto newClosePeriod = poll.vclose_period().value_or_empty();
 	auto newAnswers = ranges::views::all(
@@ -91,6 +94,18 @@ bool PollData::applyChanges(const MTPDpoll &poll) {
 			result.text = Api::ParseTextWithEntities(
 				&session(),
 				answer.vtext());
+			if (const auto media = answer.vmedia()) {
+				result.media = PollMediaToInputMedia(*media);
+			}
+			return result;
+		}, [&](const MTPDinputPollAnswer &answer) {
+			auto result = PollAnswer();
+			result.text = Api::ParseTextWithEntities(
+				&session(),
+				answer.vtext());
+			if (const auto media = answer.vmedia()) {
+				result.media = *media;
+			}
 			return result;
 		}, [](const auto &) {
 			return PollAnswer();
@@ -174,6 +189,16 @@ bool PollData::applyResults(const MTPPollResults &results) {
 				changed = true;
 			}
 		}
+		if (const auto media = results.vsolution_media()) {
+			const auto parsed = PollMediaToInputMedia(*media);
+			const auto changedMedia = !parsed
+				? solutionMedia.has_value()
+				: (!solutionMedia || (solutionMedia->type() != parsed->type()));
+			solutionMedia = parsed;
+			if (changedMedia) {
+				changed = true;
+			}
+		}
 		if (!changed) {
 			return false;
 		}
@@ -211,12 +236,12 @@ bool PollData::applyResultToAnswers(
 		if (!answer) {
 			return false;
 		}
-		const auto newVotes = voters.vvoters()
-			? voters.vvoters()->v
-			: 0;
-		auto changed = (answer->votes != newVotes);
-		if (changed) {
-			answer->votes = newVotes;
+		auto changed = false;
+		if (const auto count = voters.vvoters()) {
+			if (answer->votes != count->v) {
+				answer->votes = count->v;
+				changed = true;
+			}
 		}
 		if (!isMinResults) {
 			if (answer->chosen != voters.is_chosen()) {
@@ -275,17 +300,68 @@ bool PollData::openAnswers() const {
 	return (_flags & Flag::OpenAnswers);
 }
 
+bool PollData::hideResultsUntilClose() const {
+	return (_flags & Flag::HideResultsUntilClose);
+}
+
+std::optional<MTPInputMedia> PollMediaToInputMedia(
+		const MTPMessageMedia &media) {
+	return media.match([&](const MTPDmessageMediaPhoto &media) {
+		const auto photo = media.vphoto();
+		if (!photo || photo->type() != mtpc_photo) {
+			return std::optional<MTPInputMedia>();
+		}
+		const auto &fields = photo->c_photo();
+		using Flag = MTPDinputMediaPhoto::Flag;
+		const auto flags = media.vttl_seconds()
+			? Flag::f_ttl_seconds
+			: Flag(0);
+		return std::optional<MTPInputMedia>(MTP_inputMediaPhoto(
+			MTP_flags(flags),
+			MTP_inputPhoto(
+				fields.vid(),
+				fields.vaccess_hash(),
+				fields.vfile_reference()),
+			MTP_int(media.vttl_seconds().value_or_empty()),
+			MTPInputDocument()));
+	}, [&](const MTPDmessageMediaDocument &media) {
+		const auto document = media.vdocument();
+		if (!document || document->type() != mtpc_document) {
+			return std::optional<MTPInputMedia>();
+		}
+		const auto &fields = document->c_document();
+		using Flag = MTPDinputMediaDocument::Flag;
+		const auto flags = Flag()
+			| (media.vttl_seconds() ? Flag::f_ttl_seconds : Flag())
+			| (media.vvideo_timestamp()
+				? Flag::f_video_timestamp
+				: Flag());
+		return std::optional<MTPInputMedia>(MTP_inputMediaDocument(
+			MTP_flags(flags),
+			MTP_inputDocument(
+				fields.vid(),
+				fields.vaccess_hash(),
+				fields.vfile_reference()),
+			MTPInputPhoto(),
+			MTP_int(media.vvideo_timestamp().value_or_empty()),
+			MTP_int(media.vttl_seconds().value_or_empty()),
+			MTPstring()));
+	}, [](const auto &) {
+		return std::optional<MTPInputMedia>();
+	});
+}
+
 MTPPoll PollDataToMTP(not_null<const PollData*> poll, bool close) {
 	const auto convert = [&](const PollAnswer &answer) {
-		return MTP_pollAnswer(
-			MTP_flags(0),
+		const auto flags = answer.media
+			? MTPDinputPollAnswer::Flag::f_media
+			: MTPDinputPollAnswer::Flag(0);
+		return MTP_inputPollAnswer(
+			MTP_flags(flags),
 			MTP_textWithEntities(
 				MTP_string(answer.text.text),
 				Api::EntitiesToMTP(&poll->session(), answer.text.entities)),
-			MTP_bytes(answer.option),
-			MTPMessageMedia(), // media
-			MTPPeer(), // added_by
-			MTPint()); // date
+			answer.media ? *answer.media : MTPInputMedia());
 	};
 	auto answers = QVector<MTPPollAnswer>();
 	answers.reserve(poll->answers.size());
@@ -301,6 +377,9 @@ MTPPoll PollDataToMTP(not_null<const PollData*> poll, bool close) {
 		| (poll->shuffleAnswers() ? Flag::f_shuffle_answers : Flag(0))
 		| (poll->revotingDisabled() ? Flag::f_revoting_disabled : Flag(0))
 		| (poll->openAnswers() ? Flag::f_open_answers : Flag(0))
+		| (poll->hideResultsUntilClose()
+			? Flag::f_hide_results_until_close
+			: Flag(0))
 		| (poll->closePeriod > 0 ? Flag::f_close_period : Flag(0))
 		| (poll->closeDate > 0 ? Flag::f_close_date : Flag(0));
 	return MTP_poll(
@@ -343,12 +422,18 @@ MTPInputMedia PollDataToInputMedia(
 	if (!sentEntities.v.isEmpty()) {
 		inputFlags |= MTPDinputMediaPoll::Flag::f_solution_entities;
 	}
+	if (poll->attachedMedia) {
+		inputFlags |= MTPDinputMediaPoll::Flag::f_attached_media;
+	}
+	if (poll->solutionMedia) {
+		inputFlags |= MTPDinputMediaPoll::Flag::f_solution_media;
+	}
 	return MTP_inputMediaPoll(
 		MTP_flags(inputFlags),
 		PollDataToMTP(poll, close),
 		MTP_vector<MTPint>(correct),
-		MTPInputMedia(), // attached_media
+		poll->attachedMedia ? *poll->attachedMedia : MTPInputMedia(),
 		MTP_string(solution.text),
 		sentEntities,
-		MTPInputMedia()); // solution_media
+		poll->solutionMedia ? *poll->solutionMedia : MTPInputMedia());
 }
