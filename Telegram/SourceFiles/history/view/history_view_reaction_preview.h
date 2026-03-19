@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 class DocumentData;
+class PhotoData;
 
 namespace Ui {
 class DropdownMenu;
@@ -27,6 +28,12 @@ bool ShowStickerPreview(
 	not_null<Window::SessionController*> controller,
 	FullMsgId origin,
 	not_null<DocumentData*> document,
+	Fn<void(not_null<Ui::DropdownMenu*>)> fillMenu = nullptr);
+
+bool ShowPhotoPreview(
+	not_null<Window::SessionController*> controller,
+	FullMsgId origin,
+	not_null<PhotoData*> photo,
 	Fn<void(not_null<Ui::DropdownMenu*>)> fillMenu = nullptr);
 
 bool ShowReactionPreview(

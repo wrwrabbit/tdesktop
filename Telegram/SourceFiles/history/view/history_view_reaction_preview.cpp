@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/event_filter.h"
 #include "boxes/sticker_set_box.h"
 #include "data/data_document.h"
+#include "data/data_photo.h"
 #include "data/data_message_reactions.h"
 #include "data/data_session.h"
 #include "data/stickers/data_custom_emoji.h"
@@ -56,10 +57,11 @@ struct PreviewOverlay {
 	Fn<void()> hideAll;
 };
 
+template <typename MediaData>
 [[nodiscard]] PreviewOverlay CreatePreviewOverlay(
 		not_null<Window::SessionController*> controller,
 		FullMsgId origin,
-		not_null<DocumentData*> document) {
+		MediaData media) {
 	const auto state = std::make_shared<PreviewOverlayState>();
 
 	const auto mainwidget = controller->widget();
@@ -91,7 +93,7 @@ struct PreviewOverlay {
 		}
 		return base::EventFilterResult::Continue;
 	}, state->clickable->lifetime());
-	state->mediaPreview->showPreview(origin, document);
+	state->mediaPreview->showPreview(origin, media);
 	state->clickable->show();
 	const auto clickableRaw = state->clickable.get();
 
@@ -103,16 +105,11 @@ struct PreviewOverlay {
 	return { state, hideAll };
 }
 
-} // namespace
-
-bool ShowStickerPreview(
+void SetupPreviewMenu(
 		not_null<Window::SessionController*> controller,
-		FullMsgId origin,
-		not_null<DocumentData*> document,
+		const PreviewOverlay &overlay,
 		Fn<void(not_null<Ui::DropdownMenu*>)> fillMenu) {
-	const auto overlay = CreatePreviewOverlay(controller, origin, document);
 	const auto &state = overlay.state;
-
 	const auto mainwidget = controller->widget();
 	if (fillMenu) {
 		state->mediaPreview->setHideEmoji(true);
@@ -148,6 +145,31 @@ bool ShowStickerPreview(
 			menuRaw->raise();
 		}
 	}, mediaPreviewRaw->lifetime());
+}
+
+} // namespace
+
+bool ShowStickerPreview(
+		not_null<Window::SessionController*> controller,
+		FullMsgId origin,
+		not_null<DocumentData*> document,
+		Fn<void(not_null<Ui::DropdownMenu*>)> fillMenu) {
+	SetupPreviewMenu(
+		controller,
+		CreatePreviewOverlay(controller, origin, document),
+		std::move(fillMenu));
+	return true;
+}
+
+bool ShowPhotoPreview(
+		not_null<Window::SessionController*> controller,
+		FullMsgId origin,
+		not_null<PhotoData*> photo,
+		Fn<void(not_null<Ui::DropdownMenu*>)> fillMenu) {
+	SetupPreviewMenu(
+		controller,
+		CreatePreviewOverlay(controller, origin, photo),
+		std::move(fillMenu));
 	return true;
 }
 

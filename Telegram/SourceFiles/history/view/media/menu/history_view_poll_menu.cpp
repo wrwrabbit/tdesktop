@@ -7,22 +7,32 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/media/menu/history_view_poll_menu.h"
 
-#include "lang/lang_keys.h"
-#include "ui/widgets/dropdown_menu.h"
-#include "ui/widgets/menu/menu_action.h"
-#include "ui/painter.h"
-#include "history/view/history_view_group_call_bar.h"
-#include "boxes/sticker_set_box.h"
-#include "data/data_poll.h"
-#include "data/data_document.h"
-#include "data/data_session.h"
-#include "data/data_file_origin.h"
-#include "data/stickers/data_stickers.h"
 #include "api/api_polls.h"
 #include "api/api_toggling_media.h"
-#include "main/main_session.h"
-#include "window/window_session_controller.h"
 #include "apiwrap.h"
+#include "boxes/sticker_set_box.h"
+#include "data/data_document.h"
+#include "data/data_file_origin.h"
+#include "data/data_photo.h"
+#include "data/data_photo_media.h"
+#include "data/data_poll.h"
+#include "data/data_session.h"
+#include "data/stickers/data_stickers.h"
+#include "editor/editor_layer_widget.h"
+#include "editor/photo_editor.h"
+#include "history/view/history_view_group_call_bar.h"
+#include "history/view/history_view_reaction_preview.h"
+#include "lang/lang_keys.h"
+#include "main/main_session.h"
+#include "mainwidget.h"
+#include "storage/localimageloader.h"
+#include "storage/storage_media_prepare.h"
+#include "ui/chat/attach/attach_prepare.h"
+#include "ui/painter.h"
+#include "ui/widgets/dropdown_menu.h"
+#include "ui/widgets/menu/menu_action.h"
+#include "window/window_session_controller.h"
+#include "styles/style_boxes.h"
 #include "styles/style_chat.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_widgets.h"
@@ -221,6 +231,113 @@ void FillPollAnswerMenu(
 				&st::menuIconStickers);
 		}
 	}
+}
+
+namespace {
+
+void AddRemoveAction(
+		not_null<Ui::DropdownMenu*> menu,
+		Fn<void()> remove) {
+	menu->addAction(
+		base::make_unique_q<Ui::Menu::Action>(
+			menu->menu(),
+			st::menuWithIconsAttention,
+			Ui::Menu::CreateAction(
+				menu->menu().get(),
+				tr::lng_box_remove(tr::now),
+				std::move(remove)),
+			&st::menuIconDeleteAttention,
+			&st::menuIconDeleteAttention));
+}
+
+} // namespace
+
+void ShowPollStickerPreview(
+		not_null<Window::SessionController*> controller,
+		not_null<DocumentData*> document,
+		Fn<void()> replace,
+		Fn<void()> remove) {
+	ShowStickerPreview(controller, FullMsgId(), document, [=](
+			not_null<Ui::DropdownMenu*> menu) {
+		menu->addAction(
+			tr::lng_attach_replace(tr::now),
+			replace,
+			&st::menuIconReplace);
+		AddRemoveAction(menu, remove);
+	});
+}
+
+void ShowPollPhotoPreview(
+		not_null<Window::SessionController*> controller,
+		not_null<PhotoData*> photo,
+		Fn<void()> replace,
+		Fn<void()> edit,
+		Fn<void()> remove) {
+	ShowPhotoPreview(controller, FullMsgId(), photo, [=](
+			not_null<Ui::DropdownMenu*> menu) {
+		menu->addAction(
+			tr::lng_attach_replace(tr::now),
+			replace,
+			&st::menuIconReplace);
+		menu->addAction(
+			tr::lng_context_draw(tr::now),
+			edit,
+			&st::menuIconDraw);
+		AddRemoveAction(menu, remove);
+	});
+}
+
+void EditPollPhoto(
+		not_null<Window::SessionController*> controller,
+		not_null<PhotoData*> photo,
+		Fn<void(Ui::PreparedList)> done) {
+	const auto photoMedia = photo->createMediaView();
+	const auto large = photoMedia->image(Data::PhotoSize::Large);
+	if (!large) {
+		return;
+	}
+	const auto previewWidth = st::sendMediaPreviewSize;
+	const auto fileImage = std::make_shared<Image>(*large);
+	auto callback = [=](const Editor::PhotoModifications &mods) {
+		if (!mods) {
+			return;
+		}
+		const auto large = photoMedia->image(Data::PhotoSize::Large);
+		if (!large) {
+			return;
+		}
+		auto copy = large->original();
+		auto list = Storage::PrepareMediaFromImage(
+			std::move(copy),
+			QByteArray(),
+			previewWidth);
+
+		using ImageInfo = Ui::PreparedFileInformation::Image;
+		auto &file = list.files.front();
+		const auto image = std::get_if<ImageInfo>(
+			&file.information->media);
+		image->modifications = mods;
+		Storage::UpdateImageDetails(
+			file,
+			previewWidth,
+			PhotoSideLimit(true));
+		Storage::ApplyModifications(list);
+		done(std::move(list));
+	};
+	const auto parent = controller->content().get();
+	auto editor = base::make_unique_q<Editor::PhotoEditor>(
+		parent,
+		&controller->window(),
+		fileImage,
+		Editor::PhotoModifications());
+	const auto raw = editor.get();
+	auto layer = std::make_unique<Editor::LayerWidget>(
+		parent,
+		std::move(editor));
+	Editor::InitEditorLayer(layer.get(), raw, std::move(callback));
+	controller->showLayer(
+		std::move(layer),
+		Ui::LayerOption::KeepOther);
 }
 
 } // namespace HistoryView

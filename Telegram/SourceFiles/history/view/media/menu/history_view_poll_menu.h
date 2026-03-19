@@ -9,9 +9,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 struct PollData;
 class DocumentData;
+class PhotoData;
 
 namespace Ui {
 class DropdownMenu;
+struct PreparedList;
 } // namespace Ui
 
 namespace Window {
@@ -27,5 +29,23 @@ void FillPollAnswerMenu(
 	not_null<DocumentData*> document,
 	FullMsgId itemId,
 	not_null<Window::SessionController*> controller);
+
+void ShowPollStickerPreview(
+	not_null<Window::SessionController*> controller,
+	not_null<DocumentData*> document,
+	Fn<void()> replace,
+	Fn<void()> remove);
+
+void ShowPollPhotoPreview(
+	not_null<Window::SessionController*> controller,
+	not_null<PhotoData*> photo,
+	Fn<void()> replace,
+	Fn<void()> edit,
+	Fn<void()> remove);
+
+void EditPollPhoto(
+	not_null<Window::SessionController*> controller,
+	not_null<PhotoData*> photo,
+	Fn<void(Ui::PreparedList)> done);
 
 } // namespace HistoryView

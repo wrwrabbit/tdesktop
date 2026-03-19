@@ -27,7 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "data/stickers/data_custom_emoji.h"
-#include "history/view/history_view_reaction_preview.h"
+#include "history/view/media/menu/history_view_poll_menu.h"
 #include "history/view/history_view_schedule_box.h"
 #include "lang/lang_keys.h"
 #include "layout/layout_document_generic_preview.h"
@@ -2225,27 +2225,31 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			return;
 		}
 		const auto document = media->media.document;
+		const auto photo = media->media.photo;
+		const auto remove = [=] { clearMedia(media); };
 		if (document && document->sticker()) {
-			HistoryView::ShowStickerPreview(
+			HistoryView::ShowPollStickerPreview(
 				_controller,
-				FullMsgId(),
 				document,
-				[=](not_null<Ui::DropdownMenu*> menu) {
-					menu->addAction(
-						tr::lng_attach_replace(tr::now),
-						[=] { showStickerPanel(button, media); },
-						&st::menuIconReplace);
-					menu->addAction(
-						base::make_unique_q<Ui::Menu::Action>(
-							menu->menu(),
-							st::menuWithIconsAttention,
-							Ui::Menu::CreateAction(
-								menu->menu().get(),
-								tr::lng_box_remove(tr::now),
-								[=] { clearMedia(media); }),
-							&st::menuIconDeleteAttention,
-							&st::menuIconDeleteAttention));
-				});
+				[=] { showStickerPanel(button, media); },
+				remove);
+			return;
+		} else if (photo) {
+			HistoryView::ShowPollPhotoPreview(
+				_controller,
+				photo,
+				[=] { choosePhoto(media); },
+				[=] {
+					HistoryView::EditPollPhoto(
+						_controller,
+						photo,
+						crl::guard(this, [=](Ui::PreparedList list) {
+							applyPreparedPhotoList(
+								media,
+								std::move(list));
+						}));
+				},
+				remove);
 			return;
 		}
 		state->mediaMenu = base::make_unique_q<Ui::PopupMenu>(
