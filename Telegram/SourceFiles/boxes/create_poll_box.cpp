@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "data/stickers/data_custom_emoji.h"
+#include "history/view/history_view_reaction_preview.h"
 #include "history/view/history_view_schedule_box.h"
 #include "lang/lang_keys.h"
 #include "layout/layout_document_generic_preview.h"
@@ -51,6 +52,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/dropdown_menu.h"
+#include "ui/widgets/menu/menu_action.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
@@ -2117,6 +2120,30 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			bool allowStickers = true) {
 		if (media->uploading) {
 			clearMedia(media);
+			return;
+		}
+		const auto document = media->media.document;
+		if (document && document->sticker()) {
+			HistoryView::ShowStickerPreview(
+				_controller,
+				FullMsgId(),
+				document,
+				[=](not_null<Ui::DropdownMenu*> menu) {
+					menu->addAction(
+						tr::lng_attach_replace(tr::now),
+						[=] { showStickerPanel(button, media); },
+						&st::menuIconReplace);
+					menu->addAction(
+						base::make_unique_q<Ui::Menu::Action>(
+							menu->menu(),
+							st::menuWithIconsAttention,
+							Ui::Menu::CreateAction(
+								menu->menu().get(),
+								tr::lng_box_remove(tr::now),
+								[=] { clearMedia(media); }),
+							&st::menuIconDeleteAttention,
+							&st::menuIconDeleteAttention));
+				});
 			return;
 		}
 		state->mediaMenu = base::make_unique_q<Ui::PopupMenu>(
