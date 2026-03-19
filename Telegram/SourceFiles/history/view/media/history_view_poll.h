@@ -59,6 +59,9 @@ public:
 		const QRect &bubble,
 		crl::time ms) const override;
 
+	void clickHandlerActiveChanged(
+		const ClickHandlerPtr &handler,
+		bool active) override;
 	void clickHandlerPressedChanged(
 		const ClickHandlerPtr &handler,
 		bool pressed) override;
@@ -92,6 +95,11 @@ private:
 	void validateTopMediaCache(QSize size) const;
 	[[nodiscard]] int countDescriptionHeight(int innerWidth) const;
 	[[nodiscard]] int countQuestionTop(int innerWidth) const;
+	[[nodiscard]] uint16 solutionSelectionLength() const;
+	[[nodiscard]] TextSelection toSolutionSelection(
+		TextSelection selection) const;
+	[[nodiscard]] TextSelection fromSolutionSelection(
+		TextSelection selection) const;
 	[[nodiscard]] TextSelection toQuestionSelection(
 		TextSelection selection) const;
 	[[nodiscard]] TextSelection fromQuestionSelection(

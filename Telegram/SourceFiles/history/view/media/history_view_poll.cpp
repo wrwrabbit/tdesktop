@@ -898,12 +898,30 @@ int Poll::countQuestionTop(int innerWidth) const {
 	return result;
 }
 
-TextSelection Poll::toQuestionSelection(TextSelection selection) const {
+uint16 Poll::solutionSelectionLength() const {
+	return (_solutionShown && canShowSolution())
+		? _solutionText.length()
+		: uint16(0);
+}
+
+TextSelection Poll::toSolutionSelection(TextSelection selection) const {
 	return UnshiftItemSelection(selection, _description);
 }
 
-TextSelection Poll::fromQuestionSelection(TextSelection selection) const {
+TextSelection Poll::fromSolutionSelection(TextSelection selection) const {
 	return ShiftItemSelection(selection, _description);
+}
+
+TextSelection Poll::toQuestionSelection(TextSelection selection) const {
+	return UnshiftItemSelection(
+		selection,
+		uint16(_description.length() + solutionSelectionLength()));
+}
+
+TextSelection Poll::fromQuestionSelection(TextSelection selection) const {
+	return ShiftItemSelection(
+		selection,
+		uint16(_description.length() + solutionSelectionLength()));
 }
 
 void Poll::checkQuizAnswered() {
@@ -1731,13 +1749,16 @@ void Poll::paintSolutionBlock(
 	yshift += st::semiboldFont->height + st::historyPollExplanationTitleSkip;
 
 	p.setPen(stm->historyTextFg);
+	_parent->prepareCustomEmojiPaint(p, context, _solutionText);
 	_solutionText.draw(p, {
 		.position = { innerLeft, yshift },
 		.outerWidth = width(),
 		.availableWidth = textWidth,
+		.spoiler = Ui::Text::DefaultSpoilerCache(),
 		.now = context.now,
 		.pausedEmoji = context.paused,
 		.pausedSpoiler = context.paused,
+		.selection = toSolutionSelection(context.selection),
 	});
 
 	if (countSolutionMediaHeight(textWidth)) {
@@ -2231,40 +2252,73 @@ void Poll::startAnswersAnimation() const {
 TextSelection Poll::adjustSelection(
 		TextSelection selection,
 		TextSelectType type) const {
-	if (_description.isEmpty()) {
+	const auto descLen = _description.length();
+	const auto solLen = solutionSelectionLength();
+	const auto descSolLen = uint16(descLen + solLen);
+
+	if (descLen == 0 && solLen == 0) {
 		return _question.adjustSelection(selection, type);
-	} else if (selection.to <= _description.length()) {
+	}
+	if (selection.to <= descLen && descLen > 0) {
 		return _description.adjustSelection(selection, type);
+	}
+	if (solLen > 0
+		&& selection.from >= descLen
+		&& selection.to <= descSolLen) {
+		const auto adjusted = _solutionText.adjustSelection(
+			toSolutionSelection(selection),
+			type);
+		return fromSolutionSelection(adjusted);
 	}
 	const auto questionSelection = _question.adjustSelection(
 		toQuestionSelection(selection),
 		type);
-	if (selection.from >= _description.length()) {
+	if (selection.from >= descSolLen) {
 		return fromQuestionSelection(questionSelection);
 	}
-	const auto descriptionSelection = _description.adjustSelection(
-		selection,
-		type);
-	return {
-		descriptionSelection.from,
-		fromQuestionSelection(questionSelection).to
-	};
+	const auto from = (selection.from < descLen && descLen > 0)
+		? _description.adjustSelection(selection, type).from
+		: (solLen > 0 && selection.from < descSolLen)
+		? fromSolutionSelection(
+			_solutionText.adjustSelection(
+				toSolutionSelection(selection),
+				type)).from
+		: fromQuestionSelection(questionSelection).from;
+	const auto to = (selection.to <= descSolLen && solLen > 0)
+		? fromSolutionSelection(
+			_solutionText.adjustSelection(
+				toSolutionSelection(selection),
+				type)).to
+		: fromQuestionSelection(questionSelection).to;
+	return { from, to };
 }
 
 uint16 Poll::fullSelectionLength() const {
-	return _description.length() + _question.length();
+	return _description.length()
+		+ solutionSelectionLength()
+		+ _question.length();
 }
 
 TextForMimeData Poll::selectedText(TextSelection selection) const {
 	auto description = _description.toTextForMimeData(selection);
+	auto solution = _solutionText.toTextForMimeData(
+		toSolutionSelection(selection));
 	auto question = _question.toTextForMimeData(
 		toQuestionSelection(selection));
-	if (description.empty()) {
-		return question;
-	} else if (question.empty()) {
-		return description;
-	}
-	return description.append('\n').append(std::move(question));
+	auto result = TextForMimeData();
+	const auto append = [&](TextForMimeData &&part) {
+		if (part.empty()) {
+			return;
+		}
+		if (!result.empty()) {
+			result.append('\n');
+		}
+		result.append(std::move(part));
+	};
+	append(std::move(description));
+	append(std::move(solution));
+	append(std::move(question));
+	return result;
 }
 
 TextState Poll::textState(QPoint point, StateRequest request) const {
@@ -2342,14 +2396,12 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 				textTop,
 				textWidth,
 				textHeight).contains(point)) {
-				auto textResult = _solutionText.getStateLeft(
+				result = TextState(_parent, _solutionText.getStateLeft(
 					point - QPoint(innerLeft, textTop),
 					textWidth,
 					width(),
-					request.forText());
-				if (textResult.link) {
-					result.link = textResult.link;
-				}
+					request.forText()));
+				result.symbol += symbolAdd;
 				return result;
 			}
 			if (const auto mh = countSolutionMediaHeight(textWidth)) {
@@ -2373,6 +2425,9 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 				}
 			}
 			return result;
+		}
+		if (point.y() >= tshift + solutionHeight) {
+			symbolAdd += _solutionText.length();
 		}
 		tshift += solutionHeight + st::historyPollExplanationSkip;
 	}
@@ -2502,6 +2557,14 @@ void Poll::paintBubbleFireworks(
 	_fireworksAnimation = nullptr;
 }
 
+void Poll::clickHandlerActiveChanged(
+		const ClickHandlerPtr &handler,
+		bool active) {
+	if (_solutionAttach) {
+		_solutionAttach->clickHandlerActiveChanged(handler, active);
+	}
+}
+
 void Poll::clickHandlerPressedChanged(
 		const ClickHandlerPtr &handler,
 		bool pressed) {
@@ -2515,6 +2578,9 @@ void Poll::clickHandlerPressedChanged(
 		toggleRipple(*i, pressed);
 	} else if (handler == _sendVotesLink || handler == _showResultsLink) {
 		toggleLinkRipple(pressed);
+	}
+	if (_solutionAttach) {
+		_solutionAttach->clickHandlerPressedChanged(handler, pressed);
 	}
 }
 
