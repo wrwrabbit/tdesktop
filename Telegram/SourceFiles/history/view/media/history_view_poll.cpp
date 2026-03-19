@@ -30,8 +30,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "ui/dynamic_image.h"
 #include "ui/dynamic_thumbnails.h"
+#include "history/view/media/history_view_media_common.h"
 #include "data/data_media_types.h"
 #include "data/data_document.h"
+#include "data/data_photo.h"
 #include "data/data_poll.h"
 #include "data/data_user.h"
 #include "data/data_session.h"
@@ -307,6 +309,11 @@ struct Poll::AttachedMedia {
 	std::shared_ptr<Ui::DynamicImage> thumbnail;
 	PollThumbnailKind kind = PollThumbnailKind::None;
 	bool rounded = false;
+	uint64 id = 0;
+};
+
+struct Poll::SolutionMedia {
+	PollThumbnailKind kind = PollThumbnailKind::None;
 	uint64 id = 0;
 };
 
@@ -602,6 +609,8 @@ void Poll::updateTexts() {
 	updateRecentVoters();
 	updateAnswers();
 	updateAttachedMedia();
+	updateSolutionText();
+	updateSolutionMedia();
 	updateVotes();
 
 	if (willStartAnimation) {
@@ -637,6 +646,63 @@ void Poll::updateDescription() {
 		consumed,
 		Ui::ItemTextOptions(_parent->data()),
 		context);
+}
+
+void Poll::updateSolutionText() {
+	if (_poll->solution.text.isEmpty()) {
+		_solutionText = Ui::Text::String();
+		return;
+	}
+	if (_solutionText.toTextWithEntities() == _poll->solution) {
+		return;
+	}
+	_solutionText = Ui::Text::String(st::msgMinWidth);
+	_solutionText.setMarkedText(
+		st::webPageDescriptionStyle,
+		_poll->solution,
+		Ui::ItemTextOptions(_parent->data()),
+		Core::TextContext({
+			.session = &_poll->session(),
+			.repaint = [=] { repaint(); },
+		}));
+}
+
+void Poll::updateSolutionMedia() {
+	const auto item = _parent->data();
+	const auto messageContext = Window::SessionController::MessageContext{
+		.id = item->fullId(),
+		.topicRootId = item->topicRootId(),
+		.monoforumPeerId = item->sublistPeerId(),
+	};
+	const auto updated = MakePollThumbnail(
+		_poll,
+		_poll->solutionMedia,
+		messageContext);
+	if (!updated.thumbnail) {
+		_solutionMedia = nullptr;
+		_solutionAttach = nullptr;
+		return;
+	}
+	if (_solutionMedia
+		&& _solutionMedia->kind == updated.kind
+		&& _solutionMedia->id == updated.id) {
+		return;
+	}
+	if (!_solutionMedia) {
+		_solutionMedia = std::make_unique<SolutionMedia>();
+	}
+	_solutionMedia->kind = updated.kind;
+	_solutionMedia->id = updated.id;
+	auto photo = (PhotoData*)(nullptr);
+	auto document = (DocumentData*)(nullptr);
+	if (updated.kind == PollThumbnailKind::Photo && updated.id) {
+		photo = _poll->owner().photo(PhotoId(updated.id));
+	} else if (updated.kind == PollThumbnailKind::Document && updated.id) {
+		document = _poll->owner().document(DocumentId(updated.id));
+	}
+	_solutionAttach = (photo || document)
+		? CreateAttach(_parent, document, photo)
+		: nullptr;
 }
 
 void Poll::updateAttachedMedia() {
@@ -749,6 +815,33 @@ int Poll::countDescriptionHeight(int innerWidth) const {
 	return _description.isEmpty() ? 0 : _description.countHeight(innerWidth);
 }
 
+int Poll::countSolutionMediaHeight(int mediaWidth) const {
+	if (!_solutionAttach) {
+		return 0;
+	}
+	_solutionAttach->initDimensions();
+	return _solutionAttach->resizeGetHeight(mediaWidth);
+}
+
+int Poll::countSolutionBlockHeight(int innerWidth) const {
+	if (!_solutionShown || !canShowSolution()) {
+		return 0;
+	}
+	const auto &qst = st::historyPagePreview;
+	const auto textWidth = innerWidth
+		- qst.padding.left()
+		- qst.padding.right();
+	auto height = qst.padding.top();
+	height += st::semiboldFont->height;
+	height += st::historyPollExplanationTitleSkip;
+	height += _solutionText.countHeight(textWidth);
+	if (const auto mediaHeight = countSolutionMediaHeight(textWidth)) {
+		height += st::historyPollExplanationMediaSkip + mediaHeight;
+	}
+	height += qst.padding.bottom();
+	return height;
+}
+
 int Poll::countQuestionTop(int innerWidth) const {
 	auto result = countTopContentSkip();
 	if (const auto mediaHeight = countTopMediaHeight()) {
@@ -756,6 +849,9 @@ int Poll::countQuestionTop(int innerWidth) const {
 	}
 	if (const auto descriptionHeight = countDescriptionHeight(innerWidth)) {
 		result += descriptionHeight + st::historyPollDescriptionSkip;
+	}
+	if (const auto solutionHeight = countSolutionBlockHeight(innerWidth)) {
+		result += solutionHeight + st::historyPollExplanationSkip;
 	}
 	return result;
 }
@@ -793,9 +889,6 @@ void Poll::checkQuizAnswered() {
 void Poll::showSolution() const {
 	if (!_poll->solution.text.isEmpty()) {
 		solutionToggled(true);
-		_parent->delegate()->elementShowTooltip(
-			_poll->solution,
-			crl::guard(this, [=] { solutionToggled(false); }));
 	}
 }
 
@@ -813,10 +906,8 @@ void Poll::solutionToggled(
 		return;
 	}
 	_solutionButtonVisible = visible;
-	history()->owner().notifyViewLayoutChange(_parent);
 	if (animated == anim::type::instant) {
 		_solutionButtonAnimation.stop();
-		repaint();
 	} else {
 		_solutionButtonAnimation.start(
 			[=] { repaint(); },
@@ -824,6 +915,7 @@ void Poll::solutionToggled(
 			visible ? 1. : 0.,
 			st::fadeWrapDuration);
 	}
+	history()->owner().requestViewResize(_parent);
 }
 
 void Poll::updateRecentVoters() {
@@ -1190,6 +1282,11 @@ void Poll::draw(Painter &p, const PaintContext &context) const {
 		tshift += descriptionHeight + st::historyPollDescriptionSkip;
 	}
 
+	if (const auto solutionHeight = countSolutionBlockHeight(paintw)) {
+		paintSolutionBlock(p, padding.left(), tshift, paintw, context);
+		tshift += solutionHeight + st::historyPollExplanationSkip;
+	}
+
 	p.setPen(stm->historyTextFg);
 	_question.drawLeft(
 		p,
@@ -1479,6 +1576,100 @@ void Poll::paintShowSolution(
 		p.setOpacity(shown);
 		icon.paint(p, -icon.width() / 2, -icon.height() / 2, width());
 		p.restore();
+	}
+}
+
+void Poll::paintSolutionBlock(
+		Painter &p,
+		int left,
+		int top,
+		int paintw,
+		const PaintContext &context) const {
+	if (!_solutionShown || !canShowSolution()) {
+		return;
+	}
+	if (!_closeSolutionLink) {
+		_closeSolutionLink = std::make_shared<LambdaClickHandler>(
+			crl::guard(this, [=] { solutionToggled(false); }));
+	}
+
+	const auto &qst = st::historyPagePreview;
+	const auto blockHeight = countSolutionBlockHeight(paintw);
+	const auto outer = QRect(left, top, paintw, blockHeight);
+
+	const auto stm = context.messageStyle();
+	const auto view = _parent;
+	const auto selected = context.selected();
+	const auto colorIndex = view->contentColorIndex();
+	const auto &chatSt = *context.st;
+	const auto colorPattern = chatSt.colorPatternIndex(colorIndex);
+	const auto useColorIndex = !context.outbg;
+	const auto cache = useColorIndex
+		? chatSt.coloredReplyCache(selected, colorIndex).get()
+		: stm->replyCache[colorPattern].get();
+
+	Ui::Text::ValidateQuotePaintCache(*cache, qst);
+	Ui::Text::FillQuotePaint(p, outer, *cache, qst);
+
+	const auto innerLeft = left + qst.padding.left();
+	const auto innerRight = left + paintw - qst.padding.right();
+	const auto textWidth = innerRight - innerLeft;
+	auto yshift = top + qst.padding.top();
+
+	p.setPen(cache->outlines[0]);
+	p.setFont(st::semiboldFont);
+	const auto closeArea = st::historyPollExplanationCloseSize;
+	p.drawTextLeft(
+		innerLeft,
+		yshift,
+		width(),
+		tr::lng_polls_solution_title(tr::now),
+		textWidth - closeArea);
+
+	{
+		const auto iconSize = st::historyPollExplanationCloseIconSize;
+		const auto centerX = innerRight - closeArea / 2;
+		const auto centerY = yshift + st::semiboldFont->height / 2;
+		const auto half = iconSize / 2;
+		auto pen = QPen(cache->outlines[0]);
+		pen.setWidthF(st::historyPollExplanationCloseStroke * 1.);
+		pen.setCapStyle(Qt::RoundCap);
+		p.setPen(pen);
+		p.setRenderHint(QPainter::Antialiasing);
+		p.drawLine(
+			centerX - half, centerY - half,
+			centerX + half, centerY + half);
+		p.drawLine(
+			centerX + half, centerY - half,
+			centerX - half, centerY + half);
+		p.setRenderHint(QPainter::Antialiasing, false);
+	}
+
+	yshift += st::semiboldFont->height + st::historyPollExplanationTitleSkip;
+
+	p.setPen(stm->historyTextFg);
+	_solutionText.draw(p, {
+		.position = { innerLeft, yshift },
+		.outerWidth = width(),
+		.availableWidth = textWidth,
+		.now = context.now,
+		.pausedEmoji = context.paused,
+		.pausedSpoiler = context.paused,
+	});
+
+	if (countSolutionMediaHeight(textWidth)) {
+		yshift += _solutionText.countHeight(textWidth)
+			+ st::historyPollExplanationMediaSkip;
+		const auto shift = st::msgFileLayout.padding.left();
+		const auto attachLeft = rtl()
+			? (width() - innerLeft + shift - _solutionAttach->width())
+			: (innerLeft - shift);
+		p.translate(attachLeft, yshift);
+		_solutionAttach->draw(
+			p,
+			context.translated(-attachLeft, -yshift)
+				.withSelection(TextSelection()));
+		p.translate(-attachLeft, -yshift);
 	}
 }
 
@@ -1937,6 +2128,74 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 			symbolAdd += _description.length();
 		}
 		tshift += descriptionHeight + st::historyPollDescriptionSkip;
+	}
+
+	if (const auto solutionHeight = countSolutionBlockHeight(paintw)) {
+		if (QRect(
+			padding.left(),
+			tshift,
+			paintw,
+			solutionHeight).contains(point)) {
+			const auto &qst = st::historyPagePreview;
+			const auto innerLeft = padding.left() + qst.padding.left();
+			const auto innerRight = padding.left()
+				+ paintw
+				- qst.padding.right();
+			const auto closeArea = st::historyPollExplanationCloseSize;
+			const auto closeLeft = innerRight - closeArea;
+			const auto closeTop = tshift + qst.padding.top();
+			if (QRect(
+				closeLeft,
+				closeTop,
+				closeArea,
+				st::semiboldFont->height).contains(point)) {
+				result.link = _closeSolutionLink;
+				return result;
+			}
+			const auto textTop = tshift
+				+ qst.padding.top()
+				+ st::semiboldFont->height
+				+ st::historyPollExplanationTitleSkip;
+			const auto textWidth = innerRight - innerLeft;
+			const auto textHeight = _solutionText.countHeight(textWidth);
+			if (QRect(
+				innerLeft,
+				textTop,
+				textWidth,
+				textHeight).contains(point)) {
+				auto textResult = _solutionText.getStateLeft(
+					point - QPoint(innerLeft, textTop),
+					textWidth,
+					width(),
+					request.forText());
+				if (textResult.link) {
+					result.link = textResult.link;
+				}
+				return result;
+			}
+			if (const auto mh = countSolutionMediaHeight(textWidth)) {
+				const auto mediaTop = textTop
+					+ textHeight
+					+ st::historyPollExplanationMediaSkip;
+				const auto shift = st::msgFileLayout.padding.left();
+				const auto mediaLeft = innerLeft - shift;
+				if (_solutionAttach
+					&& QRect(
+						mediaLeft,
+						mediaTop,
+						_solutionAttach->width(),
+						mh).contains(point)) {
+					const auto attachLeft = rtl()
+						? (width() - innerLeft - _solutionAttach->width())
+						: innerLeft;
+					result = _solutionAttach->textState(
+						point - QPoint(attachLeft, mediaTop),
+						request);
+				}
+			}
+			return result;
+		}
+		tshift += solutionHeight + st::historyPollExplanationSkip;
 	}
 
 	const auto questionH = _question.countHeight(paintw);

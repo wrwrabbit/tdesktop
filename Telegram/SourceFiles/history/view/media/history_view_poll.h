@@ -73,6 +73,7 @@ private:
 	struct SendingAnimation;
 	struct Answer;
 	struct AttachedMedia;
+	struct SolutionMedia;
 	struct CloseInformation;
 	struct RecentVoter;
 
@@ -208,6 +209,17 @@ private:
 		int right,
 		int top) const;
 
+	void updateSolutionText();
+	void updateSolutionMedia();
+	[[nodiscard]] int countSolutionBlockHeight(int innerWidth) const;
+	[[nodiscard]] int countSolutionMediaHeight(int mediaWidth) const;
+	void paintSolutionBlock(
+		Painter &p,
+		int left,
+		int top,
+		int paintw,
+		const PaintContext &context) const;
+
 	[[nodiscard]] int bottomButtonHeight() const;
 
 	const not_null<PollData*> _poll;
@@ -246,6 +258,11 @@ private:
 	mutable Ui::Animations::Simple _solutionButtonAnimation;
 	mutable bool _solutionShown = false;
 	mutable bool _solutionButtonVisible = false;
+
+	Ui::Text::String _solutionText;
+	mutable ClickHandlerPtr _closeSolutionLink;
+	std::unique_ptr<SolutionMedia> _solutionMedia;
+	std::unique_ptr<Media> _solutionAttach;
 
 	bool _hasSelected = false;
 	bool _votedFromHere = false;
