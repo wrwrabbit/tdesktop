@@ -260,9 +260,18 @@ protected:
 				p.fillRect(rippleRect(), st::songCoverOverlayFg);
 				p.restore();
 			}
+			const auto cancelOpacity = _state->uploading
+				? _cancelShown.value(
+					(isOver() || isDown()) ? 1. : 0.)
+				: 0.;
 			const auto line = float64(st::lineWidth * 2);
 			const auto margin = float64(st::pollAttachProgressMargin);
 			const auto arc = QRectF(rippleRect()) - Margins(margin);
+			if (cancelOpacity > 0.) {
+				p.setOpacity(cancelOpacity);
+				st::pollAttachCancel.paintInCenter(p, rippleRect());
+				p.setOpacity(1.);
+			}
 			_radial.draw(p, arc, line, st::historyFileThumbRadialFg);
 		}
 	}
@@ -271,6 +280,18 @@ protected:
 		RippleButton::onStateChanged(was, source);
 		if (!_state->thumbnail) {
 			update();
+		}
+		if (_state->uploading) {
+			const auto over = isOver() || isDown();
+			const auto wasOver = (was & StateFlag::Over)
+				|| (was & StateFlag::Down);
+			if (over != wasOver) {
+				_cancelShown.start(
+					[=] { update(); },
+					over ? 0. : 1.,
+					over ? 1. : 0.,
+					st::universalDuration);
+			}
 		}
 	}
 
@@ -389,6 +410,7 @@ private:
 	const std::shared_ptr<Ui::DynamicImage> _attachOver;
 	std::shared_ptr<Ui::DynamicImage> _subscribed;
 	Ui::RadialAnimation _radial;
+	Ui::Animations::Simple _cancelShown;
 
 };
 
@@ -2093,6 +2115,10 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			std::shared_ptr<PollMediaState> media,
 			bool allowDocuments = false,
 			bool allowStickers = true) {
+		if (media->uploading) {
+			clearMedia(media);
+			return;
+		}
 		state->mediaMenu = base::make_unique_q<Ui::PopupMenu>(
 			button,
 			st::popupMenuWithIcons);
