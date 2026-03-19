@@ -110,6 +110,33 @@ constexpr auto kErrorLimit = 99;
 	return result;
 }
 
+[[nodiscard]] bool ValidateFileDragData(not_null<const QMimeData*> data) {
+	if (data->hasImage()) {
+		return true;
+	}
+	const auto urls = Core::ReadMimeUrls(data);
+	return (urls.size() == 1) && urls.front().isLocalFile();
+}
+
+[[nodiscard]] Ui::PreparedList FileListFromMimeData(
+		not_null<const QMimeData*> data,
+		bool premium) {
+	using Error = Ui::PreparedList::Error;
+	const auto urls = Core::ReadMimeUrls(data);
+	if (!urls.isEmpty()) {
+		return Storage::PrepareMediaList(
+			urls.mid(0, 1),
+			st::sendMediaPreviewSize,
+			premium);
+	} else if (auto read = Core::ReadMimeImage(data)) {
+		return Storage::PrepareMediaFromImage(
+			std::move(read.image),
+			std::move(read.content),
+			st::sendMediaPreviewSize);
+	}
+	return Ui::PreparedList(Error::EmptyFile, QString());
+}
+
 struct PollMediaState {
 	PollMedia media;
 	std::shared_ptr<Ui::DynamicImage> thumbnail;
@@ -2000,9 +2027,15 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 				data,
 				_controller->session().premium()));
 	};
-	const auto installPhotoDropToWidget = [=](
+	using ValidateFn = Fn<bool(not_null<const QMimeData*>)>;
+	using ApplyDropFn = Fn<bool(
+		std::shared_ptr<PollMediaState>,
+		not_null<const QMimeData*>)>;
+	const auto installDropToWidget = [=](
 			not_null<QWidget*> widget,
-			std::shared_ptr<PollMediaState> media) {
+			std::shared_ptr<PollMediaState> media,
+			ValidateFn validate,
+			ApplyDropFn apply) {
 		widget->setAcceptDrops(true);
 		base::install_event_filter(widget, [=](not_null<QEvent*> event) {
 			const auto type = event->type();
@@ -2013,30 +2046,74 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			}
 			const auto drop = static_cast<QDropEvent*>(event.get());
 			const auto data = drop->mimeData();
-			if (!data || !Storage::ValidatePhotoEditorMediaDragData(data)) {
+			if (!data || !validate(data)) {
 				return base::EventFilterResult::Continue;
 			}
-			if (type == QEvent::Drop && !applyPhotoDrop(media, data)) {
+			if (type == QEvent::Drop && !apply(media, data)) {
 				return base::EventFilterResult::Continue;
 			}
 			drop->acceptProposedAction();
 			return base::EventFilterResult::Cancel;
 		});
 	};
-	const auto installPhotoDropToField = [=](
+	const auto installDropToField = [=](
 			not_null<Ui::InputField*> field,
-			std::shared_ptr<PollMediaState> media) {
+			std::shared_ptr<PollMediaState> media,
+			ValidateFn validate,
+			ApplyDropFn apply) {
 		field->setMimeDataHook([=](
 				not_null<const QMimeData*> data,
 				Ui::InputField::MimeAction action) {
 			if (action == Ui::InputField::MimeAction::Check) {
-				return Storage::ValidatePhotoEditorMediaDragData(data);
+				return validate(data);
 			} else if (action == Ui::InputField::MimeAction::Insert) {
-				return applyPhotoDrop(media, data);
+				return apply(media, data);
 			}
 			Unexpected("Polls: action in MimeData hook.");
 		});
 	};
+	const auto validatePhoto = ValidateFn(
+		Storage::ValidatePhotoEditorMediaDragData);
+	const auto installPhotoDropToWidget = [=](
+			not_null<QWidget*> widget,
+			std::shared_ptr<PollMediaState> media) {
+		installDropToWidget(widget, media, validatePhoto, applyPhotoDrop);
+	};
+	const auto installPhotoDropToField = [=](
+			not_null<Ui::InputField*> field,
+			std::shared_ptr<PollMediaState> media) {
+		installDropToField(field, media, validatePhoto, applyPhotoDrop);
+	};
+	const auto applyFileDrop = ApplyDropFn([=](
+			std::shared_ptr<PollMediaState> media,
+			not_null<const QMimeData*> data) {
+		auto list = FileListFromMimeData(
+			data,
+			_controller->session().premium());
+		if (list.error == Ui::PreparedList::Error::TooLargeFile) {
+			const auto fileSize = list.files.empty()
+				? 0
+				: list.files.front().size;
+			_controller->show(Box(
+				FileSizeLimitBox,
+				&_controller->session(),
+				fileSize,
+				nullptr));
+			return false;
+		}
+		if (list.error != Ui::PreparedList::Error::None
+			|| list.files.empty()) {
+			return false;
+		}
+		auto &file = list.files.front();
+		if (file.type == Ui::PreparedFile::Type::Photo) {
+			startPreparedPhotoUpload(media, std::move(file));
+		} else {
+			startPreparedDocumentUpload(media, std::move(file));
+		}
+		return true;
+	});
+	const auto validateFile = ValidateFn(ValidateFileDragData);
 	const auto choosePhoto = [=](std::shared_ptr<PollMediaState> media) {
 		const auto callback = crl::guard(this, [=](
 				FileDialog::OpenResult &&result) {
@@ -2183,8 +2260,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			st::pollAttach,
 			media);
 		button->show();
-		installPhotoDropToField(field, media);
-		installPhotoDropToWidget(button, media);
+		installDropToField(field, media, validateFile, applyFileDrop);
+		installDropToWidget(button, media, validateFile, applyFileDrop);
 		field->sizeValue(
 		) | rpl::on_next([=](QSize size) {
 			button->moveToRight(
