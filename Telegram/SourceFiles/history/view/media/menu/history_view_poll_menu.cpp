@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "boxes/sticker_set_box.h"
 #include "data/data_document.h"
+#include "data/data_document_media.h"
 #include "data/data_file_origin.h"
 #include "data/data_photo.h"
 #include "data/data_photo_media.h"
@@ -38,6 +39,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_layers.h"
 #include "styles/style_media_view.h"
 #include "styles/style_menu_icons.h"
@@ -298,6 +300,72 @@ void ShowPollDocumentPreview(
 		not_null<DocumentData*> document,
 		Fn<void()> replace,
 		Fn<void()> remove) {
+	if (document->hasThumbnail()) {
+		const auto media = document->createMediaView();
+		media->thumbnailWanted(Data::FileOrigin());
+		ShowWidgetPreview(controller, [=](
+				not_null<Ui::RpWidget*> preview) {
+			const auto body = preview->parentWidget()->size();
+			const auto skip = st::mediaPreviewPhotoSkip;
+			const auto box = QSize(
+				body.width() - 2 * skip,
+				body.height() - 2 * skip);
+			const auto d = document->dimensions;
+			const auto raw = (d.width() > 0 && d.height() > 0)
+				? QSize(
+					style::ConvertScale(d.width()),
+					style::ConvertScale(d.height()))
+				: box;
+			const auto scaled = raw.scaled(box, Qt::KeepAspectRatio);
+			const auto shadowExtend = st::boxRoundShadow.extend;
+			const auto fullW = scaled.width()
+				+ rect::m::sum::h(shadowExtend);
+			const auto fullH = scaled.height()
+				+ rect::m::sum::v(shadowExtend);
+			preview->resize(fullW, fullH);
+
+			document->session().downloaderTaskFinished(
+			) | rpl::on_next([=] {
+				preview->update();
+			}, preview->lifetime());
+
+			preview->paintRequest() | rpl::on_next([=] {
+				auto p = Painter(preview);
+				const auto outer = preview->rect() - shadowExtend;
+
+				Ui::Shadow::paint(
+					p,
+					outer,
+					preview->width(),
+					st::boxRoundShadow);
+				auto hq = PainterHighQualityEnabler(p);
+				p.setPen(Qt::NoPen);
+				p.setBrush(st::windowBg);
+				const auto radius = st::boxRadius;
+				p.drawRoundedRect(outer, radius, radius);
+
+				const auto thumb = media->thumbnail();
+				const auto blurred = media->thumbnailInline();
+				if (const auto image = thumb ? thumb : blurred) {
+					auto path = QPainterPath();
+					path.addRoundedRect(outer, radius, radius);
+					p.setClipPath(path);
+					p.drawImage(outer, image->original().scaled(
+						outer.size() * style::DevicePixelRatio(),
+						Qt::KeepAspectRatioByExpanding,
+						Qt::SmoothTransformation));
+				}
+			}, preview->lifetime());
+		}, [=](not_null<Ui::DropdownMenu*> menu) {
+			menu->addAction(
+				tr::lng_attach_replace(tr::now),
+				replace,
+				&st::menuIconReplace);
+			AddRemoveAction(menu, remove);
+		});
+		return;
+	}
+
 	const auto docGeneric = Layout::DocumentGenericPreview::Create(
 		document);
 	const auto docIcon = docGeneric.icon();

@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "layout/layout_document_generic_preview.h"
 #include "main/main_app_config.h"
+#include "platform/platform_file_utilities.h"
 #include "main/main_session.h"
 #include "menu/menu_send.h"
 #include "settings/detailed_settings_button.h"
@@ -87,28 +88,6 @@ constexpr auto kWarnOptionLimit = 30;
 constexpr auto kSolutionLimit = 200;
 constexpr auto kWarnSolutionLimit = 60;
 constexpr auto kErrorLimit = 99;
-
-[[nodiscard]] Ui::PreparedList PhotoListFromMimeData(
-		not_null<const QMimeData*> data,
-		bool premium) {
-	using Error = Ui::PreparedList::Error;
-	const auto urls = Core::ReadMimeUrls(data);
-	auto result = !urls.isEmpty()
-		? Storage::PrepareMediaList(
-			urls.mid(0, 1),
-			st::sendMediaPreviewSize,
-			premium)
-		: Ui::PreparedList(Error::EmptyFile, QString());
-	if (result.error == Error::None) {
-		return result;
-	} else if (auto read = Core::ReadMimeImage(data)) {
-		return Storage::PrepareMediaFromImage(
-			std::move(read.image),
-			std::move(read.content),
-			st::sendMediaPreviewSize);
-	}
-	return result;
-}
 
 [[nodiscard]] bool ValidateFileDragData(not_null<const QMimeData*> data) {
 	if (data->hasImage()) {
@@ -1565,6 +1544,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		uint64 token = 0;
 		QString filename;
 		QString filemime;
+		QVector<MTPDocumentAttribute> attributes;
+		bool forceFile = true;
 	};
 	struct State final {
 		Errors error = Error::Question;
@@ -1692,21 +1673,22 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			uint64 token,
 			FullMsgId fullId,
 			const Api::RemoteFileInfo &info,
-			const QString &filename,
-			const QString &filemime) {
+			const UploadContext &context) {
 		using Flag = MTPDinputMediaUploadedDocument::Flag;
-		const auto flags = Flag::f_force_file
+		const auto flags = (context.forceFile ? Flag::f_force_file : Flag())
 			| (info.thumb ? Flag::f_thumb : Flag());
+		auto attributes = !context.attributes.isEmpty()
+			? context.attributes
+			: QVector<MTPDocumentAttribute>{
+				MTP_documentAttributeFilename(
+					MTP_string(context.filename)),
+			};
 		const auto uploaded = MTP_inputMediaUploadedDocument(
 			MTP_flags(flags),
 			info.file,
 			info.thumb.value_or(MTPInputFile()),
-			MTP_string(filemime),
-			MTP_vector<MTPDocumentAttribute>(
-				QVector<MTPDocumentAttribute>{
-					MTP_documentAttributeFilename(
-						MTP_string(filename)),
-				}),
+			MTP_string(context.filemime),
+			MTP_vector<MTPDocumentAttribute>(std::move(attributes)),
 			MTP_vector<MTPInputDocument>(),
 			MTPInputPhoto(),
 			MTP_int(0),
@@ -1726,11 +1708,17 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 				showToast(tr::lng_attach_failed(tr::now));
 				return;
 			}
+			const auto isVideo = parsed.input.document
+				&& parsed.input.document->isVideoFile();
 			setMedia(
 				media,
 				parsed.input,
-				std::move(parsed.thumbnail),
-				false);
+				isVideo
+					? (media->thumbnail
+						? media->thumbnail
+						: std::move(parsed.thumbnail))
+					: std::move(parsed.thumbnail),
+				isVideo);
 		}).fail([=](const MTP::Error &) {
 			if (media->token != token) {
 				return;
@@ -1796,8 +1784,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			context->token,
 			data.fullId,
 			data.info,
-			context->filename,
-			context->filemime);
+			*context);
 	}, lifetime());
 	_controller->session().uploader().documentProgress(
 	) | rpl::on_next([=](const FullMsgId &id) {
@@ -2032,6 +2019,69 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 					prepared);
 			}));
 	};
+	const auto startPreparedVideoUpload = [=](
+			std::shared_ptr<PollMediaState> media,
+			Ui::PreparedFile file) {
+		const auto token = ++media->token;
+		media->media = PollMedia();
+		media->thumbnail = std::make_shared<LocalImageThumbnail>(
+			std::move(file.preview));
+		media->rounded = true;
+		media->uploading = true;
+		media->progress = 0.;
+		media->uploadDataId = 0;
+		updateMedia(media);
+		using PreparePoll = PreparePollMediaTask;
+		state->prepareQueue->addTask(std::make_unique<PreparePoll>(
+			FileLoadTask::Args{
+				.session = &_controller->session(),
+				.filepath = file.path,
+				.content = file.content,
+				.information = std::move(file.information),
+				.videoCover = nullptr,
+				.type = SendMediaType::File,
+				.to = FileLoadTo(
+					_peer->id,
+					Api::SendOptions(),
+					FullReplyTo(),
+					MsgId()),
+				.caption = TextWithTags(),
+				.spoiler = false,
+				.album = nullptr,
+				.forceFile = false,
+				.idOverride = 0,
+				.displayName = file.displayName,
+			},
+			[=](std::shared_ptr<FilePrepareResult> prepared) {
+				if ((media->token != token) || !prepared) {
+					if (media->token == token) {
+						setMedia(media, PollMedia(), nullptr, false);
+						showToast(tr::lng_attach_failed(tr::now));
+					}
+					return;
+				}
+				auto attributes = QVector<MTPDocumentAttribute>();
+				prepared->document.match([&](const MTPDdocument &data) {
+					attributes = data.vattributes().v;
+				}, [](const auto &) {
+				});
+				const auto uploadId = FullMsgId(
+					_peer->id,
+					_controller->session().data().nextLocalMessageId());
+				state->uploads.emplace(uploadId, UploadContext{
+					.media = media,
+					.token = token,
+					.filename = prepared->filename,
+					.filemime = prepared->filemime,
+					.attributes = std::move(attributes),
+					.forceFile = false,
+				});
+				media->uploadDataId = prepared->id;
+				_controller->session().uploader().upload(
+					uploadId,
+					prepared);
+			}));
+	};
 	const auto applyPreparedPhotoList = [=](
 			std::shared_ptr<PollMediaState> media,
 			Ui::PreparedList &&list) {
@@ -2042,15 +2092,6 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		}
 		startPreparedPhotoUpload(media, std::move(list.files.front()));
 		return true;
-	};
-	const auto applyPhotoDrop = [=](
-			std::shared_ptr<PollMediaState> media,
-			not_null<const QMimeData*> data) {
-		return applyPreparedPhotoList(
-			media,
-			PhotoListFromMimeData(
-				data,
-				_controller->session().premium()));
 	};
 	using ValidateFn = Fn<bool(not_null<const QMimeData*>)>;
 	using ApplyDropFn = Fn<bool(
@@ -2097,17 +2138,56 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			Unexpected("Polls: action in MimeData hook.");
 		});
 	};
-	const auto validatePhoto = ValidateFn(
-		Storage::ValidatePhotoEditorMediaDragData);
+	const auto applyPhotoOrVideoDrop = ApplyDropFn([=](
+			std::shared_ptr<PollMediaState> media,
+			not_null<const QMimeData*> data) {
+		auto list = FileListFromMimeData(
+			data,
+			_controller->session().premium());
+		if (list.error != Ui::PreparedList::Error::None
+			|| list.files.empty()) {
+			return false;
+		}
+		auto &file = list.files.front();
+		if (file.type == Ui::PreparedFile::Type::Photo) {
+			startPreparedPhotoUpload(media, std::move(file));
+			return true;
+		} else if (file.type == Ui::PreparedFile::Type::Video) {
+			startPreparedVideoUpload(media, std::move(file));
+			return true;
+		}
+		return false;
+	});
+	const auto validatePhotoOrVideo = ValidateFn([](
+			not_null<const QMimeData*> data) {
+		if (data->hasImage()) {
+			return true;
+		}
+		const auto urls = Core::ReadMimeUrls(data);
+		if (urls.size() != 1 || !urls.front().isLocalFile()) {
+			return false;
+		}
+		const auto file = Platform::File::UrlToLocal(urls.front());
+		const auto mime = Core::MimeTypeForFile(QFileInfo(file)).name();
+		return Core::IsMimeAcceptedForPhotoVideoAlbum(mime);
+	});
 	const auto installPhotoDropToWidget = [=](
 			not_null<QWidget*> widget,
 			std::shared_ptr<PollMediaState> media) {
-		installDropToWidget(widget, media, validatePhoto, applyPhotoDrop);
+		installDropToWidget(
+			widget,
+			media,
+			validatePhotoOrVideo,
+			applyPhotoOrVideoDrop);
 	};
 	const auto installPhotoDropToField = [=](
 			not_null<Ui::InputField*> field,
 			std::shared_ptr<PollMediaState> media) {
-		installDropToField(field, media, validatePhoto, applyPhotoDrop);
+		installDropToField(
+			field,
+			media,
+			validatePhotoOrVideo,
+			applyPhotoOrVideoDrop);
 	};
 	const auto applyFileDrop = ApplyDropFn([=](
 			std::shared_ptr<PollMediaState> media,
@@ -2133,19 +2213,26 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		auto &file = list.files.front();
 		if (file.type == Ui::PreparedFile::Type::Photo) {
 			startPreparedPhotoUpload(media, std::move(file));
+		} else if (file.type == Ui::PreparedFile::Type::Video) {
+			startPreparedVideoUpload(media, std::move(file));
 		} else {
 			startPreparedDocumentUpload(media, std::move(file));
 		}
 		return true;
 	});
 	const auto validateFile = ValidateFn(ValidateFileDragData);
-	const auto choosePhoto = [=](std::shared_ptr<PollMediaState> media) {
+	const auto choosePhotoOrVideo = [=](
+			std::shared_ptr<PollMediaState> media) {
 		const auto callback = crl::guard(this, [=](
 				FileDialog::OpenResult &&result) {
 			const auto checkResult = [&](const Ui::PreparedList &list) {
 				using namespace Ui;
-				return (list.files.size() == 1)
-					&& (list.files.front().type == PreparedFile::Type::Photo);
+				if (list.files.size() != 1) {
+					return false;
+				}
+				const auto type = list.files.front().type;
+				return (type == PreparedFile::Type::Photo)
+					|| (type == PreparedFile::Type::Video);
 			};
 			const auto showError = [=](tr::phrase<> text) {
 				showToast(text(tr::now));
@@ -2156,14 +2243,20 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 				showError,
 				st::sendMediaPreviewSize,
 				_controller->session().premium());
-			if (list) {
+			if (!list) {
+				return;
+			}
+			auto &file = list->files.front();
+			if (file.type == Ui::PreparedFile::Type::Photo) {
 				applyPreparedPhotoList(media, std::move(*list));
+			} else {
+				startPreparedVideoUpload(media, std::move(file));
 			}
 		});
 		FileDialog::GetOpenPath(
 			this,
-			tr::lng_attach_photo(tr::now),
-			FileDialog::ImagesFilter(),
+			tr::lng_attach_photo_or_video(tr::now),
+			FileDialog::PhotoVideoFilesFilter(),
 			callback);
 	};
 	const auto chooseDocument = [=](std::shared_ptr<PollMediaState> media) {
@@ -2238,7 +2331,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			HistoryView::ShowPollPhotoPreview(
 				_controller,
 				photo,
-				[=] { choosePhoto(media); },
+				[=] { choosePhotoOrVideo(media); },
 				[=] {
 					HistoryView::EditPollPhoto(
 						_controller,
@@ -2249,6 +2342,13 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 								std::move(list));
 						}));
 				},
+				remove);
+			return;
+		} else if (document && document->isVideoFile()) {
+			HistoryView::ShowPollDocumentPreview(
+				_controller,
+				document,
+				[=] { choosePhotoOrVideo(media); },
 				remove);
 			return;
 		} else if (document) {
@@ -2265,8 +2365,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		state->mediaMenu->setForcedOrigin(
 			Ui::PanelAnimation::Origin::TopRight);
 		state->mediaMenu->addAction(
-			tr::lng_attach_photo(tr::now),
-			[=] { choosePhoto(media); },
+			tr::lng_attach_photo_or_video(tr::now),
+			[=] { choosePhotoOrVideo(media); },
 			&st::menuIconPhoto);
 		if (allowDocuments) {
 			state->mediaMenu->addAction(
