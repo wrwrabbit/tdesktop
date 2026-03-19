@@ -104,6 +104,7 @@ pollBoxFilledPollMultipleIcon: icon{{ "poll/filled/filled_poll_multiple", active
 pollAttachTextSkip: 28px;
 pollAttachProgressMargin: 4px;
 pollAttachCancel: icon {{ "history_audio_cancel", historyFileThumbIconFg }};
+pollAttachView: icon {{ "mediaview/views", historyFileThumbIconFg }};
 pollAttachShift: point(-11px, -2px);
 
 createPollField: InputField(defaultInputField) {

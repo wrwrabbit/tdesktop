@@ -275,6 +275,23 @@ protected:
 					image->image(std::max(target.width(), target.height())));
 			}
 		}
+		if (_state->thumbnail && !_state->uploading) {
+			const auto viewOpacity = _viewShown.value(
+				(isOver() || isDown()) ? 1. : 0.);
+			if (viewOpacity > 0.) {
+				p.save();
+				p.setOpacity(viewOpacity);
+				auto path = QPainterPath();
+				path.addRoundedRect(
+					rippleRect(),
+					st::roundRadiusSmall,
+					st::roundRadiusSmall);
+				p.setClipPath(path);
+				p.fillRect(rippleRect(), st::songCoverOverlayFg);
+				st::pollAttachView.paintInCenter(p, rippleRect());
+				p.restore();
+			}
+		}
 		if (_state->uploading && !_radial.animating()) {
 			_radial.start(_state->progress);
 		}
@@ -311,12 +328,19 @@ protected:
 		if (!_state->thumbnail) {
 			update();
 		}
-		if (_state->uploading) {
-			const auto over = isOver() || isDown();
-			const auto wasOver = (was & StateFlag::Over)
-				|| (was & StateFlag::Down);
-			if (over != wasOver) {
+		const auto over = isOver() || isDown();
+		const auto wasOver = (was & StateFlag::Over)
+			|| (was & StateFlag::Down);
+		if (over != wasOver) {
+			if (_state->uploading) {
 				_cancelShown.start(
+					[=] { update(); },
+					over ? 0. : 1.,
+					over ? 1. : 0.,
+					st::universalDuration);
+			}
+			if (_state->thumbnail && !_state->uploading) {
+				_viewShown.start(
 					[=] { update(); },
 					over ? 0. : 1.,
 					over ? 1. : 0.,
@@ -441,6 +465,7 @@ private:
 	std::shared_ptr<Ui::DynamicImage> _subscribed;
 	Ui::RadialAnimation _radial;
 	Ui::Animations::Simple _cancelShown;
+	Ui::Animations::Simple _viewShown;
 
 };
 
