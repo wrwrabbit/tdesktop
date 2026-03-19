@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "core/crash_reports.h"
 
+#include <QtCore/QFileInfo>
 #include <QtCore/QOperatingSystemVersion>
 #include <QtWidgets/QApplication>
 #include <QtGui/QDesktopServices>
@@ -804,6 +805,59 @@ void psSendToMenu(bool send, bool silent) {
 		L"--",
 		L"Telegram send to link.\n"
 		"You can disable send to menu item in Telegram settings.");
+}
+
+bool CreateStartMenuShortcut(const QString &exePath, bool silent) {
+	PWSTR programsFolder = nullptr;
+	HRESULT hr = SHGetKnownFolderPath(
+		FOLDERID_Programs,
+		KF_FLAG_CREATE,
+		nullptr,
+		&programsFolder);
+	const auto guard = gsl::finally([&] { CoTaskMemFree(programsFolder); });
+	if (!SUCCEEDED(hr)) {
+		if (!silent) LOG(("App Error: could not get FOLDERID_Programs: %1").arg(hr));
+		return false;
+	}
+	const auto lnk = QString::fromWCharArray(programsFolder)
+		+ '\\'
+		+ AppFile.utf16()
+		+ u".lnk"_q;
+	const auto shellLink = base::WinRT::TryCreateInstance<IShellLink>(
+		CLSID_ShellLink);
+	if (!shellLink) {
+		if (!silent) LOG(("App Error: could not create IShellLink for start menu shortcut"));
+		return false;
+	}
+	const auto exeNative = QDir::toNativeSeparators(exePath);
+	const auto dirNative = QDir::toNativeSeparators(
+		QFileInfo(exePath).absolutePath());
+	shellLink->SetArguments(L"");
+	shellLink->SetPath(exeNative.toStdWString().c_str());
+	shellLink->SetWorkingDirectory(dirNative.toStdWString().c_str());
+	shellLink->SetDescription(L"Telegram Desktop");
+	if (const auto propertyStore = shellLink.try_as<IPropertyStore>()) {
+		PROPVARIANT appIdPropVar;
+		hr = InitPropVariantFromString(AppUserModelId::Id().c_str(), &appIdPropVar);
+		if (SUCCEEDED(hr)) {
+			hr = propertyStore->SetValue(AppUserModelId::Key(), appIdPropVar);
+			PropVariantClear(&appIdPropVar);
+			if (SUCCEEDED(hr)) {
+				hr = propertyStore->Commit();
+			}
+		}
+	}
+	const auto persistFile = shellLink.try_as<IPersistFile>();
+	if (!persistFile) {
+		if (!silent) LOG(("App Error: could not get IPersistFile for start menu shortcut"));
+		return false;
+	}
+	hr = persistFile->Save(lnk.toStdWString().c_str(), TRUE);
+	if (!SUCCEEDED(hr)) {
+		if (!silent) LOG(("App Error: could not save start menu shortcut to %1").arg(lnk));
+		return false;
+	}
+	return true;
 }
 
 // Stub while we still support Windows 7.

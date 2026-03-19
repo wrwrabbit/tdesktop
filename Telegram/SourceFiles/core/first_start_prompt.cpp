@@ -294,6 +294,7 @@ void ShowRemovableDialog() {
 } // namespace
 
 void ShowFirstStartPromptIfNeeded() {
+	return; // Startup dialog disabled for Phase 1 testing; use Settings to invoke it.
 	if (PromptAlreadyShown()) {
 		LOG(("FirstStart: prompt already shown ('%1' exists), skipping").arg(PromptMarkerPath()));
 		return;

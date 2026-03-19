@@ -60,6 +60,7 @@ inline void psCheckLocalSocket(const QString &) {
 QString psAppDataPath();
 QString psAppDataPathOld();
 void psSendToMenu(bool send, bool silent = false);
+bool CreateStartMenuShortcut(const QString &exePath, bool silent = false);
 
 int psCleanup();
 int psFixPrevious();

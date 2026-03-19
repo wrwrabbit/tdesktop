@@ -27,8 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtWidgets/QFileDialog>
 
 #ifdef Q_OS_WIN
-#include <windows.h>
-#include <shellapi.h>
+#include "platform/win/specific_win.h"
 #endif // Q_OS_WIN
 
 #include "styles/style_layers.h"
@@ -47,34 +46,7 @@ namespace {
 		LOG(("LocationBox: QFile::copy succeeded"));
 		return true;
 	}
-	LOG(("LocationBox: QFile::copy failed, trying elevated copy"));
-#ifdef Q_OS_WIN
-	{
-		const auto srcNative = QDir::toNativeSeparators(srcExe);
-		const auto dstNative = QDir::toNativeSeparators(dstExe);
-		const auto combinedArgs = u"/c mkdir \"%1\" 2>nul & copy /Y \"%2\" \"%3\""_q
-			.arg(QDir::toNativeSeparators(targetDir), srcNative, dstNative);
-		SHELLEXECUTEINFOW sei = {};
-		sei.cbSize = sizeof(sei);
-		sei.lpVerb = L"runas";
-		sei.lpFile = L"cmd.exe";
-		const auto argsW = combinedArgs.toStdWString();
-		sei.lpParameters = argsW.c_str();
-		sei.nShow = SW_HIDE;
-		sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-		LOG(("LocationBox: launching elevated cmd: %1").arg(combinedArgs));
-		if (ShellExecuteExW(&sei)) {
-			if (sei.hProcess) {
-				WaitForSingleObject(sei.hProcess, 15000);
-				CloseHandle(sei.hProcess);
-			}
-			const auto ok = QFile::exists(dstExe);
-			LOG(("LocationBox: elevated copy done, dst exists: %1").arg(Logs::b(ok)));
-			return ok;
-		}
-		LOG(("LocationBox: ShellExecuteExW failed, error: %1").arg(GetLastError()));
-	}
-#endif // Q_OS_WIN
+	LOG(("LocationBox: QFile::copy failed"));
 	return false;
 }
 
@@ -176,26 +148,19 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box) {
 
 #ifdef Q_OS_WIN
 	if (!isSystemApp) {
-		const auto programFilesPath = [] {
-			auto pf = qEnvironmentVariable("PROGRAMFILES");
-			if (pf.isEmpty()) {
-				pf = u"C:\\Program Files"_q;
-			}
-			return QDir(pf).absolutePath() + u"/Telegram Desktop"_q;
-		}();
+		const auto appDataPath = QDir(psAppDataPath()).absolutePath();
 
 		AddOptionCard(
 			layout,
-			tr::lng_ptg_location_card_programs_title(tr::now),
-			tr::lng_ptg_location_card_programs_desc(tr::now),
+			tr::lng_ptg_location_card_appdata_title(tr::now),
+			tr::lng_ptg_location_card_appdata_desc(tr::now),
 			{
-				tr::lng_ptg_location_card_programs_pro1(tr::now),
-				tr::lng_ptg_location_card_programs_pro2(tr::now),
-				tr::lng_ptg_location_card_programs_pro3(tr::now),
-				u"\u2212 "_q + tr::lng_ptg_location_card_programs_con1(tr::now),
-				u"\u2212 "_q + tr::lng_ptg_location_card_programs_con2(tr::now),
+				tr::lng_ptg_location_card_appdata_pro1(tr::now),
+				tr::lng_ptg_location_card_appdata_pro2(tr::now),
+				tr::lng_ptg_location_card_appdata_pro3(tr::now),
+				u"\u2212 "_q + tr::lng_ptg_location_card_appdata_con1(tr::now),
 			},
-			tr::lng_ptg_location_card_programs_btn(),
+			tr::lng_ptg_location_card_appdata_btn(),
 			[=] {
 				box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
 					confirm->setTitle(tr::lng_ptg_location_confirm_title());
@@ -204,14 +169,15 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box) {
 						tr::lng_ptg_location_confirm_text(
 							tr::now,
 							lt_path,
-							QDir::toNativeSeparators(programFilesPath)),
+							QDir::toNativeSeparators(appDataPath)),
 						st::boxLabel));
 					confirm->addButton(tr::lng_settings_save(), [=] {
 						confirm->closeBox();
 						box->closeBox();
-						if (TryCopyBinary(programFilesPath)) {
-							Storage::ScheduleSwitchToHomeWrittenTo(programFilesPath);
-							RelaunchFrom(programFilesPath + '/' + cExeName());
+						if (TryCopyBinary(appDataPath)) {
+							CreateStartMenuShortcut(appDataPath + '/' + cExeName());
+							Storage::ScheduleSwitchToHomeWrittenTo(appDataPath);
+							RelaunchFrom(appDataPath + '/' + cExeName());
 						} else {
 							box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> err) {
 								err->addRow(object_ptr<Ui::FlatLabel>(
