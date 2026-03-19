@@ -64,7 +64,7 @@ template <typename MediaData>
 		MediaData media) {
 	const auto state = std::make_shared<PreviewOverlayState>();
 
-	const auto mainwidget = controller->widget();
+	const auto mainwidget = controller->widget()->bodyWidget();
 	state->mediaPreview = base::make_unique_q<Window::MediaPreviewWidget>(
 		mainwidget,
 		controller);
@@ -110,7 +110,7 @@ void SetupPreviewMenu(
 		const PreviewOverlay &overlay,
 		Fn<void(not_null<Ui::DropdownMenu*>)> fillMenu) {
 	const auto &state = overlay.state;
-	const auto mainwidget = controller->widget();
+	const auto mainwidget = controller->widget()->bodyWidget();
 	if (fillMenu) {
 		state->mediaPreview->setHideEmoji(true);
 		state->menu = base::make_unique_q<Ui::DropdownMenu>(
@@ -192,7 +192,7 @@ bool ShowReactionPreview(
 	const auto overlay = CreatePreviewOverlay(controller, origin, document);
 	const auto &state = overlay.state;
 
-	const auto mainwidget = controller->widget();
+	const auto mainwidget = controller->widget()->bodyWidget();
 	const auto shadowExtend = st::boxRoundShadow.extend;
 
 	if (reactionId.custom() && document->sticker()) {
