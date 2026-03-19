@@ -789,6 +789,30 @@ void Poll::updateAttachedMedia() {
 	_attachedMedia->kind = updated.kind;
 	_attachedMedia->rounded = updated.rounded;
 	_attachedMedia->id = updated.id;
+	if (updated.kind == PollThumbnailKind::Document && updated.id) {
+		const auto document = _poll->owner().document(
+			DocumentId(updated.id));
+		const auto session = &_poll->session();
+		_attachedMedia->handler = std::make_shared<LambdaClickHandler>(
+			[=](ClickContext context) {
+				const auto my = context.other.value<ClickHandlerContext>();
+				const auto controller = my.sessionWindow.get();
+				if (!controller
+					|| (&controller->session() != session)) {
+					return;
+				}
+				controller->openDocument(
+					document,
+					false,
+					messageContext);
+			});
+		_attachedMediaAttach = CreateAttach(
+			_parent,
+			document,
+			nullptr);
+	} else {
+		_attachedMediaAttach = nullptr;
+	}
 	if (_attachedMedia->thumbnail) {
 		_attachedMedia->thumbnail->subscribeToUpdates(
 			crl::guard(this, [=] {
@@ -807,9 +831,25 @@ int Poll::countTopContentSkip() const {
 }
 
 int Poll::countTopMediaHeight() const {
-	return (_attachedMedia && _attachedMedia->thumbnail)
-		? st::historyPollMediaHeight
-		: 0;
+	if (!_attachedMedia || !_attachedMedia->thumbnail) {
+		return 0;
+	}
+	if (_attachedMediaAttach) {
+		return countAttachedDocumentHeight();
+	}
+	return st::historyPollMediaHeight;
+}
+
+int Poll::countAttachedDocumentHeight() const {
+	if (!_attachedMediaAttach) {
+		return 0;
+	}
+	_attachedMediaAttach->initDimensions();
+	const auto innerWidth = width()
+		- st::msgPadding.left()
+		- st::msgPadding.right();
+	return _attachedMediaAttach->resizeGetHeight(
+		std::max(1, innerWidth));
 }
 
 QRect Poll::countTopMediaRect(int top) const {
@@ -1334,44 +1374,59 @@ void Poll::draw(Painter &p, const PaintContext &context) const {
 	paintw -= padding.left() + padding.right();
 
 	if (const auto mediaHeight = countTopMediaHeight()) {
-		const auto target = countTopMediaRect(tshift);
-		p.setPen(Qt::NoPen);
-		p.setBrush(stm->msgFileBg);
-		PainterHighQualityEnabler hq(p);
-		if (_attachedMedia->kind == PollThumbnailKind::Emoji) {
-			p.drawRoundedRect(
-				target,
-				st::roundRadiusLarge,
-				st::roundRadiusLarge);
-			const auto image = _attachedMedia->thumbnail->image(
-				std::max(target.width(), target.height()));
-			if (!image.isNull()) {
-				const auto source = QRectF(QPointF(), QSizeF(image.size()));
-				const auto kx = target.width() / source.width();
-				const auto ky = target.height() / source.height();
-				const auto scale = std::min(kx, ky);
-				const auto imageSize = QSizeF(
-					source.width() * scale,
-					source.height() * scale);
-				const auto geometry = QRectF(
-					target.x() + (target.width() - imageSize.width()) / 2.,
-					target.y() + (target.height() - imageSize.height()) / 2.,
-					imageSize.width(),
-					imageSize.height());
-				p.save();
-				auto path = QPainterPath();
-				path.addRoundedRect(
+		if (_attachedMediaAttach) {
+			const auto shift = st::msgFileLayout.padding.left();
+			const auto attachLeft = padding.left() - shift;
+			p.translate(attachLeft, tshift);
+			_attachedMediaAttach->draw(
+				p,
+				context.translated(-attachLeft, -tshift)
+					.withSelection(TextSelection()));
+			p.translate(-attachLeft, -tshift);
+		} else {
+			const auto target = countTopMediaRect(tshift);
+			p.setPen(Qt::NoPen);
+			p.setBrush(stm->msgFileBg);
+			PainterHighQualityEnabler hq(p);
+			if (_attachedMedia->kind == PollThumbnailKind::Emoji) {
+				p.drawRoundedRect(
 					target,
 					st::roundRadiusLarge,
 					st::roundRadiusLarge);
-				p.setClipPath(path);
-				p.drawImage(geometry, image, source);
-				p.restore();
-			}
-		} else {
-			validateTopMediaCache(target.size());
-			if (!_attachedMediaCache.isNull()) {
-				p.drawImage(target.topLeft(), _attachedMediaCache);
+				const auto image = _attachedMedia->thumbnail->image(
+					std::max(target.width(), target.height()));
+				if (!image.isNull()) {
+					const auto source = QRectF(
+						QPointF(),
+						QSizeF(image.size()));
+					const auto kx = target.width() / source.width();
+					const auto ky = target.height() / source.height();
+					const auto scale = std::min(kx, ky);
+					const auto imageSize = QSizeF(
+						source.width() * scale,
+						source.height() * scale);
+					const auto geometry = QRectF(
+						target.x()
+							+ (target.width() - imageSize.width()) / 2.,
+						target.y()
+							+ (target.height() - imageSize.height()) / 2.,
+						imageSize.width(),
+						imageSize.height());
+					p.save();
+					auto path = QPainterPath();
+					path.addRoundedRect(
+						target,
+						st::roundRadiusLarge,
+						st::roundRadiusLarge);
+					p.setClipPath(path);
+					p.drawImage(geometry, image, source);
+					p.restore();
+				}
+			} else {
+				validateTopMediaCache(target.size());
+				if (!_attachedMediaCache.isNull()) {
+					p.drawImage(target.topLeft(), _attachedMediaCache);
+				}
 			}
 		}
 		tshift += mediaHeight + st::historyPollMediaSkip;
@@ -1780,7 +1835,16 @@ void Poll::paintSolutionBlock(
 	if (countSolutionMediaHeight(textWidth)) {
 		yshift += _solutionText.countHeight(textWidth)
 			+ st::historyPollExplanationMediaSkip;
-		const auto shift = st::msgFileLayout.padding.left();
+		const auto isDocument = _solutionMedia
+			&& (_solutionMedia->kind == PollThumbnailKind::Document);
+		const auto isThumbed = isDocument
+			&& _poll->solutionMedia.document
+			&& _poll->solutionMedia.document->hasThumbnail()
+			&& !_poll->solutionMedia.document->isSong();
+		const auto &fileSt = isThumbed
+			? st::msgFileThumbLayout
+			: st::msgFileLayout;
+		const auto shift = isDocument ? fileSt.padding.left() : 0;
 		const auto attachLeft = rtl()
 			? (width() - innerLeft + shift - _solutionAttach->width())
 			: (innerLeft - shift);
@@ -2351,7 +2415,19 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 	paintw -= padding.left() + padding.right();
 
 	if (const auto mediaHeight = countTopMediaHeight()) {
-		if (_attachedMedia->handler
+		if (_attachedMediaAttach) {
+			const auto shift = st::msgFileLayout.padding.left();
+			const auto attachLeft = padding.left() - shift;
+			if (_attachedMedia->handler
+				&& QRect(
+					attachLeft,
+					tshift,
+					_attachedMediaAttach->width(),
+					mediaHeight).contains(point)) {
+				result.link = _attachedMedia->handler;
+				return result;
+			}
+		} else if (_attachedMedia->handler
 			&& countTopMediaRect(tshift).contains(point)) {
 			result.link = _attachedMedia->handler;
 			return result;
@@ -2424,7 +2500,19 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 				const auto mediaTop = textTop
 					+ textHeight
 					+ st::historyPollExplanationMediaSkip;
-				const auto shift = st::msgFileLayout.padding.left();
+				const auto isDocument = _solutionMedia
+					&& (_solutionMedia->kind
+						== PollThumbnailKind::Document);
+				const auto isThumbed = isDocument
+					&& _poll->solutionMedia.document
+					&& _poll->solutionMedia.document->hasThumbnail()
+					&& !_poll->solutionMedia.document->isSong();
+				const auto &fileSt = isThumbed
+					? st::msgFileThumbLayout
+					: st::msgFileLayout;
+				const auto shift = isDocument
+					? fileSt.padding.left()
+					: 0;
 				const auto mediaLeft = innerLeft - shift;
 				if (_solutionAttach
 					&& QRect(
@@ -2574,6 +2662,9 @@ void Poll::paintBubbleFireworks(
 void Poll::clickHandlerActiveChanged(
 		const ClickHandlerPtr &handler,
 		bool active) {
+	if (_attachedMediaAttach) {
+		_attachedMediaAttach->clickHandlerActiveChanged(handler, active);
+	}
 	if (_solutionAttach) {
 		_solutionAttach->clickHandlerActiveChanged(handler, active);
 	}
@@ -2592,6 +2683,9 @@ void Poll::clickHandlerPressedChanged(
 		toggleRipple(*i, pressed);
 	} else if (handler == _sendVotesLink || handler == _showResultsLink) {
 		toggleLinkRipple(pressed);
+	}
+	if (_attachedMediaAttach) {
+		_attachedMediaAttach->clickHandlerPressedChanged(handler, pressed);
 	}
 	if (_solutionAttach) {
 		_solutionAttach->clickHandlerPressedChanged(handler, pressed);

@@ -90,6 +90,7 @@ private:
 	void updateAttachedMedia();
 	[[nodiscard]] int countTopContentSkip() const;
 	[[nodiscard]] int countTopMediaHeight() const;
+	[[nodiscard]] int countAttachedDocumentHeight() const;
 	[[nodiscard]] QRect countTopMediaRect(int top) const;
 	[[nodiscard]] Ui::BubbleRounding topMediaRounding() const;
 	void validateTopMediaCache(QSize size) const;
@@ -241,6 +242,7 @@ private:
 	Ui::Text::String _question;
 	Ui::Text::String _subtitle;
 	std::unique_ptr<AttachedMedia> _attachedMedia;
+	std::unique_ptr<Media> _attachedMediaAttach;
 	mutable QImage _attachedMediaCache;
 	mutable Ui::BubbleRounding _attachedMediaCacheRounding;
 	std::vector<RecentVoter> _recentVoters;
