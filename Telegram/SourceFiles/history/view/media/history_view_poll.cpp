@@ -351,6 +351,7 @@ struct Poll::AttachedMedia {
 struct Poll::SolutionMedia {
 	PollThumbnailKind kind = PollThumbnailKind::None;
 	uint64 id = 0;
+	ClickHandlerPtr handler;
 };
 
 struct Poll::CloseInformation {
@@ -739,8 +740,23 @@ void Poll::updateSolutionMedia() {
 	auto document = (DocumentData*)(nullptr);
 	if (updated.kind == PollThumbnailKind::Photo && updated.id) {
 		photo = _poll->owner().photo(PhotoId(updated.id));
+		_solutionMedia->handler = updated.handler;
 	} else if (updated.kind == PollThumbnailKind::Document && updated.id) {
 		document = _poll->owner().document(DocumentId(updated.id));
+		const auto session = &_poll->session();
+		_solutionMedia->handler = std::make_shared<LambdaClickHandler>(
+			[=](ClickContext context) {
+				const auto my = context.other.value<ClickHandlerContext>();
+				const auto controller = my.sessionWindow.get();
+				if (!controller
+					|| (&controller->session() != session)) {
+					return;
+				}
+				controller->openDocument(
+					document,
+					false,
+					messageContext);
+			});
 	}
 	_solutionAttach = (photo || document)
 		? CreateAttach(_parent, document, photo)
@@ -2416,12 +2432,10 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 						mediaTop,
 						_solutionAttach->width(),
 						mh).contains(point)) {
-					const auto attachLeft = rtl()
-						? (width() - innerLeft - _solutionAttach->width())
-						: innerLeft;
-					result = _solutionAttach->textState(
-						point - QPoint(attachLeft, mediaTop),
-						request);
+					if (_solutionMedia
+						&& _solutionMedia->handler) {
+						result.link = _solutionMedia->handler;
+					}
 				}
 			}
 			return result;
