@@ -875,9 +875,8 @@ int Poll::countAttachHeight() const {
 		return 0;
 	}
 	_attachedMediaAttach->initDimensions();
-	const auto innerWidth = width()
-		- st::msgPadding.left()
-		- st::msgPadding.right();
+	const auto sideSkip = st::historyPollMediaSideSkip;
+	const auto innerWidth = width() - 2 * sideSkip;
 	return _attachedMediaAttach->resizeGetHeight(
 		std::max(1, innerWidth));
 }
@@ -1421,14 +1420,14 @@ void Poll::draw(Painter &p, const PaintContext &context) const {
 
 	if (const auto mediaHeight = countTopMediaHeight()) {
 		if (_attachedMediaAttach) {
-			const auto shift = st::msgFileLayout.padding.left();
-			const auto attachLeft = padding.left() - shift;
-			p.translate(attachLeft, tshift);
+			const auto sideSkip = st::historyPollMediaSideSkip;
+			_attachedMediaAttach->setBubbleRounding(topMediaRounding());
+			p.translate(sideSkip, tshift);
 			_attachedMediaAttach->draw(
 				p,
-				context.translated(-attachLeft, -tshift)
+				context.translated(-sideSkip, -tshift)
 					.withSelection(TextSelection()));
-			p.translate(-attachLeft, -tshift);
+			p.translate(-sideSkip, -tshift);
 		} else {
 			const auto target = countTopMediaRect(tshift);
 			p.setPen(Qt::NoPen);
@@ -2462,11 +2461,10 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 
 	if (const auto mediaHeight = countTopMediaHeight()) {
 		if (_attachedMediaAttach) {
-			const auto shift = st::msgFileLayout.padding.left();
-			const auto attachLeft = padding.left() - shift;
+			const auto sideSkip = st::historyPollMediaSideSkip;
 			if (_attachedMedia->handler
 				&& QRect(
-					attachLeft,
+					sideSkip,
 					tshift,
 					_attachedMediaAttach->width(),
 					mediaHeight).contains(point)) {
