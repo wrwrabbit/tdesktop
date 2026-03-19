@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/create_poll_box.h"
 
 #include "base/call_delayed.h"
+#include "boxes/premium_limits_box.h"
 #include "base/event_filter.h"
 #include "base/random.h"
 #include "base/unique_qptr.h"
@@ -28,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/stickers/data_custom_emoji.h"
 #include "history/view/history_view_schedule_box.h"
 #include "lang/lang_keys.h"
+#include "layout/layout_document_generic_preview.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "menu/menu_send.h"
@@ -66,6 +68,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat_helpers.h" // defaultComposeFiles.
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
+#include "styles/style_overview.h"
 #include "styles/style_polls.h"
 #include "styles/style_settings.h"
 
@@ -136,6 +139,57 @@ private:
 	QImage _original;
 
 };
+
+[[nodiscard]] QImage GenerateDocumentFilePreview(
+		const QString &filename,
+		int size) {
+	const auto preview = Layout::DocumentGenericPreview::Create(filename);
+	const auto &color = preview.color;
+	const auto &ext = preview.ext;
+
+	const auto ratio = style::DevicePixelRatio();
+	auto result = QImage(
+		QSize(size, size) * ratio,
+		QImage::Format_ARGB32_Premultiplied);
+	result.fill(Qt::transparent);
+	result.setDevicePixelRatio(ratio);
+
+	auto p = QPainter(&result);
+	PainterHighQualityEnabler hq(p);
+	p.setPen(Qt::NoPen);
+	p.setBrush(color);
+	p.drawRoundedRect(
+		QRect(0, 0, size, size),
+		st::roundRadiusSmall,
+		st::roundRadiusSmall);
+
+	if (!ext.isEmpty()) {
+		const auto refSize = st::overviewFileLayout.fileThumbSize;
+		const auto fontSize = std::max(
+			size * st::overviewFileExtFont->f.pixelSize() / refSize,
+			8);
+		const auto font = style::font(
+			fontSize,
+			st::overviewFileExtFont->flags(),
+			st::overviewFileExtFont->family());
+		const auto padding = size * st::overviewFileExtPadding / refSize;
+		const auto maxw = size - padding * 2;
+		auto extStr = ext;
+		auto extw = font->width(extStr);
+		if (extw > maxw) {
+			extStr = font->elided(extStr, maxw, Qt::ElideMiddle);
+			extw = font->width(extStr);
+		}
+		p.setFont(font);
+		p.setPen(st::overviewFileExtFg);
+		p.drawText(
+			(size - extw) / 2,
+			(size - font->height) / 2 + font->ascent,
+			extStr);
+	}
+	p.end();
+	return result;
+}
 
 class PollMediaButton final : public Ui::RippleButton {
 public:
@@ -1432,6 +1486,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	struct UploadContext {
 		std::weak_ptr<PollMediaState> media;
 		uint64 token = 0;
+		QString filename;
+		QString filemime;
 	};
 	struct State final {
 		Errors error = Error::Question;
@@ -1503,7 +1559,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 					parsed.input.document = owner.processDocument(
 						*document);
 					parsed.thumbnail
-						= Ui::MakeDocumentThumbnail(
+						= Ui::MakeDocumentFilePreviewThumbnail(
 							parsed.input.document,
 							fullId);
 				}, [](const auto &) {
@@ -1554,6 +1610,58 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			showToast(tr::lng_attach_failed(tr::now));
 		}).send();
 	};
+	const auto applyUploadedDocument = [=](
+			const std::shared_ptr<PollMediaState> &media,
+			uint64 token,
+			FullMsgId fullId,
+			const Api::RemoteFileInfo &info,
+			const QString &filename,
+			const QString &filemime) {
+		using Flag = MTPDinputMediaUploadedDocument::Flag;
+		const auto flags = Flag::f_force_file
+			| (info.thumb ? Flag::f_thumb : Flag());
+		const auto uploaded = MTP_inputMediaUploadedDocument(
+			MTP_flags(flags),
+			info.file,
+			info.thumb.value_or(MTPInputFile()),
+			MTP_string(filemime),
+			MTP_vector<MTPDocumentAttribute>(
+				QVector<MTPDocumentAttribute>{
+					MTP_documentAttributeFilename(
+						MTP_string(filename)),
+				}),
+			MTP_vector<MTPInputDocument>(),
+			MTPInputPhoto(),
+			MTP_int(0),
+			MTP_int(0));
+		_controller->session().api().request(MTPmessages_UploadMedia(
+			MTP_flags(0),
+			MTPstring(),
+			_peer->input(),
+			uploaded
+		)).done([=](const MTPMessageMedia &result) {
+			if (media->token != token) {
+				return;
+			}
+			auto parsed = parseUploaded(result, fullId);
+			if (!parsed.input) {
+				setMedia(media, PollMedia(), nullptr, false);
+				showToast(tr::lng_attach_failed(tr::now));
+				return;
+			}
+			setMedia(
+				media,
+				parsed.input,
+				std::move(parsed.thumbnail),
+				false);
+		}).fail([=](const MTP::Error &) {
+			if (media->token != token) {
+				return;
+			}
+			setMedia(media, PollMedia(), nullptr, false);
+			showToast(tr::lng_attach_failed(tr::now));
+		}).send();
+	};
 	_controller->session().uploader().photoReady(
 	) | rpl::on_next([=](const Storage::UploadedMedia &data) {
 		const auto context = state->uploads.take(data.fullId);
@@ -1584,6 +1692,54 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		updateMedia(media);
 	}, lifetime());
 	_controller->session().uploader().photoFailed(
+	) | rpl::on_next([=](const FullMsgId &id) {
+		const auto context = state->uploads.take(id);
+		if (!context) {
+			return;
+		}
+		const auto media = context->media.lock();
+		if (!media || (media->token != context->token)) {
+			return;
+		}
+		setMedia(media, PollMedia(), nullptr, false);
+		showToast(tr::lng_attach_failed(tr::now));
+	}, lifetime());
+	_controller->session().uploader().documentReady(
+	) | rpl::on_next([=](const Storage::UploadedMedia &data) {
+		const auto context = state->uploads.take(data.fullId);
+		if (!context) {
+			return;
+		}
+		const auto media = context->media.lock();
+		if (!media || (media->token != context->token)) {
+			return;
+		}
+		applyUploadedDocument(
+			media,
+			context->token,
+			data.fullId,
+			data.info,
+			context->filename,
+			context->filemime);
+	}, lifetime());
+	_controller->session().uploader().documentProgress(
+	) | rpl::on_next([=](const FullMsgId &id) {
+		const auto i = state->uploads.find(id);
+		if (i == state->uploads.end()) {
+			return;
+		}
+		const auto &context = i->second;
+		const auto media = context.media.lock();
+		if (!media
+			|| (media->token != context.token)
+			|| !media->uploadDataId) {
+			return;
+		}
+		media->progress = _controller->session().data().document(
+			media->uploadDataId)->progress();
+		updateMedia(media);
+	}, lifetime());
+	_controller->session().uploader().documentFailed(
 	) | rpl::on_next([=](const FullMsgId &id) {
 		const auto context = state->uploads.take(id);
 		if (!context) {
@@ -1738,6 +1894,67 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 					prepared);
 			}));
 	};
+	const auto startPreparedDocumentUpload = [=](
+			std::shared_ptr<PollMediaState> media,
+			Ui::PreparedFile file) {
+		const auto displayName = file.displayName.isEmpty()
+			? QFileInfo(file.path).fileName()
+			: file.displayName;
+		const auto token = ++media->token;
+		media->media = PollMedia();
+		media->thumbnail = std::make_shared<LocalImageThumbnail>(
+			GenerateDocumentFilePreview(
+				displayName,
+				st::pollAttach.rippleAreaSize));
+		media->rounded = false;
+		media->uploading = true;
+		media->progress = 0.;
+		media->uploadDataId = 0;
+		updateMedia(media);
+		using PreparePoll = PreparePollMediaTask;
+		state->prepareQueue->addTask(std::make_unique<PreparePoll>(
+			FileLoadTask::Args{
+				.session = &_controller->session(),
+				.filepath = file.path,
+				.content = file.content,
+				.information = std::move(file.information),
+				.videoCover = nullptr,
+				.type = SendMediaType::File,
+				.to = FileLoadTo(
+					_peer->id,
+					Api::SendOptions(),
+					FullReplyTo(),
+					MsgId()),
+				.caption = TextWithTags(),
+				.spoiler = false,
+				.album = nullptr,
+				.forceFile = true,
+				.idOverride = 0,
+				.displayName = displayName,
+			},
+			[=](std::shared_ptr<FilePrepareResult> prepared) {
+				if ((media->token != token) || !prepared) {
+					if (media->token == token) {
+						setMedia(media, PollMedia(), nullptr, false);
+						showToast(tr::lng_attach_failed(tr::now));
+					}
+					return;
+				}
+				const auto uploadId = FullMsgId(
+					_peer->id,
+					_controller->session().data().nextLocalMessageId());
+				state->uploads.emplace(uploadId, UploadContext{
+					.media = media,
+					.token = token,
+					.filename = prepared->filename,
+					.filemime = prepared->filemime,
+				});
+				media->uploadDataId = prepared->id;
+				_controller->session().uploader().upload(
+					uploadId,
+					prepared);
+			}));
+	};
 	const auto applyPreparedPhotoList = [=](
 			std::shared_ptr<PollMediaState> media,
 			Ui::PreparedList &&list) {
@@ -1822,6 +2039,40 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			FileDialog::ImagesFilter(),
 			callback);
 	};
+	const auto chooseDocument = [=](std::shared_ptr<PollMediaState> media) {
+		const auto callback = crl::guard(this, [=](
+				FileDialog::OpenResult &&result) {
+			if (result.paths.isEmpty()) {
+				return;
+			}
+			auto list = Storage::PrepareMediaList(
+				result.paths.mid(0, 1),
+				st::sendMediaPreviewSize,
+				_controller->session().premium());
+			if (list.error == Ui::PreparedList::Error::TooLargeFile) {
+				const auto fileSize = list.files.empty()
+					? 0
+					: list.files.front().size;
+				_controller->show(Box(
+					FileSizeLimitBox,
+					&_controller->session(),
+					fileSize,
+					nullptr));
+				return;
+			} else if (list.error != Ui::PreparedList::Error::None
+				|| list.files.empty()) {
+				return;
+			}
+			startPreparedDocumentUpload(
+				media,
+				std::move(list.files.front()));
+		});
+		FileDialog::GetOpenPath(
+			this,
+			tr::lng_attach_file(tr::now),
+			FileDialog::AllFilesFilter(),
+			callback);
+	};
 	const auto clearMedia = [=](std::shared_ptr<PollMediaState> media) {
 		auto toCancel = std::vector<FullMsgId>();
 		for (auto i = state->uploads.begin(); i != state->uploads.end();) {
@@ -1840,6 +2091,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	const auto showMediaMenu = [=](
 			not_null<Ui::RpWidget*> button,
 			std::shared_ptr<PollMediaState> media,
+			bool allowDocuments = false,
 			bool allowStickers = true) {
 		state->mediaMenu = base::make_unique_q<Ui::PopupMenu>(
 			button,
@@ -1850,6 +2102,12 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			tr::lng_attach_photo(tr::now),
 			[=] { choosePhoto(media); },
 			&st::menuIconPhoto);
+		if (allowDocuments) {
+			state->mediaMenu->addAction(
+				tr::lng_attach_file(tr::now),
+				[=] { chooseDocument(media); },
+				&st::menuIconFile);
+		}
 		if (allowStickers) {
 			state->mediaMenu->addAction(
 				tr::lng_chat_intro_choose_sticker(tr::now),
@@ -1887,7 +2145,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			if (buttonType != Qt::LeftButton) {
 				return;
 			}
-			showMediaMenu(button, media, false);
+			showMediaMenu(button, media, true, false);
 		}, button->lifetime());
 	};
 
