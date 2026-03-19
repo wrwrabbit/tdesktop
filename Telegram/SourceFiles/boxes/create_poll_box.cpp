@@ -1386,8 +1386,10 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			= std::make_shared<PollMediaState>();
 		std::shared_ptr<PollMediaState> solutionMedia
 			= std::make_shared<PollMediaState>();
+		std::weak_ptr<PollMediaState> stickerTarget;
 		base::flat_map<FullMsgId, UploadContext> uploads;
 		base::unique_qptr<Ui::PopupMenu> mediaMenu;
+		base::unique_qptr<ChatHelpers::TabbedPanel> stickerPanel;
 		std::unique_ptr<TaskQueue> prepareQueue;
 	};
 	const auto state = lifetime().make_state<State>();
@@ -1534,6 +1536,94 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		setMedia(media, std::nullopt, nullptr, false);
 		showToast(tr::lng_attach_failed(tr::now));
 	}, lifetime());
+	const auto emojiPaused = [=] {
+		using namespace Window;
+		return _controller->isGifPausedAtLeastFor(GifPauseReason::Any);
+	};
+	const auto updateStickerPanelGeometry = [=] {
+		if (!state->stickerPanel) {
+			return;
+		}
+		const auto panel = state->stickerPanel.get();
+		const auto parent = panel->parentWidget();
+		const auto left = std::max(
+			(parent->width() - panel->width()) / 2,
+			0);
+		const auto top = std::max(
+			(parent->height() - panel->height()) / 2,
+			0);
+		panel->moveTopRight(top, left + panel->width());
+	};
+	const auto showStickerPanel = [=](
+			not_null<Ui::RpWidget*>,
+			std::shared_ptr<PollMediaState> media) {
+		using Selector = ChatHelpers::TabbedSelector;
+		using Descriptor = ChatHelpers::TabbedSelectorDescriptor;
+		using Mode = ChatHelpers::TabbedSelector::Mode;
+		using Panel = ChatHelpers::TabbedPanel;
+		if (!state->stickerPanel) {
+			const auto body = getDelegate()->outerContainer();
+			state->stickerPanel = base::make_unique_q<Panel>(
+				body,
+				_controller,
+				object_ptr<Selector>(
+					nullptr,
+					Descriptor{
+						.show = _controller->uiShow(),
+						.st = st::backgroundEmojiPan,
+						.level = Window::GifPauseReason::Layer,
+						.mode = Mode::StickersOnly,
+						.features = {
+							.megagroupSet = false,
+							.stickersSettings = false,
+							.openStickerSets = false,
+						},
+					}));
+			state->stickerPanel->setDropDown(true);
+			state->stickerPanel->setDesiredHeightValues(
+				0.,
+				st::emojiPanMinHeight,
+				st::emojiPanMinHeight);
+			state->stickerPanel->hide();
+			base::install_event_filter(
+				body,
+				[=](not_null<QEvent*> event) {
+					const auto type = event->type();
+					if (type == QEvent::Move || type == QEvent::Resize) {
+						crl::on_main(this, updateStickerPanelGeometry);
+					}
+					return base::EventFilterResult::Continue;
+				},
+				lifetime());
+			state->stickerPanel->selector()->fileChosen(
+			) | rpl::on_next([=](ChatHelpers::FileChosen data) {
+				const auto target = state->stickerTarget.lock();
+				if (!target) {
+					return;
+				}
+				using Flag = MTPDinputMediaDocument::Flag;
+				setMedia(
+					target,
+					MTP_inputMediaDocument(
+						MTP_flags(Flag(0)),
+						data.document->mtpInput(),
+						MTPInputPhoto(),
+						MTP_int(0),
+						MTP_int(0),
+						MTPstring()),
+					Ui::MakeEmojiThumbnail(
+						&_controller->session().data(),
+						Data::SerializeCustomEmojiId(data.document),
+						emojiPaused),
+					false);
+				state->stickerPanel->hideAnimated();
+			}, state->stickerPanel->lifetime());
+		}
+		state->stickerTarget = media;
+		const auto panel = state->stickerPanel.get();
+		updateStickerPanelGeometry();
+		panel->toggleAnimated();
+	};
 	const auto choosePhoto = [=](std::shared_ptr<PollMediaState> media) {
 		const auto callback = crl::guard(this, [=](
 				FileDialog::OpenResult &&result) {
@@ -1631,7 +1721,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	};
 	const auto showMediaMenu = [=](
 			not_null<Ui::RpWidget*> button,
-			std::shared_ptr<PollMediaState> media) {
+			std::shared_ptr<PollMediaState> media,
+			bool allowStickers = true) {
 		state->mediaMenu = base::make_unique_q<Ui::PopupMenu>(
 			button,
 			st::popupMenuWithIcons);
@@ -1641,6 +1732,12 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			tr::lng_attach_photo(tr::now),
 			[=] { choosePhoto(media); },
 			&st::menuIconPhoto);
+		if (allowStickers) {
+			state->mediaMenu->addAction(
+				tr::lng_chat_intro_choose_sticker(tr::now),
+				[=] { showStickerPanel(button, media); },
+				&st::menuIconStickers);
+		}
 		if (media->media || media->uploading) {
 			state->mediaMenu->addAction(
 				tr::lng_box_remove(tr::now),
@@ -1670,7 +1767,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			if (buttonType != Qt::LeftButton) {
 				return;
 			}
-			showMediaMenu(not_null<Ui::RpWidget*>(button), media);
+			showMediaMenu(button, media, false);
 		}, button->lifetime());
 	};
 
