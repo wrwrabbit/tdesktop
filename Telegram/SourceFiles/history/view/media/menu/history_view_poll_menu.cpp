@@ -23,17 +23,23 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_group_call_bar.h"
 #include "history/view/history_view_reaction_preview.h"
 #include "lang/lang_keys.h"
+#include "layout/layout_document_generic_preview.h"
 #include "main/main_session.h"
 #include "mainwidget.h"
 #include "storage/localimageloader.h"
 #include "storage/storage_media_prepare.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/painter.h"
+#include "ui/rect.h"
+#include "ui/text/format_values.h"
 #include "ui/widgets/dropdown_menu.h"
 #include "ui/widgets/menu/menu_action.h"
+#include "ui/widgets/shadow.h"
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat.h"
+#include "styles/style_layers.h"
+#include "styles/style_media_view.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_widgets.h"
 
@@ -283,6 +289,124 @@ void ShowPollPhotoPreview(
 			tr::lng_context_draw(tr::now),
 			edit,
 			&st::menuIconDraw);
+		AddRemoveAction(menu, remove);
+	});
+}
+
+void ShowPollDocumentPreview(
+		not_null<Window::SessionController*> controller,
+		not_null<DocumentData*> document,
+		Fn<void()> replace,
+		Fn<void()> remove) {
+	const auto docGeneric = Layout::DocumentGenericPreview::Create(
+		document);
+	const auto docIcon = docGeneric.icon();
+	const auto docIconColor = docGeneric.color;
+	const auto docExt = [&] {
+		auto ext = docGeneric.ext;
+		const auto maxW = st::mediaviewFileIconSize
+			- st::mediaviewFileExtPadding * 2;
+		if (st::mediaviewFileExtFont->width(ext) > maxW) {
+			ext = st::mediaviewFileExtFont->elided(ext, maxW, Qt::ElideMiddle);
+		}
+		return ext;
+	}();
+
+	const auto maxTextW = st::mediaviewFileSize.width()
+		- st::mediaviewFileIconSize
+		- st::mediaviewFilePadding * 3;
+	const auto docName = [&] {
+		auto name = document->filename().isEmpty()
+			? tr::lng_mediaview_doc_image(tr::now)
+			: document->filename();
+		if (st::mediaviewFileNameFont->width(name) > maxTextW) {
+			name = st::mediaviewFileNameFont->elided(name, maxTextW, Qt::ElideMiddle);
+		}
+		return name;
+	}();
+	const auto docSize = [&] {
+		auto text = Ui::FormatSizeText(document->size);
+		if (st::mediaviewFont->width(text) > maxTextW) {
+			text = st::mediaviewFont->elided(text, maxTextW);
+		}
+		return text;
+	}();
+
+	ShowWidgetPreview(controller, [=](not_null<Ui::RpWidget*> preview) {
+		const auto shadowExtend = st::boxRoundShadow.extend;
+		const auto fullW = st::mediaviewFileSize.width()
+			+ rect::m::sum::h(shadowExtend);
+		const auto fullH = st::mediaviewFileSize.height()
+			+ rect::m::sum::v(shadowExtend);
+		preview->resize(fullW, fullH);
+		preview->paintRequest() | rpl::on_next([=] {
+			auto p = Painter(preview);
+			const auto outer = preview->rect() - shadowExtend;
+
+			Ui::Shadow::paint(
+				p,
+				outer,
+				preview->width(),
+				st::boxRoundShadow);
+			{
+				auto hq = PainterHighQualityEnabler(p);
+				p.setPen(Qt::NoPen);
+				p.setBrush(st::windowBg);
+				p.drawRoundedRect(outer, st::boxRadius, st::boxRadius);
+			}
+
+			const auto padding = st::mediaviewFilePadding;
+			const auto iconSize = st::mediaviewFileIconSize;
+			const auto iconRect = QRect(
+				outer.x() + padding,
+				outer.y() + padding,
+				iconSize,
+				iconSize);
+
+			p.fillRect(iconRect, docIconColor);
+			if (docIcon) {
+				docIcon->paint(
+					p,
+					iconRect.x() + (iconRect.width() - docIcon->width()),
+					iconRect.y(),
+					preview->width());
+			}
+			if (!docExt.isEmpty()) {
+				p.setPen(st::activeButtonFg);
+				p.setFont(st::mediaviewFileExtFont);
+				const auto extW = st::mediaviewFileExtFont->width(docExt);
+				p.drawText(
+					iconRect.x() + (iconRect.width() - extW) / 2,
+					iconRect.y()
+						+ st::mediaviewFileExtTop
+						+ st::mediaviewFileExtFont->ascent,
+					docExt);
+			}
+
+			const auto textX = outer.x() + 2 * padding + iconSize;
+			p.setPen(st::windowFg);
+			p.setFont(st::mediaviewFileNameFont);
+			p.drawText(
+				textX,
+				outer.y() + padding
+					+ st::mediaviewFileNameTop
+					+ st::mediaviewFileNameFont->ascent,
+				docName);
+
+			p.setPen(st::windowSubTextFg);
+			p.setFont(st::mediaviewFont);
+			p.drawText(
+				textX,
+				outer.y() + padding
+					+ st::mediaviewFileSizeTop
+					+ st::mediaviewFont->ascent,
+				docSize);
+		}, preview->lifetime());
+	}, [=](not_null<Ui::DropdownMenu*> menu) {
+		menu->addAction(
+			tr::lng_attach_replace(tr::now),
+			replace,
+			&st::menuIconReplace);
 		AddRemoveAction(menu, remove);
 	});
 }

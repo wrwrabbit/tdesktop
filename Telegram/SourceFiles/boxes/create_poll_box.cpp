@@ -2251,6 +2251,13 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 				},
 				remove);
 			return;
+		} else if (document) {
+			HistoryView::ShowPollDocumentPreview(
+				_controller,
+				document,
+				[=] { chooseDocument(media); },
+				remove);
+			return;
 		}
 		state->mediaMenu = base::make_unique_q<Ui::PopupMenu>(
 			button,

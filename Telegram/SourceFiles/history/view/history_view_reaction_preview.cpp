@@ -35,6 +35,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace HistoryView {
 namespace {
 
+void SetupOverlayHideOnEscape(
+		not_null<Ui::AbstractButton*> clickable,
+		Fn<void()> hideAll) {
+	clickable->setClickedCallback(hideAll);
+	base::install_event_filter(QCoreApplication::instance(), [=](
+			not_null<QEvent*> e) {
+		if (e->type() == QEvent::KeyPress
+			&& clickable->window()->isActiveWindow()) {
+			const auto k = static_cast<QKeyEvent*>(e.get());
+			if (k->key() == Qt::Key_Escape) {
+				hideAll();
+				return base::EventFilterResult::Cancel;
+			}
+		}
+		return base::EventFilterResult::Continue;
+	}, clickable->lifetime());
+}
+
 struct PreviewOverlayState {
 	base::unique_qptr<Window::MediaPreviewWidget> mediaPreview;
 	base::unique_qptr<Ui::AbstractButton> clickable;
@@ -80,19 +98,7 @@ template <typename MediaData>
 			st::defaultToggle.duration,
 			[=] { state->clear(); });
 	};
-	state->clickable->setClickedCallback(hideAll);
-	base::install_event_filter(QCoreApplication::instance(), [=](
-			not_null<QEvent*> e) {
-		if (e->type() == QEvent::KeyPress
-			&& state->clickable->window()->isActiveWindow()) {
-			const auto k = static_cast<QKeyEvent*>(e.get());
-			if (k->key() == Qt::Key_Escape) {
-				hideAll();
-				return base::EventFilterResult::Cancel;
-			}
-		}
-		return base::EventFilterResult::Continue;
-	}, state->clickable->lifetime());
+	SetupOverlayHideOnEscape(state->clickable.get(), hideAll);
 	state->mediaPreview->showPreview(origin, media);
 	state->clickable->show();
 	const auto clickableRaw = state->clickable.get();
@@ -282,6 +288,76 @@ bool ShowReactionPreview(
 		}
 	}, mediaPreviewRaw->lifetime());
 	return true;
+}
+
+void ShowWidgetPreview(
+		not_null<Window::SessionController*> controller,
+		Fn<void(not_null<Ui::RpWidget*>)> setupContent,
+		Fn<void(not_null<Ui::DropdownMenu*>)> fillMenu) {
+	struct State {
+		base::unique_qptr<Ui::RpWidget> preview;
+		base::unique_qptr<Ui::AbstractButton> clickable;
+		base::unique_qptr<Ui::DropdownMenu> menu;
+	};
+	const auto state = std::make_shared<State>();
+	const auto mainwidget = controller->widget()->bodyWidget();
+
+	state->preview = base::make_unique_q<Ui::RpWidget>(mainwidget);
+	const auto previewRaw = state->preview.get();
+	setupContent(previewRaw);
+	previewRaw->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+	state->clickable = base::make_unique_q<Ui::AbstractButton>(mainwidget);
+	state->clickable->paintOn([=](QPainter &p) {
+		p.fillRect(state->clickable->rect(), st::stickerPreviewBg);
+	});
+
+	const auto hideAll = [=] {
+		state->clickable->setAttribute(Qt::WA_TransparentForMouseEvents);
+		if (state->menu) {
+			state->menu->hideAnimated();
+		}
+		base::call_delayed(
+			st::defaultToggle.duration,
+			[s = state] {
+				s->preview.reset();
+				s->menu.reset();
+				s->clickable.reset();
+			});
+	};
+	SetupOverlayHideOnEscape(state->clickable.get(), hideAll);
+
+	state->menu = base::make_unique_q<Ui::DropdownMenu>(
+		mainwidget,
+		st::dropdownMenuWithIcons);
+	state->menu->setAutoHiding(false);
+	state->menu->setHiddenCallback(
+		crl::guard(state->clickable.get(), hideAll));
+	fillMenu(state->menu.get());
+
+	const auto menuRaw = state->menu.get();
+	state->clickable->show();
+	previewRaw->show();
+
+	const auto fullW = previewRaw->width();
+	const auto fullH = previewRaw->height();
+
+	mainwidget->sizeValue() | rpl::on_next([=](QSize size) {
+		state->clickable->setGeometry(Rect(size));
+		state->clickable->raise();
+
+		const auto gap = st::defaultMenu.itemPadding.top();
+		const auto totalH = fullH + gap + menuRaw->height();
+		const auto previewY = (size.height() - totalH) / 2;
+		previewRaw->move((size.width() - fullW) / 2, previewY);
+		previewRaw->raise();
+
+		menuRaw->move(
+			(size.width() - menuRaw->width()) / 2,
+			previewY + fullH + gap);
+		menuRaw->showAnimated(Ui::PanelAnimation::Origin::TopLeft);
+		menuRaw->raise();
+	}, previewRaw->lifetime());
 }
 
 } // namespace HistoryView

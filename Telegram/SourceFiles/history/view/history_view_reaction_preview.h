@@ -12,6 +12,7 @@ class PhotoData;
 
 namespace Ui {
 class DropdownMenu;
+class RpWidget;
 } // namespace Ui
 
 namespace Data {
@@ -35,6 +36,11 @@ bool ShowPhotoPreview(
 	FullMsgId origin,
 	not_null<PhotoData*> photo,
 	Fn<void(not_null<Ui::DropdownMenu*>)> fillMenu = nullptr);
+
+void ShowWidgetPreview(
+	not_null<Window::SessionController*> controller,
+	Fn<void(not_null<Ui::RpWidget*>)> setupContent,
+	Fn<void(not_null<Ui::DropdownMenu*>)> fillMenu);
 
 bool ShowReactionPreview(
 	not_null<Window::SessionController*> controller,

@@ -43,6 +43,12 @@ void ShowPollPhotoPreview(
 	Fn<void()> edit,
 	Fn<void()> remove);
 
+void ShowPollDocumentPreview(
+	not_null<Window::SessionController*> controller,
+	not_null<DocumentData*> document,
+	Fn<void()> replace,
+	Fn<void()> remove);
+
 void EditPollPhoto(
 	not_null<Window::SessionController*> controller,
 	not_null<PhotoData*> photo,
