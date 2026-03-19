@@ -555,6 +555,7 @@ stickerPanRemoveSet: IconButton(hashtagClose) {
 stickerIconMove: 400;
 stickerPreviewDuration: 150;
 stickerPreviewMin: 0.1;
+mediaPreviewPhotoSkip: 48px;
 
 emojiPanColorAll: IconButton(stickerPanRemoveSet) {
 	width: 24px;

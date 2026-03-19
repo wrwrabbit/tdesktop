@@ -40,6 +40,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_media_types.h"
 #include "data/data_document.h"
 #include "data/data_photo.h"
+#include "data/data_photo_media.h"
+#include "data/data_file_origin.h"
 #include "data/data_poll.h"
 #include "data/data_user.h"
 #include "data/data_session.h"
@@ -343,6 +345,9 @@ struct Poll::Answer {
 struct Poll::AttachedMedia {
 	ClickHandlerPtr handler;
 	std::shared_ptr<Ui::DynamicImage> thumbnail;
+	PhotoData *photo = nullptr;
+	std::shared_ptr<Data::PhotoMedia> photoMedia;
+	QSize photoSize;
 	PollThumbnailKind kind = PollThumbnailKind::None;
 	bool rounded = false;
 	uint64 id = 0;
@@ -789,6 +794,22 @@ void Poll::updateAttachedMedia() {
 	_attachedMedia->kind = updated.kind;
 	_attachedMedia->rounded = updated.rounded;
 	_attachedMedia->id = updated.id;
+	_attachedMedia->photo = nullptr;
+	_attachedMedia->photoMedia = nullptr;
+	_attachedMedia->photoSize = QSize();
+	if (updated.kind == PollThumbnailKind::Photo && updated.id) {
+		const auto photo = _poll->owner().photo(PhotoId(updated.id));
+		_attachedMedia->photo = photo;
+		_attachedMedia->photoMedia = photo->createMediaView();
+		_attachedMedia->photoMedia->wanted(
+			Data::PhotoSize::Large,
+			_parent->data()->fullId());
+		if (const auto size = photo->size(Data::PhotoSize::Large)) {
+			_attachedMedia->photoSize = *size;
+		} else if (const auto size = photo->size(Data::PhotoSize::Thumbnail)) {
+			_attachedMedia->photoSize = *size;
+		}
+	}
 	if (updated.kind == PollThumbnailKind::Document && updated.id) {
 		const auto document = _poll->owner().document(
 			DocumentId(updated.id));
@@ -835,12 +856,21 @@ int Poll::countTopMediaHeight() const {
 		return 0;
 	}
 	if (_attachedMediaAttach) {
-		return countAttachedDocumentHeight();
+		return countAttachHeight();
+	}
+	if (_attachedMedia->kind == PollThumbnailKind::Photo
+		&& !_attachedMedia->photoSize.isEmpty()) {
+		const auto sideSkip = st::historyPollMediaSideSkip;
+		const auto availableWidth = width() - 2 * sideSkip;
+		const auto &original = _attachedMedia->photoSize;
+		return std::max(
+			1,
+			int(original.height() * availableWidth / original.width()));
 	}
 	return st::historyPollMediaHeight;
 }
 
-int Poll::countAttachedDocumentHeight() const {
+int Poll::countAttachHeight() const {
 	if (!_attachedMediaAttach) {
 		return 0;
 	}
@@ -892,8 +922,24 @@ void Poll::validateTopMediaCache(QSize size) const {
 		&& (_attachedMediaCacheRounding == rounding)) {
 		return;
 	}
-	const auto source = _attachedMedia->thumbnail->image(
-		std::max(size.width(), size.height()) * ratio);
+	auto source = QImage();
+	if (_attachedMedia->photoMedia) {
+		if (const auto image
+			= _attachedMedia->photoMedia->image(Data::PhotoSize::Large)) {
+			source = image->original();
+		} else if (const auto image
+			= _attachedMedia->photoMedia->image(
+				Data::PhotoSize::Thumbnail)) {
+			source = image->original();
+		} else if (const auto image
+			= _attachedMedia->photoMedia->thumbnailInline()) {
+			source = image->original();
+		}
+	}
+	if (source.isNull()) {
+		source = _attachedMedia->thumbnail->image(
+			std::max(size.width(), size.height()) * ratio);
+	}
 	if (source.isNull()) {
 		return;
 	}

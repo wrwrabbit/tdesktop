@@ -328,6 +328,7 @@ void MediaPreviewWidget::setHideEmoji(bool hide) {
 
 void MediaPreviewWidget::setContentShift(int y) {
 	_contentShiftY = y;
+	_cachedSize = QSize();
 	update();
 }
 
@@ -349,8 +350,9 @@ QSize MediaPreviewWidget::currentDimensions() const {
 	auto box = QSize();
 	if (_photo) {
 		result = QSize(_photo->width(), _photo->height());
-		const auto skip = st::defaultBox.margin.top();
-		box = QSize(width() - 2 * skip, height() - 2 * skip);
+		const auto skip = st::mediaPreviewPhotoSkip;
+		const auto shiftSkip = 2 * std::abs(_contentShiftY);
+		box = QSize(width() - 2 * skip, height() - 2 * skip - shiftSkip);
 	} else {
 		result = _document->dimensions;
 		if (result.isEmpty()) {

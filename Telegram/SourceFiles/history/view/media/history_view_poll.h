@@ -90,7 +90,7 @@ private:
 	void updateAttachedMedia();
 	[[nodiscard]] int countTopContentSkip() const;
 	[[nodiscard]] int countTopMediaHeight() const;
-	[[nodiscard]] int countAttachedDocumentHeight() const;
+	[[nodiscard]] int countAttachHeight() const;
 	[[nodiscard]] QRect countTopMediaRect(int top) const;
 	[[nodiscard]] Ui::BubbleRounding topMediaRounding() const;
 	void validateTopMediaCache(QSize size) const;
