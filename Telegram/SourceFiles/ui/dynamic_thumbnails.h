@@ -49,5 +49,8 @@ class DynamicImage;
 [[nodiscard]] std::shared_ptr<DynamicImage> MakeDocumentThumbnailCenterCrop(
 	not_null<DocumentData*> document,
 	FullMsgId fullId);
+[[nodiscard]] std::shared_ptr<DynamicImage> MakeDocumentFilePreviewThumbnail(
+	not_null<DocumentData*> document,
+	FullMsgId fullId);
 
 } // namespace Ui

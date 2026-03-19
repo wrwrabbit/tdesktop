@@ -17,12 +17,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_story.h"
+#include "layout/layout_document_generic_preview.h"
 #include "main/main_session.h"
 #include "ui/empty_userpic.h"
 #include "ui/dynamic_image.h"
+#include "ui/image/image_prepare.h"
 #include "ui/painter.h"
 #include "ui/text/text_custom_emoji.h"
 #include "ui/userpic_view.h"
+#include "styles/style_overview.h"
 
 namespace Ui {
 namespace {
@@ -238,6 +241,32 @@ private:
 	Fn<bool()> _paused;
 	Fn<QColor()> _textColor;
 	QImage _frame;
+
+};
+
+class DocumentFilePreviewThumbnail final : public DynamicImage {
+public:
+	DocumentFilePreviewThumbnail(
+		not_null<DocumentData*> document,
+		Data::FileOrigin origin);
+
+	std::shared_ptr<DynamicImage> clone() override;
+
+	QImage image(int size) override;
+	void subscribeToUpdates(Fn<void()> callback) override;
+
+private:
+	[[nodiscard]] QImage prepareThumbImage(int size);
+	[[nodiscard]] QImage prepareGenericImage(int size);
+
+	const not_null<DocumentData*> _document;
+	const Data::FileOrigin _origin;
+	const ::Layout::DocumentGenericPreview _generic;
+	std::shared_ptr<Data::DocumentMedia> _media;
+	QImage _prepared;
+	bool _thumbLoaded = false;
+	int _paletteVersion = 0;
+	rpl::lifetime _subscription;
 
 };
 
@@ -718,6 +747,142 @@ QImage EmojiThumbnail::image(int size) {
 	return _frame;
 }
 
+DocumentFilePreviewThumbnail::DocumentFilePreviewThumbnail(
+	not_null<DocumentData*> document,
+	Data::FileOrigin origin)
+: _document(document)
+, _origin(origin)
+, _generic(::Layout::DocumentGenericPreview::Create(document)) {
+}
+
+std::shared_ptr<DynamicImage> DocumentFilePreviewThumbnail::clone() {
+	return std::make_shared<DocumentFilePreviewThumbnail>(
+		_document,
+		_origin);
+}
+
+QImage DocumentFilePreviewThumbnail::image(int size) {
+	const auto ratio = style::DevicePixelRatio();
+	const auto paletteVersion = style::PaletteVersion();
+	const auto good = (_prepared.width() == size * ratio);
+	if (good && _paletteVersion == paletteVersion) {
+		return _prepared;
+	}
+	_paletteVersion = paletteVersion;
+
+	if (_media) {
+		const auto thumbnail = _media->thumbnail();
+		const auto blurred = _media->thumbnailInline();
+		if (thumbnail || blurred) {
+			_prepared = prepareThumbImage(size);
+			if (!_prepared.isNull()) {
+				return _prepared;
+			}
+		}
+	}
+	_prepared = prepareGenericImage(size);
+	return _prepared;
+}
+
+QImage DocumentFilePreviewThumbnail::prepareThumbImage(int size) {
+	const auto ratio = style::DevicePixelRatio();
+	const auto thumbnail = _media->thumbnail();
+	const auto blurred = _media->thumbnailInline();
+	const auto image = thumbnail ? thumbnail : blurred;
+	if (!image) {
+		return {};
+	}
+	auto full = image->original();
+	const auto side = std::min(full.width(), full.height());
+	const auto x = (full.width() - side) / 2;
+	const auto y = (full.height() - side) / 2;
+	auto result = full.copy(x, y, side, side).scaled(
+		QSize(size, size) * ratio,
+		Qt::IgnoreAspectRatio,
+		Qt::SmoothTransformation);
+	result = Images::Round(
+		std::move(result),
+		ImageRoundRadius::Small);
+	result.setDevicePixelRatio(ratio);
+	return result;
+}
+
+QImage DocumentFilePreviewThumbnail::prepareGenericImage(int size) {
+	const auto ratio = style::DevicePixelRatio();
+	auto result = QImage(
+		QSize(size, size) * ratio,
+		QImage::Format_ARGB32_Premultiplied);
+	result.fill(Qt::transparent);
+	result.setDevicePixelRatio(ratio);
+
+	auto p = QPainter(&result);
+	PainterHighQualityEnabler hq(p);
+	p.setPen(Qt::NoPen);
+	p.setBrush(_generic.color);
+	p.drawRoundedRect(
+		QRect(0, 0, size, size),
+		st::roundRadiusSmall,
+		st::roundRadiusSmall);
+
+	if (!_generic.ext.isEmpty()) {
+		// Reference: overview uses 18px font in a 70px square.
+		const auto refSize = st::overviewFileLayout.fileThumbSize;
+		const auto fontSize = std::max(
+			size * st::overviewFileExtFont->f.pixelSize() / refSize,
+			8);
+		const auto font = style::font(
+			fontSize,
+			st::overviewFileExtFont->flags(),
+			st::overviewFileExtFont->family());
+		const auto padding = size * st::overviewFileExtPadding / refSize;
+		const auto maxw = size - padding * 2;
+		auto ext = _generic.ext;
+		auto extw = font->width(ext);
+		if (extw > maxw) {
+			ext = font->elided(ext, maxw, Qt::ElideMiddle);
+			extw = font->width(ext);
+		}
+		p.setFont(font);
+		p.setPen(st::overviewFileExtFg);
+		p.drawText(
+			(size - extw) / 2,
+			(size - font->height) / 2 + font->ascent,
+			ext);
+	}
+	p.end();
+	return result;
+}
+
+void DocumentFilePreviewThumbnail::subscribeToUpdates(Fn<void()> callback) {
+	_subscription.destroy();
+	if (!callback) {
+		_media = nullptr;
+		_prepared = QImage();
+		return;
+	}
+	if (!_document->hasThumbnail()) {
+		return;
+	}
+	if (!_media) {
+		_media = _document->createMediaView();
+		_media->thumbnailWanted(_origin);
+	}
+	if (_media->thumbnail()) {
+		_thumbLoaded = true;
+		return;
+	}
+	if (!_thumbLoaded) {
+		_subscription = _document->session().downloaderTaskFinished(
+		) | rpl::filter([=] {
+			return _media && _media->thumbnail();
+		}) | rpl::take(1) | rpl::on_next([=] {
+			_thumbLoaded = true;
+			_prepared = QImage();
+			callback();
+		});
+	}
+}
+
 } // namespace
 
 std::shared_ptr<DynamicImage> MakeUserpicThumbnail(
@@ -817,6 +982,14 @@ std::shared_ptr<DynamicImage> MakeDocumentThumbnailCenterCrop(
 		fullId,
 		false,
 		true);
+}
+
+std::shared_ptr<DynamicImage> MakeDocumentFilePreviewThumbnail(
+		not_null<DocumentData*> document,
+		FullMsgId fullId) {
+	return std::make_shared<DocumentFilePreviewThumbnail>(
+		document,
+		fullId);
 }
 
 } // namespace Ui
