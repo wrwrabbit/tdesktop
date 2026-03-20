@@ -6870,6 +6870,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_polls_create_shuffle_options_about" = "Answers appear in random order for each voter.";
 "lng_polls_create_set_correct_answer" = "Set Correct Answer";
 "lng_polls_create_set_correct_answer_about" = "Mark one option as the right answer.";
+"lng_polls_create_limit_duration" = "Limit Duration";
+"lng_polls_create_limit_duration_about" = "Automatically close the poll at a set time.";
+"lng_polls_create_poll_duration" = "Poll Duration";
+"lng_polls_create_poll_ends" = "Poll ends";
+"lng_polls_create_hide_results" = "Hide results";
+"lng_polls_create_hide_results_about" = "If you switch this on, results will appear only after the poll closes.";
+"lng_polls_create_duration_custom" = "Custom";
+"lng_polls_create_deadline_title" = "Deadline";
+"lng_polls_create_deadline_button" = "Set Deadline";
+"lng_polls_create_deadline_expired" = "The poll deadline has already passed. Please choose a new time.";
 "lng_polls_create_anonymous" = "Anonymous Voting";
 "lng_polls_create_multiple_choice" = "Multiple Answers";
 "lng_polls_create_quiz_mode" = "Quiz Mode";

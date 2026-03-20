@@ -212,6 +212,10 @@ pollAttach: IconButton(defaultIconButton) {
 	ripple: defaultRippleAnimationBgOver;
 }
 
+createPollDurationIconSize: 20px;
+createPollDurationIconPosition: point(1px, 5px);
+createPollDurationIconMargins: margins(2px, 2px, 2px, 2px);
+
 pollDescriptionFieldPadding: margins(22px, 5px, 11px, 5px);
 pollDescriptionField: InputField(createPollField) {
 	textMargins: margins(0px, 4px, pollAttachTextSkip, 4px);

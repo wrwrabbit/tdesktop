@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/create_poll_box.h"
 
 #include "base/call_delayed.h"
+#include "base/unixtime.h"
 #include "boxes/premium_limits_box.h"
 #include "base/event_filter.h"
 #include "base/random.h"
@@ -47,6 +48,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/dynamic_thumbnails.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/effects/ripple_animation.h"
+#include "ui/effects/ttl_icon.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
 #include "ui/text/text_utilities.h"
@@ -58,6 +60,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
+#include "ui/boxes/choose_date_time.h"
+#include "ui/text/format_values.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/shadow.h"
 #include "ui/wrap/fade_wrap.h"
@@ -68,6 +72,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "apiwrap.h"
 #include "styles/style_boxes.h"
+#include "styles/style_dialogs.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h" // defaultComposeFiles.
 #include "styles/style_layers.h"
@@ -1329,6 +1334,51 @@ void Options::checkLastOption() {
 	addEmptyOption();
 }
 
+class DurationIconAction final : public Ui::Menu::Action {
+public:
+	DurationIconAction(
+		not_null<Ui::Menu::Menu*> parent,
+		const style::Menu &st,
+		not_null<QAction*> action,
+		const QString &tinyText);
+
+protected:
+	void paintEvent(QPaintEvent *e) override;
+
+private:
+	QString _tinyText;
+
+};
+
+DurationIconAction::DurationIconAction(
+	not_null<Ui::Menu::Menu*> parent,
+	const style::Menu &st,
+	not_null<QAction*> action,
+	const QString &tinyText)
+: Ui::Menu::Action(parent, st, action, nullptr, nullptr)
+, _tinyText(tinyText) {
+}
+
+void DurationIconAction::paintEvent(QPaintEvent *e) {
+	Ui::Menu::Action::paintEvent(e);
+
+	const auto &st = this->st();
+	const auto iconPos = st.itemIconPosition;
+	const auto size = st::createPollDurationIconSize;
+	const auto &pos = st::createPollDurationIconPosition;
+	const auto rect = QRect(
+		iconPos.x() + pos.x(),
+		iconPos.y() + pos.y(),
+		size,
+		size);
+	const auto innerRect = rect - st::createPollDurationIconMargins;
+
+	Painter p(this);
+	PainterHighQualityEnabler hq(p);
+
+	Ui::PaintTimerIcon(p, innerRect, _tinyText, st::menuIconColor->c);
+}
+
 } // namespace
 
 CreatePollBox::CreatePollBox(
@@ -1554,6 +1604,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		rpl::event_stream<bool> addOptionsForceOff;
 		rpl::event_stream<bool> revotingForceOff;
 		rpl::event_stream<bool> quizForceOff;
+		rpl::variable<int> closePeriod = 0;
+		rpl::variable<TimeId> closeDate = TimeId(0);
 		std::shared_ptr<PollMediaState> descriptionMedia
 			= std::make_shared<PollMediaState>();
 		std::shared_ptr<PollMediaState> solutionMedia
@@ -1561,6 +1613,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		std::weak_ptr<PollMediaState> stickerTarget;
 		base::flat_map<FullMsgId, UploadContext> uploads;
 		base::unique_qptr<Ui::PopupMenu> mediaMenu;
+		base::unique_qptr<Ui::PopupMenu> durationMenu;
 		base::unique_qptr<ChatHelpers::TabbedPanel> stickerPanel;
 		std::unique_ptr<TaskQueue> prepareQueue;
 	};
@@ -2541,6 +2594,128 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			| rpl::then(state->quizForceOff.events()),
 		st::detailedSettingsButtonStyle);
 
+	const auto duration = AddPollToggleButton(
+		container,
+		tr::lng_polls_create_limit_duration(),
+		tr::lng_polls_create_limit_duration_about(),
+		{
+			.icon = &st::pollBoxFilledPollDeadlineIcon,
+			.background = &st::settingsIconBg1,
+		},
+		rpl::single(false),
+		st::detailedSettingsButtonStyle);
+
+	const auto durationWrap = container->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			container,
+			object_ptr<Ui::VerticalLayout>(container))
+	)->toggleOn(
+		rpl::single(duration->toggled())
+			| rpl::then(duration->toggledChanges()));
+	const auto durationInner = durationWrap->entity();
+
+	auto pollEndsLabelText = state->closePeriod.value(
+	) | rpl::map([=](int) {
+		const auto date = state->closeDate.current();
+		if (date > 0) {
+			return langDateTime(base::unixtime::parse(date));
+		}
+		const auto period = state->closePeriod.current();
+		if (period > 0) {
+			const auto target = base::unixtime::now() + period;
+			return langDateTime(base::unixtime::parse(target));
+		}
+		return QString();
+	});
+	state->closeDate.value(
+	) | rpl::on_next([=](TimeId) {
+		state->closePeriod.force_assign(state->closePeriod.current());
+	}, durationInner->lifetime());
+
+	const auto pollEndsLabel = AddButtonWithLabel(
+		durationInner,
+		tr::lng_polls_create_poll_ends(),
+		std::move(pollEndsLabelText),
+		st::settingsButtonNoIcon);
+
+	const auto show = uiShow();
+	pollEndsLabel->setClickedCallback([=] {
+		state->durationMenu = base::make_unique_q<Ui::PopupMenu>(
+			pollEndsLabel,
+			st::popupMenuWithIcons);
+		const auto &menuSt = state->durationMenu->st().menu;
+		const auto presets = {
+			3600,
+			3 * 3600,
+			8 * 3600,
+			24 * 3600,
+			72 * 3600,
+		};
+		for (const auto seconds : presets) {
+			const auto text = Ui::FormatMuteFor(seconds);
+			auto item = base::make_unique_q<DurationIconAction>(
+				state->durationMenu->menu(),
+				menuSt,
+				Ui::Menu::CreateAction(
+					state->durationMenu->menu().get(),
+					text,
+					[=] {
+						state->closePeriod = seconds;
+						state->closeDate = TimeId(0);
+					}),
+				Ui::FormatTTLTiny(seconds));
+			state->durationMenu->addAction(std::move(item));
+		}
+		state->durationMenu->addAction(
+			tr::lng_polls_create_duration_custom(tr::now),
+			[=] {
+				const auto now = base::unixtime::now();
+				const auto current = (state->closeDate.current() > now)
+					? state->closeDate.current()
+					: (state->closePeriod.current() > 0)
+					? (now + state->closePeriod.current())
+					: (now + 24 * 3600);
+				show->show(Box([=](not_null<Ui::GenericBox*> box) {
+					Ui::ChooseDateTimeBox(box, {
+						.title = tr::lng_polls_create_deadline_title(),
+						.submit = tr::lng_polls_create_deadline_button(),
+						.done = [=](TimeId time) {
+							state->closeDate = time;
+							state->closePeriod = 0;
+							box->closeBox();
+						},
+						.min = [=] { return base::unixtime::now() + 60; },
+						.time = current,
+						.max = [=] {
+							return base::unixtime::now() + 365 * 24 * 3600;
+						},
+					});
+				}));
+			},
+			&st::menuIconCustomize);
+		state->durationMenu->popup(QCursor::pos());
+	});
+
+	duration->toggledChanges(
+	) | rpl::on_next([=](bool checked) {
+		if (checked && state->closePeriod.current() == 0
+				&& state->closeDate.current() == 0) {
+			state->closePeriod = 24 * 3600;
+		}
+	}, duration->lifetime());
+
+	const auto hideResults = durationInner->add(
+		object_ptr<Ui::SettingsButton>(
+			durationInner,
+			tr::lng_polls_create_hide_results(),
+			st::settingsButtonNoIcon)
+	)->toggleOn(rpl::single(false));
+
+	Ui::AddSkip(durationInner);
+	Ui::AddDividerText(
+		durationInner,
+		tr::lng_polls_create_hide_results_about());
+
 	const auto solution = setupSolution(
 		container,
 		rpl::single(quiz->toggled()) | rpl::then(quiz->toggledChanges()));
@@ -2632,15 +2807,31 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		if (quiz->toggled()) {
 			result.solutionMedia = state->solutionMedia->media;
 		}
+		if (duration->toggled()) {
+			const auto closeDate = state->closeDate.current();
+			const auto closePeriod = state->closePeriod.current();
+			if (closeDate > 0) {
+				result.closeDate = closeDate;
+				result.closePeriod = closeDate - base::unixtime::now();
+			} else if (closePeriod > 0) {
+				result.closePeriod = closePeriod;
+				result.closeDate = base::unixtime::now() + closePeriod;
+			}
+		}
 		const auto publicVotes = (showWhoVoted && showWhoVoted->toggled());
 		const auto multiChoice = multiple->toggled();
+		const auto hideResultsEnabled = duration->toggled()
+			&& hideResults->toggled();
 		result.setFlags(Flag(0)
 			| (publicVotes ? Flag::PublicVotes : Flag(0))
 			| (multiChoice ? Flag::MultiChoice : Flag(0))
 			| ((addOptions && addOptions->toggled()) ? Flag::OpenAnswers : Flag(0))
 			| (!revoting->toggled() ? Flag::RevotingDisabled : Flag(0))
 			| (shuffle->toggled() ? Flag::ShuffleAnswers : Flag(0))
-			| (quiz->toggled() ? Flag::Quiz : Flag(0)));
+			| (quiz->toggled() ? Flag::Quiz : Flag(0))
+			| (hideResultsEnabled
+				? Flag::HideResultsUntilClose
+				: Flag(0)));
 		auto text = TextWithEntities{
 			descriptionWithTags.text,
 			TextUtilities::ConvertTextTagsToEntities(
@@ -2684,6 +2875,23 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		} else {
 			state->error &= ~Error::Media;
 		}
+		if (duration->toggled()) {
+			const auto now = base::unixtime::now();
+			const auto closeDate = state->closeDate.current();
+			const auto closePeriod = state->closePeriod.current();
+			const auto deadline = (closeDate > 0)
+				? closeDate
+				: (closePeriod > 0)
+				? (now + closePeriod)
+				: 0;
+			if (deadline > 0 && deadline <= now) {
+				state->error |= Error::Deadline;
+			} else {
+				state->error &= ~Error::Deadline;
+			}
+		} else {
+			state->error &= ~Error::Deadline;
+		}
 	};
 	const auto showError = [show = uiShow()](
 			tr::phrase<> text) {
@@ -2703,6 +2911,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			solution->showError();
 		} else if (state->error & Error::Media) {
 			showError(tr::lng_polls_media_uploading);
+		} else if (state->error & Error::Deadline) {
+			showError(tr::lng_polls_create_deadline_expired);
 		} else if (!state->error) {
 			auto result = collectResult();
 			result.options = sendOptions;
