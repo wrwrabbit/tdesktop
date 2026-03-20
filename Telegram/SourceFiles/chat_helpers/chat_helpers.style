@@ -1420,6 +1420,29 @@ historySend: SendButton {
 	sendDisabledFg: historyComposeIconFg;
 	sendIconFg: historySendIconFg;
 }
+historyAiComposeButton: IconButton(historyAttach) {
+	width: 34px;
+	height: 34px;
+	icon: historySendIcon;
+	iconOver: historySendIconOver;
+	iconPosition: point(10px, 10px);
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: 34px;
+	ripple: defaultRippleAnimationBgOver;
+}
+historyAiComposeButtonBg: transparent;
+historyAiComposeButtonBgOver: transparent;
+historyAiComposeButtonTextFg: historyComposeIconFg;
+historyAiComposeButtonTextFgOver: historyComposeIconFgOver;
+historyAiComposeButtonFont: font(15px semibold);
+historyAiComposeButtonTextShift: point(1px, 1px);
+historyAiComposeButtonSparkleBigPosition: point(10px, 12px);
+historyAiComposeButtonSparkleBigRadius: 3px;
+historyAiComposeButtonSparkleSmallPosition: point(16px, 8px);
+historyAiComposeButtonSparkleSmallRadius: 2px;
+historyAiComposeButtonSparkleStroke: 1px;
+historyAiComposeButtonTop: -4px;
+historyAiComposeTooltipSkip: 8px;
 historyRecordFrameIndex: 30;
 
 defaultComposeFilesMenu: IconButton(defaultIconButton) {
@@ -1767,4 +1790,18 @@ topPeersSelectorImportantTooltipLabel: FlatLabel(defaultImportantTooltipLabel) {
 	style: TextStyle(defaultTextStyle) {
 		font: font(semibold 12px);
 	}
+}
+
+aiComposeSendButton: SendButton(historySend) {
+	sendIconPosition: point(9px, 9px);
+	sendIconFillPadding: 5px;
+	inner: IconButton(historyAttach) {
+		width: 42px;
+		height: 42px;
+		icon: icon {{ "chat/input_send_round", windowFgActive }};
+		iconOver: icon {{ "chat/input_send_round", windowFgActive }};
+		rippleAreaSize: 40px;
+		rippleAreaPosition: point(1px, 1px);
+	}
+	sendIconFg: windowFgActive;
 }

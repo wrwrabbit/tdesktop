@@ -68,6 +68,7 @@ class EmojiButton;
 class SendAsButton;
 class SilentToggle;
 class DropdownMenu;
+class ImportantTooltip;
 struct PreparedList;
 struct SendStarButtonState;
 class ReactionFlyAnimation;
@@ -100,6 +101,7 @@ class VoiceRecordBar;
 class TTLButton;
 class WebpageProcessor;
 class CharactersLimitLabel;
+class ComposeAiButton;
 } // namespace HistoryView::Controls
 
 namespace HistoryView {
@@ -312,6 +314,7 @@ private:
 	void initKeyHandler();
 	void initLikeButton();
 	void initEditStarsButton();
+	void initAiButton();
 	void updateControlsParents();
 	void updateSubmitSettings();
 	void updateSendButtonType();
@@ -322,6 +325,9 @@ private:
 	void updateWrappingVisibility();
 	void updateControlsVisibility();
 	void updateControlsGeometry(QSize size);
+	void updateAiButtonVisibility();
+	void updateAiButtonGeometry();
+	void updateAiTooltipGeometry();
 	bool updateReplaceMediaButton();
 	void updateOuterGeometry(QRect rect);
 	void paintBackground(QPainter &p, QRect full, QRect clip);
@@ -345,12 +351,14 @@ private:
 	void toggleTabbedSelectorMode();
 	void createTabbedPanel();
 	void setTabbedPanel(std::unique_ptr<ChatHelpers::TabbedPanel> panel);
+	void showAiComposeBox();
 
 	[[nodiscard]] bool showRecordButton() const;
 	[[nodiscard]] bool showEditStarsButton() const;
 	[[nodiscard]] int shownStarsPerMessage() const;
 	bool updateBotCommandShown();
 	bool updateLikeShown();
+	[[nodiscard]] bool hasEnoughLinesForAi() const;
 
 	void cancelInlineBot();
 	void clearInlineBot();
@@ -427,6 +435,7 @@ private:
 	std::optional<Ui::RoundRect> _backgroundRect;
 
 	const std::shared_ptr<Ui::SendButton> _send;
+	Controls::ComposeAiButton * const _aiButton = nullptr;
 	Ui::IconButton *_editStars = nullptr;
 	Ui::IconButton *_like = nullptr;
 	rpl::variable<int> _minStarsCount;
@@ -461,6 +470,8 @@ private:
 	friend class FieldHeader;
 	const std::unique_ptr<FieldHeader> _header;
 	const std::unique_ptr<Controls::VoiceRecordBar> _voiceRecordBar;
+	base::unique_qptr<Ui::ImportantTooltip> _aiTooltip;
+	bool _aiTooltipShown = false;
 
 	const Fn<SendMenu::Details()> _sendMenuDetails;
 	const Fn<void(not_null<DocumentData*>)> _unavailableEmojiPasted;

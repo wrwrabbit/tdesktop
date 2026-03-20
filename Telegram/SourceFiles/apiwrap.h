@@ -81,6 +81,7 @@ class TodoLists;
 class ChatParticipants;
 class UnreadThings;
 class Ringtones;
+class ComposeWithAi;
 class Transcribes;
 class Premium;
 class ReadMetrics;
@@ -423,6 +424,7 @@ public:
 	[[nodiscard]] Api::ChatParticipants &chatParticipants();
 	[[nodiscard]] Api::UnreadThings &unreadThings();
 	[[nodiscard]] Api::Ringtones &ringtones();
+	[[nodiscard]] Api::ComposeWithAi &composeWithAi();
 	[[nodiscard]] Api::Transcribes &transcribes();
 	[[nodiscard]] Api::Premium &premium();
 	[[nodiscard]] Api::Usernames &usernames();
@@ -782,6 +784,7 @@ private:
 	const std::unique_ptr<Api::ChatParticipants> _chatParticipants;
 	const std::unique_ptr<Api::UnreadThings> _unreadThings;
 	const std::unique_ptr<Api::Ringtones> _ringtones;
+	const std::unique_ptr<Api::ComposeWithAi> _composeWithAi;
 	const std::unique_ptr<Api::Transcribes> _transcribes;
 	const std::unique_ptr<Api::Premium> _premium;
 	const std::unique_ptr<Api::Usernames> _usernames;

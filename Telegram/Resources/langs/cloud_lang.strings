@@ -16,6 +16,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "cloud_lng_age_verify_about_gb#one" = "To access such content, you must confirm that you are at least **{count}** year old as required by UK law.";
 "cloud_lng_age_verify_about_gb#other" = "To access such content, you must confirm that you are at least **{count}** years old as required by UK law.";
 
+"cloud_lng_ai_compose_style_biblical" = "Biblical";
+"cloud_lng_ai_compose_style_formal" = "Formal";
+"cloud_lng_ai_compose_style_posh" = "Posh";
+"cloud_lng_ai_compose_style_savage" = "Savage";
+"cloud_lng_ai_compose_style_short" = "Short";
+
 "cloud_lng_passport_in_ar" = "Arabic";
 "cloud_lng_passport_in_az" = "Azerbaijani";
 "cloud_lng_passport_in_bg" = "Bulgarian";

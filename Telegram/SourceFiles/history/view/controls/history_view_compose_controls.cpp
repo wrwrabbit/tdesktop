@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 #include "base/timer_rpl.h"
 #include "base/unixtime.h"
+#include "boxes/compose_ai_box.h"
 #include "boxes/edit_caption_box.h"
 #include "calls/group/ui/calls_group_stars_coloring.h"
 #include "calls/group/calls_group_stars_box.h"
@@ -57,6 +58,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/view/controls/history_view_characters_limit.h"
+#include "history/view/controls/history_view_compose_ai_button.h"
 #include "history/view/controls/history_view_compose_media_edit_manager.h"
 #include "history/view/controls/history_view_forward_panel.h"
 #include "history/view/controls/history_view_draft_options.h"
@@ -1007,6 +1009,9 @@ ComposeControls::ComposeControls(
 , _mode(descriptor.mode)
 , _wrap(std::make_unique<Ui::RpWidget>(_parent))
 , _send(std::make_shared<Ui::SendButton>(_wrap.get(), _st.send))
+, _aiButton(Ui::CreateChild<Controls::ComposeAiButton>(
+	_wrap.get(),
+	st::historyAiComposeButton))
 , _like(_features.likes
 	? Ui::CreateChild<Ui::IconButton>(_wrap.get(), _st.like)
 	: nullptr)
@@ -1877,6 +1882,10 @@ void ComposeControls::showFinished() {
 		_autocomplete->hideFast();
 	}
 	updateWrappingVisibility();
+	_aiButton->raise();
+	if (_aiTooltip) {
+		_aiTooltip->raise();
+	}
 	_voiceRecordBar->orderControls();
 }
 
@@ -2007,6 +2016,7 @@ void ComposeControls::init() {
 	initField();
 	initTabbedSelector();
 	initSendButton();
+	initAiButton();
 	initWriteRestriction();
 	initVoiceRecordBar();
 	initKeyHandler();
@@ -2315,10 +2325,12 @@ void ComposeControls::initField() {
 	_field->heightChanges(
 	) | rpl::on_next([=] {
 		updateHeight();
+		updateAiButtonVisibility();
 	}, _field->lifetime());
 	_field->changes(
 	) | rpl::on_next([=] {
 		fieldChanged();
+		updateAiButtonVisibility();
 	}, _field->lifetime());
 #ifdef Q_OS_MAC
 	// Removed an ability to insert text from the menu bar
@@ -3171,6 +3183,7 @@ void ComposeControls::initVoiceRecordBar() {
 			changeFocusedControl();
 			_recording = false;
 		}
+		updateAiButtonVisibility();
 	}, _wrap->lifetime());
 
 	_voiceRecordBar->setStartRecordingFilter([=] {
@@ -3255,6 +3268,38 @@ void ComposeControls::initVoiceRecordBar() {
 	}, _voiceRecordBar->lifetime());
 }
 
+void ComposeControls::initAiButton() {
+	_aiButton->hide();
+	_aiButton->setAccessibleName(tr::lng_ai_compose_title(tr::now));
+	_aiButton->setClickedCallback([=] {
+		if (!Core::App().settings().aiComposeTooltipHidden()) {
+			Core::App().settings().setAiComposeTooltipHidden(true);
+			Core::App().saveSettingsDelayed();
+		}
+		updateAiButtonVisibility();
+		showAiComposeBox();
+	});
+
+	_aiTooltip.reset(Ui::CreateChild<Ui::ImportantTooltip>(
+		_wrap.get(),
+		object_ptr<Ui::PaddingWrap<Ui::FlatLabel>>(
+			_wrap.get(),
+			Ui::MakeNiceTooltipLabel(
+				_wrap.get(),
+				tr::lng_ai_compose_tooltip(tr::rich),
+				st::historyMessagesTTLLabel.minWidth,
+				st::ttlMediaImportantTooltipLabel),
+			st::defaultImportantTooltip.padding),
+		st::historyRecordTooltip));
+	_aiTooltip->toggleFast(false);
+	_aiButton->geometryValue(
+	) | rpl::on_next([=](const QRect &geometry) {
+		if (!geometry.isEmpty()) {
+			updateAiTooltipGeometry();
+		}
+	}, _aiTooltip->lifetime());
+}
+
 void ComposeControls::updateWrappingVisibility() {
 	const auto &restriction = _writeRestriction.current();
 	const auto restricted = !restriction.empty() && _writeRestricted;
@@ -3266,6 +3311,7 @@ void ComposeControls::updateWrappingVisibility() {
 	}
 	_wrap->setVisible(!hidden && !restricted);
 	updateControlsParents();
+	updateAiButtonVisibility();
 	if (!hidden && !restricted) {
 		updateControlsGeometry(_wrap->size());
 		_wrap->raise();
@@ -3456,6 +3502,7 @@ void ComposeControls::updateControlsGeometry(QSize size) {
 	if (_ttlInfo) {
 		_ttlInfo->move(size.width() - right - _ttlInfo->width(), buttonsTop);
 	}
+	updateAiButtonGeometry();
 
 	_voiceRecordBar->resizeToWidth(size.width());
 	_voiceRecordBar->moveToLeft(
@@ -3494,6 +3541,52 @@ void ComposeControls::updateControlsVisibility() {
 	if (_starsReaction) {
 		_starsReaction->show();
 	}
+	updateAiButtonVisibility();
+}
+
+void ComposeControls::updateAiButtonVisibility() {
+	const auto shown = hasEnoughLinesForAi()
+		&& _wrap->isVisible()
+		&& !_recording.current()
+		&& _field->isVisible();
+	_aiButton->setVisible(shown);
+	if (_aiTooltip) {
+		const auto showTooltip = shown
+			&& !Core::App().settings().aiComposeTooltipHidden();
+		if (showTooltip) {
+			updateAiTooltipGeometry();
+		}
+		if (showTooltip != _aiTooltipShown) {
+			_aiTooltipShown = showTooltip;
+			_aiTooltip->toggleAnimated(showTooltip);
+		}
+	}
+}
+
+void ComposeControls::updateAiButtonGeometry() {
+	if (_aiButton->isHidden()) {
+		return;
+	}
+	_aiButton->move(
+		_send->x() + (_send->width() - _aiButton->width()) / 2,
+		_field->y() + st::historyAiComposeButtonTop);
+	updateAiTooltipGeometry();
+}
+
+void ComposeControls::updateAiTooltipGeometry() {
+	if (!_aiTooltip || _aiButton->isHidden()) {
+		return;
+	}
+	const auto geometry = _aiButton->geometry();
+	const auto countPosition = [=](QSize size) {
+		const auto left = geometry.x()
+			+ geometry.width()
+			- size.width();
+		return QPoint(
+			std::clamp(left, 0, _wrap->width() - size.width()),
+			geometry.y() - size.height() - st::historyAiComposeTooltipSkip);
+	};
+	_aiTooltip->pointAt(geometry, RectPart::Top, countPosition);
 }
 
 bool ComposeControls::updateLikeShown() {
@@ -3503,6 +3596,38 @@ bool ComposeControls::updateLikeShown() {
 		return true;
 	}
 	return false;
+}
+
+void ComposeControls::showAiComposeBox() {
+	const auto text = prepareTextForEditMsg();
+	if (text.text.isEmpty()) {
+		return;
+	}
+	Controls::ShowComposeAiBox(_show, {
+		.session = _session,
+		.text = text,
+		.apply = crl::guard(_wrap.get(), [=](TextWithEntities &&result) {
+			setFieldText({
+				result.text,
+				TextUtilities::ConvertEntitiesToTextTags(result.entities),
+			}, 0, Ui::InputField::HistoryAction::NewEntry);
+		}),
+	});
+}
+
+bool ComposeControls::hasEnoughLinesForAi() const {
+	if (!_history || _recording.current()) {
+		return false;
+	}
+	const auto &style = _field->st().style;
+	const auto lineHeight = style.lineHeight
+		? style.lineHeight
+		: style.font->height;
+	const auto margins = _field->fullTextMargins();
+	const auto contentHeight = _field->height()
+		- margins.top()
+		- margins.bottom();
+	return contentHeight >= (3 * lineHeight);
 }
 
 bool ComposeControls::updateBotCommandShown() {

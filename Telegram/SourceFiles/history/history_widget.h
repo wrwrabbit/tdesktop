@@ -62,6 +62,7 @@ namespace Ui {
 class InnerDropdown;
 class DropdownMenu;
 class PlainShadow;
+class ImportantTooltip;
 class IconButton;
 class EmojiButton;
 class SendButton;
@@ -124,6 +125,7 @@ class TTLButton;
 class WebpageProcessor;
 class CharactersLimitLabel;
 class PhotoEditSpoilerManager;
+class ComposeAiButton;
 struct VoiceToSend;
 } // namespace HistoryView::Controls
 
@@ -509,10 +511,16 @@ private:
 	// like send button, emoji button and others.
 	void moveFieldControls();
 	void updateFieldSize();
+	void initAiButton();
+	void updateAiButtonVisibility();
+	void updateAiButtonGeometry();
+	void updateAiTooltipGeometry();
+	void showAiComposeBox();
 
 	[[nodiscard]] MsgId resolveReplyToTopicRootId();
 	[[nodiscard]] Data::ForumTopic *resolveReplyToTopic();
 	[[nodiscard]] bool canWriteMessage() const;
+	[[nodiscard]] bool hasEnoughLinesForAi() const;
 	void orderWidgets();
 
 	[[nodiscard]] InlineBotQuery parseInlineBotQuery() const;
@@ -812,6 +820,7 @@ private:
 	std::unique_ptr<HistoryView::BusinessBotStatus> _businessBotStatus;
 
 	const std::shared_ptr<Ui::SendButton> _send;
+	HistoryView::Controls::ComposeAiButton * const _aiButton = nullptr;
 	object_ptr<Ui::FlatButton> _unblock;
 	object_ptr<Ui::FlatButton> _botStart;
 	object_ptr<Ui::FlatButton> _joinChannel;
@@ -843,6 +852,8 @@ private:
 	std::unique_ptr<HistoryView::SubsectionTabs> _subsectionTabs;
 	rpl::lifetime _subsectionTabsLifetime;
 	rpl::lifetime _subsectionCheckLifetime;
+	base::unique_qptr<Ui::ImportantTooltip> _aiTooltip;
+	bool _aiTooltipShown = false;
 	bool _cmdStartShown = false;
 	object_ptr<Ui::InputField> _field;
 	base::unique_qptr<Ui::RpWidget> _fieldDisabled;

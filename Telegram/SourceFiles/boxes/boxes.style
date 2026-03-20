@@ -1261,3 +1261,105 @@ managedBotIconEmoji: IconEmoji {
 	icon: icon {{ "chat/code_tags", windowSubTextFg }};
 	padding: margins(-2px, -2px, -2px, 0px);
 }
+
+aiComposeBoxSectionSkip: 8px;
+aiComposeBoxStyleTabsSkip: 8px;
+aiComposeContentMargin: margins(16px, 0px, 16px, 0px);
+
+aiComposeButtonBgActive: windowActiveTextFg;
+aiComposeButtonBgActiveOpacity: 0.1;
+aiComposeButtonFg: windowBoldFg;
+aiComposeButtonFgActive: windowActiveTextFg;
+aiComposeButtonRippleInactive: RippleAnimation(defaultRippleAnimation) {
+	color: windowBoldFg;
+}
+aiComposeButtonRippleInactiveOpacity: 0.1;
+aiComposeButtonRippleActive: RippleAnimation(defaultRippleAnimation) {
+	color: windowActiveTextFg;
+}
+aiComposeButtonRippleActiveOpacity: 0.1;
+
+aiComposeTabsBg: boxBg;
+aiComposeTabsHeight: 58px;
+aiComposeTabsRadius: 29px;
+aiComposeTabsPadding: margins(6px, 6px, 6px, 6px);
+aiComposeTabsSkip: 4px;
+aiComposeTabButtonBgActive: aiComposeButtonBgActive;
+aiComposeTabLabelFg: aiComposeButtonFg;
+aiComposeTabLabelFgActive: aiComposeButtonFgActive;
+aiComposeTabLabelFont: font(12px semibold);
+aiComposeTabIconTop: 6px;
+aiComposeTabLabelTop: 26px;
+aiComposeTabTranslateIcon: icon {{ "menu/translate", aiComposeButtonFg }};
+aiComposeTabTranslateIconActive: icon {{ "menu/translate", aiComposeButtonFgActive }};
+aiComposeTabStyleIcon: icon {{ "menu/edit_stars", aiComposeButtonFg }};
+aiComposeTabStyleIconActive: icon {{ "menu/edit_stars", aiComposeButtonFgActive }};
+aiComposeTabFixIcon: icon {{ "menu/search_check", aiComposeButtonFg }};
+aiComposeTabFixIconActive: icon {{ "menu/search_check", aiComposeButtonFgActive }};
+
+aiComposeStyleTabsBg: boxBg;
+aiComposeStyleTabsHeight: 64px;
+aiComposeStyleTabsRadius: 14px;
+aiComposeStyleTabsPadding: margins(6px, 6px, 6px, 6px);
+aiComposeStyleTabsSkip: 4px;
+aiComposeStyleButtonBgActive: aiComposeButtonBgActive;
+aiComposeStyleLabelFg: aiComposeButtonFg;
+aiComposeStyleLabelFgActive: aiComposeButtonFgActive;
+aiComposeStyleEmojiTop: 5px;
+aiComposeStyleLabelTop: 30px;
+aiComposeStyleEmojiFont: font(20px);
+aiComposeStyleLabelFont: font(12px semibold);
+
+aiComposeCardBg: boxBg;
+aiComposeCardRadius: 22px;
+aiComposeCardPadding: margins(12px, 16px, 16px, 16px);
+aiComposeCardDivider: shadowFg;
+aiComposeCardSectionSkip: 12px;
+aiComposeCardTextSkip: 0px;
+aiComposeCardCopySkip: 0px;
+aiComposeCardControlSkip: 8px;
+aiComposeCardTitle: FlatLabel(defaultSubsectionTitle) {
+	textFg: windowFg;
+	minWidth: 0px;
+	maxHeight: 22px;
+}
+aiComposeEmojifyCheckbox: Checkbox(defaultBoxCheckbox) {
+	width: 0px;
+}
+
+aiComposeExpandIcon: icon{{ "info/edit/expand_arrow_small", windowActiveTextFg }};
+aiComposeCollapseIcon: icon{{ "info/edit/expand_arrow_small-flip_vertical", windowActiveTextFg }};
+aiComposeExpandButton: IconButton(defaultIconButton) {
+	width: 32px;
+	height: 32px;
+	icon: aiComposeExpandIcon;
+	iconOver: aiComposeExpandIcon;
+	iconPosition: point(5px, 5px);
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: 32px;
+	ripple: defaultRippleAnimationBgOver;
+}
+
+aiComposeCopyIcon: icon{{ "menu/copy", windowActiveTextFg }};
+aiComposeCopyButton: IconButton(aiComposeExpandButton) {
+	icon: aiComposeCopyIcon;
+	iconOver: aiComposeCopyIcon;
+}
+
+aiComposeBoxButton: RoundButton(defaultActiveButton) {
+	height: 42px;
+	textTop: 12px;
+	style: semiboldTextStyle;
+}
+aiComposeBox: Box(defaultBox) {
+	buttonPadding: margins(16px, 12px, 16px, 12px);
+	buttonHeight: 42px;
+	buttonWide: true;
+	button: aiComposeBoxButton;
+	shadowIgnoreTopSkip: true;
+	bg: boxDividerBg;
+}
+aiComposeBoxWithSend: Box(aiComposeBox) {
+	buttonPadding: margins(16px, 12px, 66px, 12px);
+}
+aiComposeSendButtonSkip: 8px;

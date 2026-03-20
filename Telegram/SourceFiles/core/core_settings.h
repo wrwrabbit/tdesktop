@@ -924,6 +924,15 @@ public:
 	void setTtlVoiceClickTooltipHidden(bool value) {
 		_ttlVoiceClickTooltipHidden = value;
 	}
+	[[nodiscard]] bool aiComposeTooltipHidden() const {
+		return _aiComposeTooltipHidden.current();
+	}
+	[[nodiscard]] rpl::producer<bool> aiComposeTooltipHiddenValue() const {
+		return _aiComposeTooltipHidden.value();
+	}
+	void setAiComposeTooltipHidden(bool value) {
+		_aiComposeTooltipHidden = value;
+	}
 
 	[[nodiscard]] const WindowPosition &ivPosition() const {
 		return _ivPosition;
@@ -1125,6 +1134,7 @@ private:
 	std::optional<uint64> _macRoundIconDigest;
 	rpl::variable<bool> _storiesClickTooltipHidden = false;
 	rpl::variable<bool> _ttlVoiceClickTooltipHidden = false;
+	rpl::variable<bool> _aiComposeTooltipHidden = false;
 	WindowPosition _ivPosition;
 	WindowPosition _callPanelPosition;
 	QString _customFontFamily;

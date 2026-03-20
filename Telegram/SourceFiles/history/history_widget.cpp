@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_send_progress.h"
 #include "api/api_unread_things.h"
 #include "base/random.h"
+#include "boxes/compose_ai_box.h"
 #include "ui/boxes/confirm_box.h"
 #include "boxes/delete_messages_box.h"
 #include "boxes/send_credits_box.h"
@@ -29,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/star_gift_box.h"
 #include "boxes/peers/edit_peer_permissions_box.h" // ShowAboutGigagroup.
 #include "boxes/peers/edit_peer_requests_box.h"
+#include "core/core_settings.h"
 #include "core/file_utilities.h"
 #include "core/mime_type.h"
 #include "history/view/history_view_draw_to_reply.h"
@@ -43,6 +45,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/ripple_animation.h"
 #include "ui/effects/message_sending_animation_controller.h"
 #include "ui/text/format_values.h"
+#include "ui/text/text_utilities.h"
 #include "ui/chat/message_bar.h"
 #include "ui/chat/attach/attach_send_files_way.h"
 #include "ui/chat/choose_send_as.h"
@@ -99,6 +102,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_unread_things.h"
 #include "history/admin_log/history_admin_log_section.h"
 #include "history/view/controls/history_view_characters_limit.h"
+#include "history/view/controls/history_view_compose_ai_button.h"
 #include "history/view/controls/history_view_compose_search.h"
 #include "history/view/controls/history_view_forward_panel.h"
 #include "history/view/controls/history_view_draft_options.h"
@@ -161,6 +165,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/elastic_scroll.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/widgets/tooltip.h"
 #include "ui/item_text_options.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
@@ -260,6 +265,9 @@ HistoryWidget::HistoryWidget(
 	? object_ptr<Support::Autocomplete>(this, &session())
 	: nullptr)
 , _send(std::make_shared<Ui::SendButton>(this, st::historySend))
+, _aiButton(Ui::CreateChild<HistoryView::Controls::ComposeAiButton>(
+	this,
+	st::historyAiComposeButton))
 , _unblock(
 	this,
 	tr::lng_unblock_button(tr::now).toUpper(),
@@ -496,6 +504,7 @@ HistoryWidget::HistoryWidget(
 	InitMessageFieldFade(_field, st::historyComposeField.textBg);
 
 	setupFastButtonMode();
+	initAiButton();
 
 	_fieldCharsCountManager.limitExceeds(
 	) | rpl::on_next([=] {
@@ -1277,9 +1286,42 @@ void HistoryWidget::initVoiceRecordBar() {
 	) | rpl::on_next([=](bool active) {
 		_field->setDisabled(active);
 		controller()->widget()->setInnerFocus();
+		updateAiButtonVisibility();
 	}, lifetime());
 
 	_voiceRecordBar->hideFast();
+}
+
+void HistoryWidget::initAiButton() {
+	_aiButton->hide();
+	_aiButton->setAccessibleName(tr::lng_ai_compose_title(tr::now));
+	_aiButton->setClickedCallback([=] {
+		if (!Core::App().settings().aiComposeTooltipHidden()) {
+			Core::App().settings().setAiComposeTooltipHidden(true);
+			Core::App().saveSettingsDelayed();
+		}
+		updateAiButtonVisibility();
+		showAiComposeBox();
+	});
+
+	_aiTooltip.reset(Ui::CreateChild<Ui::ImportantTooltip>(
+		this,
+		object_ptr<Ui::PaddingWrap<Ui::FlatLabel>>(
+			this,
+			Ui::MakeNiceTooltipLabel(
+				this,
+				tr::lng_ai_compose_tooltip(tr::rich),
+				st::historyMessagesTTLLabel.minWidth,
+				st::ttlMediaImportantTooltipLabel),
+			st::defaultImportantTooltip.padding),
+		st::historyRecordTooltip));
+	_aiTooltip->toggleFast(false);
+	_aiButton->geometryValue(
+	) | rpl::on_next([=](const QRect &geometry) {
+		if (!geometry.isEmpty()) {
+			updateAiTooltipGeometry();
+		}
+	}, _aiTooltip->lifetime());
 }
 
 void HistoryWidget::initTabbedSelector() {
@@ -1808,6 +1850,7 @@ void HistoryWidget::applyInlineBotQuery(UserData *bot, const QString &query) {
 void HistoryWidget::orderWidgets() {
 	_voiceRecordBar->raise();
 	_send->raise();
+	_aiButton->raise();
 	_topBars->raise();
 	if (_businessBotStatus) {
 		_businessBotStatus->bar().raise();
@@ -1857,6 +1900,9 @@ void HistoryWidget::orderWidgets() {
 	}
 	if (_attachBotsMenu) {
 		_attachBotsMenu->raise();
+	}
+	if (_aiTooltip) {
+		_aiTooltip->raise();
 	}
 	_attachDragAreas.document->raise();
 	_attachDragAreas.photo->raise();
@@ -1931,6 +1977,7 @@ void HistoryWidget::fieldChanged() {
 		updateControlsVisibility();
 		updateControlsGeometry();
 	}
+	updateAiButtonVisibility();
 
 	_saveCloudDraftTimer.cancel();
 	if (!_peer || !(_textUpdateEvents & TextUpdateEvent::SaveDraft)) {
@@ -3721,6 +3768,7 @@ void HistoryWidget::updateControlsVisibility() {
 		hideFieldIfVisible();
 	}
 	//checkTabbedSelectorToggleTooltip();
+	updateAiButtonVisibility();
 	updateMouseTracking();
 }
 
@@ -4591,6 +4639,23 @@ TextWithEntities HistoryWidget::prepareTextForEditMsg() const {
 		TextUtilities::ConvertTextTagsToEntities(textWithTags.tags) };
 	TextUtilities::PrepareForSending(left, prepareFlags);
 	return left;
+}
+
+void HistoryWidget::showAiComposeBox() {
+	const auto text = prepareTextForEditMsg();
+	if (text.text.isEmpty()) {
+		return;
+	}
+	HistoryView::Controls::ShowComposeAiBox(controller()->uiShow(), {
+		.session = &session(),
+		.text = text,
+		.apply = crl::guard(this, [=](TextWithEntities &&result) {
+			setFieldText({
+				result.text,
+				TextUtilities::ConvertEntitiesToTextTags(result.entities),
+			}, 0, Ui::InputField::HistoryAction::NewEntry);
+		}),
+	});
 }
 
 void HistoryWidget::saveEditMessage(Api::SendOptions options) {
@@ -5975,6 +6040,7 @@ void HistoryWidget::toggleKeyboard(bool manual) {
 		}
 	}
 	updateControlsGeometry();
+	updateAiButtonVisibility();
 	updateFieldPlaceholder();
 	if (_botKeyboardHide->isHidden()
 		&& canWriteMessage()
@@ -6118,6 +6184,69 @@ bool HistoryWidget::fieldOrDisabledShown() const {
 	return !_field->isHidden() || _fieldDisabled;
 }
 
+bool HistoryWidget::hasEnoughLinesForAi() const {
+	if (!_history || _voiceRecordBar->isActive()) {
+		return false;
+	}
+	const auto &style = _field->st().style;
+	const auto lineHeight = style.lineHeight
+		? style.lineHeight
+		: style.font->height;
+	const auto margins = _field->fullTextMargins();
+	const auto contentHeight = _field->height()
+		- margins.top()
+		- margins.bottom();
+	return contentHeight >= (3 * lineHeight);
+}
+
+void HistoryWidget::updateAiButtonVisibility() {
+	const auto shown = hasEnoughLinesForAi()
+		&& _send->isVisible()
+		&& _field->isVisible();
+	_aiButton->setVisible(shown);
+	if (_aiTooltip) {
+		if (shown) {
+			updateAiButtonGeometry();
+		}
+		const auto showTooltip = shown
+			&& !Core::App().settings().aiComposeTooltipHidden();
+		if (showTooltip) {
+			updateAiTooltipGeometry();
+		}
+		if ((showTooltip != _aiTooltipShown)
+			|| (showTooltip && _aiTooltip->isHidden())) {
+			_aiTooltipShown = showTooltip;
+			_aiTooltip->toggleAnimated(showTooltip);
+		}
+	}
+}
+
+void HistoryWidget::updateAiButtonGeometry() {
+	if (_aiButton->isHidden()) {
+		return;
+	}
+	_aiButton->move(
+		_send->x() + _send->width() - _aiButton->width(),
+		_field->y() + st::historyAiComposeButtonTop);
+	updateAiTooltipGeometry();
+}
+
+void HistoryWidget::updateAiTooltipGeometry() {
+	if (!_aiTooltip || _aiButton->isHidden()) {
+		return;
+	}
+	const auto geometry = _aiButton->geometry();
+	const auto countPosition = [=](QSize size) {
+		const auto left = geometry.x()
+			+ geometry.width()
+			- size.width();
+		return QPoint(
+			std::clamp(left, 0, width() - size.width()),
+			geometry.y() - size.height() - st::historyAiComposeTooltipSkip);
+	};
+	_aiTooltip->pointAt(geometry, RectPart::Top, countPosition);
+}
+
 void HistoryWidget::moveFieldControls() {
 	auto keyboardHeight = 0;
 	auto bottom = height();
@@ -6187,6 +6316,7 @@ void HistoryWidget::moveFieldControls() {
 	if (_ttlInfo) {
 		_ttlInfo->move(width() - right - _ttlInfo->width(), buttonsBottom);
 	}
+	updateAiButtonGeometry();
 
 	_fieldBarCancel->moveToRight(
 		0,
@@ -6290,6 +6420,7 @@ void HistoryWidget::inlineBotChanged() {
 
 void HistoryWidget::fieldResized() {
 	moveFieldControls();
+	updateAiButtonVisibility();
 	updateHistoryGeometry();
 	updateField();
 }
