@@ -106,6 +106,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_click_handler.h"
 #include "data/data_histories.h"
 #include "data/data_changes.h"
+#include "data/data_poll.h"
 #include "data/data_todo_list.h"
 #include "dialogs/ui/dialogs_video_userpic.h"
 #include "styles/style_chat.h"
@@ -2956,6 +2957,24 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			}),
 			&st::menuIconAdd);
 	};
+	const auto addCopyPollOptionAction = [&](HistoryItem *item) {
+		if (pollOptionLink.isEmpty() || !item) {
+			return;
+		}
+		if (const auto media = item->media()) {
+			if (const auto poll = media->poll()) {
+				if (const auto a = poll->answerByOption(pollOptionLink)) {
+					auto text = a->text;
+					_menu->addAction(
+						tr::lng_context_copy_poll_option(tr::now),
+						[text = TextForMimeData::Rich(std::move(text))] {
+							TextUtilities::SetClipboardText(text);
+						},
+						&st::menuIconCopy);
+				}
+			}
+		}
+	};
 	const auto lnkPhoto = link
 		? reinterpret_cast<PhotoData*>(
 			link->property(kPhotoLinkMediaProperty).toULongLong())
@@ -2968,6 +2987,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		const auto item = _dragStateItem;
 		const auto itemId = item ? item->fullId() : FullMsgId();
 		addReplyAction(item);
+		addCopyPollOptionAction(item);
 
 		if (isUponSelected > 0) {
 			const auto selectedText = getSelectedText();
@@ -3106,6 +3126,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		}
 		if (isUponSelected > 0) {
 			addReplyAction(item);
+			addCopyPollOptionAction(item);
 			const auto selectedText = getSelectedText();
 			if (!hasCopyRestrictionForSelected() && !selectedText.empty()) {
 				_menu->addAction(
@@ -3129,6 +3150,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			addItemActions(item, item);
 		} else {
 			addReplyAction(partItemOrLeader);
+			addCopyPollOptionAction(partItemOrLeader);
 			addTodoListAction(partItemOrLeader);
 			addItemActions(item, albumPartItem);
 			if (item && !isUponSelected) {

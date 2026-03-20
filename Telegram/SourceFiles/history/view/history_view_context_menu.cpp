@@ -63,6 +63,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_photo_media.h"
 #include "data/data_document.h"
 #include "data/data_media_types.h"
+#include "data/data_poll.h"
 #include "data/data_forum_topic.h"
 #include "data/data_session.h"
 #include "data/data_stories.h"
@@ -1307,6 +1308,25 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 		st::popupMenuWithIcons);
 
 	AddReplyToMessageAction(result, request, list);
+	if (const auto pollOption = link
+		? link->property(kPollOptionProperty).toByteArray()
+		: QByteArray(); !pollOption.isEmpty()) {
+		if (item) {
+			if (const auto media = item->media()) {
+				if (const auto poll = media->poll()) {
+					if (const auto a = poll->answerByOption(pollOption)) {
+						auto text = a->text;
+						result->addAction(
+							tr::lng_context_copy_poll_option(tr::now),
+							[text = TextForMimeData::Rich(std::move(text))] {
+								TextUtilities::SetClipboardText(text);
+							},
+							&st::menuIconCopy);
+					}
+				}
+			}
+		}
+	}
 	AddTodoListAction(result, request, list);
 
 	if (request.overSelection
