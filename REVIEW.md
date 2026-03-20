@@ -270,6 +270,78 @@ if (!document || duration <= 0) {
 }
 ```
 
+## Don't wrap tr:: lang keys in rpl::single
+
+`tr::lng_*()` (without `tr::now`) already returns an `rpl::producer`. Wrapping a snapshot in `rpl::single()` defeats live language switching — the value is captured once and never updates. Just call the lang key without `tr::now`.
+
+```cpp
+// BAD - frozen snapshot, won't update on language change:
+rpl::single(tr::lng_ai_compose_title(tr::now))
+
+// GOOD - live producer that updates automatically:
+tr::lng_ai_compose_title()
+```
+
+## Extract method definitions from local classes
+
+When defining local classes (e.g. in anonymous namespaces), keep the class body compact — only declarations. Put all method definitions **after** all class definitions. This avoids unnecessary nesting inside the class body and keeps methods at the same indentation level as free functions.
+
+```cpp
+// BAD - methods defined inline, adding a nesting level:
+class MyWidget final : public Ui::RpWidget {
+public:
+    MyWidget(QWidget *parent)
+    : RpWidget(parent) {
+        // ... 20 lines of setup
+    }
+
+    void setActive(bool active) {
+        _active = active;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *e) override {
+        // ... 30 lines of painting
+    }
+
+private:
+    bool _active = false;
+
+};
+
+// GOOD - class is a compact declaration, methods defined after:
+class MyWidget final : public Ui::RpWidget {
+public:
+    MyWidget(QWidget *parent, QString label);
+
+    void setActive(bool active);
+
+protected:
+    void paintEvent(QPaintEvent *e) override;
+
+private:
+    bool _active = false;
+
+};
+
+MyWidget::MyWidget(QWidget *parent, QString label)
+: RpWidget(parent) {
+    // ... 20 lines of setup
+}
+
+void MyWidget::setActive(bool active) {
+    _active = active;
+    update();
+}
+
+void MyWidget::paintEvent(QPaintEvent *e) {
+    // ... 30 lines of painting
+}
+```
+
+When there are multiple local classes, put **all class definitions first**, then **all method definitions** after. This keeps the declarations readable as an overview.
+
 ## Static member functions use PascalCase
 
 Non-static member functions use camelCase (`startBatch`, `finalize`). Static member functions use PascalCase (`ShouldTrack`, `Parse`, `Create`), matching the convention for free functions.
