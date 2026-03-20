@@ -88,14 +88,16 @@ private:
 	[[nodiscard]] bool canSendVotes() const;
 	void updateDescription();
 	void updateAttachedMedia();
-	[[nodiscard]] int countTopContentSkip() const;
-	[[nodiscard]] int countTopMediaHeight() const;
-	[[nodiscard]] int countAttachHeight() const;
+	[[nodiscard]] int countTopContentSkip(int pollWidth = 0) const;
+	[[nodiscard]] int countTopMediaHeight(int pollWidth = 0) const;
+	[[nodiscard]] int countAttachHeight(int pollWidth = 0) const;
 	[[nodiscard]] QRect countTopMediaRect(int top) const;
 	[[nodiscard]] Ui::BubbleRounding topMediaRounding() const;
 	void validateTopMediaCache(QSize size) const;
 	[[nodiscard]] int countDescriptionHeight(int innerWidth) const;
-	[[nodiscard]] int countQuestionTop(int innerWidth) const;
+	[[nodiscard]] int countQuestionTop(
+		int innerWidth,
+		int pollWidth = 0) const;
 	[[nodiscard]] uint16 solutionSelectionLength() const;
 	[[nodiscard]] TextSelection toSolutionSelection(
 		TextSelection selection) const;

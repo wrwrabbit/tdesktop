@@ -512,7 +512,7 @@ QSize Poll::countOptimalSize() {
 	const auto bottomButtonHeight = inlineFooter()
 		? 0
 		: st::historyPollBottomButtonSkip;
-	auto minHeight = countQuestionTop(maxWidth - paddings)
+	auto minHeight = countQuestionTop(maxWidth - paddings, maxWidth)
 		+ _question.minHeight()
 		+ st::historyPollSubtitleSkip
 		+ st::msgDateFont->height
@@ -614,7 +614,7 @@ QSize Poll::countCurrentSize(int newWidth) {
 	const auto bottomButtonHeight = inlineFooter()
 		? 0
 		: st::historyPollBottomButtonSkip;
-	auto newHeight = countQuestionTop(innerWidth)
+	auto newHeight = countQuestionTop(innerWidth, newWidth)
 		+ _question.countHeight(innerWidth)
 		+ st::historyPollSubtitleSkip
 		+ st::msgDateFont->height
@@ -855,25 +855,26 @@ void Poll::updateAttachedMedia() {
 	}
 }
 
-int Poll::countTopContentSkip() const {
-	return countTopMediaHeight()
+int Poll::countTopContentSkip(int pollWidth) const {
+	return countTopMediaHeight(pollWidth)
 		? st::historyPollMediaTopSkip
 		: isBubbleTop()
 		? st::historyPollQuestionTop
 		: (st::historyPollQuestionTop - st::msgFileTopMinus);
 }
 
-int Poll::countTopMediaHeight() const {
+int Poll::countTopMediaHeight(int pollWidth) const {
 	if (!_attachedMedia || !_attachedMedia->thumbnail) {
 		return 0;
 	}
 	if (_attachedMediaAttach) {
-		return countAttachHeight();
+		return countAttachHeight(pollWidth);
 	}
 	if (_attachedMedia->kind == PollThumbnailKind::Photo
 		&& !_attachedMedia->photoSize.isEmpty()) {
+		const auto w = pollWidth > 0 ? pollWidth : width();
 		const auto sideSkip = st::historyPollMediaSideSkip;
-		const auto availableWidth = width() - 2 * sideSkip;
+		const auto availableWidth = w - 2 * sideSkip;
 		const auto &original = _attachedMedia->photoSize;
 		return std::max(
 			1,
@@ -882,13 +883,14 @@ int Poll::countTopMediaHeight() const {
 	return st::historyPollMediaHeight;
 }
 
-int Poll::countAttachHeight() const {
+int Poll::countAttachHeight(int pollWidth) const {
 	if (!_attachedMediaAttach) {
 		return 0;
 	}
 	_attachedMediaAttach->initDimensions();
+	const auto w = pollWidth > 0 ? pollWidth : width();
 	const auto sideSkip = st::historyPollMediaSideSkip;
-	const auto innerWidth = width() - 2 * sideSkip;
+	const auto innerWidth = w - 2 * sideSkip;
 	return _attachedMediaAttach->resizeGetHeight(
 		std::max(1, innerWidth));
 }
@@ -997,9 +999,9 @@ int Poll::countSolutionBlockHeight(int innerWidth) const {
 	return height;
 }
 
-int Poll::countQuestionTop(int innerWidth) const {
-	auto result = countTopContentSkip();
-	if (const auto mediaHeight = countTopMediaHeight()) {
+int Poll::countQuestionTop(int innerWidth, int pollWidth) const {
+	auto result = countTopContentSkip(pollWidth);
+	if (const auto mediaHeight = countTopMediaHeight(pollWidth)) {
 		result += mediaHeight + st::historyPollMediaSkip;
 	}
 	if (const auto descriptionHeight = countDescriptionHeight(innerWidth)) {
