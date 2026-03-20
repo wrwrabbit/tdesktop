@@ -24,6 +24,7 @@ bool ScheduleSwitchToPortable();
 bool ScheduleSwitchToHome();
 bool ScheduleSwitchToHomeWrittenTo(const QString &newExeDir);
 bool ScheduleSwitchToCustom(const QString &targetDir);
+bool ScheduleSwitchToCustomWrittenTo(const QString &newExeDir);
 
 bool ApplyPendingSwitch();
 

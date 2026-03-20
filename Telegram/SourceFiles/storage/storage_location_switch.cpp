@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QDir>
 #include <QtCore/QDirIterator>
 #include <QtCore/QFile>
+#include <QtCore/QThread>
 
 namespace Storage {
 namespace {
@@ -34,6 +35,9 @@ namespace {
 		it.next();
 		const auto srcFile = it.filePath();
 		const auto relative = sourceDir.relativeFilePath(srcFile);
+		if (relative == u"working"_q) {
+			continue;
+		}
 		const auto dstFile = target + '/' + relative;
 		QDir().mkpath(QFileInfo(dstFile).absolutePath());
 		QFile::remove(dstFile);
@@ -88,10 +92,10 @@ bool IsCurrentlyInHome() {
 }
 
 TdataLocation CurrentTdataLocation() {
-	if (IsCurrentlyPortable()) {
-		return TdataLocation::Portable;
-	} else if (IsCurrentlyInHome()) {
+	if (IsCurrentlyInHome()) {
 		return TdataLocation::Home;
+	} else if (IsCurrentlyPortable()) {
+		return TdataLocation::Portable;
 	}
 	return TdataLocation::Custom;
 }
@@ -140,6 +144,23 @@ bool ScheduleSwitchToHomeWrittenTo(const QString &newExeDir) {
 
 bool ScheduleSwitchToCustom(const QString &targetDir) {
 	return WriteSwitchFlag(cWorkingDir(), targetDir);
+}
+
+bool ScheduleSwitchToCustomWrittenTo(const QString &newExeDir) {
+	const auto target = QDir::cleanPath(newExeDir);
+	QDir().mkpath(target);
+	const auto flagPath = target + u"/tdata_switch_pending"_q;
+	const auto content = (cWorkingDir() + '|' + newExeDir).toUtf8();
+	LOG(("LocationSwitch: ScheduleSwitchToCustomWrittenTo newExeDir='%1' flag='%2'").arg(
+		newExeDir, flagPath));
+	QFile f(flagPath);
+	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		LOG(("LocationSwitch: failed to write flag to '%1': %2").arg(flagPath, f.errorString()));
+		return false;
+	}
+	f.write(content);
+	LOG(("LocationSwitch: wrote flag to '%1'").arg(flagPath));
+	return true;
 }
 
 bool ApplyPendingSwitch() {
@@ -219,8 +240,29 @@ bool ApplyPendingSwitch() {
 			u".ptg_location_prompt_shown"_q,
 			cExeName(),
 		}) {
-			const auto removed = QFile::remove(cleanSource + '/' + name);
+			const auto filePath = cleanSource + '/' + name;
+			auto removed = false;
+			for (int i = 0; !removed && i < 8; ++i) {
+				removed = QFile::remove(filePath);
+				if (!removed && i + 1 < 8) {
+					QThread::msleep(150);
+				}
+			}
 			LOG(("LocationSwitch: cleanup '%1': %2").arg(name, Logs::b(removed)));
+		}
+		const auto workingPath = sourceTdata + u"/working"_q;
+		auto workingRemoved = false;
+		for (int i = 0; !workingRemoved && i < 8; ++i) {
+			workingRemoved = QFile::remove(workingPath)
+				|| QDir(workingPath).removeRecursively();
+			if (!workingRemoved && i + 1 < 8) {
+				QThread::msleep(150);
+			}
+		}
+		LOG(("LocationSwitch: cleanup 'tdata/working': %1").arg(Logs::b(workingRemoved)));
+		if (QDir(sourceTdata).isEmpty()) {
+			const auto tdirRemoved = QDir().rmdir(sourceTdata);
+			LOG(("LocationSwitch: cleanup 'tdata' dir: %1").arg(Logs::b(tdirRemoved)));
 		}
 	}
 

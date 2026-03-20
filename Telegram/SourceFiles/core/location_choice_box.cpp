@@ -26,9 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QProcess>
 #include <QtWidgets/QFileDialog>
 
-#ifdef Q_OS_WIN
-#include "platform/win/specific_win.h"
-#endif // Q_OS_WIN
+#include "platform/platform_specific.h"
 
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
@@ -146,10 +144,12 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box) {
 			st::boxRowPadding);
 	}
 
+	auto isAlreadyInAppData = false;
 #ifdef Q_OS_WIN
-	if (!isSystemApp) {
-		const auto appDataPath = QDir(psAppDataPath()).absolutePath();
-
+	const auto appDataPath = QDir(psAppDataPath()).absolutePath();
+	isAlreadyInAppData = (QDir::cleanPath(QDir(cExeDir()).absolutePath()).toLower()
+		== QDir::cleanPath(appDataPath).toLower());
+	if (!isSystemApp && !isAlreadyInAppData) {
 		AddOptionCard(
 			layout,
 			tr::lng_ptg_location_card_appdata_title(tr::now),
@@ -162,14 +162,18 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box) {
 			},
 			tr::lng_ptg_location_card_appdata_btn(),
 			[=] {
+				const auto targetExists = QFile::exists(appDataPath + '/' + cExeName())
+					|| QDir(appDataPath + u"/tdata"_q).exists();
 				box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
 					confirm->setTitle(tr::lng_ptg_location_confirm_title());
 					confirm->addRow(object_ptr<Ui::FlatLabel>(
 						confirm,
-						tr::lng_ptg_location_confirm_text(
-							tr::now,
-							lt_path,
-							QDir::toNativeSeparators(appDataPath)),
+						targetExists
+							? tr::lng_ptg_location_confirm_overwrite(tr::now)
+							: tr::lng_ptg_location_confirm_text(
+								tr::now,
+								lt_path,
+								QDir::toNativeSeparators(appDataPath)),
 						st::boxLabel));
 					confirm->addButton(tr::lng_settings_save(), [=] {
 						confirm->closeBox();
@@ -270,19 +274,23 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box) {
 					}
 				}
 				box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
+					const auto targetExists = QFile::exists(cleanChosen + '/' + cExeName())
+						|| QDir(cleanChosen + u"/tdata"_q).exists();
 					confirm->setTitle(tr::lng_ptg_location_confirm_title());
 					confirm->addRow(object_ptr<Ui::FlatLabel>(
 						confirm,
-						tr::lng_ptg_location_confirm_text(
-							tr::now,
-							lt_path,
-							QDir::toNativeSeparators(cleanChosen)),
+						targetExists
+							? tr::lng_ptg_location_confirm_overwrite(tr::now)
+							: tr::lng_ptg_location_confirm_text(
+								tr::now,
+								lt_path,
+								QDir::toNativeSeparators(cleanChosen)),
 						st::boxLabel));
 					confirm->addButton(tr::lng_settings_save(), [=] {
 						confirm->closeBox();
 						box->closeBox();
 						if (TryCopyBinary(cleanChosen)) {
-							Storage::ScheduleSwitchToCustom(cleanChosen);
+							Storage::ScheduleSwitchToCustomWrittenTo(cleanChosen);
 							RelaunchFrom(cleanChosen + '/' + cExeName());
 						} else {
 							box->uiShow()->showToast(
@@ -306,11 +314,16 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box) {
 			},
 			tr::lng_ptg_location_card_data_home_btn(),
 			[=] {
+				const auto targetTdataExists = QDir(
+					QDir::cleanPath(psAppDataPath()) + u"/tdata"_q
+				).exists();
 				box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
 					confirm->setTitle(tr::lng_ptg_location_confirm_title());
 					confirm->addRow(object_ptr<Ui::FlatLabel>(
 						confirm,
-						tr::lng_ptg_location_confirm_text_simple(tr::now),
+						targetTdataExists
+							? tr::lng_ptg_location_confirm_overwrite_tdata(tr::now)
+							: tr::lng_ptg_location_confirm_text_simple(tr::now),
 						st::boxLabel));
 					confirm->addButton(tr::lng_settings_save(), [=] {
 						confirm->closeBox();
@@ -323,7 +336,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box) {
 			});
 	}
 
-	if (tdataLocation == Storage::TdataLocation::Home && !isSystemApp) {
+	if (tdataLocation == Storage::TdataLocation::Home && !isAlreadyInAppData && !isSystemApp) {
 		AddOptionCard(
 			layout,
 			tr::lng_ptg_location_card_portable_title(tr::now),

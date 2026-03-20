@@ -7739,6 +7739,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_ptg_location_confirm_title" = "Confirm move";
 "lng_ptg_location_confirm_text" = "Telegram will restart and move to: {path}";
 "lng_ptg_location_confirm_text_simple" = "Telegram will restart to apply the change.";
+"lng_ptg_location_confirm_overwrite_tdata" = "There is already Telegram data at the destination. It will be merged with your current data. Continue?";
+"lng_ptg_location_confirm_overwrite" = "Files already exist at the destination. They will be overwritten. Continue?";
 "lng_ptg_location_error_copy" = "Could not copy Telegram to the selected folder. Please try again or choose a different folder.";
 "lng_ptg_location_error_folder" = "Cannot move Telegram to that folder. Please choose a different location.";
 "lng_ptg_location_same_dir" = "Telegram is already running from that folder.";
