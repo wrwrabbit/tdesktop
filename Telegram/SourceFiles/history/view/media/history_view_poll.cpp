@@ -1331,6 +1331,13 @@ void Poll::updateVotes() {
 			for (auto &answer : _answers) {
 				answer.selected = false;
 			}
+			if (_votedFromHere
+				&& (_flags & PollData::Flag::HideResultsUntilClose)
+				&& !(_flags & PollData::Flag::Closed)) {
+				_parent->delegate()->elementShowTooltip(
+					{ tr::lng_polls_results_after_close(tr::now) },
+					[] {});
+			}
 		} else {
 			_votedFromHere = false;
 			_hasSelected = false;

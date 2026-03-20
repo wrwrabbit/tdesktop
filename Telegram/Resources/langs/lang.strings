@@ -6853,6 +6853,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_polls_results_in_days#other" = "results in {count} days";
 "lng_polls_ends_in_time" = "ends in {time}";
 "lng_polls_results_in_time" = "results in {time}";
+"lng_polls_results_after_close" = "Results will appear after the poll ends.";
 "lng_polls_retract" = "Retract vote";
 "lng_polls_stop" = "Stop poll";
 "lng_polls_stop_warning" = "If you stop this poll now, nobody will be able to vote in it anymore. This action cannot be undone.";
