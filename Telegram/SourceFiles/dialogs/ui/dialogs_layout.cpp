@@ -184,7 +184,7 @@ int PaintBadges(
 		st.muted = badgesState.unreadMuted;
 		const auto counter = FormatUnreadCounter(
 			badgesState.unreadCounter,
-			badgesState.mention || badgesState.reaction,
+			badgesState.mention || badgesState.reaction || badgesState.poll,
 			narrow);
 		const auto badge = PaintUnreadBadge(p, counter, right, top, st);
 		right -= badge.width() + st.padding;
@@ -216,6 +216,22 @@ int PaintBadges(
 			badgesState.mention
 				? st::dialogsUnreadMention
 				: st::dialogsUnreadReaction,
+			st.active,
+			st.selected).paintInCenter(p, badge);
+		right -= badge.width() + st.padding + st::dialogsUnreadPadding;
+	}
+	if (badgesState.poll) {
+		UnreadBadgeStyle st;
+		st.sizeId = UnreadBadgeSize::ReactionInDialogs;
+		st.active = context.active;
+		st.selected = context.selected;
+		st.muted = badgesState.pollMuted;
+		st.padding = 0;
+		st.textTop = 0;
+		const auto counter = QString();
+		const auto badge = PaintUnreadBadge(p, counter, right, top, st);
+		ThreeStateIcon(
+			st::dialogsUnreadPoll,
 			st.active,
 			st.selected).paintInCenter(p, badge);
 		right -= badge.width() + st.padding + st::dialogsUnreadPadding;

@@ -586,6 +586,11 @@ dialogsUnreadReaction: ThreeStateIcon {
 	over: icon{{ "dialogs/dialogs_reaction", dialogsUnreadFgOver }};
 	active: icon{{ "dialogs/dialogs_reaction", dialogsUnreadFgActive }};
 }
+dialogsUnreadPoll: ThreeStateIcon {
+	icon: icon{{ "poll/filled/filled_chatlist_poll-18x18", dialogsUnreadFg }};
+	over: icon{{ "poll/filled/filled_chatlist_poll-18x18", dialogsUnreadFgOver }};
+	active: icon{{ "poll/filled/filled_chatlist_poll-18x18", dialogsUnreadFgActive }};
+}
 
 downloadBarHeight: 46px;
 downloadArrow: icon{{ "fast_to_original", menuIconFg }};
