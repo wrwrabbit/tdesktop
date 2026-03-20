@@ -69,7 +69,8 @@ constexpr auto kNonExpandedLinesLimit = 5;
 	return result;
 }
 
-[[nodiscard]] QImage MakeTaskDoneImage() {
+template <typename PaintShape>
+[[nodiscard]] QImage MakeCheckedImage(PaintShape paintShape) {
 	const auto white = QColor(255, 255, 255);
 	const auto black = QColor(0, 0, 0);
 
@@ -88,11 +89,7 @@ constexpr auto kNonExpandedLinesLimit = 5;
 
 	const auto rect = QRectF(line, line, diameter, diameter).marginsRemoved(
 		QMarginsF(line / 2., line / 2., line / 2., line / 2.));
-	auto pen = QPen(white);
-	pen.setWidth(line);
-	p.setPen(pen);
-	p.setBrush(white);
-	p.drawEllipse(rect);
+	paintShape(p, rect);
 	const auto &icon = st::historyPollInChoiceRight;
 	icon.paint(
 		p,
@@ -103,6 +100,28 @@ constexpr auto kNonExpandedLinesLimit = 5;
 	p.end();
 
 	return style::colorizeImage(result, white);
+}
+
+[[nodiscard]] QImage MakeTaskDoneImage() {
+	return MakeCheckedImage([](QPainter &p, QRectF rect) {
+		const auto white = QColor(255, 255, 255);
+		const auto line = st::historyPollRadio.thickness;
+		auto pen = QPen(white);
+		pen.setWidth(line);
+		p.setPen(pen);
+		p.setBrush(white);
+		p.drawEllipse(rect);
+	});
+}
+
+[[nodiscard]] QImage MakePollAnswerImage() {
+	return MakeCheckedImage([](QPainter &p, QRectF rect) {
+		const auto white = QColor(255, 255, 255);
+		const auto line = st::historyPollRadio.thickness;
+		p.setPen(Qt::NoPen);
+		p.setBrush(white);
+		p.drawRoundedRect(rect, line * 2, line * 2);
+	});
 }
 
 } // namespace
@@ -384,7 +403,7 @@ void Reply::update(
 			})).append(task->text)
 		: pollAnswer
 		? Ui::Text::Colorized(helper.image({
-			.image = MakeTaskImage(),
+			.image = MakePollAnswerImage(),
 			.margin = QMargins(0, st::lineWidth, st::lineWidth, 0),
 		})).append(pollAnswer->text)
 		: (message && (fields.quote.empty() || !fields.manualQuote))
