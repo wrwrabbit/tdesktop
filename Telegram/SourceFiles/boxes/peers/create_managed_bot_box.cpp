@@ -35,11 +35,13 @@ void CreateManagedBotBox(
 		QString checkUsername;
 		QString errorText;
 		QString goodText;
+		bool created = false;
 	};
 	const auto show = descriptor.show;
 	const auto session = &show->session();
 	const auto viaDeeplink = descriptor.viaDeeplink;
 	const auto done = std::move(descriptor.done);
+	const auto cancelled = std::move(descriptor.cancelled);
 	const auto manager = descriptor.manager;
 
 	const auto api = box->lifetime().make_state<MTP::Sender>(
@@ -53,17 +55,15 @@ void CreateManagedBotBox(
 		box->closeBox();
 	});
 
-	if (manager) {
-		auto userpic = object_ptr<Ui::UserpicButton>(
-			box,
-			manager,
-			st::defaultUserpicButton);
-		userpic->setAttribute(Qt::WA_TransparentForMouseEvents);
-		box->addRow(
-			std::move(userpic),
-			st::boxRowPadding + st::createBotUserpicPadding,
-			style::al_top);
-	}
+	auto userpic = object_ptr<Ui::UserpicButton>(
+		box,
+		manager,
+		st::defaultUserpicButton);
+	userpic->setAttribute(Qt::WA_TransparentForMouseEvents);
+	box->addRow(
+		std::move(userpic),
+		st::boxRowPadding + st::createBotUserpicPadding,
+		style::al_top);
 
 	box->addRow(
 		object_ptr<Ui::FlatLabel>(
@@ -73,19 +73,17 @@ void CreateManagedBotBox(
 		st::boxRowPadding + st::createBotTitlePadding,
 		style::al_top);
 
-	if (manager) {
-		box->addRow(
-			object_ptr<Ui::FlatLabel>(
-				box,
-				tr::lng_create_bot_subtitle(
-					lt_bot,
-					rpl::single(tr::bold(manager->name())),
-					tr::rich),
-				st::createBotCenteredText),
-			st::boxRowPadding + st::createBotSubtitlePadding,
-			style::al_top
-		)->setTryMakeSimilarLines(true);
-	}
+	box->addRow(
+		object_ptr<Ui::FlatLabel>(
+			box,
+			tr::lng_create_bot_subtitle(
+				lt_bot,
+				rpl::single(tr::bold(manager->name())),
+				tr::rich),
+			st::createBotCenteredText),
+		st::boxRowPadding + st::createBotSubtitlePadding,
+		style::al_top
+	)->setTryMakeSimilarLines(true);
 
 	const auto name = box->addRow(object_ptr<Ui::InputField>(
 		box,
@@ -100,11 +98,11 @@ void CreateManagedBotBox(
 	const auto botSuffixText = u"bot"_q;
 
 	auto initialUsername = descriptor.suggestedUsername;
-	if (initialUsername.startsWith(botPrefixText)) {
+	while (initialUsername.startsWith(botPrefixText)) {
 		initialUsername.remove(0, botPrefixText.size());
 	}
 	if (initialUsername.endsWith(botSuffixText, Qt::CaseInsensitive)) {
-		initialUsername.chop(3);
+		initialUsername.chop(botSuffixText.size());
 	}
 
 	const auto fieldSt = box->lifetime().make_state<style::InputField>(
@@ -201,10 +199,10 @@ void CreateManagedBotBox(
 		api->request(base::take(state->checkRequestId)).cancel();
 
 		auto raw = username->getLastText().trimmed();
-		if (raw.startsWith(QChar('@'))) {
-			raw = raw.mid(1);
+		while (raw.startsWith(botPrefixText)) {
+			raw = raw.mid(botPrefixText.size());
 		}
-		const auto value = raw + u"bot"_q;
+		const auto value = raw + botSuffixText;
 		if (value.size() < Ui::EditPeer::kMinUsernameLength) {
 			return;
 		}
@@ -252,7 +250,7 @@ void CreateManagedBotBox(
 			}
 		}
 
-		if ((value + u"bot"_q).size() < Ui::EditPeer::kMinUsernameLength) {
+		if ((value + botSuffixText).size() < Ui::EditPeer::kMinUsernameLength) {
 			setError(tr::lng_create_bot_username_too_short(tr::now));
 			return;
 		}
@@ -273,10 +271,10 @@ void CreateManagedBotBox(
 		}
 
 		auto rawUsername = username->getLastText().trimmed();
-		if (rawUsername.startsWith(QChar('@'))) {
-			rawUsername = rawUsername.mid(1);
+		while (rawUsername.startsWith(botPrefixText)) {
+			rawUsername = rawUsername.mid(botPrefixText.size());
 		}
-		const auto usernameValue = rawUsername + u"bot"_q;
+		const auto usernameValue = rawUsername + botSuffixText;
 		if (rawUsername.isEmpty()) {
 			username->showError();
 			return;
@@ -289,19 +287,16 @@ void CreateManagedBotBox(
 
 		using Flag = MTPbots_CreateBot::Flag;
 		const auto flags = viaDeeplink ? Flag::f_via_deeplink : Flag(0);
-		const auto managerInput = manager
-			? manager->inputUser()
-			: MTP_inputUserEmpty();
-
 		const auto weak = base::make_weak(box);
 		state->createRequestId = api->request(MTPbots_CreateBot(
 			MTP_flags(flags),
 			MTP_string(nameValue),
 			MTP_string(usernameValue),
-			managerInput
+			manager->inputUser()
 		)).done([=](const MTPUser &result) {
 			state->createRequestId = 0;
 			const auto user = session->data().processUser(result);
+			state->created = true;
 			if (done) {
 				done(user);
 			}
@@ -339,6 +334,12 @@ void CreateManagedBotBox(
 	if (!descriptor.suggestedUsername.isEmpty()) {
 		usernameChanged();
 	}
+
+	box->boxClosing() | rpl::on_next([=] {
+		if (!state->created && cancelled) {
+			cancelled();
+		}
+	}, box->lifetime());
 }
 
 void ShowCreateManagedBotBox(CreateManagedBotDescriptor &&descriptor) {

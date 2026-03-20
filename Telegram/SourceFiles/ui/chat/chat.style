@@ -1552,8 +1552,8 @@ newThreadAboutIconOuter: 60px;
 newThreadAboutIcon: icon{{ "chat/new_thread-40x40", windowFgActive }};
 
 managedBotCodeIcon: icon{{ "chat/code_tags", windowFg }};
-managedBotImageWidth: 240px;
-managedBotImageHeight: 120px;
+managedBotImageWidth: 280px;
+managedBotImageHeight: 140px;
 
 stakeBox: Box(defaultBox) {
 	buttonPadding: margins(24px, 12px, 24px, 24px);

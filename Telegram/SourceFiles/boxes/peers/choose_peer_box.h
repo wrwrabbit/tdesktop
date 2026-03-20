@@ -26,10 +26,12 @@ void ShowChoosePeerBox(
 	not_null<Window::SessionNavigation*> navigation,
 	not_null<UserData*> bot,
 	RequestPeerQuery query,
-	Fn<void(std::vector<not_null<PeerData*>>)> chosen);
+	Fn<void(std::vector<not_null<PeerData*>>)> chosen,
+	Fn<void()> cancelled = nullptr);
 
 void ShowChoosePeerBox(
 	std::shared_ptr<Main::SessionShow> show,
 	not_null<UserData*> bot,
 	RequestPeerQuery query,
-	Fn<void(std::vector<not_null<PeerData*>>)> chosen);
+	Fn<void(std::vector<not_null<PeerData*>>)> chosen,
+	Fn<void()> cancelled = nullptr);

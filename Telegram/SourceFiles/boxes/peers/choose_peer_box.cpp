@@ -503,19 +503,22 @@ void ShowChoosePeerBox(
 		not_null<Window::SessionNavigation*> navigation,
 		not_null<UserData*> bot,
 		RequestPeerQuery query,
-		Fn<void(std::vector<not_null<PeerData*>>)> chosen) {
+		Fn<void(std::vector<not_null<PeerData*>>)> chosen,
+		Fn<void()> cancelled) {
 	ShowChoosePeerBox(
 		navigation->uiShow(),
 		bot,
 		query,
-		std::move(chosen));
+		std::move(chosen),
+		std::move(cancelled));
 }
 
 void ShowChoosePeerBox(
 		std::shared_ptr<Main::SessionShow> show,
 		not_null<UserData*> bot,
 		RequestPeerQuery query,
-		Fn<void(std::vector<not_null<PeerData*>>)> chosen) {
+		Fn<void(std::vector<not_null<PeerData*>>)> chosen,
+		Fn<void()> cancelled) {
 	const auto session = &show->session();
 	const auto needCommonGroups = query.isBotParticipant
 		&& (query.type == RequestPeerQuery::Type::Group)
@@ -524,14 +527,16 @@ void ShowChoosePeerBox(
 		const auto weak = std::weak_ptr(show);
 		session->api().requestBotCommonGroups(bot, [=] {
 			if (const auto strong = weak.lock()) {
-				ShowChoosePeerBox(strong, bot, query, chosen);
+				ShowChoosePeerBox(strong, bot, query, chosen, cancelled);
 			}
 		});
 		return;
 	}
 	const auto weak = std::make_shared<base::weak_qptr<Ui::BoxContent>>();
+	const auto sent = std::make_shared<bool>(false);
 	auto callback = [=, done = std::move(chosen)](
 			std::vector<not_null<PeerData*>> peers) {
+		*sent = true;
 		done(std::move(peers));
 		if (const auto strong = weak->get()) {
 			strong->closeBox();
@@ -565,4 +570,11 @@ void ShowChoosePeerBox(
 	*weak = show->show(Box<PeerListBox>(
 		std::move(controller),
 		std::move(initBox)));
+	if (const auto strong = weak->get()) {
+		strong->boxClosing() | rpl::on_next([=] {
+			if (!*sent && cancelled) {
+				cancelled();
+			}
+		}, strong->lifetime());
+	}
 }

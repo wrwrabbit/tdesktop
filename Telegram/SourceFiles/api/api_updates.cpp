@@ -2111,18 +2111,6 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 		}
 	} break;
 
-	case mtpc_updateManagedBot: {
-		const auto &d = update.c_updateManagedBot();
-		if (const auto user = session().data().userLoaded(
-				UserId(d.vuser_id().v))) {
-			session().api().requestFullPeer(user);
-		}
-		if (const auto bot = session().data().userLoaded(
-				UserId(d.vbot_id().v))) {
-			session().api().requestFullPeer(bot);
-		}
-	} break;
-
 	case mtpc_updatePendingJoinRequests: {
 		const auto &d = update.c_updatePendingJoinRequests();
 		if (const auto peer = session().data().peerLoaded(peerFromMTP(d.vpeer()))) {

@@ -19,11 +19,12 @@ class GenericBox;
 
 struct CreateManagedBotDescriptor {
 	std::shared_ptr<Main::SessionShow> show;
-	UserData *manager = nullptr;
+	not_null<UserData*> manager;
 	QString suggestedName;
 	QString suggestedUsername;
 	bool viaDeeplink = false;
 	Fn<void(not_null<UserData*>)> done;
+	Fn<void()> cancelled;
 };
 
 void CreateManagedBotBox(

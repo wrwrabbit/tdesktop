@@ -12,7 +12,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_id.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "ui/toast/toast.h"
 #include "window/window_session_controller.h"
 
 namespace Core::DeepLinks {
@@ -78,9 +80,19 @@ Result ShowNewBot(const Context &ctx) {
 					.suggestedName = title,
 					.suggestedUsername = username,
 					.viaDeeplink = true,
-					.done = [weak](not_null<UserData*> createdBot) {
+					.done = [weak, managerBot](not_null<UserData*> createdBot) {
 						if (const auto strong = weak.get()) {
 							strong->showPeerHistory(createdBot);
+							strong->showToast({
+								.title = tr::lng_managed_bot_created_title(
+									tr::now,
+									lt_name,
+									createdBot->name()),
+								.text = { tr::lng_managed_bot_created_text(
+									tr::now,
+									lt_parent_name,
+									managerBot->name()) },
+							});
 						}
 					},
 				});

@@ -585,6 +585,17 @@ void ActivateBotCommand(ClickHandlerContext context, int row, int column) {
 				).done([=](const MTPUpdates &result) {
 					peer->session().api().applyUpdates(result);
 				}).send();
+				controller->showPeerHistory(createdBot);
+				controller->showToast({
+					.title = tr::lng_managed_bot_created_title(
+						tr::now,
+						lt_name,
+						createdBot->name()),
+					.text = { tr::lng_managed_bot_created_text(
+						tr::now,
+						lt_parent_name,
+						bot->name()) },
+				});
 			},
 		});
 	} break;

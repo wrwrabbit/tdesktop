@@ -789,11 +789,22 @@ bool AboutView::refresh() {
 		}
 		setItem(makeNewBotThread(), nullptr);
 		return true;
-	} else if (user->botManagerId() && info->description.isEmpty()) {
+	} else if (user->botManagerId()
+			&& info
+			&& info->description.isEmpty()
+			&& info->canEditInformation
+			&& _history->isEmpty()
+			&& !_history->lastMessage()) {
 		if (_item) {
 			return false;
 		}
 		setItem(makeManagedBotInfo(user), nullptr);
+		_history->session().data().newItemAdded(
+		) | rpl::on_next([=](not_null<HistoryItem*> item) {
+			if (item->history() == _history) {
+				_destroyRequests.fire({});
+			}
+		}, lifetime());
 		return true;
 	}
 	const auto version = info->descriptionVersion;
@@ -1179,13 +1190,28 @@ AdminLog::OwnedItem AboutView::makeManagedBotInfo(
 	const auto parentName = managerUser
 		? managerUser->name()
 		: QString();
-	const auto text = tr::lng_managed_bot_ready(
+	auto text = tr::lng_managed_bot_ready(
 		tr::now,
 		lt_name,
 		tr::bold(user->name()),
 		lt_parent,
 		tr::bold(parentName),
 		tr::rich);
+
+	const auto url = u"internal:edit_peer/"_q
+		+ QString::number(user->id.value);
+	text.append(u"\n\n"_q).append(tr::lng_managed_bot_edit_photo(
+		tr::now,
+		lt_link,
+		Ui::Text::Wrapped(
+			tr::lng_managed_bot_edit_photo_link(
+				tr::now,
+				lt_arrow,
+				Ui::Text::IconEmoji(&st::textMoreIconEmoji),
+				tr::rich),
+			EntityType::CustomUrl,
+			url),
+		tr::rich));
 
 	return makeAboutSimple(text, nullptr, photo);
 }

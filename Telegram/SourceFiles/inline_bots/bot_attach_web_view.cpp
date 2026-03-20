@@ -2033,11 +2033,26 @@ void WebViewInstance::botRequestChat(
 							.value_or_empty()),
 					.done = [=](not_null<UserData*> createdBot) {
 						sendPeers({ createdBot });
+						show->showBox(Ui::MakeInformBox({
+							.text = tr::lng_managed_bot_created_text(
+								tr::now,
+								lt_parent_name,
+								bot->name()),
+							.title = tr::lng_managed_bot_created_title(
+								tr::now,
+								lt_name,
+								createdBot->name()),
+						}));
+					},
+					.cancelled = [=] {
+						callback(u"USER_DECLINED"_q);
 					},
 				});
 			}, [&](const auto &) {
 				const auto query = RequestPeerQueryFromTL(data);
-				ShowChoosePeerBox(show, bot, query, sendPeers);
+				ShowChoosePeerBox(show, bot, query, sendPeers, [=] {
+					callback(u"USER_DECLINED"_q);
+				});
 			});
 		}, [&](const auto &) {
 			callback(u"UNSUPPORTED_BUTTON_TYPE"_q);

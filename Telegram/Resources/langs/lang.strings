@@ -2557,6 +2557,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_create_bot_button" = "Create";
 "lng_managed_bot_label" = "{icon} Created and managed by {bot}.";
 "lng_managed_bot_ready" = "**{name}** is ready!\n\nClick **Start** below to test your new chatbot. Its behavior is defined by **{parent}**.";
+"lng_managed_bot_created_title" = "{name} created!";
+"lng_managed_bot_created_text" = "{parent_name} will manage this bot for you.";
+"lng_managed_bot_edit_photo" = "You can edit your bot's profile picture {link}";
+"lng_managed_bot_edit_photo_link" = "here {arrow}";
 
 "lng_stake_game_title" = "Emoji Stake";
 "lng_stake_game_beta" = "Beta";

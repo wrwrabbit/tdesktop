@@ -2400,6 +2400,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::fill() {
 					const auto parts = (info->hasMainApp && !info->canManageEmojiStatus)
 						? RectPart::Bottom
 						: (RectPart::Top | RectPart::Bottom);
+					Ui::AddSkip(_wrap);
 					const auto divider = Ui::AddDividerText(
 						_wrap,
 						tr::lng_managed_bot_label(

@@ -1175,6 +1175,20 @@ bool ShowCommonGroups(
 	return true;
 }
 
+bool EditPeer(
+		Window::SessionController *controller,
+		const Match &match,
+		const QVariant &context) {
+	if (!controller) {
+		return false;
+	}
+	const auto peerId = PeerId(match->captured(1).toULongLong());
+	if (const auto peer = controller->session().data().peerLoaded(peerId)) {
+		controller->showEditPeerBox(peer);
+	}
+	return true;
+}
+
 bool ShowStarsExamples(
 		Window::SessionController *controller,
 		const Match &match,
@@ -1786,6 +1800,10 @@ const std::vector<LocalUrlHandler> &InternalUrlHandlers() {
 		{
 			u"^common_groups/([0-9]+)$"_q,
 			ShowCommonGroups,
+		},
+		{
+			u"^edit_peer/([0-9]+)$"_q,
+			EditPeer,
 		},
 		{
 			u"^stars_examples$"_q,
