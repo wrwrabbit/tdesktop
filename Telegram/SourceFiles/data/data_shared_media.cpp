@@ -79,7 +79,8 @@ std::optional<Storage::SharedMediaType> SharedMediaOverviewType(
 	case Type::MusicFile:
 	case Type::File:
 	case Type::RoundVoiceFile:
-	case Type::Link: return type;
+	case Type::Link:
+	case Type::Poll: return type;
 	}
 	return std::nullopt;
 }

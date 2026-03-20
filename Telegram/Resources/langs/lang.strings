@@ -1621,6 +1621,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_profile_photos#other" = "{count} photos";
 "lng_profile_gifs#one" = "{count} GIF";
 "lng_profile_gifs#other" = "{count} GIFs";
+"lng_profile_polls#one" = "{count} poll";
+"lng_profile_polls#other" = "{count} polls";
 "lng_profile_videos#one" = "{count} video";
 "lng_profile_videos#other" = "{count} videos";
 "lng_profile_songs#one" = "{count} audio file";
@@ -1789,6 +1791,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_media_type_files" = "Files";
 "lng_media_type_audios" = "Voice messages";
 "lng_media_type_links" = "Shared links";
+"lng_media_type_polls" = "Polls";
 "lng_media_type_rounds" = "Video messages";
 "lng_media_saved_music_your" = "Your playlist";
 "lng_media_saved_music_title" = "Playlist";

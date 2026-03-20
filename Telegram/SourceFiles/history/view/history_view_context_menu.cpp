@@ -814,8 +814,9 @@ bool AddGoToMessageAction(
 	const auto view = request.view;
 	if (!view
 		|| !view->data()->isRegular()
-		|| context != Context::Pinned
-		|| !view->hasOutLayout()) {
+		|| (context != Context::Pinned
+			&& context != Context::ChatPreview)
+		|| (context == Context::Pinned && !view->hasOutLayout())) {
 		return false;
 	}
 	const auto itemId = view->data()->fullId();
@@ -1518,7 +1519,8 @@ void AddPollActions(
 	if ((context != Context::History)
 		&& (context != Context::Replies)
 		&& (context != Context::Pinned)
-		&& (context != Context::ScheduledTopic)) {
+		&& (context != Context::ScheduledTopic)
+		&& (context != Context::ChatPreview)) {
 		return;
 	}
 	if (poll->closed()) {

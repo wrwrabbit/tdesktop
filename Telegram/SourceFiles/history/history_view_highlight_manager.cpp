@@ -135,7 +135,9 @@ void ElementHighlighter::highlight(Highlight data) {
 				}
 			}
 			_highlighted = data;
-			_animation.start((!data.part.empty() || data.todoListId)
+			_animation.start((!data.part.empty()
+					|| data.todoListId
+					|| !data.pollOption.isEmpty())
 				&& !IsSubGroupSelection(data.part));
 
 			repaintHighlightedItem(view);

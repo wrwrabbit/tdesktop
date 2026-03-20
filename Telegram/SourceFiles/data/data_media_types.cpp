@@ -2318,6 +2318,11 @@ PollData *MediaPoll::poll() const {
 	return _poll;
 }
 
+Storage::SharedMediaTypesMask MediaPoll::sharedMediaTypes() const {
+	return Storage::SharedMediaTypesMask{}
+		.added(Storage::SharedMediaType::Poll);
+}
+
 TextWithEntities MediaPoll::notificationText() const {
 	return TextWithEntities()
 		.append(QChar(0xD83D))

@@ -434,7 +434,8 @@ void Controller::updateSearchControllers(
 	const auto hasMembersSearch = (type == Type::Members)
 		|| (type == Type::Profile);
 	const auto searchQuery = memento->searchFieldQuery();
-	if (type == Type::Media) {
+	if (type == Type::Media
+		&& mediaType != Section::MediaType::Poll) {
 		_searchController
 			= std::make_unique<Api::DelayedSearchController>(&session());
 		auto mediaMemento = dynamic_cast<Media::Memento*>(memento.get());

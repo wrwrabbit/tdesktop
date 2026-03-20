@@ -1,0 +1,708 @@
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+#include "info/polls/info_polls_list_widget.h"
+
+#include "data/data_poll_messages.h"
+#include "data/data_peer.h"
+#include "data/data_session.h"
+#include "data/data_forum_topic.h"
+#include "data/data_peer_values.h"
+#include "data/data_saved_sublist.h"
+#include "history/history.h"
+#include "history/history_item.h"
+#include "history/view/history_view_list_widget.h"
+#include "history/view/history_view_corner_buttons.h"
+#include "history/view/history_view_element.h"
+#include "history/view/reactions/history_view_reactions_button.h"
+#include "info/info_controller.h"
+#include "info/info_memento.h"
+#include "lang/lang_keys.h"
+#include "main/main_session.h"
+#include "ui/chat/chat_style.h"
+#include "ui/chat/chat_theme.h"
+#include "ui/widgets/elastic_scroll.h"
+#include "ui/widgets/scroll_area.h"
+#include "ui/ui_utility.h"
+#include "window/section_widget.h"
+#include "window/themes/window_theme.h"
+#include "window/window_session_controller.h"
+#include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
+
+namespace Info::Polls {
+
+class ListWidget::Inner final
+	: private HistoryView::ListDelegate
+	, private HistoryView::CornerButtonsDelegate {
+public:
+	Inner(
+		not_null<QWidget*> parent,
+		not_null<Controller*> controller);
+
+	[[nodiscard]] not_null<Ui::ElasticScroll*> scroll() const {
+		return _scroll.get();
+	}
+	[[nodiscard]] HistoryView::ListWidget *list() const {
+		return _list;
+	}
+
+	void updateGeometry(QRect rect);
+
+	[[nodiscard]] int scrollTop() const;
+	void setScrollTop(int top);
+
+	void paintBackground(QPainter &p, QRect clip);
+
+private:
+	void setupHistory();
+	void updateInnerVisibleArea();
+
+	HistoryView::Context listContext() override;
+	bool listScrollTo(int top, bool syntetic = true) override;
+	void listCancelRequest() override;
+	void listDeleteRequest() override;
+	void listTryProcessKeyInput(not_null<QKeyEvent*> e) override;
+	rpl::producer<Data::MessagesSlice> listSource(
+		Data::MessagePosition aroundId,
+		int limitBefore,
+		int limitAfter) override;
+	bool listAllowsMultiSelect() override;
+	bool listIsItemGoodForSelection(
+		not_null<HistoryItem*> item) override;
+	bool listIsLessInOrder(
+		not_null<HistoryItem*> first,
+		not_null<HistoryItem*> second) override;
+	void listSelectionChanged(
+		HistoryView::SelectedItems &&items) override;
+	void listMarkReadTill(not_null<HistoryItem*> item) override;
+	void listMarkContentsRead(
+		const base::flat_set<not_null<HistoryItem*>> &items) override;
+	HistoryView::MessagesBarData listMessagesBar(
+		const std::vector<not_null<HistoryView::Element*>> &elements)
+		override;
+	void listContentRefreshed() override;
+	void listUpdateDateLink(
+		ClickHandlerPtr &link,
+		not_null<HistoryView::Element*> view) override;
+	bool listElementHideReply(
+		not_null<const HistoryView::Element*> view) override;
+	bool listElementShownUnread(
+		not_null<const HistoryView::Element*> view) override;
+	bool listIsGoodForAroundPosition(
+		not_null<const HistoryView::Element*> view) override;
+	void listSendBotCommand(
+		const QString &command,
+		const FullMsgId &context) override;
+	void listSearch(
+		const QString &query,
+		const FullMsgId &context) override;
+	void listHandleViaClick(not_null<UserData*> bot) override;
+	not_null<Ui::ChatTheme*> listChatTheme() override;
+	HistoryView::CopyRestrictionType listCopyRestrictionType(
+		HistoryItem *item) override;
+	HistoryView::CopyRestrictionType listCopyMediaRestrictionType(
+		not_null<HistoryItem*> item) override;
+	HistoryView::CopyRestrictionType listSelectRestrictionType() override;
+	auto listAllowedReactionsValue()
+		-> rpl::producer<Data::AllowedReactions> override;
+	void listShowPremiumToast(
+		not_null<DocumentData*> document) override;
+	void listOpenPhoto(
+		not_null<PhotoData*> photo,
+		FullMsgId context) override;
+	void listOpenDocument(
+		not_null<DocumentData*> document,
+		FullMsgId context,
+		bool showInMediaView) override;
+	void listPaintEmpty(
+		Painter &p,
+		const Ui::ChatPaintContext &context) override;
+	QString listElementAuthorRank(
+		not_null<const HistoryView::Element*> view) override;
+	bool listElementHideTopicButton(
+		not_null<const HistoryView::Element*> view) override;
+	History *listTranslateHistory() override;
+	void listAddTranslatedItems(
+		not_null<HistoryView::TranslateTracker*> tracker) override;
+	not_null<Window::SessionController*> listWindow() override;
+	not_null<QWidget*> listEmojiInteractionsParent() override;
+	not_null<const Ui::ChatStyle*> listChatStyle() override;
+	rpl::producer<bool> listChatWideValue() override;
+	std::unique_ptr<HistoryView::Reactions::Manager>
+		listMakeReactionsManager(
+			QWidget *wheelEventsTarget,
+			Fn<void(QRect)> update) override;
+	void listVisibleAreaUpdated() override;
+	std::shared_ptr<Ui::Show> listUiShow() override;
+	void listShowPollResults(
+		not_null<PollData*> poll,
+		FullMsgId context) override;
+	void listCancelUploadLayer(not_null<HistoryItem*> item) override;
+	bool listAnimationsPaused() override;
+	auto listSendingAnimation()
+		-> Ui::MessageSendingAnimationController* override;
+	Ui::ChatPaintContext listPreparePaintContext(
+		Ui::ChatPaintContextArgs &&args) override;
+	bool listMarkingContentRead() override;
+	bool listIgnorePaintEvent(QWidget *w, QPaintEvent *e) override;
+	bool listShowReactPremiumError(
+		not_null<HistoryItem*> item,
+		const Data::ReactionId &id) override;
+	base::unique_qptr<Ui::PopupMenu> listFillSenderUserpicMenu(
+		PeerId userpicPeerId) override;
+	void listWindowSetInnerFocus() override;
+	bool listAllowsDragForward() override;
+	void listLaunchDrag(
+		std::unique_ptr<QMimeData> data,
+		Fn<void()> finished) override;
+
+	void cornerButtonsShowAtPosition(
+		Data::MessagePosition position) override;
+	Data::Thread *cornerButtonsThread() override;
+	FullMsgId cornerButtonsCurrentId() override;
+	bool cornerButtonsIgnoreVisibility() override;
+	std::optional<bool> cornerButtonsDownShown() override;
+	bool cornerButtonsUnreadMayBeShown() override;
+	bool cornerButtonsHas(HistoryView::CornerButtonType type) override;
+
+	const not_null<Controller*> _controller;
+	const not_null<Main::Session*> _session;
+	const not_null<History*> _history;
+	const MsgId _topicRootId = 0;
+	const PeerId _monoforumPeerId = 0;
+	const std::shared_ptr<Ui::ChatTheme> _theme;
+	const std::unique_ptr<Ui::ChatStyle> _chatStyle;
+	const std::unique_ptr<Ui::ElasticScroll> _scroll;
+
+	QPointer<HistoryView::ListWidget> _list;
+	std::unique_ptr<HistoryView::CornerButtons> _cornerButtons;
+	bool _viewerRefreshed = false;
+
+	QImage _bg;
+
+};
+
+ListWidget::Inner::Inner(
+	not_null<QWidget*> parent,
+	not_null<Controller*> controller)
+: _controller(controller)
+, _session(&controller->session())
+, _history(_session->data().history(controller->key().peer()))
+, _topicRootId(controller->topic()
+	? controller->topic()->rootId()
+	: MsgId())
+, _monoforumPeerId(controller->sublist()
+	? controller->sublist()->sublistPeer()->id
+	: PeerId())
+, _theme(Window::Theme::DefaultChatThemeOn(
+	_controller->parentController()->lifetime()))
+, _chatStyle(
+	std::make_unique<Ui::ChatStyle>(_session->colorIndicesValue()))
+, _scroll(std::make_unique<Ui::ElasticScroll>(parent)) {
+	_chatStyle->apply(_theme.get());
+	setupHistory();
+}
+
+void ListWidget::Inner::setupHistory() {
+	_list = _scroll->setOwnedWidget(
+		object_ptr<HistoryView::ListWidget>(
+			_scroll.get(),
+			_session,
+			static_cast<HistoryView::ListDelegate*>(this)));
+	_cornerButtons = std::make_unique<HistoryView::CornerButtons>(
+		_scroll.get(),
+		_chatStyle.get(),
+		static_cast<HistoryView::CornerButtonsDelegate*>(this));
+
+	_scroll->scrolls(
+	) | rpl::on_next([=] {
+		updateInnerVisibleArea();
+	}, _scroll->lifetime());
+	_scroll->setOverscrollBg(QColor(0, 0, 0, 0));
+	using Type = Ui::ElasticScroll::OverscrollType;
+	_scroll->setOverscrollTypes(Type::Real, Type::Real);
+
+	_list->scrollKeyEvents(
+	) | rpl::on_next([=](not_null<QKeyEvent*> e) {
+		_scroll->keyPressEvent(e);
+	}, _scroll->lifetime());
+}
+
+void ListWidget::Inner::updateGeometry(QRect rect) {
+	_scroll->setGeometry(rect);
+	_cornerButtons->updatePositions();
+
+	if (rect.isEmpty()) {
+		return;
+	}
+	if (!_viewerRefreshed) {
+		_viewerRefreshed = true;
+		_list->resizeToWidth(_scroll->width(), _scroll->height());
+		_list->refreshViewer();
+	}
+	const auto ratio = style::DevicePixelRatio();
+	_bg = QImage(
+		rect.size() * ratio,
+		QImage::Format_ARGB32_Premultiplied);
+	auto p = QPainter(&_bg);
+	Window::SectionWidget::PaintBackground(
+		p,
+		_theme.get(),
+		QSize(rect.width(), rect.height() * 2),
+		QRect(QPoint(), rect.size()));
+}
+
+void ListWidget::Inner::paintBackground(QPainter &p, QRect clip) {
+	if (!_bg.isNull()) {
+		const auto scrollGeometry = _scroll->geometry();
+		p.drawImage(scrollGeometry.topLeft(), _bg);
+	}
+}
+
+void ListWidget::Inner::updateInnerVisibleArea() {
+	const auto scrollTop = _scroll->scrollTop();
+	_list->setVisibleTopBottom(scrollTop, scrollTop + _scroll->height());
+	_cornerButtons->updateJumpDownVisibility();
+}
+
+int ListWidget::Inner::scrollTop() const {
+	return _scroll->scrollTop();
+}
+
+void ListWidget::Inner::setScrollTop(int top) {
+	_scroll->scrollToY(top);
+}
+
+HistoryView::Context ListWidget::Inner::listContext() {
+	return HistoryView::Context::ChatPreview;
+}
+
+bool ListWidget::Inner::listScrollTo(int top, bool syntetic) {
+	top = std::clamp(top, 0, _scroll->scrollTopMax());
+	if (_scroll->scrollTop() == top) {
+		updateInnerVisibleArea();
+		return false;
+	}
+	_scroll->scrollToY(top);
+	return true;
+}
+
+void ListWidget::Inner::listCancelRequest() {
+}
+
+void ListWidget::Inner::listDeleteRequest() {
+}
+
+void ListWidget::Inner::listTryProcessKeyInput(not_null<QKeyEvent*> e) {
+}
+
+rpl::producer<Data::MessagesSlice> ListWidget::Inner::listSource(
+		Data::MessagePosition aroundId,
+		int limitBefore,
+		int limitAfter) {
+	return Data::PollMessagesViewer(
+		_session,
+		_history,
+		_topicRootId,
+		_monoforumPeerId,
+		aroundId,
+		limitBefore,
+		limitAfter);
+}
+
+bool ListWidget::Inner::listAllowsMultiSelect() {
+	return false;
+}
+
+bool ListWidget::Inner::listIsItemGoodForSelection(
+		not_null<HistoryItem*> item) {
+	return false;
+}
+
+bool ListWidget::Inner::listIsLessInOrder(
+		not_null<HistoryItem*> first,
+		not_null<HistoryItem*> second) {
+	if (first->isRegular() && second->isRegular()) {
+		return first->id < second->id;
+	} else if (first->isRegular()) {
+		return true;
+	} else if (second->isRegular()) {
+		return false;
+	}
+	return first->id < second->id;
+}
+
+void ListWidget::Inner::listSelectionChanged(
+		HistoryView::SelectedItems &&items) {
+}
+
+void ListWidget::Inner::listMarkReadTill(not_null<HistoryItem*> item) {
+}
+
+void ListWidget::Inner::listMarkContentsRead(
+		const base::flat_set<not_null<HistoryItem*>> &items) {
+}
+
+HistoryView::MessagesBarData ListWidget::Inner::listMessagesBar(
+		const std::vector<not_null<HistoryView::Element*>> &elements) {
+	return {};
+}
+
+void ListWidget::Inner::listContentRefreshed() {
+}
+
+void ListWidget::Inner::listUpdateDateLink(
+		ClickHandlerPtr &link,
+		not_null<HistoryView::Element*> view) {
+}
+
+bool ListWidget::Inner::listElementHideReply(
+		not_null<const HistoryView::Element*> view) {
+	return false;
+}
+
+bool ListWidget::Inner::listElementShownUnread(
+		not_null<const HistoryView::Element*> view) {
+	return false;
+}
+
+bool ListWidget::Inner::listIsGoodForAroundPosition(
+		not_null<const HistoryView::Element*> view) {
+	return view->data()->isRegular();
+}
+
+void ListWidget::Inner::listSendBotCommand(
+		const QString &command,
+		const FullMsgId &context) {
+}
+
+void ListWidget::Inner::listSearch(
+		const QString &query,
+		const FullMsgId &context) {
+}
+
+void ListWidget::Inner::listHandleViaClick(not_null<UserData*> bot) {
+}
+
+not_null<Ui::ChatTheme*> ListWidget::Inner::listChatTheme() {
+	return _theme.get();
+}
+
+HistoryView::CopyRestrictionType
+ListWidget::Inner::listCopyRestrictionType(HistoryItem *item) {
+	return HistoryView::CopyRestrictionType::None;
+}
+
+HistoryView::CopyRestrictionType
+ListWidget::Inner::listCopyMediaRestrictionType(
+		not_null<HistoryItem*> item) {
+	return HistoryView::CopyRestrictionType::None;
+}
+
+HistoryView::CopyRestrictionType
+ListWidget::Inner::listSelectRestrictionType() {
+	return HistoryView::CopyRestrictionType::None;
+}
+
+auto ListWidget::Inner::listAllowedReactionsValue()
+-> rpl::producer<Data::AllowedReactions> {
+	return Data::PeerAllowedReactionsValue(_history->peer);
+}
+
+void ListWidget::Inner::listShowPremiumToast(
+		not_null<DocumentData*> document) {
+}
+
+void ListWidget::Inner::listOpenPhoto(
+		not_null<PhotoData*> photo,
+		FullMsgId context) {
+}
+
+void ListWidget::Inner::listOpenDocument(
+		not_null<DocumentData*> document,
+		FullMsgId context,
+		bool showInMediaView) {
+}
+
+void ListWidget::Inner::listPaintEmpty(
+		Painter &p,
+		const Ui::ChatPaintContext &context) {
+}
+
+QString ListWidget::Inner::listElementAuthorRank(
+		not_null<const HistoryView::Element*> view) {
+	return {};
+}
+
+bool ListWidget::Inner::listElementHideTopicButton(
+		not_null<const HistoryView::Element*> view) {
+	return true;
+}
+
+History *ListWidget::Inner::listTranslateHistory() {
+	return nullptr;
+}
+
+void ListWidget::Inner::listAddTranslatedItems(
+		not_null<HistoryView::TranslateTracker*> tracker) {
+}
+
+not_null<Window::SessionController*> ListWidget::Inner::listWindow() {
+	return _controller->parentController();
+}
+
+not_null<QWidget*> ListWidget::Inner::listEmojiInteractionsParent() {
+	return _scroll.get();
+}
+
+not_null<const Ui::ChatStyle*> ListWidget::Inner::listChatStyle() {
+	return _chatStyle.get();
+}
+
+rpl::producer<bool> ListWidget::Inner::listChatWideValue() {
+	return rpl::single(false);
+}
+
+std::unique_ptr<HistoryView::Reactions::Manager>
+ListWidget::Inner::listMakeReactionsManager(
+		QWidget *wheelEventsTarget,
+		Fn<void(QRect)> update) {
+	return std::make_unique<HistoryView::Reactions::Manager>(
+		wheelEventsTarget,
+		std::move(update));
+}
+
+void ListWidget::Inner::listVisibleAreaUpdated() {
+}
+
+std::shared_ptr<Ui::Show> ListWidget::Inner::listUiShow() {
+	return _controller->parentController()->uiShow();
+}
+
+void ListWidget::Inner::listShowPollResults(
+		not_null<PollData*> poll,
+		FullMsgId context) {
+	_controller->parentController()->showSection(
+		std::make_shared<Info::Memento>(poll, context));
+}
+
+void ListWidget::Inner::listCancelUploadLayer(
+		not_null<HistoryItem*> item) {
+}
+
+bool ListWidget::Inner::listAnimationsPaused() {
+	return false;
+}
+
+auto ListWidget::Inner::listSendingAnimation()
+-> Ui::MessageSendingAnimationController* {
+	return nullptr;
+}
+
+Ui::ChatPaintContext ListWidget::Inner::listPreparePaintContext(
+		Ui::ChatPaintContextArgs &&args) {
+	const auto visibleAreaTopLocal = _scroll->mapFromGlobal(
+		args.visibleAreaPositionGlobal).y();
+	const auto area = QRect(
+		0,
+		args.visibleAreaTop,
+		args.visibleAreaWidth,
+		args.visibleAreaHeight);
+	const auto viewport = QRect(
+		0,
+		args.visibleAreaTop - visibleAreaTopLocal,
+		args.visibleAreaWidth,
+		_scroll->height());
+	return args.theme->preparePaintContext(
+		_chatStyle.get(),
+		viewport,
+		area,
+		args.clip,
+		false);
+}
+
+bool ListWidget::Inner::listMarkingContentRead() {
+	return false;
+}
+
+bool ListWidget::Inner::listIgnorePaintEvent(QWidget *w, QPaintEvent *e) {
+	return false;
+}
+
+bool ListWidget::Inner::listShowReactPremiumError(
+		not_null<HistoryItem*> item,
+		const Data::ReactionId &id) {
+	return Window::ShowReactPremiumError(
+		_controller->parentController(),
+		item,
+		id);
+}
+
+base::unique_qptr<Ui::PopupMenu>
+ListWidget::Inner::listFillSenderUserpicMenu(PeerId userpicPeerId) {
+	return nullptr;
+}
+
+void ListWidget::Inner::listWindowSetInnerFocus() {
+}
+
+bool ListWidget::Inner::listAllowsDragForward() {
+	return false;
+}
+
+void ListWidget::Inner::listLaunchDrag(
+		std::unique_ptr<QMimeData> data,
+		Fn<void()> finished) {
+}
+
+void ListWidget::Inner::cornerButtonsShowAtPosition(
+		Data::MessagePosition position) {
+	if (position == Data::UnreadMessagePosition) {
+		position = Data::MaxMessagePosition;
+	}
+	_list->showAtPosition(
+		position,
+		{},
+		_cornerButtons->doneJumpFrom(position.fullId, {}, true));
+}
+
+Data::Thread *ListWidget::Inner::cornerButtonsThread() {
+	return _history;
+}
+
+FullMsgId ListWidget::Inner::cornerButtonsCurrentId() {
+	return {};
+}
+
+bool ListWidget::Inner::cornerButtonsIgnoreVisibility() {
+	return false;
+}
+
+std::optional<bool> ListWidget::Inner::cornerButtonsDownShown() {
+	const auto top = _scroll->scrollTop() + st::historyToDownShownAfter;
+	if (top < _scroll->scrollTopMax()) {
+		return true;
+	} else if (_list->loadedAtBottomKnown()) {
+		return !_list->loadedAtBottom();
+	}
+	return std::nullopt;
+}
+
+bool ListWidget::Inner::cornerButtonsUnreadMayBeShown() {
+	return false;
+}
+
+bool ListWidget::Inner::cornerButtonsHas(
+		HistoryView::CornerButtonType type) {
+	return (type == HistoryView::CornerButtonType::Down);
+}
+
+// --- ListMemento ---
+
+ListMemento::ListMemento(
+	not_null<PeerData*> peer,
+	PeerId migratedPeerId)
+: ContentMemento(peer, nullptr, nullptr, migratedPeerId) {
+}
+
+ListMemento::ListMemento(not_null<Data::ForumTopic*> topic)
+: ContentMemento(topic->peer(), topic, nullptr, PeerId()) {
+}
+
+ListMemento::ListMemento(not_null<Data::SavedSublist*> sublist)
+: ContentMemento(
+	sublist->owningHistory()->peer,
+	nullptr,
+	sublist,
+	PeerId()) {
+}
+
+Section ListMemento::section() const {
+	return Section(Storage::SharedMediaType::Poll);
+}
+
+object_ptr<ContentWidget> ListMemento::createWidget(
+		QWidget *parent,
+		not_null<Controller*> controller,
+		const QRect &geometry) {
+	auto result = object_ptr<ListWidget>(parent, controller);
+	result->setInternalState(geometry, this);
+	return result;
+}
+
+// --- ListWidget ---
+
+ListWidget::ListWidget(
+	QWidget *parent,
+	not_null<Controller*> controller)
+: ContentWidget(parent, controller)
+, _inner(std::make_unique<Inner>(this, controller)) {
+	setInnerWidget(object_ptr<Ui::RpWidget>(this));
+	scroll()->hide();
+}
+
+ListWidget::~ListWidget() = default;
+
+rpl::producer<QString> ListWidget::title() {
+	return tr::lng_media_type_polls();
+}
+
+rpl::producer<int> ListWidget::desiredHeightValue() const {
+	return sizeValue(
+	) | rpl::map([=](QSize) {
+		return maxVisibleHeight();
+	}) | rpl::distinct_until_changed();
+}
+
+bool ListWidget::showInternal(not_null<ContentMemento*> memento) {
+	if (!controller()->validateMementoPeer(memento)) {
+		return false;
+	}
+	if (auto my = dynamic_cast<ListMemento*>(memento.get())) {
+		restoreState(my);
+		return true;
+	}
+	return false;
+}
+
+void ListWidget::setInternalState(
+		const QRect &geometry,
+		not_null<ListMemento*> memento) {
+	setGeometry(geometry);
+	Ui::SendPendingMoveResizeEvents(this);
+	restoreState(memento);
+}
+
+std::shared_ptr<ContentMemento> ListWidget::doCreateMemento() {
+	auto result = std::make_shared<ListMemento>(
+		controller()->key().peer(),
+		controller()->migratedPeerId());
+	saveState(result.get());
+	return result;
+}
+
+void ListWidget::saveState(not_null<ListMemento*> memento) {
+	memento->setScrollTop(_inner->scrollTop());
+}
+
+void ListWidget::restoreState(not_null<ListMemento*> memento) {
+	_inner->setScrollTop(memento->scrollTop());
+}
+
+void ListWidget::resizeEvent(QResizeEvent *e) {
+	ContentWidget::resizeEvent(e);
+	_inner->updateGeometry(QRect(0, 0, width(), height()));
+}
+
+void ListWidget::paintEvent(QPaintEvent *e) {
+	ContentWidget::paintEvent(e);
+	auto p = QPainter(this);
+	_inner->paintBackground(p, e->rect());
+}
+
+} // namespace Info::Polls

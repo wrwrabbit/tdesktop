@@ -633,6 +633,7 @@ public:
 	std::unique_ptr<Media> clone(not_null<HistoryItem*> parent) override;
 
 	PollData *poll() const override;
+	Storage::SharedMediaTypesMask sharedMediaTypes() const override;
 
 	TextWithEntities notificationText() const override;
 	QString pinnedTextSubstring() const override;
