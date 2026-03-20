@@ -268,7 +268,9 @@ MTPPoll PollDataToMTP(not_null<const PollData*> poll, bool close) {
 				MTP_string(answer.text.text),
 				Api::EntitiesToMTP(&poll->session(), answer.text.entities)),
 			MTP_bytes(answer.option),
-			MTPMessageMedia()); // media
+			MTPMessageMedia(), // media
+			MTPPeer(), // added_by
+			MTPint()); // date
 	};
 	auto answers = QVector<MTPPollAnswer>();
 	answers.reserve(poll->answers.size());
@@ -302,10 +304,10 @@ MTPInputMedia PollDataToInputMedia(
 		| (poll->quiz()
 			? MTPDinputMediaPoll::Flag::f_correct_answers
 			: MTPDinputMediaPoll::Flag(0));
-	auto correct = QVector<MTPbytes>();
-	for (const auto &answer : poll->answers) {
-		if (answer.correct) {
-			correct.push_back(MTP_bytes(answer.option));
+	auto correct = QVector<MTPint>();
+	for (auto i = 0, count = int(poll->answers.size()); i < count; ++i) {
+		if (poll->answers[i].correct) {
+			correct.push_back(MTP_int(i));
 		}
 	}
 
@@ -326,7 +328,7 @@ MTPInputMedia PollDataToInputMedia(
 	return MTP_inputMediaPoll(
 		MTP_flags(inputFlags),
 		PollDataToMTP(poll, close),
-		MTP_vector<MTPbytes>(correct),
+		MTP_vector<MTPint>(correct),
 		MTPInputMedia(), // attached_media
 		MTP_string(solution.text),
 		sentEntities,
