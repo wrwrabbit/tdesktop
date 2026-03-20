@@ -105,6 +105,11 @@ template <typename MediaData>
 	state->clickable->show();
 	const auto clickableRaw = state->clickable.get();
 
+	mainwidget->sizeValue(
+	) | rpl::skip(1) | rpl::on_next([=](QSize) {
+		hideAll();
+	}, clickableRaw->lifetime());
+
 	mainwidget->sizeValue() | rpl::on_next([=](QSize size) {
 		clickableRaw->setGeometry(Rect(size));
 		clickableRaw->raise();
@@ -345,6 +350,11 @@ void ShowWidgetPreview(
 	const auto menuRaw = state->menu.get();
 	state->clickable->show();
 	previewRaw->show();
+
+	mainwidget->sizeValue(
+	) | rpl::skip(1) | rpl::on_next([=](QSize) {
+		hideAll();
+	}, previewRaw->lifetime());
 
 	const auto fullW = previewRaw->width();
 	const auto fullH = previewRaw->height();
