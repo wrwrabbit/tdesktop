@@ -55,6 +55,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
+#include "styles/style_dialogs.h"
 #include "styles/style_widgets.h"
 #include "styles/style_window.h"
 
@@ -178,6 +179,7 @@ struct PollThumbnailData {
 	ClickHandlerPtr handler;
 	PollThumbnailKind kind = PollThumbnailKind::None;
 	bool rounded = false;
+	bool isVideo = false;
 	uint64 id = 0;
 };
 
@@ -214,6 +216,9 @@ struct PollThumbnailData {
 				messageContext.id);
 			result.rounded = true;
 			result.kind = PollThumbnailKind::Document;
+			result.isVideo = media.document->isVideoFile()
+				|| media.document->isVideoMessage()
+				|| media.document->isAnimation();
 		}
 	}
 	if (result.kind == PollThumbnailKind::Photo && result.id) {
@@ -335,6 +340,7 @@ struct Poll::Answer {
 	Ui::Animations::Simple selectedAnimation;
 	std::shared_ptr<Ui::DynamicImage> thumbnail;
 	bool thumbnailRounded = false;
+	bool thumbnailIsVideo = false;
 	PollThumbnailKind thumbnailKind = PollThumbnailKind::None;
 	uint64 thumbnailId = 0;
 	mutable std::unique_ptr<Ui::RippleAnimation> ripple;
@@ -424,6 +430,7 @@ void Poll::Answer::fillMedia(
 	thumbnail = updated.thumbnail;
 	mediaHandler = updated.handler;
 	thumbnailRounded = updated.rounded;
+	thumbnailIsVideo = updated.isVideo;
 	thumbnailKind = updated.kind;
 	thumbnailId = updated.id;
 	if (thumbnail) {
@@ -2087,6 +2094,9 @@ int Poll::paintAnswer(
 				}
 				p.drawImage(geometry, image, source);
 				p.restore();
+				if (answer.thumbnailIsVideo) {
+					st::dialogsMiniPlay.paintInCenter(p, target);
+				}
 			}
 		}
 	}
