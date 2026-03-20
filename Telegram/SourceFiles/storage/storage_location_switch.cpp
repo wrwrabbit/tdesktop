@@ -223,7 +223,9 @@ bool ApplyPendingSwitch() {
 				return false;
 			}
 			LOG(("LocationSwitch: recursive copy succeeded, removing source tdata"));
-			QDir(sourceTdata).removeRecursively();
+			const auto removedTdata = QDir(sourceTdata).removeRecursively();
+			LOG(("LocationSwitch: removeRecursively result: %1, sourceTdata still exists: %2").arg(
+				Logs::b(removedTdata), Logs::b(QDir(sourceTdata).exists())));
 		}
 	} else {
 		LOG(("LocationSwitch: sourceTdata does not exist, nothing to move"));
@@ -234,6 +236,9 @@ bool ApplyPendingSwitch() {
 	LOG(("LocationSwitch: switch complete, working dir now '%1'").arg(targetWorkingDir));
 
 	if (QDir::cleanPath(sourceWorkingDir) != QDir::cleanPath(targetWorkingDir)) {
+		// Give the old process time to release file locks before attempting cleanup.
+		QThread::msleep(1500);
+
 		const auto cleanSource = QDir::cleanPath(sourceWorkingDir);
 		for (const auto &name : {
 			u"log.txt"_q,
@@ -241,28 +246,73 @@ bool ApplyPendingSwitch() {
 			cExeName(),
 		}) {
 			const auto filePath = cleanSource + '/' + name;
+			if (!QFile::exists(filePath)) {
+				LOG(("LocationSwitch: cleanup '%1': not present, skipping").arg(name));
+				continue;
+			}
 			auto removed = false;
-			for (int i = 0; !removed && i < 8; ++i) {
-				removed = QFile::remove(filePath);
-				if (!removed && i + 1 < 8) {
-					QThread::msleep(150);
+			for (int i = 0; !removed && i < 12; ++i) {
+				QFile f(filePath);
+				removed = f.remove();
+				if (!removed) {
+					LOG(("LocationSwitch: cleanup '%1' attempt %2 failed: %3").arg(
+						name, QString::number(i + 1), f.errorString()));
+					if (i + 1 < 12) {
+						QThread::msleep(250);
+					}
 				}
 			}
 			LOG(("LocationSwitch: cleanup '%1': %2").arg(name, Logs::b(removed)));
 		}
+
 		const auto workingPath = sourceTdata + u"/working"_q;
+		LOG(("LocationSwitch: 'tdata/working' exists=%1 isFile=%2 isDir=%3").arg(
+			Logs::b(QFile::exists(workingPath)),
+			Logs::b(QFileInfo(workingPath).isFile()),
+			Logs::b(QFileInfo(workingPath).isDir())));
 		auto workingRemoved = false;
-		for (int i = 0; !workingRemoved && i < 8; ++i) {
-			workingRemoved = QFile::remove(workingPath)
-				|| QDir(workingPath).removeRecursively();
-			if (!workingRemoved && i + 1 < 8) {
-				QThread::msleep(150);
+		for (int i = 0; !workingRemoved && i < 12; ++i) {
+			QFile f(workingPath);
+			workingRemoved = f.remove();
+			if (!workingRemoved) {
+				const auto ferr = f.errorString();
+				workingRemoved = QDir(workingPath).removeRecursively();
+				if (!workingRemoved) {
+					LOG(("LocationSwitch: cleanup 'tdata/working' attempt %1 failed: %2").arg(
+						QString::number(i + 1), ferr));
+					if (i + 1 < 12) {
+						QThread::msleep(250);
+					}
+				}
 			}
 		}
 		LOG(("LocationSwitch: cleanup 'tdata/working': %1").arg(Logs::b(workingRemoved)));
-		if (QDir(sourceTdata).isEmpty()) {
-			const auto tdirRemoved = QDir().rmdir(sourceTdata);
-			LOG(("LocationSwitch: cleanup 'tdata' dir: %1").arg(Logs::b(tdirRemoved)));
+
+		if (!workingRemoved && QFile::exists(workingPath)) {
+			// The working file is still held by the dying old process. Rename the
+			// entire source tdata directory so future startups from the old location
+			// don't pick it up as a valid tdata (directory rename works on Windows
+			// even when files inside are open).
+			const auto tdataOld = sourceTdata + u"_old"_q;
+			QDir(tdataOld).removeRecursively();
+			const auto staleRenamed = QDir().rename(sourceTdata, tdataOld);
+			LOG(("LocationSwitch: renamed stale sourceTdata to tdata_old: %1").arg(
+				Logs::b(staleRenamed)));
+			if (!staleRenamed) {
+				LOG(("LocationSwitch: WARNING stale 'tdata/working' remains at '%1';"
+					" future startups from '%2' may use wrong tdata").arg(
+					workingPath, sourceWorkingDir));
+			}
+		} else {
+			const auto sourceEntries = QDir(sourceTdata).entryList(
+				QDir::AllEntries | QDir::NoDotAndDotDot);
+			if (sourceEntries.isEmpty()) {
+				const auto tdirRemoved = QDir().rmdir(sourceTdata);
+				LOG(("LocationSwitch: cleanup 'tdata' dir: %1").arg(Logs::b(tdirRemoved)));
+			} else {
+				LOG(("LocationSwitch: sourceTdata not empty after cleanup, remaining: %1").arg(
+					sourceEntries.join(u", "_q)));
+			}
 		}
 	}
 

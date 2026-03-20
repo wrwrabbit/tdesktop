@@ -253,7 +253,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box) {
 				const auto chosen = QFileDialog::getExistingDirectory(
 					box->window(),
 					tr::lng_ptg_location_card_custom_title(tr::now),
-					QDir::homePath());
+					cExeDir());
 				if (chosen.isEmpty()) {
 					return;
 				}
