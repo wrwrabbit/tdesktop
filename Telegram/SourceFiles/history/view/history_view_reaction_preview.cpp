@@ -60,8 +60,10 @@ struct PreviewOverlayState {
 	base::unique_qptr<Ui::AbstractButton> background;
 	base::unique_qptr<Ui::FlatLabel> label;
 	Fn<void()> extraHide;
+	rpl::lifetime shutdownGuard;
 
 	void clear() {
+		shutdownGuard.destroy();
 		menu.reset();
 		background.reset();
 		label.reset();
@@ -107,6 +109,11 @@ template <typename MediaData>
 		clickableRaw->setGeometry(Rect(size));
 		clickableRaw->raise();
 	}, clickableRaw->lifetime());
+
+	// Prevent running state destructor from within a child widget's
+	// destructor, which would trigger a double-delete through unique_qptr.
+	mainwidget->death() | rpl::on_next([s = state] {
+	}, state->shutdownGuard);
 
 	return { state, hideAll };
 }
