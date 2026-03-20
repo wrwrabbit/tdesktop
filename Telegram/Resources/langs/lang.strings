@@ -6882,6 +6882,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_polls_create_shuffle_options_about" = "Answers appear in random order for each voter.";
 "lng_polls_create_set_correct_answer" = "Set Correct Answer";
 "lng_polls_create_set_correct_answer_about" = "Mark one option as the right answer.";
+"lng_polls_create_set_correct_answer_about_multi" = "Mark one or more options as the right answer.";
 "lng_polls_create_limit_duration" = "Limit Duration";
 "lng_polls_create_limit_duration_about" = "Automatically close the poll at a set time.";
 "lng_polls_create_poll_duration" = "Poll Duration";

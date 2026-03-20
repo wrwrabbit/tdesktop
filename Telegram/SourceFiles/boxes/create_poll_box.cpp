@@ -505,7 +505,7 @@ public:
 	[[nodiscard]] std::vector<PollAnswer> toPollAnswers() const;
 	void focusFirst();
 
-	void enableChooseCorrect(bool enabled);
+	void enableChooseCorrect(bool enabled, bool multiCorrect = false);
 
 	[[nodiscard]] rpl::producer<int> usedCount() const;
 	[[nodiscard]] rpl::producer<not_null<QWidget*>> scrollToWidget() const;
@@ -530,7 +530,9 @@ private:
 
 		void toggleRemoveAlways(bool toggled);
 		void enableChooseCorrect(
-			std::shared_ptr<Ui::RadiobuttonGroup> group);
+			std::shared_ptr<Ui::RadiobuttonGroup> group,
+			bool multiCorrect = false,
+			Fn<void()> checkboxChanged = nullptr);
 
 		void show(anim::type animated);
 		void destroy(FnMut<void()> done);
@@ -566,7 +568,7 @@ private:
 
 		base::unique_qptr<Ui::SlideWrap<Ui::RpWidget>> _wrap;
 		not_null<Ui::RpWidget*> _content;
-		base::unique_qptr<Ui::FadeWrapScaled<Ui::Radiobutton>> _correct;
+		base::unique_qptr<Ui::FadeWrapScaled<Ui::Checkbox>> _correct;
 		Ui::Animations::Simple _correctShown;
 		bool _hasCorrect = false;
 		Ui::InputField *_field = nullptr;
@@ -603,6 +605,8 @@ private:
 	const FieldDropCallback _fieldDropCallback;
 	const WidgetDropCallback _widgetDropCallback;
 	std::shared_ptr<Ui::RadiobuttonGroup> _chooseCorrectGroup;
+	bool _multiCorrect = false;
+	Fn<void()> _multiCorrectChanged;
 	int _position = 0;
 	std::vector<std::unique_ptr<Option>> _list;
 	std::vector<std::unique_ptr<Option>> _destroyed;
@@ -915,8 +919,10 @@ void Options::Option::toggleRemoveAlways(bool toggled) {
 }
 
 void Options::Option::enableChooseCorrect(
-		std::shared_ptr<Ui::RadiobuttonGroup> group) {
-	if (!group) {
+		std::shared_ptr<Ui::RadiobuttonGroup> group,
+		bool multiCorrect,
+		Fn<void()> checkboxChanged) {
+	if (!group && !multiCorrect) {
 		if (_correct) {
 			_hasCorrect = false;
 			_correct->hide(anim::type::normal);
@@ -925,14 +931,22 @@ void Options::Option::enableChooseCorrect(
 		return;
 	}
 	static auto Index = 0;
-	const auto button = Ui::CreateChild<Ui::FadeWrapScaled<Ui::Radiobutton>>(
-		_content.get(),
-		object_ptr<Ui::Radiobutton>(
+	auto checkbox = multiCorrect
+		? object_ptr<Ui::Checkbox>(
+			_content.get(),
+			QString(),
+			false,
+			st::defaultCheckbox,
+			st::defaultCheck)
+		: object_ptr<Ui::Checkbox>(object_ptr<Ui::Radiobutton>(
 			_content.get(),
 			group,
 			++Index,
 			QString(),
 			st::defaultCheckbox));
+	const auto button = Ui::CreateChild<Ui::FadeWrapScaled<Ui::Checkbox>>(
+		_content.get(),
+		std::move(checkbox));
 	button->entity()->resize(
 		button->entity()->height(),
 		button->entity()->height());
@@ -946,6 +960,12 @@ void Options::Option::enableChooseCorrect(
 	}, button->lifetime());
 	_correct.reset(button);
 	_hasCorrect = true;
+	if (multiCorrect && checkboxChanged) {
+		button->entity()->checkedChanges(
+		) | rpl::on_next([=](bool) {
+			checkboxChanged();
+		}, button->lifetime());
+	}
 	if (isGood()) {
 		_correct->show(anim::type::normal);
 	} else {
@@ -1106,12 +1126,25 @@ std::shared_ptr<Ui::RadiobuttonGroup> Options::createChooseCorrectGroup() {
 	return result;
 }
 
-void Options::enableChooseCorrect(bool enabled) {
-	_chooseCorrectGroup = enabled
-		? createChooseCorrectGroup()
-		: nullptr;
-	for (auto &option : _list) {
-		option->enableChooseCorrect(_chooseCorrectGroup);
+void Options::enableChooseCorrect(bool enabled, bool multiCorrect) {
+	_multiCorrect = enabled && multiCorrect;
+	if (_multiCorrect) {
+		_chooseCorrectGroup = nullptr;
+		_multiCorrectChanged = [=] { validateState(); };
+		for (auto &option : _list) {
+			option->enableChooseCorrect(
+				nullptr,
+				true,
+				_multiCorrectChanged);
+		}
+	} else {
+		_multiCorrectChanged = nullptr;
+		_chooseCorrectGroup = enabled
+			? createChooseCorrectGroup()
+			: nullptr;
+		for (auto &option : _list) {
+			option->enableChooseCorrect(_chooseCorrectGroup);
+		}
 	}
 	validateState();
 }
@@ -1199,6 +1232,12 @@ void Options::addEmptyOption() {
 		_attachCallback,
 		_fieldDropCallback,
 		_widgetDropCallback));
+	if (_multiCorrect) {
+		_list.back()->enableChooseCorrect(
+			nullptr,
+			true,
+			_multiCorrectChanged);
+	}
 	const auto field = _list.back()->field();
 	if (const auto emojiPanel = _emojiPanel) {
 		const auto emojiToggle = Ui::AddEmojiToggleToField(
@@ -2585,7 +2624,14 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	const auto quiz = AddPollToggleButton(
 		container,
 		tr::lng_polls_create_set_correct_answer(),
-		tr::lng_polls_create_set_correct_answer_about(),
+		rpl::single(multiple->toggled()) | rpl::then(
+			multiple->toggledChanges()
+		) | rpl::map([](bool multi) {
+			return multi
+				? tr::lng_polls_create_set_correct_answer_about_multi(
+					tr::now)
+				: tr::lng_polls_create_set_correct_answer_about(tr::now);
+		}),
 		{
 			.icon = &st::pollBoxFilledPollCorrectIcon,
 			.background = &st::settingsIconBg2,
@@ -2743,8 +2789,6 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		}
 		revoting->setToggleLocked(
 			(_disabled & PollData::Flag::RevotingDisabled) || checked);
-		multiple->setToggleLocked(
-			(_disabled & PollData::Flag::MultiChoice) || checked);
 	};
 	quiz->setToggleLocked(_disabled & PollData::Flag::Quiz);
 	shuffle->setToggleLocked(_disabled & PollData::Flag::ShuffleAnswers);
@@ -2758,13 +2802,19 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			return;
 		}
 		if (checked) {
-			state->multipleForceOff.fire(false);
 			state->addOptionsForceOff.fire(false);
 			state->revotingForceOff.fire(false);
 		}
 		updateQuizDependentLocks(checked);
-		options->enableChooseCorrect(checked);
+		options->enableChooseCorrect(checked, multiple->toggled());
 	}, quiz->lifetime());
+
+	multiple->toggledChanges(
+	) | rpl::on_next([=](bool checked) {
+		if (quiz->toggled()) {
+			options->enableChooseCorrect(true, checked);
+		}
+	}, multiple->lifetime());
 
 	const auto isValidQuestion = [=] {
 		const auto text = question->getLastText().trimmed();
