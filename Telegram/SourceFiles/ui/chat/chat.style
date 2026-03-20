@@ -372,6 +372,10 @@ textMoreIconEmoji: IconEmoji {
 	icon: topicButtonArrow;
 	padding: margins(-2px, 5px, 0px, 0px);
 }
+textBackIconEmoji: IconEmoji {
+	icon: icon{{ "dialogs/dialogs_topic_arrow-flip_horizontal", historyReplyIconFg }};
+	padding: margins(0px, 5px, -2px, 0px);
+}
 
 msgBotKbIconPadding: 4px;
 msgBotKbUrlIcon: icon {{ "inline_button_url", msgBotKbIconFg }};

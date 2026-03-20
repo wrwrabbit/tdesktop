@@ -448,6 +448,28 @@ Poll::Poll(
 	std::make_shared<LambdaClickHandler>(crl::guard(
 		this,
 		[=] { sendMultiOptions(); })))
+, _adminVotesLink(
+	std::make_shared<LambdaClickHandler>(crl::guard(
+		this,
+		[=] {
+			if (_flags & PollData::Flag::PublicVotes) {
+				showResults();
+			} else {
+				saveStateInAnimation();
+				_adminShowResults = true;
+				updateAnswerVotes();
+				startAnswersAnimation();
+			}
+		})))
+, _adminBackVoteLink(
+	std::make_shared<LambdaClickHandler>(crl::guard(
+		this,
+		[=] {
+			saveStateInAnimation();
+			_adminShowResults = false;
+			updateAnswerVotes();
+			startAnswersAnimation();
+		})))
 , _closeTimer([=] { repaint(); }) {
 	if (!consumed.text.isEmpty()) {
 		updateDescription();
@@ -508,10 +530,19 @@ QSize Poll::countOptimalSize() {
 }
 
 bool Poll::showVotes() const {
+	if (_adminShowResults) {
+		return true;
+	}
 	if (_flags & PollData::Flag::HideResultsUntilClose) {
 		return (_flags & PollData::Flag::Closed) || _parent->data()->out();
 	}
 	return _voted || (_flags & PollData::Flag::Closed);
+}
+
+bool Poll::isAuthorNotVoted() const {
+	return _parent->data()->out()
+		&& !_voted
+		&& !(_flags & PollData::Flag::Closed);
 }
 
 bool Poll::canVote() const {
@@ -649,6 +680,15 @@ void Poll::updateTexts() {
 				: ((_flags & Flag::PublicVotes)
 					? tr::lng_polls_public(tr::now)
 					: tr::lng_polls_anonymous(tr::now))));
+	}
+	if (_adminBackVoteLabel.isEmpty()) {
+		_adminBackVoteLabel.setMarkedText(
+			st::semiboldTextStyle,
+			tr::lng_polls_admin_back_vote(
+				tr::now,
+				lt_arrow,
+				Ui::Text::IconEmoji(&st::textBackIconEmoji),
+				tr::marked));
 	}
 	updateRecentVoters();
 	updateAnswers();
@@ -1293,6 +1333,7 @@ void Poll::updateVotes() {
 			}
 		} else {
 			_votedFromHere = false;
+			_hasSelected = false;
 		}
 	}
 	updateAnswerVotes();
@@ -1338,6 +1379,15 @@ void Poll::updateTotalVotes() {
 				lt_count_short,
 				_totalVotes);
 	_totalVotesLabel.setText(st::msgDateTextStyle, string);
+	_adminVotesLabel.setMarkedText(
+		st::semiboldTextStyle,
+		tr::lng_polls_admin_votes(
+			tr::now,
+			lt_count,
+			_totalVotes,
+			lt_arrow,
+			Ui::Text::IconEmoji(&st::textMoreIconEmoji),
+			tr::marked));
 }
 
 void Poll::updateAnswerVotesFromOriginal(
@@ -1646,7 +1696,25 @@ void Poll::paintBottom(
 		+ st::msgPadding.bottom()
 		+ st::historyPollBottomButtonTop;
 	const auto stm = context.messageStyle();
-	if (showVotersCount()) {
+	if (isAuthorNotVoted() && !_adminShowResults && !canSendVotes()) {
+		p.setPen(stm->msgFileThumbLinkFg);
+		const auto labelWidth = _adminVotesLabel.maxWidth();
+		_adminVotesLabel.drawLeft(
+			p,
+			left + (paintw - labelWidth) / 2,
+			stringtop,
+			labelWidth,
+			width());
+	} else if (_adminShowResults && isAuthorNotVoted()) {
+		p.setPen(stm->msgFileThumbLinkFg);
+		const auto backw = _adminBackVoteLabel.maxWidth();
+		_adminBackVoteLabel.drawLeft(
+			p,
+			left + (paintw - backw) / 2,
+			stringtop,
+			backw,
+			width());
+	} else if (showVotersCount()) {
 		p.setPen(stm->msgDateFg);
 		const auto timerText = closeTimerText();
 		if (timerText.isEmpty()) {
@@ -1710,8 +1778,13 @@ void Poll::paintBottom(
 		p.setFont(st::semiboldFont);
 		p.setPen(link ? stm->msgFileThumbLinkFg : stm->msgDateFg);
 		const auto string = showVotes()
-			? tr::lng_polls_view_results(tr::now, tr::upper)
-			: tr::lng_polls_submit_votes(tr::now, tr::upper);
+			? ((_flags & PollData::Flag::PublicVotes)
+				? tr::lng_polls_view_votes(
+					tr::now,
+					lt_count,
+					_totalVotes)
+				: tr::lng_polls_view_results(tr::now))
+			: tr::lng_polls_submit_votes(tr::now);
 		const auto stringw = st::semiboldFont->width(string);
 		p.drawTextLeft(
 			left + (paintw - stringw) / 2,
@@ -2689,16 +2762,29 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 		}
 		tshift += height;
 	}
-	if (!showVotersCount()) {
-		const auto link = showVotes()
-			? _showResultsLink
-			: canSendVotes()
-			? _sendVotesLink
-			: nullptr;
-		if (link) {
-			const auto linkHeight = bottomButtonHeight();
-			const auto linkTop = height() - linkHeight;
+	{
+		const auto linkHeight = bottomButtonHeight();
+		const auto linkTop = height() - linkHeight;
+		if (isAuthorNotVoted() && !_adminShowResults && !canSendVotes()) {
 			if (QRect(0, linkTop, width(), linkHeight).contains(point)) {
+				_lastLinkPoint = point;
+				result.link = _adminVotesLink;
+				return result;
+			}
+		} else if (_adminShowResults && isAuthorNotVoted()) {
+			if (QRect(0, linkTop, width(), linkHeight).contains(point)) {
+				_lastLinkPoint = point;
+				result.link = _adminBackVoteLink;
+				return result;
+			}
+		} else if (!showVotersCount()) {
+			const auto link = showVotes()
+				? _showResultsLink
+				: canSendVotes()
+				? _sendVotesLink
+				: nullptr;
+			if (link
+				&& QRect(0, linkTop, width(), linkHeight).contains(point)) {
 				_lastLinkPoint = point;
 				result.link = link;
 				return result;
@@ -2779,7 +2865,10 @@ void Poll::clickHandlerPressedChanged(
 		if (canVote()) {
 			toggleRipple(*i, pressed);
 		}
-	} else if (handler == _sendVotesLink || handler == _showResultsLink) {
+	} else if (handler == _sendVotesLink
+		|| handler == _showResultsLink
+		|| handler == _adminVotesLink
+		|| handler == _adminBackVoteLink) {
 		toggleLinkRipple(pressed);
 	}
 	if (_attachedMediaAttach) {

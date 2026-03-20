@@ -86,6 +86,7 @@ private:
 	[[nodiscard]] bool showVotes() const;
 	[[nodiscard]] bool canVote() const;
 	[[nodiscard]] bool canSendVotes() const;
+	[[nodiscard]] bool isAuthorNotVoted() const;
 	void updateDescription();
 	void updateAttachedMedia();
 	[[nodiscard]] int countTopContentSkip(int pollWidth = 0) const;
@@ -250,8 +251,12 @@ private:
 
 	std::vector<Answer> _answers;
 	Ui::Text::String _totalVotesLabel;
+	Ui::Text::String _adminVotesLabel;
+	Ui::Text::String _adminBackVoteLabel;
 	ClickHandlerPtr _showResultsLink;
 	ClickHandlerPtr _sendVotesLink;
+	ClickHandlerPtr _adminVotesLink;
+	ClickHandlerPtr _adminBackVoteLink;
 	mutable ClickHandlerPtr _showSolutionLink;
 	mutable std::unique_ptr<Ui::RippleAnimation> _linkRipple;
 	mutable int _linkRippleShift = 0;
@@ -279,6 +284,7 @@ private:
 	bool _anyAnswerHasMedia = false;
 	bool _votedFromHere = false;
 	mutable bool _wrongAnswerAnimated = false;
+	mutable bool _adminShowResults = false;
 
 };
 

@@ -6842,6 +6842,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_polls_answers_none" = "No answers";
 "lng_polls_submit_votes" = "Vote";
 "lng_polls_view_results" = "View results";
+"lng_polls_view_votes#one" = "View Votes ({count})";
+"lng_polls_view_votes#other" = "View Votes ({count})";
+"lng_polls_admin_votes#one" = "{count} vote {arrow}";
+"lng_polls_admin_votes#other" = "{count} votes {arrow}";
+"lng_polls_admin_back_vote" = "{arrow} Vote";
 "lng_polls_ends_in_days#one" = "ends in {count} day";
 "lng_polls_ends_in_days#other" = "ends in {count} days";
 "lng_polls_results_in_days#one" = "results in {count} day";
