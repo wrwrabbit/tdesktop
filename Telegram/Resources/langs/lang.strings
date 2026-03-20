@@ -4974,7 +4974,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_context_quote_and_reply" = "Quote & Reply";
 "lng_context_reply_to_task" = "Reply to Task";
 "lng_context_edit_msg" = "Edit";
-"lng_context_draw" = "Draw";
+"lng_context_draw" = "Edit Image";
 "lng_context_add_factcheck" = "Add Fact Check";
 "lng_context_edit_factcheck" = "Edit Fact Check";
 "lng_context_add_offer" = "Add Offer";
