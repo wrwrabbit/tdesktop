@@ -67,6 +67,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/fade_wrap.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
+#include "ui/wrap/vertical_layout_reorder.h"
 #include "ui/ui_utility.h"
 #include "window/section_widget.h"
 #include "window/window_session_controller.h"
@@ -559,17 +560,19 @@ private:
 
 		[[nodiscard]] rpl::producer<Qt::MouseButton> removeClicks() const;
 
+		[[nodiscard]] Ui::RpWidget *handleWidget() const;
+
 	private:
 		void createRemove();
 		void createAttach();
 		void createWarning();
-		void toggleCorrectSpace(bool visible);
+		void createHandle();
 		void updateFieldGeometry();
 
 		base::unique_qptr<Ui::SlideWrap<Ui::RpWidget>> _wrap;
 		not_null<Ui::RpWidget*> _content;
 		base::unique_qptr<Ui::FadeWrapScaled<Ui::Checkbox>> _correct;
-		Ui::Animations::Simple _correctShown;
+		base::unique_qptr<Ui::FadeWrapScaled<Ui::RpWidget>> _handle;
 		bool _hasCorrect = false;
 		Ui::InputField *_field = nullptr;
 		base::unique_qptr<Ui::PlainShadow> _shadow;
@@ -596,6 +599,8 @@ private:
 	int findField(not_null<Ui::InputField*> field) const;
 	[[nodiscard]] auto createChooseCorrectGroup()
 		-> std::shared_ptr<Ui::RadiobuttonGroup>;
+	void setupReorder();
+	void restartReorder();
 
 	not_null<Ui::BoxContent*> _box;
 	not_null<Ui::VerticalLayout*> _container;
@@ -607,7 +612,9 @@ private:
 	std::shared_ptr<Ui::RadiobuttonGroup> _chooseCorrectGroup;
 	bool _multiCorrect = false;
 	Fn<void()> _multiCorrectChanged;
-	int _position = 0;
+	Ui::VerticalLayout *_optionsLayout = nullptr;
+	std::unique_ptr<Ui::VerticalLayoutReorder> _reorder;
+	int _reordering = 0;
 	std::vector<std::unique_ptr<Option>> _list;
 	std::vector<std::unique_ptr<Option>> _destroyed;
 	rpl::variable<int> _usedCount = 0;
@@ -726,6 +733,12 @@ Options::Option::Option(
 
 	_wrap->hide(anim::type::instant);
 
+	_content->paintRequest(
+	) | rpl::on_next([content = _content.get()] {
+		auto p = QPainter(content);
+		p.fillRect(content->rect(), st::boxBg);
+	}, _content->lifetime());
+
 	_content->widthValue(
 	) | rpl::on_next([=] {
 		updateFieldGeometry();
@@ -741,6 +754,8 @@ Options::Option::Option(
 		Ui::PostponeCall(crl::guard(_field, [=] {
 			if (_hasCorrect) {
 				_correct->toggle(isGood(), anim::type::normal);
+			} else if (_handle) {
+				_handle->toggle(isGood(), anim::type::normal);
 			}
 		}));
 	}, _field->lifetime());
@@ -749,10 +764,13 @@ Options::Option::Option(
 	createRemove();
 	createAttach();
 	createWarning();
+	createHandle();
 	enableChooseCorrect(group);
-	_correctShown.stop();
 	if (_correct) {
 		_correct->finishAnimating();
+	}
+	if (_handle) {
+		_handle->finishAnimating();
 	}
 	updateFieldGeometry();
 }
@@ -878,6 +896,38 @@ void Options::Option::createWarning() {
 	}, warning->lifetime());
 }
 
+void Options::Option::createHandle() {
+	auto widget = object_ptr<Ui::RpWidget>(_content.get());
+	const auto raw = widget.data();
+	const auto &icon = st::pollBoxMenuPollOrderIcon;
+	raw->resize(icon.width(), icon.height());
+	raw->setCursor(Qt::SizeVerCursor);
+	raw->paintRequest(
+	) | rpl::on_next([=] {
+		auto p = QPainter(raw);
+		icon.paint(p, 0, 0, raw->width());
+	}, raw->lifetime());
+
+	const auto wrap = Ui::CreateChild<Ui::FadeWrapScaled<Ui::RpWidget>>(
+		_content.get(),
+		std::move(widget));
+	wrap->hide(anim::type::instant);
+
+	_content->sizeValue(
+	) | rpl::on_next([=](QSize size) {
+		const auto left = st::createPollFieldPadding.left();
+		wrap->moveToLeft(
+			left,
+			(size.height() - wrap->heightNoMargins()) / 2);
+	}, wrap->lifetime());
+
+	_handle.reset(wrap);
+}
+
+Ui::RpWidget *Options::Option::handleWidget() const {
+	return _handle ? _handle->entity() : nullptr;
+}
+
 bool Options::Option::isEmpty() const {
 	return field()->getLastText().trimmed().isEmpty();
 }
@@ -923,10 +973,12 @@ void Options::Option::enableChooseCorrect(
 		bool multiCorrect,
 		Fn<void()> checkboxChanged) {
 	if (!group && !multiCorrect) {
+		_hasCorrect = false;
 		if (_correct) {
-			_hasCorrect = false;
 			_correct->hide(anim::type::normal);
-			toggleCorrectSpace(false);
+		}
+		if (_handle) {
+			_handle->toggle(isGood(), anim::type::normal);
 		}
 		return;
 	}
@@ -971,24 +1023,16 @@ void Options::Option::enableChooseCorrect(
 	} else {
 		_correct->hide(anim::type::instant);
 	}
-	toggleCorrectSpace(true);
-}
-
-void Options::Option::toggleCorrectSpace(bool visible) {
-	_correctShown.start(
-		[=] { updateFieldGeometry(); },
-		visible ? 0. : 1.,
-		visible ? 1. : 0.,
-		st::fadeWrapDuration);
+	if (_handle) {
+		_handle->hide(anim::type::normal);
+	}
 }
 
 void Options::Option::updateFieldGeometry() {
-	const auto shown = _correctShown.value(_hasCorrect ? 1. : 0.);
 	const auto skip = st::defaultRadio.diameter
 		+ st::defaultCheckbox.textPosition.x();
-	const auto left = anim::interpolate(0, skip, shown);
-	_field->resizeToWidth(_content->width() - left);
-	_field->moveToLeft(left, 0);
+	_field->resizeToWidth(_content->width() - skip);
+	_field->moveToLeft(skip, 0);
 }
 
 not_null<Ui::InputField*> Options::Option::field() const {
@@ -1039,8 +1083,11 @@ Options::Options(
 , _widgetDropCallback(std::move(widgetDropCallback))
 , _chooseCorrectGroup(chooseCorrectEnabled
 	? createChooseCorrectGroup()
-	: nullptr)
-, _position(_container->count()) {
+	: nullptr) {
+	auto optionsObj = object_ptr<Ui::VerticalLayout>(container);
+	_optionsLayout = optionsObj.data();
+	container->add(std::move(optionsObj));
+	setupReorder();
 	checkLastOption();
 }
 
@@ -1147,6 +1194,7 @@ void Options::enableChooseCorrect(bool enabled, bool multiCorrect) {
 		}
 	}
 	validateState();
+	restartReorder();
 }
 
 bool Options::correctShadows() const {
@@ -1195,6 +1243,9 @@ void Options::removeEmptyTail() {
 }
 
 void Options::destroy(std::unique_ptr<Option> option) {
+	if (_reorder) {
+		_reorder->cancel();
+	}
 	const auto value = option.get();
 	option->destroy([=] { removeDestroyed(value); });
 	_destroyed.push_back(std::move(option));
@@ -1225,9 +1276,9 @@ void Options::addEmptyOption() {
 	}
 	_list.push_back(std::make_unique<Option>(
 		_box,
-		_container,
+		_optionsLayout,
 		&_controller->session(),
-		_position + _list.size() + _destroyed.size(),
+		_optionsLayout->count(),
 		_chooseCorrectGroup,
 		_attachCallback,
 		_fieldDropCallback,
@@ -1337,6 +1388,7 @@ void Options::addEmptyOption() {
 		? anim::type::instant
 		: anim::type::normal);
 	fixShadows();
+	restartReorder();
 }
 
 void Options::removeDestroyed(not_null<Option*> option) {
@@ -1346,6 +1398,7 @@ void Options::removeDestroyed(not_null<Option*> option) {
 		&std::unique_ptr<Option>::get);
 	Assert(i != end(_destroyed));
 	_destroyed.erase(i);
+	restartReorder();
 }
 
 void Options::validateState() {
@@ -1371,6 +1424,63 @@ int Options::findField(not_null<Ui::InputField*> field) const {
 void Options::checkLastOption() {
 	removeEmptyTail();
 	addEmptyOption();
+}
+
+void Options::setupReorder() {
+	_reorder = std::make_unique<Ui::VerticalLayoutReorder>(
+		_optionsLayout);
+	_reorder->setMouseEventProxy([=](int i)
+			-> not_null<Ui::RpWidget*> {
+		if (i < int(_list.size())) {
+			if (const auto handle = _list[i]->handleWidget()) {
+				return handle;
+			}
+		}
+		return _optionsLayout->widgetAt(i);
+	});
+	_reorder->updates(
+	) | rpl::on_next([=](Ui::VerticalLayoutReorder::Single data) {
+		using State = Ui::VerticalLayoutReorder::State;
+		if (data.state == State::Started) {
+			++_reordering;
+		} else {
+			Ui::PostponeCall(_optionsLayout, [=] {
+				--_reordering;
+			});
+			if (data.state == State::Applied) {
+				base::reorder(
+					_list,
+					data.oldPosition,
+					data.newPosition);
+				fixShadows();
+			}
+		}
+	}, _box->lifetime());
+}
+
+void Options::restartReorder() {
+	if (!_reorder) {
+		return;
+	}
+	_reorder->cancel();
+
+	if (!_destroyed.empty()) {
+		return;
+	}
+	if (_chooseCorrectGroup || _multiCorrect) {
+		return;
+	}
+
+	_reorder->clearPinnedIntervals();
+
+	const auto count = int(_list.size());
+	if (count < 2) {
+		return;
+	}
+	if (_list.back()->isEmpty()) {
+		_reorder->addPinnedInterval(count - 1, 1);
+	}
+	_reorder->start();
 }
 
 class DurationIconAction final : public Ui::Menu::Action {

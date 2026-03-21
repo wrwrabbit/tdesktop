@@ -89,7 +89,7 @@ historyPollInChosenSelected: icon {{ "poll_select_check", historyFileInIconFgSel
 pollBoxOutlinePollEmojiIcon: icon{{ "poll/general/outline_poll_emoji", activeButtonFg }};
 pollBoxOutlinePollAddIcon: icon{{ "poll/general/outline_poll_add", activeButtonFg }};
 pollBoxOutlinePollAttachIcon: icon{{ "poll/general/outline_poll_attach", activeButtonFg }};
-pollBoxMenuPollOrderIcon: icon{{ "poll/general/menu_poll_order", activeButtonFg }};
+pollBoxMenuPollOrderIcon: icon{{ "poll/general/menu_poll_order-24x24", historyComposeIconFg }};
 pollBoxFilledPollDeadlineIcon: icon{{ "poll/filled/filled_poll_deadline", activeButtonFg }};
 pollBoxFilledPollViewIcon: icon{{ "poll/filled/filled_poll_view", activeButtonFg }};
 pollBoxFilledPollAddIcon: icon{{ "poll/filled/filled_poll_add", activeButtonFg }};
