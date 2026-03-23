@@ -1323,6 +1323,17 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 								TextUtilities::SetClipboardText(text);
 							},
 							&st::menuIconCopy);
+						if (poll->creator() && a->addedDate) {
+							const auto itemId = item->fullId();
+							result->addAction(
+								tr::lng_context_delete_poll_option(tr::now),
+								[=] {
+									poll->session().api().polls().deleteAnswer(
+										itemId,
+										pollOption);
+								},
+								&st::menuIconDelete);
+						}
 					}
 				}
 			}

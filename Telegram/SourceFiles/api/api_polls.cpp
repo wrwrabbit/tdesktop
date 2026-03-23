@@ -231,6 +231,27 @@ void Polls::addAnswer(
 	_pollAddAnswerRequestIds.emplace(itemId, requestId);
 }
 
+void Polls::deleteAnswer(FullMsgId itemId, const QByteArray &option) {
+	if (_pollVotesRequestIds.contains(itemId)) {
+		return;
+	}
+	const auto item = _session->data().message(itemId);
+	if (!item) {
+		return;
+	}
+	const auto requestId = _api.request(MTPmessages_DeletePollAnswer(
+		item->history()->peer->input(),
+		MTP_int(item->id),
+		MTP_bytes(option)
+	)).done([=](const MTPUpdates &result) {
+		_pollVotesRequestIds.erase(itemId);
+		_session->updates().applyUpdates(result);
+	}).fail([=] {
+		_pollVotesRequestIds.erase(itemId);
+	}).send();
+	_pollVotesRequestIds.emplace(itemId, requestId);
+}
+
 void Polls::close(not_null<HistoryItem*> item) {
 	const auto itemId = item->fullId();
 	if (_pollCloseRequestIds.contains(itemId)) {

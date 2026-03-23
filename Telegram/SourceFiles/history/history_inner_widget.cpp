@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_inner_widget.h"
 
+#include "api/api_polls.h"
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "core/application.h"
 #include "core/file_utilities.h"
@@ -2995,6 +2996,18 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 							TextUtilities::SetClipboardText(text);
 						},
 						&st::menuIconCopy);
+					if (poll->creator() && a->addedDate) {
+						const auto itemId = item->fullId();
+						const auto option = pollOptionLink;
+						_menu->addAction(
+							tr::lng_context_delete_poll_option(tr::now),
+							[=] {
+								poll->session().api().polls().deleteAnswer(
+									itemId,
+									option);
+							},
+							&st::menuIconDelete);
+					}
 				}
 			}
 		}

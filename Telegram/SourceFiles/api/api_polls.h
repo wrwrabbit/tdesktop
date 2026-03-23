@@ -42,6 +42,7 @@ public:
 		const PollMedia &media,
 		Fn<void()> done,
 		Fn<void(QString)> fail);
+	void deleteAnswer(FullMsgId itemId, const QByteArray &option);
 	void close(not_null<HistoryItem*> item);
 	void reloadResults(not_null<HistoryItem*> item);
 
