@@ -122,6 +122,7 @@ void AddPollOptionWidget::triggerSubmit() {
 	_session->api().polls().addAnswer(
 		_itemId,
 		{ text },
+		PollMedia(),
 		[=] { _submittedEvents.fire({}); },
 		[=](QString error) {
 			_field->setEnabled(true);

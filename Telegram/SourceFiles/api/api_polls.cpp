@@ -188,6 +188,7 @@ void Polls::sendVotes(
 void Polls::addAnswer(
 		FullMsgId itemId,
 		const TextWithEntities &text,
+		const PollMedia &media,
 		Fn<void()> done,
 		Fn<void(QString)> fail) {
 	if (_pollAddAnswerRequestIds.contains(itemId)) {
@@ -201,12 +202,16 @@ void Polls::addAnswer(
 		_session,
 		text.entities,
 		Api::ConvertOption::SkipLocal);
+	using Flag = MTPDinputPollAnswer::Flag;
+	const auto flags = media
+		? Flag::f_media
+		: Flag();
 	const auto answer = MTP_inputPollAnswer(
-		MTP_flags(MTPDinputPollAnswer::Flags(0)),
+		MTP_flags(flags),
 		MTP_textWithEntities(
 			MTP_string(text.text),
 			sentEntities),
-		MTPInputMedia());
+		media ? PollMediaToMTP(media) : MTPInputMedia());
 	const auto requestId = _api.request(MTPmessages_AddPollAnswer(
 		item->history()->peer->input(),
 		MTP_int(item->id),

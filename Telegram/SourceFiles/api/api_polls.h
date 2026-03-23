@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 class ApiWrap;
 class HistoryItem;
 struct PollData;
+struct PollMedia;
 
 namespace Main {
 class Session;
@@ -38,6 +39,7 @@ public:
 	void addAnswer(
 		FullMsgId itemId,
 		const TextWithEntities &text,
+		const PollMedia &media,
 		Fn<void()> done,
 		Fn<void(QString)> fail);
 	void close(not_null<HistoryItem*> item);
