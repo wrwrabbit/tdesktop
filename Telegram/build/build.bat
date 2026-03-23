@@ -234,12 +234,11 @@ if %BuildUWP% equ 0 (
     goto sign2
   )
 
-rem  No installer in PTG
-rem   if %AlphaVersion% equ 0 (
-rem     iscc /dMyAppVersion=%AppVersionStrSmall% /dMyAppVersionZero=%AppVersionStr% /dMyAppVersionFull=%AppVersionStrFull% "/dReleasePath=%ReleasePath%" "/dMyBuildTarget=%BuildTarget%" "%FullScriptPath%setup.iss"
-rem     if %errorlevel% neq 0 goto error
-rem     if not exist "%SetupFile%" goto error
-rem   )
+  if %AlphaVersion% equ 0 (
+    iscc /dMyAppVersion=%AppVersionStrSmall% /dMyAppVersionZero=%AppVersionStr% /dMyAppVersionFull=%AppVersionStrFull% "/dReleasePath=%ReleasePath%" "/dMyBuildTarget=%BuildTarget%" "%FullScriptPath%setup.iss"
+    if %errorlevel% neq 0 goto error
+    if not exist "%SetupFile%" goto error
+  )
 
   if %BuildARM% neq 0 (
     call Packer.exe -version %VersionForPacker% -path %BinaryName%.exe -path Updater.exe -target %BuildTarget% %AlphaBetaParam%
@@ -363,9 +362,9 @@ if %BuildUWP% equ 0 (
 
   if not exist "%DeployPath%\%UpdateFile%" goto error
   if not exist "%DeployPath%\%PortableFile%" goto error
-rem   if %AlphaVersion% equ 0 (
-rem     if not exist "%DeployPath%\%SetupFile%" goto error
-rem   )
+  if %AlphaVersion% equ 0 (
+    if not exist "%DeployPath%\%SetupFile%" goto error
+  )
 rem  if not exist "%DeployPath%\%BinaryName%.pdb" goto error
   if not exist "%DeployPath%\Updater.exe" goto error
 rem  if not exist "%DeployPath%\Updater.pdb" goto error
@@ -373,11 +372,9 @@ rem  if not exist "%DeployPath%\Updater.pdb" goto error
 
   xcopy "%DeployPath%\%UpdateFile%" "%FinalDeployPath%\" /Y
   xcopy "%DeployPath%\%PortableFile%" "%FinalDeployPath%\" /Y
-rem   if %AlphaVersion% equ 0 (
-rem     xcopy "%DeployPath%\%SetupFile%" "%FinalDeployPath%\" /Y
-rem   ) else (
-rem     xcopy "%DeployPath%\%AlphaKeyFile%" "%FinalDeployPath%\" /Y
-rem   )
+  if %AlphaVersion% equ 0 (
+    xcopy "%DeployPath%\%SetupFile%" "%FinalDeployPath%\" /Y
+  )
 )
 
 echo Version %AppVersionStrFull% is ready!
