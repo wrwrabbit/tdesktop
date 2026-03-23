@@ -131,6 +131,8 @@ namespace PTG
         {"lng_ptg_location_error_copy", "Не удалось скопировать Telegram в выбранную папку. Попробуйте ещё раз или выберите другую папку."},
         {"lng_ptg_location_error_folder", "Невозможно переместить Telegram в эту папку. Выберите другое место."},
         {"lng_ptg_location_same_dir", "Telegram уже запущен из этой папки."},
+        {"lng_ptg_location_setup_title", "Где хранить Telegram"},
+        {"lng_ptg_location_continue_downloads", "Остаться в папке Загрузок"},
         {0, nullptr}
     };
     static_assert(LangRuTranslation[sizeof(LangRuTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -260,6 +262,8 @@ namespace PTG
         {"lng_ptg_location_error_copy", "Не ўдалося скапіяваць Telegram у выбраную папку. Паспрабуйце яшчэ раз або выберыце іншую папку."},
         {"lng_ptg_location_error_folder", "Немагчыма перамясціць Telegram у гэтую папку. Выберыце іншае месца."},
         {"lng_ptg_location_same_dir", "Telegram ужо запушчаны з гэтай папкі."},
+        {"lng_ptg_location_setup_title", "Дзе захоўваць Telegram"},
+        {"lng_ptg_location_continue_downloads", "Застацца ў папцы загрузак"},
         {0, nullptr}
     };
     static_assert(LangByTranslation[sizeof(LangByTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -379,6 +383,8 @@ namespace PTG
         {"lng_ptg_location_error_copy", "Nie można skopiować Telegram do wybranego folderu. Spróbuj ponownie lub wybierz inny folder."},
         {"lng_ptg_location_error_folder", "Nie można przenieść Telegram do tego folderu. Wybierz inne miejsce."},
         {"lng_ptg_location_same_dir", "Telegram jest już uruchomiony z tego folderu."},
+        {"lng_ptg_location_setup_title", "Gdzie przechowywać Telegram"},
+        {"lng_ptg_location_continue_downloads", "Pozostań w folderze Pobrane"},
         {0, nullptr}
     };
     static_assert(LangPlTranslation[sizeof(LangPlTranslation) / sizeof(LangRecord) - 1].key == 0);

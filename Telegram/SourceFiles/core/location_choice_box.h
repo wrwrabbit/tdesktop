@@ -19,5 +19,6 @@ namespace Core {
 
 void FillLocationChoiceBox(not_null<Ui::GenericBox*> box);
 void ShowLocationChoiceBox(not_null<Ui::Show*> show);
+void ShowLocationChoiceBoxFirstRun(not_null<Ui::Show*> show);
 
 } // namespace Core

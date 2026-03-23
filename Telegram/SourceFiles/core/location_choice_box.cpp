@@ -110,12 +110,13 @@ void AddOptionCard(
 		st::boxRowPadding)->addClickHandler(std::move(callback));
 }
 
-void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box) {
-	box->setTitle(tr::lng_ptg_location_move_title());
+void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
+	box->setTitle(firstRun
+		? tr::lng_ptg_location_setup_title()
+		: tr::lng_ptg_location_move_title());
 
 	const auto layout = box->verticalLayout();
 	const auto binaryCategory = Core::ClassifyBinaryLocation();
-	const auto tdataLocation = Storage::CurrentTdataLocation();
 	const auto exeDir = QDir::toNativeSeparators(
 		QDir(cExeDir()).absolutePath());
 
@@ -302,82 +303,31 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box) {
 			});
 	}
 
-	if (tdataLocation != Storage::TdataLocation::Home) {
-		AddOptionCard(
-			layout,
-			tr::lng_ptg_location_card_data_home_title(tr::now),
-			tr::lng_ptg_location_card_data_home_desc(tr::now),
-			{
-				tr::lng_ptg_location_card_data_home_pro1(tr::now),
-				tr::lng_ptg_location_card_data_home_pro2(tr::now),
-				u"\u2212 "_q + tr::lng_ptg_location_card_data_home_con1(tr::now),
-			},
-			tr::lng_ptg_location_card_data_home_btn(),
-			[=] {
-				const auto targetTdataExists = QDir(
-					QDir::cleanPath(psAppDataPath()) + u"/tdata"_q
-				).exists();
-				box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
-					confirm->setTitle(tr::lng_ptg_location_confirm_title());
-					confirm->addRow(object_ptr<Ui::FlatLabel>(
-						confirm,
-						targetTdataExists
-							? tr::lng_ptg_location_confirm_overwrite_tdata(tr::now)
-							: tr::lng_ptg_location_confirm_text_simple(tr::now),
-						st::boxLabel));
-					confirm->addButton(tr::lng_settings_save(), [=] {
-						confirm->closeBox();
-						box->closeBox();
-						Storage::ScheduleSwitchToHome();
-						Core::Restart();
-					});
-					confirm->addButton(tr::lng_cancel(), [=] { confirm->closeBox(); });
-				}));
-			});
-	}
-
-	if (tdataLocation == Storage::TdataLocation::Home && !isAlreadyInAppData && !isSystemApp) {
-		AddOptionCard(
-			layout,
-			tr::lng_ptg_location_card_portable_title(tr::now),
-			tr::lng_ptg_location_card_portable_desc(tr::now),
-			{
-				tr::lng_ptg_location_card_portable_pro1(tr::now),
-				tr::lng_ptg_location_card_portable_pro2(tr::now),
-				u"\u2212 "_q + tr::lng_ptg_location_card_portable_con1(tr::now),
-			},
-			tr::lng_ptg_location_card_portable_btn(),
-			[=] {
-				box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
-					confirm->setTitle(tr::lng_ptg_location_confirm_title());
-					confirm->addRow(object_ptr<Ui::FlatLabel>(
-						confirm,
-						tr::lng_ptg_location_confirm_text_simple(tr::now),
-						st::boxLabel));
-					confirm->addButton(tr::lng_settings_save(), [=] {
-						confirm->closeBox();
-						box->closeBox();
-						Storage::ScheduleSwitchToPortable();
-						Core::Restart();
-					});
-					confirm->addButton(tr::lng_cancel(), [=] { confirm->closeBox(); });
-				}));
-			});
-	}
-
 	Ui::AddSkip(layout, st::ptgLocationCardSkip);
 
-	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	if (firstRun) {
+		box->addButton(tr::lng_ptg_location_continue_downloads(), [=] { box->closeBox(); });
+	} else {
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	}
 }
 
 } // namespace
 
 void FillLocationChoiceBox(not_null<Ui::GenericBox*> box) {
-	FillLocationChoiceBoxImpl(box);
+	FillLocationChoiceBoxImpl(box, false);
 }
 
 void ShowLocationChoiceBox(not_null<Ui::Show*> show) {
-	show->showBox(Box(FillLocationChoiceBoxImpl));
+	show->showBox(Box([](not_null<Ui::GenericBox*> box) {
+		FillLocationChoiceBoxImpl(box, false);
+	}));
+}
+
+void ShowLocationChoiceBoxFirstRun(not_null<Ui::Show*> show) {
+	show->showBox(Box([](not_null<Ui::GenericBox*> box) {
+		FillLocationChoiceBoxImpl(box, true);
+	}));
 }
 
 } // namespace Core

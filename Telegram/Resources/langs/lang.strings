@@ -7744,5 +7744,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_ptg_location_error_copy" = "Could not copy Telegram to the selected folder. Please try again or choose a different folder.";
 "lng_ptg_location_error_folder" = "Cannot move Telegram to that folder. Please choose a different location.";
 "lng_ptg_location_same_dir" = "Telegram is already running from that folder.";
+"lng_ptg_location_setup_title" = "Choose where to keep Telegram";
+"lng_ptg_location_continue_downloads" = "Continue in Downloads";
 
 // Keys finished
