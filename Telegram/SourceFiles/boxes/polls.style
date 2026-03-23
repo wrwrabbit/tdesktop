@@ -88,13 +88,14 @@ historyPollInChosenSelected: icon {{ "poll_select_check", historyFileInIconFgSel
 
 historyPollAddOptionTop: 3px;
 historyPollAddOptionHeight: 32px;
+historyPollAddOptionButtonSize: 26px;
 historyPollAddOptionField: InputField(defaultInputField) {
 	textBg: transparent;
 	textFg: windowFg;
 	placeholderFg: placeholderFg;
 	placeholderFgActive: placeholderFgActive;
 	placeholderFgError: placeholderFgActive;
-	textMargins: margins(8px, 7px, 28px, 4px);
+	textMargins: margins(32px, 7px, 28px, 4px);
 	heightMin: 32px;
 	heightMax: 32px;
 	style: TextStyle(defaultTextStyle) {
@@ -105,6 +106,20 @@ historyPollAddOptionField: InputField(defaultInputField) {
 	placeholderScale: 0.;
 	border: 0px;
 	borderActive: 0px;
+}
+historyPollAddOptionEmoji: IconButton(defaultIconButton) {
+	width: 26px;
+	height: 26px;
+	icon: icon {{ "poll/general/outline_poll_emoji-22x22", historyComposeIconFg }};
+	iconOver: icon {{ "poll/general/outline_poll_emoji-22x22", historyComposeIconFgOver }};
+	rippleAreaSize: 0px;
+}
+historyPollAddOptionAttach: IconButton(defaultIconButton) {
+	width: 26px;
+	height: 26px;
+	icon: icon {{ "poll/general/outline_poll_attach-22x22", historyComposeIconFg }};
+	iconOver: icon {{ "poll/general/outline_poll_attach-22x22", historyComposeIconFgOver }};
+	rippleAreaSize: 0px;
 }
 
 pollBoxOutlinePollEmojiIcon: icon{{ "poll/general/outline_poll_emoji", activeButtonFg }};

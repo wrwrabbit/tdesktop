@@ -13,6 +13,7 @@ struct PollData;
 
 namespace Ui {
 class InputField;
+class IconButton;
 } // namespace Ui
 
 namespace Main {
@@ -45,6 +46,8 @@ private:
 	const not_null<Main::Session*> _session;
 
 	Ui::InputField *_field = nullptr;
+	Ui::IconButton *_emoji = nullptr;
+	Ui::IconButton *_attach = nullptr;
 
 	rpl::event_stream<> _submittedEvents;
 	rpl::event_stream<> _cancelledEvents;

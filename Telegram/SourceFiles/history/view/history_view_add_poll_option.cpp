@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
+#include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/toast/toast.h"
 #include "styles/style_chat.h"
@@ -43,12 +44,26 @@ void AddPollOptionWidget::setupField() {
 		Ui::InputField::Mode::SingleLine,
 		tr::lng_polls_add_option_placeholder());
 
+	_emoji = Ui::CreateChild<Ui::IconButton>(
+		this,
+		st::historyPollAddOptionEmoji);
+
+	_attach = Ui::CreateChild<Ui::IconButton>(
+		this,
+		st::historyPollAddOptionAttach);
+
 	_field->setMaxLength(100);
 
 	const auto field = _field;
+	const auto emoji = _emoji;
+	const auto attach = _attach;
 	sizeValue(
-	) | rpl::on_next([field](QSize size) {
+	) | rpl::on_next([field, emoji, attach](QSize size) {
 		field->setGeometry(0, 0, size.width(), size.height());
+		const auto bsize = st::historyPollAddOptionButtonSize;
+		const auto by = (size.height() - bsize) / 2;
+		emoji->moveToLeft(0, by);
+		attach->moveToRight(0, by, size.width());
 	}, _field->lifetime());
 
 	_field->submits(
