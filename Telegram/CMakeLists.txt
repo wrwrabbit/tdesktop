@@ -951,6 +951,8 @@ PRIVATE
     history/view/history_view_draw_to_reply.h
     history/view/history_view_add_poll_option.cpp
     history/view/history_view_add_poll_option.h
+    history/view/history_view_element_overlay.cpp
+    history/view/history_view_element_overlay.h
     history/view/history_view_element.cpp
     history/view/history_view_element.h
     history/view/history_view_emoji_interactions.cpp

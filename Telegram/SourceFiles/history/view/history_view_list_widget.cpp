@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_translate_tracker.h"
 #include "history/view/history_view_read_metrics_tracker.h"
 #include "history/view/history_view_add_poll_option.h"
+#include "history/view/history_view_element_overlay.h"
 #include "data/data_poll.h"
 #include "history/view/history_view_top_peers_selector.h"
 #include "history/view/history_view_quick_action.h"
@@ -439,9 +440,15 @@ ListWidget::ListWidget(
 		[=](int d) { _delegate->listScrollTo(_visibleTop + d, false); },
 		[=](const QCursor &cursor) { setCursor(cursor); },
 		[=] { mouseActionUpdate(QCursor::pos()); setCursor(_cursor); },
-		[=] { return window()->isActiveWindow(); }) {
+		[=] { return window()->isActiveWindow(); })
+, _overlayHost(std::make_unique<ElementOverlayHost>(
+	this,
+	[=](not_null<const Element*> view) { return itemTop(view); })) {
 	setAttribute(Qt::WA_AcceptTouchEvents);
 	setMouseTracking(true);
+	_overlayHost->setHiddenCallback([=] {
+		_delegate->listWindowSetInnerFocus();
+	});
 	if (_readMetricsTracker) {
 		Core::App().inAppKeyPressed(
 		) | rpl::on_next([=] {
@@ -1176,7 +1183,7 @@ void ListWidget::visibleTopBottomUpdated(
 	_applyUpdatedScrollState.call();
 
 	_emojiInteractions->visibleAreaUpdated(_visibleTop, _visibleBottom);
-	updateAddPollOptionPosition();
+	_overlayHost->updatePosition();
 }
 
 void ListWidget::applyUpdatedScrollState() {
@@ -1897,91 +1904,44 @@ void ListWidget::elementShowAddPollOption(
 		not_null<PollData*> poll,
 		FullMsgId context,
 		QRect optionRect) {
-	showAddPollOption(view, poll, context);
-}
-
-void ListWidget::elementSubmitAddPollOption(FullMsgId context) {
-	if (_addPollOptionWidget && _addPollOptionContext == context) {
-		_addPollOptionWidget->triggerSubmit();
-	}
-}
-
-void ListWidget::showAddPollOption(
-		not_null<Element*> view,
-		not_null<PollData*> poll,
-		FullMsgId context) {
-	if (_addPollOptionWidget && _addPollOptionContext == context) {
-		hideAddPollOption();
-		return;
-	}
-	hideAddPollOption();
-
-	_addPollOptionView = view;
-	_addPollOptionContext = context;
-
-	if (const auto media = view->media()) {
-		media->setAddOptionActive(true);
-	}
-
-	_addPollOptionWidget = base::make_unique_q<AddPollOptionWidget>(
+	auto widget = base::make_unique_q<AddPollOptionWidget>(
 		this,
 		poll,
 		context,
 		controller());
-
-	_addPollOptionWidget->submitted(
-	) | rpl::on_next([=] {
-		hideAddPollOption();
-	}, _addPollOptionWidget->lifetime());
-
-	_addPollOptionWidget->cancelled(
-	) | rpl::on_next([=] {
-		hideAddPollOption();
-	}, _addPollOptionWidget->lifetime());
-
-	updateAddPollOptionPosition();
-	_addPollOptionWidget->show();
+	const auto raw = widget.get();
+	_overlayHost->show(
+		view,
+		context,
+		std::move(widget),
+		rpl::merge(raw->submitted(), raw->cancelled()),
+		[raw](not_null<Element*> v, int top) {
+			const auto media = v->media();
+			if (!media) {
+				return false;
+			}
+			const auto mediaPos = v->mediaTopLeft();
+			const auto innerWidth = v->innerGeometry().width()
+				- st::msgPadding.left()
+				- st::msgPadding.right();
+			const auto rect = media->addOptionRect(innerWidth);
+			raw->updatePosition(
+				QPoint(
+					mediaPos.x() + rect.x(),
+					top + mediaPos.y() + rect.y()),
+				rect.width());
+			return true;
+		},
+		[](not_null<Element*> v, bool active) {
+			if (const auto media = v->media()) {
+				media->setAddOptionActive(active);
+			}
+		},
+		[raw] { raw->triggerSubmit(); });
 }
 
-void ListWidget::hideAddPollOption() {
-	if (!_addPollOptionWidget) {
-		return;
-	}
-	if (_addPollOptionView) {
-		if (const auto media = _addPollOptionView->media()) {
-			media->setAddOptionActive(false);
-		}
-	}
-	_addPollOptionWidget = nullptr;
-	_addPollOptionView = nullptr;
-	_addPollOptionContext = FullMsgId();
-	_delegate->listWindowSetInnerFocus();
-}
-
-void ListWidget::updateAddPollOptionPosition() {
-	if (!_addPollOptionWidget || !_addPollOptionView) {
-		return;
-	}
-	const auto view = _addPollOptionView;
-	const auto top = itemTop(view);
-	if (top < 0) {
-		return;
-	}
-	const auto media = view->media();
-	if (!media) {
-		hideAddPollOption();
-		return;
-	}
-	const auto mediaPos = view->mediaTopLeft();
-	const auto innerWidth = view->innerGeometry().width()
-		- st::msgPadding.left()
-		- st::msgPadding.right();
-	const auto rect = media->addOptionRect(innerWidth);
-	_addPollOptionWidget->updatePosition(
-		QPoint(
-			mediaPos.x() + rect.x(),
-			top + mediaPos.y() + rect.y()),
-		rect.width());
+void ListWidget::elementSubmitAddPollOption(FullMsgId context) {
+	_overlayHost->triggerSubmit(context);
 }
 
 void ListWidget::elementOpenPhoto(
@@ -3164,15 +3124,7 @@ void ListWidget::mousePressEvent(QMouseEvent *e) {
 		e->accept();
 		return; // ignore mouse press, that was hiding context menu
 	}
-	if (_addPollOptionWidget && _addPollOptionView) {
-		const auto top = itemTop(_addPollOptionView);
-		const auto viewRect = (top >= 0)
-			? QRect(0, top, width(), _addPollOptionView->height())
-			: QRect();
-		if (!viewRect.contains(e->pos())) {
-			hideAddPollOption();
-		}
-	}
+	_overlayHost->handleClickOutside(e->pos());
 	if (_middleClickAutoscroll.active()) {
 		_middleClickAutoscroll.stop();
 		e->accept();
@@ -4461,9 +4413,7 @@ void ListWidget::showItemHighlight(not_null<HistoryItem*> item) {
 }
 
 void ListWidget::viewReplaced(not_null<const Element*> was, Element *now) {
-	if (_addPollOptionView == was) {
-		hideAddPollOption();
-	}
+	_overlayHost->viewGone(was);
 	if (_visibleTopItem == was) _visibleTopItem = now;
 	if (_scrollDateLastItem == was) _scrollDateLastItem = now;
 	if (_overElement == was) _overElement = now;

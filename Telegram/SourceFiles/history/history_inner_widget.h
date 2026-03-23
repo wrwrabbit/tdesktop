@@ -37,7 +37,7 @@ struct StateRequest;
 enum class CursorState : char;
 enum class PointState : char;
 enum class ElementChatMode : char;
-class AddPollOptionWidget;
+class ElementOverlayHost;
 class EmptyPainter;
 class Element;
 class TranslateTracker;
@@ -262,13 +262,6 @@ protected:
 	void contextMenuEvent(QContextMenuEvent *e) override;
 
 private:
-	void showAddPollOption(
-		not_null<Element*> view,
-		not_null<PollData*> poll,
-		FullMsgId context);
-	void hideAddPollOption();
-	void updateAddPollOptionPosition();
-
 	void onTouchSelect();
 	void onTouchScrollTimer();
 	void markReadMetricsStale();
@@ -610,9 +603,7 @@ private:
 	ClickHandlerPtr _scrollDateLink;
 	ClickHandlerPtr _forumThreadBarLink;
 
-	base::unique_qptr<HistoryView::AddPollOptionWidget> _addPollOptionWidget;
-	Element *_addPollOptionView = nullptr;
-	FullMsgId _addPollOptionContext;
+	std::unique_ptr<HistoryView::ElementOverlayHost> _overlayHost;
 
 };
 

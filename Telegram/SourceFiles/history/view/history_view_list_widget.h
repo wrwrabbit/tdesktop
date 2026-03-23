@@ -66,7 +66,7 @@ namespace HistoryView {
 
 struct TextState;
 struct StateRequest;
-class AddPollOptionWidget;
+class ElementOverlayHost;
 class EmojiInteractions;
 class TranslateTracker;
 class ReadMetricsTracker;
@@ -547,13 +547,6 @@ private:
 		Deselecting,
 	};
 
-	void showAddPollOption(
-		not_null<Element*> view,
-		not_null<PollData*> poll,
-		FullMsgId context);
-	void hideAddPollOption();
-	void updateAddPollOptionPosition();
-
 	void onTouchSelect();
 	void onTouchScrollTimer();
 	void markReadMetricsStale();
@@ -907,9 +900,7 @@ private:
 	rpl::event_stream<FullMsgId> _requestedToShowMessage;
 	rpl::event_stream<not_null<QKeyEvent*>> _scrollKeyEvents;
 
-	base::unique_qptr<AddPollOptionWidget> _addPollOptionWidget;
-	Element *_addPollOptionView = nullptr;
-	FullMsgId _addPollOptionContext;
+	std::unique_ptr<ElementOverlayHost> _overlayHost;
 
 	rpl::lifetime _viewerLifetime;
 
