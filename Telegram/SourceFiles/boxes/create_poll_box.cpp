@@ -529,7 +529,6 @@ private:
 		Option(const Option &other) = delete;
 		Option &operator=(const Option &other) = delete;
 
-		void toggleRemoveAlways(bool toggled);
 		void enableChooseCorrect(
 			std::shared_ptr<Ui::RadiobuttonGroup> group,
 			bool multiCorrect = false,
@@ -558,12 +557,9 @@ private:
 
 		[[nodiscard]] PollAnswer toPollAnswer(int index) const;
 
-		[[nodiscard]] rpl::producer<Qt::MouseButton> removeClicks() const;
-
 		[[nodiscard]] Ui::RpWidget *handleWidget() const;
 
 	private:
-		void createRemove();
 		void createAttach();
 		void createWarning();
 		void createHandle();
@@ -577,8 +573,6 @@ private:
 		Ui::InputField *_field = nullptr;
 		base::unique_qptr<Ui::PlainShadow> _shadow;
 		base::unique_qptr<PollMediaButton> _attach;
-		base::unique_qptr<Ui::CrossButton> _remove;
-		rpl::variable<bool> *_removeAlways = nullptr;
 		AttachCallback _attachCallback;
 		FieldDropCallback _fieldDropCallback;
 		WidgetDropCallback _widgetDropCallback;
@@ -715,9 +709,7 @@ Options::Option::Option(
 , _field(
 	Ui::CreateChild<Ui::InputField>(
 		_content.get(),
-		session->user()->isPremium()
-			? st::createPollOptionFieldPremium
-			: st::createPollOptionField,
+		st::createPollOptionFieldPremium,
 		Ui::InputField::Mode::NoNewlines,
 		tr::lng_polls_create_option_add()))
 , _attachCallback(std::move(attachCallback))
@@ -761,7 +753,6 @@ Options::Option::Option(
 	}, _field->lifetime());
 
 	createShadow();
-	createRemove();
 	createAttach();
 	createWarning();
 	createHandle();
@@ -800,47 +791,6 @@ void Options::Option::createShadow() {
 
 void Options::Option::destroyShadow() {
 	_shadow = nullptr;
-}
-
-void Options::Option::createRemove() {
-	using namespace rpl::mappers;
-
-	const auto field = this->field();
-	auto &lifetime = field->lifetime();
-
-	const auto remove = Ui::CreateChild<Ui::CrossButton>(
-		field.get(),
-		st::createPollOptionRemove);
-	remove->show(anim::type::instant);
-
-	const auto toggle = lifetime.make_state<rpl::variable<bool>>(false);
-	_removeAlways = lifetime.make_state<rpl::variable<bool>>(false);
-
-	field->changes(
-	) | rpl::on_next([field, toggle] {
-		// Don't capture 'this'! Because Option is a value type.
-		*toggle = !field->getLastText().isEmpty();
-	}, field->lifetime());
-#if 0
-	rpl::combine(
-		toggle->value(),
-		_removeAlways->value(),
-		_1 || _2
-	) | rpl::on_next([=](bool shown) {
-		remove->toggle(shown, anim::type::normal);
-	}, remove->lifetime());
-#endif
-
-	field->widthValue(
-	) | rpl::on_next([=](int width) {
-		const auto attachSkip = st::pollAttach.width + st::lineWidth * 4;
-		remove->moveToRight(
-			st::createPollOptionRemovePosition.x() + attachSkip,
-			st::createPollOptionRemovePosition.y(),
-			width);
-	}, remove->lifetime());
-
-	_remove.reset(remove);
 }
 
 void Options::Option::createAttach() {
@@ -964,10 +914,6 @@ void Options::Option::setPlaceholder() const {
 	field()->setPlaceholder(tr::lng_polls_create_option_add());
 }
 
-void Options::Option::toggleRemoveAlways(bool toggled) {
-	*_removeAlways = toggled;
-}
-
 void Options::Option::enableChooseCorrect(
 		std::shared_ptr<Ui::RadiobuttonGroup> group,
 		bool multiCorrect,
@@ -1059,10 +1005,6 @@ PollAnswer Options::Option::toPollAnswer(int index) const {
 	TextUtilities::Trim(result.text);
 	result.correct = _correct ? _correct->entity()->Checkbox::checked() : false;
 	return result;
-}
-
-rpl::producer<Qt::MouseButton> Options::Option::removeClicks() const {
-	return _remove->clicks();
 }
 
 Options::Options(
@@ -1256,10 +1198,8 @@ void Options::fixAfterErase() {
 
 	const auto last = _list.end() - 1;
 	(*last)->setPlaceholder();
-	(*last)->toggleRemoveAlways(false);
 	if (last != begin(_list)) {
 		(*(last - 1))->setPlaceholder();
-		(*(last - 1))->toggleRemoveAlways(false);
 	}
 	fixShadows();
 }
@@ -1272,7 +1212,6 @@ void Options::addEmptyOption() {
 	}
 	if (_list.size() > 1) {
 		(*(_list.end() - 2))->removePlaceholder();
-		(*(_list.end() - 2))->toggleRemoveAlways(true);
 	}
 	_list.push_back(std::make_unique<Option>(
 		_box,
@@ -1291,6 +1230,7 @@ void Options::addEmptyOption() {
 	}
 	const auto field = _list.back()->field();
 	if (const auto emojiPanel = _emojiPanel) {
+		const auto isPremium = _controller->session().user()->isPremium();
 		const auto emojiToggle = Ui::AddEmojiToggleToField(
 			field,
 			_box,
@@ -1310,12 +1250,14 @@ void Options::addEmptyOption() {
 					Ui::InsertEmojiAtCursor(field->textCursor(), data.emoji);
 				}
 			}, _emojiPanelLifetime);
-			emojiPanel->selector()->customEmojiChosen(
-			) | rpl::on_next([=](ChatHelpers::FileChosen data) {
-				if (field->hasFocus()) {
-					Data::InsertCustomEmoji(field, data.document);
-				}
-			}, _emojiPanelLifetime);
+			if (isPremium) {
+				emojiPanel->selector()->customEmojiChosen(
+				) | rpl::on_next([=](ChatHelpers::FileChosen data) {
+					if (field->hasFocus()) {
+						Data::InsertCustomEmoji(field, data.document);
+					}
+				}, _emojiPanelLifetime);
+			}
 		}, emojiToggle->lifetime());
 	}
 	field->submits(
@@ -1363,26 +1305,6 @@ void Options::addEmptyOption() {
 		}
 		return base::EventFilterResult::Cancel;
 	});
-
-	_list.back()->removeClicks(
-	) | rpl::on_next([=] {
-		Ui::PostponeCall(crl::guard(field, [=] {
-			Expects(!_list.empty());
-
-			const auto item = begin(_list) + findField(field);
-			if (item == _list.end() - 1) {
-				(*item)->clearValue();
-				return;
-			}
-			if ((*item)->hasFocus()) {
-				(*(item + 1))->setFocus();
-			}
-			destroy(std::move(*item));
-			_list.erase(item);
-			fixAfterErase();
-			validateState();
-		}));
-	}, field->lifetime());
 
 	_list.back()->show((_list.size() == 1)
 		? anim::type::instant
@@ -1575,14 +1497,12 @@ not_null<Ui::InputField*> CreatePollBox::setupQuestion(
 			Ui::InputField::Mode::MultiLine,
 			tr::lng_polls_create_question_placeholder()),
 		st::createPollFieldPadding
-			+ (isPremium
-				? QMargins(0, 0, st::defaultComposeFiles.emoji.inner.width, 0)
-				: QMargins()));
+			+ QMargins(0, 0, st::defaultComposeFiles.emoji.inner.width, 0));
 	InitField(getDelegate()->outerContainer(), question, session);
 	question->setMaxLength(kQuestionLimit + kErrorLimit);
 	question->setSubmitSettings(Ui::InputField::SubmitSettings::Both);
 
-	if (isPremium) {
+	{
 		using Selector = ChatHelpers::TabbedSelector;
 		const auto outer = getDelegate()->outerContainer();
 		_emojiPanel = base::make_unique_q<ChatHelpers::TabbedPanel>(
@@ -1607,18 +1527,21 @@ not_null<Ui::InputField*> CreatePollBox::setupQuestion(
 			_controller,
 			emojiPanel,
 			st::createPollOptionFieldPremiumEmojiPosition);
+		emojiToggle->show();
 		emojiPanel->selector()->emojiChosen(
 		) | rpl::on_next([=](ChatHelpers::EmojiChosen data) {
 			if (question->hasFocus()) {
 				Ui::InsertEmojiAtCursor(question->textCursor(), data.emoji);
 			}
 		}, emojiToggle->lifetime());
-		emojiPanel->selector()->customEmojiChosen(
-		) | rpl::on_next([=](ChatHelpers::FileChosen data) {
-			if (question->hasFocus()) {
-				Data::InsertCustomEmoji(question, data.document);
-			}
-		}, emojiToggle->lifetime());
+		if (isPremium) {
+			emojiPanel->selector()->customEmojiChosen(
+			) | rpl::on_next([=](ChatHelpers::FileChosen data) {
+				if (question->hasFocus()) {
+					Data::InsertCustomEmoji(question, data.document);
+				}
+			}, emojiToggle->lifetime());
+		}
 	}
 
 	const auto warning = CreateWarningLabel(
@@ -1649,6 +1572,7 @@ not_null<Ui::InputField*> CreatePollBox::setupQuestion(
 not_null<Ui::InputField*> CreatePollBox::setupDescription(
 		not_null<Ui::VerticalLayout*> container) {
 	const auto session = &_controller->session();
+	const auto isPremium = session->user()->isPremium();
 	const auto description = container->add(
 		object_ptr<Ui::InputField>(
 			container,
@@ -1658,6 +1582,39 @@ not_null<Ui::InputField*> CreatePollBox::setupDescription(
 		st::pollDescriptionFieldPadding);
 	InitField(getDelegate()->outerContainer(), description, session);
 	description->setSubmitSettings(Ui::InputField::SubmitSettings::Both);
+
+	if (const auto emojiPanel = _emojiPanel.get()) {
+		const auto emojiToggle = Ui::AddEmojiToggleToField(
+			description,
+			this,
+			_controller,
+			emojiPanel,
+			QPoint(
+				-st::pollDescriptionField.textMargins.right(),
+				-st::lineWidth));
+		emojiToggle->shownValue() | rpl::on_next([=](bool shown) {
+			if (!shown) {
+				return;
+			}
+			emojiPanel->selector()->emojiChosen(
+			) | rpl::on_next([=](ChatHelpers::EmojiChosen data) {
+				if (description->hasFocus()) {
+					Ui::InsertEmojiAtCursor(
+						description->textCursor(),
+						data.emoji);
+				}
+			}, emojiToggle->lifetime());
+			if (isPremium) {
+				emojiPanel->selector()->customEmojiChosen(
+				) | rpl::on_next([=](ChatHelpers::FileChosen data) {
+					if (description->hasFocus()) {
+						Data::InsertCustomEmoji(description, data.document);
+					}
+				}, emojiToggle->lifetime());
+			}
+		}, emojiToggle->lifetime());
+	}
+
 	return description;
 }
 
@@ -2603,9 +2560,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		field->sizeValue(
 		) | rpl::on_next([=](QSize size) {
 			button->moveToRight(
-				st::createPollOptionRemovePosition.x() + st::pollAttachShift.x(),
-				((size.height() - button->height()) / 2)
-					+ st::pollAttachShift.y(),
+				st::createPollAttachPosition.x(),
+				st::createPollAttachPosition.y(),
 				size.width());
 		}, button->lifetime());
 		button->clicks(

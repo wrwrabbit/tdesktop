@@ -292,7 +292,7 @@ Tasks::Task::Task(
 	Ui::CreateChild<Ui::InputField>(
 		_content.get(),
 		session->user()->isPremium()
-			? st::createPollOptionFieldPremium
+			? st::createTodoOptionField
 			: st::createPollOptionField,
 		Ui::InputField::Mode::MultiLine,
 		tr::lng_todo_create_list_add()))
@@ -715,7 +715,7 @@ void Tasks::initTaskField(not_null<Task*> task, TextWithEntities text) {
 			_controller,
 			emojiPanel,
 			QPoint(
-				-st::createPollOptionFieldPremium.textMargins.right(),
+				-st::createTodoOptionField.textMargins.right(),
 				st::createPollOptionEmojiPositionSkip));
 		emojiToggle->shownValue() | rpl::on_next([=](bool shown) {
 			if (!shown) {
@@ -944,7 +944,7 @@ not_null<Ui::InputField*> EditTodoListBox::setupTitle(
 			this,
 			_controller,
 			_emojiPanel.get(),
-			st::createPollOptionFieldPremiumEmojiPosition);
+			st::createTodoOptionFieldEmojiPosition);
 		_emojiPanel->selector()->emojiChosen(
 		) | rpl::on_next([=](ChatHelpers::EmojiChosen data) {
 			if (title->hasFocus()) {

@@ -131,9 +131,9 @@ createPollOptionField: InputField(createPollField) {
 	heightMax: 68px;
 }
 createPollOptionFieldPremium: InputField(createPollOptionField) {
-	textMargins: margins(22px, 11px, 68px, 11px);
+	textMargins: margins(22px, 11px, 72px, 11px);
 }
-createPollOptionFieldPremiumEmojiPosition: point(15px, -1px);
+createPollOptionFieldPremiumEmojiPosition: point(13px, -1px);
 createPollSolutionField: InputField(createPollField) {
 	textMargins: margins(0px, 4px, 0px, 4px);
 	border: 1px;
@@ -158,8 +158,9 @@ createPollOptionRemove: CrossButton {
 	loadingPeriod: 1000;
 	ripple: defaultRippleAnimationBgOver;
 }
+createPollAttachPosition: point(0px, 0px);
 createPollOptionRemovePosition: point(11px, 9px);
-createPollOptionEmojiPositionSkip: 4px;
+createPollOptionEmojiPositionSkip: 6px;
 createPollWarning: FlatLabel(defaultFlatLabel) {
 	textFg: windowSubTextFg;
 	palette: TextPalette(defaultTextPalette) {
@@ -169,6 +170,11 @@ createPollWarning: FlatLabel(defaultFlatLabel) {
 createPollWarningPosition: point(16px, 6px);
 createPollCheckboxMargin: margins(22px, 10px, 22px, 10px);
 createPollFieldTitlePadding: margins(22px, 7px, 10px, 6px);
+
+createTodoOptionField: InputField(createPollOptionField) {
+	textMargins: margins(22px, 11px, 68px, 11px);
+}
+createTodoOptionFieldEmojiPosition: point(13px, -1px);
 
 pollResultsQuestion: FlatLabel(defaultFlatLabel) {
 	minWidth: 320px;
@@ -204,8 +210,8 @@ pollAttach: IconButton(defaultIconButton) {
 	width: pollAttachTextSkip;
 	height: pollAttachTextSkip;
 
-	icon: icon {{ "poll/general/outline_poll_attach-24x24", historyComposeIconFg }};
-	iconOver: icon {{ "poll/general/outline_poll_attach-24x24", historyComposeIconFgOver }};
+	icon: icon {{ "poll/general/outline_poll_attach-26x26", historyComposeIconFg }};
+	iconOver: icon {{ "poll/general/outline_poll_attach-26x26", historyComposeIconFgOver }};
 
 	rippleAreaPosition: point(0px, 0px);
 	rippleAreaSize: pollAttachTextSkip;
@@ -218,7 +224,7 @@ createPollDurationIconMargins: margins(2px, 2px, 2px, 2px);
 
 pollDescriptionFieldPadding: margins(22px, 5px, 11px, 5px);
 pollDescriptionField: InputField(createPollField) {
-	textMargins: margins(0px, 4px, pollAttachTextSkip, 4px);
+	textMargins: margins(0px, 4px, pollAttachTextSkip + pollAttachTextSkip + 1px, 4px);
 	border: 0px;
 	borderActive: 0px;
 }
