@@ -189,6 +189,7 @@ public:
 
 	QRect effectIconGeometry() const override;
 	QRect innerGeometry() const override;
+	QPoint mediaTopLeft() const override;
 	[[nodiscard]] BottomRippleMask bottomRippleMask(int buttonHeight) const;
 
 private:
@@ -398,6 +399,7 @@ private:
 	uint32 _postShowingAuthor : 1 = 0;
 
 	BottomInfo _bottomInfo;
+	mutable QPoint _lastMediaPosition;
 
 };
 

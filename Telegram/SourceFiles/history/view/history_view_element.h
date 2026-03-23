@@ -107,6 +107,12 @@ public:
 	virtual void elementShowPollResults(
 		not_null<PollData*> poll,
 		FullMsgId context) = 0;
+	virtual void elementShowAddPollOption(
+		not_null<Element*> view,
+		not_null<PollData*> poll,
+		FullMsgId context,
+		QRect optionRect) = 0;
+	virtual void elementSubmitAddPollOption(FullMsgId context) = 0;
 	virtual void elementOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) = 0;
@@ -163,6 +169,12 @@ public:
 	void elementShowPollResults(
 		not_null<PollData*> poll,
 		FullMsgId context) override;
+	void elementShowAddPollOption(
+		not_null<Element*> view,
+		not_null<PollData*> poll,
+		FullMsgId context,
+		QRect optionRect) override;
+	void elementSubmitAddPollOption(FullMsgId context) override;
 	void elementOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) override;
@@ -637,6 +649,7 @@ public:
 
 	[[nodiscard]] virtual QRect effectIconGeometry() const;
 	[[nodiscard]] virtual QRect innerGeometry() const = 0;
+	[[nodiscard]] virtual QPoint mediaTopLeft() const;
 
 	void customEmojiRepaint();
 	void prepareCustomEmojiPaint(

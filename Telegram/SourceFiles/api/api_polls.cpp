@@ -185,6 +185,47 @@ void Polls::sendVotes(
 	_pollVotesRequestIds.emplace(itemId, requestId);
 }
 
+void Polls::addAnswer(
+		FullMsgId itemId,
+		const TextWithEntities &text,
+		Fn<void()> done,
+		Fn<void(QString)> fail) {
+	if (_pollAddAnswerRequestIds.contains(itemId)) {
+		return;
+	}
+	const auto item = _session->data().message(itemId);
+	if (!item) {
+		return;
+	}
+	const auto sentEntities = Api::EntitiesToMTP(
+		_session,
+		text.entities,
+		Api::ConvertOption::SkipLocal);
+	const auto answer = MTP_inputPollAnswer(
+		MTP_flags(MTPDinputPollAnswer::Flags(0)),
+		MTP_textWithEntities(
+			MTP_string(text.text),
+			sentEntities),
+		MTPInputMedia());
+	const auto requestId = _api.request(MTPmessages_AddPollAnswer(
+		item->history()->peer->input(),
+		MTP_int(item->id),
+		answer
+	)).done([=](const MTPUpdates &result) {
+		_pollAddAnswerRequestIds.erase(itemId);
+		_session->updates().applyUpdates(result);
+		if (done) {
+			done();
+		}
+	}).fail([=](const MTP::Error &error) {
+		_pollAddAnswerRequestIds.erase(itemId);
+		if (fail) {
+			fail(error.type());
+		}
+	}).send();
+	_pollAddAnswerRequestIds.emplace(itemId, requestId);
+}
+
 void Polls::close(not_null<HistoryItem*> item) {
 	const auto itemId = item->fullId();
 	if (_pollCloseRequestIds.contains(itemId)) {

@@ -71,6 +71,9 @@ public:
 	bool hasHeavyPart() const override;
 	void parentTextUpdated() override;
 
+	[[nodiscard]] QRect addOptionRect(int innerWidth) const override;
+	void setAddOptionActive(bool active) override;
+
 private:
 	struct AnswerAnimation;
 	struct AnswersAnimation;
@@ -201,6 +204,7 @@ private:
 	void radialAnimationCallback() const;
 
 	void toggleRipple(Answer &answer, bool pressed);
+	void toggleAddOptionRipple(bool pressed);
 	void toggleLinkRipple(bool pressed);
 	void toggleMultiOption(const QByteArray &option);
 	void sendMultiOptions();
@@ -223,6 +227,15 @@ private:
 	[[nodiscard]] int countSolutionBlockHeight(int innerWidth) const;
 	[[nodiscard]] int countSolutionMediaHeight(int mediaWidth) const;
 	void paintSolutionBlock(
+		Painter &p,
+		int left,
+		int top,
+		int paintw,
+		const PaintContext &context) const;
+
+	[[nodiscard]] bool canAddOption() const;
+	[[nodiscard]] int addOptionHeight() const;
+	void paintAddOption(
 		Painter &p,
 		int left,
 		int top,
@@ -257,7 +270,10 @@ private:
 	ClickHandlerPtr _sendVotesLink;
 	ClickHandlerPtr _adminVotesLink;
 	ClickHandlerPtr _adminBackVoteLink;
+	ClickHandlerPtr _addOptionLink;
+	ClickHandlerPtr _saveOptionLink;
 	mutable ClickHandlerPtr _showSolutionLink;
+	mutable std::unique_ptr<Ui::RippleAnimation> _addOptionRipple;
 	mutable std::unique_ptr<Ui::RippleAnimation> _linkRipple;
 	mutable int _linkRippleShift = 0;
 
@@ -283,6 +299,7 @@ private:
 	bool _hasSelected = false;
 	bool _anyAnswerHasMedia = false;
 	bool _votedFromHere = false;
+	bool _addOptionActive = false;
 	mutable bool _wrongAnswerAnimated = false;
 	mutable bool _adminShowResults = false;
 

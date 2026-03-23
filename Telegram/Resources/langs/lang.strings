@@ -6913,6 +6913,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_polls_votes_collapse" = "Collapse";
 "lng_polls_vote_yesterday" = "yesterday";
 "lng_polls_option_added_by" = "Added by {user}";
+"lng_polls_add_option" = "Add an Option";
+"lng_polls_add_option_placeholder" = "Option text...";
+"lng_polls_max_options_reached" = "Maximum number of options reached.";
+"lng_polls_add_option_duplicate" = "This option already exists.";
+"lng_polls_add_option_closed" = "This poll has been closed.";
+"lng_polls_add_option_error" = "Could not add the option. Please try again.";
+"lng_polls_add_option_save" = "Save";
 
 "lng_todo_title" = "Checklist";
 "lng_todo_title_group" = "Group Checklist";

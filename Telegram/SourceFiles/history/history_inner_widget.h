@@ -37,6 +37,7 @@ struct StateRequest;
 enum class CursorState : char;
 enum class PointState : char;
 enum class ElementChatMode : char;
+class AddPollOptionWidget;
 class EmptyPainter;
 class Element;
 class TranslateTracker;
@@ -155,6 +156,12 @@ public:
 	void elementShowPollResults(
 		not_null<PollData*> poll,
 		FullMsgId context);
+	void elementShowAddPollOption(
+		not_null<HistoryView::Element*> view,
+		not_null<PollData*> poll,
+		FullMsgId context,
+		QRect optionRect);
+	void elementSubmitAddPollOption(FullMsgId context);
 	void elementOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context);
@@ -255,6 +262,13 @@ protected:
 	void contextMenuEvent(QContextMenuEvent *e) override;
 
 private:
+	void showAddPollOption(
+		not_null<Element*> view,
+		not_null<PollData*> poll,
+		FullMsgId context);
+	void hideAddPollOption();
+	void updateAddPollOptionPosition();
+
 	void onTouchSelect();
 	void onTouchScrollTimer();
 	void markReadMetricsStale();
@@ -595,6 +609,10 @@ private:
 	int _scrollDateLastItemTop = 0;
 	ClickHandlerPtr _scrollDateLink;
 	ClickHandlerPtr _forumThreadBarLink;
+
+	base::unique_qptr<HistoryView::AddPollOptionWidget> _addPollOptionWidget;
+	Element *_addPollOptionView = nullptr;
+	FullMsgId _addPollOptionContext;
 
 };
 

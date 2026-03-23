@@ -49,6 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/crc32hash.h"
 #include "base/unixtime.h"
 #include "base/timer.h"
+#include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "apiwrap.h"
 #include "api/api_polls.h"
@@ -470,6 +471,36 @@ Poll::Poll(
 			updateAnswerVotes();
 			startAnswersAnimation();
 		})))
+, _addOptionLink(
+	std::make_shared<LambdaClickHandler>(crl::guard(
+		this,
+		[=](ClickContext context) {
+			const auto my = context.other.value<ClickHandlerContext>();
+			if (const auto delegate = my.elementDelegate
+				? my.elementDelegate()
+				: nullptr) {
+				const auto innerWidth = width()
+					- st::msgPadding.left()
+					- st::msgPadding.right();
+				delegate->elementShowAddPollOption(
+					_parent,
+					_poll,
+					_parent->data()->fullId(),
+					addOptionRect(innerWidth));
+			}
+		})))
+, _saveOptionLink(
+	std::make_shared<LambdaClickHandler>(crl::guard(
+		this,
+		[=](ClickContext context) {
+			const auto my = context.other.value<ClickHandlerContext>();
+			if (const auto delegate = my.elementDelegate
+				? my.elementDelegate()
+				: nullptr) {
+				delegate->elementSubmitAddPollOption(
+					_parent->data()->fullId());
+			}
+		})))
 , _closeTimer([=] { repaint(); }) {
 	if (!consumed.text.isEmpty()) {
 		updateDescription();
@@ -510,6 +541,7 @@ QSize Poll::countOptimalSize() {
 			+ padding.bottom();
 	}), 0);
 
+	const auto addOptionHeight = canAddOption() ? this->addOptionHeight() : 0;
 	const auto bottomButtonHeight = inlineFooter()
 		? 0
 		: st::historyPollBottomButtonSkip;
@@ -521,6 +553,7 @@ QSize Poll::countOptimalSize() {
 		+ st::msgDateFont->height
 		+ st::historyPollAnswersSkip
 		+ answersHeight
+		+ addOptionHeight
 		+ st::historyPollTotalVotesSkip
 		+ bottomButtonHeight
 		+ st::msgDateFont->height
@@ -562,6 +595,45 @@ bool Poll::showVotersCount() const {
 bool Poll::inlineFooter() const {
 	return !(_flags
 		& (PollData::Flag::PublicVotes | PollData::Flag::MultiChoice));
+}
+
+bool Poll::canAddOption() const {
+	return (_flags & PollData::Flag::OpenAnswers)
+		&& !(_flags & PollData::Flag::Closed)
+		&& (int(_poll->answers.size())
+			< _poll->session().appConfig().pollOptionsLimit());
+}
+
+int Poll::addOptionHeight() const {
+	return st::historyPollAnswerPaddingNoMedia.top()
+		+ st::msgDateFont->height
+		+ st::historyPollAnswerPaddingNoMedia.bottom();
+}
+
+QRect Poll::addOptionRect(int innerWidth) const {
+	const auto answersHeight = ranges::accumulate(ranges::views::all(
+		_answers
+	) | ranges::views::transform([&](const Answer &answer) {
+		return countAnswerHeight(answer, innerWidth);
+	}), 0);
+	const auto top = countQuestionTop(innerWidth)
+		+ _question.countHeight(innerWidth)
+		+ st::historyPollSubtitleSkip
+		+ st::msgDateFont->height
+		+ st::historyPollAnswersSkip
+		+ answersHeight;
+	return QRect(
+		st::msgPadding.left(),
+		top,
+		innerWidth,
+		addOptionHeight());
+}
+
+void Poll::setAddOptionActive(bool active) {
+	if (_addOptionActive != active) {
+		_addOptionActive = active;
+		history()->owner().requestViewResize(_parent);
+	}
 }
 
 int Poll::countAnswerTop(
@@ -624,6 +696,7 @@ QSize Poll::countCurrentSize(int newWidth) {
 		return countAnswerHeight(answer, innerWidth);
 	}), 0);
 
+	const auto addOptionHeight = canAddOption() ? this->addOptionHeight() : 0;
 	const auto bottomButtonHeight = inlineFooter()
 		? 0
 		: st::historyPollBottomButtonSkip;
@@ -634,6 +707,7 @@ QSize Poll::countCurrentSize(int newWidth) {
 		+ st::msgDateFont->height
 		+ st::historyPollAnswersSkip
 		+ answersHeight
+		+ addOptionHeight
 		+ st::historyPollTotalVotesSkip
 		+ bottomButtonHeight
 		+ st::msgDateFont->height
@@ -1636,6 +1710,10 @@ void Poll::draw(Painter &p, const PaintContext &context) const {
 			context);
 		tshift += height;
 	}
+	if (canAddOption()) {
+		paintAddOption(p, padding.left(), tshift, paintw, context);
+		tshift += addOptionHeight();
+	}
 	if (!inlineFooter()) {
 		paintBottom(p, padding.left(), tshift, paintw, context);
 	} else if (!_totalVotesLabel.isEmpty()) {
@@ -1693,6 +1771,55 @@ void Poll::paintInlineFooter(
 	}
 }
 
+void Poll::paintAddOption(
+		Painter &p,
+		int left,
+		int top,
+		int paintw,
+		const PaintContext &context) const {
+	if (_addOptionActive) {
+		return;
+	}
+	const auto stm = context.messageStyle();
+	const auto height = addOptionHeight();
+	const auto &padding = st::historyPollAnswerPaddingNoMedia;
+	const auto textTop = top + padding.top();
+
+	if (_addOptionRipple) {
+		p.setOpacity(st::historyPollRippleOpacity);
+		_addOptionRipple->paint(
+			p,
+			left - st::msgPadding.left(),
+			top,
+			width(),
+			&stm->msgWaveformInactive->c);
+		if (_addOptionRipple->empty()) {
+			_addOptionRipple.reset();
+		}
+		p.setOpacity(1.);
+	}
+
+	const auto color = stm->msgDateFg->c;
+	const auto &icon = st::pollBoxOutlinePollAddIcon;
+	const auto &radio = st::historyPollRadio;
+	const auto iconLeft = left
+		+ (radio.diameter - icon.width()) / 2;
+	const auto iconTop = textTop
+		+ (st::msgDateFont->height - icon.height()) / 2;
+	icon.paint(p, iconLeft, iconTop, width(), color);
+
+	p.setFont(st::normalFont);
+	p.setPen(stm->msgDateFg);
+	const auto text = tr::lng_polls_add_option(tr::now);
+	const auto textw = st::normalFont->width(text);
+	p.drawTextLeft(
+		left + st::historyPollAnswerPadding.left(),
+		textTop,
+		width(),
+		text,
+		textw);
+}
+
 void Poll::paintBottom(
 		Painter &p,
 		int left,
@@ -1703,6 +1830,19 @@ void Poll::paintBottom(
 		+ st::msgPadding.bottom()
 		+ st::historyPollBottomButtonTop;
 	const auto stm = context.messageStyle();
+	if (_addOptionActive) {
+		p.setFont(st::semiboldFont);
+		p.setPen(stm->msgFileThumbLinkFg);
+		const auto text = tr::lng_polls_add_option_save(tr::now);
+		const auto textw = st::semiboldFont->width(text);
+		p.drawTextLeft(
+			left + (paintw - textw) / 2,
+			stringtop,
+			width(),
+			text,
+			textw);
+		return;
+	}
 	if (isAuthorNotVoted() && !_adminShowResults && !canSendVotes()) {
 		p.setPen(stm->msgFileThumbLinkFg);
 		const auto labelWidth = _adminVotesLabel.maxWidth();
@@ -2769,10 +2909,25 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 		}
 		tshift += height;
 	}
+	if (canAddOption()) {
+		const auto optHeight = addOptionHeight();
+		if (QRect(0, tshift, width(), optHeight).contains(point)) {
+			_lastLinkPoint = point;
+			result.link = _addOptionLink;
+			return result;
+		}
+		tshift += optHeight;
+	}
 	{
 		const auto linkHeight = bottomButtonHeight();
 		const auto linkTop = height() - linkHeight;
-		if (isAuthorNotVoted() && !_adminShowResults && !canSendVotes()) {
+		if (_addOptionActive) {
+			if (QRect(0, linkTop, width(), linkHeight).contains(point)) {
+				_lastLinkPoint = point;
+				result.link = _saveOptionLink;
+				return result;
+			}
+		} else if (isAuthorNotVoted() && !_adminShowResults && !canSendVotes()) {
 			if (QRect(0, linkTop, width(), linkHeight).contains(point)) {
 				_lastLinkPoint = point;
 				result.link = _adminVotesLink;
@@ -2872,10 +3027,13 @@ void Poll::clickHandlerPressedChanged(
 		if (canVote()) {
 			toggleRipple(*i, pressed);
 		}
+	} else if (handler == _addOptionLink) {
+		toggleAddOptionRipple(pressed);
 	} else if (handler == _sendVotesLink
 		|| handler == _showResultsLink
 		|| handler == _adminVotesLink
-		|| handler == _adminBackVoteLink) {
+		|| handler == _adminBackVoteLink
+		|| handler == _saveOptionLink) {
 		toggleLinkRipple(pressed);
 	}
 	if (_attachedMediaAttach) {
@@ -3000,6 +3158,29 @@ bool Poll::timerFooterMultiline(int paintw) const {
 	const auto fullw = st::msgDateFont->width(full);
 	const auto skipw = _parent->skipBlockWidth();
 	return (paintw + fullw) / 2 > paintw - skipw;
+}
+
+void Poll::toggleAddOptionRipple(bool pressed) {
+	if (pressed) {
+		const auto optWidth = width();
+		const auto optHeight = addOptionHeight();
+		if (!_addOptionRipple) {
+			auto mask = Ui::RippleAnimation::RectMask(
+				QSize(optWidth, optHeight));
+			_addOptionRipple = std::make_unique<Ui::RippleAnimation>(
+				st::defaultRippleAnimation,
+				std::move(mask),
+				[=] { repaint(); });
+		}
+		const auto innerWidth = optWidth
+			- st::msgPadding.left()
+			- st::msgPadding.right();
+		const auto rect = addOptionRect(innerWidth);
+		_addOptionRipple->add(_lastLinkPoint
+			- QPoint(0, rect.y()));
+	} else if (_addOptionRipple) {
+		_addOptionRipple->lastStop();
+	}
 }
 
 void Poll::toggleLinkRipple(bool pressed) {

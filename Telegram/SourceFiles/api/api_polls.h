@@ -35,6 +35,11 @@ public:
 	void sendVotes(
 		FullMsgId itemId,
 		const std::vector<QByteArray> &options);
+	void addAnswer(
+		FullMsgId itemId,
+		const TextWithEntities &text,
+		Fn<void()> done,
+		Fn<void(QString)> fail);
 	void close(not_null<HistoryItem*> item);
 	void reloadResults(not_null<HistoryItem*> item);
 
@@ -43,6 +48,7 @@ private:
 	MTP::Sender _api;
 
 	base::flat_map<FullMsgId, mtpRequestId> _pollVotesRequestIds;
+	base::flat_map<FullMsgId, mtpRequestId> _pollAddAnswerRequestIds;
 	base::flat_map<FullMsgId, mtpRequestId> _pollCloseRequestIds;
 	base::flat_map<FullMsgId, mtpRequestId> _pollReloadRequestIds;
 

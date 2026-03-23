@@ -505,6 +505,16 @@ void DefaultElementDelegate::elementShowPollResults(
 	FullMsgId context) {
 }
 
+void DefaultElementDelegate::elementShowAddPollOption(
+	not_null<Element*> view,
+	not_null<PollData*> poll,
+	FullMsgId context,
+	QRect optionRect) {
+}
+
+void DefaultElementDelegate::elementSubmitAddPollOption(FullMsgId context) {
+}
+
 void DefaultElementDelegate::elementOpenPhoto(
 	not_null<PhotoData*> photo,
 	FullMsgId context) {
@@ -2882,6 +2892,10 @@ auto Element::takeEffectAnimation()
 
 QRect Element::effectIconGeometry() const {
 	return QRect();
+}
+
+QPoint Element::mediaTopLeft() const {
+	return innerGeometry().topLeft();
 }
 
 Element::~Element() {

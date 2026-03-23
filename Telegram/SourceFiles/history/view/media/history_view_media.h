@@ -184,6 +184,12 @@ public:
 	virtual void clickHandlerPressedChanged(const ClickHandlerPtr &p, bool pressed) {
 	}
 
+	[[nodiscard]] virtual QRect addOptionRect(int innerWidth) const {
+		return {};
+	}
+	virtual void setAddOptionActive(bool active) {
+	}
+
 	[[nodiscard]] virtual bool uploading() const {
 		return false;
 	}

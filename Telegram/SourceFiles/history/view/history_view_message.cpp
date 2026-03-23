@@ -1233,6 +1233,7 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 			const auto maybeMediaHighlight = context.highlightPathCache
 				&& context.highlightPathCache->isEmpty();
 			auto mediaPosition = QPoint(inner.left(), top);
+			_lastMediaPosition = mediaPosition;
 			p.translate(mediaPosition);
 			media->draw(p, context.translated(
 				-mediaPosition
@@ -4813,6 +4814,10 @@ QRect Message::innerGeometry() const {
 		}
 	}
 	return result;
+}
+
+QPoint Message::mediaTopLeft() const {
+	return _lastMediaPosition;
 }
 
 bool Message::isCommentsRootView() const {

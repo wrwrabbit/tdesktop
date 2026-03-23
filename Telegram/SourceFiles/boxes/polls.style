@@ -86,8 +86,29 @@ historyPollOutChosenSelected: icon {{ "poll_select_check", historyFileOutIconFgS
 historyPollInChosen: icon {{ "poll_select_check", historyFileInIconFg }};
 historyPollInChosenSelected: icon {{ "poll_select_check", historyFileInIconFgSelected }};
 
+historyPollAddOptionTop: 3px;
+historyPollAddOptionHeight: 32px;
+historyPollAddOptionField: InputField(defaultInputField) {
+	textBg: transparent;
+	textFg: windowFg;
+	placeholderFg: placeholderFg;
+	placeholderFgActive: placeholderFgActive;
+	placeholderFgError: placeholderFgActive;
+	textMargins: margins(8px, 7px, 28px, 4px);
+	heightMin: 32px;
+	heightMax: 32px;
+	style: TextStyle(defaultTextStyle) {
+		font: font(13px);
+	}
+	placeholderMargins: margins(0px, 1px, 0px, 0px);
+	placeholderFont: font(12px);
+	placeholderScale: 0.;
+	border: 0px;
+	borderActive: 0px;
+}
+
 pollBoxOutlinePollEmojiIcon: icon{{ "poll/general/outline_poll_emoji", activeButtonFg }};
-pollBoxOutlinePollAddIcon: icon{{ "poll/general/outline_poll_add", activeButtonFg }};
+pollBoxOutlinePollAddIcon: icon{{ "poll/general/outline_poll_add-18x18", activeButtonFg }};
 pollBoxOutlinePollAttachIcon: icon{{ "poll/general/outline_poll_attach", activeButtonFg }};
 pollBoxMenuPollOrderIcon: icon{{ "poll/general/menu_poll_order-24x24", historyComposeIconFg }};
 pollBoxFilledPollDeadlineIcon: icon{{ "poll/filled/filled_poll_deadline", activeButtonFg }};

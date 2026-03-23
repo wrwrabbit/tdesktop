@@ -66,6 +66,7 @@ namespace HistoryView {
 
 struct TextState;
 struct StateRequest;
+class AddPollOptionWidget;
 class EmojiInteractions;
 class TranslateTracker;
 class ReadMetricsTracker;
@@ -416,6 +417,12 @@ public:
 	void elementShowPollResults(
 		not_null<PollData*> poll,
 		FullMsgId context) override;
+	void elementShowAddPollOption(
+		not_null<Element*> view,
+		not_null<PollData*> poll,
+		FullMsgId context,
+		QRect optionRect) override;
+	void elementSubmitAddPollOption(FullMsgId context) override;
 	void elementOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) override;
@@ -539,6 +546,13 @@ private:
 		Selecting,
 		Deselecting,
 	};
+
+	void showAddPollOption(
+		not_null<Element*> view,
+		not_null<PollData*> poll,
+		FullMsgId context);
+	void hideAddPollOption();
+	void updateAddPollOptionPosition();
 
 	void onTouchSelect();
 	void onTouchScrollTimer();
@@ -892,6 +906,10 @@ private:
 	rpl::event_stream<FullMsgId> _requestedToReadMessage;
 	rpl::event_stream<FullMsgId> _requestedToShowMessage;
 	rpl::event_stream<not_null<QKeyEvent*>> _scrollKeyEvents;
+
+	base::unique_qptr<AddPollOptionWidget> _addPollOptionWidget;
+	Element *_addPollOptionView = nullptr;
+	FullMsgId _addPollOptionContext;
 
 	rpl::lifetime _viewerLifetime;
 
