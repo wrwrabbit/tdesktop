@@ -10,16 +10,26 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_polls.h"
 #include "apiwrap.h"
 #include "base/event_filter.h"
+#include "chat_helpers/tabbed_panel.h"
+#include "chat_helpers/tabbed_selector.h"
+#include "core/file_utilities.h"
+#include "data/data_peer.h"
 #include "data/data_poll.h"
+#include "data/data_user.h"
 #include "data/data_session.h"
+#include "data/stickers/data_custom_emoji.h"
+#include "history/history.h"
 #include "history/history_item.h"
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
+#include "poll/poll_media_upload.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/toast/toast.h"
+#include "window/window_session_controller.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_polls.h"
 
 namespace HistoryView {
@@ -28,12 +38,28 @@ AddPollOptionWidget::AddPollOptionWidget(
 	not_null<QWidget*> parent,
 	not_null<PollData*> poll,
 	FullMsgId itemId,
-	not_null<Main::Session*> session)
+	not_null<Window::SessionController*> controller)
 : RpWidget(parent)
 , _poll(poll)
 , _itemId(itemId)
-, _session(session) {
+, _controller(controller)
+, _session(&controller->session())
+, _mediaState(std::make_shared<PollMediaUpload::PollMediaState>()) {
+	const auto item = _session->data().message(_itemId);
+	const auto peer = item ? item->history()->peer.get() : nullptr;
+	if (peer) {
+		_uploader = std::make_unique<PollMediaUpload::PollMediaUploader>(
+			PollMediaUpload::PollMediaUploader::Args{
+				.session = _session,
+				.peer = peer,
+				.showError = [=](const QString &text) {
+					Ui::Toast::Show(parentWidget(), text);
+				},
+			});
+	}
 	setupField();
+	setupEmojiPanel();
+	setupAttach();
 	subscribeToPollUpdates();
 }
 
@@ -41,7 +67,7 @@ void AddPollOptionWidget::setupField() {
 	_field = Ui::CreateChild<Ui::InputField>(
 		this,
 		st::historyPollAddOptionField,
-		Ui::InputField::Mode::SingleLine,
+		Ui::InputField::Mode::NoNewlines,
 		tr::lng_polls_add_option_placeholder());
 
 	_emoji = Ui::CreateChild<Ui::IconButton>(
@@ -74,7 +100,11 @@ void AddPollOptionWidget::setupField() {
 	base::install_event_filter(_field, [=](not_null<QEvent*> event) {
 		if (event->type() == QEvent::KeyPress) {
 			if (static_cast<QKeyEvent*>(event.get())->key() == Qt::Key_Escape) {
-				_cancelledEvents.fire({});
+				if (_emojiPanel && !_emojiPanel->isHidden()) {
+					_emojiPanel->hideAnimated();
+				} else {
+					_cancelledEvents.fire({});
+				}
 				return base::EventFilterResult::Cancel;
 			}
 		}
@@ -82,6 +112,67 @@ void AddPollOptionWidget::setupField() {
 	});
 
 	_field->setFocusFast();
+}
+
+void AddPollOptionWidget::setupEmojiPanel() {
+	using Selector = ChatHelpers::TabbedSelector;
+
+	const auto parent = parentWidget();
+	_emojiPanel = base::make_unique_q<ChatHelpers::TabbedPanel>(
+		parent,
+		_controller,
+		object_ptr<Selector>(
+			nullptr,
+			_controller->uiShow(),
+			Window::GifPauseReason::Layer,
+			Selector::Mode::EmojiOnly));
+
+	const auto panel = _emojiPanel.get();
+	panel->setDesiredHeightValues(
+		1.,
+		st::emojiPanMinHeight / 2,
+		st::emojiPanMinHeight);
+	panel->hide();
+	panel->selector()->setCurrentPeer(_session->user().get());
+
+	_emoji->installEventFilter(panel);
+	_emoji->addClickHandler([=] {
+		const auto button = QRect(
+			_emoji->mapTo(parent, QPoint()),
+			_emoji->size());
+		const auto isDropDown = button.y() < parent->height() / 2;
+		panel->setDropDown(isDropDown);
+		if (isDropDown) {
+			panel->moveTopRight(
+				button.y() + button.height(),
+				button.x() + button.width());
+		} else {
+			panel->moveBottomRight(
+				button.y(),
+				button.x() + button.width());
+		}
+		panel->toggleAnimated();
+	});
+
+	panel->selector()->emojiChosen(
+	) | rpl::on_next([=](ChatHelpers::EmojiChosen data) {
+		Ui::InsertEmojiAtCursor(_field->textCursor(), data.emoji);
+	}, panel->lifetime());
+
+	panel->selector()->customEmojiChosen(
+	) | rpl::on_next([=](ChatHelpers::FileChosen data) {
+		Data::InsertCustomEmoji(_field, data.document);
+	}, panel->lifetime());
+}
+
+void AddPollOptionWidget::setupAttach() {
+	if (!_uploader) {
+		return;
+	}
+	_attach->addClickHandler([=] {
+		_uploader->choosePhotoOrVideo(this, _mediaState);
+	});
+	_uploader->installDropToField(_field, _mediaState, false);
 }
 
 void AddPollOptionWidget::subscribeToPollUpdates() {
@@ -119,10 +210,11 @@ void AddPollOptionWidget::triggerSubmit() {
 
 	_field->setEnabled(false);
 
+	const auto media = _mediaState ? _mediaState->media : PollMedia();
 	_session->api().polls().addAnswer(
 		_itemId,
 		{ text },
-		PollMedia(),
+		media,
 		[=] { _submittedEvents.fire({}); },
 		[=](QString error) {
 			_field->setEnabled(true);

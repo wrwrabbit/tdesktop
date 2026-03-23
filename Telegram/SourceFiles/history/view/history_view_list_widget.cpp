@@ -1927,7 +1927,7 @@ void ListWidget::showAddPollOption(
 		this,
 		poll,
 		context,
-		&poll->session());
+		controller());
 
 	_addPollOptionWidget->submitted(
 	) | rpl::on_next([=] {

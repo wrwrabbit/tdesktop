@@ -4340,7 +4340,7 @@ void HistoryInner::showAddPollOption(
 			this,
 			poll,
 			context,
-			&poll->session());
+			_controller);
 
 	_addPollOptionWidget->submitted(
 	) | rpl::on_next([=] {
