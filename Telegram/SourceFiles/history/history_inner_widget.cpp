@@ -4301,41 +4301,13 @@ void HistoryInner::elementShowAddPollOption(
 		not_null<PollData*> poll,
 		FullMsgId context,
 		QRect optionRect) {
-	auto widget = base::make_unique_q<
-		HistoryView::AddPollOptionWidget>(
-			this,
-			poll,
-			context,
-			_controller);
-	const auto raw = widget.get();
-	_overlayHost->show(
+	HistoryView::ShowAddPollOptionOverlay(
+		*_overlayHost,
+		this,
 		view,
+		poll,
 		context,
-		std::move(widget),
-		rpl::merge(raw->submitted(), raw->cancelled()),
-		[raw](not_null<Element*> v, int top) {
-			const auto media = v->media();
-			if (!media) {
-				return false;
-			}
-			const auto mediaPos = v->mediaTopLeft();
-			const auto innerWidth = v->innerGeometry().width()
-				- st::msgPadding.left()
-				- st::msgPadding.right();
-			const auto rect = media->addOptionRect(innerWidth);
-			raw->updatePosition(
-				QPoint(
-					mediaPos.x() + rect.x(),
-					top + mediaPos.y() + rect.y()),
-				rect.width());
-			return true;
-		},
-		[](not_null<Element*> v, bool active) {
-			if (const auto media = v->media()) {
-				media->setAddOptionActive(active);
-			}
-		},
-		[raw] { raw->triggerSubmit(); });
+		_controller);
 }
 
 void HistoryInner::elementSubmitAddPollOption(FullMsgId context) {

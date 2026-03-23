@@ -16,6 +16,7 @@ class TabbedPanel;
 } // namespace ChatHelpers
 
 namespace PollMediaUpload {
+class PollMediaButton;
 struct PollMediaState;
 class PollMediaUploader;
 } // namespace PollMediaUpload
@@ -34,6 +35,9 @@ class SessionController;
 } // namespace Window
 
 namespace HistoryView {
+
+class Element;
+class ElementOverlayHost;
 
 class AddPollOptionWidget final : public Ui::RpWidget {
 public:
@@ -63,7 +67,7 @@ private:
 
 	Ui::InputField *_field = nullptr;
 	Ui::IconButton *_emoji = nullptr;
-	Ui::IconButton *_attach = nullptr;
+	PollMediaUpload::PollMediaButton *_attach = nullptr;
 	base::unique_qptr<ChatHelpers::TabbedPanel> _emojiPanel;
 	std::unique_ptr<PollMediaUpload::PollMediaUploader> _uploader;
 	std::shared_ptr<PollMediaUpload::PollMediaState> _mediaState;
@@ -72,5 +76,13 @@ private:
 	rpl::event_stream<> _cancelledEvents;
 
 };
+
+void ShowAddPollOptionOverlay(
+	ElementOverlayHost &host,
+	not_null<QWidget*> parent,
+	not_null<Element*> view,
+	not_null<PollData*> poll,
+	FullMsgId context,
+	not_null<Window::SessionController*> controller);
 
 } // namespace HistoryView

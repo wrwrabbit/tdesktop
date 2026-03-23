@@ -59,24 +59,19 @@ void ElementOverlayHost::hide() {
 	if (!_widget) {
 		return;
 	}
-	if (_view && _mediaStateFn) {
-		_mediaStateFn(_view, false);
-	}
-	_widget = nullptr;
-	_view = nullptr;
-	_context = FullMsgId();
-	_positionFn = nullptr;
-	_mediaStateFn = nullptr;
-	_submitFn = nullptr;
-	_closeLifetime.destroy();
-	if (const auto callback = _hiddenCallback) {
-		callback();
-	}
+	cleanup(true);
 }
 
 void ElementOverlayHost::viewGone(not_null<const Element*> view) {
 	if (_view != view.get()) {
 		return;
+	}
+	cleanup(false);
+}
+
+void ElementOverlayHost::cleanup(bool notifyMedia) {
+	if (notifyMedia && _view && _mediaStateFn) {
+		_mediaStateFn(_view, false);
 	}
 	_widget = nullptr;
 	_view = nullptr;
@@ -103,9 +98,9 @@ void ElementOverlayHost::updatePosition() {
 	}
 }
 
-bool ElementOverlayHost::handleClickOutside(QPoint clickPos) {
+void ElementOverlayHost::handleClickOutside(QPoint clickPos) {
 	if (!_widget || !_view) {
-		return false;
+		return;
 	}
 	const auto top = _itemTopFn(_view);
 	const auto viewRect = (top >= 0)
@@ -113,9 +108,7 @@ bool ElementOverlayHost::handleClickOutside(QPoint clickPos) {
 		: QRect();
 	if (!viewRect.contains(clickPos)) {
 		hide();
-		return true;
 	}
-	return false;
 }
 
 void ElementOverlayHost::triggerSubmit(FullMsgId context) {

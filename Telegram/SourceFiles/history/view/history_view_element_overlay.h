@@ -40,7 +40,7 @@ public:
 	void hide();
 	void viewGone(not_null<const Element*> view);
 	void updatePosition();
-	bool handleClickOutside(QPoint clickPos);
+	void handleClickOutside(QPoint clickPos);
 	void triggerSubmit(FullMsgId context);
 	void setHiddenCallback(Fn<void()> callback);
 
@@ -48,6 +48,8 @@ public:
 	[[nodiscard]] FullMsgId context() const;
 
 private:
+	void cleanup(bool notifyMedia);
+
 	const not_null<QWidget*> _container;
 	const ItemTopFn _itemTopFn;
 

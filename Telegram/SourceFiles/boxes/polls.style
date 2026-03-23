@@ -120,7 +120,9 @@ historyPollAddOptionAttach: IconButton(defaultIconButton) {
 	height: 26px;
 	icon: icon {{ "poll/general/outline_poll_attach-22x22", historyComposeIconFg }};
 	iconOver: icon {{ "poll/general/outline_poll_attach-22x22", historyComposeIconFgOver }};
-	rippleAreaSize: 0px;
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: 26px;
+	ripple: defaultRippleAnimationBgOver;
 }
 
 pollBoxOutlinePollEmojiIcon: icon{{ "poll/general/outline_poll_emoji", activeButtonFg }};
