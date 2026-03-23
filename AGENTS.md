@@ -96,6 +96,15 @@ Retrying builds wastes time and context. The ONLY fix is for the user to close t
 1. **Always use Debug builds** - Release builds are extremely heavy
 2. **Don't build Release configuration** - it's too heavy for testing
 
+## Local Storage Serialization
+
+Both app-level (`Core::Settings`) and session-level (`Main::SessionSettings`) use sequential binary serialization via `QDataStream`. Key rules:
+
+- New fields must ALWAYS be appended at the **end** of the stream, never inserted in the middle
+- Reading new fields must be guarded with `!stream.atEnd()` and provide a meaningful default/fallback
+- Inserting in the middle breaks reading of data saved by older versions (the new read code consumes bytes that belong to subsequent fields)
+- For simple flags and values, prefer using the generic KV prefs facility (`writePref<Type>` / `readPref<Type>`) instead of adding to the binary stream -- this avoids serialization ordering issues entirely
+
 ---
 
 # Development Guidelines
