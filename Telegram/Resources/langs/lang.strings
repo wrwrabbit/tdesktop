@@ -6912,6 +6912,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_polls_show_more#other" = "Show more ({count})";
 "lng_polls_votes_collapse" = "Collapse";
 "lng_polls_vote_yesterday" = "yesterday";
+"lng_polls_option_added_by" = "Added by {user}";
 
 "lng_todo_title" = "Checklist";
 "lng_todo_title_group" = "Group Checklist";

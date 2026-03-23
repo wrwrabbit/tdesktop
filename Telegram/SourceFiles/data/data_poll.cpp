@@ -121,6 +121,10 @@ bool PollData::applyChanges(const MTPDpoll &poll) {
 				ProcessPollMedia(_owner, *media);
 				result.media = PollMediaFromMTP(_owner, *media);
 			}
+			if (const auto addedBy = answer.vadded_by()) {
+				result.addedBy = _owner->peer(peerFromMTP(*addedBy));
+				result.addedDate = answer.vdate().value_or_empty();
+			}
 			return result;
 		}, [&](const MTPDinputPollAnswer &answer) {
 			auto result = PollAnswer();

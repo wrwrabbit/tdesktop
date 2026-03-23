@@ -39,6 +39,8 @@ struct PollAnswer {
 	QByteArray option;
 	PollMedia media;
 	std::vector<not_null<PeerData*>> recentVoters;
+	PeerData *addedBy = nullptr;
+	TimeId addedDate = 0;
 	int votes = 0;
 	bool chosen = false;
 	bool correct = false;

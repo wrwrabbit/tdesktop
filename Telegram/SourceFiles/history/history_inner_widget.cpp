@@ -47,6 +47,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/edit_factcheck_box.h"
 #include "ui/boxes/report_box_graphics.h"
 #include "ui/controls/delete_message_context_action.h"
+#include "ui/controls/who_reacted_context_action.h"
+#include "ui/text/format_values.h"
 #include "ui/controls/swipe_handler.h"
 #include "ui/inactive_press.h"
 #include "ui/painter.h"
@@ -110,6 +112,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_todo_list.h"
 #include "dialogs/ui/dialogs_video_userpic.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_menu_icons.h"
 
 #include <QtGui/QClipboard>
@@ -3371,6 +3374,48 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			_menu,
 			textItem ? textItem : _dragStateItem,
 			!added);
+	}
+	if (!pollOptionLink.isEmpty() && leaderOrSelf) {
+		if (const auto media = leaderOrSelf->media()) {
+			if (const auto poll = media->poll()) {
+				if (const auto a = poll->answerByOption(pollOptionLink)) {
+					if (a->addedBy) {
+						if (!_menu->empty()) {
+							_menu->addSeparator(
+								&st::expandedMenuSeparator);
+						}
+						const auto photoSize
+							= st::defaultWhoRead.photoSize;
+						auto view = Ui::PeerUserpicView();
+						auto userpic
+							= PeerData::GenerateUserpicImage(
+								a->addedBy,
+								view,
+								photoSize);
+						const auto date = a->addedDate
+							? Ui::FormatDateTime(
+								base::unixtime::parse(a->addedDate))
+							: QString();
+						_menu->addAction(
+							base::make_unique_q<
+								Ui::WhoReactedEntryAction>(
+								_menu->menu(),
+								nullptr,
+								_menu->menu()->st(),
+								Ui::WhoReactedEntryData{
+									.text = tr::lng_polls_option_added_by(
+										tr::now,
+										lt_user,
+										a->addedBy->shortName()),
+									.date = date,
+									.type = Ui::WhoReactedType
+										::RefRecipient,
+									.userpic = std::move(userpic),
+								}));
+					}
+				}
+			}
+		}
 	}
 	if (hasWhoReactedItem) {
 		HistoryView::AddWhoReactedAction(

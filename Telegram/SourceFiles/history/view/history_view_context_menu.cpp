@@ -38,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/image/image.h"
 #include "ui/toast/toast.h"
 #include "ui/text/format_song_document_name.h"
+#include "ui/text/format_values.h"
 #include "ui/text/text_utilities.h"
 #include "ui/controls/delete_message_context_action.h"
 #include "ui/controls/who_reacted_context_action.h"
@@ -1427,6 +1428,41 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 	if (item) {
 		const auto added = (result->actions().size() > wasAmount);
 		AddSelectRestrictionAction(result, item, !added);
+	}
+	if (const auto pollOption = link
+		? link->property(kPollOptionProperty).toByteArray()
+		: QByteArray(); !pollOption.isEmpty() && poll) {
+		if (const auto a = poll->answerByOption(pollOption)) {
+			if (a->addedBy) {
+				if (!result->empty()) {
+					result->addSeparator(&st::expandedMenuSeparator);
+				}
+				const auto photoSize = st::defaultWhoRead.photoSize;
+				auto view = Ui::PeerUserpicView();
+				auto userpic = PeerData::GenerateUserpicImage(
+					a->addedBy,
+					view,
+					photoSize);
+				const auto date = a->addedDate
+					? Ui::FormatDateTime(
+						base::unixtime::parse(a->addedDate))
+					: QString();
+				result->addAction(
+					base::make_unique_q<Ui::WhoReactedEntryAction>(
+						result->menu(),
+						nullptr,
+						result->menu()->st(),
+						Ui::WhoReactedEntryData{
+							.text = tr::lng_polls_option_added_by(
+								tr::now,
+								lt_user,
+								a->addedBy->shortName()),
+							.date = date,
+							.type = Ui::WhoReactedType::RefRecipient,
+							.userpic = std::move(userpic),
+						}));
+			}
+		}
 	}
 	if (hasWhoReactedItem) {
 		AddWhoReactedAction(result, list, item, list->controller());
