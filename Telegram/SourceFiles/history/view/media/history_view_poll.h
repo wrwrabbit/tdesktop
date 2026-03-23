@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/animations.h"
 #include "data/data_poll.h"
 #include "base/weak_ptr.h"
+#include "base/timer.h"
 
 namespace Ui {
 class RippleAnimation;
@@ -77,7 +78,6 @@ private:
 	struct Answer;
 	struct AttachedMedia;
 	struct SolutionMedia;
-	struct CloseInformation;
 	struct RecentVoter;
 
 	QSize countOptimalSize() override;
@@ -137,11 +137,6 @@ private:
 	void paintRecentVoters(
 		Painter &p,
 		int left,
-		int top,
-		const PaintContext &context) const;
-	void paintCloseByTimer(
-		Painter &p,
-		int right,
 		int top,
 		const PaintContext &context) const;
 	void paintShowSolution(
@@ -234,6 +229,8 @@ private:
 		const PaintContext &context) const;
 
 	[[nodiscard]] int bottomButtonHeight() const;
+	[[nodiscard]] QString closeTimerText() const;
+	[[nodiscard]] bool timerFooterMultiline(int paintw) const;
 
 	const not_null<PollData*> _poll;
 	int _pollVersion = 0;
@@ -267,7 +264,7 @@ private:
 	mutable QImage _userpicCircleCache;
 	mutable QImage _fillingIconCache;
 
-	mutable std::unique_ptr<CloseInformation> _close;
+	mutable base::Timer _closeTimer;
 
 	mutable Ui::Animations::Simple _solutionButtonAnimation;
 	mutable bool _solutionShown = false;

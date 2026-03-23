@@ -6842,6 +6842,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_polls_answers_none" = "No answers";
 "lng_polls_submit_votes" = "Vote";
 "lng_polls_view_results" = "View results";
+"lng_polls_ends_in_days#one" = "ends in {count} day";
+"lng_polls_ends_in_days#other" = "ends in {count} days";
+"lng_polls_results_in_days#one" = "results in {count} day";
+"lng_polls_results_in_days#other" = "results in {count} days";
+"lng_polls_ends_in_time" = "ends in {time}";
+"lng_polls_results_in_time" = "results in {time}";
 "lng_polls_retract" = "Retract vote";
 "lng_polls_stop" = "Stop poll";
 "lng_polls_stop_warning" = "If you stop this poll now, nobody will be able to vote in it anymore. This action cannot be undone.";
