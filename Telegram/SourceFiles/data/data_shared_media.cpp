@@ -89,7 +89,8 @@ bool SharedMediaAllowSearch(Storage::SharedMediaType type) {
 	switch (type) {
 	case Type::MusicFile:
 	case Type::File:
-	case Type::Link: return true;
+	case Type::Link:
+	case Type::Poll: return true;
 	default: return false;
 	}
 }

@@ -68,10 +68,14 @@ public:
 		const QRect &geometry,
 		not_null<ListMemento*> memento);
 
+	void fillTopBarMenu(
+		const Ui::Menu::MenuCallback &addAction) override;
+
 	rpl::producer<QString> title() override;
 	rpl::producer<int> desiredHeightValue() const override;
 
 private:
+	void setupSearch();
 	void saveState(not_null<ListMemento*> memento);
 	void restoreState(not_null<ListMemento*> memento);
 

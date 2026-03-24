@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/polls/info_polls_list_widget.h"
 
 #include "data/data_poll_messages.h"
+#include "data/data_shared_media.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
 #include "data/data_forum_topic.h"
@@ -31,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/section_widget.h"
 #include "window/themes/window_theme.h"
 #include "window/window_session_controller.h"
+#include "ui/widgets/menu/menu_add_action_callback.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 
@@ -55,10 +57,16 @@ public:
 
 	[[nodiscard]] int scrollTop() const;
 	void setScrollTop(int top);
+	void setSearchQuery(const QString &query);
 
 	void paintBackground(QPainter &p, QRect clip);
 
 private:
+	[[nodiscard]] SparseIdsMergedSlice::UniversalMsgId computeUniversalId(
+		Data::MessagePosition aroundId) const;
+	[[nodiscard]] Data::MessagesSlice sliceFromSparseIds(
+		SparseIdsMergedSlice &&slice,
+		SparseIdsMergedSlice::UniversalMsgId aroundId) const;
 	void setupHistory();
 	void updateInnerVisibleArea();
 
@@ -182,6 +190,7 @@ private:
 	QPointer<HistoryView::ListWidget> _list;
 	std::unique_ptr<HistoryView::CornerButtons> _cornerButtons;
 	bool _viewerRefreshed = false;
+	QString _searchQuery;
 
 	QImage _bg;
 
@@ -278,6 +287,48 @@ void ListWidget::Inner::setScrollTop(int top) {
 	_scroll->scrollToY(top);
 }
 
+void ListWidget::Inner::setSearchQuery(const QString &query) {
+	if (_searchQuery == query) {
+		return;
+	}
+	_searchQuery = query;
+	if (_viewerRefreshed) {
+		_list->refreshViewer();
+	}
+}
+
+SparseIdsMergedSlice::UniversalMsgId
+ListWidget::Inner::computeUniversalId(
+		Data::MessagePosition aroundId) const {
+	const auto peerId = _history->peer->id;
+	return ((aroundId.fullId.msg == ShowAtTheEndMsgId)
+			|| (aroundId == Data::MaxMessagePosition))
+		? (ServerMaxMsgId - 1)
+		: (aroundId.fullId.peer == peerId)
+		? aroundId.fullId.msg
+		: (aroundId.fullId.msg
+			? (aroundId.fullId.msg - ServerMaxMsgId)
+			: (ServerMaxMsgId - 1));
+}
+
+Data::MessagesSlice ListWidget::Inner::sliceFromSparseIds(
+		SparseIdsMergedSlice &&slice,
+		SparseIdsMergedSlice::UniversalMsgId aroundId) const {
+	auto result = Data::MessagesSlice();
+	result.fullCount = slice.fullCount();
+	result.skippedAfter = slice.skippedAfter();
+	result.skippedBefore = slice.skippedBefore();
+	const auto count = slice.size();
+	result.ids.reserve(count);
+	if (const auto msgId = slice.nearest(aroundId)) {
+		result.nearestToAround = *msgId;
+	}
+	for (auto i = 0; i != count; ++i) {
+		result.ids.push_back(slice[i]);
+	}
+	return result;
+}
+
 HistoryView::Context ListWidget::Inner::listContext() {
 	return HistoryView::Context::ChatPreview;
 }
@@ -305,6 +356,18 @@ rpl::producer<Data::MessagesSlice> ListWidget::Inner::listSource(
 		Data::MessagePosition aroundId,
 		int limitBefore,
 		int limitAfter) {
+	if (!_searchQuery.isEmpty()) {
+		const auto universalId = computeUniversalId(aroundId);
+		return _controller->mediaSource(
+			universalId,
+			limitBefore,
+			limitAfter
+		) | rpl::map([=](SparseIdsMergedSlice &&slice) {
+			return sliceFromSparseIds(
+				std::move(slice),
+				universalId);
+		});
+	}
 	return Data::PollMessagesViewer(
 		_session,
 		_history,
@@ -644,9 +707,33 @@ ListWidget::ListWidget(
 , _inner(std::make_unique<Inner>(this, controller)) {
 	setInnerWidget(object_ptr<Ui::RpWidget>(this));
 	scroll()->hide();
+
+	scroll()->geometryValue(
+	) | rpl::on_next([=](QRect rect) {
+		_inner->updateGeometry(rect);
+	}, lifetime());
+
+	setupSearch();
 }
 
 ListWidget::~ListWidget() = default;
+
+void ListWidget::fillTopBarMenu(
+		const Ui::Menu::MenuCallback &addAction) {
+}
+
+void ListWidget::setupSearch() {
+	auto search = controller()->searchFieldController();
+	if (!search) {
+		return;
+	}
+	controller()->setSearchEnabledByContent(true);
+
+	controller()->mediaSourceQueryValue(
+	) | rpl::on_next([=](const QString &query) {
+		_inner->setSearchQuery(query);
+	}, lifetime());
+}
 
 rpl::producer<QString> ListWidget::title() {
 	return tr::lng_media_type_polls();
@@ -696,7 +783,7 @@ void ListWidget::restoreState(not_null<ListMemento*> memento) {
 
 void ListWidget::resizeEvent(QResizeEvent *e) {
 	ContentWidget::resizeEvent(e);
-	_inner->updateGeometry(QRect(0, 0, width(), height()));
+	_inner->updateGeometry(scroll()->geometry());
 }
 
 void ListWidget::paintEvent(QPaintEvent *e) {
