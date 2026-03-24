@@ -154,6 +154,18 @@ PollMediaButton::PollMediaButton(
 	updateMediaSubscription();
 }
 
+void PollMediaButton::setIconColorOverride(
+		std::optional<QColor> colorOverride) {
+	_iconColorOverride = colorOverride;
+	update();
+}
+
+void PollMediaButton::setRippleColorOverride(
+		std::optional<QColor> colorOverride) {
+	_rippleColorOverride = colorOverride;
+	update();
+}
+
 PollMediaButton::~PollMediaButton() {
 	if (_subscribed) {
 		_subscribed->subscribeToUpdates(nullptr);
@@ -162,24 +174,35 @@ PollMediaButton::~PollMediaButton() {
 
 void PollMediaButton::paintEvent(QPaintEvent *e) {
 	auto p = Painter(this);
-	paintRipple(p, _st.rippleAreaPosition);
-	if (const auto image = _state->thumbnail
-		? _state->thumbnail
-		: currentAttachThumbnail()) {
-		const auto target = _state->thumbnail
-			? rippleRect()
-			: iconRect();
-		if (_state->thumbnail) {
-			paintCover(
-				p,
-				target,
-				image->image(std::max(target.width(), target.height())),
-				_state->rounded);
-		} else {
-			p.drawImage(
-				target,
-				image->image(std::max(target.width(), target.height())));
+	paintRipple(
+		p,
+		_st.rippleAreaPosition,
+		_rippleColorOverride ? &*_rippleColorOverride : nullptr);
+	if (_state->thumbnail) {
+		const auto target = rippleRect();
+		paintCover(
+			p,
+			target,
+			_state->thumbnail->image(
+				std::max(target.width(), target.height())),
+			_state->rounded);
+	} else if (_iconColorOverride) {
+		const auto &icon = (isOver() && !_st.iconOver.empty())
+			? _st.iconOver
+			: _st.icon;
+		auto position = _st.iconPosition;
+		if (position.x() < 0) {
+			position.setX((width() - icon.width()) / 2);
 		}
+		if (position.y() < 0) {
+			position.setY((height() - icon.height()) / 2);
+		}
+		icon.paint(p, position, width(), *_iconColorOverride);
+	} else if (const auto image = currentAttachThumbnail()) {
+		const auto target = iconRect();
+		p.drawImage(
+			target,
+			image->image(std::max(target.width(), target.height())));
 	}
 	if (_state->thumbnail && !_state->uploading) {
 		const auto viewOpacity = _viewShown.value(

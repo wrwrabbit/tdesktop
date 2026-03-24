@@ -79,6 +79,9 @@ public:
 		std::shared_ptr<PollMediaState> state);
 	~PollMediaButton() override;
 
+	void setIconColorOverride(std::optional<QColor> colorOverride);
+	void setRippleColorOverride(std::optional<QColor> colorOverride);
+
 protected:
 	void paintEvent(QPaintEvent *e) override;
 	void onStateChanged(State was, StateChangeSource source) override;
@@ -105,6 +108,8 @@ private:
 	Ui::RadialAnimation _radial;
 	Ui::Animations::Simple _cancelShown;
 	Ui::Animations::Simple _viewShown;
+	std::optional<QColor> _iconColorOverride;
+	std::optional<QColor> _rippleColorOverride;
 
 };
 
