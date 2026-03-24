@@ -62,7 +62,7 @@ void AddPollOptionWidget::setupField() {
 		field->setGeometry(0, 0, size.width(), size.height());
 		const auto bsize = st::historyPollAddOptionButtonSize;
 		const auto by = (size.height() - bsize) / 2;
-		emoji->moveToLeft(0, by);
+		emoji->moveToLeft(st::historyPollAddOptionEmojiLeft, by);
 		attach->moveToRight(0, by, size.width());
 	}, _field->lifetime());
 
