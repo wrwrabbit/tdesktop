@@ -19,7 +19,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_list_widget.h"
 #include "history/view/history_view_corner_buttons.h"
 #include "history/view/history_view_element.h"
+#include "history/view/history_view_service_message.h"
 #include "history/view/reactions/history_view_reactions_button.h"
+#include "lottie/lottie_icon.h"
+#include "ui/painter.h"
 #include "info/info_controller.h"
 #include "info/info_memento.h"
 #include "lang/lang_keys.h"
@@ -35,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
+#include "styles/style_dialogs.h"
 
 namespace Info::Polls {
 
@@ -192,6 +196,10 @@ private:
 	bool _viewerRefreshed = false;
 	QString _searchQuery;
 
+	std::unique_ptr<Lottie::Icon> _emptyIcon;
+	Ui::Text::String _emptyText;
+	bool _emptyAnimated = false;
+
 	QImage _bg;
 
 };
@@ -249,9 +257,9 @@ void ListWidget::Inner::updateGeometry(QRect rect) {
 	if (rect.isEmpty()) {
 		return;
 	}
+	_list->resizeToWidth(_scroll->width(), _scroll->height());
 	if (!_viewerRefreshed) {
 		_viewerRefreshed = true;
-		_list->resizeToWidth(_scroll->width(), _scroll->height());
 		_list->refreshViewer();
 	}
 	const auto ratio = style::DevicePixelRatio();
@@ -290,6 +298,10 @@ void ListWidget::Inner::setScrollTop(int top) {
 void ListWidget::Inner::setSearchQuery(const QString &query) {
 	if (_searchQuery == query) {
 		return;
+	}
+	_emptyAnimated = false;
+	if (_emptyIcon) {
+		_emptyIcon->jumpTo(0, nullptr);
 	}
 	_searchQuery = query;
 	if (_viewerRefreshed) {
@@ -495,6 +507,54 @@ void ListWidget::Inner::listOpenDocument(
 void ListWidget::Inner::listPaintEmpty(
 		Painter &p,
 		const Ui::ChatPaintContext &context) {
+	if (!_emptyIcon) {
+		const auto size = st::recentPeersEmptySize;
+		_emptyIcon = Lottie::MakeIcon({
+			.name = u"noresults"_q,
+			.sizeOverride = { size, size },
+		});
+		_emptyText.setText(
+			st::serviceTextStyle,
+			tr::lng_polls_search_none(tr::now));
+	}
+	if (!_emptyAnimated) {
+		_emptyAnimated = true;
+		_emptyIcon->animate(
+			[=] { _scroll->update(); },
+			0,
+			_emptyIcon->framesCount() - 1);
+	}
+	const auto iconSize = _emptyIcon->size();
+	const auto width = st::repliesEmptyWidth;
+	const auto padding = st::repliesEmptyPadding;
+	const auto textWidth = width - padding.left() - padding.right();
+	const auto textHeight = _emptyText.countHeight(textWidth);
+	const auto height = padding.top()
+		+ iconSize.height()
+		+ st::repliesEmptySkip
+		+ textHeight
+		+ padding.bottom();
+	const auto r = QRect(
+		(_scroll->width() - width) / 2,
+		(_scroll->height() - height) / 3,
+		width,
+		height);
+	HistoryView::ServiceMessagePainter::PaintBubble(
+		p,
+		context.st,
+		r);
+
+	_emptyIcon->paintInCenter(
+		p,
+		QRect(r.x(), r.y() + padding.top(), r.width(), iconSize.height()),
+		st::msgServiceFg->c);
+	p.setPen(st::msgServiceFg);
+	_emptyText.draw(
+		p,
+		r.x() + (r.width() - textWidth) / 2,
+		r.y() + padding.top() + iconSize.height() + st::repliesEmptySkip,
+		textWidth,
+		style::al_top);
 }
 
 QString ListWidget::Inner::listElementAuthorRank(

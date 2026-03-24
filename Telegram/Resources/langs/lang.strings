@@ -1792,6 +1792,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_media_type_audios" = "Voice messages";
 "lng_media_type_links" = "Shared links";
 "lng_media_type_polls" = "Polls";
+"lng_polls_search_none" = "No polls found";
 "lng_media_type_rounds" = "Video messages";
 "lng_media_saved_music_your" = "Your playlist";
 "lng_media_saved_music_title" = "Playlist";
