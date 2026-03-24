@@ -245,7 +245,7 @@ QByteArray Settings::serialize() const {
 	for (const auto &id : _recentEmojiSkip) {
 		size += Serialize::stringSize(id);
 	}
-	size += sizeof(qint32) * 3
+	size += sizeof(qint32) * 2
 		+ Serialize::stringSize(_playbackDeviceId.current())
 		+ Serialize::stringSize(_captureDeviceId.current())
 		+ Serialize::stringSize(_callPlaybackDeviceId.current())
@@ -260,6 +260,11 @@ QByteArray Settings::serialize() const {
 		+ sizeof(qint32) // _notificationsDisplayChecksum
 		+ Serialize::bytearraySize(callPanelPosition)
 		+ sizeof(qint32) * 4;
+	size += sizeof(quint32);
+	for (const auto &[key, value] : _prefs) {
+		size += Serialize::bytearraySize(key)
+			+ Serialize::bytearraySize(value);
+	}
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -400,7 +405,6 @@ QByteArray Settings::serialize() const {
 		stream
 			<< qint32(_trayIconMonochrome.current() ? 1 : 0)
 			<< qint32(_ttlVoiceClickTooltipHidden.current() ? 1 : 0)
-			<< qint32(_aiComposeTooltipHidden.current() ? 1 : 0)
 			<< _playbackDeviceId.current()
 			<< _captureDeviceId.current()
 			<< _callPlaybackDeviceId.current()
@@ -430,6 +434,10 @@ QByteArray Settings::serialize() const {
 			<< qint32(_systemAccentColorEnabled ? 1 : 0)
 			<< qint32(_usePlatformTranslation ? 1 : 0)
 			<< qint32(_systemTextReplace.current() ? 1 : 0);
+		stream << quint32(_prefs.size());
+		for (const auto &[key, value] : _prefs) {
+			stream << key << value;
+		}
 	}
 
 	Ensures(result.size() == size);
@@ -550,7 +558,6 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	base::flat_set<QString> recentEmojiSkip;
 	qint32 trayIconMonochrome = (_trayIconMonochrome.current() ? 1 : 0);
 	qint32 ttlVoiceClickTooltipHidden = _ttlVoiceClickTooltipHidden.current() ? 1 : 0;
-	qint32 aiComposeTooltipHidden = _aiComposeTooltipHidden.current() ? 1 : 0;
 	QByteArray ivPosition;
 	QByteArray callPanelPosition;
 	QString customFontFamily = _customFontFamily;
@@ -831,9 +838,6 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 		stream >> ttlVoiceClickTooltipHidden;
 	}
 	if (!stream.atEnd()) {
-		stream >> aiComposeTooltipHidden;
-	}
-	if (!stream.atEnd()) {
 		stream
 			>> playbackDeviceId
 			>> captureDeviceId;
@@ -923,6 +927,21 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	}
 	if (!stream.atEnd()) {
 		stream >> systemTextReplace;
+	}
+	if (!stream.atEnd()) {
+		auto prefsCount = quint32();
+		stream >> prefsCount;
+		auto prefs = base::flat_map<QByteArray, QByteArray>();
+		prefs.reserve(prefsCount);
+		for (auto i = quint32(); i != prefsCount; ++i) {
+			auto key = QByteArray();
+			auto value = QByteArray();
+			stream >> key >> value;
+			prefs.emplace(std::move(key), std::move(value));
+		}
+		if (stream.status() == QDataStream::Ok) {
+			_prefs = std::move(prefs);
+		}
 	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
@@ -1136,7 +1155,6 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_recentEmojiSkip = std::move(recentEmojiSkip);
 	_trayIconMonochrome = (trayIconMonochrome == 1);
 	_ttlVoiceClickTooltipHidden = (ttlVoiceClickTooltipHidden == 1);
-	_aiComposeTooltipHidden = (aiComposeTooltipHidden == 1);
 	if (!ivPosition.isEmpty()) {
 		_ivPosition = Deserialize(ivPosition);
 	}
@@ -1156,6 +1174,48 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_chatFiltersHorizontal = (chatFiltersHorizontal == 1);
 	_quickDialogAction = Dialogs::Ui::QuickDialogAction(quickDialogAction);
 	_notificationsVolume = notificationsVolume;
+}
+
+void Settings::clearPref(std::string_view key) {
+	const auto i = _prefs.find(QByteArray(key.data(), key.size()));
+	if (i == end(_prefs)) {
+		return;
+	}
+	_prefs.erase(i);
+	_saveDelayed.fire({});
+}
+
+void Settings::writePrefGeneric(
+		std::string_view key,
+		const QByteArray &value) {
+	const auto raw = QByteArray(key.data(), key.size());
+	if (const auto i = _prefs.find(raw); i != end(_prefs)) {
+		if (i->second == value) {
+			return;
+		}
+		i->second = value;
+	} else {
+		_prefs.emplace(raw, value);
+	}
+	_saveDelayed.fire({});
+}
+
+std::optional<QByteArray> Settings::readPrefGeneric(std::string_view key) {
+	const auto i = _prefs.find(QByteArray(key.data(), key.size()));
+	return (i != end(_prefs)) ? i->second : std::optional<QByteArray>();
+}
+
+template <>
+std::optional<bool> Settings::readPrefImpl<bool>(std::string_view key) {
+	if (const auto data = readPrefGeneric(key)) {
+		return !data->isEmpty();
+	}
+	return {};
+}
+
+template <>
+void Settings::writePrefImpl<bool>(std::string_view key, bool value) {
+	writePrefGeneric(key, value ? "\x1"_q : QByteArray());
 }
 
 QString Settings::getSoundPath(const QString &key) const {
@@ -1544,7 +1604,7 @@ void Settings::resetOnLastLogout() {
 	_hiddenGroupCallTooltips = 0;
 	_storiesClickTooltipHidden = false;
 	_ttlVoiceClickTooltipHidden = false;
-	_aiComposeTooltipHidden = false;
+	_prefs.clear();
 	_ivZoom = 0;
 	_recordVideoMessages = false;
 	_videoQuality = {};

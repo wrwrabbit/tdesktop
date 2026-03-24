@@ -122,6 +122,7 @@ constexpr auto kMaxStarSendEffects = 4;
 constexpr auto kMaxStarEffects = 4;
 constexpr auto kStarEffectDuration = 2 * crl::time(1000);
 constexpr auto kStarEffectRotationMax = 12;
+constexpr auto kAiComposeTooltipHiddenPref = "ai_compose_tooltip_hidden"_cs;
 constexpr auto kStarEffectScaleMin = 0.3;
 constexpr auto kStarEffectScaleMax = 0.7;
 
@@ -3272,9 +3273,8 @@ void ComposeControls::initAiButton() {
 	_aiButton->hide();
 	_aiButton->setAccessibleName(tr::lng_ai_compose_title(tr::now));
 	_aiButton->setClickedCallback([=] {
-		if (!Core::App().settings().aiComposeTooltipHidden()) {
-			Core::App().settings().setAiComposeTooltipHidden(true);
-			Core::App().saveSettingsDelayed();
+		if (!Core::App().settings().readPref<bool>(kAiComposeTooltipHiddenPref)) {
+			Core::App().settings().writePref<bool>(kAiComposeTooltipHiddenPref, true);
 		}
 		updateAiButtonVisibility();
 		showAiComposeBox();
@@ -3552,7 +3552,7 @@ void ComposeControls::updateAiButtonVisibility() {
 	_aiButton->setVisible(shown);
 	if (_aiTooltip) {
 		const auto showTooltip = shown
-			&& !Core::App().settings().aiComposeTooltipHidden();
+			&& !Core::App().settings().readPref<bool>(kAiComposeTooltipHiddenPref);
 		if (showTooltip) {
 			updateAiTooltipGeometry();
 		}

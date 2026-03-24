@@ -211,6 +211,7 @@ constexpr auto kSaveDraftTimeout = crl::time(1000);
 constexpr auto kSaveDraftAnywayTimeout = 5 * crl::time(1000);
 constexpr auto kSaveCloudDraftIdleTimeout = 14 * crl::time(1000);
 constexpr auto kRefreshSlowmodeLabelTimeout = crl::time(200);
+constexpr auto kAiComposeTooltipHiddenPref = "ai_compose_tooltip_hidden"_cs;
 constexpr auto kCommonModifiers = 0
 	| Qt::ShiftModifier
 	| Qt::MetaModifier
@@ -1296,9 +1297,8 @@ void HistoryWidget::initAiButton() {
 	_aiButton->hide();
 	_aiButton->setAccessibleName(tr::lng_ai_compose_title(tr::now));
 	_aiButton->setClickedCallback([=] {
-		if (!Core::App().settings().aiComposeTooltipHidden()) {
-			Core::App().settings().setAiComposeTooltipHidden(true);
-			Core::App().saveSettingsDelayed();
+		if (!Core::App().settings().readPref<bool>(kAiComposeTooltipHiddenPref)) {
+			Core::App().settings().writePref<bool>(kAiComposeTooltipHiddenPref, true);
 		}
 		updateAiButtonVisibility();
 		showAiComposeBox();
@@ -6209,7 +6209,7 @@ void HistoryWidget::updateAiButtonVisibility() {
 			updateAiButtonGeometry();
 		}
 		const auto showTooltip = shown
-			&& !Core::App().settings().aiComposeTooltipHidden();
+			&& !Core::App().settings().readPref<bool>(kAiComposeTooltipHiddenPref);
 		if (showTooltip) {
 			updateAiTooltipGeometry();
 		}
