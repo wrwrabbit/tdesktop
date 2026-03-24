@@ -762,3 +762,33 @@ settingsAgeVerifyTitle: FlatLabel(boxTitle) {
 settingsAgeVerifyIcon: icon {{ "settings/filled_verify_age-48x48", windowFgActive }};
 settingsAgeVerifyIconPadding: margins(16px, 16px, 16px, 16px);
 settingsAgeVerifyIconMargin: margins(0px, 24px, 0px, 14px);
+
+DetailedSettingsButtonStyle {
+	button: SettingsButton;
+	description: FlatLabel;
+	iconRadius: pixels;
+	iconPadding: pixels;
+	iconForegroundPadding: pixels;
+	descriptionTopSkip: pixels;
+	descriptionBottomSkip: pixels;
+	descriptionRightSkip: pixels;
+}
+
+detailedSettingsButtonStyle: DetailedSettingsButtonStyle {
+	button: SettingsButton(settingsButtonNoIconLocked) {
+		style: defaultTextStyle;
+		textBg: transparent;
+		textBgOver: transparent;
+		padding: margins(68px, 8px, 22px, 8px);
+		iconLeft: 17px;
+	}
+	description: FlatLabel(defaultFlatLabel) {
+		textFg: windowSubTextFg;
+	}
+	iconRadius: 10px;
+	iconPadding: 6px;
+	iconForegroundPadding: 3px;
+	descriptionTopSkip: 0px;
+	descriptionBottomSkip: 8px;
+	descriptionRightSkip: 4px;
+}

@@ -1618,6 +1618,8 @@ PRIVATE
     settings/settings_codes.h
     settings/settings_common_session.cpp
     settings/settings_common_session.h
+    settings/detailed_settings_button.cpp
+    settings/detailed_settings_button.h
     settings/sections/settings_credits.cpp
     settings/sections/settings_credits.h
     settings/settings_credits_graphics.cpp
