@@ -48,6 +48,7 @@ public:
 		not_null<Window::SessionController*> controller);
 
 	void setPlaceholderColorOverride(const style::color &color);
+	void setEmojiIconColorOverride(QColor color);
 	void updatePosition(QPoint topLeft, int width);
 	void triggerSubmit();
 
@@ -307,6 +308,10 @@ void AddPollOptionWidget::setPlaceholderColorOverride(
 	_field->setPlaceholderColorOverride(color);
 }
 
+void AddPollOptionWidget::setEmojiIconColorOverride(QColor color) {
+	_emoji->setIconColorOverride(color);
+}
+
 } // namespace
 
 void ShowAddPollOptionOverlay(
@@ -325,6 +330,7 @@ void ShowAddPollOptionOverlay(
 	const auto raw = widget.get();
 	const auto &msgSt = st->messageStyle(view->hasOutLayout(), false);
 	raw->setPlaceholderColorOverride(msgSt.msgDateFg);
+	raw->setEmojiIconColorOverride(msgSt.msgDateFg->c);
 	host.show(
 		view,
 		context,
