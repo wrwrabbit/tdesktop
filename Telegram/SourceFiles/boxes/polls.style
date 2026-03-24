@@ -93,12 +93,9 @@ pollBoxMenuPollOrderIcon: icon{{ "poll/general/menu_poll_order-24x24", historyCo
 pollBoxFilledPollDeadlineIcon: icon{{ "poll/filled/filled_poll_deadline", activeButtonFg }};
 pollBoxFilledPollViewIcon: icon{{ "poll/filled/filled_poll_view", activeButtonFg }};
 pollBoxFilledPollAddIcon: icon{{ "poll/filled/filled_poll_add", activeButtonFg }};
-pollBoxFilledChatlistPollIcon: icon{{ "poll/filled/filled_chatlist_poll", activeButtonFg }};
 pollBoxFilledPollCorrectIcon: icon{{ "poll/filled/filled_poll_correct", activeButtonFg }};
-pollBoxFilledChatlistReactionIcon: icon{{ "poll/filled/filled_chatlist_reaction", activeButtonFg }};
 pollBoxFilledPollRevoteIcon: icon{{ "poll/filled/filled_poll_revote", activeButtonFg }};
 pollBoxFilledPollShuffleIcon: icon{{ "poll/filled/filled_poll_shuffle", activeButtonFg }};
-pollBoxFilledChatlistMentionIcon: icon{{ "poll/filled/filled_chatlist_mention", activeButtonFg }};
 pollBoxFilledPollMultipleIcon: icon{{ "poll/filled/filled_poll_multiple", activeButtonFg }};
 
 pollAttachTextSkip: 28px;

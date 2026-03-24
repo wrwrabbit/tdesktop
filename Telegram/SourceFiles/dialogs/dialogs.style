@@ -577,19 +577,34 @@ dialogsMiniReplyStory: DialogsMiniIcon {
 }
 
 dialogsUnreadMention: ThreeStateIcon {
-	icon: icon{{ "dialogs/dialogs_mention", dialogsUnreadFg }};
-	over: icon{{ "dialogs/dialogs_mention", dialogsUnreadFgOver }};
-	active: icon{{ "dialogs/dialogs_mention", dialogsUnreadFgActive }};
+	icon: icon{{ "dialogs/dialogs_chatlist_mention-18x18", dialogsMentionIconFg }};
+	over: icon{{ "dialogs/dialogs_chatlist_mention-18x18", dialogsMentionIconFg }};
+	active: icon{{ "dialogs/dialogs_chatlist_mention-18x18", dialogsNameFgActive }};
+}
+dialogsUnreadMentionMuted: ThreeStateIcon {
+	icon: icon{{ "dialogs/dialogs_chatlist_mention-18x18", dialogsUnreadBgMuted }};
+	over: icon{{ "dialogs/dialogs_chatlist_mention-18x18", dialogsUnreadBgMutedOver }};
+	active: icon{{ "dialogs/dialogs_chatlist_mention-18x18", dialogsUnreadBgMutedActive }};
 }
 dialogsUnreadReaction: ThreeStateIcon {
-	icon: icon{{ "dialogs/dialogs_reaction", dialogsUnreadFg }};
-	over: icon{{ "dialogs/dialogs_reaction", dialogsUnreadFgOver }};
-	active: icon{{ "dialogs/dialogs_reaction", dialogsUnreadFgActive }};
+	icon: icon{{ "dialogs/dialogs_chatlist_reaction-18x18", dialogsReactionIconFg }};
+	over: icon{{ "dialogs/dialogs_chatlist_reaction-18x18", dialogsReactionIconFg }};
+	active: icon{{ "dialogs/dialogs_chatlist_reaction-18x18", dialogsNameFgActive }};
+}
+dialogsUnreadReactionMuted: ThreeStateIcon {
+	icon: icon{{ "dialogs/dialogs_chatlist_reaction-18x18", dialogsUnreadBgMuted }};
+	over: icon{{ "dialogs/dialogs_chatlist_reaction-18x18", dialogsUnreadBgMutedOver }};
+	active: icon{{ "dialogs/dialogs_chatlist_reaction-18x18", dialogsUnreadBgMutedActive }};
 }
 dialogsUnreadPoll: ThreeStateIcon {
-	icon: icon{{ "poll/filled/filled_chatlist_poll-18x18", dialogsUnreadFg }};
-	over: icon{{ "poll/filled/filled_chatlist_poll-18x18", dialogsUnreadFgOver }};
-	active: icon{{ "poll/filled/filled_chatlist_poll-18x18", dialogsUnreadFgActive }};
+	icon: icon{{ "dialogs/dialogs_chatlist_poll-18x18", dialogsPollIconFg }};
+	over: icon{{ "dialogs/dialogs_chatlist_poll-18x18", dialogsPollIconFg }};
+	active: icon{{ "dialogs/dialogs_chatlist_poll-18x18", dialogsNameFgActive }};
+}
+dialogsUnreadPollMuted: ThreeStateIcon {
+	icon: icon{{ "dialogs/dialogs_chatlist_poll-18x18", dialogsUnreadBgMuted }};
+	over: icon{{ "dialogs/dialogs_chatlist_poll-18x18", dialogsUnreadBgMutedOver }};
+	active: icon{{ "dialogs/dialogs_chatlist_poll-18x18", dialogsUnreadBgMutedActive }};
 }
 
 downloadBarHeight: 46px;

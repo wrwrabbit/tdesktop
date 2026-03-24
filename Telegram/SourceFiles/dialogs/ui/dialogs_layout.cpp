@@ -199,42 +199,31 @@ int PaintBadges(
 		right -= icon.width() + st::dialogsUnreadPadding;
 	}
 	if (badgesState.mention || badgesState.reaction) {
-		UnreadBadgeStyle st;
-		st.sizeId = badgesState.mention
-			? UnreadBadgeSize::Dialogs
-			: UnreadBadgeSize::ReactionInDialogs;
-		st.active = context.active;
-		st.selected = context.selected;
-		st.muted = badgesState.mention
+		const auto muted = badgesState.mention
 			? badgesState.mentionMuted
 			: badgesState.reactionMuted;
-		st.padding = 0;
-		st.textTop = 0;
-		const auto counter = QString();
-		const auto badge = PaintUnreadBadge(p, counter, right, top, st);
-		ThreeStateIcon(
+		const auto &icon = ThreeStateIcon(
 			badgesState.mention
-				? st::dialogsUnreadMention
-				: st::dialogsUnreadReaction,
-			st.active,
-			st.selected).paintInCenter(p, badge);
-		right -= badge.width() + st.padding + st::dialogsUnreadPadding;
+				? (muted
+					? st::dialogsUnreadMentionMuted
+					: st::dialogsUnreadMention)
+				: (muted
+					? st::dialogsUnreadReactionMuted
+					: st::dialogsUnreadReaction),
+			context.active,
+			context.selected);
+		icon.paint(p, right - icon.width(), top, context.width);
+		right -= icon.width() + st::dialogsUnreadPadding;
 	}
 	if (badgesState.poll) {
-		UnreadBadgeStyle st;
-		st.sizeId = UnreadBadgeSize::ReactionInDialogs;
-		st.active = context.active;
-		st.selected = context.selected;
-		st.muted = badgesState.pollMuted;
-		st.padding = 0;
-		st.textTop = 0;
-		const auto counter = QString();
-		const auto badge = PaintUnreadBadge(p, counter, right, top, st);
-		ThreeStateIcon(
-			st::dialogsUnreadPoll,
-			st.active,
-			st.selected).paintInCenter(p, badge);
-		right -= badge.width() + st.padding + st::dialogsUnreadPadding;
+		const auto &icon = ThreeStateIcon(
+			badgesState.pollMuted
+				? st::dialogsUnreadPollMuted
+				: st::dialogsUnreadPoll,
+			context.active,
+			context.selected);
+		icon.paint(p, right - icon.width(), top, context.width);
+		right -= icon.width() + st::dialogsUnreadPadding;
 	}
 	return (initial - right);
 }
