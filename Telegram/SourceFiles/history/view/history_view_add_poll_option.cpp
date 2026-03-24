@@ -37,6 +37,46 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_polls.h"
 
 namespace HistoryView {
+namespace {
+
+class AddPollOptionWidget final : public Ui::RpWidget {
+public:
+	AddPollOptionWidget(
+		not_null<QWidget*> parent,
+		not_null<PollData*> poll,
+		FullMsgId itemId,
+		not_null<Window::SessionController*> controller);
+
+	void setPlaceholderColorOverride(const style::color &color);
+	void updatePosition(QPoint topLeft, int width);
+	void triggerSubmit();
+
+	[[nodiscard]] rpl::producer<> submitted() const;
+	[[nodiscard]] rpl::producer<> cancelled() const;
+
+private:
+	void setupField();
+	void setupEmojiPanel();
+	void setupAttach();
+	void subscribeToPollUpdates();
+	[[nodiscard]] static QString mapErrorToText(const QString &error);
+
+	const not_null<PollData*> _poll;
+	const FullMsgId _itemId;
+	const not_null<Window::SessionController*> _controller;
+	const not_null<Main::Session*> _session;
+
+	Ui::InputField *_field = nullptr;
+	Ui::IconButton *_emoji = nullptr;
+	PollMediaUpload::PollMediaButton *_attach = nullptr;
+	base::unique_qptr<ChatHelpers::TabbedPanel> _emojiPanel;
+	std::unique_ptr<PollMediaUpload::PollMediaUploader> _uploader;
+	std::shared_ptr<PollMediaUpload::PollMediaState> _mediaState;
+
+	rpl::event_stream<> _submittedEvents;
+	rpl::event_stream<> _cancelledEvents;
+
+};
 
 AddPollOptionWidget::AddPollOptionWidget(
 	not_null<QWidget*> parent,
@@ -266,6 +306,8 @@ void AddPollOptionWidget::setPlaceholderColorOverride(
 		const style::color &color) {
 	_field->setPlaceholderColorOverride(color);
 }
+
+} // namespace
 
 void ShowAddPollOptionOverlay(
 		ElementOverlayHost &host,
