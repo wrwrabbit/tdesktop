@@ -1309,6 +1309,23 @@ aiComposeStyleEmojiTop: 5px;
 aiComposeStyleLabelTop: 30px;
 aiComposeStyleEmojiFont: font(20px);
 aiComposeStyleLabelFont: font(12px semibold);
+aiComposeStyleTabsScroll: ScrollArea(defaultScrollArea) {
+	barHidden: true;
+}
+aiComposeStyleButtonPadding: margins(12px, 0px, 12px, 0px);
+aiComposeStyleFadeWidth: 24px;
+aiComposeBadge: RoundButton(customEmojiTextBadge) {
+	textFg: activeButtonBg;
+	textBg: activeButtonFg;
+	width: -8px;
+	height: 16px;
+	radius: 4px;
+	textTop: 1px;
+	style: TextStyle(semiboldTextStyle) {
+		font: font(10px semibold);
+	}
+}
+aiComposeBadgeMargin: margins(0px, 2px, 0px, 0px);
 
 aiComposeCardBg: boxBg;
 aiComposeCardRadius: 22px;

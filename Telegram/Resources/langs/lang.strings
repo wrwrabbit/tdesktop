@@ -2964,6 +2964,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_premium_summary_about_gifts" = "Gifts are collectible items you can trade or showcase on your profile.";
 "lng_premium_summary_subtitle_no_forwards" = "Disable Sharing";
 "lng_premium_summary_about_no_forwards" = "Restrict forwarding, copying, and saving content from your private chats.";
+"lng_premium_summary_subtitle_ai_compose" = "AI Tools";
+"lng_premium_summary_about_ai_compose" = "Transform your messages and entire chats in your preferred style and language.";
 "lng_premium_summary_bottom_subtitle" = "About Telegram Premium";
 "lng_premium_summary_bottom_about" = "While the free version of Telegram already gives its users more than any other messaging application, **Telegram Premium** pushes its capabilities even further.\n\n**Telegram Premium** is a paid option, because most Premium Features require additional expenses from Telegram to third parties such as data center providers and server manufacturers. Contributions from **Telegram Premium** users allow us to cover such costs and also help Telegram stay free for everyone.";
 "lng_premium_summary_button" = "Subscribe for {cost} per month";
@@ -7772,8 +7774,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_ai_compose_result" = "Result";
 "lng_ai_compose_to_language" = "To {language}";
 "lng_ai_compose_emojify" = "emojify";
-"lng_ai_compose_loading" = "Working on it...";
 "lng_ai_compose_error" = "AI request failed.";
 "lng_ai_compose_tooltip" = "Rewrite, translate, or correct your text using AI.";
+"lng_ai_compose_flood_title" = "Daily limit reached";
+"lng_ai_compose_flood_text" = "Get {link} for **50x** more AI text transformations per day.";
+"lng_ai_compose_flood_link" = "Telegram Premium";
+"lng_ai_compose_increase_limit" = "Increase Limit";
+"lng_ai_compose_select_style" = "Select Style";
+"lng_ai_compose_apply_style" = "Apply Style";
 
 // Keys finished

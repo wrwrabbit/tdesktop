@@ -9,17 +9,23 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_compose_with_ai.h"
 #include "apiwrap.h"
+#include "boxes/premium_preview_box.h"
+#include "chat_helpers/compose/compose_show.h"
 #include "core/ui_integration.h"
 #include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
+#include "main/session/session_show.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
+#include "settings/sections/settings_premium.h"
 #include "spellcheck/platform/platform_language.h"
 #include "ui/boxes/choose_language_box.h"
 #include "ui/controls/send_button.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
+#include "ui/text/custom_emoji_helper.h"
+#include "ui/text/custom_emoji_text_badge.h"
 #include "ui/text/text_utilities.h"
 #include "ui/vertical_list.h"
 #include "ui/wrap/slide_wrap.h"
@@ -27,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/labels.h"
+#include "ui/widgets/scroll_area.h"
 #include "styles/style_basic.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
@@ -34,6 +41,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_widgets.h"
 
 #include <algorithm>
+
+#include <QtWidgets/QScrollBar>
 
 namespace HistoryView::Controls {
 namespace {
@@ -235,8 +244,9 @@ public:
 		Main::AppConfig::AiComposeStyle style);
 
 	void setSelected(bool selected);
+	void setExtraPadding(int extra);
 	[[nodiscard]] const Main::AppConfig::AiComposeStyle &style() const;
-
+	
 protected:
 	void paintEvent(QPaintEvent *e) override;
 	[[nodiscard]] QImage prepareRippleMask() const override;
@@ -245,6 +255,7 @@ private:
 	const Main::AppConfig::AiComposeStyle _style;
 	const QString _label;
 	bool _selected = false;
+	int _extraPadding = 0;
 
 };
 
@@ -256,16 +267,40 @@ public:
 
 	void setChangedCallback(Fn<void(int)> callback);
 	void setActive(int index);
+	void resizeForOuterWidth(int outerWidth);
 	[[nodiscard]] QString currentTone() const;
+	[[nodiscard]] int buttonCount() const;
 
 protected:
-	int resizeGetHeight(int newWidth) override;
 	void paintEvent(QPaintEvent *e) override;
 
 private:
-	QList<not_null<ComposeAiStyleButton*>> _buttons;
+	std::vector<not_null<ComposeAiStyleButton*>> _buttons;
 	Fn<void(int)> _changed;
-	int _active = 0;
+	int _active = -1;
+
+};
+
+class ComposeAiStyleScrollTabs final : public Ui::RpWidget {
+public:
+	ComposeAiStyleScrollTabs(
+		QWidget *parent,
+		std::vector<Main::AppConfig::AiComposeStyle> styles);
+
+	[[nodiscard]] not_null<ComposeAiStyleTabs*> inner() const;
+
+protected:
+	int resizeGetHeight(int newWidth) override;
+
+private:
+	void updateFades();
+
+	const not_null<Ui::ScrollArea*> _scroll;
+	const not_null<ComposeAiStyleTabs*> _inner;
+	const not_null<Ui::RpWidget*> _fadeLeft;
+	const not_null<Ui::RpWidget*> _fadeRight;
+	const not_null<Ui::RpWidget*> _cornerLeft;
+	const not_null<Ui::RpWidget*> _cornerRight;
 
 };
 
@@ -286,6 +321,7 @@ public:
 	void setEmojifyVisible(bool visible);
 	void setEmojifyChecked(bool checked);
 	void setLoading(bool loading);
+	void setResultVisible(bool visible);
 	void setResult(TextWithEntities text, bool copyVisible);
 
 protected:
@@ -313,6 +349,7 @@ private:
 	bool _originalVisible = true;
 	bool _loading = false;
 	bool _hasShownResult = false;
+	bool _resultVisible = true;
 	bool _copyVisible = false;
 	bool _emojifyVisible = false;
 	bool _dividerVisible = false;
@@ -332,8 +369,13 @@ public:
 	[[nodiscard]] const TextWithEntities &result() const;
 	[[nodiscard]] const std::vector<Main::AppConfig::AiComposeStyle> &stylesData() const;
 	void setReadyChangedCallback(Fn<void(bool)> callback);
+	void setPremiumFloodCallback(Fn<void()> callback);
+	void setModeChangedCallback(Fn<void(ComposeAiMode)> callback);
+	void setStyleSelectedCallback(Fn<void()> callback);
+	[[nodiscard]] ComposeAiMode mode() const;
+	[[nodiscard]] bool hasStyleSelection() const;
 	void setModeTabs(not_null<ComposeAiModeTabs*> tabs);
-	void setStyleTabs(not_null<Ui::SlideWrap<ComposeAiStyleTabs>*> stylesWrap);
+	void setStyleTabs(not_null<Ui::SlideWrap<ComposeAiStyleScrollTabs>*> stylesWrap);
 	void start();
 
 protected:
@@ -359,12 +401,15 @@ private:
 	LanguageId _to;
 	const std::vector<Main::AppConfig::AiComposeStyle> _stylesData;
 	QPointer<ComposeAiModeTabs> _tabs;
-	QPointer<ComposeAiStyleTabs> _styles;
-	QPointer<Ui::SlideWrap<ComposeAiStyleTabs>> _stylesWrap;
+	QPointer<ComposeAiStyleScrollTabs> _styles;
+	QPointer<Ui::SlideWrap<ComposeAiStyleScrollTabs>> _stylesWrap;
 	const not_null<ComposeAiPreviewCard*> _preview;
 	Fn<void(bool)> _readyChanged;
+	Fn<void()> _premiumFlood;
+	Fn<void(ComposeAiMode)> _modeChanged;
+	Fn<void()> _styleSelected;
 	ComposeAiMode _mode = ComposeAiMode::Translate;
-	int _styleIndex = 0;
+	int _styleIndex = -1;
 	bool _emojify = false;
 	bool _ready = false;
 	mtpRequestId _requestId = 0;
@@ -529,6 +574,15 @@ ComposeAiStyleButton::ComposeAiStyleButton(
 , _style(std::move(style))
 , _label(ToneTitle(_style.key)) {
 	setCursor(style::cur_pointer);
+	setNaturalWidth([&] {
+		const auto padding = st::aiComposeStyleButtonPadding;
+		const auto labelWidth = st::aiComposeStyleLabelFont->width(_label);
+		const auto emojiWidth = st::aiComposeStyleEmojiFont->width(_style.emoji);
+		return padding.left()
+			+ std::max(labelWidth, emojiWidth)
+			+ padding.right();
+	}());
+	setExtraPadding(0);
 }
 
 void ComposeAiStyleButton::setSelected(bool selected) {
@@ -537,6 +591,11 @@ void ComposeAiStyleButton::setSelected(bool selected) {
 	}
 	_selected = selected;
 	update();
+}
+
+void ComposeAiStyleButton::setExtraPadding(int extra) {
+	_extraPadding = extra;
+	resize(naturalWidth() + 2 * extra, height());
 }
 
 const Main::AppConfig::AiComposeStyle &ComposeAiStyleButton::style() const {
@@ -615,8 +674,9 @@ ComposeAiStyleTabs::ComposeAiStyleTabs(
 			this,
 			std::move(style));
 		button->setClickedCallback([=] {
-			const auto index = _buttons.indexOf(button);
-			if (index < 0) {
+			const auto i = ranges::find(_buttons, not_null(button));
+			const auto index = int(i - begin(_buttons));
+			if (index == _buttons.size()) {
 				return;
 			}
 			setActive(index);
@@ -626,7 +686,16 @@ ComposeAiStyleTabs::ComposeAiStyleTabs(
 		});
 		_buttons.push_back(button);
 	}
-	setActive(0);
+	setNaturalWidth([&] {
+		const auto padding = st::aiComposeStyleTabsPadding;
+		const auto skip = st::aiComposeStyleTabsSkip;
+		auto total = padding.left();
+		for (const auto button : _buttons) {
+			total += button->naturalWidth() + skip;
+		}
+		return total - skip + padding.right();
+	}());
+	setActive(-1);
 }
 
 void ComposeAiStyleTabs::setChangedCallback(Fn<void(int)> callback) {
@@ -634,36 +703,88 @@ void ComposeAiStyleTabs::setChangedCallback(Fn<void(int)> callback) {
 }
 
 void ComposeAiStyleTabs::setActive(int index) {
-	if (index < 0 || index >= _buttons.size()) {
+	if (index < -1 || index >= int(_buttons.size())) {
 		return;
 	}
 	_active = index;
-	for (auto i = 0; i != _buttons.size(); ++i) {
+	for (auto i = 0; i != int(_buttons.size()); ++i) {
 		_buttons[i]->setSelected(i == index);
 	}
 }
 
+void ComposeAiStyleTabs::resizeForOuterWidth(int outerWidth) {
+	const auto count = int(_buttons.size());
+	const auto padding = st::aiComposeStyleTabsPadding;
+	const auto skip = st::aiComposeStyleTabsSkip;
+	const auto bheight = st::aiComposeStyleTabsHeight
+		- padding.top()
+		- padding.bottom();
+	const auto height = st::aiComposeStyleTabsHeight;
+	auto left = padding.left();
+	const auto guard = gsl::finally([&] {
+		resize(left - skip + padding.right(), height);
+	});
+	if (!count) {
+		return;
+	}
+	const auto setExtraPaddingFor = [&](
+			not_null<ComposeAiStyleButton*> button,
+			int value) {
+		button->setExtraPadding(value);
+
+		const auto w = button->width();
+		button->setGeometry(left, padding.top(), w, bheight);
+		left += w + skip;
+	};
+	const auto diff = naturalWidth() - outerWidth;
+	if (diff > 0) {
+		auto total = left;
+		for (auto fit = 0; fit != count;) {
+			const auto width = _buttons[fit]->naturalWidth();
+			const auto tooLarge = (total + (width / 2) > outerWidth);
+			if (!tooLarge) {
+				++fit;
+				total += width + skip;
+			}
+			if (tooLarge || (fit == count)) {
+				if (fit > 0) {
+					const auto width = _buttons[fit - 1]->naturalWidth();
+					const auto desired = total - skip - (width / 2);
+					const auto add = outerWidth - desired;
+					const auto extra = add / ((fit - 1) * 2 + 1);
+					for (const auto &button : _buttons) {
+						setExtraPaddingFor(button, extra);
+					}
+				} else {
+					for (const auto &button : _buttons) {
+						setExtraPaddingFor(button, 0);
+					}
+				}
+				return;
+			}
+		}
+		Unexpected("Tabs width inconsistency.");
+	} else {
+		const auto add = -diff / 2;
+		const auto each = add / _buttons.size();
+		const auto more = add - (each * _buttons.size());
+		for (auto i = 0; i < more; ++i) {
+			setExtraPaddingFor(_buttons[i], each + 1);
+		}
+		for (auto i = more; i < count; ++i) {
+			setExtraPaddingFor(_buttons[i], each);
+		}
+	}
+}
+
 QString ComposeAiStyleTabs::currentTone() const {
-	return (_active >= 0 && _active < _buttons.size())
+	return (_active >= 0 && _active < int(_buttons.size()))
 		? _buttons[_active]->style().key
 		: QString();
 }
 
-int ComposeAiStyleTabs::resizeGetHeight(int newWidth) {
-	const auto padding = st::aiComposeStyleTabsPadding;
-	const auto skip = st::aiComposeStyleTabsSkip;
-	const auto count = std::max(_buttons.size(), 1);
-	const auto innerWidth = newWidth - padding.left() - padding.right();
-	const auto width = (innerWidth - ((count - 1) * skip)) / count;
-	const auto height = st::aiComposeStyleTabsHeight
-		- padding.top()
-		- padding.bottom();
-	auto left = padding.left();
-	for (const auto button : _buttons) {
-		button->setGeometry(left, padding.top(), width, height);
-		left += width + skip;
-	}
-	return st::aiComposeStyleTabsHeight;
+int ComposeAiStyleTabs::buttonCount() const {
+	return int(_buttons.size());
 }
 
 void ComposeAiStyleTabs::paintEvent(QPaintEvent *e) {
@@ -676,6 +797,130 @@ void ComposeAiStyleTabs::paintEvent(QPaintEvent *e) {
 		rect(),
 		radius,
 		radius);
+}
+
+ComposeAiStyleScrollTabs::ComposeAiStyleScrollTabs(
+	QWidget *parent,
+	std::vector<Main::AppConfig::AiComposeStyle> styles)
+: RpWidget(parent)
+, _scroll(Ui::CreateChild<Ui::ScrollArea>(
+	this,
+	st::aiComposeStyleTabsScroll))
+, _inner(_scroll->setOwnedWidget(
+	object_ptr<ComposeAiStyleTabs>(this, std::move(styles))))
+, _fadeLeft(Ui::CreateChild<Ui::RpWidget>(this))
+, _fadeRight(Ui::CreateChild<Ui::RpWidget>(this))
+, _cornerLeft(Ui::CreateChild<Ui::RpWidget>(this))
+, _cornerRight(Ui::CreateChild<Ui::RpWidget>(this)) {
+	_scroll->setCustomWheelProcess([=](not_null<QWheelEvent*> e) {
+		const auto pixelDelta = e->pixelDelta();
+		const auto angleDelta = e->angleDelta();
+		if (std::abs(pixelDelta.x()) + std::abs(angleDelta.x())) {
+			return false;
+		}
+		const auto y = pixelDelta.y() ? pixelDelta.y() : angleDelta.y();
+		_scroll->scrollToX(_scroll->scrollLeft() - y);
+		return true;
+	});
+
+	const auto setupFade = [&](
+			not_null<Ui::RpWidget*> fade,
+			bool left) {
+		fade->setAttribute(Qt::WA_TransparentForMouseEvents);
+		fade->paintRequest(
+		) | rpl::on_next([=] {
+			auto p = QPainter(fade);
+			const auto w = fade->width();
+			const auto bg = st::aiComposeStyleTabsBg->c;
+			auto transparent = bg;
+			transparent.setAlpha(0);
+			auto gradient = QLinearGradient(0, 0, w, 0);
+			if (left) {
+				gradient.setColorAt(0., bg);
+				gradient.setColorAt(1., transparent);
+			} else {
+				gradient.setColorAt(0., transparent);
+				gradient.setColorAt(1., bg);
+			}
+			p.fillRect(fade->rect(), gradient);
+		}, fade->lifetime());
+		fade->hide();
+	};
+	setupFade(_fadeLeft, true);
+	setupFade(_fadeRight, false);
+
+	const auto setupCorner = [&](
+			not_null<Ui::RpWidget*> corner,
+			bool left) {
+		corner->setAttribute(Qt::WA_TransparentForMouseEvents);
+		corner->paintRequest(
+		) | rpl::on_next([=] {
+			auto p = QPainter(corner);
+			PainterHighQualityEnabler hq(p);
+			const auto w = corner->width();
+			const auto h = corner->height();
+			auto mask = QPainterPath();
+			mask.addRect(0, 0, w, h);
+			auto rounded = QPainterPath();
+			if (left) {
+				rounded.addRoundedRect(0, 0, w * 2, h, w, w);
+			} else {
+				rounded.addRoundedRect(-w, 0, w * 2, h, w, w);
+			}
+			p.setPen(Qt::NoPen);
+			p.setBrush(st::boxDividerBg);
+			p.drawPath(mask.subtracted(rounded));
+		}, corner->lifetime());
+	};
+	setupCorner(_cornerLeft, true);
+	setupCorner(_cornerRight, false);
+
+	_scroll->scrolls(
+	) | rpl::on_next([=] {
+		updateFades();
+	}, lifetime());
+
+	rpl::combine(
+		widthValue(),
+		_scroll->widthValue(),
+		_inner->widthValue()
+	) | rpl::on_next([=] {
+		updateFades();
+	}, lifetime());
+}
+
+not_null<ComposeAiStyleTabs*> ComposeAiStyleScrollTabs::inner() const {
+	return _inner;
+}
+
+int ComposeAiStyleScrollTabs::resizeGetHeight(int newWidth) {
+	_scroll->setGeometry(0, 0, newWidth, st::aiComposeStyleTabsHeight);
+
+	_inner->resizeForOuterWidth(newWidth);
+
+	const auto fadeWidth = st::aiComposeStyleFadeWidth;
+	const auto fadeHeight = st::aiComposeStyleTabsHeight;
+	_fadeLeft->setGeometry(0, 0, fadeWidth, fadeHeight);
+	_fadeRight->setGeometry(
+		newWidth - fadeWidth, 0, fadeWidth, fadeHeight);
+	_fadeLeft->raise();
+	_fadeRight->raise();
+
+	const auto radius = st::aiComposeStyleTabsRadius;
+	_cornerLeft->setGeometry(0, 0, radius, fadeHeight);
+	_cornerRight->setGeometry(newWidth - radius, 0, radius, fadeHeight);
+	_cornerLeft->raise();
+	_cornerRight->raise();
+
+	updateFades();
+	return st::aiComposeStyleTabsHeight;
+}
+
+void ComposeAiStyleScrollTabs::updateFades() {
+	const auto scrollLeft = _scroll->scrollLeft();
+	const auto scrollMax = _scroll->scrollLeftMax();
+	_fadeLeft->setVisible(scrollLeft > 0);
+	_fadeRight->setVisible(scrollLeft < scrollMax);
 }
 
 // ComposeAiPreviewCard
@@ -795,11 +1040,17 @@ void ComposeAiPreviewCard::setEmojifyChecked(bool checked) {
 void ComposeAiPreviewCard::setLoading(bool loading) {
 	_loading = loading;
 	if (loading && !_hasShownResult) {
-		_resultBody->setMarkedText(
-			Ui::Text::Italic(tr::lng_ai_compose_loading(tr::now)),
-			_context);
+		_resultBody->setMarkedText(_original, _context);
 	}
 	_copy->setVisible(!loading && _copyVisible);
+	refreshGeometry();
+}
+
+void ComposeAiPreviewCard::setResultVisible(bool visible) {
+	if (_resultVisible == visible) {
+		return;
+	}
+	_resultVisible = visible;
 	refreshGeometry();
 }
 
@@ -863,46 +1114,59 @@ int ComposeAiPreviewCard::resizeGetHeight(int newWidth) {
 		_originalToggle->hide();
 	}
 
-	auto controlsWidth = 0;
-	if (_emojifyVisible) {
-		_emojify->show();
-		_emojify->resizeToNaturalWidth(contentWidth);
-		controlsWidth += _emojify->width() + st::aiComposeCardControlSkip;
+	if (_resultVisible) {
+		_resultTitle->show();
+		_resultBody->show();
+		auto controlsWidth = 0;
+		if (_emojifyVisible) {
+			_emojify->show();
+			_emojify->resizeToNaturalWidth(contentWidth);
+			controlsWidth += _emojify->width()
+				+ st::aiComposeCardControlSkip;
+		} else {
+			_emojify->hide();
+		}
+		const auto resultTitleWidth = std::max(
+			contentWidth - controlsWidth,
+			0);
+		_resultTitle->resizeToWidth(resultTitleWidth);
+		auto right = padding.right();
+		if (_emojifyVisible) {
+			_emojify->moveToRight(right, y, newWidth);
+			right += _emojify->width() + st::aiComposeCardControlSkip;
+		}
+		_resultTitle->setGeometryToLeft(
+			padding.left(),
+			y,
+			resultTitleWidth,
+			_resultTitle->height(),
+			newWidth);
+		y += std::max({
+			_resultTitle->height(),
+			_emojifyVisible ? _emojify->height() : 0,
+		});
+		y += st::aiComposeCardTextSkip;
+
+		_resultBody->resizeToWidth(contentWidth);
+		_resultBody->setGeometryToLeft(
+			padding.left(),
+			y,
+			contentWidth,
+			_resultBody->height(),
+			newWidth);
+		y += _resultBody->height();
+
+		if (_copy->isVisible()) {
+			y += st::aiComposeCardCopySkip;
+			_copy->moveToRight(padding.right(), y, newWidth);
+			y += _copy->height();
+		}
+
 	} else {
+		_resultTitle->hide();
+		_resultBody->hide();
+		_copy->hide();
 		_emojify->hide();
-	}
-	const auto resultTitleWidth = std::max(contentWidth - controlsWidth, 0);
-	_resultTitle->resizeToWidth(resultTitleWidth);
-	auto right = padding.right();
-	if (_emojifyVisible) {
-		_emojify->moveToRight(right, y, newWidth);
-		right += _emojify->width() + st::aiComposeCardControlSkip;
-	}
-	_resultTitle->setGeometryToLeft(
-		padding.left(),
-		y,
-		resultTitleWidth,
-		_resultTitle->height(),
-		newWidth);
-	y += std::max({
-		_resultTitle->height(),
-		_emojifyVisible ? _emojify->height() : 0,
-	});
-	y += st::aiComposeCardTextSkip;
-
-	_resultBody->resizeToWidth(contentWidth);
-	_resultBody->setGeometryToLeft(
-		padding.left(),
-		y,
-		contentWidth,
-		_resultBody->height(),
-		newWidth);
-	y += _resultBody->height();
-
-	if (_copy->isVisible()) {
-		y += st::aiComposeCardCopySkip;
-		_copy->moveToRight(padding.right(), y, newWidth);
-		y += _copy->height();
 	}
 
 	return y + padding.bottom();
@@ -997,19 +1261,24 @@ void ComposeAiContent::setModeTabs(not_null<ComposeAiModeTabs*> tabs) {
 }
 
 void ComposeAiContent::setStyleTabs(
-		not_null<Ui::SlideWrap<ComposeAiStyleTabs>*> stylesWrap) {
+		not_null<Ui::SlideWrap<ComposeAiStyleScrollTabs>*> stylesWrap) {
 	_stylesWrap = stylesWrap;
 	_stylesWrap->setDuration(0);
 	_styles = stylesWrap->entity();
-	_styles->setChangedCallback([=](int index) {
-		if (index >= 0 && index < _stylesData.size()) {
+	_styles->inner()->setChangedCallback([=](int index) {
+		if (index >= 0 && index < int(_stylesData.size())) {
+			const auto wasNoSelection = (_styleIndex < 0);
 			_styleIndex = index;
+			updateTitles();
 			if (_mode == ComposeAiMode::Style) {
 				request();
+				if (wasNoSelection && _styleSelected) {
+					_styleSelected();
+				}
 			}
 		}
 	});
-	_styles->setActive(_styleIndex);
+	_styles->inner()->setActive(_styleIndex);
 	_stylesWrap->toggle(_mode == ComposeAiMode::Style, anim::type::instant);
 }
 
@@ -1067,6 +1336,9 @@ void ComposeAiContent::setMode(ComposeAiMode mode) {
 		return;
 	}
 	_mode = mode;
+	if (_modeChanged) {
+		_modeChanged(_mode);
+	}
 	updatePinnedTabs(anim::type::normal);
 	updateTitles();
 	refreshLayout();
@@ -1074,7 +1346,11 @@ void ComposeAiContent::setMode(ComposeAiMode mode) {
 }
 
 void ComposeAiContent::updateTitles() {
-	_preview->setOriginalVisible(_mode != ComposeAiMode::Style);
+	const auto styleNoSelection = (_mode == ComposeAiMode::Style)
+		&& (_styleIndex < 0);
+	_preview->setOriginalVisible(
+		_mode != ComposeAiMode::Style || styleNoSelection);
+	_preview->setResultVisible(!styleNoSelection);
 	_preview->setOriginalTitle(
 		(_mode == ComposeAiMode::Translate)
 			? FromTitle(_detectedFrom)
@@ -1092,7 +1368,7 @@ void ComposeAiContent::updatePinnedTabs(anim::type animated) {
 		_tabs->setActive(_mode);
 	}
 	if (_styles) {
-		_styles->setActive(_styleIndex);
+		_styles->inner()->setActive(_styleIndex);
 	}
 	if (_stylesWrap) {
 		_stylesWrap->toggle(_mode == ComposeAiMode::Style, animated);
@@ -1108,6 +1384,9 @@ void ComposeAiContent::cancelRequest() {
 }
 
 void ComposeAiContent::request() {
+	if (_mode == ComposeAiMode::Style && _styleIndex < 0) {
+		return;
+	}
 	cancelRequest();
 	_ready = false;
 	_result = {};
@@ -1168,6 +1447,24 @@ void ComposeAiContent::showError(const MTP::Error &error) {
 	_ready = false;
 	notifyReadyChanged();
 	refreshLayout();
+	if (error.type() == u"AICOMPOSE_FLOOD_PREMIUM"_q) {
+		const auto show = Main::MakeSessionShow(
+			_box->uiShow(),
+			_session);
+		Settings::ShowPremiumPromoToast(
+			show,
+			ChatHelpers::ResolveWindowDefault(),
+			tr::lng_ai_compose_flood_text(
+				tr::now,
+				lt_link,
+				tr::link(tr::lng_ai_compose_flood_link(tr::now)),
+				tr::rich),
+			u"ai_compose"_q);
+		if (_premiumFlood) {
+			_premiumFlood();
+		}
+		return;
+	}
 	_box->showToast(error.type().isEmpty()
 		? tr::lng_ai_compose_error(tr::now)
 		: error.type());
@@ -1179,10 +1476,31 @@ void ComposeAiContent::notifyReadyChanged() {
 	}
 }
 
+void ComposeAiContent::setPremiumFloodCallback(Fn<void()> callback) {
+	_premiumFlood = std::move(callback);
+}
+
+void ComposeAiContent::setModeChangedCallback(
+		Fn<void(ComposeAiMode)> callback) {
+	_modeChanged = std::move(callback);
+}
+
+void ComposeAiContent::setStyleSelectedCallback(Fn<void()> callback) {
+	_styleSelected = std::move(callback);
+}
+
+ComposeAiMode ComposeAiContent::mode() const {
+	return _mode;
+}
+
+bool ComposeAiContent::hasStyleSelection() const {
+	return _styleIndex >= 0;
+}
+
 } // namespace
 
 void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
-	box->setStyle(st::aiComposeBoxWithSend);
+	box->setStyle(st::aiComposeBox);
 	box->setNoContentMargin(true);
 	box->setWidth(st::boxWideWidth);
 	box->setTitle(tr::lng_ai_compose_title());
@@ -1190,27 +1508,33 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 		box->closeBox();
 	});
 
+	const auto session = args.session;
 	const auto body = box->verticalLayout();
-	Ui::AddSkip(body, st::aiComposeBoxSectionSkip);
+	const auto tabsSkip = QMargins(0, 0, 0, st::aiComposeBoxStyleTabsSkip);
 	const auto pinnedToTop = box->setPinnedToTopContent(
 		object_ptr<Ui::VerticalLayout>(box));
 	const auto tabs = pinnedToTop->add(
 		object_ptr<ComposeAiModeTabs>(pinnedToTop),
-		st::aiComposeContentMargin);
+		st::aiComposeContentMargin + tabsSkip);
 	const auto content = body->add(
 		object_ptr<ComposeAiContent>(box, box, args),
 		st::aiComposeContentMargin);
 	const auto stylesWrap = pinnedToTop->add(
-		object_ptr<Ui::SlideWrap<ComposeAiStyleTabs>>(
+		object_ptr<Ui::SlideWrap<ComposeAiStyleScrollTabs>>(
 			pinnedToTop,
-			object_ptr<ComposeAiStyleTabs>(
+			object_ptr<ComposeAiStyleScrollTabs>(
 				pinnedToTop,
 				content->stylesData()),
-			style::margins(0, st::aiComposeBoxStyleTabsSkip, 0, 0)),
+			tabsSkip),
 		st::aiComposeContentMargin);
 	stylesWrap->hide(anim::type::instant);
 	content->setModeTabs(tabs);
 	content->setStyleTabs(stylesWrap);
+
+	auto premiumFlooded = std::make_shared<bool>(false);
+	auto applyButton = std::make_shared<QPointer<Ui::RoundButton>>();
+	auto sendButton = std::make_shared<QPointer<Ui::SendButton>>();
+
 	const auto applyAndClose = [=] {
 		if (!content->hasResult()) {
 			return;
@@ -1218,36 +1542,111 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 		args.apply(TextWithEntities(content->result()));
 		box->closeBox();
 	};
-	const auto apply = box->addButton(
-		tr::lng_ai_compose_apply(),
-		applyAndClose);
-	apply->setDisabled(!content->hasResult());
-	apply->setFullRadius(true);
 
-	const auto send = Ui::CreateChild<Ui::SendButton>(
-		apply->parentWidget(),
-		st::aiComposeSendButton);
-	send->setState({ .type = Ui::SendButton::Type::Send });
-	send->show();
-	send->setAttribute(Qt::WA_TransparentForMouseEvents, !content->hasResult());
+	const auto rebuildButtons = [=] {
+		if (*sendButton) {
+			delete sendButton->data();
+		}
+		*sendButton = nullptr;
+		box->clearButtons();
+		box->addTopButton(st::boxTitleClose, [=] {
+			box->closeBox();
+		});
+		*applyButton = nullptr;
 
-	apply->geometryValue(
-	) | rpl::on_next([=](QRect geometry) {
-		const auto size = st::aiComposeBoxWithSend.buttonHeight;
-		send->resize(size, size);
-		send->moveToLeft(
-			geometry.x() + geometry.width() + st::aiComposeSendButtonSkip,
-			geometry.y() + (geometry.height() - size) / 2);
-	}, send->lifetime());
+		if (*premiumFlooded) {
+			box->setStyle(st::aiComposeBox);
+			auto helper = Ui::Text::CustomEmojiHelper();
+			const auto badge = helper.paletteDependent(
+				Ui::Text::CustomEmojiTextBadge(
+					u"x50"_q,
+					st::aiComposeBadge,
+					st::aiComposeBadgeMargin));
+			const auto btn = box->addButton(
+				tr::lng_ai_compose_increase_limit(), nullptr);
+			btn->setFullRadius(true);
+			btn->setContext(helper.context());
+			btn->setText(rpl::single(
+				tr::lng_ai_compose_increase_limit(tr::now, tr::marked)
+					.append(' ')
+					.append(badge)));
+			const auto resolve = ChatHelpers::ResolveWindowDefault();
+			const auto close = crl::guard(box, [=] {
+				box->closeBox();
+			});
+			btn->setClickedCallback([=] {
+				if (const auto controller = resolve(session)) {
+					ShowPremiumPreviewBox(
+						controller,
+						PremiumFeature::AiCompose);
+				}
+				close();
+			});
+		} else if (content->mode() == ComposeAiMode::Style
+				&& !content->hasStyleSelection()) {
+			box->setStyle(st::aiComposeBox);
+			const auto btn = box->addButton(
+				tr::lng_ai_compose_select_style(), nullptr);
+			btn->setFullRadius(true);
+			btn->setDisabled(true);
+			btn->setTextFgOverride(
+				anim::color(st::activeButtonBg, st::activeButtonFg, 0.5));
+		} else {
+			box->setStyle(st::aiComposeBoxWithSend);
+			const auto isStyle =
+				(content->mode() == ComposeAiMode::Style);
+			const auto btn = box->addButton(
+				isStyle
+					? tr::lng_ai_compose_apply_style()
+					: tr::lng_ai_compose_apply(),
+				applyAndClose);
+			btn->setFullRadius(true);
+			btn->setDisabled(!content->hasResult());
+			*applyButton = btn;
 
-	send->setClickedCallback(applyAndClose);
+			const auto send = Ui::CreateChild<Ui::SendButton>(
+				btn->parentWidget(),
+				st::aiComposeSendButton);
+			send->setState({ .type = Ui::SendButton::Type::Send });
+			send->show();
+			send->setAttribute(
+				Qt::WA_TransparentForMouseEvents,
+				!content->hasResult());
+			btn->geometryValue(
+			) | rpl::on_next([=](QRect geometry) {
+				const auto size = st::aiComposeBoxWithSend.buttonHeight;
+				send->resize(size, size);
+				send->moveToLeft(
+					geometry.x() + geometry.width()
+						+ st::aiComposeSendButtonSkip,
+					geometry.y() + (geometry.height() - size) / 2);
+			}, send->lifetime());
+			send->setClickedCallback(applyAndClose);
+			*sendButton = send;
+		}
+	};
 
 	content->setReadyChangedCallback([=](bool ready) {
-		if (apply) {
-			apply->setDisabled(!ready);
+		if (*applyButton) {
+			(*applyButton)->setDisabled(!ready);
 		}
-		send->setAttribute(Qt::WA_TransparentForMouseEvents, !ready);
+		if (*sendButton) {
+			(*sendButton)->setAttribute(
+				Qt::WA_TransparentForMouseEvents, !ready);
+		}
 	});
+	content->setPremiumFloodCallback([=] {
+		*premiumFlooded = true;
+		rebuildButtons();
+	});
+	content->setModeChangedCallback([=](ComposeAiMode) {
+		rebuildButtons();
+	});
+	content->setStyleSelectedCallback([=] {
+		rebuildButtons();
+	});
+
+	rebuildButtons();
 	content->start();
 }
 
