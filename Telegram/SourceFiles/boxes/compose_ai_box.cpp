@@ -1147,6 +1147,16 @@ int ComposeAiPreviewCard::resizeGetHeight(int newWidth) {
 		});
 		y += st::aiComposeCardTextSkip;
 
+		const auto lineHeight = _resultBody->st().style.lineHeight
+			? _resultBody->st().style.lineHeight
+			: _resultBody->st().style.font->height;
+		if (_copy->isVisible()) {
+			_resultBody->setSkipBlock(
+				_copy->width(),
+				lineHeight);
+		} else {
+			_resultBody->setSkipBlock(0, 0);
+		}
 		_resultBody->resizeToWidth(contentWidth);
 		_resultBody->setGeometryToLeft(
 			padding.left(),
@@ -1154,13 +1164,13 @@ int ComposeAiPreviewCard::resizeGetHeight(int newWidth) {
 			contentWidth,
 			_resultBody->height(),
 			newWidth);
-		y += _resultBody->height();
-
 		if (_copy->isVisible()) {
-			y += st::aiComposeCardCopySkip;
-			_copy->moveToRight(padding.right(), y, newWidth);
-			y += _copy->height();
+			_copy->moveToRight(
+				padding.right(),
+				y + _resultBody->height() - lineHeight,
+				newWidth);
 		}
+		y += _resultBody->height();
 
 	} else {
 		_resultTitle->hide();

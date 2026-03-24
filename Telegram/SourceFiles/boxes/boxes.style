@@ -1333,7 +1333,6 @@ aiComposeCardPadding: margins(12px, 16px, 16px, 16px);
 aiComposeCardDivider: shadowFg;
 aiComposeCardSectionSkip: 12px;
 aiComposeCardTextSkip: 0px;
-aiComposeCardCopySkip: 0px;
 aiComposeCardControlSkip: 8px;
 aiComposeCardTitle: FlatLabel(defaultSubsectionTitle) {
 	textFg: windowFg;
