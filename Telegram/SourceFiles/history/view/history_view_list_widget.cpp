@@ -764,12 +764,18 @@ std::optional<int> ListWidget::scrollTopForView(
 	if (heightLeft >= 0) {
 		return std::max(top - (heightLeft / 2), 0);
 	} else if (const auto highlight = _highlighter.state(view->data())
-		; (!highlight.range.empty() || highlight.todoItemId)
+		; (!highlight.range.empty()
+			|| highlight.todoItemId
+			|| !highlight.pollOption.isEmpty())
 		&& !IsSubGroupSelection(highlight.range)) {
 		const auto sel = highlight.range;
 		const auto single = st::messageTextStyle.font->height;
 		const auto todoy = sel.empty()
-			? HistoryView::FindViewTaskY(view, highlight.todoItemId)
+			? (highlight.todoItemId
+				? HistoryView::FindViewTaskY(view, highlight.todoItemId)
+				: !highlight.pollOption.isEmpty()
+				? HistoryView::FindViewPollOptionY(view, highlight.pollOption)
+				: 0)
 			: 0;
 		const auto begin = sel.empty()
 			? (todoy - 4 * single)

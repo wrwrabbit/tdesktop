@@ -789,6 +789,11 @@ private:
 	int taskId,
 	int yfrom = 0);
 
+[[nodiscard]] int FindViewPollOptionY(
+	not_null<Element*> view,
+	const QByteArray &option,
+	int yfrom = 0);
+
 [[nodiscard]] Window::SessionController *ExtractController(
 	const ClickContext &context);
 

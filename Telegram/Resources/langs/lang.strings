@@ -4973,6 +4973,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_context_reply_msg" = "Reply";
 "lng_context_quote_and_reply" = "Quote & Reply";
 "lng_context_reply_to_task" = "Reply to Task";
+"lng_context_reply_to_poll_option" = "Reply to Option";
 "lng_context_edit_msg" = "Edit";
 "lng_context_draw" = "Edit Image";
 "lng_context_add_factcheck" = "Add Fact Check";
@@ -5214,6 +5215,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_preview_reply_to" = "Reply to {name}";
 "lng_preview_reply_to_quote" = "Reply to quote from {name}";
 "lng_preview_reply_to_task" = "Reply to task from {title}";
+"lng_preview_reply_to_poll_option" = "Reply to poll option from {title}";
 
 "lng_suggest_bar_title" = "Suggest a Post Below";
 "lng_suggest_bar_text" = "Click to offer a price for publishing.";

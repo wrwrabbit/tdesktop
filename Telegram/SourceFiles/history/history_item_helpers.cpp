@@ -906,6 +906,9 @@ MTPMessageReplyHeader NewMessageReplyHeader(const Api::SendAction &action) {
 					? Flag()
 					: Flag::f_quote_entities)
 				| (replyTo.todoItemId ? Flag::f_todo_item_id : Flag())
+				| (replyTo.pollOption.isEmpty()
+					? Flag()
+					: Flag::f_poll_option)
 				| (topicPost ? Flag::f_forum_topic : Flag())),
 			MTP_int(replyTo.messageId.msg),
 			peerToMTP(externalPeerId),
@@ -916,7 +919,7 @@ MTPMessageReplyHeader NewMessageReplyHeader(const Api::SendAction &action) {
 			quoteEntities,
 			MTP_int(replyTo.quoteOffset),
 			MTP_int(replyTo.todoItemId),
-			MTPbytes()); // poll_option
+			MTP_bytes(replyTo.pollOption));
 	}
 	return MTPMessageReplyHeader();
 }

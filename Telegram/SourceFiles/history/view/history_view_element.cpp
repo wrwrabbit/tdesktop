@@ -3059,6 +3059,72 @@ int FindViewTaskY(not_null<Element*> view, int taskId, int yfrom) {
 	return origin.y() + (yfrom + ytill) / 2;
 }
 
+int FindViewPollOptionY(
+		not_null<Element*> view,
+		const QByteArray &option,
+		int yfrom) {
+	auto request = HistoryView::StateRequest();
+	request.flags = Ui::Text::StateRequest::Flag::LookupLink;
+	const auto single = st::messageTextStyle.font->height;
+	const auto inner = view->innerGeometry();
+	const auto origin = inner.topLeft();
+	if (origin.y() < 0
+		|| origin.y() + inner.height() > view->height()
+		|| inner.height() <= 0) {
+		return yfrom;
+	}
+	const auto media = view->data()->media();
+	const auto poll = media ? media->poll() : nullptr;
+	if (!poll) {
+		return yfrom;
+	}
+	const auto &answers = poll->answers;
+	const auto indexOf = [&](const QByteArray &opt) -> int {
+		return int(ranges::find(
+			answers, opt, &PollAnswer::option) - begin(answers));
+	};
+	const auto index = indexOf(option);
+	const auto count = int(answers.size());
+	if (index == count) {
+		return yfrom;
+	}
+	yfrom = std::max(yfrom - origin.y(), 0);
+	auto ytill = inner.height() - 1;
+	const auto middle = (yfrom + ytill) / 2;
+	const auto fory = [&](int y) {
+		const auto state = view->textState(origin + QPoint(0, y), request);
+		const auto &link = state.link;
+		const auto opt = link
+			? link->property(kPollOptionProperty).toByteArray()
+			: QByteArray();
+		const auto idx = !opt.isEmpty() ? indexOf(opt) : count;
+		return (idx < count) ? idx : (y < middle) ? -1 : count;
+	};
+	auto indexfrom = fory(yfrom);
+	auto indextill = fory(ytill);
+	if ((yfrom >= ytill) || (indexfrom >= index)) {
+		return origin.y() + yfrom;
+	} else if (indextill <= index) {
+		return origin.y() + ytill;
+	}
+	while (ytill - yfrom >= 2 * single) {
+		const auto mid = (yfrom + ytill) / 2;
+		const auto found = fory(mid);
+		if (found == index
+			|| indexfrom > found
+			|| indextill < found) {
+			return origin.y() + mid;
+		} else if (found < index) {
+			yfrom = mid;
+			indexfrom = found;
+		} else {
+			ytill = mid;
+			indextill = found;
+		}
+	}
+	return origin.y() + (yfrom + ytill) / 2;
+}
+
 Window::SessionController *ExtractController(const ClickContext &context) {
 	const auto my = context.other.value<ClickHandlerContext>();
 	if (const auto controller = my.sessionWindow.get()) {

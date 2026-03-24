@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_channel.h"
 #include "data/data_peer.h"
+#include "data/data_poll.h"
 #include "data/data_session.h"
 #include "data/data_story.h"
 #include "data/data_todo_list.h"
@@ -310,7 +311,8 @@ void Reply::update(
 	const auto item = view->data();
 	const auto &fields = data->fields();
 	const auto message = data->resolvedMessage.get();
-	const auto messageMedia = (message && fields.todoItemId)
+	const auto messageMedia = (message
+			&& (fields.todoItemId || !fields.pollOption.isEmpty()))
 		? message->media()
 		: nullptr;
 	const auto messageTodoList = messageMedia
@@ -325,6 +327,12 @@ void Reply::update(
 	const auto task = (taskIndex >= 0
 		&& taskIndex < messageTodoList->items.size())
 		? &messageTodoList->items[taskIndex]
+		: nullptr;
+	const auto messagePoll = messageMedia
+		? messageMedia->poll()
+		: nullptr;
+	const auto pollAnswer = messagePoll
+		? messagePoll->answerByOption(fields.pollOption)
 		: nullptr;
 	const auto story = data->resolvedStory.get();
 	const auto externalMedia = fields.externalMedia.get();
@@ -374,6 +382,11 @@ void Reply::update(
 				.image = MakeTaskImage(),
 				.margin = QMargins(0, st::lineWidth, st::lineWidth, 0),
 			})).append(task->text)
+		: pollAnswer
+		? Ui::Text::Colorized(helper.image({
+			.image = MakeTaskImage(),
+			.margin = QMargins(0, st::lineWidth, st::lineWidth, 0),
+		})).append(pollAnswer->text)
 		: (message && (fields.quote.empty() || !fields.manualQuote))
 		? message->inReplyText()
 		: !fields.quote.empty()
@@ -431,6 +444,7 @@ void Reply::setLinkFrom(
 		.quote = fields.manualQuote ? fields.quote : TextWithEntities(),
 		.quoteOffset = int(fields.quoteOffset),
 		.todoItemId = fields.todoItemId,
+		.pollOption = fields.pollOption,
 	};
 	const auto returnToId = view->data()->fullId();
 	const auto externalLink = [=](ClickContext context) {
@@ -1033,12 +1047,21 @@ TextWithEntities Reply::ComposePreviewName(
 		}
 		return to->author();
 	}();
-	if (const auto media = replyTo.todoItemId ? to->media() : nullptr) {
+	if (const auto media = (replyTo.todoItemId
+			|| !replyTo.pollOption.isEmpty())
+		? to->media()
+		: nullptr) {
 		if (const auto todolist = media->todolist()) {
 			return tr::lng_preview_reply_to_task(
 				tr::now,
 				lt_title,
 				todolist->title,
+				tr::marked);
+		} else if (const auto poll = media->poll()) {
+			return tr::lng_preview_reply_to_poll_option(
+				tr::now,
+				lt_title,
+				poll->question,
 				tr::marked);
 		}
 	}

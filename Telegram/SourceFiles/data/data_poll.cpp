@@ -161,6 +161,7 @@ bool PollData::applyChanges(const MTPDpoll &poll) {
 			}
 		}
 	}
+	hash = poll.vhash().v;
 	++version;
 	return true;
 }

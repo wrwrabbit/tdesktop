@@ -2501,6 +2501,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	const auto todoListTaskId = link
 		? link->property(kTodoListItemIdProperty).toInt()
 		: 0;
+	const auto pollOptionLink = link
+		? link->property(kPollOptionProperty).toByteArray()
+		: QByteArray();
 	const auto session = &this->session();
 	_whoReactedMenuLifetime.destroy();
 	if (!clickedReaction.empty() && leaderOrSelf) {
@@ -2909,6 +2912,8 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				? tr::lng_context_quote_and_reply
 				: todoListTaskId
 				? tr::lng_context_reply_to_task
+				: !pollOptionLink.isEmpty()
+				? tr::lng_context_reply_to_poll_option
 				: tr::lng_context_reply_msg)(
 					tr::now,
 					Ui::Text::FixAmpersandInAction);
@@ -2920,6 +2925,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					.quote = selected.highlight.quote,
 					.quoteOffset = selected.highlight.quoteOffset,
 					.todoItemId = todoListTaskId,
+					.pollOption = pollOptionLink,
 				});
 				if (!selected.highlight.quote.empty()) {
 					_widget->clearSelected();

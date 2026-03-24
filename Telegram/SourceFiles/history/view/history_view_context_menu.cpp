@@ -623,9 +623,14 @@ bool AddReplyToMessageAction(
 	const auto todoListTaskId = request.link
 		? request.link->property(kTodoListItemIdProperty).toInt()
 		: 0;
+	const auto pollOption = request.link
+		? request.link->property(kPollOptionProperty).toByteArray()
+		: QByteArray();
 	const auto &quote = request.quote;
 	auto text = (todoListTaskId
 		? tr::lng_context_reply_to_task
+		: !pollOption.isEmpty()
+		? tr::lng_context_reply_to_poll_option
 		: quote.highlight.quote.empty()
 		? tr::lng_context_reply_msg
 		: tr::lng_context_quote_and_reply)(
@@ -637,6 +642,7 @@ bool AddReplyToMessageAction(
 			.quote = quote.highlight.quote,
 			.quoteOffset = quote.highlight.quoteOffset,
 			.todoItemId = todoListTaskId,
+			.pollOption = pollOption,
 		}, base::IsCtrlPressed());
 	}, &st::menuIconReply);
 	return true;

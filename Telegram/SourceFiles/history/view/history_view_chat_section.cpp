@@ -1065,6 +1065,7 @@ void ChatWidget::setupSwipeReplyAndBack() {
 				.quote = selected.highlight.quote,
 				.quoteOffset = selected.highlight.quoteOffset,
 				.todoItemId = selected.highlight.todoItemId,
+				.pollOption = selected.highlight.pollOption,
 			});
 		};
 		return result;

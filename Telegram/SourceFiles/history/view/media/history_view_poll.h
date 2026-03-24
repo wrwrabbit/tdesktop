@@ -207,6 +207,7 @@ private:
 	void toggleMultiOption(const QByteArray &option);
 	void sendMultiOptions();
 	void showResults();
+	void showAnswerVotesTooltip(const QByteArray &option);
 	void checkQuizAnswered();
 	void showSolution() const;
 	void solutionToggled(

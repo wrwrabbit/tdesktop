@@ -1592,12 +1592,18 @@ int HistoryWidget::itemTopForHighlight(
 	if (heightLeft >= 0) {
 		return std::max(itemTop - (heightLeft / 2), 0);
 	} else if (const auto highlight = itemHighlight(item)
-		; (!highlight.range.empty() || highlight.todoItemId)
+		; (!highlight.range.empty()
+			|| highlight.todoItemId
+			|| !highlight.pollOption.isEmpty())
 			&& !IsSubGroupSelection(highlight.range)) {
 		const auto sel = highlight.range;
 		const auto single = st::messageTextStyle.font->height;
 		const auto todoy = sel.empty()
-			? HistoryView::FindViewTaskY(view, highlight.todoItemId)
+			? (highlight.todoItemId
+				? HistoryView::FindViewTaskY(view, highlight.todoItemId)
+				: !highlight.pollOption.isEmpty()
+				? HistoryView::FindViewPollOptionY(view, highlight.pollOption)
+				: 0)
 			: 0;
 		const auto begin = sel.empty()
 			? (todoy - 4 * single)
@@ -9656,7 +9662,10 @@ void HistoryWidget::updateReplyEditText(not_null<HistoryItem*> item) {
 		.repaint = [=] { updateField(); },
 	});
 	const auto text = [&] {
-		const auto media = _replyTo.todoItemId ? item->media() : nullptr;
+		const auto media = (_replyTo.todoItemId
+				|| !_replyTo.pollOption.isEmpty())
+			? item->media()
+			: nullptr;
 		if (const auto todolist = media ? media->todolist() : nullptr) {
 			const auto i = ranges::find(
 				todolist->items,
@@ -9664,6 +9673,12 @@ void HistoryWidget::updateReplyEditText(not_null<HistoryItem*> item) {
 				&TodoListItem::id);
 			if (i != end(todolist->items)) {
 				return i->text;
+			}
+		}
+		if (const auto poll = media ? media->poll() : nullptr) {
+			if (const auto answer = poll->answerByOption(
+					_replyTo.pollOption)) {
+				return answer->text;
 			}
 		}
 		return (_editMsgId || _replyTo.quote.empty())

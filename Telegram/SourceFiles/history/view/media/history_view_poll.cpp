@@ -282,6 +282,11 @@ PollThumbnailData MakePollThumbnail(
 					});
 			});
 	}
+	if (result.handler) {
+		result.handler->setProperty(
+			kPollOptionProperty,
+			answer.option);
+	}
 	return result;
 }
 
@@ -1202,17 +1207,29 @@ void Poll::updateAnswers() {
 ClickHandlerPtr Poll::createAnswerClickHandler(
 		const Answer &answer) {
 	const auto option = answer.option;
+	auto result = ClickHandlerPtr();
 	if (_flags & PollData::Flag::MultiChoice) {
-		return std::make_shared<LambdaClickHandler>(crl::guard(this, [=] {
-			toggleMultiOption(option);
+		result = std::make_shared<LambdaClickHandler>(crl::guard(this, [=] {
+			if (canVote()) {
+				toggleMultiOption(option);
+			} else if (showVotes()) {
+				showAnswerVotesTooltip(option);
+			}
+		}));
+	} else {
+		result = std::make_shared<LambdaClickHandler>(crl::guard(this, [=] {
+			if (canVote()) {
+				_votedFromHere = true;
+				history()->session().api().polls().sendVotes(
+					_parent->data()->fullId(),
+					{ option });
+			} else if (showVotes()) {
+				showAnswerVotesTooltip(option);
+			}
 		}));
 	}
-	return std::make_shared<LambdaClickHandler>(crl::guard(this, [=] {
-		_votedFromHere = true;
-		history()->session().api().polls().sendVotes(
-			_parent->data()->fullId(),
-			{ option });
-	}));
+	result->setProperty(kPollOptionProperty, option);
+	return result;
 }
 
 void Poll::toggleMultiOption(const QByteArray &option) {
@@ -1253,6 +1270,25 @@ void Poll::sendMultiOptions() {
 			_parent->data()->fullId(),
 			std::move(chosen));
 	}
+}
+
+void Poll::showAnswerVotesTooltip(const QByteArray &option) {
+	const auto answer = _poll->answerByOption(option);
+	if (!answer) {
+		return;
+	}
+	const auto quiz = _poll->quiz();
+	const auto text = answer->votes
+		? (quiz
+			? tr::lng_polls_answers_count
+			: tr::lng_polls_votes_count)(
+				tr::now,
+				lt_count_decimal,
+				answer->votes)
+		: (quiz
+			? tr::lng_polls_answers_none
+			: tr::lng_polls_votes_none)(tr::now);
+	_parent->delegate()->elementShowTooltip({ text }, [] {});
 }
 
 void Poll::showResults() {
@@ -1919,6 +1955,30 @@ int Poll::paintAnswer(
 		int outerWidth,
 		const PaintContext &context) const {
 	const auto height = countAnswerHeight(answer, width);
+	if (!context.highlight.pollOption.isEmpty()
+		&& context.highlight.pollOption == answer.option
+		&& context.highlight.collapsion > 0.) {
+		const auto to = context.highlightInterpolateTo;
+		const auto toProgress = (1. - context.highlight.collapsion);
+		if (toProgress >= 1.) {
+			context.highlightPathCache->addRect(to);
+		} else if (toProgress <= 0.) {
+			context.highlightPathCache->addRect(
+				0,
+				top,
+				this->width(),
+				height);
+		} else {
+			const auto lerp = [=](int from, int to) {
+				return from + (to - from) * toProgress;
+			};
+			context.highlightPathCache->addRect(
+				lerp(0, to.x()),
+				lerp(top, to.y()),
+				lerp(this->width(), to.width()),
+				lerp(height, to.height()));
+		}
+	}
 	const auto stm = context.messageStyle();
 	const auto &answerPadding = answer.thumbnail
 		? st::historyPollAnswerPadding
@@ -2623,10 +2683,13 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 					media,
 					media).contains(point)) {
 				result.link = answer.mediaHandler;
-			} else if (can) {
-				_lastLinkPoint = point;
+			} else {
+				if (can) {
+					_lastLinkPoint = point;
+				}
 				result.link = answer.handler;
-			} else if (show) {
+			}
+			if (!can && show) {
 				result.customTooltip = true;
 				using Flag = Ui::Text::StateRequest::Flag;
 				if (request.flags & Flag::LookupCustomTooltip) {
@@ -2734,7 +2797,9 @@ void Poll::clickHandlerPressedChanged(
 		handler,
 		&Answer::handler);
 	if (i != end(_answers)) {
-		toggleRipple(*i, pressed);
+		if (canVote()) {
+			toggleRipple(*i, pressed);
+		}
 	} else if (handler == _sendVotesLink || handler == _showResultsLink) {
 		toggleLinkRipple(pressed);
 	}

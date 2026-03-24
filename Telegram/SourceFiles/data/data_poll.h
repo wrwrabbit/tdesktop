@@ -105,6 +105,7 @@ struct PollData {
 	TimeId closeDate = 0;
 	int totalVoters = 0;
 	int version = 0;
+	uint64 hash = 0;
 
 	static constexpr auto kMaxOptions = 32;
 
