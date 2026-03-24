@@ -1848,7 +1848,29 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 	} break;
 
 	case mtpc_updateMessagePoll: {
-		session().data().applyUpdate(update.c_updateMessagePoll());
+		const auto &d = update.c_updateMessagePoll();
+		session().data().applyUpdate(d);
+		if (const auto tlPeer = d.vpeer()) {
+			const auto peer = peerFromMTP(*tlPeer);
+			const auto msgId = d.vmsg_id()->v;
+			if (const auto history = session().data().historyLoaded(peer)) {
+				if (const auto item = session().data().message(
+						peer,
+						msgId)) {
+					if (!item->hasUnreadPollVote()) {
+						item->setHasUnreadPollVote();
+						item->addToUnreadThings(
+							HistoryUnreadThings::AddType::New);
+					}
+				} else {
+					if (history->unreadPollVotes().has()) {
+						history->unreadPollVotes().checkAdd(msgId);
+					}
+					history->owner().histories().requestDialogEntry(
+						history);
+				}
+			}
+		}
 	} break;
 
 	case mtpc_updateUserTyping: {

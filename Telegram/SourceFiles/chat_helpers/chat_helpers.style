@@ -1088,6 +1088,10 @@ historyUnreadReactions: TwoIconButton(historyToDown) {
 	iconAbove: icon {{ "history_unread_reaction", historyToDownFg }};
 	iconAboveOver: icon {{ "history_unread_reaction", historyToDownFgOver }};
 }
+historyUnreadPollVotes: TwoIconButton(historyToDown) {
+	iconAbove: icon {{ "history_unread_poll_vote-40x40", historyToDownFg, point(6px, 6px) }};
+	iconAboveOver: icon {{ "history_unread_poll_vote-40x40", historyToDownFgOver, point(6px, 6px) }};
+}
 historyUnreadThingsSkip: 4px;
 
 historyQuoteStyle: QuoteStyle(defaultQuoteStyle) {

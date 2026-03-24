@@ -963,6 +963,7 @@ Dialogs::BadgesState SavedSublist::chatListBadgesState() const {
 		result.unreadMuted
 			= result.mentionMuted
 			= result.reactionMuted
+			= result.pollMuted
 			= true;
 	}
 	return result;
@@ -1026,6 +1027,9 @@ void SavedSublist::hasUnreadReactionChanged(bool has) {
 		was.reactionsMuted = muted() ? was.reactions : 0;
 	}
 	notifyUnreadStateChange(was);
+}
+
+void SavedSublist::hasUnreadPollVoteChanged(bool has) {
 }
 
 void SavedSublist::allowChatListMessageResolve() {

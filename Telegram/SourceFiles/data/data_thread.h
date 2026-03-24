@@ -78,8 +78,11 @@ public:
 	[[nodiscard]] HistoryUnreadThings::ConstProxy unreadMentions() const;
 	[[nodiscard]] HistoryUnreadThings::Proxy unreadReactions();
 	[[nodiscard]] HistoryUnreadThings::ConstProxy unreadReactions() const;
+	[[nodiscard]] HistoryUnreadThings::Proxy unreadPollVotes();
+	[[nodiscard]] HistoryUnreadThings::ConstProxy unreadPollVotes() const;
 	virtual void hasUnreadMentionChanged(bool has) = 0;
 	virtual void hasUnreadReactionChanged(bool has) = 0;
+	virtual void hasUnreadPollVoteChanged(bool has) = 0;
 	bool canToggleUnread(bool nowUnread) const;
 
 	void removeNotification(not_null<HistoryItem*> item);
@@ -106,6 +109,7 @@ public:
 
 	[[nodiscard]] const base::flat_set<MsgId> &unreadMentionsIds() const;
 	[[nodiscard]] const base::flat_set<MsgId> &unreadReactionsIds() const;
+	[[nodiscard]] const base::flat_set<MsgId> &unreadPollVotesIds() const;
 
 	[[nodiscard]] Ui::Text::String &cloudDraftTextCache() {
 		return _cloudDraftTextCache;

@@ -1563,6 +1563,14 @@ bool HistoryItem::hasUnreadReaction() const {
 	return (_flags & MessageFlag::HasUnreadReaction);
 }
 
+bool HistoryItem::hasUnreadPollVote() const {
+	return (_flags & MessageFlag::HasUnreadPollVote);
+}
+
+void HistoryItem::setHasUnreadPollVote() {
+	_flags |= MessageFlag::HasUnreadPollVote;
+}
+
 bool HistoryItem::hasUnwatchedEffect() const {
 	return effectId() && !(_flags & MessageFlag::EffectWatched);
 }
@@ -1639,6 +1647,16 @@ void HistoryItem::markReactionsRead() {
 	} else if (const auto sublist = this->savedSublist()) {
 		sublist->updateChatListEntry();
 		sublist->unreadReactions().erase(id);
+	}
+}
+
+void HistoryItem::markPollVotesRead() {
+	_flags &= ~MessageFlag::HasUnreadPollVote;
+	_history->updateChatListEntry();
+	_history->unreadPollVotes().erase(id);
+	if (const auto topic = this->topic()) {
+		topic->updateChatListEntry();
+		topic->unreadPollVotes().erase(id);
 	}
 }
 
@@ -2429,7 +2447,8 @@ void HistoryItem::addToUnreadThings(HistoryUnreadThings::AddType type) {
 	}
 	const auto mention = isUnreadMention();
 	const auto reaction = hasUnreadReaction();
-	if (!mention && !reaction) {
+	const auto pollVote = hasUnreadPollVote();
+	if (!mention && !reaction && !pollVote) {
 		return;
 	}
 	const auto topic = this->topic();
@@ -2479,6 +2498,23 @@ void HistoryItem::addToUnreadThings(HistoryUnreadThings::AddType type) {
 			}
 		}
 	}
+	if (pollVote) {
+		const auto toHistory = history->unreadPollVotes().add(id, type);
+		const auto toTopic = topic
+			&& topic->unreadPollVotes().add(id, type);
+		if (toHistory || toTopic) {
+			if (toHistory) {
+				changes->historyUpdated(
+					history,
+					Data::HistoryUpdate::Flag::UnreadPollVotes);
+			}
+			if (toTopic) {
+				changes->topicUpdated(
+					topic,
+					Data::TopicUpdate::Flag::UnreadPollVotes);
+			}
+		}
+	}
 }
 
 void HistoryItem::destroyHistoryEntry() {
@@ -2494,6 +2530,12 @@ void HistoryItem::destroyHistoryEntry() {
 			topic->unreadReactions().erase(id);
 		} else if (const auto sublist = this->savedSublist()) {
 			sublist->unreadReactions().erase(id);
+		}
+	}
+	if (hasUnreadPollVote()) {
+		history()->unreadPollVotes().erase(id);
+		if (const auto topic = this->topic()) {
+			topic->unreadPollVotes().erase(id);
 		}
 	}
 	if (isRegular() && _history->peer->isMegagroup()) {

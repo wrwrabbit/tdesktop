@@ -152,8 +152,9 @@ struct HistoryUpdate {
 		CloudDraft         = (1U << 12),
 		TranslateFrom      = (1U << 13),
 		TranslatedTo       = (1U << 14),
+		UnreadPollVotes    = (1U << 15),
 
-		LastUsedBit        = (1U << 14),
+		LastUsedBit        = (1U << 15),
 	};
 	using Flags = base::flags<Flag>;
 	friend inline constexpr auto is_flag_type(Flag) { return true; }
@@ -178,8 +179,9 @@ struct TopicUpdate {
 		Closed          = (1U << 9),
 		Creator         = (1U << 10),
 		Destroyed       = (1U << 11),
+		UnreadPollVotes = (1U << 12),
 
-		LastUsedBit     = (1U << 11),
+		LastUsedBit     = (1U << 12),
 	};
 	using Flags = base::flags<Flag>;
 	friend inline constexpr auto is_flag_type(Flag) { return true; }
@@ -197,8 +199,9 @@ struct SublistUpdate {
 		UnreadReactions = (1U << 2),
 		CloudDraft = (1U << 3),
 		Destroyed = (1U << 4),
+		UnreadPollVotes = (1U << 5),
 
-		LastUsedBit = (1U << 4),
+		LastUsedBit = (1U << 5),
 	};
 	using Flags = base::flags<Flag>;
 	friend inline constexpr auto is_flag_type(Flag) { return true; }

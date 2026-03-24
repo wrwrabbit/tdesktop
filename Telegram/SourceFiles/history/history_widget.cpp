@@ -715,6 +715,7 @@ HistoryWidget::HistoryWidget(
 		| HistoryUpdateFlag::CloudDraft
 		| HistoryUpdateFlag::UnreadMentions
 		| HistoryUpdateFlag::UnreadReactions
+		| HistoryUpdateFlag::UnreadPollVotes
 		| HistoryUpdateFlag::UnreadView
 		| HistoryUpdateFlag::TopPromoted
 		| HistoryUpdateFlag::ClientSideMessages
@@ -735,7 +736,8 @@ HistoryWidget::HistoryWidget(
 			updateSendButtonType();
 		}
 		if ((flags & HistoryUpdateFlag::UnreadMentions)
-			|| (flags & HistoryUpdateFlag::UnreadReactions)) {
+			|| (flags & HistoryUpdateFlag::UnreadReactions)
+			|| (flags & HistoryUpdateFlag::UnreadPollVotes)) {
 			_cornerButtons.updateUnreadThingsVisibility();
 		}
 		if (flags & HistoryUpdateFlag::UnreadView) {

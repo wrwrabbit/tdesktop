@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtproto_config.h"
 #include "window/notifications_manager.h"
 #include "history/history.h"
+#include "history/history_item.h"
 #include "history/history_item_components.h"
 #include "history/view/media/history_view_media.h"
 #include "history/view/history_view_element.h"
@@ -4463,6 +4464,23 @@ void Session::applyUpdate(const MTPDupdateMessagePoll &update) {
 	}();
 	if (updated && updated->applyResults(update.vresults())) {
 		notifyPollUpdateDelayed(updated);
+	}
+	if (const auto tlPeer = update.vpeer()) {
+		const auto peer = peerFromMTP(*tlPeer);
+		if (const auto history = historyLoaded(peer)) {
+			histories().requestDialogEntry(history);
+		}
+	} else if (updated) {
+		if (const auto i = _pollViews.find(updated)
+			; i != _pollViews.end()) {
+			for (const auto &view : i->second) {
+				if (view->data()->hasUnreadPollVote()) {
+					histories().requestDialogEntry(
+						view->data()->history());
+					break;
+				}
+			}
+		}
 	}
 }
 

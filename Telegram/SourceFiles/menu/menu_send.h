@@ -127,4 +127,8 @@ void SetupUnreadReactionsMenu(
 	not_null<Ui::RpWidget*> button,
 	Fn<Data::Thread*()> currentThread);
 
+void SetupUnreadPollVotesMenu(
+	not_null<Ui::RpWidget*> button,
+	Fn<Data::Thread*()> currentThread);
+
 } // namespace SendMenu

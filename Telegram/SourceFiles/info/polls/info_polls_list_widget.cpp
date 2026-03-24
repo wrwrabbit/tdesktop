@@ -722,7 +722,8 @@ bool ListWidget::Inner::cornerButtonsUnreadMayBeShown() {
 
 bool ListWidget::Inner::cornerButtonsHas(
 		HistoryView::CornerButtonType type) {
-	return (type == HistoryView::CornerButtonType::Down);
+	return (type == HistoryView::CornerButtonType::Down)
+		|| (type == HistoryView::CornerButtonType::PollVotes);
 }
 
 // --- ListMemento ---

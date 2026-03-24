@@ -918,6 +918,57 @@ void History::clearUnreadReactionsFor(
 	}
 }
 
+int History::unreadPollVotesCount() const {
+	return _unreadPollVotesCount;
+}
+
+void History::setUnreadPollVotesCount(int count) {
+	if (_unreadPollVotesCount == count) {
+		return;
+	}
+	const auto notifier = unreadStateChangeNotifier(
+		useMyUnreadInParent());
+	_unreadPollVotesCount = count;
+	_unreadPollVotesCountChanges.fire_copy(count);
+}
+
+rpl::producer<int> History::unreadPollVotesCountChanges() const {
+	return _unreadPollVotesCountChanges.events();
+}
+
+void History::clearUnreadPollVotesFor(MsgId topicRootId) {
+	const auto forum = peer->forum();
+	if (!topicRootId) {
+		if (forum) {
+			forum->clearAllUnreadPollVotes();
+		}
+		unreadPollVotes().clear();
+		return;
+	} else if (forum) {
+		if (const auto topic = forum->topicFor(topicRootId)) {
+			topic->unreadPollVotes().clear();
+		}
+	}
+	const auto &ids = unreadPollVotesIds();
+	if (ids.empty()) {
+		return;
+	}
+	const auto owner = &this->owner();
+	const auto peerId = peer->id;
+	auto items = base::flat_set<MsgId>();
+	items.reserve(ids.size());
+	for (const auto &id : ids) {
+		if (const auto item = owner->message(peerId, id)) {
+			if (item->topicRootId() == topicRootId) {
+				items.emplace(id);
+			}
+		}
+	}
+	for (const auto &id : items) {
+		unreadPollVotes().erase(id);
+	}
+}
+
 not_null<HistoryItem*> History::addNewToBack(
 		not_null<HistoryItem*> item,
 		bool unread) {
@@ -2111,7 +2162,7 @@ void History::setMuted(bool muted) {
 		const auto state = useMyUnreadInParent()
 			? computeBadgesState()
 			: Dialogs::BadgesState();
-		const auto notify = (state.unread || state.reaction);
+		const auto notify = (state.unread || state.reaction || state.poll);
 		const auto notifier = unreadStateChangeNotifier(notify);
 		Thread::setMuted(muted);
 	}
@@ -2243,6 +2294,20 @@ void History::hasUnreadReactionChanged(bool has) {
 	} else {
 		was.reactions = 1;
 		was.reactionsMuted = muted() ? was.reactions : 0;
+	}
+	notifyUnreadStateChange(was);
+}
+
+void History::hasUnreadPollVoteChanged(bool has) {
+	if (isForum()) {
+		return;
+	}
+	auto was = chatListUnreadState();
+	if (has) {
+		was.polls = was.pollsMuted = 0;
+	} else {
+		was.polls = 1;
+		was.pollsMuted = muted() ? was.polls : 0;
 	}
 	notifyUnreadStateChange(was);
 }
@@ -2451,7 +2516,11 @@ Dialogs::BadgesState History::computeBadgesState() const {
 Dialogs::BadgesState History::adjustBadgesStateByFolder(
 		Dialogs::BadgesState state) const {
 	if (folder()) {
-		state.mentionMuted = state.reactionMuted = state.unreadMuted = true;
+		state.mentionMuted
+			= state.reactionMuted
+			= state.pollMuted
+			= state.unreadMuted
+			= true;
 	}
 	return state;
 }
@@ -2466,10 +2535,12 @@ Dialogs::UnreadState History::computeUnreadState() const {
 	result.marks = mark ? 1 : 0;
 	result.mentions = unreadMentions().has() ? 1 : 0;
 	result.reactions = unreadReactions().has() ? 1 : 0;
+	result.polls = (_unreadPollVotesCount > 0) ? 1 : 0;
 	result.messagesMuted = muted ? result.messages : 0;
 	result.chatsMuted = muted ? result.chats : 0;
 	result.marksMuted = muted ? result.marks : 0;
 	result.reactionsMuted = muted ? result.reactions : 0;
+	result.pollsMuted = muted ? result.polls : 0;
 	result.known = _unreadCount.has_value();
 	return result;
 }
@@ -2480,6 +2551,7 @@ Dialogs::UnreadState History::withMyMuted(Dialogs::UnreadState state) const {
 		state.marksMuted = state.marks;
 		state.messagesMuted = state.messages;
 		state.reactionsMuted = state.reactions;
+		state.pollsMuted = state.polls;
 	}
 	return state;
 }
@@ -3059,6 +3131,12 @@ void History::applyDialog(
 	setUnreadMark(data.is_unread_mark());
 	unreadMentions().setCount(data.vunread_mentions_count().v);
 	unreadReactions().setCount(data.vunread_reactions_count().v);
+	const auto pollVotesCount = data.vunread_poll_votes_count().v;
+	setUnreadPollVotesCount(pollVotesCount);
+	unreadPollVotes().setCount(pollVotesCount);
+	session().changes().historyUpdated(
+		this,
+		Data::HistoryUpdate::Flag::UnreadPollVotes);
 	if (const auto channel = peer->asChannel()) {
 		if (const auto pts = data.vpts()) {
 			channel->ptsReceived(pts->v);

@@ -1028,4 +1028,46 @@ void SetupUnreadReactionsMenu(
 	SetupReadAllMenu(button, currentThread, text, sendRequest);
 }
 
+void SetupUnreadPollVotesMenu(
+		not_null<Ui::RpWidget*> button,
+		Fn<Data::Thread*()> currentThread) {
+	const auto text = tr::lng_context_mark_read_poll_votes_all(tr::now);
+	const auto sendOne = [=](
+			base::weak_ptr<Data::Thread> weakThread,
+			Fn<void()> done,
+			auto resend) -> void {
+		const auto thread = weakThread.get();
+		if (!thread) {
+			done();
+			return;
+		}
+		const auto topic = thread->asTopic();
+		const auto peer = thread->peer();
+		const auto rootId = topic ? topic->rootId() : 0;
+		using Flag = MTPmessages_ReadPollVotes::Flag;
+		peer->session().api().request(MTPmessages_ReadPollVotes(
+			MTP_flags(rootId ? Flag::f_top_msg_id : Flag(0)),
+			peer->input(),
+			MTP_int(rootId)
+		)).done([=](const MTPmessages_AffectedHistory &result) {
+			const auto offset = peer->session().api().applyAffectedHistory(
+				peer,
+				result);
+			if (offset > 0) {
+				resend(weakThread, done, resend);
+			} else {
+				done();
+				peer->owner().history(peer)->clearUnreadPollVotesFor(
+					rootId);
+			}
+		}).fail(done).send();
+	};
+	const auto sendRequest = [=](
+			not_null<Data::Thread*> thread,
+			Fn<void()> done) {
+		sendOne(base::make_weak(thread), std::move(done), sendOne);
+	};
+	SetupReadAllMenu(button, currentThread, text, sendRequest);
+}
+
 } // namespace SendMenu

@@ -989,6 +989,9 @@ void ForumTopic::hasUnreadReactionChanged(bool has) {
 	notifyUnreadStateChange(was);
 }
 
+void ForumTopic::hasUnreadPollVoteChanged(bool has) {
+}
+
 const QString &ForumTopic::chatListNameSortKey() const {
 	static const auto empty = QString();
 	return empty;
