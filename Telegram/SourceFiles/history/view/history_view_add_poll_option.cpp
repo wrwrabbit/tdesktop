@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "poll/poll_media_upload.h"
+#include "ui/chat/chat_style.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/toast/toast.h"
@@ -261,19 +262,27 @@ rpl::producer<> AddPollOptionWidget::cancelled() const {
 	return _cancelledEvents.events();
 }
 
+void AddPollOptionWidget::setPlaceholderColorOverride(
+		const style::color &color) {
+	_field->setPlaceholderColorOverride(color);
+}
+
 void ShowAddPollOptionOverlay(
 		ElementOverlayHost &host,
 		not_null<QWidget*> parent,
 		not_null<Element*> view,
 		not_null<PollData*> poll,
 		FullMsgId context,
-		not_null<Window::SessionController*> controller) {
+		not_null<Window::SessionController*> controller,
+		not_null<const Ui::ChatStyle*> st) {
 	auto widget = base::make_unique_q<AddPollOptionWidget>(
 		parent,
 		poll,
 		context,
 		controller);
 	const auto raw = widget.get();
+	const auto &msgSt = st->messageStyle(view->hasOutLayout(), false);
+	raw->setPlaceholderColorOverride(msgSt.msgDateFg);
 	host.show(
 		view,
 		context,

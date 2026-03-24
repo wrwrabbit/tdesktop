@@ -22,6 +22,7 @@ class PollMediaUploader;
 } // namespace PollMediaUpload
 
 namespace Ui {
+class ChatStyle;
 class InputField;
 class IconButton;
 } // namespace Ui
@@ -47,6 +48,7 @@ public:
 		FullMsgId itemId,
 		not_null<Window::SessionController*> controller);
 
+	void setPlaceholderColorOverride(const style::color &color);
 	void updatePosition(QPoint topLeft, int width);
 	void triggerSubmit();
 
@@ -83,6 +85,7 @@ void ShowAddPollOptionOverlay(
 	not_null<Element*> view,
 	not_null<PollData*> poll,
 	FullMsgId context,
-	not_null<Window::SessionController*> controller);
+	not_null<Window::SessionController*> controller,
+	not_null<const Ui::ChatStyle*> st);
 
 } // namespace HistoryView

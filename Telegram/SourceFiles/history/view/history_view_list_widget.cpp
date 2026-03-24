@@ -1910,7 +1910,8 @@ void ListWidget::elementShowAddPollOption(
 		view,
 		poll,
 		context,
-		controller());
+		controller(),
+		_delegate->listChatStyle());
 }
 
 void ListWidget::elementSubmitAddPollOption(FullMsgId context) {

@@ -4320,7 +4320,8 @@ void HistoryInner::elementShowAddPollOption(
 		view,
 		poll,
 		context,
-		_controller);
+		_controller,
+		_controller->chatStyle());
 }
 
 void HistoryInner::elementSubmitAddPollOption(FullMsgId context) {
