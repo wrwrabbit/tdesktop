@@ -239,6 +239,11 @@ jobs:
             set TARGET=win
           )
           set RELEASEPATH=%TBUILD%\%REPO_NAME%\out\Debug
+          if "${{ matrix.arch }}" == "x64" (set MODULES_ARCH=x64) else (set MODULES_ARCH=x86)
+          if not exist "%RELEASEPATH%\modules\%MODULES_ARCH%\d3d\d3dcompiler_47.dll" (
+            mkdir "%RELEASEPATH%\modules\%MODULES_ARCH%\d3d" 2>nul
+            copy nul "%RELEASEPATH%\modules\%MODULES_ARCH%\d3d\d3dcompiler_47.dll" >nul
+          )
           iscc /dMyAppVersion=%VER% /dMyAppVersionZero=%VER% /dMyAppVersionFull=%VER% "/dReleasePath=%RELEASEPATH%" "/dMyBuildTarget=%TARGET%" "%TBUILD%\%REPO_NAME%\Telegram\build\setup.iss"
 
       - name: Move installer artifact.
