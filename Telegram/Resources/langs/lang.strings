@@ -2551,6 +2551,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_create_bot_name_placeholder" = "Bot Name";
 "lng_create_bot_username_placeholder" = "Bot Username";
 "lng_create_bot_username_available" = "{username} is available.";
+"lng_create_bot_username_link" = "Link: {link}";
 "lng_create_bot_username_taken" = "This username is already taken.";
 "lng_create_bot_username_bad_symbols" = "Username can only contain a-z, 0-9, and underscores.";
 "lng_create_bot_username_too_short" = "Username must be at least 5 characters.";

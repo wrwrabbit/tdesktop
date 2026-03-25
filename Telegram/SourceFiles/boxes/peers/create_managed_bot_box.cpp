@@ -36,6 +36,7 @@ void CreateManagedBotBox(
 		QString errorText;
 		QString goodText;
 		bool created = false;
+		bool hadOccupiedError = false;
 	};
 	const auto show = descriptor.show;
 	const auto session = &show->session();
@@ -195,6 +196,22 @@ void CreateManagedBotBox(
 		state->checkTimer.cancel();
 	};
 
+	const auto showLinkInfo = [=] {
+		auto raw = username->getLastText().trimmed();
+		while (raw.startsWith(botPrefixText)) {
+			raw = raw.mid(botPrefixText.size());
+		}
+		const auto full = raw + botSuffixText;
+		const auto text = tr::lng_create_bot_username_link(
+			tr::now,
+			lt_link,
+			u"t.me/"_q + full);
+		state->errorText = QString();
+		state->goodText = text;
+		statusLabel->setText(text);
+		statusLabel->setTextColorOverride(st::usernameDefaultFg->c);
+	};
+
 	const auto checkUsername = [=] {
 		api->request(base::take(state->checkRequestId)).cancel();
 
@@ -212,18 +229,24 @@ void CreateManagedBotBox(
 		)).done([=](const MTPBool &result) {
 			state->checkRequestId = 0;
 			if (mtpIsTrue(result)) {
-				state->errorText = QString();
-				state->goodText = tr::lng_create_bot_username_available(
-					tr::now,
-					lt_username,
-					state->checkUsername);
-				statusLabel->setText(state->goodText);
-				statusLabel->setTextColorOverride(st::boxTextFgGood->c);
+				if (state->hadOccupiedError) {
+					state->errorText = QString();
+					state->goodText = tr::lng_create_bot_username_available(
+						tr::now,
+						lt_username,
+						state->checkUsername);
+					statusLabel->setText(state->goodText);
+					statusLabel->setTextColorOverride(st::boxTextFgGood->c);
+				} else {
+					showLinkInfo();
+				}
 			} else {
+				state->hadOccupiedError = true;
 				setError(tr::lng_create_bot_username_taken(tr::now));
 			}
 		}).fail([=](const MTP::Error &error) {
 			state->checkRequestId = 0;
+			state->hadOccupiedError = true;
 			setError(tr::lng_create_bot_username_taken(tr::now));
 		}).send();
 	};
@@ -255,7 +278,7 @@ void CreateManagedBotBox(
 			return;
 		}
 
-		setError(QString());
+		showLinkInfo();
 		state->checkTimer.callOnce(Ui::EditPeer::kUsernameCheckTimeout);
 	};
 
@@ -308,6 +331,7 @@ void CreateManagedBotBox(
 			const auto type = error.type();
 			if (type == u"USERNAME_OCCUPIED"_q
 				|| type == u"USERNAME_INVALID"_q) {
+				state->hadOccupiedError = true;
 				username->showError();
 				setError(tr::lng_create_bot_username_taken(tr::now));
 			} else {
