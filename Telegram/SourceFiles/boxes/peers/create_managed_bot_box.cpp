@@ -120,7 +120,9 @@ void CreateManagedBotBox(
 		*fieldSt,
 		tr::lng_create_bot_username_placeholder(),
 		initialUsername,
-		QString()); // linkPlaceholder
+		QString());
+	username->setMaxLength(
+		Ui::EditPeer::kMaxUsernameLength - int(botSuffixText.size()));
 	usernameWrap->widthValue() | rpl::on_next([=](int width) {
 		username->resizeToWidth(width);
 	}, username->lifetime());
@@ -161,7 +163,7 @@ void CreateManagedBotBox(
 
 	const auto statusLabel = Ui::CreateChild<Ui::FlatLabel>(
 		statusWrapper,
-		st::aboutRevokePublicLabel);
+		st::createBotStatusLabel);
 	statusLabel->move(0, 0);
 
 	const auto maxHeight = box->lifetime().make_state<int>(0);
@@ -170,7 +172,7 @@ void CreateManagedBotBox(
 		const auto newMax = std::max({
 			*maxHeight,
 			height,
-			st::aboutRevokePublicLabel.style.font->height,
+			st::createBotStatusLabel.style.font->height,
 		});
 		if (*maxHeight != newMax) {
 			*maxHeight = newMax;

@@ -1262,6 +1262,10 @@ managedBotIconEmoji: IconEmoji {
 	padding: margins(-2px, -2px, -2px, 0px);
 }
 
+createBotStatusLabel: FlatLabel(aboutRevokePublicLabel) {
+	maxHeight: 20px;
+}
+
 aiComposeBoxSectionSkip: 8px;
 aiComposeBoxStyleTabsSkip: 8px;
 aiComposeContentMargin: margins(16px, 0px, 16px, 0px);
