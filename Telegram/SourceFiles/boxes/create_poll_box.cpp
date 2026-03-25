@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "poll/poll_media_upload.h"
 #include "base/call_delayed.h"
+#include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
 #include "boxes/premium_limits_box.h"
 #include "base/event_filter.h"
@@ -22,7 +23,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/mime_type.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "core/shortcuts.h"
+#include "data/data_cloud_file.h"
 #include "data/data_document.h"
+#include "data/data_file_origin.h"
+#include "data/data_location.h"
 #include "data/data_poll.h"
 #include "data/data_peer.h"
 #include "data/data_photo.h"
@@ -34,6 +39,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "layout/layout_document_generic_preview.h"
 #include "main/main_app_config.h"
+#include "mainwidget.h"
+#include "mainwindow.h"
 #include "platform/platform_file_utilities.h"
 #include "main/main_session.h"
 #include "menu/menu_send.h"
@@ -41,9 +48,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_common.h"
 #include "storage/file_upload.h"
 #include "storage/localimageloader.h"
+#include "storage/storage_account.h"
 #include "storage/storage_media_prepare.h"
 #include "ui/controls/emoji_button.h"
 #include "ui/controls/emoji_button_factory.h"
+#include "ui/controls/location_picker.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/dynamic_image.h"
 #include "ui/dynamic_thumbnails.h"
@@ -2097,6 +2106,55 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		}
 		setMedia(media, PollMedia(), nullptr, false);
 	};
+	const auto chooseLocation = [=](
+			std::shared_ptr<PollMediaState> media) {
+		const auto session = &_controller->session();
+		const auto &appConfig = session->appConfig();
+		auto map = appConfig.get<base::flat_map<QString, QString>>(
+			u"tdesktop_config_map"_q,
+			base::flat_map<QString, QString>());
+		const auto config = Ui::LocationPickerConfig{
+			.mapsToken = map[u"maps"_q],
+			.geoToken = map[u"geo"_q],
+		};
+		const auto applyGeo = [=](float64 lat, float64 lon) {
+			const auto point = Data::LocationPoint(
+				lat,
+				lon,
+				Data::LocationPoint::NoAccessHash);
+			auto pollMedia = PollMedia();
+			pollMedia.geo = point;
+			const auto cloudImage = session->data().location(point);
+			auto thumbnail = Ui::MakeGeoThumbnailWithPin(
+				cloudImage,
+				session,
+				Data::FileOrigin());
+			setMedia(media, pollMedia, std::move(thumbnail), true);
+		};
+		if (base::IsCtrlPressed()) {
+			const auto lat = 48.8566 + base::RandomValue<uint32>()
+				/ float64(std::numeric_limits<uint32>::max()) * 0.02 - 0.01;
+			const auto lon = 2.3522 + base::RandomValue<uint32>()
+				/ float64(std::numeric_limits<uint32>::max()) * 0.02 - 0.01;
+			applyGeo(lat, lon);
+			return;
+		}
+		if (!Ui::LocationPicker::Available(config)) {
+			return;
+		}
+		Ui::LocationPicker::Show({
+			.parent = _controller->widget().get(),
+			.config = config,
+			.chooseLabel = tr::lng_maps_point_send(),
+			.session = session,
+			.callback = crl::guard(this, [=](Data::InputVenue venue) {
+				applyGeo(venue.lat, venue.lon);
+			}),
+			.quit = [] { Shortcuts::Launch(Shortcuts::Command::Quit); },
+			.storageId = session->local().resolveStorageIdBots(),
+			.closeRequests = _controller->content()->death(),
+		});
+	};
 	const auto showMediaMenu = [=](
 			not_null<Ui::RpWidget*> button,
 			std::shared_ptr<PollMediaState> media,
@@ -2147,6 +2205,13 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 				[=] { chooseDocument(media); },
 				remove);
 			return;
+		} else if (media->media.geo) {
+			HistoryView::ShowPollGeoPreview(
+				_controller,
+				*media->media.geo,
+				nullptr,
+				remove);
+			return;
 		}
 		state->mediaMenu = base::make_unique_q<Ui::PopupMenu>(
 			button,
@@ -2162,6 +2227,22 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 				tr::lng_attach_file(tr::now),
 				[=] { chooseDocument(media); },
 				&st::menuIconFile);
+		}
+		{
+			const auto &appConfig = _controller->session().appConfig();
+			auto map = appConfig.get<base::flat_map<QString, QString>>(
+				u"tdesktop_config_map"_q,
+				base::flat_map<QString, QString>());
+			const auto config = Ui::LocationPickerConfig{
+				.mapsToken = map[u"maps"_q],
+				.geoToken = map[u"geo"_q],
+			};
+			if (Ui::LocationPicker::Available(config)) {
+				state->mediaMenu->addAction(
+					tr::lng_maps_point(tr::now),
+					[=] { chooseLocation(media); },
+					&st::menuIconAddress);
+			}
 		}
 		if (allowStickers) {
 			state->mediaMenu->addAction(
