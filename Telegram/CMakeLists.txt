@@ -519,8 +519,6 @@ PRIVATE
     core/deep_links/deep_links_types.h
     core/file_utilities.cpp
     core/file_utilities.h
-    core/first_start_prompt.cpp
-    core/first_start_prompt.h
     core/binary_location.cpp
     core/binary_location.h
     core/location_choice_box.cpp

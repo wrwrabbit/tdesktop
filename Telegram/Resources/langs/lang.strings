@@ -1264,18 +1264,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_storage_move_failed_title" = "Could not move data";
 "lng_settings_storage_move_failed" = "Failed to move the data folder. Please move the tdata folder manually to:\n{path}";
 
-"lng_first_start_downloads_title" = "Telegram is in your Downloads folder";
-"lng_first_start_downloads_body" = "Downloads is a temporary location. Your settings and data could be lost or overwritten.\n\nWhere would you like to set up Telegram?";
-"lng_first_start_move_to_programs" = "Install to Program Files";
-"lng_first_start_move_to_applications" = "Move to Applications folder";
-"lng_first_start_choose_folder" = "Choose a folder";
-"lng_first_start_continue_downloads" = "Continue in Downloads (not recommended)";
-"lng_first_start_removable_title" = "Running from a removable drive";
-"lng_first_start_removable_body" = "Telegram is running from a removable drive. Use portable mode to keep your data on the drive, or store it in the standard system location.";
-"lng_first_start_use_portable" = "Use portable mode (keep data on drive)";
-"lng_first_start_use_system" = "Use standard system location";
-"lng_install_existing_title" = "Telegram already installed";
-"lng_install_existing_body" = "Telegram is already installed at {path}. Replace it with this version?";
 
 "lng_settings_ask_question" = "Ask a Question";
 "lng_settings_ask_sure" = "Please note that Telegram Support is done by volunteers. We try to respond as quickly as possible, but it may take a while.\n\nPlease take a look at the Telegram FAQ: it has important troubleshooting tips and answers to most questions.";

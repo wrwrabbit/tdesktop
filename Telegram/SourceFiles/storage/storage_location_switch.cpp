@@ -242,7 +242,6 @@ bool ApplyPendingSwitch() {
 		const auto cleanSource = QDir::cleanPath(sourceWorkingDir);
 		for (const auto &name : {
 			u"log.txt"_q,
-			u".ptg_location_prompt_shown"_q,
 			cExeName(),
 		}) {
 			const auto filePath = cleanSource + '/' + name;
