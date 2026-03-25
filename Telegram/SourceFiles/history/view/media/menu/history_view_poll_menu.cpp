@@ -11,9 +11,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_toggling_media.h"
 #include "apiwrap.h"
 #include "boxes/sticker_set_box.h"
+#include "data/data_cloud_file.h"
 #include "data/data_document.h"
 #include "data/data_document_media.h"
 #include "data/data_file_origin.h"
+#include "data/data_location.h"
 #include "data/data_photo.h"
 #include "data/data_photo_media.h"
 #include "data/data_poll.h"
@@ -21,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/stickers/data_stickers.h"
 #include "editor/editor_layer_widget.h"
 #include "editor/photo_editor.h"
+#include "history/history_location_manager.h"
 #include "history/view/history_view_group_call_bar.h"
 #include "history/view/history_view_reaction_preview.h"
 #include "lang/lang_keys.h"
@@ -476,6 +479,91 @@ void ShowPollDocumentPreview(
 			replace,
 			&st::menuIconReplace);
 		AddRemoveAction(menu, remove);
+	});
+}
+
+void ShowPollGeoPreview(
+		not_null<Window::SessionController*> controller,
+		Data::LocationPoint point,
+		Fn<void()> replace,
+		Fn<void()> remove) {
+	const auto session = &controller->session();
+	const auto cloudImage = session->data().location(point);
+	const auto view = cloudImage->createView();
+	cloudImage->load(session, Data::FileOrigin());
+
+	ShowWidgetPreview(controller, [=](
+			not_null<Ui::RpWidget*> preview) {
+		const auto body = preview->parentWidget()->size();
+		const auto skip = st::mediaPreviewPhotoSkip;
+		const auto maxSide = std::min(
+			body.width() - 2 * skip,
+			body.height() - 2 * skip);
+		const auto side = std::min(maxSide, st::locationSize.width());
+		const auto scaled = QSize(side, side);
+		const auto shadowExtend = st::boxRoundShadow.extend;
+		const auto fullW = scaled.width()
+			+ rect::m::sum::h(shadowExtend);
+		const auto fullH = scaled.height()
+			+ rect::m::sum::v(shadowExtend);
+		preview->resize(fullW, fullH);
+
+		session->downloaderTaskFinished(
+		) | rpl::on_next([=] {
+			preview->update();
+		}, preview->lifetime());
+
+		preview->paintRequest() | rpl::on_next([=] {
+			auto p = Painter(preview);
+			const auto outer = preview->rect() - shadowExtend;
+
+			Ui::Shadow::paint(
+				p,
+				outer,
+				preview->width(),
+				st::boxRoundShadow);
+			auto hq = PainterHighQualityEnabler(p);
+			p.setPen(Qt::NoPen);
+			p.setBrush(st::windowBg);
+			const auto radius = st::boxRadius;
+			p.drawRoundedRect(outer, radius, radius);
+
+			if (!view->isNull()) {
+				auto path = QPainterPath();
+				path.addRoundedRect(outer, radius, radius);
+				p.setClipPath(path);
+				p.drawImage(outer, view->scaled(
+					outer.size() * style::DevicePixelRatio(),
+					Qt::KeepAspectRatioByExpanding,
+					Qt::SmoothTransformation));
+				p.setClipping(false);
+				const auto paintMarker = [&](const style::icon &icon) {
+					icon.paint(
+						p,
+						outer.x()
+							+ (outer.width() - icon.width()) / 2,
+						outer.y()
+							+ (outer.height() / 2) - icon.height(),
+						preview->width());
+				};
+				paintMarker(st::historyMapPoint);
+				paintMarker(st::historyMapPointInner);
+			}
+		}, preview->lifetime());
+	}, [=](not_null<Ui::DropdownMenu*> menu) {
+		menu->addAction(
+			tr::lng_open_link(tr::now),
+			[=] { LocationClickHandler(point).onClick({}); },
+			&st::menuIconAddress);
+		if (replace) {
+			menu->addAction(
+				tr::lng_attach_replace(tr::now),
+				replace,
+				&st::menuIconReplace);
+		}
+		if (remove) {
+			AddRemoveAction(menu, remove);
+		}
 	});
 }
 

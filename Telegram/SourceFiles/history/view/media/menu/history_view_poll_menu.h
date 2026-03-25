@@ -7,6 +7,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+namespace Data {
+class LocationPoint;
+} // namespace Data
+
 struct PollData;
 class DocumentData;
 class PhotoData;
@@ -48,6 +52,12 @@ void ShowPollDocumentPreview(
 	not_null<DocumentData*> document,
 	Fn<void()> replace,
 	Fn<void()> remove);
+
+void ShowPollGeoPreview(
+	not_null<Window::SessionController*> controller,
+	Data::LocationPoint point,
+	Fn<void()> replace = nullptr,
+	Fn<void()> remove = nullptr);
 
 void EditPollPhoto(
 	not_null<Window::SessionController*> controller,
