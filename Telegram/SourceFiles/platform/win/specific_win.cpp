@@ -860,6 +860,14 @@ bool CreateStartMenuShortcut(const QString &exePath, bool silent) {
 	return true;
 }
 
+void RemoveInnoSetupRegistryKey() {
+	const auto appId = AppId.utf16();
+	const auto key1 = QString("Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId).toStdWString();
+	const auto key2 = QString("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId).toStdWString();
+	RegDeleteKeyW(HKEY_CURRENT_USER, key1.c_str());
+	RegDeleteKeyW(HKEY_CURRENT_USER, key2.c_str());
+}
+
 // Stub while we still support Windows 7.
 extern "C" {
 

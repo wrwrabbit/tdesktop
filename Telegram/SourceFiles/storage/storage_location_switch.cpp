@@ -243,6 +243,7 @@ bool ApplyPendingSwitch() {
 		for (const auto &name : {
 			u"log.txt"_q,
 			cExeName(),
+			u"Updater.exe"_q,
 		}) {
 			const auto filePath = cleanSource + '/' + name;
 			if (!QFile::exists(filePath)) {
@@ -262,6 +263,18 @@ bool ApplyPendingSwitch() {
 				}
 			}
 			LOG(("LocationSwitch: cleanup '%1': %2").arg(name, Logs::b(removed)));
+		}
+
+		const auto debugLogs = cleanSource + u"/DebugLogs"_q;
+		if (QDir(debugLogs).exists()) {
+			const auto removed = QDir(debugLogs).removeRecursively();
+			LOG(("LocationSwitch: cleanup 'DebugLogs': %1").arg(Logs::b(removed)));
+		}
+
+		const auto modules = cleanSource + u"/modules"_q;
+		if (QDir(modules).exists()) {
+			const auto removed = QDir(modules).removeRecursively();
+			LOG(("LocationSwitch: cleanup 'modules': %1").arg(Logs::b(removed)));
 		}
 
 		const auto workingPath = sourceTdata + u"/working"_q;

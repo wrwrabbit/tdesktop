@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "core/application.h"
 #include "core/binary_location.h"
+#include "core/crash_reports.h"
 #include "storage/storage_location_switch.h"
 #include "lang/lang_keys.h"
 #include "ui/layers/show.h"
@@ -21,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings.h"
 
 #include <QtCore/QDir>
+#include <QtCore/QDirIterator>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QProcess>
@@ -48,9 +50,37 @@ namespace {
 	return false;
 }
 
+void CopyCompanionFiles(const QString &targetDir) {
+	const auto updaterSrc = cExeDir() + u"Updater.exe"_q;
+	if (QFile::exists(updaterSrc)) {
+		const auto updaterDst = targetDir + u"/Updater.exe"_q;
+		QFile::remove(updaterDst);
+		const auto copied = QFile::copy(updaterSrc, updaterDst);
+		LOG(("LocationBox: copy Updater.exe: %1").arg(Logs::b(copied)));
+	}
+	const auto modulesSrc = cExeDir() + u"modules"_q;
+	if (QDir(modulesSrc).exists()) {
+		auto it = QDirIterator(
+			modulesSrc,
+			QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot,
+			QDirIterator::Subdirectories);
+		const auto srcDir = QDir(modulesSrc);
+		while (it.hasNext()) {
+			it.next();
+			const auto relative = srcDir.relativeFilePath(it.filePath());
+			const auto dstFile = targetDir + u"/modules/"_q + relative;
+			QDir().mkpath(QFileInfo(dstFile).absolutePath());
+			QFile::remove(dstFile);
+			const auto copied = QFile::copy(it.filePath(), dstFile);
+			LOG(("LocationBox: copy modules/%1: %2").arg(relative, Logs::b(copied)));
+		}
+	}
+}
+
 void RelaunchFrom(const QString &newExePath) {
 	LOG(("LocationBox: relaunching from '%1'").arg(newExePath));
 	QProcess::startDetached(newExePath, {});
+	CrashReports::Finish();
 	Core::Quit();
 }
 
@@ -135,6 +165,30 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 
 	const auto isSystemApp = (binaryCategory == BinaryLocationCategory::SystemAppFolder);
 
+	auto isInstallerManaged = false;
+#ifdef Q_OS_WIN
+	isInstallerManaged = QFile::exists(cExeDir() + u"uninstall.exe"_q);
+	if (isInstallerManaged) {
+		AddOptionCard(
+			layout,
+			tr::lng_ptg_location_card_make_portable_title(tr::now),
+			tr::lng_ptg_location_card_make_portable_desc(tr::now),
+			{
+				tr::lng_ptg_location_card_make_portable_pro1(tr::now),
+				tr::lng_ptg_location_card_make_portable_pro2(tr::now),
+				tr::lng_ptg_location_card_make_portable_pro3(tr::now),
+			},
+			tr::lng_ptg_location_card_make_portable_btn(),
+			[=] {
+				RemoveInnoSetupRegistryKey();
+				QFile::remove(cExeDir() + u"uninstall.exe"_q);
+				box->closeBox();
+				box->uiShow()->showBox(Box([firstRun](not_null<Ui::GenericBox*> newBox) {
+					FillLocationChoiceBoxImpl(newBox, firstRun);
+				}));
+			});
+	} else
+#endif // Q_OS_WIN
 	if (isSystemApp) {
 		Ui::AddSkip(layout, st::ptgLocationSectionSkip);
 		layout->add(
@@ -150,7 +204,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 	const auto appDataPath = QDir(psAppDataPath()).absolutePath();
 	isAlreadyInAppData = (QDir::cleanPath(QDir(cExeDir()).absolutePath()).toLower()
 		== QDir::cleanPath(appDataPath).toLower());
-	if (!isSystemApp && !isAlreadyInAppData) {
+	if (!isSystemApp && !isInstallerManaged && !isAlreadyInAppData) {
 		AddOptionCard(
 			layout,
 			tr::lng_ptg_location_card_appdata_title(tr::now),
@@ -180,6 +234,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 						confirm->closeBox();
 						box->closeBox();
 						if (TryCopyBinary(appDataPath)) {
+							CopyCompanionFiles(appDataPath);
 							CreateStartMenuShortcut(appDataPath + '/' + cExeName());
 							Storage::ScheduleSwitchToHomeWrittenTo(appDataPath);
 							RelaunchFrom(appDataPath + '/' + cExeName());
@@ -224,6 +279,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 						confirm->closeBox();
 						box->closeBox();
 						if (TryCopyBinary(kApplicationsPath)) {
+							CopyCompanionFiles(kApplicationsPath);
 							Storage::ScheduleSwitchToHomeWrittenTo(kApplicationsPath);
 							RelaunchFrom(kApplicationsPath + '/' + cExeName());
 						} else {
@@ -237,7 +293,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 	}
 #endif // Q_OS_WIN / Q_OS_MAC
 
-	if (!isSystemApp) {
+	if (!isSystemApp && !isInstallerManaged) {
 		AddOptionCard(
 			layout,
 			tr::lng_ptg_location_card_custom_title(tr::now),
@@ -291,6 +347,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 						confirm->closeBox();
 						box->closeBox();
 						if (TryCopyBinary(cleanChosen)) {
+							CopyCompanionFiles(cleanChosen);
 							Storage::ScheduleSwitchToCustomWrittenTo(cleanChosen);
 							RelaunchFrom(cleanChosen + '/' + cExeName());
 						} else {

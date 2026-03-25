@@ -61,6 +61,7 @@ QString psAppDataPath();
 QString psAppDataPathOld();
 void psSendToMenu(bool send, bool silent = false);
 bool CreateStartMenuShortcut(const QString &exePath, bool silent = false);
+void RemoveInnoSetupRegistryKey();
 
 int psCleanup();
 int psFixPrevious();

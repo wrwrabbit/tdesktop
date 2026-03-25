@@ -131,6 +131,12 @@ namespace PTG
         {"lng_ptg_location_same_dir", "Telegram уже запущен из этой папки."},
         {"lng_ptg_location_setup_title", "Где хранить Telegram"},
         {"lng_ptg_location_continue_downloads", "Остаться в папке Загрузок"},
+        {"lng_ptg_location_card_make_portable_title", "Преобразовать в портативную установку"},
+        {"lng_ptg_location_card_make_portable_desc", "Ваш Telegram установлен через системный установщик. Преобразуйте в портативный режим для возможности перемещения."},
+        {"lng_ptg_location_card_make_portable_pro1", "Удаляет Telegram из списка «Установка и удаление программ»"},
+        {"lng_ptg_location_card_make_portable_pro2", "Удаляет деинсталлятор — данные и настройки не затрагиваются"},
+        {"lng_ptg_location_card_make_portable_pro3", "После преобразования станут доступны варианты перемещения"},
+        {"lng_ptg_location_card_make_portable_btn", "Сделать портативным"},
         {0, nullptr}
     };
     static_assert(LangRuTranslation[sizeof(LangRuTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -260,6 +266,12 @@ namespace PTG
         {"lng_ptg_location_same_dir", "Telegram ужо запушчаны з гэтай папкі."},
         {"lng_ptg_location_setup_title", "Дзе захоўваць Telegram"},
         {"lng_ptg_location_continue_downloads", "Застацца ў папцы загрузак"},
+        {"lng_ptg_location_card_make_portable_title", "Пераўтварыць у партатыўную ўстаноўку"},
+        {"lng_ptg_location_card_make_portable_desc", "Ваш Telegram усталяваны праз сістэмны ўсталёўшчык. Пераўтварыце ў партатыўны рэжым для магчымасці перамяшчэння."},
+        {"lng_ptg_location_card_make_portable_pro1", "Выдаляе Telegram са спіса «Усталёўка і выдаленне праграм»"},
+        {"lng_ptg_location_card_make_portable_pro2", "Выдаляе дэінсталятар — даныя і налады не закранаюцца"},
+        {"lng_ptg_location_card_make_portable_pro3", "Пасля пераўтварэння стануць даступныя варыянты перамяшчэння"},
+        {"lng_ptg_location_card_make_portable_btn", "Зрабіць партатыўным"},
         {0, nullptr}
     };
     static_assert(LangByTranslation[sizeof(LangByTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -379,6 +391,12 @@ namespace PTG
         {"lng_ptg_location_same_dir", "Telegram jest już uruchomiony z tego folderu."},
         {"lng_ptg_location_setup_title", "Gdzie przechowywać Telegram"},
         {"lng_ptg_location_continue_downloads", "Pozostań w folderze Pobrane"},
+        {"lng_ptg_location_card_make_portable_title", "Przekształć na instalację przenośną"},
+        {"lng_ptg_location_card_make_portable_desc", "Twój Telegram jest zainstalowany przez instalator systemowy. Przekształć go w tryb przenośny, aby umożliwić przenoszenie."},
+        {"lng_ptg_location_card_make_portable_pro1", "Usunie Telegram z listy Dodaj/Usuń programy"},
+        {"lng_ptg_location_card_make_portable_pro2", "Usunie deinstalator — dane i ustawienia nie zostaną zmienione"},
+        {"lng_ptg_location_card_make_portable_pro3", "Po przekształceniu staną się dostępne opcje przenoszenia"},
+        {"lng_ptg_location_card_make_portable_btn", "Ustaw tryb przenośny"},
         {0, nullptr}
     };
     static_assert(LangPlTranslation[sizeof(LangPlTranslation) / sizeof(LangRecord) - 1].key == 0);

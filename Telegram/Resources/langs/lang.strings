@@ -7735,4 +7735,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_ptg_location_setup_title" = "Choose where to keep Telegram";
 "lng_ptg_location_continue_downloads" = "Continue in Downloads";
 
+"lng_ptg_location_card_make_portable_title" = "Convert to portable installation";
+"lng_ptg_location_card_make_portable_desc" = "Your Telegram was installed via the system installer. Convert it to portable to enable relocation.";
+"lng_ptg_location_card_make_portable_pro1" = "Removes Telegram from Add/Remove Programs";
+"lng_ptg_location_card_make_portable_pro2" = "Deletes the uninstaller — your data and settings are not affected";
+"lng_ptg_location_card_make_portable_pro3" = "After conversion, move options become available";
+"lng_ptg_location_card_make_portable_btn" = "Make portable";
+
 // Keys finished
