@@ -4371,6 +4371,16 @@ not_null<PollData*> Session::processPoll(const MTPDmessageMediaPoll &data) {
 			if (document && document->type() == mtpc_document) {
 				media.document = processDocument(*document);
 			}
+		}, [&](const MTPDmessageMediaGeo &data) {
+			data.vgeo().match([&](const MTPDgeoPoint &point) {
+				media.geo = LocationPoint(point);
+			}, [](const MTPDgeoPointEmpty &) {
+			});
+		}, [&](const MTPDmessageMediaVenue &data) {
+			data.vgeo().match([&](const MTPDgeoPoint &point) {
+				media.geo = LocationPoint(point);
+			}, [](const MTPDgeoPointEmpty &) {
+			});
 		}, [](const auto &) {
 		});
 	}

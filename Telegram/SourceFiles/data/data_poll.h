@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "data/data_location.h"
+
 namespace Data {
 class Session;
 } // namespace Data
@@ -22,12 +24,15 @@ class DocumentData;
 struct PollMedia {
 	PhotoData *photo = nullptr;
 	DocumentData *document = nullptr;
+	std::optional<Data::LocationPoint> geo;
 
-	explicit operator bool() const { return photo || document; }
+	explicit operator bool() const { return photo || document || geo; }
 };
 
 inline bool operator==(const PollMedia &a, const PollMedia &b) {
-	return (a.photo == b.photo) && (a.document == b.document);
+	return (a.photo == b.photo)
+		&& (a.document == b.document)
+		&& (a.geo == b.geo);
 }
 
 inline bool operator!=(const PollMedia &a, const PollMedia &b) {

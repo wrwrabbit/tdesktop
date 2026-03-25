@@ -374,6 +374,13 @@ MTPInputMedia PollMediaToMTP(const PollMedia &media) {
 			MTP_int(0),
 			MTP_int(0),
 			MTPstring());
+	} else if (media.geo) {
+		return MTP_inputMediaGeoPoint(
+			MTP_inputGeoPoint(
+				MTP_flags(0),
+				MTP_double(media.geo->lat()),
+				MTP_double(media.geo->lon()),
+				MTPint())); // accuracy_radius
 	}
 	return MTPInputMedia();
 }
@@ -396,6 +403,16 @@ PollMedia PollMediaFromMTP(
 			}, [](const auto &) {
 			});
 		}
+	}, [&](const MTPDmessageMediaGeo &data) {
+		data.vgeo().match([&](const MTPDgeoPoint &point) {
+			result.geo = Data::LocationPoint(point);
+		}, [](const MTPDgeoPointEmpty &) {
+		});
+	}, [&](const MTPDmessageMediaVenue &data) {
+		data.vgeo().match([&](const MTPDgeoPoint &point) {
+			result.geo = Data::LocationPoint(point);
+		}, [](const MTPDgeoPointEmpty &) {
+		});
 	}, [](const auto &) {
 	});
 	return result;
@@ -413,6 +430,14 @@ PollMedia PollMediaFromInputMTP(
 	}, [&](const MTPDinputMediaDocument &data) {
 		data.vid().match([&](const MTPDinputDocument &document) {
 			result.document = owner->document(document.vid().v);
+		}, [](const auto &) {
+		});
+	}, [&](const MTPDinputMediaGeoPoint &data) {
+		data.vgeo_point().match([&](const MTPDinputGeoPoint &point) {
+			result.geo.emplace(
+				point.vlat().v,
+				point.vlong().v,
+				Data::LocationPoint::NoAccessHash);
 		}, [](const auto &) {
 		});
 	}, [](const auto &) {
