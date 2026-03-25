@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/choose_language_box.h"
 #include "ui/controls/send_button.h"
 #include "ui/effects/ripple_animation.h"
+#include "ui/effects/skeleton_animation.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
 #include "ui/text/custom_emoji_helper.h"
@@ -53,6 +54,21 @@ enum class ComposeAiMode {
 	Style,
 	Fix,
 };
+
+enum class CardState {
+	Waiting,
+	Loading,
+	Ready,
+	Failed,
+};
+
+[[nodiscard]] QColor ComposeAiColorWithAlpha(
+		const style::color &color,
+		float64 alpha) {
+	auto result = color->c;
+	result.setAlphaF(result.alphaF() * alpha);
+	return result;
+}
 
 [[nodiscard]] QString ToneTitle(const QString &key) {
 	const auto value = Lang::GetNonDefaultValue(
@@ -175,14 +191,6 @@ enum class ComposeAiMode {
 
 [[nodiscard]] qreal ComposeAiStyleRadius() {
 	return st::aiComposeStyleTabsRadius;
-}
-
-[[nodiscard]] QColor ComposeAiColorWithAlpha(
-		const style::color &color,
-		float64 alpha) {
-	auto result = color->c;
-	result.setAlphaF(result.alphaF() * alpha);
-	return result;
 }
 
 [[nodiscard]] QColor ComposeAiActiveBackgroundColor(
@@ -328,9 +336,8 @@ public:
 	void setResultTitle(const TextWithEntities &title);
 	void setEmojifyVisible(bool visible);
 	void setEmojifyChecked(bool checked);
-	void setLoading(bool loading);
-	void setResultVisible(bool visible);
-	void setResult(TextWithEntities text, bool copyVisible);
+	void setState(CardState state);
+	void setResultText(TextWithEntities text);
 
 protected:
 	int resizeGetHeight(int newWidth) override;
@@ -355,13 +362,11 @@ private:
 	Fn<void(bool)> _emojifyChanged;
 	bool _originalExpanded = false;
 	bool _originalVisible = true;
-	bool _loading = false;
-	bool _hasShownResult = false;
-	bool _resultVisible = true;
-	bool _copyVisible = false;
 	bool _emojifyVisible = false;
 	bool _dividerVisible = false;
 	int _dividerTop = 0;
+	CardState _state = CardState::Waiting;
+	Ui::SkeletonAnimation _skeleton;
 	std::array<Ui::Text::SpecialColor, 2> _diffColors;
 
 };
@@ -420,7 +425,7 @@ private:
 	ComposeAiMode _mode = ComposeAiMode::Translate;
 	int _styleIndex = -1;
 	bool _emojify = false;
-	bool _ready = false;
+	CardState _state = CardState::Waiting;
 	mtpRequestId _requestId = 0;
 	int _requestToken = 0;
 	TextWithEntities _result;
@@ -1003,7 +1008,8 @@ ComposeAiPreviewCard::ComposeAiPreviewCard(
 		this,
 		tr::lng_ai_compose_emojify(tr::now),
 		st::aiComposeEmojifyCheckbox,
-		std::make_unique<Ui::RoundCheckView>(st::defaultCheck,false))) {
+		std::make_unique<Ui::RoundCheckView>(st::defaultCheck,false)))
+, _skeleton(_resultBody) {
 	_originalBody->setSelectable(true);
 	_originalBody->setMarkedText(_original, _context);
 	_resultTitle->setClickHandlerFilter([=](const auto &...) {
@@ -1036,7 +1042,8 @@ ComposeAiPreviewCard::ComposeAiPreviewCard(
 	}, _emojify->lifetime());
 	setOriginalTitle(tr::lng_ai_compose_original(tr::now));
 	setResultTitle(tr::lng_ai_compose_result(tr::now, tr::marked));
-	setLoading(true);
+	_resultBody->setMarkedText(_original, _context);
+	_copy->setVisible(false);
 	updateOriginalToggleIcon();
 }
 
@@ -1088,29 +1095,38 @@ void ComposeAiPreviewCard::setEmojifyChecked(bool checked) {
 	refreshGeometry();
 }
 
-void ComposeAiPreviewCard::setLoading(bool loading) {
-	_loading = loading;
-	if (loading && !_hasShownResult) {
-		_resultBody->setMarkedText(_original, _context);
-	}
-	_copy->setVisible(!loading && _copyVisible);
-	refreshGeometry();
-}
-
-void ComposeAiPreviewCard::setResultVisible(bool visible) {
-	if (_resultVisible == visible) {
+void ComposeAiPreviewCard::setState(CardState state) {
+	if (_state == state) {
 		return;
 	}
-	_resultVisible = visible;
+	const auto wasLoading = (_state == CardState::Loading);
+	_state = state;
+	switch (_state) {
+	case CardState::Waiting:
+	case CardState::Failed:
+		_resultBody->setMarkedText(_original, _context);
+		_copy->setVisible(false);
+		if (wasLoading) {
+			_skeleton.stop();
+		}
+		break;
+	case CardState::Loading:
+		_resultBody->setMarkedText(_original, _context);
+		_copy->setVisible(false);
+		_skeleton.start();
+		break;
+	case CardState::Ready:
+		_copy->setVisible(true);
+		if (wasLoading) {
+			_skeleton.stop();
+		}
+		break;
+	}
 	refreshGeometry();
 }
 
-void ComposeAiPreviewCard::setResult(TextWithEntities text, bool copyVisible) {
-	_loading = false;
-	_hasShownResult = true;
-	_copyVisible = copyVisible;
-	_resultBody->setMarkedText(text, _context);
-	_copy->setVisible(_copyVisible);
+void ComposeAiPreviewCard::setResultText(TextWithEntities text) {
+	_resultBody->setMarkedText(std::move(text), _context);
 	refreshGeometry();
 }
 
@@ -1165,70 +1181,61 @@ int ComposeAiPreviewCard::resizeGetHeight(int newWidth) {
 		_originalToggle->hide();
 	}
 
-	if (_resultVisible) {
-		_resultTitle->show();
-		_resultBody->show();
-		auto controlsWidth = 0;
-		if (_emojifyVisible) {
-			_emojify->show();
-			_emojify->resizeToNaturalWidth(contentWidth);
-			controlsWidth += _emojify->width()
-				+ st::aiComposeCardControlSkip;
-		} else {
-			_emojify->hide();
-		}
-		const auto resultTitleWidth = std::max(
-			contentWidth - controlsWidth,
-			0);
-		_resultTitle->resizeToWidth(resultTitleWidth);
-		auto right = padding.right();
-		if (_emojifyVisible) {
-			_emojify->moveToRight(right, y, newWidth);
-			right += _emojify->width() + st::aiComposeCardControlSkip;
-		}
-		_resultTitle->setGeometryToLeft(
-			padding.left(),
-			y,
-			resultTitleWidth,
-			_resultTitle->height(),
-			newWidth);
-		y += std::max({
-			_resultTitle->height(),
-			_emojifyVisible ? _emojify->height() : 0,
-		});
-		y += st::aiComposeCardTextSkip;
-
-		const auto lineHeight = _resultBody->st().style.lineHeight
-			? _resultBody->st().style.lineHeight
-			: _resultBody->st().style.font->height;
-		if (_copy->isVisible()) {
-			_resultBody->setSkipBlock(
-				_copy->width(),
-				lineHeight);
-		} else {
-			_resultBody->setSkipBlock(0, 0);
-		}
-		_resultBody->resizeToWidth(contentWidth);
-		_resultBody->setGeometryToLeft(
-			padding.left(),
-			y,
-			contentWidth,
-			_resultBody->height(),
-			newWidth);
-		if (_copy->isVisible()) {
-			_copy->moveToRight(
-				padding.right(),
-				y + _resultBody->height() - lineHeight,
-				newWidth);
-		}
-		y += _resultBody->height();
-
+	_resultTitle->show();
+	auto controlsWidth = 0;
+	if (_emojifyVisible) {
+		_emojify->show();
+		_emojify->resizeToNaturalWidth(contentWidth);
+		controlsWidth += _emojify->width()
+			+ st::aiComposeCardControlSkip;
 	} else {
-		_resultTitle->hide();
-		_resultBody->hide();
-		_copy->hide();
 		_emojify->hide();
 	}
+	const auto resultTitleWidth = std::max(
+		contentWidth - controlsWidth,
+		0);
+	_resultTitle->resizeToWidth(resultTitleWidth);
+	auto right = padding.right();
+	if (_emojifyVisible) {
+		_emojify->moveToRight(right, y, newWidth);
+		right += _emojify->width() + st::aiComposeCardControlSkip;
+	}
+	_resultTitle->setGeometryToLeft(
+		padding.left(),
+		y,
+		resultTitleWidth,
+		_resultTitle->height(),
+		newWidth);
+	y += std::max({
+		_resultTitle->height(),
+		_emojifyVisible ? _emojify->height() : 0,
+	});
+	y += st::aiComposeCardTextSkip;
+
+	const auto lineHeight = _resultBody->st().style.lineHeight
+		? _resultBody->st().style.lineHeight
+		: _resultBody->st().style.font->height;
+	if (_copy->isVisible()) {
+		_resultBody->setSkipBlock(
+			_copy->width(),
+			lineHeight);
+	} else {
+		_resultBody->setSkipBlock(0, 0);
+	}
+	_resultBody->resizeToWidth(contentWidth);
+	_resultBody->setGeometryToLeft(
+		padding.left(),
+		y,
+		contentWidth,
+		_resultBody->height(),
+		newWidth);
+	if (_copy->isVisible()) {
+		_copy->moveToRight(
+			padding.right(),
+			y + _resultBody->height() - lineHeight,
+			newWidth);
+	}
+	y += _resultBody->height();
 
 	return y + padding.bottom();
 }
@@ -1298,7 +1305,7 @@ ComposeAiContent::~ComposeAiContent() {
 }
 
 bool ComposeAiContent::hasResult() const {
-	return _ready;
+	return _state == CardState::Ready;
 }
 
 const TextWithEntities &ComposeAiContent::result() const {
@@ -1385,7 +1392,7 @@ void ComposeAiContent::chooseLanguage() {
 }
 
 void ComposeAiContent::copyResult() {
-	if (!_ready) {
+	if (_state != CardState::Ready) {
 		return;
 	}
 	TextUtilities::SetClipboardText(
@@ -1397,6 +1404,8 @@ void ComposeAiContent::setMode(ComposeAiMode mode) {
 		return;
 	}
 	_mode = mode;
+	_state = CardState::Waiting;
+	_preview->setState(CardState::Waiting);
 	if (_modeChanged) {
 		_modeChanged(_mode);
 	}
@@ -1407,20 +1416,21 @@ void ComposeAiContent::setMode(ComposeAiMode mode) {
 }
 
 void ComposeAiContent::updateTitles() {
-	const auto styleNoSelection = (_mode == ComposeAiMode::Style)
-		&& (_styleIndex < 0);
-	_preview->setOriginalVisible(
-		_mode != ComposeAiMode::Style || styleNoSelection);
-	_preview->setResultVisible(!styleNoSelection);
+	const auto hasResult = (_state == CardState::Loading)
+		|| (_state == CardState::Ready);
+	_preview->setOriginalVisible(hasResult);
 	_preview->setOriginalTitle(
 		(_mode == ComposeAiMode::Translate)
 			? FromTitle(_detectedFrom)
 			: tr::lng_ai_compose_original(tr::now));
 	_preview->setResultTitle(
-		(_mode == ComposeAiMode::Translate)
-			? ToTitle(_to)
-			: tr::lng_ai_compose_result(tr::now, tr::marked));
-	_preview->setEmojifyVisible(_mode != ComposeAiMode::Fix);
+		hasResult
+			? ((_mode == ComposeAiMode::Translate)
+				? ToTitle(_to)
+				: tr::lng_ai_compose_result(tr::now, tr::marked))
+			: tr::lng_ai_compose_original(tr::now, tr::marked));
+	_preview->setEmojifyVisible(
+		hasResult && (_mode != ComposeAiMode::Fix));
 	_preview->setEmojifyChecked(_emojify);
 }
 
@@ -1449,9 +1459,10 @@ void ComposeAiContent::request() {
 		return;
 	}
 	cancelRequest();
-	_ready = false;
+	_state = CardState::Loading;
 	_result = {};
-	_preview->setLoading(true);
+	_preview->setState(CardState::Loading);
+	updateTitles();
 	notifyReadyChanged();
 
 	auto request = Api::ComposeWithAi::Request{
@@ -1495,17 +1506,20 @@ void ComposeAiContent::applyResult(Api::ComposeWithAi::Result &&result) {
 	auto display = (_mode == ComposeAiMode::Fix && result.diffText)
 		? BuildDiffDisplay(*result.diffText)
 		: _result;
-	_preview->setResult(std::move(display), true);
-	_ready = !_result.text.isEmpty();
+	_state = _result.text.isEmpty() ? CardState::Failed : CardState::Ready;
+	_preview->setState(_state);
+	if (_state == CardState::Ready) {
+		_preview->setResultText(std::move(display));
+	}
+	updateTitles();
 	notifyReadyChanged();
 	refreshLayout();
 }
 
 void ComposeAiContent::showError(const MTP::Error &error) {
-	_preview->setResult(
-		Ui::Text::Italic(tr::lng_ai_compose_error(tr::now)),
-		false);
-	_ready = false;
+	_state = CardState::Failed;
+	_preview->setState(CardState::Failed);
+	updateTitles();
 	notifyReadyChanged();
 	refreshLayout();
 	if (error.type() == u"AICOMPOSE_FLOOD_PREMIUM"_q) {
@@ -1533,7 +1547,7 @@ void ComposeAiContent::showError(const MTP::Error &error) {
 
 void ComposeAiContent::notifyReadyChanged() {
 	if (_readyChanged) {
-		_readyChanged(_ready);
+		_readyChanged(_state == CardState::Ready);
 	}
 }
 
@@ -1652,7 +1666,7 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 			btn->setDisabled(true);
 			btn->setTextFgOverride(
 				anim::color(st::activeButtonBg, st::activeButtonFg, 0.5));
-		} else {
+		} else if (content->hasResult()) {
 			box->setStyle(st::aiComposeBoxWithSend);
 			const auto isStyle =
 				(content->mode() == ComposeAiMode::Style);
@@ -1662,7 +1676,6 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 					: tr::lng_ai_compose_apply(),
 				applyAndClose);
 			btn->setFullRadius(true);
-			btn->setDisabled(!content->hasResult());
 			*applyButton = btn;
 
 			const auto send = Ui::CreateChild<Ui::SendButton>(
@@ -1670,9 +1683,6 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 				st::aiComposeSendButton);
 			send->setState({ .type = Ui::SendButton::Type::Send });
 			send->show();
-			send->setAttribute(
-				Qt::WA_TransparentForMouseEvents,
-				!content->hasResult());
 			btn->geometryValue(
 			) | rpl::on_next([=](QRect geometry) {
 				const auto size = st::aiComposeBoxWithSend.buttonHeight;
@@ -1684,17 +1694,23 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 			}, send->lifetime());
 			send->setClickedCallback(applyAndClose);
 			*sendButton = send;
+		} else {
+			box->setStyle(st::aiComposeBox);
+			const auto isStyle =
+				(content->mode() == ComposeAiMode::Style);
+			const auto btn = box->addButton(
+				isStyle
+					? tr::lng_ai_compose_apply_style()
+					: tr::lng_ai_compose_apply(),
+				nullptr);
+			btn->setFullRadius(true);
+			btn->setDisabled(true);
+			*applyButton = btn;
 		}
 	};
 
-	content->setReadyChangedCallback([=](bool ready) {
-		if (*applyButton) {
-			(*applyButton)->setDisabled(!ready);
-		}
-		if (*sendButton) {
-			(*sendButton)->setAttribute(
-				Qt::WA_TransparentForMouseEvents, !ready);
-		}
+	content->setReadyChangedCallback([=](bool) {
+		rebuildButtons();
 	});
 	content->setPremiumFloodCallback([=] {
 		*premiumFlooded = true;
