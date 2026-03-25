@@ -41,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_widgets.h"
 
 #include <algorithm>
+#include <array>
 
 #include <QtWidgets/QScrollBar>
 
@@ -69,7 +70,12 @@ enum class ComposeAiMode {
 
 [[nodiscard]] TextWithEntities HighlightDiff(TextWithEntities text) {
 	return Ui::Text::Colorized(
-		Ui::Text::Wrapped(std::move(text), EntityType::Underline));
+		Ui::Text::Wrapped(std::move(text), EntityType::Underline), 1);
+}
+
+[[nodiscard]] TextWithEntities StrikeOutDiff(TextWithEntities text) {
+	return Ui::Text::Colorized(
+		Ui::Text::Wrapped(std::move(text), EntityType::StrikeOut), 2);
 }
 
 [[nodiscard]] TextWithEntities BuildDiffDisplay(
@@ -98,15 +104,13 @@ enum class ComposeAiMode {
 		case Api::ComposeWithAi::DiffEntity::Type::Replace:
 			if (!entity.oldText.isEmpty()) {
 				result.append(
-					Ui::Text::Wrapped(
-						TextWithEntities::Simple(entity.oldText),
-						EntityType::StrikeOut));
+					StrikeOutDiff(
+						TextWithEntities::Simple(entity.oldText)));
 			}
 			result.append(HighlightDiff(std::move(part)));
 			break;
 		case Api::ComposeWithAi::DiffEntity::Type::Delete:
-			result.append(
-				Ui::Text::Wrapped(std::move(part), EntityType::StrikeOut));
+			result.append(StrikeOutDiff(std::move(part)));
 			break;
 		}
 		taken = std::max(taken, offset + length);
@@ -354,6 +358,7 @@ private:
 	bool _emojifyVisible = false;
 	bool _dividerVisible = false;
 	int _dividerTop = 0;
+	std::array<Ui::Text::SpecialColor, 2> _diffColors;
 
 };
 
@@ -965,6 +970,9 @@ ComposeAiPreviewCard::ComposeAiPreviewCard(
 		return false;
 	});
 	_resultBody->setSelectable(true);
+	_diffColors[0] = { &st::boxTextFgGood->p, &st::boxTextFgGood->p };
+	_diffColors[1] = { &st::attentionButtonFg->p, &st::attentionButtonFg->p };
+	_resultBody->setColors(_diffColors);
 	_originalToggle->setClickedCallback([=] {
 		_originalExpanded = !_originalExpanded;
 		updateOriginalToggleIcon();
