@@ -274,6 +274,7 @@ public:
 	void resizeForOuterWidth(int outerWidth);
 	[[nodiscard]] QString currentTone() const;
 	[[nodiscard]] int buttonCount() const;
+	[[nodiscard]] rpl::producer<Ui::ScrollToRequest> requestShown() const;
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
@@ -282,6 +283,7 @@ private:
 	std::vector<not_null<ComposeAiStyleButton*>> _buttons;
 	Fn<void(int)> _changed;
 	int _active = -1;
+	rpl::event_stream<Ui::ScrollToRequest> _requestShown;
 
 };
 
@@ -298,6 +300,7 @@ protected:
 
 private:
 	void updateFades();
+	void scrollToButton(int buttonLeft, int buttonRight);
 
 	const not_null<Ui::ScrollArea*> _scroll;
 	const not_null<ComposeAiStyleTabs*> _inner;
@@ -305,6 +308,7 @@ private:
 	const not_null<Ui::RpWidget*> _fadeRight;
 	const not_null<Ui::RpWidget*> _cornerLeft;
 	const not_null<Ui::RpWidget*> _cornerRight;
+	Ui::Animations::Simple _scrollAnimation;
 
 };
 
@@ -685,6 +689,10 @@ ComposeAiStyleTabs::ComposeAiStyleTabs(
 				return;
 			}
 			setActive(index);
+			_requestShown.fire({
+				_buttons[index]->x(),
+				_buttons[index]->x() + _buttons[index]->width(),
+			});
 			if (_changed) {
 				_changed(index);
 			}
@@ -792,6 +800,10 @@ int ComposeAiStyleTabs::buttonCount() const {
 	return int(_buttons.size());
 }
 
+rpl::producer<Ui::ScrollToRequest> ComposeAiStyleTabs::requestShown() const {
+	return _requestShown.events();
+}
+
 void ComposeAiStyleTabs::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 	PainterHighQualityEnabler hq(p);
@@ -824,6 +836,7 @@ ComposeAiStyleScrollTabs::ComposeAiStyleScrollTabs(
 			return false;
 		}
 		const auto y = pixelDelta.y() ? pixelDelta.y() : angleDelta.y();
+		_scrollAnimation.stop();
 		_scroll->scrollToX(_scroll->scrollLeft() - y);
 		return true;
 	});
@@ -892,6 +905,11 @@ ComposeAiStyleScrollTabs::ComposeAiStyleScrollTabs(
 	) | rpl::on_next([=] {
 		updateFades();
 	}, lifetime());
+
+	_inner->requestShown(
+	) | rpl::on_next([=](Ui::ScrollToRequest request) {
+		scrollToButton(request.ymin, request.ymax);
+	}, lifetime());
 }
 
 not_null<ComposeAiStyleTabs*> ComposeAiStyleScrollTabs::inner() const {
@@ -926,6 +944,31 @@ void ComposeAiStyleScrollTabs::updateFades() {
 	const auto scrollMax = _scroll->scrollLeftMax();
 	_fadeLeft->setVisible(scrollLeft > 0);
 	_fadeRight->setVisible(scrollLeft < scrollMax);
+}
+
+void ComposeAiStyleScrollTabs::scrollToButton(
+		int buttonLeft,
+		int buttonRight) {
+	const auto full = _scroll->width();
+	const auto tab = buttonRight - buttonLeft;
+	if (tab < full) {
+		const auto add = std::min(full - tab, tab) / 2;
+		buttonRight += add;
+		buttonLeft -= add;
+	}
+	const auto scrollLeft = _scroll->scrollLeft();
+	const auto needed = (buttonLeft < scrollLeft)
+		|| (buttonRight > scrollLeft + full);
+	if (!needed) {
+		return;
+	}
+	const auto target = (buttonLeft < scrollLeft)
+		? buttonLeft
+		: std::min(buttonLeft, buttonRight - full);
+	_scrollAnimation.stop();
+	_scrollAnimation.start([=] {
+		_scroll->scrollToX(qRound(_scrollAnimation.value(target)));
+	}, scrollLeft, target, st::slideDuration, anim::sineInOut);
 }
 
 // ComposeAiPreviewCard
