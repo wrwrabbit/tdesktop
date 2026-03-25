@@ -237,6 +237,8 @@ constexpr auto kSponsoredUserpicLines = 2;
 		? tr::lng_view_button_storyalbum(tr::now)
 		: (type == WebPageType::GiftCollection)
 		? tr::lng_view_button_collection(tr::now)
+		: (type == WebPageType::NewBot)
+		? tr::lng_view_button_newbot(tr::now)
 		: (type == WebPageType::Auction)
 		? ((page->auction
 			&& page->auction->endDate
@@ -284,7 +286,8 @@ constexpr auto kSponsoredUserpicLines = 2;
 		|| (type == WebPageType::StickerSet)
 		|| (type == WebPageType::StoryAlbum)
 		|| (type == WebPageType::GiftCollection)
-		|| (type == WebPageType::Auction);
+		|| (type == WebPageType::Auction)
+		|| (type == WebPageType::NewBot);
 }
 
 } // namespace
