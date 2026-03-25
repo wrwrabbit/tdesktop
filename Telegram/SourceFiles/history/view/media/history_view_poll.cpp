@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "core/click_handler_types.h"
 #include "core/ui_integration.h" // TextContext
+#include "data/data_cloud_file.h"
+#include "data/data_location.h"
 #include "lang/lang_keys.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -35,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rect.h"
 #include "ui/dynamic_image.h"
 #include "ui/dynamic_thumbnails.h"
+#include "history/view/media/history_view_location.h"
 #include "history/view/media/history_view_media_common.h"
 #include "history/view/history_view_group_call_bar.h"
 #include "data/data_media_types.h"
@@ -84,6 +87,7 @@ enum class PollThumbnailKind {
 	Photo,
 	Document,
 	Emoji,
+	Geo,
 };
 
 struct PercentCounterItem {
@@ -219,6 +223,15 @@ struct PollThumbnailData {
 				|| media.document->isVideoMessage()
 				|| media.document->isAnimation();
 		}
+	} else if (media.geo) {
+		result.id = uint64(media.geo->hash());
+		const auto cloudImage = poll->owner().location(*media.geo);
+		result.thumbnail = Ui::MakeGeoThumbnailWithPin(
+			cloudImage,
+			&poll->session(),
+			Data::FileOrigin());
+		result.rounded = true;
+		result.kind = PollThumbnailKind::Geo;
 	}
 	if (result.kind == PollThumbnailKind::Photo && result.id) {
 		const auto photo = media.photo;
@@ -243,6 +256,18 @@ struct PollThumbnailData {
 					return;
 				}
 				controller->openDocument(document, true, messageContext);
+			});
+	} else if (result.kind == PollThumbnailKind::Geo && media.geo) {
+		const auto point = *media.geo;
+		const auto session = &poll->session();
+		result.handler = std::make_shared<LambdaClickHandler>(
+			[=](ClickContext context) {
+				const auto my = context.other.value<ClickHandlerContext>();
+				const auto controller = my.sessionWindow.get();
+				if (!controller || (&controller->session() != session)) {
+					return;
+				}
+				HistoryView::ShowPollGeoPreview(controller, point);
 			});
 	}
 	return result;
@@ -872,6 +897,18 @@ void Poll::updateSolutionMedia() {
 					false,
 					messageContext);
 			});
+	} else if (updated.kind == PollThumbnailKind::Geo
+		&& _poll->solutionMedia.geo) {
+		_solutionMedia->handler = updated.handler;
+		const auto &point = *_poll->solutionMedia.geo;
+		const auto cloudImage = _poll->owner().location(point);
+		_solutionAttach = std::make_unique<Location>(
+			_parent,
+			cloudImage,
+			point,
+			QString(),
+			QString());
+		return;
 	}
 	_solutionAttach = (photo || document)
 		? CreateAttach(_parent, document, photo)
@@ -1053,6 +1090,19 @@ void Poll::validateTopMediaCache(QSize size) const {
 	}
 	if (source.isNull()) {
 		return;
+	}
+	const auto sw = source.width();
+	const auto sh = source.height();
+	const auto tw = size.width() * ratio;
+	const auto th = size.height() * ratio;
+	if (sw * th != sh * tw) {
+		const auto cropW = std::min(sw, sh * tw / th);
+		const auto cropH = std::min(sh, sw * th / tw);
+		source = source.copy(
+			(sw - cropW) / 2,
+			(sh - cropH) / 2,
+			cropW,
+			cropH);
 	}
 	auto prepared = Images::Prepare(
 		source,
