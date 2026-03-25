@@ -36,6 +36,9 @@ enum class StickedTooltip;
 
 namespace Core {
 
+inline constexpr auto kScreenReaderModeDisabledKey
+	= "screen-reader-mode-disabled"_cs;
+
 struct WindowPosition {
 	int32 moncrc = 0;
 	int maximized = 0;

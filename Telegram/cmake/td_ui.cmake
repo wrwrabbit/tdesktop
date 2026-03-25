@@ -455,6 +455,8 @@ PRIVATE
     ui/controls/window_outdated_bar.cpp
     ui/controls/window_outdated_bar_dummy.cpp
     ui/controls/window_outdated_bar.h
+    ui/controls/window_screen_reader_bar.cpp
+    ui/controls/window_screen_reader_bar.h
     ui/effects/fireworks_animation.cpp
     ui/effects/fireworks_animation.h
     ui/effects/glare.cpp

@@ -6904,6 +6904,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_outdated_soon" = "Otherwise, Telegram Desktop will stop updating on {date}.";
 "lng_outdated_now" = "So Telegram Desktop can update to newer versions.";
 
+"lng_screen_reader_bar_text" = "Telegram is working in Screen Reader mode.";
+"lng_screen_reader_bar_disable" = "Disable";
+"lng_screen_reader_confirm_text" = "Telegram detected accessibility software is being used in your system and it is working in Screen Reader friendly mode.\n\nThis may result in unexpected changes to the way Telegram user interface works.\n\nIf you do not use Screen Reader software with Telegram, please disable this mode.";
+"lng_screen_reader_confirm_disable" = "Disable";
+"lng_screen_reader_settings_title" = "Screen reader";
+"lng_screen_reader_settings_disable" = "Disable screen reader mode";
+
 "lng_filters_all" = "All chats";
 "lng_filters_all_short" = "All";
 "lng_filters_setup" = "Edit";

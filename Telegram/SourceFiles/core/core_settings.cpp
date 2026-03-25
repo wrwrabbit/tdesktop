@@ -1604,7 +1604,11 @@ void Settings::resetOnLastLogout() {
 	_hiddenGroupCallTooltips = 0;
 	_storiesClickTooltipHidden = false;
 	_ttlVoiceClickTooltipHidden = false;
+	const auto srDisabled = readPref<bool>(kScreenReaderModeDisabledKey);
 	_prefs.clear();
+	if (srDisabled) {
+		writePref<bool>(kScreenReaderModeDisabledKey, true);
+	}
 	_ivZoom = 0;
 	_recordVideoMessages = false;
 	_videoQuality = {};

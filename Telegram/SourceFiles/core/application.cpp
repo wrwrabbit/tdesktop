@@ -73,6 +73,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/spoiler_mess.h"
 #include "ui/cached_round_corners.h"
 #include "ui/power_saving.h"
+#include "ui/screen_reader_mode.h"
 #include "storage/storage_domain.h"
 #include "storage/storage_databases.h"
 #include "storage/localstorage.h"
@@ -487,6 +488,8 @@ void Application::startSettingsAndBackground() {
 	Local::rewriteSettingsIfNeeded();
 	Window::Theme::Background()->start();
 	checkSystemDarkMode();
+	Ui::SetScreenReaderModeDisabled(
+		settings().readPref<bool>(kScreenReaderModeDisabledKey));
 }
 
 void Application::checkSystemDarkMode() {
