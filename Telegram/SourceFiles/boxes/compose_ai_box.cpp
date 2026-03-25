@@ -88,7 +88,7 @@ enum class ComposeAiMode {
 		[](const auto &a, const auto &b) {
 			return a.offset < b.offset;
 		});
-	const auto size = diff.text.text.size();
+	const auto size = int(diff.text.text.size());
 	auto taken = 0;
 	for (const auto &entity : entities) {
 		const auto offset = std::clamp(entity.offset, 0, size);
