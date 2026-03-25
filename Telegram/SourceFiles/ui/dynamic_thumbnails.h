@@ -11,7 +11,12 @@ class DocumentData;
 class PeerData;
 class PhotoData;
 
+namespace Main {
+class Session;
+} // namespace Main
+
 namespace Data {
+class CloudImage;
 class Story;
 class Session;
 struct FileOrigin;
@@ -52,5 +57,13 @@ class DynamicImage;
 [[nodiscard]] std::shared_ptr<DynamicImage> MakeDocumentFilePreviewThumbnail(
 	not_null<DocumentData*> document,
 	FullMsgId fullId);
+[[nodiscard]] std::shared_ptr<DynamicImage> MakeGeoThumbnail(
+	not_null<Data::CloudImage*> data,
+	not_null<Main::Session*> session,
+	Data::FileOrigin origin);
+[[nodiscard]] std::shared_ptr<DynamicImage> MakeGeoThumbnailWithPin(
+	not_null<Data::CloudImage*> data,
+	not_null<Main::Session*> session,
+	Data::FileOrigin origin);
 
 } // namespace Ui

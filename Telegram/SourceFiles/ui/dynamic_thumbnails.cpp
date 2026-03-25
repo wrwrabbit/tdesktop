@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/dynamic_thumbnails.h"
 
 #include "data/data_changes.h"
+#include "data/data_cloud_file.h"
 #include "data/data_document.h"
 #include "data/data_document_media.h"
 #include "data/data_file_origin.h"
@@ -25,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "ui/text/text_custom_emoji.h"
 #include "ui/userpic_view.h"
+#include "styles/style_chat.h"
 #include "styles/style_overview.h"
 
 namespace Ui {
@@ -241,6 +243,31 @@ private:
 	Fn<bool()> _paused;
 	Fn<QColor()> _textColor;
 	QImage _frame;
+
+};
+
+class GeoThumbnail final : public DynamicImage {
+public:
+	GeoThumbnail(
+		not_null<Data::CloudImage*> data,
+		not_null<Main::Session*> session,
+		Data::FileOrigin origin,
+		bool drawPin);
+
+	std::shared_ptr<DynamicImage> clone() override;
+
+	QImage image(int size) override;
+	void subscribeToUpdates(Fn<void()> callback) override;
+
+private:
+	const not_null<Data::CloudImage*> _data;
+	const not_null<Main::Session*> _session;
+	const Data::FileOrigin _origin;
+	const bool _drawPin;
+	std::shared_ptr<QImage> _view;
+	QImage _prepared;
+	int _paletteVersion = 0;
+	rpl::lifetime _subscription;
 
 };
 
@@ -747,6 +774,97 @@ QImage EmojiThumbnail::image(int size) {
 	return _frame;
 }
 
+GeoThumbnail::GeoThumbnail(
+	not_null<Data::CloudImage*> data,
+	not_null<Main::Session*> session,
+	Data::FileOrigin origin,
+	bool drawPin)
+: _data(data)
+, _session(session)
+, _origin(origin)
+, _drawPin(drawPin) {
+}
+
+std::shared_ptr<DynamicImage> GeoThumbnail::clone() {
+	return std::make_shared<GeoThumbnail>(
+		_data,
+		_session,
+		_origin,
+		_drawPin);
+}
+
+QImage GeoThumbnail::image(int size) {
+	const auto ratio = style::DevicePixelRatio();
+	const auto full = QSize(size, size) * ratio;
+	const auto paletteVersion = style::PaletteVersion();
+	if (_prepared.size() == full && _paletteVersion == paletteVersion) {
+		return _prepared;
+	}
+	_paletteVersion = paletteVersion;
+
+	const auto loaded = _view ? *_view : QImage();
+	if (loaded.isNull()) {
+		_prepared = QImage(full, QImage::Format_ARGB32_Premultiplied);
+		_prepared.fill(Qt::black);
+	} else {
+		const auto w = loaded.width();
+		const auto h = loaded.height();
+		const auto side = std::min(w, h);
+		const auto x = (w - side) / 2;
+		const auto y = (h - side) / 2;
+		_prepared = loaded.copy(x, y, side, side).scaled(
+			full,
+			Qt::IgnoreAspectRatio,
+			Qt::SmoothTransformation);
+	}
+	_prepared = Images::Round(
+		std::move(_prepared),
+		ImageRoundRadius::Small);
+	_prepared.setDevicePixelRatio(ratio);
+	if (_drawPin && !loaded.isNull()) {
+		auto p = Painter(&_prepared);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto pinScale = std::min(
+			1.0,
+			size / (st::historyMapPoint.height() * 2.5));
+		const auto center = QPointF(size / 2.0, size / 2.0);
+		p.translate(center);
+		p.scale(pinScale, pinScale);
+		p.translate(-center);
+		const auto paintMarker = [&](const style::icon &icon) {
+			icon.paint(
+				p,
+				(size - icon.width()) / 2,
+				(size / 2) - icon.height(),
+				size);
+		};
+		paintMarker(st::historyMapPoint);
+		paintMarker(st::historyMapPointInner);
+	}
+	return _prepared;
+}
+
+void GeoThumbnail::subscribeToUpdates(Fn<void()> callback) {
+	_subscription.destroy();
+	if (!callback) {
+		_view = nullptr;
+		_prepared = QImage();
+		return;
+	}
+	_view = _data->createView();
+	_data->load(_session, _origin);
+	if (!_view->isNull()) {
+		return;
+	}
+	_subscription = _session->downloaderTaskFinished(
+	) | rpl::filter([=] {
+		return !_view->isNull();
+	}) | rpl::take(1) | rpl::on_next([=] {
+		_prepared = QImage();
+		callback();
+	});
+}
+
 DocumentFilePreviewThumbnail::DocumentFilePreviewThumbnail(
 	not_null<DocumentData*> document,
 	Data::FileOrigin origin)
@@ -816,7 +934,7 @@ QImage DocumentFilePreviewThumbnail::prepareGenericImage(int size) {
 	result.setDevicePixelRatio(ratio);
 
 	auto p = QPainter(&result);
-	PainterHighQualityEnabler hq(p);
+	auto hq = PainterHighQualityEnabler(p);
 	p.setPen(Qt::NoPen);
 	p.setBrush(_generic.color);
 	p.drawRoundedRect(
@@ -990,6 +1108,28 @@ std::shared_ptr<DynamicImage> MakeDocumentFilePreviewThumbnail(
 	return std::make_shared<DocumentFilePreviewThumbnail>(
 		document,
 		fullId);
+}
+
+std::shared_ptr<DynamicImage> MakeGeoThumbnail(
+		not_null<Data::CloudImage*> data,
+		not_null<Main::Session*> session,
+		Data::FileOrigin origin) {
+	return std::make_shared<GeoThumbnail>(
+		data,
+		session,
+		std::move(origin),
+		false);
+}
+
+std::shared_ptr<DynamicImage> MakeGeoThumbnailWithPin(
+		not_null<Data::CloudImage*> data,
+		not_null<Main::Session*> session,
+		Data::FileOrigin origin) {
+	return std::make_shared<GeoThumbnail>(
+		data,
+		session,
+		std::move(origin),
+		true);
 }
 
 } // namespace Ui
