@@ -901,6 +901,7 @@ private:
 	rpl::event_stream<FullMsgId> _requestedToShowMessage;
 	rpl::event_stream<not_null<QKeyEvent*>> _scrollKeyEvents;
 
+	[[nodiscard]] ElementOverlayHost &ensureOverlayHost();
 	std::unique_ptr<ElementOverlayHost> _overlayHost;
 
 	rpl::lifetime _viewerLifetime;

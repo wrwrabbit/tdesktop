@@ -370,10 +370,7 @@ HistoryInner::HistoryInner(
 	[=] { mouseActionUpdate(QCursor::pos()); setCursor(_cursor); },
 	[=] { return window()->isActiveWindow(); })
 , _scrollDateCheck([this] { scrollDateCheck(); })
-, _scrollDateHideTimer([this] { scrollDateHideByTimer(); })
-, _overlayHost(std::make_unique<HistoryView::ElementOverlayHost>(
-	this,
-	[=](not_null<const Element*> view) { return itemTop(view); })) {
+, _scrollDateHideTimer([this] { scrollDateHideByTimer(); }) {
 	_history->delegateMixin()->setCurrent(this);
 	if (_migrated) {
 		_migrated->delegateMixin()->setCurrent(this);
@@ -498,7 +495,9 @@ HistoryInner::HistoryInner(
 	controller->adaptive().chatWideValue(
 	) | rpl::on_next([=](bool wide) {
 		_isChatWide = wide;
-		_overlayHost->hide();
+		if (_overlayHost) {
+			_overlayHost->hide();
+		}
 	}, lifetime());
 
 	_selectScroll.scrolls(
@@ -699,7 +698,9 @@ void HistoryInner::setupSwipeReplyAndBack() {
 			if (!canReply) {
 				return true;
 			}
-			_overlayHost->hide();
+			if (_overlayHost) {
+				_overlayHost->hide();
+			}
 			result.msgBareId = item->fullId().msg.bare;
 			result.callback = [=, itemId = item->fullId()] {
 				const auto still = show->session().data().message(itemId);
@@ -1892,7 +1893,9 @@ void HistoryInner::mousePressEvent(QMouseEvent *e) {
 		e->accept();
 		return; // ignore mouse press, that was hiding context menu
 	}
-	_overlayHost->handleClickOutside(e->pos());
+	if (_overlayHost) {
+		_overlayHost->handleClickOutside(e->pos());
+	}
 	if (_middleClickAutoscroll.active()) {
 		_middleClickAutoscroll.stop();
 		e->accept();
@@ -2203,7 +2206,9 @@ void HistoryInner::itemRemoved(not_null<const HistoryItem*> item) {
 }
 
 void HistoryInner::viewRemoved(not_null<const Element*> view) {
-	_overlayHost->viewGone(view);
+	if (_overlayHost) {
+		_overlayHost->viewGone(view);
+	}
 	const auto refresh = [&](auto &saved) {
 		if (saved == view) {
 			const auto now = viewByItem(view->data());
@@ -3667,7 +3672,7 @@ void HistoryInner::copyContextText(FullMsgId itemId) {
 }
 
 void HistoryInner::resizeEvent(QResizeEvent *e) {
-	if (e->oldSize().width() != e->size().width()) {
+	if (e->oldSize().width() != e->size().width() && _overlayHost) {
 		_overlayHost->hide();
 	}
 	mouseActionUpdate();
@@ -3984,7 +3989,9 @@ void HistoryInner::visibleAreaUpdated(int top, int bottom) {
 		_visibleAreaTop,
 		_visibleAreaBottom);
 
-	_overlayHost->updatePosition();
+	if (_overlayHost) {
+		_overlayHost->updatePosition();
+	}
 }
 
 bool HistoryInner::displayScrollDate() const {
@@ -4142,7 +4149,9 @@ void HistoryInner::leaveEventHook(QEvent *e) {
 }
 
 HistoryInner::~HistoryInner() {
-	_overlayHost->hide();
+	if (_overlayHost) {
+		_overlayHost->hide();
+	}
 	_aboutView = nullptr;
 	for (const auto &item : _animatedStickersPlayed) {
 		if (const auto view = item->mainView()) {
@@ -4265,7 +4274,7 @@ HistoryView::SelectionModeResult HistoryInner::inSelectionMode() const {
 	const auto now = inSelectionMode;
 	if (_lastInSelectionMode != now) {
 		_lastInSelectionMode = now;
-		if (now) {
+		if (now && _overlayHost) {
 			_overlayHost->hide();
 		}
 		if (_inSelectionModeAnimation.animating()) {
@@ -4317,13 +4326,24 @@ void HistoryInner::elementShowPollResults(
 	_controller->showPollResults(poll, context);
 }
 
+HistoryView::ElementOverlayHost &HistoryInner::ensureOverlayHost() {
+	if (!_overlayHost) {
+		_overlayHost = std::make_unique<HistoryView::ElementOverlayHost>(
+			this,
+			[=](not_null<const Element*> view) {
+				return itemTop(view);
+			});
+	}
+	return *_overlayHost;
+}
+
 void HistoryInner::elementShowAddPollOption(
 		not_null<HistoryView::Element*> view,
 		not_null<PollData*> poll,
 		FullMsgId context,
 		QRect optionRect) {
 	HistoryView::ShowAddPollOptionOverlay(
-		*_overlayHost,
+		ensureOverlayHost(),
 		this,
 		view,
 		poll,
@@ -4333,7 +4353,9 @@ void HistoryInner::elementShowAddPollOption(
 }
 
 void HistoryInner::elementSubmitAddPollOption(FullMsgId context) {
-	_overlayHost->triggerSubmit(context);
+	if (_overlayHost) {
+		_overlayHost->triggerSubmit(context);
+	}
 }
 
 void HistoryInner::elementOpenPhoto(

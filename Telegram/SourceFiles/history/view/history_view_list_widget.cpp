@@ -440,15 +440,9 @@ ListWidget::ListWidget(
 		[=](int d) { _delegate->listScrollTo(_visibleTop + d, false); },
 		[=](const QCursor &cursor) { setCursor(cursor); },
 		[=] { mouseActionUpdate(QCursor::pos()); setCursor(_cursor); },
-		[=] { return window()->isActiveWindow(); })
-, _overlayHost(std::make_unique<ElementOverlayHost>(
-	this,
-	[=](not_null<const Element*> view) { return itemTop(view); })) {
+		[=] { return window()->isActiveWindow(); }) {
 	setAttribute(Qt::WA_AcceptTouchEvents);
 	setMouseTracking(true);
-	_overlayHost->setHiddenCallback([=] {
-		_delegate->listWindowSetInnerFocus();
-	});
 	if (_readMetricsTracker) {
 		Core::App().inAppKeyPressed(
 		) | rpl::on_next([=] {
@@ -572,7 +566,9 @@ ListWidget::ListWidget(
 	_delegate->listChatWideValue(
 	) | rpl::on_next([=](bool wide) {
 		_isChatWide = wide;
-		_overlayHost->hide();
+		if (_overlayHost) {
+			_overlayHost->hide();
+		}
 	}, lifetime());
 
 	_selectScroll.scrolls(
@@ -1184,7 +1180,9 @@ void ListWidget::visibleTopBottomUpdated(
 	_applyUpdatedScrollState.call();
 
 	_emojiInteractions->visibleAreaUpdated(_visibleTop, _visibleBottom);
-	_overlayHost->updatePosition();
+	if (_overlayHost) {
+		_overlayHost->updatePosition();
+	}
 }
 
 void ListWidget::applyUpdatedScrollState() {
@@ -1318,7 +1316,7 @@ SelectionModeResult ListWidget::inSelectionMode() const {
 		|| (_mouseAction == MouseAction::Selecting && _lastInSelectionMode);
 	if (_lastInSelectionMode != now) {
 		_lastInSelectionMode = now;
-		if (now) {
+		if (now && _overlayHost) {
 			_overlayHost->hide();
 		}
 		if (_inSelectionModeAnimation.animating()) {
@@ -1903,13 +1901,27 @@ void ListWidget::elementShowPollResults(
 	_delegate->listShowPollResults(poll, context);
 }
 
+ElementOverlayHost &ListWidget::ensureOverlayHost() {
+	if (!_overlayHost) {
+		_overlayHost = std::make_unique<ElementOverlayHost>(
+			this,
+			[=](not_null<const Element*> view) {
+				return itemTop(view);
+			});
+		_overlayHost->setHiddenCallback([=] {
+			_delegate->listWindowSetInnerFocus();
+		});
+	}
+	return *_overlayHost;
+}
+
 void ListWidget::elementShowAddPollOption(
 		not_null<Element*> view,
 		not_null<PollData*> poll,
 		FullMsgId context,
 		QRect optionRect) {
 	ShowAddPollOptionOverlay(
-		*_overlayHost,
+		ensureOverlayHost(),
 		this,
 		view,
 		poll,
@@ -1919,11 +1931,15 @@ void ListWidget::elementShowAddPollOption(
 }
 
 void ListWidget::elementSubmitAddPollOption(FullMsgId context) {
-	_overlayHost->triggerSubmit(context);
+	if (_overlayHost) {
+		_overlayHost->triggerSubmit(context);
+	}
 }
 
 void ListWidget::hideElementOverlay() {
-	_overlayHost->hide();
+	if (_overlayHost) {
+		_overlayHost->hide();
+	}
 }
 
 void ListWidget::elementOpenPhoto(
@@ -2069,7 +2085,7 @@ void ListWidget::updateSize() {
 }
 
 void ListWidget::resizeToWidth(int newWidth, int minHeight) {
-	if (width() != newWidth) {
+	if (width() != newWidth && _overlayHost) {
 		_overlayHost->hide();
 	}
 	_minHeight = minHeight;
@@ -3109,7 +3125,9 @@ void ListWidget::mousePressEvent(QMouseEvent *e) {
 		e->accept();
 		return; // ignore mouse press, that was hiding context menu
 	}
-	_overlayHost->handleClickOutside(e->pos());
+	if (_overlayHost) {
+		_overlayHost->handleClickOutside(e->pos());
+	}
 	if (_middleClickAutoscroll.active()) {
 		_middleClickAutoscroll.stop();
 		e->accept();
@@ -4398,7 +4416,9 @@ void ListWidget::showItemHighlight(not_null<HistoryItem*> item) {
 }
 
 void ListWidget::viewReplaced(not_null<const Element*> was, Element *now) {
-	_overlayHost->viewGone(was);
+	if (_overlayHost) {
+		_overlayHost->viewGone(was);
+	}
 	if (_visibleTopItem == was) _visibleTopItem = now;
 	if (_scrollDateLastItem == was) _scrollDateLastItem = now;
 	if (_overElement == was) _overElement = now;

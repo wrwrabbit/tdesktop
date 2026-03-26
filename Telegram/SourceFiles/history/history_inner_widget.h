@@ -603,6 +603,7 @@ private:
 	ClickHandlerPtr _scrollDateLink;
 	ClickHandlerPtr _forumThreadBarLink;
 
+	[[nodiscard]] HistoryView::ElementOverlayHost &ensureOverlayHost();
 	std::unique_ptr<HistoryView::ElementOverlayHost> _overlayHost;
 
 };
