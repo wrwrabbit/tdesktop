@@ -1349,6 +1349,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		rpl::event_stream<bool> addOptionsForceOff;
 		rpl::event_stream<bool> revotingForceOff;
 		rpl::event_stream<bool> quizForceOff;
+		rpl::event_stream<bool> showWhoVotedForceOn;
 		rpl::variable<int> closePeriod = 0;
 		rpl::variable<TimeId> closeDate = TimeId(0);
 		std::shared_ptr<PollMediaState> descriptionMedia
@@ -2355,7 +2356,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 				.icon = &st::pollBoxFilledPollViewIcon,
 				.background = &st::settingsIconBg4,
 			},
-			rpl::single(!!(_chosen & PollData::Flag::PublicVotes)),
+			rpl::single(!!(_chosen & PollData::Flag::PublicVotes))
+				| rpl::then(state->showWhoVotedForceOn.events()),
 			st::detailedSettingsButtonStyle)
 		: nullptr;
 	const auto multiple = AddPollToggleButton(
@@ -2597,6 +2599,22 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			options->enableChooseCorrect(true, checked);
 		}
 	}, multiple->lifetime());
+
+	if (addOptions && showWhoVoted) {
+		const auto updateShowWhoVotedLock = [=](bool openAnswers) {
+			showWhoVoted->setToggleLocked(
+				(_disabled & PollData::Flag::PublicVotes)
+				|| openAnswers);
+			if (openAnswers) {
+				state->showWhoVotedForceOn.fire(true);
+			}
+		};
+		updateShowWhoVotedLock(addOptions->toggled());
+		addOptions->toggledChanges(
+		) | rpl::on_next([=](bool checked) {
+			updateShowWhoVotedLock(checked);
+		}, addOptions->lifetime());
+	}
 
 	const auto isValidQuestion = [=] {
 		const auto text = question->getLastText().trimmed();
