@@ -554,15 +554,22 @@ QSize Poll::countOptimalSize() {
 			+ st::historyPollAnswerPadding.right());
 	}
 
+	const auto show = showVotes();
 	const auto answersHeight = ranges::accumulate(ranges::views::all(
 		_answers
-	) | ranges::views::transform([](const Answer &answer) {
+	) | ranges::views::transform([show](const Answer &answer) {
 		const auto media = answer.thumbnail ? PollAnswerMediaSize() : 0;
 		const auto &padding = answer.thumbnail
 			? st::historyPollAnswerPadding
 			: st::historyPollAnswerPaddingNoMedia;
+		const auto fillingWithChoice = show
+			? (st::historyPollPercentFont->height
+				+ st::historyPollFillingTop
+				+ (st::historyPollFillingHeight
+					+ st::historyPollChoiceRight.height()) / 2)
+			: 0;
 		return padding.top()
-			+ std::max(answer.text.minHeight(), media)
+			+ std::max({ answer.text.minHeight(), media, fillingWithChoice })
 			+ padding.bottom();
 	}), 0);
 
@@ -704,8 +711,18 @@ int Poll::countAnswerHeight(
 	const auto &padding = answer.thumbnail
 		? st::historyPollAnswerPadding
 		: st::historyPollAnswerPaddingNoMedia;
+	const auto fillingWithChoice = showVotes()
+		? (st::historyPollPercentFont->height
+			+ st::historyPollFillingTop
+			+ (st::historyPollFillingHeight
+				+ st::historyPollChoiceRight.height()) / 2)
+		: 0;
 	return padding.top()
-		+ std::max(answer.text.countHeight(textWidth), media)
+		+ std::max({
+			answer.text.countHeight(textWidth),
+			media,
+			fillingWithChoice,
+		})
 		+ padding.bottom();
 }
 
