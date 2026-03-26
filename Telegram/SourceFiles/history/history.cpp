@@ -49,6 +49,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document.h"
 #include "data/data_histories.h"
 #include "data/data_history_messages.h"
+#include "api/api_text_entities.h"
+#include "data/data_poll.h"
 #include "data/data_todo_list.h"
 #include "lang/lang_keys.h"
 #include "apiwrap.h"
@@ -1426,6 +1428,41 @@ void History::applyServiceChanges(
 			if (const auto media = list ? list->media() : nullptr) {
 				if (const auto todolist = media->todolist()) {
 					todolist->apply(data);
+				}
+			}
+		}
+	}, [&](const MTPDmessageActionPollAppendAnswer &data) {
+		if (const auto append = item->Get<HistoryServicePollAppendAnswer>()) {
+			const auto list = append->msg
+				? append->msg
+				: owner().message(peer, append->msgId);
+			if (const auto media = list ? list->media() : nullptr) {
+				if (const auto poll = media->poll()) {
+					data.vanswer().match([&](const MTPDpollAnswer &answer) {
+						auto parsed = PollAnswer();
+						parsed.option = answer.voption().v;
+						parsed.text = Api::ParseTextWithEntities(
+							&session(),
+							answer.vtext());
+						if (!poll->answerByOption(parsed.option)) {
+							poll->answers.push_back(std::move(parsed));
+						}
+					}, [](const auto &) {});
+				}
+			}
+		}
+	}, [&](const MTPDmessageActionPollDeleteAnswer &data) {
+		if (const auto del = item->Get<HistoryServicePollDeleteAnswer>()) {
+			const auto list = del->msg
+				? del->msg
+				: owner().message(peer, del->msgId);
+			if (const auto media = list ? list->media() : nullptr) {
+				if (const auto poll = media->poll()) {
+					const auto option = del->answer.option;
+					auto &answers = poll->answers;
+					answers.erase(
+						ranges::remove(answers, option, &PollAnswer::option),
+						end(answers));
 				}
 			}
 		}

@@ -866,6 +866,8 @@ HistoryServiceDependentData *HistoryItem::GetServiceDependentData() {
 		return done;
 	} else if (const auto append = Get<HistoryServiceTodoAppendTasks>()) {
 		return append;
+	} else if (const auto poll = Get<HistoryServicePollAppendAnswer>()) {
+		return poll;
 	} else if (const auto decision = Get<HistoryServiceSuggestDecision>()) {
 		return decision;
 	} else if (const auto finish = Get<HistoryServiceSuggestFinish>()) {
@@ -931,6 +933,8 @@ void HistoryItem::updateDependentServiceText() {
 		updateServiceText(prepareTodoCompletionsText());
 	} else if (Has<HistoryServiceTodoAppendTasks>()) {
 		updateServiceText(prepareTodoAppendTasksText());
+	} else if (Has<HistoryServicePollAppendAnswer>()) {
+		updateServiceText(preparePollAppendAnswerText());
 	}
 }
 
@@ -947,6 +951,7 @@ void HistoryItem::updateServiceDependent(bool force) {
 
 	if (!dependent->lnk) {
 		auto todoItemId = 0;
+		auto pollOption = QByteArray();
 		if (const auto done = Get<HistoryServiceTodoCompletions>()) {
 			const auto &items = !done->completed.empty()
 				? done->completed
@@ -958,6 +963,10 @@ void HistoryItem::updateServiceDependent(bool force) {
 			if (append->list.size() == 1) {
 				todoItemId = append->list.front().id;
 			}
+		} else if (const auto pa = Get<HistoryServicePollAppendAnswer>()) {
+			pollOption = pa->answer.option;
+		} else if (const auto pd = Get<HistoryServicePollDeleteAnswer>()) {
+			pollOption = pd->answer.option;
 		}
 		dependent->lnk = JumpToMessageClickHandler(
 			(dependent->peerId
@@ -965,7 +974,7 @@ void HistoryItem::updateServiceDependent(bool force) {
 				: _history->peer),
 			dependent->msgId,
 			fullId(),
-			{ .todoItemId = todoItemId });
+			{ .todoItemId = todoItemId, .pollOption = pollOption });
 	}
 	auto gotDependencyItem = false;
 	if (!dependent->msg) {
@@ -4490,6 +4499,7 @@ void HistoryItem::createComponentsHelper(HistoryItemCommonFields &&fields) {
 			? replyTo.monoforumPeerId
 			: PeerId();
 		config.reply.todoItemId = replyTo.todoItemId;
+		config.reply.pollOption = replyTo.pollOption;
 		const auto replyToTop = replyTo.topicRootId
 			? replyTo.topicRootId
 			: LookupReplyToTop(_history, to);
@@ -4960,6 +4970,28 @@ void HistoryItem::createServiceFromMtp(const MTPDmessageService &message) {
 		) | ranges::views::transform([&](const MTPTodoItem &item) {
 			return TodoListItemFromMTP(session, item);
 		}) | ranges::to_vector;
+	} else if (type == mtpc_messageActionPollAppendAnswer) {
+		const auto &data = action.c_messageActionPollAppendAnswer();
+		UpdateComponents(HistoryServicePollAppendAnswer::Bit());
+		const auto append = Get<HistoryServicePollAppendAnswer>();
+		data.vanswer().match([&](const MTPDpollAnswer &answer) {
+			append->answer.option = answer.voption().v;
+			append->answer.text = Api::ParseTextWithEntities(
+				&_history->session(),
+				answer.vtext());
+		}, [](const auto &) {
+		});
+	} else if (type == mtpc_messageActionPollDeleteAnswer) {
+		const auto &data = action.c_messageActionPollDeleteAnswer();
+		UpdateComponents(HistoryServicePollDeleteAnswer::Bit());
+		const auto del = Get<HistoryServicePollDeleteAnswer>();
+		data.vanswer().match([&](const MTPDpollAnswer &answer) {
+			del->answer.option = answer.voption().v;
+			del->answer.text = Api::ParseTextWithEntities(
+				&_history->session(),
+				answer.vtext());
+		}, [](const auto &) {
+		});
 	} else if (type == mtpc_messageActionSuggestedPostApproval) {
 		const auto &data = action.c_messageActionSuggestedPostApproval();
 		UpdateComponents(HistoryServiceSuggestDecision::Bit());
@@ -6577,6 +6609,14 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 		return prepareTodoAppendTasksText();
 	};
 
+	auto preparePollAppendAnswer = [&](const MTPDmessageActionPollAppendAnswer &) {
+		return preparePollAppendAnswerText();
+	};
+
+	auto preparePollDeleteAnswer = [&](const MTPDmessageActionPollDeleteAnswer &) {
+		return preparePollDeleteAnswerText();
+	};
+
 	auto prepareSuggestedPostApproval = [&](const MTPDmessageActionSuggestedPostApproval &data) {
 		return PreparedServiceText{ { data.is_rejected()
 			? tr::lng_action_post_rejected(tr::now)
@@ -6863,6 +6903,7 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 		prepareConferenceCall,
 		prepareTodoCompletions,
 		prepareTodoAppendTasks,
+		preparePollAppendAnswer,
 		prepareSuggestedPostApproval,
 		prepareSuggestedPostSuccess,
 		prepareSuggestedPostRefund,
@@ -6875,7 +6916,7 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 		prepareNoForwardsRequest,
 		prepareManagedBotCreated,
 		PrepareEmptyText<MTPDmessageActionPollAppendAnswer>,
-		PrepareEmptyText<MTPDmessageActionPollDeleteAnswer>,
+		preparePollDeleteAnswer,
 		PrepareEmptyText<MTPDmessageActionRequestedPeerSentMe>,
 		PrepareErrorText<MTPDmessageActionEmpty>));
 
@@ -7659,6 +7700,58 @@ PreparedServiceText HistoryItem::prepareTodoAppendTasksText() {
 		.links = { fromLink() },
 	};
 	return result;
+}
+
+PreparedServiceText HistoryItem::preparePollAppendAnswerText() {
+	const auto append = Get<HistoryServicePollAppendAnswer>();
+	const auto option = append
+		? append->answer.text.text
+		: QString();
+	if (out()) {
+		return {
+			tr::lng_action_poll_added_answer_self(
+				tr::now,
+				lt_option,
+				{ option },
+				tr::marked),
+		};
+	}
+	return {
+		.text = tr::lng_action_poll_added_answer(
+			tr::now,
+			lt_from,
+			fromLinkText(),
+			lt_option,
+			{ option },
+			tr::marked),
+		.links = { fromLink() },
+	};
+}
+
+PreparedServiceText HistoryItem::preparePollDeleteAnswerText() {
+	const auto del = Get<HistoryServicePollDeleteAnswer>();
+	const auto option = del
+		? del->answer.text.text
+		: QString();
+	if (out()) {
+		return {
+			tr::lng_action_poll_deleted_answer_self(
+				tr::now,
+				lt_option,
+				{ option },
+				tr::marked),
+		};
+	}
+	return {
+		.text = tr::lng_action_poll_deleted_answer(
+			tr::now,
+			lt_from,
+			fromLinkText(),
+			lt_option,
+			{ option },
+			tr::marked),
+		.links = { fromLink() },
+	};
 }
 
 TextWithEntities HistoryItem::fromLinkText() const {

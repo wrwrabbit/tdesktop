@@ -1803,6 +1803,8 @@ ServiceAction ParseServiceAction(
 				| ranges::views::transform(ParseTodoListItem)
 				| ranges::to_vector,
 		};
+	}, [&](const MTPDmessageActionPollAppendAnswer &data) {
+		result.content = ActionPollAppendAnswer{};
 	}, [&](const MTPDmessageActionSuggestedPostApproval &data) {
 		result.content = ActionSuggestedPostApproval{
 			.rejectComment = data.vreject_comment().value_or_empty(),
@@ -1879,7 +1881,23 @@ ServiceAction ParseServiceAction(
 		content.botId = data.vbot_id().v;
 		result.content = content;
 	}, [&](const MTPDmessageActionPollAppendAnswer &data) {
+		auto content = ActionPollAppendAnswer();
+		data.vanswer().match([&](const MTPDpollAnswer &answer) {
+			content.option = ParseString(answer.vtext().match(
+				[](const MTPDtextWithEntities &d) {
+					return d.vtext();
+				}));
+		}, [](const auto &) {});
+		result.content = content;
 	}, [&](const MTPDmessageActionPollDeleteAnswer &data) {
+		auto content = ActionPollDeleteAnswer();
+		data.vanswer().match([&](const MTPDpollAnswer &answer) {
+			content.option = ParseString(answer.vtext().match(
+				[](const MTPDtextWithEntities &d) {
+					return d.vtext();
+				}));
+		}, [](const auto &) {});
+		result.content = content;
 	}, [](const MTPDmessageActionEmpty &data) {});
 	return result;
 }

@@ -718,6 +718,14 @@ struct ActionTodoAppendTasks {
 	std::vector<TodoListItem> items;
 };
 
+struct ActionPollAppendAnswer {
+	Utf8String option;
+};
+
+struct ActionPollDeleteAnswer {
+	Utf8String option;
+};
+
 struct ActionSuggestedPostApproval {
 	Utf8String rejectComment;
 	TimeId scheduleDate = 0;
@@ -809,6 +817,8 @@ struct ServiceAction {
 		ActionPaidMessagesPrice,
 		ActionTodoCompletions,
 		ActionTodoAppendTasks,
+		ActionPollAppendAnswer,
+		ActionPollDeleteAnswer,
 		ActionSuggestedPostApproval,
 		ActionSuggestedPostSuccess,
 		ActionSuggestedPostRefund,

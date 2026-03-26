@@ -2528,6 +2528,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_action_todo_marked_not_done_self" = "You marked {tasks} as not done.";
 "lng_action_todo_added" = "{from} added {tasks} to the list.";
 "lng_action_todo_added_self" = "You added {tasks} to the list.";
+"lng_action_poll_added_answer" = "{from} added \"{option}\" to the poll.";
+"lng_action_poll_added_answer_self" = "You added \"{option}\" to the poll.";
+"lng_action_poll_deleted_answer" = "{from} removed \"{option}\" from the poll.";
+"lng_action_poll_deleted_answer_self" = "You removed \"{option}\" from the poll.";
 "lng_action_todo_tasks_fallback#one" = "task";
 "lng_action_todo_tasks_fallback#other" = "{count} tasks";
 "lng_action_todo_tasks_and_one" = "{tasks}, {task}";

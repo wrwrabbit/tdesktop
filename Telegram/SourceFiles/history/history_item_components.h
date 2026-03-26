@@ -722,6 +722,18 @@ struct HistoryServiceTodoAppendTasks
 [[nodiscard]] TextWithEntities ComposeTodoTasksList(
 	not_null<HistoryServiceTodoAppendTasks*> append);
 
+struct HistoryServicePollAppendAnswer
+: RuntimeComponent<HistoryServicePollAppendAnswer, HistoryItem>
+, HistoryServiceDependentData {
+	PollAnswer answer;
+};
+
+struct HistoryServicePollDeleteAnswer
+: RuntimeComponent<HistoryServicePollDeleteAnswer, HistoryItem>
+, HistoryServiceDependentData {
+	PollAnswer answer;
+};
+
 struct HistoryServiceSuggestDecision
 : RuntimeComponent<HistoryServiceSuggestDecision, HistoryItem>
 , HistoryServiceDependentData {

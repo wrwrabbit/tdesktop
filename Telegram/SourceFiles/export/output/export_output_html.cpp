@@ -1501,6 +1501,14 @@ auto HtmlWriter::Wrap::pushMessage(
 				+ "&quot;");
 		}
 		return serviceFrom + " added tasks: " + tasks.join(", ");
+	}, [&](const ActionPollAppendAnswer &data) {
+		return serviceFrom + " added &quot;"
+			+ data.option
+			+ "&quot; to the poll.";
+	}, [&](const ActionPollDeleteAnswer &data) {
+		return serviceFrom + " removed &quot;"
+			+ data.option
+			+ "&quot; from the poll.";
 	}, [&](const ActionSuggestedPostApproval &data) {
 		return serviceFrom
 			+ (data.rejected ? " rejected " : " approved ")

@@ -711,6 +711,14 @@ QByteArray SerializeMessage(
 			return result;
 		}) | ranges::to_vector;
 		pushBare("items", SerializeArray(context, items));
+	}, [&](const ActionPollAppendAnswer &data) {
+		pushActor();
+		pushAction("poll_append_answer");
+		push("option", data.option);
+	}, [&](const ActionPollDeleteAnswer &data) {
+		pushActor();
+		pushAction("poll_delete_answer");
+		push("option", data.option);
 	}, [&](const ActionSuggestedPostApproval &data) {
 		pushActor();
 		pushAction("process_suggested_post");
