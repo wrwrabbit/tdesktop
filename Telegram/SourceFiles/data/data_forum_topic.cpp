@@ -431,6 +431,7 @@ void ForumTopic::applyTopic(const MTPDforumTopic &data) {
 		applyTopicTopMessage(data.vtop_message().v);
 		unreadMentions().setCount(data.vunread_mentions_count().v);
 		unreadReactions().setCount(data.vunread_reactions_count().v);
+		unreadPollVotes().setCount(data.vunread_poll_votes_count().v);
 	}
 }
 
