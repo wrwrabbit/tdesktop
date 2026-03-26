@@ -7782,6 +7782,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_ai_compose_original" = "Original";
 "lng_ai_compose_result" = "Result";
 "lng_ai_compose_to_language" = "To {language}";
+"lng_ai_compose_name_style" = "{name} ({style})";
+"lng_ai_compose_style_neutral" = "Neutral";
 "lng_ai_compose_emojify" = "emojify";
 "lng_ai_compose_error" = "AI request failed.";
 "lng_ai_compose_tooltip" = "Rewrite, translate, or correct your text using AI.";

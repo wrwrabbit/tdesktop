@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_premium.h"
 #include "spellcheck/platform/platform_language.h"
 #include "ui/boxes/choose_language_box.h"
+#include "ui/controls/labeled_emoji_tabs.h"
 #include "ui/controls/send_button.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/effects/skeleton_animation.h"
@@ -37,7 +38,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/labels.h"
-#include "ui/widgets/scroll_area.h"
 #include "ui/emoji_config.h"
 #include "styles/style_basic.h"
 #include "styles/style_boxes.h"
@@ -47,8 +47,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <algorithm>
 #include <array>
-
-#include <QtWidgets/QScrollBar>
 
 namespace HistoryView::Controls {
 namespace {
@@ -75,16 +73,16 @@ enum class CardState {
 }
 
 [[nodiscard]] QString ToneTitle(const QString &key) {
+	if (key.isEmpty()) {
+		return QString();
+	}
 	const auto value = Lang::GetNonDefaultValue(
 		QByteArray("cloud_lng_ai_compose_style_") + key.toUtf8());
 	if (!value.isEmpty()) {
 		return value;
 	}
-	if (key.isEmpty()) {
-		return QString();
-	}
 	auto result = key;
-	result[0] = result[0].toUpper();
+	result[0] = result[0].toTitleCase();
 	return result;
 }
 
@@ -145,11 +143,22 @@ enum class CardState {
 	return tr::lng_ai_compose_original(tr::now);
 }
 
-[[nodiscard]] TextWithEntities ToTitle(LanguageId id) {
+[[nodiscard]] TextWithEntities ToTitle(
+		LanguageId id,
+		const QString &style) {
+	const auto name = style.isEmpty()
+		? tr::link(Ui::LanguageName(id))
+		: tr::link(tr::lng_ai_compose_name_style(
+			tr::now,
+			lt_name,
+			tr::marked(Ui::LanguageName(id)),
+			lt_style,
+			tr::marked(style),
+			tr::marked));
 	return tr::lng_ai_compose_to_language(
 		tr::now,
 		lt_language,
-		tr::link(Ui::LanguageName(id)),
+		name,
 		tr::marked);
 }
 
@@ -193,10 +202,6 @@ enum class CardState {
 	return height / 2.;
 }
 
-[[nodiscard]] qreal ComposeAiStyleRadius() {
-	return st::aiComposeStyleTabsRadius;
-}
-
 [[nodiscard]] QColor ComposeAiActiveBackgroundColor(
 		const style::color &color) {
 	return ComposeAiColorWithAlpha(
@@ -212,34 +217,66 @@ enum class CardState {
 		opacity);
 }
 
-struct StyleDescriptor {
-	QString key;
-	EmojiPtr emojiPtr = nullptr;
-	QString customEmojiData;
-};
+[[nodiscard]] std::optional<Ui::LabeledEmojiTab> ResolveStyleDescriptor(
+		not_null<Main::Session*> session,
+		QString id,
+		QString label,
+		const QString &emoji) {
+	const auto found = Ui::Emoji::Find(emoji);
+	if (!found) {
+		return std::nullopt;
+	}
+	auto result = Ui::LabeledEmojiTab{
+		.id = std::move(id),
+		.label = std::move(label),
+		.emoji = found,
+	};
+	const auto sticker = session->emojiStickersPack().stickerForEmoji(found);
+	if (sticker.document) {
+		result.customEmojiData = Data::SerializeCustomEmojiId(sticker.document);
+	}
+	return result;
+}
 
-[[nodiscard]] std::vector<StyleDescriptor> ResolveStyleDescriptors(
+[[nodiscard]] std::vector<Ui::LabeledEmojiTab> ResolveStyleDescriptors(
 		not_null<Main::Session*> session,
 		const std::vector<Main::AppConfig::AiComposeStyle> &styles) {
-	auto result = std::vector<StyleDescriptor>();
+	auto result = std::vector<Ui::LabeledEmojiTab>();
 	result.reserve(styles.size());
 	for (const auto &style : styles) {
-		const auto e = Ui::Emoji::Find(style.emoji);
-		if (!e) {
-			continue;
+		if (const auto descriptor = ResolveStyleDescriptor(
+				session,
+				style.key,
+				ToneTitle(style.key),
+				style.emoji)) {
+			result.push_back(*descriptor);
 		}
-		auto descriptor = StyleDescriptor{
-			.key = style.key,
-			.emojiPtr = e,
-		};
-		const auto sticker
-			= session->emojiStickersPack().stickerForEmoji(e);
-		if (sticker.document) {
-			descriptor.customEmojiData
-				= Data::SerializeCustomEmojiId(sticker.document);
-		}
-		result.push_back(std::move(descriptor));
 	}
+	return result;
+}
+
+[[nodiscard]] std::vector<Ui::LabeledEmojiTab> ResolveTranslateStyleDescriptors(
+		not_null<Main::Session*> session,
+		const std::vector<Ui::LabeledEmojiTab> &styles) {
+	auto result = std::vector<Ui::LabeledEmojiTab>();
+	result.reserve(styles.size() + 1);
+	const auto neutralEmoji = QString::fromUtf8(
+		"\xF0\x9F\x8F\xB3\xEF\xB8\x8F");
+	auto neutral = Ui::LabeledEmojiTab{
+		.id = QString(),
+		.label = tr::lng_ai_compose_style_neutral(tr::now),
+		.emoji = Ui::Emoji::Find(neutralEmoji),
+	};
+	if (neutral.emoji) {
+		const auto sticker = session->emojiStickersPack().stickerForEmoji(
+			neutral.emoji);
+		if (sticker.document) {
+			neutral.customEmojiData = Data::SerializeCustomEmojiId(
+				sticker.document);
+		}
+	}
+	result.push_back(std::move(neutral));
+	result.insert(end(result), begin(styles), end(styles));
 	return result;
 }
 
@@ -281,81 +318,6 @@ private:
 	const not_null<ComposeAiModeButton*> _fix;
 	Fn<void(ComposeAiMode)> _changed;
 	ComposeAiMode _active = ComposeAiMode::Style;
-
-};
-
-class ComposeAiStyleButton final : public Ui::RippleButton {
-public:
-	ComposeAiStyleButton(
-		QWidget *parent,
-		StyleDescriptor descriptor,
-		Ui::Text::CustomEmojiFactory factory);
-
-	void setSelected(bool selected);
-	void setExtraPadding(int extra);
-	[[nodiscard]] const QString &styleKey() const;
-
-protected:
-	void paintEvent(QPaintEvent *e) override;
-	[[nodiscard]] QImage prepareRippleMask() const override;
-
-private:
-	const StyleDescriptor _descriptor;
-	const QString _label;
-	std::unique_ptr<Ui::Text::CustomEmoji> _custom;
-	bool _selected = false;
-	int _extraPadding = 0;
-
-};
-
-class ComposeAiStyleTabs final : public Ui::RpWidget {
-public:
-	ComposeAiStyleTabs(
-		QWidget *parent,
-		std::vector<StyleDescriptor> descriptors,
-		Ui::Text::CustomEmojiFactory factory);
-
-	void setChangedCallback(Fn<void(int)> callback);
-	void setActive(int index);
-	void resizeForOuterWidth(int outerWidth);
-	[[nodiscard]] QString currentTone() const;
-	[[nodiscard]] int buttonCount() const;
-	[[nodiscard]] rpl::producer<Ui::ScrollToRequest> requestShown() const;
-
-protected:
-	void paintEvent(QPaintEvent *e) override;
-
-private:
-	std::vector<not_null<ComposeAiStyleButton*>> _buttons;
-	Fn<void(int)> _changed;
-	int _active = -1;
-	rpl::event_stream<Ui::ScrollToRequest> _requestShown;
-
-};
-
-class ComposeAiStyleScrollTabs final : public Ui::RpWidget {
-public:
-	ComposeAiStyleScrollTabs(
-		QWidget *parent,
-		std::vector<StyleDescriptor> descriptors,
-		Ui::Text::CustomEmojiFactory factory);
-
-	[[nodiscard]] not_null<ComposeAiStyleTabs*> inner() const;
-
-protected:
-	int resizeGetHeight(int newWidth) override;
-
-private:
-	void updateFades();
-	void scrollToButton(int buttonLeft, int buttonRight);
-
-	const not_null<Ui::ScrollArea*> _scroll;
-	const not_null<ComposeAiStyleTabs*> _inner;
-	const not_null<Ui::RpWidget*> _fadeLeft;
-	const not_null<Ui::RpWidget*> _fadeRight;
-	const not_null<Ui::RpWidget*> _cornerLeft;
-	const not_null<Ui::RpWidget*> _cornerRight;
-	Ui::Animations::Simple _scrollAnimation;
 
 };
 
@@ -420,7 +382,7 @@ public:
 
 	[[nodiscard]] bool hasResult() const;
 	[[nodiscard]] const TextWithEntities &result() const;
-	[[nodiscard]] const std::vector<StyleDescriptor> &stylesData() const;
+	[[nodiscard]] const std::vector<Ui::LabeledEmojiTab> &stylesData() const;
 	void setReadyChangedCallback(Fn<void(bool)> callback);
 	void setPremiumFloodCallback(Fn<void()> callback);
 	void setModeChangedCallback(Fn<void(ComposeAiMode)> callback);
@@ -428,7 +390,7 @@ public:
 	[[nodiscard]] ComposeAiMode mode() const;
 	[[nodiscard]] bool hasStyleSelection() const;
 	void setModeTabs(not_null<ComposeAiModeTabs*> tabs);
-	void setStyleTabs(not_null<Ui::SlideWrap<ComposeAiStyleScrollTabs>*> stylesWrap);
+	void setStyleTabs(not_null<Ui::SlideWrap<Ui::LabeledEmojiScrollTabs>*> stylesWrap);
 	void start();
 
 protected:
@@ -446,16 +408,19 @@ private:
 	void applyResult(Api::ComposeWithAi::Result &&result);
 	void showError(const MTP::Error &error);
 	void notifyReadyChanged();
+	[[nodiscard]] QString currentTranslateStyle() const;
+	[[nodiscard]] QString currentTranslateStyleLabel() const;
 
 	const not_null<Ui::GenericBox*> _box;
 	const not_null<Main::Session*> _session;
 	const TextWithEntities _original;
 	const LanguageId _detectedFrom;
 	LanguageId _to;
-	const std::vector<StyleDescriptor> _stylesData;
+	const std::vector<Ui::LabeledEmojiTab> _stylesData;
+	const std::vector<Ui::LabeledEmojiTab> _translateStylesData;
 	QPointer<ComposeAiModeTabs> _tabs;
-	QPointer<ComposeAiStyleScrollTabs> _styles;
-	QPointer<Ui::SlideWrap<ComposeAiStyleScrollTabs>> _stylesWrap;
+	QPointer<Ui::LabeledEmojiScrollTabs> _styles;
+	QPointer<Ui::SlideWrap<Ui::LabeledEmojiScrollTabs>> _stylesWrap;
 	const not_null<ComposeAiPreviewCard*> _preview;
 	Fn<void(bool)> _readyChanged;
 	Fn<void()> _premiumFlood;
@@ -463,6 +428,7 @@ private:
 	Fn<void()> _styleSelected;
 	ComposeAiMode _mode = ComposeAiMode::Style;
 	int _styleIndex = -1;
+	int _translateStyleIndex = 0;
 	bool _emojify = false;
 	CardState _state = CardState::Waiting;
 	mtpRequestId _requestId = 0;
@@ -616,433 +582,6 @@ void ComposeAiModeTabs::paintEvent(QPaintEvent *e) {
 		rect(),
 		radius,
 		radius);
-}
-
-// ComposeAiStyleButton
-
-ComposeAiStyleButton::ComposeAiStyleButton(
-	QWidget *parent,
-	StyleDescriptor descriptor,
-	Ui::Text::CustomEmojiFactory factory)
-: RippleButton(parent, st::aiComposeButtonRippleInactive)
-, _descriptor(std::move(descriptor))
-, _label(ToneTitle(_descriptor.key))
-, _custom(!_descriptor.customEmojiData.isEmpty() && factory
-	? factory(
-		_descriptor.customEmojiData,
-		{ .repaint = [this] { update(); } })
-	: nullptr) {
-	setCursor(style::cur_pointer);
-	setNaturalWidth([&] {
-		const auto padding = st::aiComposeStyleButtonPadding;
-		const auto labelWidth = st::aiComposeStyleLabelFont->width(_label);
-		const auto emojiWidth = Ui::Emoji::GetSizeLarge()
-			/ style::DevicePixelRatio();
-		return padding.left()
-			+ std::max(labelWidth, emojiWidth)
-			+ padding.right();
-	}());
-	setExtraPadding(0);
-}
-
-void ComposeAiStyleButton::setSelected(bool selected) {
-	if (_selected == selected) {
-		return;
-	}
-	_selected = selected;
-	update();
-}
-
-void ComposeAiStyleButton::setExtraPadding(int extra) {
-	_extraPadding = extra;
-	resize(naturalWidth() + 2 * extra, height());
-}
-
-const QString &ComposeAiStyleButton::styleKey() const {
-	return _descriptor.key;
-}
-
-void ComposeAiStyleButton::paintEvent(QPaintEvent *e) {
-	Painter p(this);
-	PainterHighQualityEnabler hq(p);
-
-	const auto radius = ComposeAiStyleRadius();
-	if (_selected) {
-		p.setPen(Qt::NoPen);
-		p.setBrush(ComposeAiActiveBackgroundColor(
-			st::aiComposeStyleButtonBgActive));
-		p.drawRoundedRect(
-			rect(),
-			radius,
-			radius);
-	}
-	const auto ripple = ComposeAiRippleColor(
-		_selected
-			? st::aiComposeButtonRippleActive
-			: st::aiComposeButtonRippleInactive,
-		_selected
-			? st::aiComposeButtonRippleActiveOpacity
-			: st::aiComposeButtonRippleInactiveOpacity);
-	paintRipple(p, 0, 0, &ripple);
-
-	if (_custom) {
-		const auto size = Ui::Emoji::GetSizeLarge()
-			/ style::DevicePixelRatio();
-		const auto adjusted = Ui::Text::AdjustCustomEmojiSize(size);
-		const auto skip = (size - adjusted) / 2;
-		const auto left = (width() - size) / 2;
-		_custom->paint(p, {
-			.textColor = (_selected
-				? st::aiComposeStyleLabelFgActive
-				: st::aiComposeStyleLabelFg)->c,
-			.now = crl::now(),
-			.position = {
-				left + skip,
-				st::aiComposeStyleEmojiTop + skip,
-			},
-		});
-	} else {
-		const auto size = Ui::Emoji::GetSizeLarge()
-			/ style::DevicePixelRatio();
-		const auto left = (width() - size) / 2;
-		Ui::Emoji::Draw(
-			p,
-			_descriptor.emojiPtr,
-			Ui::Emoji::GetSizeLarge(),
-			left,
-			st::aiComposeStyleEmojiTop);
-	}
-
-	p.setPen(_selected
-		? st::aiComposeStyleLabelFgActive
-		: st::aiComposeStyleLabelFg);
-	p.setFont(st::aiComposeStyleLabelFont);
-	p.drawText(
-		QRect(
-			0,
-			st::aiComposeStyleLabelTop,
-			width(),
-			height() - st::aiComposeStyleLabelTop),
-		Qt::AlignHCenter | Qt::AlignTop,
-		_label);
-}
-
-QImage ComposeAiStyleButton::prepareRippleMask() const {
-	return Ui::RippleAnimation::MaskByDrawer(size(), false, [&](QPainter &p) {
-		p.setPen(Qt::NoPen);
-		p.setBrush(Qt::white);
-		const auto radius = ComposeAiStyleRadius();
-		p.drawRoundedRect(
-			rect(),
-			radius,
-			radius);
-	});
-}
-
-// ComposeAiStyleTabs
-
-ComposeAiStyleTabs::ComposeAiStyleTabs(
-	QWidget *parent,
-	std::vector<StyleDescriptor> descriptors,
-	Ui::Text::CustomEmojiFactory factory)
-: RpWidget(parent) {
-	_buttons.reserve(descriptors.size());
-	for (auto &descriptor : descriptors) {
-		const auto button = Ui::CreateChild<ComposeAiStyleButton>(
-			this,
-			std::move(descriptor),
-			factory);
-		button->setClickedCallback([=] {
-			const auto i = ranges::find(_buttons, not_null(button));
-			const auto index = int(i - begin(_buttons));
-			if (index == _buttons.size()) {
-				return;
-			}
-			setActive(index);
-			_requestShown.fire({
-				_buttons[index]->x(),
-				_buttons[index]->x() + _buttons[index]->width(),
-			});
-			if (_changed) {
-				_changed(index);
-			}
-		});
-		_buttons.push_back(button);
-	}
-	setNaturalWidth([&] {
-		const auto padding = st::aiComposeStyleTabsPadding;
-		const auto skip = st::aiComposeStyleTabsSkip;
-		auto total = padding.left();
-		for (const auto button : _buttons) {
-			total += button->naturalWidth() + skip;
-		}
-		return total - skip + padding.right();
-	}());
-	setActive(-1);
-}
-
-void ComposeAiStyleTabs::setChangedCallback(Fn<void(int)> callback) {
-	_changed = std::move(callback);
-}
-
-void ComposeAiStyleTabs::setActive(int index) {
-	if (index < -1 || index >= int(_buttons.size())) {
-		return;
-	}
-	_active = index;
-	for (auto i = 0; i != int(_buttons.size()); ++i) {
-		_buttons[i]->setSelected(i == index);
-	}
-}
-
-void ComposeAiStyleTabs::resizeForOuterWidth(int outerWidth) {
-	const auto count = int(_buttons.size());
-	const auto padding = st::aiComposeStyleTabsPadding;
-	const auto skip = st::aiComposeStyleTabsSkip;
-	const auto bheight = st::aiComposeStyleTabsHeight
-		- padding.top()
-		- padding.bottom();
-	const auto height = st::aiComposeStyleTabsHeight;
-	auto left = padding.left();
-	const auto guard = gsl::finally([&] {
-		resize(left - skip + padding.right(), height);
-	});
-	if (!count) {
-		return;
-	}
-	const auto setExtraPaddingFor = [&](
-			not_null<ComposeAiStyleButton*> button,
-			int value) {
-		button->setExtraPadding(value);
-
-		const auto w = button->width();
-		button->setGeometry(left, padding.top(), w, bheight);
-		left += w + skip;
-	};
-	const auto diff = naturalWidth() - outerWidth;
-	if (diff > 0) {
-		auto total = left;
-		for (auto fit = 0; fit != count;) {
-			const auto width = _buttons[fit]->naturalWidth();
-			const auto tooLarge = (total + (width / 2) > outerWidth);
-			if (!tooLarge) {
-				++fit;
-				total += width + skip;
-			}
-			if (tooLarge || (fit == count)) {
-				if (fit > 0) {
-					const auto width = _buttons[fit - 1]->naturalWidth();
-					const auto desired = total - skip - (width / 2);
-					const auto add = outerWidth - desired;
-					const auto extra = add / ((fit - 1) * 2 + 1);
-					for (const auto &button : _buttons) {
-						setExtraPaddingFor(button, extra);
-					}
-				} else {
-					for (const auto &button : _buttons) {
-						setExtraPaddingFor(button, 0);
-					}
-				}
-				return;
-			}
-		}
-		Unexpected("Tabs width inconsistency.");
-	} else {
-		const auto add = -diff / 2;
-		const auto each = add / _buttons.size();
-		const auto more = add - (each * _buttons.size());
-		for (auto i = 0; i < more; ++i) {
-			setExtraPaddingFor(_buttons[i], each + 1);
-		}
-		for (auto i = more; i < count; ++i) {
-			setExtraPaddingFor(_buttons[i], each);
-		}
-	}
-}
-
-QString ComposeAiStyleTabs::currentTone() const {
-	return (_active >= 0 && _active < int(_buttons.size()))
-		? _buttons[_active]->styleKey()
-		: QString();
-}
-
-int ComposeAiStyleTabs::buttonCount() const {
-	return int(_buttons.size());
-}
-
-rpl::producer<Ui::ScrollToRequest> ComposeAiStyleTabs::requestShown() const {
-	return _requestShown.events();
-}
-
-void ComposeAiStyleTabs::paintEvent(QPaintEvent *e) {
-	Painter p(this);
-	PainterHighQualityEnabler hq(p);
-	p.setPen(Qt::NoPen);
-	p.setBrush(st::aiComposeStyleTabsBg);
-	const auto radius = ComposeAiStyleRadius();
-	p.drawRoundedRect(
-		rect(),
-		radius,
-		radius);
-}
-
-ComposeAiStyleScrollTabs::ComposeAiStyleScrollTabs(
-	QWidget *parent,
-	std::vector<StyleDescriptor> descriptors,
-	Ui::Text::CustomEmojiFactory factory)
-: RpWidget(parent)
-, _scroll(Ui::CreateChild<Ui::ScrollArea>(
-	this,
-	st::aiComposeStyleTabsScroll))
-, _inner(_scroll->setOwnedWidget(
-	object_ptr<ComposeAiStyleTabs>(
-		this,
-		std::move(descriptors),
-		std::move(factory))))
-, _fadeLeft(Ui::CreateChild<Ui::RpWidget>(this))
-, _fadeRight(Ui::CreateChild<Ui::RpWidget>(this))
-, _cornerLeft(Ui::CreateChild<Ui::RpWidget>(this))
-, _cornerRight(Ui::CreateChild<Ui::RpWidget>(this)) {
-	_scroll->setCustomWheelProcess([=](not_null<QWheelEvent*> e) {
-		const auto pixelDelta = e->pixelDelta();
-		const auto angleDelta = e->angleDelta();
-		if (std::abs(pixelDelta.x()) + std::abs(angleDelta.x())) {
-			return false;
-		}
-		const auto y = pixelDelta.y() ? pixelDelta.y() : angleDelta.y();
-		_scrollAnimation.stop();
-		_scroll->scrollToX(_scroll->scrollLeft() - y);
-		return true;
-	});
-
-	const auto setupFade = [&](
-			not_null<Ui::RpWidget*> fade,
-			bool left) {
-		fade->setAttribute(Qt::WA_TransparentForMouseEvents);
-		fade->paintRequest(
-		) | rpl::on_next([=] {
-			auto p = QPainter(fade);
-			const auto w = fade->width();
-			const auto bg = st::aiComposeStyleTabsBg->c;
-			auto transparent = bg;
-			transparent.setAlpha(0);
-			auto gradient = QLinearGradient(0, 0, w, 0);
-			if (left) {
-				gradient.setColorAt(0., bg);
-				gradient.setColorAt(1., transparent);
-			} else {
-				gradient.setColorAt(0., transparent);
-				gradient.setColorAt(1., bg);
-			}
-			p.fillRect(fade->rect(), gradient);
-		}, fade->lifetime());
-		fade->hide();
-	};
-	setupFade(_fadeLeft, true);
-	setupFade(_fadeRight, false);
-
-	const auto setupCorner = [&](
-			not_null<Ui::RpWidget*> corner,
-			bool left) {
-		corner->setAttribute(Qt::WA_TransparentForMouseEvents);
-		corner->paintRequest(
-		) | rpl::on_next([=] {
-			auto p = QPainter(corner);
-			PainterHighQualityEnabler hq(p);
-			const auto w = corner->width();
-			const auto h = corner->height();
-			auto mask = QPainterPath();
-			mask.addRect(0, 0, w, h);
-			auto rounded = QPainterPath();
-			if (left) {
-				rounded.addRoundedRect(0, 0, w * 2, h, w, w);
-			} else {
-				rounded.addRoundedRect(-w, 0, w * 2, h, w, w);
-			}
-			p.setPen(Qt::NoPen);
-			p.setBrush(st::boxDividerBg);
-			p.drawPath(mask.subtracted(rounded));
-		}, corner->lifetime());
-	};
-	setupCorner(_cornerLeft, true);
-	setupCorner(_cornerRight, false);
-
-	_scroll->scrolls(
-	) | rpl::on_next([=] {
-		updateFades();
-	}, lifetime());
-
-	rpl::combine(
-		widthValue(),
-		_scroll->widthValue(),
-		_inner->widthValue()
-	) | rpl::on_next([=] {
-		updateFades();
-	}, lifetime());
-
-	_inner->requestShown(
-	) | rpl::on_next([=](Ui::ScrollToRequest request) {
-		scrollToButton(request.ymin, request.ymax);
-	}, lifetime());
-}
-
-not_null<ComposeAiStyleTabs*> ComposeAiStyleScrollTabs::inner() const {
-	return _inner;
-}
-
-int ComposeAiStyleScrollTabs::resizeGetHeight(int newWidth) {
-	_scroll->setGeometry(0, 0, newWidth, st::aiComposeStyleTabsHeight);
-
-	_inner->resizeForOuterWidth(newWidth);
-
-	const auto fadeWidth = st::aiComposeStyleFadeWidth;
-	const auto fadeHeight = st::aiComposeStyleTabsHeight;
-	_fadeLeft->setGeometry(0, 0, fadeWidth, fadeHeight);
-	_fadeRight->setGeometry(
-		newWidth - fadeWidth, 0, fadeWidth, fadeHeight);
-	_fadeLeft->raise();
-	_fadeRight->raise();
-
-	const auto radius = st::aiComposeStyleTabsRadius;
-	_cornerLeft->setGeometry(0, 0, radius, fadeHeight);
-	_cornerRight->setGeometry(newWidth - radius, 0, radius, fadeHeight);
-	_cornerLeft->raise();
-	_cornerRight->raise();
-
-	updateFades();
-	return st::aiComposeStyleTabsHeight;
-}
-
-void ComposeAiStyleScrollTabs::updateFades() {
-	const auto scrollLeft = _scroll->scrollLeft();
-	const auto scrollMax = _scroll->scrollLeftMax();
-	_fadeLeft->setVisible(scrollLeft > 0);
-	_fadeRight->setVisible(scrollLeft < scrollMax);
-}
-
-void ComposeAiStyleScrollTabs::scrollToButton(
-		int buttonLeft,
-		int buttonRight) {
-	const auto full = _scroll->width();
-	const auto tab = buttonRight - buttonLeft;
-	if (tab < full) {
-		const auto add = std::min(full - tab, tab) / 2;
-		buttonRight += add;
-		buttonLeft -= add;
-	}
-	const auto scrollLeft = _scroll->scrollLeft();
-	const auto needed = (buttonLeft < scrollLeft)
-		|| (buttonRight > scrollLeft + full);
-	if (!needed) {
-		return;
-	}
-	const auto target = (buttonLeft < scrollLeft)
-		? buttonLeft
-		: std::min(buttonLeft, buttonRight - full);
-	_scrollAnimation.stop();
-	_scrollAnimation.start([=] {
-		_scroll->scrollToX(qRound(_scrollAnimation.value(target)));
-	}, scrollLeft, target, st::slideDuration, anim::sineInOut);
 }
 
 // ComposeAiPreviewCard
@@ -1359,6 +898,7 @@ ComposeAiContent::ComposeAiContent(
 , _stylesData(ResolveStyleDescriptors(
 	_session,
 	_session->appConfig().aiComposeStyles()))
+, _translateStylesData(ResolveTranslateStyleDescriptors(_session, _stylesData))
 , _preview(Ui::CreateChild<ComposeAiPreviewCard>(this, _session, _original)) {
 	_preview->setResizeCallback([=] { refreshLayout(); });
 	_preview->setChooseCallback([=] { chooseLanguage(); });
@@ -1383,7 +923,7 @@ const TextWithEntities &ComposeAiContent::result() const {
 	return _result;
 }
 
-const std::vector<StyleDescriptor> &ComposeAiContent::stylesData() const {
+const std::vector<Ui::LabeledEmojiTab> &ComposeAiContent::stylesData() const {
 	return _stylesData;
 }
 
@@ -1400,11 +940,11 @@ void ComposeAiContent::setModeTabs(not_null<ComposeAiModeTabs*> tabs) {
 }
 
 void ComposeAiContent::setStyleTabs(
-		not_null<Ui::SlideWrap<ComposeAiStyleScrollTabs>*> stylesWrap) {
+		not_null<Ui::SlideWrap<Ui::LabeledEmojiScrollTabs>*> stylesWrap) {
 	_stylesWrap = stylesWrap;
 	_stylesWrap->setDuration(0);
 	_styles = stylesWrap->entity();
-	_styles->inner()->setChangedCallback([=](int index) {
+	_styles->setChangedCallback([=](int index) {
 		if (index >= 0 && index < int(_stylesData.size())) {
 			const auto wasNoSelection = (_styleIndex < 0);
 			_styleIndex = index;
@@ -1417,7 +957,7 @@ void ComposeAiContent::setStyleTabs(
 			}
 		}
 	});
-	_styles->inner()->setActive(_styleIndex);
+	_styles->setActive(_styleIndex);
 	_stylesWrap->toggle(_mode == ComposeAiMode::Style, anim::type::instant);
 }
 
@@ -1444,21 +984,57 @@ void ComposeAiContent::chooseLanguage() {
 		return;
 	}
 	const auto weak = QPointer<ComposeAiContent>(this);
+	const auto session = _session;
+	const auto styles = _translateStylesData;
+	const auto selectedStyle = std::make_shared<int>(_translateStyleIndex);
 	_box->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		const auto apply = [=](LanguageId id, int styleIndex) {
+			if (!weak) {
+				return;
+			}
+			weak->_to = id;
+			if (const auto count = int(weak->_translateStylesData.size())) {
+				weak->_translateStyleIndex = std::clamp(styleIndex, 0, count - 1);
+			}
+			weak->updateTitles();
+			weak->request();
+		};
 		Ui::ChooseLanguageBox(
 			box,
 			tr::lng_languages(),
 			[=](std::vector<LanguageId> ids) {
-				if (!weak || ids.empty()) {
+				if (ids.empty()) {
 					return;
 				}
-				weak->_to = ids.front();
-				weak->updateTitles();
-				weak->request();
+				apply(ids.front(), *selectedStyle);
 			},
 			{ _to },
 			false,
 			nullptr);
+		const auto bottom = box->setPinnedToBottomContent(
+			object_ptr<Ui::VerticalLayout>(box));
+		const auto skip = st::defaultSubsectionTitlePadding.left();
+		const auto tabs = bottom->add(
+			object_ptr<Ui::LabeledEmojiScrollTabs>(
+				bottom,
+				styles,
+				session->data().customEmojiManager().factory(
+					Data::CustomEmojiSizeTag::Large)),
+			QMargins(
+				(skip - st::aiComposeStyleTabsPadding.left()),
+				0,
+				(skip - st::aiComposeStyleTabsPadding.right()),
+				0));
+		tabs->setPaintOuterCorners(false);
+		tabs->setChangedCallback([=](int index) {
+			if (index >= 0 && index < int(styles.size())) {
+				*selectedStyle = index;
+				apply(_to, index);
+				box->closeBox();
+			}
+		});
+		tabs->setActive(std::clamp(*selectedStyle, 0, int(styles.size()) - 1));
+		tabs->scrollToActive();
 	}));
 }
 
@@ -1500,7 +1076,7 @@ void ComposeAiContent::updateTitles() {
 	_preview->setResultTitle(
 		hasResult
 			? ((_mode == ComposeAiMode::Translate)
-				? ToTitle(_to)
+				? ToTitle(_to, currentTranslateStyleLabel())
 				: tr::lng_ai_compose_result(tr::now, tr::marked))
 			: tr::lng_ai_compose_original(tr::now, tr::marked));
 	_preview->setEmojifyVisible(
@@ -1513,7 +1089,7 @@ void ComposeAiContent::updatePinnedTabs(anim::type animated) {
 		_tabs->setActive(_mode);
 	}
 	if (_styles) {
-		_styles->inner()->setActive(_styleIndex);
+		_styles->setActive(_styleIndex);
 	}
 	if (_stylesWrap) {
 		_stylesWrap->toggle(_mode == ComposeAiMode::Style, animated);
@@ -1546,9 +1122,10 @@ void ComposeAiContent::request() {
 	switch (_mode) {
 	case ComposeAiMode::Translate:
 		request.translateToLang = _to.twoLetterCode();
+		request.changeTone = currentTranslateStyle();
 		break;
 	case ComposeAiMode::Style:
-		request.changeTone = _stylesData[_styleIndex].key;
+		request.changeTone = _stylesData[_styleIndex].id;
 		break;
 	case ComposeAiMode::Fix:
 		request.proofread = true;
@@ -1638,6 +1215,23 @@ void ComposeAiContent::setStyleSelectedCallback(Fn<void()> callback) {
 	_styleSelected = std::move(callback);
 }
 
+QString ComposeAiContent::currentTranslateStyle() const {
+	return (_translateStyleIndex >= 0
+		&& _translateStyleIndex < int(_translateStylesData.size()))
+		? _translateStylesData[_translateStyleIndex].id
+		: QString();
+}
+
+QString ComposeAiContent::currentTranslateStyleLabel() const {
+	if (const auto style = currentTranslateStyle(); !style.isEmpty()) {
+		return (_translateStyleIndex >= 0
+			&& _translateStyleIndex < int(_translateStylesData.size()))
+			? _translateStylesData[_translateStyleIndex].label
+			: QString();
+	}
+	return QString();
+}
+
 ComposeAiMode ComposeAiContent::mode() const {
 	return _mode;
 }
@@ -1684,9 +1278,9 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 	auto emojiFactory = session->data().customEmojiManager().factory(
 		Data::CustomEmojiSizeTag::Large);
 	const auto stylesWrap = pinnedToTop->add(
-		object_ptr<Ui::SlideWrap<ComposeAiStyleScrollTabs>>(
+		object_ptr<Ui::SlideWrap<Ui::LabeledEmojiScrollTabs>>(
 			pinnedToTop,
-			object_ptr<ComposeAiStyleScrollTabs>(
+			object_ptr<Ui::LabeledEmojiScrollTabs>(
 				pinnedToTop,
 				content->stylesData(),
 				std::move(emojiFactory)),

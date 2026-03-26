@@ -424,6 +424,8 @@ PRIVATE
     ui/controls/invite_link_buttons.h
     ui/controls/invite_link_label.cpp
     ui/controls/invite_link_label.h
+    ui/controls/labeled_emoji_tabs.cpp
+    ui/controls/labeled_emoji_tabs.h
     ui/controls/peer_list_dummy.cpp
     ui/controls/peer_list_dummy.h
     ui/controls/popup_selector.cpp
