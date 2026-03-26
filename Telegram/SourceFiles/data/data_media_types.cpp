@@ -2323,6 +2323,18 @@ Storage::SharedMediaTypesMask MediaPoll::sharedMediaTypes() const {
 		.added(Storage::SharedMediaType::Poll);
 }
 
+ItemPreview MediaPoll::toPreview(ToPreviewOptions options) const {
+	const auto caption = (options.hideCaption || options.ignoreMessageText)
+		? TextWithEntities()
+		: Dialogs::Ui::DialogsPreviewText(options.translated
+			? parent()->translatedText()
+			: parent()->originalText());
+	const auto type = u"\xD83D\xDCCA "_q + _poll->question.text;
+	return {
+		.text = WithCaptionNotificationText(type, caption),
+	};
+}
+
 TextWithEntities MediaPoll::notificationText() const {
 	return TextWithEntities()
 		.append(QChar(0xD83D))

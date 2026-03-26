@@ -1315,8 +1315,10 @@ int ItemsForwardCaptionsCount(const HistoryItemsList &list) {
 	auto result = 0;
 	for (const auto &item : list) {
 		if (const auto media = item->media()) {
-			if (!item->originalText().text.isEmpty()
-				&& media->allowsEditCaption()) {
+			const auto hasCaption = !item->originalText().text.isEmpty()
+				|| !media->consumedMessageText().text.isEmpty();
+			if (hasCaption
+				&& (media->allowsEditCaption() || media->poll())) {
 				++result;
 			}
 		}

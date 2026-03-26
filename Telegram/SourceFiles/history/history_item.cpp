@@ -655,13 +655,23 @@ HistoryItem::HistoryItem(
 
 	const auto dropText = fields.ignoreForwardCaptions
 		&& _media
-		&& (_media->photo() || _media->document())
-		&& !_media->webpage();
-	setText(dropText
-		? TextWithEntities()
-		: dropForwardInfo
-		? DropDisallowedCustomEmoji(history->peer, original->originalText())
-		: original->originalText());
+		&& (_media->allowsEditCaption() || _media->poll());
+	const auto forwardText = [&] {
+		if (dropText) {
+			return TextWithEntities();
+		}
+		const auto &text = original->originalText();
+		if (!text.text.isEmpty()) {
+			return dropForwardInfo
+				? DropDisallowedCustomEmoji(history->peer, text)
+				: TextWithEntities(text);
+		}
+		if (const auto media = original->media()) {
+			return media->consumedMessageText();
+		}
+		return TextWithEntities();
+	}();
+	setText(forwardText);
 
 	if (fields.groupedId) {
 		setGroupId(MessageGroupId::FromRaw(

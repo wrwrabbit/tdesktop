@@ -635,6 +635,7 @@ public:
 	PollData *poll() const override;
 	Storage::SharedMediaTypesMask sharedMediaTypes() const override;
 
+	ItemPreview toPreview(ToPreviewOptions options) const override;
 	TextWithEntities notificationText() const override;
 	QString pinnedTextSubstring() const override;
 	TextForMimeData clipboardText() const override;
