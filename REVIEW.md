@@ -342,6 +342,84 @@ void MyWidget::paintEvent(QPaintEvent *e) {
 
 When there are multiple local classes, put **all class definitions first**, then **all method definitions** after. This keeps the declarations readable as an overview.
 
+## Use RAII for resource cleanup
+
+When working with raw resources (Win32 HANDLEs, file descriptors, COM objects), use `gsl::finally` or a dedicated RAII wrapper for cleanup instead of calling release functions manually. Manual cleanup breaks when early returns are added later.
+
+```cpp
+// BAD - manual cleanup, fragile with early returns:
+const auto snapshot = CreateToolhelp32Snapshot(...);
+if (snapshot != INVALID_HANDLE_VALUE) {
+	// ... logic that might grow early returns ...
+	CloseHandle(snapshot);
+}
+
+// GOOD - RAII guard, cleanup runs on any exit path:
+const auto snapshot = CreateToolhelp32Snapshot(...);
+if (snapshot == INVALID_HANDLE_VALUE) {
+	return;
+}
+const auto guard = gsl::finally([&] {
+	CloseHandle(snapshot);
+});
+// ... logic, early returns are safe ...
+```
+
+## Extract substantial logic from lambdas
+
+When a lambda grows beyond a few lines of self-contained logic, extract it into a named function (free function in anonymous namespace, or a private method). Lambdas should primarily be glue — captures, dispatch, short transforms. This applies when the lambda's captures are minimal and can easily become function parameters. When a lambda captures many variables from its surrounding context, it may be cleaner to keep it inline.
+
+```cpp
+// BAD - substantial logic buried in a lambda:
+crl::async([=] {
+	auto found = false;
+	auto pe = PROCESSENTRY32();
+	pe.dwSize = sizeof(PROCESSENTRY32);
+	const auto snapshot = CreateToolhelp32Snapshot(...);
+	if (snapshot != INVALID_HANDLE_VALUE) {
+		for (...) {
+			if (/* match */) {
+				found = true;
+				break;
+			}
+		}
+		CloseHandle(snapshot);
+	}
+	crl::on_main(weak, [=] { handle(found); });
+});
+
+// GOOD - logic extracted, lambda is just glue:
+crl::async([=] {
+	const auto found = FindRunningReader();
+	crl::on_main(weak, [=] { handle(found); });
+});
+```
+
+## Data-driven matching over chained conditions
+
+When comparing a value against multiple known constants, store them in a collection and loop instead of chaining `||` conditions. Easier to extend, less repetition, and reads as data rather than logic.
+
+```cpp
+// BAD - repetitive chain, hard to extend:
+if (_wcsicmp(name, L"Narrator.exe") == 0
+	|| _wcsicmp(name, L"nvda.exe") == 0
+	|| _wcsicmp(name, L"jfw.exe") == 0
+	|| _wcsicmp(name, L"Zt.exe") == 0) {
+
+// GOOD - data-driven, easy to extend:
+const auto list = std::array{
+	L"Narrator.exe",
+	L"nvda.exe",
+	L"jfw.exe",
+	L"Zt.exe",
+};
+for (const auto &entry : list) {
+	if (_wcsicmp(name, entry) == 0) {
+		return true;
+	}
+}
+```
+
 ## Static member functions use PascalCase
 
 Non-static member functions use camelCase (`startBatch`, `finalize`). Static member functions use PascalCase (`ShouldTrack`, `Parse`, `Create`), matching the convention for free functions.
