@@ -1108,6 +1108,18 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 				| rpl::then(state->multipleForceOff.events()),
 			st::detailedSettingsButtonStyle)
 		: nullptr;
+	const auto addOptions = (!(_disabled & PollData::Flag::OpenAnswers))
+		? AddPollToggleButton(
+			container,
+			tr::lng_polls_create_allow_adding_options(),
+			tr::lng_polls_create_allow_adding_options_about(),
+			{
+				.icon = &st::pollBoxFilledPollAddIcon,
+				.background = &st::settingsIconBg4,
+			},
+			rpl::single(!!(_chosen & PollData::Flag::OpenAnswers)),
+			st::detailedSettingsButtonStyle)
+		: nullptr;
 	const auto revoting = AddPollToggleButton(
 		container,
 		tr::lng_polls_create_allow_revoting(),
@@ -1160,6 +1172,9 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	}, solution->lifetime());
 
 	quiz->setToggleLocked(_disabled & PollData::Flag::Quiz);
+	if (addOptions) {
+		addOptions->setToggleLocked(_disabled & PollData::Flag::OpenAnswers);
+	}
 	revoting->setToggleLocked(_disabled & PollData::Flag::RevotingDisabled);
 	shuffle->setToggleLocked(_disabled & PollData::Flag::ShuffleAnswers);
 	if (multiple) {
@@ -1235,6 +1250,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		result.setFlags(Flag(0)
 			| (publicVotes ? Flag::PublicVotes : Flag(0))
 			| (multiChoice ? Flag::MultiChoice : Flag(0))
+			| ((addOptions && addOptions->toggled()) ? Flag::OpenAnswers : Flag(0))
 			| (!revoting->toggled() ? Flag::RevotingDisabled : Flag(0))
 			| (shuffle->toggled() ? Flag::ShuffleAnswers : Flag(0))
 			| (quiz->toggled() ? Flag::Quiz : Flag(0)));

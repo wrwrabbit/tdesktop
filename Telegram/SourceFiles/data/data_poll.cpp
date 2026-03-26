@@ -78,7 +78,8 @@ bool PollData::applyChanges(const MTPDpoll &poll) {
 		| (poll.is_multiple_choice() ? Flag::MultiChoice : Flag(0))
 		| (poll.is_quiz() ? Flag::Quiz : Flag(0))
 		| (poll.is_shuffle_answers() ? Flag::ShuffleAnswers : Flag(0))
-		| (poll.is_revoting_disabled() ? Flag::RevotingDisabled : Flag(0));
+		| (poll.is_revoting_disabled() ? Flag::RevotingDisabled : Flag(0))
+		| (poll.is_open_answers() ? Flag::OpenAnswers : Flag(0));
 	const auto newCloseDate = poll.vclose_date().value_or_empty();
 	const auto newClosePeriod = poll.vclose_period().value_or_empty();
 	auto newAnswers = ranges::views::all(
@@ -270,6 +271,10 @@ bool PollData::revotingDisabled() const {
 	return (_flags & Flag::RevotingDisabled);
 }
 
+bool PollData::openAnswers() const {
+	return (_flags & Flag::OpenAnswers);
+}
+
 MTPPoll PollDataToMTP(not_null<const PollData*> poll, bool close) {
 	const auto convert = [&](const PollAnswer &answer) {
 		return MTP_pollAnswer(
@@ -295,6 +300,7 @@ MTPPoll PollDataToMTP(not_null<const PollData*> poll, bool close) {
 		| (poll->quiz() ? Flag::f_quiz : Flag(0))
 		| (poll->shuffleAnswers() ? Flag::f_shuffle_answers : Flag(0))
 		| (poll->revotingDisabled() ? Flag::f_revoting_disabled : Flag(0))
+		| (poll->openAnswers() ? Flag::f_open_answers : Flag(0))
 		| (poll->closePeriod > 0 ? Flag::f_close_period : Flag(0))
 		| (poll->closeDate > 0 ? Flag::f_close_date : Flag(0));
 	return MTP_poll(

@@ -45,6 +45,7 @@ struct PollData {
 		Quiz             = 0x08,
 		ShuffleAnswers   = 0x10,
 		RevotingDisabled = 0x20,
+		OpenAnswers      = 0x40,
 	};
 	friend inline constexpr bool is_flag_type(Flag) { return true; };
 	using Flags = base::flags<Flag>;
@@ -67,6 +68,7 @@ struct PollData {
 	[[nodiscard]] bool quiz() const;
 	[[nodiscard]] bool shuffleAnswers() const;
 	[[nodiscard]] bool revotingDisabled() const;
+	[[nodiscard]] bool openAnswers() const;
 
 	PollId id = 0;
 	TextWithEntities question;
