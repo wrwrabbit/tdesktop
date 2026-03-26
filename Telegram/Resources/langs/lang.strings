@@ -7742,4 +7742,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_ptg_location_card_make_portable_pro3" = "After conversion, move options become available";
 "lng_ptg_location_card_make_portable_btn" = "Make portable";
 
+"lng_settings_lock_down_privacy#one" = "Lock Down Privacy ({count} not secure)";
+"lng_settings_lock_down_privacy#other" = "Lock Down Privacy ({count} not secure)";
+"lng_settings_lock_down_confirm" = "Apply the most private settings to all your privacy options?";
+"lng_settings_lock_down_done" = "All privacy settings secured.";
+"lng_settings_review_privacy" = "Review Your Privacy";
+"lng_settings_review_reason_insecure#one" = "{count} setting not secure";
+"lng_settings_review_reason_insecure#other" = "{count} settings not secure";
+"lng_settings_review_reason_session" = "Unusual session activity";
+"lng_settings_review_reason_overdue" = "Monthly privacy check";
+"lng_settings_review_all_good" = "All Looks Good";
+"lng_settings_review_manage" = "Manage Individually";
+"lng_settings_review_session_country" = "Session from {country}";
+"lng_settings_manage_sessions" = "Manage Sessions";
+
 // Keys finished

@@ -56,4 +56,7 @@ void SetupArchiveAndMute(
 	not_null<Ui::VerticalLayout*> container,
 	HighlightRegistry *highlights = nullptr);
 
+void ShowPrivacyReviewBox(
+	not_null<Window::SessionController*> controller);
+
 } // namespace Settings

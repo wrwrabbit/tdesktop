@@ -781,3 +781,7 @@ ptgLocationCardButton: RoundButton(defaultActiveButton) {
 	textTop: 7px;
 }
 ptgLocationCardSkip: 12px;
+
+settingsPrivacyBadgeSize: 18px;
+settingsPrivacyBadgePadding: margins(5px, 2px, 5px, 2px);
+settingsReviewBannerPadding: margins(22px, 12px, 22px, 12px);

@@ -1660,6 +1660,8 @@ PRIVATE
     settings/sections/settings_notifications.h
     settings/sections/settings_privacy_security.cpp
     settings/sections/settings_privacy_security.h
+    settings/settings_privacy_security_helpers.cpp
+    settings/settings_privacy_security_helpers.h
     settings/sections/settings_notifications_type.cpp
     settings/sections/settings_notifications_type.h
     settings/sections/settings_passkeys.cpp

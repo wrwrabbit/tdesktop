@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_privacy_security.h"
 
 #include "settings/settings_common_session.h"
+#include "settings/settings_privacy_security_helpers.h"
 
 #include "api/api_authorizations.h"
 #include "api/api_blocked_peers.h"
@@ -19,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "base/system_unlock.h"
 #include "base/timer_rpl.h"
+#include "base/unixtime.h"
 #include "boxes/edit_privacy_box.h"
 #include "boxes/passcode_box.h"
 #include "boxes/self_destruction_box.h"
@@ -27,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_cloud_password.h"
 #include "core/core_settings.h"
 #include "core/update_checker.h"
+#include "fakepasscode/settings.h"
 #include "data/components/passkeys.h"
 #include "data/components/top_peers.h"
 #include "data/data_channel.h"
@@ -832,6 +835,39 @@ void BuildPrivacySection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
 	const auto session = builder.session();
 
+	auto &localDomain = session->domain().local();
+	if (!localDomain.IsFake() && localDomain.hasLocalPasscode()) {
+		builder.addButton({
+			.id = u"privacy/lock_down"_q,
+			.title = InsecurePrivacyCount(
+				session
+			) | rpl::map([](int count) {
+				return tr::lng_settings_lock_down_privacy(
+					tr::now,
+					lt_count,
+					count);
+			}),
+			.st = &st::settingsAttentionButton,
+			.onClick = [=] {
+				controller->show(Ui::MakeConfirmBox({
+					.text = tr::lng_settings_lock_down_confirm(),
+					.confirmed = [=](Fn<void()> close) {
+						ApplyMaxPrivacy(&controller->session());
+						Ui::Toast::Show(
+							tr::lng_settings_lock_down_done(tr::now));
+						close();
+					},
+				}));
+			},
+			.keywords = { u"lock"_q, u"secure"_q, u"privacy"_q },
+			.shown = rpl::single(
+				false
+			) | rpl::then(InsecurePrivacyCount(
+				session
+			) | rpl::map([](int count) { return count > 0; })),
+		});
+	}
+
 	builder.addSkip(st::settingsPrivacySkip);
 	builder.addSubsectionTitle({
 		.id = u"privacy/section"_q,
@@ -1166,12 +1202,114 @@ void BuildConfirmationExtensions(SectionBuilder &builder) {
 	builder.addDividerText(tr::lng_settings_edit_extensions_about());
 }
 
+void ShowPrivacyReviewBox(
+		not_null<Window::SessionController*> controller) {
+	const auto session = &controller->session();
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(tr::lng_settings_review_privacy());
+
+		const auto container = box->verticalLayout();
+
+		using Key = Api::UserPrivacy::Key;
+		struct KeyInfo {
+			Key key;
+			QString label;
+		};
+		const auto keys = std::vector<KeyInfo>{
+			{ Key::PhoneNumber, tr::lng_settings_phone_number_privacy(tr::now) },
+			{ Key::LastSeen, tr::lng_settings_last_seen(tr::now) },
+			{ Key::ProfilePhoto, tr::lng_settings_profile_photo_privacy(tr::now) },
+			{ Key::Forwards, tr::lng_settings_forwards_privacy(tr::now) },
+			{ Key::Calls, tr::lng_settings_calls(tr::now) },
+			{ Key::CallsPeer2Peer, tr::lng_settings_calls_peer_to_peer_title(tr::now) },
+			{ Key::Voices, tr::lng_settings_voices_privacy(tr::now) },
+			{ Key::About, tr::lng_settings_bio_privacy(tr::now) },
+			{ Key::Birthday, tr::lng_settings_birthday_privacy(tr::now) },
+			{ Key::GiftsAutoSave, tr::lng_settings_gifts_privacy(tr::now) },
+			{ Key::SavedMusic, tr::lng_settings_saved_music_privacy(tr::now) },
+			{ Key::Invites, tr::lng_settings_groups_invite(tr::now) },
+		};
+
+		for (const auto &info : keys) {
+			session->api().userPrivacy().reload(info.key);
+			const auto label = info.label;
+			const auto key = info.key;
+			auto text = session->api().userPrivacy().value(
+				key
+			) | rpl::map([label, key](const Api::UserPrivacy::Rule &rule) {
+				const auto secure = IsPrivacyKeySecure(key, rule);
+				const auto indicator = secure
+					? QString::fromUtf8("\xF0\x9F\x9F\xA2 ")
+					: (rule.option == Api::UserPrivacy::Option::Everyone)
+					? QString::fromUtf8("\xF0\x9F\x94\xB4 ")
+					: QString::fromUtf8("\xF0\x9F\x9F\xA1 ");
+				return indicator + label;
+			});
+			container->add(
+				object_ptr<Ui::SettingsButton>(
+					container,
+					std::move(text),
+					st::settingsButtonNoIcon));
+		}
+
+		box->addButton(tr::lng_settings_review_all_good(), [=] {
+			PTG::SetPrivacyLastReviewTime(base::unixtime::now());
+			Core::App().domain().local().writeAccounts();
+			box->closeBox();
+		});
+		box->addButton(tr::lng_settings_review_manage(), [=] {
+			box->closeBox();
+		});
+	}));
+}
+
 void BuildPrivacySecuritySectionContent(SectionBuilder &builder) {
 	auto updateOnTick = rpl::single(
 	) | rpl::then(base::timer_each(kUpdateTimeout));
 	const auto trigger = [&] {
 		return rpl::duplicate(updateOnTick);
 	};
+
+	const auto controller = builder.controller();
+	const auto session = builder.session();
+
+	auto overdue = rpl::single(rpl::empty) | rpl::map([=] {
+		const auto last = PTG::GetPrivacyLastReviewTime();
+		const auto now = base::unixtime::now();
+		return (last == 0) || (now - last > 30 * 86400);
+	});
+
+	auto reviewPending = rpl::combine(
+		InsecurePrivacyCount(session),
+		HasSessionAnomaly(session),
+		std::move(overdue)
+	) | rpl::map([](int insecure, bool anomaly, bool overdue) {
+		return insecure > 0 || anomaly || overdue;
+	});
+
+	builder.addButton({
+		.id = u"privacy/review_banner"_q,
+		.title = InsecurePrivacyCount(
+			session
+		) | rpl::map([](int count) {
+			if (count > 0) {
+				return tr::lng_settings_review_reason_insecure(
+					tr::now,
+					lt_count,
+					count);
+			}
+			return tr::lng_settings_review_privacy(tr::now);
+		}),
+		.st = &st::settingsAttentionButtonWithIcon,
+		.icon = { &st::menuIconLock },
+		.onClick = [=] {
+			ShowPrivacyReviewBox(controller);
+		},
+		.keywords = { u"review"_q, u"privacy"_q },
+		.shown = rpl::single(
+			false
+		) | rpl::then(std::move(reviewPending)),
+	});
 
 	BuildSecuritySection(builder, trigger());
 	BuildPrivacySection(builder);

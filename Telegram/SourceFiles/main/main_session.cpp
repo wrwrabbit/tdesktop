@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/components/sponsored_messages.h"
 #include "data/components/top_peers.h"
 #include "settings/settings_faq_suggestions.h"
+#include "settings/settings_privacy_security_helpers.h"
 #include "data/data_session.h"
 #include "data/data_changes.h"
 #include "data/data_user.h"
@@ -229,6 +230,8 @@ Session::Session(
 		data().stickers().notifyUpdated(Data::StickersType::Emoji);
 		data().stickers().notifySavedGifsUpdated();
 		DEBUG_LOG(("Init: Account stored data load finished."));
+
+		Settings::RunBackgroundSessionCheck(this);
 	});
 
 #ifndef TDESKTOP_DISABLE_SPELLCHECK

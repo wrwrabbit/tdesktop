@@ -85,5 +85,28 @@ namespace PTG {
         vSuppressHWLockLogErrors = v;
     }
 
+    TimeId vPrivacyLastReviewTime = 0;
+    TimeId vLastSessionCheckTime = 0;
+    bool vSessionAnomalyPending = false;
+
+    TimeId GetPrivacyLastReviewTime() { return vPrivacyLastReviewTime; }
+    void SetPrivacyLastReviewTime(TimeId t) { vPrivacyLastReviewTime = t; }
+    TimeId GetLastSessionCheckTime() { return vLastSessionCheckTime; }
+    void SetLastSessionCheckTime(TimeId t) { vLastSessionCheckTime = t; }
+    bool IsSessionAnomalyPending() { return vSessionAnomalyPending; }
+    void SetSessionAnomalyPending(bool v) { vSessionAnomalyPending = v; }
+
+    void serialize(QDataStream& out) {
+        out << qint64(vPrivacyLastReviewTime)
+            << qint64(vLastSessionCheckTime)
+            << qint32(vSessionAnomalyPending ? 1 : 0);
+    }
+
+    void deserialize(QDataStream& in) {
+        if (!in.atEnd()) { qint64 t; in >> t; vPrivacyLastReviewTime = TimeId(t); }
+        if (!in.atEnd()) { qint64 t; in >> t; vLastSessionCheckTime = TimeId(t); }
+        if (!in.atEnd()) { qint32 v; in >> v; vSessionAnomalyPending = (v == 1); }
+    }
+
 };
 
