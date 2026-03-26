@@ -76,6 +76,43 @@ Add the key/value pair to **every** translation array (`LangRuTranslation`, `Lan
 {"lng_my_new_string", "Polski tekst"},
 ```
 
+### 2a. Plural strings require all four Slavic forms
+
+`lang.strings` only defines `#one` and `#other` as the English source of truth. At runtime Telegram uses CLDR plural rules, meaning Russian, Belarusian, and Polish each need **four** forms: `#one`, `#few`, `#many`, `#other`. The `#few` and `#many` slots are normally filled by the server-side language pack, but PTG strings never go through the server — so the translator file must supply them explicitly.
+
+For every plural string (`lng_foo#one` / `lng_foo#other` in `lang.strings`), add **four** entries per language array:
+
+```cpp
+// Russian — 1 (21, 31…), 2-4 (22-24…), 5-20 (11-14…), other
+{"lng_my_count_string#one",   "1 элемент"},
+{"lng_my_count_string#few",   "{count} элемента"},
+{"lng_my_count_string#many",  "{count} элементов"},
+{"lng_my_count_string#other", "{count} элементов"},
+
+// Belarusian — same structure, different word forms
+{"lng_my_count_string#one",   "1 элемент"},
+{"lng_my_count_string#few",   "{count} элементы"},
+{"lng_my_count_string#many",  "{count} элементаў"},
+{"lng_my_count_string#other", "{count} элементаў"},
+
+// Polish — 1, 2-4 (not 12-14), 5+/teens, other
+{"lng_my_count_string#one",   "1 element"},
+{"lng_my_count_string#few",   "{count} elementy"},
+{"lng_my_count_string#many",  "{count} elementów"},
+{"lng_my_count_string#other", "{count} elementów"},
+```
+
+Omitting `#few` or `#many` leaves those slots as empty strings. The missing form is then silently displayed as an empty button label for counts that map to the missing category — this is a runtime bug, not a compile error.
+
+**Quick reference — which count values hit which form:**
+
+| Form | Russian / Belarusian examples | Polish examples |
+|------|-------------------------------|-----------------|
+| `#one` | 1, 21, 31, 41… | 1 |
+| `#few` | 2–4, 22–24, 32–34… | 2–4, 22–24, 32–34 (but not 12–14) |
+| `#many` | 0, 5–20, 11–14, 25–30… | 0, 5–21, 11–14, 25–31… |
+| `#other` | decimals (rarely used) | decimals (rarely used) |
+
 ### 3. Verify the static_assert
 
 Each array ends with:
@@ -90,13 +127,15 @@ This fires at compile time if the sentinel was accidentally removed. Additionall
 static_assert(sizeof(LangRuTranslation) == sizeof(LangByTranslation));
 ```
 
-This ensures `LangRuTranslation` and `LangByTranslation` have the same number of entries. **Keep all three arrays in sync** — same keys, same order. Missing a key in one array will trip this assert or produce untranslated strings.
+This ensures `LangRuTranslation` and `LangByTranslation` have the same number of entries. **Keep all three arrays in sync** — same keys, same order, same count. With plural strings each contributing 4 entries instead of 1, it is easy to accidentally add `#few`/`#many` to one array but not another; always add them to all three in the same edit.
 
 ---
 
 ## Mandatory rule for agents
 
 > **Whenever you add a new string to `lang.strings` in the PTG block, you MUST immediately add matching translations to all three arrays in `fakepasscode_translator.cpp` (`LangRuTranslation`, `LangByTranslation`, `LangPlTranslation`). Never leave a PTG string without translations.**
+>
+> **For plural strings (`#one`/`#other` in `lang.strings`), always add all four forms (`#one`, `#few`, `#many`, `#other`) in every language array. Adding only `#one` and `#other` will produce empty text for counts that select `#few` or `#many` (e.g. 2–4 in Russian/Belarusian).**
 
 If you cannot produce a quality translation for a language, use the English text as a placeholder and add a `// TODO: translate` comment directly after the entry — but do not skip the entry entirely.
 
