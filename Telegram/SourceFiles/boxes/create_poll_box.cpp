@@ -1381,6 +1381,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		Errors error = Error::Question;
 		std::unique_ptr<Options> options;
 		rpl::event_stream<bool> multipleForceOff;
+		rpl::event_stream<bool> addOptionsForceOff;
+		rpl::event_stream<bool> revotingForceOff;
 		rpl::event_stream<bool> quizForceOff;
 		std::shared_ptr<PollMediaState> descriptionMedia
 			= std::make_shared<PollMediaState>();
@@ -1858,7 +1860,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 				.icon = &st::pollBoxFilledPollAddIcon,
 				.background = &st::settingsIconBg4,
 			},
-			rpl::single(!!(_chosen & PollData::Flag::OpenAnswers)),
+			rpl::single(!!(_chosen & PollData::Flag::OpenAnswers))
+				| rpl::then(state->addOptionsForceOff.events()),
 			st::detailedSettingsButtonStyle)
 		: nullptr;
 	const auto revoting = AddPollToggleButton(
@@ -1869,7 +1872,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			.icon = &st::pollBoxFilledPollRevoteIcon,
 			.background = &st::settingsIconBg6,
 		},
-		rpl::single(!(_chosen & PollData::Flag::RevotingDisabled)),
+		rpl::single(!(_chosen & PollData::Flag::RevotingDisabled))
+			| rpl::then(state->revotingForceOff.events()),
 		st::detailedSettingsButtonStyle);
 	const auto shuffle = AddPollToggleButton(
 		container,
@@ -1913,13 +1917,19 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		*handled = true;
 	}, solution->lifetime());
 
+	const auto updateQuizDependentLocks = [=](bool checked) {
+		if (addOptions) {
+			addOptions->setToggleLocked(
+				(_disabled & PollData::Flag::OpenAnswers) || checked);
+		}
+		revoting->setToggleLocked(
+			(_disabled & PollData::Flag::RevotingDisabled) || checked);
+		multiple->setToggleLocked(
+			(_disabled & PollData::Flag::MultiChoice) || checked);
+	};
 	quiz->setToggleLocked(_disabled & PollData::Flag::Quiz);
-	if (addOptions) {
-		addOptions->setToggleLocked(_disabled & PollData::Flag::OpenAnswers);
-	}
-	revoting->setToggleLocked(_disabled & PollData::Flag::RevotingDisabled);
 	shuffle->setToggleLocked(_disabled & PollData::Flag::ShuffleAnswers);
-	multiple->setToggleLocked(_disabled & PollData::Flag::MultiChoice);
+	updateQuizDependentLocks(quiz->toggled());
 
 	using namespace rpl::mappers;
 	quiz->toggledChanges(
@@ -1928,6 +1938,12 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			state->quizForceOff.fire(false);
 			return;
 		}
+		if (checked) {
+			state->multipleForceOff.fire(false);
+			state->addOptionsForceOff.fire(false);
+			state->revotingForceOff.fire(false);
+		}
+		updateQuizDependentLocks(checked);
 		options->enableChooseCorrect(checked);
 	}, quiz->lifetime());
 
