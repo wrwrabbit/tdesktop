@@ -36,11 +36,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/themes/window_theme.h"
 #include "window/main_window.h"
 #include "window/window_session_controller.h"
+#include "ui/widgets/buttons.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "info/info_wrap_widget.h"
+#include "window/window_peer_menu.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_dialogs.h"
+#include "styles/style_widgets.h"
 
 namespace Info::Polls {
 
@@ -78,6 +81,8 @@ private:
 		SparseIdsMergedSlice::UniversalMsgId aroundId) const;
 	void setupHistory();
 	void updateInnerVisibleArea();
+	void updateNewPollButtonPosition();
+	void updateNewPollButtonVisibility();
 
 	HistoryView::Context listContext() override;
 	bool listScrollTo(int top, bool syntetic = true) override;
@@ -201,6 +206,10 @@ private:
 	bool _viewerRefreshed = false;
 	QString _searchQuery;
 
+	object_ptr<Ui::RoundButton> _newPollButton = { nullptr };
+	Ui::Animations::Simple _newPollButtonAnimation;
+	bool _newPollButtonShown = true;
+
 	std::unique_ptr<Lottie::Icon> _emptyIcon;
 	Ui::Text::String _emptyText;
 	bool _emptyAnimated = false;
@@ -255,11 +264,64 @@ void ListWidget::Inner::setupHistory() {
 	) | rpl::on_next([=](not_null<QKeyEvent*> e) {
 		_scroll->keyPressEvent(e);
 	}, _scroll->lifetime());
+
+	_newPollButton.create(
+		_scroll.get(),
+		tr::lng_polls_create_title(),
+		st::defaultActiveButton);
+	_newPollButton->setTextTransform(
+		Ui::RoundButton::TextTransform::NoTransform);
+	_newPollButton->setFullRadius(true);
+	_newPollButton->setClickedCallback([=] {
+		Window::PeerMenuCreatePoll(
+			_controller->parentController(),
+			_history->peer);
+	});
+	_newPollButton->show();
+}
+
+void ListWidget::Inner::updateNewPollButtonPosition() {
+	if (!_newPollButton) {
+		return;
+	}
+	const auto progress = _newPollButtonAnimation.value(
+		_newPollButtonShown ? 1. : 0.);
+	const auto buttonWidth = _newPollButton->width();
+	const auto buttonHeight = _newPollButton->height();
+	const auto x = (_scroll->width() - buttonWidth) / 2;
+	const auto bottom = st::infoPollsNewButtonBottom;
+	const auto top = anim::interpolate(
+		_scroll->height(),
+		_scroll->height() - buttonHeight - bottom,
+		progress);
+	_newPollButton->moveToLeft(x, top);
+	const auto shouldBeHidden = !_newPollButtonShown
+		&& !_newPollButtonAnimation.animating();
+	if (shouldBeHidden != _newPollButton->isHidden()) {
+		_newPollButton->setVisible(!shouldBeHidden);
+	}
+}
+
+void ListWidget::Inner::updateNewPollButtonVisibility() {
+	const auto scrollTop = _scroll->scrollTop();
+	const auto scrollTopMax = _scroll->scrollTopMax();
+	const auto nearBottom = (scrollTop + st::historyToDownShownAfter / 2)
+		>= scrollTopMax;
+	const auto shown = !nearBottom;
+	if (_newPollButtonShown != shown) {
+		_newPollButtonShown = shown;
+		_newPollButtonAnimation.start(
+			[=] { updateNewPollButtonPosition(); },
+			shown ? 0. : 1.,
+			shown ? 1. : 0.,
+			st::historyToDownDuration);
+	}
 }
 
 void ListWidget::Inner::updateGeometry(QRect rect) {
 	_scroll->setGeometry(rect);
 	_cornerButtons->updatePositions();
+	updateNewPollButtonPosition();
 
 	if (rect.isEmpty()) {
 		return;
@@ -292,6 +354,7 @@ void ListWidget::Inner::updateInnerVisibleArea() {
 	const auto scrollTop = _scroll->scrollTop();
 	_list->setVisibleTopBottom(scrollTop, scrollTop + _scroll->height());
 	_cornerButtons->updateJumpDownVisibility();
+	updateNewPollButtonVisibility();
 }
 
 int ListWidget::Inner::scrollTop() const {

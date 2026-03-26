@@ -268,3 +268,5 @@ pollDescriptionField: InputField(createPollField) {
 pollMediaField: InputField(createPollSolutionField) {
 	textMargins: margins(0px, 4px, pollAttachTextSkip, 4px);
 }
+
+infoPollsNewButtonBottom: 19px;
