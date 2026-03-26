@@ -377,26 +377,13 @@ HistoryWidget::HistoryWidget(
 		updateOverStates(mapFromGlobal(QCursor::pos()));
 	}, lifetime());
 
-	{
-		using namespace SendMenu;
-		const auto sendAction = [=](Action action, Details) {
-			if (action.type == ActionType::CaptionUp
-				|| action.type == ActionType::CaptionDown
-				|| action.type == ActionType::SpoilerOn
-				|| action.type == ActionType::SpoilerOff) {
-				_mediaEditManager.apply(action);
-			} else if (action.type == ActionType::Send) {
-				send(action.options);
-			} else {
-				sendScheduled(action.options);
-			}
-		};
-		SetupMenuAndShortcuts(
-			_send.get(),
-			controller->uiShow(),
-			[=] { return sendButtonMenuDetails(); },
-			sendAction);
-	}
+	setupSendMenu(_send.get(), [=](SendMenu::Action action, SendMenu::Details) {
+		if (action.type == SendMenu::ActionType::Send) {
+			send(action.options);
+		} else {
+			sendScheduled(action.options);
+		}
+	});
 	_unblock->addClickHandler([=] { unblockUser(); });
 	_botStart->addClickHandler([=] { sendBotStartCommand(); });
 	_joinChannel->addClickHandler([=] { joinChannel(); });
@@ -4641,20 +4628,65 @@ TextWithEntities HistoryWidget::prepareTextForEditMsg() const {
 	return left;
 }
 
+void HistoryWidget::setupSendMenu(
+		not_null<Ui::RpWidget*> button,
+		Fn<void(SendMenu::Action, SendMenu::Details)> action) {
+	using namespace SendMenu;
+	SetupMenuAndShortcuts(
+		button,
+		controller()->uiShow(),
+		[=] { return sendButtonMenuDetails(); },
+		[=](Action value, Details details) {
+			if (value.type == ActionType::CaptionUp
+				|| value.type == ActionType::CaptionDown
+				|| value.type == ActionType::SpoilerOn
+				|| value.type == ActionType::SpoilerOff) {
+				_mediaEditManager.apply(value);
+			} else {
+				action(value, details);
+			}
+		});
+}
+
 void HistoryWidget::showAiComposeBox() {
 	const auto text = prepareTextForEditMsg();
 	if (text.text.isEmpty()) {
 		return;
 	}
+	auto send = Fn<void(TextWithEntities &&, Api::SendOptions, Fn<void()>)>(
+		nullptr);
+	auto setupMenu = Fn<void(
+		not_null<Ui::RpWidget*>,
+		Fn<void(Api::SendOptions)>)>(nullptr);
+	if (_list && canSendAiComposeDirect()) {
+		send = crl::guard(_list, [=](
+				TextWithEntities result,
+				Api::SendOptions options,
+				Fn<void()> done) {
+			sendWithTextOverride(std::move(result), options, std::move(done));
+		});
+		setupMenu = crl::guard(_list, [=](
+				not_null<Ui::RpWidget*> button,
+				Fn<void(Api::SendOptions)> sendCallback) {
+			setupSendMenu(
+				button,
+				SendMenu::DefaultCallback(
+					controller()->uiShow(),
+					sendCallback));
+		});
+	}
 	HistoryView::Controls::ShowComposeAiBox(controller()->uiShow(), {
 		.session = &session(),
 		.text = text,
-		.apply = crl::guard(this, [=](TextWithEntities &&result) {
+		.apply = crl::guard(this, [=](const TextWithEntities &result) {
+			const auto action = Ui::InputField::HistoryAction::NewEntry;
 			setFieldText({
 				result.text,
 				TextUtilities::ConvertEntitiesToTextTags(result.entities),
-			}, 0, Ui::InputField::HistoryAction::NewEntry);
+			}, TextUpdateEvent::SaveDraft, action);
 		}),
+		.send = std::move(send),
+		.setupMenu = std::move(setupMenu),
 	});
 }
 
@@ -4911,19 +4943,33 @@ void HistoryWidget::send(Api::SendOptions options) {
 		return;
 	}
 
+	sendTextWithTags(
+		_field->getTextWithAppliedMarkdown(),
+		true,
+		options,
+		nullptr);
+}
+
+void HistoryWidget::sendTextWithTags(
+		TextWithTags textWithTags,
+		bool useWebPageDraft,
+		Api::SendOptions options,
+		Fn<void()> done) {
 	if (!options.scheduled) {
 		_cornerButtons.clearReplyReturns();
 	}
 
 	auto message = Api::MessageToSend(prepareSendAction(options));
-	message.textWithTags = _field->getTextWithAppliedMarkdown();
-	message.webPage = _preview->draft();
+	message.textWithTags = textWithTags;
+	if (useWebPageDraft && _preview) {
+		message.webPage = _preview->draft();
+	}
 
 	const auto ignoreSlowmodeCountdown = (options.scheduled != 0);
 	const auto withPaymentApproved = [=](int approved) {
 		auto copy = options;
 		copy.starsApproved = approved;
-		send(copy);
+		sendTextWithTags(textWithTags, useWebPageDraft, copy, done);
 	};
 	if (showSendMessageError(
 			message.textWithTags,
@@ -4934,8 +4980,9 @@ void HistoryWidget::send(Api::SendOptions options) {
 	}
 
 	const auto nextLocalMessageId = session().data().nextLocalMessageId();
+	const auto hasText = !message.textWithTags.text.trimmed().isEmpty();
 
-	if (HasSendText(_field)
+	if (hasText
 		&& message.webPage.url.isEmpty()
 		&& (_field->document()->size().height() <= _field->height())) {
 		controller()->sendingAnimation().appendSending({
@@ -4946,7 +4993,7 @@ void HistoryWidget::send(Api::SendOptions options) {
 	}
 
 	// Just a flag not to drop reply info if we're not sending anything.
-	_justMarkingAsRead = !HasSendText(_field)
+	_justMarkingAsRead = !hasText
 		&& message.webPage.url.isEmpty();
 	session().api().sendMessage(std::move(message), nextLocalMessageId);
 	_justMarkingAsRead = false;
@@ -4969,6 +5016,23 @@ void HistoryWidget::send(Api::SendOptions options) {
 		(options.scheduled
 			? Data::HistoryUpdate::Flag::ScheduledSent
 			: Data::HistoryUpdate::Flag::MessageSent));
+	if (done) {
+		done();
+	}
+}
+
+void HistoryWidget::sendWithTextOverride(
+		TextWithEntities text,
+		Api::SendOptions options,
+		Fn<void()> done) {
+	if (!canSendAiComposeDirect()) {
+		return;
+	}
+	const auto useWebPageDraft = (text.text == prepareTextForEditMsg().text);
+	sendTextWithTags({
+		text.text,
+		TextUtilities::ConvertEntitiesToTextTags(text.entities),
+	}, useWebPageDraft, options, std::move(done));
 }
 
 void HistoryWidget::sendWithModifiers(Qt::KeyboardModifiers modifiers) {
@@ -5029,6 +5093,16 @@ auto HistoryWidget::computeSendButtonType() const {
 			: Type::Record;
 	}
 	return Type::Send;
+}
+
+bool HistoryWidget::canSendAiComposeDirect() const {
+	using Type = Ui::SendButton::Type;
+	return _history
+		&& _peer
+		&& (computeSendButtonType() == Type::Send)
+		&& !_peer->slowmodeSecondsLeft()
+		&& !(_peer->slowmodeApplied() && _history->latestSendingMessage())
+		&& !_peer->starsPerMessageChecked();
 }
 
 SendMenu::Details HistoryWidget::sendButtonMenuDetails() const {

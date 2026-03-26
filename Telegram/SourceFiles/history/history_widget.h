@@ -37,6 +37,7 @@ struct SendError;
 } // namespace Data
 
 namespace SendMenu {
+struct Action;
 struct Details;
 } // namespace SendMenu
 
@@ -65,6 +66,7 @@ class PlainShadow;
 class ImportantTooltip;
 class IconButton;
 class EmojiButton;
+class RpWidget;
 class SendButton;
 class SilentToggle;
 class FlatButton;
@@ -404,6 +406,9 @@ private:
 	void windowIsVisibleChanged();
 	void saveFieldToHistoryLocalDraft();
 	void fileChosen(ChatHelpers::FileChosen &&data);
+	void setupSendMenu(
+		not_null<Ui::RpWidget*> button,
+		Fn<void(SendMenu::Action, SendMenu::Details)> action);
 
 	void updateFieldSubmitSettings();
 	bool clearMaybeSendStart();
@@ -426,7 +431,16 @@ private:
 
 	[[nodiscard]] Api::SendAction prepareSendAction(
 		Api::SendOptions options);
+	void sendTextWithTags(
+		TextWithTags textWithTags,
+		bool useWebPageDraft,
+		Api::SendOptions options,
+		Fn<void()> done);
 	void sendVoice(const VoiceToSend &data);
+	void sendWithTextOverride(
+		TextWithEntities text,
+		Api::SendOptions options,
+		Fn<void()> done);
 	void send(Api::SendOptions options);
 	void sendWithModifiers(Qt::KeyboardModifiers modifiers);
 	void sendScheduled(Api::SendOptions initialOptions);
@@ -461,7 +475,7 @@ private:
 	void supportInsertText(const QString &text);
 	void supportShareContact(Support::Contact contact);
 
-	auto computeSendButtonType() const;
+	[[nodiscard]] auto computeSendButtonType() const;
 
 	void showFinished();
 	void updateOverStates(QPoint pos);
@@ -516,6 +530,7 @@ private:
 	void updateAiButtonGeometry();
 	void updateAiTooltipGeometry();
 	void showAiComposeBox();
+	[[nodiscard]] bool canSendAiComposeDirect() const;
 
 	[[nodiscard]] MsgId resolveReplyToTopicRootId();
 	[[nodiscard]] Data::ForumTopic *resolveReplyToTopic();

@@ -328,6 +328,9 @@ private:
 	void updateAiButtonVisibility();
 	void updateAiButtonGeometry();
 	void updateAiTooltipGeometry();
+	void setupSendMenu(
+		not_null<Ui::RpWidget*> button,
+		Fn<void(Api::SendOptions)> send);
 	bool updateReplaceMediaButton();
 	void updateOuterGeometry(QRect rect);
 	void paintBackground(QPainter &p, QRect full, QRect clip);
@@ -352,6 +355,7 @@ private:
 	void createTabbedPanel();
 	void setTabbedPanel(std::unique_ptr<ChatHelpers::TabbedPanel> panel);
 	void showAiComposeBox();
+	[[nodiscard]] bool canSendAiComposeDirect() const;
 
 	[[nodiscard]] bool showRecordButton() const;
 	[[nodiscard]] bool showEditStarsButton() const;
@@ -421,6 +425,7 @@ private:
 	BusinessShortcutId _shortcutId = 0;
 	Fn<bool()> _showSlowmodeError;
 	Fn<Api::SendAction()> _sendActionFactory;
+	Fn<void(TextWithEntities, Api::SendOptions, Fn<void()>)> _sendWithText;
 	rpl::variable<int> _slowmodeSecondsLeft;
 	rpl::variable<bool> _sendDisabledBySlowmode;
 	rpl::variable<bool> _liked;

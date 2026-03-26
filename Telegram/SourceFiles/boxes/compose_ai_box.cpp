@@ -280,7 +280,7 @@ private:
 	const not_null<ComposeAiModeButton*> _style;
 	const not_null<ComposeAiModeButton*> _fix;
 	Fn<void(ComposeAiMode)> _changed;
-	ComposeAiMode _active = ComposeAiMode::Translate;
+	ComposeAiMode _active = ComposeAiMode::Style;
 
 };
 
@@ -461,7 +461,7 @@ private:
 	Fn<void()> _premiumFlood;
 	Fn<void(ComposeAiMode)> _modeChanged;
 	Fn<void()> _styleSelected;
-	ComposeAiMode _mode = ComposeAiMode::Translate;
+	ComposeAiMode _mode = ComposeAiMode::Style;
 	int _styleIndex = -1;
 	bool _emojify = false;
 	CardState _state = CardState::Waiting;
@@ -575,7 +575,7 @@ ComposeAiModeTabs::ComposeAiModeTabs(QWidget *parent)
 	bind(_translate);
 	bind(_style);
 	bind(_fix);
-	setActive(ComposeAiMode::Translate);
+	setActive(ComposeAiMode::Style);
 }
 
 void ComposeAiModeTabs::setActive(ComposeAiMode mode) {
@@ -1474,6 +1474,9 @@ void ComposeAiContent::setMode(ComposeAiMode mode) {
 	if (_mode == mode) {
 		return;
 	}
+	if (mode != ComposeAiMode::Style) {
+		_styleIndex = -1;
+	}
 	_mode = mode;
 	_state = CardState::Waiting;
 	_preview->setState(CardState::Waiting);
@@ -1646,7 +1649,20 @@ bool ComposeAiContent::hasStyleSelection() const {
 } // namespace
 
 void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
-	box->setStyle(st::aiComposeBox);
+	const auto sendButtonHeight = st::aiComposeSendButton.inner.height;
+	const auto buttonHeight = st::aiComposeSendButton.inner.icon.height()
+		+ 2 * st::aiComposeSendButton.sendIconFillPadding;
+	const auto boxStyle = [&](const style::Box &base) {
+		const auto result = box->lifetime().make_state<style::Box>(base);
+		result->button.height = buttonHeight;
+		result->buttonHeight = buttonHeight;
+		result->button.textTop = base.button.textTop
+			- (base.button.height - buttonHeight) / 2;
+		return result;
+	};
+	const auto boxStyleNoSend = boxStyle(st::aiComposeBox);
+	const auto boxStyleWithSend = boxStyle(st::aiComposeBoxWithSend);
+	box->setStyle(*boxStyleNoSend);
 	box->setNoContentMargin(true);
 	box->setWidth(st::boxWideWidth);
 	box->setTitle(tr::lng_ai_compose_title());
@@ -1681,7 +1697,6 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 	content->setStyleTabs(stylesWrap);
 
 	auto premiumFlooded = std::make_shared<bool>(false);
-	auto applyButton = std::make_shared<QPointer<Ui::RoundButton>>();
 	auto sendButton = std::make_shared<QPointer<Ui::SendButton>>();
 
 	const auto applyAndClose = [=] {
@@ -1690,6 +1705,35 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 		}
 		args.apply(TextWithEntities(content->result()));
 		box->closeBox();
+	};
+	const auto sendResult = [=](Api::SendOptions options) {
+		if (!args.send || !content->hasResult()) {
+			return;
+		}
+		args.send(
+			TextWithEntities(content->result()),
+			options,
+			crl::guard(box, [=] {
+				box->closeBox();
+			}));
+	};
+	const auto addApplyButton = [=](
+			const style::Box &style,
+			rpl::producer<QString> text,
+			Fn<void()> callback) {
+		box->setStyle(style);
+		const auto result = box->addButton(std::move(text), std::move(callback));
+		result->setFullRadius(true);
+		return result;
+	};
+	const auto disableButton = [=](not_null<Ui::RoundButton*> button) {
+		button->clearState();
+		button->setDisabled(true);
+		button->setAttribute(Qt::WA_TransparentForMouseEvents);
+		button->setTextFgOverride(
+			anim::color(st::activeButtonBg, st::activeButtonFg, 0.5));
+		button->setClickedCallback([] {
+		});
 	};
 
 	const auto rebuildButtons = [=] {
@@ -1701,19 +1745,17 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 		box->addTopButton(st::boxTitleClose, [=] {
 			box->closeBox();
 		});
-		*applyButton = nullptr;
 
 		if (*premiumFlooded) {
-			box->setStyle(st::aiComposeBox);
 			auto helper = Ui::Text::CustomEmojiHelper();
 			const auto badge = helper.paletteDependent(
 				Ui::Text::CustomEmojiTextBadge(
 					u"x50"_q,
 					st::aiComposeBadge,
 					st::aiComposeBadgeMargin));
-			const auto btn = box->addButton(
+			const auto btn = addApplyButton(
+				*boxStyleNoSend,
 				tr::lng_ai_compose_increase_limit(), nullptr);
-			btn->setFullRadius(true);
 			btn->setContext(helper.context());
 			btn->setText(rpl::single(
 				tr::lng_ai_compose_increase_limit(tr::now, tr::marked)
@@ -1733,53 +1775,56 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 			});
 		} else if (content->mode() == ComposeAiMode::Style
 				&& !content->hasStyleSelection()) {
-			box->setStyle(st::aiComposeBox);
-			const auto btn = box->addButton(
+			const auto btn = addApplyButton(
+				*boxStyleNoSend,
 				tr::lng_ai_compose_select_style(), nullptr);
-			btn->setFullRadius(true);
-			btn->setDisabled(true);
-			btn->setTextFgOverride(
-				anim::color(st::activeButtonBg, st::activeButtonFg, 0.5));
+			disableButton(btn);
 		} else if (content->hasResult()) {
-			box->setStyle(st::aiComposeBoxWithSend);
 			const auto isStyle =
 				(content->mode() == ComposeAiMode::Style);
-			const auto btn = box->addButton(
+			const auto btn = addApplyButton(
+				args.send ? *boxStyleWithSend : *boxStyleNoSend,
 				isStyle
 					? tr::lng_ai_compose_apply_style()
 					: tr::lng_ai_compose_apply(),
 				applyAndClose);
-			btn->setFullRadius(true);
-			*applyButton = btn;
-
-			const auto send = Ui::CreateChild<Ui::SendButton>(
-				btn->parentWidget(),
-				st::aiComposeSendButton);
-			send->setState({ .type = Ui::SendButton::Type::Send });
-			send->show();
-			btn->geometryValue(
-			) | rpl::on_next([=](QRect geometry) {
-				const auto size = st::aiComposeBoxWithSend.buttonHeight;
-				send->resize(size, size);
-				send->moveToLeft(
-					geometry.x() + geometry.width()
-						+ st::aiComposeSendButtonSkip,
-					geometry.y() + (geometry.height() - size) / 2);
-			}, send->lifetime());
-			send->setClickedCallback(applyAndClose);
-			*sendButton = send;
+			if (args.send) {
+				const auto send = Ui::CreateChild<Ui::SendButton>(
+					btn->parentWidget(),
+					st::aiComposeSendButton);
+				send->setState({ .type = Ui::SendButton::Type::Send });
+				send->show();
+				btn->geometryValue(
+				) | rpl::on_next([=](QRect geometry) {
+					const auto size = sendButtonHeight;
+					send->resize(size, size);
+					send->moveToLeft(
+						geometry.x() + geometry.width()
+							+ st::aiComposeSendButtonSkip,
+						geometry.y() + (geometry.height() - size) / 2);
+				}, send->lifetime());
+				send->setClickedCallback([=] {
+					sendResult({});
+				});
+				if (args.setupMenu) {
+					args.setupMenu(
+						send,
+						[=](Api::SendOptions options) {
+							sendResult(options);
+						});
+				}
+				*sendButton = send;
+			}
 		} else {
-			box->setStyle(st::aiComposeBox);
 			const auto isStyle =
 				(content->mode() == ComposeAiMode::Style);
-			const auto btn = box->addButton(
+			const auto btn = addApplyButton(
+				*boxStyleNoSend,
 				isStyle
 					? tr::lng_ai_compose_apply_style()
 					: tr::lng_ai_compose_apply(),
 				nullptr);
-			btn->setFullRadius(true);
-			btn->setDisabled(true);
-			*applyButton = btn;
+			disableButton(btn);
 		}
 	};
 

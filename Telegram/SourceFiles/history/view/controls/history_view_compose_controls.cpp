@@ -1119,6 +1119,7 @@ void ComposeControls::updateShortcutId(BusinessShortcutId shortcutId) {
 void ComposeControls::setHistory(SetHistoryArgs &&args) {
 	_showSlowmodeError = std::move(args.showSlowmodeError);
 	_sendActionFactory = std::move(args.sendActionFactory);
+	_sendWithText = std::move(args.sendWithText);
 	_slowmodeSecondsLeft = rpl::single(0)
 		| rpl::then(std::move(args.slowmodeSecondsLeft));
 	_sendDisabledBySlowmode = rpl::single(false)
@@ -2881,7 +2882,16 @@ void ComposeControls::initSendButton() {
 	const auto send = crl::guard(_send.get(), [=](Api::SendOptions options) {
 		_sendCustomRequests.fire(std::move(options));
 	});
+	setupSendMenu(_send.get(), send);
 
+	_send->widthValue() | rpl::skip(1) | rpl::on_next([=] {
+		updateControlsGeometry(_wrap->size());
+	}, _send->lifetime());
+}
+
+void ComposeControls::setupSendMenu(
+		not_null<Ui::RpWidget*> button,
+		Fn<void(Api::SendOptions)> send) {
 	using namespace SendMenu;
 	const auto sendAction = [=](Action action, Details details) {
 		if (action.type == ActionType::ChangePrice) {
@@ -2896,18 +2906,13 @@ void ComposeControls::initSendButton() {
 			SendMenu::DefaultCallback(_show, send)(action, details);
 		}
 	};
-
 	SendMenu::SetupMenuAndShortcuts(
-		_send.get(),
+		button,
 		_show,
 		[=] { return sendButtonMenuDetails(); },
 		sendAction,
 		&_st.tabbed.menu,
 		&_st.tabbed.icons);
-
-	_send->widthValue() | rpl::skip(1) | rpl::on_next([=] {
-		updateControlsGeometry(_wrap->size());
-	}, _send->lifetime());
 }
 
 void ComposeControls::initSendAsButton(
@@ -3603,16 +3608,45 @@ void ComposeControls::showAiComposeBox() {
 	if (text.text.isEmpty()) {
 		return;
 	}
+	auto send = Fn<void(TextWithEntities, Api::SendOptions, Fn<void()>)>();
+	auto setupMenu = Fn<void(
+		not_null<Ui::RpWidget*>,
+		Fn<void(Api::SendOptions)>)>();
+	if (canSendAiComposeDirect() && _sendWithText) {
+		send = crl::guard(_wrap.get(), [=](
+				TextWithEntities result,
+				Api::SendOptions options,
+				Fn<void()> done) {
+			_sendWithText(std::move(result), options, std::move(done));
+		});
+		setupMenu = crl::guard(_wrap.get(), [=](
+				not_null<Ui::RpWidget*> button,
+				Fn<void(Api::SendOptions)> sendCallback) {
+			setupSendMenu(button, sendCallback);
+		});
+	}
 	Controls::ShowComposeAiBox(_show, {
 		.session = _session,
 		.text = text,
-		.apply = crl::guard(_wrap.get(), [=](TextWithEntities &&result) {
+		.apply = crl::guard(_wrap.get(), [=](TextWithEntities result) {
+			const auto action = Ui::InputField::HistoryAction::NewEntry;
 			setFieldText({
 				result.text,
 				TextUtilities::ConvertEntitiesToTextTags(result.entities),
-			}, 0, Ui::InputField::HistoryAction::NewEntry);
+			}, TextUpdateEvent::SaveDraft, action);
 		}),
+		.send = std::move(send),
+		.setupMenu = std::move(setupMenu),
 	});
+}
+
+bool ComposeControls::canSendAiComposeDirect() const {
+	using Type = Ui::SendButton::Type;
+	return _history
+		&& (computeSendButtonType() == Type::Send)
+		&& (_slowmodeSecondsLeft.current() == 0)
+		&& !_sendDisabledBySlowmode.current()
+		&& !shownStarsPerMessage();
 }
 
 bool ComposeControls::hasEnoughLinesForAi() const {

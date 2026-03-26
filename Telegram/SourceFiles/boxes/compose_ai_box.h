@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "api/api_common.h"
 #include "base/object_ptr.h"
 #include "ui/text/text_entity.h"
 
@@ -16,6 +17,7 @@ class Session;
 
 namespace Ui {
 class GenericBox;
+class RpWidget;
 class Show;
 } // namespace Ui
 
@@ -24,7 +26,9 @@ namespace HistoryView::Controls {
 struct ComposeAiBoxArgs {
 	not_null<Main::Session*> session;
 	TextWithEntities text;
-	Fn<void(TextWithEntities &&)> apply;
+	Fn<void(TextWithEntities)> apply;
+	Fn<void(TextWithEntities, Api::SendOptions, Fn<void()>)> send;
+	Fn<void(not_null<Ui::RpWidget*>, Fn<void(Api::SendOptions)>)> setupMenu;
 };
 
 void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args);

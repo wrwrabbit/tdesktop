@@ -803,6 +803,12 @@ void ChatWidget::setupComposeControls() {
 		.monoforumPeerId = _monoforumPeerId,
 		.showSlowmodeError = [=] { return showSlowmodeError(); },
 		.sendActionFactory = [=] { return prepareSendAction({}); },
+		.sendWithText = [=](
+				TextWithEntities &&text,
+				Api::SendOptions options,
+				Fn<void()> done) {
+			sendWithTextOverride(std::move(text), options, std::move(done));
+		},
 		.slowmodeSecondsLeft = SlowmodeSecondsLeft(_peer),
 		.sendDisabledBySlowmode = SendDisabledBySlowmode(_peer),
 		.writeRestriction = std::move(writeRestriction),
@@ -1362,13 +1368,27 @@ void ChatWidget::send(Api::SendOptions options) {
 		return;
 	}
 
+	sendTextWithTags(
+		_composeControls->getTextWithAppliedMarkdown(),
+		true,
+		options,
+		nullptr);
+}
+
+void ChatWidget::sendTextWithTags(
+		TextWithTags textWithTags,
+		bool useCurrentWebPageDraft,
+		Api::SendOptions options,
+		Fn<void()> done) {
 	if (!options.scheduled) {
 		_cornerButtons.clearReplyReturns();
 	}
 
 	auto message = Api::MessageToSend(prepareSendAction(options));
-	message.textWithTags = _composeControls->getTextWithAppliedMarkdown();
-	message.webPage = _composeControls->webPageDraft();
+	message.textWithTags = textWithTags;
+	if (useCurrentWebPageDraft) {
+		message.webPage = _composeControls->webPageDraft();
+	}
 
 	auto request = SendingErrorRequest{
 		.topicRootId = _topic ? _topic->rootId() : MsgId(0),
@@ -1386,7 +1406,7 @@ void ChatWidget::send(Api::SendOptions options) {
 		const auto withPaymentApproved = [=](int approved) {
 			auto copy = options;
 			copy.starsApproved = approved;
-			send(copy);
+			sendTextWithTags(textWithTags, useCurrentWebPageDraft, copy, done);
 		};
 		const auto checked = checkSendPayment(
 			request.messagesCount,
@@ -1398,9 +1418,10 @@ void ChatWidget::send(Api::SendOptions options) {
 	}
 
 	const auto nextLocalMessageId = session().data().nextLocalMessageId();
+	const auto hasText = !message.textWithTags.text.trimmed().isEmpty();
 
 	if (const auto field = _composeControls->fieldForMention(); field
-		&& HasSendText(field)
+		&& hasText
 		&& message.webPage.url.isEmpty()
 		&& (field->document()->size().height() <= field->height())) {
 		controller()->sendingAnimation().appendSending({
@@ -1427,6 +1448,21 @@ void ChatWidget::send(Api::SendOptions options) {
 	//onDraftSave();
 
 	finishSending();
+	if (done) {
+		done();
+	}
+}
+
+void ChatWidget::sendWithTextOverride(
+		TextWithEntities text,
+		Api::SendOptions options,
+		Fn<void()> done) {
+	const auto useCurrentWebPageDraft
+		= (text.text == _composeControls->prepareTextForEditMsg().text);
+	sendTextWithTags({
+		text.text,
+		TextUtilities::ConvertEntitiesToTextTags(text.entities),
+	}, useCurrentWebPageDraft, options, std::move(done));
 }
 
 void ChatWidget::edit(
