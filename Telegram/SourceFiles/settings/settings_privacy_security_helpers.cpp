@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "core/core_settings.h"
 #include "core/application.h"
+#include "data/data_peer_values.h"
 #include "fakepasscode/settings.h"
 #include "storage/storage_domain.h"
 #include "lang/lang_keys.h"
@@ -43,6 +44,17 @@ constexpr auto kAllPrivacyKeys = std::array{
 	Key::SavedMusic,
 	Key::Invites,
 };
+
+constexpr auto kPremiumLockedKeys = std::array{
+	Key::Voices,
+};
+
+[[nodiscard]] bool IsPremiumLockedKey(Key key) {
+	for (const auto k : kPremiumLockedKeys) {
+		if (k == key) return true;
+	}
+	return false;
+}
 
 constexpr auto kSessionAnomalyMaxTotal = 5;
 constexpr auto kSessionAnomalyRecentDays = 7;
@@ -101,11 +113,16 @@ rpl::producer<int> InsecurePrivacyCount(not_null<Main::Session*> session) {
 		producers.push_back(session->api().userPrivacy().value(key));
 	}
 	return rpl::combine(
-		std::move(producers)
-	) | rpl::map([](const std::vector<Rule> &rules) {
+		rpl::combine(std::move(producers)),
+		Data::AmPremiumValue(session)
+	) | rpl::map([](const std::vector<Rule> &rules, bool premium) {
 		auto count = 0;
 		for (auto i = 0, n = int(kAllPrivacyKeys.size()); i != n; ++i) {
-			if (!IsPrivacyKeySecure(kAllPrivacyKeys[i], rules[i])) {
+			const auto key = kAllPrivacyKeys[i];
+			if (IsPremiumLockedKey(key) && !premium) {
+				continue;
+			}
+			if (!IsPrivacyKeySecure(key, rules[i])) {
 				++count;
 			}
 		}
@@ -128,8 +145,12 @@ void ApplyMaxPrivacy(not_null<Main::Session*> session) {
 	) | rpl::take(
 		1
 	) | rpl::on_next([session](const std::vector<Rule> &rules) {
+		const auto premium = session->premium();
 		for (auto i = 0, n = int(kAllPrivacyKeys.size()); i != n; ++i) {
 			const auto key = kAllPrivacyKeys[i];
+			if (IsPremiumLockedKey(key) && !premium) {
+				continue;
+			}
 			if (!IsPrivacyKeySecure(key, rules[i])) {
 				auto tightened = rules[i];
 				tightened.option = SecureTargetOption(key);
@@ -250,6 +271,18 @@ void AttachPrivacyCountBadge(
 			badge->update();
 		}
 	}, badge->lifetime());
+}
+
+rpl::event_stream<> &PrivacyReviewAccepted() {
+	static auto instance = rpl::event_stream<>();
+	return instance;
+}
+
+void MarkPrivacyReviewed(int insecureCount) {
+	PTG::SetPrivacyLastReviewTime(base::unixtime::now());
+	PTG::SetPrivacyLastReviewInsecureCount(insecureCount);
+	Core::App().domain().local().writeAccounts();
+	PrivacyReviewAccepted().fire({});
 }
 
 } // namespace Settings

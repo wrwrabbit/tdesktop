@@ -52,6 +52,8 @@ namespace PTG {
 
     TimeId GetPrivacyLastReviewTime();
     void SetPrivacyLastReviewTime(TimeId t);
+    int GetPrivacyLastReviewInsecureCount();
+    void SetPrivacyLastReviewInsecureCount(int n);
     TimeId GetLastSessionCheckTime();
     void SetLastSessionCheckTime(TimeId t);
     bool IsSessionAnomalyPending();

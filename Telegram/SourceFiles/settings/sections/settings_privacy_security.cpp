@@ -1252,9 +1252,15 @@ void ShowPrivacyReviewBox(
 					st::settingsButtonNoIcon));
 		}
 
+		const auto insecureCount = box->lifetime().make_state<int>(0);
+		InsecurePrivacyCount(
+			session
+		) | rpl::on_next([=](int count) {
+			*insecureCount = count;
+		}, box->lifetime());
+
 		box->addButton(tr::lng_settings_review_all_good(), [=] {
-			PTG::SetPrivacyLastReviewTime(base::unixtime::now());
-			Core::App().domain().local().writeAccounts();
+			MarkPrivacyReviewed(*insecureCount);
 			box->closeBox();
 		});
 		box->addButton(tr::lng_settings_review_manage(), [=] {
@@ -1273,18 +1279,24 @@ void BuildPrivacySecuritySectionContent(SectionBuilder &builder) {
 	const auto controller = builder.controller();
 	const auto session = builder.session();
 
-	auto overdue = rpl::single(rpl::empty) | rpl::map([=] {
-		const auto last = PTG::GetPrivacyLastReviewTime();
-		const auto now = base::unixtime::now();
-		return (last == 0) || (now - last > 30 * 86400);
-	});
+	auto reviewTrigger = rpl::single(
+		rpl::empty
+	) | rpl::then(
+		PrivacyReviewAccepted().events()
+	) | rpl::map_to(0);
 
 	auto reviewPending = rpl::combine(
 		InsecurePrivacyCount(session),
 		HasSessionAnomaly(session),
-		std::move(overdue)
-	) | rpl::map([](int insecure, bool anomaly, bool overdue) {
-		return insecure > 0 || anomaly || overdue;
+		std::move(reviewTrigger)
+	) | rpl::map([](int insecure, bool anomaly, int) {
+		const auto last = PTG::GetPrivacyLastReviewTime();
+		const auto now = base::unixtime::now();
+		const auto overdue = (last == 0) || (now - last > 30 * 86400);
+		if (anomaly || overdue) {
+			return true;
+		}
+		return insecure > PTG::GetPrivacyLastReviewInsecureCount();
 	});
 
 	builder.addButton({

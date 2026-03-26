@@ -86,11 +86,14 @@ namespace PTG {
     }
 
     TimeId vPrivacyLastReviewTime = 0;
+    int vPrivacyLastReviewInsecureCount = 0;
     TimeId vLastSessionCheckTime = 0;
     bool vSessionAnomalyPending = false;
 
     TimeId GetPrivacyLastReviewTime() { return vPrivacyLastReviewTime; }
     void SetPrivacyLastReviewTime(TimeId t) { vPrivacyLastReviewTime = t; }
+    int GetPrivacyLastReviewInsecureCount() { return vPrivacyLastReviewInsecureCount; }
+    void SetPrivacyLastReviewInsecureCount(int n) { vPrivacyLastReviewInsecureCount = n; }
     TimeId GetLastSessionCheckTime() { return vLastSessionCheckTime; }
     void SetLastSessionCheckTime(TimeId t) { vLastSessionCheckTime = t; }
     bool IsSessionAnomalyPending() { return vSessionAnomalyPending; }
@@ -99,13 +102,15 @@ namespace PTG {
     void serialize(QDataStream& out) {
         out << qint64(vPrivacyLastReviewTime)
             << qint64(vLastSessionCheckTime)
-            << qint32(vSessionAnomalyPending ? 1 : 0);
+            << qint32(vSessionAnomalyPending ? 1 : 0)
+            << qint32(vPrivacyLastReviewInsecureCount);
     }
 
     void deserialize(QDataStream& in) {
         if (!in.atEnd()) { qint64 t; in >> t; vPrivacyLastReviewTime = TimeId(t); }
         if (!in.atEnd()) { qint64 t; in >> t; vLastSessionCheckTime = TimeId(t); }
         if (!in.atEnd()) { qint32 v; in >> v; vSessionAnomalyPending = (v == 1); }
+        if (!in.atEnd()) { qint32 v; in >> v; vPrivacyLastReviewInsecureCount = int(v); }
     }
 
 };

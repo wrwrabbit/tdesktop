@@ -45,4 +45,7 @@ void AttachPrivacyCountBadge(
 	not_null<Ui::RpWidget*> button,
 	not_null<Main::Session*> session);
 
+[[nodiscard]] rpl::event_stream<> &PrivacyReviewAccepted();
+void MarkPrivacyReviewed(int insecureCount);
+
 } // namespace Settings
