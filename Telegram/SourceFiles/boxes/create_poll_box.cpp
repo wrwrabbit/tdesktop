@@ -1762,6 +1762,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		const auto displayName = file.displayName.isEmpty()
 			? QFileInfo(file.path).fileName()
 			: file.displayName;
+		auto audioAttributes = PollMediaUpload::ExtractAudioAttributes(file);
+		const auto isAudio = !audioAttributes.isEmpty();
 		const auto token = ++media->token;
 		media->media = PollMedia();
 		media->thumbnail = std::make_shared<LocalImageThumbnail>(
@@ -1790,11 +1792,12 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 				.caption = TextWithTags(),
 				.spoiler = false,
 				.album = nullptr,
-				.forceFile = true,
+				.forceFile = !isAudio,
 				.idOverride = 0,
 				.displayName = displayName,
 			},
-			[=](std::shared_ptr<FilePrepareResult> prepared) {
+			[=, attributes = std::move(audioAttributes)](
+					std::shared_ptr<FilePrepareResult> prepared) {
 				if ((media->token != token) || !prepared) {
 					if (media->token == token) {
 						setMedia(media, PollMedia(), nullptr, false);
@@ -1810,6 +1813,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 					.token = token,
 					.filename = prepared->filename,
 					.filemime = prepared->filemime,
+					.attributes = attributes,
+					.forceFile = !isAudio,
 				});
 				media->uploadDataId = prepared->id;
 				_controller->session().uploader().upload(

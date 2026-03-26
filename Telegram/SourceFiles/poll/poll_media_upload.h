@@ -65,6 +65,9 @@ private:
 	const QString &filename,
 	int size);
 
+[[nodiscard]] QVector<MTPDocumentAttribute> ExtractAudioAttributes(
+	const Ui::PreparedFile &file);
+
 [[nodiscard]] bool ValidateFileDragData(not_null<const QMimeData*> data);
 
 [[nodiscard]] Ui::PreparedList FileListFromMimeData(

@@ -111,6 +111,28 @@ bool ValidateFileDragData(not_null<const QMimeData*> data) {
 	return (urls.size() == 1) && urls.front().isLocalFile();
 }
 
+QVector<MTPDocumentAttribute> ExtractAudioAttributes(
+		const Ui::PreparedFile &file) {
+	auto result = QVector<MTPDocumentAttribute>();
+	if (!file.information) {
+		return result;
+	}
+	const auto song = std::get_if<Ui::PreparedFileInformation::Song>(
+		&file.information->media);
+	if (!song) {
+		return result;
+	}
+	const auto seconds = song->duration / 1000;
+	using Flag = MTPDdocumentAttributeAudio::Flag;
+	result.push_back(MTP_documentAttributeAudio(
+		MTP_flags(Flag::f_title | Flag::f_performer),
+		MTP_int(seconds),
+		MTP_string(song->title),
+		MTP_string(song->performer),
+		MTPstring()));
+	return result;
+}
+
 Ui::PreparedList FileListFromMimeData(
 		not_null<const QMimeData*> data,
 		bool premium) {
@@ -725,6 +747,8 @@ void PollMediaUploader::startDocumentUpload(
 	const auto displayName = file.displayName.isEmpty()
 		? QFileInfo(file.path).fileName()
 		: file.displayName;
+	auto audioAttributes = ExtractAudioAttributes(file);
+	const auto isAudio = !audioAttributes.isEmpty();
 	const auto token = ++media->token;
 	media->media = PollMedia();
 	media->thumbnail = std::make_shared<LocalImageThumbnail>(
@@ -752,11 +776,12 @@ void PollMediaUploader::startDocumentUpload(
 			.caption = TextWithTags(),
 			.spoiler = false,
 			.album = nullptr,
-			.forceFile = true,
+			.forceFile = !isAudio,
 			.idOverride = 0,
 			.displayName = displayName,
 		},
-		[=](std::shared_ptr<FilePrepareResult> prepared) {
+		[=, attributes = std::move(audioAttributes)](
+				std::shared_ptr<FilePrepareResult> prepared) {
 			if ((media->token != token) || !prepared) {
 				if (media->token == token) {
 					setMedia(media, PollMedia(), nullptr, false);
@@ -772,6 +797,8 @@ void PollMediaUploader::startDocumentUpload(
 				.token = token,
 				.filename = prepared->filename,
 				.filemime = prepared->filemime,
+				.attributes = attributes,
+				.forceFile = !isAudio,
 			});
 			media->uploadDataId = prepared->id;
 			_session->uploader().upload(uploadId, prepared);
