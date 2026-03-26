@@ -1894,14 +1894,25 @@ void Poll::paintBottom(
 		return;
 	}
 	if (isAuthorNotVoted() && !_adminShowResults && !canSendVotes()) {
-		p.setPen(stm->msgFileThumbLinkFg);
-		const auto labelWidth = _adminVotesLabel.maxWidth();
-		_adminVotesLabel.drawLeft(
-			p,
-			left + (paintw - labelWidth) / 2,
-			stringtop,
-			labelWidth,
-			width());
+		if (_totalVotes > 0) {
+			p.setPen(stm->msgFileThumbLinkFg);
+			const auto labelWidth = _adminVotesLabel.maxWidth();
+			_adminVotesLabel.drawLeft(
+				p,
+				left + (paintw - labelWidth) / 2,
+				stringtop,
+				labelWidth,
+				width());
+		} else {
+			p.setPen(stm->msgDateFg);
+			const auto textw = _totalVotesLabel.maxWidth();
+			_totalVotesLabel.drawLeft(
+				p,
+				left + (paintw - textw) / 2,
+				stringtop,
+				textw,
+				width());
+		}
 	} else if (_adminShowResults && isAuthorNotVoted()) {
 		p.setPen(stm->msgFileThumbLinkFg);
 		const auto backw = _adminBackVoteLabel.maxWidth();
@@ -2978,7 +2989,8 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 				return result;
 			}
 		} else if (isAuthorNotVoted() && !_adminShowResults && !canSendVotes()) {
-			if (QRect(0, linkTop, width(), linkHeight).contains(point)) {
+			if (_totalVotes > 0
+				&& QRect(0, linkTop, width(), linkHeight).contains(point)) {
 				_lastLinkPoint = point;
 				result.link = _adminVotesLink;
 				return result;
