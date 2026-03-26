@@ -1851,20 +1851,35 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 		const auto &d = update.c_updateMessagePoll();
 		session().data().applyUpdate(d);
 		if (const auto tlPeer = d.vpeer()) {
+			const auto &results = d.vresults();
+			const auto hasUnread = results.match([](
+					const MTPDpollResults &data) {
+				return data.is_has_unread_votes();
+			});
+			const auto isMin = results.match([](
+					const MTPDpollResults &data) {
+				return data.is_min();
+			});
 			const auto peer = peerFromMTP(*tlPeer);
 			const auto msgId = d.vmsg_id()->v;
 			if (const auto history = session().data().historyLoaded(peer)) {
 				if (const auto item = session().data().message(
 						peer,
 						msgId)) {
-					if (!item->hasUnreadPollVote()) {
-						item->setHasUnreadPollVote();
-						item->addToUnreadThings(
-							HistoryUnreadThings::AddType::New);
+					if (hasUnread) {
+						if (!item->hasUnreadPollVote()) {
+							item->setHasUnreadPollVote();
+							item->addToUnreadThings(
+								HistoryUnreadThings::AddType::New);
+						}
+					} else if (!isMin && item->hasUnreadPollVote()) {
+						item->markPollVotesRead();
 					}
 				} else {
 					if (history->unreadPollVotes().has()) {
-						history->unreadPollVotes().checkAdd(msgId);
+						if (hasUnread) {
+							history->unreadPollVotes().checkAdd(msgId);
+						}
 					}
 					history->owner().histories().requestDialogEntry(
 						history);
