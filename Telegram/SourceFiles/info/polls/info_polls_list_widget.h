@@ -74,6 +74,9 @@ public:
 	rpl::producer<QString> title() override;
 	rpl::producer<int> desiredHeightValue() const override;
 
+	rpl::producer<SelectedItems> selectedListValue() const override;
+	void selectionAction(SelectionAction action) override;
+
 private:
 	void setupSearch();
 	void saveState(not_null<ListMemento*> memento);

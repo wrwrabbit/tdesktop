@@ -34,8 +34,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "window/section_widget.h"
 #include "window/themes/window_theme.h"
+#include "window/main_window.h"
 #include "window/window_session_controller.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
+#include "info/info_wrap_widget.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_dialogs.h"
@@ -62,6 +64,9 @@ public:
 	[[nodiscard]] int scrollTop() const;
 	void setScrollTop(int top);
 	void setSearchQuery(const QString &query);
+
+	[[nodiscard]] rpl::producer<SelectedItems> selectedItems() const;
+	void selectionAction(SelectionAction action);
 
 	void paintBackground(QPainter &p, QRect clip);
 
@@ -202,6 +207,8 @@ private:
 
 	QImage _bg;
 
+	rpl::event_stream<SelectedItems> _selectedItems;
+
 };
 
 ListWidget::Inner::Inner(
@@ -309,6 +316,23 @@ void ListWidget::Inner::setSearchQuery(const QString &query) {
 	}
 }
 
+rpl::producer<SelectedItems> ListWidget::Inner::selectedItems() const {
+	return _selectedItems.events();
+}
+
+void ListWidget::Inner::selectionAction(SelectionAction action) {
+	switch (action) {
+	case SelectionAction::Clear: _list->cancelSelection(); return;
+	case SelectionAction::Forward:
+		HistoryView::ConfirmForwardSelectedItems(_list);
+		return;
+	case SelectionAction::Delete:
+		HistoryView::ConfirmDeleteSelectedItems(_list);
+		return;
+	default: return;
+	}
+}
+
 SparseIdsMergedSlice::UniversalMsgId
 ListWidget::Inner::computeUniversalId(
 		Data::MessagePosition aroundId) const {
@@ -356,9 +380,11 @@ bool ListWidget::Inner::listScrollTo(int top, bool syntetic) {
 }
 
 void ListWidget::Inner::listCancelRequest() {
+	_list->cancelSelection();
 }
 
 void ListWidget::Inner::listDeleteRequest() {
+	HistoryView::ConfirmDeleteSelectedItems(_list);
 }
 
 void ListWidget::Inner::listTryProcessKeyInput(not_null<QKeyEvent*> e) {
@@ -391,12 +417,12 @@ rpl::producer<Data::MessagesSlice> ListWidget::Inner::listSource(
 }
 
 bool ListWidget::Inner::listAllowsMultiSelect() {
-	return false;
+	return true;
 }
 
 bool ListWidget::Inner::listIsItemGoodForSelection(
 		not_null<HistoryItem*> item) {
-	return false;
+	return item->isRegular() && !item->isService();
 }
 
 bool ListWidget::Inner::listIsLessInOrder(
@@ -414,6 +440,16 @@ bool ListWidget::Inner::listIsLessInOrder(
 
 void ListWidget::Inner::listSelectionChanged(
 		HistoryView::SelectedItems &&items) {
+	auto result = SelectedItems(Storage::SharedMediaType::Poll);
+	result.list.reserve(items.size());
+	const auto sessionId = _session->uniqueId();
+	for (const auto &item : items) {
+		auto entry = SelectedItem(GlobalMsgId{ item.msgId, sessionId });
+		entry.canDelete = item.canDelete;
+		entry.canForward = item.canForward;
+		result.list.push_back(std::move(entry));
+	}
+	_selectedItems.fire(std::move(result));
 }
 
 void ListWidget::Inner::listMarkReadTill(not_null<HistoryItem*> item) {
@@ -675,7 +711,7 @@ void ListWidget::Inner::listWindowSetInnerFocus() {
 }
 
 bool ListWidget::Inner::listAllowsDragForward() {
-	return false;
+	return _controller->parentController()->adaptive().isOneColumn();
 }
 
 void ListWidget::Inner::listLaunchDrag(
@@ -794,6 +830,14 @@ void ListWidget::setupSearch() {
 	) | rpl::on_next([=](const QString &query) {
 		_inner->setSearchQuery(query);
 	}, lifetime());
+}
+
+rpl::producer<SelectedItems> ListWidget::selectedListValue() const {
+	return _inner->selectedItems();
+}
+
+void ListWidget::selectionAction(SelectionAction action) {
+	_inner->selectionAction(action);
 }
 
 rpl::producer<QString> ListWidget::title() {
