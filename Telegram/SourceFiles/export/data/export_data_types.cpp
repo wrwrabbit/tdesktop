@@ -1879,6 +1879,7 @@ ServiceAction ParseServiceAction(
 		content.botId = data.vbot_id().v;
 		result.content = content;
 	}, [&](const MTPDmessageActionPollAppendAnswer &data) {
+	}, [&](const MTPDmessageActionPollDeleteAnswer &data) {
 	}, [](const MTPDmessageActionEmpty &data) {});
 	return result;
 }
