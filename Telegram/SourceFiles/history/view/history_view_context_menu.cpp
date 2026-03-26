@@ -87,6 +87,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "lang/lang_keys.h"
 #include "core/application.h"
+#include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "spellcheck/spellcheck_types.h"
@@ -1323,7 +1324,24 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 								TextUtilities::SetClipboardText(text);
 							},
 							&st::menuIconCopy);
-						if (poll->creator() && a->addedDate) {
+						const auto canDelete = [&] {
+							if (!a->addedDate) {
+								return false;
+							}
+							if (poll->creator()) {
+								return true;
+							}
+							if (a->addedBy
+								&& a->addedBy->isSelf()) {
+								const auto period = poll->session()
+									.appConfig()
+									.pollAnswerDeletePeriod();
+								return (base::unixtime::now() - a->addedDate)
+									< period;
+							}
+							return false;
+						}();
+						if (canDelete) {
 							const auto itemId = item->fullId();
 							result->addAction(
 								tr::lng_context_delete_poll_option(tr::now),

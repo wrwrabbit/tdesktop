@@ -81,6 +81,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
 #include "base/call_delayed.h"
+#include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "mainwidget.h"
@@ -3003,7 +3004,24 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 							TextUtilities::SetClipboardText(text);
 						},
 						&st::menuIconCopy);
-					if (poll->creator() && a->addedDate) {
+					const auto canDelete = [&] {
+						if (!a->addedDate) {
+							return false;
+						}
+						if (poll->creator()) {
+							return true;
+						}
+						if (a->addedBy
+							&& a->addedBy->isSelf()) {
+							const auto period = poll->session()
+								.appConfig()
+								.pollAnswerDeletePeriod();
+							return (base::unixtime::now() - a->addedDate)
+								< period;
+						}
+						return false;
+					}();
+					if (canDelete) {
 						const auto itemId = item->fullId();
 						const auto option = pollOptionLink;
 						_menu->addAction(
