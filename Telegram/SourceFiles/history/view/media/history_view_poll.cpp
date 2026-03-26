@@ -386,7 +386,6 @@ struct Poll::Answer {
 };
 
 struct Poll::AttachedMedia {
-	ClickHandlerPtr handler;
 	std::shared_ptr<Ui::DynamicImage> thumbnail;
 	PhotoData *photo = nullptr;
 	std::shared_ptr<Data::PhotoMedia> photoMedia;
@@ -399,7 +398,6 @@ struct Poll::AttachedMedia {
 struct Poll::SolutionMedia {
 	PollThumbnailKind kind = PollThumbnailKind::None;
 	uint64 id = 0;
-	ClickHandlerPtr handler;
 };
 
 struct Poll::RecentVoter {
@@ -905,28 +903,12 @@ void Poll::updateSolutionMedia() {
 	auto document = (DocumentData*)(nullptr);
 	if (updated.kind == PollThumbnailKind::Photo && updated.id) {
 		photo = _poll->owner().photo(PhotoId(updated.id));
-		_solutionMedia->handler = updated.handler;
 	} else if (updated.kind == PollThumbnailKind::Document && updated.id) {
 		document = _poll->owner().document(DocumentId(updated.id));
-		const auto session = &_poll->session();
-		_solutionMedia->handler = std::make_shared<LambdaClickHandler>(
-			[=](ClickContext context) {
-				const auto my = context.other.value<ClickHandlerContext>();
-				const auto controller = my.sessionWindow.get();
-				if (!controller
-					|| (&controller->session() != session)) {
-					return;
-				}
-				controller->openDocument(
-					document,
-					false,
-					messageContext);
-			});
 	} else if (updated.kind == PollThumbnailKind::Audio && updated.id) {
 		document = _poll->owner().document(DocumentId(updated.id));
 	} else if (updated.kind == PollThumbnailKind::Geo
 		&& _poll->solutionMedia.geo) {
-		_solutionMedia->handler = updated.handler;
 		const auto &point = *_poll->solutionMedia.geo;
 		const auto cloudImage = _poll->owner().location(point);
 		_solutionAttach = std::make_unique<Location>(
@@ -964,7 +946,6 @@ void Poll::updateAttachedMedia() {
 	}
 	_attachedMediaCache = QImage();
 	_attachedMedia->thumbnail = updated.thumbnail;
-	_attachedMedia->handler = updated.handler;
 	_attachedMedia->kind = updated.kind;
 	_attachedMedia->rounded = updated.rounded;
 	_attachedMedia->id = updated.id;
@@ -988,22 +969,6 @@ void Poll::updateAttachedMedia() {
 		|| updated.kind == PollThumbnailKind::Audio) && updated.id) {
 		const auto document = _poll->owner().document(
 			DocumentId(updated.id));
-		if (updated.kind == PollThumbnailKind::Document) {
-			const auto session = &_poll->session();
-			_attachedMedia->handler = std::make_shared<LambdaClickHandler>(
-				[=](ClickContext context) {
-					const auto my = context.other.value<ClickHandlerContext>();
-					const auto controller = my.sessionWindow.get();
-					if (!controller
-						|| (&controller->session() != session)) {
-						return;
-					}
-					controller->openDocument(
-						document,
-						false,
-						messageContext);
-				});
-		}
 		_attachedMediaAttach = CreateAttach(
 			_parent,
 			document,
@@ -2823,19 +2788,17 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 	if (const auto mediaHeight = countTopMediaHeight()) {
 		if (_attachedMediaAttach) {
 			const auto sideSkip = st::historyPollMediaSideSkip;
-			if (_attachedMedia->handler
-				&& QRect(
+			if (QRect(
 					sideSkip,
 					tshift,
 					_attachedMediaAttach->width(),
 					mediaHeight).contains(point)) {
-				result.link = _attachedMedia->handler;
+				result = _attachedMediaAttach->textState(
+					point - QPoint(sideSkip, tshift),
+					request);
+				result.symbol = 0;
 				return result;
 			}
-		} else if (_attachedMedia->handler
-			&& countTopMediaRect(tshift).contains(point)) {
-			result.link = _attachedMedia->handler;
-			return result;
 		}
 		tshift += mediaHeight + st::historyPollMediaSkip;
 	}
@@ -2901,33 +2864,37 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 				result.symbol += symbolAdd;
 				return result;
 			}
-			if (const auto mh = countSolutionMediaHeight(textWidth)) {
-				const auto mediaTop = textTop
-					+ textHeight
-					+ st::historyPollExplanationMediaSkip;
-				const auto isDocument = _solutionMedia
-					&& (_solutionMedia->kind == PollThumbnailKind::Document
-						|| _solutionMedia->kind == PollThumbnailKind::Audio);
-				const auto isThumbed = isDocument
-					&& _poll->solutionMedia.document
-					&& _poll->solutionMedia.document->hasThumbnail()
-					&& !_poll->solutionMedia.document->isSong();
-				const auto &fileSt = isThumbed
-					? st::msgFileThumbLayout
-					: st::msgFileLayout;
-				const auto shift = isDocument
-					? fileSt.padding.left()
-					: 0;
-				const auto mediaLeft = innerLeft - shift;
-				if (_solutionAttach
-					&& QRect(
-						mediaLeft,
-						mediaTop,
-						_solutionAttach->width(),
-						mh).contains(point)) {
-					if (_solutionMedia
-						&& _solutionMedia->handler) {
-						result.link = _solutionMedia->handler;
+			if (_solutionAttach) {
+				if (const auto mh = countSolutionMediaHeight(textWidth)) {
+					const auto mediaTop = textTop
+						+ textHeight
+						+ st::historyPollExplanationMediaSkip;
+					const auto isDocument = _solutionMedia
+						&& (_solutionMedia->kind
+								== PollThumbnailKind::Document
+							|| _solutionMedia->kind
+								== PollThumbnailKind::Audio);
+					const auto isThumbed = isDocument
+						&& _poll->solutionMedia.document
+						&& _poll->solutionMedia.document
+							->hasThumbnail()
+						&& !_poll->solutionMedia.document->isSong();
+					const auto &fileSt = isThumbed
+						? st::msgFileThumbLayout
+						: st::msgFileLayout;
+					const auto shift = isDocument
+						? fileSt.padding.left()
+						: 0;
+					const auto mediaLeft = innerLeft - shift;
+					if (QRect(
+							mediaLeft,
+							mediaTop,
+							_solutionAttach->width(),
+							mh).contains(point)) {
+						result = _solutionAttach->textState(
+							point - QPoint(mediaLeft, mediaTop),
+							request);
+						result.symbol = 0;
 					}
 				}
 			}
