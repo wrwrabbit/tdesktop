@@ -11,7 +11,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/ui_integration.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_channel.h"
+#include "data/data_document.h"
 #include "data/data_peer.h"
+#include "data/data_photo.h"
 #include "data/data_poll.h"
 #include "data/data_session.h"
 #include "data/data_story.h"
@@ -349,8 +351,10 @@ void Reply::update(
 		: nullptr;
 	const auto messagePoll = messageMedia
 		? messageMedia->poll()
+		: message
+		? (message->media() ? message->media()->poll() : nullptr)
 		: nullptr;
-	const auto pollAnswer = messagePoll
+	const auto pollAnswer = (messagePoll && !fields.pollOption.isEmpty())
 		? messagePoll->answerByOption(fields.pollOption)
 		: nullptr;
 	const auto story = data->resolvedStory.get();
@@ -370,11 +374,18 @@ void Reply::update(
 	_hiddenSenderColorIndexPlusOne = (!_colorPeer && message)
 		? (message->originalHiddenSenderInfo()->colorIndex + 1)
 		: 0;
+	const auto pollMediaPtr = pollAnswer
+		? &pollAnswer->media
+		: (messagePoll && fields.pollOption.isEmpty())
+		? &messagePoll->attachedMedia
+		: nullptr;
 	const auto hasPreview = (story && story->hasReplyPreview())
 		|| (message
 			&& message->media()
 			&& message->media()->hasReplyPreview())
-		|| (externalMedia && externalMedia->hasReplyPreview());
+		|| (externalMedia && externalMedia->hasReplyPreview())
+		|| (pollMediaPtr
+			&& (pollMediaPtr->photo || pollMediaPtr->document));
 	_hasPreview = hasPreview ? 1 : 0;
 	_displaying = data->displaying() ? 1 : 0;
 	_multiline = data->multiline() ? 1 : 0;
@@ -890,15 +901,42 @@ void Reply::paint(
 					? data->resolvedMessage.get()
 					: nullptr;
 				const auto media = message ? message->media() : nullptr;
-				const auto image = media
-					? media->replyPreview()
-					: !data
-					? nullptr
-					: data->resolvedStory
-					? data->resolvedStory->replyPreview()
-					: data->fields().externalMedia
-					? data->fields().externalMedia->replyPreview()
+				const auto messagePoll = media ? media->poll() : nullptr;
+				const auto pollAnswer = messagePoll
+					? messagePoll->answerByOption(
+						data->fields().pollOption)
 					: nullptr;
+				const auto pollMediaPtr = pollAnswer
+					? &pollAnswer->media
+					: (messagePoll
+						&& data->fields().pollOption.isEmpty())
+					? &messagePoll->attachedMedia
+					: nullptr;
+				const auto image = [&]() -> Image* {
+					if (pollMediaPtr) {
+						if (pollMediaPtr->photo) {
+							return pollMediaPtr->photo->getReplyPreview(
+								message);
+						} else if (pollMediaPtr->document) {
+							return pollMediaPtr->document->getReplyPreview(
+								message);
+						}
+					}
+					if (media) {
+						return media->replyPreview();
+					}
+					if (!data) {
+						return nullptr;
+					}
+					if (data->resolvedStory) {
+						return data->resolvedStory->replyPreview();
+					}
+					if (data->fields().externalMedia) {
+						return data->fields().externalMedia
+							->replyPreview();
+					}
+					return nullptr;
+				}();
 				if (image) {
 					auto to = style::rtlrect(
 						x + st::historyReplyPreviewMargin.left(),
