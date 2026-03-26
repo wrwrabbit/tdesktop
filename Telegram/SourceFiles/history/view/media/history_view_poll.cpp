@@ -86,6 +86,7 @@ enum class PollThumbnailKind {
 	None,
 	Photo,
 	Document,
+	Audio,
 	Emoji,
 	Geo,
 };
@@ -213,6 +214,12 @@ struct PollThumbnailData {
 				&poll->owner(),
 				Data::SerializeCustomEmojiId(media.document));
 			result.kind = PollThumbnailKind::Emoji;
+		} else if (media.document->isSong()
+			|| media.document->isVoiceMessage()) {
+			result.thumbnail = Ui::MakeDocumentFilePreviewThumbnail(
+				media.document,
+				messageContext.id);
+			result.kind = PollThumbnailKind::Audio;
 		} else {
 			result.thumbnail = Ui::MakeDocumentThumbnailCenterCrop(
 				media.document,
@@ -245,7 +252,8 @@ struct PollThumbnailData {
 				}
 				controller->openPhoto(photo, messageContext);
 			});
-	} else if (result.kind == PollThumbnailKind::Document && result.id) {
+	} else if ((result.kind == PollThumbnailKind::Document
+		|| result.kind == PollThumbnailKind::Audio) && result.id) {
 		const auto document = media.document;
 		const auto session = &poll->session();
 		result.handler = std::make_shared<LambdaClickHandler>(
@@ -914,6 +922,8 @@ void Poll::updateSolutionMedia() {
 					false,
 					messageContext);
 			});
+	} else if (updated.kind == PollThumbnailKind::Audio && updated.id) {
+		document = _poll->owner().document(DocumentId(updated.id));
 	} else if (updated.kind == PollThumbnailKind::Geo
 		&& _poll->solutionMedia.geo) {
 		_solutionMedia->handler = updated.handler;
@@ -974,23 +984,26 @@ void Poll::updateAttachedMedia() {
 			_attachedMedia->photoSize = *size;
 		}
 	}
-	if (updated.kind == PollThumbnailKind::Document && updated.id) {
+	if ((updated.kind == PollThumbnailKind::Document
+		|| updated.kind == PollThumbnailKind::Audio) && updated.id) {
 		const auto document = _poll->owner().document(
 			DocumentId(updated.id));
-		const auto session = &_poll->session();
-		_attachedMedia->handler = std::make_shared<LambdaClickHandler>(
-			[=](ClickContext context) {
-				const auto my = context.other.value<ClickHandlerContext>();
-				const auto controller = my.sessionWindow.get();
-				if (!controller
-					|| (&controller->session() != session)) {
-					return;
-				}
-				controller->openDocument(
-					document,
-					false,
-					messageContext);
-			});
+		if (updated.kind == PollThumbnailKind::Document) {
+			const auto session = &_poll->session();
+			_attachedMedia->handler = std::make_shared<LambdaClickHandler>(
+				[=](ClickContext context) {
+					const auto my = context.other.value<ClickHandlerContext>();
+					const auto controller = my.sessionWindow.get();
+					if (!controller
+						|| (&controller->session() != session)) {
+						return;
+					}
+					controller->openDocument(
+						document,
+						false,
+						messageContext);
+				});
+		}
 		_attachedMediaAttach = CreateAttach(
 			_parent,
 			document,
@@ -2201,7 +2214,8 @@ void Poll::paintSolutionBlock(
 		yshift += _solutionText.countHeight(textWidth)
 			+ st::historyPollExplanationMediaSkip;
 		const auto isDocument = _solutionMedia
-			&& (_solutionMedia->kind == PollThumbnailKind::Document);
+			&& (_solutionMedia->kind == PollThumbnailKind::Document
+				|| _solutionMedia->kind == PollThumbnailKind::Audio);
 		const auto isThumbed = isDocument
 			&& _poll->solutionMedia.document
 			&& _poll->solutionMedia.document->hasThumbnail()
@@ -2892,8 +2906,8 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 					+ textHeight
 					+ st::historyPollExplanationMediaSkip;
 				const auto isDocument = _solutionMedia
-					&& (_solutionMedia->kind
-						== PollThumbnailKind::Document);
+					&& (_solutionMedia->kind == PollThumbnailKind::Document
+						|| _solutionMedia->kind == PollThumbnailKind::Audio);
 				const auto isThumbed = isDocument
 					&& _poll->solutionMedia.document
 					&& _poll->solutionMedia.document->hasThumbnail()
