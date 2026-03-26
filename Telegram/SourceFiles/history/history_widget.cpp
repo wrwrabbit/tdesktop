@@ -79,6 +79,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document_media.h"
 #include "data/data_photo.h"
 #include "data/data_photo_media.h"
+#include "data/data_poll.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_forum.h"
@@ -9814,10 +9815,26 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 	const auto media = (!_previewDrawPreview && drawMsgText)
 		? drawMsgText->media()
 		: nullptr;
-	const auto hasPreview = media && media->hasReplyPreview();
+	const auto poll = media ? media->poll() : nullptr;
+	const auto pollAnswer = poll
+		? poll->answerByOption(_replyTo.pollOption)
+		: nullptr;
+	const auto pollMediaPtr = pollAnswer
+		? &pollAnswer->media
+		: (poll && _replyTo.pollOption.isEmpty())
+		? &poll->attachedMedia
+		: nullptr;
+	const auto pollMediaHasPreview = pollMediaPtr
+		&& (pollMediaPtr->photo || pollMediaPtr->document);
+	const auto hasPreview = pollMediaHasPreview
+		|| (media && media->hasReplyPreview());
 	const auto preview = _mediaEditManager
 		? _mediaEditManager.mediaPreview()
-		: hasPreview
+		: pollMediaHasPreview
+		? (pollMediaPtr->photo
+			? pollMediaPtr->photo->getReplyPreview(drawMsgText)
+			: pollMediaPtr->document->getReplyPreview(drawMsgText))
+		: (media && media->hasReplyPreview())
 		? media->replyPreview()
 		: nullptr;
 	const auto spoilered = _mediaEditManager.spoilered();

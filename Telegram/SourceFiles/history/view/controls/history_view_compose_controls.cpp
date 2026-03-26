@@ -43,7 +43,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_origin.h"
 #include "data/data_forum_topic.h"
 #include "data/data_peer_values.h"
+#include "data/data_document.h"
+#include "data/data_photo.h"
 #include "data/data_photo_media.h"
+#include "data/data_poll.h"
 #include "data/data_premium_limits.h" // Data::PremiumLimits.
 #include "data/stickers/data_stickers.h"
 #include "data/stickers/data_custom_emoji.h"
@@ -637,10 +640,27 @@ void FieldHeader::paintEditOrReplyToMessage(Painter &p) {
 	}
 
 	const auto media = _shownMessage->media();
-	_shownMessageHasPreview = media && media->hasReplyPreview();
+	const auto poll = media ? media->poll() : nullptr;
+	const auto reply = replyingToMessage();
+	const auto pollAnswer = poll
+		? poll->answerByOption(reply.pollOption)
+		: nullptr;
+	const auto pollMediaPtr = pollAnswer
+		? &pollAnswer->media
+		: (poll && reply.pollOption.isEmpty())
+		? &poll->attachedMedia
+		: nullptr;
+	const auto pollMediaHasPreview = pollMediaPtr
+		&& (pollMediaPtr->photo || pollMediaPtr->document);
+	_shownMessageHasPreview = pollMediaHasPreview
+		|| (media && media->hasReplyPreview());
 	const auto preview = _mediaEditManager
 		? _mediaEditManager.mediaPreview()
-		: _shownMessageHasPreview
+		: pollMediaHasPreview
+		? (pollMediaPtr->photo
+			? pollMediaPtr->photo->getReplyPreview(_shownMessage)
+			: pollMediaPtr->document->getReplyPreview(_shownMessage))
+		: (media && media->hasReplyPreview())
 		? media->replyPreview()
 		: nullptr;
 	const auto spoilered = _mediaEditManager.spoilered();
