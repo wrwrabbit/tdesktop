@@ -157,6 +157,7 @@ void BuildLocationSection(SectionBuilder &builder) {
 
 	const auto isSystemApp = Core::BinaryIsInSystemAppFolder();
 
+#ifndef OS_MAC_STORE
 	if (!isSystemApp) {
 		builder.addButton({
 			.id = u"ptg/location_move"_q,
@@ -175,6 +176,7 @@ void BuildLocationSection(SectionBuilder &builder) {
 				st::ptgLocationCardDesc),
 			st::boxRowPadding);
 	}
+#endif // OS_MAC_STORE
 
 	builder.addDivider();
 }

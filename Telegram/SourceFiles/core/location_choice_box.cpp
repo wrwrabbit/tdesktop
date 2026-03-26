@@ -36,7 +36,63 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Core {
 namespace {
 
+#ifdef Q_OS_MAC
+[[nodiscard]] QString FindBundleRoot() {
+	auto dir = QDir(cExeDir());
+	dir.cdUp(); // Contents/MacOS → Contents
+	dir.cdUp(); // Contents → Telegram.app
+	if (dir.dirName().endsWith(u".app"_q)) {
+		return dir.absolutePath();
+	}
+	return QString();
+}
+
+[[nodiscard]] bool CopyBundleRecursive(
+		const QString &source,
+		const QString &target) {
+	const auto sourceDir = QDir(source);
+	if (!sourceDir.exists()) {
+		return false;
+	}
+	QDir().mkpath(target);
+	auto it = QDirIterator(
+		source,
+		QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot,
+		QDirIterator::Subdirectories);
+	while (it.hasNext()) {
+		it.next();
+		const auto srcFile = it.filePath();
+		const auto relative = sourceDir.relativeFilePath(srcFile);
+		const auto dstFile = target + '/' + relative;
+		QDir().mkpath(QFileInfo(dstFile).absolutePath());
+		QFile::remove(dstFile);
+		if (!QFile::copy(srcFile, dstFile)) {
+			LOG(("LocationBox: bundle copy failed '%1' -> '%2'").arg(srcFile, dstFile));
+			return false;
+		}
+	}
+	return true;
+}
+#endif // Q_OS_MAC
+
 [[nodiscard]] bool TryCopyBinary(const QString &targetDir) {
+#ifdef Q_OS_MAC
+	const auto bundleRoot = FindBundleRoot();
+	if (!bundleRoot.isEmpty()) {
+		const auto bundleName = QFileInfo(bundleRoot).fileName();
+		const auto dstBundle = targetDir + '/' + bundleName;
+		LOG(("LocationBox: TryCopyBinary (bundle) src='%1' dst='%2'").arg(bundleRoot, dstBundle));
+		if (QDir(dstBundle).exists()) {
+			QDir(dstBundle).removeRecursively();
+		}
+		if (CopyBundleRecursive(bundleRoot, dstBundle)) {
+			LOG(("LocationBox: bundle copy succeeded"));
+			return true;
+		}
+		LOG(("LocationBox: bundle copy failed"));
+		return false;
+	}
+#endif // Q_OS_MAC
 	const auto srcExe = cExeDir() + cExeName();
 	const auto dstExe = targetDir + '/' + cExeName();
 	LOG(("LocationBox: TryCopyBinary src='%1' dst='%2'").arg(srcExe, dstExe));
@@ -51,12 +107,17 @@ namespace {
 }
 
 void CopyCompanionFiles(const QString &targetDir) {
-	const auto updaterSrc = cExeDir() + u"Updater.exe"_q;
+#ifdef Q_OS_WIN
+	const auto updaterName = u"Updater.exe"_q;
+#else
+	const auto updaterName = u"Updater"_q;
+#endif
+	const auto updaterSrc = cExeDir() + updaterName;
 	if (QFile::exists(updaterSrc)) {
-		const auto updaterDst = targetDir + u"/Updater.exe"_q;
+		const auto updaterDst = targetDir + '/' + updaterName;
 		QFile::remove(updaterDst);
 		const auto copied = QFile::copy(updaterSrc, updaterDst);
-		LOG(("LocationBox: copy Updater.exe: %1").arg(Logs::b(copied)));
+		LOG(("LocationBox: copy %1: %2").arg(updaterName, Logs::b(copied)));
 	}
 	const auto modulesSrc = cExeDir() + u"modules"_q;
 	if (QDir(modulesSrc).exists()) {
@@ -82,6 +143,35 @@ void RelaunchFrom(const QString &newExePath) {
 	QProcess::startDetached(newExePath, {});
 	CrashReports::Finish();
 	Core::Quit();
+}
+
+[[nodiscard]] QString RelaunchExePath(const QString &targetDir) {
+#ifdef Q_OS_MAC
+	const auto bundleRoot = FindBundleRoot();
+	if (!bundleRoot.isEmpty()) {
+		const auto bundleName = QFileInfo(bundleRoot).fileName();
+		return targetDir + '/' + bundleName
+			+ u"/Contents/MacOS/"_q + cExeName();
+	}
+#endif // Q_OS_MAC
+	return targetDir + '/' + cExeName();
+}
+
+[[nodiscard]] QString DisplayDirPath(const QString &exeDir) {
+#ifdef Q_OS_MAC
+	auto dir = QDir(cExeDir());
+	dir.cdUp();
+	dir.cdUp();
+	if (dir.dirName().endsWith(u".app"_q)) {
+		return QDir::toNativeSeparators(dir.absolutePath());
+	}
+#elif defined(Q_OS_LINUX)
+	const auto home = QDir::homePath();
+	if (!home.isEmpty() && exeDir.startsWith(home)) {
+		return u"~"_q + exeDir.mid(home.size());
+	}
+#endif
+	return exeDir;
 }
 
 [[nodiscard]] QString LocationStatusText(
@@ -149,6 +239,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 	const auto binaryCategory = Core::ClassifyBinaryLocation();
 	const auto exeDir = QDir::toNativeSeparators(
 		QDir(cExeDir()).absolutePath());
+	const auto displayDir = DisplayDirPath(exeDir);
 
 	Ui::AddSkip(layout);
 
@@ -159,7 +250,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 	layout->add(
 		object_ptr<Ui::FlatLabel>(
 			layout,
-			tr::lng_ptg_location_running_at(tr::now, lt_path, exeDir),
+			tr::lng_ptg_location_running_at(tr::now, lt_path, displayDir),
 			labelStyle),
 		st::boxRowPadding);
 
@@ -253,45 +344,98 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 			});
 	}
 #elif defined(Q_OS_MAC)
-	if (!isSystemApp) {
-		constexpr auto kApplicationsPath = u"/Applications/Telegram Desktop"_q;
-		AddOptionCard(
-			layout,
-			tr::lng_ptg_location_card_applications_title(tr::now),
-			tr::lng_ptg_location_card_applications_desc(tr::now),
-			{
-				tr::lng_ptg_location_card_applications_pro1(tr::now),
-				tr::lng_ptg_location_card_applications_pro2(tr::now),
-				u"\u2212 "_q + tr::lng_ptg_location_card_applications_con1(tr::now),
-			},
-			tr::lng_ptg_location_card_applications_btn(),
-			[=] {
-				box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
-					confirm->setTitle(tr::lng_ptg_location_confirm_title());
-					confirm->addRow(object_ptr<Ui::FlatLabel>(
-						confirm,
-						tr::lng_ptg_location_confirm_text(
-							tr::now,
-							lt_path,
-							kApplicationsPath),
-						st::boxLabel));
-					confirm->addButton(tr::lng_settings_save(), [=] {
-						confirm->closeBox();
-						box->closeBox();
-						if (TryCopyBinary(kApplicationsPath)) {
-							CopyCompanionFiles(kApplicationsPath);
-							Storage::ScheduleSwitchToHomeWrittenTo(kApplicationsPath);
-							RelaunchFrom(kApplicationsPath + '/' + cExeName());
-						} else {
-							box->uiShow()->showToast(
-								tr::lng_ptg_location_error_copy(tr::now));
-						}
-					});
-					confirm->addButton(tr::lng_cancel(), [=] { confirm->closeBox(); });
-				}));
-			});
+	{
+		const auto kApplicationsPath = u"/Applications"_q;
+		const auto applicationsWritable = QFileInfo(kApplicationsPath).isWritable();
+		if (!isSystemApp && applicationsWritable) {
+			AddOptionCard(
+				layout,
+				tr::lng_ptg_location_card_applications_title(tr::now),
+				tr::lng_ptg_location_card_applications_desc(tr::now),
+				{
+					tr::lng_ptg_location_card_applications_pro1(tr::now),
+					tr::lng_ptg_location_card_applications_pro2(tr::now),
+					u"\u2212 "_q + tr::lng_ptg_location_card_applications_con1(tr::now),
+				},
+				tr::lng_ptg_location_card_applications_btn(),
+				[=] {
+					box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
+						confirm->setTitle(tr::lng_ptg_location_confirm_title());
+						confirm->addRow(object_ptr<Ui::FlatLabel>(
+							confirm,
+							tr::lng_ptg_location_confirm_text(
+								tr::now,
+								lt_path,
+								kApplicationsPath),
+							st::boxLabel));
+						confirm->addButton(tr::lng_settings_save(), [=] {
+							confirm->closeBox();
+							box->closeBox();
+							if (TryCopyBinary(kApplicationsPath)) {
+								Storage::ScheduleSwitchToHomeWrittenTo(kApplicationsPath);
+								RelaunchFrom(RelaunchExePath(kApplicationsPath));
+							} else {
+								box->uiShow()->showToast(
+									tr::lng_ptg_location_error_copy(tr::now));
+							}
+						});
+						confirm->addButton(tr::lng_cancel(), [=] { confirm->closeBox(); });
+					}));
+				});
+		}
 	}
-#endif // Q_OS_WIN / Q_OS_MAC
+#else // Q_OS_LINUX
+	{
+		const auto homeBinPath = QDir::homePath() + u"/.local/bin"_q;
+		const auto isAlreadyInHome = (QDir::cleanPath(QDir(cExeDir()).absolutePath())
+			== QDir::cleanPath(homeBinPath));
+		if (!isSystemApp && !isAlreadyInHome) {
+			AddOptionCard(
+				layout,
+				tr::lng_ptg_location_card_home_title(tr::now),
+				tr::lng_ptg_location_card_home_desc(tr::now),
+				{
+					tr::lng_ptg_location_card_home_pro1(tr::now),
+					tr::lng_ptg_location_card_home_pro2(tr::now),
+					tr::lng_ptg_location_card_home_pro3(tr::now),
+				},
+				tr::lng_ptg_location_card_home_btn(),
+				[=] {
+					const auto targetExists = QFile::exists(homeBinPath + '/' + cExeName());
+					box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
+						confirm->setTitle(tr::lng_ptg_location_confirm_title());
+						confirm->addRow(object_ptr<Ui::FlatLabel>(
+							confirm,
+							targetExists
+								? tr::lng_ptg_location_confirm_overwrite(tr::now)
+								: tr::lng_ptg_location_confirm_text(
+									tr::now,
+									lt_path,
+									u"~/.local/bin"_q),
+							st::boxLabel));
+						confirm->addButton(tr::lng_settings_save(), [=] {
+							confirm->closeBox();
+							box->closeBox();
+							if (TryCopyBinary(homeBinPath)) {
+								CopyCompanionFiles(homeBinPath);
+								Storage::ScheduleSwitchToHomeWrittenTo(homeBinPath);
+								RelaunchFrom(RelaunchExePath(homeBinPath));
+							} else {
+								box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> err) {
+									err->addRow(object_ptr<Ui::FlatLabel>(
+										err,
+										tr::lng_ptg_location_error_copy(tr::now),
+										st::boxLabel));
+									err->addButton(tr::lng_close(), [=] { err->closeBox(); });
+								}));
+							}
+						});
+						confirm->addButton(tr::lng_cancel(), [=] { confirm->closeBox(); });
+					}));
+				});
+		}
+	}
+#endif // Q_OS_WIN / Q_OS_MAC / Q_OS_LINUX
 
 	if (!isSystemApp && !isInstallerManaged) {
 		AddOptionCard(
@@ -347,9 +491,11 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 						confirm->closeBox();
 						box->closeBox();
 						if (TryCopyBinary(cleanChosen)) {
+#ifndef Q_OS_MAC
 							CopyCompanionFiles(cleanChosen);
+#endif // Q_OS_MAC
 							Storage::ScheduleSwitchToCustomWrittenTo(cleanChosen);
-							RelaunchFrom(cleanChosen + '/' + cExeName());
+							RelaunchFrom(RelaunchExePath(cleanChosen));
 						} else {
 							box->uiShow()->showToast(
 								tr::lng_ptg_location_error_copy(tr::now));

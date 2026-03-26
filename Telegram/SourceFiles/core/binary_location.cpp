@@ -12,6 +12,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QDir>
 #include <QtCore/QStandardPaths>
 
+#ifdef Q_OS_LINUX
+#include <ksandbox.h>
+#endif // Q_OS_LINUX
+
 namespace Core {
 namespace {
 
@@ -69,6 +73,12 @@ QString SystemAppFolderPath() {
 
 BinaryLocationCategory ClassifyBinaryLocation() {
 	const auto exeDir = QDir(cExeDir()).absolutePath();
+
+#ifdef Q_OS_LINUX
+	if (KSandbox::isSnap() || KSandbox::isFlatpak()) {
+		return BinaryLocationCategory::SystemAppFolder;
+	}
+#endif // Q_OS_LINUX
 
 	const auto downloads = DownloadsFolderPath();
 	if (!downloads.isEmpty() && PathStartsWith(exeDir, downloads)) {

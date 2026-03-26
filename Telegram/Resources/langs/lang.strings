@@ -7704,6 +7704,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_ptg_location_card_applications_pro2" = "Data is stored in ~/Library \u2014 the standard macOS location";
 "lng_ptg_location_card_applications_con1" = "May require administrator password";
 "lng_ptg_location_card_applications_btn" = "Move to Applications";
+"lng_ptg_location_card_home_title" = "Move to ~/.local/bin";
+"lng_ptg_location_card_home_desc" = "Move Telegram to the standard Linux user binary directory.";
+"lng_ptg_location_card_home_pro1" = "Standard XDG location, separate from your downloaded files";
+"lng_ptg_location_card_home_pro2" = "Desktop launcher updated automatically on next start";
+"lng_ptg_location_card_home_pro3" = "Won\u2019t be accidentally deleted when cleaning Downloads";
+"lng_ptg_location_card_home_btn" = "Move to ~/.local/bin";
 "lng_ptg_location_card_custom_title" = "Move to a custom folder";
 "lng_ptg_location_card_custom_desc" = "Choose any folder to keep Telegram. Data is stored alongside the app (portable mode).";
 "lng_ptg_location_card_custom_pro1" = "Works on USB drives \u2014 take Telegram with you";

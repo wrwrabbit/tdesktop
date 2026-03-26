@@ -115,6 +115,7 @@ object_ptr<Ui::RpWidget> CreateIntroSettings(
 		OpenFaq(nullptr);
 	});
 
+#ifndef OS_MAC_STORE
 	if (!Core::BinaryIsInSystemAppFolder()) {
 		Ui::AddDivider(result);
 		Ui::AddSkip(result);
@@ -128,6 +129,7 @@ object_ptr<Ui::RpWidget> CreateIntroSettings(
 		});
 		Ui::AddSkip(result);
 	}
+#endif // OS_MAC_STORE
 
 	return result;
 }

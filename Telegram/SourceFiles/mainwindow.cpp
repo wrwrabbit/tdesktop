@@ -302,6 +302,7 @@ void MainWindow::setupIntro(
 	}
 	fixOrder();
 
+#ifndef OS_MAC_STORE
 	if (!_passcodeLock
 			&& !_setupEmailLock
 			&& point == Intro::EnterPoint::Start
@@ -311,6 +312,7 @@ void MainWindow::setupIntro(
 			Core::ShowLocationChoiceBoxFirstRun(show.get());
 		});
 	}
+#endif // OS_MAC_STORE
 }
 
 void MainWindow::setupMain(
