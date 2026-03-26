@@ -1054,6 +1054,7 @@ void ChatWidget::setupSwipeReplyAndBack() {
 			return result;
 		}
 
+		_inner->hideElementOverlay();
 		result.msgBareId = view->data()->fullId().msg.bare;
 		result.callback = [=, itemId = view->data()->fullId()] {
 			const auto still = show->session().data().message(itemId);

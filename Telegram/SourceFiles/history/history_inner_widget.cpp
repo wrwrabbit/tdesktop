@@ -498,6 +498,7 @@ HistoryInner::HistoryInner(
 	controller->adaptive().chatWideValue(
 	) | rpl::on_next([=](bool wide) {
 		_isChatWide = wide;
+		_overlayHost->hide();
 	}, lifetime());
 
 	_selectScroll.scrolls(
@@ -698,6 +699,7 @@ void HistoryInner::setupSwipeReplyAndBack() {
 			if (!canReply) {
 				return true;
 			}
+			_overlayHost->hide();
 			result.msgBareId = item->fullId().msg.bare;
 			result.callback = [=, itemId = item->fullId()] {
 				const auto still = show->session().data().message(itemId);
@@ -3665,6 +3667,9 @@ void HistoryInner::copyContextText(FullMsgId itemId) {
 }
 
 void HistoryInner::resizeEvent(QResizeEvent *e) {
+	if (e->oldSize().width() != e->size().width()) {
+		_overlayHost->hide();
+	}
 	mouseActionUpdate();
 }
 
@@ -4260,6 +4265,9 @@ HistoryView::SelectionModeResult HistoryInner::inSelectionMode() const {
 	const auto now = inSelectionMode;
 	if (_lastInSelectionMode != now) {
 		_lastInSelectionMode = now;
+		if (now) {
+			_overlayHost->hide();
+		}
 		if (_inSelectionModeAnimation.animating()) {
 			const auto progress = !now
 				? _inSelectionModeAnimation.value(0.)

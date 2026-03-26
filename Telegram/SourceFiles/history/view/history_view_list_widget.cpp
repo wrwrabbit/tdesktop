@@ -572,6 +572,7 @@ ListWidget::ListWidget(
 	_delegate->listChatWideValue(
 	) | rpl::on_next([=](bool wide) {
 		_isChatWide = wide;
+		_overlayHost->hide();
 	}, lifetime());
 
 	_selectScroll.scrolls(
@@ -1317,6 +1318,9 @@ SelectionModeResult ListWidget::inSelectionMode() const {
 		|| (_mouseAction == MouseAction::Selecting && _lastInSelectionMode);
 	if (_lastInSelectionMode != now) {
 		_lastInSelectionMode = now;
+		if (now) {
+			_overlayHost->hide();
+		}
 		if (_inSelectionModeAnimation.animating()) {
 			const auto progress = !now
 				? _inSelectionModeAnimation.value(0.)
@@ -1918,6 +1922,10 @@ void ListWidget::elementSubmitAddPollOption(FullMsgId context) {
 	_overlayHost->triggerSubmit(context);
 }
 
+void ListWidget::hideElementOverlay() {
+	_overlayHost->hide();
+}
+
 void ListWidget::elementOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) {
@@ -2061,6 +2069,9 @@ void ListWidget::updateSize() {
 }
 
 void ListWidget::resizeToWidth(int newWidth, int minHeight) {
+	if (width() != newWidth) {
+		_overlayHost->hide();
+	}
 	_minHeight = minHeight;
 	RpWidget::resizeToWidth(newWidth);
 	restoreScrollPosition();
