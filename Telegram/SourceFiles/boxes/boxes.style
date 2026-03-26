@@ -1311,7 +1311,6 @@ aiComposeStyleLabelFg: aiComposeButtonFg;
 aiComposeStyleLabelFgActive: aiComposeButtonFgActive;
 aiComposeStyleEmojiTop: 5px;
 aiComposeStyleLabelTop: 30px;
-aiComposeStyleEmojiFont: font(20px);
 aiComposeStyleLabelFont: font(12px semibold);
 aiComposeStyleTabsScroll: ScrollArea(defaultScrollArea) {
 	barHidden: true;

@@ -11,7 +11,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "boxes/premium_preview_box.h"
 #include "chat_helpers/compose/compose_show.h"
+#include "chat_helpers/stickers_emoji_pack.h"
 #include "core/ui_integration.h"
+#include "data/stickers/data_custom_emoji.h"
+#include "data/data_session.h"
 #include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "main/session/session_show.h"
@@ -35,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/scroll_area.h"
+#include "ui/emoji_config.h"
 #include "styles/style_basic.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
@@ -208,6 +212,37 @@ enum class CardState {
 		opacity);
 }
 
+struct StyleDescriptor {
+	QString key;
+	EmojiPtr emojiPtr = nullptr;
+	QString customEmojiData;
+};
+
+[[nodiscard]] std::vector<StyleDescriptor> ResolveStyleDescriptors(
+		not_null<Main::Session*> session,
+		const std::vector<Main::AppConfig::AiComposeStyle> &styles) {
+	auto result = std::vector<StyleDescriptor>();
+	result.reserve(styles.size());
+	for (const auto &style : styles) {
+		const auto e = Ui::Emoji::Find(style.emoji);
+		if (!e) {
+			continue;
+		}
+		auto descriptor = StyleDescriptor{
+			.key = style.key,
+			.emojiPtr = e,
+		};
+		const auto sticker
+			= session->emojiStickersPack().stickerForEmoji(e);
+		if (sticker.document) {
+			descriptor.customEmojiData
+				= Data::SerializeCustomEmojiId(sticker.document);
+		}
+		result.push_back(std::move(descriptor));
+	}
+	return result;
+}
+
 class ComposeAiModeButton final : public Ui::RippleButton {
 public:
 	ComposeAiModeButton(
@@ -253,19 +288,21 @@ class ComposeAiStyleButton final : public Ui::RippleButton {
 public:
 	ComposeAiStyleButton(
 		QWidget *parent,
-		Main::AppConfig::AiComposeStyle style);
+		StyleDescriptor descriptor,
+		Ui::Text::CustomEmojiFactory factory);
 
 	void setSelected(bool selected);
 	void setExtraPadding(int extra);
-	[[nodiscard]] const Main::AppConfig::AiComposeStyle &style() const;
-	
+	[[nodiscard]] const QString &styleKey() const;
+
 protected:
 	void paintEvent(QPaintEvent *e) override;
 	[[nodiscard]] QImage prepareRippleMask() const override;
 
 private:
-	const Main::AppConfig::AiComposeStyle _style;
+	const StyleDescriptor _descriptor;
 	const QString _label;
+	std::unique_ptr<Ui::Text::CustomEmoji> _custom;
 	bool _selected = false;
 	int _extraPadding = 0;
 
@@ -275,7 +312,8 @@ class ComposeAiStyleTabs final : public Ui::RpWidget {
 public:
 	ComposeAiStyleTabs(
 		QWidget *parent,
-		std::vector<Main::AppConfig::AiComposeStyle> styles);
+		std::vector<StyleDescriptor> descriptors,
+		Ui::Text::CustomEmojiFactory factory);
 
 	void setChangedCallback(Fn<void(int)> callback);
 	void setActive(int index);
@@ -299,7 +337,8 @@ class ComposeAiStyleScrollTabs final : public Ui::RpWidget {
 public:
 	ComposeAiStyleScrollTabs(
 		QWidget *parent,
-		std::vector<Main::AppConfig::AiComposeStyle> styles);
+		std::vector<StyleDescriptor> descriptors,
+		Ui::Text::CustomEmojiFactory factory);
 
 	[[nodiscard]] not_null<ComposeAiStyleTabs*> inner() const;
 
@@ -381,7 +420,7 @@ public:
 
 	[[nodiscard]] bool hasResult() const;
 	[[nodiscard]] const TextWithEntities &result() const;
-	[[nodiscard]] const std::vector<Main::AppConfig::AiComposeStyle> &stylesData() const;
+	[[nodiscard]] const std::vector<StyleDescriptor> &stylesData() const;
 	void setReadyChangedCallback(Fn<void(bool)> callback);
 	void setPremiumFloodCallback(Fn<void()> callback);
 	void setModeChangedCallback(Fn<void(ComposeAiMode)> callback);
@@ -413,7 +452,7 @@ private:
 	const TextWithEntities _original;
 	const LanguageId _detectedFrom;
 	LanguageId _to;
-	const std::vector<Main::AppConfig::AiComposeStyle> _stylesData;
+	const std::vector<StyleDescriptor> _stylesData;
 	QPointer<ComposeAiModeTabs> _tabs;
 	QPointer<ComposeAiStyleScrollTabs> _styles;
 	QPointer<Ui::SlideWrap<ComposeAiStyleScrollTabs>> _stylesWrap;
@@ -583,15 +622,22 @@ void ComposeAiModeTabs::paintEvent(QPaintEvent *e) {
 
 ComposeAiStyleButton::ComposeAiStyleButton(
 	QWidget *parent,
-	Main::AppConfig::AiComposeStyle style)
+	StyleDescriptor descriptor,
+	Ui::Text::CustomEmojiFactory factory)
 : RippleButton(parent, st::aiComposeButtonRippleInactive)
-, _style(std::move(style))
-, _label(ToneTitle(_style.key)) {
+, _descriptor(std::move(descriptor))
+, _label(ToneTitle(_descriptor.key))
+, _custom(!_descriptor.customEmojiData.isEmpty() && factory
+	? factory(
+		_descriptor.customEmojiData,
+		{ .repaint = [this] { update(); } })
+	: nullptr) {
 	setCursor(style::cur_pointer);
 	setNaturalWidth([&] {
 		const auto padding = st::aiComposeStyleButtonPadding;
 		const auto labelWidth = st::aiComposeStyleLabelFont->width(_label);
-		const auto emojiWidth = st::aiComposeStyleEmojiFont->width(_style.emoji);
+		const auto emojiWidth = Ui::Emoji::GetSizeLarge()
+			/ style::DevicePixelRatio();
 		return padding.left()
 			+ std::max(labelWidth, emojiWidth)
 			+ padding.right();
@@ -612,8 +658,8 @@ void ComposeAiStyleButton::setExtraPadding(int extra) {
 	resize(naturalWidth() + 2 * extra, height());
 }
 
-const Main::AppConfig::AiComposeStyle &ComposeAiStyleButton::style() const {
-	return _style;
+const QString &ComposeAiStyleButton::styleKey() const {
+	return _descriptor.key;
 }
 
 void ComposeAiStyleButton::paintEvent(QPaintEvent *e) {
@@ -639,16 +685,33 @@ void ComposeAiStyleButton::paintEvent(QPaintEvent *e) {
 			: st::aiComposeButtonRippleInactiveOpacity);
 	paintRipple(p, 0, 0, &ripple);
 
-	const auto emojiRect = QRect(
-		0,
-		st::aiComposeStyleEmojiTop,
-		width(),
-		st::aiComposeStyleEmojiFont->height);
-	p.setPen(_selected
-		? st::aiComposeStyleLabelFgActive
-		: st::aiComposeStyleLabelFg);
-	p.setFont(st::aiComposeStyleEmojiFont);
-	p.drawText(emojiRect, Qt::AlignHCenter | Qt::AlignTop, _style.emoji);
+	if (_custom) {
+		const auto size = Ui::Emoji::GetSizeLarge()
+			/ style::DevicePixelRatio();
+		const auto adjusted = Ui::Text::AdjustCustomEmojiSize(size);
+		const auto skip = (size - adjusted) / 2;
+		const auto left = (width() - size) / 2;
+		_custom->paint(p, {
+			.textColor = (_selected
+				? st::aiComposeStyleLabelFgActive
+				: st::aiComposeStyleLabelFg)->c,
+			.now = crl::now(),
+			.position = {
+				left + skip,
+				st::aiComposeStyleEmojiTop + skip,
+			},
+		});
+	} else {
+		const auto size = Ui::Emoji::GetSizeLarge()
+			/ style::DevicePixelRatio();
+		const auto left = (width() - size) / 2;
+		Ui::Emoji::Draw(
+			p,
+			_descriptor.emojiPtr,
+			Ui::Emoji::GetSizeLarge(),
+			left,
+			st::aiComposeStyleEmojiTop);
+	}
 
 	p.setPen(_selected
 		? st::aiComposeStyleLabelFgActive
@@ -680,13 +743,15 @@ QImage ComposeAiStyleButton::prepareRippleMask() const {
 
 ComposeAiStyleTabs::ComposeAiStyleTabs(
 	QWidget *parent,
-	std::vector<Main::AppConfig::AiComposeStyle> styles)
+	std::vector<StyleDescriptor> descriptors,
+	Ui::Text::CustomEmojiFactory factory)
 : RpWidget(parent) {
-	_buttons.reserve(styles.size());
-	for (auto &style : styles) {
+	_buttons.reserve(descriptors.size());
+	for (auto &descriptor : descriptors) {
 		const auto button = Ui::CreateChild<ComposeAiStyleButton>(
 			this,
-			std::move(style));
+			std::move(descriptor),
+			factory);
 		button->setClickedCallback([=] {
 			const auto i = ranges::find(_buttons, not_null(button));
 			const auto index = int(i - begin(_buttons));
@@ -797,7 +862,7 @@ void ComposeAiStyleTabs::resizeForOuterWidth(int outerWidth) {
 
 QString ComposeAiStyleTabs::currentTone() const {
 	return (_active >= 0 && _active < int(_buttons.size()))
-		? _buttons[_active]->style().key
+		? _buttons[_active]->styleKey()
 		: QString();
 }
 
@@ -823,13 +888,17 @@ void ComposeAiStyleTabs::paintEvent(QPaintEvent *e) {
 
 ComposeAiStyleScrollTabs::ComposeAiStyleScrollTabs(
 	QWidget *parent,
-	std::vector<Main::AppConfig::AiComposeStyle> styles)
+	std::vector<StyleDescriptor> descriptors,
+	Ui::Text::CustomEmojiFactory factory)
 : RpWidget(parent)
 , _scroll(Ui::CreateChild<Ui::ScrollArea>(
 	this,
 	st::aiComposeStyleTabsScroll))
 , _inner(_scroll->setOwnedWidget(
-	object_ptr<ComposeAiStyleTabs>(this, std::move(styles))))
+	object_ptr<ComposeAiStyleTabs>(
+		this,
+		std::move(descriptors),
+		std::move(factory))))
 , _fadeLeft(Ui::CreateChild<Ui::RpWidget>(this))
 , _fadeRight(Ui::CreateChild<Ui::RpWidget>(this))
 , _cornerLeft(Ui::CreateChild<Ui::RpWidget>(this))
@@ -1287,7 +1356,9 @@ ComposeAiContent::ComposeAiContent(
 , _original(std::move(args.text))
 , _detectedFrom(Platform::Language::Recognize(_original.text))
 , _to(DefaultAiTranslateTo(_detectedFrom))
-, _stylesData(_session->appConfig().aiComposeStyles())
+, _stylesData(ResolveStyleDescriptors(
+	_session,
+	_session->appConfig().aiComposeStyles()))
 , _preview(Ui::CreateChild<ComposeAiPreviewCard>(this, _session, _original)) {
 	_preview->setResizeCallback([=] { refreshLayout(); });
 	_preview->setChooseCallback([=] { chooseLanguage(); });
@@ -1312,7 +1383,7 @@ const TextWithEntities &ComposeAiContent::result() const {
 	return _result;
 }
 
-const std::vector<Main::AppConfig::AiComposeStyle> &ComposeAiContent::stylesData() const {
+const std::vector<StyleDescriptor> &ComposeAiContent::stylesData() const {
 	return _stylesData;
 }
 
@@ -1594,12 +1665,15 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 	const auto content = body->add(
 		object_ptr<ComposeAiContent>(box, box, args),
 		st::aiComposeContentMargin);
+	auto emojiFactory = session->data().customEmojiManager().factory(
+		Data::CustomEmojiSizeTag::Large);
 	const auto stylesWrap = pinnedToTop->add(
 		object_ptr<Ui::SlideWrap<ComposeAiStyleScrollTabs>>(
 			pinnedToTop,
 			object_ptr<ComposeAiStyleScrollTabs>(
 				pinnedToTop,
-				content->stylesData()),
+				content->stylesData(),
+				std::move(emojiFactory)),
 			tabsSkip),
 		st::aiComposeContentMargin);
 	stylesWrap->hide(anim::type::instant);
