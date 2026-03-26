@@ -6,6 +6,7 @@ Use these templates as Codex subagent messages or, if delegation is unavailable,
 
 - Phase 0 runs in the main session.
 - For Phases 1 through 6, prefer a fresh subagent per phase to keep phase context isolated.
+- Phase 7 runs in the main session on Windows because it depends on the final local diff and touched-file set.
 - Write each phase prompt to `.ai/<PROJECT>/<LETTER>/logs/phase-<name>.prompt.md` before execution.
 - If you delegate a phase, send the prompt file contents as the initial `spawn_agent` message.
 - After each phase completes, write `.ai/<PROJECT>/<LETTER>/logs/phase-<name>.result.md` summarizing the status, files touched, and any follow-up notes.
@@ -327,7 +328,7 @@ LOOP:
 
 FINISH:
   - Update plan.md: change `- [ ] Code review` to `- [x] Code review`
-  - Proceed to Completion
+  - Proceed to Phase 7 on Windows, otherwise proceed to Completion
 ```
 
 ### Step 6a: Code Review
@@ -415,15 +416,53 @@ After all changes are made:
 When finished, report what changes were made and which files you touched.
 ```
 
+## Phase 7: Windows Line Ending Normalization
+
+Run this phase only on Windows hosts and only after the review loop has finished.
+
+Use the current task's result logs as the source of truth for what Codex touched. Do not sweep the whole repo and do not rewrite unrelated files from a dirty worktree.
+
+```text
+You are performing the final Windows-only line ending normalization phase for task-think.
+
+Read these files:
+- .ai/<PROJECT>/<LETTER>/plan.md
+- .ai/<PROJECT>/<LETTER>/logs/phase-4*.result.md
+- .ai/<PROJECT>/<LETTER>/logs/phase-5*.result.md
+- .ai/<PROJECT>/<LETTER>/logs/phase-6*.result.md
+
+Your job:
+- Collect the union of repo file paths listed under "Touched files" in those result logs.
+- Keep only files inside the repository that currently exist and are textual project files: source, headers, build/config files, localization files, style files, and similar text assets.
+- Exclude `.ai/`, `out/`, binary files, and unrelated user files that were not touched by Codex in this task.
+- Rewrite each kept file so all line endings are CRLF.
+- Preserve file content otherwise. Preserve whether the file ended with a trailing newline.
+
+Rules:
+- Run this phase in the main session on Windows.
+- Do not modify files outside the touched-file set for the current task.
+- Do not rewrite binary files.
+- If a file cannot be normalized safely, record it as a failure instead of silently skipping it.
+
+When finished:
+1. Write `.ai/<PROJECT>/<LETTER>/logs/phase-7-line-endings.result.md`
+2. Include:
+   - whether the phase completed
+   - which files were normalized
+   - which files were skipped and why
+   - any failures that need to be mentioned in the final summary
+```
+
 ## Completion
 
-When all phases, including build verification and code review, are done:
+When all phases, including build verification, code review, and Windows line ending normalization when applicable, are done:
 1. Read the final `plan.md` and report the summary to the user.
 2. Show which files were modified or created.
 3. Note any issues encountered during implementation.
 4. Summarize the code review iterations: how many rounds, what was found and fixed, or whether it was approved on the first pass.
-5. Calculate and display the total elapsed time since `$START_TIME` (format as `Xh Ym Zs`, omitting zero components).
-6. Remind the user of the project name so they can request follow-up tasks within the same project.
+5. On Windows, mention the line-ending normalization result briefly: which project files were normalized or whether nothing needed changes.
+6. Calculate and display the total elapsed time since `$START_TIME` (format as `Xh Ym Zs`, omitting zero components).
+7. Remind the user of the project name so they can request follow-up tasks within the same project.
 
 ## Error Handling
 

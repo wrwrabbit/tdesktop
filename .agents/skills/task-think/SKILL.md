@@ -70,6 +70,7 @@ Run these phases sequentially:
 5. Phase 4: Implementation - Execute one implementation unit per plan phase.
 6. Phase 5: Build Verification - Build the project, fix any build errors. Skip if no source code was modified.
 7. Phase 6: Code Review Loop - Run review and fix iterations until approved or the iteration limit is reached.
+8. Phase 7: Windows Line Ending Normalization - On Windows only, after review passes and before the final summary, normalize LF to CRLF for the text source/config files Codex edited in this task.
 
 Use the phase prompt templates in `PROMPTS.md`.
 
@@ -78,6 +79,7 @@ Use the phase prompt templates in `PROMPTS.md`.
 Use Codex subagents as the primary orchestration mechanism.
 
 - Spawn a fresh subagent for context gathering, planning, plan assessment, each implementation phase, and each review or review-fix pass when delegation is available.
+- Run Phase 7 in the main session on Windows because it depends on the final local file state and the exact touched-file set for the current task.
 - Prefer `worker` for phases that write files. Use `explorer` only for narrow read-only questions that unblock your next local step.
 - Keep `fork_context` off by default. Pass the phase prompt and explicit file paths instead of the whole thread unless the phase truly needs prior conversational context or thread-only attachments.
 - When the platform supports it, request `model: gpt-5.4` and `reasoning_effort: xhigh` for spawned phase agents. If overrides are unavailable, inherit the current session settings.
@@ -94,6 +96,7 @@ Use Codex subagents as the primary orchestration mechanism.
   - implemented code changes present
   - build attempt results recorded
   - review pass documented with any follow-up fixes
+  - on Windows, if the task edited project source/config text files, a line-ending normalization pass recorded after review
 
 ## Completion Criteria
 
@@ -101,6 +104,7 @@ Mark complete only when:
 - All plan phases are done
 - Build verification is recorded
 - Review issues are addressed or explicitly deferred with rationale
+- On Windows, Codex-edited project source/config text files have been normalized to CRLF and the result is logged
 - Display total elapsed time since start (format: `Xh Ym Zs`, omitting zero components)
 - Remind the user of the project name so they can request follow-up tasks within the same project
 
@@ -110,6 +114,7 @@ Mark complete only when:
 - If `context.md` or `plan.md` is not written properly by a phase, rerun that phase with more specific instructions.
 - If build errors persist after the build phase's attempts, report the remaining errors to the user.
 - If a review-fix phase introduces new build errors that it cannot resolve, report to the user.
+- If Phase 7 cannot safely normalize a touched file on Windows, record the failure in the result log and report it in the final summary instead of silently skipping it.
 
 ## User Invocation
 
