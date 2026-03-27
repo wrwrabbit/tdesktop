@@ -13,7 +13,7 @@ If `$ARGUMENTS` is empty, ask the user to describe the icon they want and paste 
 
 ## Overview
 
-The workflow takes a cropped screenshot of an icon from a design mockup (grabbed from the Windows clipboard), vectorizes it via the vectosolve MCP, then post-processes the SVG (recolor to white-on-transparent, restructure to minimal format, set 24x24 output size).
+The workflow takes a cropped screenshot of an icon from a design mockup (grabbed from the clipboard), vectorizes it via the vectosolve MCP, then post-processes the SVG (recolor to white-on-transparent, restructure to minimal format, set 24x24 output size).
 
 Working directory: `.ai/icon_{name}/` with iterations labeled by letter (`a/`, `b/`, ...), each containing `source.png`. Output SVGs are in the icon root: `a.svg`, `b.svg`, etc.
 
@@ -21,7 +21,7 @@ Follow-ups are supported: `/icon {icon_name} <description>` continues from where
 
 ## Phase 0: Setup
 
-**Record the current time** (using `Get-Date` in PowerShell or equivalent) as `$START_TIME`.
+**Record the current time** (using `date` or equivalent) as `$START_TIME`.
 
 ### Step 0a: Clipboard grab (MUST be the VERY FIRST action)
 
@@ -30,12 +30,12 @@ If there is an image attached to the user's message:
 1. Generate a random 8-character hex string for `HASH` (use `openssl rand -hex 4` or similar).
 2. **IMMEDIATELY** — before any other processing — run this Bash command to save the clipboard image:
    ```bash
-   HASH=$(openssl rand -hex 4) && powershell -ExecutionPolicy Bypass -File .claude/grab_clipboard.ps1 ".ai/icon_${HASH}.png"
+   HASH=$(openssl rand -hex 4) && if [[ "$OSTYPE" == darwin* ]]; then bash .claude/grab_clipboard.sh ".ai/icon_${HASH}.png"; else powershell -ExecutionPolicy Bypass -File .claude/grab_clipboard.ps1 ".ai/icon_${HASH}.png"; fi
    ```
-   The script `.claude/grab_clipboard.ps1` grabs the current clipboard image and saves it to the specified path.
+   On macOS `.claude/grab_clipboard.sh` is used; on Windows `.claude/grab_clipboard.ps1`. Both grab the current clipboard image and save it to the specified path.
 
 3. If the command fails (exit 1 / no image on clipboard):
-   - Tell the user: **"Clipboard doesn't contain an image. Please copy the icon area first (Win+Shift+S), then retry."**
+   - Tell the user: **"Clipboard doesn't contain an image. Please copy the icon area first, then retry."** (On macOS: Cmd+Ctrl+Shift+4 to snip to clipboard; on Windows: Win+Shift+S.)
    - **STOP IMMEDIATELY. Do NOT continue.** You cannot use the image pasted in the conversation — it exists only as pixels in the chat, not as a file you can send to vectosolve. The clipboard grab is the ONLY way to get the image to disk. Do not attempt any workaround.
 
 4. Read back the saved `.ai/icon_HASH.png` using the Read tool.
@@ -126,14 +126,19 @@ If NO image was grabbed:
 Locate the render tool (`codegen_style` with `--render-svg` mode):
 
 ```bash
-ls out/Telegram/codegen/codegen/style/Debug/codegen_style.exe
+if [[ "$OSTYPE" == darwin* ]]; then
+    ls out/Debug/codegen_style
+else
+    ls out/Telegram/codegen/codegen/style/Debug/codegen_style.exe
+fi
 ```
 
 If missing, build it: `cmake --build out --config Debug --target codegen_style`
 
-Test on a known good SVG:
+Test on a known good SVG (use the appropriate binary path for the OS):
 ```bash
-out/Telegram/codegen/codegen/style/Debug/codegen_style.exe --render-svg Telegram/Resources/icons/menu/tag_add.svg .ai/icon_{name}/test_render.png 512
+CODEGEN=$(if [[ "$OSTYPE" == darwin* ]]; then echo out/Debug/codegen_style; else echo out/Telegram/codegen/codegen/style/Debug/codegen_style.exe; fi)
+$CODEGEN --render-svg Telegram/Resources/icons/menu/tag_add.svg .ai/icon_{name}/test_render.png 512
 ```
 
 If works → delete test render, set `RENDER_AVAILABLE = true`. If fails → `RENDER_AVAILABLE = false`.
@@ -235,7 +240,7 @@ Write the final SVG to `.ai/icon_{name}/{LETTER}.svg`.
 
 If `RENDER_AVAILABLE`:
 ```bash
-out/Telegram/codegen/codegen/style/Debug/codegen_style.exe --render-svg ".ai/icon_{name}/{LETTER}.svg" ".ai/icon_{name}/render_{LETTER}.png" 512
+$CODEGEN --render-svg ".ai/icon_{name}/{LETTER}.svg" ".ai/icon_{name}/render_{LETTER}.png" 512
 ```
 
 Read the render to visually verify the result.
