@@ -64,7 +64,9 @@ Now think deeply. For each correction the user made, ask yourself:
 
 1. **What did the agent do wrong?** Understand the specific mistake.
 2. **Why was it wrong?** Identify the underlying principle.
-3. **Is this already covered by AGENTS.md or REVIEW.md?** If yes — the agent just failed to follow existing rules. That's not a documentation problem. Skip it.
+3. **Is this already covered by AGENTS.md or REVIEW.md?** Check carefully:
+   - If the existing rule's scope, title, and examples **clearly cover** this exact scenario and the agent just ignored it — that's not a documentation problem. Skip it.
+   - If the existing rule **technically applies** but its scope is too narrow, its examples don't illustrate this usage pattern, or its wording would reasonably lead an agent to think it doesn't apply here — **the rule needs improvement**. Treat this as a potential insight (broaden the scope, add examples, adjust wording). A rule that agents repeatedly violate is an ineffective rule.
 4. **Is this specific to this particular task, or is it general?** Most corrections are task-specific ("wrong variable here", "this should call that function instead"). These are NOT documentation-worthy. Only patterns that would apply across many different tasks are worth capturing.
 5. **Would documenting this actually help a future agent?** Some things are too context-dependent or too obvious to be useful as a written rule. Be honest about this.
 
@@ -72,23 +74,30 @@ Now think deeply. For each correction the user made, ask yourself:
 
 After analysis, you MUST reach one of these conclusions:
 
-### Conclusion A: No actionable insight (THE MOST COMMON OUTCOME)
+### Conclusion A: No actionable insight
 
-This is the expected result most of the time. Say something like:
+The corrections are purely task-specific, or the existing documentation clearly and specifically covers the exact scenario and the agent simply ignored it. Say what the corrections were and why no doc changes are needed. Then **stop**.
 
-> "I reviewed the corrections. The changes are task-specific / already covered by existing guidelines / too context-dependent to generalize. No documentation updates needed."
+### Conclusion B: New insight found
 
-Briefly explain what the corrections were and why they don't warrant a guideline change. Then **stop**.
-
-### Conclusion B: Potential insight found
-
-Only reach this conclusion if you can articulate a **concise, general rule** that:
+You can articulate a **concise, general rule** that:
 - Applies broadly (not just to this one task)
-- Is not already documented (or contradicts what's documented)
+- Is not already documented
 - Would genuinely help a future agent avoid the same class of mistake
 - Can be expressed in a few sentences with a clear code example
 
-If you have a potential insight, proceed to Step 5.
+If you have a new insight, proceed to Step 5.
+
+### Conclusion C: Existing rule needs improvement
+
+A rule already exists in AGENTS.md or REVIEW.md, but its **scope is too narrow**, its **examples don't cover** the pattern the agent encountered, or its **wording** would reasonably lead an agent to think the rule doesn't apply. The agent's mistake is evidence the rule isn't effective.
+
+This is NOT the same as Conclusion A. The test: would a careful agent, reading the existing rule, clearly know it applies to this specific situation? If no — the rule needs to be broadened, its examples expanded, or its title/scope adjusted. Proceed to Step 5.
+
+**Common signs of an ineffective rule:**
+- The rule's title or scope restricts it to a context narrower than the actual principle (e.g., "in localization calls" when the pattern applies generally)
+- The examples only show one usage pattern, and the agent encountered a different one
+- The wording describes *what* to use but not *when* — so agents only apply it in situations that look like the examples
 
 ## Step 5: Categorize and Check for Contradictions
 
@@ -119,7 +128,7 @@ Only after the user approves, apply the edit using the Edit tool.
 
 ## Rules
 
-- **Conservatism is paramount.** When in doubt, do nothing. A false positive (adding a useless or wrong rule) is far worse than a false negative (missing a valid insight). The documentation should stay lean and high-signal.
+- **Keep docs lean and high-signal.** Don't add vague or overly specific rules. But don't default to inaction either — if the user had to manually fix something that a better-worded rule would have prevented, improving that rule is high-signal work.
 - **Never dump corrections verbatim.** The goal is distilled principles, not a changelog of mistakes.
 - **One insight per reflection, maximum.** If you think you see multiple insights, pick the strongest one. You can always run `/reflect` again next time.
 - **Keep the same style.** Match the formatting, tone, and level of detail of the target file. REVIEW.md uses specific before/after code examples. AGENTS.md uses explanatory sections with code snippets.
