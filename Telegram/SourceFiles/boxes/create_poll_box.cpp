@@ -73,6 +73,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/choose_date_time.h"
 #include "ui/text/format_values.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/widgets/scroll_area.h"
 #include "ui/widgets/shadow.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/wrap/slide_wrap.h"
@@ -147,6 +148,7 @@ public:
 
 	void enableChooseCorrect(bool enabled, bool multiCorrect = false);
 
+	[[nodiscard]] not_null<Ui::RpWidget*> layoutWidget() const;
 	[[nodiscard]] rpl::producer<int> usedCount() const;
 	[[nodiscard]] rpl::producer<not_null<QWidget*>> scrollToWidget() const;
 	[[nodiscard]] rpl::producer<> backspaceInFront() const;
@@ -739,6 +741,10 @@ bool Options::hasUploadingMedia() const {
 	return ranges::any_of(_list, &Option::uploadingMedia);
 }
 
+not_null<Ui::RpWidget*> Options::layoutWidget() const {
+	return _optionsLayout;
+}
+
 rpl::producer<int> Options::usedCount() const {
 	return _usedCount.value();
 }
@@ -1318,7 +1324,7 @@ not_null<Ui::InputField*> CreatePollBox::setupSolution(
 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
 			container,
 			object_ptr<Ui::VerticalLayout>(container))
-	)->setDuration(0)->toggleOn(std::move(shown));
+	)->toggleOn(std::move(shown));
 	const auto inner = outer->entity();
 
 	const auto session = &_controller->session();
@@ -1372,12 +1378,9 @@ not_null<Ui::InputField*> CreatePollBox::setupSolution(
 			geometry.width());
 	}, warning->lifetime());
 
-	inner->add(
-		object_ptr<Ui::FlatLabel>(
-			inner,
-			tr::lng_polls_solution_about(),
-			st::boxDividerLabel),
-		st::createPollFieldTitlePadding);
+	Ui::AddDividerText(
+		inner,
+		tr::lng_polls_solution_about());
 
 	return solution;
 }
@@ -2640,6 +2643,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		if (checked) {
 			state->addOptionsForceOff.fire(false);
 			state->revotingForceOff.fire(false);
+			solution->setFocus();
 		}
 		updateQuizDependentLocks(checked);
 		options->enableChooseCorrect(checked, multiple->toggled());
@@ -2809,6 +2813,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			options->focusFirst();
 		} else if (state->error & Error::Correct) {
 			showError(tr::lng_polls_choose_correct);
+			scrollToWidget(options->layoutWidget());
 		} else if (state->error & Error::Solution) {
 			solution->showError();
 		} else if (state->error & Error::Media) {
@@ -2867,4 +2872,6 @@ void CreatePollBox::prepare() {
 	const auto inner = setInnerWidget(setupContent());
 
 	setDimensionsToContent(st::boxWideWidth, inner);
+
+	Ui::SetStickyBottomScroll(this, inner);
 }
