@@ -729,6 +729,28 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 	} break;
 	}
 
+	const auto widget = static_cast<QWidget*>(object);
+	if (!object->isWidgetType()
+			|| !widget->testAttribute(Qt::WA_AcceptTouchEvents)) {
+		return QObject::eventFilter(object, e);
+	}
+
+	switch (e->type()) {
+	case QEvent::MouseButtonPress:
+	case QEvent::MouseButtonRelease:
+	case QEvent::MouseButtonDblClick:
+	case QEvent::MouseMove: {
+		const auto ev = static_cast<QMouseEvent*>(e);
+		_lastMouseEventSource = ev->source();
+		return _lastMouseEventSource == Qt::MouseEventSynthesizedBySystem;
+	} break;
+	case QEvent::ContextMenu: {
+		const auto ev = static_cast<QContextMenuEvent*>(e);
+		return ev->reason() == QContextMenuEvent::Mouse
+			&& _lastMouseEventSource == Qt::MouseEventSynthesizedBySystem;
+	} break;
+	}
+
 	return QObject::eventFilter(object, e);
 }
 
