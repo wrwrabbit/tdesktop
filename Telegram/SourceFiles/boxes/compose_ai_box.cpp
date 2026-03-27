@@ -422,7 +422,7 @@ private:
 	void cancelRequest();
 	void request();
 	void applyResult(Api::ComposeWithAi::Result &&result);
-	void showError(const MTP::Error &error);
+	void showError(const QString &error = {});
 	void notifyLoadingChanged();
 	void notifyReadyChanged();
 	[[nodiscard]] QString currentTranslateStyle() const;
@@ -767,10 +767,10 @@ int ComposeAiPreviewCard::resizeGetHeight(int newWidth) {
 		_originalBody->show();
 		_originalTitle->resizeToWidth(contentWidth);
 		_originalToggle->setVisible(false);
-		_originalToggle->moveToRight(
-			padding.right(),
-			(y + (_originalTitle->height() - _originalToggle->height()) / 2),
-			newWidth);
+
+		const auto toggleTop = y
+			+ (_originalTitle->height() - _originalToggle->height()) / 2;
+		_originalToggle->moveToRight(padding.right(), toggleTop, newWidth);
 		const auto originalTitleWidth = contentWidth
 			- _originalToggle->width()
 			- st::aiComposeCardControlSkip;
@@ -780,8 +780,9 @@ int ComposeAiPreviewCard::resizeGetHeight(int newWidth) {
 			std::max(originalTitleWidth, 0),
 			_originalTitle->height(),
 			newWidth);
-		y += std::max(_originalTitle->height(), _originalToggle->height());
-		y += st::aiComposeCardTextSkip;
+		y = std::max(
+			y + _originalTitle->height(),
+			toggleTop + _originalToggle->height());
 
 		_originalBody->resizeToWidth(contentWidth);
 		const auto lineHeight = _originalBody->st().style.lineHeight;
@@ -832,11 +833,11 @@ int ComposeAiPreviewCard::resizeGetHeight(int newWidth) {
 		resultTitleWidth,
 		_resultTitle->height(),
 		newWidth);
-	y += std::max({
-		_resultTitle->height(),
-		_emojifyVisible ? _emojify->height() : 0,
-	});
-	y += st::aiComposeCardTextSkip;
+	y = std::max(
+		y + _resultTitle->height(),
+		(_emojifyVisible
+			? (y - _emojify->getMargins().top() + _emojify->height())
+			: 0));
 
 	const auto lineHeight = _resultBody->st().style.lineHeight
 		? _resultBody->st().style.lineHeight
@@ -1173,12 +1174,16 @@ void ComposeAiContent::request() {
 				return;
 			}
 			weak->_requestId = 0;
-			weak->showError(error);
+			weak->showError(error.type());
 		});
 }
 
 void ComposeAiContent::applyResult(Api::ComposeWithAi::Result &&result) {
 	_result = std::move(result.resultText);
+	if (_result.text.isEmpty()) {
+		showError({});
+		return;
+	}
 	auto display = (_mode == ComposeAiMode::Fix && result.diffText)
 		? BuildDiffDisplay(*result.diffText)
 		: _result;
@@ -1193,14 +1198,14 @@ void ComposeAiContent::applyResult(Api::ComposeWithAi::Result &&result) {
 	refreshLayout();
 }
 
-void ComposeAiContent::showError(const MTP::Error &error) {
+void ComposeAiContent::showError(const QString &error) {
 	_state = CardState::Failed;
 	_preview->setState(CardState::Failed);
 	notifyLoadingChanged();
 	updateTitles();
 	notifyReadyChanged();
 	refreshLayout();
-	if (error.type() == u"AICOMPOSE_FLOOD_PREMIUM"_q) {
+	if (error == u"AICOMPOSE_FLOOD_PREMIUM"_q) {
 		const auto show = Main::MakeSessionShow(
 			_box->uiShow(),
 			_session);
@@ -1218,9 +1223,9 @@ void ComposeAiContent::showError(const MTP::Error &error) {
 		}
 		return;
 	}
-	_box->showToast(error.type().isEmpty()
+	_box->showToast(error.isEmpty()
 		? tr::lng_ai_compose_error(tr::now)
-		: error.type());
+		: error);
 }
 
 void ComposeAiContent::notifyLoadingChanged() {
