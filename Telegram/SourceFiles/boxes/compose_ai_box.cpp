@@ -1215,7 +1215,7 @@ void ComposeAiContent::showError(const QString &error) {
 			tr::lng_ai_compose_flood_text(
 				tr::now,
 				lt_link,
-				tr::link(tr::lng_ai_compose_flood_link(tr::now)),
+				tr::link(tr::lng_ai_compose_flood_link(tr::now, tr::bold)),
 				tr::rich),
 			u"ai_compose"_q);
 		if (_premiumFlood) {
