@@ -1,6 +1,6 @@
 ---
 name: task-think
-description: Orchestrate a multi-phase implementation workflow for this repository with artifact files under .ai/<project-name>/<letter>/ using Codex subagents instead of shell-spawned child processes. Use when the user wants one prompt to drive context gathering, planning, plan assessment, implementation, build verification, and review with persistent artifacts and clear phase handoffs. Prefer spawn_agent/send_input/wait_agent; fall back to same-session execution only when delegation is unavailable or disallowed.
+description: Orchestrate a multi-phase implementation workflow for this repository with artifact files under .ai/<project-name>/<letter>/ using Codex subagents instead of shell-spawned child processes. Use when the user wants one prompt to drive context gathering, planning, plan assessment, implementation, build verification, and review with persistent artifacts, clear phase handoffs, and a thin parent thread. Prefer spawn_agent/send_input/wait_agent, keep heavy pre-build work delegated when possible, and avoid pulling timed-out phases back into the main session.
 ---
 
 # Task Pipeline
@@ -78,20 +78,27 @@ Use the phase prompt templates in `PROMPTS.md`.
 
 Use Codex subagents as the primary orchestration mechanism.
 
-- Spawn a fresh subagent for context gathering, planning, plan assessment, each implementation phase, and each review or review-fix pass when delegation is available.
+- When delegation is available, Phase 1, Phase 2, Phase 3, each Phase 4 implementation unit, and each Phase 6 review or review-fix pass must run in fresh subagents. Do not rerun those phases in the main session midstream just because a wait timed out or an artifact is missing.
 - Run Phase 7 in the main session on Windows because it depends on the final local file state and the exact touched-file set for the current task.
+- The main session may read `context.md` once after Phase 1 and `plan.md` once after Phase 3. After that, prefer narrow shell checks, file existence checks, and status-line reads instead of rereading full documents or diffs.
 - Prefer `worker` for phases that write files. Use `explorer` only for narrow read-only questions that unblock your next local step.
 - Keep `fork_context` off by default. Pass the phase prompt and explicit file paths instead of the whole thread unless the phase truly needs prior conversational context or thread-only attachments.
 - When the platform supports it, request `model: gpt-5.4` and `reasoning_effort: xhigh` for spawned phase agents. If overrides are unavailable, inherit the current session settings.
 - Write the exact phase prompt to the matching `logs/phase-<name>.prompt.md` file before you delegate. Use the same prompt file as a checklist if you later need to fall back to same-session execution.
+- In every delegated prompt, require a compact final reply with only status, artifact paths, touched files, and blocker or `none`. Detailed reasoning belongs in `.ai/` artifacts, not in the chat reply.
 - After a subagent finishes, verify that the expected artifacts or code changes exist, then write a short result log in `logs/phase-<name>.result.md`.
+- For delegated phases, use `wait_agent` with a 15-minute timeout by default. A timeout is not a failure; it only means no final status arrived yet.
+- On timeout, inspect the expected artifact and worktree for progress first. If progress exists, wait again.
+- If no usable artifact exists yet, send one short follow-up asking the same subagent to finish writing the artifact and return the compact status block, then wait again.
+- If the same subagent still produces no usable artifact after two 15-minute waits and one follow-up, close it and rerun that phase in a fresh subagent.
 - Use `wait_agent` only when the next step is blocked on the result. While the delegated phase runs, do small non-overlapping local tasks such as validating directory structure or preparing the next prompt file.
 - Build verification is critical-path work. Prefer running the build in the main session, and only delegate a bounded build-fix phase when there is a concrete reason.
-- If subagents are unavailable in the current environment, or current policy does not allow delegation for this request, run the phase in the main session using the same prompt files. Never fall back to shell-spawned `codex exec` child processes from this skill.
+- If subagents are unavailable in the current environment, or current policy does not allow delegation from the start, run the phase in the main session using the same prompt files. Otherwise, do not switch a pre-build phase to same-session midstream. Never fall back to shell-spawned `codex exec` child processes from this skill.
 
 ## Verification Rules
 
 - If build or test commands fail due to file locks or access-denied outputs (C1041, LNK1104), stop and ask the user to close locking processes before retrying.
+- Treat a delegated phase as complete only when the required artifact or status update exists on disk and matches the phase goals; do not rely on the chat reply alone.
 - Never claim completion without:
   - implemented code changes present
   - build attempt results recorded
@@ -110,8 +117,8 @@ Mark complete only when:
 
 ## Error Handling
 
-- If any phase fails, times out, or gets stuck, inspect the partial artifacts, tighten the prompt, and retry with a fresh subagent or same-session fallback. Report the issue to the user if you remain blocked.
-- If `context.md` or `plan.md` is not written properly by a phase, rerun that phase with more specific instructions.
+- If any phase fails, times out, or gets stuck, follow the retry ladder from Execution Mode. After two delegated attempts remain blocked, report the issue to the user. Do not absorb the phase into the main session before build unless delegation was unavailable from the start.
+- If `context.md` or `plan.md` is not written properly by a phase, rerun that phase in a fresh subagent with more specific instructions. Do not repair it locally before build unless delegation was unavailable from the start.
 - If build errors persist after the build phase's attempts, report the remaining errors to the user.
 - If a review-fix phase introduces new build errors that it cannot resolve, report to the user.
 - If Phase 7 cannot safely normalize a touched file on Windows, record the failure in the result log and report it in the final summary instead of silently skipping it.

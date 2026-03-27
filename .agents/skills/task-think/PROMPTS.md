@@ -1,19 +1,52 @@
 # Phase Prompts
 
-Use these templates as Codex subagent messages or, if delegation is unavailable, as same-session checklists. Replace `<TASK>`, `<PROJECT>`, `<LETTER>`, and `<REPO_ROOT>`.
+Use these templates as Codex subagent messages. Use them as same-session checklists only for Phase 0, intentional main-session build work, Phase 7, or when delegation is unavailable from the start. Replace `<TASK>`, `<PROJECT>`, `<LETTER>`, and `<REPO_ROOT>`.
 
 ## Orchestration Rules
 
 - Phase 0 runs in the main session.
-- For Phases 1 through 6, prefer a fresh subagent per phase to keep phase context isolated.
+- When delegation is available, use a fresh subagent for Phase 1, Phase 2, Phase 3, each Phase 4 implementation unit, and each Phase 6 pass. Do not switch those phases to same-session midstream because of a timeout or missing artifact.
 - Phase 7 runs in the main session on Windows because it depends on the final local diff and touched-file set.
 - Write each phase prompt to `.ai/<PROJECT>/<LETTER>/logs/phase-<name>.prompt.md` before execution.
 - If you delegate a phase, send the prompt file contents as the initial `spawn_agent` message.
+- When writing the phase prompt file, append the standard compact reply block below so the subagent knows exactly how to report completion.
 - After each phase completes, write `.ai/<PROJECT>/<LETTER>/logs/phase-<name>.result.md` summarizing the status, files touched, and any follow-up notes.
 - Use `fork_context: false` by default. If the phase depends on thread-only context or UI attachments, pass that context explicitly or enable `fork_context` only for that phase.
 - Prefer `worker` for phases that write files. Use `default` for plan or review passes if that fits the host better. Use `explorer` only for narrow read-only questions.
 - When supported, request `model: gpt-5.4` and `reasoning_effort: xhigh` for delegated phases.
+- Default wait budget for delegated phases is 15 minutes. Use shorter waits only when the phase is intentionally tiny.
+- A `wait_agent` timeout is not failure. On timeout, inspect expected artifact progress before deciding anything.
+- If the expected artifact exists and shows progress, wait again.
+- If no usable artifact exists yet, send one short follow-up asking the same agent to finish the required artifact and return the standard compact reply block, then wait again.
+- If the same agent still produces no usable artifact after two 15-minute waits and one follow-up, close it and retry the phase in a fresh subagent.
+- For Phase 1, Phase 2, Phase 3, Phase 4, and Phase 6, if delegated retries still fail, stop and ask the user rather than rerunning the phase locally.
 - Never use `codex exec`, background shell child processes, or JSONL child-session logging from this skill.
+
+## Standard Compact Reply Block
+
+Append this verbatim to every delegated phase prompt:
+
+```text
+Before replying in chat, write the required artifact(s) to disk.
+
+Reply in 8 lines or fewer using exactly these keys:
+STATUS: <DONE|BLOCKED|APPROVED|NEEDS_CHANGES>
+ARTIFACTS: <paths>
+TOUCHED: <repo paths or none>
+BLOCKER: <none or one short line>
+
+Do not restate the full context, plan, diff, or long reasoning in the chat reply.
+```
+
+## Artifact-Based Completion Checks
+
+- Phase 1 is complete only when `about.md` and `context.md` both exist and are non-empty.
+- Phase 2 is complete only when `plan.md` exists, contains a `## Status` section, and no unintended source edits were made.
+- Phase 3 is complete only when `plan.md` contains both `Phases:` in the Status section and `Assessed: yes`.
+- Phase 4 is complete only when the target phase checkbox changed to checked and the touched-file list matches the owned write set, or the blocker explains any mismatch.
+- Phase 5 is complete only when the build outcome is known and the build checkbox is updated on success.
+- Phase 6a is complete only when `review<R>.md` exists and contains a verdict line.
+- Phase 6b is complete only when the requested fixes were applied and the post-fix build outcome is known.
 
 ## Phase 0: Setup
 
@@ -270,8 +303,8 @@ When finished, report what you did, which files you changed, and any issues enco
 ```
 
 After each implementation phase:
-1. Read `plan.md` to confirm the status was updated.
-2. Verify the owned write set and touched files make sense.
+1. Use a narrow read or search to confirm the status line was updated.
+2. Verify the owned write set and touched files with a small diff summary such as `git diff --name-only`.
 3. If more phases remain, run the next implementation phase.
 4. If all phases are done, proceed to build verification.
 
@@ -466,8 +499,8 @@ When all phases, including build verification, code review, and Windows line end
 
 ## Error Handling
 
-- If any phase fails or gets stuck, report the issue to the user and ask how to proceed.
-- If `context.md` or `plan.md` is not written properly by a phase, rerun that phase with more specific instructions.
+- If any phase fails or gets stuck, follow the timeout and retry rules above. For Phase 1, Phase 2, Phase 3, Phase 4, and Phase 6, do not rerun locally after a timeout; ask the user if delegated retries fail.
+- If `context.md` or `plan.md` is not written properly by a phase, rerun that phase in a fresh subagent with more specific instructions.
 - If build errors persist after the build phase's attempts, report the remaining errors to the user.
 - If a review-fix phase introduces new build errors that it cannot resolve, report to the user.
 
@@ -475,7 +508,7 @@ When all phases, including build verification, code review, and Windows line end
 
 For each phase:
 1. Write the full prompt to `.ai/<PROJECT>/<LETTER>/logs/phase-<name>.prompt.md`
-2. Delegate by sending that prompt text to a fresh subagent, or use it as a same-session checklist
+2. Delegate by sending that prompt text to a fresh subagent, or use it as a same-session checklist only for the designated main-session phases or when delegation was unavailable from the start
 3. Save a concise completion note to `.ai/<PROJECT>/<LETTER>/logs/phase-<name>.result.md`
 
 For review iterations, include the iteration in the file name, for example:
@@ -490,8 +523,9 @@ Use this pattern conceptually for delegated phases:
 
 1. Write the phase prompt file.
 2. Spawn a fresh subagent with the phase prompt, usually with `fork_context: false`.
-3. Wait when the next step is blocked on that phase.
-4. Validate the expected artifact or code changes.
-5. Write the result log.
+3. Wait in 15-minute intervals when the next step is blocked on that phase, checking artifact progress on timeout.
+4. If needed, send one short follow-up to the same agent, then retry once with a fresh subagent before involving the user.
+5. Validate the expected artifact or code changes with small shell summaries and the completion checks above.
+6. Write the result log from the validated outcome and the compact reply block.
 
 Do not replace this pattern with shell-launched `codex exec`.
