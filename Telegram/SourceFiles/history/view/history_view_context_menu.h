@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_element.h"
 
 namespace Data {
+class Session;
 struct ReactionId;
 } // namespace Data
 
@@ -70,6 +71,17 @@ void CopyPostLink(
 void CopyStoryLink(
 	std::shared_ptr<Main::SessionShow> show,
 	FullStoryId storyId);
+void FillPollOptionPage(
+	not_null<Ui::PopupMenu*> menu,
+	not_null<Data::Session*> owner,
+	FullMsgId itemId,
+	const QByteArray &pollOption,
+	Fn<void()> replyToOption = nullptr);
+
+void AttachPollOptionTabs(
+	not_null<Ui::PopupMenu*> menu,
+	QPoint desiredPosition);
+
 void AddPollActions(
 	not_null<Ui::PopupMenu*> menu,
 	not_null<PollData*> poll,

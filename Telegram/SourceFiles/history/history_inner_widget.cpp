@@ -2946,8 +2946,6 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				? tr::lng_context_quote_and_reply
 				: todoListTaskId
 				? tr::lng_context_reply_to_task
-				: !pollOptionLink.isEmpty()
-				? tr::lng_context_reply_to_poll_option
 				: tr::lng_context_reply_msg)(
 					tr::now,
 					Ui::Text::FixAmpersandInAction);
@@ -2959,7 +2957,6 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					.quote = selected.highlight.quote,
 					.quoteOffset = selected.highlight.quoteOffset,
 					.todoItemId = todoListTaskId,
-					.pollOption = pollOptionLink,
 				});
 				if (!selected.highlight.quote.empty()) {
 					_widget->clearSelected();
@@ -2990,53 +2987,6 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			}),
 			&st::menuIconAdd);
 	};
-	const auto addCopyPollOptionAction = [&](HistoryItem *item) {
-		if (pollOptionLink.isEmpty() || !item) {
-			return;
-		}
-		if (const auto media = item->media()) {
-			if (const auto poll = media->poll()) {
-				if (const auto a = poll->answerByOption(pollOptionLink)) {
-					auto text = a->text;
-					_menu->addAction(
-						tr::lng_context_copy_poll_option(tr::now),
-						[text = TextForMimeData::Rich(std::move(text))] {
-							TextUtilities::SetClipboardText(text);
-						},
-						&st::menuIconCopy);
-					const auto canDelete = [&] {
-						if (!a->addedDate) {
-							return false;
-						}
-						if (poll->creator()) {
-							return true;
-						}
-						if (a->addedBy
-							&& a->addedBy->isSelf()) {
-							const auto period = poll->session()
-								.appConfig()
-								.pollAnswerDeletePeriod();
-							return (base::unixtime::now() - a->addedDate)
-								< period;
-						}
-						return false;
-					}();
-					if (canDelete) {
-						const auto itemId = item->fullId();
-						const auto option = pollOptionLink;
-						_menu->addAction(
-							tr::lng_context_delete_poll_option(tr::now),
-							[=] {
-								poll->session().api().polls().deleteAnswer(
-									itemId,
-									option);
-							},
-							&st::menuIconDelete);
-					}
-				}
-			}
-		}
-	};
 	const auto lnkPhoto = link
 		? reinterpret_cast<PhotoData*>(
 			link->property(kPhotoLinkMediaProperty).toULongLong())
@@ -3049,7 +2999,6 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		const auto item = _dragStateItem;
 		const auto itemId = item ? item->fullId() : FullMsgId();
 		addReplyAction(item);
-		addCopyPollOptionAction(item);
 
 		if (isUponSelected > 0) {
 			const auto selectedText = getSelectedText();
@@ -3188,8 +3137,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		}
 		if (isUponSelected > 0) {
 			addReplyAction(item);
-			addCopyPollOptionAction(item);
-			const auto selectedText = getSelectedText();
+				const auto selectedText = getSelectedText();
 			if (!hasCopyRestrictionForSelected() && !selectedText.empty()) {
 				_menu->addAction(
 					((isUponSelected > 1)
@@ -3212,8 +3160,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			addItemActions(item, item);
 		} else {
 			addReplyAction(partItemOrLeader);
-			addCopyPollOptionAction(partItemOrLeader);
-			addTodoListAction(partItemOrLeader);
+				addTodoListAction(partItemOrLeader);
 			addItemActions(item, albumPartItem);
 			if (item && !isUponSelected) {
 				const auto media = (view ? view->media() : nullptr);
@@ -3434,48 +3381,6 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			textItem ? textItem : _dragStateItem,
 			!added);
 	}
-	if (!pollOptionLink.isEmpty() && leaderOrSelf) {
-		if (const auto media = leaderOrSelf->media()) {
-			if (const auto poll = media->poll()) {
-				if (const auto a = poll->answerByOption(pollOptionLink)) {
-					if (a->addedBy) {
-						if (!_menu->empty()) {
-							_menu->addSeparator(
-								&st::expandedMenuSeparator);
-						}
-						const auto photoSize
-							= st::defaultWhoRead.photoSize;
-						auto view = Ui::PeerUserpicView();
-						auto userpic
-							= PeerData::GenerateUserpicImage(
-								a->addedBy,
-								view,
-								photoSize);
-						const auto date = a->addedDate
-							? Ui::FormatDateTime(
-								base::unixtime::parse(a->addedDate))
-							: QString();
-						_menu->addAction(
-							base::make_unique_q<
-								Ui::WhoReactedEntryAction>(
-								_menu->menu(),
-								nullptr,
-								_menu->menu()->st(),
-								Ui::WhoReactedEntryData{
-									.text = tr::lng_polls_option_added_by(
-										tr::now,
-										lt_user,
-										a->addedBy->shortName()),
-									.date = date,
-									.type = Ui::WhoReactedType
-										::RefRecipient,
-									.userpic = std::move(userpic),
-								}));
-					}
-				}
-			}
-		}
-	}
 	if (hasWhoReactedItem) {
 		HistoryView::AddWhoReactedAction(
 			_menu,
@@ -3494,6 +3399,23 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			_menu,
 			_menu->st().menu,
 			Menu::RateTranscribeCallbackFactory(rateTranscriptionItem)));
+	}
+
+	if (!pollOptionLink.isEmpty() && leaderOrSelf && !_menu->empty()) {
+		const auto pollItemId = leaderOrSelf->fullId();
+		_menu->stashContent([=](not_null<Ui::PopupMenu*> menu) {
+			HistoryView::FillPollOptionPage(
+				menu,
+				&session->data(),
+				pollItemId,
+				pollOptionLink,
+				[=] {
+					_widget->replyToMessage({
+						.messageId = pollItemId,
+						.pollOption = pollOptionLink,
+					});
+				});
+		});
 	}
 
 	if (_menu->empty()) {
@@ -3517,7 +3439,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	if (attached == AttachSelectorResult::Failed) {
 		_menu = nullptr;
 		return;
-	} else if (attached == AttachSelectorResult::Attached) {
+	}
+	HistoryView::AttachPollOptionTabs(_menu.get(), desiredPosition);
+	if (attached == AttachSelectorResult::Attached) {
 		_menu->popupPrepared();
 	} else {
 		_menu->popup(desiredPosition);

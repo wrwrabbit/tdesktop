@@ -45,6 +45,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/edit_factcheck_box.h"
 #include "ui/boxes/report_box_graphics.h"
 #include "ui/ui_utility.h"
+#include "ui/painter.h"
+#include "ui/widgets/pill_tabs.h"
 #include "menu/menu_item_download_files.h"
 #include "menu/menu_item_rate_transcribe.h"
 #include "menu/menu_item_rate_transcribe_session.h"
@@ -626,14 +628,9 @@ bool AddReplyToMessageAction(
 	const auto todoListTaskId = request.link
 		? request.link->property(kTodoListItemIdProperty).toInt()
 		: 0;
-	const auto pollOption = request.link
-		? request.link->property(kPollOptionProperty).toByteArray()
-		: QByteArray();
 	const auto &quote = request.quote;
 	auto text = (todoListTaskId
 		? tr::lng_context_reply_to_task
-		: !pollOption.isEmpty()
-		? tr::lng_context_reply_to_poll_option
 		: quote.highlight.quote.empty()
 		? tr::lng_context_reply_msg
 		: tr::lng_context_quote_and_reply)(
@@ -645,7 +642,6 @@ bool AddReplyToMessageAction(
 			.quote = quote.highlight.quote,
 			.quoteOffset = quote.highlight.quoteOffset,
 			.todoItemId = todoListTaskId,
-			.pollOption = pollOption,
 		}, base::IsCtrlPressed());
 	}, &st::menuIconReply);
 	return true;
@@ -1282,9 +1278,11 @@ ContextMenuRequest::ContextMenuRequest(
 : navigation(navigation) {
 }
 
-base::unique_qptr<Ui::PopupMenu> FillContextMenu(
+void FillContextMenuItems(
+		not_null<Ui::PopupMenu*> result,
 		not_null<ListWidget*> list,
-		const ContextMenuRequest &request) {
+		const ContextMenuRequest &request,
+		bool skipWhoReacted = false) {
 	const auto link = request.link;
 	const auto view = request.view;
 	const auto item = request.item;
@@ -1305,58 +1303,7 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 	const auto hasWhoReactedItem = item
 		&& Api::WhoReactedExists(item, Api::WhoReactedList::All);
 
-	auto result = base::make_unique_q<Ui::PopupMenu>(
-		list,
-		st::popupMenuWithIcons);
-
 	AddReplyToMessageAction(result, request, list);
-	if (const auto pollOption = link
-		? link->property(kPollOptionProperty).toByteArray()
-		: QByteArray(); !pollOption.isEmpty()) {
-		if (item) {
-			if (const auto media = item->media()) {
-				if (const auto poll = media->poll()) {
-					if (const auto a = poll->answerByOption(pollOption)) {
-						auto text = a->text;
-						result->addAction(
-							tr::lng_context_copy_poll_option(tr::now),
-							[text = TextForMimeData::Rich(std::move(text))] {
-								TextUtilities::SetClipboardText(text);
-							},
-							&st::menuIconCopy);
-						const auto canDelete = [&] {
-							if (!a->addedDate) {
-								return false;
-							}
-							if (poll->creator()) {
-								return true;
-							}
-							if (a->addedBy
-								&& a->addedBy->isSelf()) {
-								const auto period = poll->session()
-									.appConfig()
-									.pollAnswerDeletePeriod();
-								return (base::unixtime::now() - a->addedDate)
-									< period;
-							}
-							return false;
-						}();
-						if (canDelete) {
-							const auto itemId = item->fullId();
-							result->addAction(
-								tr::lng_context_delete_poll_option(tr::now),
-								[=] {
-									poll->session().api().polls().deleteAnswer(
-										itemId,
-										pollOption);
-								},
-								&st::menuIconDelete);
-						}
-					}
-				}
-			}
-		}
-	}
 	AddTodoListAction(result, request, list);
 
 	if (request.overSelection
@@ -1458,47 +1405,48 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 		const auto added = (result->actions().size() > wasAmount);
 		AddSelectRestrictionAction(result, item, !added);
 	}
-	if (const auto pollOption = link
-		? link->property(kPollOptionProperty).toByteArray()
-		: QByteArray(); !pollOption.isEmpty() && poll) {
-		if (const auto a = poll->answerByOption(pollOption)) {
-			if (a->addedBy) {
-				if (!result->empty()) {
-					result->addSeparator(&st::expandedMenuSeparator);
-				}
-				const auto photoSize = st::defaultWhoRead.photoSize;
-				auto view = Ui::PeerUserpicView();
-				auto userpic = PeerData::GenerateUserpicImage(
-					a->addedBy,
-					view,
-					photoSize);
-				const auto date = a->addedDate
-					? Ui::FormatDateTime(
-						base::unixtime::parse(a->addedDate))
-					: QString();
-				result->addAction(
-					base::make_unique_q<Ui::WhoReactedEntryAction>(
-						result->menu(),
-						nullptr,
-						result->menu()->st(),
-						Ui::WhoReactedEntryData{
-							.text = tr::lng_polls_option_added_by(
-								tr::now,
-								lt_user,
-								a->addedBy->shortName()),
-							.date = date,
-							.type = Ui::WhoReactedType::RefRecipient,
-							.userpic = std::move(userpic),
-						}));
-			}
+	if (!skipWhoReacted) {
+		if (hasWhoReactedItem) {
+			AddWhoReactedAction(result, list, item, list->controller());
+		} else if (item) {
+			MaybeAddWhenEditedForwardedAction(
+				result,
+				item,
+				list->controller());
 		}
 	}
-	if (hasWhoReactedItem) {
-		AddWhoReactedAction(result, list, item, list->controller());
-	} else if (item) {
-		MaybeAddWhenEditedForwardedAction(result, item, list->controller());
-	}
+}
 
+base::unique_qptr<Ui::PopupMenu> FillContextMenu(
+		not_null<ListWidget*> list,
+		const ContextMenuRequest &request) {
+	const auto link = request.link;
+	const auto item = request.item;
+	const auto itemId = item ? item->fullId() : FullMsgId();
+	const auto pollOption = link
+		? link->property(kPollOptionProperty).toByteArray()
+		: QByteArray();
+	const auto hasPollOption = !pollOption.isEmpty() && item;
+
+	auto result = base::make_unique_q<Ui::PopupMenu>(
+		list,
+		st::popupMenuWithIcons);
+
+	// Build the full message menu.
+	FillContextMenuItems(result, list, request, hasPollOption);
+
+	if (hasPollOption) {
+		const auto raw = result.get();
+		const auto owner = &item->history()->owner();
+		raw->stashContent([=](not_null<Ui::PopupMenu*> menu) {
+			FillPollOptionPage(menu, owner, itemId, pollOption, [=] {
+				list->replyToMessageRequestNotify({
+					.messageId = itemId,
+					.pollOption = pollOption,
+				}, base::IsCtrlPressed());
+			});
+		});
+	}
 	return result;
 }
 
@@ -1575,6 +1523,176 @@ void CopyStoryLink(
 	QGuiApplication::clipboard()->setText(
 		session->api().exportDirectStoryLink(story));
 	show->showToast(tr::lng_channel_public_link_copied(tr::now));
+}
+
+void FillPollOptionItems(
+		not_null<Ui::PopupMenu*> menu,
+		not_null<Data::Session*> owner,
+		FullMsgId itemId,
+		const QByteArray &pollOption) {
+	const auto item = owner->message(itemId);
+	if (!item) {
+		return;
+	}
+	const auto media = item->media();
+	const auto poll = media ? media->poll() : nullptr;
+	if (!poll) {
+		return;
+	}
+	const auto a = poll->answerByOption(pollOption);
+	if (!a) {
+		return;
+	}
+	auto text = a->text;
+	menu->addAction(
+		tr::lng_context_copy_poll_option(tr::now),
+		[text = TextForMimeData::Rich(std::move(text))] {
+			TextUtilities::SetClipboardText(text);
+		},
+		&st::menuIconCopy);
+	const auto canDelete = [&] {
+		if (!a->addedDate) {
+			return false;
+		}
+		if (poll->creator()) {
+			return true;
+		}
+		if (a->addedBy && a->addedBy->isSelf()) {
+			const auto period = poll->session()
+				.appConfig()
+				.pollAnswerDeletePeriod();
+			return (base::unixtime::now() - a->addedDate) < period;
+		}
+		return false;
+	}();
+	if (canDelete) {
+		menu->addAction(
+			tr::lng_context_delete_poll_option(tr::now),
+			[=] {
+				if (const auto item = owner->message(itemId)) {
+					if (const auto media = item->media()) {
+						if (const auto poll = media->poll()) {
+							poll->session().api().polls()
+								.deleteAnswer(itemId, pollOption);
+						}
+					}
+				}
+			},
+			&st::menuIconDelete);
+	}
+	if (a->addedBy) {
+		menu->addSeparator(&st::expandedMenuSeparator);
+		auto view = Ui::PeerUserpicView();
+		auto userpic = PeerData::GenerateUserpicImage(
+			a->addedBy,
+			view,
+			st::defaultWhoRead.photoSize);
+		const auto date = a->addedDate
+			? Ui::FormatDateTime(
+				base::unixtime::parse(a->addedDate))
+			: QString();
+		menu->addAction(
+			base::make_unique_q<Ui::WhoReactedEntryAction>(
+				menu->menu(),
+				nullptr,
+				menu->menu()->st(),
+				Ui::WhoReactedEntryData{
+					.text = tr::lng_polls_option_added_by(
+						tr::now,
+						lt_user,
+						a->addedBy->shortName()),
+					.date = date,
+					.type = Ui::WhoReactedType::RefRecipient,
+					.userpic = std::move(userpic),
+				}));
+	}
+}
+
+
+void FillPollOptionPage(
+		not_null<Ui::PopupMenu*> menu,
+		not_null<Data::Session*> owner,
+		FullMsgId itemId,
+		const QByteArray &pollOption,
+		Fn<void()> replyToOption) {
+	if (replyToOption) {
+		menu->addAction(
+			tr::lng_context_reply_to_poll_option(
+				tr::now,
+				Ui::Text::FixAmpersandInAction),
+			std::move(replyToOption),
+			&st::menuIconReply);
+	}
+	FillPollOptionItems(menu, owner, itemId, pollOption);
+}
+
+void AttachPollOptionTabs(
+		not_null<Ui::PopupMenu*> menu,
+		QPoint desiredPosition) {
+	if (!menu->hasStashedContent()) {
+		return;
+	}
+	const auto &tabsSt = st::popupMenuPillTabs;
+	const auto tabs = Ui::CreateChild<Ui::PillTabs>(
+		menu.get(),
+		std::vector<QString>{ u"Option"_q, u"Poll"_q },
+		0,
+		tabsSt);
+
+	const auto height = tabsSt.height;
+	const auto margin = tabsSt.margin;
+	tabs->show();
+
+	// Reserve space for tabs by increasing additional padding top.
+	{
+		auto padding = menu->additionalMenuPadding();
+		auto margins = menu->additionalMenuMargins();
+		padding.setTop(padding.top() + height + margin);
+		menu->setAdditionalMenuPadding(padding, margins);
+		menu->prepareGeometryFor(desiredPosition);
+	}
+
+	// Position tabs just above _inner (in the reserved padding space).
+	const auto reposition = [=] {
+		const auto inner = menu->inner();
+		tabs->setGeometry(
+			inner.x(),
+			inner.y() - height - margin,
+			inner.width(),
+			height);
+	};
+	reposition();
+
+	// Wire tab changes to swap stashed content.
+	tabs->activeIndexChanges(
+	) | rpl::on_next([=](int index) {
+		const auto direction = (index > 0)
+			? Ui::PopupMenu::SwitchDirection::LeftToRight
+			: Ui::PopupMenu::SwitchDirection::RightToLeft;
+		base::call_delayed(0, menu, [=] {
+			menu->swapStashed(direction);
+		});
+	}, tabs->lifetime());
+
+	// Reposition after geometry is prepared.
+	menu->animatePhaseValue(
+	) | rpl::on_next([=](Ui::PopupMenu::AnimatePhase phase) {
+		if (phase == Ui::PopupMenu::AnimatePhase::StartShow) {
+			reposition();
+		}
+	}, tabs->lifetime());
+
+	menu->showStateValue(
+	) | rpl::on_next([=](Ui::PopupMenu::ShowState state) {
+		if (state.appearing) {
+			tabs->setVisible(state.heightProgress > 0.);
+			tabs->setOpacity(state.opacity * state.heightProgress);
+		} else {
+			tabs->setVisible(true);
+			tabs->setOpacity(1.);
+			reposition();
+		}
+	}, tabs->lifetime());
 }
 
 void AddPollActions(
