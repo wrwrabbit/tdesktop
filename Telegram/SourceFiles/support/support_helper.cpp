@@ -102,7 +102,7 @@ EditInfoBox::EditInfoBox(
 }
 
 void EditInfoBox::prepare() {
-	setTitle(rpl::single(u"Edit support information"_q)); // #TODO hard_lang
+	setTitle(u"Edit support information"_q); // #TODO hard_lang
 
 	const auto save = [=] {
 		const auto done = crl::guard(this, [=](bool success) {

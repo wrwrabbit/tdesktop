@@ -63,7 +63,7 @@ rpl::producer<TextWithEntities> Text3() {
 } // namespace
 
 void AboutBox(not_null<Ui::GenericBox*> box) {
-	box->setTitle(rpl::single(u"Telegram Desktop"_q));
+	box->setTitle(u"Telegram Desktop"_q);
 
 	auto layout = box->verticalLayout();
 
