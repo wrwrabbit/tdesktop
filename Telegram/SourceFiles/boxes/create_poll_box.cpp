@@ -191,6 +191,7 @@ private:
 
 		void setPlaceholder() const;
 		void removePlaceholder() const;
+		void showAddIcon(bool show);
 
 		[[nodiscard]] not_null<Ui::InputField*> field() const;
 
@@ -216,6 +217,7 @@ private:
 		FieldDropCallback _fieldDropCallback;
 		WidgetDropCallback _widgetDropCallback;
 		std::shared_ptr<PollMediaState> _media;
+		Ui::FadeWrapScaled<Ui::RpWidget> *_addIcon = nullptr;
 
 	};
 
@@ -628,6 +630,50 @@ void Options::Option::removePlaceholder() const {
 	field()->setPlaceholder(rpl::single(QString()));
 }
 
+void Options::Option::showAddIcon(bool show) {
+	if (show && !_addIcon) {
+		auto icon = Settings::Icon(Settings::IconDescriptor{
+			&st::settingsIconAdd,
+			Settings::IconType::Round,
+			&st::windowBgActive,
+		});
+		const auto iconSize = icon.size();
+		auto widget = object_ptr<Ui::RpWidget>(_content.get());
+		const auto raw = widget.data();
+		raw->resize(iconSize);
+		const auto iconPtr = std::make_shared<Settings::Icon>(
+			std::move(icon));
+		raw->paintOn([=](QPainter &p) {
+			iconPtr->paint(p, 0, 0);
+		});
+
+		const auto wrap =
+			Ui::CreateChild<Ui::FadeWrapScaled<Ui::RpWidget>>(
+				_content.get(),
+				std::move(widget));
+		wrap->hide(anim::type::instant);
+
+		_content->sizeValue(
+		) | rpl::on_next([=](QSize size) {
+			const auto &handleIcon = st::pollBoxMenuPollOrderIcon;
+			const auto left = st::createPollFieldPadding.left()
+				+ (handleIcon.width() - iconSize.width()) / 2;
+			wrap->moveToLeft(
+				left,
+				(size.height() - wrap->heightNoMargins()) / 2);
+		}, wrap->lifetime());
+
+		_addIcon = wrap;
+	}
+	if (_addIcon) {
+		if (show) {
+			_addIcon->show(anim::type::normal);
+		} else {
+			_addIcon->hide(anim::type::normal);
+		}
+	}
+}
+
 PollAnswer Options::Option::toPollAnswer(int index) const {
 	Expects(index >= 0 && index < kMaxOptionsCount);
 
@@ -837,8 +883,10 @@ void Options::fixAfterErase() {
 
 	const auto last = _list.end() - 1;
 	(*last)->setPlaceholder();
+	(*last)->showAddIcon(true);
 	if (last != begin(_list)) {
 		(*(last - 1))->setPlaceholder();
+		(*(last - 1))->showAddIcon(false);
 	}
 	fixShadows();
 }
@@ -848,6 +896,9 @@ void Options::addEmptyOption() {
 		return;
 	} else if (!_list.empty() && _list.back()->isEmpty()) {
 		return;
+	}
+	if (!_list.empty()) {
+		_list.back()->showAddIcon(false);
 	}
 	if (_list.size() > 1) {
 		(*(_list.end() - 2))->removePlaceholder();
@@ -945,6 +996,7 @@ void Options::addEmptyOption() {
 		return base::EventFilterResult::Cancel;
 	});
 
+	_list.back()->showAddIcon(true);
 	_list.back()->show((_list.size() == 1)
 		? anim::type::instant
 		: anim::type::normal);
