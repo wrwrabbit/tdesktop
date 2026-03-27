@@ -433,6 +433,26 @@ for (const auto &entry : list) {
 }
 ```
 
+## Use !isHidden() for logic checks, not isVisible()
+
+When you call `show()` / `hide()` / `setVisible()` on a widget and later branch on that state, always check `!isHidden()` (the widget's own flag) — never `isVisible()`. `isVisible()` returns `true` only when the widget **and every ancestor** are visible, so it silently returns `false` during parent show-animations, before the parent is laid out, etc. `isHidden()` reflects exactly the flag you set.
+
+```cpp
+// BAD — breaks when parent is still animating / not yet shown:
+child->setVisible(true);
+// ... later, in resizeGetHeight or similar:
+if (child->isVisible()) {   // false if parent isn't visible yet!
+    child->moveToRight(x, y, w);
+}
+
+// GOOD — checks the widget's own state:
+if (!child->isHidden()) {
+    child->moveToRight(x, y, w);
+}
+```
+
+The same applies to any logic that depends on a previous `show()`/`hide()` call: skip blocks, layout branches, opacity decisions, etc.
+
 ## Static member functions use PascalCase
 
 Non-static member functions use camelCase (`startBatch`, `finalize`). Static member functions use PascalCase (`ShouldTrack`, `Parse`, `Create`), matching the convention for free functions.
