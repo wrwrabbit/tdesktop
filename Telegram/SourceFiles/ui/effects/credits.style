@@ -560,10 +560,9 @@ auctionBidEmoji: IconEmoji {
 	padding: margins(-4px, -2px, -4px, 0px);
 }
 auctionBidToast: Toast(defaultToast) {
-	padding: margins(54px, 13px, 19px, 12px);
-	icon: icon {{ "settings/toast_auction", toastFg }};
-	iconPosition: point(18px, 18px);
+	padding: margins(19px, 13px, 19px, 12px);
 }
+auctionBidToastIcon: icon {{ "toast/auction", toastFg }};
 auctionAboutLogo: icon {{ "settings/large_auctions", windowFgActive }};
 auctionAboutLogoPadding: margins(8px, 8px, 8px, 8px);
 auctionAboutTextPadding: margins(0px, 6px, 0px, 8px);

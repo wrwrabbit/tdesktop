@@ -789,3 +789,6 @@ detailedSettingsButtonStyle: DetailedSettingsButtonStyle {
 	descriptionBottomSkip: 8px;
 	descriptionRightSkip: 4px;
 }
+
+settingsToastStarIcon: icon {{ "toast/star", toastFg }};
+

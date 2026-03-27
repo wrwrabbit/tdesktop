@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "ui/toast/toast.h"
 #include "window/window_session_controller.h"
+#include "styles/style_chat.h"
 
 namespace Core::DeepLinks {
 namespace {
@@ -92,6 +93,7 @@ Result ShowNewBot(const Context &ctx) {
 									tr::now,
 									lt_parent_name,
 									managerBot->name()) },
+								.icon = &st::toastCheckIcon,
 							});
 						}
 					},

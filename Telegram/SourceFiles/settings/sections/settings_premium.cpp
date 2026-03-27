@@ -67,6 +67,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
+#include "styles/style_widgets.h"
 
 namespace Settings {
 namespace {
@@ -1918,6 +1919,7 @@ void ShowPremiumPromoToast(
 			}
 			return false;
 		}),
+		.icon = &st::settingsToastStarIcon,
 		.adaptive = true,
 		.duration = Ui::Toast::kDefaultDuration * 2,
 	});

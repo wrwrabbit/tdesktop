@@ -425,10 +425,9 @@ historyDiceToast: Toast(defaultToast) {
 historyInfoToast: Toast(defaultToast) {
 	minWidth: msgMinWidth;
 	maxWidth: 380px;
-	padding: margins(54px, 13px, 19px, 12px);
-	icon: icon {{ "toast_info", toastFg }};
-	iconPosition: point(13px, 13px);
+	padding: margins(13px, 13px, 19px, 12px);
 }
+historyInfoToastIcon: icon {{ "toast/info", toastFg }};
 
 bubbleRadiusSmall: roundRadiusLarge;
 bubbleRadiusLarge: 16px;
@@ -1538,3 +1537,6 @@ stateChangeBadgeMargin: margins(0px, 1px, 0px, 0px);
 
 historySummaryHeaderIconSize: 30px;
 historySummaryHeaderIconSizeInner: 5px;
+
+toastCheckIcon: icon {{ "toast/check-36x36", toastFg }};
+toastCheckIconPadding: margins(12px, 8px, 12px, 8px);

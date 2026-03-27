@@ -40,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/layers/generic_box.h"
 #include "ui/text/text_utilities.h"
+#include "styles/style_chat.h"
 
 #include <QtCore/QDataStream>
 #include <QtGui/QGuiApplication>
@@ -595,6 +596,7 @@ void ActivateBotCommand(ClickHandlerContext context, int row, int column) {
 						tr::now,
 						lt_parent_name,
 						bot->name()) },
+					.icon = &st::toastCheckIcon,
 				});
 			},
 		});

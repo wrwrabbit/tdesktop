@@ -848,32 +848,31 @@ reactPanelScrollRounded: ScrollArea(emojiScroll) {
 	deltab: 14px;
 }
 selfForwardsTaggerStripSkip: 26px;
-selfForwardsTaggerIcon: size(32px, 32px);
+
+selfForwardsTaggerIconPadding: margins(14px, 2px, 8px, 2px);
 selfForwardsTaggerToast: Toast(defaultToast) {
 	minWidth: 160px;
 	maxWidth: 380px;
 	radius: 9px;
-	padding: margins(54px, 12px, 19px, 12px);
-	iconPosition: point(15px, 6px);
+	padding: margins(19px, 12px, 19px, 12px);
 }
 joinChatAddToFilterToast: Toast(defaultToast) {
 	minWidth: 160px;
 	maxWidth: 380px;
 	radius: 9px;
-	padding: margins(54px, 12px, 44px, 12px);
-	iconPosition: point(15px, 6px);
+	padding: margins(7px, 12px, 44px, 12px);
 }
 joinChatAddToFilterToastButton: IconButton(defaultIconButton) {
 	width: 40px;
 	height: 40px;
 
 	icon: icon{
-		{ "chat/reactions_round_small", windowBgRipple },
-		{ "chat/reactions_expand_panel", windowSubTextFg },
+		{ "chat/reactions_round_small", toastFg },
+		{ "chat/reactions_expand_panel", toastBg },
 	};
 	iconOver: icon{
-		{ "chat/reactions_round_small", windowBgRipple },
-		{ "chat/reactions_expand_panel", windowSubTextFg },
+		{ "chat/reactions_round_small", toastFg },
+		{ "chat/reactions_expand_panel", toastBg },
 	};
 	rippleAreaPosition: point(10px, 10px);
 	rippleAreaSize: 20px;
