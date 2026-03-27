@@ -3550,18 +3550,26 @@ void ComposeControls::updateControlsVisibility() {
 }
 
 void ComposeControls::updateAiButtonVisibility() {
-	const auto shown = hasEnoughLinesForAi()
-		&& _wrap->isVisible()
-		&& !_recording.current()
-		&& _field->isVisible();
+	const auto hidden = !hasEnoughLinesForAi()
+		|| !_wrap->isVisible()
+		|| _recording.current()
+		|| !_field->isVisible();
+	if (_aiButton->isHidden() == hidden) {
+		return;
+	}
+	const auto shown = !hidden;
 	_aiButton->setVisible(shown);
+	if (shown) {
+		updateAiButtonGeometry();
+	}
 	if (_aiTooltip) {
 		const auto showTooltip = shown
 			&& !Core::App().settings().readPref<bool>(kAiComposeTooltipHiddenPref);
 		if (showTooltip) {
 			updateAiTooltipGeometry();
 		}
-		if (showTooltip != _aiTooltipShown) {
+		if ((_aiTooltipShown != showTooltip)
+			|| (showTooltip && _aiTooltip->isHidden())) {
 			_aiTooltipShown = showTooltip;
 			_aiTooltip->toggleAnimated(showTooltip);
 		}
@@ -3572,9 +3580,8 @@ void ComposeControls::updateAiButtonGeometry() {
 	if (_aiButton->isHidden()) {
 		return;
 	}
-	_aiButton->move(
-		_send->x() + (_send->width() - _aiButton->width()) / 2,
-		_field->y() + st::historyAiComposeButtonTop);
+	const auto x = _send->x() + _send->width() - _aiButton->width();
+	_aiButton->move(QPoint(x, _field->y()) + st::historyAiComposeButtonPosition);
 	updateAiTooltipGeometry();
 }
 

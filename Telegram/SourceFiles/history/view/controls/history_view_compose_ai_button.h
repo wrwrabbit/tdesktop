@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "ui/effects/animations.h"
 #include "ui/widgets/buttons.h"
 
 namespace HistoryView::Controls {
@@ -24,6 +25,7 @@ protected:
 
 private:
 	const style::IconButton &_st;
+	Ui::Animations::Simple _animation;
 
 };
 
