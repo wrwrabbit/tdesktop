@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_location_manager.h"
 #include "history/view/history_view_group_call_bar.h"
 #include "history/view/history_view_reaction_preview.h"
+#include "history/view/media/history_view_document.h"
 #include "lang/lang_keys.h"
 #include "layout/layout_document_generic_preview.h"
 #include "main/main_session.h"
@@ -35,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
+#include "ui/text/format_song_name.h"
 #include "ui/text/format_values.h"
 #include "ui/widgets/dropdown_menu.h"
 #include "ui/widgets/menu/menu_action.h"
@@ -303,70 +305,13 @@ void ShowPollDocumentPreview(
 		not_null<DocumentData*> document,
 		Fn<void()> replace,
 		Fn<void()> remove) {
-	if (document->hasThumbnail()) {
-		const auto media = document->createMediaView();
+	const auto isSong = document->isSong();
+	const auto songData = isSong ? document->song() : nullptr;
+	const auto media = isSong
+		? document->createMediaView()
+		: nullptr;
+	if (media) {
 		media->thumbnailWanted(Data::FileOrigin());
-		ShowWidgetPreview(controller, [=](
-				not_null<Ui::RpWidget*> preview) {
-			const auto body = preview->parentWidget()->size();
-			const auto skip = st::mediaPreviewPhotoSkip;
-			const auto box = QSize(
-				body.width() - 2 * skip,
-				body.height() - 2 * skip);
-			const auto d = document->dimensions;
-			const auto raw = (d.width() > 0 && d.height() > 0)
-				? QSize(
-					style::ConvertScale(d.width()),
-					style::ConvertScale(d.height()))
-				: box;
-			const auto scaled = raw.scaled(box, Qt::KeepAspectRatio);
-			const auto shadowExtend = st::boxRoundShadow.extend;
-			const auto fullW = scaled.width()
-				+ rect::m::sum::h(shadowExtend);
-			const auto fullH = scaled.height()
-				+ rect::m::sum::v(shadowExtend);
-			preview->resize(fullW, fullH);
-
-			document->session().downloaderTaskFinished(
-			) | rpl::on_next([=] {
-				preview->update();
-			}, preview->lifetime());
-
-			preview->paintRequest() | rpl::on_next([=] {
-				auto p = Painter(preview);
-				const auto outer = preview->rect() - shadowExtend;
-
-				Ui::Shadow::paint(
-					p,
-					outer,
-					preview->width(),
-					st::boxRoundShadow);
-				auto hq = PainterHighQualityEnabler(p);
-				p.setPen(Qt::NoPen);
-				p.setBrush(st::windowBg);
-				const auto radius = st::boxRadius;
-				p.drawRoundedRect(outer, radius, radius);
-
-				const auto thumb = media->thumbnail();
-				const auto blurred = media->thumbnailInline();
-				if (const auto image = thumb ? thumb : blurred) {
-					auto path = QPainterPath();
-					path.addRoundedRect(outer, radius, radius);
-					p.setClipPath(path);
-					p.drawImage(outer, image->original().scaled(
-						outer.size() * style::DevicePixelRatio(),
-						Qt::KeepAspectRatioByExpanding,
-						Qt::SmoothTransformation));
-				}
-			}, preview->lifetime());
-		}, [=](not_null<Ui::DropdownMenu*> menu) {
-			menu->addAction(
-				tr::lng_attach_replace(tr::now),
-				replace,
-				&st::menuIconReplace);
-			AddRemoveAction(menu, remove);
-		});
-		return;
 	}
 
 	const auto docGeneric = Layout::DocumentGenericPreview::Create(
@@ -387,11 +332,19 @@ void ShowPollDocumentPreview(
 		- st::mediaviewFileIconSize
 		- st::mediaviewFilePadding * 3;
 	const auto docName = [&] {
-		auto name = document->filename().isEmpty()
+		auto name = (isSong && songData)
+			? Ui::Text::FormatSongName(
+				document->filename(),
+				songData->title,
+				songData->performer).string()
+			: document->filename().isEmpty()
 			? tr::lng_mediaview_doc_image(tr::now)
 			: document->filename();
 		if (st::mediaviewFileNameFont->width(name) > maxTextW) {
-			name = st::mediaviewFileNameFont->elided(name, maxTextW, Qt::ElideMiddle);
+			name = st::mediaviewFileNameFont->elided(
+				name,
+				maxTextW,
+				Qt::ElideMiddle);
 		}
 		return name;
 	}();
@@ -410,6 +363,14 @@ void ShowPollDocumentPreview(
 		const auto fullH = st::mediaviewFileSize.height()
 			+ rect::m::sum::v(shadowExtend);
 		preview->resize(fullW, fullH);
+
+		if (media) {
+			document->session().downloaderTaskFinished(
+			) | rpl::on_next([=] {
+				preview->update();
+			}, preview->lifetime());
+		}
+
 		preview->paintRequest() | rpl::on_next([=] {
 			auto p = Painter(preview);
 			const auto outer = preview->rect() - shadowExtend;
@@ -434,24 +395,43 @@ void ShowPollDocumentPreview(
 				iconSize,
 				iconSize);
 
-			p.fillRect(iconRect, docIconColor);
-			if (docIcon) {
-				docIcon->paint(
+			const auto coverDrawn = isSong
+				&& DrawThumbnailAsSongCover(
 					p,
-					iconRect.x() + (iconRect.width() - docIcon->width()),
-					iconRect.y(),
-					preview->width());
+					st::songCoverOverlayFg,
+					media,
+					iconRect);
+			if (!coverDrawn) {
+				p.setPen(Qt::NoPen);
+				p.fillRect(iconRect, docIconColor);
+				if (docIcon) {
+					docIcon->paint(
+						p,
+						iconRect.x()
+							+ (iconRect.width() - docIcon->width()),
+						iconRect.y(),
+						preview->width());
+				}
+				if (!docExt.isEmpty()) {
+					p.setPen(st::activeButtonFg);
+					p.setFont(st::mediaviewFileExtFont);
+					const auto extW
+						= st::mediaviewFileExtFont->width(docExt);
+					p.drawText(
+						iconRect.x()
+							+ (iconRect.width() - extW) / 2,
+						iconRect.y()
+							+ st::mediaviewFileExtTop
+							+ st::mediaviewFileExtFont->ascent,
+						docExt);
+				}
 			}
-			if (!docExt.isEmpty()) {
-				p.setPen(st::activeButtonFg);
-				p.setFont(st::mediaviewFileExtFont);
-				const auto extW = st::mediaviewFileExtFont->width(docExt);
-				p.drawText(
-					iconRect.x() + (iconRect.width() - extW) / 2,
-					iconRect.y()
-						+ st::mediaviewFileExtTop
-						+ st::mediaviewFileExtFont->ascent,
-					docExt);
+			if (isSong && !coverDrawn) {
+				auto hq = PainterHighQualityEnabler(p);
+				p.setPen(Qt::NoPen);
+				p.setBrush(st::msgFileInBg);
+				p.drawEllipse(iconRect);
+				st::historyFileInPlay.paintInCenter(p, iconRect);
 			}
 
 			const auto textX = outer.x() + 2 * padding + iconSize;
