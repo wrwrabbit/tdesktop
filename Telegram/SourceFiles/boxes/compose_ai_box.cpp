@@ -841,7 +841,7 @@ int ComposeAiPreviewCard::resizeGetHeight(int newWidth) {
 	const auto lineHeight = _resultBody->st().style.lineHeight
 		? _resultBody->st().style.lineHeight
 		: _resultBody->st().style.font->height;
-	if (_copy->isVisible()) {
+	if (!_copy->isHidden()) {
 		_resultBody->setSkipBlock(
 			_copy->width(),
 			lineHeight);
@@ -855,7 +855,7 @@ int ComposeAiPreviewCard::resizeGetHeight(int newWidth) {
 		contentWidth,
 		_resultBody->height(),
 		newWidth);
-	if (_copy->isVisible()) {
+	if (!_copy->isHidden()) {
 		_copy->moveToRight(
 			padding.right(),
 			y + _resultBody->height() - lineHeight,
