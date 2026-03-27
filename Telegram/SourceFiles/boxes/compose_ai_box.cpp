@@ -280,6 +280,21 @@ enum class CardState {
 	return result;
 }
 
+[[nodiscard]] std::optional<TextWithEntities> ResolveLoadingTitleSparkle(
+		not_null<Main::Session*> session) {
+	const auto sparkleEmoji = QString::fromUtf8("\xE2\x9C\xA8");
+	const auto found = Ui::Emoji::Find(sparkleEmoji);
+	if (!found) {
+		return std::nullopt;
+	}
+	const auto sticker = session->emojiStickersPack().stickerForEmoji(found);
+	if (!sticker.document) {
+		return std::nullopt;
+	}
+	return tr::marked(u" "_q)
+		.append(Data::SingleCustomEmoji(sticker.document));
+}
+
 class ComposeAiModeButton final : public Ui::RippleButton {
 public:
 	ComposeAiModeButton(
@@ -384,6 +399,7 @@ public:
 	[[nodiscard]] const TextWithEntities &result() const;
 	[[nodiscard]] const std::vector<Ui::LabeledEmojiTab> &stylesData() const;
 	void setReadyChangedCallback(Fn<void(bool)> callback);
+	void setLoadingChangedCallback(Fn<void(bool)> callback);
 	void setPremiumFloodCallback(Fn<void()> callback);
 	void setModeChangedCallback(Fn<void(ComposeAiMode)> callback);
 	void setStyleSelectedCallback(Fn<void()> callback);
@@ -407,6 +423,7 @@ private:
 	void request();
 	void applyResult(Api::ComposeWithAi::Result &&result);
 	void showError(const MTP::Error &error);
+	void notifyLoadingChanged();
 	void notifyReadyChanged();
 	[[nodiscard]] QString currentTranslateStyle() const;
 	[[nodiscard]] QString currentTranslateStyleLabel() const;
@@ -423,6 +440,7 @@ private:
 	QPointer<Ui::SlideWrap<Ui::LabeledEmojiScrollTabs>> _stylesWrap;
 	const not_null<ComposeAiPreviewCard*> _preview;
 	Fn<void(bool)> _readyChanged;
+	Fn<void(bool)> _loadingChanged;
 	Fn<void()> _premiumFlood;
 	Fn<void(ComposeAiMode)> _modeChanged;
 	Fn<void()> _styleSelected;
@@ -931,6 +949,11 @@ void ComposeAiContent::setReadyChangedCallback(Fn<void(bool)> callback) {
 	_readyChanged = std::move(callback);
 }
 
+void ComposeAiContent::setLoadingChangedCallback(Fn<void(bool)> callback) {
+	_loadingChanged = std::move(callback);
+	notifyLoadingChanged();
+}
+
 void ComposeAiContent::setModeTabs(not_null<ComposeAiModeTabs*> tabs) {
 	_tabs = tabs;
 	_tabs->setChangedCallback([=](ComposeAiMode mode) {
@@ -1056,6 +1079,7 @@ void ComposeAiContent::setMode(ComposeAiMode mode) {
 	_mode = mode;
 	_state = CardState::Waiting;
 	_preview->setState(CardState::Waiting);
+	notifyLoadingChanged();
 	if (_modeChanged) {
 		_modeChanged(_mode);
 	}
@@ -1105,13 +1129,14 @@ void ComposeAiContent::cancelRequest() {
 }
 
 void ComposeAiContent::request() {
+	cancelRequest();
 	if (_mode == ComposeAiMode::Style && _styleIndex < 0) {
 		return;
 	}
-	cancelRequest();
 	_state = CardState::Loading;
 	_result = {};
 	_preview->setState(CardState::Loading);
+	notifyLoadingChanged();
 	updateTitles();
 	notifyReadyChanged();
 
@@ -1159,6 +1184,7 @@ void ComposeAiContent::applyResult(Api::ComposeWithAi::Result &&result) {
 		: _result;
 	_state = _result.text.isEmpty() ? CardState::Failed : CardState::Ready;
 	_preview->setState(_state);
+	notifyLoadingChanged();
 	if (_state == CardState::Ready) {
 		_preview->setResultText(std::move(display));
 	}
@@ -1170,6 +1196,7 @@ void ComposeAiContent::applyResult(Api::ComposeWithAi::Result &&result) {
 void ComposeAiContent::showError(const MTP::Error &error) {
 	_state = CardState::Failed;
 	_preview->setState(CardState::Failed);
+	notifyLoadingChanged();
 	updateTitles();
 	notifyReadyChanged();
 	refreshLayout();
@@ -1194,6 +1221,12 @@ void ComposeAiContent::showError(const MTP::Error &error) {
 	_box->showToast(error.type().isEmpty()
 		? tr::lng_ai_compose_error(tr::now)
 		: error.type());
+}
+
+void ComposeAiContent::notifyLoadingChanged() {
+	if (_loadingChanged) {
+		_loadingChanged(_state == CardState::Loading);
+	}
 }
 
 void ComposeAiContent::notifyReadyChanged() {
@@ -1259,12 +1292,11 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 	box->setStyle(*boxStyleNoSend);
 	box->setNoContentMargin(true);
 	box->setWidth(st::boxWideWidth);
-	box->setTitle(tr::lng_ai_compose_title());
+	const auto session = args.session;
 	box->addTopButton(st::boxTitleClose, [=] {
 		box->closeBox();
 	});
 
-	const auto session = args.session;
 	const auto body = box->verticalLayout();
 	const auto tabsSkip = QMargins(0, 0, 0, st::aiComposeBoxStyleTabsSkip);
 	const auto pinnedToTop = box->setPinnedToTopContent(
@@ -1289,6 +1321,24 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 	stylesWrap->hide(anim::type::instant);
 	content->setModeTabs(tabs);
 	content->setStyleTabs(stylesWrap);
+
+	if (const auto sparkle = ResolveLoadingTitleSparkle(session)) {
+		const auto loading = box->lifetime().make_state<
+			rpl::variable<bool>>();
+
+		content->setLoadingChangedCallback([=](bool value) {
+			*loading = value;
+		});
+
+		box->setTitle(rpl::combine(
+			loading->value(),
+			tr::lng_ai_compose_title(tr::marked)
+		) | rpl::map([=](bool loading, TextWithEntities title) {
+			return loading ? title.append(*sparkle) : title;
+		}), Core::TextContext({ .session = session }));
+	} else {
+		box->setTitle(tr::lng_ai_compose_title());
+	}
 
 	auto premiumFlooded = std::make_shared<bool>(false);
 	auto sendButton = std::make_shared<QPointer<Ui::SendButton>>();
