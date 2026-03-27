@@ -114,7 +114,7 @@ bool _expanded = false;
 SomeType *_pointer = nullptr;
 ```
 
-## Prefer tr:: projections over Ui::Text:: in localization calls
+## Use tr:: projections for TextWithEntities
 
 Inside `tr::lng_...()` calls, always use the `tr::` projection helpers instead of their `Ui::Text::` equivalents. The `tr::` helpers are shorter and work uniformly as both placeholder wrappers and final projectors.
 
@@ -143,6 +143,19 @@ tr::lng_some_key(
     lt_group,
     tr::bold(group),
     tr::rich)
+```
+
+Also use `tr::marked()` as the standard way to create `TextWithEntities` — not just as a projector:
+
+```cpp
+// BAD - verbose constructor:
+auto text = TextWithEntities();
+auto text = TextWithEntities{ u"hello"_q };
+auto text = TextWithEntities().append(u"hello"_q);
+
+// GOOD - concise:
+auto text = tr::marked();
+auto text = tr::marked(u"hello"_q);
 ```
 
 ## Multi-line calls — one argument per line
