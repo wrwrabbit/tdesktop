@@ -166,6 +166,7 @@ giftBoxTabFg: windowSubTextFg;
 giftBoxTabFgActive: windowBoldFg;
 giftBoxTabBgActive: windowBgRipple;
 giftBoxPillTabs: PillTabs(defaultPillTabs) {
+	borderWidth: 6px;
 	fg: windowSubTextFg;
 	fgActive: windowBoldFg;
 	bgActive: windowBgRipple;

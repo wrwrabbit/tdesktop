@@ -44,8 +44,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/controls/who_reacted_context_action.h"
 #include "ui/boxes/edit_factcheck_box.h"
 #include "ui/boxes/report_box_graphics.h"
-#include "ui/ui_utility.h"
 #include "ui/painter.h"
+#include "ui/rect.h"
+#include "ui/ui_utility.h"
 #include "ui/widgets/pill_tabs.h"
 #include "menu/menu_item_download_files.h"
 #include "menu/menu_item_rate_transcribe.h"
@@ -1641,6 +1642,7 @@ void AttachPollOptionTabs(
 
 	const auto height = tabsSt.height;
 	const auto margin = tabsSt.margin;
+	tabs->setShadow(st::defaultBoxShadow);
 	tabs->show();
 
 	// Reserve space for tabs by increasing additional padding top.
@@ -1655,11 +1657,12 @@ void AttachPollOptionTabs(
 	// Position tabs just above _inner (in the reserved padding space).
 	const auto reposition = [=] {
 		const auto inner = menu->inner();
-		tabs->setGeometry(
-			inner.x(),
-			inner.y() - height - margin,
-			inner.width(),
-			height);
+		tabs->setGeometry(tabs->shadowExtend()
+			+ QRect(
+				inner.x(),
+				inner.y() - height - margin,
+				inner.width(),
+				height));
 	};
 	reposition();
 
@@ -1683,13 +1686,23 @@ void AttachPollOptionTabs(
 	}, tabs->lifetime());
 
 	menu->showStateValue(
-	) | rpl::on_next([=](Ui::PopupMenu::ShowState state) {
-		if (state.appearing) {
-			tabs->setVisible(state.heightProgress > 0.);
-			tabs->setOpacity(state.opacity * state.heightProgress);
+	) | rpl::on_next([=](Ui::PopupMenu::ShowState showState) {
+		if (showState.appearing) {
+			tabs->show();
+			tabs->raise();
+			const auto raw = showState.widthProgress;
+			const auto delayed = std::clamp(
+				(raw - 0.4) / 0.6,
+				0.,
+				1.);
+			tabs->setShowProgress(
+				delayed,
+				showState.opacity * delayed);
+		} else if (showState.toggling) {
+			tabs->setShowProgress(1., showState.opacity);
 		} else {
-			tabs->setVisible(true);
-			tabs->setOpacity(1.);
+			tabs->show();
+			tabs->setShowProgress(1., 1.);
 			reposition();
 		}
 	}, tabs->lifetime());
