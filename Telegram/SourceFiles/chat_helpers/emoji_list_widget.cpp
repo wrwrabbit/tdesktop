@@ -120,6 +120,7 @@ private:
 	QPoint _innerPosition;
 	Ui::RoundRect _backgroundRect;
 	Ui::RoundRect _overBg;
+	Ui::BoxShadow _shadow;
 
 	bool _hiding = false;
 	QPixmap _cache;
@@ -150,7 +151,8 @@ EmojiColorPicker::EmojiColorPicker(
 : RpWidget(parent)
 , _st(st)
 , _backgroundRect(st::emojiPanRadius, _st.bg)
-, _overBg(st::emojiPanRadius, _st.overBg) {
+, _overBg(st::emojiPanRadius, _st.overBg)
+, _shadow(_st.showAnimation.shadow) {
 	setMouseTracking(true);
 }
 
@@ -233,7 +235,7 @@ void EmojiColorPicker::paintEvent(QPaintEvent *e) {
 		p.drawPixmap(0, 0, _cache);
 		return;
 	}
-	Ui::Shadow::paint(p, inner, width(), _st.showAnimation.shadow);
+	_shadow.paint(p, inner, st::emojiPanRadius);
 	_backgroundRect.paint(p, inner);
 
 	const auto skip = topColorAllSkip();

@@ -524,10 +524,6 @@ dialogsSearchInDownTop: 15px;
 dialogsSearchInDown: icon {{ "intro_country_dropdown", windowBoldFg }};
 dialogsSearchInDownSkip: 4px;
 dialogsSearchInMenu: PopupMenu(defaultPopupMenu) {
-	shadow: boxRoundShadow;
-	animation: PanelAnimation(defaultPanelAnimation) {
-		shadow: boxRoundShadow;
-	}
 	scrollPadding: margins(0px, 0px, 0px, 0px);
 	radius: 8px;
 	menu: menuWithIcons;

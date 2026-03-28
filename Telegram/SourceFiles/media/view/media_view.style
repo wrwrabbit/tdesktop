@@ -191,10 +191,9 @@ mediaviewMenuShadow: Shadow(defaultEmptyShadow) {
 }
 mediaviewPanelAnimation: PanelAnimation(defaultPanelAnimation) {
 	fadeBg: groupCallMenuBg;
-	shadow: mediaviewMenuShadow;
 }
 mediaviewPopupMenu: PopupMenu(defaultPopupMenu) {
-	shadow: mediaviewMenuShadow;
+	shadowFallback: groupCallMenuBg;
 	menu: mediaviewMenu;
 	animation: mediaviewPanelAnimation;
 }
@@ -545,10 +544,9 @@ storiesMenu: Menu(defaultMenu) {
 		color: groupCallMenuBgRipple;
 	}
 }
-storiesMenuShadow: mediaviewMenuShadow;
 storiesMenuAnimation: mediaviewPanelAnimation;
 storiesPopupMenu: PopupMenu(defaultPopupMenu) {
-	shadow: storiesMenuShadow;
+	shadowFallback: groupCallMenuBg;
 	menu: storiesMenu;
 	animation: storiesMenuAnimation;
 }
@@ -775,7 +773,6 @@ storiesComposeControls: ComposeControls(defaultComposeControls) {
 		dropdown: InnerDropdown(emojiSuggestionsDropdown) {
 			animation: PanelAnimation(defaultPanelAnimation) {
 				fadeBg: storiesComposeBg;
-				shadow: defaultRoundShadow;
 			}
 			bg: storiesComposeBg;
 		}

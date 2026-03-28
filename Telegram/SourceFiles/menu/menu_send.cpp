@@ -147,6 +147,7 @@ private:
 	QImage _bg;
 	QPoint _itemShift;
 	QRect _iconRect;
+	Ui::BoxShadow _boxShadow;
 	std::unique_ptr<Ui::InfiniteRadialAnimation> _loading;
 
 	Ui::Animations::Simple _shownAnimation;
@@ -286,7 +287,8 @@ EffectPreview::EffectPreview(
 		st::effectPreviewPromoPadding))
 , _bottom(_send ? ((Ui::RpWidget*)_send.get()) : _premiumPromoLabel.get())
 , _close(done)
-, _actionWithEffect(ComposeActionWithEffect(action, _effectId, done)) {
+, _actionWithEffect(ComposeActionWithEffect(action, _effectId, done))
+, _boxShadow(st::previewMenu.animation.shadow) {
 	_chatStyle->apply(_theme.get());
 
 	setupGeometry(position);
@@ -376,8 +378,7 @@ void EffectPreview::mousePressEvent(QMouseEvent *e) {
 void EffectPreview::setupGeometry(QPoint position) {
 	const auto parent = parentWidget();
 	const auto innerSize = HistoryView::Sticker::MessageEffectSize();
-	const auto shadow = st::previewMenu.shadow;
-	const auto extend = shadow.extend;
+	const auto extend = Ui::BoxShadow::ExtendFor(st::previewMenu.shadow);
 	_inner = QRect(QPoint(extend.left(), extend.top()), innerSize);
 	_bottom->resizeToWidth(_inner.width());
 	const auto size = _inner.marginsAdded(extend).size()
@@ -471,9 +472,8 @@ void EffectPreview::repaintBackground() {
 	_bg.fill(Qt::transparent);
 	auto p = QPainter(&_bg);
 
-	const auto &shadow = st::previewMenu.animation.shadow;
 	const auto shadowed = QRect(_inner.topLeft(), inner);
-	Ui::Shadow::paint(p, shadowed, width(), shadow);
+	_boxShadow.paint(p, shadowed, st::previewMenu.radius);
 	p.drawImage(_inner.topLeft(), bg);
 }
 

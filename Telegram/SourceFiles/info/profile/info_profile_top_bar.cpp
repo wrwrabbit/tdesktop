@@ -85,6 +85,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/widgets/shadow.h"
 #include "ui/widgets/tooltip.h"
 #include "ui/wrap/fade_wrap.h"
 #include "window/themes/window_theme.h"
@@ -1976,7 +1977,9 @@ void TopBar::showTopBarMenu(
 		? Ui::PopupMenu::ConstrainToParentScreen(
 			_peerMenu,
 			_actionMore->mapToGlobal(QPoint(
-				_actionMore->width() + _peerMenu->st().shadow.extend.right(),
+				_actionMore->width()
+					+ Ui::BoxShadow::ExtendFor(
+						_peerMenu->st().shadow).right(),
 				_actionMore->height() + st::infoProfileTopBarActionMenuSkip)))
 		: QCursor::pos());
 }

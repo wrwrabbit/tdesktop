@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/widgets/menu/menu_action.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/widgets/shadow.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 #include "styles/style_settings.h"
@@ -173,7 +174,8 @@ struct SwitchAccountResult {
 		state->menu->popup(
 			widget->mapToGlobal(
 				QPoint(
-					widget->width() + st.shadow.extend.right(),
+					widget->width()
+						+ Ui::BoxShadow::ExtendFor(st.shadow).right(),
 					widget->height())));
 	});
 	return {
