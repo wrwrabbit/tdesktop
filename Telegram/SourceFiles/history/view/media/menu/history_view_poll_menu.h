@@ -7,13 +7,23 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "base/unique_qptr.h"
+
 namespace Data {
 class LocationPoint;
 } // namespace Data
 
+namespace PollMediaUpload {
+struct PollMediaState;
+} // namespace PollMediaUpload
+
 struct PollData;
 class DocumentData;
 class PhotoData;
+
+namespace ChatHelpers {
+class TabbedPanel;
+} // namespace ChatHelpers
 
 namespace Ui {
 class DropdownMenu;
@@ -25,6 +35,14 @@ class SessionController;
 } // namespace Window
 
 namespace HistoryView {
+
+struct PollMediaActions {
+	Fn<void()> choosePhotoOrVideo;
+	Fn<void()> chooseDocument;
+	Fn<void()> chooseSticker;
+	Fn<void(Ui::PreparedList)> editPhoto;
+	Fn<void()> remove;
+};
 
 void FillPollAnswerMenu(
 	not_null<Ui::DropdownMenu*> menu,
@@ -63,5 +81,15 @@ void EditPollPhoto(
 	not_null<Window::SessionController*> controller,
 	not_null<PhotoData*> photo,
 	Fn<void(Ui::PreparedList)> done);
+
+[[nodiscard]] bool ShowPollMediaPreview(
+	not_null<Window::SessionController*> controller,
+	const std::shared_ptr<PollMediaUpload::PollMediaState> &media,
+	PollMediaActions actions);
+
+[[nodiscard]] base::unique_qptr<ChatHelpers::TabbedPanel>
+CreatePollStickerPanel(
+	not_null<QWidget*> parent,
+	not_null<Window::SessionController*> controller);
 
 } // namespace HistoryView

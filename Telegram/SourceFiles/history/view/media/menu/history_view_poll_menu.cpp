@@ -30,9 +30,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "layout/layout_document_generic_preview.h"
 #include "main/main_session.h"
+#include "poll/poll_media_upload.h"
 #include "mainwidget.h"
 #include "storage/localimageloader.h"
 #include "storage/storage_media_prepare.h"
+#include "chat_helpers/tabbed_panel.h"
+#include "chat_helpers/tabbed_selector.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
@@ -598,6 +601,91 @@ void EditPollPhoto(
 	controller->showLayer(
 		std::move(layer),
 		Ui::LayerOption::KeepOther);
+}
+
+bool ShowPollMediaPreview(
+		not_null<Window::SessionController*> controller,
+		const std::shared_ptr<PollMediaUpload::PollMediaState> &media,
+		PollMediaActions actions) {
+	if (media->uploading) {
+		actions.remove();
+		return true;
+	}
+	const auto document = media->media.document;
+	const auto photo = media->media.photo;
+	if (document && document->sticker()) {
+		ShowPollStickerPreview(
+			controller,
+			document,
+			std::move(actions.chooseSticker),
+			std::move(actions.remove));
+		return true;
+	} else if (photo) {
+		ShowPollPhotoPreview(
+			controller,
+			photo,
+			std::move(actions.choosePhotoOrVideo),
+			[controller, photo, editPhoto = std::move(actions.editPhoto)] {
+				EditPollPhoto(
+					controller,
+					photo,
+					std::move(editPhoto));
+			},
+			std::move(actions.remove));
+		return true;
+	} else if (document && document->isVideoFile()) {
+		ShowPollDocumentPreview(
+			controller,
+			document,
+			std::move(actions.choosePhotoOrVideo),
+			std::move(actions.remove));
+		return true;
+	} else if (document) {
+		ShowPollDocumentPreview(
+			controller,
+			document,
+			std::move(actions.chooseDocument),
+			std::move(actions.remove));
+		return true;
+	} else if (media->media.geo) {
+		ShowPollGeoPreview(
+			controller,
+			*media->media.geo,
+			nullptr,
+			std::move(actions.remove));
+		return true;
+	}
+	return false;
+}
+
+base::unique_qptr<ChatHelpers::TabbedPanel> CreatePollStickerPanel(
+		not_null<QWidget*> parent,
+		not_null<Window::SessionController*> controller) {
+	using Selector = ChatHelpers::TabbedSelector;
+	using Descriptor = ChatHelpers::TabbedSelectorDescriptor;
+
+	auto panel = base::make_unique_q<ChatHelpers::TabbedPanel>(
+		parent,
+		controller,
+		object_ptr<Selector>(
+			nullptr,
+			Descriptor{
+				.show = controller->uiShow(),
+				.st = st::backgroundEmojiPan,
+				.level = Window::GifPauseReason::Layer,
+				.mode = Selector::Mode::StickersOnly,
+				.features = {
+					.megagroupSet = false,
+					.stickersSettings = false,
+					.openStickerSets = false,
+				},
+			}));
+	panel->setDesiredHeightValues(
+		0.,
+		st::emojiPanMinHeight,
+		st::emojiPanMinHeight);
+	panel->hide();
+	return panel;
 }
 
 } // namespace HistoryView

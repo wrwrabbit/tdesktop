@@ -1691,34 +1691,12 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	const auto showStickerPanel = [=](
 			not_null<Ui::RpWidget*>,
 			std::shared_ptr<PollMediaState> media) {
-		using Selector = ChatHelpers::TabbedSelector;
-		using Descriptor = ChatHelpers::TabbedSelectorDescriptor;
-		using Mode = ChatHelpers::TabbedSelector::Mode;
-		using Panel = ChatHelpers::TabbedPanel;
 		if (!state->stickerPanel) {
 			const auto body = getDelegate()->outerContainer();
-			state->stickerPanel = base::make_unique_q<Panel>(
+			state->stickerPanel = HistoryView::CreatePollStickerPanel(
 				body,
-				_controller,
-				object_ptr<Selector>(
-					nullptr,
-					Descriptor{
-						.show = _controller->uiShow(),
-						.st = st::backgroundEmojiPan,
-						.level = Window::GifPauseReason::Layer,
-						.mode = Mode::StickersOnly,
-						.features = {
-							.megagroupSet = false,
-							.stickersSettings = false,
-							.openStickerSets = false,
-						},
-					}));
+				_controller);
 			state->stickerPanel->setDropDown(true);
-			state->stickerPanel->setDesiredHeightValues(
-				0.,
-				st::emojiPanMinHeight,
-				st::emojiPanMinHeight);
-			state->stickerPanel->hide();
 			base::install_event_filter(
 				body,
 				[=](not_null<QEvent*> event) {
@@ -2221,57 +2199,17 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			std::shared_ptr<PollMediaState> media,
 			bool allowDocuments = false,
 			bool allowStickers = true) {
-		if (media->uploading) {
-			clearMedia(media);
-			return;
-		}
-		const auto document = media->media.document;
-		const auto photo = media->media.photo;
-		const auto remove = [=] { clearMedia(media); };
-		if (document && document->sticker()) {
-			HistoryView::ShowPollStickerPreview(
-				_controller,
-				document,
-				[=] { showStickerPanel(button, media); },
-				remove);
-			return;
-		} else if (photo) {
-			HistoryView::ShowPollPhotoPreview(
-				_controller,
-				photo,
-				[=] { choosePhotoOrVideo(media); },
-				[=] {
-					HistoryView::EditPollPhoto(
-						_controller,
-						photo,
-						crl::guard(this, [=](Ui::PreparedList list) {
-							applyPreparedPhotoList(
-								media,
-								std::move(list));
-						}));
-				},
-				remove);
-			return;
-		} else if (document && document->isVideoFile()) {
-			HistoryView::ShowPollDocumentPreview(
-				_controller,
-				document,
-				[=] { choosePhotoOrVideo(media); },
-				remove);
-			return;
-		} else if (document) {
-			HistoryView::ShowPollDocumentPreview(
-				_controller,
-				document,
-				[=] { chooseDocument(media); },
-				remove);
-			return;
-		} else if (media->media.geo) {
-			HistoryView::ShowPollGeoPreview(
-				_controller,
-				*media->media.geo,
-				nullptr,
-				remove);
+		if (HistoryView::ShowPollMediaPreview(_controller, media, {
+			.choosePhotoOrVideo = [=] { choosePhotoOrVideo(media); },
+			.chooseDocument = [=] { chooseDocument(media); },
+			.chooseSticker = [=] {
+				showStickerPanel(button, media);
+			},
+			.editPhoto = crl::guard(this, [=](Ui::PreparedList list) {
+				applyPreparedPhotoList(media, std::move(list));
+			}),
+			.remove = [=] { clearMedia(media); },
+		})) {
 			return;
 		}
 		state->mediaMenu = base::make_unique_q<Ui::PopupMenu>(
