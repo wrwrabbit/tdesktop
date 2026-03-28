@@ -433,7 +433,8 @@ private:
 	Window::Controller *_lastActiveWindow = nullptr;
 	Window::Controller *_lastActivePrimaryWindow = nullptr;
 	Window::Controller *_windowInSettings = nullptr;
-	Qt::MouseEventSource _lastMouseEventSource = Qt::MouseEventNotSynthesized;
+	bool _lastMouseIgnored = false;
+	bool _lastTouchToWidget = false;
 
 	std::unique_ptr<Media::View::OverlayWidget> _mediaView;
 	const std::unique_ptr<Lang::Instance> _langpack;

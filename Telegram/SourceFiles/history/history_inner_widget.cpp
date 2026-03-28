@@ -1617,10 +1617,13 @@ HistoryInner::VideoUserpic *HistoryInner::validateVideoUserpic(
 
 void HistoryInner::onTouchScrollTimer() {
 	auto nowTime = crl::now();
-	if (_touchScrollState == Ui::TouchScrollState::Acceleration && _touchWaitingAcceleration && (nowTime - _touchAccelerationTime) > 40) {
+	if (_touchScrollState == Ui::TouchScrollState::Acceleration
+		&& _touchWaitingAcceleration
+		&& (nowTime - _touchAccelerationTime) > 40) {
 		_touchScrollState = Ui::TouchScrollState::Manual;
 		touchResetSpeed();
-	} else if (_touchScrollState == Ui::TouchScrollState::Auto || _touchScrollState == Ui::TouchScrollState::Acceleration) {
+	} else if (_touchScrollState == Ui::TouchScrollState::Auto
+		|| _touchScrollState == Ui::TouchScrollState::Acceleration) {
 		int32 elapsed = int32(nowTime - _touchTime);
 		QPoint delta = _touchSpeed * elapsed / 1000;
 		const auto consumedHorizontal = consumeScrollAction(delta);
@@ -1755,11 +1758,6 @@ void HistoryInner::touchEvent(QTouchEvent *e) {
 	} break;
 
 	case QEvent::TouchUpdate: {
-		LOG(("UPDATE: %1,%2 -> %3,%4"
-			).arg(_touchStart.x()
-			).arg(_touchStart.y()
-			).arg(_touchPos.x()
-			).arg(_touchPos.y()));
 		if (!_touchInProgress) {
 			return;
 		} else if (_touchSelect) {

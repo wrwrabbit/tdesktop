@@ -5669,6 +5669,9 @@ not_null<Ui::QuickActionContext*> InnerWidget::ensureQuickAction(int64 key) {
 
 int64 InnerWidget::calcSwipeKey(int top) {
 	top -= dialogsOffset();
+	if (top < 0) {
+		return 0;
+	}
 	for (auto it = _shownList->begin(); it != _shownList->end(); ++it) {
 		const auto row = it->get();
 		const auto from = row->top();

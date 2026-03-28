@@ -2856,7 +2856,7 @@ void OverlayWidget::toggleFullScreen(bool fullscreen) {
 }
 
 void OverlayWidget::activateControls() {
-	if (!_menu && !_mousePressed && !_stories) {
+	if (!_menu && !_mousePressed && !_touchMove && !_stories) {
 		_controlsHideTimer.callOnce(st::mediaviewWaitHide);
 	}
 	if (_fullScreenVideo) {
@@ -2886,7 +2886,8 @@ void OverlayWidget::hideControls(bool force) {
 				&& _streamed->controls
 				&& _streamed->controls->hasMenu())
 			|| _menu
-			|| _mousePressed) {
+			|| _mousePressed
+			|| _touchMove) {
 			return;
 		}
 	}
@@ -7149,8 +7150,8 @@ bool OverlayWidget::handleTouchEvent(not_null<QTouchEvent*> e) {
 		return false;
 	} else if (e->type() == QEvent::TouchBegin
 		&& !e->touchPoints().isEmpty()
-		&& _body->childAt(
-			_body->mapFromGlobal(
+		&& _widget->childAt(
+			_widget->mapFromGlobal(
 				e->touchPoints().cbegin()->screenPos().toPoint()))) {
 		return false;
 	}
@@ -7163,6 +7164,7 @@ bool OverlayWidget::handleTouchEvent(not_null<QTouchEvent*> e) {
 		_touchPress = true;
 		_touchMove = _touchRightButton = false;
 		_touchStart = e->touchPoints().cbegin()->screenPos().toPoint();
+		activateControls();
 	} break;
 
 	case QEvent::TouchUpdate: {
@@ -7172,6 +7174,7 @@ bool OverlayWidget::handleTouchEvent(not_null<QTouchEvent*> e) {
 		if (!_touchMove && (e->touchPoints().cbegin()->screenPos().toPoint() - _touchStart).manhattanLength() >= QApplication::startDragDistance()) {
 			_touchMove = true;
 		}
+		activateControls();
 	} break;
 
 	case QEvent::TouchEnd: {
@@ -7209,6 +7212,7 @@ bool OverlayWidget::handleTouchEvent(not_null<QTouchEvent*> e) {
 		_touchTimer.cancel();
 	} break;
 	}
+	e->accept();
 	return true;
 }
 
