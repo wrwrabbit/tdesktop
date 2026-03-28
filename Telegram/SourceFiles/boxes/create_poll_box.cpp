@@ -2413,7 +2413,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			},
 			rpl::single(!!(_chosen & PollData::Flag::PublicVotes))
 				| rpl::then(state->showWhoVotedForceOn.events()),
-			st::detailedSettingsButtonStyle)
+			st::detailedSettingsButtonStyle).get()
 		: nullptr;
 	const auto multiple = AddPollToggleButton(
 		container,
@@ -2437,7 +2437,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			},
 			rpl::single(!!(_chosen & PollData::Flag::OpenAnswers))
 				| rpl::then(state->addOptionsForceOff.events()),
-			st::detailedSettingsButtonStyle)
+			st::detailedSettingsButtonStyle).get()
 		: nullptr;
 	const auto revoting = AddPollToggleButton(
 		container,

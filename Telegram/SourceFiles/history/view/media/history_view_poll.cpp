@@ -1826,7 +1826,6 @@ void Poll::paintAddOption(
 		return;
 	}
 	const auto stm = context.messageStyle();
-	const auto height = addOptionHeight();
 	const auto &padding = st::historyPollAnswerPaddingNoMedia;
 	const auto textTop = top + padding.top();
 
