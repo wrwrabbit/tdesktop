@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_element_overlay.h"
 #include "history/view/media/history_view_media.h"
+#include "history/view/media/menu/history_view_poll_menu.h"
 #include "api/api_polls.h"
 #include "apiwrap.h"
 #include "base/event_filter.h"
@@ -27,13 +28,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "poll/poll_media_upload.h"
+#include "ui/chat/attach/attach_prepare.h"
+#include "ui/dynamic_thumbnails.h"
 #include "ui/chat/chat_style.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/toast/toast.h"
+#include "window/section_widget.h"
 #include "window/window_session_controller.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
+#include "styles/style_menu_icons.h"
 #include "styles/style_polls.h"
 
 namespace HistoryView {
@@ -59,6 +65,7 @@ private:
 	void setupField();
 	void setupEmojiPanel();
 	void setupAttach();
+	void showStickerPanel();
 	void subscribeToPollUpdates();
 	[[nodiscard]] static QString mapErrorToText(const QString &error);
 
@@ -71,6 +78,8 @@ private:
 	Ui::IconButton *_emoji = nullptr;
 	PollMediaUpload::PollMediaButton *_attach = nullptr;
 	base::unique_qptr<ChatHelpers::TabbedPanel> _emojiPanel;
+	base::unique_qptr<ChatHelpers::TabbedPanel> _stickerPanel;
+	base::unique_qptr<Ui::PopupMenu> _mediaMenu;
 	std::unique_ptr<PollMediaUpload::PollMediaUploader> _uploader;
 	std::shared_ptr<PollMediaUpload::PollMediaState> _mediaState;
 
@@ -216,15 +225,82 @@ void AddPollOptionWidget::setupAttach() {
 		return;
 	}
 	_attach->addClickHandler([=] {
-		if (_mediaState->uploading) {
-			_uploader->clearMedia(_mediaState);
-		} else if (_mediaState->media) {
-			_uploader->clearMedia(_mediaState);
-		} else {
-			_uploader->choosePhotoOrVideo(this, _mediaState);
+		if (ShowPollMediaPreview(_controller, _mediaState, {
+			.choosePhotoOrVideo = [=] {
+				_uploader->choosePhotoOrVideo(this, _mediaState);
+			},
+			.chooseDocument = [=] {
+				_uploader->chooseDocument(this, _mediaState);
+			},
+			.chooseSticker = [=] { showStickerPanel(); },
+			.editPhoto = [=](Ui::PreparedList list) {
+				_uploader->applyPreparedPhotoList(
+					_mediaState,
+					std::move(list));
+			},
+			.remove = [=] { _uploader->clearMedia(_mediaState); },
+		})) {
+			return;
 		}
+		_mediaMenu = base::make_unique_q<Ui::PopupMenu>(
+			_attach,
+			st::popupMenuWithIcons);
+		_mediaMenu->setForcedOrigin(
+			Ui::PanelAnimation::Origin::TopRight);
+		_mediaMenu->addAction(
+			tr::lng_attach_photo_or_video(tr::now),
+			[=] { _uploader->choosePhotoOrVideo(this, _mediaState); },
+			&st::menuIconPhoto);
+		_mediaMenu->addAction(
+			tr::lng_attach_file(tr::now),
+			[=] { _uploader->chooseDocument(this, _mediaState); },
+			&st::menuIconFile);
+		_mediaMenu->addAction(
+			tr::lng_chat_intro_choose_sticker(tr::now),
+			[=] { showStickerPanel(); },
+			&st::menuIconStickers);
+		_mediaMenu->popup(QCursor::pos());
 	});
 	_uploader->installDropToField(_field, _mediaState, false);
+}
+
+void AddPollOptionWidget::showStickerPanel() {
+	const auto parent = parentWidget();
+	if (!_stickerPanel) {
+		_stickerPanel = CreatePollStickerPanel(parent, _controller);
+		_stickerPanel->selector()->fileChosen(
+		) | rpl::on_next([=](ChatHelpers::FileChosen data) {
+			if (Window::ShowSendPremiumError(
+					_controller,
+					data.document)) {
+				return;
+			}
+			_uploader->setMedia(
+				_mediaState,
+				PollMedia{ .document = data.document },
+				Ui::MakeEmojiThumbnail(
+					&_session->data(),
+					Data::SerializeCustomEmojiId(data.document)),
+				false);
+			_stickerPanel->hideAnimated();
+		}, _stickerPanel->lifetime());
+	}
+	const auto panel = _stickerPanel.get();
+	const auto button = QRect(
+		_attach->mapTo(parent, QPoint()),
+		_attach->size());
+	const auto isDropDown = button.y() < parent->height() / 2;
+	panel->setDropDown(isDropDown);
+	if (isDropDown) {
+		panel->moveTopRight(
+			button.y() + button.height(),
+			button.x() + button.width());
+	} else {
+		panel->moveBottomRight(
+			button.y(),
+			button.x() + button.width());
+	}
+	panel->toggleAnimated();
 }
 
 void AddPollOptionWidget::subscribeToPollUpdates() {
