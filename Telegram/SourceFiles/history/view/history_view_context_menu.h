@@ -58,6 +58,8 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 	not_null<ListWidget*> list,
 	const ContextMenuRequest &request);
 
+void InsertPollHiddenResultsLabel(not_null<Ui::PopupMenu*> menu);
+
 void CopyPostLink(
 	not_null<Window::SessionController*> controller,
 	FullMsgId itemId,

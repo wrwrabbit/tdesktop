@@ -35,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/menu/menu_action.h"
 #include "ui/widgets/menu/menu_common.h"
 #include "ui/widgets/menu/menu_multiline_action.h"
+#include "ui/widgets/menu/menu_separator.h"
 #include "ui/image/image.h"
 #include "ui/toast/toast.h"
 #include "ui/text/format_song_document_name.h"
@@ -1274,6 +1275,24 @@ void ShowWhoReadInfo(
 
 } // namespace
 
+void InsertPollHiddenResultsLabel(not_null<Ui::PopupMenu*> menu) {
+	auto label = base::make_unique_q<Ui::Menu::MultilineAction>(
+		menu->menu(),
+		menu->st().menu,
+		st::historyHasCustomEmoji,
+		st::historyHasCustomEmojiPosition,
+		tr::lng_polls_context_ends(tr::now, tr::rich));
+	menu->insertAction(0, std::move(label));
+	const auto sepAction = new QAction(menu->menu());
+	sepAction->setSeparator(true);
+	auto separator = base::make_unique_q<Ui::Menu::Separator>(
+		menu->menu(),
+		menu->st().menu,
+		menu->st().menu.separator,
+		sepAction);
+	menu->insertAction(1, std::move(separator));
+}
+
 ContextMenuRequest::ContextMenuRequest(
 	not_null<Window::SessionNavigation*> navigation)
 : navigation(navigation) {
@@ -1441,6 +1460,14 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 
 	// Build the full message menu.
 	FillContextMenuItems(result, list, request, hasPollOption);
+
+	if (item) {
+		const auto media = item->media();
+		const auto poll = media ? media->poll() : nullptr;
+		if (poll && !poll->closed() && poll->hideResultsUntilClose()) {
+			InsertPollHiddenResultsLabel(result.get());
+		}
+	}
 
 	if (hasPollOption) {
 		const auto raw = result.get();

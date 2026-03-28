@@ -3417,6 +3417,14 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		});
 	}
 
+	if (leaderOrSelf && !_menu->empty()) {
+		const auto media = leaderOrSelf->media();
+		const auto poll = media ? media->poll() : nullptr;
+		if (poll && !poll->closed() && poll->hideResultsUntilClose()) {
+			HistoryView::InsertPollHiddenResultsLabel(_menu.get());
+		}
+	}
+
 	if (_menu->empty()) {
 		_menu = nullptr;
 		return;
