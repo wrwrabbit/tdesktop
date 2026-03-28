@@ -7762,6 +7762,41 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_new_window_tooltip_ctrl" = "Use Ctrl+Click to open in New Window.";
 "lng_new_window_tooltip_cmd" = "Use Cmd+Click to open in New Window.";
 
+"lng_rename_file" = "Rename file";
+
+"lng_sr_playback_order" = "Playback order";
+"lng_sr_player_close" = "Close media player";
+"lng_sr_group_call_menu" = "Video chat menu";
+"lng_sr_search_date" = "Search by date";
+"lng_sr_cancel_search" = "Cancel search";
+"lng_sr_clear_search" = "Clear search";
+"lng_sr_scroll_to_top" = "Scroll to top";
+"lng_sr_verified_badge" = "Verified";
+"lng_sr_bot_verified_badge" = "Verified Bot";
+"lng_sr_profile_menu" = "Profile menu";
+"lng_sr_close_panel" = "Close panel";
+
+"lng_ai_compose_title" = "AI Editor";
+"lng_ai_compose_apply" = "Apply";
+"lng_ai_compose_tab_translate" = "Translate";
+"lng_ai_compose_tab_style" = "Style";
+"lng_ai_compose_tab_fix" = "Fix";
+"lng_ai_compose_original" = "Original";
+"lng_ai_compose_result" = "Result";
+"lng_ai_compose_to_language" = "To {language}";
+"lng_ai_compose_name_style" = "{name} ({style})";
+"lng_ai_compose_style_neutral" = "Neutral";
+"lng_ai_compose_emojify" = "emojify";
+"lng_ai_compose_error" = "AI request failed.";
+"lng_ai_compose_tooltip" = "Rewrite, translate, or correct your text using AI.";
+"lng_ai_compose_flood_title" = "Daily limit reached";
+"lng_ai_compose_flood_text" = "Get {link} for **50x** more AI text transformations per day.";
+"lng_ai_compose_flood_link" = "Telegram Premium";
+"lng_ai_compose_increase_limit" = "Increase Limit";
+"lng_ai_compose_select_style" = "Select Style";
+"lng_ai_compose_apply_style" = "Apply Style";
+"lng_ai_compose_style_tooltip" = "Choose Style";
+
 // Wnd specific
 
 "lng_wnd_choose_program_menu" = "Choose Default Program...";
@@ -7827,38 +7862,5 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mac_touchbar_favorite_stickers" = "Favorite stickers";
 
 "lng_mac_hold_to_quit" = "Hold {text} to Quit";
-
-"lng_rename_file" = "Rename file";
-
-"lng_sr_playback_order" = "Playback order";
-"lng_sr_player_close" = "Close media player";
-"lng_sr_group_call_menu" = "Video chat menu";
-"lng_sr_search_date" = "Search by date";
-"lng_sr_cancel_search" = "Cancel search";
-"lng_sr_clear_search" = "Clear search";
-"lng_sr_scroll_to_top" = "Scroll to top";
-"lng_sr_verified_badge" = "Verified";
-"lng_sr_bot_verified_badge" = "Verified Bot";
-"lng_sr_profile_menu" = "Profile menu";
-"lng_sr_close_panel" = "Close panel";
-"lng_ai_compose_title" = "AI Editor";
-"lng_ai_compose_apply" = "Apply";
-"lng_ai_compose_tab_translate" = "Translate";
-"lng_ai_compose_tab_style" = "Style";
-"lng_ai_compose_tab_fix" = "Fix";
-"lng_ai_compose_original" = "Original";
-"lng_ai_compose_result" = "Result";
-"lng_ai_compose_to_language" = "To {language}";
-"lng_ai_compose_name_style" = "{name} ({style})";
-"lng_ai_compose_style_neutral" = "Neutral";
-"lng_ai_compose_emojify" = "emojify";
-"lng_ai_compose_error" = "AI request failed.";
-"lng_ai_compose_tooltip" = "Rewrite, translate, or correct your text using AI.";
-"lng_ai_compose_flood_title" = "Daily limit reached";
-"lng_ai_compose_flood_text" = "Get {link} for **50x** more AI text transformations per day.";
-"lng_ai_compose_flood_link" = "Telegram Premium";
-"lng_ai_compose_increase_limit" = "Increase Limit";
-"lng_ai_compose_select_style" = "Select Style";
-"lng_ai_compose_apply_style" = "Apply Style";
 
 // Keys finished
