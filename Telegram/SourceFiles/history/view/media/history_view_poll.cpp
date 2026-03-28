@@ -1467,9 +1467,12 @@ void Poll::updateVotes() {
 				&& (_flags & PollData::Flag::HideResultsUntilClose)
 				&& !(_flags & PollData::Flag::Closed)) {
 				Ui::Toast::Show({
-					.text = { tr::lng_polls_results_after_close(
-						tr::now) },
+					.text = tr::lng_polls_results_after_close(
+						tr::now,
+						tr::marked),
 					.iconLottie = u"toast_hide_results"_q,
+					.iconLottieSize = st::pollToastIconSize,
+					.duration = crl::time(3000),
 				});
 			}
 		} else {

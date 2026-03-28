@@ -272,3 +272,5 @@ pollMediaField: InputField(createPollSolutionField) {
 }
 
 infoPollsNewButtonBottom: 19px;
+
+pollToastIconSize: size(22px, 22px);
