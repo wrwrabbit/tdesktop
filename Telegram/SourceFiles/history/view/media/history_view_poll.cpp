@@ -581,11 +581,12 @@ QSize Poll::countOptimalSize() {
 	}), 0);
 
 	const auto addOptionHeight = canAddOption() ? this->addOptionHeight() : 0;
+	const auto votersCount = !inlineFooter() && showVotersCount();
 	const auto bottomButtonHeight = inlineFooter()
 		? 0
 		: st::historyPollBottomButtonSkip;
-	const auto timerMultiline = timerFooterMultiline(
-		maxWidth - paddings);
+	const auto timerMultiline = votersCount
+		&& timerFooterMultiline(maxWidth - paddings);
 	auto minHeight = countQuestionTop(maxWidth - paddings, maxWidth)
 		+ _question.minHeight()
 		+ st::historyPollSubtitleSkip
@@ -618,7 +619,7 @@ bool Poll::isAuthorNotVoted() const {
 }
 
 bool Poll::canVote() const {
-	return !showVotes() && _parent->data()->isRegular();
+	return !showVotes() && !_voted && _parent->data()->isRegular();
 }
 
 bool Poll::canSendVotes() const {
@@ -626,6 +627,9 @@ bool Poll::canSendVotes() const {
 }
 
 bool Poll::showVotersCount() const {
+	if (_voted && !showVotes()) {
+		return true;
+	}
 	return showVotes()
 		? (!_totalVotes || !(_flags & PollData::Flag::PublicVotes))
 		: !(_flags & PollData::Flag::MultiChoice);
@@ -746,10 +750,12 @@ QSize Poll::countCurrentSize(int newWidth) {
 	}), 0);
 
 	const auto addOptionHeight = canAddOption() ? this->addOptionHeight() : 0;
+	const auto votersCount = !inlineFooter() && showVotersCount();
 	const auto bottomButtonHeight = inlineFooter()
 		? 0
 		: st::historyPollBottomButtonSkip;
-	const auto timerMultiline = timerFooterMultiline(innerWidth);
+	const auto timerMultiline = votersCount
+		&& timerFooterMultiline(innerWidth);
 	auto newHeight = countQuestionTop(innerWidth, newWidth)
 		+ _question.countHeight(innerWidth)
 		+ st::historyPollSubtitleSkip
@@ -766,6 +772,11 @@ QSize Poll::countCurrentSize(int newWidth) {
 }
 
 void Poll::updateTexts() {
+	const auto current = _poll->owner().poll(_poll->id);
+	if (_poll != current) {
+		_poll = current;
+		_pollVersion = 0;
+	}
 	if (_pollVersion == _poll->version) {
 		return;
 	}
@@ -1455,9 +1466,11 @@ void Poll::updateVotes() {
 			if (_votedFromHere
 				&& (_flags & PollData::Flag::HideResultsUntilClose)
 				&& !(_flags & PollData::Flag::Closed)) {
-				_parent->delegate()->elementShowTooltip(
-					{ tr::lng_polls_results_after_close(tr::now) },
-					[] {});
+				Ui::Toast::Show({
+					.text = { tr::lng_polls_results_after_close(
+						tr::now) },
+					.iconLottie = u"toast_hide_results"_q,
+				});
 			}
 		} else {
 			_votedFromHere = false;
@@ -1534,6 +1547,7 @@ void Poll::updateAnswerVotesFromOriginal(
 		answer.votesPercentWidth = st::historyPollPercentFont->width(
 			answer.votesPercentString);
 	}
+	answer.chosen = original.chosen;
 	answer.votes = original.votes;
 	answer.filling = answer.votes / float64(maxVotes);
 	if (showVotes() && answer.votes) {
@@ -1877,13 +1891,17 @@ void Poll::paintBottom(
 		+ st::historyPollBottomButtonTop;
 	const auto stm = context.messageStyle();
 	if (_addOptionActive) {
+		const auto savetop = height()
+			- bottomButtonHeight()
+			+ st::msgPadding.bottom()
+			+ st::historyPollBottomButtonTop;
 		p.setFont(st::semiboldFont);
 		p.setPen(stm->msgFileThumbLinkFg);
 		const auto text = tr::lng_polls_add_option_save(tr::now);
 		const auto textw = st::semiboldFont->width(text);
 		p.drawTextLeft(
 			left + (paintw - textw) / 2,
-			stringtop,
+			savetop,
 			width(),
 			text,
 			textw);
@@ -2441,7 +2459,10 @@ void Poll::paintRadio(
 	const auto over = ClickHandler::showAsActive(answer.handler);
 	const auto &regular = stm->msgDateFg;
 
-	const auto checkmark = answer.selectedAnimation.value(answer.selected ? 1. : 0.);
+	const auto chosen = answer.chosen && !showVotes();
+	const auto checkmark = chosen
+		? 1.
+		: answer.selectedAnimation.value(answer.selected ? 1. : 0.);
 
 	const auto o = p.opacity();
 	if (checkmark < 1.) {
@@ -3218,6 +3239,9 @@ bool Poll::timerFooterMultiline(int paintw) const {
 	const auto timerText = closeTimerText();
 	if (timerText.isEmpty()) {
 		return false;
+	}
+	if (_voted && !showVotes()) {
+		return true;
 	}
 	const auto sep = QString::fromUtf8(" \xC2\xB7 ");
 	const auto full = _totalVotesLabel.toString() + sep + timerText;

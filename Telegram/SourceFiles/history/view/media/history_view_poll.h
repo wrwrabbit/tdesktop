@@ -246,7 +246,7 @@ private:
 	[[nodiscard]] QString closeTimerText() const;
 	[[nodiscard]] bool timerFooterMultiline(int paintw) const;
 
-	const not_null<PollData*> _poll;
+	not_null<PollData*> _poll;
 	int _pollVersion = 0;
 	int _totalVotes = 0;
 	bool _voted = false;

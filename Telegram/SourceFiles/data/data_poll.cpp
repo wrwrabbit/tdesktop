@@ -184,6 +184,15 @@ bool PollData::applyResults(const MTPPollResults &results) {
 					changed = true;
 				}
 			}
+		} else if (!results.is_min()
+			&& newTotalVoters == 0
+			&& voted()) {
+			for (auto &answer : answers) {
+				if (answer.chosen) {
+					answer.chosen = false;
+					changed = true;
+				}
+			}
 		}
 		if (const auto recent = results.vrecent_voters()) {
 			const auto recentChanged = !ranges::equal(
