@@ -45,7 +45,9 @@ struct PollMediaState {
 	float64 progress = 0.;
 	uint64 uploadDataId = 0;
 	uint64 token = 0;
+	crl::time uploadedAt = 0;
 	Fn<void()> update;
+	Fn<void()> reupload;
 };
 
 class LocalImageThumbnail final : public Ui::DynamicImage {

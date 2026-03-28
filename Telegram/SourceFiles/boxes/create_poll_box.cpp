@@ -93,6 +93,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_polls.h"
 #include "styles/style_settings.h"
 
+#include <QtCore/QBuffer>
 #include <QtCore/QMimeData>
 
 namespace {
@@ -105,6 +106,7 @@ constexpr auto kWarnOptionLimit = 30;
 constexpr auto kSolutionLimit = 200;
 constexpr auto kWarnSolutionLimit = 60;
 constexpr auto kErrorLimit = 99;
+constexpr auto kMediaUploadMaxAge = 45 * 60 * crl::time(1000);
 
 using PollMediaState = PollMediaUpload::PollMediaState;
 using PollMediaButton = PollMediaUpload::PollMediaButton;
@@ -143,6 +145,7 @@ public:
 	[[nodiscard]] bool isValid() const;
 	[[nodiscard]] bool hasCorrect() const;
 	[[nodiscard]] bool hasUploadingMedia() const;
+	bool refreshStaleMedia(crl::time threshold);
 	[[nodiscard]] std::vector<PollAnswer> toPollAnswers() const;
 	void focusFirst();
 
@@ -187,6 +190,7 @@ private:
 		[[nodiscard]] bool isTooLong() const;
 		[[nodiscard]] bool isCorrect() const;
 		[[nodiscard]] bool uploadingMedia() const;
+		bool refreshMediaIfStale(crl::time threshold);
 		[[nodiscard]] bool hasFocus() const;
 		void setFocus() const;
 		void clearValue();
@@ -541,6 +545,18 @@ bool Options::Option::uploadingMedia() const {
 	return _media->uploading;
 }
 
+bool Options::Option::refreshMediaIfStale(crl::time threshold) {
+	if (_media->media
+		&& _media->uploadedAt > 0
+		&& (!threshold
+			|| (crl::now() - _media->uploadedAt > threshold))
+		&& _media->reupload) {
+		_media->reupload();
+		return true;
+	}
+	return false;
+}
+
 bool Options::Option::hasFocus() const {
 	return field()->hasFocus();
 }
@@ -739,6 +755,16 @@ bool Options::hasCorrect() const {
 
 bool Options::hasUploadingMedia() const {
 	return ranges::any_of(_list, &Option::uploadingMedia);
+}
+
+bool Options::refreshStaleMedia(crl::time threshold) {
+	auto refreshed = false;
+	for (const auto &option : _list) {
+		if (option->refreshMediaIfStale(threshold)) {
+			refreshed = true;
+		}
+	}
+	return refreshed;
 }
 
 not_null<Ui::RpWidget*> Options::layoutWidget() const {
@@ -1179,6 +1205,13 @@ void CreatePollBox::submitFailed(const QString &error) {
 	showToast(error);
 }
 
+void CreatePollBox::submitMediaExpired() {
+	if (_refreshExpiredMedia) {
+		_refreshExpiredMedia();
+		showToast(tr::lng_polls_media_uploading_toast(tr::now));
+	}
+}
+
 not_null<Ui::InputField*> CreatePollBox::setupQuestion(
 		not_null<Ui::VerticalLayout*> container) {
 	using namespace Settings;
@@ -1397,6 +1430,9 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		QVector<MTPDocumentAttribute> attributes;
 		bool forceFile = true;
 	};
+	using StartUploadFn = Fn<void(
+		std::shared_ptr<PollMediaState>,
+		Ui::PreparedFile)>;
 	struct State final {
 		Errors error = Error::Question;
 		std::unique_ptr<Options> options;
@@ -1417,6 +1453,9 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		base::unique_qptr<Ui::PopupMenu> durationMenu;
 		base::unique_qptr<ChatHelpers::TabbedPanel> stickerPanel;
 		std::unique_ptr<TaskQueue> prepareQueue;
+		StartUploadFn startPhotoUpload;
+		StartUploadFn startDocumentUpload;
+		StartUploadFn startVideoUpload;
 	};
 	const auto state = lifetime().make_state<State>();
 	state->prepareQueue = std::make_unique<TaskQueue>();
@@ -1435,6 +1474,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			PollMedia value,
 			std::shared_ptr<Ui::DynamicImage> thumbnail,
 			bool rounded) {
+		const auto wasUploading = media->uploading;
 		media->token++;
 		media->media = value;
 		media->thumbnail = std::move(thumbnail);
@@ -1444,6 +1484,12 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			: 0.;
 		media->uploadDataId = 0;
 		media->uploading = false;
+		if (wasUploading && value) {
+			media->uploadedAt = crl::now();
+		} else {
+			media->uploadedAt = 0;
+			media->reupload = nullptr;
+		}
 		updateMedia(media);
 	};
 	struct UploadedMedia final {
@@ -1734,9 +1780,133 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		updateStickerPanelGeometry();
 		panel->toggleAnimated();
 	};
+	const auto asyncReupload = [=](
+			std::shared_ptr<PollMediaState> media,
+			Fn<Ui::PreparedList()> prepare,
+			Fn<bool(const Ui::PreparedList&)> validate,
+			const QString &name,
+			const StartUploadFn &startUpload) {
+		const auto reuploadToken = ++media->token;
+		media->media = PollMedia();
+		media->uploading = true;
+		media->progress = 0.;
+		media->uploadDataId = 0;
+		updateMedia(media);
+		const auto weak = QPointer<CreatePollBox>(this);
+		crl::async([=, prepare = std::move(prepare)] {
+			auto list = prepare();
+			crl::on_main([=, list = std::move(list)]() mutable {
+				if (!weak || media->token != reuploadToken) {
+					return;
+				}
+				if (list.error != Ui::PreparedList::Error::None
+					|| list.files.empty()
+					|| (validate && !validate(list))) {
+					setMedia(media, PollMedia(), nullptr, false);
+					showToast(tr::lng_attach_failed(tr::now));
+					return;
+				}
+				auto &f = list.files.front();
+				if (!name.isEmpty()) {
+					f.displayName = name;
+				}
+				startUpload(media, std::move(f));
+			});
+		});
+	};
+	const auto setFileReupload = [=](
+			std::shared_ptr<PollMediaState> media,
+			const QString &path,
+			const QString &name,
+			const StartUploadFn &startUpload) {
+		media->reupload = crl::guard(this, [=,
+				weak = std::weak_ptr(media)] {
+			const auto strong = weak.lock();
+			if (!strong) {
+				return;
+			}
+			if (path.isEmpty()) {
+				setMedia(strong, PollMedia(), nullptr, false);
+				showToast(tr::lng_attach_failed(tr::now));
+				return;
+			}
+			const auto premium = _controller->session().premium();
+			asyncReupload(
+				strong,
+				[=] {
+					return Storage::PrepareMediaList(
+						QStringList{ path },
+						st::sendMediaPreviewSize,
+						premium);
+				},
+				nullptr,
+				name,
+				startUpload);
+		});
+	};
 	const auto startPreparedPhotoUpload = [=](
 			std::shared_ptr<PollMediaState> media,
 			Ui::PreparedFile file) {
+		const auto sourceImage = (file.path.isEmpty()
+			&& file.content.isEmpty()
+			&& file.information)
+			? [&]() -> QImage {
+				const auto img = std::get_if<
+					Ui::PreparedFileInformation::Image>(
+						&file.information->media);
+				return (img && !img->data.isNull())
+					? img->data
+					: QImage();
+			}()
+			: QImage();
+		media->reupload = crl::guard(this, [=,
+				weak = std::weak_ptr(media),
+				path = file.path,
+				content = file.content,
+				name = file.displayName] {
+			const auto strong = weak.lock();
+			if (!strong) {
+				return;
+			}
+			const auto premium = _controller->session().premium();
+			asyncReupload(
+				strong,
+				[=] {
+					if (!path.isEmpty()) {
+						return Storage::PrepareMediaList(
+							QStringList{ path },
+							st::sendMediaPreviewSize,
+							premium);
+					}
+					if (!content.isEmpty()) {
+						auto image = QImage::fromData(content);
+						if (!image.isNull()) {
+							return Storage::PrepareMediaFromImage(
+								std::move(image),
+								QByteArray(content),
+								st::sendMediaPreviewSize);
+						}
+					} else if (!sourceImage.isNull()) {
+						auto bytes = QByteArray();
+						auto buffer = QBuffer(&bytes);
+						buffer.open(QIODevice::WriteOnly);
+						sourceImage.save(&buffer, "PNG");
+						return Storage::PrepareMediaFromImage(
+							QImage(sourceImage),
+							std::move(bytes),
+							st::sendMediaPreviewSize);
+					}
+					return Ui::PreparedList(
+						Ui::PreparedList::Error::EmptyFile,
+						QString());
+				},
+				[](const Ui::PreparedList &list) {
+					return list.files.front().type
+						== Ui::PreparedFile::Type::Photo;
+				},
+				name,
+				state->startPhotoUpload);
+		});
 		const auto token = ++media->token;
 		media->media = PollMedia();
 		media->thumbnail = std::make_shared<LocalImageThumbnail>(
@@ -1796,6 +1966,11 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		const auto displayName = file.displayName.isEmpty()
 			? QFileInfo(file.path).fileName()
 			: file.displayName;
+		setFileReupload(
+			media,
+			file.path,
+			displayName,
+			state->startDocumentUpload);
 		auto audioAttributes = PollMediaUpload::ExtractAudioAttributes(file);
 		const auto isAudio = !audioAttributes.isEmpty();
 		const auto token = ++media->token;
@@ -1859,6 +2034,11 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	const auto startPreparedVideoUpload = [=](
 			std::shared_ptr<PollMediaState> media,
 			Ui::PreparedFile file) {
+		setFileReupload(
+			media,
+			file.path,
+			file.displayName,
+			state->startVideoUpload);
 		const auto token = ++media->token;
 		media->media = PollMedia();
 		media->thumbnail = std::make_shared<LocalImageThumbnail>(
@@ -1919,6 +2099,9 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 					prepared);
 			}));
 	};
+	state->startPhotoUpload = startPreparedPhotoUpload;
+	state->startDocumentUpload = startPreparedDocumentUpload;
+	state->startVideoUpload = startPreparedVideoUpload;
 	const auto applyPreparedPhotoList = [=](
 			std::shared_ptr<PollMediaState> media,
 			Ui::PreparedList &&list) {
@@ -2741,7 +2924,44 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			tr::phrase<> text) {
 		show->showToast(text(tr::now));
 	};
+	_refreshExpiredMedia = [=] {
+		const auto forceRefresh = [](
+				const std::shared_ptr<PollMediaState> &m) {
+			if (m->media && m->reupload) {
+				m->reupload();
+			}
+		};
+		forceRefresh(state->descriptionMedia);
+		forceRefresh(state->solutionMedia);
+		options->refreshStaleMedia(0);
+	};
 	const auto send = [=](Api::SendOptions sendOptions) {
+		const auto kStaleTimeout = kMediaUploadMaxAge;
+		auto refreshedAny = false;
+		const auto tryRefresh = [&](
+				const std::shared_ptr<PollMediaState> &m) {
+			if (m->media
+				&& m->uploadedAt > 0
+				&& (crl::now() - m->uploadedAt > kStaleTimeout)
+				&& m->reupload) {
+				m->reupload();
+				refreshedAny = true;
+			}
+		};
+		tryRefresh(state->descriptionMedia);
+		if (quiz->toggled()) {
+			tryRefresh(state->solutionMedia);
+		}
+		if (options->refreshStaleMedia(kStaleTimeout)) {
+			refreshedAny = true;
+		}
+		if (refreshedAny) {
+			collectError();
+			if (state->error & Error::Media) {
+				showError(tr::lng_polls_media_uploading_toast);
+			}
+			return;
+		}
 		collectError();
 		if (state->error & Error::Question) {
 			showError(tr::lng_polls_choose_question);

@@ -32,7 +32,7 @@ public:
 		const TextWithEntities &text,
 		SendAction action,
 		Fn<void()> done,
-		Fn<void()> fail);
+		Fn<void(bool fileReferenceExpired)> fail);
 	void sendVotes(
 		FullMsgId itemId,
 		const std::vector<QByteArray> &options);

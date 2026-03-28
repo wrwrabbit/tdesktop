@@ -2268,9 +2268,13 @@ void PeerMenuCreatePoll(
 				state->create = nullptr;
 				weak->closeBox();
 			}),
-			crl::guard(weak, [=] {
+			crl::guard(weak, [=](bool fileReferenceExpired) {
 				state->lock = false;
-				weak->submitFailed(tr::lng_attach_failed(tr::now));
+				if (fileReferenceExpired) {
+					weak->submitMediaExpired();
+				} else {
+					weak->submitFailed(tr::lng_attach_failed(tr::now));
+				}
 			}));
 	};
 	box->submitRequests(

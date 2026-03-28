@@ -34,7 +34,7 @@ void Polls::create(
 		const TextWithEntities &text,
 		SendAction action,
 		Fn<void()> done,
-		Fn<void()> fail) {
+		Fn<void(bool fileReferenceExpired)> fail) {
 	_session->api().sendAction(action);
 
 	const auto history = action.history;
@@ -133,7 +133,9 @@ void Polls::create(
 				monoforumPeerId,
 				UnixtimeFromMsgId(response.outerMsgId));
 		}
-		fail();
+		const auto expired = (error.code() == 400)
+			&& error.type().startsWith(u"FILE_REFERENCE_"_q);
+		fail(expired);
 	});
 }
 

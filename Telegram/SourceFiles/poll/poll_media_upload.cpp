@@ -541,6 +541,7 @@ void PollMediaUploader::setMedia(
 		PollMedia value,
 		std::shared_ptr<Ui::DynamicImage> thumbnail,
 		bool rounded) {
+	const auto wasUploading = media->uploading;
 	media->token++;
 	media->media = value;
 	media->thumbnail = std::move(thumbnail);
@@ -550,6 +551,12 @@ void PollMediaUploader::setMedia(
 		: 0.;
 	media->uploadDataId = 0;
 	media->uploading = false;
+	if (wasUploading && value) {
+		media->uploadedAt = crl::now();
+	} else {
+		media->uploadedAt = 0;
+		media->reupload = nullptr;
+	}
 	updateMedia(media);
 }
 

@@ -52,6 +52,7 @@ public:
 
 	[[nodiscard]] rpl::producer<Result> submitRequests() const;
 	void submitFailed(const QString &error);
+	void submitMediaExpired();
 
 	void setInnerFocus() override;
 
@@ -89,6 +90,7 @@ private:
 	rpl::variable<int> _starsRequired;
 	base::unique_qptr<ChatHelpers::TabbedPanel> _emojiPanel;
 	Fn<void()> _setInnerFocus;
+	Fn<void()> _refreshExpiredMedia;
 	Fn<rpl::producer<bool>()> _dataIsValidValue;
 	rpl::event_stream<Result> _submitRequests;
 

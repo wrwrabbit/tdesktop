@@ -1675,7 +1675,7 @@ void AttachPollOptionTabs(
 		const auto direction = (index > 0)
 			? Ui::PopupMenu::SwitchDirection::LeftToRight
 			: Ui::PopupMenu::SwitchDirection::RightToLeft;
-		base::call_delayed(0, menu, [=] {
+		crl::on_main(menu, [=] {
 			menu->swapStashed(direction);
 		});
 	}, tabs->lifetime());
