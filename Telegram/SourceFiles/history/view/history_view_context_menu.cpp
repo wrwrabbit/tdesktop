@@ -1636,7 +1636,10 @@ void AttachPollOptionTabs(
 	const auto &tabsSt = st::popupMenuPillTabs;
 	const auto tabs = Ui::CreateChild<Ui::PillTabs>(
 		menu.get(),
-		std::vector<QString>{ u"Option"_q, u"Poll"_q },
+		std::vector<QString>{
+			tr::lng_context_poll_option_tab(tr::now),
+			tr::lng_context_poll_message_tab(tr::now),
+		},
 		0,
 		tabsSt);
 
