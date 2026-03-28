@@ -4986,7 +4986,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_context_reply_to_task" = "Reply to Task";
 "lng_context_reply_to_poll_option" = "Reply to Option";
 "lng_context_copy_poll_option" = "Copy Option";
-"lng_context_delete_poll_option" = "Delete Option";
+"lng_context_delete_poll_option" = "Delete Item";
 "lng_context_edit_msg" = "Edit";
 "lng_context_draw" = "Edit Image";
 "lng_context_add_factcheck" = "Add Fact Check";
@@ -6913,7 +6913,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_polls_solution_title" = "Explanation";
 "lng_polls_solution_placeholder" = "Add a Comment (Optional)";
 "lng_polls_solution_about" = "Users will see this comment after choosing a wrong answer, good for educational purposes.";
-"lng_polls_media_uploading" = "Please wait until media upload is complete.";
+"lng_polls_media_uploading_toast_title" = "Please wait";
+"lng_polls_media_uploading_toast" = "Poll media is still uploading...";
+"lng_polls_ends_toast" = "Results will appear after the poll ends.";
 
 "lng_polls_poll_results_title" = "Poll results";
 "lng_polls_quiz_results_title" = "Quiz results";
@@ -6922,6 +6924,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_polls_votes_collapse" = "Collapse";
 "lng_polls_vote_yesterday" = "yesterday";
 "lng_polls_option_added_by" = "Added by {user}";
+"lng_polls_context_ends" = "Results will appear after the poll ends.";
 "lng_polls_add_option" = "Add an Option";
 "lng_polls_add_option_placeholder" = "Option text...";
 "lng_polls_max_options_reached" = "Maximum number of options reached.";

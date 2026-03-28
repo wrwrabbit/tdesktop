@@ -2817,7 +2817,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		} else if (state->error & Error::Solution) {
 			solution->showError();
 		} else if (state->error & Error::Media) {
-			showError(tr::lng_polls_media_uploading);
+			showError(tr::lng_polls_media_uploading_toast);
 		} else if (state->error & Error::Deadline) {
 			showError(tr::lng_polls_create_deadline_expired);
 		} else if (!state->error) {
