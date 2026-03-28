@@ -4760,6 +4760,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_url_auth_login_title" = "Log in to {domain}";
 "lng_url_auth_login_button" = "Log in";
 "lng_url_auth_site_access" = "This site will receive your **name**, **username** and **profile photo**.";
+"lng_url_auth_app_access" = "This app will receive your **name**, **username** and **profile photo**.";
+"lng_url_auth_unverified_app" = "Unverified App";
 "lng_url_auth_device_label" = "Device";
 "lng_url_auth_ip_label" = "IP Address";
 "lng_url_auth_login_attempt" = "This login attempt came from the device above.";
