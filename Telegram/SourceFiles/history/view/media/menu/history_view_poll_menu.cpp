@@ -483,7 +483,10 @@ void ShowPollGeoPreview(
 			body.width() - 2 * skip,
 			body.height() - 2 * skip);
 		const auto side = std::min(maxSide, st::locationSize.width());
-		const auto scaled = QSize(side, side);
+		const auto scaled = QSize(
+			side,
+			(side * st::locationSize.height()
+				/ st::locationSize.width()));
 		const auto shadowExtend = st::boxRoundShadow.extend;
 		const auto fullW = scaled.width()
 			+ rect::m::sum::h(shadowExtend);
