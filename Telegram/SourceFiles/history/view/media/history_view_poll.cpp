@@ -387,6 +387,7 @@ struct Poll::Answer {
 
 struct Poll::AttachedMedia {
 	std::shared_ptr<Ui::DynamicImage> thumbnail;
+	ClickHandlerPtr handler;
 	PhotoData *photo = nullptr;
 	std::shared_ptr<Data::PhotoMedia> photoMedia;
 	QSize photoSize;
@@ -946,6 +947,7 @@ void Poll::updateAttachedMedia() {
 	}
 	_attachedMediaCache = QImage();
 	_attachedMedia->thumbnail = updated.thumbnail;
+	_attachedMedia->handler = updated.handler;
 	_attachedMedia->kind = updated.kind;
 	_attachedMedia->rounded = updated.rounded;
 	_attachedMedia->id = updated.id;
@@ -2798,6 +2800,11 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 				result.symbol = 0;
 				return result;
 			}
+		} else if (_attachedMedia
+			&& _attachedMedia->handler
+			&& QRect(0, tshift, width(), mediaHeight).contains(point)) {
+			result.link = _attachedMedia->handler;
+			return result;
 		}
 		tshift += mediaHeight + st::historyPollMediaSkip;
 	}
