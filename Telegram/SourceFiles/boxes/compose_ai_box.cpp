@@ -11,11 +11,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "boxes/premium_preview_box.h"
 #include "chat_helpers/compose/compose_show.h"
-#include "chat_helpers/stickers_emoji_pack.h"
+#include "chat_helpers/stickers_lottie.h"
 #include "core/ui_integration.h"
+#include "data/data_document.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_session.h"
-#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "main/session/session_show.h"
 #include "main/main_app_config.h"
@@ -38,7 +38,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/labels.h"
-#include "ui/emoji_config.h"
 #include "styles/style_basic.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
@@ -69,20 +68,6 @@ enum class CardState {
 		float64 alpha) {
 	auto result = color->c;
 	result.setAlphaF(result.alphaF() * alpha);
-	return result;
-}
-
-[[nodiscard]] QString ToneTitle(const QString &key) {
-	if (key.isEmpty()) {
-		return QString();
-	}
-	const auto value = Lang::GetNonDefaultValue(
-		QByteArray("cloud_lng_ai_compose_style_") + key.toUtf8());
-	if (!value.isEmpty()) {
-		return value;
-	}
-	auto result = key;
-	result[0] = result[0].toTitleCase();
 	return result;
 }
 
@@ -217,40 +202,21 @@ enum class CardState {
 		opacity);
 }
 
-[[nodiscard]] std::optional<Ui::LabeledEmojiTab> ResolveStyleDescriptor(
-		not_null<Main::Session*> session,
-		QString id,
-		QString label,
-		const QString &emoji) {
-	const auto found = Ui::Emoji::Find(emoji);
-	if (!found) {
-		return std::nullopt;
-	}
-	auto result = Ui::LabeledEmojiTab{
-		.id = std::move(id),
-		.label = std::move(label),
-		.emoji = found,
+[[nodiscard]] Ui::LabeledEmojiTab ResolveStyleDescriptor(
+		const Main::AppConfig::AiComposeStyle &style) {
+	return {
+		.id = style.type,
+		.label = style.title,
+		.customEmojiData = Data::SerializeCustomEmojiId(style.emojiId),
 	};
-	const auto sticker = session->emojiStickersPack().stickerForEmoji(found);
-	if (sticker.document) {
-		result.customEmojiData = Data::SerializeCustomEmojiId(sticker.document);
-	}
-	return result;
 }
 
 [[nodiscard]] std::vector<Ui::LabeledEmojiTab> ResolveStyleDescriptors(
-		not_null<Main::Session*> session,
 		const std::vector<Main::AppConfig::AiComposeStyle> &styles) {
 	auto result = std::vector<Ui::LabeledEmojiTab>();
 	result.reserve(styles.size());
 	for (const auto &style : styles) {
-		if (const auto descriptor = ResolveStyleDescriptor(
-				session,
-				style.key,
-				ToneTitle(style.key),
-				style.emoji)) {
-			result.push_back(*descriptor);
-		}
+		result.push_back(ResolveStyleDescriptor(style));
 	}
 	return result;
 }
@@ -258,41 +224,27 @@ enum class CardState {
 [[nodiscard]] std::vector<Ui::LabeledEmojiTab> ResolveTranslateStyleDescriptors(
 		not_null<Main::Session*> session,
 		const std::vector<Ui::LabeledEmojiTab> &styles) {
+	const auto neutral = ChatHelpers::GenerateLocalTgsSticker(
+		session,
+		u"chat/white_flag_emoji"_q);
 	auto result = std::vector<Ui::LabeledEmojiTab>();
 	result.reserve(styles.size() + 1);
-	const auto neutralEmoji = QString::fromUtf8(
-		"\xF0\x9F\x8F\xB3\xEF\xB8\x8F");
-	auto neutral = Ui::LabeledEmojiTab{
+	result.push_back({
 		.id = QString(),
 		.label = tr::lng_ai_compose_style_neutral(tr::now),
-		.emoji = Ui::Emoji::Find(neutralEmoji),
-	};
-	if (neutral.emoji) {
-		const auto sticker = session->emojiStickersPack().stickerForEmoji(
-			neutral.emoji);
-		if (sticker.document) {
-			neutral.customEmojiData = Data::SerializeCustomEmojiId(
-				sticker.document);
-		}
-	}
-	result.push_back(std::move(neutral));
+		.customEmojiData = Data::SerializeCustomEmojiId(neutral->id),
+	});
 	result.insert(end(result), begin(styles), end(styles));
 	return result;
 }
 
-[[nodiscard]] std::optional<TextWithEntities> ResolveLoadingTitleSparkle(
+[[nodiscard]] TextWithEntities LoadingTitleSparkle(
 		not_null<Main::Session*> session) {
-	const auto sparkleEmoji = QString::fromUtf8("\xE2\x9C\xA8");
-	const auto found = Ui::Emoji::Find(sparkleEmoji);
-	if (!found) {
-		return std::nullopt;
-	}
-	const auto sticker = session->emojiStickersPack().stickerForEmoji(found);
-	if (!sticker.document) {
-		return std::nullopt;
-	}
+	const auto sparkles = ChatHelpers::GenerateLocalTgsSticker(
+		session,
+		u"chat/sparkles_emoji"_q);
 	return tr::marked(u" "_q)
-		.append(Data::SingleCustomEmoji(sticker.document));
+		.append(Data::SingleCustomEmoji(sparkles->id));
 }
 
 class ComposeAiModeButton final : public Ui::RippleButton {
@@ -915,7 +867,6 @@ ComposeAiContent::ComposeAiContent(
 , _detectedFrom(Platform::Language::Recognize(_original.text))
 , _to(DefaultAiTranslateTo(_detectedFrom))
 , _stylesData(ResolveStyleDescriptors(
-	_session,
 	_session->appConfig().aiComposeStyles()))
 , _translateStylesData(ResolveTranslateStyleDescriptors(_session, _stylesData))
 , _preview(Ui::CreateChild<ComposeAiPreviewCard>(this, _session, _original)) {
@@ -1327,23 +1278,20 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 	content->setModeTabs(tabs);
 	content->setStyleTabs(stylesWrap);
 
-	if (const auto sparkle = ResolveLoadingTitleSparkle(session)) {
-		const auto loading = box->lifetime().make_state<
-			rpl::variable<bool>>();
+	const auto sparkle = LoadingTitleSparkle(session);
+	const auto loading = box->lifetime().make_state<
+		rpl::variable<bool>>();
 
-		content->setLoadingChangedCallback([=](bool value) {
-			*loading = value;
-		});
+	content->setLoadingChangedCallback([=](bool value) {
+		*loading = value;
+	});
 
-		box->setTitle(rpl::combine(
-			loading->value(),
-			tr::lng_ai_compose_title(tr::marked)
-		) | rpl::map([=](bool loading, TextWithEntities title) {
-			return loading ? title.append(*sparkle) : title;
-		}), Core::TextContext({ .session = session }));
-	} else {
-		box->setTitle(tr::lng_ai_compose_title());
-	}
+	box->setTitle(rpl::combine(
+		loading->value(),
+		tr::lng_ai_compose_title(tr::marked)
+	) | rpl::map([=](bool loading, TextWithEntities title) {
+		return loading ? title.append(sparkle) : title;
+	}), Core::TextContext({ .session = session }));
 
 	auto premiumFlooded = std::make_shared<bool>(false);
 	auto sendButton = std::make_shared<QPointer<Ui::SendButton>>();

@@ -3677,7 +3677,9 @@ bool ComposeControls::canSendAiComposeDirect() const {
 }
 
 bool ComposeControls::hasEnoughLinesForAi() const {
-	if (!_history || _recording.current()) {
+	if (!_history
+		|| _recording.current()
+		|| session().appConfig().aiComposeStyles().empty()) {
 		return false;
 	}
 	const auto &style = _field->st().style;

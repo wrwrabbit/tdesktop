@@ -21,20 +21,6 @@ namespace {
 
 constexpr auto kRefreshTimeout = 3600 * crl::time(1000);
 
-[[nodiscard]] auto DefaultAiComposeStyles()
--> std::vector<AppConfig::AiComposeStyle> {
-	const auto emoji = [](const char *value) {
-		return QString::fromUtf8(value);
-	};
-	return {
-		{ emoji("\xF0\x9F\xA4\x9D"), u"formal"_q },
-		{ emoji("\xF0\x9F\x8E\xAF"), u"short"_q },
-		{ emoji("\xF0\x9F\x8D\x96"), u"savage"_q },
-		{ emoji("\xF0\x9F\x95\xAF"), u"biblical"_q },
-		{ emoji("\xF0\x9F\x8D\xB7"), u"posh"_q },
-	};
-}
-
 } // namespace
 
 AppConfig::AppConfig(not_null<Account*> account) : _account(account) {
@@ -355,7 +341,7 @@ void AppConfig::refresh(bool force) {
 			}
 			updateIgnoredRestrictionReasons(std::move(was));
 
-			_aiComposeStyles = {};
+			_aiComposeStyles.reset();
 			_groupCallColorings = {};
 
 			DEBUG_LOG(("getAppConfig result handled."));
@@ -567,8 +553,8 @@ bool AppConfig::newRequirePremiumFree() const {
 }
 
 std::vector<AppConfig::AiComposeStyle> AppConfig::aiComposeStyles() const {
-	if (!_aiComposeStyles.empty()) {
-		return _aiComposeStyles;
+	if (_aiComposeStyles) {
+		return *_aiComposeStyles;
 	}
 	_aiComposeStyles = getValue(u"ai_compose_styles"_q, [&](const auto &value) {
 		return value.match([&](const MTPDjsonArray &data) {
@@ -576,27 +562,27 @@ std::vector<AppConfig::AiComposeStyle> AppConfig::aiComposeStyles() const {
 			result.reserve(data.vvalue().v.size());
 			for (const auto &entry : data.vvalue().v) {
 				if (entry.type() != mtpc_jsonArray) {
-					return DefaultAiComposeStyles();
+					return std::vector<AiComposeStyle>();
 				}
 				const auto &list = entry.c_jsonArray().vvalue().v;
-				if (list.size() < 2
+				if (list.size() < 3
 					|| (list[0].type() != mtpc_jsonString)
-					|| (list[1].type() != mtpc_jsonString)) {
-					return DefaultAiComposeStyles();
+					|| (list[1].type() != mtpc_jsonString)
+					|| (list[2].type() != mtpc_jsonString)) {
+					return std::vector<AiComposeStyle>();
 				}
 				result.push_back({
-					qs(list[0].c_jsonString().vvalue()),
-					qs(list[1].c_jsonString().vvalue()),
+					.type = qs(list[0].c_jsonString().vvalue()),
+					.emojiId = qs(list[1].c_jsonString().vvalue()).toULongLong(),
+					.title = qs(list[2].c_jsonString().vvalue()),
 				});
 			}
-			return result.empty()
-				? DefaultAiComposeStyles()
-				: result;
+			return result;
 		}, [&](const auto &) {
-			return DefaultAiComposeStyles();
+			return std::vector<AiComposeStyle>();
 		});
 	});
-	return _aiComposeStyles;
+	return *_aiComposeStyles;
 }
 
 auto AppConfig::groupCallColorings() const -> std::vector<StarsColoring> {

@@ -19,6 +19,8 @@
     <file alias="voice_ttl_start.tgs">../../animations/voice_ttl_start.tgs</file>
     <file alias="chat/voice_to_video.tgs">../../animations/chat/voice_to_video.tgs</file>
     <file alias="chat/video_to_voice.tgs">../../animations/chat/video_to_voice.tgs</file>
+    <file alias="chat/sparkles_emoji.tgs">../../animations/chat/sparkles_emoji.tgs</file>
+    <file alias="chat/white_flag_emoji.tgs">../../animations/chat/white_flag_emoji.tgs</file>
     <file alias="palette.tgs">../../animations/palette.tgs</file>
     <file alias="sleep.tgs">../../animations/sleep.tgs</file>
     <file alias="greeting.tgs">../../animations/greeting.tgs</file>
