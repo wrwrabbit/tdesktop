@@ -14,7 +14,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/style/style_core_palette.h"
 #include "layout/layout_selection.h"
 #include "styles/style_basic.h"
-#include "styles/style_polls.h"
 
 enum class ImageRoundRadius;
 
