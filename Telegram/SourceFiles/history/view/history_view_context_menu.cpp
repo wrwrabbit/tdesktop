@@ -1341,7 +1341,13 @@ void FillContextMenuItems(
 		AddDocumentActions(result, lnkDocument, item, list);
 	} else if (poll) {
 		const auto context = list->elementContext();
-		AddPollActions(result, poll, item, context, list->controller());
+		AddPollActions(
+			result,
+			poll,
+			item,
+			context,
+			list->controller(),
+			skipWhoReacted);
 	} else if (!request.overSelection && view && !hasSelection) {
 		const auto owner = &view->history()->owner();
 		const auto media = view->media();
@@ -1526,11 +1532,12 @@ void CopyStoryLink(
 	show->showToast(tr::lng_channel_public_link_copied(tr::now));
 }
 
-void FillPollOptionItems(
+void FillPollOptionPage(
 		not_null<Ui::PopupMenu*> menu,
 		not_null<Data::Session*> owner,
 		FullMsgId itemId,
-		const QByteArray &pollOption) {
+		const QByteArray &pollOption,
+		Fn<void()> replyToOption) {
 	const auto item = owner->message(itemId);
 	if (!item) {
 		return;
@@ -1539,6 +1546,23 @@ void FillPollOptionItems(
 	const auto poll = media ? media->poll() : nullptr;
 	if (!poll) {
 		return;
+	}
+	if (!poll->closed()
+		&& !poll->quiz()
+		&& poll->voted()
+		&& !poll->revotingDisabled()) {
+		menu->addAction(
+			tr::lng_polls_retract(tr::now),
+			[=] { poll->session().api().polls().sendVotes(itemId, {}); },
+			&st::menuIconRetractVote);
+	}
+	if (replyToOption) {
+		menu->addAction(
+			tr::lng_context_reply_to_poll_option(
+				tr::now,
+				Ui::Text::FixAmpersandInAction),
+			std::move(replyToOption),
+			&st::menuIconReply);
 	}
 	const auto a = poll->answerByOption(pollOption);
 	if (!a) {
@@ -1607,24 +1631,6 @@ void FillPollOptionItems(
 					.userpic = std::move(userpic),
 				}));
 	}
-}
-
-
-void FillPollOptionPage(
-		not_null<Ui::PopupMenu*> menu,
-		not_null<Data::Session*> owner,
-		FullMsgId itemId,
-		const QByteArray &pollOption,
-		Fn<void()> replyToOption) {
-	if (replyToOption) {
-		menu->addAction(
-			tr::lng_context_reply_to_poll_option(
-				tr::now,
-				Ui::Text::FixAmpersandInAction),
-			std::move(replyToOption),
-			&st::menuIconReply);
-	}
-	FillPollOptionItems(menu, owner, itemId, pollOption);
 }
 
 void AttachPollOptionTabs(
@@ -1716,7 +1722,8 @@ void AddPollActions(
 		not_null<PollData*> poll,
 		not_null<HistoryItem*> item,
 		Context context,
-		not_null<Window::SessionController*> controller) {
+		not_null<Window::SessionController*> controller,
+		bool skipRetractVote) {
 	{
 		constexpr auto kRadio = "\xf0\x9f\x94\x98";
 		const auto radio = QString::fromUtf8(kRadio);
@@ -1746,7 +1753,10 @@ void AddPollActions(
 		return;
 	}
 	const auto itemId = item->fullId();
-	if (poll->voted() && !poll->quiz() && !poll->revotingDisabled()) {
+	if (!skipRetractVote
+		&& poll->voted()
+		&& !poll->quiz()
+		&& !poll->revotingDisabled()) {
 		menu->addAction(tr::lng_polls_retract(tr::now), [=] {
 			poll->session().api().polls().sendVotes(itemId, {});
 		}, &st::menuIconRetractVote);

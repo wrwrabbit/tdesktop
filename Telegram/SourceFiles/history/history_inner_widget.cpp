@@ -3188,7 +3188,8 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 							poll,
 							item,
 							HistoryView::Context::History,
-							_controller);
+							_controller,
+							!pollOptionLink.isEmpty());
 					} else if (const auto contact = media->sharedContact()) {
 						const auto phone = contact->phoneNumber;
 						_menu->addAction(tr::lng_profile_copy_phone(tr::now), [=] {

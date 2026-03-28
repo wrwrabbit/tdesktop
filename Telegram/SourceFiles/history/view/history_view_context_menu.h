@@ -87,7 +87,8 @@ void AddPollActions(
 	not_null<PollData*> poll,
 	not_null<HistoryItem*> item,
 	Context context,
-	not_null<Window::SessionController*> controller);
+	not_null<Window::SessionController*> controller,
+	bool skipRetractVote = false);
 void AddSaveSoundForNotifications(
 	not_null<Ui::PopupMenu*> menu,
 	not_null<HistoryItem*> item,
