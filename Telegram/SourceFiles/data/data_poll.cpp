@@ -391,15 +391,15 @@ PollMedia PollMediaFromMTP(
 	auto result = PollMedia();
 	media.match([&](const MTPDmessageMediaPhoto &data) {
 		if (const auto photo = data.vphoto()) {
-			photo->match([&](const MTPDphoto &d) {
-				result.photo = owner->photo(d.vid().v);
+			photo->match([&](const MTPDphoto &) {
+				result.photo = owner->processPhoto(*photo);
 			}, [](const auto &) {
 			});
 		}
 	}, [&](const MTPDmessageMediaDocument &data) {
 		if (const auto document = data.vdocument()) {
-			document->match([&](const MTPDdocument &d) {
-				result.document = owner->document(d.vid().v);
+			document->match([&](const MTPDdocument &) {
+				result.document = owner->processDocument(*document);
 			}, [](const auto &) {
 			});
 		}
