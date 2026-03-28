@@ -1173,6 +1173,16 @@ void DurationIconAction::paintEvent(QPaintEvent *e) {
 	Ui::PaintTimerIcon(p, innerRect, _tinyText, st::menuIconColor->c);
 }
 
+void ShowMediaUploadingToast() {
+	Ui::Toast::Show({
+		.title = tr::lng_polls_media_uploading_toast_title(tr::now),
+		.text = tr::lng_polls_media_uploading_toast(tr::now, tr::marked),
+		.iconLottie = u"uploading"_q,
+		.iconLottieSize = st::pollToastUploadingIconSize,
+		.duration = crl::time(3000),
+	});
+}
+
 } // namespace
 
 CreatePollBox::CreatePollBox(
@@ -1208,7 +1218,7 @@ void CreatePollBox::submitFailed(const QString &error) {
 void CreatePollBox::submitMediaExpired() {
 	if (_refreshExpiredMedia) {
 		_refreshExpiredMedia();
-		showToast(tr::lng_polls_media_uploading_toast(tr::now));
+		ShowMediaUploadingToast();
 	}
 }
 
@@ -2958,7 +2968,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		if (refreshedAny) {
 			collectError();
 			if (state->error & Error::Media) {
-				showError(tr::lng_polls_media_uploading_toast);
+				ShowMediaUploadingToast();
 			}
 			return;
 		}
@@ -2975,7 +2985,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		} else if (state->error & Error::Solution) {
 			solution->showError();
 		} else if (state->error & Error::Media) {
-			showError(tr::lng_polls_media_uploading_toast);
+			ShowMediaUploadingToast();
 		} else if (state->error & Error::Deadline) {
 			showError(tr::lng_polls_create_deadline_expired);
 		} else if (!state->error) {

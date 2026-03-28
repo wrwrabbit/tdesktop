@@ -273,4 +273,5 @@ pollMediaField: InputField(createPollSolutionField) {
 
 infoPollsNewButtonBottom: 19px;
 
+pollToastUploadingIconSize: size(30px, 30px);
 pollToastIconSize: size(22px, 22px);
