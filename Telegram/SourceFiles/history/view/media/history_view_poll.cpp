@@ -3019,6 +3019,8 @@ int Poll::Options::paintAnswer(
 	if (!context.highlight.pollOption.isEmpty()
 		&& context.highlight.pollOption == answer.option
 		&& context.highlight.collapsion > 0.) {
+		const auto absoluteTop = top
+			+ _owner->_headerPart->countHeight(width);
 		const auto to = context.highlightInterpolateTo;
 		const auto toProgress = (1. - context.highlight.collapsion);
 		if (toProgress >= 1.) {
@@ -3026,7 +3028,7 @@ int Poll::Options::paintAnswer(
 		} else if (toProgress <= 0.) {
 			context.highlightPathCache->addRect(
 				0,
-				top,
+				absoluteTop,
 				_owner->width(),
 				height);
 		} else {
@@ -3035,7 +3037,7 @@ int Poll::Options::paintAnswer(
 			};
 			context.highlightPathCache->addRect(
 				lerp(0, to.x()),
-				lerp(top, to.y()),
+				lerp(absoluteTop, to.y()),
 				lerp(_owner->width(), to.width()),
 				lerp(height, to.height()));
 		}
