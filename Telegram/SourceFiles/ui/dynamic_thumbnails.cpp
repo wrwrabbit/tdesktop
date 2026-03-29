@@ -933,14 +933,43 @@ QImage DocumentFilePreviewThumbnail::prepareGenericImage(int size) {
 	result.fill(Qt::transparent);
 	result.setDevicePixelRatio(ratio);
 
+	const auto radius = size / 6;
+	const auto foldSize = size / 4;
+
 	auto p = QPainter(&result);
 	auto hq = PainterHighQualityEnabler(p);
 	p.setPen(Qt::NoPen);
+
+	// Rounded rect with top-right corner cut for fold.
+	auto path = QPainterPath();
+	path.moveTo(radius, 0);
+	path.lineTo(size - foldSize, 0);
+	path.lineTo(size, foldSize);
+	path.lineTo(size, size - radius);
+	path.arcTo(
+		size - 2 * radius,
+		size - 2 * radius,
+		2 * radius,
+		2 * radius,
+		0,
+		-90);
+	path.lineTo(radius, size);
+	path.arcTo(0, size - 2 * radius, 2 * radius, 2 * radius, 270, -90);
+	path.lineTo(0, radius);
+	path.arcTo(0, 0, 2 * radius, 2 * radius, 180, -90);
+	path.closeSubpath();
+
 	p.setBrush(_generic.color);
-	p.drawRoundedRect(
-		QRect(0, 0, size, size),
-		st::roundRadiusSmall,
-		st::roundRadiusSmall);
+	p.drawPath(path);
+
+	// Fold triangle.
+	auto fold = QPainterPath();
+	fold.moveTo(size - foldSize, 0);
+	fold.lineTo(size, foldSize);
+	fold.lineTo(size - foldSize, foldSize);
+	fold.closeSubpath();
+	p.setBrush(_generic.dark);
+	p.drawPath(fold);
 
 	if (!_generic.ext.isEmpty()) {
 		// Reference: overview uses 18px font in a 70px square.
