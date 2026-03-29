@@ -118,9 +118,6 @@ private:
 	[[nodiscard]] TextSelection fromQuestionSelection(
 		TextSelection selection) const;
 
-	[[nodiscard]] int countAnswerTop(
-		const Answer &answer,
-		int innerWidth) const;
 	[[nodiscard]] int countAnswerContentWidth(
 		const Answer &answer,
 		int innerWidth) const;
@@ -141,8 +138,6 @@ private:
 		const PollAnswer &original,
 		int percent,
 		int maxVotes);
-	void checkSendingAnimation() const;
-
 	void paintRecentVoters(
 		Painter &p,
 		int left,
@@ -224,9 +219,6 @@ private:
 		const PaintContext &context) const;
 
 	[[nodiscard]] bool canAddOption() const;
-
-	[[nodiscard]] QString closeTimerText() const;
-	[[nodiscard]] bool timerFooterMultiline(int paintw) const;
 
 	not_null<PollData*> _poll;
 	int _pollVersion = 0;

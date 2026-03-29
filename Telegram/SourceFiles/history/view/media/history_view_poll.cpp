@@ -465,6 +465,8 @@ private:
 	[[nodiscard]] int textTop() const;
 	[[nodiscard]] bool hasTimerLine(int innerWidth) const;
 	[[nodiscard]] bool hasCloseDate() const;
+	[[nodiscard]] QString closeTimerText() const;
+	[[nodiscard]] bool timerFooterMultiline(int paintw) const;
 	void toggleLinkRipple(bool pressed);
 };
 
@@ -487,7 +489,7 @@ bool Poll::Footer::hasCloseDate() const {
 
 bool Poll::Footer::hasTimerLine(int innerWidth) const {
 	if (_owner->inlineFooter() || _owner->showVotersCount()) {
-		return _owner->timerFooterMultiline(innerWidth);
+		return timerFooterMultiline(innerWidth);
 	}
 	return hasCloseDate();
 }
@@ -516,9 +518,9 @@ void Poll::Footer::draw(
 	const auto inline_ = _owner->inlineFooter();
 
 	if (inline_) {
-		const auto top = topSkip() + st::msgPadding.bottom();
+		const auto top = st::msgPadding.bottom();
 		p.setPen(stm->msgDateFg);
-		const auto timerText = _owner->closeTimerText();
+		const auto timerText = closeTimerText();
 		if (timerText.isEmpty()) {
 			const auto labelWidth = _owner->_totalVotesLabel.maxWidth();
 			const auto labelLeft = left + (innerWidth - labelWidth) / 2;
@@ -528,7 +530,7 @@ void Poll::Footer::draw(
 				top,
 				labelWidth,
 				outerWidth);
-		} else if (_owner->timerFooterMultiline(innerWidth)) {
+		} else if (timerFooterMultiline(innerWidth)) {
 			const auto labelWidth = _owner->_totalVotesLabel.maxWidth();
 			const auto labelLeft = left + (innerWidth - labelWidth) / 2;
 			_owner->_totalVotesLabel.drawLeftElided(
@@ -610,7 +612,7 @@ void Poll::Footer::draw(
 			outerWidth);
 	} else if (_owner->showVotersCount()) {
 		p.setPen(stm->msgDateFg);
-		const auto timerText = _owner->closeTimerText();
+		const auto timerText = closeTimerText();
 		if (timerText.isEmpty()) {
 			const auto labelWidth = _owner->_totalVotesLabel.maxWidth();
 			const auto labelLeft = left + (innerWidth - labelWidth) / 2;
@@ -620,7 +622,7 @@ void Poll::Footer::draw(
 				stringtop,
 				labelWidth,
 				style::al_top);
-		} else if (_owner->timerFooterMultiline(innerWidth)) {
+		} else if (timerFooterMultiline(innerWidth)) {
 			const auto labelWidth = _owner->_totalVotesLabel.maxWidth();
 			const auto labelLeft = left + (innerWidth - labelWidth) / 2;
 			_owner->_totalVotesLabel.draw(
@@ -688,7 +690,7 @@ void Poll::Footer::draw(
 			outerWidth,
 			string,
 			stringw);
-		const auto timerText = _owner->closeTimerText();
+		const auto timerText = closeTimerText();
 		if (!timerText.isEmpty()) {
 			p.setFont(st::msgDateFont);
 			p.setPen(stm->msgDateFg);
@@ -1323,6 +1325,8 @@ struct Poll::Options : public Poll::Part {
 		const ClickHandlerPtr &handler,
 		bool pressed) override;
 	bool hasHeavyPart() const override;
+
+	void checkSendingAnimation() const;
 	void unloadHeavyPart() override;
 };
 
@@ -1340,7 +1344,7 @@ void Poll::Options::draw(
 		int innerWidth,
 		int outerWidth,
 		const PaintContext &context) const {
-	_owner->checkSendingAnimation();
+	checkSendingAnimation();
 
 	const auto progress = _owner->_answersAnimation
 		? _owner->_answersAnimation->progress.value(1.)
@@ -1706,29 +1710,6 @@ void Poll::setAddOptionActive(bool active) {
 		_addOptionActive = active;
 		history()->owner().requestViewResize(_parent);
 	}
-}
-
-int Poll::countAnswerTop(
-		const Answer &answer,
-		int innerWidth) const {
-	auto tshift = countQuestionTop(innerWidth)
-		+ _question.countHeight(innerWidth)
-		+ st::historyPollSubtitleSkip;
-	tshift += st::msgDateFont->height + st::historyPollAnswersSkip;
-	const auto i = ranges::find(
-		_answers,
-		&answer,
-		[](const Answer &answer) { return &answer; });
-	const auto countHeight = [&](const Answer &answer) {
-		return countAnswerHeight(answer, innerWidth);
-	};
-	tshift += ranges::accumulate(
-		begin(_answers),
-		i,
-		0,
-		ranges::plus(),
-		countHeight);
-	return tshift;
 }
 
 int Poll::countAnswerContentWidth(
@@ -2492,26 +2473,26 @@ void Poll::updateVotes() {
 	_footerPart->updateTotalVotes();
 }
 
-void Poll::checkSendingAnimation() const {
-	const auto &sending = _poll->sendingVotes;
+void Poll::Options::checkSendingAnimation() const {
+	const auto &sending = _owner->_poll->sendingVotes;
 	const auto sendingRadial = (sending.size() == 1)
-		&& !(_flags & PollData::Flag::MultiChoice);
-	if (sendingRadial == (_sendingAnimation != nullptr)) {
-		if (_sendingAnimation) {
-			_sendingAnimation->option = sending.front();
+		&& !(_owner->_flags & PollData::Flag::MultiChoice);
+	if (sendingRadial == (_owner->_sendingAnimation != nullptr)) {
+		if (_owner->_sendingAnimation) {
+			_owner->_sendingAnimation->option = sending.front();
 		}
 		return;
 	}
 	if (!sendingRadial) {
-		if (!_answersAnimation) {
-			_sendingAnimation = nullptr;
+		if (!_owner->_answersAnimation) {
+			_owner->_sendingAnimation = nullptr;
 		}
 		return;
 	}
-	_sendingAnimation = std::make_unique<SendingAnimation>(
+	_owner->_sendingAnimation = std::make_unique<SendingAnimation>(
 		sending.front(),
-		[=] { radialAnimationCallback(); });
-	_sendingAnimation->animation.start();
+		[owner = _owner] { owner->radialAnimationCallback(); });
+	_owner->_sendingAnimation->animation.start();
 }
 
 void Poll::updateAnswerVotesFromOriginal(
@@ -3547,8 +3528,16 @@ void Poll::toggleRipple(Answer &answer, bool pressed) {
 				std::move(mask),
 				[=] { repaint(); });
 		}
-		const auto top = countAnswerTop(answer, innerWidth);
-		answer.ripple->add(_lastLinkPoint - QPoint(0, top));
+		// _lastLinkPoint is Options-local, compute answer's
+		// position within Options (sum of heights above it).
+		auto answerTop = 0;
+		for (const auto &a : _answers) {
+			if (&a == &answer) {
+				break;
+			}
+			answerTop += countAnswerHeight(a, innerWidth);
+		}
+		answer.ripple->add(_lastLinkPoint - QPoint(0, answerTop));
 	} else if (answer.ripple) {
 		answer.ripple->lastStop();
 	}
@@ -3571,20 +3560,21 @@ bool Poll::inShowSolution(
 	return QRect(x, y, icon.width(), icon.height()).contains(point);
 }
 
-QString Poll::closeTimerText() const {
-	if (_poll->closeDate <= 0 || (_flags & PollData::Flag::Closed)) {
-		_closeTimer.cancel();
+QString Poll::Footer::closeTimerText() const {
+	if (_owner->_poll->closeDate <= 0
+		|| (_owner->_flags & PollData::Flag::Closed)) {
+		_owner->_closeTimer.cancel();
 		return {};
 	}
-	const auto left = _poll->closeDate - base::unixtime::now();
+	const auto left = _owner->_poll->closeDate - base::unixtime::now();
 	if (left <= 0) {
-		_closeTimer.cancel();
+		_owner->_closeTimer.cancel();
 		return {};
 	}
-	if (!_closeTimer.isActive()) {
-		_closeTimer.callEach(1000);
+	if (!_owner->_closeTimer.isActive()) {
+		_owner->_closeTimer.callEach(1000);
 	}
-	const auto hideResults = (_flags
+	const auto hideResults = (_owner->_flags
 		& PollData::Flag::HideResultsUntilClose);
 	if (left >= 86400) {
 		const auto days = (left + 86399) / 86400;
@@ -3598,18 +3588,20 @@ QString Poll::closeTimerText() const {
 		: tr::lng_polls_ends_in_time(tr::now, lt_time, timer);
 }
 
-bool Poll::timerFooterMultiline(int paintw) const {
+bool Poll::Footer::timerFooterMultiline(int paintw) const {
 	const auto timerText = closeTimerText();
 	if (timerText.isEmpty()) {
 		return false;
 	}
-	if (_voted && !showVotes()) {
+	if (_owner->_voted && !_owner->showVotes()) {
 		return true;
 	}
 	const auto sep = QString::fromUtf8(" \xC2\xB7 ");
-	const auto full = _totalVotesLabel.toString() + sep + timerText;
+	const auto full = _owner->_totalVotesLabel.toString()
+		+ sep
+		+ timerText;
 	const auto fullw = st::msgDateFont->width(full);
-	const auto skipw = _parent->skipBlockWidth();
+	const auto skipw = _owner->_parent->skipBlockWidth();
 	return (paintw + fullw) / 2 > paintw - skipw;
 }
 
