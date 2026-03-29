@@ -75,6 +75,9 @@ public:
 	void setAddOptionActive(bool active) override;
 
 private:
+	struct Part;
+	struct Footer;
+
 	struct AnswerAnimation;
 	struct AnswersAnimation;
 	struct SendingAnimation;
@@ -127,7 +130,6 @@ private:
 	void updateRecentVoters();
 	void updateAnswers();
 	void updateVotes();
-	void updateTotalVotes();
 	bool showVotersCount() const;
 	bool inlineFooter() const;
 	void updateAnswerVotes();
@@ -183,19 +185,6 @@ private:
 		int width,
 		int contentWidth,
 		const PaintContext &context) const;
-	void paintInlineFooter(
-		Painter &p,
-		int left,
-		int top,
-		int paintw,
-		const PaintContext &context) const;
-	void paintBottom(
-		Painter &p,
-		int left,
-		int top,
-		int paintw,
-		const PaintContext &context) const;
-
 	bool checkAnimationStart() const;
 	bool answerVotesChanged() const;
 	void saveStateInAnimation() const;
@@ -205,7 +194,6 @@ private:
 
 	void toggleRipple(Answer &answer, bool pressed);
 	void toggleAddOptionRipple(bool pressed);
-	void toggleLinkRipple(bool pressed);
 	void toggleMultiOption(const QByteArray &option);
 	void sendMultiOptions();
 	void showResults();
@@ -242,7 +230,6 @@ private:
 		int paintw,
 		const PaintContext &context) const;
 
-	[[nodiscard]] int bottomButtonHeight() const;
 	[[nodiscard]] QString closeTimerText() const;
 	[[nodiscard]] bool timerFooterMultiline(int paintw) const;
 
@@ -302,6 +289,8 @@ private:
 	bool _addOptionActive = false;
 	mutable bool _wrongAnswerAnimated = false;
 	mutable bool _adminShowResults = false;
+
+	std::unique_ptr<Footer> _footerPart;
 
 };
 

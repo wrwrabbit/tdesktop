@@ -407,6 +407,408 @@ struct Poll::RecentVoter {
 	mutable Ui::PeerUserpicView userpic;
 };
 
+struct Poll::Part {
+	explicit Part(not_null<Poll*> owner) : _owner(owner) {}
+	virtual ~Part() = default;
+
+	[[nodiscard]] virtual int countHeight(int innerWidth) const = 0;
+	virtual void draw(
+		Painter &p,
+		int left,
+		int innerWidth,
+		int outerWidth,
+		const PaintContext &context) const = 0;
+	[[nodiscard]] virtual TextState textState(
+		QPoint point,
+		int left,
+		int innerWidth,
+		int outerWidth,
+		StateRequest request) const = 0;
+	virtual void clickHandlerPressedChanged(
+		const ClickHandlerPtr &handler,
+		bool pressed) {}
+	virtual void clickHandlerActiveChanged(
+		const ClickHandlerPtr &handler,
+		bool active) {}
+	[[nodiscard]] virtual bool hasHeavyPart() const { return false; }
+	virtual void unloadHeavyPart() {}
+	[[nodiscard]] virtual uint16 selectionLength() const { return 0; }
+
+protected:
+	const not_null<Poll*> _owner;
+};
+
+struct Poll::Footer : public Poll::Part {
+	using Part::Part;
+
+	int countHeight(int innerWidth) const override;
+	void draw(
+		Painter &p,
+		int left,
+		int innerWidth,
+		int outerWidth,
+		const PaintContext &context) const override;
+	TextState textState(
+		QPoint point,
+		int left,
+		int innerWidth,
+		int outerWidth,
+		StateRequest request) const override;
+	void clickHandlerPressedChanged(
+		const ClickHandlerPtr &handler,
+		bool pressed) override;
+
+	void updateTotalVotes();
+
+private:
+	[[nodiscard]] int topSkip() const;
+	[[nodiscard]] int textTop() const;
+	[[nodiscard]] bool hasTimerLine(int innerWidth) const;
+	[[nodiscard]] bool hasCloseDate() const;
+	void toggleLinkRipple(bool pressed);
+};
+
+int Poll::Footer::topSkip() const {
+	return _owner->canAddOption()
+		? 0
+		: st::historyPollTotalVotesSkip;
+}
+
+int Poll::Footer::textTop() const {
+	return topSkip()
+		+ st::msgPadding.bottom()
+		+ st::historyPollBottomButtonTop;
+}
+
+bool Poll::Footer::hasCloseDate() const {
+	return _owner->_poll->closeDate > 0
+		&& !(_owner->_flags & PollData::Flag::Closed);
+}
+
+bool Poll::Footer::hasTimerLine(int innerWidth) const {
+	if (_owner->inlineFooter() || _owner->showVotersCount()) {
+		return _owner->timerFooterMultiline(innerWidth);
+	}
+	return hasCloseDate();
+}
+
+int Poll::Footer::countHeight(int innerWidth) const {
+	const auto inline_ = _owner->inlineFooter();
+	const auto top = topSkip();
+	const auto buttonSkip = inline_
+		? 0
+		: st::historyPollBottomButtonSkip;
+	const auto timerLine = hasTimerLine(innerWidth);
+	return top
+		+ buttonSkip
+		+ st::msgDateFont->height
+		+ (timerLine ? st::msgDateFont->height : 0)
+		+ st::msgPadding.bottom();
+}
+
+void Poll::Footer::draw(
+		Painter &p,
+		int left,
+		int innerWidth,
+		int outerWidth,
+		const PaintContext &context) const {
+	const auto stm = context.messageStyle();
+	const auto inline_ = _owner->inlineFooter();
+
+	if (inline_) {
+		const auto top = topSkip() + st::msgPadding.bottom();
+		p.setPen(stm->msgDateFg);
+		const auto timerText = _owner->closeTimerText();
+		if (timerText.isEmpty()) {
+			const auto labelWidth = _owner->_totalVotesLabel.maxWidth();
+			const auto labelLeft = left + (innerWidth - labelWidth) / 2;
+			_owner->_totalVotesLabel.drawLeftElided(
+				p,
+				labelLeft,
+				top,
+				labelWidth,
+				outerWidth);
+		} else if (_owner->timerFooterMultiline(innerWidth)) {
+			const auto labelWidth = _owner->_totalVotesLabel.maxWidth();
+			const auto labelLeft = left + (innerWidth - labelWidth) / 2;
+			_owner->_totalVotesLabel.drawLeftElided(
+				p,
+				labelLeft,
+				top,
+				labelWidth,
+				outerWidth);
+			p.setFont(st::msgDateFont);
+			const auto timerw = st::msgDateFont->width(timerText);
+			p.drawTextLeft(
+				left + (innerWidth - timerw) / 2,
+				top + st::msgDateFont->height,
+				outerWidth,
+				timerText,
+				timerw);
+		} else {
+			p.setFont(st::msgDateFont);
+			const auto sep = QString::fromUtf8(" \xC2\xB7 ");
+			const auto full = _owner->_totalVotesLabel.toString()
+				+ sep
+				+ timerText;
+			const auto fullw = st::msgDateFont->width(full);
+			p.drawTextLeft(
+				left + (innerWidth - fullw) / 2,
+				top,
+				outerWidth,
+				full,
+				fullw);
+		}
+		return;
+	}
+
+	const auto stringtop = textTop();
+
+	if (_owner->_addOptionActive) {
+		p.setFont(st::semiboldFont);
+		p.setPen(stm->msgFileThumbLinkFg);
+		const auto text = tr::lng_polls_add_option_save(tr::now);
+		const auto textw = st::semiboldFont->width(text);
+		p.drawTextLeft(
+			left + (innerWidth - textw) / 2,
+			stringtop,
+			outerWidth,
+			text,
+			textw);
+		return;
+	}
+	if (_owner->isAuthorNotVoted()
+		&& !_owner->_adminShowResults
+		&& !_owner->canSendVotes()) {
+		if (_owner->_totalVotes > 0) {
+			p.setPen(stm->msgFileThumbLinkFg);
+			const auto labelWidth = _owner->_adminVotesLabel.maxWidth();
+			_owner->_adminVotesLabel.drawLeft(
+				p,
+				left + (innerWidth - labelWidth) / 2,
+				stringtop,
+				labelWidth,
+				outerWidth);
+		} else {
+			p.setPen(stm->msgDateFg);
+			const auto textw = _owner->_totalVotesLabel.maxWidth();
+			_owner->_totalVotesLabel.drawLeft(
+				p,
+				left + (innerWidth - textw) / 2,
+				stringtop,
+				textw,
+				outerWidth);
+		}
+	} else if (_owner->_adminShowResults && _owner->isAuthorNotVoted()) {
+		p.setPen(stm->msgFileThumbLinkFg);
+		const auto backw = _owner->_adminBackVoteLabel.maxWidth();
+		_owner->_adminBackVoteLabel.drawLeft(
+			p,
+			left + (innerWidth - backw) / 2,
+			stringtop,
+			backw,
+			outerWidth);
+	} else if (_owner->showVotersCount()) {
+		p.setPen(stm->msgDateFg);
+		const auto timerText = _owner->closeTimerText();
+		if (timerText.isEmpty()) {
+			const auto labelWidth = _owner->_totalVotesLabel.maxWidth();
+			const auto labelLeft = left + (innerWidth - labelWidth) / 2;
+			_owner->_totalVotesLabel.draw(
+				p,
+				labelLeft,
+				stringtop,
+				labelWidth,
+				style::al_top);
+		} else if (_owner->timerFooterMultiline(innerWidth)) {
+			const auto labelWidth = _owner->_totalVotesLabel.maxWidth();
+			const auto labelLeft = left + (innerWidth - labelWidth) / 2;
+			_owner->_totalVotesLabel.draw(
+				p,
+				labelLeft,
+				stringtop,
+				labelWidth,
+				style::al_top);
+			p.setFont(st::msgDateFont);
+			const auto timerw = st::msgDateFont->width(timerText);
+			p.drawTextLeft(
+				left + (innerWidth - timerw) / 2,
+				stringtop + st::msgDateFont->height,
+				outerWidth,
+				timerText,
+				timerw);
+		} else {
+			p.setFont(st::msgDateFont);
+			const auto sep = QString::fromUtf8(" \xC2\xB7 ");
+			const auto full = _owner->_totalVotesLabel.toString()
+				+ sep
+				+ timerText;
+			const auto fullw = st::msgDateFont->width(full);
+			p.drawTextLeft(
+				left + (innerWidth - fullw) / 2,
+				stringtop,
+				outerWidth,
+				full,
+				fullw);
+		}
+	} else {
+		const auto link = _owner->showVotes()
+			? _owner->_showResultsLink
+			: _owner->canSendVotes()
+			? _owner->_sendVotesLink
+			: nullptr;
+		if (_owner->_linkRipple) {
+			const auto rippleTop = topSkip();
+			p.setOpacity(st::historyPollRippleOpacity);
+			_owner->_linkRipple->paint(
+				p,
+				left - st::msgPadding.left() - _owner->_linkRippleShift,
+				rippleTop,
+				outerWidth,
+				&stm->msgWaveformInactive->c);
+			if (_owner->_linkRipple->empty()) {
+				_owner->_linkRipple.reset();
+			}
+			p.setOpacity(1.);
+		}
+		p.setFont(st::semiboldFont);
+		p.setPen(link ? stm->msgFileThumbLinkFg : stm->msgDateFg);
+		const auto string = _owner->showVotes()
+			? ((_owner->_flags & PollData::Flag::PublicVotes)
+				? tr::lng_polls_view_votes(
+					tr::now,
+					lt_count,
+					_owner->_totalVotes)
+				: tr::lng_polls_view_results(tr::now))
+			: tr::lng_polls_submit_votes(tr::now);
+		const auto stringw = st::semiboldFont->width(string);
+		p.drawTextLeft(
+			left + (innerWidth - stringw) / 2,
+			stringtop,
+			outerWidth,
+			string,
+			stringw);
+		const auto timerText = _owner->closeTimerText();
+		if (!timerText.isEmpty()) {
+			p.setFont(st::msgDateFont);
+			p.setPen(stm->msgDateFg);
+			const auto timerw = st::msgDateFont->width(timerText);
+			p.drawTextLeft(
+				left + (innerWidth - timerw) / 2,
+				stringtop + st::semiboldFont->height,
+				outerWidth,
+				timerText,
+				timerw);
+		}
+	}
+}
+
+TextState Poll::Footer::textState(
+		QPoint point,
+		int left,
+		int innerWidth,
+		int outerWidth,
+		StateRequest request) const {
+	TextState result;
+	if (_owner->inlineFooter()) {
+		return result;
+	}
+	const auto top = topSkip();
+	const auto h = countHeight(innerWidth);
+	if (point.y() < top || point.y() >= h) {
+		return result;
+	}
+	_owner->_lastLinkPoint = point;
+	if (_owner->_addOptionActive) {
+		result.link = _owner->_saveOptionLink;
+	} else if (_owner->isAuthorNotVoted()
+		&& !_owner->_adminShowResults
+		&& !_owner->canSendVotes()) {
+		if (_owner->_totalVotes > 0) {
+			result.link = _owner->_adminVotesLink;
+		}
+	} else if (_owner->_adminShowResults && _owner->isAuthorNotVoted()) {
+		result.link = _owner->_adminBackVoteLink;
+	} else if (!_owner->showVotersCount()) {
+		result.link = _owner->showVotes()
+			? _owner->_showResultsLink
+			: _owner->canSendVotes()
+			? _owner->_sendVotesLink
+			: nullptr;
+	}
+	return result;
+}
+
+void Poll::Footer::clickHandlerPressedChanged(
+		const ClickHandlerPtr &handler,
+		bool pressed) {
+	if (handler == _owner->_sendVotesLink
+		|| handler == _owner->_showResultsLink
+		|| handler == _owner->_adminVotesLink
+		|| handler == _owner->_adminBackVoteLink
+		|| handler == _owner->_saveOptionLink) {
+		toggleLinkRipple(pressed);
+	}
+}
+
+void Poll::Footer::toggleLinkRipple(bool pressed) {
+	if (pressed) {
+		const auto outerWidth = _owner->width();
+		const auto h = countHeight(
+			outerWidth - st::msgPadding.left() - st::msgPadding.right());
+		const auto rippleTop = topSkip();
+		const auto linkHeight = h - rippleTop;
+		if (!_owner->_linkRipple) {
+			auto mask = _owner->isRoundedInBubbleBottom()
+				? static_cast<Message*>(_owner->_parent.get())
+					->bottomRippleMask(linkHeight)
+				: BottomRippleMask{
+					Ui::RippleAnimation::RectMask(
+						{ outerWidth, linkHeight }),
+				};
+			_owner->_linkRipple = std::make_unique<Ui::RippleAnimation>(
+				st::defaultRippleAnimation,
+				std::move(mask.image),
+				[owner = _owner] { owner->repaint(); });
+			_owner->_linkRippleShift = mask.shift;
+		}
+		_owner->_linkRipple->add(
+			_owner->_lastLinkPoint
+				+ QPoint(_owner->_linkRippleShift, -rippleTop));
+	} else if (_owner->_linkRipple) {
+		_owner->_linkRipple->lastStop();
+	}
+}
+
+void Poll::Footer::updateTotalVotes() {
+	if (_owner->_totalVotes == _owner->_poll->totalVoters
+		&& !_owner->_totalVotesLabel.isEmpty()) {
+		return;
+	}
+	_owner->_totalVotes = _owner->_poll->totalVoters;
+	const auto quiz = _owner->_poll->quiz();
+	const auto string = !_owner->_totalVotes
+		? (quiz
+			? tr::lng_polls_answers_none
+			: tr::lng_polls_votes_none)(tr::now)
+		: (quiz
+			? tr::lng_polls_answers_count
+			: tr::lng_polls_votes_count)(
+				tr::now,
+				lt_count_short,
+				_owner->_totalVotes);
+	_owner->_totalVotesLabel.setText(st::msgDateTextStyle, string);
+	_owner->_adminVotesLabel.setMarkedText(
+		st::semiboldTextStyle,
+		tr::lng_polls_admin_votes(
+			tr::now,
+			lt_count,
+			_owner->_totalVotes,
+			lt_arrow,
+			Ui::Text::IconEmoji(&st::textMoreIconEmoji),
+			tr::marked));
+}
+
 template <typename Callback>
 Poll::SendingAnimation::SendingAnimation(
 	const QByteArray &option,
@@ -535,6 +937,7 @@ Poll::Poll(
 			}
 		})))
 , _closeTimer([=] { repaint(); }) {
+	_footerPart = std::make_unique<Footer>(this);
 	if (!consumed.text.isEmpty()) {
 		updateDescription();
 	}
@@ -582,12 +985,6 @@ QSize Poll::countOptimalSize() {
 	}), 0);
 
 	const auto addOptionHeight = canAddOption() ? this->addOptionHeight() : 0;
-	const auto votersCount = !inlineFooter() && showVotersCount();
-	const auto bottomButtonHeight = inlineFooter()
-		? 0
-		: st::historyPollBottomButtonSkip;
-	const auto timerMultiline = votersCount
-		&& timerFooterMultiline(maxWidth - paddings);
 	auto minHeight = countQuestionTop(maxWidth - paddings, maxWidth)
 		+ _question.minHeight()
 		+ st::historyPollSubtitleSkip
@@ -595,11 +992,7 @@ QSize Poll::countOptimalSize() {
 		+ st::historyPollAnswersSkip
 		+ answersHeight
 		+ addOptionHeight
-		+ st::historyPollTotalVotesSkip
-		+ bottomButtonHeight
-		+ st::msgDateFont->height
-		+ (timerMultiline ? st::msgDateFont->height : 0)
-		+ st::msgPadding.bottom();
+		+ _footerPart->countHeight(maxWidth - paddings);
 	return { maxWidth, minHeight };
 }
 
@@ -751,12 +1144,6 @@ QSize Poll::countCurrentSize(int newWidth) {
 	}), 0);
 
 	const auto addOptionHeight = canAddOption() ? this->addOptionHeight() : 0;
-	const auto votersCount = !inlineFooter() && showVotersCount();
-	const auto bottomButtonHeight = inlineFooter()
-		? 0
-		: st::historyPollBottomButtonSkip;
-	const auto timerMultiline = votersCount
-		&& timerFooterMultiline(innerWidth);
 	auto newHeight = countQuestionTop(innerWidth, newWidth)
 		+ _question.countHeight(innerWidth)
 		+ st::historyPollSubtitleSkip
@@ -764,11 +1151,7 @@ QSize Poll::countCurrentSize(int newWidth) {
 		+ st::historyPollAnswersSkip
 		+ answersHeight
 		+ addOptionHeight
-		+ st::historyPollTotalVotesSkip
-		+ bottomButtonHeight
-		+ st::msgDateFont->height
-		+ (timerMultiline ? st::msgDateFont->height : 0)
-		+ st::msgPadding.bottom();
+		+ _footerPart->countHeight(innerWidth);
 	return { newWidth, newHeight };
 }
 
@@ -1482,7 +1865,7 @@ void Poll::updateVotes() {
 		}
 	}
 	updateAnswerVotes();
-	updateTotalVotes();
+	_footerPart->updateTotalVotes();
 }
 
 void Poll::checkSendingAnimation() const {
@@ -1505,34 +1888,6 @@ void Poll::checkSendingAnimation() const {
 		sending.front(),
 		[=] { radialAnimationCallback(); });
 	_sendingAnimation->animation.start();
-}
-
-void Poll::updateTotalVotes() {
-	if (_totalVotes == _poll->totalVoters && !_totalVotesLabel.isEmpty()) {
-		return;
-	}
-	_totalVotes = _poll->totalVoters;
-	const auto quiz = _poll->quiz();
-	const auto string = !_totalVotes
-		? (quiz
-			? tr::lng_polls_answers_none
-			: tr::lng_polls_votes_none)(tr::now)
-		: (quiz
-			? tr::lng_polls_answers_count
-			: tr::lng_polls_votes_count)(
-				tr::now,
-				lt_count_short,
-				_totalVotes);
-	_totalVotesLabel.setText(st::msgDateTextStyle, string);
-	_adminVotesLabel.setMarkedText(
-		st::semiboldTextStyle,
-		tr::lng_polls_admin_votes(
-			tr::now,
-			lt_count,
-			_totalVotes,
-			lt_arrow,
-			Ui::Text::IconEmoji(&st::textMoreIconEmoji),
-			tr::marked));
 }
 
 void Poll::updateAnswerVotesFromOriginal(
@@ -1779,60 +2134,11 @@ void Poll::draw(Painter &p, const PaintContext &context) const {
 		paintAddOption(p, padding.left(), tshift, paintw, context);
 		tshift += addOptionHeight();
 	}
-	if (!inlineFooter()) {
-		paintBottom(p, padding.left(), tshift, paintw, context);
-	} else if (!_totalVotesLabel.isEmpty()) {
-		tshift += st::msgPadding.bottom();
-		paintInlineFooter(p, padding.left(), tshift, paintw, context);
-	}
-}
-
-void Poll::paintInlineFooter(
-		Painter &p,
-		int left,
-		int top,
-		int paintw,
-		const PaintContext &context) const {
-	const auto stm = context.messageStyle();
-	p.setPen(stm->msgDateFg);
-	const auto timerText = closeTimerText();
-	if (timerText.isEmpty()) {
-		const auto labelWidth = _totalVotesLabel.maxWidth();
-		const auto labelLeft = left + (paintw - labelWidth) / 2;
-		_totalVotesLabel.drawLeftElided(
-			p,
-			labelLeft,
-			top,
-			labelWidth,
-			width());
-	} else if (timerFooterMultiline(paintw)) {
-		const auto labelWidth = _totalVotesLabel.maxWidth();
-		const auto labelLeft = left + (paintw - labelWidth) / 2;
-		_totalVotesLabel.drawLeftElided(
-			p,
-			labelLeft,
-			top,
-			labelWidth,
-			width());
-		p.setFont(st::msgDateFont);
-		const auto timerw = st::msgDateFont->width(timerText);
-		p.drawTextLeft(
-			left + (paintw - timerw) / 2,
-			top + st::msgDateFont->height,
-			width(),
-			timerText,
-			timerw);
-	} else {
-		p.setFont(st::msgDateFont);
-		const auto sep = QString::fromUtf8(" \xC2\xB7 ");
-		const auto full = _totalVotesLabel.toString() + sep + timerText;
-		const auto fullw = st::msgDateFont->width(full);
-		p.drawTextLeft(
-			left + (paintw - fullw) / 2,
-			top,
-			width(),
-			full,
-			fullw);
+	{
+		const auto saved = p.transform();
+		p.translate(0, tshift);
+		_footerPart->draw(p, padding.left(), paintw, width(), context);
+		p.setTransform(saved);
 	}
 }
 
@@ -1882,143 +2188,6 @@ void Poll::paintAddOption(
 		width(),
 		text,
 		textw);
-}
-
-void Poll::paintBottom(
-		Painter &p,
-		int left,
-		int top,
-		int paintw,
-		const PaintContext &context) const {
-	const auto stringtop = top
-		+ st::msgPadding.bottom()
-		+ st::historyPollBottomButtonTop;
-	const auto stm = context.messageStyle();
-	if (_addOptionActive) {
-		const auto savetop = height()
-			- bottomButtonHeight()
-			+ st::msgPadding.bottom()
-			+ st::historyPollBottomButtonTop;
-		p.setFont(st::semiboldFont);
-		p.setPen(stm->msgFileThumbLinkFg);
-		const auto text = tr::lng_polls_add_option_save(tr::now);
-		const auto textw = st::semiboldFont->width(text);
-		p.drawTextLeft(
-			left + (paintw - textw) / 2,
-			savetop,
-			width(),
-			text,
-			textw);
-		return;
-	}
-	if (isAuthorNotVoted() && !_adminShowResults && !canSendVotes()) {
-		if (_totalVotes > 0) {
-			p.setPen(stm->msgFileThumbLinkFg);
-			const auto labelWidth = _adminVotesLabel.maxWidth();
-			_adminVotesLabel.drawLeft(
-				p,
-				left + (paintw - labelWidth) / 2,
-				stringtop,
-				labelWidth,
-				width());
-		} else {
-			p.setPen(stm->msgDateFg);
-			const auto textw = _totalVotesLabel.maxWidth();
-			_totalVotesLabel.drawLeft(
-				p,
-				left + (paintw - textw) / 2,
-				stringtop,
-				textw,
-				width());
-		}
-	} else if (_adminShowResults && isAuthorNotVoted()) {
-		p.setPen(stm->msgFileThumbLinkFg);
-		const auto backw = _adminBackVoteLabel.maxWidth();
-		_adminBackVoteLabel.drawLeft(
-			p,
-			left + (paintw - backw) / 2,
-			stringtop,
-			backw,
-			width());
-	} else if (showVotersCount()) {
-		p.setPen(stm->msgDateFg);
-		const auto timerText = closeTimerText();
-		if (timerText.isEmpty()) {
-			const auto labelWidth = _totalVotesLabel.maxWidth();
-			const auto labelLeft = left + (paintw - labelWidth) / 2;
-			_totalVotesLabel.draw(
-				p,
-				labelLeft,
-				stringtop,
-				labelWidth,
-				style::al_top);
-		} else if (timerFooterMultiline(paintw)) {
-			const auto labelWidth = _totalVotesLabel.maxWidth();
-			const auto labelLeft = left + (paintw - labelWidth) / 2;
-			_totalVotesLabel.draw(
-				p,
-				labelLeft,
-				stringtop,
-				labelWidth,
-				style::al_top);
-			p.setFont(st::msgDateFont);
-			const auto timerw = st::msgDateFont->width(timerText);
-			p.drawTextLeft(
-				left + (paintw - timerw) / 2,
-				stringtop + st::msgDateFont->height,
-				width(),
-				timerText,
-				timerw);
-		} else {
-			p.setFont(st::msgDateFont);
-			const auto sep = QString::fromUtf8(" \xC2\xB7 ");
-			const auto full = _totalVotesLabel.toString() + sep + timerText;
-			const auto fullw = st::msgDateFont->width(full);
-			p.drawTextLeft(
-				left + (paintw - fullw) / 2,
-				stringtop,
-				width(),
-				full,
-				fullw);
-		}
-	} else {
-		const auto link = showVotes()
-			? _showResultsLink
-			: canSendVotes()
-			? _sendVotesLink
-			: nullptr;
-		if (_linkRipple) {
-			const auto linkHeight = bottomButtonHeight();
-			p.setOpacity(st::historyPollRippleOpacity);
-			_linkRipple->paint(
-				p,
-				left - st::msgPadding.left() - _linkRippleShift,
-				height() - linkHeight,
-				width(),
-				&stm->msgWaveformInactive->c);
-			if (_linkRipple->empty()) {
-				_linkRipple.reset();
-			}
-			p.setOpacity(1.);
-		}
-		p.setFont(st::semiboldFont);
-		p.setPen(link ? stm->msgFileThumbLinkFg : stm->msgDateFg);
-		const auto string = showVotes()
-			? ((_flags & PollData::Flag::PublicVotes)
-				? tr::lng_polls_view_votes(
-					tr::now,
-					lt_count,
-					_totalVotes)
-				: tr::lng_polls_view_results(tr::now))
-			: tr::lng_polls_submit_votes(tr::now);
-		const auto stringw = st::semiboldFont->width(string);
-		p.drawTextLeft(
-			left + (paintw - stringw) / 2,
-			stringtop,
-			width(),
-			string,
-			stringw);
-	}
 }
 
 void Poll::resetAnswersAnimation() const {
@@ -3009,39 +3178,14 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 		tshift += optHeight;
 	}
 	{
-		const auto linkHeight = bottomButtonHeight();
-		const auto linkTop = height() - linkHeight;
-		if (_addOptionActive) {
-			if (QRect(0, linkTop, width(), linkHeight).contains(point)) {
-				_lastLinkPoint = point;
-				result.link = _saveOptionLink;
-				return result;
-			}
-		} else if (isAuthorNotVoted() && !_adminShowResults && !canSendVotes()) {
-			if (_totalVotes > 0
-				&& QRect(0, linkTop, width(), linkHeight).contains(point)) {
-				_lastLinkPoint = point;
-				result.link = _adminVotesLink;
-				return result;
-			}
-		} else if (_adminShowResults && isAuthorNotVoted()) {
-			if (QRect(0, linkTop, width(), linkHeight).contains(point)) {
-				_lastLinkPoint = point;
-				result.link = _adminBackVoteLink;
-				return result;
-			}
-		} else if (!showVotersCount()) {
-			const auto link = showVotes()
-				? _showResultsLink
-				: canSendVotes()
-				? _sendVotesLink
-				: nullptr;
-			if (link
-				&& QRect(0, linkTop, width(), linkHeight).contains(point)) {
-				_lastLinkPoint = point;
-				result.link = link;
-				return result;
-			}
+		const auto footerResult = _footerPart->textState(
+			point - QPoint(0, tshift),
+			st::msgPadding.left(),
+			paintw,
+			width(),
+			request);
+		if (footerResult.link) {
+			return footerResult;
 		}
 	}
 	return result;
@@ -3120,12 +3264,8 @@ void Poll::clickHandlerPressedChanged(
 		}
 	} else if (handler == _addOptionLink) {
 		toggleAddOptionRipple(pressed);
-	} else if (handler == _sendVotesLink
-		|| handler == _showResultsLink
-		|| handler == _adminVotesLink
-		|| handler == _adminBackVoteLink
-		|| handler == _saveOptionLink) {
-		toggleLinkRipple(pressed);
+	} else {
+		_footerPart->clickHandlerPressedChanged(handler, pressed);
 	}
 	if (_attachedMediaAttach) {
 		_attachedMediaAttach->clickHandlerPressedChanged(handler, pressed);
@@ -3200,18 +3340,6 @@ bool Poll::inShowSolution(
 	return QRect(x, y, icon.width(), icon.height()).contains(point);
 }
 
-int Poll::bottomButtonHeight() const {
-	const auto skip = st::historyPollChoiceRight.height()
-		- st::historyPollFillingBottom
-		- st::historyPollFillingHeight
-		- (st::historyPollChoiceRight.height() - st::historyPollFillingHeight) / 2;
-	return st::historyPollTotalVotesSkip
-		- skip
-		+ st::historyPollBottomButtonSkip
-		+ st::msgDateFont->height
-		+ st::msgPadding.bottom();
-}
-
 QString Poll::closeTimerText() const {
 	if (_poll->closeDate <= 0 || (_flags & PollData::Flag::Closed)) {
 		_closeTimer.cancel();
@@ -3274,30 +3402,6 @@ void Poll::toggleAddOptionRipple(bool pressed) {
 			- QPoint(0, rect.y()));
 	} else if (_addOptionRipple) {
 		_addOptionRipple->lastStop();
-	}
-}
-
-void Poll::toggleLinkRipple(bool pressed) {
-	if (pressed) {
-		const auto linkWidth = width();
-		const auto linkHeight = bottomButtonHeight();
-		if (!_linkRipple) {
-			auto mask = isRoundedInBubbleBottom()
-				? static_cast<Message*>(_parent.get())->bottomRippleMask(
-					bottomButtonHeight())
-				: BottomRippleMask{
-					Ui::RippleAnimation::RectMask({ linkWidth, linkHeight }),
-				};
-			_linkRipple = std::make_unique<Ui::RippleAnimation>(
-				st::defaultRippleAnimation,
-				std::move(mask.image),
-				[=] { repaint(); });
-			_linkRippleShift = mask.shift;
-		}
-		_linkRipple->add(_lastLinkPoint
-			+ QPoint(_linkRippleShift, linkHeight - height()));
-	} else if (_linkRipple) {
-		_linkRipple->lastStop();
 	}
 }
 
