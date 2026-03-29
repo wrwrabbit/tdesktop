@@ -1680,17 +1680,23 @@ void HistoryItem::markPollVotesRead() {
 }
 
 bool HistoryItem::markContentsRead(bool fromThisClient) {
+	auto result = false;
 	if (hasUnreadReaction()) {
 		if (fromThisClient) {
 			_history->owner().requestUnreadReactionsAnimation(this);
 		}
 		markReactionsRead();
-		return true;
-	} else if (isUnreadMention() || isIncomingUnreadMedia()) {
-		markMediaAndMentionRead();
-		return true;
+		result = true;
 	}
-	return false;
+	if (isUnreadMention() || isIncomingUnreadMedia()) {
+		markMediaAndMentionRead();
+		result = true;
+	}
+	if (hasUnreadPollVote()) {
+		markPollVotesRead();
+		result = true;
+	}
+	return result;
 }
 
 void HistoryItem::setIsPinned(bool pinned) {

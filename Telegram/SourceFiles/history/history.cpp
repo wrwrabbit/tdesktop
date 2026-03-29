@@ -2572,7 +2572,7 @@ Dialogs::UnreadState History::computeUnreadState() const {
 	result.marks = mark ? 1 : 0;
 	result.mentions = unreadMentions().has() ? 1 : 0;
 	result.reactions = unreadReactions().has() ? 1 : 0;
-	result.polls = (_unreadPollVotesCount > 0) ? 1 : 0;
+	result.polls = unreadPollVotes().has() ? 1 : 0;
 	result.messagesMuted = muted ? result.messages : 0;
 	result.chatsMuted = muted ? result.chats : 0;
 	result.marksMuted = muted ? result.marks : 0;

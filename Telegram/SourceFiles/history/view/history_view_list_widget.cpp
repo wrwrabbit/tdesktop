@@ -2457,6 +2457,9 @@ void ListWidget::paintEvent(QPaintEvent *e) {
 				readContents.insert(item);
 				_highlighter.enqueue({ item });
 			}
+			if (item->hasUnreadPollVote()) {
+				readContents.insert(item);
+			}
 		}
 		session->data().reactions().poll(item, context.now);
 		if (item->hasUnpaidContent()) {
