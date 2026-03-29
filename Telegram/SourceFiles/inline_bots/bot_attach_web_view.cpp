@@ -2751,14 +2751,14 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 				|| action.history->peer->starsPerMessageChecked())
 				? SendMenu::Type::SilentOnly
 				: SendMenu::Type::Scheduled;
-			const auto flag = PollData::Flags();
+			const auto chosen = kDefaultPollCreateFlags;
 			Window::PeerMenuCreatePoll(
 				controller,
 				peer,
 				action.replyTo,
 				action.options.suggest,
-				flag,
-				flag,
+				chosen,
+				PollData::Flags(),
 				source,
 				{ sendMenuType });
 		}, &st::menuIconCreatePoll);

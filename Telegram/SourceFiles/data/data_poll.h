@@ -131,6 +131,11 @@ private:
 
 };
 
+inline constexpr auto kDefaultPollCreateFlags = PollData::Flag::PublicVotes
+	| PollData::Flag::MultiChoice
+	| PollData::Flag::OpenAnswers
+	| PollData::Flag::ShuffleAnswers;
+
 [[nodiscard]] QByteArray PollOptionFromLink(const QString &value);
 [[nodiscard]] QString PollOptionToLink(const QByteArray &option);
 

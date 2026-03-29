@@ -394,7 +394,7 @@ void ActivateBotCommand(ClickHandlerContext context, int row, int column) {
 
 	case ButtonType::RequestPoll: {
 		HideSingleUseKeyboard(controller, item);
-		auto chosen = PollData::Flags();
+		auto chosen = kDefaultPollCreateFlags;
 		auto disabled = PollData::Flags();
 		if (!button->data.isEmpty()) {
 			disabled |= PollData::Flag::Quiz;

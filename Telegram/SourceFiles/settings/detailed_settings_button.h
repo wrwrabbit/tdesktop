@@ -64,6 +64,7 @@ private:
 	int _descriptionWidth = 0;
 	int _descriptionTop = 0;
 	int _descriptionHeight = 0;
+	bool _toggleLocked = false;
 
 };
 

@@ -43,7 +43,9 @@ DetailedSettingsButton::DetailedSettingsButton(
 		false,
 		[this] { rtlupdate(toggleRect()); });
 	addClickHandler([=] {
-		_toggle->setChecked(!_toggle->checked(), anim::type::normal);
+		if (!_toggleLocked) {
+			_toggle->setChecked(!_toggle->checked(), anim::type::normal);
+		}
 	});
 	std::move(
 		toggled
@@ -88,6 +90,7 @@ DetailedSettingsButton::clickAreaEvents() const {
 }
 
 void DetailedSettingsButton::setToggleLocked(bool locked) {
+	_toggleLocked = locked;
 	_toggle->setLocked(locked);
 }
 

@@ -2752,11 +2752,19 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		*handled = true;
 	}, solution->lifetime());
 
-	const auto updateQuizDependentLocks = [=](bool checked) {
+	const auto updateAddOptionsLocked = [=] {
 		if (addOptions) {
-			addOptions->setToggleLocked(
-				(_disabled & PollData::Flag::OpenAnswers) || checked);
+			const auto locked = (_disabled & PollData::Flag::OpenAnswers)
+				|| quiz->toggled()
+				|| (showWhoVoted && !showWhoVoted->toggled());
+			addOptions->setToggleLocked(locked);
+			if (locked) {
+				state->addOptionsForceOff.fire(false);
+			}
 		}
+	};
+	const auto updateQuizDependentLocks = [=](bool checked) {
+		updateAddOptionsLocked();
 		revoting->setToggleLocked(
 			(_disabled & PollData::Flag::RevotingDisabled) || checked);
 	};
@@ -2788,19 +2796,11 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	}, multiple->lifetime());
 
 	if (addOptions && showWhoVoted) {
-		const auto updateShowWhoVotedLock = [=](bool openAnswers) {
-			showWhoVoted->setToggleLocked(
-				(_disabled & PollData::Flag::PublicVotes)
-				|| openAnswers);
-			if (openAnswers) {
-				state->showWhoVotedForceOn.fire(true);
-			}
-		};
-		updateShowWhoVotedLock(addOptions->toggled());
-		addOptions->toggledChanges(
-		) | rpl::on_next([=](bool checked) {
-			updateShowWhoVotedLock(checked);
-		}, addOptions->lifetime());
+		updateAddOptionsLocked();
+		showWhoVoted->toggledChanges(
+		) | rpl::on_next([=](bool) {
+			updateAddOptionsLocked();
+		}, showWhoVoted->lifetime());
 	}
 
 	const auto isValidQuestion = [=] {

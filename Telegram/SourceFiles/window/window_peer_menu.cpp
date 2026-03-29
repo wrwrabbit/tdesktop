@@ -1271,17 +1271,17 @@ void Filler::addCreatePoll() {
 			|| _peer->starsPerMessageChecked())
 		? SendMenu::Type::SilentOnly
 		: SendMenu::Type::Scheduled;
-	const auto flag = PollData::Flags();
 	const auto replyTo = _request.currentReplyTo;
 	const auto suggest = _request.currentSuggest;
+	const auto chosen = kDefaultPollCreateFlags;
 	auto callback = [=] {
 		PeerMenuCreatePoll(
 			controller,
 			peer,
 			replyTo,
 			suggest,
-			flag,
-			flag,
+			chosen,
+			PollData::Flags(),
 			source,
 			{ sendMenuType });
 	};
