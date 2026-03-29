@@ -936,6 +936,540 @@ void Poll::AddOption::toggleRipple(bool pressed) {
 	}
 }
 
+struct Poll::Header : public Poll::Part {
+	using Part::Part;
+
+	int countHeight(int innerWidth) const override;
+	void draw(
+		Painter &p,
+		int left,
+		int innerWidth,
+		int outerWidth,
+		const PaintContext &context) const override;
+	TextState textState(
+		QPoint point,
+		int left,
+		int innerWidth,
+		int outerWidth,
+		StateRequest request) const override;
+	void clickHandlerActiveChanged(
+		const ClickHandlerPtr &handler,
+		bool active) override;
+	void clickHandlerPressedChanged(
+		const ClickHandlerPtr &handler,
+		bool pressed) override;
+	bool hasHeavyPart() const override;
+	void unloadHeavyPart() override;
+	uint16 selectionLength() const override;
+};
+
+int Poll::Header::countHeight(int innerWidth) const {
+	const auto pollWidth = innerWidth
+		+ st::msgPadding.left()
+		+ st::msgPadding.right();
+	return _owner->countQuestionTop(innerWidth, pollWidth)
+		+ _owner->_question.countHeight(innerWidth)
+		+ st::historyPollSubtitleSkip
+		+ st::msgDateFont->height
+		+ st::historyPollAnswersSkip;
+}
+
+void Poll::Header::draw(
+		Painter &p,
+		int left,
+		int innerWidth,
+		int outerWidth,
+		const PaintContext &context) const {
+	const auto stm = context.messageStyle();
+	auto tshift = _owner->countTopContentSkip();
+
+	if (const auto mediaHeight = _owner->countTopMediaHeight()) {
+		if (_owner->_attachedMediaAttach) {
+			const auto sideSkip = st::historyPollMediaSideSkip;
+			_owner->_attachedMediaAttach->setBubbleRounding(
+				_owner->topMediaRounding());
+			p.translate(sideSkip, tshift);
+			_owner->_attachedMediaAttach->draw(
+				p,
+				context.translated(-sideSkip, -tshift)
+					.withSelection(TextSelection()));
+			p.translate(-sideSkip, -tshift);
+		} else {
+			const auto target = _owner->countTopMediaRect(tshift);
+			p.setPen(Qt::NoPen);
+			p.setBrush(stm->msgFileBg);
+			PainterHighQualityEnabler hq(p);
+			if (_owner->_attachedMedia->kind
+					== PollThumbnailKind::Emoji) {
+				p.drawRoundedRect(
+					target,
+					st::roundRadiusLarge,
+					st::roundRadiusLarge);
+				const auto image
+					= _owner->_attachedMedia->thumbnail->image(
+						std::max(target.width(), target.height()));
+				if (!image.isNull()) {
+					const auto source = QRectF(
+						QPointF(),
+						QSizeF(image.size()));
+					const auto kx = target.width() / source.width();
+					const auto ky = target.height() / source.height();
+					const auto scale = std::min(kx, ky);
+					const auto imageSize = QSizeF(
+						source.width() * scale,
+						source.height() * scale);
+					const auto geometry = QRectF(
+						target.x()
+							+ (target.width()
+								- imageSize.width()) / 2.,
+						target.y()
+							+ (target.height()
+								- imageSize.height()) / 2.,
+						imageSize.width(),
+						imageSize.height());
+					p.save();
+					auto path = QPainterPath();
+					path.addRoundedRect(
+						target,
+						st::roundRadiusLarge,
+						st::roundRadiusLarge);
+					p.setClipPath(path);
+					p.drawImage(geometry, image, source);
+					p.restore();
+				}
+			} else {
+				_owner->validateTopMediaCache(target.size());
+				if (!_owner->_attachedMediaCache.isNull()) {
+					p.drawImage(target.topLeft(),
+						_owner->_attachedMediaCache);
+				}
+			}
+		}
+		tshift += mediaHeight + st::historyPollMediaSkip;
+	}
+
+	if (const auto descriptionHeight
+			= _owner->countDescriptionHeight(innerWidth)) {
+		p.setPen(stm->historyTextFg);
+		_owner->_parent->prepareCustomEmojiPaint(
+			p, context, _owner->_description);
+		_owner->_description.draw(p, {
+			.position = { left, tshift },
+			.outerWidth = outerWidth,
+			.availableWidth = innerWidth,
+			.spoiler = Ui::Text::DefaultSpoilerCache(),
+			.now = context.now,
+			.pausedEmoji = context.paused,
+			.pausedSpoiler = context.paused,
+			.selection = context.selection,
+			.useFullWidth = true,
+		});
+		tshift += descriptionHeight + st::historyPollDescriptionSkip;
+	}
+
+	if (const auto solutionHeight
+			= _owner->countSolutionBlockHeight(innerWidth)) {
+		_owner->paintSolutionBlock(
+			p, left, tshift, innerWidth, context);
+		tshift += solutionHeight + st::historyPollExplanationSkip;
+	}
+
+	p.setPen(stm->historyTextFg);
+	_owner->_question.drawLeft(
+		p,
+		left,
+		tshift,
+		innerWidth,
+		outerWidth,
+		style::al_left,
+		0,
+		-1,
+		_owner->toQuestionSelection(context.selection));
+	tshift += _owner->_question.countHeight(innerWidth)
+		+ st::historyPollSubtitleSkip;
+
+	p.setPen(stm->msgDateFg);
+	_owner->_subtitle.drawLeftElided(
+		p, left, tshift, innerWidth, outerWidth);
+	_owner->paintRecentVoters(
+		p, left + _owner->_subtitle.maxWidth(), tshift, context);
+	_owner->paintShowSolution(
+		p, left + innerWidth, tshift, context);
+}
+
+TextState Poll::Header::textState(
+		QPoint point,
+		int left,
+		int innerWidth,
+		int outerWidth,
+		StateRequest request) const {
+	TextState result(_owner->_parent);
+	auto tshift = _owner->countTopContentSkip();
+
+	if (const auto mediaHeight = _owner->countTopMediaHeight()) {
+		if (_owner->_attachedMediaAttach) {
+			const auto sideSkip = st::historyPollMediaSideSkip;
+			if (QRect(
+					sideSkip,
+					tshift,
+					_owner->_attachedMediaAttach->width(),
+					mediaHeight).contains(point)) {
+				result = _owner->_attachedMediaAttach->textState(
+					point - QPoint(sideSkip, tshift),
+					request);
+				result.symbol = 0;
+				return result;
+			}
+		} else if (_owner->_attachedMedia
+			&& _owner->_attachedMedia->handler
+			&& QRect(0, tshift, outerWidth, mediaHeight)
+				.contains(point)) {
+			result.link = _owner->_attachedMedia->handler;
+			return result;
+		}
+		tshift += mediaHeight + st::historyPollMediaSkip;
+	}
+
+	auto symbolAdd = uint16(0);
+	if (const auto descriptionHeight
+			= _owner->countDescriptionHeight(innerWidth)) {
+		if (QRect(left, tshift, innerWidth, descriptionHeight)
+				.contains(point)) {
+			result = TextState(
+				_owner->_parent,
+				_owner->_description.getStateLeft(
+					point - QPoint(left, tshift),
+					innerWidth,
+					outerWidth,
+					request.forText()));
+			return result;
+		}
+		if (point.y() >= tshift + descriptionHeight) {
+			symbolAdd += _owner->_description.length();
+		}
+		tshift += descriptionHeight + st::historyPollDescriptionSkip;
+	}
+
+	if (const auto solutionHeight
+			= _owner->countSolutionBlockHeight(innerWidth)) {
+		if (QRect(left, tshift, innerWidth, solutionHeight)
+				.contains(point)) {
+			const auto &qst = st::historyPagePreview;
+			const auto innerLeft = left + qst.padding.left();
+			const auto innerRight = left
+				+ innerWidth
+				- qst.padding.right();
+			const auto closeArea
+				= st::historyPollExplanationCloseSize;
+			const auto closeLeft = innerRight - closeArea;
+			const auto closeTop = tshift + qst.padding.top();
+			if (QRect(
+				closeLeft,
+				closeTop,
+				closeArea,
+				st::semiboldFont->height).contains(point)) {
+				result.link = _owner->_closeSolutionLink;
+				return result;
+			}
+			const auto textTop = tshift
+				+ qst.padding.top()
+				+ st::semiboldFont->height
+				+ st::historyPollExplanationTitleSkip;
+			const auto textWidth = innerRight - innerLeft;
+			const auto textHeight
+				= _owner->_solutionText.countHeight(textWidth);
+			if (QRect(
+				innerLeft,
+				textTop,
+				textWidth,
+				textHeight).contains(point)) {
+				result = TextState(
+					_owner->_parent,
+					_owner->_solutionText.getStateLeft(
+						point - QPoint(innerLeft, textTop),
+						textWidth,
+						outerWidth,
+						request.forText()));
+				result.symbol += symbolAdd;
+				return result;
+			}
+			if (_owner->_solutionAttach) {
+				if (const auto mh
+						= _owner->countSolutionMediaHeight(
+							textWidth)) {
+					const auto mediaTop = textTop
+						+ textHeight
+						+ st::historyPollExplanationMediaSkip;
+					const auto isDocument = _owner->_solutionMedia
+						&& (_owner->_solutionMedia->kind
+								== PollThumbnailKind::Document
+							|| _owner->_solutionMedia->kind
+								== PollThumbnailKind::Audio);
+					const auto isThumbed = isDocument
+						&& _owner->_poll->solutionMedia.document
+						&& _owner->_poll->solutionMedia.document
+							->hasThumbnail()
+						&& !_owner->_poll->solutionMedia.document
+							->isSong();
+					const auto &fileSt = isThumbed
+						? st::msgFileThumbLayout
+						: st::msgFileLayout;
+					const auto shift = isDocument
+						? fileSt.padding.left()
+						: 0;
+					const auto mediaLeft = innerLeft - shift;
+					if (QRect(
+							mediaLeft,
+							mediaTop,
+							_owner->_solutionAttach->width(),
+							mh).contains(point)) {
+						result = _owner->_solutionAttach->textState(
+							point - QPoint(mediaLeft, mediaTop),
+							request);
+						result.symbol = 0;
+					}
+				}
+			}
+			return result;
+		}
+		if (point.y() >= tshift + solutionHeight) {
+			symbolAdd += _owner->_solutionText.length();
+		}
+		tshift += solutionHeight + st::historyPollExplanationSkip;
+	}
+
+	const auto questionH = _owner->_question.countHeight(innerWidth);
+	if (QRect(left, tshift, innerWidth, questionH).contains(point)) {
+		result = TextState(
+			_owner->_parent,
+			_owner->_question.getState(
+				point - QPoint(left, tshift),
+				innerWidth,
+				request.forText()));
+		result.symbol += symbolAdd;
+		return result;
+	}
+	if (point.y() >= tshift + questionH) {
+		symbolAdd += _owner->_question.length();
+	}
+	tshift += questionH + st::historyPollSubtitleSkip;
+	if (_owner->inShowSolution(
+			point, left + innerWidth, tshift)) {
+		result.link = _owner->_showSolutionLink;
+		return result;
+	}
+
+	return result;
+}
+
+void Poll::Header::clickHandlerActiveChanged(
+		const ClickHandlerPtr &handler,
+		bool active) {
+	if (_owner->_attachedMediaAttach) {
+		_owner->_attachedMediaAttach->clickHandlerActiveChanged(
+			handler, active);
+	}
+}
+
+void Poll::Header::clickHandlerPressedChanged(
+		const ClickHandlerPtr &handler,
+		bool pressed) {
+	if (_owner->_attachedMediaAttach) {
+		_owner->_attachedMediaAttach->clickHandlerPressedChanged(
+			handler, pressed);
+	}
+	if (_owner->_solutionAttach) {
+		_owner->_solutionAttach->clickHandlerPressedChanged(
+			handler, pressed);
+	}
+}
+
+bool Poll::Header::hasHeavyPart() const {
+	for (const auto &recent : _owner->_recentVoters) {
+		if (!recent.userpic.null()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void Poll::Header::unloadHeavyPart() {
+	for (auto &recent : _owner->_recentVoters) {
+		recent.userpic = {};
+	}
+}
+
+uint16 Poll::Header::selectionLength() const {
+	return _owner->fullSelectionLength();
+}
+
+struct Poll::Options : public Poll::Part {
+	using Part::Part;
+
+	int countHeight(int innerWidth) const override;
+	void draw(
+		Painter &p,
+		int left,
+		int innerWidth,
+		int outerWidth,
+		const PaintContext &context) const override;
+	TextState textState(
+		QPoint point,
+		int left,
+		int innerWidth,
+		int outerWidth,
+		StateRequest request) const override;
+	void clickHandlerPressedChanged(
+		const ClickHandlerPtr &handler,
+		bool pressed) override;
+	bool hasHeavyPart() const override;
+	void unloadHeavyPart() override;
+};
+
+int Poll::Options::countHeight(int innerWidth) const {
+	return ranges::accumulate(ranges::views::all(
+		_owner->_answers
+	) | ranges::views::transform([&](const Answer &answer) {
+		return _owner->countAnswerHeight(answer, innerWidth);
+	}), 0);
+}
+
+void Poll::Options::draw(
+		Painter &p,
+		int left,
+		int innerWidth,
+		int outerWidth,
+		const PaintContext &context) const {
+	_owner->checkSendingAnimation();
+
+	const auto progress = _owner->_answersAnimation
+		? _owner->_answersAnimation->progress.value(1.)
+		: 1.;
+	if (progress == 1.) {
+		_owner->resetAnswersAnimation();
+	}
+
+	auto tshift = 0;
+	auto &&answers = ranges::views::zip(
+		_owner->_answers,
+		ranges::views::ints(0, int(_owner->_answers.size())));
+	for (const auto &[answer, index] : answers) {
+		const auto animation = _owner->_answersAnimation
+			? &_owner->_answersAnimation->data[index]
+			: nullptr;
+		if (animation) {
+			animation->percent.update(progress, anim::linear);
+			animation->filling.update(
+				progress,
+				_owner->showVotes()
+					? anim::easeOutCirc
+					: anim::linear);
+			animation->opacity.update(progress, anim::linear);
+		}
+		const auto height = _owner->paintAnswer(
+			p,
+			answer,
+			animation,
+			left,
+			tshift,
+			innerWidth,
+			outerWidth,
+			context);
+		tshift += height;
+	}
+}
+
+TextState Poll::Options::textState(
+		QPoint point,
+		int left,
+		int innerWidth,
+		int outerWidth,
+		StateRequest request) const {
+	TextState result;
+	const auto can = _owner->canVote();
+	const auto show = _owner->showVotes();
+
+	auto tshift = 0;
+	for (const auto &answer : _owner->_answers) {
+		const auto height = _owner->countAnswerHeight(answer, innerWidth);
+		if (point.y() >= tshift && point.y() < tshift + height) {
+			const auto media = answer.thumbnail
+				? PollAnswerMediaSize()
+				: 0;
+			if (media
+				&& answer.mediaHandler
+				&& QRect(
+					left + innerWidth
+						- st::historyPollAnswerPadding.right()
+						- media,
+					tshift + (answer.thumbnail
+						? st::historyPollAnswerPadding
+						: st::historyPollAnswerPaddingNoMedia).top(),
+					media,
+					media).contains(point)) {
+				result.link = answer.mediaHandler;
+			} else {
+				if (can) {
+					_owner->_lastLinkPoint = point;
+				}
+				result.link = answer.handler;
+			}
+			if (!can && show) {
+				result.customTooltip = true;
+				using Flag = Ui::Text::StateRequest::Flag;
+				if (request.flags & Flag::LookupCustomTooltip) {
+					const auto quiz = _owner->_poll->quiz();
+					result.customTooltipText = answer.votes
+						? (quiz
+							? tr::lng_polls_answers_count
+							: tr::lng_polls_votes_count)(
+								tr::now,
+								lt_count_decimal,
+								answer.votes)
+						: (quiz
+							? tr::lng_polls_answers_none
+							: tr::lng_polls_votes_none)(tr::now);
+				}
+			}
+			return result;
+		}
+		tshift += height;
+	}
+	return result;
+}
+
+void Poll::Options::clickHandlerPressedChanged(
+		const ClickHandlerPtr &handler,
+		bool pressed) {
+	const auto i = ranges::find(
+		_owner->_answers,
+		handler,
+		&Answer::handler);
+	if (i != end(_owner->_answers)) {
+		if (_owner->canVote()) {
+			_owner->toggleRipple(*i, pressed);
+		}
+	}
+}
+
+bool Poll::Options::hasHeavyPart() const {
+	for (const auto &answer : _owner->_answers) {
+		if (!answer.recentVotersImage.isNull()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void Poll::Options::unloadHeavyPart() {
+	for (auto &answer : _owner->_answers) {
+		for (auto &recent : answer.recentVoters) {
+			recent.view = {};
+		}
+		answer.recentVotersImage = QImage();
+	}
+}
+
 template <typename Callback>
 Poll::SendingAnimation::SendingAnimation(
 	const QByteArray &option,
@@ -1064,6 +1598,8 @@ Poll::Poll(
 			}
 		})))
 , _closeTimer([=] { repaint(); }) {
+	_headerPart = std::make_unique<Header>(this);
+	_optionsPart = std::make_unique<Options>(this);
 	_addOptionPart = std::make_unique<AddOption>(this);
 	_footerPart = std::make_unique<Footer>(this);
 	if (!consumed.text.isEmpty()) {
@@ -1093,33 +1629,11 @@ QSize Poll::countOptimalSize() {
 			+ st::historyPollAnswerPadding.right());
 	}
 
-	const auto show = showVotes();
-	const auto answersHeight = ranges::accumulate(ranges::views::all(
-		_answers
-	) | ranges::views::transform([show](const Answer &answer) {
-		const auto media = answer.thumbnail ? PollAnswerMediaSize() : 0;
-		const auto &padding = answer.thumbnail
-			? st::historyPollAnswerPadding
-			: st::historyPollAnswerPaddingNoMedia;
-		const auto fillingWithChoice = show
-			? (st::historyPollPercentFont->height
-				+ st::historyPollFillingTop
-				+ (st::historyPollFillingHeight
-					+ st::historyPollChoiceRight.height()) / 2)
-			: 0;
-		return padding.top()
-			+ std::max({ answer.text.minHeight(), media, fillingWithChoice })
-			+ padding.bottom();
-	}), 0);
-
-	auto minHeight = countQuestionTop(maxWidth - paddings, maxWidth)
-		+ _question.minHeight()
-		+ st::historyPollSubtitleSkip
-		+ st::msgDateFont->height
-		+ st::historyPollAnswersSkip
-		+ answersHeight
-		+ _addOptionPart->countHeight(maxWidth - paddings)
-		+ _footerPart->countHeight(maxWidth - paddings);
+	const auto innerWidth = maxWidth - paddings;
+	auto minHeight = _headerPart->countHeight(innerWidth)
+		+ _optionsPart->countHeight(innerWidth)
+		+ _addOptionPart->countHeight(innerWidth)
+		+ _footerPart->countHeight(innerWidth);
 	return { maxWidth, minHeight };
 }
 
@@ -1237,7 +1751,7 @@ int Poll::countAnswerHeight(
 	const auto &padding = answer.thumbnail
 		? st::historyPollAnswerPadding
 		: st::historyPollAnswerPaddingNoMedia;
-	const auto fillingWithChoice = showVotes()
+	const auto fillingWithChoice = (showVotes() && media)
 		? (st::historyPollPercentFont->height
 			+ st::historyPollFillingTop
 			+ (st::historyPollFillingHeight
@@ -1258,18 +1772,8 @@ QSize Poll::countCurrentSize(int newWidth) {
 		- st::msgPadding.left()
 		- st::msgPadding.right();
 
-	const auto answersHeight = ranges::accumulate(ranges::views::all(
-		_answers
-	) | ranges::views::transform([&](const Answer &answer) {
-		return countAnswerHeight(answer, innerWidth);
-	}), 0);
-
-	auto newHeight = countQuestionTop(innerWidth, newWidth)
-		+ _question.countHeight(innerWidth)
-		+ st::historyPollSubtitleSkip
-		+ st::msgDateFont->height
-		+ st::historyPollAnswersSkip
-		+ answersHeight
+	auto newHeight = _headerPart->countHeight(innerWidth)
+		+ _optionsPart->countHeight(innerWidth)
 		+ _addOptionPart->countHeight(innerWidth)
 		+ _footerPart->countHeight(innerWidth);
 	return { newWidth, newHeight };
@@ -2108,164 +2612,29 @@ void Poll::draw(Painter &p, const PaintContext &context) const {
 	if (width() < st::msgPadding.left() + st::msgPadding.right() + 1) return;
 	auto paintw = width();
 
-	checkSendingAnimation();
 	if (_poll->checkResultsReload(context.now)) {
 		history()->session().api().polls().reloadResults(_parent->data());
 	}
 
-	const auto stm = context.messageStyle();
 	const auto padding = st::msgPadding;
-	auto tshift = countTopContentSkip();
 	paintw -= padding.left() + padding.right();
 
-	if (const auto mediaHeight = countTopMediaHeight()) {
-		if (_attachedMediaAttach) {
-			const auto sideSkip = st::historyPollMediaSideSkip;
-			_attachedMediaAttach->setBubbleRounding(topMediaRounding());
-			p.translate(sideSkip, tshift);
-			_attachedMediaAttach->draw(
-				p,
-				context.translated(-sideSkip, -tshift)
-					.withSelection(TextSelection()));
-			p.translate(-sideSkip, -tshift);
-		} else {
-			const auto target = countTopMediaRect(tshift);
-			p.setPen(Qt::NoPen);
-			p.setBrush(stm->msgFileBg);
-			PainterHighQualityEnabler hq(p);
-			if (_attachedMedia->kind == PollThumbnailKind::Emoji) {
-				p.drawRoundedRect(
-					target,
-					st::roundRadiusLarge,
-					st::roundRadiusLarge);
-				const auto image = _attachedMedia->thumbnail->image(
-					std::max(target.width(), target.height()));
-				if (!image.isNull()) {
-					const auto source = QRectF(
-						QPointF(),
-						QSizeF(image.size()));
-					const auto kx = target.width() / source.width();
-					const auto ky = target.height() / source.height();
-					const auto scale = std::min(kx, ky);
-					const auto imageSize = QSizeF(
-						source.width() * scale,
-						source.height() * scale);
-					const auto geometry = QRectF(
-						target.x()
-							+ (target.width() - imageSize.width()) / 2.,
-						target.y()
-							+ (target.height() - imageSize.height()) / 2.,
-						imageSize.width(),
-						imageSize.height());
-					p.save();
-					auto path = QPainterPath();
-					path.addRoundedRect(
-						target,
-						st::roundRadiusLarge,
-						st::roundRadiusLarge);
-					p.setClipPath(path);
-					p.drawImage(geometry, image, source);
-					p.restore();
-				}
-			} else {
-				validateTopMediaCache(target.size());
-				if (!_attachedMediaCache.isNull()) {
-					p.drawImage(target.topLeft(), _attachedMediaCache);
-				}
-			}
-		}
-		tshift += mediaHeight + st::historyPollMediaSkip;
-	}
-
-	if (const auto descriptionHeight = countDescriptionHeight(paintw)) {
-		p.setPen(stm->historyTextFg);
-		_parent->prepareCustomEmojiPaint(p, context, _description);
-		_description.draw(p, {
-			.position = { padding.left(), tshift },
-			.outerWidth = width(),
-			.availableWidth = paintw,
-			.spoiler = Ui::Text::DefaultSpoilerCache(),
-			.now = context.now,
-			.pausedEmoji = context.paused,
-			.pausedSpoiler = context.paused,
-			.selection = context.selection,
-			.useFullWidth = true,
-		});
-		tshift += descriptionHeight + st::historyPollDescriptionSkip;
-	}
-
-	if (const auto solutionHeight = countSolutionBlockHeight(paintw)) {
-		paintSolutionBlock(p, padding.left(), tshift, paintw, context);
-		tshift += solutionHeight + st::historyPollExplanationSkip;
-	}
-
-	p.setPen(stm->historyTextFg);
-	_question.drawLeft(
-		p,
-		padding.left(),
-		tshift,
-		paintw,
-		width(),
-		style::al_left,
-		0,
-		-1,
-		toQuestionSelection(context.selection));
-	tshift += _question.countHeight(paintw) + st::historyPollSubtitleSkip;
-
-	p.setPen(stm->msgDateFg);
-	_subtitle.drawLeftElided(p, padding.left(), tshift, paintw, width());
-	paintRecentVoters(p, padding.left() + _subtitle.maxWidth(), tshift, context);
-	paintShowSolution(p, padding.left() + paintw, tshift, context);
-	tshift += st::msgDateFont->height + st::historyPollAnswersSkip;
-
-	const auto progress = _answersAnimation
-		? _answersAnimation->progress.value(1.)
-		: 1.;
-	if (progress == 1.) {
-		resetAnswersAnimation();
-	}
-
-	auto &&answers = ranges::views::zip(
-		_answers,
-		ranges::views::ints(0, int(_answers.size())));
-	for (const auto &[answer, index] : answers) {
-		const auto animation = _answersAnimation
-			? &_answersAnimation->data[index]
-			: nullptr;
-		if (animation) {
-			animation->percent.update(progress, anim::linear);
-			animation->filling.update(
-				progress,
-				showVotes() ? anim::easeOutCirc : anim::linear);
-			animation->opacity.update(progress, anim::linear);
-		}
-		const auto height = paintAnswer(
-			p,
-			answer,
-			animation,
-			padding.left(),
-			tshift,
-			paintw,
-			width(),
-			context);
-		tshift += height;
-	}
-	{
-		const auto addOptH = _addOptionPart->countHeight(paintw);
-		if (addOptH > 0) {
+	const Part *parts[] = {
+		_headerPart.get(),
+		_optionsPart.get(),
+		_addOptionPart.get(),
+		_footerPart.get(),
+	};
+	auto tshift = 0;
+	for (const auto part : parts) {
+		const auto h = part->countHeight(paintw);
+		if (h > 0) {
 			const auto saved = p.transform();
 			p.translate(0, tshift);
-			_addOptionPart->draw(
-				p, padding.left(), paintw, width(), context);
+			part->draw(p, padding.left(), paintw, width(), context);
 			p.setTransform(saved);
 		}
-		tshift += addOptH;
-	}
-	{
-		const auto saved = p.transform();
-		p.translate(0, tshift);
-		_footerPart->draw(p, padding.left(), paintw, width(), context);
-		p.setTransform(saved);
+		tshift += h;
 	}
 }
 
@@ -3052,226 +3421,39 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 		return result;
 	}
 
-	const auto can = canVote();
-	const auto show = showVotes();
 	const auto padding = st::msgPadding;
-	auto paintw = width();
-	auto tshift = countTopContentSkip();
-	paintw -= padding.left() + padding.right();
+	auto paintw = width() - padding.left() - padding.right();
 
-	if (const auto mediaHeight = countTopMediaHeight()) {
-		if (_attachedMediaAttach) {
-			const auto sideSkip = st::historyPollMediaSideSkip;
-			if (QRect(
-					sideSkip,
-					tshift,
-					_attachedMediaAttach->width(),
-					mediaHeight).contains(point)) {
-				result = _attachedMediaAttach->textState(
-					point - QPoint(sideSkip, tshift),
-					request);
-				result.symbol = 0;
-				return result;
-			}
-		} else if (_attachedMedia
-			&& _attachedMedia->handler
-			&& QRect(0, tshift, width(), mediaHeight).contains(point)) {
-			result.link = _attachedMedia->handler;
-			return result;
-		}
-		tshift += mediaHeight + st::historyPollMediaSkip;
-	}
-
-	auto symbolAdd = 0;
-	if (const auto descriptionHeight = countDescriptionHeight(paintw)) {
-		if (QRect(
-			padding.left(),
-			tshift,
-			paintw,
-			descriptionHeight).contains(point)) {
-			result = TextState(_parent, _description.getStateLeft(
-				point - QPoint(padding.left(), tshift),
-				paintw,
-				width(),
-				request.forText()));
-			return result;
-		}
-		if (point.y() >= tshift + descriptionHeight) {
-			symbolAdd += _description.length();
-		}
-		tshift += descriptionHeight + st::historyPollDescriptionSkip;
-	}
-
-	if (const auto solutionHeight = countSolutionBlockHeight(paintw)) {
-		if (QRect(
-			padding.left(),
-			tshift,
-			paintw,
-			solutionHeight).contains(point)) {
-			const auto &qst = st::historyPagePreview;
-			const auto innerLeft = padding.left() + qst.padding.left();
-			const auto innerRight = padding.left()
-				+ paintw
-				- qst.padding.right();
-			const auto closeArea = st::historyPollExplanationCloseSize;
-			const auto closeLeft = innerRight - closeArea;
-			const auto closeTop = tshift + qst.padding.top();
-			if (QRect(
-				closeLeft,
-				closeTop,
-				closeArea,
-				st::semiboldFont->height).contains(point)) {
-				result.link = _closeSolutionLink;
-				return result;
-			}
-			const auto textTop = tshift
-				+ qst.padding.top()
-				+ st::semiboldFont->height
-				+ st::historyPollExplanationTitleSkip;
-			const auto textWidth = innerRight - innerLeft;
-			const auto textHeight = _solutionText.countHeight(textWidth);
-			if (QRect(
-				innerLeft,
-				textTop,
-				textWidth,
-				textHeight).contains(point)) {
-				result = TextState(_parent, _solutionText.getStateLeft(
-					point - QPoint(innerLeft, textTop),
-					textWidth,
-					width(),
-					request.forText()));
-				result.symbol += symbolAdd;
-				return result;
-			}
-			if (_solutionAttach) {
-				if (const auto mh = countSolutionMediaHeight(textWidth)) {
-					const auto mediaTop = textTop
-						+ textHeight
-						+ st::historyPollExplanationMediaSkip;
-					const auto isDocument = _solutionMedia
-						&& (_solutionMedia->kind
-								== PollThumbnailKind::Document
-							|| _solutionMedia->kind
-								== PollThumbnailKind::Audio);
-					const auto isThumbed = isDocument
-						&& _poll->solutionMedia.document
-						&& _poll->solutionMedia.document
-							->hasThumbnail()
-						&& !_poll->solutionMedia.document->isSong();
-					const auto &fileSt = isThumbed
-						? st::msgFileThumbLayout
-						: st::msgFileLayout;
-					const auto shift = isDocument
-						? fileSt.padding.left()
-						: 0;
-					const auto mediaLeft = innerLeft - shift;
-					if (QRect(
-							mediaLeft,
-							mediaTop,
-							_solutionAttach->width(),
-							mh).contains(point)) {
-						result = _solutionAttach->textState(
-							point - QPoint(mediaLeft, mediaTop),
-							request);
-						result.symbol = 0;
-					}
-				}
-			}
-			return result;
-		}
-		if (point.y() >= tshift + solutionHeight) {
-			symbolAdd += _solutionText.length();
-		}
-		tshift += solutionHeight + st::historyPollExplanationSkip;
-	}
-
-	const auto questionH = _question.countHeight(paintw);
-	if (QRect(padding.left(), tshift, paintw, questionH).contains(point)) {
-		result = TextState(_parent, _question.getState(
-			point - QPoint(padding.left(), tshift),
-			paintw,
-			request.forText()));
-		result.symbol += symbolAdd;
-		return result;
-	}
-	if (point.y() >= tshift + questionH) {
-		symbolAdd += _question.length();
-	}
-	tshift += questionH + st::historyPollSubtitleSkip;
-	if (inShowSolution(point, padding.left() + paintw, tshift)) {
-		result.link = _showSolutionLink;
-		return result;
-	}
-	tshift += st::msgDateFont->height + st::historyPollAnswersSkip;
-	for (const auto &answer : _answers) {
-		const auto height = countAnswerHeight(answer, paintw);
-		if (point.y() >= tshift && point.y() < tshift + height) {
-			const auto media = answer.thumbnail ? PollAnswerMediaSize() : 0;
-			if (media
-				&& answer.mediaHandler
-				&& QRect(
-					padding.left()
-						+ paintw
-						- st::historyPollAnswerPadding.right()
-						- media,
-					tshift + (answer.thumbnail
-						? st::historyPollAnswerPadding
-						: st::historyPollAnswerPaddingNoMedia).top(),
-					media,
-					media).contains(point)) {
-				result.link = answer.mediaHandler;
-			} else {
-				if (can) {
-					_lastLinkPoint = point;
-				}
-				result.link = answer.handler;
-			}
-			if (!can && show) {
-				result.customTooltip = true;
-				using Flag = Ui::Text::StateRequest::Flag;
-				if (request.flags & Flag::LookupCustomTooltip) {
-					const auto quiz = _poll->quiz();
-					result.customTooltipText = answer.votes
-						? (quiz
-							? tr::lng_polls_answers_count
-							: tr::lng_polls_votes_count)(
-								tr::now,
-								lt_count_decimal,
-								answer.votes)
-						: (quiz
-							? tr::lng_polls_answers_none
-							: tr::lng_polls_votes_none)(tr::now);
-				}
-			}
-			return result;
-		}
-		tshift += height;
-	}
-	{
-		const auto addOptH = _addOptionPart->countHeight(paintw);
-		if (addOptH > 0) {
-			const auto addOptResult = _addOptionPart->textState(
+	const Part *parts[] = {
+		_headerPart.get(),
+		_optionsPart.get(),
+		_addOptionPart.get(),
+		_footerPart.get(),
+	};
+	auto tshift = 0;
+	auto symbolAdd = uint16(0);
+	for (const auto part : parts) {
+		const auto h = part->countHeight(paintw);
+		if (h > 0) {
+			auto partResult = part->textState(
 				point - QPoint(0, tshift),
-				st::msgPadding.left(),
+				padding.left(),
 				paintw,
 				width(),
 				request);
-			if (addOptResult.link) {
-				return addOptResult;
+			if (partResult.link) {
+				partResult.itemId = result.itemId;
+				partResult.symbol += symbolAdd;
+				return partResult;
+			}
+			if (point.y() >= tshift && point.y() < tshift + h) {
+				partResult.itemId = result.itemId;
+				partResult.symbol += symbolAdd;
+				return partResult;
 			}
 		}
-		tshift += addOptH;
-	}
-	{
-		const auto footerResult = _footerPart->textState(
-			point - QPoint(0, tshift),
-			st::msgPadding.left(),
-			paintw,
-			width(),
-			request);
-		if (footerResult.link) {
-			return footerResult;
-		}
+		symbolAdd += part->selectionLength();
+		tshift += h;
 	}
 	return result;
 }
@@ -3326,12 +3508,7 @@ void Poll::paintBubbleFireworks(
 void Poll::clickHandlerActiveChanged(
 		const ClickHandlerPtr &handler,
 		bool active) {
-	if (_attachedMediaAttach) {
-		_attachedMediaAttach->clickHandlerActiveChanged(handler, active);
-	}
-	if (_solutionAttach) {
-		_solutionAttach->clickHandlerActiveChanged(handler, active);
-	}
+	_headerPart->clickHandlerActiveChanged(handler, active);
 }
 
 void Poll::clickHandlerPressedChanged(
@@ -3339,50 +3516,20 @@ void Poll::clickHandlerPressedChanged(
 		bool pressed) {
 	if (!handler) return;
 
-	const auto i = ranges::find(
-		_answers,
-		handler,
-		&Answer::handler);
-	if (i != end(_answers)) {
-		if (canVote()) {
-			toggleRipple(*i, pressed);
-		}
-	} else {
-		_addOptionPart->clickHandlerPressedChanged(handler, pressed);
-		_footerPart->clickHandlerPressedChanged(handler, pressed);
-	}
-	if (_attachedMediaAttach) {
-		_attachedMediaAttach->clickHandlerPressedChanged(handler, pressed);
-	}
-	if (_solutionAttach) {
-		_solutionAttach->clickHandlerPressedChanged(handler, pressed);
-	}
+	_headerPart->clickHandlerPressedChanged(handler, pressed);
+	_optionsPart->clickHandlerPressedChanged(handler, pressed);
+	_addOptionPart->clickHandlerPressedChanged(handler, pressed);
+	_footerPart->clickHandlerPressedChanged(handler, pressed);
 }
 
 void Poll::unloadHeavyPart() {
-	for (auto &recent : _recentVoters) {
-		recent.userpic = {};
-	}
-	for (auto &answer : _answers) {
-		for (auto &recent : answer.recentVoters) {
-			recent.view = {};
-		}
-		answer.recentVotersImage = QImage();
-	}
+	_headerPart->unloadHeavyPart();
+	_optionsPart->unloadHeavyPart();
 }
 
 bool Poll::hasHeavyPart() const {
-	for (auto &recent : _recentVoters) {
-		if (!recent.userpic.null()) {
-			return true;
-		}
-	}
-	for (const auto &answer : _answers) {
-		if (!answer.recentVotersImage.isNull()) {
-			return true;
-		}
-	}
-	return false;
+	return _headerPart->hasHeavyPart()
+		|| _optionsPart->hasHeavyPart();
 }
 
 void Poll::toggleRipple(Answer &answer, bool pressed) {

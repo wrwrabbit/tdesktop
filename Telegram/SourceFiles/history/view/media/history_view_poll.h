@@ -76,6 +76,8 @@ public:
 
 private:
 	struct Part;
+	struct Header;
+	struct Options;
 	struct AddOption;
 	struct Footer;
 
@@ -283,6 +285,8 @@ private:
 	mutable bool _wrongAnswerAnimated = false;
 	mutable bool _adminShowResults = false;
 
+	std::unique_ptr<Header> _headerPart;
+	std::unique_ptr<Options> _optionsPart;
 	std::unique_ptr<AddOption> _addOptionPart;
 	std::unique_ptr<Footer> _footerPart;
 
