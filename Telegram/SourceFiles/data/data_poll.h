@@ -131,6 +131,9 @@ private:
 
 };
 
+[[nodiscard]] QByteArray PollOptionFromLink(const QString &value);
+[[nodiscard]] QString PollOptionToLink(const QByteArray &option);
+
 [[nodiscard]] MTPPoll PollDataToMTP(
 	not_null<const PollData*> poll,
 	bool close = false);

@@ -4988,6 +4988,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_context_reply_to_task" = "Reply to Task";
 "lng_context_reply_to_poll_option" = "Reply to Option";
 "lng_context_copy_poll_option" = "Copy Option";
+"lng_context_copy_poll_option_link" = "Copy Option Link";
 "lng_context_delete_poll_option" = "Delete Item";
 "lng_context_poll_message_tab" = "Poll";
 "lng_context_poll_option_tab" = "Option";

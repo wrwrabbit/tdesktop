@@ -491,6 +491,15 @@ PollMedia PollMediaFromInputMTP(
 	return result;
 }
 
+QByteArray PollOptionFromLink(const QString &value) {
+	return QByteArray::fromBase64(value.toLatin1());
+}
+
+QString PollOptionToLink(const QByteArray &option) {
+	return QString::fromLatin1(
+		option.toBase64(QByteArray::OmitTrailingEquals));
+}
+
 MTPPoll PollDataToMTP(not_null<const PollData*> poll, bool close) {
 	const auto convert = [&](const PollAnswer &answer) {
 		const auto flags = answer.media

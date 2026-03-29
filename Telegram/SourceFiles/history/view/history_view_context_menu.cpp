@@ -1602,6 +1602,21 @@ void FillPollOptionPage(
 			TextUtilities::SetClipboardText(text);
 		},
 		&st::menuIconCopy);
+	if (item->hasDirectLink()) {
+		const auto link = item->history()->session().api()
+			.exportDirectMessageLink(item, false);
+		const auto separator = (link.indexOf('?') >= 0) ? u'&' : u'?';
+		const auto optionLink = link
+			+ separator
+			+ u"option="_q
+			+ PollOptionToLink(pollOption);
+		menu->addAction(
+			tr::lng_context_copy_poll_option_link(tr::now),
+			[optionLink] {
+				QGuiApplication::clipboard()->setText(optionLink);
+			},
+			&st::menuIconLink);
+	}
 	const auto canDelete = [&] {
 		if (!a->addedDate) {
 			return false;

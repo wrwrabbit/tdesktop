@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_birthday.h"
 #include "data/data_channel.h"
 #include "data/data_document.h"
+#include "data/data_poll.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "media/player/media_player_instance.h"
@@ -615,6 +616,8 @@ bool ResolveUsernameOrPhone(
 	const auto threadId = topicId ? topicId : threadParam.toInt();
 	const auto gameParam = params.value(u"game"_q);
 	const auto videot = params.value(u"t"_q);
+	const auto pollOption = PollOptionFromLink(
+		params.value(u"option"_q));
 	if (params.contains(u"direct"_q)) {
 		resolveType = ResolveType::ChannelDirect;
 	}
@@ -633,6 +636,7 @@ bool ResolveUsernameOrPhone(
 		.usernameOrId = domain,
 		.phone = phone,
 		.messageId = post,
+		.pollOption = pollOption,
 		.storyParam = storyParam,
 		.storyAlbumId = storyAlbumId,
 		.giftCollectionId = giftCollectionId,
@@ -704,6 +708,8 @@ bool ResolvePrivatePost(
 	const auto topicId = topicParam.toInt();
 	const auto threadParam = params.value(u"thread"_q);
 	const auto threadId = topicId ? topicId : threadParam.toInt();
+	const auto pollOption = PollOptionFromLink(
+		params.value(u"option"_q));
 	if (!channelId || (msgId && !IsServerMsgId(msgId))) {
 		return false;
 	}
@@ -711,6 +717,7 @@ bool ResolvePrivatePost(
 	controller->showPeerByLink(Window::PeerByLinkInfo{
 		.usernameOrId = channelId,
 		.messageId = msgId,
+		.pollOption = pollOption,
 		.repliesInfo = commentId
 			? Window::RepliesByLinkInfo{
 				Window::CommentId{ commentId }
