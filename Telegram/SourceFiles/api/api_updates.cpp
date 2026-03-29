@@ -1849,7 +1849,16 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 
 	case mtpc_updateMessagePoll: {
 		const auto &d = update.c_updateMessagePoll();
+		const auto wasRecentVoters = session().data().pollRecentVoters(
+			d.vpoll_id().v);
 		session().data().applyUpdate(d);
+		const auto notifyItem = session().data().findItemForPoll(
+			d.vpoll_id().v);
+		if (notifyItem) {
+			CheckPollVoteNotificationSchedule(
+				notifyItem,
+				wasRecentVoters);
+		}
 		if (const auto tlPeer = d.vpeer()) {
 			const auto &results = d.vresults();
 			const auto hasUnread = results.match([](

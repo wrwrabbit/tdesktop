@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
 #include "data/data_message_reactions.h"
+#include "data/data_poll.h"
 #include "data/data_session.h"
 #include "data/data_stories.h"
 #include "data/data_user.h"
@@ -1191,8 +1192,39 @@ void CheckReactionNotificationSchedule(
 			}
 			const auto notification = Data::ItemNotification{
 				.item = item,
-				.reactionSender = user,
+				.reactionOrVoteSender = user,
 				.type = Data::ItemNotificationType::Reaction,
+			};
+			item->notificationThread()->pushNotification(notification);
+			Core::App().notifications().schedule(notification);
+			return;
+		}
+	}
+}
+
+void CheckPollVoteNotificationSchedule(
+		not_null<HistoryItem*> item,
+		const std::vector<not_null<PeerData*>> &wasRecentVoters) {
+	const auto media = item->media();
+	const auto poll = media ? media->poll() : nullptr;
+	if (!poll || !poll->creator()) {
+		return;
+	}
+	for (const auto &answer : poll->answers) {
+		for (const auto &voter : answer.recentVoters) {
+			const auto user = voter->asUser();
+			if (!user
+				|| ranges::contains(wasRecentVoters, voter)) {
+				continue;
+			}
+			using Status = PeerData::BlockStatus;
+			if (user->blockStatus() == Status::Unknown) {
+				user->updateFull();
+			}
+			const auto notification = Data::ItemNotification{
+				.item = item,
+				.reactionOrVoteSender = user,
+				.type = Data::ItemNotificationType::PollVote,
 			};
 			item->notificationThread()->pushNotification(notification);
 			Core::App().notifications().schedule(notification);

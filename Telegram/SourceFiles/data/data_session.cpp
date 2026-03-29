@@ -4341,6 +4341,34 @@ not_null<PollData*> Session::poll(PollId id) {
 	return i->second.get();
 }
 
+HistoryItem *Session::findItemForPoll(PollId id) const {
+	const auto i = _polls.find(id);
+	if (i == _polls.end()) {
+		return nullptr;
+	}
+	const auto j = _pollViews.find(i->second.get());
+	if (j == _pollViews.end() || j->second.empty()) {
+		return nullptr;
+	}
+	return j->second.front()->data();
+}
+
+std::vector<not_null<PeerData*>> Session::pollRecentVoters(PollId id) const {
+	auto result = std::vector<not_null<PeerData*>>();
+	const auto i = _polls.find(id);
+	if (i == _polls.end()) {
+		return result;
+	}
+	for (const auto &answer : i->second->answers) {
+		for (const auto &voter : answer.recentVoters) {
+			if (!ranges::contains(result, voter)) {
+				result.push_back(voter);
+			}
+		}
+	}
+	return result;
+}
+
 not_null<PollData*> Session::processPoll(const MTPPoll &data) {
 	return data.match([&](const MTPDpoll &data) {
 		const auto id = data.vid().v;

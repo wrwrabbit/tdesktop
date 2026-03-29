@@ -172,7 +172,7 @@ base::options::toggle HideReplyButtonOption({
 
 struct System::Waiter {
 	NotificationInHistoryKey key;
-	UserData *reactionSender = nullptr;
+	UserData *reactionOrVoteSender = nullptr;
 	Data::ItemNotificationType type = Data::ItemNotificationType::Message;
 	crl::time when = 0;
 };
@@ -266,23 +266,23 @@ Main::Session *System::findSession(uint64 sessionId) const {
 	return nullptr;
 }
 
-bool System::skipReactionNotification(not_null<HistoryItem*> item) const {
-	const auto id = ReactionNotificationId{
+bool System::skipSentNotification(
+		not_null<HistoryItem*> item,
+		base::flat_map<SentNotificationId, crl::time> &already) const {
+	const auto id = SentNotificationId{
 		.itemId = item->fullId(),
 		.sessionId = item->history()->session().uniqueId(),
 	};
 	const auto now = crl::now();
 	const auto clearBefore = now - kReactionNotificationEach;
-	for (auto i = begin(_sentReactionNotifications)
-		; i != end(_sentReactionNotifications)
-		;) {
+	for (auto i = begin(already); i != end(already);) {
 		if (i->second <= clearBefore) {
-			i = _sentReactionNotifications.erase(i);
+			i = already.erase(i);
 		} else {
 			++i;
 		}
 	}
-	return !_sentReactionNotifications.emplace(id, now).second;
+	return !already.emplace(id, now).second;
 }
 
 System::SkipState System::skipNotification(
@@ -295,7 +295,9 @@ System::SkipState System::skipNotification(
 		|| !thread->currentNotification()
 		|| (messageType && item->skipNotification())
 		|| (type == Data::ItemNotificationType::Reaction
-			&& skipReactionNotification(item))) {
+			&& skipSentNotification(item, _sentReactionNotifications))
+		|| (type == Data::ItemNotificationType::PollVote
+			&& skipSentNotification(item, _sentPollVoteNotifications))) {
 		return { SkipState::Skip };
 	}
 	return computeSkipState(notification);
@@ -324,7 +326,7 @@ System::SkipState System::computeSkipState(
 		&& item->isFromScheduled();
 	const auto notifyBy = messageType
 		? item->specialNotificationPeer()
-		: notification.reactionSender;
+		: notification.reactionOrVoteSender;
 	if (Core::Quitting()) {
 		return { SkipState::Skip };
 	} else if (!Core::App().settings().notifyFromAll()
@@ -419,7 +421,8 @@ void System::schedule(Data::ItemNotification notification) {
 	const auto ready = (skip.value != SkipState::Unknown)
 		&& item->notificationReady();
 
-	const auto minimalDelay = (type == Data::ItemNotificationType::Reaction)
+	const auto minimalDelay = (type == Data::ItemNotificationType::Reaction
+		|| type == Data::ItemNotificationType::PollVote)
 		? kMinimalDelay
 		: item->Has<HistoryMessageForwarded>()
 		? kMinimalForwardDelay
@@ -427,7 +430,7 @@ void System::schedule(Data::ItemNotification notification) {
 	const auto timing = countTiming(thread, minimalDelay);
 	const auto notifyBy = (type == Data::ItemNotificationType::Message)
 		? item->specialNotificationPeer()
-		: notification.reactionSender;
+		: notification.reactionOrVoteSender;
 	if (!skip.silent) {
 		registerThread(thread);
 		_whenAlerts[thread].emplace(timing.when, notifyBy);
@@ -452,7 +455,7 @@ void System::schedule(Data::ItemNotification notification) {
 		if (it == addTo.end() || it->second.when > timing.when) {
 			addTo.emplace(thread, Waiter{
 				.key = key,
-				.reactionSender = notification.reactionSender,
+				.reactionOrVoteSender = notification.reactionOrVoteSender,
 				.type = notification.type,
 				.when = timing.when,
 			});
@@ -632,7 +635,7 @@ void System::checkDelayed() {
 			}
 			const auto state = computeSkipState({
 				.item = item,
-				.reactionSender = i->second.reactionSender,
+				.reactionOrVoteSender = i->second.reactionOrVoteSender,
 				.type = i->second.type,
 			});
 			if (state.value == SkipState::Skip) {
@@ -923,18 +926,27 @@ void System::showNext() {
 			showGrouped();
 			const auto reactionNotification
 				= (notify->type == Data::ItemNotificationType::Reaction);
+			const auto pollVoteNotification
+				= (notify->type == Data::ItemNotificationType::PollVote);
 			const auto reaction = reactionNotification
-				? notify->item->lookupUnreadReaction(notify->reactionSender)
+				? notify->item->lookupUnreadReaction(notify->reactionOrVoteSender)
 				: Data::ReactionId();
-			const auto soundFrom = reactionNotification
-				? notify->reactionSender
+			const auto pollVoteOption = pollVoteNotification
+				? notify->item->lookupUnreadPollVote(
+					notify->reactionOrVoteSender)
+				: QByteArray();
+			const auto soundFrom = (reactionNotification
+				|| pollVoteNotification)
+				? notify->reactionOrVoteSender
 				: notify->item->specialNotificationPeer();
-			if (!reactionNotification || !reaction.empty()) {
+			if ((!reactionNotification || !reaction.empty())
+				&& (!pollVoteNotification || !pollVoteOption.isEmpty())) {
 				_manager->showNotification({
 					.item = notify->item,
 					.forwardedCount = forwardedCount,
-					.reactionFrom = notify->reactionSender,
+					.reactionFrom = notify->reactionOrVoteSender,
 					.reactionId = reaction,
+					.pollVoteOption = pollVoteOption,
 					.soundId = (notifySilent
 						? std::nullopt
 						: MaybeSoundFor(notifyThread, soundFrom)),
@@ -1187,6 +1199,32 @@ TextWithEntities Manager::ComposeReactionNotification(
 	return text();
 }
 
+TextWithEntities Manager::ComposePollVoteNotification(
+		not_null<HistoryItem*> item,
+		const QByteArray &option,
+		bool hideContent) {
+	if (hideContent) {
+		return tr::lng_poll_vote_notext(tr::now, tr::marked);
+	}
+	const auto media = item->media();
+	const auto poll = media ? media->poll() : nullptr;
+	if (!poll) {
+		return tr::lng_poll_vote_notext(tr::now, tr::marked);
+	}
+	if (const auto answer = poll->answerByOption(option)) {
+		return tr::lng_poll_vote_option(
+			tr::now,
+			lt_option,
+			answer->text,
+			tr::marked);
+	}
+	return tr::lng_poll_vote(
+		tr::now,
+		lt_title,
+		poll->question,
+		tr::marked);
+}
+
 TextWithEntities Manager::addTargetAccountName(
 		TextWithEntities title,
 		not_null<Main::Session*> session) {
@@ -1411,11 +1449,13 @@ void Manager::maybePlaySound(Fn<void()> playSound) {
 }
 
 void NativeManager::doShowNotification(NotificationFields &&fields) {
-	const auto options = getNotificationOptions(
-		fields.item,
-		(fields.reactionFrom
-			? Data::ItemNotificationType::Reaction
-			: Data::ItemNotificationType::Message));
+	const auto pollVote = !fields.pollVoteOption.isEmpty();
+	const auto type = fields.reactionFrom
+		? (pollVote
+			? Data::ItemNotificationType::PollVote
+			: Data::ItemNotificationType::Reaction)
+		: Data::ItemNotificationType::Message;
+	const auto options = getNotificationOptions(fields.item, type);
 	const auto item = fields.item;
 	const auto peer = item->history()->peer;
 	const auto reactionFrom = fields.reactionFrom;
@@ -1447,7 +1487,12 @@ void NativeManager::doShowNotification(NotificationFields &&fields) {
 		: options.hideNameAndPhoto
 		? QString()
 		: item->notificationHeader();
-	const auto text = reactionFrom
+	const auto text = pollVote
+		? TextWithPermanentSpoiler(ComposePollVoteNotification(
+			item,
+			fields.pollVoteOption,
+			options.hideMessageText))
+		: reactionFrom
 		? TextWithPermanentSpoiler(ComposeReactionNotification(
 			item,
 			fields.reactionId,

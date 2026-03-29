@@ -612,6 +612,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_reaction_invoice" = "{reaction} to your invoice";
 "lng_reaction_gif" = "{reaction} to your GIF";
 
+"lng_poll_vote_option" = "voted for \"{option}\" in your poll";
+"lng_poll_vote" = "voted in your poll \"{title}\"";
+"lng_poll_vote_notext" = "voted in your poll";
+
 "lng_effect_add_title" = "Add an animated effect";
 "lng_effect_stickers_title" = "Effects from stickers";
 "lng_effect_send" = "Send with Effect";

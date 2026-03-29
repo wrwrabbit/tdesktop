@@ -43,11 +43,12 @@ class PeerNotifySettings;
 enum class ItemNotificationType {
 	Message,
 	Reaction,
+	PollVote,
 };
 
 struct ItemNotification {
 	not_null<HistoryItem*> item;
-	UserData *reactionSender = nullptr;
+	UserData *reactionOrVoteSender = nullptr;
 	ItemNotificationType type = ItemNotificationType::Message;
 
 	friend inline auto operator<=>(

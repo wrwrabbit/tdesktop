@@ -3268,6 +3268,21 @@ Data::ReactionId HistoryItem::lookupUnreadReaction(
 	return {};
 }
 
+QByteArray HistoryItem::lookupUnreadPollVote(
+		not_null<PeerData*> from) const {
+	const auto m = media();
+	const auto poll = m ? m->poll() : nullptr;
+	if (!poll) {
+		return {};
+	}
+	for (const auto &answer : poll->answers) {
+		if (ranges::contains(answer.recentVoters, from)) {
+			return answer.option;
+		}
+	}
+	return {};
+}
+
 crl::time HistoryItem::lastReactionsRefreshTime() const {
 	return _reactionsLastRefreshed;
 }
