@@ -76,6 +76,7 @@ public:
 
 private:
 	struct Part;
+	struct AddOption;
 	struct Footer;
 
 	struct AnswerAnimation;
@@ -193,7 +194,6 @@ private:
 	void radialAnimationCallback() const;
 
 	void toggleRipple(Answer &answer, bool pressed);
-	void toggleAddOptionRipple(bool pressed);
 	void toggleMultiOption(const QByteArray &option);
 	void sendMultiOptions();
 	void showResults();
@@ -222,13 +222,6 @@ private:
 		const PaintContext &context) const;
 
 	[[nodiscard]] bool canAddOption() const;
-	[[nodiscard]] int addOptionHeight() const;
-	void paintAddOption(
-		Painter &p,
-		int left,
-		int top,
-		int paintw,
-		const PaintContext &context) const;
 
 	[[nodiscard]] QString closeTimerText() const;
 	[[nodiscard]] bool timerFooterMultiline(int paintw) const;
@@ -290,6 +283,7 @@ private:
 	mutable bool _wrongAnswerAnimated = false;
 	mutable bool _adminShowResults = false;
 
+	std::unique_ptr<AddOption> _addOptionPart;
 	std::unique_ptr<Footer> _footerPart;
 
 };
