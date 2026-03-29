@@ -1521,11 +1521,16 @@ struct Poll::Options : public Poll::Part {
 };
 
 int Poll::Options::countHeight(int innerWidth) const {
-	return ranges::accumulate(ranges::views::all(
+	auto result = ranges::accumulate(ranges::views::all(
 		_answers
 	) | ranges::views::transform([&](const Answer &answer) {
 		return countAnswerHeight(answer, innerWidth);
 	}), 0);
+	if (_owner->canAddOption()) {
+		result += (st::historyPollChoiceRight.height()
+			- st::historyPollFillingHeight) / 2;
+	}
+	return result;
 }
 
 void Poll::Options::draw(
@@ -1871,7 +1876,9 @@ QRect Poll::addOptionRect(int innerWidth) const {
 		+ st::historyPollSubtitleSkip
 		+ st::msgDateFont->height
 		+ st::historyPollAnswersSkip
-		+ answersHeight;
+		+ answersHeight
+		+ (st::historyPollChoiceRight.height()
+			- st::historyPollFillingHeight) / 2;
 	return QRect(
 		st::msgPadding.left(),
 		top,
