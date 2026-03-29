@@ -109,53 +109,10 @@ private:
 	bool _voted = false;
 	PollData::Flags _flags = PollData::Flags();
 
-	Ui::Text::String _description;
-	Ui::Text::String _question;
-	Ui::Text::String _subtitle;
-	std::unique_ptr<AttachedMedia> _attachedMedia;
-	std::unique_ptr<Media> _attachedMediaAttach;
-	mutable QImage _attachedMediaCache;
-	mutable Ui::BubbleRounding _attachedMediaCacheRounding;
-	std::vector<RecentVoter> _recentVoters;
-	QImage _recentVotersImage;
-
-	std::vector<Answer> _answers;
-	Ui::Text::String _totalVotesLabel;
-	Ui::Text::String _adminVotesLabel;
-	Ui::Text::String _adminBackVoteLabel;
-	ClickHandlerPtr _showResultsLink;
-	ClickHandlerPtr _sendVotesLink;
-	ClickHandlerPtr _adminVotesLink;
-	ClickHandlerPtr _adminBackVoteLink;
-	ClickHandlerPtr _addOptionLink;
-	ClickHandlerPtr _saveOptionLink;
-	mutable ClickHandlerPtr _showSolutionLink;
-	mutable std::unique_ptr<Ui::RippleAnimation> _addOptionRipple;
-	mutable std::unique_ptr<Ui::RippleAnimation> _linkRipple;
-	mutable int _linkRippleShift = 0;
-
-	mutable std::unique_ptr<AnswersAnimation> _answersAnimation;
-	mutable std::unique_ptr<SendingAnimation> _sendingAnimation;
 	mutable std::unique_ptr<Ui::FireworksAnimation> _fireworksAnimation;
 	Ui::Animations::Simple _wrongAnswerAnimation;
 	mutable QPoint _lastLinkPoint;
-	mutable QImage _userpicCircleCache;
-	mutable QImage _fillingIconCache;
 
-	mutable base::Timer _closeTimer;
-
-	mutable Ui::Animations::Simple _solutionButtonAnimation;
-	mutable bool _solutionShown = false;
-	mutable bool _solutionButtonVisible = false;
-
-	Ui::Text::String _solutionText;
-	mutable ClickHandlerPtr _closeSolutionLink;
-	std::unique_ptr<SolutionMedia> _solutionMedia;
-	std::unique_ptr<Media> _solutionAttach;
-
-	bool _hasSelected = false;
-	bool _anyAnswerHasMedia = false;
-	bool _votedFromHere = false;
 	bool _addOptionActive = false;
 	mutable bool _wrongAnswerAnimated = false;
 	mutable bool _adminShowResults = false;
