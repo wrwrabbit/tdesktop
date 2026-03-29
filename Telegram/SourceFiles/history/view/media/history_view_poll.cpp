@@ -579,6 +579,20 @@ void Poll::Footer::draw(
 
 	const auto stringtop = textTop();
 
+	if (_linkRipple) {
+		const auto rippleTop = topSkip();
+		p.setOpacity(st::historyPollRippleOpacity);
+		_linkRipple->paint(
+			p,
+			left - st::msgPadding.left() - _linkRippleShift,
+			rippleTop,
+			outerWidth,
+			&stm->msgWaveformInactive->c);
+		if (_linkRipple->empty()) {
+			_linkRipple.reset();
+		}
+		p.setOpacity(1.);
+	}
 	if (_owner->_addOptionActive) {
 		p.setFont(st::semiboldFont);
 		p.setPen(stm->msgFileThumbLinkFg);
@@ -624,6 +638,7 @@ void Poll::Footer::draw(
 			backw,
 			outerWidth);
 	} else if (_owner->showVotersCount()) {
+		_linkRipple.reset();
 		p.setPen(stm->msgDateFg);
 		const auto timerText = closeTimerText();
 		if (timerText.isEmpty()) {
@@ -674,20 +689,6 @@ void Poll::Footer::draw(
 			: _owner->canSendVotes()
 			? _sendVotesLink
 			: nullptr;
-		if (_linkRipple) {
-			const auto rippleTop = topSkip();
-			p.setOpacity(st::historyPollRippleOpacity);
-			_linkRipple->paint(
-				p,
-				left - st::msgPadding.left() - _linkRippleShift,
-				rippleTop,
-				outerWidth,
-				&stm->msgWaveformInactive->c);
-			if (_linkRipple->empty()) {
-				_linkRipple.reset();
-			}
-			p.setOpacity(1.);
-		}
 		p.setFont(st::semiboldFont);
 		p.setPen(link ? stm->msgFileThumbLinkFg : stm->msgDateFg);
 		const auto string = (_owner->showVotes() || votedPublic)
