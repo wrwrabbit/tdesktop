@@ -1595,62 +1595,15 @@ int HistoryWidget::itemTopForHighlight(
 	const auto heightLeft = (visibleAreaHeight - viewHeight);
 	if (heightLeft >= 0) {
 		return std::max(itemTop - (heightLeft / 2), 0);
-	} else if (const auto highlight = itemHighlight(item)
-		; (!highlight.range.empty()
-			|| highlight.todoItemId
-			|| !highlight.pollOption.isEmpty())
-			&& !IsSubGroupSelection(highlight.range)) {
-		const auto sel = highlight.range;
-		const auto single = st::messageTextStyle.font->height;
-		const auto todoy = sel.empty()
-			? (highlight.todoItemId
-				? HistoryView::FindViewTaskY(view, highlight.todoItemId)
-				: !highlight.pollOption.isEmpty()
-				? HistoryView::FindViewPollOptionY(view, highlight.pollOption)
-				: 0)
-			: 0;
-		const auto begin = sel.empty()
-			? (todoy - 4 * single)
-			: HistoryView::FindViewY(view, sel.from) - single;
-		const auto end = sel.empty()
-			? (todoy + 4 * single)
-			: (HistoryView::FindViewY(view, sel.to, begin + single)
-				+ 2 * single);
-		auto result = itemTop;
-		if (end > visibleAreaHeight) {
-			result = std::max(result, itemTop + end - visibleAreaHeight);
-		}
-		if (itemTop + begin < result) {
-			result = itemTop + begin;
-		}
-		return result;
-	} else if (IsSubGroupSelection(highlight.range)) {
-		if (const auto media = view->media()) {
-			for (auto i = 0; i != 15; ++i) {
-				if (!IsGroupItemSelection(highlight.range, i)) {
-					continue;
-				}
-				const auto rect = media->groupItemRect(i);
-				if (rect.isEmpty()) {
-					break;
-				}
-				const auto inner = view->innerGeometry();
-				const auto single = st::messageTextStyle.font->height;
-				const auto begin = inner.y() + rect.y() - 2 * single;
-				const auto end = inner.y() + rect.y()
-					+ rect.height() + 2 * single;
-				auto result = itemTop;
-				if (end > visibleAreaHeight) {
-					result = std::max(
-						result,
-						itemTop + end - visibleAreaHeight);
-				}
-				if (itemTop + begin < result) {
-					result = itemTop + begin;
-				}
-				return result;
-			}
-		}
+	}
+	const auto highlight = itemHighlight(item);
+	if (const auto range = HistoryView::FindHighlightYRange(
+			view,
+			highlight)) {
+		return HistoryView::AdjustScrollForRange(
+			itemTop,
+			visibleAreaHeight,
+			range);
 	} else if (reactionCenter >= 0) {
 		const auto maxSize = st::reactionInlineImage;
 

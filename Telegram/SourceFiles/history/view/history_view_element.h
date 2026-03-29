@@ -34,6 +34,7 @@ namespace Ui {
 class PathShiftGradient;
 struct BubblePattern;
 struct ChatPaintContext;
+struct ChatPaintHighlight;
 class ChatStyle;
 struct ReactionFlyAnimationArgs;
 class ReactionFlyAnimation;
@@ -806,6 +807,24 @@ private:
 	not_null<Element*> view,
 	const QByteArray &option,
 	int yfrom = 0);
+
+struct HighlightYRange {
+	int begin = 0;
+	int end = 0;
+
+	explicit operator bool() const {
+		return begin != end;
+	}
+};
+
+[[nodiscard]] HighlightYRange FindHighlightYRange(
+	not_null<Element*> view,
+	const Ui::ChatPaintHighlight &highlight);
+
+[[nodiscard]] int AdjustScrollForRange(
+	int viewTop,
+	int available,
+	HighlightYRange range);
 
 [[nodiscard]] Window::SessionController *ExtractController(
 	const ClickContext &context);

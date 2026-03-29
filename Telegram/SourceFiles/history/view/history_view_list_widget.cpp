@@ -769,60 +769,10 @@ std::optional<int> ListWidget::scrollTopForView(
 	const auto heightLeft = (available - height);
 	if (heightLeft >= 0) {
 		return std::max(top - (heightLeft / 2), 0);
-	} else if (const auto highlight = _highlighter.state(view->data())
-		; (!highlight.range.empty()
-			|| highlight.todoItemId
-			|| !highlight.pollOption.isEmpty())
-		&& !IsSubGroupSelection(highlight.range)) {
-		const auto sel = highlight.range;
-		const auto single = st::messageTextStyle.font->height;
-		const auto todoy = sel.empty()
-			? (highlight.todoItemId
-				? HistoryView::FindViewTaskY(view, highlight.todoItemId)
-				: !highlight.pollOption.isEmpty()
-				? HistoryView::FindViewPollOptionY(view, highlight.pollOption)
-				: 0)
-			: 0;
-		const auto begin = sel.empty()
-			? (todoy - 4 * single)
-			: HistoryView::FindViewY(view, sel.from) - single;
-		const auto end = sel.empty()
-			? (todoy + 4 * single)
-			: (HistoryView::FindViewY(view, sel.to, begin + single)
-				+ 2 * single);
-		auto result = top;
-		if (end > available) {
-			result = std::max(result, top + end - available);
-		}
-		if (top + begin < result) {
-			result = top + begin;
-		}
-		return result;
-	} else if (IsSubGroupSelection(highlight.range)) {
-		if (const auto media = view->media()) {
-			for (auto i = 0; i != 15; ++i) {
-				if (!IsGroupItemSelection(highlight.range, i)) {
-					continue;
-				}
-				const auto rect = media->groupItemRect(i);
-				if (rect.isEmpty()) {
-					break;
-				}
-				const auto inner = view->innerGeometry();
-				const auto single = st::messageTextStyle.font->height;
-				const auto begin = inner.y() + rect.y() - 2 * single;
-				const auto end = inner.y() + rect.y()
-					+ rect.height() + 2 * single;
-				auto result = top;
-				if (end > available) {
-					result = std::max(result, top + end - available);
-				}
-				if (top + begin < result) {
-					result = top + begin;
-				}
-				return result;
-			}
-		}
+	}
+	const auto highlight = _highlighter.state(view->data());
+	if (const auto range = FindHighlightYRange(view, highlight)) {
+		return AdjustScrollForRange(top, available, range);
 	}
 	return top;
 }
