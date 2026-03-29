@@ -667,7 +667,9 @@ void Poll::Footer::draw(
 				fullw);
 		}
 	} else {
-		const auto link = _owner->showVotes()
+		const auto votedPublic = _owner->_voted
+			&& (_owner->_flags & PollData::Flag::PublicVotes);
+		const auto link = (_owner->showVotes() || votedPublic)
 			? _showResultsLink
 			: _owner->canSendVotes()
 			? _sendVotesLink
@@ -688,7 +690,7 @@ void Poll::Footer::draw(
 		}
 		p.setFont(st::semiboldFont);
 		p.setPen(link ? stm->msgFileThumbLinkFg : stm->msgDateFg);
-		const auto string = _owner->showVotes()
+		const auto string = (_owner->showVotes() || votedPublic)
 			? ((_owner->_flags & PollData::Flag::PublicVotes)
 				? tr::lng_polls_view_votes(
 					tr::now,
@@ -745,7 +747,9 @@ TextState Poll::Footer::textState(
 	} else if (_owner->_adminShowResults && _owner->isAuthorNotVoted()) {
 		result.link = _adminBackVoteLink;
 	} else if (!_owner->showVotersCount()) {
-		result.link = _owner->showVotes()
+		const auto votedPublic = _owner->_voted
+			&& (_owner->_flags & PollData::Flag::PublicVotes);
+		result.link = (_owner->showVotes() || votedPublic)
 			? _showResultsLink
 			: _owner->canSendVotes()
 			? _sendVotesLink
@@ -1836,7 +1840,7 @@ bool Poll::canSendVotes() const {
 
 bool Poll::showVotersCount() const {
 	if (_voted && !showVotes()) {
-		return true;
+		return !(_flags & PollData::Flag::PublicVotes);
 	}
 	return showVotes()
 		? (!_totalVotes || !(_flags & PollData::Flag::PublicVotes))
