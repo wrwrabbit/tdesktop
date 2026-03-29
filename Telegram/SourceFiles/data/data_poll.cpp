@@ -368,6 +368,43 @@ bool PollData::creator() const {
 	return (_flags & Flag::Creator);
 }
 
+QString PollData::debugString() const {
+	auto result = QString();
+	result += u"Poll #"_q + QString::number(id) + u'\n';
+	result += u"Q: "_q + question.text + u'\n';
+	if (quiz()) {
+		result += u"[Quiz]"_q;
+	}
+	if (multiChoice()) {
+		result += u"[MultiChoice]"_q;
+	}
+	if (closed()) {
+		result += u"[Closed]"_q;
+	}
+	if (publicVotes()) {
+		result += u"[PublicVotes]"_q;
+	}
+	if (!result.endsWith(u'\n')) {
+		result += u'\n';
+	}
+	result += u"Total voters: "_q + QString::number(totalVoters) + u'\n';
+	for (const auto &answer : answers) {
+		result += u"  - "_q + answer.text.text
+			+ u" ["_q + QString::number(answer.votes) + u" votes"_q;
+		if (answer.chosen) {
+			result += u", chosen"_q;
+		}
+		if (answer.correct) {
+			result += u", correct"_q;
+		}
+		result += u"]\n"_q;
+	}
+	if (!solution.text.isEmpty()) {
+		result += u"Solution: "_q + solution.text + u'\n';
+	}
+	return result;
+}
+
 MTPInputMedia PollMediaToMTP(const PollMedia &media) {
 	if (media.photo) {
 		return MTP_inputMediaPhoto(

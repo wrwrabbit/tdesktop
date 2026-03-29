@@ -102,6 +102,8 @@ struct PollData {
 	[[nodiscard]] bool hideResultsUntilClose() const;
 	[[nodiscard]] bool creator() const;
 
+	[[nodiscard]] QString debugString() const;
+
 	PollId id = 0;
 	TextWithEntities question;
 	std::vector<PollAnswer> answers;

@@ -52,6 +52,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/crc32hash.h"
 #include "base/unixtime.h"
 #include "base/timer.h"
+#include "base/qt/qt_key_modifiers.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "apiwrap.h"
@@ -2525,6 +2526,11 @@ ClickHandlerPtr Poll::Options::createAnswerClickHandler(
 	auto result = ClickHandlerPtr();
 	if (_owner->_flags & PollData::Flag::MultiChoice) {
 		result = std::make_shared<LambdaClickHandler>(crl::guard(this, [=] {
+			if (Logs::DebugEnabled() && base::IsCtrlPressed()) {
+				TextUtilities::SetClipboardText(
+					TextForMimeData::Simple(_owner->_poll->debugString()));
+				return;
+			}
 			if (_owner->canVote()) {
 				toggleMultiOption(option);
 			} else if (_owner->showVotes()) {
@@ -2533,6 +2539,11 @@ ClickHandlerPtr Poll::Options::createAnswerClickHandler(
 		}));
 	} else {
 		result = std::make_shared<LambdaClickHandler>(crl::guard(this, [=] {
+			if (Logs::DebugEnabled() && base::IsCtrlPressed()) {
+				TextUtilities::SetClipboardText(
+					TextForMimeData::Simple(_owner->_poll->debugString()));
+				return;
+			}
 			if (_owner->canVote()) {
 				_votedFromHere = true;
 				_owner->history()->session().api().polls().sendVotes(
