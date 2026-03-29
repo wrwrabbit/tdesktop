@@ -408,7 +408,7 @@ struct Poll::RecentVoter {
 	mutable Ui::PeerUserpicView userpic;
 };
 
-struct Poll::Part : public base::has_weak_ptr {
+struct Poll::Part {
 	explicit Part(not_null<Poll*> owner) : _owner(owner) {}
 	virtual ~Part() = default;
 
@@ -2452,7 +2452,7 @@ void Poll::Options::updateAnswers() {
 		.repaint = [=] { _owner->repaint(); },
 		.customEmojiLoopLimit = 2,
 	});
-	const auto repaintThumbnail = crl::guard(this, [=] { _owner->repaint(); });
+	const auto repaintThumbnail = crl::guard(_owner, [=] { _owner->repaint(); });
 	const auto item = _owner->_parent->data();
 	const auto messageContext = Window::SessionController::MessageContext{
 		.id = item->fullId(),
@@ -2530,32 +2530,32 @@ ClickHandlerPtr Poll::Options::createAnswerClickHandler(
 	const auto option = answer.option;
 	auto result = ClickHandlerPtr();
 	if (_owner->_flags & PollData::Flag::MultiChoice) {
-		result = std::make_shared<LambdaClickHandler>(crl::guard(this, [=] {
+		result = std::make_shared<LambdaClickHandler>(crl::guard(_owner, [=] {
 			if (Logs::DebugEnabled() && base::IsCtrlPressed()) {
 				TextUtilities::SetClipboardText(
 					TextForMimeData::Simple(_owner->_poll->debugString()));
 				return;
 			}
 			if (_owner->canVote()) {
-				toggleMultiOption(option);
+				_owner->_optionsPart->toggleMultiOption(option);
 			} else if (_owner->showVotes()) {
-				showAnswerVotesTooltip(option);
+				_owner->_optionsPart->showAnswerVotesTooltip(option);
 			}
 		}));
 	} else {
-		result = std::make_shared<LambdaClickHandler>(crl::guard(this, [=] {
+		result = std::make_shared<LambdaClickHandler>(crl::guard(_owner, [=] {
 			if (Logs::DebugEnabled() && base::IsCtrlPressed()) {
 				TextUtilities::SetClipboardText(
 					TextForMimeData::Simple(_owner->_poll->debugString()));
 				return;
 			}
 			if (_owner->canVote()) {
-				_votedFromHere = true;
+				_owner->_optionsPart->_votedFromHere = true;
 				_owner->history()->session().api().polls().sendVotes(
 					_owner->_parent->data()->fullId(),
 					{ option });
 			} else if (_owner->showVotes()) {
-				showAnswerVotesTooltip(option);
+				_owner->_optionsPart->showAnswerVotesTooltip(option);
 			}
 		}));
 	}
