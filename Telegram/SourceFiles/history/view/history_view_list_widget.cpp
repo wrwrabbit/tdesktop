@@ -798,6 +798,31 @@ std::optional<int> ListWidget::scrollTopForView(
 			result = top + begin;
 		}
 		return result;
+	} else if (IsSubGroupSelection(highlight.range)) {
+		if (const auto media = view->media()) {
+			for (auto i = 0; i != 15; ++i) {
+				if (!IsGroupItemSelection(highlight.range, i)) {
+					continue;
+				}
+				const auto rect = media->groupItemRect(i);
+				if (rect.isEmpty()) {
+					break;
+				}
+				const auto inner = view->innerGeometry();
+				const auto single = st::messageTextStyle.font->height;
+				const auto begin = inner.y() + rect.y() - 2 * single;
+				const auto end = inner.y() + rect.y()
+					+ rect.height() + 2 * single;
+				auto result = top;
+				if (end > available) {
+					result = std::max(result, top + end - available);
+				}
+				if (top + begin < result) {
+					result = top + begin;
+				}
+				return result;
+			}
+		}
 	}
 	return top;
 }
@@ -966,10 +991,11 @@ bool ListWidget::showAtPositionNow(
 	}
 	if (position != Data::MaxMessagePosition
 		&& position != Data::UnreadMessagePosition) {
-		const auto hasHighlight = !params.highlight.empty();
+		const auto item = session().data().message(position.fullId);
+		const auto mayScrollToPart = !params.highlight.empty()
+			|| (item && item->groupId());
 		highlightMessage(position.fullId, params.highlight);
-		if (hasHighlight) {
-			// We may want to scroll to a different part of the message.
+		if (mayScrollToPart) {
 			scrollTop = scrollTopForPosition(position);
 			Assert(scrollTop.has_value());
 		}

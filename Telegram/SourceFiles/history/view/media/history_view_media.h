@@ -141,6 +141,9 @@ public:
 		const PaintContext &context,
 		int top) const {
 	}
+	[[nodiscard]] virtual QRect groupItemRect(int index) const {
+		return {};
+	}
 	virtual void draw(Painter &p, const PaintContext &context) const = 0;
 	[[nodiscard]] virtual PointState pointState(QPoint point) const;
 	[[nodiscard]] virtual TextState textState(

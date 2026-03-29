@@ -1624,6 +1624,33 @@ int HistoryWidget::itemTopForHighlight(
 			result = itemTop + begin;
 		}
 		return result;
+	} else if (IsSubGroupSelection(highlight.range)) {
+		if (const auto media = view->media()) {
+			for (auto i = 0; i != 15; ++i) {
+				if (!IsGroupItemSelection(highlight.range, i)) {
+					continue;
+				}
+				const auto rect = media->groupItemRect(i);
+				if (rect.isEmpty()) {
+					break;
+				}
+				const auto inner = view->innerGeometry();
+				const auto single = st::messageTextStyle.font->height;
+				const auto begin = inner.y() + rect.y() - 2 * single;
+				const auto end = inner.y() + rect.y()
+					+ rect.height() + 2 * single;
+				auto result = itemTop;
+				if (end > visibleAreaHeight) {
+					result = std::max(
+						result,
+						itemTop + end - visibleAreaHeight);
+				}
+				if (itemTop + begin < result) {
+					result = itemTop + begin;
+				}
+				return result;
+			}
+		}
 	} else if (reactionCenter >= 0) {
 		const auto maxSize = st::reactionInlineImage;
 
