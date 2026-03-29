@@ -165,6 +165,8 @@ PRIVATE
     api/api_premium.h
     api/api_premium_option.cpp
     api/api_premium_option.h
+    api/api_reactions_notify_settings.cpp
+    api/api_reactions_notify_settings.h
     api/api_read_metrics.cpp
     api/api_read_metrics.h
     api/api_report.cpp

@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_self_destruct.h"
 #include "api/api_sensitive_content.h"
 #include "api/api_global_privacy.h"
+#include "api/api_reactions_notify_settings.h"
 #include "api/api_updates.h"
 #include "api/api_user_privacy.h"
 #include "api/api_read_metrics.h"
@@ -179,6 +180,8 @@ ApiWrap::ApiWrap(not_null<Main::Session*> session)
 , _selfDestruct(std::make_unique<Api::SelfDestruct>(this))
 , _sensitiveContent(std::make_unique<Api::SensitiveContent>(this))
 , _globalPrivacy(std::make_unique<Api::GlobalPrivacy>(this))
+, _reactionsNotifySettings(
+	std::make_unique<Api::ReactionsNotifySettings>(this))
 , _userPrivacy(std::make_unique<Api::UserPrivacy>(this))
 , _inviteLinks(std::make_unique<Api::InviteLinks>(this))
 , _chatLinks(std::make_unique<Api::ChatLinks>(this))
@@ -207,6 +210,7 @@ ApiWrap::ApiWrap(not_null<Main::Session*> session)
 			requestMoreDialogsIfNeeded();
 		}, _session->lifetime());
 
+		_reactionsNotifySettings->reload();
 		setupSupportMode();
 	});
 }
@@ -4966,6 +4970,10 @@ Api::SensitiveContent &ApiWrap::sensitiveContent() {
 
 Api::GlobalPrivacy &ApiWrap::globalPrivacy() {
 	return *_globalPrivacy;
+}
+
+Api::ReactionsNotifySettings &ApiWrap::reactionsNotifySettings() {
+	return *_reactionsNotifySettings;
 }
 
 Api::UserPrivacy &ApiWrap::userPrivacy() {

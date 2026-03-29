@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "core/application.h"
 #include "mainwindow.h"
+#include "api/api_reactions_notify_settings.h"
 #include "api/api_updates.h"
 #include "apiwrap.h"
 #include "main/main_account.h"
@@ -1482,8 +1483,13 @@ void NativeManager::doShowNotification(NotificationFields &&fields) {
 		? tr::lng_notification_reminder(tr::now)
 		: subWithChat();
 	const auto fullTitle = addTargetAccountName(title, &peer->session());
+	const auto hideReactionSender = reactionFrom
+		&& !peer->session().api().reactionsNotifySettings()
+			.showPreviewsCurrent();
 	const auto subtitle = reactionFrom
-		? (reactionFrom != peer ? reactionFrom->name() : QString())
+		? ((!hideReactionSender && reactionFrom != peer)
+			? reactionFrom->name()
+			: QString())
 		: options.hideNameAndPhoto
 		? QString()
 		: item->notificationHeader();

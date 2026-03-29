@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_item_helpers.h"
 
+#include "api/api_reactions_notify_settings.h"
 #include "api/api_text_entities.h"
 #include "boxes/premium_preview_box.h"
 #include "calls/calls_instance.h"
@@ -1175,15 +1176,22 @@ void CheckReactionNotificationSchedule(
 	if (!item->hasUnreadReaction()) {
 		return;
 	}
+	const auto from = item->history()->session().api()
+		.reactionsNotifySettings().messagesFromCurrent();
+	if (from == Api::ReactionsNotifyFrom::None) {
+		return;
+	}
 	for (const auto &[emoji, reactions] : item->recentReactions()) {
 		for (const auto &reaction : reactions) {
 			if (!reaction.unread) {
 				continue;
 			}
 			const auto user = reaction.peer->asUser();
-			if (!user
-				|| !user->isContact()
-				|| ranges::contains(wasUsers, user)) {
+			if (!user || ranges::contains(wasUsers, user)) {
+				continue;
+			}
+			if (from == Api::ReactionsNotifyFrom::Contacts
+				&& !user->isContact()) {
 				continue;
 			}
 			using Status = PeerData::BlockStatus;
@@ -1210,11 +1218,19 @@ void CheckPollVoteNotificationSchedule(
 	if (!poll || !poll->creator()) {
 		return;
 	}
+	const auto from = item->history()->session().api()
+		.reactionsNotifySettings().pollVotesFromCurrent();
+	if (from == Api::ReactionsNotifyFrom::None) {
+		return;
+	}
 	for (const auto &answer : poll->answers) {
 		for (const auto &voter : answer.recentVoters) {
 			const auto user = voter->asUser();
-			if (!user
-				|| ranges::contains(wasRecentVoters, voter)) {
+			if (!user || ranges::contains(wasRecentVoters, voter)) {
+				continue;
+			}
+			if (from == Api::ReactionsNotifyFrom::Contacts
+				&& !user->isContact()) {
 				continue;
 			}
 			using Status = PeerData::BlockStatus;

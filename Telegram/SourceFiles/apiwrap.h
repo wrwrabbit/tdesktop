@@ -69,6 +69,7 @@ class CloudPassword;
 class SelfDestruct;
 class SensitiveContent;
 class GlobalPrivacy;
+class ReactionsNotifySettings;
 class UserPrivacy;
 class InviteLinks;
 class ChatLinks;
@@ -412,6 +413,7 @@ public:
 	[[nodiscard]] Api::SelfDestruct &selfDestruct();
 	[[nodiscard]] Api::SensitiveContent &sensitiveContent();
 	[[nodiscard]] Api::GlobalPrivacy &globalPrivacy();
+	[[nodiscard]] Api::ReactionsNotifySettings &reactionsNotifySettings();
 	[[nodiscard]] Api::UserPrivacy &userPrivacy();
 	[[nodiscard]] Api::InviteLinks &inviteLinks();
 	[[nodiscard]] Api::ChatLinks &chatLinks();
@@ -772,6 +774,7 @@ private:
 	const std::unique_ptr<Api::SelfDestruct> _selfDestruct;
 	const std::unique_ptr<Api::SensitiveContent> _sensitiveContent;
 	const std::unique_ptr<Api::GlobalPrivacy> _globalPrivacy;
+	const std::unique_ptr<Api::ReactionsNotifySettings> _reactionsNotifySettings;
 	const std::unique_ptr<Api::UserPrivacy> _userPrivacy;
 	const std::unique_ptr<Api::InviteLinks> _inviteLinks;
 	const std::unique_ptr<Api::ChatLinks> _chatLinks;
