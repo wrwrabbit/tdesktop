@@ -2766,7 +2766,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	const auto updateQuizDependentLocks = [=](bool checked) {
 		updateAddOptionsLocked();
 		revoting->setToggleLocked(
-			(_disabled & PollData::Flag::RevotingDisabled) || checked);
+			_disabled & PollData::Flag::RevotingDisabled);
 	};
 	quiz->setToggleLocked(_disabled & PollData::Flag::Quiz);
 	shuffle->setToggleLocked(_disabled & PollData::Flag::ShuffleAnswers);
