@@ -7983,10 +7983,9 @@ bool HistoryWidget::replyToPreviousMessage() {
 		|| (_replyTo && _replyTo.messageId.peer != _history->peer->id)) {
 		return false;
 	}
-	const auto isFieldVisible = _field->isVisible();
 	const auto fullId = FullMsgId(
 		_history->peer->id,
-		((isFieldVisible && _replyTo.messageId.msg)
+		(_field->isVisible()
 			? _replyTo.messageId.msg
 			: _highlighter.latestSingleHighlightedMsgId()));
 	if (const auto item = session().data().message(fullId)) {
@@ -7994,12 +7993,8 @@ bool HistoryWidget::replyToPreviousMessage() {
 			if (const auto previousView = view->previousDisplayedInBlocks()) {
 				const auto previous = previousView->data();
 				controller()->showMessage(previous);
-				if (isFieldVisible) {
-					if (previous->isLocal()) {
-						cancelReply(false, true);
-					} else {
-						replyToMessage(previous);
-					}
+				if (_field->isVisible()) {
+					replyToMessage(previous);
 				}
 				return true;
 			}
@@ -8007,12 +8002,8 @@ bool HistoryWidget::replyToPreviousMessage() {
 	} else if (const auto previousView = _history->findLastDisplayed()) {
 		const auto previous = previousView->data();
 		controller()->showMessage(previous);
-		if (isFieldVisible) {
-			if (previous->isLocal()) {
-				cancelReply();
-			} else {
-				replyToMessage(previous);
-			}
+		if (_field->isVisible()) {
+			replyToMessage(previous);
 		}
 		return true;
 	}
@@ -8026,10 +8017,9 @@ bool HistoryWidget::replyToNextMessage() {
 		|| (_replyTo && _replyTo.messageId.peer != _history->peer->id)) {
 		return false;
 	}
-	const auto isFieldVisible = _field->isVisible();
 	const auto fullId = FullMsgId(
 		_history->peer->id,
-		((isFieldVisible && _replyTo.messageId.msg)
+		(_field->isVisible()
 			? _replyTo.messageId.msg
 			: _highlighter.latestSingleHighlightedMsgId()));
 	if (const auto item = session().data().message(fullId)) {
@@ -8037,14 +8027,11 @@ bool HistoryWidget::replyToNextMessage() {
 			if (const auto nextView = view->nextDisplayedInBlocks()) {
 				const auto next = nextView->data();
 				controller()->showMessage(next);
-				if (isFieldVisible) {
-					if (next->isLocal()) {
-						cancelReply(false, true);
-					} else {
-						replyToMessage(next);
-					}
+				if (_field->isVisible()) {
+					replyToMessage(next);
 				}
 			} else {
+				_highlighter.clear();
 				cancelReply(false);
 			}
 			return true;
@@ -9211,9 +9198,7 @@ bool HistoryWidget::cancelReplyOrSuggest(bool lastKeyboardUsed) {
 	return ok1 || ok2;
 }
 
-bool HistoryWidget::cancelReply(
-		bool lastKeyboardUsed,
-		bool keepHighlighterState) {
+bool HistoryWidget::cancelReply(bool lastKeyboardUsed) {
 	bool wasReply = false;
 	if (_replyTo) {
 		wasReply = true;
@@ -9254,9 +9239,6 @@ bool HistoryWidget::cancelReply(
 		if (_kbReplyTo) {
 			toggleKeyboard(false);
 		}
-	}
-	if (!keepHighlighterState) {
-		_highlighter.clear();
 	}
 	return wasReply;
 }
