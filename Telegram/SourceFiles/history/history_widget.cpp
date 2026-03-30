@@ -483,7 +483,7 @@ HistoryWidget::HistoryWidget(
 		updateControlsGeometry();
 	}, lifetime());
 
-	InitMessageField(controller, _field, [=](
+	_fieldChatStyle = InitMessageField(controller, _field, [=](
 			not_null<DocumentData*> document) {
 		if (_peer && Data::AllowEmojiWithoutPremium(_peer, document)) {
 			return true;
@@ -4677,6 +4677,7 @@ void HistoryWidget::showAiComposeBox() {
 	HistoryView::Controls::ShowComposeAiBox(controller()->uiShow(), {
 		.session = &session(),
 		.text = text,
+		.chatStyle = _fieldChatStyle,
 		.apply = crl::guard(this, [=](const TextWithEntities &result) {
 			const auto action = Ui::InputField::HistoryAction::NewEntry;
 			setFieldText({

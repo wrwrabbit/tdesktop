@@ -2362,7 +2362,7 @@ void ComposeControls::initField() {
 		_field->setEnabled(shown);
 	}, _field->lifetime());
 #endif // Q_OS_MAC
-	InitMessageField(_show, _field, [=](not_null<DocumentData*> emoji) {
+	_chatStyle = InitMessageField(_show, _field, [=](not_null<DocumentData*> emoji) {
 		if (_history
 			&& Data::AllowEmojiWithoutPremium(_history->peer, emoji)) {
 			return true;
@@ -3659,6 +3659,7 @@ void ComposeControls::showAiComposeBox() {
 	Controls::ShowComposeAiBox(_show, {
 		.session = _session,
 		.text = text,
+		.chatStyle = _chatStyle,
 		.apply = crl::guard(_wrap.get(), [=](TextWithEntities result) {
 			const auto action = Ui::InputField::HistoryAction::NewEntry;
 			setFieldText({

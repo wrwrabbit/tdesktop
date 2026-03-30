@@ -184,22 +184,35 @@ void EditFileCaptionBox(
 	Ui::ResizeFitChild(wrap, field);
 	if (const auto window = Core::App().findWindow(box)) {
 		const auto controller = window->sessionController();
+		const auto allow = [=](not_null<DocumentData*> emoji) {
+			return captionToPeer
+				&& Data::AllowEmojiWithoutPremium(captionToPeer, emoji);
+		};
 		Ui::SetupCaptionFieldInBox(
 			box,
 			controller,
 			field,
 			captionToPeer,
-			[=](not_null<DocumentData*> emoji) {
-				return captionToPeer
-					&& Data::AllowEmojiWithoutPremium(captionToPeer, emoji);
-			},
+			allow,
 			PremiumFeature::EmojiStatus);
 		if (controller) {
+			const auto chatStyle = InitMessageFieldHandlers({
+				.session = &controller->session(),
+				.show = controller->uiShow(),
+				.field = field,
+				.customEmojiPaused = [=] {
+					return controller->isGifPausedAtLeastFor(
+						Window::GifPauseReason::Layer);
+				},
+				.allowPremiumEmoji = allow,
+				.fieldStyle = &st.files.caption,
+			});
 			const auto aiButton = Ui::SetupCaptionAiButton({
 				.parent = field->parentWidget(),
 				.field = field,
 				.session = &controller->session(),
 				.show = controller->uiShow(),
+				.chatStyle = chatStyle,
 			});
 			rpl::combine(
 				box->sizeValue(),
@@ -1763,7 +1776,7 @@ void SendFilesBox::setupCaption() {
 		return Data::AllowEmojiWithoutPremium(_toPeer, emoji);
 	};
 	const auto show = _show;
-	InitMessageFieldHandlers({
+	const auto chatStyle = InitMessageFieldHandlers({
 		.session = &show->session(),
 		.show = show,
 		.field = _caption.data(),
@@ -1839,6 +1852,7 @@ void SendFilesBox::setupCaption() {
 		.field = _caption.data(),
 		.session = &_show->session(),
 		.show = _show,
+		.chatStyle = chatStyle,
 	});
 }
 

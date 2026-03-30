@@ -62,6 +62,7 @@ auto SetupCaptionAiButton(SetupCaptionAiButtonArgs &&args)
 	const auto field = args.field;
 	const auto session = args.session;
 	const auto show = std::move(args.show);
+	const auto chatStyle = std::move(args.chatStyle);
 
 	button->hide();
 	button->setAccessibleName(tr::lng_ai_compose_title(tr::now));
@@ -78,6 +79,7 @@ auto SetupCaptionAiButton(SetupCaptionAiButtonArgs &&args)
 		HistoryView::Controls::ShowComposeAiBox(show, {
 			.session = session,
 			.text = std::move(text),
+			.chatStyle = chatStyle,
 			.apply = crl::guard(field, [=](TextWithEntities result) {
 				field->setTextWithTags(
 					{

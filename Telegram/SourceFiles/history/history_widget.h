@@ -82,6 +82,7 @@ class SpoilerAnimation;
 class ChooseThemeController;
 class ContinuousScroll;
 struct ChatPaintHighlight;
+class ChatStyle;
 template <typename Widget>
 class SlideWrap;
 } // namespace Ui
@@ -866,6 +867,7 @@ private:
 	rpl::lifetime _subsectionTabsLifetime;
 	rpl::lifetime _subsectionCheckLifetime;
 	base::unique_qptr<Ui::ImportantTooltip> _aiTooltip;
+	std::shared_ptr<Ui::ChatStyle> _fieldChatStyle;
 	bool _aiTooltipShown = false;
 	bool _cmdStartShown = false;
 	object_ptr<Ui::InputField> _field;

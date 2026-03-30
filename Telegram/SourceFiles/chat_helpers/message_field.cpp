@@ -498,7 +498,8 @@ Fn<void(QString now, Fn<void(QString)> save)> DefaultEditLanguageCallback(
 	};
 }
 
-void InitMessageFieldHandlers(MessageFieldHandlersArgs &&args) {
+auto InitMessageFieldHandlers(MessageFieldHandlersArgs &&args)
+-> std::shared_ptr<Ui::ChatStyle> {
 	const auto paused = [passed = args.customEmojiPaused] {
 		return passed && passed();
 	};
@@ -526,7 +527,7 @@ void InitMessageFieldHandlers(MessageFieldHandlersArgs &&args) {
 		field->setEditLanguageCallback(DefaultEditLanguageCallback(show));
 		InitSpellchecker(show, field, args.fieldStyle != nullptr);
 	}
-	const auto style = field->lifetime().make_state<Ui::ChatStyle>(
+	const auto style = std::make_shared<Ui::ChatStyle>(
 		session->colorIndicesValue());
 	field->setPreCache([=] {
 		return style->messageStyle(false, false).preCache.get();
@@ -535,6 +536,7 @@ void InitMessageFieldHandlers(MessageFieldHandlersArgs &&args) {
 		const auto colorIndex = session->user()->colorIndex();
 		return style->coloredQuoteCache(false, colorIndex).get();
 	});
+	return style;
 }
 
 [[nodiscard]] bool IsGoodFactcheckUrl(QStringView url) {
@@ -646,11 +648,11 @@ void InitMessageFieldGeometry(not_null<Ui::InputField*> field) {
 	field->setAdditionalMargin(style::ConvertScale(4) - 4);
 }
 
-void InitMessageField(
+std::shared_ptr<Ui::ChatStyle> InitMessageField(
 		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<Ui::InputField*> field,
 		Fn<bool(not_null<DocumentData*>)> allowPremiumEmoji) {
-	InitMessageFieldHandlers({
+	const auto style = InitMessageFieldHandlers({
 		.session = &show->session(),
 		.show = show,
 		.field = field,
@@ -660,9 +662,10 @@ void InitMessageField(
 		.allowPremiumEmoji = std::move(allowPremiumEmoji),
 	});
 	InitMessageFieldGeometry(field);
+	return style;
 }
 
-void InitMessageField(
+std::shared_ptr<Ui::ChatStyle> InitMessageField(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::InputField*> field,
 		Fn<bool(not_null<DocumentData*>)> allowPremiumEmoji) {

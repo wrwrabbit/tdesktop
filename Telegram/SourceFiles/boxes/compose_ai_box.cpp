@@ -13,9 +13,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/compose/compose_show.h"
 #include "chat_helpers/stickers_lottie.h"
 #include "core/application.h"
+#include "core/click_handler_types.h"
 #include "core/core_settings.h"
 #include "core/ui_integration.h"
 #include "data/data_document.h"
+#include "data/data_user.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_session.h"
 #include "lang/lang_keys.h"
@@ -25,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_premium.h"
 #include "spellcheck/platform/platform_language.h"
 #include "ui/boxes/choose_language_box.h"
+#include "ui/chat/chat_style.h"
 #include "ui/controls/labeled_emoji_tabs.h"
 #include "ui/controls/send_button.h"
 #include "ui/effects/ripple_animation.h"
@@ -34,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "ui/text/custom_emoji_helper.h"
 #include "ui/text/custom_emoji_text_badge.h"
+#include "ui/text/text_extended_data.h"
 #include "ui/text/text_utilities.h"
 #include "ui/vertical_list.h"
 #include "ui/wrap/slide_wrap.h"
@@ -299,7 +303,8 @@ public:
 	ComposeAiPreviewCard(
 		QWidget *parent,
 		not_null<Main::Session*> session,
-		TextWithEntities original);
+		TextWithEntities original,
+		std::shared_ptr<Ui::ChatStyle> chatStyle);
 
 	void setResizeCallback(Fn<void()> callback);
 	void setChooseCallback(Fn<void()> callback);
@@ -312,6 +317,7 @@ public:
 	void setEmojifyChecked(bool checked);
 	void setState(CardState state);
 	void setResultText(TextWithEntities text);
+	void setShow(std::shared_ptr<Ui::Show> show);
 
 protected:
 	int resizeGetHeight(int newWidth) override;
@@ -565,7 +571,8 @@ void ComposeAiModeTabs::paintEvent(QPaintEvent *e) {
 ComposeAiPreviewCard::ComposeAiPreviewCard(
 	QWidget *parent,
 	not_null<Main::Session*> session,
-	TextWithEntities original)
+	TextWithEntities original,
+	std::shared_ptr<Ui::ChatStyle> chatStyle)
 : RpWidget(parent)
 , _context(Core::TextContext({ .session = session }))
 , _original(std::move(original))
@@ -574,7 +581,7 @@ ComposeAiPreviewCard::ComposeAiPreviewCard(
 	st::aiComposeCardTitle))
 , _originalBody(Ui::CreateChild<Ui::FlatLabel>(
 	this,
-	st::aboutLabel))
+	st::aiComposeBodyLabel))
 , _originalToggle(Ui::CreateChild<Ui::IconButton>(
 	this,
 	st::aiComposeExpandButton))
@@ -583,7 +590,7 @@ ComposeAiPreviewCard::ComposeAiPreviewCard(
 	st::aiComposeCardTitle))
 , _resultBody(Ui::CreateChild<Ui::FlatLabel>(
 	this,
-	st::aboutLabel))
+	st::aiComposeBodyLabel))
 , _copy(Ui::CreateChild<Ui::IconButton>(
 	this,
 	st::aiComposeCopyButton))
@@ -603,6 +610,16 @@ ComposeAiPreviewCard::ComposeAiPreviewCard(
 		return false;
 	});
 	_resultBody->setSelectable(true);
+	const auto watchHeight = [=](not_null<Ui::FlatLabel*> label) {
+		label->heightValue(
+		) | rpl::skip(1) | rpl::on_next([=] {
+			if (_resized) {
+				_resized();
+			}
+		}, lifetime());
+	};
+	watchHeight(_originalBody);
+	watchHeight(_resultBody);
 	_diffColors[0] = { &st::boxTextFgGood->p, &st::boxTextFgGood->p };
 	_diffColors[1] = { &st::attentionButtonFg->p, &st::attentionButtonFg->p };
 	_resultBody->setColors(_diffColors);
@@ -629,6 +646,22 @@ ComposeAiPreviewCard::ComposeAiPreviewCard(
 	_resultBody->setMarkedText(_original, _context);
 	_copy->setVisible(false);
 	updateOriginalToggleIcon();
+	if (chatStyle) {
+		const auto style = chatStyle;
+		const auto s = session.get();
+		const auto setupCaches = [=](not_null<Ui::FlatLabel*> label) {
+			label->setPreCache([=] {
+				return style->messageStyle(false, false).preCache.get();
+			});
+			label->setBlockquoteCache([=] {
+				return style->coloredQuoteCache(
+					false,
+					s->user()->colorIndex());
+			});
+		};
+		setupCaches(_originalBody);
+		setupCaches(_resultBody);
+	}
 }
 
 void ComposeAiPreviewCard::setResizeCallback(Fn<void()> callback) {
@@ -712,6 +745,27 @@ void ComposeAiPreviewCard::setState(CardState state) {
 void ComposeAiPreviewCard::setResultText(TextWithEntities text) {
 	_resultBody->setMarkedText(std::move(text), _context);
 	refreshGeometry();
+}
+
+void ComposeAiPreviewCard::setShow(std::shared_ptr<Ui::Show> show) {
+	const auto setupFilter = [&](not_null<Ui::FlatLabel*> label) {
+		label->setClickHandlerFilter([=](
+				const ClickHandlerPtr &handler,
+				Qt::MouseButton button) {
+			if (dynamic_cast<Ui::Text::PreClickHandler*>(handler.get())) {
+				ActivateClickHandler(label, handler, ClickContext{
+					.button = button,
+					.other = QVariant::fromValue(ClickHandlerContext{
+						.show = show,
+					})
+				});
+				return false;
+			}
+			return true;
+		});
+	};
+	setupFilter(_originalBody);
+	setupFilter(_resultBody);
 }
 
 int ComposeAiPreviewCard::resizeGetHeight(int newWidth) {
@@ -875,7 +929,12 @@ ComposeAiContent::ComposeAiContent(
 , _stylesData(ResolveStyleDescriptors(
 	_session->appConfig().aiComposeStyles()))
 , _translateStylesData(ResolveTranslateStyleDescriptors(_session, _stylesData))
-, _preview(Ui::CreateChild<ComposeAiPreviewCard>(this, _session, _original)) {
+, _preview(
+	Ui::CreateChild<ComposeAiPreviewCard>(
+		this,
+		_session,
+		_original,
+		args.chatStyle)) {
 	_preview->setResizeCallback([=] { refreshLayout(); });
 	_preview->setChooseCallback([=] { chooseLanguage(); });
 	_preview->setCopyCallback([=] { copyResult(); });
@@ -885,6 +944,7 @@ ComposeAiContent::ComposeAiContent(
 			request();
 		}
 	});
+	_preview->setShow(_box->uiShow());
 }
 
 ComposeAiContent::~ComposeAiContent() {

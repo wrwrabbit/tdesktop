@@ -576,11 +576,16 @@ void EditCaptionBox::setupField() {
 	const auto allow = [=](not_null<DocumentData*> emoji) {
 		return Data::AllowEmojiWithoutPremium(peer, emoji);
 	};
-	InitMessageFieldHandlers(
-		_controller,
-		_field.get(),
-		Window::GifPauseReason::Layer,
-		allow);
+	const auto chatStyle = InitMessageFieldHandlers({
+		.session = &_controller->session(),
+		.show = _controller->uiShow(),
+		.field = _field.get(),
+		.customEmojiPaused = [=] {
+			return _controller->isGifPausedAtLeastFor(
+				Window::GifPauseReason::Layer);
+		},
+		.allowPremiumEmoji = allow,
+	});
 	setupFieldAutocomplete();
 	Ui::Emoji::SuggestionsController::Init(
 		getDelegate()->outerContainer(),
@@ -623,6 +628,7 @@ void EditCaptionBox::setupField() {
 		.field = _field.get(),
 		.session = &_controller->session(),
 		.show = _controller->uiShow(),
+		.chatStyle = chatStyle,
 	});
 }
 

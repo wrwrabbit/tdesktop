@@ -72,6 +72,7 @@ class ImportantTooltip;
 struct PreparedList;
 struct SendStarButtonState;
 class ReactionFlyAnimation;
+class ChatStyle;
 } // namespace Ui
 
 namespace Ui::Emoji {
@@ -477,6 +478,7 @@ private:
 	const std::unique_ptr<Controls::VoiceRecordBar> _voiceRecordBar;
 	base::unique_qptr<Ui::ImportantTooltip> _aiTooltip;
 	bool _aiTooltipShown = false;
+	std::shared_ptr<Ui::ChatStyle> _chatStyle;
 
 	const Fn<SendMenu::Details()> _sendMenuDetails;
 	const Fn<void(not_null<DocumentData*>)> _unavailableEmojiPasted;

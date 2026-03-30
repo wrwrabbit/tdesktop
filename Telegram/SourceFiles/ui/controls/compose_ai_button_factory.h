@@ -12,6 +12,7 @@ class Session;
 } // namespace Main
 
 namespace Ui {
+class ChatStyle;
 class InputField;
 class Show;
 } // namespace Ui
@@ -31,6 +32,7 @@ struct SetupCaptionAiButtonArgs {
 	not_null<Ui::InputField*> field;
 	not_null<Main::Session*> session;
 	std::shared_ptr<Ui::Show> show;
+	std::shared_ptr<Ui::ChatStyle> chatStyle;
 };
 
 [[nodiscard]] auto SetupCaptionAiButton(SetupCaptionAiButtonArgs &&args)

@@ -16,6 +16,7 @@ class Session;
 } // namespace Main
 
 namespace Ui {
+class ChatStyle;
 class GenericBox;
 class RpWidget;
 class Show;
@@ -26,6 +27,7 @@ namespace HistoryView::Controls {
 struct ComposeAiBoxArgs {
 	not_null<Main::Session*> session;
 	TextWithEntities text;
+	std::shared_ptr<Ui::ChatStyle> chatStyle;
 	Fn<void(TextWithEntities)> apply;
 	Fn<void(TextWithEntities, Api::SendOptions, Fn<void()>)> send;
 	Fn<void(not_null<Ui::RpWidget*>, Fn<void(Api::SendOptions)>)> setupMenu;
