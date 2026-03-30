@@ -453,6 +453,23 @@ if (!child->isHidden()) {
 
 The same applies to any logic that depends on a previous `show()`/`hide()` call: skip blocks, layout branches, opacity decisions, etc.
 
+## Consolidate make_state calls into a single State struct
+
+Every `make_state` is a separate heap allocation. When a function needs multiple pieces of lambda-captured mutable state, define a local `struct State` with all fields and call `make_state<State>()` once, then capture the resulting pointer everywhere.
+
+```cpp
+// BAD - two allocations:
+const auto shown = lifetime.make_state<bool>(false);
+const auto count = lifetime.make_state<int>(0);
+
+// GOOD - one allocation:
+struct State {
+	bool shown = false;
+	int count = 0;
+};
+const auto state = lifetime.make_state<State>();
+```
+
 ## Static member functions use PascalCase
 
 Non-static member functions use camelCase (`startBatch`, `finalize`). Static member functions use PascalCase (`ShouldTrack`, `Parse`, `Create`), matching the convention for free functions.
