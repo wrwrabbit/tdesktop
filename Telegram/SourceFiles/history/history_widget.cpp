@@ -5844,9 +5844,9 @@ bool HistoryWidget::updateCmdStartShown() {
 	if (_history
 		&& _peer
 		&& (false
-			|| (_peer->isChat() && _peer->asChat()->botStatus == Data::BotStatus::HasBots)
+			|| (_peer->isChat() && !_peer->asChat()->botCommands().empty())
 			|| (_peer->isMegagroup()
-				&& _peer->asChannel()->mgInfo->botStatus == Data::BotStatus::HasBots))) {
+				&& !_peer->asChannel()->mgInfo->botCommands().empty()))) {
 		if (!isBotStart()
 			&& !isBlocked()
 			&& !_keyboard->hasMarkup()

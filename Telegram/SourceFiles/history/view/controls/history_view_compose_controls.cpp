@@ -3696,12 +3696,18 @@ bool ComposeControls::hasEnoughLinesForAi() const {
 bool ComposeControls::updateBotCommandShown() {
 	auto shown = false;
 	const auto peer = _history ? _history->peer.get() : nullptr;
-	if (_botCommandStart
-		&& peer
-		&& ((peer->isChat() && peer->asChat()->botStatus == Data::BotStatus::HasBots)
-			|| (peer->isMegagroup() && peer->asChannel()->mgInfo->botStatus == Data::BotStatus::HasBots)
-			|| (peer->isUser() && peer->asUser()->isBot()))) {
-		if (!HasSendText(_field)) {
+	if (_botCommandStart && peer) {
+		const auto hasBotCommands = [&] {
+			if (peer->isChat()) {
+				return !peer->asChat()->botCommands().empty();
+			} else if (peer->isMegagroup()) {
+				return !peer->asChannel()->mgInfo->botCommands().empty();
+			} else if (peer->isUser()) {
+				return peer->asUser()->isBot();
+			}
+			return false;
+		}();
+		if (hasBotCommands && !HasSendText(_field)) {
 			shown = true;
 		}
 	}
@@ -4184,6 +4190,16 @@ void ComposeControls::initWebpageProcess() {
 				updateControlsVisibility();
 				updateControlsGeometry(_wrap->size());
 			}
+		}
+	}, _historyLifetime);
+
+	session().data().botCommandsChanges(
+	) | rpl::filter([peer = _history->peer](not_null<PeerData*> p) {
+		return (p == peer);
+	}) | rpl::on_next([=] {
+		if (updateBotCommandShown()) {
+			updateControlsVisibility();
+			updateControlsGeometry(_wrap->size());
 		}
 	}, _historyLifetime);
 
