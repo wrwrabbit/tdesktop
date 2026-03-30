@@ -470,6 +470,20 @@ struct State {
 const auto state = lifetime.make_state<State>();
 ```
 
+## Use trailing return type when the return type doesn't fit on one line
+
+When a function's return type is long enough that the declaration would need a line break between the return type and the function name, use trailing return type syntax (`auto ... -> Type`) to keep the function name on the opening line.
+
+```cpp
+// BAD - return type orphaned on its own line:
+not_null<HistoryView::Controls::ComposeAiButton*>
+SetupCaptionAiButton(SetupCaptionAiButtonArgs &&args);
+
+// GOOD - trailing return type keeps name visible:
+auto SetupCaptionAiButton(SetupCaptionAiButtonArgs &&args)
+-> not_null<HistoryView::Controls::ComposeAiButton*>;
+```
+
 ## Static member functions use PascalCase
 
 Non-static member functions use camelCase (`startBatch`, `finalize`). Static member functions use PascalCase (`ShouldTrack`, `Parse`, `Create`), matching the convention for free functions.
