@@ -7988,10 +7988,18 @@ bool HistoryWidget::replyToPreviousMessage() {
 		(_field->isVisible()
 			? _replyTo.messageId.msg
 			: _highlighter.latestSingleHighlightedMsgId()));
+	const auto skipLocal = [](HistoryView::Element *from) {
+		auto view = from;
+		while (view && view->data()->isLocal()) {
+			view = view->previousDisplayedInBlocks();
+		}
+		return view;
+	};
 	if (const auto item = session().data().message(fullId)) {
 		if (const auto view = item->mainView()) {
-			if (const auto previousView = view->previousDisplayedInBlocks()) {
-				const auto previous = previousView->data();
+			if (const auto target = skipLocal(
+					view->previousDisplayedInBlocks())) {
+				const auto previous = target->data();
 				controller()->showMessage(previous);
 				if (_field->isVisible()) {
 					replyToMessage(previous);
@@ -7999,8 +8007,9 @@ bool HistoryWidget::replyToPreviousMessage() {
 				return true;
 			}
 		}
-	} else if (const auto previousView = _history->findLastDisplayed()) {
-		const auto previous = previousView->data();
+	} else if (const auto target = skipLocal(
+			_history->findLastDisplayed())) {
+		const auto previous = target->data();
 		controller()->showMessage(previous);
 		if (_field->isVisible()) {
 			replyToMessage(previous);
@@ -8024,11 +8033,15 @@ bool HistoryWidget::replyToNextMessage() {
 			: _highlighter.latestSingleHighlightedMsgId()));
 	if (const auto item = session().data().message(fullId)) {
 		if (const auto view = item->mainView()) {
-			if (const auto nextView = view->nextDisplayedInBlocks()) {
-				const auto next = nextView->data();
-				controller()->showMessage(next);
+			auto next = view->nextDisplayedInBlocks();
+			while (next && next->data()->isLocal()) {
+				next = next->nextDisplayedInBlocks();
+			}
+			if (next) {
+				const auto item = next->data();
+				controller()->showMessage(item);
 				if (_field->isVisible()) {
-					replyToMessage(next);
+					replyToMessage(item);
 				}
 			} else {
 				_highlighter.clear();
