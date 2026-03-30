@@ -224,7 +224,8 @@ PhotoEditor::PhotoEditor(
 	this,
 	_controllers,
 	_modifications,
-	data))
+	data,
+	photo->size()))
 , _brushes(Deserialize(Core::App().settings().photoEditorBrush()).brushes)
 , _brushTool(Deserialize(Core::App().settings().photoEditorBrush()).tool)
 , _colorPicker(std::make_unique<ColorPicker>(
@@ -283,6 +284,10 @@ PhotoEditor::PhotoEditor(
 	) | rpl::on_next([=] {
 		_modifications.flipped = !_modifications.flipped;
 		_content->applyModifications(_modifications);
+	}, lifetime());
+
+	_controls->aspectRatioChanges() | rpl::on_next([=](float64 ratio) {
+		_content->applyAspectRatio(ratio);
 	}, lifetime());
 
 	_controls->paintModeRequests(

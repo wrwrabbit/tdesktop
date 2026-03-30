@@ -142,6 +142,10 @@ void PhotoEditorContent::applyMode(const PhotoEditorMode &mode) {
 	update();
 }
 
+void PhotoEditorContent::applyAspectRatio(float64 ratio) {
+	_crop->setAspectRatio(ratio);
+}
+
 void PhotoEditorContent::applyBrush(const Brush &brush) {
 	_paint->applyBrush(brush);
 }

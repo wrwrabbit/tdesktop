@@ -177,7 +177,7 @@ void Crop::paintFrame(QPainter &p) {
 	p.save();
 	p.setRenderHint(QPainter::Antialiasing, true);
 	p.fillPath(frameShape, st::photoCropPointFg);
-	if (_data.cropType == EditorData::CropType::Rect) {
+	{
 		const auto cornerLength = std::min(
 			float64(st::photoEditorCropPointSize * 2),
 			std::min(_cropPaint.width(), _cropPaint.height()) / 2.);
@@ -439,12 +439,14 @@ void Crop::performCrop(const QPoint &pos) {
 		}
 
 		const auto &minSize = st::photoEditorCropMinSize;
-		const auto xMin = xFactor * int(crop.width() - minSize);
-		// const auto xMin = int(xFactor * crop.width()
-		// 	- xFactor * minSize * ((cropRatio > 1.) ? cropRatio : 1.));
-		const auto yMin = yFactor * int(crop.height() - minSize);
-		// const auto yMin = int(yFactor * crop.height()
-		// 	- yFactor * minSize * ((cropRatio < 1.) ? (1. / cropRatio) : 1.));
+		const auto minW = (_keepAspectRatio && cropRatio > 1.)
+			? (minSize * cropRatio)
+			: float64(minSize);
+		const auto minH = (_keepAspectRatio && cropRatio < 1.)
+			? (minSize / cropRatio)
+			: float64(minSize);
+		const auto xMin = xFactor * int(crop.width() - minW);
+		const auto yMin = yFactor * int(crop.height() - minH);
 
 		const auto x = std::clamp(
 			diff.x(),
@@ -502,6 +504,48 @@ void Crop::mouseMoveEvent(QMouseEvent *e) {
 
 style::margins Crop::cropMargins() const {
 	return _innerMargins;
+}
+
+void Crop::setAspectRatio(float64 ratio) {
+	const auto free = (ratio <= 0.);
+	_keepAspectRatio = !free;
+
+	if (!free) {
+		const auto maxW = _innerRect.width();
+		const auto maxH = _innerRect.height();
+		auto newW = maxW;
+		auto newH = maxW / ratio;
+		if (newH > maxH) {
+			newH = maxH;
+			newW = maxH * ratio;
+		}
+
+		const auto center = _cropPaint.center();
+		auto adjusted = QRectF(
+			center.x() - newW / 2.,
+			center.y() - newH / 2.,
+			newW,
+			newH);
+
+		if (adjusted.left() < _innerRect.left()) {
+			adjusted.moveLeft(_innerRect.left());
+		}
+		if (adjusted.top() < _innerRect.top()) {
+			adjusted.moveTop(_innerRect.top());
+		}
+		if (adjusted.right() > _innerRect.right()) {
+			adjusted.moveRight(_innerRect.right());
+		}
+		if (adjusted.bottom() > _innerRect.bottom()) {
+			adjusted.moveBottom(_innerRect.bottom());
+		}
+
+		setCropPaint(std::move(adjusted));
+		convertCropPaintToOriginal();
+	} else {
+		updateEdges();
+	}
+	update();
 }
 
 QRect Crop::saveCropRect() {

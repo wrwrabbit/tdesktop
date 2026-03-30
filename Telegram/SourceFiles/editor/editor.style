@@ -89,6 +89,18 @@ photoEditorStickersButton: IconButton(photoEditorRotateButton) {
 }
 photoEditorStickersIconActive: icon {{ "settings/settings_stickers", photoEditorButtonIconFgActive }};
 
+photoEditorCropRatioButton: IconButton(photoEditorRotateButton) {
+	icon: icon {{ "photo_editor/ratio-23x23", photoEditorButtonIconFg, point(0px, 1px) }};
+	iconOver: icon {{ "photo_editor/ratio-23x23", photoEditorButtonIconFgOver, point(0px, 1px) }};
+}
+photoEditorCropRatioIconActive: icon {{ "photo_editor/ratio-23x23", photoEditorButtonIconFgActive, point(0px, 1px) }};
+
+photoEditorCropRatioMenu: PopupMenu(popupMenuWithIcons) {
+	menu: Menu(menuWithIcons) {
+		widthMin: 108px;
+	}
+}
+
 photoEditorUndoButtonInactive: icon {{ "photo_editor/undo", photoEditorButtonIconFgInactive }};
 photoEditorRedoButtonInactive: icon {{ "photo_editor/undo-flip_horizontal", photoEditorButtonIconFgInactive }};
 

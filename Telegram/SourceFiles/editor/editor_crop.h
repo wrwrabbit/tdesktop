@@ -31,6 +31,7 @@ public:
 		const QSizeF &scaledImageSize);
 	[[nodiscard]] QRect saveCropRect();
 	[[nodiscard]] style::margins cropMargins() const;
+	void setAspectRatio(float64 ratio);
 
 protected:
 	void mousePressEvent(QMouseEvent *e) override;
