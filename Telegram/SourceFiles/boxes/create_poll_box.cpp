@@ -24,6 +24,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "core/shortcuts.h"
+#include "core/ui_integration.h"
+#include "ui/power_saving.h"
 #include "data/data_cloud_file.h"
 #include "data/data_document.h"
 #include "data/data_file_origin.h"
@@ -272,11 +274,15 @@ private:
 void InitField(
 		not_null<QWidget*> container,
 		not_null<Ui::InputField*> field,
-		not_null<Main::Session*> session) {
-	field->setInstantReplaces(Ui::InstantReplaces::Default());
-	field->setInstantReplacesEnabled(
-		Core::App().settings().replaceEmojiValue(),
-		Core::App().settings().systemTextReplaceValue());
+		not_null<Main::Session*> session,
+		std::shared_ptr<Main::SessionShow> show = nullptr,
+		base::flat_set<QString> markdownTags = {}) {
+	InitMessageFieldHandlers({
+		.session = session,
+		.show = std::move(show),
+		.field = field,
+		.allowMarkdownTags = std::move(markdownTags),
+	});
 	auto options = Ui::Emoji::SuggestionsController::Options();
 	options.suggestExactFirstWord = false;
 	Ui::Emoji::SuggestionsController::Init(
@@ -695,7 +701,7 @@ void Options::Option::showAddIcon(bool show) {
 PollAnswer Options::Option::toPollAnswer(int index) const {
 	Expects(index >= 0 && index < kMaxOptionsCount);
 
-	const auto text = field()->getTextWithTags();
+	const auto text = field()->getTextWithAppliedMarkdown();
 
 	auto result = PollAnswer{
 		TextWithEntities{
@@ -1238,7 +1244,11 @@ not_null<Ui::InputField*> CreatePollBox::setupQuestion(
 			tr::lng_polls_create_question_placeholder()),
 		st::createPollFieldPadding
 			+ QMargins(0, 0, st::defaultComposeFiles.emoji.inner.width, 0));
-	InitField(getDelegate()->outerContainer(), question, session);
+	InitField(
+		getDelegate()->outerContainer(),
+		question,
+		session,
+		_controller->uiShow());
 	question->setMaxLength(kQuestionLimit + kErrorLimit);
 	question->setSubmitSettings(Ui::InputField::SubmitSettings::Both);
 
@@ -1320,7 +1330,11 @@ not_null<Ui::InputField*> CreatePollBox::setupDescription(
 			Ui::InputField::Mode::MultiLine,
 			tr::lng_polls_create_description_placeholder()),
 		st::pollDescriptionFieldPadding);
-	InitField(getDelegate()->outerContainer(), description, session);
+	InitField(
+		getDelegate()->outerContainer(),
+		description,
+		session,
+		_controller->uiShow());
 	description->setSubmitSettings(Ui::InputField::SubmitSettings::Both);
 
 	if (const auto emojiPanel = _emojiPanel.get()) {
@@ -1380,24 +1394,20 @@ not_null<Ui::InputField*> CreatePollBox::setupSolution(
 			Ui::InputField::Mode::MultiLine,
 			tr::lng_polls_solution_placeholder()),
 		st::createPollFieldPadding);
-	InitField(getDelegate()->outerContainer(), solution, session);
-	solution->setMaxLength(kSolutionLimit + kErrorLimit);
-	solution->setInstantReplaces(Ui::InstantReplaces::Default());
-	solution->setInstantReplacesEnabled(
-		Core::App().settings().replaceEmojiValue(),
-		Core::App().settings().systemTextReplaceValue());
-	solution->setMarkdownReplacesEnabled(rpl::single(
-		Ui::MarkdownEnabledState{ Ui::MarkdownEnabled{ {
+	InitField(
+		getDelegate()->outerContainer(),
+		solution,
+		session,
+		_controller->uiShow(),
+		{
 			Ui::InputField::kTagBold,
 			Ui::InputField::kTagItalic,
 			Ui::InputField::kTagUnderline,
 			Ui::InputField::kTagStrikeOut,
 			Ui::InputField::kTagCode,
 			Ui::InputField::kTagSpoiler,
-		} } }
-	));
-	solution->setEditLinkCallback(
-		DefaultEditLinkCallback(_controller->uiShow(), solution));
+		});
+	solution->setMaxLength(kSolutionLimit + kErrorLimit);
 
 	const auto warning = CreateWarningLabel(
 		inner,
@@ -2824,7 +2834,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	};
 
 	const auto collectResult = [=] {
-		const auto textWithTags = question->getTextWithTags();
+		const auto textWithTags = question->getTextWithAppliedMarkdown();
 		const auto descriptionWithTags = description->getTextWithTags();
 		using Flag = PollData::Flag;
 		auto result = PollData(&_controller->session().data(), id);
