@@ -5629,10 +5629,10 @@ bool HistoryWidget::insertBotCommand(const QString &cmd) {
 			? _peer->asChat()->botStatus
 			: _peer->isMegagroup()
 			? _peer->asChannel()->mgInfo->botStatus
-			: -1;
+			: Data::BotStatus::NoBots;
 		if ((toInsert.indexOf('@') < 0)
 			&& !username.isEmpty()
-			&& (botStatus == 0 || botStatus == 2)) {
+			&& (botStatus != Data::BotStatus::NoBots)) {
 			toInsert += '@' + username;
 		}
 	}
@@ -5844,9 +5844,9 @@ bool HistoryWidget::updateCmdStartShown() {
 	if (_history
 		&& _peer
 		&& (false
-			|| (_peer->isChat() && _peer->asChat()->botStatus > 0)
+			|| (_peer->isChat() && _peer->asChat()->botStatus == Data::BotStatus::HasBots)
 			|| (_peer->isMegagroup()
-				&& _peer->asChannel()->mgInfo->botStatus > 0))) {
+				&& _peer->asChannel()->mgInfo->botStatus == Data::BotStatus::HasBots))) {
 		if (!isBotStart()
 			&& !isBlocked()
 			&& !_keyboard->hasMarkup()
@@ -9393,7 +9393,7 @@ void HistoryWidget::handlePeerUpdate() {
 				== UserData::CallsStatus::Unknown))) {
 		session().api().requestFullPeer(_peer);
 	} else if (auto channel = _peer->asMegagroup()) {
-		if (!channel->mgInfo->botStatus) {
+		if (channel->mgInfo->botStatus == Data::BotStatus::Unknown) {
 			session().api().chatParticipants().requestBots(channel);
 		}
 		if (!channel->mgInfo->adminsLoaded) {

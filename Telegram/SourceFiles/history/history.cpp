@@ -1040,8 +1040,8 @@ not_null<HistoryItem*> History::addNewToBack(
 					auto mgInfo = megagroup->mgInfo.get();
 					Assert(mgInfo != nullptr);
 					mgInfo->bots.insert(user);
-					if (mgInfo->botStatus != 0 && mgInfo->botStatus < 2) {
-						mgInfo->botStatus = 2;
+					if (mgInfo->botStatus == Data::BotStatus::NoBots) {
+						mgInfo->botStatus = Data::BotStatus::HasBots;
 					}
 				}
 			}
@@ -1103,7 +1103,7 @@ not_null<HistoryItem*> History::addNewToBack(
 								item->from()->asUser());
 					} else if (peer->isMegagroup()) {
 						botNotInChat = item->from()->isUser()
-							&& (peer->asChannel()->mgInfo->botStatus != 0
+							&& (peer->asChannel()->mgInfo->botStatus != Data::BotStatus::Unknown
 								|| !Data::CanSendAnything(peer))
 							&& !peer->asChannel()->mgInfo->bots.contains(
 								item->from()->asUser());
@@ -1160,8 +1160,8 @@ void History::applyServiceChanges(
 		}
 		if (user->isBot()) {
 			mgInfo->bots.insert(user);
-			if (mgInfo->botStatus != 0 && mgInfo->botStatus < 2) {
-				mgInfo->botStatus = 2;
+			if (mgInfo->botStatus == Data::BotStatus::NoBots) {
+				mgInfo->botStatus = Data::BotStatus::HasBots;
 			}
 		}
 	};
@@ -1229,8 +1229,8 @@ void History::applyServiceChanges(
 						Data::PeerUpdate::Flag::Admins);
 				}
 				mgInfo->bots.remove(user);
-				if (mgInfo->bots.empty() && mgInfo->botStatus > 0) {
-					mgInfo->botStatus = -1;
+				if (mgInfo->bots.empty() && mgInfo->botStatus == Data::BotStatus::HasBots) {
+					mgInfo->botStatus = Data::BotStatus::NoBots;
 				}
 			}
 			Data::ChannelAdminChanges(megagroup).remove(uid);
@@ -1813,7 +1813,7 @@ void History::addItemsToLists(
 										&& !peer->asChat()->participants.contains(item->author()->asUser());
 								} else if (peer->isMegagroup()) {
 									botNotInChat = (!Data::CanSendAnything(peer)
-										|| peer->asChannel()->mgInfo->botStatus != 0)
+										|| peer->asChannel()->mgInfo->botStatus != Data::BotStatus::Unknown)
 										&& item->author()->isUser()
 										&& !peer->asChannel()->mgInfo->bots.contains(item->author()->asUser());
 								}

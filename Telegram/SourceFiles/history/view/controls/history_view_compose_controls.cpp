@@ -1184,7 +1184,7 @@ void ComposeControls::setHistory(SetHistoryArgs &&args) {
 	if (peer->isChat() && peer->asChat()->noParticipantInfo()) {
 		session().api().requestFullPeer(peer);
 	} else if (const auto channel = peer->asMegagroup()) {
-		if (!channel->mgInfo->botStatus) {
+		if (channel->mgInfo->botStatus == Data::BotStatus::Unknown) {
 			session().api().chatParticipants().requestBots(channel);
 		}
 	} else if (hasSilentBroadcastToggle()) {
@@ -3698,8 +3698,8 @@ bool ComposeControls::updateBotCommandShown() {
 	const auto peer = _history ? _history->peer.get() : nullptr;
 	if (_botCommandStart
 		&& peer
-		&& ((peer->isChat() && peer->asChat()->botStatus > 0)
-			|| (peer->isMegagroup() && peer->asChannel()->mgInfo->botStatus > 0)
+		&& ((peer->isChat() && peer->asChat()->botStatus == Data::BotStatus::HasBots)
+			|| (peer->isMegagroup() && peer->asChannel()->mgInfo->botStatus == Data::BotStatus::HasBots)
 			|| (peer->isUser() && peer->asUser()->isBot()))) {
 		if (!HasSendText(_field)) {
 			shown = true;
