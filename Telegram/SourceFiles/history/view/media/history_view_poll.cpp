@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_message.h"
 #include "history/view/history_view_cursor_state.h"
 #include "history/view/history_view_reaction_preview.h"
+#include "history/view/history_view_text_helper.h"
 #include "history/view/media/menu/history_view_poll_menu.h"
 #include "calls/calls_instance.h"
 #include "ui/widgets/dropdown_menu.h"
@@ -1196,16 +1197,17 @@ void Poll::Header::draw(
 	}
 
 	p.setPen(stm->historyTextFg);
-	_question.drawLeft(
-		p,
-		left,
-		tshift,
-		innerWidth,
-		outerWidth,
-		style::al_left,
-		0,
-		-1,
-		toQuestionSelection(context.selection));
+	_owner->_parent->prepareCustomEmojiPaint(p, context, _question);
+	_question.draw(p, {
+		.position = { left, tshift },
+		.outerWidth = outerWidth,
+		.availableWidth = innerWidth,
+		.spoiler = Ui::Text::DefaultSpoilerCache(),
+		.now = context.now,
+		.pausedEmoji = context.paused,
+		.pausedSpoiler = context.paused,
+		.selection = toQuestionSelection(context.selection),
+	});
 	tshift += _question.countHeight(innerWidth)
 		+ st::historyPollSubtitleSkip;
 
@@ -1608,10 +1610,28 @@ TextState Poll::Options::textState(
 					media).contains(point)) {
 				result.link = answer.mediaHandler;
 			} else {
-				if (can) {
-					_owner->_lastLinkPoint = point;
+				const auto &answerPadding = answer.thumbnail
+					? st::historyPollAnswerPadding
+					: st::historyPollAnswerPaddingNoMedia;
+				const auto aleft = left
+					+ st::historyPollAnswerPadding.left();
+				const auto atop = tshift + answerPadding.top();
+				const auto textWidth = countAnswerContentWidth(
+					answer,
+					innerWidth);
+				const auto textState = answer.text.getStateLeft(
+					point - QPoint(aleft, atop),
+					textWidth,
+					outerWidth,
+					request.forText());
+				if (textState.link) {
+					result.link = textState.link;
+				} else {
+					if (can) {
+						_owner->_lastLinkPoint = point;
+					}
+					result.link = answer.handler;
 				}
-				result.link = answer.handler;
 			}
 			if (!can && show) {
 				result.customTooltip = true;
@@ -2034,6 +2054,7 @@ void Poll::Header::updateDescription() {
 		consumed,
 		Ui::ItemTextOptions(_owner->_parent->data()),
 		context);
+	InitElementTextPart(_owner->_parent, _description);
 }
 
 void Poll::Header::updateSolutionText() {
@@ -2053,6 +2074,7 @@ void Poll::Header::updateSolutionText() {
 			.session = &_owner->_poll->session(),
 			.repaint = [=] { _owner->repaint(); },
 		}));
+	InitElementTextPart(_owner->_parent, _solutionText);
 }
 
 void Poll::Header::updateSolutionMedia() {
@@ -3231,7 +3253,15 @@ int Poll::Options::paintAnswer(
 		}
 	}
 	p.setPen(stm->historyTextFg);
-	answer.text.drawLeft(p, aleft, top, textWidth, outerWidth);
+	answer.text.draw(p, {
+		.position = { aleft, top },
+		.outerWidth = outerWidth,
+		.availableWidth = textWidth,
+		.spoiler = Ui::Text::DefaultSpoilerCache(),
+		.now = context.now,
+		.pausedEmoji = context.paused,
+		.pausedSpoiler = context.paused,
+	});
 
 	return height;
 }
@@ -3694,6 +3724,19 @@ void Poll::clickHandlerPressedChanged(
 	_optionsPart->clickHandlerPressedChanged(handler, pressed);
 	_addOptionPart->clickHandlerPressedChanged(handler, pressed);
 	_footerPart->clickHandlerPressedChanged(handler, pressed);
+}
+
+void Poll::hideSpoilers() {
+	if (_headerPart->_description.hasSpoilers()) {
+		_headerPart->_description.setSpoilerRevealed(
+			false,
+			anim::type::instant);
+	}
+	if (_headerPart->_solutionText.hasSpoilers()) {
+		_headerPart->_solutionText.setSpoilerRevealed(
+			false,
+			anim::type::instant);
+	}
 }
 
 void Poll::unloadHeavyPart() {

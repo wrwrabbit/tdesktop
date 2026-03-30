@@ -67,6 +67,8 @@ public:
 		const ClickHandlerPtr &handler,
 		bool pressed) override;
 
+	void hideSpoilers() override;
+
 	void unloadHeavyPart() override;
 	bool hasHeavyPart() const override;
 	void parentTextUpdated() override;
