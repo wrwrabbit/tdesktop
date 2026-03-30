@@ -35,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_drag_area.h"
 #include "history/history_item.h"
 #include "history/history.h"
+#include "history/view/controls/history_view_compose_ai_button.h"
 #include "lang/lang_keys.h"
 #include "menu/menu_checked_action.h"
 #include "main/main_session.h"
@@ -50,6 +51,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/attach/attach_item_single_media_preview.h"
 #include "ui/chat/attach/attach_single_file_preview.h"
 #include "ui/chat/attach/attach_single_media_preview.h"
+#include "ui/controls/compose_ai_button_factory.h"
 #include "ui/controls/emoji_button.h"
 #include "ui/effects/scroll_content_shadow.h"
 #include "ui/image/image.h"
@@ -615,6 +617,13 @@ void EditCaptionBox::setupField() {
 		}
 		Unexpected("Action in MimeData hook.");
 	});
+
+	_aiButton = Ui::SetupCaptionAiButton({
+		.parent = this,
+		.field = _field.get(),
+		.session = &_controller->session(),
+		.show = _controller->uiShow(),
+	});
 }
 
 void EditCaptionBox::setupFieldAutocomplete() {
@@ -1164,6 +1173,11 @@ void EditCaptionBox::resizeEvent(QResizeEvent *e) {
 			- _emojiToggle->width()),
 		_field->y() + st::boxAttachEmojiTop);
 	_emojiToggle->update();
+
+	if (_aiButton) {
+		Ui::UpdateCaptionAiButtonGeometry(_aiButton, _field.get());
+		_aiButton->raise();
+	}
 
 	if (!_controls->isHidden()) {
 		_controls->resizeToWidth(width());

@@ -59,6 +59,7 @@ struct Action;
 
 namespace HistoryView::Controls {
 class CharactersLimitLabel;
+class ComposeAiButton;
 } // namespace HistoryView::Controls
 
 enum class SendFilesAllow {
@@ -304,6 +305,7 @@ private:
 	std::unique_ptr<ChatHelpers::FieldAutocomplete> _autocomplete;
 	TextWithTags _prefilledCaptionText;
 	object_ptr<Ui::EmojiButton> _emojiToggle = { nullptr };
+	HistoryView::Controls::ComposeAiButton *_aiButton = nullptr;
 	base::unique_qptr<ChatHelpers::TabbedPanel> _emojiPanel;
 	base::unique_qptr<QObject> _emojiFilter;
 	using CharactersLimitLabel = HistoryView::Controls::CharactersLimitLabel;

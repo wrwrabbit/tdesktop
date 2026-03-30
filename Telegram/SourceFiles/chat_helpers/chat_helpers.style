@@ -1434,6 +1434,7 @@ historyAiComposeButtonStar1: icon{{ "chat/ai_star1-20x20", historyComposeIconFg 
 historyAiComposeButtonStar2: icon{{ "chat/ai_star2-20x20", historyComposeIconFg }};
 historyAiComposeButtonPosition: point(-8px, -4px);
 historyAiComposeTooltipSkip: 8px;
+boxAiComposeButtonPosition: point(0px, -4px);
 historyRecordFrameIndex: 30;
 
 defaultComposeFilesMenu: IconButton(defaultIconButton) {
