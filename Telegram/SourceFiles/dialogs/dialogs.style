@@ -603,6 +603,13 @@ dialogsUnreadPollMuted: ThreeStateIcon {
 	active: icon{{ "dialogs/dialogs_chatlist_poll-18x18", dialogsUnreadBgMutedActive }};
 }
 
+dialogsMuteIcon: ThreeStateIcon {
+	icon: icon{{ "dialogs/dialogs_mute", dialogsUnreadBgMuted }};
+	over: icon{{ "dialogs/dialogs_mute", dialogsUnreadBgMutedOver }};
+	active: icon{{ "dialogs/dialogs_mute", dialogsUnreadBgMutedActive }};
+}
+dialogsMuteIconSkip: 4px;
+
 downloadBarHeight: 46px;
 downloadArrow: icon{{ "fast_to_original", menuIconFg }};
 downloadArrowOver: icon{{ "fast_to_original", menuIconFgOver }};

@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/ui/dialogs_layout.h"
 
+#include "base/options.h"
 #include "base/unixtime.h"
 #include "core/ui_integration.h"
 #include "data/data_channel.h"
@@ -51,7 +52,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_window.h"
 
 namespace Dialogs::Ui {
+
+const char kOptionDialogsMuteIcon[] = "dialogs-mute-icon";
+
 namespace {
+
+base::options::toggle DialogsMuteIcon({
+	.id = kOptionDialogsMuteIcon,
+	.name = "Mute icon in dialogs",
+	.description = "Show a small mute icon next to the chat name "
+		"for muted chats.",
+});
 
 const auto kPsaBadgePrefix = "cloud_lng_badge_psa_";
 
@@ -796,8 +807,24 @@ void PaintRow(
 			context.width,
 			text);
 	} else if (from) {
+		auto badgeWidth = 0;
 		if ((history || sublist) && !context.search) {
+			const auto widthBefore = rectForName.width();
 			paintPeerBadge(rowName.maxWidth());
+			badgeWidth = widthBefore - rectForName.width();
+		}
+		const auto drawMuteIcon = DialogsMuteIcon.value()
+			&& thread
+			&& thread->muted();
+		if (drawMuteIcon) {
+			const auto &muteIcon = ThreeStateIcon(
+				st::dialogsMuteIcon,
+				context.active,
+				context.selected);
+			rectForName.setWidth(
+				rectForName.width()
+					- muteIcon.width()
+					- st::dialogsMuteIconSkip);
 		}
 		p.setPen(context.active
 			? st::dialogsNameFgActive
@@ -809,6 +836,22 @@ void PaintRow(
 			.availableWidth = rectForName.width(),
 			.elisionLines = 1,
 		});
+		if (drawMuteIcon) {
+			const auto &muteIcon = ThreeStateIcon(
+				st::dialogsMuteIcon,
+				context.active,
+				context.selected);
+			const auto nameW = std::min(
+				rowName.maxWidth(),
+				rectForName.width());
+			const auto muteLeft = rectForName.left()
+				+ nameW
+				+ badgeWidth
+				+ st::dialogsMuteIconSkip;
+			const auto muteTop = rectForName.top()
+				+ (st::semiboldFont->height - muteIcon.height()) / 2;
+			muteIcon.paint(p, muteLeft, muteTop, context.width);
+		}
 	} else if (hiddenSenderInfo) {
 		p.setPen(context.active
 			? st::dialogsNameFgActive

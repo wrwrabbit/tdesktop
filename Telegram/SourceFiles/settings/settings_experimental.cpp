@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/sandbox.h"
 #include "chat_helpers/tabbed_panel.h"
 #include "dialogs/dialogs_widget.h"
+#include "dialogs/ui/dialogs_layout.h"
 #include "history/history_item_components.h"
 #include "info/profile/info_profile_actions.h"
 #include "lang/lang_keys.h"
@@ -204,6 +205,7 @@ void SetupExperimental(
 
 	addToggle(ChatHelpers::kOptionTabbedPanelShowOnClick);
 	addToggle(Dialogs::kOptionForumHideChatsList);
+	addToggle(Dialogs::Ui::kOptionDialogsMuteIcon);
 	addToggle(Core::kOptionFractionalScalingEnabled);
 	addToggle(Core::kOptionHighDpiDownscale);
 	addToggle(Window::kOptionViewProfileInChatsListContextMenu);
