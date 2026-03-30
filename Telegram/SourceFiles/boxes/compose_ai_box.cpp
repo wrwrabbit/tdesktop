@@ -12,6 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/premium_preview_box.h"
 #include "chat_helpers/compose/compose_show.h"
 #include "chat_helpers/stickers_lottie.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "core/ui_integration.h"
 #include "data/data_document.h"
 #include "data/stickers/data_custom_emoji.h"
@@ -29,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/skeleton_animation.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
+#include "ui/ui_utility.h"
 #include "ui/text/custom_emoji_helper.h"
 #include "ui/text/custom_emoji_text_badge.h"
 #include "ui/text/text_utilities.h"
@@ -38,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/labels.h"
+#include "ui/widgets/tooltip.h"
 #include "styles/style_basic.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
@@ -49,6 +53,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace HistoryView::Controls {
 namespace {
+
+constexpr auto kAiComposeStyleTooltipHiddenPref = "ai_compose_style_tooltip_hidden"_cs;
 
 enum class ComposeAiMode {
 	Translate,
@@ -1229,6 +1235,82 @@ bool ComposeAiContent::hasStyleSelection() const {
 	return _styleIndex >= 0;
 }
 
+[[nodiscard]] Fn<void(bool)> SetupStyleTooltip(
+		not_null<Ui::GenericBox*> box,
+		not_null<Ui::RpWidget*> pinnedToTop,
+		not_null<Ui::RpWidget*> stylesWrap,
+		Fn<ComposeAiMode()> currentMode) {
+	const auto tooltip = Ui::CreateChild<Ui::ImportantTooltip>(
+		box,
+		object_ptr<Ui::PaddingWrap<Ui::FlatLabel>>(
+			box,
+			Ui::MakeNiceTooltipLabel(
+				box,
+				tr::lng_ai_compose_style_tooltip(tr::rich),
+				st::historyMessagesTTLLabel.minWidth,
+				st::ttlMediaImportantTooltipLabel),
+			st::defaultImportantTooltip.padding),
+		st::historyRecordTooltip);
+	tooltip->toggleFast(false);
+
+	struct State {
+		bool shown = false;
+		bool shownOnce = false;
+	};
+	const auto state = box->lifetime().make_state<State>();
+
+	const auto updateGeometry = [=] {
+		const auto local = stylesWrap->geometry();
+		if (local.isEmpty()) {
+			return;
+		}
+		const auto geometry = Ui::MapFrom(box, pinnedToTop, local);
+		const auto countPosition = [=](QSize size) {
+			const auto left = geometry.x()
+				+ (geometry.width() - size.width()) / 2;
+			return QPoint(
+				std::max(std::min(left, box->width() - size.width()), 0),
+				(geometry.y()
+					+ geometry.height()
+					- st::historyRecordTooltip.arrow
+					- (st::aiComposeBoxStyleTabsSkip / 2)));
+		};
+		tooltip->pointAt(geometry, RectPart::Bottom, countPosition);
+	};
+
+	const auto updateVisibility = [=](bool visible) {
+		const auto show = visible
+			&& !Core::App().settings().readPref<bool>(
+				kAiComposeStyleTooltipHiddenPref);
+		if (state->shown != show) {
+			state->shown = show;
+			if (show) {
+				updateGeometry();
+				tooltip->raise();
+			}
+			if (show && !state->shownOnce) {
+				state->shownOnce = true;
+				tooltip->toggleFast(true);
+			} else {
+				tooltip->toggleAnimated(show);
+			}
+		}
+	};
+
+	stylesWrap->geometryValue(
+	) | rpl::on_next([=](const QRect &geometry) {
+		if (!geometry.isEmpty()) {
+			if (state->shown) {
+				updateGeometry();
+			} else {
+				updateVisibility(currentMode() == ComposeAiMode::Style);
+			}
+		}
+	}, tooltip->lifetime());
+
+	return updateVisibility;
+}
+
 } // namespace
 
 void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
@@ -1277,6 +1359,12 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 	stylesWrap->hide(anim::type::instant);
 	content->setModeTabs(tabs);
 	content->setStyleTabs(stylesWrap);
+
+	const auto updateStyleTooltipVisibility = SetupStyleTooltip(
+		box,
+		pinnedToTop,
+		stylesWrap,
+		[=] { return content->mode(); });
 
 	const auto sparkle = LoadingTitleSparkle(session);
 	const auto loading = box->lifetime().make_state<
@@ -1432,11 +1520,16 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 		*premiumFlooded = true;
 		rebuildButtons();
 	});
-	content->setModeChangedCallback([=](ComposeAiMode) {
+	content->setModeChangedCallback([=](ComposeAiMode mode) {
 		rebuildButtons();
+		updateStyleTooltipVisibility(mode == ComposeAiMode::Style);
 	});
 	content->setStyleSelectedCallback([=] {
 		rebuildButtons();
+		if (!Core::App().settings().readPref<bool>(kAiComposeStyleTooltipHiddenPref)) {
+			Core::App().settings().writePref<bool>(kAiComposeStyleTooltipHiddenPref, true);
+		}
+		updateStyleTooltipVisibility(false);
 	});
 
 	rebuildButtons();

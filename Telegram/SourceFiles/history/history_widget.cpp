@@ -1291,6 +1291,10 @@ void HistoryWidget::initAiButton() {
 		if (!Core::App().settings().readPref<bool>(kAiComposeTooltipHiddenPref)) {
 			Core::App().settings().writePref<bool>(kAiComposeTooltipHiddenPref, true);
 		}
+		if (_aiTooltip) {
+			_aiTooltipShown = false;
+			_aiTooltip->toggleAnimated(false);
+		}
 		updateAiButtonVisibility();
 		showAiComposeBox();
 	});
