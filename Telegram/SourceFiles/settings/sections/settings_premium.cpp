@@ -1904,20 +1904,28 @@ void ShowPremiumPromoToast(
 	(*toast) = show->showToast({
 		.text = std::move(textWithLink),
 		.filter = crl::guard(&show->session(), [=](
-				const ClickHandlerPtr &,
+				const ClickHandlerPtr &handler,
 				Qt::MouseButton button) {
-			if (button == Qt::LeftButton) {
+			if (button != Qt::LeftButton) {
+				return false;
+			}
+			const auto url = handler ? handler->url() : QString();
+			if (!url.isEmpty() && !url.startsWith(u"internal:"_q)) {
 				if (const auto strong = toast->get()) {
 					strong->hideAnimated();
 					(*toast) = nullptr;
-					if (const auto controller = resolveWindow(
-							&show->session())) {
-						Settings::ShowPremium(controller, ref);
-					}
-					return true;
+				}
+				return true;
+			}
+			if (const auto strong = toast->get()) {
+				strong->hideAnimated();
+				(*toast) = nullptr;
+				if (const auto controller = resolveWindow(
+						&show->session())) {
+					Settings::ShowPremium(controller, ref);
 				}
 			}
-			return false;
+			return true;
 		}),
 		.icon = &st::settingsToastStarIcon,
 		.adaptive = true,

@@ -75,6 +75,14 @@ Result ShowNewBot(const Context &ctx) {
 				if (!managerBot->isBot()) {
 					return;
 				}
+				if (!managerBot->botInfo->canManageBots) {
+					strong->showToast(
+						tr::lng_create_bot_no_manage(
+							tr::now,
+							lt_bot,
+							u"@"_q + managerBot->username()));
+					return;
+				}
 				ShowCreateManagedBotBox({
 					.show = strong->uiShow(),
 					.manager = managerBot,

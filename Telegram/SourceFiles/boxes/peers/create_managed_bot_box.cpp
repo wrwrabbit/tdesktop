@@ -9,14 +9,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/timer.h"
 #include "boxes/peers/edit_peer_common.h"
+#include "chat_helpers/compose/compose_show.h"
+#include "data/data_premium_limits.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "lang/lang_keys.h"
 #include "main/session/session_show.h"
 #include "main/main_session.h"
 #include "mtproto/sender.h"
+#include "settings/sections/settings_premium.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/layers/generic_box.h"
+#include "ui/toast/toast.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/fields/special_fields.h"
 #include "ui/widgets/labels.h"
@@ -336,6 +340,57 @@ void CreateManagedBotBox(
 				state->hadOccupiedError = true;
 				username->showError();
 				setError(tr::lng_create_bot_username_taken(tr::now));
+			} else if (type == u"BOT_CREATE_LIMIT_EXCEEDED"_q) {
+				const auto limits = Data::PremiumLimits(session);
+				const auto premium = session->premium();
+				const auto premiumPossible = session->premiumPossible();
+				const auto defaultLimit = limits.botsCreateDefault();
+				const auto premiumLimit = limits.botsCreatePremium();
+				const auto current = premium ? premiumLimit : defaultLimit;
+				const auto bot = tr::link(
+					u"@BotFather"_q,
+					u"https://t.me/botfather?start=deletebot"_q);
+				if (premium || !premiumPossible) {
+					using WeakToast = base::weak_ptr<Ui::Toast::Instance>;
+					const auto toast = std::make_shared<WeakToast>();
+					(*toast) = show->showToast({
+						.text = tr::lng_bots_create_limit_final(
+							tr::now,
+							lt_count,
+							current,
+							lt_bot,
+							tr::bold(bot),
+							tr::rich),
+						.filter = crl::guard(session, [=](
+								const ClickHandlerPtr &,
+								Qt::MouseButton button) {
+							if (button == Qt::LeftButton) {
+								if (const auto strong = toast->get()) {
+									strong->hideAnimated();
+									(*toast) = nullptr;
+								}
+							}
+							return true;
+						}),
+					});
+				} else {
+					Settings::ShowPremiumPromoToast(
+						show,
+						ChatHelpers::ResolveWindowDefault(),
+						tr::lng_bots_create_limit(
+							tr::now,
+							lt_count,
+							current,
+							lt_link,
+							tr::bold(
+								tr::lng_bots_create_limit_link(tr::now, tr::link)),
+							lt_premium_count,
+							tr::bold(QString::number(premiumLimit)),
+							lt_bot,
+							tr::bold(bot),
+							tr::rich),
+						u"managed_bots"_q);
+				}
 			} else {
 				show->showToast(type);
 			}

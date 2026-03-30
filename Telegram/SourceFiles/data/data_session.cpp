@@ -589,6 +589,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 				info->activeUsers = data.vbot_active_users().value_or_empty();
 				info->hasMainApp = data.is_bot_has_main_app();
 				info->userCreatesTopics = data.is_bot_forum_can_manage_topics();
+				info->canManageBots = data.is_bot_can_manage_bots();
 			}
 		}
 

@@ -2591,6 +2591,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_managed_bot_edit_photo_link" = "here {arrow}";
 "lng_managed_bot_set_photo" = "Set Profile Photo";
 
+"lng_create_bot_no_manage" = "{bot} doesn't have Bot Management Mode enabled.";
+
+"lng_bots_create_limit#one" = "Subscribe to {link} to create up to {premium_count} bots, or delete one of your **{count}** bot via {bot}.";
+"lng_bots_create_limit#other" = "Subscribe to {link} to create up to {premium_count} bots, or delete one of your **{count}** bots via {bot}.";
+"lng_bots_create_limit_link" = "Premium";
+"lng_bots_create_limit_final#one" = "You can create up to **{count}** bot. Delete your current ones via {bot}.";
+"lng_bots_create_limit_final#other" = "You can create up to **{count}** bots. Delete your current ones via {bot}.";
+
 "lng_stake_game_title" = "Emoji Stake";
 "lng_stake_game_beta" = "Beta";
 "lng_stake_game_about" = "A limited play-test of the upcoming emoji mini-game platform for a small group of users.";

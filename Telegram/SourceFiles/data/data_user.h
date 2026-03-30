@@ -107,6 +107,7 @@ struct BotInfo {
 	bool hasMainApp : 1 = false;
 	bool userCreatesTopics : 1 = false;
 	bool setBotPhotoHidden : 1 = false;
+	bool canManageBots : 1 = false;
 
 private:
 	std::unique_ptr<Data::Forum> _forum;
