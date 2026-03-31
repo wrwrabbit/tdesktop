@@ -366,6 +366,17 @@ void Viewport::RendererRhi::createPipelines() {
 	_blurHPipeline->setRenderPassDescriptor(_offscreenRpDesc);
 	_blurHPipeline->create();
 
+	_blurVPipeline = _rhi->newGraphicsPipeline();
+	_blurVPipeline->setShaderStages({
+		{ QRhiShaderStage::Vertex, passthroughVert },
+		{ QRhiShaderStage::Fragment, blurVFrag },
+	});
+	_blurVPipeline->setVertexInputLayout(passthroughLayout);
+	_blurVPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
+	_blurVPipeline->setShaderResourceBindings(_blurHSrb);
+	_blurVPipeline->setRenderPassDescriptor(_offscreenRpDesc);
+	_blurVPipeline->create();
+
 	auto *frameSrb = _rhi->newShaderResourceBindings();
 	frameSrb->setBindings({
 		QRhiShaderResourceBinding::uniformBuffer(
@@ -462,9 +473,12 @@ void Viewport::RendererRhi::releaseResources() {
 		delete data.downscaleTexture;
 		delete data.downscaleRpDesc;
 		delete data.downscaleRt;
-		delete data.blurTexture;
-		delete data.blurRpDesc;
-		delete data.blurRt;
+		delete data.blurHTexture;
+		delete data.blurHRpDesc;
+		delete data.blurHRt;
+		delete data.blurVTexture;
+		delete data.blurVRpDesc;
+		delete data.blurVRt;
 	}
 	_tileData.clear();
 	_tileDataIndices.clear();
@@ -472,6 +486,7 @@ void Viewport::RendererRhi::releaseResources() {
 	delete _downscaleArgb32Pipeline; _downscaleArgb32Pipeline = nullptr;
 	delete _downscaleYuv420Pipeline; _downscaleYuv420Pipeline = nullptr;
 	delete _blurHPipeline; _blurHPipeline = nullptr;
+	delete _blurVPipeline; _blurVPipeline = nullptr;
 	delete _framePipeline; _framePipeline = nullptr;
 	delete _controlsPipeline; _controlsPipeline = nullptr;
 
@@ -560,20 +575,90 @@ void Viewport::RendererRhi::ensureNoiseTexture() {
 		QImage::Format_ARGB32_Premultiplied);
 	noiseImage.fill(Qt::transparent);
 
-	auto *rub = _rhi->nextResourceUpdateBatch();
-
 	_noiseTexture = _rhi->newTexture(
 		QRhiTexture::RGBA8,
 		QSize(kNoiseTextureSize, kNoiseTextureSize));
 	_noiseTexture->create();
 
-	// Render noise via the noise.frag shader to an offscreen target,
-	// then read back. For simplicity, generate procedurally on CPU.
+	const auto fade = [](float t) {
+		return t * t * t * (t * (t * 6.f - 15.f) + 10.f);
+	};
+	const auto rnm = [](float x, float y) {
+		const auto noise = std::sin(
+			x * 12.9898f + y * 78.233f) * 43758.5453f;
+		return std::array<float, 4>{
+			std::fmod(noise, 1.f) * 2.f - 1.f,
+			std::fmod(noise * 1.2154f, 1.f) * 2.f - 1.f,
+			std::fmod(noise * 1.3453f, 1.f) * 2.f - 1.f,
+			std::fmod(noise * 1.4651f, 1.f) * 2.f - 1.f,
+		};
+	};
+	const auto pnoise3D = [&](float px, float py, float pz) {
+		const auto unit = 1.f / 256.f;
+		const auto half = 0.5f / 256.f;
+		const auto pix = unit * std::floor(px) + half;
+		const auto piy = unit * std::floor(py) + half;
+		const auto piz = unit * std::floor(pz) + half;
+		const auto pfx = px - std::floor(px);
+		const auto pfy = py - std::floor(py);
+		const auto pfz = pz - std::floor(pz);
+		const auto perm00 = rnm(pix, piy)[3];
+		const auto g000 = rnm(perm00, piz);
+		const auto n000 = g000[0]*pfx + g000[1]*pfy + g000[2]*pfz;
+		const auto g001 = rnm(perm00, piz + unit);
+		const auto n001 = g001[0]*pfx + g001[1]*pfy
+			+ g001[2]*(pfz - 1.f);
+		const auto perm01 = rnm(pix, piy + unit)[3];
+		const auto g010 = rnm(perm01, piz);
+		const auto n010 = g010[0]*pfx + g010[1]*(pfy - 1.f)
+			+ g010[2]*pfz;
+		const auto g011 = rnm(perm01, piz + unit);
+		const auto n011 = g011[0]*pfx + g011[1]*(pfy - 1.f)
+			+ g011[2]*(pfz - 1.f);
+		const auto perm10 = rnm(pix + unit, piy)[3];
+		const auto g100 = rnm(perm10, piz);
+		const auto n100 = g100[0]*(pfx - 1.f) + g100[1]*pfy
+			+ g100[2]*pfz;
+		const auto g101 = rnm(perm10, piz + unit);
+		const auto n101 = g101[0]*(pfx - 1.f) + g101[1]*pfy
+			+ g101[2]*(pfz - 1.f);
+		const auto perm11 = rnm(pix + unit, piy + unit)[3];
+		const auto g110 = rnm(perm11, piz);
+		const auto n110 = g110[0]*(pfx - 1.f) + g110[1]*(pfy - 1.f)
+			+ g110[2]*pfz;
+		const auto g111 = rnm(perm11, piz + unit);
+		const auto n111 = g111[0]*(pfx - 1.f) + g111[1]*(pfy - 1.f)
+			+ g111[2]*(pfz - 1.f);
+		const auto fx = fade(pfx);
+		const auto fy = fade(pfy);
+		const auto fz = fade(pfz);
+		const auto nx0 = n000 + (n100 - n000) * fx;
+		const auto nx1 = n001 + (n101 - n001) * fx;
+		const auto nx2 = n010 + (n110 - n010) * fx;
+		const auto nx3 = n011 + (n111 - n011) * fx;
+		const auto nxy0 = nx0 + (nx2 - nx0) * fy;
+		const auto nxy1 = nx1 + (nx3 - nx1) * fy;
+		return nxy0 + (nxy1 - nxy0) * fz;
+	};
+
+	constexpr auto grainsize = 1.3f;
+	constexpr auto rotation = 1.425f;
+	const auto sinR = std::sin(rotation);
+	const auto cosR = std::cos(rotation);
+
 	auto *noiseData = noiseImage.bits();
 	for (int py = 0; py < kNoiseTextureSize; ++py) {
 		for (int px = 0; px < kNoiseTextureSize; ++px) {
-			const auto noise = float(rand() % 256) / 255.f;
-			const auto v = quint8(noise * 255);
+			auto tx = float(px) / grainsize;
+			auto ty = float(py) / grainsize;
+			tx -= 0.5f * kNoiseTextureSize / grainsize;
+			ty -= 0.5f * kNoiseTextureSize / grainsize;
+			const auto rx = tx * cosR - ty * sinR;
+			const auto ry = tx * sinR + ty * cosR;
+			tx = rx + 0.5f * kNoiseTextureSize / grainsize;
+			ty = ry + 0.5f * kNoiseTextureSize / grainsize;
+			const auto noise = pnoise3D(tx, ty, 0.f) * 0.5f + 0.5f;
+			const auto v = quint8(std::clamp(noise, 0.f, 1.f) * 255.f);
 			auto *pixel = noiseData
 				+ (py * noiseImage.bytesPerLine())
 				+ (px * 4);
@@ -583,14 +668,12 @@ void Viewport::RendererRhi::ensureNoiseTexture() {
 			pixel[3] = 255;
 		}
 	}
-	rub->uploadTexture(
+	_rub = _rhi->nextResourceUpdateBatch();
+	_rub->uploadTexture(
 		_noiseTexture,
 		QRhiTextureUploadDescription(
 			QRhiTextureUploadEntry(0, 0,
 				QRhiTextureSubresourceUploadDescription(noiseImage))));
-
-	_cb->beginPass(_rt, *clearColor(), { 1.0f, 0 }, rub);
-	_cb->endPass();
 }
 
 void Viewport::RendererRhi::paintTile(
@@ -644,7 +727,7 @@ void Viewport::RendererRhi::uploadFrame(
 		return;
 	}
 
-	auto *rub = _rhi->nextResourceUpdateBatch();
+	_rub = _rhi->nextResourceUpdateBatch();
 
 	if (_rgbaFrame) {
 		const auto &image = _userpicFrame
@@ -658,7 +741,7 @@ void Viewport::RendererRhi::uploadFrame(
 			tileData.rgbaTexture->create();
 			tileData.rgbaSize = image.size();
 		}
-		rub->uploadTexture(
+		_rub->uploadTexture(
 			tileData.rgbaTexture,
 			QRhiTextureUploadDescription(
 				QRhiTextureUploadEntry(0, 0,
@@ -676,7 +759,7 @@ void Viewport::RendererRhi::uploadFrame(
 			yuv->y.data,
 			yuv->y.stride * yuv->size.height());
 		yDesc.setDataStride(yuv->y.stride);
-		rub->uploadTexture(
+		_rub->uploadTexture(
 			tileData.yTexture,
 			QRhiTextureUploadDescription(
 				QRhiTextureUploadEntry(0, 0, yDesc)));
@@ -697,7 +780,7 @@ void Viewport::RendererRhi::uploadFrame(
 			yuv->u.data,
 			yuv->u.stride * yuv->chromaSize.height());
 		uDesc.setDataStride(yuv->u.stride);
-		rub->uploadTexture(
+		_rub->uploadTexture(
 			tileData.uTexture,
 			QRhiTextureUploadDescription(
 				QRhiTextureUploadEntry(0, 0, uDesc)));
@@ -705,14 +788,11 @@ void Viewport::RendererRhi::uploadFrame(
 			yuv->v.data,
 			yuv->v.stride * yuv->chromaSize.height());
 		vDesc.setDataStride(yuv->v.stride);
-		rub->uploadTexture(
+		_rub->uploadTexture(
 			tileData.vTexture,
 			QRhiTextureUploadDescription(
 				QRhiTextureUploadEntry(0, 0, vDesc)));
 	}
-
-	_cb->beginPass(_rt, *clearColor(), { 1.0f, 0 }, rub);
-	_cb->endPass();
 }
 
 void Viewport::RendererRhi::prepareOffscreenTargets(
@@ -720,46 +800,41 @@ void Viewport::RendererRhi::prepareOffscreenTargets(
 		QSize blurSize) {
 	if (tileData.blurSize == blurSize
 		&& tileData.downscaleRt
-		&& tileData.blurRt) {
+		&& tileData.blurHRt
+		&& tileData.blurVRt) {
 		return;
 	}
 	tileData.blurSize = blurSize;
 
-	delete tileData.downscaleRt;
-	delete tileData.downscaleRpDesc;
-	delete tileData.downscaleTexture;
-	tileData.downscaleTexture = _rhi->newTexture(
-		QRhiTexture::RGBA8,
-		blurSize,
-		1,
-		QRhiTexture::RenderTarget);
-	tileData.downscaleTexture->create();
-	auto downscaleColorAtt = QRhiColorAttachment(
-		tileData.downscaleTexture);
-	tileData.downscaleRt = _rhi->newTextureRenderTarget(
-		QRhiTextureRenderTargetDescription(downscaleColorAtt));
-	tileData.downscaleRpDesc =
-		tileData.downscaleRt->newCompatibleRenderPassDescriptor();
-	tileData.downscaleRt->setRenderPassDescriptor(
+	const auto createOffscreenRT = [&](
+			QRhiTexture *&tex,
+			QRhiTextureRenderTarget *&rt,
+			QRhiRenderPassDescriptor *&rpDesc) {
+		delete rt;
+		delete rpDesc;
+		delete tex;
+		tex = _rhi->newTexture(
+			QRhiTexture::RGBA8, blurSize, 1, QRhiTexture::RenderTarget);
+		tex->create();
+		auto colorAtt = QRhiColorAttachment(tex);
+		rt = _rhi->newTextureRenderTarget(
+			QRhiTextureRenderTargetDescription(colorAtt));
+		rpDesc = rt->newCompatibleRenderPassDescriptor();
+		rt->setRenderPassDescriptor(rpDesc);
+		rt->create();
+	};
+	createOffscreenRT(
+		tileData.downscaleTexture,
+		tileData.downscaleRt,
 		tileData.downscaleRpDesc);
-	tileData.downscaleRt->create();
-
-	delete tileData.blurRt;
-	delete tileData.blurRpDesc;
-	delete tileData.blurTexture;
-	tileData.blurTexture = _rhi->newTexture(
-		QRhiTexture::RGBA8,
-		blurSize,
-		1,
-		QRhiTexture::RenderTarget);
-	tileData.blurTexture->create();
-	auto blurColorAtt = QRhiColorAttachment(tileData.blurTexture);
-	tileData.blurRt = _rhi->newTextureRenderTarget(
-		QRhiTextureRenderTargetDescription(blurColorAtt));
-	tileData.blurRpDesc =
-		tileData.blurRt->newCompatibleRenderPassDescriptor();
-	tileData.blurRt->setRenderPassDescriptor(tileData.blurRpDesc);
-	tileData.blurRt->create();
+	createOffscreenRT(
+		tileData.blurHTexture,
+		tileData.blurHRt,
+		tileData.blurHRpDesc);
+	createOffscreenRT(
+		tileData.blurVTexture,
+		tileData.blurVRt,
+		tileData.blurVRpDesc);
 }
 
 void Viewport::RendererRhi::drawDownscalePass(
@@ -774,8 +849,10 @@ void Viewport::RendererRhi::drawDownscalePass(
 		 1.f,  1.f, 1.f, 0.f,
 	};
 
-	auto *rub = _rhi->nextResourceUpdateBatch();
-	rub->updateDynamicBuffer(
+	if (!_rub) {
+		_rub = _rhi->nextResourceUpdateBatch();
+	}
+	_rub->updateDynamicBuffer(
 		_offscreenVertexBuffer, 0, sizeof(coords), coords);
 
 	auto *srb = _rhi->newShaderResourceBindings();
@@ -812,7 +889,8 @@ void Viewport::RendererRhi::drawDownscalePass(
 	}
 	srb->create();
 
-	_cb->beginPass(tileData.downscaleRt, Qt::black, { 1.0f, 0 }, rub);
+	_cb->beginPass(tileData.downscaleRt, Qt::black, { 1.0f, 0 }, _rub);
+	_rub = nullptr;
 	_cb->setGraphicsPipeline(pipeline);
 	_cb->setShaderResources(srb);
 	_cb->setViewport({ 0, 0, w, h });
@@ -835,41 +913,77 @@ void Viewport::RendererRhi::drawBlurPass(
 		 1.f,  1.f, 1.f, 0.f,
 	};
 
-	BlurUniforms blurUniforms{};
-	blurUniforms.texelOffset = 1.f / w;
+	{
+		BlurUniforms blurUniforms{};
+		blurUniforms.texelOffset = 1.f / w;
+		auto *rub = _rhi->nextResourceUpdateBatch();
+		rub->updateDynamicBuffer(
+			_offscreenVertexBuffer, 0, sizeof(coords), coords);
+		rub->updateDynamicBuffer(
+			_uniformBuffer, 0, sizeof(blurUniforms), &blurUniforms);
 
-	auto *rub = _rhi->nextResourceUpdateBatch();
-	rub->updateDynamicBuffer(
-		_offscreenVertexBuffer, 0, sizeof(coords), coords);
-	rub->updateDynamicBuffer(
-		_uniformBuffer, 0, sizeof(blurUniforms), &blurUniforms);
+		auto *srb = _rhi->newShaderResourceBindings();
+		_perDrawSrbs.push_back(srb);
+		srb->setBindings({
+			QRhiShaderResourceBinding::uniformBuffer(
+				0,
+				QRhiShaderResourceBinding::FragmentStage,
+				_uniformBuffer, 0, sizeof(BlurUniforms)),
+			QRhiShaderResourceBinding::sampledTexture(
+				1,
+				QRhiShaderResourceBinding::FragmentStage,
+				tileData.downscaleTexture,
+				_nearestSampler),
+		});
+		srb->create();
 
-	auto *srb = _rhi->newShaderResourceBindings();
-	_perDrawSrbs.push_back(srb);
-	srb->setBindings({
-		QRhiShaderResourceBinding::uniformBuffer(
-			0,
-			QRhiShaderResourceBinding::FragmentStage,
-			_uniformBuffer,
-			0,
-			sizeof(BlurUniforms)),
-		QRhiShaderResourceBinding::sampledTexture(
-			1,
-			QRhiShaderResourceBinding::FragmentStage,
-			tileData.downscaleTexture,
-			_nearestSampler),
-	});
-	srb->create();
+		_cb->beginPass(
+			tileData.blurHRt, Qt::black, { 1.0f, 0 }, rub);
+		_cb->setGraphicsPipeline(_blurHPipeline);
+		_cb->setShaderResources(srb);
+		_cb->setViewport({ 0, 0, w, h });
+		const QRhiCommandBuffer::VertexInput vbuf(
+			_offscreenVertexBuffer, 0);
+		_cb->setVertexInput(0, 1, &vbuf);
+		_cb->draw(4);
+		_cb->endPass();
+	}
 
-	_cb->beginPass(tileData.blurRt, Qt::black, { 1.0f, 0 }, rub);
-	_cb->setGraphicsPipeline(_blurHPipeline);
-	_cb->setShaderResources(srb);
-	_cb->setViewport({ 0, 0, w, h });
-	const QRhiCommandBuffer::VertexInput vbuf(
-		_offscreenVertexBuffer, 0);
-	_cb->setVertexInput(0, 1, &vbuf);
-	_cb->draw(4);
-	_cb->endPass();
+	{
+		BlurUniforms blurUniforms{};
+		blurUniforms.texelOffset = 1.f / h;
+		auto *rub = _rhi->nextResourceUpdateBatch();
+		rub->updateDynamicBuffer(
+			_offscreenVertexBuffer, 0, sizeof(coords), coords);
+		rub->updateDynamicBuffer(
+			_uniformBuffer, 0, sizeof(blurUniforms), &blurUniforms);
+
+		auto *srb = _rhi->newShaderResourceBindings();
+		_perDrawSrbs.push_back(srb);
+		srb->setBindings({
+			QRhiShaderResourceBinding::uniformBuffer(
+				0,
+				QRhiShaderResourceBinding::FragmentStage,
+				_uniformBuffer, 0, sizeof(BlurUniforms)),
+			QRhiShaderResourceBinding::sampledTexture(
+				1,
+				QRhiShaderResourceBinding::FragmentStage,
+				tileData.blurHTexture,
+				_nearestSampler),
+		});
+		srb->create();
+
+		_cb->beginPass(
+			tileData.blurVRt, Qt::black, { 1.0f, 0 }, rub);
+		_cb->setGraphicsPipeline(_blurVPipeline);
+		_cb->setShaderResources(srb);
+		_cb->setViewport({ 0, 0, w, h });
+		const QRhiCommandBuffer::VertexInput vbuf(
+			_offscreenVertexBuffer, 0);
+		_cb->setVertexInput(0, 1, &vbuf);
+		_cb->draw(4);
+		_cb->endPass();
+	}
 }
 
 void Viewport::RendererRhi::drawFramePass(
@@ -1030,8 +1144,8 @@ void Viewport::RendererRhi::drawFramePass(
 		QRhiShaderResourceBinding::sampledTexture(
 			2,
 			QRhiShaderResourceBinding::FragmentStage,
-			tileData.blurTexture
-				? tileData.blurTexture
+			tileData.blurVTexture
+				? tileData.blurVTexture
 				: _placeholderTexture,
 			_linearSampler),
 		QRhiShaderResourceBinding::sampledTexture(
@@ -1452,9 +1566,12 @@ void Viewport::RendererRhi::validateDatas() {
 			delete it->downscaleTexture;
 			delete it->downscaleRpDesc;
 			delete it->downscaleRt;
-			delete it->blurTexture;
-			delete it->blurRpDesc;
-			delete it->blurRt;
+			delete it->blurHTexture;
+			delete it->blurHRpDesc;
+			delete it->blurHRt;
+			delete it->blurVTexture;
+			delete it->blurVRpDesc;
+			delete it->blurVRt;
 			it = _tileData.erase(it);
 		} else {
 			++it;

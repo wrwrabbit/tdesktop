@@ -78,9 +78,13 @@ private:
 		QRhiTextureRenderTarget *downscaleRt = nullptr;
 		QRhiRenderPassDescriptor *downscaleRpDesc = nullptr;
 
-		QRhiTexture *blurTexture = nullptr;
-		QRhiTextureRenderTarget *blurRt = nullptr;
-		QRhiRenderPassDescriptor *blurRpDesc = nullptr;
+		QRhiTexture *blurHTexture = nullptr;
+		QRhiTextureRenderTarget *blurHRt = nullptr;
+		QRhiRenderPassDescriptor *blurHRpDesc = nullptr;
+
+		QRhiTexture *blurVTexture = nullptr;
+		QRhiTextureRenderTarget *blurVRt = nullptr;
+		QRhiRenderPassDescriptor *blurVRpDesc = nullptr;
 
 		QSize blurSize;
 		bool stale = false;
