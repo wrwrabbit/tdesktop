@@ -651,6 +651,29 @@ public:
 		_yuv420Pipeline->setRenderPassDescriptor(rpDesc);
 		_yuv420Pipeline->create();
 
+#ifndef Q_OS_MAC
+		const auto shadowFs = Ui::Rhi::ShaderFromFile(
+			u":/shaders/argb32.frag.qsb"_q);
+		QRhiGraphicsPipeline::TargetBlend blend;
+		blend.enable = true;
+		blend.srcColor = QRhiGraphicsPipeline::One;
+		blend.dstColor = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+		blend.srcAlpha = QRhiGraphicsPipeline::One;
+		blend.dstAlpha = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+		_shadowBlendPipeline = rhi->newGraphicsPipeline();
+		_shadowBlendPipeline->setShaderStages({
+			{ QRhiShaderStage::Vertex, vs },
+			{ QRhiShaderStage::Fragment, shadowFs },
+		});
+		_shadowBlendPipeline->setVertexInputLayout(layout);
+		_shadowBlendPipeline->setTargetBlends({ blend });
+		_shadowBlendPipeline->setTopology(
+			QRhiGraphicsPipeline::TriangleStrip);
+		_shadowBlendPipeline->setShaderResourceBindings(_argb32Srb);
+		_shadowBlendPipeline->setRenderPassDescriptor(rpDesc);
+		_shadowBlendPipeline->create();
+#endif
+
 		_initialized = true;
 	}
 
@@ -835,14 +858,145 @@ public:
 		const QRhiCommandBuffer::VertexInput vbuf(_vertexBuffer, 0);
 		cb->setVertexInput(0, 1, &vbuf);
 		cb->draw(4);
+
+#ifndef Q_OS_MAC
+		paintTitleShadow(rt, cb, pw, ph);
+#endif
+
 		cb->endPass();
+	}
+
+	void paintTitleShadow(
+			QRhiRenderTarget *rt,
+			QRhiCommandBuffer *cb,
+			float pw,
+			float ph) {
+		if (!_shadowBlendPipeline) {
+			return;
+		}
+		validateShadowImage();
+		if (!_shadowTexture) {
+			return;
+		}
+		const auto factor = style::DevicePixelRatio();
+		const auto widget = _owner->widget();
+		const auto left = (_owner->_topControlsAlignment
+			== style::al_left);
+		const auto width = widget->parentWidget()->width();
+		const auto position = left
+			? QPoint()
+			: QPoint(
+				width - st::callTitleShadowRight.width(),
+				0);
+		const auto translated = position - widget->pos();
+		const auto shadowArea = QRect(
+			translated,
+			st::callTitleShadowLeft.size());
+		const auto viewport = QSize(
+			int(pw / factor), int(ph / factor));
+		const auto shadowRect = Ui::GL::TransformRect(
+			Ui::GL::Rect(shadowArea),
+			viewport,
+			factor);
+
+		const auto &texRect = left
+			? _shadowLeftRect : _shadowRightRect;
+		const auto atlasW = float(_shadowSize.width());
+		const auto atlasH = float(_shadowSize.height());
+		const auto tl = texRect.left() / atlasW;
+		const auto tr = texRect.right() / atlasW;
+		const auto tt = texRect.top() / atlasH;
+		const auto tb = texRect.bottom() / atlasH;
+
+		auto *rub2 = _rhi->nextResourceUpdateBatch();
+		ensureShadowUploaded(rub2);
+		const float shadowCoords[] = {
+			shadowRect.left(), shadowRect.bottom(), tl, tt,
+			shadowRect.right(), shadowRect.bottom(), tr, tt,
+			shadowRect.left(), shadowRect.top(), tl, tb,
+			shadowRect.right(), shadowRect.top(), tr, tb,
+		};
+		rub2->updateDynamicBuffer(
+			_vertexBuffer, 0, sizeof(shadowCoords), shadowCoords);
+		const float viewport2[] = { pw, ph, 0.f, 0.f };
+		rub2->updateDynamicBuffer(
+			_uniformBuffer, 0, sizeof(viewport2), viewport2);
+
+		_argb32Srb->setBindings({
+			QRhiShaderResourceBinding::uniformBuffer(
+				0,
+				QRhiShaderResourceBinding::VertexStage,
+				_uniformBuffer),
+			QRhiShaderResourceBinding::sampledTexture(
+				1,
+				QRhiShaderResourceBinding::FragmentStage,
+				_shadowTexture, _sampler),
+		});
+		_argb32Srb->create();
+
+		cb->resourceUpdate(rub2);
+		cb->setGraphicsPipeline(_shadowBlendPipeline);
+		cb->setShaderResources(_argb32Srb);
+		cb->setViewport({ 0, 0, pw, ph });
+		const QRhiCommandBuffer::VertexInput vbuf2(_vertexBuffer, 0);
+		cb->setVertexInput(0, 1, &vbuf2);
+		cb->draw(4);
+	}
+
+	void validateShadowImage() {
+		if (_shadowTexture) {
+			return;
+		}
+		const auto ifactor = int(std::ceil(
+			style::DevicePixelRatio()));
+		const auto size = st::callTitleShadowLeft.size();
+		const auto full = QSize(
+			size.width(), 2 * size.height()) * ifactor;
+		auto image = QImage(
+			full, QImage::Format_ARGB32_Premultiplied);
+		image.setDevicePixelRatio(ifactor);
+		image.fill(Qt::transparent);
+		{
+			auto p = QPainter(&image);
+			st::callTitleShadowLeft.paint(
+				p, 0, 0, size.width());
+			_shadowLeftRect = QRect(
+				0, 0, full.width(), full.height() / 2);
+			st::callTitleShadowRight.paint(
+				p, 0, size.height(), size.width());
+			_shadowRightRect = QRect(
+				0, full.height() / 2,
+				full.width(), full.height() / 2);
+		}
+		_shadowTexture = _rhi->newTexture(
+			QRhiTexture::BGRA8, full);
+		_shadowTexture->create();
+		_shadowSize = full;
+		_shadowUploadImage = std::move(image);
+	}
+
+	QImage _shadowUploadImage;
+
+	void ensureShadowUploaded(QRhiResourceUpdateBatch *rub) {
+		if (_shadowUploadImage.isNull()) {
+			return;
+		}
+		rub->uploadTexture(
+			_shadowTexture,
+			QRhiTextureUploadDescription(
+				QRhiTextureUploadEntry(0, 0,
+					QRhiTextureSubresourceUploadDescription(
+						_shadowUploadImage))));
+		_shadowUploadImage = QImage();
 	}
 
 	void releaseResources() override {
 		delete _argb32Pipeline; _argb32Pipeline = nullptr;
 		delete _yuv420Pipeline; _yuv420Pipeline = nullptr;
+		delete _shadowBlendPipeline; _shadowBlendPipeline = nullptr;
 		delete _argb32Srb; _argb32Srb = nullptr;
 		delete _yuv420Srb; _yuv420Srb = nullptr;
+		delete _shadowTexture; _shadowTexture = nullptr;
 		delete _rgbaTexture; _rgbaTexture = nullptr;
 		delete _yTexture; _yTexture = nullptr;
 		delete _uTexture; _uTexture = nullptr;
@@ -873,8 +1027,13 @@ private:
 	int _trackFrameIndex = 0;
 	QRhiGraphicsPipeline *_argb32Pipeline = nullptr;
 	QRhiGraphicsPipeline *_yuv420Pipeline = nullptr;
+	QRhiGraphicsPipeline *_shadowBlendPipeline = nullptr;
 	QRhiShaderResourceBindings *_argb32Srb = nullptr;
 	QRhiShaderResourceBindings *_yuv420Srb = nullptr;
+	QRhiTexture *_shadowTexture = nullptr;
+	QSize _shadowSize;
+	QRect _shadowLeftRect;
+	QRect _shadowRightRect;
 	bool _initialized = false;
 };
 #endif // Qt >= 6.7
