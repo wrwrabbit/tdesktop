@@ -138,9 +138,9 @@ private:
 	std::vector<QRhiShaderResourceBindings*> _perDrawSrbs;
 	int _nextVertexSlot = 0;
 
-	QRhiTexture *_rgbaTexture = nullptr;
-	QSize _rgbaSize;
-	quint64 _cacheKey = 0;
+	QRhiTexture *_rgbaTextures[3] = {};
+	QSize _rgbaSizes[3];
+	quint64 _cacheKeys[3] = {};
 
 	struct PoolTexture {
 		QRhiTexture *texture = nullptr;

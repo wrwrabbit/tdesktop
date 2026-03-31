@@ -30,6 +30,34 @@ struct ImageUniforms {
 };
 static_assert(sizeof(ImageUniforms) % 16 == 0);
 
+[[nodiscard]] QRectF StoryCropTextureRect(
+		QSizeF imageSize,
+		QSizeF targetSize) {
+	if (imageSize.isEmpty() || targetSize.isEmpty()) {
+		return QRectF(0., 0., 1., 1.);
+	}
+	const auto targetAspect = targetSize.width() / targetSize.height();
+	const auto imageAspect = imageSize.width() / imageSize.height();
+	if (imageAspect > targetAspect) {
+		const auto cropW = imageSize.height() * targetAspect;
+		const auto offset = (imageSize.width() - cropW) / 2.;
+		return QRectF(
+			offset / imageSize.width(),
+			0.,
+			cropW / imageSize.width(),
+			1.);
+	} else if (imageAspect < targetAspect) {
+		const auto cropH = imageSize.width() / targetAspect;
+		const auto offset = (imageSize.height() - cropH) / 2.;
+		return QRectF(
+			0.,
+			offset / imageSize.height(),
+			1.,
+			cropH / imageSize.height());
+	}
+	return QRectF(0., 0., 1., 1.);
+}
+
 [[nodiscard]] QShader LoadShader(const QString &name) {
 	return Ui::Rhi::ShaderFromFile(
 		u":/shaders/"_q + name + u".qsb"_q);
@@ -41,7 +69,7 @@ OverlayWidget::RendererRhi::RendererRhi(not_null<OverlayWidget*> owner)
 : _owner(owner) {
 	style::PaletteChanged(
 	) | rpl::on_next([=] {
-		_cacheKey = 0;
+		ranges::fill(_cacheKeys, quint64(0));
 	}, _lifetime);
 
 	crl::on_main(this, [=] {
@@ -51,11 +79,11 @@ OverlayWidget::RendererRhi::RendererRhi(not_null<OverlayWidget*> owner)
 				Data::AmPremiumValue(
 					_owner->_storiesSession
 				) | rpl::on_next([=] {
-					_cacheKey = 0;
+					ranges::fill(_cacheKeys, quint64(0));
 				}, _storiesLifetime);
 			} else {
 				_storiesLifetime.destroy();
-				_cacheKey = 0;
+				ranges::fill(_cacheKeys, quint64(0));
 			}
 		}, _lifetime);
 	});
@@ -190,7 +218,7 @@ void OverlayWidget::RendererRhi::render(
 	if (_factor != factor) {
 		_factor = factor;
 		_ifactor = int(std::ceil(factor));
-		_cacheKey = 0;
+		ranges::fill(_cacheKeys, quint64(0));
 	}
 	_viewport = QSize(
 		int(size.width() / _factor),
@@ -277,8 +305,12 @@ void OverlayWidget::RendererRhi::releaseResources() {
 	}
 	_perDrawSrbs.clear();
 
-	delete _rgbaTexture;
-	_rgbaTexture = nullptr;
+	for (auto &tex : _rgbaTextures) {
+		delete tex;
+		tex = nullptr;
+	}
+	ranges::fill(_rgbaSizes, QSize());
+	ranges::fill(_cacheKeys, quint64(0));
 	delete _placeholderTexture;
 	_placeholderTexture = nullptr;
 
@@ -510,16 +542,41 @@ void OverlayWidget::RendererRhi::paintTransformedStaticContent(
 		bool semiTransparent,
 		bool fillTransparentBackground,
 		int index) {
-	if (image.isNull() || !_imagePipeline) {
+	Expects(index >= 0 && index < 3);
+
+	if (image.isNull() || geometry.rect.isEmpty() || !_imagePipeline) {
 		return;
 	}
 
-	auto *tex = acquirePoolTexture(image.size());
-	_rub->uploadTexture(
-		tex,
-		QRhiTextureUploadDescription(
-			QRhiTextureUploadEntry(0, 0,
-				QRhiTextureSubresourceUploadDescription(image))));
+	const auto cacheKey = image.cacheKey();
+	const auto upload = (_cacheKeys[index] != cacheKey);
+	if (upload) {
+		_cacheKeys[index] = cacheKey;
+		if (!_rgbaTextures[index]
+			|| _rgbaSizes[index] != image.size()) {
+			delete _rgbaTextures[index];
+			_rgbaTextures[index] = _rhi->newTexture(
+				QRhiTexture::BGRA8,
+				image.size());
+			_rgbaTextures[index]->create();
+			_rgbaSizes[index] = image.size();
+		}
+		_rub->uploadTexture(
+			_rgbaTextures[index],
+			QRhiTextureUploadDescription(
+				QRhiTextureUploadEntry(0, 0,
+					QRhiTextureSubresourceUploadDescription(image))));
+	}
+
+	const auto textureRect = _owner->_stories
+		? StoryCropTextureRect(
+			QSizeF(image.size()),
+			geometry.rect.size())
+		: QRectF(0., 0., 1., 1.);
+	const auto texLeft = float(textureRect.x());
+	const auto texRight = float(textureRect.x() + textureRect.width());
+	const auto texTop = float(textureRect.y());
+	const auto texBottom = float(textureRect.y() + textureRect.height());
 
 	const auto rRect = scaleRect(
 		transformRect(geometry.rect),
@@ -539,13 +596,20 @@ void OverlayWidget::RendererRhi::paintTransformedStaticContent(
 	const auto bl = rotated(rRect.left(), rRect.top());
 	const auto br = rotated(rRect.right(), rRect.top());
 	const float coords[] = {
-		tl[0], tl[1], 0.f, 0.f,
-		tr[0], tr[1], 1.f, 0.f,
-		bl[0], bl[1], 0.f, 1.f,
-		br[0], br[1], 1.f, 1.f,
+		tl[0], tl[1], texLeft, texTop,
+		tr[0], tr[1], texRight, texTop,
+		bl[0], bl[1], texLeft, texBottom,
+		br[0], br[1], texRight, texBottom,
 	};
 
-	drawTexturedQuad(_imagePipeline, tex, coords);
+	const auto blend = (geometry.roundRadius > 0.)
+		|| (semiTransparent && !fillTransparentBackground);
+	drawTexturedQuad(
+		_imagePipeline,
+		_rgbaTextures[index],
+		coords,
+		1.f,
+		blend);
 	paintRecognitionOverlay(image, geometry);
 }
 
