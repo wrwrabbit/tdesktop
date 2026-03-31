@@ -808,6 +808,8 @@ popupMenuExpandedSeparator: PopupMenu(popupMenuWithIcons) {
 	}
 }
 
+menuTimecodeFont: font(7px semibold);
+
 whoReadMenu: PopupMenu(popupMenuExpandedSeparator) {
 	scrollPadding: margins(0px, 6px, 0px, 4px);
 	maxHeight: 400px;

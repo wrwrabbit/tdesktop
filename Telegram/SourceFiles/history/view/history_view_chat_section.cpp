@@ -62,6 +62,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/mime_type.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
+#include "menu/menu_timecode_action.h"
 #include "data/components/scheduled_messages.h"
 #include "data/data_histories.h"
 #include "data/data_saved_messages.h"
@@ -394,6 +395,12 @@ ChatWidget::ChatWidget(
 			showAtPosition(item->position());
 		}
 	}, _inner->lifetime());
+
+	_inner->setInsertTextCallback([=](const QString &text) {
+		if (const auto field = _composeControls->fieldForMention()) {
+			Menu::InsertTextAtCursor(field, text);
+		}
+	});
 
 	_composeControls->sendActionUpdates(
 	) | rpl::on_next([=](ComposeControls::SendActionUpdate &&data) {

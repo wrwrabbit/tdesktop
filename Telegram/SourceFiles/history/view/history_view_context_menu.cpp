@@ -52,6 +52,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "menu/menu_item_download_files.h"
 #include "menu/menu_item_rate_transcribe.h"
 #include "menu/menu_item_rate_transcribe_session.h"
+#include "menu/menu_timecode_action.h"
 #include "menu/menu_send.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/boxes/show_or_premium_box.h"
@@ -94,6 +95,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
+#include "media/audio/media_audio.h"
+#include "media/player/media_player_instance.h"
 #include "spellcheck/spellcheck_types.h"
 #include "apiwrap.h"
 #include "styles/style_chat.h"
@@ -1275,6 +1278,30 @@ void ShowWhoReadInfo(
 
 } // namespace
 
+std::optional<QString> CurrentVoiceTimecode(FullMsgId itemId) {
+	const auto state = ::Media::Player::instance()->getState(
+		AudioMsgId::Type::Voice);
+	if (state.id.contextId() == itemId
+		&& !::Media::Player::IsStoppedOrStopping(state.state)
+		&& state.frequency > 0) {
+		return Ui::FormatDurationText(state.position / state.frequency);
+	}
+	return std::nullopt;
+}
+
+rpl::producer<QString> VoiceTimecodeUpdates(FullMsgId itemId) {
+	return ::Media::Player::instance()->updatedNotifier(
+	) | rpl::filter([=](const ::Media::Player::TrackState &state) {
+		return (state.id.type() == AudioMsgId::Type::Voice)
+			&& (state.id.contextId() == itemId);
+	}) | rpl::filter([](const ::Media::Player::TrackState &state) {
+		return !::Media::Player::IsStoppedOrStopping(state.state)
+			&& state.frequency > 0;
+	}) | rpl::map([](const ::Media::Player::TrackState &state) {
+		return Ui::FormatDurationText(state.position / state.frequency);
+	}) | rpl::distinct_until_changed();
+}
+
 void InsertPollHiddenResultsLabel(not_null<Ui::PopupMenu*> menu) {
 	auto label = base::make_unique_q<Ui::Menu::MultilineAction>(
 		menu->menu(),
@@ -1324,6 +1351,32 @@ void FillContextMenuItems(
 		&& Api::WhoReactedExists(item, Api::WhoReactedList::All);
 
 	AddReplyToMessageAction(result, request, list);
+	if (item) {
+		const auto media = item->media();
+		const auto document = media ? media->document() : nullptr;
+		const auto topic = item->topic();
+		const auto peer = item->history()->peer.get();
+		const auto canSendText = topic
+			? Data::CanSendAnything(topic)
+			: Data::CanSendAnything(peer);
+		if (canSendText && document && document->isVoiceMessage()) {
+			const auto msgId = item->fullId();
+			if (const auto timecode = CurrentVoiceTimecode(msgId)) {
+				const auto weak = base::make_weak(list.get());
+				Menu::AddTimecodeAction(
+					result,
+					*timecode,
+					VoiceTimecodeUpdates(msgId),
+					[=] {
+						const auto tc = CurrentVoiceTimecode(msgId);
+						if (const auto strong = weak.get()) {
+							strong->insertTextAtCursor(
+								tc.value_or(*timecode));
+						}
+					});
+			}
+		}
+	}
 	AddTodoListAction(result, request, list);
 
 	if (request.overSelection

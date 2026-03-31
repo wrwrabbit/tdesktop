@@ -142,6 +142,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/bot_keyboard.h"
 #include "chat_helpers/message_field.h"
 #include "menu/menu_send.h"
+#include "menu/menu_timecode_action.h"
 #include "mtproto/mtproto_config.h"
 #include "lang/lang_keys.h"
 #include "settings/business/settings_quick_replies.h"
@@ -5675,6 +5676,13 @@ bool HistoryWidget::insertBotCommand(const QString &cmd) {
 		return true;
 	}
 	return false;
+}
+
+void HistoryWidget::insertTextAtCursor(const QString &text) {
+	if (!_canSendTexts) {
+		return;
+	}
+	Menu::InsertTextAtCursor(_field, text);
 }
 
 bool HistoryWidget::eventFilter(QObject *obj, QEvent *e) {

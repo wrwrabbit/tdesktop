@@ -389,6 +389,8 @@ public:
 		bool forceAnotherChat = false);
 	[[nodiscard]] rpl::producer<FullMsgId> readMessageRequested() const;
 	[[nodiscard]] rpl::producer<FullMsgId> showMessageRequested() const;
+	void setInsertTextCallback(Fn<void(QString)> callback);
+	void insertTextAtCursor(const QString &text);
 	void replyNextMessage(FullMsgId fullId, bool next = true);
 
 	[[nodiscard]] Reactions::ButtonParameters reactionButtonParameters(
@@ -899,6 +901,7 @@ private:
 	rpl::event_stream<ReplyToMessageRequest> _requestedToReplyToMessage;
 	rpl::event_stream<FullMsgId> _requestedToReadMessage;
 	rpl::event_stream<FullMsgId> _requestedToShowMessage;
+	Fn<void(QString)> _insertTextCallback;
 	rpl::event_stream<not_null<QKeyEvent*>> _scrollKeyEvents;
 
 	[[nodiscard]] ElementOverlayHost &ensureOverlayHost();

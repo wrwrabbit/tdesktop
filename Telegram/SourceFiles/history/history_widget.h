@@ -242,6 +242,7 @@ public:
 	void sendBotCommand(const Bot::SendCommandRequest &request);
 	void hideSingleUseKeyboard(FullMsgId replyToId);
 	bool insertBotCommand(const QString &cmd);
+	void insertTextAtCursor(const QString &text);
 
 	bool eventFilter(QObject *obj, QEvent *e) override;
 

@@ -88,6 +88,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "menu/menu_item_download_files.h"
 #include "menu/menu_item_rate_transcribe.h"
 #include "menu/menu_item_rate_transcribe_session.h"
+#include "menu/menu_timecode_action.h"
 #include "menu/menu_sponsored.h"
 #include "core/application.h"
 #include "apiwrap.h"
@@ -2963,6 +2964,24 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					_widget->clearSelected();
 				}
 			}, &st::menuIconReply);
+			const auto media = item->media();
+			const auto document = media
+				? media->document()
+				: nullptr;
+			if (canSendReply && document && document->isVoiceMessage()) {
+				const auto msgId = item->fullId();
+				if (const auto t = HistoryView::CurrentVoiceTimecode(msgId)) {
+					Menu::AddTimecodeAction(
+						_menu.get(),
+						*t,
+						HistoryView::VoiceTimecodeUpdates(msgId),
+						[=] {
+							const auto cur
+								= HistoryView::CurrentVoiceTimecode(msgId);
+							_widget->insertTextAtCursor(cur.value_or(*t));
+						});
+				}
+			}
 		}
 	};
 

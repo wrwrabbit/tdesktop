@@ -4522,6 +4522,16 @@ rpl::producer<FullMsgId> ListWidget::showMessageRequested() const {
 	return _requestedToShowMessage.events();
 }
 
+void ListWidget::setInsertTextCallback(Fn<void(QString)> callback) {
+	_insertTextCallback = std::move(callback);
+}
+
+void ListWidget::insertTextAtCursor(const QString &text) {
+	if (_insertTextCallback) {
+		_insertTextCallback(text);
+	}
+}
+
 void ListWidget::replyNextMessage(FullMsgId fullId, bool next) {
 	const auto reply = [&](Element *view) {
 		if (view) {
