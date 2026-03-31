@@ -40,7 +40,7 @@ static_assert(sizeof(PipUniforms) % 16 == 0);
 struct ImageUniforms {
 	float viewport[2];
 	float g_opacity;
-	float o_opacity;
+	float _pad0;
 };
 static_assert(sizeof(ImageUniforms) % 16 == 0);
 
@@ -242,9 +242,11 @@ void Pip::RendererRhi::render(
 	_cb = cb;
 
 	const auto size = rt->pixelSize();
-	_factor = rt->devicePixelRatio();
+	_factor = style::DevicePixelRatio();
 	_ifactor = int(std::ceil(_factor));
-	_viewport = QSize(size.width() / _factor, size.height() / _factor);
+	_viewport = QSize(
+		int(size.width() / _factor),
+		int(size.height() / _factor));
 
 	_rub = rhi->nextResourceUpdateBatch();
 
@@ -280,38 +282,18 @@ void Pip::RendererRhi::releaseResources() {
 
 	delete _argb32Pipeline;
 	_argb32Pipeline = nullptr;
-	delete _yuv420Pipeline;
-	_yuv420Pipeline = nullptr;
-	delete _nv12Pipeline;
-	_nv12Pipeline = nullptr;
 	delete _imagePipeline;
 	_imagePipeline = nullptr;
 	delete _imageBlendPipeline;
 	_imageBlendPipeline = nullptr;
-	delete _controlsPipeline;
-	_controlsPipeline = nullptr;
 
 	delete _argb32Srb;
 	_argb32Srb = nullptr;
-	delete _yuv420Srb;
-	_yuv420Srb = nullptr;
-	delete _nv12Srb;
-	_nv12Srb = nullptr;
 	delete _imageSrb;
 	_imageSrb = nullptr;
-	delete _controlsSrb;
-	_controlsSrb = nullptr;
 
 	delete _rgbaTexture;
 	_rgbaTexture = nullptr;
-	delete _yTexture;
-	_yTexture = nullptr;
-	delete _uTexture;
-	_uTexture = nullptr;
-	delete _vTexture;
-	_vTexture = nullptr;
-	delete _uvTexture;
-	_uvTexture = nullptr;
 
 	delete _vertexBuffer;
 	_vertexBuffer = nullptr;
@@ -555,40 +537,42 @@ void Pip::RendererRhi::paintButton(
 		: *tryIndex(2);
 	Assert(meta.icon == &icon && meta.iconOver == &iconOver);
 
-	const auto iconRect = _controlsImage.texturedRect(
-		button.icon,
-		_controlsTextures[meta.index * 2 + 0]);
-	const auto geometry = transformRect(iconRect.geometry);
-	const float coords[] = {
-		geometry.left(), geometry.top(),
-		iconRect.texture.left(), iconRect.texture.bottom(),
-
-		geometry.right(), geometry.top(),
-		iconRect.texture.right(), iconRect.texture.bottom(),
-
-		geometry.left(), geometry.bottom(),
-		iconRect.texture.left(), iconRect.texture.top(),
-
-		geometry.right(), geometry.bottom(),
-		iconRect.texture.right(), iconRect.texture.top(),
-	};
-	_rub->updateDynamicBuffer(_vertexBuffer, 0, sizeof(coords), coords);
-
-	ImageUniforms uniforms{};
-	uniforms.viewport[0] = _viewport.width() * _factor;
-	uniforms.viewport[1] = _viewport.height() * _factor;
-	uniforms.g_opacity = float(shown);
-	uniforms.o_opacity = float(over);
-
-	_rub->updateDynamicBuffer(
-		_uniformBuffer,
-		0,
-		sizeof(ImageUniforms),
-		&uniforms);
-
 	_controlsImage.upload(_rhi, _rub);
+	if (!_controlsImage.texture()) {
+		return;
+	}
 
-	if (_controlsImage.texture()) {
+	const auto vw = _viewport.width() * _factor;
+	const auto vh = _viewport.height() * _factor;
+
+	const auto drawIcon = [&](int atlasIndex, float opacity) {
+		if (opacity <= 0.f) {
+			return;
+		}
+		const auto texRect = _controlsImage.texturedRect(
+			button.icon,
+			_controlsTextures[meta.index * 2 + atlasIndex]);
+		const auto geo = transformRect(texRect.geometry);
+		const float coords[] = {
+			geo.left(), geo.top(),
+			texRect.texture.left(), texRect.texture.bottom(),
+			geo.right(), geo.top(),
+			texRect.texture.right(), texRect.texture.bottom(),
+			geo.left(), geo.bottom(),
+			texRect.texture.left(), texRect.texture.top(),
+			geo.right(), geo.bottom(),
+			texRect.texture.right(), texRect.texture.top(),
+		};
+		_rub->updateDynamicBuffer(
+			_vertexBuffer, 0, sizeof(coords), coords);
+
+		ImageUniforms uniforms{};
+		uniforms.viewport[0] = vw;
+		uniforms.viewport[1] = vh;
+		uniforms.g_opacity = opacity;
+		_rub->updateDynamicBuffer(
+			_uniformBuffer, 0, sizeof(ImageUniforms), &uniforms);
+
 		_imageSrb->setBindings({
 			QRhiShaderResourceBinding::uniformBuffer(
 				0,
@@ -602,14 +586,17 @@ void Pip::RendererRhi::paintButton(
 				_sampler),
 		});
 		_imageSrb->create();
-	}
 
-	_drawCommands.push_back({
-		.pipeline = _imageBlendPipeline,
-		.srb = _imageSrb,
-		.vertexBuffer = _vertexBuffer,
-		.vertexOffset = 0,
-	});
+		_drawCommands.push_back({
+			.pipeline = _imageBlendPipeline,
+			.srb = _imageSrb,
+			.vertexBuffer = _vertexBuffer,
+			.vertexOffset = 0,
+		});
+	};
+
+	drawIcon(0, float(shown * (1. - over)));
+	drawIcon(1, float(shown * over));
 }
 
 auto Pip::RendererRhi::ControlMeta(OverState control, int index)
@@ -749,7 +736,6 @@ void Pip::RendererRhi::paintUsingRaster(
 	uniforms.viewport[0] = _viewport.width() * _factor;
 	uniforms.viewport[1] = _viewport.height() * _factor;
 	uniforms.g_opacity = 1.0f;
-	uniforms.o_opacity = 0.0f;
 
 	_rub->updateDynamicBuffer(
 		_uniformBuffer,

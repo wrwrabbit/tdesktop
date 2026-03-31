@@ -121,29 +121,15 @@ private:
 	QRhiSampler *_sampler = nullptr;
 
 	QRhiTexture *_rgbaTexture = nullptr;
-	QRhiTexture *_yTexture = nullptr;
-	QRhiTexture *_uTexture = nullptr;
-	QRhiTexture *_vTexture = nullptr;
-	QRhiTexture *_uvTexture = nullptr;
 	QSize _rgbaSize;
-	QSize _lumaSize;
-	QSize _chromaSize;
 	quint64 _cacheKey = 0;
-	int _trackFrameIndex = 0;
-	bool _chromaNV12 = false;
 
 	QRhiGraphicsPipeline *_argb32Pipeline = nullptr;
-	QRhiGraphicsPipeline *_yuv420Pipeline = nullptr;
-	QRhiGraphicsPipeline *_nv12Pipeline = nullptr;
 	QRhiGraphicsPipeline *_imagePipeline = nullptr;
 	QRhiGraphicsPipeline *_imageBlendPipeline = nullptr;
-	QRhiGraphicsPipeline *_controlsPipeline = nullptr;
 
 	QRhiShaderResourceBindings *_argb32Srb = nullptr;
-	QRhiShaderResourceBindings *_yuv420Srb = nullptr;
-	QRhiShaderResourceBindings *_nv12Srb = nullptr;
 	QRhiShaderResourceBindings *_imageSrb = nullptr;
-	QRhiShaderResourceBindings *_controlsSrb = nullptr;
 
 	Ui::Rhi::Image _shadowImage;
 	Ui::Rhi::Image _radialImage;
