@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/tabbed_panel.h"
 #include "chat_helpers/tabbed_selector.h"
 #include "core/file_utilities.h"
+#include "core/ui_integration.h"
 #include "data/data_peer.h"
 #include "data/data_poll.h"
 #include "data/data_user.h"
@@ -134,6 +135,9 @@ void AddPollOptionWidget::setupField() {
 		_mediaState);
 
 	_field->setMaxLength(100);
+	_field->setCustomTextContext(Core::TextContext({
+		.session = _session,
+	}));
 
 	const auto field = _field;
 	const auto emoji = _emoji;
