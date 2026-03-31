@@ -2094,18 +2094,34 @@ void HistoryItem::applyEdition(HistoryMessageEdition &&edition) {
 	if (!edition.useSameForwards) {
 		setForwardsCount(edition.forwards);
 	}
+	const auto mediaCheck = edition.mtpMedia
+		? CheckMessageMedia(*edition.mtpMedia)
+		: MediaCheckResult::Good;
 	if (updatingSavedLocalEdit) {
-		Get<HistoryMessageSavedMediaData>()->media = edition.mtpMedia
+		Get<HistoryMessageSavedMediaData>()->media
+			= (mediaCheck != MediaCheckResult::Unsupported
+				&& edition.mtpMedia)
 			? CreateMedia(this, *edition.mtpMedia)
 			: nullptr;
 	} else {
 		removeFromSharedMediaIndex();
-		refreshMedia(edition.mtpMedia);
+		if (mediaCheck == MediaCheckResult::Unsupported) {
+			_media = nullptr;
+			_flags &= ~MessageFlag::HasPostAuthor;
+			_flags |= MessageFlag::Legacy;
+		} else {
+			refreshMedia(edition.mtpMedia);
+			if (_flags & MessageFlag::Legacy) {
+				_flags &= ~MessageFlag::Legacy;
+			}
+		}
 	}
 	const auto &checkedMedia = updatingSavedLocalEdit
 		? Get<HistoryMessageSavedMediaData>()->media
 		: _media;
-	auto updatedText = checkedMedia
+	auto updatedText = (mediaCheck == MediaCheckResult::Unsupported)
+		? UnsupportedMessageText()
+		: checkedMedia
 		? edition.textWithEntities
 		: EnsureNonEmpty(edition.textWithEntities);
 	auto serviceText = (!checkedMedia
@@ -2369,8 +2385,22 @@ void HistoryItem::updateSentContent(
 	if (isEditingMedia()) {
 		return;
 	}
-	setText(textWithEntities);
-	if (_flags & MessageFlag::FromInlineBot) {
+	const auto mediaCheck = media
+		? CheckMessageMedia(*media)
+		: MediaCheckResult::Good;
+	if (mediaCheck == MediaCheckResult::Unsupported) {
+		_flags &= ~MessageFlag::HasPostAuthor;
+		_flags |= MessageFlag::Legacy;
+		setText(UnsupportedMessageText());
+	} else {
+		if (_flags & MessageFlag::Legacy) {
+			_flags &= ~MessageFlag::Legacy;
+		}
+		setText(textWithEntities);
+	}
+	if (mediaCheck == MediaCheckResult::Unsupported) {
+		_media = nullptr;
+	} else if (_flags & MessageFlag::FromInlineBot) {
 		if (!media || !_media || !_media->updateInlineResultMedia(*media)) {
 			refreshSentMedia(media);
 		}
