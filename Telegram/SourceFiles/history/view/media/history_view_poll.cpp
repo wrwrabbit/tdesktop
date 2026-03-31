@@ -3048,6 +3048,9 @@ int Poll::Options::paintAnswer(
 	if (!context.highlight.pollOption.isEmpty()
 		&& context.highlight.pollOption == answer.option
 		&& context.highlight.collapsion > 0.) {
+		const auto fillingExtra = (_owner->showVotes() && !answer.thumbnail)
+			? (st::historyPollChoiceRight.height() / 2)
+			: 0;
 		const auto absoluteTop = top
 			+ _owner->_headerPart->countHeight(width);
 		const auto to = context.highlightInterpolateTo;
@@ -3057,18 +3060,18 @@ int Poll::Options::paintAnswer(
 		} else if (toProgress <= 0.) {
 			context.highlightPathCache->addRect(
 				0,
-				absoluteTop,
+				absoluteTop + fillingExtra,
 				_owner->width(),
-				height);
+				height + fillingExtra);
 		} else {
 			const auto lerp = [=](int from, int to) {
 				return from + (to - from) * toProgress;
 			};
 			context.highlightPathCache->addRect(
 				lerp(0, to.x()),
-				lerp(absoluteTop, to.y()),
+				lerp(absoluteTop, to.y()) + fillingExtra,
 				lerp(_owner->width(), to.width()),
-				lerp(height, to.height()));
+				lerp(height + fillingExtra, to.height()));
 		}
 	}
 	const auto stm = context.messageStyle();
