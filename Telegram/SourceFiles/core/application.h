@@ -434,7 +434,7 @@ private:
 	Window::Controller *_lastActivePrimaryWindow = nullptr;
 	Window::Controller *_windowInSettings = nullptr;
 	bool _lastMouseIgnored = false;
-	bool _lastTouchToWidget = false;
+	bool _lastTouchProcessed = false;
 
 	std::unique_ptr<Media::View::OverlayWidget> _mediaView;
 	const std::unique_ptr<Lang::Instance> _langpack;

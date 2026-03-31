@@ -731,9 +731,10 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 
 	switch (e->type()) {
 	case QEvent::TouchBegin:
+		Ui::Integration::Instance().touchCounterIncrement();
 	case QEvent::TouchUpdate:
 	case QEvent::TouchEnd: {
-		_lastTouchToWidget = object->isWidgetType();
+		_lastTouchProcessed = object->isWidgetType();
 	} break;
 
 	case QEvent::MouseButtonPress:
@@ -743,7 +744,7 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 		const auto ev = static_cast<QMouseEvent*>(e);
 		if (ev->source() == Qt::MouseEventSynthesizedBySystem) {
 			const auto widget = static_cast<QWidget*>(object);
-			if (_lastTouchToWidget
+			if (_lastTouchProcessed
 				|| (object->isWidgetType()
 					&& widget->testAttribute(Qt::WA_AcceptTouchEvents))) {
 				_lastMouseIgnored = true;
