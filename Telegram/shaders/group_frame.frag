@@ -33,11 +33,12 @@ vec2 roundedCorner(vec2 fc) {
 		1.0 - (smoothstep(0.0, 1.0, outline) * outlineFg.a));
 }
 
-bool insideTexture() {
-	return v_texcoord.x >= 0.0
-		&& v_texcoord.x <= 1.0
-		&& v_texcoord.y >= 0.0
-		&& v_texcoord.y <= 1.0;
+float insideTexture() {
+	vec2 textureHalf = vec2(0.5, 0.5);
+	vec2 fromTextureCenter = abs(v_texcoord - textureHalf);
+	vec2 fromTextureEdge = max(fromTextureCenter, textureHalf) - textureHalf;
+	float outsideCheck = dot(fromTextureEdge, fromTextureEdge);
+	return step(outsideCheck, 0.0);
 }
 
 vec4 background() {
@@ -48,18 +49,19 @@ vec4 background() {
 
 void main() {
 	vec2 fc = vec2(gl_FragCoord.x, viewport.y - gl_FragCoord.y);
-	vec4 result;
-	if (insideTexture()) {
-		result = texture(s_texture, v_texcoord);
-		result = mix(result, background(), paused);
-	} else {
-		result = background();
-	}
 
-	float shadowCoord = shadow.y - fc.y;
-	float shadowValue = clamp(shadowCoord / shadow.x, 0.0, 1.0);
-	float shadowShown = shadowValue * shadow.z;
-	result = vec4(min(result.rgb, vec3(1.0)) * (1.0 - shadowShown), result.a);
+	float inside = insideTexture() * (1.0 - paused);
+	vec4 result;
+	float backgroundOpacity = shadow.w;
+	vec4 mainColor = texture(s_texture, v_texcoord);
+	result = mainColor * inside
+		+ (1.0 - inside) * (backgroundOpacity * background()
+			+ (1.0 - backgroundOpacity) * frameBg);
+
+	float shadowCoord = fc.y - roundRect.y;
+	float shadowValue = max(1.0 - (shadowCoord / shadow.x), 0.0);
+	float shadowShown = max(shadowValue * shadow.y, paused) * shadow.z;
+	result = vec4(result.rgb * (1.0 - shadowShown), result.a);
 
 	float noiseValue = texture(n_texture, fc / vec2(256.0)).r;
 	result.rgb += (noiseValue - 0.5) * 0.002;

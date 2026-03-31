@@ -111,9 +111,14 @@ private:
 		TileData &data);
 	void ensureButtonsImage();
 
-	void paintTile(
+	void paintTileOffscreen(
 		not_null<VideoTile*> tile,
 		TileData &tileData);
+	void paintTileOnscreen(
+		not_null<VideoTile*> tile,
+		TileData &tileData,
+		float pw,
+		float ph);
 	void uploadFrame(
 		const Webrtc::FrameWithInfo &data,
 		TileData &tileData);

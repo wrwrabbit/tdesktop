@@ -552,16 +552,44 @@ void Viewport::RendererRhi::render(
 	validateDatas();
 	ensureNoiseTexture();
 
+	for (auto *srb : _perDrawSrbs) {
+		delete srb;
+	}
+	_perDrawSrbs.clear();
+
 	auto index = 0;
 	for (const auto &tile : _owner->_tiles) {
 		if (!tile->visible()) {
 			index++;
 			continue;
 		}
-		paintTile(
+		paintTileOffscreen(
 			tile.get(),
 			_tileData[_tileDataIndices[index++]]);
 	}
+
+	const auto pw = float(rt->pixelSize().width());
+	const auto ph = float(rt->pixelSize().height());
+	auto *screenRub = _rhi->nextResourceUpdateBatch();
+	if (_rub) {
+		screenRub->merge(_rub);
+		_rub = nullptr;
+	}
+	cb->beginPass(rt, *clearColor(), { 1.0f, 0 }, screenRub);
+
+	index = 0;
+	for (const auto &tile : _owner->_tiles) {
+		if (!tile->visible()) {
+			index++;
+			continue;
+		}
+		paintTileOnscreen(
+			tile.get(),
+			_tileData[_tileDataIndices[index++]],
+			pw, ph);
+	}
+
+	cb->endPass();
 }
 
 void Viewport::RendererRhi::ensureNoiseTexture() {
@@ -676,7 +704,7 @@ void Viewport::RendererRhi::ensureNoiseTexture() {
 				QRhiTextureSubresourceUploadDescription(noiseImage))));
 }
 
-void Viewport::RendererRhi::paintTile(
+void Viewport::RendererRhi::paintTileOffscreen(
 		not_null<VideoTile*> tile,
 		TileData &tileData) {
 	const auto track = tile->track();
@@ -689,7 +717,6 @@ void Viewport::RendererRhi::paintTile(
 	const auto frameSize = _userpicFrame
 		? tileData.userpicFrame.size()
 		: data.yuv420->size;
-	const auto frameRotation = _userpicFrame ? 0 : data.rotation;
 	Assert(!frameSize.isEmpty());
 
 	_rgbaFrame = (data.format == Webrtc::FrameFormat::ARGB32)
@@ -699,7 +726,7 @@ void Viewport::RendererRhi::paintTile(
 		_owner->borrowedOrigin());
 	const auto unscaled = Media::View::FlipSizeByRotation(
 		frameSize,
-		frameRotation);
+		_userpicFrame ? 0 : data.rotation);
 
 	validateOutlineAnimation(tile, tileData);
 	validatePausedAnimation(tile, tileData);
@@ -713,6 +740,32 @@ void Viewport::RendererRhi::paintTile(
 	prepareOffscreenTargets(tileData, blurSize);
 	drawDownscalePass(tileData, blurSize);
 	drawBlurPass(tileData, blurSize);
+}
+
+void Viewport::RendererRhi::paintTileOnscreen(
+		not_null<VideoTile*> tile,
+		TileData &tileData,
+		float pw,
+		float ph) {
+	const auto data = tile->track()->frameWithInfo(false);
+	_userpicFrame = (data.format == Webrtc::FrameFormat::None);
+	const auto frameSize = _userpicFrame
+		? tileData.userpicFrame.size()
+		: data.yuv420->size;
+	const auto frameRotation = _userpicFrame ? 0 : data.rotation;
+	_rgbaFrame = (data.format == Webrtc::FrameFormat::ARGB32)
+		|| _userpicFrame;
+
+	const auto geometry = tile->geometry().translated(
+		_owner->borrowedOrigin());
+	const auto unscaled = Media::View::FlipSizeByRotation(
+		frameSize,
+		frameRotation);
+	const auto blurSize = CountBlurredSize(
+		unscaled,
+		geometry.size(),
+		_factor);
+
 	drawFramePass(tile, tileData, blurSize);
 	drawControls(tile, tileData);
 }
@@ -992,10 +1045,6 @@ void Viewport::RendererRhi::drawFramePass(
 		QSize blurSize) {
 	const auto geometry = tile->geometry().translated(
 		_owner->borrowedOrigin());
-	const auto x = geometry.x();
-	const auto y = geometry.y();
-	const auto width = geometry.width();
-	const auto height = geometry.height();
 
 	const auto data = tile->track()->frameWithInfo(false);
 	const auto frameSize = _userpicFrame
@@ -1050,23 +1099,20 @@ void Viewport::RendererRhi::drawFramePass(
 
 	const auto rect = transformRect(geometry);
 
-	// For group_frame.vert: position in pixels, v_texcoord, b_texcoord
-	// Vertex layout: pos.x, pos.y, vtc.x, vtc.y, btc.x, btc.y
-	// Triangle strip: BL, BR, TL, TR
 	const float frameCoords[] = {
-		float(x) * _factor, float(y + height) * _factor,
+		rect.left(), rect.top(),
 		texCoords[0][0], texCoords[0][1],
 		blurTexCoords[0][0], blurTexCoords[0][1],
 
-		float(x + width) * _factor, float(y + height) * _factor,
+		rect.right(), rect.top(),
 		texCoords[1][0], texCoords[1][1],
 		blurTexCoords[1][0], blurTexCoords[1][1],
 
-		float(x) * _factor, float(y) * _factor,
+		rect.right(), rect.bottom(),
 		texCoords[2][0], texCoords[2][1],
 		blurTexCoords[2][0], blurTexCoords[2][1],
 
-		float(x + width) * _factor, float(y) * _factor,
+		rect.left(), rect.bottom(),
 		texCoords[3][0], texCoords[3][1],
 		blurTexCoords[3][0], blurTexCoords[3][1],
 	};
@@ -1090,10 +1136,10 @@ void Viewport::RendererRhi::drawFramePass(
 
 	uniforms.paused = float(paused);
 
-	uniforms.roundRect[0] = float(x) * _factor;
-	uniforms.roundRect[1] = float(y) * _factor;
-	uniforms.roundRect[2] = float(width) * _factor;
-	uniforms.roundRect[3] = float(height) * _factor;
+	uniforms.roundRect[0] = rect.x();
+	uniforms.roundRect[1] = rect.y();
+	uniforms.roundRect[2] = rect.width();
+	uniforms.roundRect[3] = rect.height();
 
 	const auto radius = _owner->videoStream()
 		? st::storiesRadius
@@ -1156,7 +1202,7 @@ void Viewport::RendererRhi::drawFramePass(
 	});
 	srb->create();
 
-	_cb->beginPass(_rt, *clearColor(), { 1.0f, 0 }, rub);
+	_cb->resourceUpdate(rub);
 	_cb->setGraphicsPipeline(_framePipeline);
 	_cb->setShaderResources(srb);
 	_cb->setViewport({ 0, 0, pw, ph });
@@ -1164,7 +1210,6 @@ void Viewport::RendererRhi::drawFramePass(
 		_onscreenVertexBuffer, 0);
 	_cb->setVertexInput(0, 1, &vbuf);
 	_cb->draw(4);
-	_cb->endPass();
 }
 
 void Viewport::RendererRhi::drawControls(
@@ -1410,7 +1455,7 @@ void Viewport::RendererRhi::paintUsingRaster(
 	});
 	srb->create();
 
-	_cb->beginPass(_rt, *clearColor(), { 1.0f, 0 }, rub);
+	_cb->resourceUpdate(rub);
 	_cb->setGraphicsPipeline(_controlsPipeline);
 	_cb->setShaderResources(srb);
 	_cb->setViewport({ 0, 0, pw, ph });
@@ -1418,7 +1463,6 @@ void Viewport::RendererRhi::paintUsingRaster(
 		_onscreenVertexBuffer, 0);
 	_cb->setVertexInput(0, 1, &vbuf);
 	_cb->draw(4);
-	_cb->endPass();
 }
 
 Rect Viewport::RendererRhi::transformRect(const QRect &raster) const {
