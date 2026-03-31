@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/group/calls_group_viewport_raster.h"
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 #include "calls/group/calls_group_viewport_rhi.h"
+#include "ui/rhi/rhi_renderer.h"
 #endif
 #include "calls/group/calls_group_common.h"
 #include "calls/group/calls_group_call.h"
@@ -996,6 +997,43 @@ void Viewport::borrowedPaint(Painter &p, const QRegion &clip) {
 
 	_borrowedRenderer->paintFallback(p, clip, Ui::GL::Backend::Raster);
 }
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+Ui::Rhi::Renderer *Viewport::ensureBorrowedRhi(
+		QRhi *rhi,
+		QRhiRenderTarget *rt,
+		QRhiCommandBuffer *cb) {
+	Expects(_borrowed != nullptr);
+
+	if (!_borrowedRenderer) {
+		_borrowedRenderer = makeRenderer();
+	}
+	if (const auto r = dynamic_cast<Ui::Rhi::Renderer*>(
+			_borrowedRenderer.get())) {
+		r->initialize(rhi, rt, cb);
+		return r;
+	}
+	return nullptr;
+}
+
+void Viewport::borrowedPaintOffscreen(
+		QRhi *rhi,
+		QRhiRenderTarget *rt,
+		QRhiCommandBuffer *cb) {
+	if (const auto r = ensureBorrowedRhi(rhi, rt, cb)) {
+		r->renderOffscreen(rhi, rt, cb);
+	}
+}
+
+void Viewport::borrowedPaintOnscreen(
+		QRhi *rhi,
+		QRhiRenderTarget *rt,
+		QRhiCommandBuffer *cb) {
+	if (const auto r = ensureBorrowedRhi(rhi, rt, cb)) {
+		r->renderOnscreen(rhi, rt, cb);
+	}
+}
+#endif
 
 QPoint Viewport::borrowedOrigin() const {
 	return _borrowed ? _borrowedGeometry.topLeft() : QPoint();

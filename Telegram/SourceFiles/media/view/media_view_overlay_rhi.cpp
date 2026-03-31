@@ -489,8 +489,13 @@ void OverlayWidget::RendererRhi::render(
 		int(size.height() / _factor));
 
 	_rub = rhi->nextResourceUpdateBatch();
+	_pendingVideoStream = nullptr;
 
 	_owner->paint(this);
+
+	if (_pendingVideoStream) {
+		_pendingVideoStream->borrowedPaintOffscreen(_rhi, _rt, _cb);
+	}
 
 	if (const auto notch = _owner->topNotchSkip()) {
 		auto blackImage = QImage(1, 1, QImage::Format_ARGB32_Premultiplied);
@@ -535,6 +540,11 @@ void OverlayWidget::RendererRhi::render(
 		cb->draw(4);
 	}
 	_drawCommands.clear();
+
+	if (_pendingVideoStream) {
+		_pendingVideoStream->borrowedPaintOnscreen(_rhi, _rt, _cb);
+		_pendingVideoStream = nullptr;
+	}
 
 	cb->endPass();
 }
@@ -987,13 +997,7 @@ void OverlayWidget::RendererRhi::paintBackground() {
 }
 
 void OverlayWidget::RendererRhi::paintVideoStream() {
-	if (const auto stream = _owner->_videoStream.get()) {
-		stream->ensureBorrowedRenderer();
-		const auto rect = QRect(QPoint(), _viewport);
-		paintUsingRaster(rect, [&](Painter &p) {
-			stream->borrowedPaint(p, QRegion(rect));
-		});
-	}
+	_pendingVideoStream = _owner->_videoStream.get();
 }
 
 void OverlayWidget::RendererRhi::paintTransformedVideoFrame(

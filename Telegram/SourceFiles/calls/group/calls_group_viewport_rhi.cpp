@@ -533,6 +533,24 @@ void Viewport::RendererRhi::render(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) {
+	renderOffscreen(rhi, rt, cb);
+
+	const auto pw = float(rt->pixelSize().width());
+	const auto ph = float(rt->pixelSize().height());
+	auto *screenRub = _rhi->nextResourceUpdateBatch();
+	if (_rub) {
+		screenRub->merge(_rub);
+		_rub = nullptr;
+	}
+	cb->beginPass(rt, *clearColor(), { 1.0f, 0 }, screenRub);
+	renderOnscreen(rhi, rt, cb);
+	cb->endPass();
+}
+
+void Viewport::RendererRhi::renderOffscreen(
+		QRhi *rhi,
+		QRhiRenderTarget *rt,
+		QRhiCommandBuffer *cb) {
 	_rhi = rhi;
 	_rt = rt;
 	_cb = cb;
@@ -567,17 +585,20 @@ void Viewport::RendererRhi::render(
 			tile.get(),
 			_tileData[_tileDataIndices[index++]]);
 	}
+}
+
+void Viewport::RendererRhi::renderOnscreen(
+		QRhi *rhi,
+		QRhiRenderTarget *rt,
+		QRhiCommandBuffer *cb) {
+	_rhi = rhi;
+	_rt = rt;
+	_cb = cb;
 
 	const auto pw = float(rt->pixelSize().width());
 	const auto ph = float(rt->pixelSize().height());
-	auto *screenRub = _rhi->nextResourceUpdateBatch();
-	if (_rub) {
-		screenRub->merge(_rub);
-		_rub = nullptr;
-	}
-	cb->beginPass(rt, *clearColor(), { 1.0f, 0 }, screenRub);
 
-	index = 0;
+	auto index = 0;
 	for (const auto &tile : _owner->_tiles) {
 		if (!tile->visible()) {
 			index++;
@@ -588,8 +609,6 @@ void Viewport::RendererRhi::render(
 			_tileData[_tileDataIndices[index++]],
 			pw, ph);
 	}
-
-	cb->endPass();
 }
 
 void Viewport::RendererRhi::ensureNoiseTexture() {

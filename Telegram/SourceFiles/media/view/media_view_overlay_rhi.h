@@ -23,6 +23,8 @@ class QRhiResourceUpdateBatch;
 
 namespace Media::View {
 
+class VideoStream;
+
 class OverlayWidget::RendererRhi final
 	: public OverlayWidget::Renderer
 	, public Ui::Rhi::Renderer
@@ -205,6 +207,7 @@ private:
 	bool _shadowTopFlip = false;
 	bool _shadowsForStories = false;
 
+	VideoStream *_pendingVideoStream = nullptr;
 	bool _initialized = false;
 
 	rpl::lifetime _storiesLifetime;

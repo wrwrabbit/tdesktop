@@ -12,11 +12,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class Painter;
 class QOpenGLFunctions;
+class QRhi;
+class QRhiRenderTarget;
+class QRhiCommandBuffer;
 
 namespace Ui {
 class AbstractButton;
 class RpWidgetWrap;
 } // namespace Ui
+
+namespace Ui::Rhi {
+class Renderer;
+} // namespace Ui::Rhi
 
 namespace Ui::GL {
 enum class Backend;
@@ -107,6 +114,14 @@ public:
 	void ensureBorrowedRenderer();
 	void ensureBorrowedCleared();
 	void borrowedPaint(Painter &p, const QRegion &clip);
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	void borrowedPaintOffscreen(QRhi *rhi, QRhiRenderTarget *rt, QRhiCommandBuffer *cb);
+	void borrowedPaintOnscreen(QRhi *rhi, QRhiRenderTarget *rt, QRhiCommandBuffer *cb);
+private:
+	[[nodiscard]] Ui::Rhi::Renderer *ensureBorrowedRhi(QRhi *rhi, QRhiRenderTarget *rt, QRhiCommandBuffer *cb);
+public:
+#endif
 
 	[[nodiscard]] QPoint borrowedOrigin() const;
 

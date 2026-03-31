@@ -48,6 +48,14 @@ public:
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) override;
+	void renderOffscreen(
+		QRhi *rhi,
+		QRhiRenderTarget *rt,
+		QRhiCommandBuffer *cb) override;
+	void renderOnscreen(
+		QRhi *rhi,
+		QRhiRenderTarget *rt,
+		QRhiCommandBuffer *cb) override;
 	void releaseResources() override;
 
 	QColor rhiClearColor() override;
