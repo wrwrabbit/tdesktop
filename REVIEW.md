@@ -484,6 +484,23 @@ auto SetupCaptionAiButton(SetupCaptionAiButtonArgs &&args)
 -> not_null<HistoryView::Controls::ComposeAiButton*>;
 ```
 
+## Mind data structure sizes and alignment
+
+When adding fields to a class or struct, consider the memory layout. A standalone `bool` between two pointer-sized fields wastes 7 bytes to alignment padding. Review new fields for packing opportunities:
+
+- If the struct already has bitfields, pack new boolean flags as `: 1` members rather than standalone `bool`.
+- If alignment leaves a gap (e.g., an `int` followed by a pointer), consider whether a new small field can fill it.
+- For classes instantiated in large quantities (per-message, per-element, per-row), every wasted byte is multiplied thousands of times.
+
+```cpp
+// BAD - standalone bool adds 8 bytes (1 + 7 padding) before the next pointer:
+mutable bool _myFlag = false;
+mutable std::unique_ptr<Foo> _foo;
+
+// GOOD - packed into existing bitfield group, no extra bytes:
+mutable uint32 _myFlag : 1 = 0;
+```
+
 ## Static member functions use PascalCase
 
 Non-static member functions use camelCase (`startBatch`, `finalize`). Static member functions use PascalCase (`ShouldTrack`, `Parse`, `Create`), matching the convention for free functions.
