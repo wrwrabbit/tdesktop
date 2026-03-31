@@ -161,9 +161,11 @@ void OverlayWidget::RendererRhi::render(
 	_nextVertexSlot = 0;
 
 	const auto size = rt->pixelSize();
-	_factor = rt->devicePixelRatio();
+	_factor = _owner->widget()->devicePixelRatioF();
 	_ifactor = int(std::ceil(_factor));
-	_viewport = QSize(size.width() / _factor, size.height() / _factor);
+	_viewport = QSize(
+		int(size.width() / _factor),
+		int(size.height() / _factor));
 
 	_rub = rhi->nextResourceUpdateBatch();
 
@@ -319,17 +321,17 @@ void OverlayWidget::RendererRhi::paintUsingRaster(
 		QRect(QPoint(), size));
 	const auto geometry = transformRect(textured.geometry);
 	const float coords[] = {
-		geometry.left(), geometry.top(),
-		textured.texture.left(), textured.texture.bottom(),
-
-		geometry.right(), geometry.top(),
-		textured.texture.right(), textured.texture.bottom(),
-
 		geometry.left(), geometry.bottom(),
 		textured.texture.left(), textured.texture.top(),
 
 		geometry.right(), geometry.bottom(),
 		textured.texture.right(), textured.texture.top(),
+
+		geometry.left(), geometry.top(),
+		textured.texture.left(), textured.texture.bottom(),
+
+		geometry.right(), geometry.top(),
+		textured.texture.right(), textured.texture.bottom(),
 	};
 
 	drawTexturedQuad(
@@ -383,7 +385,7 @@ void OverlayWidget::RendererRhi::paintTransformedStaticContent(
 			|| _rgbaSize.height() < image.height()) {
 			delete _rgbaTexture;
 			_rgbaTexture = _rhi->newTexture(
-				QRhiTexture::RGBA8,
+				QRhiTexture::BGRA8,
 				image.size());
 			_rgbaTexture->create();
 			_rgbaSize = image.size();
@@ -396,6 +398,11 @@ void OverlayWidget::RendererRhi::paintTransformedStaticContent(
 	}
 
 	const auto rect = geometry.rect;
+	LOG(("QRhi Overlay: rect=(%1,%2,%3,%4) viewport=(%5,%6) factor=%7 image=(%8,%9)")
+		.arg(rect.x()).arg(rect.y()).arg(rect.width()).arg(rect.height())
+		.arg(_viewport.width()).arg(_viewport.height())
+		.arg(_factor)
+		.arg(image.width()).arg(image.height()));
 	const auto rRect = transformRect(rect);
 	std::array<std::array<float, 2>, 4> texcoords = { {
 		{ { 0.f, 0.f } },
@@ -410,16 +417,16 @@ void OverlayWidget::RendererRhi::paintTransformedStaticContent(
 			end(texcoords));
 	}
 	const float coords[] = {
-		rRect.left(), rRect.top(),
+		rRect.left(), rRect.bottom(),
 		texcoords[0][0], texcoords[0][1],
 
-		rRect.right(), rRect.top(),
+		rRect.right(), rRect.bottom(),
 		texcoords[1][0], texcoords[1][1],
 
-		rRect.left(), rRect.bottom(),
+		rRect.left(), rRect.top(),
 		texcoords[2][0], texcoords[2][1],
 
-		rRect.right(), rRect.bottom(),
+		rRect.right(), rRect.top(),
 		texcoords[3][0], texcoords[3][1],
 	};
 
@@ -543,20 +550,15 @@ void OverlayWidget::RendererRhi::paintStoriesSiblingPart(
 }
 
 Rect OverlayWidget::RendererRhi::transformRect(const Rect &raster) const {
-	return {
-		raster.left() * _factor,
-		raster.top() * _factor,
-		raster.width() * _factor,
-		raster.height() * _factor,
-	};
+	return TransformRect(raster, _viewport, _factor);
 }
 
 Rect OverlayWidget::RendererRhi::transformRect(const QRectF &raster) const {
-	return transformRect(Rect(raster));
+	return TransformRect(raster, _viewport, _factor);
 }
 
 Rect OverlayWidget::RendererRhi::transformRect(const QRect &raster) const {
-	return transformRect(Rect(raster));
+	return TransformRect(Rect(raster), _viewport, _factor);
 }
 
 } // namespace Media::View
