@@ -397,6 +397,7 @@ void Widget::inlineResultsDone(const MTPmessages_BotResults &result) {
 			entry->switchPmStartToken = QString();
 			entry->switchPmUrl = switchWebView->data().vurl().v;
 		}
+		entry->gallery = d.is_gallery();
 
 		if (const auto count = v.size()) {
 			entry->results.reserve(entry->results.size() + count);
