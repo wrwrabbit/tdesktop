@@ -25,7 +25,8 @@ namespace Media::View {
 
 class OverlayWidget::RendererRhi final
 	: public OverlayWidget::Renderer
-	, public Ui::Rhi::Renderer {
+	, public Ui::Rhi::Renderer
+	, public base::has_weak_ptr {
 public:
 	explicit RendererRhi(not_null<OverlayWidget*> owner);
 
@@ -102,6 +103,9 @@ private:
 	[[nodiscard]] Ui::GL::Rect transformRect(const QRectF &raster) const;
 	[[nodiscard]] Ui::GL::Rect transformRect(
 		const Ui::GL::Rect &raster) const;
+	[[nodiscard]] Ui::GL::Rect scaleRect(
+		const Ui::GL::Rect &unscaled,
+		float64 scale) const;
 
 	const not_null<OverlayWidget*> _owner;
 
@@ -148,6 +152,7 @@ private:
 
 	bool _initialized = false;
 
+	rpl::lifetime _storiesLifetime;
 	rpl::lifetime _lifetime;
 
 };

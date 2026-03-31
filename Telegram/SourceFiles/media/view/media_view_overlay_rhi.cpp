@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ui/rhi/rhi_shader.h"
 #include "ui/painter.h"
+#include "data/data_peer_values.h"
 #include "media/streaming/media_streaming_common.h"
 #include "base/debug_log.h"
 #include "styles/style_media_view.h"
@@ -38,6 +39,26 @@ static_assert(sizeof(ImageUniforms) % 16 == 0);
 
 OverlayWidget::RendererRhi::RendererRhi(not_null<OverlayWidget*> owner)
 : _owner(owner) {
+	style::PaletteChanged(
+	) | rpl::on_next([=] {
+		_cacheKey = 0;
+	}, _lifetime);
+
+	crl::on_main(this, [=] {
+		_owner->_storiesChanged.events(
+		) | rpl::on_next([=] {
+			if (_owner->_storiesSession) {
+				Data::AmPremiumValue(
+					_owner->_storiesSession
+				) | rpl::on_next([=] {
+					_cacheKey = 0;
+				}, _storiesLifetime);
+			} else {
+				_storiesLifetime.destroy();
+				_cacheKey = 0;
+			}
+		}, _lifetime);
+	});
 }
 
 void OverlayWidget::RendererRhi::initialize(
@@ -165,8 +186,12 @@ void OverlayWidget::RendererRhi::render(
 	_drawCommands.clear();
 
 	const auto size = rt->pixelSize();
-	_factor = _owner->widget()->devicePixelRatioF();
-	_ifactor = int(std::ceil(_factor));
+	const auto factor = _owner->widget()->devicePixelRatioF();
+	if (_factor != factor) {
+		_factor = factor;
+		_ifactor = int(std::ceil(factor));
+		_cacheKey = 0;
+	}
 	_viewport = QSize(
 		int(size.width() / _factor),
 		int(size.height() / _factor));
@@ -469,7 +494,7 @@ void OverlayWidget::RendererRhi::paintRecognitionOverlay(
 			QRhiTextureUploadEntry(0, 0,
 				QRhiTextureSubresourceUploadDescription(overlay))));
 
-	const auto rRect = transformRect(rect);
+	const auto rRect = scaleRect(transformRect(rect), geometry.scale);
 	const float coords[] = {
 		rRect.left(), rRect.bottom(), 0.f, 0.f,
 		rRect.right(), rRect.bottom(), 1.f, 0.f,
@@ -496,7 +521,9 @@ void OverlayWidget::RendererRhi::paintTransformedStaticContent(
 			QRhiTextureUploadEntry(0, 0,
 				QRhiTextureSubresourceUploadDescription(image))));
 
-	const auto rRect = transformRect(geometry.rect);
+	const auto rRect = scaleRect(
+		transformRect(geometry.rect),
+		geometry.scale);
 	const auto centerx = rRect.x() + rRect.width() / 2;
 	const auto centery = rRect.y() + rRect.height() / 2;
 	const auto rsin = float(std::sin(geometry.rotation * M_PI / 180.));
@@ -648,6 +675,19 @@ Rect OverlayWidget::RendererRhi::transformRect(const QRectF &raster) const {
 
 Rect OverlayWidget::RendererRhi::transformRect(const QRect &raster) const {
 	return TransformRect(Rect(raster), _viewport, _factor);
+}
+
+Rect OverlayWidget::RendererRhi::scaleRect(
+		const Rect &unscaled,
+		float64 scale) const {
+	const auto added = scale - 1.;
+	const auto addw = unscaled.width() * added;
+	const auto addh = unscaled.height() * added;
+	return Rect(
+		unscaled.x() - addw / 2,
+		unscaled.y() - addh / 2,
+		unscaled.width() + addw,
+		unscaled.height() + addh);
 }
 
 } // namespace Media::View
