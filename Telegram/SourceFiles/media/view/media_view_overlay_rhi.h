@@ -89,7 +89,6 @@ private:
 		bool blend = false);
 
 	void paintUsingRaster(
-		Ui::Rhi::Image &image,
 		QRect rect,
 		Fn<void(Painter&)> method,
 		bool transparent = false);
@@ -134,15 +133,13 @@ private:
 	QSize _rgbaSize;
 	quint64 _cacheKey = 0;
 
-	Ui::Rhi::Image _controlsFadeImage;
-	Ui::Rhi::Image _radialImage;
-	Ui::Rhi::Image _themePreviewImage;
-	Ui::Rhi::Image _documentBubbleImage;
-	Ui::Rhi::Image _saveMsgImage;
-	Ui::Rhi::Image _footerImage;
-	Ui::Rhi::Image _captionImage;
-	Ui::Rhi::Image _groupThumbsImage;
-	Ui::Rhi::Image _controlsImage;
+	struct PoolTexture {
+		QRhiTexture *texture = nullptr;
+		QSize size;
+	};
+	std::vector<PoolTexture> _texturePool;
+	int _nextPoolIndex = 0;
+	[[nodiscard]] QRhiTexture *acquirePoolTexture(QSize size);
 
 	bool _initialized = false;
 
