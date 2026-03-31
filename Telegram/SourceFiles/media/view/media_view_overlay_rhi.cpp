@@ -150,6 +150,9 @@ void OverlayWidget::RendererRhi::render(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) {
+	if (_owner->_hideWorkaround) {
+		return;
+	}
 	_rhi = rhi;
 	_rt = rt;
 	_cb = cb;
@@ -265,11 +268,23 @@ void OverlayWidget::RendererRhi::releaseResources() {
 }
 
 QColor OverlayWidget::RendererRhi::rhiClearColor() {
-	return QColor(0, 0, 0, 0);
+	if (_owner->_hideWorkaround) {
+		return QColor(0, 0, 0, 0);
+	} else if (_owner->_fullScreenVideo) {
+		return st::mediaviewVideoBg->c;
+	} else {
+		return st::mediaviewBg->c;
+	}
 }
 
 std::optional<QColor> OverlayWidget::RendererRhi::clearColor() {
-	return QColor(0, 0, 0, 0);
+	if (_owner->_hideWorkaround) {
+		return QColor(0, 0, 0, 0);
+	} else if (_owner->_fullScreenVideo) {
+		return st::mediaviewVideoBg->c;
+	} else {
+		return st::mediaviewBg->c;
+	}
 }
 
 void OverlayWidget::RendererRhi::drawTexturedQuad(
