@@ -340,6 +340,7 @@ private:
 	Fn<void()> _chooseCallback;
 	Fn<void()> _copyCallback;
 	Fn<void(bool)> _emojifyChanged;
+	bool _ignoreResizedCallback = false;
 	bool _originalExpanded = false;
 	bool _originalVisible = true;
 	bool _emojifyVisible = false;
@@ -613,7 +614,7 @@ ComposeAiPreviewCard::ComposeAiPreviewCard(
 	const auto watchHeight = [=](not_null<Ui::FlatLabel*> label) {
 		label->heightValue(
 		) | rpl::skip(1) | rpl::on_next([=] {
-			if (_resized) {
+			if (_resized && !_ignoreResizedCallback) {
 				_resized();
 			}
 		}, lifetime());
@@ -796,9 +797,14 @@ int ComposeAiPreviewCard::resizeGetHeight(int newWidth) {
 			y + _originalTitle->height(),
 			toggleTop + _originalToggle->height());
 
+		_ignoreResizedCallback = true;
+		const auto wasOriginalSize = _originalBody->size();
 		_originalBody->resizeToWidth(contentWidth);
-		const auto lineHeight = _originalBody->st().style.lineHeight;
 		const auto fullOriginalHeight = _originalBody->height();
+		_originalBody->resize(wasOriginalSize);
+		_ignoreResizedCallback = false;
+
+		const auto lineHeight = _originalBody->st().style.lineHeight;
 		const auto originalHeight = _originalExpanded
 			? fullOriginalHeight
 			: std::min(fullOriginalHeight, lineHeight);
@@ -1309,7 +1315,7 @@ bool ComposeAiContent::hasStyleSelection() const {
 				tr::lng_ai_compose_style_tooltip(tr::rich),
 				st::historyMessagesTTLLabel.minWidth,
 				st::ttlMediaImportantTooltipLabel),
-			st::defaultImportantTooltip.padding),
+			st::historyRecordTooltip.padding),
 		st::historyRecordTooltip);
 	tooltip->toggleFast(false);
 
