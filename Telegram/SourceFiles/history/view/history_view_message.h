@@ -393,10 +393,11 @@ private:
 	mutable int _fromNameVersion = 0;
 	mutable int _bubbleTextualWidthMinimum : 16 = -1;
 	mutable int _bubbleTextualWidthCache : 16 = 0;
-	uint32 _bubbleWidthLimit : 27 = 0;
+	uint32 _bubbleWidthLimit : 26 = 0;
 	uint32 _invertMedia : 1 = 0;
 	uint32 _hideReply : 1 = 0;
 	uint32 _postShowingAuthor : 1 = 0;
+	mutable uint32 _fromLinkRipplePointSet : 1 = 0;
 
 	BottomInfo _bottomInfo;
 	mutable QPoint _lastMediaPosition;
