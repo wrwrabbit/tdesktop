@@ -365,6 +365,94 @@ void OverlayWidget::RendererRhi::createPipelines() {
 	roundedPipeline->setRenderPassDescriptor(rpDesc);
 	roundedPipeline->create();
 	_roundedCornersPipeline = roundedPipeline;
+
+	const auto yuv420Frag = LoadShader(u"yuv420_content.frag"_q);
+	const auto nv12Frag = LoadShader(u"nv12_content.frag"_q);
+
+	auto *yuv420Srb = _rhi->newShaderResourceBindings();
+	yuv420Srb->setBindings({
+		QRhiShaderResourceBinding::uniformBuffer(
+			0,
+			QRhiShaderResourceBinding::VertexStage
+				| QRhiShaderResourceBinding::FragmentStage,
+			_uniformBuffer,
+			0,
+			sizeof(ContentUniforms)),
+		QRhiShaderResourceBinding::sampledTexture(
+			1,
+			QRhiShaderResourceBinding::FragmentStage,
+			_placeholderTexture,
+			_sampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			2,
+			QRhiShaderResourceBinding::FragmentStage,
+			_placeholderTexture,
+			_sampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			3,
+			QRhiShaderResourceBinding::FragmentStage,
+			_placeholderTexture,
+			_sampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			4,
+			QRhiShaderResourceBinding::FragmentStage,
+			_placeholderTexture,
+			_sampler),
+	});
+	yuv420Srb->create();
+	_perDrawSrbs.push_back(yuv420Srb);
+
+	auto createYuvPipeline = [&](const QShader &frag, bool blending,
+			QRhiShaderResourceBindings *srb) {
+		auto *pipeline = _rhi->newGraphicsPipeline();
+		pipeline->setShaderStages({
+			{ QRhiShaderStage::Vertex, argb32Vert },
+			{ QRhiShaderStage::Fragment, frag },
+		});
+		pipeline->setVertexInputLayout(inputLayout);
+		if (blending) {
+			pipeline->setTargetBlends({ blend });
+		}
+		pipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
+		pipeline->setShaderResourceBindings(srb);
+		pipeline->setRenderPassDescriptor(rpDesc);
+		pipeline->create();
+		return pipeline;
+	};
+
+	_yuv420Pipeline = createYuvPipeline(yuv420Frag, false, yuv420Srb);
+	_yuv420BlendPipeline = createYuvPipeline(yuv420Frag, true, yuv420Srb);
+
+	auto *nv12Srb = _rhi->newShaderResourceBindings();
+	nv12Srb->setBindings({
+		QRhiShaderResourceBinding::uniformBuffer(
+			0,
+			QRhiShaderResourceBinding::VertexStage
+				| QRhiShaderResourceBinding::FragmentStage,
+			_uniformBuffer,
+			0,
+			sizeof(ContentUniforms)),
+		QRhiShaderResourceBinding::sampledTexture(
+			1,
+			QRhiShaderResourceBinding::FragmentStage,
+			_placeholderTexture,
+			_sampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			2,
+			QRhiShaderResourceBinding::FragmentStage,
+			_placeholderTexture,
+			_sampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			3,
+			QRhiShaderResourceBinding::FragmentStage,
+			_placeholderTexture,
+			_sampler),
+	});
+	nv12Srb->create();
+	_perDrawSrbs.push_back(nv12Srb);
+
+	_nv12Pipeline = createYuvPipeline(nv12Frag, false, nv12Srb);
+	_nv12BlendPipeline = createYuvPipeline(nv12Frag, true, nv12Srb);
 }
 
 void OverlayWidget::RendererRhi::render(
@@ -489,6 +577,14 @@ void OverlayWidget::RendererRhi::releaseResources() {
 	_transparentContentPipeline = nullptr;
 	delete _roundedCornersPipeline;
 	_roundedCornersPipeline = nullptr;
+	delete _yuv420Pipeline;
+	_yuv420Pipeline = nullptr;
+	delete _yuv420BlendPipeline;
+	_yuv420BlendPipeline = nullptr;
+	delete _nv12Pipeline;
+	_nv12Pipeline = nullptr;
+	delete _nv12BlendPipeline;
+	_nv12BlendPipeline = nullptr;
 
 	for (auto &tex : _storiesSiblingTextures) {
 		delete tex;
@@ -517,6 +613,20 @@ void OverlayWidget::RendererRhi::releaseResources() {
 	}
 	ranges::fill(_rgbaSizes, QSize());
 	ranges::fill(_cacheKeys, quint64(0));
+
+	delete _yTexture;
+	_yTexture = nullptr;
+	delete _uTexture;
+	_uTexture = nullptr;
+	delete _vTexture;
+	_vTexture = nullptr;
+	delete _uvTexture;
+	_uvTexture = nullptr;
+	_lumaSize = QSize();
+	_chromaSize = QSize();
+	_trackFrameIndex = 0;
+	_streamedIndex = 0;
+
 	delete _placeholderTexture;
 	_placeholderTexture = nullptr;
 
@@ -911,12 +1021,273 @@ void OverlayWidget::RendererRhi::paintTransformedVideoFrame(
 	const auto data = _owner->videoFrameWithInfo();
 	if (data.format == Streaming::FrameFormat::None) {
 		return;
+	} else if (data.format == Streaming::FrameFormat::ARGB32) {
+		Assert(!data.image.isNull());
+		paintTransformedStaticContent(
+			data.image,
+			geometry,
+			data.alpha,
+			data.alpha);
+		return;
 	}
-	const auto &image = (data.format == Streaming::FrameFormat::ARGB32)
-		? data.image
-		: _owner->videoFrame();
-	paintTransformedStaticContent(image, geometry, false, false);
-	paintRecognitionOverlay(image, geometry);
+	Assert(!data.yuv->size.isEmpty());
+	const auto nv12 = (data.format == Streaming::FrameFormat::NV12);
+	const auto yuv = data.yuv;
+	const auto nv12changed = (_chromaNV12 != nv12);
+
+	const auto upload = (_trackFrameIndex != data.index)
+		|| (_streamedIndex != _owner->streamedIndex());
+	_trackFrameIndex = data.index;
+	_streamedIndex = _owner->streamedIndex();
+
+	if (upload) {
+		if (!_yTexture || _lumaSize != yuv->size) {
+			delete _yTexture;
+			_yTexture = _rhi->newTexture(QRhiTexture::R8, yuv->size);
+			_yTexture->create();
+			_lumaSize = yuv->size;
+		}
+		auto yDesc = QRhiTextureSubresourceUploadDescription(
+			yuv->y.data,
+			yuv->y.stride * yuv->size.height());
+		yDesc.setDataStride(yuv->y.stride);
+		_rub->uploadTexture(
+			_yTexture,
+			QRhiTextureUploadDescription(
+				QRhiTextureUploadEntry(0, 0, yDesc)));
+
+		if (nv12) {
+			if (!_uvTexture || nv12changed
+				|| _chromaSize != yuv->chromaSize) {
+				delete _uvTexture;
+				_uvTexture = _rhi->newTexture(
+					QRhiTexture::RG8,
+					yuv->chromaSize);
+				_uvTexture->create();
+				_chromaSize = yuv->chromaSize;
+			}
+			auto uvDesc = QRhiTextureSubresourceUploadDescription(
+				yuv->u.data,
+				yuv->u.stride * yuv->chromaSize.height());
+			uvDesc.setDataStride(yuv->u.stride);
+			_rub->uploadTexture(
+				_uvTexture,
+				QRhiTextureUploadDescription(
+					QRhiTextureUploadEntry(0, 0, uvDesc)));
+		} else {
+			if (!_uTexture || nv12changed
+				|| _chromaSize != yuv->chromaSize) {
+				delete _uTexture;
+				_uTexture = _rhi->newTexture(
+					QRhiTexture::R8,
+					yuv->chromaSize);
+				_uTexture->create();
+				delete _vTexture;
+				_vTexture = _rhi->newTexture(
+					QRhiTexture::R8,
+					yuv->chromaSize);
+				_vTexture->create();
+				_chromaSize = yuv->chromaSize;
+			}
+			auto uDesc = QRhiTextureSubresourceUploadDescription(
+				yuv->u.data,
+				yuv->u.stride * yuv->chromaSize.height());
+			uDesc.setDataStride(yuv->u.stride);
+			_rub->uploadTexture(
+				_uTexture,
+				QRhiTextureUploadDescription(
+					QRhiTextureUploadEntry(0, 0, uDesc)));
+			auto vDesc = QRhiTextureSubresourceUploadDescription(
+				yuv->v.data,
+				yuv->v.stride * yuv->chromaSize.height());
+			vDesc.setDataStride(yuv->v.stride);
+			_rub->uploadTexture(
+				_vTexture,
+				QRhiTextureUploadDescription(
+					QRhiTextureUploadEntry(0, 0, vDesc)));
+		}
+		_chromaNV12 = nv12;
+	}
+
+	validateControlsFade();
+
+	if (_nextVertexSlot >= kMaxDraws) {
+		return;
+	}
+
+	const auto textureRect = _owner->_stories
+		? StoryCropTextureRect(QSizeF(yuv->size), geometry.rect.size())
+		: QRectF(0., 0., 1., 1.);
+	const auto texLeft = float(textureRect.x());
+	const auto texRight = float(textureRect.x() + textureRect.width());
+	const auto texTop = float(textureRect.y());
+	const auto texBottom = float(textureRect.y() + textureRect.height());
+
+	const auto rRect = scaleRect(
+		transformRect(geometry.rect),
+		geometry.scale);
+	const auto centerx = rRect.x() + rRect.width() / 2;
+	const auto centery = rRect.y() + rRect.height() / 2;
+	const auto rsin = float(std::sin(geometry.rotation * M_PI / 180.));
+	const auto rcos = float(std::cos(geometry.rotation * M_PI / 180.));
+	const auto rotated = [&](float x, float y) -> std::array<float, 2> {
+		x -= centerx;
+		y -= centery;
+		return { centerx + x * rcos + y * rsin,
+		         centery + y * rcos - x * rsin };
+	};
+	const auto tl = rotated(rRect.left(), rRect.bottom());
+	const auto tr = rotated(rRect.right(), rRect.bottom());
+	const auto bl = rotated(rRect.left(), rRect.top());
+	const auto br = rotated(rRect.right(), rRect.top());
+
+	const auto slot = _nextVertexSlot++;
+	const auto vOffset = slot * kVertexSize;
+	const auto uOffset = slot * 256;
+	const float coords[] = {
+		tl[0], tl[1], texLeft, texTop,
+		tr[0], tr[1], texRight, texTop,
+		bl[0], bl[1], texLeft, texBottom,
+		br[0], br[1], texRight, texBottom,
+	};
+	_rub->updateDynamicBuffer(
+		_vertexBuffer, vOffset, kVertexSize, coords);
+
+	const auto vw = _viewport.width() * _factor;
+	const auto vh = _viewport.height() * _factor;
+	ContentUniforms uniforms{};
+	uniforms.viewport[0] = vw;
+	uniforms.viewport[1] = vh;
+	if (_owner->_stories) {
+		const auto &top = st::storiesShadowTop.size();
+		const auto shadowTop = geometry.topShadowShown
+			? geometry.rect.y()
+			: geometry.rect.y() - top.height();
+		const auto tRect = transformRect(
+			QRect(QPoint(geometry.rect.x(), shadowTop), top));
+		uniforms.shadowTopRect[0] = tRect.x();
+		uniforms.shadowTopRect[1] = tRect.y();
+		uniforms.shadowTopRect[2] = tRect.width();
+		uniforms.shadowTopRect[3] = tRect.height();
+	} else {
+		const auto &top = st::mediaviewShadowTop.size();
+		const auto point = QPoint(
+			_shadowTopFlip ? 0 : (_viewport.width() - top.width()),
+			0);
+		const auto tRect = transformRect(QRect(point, top));
+		uniforms.shadowTopRect[0] = tRect.x();
+		uniforms.shadowTopRect[1] = tRect.y();
+		uniforms.shadowTopRect[2] = tRect.width();
+		uniforms.shadowTopRect[3] = tRect.height();
+	}
+	const auto &bottom = _owner->_stories
+		? st::storiesShadowBottom
+		: st::mediaviewShadowBottom;
+	uniforms.shadowBottomSkipOpacityFullFade[0] =
+		bottom.height() * _factor;
+	uniforms.shadowBottomSkipOpacityFullFade[1] =
+		geometry.bottomShadowSkip * _factor;
+	uniforms.shadowBottomSkipOpacityFullFade[2] =
+		geometry.controlsOpacity;
+	uniforms.shadowBottomSkipOpacityFullFade[3] =
+		1.f - float(geometry.fade);
+	if (geometry.roundRadius) {
+		uniforms.roundRect[0] = rRect.x();
+		uniforms.roundRect[1] = rRect.y();
+		uniforms.roundRect[2] = rRect.width();
+		uniforms.roundRect[3] = rRect.height();
+	} else {
+		uniforms.roundRect[0] = 0;
+		uniforms.roundRect[1] = 0;
+		uniforms.roundRect[2] = vw;
+		uniforms.roundRect[3] = vh;
+	}
+	uniforms.roundRadius = geometry.roundRadius * _factor;
+	_rub->updateDynamicBuffer(
+		_uniformBuffer, uOffset, sizeof(ContentUniforms), &uniforms);
+
+	const auto blendEnabled = (geometry.roundRadius > 0.);
+	auto *srb = _rhi->newShaderResourceBindings();
+	if (nv12) {
+		srb->setBindings({
+			QRhiShaderResourceBinding::uniformBuffer(
+				0,
+				QRhiShaderResourceBinding::VertexStage
+					| QRhiShaderResourceBinding::FragmentStage,
+				_uniformBuffer,
+				uOffset,
+				sizeof(ContentUniforms)),
+			QRhiShaderResourceBinding::sampledTexture(
+				1,
+				QRhiShaderResourceBinding::FragmentStage,
+				_yTexture,
+				_sampler),
+			QRhiShaderResourceBinding::sampledTexture(
+				2,
+				QRhiShaderResourceBinding::FragmentStage,
+				_uvTexture,
+				_sampler),
+			QRhiShaderResourceBinding::sampledTexture(
+				3,
+				QRhiShaderResourceBinding::FragmentStage,
+				_controlsFadeTexture
+					? _controlsFadeTexture
+					: _placeholderTexture,
+				_sampler),
+		});
+	} else {
+		srb->setBindings({
+			QRhiShaderResourceBinding::uniformBuffer(
+				0,
+				QRhiShaderResourceBinding::VertexStage
+					| QRhiShaderResourceBinding::FragmentStage,
+				_uniformBuffer,
+				uOffset,
+				sizeof(ContentUniforms)),
+			QRhiShaderResourceBinding::sampledTexture(
+				1,
+				QRhiShaderResourceBinding::FragmentStage,
+				_yTexture,
+				_sampler),
+			QRhiShaderResourceBinding::sampledTexture(
+				2,
+				QRhiShaderResourceBinding::FragmentStage,
+				_uTexture,
+				_sampler),
+			QRhiShaderResourceBinding::sampledTexture(
+				3,
+				QRhiShaderResourceBinding::FragmentStage,
+				_vTexture,
+				_sampler),
+			QRhiShaderResourceBinding::sampledTexture(
+				4,
+				QRhiShaderResourceBinding::FragmentStage,
+				_controlsFadeTexture
+					? _controlsFadeTexture
+					: _placeholderTexture,
+				_sampler),
+		});
+	}
+	srb->create();
+	_perDrawSrbs.push_back(srb);
+
+	auto *pipeline = nv12
+		? (blendEnabled ? _nv12BlendPipeline : _nv12Pipeline)
+		: (blendEnabled ? _yuv420BlendPipeline : _yuv420Pipeline);
+	_drawCommands.push_back({
+		.pipeline = pipeline,
+		.srb = srb,
+		.vertexIndex = slot,
+	});
+
+	if (_owner->_recognitionResult.success
+		&& !_owner->_recognitionResult.items.empty()) {
+		const auto opacity = _owner->_recognitionAnimation.value(
+			_owner->_showRecognitionResults ? 1. : 0.);
+		if (opacity > 0.) {
+			paintRecognitionOverlay(data.image, geometry);
+		}
+	}
 }
 
 void OverlayWidget::RendererRhi::paintRecognitionOverlay(
