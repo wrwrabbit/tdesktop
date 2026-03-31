@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_translate_bar.h"
 #include "history/view/history_view_translate_tracker.h"
 #include "history/view/history_view_self_forwards_tagger.h"
+#include "history/view/history_view_draw_to_reply.h"
 #include "history/history.h"
 #include "history/history_drag_area.h"
 #include "history/history_item_components.h"
@@ -456,6 +457,36 @@ ChatWidget::ChatWidget(
 			}
 		}, lifetime());
 	}
+
+	session().data().drawToReplyRequests(
+	) | rpl::on_next([=](Data::DrawToReplyRequest request) {
+		if (request.messageId.peer != _peer->id) {
+			return;
+		}
+		auto image = ResolveDrawToReplyImage(
+			&session().data(),
+			request);
+		if (image.isNull()) {
+			return;
+		}
+		const auto replyTo = request.messageId;
+		OpenDrawToReplyEditor(
+			controller,
+			std::move(image),
+			crl::guard(this, [=](QImage &&result) {
+				if (result.isNull()) {
+					return;
+				}
+				if (replyTo) {
+					replyToMessage({ .messageId = replyTo });
+				}
+				auto list = Storage::PrepareMediaFromImage(
+					std::move(result),
+					QByteArray(),
+					st::sendMediaPreviewSize);
+				confirmSendingFiles(std::move(list));
+			}));
+	}, lifetime());
 
 	_selfForwardsTagger = std::make_unique<HistoryView::SelfForwardsTagger>(
 		controller,
