@@ -91,7 +91,8 @@ private:
 	void paintUsingRaster(
 		QRect rect,
 		Fn<void(Painter&)> method,
-		bool transparent = false);
+		bool transparent = false,
+		float opacity = 1.f);
 
 	[[nodiscard]] Ui::GL::Rect transformRect(const QRect &raster) const;
 	[[nodiscard]] Ui::GL::Rect transformRect(const QRectF &raster) const;
