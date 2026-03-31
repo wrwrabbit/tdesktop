@@ -138,11 +138,13 @@ private:
 	QRhiGraphicsPipeline *_nv12Pipeline = nullptr;
 	QRhiGraphicsPipeline *_imagePipeline = nullptr;
 	QRhiGraphicsPipeline *_imageBlendPipeline = nullptr;
+	QRhiGraphicsPipeline *_controlsPipeline = nullptr;
 
 	QRhiShaderResourceBindings *_argb32Srb = nullptr;
 	QRhiShaderResourceBindings *_yuv420Srb = nullptr;
 	QRhiShaderResourceBindings *_nv12Srb = nullptr;
 	QRhiShaderResourceBindings *_imageSrb = nullptr;
+	QRhiShaderResourceBindings *_controlsSrb = nullptr;
 
 	Ui::Rhi::Image _shadowImage;
 	Ui::Rhi::Image _radialImage;

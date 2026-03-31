@@ -40,7 +40,7 @@ static_assert(sizeof(PipUniforms) % 16 == 0);
 struct ImageUniforms {
 	float viewport[2];
 	float g_opacity;
-	float _pad0;
+	float o_opacity;
 };
 static_assert(sizeof(ImageUniforms) % 16 == 0);
 
@@ -232,6 +232,31 @@ void Pip::RendererRhi::createPipelines() {
 		true,
 		4 * sizeof(float));
 
+	const auto pipControlsVert = LoadShader(u"pip_controls.vert"_q);
+	_controlsSrb = _rhi->newShaderResourceBindings();
+	_controlsSrb->setBindings({
+		QRhiShaderResourceBinding::uniformBuffer(
+			0,
+			QRhiShaderResourceBinding::VertexStage
+				| QRhiShaderResourceBinding::FragmentStage,
+			_uniformBuffer),
+		QRhiShaderResourceBinding::sampledTexture(
+			1,
+			QRhiShaderResourceBinding::FragmentStage,
+			_rgbaTexture,
+			_sampler),
+	});
+	_controlsSrb->create();
+
+	_controlsPipeline = CreatePipeline(
+		_rhi,
+		rpDesc,
+		_controlsSrb,
+		pipControlsVert,
+		controlsFrag,
+		true,
+		6 * sizeof(float));
+
 	const auto pipYuv420Frag = LoadShader(u"pip_yuv420.frag"_q);
 	const auto pipNv12Frag = LoadShader(u"pip_nv12.frag"_q);
 
@@ -342,6 +367,8 @@ void Pip::RendererRhi::releaseResources() {
 	_imagePipeline = nullptr;
 	delete _imageBlendPipeline;
 	_imageBlendPipeline = nullptr;
+	delete _controlsPipeline;
+	_controlsPipeline = nullptr;
 
 	delete _argb32Srb;
 	_argb32Srb = nullptr;
@@ -351,6 +378,8 @@ void Pip::RendererRhi::releaseResources() {
 	_nv12Srb = nullptr;
 	delete _imageSrb;
 	_imageSrb = nullptr;
+	delete _controlsSrb;
+	_controlsSrb = nullptr;
 
 	delete _rgbaTexture;
 	_rgbaTexture = nullptr;
@@ -718,61 +747,62 @@ void Pip::RendererRhi::paintButton(
 		return;
 	}
 
-	const auto vw = _viewport.width() * _factor;
-	const auto vh = _viewport.height() * _factor;
+	const auto iconRect = _controlsImage.texturedRect(
+		button.icon,
+		_controlsTextures[meta.index * 2 + 0]);
+	const auto overRect = _controlsImage.texturedRect(
+		button.icon,
+		_controlsTextures[meta.index * 2 + 1]);
+	const auto geo = transformRect(iconRect.geometry);
 
-	const auto drawIcon = [&](int atlasIndex, float opacity) {
-		if (opacity <= 0.f) {
-			return;
-		}
-		const auto texRect = _controlsImage.texturedRect(
-			button.icon,
-			_controlsTextures[meta.index * 2 + atlasIndex]);
-		const auto geo = transformRect(texRect.geometry);
-		const float coords[] = {
-			geo.left(), geo.top(),
-			texRect.texture.left(), texRect.texture.bottom(),
-			geo.right(), geo.top(),
-			texRect.texture.right(), texRect.texture.bottom(),
-			geo.left(), geo.bottom(),
-			texRect.texture.left(), texRect.texture.top(),
-			geo.right(), geo.bottom(),
-			texRect.texture.right(), texRect.texture.top(),
-		};
-		_rub->updateDynamicBuffer(
-			_vertexBuffer, 0, sizeof(coords), coords);
+	const float coords[] = {
+		geo.left(), geo.top(),
+		iconRect.texture.left(), iconRect.texture.bottom(),
+		overRect.texture.left(), overRect.texture.bottom(),
 
-		ImageUniforms uniforms{};
-		uniforms.viewport[0] = vw;
-		uniforms.viewport[1] = vh;
-		uniforms.g_opacity = opacity;
-		_rub->updateDynamicBuffer(
-			_uniformBuffer, 0, sizeof(ImageUniforms), &uniforms);
+		geo.right(), geo.top(),
+		iconRect.texture.right(), iconRect.texture.bottom(),
+		overRect.texture.right(), overRect.texture.bottom(),
 
-		_imageSrb->setBindings({
-			QRhiShaderResourceBinding::uniformBuffer(
-				0,
-				QRhiShaderResourceBinding::VertexStage
-					| QRhiShaderResourceBinding::FragmentStage,
-				_uniformBuffer),
-			QRhiShaderResourceBinding::sampledTexture(
-				1,
-				QRhiShaderResourceBinding::FragmentStage,
-				_controlsImage.texture(),
-				_sampler),
-		});
-		_imageSrb->create();
+		geo.left(), geo.bottom(),
+		iconRect.texture.left(), iconRect.texture.top(),
+		overRect.texture.left(), overRect.texture.top(),
 
-		_drawCommands.push_back({
-			.pipeline = _imageBlendPipeline,
-			.srb = _imageSrb,
-			.vertexBuffer = _vertexBuffer,
-			.vertexOffset = 0,
-		});
+		geo.right(), geo.bottom(),
+		iconRect.texture.right(), iconRect.texture.top(),
+		overRect.texture.right(), overRect.texture.top(),
 	};
+	_rub->updateDynamicBuffer(
+		_vertexBuffer, 0, sizeof(coords), coords);
 
-	drawIcon(0, float(shown * (1. - over)));
-	drawIcon(1, float(shown * over));
+	ImageUniforms uniforms{};
+	uniforms.viewport[0] = _viewport.width() * _factor;
+	uniforms.viewport[1] = _viewport.height() * _factor;
+	uniforms.g_opacity = float(shown);
+	uniforms.o_opacity = float(over);
+	_rub->updateDynamicBuffer(
+		_uniformBuffer, 0, sizeof(ImageUniforms), &uniforms);
+
+	_controlsSrb->setBindings({
+		QRhiShaderResourceBinding::uniformBuffer(
+			0,
+			QRhiShaderResourceBinding::VertexStage
+				| QRhiShaderResourceBinding::FragmentStage,
+			_uniformBuffer),
+		QRhiShaderResourceBinding::sampledTexture(
+			1,
+			QRhiShaderResourceBinding::FragmentStage,
+			_controlsImage.texture(),
+			_sampler),
+	});
+	_controlsSrb->create();
+
+	_drawCommands.push_back({
+		.pipeline = _controlsPipeline,
+		.srb = _controlsSrb,
+		.vertexBuffer = _vertexBuffer,
+		.vertexOffset = 0,
+	});
 }
 
 auto Pip::RendererRhi::ControlMeta(OverState control, int index)
