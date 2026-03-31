@@ -1,4 +1,4 @@
-﻿# Agent Guide for Telegram Desktop
+# Agent Guide for Telegram Desktop
 
 This guide defines repository-wide instructions for coding agents working with the Telegram Desktop codebase.
 
@@ -95,6 +95,12 @@ Retrying builds wastes time and context. The ONLY fix is for the user to close t
 
 1. **Always use Debug builds** - Release builds are extremely heavy
 2. **Don't build Release configuration** - it's too heavy for testing
+
+## Text File Format
+
+- On Windows, keep project text files with CRLF line endings.
+- Do not save source, header, build/config, style, or localization files as UTF-8 with BOM. Use UTF-8 without BOM.
+- When rewriting project text files for normalization, preserve file content otherwise and do not introduce a BOM.
 
 ## Local Storage Serialization
 

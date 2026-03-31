@@ -470,14 +470,14 @@ After all changes are made:
 When finished, report what changes were made and which files you touched.
 ```
 
-## Phase 7: Windows Line Ending Normalization
+## Phase 7: Windows Text Normalization
 
 Run this phase only on Windows hosts and only after the review loop has finished.
 
 Use the current task's result logs as the source of truth for what Codex touched. Do not sweep the whole repo and do not rewrite unrelated files from a dirty worktree.
 
 ```text
-You are performing the final Windows-only line ending normalization phase for task-think.
+You are performing the final Windows-only text normalization phase for task-think.
 
 Read these files:
 - .ai/<PROJECT>/<LETTER>/plan.md
@@ -490,12 +490,14 @@ Your job:
 - Keep only files inside the repository that currently exist and are textual project files: source, headers, build/config files, localization files, style files, and similar text assets.
 - Exclude `.ai/`, `out/`, binary files, and unrelated user files that were not touched by Codex in this task.
 - Rewrite each kept file so all line endings are CRLF.
+- If a kept file is UTF-8 or ASCII text, write it back as UTF-8 without BOM. Never add a UTF-8 BOM to source/config/project text files.
 - Preserve file content otherwise. Preserve whether the file ended with a trailing newline.
 
 Rules:
 - Run this phase in the main session on Windows.
 - Do not modify files outside the touched-file set for the current task.
 - Do not rewrite binary files.
+- When scripting this phase, do not use writer APIs or defaults that emit UTF-8 with BOM.
 - If a file cannot be normalized safely, record it as a failure instead of silently skipping it.
 
 When finished:
@@ -504,6 +506,7 @@ When finished:
    - whether the phase completed
    - which files were normalized
    - which files were skipped and why
+   - whether any UTF-8 BOMs were removed or verified absent
    - any failures that need to be mentioned in the final summary
 ```
 
@@ -514,7 +517,7 @@ When all phases, including build verification, code review, and Windows line end
 2. Show which files were modified or created.
 3. Note any issues encountered during implementation.
 4. Summarize the code review iterations: how many rounds, what was found and fixed, or whether it was approved on the first pass.
-5. On Windows, mention the line-ending normalization result briefly: which project files were normalized or whether nothing needed changes.
+5. On Windows, mention the text-normalization result briefly: which project files were normalized, whether any BOMs were removed, or whether nothing needed changes.
 6. Calculate and display the total elapsed time since `$START_TIME` (format as `Xh Ym Zs`, omitting zero components).
 7. Remind the user of the project name so they can request follow-up tasks within the same project.
 

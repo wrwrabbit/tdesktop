@@ -73,7 +73,7 @@ Run these phases sequentially:
 5. Phase 4: Implementation - Execute one implementation unit per plan phase.
 6. Phase 5: Build Verification - Build the project, fix any build errors. Skip if no source code was modified.
 7. Phase 6: Code Review Loop - Run review and fix iterations until approved or the iteration limit is reached.
-8. Phase 7: Windows Line Ending Normalization - On Windows only, after review passes and before the final summary, normalize LF to CRLF for the text source/config files Codex edited in this task.
+8. Phase 7: Windows Text Normalization - On Windows only, after review passes and before the final summary, normalize LF to CRLF for the text source/config files Codex edited in this task and ensure rewritten UTF-8 project files are saved without BOM.
 
 Use the phase prompt templates in `PROMPTS.md`.
 
@@ -83,6 +83,7 @@ Use Codex subagents as the primary orchestration mechanism.
 
 - When delegation is available, Phase 1, Phase 2, Phase 3, each Phase 4 implementation unit, and each Phase 6 review or review-fix pass must run in fresh subagents. Do not rerun those phases in the main session midstream just because a wait timed out or an artifact is missing.
 - Run Phase 7 in the main session on Windows because it depends on the final local file state and the exact touched-file set for the current task.
+- When any same-session helper rewrites Windows project text files, preserve CRLF and write UTF-8 without BOM. Avoid writer APIs or defaults that silently inject a UTF-8 BOM.
 - The main session may read `context.md` once after Phase 1 and `plan.md` once after Phase 3. After that, prefer narrow shell checks, file existence checks, and status-line reads instead of rereading full documents or diffs.
 - Prefer `worker` for phases that write files. Use `explorer` only for narrow read-only questions that unblock your next local step.
 - Keep `fork_context` off by default. Pass the phase prompt and explicit file paths instead of the whole thread unless the phase truly needs prior conversational context or thread-only attachments.
@@ -111,7 +112,7 @@ Use Codex subagents as the primary orchestration mechanism.
   - implemented code changes present
   - build attempt results recorded
   - review pass documented with any follow-up fixes
-  - on Windows, if the task edited project source/config text files, a line-ending normalization pass recorded after review
+  - on Windows, if the task edited project source/config text files, a CRLF / no-BOM normalization pass recorded after review
 
 ## Completion Criteria
 
@@ -119,7 +120,7 @@ Mark complete only when:
 - All plan phases are done
 - Build verification is recorded
 - Review issues are addressed or explicitly deferred with rationale
-- On Windows, Codex-edited project source/config text files have been normalized to CRLF and the result is logged
+- On Windows, Codex-edited project source/config text files have been normalized to CRLF, any UTF-8 rewrites were saved without BOM, and the result is logged
 - Display total elapsed time since start (format: `Xh Ym Zs`, omitting zero components)
 - Remind the user of the project name so they can request follow-up tasks within the same project
 
@@ -129,7 +130,7 @@ Mark complete only when:
 - If `context.md` or `plan.md` is not written properly by a phase, rerun that phase in a fresh subagent with more specific instructions. Do not repair it locally before build unless delegation was unavailable from the start.
 - If build errors persist after the build phase's attempts, report the remaining errors to the user.
 - If a review-fix phase introduces new build errors that it cannot resolve, report to the user.
-- If Phase 7 cannot safely normalize a touched file on Windows, record the failure in the result log and report it in the final summary instead of silently skipping it.
+- If Phase 7 cannot safely normalize a touched file on Windows or remove an introduced UTF-8 BOM from a touched project text file, record the failure in the result log and report it in the final summary instead of silently skipping it.
 
 ## User Invocation
 
