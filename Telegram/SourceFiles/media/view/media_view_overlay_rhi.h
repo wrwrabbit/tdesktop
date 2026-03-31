@@ -79,6 +79,10 @@ private:
 		QRect rect,
 		float64 opacity = 1.) override;
 
+	void paintRecognitionOverlay(
+		const QImage &image,
+		ContentGeometry geometry);
+
 	void createPipelines();
 
 	void drawTexturedQuad(

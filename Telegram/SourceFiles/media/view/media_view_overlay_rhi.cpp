@@ -403,17 +403,65 @@ void OverlayWidget::RendererRhi::paintTransformedVideoFrame(
 	if (data.format == Streaming::FrameFormat::None) {
 		return;
 	}
-	if (data.format == Streaming::FrameFormat::ARGB32) {
-		Assert(!data.image.isNull());
-		paintTransformedStaticContent(
-			data.image, geometry, false, false);
+	const auto &image = (data.format == Streaming::FrameFormat::ARGB32)
+		? data.image
+		: _owner->videoFrame();
+	paintTransformedStaticContent(image, geometry, false, false);
+	paintRecognitionOverlay(image, geometry);
+}
+
+void OverlayWidget::RendererRhi::paintRecognitionOverlay(
+		const QImage &image,
+		ContentGeometry geometry) {
+	if (!_owner->_recognitionResult.success
+		|| _owner->_recognitionResult.items.empty()) {
 		return;
 	}
-	paintTransformedStaticContent(
-		_owner->videoFrame(),
-		geometry,
-		false,
-		false);
+	const auto opacity = _owner->_recognitionAnimation.value(
+		_owner->_showRecognitionResults ? 1. : 0.);
+	if (opacity <= 0.) {
+		return;
+	}
+	const auto rect = geometry.rect;
+	const auto overlaySize = rect.size().toSize() * _ifactor;
+	if (overlaySize.isEmpty()) {
+		return;
+	}
+	auto overlay = QImage(
+		overlaySize,
+		QImage::Format_ARGB32_Premultiplied);
+	overlay.setDevicePixelRatio(_factor);
+	overlay.fill(QColor(0, 0, 0, int(77 * opacity)));
+
+	const auto scale = rect.width() / float(image.width());
+	{
+		auto p = QPainter(&overlay);
+		p.setCompositionMode(QPainter::CompositionMode_Clear);
+		for (const auto &item : _owner->_recognitionResult.items) {
+			const auto &r = item.rect;
+			p.fillRect(QRectF(
+				r.x() * _ifactor * scale,
+				r.y() * _ifactor * scale,
+				r.width() * _ifactor * scale,
+				r.height() * _ifactor * scale), Qt::transparent);
+		}
+	}
+
+	auto *tex = acquirePoolTexture(overlaySize);
+	_rub->uploadTexture(
+		tex,
+		QRhiTextureUploadDescription(
+			QRhiTextureUploadEntry(0, 0,
+				QRhiTextureSubresourceUploadDescription(overlay))));
+
+	const auto rRect = transformRect(rect);
+	const float coords[] = {
+		rRect.left(), rRect.bottom(), 0.f, 0.f,
+		rRect.right(), rRect.bottom(), 1.f, 0.f,
+		rRect.left(), rRect.top(), 0.f, 1.f,
+		rRect.right(), rRect.top(), 1.f, 1.f,
+	};
+	drawTexturedQuad(_imagePipeline, tex, coords, 1.f, true);
 }
 
 void OverlayWidget::RendererRhi::paintTransformedStaticContent(
@@ -433,40 +481,30 @@ void OverlayWidget::RendererRhi::paintTransformedStaticContent(
 			QRhiTextureUploadEntry(0, 0,
 				QRhiTextureSubresourceUploadDescription(image))));
 
-	const auto rect = geometry.rect;
-	LOG(("QRhi Overlay: rect=(%1,%2,%3,%4) viewport=(%5,%6) factor=%7 image=(%8,%9)")
-		.arg(rect.x()).arg(rect.y()).arg(rect.width()).arg(rect.height())
-		.arg(_viewport.width()).arg(_viewport.height())
-		.arg(_factor)
-		.arg(image.width()).arg(image.height()));
-	const auto rRect = transformRect(rect);
-	std::array<std::array<float, 2>, 4> texcoords = { {
-		{ { 0.f, 0.f } },
-		{ { 1.f, 0.f } },
-		{ { 0.f, 1.f } },
-		{ { 1.f, 1.f } },
-	} };
-	if (const auto shift = int(geometry.rotation) / 90; shift != 0) {
-		std::rotate(
-			begin(texcoords),
-			begin(texcoords) + shift,
-			end(texcoords));
-	}
+	const auto rRect = transformRect(geometry.rect);
+	const auto centerx = rRect.x() + rRect.width() / 2;
+	const auto centery = rRect.y() + rRect.height() / 2;
+	const auto rsin = float(std::sin(geometry.rotation * M_PI / 180.));
+	const auto rcos = float(std::cos(geometry.rotation * M_PI / 180.));
+	const auto rotated = [&](float x, float y) -> std::array<float, 2> {
+		x -= centerx;
+		y -= centery;
+		return { centerx + x * rcos + y * rsin,
+		         centery + y * rcos - x * rsin };
+	};
+	const auto tl = rotated(rRect.left(), rRect.bottom());
+	const auto tr = rotated(rRect.right(), rRect.bottom());
+	const auto bl = rotated(rRect.left(), rRect.top());
+	const auto br = rotated(rRect.right(), rRect.top());
 	const float coords[] = {
-		rRect.left(), rRect.bottom(),
-		texcoords[0][0], texcoords[0][1],
-
-		rRect.right(), rRect.bottom(),
-		texcoords[1][0], texcoords[1][1],
-
-		rRect.left(), rRect.top(),
-		texcoords[2][0], texcoords[2][1],
-
-		rRect.right(), rRect.top(),
-		texcoords[3][0], texcoords[3][1],
+		tl[0], tl[1], 0.f, 0.f,
+		tr[0], tr[1], 1.f, 0.f,
+		bl[0], bl[1], 0.f, 1.f,
+		br[0], br[1], 1.f, 1.f,
 	};
 
 	drawTexturedQuad(_imagePipeline, tex, coords);
+	paintRecognitionOverlay(image, geometry);
 }
 
 void OverlayWidget::RendererRhi::paintRadialLoading(
