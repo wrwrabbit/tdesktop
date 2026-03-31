@@ -33,6 +33,7 @@ Project structure:
     review3.md
     logs/
       phase-*.prompt.md
+      phase-*.progress.md
       phase-*.result.md
   b/                    # Follow-up task
     context.md
@@ -55,9 +56,11 @@ Create and maintain:
 - `.ai/<project-name>/<letter>/plan.md`
 - `.ai/<project-name>/<letter>/review<R>.md` (up to 3 review iterations)
 - `.ai/<project-name>/<letter>/logs/phase-<name>.prompt.md`
+- `.ai/<project-name>/<letter>/logs/phase-<name>.progress.md` for delegated phases
 - `.ai/<project-name>/<letter>/logs/phase-<name>.result.md`
 
 Each `phase-<name>.result.md` should capture a concise outcome summary: whether the phase completed, which files it touched, and any follow-up notes or blockers.
+Each delegated `phase-<name>.progress.md` should act as a heartbeat: a tiny monotonic counter plus current step, files being read or edited, concrete findings so far, and the next checkpoint. It is not a final artifact; it exists so the parent can distinguish active research from a truly stuck subagent without rereading large context.
 
 ## Phases
 
@@ -85,12 +88,17 @@ Use Codex subagents as the primary orchestration mechanism.
 - Keep `fork_context` off by default. Pass the phase prompt and explicit file paths instead of the whole thread unless the phase truly needs prior conversational context or thread-only attachments.
 - When the platform supports it, request `model: gpt-5.4` and `reasoning_effort: xhigh` for spawned phase agents. If overrides are unavailable, inherit the current session settings.
 - Write the exact phase prompt to the matching `logs/phase-<name>.prompt.md` file before you delegate. Use the same prompt file as a checklist if you later need to fall back to same-session execution.
+- For delegated phases, require an early `logs/phase-<name>.progress.md` heartbeat before deep work. The subagent should create or update it early, keep it tiny, and refresh it sparingly: preferably at natural milestones, and otherwise only after a longer quiet stretch such as roughly 5-10 minutes.
 - In every delegated prompt, require a compact final reply with only status, artifact paths, touched files, and blocker or `none`. Detailed reasoning belongs in `.ai/` artifacts, not in the chat reply.
 - After a subagent finishes, verify that the expected artifacts or code changes exist, then write a short result log in `logs/phase-<name>.result.md`.
-- For delegated phases, use `wait_agent` with a 15-minute timeout by default. A timeout is not a failure; it only means no final status arrived yet.
-- On timeout, inspect the expected artifact and worktree for progress first. If progress exists, wait again.
-- If no usable artifact exists yet, send one short follow-up asking the same subagent to finish writing the artifact and return the compact status block, then wait again.
-- If the same subagent still produces no usable artifact after two 15-minute waits and one follow-up, close it and rerun that phase in a fresh subagent.
+- For delegated phases, use `wait_agent` with a 5-minute timeout by default while a phase is still clearly in progress. Successful completion may wake earlier, so this does not add latency to finished phases.
+- When a phase looks close to completion — for example the final artifact has appeared, a build is in its final pass, or the agent said it is wrapping up — switch to 1-2 minute waits until it lands.
+- A timeout is not a failure; it only means no final status arrived yet. Do not treat short waits as stall detection for research-heavy phases.
+- On timeout, inspect the expected artifact, the phase progress file mtime, and the worktree for movement. Prefer mtime checks first; only reread the progress file when you need detail.
+- If the progress file mtime moved or its heartbeat counter increased since the previous check, treat that as active progress and wait again.
+- If no usable final artifact exists yet but the progress file is appearing or advancing, keep the same subagent alive. Progress-file movement does not count toward the retry limit.
+- If no usable final artifact exists yet and neither the expected artifact nor the progress file has moved since the previous blocked check, send one short follow-up asking the same subagent to refresh the progress file, finish the artifact, and return the compact status block, then wait again.
+- Only if the same subagent still shows no meaningful movement in either the expected artifact or the progress file after two full default waits and one follow-up should you close it and rerun that phase in a fresh subagent.
 - Use `wait_agent` only when the next step is blocked on the result. While the delegated phase runs, do small non-overlapping local tasks such as validating directory structure or preparing the next prompt file.
 - Build verification is critical-path work. Prefer running the build in the main session, and only delegate a bounded build-fix phase when there is a concrete reason.
 - If subagents are unavailable in the current environment, or current policy does not allow delegation from the start, run the phase in the main session using the same prompt files. Otherwise, do not switch a pre-build phase to same-session midstream. Never fall back to shell-spawned `codex exec` child processes from this skill.
@@ -117,7 +125,7 @@ Mark complete only when:
 
 ## Error Handling
 
-- If any phase fails, times out, or gets stuck, follow the retry ladder from Execution Mode. After two delegated attempts remain blocked, report the issue to the user. Do not absorb the phase into the main session before build unless delegation was unavailable from the start.
+- If any phase fails, times out, or gets stuck, follow the retry ladder from Execution Mode. Do not close an agent solely because the final artifact is missing while its progress file is still moving. After two delegated attempts remain blocked with no meaningful progress, report the issue to the user. Do not absorb the phase into the main session before build unless delegation was unavailable from the start.
 - If `context.md` or `plan.md` is not written properly by a phase, rerun that phase in a fresh subagent with more specific instructions. Do not repair it locally before build unless delegation was unavailable from the start.
 - If build errors persist after the build phase's attempts, report the remaining errors to the user.
 - If a review-fix phase introduces new build errors that it cannot resolve, report to the user.

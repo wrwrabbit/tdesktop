@@ -9,18 +9,39 @@ Use these templates as Codex subagent messages. Use them as same-session checkli
 - Phase 7 runs in the main session on Windows because it depends on the final local diff and touched-file set.
 - Write each phase prompt to `.ai/<PROJECT>/<LETTER>/logs/phase-<name>.prompt.md` before execution.
 - If you delegate a phase, send the prompt file contents as the initial `spawn_agent` message.
-- When writing the phase prompt file, append the standard compact reply block below so the subagent knows exactly how to report completion.
+- When writing the phase prompt file, append the standard progress file contract and the standard compact reply block below so the subagent knows how to surface progress before the final artifact.
 - After each phase completes, write `.ai/<PROJECT>/<LETTER>/logs/phase-<name>.result.md` summarizing the status, files touched, and any follow-up notes.
 - Use `fork_context: false` by default. If the phase depends on thread-only context or UI attachments, pass that context explicitly or enable `fork_context` only for that phase.
 - Prefer `worker` for phases that write files. Use `default` for plan or review passes if that fits the host better. Use `explorer` only for narrow read-only questions.
 - When supported, request `model: gpt-5.4` and `reasoning_effort: xhigh` for delegated phases.
-- Default wait budget for delegated phases is 15 minutes. Use shorter waits only when the phase is intentionally tiny.
-- A `wait_agent` timeout is not failure. On timeout, inspect expected artifact progress before deciding anything.
+- Default wait budget for delegated phases is 5 minutes while the phase is clearly still in progress. Successful completion may wake earlier, so this does not delay finished work.
+- When a phase appears close to landing, use 1-2 minute waits until it finishes.
+- A `wait_agent` timeout is not failure. On timeout, inspect both the expected artifact and the matching progress file before deciding anything.
 - If the expected artifact exists and shows progress, wait again.
-- If no usable artifact exists yet, send one short follow-up asking the same agent to finish the required artifact and return the standard compact reply block, then wait again.
-- If the same agent still produces no usable artifact after two 15-minute waits and one follow-up, close it and retry the phase in a fresh subagent.
+- If the expected artifact is not ready but the progress file mtime moved or its heartbeat counter increased since the previous check, wait again. Prefer mtime checks first and avoid rereading the file unless you need detail. Do not count that as a failed wait.
+- If neither the expected artifact nor the progress file moved since the previous blocked check, send one short follow-up asking the same agent to refresh the progress file, finish the required artifact, and return the standard compact reply block, then wait again.
+- If the same agent still produces no usable artifact and no meaningful progress-file movement after two full default waits and one follow-up, close it and retry the phase in a fresh subagent.
 - For Phase 1, Phase 2, Phase 3, Phase 4, and Phase 6, if delegated retries still fail, stop and ask the user rather than rerunning the phase locally.
 - Never use `codex exec`, background shell child processes, or JSONL child-session logging from this skill.
+
+## Standard Progress File Contract
+
+Append this verbatim to every delegated phase prompt:
+
+```text
+Before deep work, create or update the matching progress file in `.ai/<PROJECT>/<LETTER>/logs/`.
+
+Use `<phase-name>.progress.md` as a concise heartbeat with:
+- `Heartbeat: <N>` on the first line, incremented on each meaningful update
+- Current step
+- Files being read or edited
+- Concrete findings or decisions so far
+- Blocker or next checkpoint
+
+Update it sparingly: preferably at natural milestones, and otherwise only after a longer quiet stretch such as roughly 5-10 minutes.
+Keep it tiny so the parent can usually rely on file mtime or the heartbeat counter instead of rereading the whole file.
+Do not wait until the final artifact to write progress.
+```
 
 ## Standard Compact Reply Block
 
@@ -499,7 +520,7 @@ When all phases, including build verification, code review, and Windows line end
 
 ## Error Handling
 
-- If any phase fails or gets stuck, follow the timeout and retry rules above. For Phase 1, Phase 2, Phase 3, Phase 4, and Phase 6, do not rerun locally after a timeout; ask the user if delegated retries fail.
+- If any phase fails or gets stuck, follow the timeout and retry rules above. Do not close an agent solely because the final artifact is missing while its progress file is still advancing. For Phase 1, Phase 2, Phase 3, Phase 4, and Phase 6, do not rerun locally after delegated retries fail; ask the user instead.
 - If `context.md` or `plan.md` is not written properly by a phase, rerun that phase in a fresh subagent with more specific instructions.
 - If build errors persist after the build phase's attempts, report the remaining errors to the user.
 - If a review-fix phase introduces new build errors that it cannot resolve, report to the user.
@@ -509,7 +530,8 @@ When all phases, including build verification, code review, and Windows line end
 For each phase:
 1. Write the full prompt to `.ai/<PROJECT>/<LETTER>/logs/phase-<name>.prompt.md`
 2. Delegate by sending that prompt text to a fresh subagent, or use it as a same-session checklist only for the designated main-session phases or when delegation was unavailable from the start
-3. Save a concise completion note to `.ai/<PROJECT>/<LETTER>/logs/phase-<name>.result.md`
+3. For delegated phases, expect a matching `.ai/<PROJECT>/<LETTER>/logs/phase-<name>.progress.md` heartbeat while work is in flight
+4. Save a concise completion note to `.ai/<PROJECT>/<LETTER>/logs/phase-<name>.result.md`
 
 For review iterations, include the iteration in the file name, for example:
 - `phase-6a-review-1.prompt.md`
@@ -523,9 +545,12 @@ Use this pattern conceptually for delegated phases:
 
 1. Write the phase prompt file.
 2. Spawn a fresh subagent with the phase prompt, usually with `fork_context: false`.
-3. Wait in 15-minute intervals when the next step is blocked on that phase, checking artifact progress on timeout.
-4. If needed, send one short follow-up to the same agent, then retry once with a fresh subagent before involving the user.
-5. Validate the expected artifact or code changes with small shell summaries and the completion checks above.
-6. Write the result log from the validated outcome and the compact reply block.
+3. Require the agent to create the matching progress file early and refresh it sparingly: at natural milestones when possible, otherwise only after a longer quiet stretch such as roughly 5-10 minutes.
+4. Wait in 5-minute intervals when the next step is blocked on that phase, checking both the final artifact and the progress file on timeout.
+5. When the phase looks close to finishing, switch to 1-2 minute waits.
+6. Prefer filesystem mtime checks on the progress file first. If its mtime moved or the heartbeat counter increased, keep waiting; do not treat that as a stall.
+7. If neither the artifact nor the progress file moves, send one short follow-up to the same agent, then retry once with a fresh subagent before involving the user.
+8. Validate the expected artifact or code changes with small shell summaries and the completion checks above.
+9. Write the result log from the validated outcome and the compact reply block.
 
 Do not replace this pattern with shell-launched `codex exec`.
