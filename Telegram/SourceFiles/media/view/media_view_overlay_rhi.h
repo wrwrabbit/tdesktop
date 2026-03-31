@@ -109,6 +109,11 @@ private:
 		bool fillTransparentBackground,
 		bool blend);
 
+	void fillShadowUniforms(
+		float *shadowTopRect,
+		float *shadowBottomSkipOpacityFullFade,
+		ContentGeometry geometry) const;
+
 	void paintUsingRaster(
 		QRect rect,
 		Fn<void(Painter&)> method,
@@ -135,7 +140,6 @@ private:
 
 	static constexpr int kMaxDraws = 32;
 	static constexpr int kVertexSize = 4 * 4 * sizeof(float);
-	static constexpr int kUniformSize = 16;
 
 	QRhiBuffer *_vertexBuffer = nullptr;
 	QRhiBuffer *_fillVertexBuffer = nullptr;

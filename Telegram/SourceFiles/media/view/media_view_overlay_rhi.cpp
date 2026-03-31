@@ -808,6 +808,42 @@ void OverlayWidget::RendererRhi::validateControlsFade() {
 				QRhiTextureSubresourceUploadDescription(image))));
 }
 
+void OverlayWidget::RendererRhi::fillShadowUniforms(
+		float *shadowTopRect,
+		float *shadowBottomSkipOpacityFullFade,
+		ContentGeometry geometry) const {
+	if (_owner->_stories) {
+		const auto &top = st::storiesShadowTop.size();
+		const auto shadowTop = geometry.topShadowShown
+			? geometry.rect.y()
+			: geometry.rect.y() - top.height();
+		const auto tRect = transformRect(
+			QRect(QPoint(geometry.rect.x(), shadowTop), top));
+		shadowTopRect[0] = tRect.x();
+		shadowTopRect[1] = tRect.y();
+		shadowTopRect[2] = tRect.width();
+		shadowTopRect[3] = tRect.height();
+	} else {
+		const auto &top = st::mediaviewShadowTop.size();
+		const auto point = QPoint(
+			_shadowTopFlip ? 0 : (_viewport.width() - top.width()),
+			0);
+		const auto tRect = transformRect(QRect(point, top));
+		shadowTopRect[0] = tRect.x();
+		shadowTopRect[1] = tRect.y();
+		shadowTopRect[2] = tRect.width();
+		shadowTopRect[3] = tRect.height();
+	}
+	const auto &bottom = _owner->_stories
+		? st::storiesShadowBottom
+		: st::mediaviewShadowBottom;
+	shadowBottomSkipOpacityFullFade[0] = bottom.height() * _factor;
+	shadowBottomSkipOpacityFullFade[1] =
+		geometry.bottomShadowSkip * _factor;
+	shadowBottomSkipOpacityFullFade[2] = geometry.controlsOpacity;
+	shadowBottomSkipOpacityFullFade[3] = 1.f - float(geometry.fade);
+}
+
 void OverlayWidget::RendererRhi::drawContentQuad(
 		QRhiTexture *contentTexture,
 		const float *coords,
@@ -840,41 +876,10 @@ void OverlayWidget::RendererRhi::drawContentQuad(
 		TransparentContentUniforms uniforms{};
 		uniforms.viewport[0] = vw;
 		uniforms.viewport[1] = vh;
-
-		if (_owner->_stories) {
-			const auto &top = st::storiesShadowTop.size();
-			const auto shadowTop = geometry.topShadowShown
-				? geometry.rect.y()
-				: geometry.rect.y() - top.height();
-			const auto tRect = transformRect(
-				QRect(QPoint(geometry.rect.x(), shadowTop), top));
-			uniforms.shadowTopRect[0] = tRect.x();
-			uniforms.shadowTopRect[1] = tRect.y();
-			uniforms.shadowTopRect[2] = tRect.width();
-			uniforms.shadowTopRect[3] = tRect.height();
-		} else {
-			const auto &top = st::mediaviewShadowTop.size();
-			const auto point = QPoint(
-				_shadowTopFlip ? 0 : (_viewport.width() - top.width()),
-				0);
-			const auto tRect = transformRect(QRect(point, top));
-			uniforms.shadowTopRect[0] = tRect.x();
-			uniforms.shadowTopRect[1] = tRect.y();
-			uniforms.shadowTopRect[2] = tRect.width();
-			uniforms.shadowTopRect[3] = tRect.height();
-		}
-		const auto &bottom = _owner->_stories
-			? st::storiesShadowBottom
-			: st::mediaviewShadowBottom;
-		uniforms.shadowBottomSkipOpacityFullFade[0] =
-			bottom.height() * _factor;
-		uniforms.shadowBottomSkipOpacityFullFade[1] =
-			geometry.bottomShadowSkip * _factor;
-		uniforms.shadowBottomSkipOpacityFullFade[2] =
-			geometry.controlsOpacity;
-		uniforms.shadowBottomSkipOpacityFullFade[3] =
-			1.f - float(geometry.fade);
-
+		fillShadowUniforms(
+			uniforms.shadowTopRect,
+			uniforms.shadowBottomSkipOpacityFullFade,
+			geometry);
 		uniforms.transparentBg[0] = float(c_bg.redF());
 		uniforms.transparentBg[1] = float(c_bg.greenF());
 		uniforms.transparentBg[2] = float(c_bg.blueF());
@@ -885,7 +890,6 @@ void OverlayWidget::RendererRhi::drawContentQuad(
 		uniforms.transparentFg[3] = float(c_fg.alphaF());
 		uniforms.transparentSize =
 			st::transparentPlaceholderSize * _factor;
-
 		_rub->updateDynamicBuffer(
 			_uniformBuffer,
 			uOffset,
@@ -895,41 +899,10 @@ void OverlayWidget::RendererRhi::drawContentQuad(
 		ContentUniforms uniforms{};
 		uniforms.viewport[0] = vw;
 		uniforms.viewport[1] = vh;
-
-		if (_owner->_stories) {
-			const auto &top = st::storiesShadowTop.size();
-			const auto shadowTop = geometry.topShadowShown
-				? geometry.rect.y()
-				: geometry.rect.y() - top.height();
-			const auto tRect = transformRect(
-				QRect(QPoint(geometry.rect.x(), shadowTop), top));
-			uniforms.shadowTopRect[0] = tRect.x();
-			uniforms.shadowTopRect[1] = tRect.y();
-			uniforms.shadowTopRect[2] = tRect.width();
-			uniforms.shadowTopRect[3] = tRect.height();
-		} else {
-			const auto &top = st::mediaviewShadowTop.size();
-			const auto point = QPoint(
-				_shadowTopFlip ? 0 : (_viewport.width() - top.width()),
-				0);
-			const auto tRect = transformRect(QRect(point, top));
-			uniforms.shadowTopRect[0] = tRect.x();
-			uniforms.shadowTopRect[1] = tRect.y();
-			uniforms.shadowTopRect[2] = tRect.width();
-			uniforms.shadowTopRect[3] = tRect.height();
-		}
-		const auto &bottom = _owner->_stories
-			? st::storiesShadowBottom
-			: st::mediaviewShadowBottom;
-		uniforms.shadowBottomSkipOpacityFullFade[0] =
-			bottom.height() * _factor;
-		uniforms.shadowBottomSkipOpacityFullFade[1] =
-			geometry.bottomShadowSkip * _factor;
-		uniforms.shadowBottomSkipOpacityFullFade[2] =
-			geometry.controlsOpacity;
-		uniforms.shadowBottomSkipOpacityFullFade[3] =
-			1.f - float(geometry.fade);
-
+		fillShadowUniforms(
+			uniforms.shadowTopRect,
+			uniforms.shadowBottomSkipOpacityFullFade,
+			geometry);
 		const auto rRect = scaleRect(
 			transformRect(geometry.rect),
 			geometry.scale);
@@ -945,7 +918,6 @@ void OverlayWidget::RendererRhi::drawContentQuad(
 			uniforms.roundRect[3] = vh;
 		}
 		uniforms.roundRadius = geometry.roundRadius * _factor;
-
 		_rub->updateDynamicBuffer(
 			_uniformBuffer,
 			uOffset,
@@ -1166,39 +1138,10 @@ void OverlayWidget::RendererRhi::paintTransformedVideoFrame(
 	ContentUniforms uniforms{};
 	uniforms.viewport[0] = vw;
 	uniforms.viewport[1] = vh;
-	if (_owner->_stories) {
-		const auto &top = st::storiesShadowTop.size();
-		const auto shadowTop = geometry.topShadowShown
-			? geometry.rect.y()
-			: geometry.rect.y() - top.height();
-		const auto tRect = transformRect(
-			QRect(QPoint(geometry.rect.x(), shadowTop), top));
-		uniforms.shadowTopRect[0] = tRect.x();
-		uniforms.shadowTopRect[1] = tRect.y();
-		uniforms.shadowTopRect[2] = tRect.width();
-		uniforms.shadowTopRect[3] = tRect.height();
-	} else {
-		const auto &top = st::mediaviewShadowTop.size();
-		const auto point = QPoint(
-			_shadowTopFlip ? 0 : (_viewport.width() - top.width()),
-			0);
-		const auto tRect = transformRect(QRect(point, top));
-		uniforms.shadowTopRect[0] = tRect.x();
-		uniforms.shadowTopRect[1] = tRect.y();
-		uniforms.shadowTopRect[2] = tRect.width();
-		uniforms.shadowTopRect[3] = tRect.height();
-	}
-	const auto &bottom = _owner->_stories
-		? st::storiesShadowBottom
-		: st::mediaviewShadowBottom;
-	uniforms.shadowBottomSkipOpacityFullFade[0] =
-		bottom.height() * _factor;
-	uniforms.shadowBottomSkipOpacityFullFade[1] =
-		geometry.bottomShadowSkip * _factor;
-	uniforms.shadowBottomSkipOpacityFullFade[2] =
-		geometry.controlsOpacity;
-	uniforms.shadowBottomSkipOpacityFullFade[3] =
-		1.f - float(geometry.fade);
+	fillShadowUniforms(
+		uniforms.shadowTopRect,
+		uniforms.shadowBottomSkipOpacityFullFade,
+		geometry);
 	if (geometry.roundRadius) {
 		uniforms.roundRect[0] = rRect.x();
 		uniforms.roundRect[1] = rRect.y();
