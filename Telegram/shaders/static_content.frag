@@ -25,37 +25,27 @@ float roundedCorner() {
 	return 1.0 - smoothstep(0.0, 1.0, rounded);
 }
 
-vec4 applyControlsFade(vec4 result) {
+void main() {
+	vec4 result = texture(s_texture, v_texcoord);
+
 	float topHeight = shadowTopRect.w;
 	float bottomHeight = shadowBottomSkipOpacityFullFade.x;
 	float bottomSkip = shadowBottomSkipOpacityFullFade.y;
 	float opacity = shadowBottomSkipOpacityFullFade.z;
 	float fullFade = shadowBottomSkipOpacityFullFade.w;
+	float viewportHeight = shadowTopRect.y + topHeight;
+	float fullHeight = topHeight + bottomHeight;
+	float topY = min(
+		(viewportHeight - gl_FragCoord.y) / fullHeight,
+		topHeight / fullHeight);
+	float topX = (gl_FragCoord.x - shadowTopRect.x) / shadowTopRect.z;
+	vec4 fadeTop = texture(f_texture, vec2(topX, topY)) * opacity;
+	float bottomY = max(bottomSkip + fullHeight - gl_FragCoord.y, topHeight)
+		/ fullHeight;
+	vec4 fadeBottom = texture(f_texture, vec2(0.5, bottomY)) * opacity;
+	float fade = min((1.0 - fadeTop.a) * (1.0 - fadeBottom.a), fullFade);
+	result.rgb = result.rgb * fade;
 
-	float topY = shadowTopRect.y;
-	float bottomY = topY + shadowTopRect.z;
-	float coord = gl_FragCoord.y;
-
-	float fadeAlpha = 0.0;
-	float fadeTexCoord = 0.0;
-
-	if (coord < topY + topHeight) {
-		fadeTexCoord = (topY + topHeight - coord) / topHeight;
-		fadeAlpha = opacity;
-	} else if (coord > bottomY - bottomHeight - bottomSkip) {
-		fadeTexCoord = (coord - (bottomY - bottomHeight - bottomSkip)) / bottomHeight;
-		fadeAlpha = opacity;
-	}
-
-	fadeAlpha = mix(fadeAlpha, 1.0, fullFade);
-	vec4 fadeColor = texture(f_texture, vec2(fadeTexCoord, 0.5));
-	fadeColor *= fadeAlpha;
-	return result * (1.0 - fadeColor.a) + fadeColor;
-}
-
-void main() {
-	vec4 result = texture(s_texture, v_texcoord);
-	result = applyControlsFade(result);
 	result *= roundedCorner();
 	fragColor = result;
 }

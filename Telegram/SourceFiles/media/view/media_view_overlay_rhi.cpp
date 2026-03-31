@@ -30,6 +30,29 @@ struct ImageUniforms {
 };
 static_assert(sizeof(ImageUniforms) % 16 == 0);
 
+struct ContentUniforms {
+	float viewport[2];
+	float _pad0[2];
+	float shadowTopRect[4];
+	float shadowBottomSkipOpacityFullFade[4];
+	float roundRect[4];
+	float roundRadius;
+	float _pad1[3];
+};
+static_assert(sizeof(ContentUniforms) == 80);
+
+struct TransparentContentUniforms {
+	float viewport[2];
+	float _pad0[2];
+	float shadowTopRect[4];
+	float shadowBottomSkipOpacityFullFade[4];
+	float transparentBg[4];
+	float transparentFg[4];
+	float transparentSize;
+	float _pad1[3];
+};
+static_assert(sizeof(TransparentContentUniforms) == 96);
+
 [[nodiscard]] QRectF StoryCropTextureRect(
 		QSizeF imageSize,
 		QSizeF targetSize) {
@@ -193,6 +216,94 @@ void OverlayWidget::RendererRhi::createPipelines() {
 	imageBlendPipeline->setRenderPassDescriptor(rpDesc);
 	imageBlendPipeline->create();
 	_imageBlendPipeline = imageBlendPipeline;
+
+	const auto staticContentFrag = LoadShader(u"static_content.frag"_q);
+	const auto transparentContentFrag = LoadShader(
+		u"transparent_content.frag"_q);
+
+	auto *contentSrb = _rhi->newShaderResourceBindings();
+	contentSrb->setBindings({
+		QRhiShaderResourceBinding::uniformBuffer(
+			0,
+			QRhiShaderResourceBinding::VertexStage
+				| QRhiShaderResourceBinding::FragmentStage,
+			_uniformBuffer,
+			0,
+			sizeof(ContentUniforms)),
+		QRhiShaderResourceBinding::sampledTexture(
+			1,
+			QRhiShaderResourceBinding::FragmentStage,
+			_placeholderTexture,
+			_sampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			2,
+			QRhiShaderResourceBinding::FragmentStage,
+			_placeholderTexture,
+			_sampler),
+	});
+	contentSrb->create();
+	_perDrawSrbs.push_back(contentSrb);
+
+	auto *staticPipeline = _rhi->newGraphicsPipeline();
+	staticPipeline->setShaderStages({
+		{ QRhiShaderStage::Vertex, argb32Vert },
+		{ QRhiShaderStage::Fragment, staticContentFrag },
+	});
+	staticPipeline->setVertexInputLayout(inputLayout);
+	staticPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
+	staticPipeline->setShaderResourceBindings(contentSrb);
+	staticPipeline->setRenderPassDescriptor(rpDesc);
+	staticPipeline->create();
+	_staticContentPipeline = staticPipeline;
+
+	auto *staticBlendPipeline = _rhi->newGraphicsPipeline();
+	staticBlendPipeline->setShaderStages({
+		{ QRhiShaderStage::Vertex, argb32Vert },
+		{ QRhiShaderStage::Fragment, staticContentFrag },
+	});
+	staticBlendPipeline->setVertexInputLayout(inputLayout);
+	staticBlendPipeline->setTargetBlends({ blend });
+	staticBlendPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
+	staticBlendPipeline->setShaderResourceBindings(contentSrb);
+	staticBlendPipeline->setRenderPassDescriptor(rpDesc);
+	staticBlendPipeline->create();
+	_staticContentBlendPipeline = staticBlendPipeline;
+
+	auto *transparentSrb = _rhi->newShaderResourceBindings();
+	transparentSrb->setBindings({
+		QRhiShaderResourceBinding::uniformBuffer(
+			0,
+			QRhiShaderResourceBinding::VertexStage
+				| QRhiShaderResourceBinding::FragmentStage,
+			_uniformBuffer,
+			0,
+			sizeof(TransparentContentUniforms)),
+		QRhiShaderResourceBinding::sampledTexture(
+			1,
+			QRhiShaderResourceBinding::FragmentStage,
+			_placeholderTexture,
+			_sampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			2,
+			QRhiShaderResourceBinding::FragmentStage,
+			_placeholderTexture,
+			_sampler),
+	});
+	transparentSrb->create();
+	_perDrawSrbs.push_back(transparentSrb);
+
+	auto *transparentPipeline = _rhi->newGraphicsPipeline();
+	transparentPipeline->setShaderStages({
+		{ QRhiShaderStage::Vertex, argb32Vert },
+		{ QRhiShaderStage::Fragment, transparentContentFrag },
+	});
+	transparentPipeline->setVertexInputLayout(inputLayout);
+	transparentPipeline->setTargetBlends({ blend });
+	transparentPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
+	transparentPipeline->setShaderResourceBindings(transparentSrb);
+	transparentPipeline->setRenderPassDescriptor(rpDesc);
+	transparentPipeline->create();
+	_transparentContentPipeline = transparentPipeline;
 }
 
 void OverlayWidget::RendererRhi::render(
@@ -299,6 +410,16 @@ void OverlayWidget::RendererRhi::releaseResources() {
 	_imagePipeline = nullptr;
 	delete _imageBlendPipeline;
 	_imageBlendPipeline = nullptr;
+	delete _staticContentPipeline;
+	_staticContentPipeline = nullptr;
+	delete _staticContentBlendPipeline;
+	_staticContentBlendPipeline = nullptr;
+	delete _transparentContentPipeline;
+	_transparentContentPipeline = nullptr;
+
+	delete _controlsFadeTexture;
+	_controlsFadeTexture = nullptr;
+	_controlsFadeSize = QSize();
 
 	for (auto *srb : _perDrawSrbs) {
 		delete srb;
@@ -437,6 +558,235 @@ void OverlayWidget::RendererRhi::paintUsingRaster(
 		coords,
 		opacity,
 		transparent);
+}
+
+void OverlayWidget::RendererRhi::validateControlsFade() {
+	const auto forStories = (_owner->_stories != nullptr);
+	const auto flip = !forStories && !_owner->topShadowOnTheRight();
+	if (_controlsFadeTexture
+		&& _shadowTopFlip == flip
+		&& _shadowsForStories == forStories) {
+		return;
+	}
+	_shadowTopFlip = flip;
+	_shadowsForStories = forStories;
+	const auto &top = _shadowsForStories
+		? st::storiesShadowTop
+		: st::mediaviewShadowTop;
+	const auto &bottom = _shadowsForStories
+		? st::storiesShadowBottom
+		: st::mediaviewShadowBottom;
+	const auto width = top.width();
+	const auto bottomTop = top.height();
+	const auto height = bottomTop + bottom.height();
+
+	auto image = QImage(
+		QSize(width, height) * _ifactor,
+		QImage::Format_ARGB32_Premultiplied);
+	image.fill(Qt::transparent);
+	image.setDevicePixelRatio(_ifactor);
+	{
+		auto p = QPainter(&image);
+		top.paint(p, 0, 0, width);
+		bottom.fill(p, QRect(0, bottomTop, width, bottom.height()));
+	}
+	if (flip) {
+		image = std::move(image).mirrored(true, false);
+	}
+
+	const auto size = image.size();
+	if (!_controlsFadeTexture || _controlsFadeSize != size) {
+		delete _controlsFadeTexture;
+		_controlsFadeTexture = _rhi->newTexture(
+			QRhiTexture::BGRA8,
+			size);
+		_controlsFadeTexture->create();
+		_controlsFadeSize = size;
+	}
+	_rub->uploadTexture(
+		_controlsFadeTexture,
+		QRhiTextureUploadDescription(
+			QRhiTextureUploadEntry(0, 0,
+				QRhiTextureSubresourceUploadDescription(image))));
+}
+
+void OverlayWidget::RendererRhi::drawContentQuad(
+		QRhiTexture *contentTexture,
+		const float *coords,
+		ContentGeometry geometry,
+		bool fillTransparentBackground,
+		bool blend) {
+	if (_nextVertexSlot >= kMaxDraws || !contentTexture) {
+		return;
+	}
+
+	validateControlsFade();
+
+	const auto slot = _nextVertexSlot++;
+	const auto vOffset = slot * kVertexSize;
+	const auto uOffset = slot * 256;
+
+	_rub->updateDynamicBuffer(
+		_vertexBuffer, vOffset, kVertexSize, coords);
+
+	const auto vw = _viewport.width() * _factor;
+	const auto vh = _viewport.height() * _factor;
+
+	auto *pipeline = fillTransparentBackground
+		? _transparentContentPipeline
+		: (blend ? _staticContentBlendPipeline : _staticContentPipeline);
+
+	if (fillTransparentBackground) {
+		const auto c_bg = st::mediaviewTransparentBg->c;
+		const auto c_fg = st::mediaviewTransparentFg->c;
+		TransparentContentUniforms uniforms{};
+		uniforms.viewport[0] = vw;
+		uniforms.viewport[1] = vh;
+
+		if (_owner->_stories) {
+			const auto &top = st::storiesShadowTop.size();
+			const auto shadowTop = geometry.topShadowShown
+				? geometry.rect.y()
+				: geometry.rect.y() - top.height();
+			const auto tRect = transformRect(
+				QRect(QPoint(geometry.rect.x(), shadowTop), top));
+			uniforms.shadowTopRect[0] = tRect.x();
+			uniforms.shadowTopRect[1] = tRect.y();
+			uniforms.shadowTopRect[2] = tRect.width();
+			uniforms.shadowTopRect[3] = tRect.height();
+		} else {
+			const auto &top = st::mediaviewShadowTop.size();
+			const auto point = QPoint(
+				_shadowTopFlip ? 0 : (_viewport.width() - top.width()),
+				0);
+			const auto tRect = transformRect(QRect(point, top));
+			uniforms.shadowTopRect[0] = tRect.x();
+			uniforms.shadowTopRect[1] = tRect.y();
+			uniforms.shadowTopRect[2] = tRect.width();
+			uniforms.shadowTopRect[3] = tRect.height();
+		}
+		const auto &bottom = _owner->_stories
+			? st::storiesShadowBottom
+			: st::mediaviewShadowBottom;
+		uniforms.shadowBottomSkipOpacityFullFade[0] =
+			bottom.height() * _factor;
+		uniforms.shadowBottomSkipOpacityFullFade[1] =
+			geometry.bottomShadowSkip * _factor;
+		uniforms.shadowBottomSkipOpacityFullFade[2] =
+			geometry.controlsOpacity;
+		uniforms.shadowBottomSkipOpacityFullFade[3] =
+			1.f - float(geometry.fade);
+
+		uniforms.transparentBg[0] = float(c_bg.redF());
+		uniforms.transparentBg[1] = float(c_bg.greenF());
+		uniforms.transparentBg[2] = float(c_bg.blueF());
+		uniforms.transparentBg[3] = float(c_bg.alphaF());
+		uniforms.transparentFg[0] = float(c_fg.redF());
+		uniforms.transparentFg[1] = float(c_fg.greenF());
+		uniforms.transparentFg[2] = float(c_fg.blueF());
+		uniforms.transparentFg[3] = float(c_fg.alphaF());
+		uniforms.transparentSize =
+			st::transparentPlaceholderSize * _factor;
+
+		_rub->updateDynamicBuffer(
+			_uniformBuffer,
+			uOffset,
+			sizeof(TransparentContentUniforms),
+			&uniforms);
+	} else {
+		ContentUniforms uniforms{};
+		uniforms.viewport[0] = vw;
+		uniforms.viewport[1] = vh;
+
+		if (_owner->_stories) {
+			const auto &top = st::storiesShadowTop.size();
+			const auto shadowTop = geometry.topShadowShown
+				? geometry.rect.y()
+				: geometry.rect.y() - top.height();
+			const auto tRect = transformRect(
+				QRect(QPoint(geometry.rect.x(), shadowTop), top));
+			uniforms.shadowTopRect[0] = tRect.x();
+			uniforms.shadowTopRect[1] = tRect.y();
+			uniforms.shadowTopRect[2] = tRect.width();
+			uniforms.shadowTopRect[3] = tRect.height();
+		} else {
+			const auto &top = st::mediaviewShadowTop.size();
+			const auto point = QPoint(
+				_shadowTopFlip ? 0 : (_viewport.width() - top.width()),
+				0);
+			const auto tRect = transformRect(QRect(point, top));
+			uniforms.shadowTopRect[0] = tRect.x();
+			uniforms.shadowTopRect[1] = tRect.y();
+			uniforms.shadowTopRect[2] = tRect.width();
+			uniforms.shadowTopRect[3] = tRect.height();
+		}
+		const auto &bottom = _owner->_stories
+			? st::storiesShadowBottom
+			: st::mediaviewShadowBottom;
+		uniforms.shadowBottomSkipOpacityFullFade[0] =
+			bottom.height() * _factor;
+		uniforms.shadowBottomSkipOpacityFullFade[1] =
+			geometry.bottomShadowSkip * _factor;
+		uniforms.shadowBottomSkipOpacityFullFade[2] =
+			geometry.controlsOpacity;
+		uniforms.shadowBottomSkipOpacityFullFade[3] =
+			1.f - float(geometry.fade);
+
+		const auto rRect = scaleRect(
+			transformRect(geometry.rect),
+			geometry.scale);
+		if (geometry.roundRadius) {
+			uniforms.roundRect[0] = rRect.x();
+			uniforms.roundRect[1] = rRect.y();
+			uniforms.roundRect[2] = rRect.width();
+			uniforms.roundRect[3] = rRect.height();
+		} else {
+			uniforms.roundRect[0] = 0;
+			uniforms.roundRect[1] = 0;
+			uniforms.roundRect[2] = vw;
+			uniforms.roundRect[3] = vh;
+		}
+		uniforms.roundRadius = geometry.roundRadius * _factor;
+
+		_rub->updateDynamicBuffer(
+			_uniformBuffer,
+			uOffset,
+			sizeof(ContentUniforms),
+			&uniforms);
+	}
+
+	auto *srb = _rhi->newShaderResourceBindings();
+	srb->setBindings({
+		QRhiShaderResourceBinding::uniformBuffer(
+			0,
+			QRhiShaderResourceBinding::VertexStage
+				| QRhiShaderResourceBinding::FragmentStage,
+			_uniformBuffer,
+			uOffset,
+			fillTransparentBackground
+				? int(sizeof(TransparentContentUniforms))
+				: int(sizeof(ContentUniforms))),
+		QRhiShaderResourceBinding::sampledTexture(
+			1,
+			QRhiShaderResourceBinding::FragmentStage,
+			contentTexture,
+			_sampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			2,
+			QRhiShaderResourceBinding::FragmentStage,
+			_controlsFadeTexture
+				? _controlsFadeTexture
+				: _placeholderTexture,
+			_sampler),
+	});
+	srb->create();
+	_perDrawSrbs.push_back(srb);
+
+	_drawCommands.push_back({
+		.pipeline = pipeline,
+		.srb = srb,
+		.vertexIndex = slot,
+	});
 }
 
 void OverlayWidget::RendererRhi::paintBackground() {
@@ -604,11 +954,11 @@ void OverlayWidget::RendererRhi::paintTransformedStaticContent(
 
 	const auto blend = (geometry.roundRadius > 0.)
 		|| (semiTransparent && !fillTransparentBackground);
-	drawTexturedQuad(
-		_imagePipeline,
+	drawContentQuad(
 		_rgbaTextures[index],
 		coords,
-		1.f,
+		geometry,
+		fillTransparentBackground,
 		blend);
 	paintRecognitionOverlay(image, geometry);
 }

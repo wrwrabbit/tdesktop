@@ -85,6 +85,7 @@ private:
 		ContentGeometry geometry);
 
 	void createPipelines();
+	void validateControlsFade();
 
 	void drawTexturedQuad(
 		QRhiGraphicsPipeline *pipeline,
@@ -92,6 +93,13 @@ private:
 		const float *coords,
 		float opacity = 1.f,
 		bool blend = false);
+
+	void drawContentQuad(
+		QRhiTexture *contentTexture,
+		const float *coords,
+		ContentGeometry geometry,
+		bool fillTransparentBackground,
+		bool blend);
 
 	void paintUsingRaster(
 		QRect rect,
@@ -128,6 +136,9 @@ private:
 
 	QRhiGraphicsPipeline *_imagePipeline = nullptr;
 	QRhiGraphicsPipeline *_imageBlendPipeline = nullptr;
+	QRhiGraphicsPipeline *_staticContentPipeline = nullptr;
+	QRhiGraphicsPipeline *_staticContentBlendPipeline = nullptr;
+	QRhiGraphicsPipeline *_transparentContentPipeline = nullptr;
 
 	struct DrawCommand {
 		QRhiGraphicsPipeline *pipeline = nullptr;
@@ -149,6 +160,11 @@ private:
 	std::vector<PoolTexture> _texturePool;
 	int _nextPoolIndex = 0;
 	[[nodiscard]] QRhiTexture *acquirePoolTexture(QSize size);
+
+	QRhiTexture *_controlsFadeTexture = nullptr;
+	QSize _controlsFadeSize;
+	bool _shadowTopFlip = false;
+	bool _shadowsForStories = false;
 
 	bool _initialized = false;
 
