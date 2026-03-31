@@ -177,6 +177,11 @@ private:
 	QSize _controlsAtlasSize;
 	std::array<QRect, kControlsCount + 1> _controlsTextures;
 
+	static constexpr auto kStoriesSiblingPartsCount = 4;
+	QRhiTexture *_storiesSiblingTextures[kStoriesSiblingPartsCount] = {};
+	QSize _storiesSiblingSizes[kStoriesSiblingPartsCount];
+	quint64 _storiesSiblingCacheKeys[kStoriesSiblingPartsCount] = {};
+
 	QRhiTexture *_controlsFadeTexture = nullptr;
 	QSize _controlsFadeSize;
 	bool _shadowTopFlip = false;

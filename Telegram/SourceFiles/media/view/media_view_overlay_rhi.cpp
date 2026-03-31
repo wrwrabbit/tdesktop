@@ -490,6 +490,13 @@ void OverlayWidget::RendererRhi::releaseResources() {
 	delete _roundedCornersPipeline;
 	_roundedCornersPipeline = nullptr;
 
+	for (auto &tex : _storiesSiblingTextures) {
+		delete tex;
+		tex = nullptr;
+	}
+	ranges::fill(_storiesSiblingSizes, QSize());
+	ranges::fill(_storiesSiblingCacheKeys, quint64(0));
+
 	delete _controlsAtlasTexture;
 	_controlsAtlasTexture = nullptr;
 	_controlsAtlasSize = QSize();
@@ -1381,12 +1388,43 @@ void OverlayWidget::RendererRhi::paintStoriesSiblingPart(
 		const QImage &image,
 		QRect rect,
 		float64 opacity) {
-	paintTransformedStaticContent(
-		image,
-		{ .rect = QRectF(rect) },
-		false,
-		false,
-		index);
+	Expects(index >= 0 && index < kStoriesSiblingPartsCount);
+
+	if (image.isNull() || rect.isEmpty()) {
+		return;
+	}
+
+	const auto cacheKey = image.cacheKey();
+	if (_storiesSiblingCacheKeys[index] != cacheKey
+		|| !_storiesSiblingTextures[index]
+		|| _storiesSiblingSizes[index] != image.size()) {
+		_storiesSiblingCacheKeys[index] = cacheKey;
+		delete _storiesSiblingTextures[index];
+		_storiesSiblingTextures[index] = _rhi->newTexture(
+			QRhiTexture::BGRA8,
+			image.size());
+		_storiesSiblingTextures[index]->create();
+		_storiesSiblingSizes[index] = image.size();
+		_rub->uploadTexture(
+			_storiesSiblingTextures[index],
+			QRhiTextureUploadDescription(
+				QRhiTextureUploadEntry(0, 0,
+					QRhiTextureSubresourceUploadDescription(image))));
+	}
+
+	const auto rRect = transformRect(rect);
+	const float coords[] = {
+		rRect.left(), rRect.bottom(), 0.f, 0.f,
+		rRect.right(), rRect.bottom(), 1.f, 0.f,
+		rRect.left(), rRect.top(), 0.f, 1.f,
+		rRect.right(), rRect.top(), 1.f, 1.f,
+	};
+	drawTexturedQuad(
+		_imagePipeline,
+		_storiesSiblingTextures[index],
+		coords,
+		float(opacity),
+		true);
 }
 
 Rect OverlayWidget::RendererRhi::transformRect(const Rect &raster) const {
