@@ -33,6 +33,7 @@ public:
 	[[nodiscard]] rpl::producer<bool> toggledChanges() const;
 	[[nodiscard]] rpl::producer<not_null<QEvent*>> clickAreaEvents() const;
 	void setToggleLocked(bool locked);
+	void finishAnimating();
 
 protected:
 	void onStateChanged(State was, StateChangeSource source) override;

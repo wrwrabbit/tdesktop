@@ -94,6 +94,10 @@ void DetailedSettingsButton::setToggleLocked(bool locked) {
 	_toggle->setLocked(locked);
 }
 
+void DetailedSettingsButton::finishAnimating() {
+	_toggle->finishAnimating();
+}
+
 void DetailedSettingsButton::onStateChanged(
 		State was,
 		StateChangeSource source) {

@@ -3041,6 +3041,20 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		sendAction);
 	addButton(tr::lng_cancel(), [=] { closeBox(); });
 
+	if (showWhoVoted) {
+		showWhoVoted->finishAnimating();
+	}
+	multiple->finishAnimating();
+	if (addOptions) {
+		addOptions->finishAnimating();
+	}
+	revoting->finishAnimating();
+	shuffle->finishAnimating();
+	quiz->finishAnimating();
+	duration->finishAnimating();
+	durationWrap->finishAnimating();
+	hideResults->finishAnimating();
+
 	return result;
 }
 
