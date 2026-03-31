@@ -262,9 +262,7 @@ void SubsectionTabs::setupSlider(
 			return;
 		}
 		const auto newWindow = base::IsCtrlPressed();
-		if (active >= 0
-			&& active < _slice.size()
-			&& (newWindow || _active != _slice[active].thread)) {
+		if (active >= 0 && active < _slice.size()) {
 			const auto thread = _slice[active].thread;
 			if (newWindow) {
 				_controller->showInNewWindow(Window::SeparateId(thread));

@@ -662,9 +662,6 @@ void SubsectionSlider::setSections(
 }
 
 void SubsectionSlider::activate(int index) {
-	if (_active == index) {
-		return;
-	}
 	if (_isReorderingCallback && _isReorderingCallback()) {
 		return;
 	}
