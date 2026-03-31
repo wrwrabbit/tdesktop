@@ -113,8 +113,9 @@ Gif::Gif(
 void Gif::initDimensions() {
 	int32 w = content_width(), h = content_height();
 	if (w <= 0 || h <= 0) {
-		_maxw = 0;
-	} else {
+		w = h = 1;
+	}
+	{
 		w = w * st::inlineMediaHeight / h;
 		_maxw = qMax(w, int32(st::inlineResultsMinWidth));
 	}
@@ -663,8 +664,9 @@ void Photo::initDimensions() {
 	const auto photo = getShownPhoto();
 	int32 w = photo->width(), h = photo->height();
 	if (w <= 0 || h <= 0) {
-		_maxw = 0;
-	} else {
+		w = h = 1;
+	}
+	{
 		w = w * st::inlineMediaHeight / h;
 		_maxw = qMax(w, int32(st::inlineResultsMinWidth));
 	}
