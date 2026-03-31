@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "data/data_peer_values.h"
 #include "media/streaming/media_streaming_common.h"
+#include "platform/platform_overlay_widget.h"
 #include "base/debug_log.h"
 #include "styles/style_media_view.h"
 
@@ -102,6 +103,7 @@ OverlayWidget::RendererRhi::RendererRhi(not_null<OverlayWidget*> owner)
 	style::PaletteChanged(
 	) | rpl::on_next([=] {
 		ranges::fill(_cacheKeys, quint64(0));
+		invalidateControls();
 	}, _lifetime);
 
 	crl::on_main(this, [=] {
@@ -112,10 +114,12 @@ OverlayWidget::RendererRhi::RendererRhi(not_null<OverlayWidget*> owner)
 					_owner->_storiesSession
 				) | rpl::on_next([=] {
 					ranges::fill(_cacheKeys, quint64(0));
+					invalidateControls();
 				}, _storiesLifetime);
 			} else {
 				_storiesLifetime.destroy();
 				ranges::fill(_cacheKeys, quint64(0));
+				invalidateControls();
 			}
 		}, _lifetime);
 	});
@@ -387,6 +391,9 @@ void OverlayWidget::RendererRhi::render(
 		_factor = factor;
 		_ifactor = int(std::ceil(factor));
 		ranges::fill(_cacheKeys, quint64(0));
+		invalidateControls();
+		delete _controlsFadeTexture;
+		_controlsFadeTexture = nullptr;
 	}
 	_viewport = QSize(
 		int(size.width() / _factor),
@@ -482,6 +489,11 @@ void OverlayWidget::RendererRhi::releaseResources() {
 	_transparentContentPipeline = nullptr;
 	delete _roundedCornersPipeline;
 	_roundedCornersPipeline = nullptr;
+
+	delete _controlsAtlasTexture;
+	_controlsAtlasTexture = nullptr;
+	_controlsAtlasSize = QSize();
+	ranges::fill(_controlsTextures, QRect());
 
 	delete _controlsFadeTexture;
 	_controlsFadeTexture = nullptr;
@@ -1079,7 +1091,102 @@ void OverlayWidget::RendererRhi::paintSpeedBoost(QRect outer) {
 	}, true);
 }
 
+auto OverlayWidget::RendererRhi::controlMeta(Over control) const
+-> Control {
+	const auto stories = [&] {
+		return (_owner->_stories != nullptr);
+	};
+	switch (control) {
+	case Over::Left: return {
+		0,
+		stories() ? &st::storiesLeft : &st::mediaviewLeft
+	};
+	case Over::Right: return {
+		1,
+		stories() ? &st::storiesRight : &st::mediaviewRight
+	};
+	case Over::Save: return {
+		2,
+		(_owner->saveControlLocked()
+			? &st::mediaviewSaveLocked
+			: &st::mediaviewSave)
+	};
+	case Over::Share: return { 3, &st::mediaviewShare };
+	case Over::Rotate: return { 4, &st::mediaviewRotate };
+	case Over::More: return { 5, &st::mediaviewMore };
+	case Over::Draw: return { 6, &st::mediaviewDraw };
+	case Over::Recognize: return { 7, &st::mediaviewRecognize };
+	}
+	Unexpected("Control value in OverlayWidget::RendererRhi::controlMeta.");
+}
+
+void OverlayWidget::RendererRhi::validateControls() {
+	if (_controlsAtlasTexture) {
+		return;
+	}
+	const auto metas = {
+		controlMeta(Over::Left),
+		controlMeta(Over::Right),
+		controlMeta(Over::Save),
+		controlMeta(Over::Share),
+		controlMeta(Over::Rotate),
+		controlMeta(Over::More),
+		controlMeta(Over::Draw),
+		controlMeta(Over::Recognize),
+	};
+	auto maxWidth = 0;
+	auto fullHeight = 0;
+	for (const auto &meta : metas) {
+		maxWidth = std::max(meta.icon->width(), maxWidth);
+		fullHeight += meta.icon->height();
+	}
+	maxWidth = std::max(st::mediaviewIconOver, maxWidth);
+	fullHeight += st::mediaviewIconOver;
+	auto image = QImage(
+		QSize(maxWidth, fullHeight) * _ifactor,
+		QImage::Format_ARGB32_Premultiplied);
+	image.fill(Qt::transparent);
+	image.setDevicePixelRatio(_ifactor);
+	{
+		auto p = QPainter(&image);
+		auto index = 0;
+		auto height = 0;
+		for (const auto &meta : metas) {
+			meta.icon->paint(p, 0, height, maxWidth);
+			_controlsTextures[index++] = QRect(
+				QPoint(0, height) * _ifactor,
+				meta.icon->size() * _ifactor);
+			height += meta.icon->height();
+		}
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(Qt::NoPen);
+		p.setBrush(OverBackgroundColor());
+		p.drawEllipse(
+			QRect(0, height, st::mediaviewIconOver, st::mediaviewIconOver));
+		_controlsTextures[index++] = QRect(
+			QPoint(0, height) * _ifactor,
+			QSize(st::mediaviewIconOver, st::mediaviewIconOver) * _ifactor);
+	}
+
+	const auto size = image.size();
+	_controlsAtlasTexture = _rhi->newTexture(QRhiTexture::BGRA8, size);
+	_controlsAtlasTexture->create();
+	_controlsAtlasSize = size;
+	_rub->uploadTexture(
+		_controlsAtlasTexture,
+		QRhiTextureUploadDescription(
+			QRhiTextureUploadEntry(0, 0,
+				QRhiTextureSubresourceUploadDescription(image))));
+}
+
+void OverlayWidget::RendererRhi::invalidateControls() {
+	delete _controlsAtlasTexture;
+	_controlsAtlasTexture = nullptr;
+	ranges::fill(_controlsTextures, QRect());
+}
+
 void OverlayWidget::RendererRhi::paintControlsStart() {
+	validateControls();
 }
 
 void OverlayWidget::RendererRhi::paintControl(
@@ -1089,10 +1196,61 @@ void OverlayWidget::RendererRhi::paintControl(
 		QRect inner,
 		float64 innerOpacity,
 		const style::icon &icon) {
-	paintUsingRaster(inner, [&](Painter &p) {
-		const auto newInner = QRect(QPoint(), inner.size());
-		icon.paint(p, 0, 0, newInner.width());
-	}, true, float(innerOpacity));
+	if (!_controlsAtlasTexture) {
+		return;
+	}
+	const auto meta = controlMeta(control);
+	Assert(meta.icon == &icon);
+
+	const auto atlasW = float(_controlsAtlasSize.width());
+	const auto atlasH = float(_controlsAtlasSize.height());
+
+	if (!over.isEmpty() && overOpacity > 0.) {
+		const auto overAlpha = float(overOpacity * kOverBackgroundOpacity);
+		const auto &overTex = _controlsTextures[kControlsCount];
+		const auto overGeometry = transformRect(over);
+		// QRect::right()/bottom() return x+width-1 / y+height-1
+		// (inclusive), which is one texel short of the atlas sub-rect.
+		// Sampling only up to that coordinate stretches the (width-1)
+		// texels across the full destination quad, making the rendered
+		// icon / hover circle look one pixel too wide and clips its
+		// right/bottom antialiased edge.
+		const auto tl = overTex.left() / atlasW;
+		const auto tr = (overTex.x() + overTex.width()) / atlasW;
+		const auto tt = overTex.top() / atlasH;
+		const auto tb = (overTex.y() + overTex.height()) / atlasH;
+		const float overCoords[] = {
+			overGeometry.left(), overGeometry.bottom(), tl, tt,
+			overGeometry.right(), overGeometry.bottom(), tr, tt,
+			overGeometry.left(), overGeometry.top(), tl, tb,
+			overGeometry.right(), overGeometry.top(), tr, tb,
+		};
+		drawTexturedQuad(
+			_imagePipeline,
+			_controlsAtlasTexture,
+			overCoords,
+			overAlpha,
+			true);
+	}
+
+	const auto &iconTex = _controlsTextures[meta.index];
+	const auto iconGeometry = transformRect(inner);
+	const auto tl = iconTex.left() / atlasW;
+	const auto tr = (iconTex.x() + iconTex.width()) / atlasW;
+	const auto tt = iconTex.top() / atlasH;
+	const auto tb = (iconTex.y() + iconTex.height()) / atlasH;
+	const float iconCoords[] = {
+		iconGeometry.left(), iconGeometry.bottom(), tl, tt,
+		iconGeometry.right(), iconGeometry.bottom(), tr, tt,
+		iconGeometry.left(), iconGeometry.top(), tl, tb,
+		iconGeometry.right(), iconGeometry.top(), tr, tb,
+	};
+	drawTexturedQuad(
+		_imagePipeline,
+		_controlsAtlasTexture,
+		iconCoords,
+		float(innerOpacity),
+		true);
 }
 
 void OverlayWidget::RendererRhi::paintFooter(
