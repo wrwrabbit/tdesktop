@@ -382,7 +382,7 @@ MTPInputInvoice Form::inputInvoice() const {
 			}
 		}
 		const auto spendPeer = credits->spendPurposePeerId
-			? _session->data().peer(credits->spendPurposePeerId)
+			? _session->data().peerLoaded(credits->spendPurposePeerId)
 			: nullptr;
 		using Flag = MTPDinputStorePaymentStarsTopup::Flag;
 		return MTP_inputInvoiceStars(
