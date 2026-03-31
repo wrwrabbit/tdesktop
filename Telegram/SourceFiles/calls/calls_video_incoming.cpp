@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/gl/gl_shader.h"
 #include "ui/gl/gl_image.h"
 #include "ui/gl/gl_primitives.h"
+#include "ui/rhi/rhi_renderer.h"
+#include "ui/rhi/rhi_shader.h"
 #include "ui/painter.h"
 #include "media/view/media_view_pip.h"
 #include "webrtc/webrtc_video_track.h"
@@ -18,6 +20,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QOpenGLShader>
 #include <QOpenGLBuffer>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+#include <rhi/qrhi.h>
+#endif
 
 namespace Calls {
 namespace {
@@ -535,47 +540,184 @@ void Panel::Incoming::RendererSW::fillBottomShadow(QPainter &p) {
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 class Panel::Incoming::RendererRhi final
-	: public Ui::GL::Renderer {
+	: public Ui::GL::Renderer
+	, public Ui::Rhi::Renderer {
 public:
 	explicit RendererRhi(not_null<Incoming*> owner) : _owner(owner) {
 	}
 
-	void paintFallback(
-			Painter &p,
-			const QRegion &clip,
-			Ui::GL::Backend backend) override {
+	void initialize(
+			QRhi *rhi,
+			QRhiRenderTarget *rt,
+			QRhiCommandBuffer *cb) override {
+		if (_initialized && _rhi == rhi) {
+			return;
+		}
+		_rhi = rhi;
+		_vertexBuffer = rhi->newBuffer(
+			QRhiBuffer::Dynamic,
+			QRhiBuffer::VertexBuffer,
+			4 * 4 * sizeof(float));
+		_vertexBuffer->create();
+		_sampler = rhi->newSampler(
+			QRhiSampler::Linear, QRhiSampler::Linear,
+			QRhiSampler::None,
+			QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge);
+		_sampler->create();
+		_texture = rhi->newTexture(QRhiTexture::BGRA8, QSize(1, 1));
+		_texture->create();
+		_uniformBuffer = rhi->newBuffer(
+			QRhiBuffer::Dynamic,
+			QRhiBuffer::UniformBuffer,
+			16);
+		_uniformBuffer->create();
+
+		auto *srb = rhi->newShaderResourceBindings();
+		srb->setBindings({
+			QRhiShaderResourceBinding::uniformBuffer(
+				0,
+				QRhiShaderResourceBinding::VertexStage,
+				_uniformBuffer),
+			QRhiShaderResourceBinding::sampledTexture(
+				1,
+				QRhiShaderResourceBinding::FragmentStage,
+				_texture, _sampler),
+		});
+		srb->create();
+		_srb = srb;
+
+		const auto rpDesc = rt->renderPassDescriptor();
+		const auto vs = Ui::Rhi::ShaderFromFile(
+			u":/shaders/argb32.vert.qsb"_q);
+		const auto fs = Ui::Rhi::ShaderFromFile(
+			u":/shaders/argb32.frag.qsb"_q);
+		_pipeline = rhi->newGraphicsPipeline();
+		_pipeline->setShaderStages({
+			{ QRhiShaderStage::Vertex, vs },
+			{ QRhiShaderStage::Fragment, fs },
+		});
+		QRhiVertexInputLayout layout;
+		layout.setBindings({ { 4 * sizeof(float) } });
+		layout.setAttributes({
+			{ 0, 0, QRhiVertexInputAttribute::Float2, 0 },
+			{ 0, 1, QRhiVertexInputAttribute::Float2, 2 * sizeof(float) },
+		});
+		_pipeline->setVertexInputLayout(layout);
+		_pipeline->setTopology(
+			QRhiGraphicsPipeline::TriangleStrip);
+		_pipeline->setShaderResourceBindings(srb);
+		_pipeline->setRenderPassDescriptor(rpDesc);
+		_pipeline->create();
+		_initialized = true;
+	}
+
+	void render(
+			QRhi *rhi,
+			QRhiRenderTarget *rt,
+			QRhiCommandBuffer *cb) override {
+		_rhi = rhi;
 		const auto markGuard = gsl::finally([&] {
 			_owner->_track->markFrameShown();
 		});
 		const auto data = _owner->_track->frameWithInfo(true);
+		if (data.original.isNull()) {
+			auto *rub = rhi->nextResourceUpdateBatch();
+			cb->beginPass(rt, Qt::black, { 1.0f, 0 }, rub);
+			cb->endPass();
+			return;
+		}
 		const auto &image = data.original;
 		const auto rotation = data.rotation;
-		if (image.isNull()) {
-			p.fillRect(clip.boundingRect(), Qt::black);
-		} else {
-			const auto rect = _owner->widget()->rect();
-			using namespace Media::View;
-			auto hq = PainterHighQualityEnabler(p);
-			if (UsePainterRotation(rotation)) {
-				if (rotation) {
-					p.save();
-					p.rotate(rotation);
-				}
-				p.drawImage(RotatedRect(rect, rotation), image);
-				if (rotation) {
-					p.restore();
-				}
-			} else if (rotation) {
-				p.drawImage(rect, RotateFrameImage(image, rotation));
-			} else {
-				p.drawImage(rect, image);
-			}
+
+		if (_cacheKey != image.cacheKey()
+			|| _textureSize != image.size()) {
+			_cacheKey = image.cacheKey();
+			delete _texture;
+			_texture = rhi->newTexture(
+				QRhiTexture::BGRA8, image.size());
+			_texture->create();
+			_textureSize = image.size();
 		}
+
+		auto *rub = rhi->nextResourceUpdateBatch();
+		rub->uploadTexture(
+			_texture,
+			QRhiTextureUploadDescription(
+				QRhiTextureUploadEntry(0, 0,
+					QRhiTextureSubresourceUploadDescription(image))));
+
+		const auto pw = float(rt->pixelSize().width());
+		const auto ph = float(rt->pixelSize().height());
+
+		std::array<std::array<float, 2>, 4> texCoords = { {
+			{ { 0.f, 0.f } }, { { 1.f, 0.f } },
+			{ { 0.f, 1.f } }, { { 1.f, 1.f } },
+		} };
+		if (const auto shift = (rotation / 90); shift != 0) {
+			std::rotate(
+				texCoords.begin(),
+				texCoords.begin() + shift,
+				texCoords.end());
+		}
+		const float coords[] = {
+			0.f, ph, texCoords[0][0], texCoords[0][1],
+			pw,  ph, texCoords[1][0], texCoords[1][1],
+			0.f, 0.f, texCoords[2][0], texCoords[2][1],
+			pw,  0.f, texCoords[3][0], texCoords[3][1],
+		};
+		rub->updateDynamicBuffer(
+			_vertexBuffer, 0, sizeof(coords), coords);
+
+		const float viewport[] = { pw, ph, 0.f, 0.f };
+		rub->updateDynamicBuffer(
+			_uniformBuffer, 0, sizeof(viewport), viewport);
+
+		_srb->setBindings({
+			QRhiShaderResourceBinding::uniformBuffer(
+				0,
+				QRhiShaderResourceBinding::VertexStage,
+				_uniformBuffer),
+			QRhiShaderResourceBinding::sampledTexture(
+				1,
+				QRhiShaderResourceBinding::FragmentStage,
+				_texture, _sampler),
+		});
+		_srb->create();
+
+		cb->beginPass(rt, Qt::black, { 1.0f, 0 }, rub);
+		cb->setGraphicsPipeline(_pipeline);
+		cb->setShaderResources(_srb);
+		cb->setViewport({ 0, 0, pw, ph });
+		const QRhiCommandBuffer::VertexInput vbuf(_vertexBuffer, 0);
+		cb->setVertexInput(0, 1, &vbuf);
+		cb->draw(4);
+		cb->endPass();
 	}
+
+	void releaseResources() override {
+		delete _pipeline; _pipeline = nullptr;
+		delete _srb; _srb = nullptr;
+		delete _texture; _texture = nullptr;
+		delete _vertexBuffer; _vertexBuffer = nullptr;
+		delete _uniformBuffer; _uniformBuffer = nullptr;
+		delete _sampler; _sampler = nullptr;
+		_initialized = false;
+	}
+
+	QColor rhiClearColor() override { return Qt::black; }
 
 private:
 	const not_null<Incoming*> _owner;
-
+	QRhi *_rhi = nullptr;
+	QRhiBuffer *_vertexBuffer = nullptr;
+	QRhiBuffer *_uniformBuffer = nullptr;
+	QRhiSampler *_sampler = nullptr;
+	QRhiTexture *_texture = nullptr;
+	QSize _textureSize;
+	quint64 _cacheKey = 0;
+	QRhiGraphicsPipeline *_pipeline = nullptr;
+	QRhiShaderResourceBindings *_srb = nullptr;
+	bool _initialized = false;
 };
 #endif // Qt >= 6.7
 
