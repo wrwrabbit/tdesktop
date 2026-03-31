@@ -130,6 +130,7 @@ private:
 	static constexpr int kUniformSize = 16;
 
 	QRhiBuffer *_vertexBuffer = nullptr;
+	QRhiBuffer *_fillVertexBuffer = nullptr;
 	QRhiBuffer *_uniformBuffer = nullptr;
 	QRhiSampler *_sampler = nullptr;
 	QRhiTexture *_placeholderTexture = nullptr;
@@ -139,11 +140,13 @@ private:
 	QRhiGraphicsPipeline *_staticContentPipeline = nullptr;
 	QRhiGraphicsPipeline *_staticContentBlendPipeline = nullptr;
 	QRhiGraphicsPipeline *_transparentContentPipeline = nullptr;
+	QRhiGraphicsPipeline *_roundedCornersPipeline = nullptr;
 
 	struct DrawCommand {
 		QRhiGraphicsPipeline *pipeline = nullptr;
 		QRhiShaderResourceBindings *srb = nullptr;
 		int vertexIndex = 0;
+		bool fillVertex = false;
 	};
 	std::vector<DrawCommand> _drawCommands;
 	std::vector<QRhiShaderResourceBindings*> _perDrawSrbs;

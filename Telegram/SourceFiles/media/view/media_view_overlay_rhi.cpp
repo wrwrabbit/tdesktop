@@ -53,6 +53,15 @@ struct TransparentContentUniforms {
 };
 static_assert(sizeof(TransparentContentUniforms) == 96);
 
+struct RoundedCornersUniforms {
+	float viewport[2];
+	float _pad0[2];
+	float roundRect[4];
+	float roundRadius;
+	float _pad1[3];
+};
+static_assert(sizeof(RoundedCornersUniforms) == 48);
+
 [[nodiscard]] QRectF StoryCropTextureRect(
 		QSizeF imageSize,
 		QSizeF targetSize) {
@@ -130,6 +139,12 @@ void OverlayWidget::RendererRhi::initialize(
 		QRhiBuffer::VertexBuffer,
 		kMaxDraws * kVertexSize);
 	_vertexBuffer->create();
+
+	_fillVertexBuffer = rhi->newBuffer(
+		QRhiBuffer::Dynamic,
+		QRhiBuffer::VertexBuffer,
+		4 * 4 * 2 * sizeof(float));
+	_fillVertexBuffer->create();
 
 	_uniformBuffer = rhi->newBuffer(
 		QRhiBuffer::Dynamic,
@@ -304,6 +319,48 @@ void OverlayWidget::RendererRhi::createPipelines() {
 	transparentPipeline->setRenderPassDescriptor(rpDesc);
 	transparentPipeline->create();
 	_transparentContentPipeline = transparentPipeline;
+
+	const auto fillVert = LoadShader(u"fill.vert"_q);
+	const auto roundedCornersFrag = LoadShader(u"rounded_corners.frag"_q);
+
+	auto *roundedSrb = _rhi->newShaderResourceBindings();
+	roundedSrb->setBindings({
+		QRhiShaderResourceBinding::uniformBuffer(
+			0,
+			QRhiShaderResourceBinding::VertexStage
+				| QRhiShaderResourceBinding::FragmentStage,
+			_uniformBuffer,
+			0,
+			sizeof(RoundedCornersUniforms)),
+	});
+	roundedSrb->create();
+	_perDrawSrbs.push_back(roundedSrb);
+
+	QRhiVertexInputLayout fillInputLayout;
+	fillInputLayout.setBindings({ { 2 * sizeof(float) } });
+	fillInputLayout.setAttributes({
+		{ 0, 0, QRhiVertexInputAttribute::Float2, 0 },
+	});
+
+	QRhiGraphicsPipeline::TargetBlend cornerBlend;
+	cornerBlend.enable = true;
+	cornerBlend.srcColor = QRhiGraphicsPipeline::Zero;
+	cornerBlend.dstColor = QRhiGraphicsPipeline::SrcAlpha;
+	cornerBlend.srcAlpha = QRhiGraphicsPipeline::Zero;
+	cornerBlend.dstAlpha = QRhiGraphicsPipeline::SrcAlpha;
+
+	auto *roundedPipeline = _rhi->newGraphicsPipeline();
+	roundedPipeline->setShaderStages({
+		{ QRhiShaderStage::Vertex, fillVert },
+		{ QRhiShaderStage::Fragment, roundedCornersFrag },
+	});
+	roundedPipeline->setVertexInputLayout(fillInputLayout);
+	roundedPipeline->setTargetBlends({ cornerBlend });
+	roundedPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
+	roundedPipeline->setShaderResourceBindings(roundedSrb);
+	roundedPipeline->setRenderPassDescriptor(rpDesc);
+	roundedPipeline->create();
+	_roundedCornersPipeline = roundedPipeline;
 }
 
 void OverlayWidget::RendererRhi::render(
@@ -369,9 +426,16 @@ void OverlayWidget::RendererRhi::render(
 			0, 0,
 			float(rt->pixelSize().width()),
 			float(rt->pixelSize().height()) });
-		const QRhiCommandBuffer::VertexInput vbufBinding(
-			_vertexBuffer, cmd.vertexIndex * kVertexSize);
-		cb->setVertexInput(0, 1, &vbufBinding);
+		if (cmd.fillVertex) {
+			const QRhiCommandBuffer::VertexInput vbufBinding(
+				_fillVertexBuffer,
+				cmd.vertexIndex * 4 * 2 * sizeof(float));
+			cb->setVertexInput(0, 1, &vbufBinding);
+		} else {
+			const QRhiCommandBuffer::VertexInput vbufBinding(
+				_vertexBuffer, cmd.vertexIndex * kVertexSize);
+			cb->setVertexInput(0, 1, &vbufBinding);
+		}
 		cb->draw(4);
 	}
 	_drawCommands.clear();
@@ -416,6 +480,8 @@ void OverlayWidget::RendererRhi::releaseResources() {
 	_staticContentBlendPipeline = nullptr;
 	delete _transparentContentPipeline;
 	_transparentContentPipeline = nullptr;
+	delete _roundedCornersPipeline;
+	_roundedCornersPipeline = nullptr;
 
 	delete _controlsFadeTexture;
 	_controlsFadeTexture = nullptr;
@@ -437,6 +503,8 @@ void OverlayWidget::RendererRhi::releaseResources() {
 
 	delete _vertexBuffer;
 	_vertexBuffer = nullptr;
+	delete _fillVertexBuffer;
+	_fillVertexBuffer = nullptr;
 	delete _uniformBuffer;
 	_uniformBuffer = nullptr;
 	delete _sampler;
@@ -1064,6 +1132,90 @@ void OverlayWidget::RendererRhi::paintGroupThumbs(
 }
 
 void OverlayWidget::RendererRhi::paintRoundedCorners(int radius) {
+	if (!_roundedCornersPipeline || radius <= 0) {
+		return;
+	}
+
+	const auto vw = _viewport.width() * _factor;
+	const auto vh = _viewport.height() * _factor;
+
+	RoundedCornersUniforms uniforms{};
+	uniforms.viewport[0] = vw;
+	uniforms.viewport[1] = vh;
+	const auto roundRect = transformRect(QRect(QPoint(), _viewport));
+	uniforms.roundRect[0] = roundRect.x();
+	uniforms.roundRect[1] = roundRect.y();
+	uniforms.roundRect[2] = roundRect.width();
+	uniforms.roundRect[3] = roundRect.height();
+	uniforms.roundRadius = radius * _factor;
+
+	const auto topLeft = transformRect(
+		QRect(0, 0, radius, radius));
+	const auto topRight = transformRect(
+		QRect(_viewport.width() - radius, 0, radius, radius));
+	const auto bottomRight = transformRect(QRect(
+		_viewport.width() - radius,
+		_viewport.height() - radius,
+		radius,
+		radius));
+	const auto bottomLeft = transformRect(
+		QRect(0, _viewport.height() - radius, radius, radius));
+
+	const auto corners = {
+		std::ref(topLeft),
+		std::ref(topRight),
+		std::ref(bottomRight),
+		std::ref(bottomLeft),
+	};
+
+	auto cornerIndex = 0;
+	for (const auto &corner : corners) {
+		if (_nextVertexSlot >= kMaxDraws) {
+			break;
+		}
+		const auto slot = _nextVertexSlot++;
+		const auto uOffset = slot * 256;
+
+		const float coords[] = {
+			corner.get().left(), corner.get().bottom(),
+			corner.get().right(), corner.get().bottom(),
+			corner.get().left(), corner.get().top(),
+			corner.get().right(), corner.get().top(),
+		};
+
+		_rub->updateDynamicBuffer(
+			_fillVertexBuffer,
+			cornerIndex * int(sizeof(coords)),
+			sizeof(coords),
+			coords);
+
+		_rub->updateDynamicBuffer(
+			_uniformBuffer,
+			uOffset,
+			sizeof(RoundedCornersUniforms),
+			&uniforms);
+
+		auto *srb = _rhi->newShaderResourceBindings();
+		srb->setBindings({
+			QRhiShaderResourceBinding::uniformBuffer(
+				0,
+				QRhiShaderResourceBinding::VertexStage
+					| QRhiShaderResourceBinding::FragmentStage,
+				_uniformBuffer,
+				uOffset,
+				sizeof(RoundedCornersUniforms)),
+		});
+		srb->create();
+		_perDrawSrbs.push_back(srb);
+
+		_drawCommands.push_back({
+			.pipeline = _roundedCornersPipeline,
+			.srb = srb,
+			.vertexIndex = cornerIndex,
+			.fillVertex = true,
+		});
+		++cornerIndex;
+	}
 }
 
 void OverlayWidget::RendererRhi::paintStoriesSiblingPart(
