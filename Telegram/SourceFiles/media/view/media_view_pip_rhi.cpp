@@ -231,6 +231,58 @@ void Pip::RendererRhi::createPipelines() {
 		argb32Frag,
 		true,
 		4 * sizeof(float));
+
+	const auto pipYuv420Frag = LoadShader(u"pip_yuv420.frag"_q);
+	const auto pipNv12Frag = LoadShader(u"pip_nv12.frag"_q);
+
+	_yuv420Srb = _rhi->newShaderResourceBindings();
+	_yuv420Srb->setBindings({
+		QRhiShaderResourceBinding::uniformBuffer(
+			0,
+			QRhiShaderResourceBinding::VertexStage
+				| QRhiShaderResourceBinding::FragmentStage,
+			_uniformBuffer),
+		QRhiShaderResourceBinding::sampledTexture(
+			1, QRhiShaderResourceBinding::FragmentStage,
+			_rgbaTexture, _sampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			2, QRhiShaderResourceBinding::FragmentStage,
+			_rgbaTexture, _sampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			3, QRhiShaderResourceBinding::FragmentStage,
+			_rgbaTexture, _sampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			4, QRhiShaderResourceBinding::FragmentStage,
+			_rgbaTexture, _sampler),
+	});
+	_yuv420Srb->create();
+
+	_yuv420Pipeline = CreatePipeline(
+		_rhi, rpDesc, _yuv420Srb,
+		argb32Vert, pipYuv420Frag, false, 4 * sizeof(float));
+
+	_nv12Srb = _rhi->newShaderResourceBindings();
+	_nv12Srb->setBindings({
+		QRhiShaderResourceBinding::uniformBuffer(
+			0,
+			QRhiShaderResourceBinding::VertexStage
+				| QRhiShaderResourceBinding::FragmentStage,
+			_uniformBuffer),
+		QRhiShaderResourceBinding::sampledTexture(
+			1, QRhiShaderResourceBinding::FragmentStage,
+			_rgbaTexture, _sampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			2, QRhiShaderResourceBinding::FragmentStage,
+			_rgbaTexture, _sampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			3, QRhiShaderResourceBinding::FragmentStage,
+			_rgbaTexture, _sampler),
+	});
+	_nv12Srb->create();
+
+	_nv12Pipeline = CreatePipeline(
+		_rhi, rpDesc, _nv12Srb,
+		argb32Vert, pipNv12Frag, false, 4 * sizeof(float));
 }
 
 void Pip::RendererRhi::render(
@@ -282,6 +334,10 @@ void Pip::RendererRhi::releaseResources() {
 
 	delete _argb32Pipeline;
 	_argb32Pipeline = nullptr;
+	delete _yuv420Pipeline;
+	_yuv420Pipeline = nullptr;
+	delete _nv12Pipeline;
+	_nv12Pipeline = nullptr;
 	delete _imagePipeline;
 	_imagePipeline = nullptr;
 	delete _imageBlendPipeline;
@@ -289,11 +345,25 @@ void Pip::RendererRhi::releaseResources() {
 
 	delete _argb32Srb;
 	_argb32Srb = nullptr;
+	delete _yuv420Srb;
+	_yuv420Srb = nullptr;
+	delete _nv12Srb;
+	_nv12Srb = nullptr;
 	delete _imageSrb;
 	_imageSrb = nullptr;
 
 	delete _rgbaTexture;
 	_rgbaTexture = nullptr;
+	delete _yTexture;
+	_yTexture = nullptr;
+	delete _uTexture;
+	_uTexture = nullptr;
+	delete _vTexture;
+	_vTexture = nullptr;
+	delete _uvTexture;
+	_uvTexture = nullptr;
+	_lumaSize = QSize();
+	_chromaSize = QSize();
 
 	delete _vertexBuffer;
 	_vertexBuffer = nullptr;
@@ -337,13 +407,119 @@ void Pip::RendererRhi::paintTransformedVideoFrame(
 		paintTransformedStaticContent(data.image, geometry);
 		return;
 	}
-	auto request = Streaming::FrameRequest();
-	const auto scale = int(std::ceil(_factor));
-	request.resize = geometry.inner.size() * scale;
-	request.outer = geometry.outer * scale;
-	paintTransformedStaticContent(
-		_owner->videoFrame(request),
-		geometry);
+	Assert(!data.yuv->size.isEmpty());
+	const auto nv12 = (data.format == Streaming::FrameFormat::NV12);
+	const auto yuv = data.yuv;
+	const auto nv12changed = (_chromaNV12 != nv12);
+	const auto upload = (_trackFrameIndex != data.index);
+	_trackFrameIndex = data.index;
+
+	if (upload) {
+		if (!_yTexture || _lumaSize != yuv->size) {
+			delete _yTexture;
+			_yTexture = _rhi->newTexture(QRhiTexture::R8, yuv->size);
+			_yTexture->create();
+			_lumaSize = yuv->size;
+		}
+		auto yDesc = QRhiTextureSubresourceUploadDescription(
+			yuv->y.data, yuv->y.stride * yuv->size.height());
+		yDesc.setDataStride(yuv->y.stride);
+		_rub->uploadTexture(_yTexture,
+			QRhiTextureUploadDescription(
+				QRhiTextureUploadEntry(0, 0, yDesc)));
+
+		if (nv12) {
+			if (!_uvTexture || nv12changed
+				|| _chromaSize != yuv->chromaSize) {
+				delete _uvTexture;
+				_uvTexture = _rhi->newTexture(
+					QRhiTexture::RG8, yuv->chromaSize);
+				_uvTexture->create();
+				_chromaSize = yuv->chromaSize;
+			}
+			auto uvDesc = QRhiTextureSubresourceUploadDescription(
+				yuv->u.data, yuv->u.stride * yuv->chromaSize.height());
+			uvDesc.setDataStride(yuv->u.stride);
+			_rub->uploadTexture(_uvTexture,
+				QRhiTextureUploadDescription(
+					QRhiTextureUploadEntry(0, 0, uvDesc)));
+		} else {
+			if (!_uTexture || nv12changed
+				|| _chromaSize != yuv->chromaSize) {
+				delete _uTexture;
+				_uTexture = _rhi->newTexture(
+					QRhiTexture::R8, yuv->chromaSize);
+				_uTexture->create();
+				delete _vTexture;
+				_vTexture = _rhi->newTexture(
+					QRhiTexture::R8, yuv->chromaSize);
+				_vTexture->create();
+				_chromaSize = yuv->chromaSize;
+			}
+			auto uDesc = QRhiTextureSubresourceUploadDescription(
+				yuv->u.data, yuv->u.stride * yuv->chromaSize.height());
+			uDesc.setDataStride(yuv->u.stride);
+			_rub->uploadTexture(_uTexture,
+				QRhiTextureUploadDescription(
+					QRhiTextureUploadEntry(0, 0, uDesc)));
+			auto vDesc = QRhiTextureSubresourceUploadDescription(
+				yuv->v.data, yuv->v.stride * yuv->chromaSize.height());
+			vDesc.setDataStride(yuv->v.stride);
+			_rub->uploadTexture(_vTexture,
+				QRhiTextureUploadDescription(
+					QRhiTextureUploadEntry(0, 0, vDesc)));
+		}
+		_chromaNV12 = nv12;
+	}
+
+	_shadowImage.upload(_rhi, _rub);
+
+	if (nv12) {
+		_nv12Srb->setBindings({
+			QRhiShaderResourceBinding::uniformBuffer(
+				0,
+				QRhiShaderResourceBinding::VertexStage
+					| QRhiShaderResourceBinding::FragmentStage,
+				_uniformBuffer),
+			QRhiShaderResourceBinding::sampledTexture(
+				1, QRhiShaderResourceBinding::FragmentStage,
+				_yTexture, _sampler),
+			QRhiShaderResourceBinding::sampledTexture(
+				2, QRhiShaderResourceBinding::FragmentStage,
+				_uvTexture, _sampler),
+			QRhiShaderResourceBinding::sampledTexture(
+				3, QRhiShaderResourceBinding::FragmentStage,
+				_shadowImage.texture()
+					? _shadowImage.texture() : _rgbaTexture,
+				_sampler),
+		});
+		_nv12Srb->create();
+		paintTransformedContent(_nv12Pipeline, _nv12Srb, geometry);
+	} else {
+		_yuv420Srb->setBindings({
+			QRhiShaderResourceBinding::uniformBuffer(
+				0,
+				QRhiShaderResourceBinding::VertexStage
+					| QRhiShaderResourceBinding::FragmentStage,
+				_uniformBuffer),
+			QRhiShaderResourceBinding::sampledTexture(
+				1, QRhiShaderResourceBinding::FragmentStage,
+				_yTexture, _sampler),
+			QRhiShaderResourceBinding::sampledTexture(
+				2, QRhiShaderResourceBinding::FragmentStage,
+				_uTexture, _sampler),
+			QRhiShaderResourceBinding::sampledTexture(
+				3, QRhiShaderResourceBinding::FragmentStage,
+				_vTexture, _sampler),
+			QRhiShaderResourceBinding::sampledTexture(
+				4, QRhiShaderResourceBinding::FragmentStage,
+				_shadowImage.texture()
+					? _shadowImage.texture() : _rgbaTexture,
+				_sampler),
+		});
+		_yuv420Srb->create();
+		paintTransformedContent(_yuv420Pipeline, _yuv420Srb, geometry);
+	}
 }
 
 void Pip::RendererRhi::paintTransformedStaticContent(

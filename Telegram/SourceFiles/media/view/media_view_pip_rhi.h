@@ -123,12 +123,25 @@ private:
 	QRhiTexture *_rgbaTexture = nullptr;
 	QSize _rgbaSize;
 	quint64 _cacheKey = 0;
+	int _trackFrameIndex = 0;
+	bool _chromaNV12 = false;
+
+	QRhiTexture *_yTexture = nullptr;
+	QRhiTexture *_uTexture = nullptr;
+	QRhiTexture *_vTexture = nullptr;
+	QRhiTexture *_uvTexture = nullptr;
+	QSize _lumaSize;
+	QSize _chromaSize;
 
 	QRhiGraphicsPipeline *_argb32Pipeline = nullptr;
+	QRhiGraphicsPipeline *_yuv420Pipeline = nullptr;
+	QRhiGraphicsPipeline *_nv12Pipeline = nullptr;
 	QRhiGraphicsPipeline *_imagePipeline = nullptr;
 	QRhiGraphicsPipeline *_imageBlendPipeline = nullptr;
 
 	QRhiShaderResourceBindings *_argb32Srb = nullptr;
+	QRhiShaderResourceBindings *_yuv420Srb = nullptr;
+	QRhiShaderResourceBindings *_nv12Srb = nullptr;
 	QRhiShaderResourceBindings *_imageSrb = nullptr;
 
 	Ui::Rhi::Image _shadowImage;
