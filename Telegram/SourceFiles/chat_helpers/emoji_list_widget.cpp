@@ -1094,7 +1094,6 @@ void EmojiListWidget::fillCloudSearchSets() {
 		return;
 	}
 	const auto &sets = session().data().stickers().sets();
-	const auto test = session().isTestMode();
 	for (const auto setId : it->second) {
 		const auto setIt = sets.find(setId);
 		if (setIt == sets.end()) {
