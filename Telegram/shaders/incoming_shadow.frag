@@ -11,8 +11,9 @@ layout(std140, binding = 0) uniform Params {
 };
 
 void main() {
+	float fragY = viewport.y - gl_FragCoord.y;
 	vec4 result = texture(s_texture, v_texcoord);
-	float shadowCoord = shadow.y - gl_FragCoord.y;
+	float shadowCoord = shadow.y - fragY;
 	float shadowValue = clamp(shadowCoord / shadow.x, 0.0, 1.0);
 	float shadowShown = shadowValue * shadow.z;
 	fragColor = vec4(min(result.rgb, vec3(1.0)) * (1.0 - shadowShown), result.a);

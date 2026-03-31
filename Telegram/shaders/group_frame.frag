@@ -19,10 +19,10 @@ layout(std140, binding = 0) uniform Params {
 	vec4 outlineFg;
 };
 
-vec2 roundedCorner() {
+vec2 roundedCorner(vec2 fc) {
 	vec2 rectHalf = roundRect.zw / 2.0;
 	vec2 rectCenter = roundRect.xy + rectHalf;
-	vec2 fromRectCenter = abs(gl_FragCoord.xy - rectCenter);
+	vec2 fromRectCenter = abs(fc - rectCenter);
 	vec2 vectorRadius = radiusOutline.xx + vec2(0.5);
 	vec2 fromCenterWithRadius = fromRectCenter + vectorRadius;
 	vec2 fromRoundingCenter = max(fromCenterWithRadius, rectHalf) - rectHalf;
@@ -47,6 +47,7 @@ vec4 background() {
 }
 
 void main() {
+	vec2 fc = vec2(gl_FragCoord.x, viewport.y - gl_FragCoord.y);
 	vec4 result;
 	if (insideTexture()) {
 		result = texture(s_texture, v_texcoord);
@@ -55,16 +56,15 @@ void main() {
 		result = background();
 	}
 
-	float shadowCoord = shadow.y - gl_FragCoord.y;
+	float shadowCoord = shadow.y - fc.y;
 	float shadowValue = clamp(shadowCoord / shadow.x, 0.0, 1.0);
 	float shadowShown = shadowValue * shadow.z;
 	result = vec4(min(result.rgb, vec3(1.0)) * (1.0 - shadowShown), result.a);
 
-	float noiseValue = texture(n_texture,
-		gl_FragCoord.xy / vec2(256.0)).r;
+	float noiseValue = texture(n_texture, fc / vec2(256.0)).r;
 	result.rgb += (noiseValue - 0.5) * 0.002;
 
-	vec2 roundOutline = roundedCorner();
+	vec2 roundOutline = roundedCorner(fc);
 	result = result * roundOutline.y
 		+ vec4(outlineFg.rgb, 1.0) * (1.0 - roundOutline.y);
 	result = result * roundOutline.x + roundBg * (1.0 - roundOutline.x);

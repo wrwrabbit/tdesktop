@@ -16,9 +16,10 @@ layout(std140, binding = 0) uniform Params {
 };
 
 void main() {
+	vec2 fragCoord = vec2(gl_FragCoord.x, viewport.y - gl_FragCoord.y);
 	vec4 result = texture(s_texture, v_texcoord);
 
-	vec2 checkboardLadder = floor(gl_FragCoord.xy / transparentSize);
+	vec2 checkboardLadder = floor(fragCoord / transparentSize);
 	float checkboard = mod(checkboardLadder.x + checkboardLadder.y, 2.0);
 	vec4 bg = mix(transparentBg, transparentFg, checkboard);
 	result = vec4(result.rgb * result.a + bg.rgb * (1.0 - result.a), 1.0);
@@ -31,11 +32,11 @@ void main() {
 	float viewportHeight = shadowTopRect.y + topHeight;
 	float fullHeight = topHeight + bottomHeight;
 	float topY = min(
-		(viewportHeight - gl_FragCoord.y) / fullHeight,
+		(viewportHeight - fragCoord.y) / fullHeight,
 		topHeight / fullHeight);
-	float topX = (gl_FragCoord.x - shadowTopRect.x) / shadowTopRect.z;
+	float topX = (fragCoord.x - shadowTopRect.x) / shadowTopRect.z;
 	vec4 fadeTop = texture(f_texture, vec2(topX, topY)) * opacity;
-	float bottomY = max(bottomSkip + fullHeight - gl_FragCoord.y, topHeight)
+	float bottomY = max(bottomSkip + fullHeight - fragCoord.y, topHeight)
 		/ fullHeight;
 	vec4 fadeBottom = texture(f_texture, vec2(0.5, bottomY)) * opacity;
 	float fade = min((1.0 - fadeTop.a) * (1.0 - fadeBottom.a), fullFade);

@@ -14,10 +14,10 @@ layout(std140, binding = 0) uniform Params {
 	float roundRadius;
 };
 
-float roundedCorner() {
+float roundedCorner(vec2 fragCoord) {
 	vec2 rectHalf = roundRect.zw / 2.0;
 	vec2 rectCenter = roundRect.xy + rectHalf;
-	vec2 fromRectCenter = abs(gl_FragCoord.xy - rectCenter);
+	vec2 fromRectCenter = abs(fragCoord - rectCenter);
 	vec2 vectorRadius = vec2(roundRadius + 0.5);
 	vec2 fromCenterWithRadius = fromRectCenter + vectorRadius;
 	vec2 fromRoundingCenter = max(fromCenterWithRadius, rectHalf) - rectHalf;
@@ -26,6 +26,7 @@ float roundedCorner() {
 }
 
 void main() {
+	vec2 fragCoord = vec2(gl_FragCoord.x, viewport.y - gl_FragCoord.y);
 	vec4 result = texture(s_texture, v_texcoord);
 
 	float topHeight = shadowTopRect.w;
@@ -36,16 +37,16 @@ void main() {
 	float viewportHeight = shadowTopRect.y + topHeight;
 	float fullHeight = topHeight + bottomHeight;
 	float topY = min(
-		(viewportHeight - gl_FragCoord.y) / fullHeight,
+		(viewportHeight - fragCoord.y) / fullHeight,
 		topHeight / fullHeight);
-	float topX = (gl_FragCoord.x - shadowTopRect.x) / shadowTopRect.z;
+	float topX = (fragCoord.x - shadowTopRect.x) / shadowTopRect.z;
 	vec4 fadeTop = texture(f_texture, vec2(topX, topY)) * opacity;
-	float bottomY = max(bottomSkip + fullHeight - gl_FragCoord.y, topHeight)
+	float bottomY = max(bottomSkip + fullHeight - fragCoord.y, topHeight)
 		/ fullHeight;
 	vec4 fadeBottom = texture(f_texture, vec2(0.5, bottomY)) * opacity;
 	float fade = min((1.0 - fadeTop.a) * (1.0 - fadeBottom.a), fullFade);
 	result.rgb = result.rgb * fade;
 
-	result *= roundedCorner();
+	result *= roundedCorner(fragCoord);
 	fragColor = result;
 }

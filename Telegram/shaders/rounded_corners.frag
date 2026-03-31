@@ -9,9 +9,10 @@ layout(std140, binding = 0) uniform Params {
 };
 
 float roundedCorner() {
+	vec2 fragCoord = vec2(gl_FragCoord.x, viewport.y - gl_FragCoord.y);
 	vec2 rectHalf = roundRect.zw / 2.0;
 	vec2 rectCenter = roundRect.xy + rectHalf;
-	vec2 fromRectCenter = abs(gl_FragCoord.xy - rectCenter);
+	vec2 fromRectCenter = abs(fragCoord - rectCenter);
 	vec2 vectorRadius = vec2(roundRadius + 0.5);
 	vec2 fromCenterWithRadius = fromRectCenter + vectorRadius;
 	vec2 fromRoundingCenter = max(fromCenterWithRadius, rectHalf) - rectHalf;

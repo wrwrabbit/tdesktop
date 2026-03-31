@@ -16,10 +16,10 @@ layout(std140, binding = 0) uniform Params {
 	vec4 h_components;
 };
 
-float roundedCorner() {
+float roundedCorner(vec2 fc) {
 	vec2 rectHalf = roundRect.zw / 2.0;
 	vec2 rectCenter = roundRect.xy + rectHalf;
-	vec2 fromRectCenter = abs(gl_FragCoord.xy - rectCenter);
+	vec2 fromRectCenter = abs(fc - rectCenter);
 	vec2 vectorRadius = vec2(roundRadius + 0.5);
 	vec2 fromCenterWithRadius = fromRectCenter + vectorRadius;
 	vec2 fromRoundingCenter = max(fromCenterWithRadius, rectHalf) - rectHalf;
@@ -27,8 +27,8 @@ float roundedCorner() {
 	return 1.0 - smoothstep(0.0, 1.0, rounded);
 }
 
-float shadow() {
-	vec2 texcoord = gl_FragCoord.xy - roundRect.xy + h_extend.xy;
+float shadow(vec2 fc) {
+	vec2 texcoord = fc - roundRect.xy + h_extend.xy;
 	vec2 total = roundRect.zw + h_extend.xy + h_extend.zw;
 	vec2 dividedTexcoord = texcoord / total;
 	float left = h_components.x / h_size.x;
@@ -51,9 +51,10 @@ float shadow() {
 }
 
 void main() {
+	vec2 fc = vec2(gl_FragCoord.x, viewport.y - gl_FragCoord.y);
 	vec4 result = texture(s_texture, v_texcoord);
 	result = result * (1.0 - fadeColor.a) + fadeColor;
-	float corner = roundedCorner();
-	float shadowValue = shadow();
+	float corner = roundedCorner(fc);
+	float shadowValue = shadow(fc);
 	fragColor = result * corner + vec4(0.0, 0.0, 0.0, shadowValue) * (1.0 - corner);
 }
