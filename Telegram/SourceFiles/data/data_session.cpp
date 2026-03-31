@@ -565,9 +565,9 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 		if (!hasStarsPerMessage) {
 			result->setStarsPerMessage(0);
 		}
+		result->setBotInfoVersion(data.vbot_info_version().value_or(-1));
 
 		if (!minimal) {
-			result->setBotInfoVersion(data.vbot_info_version().value_or(-1));
 			if (const auto info = result->botInfo.get()) {
 				info->readsAllHistory = data.is_bot_chat_history();
 				if (info->cantJoinGroups != data.is_bot_nochats()) {
@@ -581,7 +581,11 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 				}
 				info->supportsAttachMenu = data.is_bot_attach_menu();
 				info->supportsBusiness = data.is_bot_business();
-				info->canEditInformation = data.is_bot_can_edit();
+				const auto canEditInformation = data.is_bot_can_edit();
+				if (info->canEditInformation != canEditInformation) {
+					info->canEditInformation = canEditInformation;
+					flags |= UpdateFlag::ManagedBot;
+				}
 				info->activeUsers = data.vbot_active_users().value_or_empty();
 				info->hasMainApp = data.is_bot_has_main_app();
 				info->userCreatesTopics = data.is_bot_forum_can_manage_topics();

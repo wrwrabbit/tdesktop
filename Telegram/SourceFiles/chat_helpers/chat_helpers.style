@@ -968,6 +968,16 @@ historyEmojiStatusInfoLabel: FlatLabel(historyContactStatusLabel) {
 }
 historyContactStatusMinSkip: 16px;
 
+historySetBotPhotoIcon: icon {{ "menu/photo_set", windowActiveTextFg }};
+historySetBotPhotoIconSize: 49px;
+historySetBotPhotoLabel: FlatLabel(defaultFlatLabel) {
+	style: semiboldTextStyle;
+	textFg: windowActiveTextFg;
+	align: align(center);
+	maxHeight: 30px;
+}
+historySetBotPhotoLabelMarginRight: 20px;
+
 historyBusinessBotPhoto: UserpicButton(defaultUserpicButton) {
 	size: size(46px, 46px);
 	photoSize: 46px;

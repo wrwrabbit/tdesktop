@@ -1189,21 +1189,6 @@ AdminLog::OwnedItem AboutView::makeManagedBotInfo(
 		tr::bold(parentName),
 		tr::rich);
 
-	const auto url = u"internal:edit_peer/"_q
-		+ QString::number(user->id.value);
-	text.append(u"\n\n"_q).append(tr::lng_managed_bot_edit_photo(
-		tr::now,
-		lt_link,
-		Ui::Text::Wrapped(
-			tr::lng_managed_bot_edit_photo_link(
-				tr::now,
-				lt_arrow,
-				Ui::Text::IconEmoji(&st::textMoreIconEmoji),
-				tr::rich),
-			EntityType::CustomUrl,
-			url),
-		tr::rich));
-
 	return makeAboutSimple(text, nullptr, photo);
 }
 

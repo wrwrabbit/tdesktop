@@ -323,7 +323,11 @@ UserId UserData::botManagerId() const {
 }
 
 void UserData::setBotManagerId(UserId managerId) {
+	const auto changed = (_botManagerId != managerId);
 	_botManagerId = managerId;
+	if (changed) {
+		session().changes().peerUpdated(this, UpdateFlag::ManagedBot);
+	}
 }
 
 MTPInputUser UserData::inputUser() const {

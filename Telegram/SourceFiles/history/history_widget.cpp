@@ -849,6 +849,7 @@ HistoryWidget::HistoryWidget(
 		| PeerUpdateFlag::MessagesTTL
 		| PeerUpdateFlag::ChatThemeToken
 		| PeerUpdateFlag::FullInfo
+		| PeerUpdateFlag::ManagedBot
 		| PeerUpdateFlag::StarsPerMessage
 		| PeerUpdateFlag::GiftSettings
 	) | rpl::filter([=](const Data::PeerUpdate &update) {
@@ -908,6 +909,10 @@ HistoryWidget::HistoryWidget(
 		}
 		if (flags & PeerUpdateFlag::Slowmode) {
 			updateSendButtonType();
+		}
+		if ((flags & PeerUpdateFlag::ManagedBot) && _list) {
+			_list->refreshAboutView();
+			_list->updateBotInfo();
 		}
 		if (flags & (PeerUpdateFlag::IsBlocked
 			| PeerUpdateFlag::Admins

@@ -2589,6 +2589,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_managed_bot_created_text" = "{parent_name} will manage this bot for you.";
 "lng_managed_bot_edit_photo" = "You can edit your bot's profile picture {link}";
 "lng_managed_bot_edit_photo_link" = "here {arrow}";
+"lng_managed_bot_set_photo" = "Set Profile Photo";
 
 "lng_stake_game_title" = "Emoji Stake";
 "lng_stake_game_beta" = "Beta";

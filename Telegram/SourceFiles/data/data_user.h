@@ -55,6 +55,12 @@ struct BotVerifierSettings {
 };
 
 struct BotInfo {
+	enum class SetBotPhotoOpenState : uchar {
+		Unknown,
+		OpenedWithHistory,
+		OpenedEmpty,
+	};
+
 	BotInfo();
 	~BotInfo();
 
@@ -90,6 +96,7 @@ struct BotInfo {
 	int version = 0;
 	int descriptionVersion = 0;
 	int activeUsers = 0;
+	SetBotPhotoOpenState setBotPhotoOpenState = SetBotPhotoOpenState::Unknown;
 	bool inited : 1 = false;
 	bool readsAllHistory : 1 = false;
 	bool cantJoinGroups : 1 = false;
@@ -99,6 +106,7 @@ struct BotInfo {
 	bool supportsBusiness : 1 = false;
 	bool hasMainApp : 1 = false;
 	bool userCreatesTopics : 1 = false;
+	bool setBotPhotoHidden : 1 = false;
 
 private:
 	std::unique_ptr<Data::Forum> _forum;
