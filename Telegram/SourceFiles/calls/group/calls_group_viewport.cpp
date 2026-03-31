@@ -10,6 +10,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/group/calls_group_viewport_tile.h"
 #include "calls/group/calls_group_viewport_opengl.h"
 #include "calls/group/calls_group_viewport_raster.h"
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+#include "calls/group/calls_group_viewport_rhi.h"
+#endif
 #include "calls/group/calls_group_common.h"
 #include "calls/group/calls_group_call.h"
 #include "calls/group/calls_group_members_row.h"
@@ -885,12 +888,22 @@ void Viewport::setPressed(Selection value) {
 }
 
 Ui::GL::ChosenRenderer Viewport::chooseRenderer(Ui::GL::Backend backend) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	if (backend == Ui::GL::Backend::QRhi) {
+		_opengl = true;
+		return {
+			.renderer = std::make_unique<RendererRhi>(this),
+			.backend = Ui::GL::Backend::QRhi,
+		};
+	}
+#else
 	if (backend == Ui::GL::Backend::QRhi) {
 		return {
 			.renderer = std::make_unique<RendererSW>(this),
 			.backend = Ui::GL::Backend::QRhi,
 		};
 	}
+#endif
 	_opengl = (backend == Ui::GL::Backend::OpenGL);
 	return {
 		.renderer = makeRenderer(),
