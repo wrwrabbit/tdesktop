@@ -1434,7 +1434,11 @@ void ShowDisableSharingBox(
 
 void Filler::addToggleNoForwards() {
 	const auto user = _peer->asUser();
-	if (!user || user->isInaccessible() || user->isBot() || user->isSelf()) {
+	if (!user
+		|| user->isInaccessible()
+		|| user->isBot()
+		|| user->isServiceUser()
+		|| user->isSelf()) {
 		return;
 	}
 	const auto controller = _controller;
