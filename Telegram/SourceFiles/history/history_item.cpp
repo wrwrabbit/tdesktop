@@ -5882,9 +5882,18 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 			? tr::lng_action_topic_bot_thread(tr::now)
 			: tr::lng_action_topic_placeholder(tr::now);
 		if (const auto closed = action.vclosed()) {
-			result.text = { mtpIsTrue(*closed)
-				? tr::lng_action_topic_closed_inside(tr::now)
-				: tr::lng_action_topic_reopened_inside(tr::now) };
+			result.links.push_back(fromLink());
+			result.text = (mtpIsTrue(*closed)
+				? tr::lng_action_topic_closed_inside_by(
+					tr::now,
+					lt_from,
+					fromLinkText(), // Link 1.
+					tr::marked)
+				: tr::lng_action_topic_reopened_inside_by(
+					tr::now,
+					lt_from,
+					fromLinkText(), // Link 1.
+					tr::marked));
 		} else if (const auto hidden = action.vhidden()) {
 			result.text = { mtpIsTrue(*hidden)
 				? tr::lng_action_topic_hidden_inside(tr::now)
