@@ -10,6 +10,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/view/media_view_overlay_renderer.h"
 #include "ui/rhi/rhi_renderer.h"
 #include "ui/rhi/rhi_image.h"
+#ifdef Q_OS_MAC
+#include "media/view/media_view_metal_texture.h"
+#endif
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 
@@ -207,6 +210,10 @@ private:
 	QSize _controlsFadeSize;
 	bool _shadowTopFlip = false;
 	bool _shadowsForStories = false;
+
+#ifdef Q_OS_MAC
+	MetalTextureCache _metalTextureCache;
+#endif
 
 	VideoStream *_pendingVideoStream = nullptr;
 	bool _initialized = false;

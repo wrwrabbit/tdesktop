@@ -1018,17 +1018,40 @@ void OverlayWidget::RendererRhi::paintTransformedVideoFrame(
 			data.alpha);
 		return;
 	}
-	Assert(!data.yuv->size.isEmpty());
-	const auto nv12 = (data.format == Streaming::FrameFormat::NV12);
+	const auto nativeTexture =
+		(data.format == Streaming::FrameFormat::NativeTexture);
+	const auto nv12 = nativeTexture
+		|| (data.format == Streaming::FrameFormat::NV12);
 	const auto yuv = data.yuv;
-	const auto nv12changed = (_chromaNV12 != nv12);
+	const auto nv12changed = !nativeTexture && (_chromaNV12 != nv12);
 
 	const auto upload = (_trackFrameIndex != data.index)
 		|| (_streamedIndex != _owner->streamedIndex());
+
 	_trackFrameIndex = data.index;
 	_streamedIndex = _owner->streamedIndex();
 
 	if (upload) {
+		auto zeroCopied = false;
+#ifdef Q_OS_MAC
+		if (nativeTexture && data.nativeFrame
+			&& data.nativeFrame->pixelBuffer) {
+			if (_metalTextureCache.createTexturesFromPixelBuffer(
+					_rhi,
+					data.nativeFrame->pixelBuffer,
+					&_yTexture,
+					&_uvTexture,
+					&_lumaSize,
+					&_chromaSize)) {
+				_chromaNV12 = true;
+				zeroCopied = true;
+			} else {
+				return;
+			}
+		}
+#endif // Q_OS_MAC
+		if (!zeroCopied) {
+		Assert(!yuv->size.isEmpty());
 		if (!_yTexture || _lumaSize != yuv->size) {
 			delete _yTexture;
 			_yTexture = _rhi->newTexture(QRhiTexture::R8, yuv->size);
@@ -1095,6 +1118,7 @@ void OverlayWidget::RendererRhi::paintTransformedVideoFrame(
 					QRhiTextureUploadEntry(0, 0, vDesc)));
 		}
 		_chromaNV12 = nv12;
+		} // if (!zeroCopied)
 	}
 
 	validateControlsFade();
@@ -1104,7 +1128,9 @@ void OverlayWidget::RendererRhi::paintTransformedVideoFrame(
 	}
 
 	const auto textureRect = _owner->_stories
-		? StoryCropTextureRect(QSizeF(yuv->size), geometry.rect.size())
+		? StoryCropTextureRect(
+			QSizeF(nativeTexture ? _lumaSize : yuv->size),
+			geometry.rect.size())
 		: QRectF(0., 0., 1., 1.);
 	const auto texLeft = float(textureRect.x());
 	const auto texRight = float(textureRect.x() + textureRect.width());

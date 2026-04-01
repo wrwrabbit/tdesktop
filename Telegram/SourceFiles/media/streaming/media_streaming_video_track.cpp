@@ -453,7 +453,35 @@ void VideoTrackObject::rasterizeFrame(not_null<Frame*> frame) {
 
 	fillRequests(frame);
 	frame->format = FrameFormat::None;
+	frame->nativeFrame = NativeFrame();
 	if (frame->decoded->hw_frames_ctx) {
+#ifdef Q_OS_MAC
+		const auto hwFormat = frame->decoded->format;
+		const auto wantARGB = requireARGB32();
+		const auto isVT = (hwFormat == AV_PIX_FMT_VIDEOTOOLBOX);
+		const auto pb = isVT ? (void*)frame->decoded->data[3] : nullptr;
+		if (!wantARGB && isVT && pb) {
+				const auto w = frame->decoded->width;
+				const auto h = frame->decoded->height;
+				frame->nativeFrame = NativeFrame{
+					.pixelBuffer = pb,
+					.size = { w, h },
+					.chromaSize = {
+						(w + 1) / 2,
+						(h + 1) / 2,
+					},
+				};
+				frame->alpha = false;
+				frame->format = FrameFormat::NativeTexture;
+				if (!frame->original.isNull()) {
+					frame->original = QImage();
+					for (auto &[_, prepared] : frame->prepared) {
+						prepared.image = QImage();
+					}
+				}
+				return;
+		}
+#endif // Q_OS_MAC
 		if (!frame->transferred) {
 			frame->transferred = FFmpeg::MakeFramePointer();
 		}
@@ -1215,6 +1243,7 @@ FrameWithInfo VideoTrack::frameWithInfo(const Instance *instance) {
 	return {
 		.image = data.frame->original,
 		.yuv = &data.frame->yuv,
+		.nativeFrame = &data.frame->nativeFrame,
 		.format = data.frame->format,
 		.index = data.index,
 		.alpha = data.frame->alpha,
@@ -1341,7 +1370,8 @@ bool VideoTrack::IsRasterized(not_null<const Frame*> frame) {
 	return IsDecoded(frame)
 		&& (!frame->original.isNull()
 			|| frame->format == FrameFormat::YUV420
-			|| frame->format == FrameFormat::NV12);
+			|| frame->format == FrameFormat::NV12
+			|| frame->format == FrameFormat::NativeTexture);
 }
 
 bool VideoTrack::IsStale(not_null<const Frame*> frame, crl::time trackTime) {
