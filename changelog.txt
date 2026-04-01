@@ -1,3 +1,7 @@
+6.7.1 (01.04.26)
+
+- Fix crash in emoji panel animation.
+
 6.7 (01.04.26)
 
 - AI Text Editor for messages.
