@@ -195,7 +195,6 @@ private:
 		bool refreshMediaIfStale(crl::time threshold);
 		[[nodiscard]] bool hasFocus() const;
 		void setFocus() const;
-		void clearValue();
 
 		void setPlaceholder() const;
 		void removePlaceholder() const;
@@ -569,10 +568,6 @@ bool Options::Option::hasFocus() const {
 
 void Options::Option::setFocus() const {
 	FocusAtEnd(field());
-}
-
-void Options::Option::clearValue() {
-	field()->setText(QString());
 }
 
 void Options::Option::setPlaceholder() const {

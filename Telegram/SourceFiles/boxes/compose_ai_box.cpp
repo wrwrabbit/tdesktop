@@ -548,7 +548,7 @@ int ComposeAiModeTabs::resizeGetHeight(int newWidth) {
 		- padding.bottom();
 	const auto top = padding.top();
 	auto left = padding.left();
-	for (const auto button : { _translate, _style, _fix }) {
+	for (const auto &button : { _translate, _style, _fix }) {
 		button->setGeometry(left, top, buttonWidth, buttonHeight);
 		left += buttonWidth + skip;
 	}

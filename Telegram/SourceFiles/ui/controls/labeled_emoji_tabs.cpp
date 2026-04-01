@@ -320,7 +320,7 @@ LabeledEmojiTabs::LabeledEmojiTabs(
 		const auto padding = st::aiComposeStyleTabsPadding;
 		const auto skip = st::aiComposeStyleTabsSkip;
 		auto total = padding.left();
-		for (const auto button : _buttons) {
+		for (const auto &button : _buttons) {
 			total += button->naturalWidth() + skip;
 		}
 		return total - (_buttons.empty() ? 0 : skip) + padding.right();

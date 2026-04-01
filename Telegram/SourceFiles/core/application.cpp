@@ -732,6 +732,7 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 	switch (e->type()) {
 	case QEvent::TouchBegin:
 		Ui::Integration::Instance().touchCounterIncrement();
+		[[fallthrough]];
 	case QEvent::TouchUpdate:
 	case QEvent::TouchEnd: {
 		_lastTouchProcessed = object->isWidgetType();
