@@ -162,13 +162,40 @@ int PaintBadges(
 		bool displayPinnedIcon,
 		int pinnedIconTop,
 		bool narrow) {
+	const auto paintIconBadge = [&](
+			const style::ThreeStateIcon &icons,
+			bool muted,
+			UnreadBadgeSize sizeId) {
+		if (narrow) {
+			auto st = UnreadBadgeStyle();
+			st.sizeId = sizeId;
+			st.active = context.active;
+			st.selected = context.selected;
+			st.muted = muted;
+			st.padding = 0;
+			st.textTop = 0;
+			const auto badge = PaintUnreadBadge(p, QString(), right, top, st);
+			ThreeStateIcon(icons, st.active, st.selected).paintInCenter(
+				p,
+				badge);
+			right -= badge.width() + st.padding + st::dialogsUnreadPadding;
+			return;
+		}
+		const auto &icon = ThreeStateIcon(
+			icons,
+			context.active,
+			context.selected);
+		icon.paint(p, right - icon.width(), top, context.width);
+		right -= icon.width() + st::dialogsUnreadPadding;
+	};
 	auto initial = right;
+	auto painted = 0;
 	if (badgesState.unread
 		&& !badgesState.unreadCounter
 		&& context.st->unreadMarkDiameter > 0) {
 		const auto d = context.st->unreadMarkDiameter;
-		UnreadBadgeStyle st;
-		PainterHighQualityEnabler hq(p);
+		auto st = UnreadBadgeStyle();
+		auto hq = PainterHighQualityEnabler(p);
 		const auto rect = QRect(
 			right - st.size + (st.size - d) / 2,
 			top + (st.size - d) / 2,
@@ -188,6 +215,7 @@ int PaintBadges(
 				: st::dialogsUnreadBg));
 		p.drawEllipse(rect);
 		right -= st.size + st.padding;
+		++painted;
 	} else if (badgesState.unread) {
 		UnreadBadgeStyle st;
 		st.active = context.active;
@@ -199,6 +227,7 @@ int PaintBadges(
 			narrow);
 		const auto badge = PaintUnreadBadge(p, counter, right, top, st);
 		right -= badge.width() + st.padding;
+		++painted;
 	} else if (const auto used = PaintRightButton(p, context)) {
 		return used - st::dialogsUnreadPadding;
 	} else if (displayPinnedIcon) {
@@ -209,32 +238,45 @@ int PaintBadges(
 		icon.paint(p, right - icon.width(), pinnedIconTop, context.width);
 		right -= icon.width() + st::dialogsUnreadPadding;
 	}
-	if (badgesState.mention || badgesState.reaction) {
+	if ((!narrow || (painted < 2))
+		&& (badgesState.mention || badgesState.reaction)) {
 		const auto muted = badgesState.mention
 			? badgesState.mentionMuted
 			: badgesState.reactionMuted;
-		const auto &icon = ThreeStateIcon(
+		paintIconBadge(
 			badgesState.mention
-				? (muted
-					? st::dialogsUnreadMentionMuted
-					: st::dialogsUnreadMention)
-				: (muted
-					? st::dialogsUnreadReactionMuted
-					: st::dialogsUnreadReaction),
-			context.active,
-			context.selected);
-		icon.paint(p, right - icon.width(), top, context.width);
-		right -= icon.width() + st::dialogsUnreadPadding;
+				? (narrow
+					? (muted
+						? st::dialogsUnreadMentionBadgeMuted
+						: st::dialogsUnreadMentionBadge)
+					: (muted
+						? st::dialogsUnreadMentionMuted
+						: st::dialogsUnreadMention))
+				: (narrow
+					? (muted
+						? st::dialogsUnreadReactionBadgeMuted
+						: st::dialogsUnreadReactionBadge)
+					: (muted
+						? st::dialogsUnreadReactionMuted
+						: st::dialogsUnreadReaction)),
+			muted,
+			badgesState.mention
+				? UnreadBadgeSize::Dialogs
+				: UnreadBadgeSize::ReactionInDialogs);
+		++painted;
 	}
-	if (badgesState.poll) {
-		const auto &icon = ThreeStateIcon(
-			badgesState.pollMuted
-				? st::dialogsUnreadPollMuted
-				: st::dialogsUnreadPoll,
-			context.active,
-			context.selected);
-		icon.paint(p, right - icon.width(), top, context.width);
-		right -= icon.width() + st::dialogsUnreadPadding;
+	if ((!narrow || (painted < 2)) && badgesState.poll) {
+		paintIconBadge(
+			narrow
+				? (badgesState.pollMuted
+					? st::dialogsUnreadPollBadgeMuted
+					: st::dialogsUnreadPollBadge)
+				: (badgesState.pollMuted
+					? st::dialogsUnreadPollMuted
+					: st::dialogsUnreadPoll),
+			badgesState.pollMuted,
+			UnreadBadgeSize::PollInDialogs);
+		++painted;
 	}
 	return (initial - right);
 }

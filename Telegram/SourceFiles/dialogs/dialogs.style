@@ -602,6 +602,36 @@ dialogsUnreadPollMuted: ThreeStateIcon {
 	over: icon{{ "dialogs/dialogs_chatlist_poll-18x18", dialogsUnreadBgMutedOver }};
 	active: icon{{ "dialogs/dialogs_chatlist_poll-18x18", dialogsUnreadBgMutedActive }};
 }
+dialogsUnreadMentionBadge: ThreeStateIcon {
+	icon: icon{{ "dialogs/dialogs_chatlist_mention-13x13", dialogsUnreadFg }};
+	over: icon{{ "dialogs/dialogs_chatlist_mention-13x13", dialogsUnreadFgOver }};
+	active: icon{{ "dialogs/dialogs_chatlist_mention-13x13", dialogsUnreadFgActive }};
+}
+dialogsUnreadMentionBadgeMuted: ThreeStateIcon {
+	icon: icon{{ "dialogs/dialogs_chatlist_mention-13x13", dialogsUnreadFg }};
+	over: icon{{ "dialogs/dialogs_chatlist_mention-13x13", dialogsUnreadFgOver }};
+	active: icon{{ "dialogs/dialogs_chatlist_mention-13x13", dialogsUnreadFgActive }};
+}
+dialogsUnreadReactionBadge: ThreeStateIcon {
+	icon: icon{{ "dialogs/dialogs_chatlist_reaction-13x13", dialogsUnreadFg }};
+	over: icon{{ "dialogs/dialogs_chatlist_reaction-13x13", dialogsUnreadFgOver }};
+	active: icon{{ "dialogs/dialogs_chatlist_reaction-13x13", dialogsUnreadFgActive }};
+}
+dialogsUnreadReactionBadgeMuted: ThreeStateIcon {
+	icon: icon{{ "dialogs/dialogs_chatlist_reaction-13x13", dialogsUnreadFg }};
+	over: icon{{ "dialogs/dialogs_chatlist_reaction-13x13", dialogsUnreadFgOver }};
+	active: icon{{ "dialogs/dialogs_chatlist_reaction-13x13", dialogsUnreadFgActive }};
+}
+dialogsUnreadPollBadge: ThreeStateIcon {
+	icon: icon{{ "dialogs/dialogs_chatlist_poll-13x13", dialogsUnreadFg }};
+	over: icon{{ "dialogs/dialogs_chatlist_poll-13x13", dialogsUnreadFgOver }};
+	active: icon{{ "dialogs/dialogs_chatlist_poll-13x13", dialogsUnreadFgActive }};
+}
+dialogsUnreadPollBadgeMuted: ThreeStateIcon {
+	icon: icon{{ "dialogs/dialogs_chatlist_poll-13x13", dialogsUnreadFg }};
+	over: icon{{ "dialogs/dialogs_chatlist_poll-13x13", dialogsUnreadFgOver }};
+	active: icon{{ "dialogs/dialogs_chatlist_poll-13x13", dialogsUnreadFgActive }};
+}
 
 dialogsMuteIcon: ThreeStateIcon {
 	icon: icon{{ "dialogs/dialogs_mute", dialogsUnreadBgMuted }};
