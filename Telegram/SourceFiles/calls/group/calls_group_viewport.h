@@ -119,6 +119,7 @@ private:
 	class VideoTile;
 	class RendererSW;
 	class RendererGL;
+	class RendererRhi;
 	using TileId = quintptr;
 
 	struct Geometry {

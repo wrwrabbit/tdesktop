@@ -885,6 +885,12 @@ void Viewport::setPressed(Selection value) {
 }
 
 Ui::GL::ChosenRenderer Viewport::chooseRenderer(Ui::GL::Backend backend) {
+	if (backend == Ui::GL::Backend::QRhi) {
+		return {
+			.renderer = std::make_unique<RendererSW>(this),
+			.backend = Ui::GL::Backend::QRhi,
+		};
+	}
 	_opengl = (backend == Ui::GL::Backend::OpenGL);
 	return {
 		.renderer = makeRenderer(),

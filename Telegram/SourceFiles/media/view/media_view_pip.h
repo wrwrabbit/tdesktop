@@ -197,6 +197,7 @@ private:
 	class Renderer;
 	class RendererGL;
 	class RendererSW;
+	class RendererRhi;
 
 	void setupPanel();
 	void setupButtons();

@@ -533,6 +533,52 @@ void Panel::Incoming::RendererSW::fillBottomShadow(QPainter &p) {
 			factor * fill.height()));
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+class Panel::Incoming::RendererRhi final
+	: public Ui::GL::Renderer {
+public:
+	explicit RendererRhi(not_null<Incoming*> owner) : _owner(owner) {
+	}
+
+	void paintFallback(
+			Painter &p,
+			const QRegion &clip,
+			Ui::GL::Backend backend) override {
+		const auto markGuard = gsl::finally([&] {
+			_owner->_track->markFrameShown();
+		});
+		const auto data = _owner->_track->frameWithInfo(true);
+		const auto &image = data.original;
+		const auto rotation = data.rotation;
+		if (image.isNull()) {
+			p.fillRect(clip.boundingRect(), Qt::black);
+		} else {
+			const auto rect = _owner->widget()->rect();
+			using namespace Media::View;
+			auto hq = PainterHighQualityEnabler(p);
+			if (UsePainterRotation(rotation)) {
+				if (rotation) {
+					p.save();
+					p.rotate(rotation);
+				}
+				p.drawImage(RotatedRect(rect, rotation), image);
+				if (rotation) {
+					p.restore();
+				}
+			} else if (rotation) {
+				p.drawImage(rect, RotateFrameImage(image, rotation));
+			} else {
+				p.drawImage(rect, image);
+			}
+		}
+	}
+
+private:
+	const not_null<Incoming*> _owner;
+
+};
+#endif // Qt >= 6.7
+
 Panel::Incoming::Incoming(
 	not_null<QWidget*> parent,
 	not_null<Webrtc::VideoTrack*> track,
@@ -560,6 +606,15 @@ void Panel::Incoming::setControlsAlignment(style::align align) {
 
 Ui::GL::ChosenRenderer Panel::Incoming::chooseRenderer(
 		Ui::GL::Backend backend) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	if (backend == Ui::GL::Backend::QRhi) {
+		_opengl = true;
+		return {
+			.renderer = std::make_unique<RendererRhi>(this),
+			.backend = Ui::GL::Backend::QRhi,
+		};
+	}
+#endif // Qt >= 6.7
 	_opengl = (backend == Ui::GL::Backend::OpenGL);
 	return {
 		.renderer = (_opengl

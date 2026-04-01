@@ -364,6 +364,18 @@ void Launcher::initHighDpi() {
 		qputenv("QT_WIDGETS_RHI", "1");
 		qputenv("QT_WIDGETS_RHI_BACKEND", "opengl");
 	}
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	if (qEnvironmentVariableIsSet("DESKTOP_APP_USE_QRHI")) {
+		qputenv("QT_WIDGETS_RHI", "1");
+#ifdef Q_OS_MAC
+		qputenv("QT_WIDGETS_RHI_BACKEND", "metal");
+#elif defined(Q_OS_WIN)
+		qputenv("QT_WIDGETS_RHI_BACKEND", "d3d11");
+#else
+		qputenv("QT_WIDGETS_RHI_BACKEND", "opengl");
+#endif
+	}
+#endif // Qt >= 6.7
 
 	if (OptionFractionalScalingEnabled.value()
 			|| OptionHighDpiDownscale.value()) {

@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/view/media_view_playback_progress.h"
 #include "media/view/media_view_pip_opengl.h"
 #include "media/view/media_view_pip_raster.h"
+#include "media/view/media_view_pip_rhi.h"
 #include "media/audio/media_audio.h"
 #include "data/data_document.h"
 #include "data/data_document_media.h"
@@ -1399,6 +1400,16 @@ QImage Pip::currentVideoFrameImage() const {
 
 Ui::GL::ChosenRenderer Pip::chooseRenderer(
 		Ui::GL::Capabilities capabilities) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	if (qEnvironmentVariableIsSet("DESKTOP_APP_USE_QRHI")) {
+		LOG(("Renderer: [QRhi] (PipPanel)"));
+		_opengl = true;
+		return {
+			.renderer = std::make_unique<RendererRhi>(this),
+			.backend = Ui::GL::Backend::QRhi,
+		};
+	}
+#endif // Qt >= 6.7
 	const auto use = Platform::IsMac()
 		? true
 		: capabilities.transparency;

@@ -54,6 +54,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/view/media_view_pip.h"
 #include "media/view/media_view_overlay_raster.h"
 #include "media/view/media_view_overlay_opengl.h"
+#include "media/view/media_view_overlay_rhi.h"
 #include "media/view/media_view_playback_sponsored.h"
 #include "media/view/media_view_video_stream.h"
 #include "media/stories/media_stories_share.h"
@@ -5724,6 +5725,15 @@ void OverlayWidget::tryStartTextRecognition() {
 
 Ui::GL::ChosenRenderer OverlayWidget::chooseRenderer(
 		Ui::GL::Backend backend) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	if (backend == Ui::GL::Backend::QRhi) {
+		_opengl = true;
+		return {
+			.renderer = std::make_unique<RendererRhi>(this),
+			.backend = Ui::GL::Backend::QRhi,
+		};
+	}
+#endif // Qt >= 6.7
 	_opengl = (backend == Ui::GL::Backend::OpenGL);
 	return {
 		.renderer = (_opengl
