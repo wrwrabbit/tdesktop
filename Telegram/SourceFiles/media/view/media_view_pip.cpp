@@ -1401,7 +1401,7 @@ QImage Pip::currentVideoFrameImage() const {
 Ui::GL::ChosenRenderer Pip::chooseRenderer(
 		Ui::GL::Capabilities capabilities) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-	if (qEnvironmentVariableIsSet("DESKTOP_APP_USE_QRHI")) {
+	if (qEnvironmentVariableIsSet("QT_WIDGETS_RHI")) {
 		LOG(("Renderer: [QRhi] (PipPanel)"));
 		_opengl = true;
 		return {
@@ -1409,7 +1409,7 @@ Ui::GL::ChosenRenderer Pip::chooseRenderer(
 			.backend = Ui::GL::Backend::QRhi,
 		};
 	}
-#endif // Qt >= 6.7
+#endif // Qt >= 6.8
 	const auto use = Platform::IsMac()
 		? true
 		: capabilities.transparency;
