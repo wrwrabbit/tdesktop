@@ -553,6 +553,9 @@ class Panel::Incoming::RendererRhi final
 public:
 	explicit RendererRhi(not_null<Incoming*> owner) : _owner(owner) {
 	}
+	~RendererRhi() {
+		releaseResources();
+	}
 
 	void initialize(
 			QRhi *rhi,

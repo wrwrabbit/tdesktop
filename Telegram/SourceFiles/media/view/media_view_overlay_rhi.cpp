@@ -99,6 +99,10 @@ static_assert(sizeof(RoundedCornersUniforms) == 48);
 
 } // namespace
 
+OverlayWidget::RendererRhi::~RendererRhi() {
+	releaseResources();
+}
+
 OverlayWidget::RendererRhi::RendererRhi(not_null<OverlayWidget*> owner)
 : _owner(owner) {
 	style::PaletteChanged(

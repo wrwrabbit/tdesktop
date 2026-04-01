@@ -31,6 +31,7 @@ class OverlayWidget::RendererRhi final
 	, public base::has_weak_ptr {
 public:
 	explicit RendererRhi(not_null<OverlayWidget*> owner);
+	~RendererRhi();
 
 	void initialize(
 		QRhi *rhi,
