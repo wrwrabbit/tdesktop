@@ -3,6 +3,10 @@
 # Usage: include(cmake/qrhi_shaders.cmake)
 # Requires: target "Telegram" and function "nice_target_sources" to exist.
 
+if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
+    return()
+endif()
+
 find_program(QSB_EXECUTABLE qsb
     HINTS "${QT_DIR}/../../../libexec" "${QT_DIR}/../../../bin"
     PATHS ENV PATH)
@@ -43,9 +47,5 @@ if (QSB_EXECUTABLE)
     add_dependencies(Telegram compile_shaders)
     message(STATUS "QSB: found ${QSB_EXECUTABLE}, will compile ${_shader_dir}/*.vert/*.frag")
 else()
-    message(STATUS "QSB: not found, using pre-compiled .qsb files")
-    nice_target_sources(Telegram ${CMAKE_CURRENT_SOURCE_DIR}
-    PRIVATE
-        shaders/shaders.qrc
-    )
+    message(STATUS "QSB: not found, shaders will not be compiled")
 endif()
