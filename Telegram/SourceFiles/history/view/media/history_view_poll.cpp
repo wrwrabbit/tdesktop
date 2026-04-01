@@ -2499,7 +2499,8 @@ void Poll::Options::updateAnswers() {
 	auto options = ranges::views::all(
 		_owner->_poll->answers
 	) | ranges::views::transform(&PollAnswer::option) | ranges::to_vector;
-	if (_owner->_flags & PollData::Flag::ShuffleAnswers) {
+	if ((_owner->_flags & PollData::Flag::ShuffleAnswers)
+		&& !(_owner->_flags & PollData::Flag::Creator)) {
 		const auto userId = _owner->_poll->session().userId();
 		const auto pollId = _owner->_poll->id;
 		ranges::sort(options, [&](const QByteArray &a, const QByteArray &b) {
@@ -2543,7 +2544,8 @@ void Poll::Options::updateAnswers() {
 		return result;
 	}) | ranges::to_vector;
 
-	if (_owner->_flags & PollData::Flag::ShuffleAnswers) {
+	if ((_owner->_flags & PollData::Flag::ShuffleAnswers)
+		&& !(_owner->_flags & PollData::Flag::Creator)) {
 		const auto visitorId = _owner->_poll->session().userId();
 		const auto pollId = _owner->_poll->id;
 		ranges::sort(_answers, [&](const Answer &a, const Answer &b) {
