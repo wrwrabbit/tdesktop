@@ -452,7 +452,9 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout 3128a5b5879c450f686f240cc9602ad7f4a054b4
+    git checkout 4e7cec08c34155d7f38d3bd9a94f19ecadf784e6
+mac:
+    git clone https://github.com/desktop-app/qt6_highsierra_patches.git qt6_highsierra
 """)
 
 stage('msys64', """
@@ -1588,6 +1590,9 @@ else: # qt > '6'
 depends:patches/qtbase_""" + qt + """/*.patch
 mac:
     find $PWD/../patches/qtbase_$QT -type f -print0 | sort -z | xargs -0 git -C qtbase apply -v
+    if [ -d "../patches/qt6_highsierra" ]; then
+        find "$PWD/../patches/qt6_highsierra" -maxdepth 1 -name "*.patch" -print0 | sort -z | xargs -0 git -C qtbase apply -v
+    fi
     sed -i.bak 's/tqtc-//' {qtimageformats,qtsvg}/dependencies.yaml
 
     CONFIGURATIONS=-debug
@@ -1600,6 +1605,7 @@ mac:
         -opensource \
         -confirm-license \
         -static \
+        -no-framework \
         -opengl desktop \
         -no-openssl \
         -securetransport \
@@ -1607,9 +1613,12 @@ mac:
         -I "$USED_PREFIX/include" \
         -no-feature-futimens \
         -no-feature-brotli \
+        -no-feature-cxx17_filesystem \
         -platform macx-clang -- \
         -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
-        -DCMAKE_PREFIX_PATH="$USED_PREFIX"
+        -DCMAKE_PREFIX_PATH="$USED_PREFIX" \
+        -DQT_NO_HANDLE_APPLE_SINGLE_ARCH_CROSS_COMPILING=OFF \
+        -DQT_SYNC_HEADERS_AT_CONFIGURE_TIME=ON
 
     cmake --build .
     cmake --install .
