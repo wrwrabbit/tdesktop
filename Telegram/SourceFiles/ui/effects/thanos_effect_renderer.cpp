@@ -25,6 +25,7 @@ constexpr auto kQuadVertexCount = int(6);
 constexpr auto kQuadVertexStride = int(2 * sizeof(float));
 constexpr auto kComputeWorkgroupSize = int(64);
 constexpr auto kMaxPhaseDuration = 4.0f;
+constexpr auto kMaxParticleCount = uint32_t(120000);
 
 const float kQuadVertices[kQuadVertexCount * 2] = {
 	0.f, 0.f,
@@ -269,8 +270,9 @@ void ThanosEffectRenderer::render(
 		}
 	}
 
-	if (needsInit) {
+	{
 		auto *rub = rhi->nextResourceUpdateBatch();
+
 		for (auto &item : _items) {
 			if (!item.particlesInitialized) {
 				item.particlesInitialized = true;
@@ -281,41 +283,41 @@ void ThanosEffectRenderer::render(
 				uni.seed = _seedCounter++;
 				uni._pad = 0;
 				rub->updateDynamicBuffer(
-					_computeInitUniformBuffer,
+					item.computeInitUniformBuffer,
 					0,
 					sizeof(uni),
 					&uni);
 			}
+
+			ComputeUpdateUniforms updateUni;
+			updateUni.particleCountX = item.particleCountX;
+			updateUni.particleCountY = item.particleCountY;
+			updateUni.phase = item.phase;
+			updateUni.timeStep = dt * 2.0f;
+			rub->updateDynamicBuffer(
+				item.computeUpdateUniformBuffer,
+				0,
+				sizeof(updateUni),
+				&updateUni);
 		}
+
 		cb->beginComputePass(rub);
-		for (auto &item : _items) {
-			if (item.phase <= dt * 2.1f) {
-				cb->setComputePipeline(_computeInitPipeline);
-				cb->setShaderResources(item.computeInitSrb);
-				const auto count = item.particleCountX * item.particleCountY;
-				const auto groups = (count + kComputeWorkgroupSize - 1)
-					/ kComputeWorkgroupSize;
-				cb->dispatch(int(groups), 1, 1);
+
+		if (needsInit) {
+			for (auto &item : _items) {
+				if (item.phase <= dt * 2.1f) {
+					cb->setComputePipeline(_computeInitPipeline);
+					cb->setShaderResources(item.computeInitSrb);
+					const auto count =
+						item.particleCountX * item.particleCountY;
+					const auto groups =
+						(count + kComputeWorkgroupSize - 1)
+						/ kComputeWorkgroupSize;
+					cb->dispatch(int(groups), 1, 1);
+				}
 			}
 		}
-		cb->endComputePass();
-	}
 
-	{
-		auto *rub = rhi->nextResourceUpdateBatch();
-		for (auto &item : _items) {
-			ComputeUpdateUniforms uni;
-			uni.particleCountX = item.particleCountX;
-			uni.particleCountY = item.particleCountY;
-			uni.phase = item.phase;
-			uni.timeStep = dt * 2.0f;
-			rub->updateDynamicBuffer(
-				_computeUpdateUniformBuffer,
-				0,
-				sizeof(uni),
-				&uni);
-		}
-		cb->beginComputePass(rub);
 		for (auto &item : _items) {
 			if (item.phase >= kMaxPhaseDuration) {
 				continue;
@@ -327,13 +329,12 @@ void ThanosEffectRenderer::render(
 				/ kComputeWorkgroupSize;
 			cb->dispatch(int(groups), 1, 1);
 		}
+
 		cb->endComputePass();
 	}
 
 	{
-		const auto bg = QColor(0, 0, 0, 0);
-		cb->beginPass(rt, bg, { 1.0f, 0 });
-
+		auto *renderRub = rhi->nextResourceUpdateBatch();
 		for (auto &item : _items) {
 			if (item.phase >= kMaxPhaseDuration) {
 				continue;
@@ -348,14 +349,17 @@ void ThanosEffectRenderer::render(
 			uni.particleResolution[0] = item.particleCountX;
 			uni.particleResolution[1] = item.particleCountY;
 
-			auto *rub = rhi->nextResourceUpdateBatch();
-			rub->updateDynamicBuffer(
-				_renderUniformBuffer,
+			renderRub->updateDynamicBuffer(
+				item.renderUniformBuffer,
 				0,
 				sizeof(uni),
 				&uni);
-			cb->resourceUpdate(rub);
+		}
 
+		const auto bg = QColor(0, 0, 0, 0);
+		cb->beginPass(rt, bg, { 1.0f, 0 }, renderRub);
+
+		for (auto &item : _items) {
 			cb->setGraphicsPipeline(_renderPipeline);
 			cb->setShaderResources(item.renderSrb);
 			cb->setViewport({
@@ -442,11 +446,7 @@ void ThanosEffectRenderer::addPendingItems(QRhiCommandBuffer *cb) {
 	}
 	_pendingItems.clear();
 
-	if (hasUploads) {
-		cb->resourceUpdate(rub);
-	} else {
-		delete rub;
-	}
+	cb->resourceUpdate(rub);
 }
 
 ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
@@ -460,8 +460,19 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 		return result;
 	}
 
-	result.particleCountX = uint32_t(w);
-	result.particleCountY = uint32_t(h);
+	const auto totalPixels = uint32_t(w) * uint32_t(h);
+	if (totalPixels <= kMaxParticleCount) {
+		result.particleCountX = uint32_t(w);
+		result.particleCountY = uint32_t(h);
+	} else {
+		const auto aspectRatio = float(w) / float(h);
+		result.particleCountY = uint32_t(
+			std::sqrt(float(kMaxParticleCount) / aspectRatio));
+		result.particleCountX = uint32_t(
+			float(kMaxParticleCount) / float(result.particleCountY));
+		if (result.particleCountX < 1) result.particleCountX = 1;
+		if (result.particleCountY < 1) result.particleCountY = 1;
+	}
 	const auto particleCount =
 		result.particleCountX * result.particleCountY;
 
@@ -484,11 +495,25 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 	result.sampler = sampler;
 
 	auto *particleBuf = _rhi->newBuffer(
-		QRhiBuffer::Immutable,
+		QRhiBuffer::Static,
 		QRhiBuffer::VertexBuffer | QRhiBuffer::StorageBuffer,
 		particleCount * kParticleStride);
 	particleBuf->create();
 	result.particleBuffer = particleBuf;
+
+	auto *initUbo = _rhi->newBuffer(
+		QRhiBuffer::Dynamic,
+		QRhiBuffer::UniformBuffer,
+		sizeof(ComputeInitUniforms));
+	initUbo->create();
+	result.computeInitUniformBuffer = initUbo;
+
+	auto *updateUbo = _rhi->newBuffer(
+		QRhiBuffer::Dynamic,
+		QRhiBuffer::UniformBuffer,
+		sizeof(ComputeUpdateUniforms));
+	updateUbo->create();
+	result.computeUpdateUniformBuffer = updateUbo;
 
 	result.computeInitSrb = _rhi->newShaderResourceBindings();
 	result.computeInitSrb->setBindings({
@@ -499,7 +524,7 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 		QRhiShaderResourceBinding::uniformBuffer(
 			1,
 			QRhiShaderResourceBinding::ComputeStage,
-			_computeInitUniformBuffer),
+			initUbo),
 	});
 	result.computeInitSrb->create();
 
@@ -512,16 +537,23 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 		QRhiShaderResourceBinding::uniformBuffer(
 			1,
 			QRhiShaderResourceBinding::ComputeStage,
-			_computeUpdateUniformBuffer),
+			updateUbo),
 	});
 	result.computeUpdateSrb->create();
+
+	auto *renderUbo = _rhi->newBuffer(
+		QRhiBuffer::Dynamic,
+		QRhiBuffer::UniformBuffer,
+		sizeof(RenderUniforms));
+	renderUbo->create();
+	result.renderUniformBuffer = renderUbo;
 
 	result.renderSrb = _rhi->newShaderResourceBindings();
 	result.renderSrb->setBindings({
 		QRhiShaderResourceBinding::uniformBuffer(
 			0,
 			QRhiShaderResourceBinding::VertexStage,
-			_renderUniformBuffer),
+			renderUbo),
 		QRhiShaderResourceBinding::sampledTexture(
 			1,
 			QRhiShaderResourceBinding::FragmentStage,
@@ -537,6 +569,9 @@ void ThanosEffectRenderer::destroyAnimatingItem(AnimatingItem &item) {
 	delete item.renderSrb;
 	delete item.computeUpdateSrb;
 	delete item.computeInitSrb;
+	delete item.renderUniformBuffer;
+	delete item.computeUpdateUniformBuffer;
+	delete item.computeInitUniformBuffer;
 	delete item.particleBuffer;
 	delete item.sampler;
 	delete item.texture;

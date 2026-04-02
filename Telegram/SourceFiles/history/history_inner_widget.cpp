@@ -4173,8 +4173,12 @@ void HistoryInner::captureViewForThanosEffect(
 	if (!Ui::ThanosEffect::Supported()) {
 		return;
 	}
-	if (view->data()->history() != _history
-		&& view->data()->history() != _migrated) {
+	const auto item = view->data();
+	if (item->history() != _history
+		&& item->history() != _migrated) {
+		return;
+	}
+	if (!item->isRegular() || item->isService()) {
 		return;
 	}
 	const auto top = itemTop(view);
@@ -4186,16 +4190,16 @@ void HistoryInner::captureViewForThanosEffect(
 	if (viewWidth <= 0 || viewHeight <= 0) {
 		return;
 	}
+	const auto visibleHeight = _visibleAreaBottom - _visibleAreaTop;
 	const auto screenTop = top - _visibleAreaTop;
-	if (screenTop + viewHeight <= 0
-		|| screenTop >= (_visibleAreaBottom - _visibleAreaTop)) {
+	if (screenTop + viewHeight <= 0 || screenTop >= visibleHeight) {
 		return;
 	}
 
 	const auto dpr = style::DevicePixelRatio();
 	auto image = QImage(
 		QSize(viewWidth, viewHeight) * dpr,
-		QImage::Format_ARGB32_Premultiplied);
+		QImage::Format_RGBA8888_Premultiplied);
 	image.setDevicePixelRatio(dpr);
 	image.fill(Qt::transparent);
 	{
@@ -4204,16 +4208,17 @@ void HistoryInner::captureViewForThanosEffect(
 		auto context = preparePaintContext(clip);
 		context.clip = clip;
 		context.outbg = view->hasOutLayout();
-		p.translate(0, -top);
+		context.translate(0, -top);
 		p.translate(0, top);
 		view->draw(p, context);
 	}
 
 	if (!_thanosEffect) {
-		_thanosEffect = std::make_unique<Ui::ThanosEffect>(this);
+		_thanosEffect = std::make_unique<Ui::ThanosEffect>(
+			_scroll.get());
 	}
-	_thanosEffect->setGeometry(
-		QRect(0, 0, viewWidth, _visibleAreaBottom - _visibleAreaTop));
+	const auto scrollRect = QRect(0, 0, viewWidth, visibleHeight);
+	_thanosEffect->setGeometry(scrollRect);
 	_thanosEffect->raise();
 	_thanosEffect->addItem(
 		std::move(image),

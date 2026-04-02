@@ -22,7 +22,7 @@ class ThanosEffectRenderer;
 
 class ThanosEffect final {
 public:
-	explicit ThanosEffect(not_null<RpWidget*> parent);
+	explicit ThanosEffect(not_null<QWidget*> parent);
 	~ThanosEffect();
 
 	void addItem(QImage snapshot, QRect rect);
@@ -38,10 +38,12 @@ public:
 
 private:
 	void ensureSurface();
+	void showSurface();
+	void hideSurface();
 	void startUpdateTimer();
 	void stopUpdateTimer();
 
-	const not_null<RpWidget*> _parent;
+	const not_null<QWidget*> _parent;
 
 	std::unique_ptr<RpWidgetWrap> _surface;
 	[[maybe_unused]] ThanosEffectRenderer *_renderer = nullptr;

@@ -67,6 +67,9 @@ private:
 		QRhiTexture *texture = nullptr;
 		QRhiSampler *sampler = nullptr;
 		QRhiBuffer *particleBuffer = nullptr;
+		QRhiBuffer *computeInitUniformBuffer = nullptr;
+		QRhiBuffer *computeUpdateUniformBuffer = nullptr;
+		QRhiBuffer *renderUniformBuffer = nullptr;
 		QRhiShaderResourceBindings *computeInitSrb = nullptr;
 		QRhiShaderResourceBindings *computeUpdateSrb = nullptr;
 		QRhiShaderResourceBindings *renderSrb = nullptr;

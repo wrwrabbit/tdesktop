@@ -29,7 +29,7 @@ bool ThanosEffect::Supported() {
 #endif
 }
 
-ThanosEffect::ThanosEffect(not_null<RpWidget*> parent)
+ThanosEffect::ThanosEffect(not_null<QWidget*> parent)
 : _parent(parent) {
 }
 
@@ -47,8 +47,10 @@ void ThanosEffect::ensureSurface() {
 	_renderer = renderer.get();
 
 	_renderer->allDone() | rpl::on_next([=] {
-		stopUpdateTimer();
-		_allDone.fire({});
+		crl::on_main(_parent, [=] {
+			hideSurface();
+			_allDone.fire({});
+		});
 	}, _lifetime);
 
 	_surface = GL::CreateSurface(
@@ -59,11 +61,28 @@ void ThanosEffect::ensureSurface() {
 		});
 
 	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
+		w->setAttribute(Qt::WA_TransparentForMouseEvents);
+		w->setAttribute(Qt::WA_AlwaysStackOnTop);
+		w->setGeometry(_parent->rect());
+		w->hide();
+	}
+#endif
+}
+
+void ThanosEffect::showSurface() {
+	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
 		w->setGeometry(_parent->rect());
 		w->show();
 		w->raise();
+		startUpdateTimer();
 	}
-#endif
+}
+
+void ThanosEffect::hideSurface() {
+	stopUpdateTimer();
+	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
+		w->hide();
+	}
 }
 
 void ThanosEffect::addItem(QImage snapshot, QRect rect) {
@@ -73,12 +92,16 @@ void ThanosEffect::addItem(QImage snapshot, QRect rect) {
 		return;
 	}
 
+	const auto wasAnimating = _renderer->hasActiveItems();
+
 	_renderer->addItem({
 		.snapshot = std::move(snapshot),
 		.rect = QRectF(rect),
 	});
 
-	startUpdateTimer();
+	if (!wasAnimating) {
+		showSurface();
+	}
 #endif
 }
 
@@ -96,7 +119,9 @@ rpl::producer<> ThanosEffect::allDone() const {
 
 void ThanosEffect::setGeometry(QRect rect) {
 	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
-		w->setGeometry(rect);
+		if (w->isVisible()) {
+			w->setGeometry(rect);
+		}
 	}
 }
 
