@@ -106,7 +106,12 @@ settingsPremiumIconEffects: icon {{ "settings/premium/effects", settingsIconFg }
 settingsPremiumIconChecklist: icon {{ "settings/premium/checklist", settingsIconFg }};
 settingsPremiumIconPeerColors: icon {{ "settings/premium/peer_colors-24x24", settingsIconFg }};
 settingsPremiumIconNoForwards: icon {{ "menu/share_off-24x24", settingsIconFg }};
-settingsPremiumIconAiCompose: icon {{ "menu/edit_stars", settingsIconFg }};
+settingsPremiumIconAiCompose: icon{
+	{ size(24px, 24px), transparent },
+	{ "chat/ai_letters-20x20", settingsIconFg, point(2px, 2px) },
+	{ "chat/ai_star1-20x20", settingsIconFg, point(2px, 2px) },
+	{ "chat/ai_star2-20x20", settingsIconFg, point(2px, 2px) },
+};
 
 settingsStoriesIconOrder: icon {{ "settings/premium/stories_order", premiumButtonBg1 }};
 settingsStoriesIconStealth: icon {{ "menu/stealth", premiumButtonBg1 }};

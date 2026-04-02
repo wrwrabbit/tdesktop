@@ -459,7 +459,6 @@ using Order = std::vector<QString>;
 				tr::lng_premium_summary_subtitle_todo_lists(),
 				tr::lng_premium_summary_about_todo_lists(),
 				PremiumFeature::TodoLists,
-				true,
 			},
 		},
 		{
@@ -478,6 +477,7 @@ using Order = std::vector<QString>;
 				tr::lng_premium_summary_subtitle_ai_compose(),
 				tr::lng_premium_summary_about_ai_compose(),
 				PremiumFeature::AiCompose,
+				true,
 			},
 		},
 	};
