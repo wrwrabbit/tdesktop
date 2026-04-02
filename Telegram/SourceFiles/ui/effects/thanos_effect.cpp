@@ -71,10 +71,15 @@ void ThanosEffect::ensureSurface() {
 
 void ThanosEffect::showSurface() {
 	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
-		w->setGeometry(_parent->rect());
+		const auto r = _parent->rect();
+		LOG(("ThanosEffect: showSurface, parent rect=%1,%2 %3x%4")
+			.arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height()));
+		w->setGeometry(r);
 		w->show();
 		w->raise();
 		startUpdateTimer();
+	} else {
+		LOG(("ThanosEffect: showSurface FAILED, no widget"));
 	}
 }
 

@@ -4208,10 +4208,16 @@ void HistoryInner::captureViewForThanosEffect(
 		auto context = preparePaintContext(clip);
 		context.clip = clip;
 		context.outbg = view->hasOutLayout();
-		context.translate(0, -top);
-		p.translate(0, top);
 		view->draw(p, context);
 	}
+
+	LOG(("ThanosEffect: captured view %1x%2, screenTop=%3, "
+		"image null=%4, allTransparent=%5")
+		.arg(viewWidth)
+		.arg(viewHeight)
+		.arg(screenTop)
+		.arg(image.isNull())
+		.arg(image.pixelColor(viewWidth / 2, viewHeight / 2).alpha() == 0));
 
 	if (!_thanosEffect) {
 		_thanosEffect = std::make_unique<Ui::ThanosEffect>(

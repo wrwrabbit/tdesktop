@@ -257,6 +257,10 @@ void ThanosEffectRenderer::render(
 		return;
 	}
 
+	LOG(("ThanosEffect render: %1 items, phase=%2")
+		.arg(_items.size())
+		.arg(_items.front().phase));
+
 	const auto pixelSize = rt->pixelSize();
 	const auto factor = style::DevicePixelRatio();
 	const auto viewW = float(pixelSize.width()) / factor;
