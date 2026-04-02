@@ -1375,12 +1375,32 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 		auto iItem = (_curHistory == _history ? _curItem : 0);
 		auto view = block->messages[iItem].get();
 		auto top = htop + block->y() + view->y();
+
+		auto collapseShift = 0;
+		if (_collapseGapHeight > 0 && _collapseGapAbsY >= 0) {
+			const auto gapAbsY = _collapseGapAbsY;
+			if (top >= gapAbsY) {
+				collapseShift = _collapseGapHeight;
+				top += collapseShift;
+			}
+		}
+
 		context.clip = clip.intersected(
 			QRect(0, hdrawtop, width(), clip.top() + clip.height()));
 		context.translate(0, -top);
 		p.translate(0, top);
 		const auto &sendingAnimation = _controller->sendingAnimation();
 		while (top < drawToY) {
+			if (!collapseShift
+				&& _collapseGapHeight > 0
+				&& _collapseGapAbsY >= 0
+				&& top >= _collapseGapAbsY) {
+				collapseShift = _collapseGapHeight;
+				top += collapseShift;
+				context.translate(0, -collapseShift);
+				p.translate(0, collapseShift);
+			}
+
 			const auto height = view->height();
 			const auto item = view->data();
 			if ((context.clip.y() < height)
@@ -4081,12 +4101,12 @@ void HistoryInner::setItemsRevealHeight(int revealHeight) {
 	_revealHeight = revealHeight;
 }
 
-void HistoryInner::changeCollapseHeight(int collapseHeight) {
-	if (_collapseHeight == collapseHeight) {
-		return;
+void HistoryInner::setCollapseGap(int absY, int height) {
+	_collapseGapAbsY = absY;
+	if (_collapseGapHeight != height) {
+		_collapseGapHeight = height;
+		updateSize();
 	}
-	_collapseHeight = collapseHeight;
-	updateSize();
 }
 
 void HistoryInner::changeItemsRevealHeight(int revealHeight) {
@@ -4099,7 +4119,7 @@ void HistoryInner::changeItemsRevealHeight(int revealHeight) {
 
 void HistoryInner::updateSize() {
 	const auto visibleHeight = _scroll->height();
-	const auto itemsHeight = historyHeight() - _revealHeight + _collapseHeight;
+	const auto itemsHeight = historyHeight() - _revealHeight + _collapseGapHeight;
 	const auto aboutAboveHistory = _aboutView && _aboutView->aboveHistory();
 	const auto aboutBelowHistory = _aboutView && !aboutAboveHistory;
 	auto newHistoryMarginBottom = st::historyPaddingBottom;
@@ -4235,7 +4255,7 @@ void HistoryInner::captureViewForThanosEffect(
 		std::move(image),
 		QRect(globalPos, QSize(viewWidth, viewHeight)));
 
-	_widget->startCollapseAnimation(viewHeight);
+	_widget->startCollapseAnimation(viewHeight, top);
 }
 
 HistoryInner::~HistoryInner() {

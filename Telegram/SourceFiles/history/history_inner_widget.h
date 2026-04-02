@@ -613,11 +613,12 @@ private:
 	void captureViewForThanosEffect(not_null<const Element*> view);
 
 public:
-	void changeCollapseHeight(int collapseHeight);
+	void setCollapseGap(int absY, int height);
 
 private:
 	std::unique_ptr<Ui::ThanosEffect> _thanosEffect;
-	int _collapseHeight = 0;
+	int _collapseGapAbsY = -1;
+	int _collapseGapHeight = 0;
 
 };
 

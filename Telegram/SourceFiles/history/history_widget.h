@@ -339,7 +339,7 @@ protected:
 	void mouseMoveEvent(QMouseEvent *e) override;
 
 public:
-	void startCollapseAnimation(int height);
+	void startCollapseAnimation(int height, int itemTop);
 
 private:
 	using TabbedPanel = ChatHelpers::TabbedPanel;
@@ -951,6 +951,7 @@ private:
 	};
 	std::optional<CollapseAnimation> _collapseAnimation;
 	int _collapseHeight = 0;
+	int _collapseItemTop = -1;
 	void collapseAnimationCallback();
 
 	bool _sponsoredMessagesStateKnown = false;
