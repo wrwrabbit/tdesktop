@@ -3364,7 +3364,7 @@ void Poll::Options::paintRadio(
 	const auto over = ClickHandler::showAsActive(answer.handler);
 	const auto &regular = stm->msgDateFg;
 
-	const auto chosen = answer.chosen && !_owner->showVotes();
+	const auto chosen = answer.chosen;
 	const auto checkmark = chosen
 		? 1.
 		: answer.selectedAnimation.value(answer.selected ? 1. : 0.);
