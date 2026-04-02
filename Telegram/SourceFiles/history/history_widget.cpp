@@ -6515,6 +6515,7 @@ void HistoryWidget::fieldResized() {
 void HistoryWidget::fieldFocused() {
 	if (_list) {
 		_list->clearSelected(true);
+		_list->hideElementOverlay();
 	}
 }
 

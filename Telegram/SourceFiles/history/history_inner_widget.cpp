@@ -4331,6 +4331,12 @@ void HistoryInner::elementSubmitAddPollOption(FullMsgId context) {
 	}
 }
 
+void HistoryInner::hideElementOverlay() {
+	if (_overlayHost) {
+		_overlayHost->hide();
+	}
+}
+
 void HistoryInner::elementOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) {
