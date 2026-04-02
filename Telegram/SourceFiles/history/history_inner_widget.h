@@ -611,7 +611,13 @@ private:
 	std::unique_ptr<HistoryView::ElementOverlayHost> _overlayHost;
 
 	void captureViewForThanosEffect(not_null<const Element*> view);
+
+public:
+	void changeCollapseHeight(int collapseHeight);
+
+private:
 	std::unique_ptr<Ui::ThanosEffect> _thanosEffect;
+	int _collapseHeight = 0;
 
 };
 

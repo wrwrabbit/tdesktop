@@ -338,6 +338,9 @@ protected:
 	void mouseReleaseEvent(QMouseEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
 
+public:
+	void startCollapseAnimation(int height);
+
 private:
 	using TabbedPanel = ChatHelpers::TabbedPanel;
 	using TabbedSelector = ChatHelpers::TabbedSelector;
@@ -941,6 +944,14 @@ private:
 		not_null<HistoryItem*>,
 		ItemRevealAnimation> _itemRevealAnimations;
 	int _itemsRevealHeight = 0;
+
+	struct CollapseAnimation {
+		Ui::Animations::Simple animation;
+		int startHeight = 0;
+	};
+	std::optional<CollapseAnimation> _collapseAnimation;
+	int _collapseHeight = 0;
+	void collapseAnimationCallback();
 
 	bool _sponsoredMessagesStateKnown = false;
 	bool _justMarkingAsRead = false;

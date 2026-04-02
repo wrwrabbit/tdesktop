@@ -7558,6 +7558,53 @@ void HistoryWidget::startItemRevealAnimations() {
 	}
 }
 
+void HistoryWidget::startCollapseAnimation(int height) {
+	if (height <= 0 || !_list) {
+		return;
+	}
+	_collapseHeight = height;
+	_list->changeCollapseHeight(_collapseHeight);
+
+	const auto scrollTop = _scroll->scrollTop();
+	synteticScrollToY(scrollTop + height);
+
+	_collapseAnimation.emplace();
+	_collapseAnimation->startHeight = height;
+	_collapseAnimation->animation.start(
+		[=] { collapseAnimationCallback(); },
+		0.,
+		1.,
+		500,
+		anim::easeOutCirc);
+}
+
+void HistoryWidget::collapseAnimationCallback() {
+	if (!_collapseAnimation) {
+		return;
+	}
+	const auto value = _collapseAnimation->animation.value(1.);
+	const auto newHeight = anim::interpolate(
+		_collapseAnimation->startHeight,
+		0,
+		value);
+
+	if (_collapseHeight != newHeight) {
+		const auto scrollTop = _scroll->scrollTop();
+		const auto delta = _collapseHeight - newHeight;
+
+		_collapseHeight = newHeight;
+		if (_list) {
+			_list->changeCollapseHeight(_collapseHeight);
+		}
+
+		synteticScrollToY(std::max(scrollTop - delta, 0));
+	}
+
+	if (!_collapseAnimation->animation.animating()) {
+		_collapseAnimation.reset();
+	}
+}
+
 void HistoryWidget::startMessageSendingAnimation(
 		not_null<HistoryItem*> item) {
 	if (_list->elementChatMode() == HistoryView::ElementChatMode::Default
