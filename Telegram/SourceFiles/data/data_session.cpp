@@ -2182,6 +2182,16 @@ rpl::producer<not_null<const HistoryItem*>> Session::itemRemoved(
 	});
 }
 
+void Session::notifyViewAboutToBeRemoved(
+		not_null<const ViewElement*> view) {
+	_viewAboutToBeRemoved.fire_copy(view);
+}
+
+rpl::producer<not_null<const ViewElement*>>
+Session::viewAboutToBeRemoved() const {
+	return _viewAboutToBeRemoved.events();
+}
+
 void Session::notifyViewRemoved(not_null<const ViewElement*> view) {
 	_viewRemoved.fire_copy(view);
 }

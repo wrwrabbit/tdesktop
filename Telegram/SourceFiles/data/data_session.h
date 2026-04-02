@@ -427,6 +427,8 @@ public:
 	[[nodiscard]] rpl::producer<not_null<const HistoryItem*>> itemRemoved() const;
 	[[nodiscard]] rpl::producer<not_null<const HistoryItem*>> itemRemoved(
 		FullMsgId itemId) const;
+	void notifyViewAboutToBeRemoved(not_null<const ViewElement*> view);
+	[[nodiscard]] rpl::producer<not_null<const ViewElement*>> viewAboutToBeRemoved() const;
 	void notifyViewRemoved(not_null<const ViewElement*> view);
 	[[nodiscard]] rpl::producer<not_null<const ViewElement*>> viewRemoved() const;
 	void notifyHistoryCleared(not_null<const History*> history);
@@ -1171,6 +1173,7 @@ private:
 	rpl::event_stream<not_null<HistoryItem*>> _itemDataChanges;
 	rpl::event_stream<ReactionsRemoved> _reactionsRemoved;
 	rpl::event_stream<not_null<const HistoryItem*>> _itemRemoved;
+	rpl::event_stream<not_null<const ViewElement*>> _viewAboutToBeRemoved;
 	rpl::event_stream<not_null<const ViewElement*>> _viewRemoved;
 	rpl::event_stream<not_null<const ViewElement*>> _viewPaidReactionSent;
 	rpl::event_stream<not_null<Calls::GroupCall*>> _callPaidReactionSent;

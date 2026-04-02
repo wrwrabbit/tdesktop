@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rp_widget.h"
 #include "ui/controls/swipe_handler_data.h"
 #include "ui/effects/animations.h"
+#include "ui/effects/thanos_effect.h"
 #include "ui/dragging_scroll_manager.h"
 #include "ui/widgets/middle_click_autoscroll.h"
 #include "ui/widgets/tooltip.h"
@@ -608,6 +609,9 @@ private:
 
 	[[nodiscard]] HistoryView::ElementOverlayHost &ensureOverlayHost();
 	std::unique_ptr<HistoryView::ElementOverlayHost> _overlayHost;
+
+	void captureViewForThanosEffect(not_null<const Element*> view);
+	std::unique_ptr<Ui::ThanosEffect> _thanosEffect;
 
 };
 

@@ -1,0 +1,56 @@
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+#pragma once
+
+#include "base/unique_qptr.h"
+
+#include <QImage>
+
+namespace Ui {
+class RpWidget;
+class RpWidgetWrap;
+} // namespace Ui
+
+namespace Ui {
+
+class ThanosEffectRenderer;
+
+class ThanosEffect final {
+public:
+	explicit ThanosEffect(not_null<RpWidget*> parent);
+	~ThanosEffect();
+
+	void addItem(QImage snapshot, QRect rect);
+
+	[[nodiscard]] bool animating() const;
+
+	[[nodiscard]] rpl::producer<> allDone() const;
+
+	void setGeometry(QRect rect);
+	void raise();
+
+	[[nodiscard]] static bool Supported();
+
+private:
+	void ensureSurface();
+	void startUpdateTimer();
+	void stopUpdateTimer();
+
+	const not_null<RpWidget*> _parent;
+
+	std::unique_ptr<RpWidgetWrap> _surface;
+	[[maybe_unused]] ThanosEffectRenderer *_renderer = nullptr;
+
+	QTimer *_updateTimer = nullptr;
+
+	rpl::event_stream<> _allDone;
+	rpl::lifetime _lifetime;
+
+};
+
+} // namespace Ui

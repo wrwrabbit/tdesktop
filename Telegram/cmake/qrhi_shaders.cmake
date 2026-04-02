@@ -1,4 +1,4 @@
-# Compile QRhi shaders (.vert/.frag -> .qsb) at build time.
+# Compile QRhi shaders (.vert/.frag/.comp -> .qsb) at build time.
 #
 # Usage: include(cmake/qrhi_shaders.cmake)
 # Requires: target "Telegram" and function "nice_target_sources" to exist.
@@ -15,16 +15,27 @@ if (QSB_EXECUTABLE)
     set(_shader_dir "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
     set(_qsb_out_dir "${CMAKE_CURRENT_BINARY_DIR}/shaders")
     file(MAKE_DIRECTORY ${_qsb_out_dir})
-    file(GLOB _shader_sources "${_shader_dir}/*.vert" "${_shader_dir}/*.frag")
+    file(GLOB _shader_sources
+        "${_shader_dir}/*.vert"
+        "${_shader_dir}/*.frag"
+        "${_shader_dir}/*.comp")
     set(_qsb_outputs)
     set(_qrc_entries)
     foreach(_src ${_shader_sources})
         get_filename_component(_name ${_src} NAME)
+        get_filename_component(_ext ${_src} LAST_EXT)
         set(_qsb "${_qsb_out_dir}/${_name}.qsb")
+
+        if("${_ext}" STREQUAL ".comp")
+            set(_glsl_ver "310es,430")
+        else()
+            set(_glsl_ver "100es,120,150")
+        endif()
+
         add_custom_command(
             OUTPUT ${_qsb}
             COMMAND ${QSB_EXECUTABLE}
-                --glsl "100es,120,150"
+                --glsl "${_glsl_ver}"
                 --hlsl 50
                 --msl 12
                 -o ${_qsb}
@@ -45,7 +56,7 @@ if (QSB_EXECUTABLE)
         shaders.qrc
     )
     add_dependencies(Telegram compile_shaders)
-    message(STATUS "QSB: found ${QSB_EXECUTABLE}, will compile ${_shader_dir}/*.vert/*.frag")
+    message(STATUS "QSB: found ${QSB_EXECUTABLE}, will compile ${_shader_dir}/*.vert/*.frag/*.comp")
 else()
     message(STATUS "QSB: not found, shaders will not be compiled")
 endif()

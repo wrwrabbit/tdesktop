@@ -1827,6 +1827,10 @@ PRIVATE
     ui/effects/message_sending_animation_controller.h
     ui/effects/reaction_fly_animation.cpp
     ui/effects/reaction_fly_animation.h
+    ui/effects/thanos_effect.cpp
+    ui/effects/thanos_effect.h
+    ui/effects/thanos_effect_renderer.cpp
+    ui/effects/thanos_effect_renderer.h
     ui/effects/send_action_animations.cpp
     ui/effects/send_action_animations.h
     ui/image/image.cpp

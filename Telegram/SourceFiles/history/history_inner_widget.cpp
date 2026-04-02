@@ -435,6 +435,10 @@ HistoryInner::HistoryInner(
 	) | rpl::on_next(
 		[this](auto item) { itemRemoved(item); },
 		lifetime());
+	session().data().viewAboutToBeRemoved(
+	) | rpl::on_next(
+		[this](auto view) { captureViewForThanosEffect(view); },
+		lifetime());
 	session().data().viewRemoved(
 	) | rpl::on_next(
 		[this](auto view) { viewRemoved(view); },
@@ -4162,6 +4166,58 @@ void HistoryInner::leaveEventHook(QEvent *e) {
 	}
 	_mouseActive = false;
 	return RpWidget::leaveEventHook(e);
+}
+
+void HistoryInner::captureViewForThanosEffect(
+		not_null<const Element*> view) {
+	if (!Ui::ThanosEffect::Supported()) {
+		return;
+	}
+	if (view->data()->history() != _history
+		&& view->data()->history() != _migrated) {
+		return;
+	}
+	const auto top = itemTop(view);
+	if (top < 0) {
+		return;
+	}
+	const auto viewHeight = view->height();
+	const auto viewWidth = width();
+	if (viewWidth <= 0 || viewHeight <= 0) {
+		return;
+	}
+	const auto screenTop = top - _visibleAreaTop;
+	if (screenTop + viewHeight <= 0
+		|| screenTop >= (_visibleAreaBottom - _visibleAreaTop)) {
+		return;
+	}
+
+	const auto dpr = style::DevicePixelRatio();
+	auto image = QImage(
+		QSize(viewWidth, viewHeight) * dpr,
+		QImage::Format_ARGB32_Premultiplied);
+	image.setDevicePixelRatio(dpr);
+	image.fill(Qt::transparent);
+	{
+		Painter p(&image);
+		auto clip = QRect(0, 0, viewWidth, viewHeight);
+		auto context = preparePaintContext(clip);
+		context.clip = clip;
+		context.outbg = view->hasOutLayout();
+		p.translate(0, -top);
+		p.translate(0, top);
+		view->draw(p, context);
+	}
+
+	if (!_thanosEffect) {
+		_thanosEffect = std::make_unique<Ui::ThanosEffect>(this);
+	}
+	_thanosEffect->setGeometry(
+		QRect(0, 0, viewWidth, _visibleAreaBottom - _visibleAreaTop));
+	_thanosEffect->raise();
+	_thanosEffect->addItem(
+		std::move(image),
+		QRect(0, screenTop, viewWidth, viewHeight));
 }
 
 HistoryInner::~HistoryInner() {
