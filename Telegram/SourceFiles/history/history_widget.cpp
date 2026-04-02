@@ -7559,6 +7559,10 @@ void HistoryWidget::startItemRevealAnimations() {
 }
 
 void HistoryWidget::startCollapseAnimation(int height, int itemTop) {
+	constexpr auto kBaseMs = 400;
+	constexpr auto kPerPixelMs = 0.5;
+	constexpr auto kMaxMs = 1200;
+
 	if (height <= 0 || !_list) {
 		return;
 	}
@@ -7568,6 +7572,29 @@ void HistoryWidget::startCollapseAnimation(int height, int itemTop) {
 	const auto itemBottom = itemTop + height;
 
 	if (itemBottom >= scrollBottom) {
+		return;
+	}
+
+	const auto computeDuration = [](int gapHeight) {
+		return int(std::clamp(
+			kBaseMs + gapHeight * kPerPixelMs,
+			double(kBaseMs),
+			double(kMaxMs)));
+	};
+
+	if (_collapseAnimation && _collapseAnimation->animation.animating()) {
+		const auto gapTop = std::min(_collapseItemTop, itemTop);
+		_collapseHeight += height;
+		_collapseItemTop = gapTop;
+		_collapseAnimation->startHeight = _collapseHeight;
+		_list->setCollapseGap(gapTop, _collapseHeight);
+		synteticScrollToY(scrollTop + height);
+		_collapseAnimation->animation.start(
+			[=] { collapseAnimationCallback(); },
+			0.,
+			1.,
+			computeDuration(_collapseHeight),
+			anim::easeOutCirc);
 		return;
 	}
 
@@ -7582,7 +7609,7 @@ void HistoryWidget::startCollapseAnimation(int height, int itemTop) {
 		[=] { collapseAnimationCallback(); },
 		0.,
 		1.,
-		500,
+		computeDuration(height),
 		anim::easeOutCirc);
 }
 
