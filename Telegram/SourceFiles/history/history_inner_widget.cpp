@@ -4250,7 +4250,13 @@ void HistoryInner::captureViewForThanosEffect(
 	_thanosEffect->setGeometry(QRect(QPoint(), topLevel->size()));
 	_thanosEffect->raise();
 
-	const auto globalPos = _scroll->mapTo(topLevel, QPoint(0, screenTop));
+	const auto gapOffset = (_collapseGapAbsY >= 0 && top >= _collapseGapAbsY)
+		? _collapseGapHeight
+		: 0;
+	const auto adjustedScreenTop = screenTop + gapOffset;
+	const auto globalPos = _scroll->mapTo(
+		topLevel,
+		QPoint(0, adjustedScreenTop));
 	_thanosEffect->addItem(
 		std::move(image),
 		QRect(globalPos, QSize(viewWidth, viewHeight)));
