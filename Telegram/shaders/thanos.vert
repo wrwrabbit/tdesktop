@@ -35,5 +35,5 @@ void main() {
 
 	gl_Position = vec4(ndc, 0.0, 1.0);
 
-	v_alpha = clamp(inLifetime / 0.3, 0.0, 1.0);
+	v_alpha = clamp(inLifetime / 0.6, 0.0, 1.0);
 }

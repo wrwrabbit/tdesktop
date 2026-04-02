@@ -4211,24 +4211,22 @@ void HistoryInner::captureViewForThanosEffect(
 		view->draw(p, context);
 	}
 
-	LOG(("ThanosEffect: captured view %1x%2, screenTop=%3, "
-		"image null=%4, allTransparent=%5")
-		.arg(viewWidth)
-		.arg(viewHeight)
-		.arg(screenTop)
-		.arg(image.isNull())
-		.arg(image.pixelColor(viewWidth / 2, viewHeight / 2).alpha() == 0));
+	const auto topLevel = window();
+	if (!topLevel) {
+		return;
+	}
 
 	if (!_thanosEffect) {
-		_thanosEffect = std::make_unique<Ui::ThanosEffect>(
-			_scroll.get());
+		_thanosEffect = std::make_unique<Ui::ThanosEffect>(topLevel);
 	}
-	const auto scrollRect = QRect(0, 0, viewWidth, visibleHeight);
-	_thanosEffect->setGeometry(scrollRect);
+	_thanosEffect->setGeometry(QRect(QPoint(), topLevel->size()));
 	_thanosEffect->raise();
+
+	const auto localPos = QPoint(0, screenTop + _visibleAreaTop);
+	const auto globalPos = mapTo(topLevel, localPos);
 	_thanosEffect->addItem(
 		std::move(image),
-		QRect(0, screenTop, viewWidth, viewHeight));
+		QRect(globalPos, QSize(viewWidth, viewHeight)));
 }
 
 HistoryInner::~HistoryInner() {

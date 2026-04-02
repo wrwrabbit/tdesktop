@@ -24,7 +24,9 @@ constexpr auto kParticleStride = int(24);
 constexpr auto kQuadVertexCount = int(6);
 constexpr auto kQuadVertexStride = int(2 * sizeof(float));
 constexpr auto kComputeWorkgroupSize = int(64);
-constexpr auto kMaxPhaseDuration = 4.0f;
+constexpr auto kMaxPhaseDuration = 6.0f;
+constexpr auto kPhaseSpeed = 1.0f;
+constexpr auto kTimeStepMultiplier = 1.0f;
 constexpr auto kMaxParticleCount = uint32_t(120000);
 
 const float kQuadVertices[kQuadVertexCount * 2] = {
@@ -257,10 +259,6 @@ void ThanosEffectRenderer::render(
 		return;
 	}
 
-	LOG(("ThanosEffect render: %1 items, phase=%2")
-		.arg(_items.size())
-		.arg(_items.front().phase));
-
 	const auto pixelSize = rt->pixelSize();
 	const auto factor = style::DevicePixelRatio();
 	const auto viewW = float(pixelSize.width()) / factor;
@@ -268,7 +266,7 @@ void ThanosEffectRenderer::render(
 
 	bool needsInit = false;
 	for (auto &item : _items) {
-		item.phase += dt * 2.0f;
+		item.phase += dt * kPhaseSpeed;
 		if (!item.particlesInitialized) {
 			needsInit = true;
 		}
@@ -297,7 +295,7 @@ void ThanosEffectRenderer::render(
 			updateUni.particleCountX = item.particleCountX;
 			updateUni.particleCountY = item.particleCountY;
 			updateUni.phase = item.phase;
-			updateUni.timeStep = dt * 2.0f;
+			updateUni.timeStep = dt * kTimeStepMultiplier;
 			rub->updateDynamicBuffer(
 				item.computeUpdateUniformBuffer,
 				0,
@@ -309,7 +307,7 @@ void ThanosEffectRenderer::render(
 
 		if (needsInit) {
 			for (auto &item : _items) {
-				if (item.phase <= dt * 2.1f) {
+				if (item.phase <= dt * kPhaseSpeed * 1.1f) {
 					cb->setComputePipeline(_computeInitPipeline);
 					cb->setShaderResources(item.computeInitSrb);
 					const auto count =

@@ -43,12 +43,12 @@ void main() {
 	uint s = gid * 3u + seed;
 
 	float direction = hashFloat(s) * (3.14159265 * 2.0);
-	float speed = (0.1 + hashFloat(s + 1u) * 0.1) * 420.0;
+	float speed = (0.1 + hashFloat(s + 1u) * 0.1) * 320.0;
 
 	Particle p;
 	p.offset = vec2(0.0, 0.0);
 	p.velocity = vec2(cos(direction) * speed, sin(direction) * speed);
-	p.lifetime = 0.7 + hashFloat(s + 2u) * 0.8;
+	p.lifetime = 1.5 + hashFloat(s + 2u) * 1.5;
 	p._pad = 0.0;
 
 	particles[gid] = p;

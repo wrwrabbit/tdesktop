@@ -46,8 +46,8 @@ void main() {
 	Particle p = particles[gid];
 
 	p.offset += p.velocity * timeStep * particleFraction;
-	p.velocity.y += 120.0 * timeStep * particleFraction;
-	p.lifetime = max(0.0, p.lifetime - timeStep * particleFraction);
+	p.velocity.y += 80.0 * timeStep * particleFraction;
+	p.lifetime = max(0.0, p.lifetime - 0.6 * timeStep * particleFraction);
 
 	particles[gid] = p;
 }
