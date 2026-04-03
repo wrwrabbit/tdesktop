@@ -84,7 +84,7 @@ void AiTooltipManager::updateGeometry() {
 			+ geometry.width()
 			- size.width();
 		return QPoint(
-			std::clamp(left, 0, maxWidth - size.width()),
+			std::max(std::min(left, maxWidth - size.width()), 0),
 			geometry.y() - size.height() - st::historyAiComposeTooltipSkip);
 	};
 	_tooltip->pointAt(geometry, RectPart::Top, countPosition);
