@@ -572,14 +572,18 @@ public:
 	}
 	[[nodiscard]] float64 voicePlaybackSpeed(
 			bool lastNonDefault = false) const {
-		return (_voicePlaybackSpeed.enabled || lastNonDefault)
-			? _voicePlaybackSpeed.value
-			: 1.;
+		const auto &s = _voicePlaybackSpeed.current();
+		return (s.enabled || lastNonDefault) ? s.value : 1.;
 	}
 	void setVoicePlaybackSpeed(float64 speed) {
-		if ((_voicePlaybackSpeed.enabled = !Media::EqualSpeeds(speed, 1.0))) {
-			_voicePlaybackSpeed.value = speed;
-		}
+		const auto enabled = !Media::EqualSpeeds(speed, 1.0);
+		_voicePlaybackSpeed = PlaybackSpeed{
+			.value = enabled ? speed : _voicePlaybackSpeed.current().value,
+			.enabled = enabled,
+		};
+	}
+	[[nodiscard]] auto voicePlaybackSpeedChanges() const {
+		return _voicePlaybackSpeed.changes();
 	}
 
 	// For legacy values read-write outside of Settings.
@@ -987,6 +991,10 @@ public:
 	struct PlaybackSpeed {
 		float64 value = Media::kSpedUpDefault;
 		bool enabled = false;
+
+		friend bool operator==(
+			const PlaybackSpeed &,
+			const PlaybackSpeed &) = default;
 	};
 	[[nodiscard]] static qint32 SerializePlaybackSpeed(PlaybackSpeed speed);
 	[[nodiscard]] static PlaybackSpeed DeserializePlaybackSpeed(
@@ -1095,7 +1103,7 @@ private:
 	rpl::variable<bool> _cornerReaction = true;
 	rpl::variable<bool> _spellcheckerEnabled = true;
 	PlaybackSpeed _videoPlaybackSpeed;
-	PlaybackSpeed _voicePlaybackSpeed;
+	rpl::variable<PlaybackSpeed> _voicePlaybackSpeed;
 	QByteArray _videoPipGeometry;
 	rpl::variable<std::vector<int>> _dictionariesEnabled;
 	rpl::variable<bool> _autoDownloadDictionaries = true;

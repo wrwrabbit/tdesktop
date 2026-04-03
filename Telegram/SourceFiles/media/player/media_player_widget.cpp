@@ -163,6 +163,11 @@ Widget::Widget(
 		instance()->updateVoicePlaybackSpeed();
 	}, lifetime());
 
+	Core::App().settings().voicePlaybackSpeedChanges(
+	) | rpl::on_next([=] {
+		_speedController->reloadFromLookup();
+	}, lifetime());
+
 	instance()->trackChanged(
 	) | rpl::filter([=](AudioMsgId::Type type) {
 		return (type == _type);
