@@ -370,6 +370,9 @@ ColorPicker::ColorPicker(
 	_parent->sizeValue(
 	) | rpl::on_next([=](const QSize &size) {
 		moveSizeControl(size);
+		if (_paletteVisible) {
+			rebuildPalette();
+		}
 	}, _sizeControl->lifetime());
 
 	_sizeControlHoverArea->events(
@@ -635,6 +638,23 @@ void ColorPicker::rebuildPalette() {
 	}
 	if (!hasCurrent) {
 		colors.push_back(_brush.color);
+
+		const auto &padding = st::photoEditorButtonBarPadding;
+		const auto size = st::photoEditorColorPaletteItemSize;
+		const auto gap = st::photoEditorColorPaletteGap;
+		const auto barWidth = std::min(
+				st::photoEditorButtonBarWidth,
+				_parent->width())
+			- rect::m::sum::h(padding)
+			- st::photoEditorUndoButton.width
+			- st::photoEditorRedoButton.width;
+		const auto count = int(colors.size());
+		const auto paletteWidth = count * size
+			+ (count - 1) * gap
+			+ (gap + size);
+		if (paletteWidth > barWidth && colors.size() > 2) {
+			colors.erase(colors.end() - 2);
+		}
 	}
 
 	auto index = uint8(0);
