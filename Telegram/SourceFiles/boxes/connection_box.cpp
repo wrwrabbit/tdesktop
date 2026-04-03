@@ -38,7 +38,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/popup_menu.h"
-#include "ui/controls/table_rows.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/table_layout.h"
 #include "ui/wrap/vertical_layout.h"
@@ -49,7 +48,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
-#include "styles/style_giveaway.h"
 #include "styles/style_info.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
@@ -1355,99 +1353,96 @@ void ProxyBox::addLabel(
 		st::proxyEditTitlePadding);
 }
 
-struct ProxyChecker {
-	using Checker = MTP::details::ConnectionPointer;
+using Connection = MTP::details::AbstractConnection;
+using Checker = MTP::details::ConnectionPointer;
 
-	Checker v4;
-	Checker v6;
+void ResetProxyCheckers(Checker &v4, Checker &v6) {
+	v4 = nullptr;
+	v6 = nullptr;
+}
 
-	void start(
-			not_null<MTP::Instance*> mtproto,
-			const ProxyData &proxy,
-			Fn<void(int ping)> done,
-			Fn<void()> fail) {
-		using Connection = MTP::details::AbstractConnection;
-		using Variants = MTP::DcOptions::Variants;
-
+void DropProxyChecker(Checker &v4, Checker &v6, not_null<Connection*> raw) {
+	if (v4.get() == raw) {
 		v4 = nullptr;
+	} else if (v6.get() == raw) {
 		v6 = nullptr;
-		const auto connType = (proxy.type == ProxyData::Type::Http)
-			? Variants::Http
-			: Variants::Tcp;
-		const auto dcId = mtproto->mainDcId();
-		const auto setup = [&](
-				Checker &checker,
-				const bytes::vector &secret) {
-			checker = Connection::Create(
-				mtproto,
-				connType,
-				QThread::currentThread(),
-				secret,
-				proxy);
-			const auto raw = checker.get();
-			raw->connect(raw, &Connection::connected, [=] {
-				const auto ping = raw->pingTime();
-				v4 = nullptr;
-				v6 = nullptr;
-				if (done) {
-					done(ping);
-				}
-			});
-			const auto failed = [=] {
-				if (v4.get() == raw) {
-					v4 = nullptr;
-				} else if (v6.get() == raw) {
-					v6 = nullptr;
-				}
-				if (!v4 && !v6 && fail) {
-					fail();
-				}
-			};
-			raw->connect(raw, &Connection::disconnected, failed);
-			raw->connect(raw, &Connection::error, failed);
-		};
-		if (proxy.type == ProxyData::Type::Mtproto) {
-			const auto secret = proxy.secretFromMtprotoPassword();
-			setup(v4, secret);
-			v4->connectToServer(
-				proxy.host,
-				proxy.port,
-				secret,
-				dcId,
-				false);
-		} else {
-			const auto options = mtproto->dcOptions().lookup(
-				dcId,
-				MTP::DcType::Regular,
-				true);
-			const auto tryConnect = [&](
-					Checker &checker,
-					Variants::Address address) {
-				const auto &list = options.data[address][connType];
-				if (list.empty()
-					|| ((address == Variants::IPv6)
-						&& !Core::App().settings().proxy()
-							.tryIPv6())) {
-					checker = nullptr;
-					return;
-				}
-				const auto &endpoint = list.front();
-				setup(checker, endpoint.secret);
-				checker->connectToServer(
-					QString::fromStdString(endpoint.ip),
-					endpoint.port,
-					endpoint.secret,
-					dcId,
-					false);
-			};
-			tryConnect(v4, Variants::IPv4);
-			tryConnect(v6, Variants::IPv6);
-			if (!v4 && !v6 && fail) {
-				fail();
-			}
-		}
 	}
-};
+}
+
+[[nodiscard]] bool HasProxyCheckers(const Checker &v4, const Checker &v6) {
+	return v4 || v6;
+}
+
+void StartProxyCheck(
+		not_null<MTP::Instance*> mtproto,
+		const ProxyData &proxy,
+		Checker &v4,
+		Checker &v6,
+		Fn<void(Connection *raw, int ping)> done,
+		Fn<void(Connection *raw)> fail) {
+	using Variants = MTP::DcOptions::Variants;
+
+	ResetProxyCheckers(v4, v6);
+	const auto connType = (proxy.type == ProxyData::Type::Http)
+		? Variants::Http
+		: Variants::Tcp;
+	const auto dcId = mtproto->mainDcId();
+	const auto setup = [&](Checker &checker, const bytes::vector &secret) {
+		checker = Connection::Create(
+			mtproto,
+			connType,
+			QThread::currentThread(),
+			secret,
+			proxy);
+		const auto raw = checker.get();
+		raw->connect(raw, &Connection::connected, [=] {
+			if (done) {
+				done(raw, raw->pingTime());
+			}
+		});
+		const auto failed = [=] {
+			if (fail) {
+				fail(raw);
+			}
+		};
+		raw->connect(raw, &Connection::disconnected, failed);
+		raw->connect(raw, &Connection::error, failed);
+	};
+	if (proxy.type == ProxyData::Type::Mtproto) {
+		const auto secret = proxy.secretFromMtprotoPassword();
+		setup(v4, secret);
+		v4->connectToServer(
+			proxy.host,
+			proxy.port,
+			secret,
+			dcId,
+			false);
+		return;
+	}
+	const auto options = mtproto->dcOptions().lookup(
+		dcId,
+		MTP::DcType::Regular,
+		true);
+	const auto tryConnect = [&](Checker &checker, Variants::Address address) {
+		const auto &list = options.data[address][connType];
+		if (list.empty()
+			|| ((address == Variants::IPv6)
+				&& !Core::App().settings().proxy().tryIPv6())) {
+			checker = nullptr;
+			return;
+		}
+		const auto &endpoint = list.front();
+		setup(checker, endpoint.secret);
+		checker->connectToServer(
+			QString::fromStdString(endpoint.ip),
+			endpoint.port,
+			endpoint.secret,
+			dcId,
+			false);
+	};
+	tryConnect(v4, Variants::IPv4);
+	tryConnect(v6, Variants::IPv6);
+}
 
 } // namespace
 
@@ -1522,8 +1517,20 @@ void ProxiesBoxController::ShowApplyConfirmation(
 		const auto table = box->addRow(
 			object_ptr<Ui::TableLayout>(
 				box,
-				st::giveawayGiftCodeTable),
-			st::giveawayGiftCodeTableMargin);
+				st::proxyApplyBoxTable),
+			st::proxyApplyBoxTableMargin);
+		const auto addRow = [&](
+				rpl::producer<QString> label,
+				object_ptr<Ui::RpWidget> value) {
+			table->addRow(
+				object_ptr<Ui::FlatLabel>(
+					table,
+					std::move(label),
+					table->st().defaultLabel),
+				std::move(value),
+				st::proxyApplyBoxTableLabelMargin,
+				st::proxyApplyBoxTableValueMargin);
+		};
 		const auto add = [&](
 				const QString &value,
 				rpl::producer<QString> label) {
@@ -1538,12 +1545,9 @@ void ProxiesBoxController::ShowApplyConfirmation(
 						{})),
 					(oneLine
 						? table->st().defaultValue
-						: st::giveawayGiftCodeValueMultiline),
+						: st::proxyApplyBoxValueMultiline),
 					st::defaultPopupMenu);
-				Ui::AddTableRow(
-					table,
-					std::move(label),
-					std::move(widget));
+				addRow(std::move(label), std::move(widget));
 			}
 		};
 		if (!displayServer.isEmpty()) {
@@ -1558,46 +1562,73 @@ void ProxiesBoxController::ShowApplyConfirmation(
 		}
 
 		{
-			const auto checker = box->lifetime().make_state<
-				ProxyChecker>();
-			const auto statusValue = box->lifetime().make_state<
-				rpl::variable<TextWithEntities>
-			>(Ui::Text::Link(
-				tr::lng_proxy_box_check_status(tr::now)));
-			const auto statusLabel = Ui::AddTableRow(
+			struct ProxyCheckStatusState {
+				Checker v4;
+				Checker v6;
+				rpl::variable<TextWithEntities> statusValue;
+			};
+			const auto state
+				= box->lifetime().make_state<ProxyCheckStatusState>();
+			state->statusValue = Ui::Text::Link(
+				tr::lng_proxy_box_check_status(tr::now));
+			const auto weak = base::make_weak(box);
+			auto statusWidget = object_ptr<Ui::FlatLabel>(
 				table,
-				tr::lng_proxy_box_status(),
-				statusValue->value());
+				state->statusValue.value(),
+				table->st().defaultValue,
+				st::defaultPopupMenu);
+			const auto statusLabel = statusWidget.data();
+			addRow(tr::lng_proxy_box_status(), std::move(statusWidget));
 			const auto relayout = [=] {
 				table->resizeToWidth(table->width());
 			};
-			statusLabel->setClickHandlerFilter([=](const auto &...) {
+			const auto setUnavailable = [=] {
+				state->statusValue = TextWithEntities{
+					tr::lng_proxy_box_table_unavailable(tr::now),
+				};
+				statusLabel->setTextColorOverride(
+					st::proxyRowStatusFgOffline->c);
+				relayout();
+			};
+			const auto runCheck = [=] {
 				const auto account = controller
 					? &controller->session().account()
 					: &Core::App().activeAccount();
-				*statusValue = TextWithEntities{
+				state->statusValue = TextWithEntities{
 					tr::lng_proxy_box_table_checking(tr::now),
 				};
-				statusLabel->setTextColorOverride(st::creditsBg3->c);
+				statusLabel->setTextColorOverride(st::proxyRowStatusFg->c);
 				relayout();
-				checker->start(&account->mtp(), proxy, [=](int ping) {
-					*statusValue = TextWithEntities{
-						tr::lng_proxy_box_table_available(
-							tr::now,
-							lt_ping,
-							QString::number(ping)),
-					};
-					statusLabel->setTextColorOverride(
-						st::proxyRowStatusFgAvailable->c);
-					relayout();
-				}, [=] {
-					*statusValue = TextWithEntities{
-						tr::lng_proxy_box_table_unavailable(tr::now),
-					};
-					statusLabel->setTextColorOverride(
-						st::proxyRowStatusFgOffline->c);
-					relayout();
-				});
+				StartProxyCheck(
+					&account->mtp(),
+					proxy,
+					state->v4,
+					state->v6,
+					[=](Connection *raw, int ping) {
+						DropProxyChecker(state->v4, state->v6, raw);
+						ResetProxyCheckers(state->v4, state->v6);
+						state->statusValue = TextWithEntities{
+							tr::lng_proxy_box_table_available(
+								tr::now,
+								lt_ping,
+								QString::number(ping)),
+						};
+						statusLabel->setTextColorOverride(
+							st::proxyRowStatusFgAvailable->c);
+						relayout();
+					},
+					[=](Connection *raw) {
+						DropProxyChecker(state->v4, state->v6, raw);
+						if (!HasProxyCheckers(state->v4, state->v6)) {
+							setUnavailable();
+						}
+					});
+				if (!HasProxyCheckers(state->v4, state->v6)) {
+					setUnavailable();
+				}
+			};
+			statusLabel->setClickHandlerFilter([=](const auto &...) {
+				runCheck();
 				return false;
 			});
 		}
@@ -1626,14 +1657,13 @@ void ProxiesBoxController::ShowApplyConfirmation(
 				Local::writeSettings();
 				box->closeBox();
 			});
-		box->events(
-		) | rpl::on_next([=](not_null<QEvent*> e) {
+		box->events() | rpl::on_next([=](not_null<QEvent*> e) {
 			if ((e->type() != QEvent::KeyPress) || !enableButton) {
 				return;
 			}
 			const auto k = static_cast<QKeyEvent*>(e.get());
 			if (k->key() == Qt::Key_Enter || k->key() == Qt::Key_Return) {
-				enableButton->clicked(Qt::KeyboardModifiers(), Qt::LeftButton);
+				enableButton->clicked({}, Qt::LeftButton);
 			}
 		}, box->lifetime());
 	};
@@ -1652,91 +1682,34 @@ auto ProxiesBoxController::proxySettingsValue() const
 }
 
 void ProxiesBoxController::refreshChecker(Item &item) {
-	using Variants = MTP::DcOptions::Variants;
-	const auto type = (item.data.type == Type::Http)
-		? Variants::Http
-		: Variants::Tcp;
-	const auto mtproto = &_account->mtp();
-	const auto dcId = mtproto->mainDcId();
-
 	item.state = ItemState::Checking;
 	const auto id = item.id;
-	const auto setup = [&](Checker &checker, const bytes::vector &secret) {
-		checker = MTP::details::AbstractConnection::Create(
-			mtproto,
-			type,
-			QThread::currentThread(),
-			secret,
-			item.data);
-		using Connection = MTP::details::AbstractConnection;
-		const auto pointer = checker.get();
-		pointer->connect(pointer, &Connection::connected, [=] {
+	StartProxyCheck(
+		&_account->mtp(),
+		item.data,
+		item.checker,
+		item.checkerv6,
+		[=](Connection *raw, int pingTime) {
 			const auto item = findById(id);
-			const auto pingTime = pointer->pingTime();
-			item->checker = nullptr;
-			item->checkerv6 = nullptr;
+			DropProxyChecker(item->checker, item->checkerv6, raw);
+			ResetProxyCheckers(item->checker, item->checkerv6);
 			if (item->state == ItemState::Checking) {
 				item->state = ItemState::Available;
 				item->ping = pingTime;
 				updateView(*item);
 			}
-		});
-		const auto failed = [=] {
+		},
+		[=](Connection *raw) {
 			const auto item = findById(id);
-			if (item->checker == pointer) {
-				item->checker = nullptr;
-			} else if (item->checkerv6 == pointer) {
-				item->checkerv6 = nullptr;
-			}
-			if (!item->checker
-				&& !item->checkerv6
+			DropProxyChecker(item->checker, item->checkerv6, raw);
+			if (!HasProxyCheckers(item->checker, item->checkerv6)
 				&& item->state == ItemState::Checking) {
 				item->state = ItemState::Unavailable;
 				updateView(*item);
 			}
-		};
-		pointer->connect(pointer, &Connection::disconnected, failed);
-		pointer->connect(pointer, &Connection::error, failed);
-	};
-	if (item.data.type == Type::Mtproto) {
-		const auto secret = item.data.secretFromMtprotoPassword();
-		setup(item.checker, secret);
-		item.checker->connectToServer(
-			item.data.host,
-			item.data.port,
-			secret,
-			dcId,
-			false);
-		item.checkerv6 = nullptr;
-	} else {
-		const auto options = mtproto->dcOptions().lookup(
-			dcId,
-			MTP::DcType::Regular,
-			true);
-		const auto connect = [&](
-				Checker &checker,
-				Variants::Address address) {
-			const auto &list = options.data[address][type];
-			if (list.empty()
-				|| ((address == Variants::IPv6)
-					&& !Core::App().settings().proxy().tryIPv6())) {
-				checker = nullptr;
-				return;
-			}
-			const auto &endpoint = list.front();
-			setup(checker, endpoint.secret);
-			checker->connectToServer(
-				QString::fromStdString(endpoint.ip),
-				endpoint.port,
-				endpoint.secret,
-				dcId,
-				false);
-		};
-		connect(item.checker, Variants::IPv4);
-		connect(item.checkerv6, Variants::IPv6);
-		if (!item.checker && !item.checkerv6) {
-			item.state = ItemState::Unavailable;
-		}
+		});
+	if (!HasProxyCheckers(item.checker, item.checkerv6)) {
+		item.state = ItemState::Unavailable;
 	}
 }
 
