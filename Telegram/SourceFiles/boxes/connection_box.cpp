@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/call_delayed.h"
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
+#include "base/weak_ptr.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "core/local_url_handlers.h"
@@ -1566,6 +1567,7 @@ void ProxiesBoxController::ShowApplyConfirmation(
 				Checker v4;
 				Checker v6;
 				rpl::variable<TextWithEntities> statusValue;
+				bool finished = false;
 			};
 			const auto state
 				= box->lifetime().make_state<ProxyCheckStatusState>();
@@ -1591,9 +1593,13 @@ void ProxiesBoxController::ShowApplyConfirmation(
 				relayout();
 			};
 			const auto runCheck = [=] {
+				if (!weak) {
+					return;
+				}
 				const auto account = controller
 					? &controller->session().account()
 					: &Core::App().activeAccount();
+				state->finished = false;
 				state->statusValue = TextWithEntities{
 					tr::lng_proxy_box_table_checking(tr::now),
 				};
@@ -1605,7 +1611,11 @@ void ProxiesBoxController::ShowApplyConfirmation(
 					state->v4,
 					state->v6,
 					[=](Connection *raw, int ping) {
+						if (!weak || state->finished) {
+							return;
+						}
 						DropProxyChecker(state->v4, state->v6, raw);
+						state->finished = true;
 						ResetProxyCheckers(state->v4, state->v6);
 						state->statusValue = TextWithEntities{
 							tr::lng_proxy_box_table_available(
@@ -1618,12 +1628,17 @@ void ProxiesBoxController::ShowApplyConfirmation(
 						relayout();
 					},
 					[=](Connection *raw) {
+						if (!weak || state->finished) {
+							return;
+						}
 						DropProxyChecker(state->v4, state->v6, raw);
 						if (!HasProxyCheckers(state->v4, state->v6)) {
+							state->finished = true;
 							setUnavailable();
 						}
 					});
 				if (!HasProxyCheckers(state->v4, state->v6)) {
+					state->finished = true;
 					setUnavailable();
 				}
 			};
@@ -1690,7 +1705,13 @@ void ProxiesBoxController::refreshChecker(Item &item) {
 		item.checker,
 		item.checkerv6,
 		[=](Connection *raw, int pingTime) {
-			const auto item = findById(id);
+			const auto item = ranges::find(
+				_list,
+				id,
+				[](const Item &item) { return item.id; });
+			if (item == end(_list)) {
+				return;
+			}
 			DropProxyChecker(item->checker, item->checkerv6, raw);
 			ResetProxyCheckers(item->checker, item->checkerv6);
 			if (item->state == ItemState::Checking) {
@@ -1700,7 +1721,13 @@ void ProxiesBoxController::refreshChecker(Item &item) {
 			}
 		},
 		[=](Connection *raw) {
-			const auto item = findById(id);
+			const auto item = ranges::find(
+				_list,
+				id,
+				[](const Item &item) { return item.id; });
+			if (item == end(_list)) {
+				return;
+			}
 			DropProxyChecker(item->checker, item->checkerv6, raw);
 			if (!HasProxyCheckers(item->checker, item->checkerv6)
 				&& item->state == ItemState::Checking) {
