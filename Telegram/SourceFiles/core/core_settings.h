@@ -575,6 +575,11 @@ public:
 		const auto &s = _voicePlaybackSpeed.current();
 		return (s.enabled || lastNonDefault) ? s.value : 1.;
 	}
+	[[nodiscard]] float64 audioPlaybackSpeed(
+			bool lastNonDefault = false) const {
+		const auto &s = _audioPlaybackSpeed.current();
+		return (s.enabled || lastNonDefault) ? s.value : 1.;
+	}
 	void setVoicePlaybackSpeed(float64 speed) {
 		const auto enabled = !Media::EqualSpeeds(speed, 1.0);
 		_voicePlaybackSpeed = PlaybackSpeed{
@@ -582,8 +587,18 @@ public:
 			.enabled = enabled,
 		};
 	}
+	void setAudioPlaybackSpeed(float64 speed) {
+		const auto enabled = !Media::EqualSpeeds(speed, 1.0);
+		_audioPlaybackSpeed = PlaybackSpeed{
+			.value = enabled ? speed : _audioPlaybackSpeed.current().value,
+			.enabled = enabled,
+		};
+	}
 	[[nodiscard]] auto voicePlaybackSpeedChanges() const {
 		return _voicePlaybackSpeed.changes();
+	}
+	[[nodiscard]] auto audioPlaybackSpeedChanges() const {
+		return _audioPlaybackSpeed.changes();
 	}
 
 	// For legacy values read-write outside of Settings.
@@ -1104,6 +1119,7 @@ private:
 	rpl::variable<bool> _spellcheckerEnabled = true;
 	PlaybackSpeed _videoPlaybackSpeed;
 	rpl::variable<PlaybackSpeed> _voicePlaybackSpeed;
+	rpl::variable<PlaybackSpeed> _audioPlaybackSpeed;
 	QByteArray _videoPipGeometry;
 	rpl::variable<std::vector<int>> _dictionariesEnabled;
 	rpl::variable<bool> _autoDownloadDictionaries = true;

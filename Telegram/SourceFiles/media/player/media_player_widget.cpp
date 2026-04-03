@@ -160,10 +160,12 @@ Widget::Widget(
 
 	_speedController->saved(
 	) | rpl::on_next([=] {
-		instance()->updateVoicePlaybackSpeed();
+		instance()->updatePlaybackSpeed();
 	}, lifetime());
 
-	Core::App().settings().voicePlaybackSpeedChanges(
+	rpl::merge(
+		Core::App().settings().voicePlaybackSpeedChanges() | rpl::to_empty,
+		Core::App().settings().audioPlaybackSpeedChanges() | rpl::to_empty
 	) | rpl::on_next([=] {
 		_speedController->reloadFromLookup();
 	}, lifetime());
@@ -447,11 +449,19 @@ void Widget::saveOrder(OrderMode mode) {
 }
 
 float64 Widget::speedLookup(bool lastNonDefault) const {
-	return Core::App().settings().voicePlaybackSpeed(lastNonDefault);
+	const auto &settings = Core::App().settings();
+	return (_type == AudioMsgId::Type::Song)
+		? settings.audioPlaybackSpeed(lastNonDefault)
+		: settings.voicePlaybackSpeed(lastNonDefault);
 }
 
 void Widget::saveSpeed(float64 speed) {
-	Core::App().settings().setVoicePlaybackSpeed(speed);
+	auto &settings = Core::App().settings();
+	if (_type == AudioMsgId::Type::Song) {
+		settings.setAudioPlaybackSpeed(speed);
+	} else {
+		settings.setVoicePlaybackSpeed(speed);
+	}
 	Core::App().saveSettingsDelayed();
 }
 
@@ -707,6 +717,7 @@ void Widget::handleSongChange() {
 		return;
 	}
 	_lastSongId = current;
+	_speedController->reloadFromLookup();
 
 	auto textWithEntities = TextWithEntities();
 	if (document->isVoiceMessage() || document->isVideoMessage()) {
