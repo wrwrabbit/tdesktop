@@ -99,7 +99,7 @@ void TopBar::resizeEvent(QResizeEvent *e) {
 void TopBar::paintEvent(QPaintEvent *e) {
 	auto p = QPainter(this);
 	auto fill = e->rect().intersected(
-		QRect(0, 0, width(), st::mediaPlayerHeight));
+		QRect(0, 0, width(), st::mediaPlayerHeight + st::lineWidth));
 	if (!fill.isEmpty()) {
 		p.fillRect(fill, st::mediaPlayerBg);
 	}
