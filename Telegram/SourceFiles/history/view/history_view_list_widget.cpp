@@ -463,6 +463,12 @@ ListWidget::ListWidget(
 			resizeItem(view);
 		}
 	}, lifetime());
+	_session->data().viewHeightAdjusted(
+	) | rpl::on_next([this](Data::Session::ViewHeightAdjusted data) {
+		if (data.view->delegate() == this) {
+			viewHeightAdjusted(data.view);
+		}
+	}, lifetime());
 	_session->data().itemViewRefreshRequest(
 	) | rpl::on_next([this](auto item) {
 		if (const auto view = viewForItem(item)) {
@@ -4350,6 +4356,30 @@ void ListWidget::refreshAttachmentsFromTill(int from, int till) {
 	if (till == int(_items.size())) {
 		_items.back()->setAttachToNext(false);
 	}
+}
+
+void ListWidget::viewHeightAdjusted(not_null<Element*> view) {
+	const auto i = ranges::find(_items, view);
+	if (i == end(_items)) {
+		return;
+	}
+	auto next = i + 1;
+	const auto was = (next != end(_items))
+		? (*next)->y()
+		: _itemsHeight;
+	const auto now = view->y() + view->height();
+	const auto delta = now - was;
+	for (; next != end(_items); ++next) {
+		(*next)->setY((*next)->y() + delta);
+	}
+	_itemsHeight += delta;
+	_itemsTop = (_minHeight > _itemsHeight + st::historyPaddingBottom)
+		? (_minHeight - _itemsHeight - st::historyPaddingBottom)
+		: 0;
+	resize(width(), _itemsTop + _itemsHeight + st::historyPaddingBottom);
+	restoreScrollPosition();
+	updateVisibleTopItem();
+	update();
 }
 
 void ListWidget::refreshItem(not_null<const Element*> view) {

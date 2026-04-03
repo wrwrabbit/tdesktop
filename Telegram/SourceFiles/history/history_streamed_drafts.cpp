@@ -56,7 +56,9 @@ void HistoryStreamedDrafts::apply(
 	_drafts.emplace(rootId, Draft{
 		.message = _history->addNewLocalMessage({
 			.id = _history->owner().nextLocalMessageId(),
-			.flags = MessageFlag::Local | MessageFlag::HasReplyInfo,
+			.flags = (MessageFlag::Local
+				| MessageFlag::HasReplyInfo
+				| MessageFlag::TextAppearing),
 			.from = fromId,
 			.replyTo = {
 				.messageId = replyToId,
@@ -80,7 +82,7 @@ bool HistoryStreamedDrafts::update(
 	if (i == end(_drafts) || i->second.randomId != randomId) {
 		return false;
 	}
-	i->second.message->setText(text);
+	i->second.message->setTextStreaming(text);
 	i->second.updated = crl::now();
 	return true;
 }

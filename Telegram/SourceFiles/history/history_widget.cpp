@@ -630,6 +630,15 @@ HistoryWidget::HistoryWidget(
 			updateHistoryGeometry();
 		}
 	}, lifetime());
+	session().data().viewHeightAdjusted(
+	) | rpl::on_next([=](Data::Session::ViewHeightAdjusted data) {
+		const auto item = data.view->data();
+		const auto history = item->history();
+		if (item->mainView() == data.view
+			&& (history == _history || history == _migrated)) {
+			updateHistoryGeometry();
+		}
+	}, lifetime());
 
 	session().data().itemShowHighlightRequest(
 	) | rpl::on_next([=](not_null<HistoryItem*> item) {
