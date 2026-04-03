@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_cloud_file.h"
 #include "data/data_location.h"
 #include "lang/lang_keys.h"
+#include "lang/lang_tag.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
@@ -2780,7 +2781,7 @@ void Poll::Options::updateAnswerVotesFromOriginal(
 	answer.votes = original.votes;
 	answer.filling = answer.votes / float64(maxVotes);
 	if (_owner->showVotes() && answer.votes) {
-		answer.votesCountString = QString::number(answer.votes);
+		answer.votesCountString = Lang::FormatCountDecimal(answer.votes);
 		answer.votesCountWidth = st::normalFont->width(
 			answer.votesCountString);
 	} else {
