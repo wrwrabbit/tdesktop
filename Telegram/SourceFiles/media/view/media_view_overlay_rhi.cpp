@@ -1051,6 +1051,21 @@ void OverlayWidget::RendererRhi::paintTransformedVideoFrame(
 		}
 #endif // Q_OS_MAC
 		if (!zeroCopied) {
+		if (_usingExternalVideoTextures) {
+			delete _yTexture;
+			_yTexture = nullptr;
+			delete _uTexture;
+			_uTexture = nullptr;
+			delete _vTexture;
+			_vTexture = nullptr;
+			delete _uvTexture;
+			_uvTexture = nullptr;
+			_lumaSize = QSize();
+			_chromaSize = QSize();
+#ifdef Q_OS_MAC
+			_metalTextureCache.flush();
+#endif // Q_OS_MAC
+		}
 		Assert(!yuv->size.isEmpty());
 		if (!_yTexture || _lumaSize != yuv->size) {
 			delete _yTexture;
@@ -1119,6 +1134,7 @@ void OverlayWidget::RendererRhi::paintTransformedVideoFrame(
 		}
 		_chromaNV12 = nv12;
 		} // if (!zeroCopied)
+		_usingExternalVideoTextures = zeroCopied;
 	}
 
 	validateControlsFade();

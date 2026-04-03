@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/shadow.h"
 #include "ui/text/format_values.h"
 #include "ui/gl/gl_surface.h"
+#include "ui/gl/gl_detection.h"
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "window/window_controller.h"
@@ -338,8 +339,13 @@ const style::Shadow &PipShadow() {
 PipPanel::PipPanel(
 	QWidget *parent,
 	Fn<Ui::GL::ChosenRenderer(Ui::GL::Capabilities)> renderer)
-: _content(Ui::GL::CreateSurface(std::move(renderer)))
+: _window(std::make_unique<Ui::RpWidget>(nullptr))
 , _parent(parent) {
+	auto chosen = std::move(renderer)(
+		Ui::GL::CheckCapabilities(nullptr));
+	_content = Ui::GL::CreateSurface(
+		_window.get(),
+		std::move(chosen));
 }
 
 void PipPanel::init() {
@@ -356,6 +362,12 @@ void PipPanel::init() {
 	widget()->setMouseTracking(true);
 	widget()->resize(0, 0);
 	widget()->hide();
+
+	_content->rpWidget()->setAttribute(Qt::WA_TransparentForMouseEvents);
+	_window->sizeValue(
+	) | rpl::on_next([=](QSize size) {
+		_content->rpWidget()->setGeometry(QRect(QPoint(), size));
+	}, _window->lifetime());
 
 	rpl::merge(
 		rp()->shownValue() | rpl::to_empty,
@@ -388,11 +400,11 @@ void PipPanel::init() {
 }
 
 not_null<QWidget*> PipPanel::widget() const {
-	return _content->rpWidget();
+	return _window.get();
 }
 
 not_null<Ui::RpWidgetWrap*> PipPanel::rp() const {
-	return _content.get();
+	return _window.get();
 }
 
 void PipPanel::setAspectRatio(QSize ratio) {
@@ -584,7 +596,7 @@ void PipPanel::setPositionOnScreen(Position position, QRect available) {
 }
 
 void PipPanel::update() {
-	widget()->update();
+	_content->rpWidget()->update();
 }
 
 void PipPanel::setGeometry(QRect geometry) {
@@ -1070,7 +1082,7 @@ void Pip::updateActiveState(OverState wasShown) {
 		const auto nowIsShown = (shownActiveState() == shownState);
 		if ((wasShown == shownState) != nowIsShown) {
 			button.active.start(
-				[=, &button] { _panel.widget()->update(button.icon); },
+				[=] { _panel.update(); },
 				nowIsShown ? 0. : 1.,
 				nowIsShown ? 1. : 0.,
 				st::fadeWrapDuration,
@@ -1316,7 +1328,7 @@ void Pip::setupButtons() {
 	_playbackProgress->setValueChangedCallback([=](
 			float64 value,
 			float64 receivedTill) {
-		_panel.widget()->update(_playback.area);
+		_panel.update();
 	});
 }
 
@@ -1711,11 +1723,7 @@ void Pip::updatePlaybackTexts(
 	_timeAlready = already;
 	_timeLeft = left;
 	_timeLeftWidth = st::pipPlaybackFont->width(_timeLeft);
-	_panel.widget()->update(QRect(
-		_playback.area.x(),
-		_playback.icon.y() - st::pipPlaybackFont->height,
-		_playback.area.width(),
-		st::pipPlaybackFont->height));
+	_panel.update();
 }
 
 void Pip::handleStreamingError(Streaming::Error &&error) {
@@ -1882,7 +1890,7 @@ Pip::OverState Pip::computeState(QPoint position) const {
 }
 
 void Pip::waitingAnimationCallback() {
-	_panel.widget()->update(countRadialRect());
+	_panel.update();
 }
 
 } // namespace View

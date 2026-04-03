@@ -12,6 +12,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rhi/rhi_image.h"
 #include "ui/gl/gl_math.h"
 
+#ifdef Q_OS_MAC
+#include "media/view/media_view_metal_texture.h"
+#endif
+
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 
 class QRhi;
@@ -77,12 +81,15 @@ private:
 	void paintTransformedContent(
 		QRhiGraphicsPipeline *pipeline,
 		QRhiShaderResourceBindings *srb,
-		ContentGeometry geometry);
+		ContentGeometry geometry,
+		int slot);
 	void paintUsingRaster(
 		Ui::Rhi::Image &image,
 		QRect rect,
 		Fn<void(QPainter&&)> method,
 		bool transparent = false);
+	[[nodiscard]] int allocateDrawSlot();
+	[[nodiscard]] QRhiShaderResourceBindings *allocateSrb();
 
 	struct DrawCommand {
 		QRhiGraphicsPipeline *pipeline = nullptr;
@@ -120,11 +127,13 @@ private:
 	QRhiBuffer *_uniformBuffer = nullptr;
 	QRhiSampler *_sampler = nullptr;
 
+	QRhiTexture *_placeholderTexture = nullptr;
 	QRhiTexture *_rgbaTexture = nullptr;
 	QSize _rgbaSize;
 	quint64 _cacheKey = 0;
-	int _trackFrameIndex = 0;
+	int _trackFrameIndex = -1;
 	bool _chromaNV12 = false;
+	bool _usingExternalVideoTextures = false;
 
 	QRhiTexture *_yTexture = nullptr;
 	QRhiTexture *_uTexture = nullptr;
@@ -140,11 +149,16 @@ private:
 	QRhiGraphicsPipeline *_imageBlendPipeline = nullptr;
 	QRhiGraphicsPipeline *_controlsPipeline = nullptr;
 
+	// Layout-only SRBs: used solely as pipeline layout templates,
+	// not for actual draw calls. Per-draw SRBs come from _srbPool.
 	QRhiShaderResourceBindings *_argb32Srb = nullptr;
 	QRhiShaderResourceBindings *_yuv420Srb = nullptr;
 	QRhiShaderResourceBindings *_nv12Srb = nullptr;
 	QRhiShaderResourceBindings *_imageSrb = nullptr;
 	QRhiShaderResourceBindings *_controlsSrb = nullptr;
+
+	std::vector<QRhiShaderResourceBindings*> _srbPool;
+	int _nextSrbIndex = 0;
 
 	Ui::Rhi::Image _shadowImage;
 	Ui::Rhi::Image _radialImage;
@@ -153,10 +167,17 @@ private:
 	Ui::Rhi::Image _volumeControllerImage;
 
 	static constexpr auto kControlsCount = 7;
+	static constexpr auto kMaxDraws = 12;
+	static constexpr auto kVertexSlotSize = 4 * 6 * sizeof(float);
 	std::array<QRect, kControlsCount * 2> _controlsTextures;
 	std::vector<DrawCommand> _drawCommands;
+	int _nextDrawSlot = 0;
 
 	bool _initialized = false;
+
+#ifdef Q_OS_MAC
+	MetalTextureCache _metalTextureCache;
+#endif
 
 	rpl::lifetime _lifetime;
 

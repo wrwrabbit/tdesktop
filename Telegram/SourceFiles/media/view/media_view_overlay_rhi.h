@@ -185,6 +185,7 @@ private:
 	QSize _lumaSize;
 	QSize _chromaSize;
 	bool _chromaNV12 = false;
+	bool _usingExternalVideoTextures = false;
 	int _trackFrameIndex = 0;
 	int _streamedIndex = 0;
 
