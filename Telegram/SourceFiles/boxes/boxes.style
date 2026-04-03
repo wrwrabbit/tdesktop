@@ -669,6 +669,42 @@ proxyAboutSponsorPadding: margins(22px, 7px, 22px, 0px);
 proxyApplyBoxLabel : FlatLabel(defaultFlatLabel) {
 	maxHeight: 30px;
 }
+proxyApplyBoxTable: Table(defaultTable) {
+	labelMinWidth: 91px;
+}
+proxyApplyBoxTableMargin: margins(24px, 4px, 24px, 4px);
+proxyApplyBoxTableLabelMargin: margins(13px, 10px, 13px, 10px);
+proxyApplyBoxTableValueMargin: margins(13px, 9px, 13px, 9px);
+proxyApplyBoxValueMultiline: FlatLabel(defaultTableValue) {
+	minWidth: 128px;
+	maxHeight: 100px;
+	style: TextStyle(defaultTextStyle) {
+		font: font(10px);
+		linkUnderline: kLinkUnderlineNever;
+	}
+}
+proxyApplyBoxSponsorLabel: FlatLabel(defaultFlatLabel) {
+	textFg: windowBoldFg;
+	minWidth: 100px;
+	align: align(top);
+	style: TextStyle(defaultTextStyle) {
+		font: font(11px);
+	}
+}
+proxyApplyBoxSponsorMargin: margins(13px, 8px, 13px, 8px);
+proxyApplyBoxButton: RoundButton(defaultActiveButton) {
+	height: 38px;
+	textTop: 10px;
+	radius: 19px;
+	style: semiboldTextStyle;
+}
+proxyApplyBox: Box(defaultBox) {
+	buttonPadding: margins(22px, 11px, 22px, 22px);
+	buttonHeight: 38px;
+	buttonWide: true;
+	button: proxyApplyBoxButton;
+	shadowIgnoreTopSkip: true;
+}
 
 markdownLinkFieldPadding: margins(22px, 0px, 22px, 10px);
 

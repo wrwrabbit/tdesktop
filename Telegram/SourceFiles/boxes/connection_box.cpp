@@ -38,7 +38,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/controls/table_rows.h"
 #include "ui/wrap/slide_wrap.h"
+#include "ui/wrap/table_layout.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/vertical_list.h"
 #include "ui/ui_utility.h"
@@ -47,6 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
+#include "styles/style_giveaway.h"
 #include "styles/style_info.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
@@ -1417,44 +1420,73 @@ void ProxiesBoxController::ShowApplyConfirmation(
 	).replace(UrlEndRegExp, QString());
 	const auto box = [=](not_null<Ui::GenericBox*> box) {
 		box->setTitle(tr::lng_proxy_box_title());
-		if (type == Type::Mtproto) {
-			box->addRow(object_ptr<Ui::FlatLabel>(
+		box->setStyle(st::proxyApplyBox);
+		box->addTopButton(st::boxTitleClose, [=] {
+			box->closeBox();
+		});
+
+		const auto table = box->addRow(
+			object_ptr<Ui::TableLayout>(
 				box,
-				tr::lng_proxy_sponsor_warning(),
-				st::boxDividerLabel));
-			Ui::AddSkip(box->verticalLayout());
-			Ui::AddSkip(box->verticalLayout());
-		}
-		const auto &stL = st::proxyApplyBoxLabel;
-		const auto &stSubL = st::boxDividerLabel;
-		const auto add = [&](const QString &s, tr::phrase<> phrase) {
-			if (!s.isEmpty()) {
-				box->addRow(object_ptr<Ui::FlatLabel>(box, s, stL));
-				box->addRow(object_ptr<Ui::FlatLabel>(box, phrase(), stSubL));
-				Ui::AddSkip(box->verticalLayout());
-				Ui::AddSkip(box->verticalLayout());
+				st::giveawayGiftCodeTable),
+			st::giveawayGiftCodeTableMargin);
+		const auto add = [&](
+				const QString &value,
+				rpl::producer<QString> label) {
+			if (!value.isEmpty()) {
+				constexpr auto kOneLineCount = 20;
+				const auto oneLine = value.length() <= kOneLineCount;
+				auto widget = object_ptr<Ui::FlatLabel>(
+					table,
+					rpl::single(Ui::Text::Wrapped(
+						{ value },
+						EntityType::Code,
+						{})),
+					(oneLine
+						? table->st().defaultValue
+						: st::giveawayGiftCodeValueMultiline),
+					st::defaultPopupMenu);
+				Ui::AddTableRow(
+					table,
+					std::move(label),
+					std::move(widget));
 			}
 		};
 		if (!displayServer.isEmpty()) {
-			add(displayServer, tr::lng_proxy_box_server);
+			add(displayServer, tr::lng_proxy_box_server());
 		}
-		add(QString::number(proxy.port), tr::lng_proxy_box_port);
+		add(QString::number(proxy.port), tr::lng_proxy_box_port());
 		if (type == Type::Socks5) {
-			add(proxy.user, tr::lng_proxy_box_username);
-			add(proxy.password, tr::lng_proxy_box_password);
+			add(proxy.user, tr::lng_proxy_box_username());
+			add(proxy.password, tr::lng_proxy_box_password());
 		} else if (type == Type::Mtproto) {
-			add(proxy.password, tr::lng_proxy_box_secret);
+			add(proxy.password, tr::lng_proxy_box_secret());
 		}
-		const auto enableButton = box->addButton(tr::lng_sure_enable(), [=] {
-			auto &proxies = Core::App().settings().proxy().list();
-			if (!ranges::contains(proxies, proxy)) {
-				proxies.push_back(proxy);
-			}
-			Core::App().setCurrentProxy(proxy, ProxyData::Settings::Enabled);
-			Local::writeSettings();
-			box->closeBox();
-		});
-		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+
+		if (type == Type::Mtproto) {
+			table->addRow(
+				object_ptr<Ui::FlatLabel>(
+					table,
+					tr::lng_proxy_sponsor_warning(),
+					st::proxyApplyBoxSponsorLabel),
+				object_ptr<Ui::RpWidget>(nullptr),
+				st::proxyApplyBoxSponsorMargin,
+				st::proxyApplyBoxSponsorMargin);
+		}
+
+		const auto enableButton = box->addButton(
+			tr::lng_sure_enable(),
+			[=] {
+				auto &proxies = Core::App().settings().proxy().list();
+				if (!ranges::contains(proxies, proxy)) {
+					proxies.push_back(proxy);
+				}
+				Core::App().setCurrentProxy(
+					proxy,
+					ProxyData::Settings::Enabled);
+				Local::writeSettings();
+				box->closeBox();
+			});
 		box->events(
 		) | rpl::on_next([=](not_null<QEvent*> e) {
 			if ((e->type() != QEvent::KeyPress) || !enableButton) {
