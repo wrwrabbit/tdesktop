@@ -32,7 +32,7 @@ namespace {
 
 constexpr auto kInNonChosenOpacity = 0.12;
 constexpr auto kOutNonChosenOpacity = 0.18;
-constexpr auto kArrowPivotNear = 0.345;
+constexpr auto kArrowPivotNear = 0.349;
 constexpr auto kArrowPivotFar = 1. - kArrowPivotNear;
 
 void ClipPainterForLock(QPainter &p, bool roundview, const QRect &r) {
@@ -160,7 +160,8 @@ void TranscribeButton::paint(
 				const auto t
 					= _openedAnimation.value(_summaryShown ? 1. : 0.);
 
-				st::historySummaryStars.paintInCenter(p, r);
+				const auto fg = context.st->msgServiceFg()->c;
+				st::historySummaryStars.paintInCenter(p, r, fg);
 
 				const auto &arrow = st::historySummaryArrows;
 				const auto sz = r.width();
@@ -187,7 +188,7 @@ void TranscribeButton::paint(
 							-sz * (1. - s) * 0.4,
 							sz * (1. - s) * 0.4);
 					}
-					arrow.paintInCenter(p, QRectF(r));
+					arrow.paintInCenter(p, QRectF(r), fg);
 					p.restore();
 				}
 
@@ -217,7 +218,7 @@ void TranscribeButton::paint(
 							-sz * (1. - s) * 0.4,
 							sz * (1. - s) * 0.4);
 					}
-					arrow.paintInCenter(p, QRectF(r));
+					arrow.paintInCenter(p, QRectF(r), fg);
 					p.restore();
 				}
 			}
