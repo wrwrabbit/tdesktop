@@ -333,6 +333,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_proxy_box_port" = "Port";
 "lng_proxy_box_secret" = "Secret";
 "lng_proxy_box_status" = "Status";
+"lng_proxy_box_check_status" = "Check Status";
 "lng_proxy_box_username" = "Username";
 "lng_proxy_box_password" = "Password";
 "lng_proxy_invalid" = "The proxy link is invalid.";
