@@ -1074,6 +1074,7 @@ topBarInfo: IconButton(topBarSearch) {
 }
 topBarInfoActive: icon {{ "top_bar_profile", windowActiveTextFg }};
 topBarActionSkip: 10px;
+topBarActionButtonLargeRadius: 8px;
 
 topBarInfoButtonSize: size(52px, topBarHeight);
 topBarInfoButtonInnerSize: 42px;

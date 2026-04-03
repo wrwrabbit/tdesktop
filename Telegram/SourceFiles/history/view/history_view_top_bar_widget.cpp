@@ -1077,7 +1077,7 @@ void TopBarWidget::updateControlsGeometry() {
 
 	_delete->moveToLeft(buttonsLeft, selectedButtonsTop);
 	{
-		const auto large = _forward->height() / 3;
+		const auto large = st::topBarActionButtonLargeRadius;
 		const auto &buttonSt = st::defaultActiveButton;
 		const auto small = buttonSt.radius
 			? buttonSt.radius
