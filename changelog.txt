@@ -1,3 +1,7 @@
+6.7.3 (04.04.26)
+
+- Fix launch on older macOS versions.
+
 6.7.2 (03.04.26)
 
 - System audio capture for desktop sharing on macOS.
