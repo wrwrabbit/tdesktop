@@ -53,8 +53,14 @@ public:
 		int left,
 		int top,
 		float64 shrinkProgress,
-		float64 moveProgress);
-	void paintPhoto(Painter &p, int left, int top, int outerWidth);
+		float64 moveProgress,
+		bool showHighQualityBadge);
+	void paintPhoto(
+		Painter &p,
+		int left,
+		int top,
+		int outerWidth,
+		bool showHighQualityBadge);
 	void paintFile(Painter &p, int left, int top, int outerWidth);
 
 	[[nodiscard]] QRect geometry() const;
@@ -94,6 +100,7 @@ private:
 	const int _shrinkSize;
 	const bool _isPhoto;
 	const bool _isVideo;
+	const bool _canShowHighQualityBadge;
 	QPixmap _albumImage;
 	QPixmap _albumImageBlurred;
 	QImage _albumCache;

@@ -193,7 +193,8 @@ void PaintWaveform(
 		const VoiceData *voiceData,
 		int availableWidth,
 		float64 progress,
-		bool ttl) {
+		bool ttl,
+		float64 hoverProgress = -1) {
 	const auto wf = [&]() -> const VoiceWaveform* {
 		if (!voiceData) {
 			return nullptr;
@@ -217,6 +218,9 @@ void PaintWaveform(
 		? int(wf->size())
 		: ::Media::Player::kWaveformSamplesCount;
 	const auto activeWidth = base::SafeRound(availableWidth * progress);
+	const auto hoverWidth = (hoverProgress >= 0)
+		? base::SafeRound(availableWidth * hoverProgress)
+		: -1.;
 
 	const auto &barWidth = st::msgWaveformBar;
 	const auto barCount = std::min(
@@ -257,6 +261,19 @@ void PaintWaveform(
 		} else if (!ttl || barLeft < activeWidth) {
 			const auto &color = (barLeft >= activeWidth) ? inactive : active;
 			p.fillRect(QRectF(barLeft, barTop, barWidth, barHeight), color);
+		}
+		if (hoverWidth >= 0) {
+			const auto hoverFrom = std::min(activeWidth, hoverWidth);
+			const auto hoverTo = std::max(activeWidth, hoverWidth);
+			if (barLeft < hoverTo && barLeft + barWidth > hoverFrom) {
+				const auto left = std::max(double(barLeft), hoverFrom);
+				const auto right = std::min(
+					double(barLeft + barWidth),
+					hoverTo);
+				p.fillRect(
+					QRectF(left, barTop, right - left, barHeight),
+					anim::with_alpha(active->c, 0.30));
+			}
 		}
 		barLeft += barWidth + st::msgWaveformSkip;
 
@@ -910,7 +927,8 @@ void Document::draw(
 			_transcribedRound ? _data->round() : _data->voice(),
 			namewidth + st::msgWaveformSkip,
 			progress,
-			inTTLViewer);
+			inTTLViewer,
+			_voiceHoverProgress);
 		p.restore();
 	} else if (const auto named = Get<HistoryDocumentNamed>()) {
 		p.setPen(stm->historyFileNameFg);
@@ -1241,12 +1259,24 @@ TextState Document::textState(
 			const auto state = ::Media::Player::instance()->getState(AudioMsgId::Type::Voice);
 			if (state.id == AudioMsgId(_data, _realParent->fullId(), state.id.externalPlayId())
 				&& !::Media::Player::IsStoppedOrStopping(state.state)) {
+				const auto hover = std::clamp(
+					(point.x() - nameleft) / float64(namewidth),
+					0.,
+					1.);
+				if (_voiceHoverProgress != hover) {
+					_voiceHoverProgress = hover;
+					repaint();
+				}
 				if (!voice->seeking()) {
 					voice->setSeekingStart((point.x() - nameleft) / float64(namewidth));
 				}
 				result.link = voice->seekl;
 				return result;
 			}
+		}
+		if (_voiceHoverProgress >= 0) {
+			_voiceHoverProgress = -1;
+			repaint();
 		}
 		transcribeLength = voice->transcribeText.length();
 		if (transcribeLength > 0) {

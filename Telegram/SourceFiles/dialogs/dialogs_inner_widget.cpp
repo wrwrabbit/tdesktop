@@ -95,7 +95,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Dialogs {
 namespace {
 
-constexpr auto kFreezeTimeout = crl::time(5000);
+constexpr auto kFreezeTimeout = 2 * crl::time(1000);
 constexpr auto kHashtagResultsLimit = 5;
 constexpr auto kStartReorderThreshold = 30;
 constexpr auto kStartDragToFilterThresholdX = kStartReorderThreshold;
@@ -3080,12 +3080,6 @@ void InnerWidget::updateDialogRow(
 
 void InnerWidget::enterEventHook(QEnterEvent *e) {
 	setMouseTracking(true);
-	if (skipChatsListFreeze()) {
-		unfreezeShownList(false);
-	} else {
-		_shownList->freeze();
-		_freezeTimer.callOnce(kFreezeTimeout);
-	}
 }
 
 Row *InnerWidget::shownRowByKey(Key key) {
@@ -5675,6 +5669,9 @@ not_null<Ui::QuickActionContext*> InnerWidget::ensureQuickAction(int64 key) {
 
 int64 InnerWidget::calcSwipeKey(int top) {
 	top -= dialogsOffset();
+	if (top < 0) {
+		return 0;
+	}
 	for (auto it = _shownList->begin(); it != _shownList->end(); ++it) {
 		const auto row = it->get();
 		const auto from = row->top();

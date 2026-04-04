@@ -76,18 +76,20 @@ void ItemCanvas::computeContentRect(const QPointF &p) {
 		return;
 	}
 	const auto sceneSize = scene()->sceneRect().size();
+	const auto contentLeft = std::max(0., _contentRect.x());
+	const auto contentTop = std::max(0., _contentRect.y());
 	_contentRect = QRectF(
 		QPointF(
-			std::clamp(p.x() - _brushMargins.left(), 0., _contentRect.x()),
-			std::clamp(p.y() - _brushMargins.top(), 0., _contentRect.y())),
+			std::clamp(p.x() - _brushMargins.left(), 0., contentLeft),
+			std::clamp(p.y() - _brushMargins.top(), 0., contentTop)),
 		QPointF(
 			std::clamp(
 				p.x() + _brushMargins.right(),
-				_contentRect.x() + _contentRect.width(),
+				contentLeft + _contentRect.width(),
 				sceneSize.width()),
 			std::clamp(
 				p.y() + _brushMargins.bottom(),
-				_contentRect.y() + _contentRect.height(),
+				contentTop + _contentRect.height(),
 				sceneSize.height())));
 }
 
@@ -120,12 +122,15 @@ float64 ItemCanvas::strokeWidth(float64 pressure) const {
 	auto width = _brushData.size * pressure;
 	if (_brushData.tool == Brush::Tool::Marker) {
 		width *= st::photoEditorMarkerSizeMultiplier;
+	} else if (_brushData.tool == Brush::Tool::Blur) {
+		width *= st::photoEditorBlurSizeMultiplier;
 	}
 	return width;
 }
 
 QColor ItemCanvas::strokeColor() const {
-	if (_brushData.tool == Brush::Tool::Eraser) {
+	if (_brushData.tool == Brush::Tool::Eraser
+		|| _brushData.tool == Brush::Tool::Blur) {
 		return QColor(0, 0, 0, 255);
 	}
 	auto color = _brushData.color;
@@ -317,8 +322,8 @@ void ItemCanvas::addStrokePoint(const QPointF &point, int64 time) {
 			: kMaxPointDistance;
 		if (distance > maxDistance) {
 			const auto steps = int(std::ceil(distance / maxDistance));
-			const auto &lastPos = _currentStroke.back().pos;
-			const auto &lastPressure = _currentStroke.back().pressure;
+			const auto lastPos = _currentStroke.back().pos;
+			const auto lastPressure = _currentStroke.back().pressure;
 			for (auto i = 1; i < steps; ++i) {
 				const auto t = float64(i) / steps;
 				const auto interpolated = lastPos * (1.0 - t) + point * t;
@@ -396,6 +401,7 @@ void ItemCanvas::handleMouseReleaseEvent(
 			.pixmap = _pixmap.copy(scaledContentRect.toRect()),
 			.position = _contentRect.topLeft(),
 			.clear = (_brushData.tool == Brush::Tool::Eraser),
+			.blur = (_brushData.tool == Brush::Tool::Blur),
 		});
 	}
 	_currentStroke.clear();
@@ -414,6 +420,11 @@ void ItemCanvas::paint(
 	if (_brushData.tool == Brush::Tool::Eraser) {
 		p->save();
 		p->setOpacity(st::photoEditorEraserPreviewOpacity);
+		p->drawPixmap(0, 0, _pixmap);
+		p->restore();
+	} else if (_brushData.tool == Brush::Tool::Blur) {
+		p->save();
+		p->setOpacity(st::photoEditorBlurPreviewOpacity);
 		p->drawPixmap(0, 0, _pixmap);
 		p->restore();
 	} else {

@@ -697,6 +697,16 @@ void InnerWidget::elementShowPollResults(
 	FullMsgId context) {
 }
 
+void InnerWidget::elementShowAddPollOption(
+	not_null<HistoryView::Element*> view,
+	not_null<PollData*> poll,
+	FullMsgId context,
+	QRect optionRect) {
+}
+
+void InnerWidget::elementSubmitAddPollOption(FullMsgId context) {
+}
+
 void InnerWidget::elementOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) {
@@ -2220,6 +2230,9 @@ void InnerWidget::onTouchScrollTimer() {
 		int32 elapsed = int32(nowTime - _touchTime);
 		QPoint delta = _touchSpeed * elapsed / 1000;
 		bool hasScrolled = !delta.isNull();
+		if (hasScrolled) {
+			_scrollToSignal.fire_copy(_visibleTop - delta.y());
+		}
 
 		if (_touchSpeed.isNull() || !hasScrolled) {
 			_touchScrollState = Ui::TouchScrollState::Manual;
@@ -2421,6 +2434,7 @@ void InnerWidget::touchEvent(QTouchEvent *e) {
 
 void InnerWidget::touchScrollUpdated(const QPoint &screenPos) {
 	_touchPos = screenPos;
+	_scrollToSignal.fire_copy(_visibleTop - (_touchPos - _touchPrevPos).y());
 	touchUpdateSpeed();
 }
 

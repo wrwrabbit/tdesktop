@@ -14,6 +14,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QSemaphore>
 #include <deque>
 
+class QPainter;
+
+namespace style {
+struct ComposeControls;
+} // namespace style
+
 namespace Ui {
 
 class RpWidget;
@@ -77,6 +83,7 @@ struct PreparedFile {
 	[[nodiscard]] bool isSticker() const;
 	[[nodiscard]] bool isVideoFile() const;
 	[[nodiscard]] bool isGifv() const;
+	[[nodiscard]] bool canUseHighQualityPhoto() const;
 
 	QString path;
 	QString displayName;
@@ -90,6 +97,7 @@ struct PreparedFile {
 	QSize originalDimensions;
 	Type type = Type::File;
 	bool spoiler = false;
+	bool sendLargePhotos = false;
 };
 
 [[nodiscard]] bool CanBeInAlbumType(PreparedFile::Type type, AlbumType album);
@@ -133,6 +141,7 @@ struct PreparedList {
 	[[nodiscard]] bool canHaveEditorHintLabel() const;
 	[[nodiscard]] bool hasSticker() const;
 	[[nodiscard]] bool hasSpoilerMenu(bool compress) const;
+	[[nodiscard]] bool hasSendLargePhotosOption(bool compress) const;
 
 	Error error = Error::None;
 	QString errorData;
@@ -170,5 +179,11 @@ struct PreparedBundle {
 [[nodiscard]] QPixmap BlurredPreviewFromPixmap(
 	QPixmap pixmap,
 	RectParts corners);
+
+void PaintHighQualityBadge(
+	QPainter &p,
+	const style::ComposeControls &st,
+	QRect rect,
+	RectPart origin = RectPart::BottomLeft);
 
 } // namespace Ui

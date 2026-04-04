@@ -59,6 +59,7 @@ struct Action;
 
 namespace HistoryView::Controls {
 class CharactersLimitLabel;
+class ComposeAiButton;
 } // namespace HistoryView::Controls
 
 enum class SendFilesAllow {
@@ -157,10 +158,7 @@ private:
 			int till,
 			const Ui::Text::MarkedContext &captionContext,
 			Fn<bool()> gifPaused,
-			Ui::SendFilesWay way,
-			Fn<bool(
-				const Ui::PreparedFile &,
-				Ui::AttachActionType)> actionAllowed);
+			Ui::SendFilesWay way);
 		Block(Block &&other) = default;
 		Block &operator=(Block &&other) = default;
 
@@ -171,8 +169,6 @@ private:
 		[[nodiscard]] rpl::producer<int> itemDeleteRequest() const;
 		[[nodiscard]] rpl::producer<int> itemReplaceRequest() const;
 		[[nodiscard]] rpl::producer<int> itemModifyRequest() const;
-		[[nodiscard]] rpl::producer<int> itemEditCoverRequest() const;
-		[[nodiscard]] rpl::producer<int> itemClearCoverRequest() const;
 		[[nodiscard]] rpl::producer<> orderUpdated() const;
 
 		void setSendWay(Ui::SendFilesWay way);
@@ -211,10 +207,12 @@ private:
 	void addMenuButton();
 	void applyBlockChanges();
 	void toggleSpoilers(bool enabled);
+	void setSendLargePhotos(bool enabled);
 	void changePrice();
 
 	[[nodiscard]] bool canChangePrice() const;
 	[[nodiscard]] bool hasPrice() const;
+	[[nodiscard]] bool hasSendLargePhotosOption() const;
 	void refreshPriceTag();
 	[[nodiscard]] QImage preparePriceTagBg(QSize size) const;
 
@@ -235,7 +233,7 @@ private:
 	void send(Api::SendOptions options, bool ctrlShiftEnter = false);
 	[[nodiscard]] Fn<void(Api::SendOptions)> sendCallback();
 	void captionResized();
-	void saveSendWaySettings();
+	void saveSendWaySettings(bool rememberAll);
 
 	void setupDragArea();
 	void refreshTitleText();
@@ -302,6 +300,7 @@ private:
 	std::unique_ptr<ChatHelpers::FieldAutocomplete> _autocomplete;
 	TextWithTags _prefilledCaptionText;
 	object_ptr<Ui::EmojiButton> _emojiToggle = { nullptr };
+	HistoryView::Controls::ComposeAiButton *_aiButton = nullptr;
 	base::unique_qptr<ChatHelpers::TabbedPanel> _emojiPanel;
 	base::unique_qptr<QObject> _emojiFilter;
 	using CharactersLimitLabel = HistoryView::Controls::CharactersLimitLabel;

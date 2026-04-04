@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_item_helpers.h"
 
+#include "api/api_reactions_notify_settings.h"
 #include "api/api_text_entities.h"
 #include "boxes/premium_preview_box.h"
 #include "calls/calls_instance.h"
@@ -21,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
 #include "data/data_message_reactions.h"
+#include "data/data_poll.h"
 #include "data/data_session.h"
 #include "data/data_stories.h"
 #include "data/data_user.h"
@@ -906,6 +908,9 @@ MTPMessageReplyHeader NewMessageReplyHeader(const Api::SendAction &action) {
 					? Flag()
 					: Flag::f_quote_entities)
 				| (replyTo.todoItemId ? Flag::f_todo_item_id : Flag())
+				| (replyTo.pollOption.isEmpty()
+					? Flag()
+					: Flag::f_poll_option)
 				| (topicPost ? Flag::f_forum_topic : Flag())),
 			MTP_int(replyTo.messageId.msg),
 			peerToMTP(externalPeerId),
@@ -915,7 +920,8 @@ MTPMessageReplyHeader NewMessageReplyHeader(const Api::SendAction &action) {
 			MTP_string(replyTo.quote.text),
 			quoteEntities,
 			MTP_int(replyTo.quoteOffset),
-			MTP_int(replyTo.todoItemId));
+			MTP_int(replyTo.todoItemId),
+			MTP_bytes(replyTo.pollOption));
 	}
 	return MTPMessageReplyHeader();
 }
@@ -1170,15 +1176,22 @@ void CheckReactionNotificationSchedule(
 	if (!item->hasUnreadReaction()) {
 		return;
 	}
+	const auto from = item->history()->session().api()
+		.reactionsNotifySettings().messagesFromCurrent();
+	if (from == Api::ReactionsNotifyFrom::None) {
+		return;
+	}
 	for (const auto &[emoji, reactions] : item->recentReactions()) {
 		for (const auto &reaction : reactions) {
 			if (!reaction.unread) {
 				continue;
 			}
 			const auto user = reaction.peer->asUser();
-			if (!user
-				|| !user->isContact()
-				|| ranges::contains(wasUsers, user)) {
+			if (!user || ranges::contains(wasUsers, user)) {
+				continue;
+			}
+			if (from == Api::ReactionsNotifyFrom::Contacts
+				&& !user->isContact()) {
 				continue;
 			}
 			using Status = PeerData::BlockStatus;
@@ -1187,8 +1200,47 @@ void CheckReactionNotificationSchedule(
 			}
 			const auto notification = Data::ItemNotification{
 				.item = item,
-				.reactionSender = user,
+				.reactionOrVoteSender = user,
 				.type = Data::ItemNotificationType::Reaction,
+			};
+			item->notificationThread()->pushNotification(notification);
+			Core::App().notifications().schedule(notification);
+			return;
+		}
+	}
+}
+
+void CheckPollVoteNotificationSchedule(
+		not_null<HistoryItem*> item,
+		const std::vector<not_null<PeerData*>> &wasRecentVoters) {
+	const auto media = item->media();
+	const auto poll = media ? media->poll() : nullptr;
+	if (!poll || !poll->creator()) {
+		return;
+	}
+	const auto from = item->history()->session().api()
+		.reactionsNotifySettings().pollVotesFromCurrent();
+	if (from == Api::ReactionsNotifyFrom::None) {
+		return;
+	}
+	for (const auto &answer : poll->answers) {
+		for (const auto &voter : answer.recentVoters) {
+			const auto user = voter->asUser();
+			if (!user || ranges::contains(wasRecentVoters, voter)) {
+				continue;
+			}
+			if (from == Api::ReactionsNotifyFrom::Contacts
+				&& !user->isContact()) {
+				continue;
+			}
+			using Status = PeerData::BlockStatus;
+			if (user->blockStatus() == Status::Unknown) {
+				user->updateFull();
+			}
+			const auto notification = Data::ItemNotification{
+				.item = item,
+				.reactionOrVoteSender = user,
+				.type = Data::ItemNotificationType::PollVote,
 			};
 			item->notificationThread()->pushNotification(notification);
 			Core::App().notifications().schedule(notification);
@@ -1311,8 +1363,10 @@ int ItemsForwardCaptionsCount(const HistoryItemsList &list) {
 	auto result = 0;
 	for (const auto &item : list) {
 		if (const auto media = item->media()) {
-			if (!item->originalText().text.isEmpty()
-				&& media->allowsEditCaption()) {
+			const auto hasCaption = !item->originalText().text.isEmpty()
+				|| !media->consumedMessageText().text.isEmpty();
+			if (hasCaption
+				&& (media->allowsEditCaption() || media->poll())) {
 				++result;
 			}
 		}

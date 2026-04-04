@@ -403,7 +403,7 @@ parts:
   qt:
     source: https://github.com/qt/qt5.git
     source-depth: 1
-    source-tag: v6.11.0-rc1
+    source-tag: v6.11.0
     source-submodules:
       - qtbase
       - qtdeclarative
@@ -488,7 +488,7 @@ parts:
   webrtc:
     source: https://github.com/desktop-app/tg_owt.git
     source-depth: 1
-    source-commit: 5c5c71258777d0196dbb3a09cc37d2f56ead28ab
+    source-commit: 26068e29bfa8d74a9dc9c8f7f94172fafbc262b8
     plugin: cmake
     build-packages:
       - libopenh264-dev

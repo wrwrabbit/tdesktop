@@ -22,7 +22,7 @@ namespace Editor {
 namespace {
 
 constexpr auto kPrecision = 100000;
-constexpr auto kBrushesVersion = -1;
+constexpr auto kBrushesVersion = -2;
 constexpr auto kDefaultBrushSizeRatio = 0.9;
 
 [[nodiscard]] int ToolIndex(Brush::Tool tool) {
@@ -30,7 +30,8 @@ constexpr auto kDefaultBrushSizeRatio = 0.9;
 	case Brush::Tool::Pen: return 0;
 	case Brush::Tool::Arrow: return 1;
 	case Brush::Tool::Marker: return 2;
-	case Brush::Tool::Eraser: return 3;
+	case Brush::Tool::Blur: return 3;
+	case Brush::Tool::Eraser: return 4;
 	}
 	return 0;
 }
@@ -40,7 +41,8 @@ constexpr auto kDefaultBrushSizeRatio = 0.9;
 	case 0: return Brush::Tool::Pen;
 	case 1: return Brush::Tool::Arrow;
 	case 2: return Brush::Tool::Marker;
-	case 3: return Brush::Tool::Eraser;
+	case 3: return Brush::Tool::Blur;
+	case 4: return Brush::Tool::Eraser;
 	}
 	return Brush::Tool::Pen;
 }
@@ -51,6 +53,7 @@ constexpr auto kDefaultBrushSizeRatio = 0.9;
 	case int(Brush::Tool::Arrow): return Brush::Tool::Arrow;
 	case int(Brush::Tool::Marker): return Brush::Tool::Marker;
 	case int(Brush::Tool::Eraser): return Brush::Tool::Eraser;
+	case int(Brush::Tool::Blur): return Brush::Tool::Blur;
 	}
 	return Brush::Tool::Pen;
 }
@@ -60,7 +63,8 @@ constexpr auto kDefaultBrushSizeRatio = 0.9;
 	case Brush::Tool::Pen: return QColor(234, 39, 57);
 	case Brush::Tool::Arrow: return QColor(252, 150, 77);
 	case Brush::Tool::Marker: return QColor(252, 222, 101);
-	case Brush::Tool::Eraser: return QColor(234, 39, 57);
+	case Brush::Tool::Eraser: return QColor(0, 0, 0);
+	case Brush::Tool::Blur: return QColor(0, 0, 0);
 	}
 	return QColor(234, 39, 57);
 }
@@ -73,8 +77,8 @@ constexpr auto kDefaultBrushSizeRatio = 0.9;
 	return result;
 }
 
-[[nodiscard]] std::array<Brush, 4> DefaultBrushes() {
-	auto result = std::array<Brush, 4>();
+[[nodiscard]] std::array<Brush, 5> DefaultBrushes() {
+	auto result = std::array<Brush, 5>();
 	for (auto i = 0; i != int(result.size()); ++i) {
 		const auto tool = ToolFromIndex(i);
 		result[i] = DefaultBrush(tool);
@@ -83,12 +87,12 @@ constexpr auto kDefaultBrushSizeRatio = 0.9;
 }
 
 struct BrushState {
-	std::array<Brush, 4> brushes = DefaultBrushes();
+	std::array<Brush, 5> brushes = DefaultBrushes();
 	Brush::Tool tool = Brush::Tool::Pen;
 };
 
 [[nodiscard]] QByteArray Serialize(
-		const std::array<Brush, 4> &brushes,
+		const std::array<Brush, 5> &brushes,
 		Brush::Tool tool) {
 	auto result = QByteArray();
 	auto stream = QDataStream(&result, QIODevice::WriteOnly);
@@ -122,6 +126,7 @@ struct BrushState {
 		return result;
 	}
 	if (head < 0) {
+		const auto version = head;
 		auto toolValue = qint32(int(Brush::Tool::Pen));
 		auto count = qint32(0);
 		stream >> toolValue >> count;
@@ -145,7 +150,7 @@ struct BrushState {
 			}
 			const auto tool = ToolFromSerialized(entryTool);
 			const auto index = ToolIndex(tool);
-			if (size > 0) {
+			if (version == kBrushesVersion && size > 0) {
 				result.brushes[index].sizeRatio = size / float(kPrecision);
 			}
 			if (color.isValid()) {
@@ -155,7 +160,6 @@ struct BrushState {
 		}
 		return result;
 	}
-	auto size = head;
 	auto color = QColor();
 	stream >> color;
 	if (stream.status() != QDataStream::Ok) {
@@ -170,9 +174,6 @@ struct BrushState {
 	}
 	const auto tool = ToolFromSerialized(toolValue);
 	const auto index = ToolIndex(tool);
-	if (size > 0) {
-		result.brushes[index].sizeRatio = size / float(kPrecision);
-	}
 	if (color.isValid()) {
 		result.brushes[index].color = color;
 	}
@@ -227,7 +228,8 @@ PhotoEditor::PhotoEditor(
 	this,
 	_controllers,
 	_modifications,
-	data))
+	data,
+	photo->size()))
 , _brushes(Deserialize(Core::App().settings().photoEditorBrush()).brushes)
 , _brushTool(Deserialize(Core::App().settings().photoEditorBrush()).tool)
 , _colorPicker(std::make_unique<ColorPicker>(
@@ -286,6 +288,10 @@ PhotoEditor::PhotoEditor(
 	) | rpl::on_next([=] {
 		_modifications.flipped = !_modifications.flipped;
 		_content->applyModifications(_modifications);
+	}, lifetime());
+
+	_controls->aspectRatioChanges() | rpl::on_next([=](float64 ratio) {
+		_content->applyAspectRatio(ratio);
 	}, lifetime());
 
 	_controls->paintModeRequests(

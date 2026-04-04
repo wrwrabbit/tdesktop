@@ -383,10 +383,10 @@ Widget::Widget(
 	_scroll->setOverscrollTypes(
 		_stories ? OverscrollType::Virtual : OverscrollType::Real,
 		OverscrollType::Real);
-	const auto innerList = _scroll->setOwnedWidget(
+	_innerList = _scroll->setOwnedWidget(
 		object_ptr<Ui::VerticalLayout>(this));
-	_inner = innerList->add(object_ptr<InnerWidget>(
-		innerList,
+	_inner = _innerList->add(object_ptr<InnerWidget>(
+		_innerList,
 		controller,
 		rpl::combine(
 			_childListPeerId.value(),
@@ -396,13 +396,13 @@ Widget::Widget(
 		_scroll->heightValue(),
 		_topBarSuggestionHeightChanged.events_starting_with(0)
 	) | rpl::on_next([=](int height, int topBarHeight) {
-		innerList->setMinimumHeight(height);
+		_innerList->setMinimumHeight(height);
 		_inner->setMinimumHeight(height - topBarHeight);
 		_inner->refresh();
-	}, innerList->lifetime());
+	}, _innerList->lifetime());
 	_scroll->widthValue() | rpl::on_next([=](int width) {
-		innerList->resizeToWidth(width);
-	}, innerList->lifetime());
+		_innerList->resizeToWidth(width);
+	}, _innerList->lifetime());
 	_scrollToTop->raise();
 	_lockUnlock->toggle(false, anim::type::instant);
 
@@ -723,7 +723,7 @@ Widget::Widget(
 	}
 
 	setupFrozenAccountBar();
-	setupTopBarSuggestions(innerList);
+	setupTopBarSuggestions();
 }
 
 void Widget::setupSwipeBack() {
@@ -737,6 +737,7 @@ void Widget::setupSwipeBack() {
 	};
 
 	auto update = [=](Ui::Controls::SwipeContextData data) {
+		data.cursorTop -= _inner->y();
 		if (data.translation != 0) {
 			if (data.translation < 0
 				&& _inner
@@ -771,6 +772,7 @@ void Widget::setupSwipeBack() {
 	};
 
 	auto init = [=](int top, Qt::LayoutDirection direction) {
+		top -= _inner->y();
 		_swipeBackIconMirrored = false;
 		_swipeBackMirrored = false;
 		if (_childListShown.current()) {
@@ -863,7 +865,7 @@ void Widget::setupSwipeBack() {
 	};
 
 	Ui::Controls::SetupSwipeHandler({
-		.widget = _inner,
+		.widget = _innerList,
 		.scroll = _scroll.data(),
 		.update = std::move(update),
 		.init = std::move(init),
@@ -1081,12 +1083,12 @@ void Widget::setupFrozenAccountBar() {
 	}, lifetime());
 }
 
-void Widget::setupTopBarSuggestions(not_null<Ui::VerticalLayout*> dialogs) {
+void Widget::setupTopBarSuggestions() {
 	if (_layout == Layout::Child) {
 		return;
 	}
 	using namespace rpl::mappers;
-	crl::on_main(dialogs, [=] {
+	crl::on_main(_innerList, [=] {
 		const auto owner = &session().data();
 		session().api().authorizations().unreviewedChanges(
 		) | rpl::on_next([=] {
@@ -1117,11 +1119,11 @@ void Widget::setupTopBarSuggestions(not_null<Ui::VerticalLayout*> dialogs) {
 					&& !searchInPeer
 					&& (id == owner->chatsFilters().defaultId());
 			});
-			return TopBarSuggestionValue(dialogs, &session(), std::move(on));
+			return TopBarSuggestionValue(_innerList, &session(), std::move(on));
 		}) | rpl::flatten_latest() | rpl::on_next([=](
 				Ui::SlideWrap<Ui::RpWidget> *raw) {
 			if (raw) {
-				_topBarSuggestion = dialogs->insert(
+				_topBarSuggestion = _innerList->insert(
 					0,
 					object_ptr<Ui::SlideWrap<Ui::RpWidget>>::fromRaw(raw));
 				_topBarSuggestion->heightValue(
@@ -1347,6 +1349,7 @@ void Widget::setupMainMenuToggle() {
 	});
 	_mainMenu.under->stackUnder(_mainMenu.toggle);
 	_mainMenu.toggle->setClickedCallback([=] { showMainMenu(); });
+	_mainMenu.toggle->setIsMenuButton(true);
 	_mainMenu.toggle->setAccessibleName(tr::lng_main_menu(tr::now));
 
 	rpl::single(rpl::empty) | rpl::then(

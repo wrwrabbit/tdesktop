@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/platform_text_recognition.h"
 
 class History;
+struct PollAnswer;
 
 namespace anim {
 enum class activation : uchar;
@@ -376,6 +377,9 @@ private:
 
 	void refreshFromLabel();
 	void refreshCaption();
+	void refreshTimestampDividers(
+		const TextWithEntities &caption,
+		TimeId duration);
 	void refreshMediaViewer();
 	void refreshNavVisibility();
 	void refreshGroupThumbs();
@@ -436,6 +440,12 @@ private:
 	void initSponsoredButton();
 	void refreshSponsoredButtonGeometry();
 	void refreshSponsoredButtonWidth();
+
+	void refreshVoteButton();
+	void refreshVoteButtonGeometry();
+	void refreshPollVotersWidget();
+	void refreshPollVotersWidgetGeometry();
+	[[nodiscard]] const PollAnswer *currentPollAnswer() const;
 
 	void documentUpdated(not_null<DocumentData*> document);
 	void changingMsgId(FullMsgId newId, MsgId oldId);
@@ -741,6 +751,9 @@ private:
 	base::Timer _dropdownShowTimer;
 
 	base::unique_qptr<SponsoredButton> _sponsoredButton;
+	object_ptr<Ui::RoundButton> _voteButton = { nullptr };
+	object_ptr<Ui::RpWidget> _pollVotersWidget = { nullptr };
+	rpl::lifetime _pollUpdateLifetime;
 
 	bool _receiveMouse = true;
 	bool _processingKeyPress = false;
