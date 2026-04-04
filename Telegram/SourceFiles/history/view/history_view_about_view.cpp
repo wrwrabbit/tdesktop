@@ -201,7 +201,7 @@ void UserpicsList::subscribeToUpdates(Fn<void()> callback) {
 		return;
 	}
 	_subscribed = std::make_unique<Subscribed>(std::move(callback));
-	for (const auto peer : _peers) {
+	for (const auto &peer : _peers) {
 		_subscribed->list.push_back({ .peer = peer });
 	}
 }
@@ -636,7 +636,7 @@ bool AboutView::aboveHistory() const {
 		return true;
 	}
 	const auto info = _history->peer->asUser()->botInfo.get();
-	return !(info->canManageTopics
+	return !(info->userCreatesTopics
 		&& info->startToken.isEmpty()
 		&& (!_history->isEmpty() || _history->lastMessage()));
 }
@@ -696,7 +696,7 @@ bool AboutView::refresh() {
 		_version = 0;
 		return false;
 	} else if (_history->peer->isForum()
-			&& info->canManageTopics
+			&& info->userCreatesTopics
 			&& info->startToken.isEmpty()
 			&& (!_history->isEmpty() || _history->lastMessage())) {
 		if (_item) {

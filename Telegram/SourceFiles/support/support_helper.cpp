@@ -719,15 +719,18 @@ QString InterpretSendPath(
 	const auto sendTo = [=](not_null<Data::Thread*> thread) {
 		window->showThread(thread);
 		const auto premium = thread->session().user()->isPremium();
-		thread->session().api().sendFiles(
-			Storage::PrepareMediaList(
-				QStringList(filePath),
-				st::sendMediaPreviewSize,
-				premium),
-			SendMediaType::File,
-			{ caption },
-			nullptr,
-			Api::SendAction(thread));
+		auto list = Storage::PrepareMediaList(
+			QStringList(filePath),
+			st::sendMediaPreviewSize,
+			premium);
+		if (!list.files.empty()) {
+			list.files.back().caption.text = caption;
+			thread->session().api().sendFiles(
+				std::move(list),
+				SendMediaType::File,
+				nullptr,
+				Api::SendAction(thread));
+		}
 	};
 	if (!history) {
 		return "App Error: Could not find channel with id: "

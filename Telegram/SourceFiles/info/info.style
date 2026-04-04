@@ -354,7 +354,7 @@ infoLayerTopBar: InfoTopBar(infoTopBar) {
 	radius: boxRadius;
 }
 
-infoLayerTopBarMenuPosition: point(40px, 37px);
+infoLayerTopBarMenuPosition: point(48px, 37px);
 
 infoTopBarColoredBack: IconButton(infoTopBarBack) {
 	icon: icon {{ "info/info_back", groupCallMembersFg }};
@@ -677,6 +677,7 @@ infoIconLeave: icon {{ "info/info_leave", infoIconFg }};
 infoIconBlock: icon {{ "info/info_block", attentionButtonFg }};
 infoIconMembers: icon {{ "info/info_members", infoIconFg }};
 infoIconPrivacyPolicy: icon {{ "menu/2sv_off", infoIconFg, point(4px, 4px) }};
+infoIconSettings: icon {{ "menu/manage", infoIconFg, point(4px, 4px) }};
 infoInformationIconPosition: point(25px, 12px);
 infoNotificationsIconPosition: point(20px, 5px);
 infoSharedMediaButtonIconPosition: point(20px, 3px);
@@ -1458,3 +1459,5 @@ earnTonIconMargin: margins(0px, 2px, 0px, 0px);
 
 infoMusicButtonRipple: universalRippleAnimation;
 infoMusicButtonPadding: margins(16px, 6px, 13px, 6px);
+
+memberTagPillPadding: margins(5px, -1px, 5px, 0px);

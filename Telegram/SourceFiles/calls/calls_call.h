@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/sender.h"
 #include "mtproto/mtproto_auth_key.h"
 #include "webrtc/webrtc_device_resolver.h"
+#include "webrtc/webrtc_system_audio_capture.h"
 
 namespace Data {
 class GroupCall;
@@ -257,7 +258,12 @@ public:
 	[[nodiscard]] QString cameraSharingDeviceId() const;
 	[[nodiscard]] QString screenSharingDeviceId() const;
 	void toggleCameraSharing(bool enabled);
-	void toggleScreenSharing(std::optional<QString> uniqueId);
+	void toggleScreenSharing(
+		std::optional<QString> uniqueId,
+		bool withAudio = false);
+	[[nodiscard]] bool screenSharingWithAudio() const {
+		return _screenWithAudio;
+	}
 	[[nodiscard]] auto peekVideoCapture() const
 		-> std::shared_ptr<tgcalls::VideoCaptureInterface>;
 
@@ -373,6 +379,8 @@ private:
 	std::shared_ptr<tgcalls::VideoCaptureInterface> _videoCapture;
 	QString _videoCaptureDeviceId;
 	bool _videoCaptureIsScreencast = false;
+	bool _screenWithAudio = false;
+	std::unique_ptr<Webrtc::SystemAudioCapture> _systemAudioCapture;
 	const std::unique_ptr<Webrtc::VideoTrack> _videoIncoming;
 	const std::unique_ptr<Webrtc::VideoTrack> _videoOutgoing;
 

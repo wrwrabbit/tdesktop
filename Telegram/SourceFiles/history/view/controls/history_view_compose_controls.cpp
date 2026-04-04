@@ -280,6 +280,7 @@ FieldHeader::FieldHeader(
 	std::make_unique<ForwardPanel>([=] { customEmojiRepaint(); }))
 , _data(&_show->session().data())
 , _cancel(Ui::CreateChild<Ui::IconButton>(this, st::historyReplyCancel)) {
+	_cancel->setAccessibleName(tr::lng_cancel(tr::now));
 	resize(QSize(parent->width(), st::historyReplyHeight));
 	init();
 }
@@ -1803,7 +1804,8 @@ rpl::producer<std::optional<bool>> ComposeControls::attachRequests() const {
 }
 
 void ComposeControls::setMimeDataHook(MimeDataHook hook) {
-	_field->setMimeDataHook(std::move(hook));
+	_field->setMimeDataHook(
+		WrappedMessageFieldMimeHook(std::move(hook), _field));
 }
 
 bool ComposeControls::confirmMediaEdit(Ui::PreparedList &list) {
@@ -1996,6 +1998,11 @@ void ComposeControls::show() {
 }
 
 void ComposeControls::init() {
+	if (_attachToggle) {
+		_attachToggle->setAccessibleName(tr::lng_attach(tr::now));
+	}
+	_tabbedSelectorToggle->setAccessibleName(tr::lng_emoji_sticker_gif(tr::now));
+
 	initField();
 	initTabbedSelector();
 	initSendButton();
@@ -2014,6 +2021,7 @@ void ComposeControls::init() {
 	}, _wrap->lifetime());
 
 	if (_botCommandStart) {
+		_botCommandStart->setAccessibleName(tr::lng_bot_commands_start(tr::now));
 		_botCommandStart->setClickedCallback([=] { setText({ "/" }); });
 	}
 
@@ -3231,7 +3239,7 @@ void ComposeControls::initVoiceRecordBar() {
 		return Ui::AppInFocus();
 	}) | rpl::on_next([=](not_null<Shortcuts::Request*> request) {
 		using Command = Shortcuts::Command;
-		if (Data::CanSendAnything(_history->peer)) {
+		if (Data::CanSendAnything(_history->peer, !_topicRootId)) {
 			const auto isVoice = request->check(Command::RecordVoice, 1);
 			const auto isRound = !isVoice
 				&& request->check(Command::RecordRound, 1);
@@ -3301,6 +3309,18 @@ SendMenu::Details ComposeControls::sendButtonMenuDetails() const {
 void ComposeControls::updateSendButtonType() {
 	using Type = Ui::SendButton::Type;
 	const auto type = computeSendButtonType();
+	const auto forbidden = [&] {
+		if (type != Type::Record && type != Type::Round) {
+			return false;
+		}
+		if (!_history) {
+			return false;
+		}
+		const auto restriction = (type == Type::Record)
+			? ChatRestriction::SendVoiceMessages
+			: ChatRestriction::SendVideoMessages;
+		return !!Data::RestrictionError(_history->peer, restriction);
+	}();
 	const auto delay = [&] {
 		return (type != Type::Cancel && type != Type::Save)
 			? _slowmodeSecondsLeft.current()
@@ -3317,6 +3337,7 @@ void ComposeControls::updateSendButtonType() {
 			: QColor()),
 		.slowmodeDelay = delay,
 		.starsToSend = shownStarsPerMessage(),
+		.forbidden = forbidden,
 	});
 	_send->setDisabled(_sendDisabledBySlowmode.current()
 		&& (type == Type::Send
@@ -3789,6 +3810,9 @@ bool ComposeControls::updateReplaceMediaButton() {
 	_replaceMedia = std::make_unique<Ui::IconButton>(
 		_wrap.get(),
 		_canReplaceMedia ? st::historyReplaceMedia : st::historyAddMedia);
+	_replaceMedia->setAccessibleName(_canReplaceMedia
+		? tr::lng_attach_replace(tr::now)
+		: tr::lng_attach(tr::now));
 	const auto hideDuration = st::historyReplaceMedia.ripple.hideDuration;
 	_replaceMedia->setClickedCallback([=] {
 		base::call_delayed(hideDuration, _wrap.get(), [=] {
@@ -3954,6 +3978,7 @@ void ComposeControls::initWebpageProcess() {
 		if (flags & Data::PeerUpdate::Flag::Rights) {
 			_preview->checkNow(false);
 			updateFieldPlaceholder();
+			updateSendButtonType();
 		}
 		if (flags & Data::PeerUpdate::Flag::Notifications) {
 			updateSilentBroadcast();
@@ -3965,6 +3990,7 @@ void ComposeControls::initWebpageProcess() {
 			updateFieldPlaceholder();
 		}
 		if (flags & Data::PeerUpdate::Flag::FullInfo) {
+			updateSendButtonType();
 			if (updateBotCommandShown()) {
 				updateControlsVisibility();
 				updateControlsGeometry(_wrap->size());

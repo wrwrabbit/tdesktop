@@ -95,9 +95,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Dialogs {
 namespace {
 
+constexpr auto kFreezeTimeout = crl::time(5000);
 constexpr auto kHashtagResultsLimit = 5;
 constexpr auto kStartReorderThreshold = 30;
-constexpr auto kStartDragToFilterThreshold = 35;
+constexpr auto kStartDragToFilterThresholdX = kStartReorderThreshold;
+constexpr auto kStartDragToFilterThresholdY = 75;
 constexpr auto kQueryPreviewLimit = 32;
 constexpr auto kPreviewPostsLimit = 3;
 
@@ -290,7 +292,8 @@ InnerWidget::InnerWidget(
 , _narrowWidth(st::defaultDialogRow.padding.left()
 	+ st::defaultDialogRow.photoSize
 	+ st::defaultDialogRow.padding.left())
-, _childListShown(std::move(childListShown)) {
+, _childListShown(std::move(childListShown))
+, _freezeTimer([=] { _shownList->unfreeze(); update(); }) {
 	setAttribute(Qt::WA_OpaquePaintEvent, true);
 
 	style::PaletteChanged(
@@ -527,17 +530,18 @@ InnerWidget::InnerWidget(
 			RowDescriptor previous,
 			RowDescriptor next) {
 		const auto update = [&](const RowDescriptor &descriptor) {
+			const auto msgId = descriptor.fullId;
 			if (const auto topic = descriptor.key.topic()) {
 				if (_openedForum == topic->forum()) {
 					updateDialogRow(descriptor);
 				} else {
-					updateDialogRow({ { topic->owningHistory() }, {} });
+					updateDialogRow({ { topic->owningHistory() }, msgId });
 				}
 			} else if (const auto sublist = descriptor.key.sublist()) {
 				if (_savedSublists == sublist->parent()) {
 					updateDialogRow(descriptor);
 				} else {
-					updateDialogRow({ { sublist->owningHistory() }, {} });
+					updateDialogRow({ { sublist->owningHistory() }, msgId });
 				}
 			} else {
 				updateDialogRow(descriptor);
@@ -1676,14 +1680,31 @@ void InnerWidget::mouseMoveEvent(QMouseEvent *e) {
 		return;
 	}
 
+	if (_lastMousePosition && *_lastMousePosition != globalPosition) {
+		if (skipChatsListFreeze()) {
+			unfreezeShownList(true);
+		} else {
+			if (!_freezeTimer.isActive()) {
+				_shownList->freeze();
+			}
+			_freezeTimer.callOnce(kFreezeTimeout);
+		}
+	}
+
 	if (_pressed && (e->buttons() & Qt::LeftButton)) {
 		const auto local = e->pos();
-		const auto outside = _dragging ? !rect().contains(local) : true;
-		const auto distanceExceeded = (local - _dragStart).manhattanLength()
-			>= style::ConvertScale(kStartDragToFilterThreshold);
+		const auto outside = _dragging ? false : true;
+		const auto delta = local - _dragStart;
+		const auto thresholdY = _pressed->entry()->isPinnedDialog(_filterId)
+			? kStartDragToFilterThresholdY
+			: kStartDragToFilterThresholdX;
+		const auto distanceExceeded = std::abs(delta.x())
+				>= style::ConvertScale(kStartDragToFilterThresholdX)
+			|| std::abs(delta.y()) >= style::ConvertScale(thresholdY);
 
 		if (!_qdragging && outside && distanceExceeded) {
 			if (_pressed->history()) {
+				unfreezeShownList(true);
 				_dragging = _pressed;
 				_qdragging = _pressed;
 				InvokeQueued(this, [=] { performDrag(); });
@@ -1700,8 +1721,21 @@ void InnerWidget::mouseMoveEvent(QMouseEvent *e) {
 	}
 }
 
+bool InnerWidget::skipChatsListFreeze() const {
+	return _dragging != nullptr;
+}
+
+void InnerWidget::unfreezeShownList(bool updateIfWasFrozen) {
+	const auto wasFrozen = _freezeTimer.isActive();
+	_freezeTimer.cancel();
+	_shownList->unfreeze();
+	if (updateIfWasFrozen && wasFrozen) {
+		update();
+	}
+}
+
 void InnerWidget::performDrag() {
-	if (!_qdragging) {
+	if (!_qdragging || !session().data().chatsFilters().has()) {
 		return;
 	}
 	const auto history = _qdragging->history();
@@ -1720,6 +1754,13 @@ void InnerWidget::performDrag() {
 	mimeData->setData(
 		u"application/x-telegram-dialog"_q,
 		std::move(byteArray));
+
+	if (const auto u = history->peer->username(); !u.isEmpty()) {
+		mimeData->setText(history->peer->session().createInternalLinkFull(u));
+		mimeData->setData(
+			u"application/x-telegram-input-field"_q,
+			('@' + u).toUtf8());
+	}
 
 	const auto &st = st::defaultDialogRow;
 	auto pixmap = QPixmap(Size(st.height * style::DevicePixelRatio()));
@@ -2255,6 +2296,7 @@ void InnerWidget::checkReorderPinnedStart(QPoint localPosition) {
 			!= Dialogs::Ui::QuickDialogAction::Disabled)) {
 		return;
 	}
+	unfreezeShownList(true);
 	_dragging = _pressed;
 	startReorderPinned(localPosition);
 }
@@ -3038,6 +3080,12 @@ void InnerWidget::updateDialogRow(
 
 void InnerWidget::enterEventHook(QEnterEvent *e) {
 	setMouseTracking(true);
+	if (skipChatsListFreeze()) {
+		unfreezeShownList(false);
+	} else {
+		_shownList->freeze();
+		_freezeTimer.callOnce(kFreezeTimeout);
+	}
 }
 
 Row *InnerWidget::shownRowByKey(Key key) {
@@ -3120,6 +3168,7 @@ void InnerWidget::refreshShownList() {
 		? session().data().chatsFilters().chatsList(_filterId)->indexed()
 		: session().data().chatsList(_openedFolder)->indexed();
 	if (_shownList != list) {
+		_shownList->unfreeze();
 		_shownList = list;
 		_shownList->updateHeights(_narrowRatio);
 	}
@@ -3127,12 +3176,16 @@ void InnerWidget::refreshShownList() {
 
 void InnerWidget::leaveEventHook(QEvent *e) {
 	setMouseTracking(false);
+	unfreezeShownList(false);
 	clearSelection();
+	update();
 }
 
 void InnerWidget::dragLeft() {
 	setMouseTracking(false);
+	unfreezeShownList(false);
 	clearSelection();
+	update();
 }
 
 FilterId InnerWidget::filterId() const {
@@ -3469,6 +3522,7 @@ void InnerWidget::dragPinnedFromTouch() {
 		return;
 	}
 	_dragStart = mapFromGlobal(global);
+	unfreezeShownList(true);
 	_dragging = _selected;
 	const auto now = mapFromGlobal(_touchDragNowGlobal.value_or(global));
 	startReorderPinned(now);
@@ -3668,6 +3722,7 @@ void InnerWidget::appendToFiltered(Key key) {
 }
 
 InnerWidget::~InnerWidget() {
+	unfreezeShownList(false);
 	session().data().stories().decrementPreloadingMainSources();
 	clearSearchResults();
 }
@@ -3782,6 +3837,10 @@ void InnerWidget::trackResultsHistory(not_null<History*> history) {
 }
 
 Data::Thread *InnerWidget::updateFromParentDrag(QPoint globalPosition) {
+	if (!_freezeTimer.isActive()) {
+		_shownList->freeze();
+	}
+	_freezeTimer.callOnce(kFreezeTimeout);
 	selectByMouse(globalPosition);
 
 	const auto fromRow = [](Row *row) {

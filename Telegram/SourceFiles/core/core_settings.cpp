@@ -251,7 +251,8 @@ QByteArray Settings::serialize() const {
 		+ sizeof(qint32) * 8
 		+ sizeof(ushort)
 		+ sizeof(qint32) // _notificationsDisplayChecksum
-		+ Serialize::bytearraySize(callPanelPosition);
+		+ Serialize::bytearraySize(callPanelPosition)
+		+ sizeof(qint32) * 3; // _cornerReply + _systemAccentColorEnabled + _usePlatformTranslation
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -416,7 +417,10 @@ QByteArray Settings::serialize() const {
 			<< qint32(_quickDialogAction)
 			<< _notificationsVolume
 			<< _notificationsDisplayChecksum
-			<< callPanelPosition;
+			<< callPanelPosition
+			<< qint32(_cornerReply.current() ? 1 : 0)
+			<< qint32(_systemAccentColorEnabled ? 1 : 0)
+			<< qint32(_usePlatformTranslation ? 1 : 0);
 	}
 
 	Ensures(result.size() == size);
@@ -519,6 +523,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	qint32 hardwareAcceleratedVideo = _hardwareAcceleratedVideo ? 1 : 0;
 	qint32 chatQuickAction = static_cast<qint32>(_chatQuickAction);
 	qint32 suggestAnimatedEmoji = _suggestAnimatedEmoji ? 1 : 0;
+	qint32 cornerReply = _cornerReply.current() ? 1 : 0;
 	qint32 cornerReaction = _cornerReaction.current() ? 1 : 0;
 	qint32 legacySkipTranslationForLanguage = _translateButtonEnabled ? 1 : 0;
 	qint32 skipTranslationLanguagesCount = 0;
@@ -549,6 +554,10 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	quint32 chatFiltersHorizontal = _chatFiltersHorizontal.current() ? 1 : 0;
 	quint32 quickDialogAction = quint32(_quickDialogAction);
 	ushort notificationsVolume = _notificationsVolume;
+	qint32 systemAccentColorEnabled = _systemAccentColorEnabled
+		? 1
+		: 0;
+	qint32 usePlatformTranslation = _usePlatformTranslation ? 1 : 0;
 
 	stream >> themesAccentColors;
 	if (!stream.atEnd()) {
@@ -889,6 +898,15 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> callPanelPosition;
 	}
+	if (!stream.atEnd()) {
+		stream >> cornerReply;
+	}
+	if (!stream.atEnd()) {
+		stream >> systemAccentColorEnabled;
+	}
+	if (!stream.atEnd()) {
+		stream >> usePlatformTranslation;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -929,6 +947,8 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	case ScreenCorner::BottomLeft: _notificationsCorner = uncheckedNotificationsCorner; break;
 	}
 	_notificationsDisplayChecksum = notificationsDisplayChecksum;
+	_systemAccentColorEnabled = (systemAccentColorEnabled == 1);
+	_usePlatformTranslation = (usePlatformTranslation == 1);
 	_includeMutedCounter = (includeMutedCounter == 1);
 	_includeMutedCounterFolders = (includeMutedCounterFolders == 1);
 	_countUnreadMessages = (countUnreadMessages == 1);
@@ -1063,6 +1083,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 		}
 	}
 	_suggestAnimatedEmoji = (suggestAnimatedEmoji == 1);
+	_cornerReply = (cornerReply == 1);
 	_cornerReaction = (cornerReaction == 1);
 	{ // Parse the legacy translation setting.
 		if (legacySkipTranslationForLanguage == 0) {
@@ -1580,6 +1601,14 @@ void Settings::setTranslateButtonEnabled(bool value) {
 
 bool Settings::translateButtonEnabled() const {
 	return _translateButtonEnabled;
+}
+
+void Settings::setUsePlatformTranslation(bool value) {
+	_usePlatformTranslation = value;
+}
+
+bool Settings::usePlatformTranslation() const {
+	return _usePlatformTranslation;
 }
 
 void Settings::setTranslateChatEnabled(bool value) {
