@@ -386,7 +386,7 @@ HistoryWidget::HistoryWidget(
 	setupSendMenu(_send.get(), [=](SendMenu::Action action, SendMenu::Details) {
 		if (action.type == SendMenu::ActionType::Send) {
 			send(action.options);
-		} else if (action.type == ActionType::DeleteWhenRead) {
+		} else if (action.type == SendMenu::ActionType::DeleteWhenRead) {
 			sendAutoDelete();
 		} else {
 			sendScheduled(action.options);
