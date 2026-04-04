@@ -1259,6 +1259,70 @@ void ShowPrivacyReviewBox(
 			*insecureCount = count;
 		}, box->lifetime());
 
+		{
+			const auto &authList = session->api().authorizations().list();
+			session->api().authorizations().reload();
+			if (!authList.empty()) {
+				Ui::AddSkip(container);
+				Ui::AddSubsectionTitle(
+					container,
+					tr::lng_settings_show_sessions());
+
+				const auto total = int(authList.size());
+				if (total > 6) {
+					container->add(object_ptr<Ui::SettingsButton>(
+						container,
+						rpl::single(
+							tr::lng_settings_review_reason_session(tr::now)),
+						st::settingsAttentionButton));
+				}
+
+				const auto newCountryHashes =
+					NewCountrySessionHashes(authList);
+				for (const auto &entry : authList) {
+					if (entry.hash == 0
+						|| !newCountryHashes.contains(entry.hash)) {
+						continue;
+					}
+					container->add(object_ptr<Ui::SettingsButton>(
+						container,
+						rpl::single(tr::lng_settings_review_session_country(
+							tr::now,
+							lt_country,
+							entry.location)),
+						st::settingsAttentionButton));
+				}
+
+				const auto freshThreshold =
+					base::unixtime::now() - 7 * 86400;
+				for (const auto &entry : authList) {
+					if (entry.hash == 0
+						|| newCountryHashes.contains(entry.hash)
+						|| entry.createdTime < freshThreshold) {
+						continue;
+					}
+					container->add(object_ptr<Ui::SettingsButton>(
+						container,
+						rpl::single(
+							tr::lng_settings_review_reason_session(tr::now)),
+						st::settingsButtonNoIcon));
+					break;
+				}
+
+				container->add(object_ptr<Ui::SettingsButton>(
+					container,
+					tr::lng_settings_show_sessions(),
+					st::settingsButtonNoIcon)
+				)->addClickHandler([=] {
+					const auto weak = base::make_weak(box);
+					controller->showSettings(SessionsId());
+					if (weak) {
+						weak->closeBox();
+					}
+				});
+			}
+		}
+
 		box->addButton(tr::lng_settings_review_all_good(), [=] {
 			MarkPrivacyReviewed(*insecureCount);
 			box->closeBox();
@@ -1289,7 +1353,10 @@ void BuildPrivacySecuritySectionContent(SectionBuilder &builder) {
 		InsecurePrivacyCount(session),
 		HasSessionAnomaly(session),
 		std::move(reviewTrigger)
-	) | rpl::map([](int insecure, bool anomaly, int) {
+	) | rpl::map([session](int insecure, bool anomaly, int) {
+		if (session->domain().local().IsFake()) {
+			return false;
+		}
 		const auto last = PTG::GetPrivacyLastReviewTime();
 		const auto now = base::unixtime::now();
 		const auto overdue = (last == 0) || (now - last > 30 * 86400);
@@ -1301,14 +1368,18 @@ void BuildPrivacySecuritySectionContent(SectionBuilder &builder) {
 
 	builder.addButton({
 		.id = u"privacy/review_banner"_q,
-		.title = InsecurePrivacyCount(
-			session
-		) | rpl::map([](int count) {
+		.title = rpl::combine(
+			InsecurePrivacyCount(session),
+			HasSessionAnomaly(session)
+		) | rpl::map([](int count, bool anomaly) {
 			if (count > 0) {
 				return tr::lng_settings_review_reason_insecure(
 					tr::now,
 					lt_count,
 					count);
+			}
+			if (anomaly) {
+				return tr::lng_settings_review_reason_session(tr::now);
 			}
 			return tr::lng_settings_review_privacy(tr::now);
 		}),

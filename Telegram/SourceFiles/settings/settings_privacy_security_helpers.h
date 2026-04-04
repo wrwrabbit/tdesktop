@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "api/api_authorizations.h"
 #include "api/api_user_privacy.h"
 
 namespace Ui {
@@ -38,6 +39,9 @@ void ApplyMaxPrivacy(not_null<Main::Session*> session);
 
 [[nodiscard]] rpl::producer<bool> HasSessionAnomaly(
 	not_null<Main::Session*> session);
+
+[[nodiscard]] base::flat_set<uint64> NewCountrySessionHashes(
+	const Api::Authorizations::List &list);
 
 void RunBackgroundSessionCheck(not_null<Main::Session*> session);
 

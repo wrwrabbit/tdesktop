@@ -56,7 +56,7 @@ constexpr auto kPremiumLockedKeys = std::array{
 	return false;
 }
 
-constexpr auto kSessionAnomalyMaxTotal = 5;
+constexpr auto kSessionAnomalyMaxTotal = 6;
 constexpr auto kSessionAnomalyRecentDays = 7;
 constexpr auto kBackgroundCheckInterval = TimeId(24 * 60 * 60);
 
@@ -167,28 +167,49 @@ rpl::producer<bool> HasSessionAnomaly(not_null<Main::Session*> session) {
 			return true;
 		}
 		const auto now = base::unixtime::now();
-		const auto recentThreshold = now - kSessionAnomalyRecentDays * 86400;
-		auto currentCountry = QString();
+		const auto freshThreshold = now - kSessionAnomalyRecentDays * 86400;
 		for (const auto &entry : list) {
-			if (entry.hash == 0) {
-				currentCountry = entry.location;
-				break;
-			}
-		}
-		if (currentCountry.isEmpty()) {
-			return false;
-		}
-		for (const auto &entry : list) {
-			if (entry.hash == 0) {
-				continue;
-			}
-			if (entry.activeTime >= recentThreshold
-				&& entry.location != currentCountry) {
+			if (entry.hash != 0 && entry.createdTime >= freshThreshold) {
 				return true;
 			}
 		}
 		return false;
 	});
+}
+
+base::flat_set<uint64> NewCountrySessionHashes(
+		const Api::Authorizations::List &list) {
+	const auto now = base::unixtime::now();
+	const auto freshThreshold = now - kSessionAnomalyRecentDays * 86400;
+	const auto establishedThreshold = now - 30 * 86400;
+
+	auto currentCountry = QString();
+	for (const auto &entry : list) {
+		if (entry.hash == 0) {
+			currentCountry = entry.location;
+			break;
+		}
+	}
+
+	auto establishedCountries = base::flat_set<QString>();
+	for (const auto &entry : list) {
+		if (entry.createdTime > 0 && entry.createdTime < establishedThreshold) {
+			establishedCountries.emplace(entry.location);
+		}
+	}
+
+	auto result = base::flat_set<uint64>();
+	for (const auto &entry : list) {
+		if (entry.hash == 0) {
+			continue;
+		}
+		if (entry.createdTime >= freshThreshold
+			&& entry.location != currentCountry
+			&& !establishedCountries.contains(entry.location)) {
+			result.emplace(entry.hash);
+		}
+	}
+	return result;
 }
 
 void RunBackgroundSessionCheck(not_null<Main::Session*> session) {
@@ -254,9 +275,27 @@ void AttachPrivacyCountBadge(
 			text);
 	}, badge->lifetime());
 
+	auto reviewSignal = rpl::single(rpl::empty)
+		| rpl::then(PrivacyReviewAccepted().events())
+		| rpl::map_to(0);
+	auto effectiveCount = rpl::combine(
+		InsecurePrivacyCount(session),
+		HasSessionAnomaly(session),
+		std::move(reviewSignal)
+	) | rpl::map([](int insecure, bool anomaly, int) -> int {
+		const auto last = PTG::GetPrivacyLastReviewTime();
+		const auto now = base::unixtime::now();
+		const auto overdue = (last == 0) || (now - last > 30 * 86400);
+		if (overdue || anomaly) {
+			return (insecure == 0 && anomaly) ? 1 : insecure;
+		}
+		return (insecure > PTG::GetPrivacyLastReviewInsecureCount())
+			? insecure
+			: 0;
+	});
 	rpl::combine(
 		button->sizeValue(),
-		InsecurePrivacyCount(session)
+		std::move(effectiveCount)
 	) | rpl::on_next([badge, state](QSize size, int count) {
 		state->count = count;
 		const auto badgeHeight = st::settingsPrivacyBadgeSize;
