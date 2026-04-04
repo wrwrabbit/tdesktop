@@ -391,10 +391,12 @@ void CreateManagedBotBox(
 							tr::rich),
 						u"managed_bots"_q);
 				}
+			} else if (MTP::IsFloodError(error)) {
+				show->showToast(tr::lng_flood_error(tr::now));
 			} else {
 				show->showToast(type);
 			}
-		}).send();
+		}).handleFloodErrors().send();
 	};
 
 	QObject::connect(username, &Ui::UsernameInput::changed, [=] {
