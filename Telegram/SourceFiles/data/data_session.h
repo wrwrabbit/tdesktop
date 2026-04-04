@@ -757,6 +757,9 @@ public:
 		const MTPBotApp &data);
 
 	[[nodiscard]] not_null<PollData*> poll(PollId id);
+	[[nodiscard]] HistoryItem *findItemForPoll(PollId id) const;
+	[[nodiscard]] std::vector<not_null<PeerData*>> pollRecentVoters(
+		PollId id) const;
 	not_null<PollData*> processPoll(const MTPPoll &data);
 	not_null<PollData*> processPoll(const MTPDmessageMediaPoll &data);
 
@@ -849,6 +852,7 @@ public:
 	[[nodiscard]] bool hasPendingWebPageGamePollTodoListNotification() const;
 	void sendWebPageGamePollTodoListNotifications();
 	[[nodiscard]] rpl::producer<not_null<WebPageData*>> webPageUpdates() const;
+	[[nodiscard]] rpl::producer<not_null<PollData*>> pollUpdates() const;
 
 	void channelDifferenceTooLong(not_null<ChannelData*> channel);
 	[[nodiscard]] rpl::producer<not_null<ChannelData*>> channelDifferenceTooLong() const;
@@ -1249,6 +1253,7 @@ private:
 	base::flat_set<not_null<TodoListData*>> _todoListsUpdated;
 
 	rpl::event_stream<not_null<WebPageData*>> _webpageUpdates;
+	rpl::event_stream<not_null<PollData*>> _pollUpdates;
 	rpl::event_stream<not_null<ChannelData*>> _channelDifferenceTooLong;
 	rpl::event_stream<not_null<DocumentData*>> _documentLoadProgress;
 	base::flat_set<not_null<ChannelData*>> _suggestToGigagroup;

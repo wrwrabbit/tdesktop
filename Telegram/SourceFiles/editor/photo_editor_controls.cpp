@@ -12,10 +12,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/image/image_prepare.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
 #include "styles/style_editor.h"
+#include "styles/style_media_player.h" // mediaPlayerMenuCheck
 
 #include <QRegion>
 
@@ -204,8 +206,10 @@ PhotoEditorControls::PhotoEditorControls(
 	not_null<Ui::RpWidget*> parent,
 	std::shared_ptr<Controllers> controllers,
 	const PhotoModifications modifications,
-	const EditorData &data)
+	const EditorData &data,
+	const QSize &imageSize)
 : RpWidget(parent)
+, _imageSize(imageSize)
 , _bg(st::roundedBg)
 , _buttonHeight(st::photoEditorButtonBarHeight)
 , _transformButtons(base::make_unique_q<ButtonBar>(this, _bg))
@@ -235,6 +239,11 @@ PhotoEditorControls::PhotoEditorControls(
 , _paintModeButton(base::make_unique_q<Ui::IconButton>(
 	_transformButtons,
 	st::photoEditorPaintModeButton))
+, _cropRatioButton(data.keepAspectRatio
+	? nullptr
+	: base::make_unique_q<Ui::IconButton>(
+		_transformButtons,
+		st::photoEditorCropRatioButton))
 , _transformDone(base::make_unique_q<EdgeButton>(
 	_transformButtons,
 	(data.confirm.isEmpty() ? tr::lng_box_done(tr::now) : data.confirm),
@@ -430,6 +439,50 @@ PhotoEditorControls::PhotoEditorControls(
 		_flipButton->setIconOverride(icon, icon);
 	}, _flipButton->lifetime());
 
+	if (_cropRatioButton) {
+		const auto imageRatio = float64(
+			_imageSize.width()) / _imageSize.height();
+		const auto ratiosMatch = [](float64 a, float64 b) {
+			return std::abs(a - b) < 0.01;
+		};
+		_cropRatioButton->setClickedCallback([=] {
+			_ratioMenu = base::make_unique_q<Ui::PopupMenu>(
+				_cropRatioButton.get(),
+				st::photoEditorCropRatioMenu);
+			_ratioMenu->setForcedOrigin(
+				Ui::PanelAnimation::Origin::BottomRight);
+			const auto check = &st::mediaPlayerMenuCheck;
+			const auto add = [&](const QString &text, float64 ratio) {
+				const auto selected = ratiosMatch(_currentRatio, ratio);
+				_ratioMenu->addAction(
+					text,
+					[=] {
+						if (ratiosMatch(_currentRatio, ratio)) {
+							return;
+						}
+						_currentRatio = ratio;
+						_aspectRatioChanges.fire_copy(ratio);
+						const auto locked = (ratio > 0.);
+						const auto icon = locked
+							? &st::photoEditorCropRatioIconActive
+							: nullptr;
+						_cropRatioButton->setIconOverride(icon, icon);
+					},
+					selected ? check : nullptr);
+			};
+			add(tr::lng_photo_editor_crop_original(tr::now), imageRatio);
+			add(tr::lng_photo_editor_crop_square(tr::now), 1.);
+			add(u"3:2"_q, 3. / 2.);
+			add(u"16:9"_q, 16. / 9.);
+			add(u"9:16"_q, 9. / 16.);
+			add(tr::lng_photo_editor_crop_free(tr::now), 0.);
+			const auto button = _cropRatioButton.get();
+			const auto bottomRight = button->mapToGlobal(
+				QPoint(button->width(), 0));
+			_ratioMenu->popup(bottomRight);
+		});
+	}
+
 	updateInputMask();
 
 }
@@ -463,11 +516,15 @@ rpl::producer<> PhotoEditorControls::cancelRequests() const {
 		_transformCancel->clicks() | rpl::to_empty,
 		_paintCancel->clicks() | rpl::to_empty,
 		_keyPresses.events(
-		) | rpl::filter([=](not_null<QKeyEvent*> e) {
-			const auto key = e->key();
-			return (key == Qt::Key_Escape)
-				&& !_toggledBarAnimation.animating();
-		}) | rpl::to_empty);
+	) | rpl::filter([=](not_null<QKeyEvent*> e) {
+		const auto key = e->key();
+		return (key == Qt::Key_Escape)
+			&& !_toggledBarAnimation.animating();
+	}) | rpl::to_empty);
+}
+
+rpl::producer<float64> PhotoEditorControls::aspectRatioChanges() const {
+	return _aspectRatioChanges.events();
 }
 
 int PhotoEditorControls::bottomButtonsTop() const {

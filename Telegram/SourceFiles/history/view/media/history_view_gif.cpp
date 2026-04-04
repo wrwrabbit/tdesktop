@@ -450,7 +450,9 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 	const auto inWebPage = (_parent->media() != this);
 	const auto isRound = _data->isVideoMessage();
 
-	const auto rounding = inWebPage
+	const auto rounding = (inWebPage
+			// Dangerous change.
+			&& bubbleRounding() == Ui::BubbleRounding())
 		? std::optional<Ui::BubbleRounding>()
 		: adjustedBubbleRounding();
 

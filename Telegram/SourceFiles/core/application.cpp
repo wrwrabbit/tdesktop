@@ -73,6 +73,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/spoiler_mess.h"
 #include "ui/cached_round_corners.h"
 #include "ui/power_saving.h"
+#include "ui/screen_reader_mode.h"
 #include "storage/storage_domain.h"
 #include "storage/storage_databases.h"
 #include "storage/localstorage.h"
@@ -500,6 +501,8 @@ void Application::startSettingsAndBackground() {
 	Local::rewriteSettingsIfNeeded();
 	Window::Theme::Background()->start();
 	checkSystemDarkMode();
+	Ui::SetScreenReaderModeDisabled(
+		settings().readPref<bool>(kScreenReaderModeDisabledKey));
 }
 
 void Application::checkSystemDarkMode() {
@@ -658,6 +661,7 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 	switch (e->type()) {
 	case QEvent::KeyPress: {
 		updateNonIdle();
+		_inAppKeyPressed.fire({});
 		const auto event = static_cast<QKeyEvent*>(e);
 		if (base::Platform::GlobalShortcuts::IsToggleFullScreenKey(event)
 			&& toggleActiveWindowFullScreen()) {
@@ -735,6 +739,39 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 			Core::App().refreshApplicationIcon();
 			Core::App().tray().updateIconCounters();
 		}
+	} break;
+	}
+
+	switch (e->type()) {
+	case QEvent::TouchBegin:
+		Ui::Integration::Instance().touchCounterIncrement();
+		[[fallthrough]];
+	case QEvent::TouchUpdate:
+	case QEvent::TouchEnd: {
+		_lastTouchProcessed = object->isWidgetType();
+	} break;
+
+	case QEvent::MouseButtonPress:
+	case QEvent::MouseButtonRelease:
+	case QEvent::MouseButtonDblClick:
+	case QEvent::MouseMove: {
+		const auto ev = static_cast<QMouseEvent*>(e);
+		if (ev->source() == Qt::MouseEventSynthesizedBySystem) {
+			const auto widget = static_cast<QWidget*>(object);
+			if (_lastTouchProcessed
+				|| (object->isWidgetType()
+					&& widget->testAttribute(Qt::WA_AcceptTouchEvents))) {
+				_lastMouseIgnored = true;
+				return true;
+			}
+		}
+		_lastMouseIgnored = false;
+	} break;
+
+	case QEvent::ContextMenu: {
+		const auto ev = static_cast<QContextMenuEvent*>(e);
+		return (ev->reason() == QContextMenuEvent::Mouse)
+			&& _lastMouseIgnored;
 	} break;
 	}
 
@@ -1283,6 +1320,10 @@ crl::time Application::lastNonIdleTime() const {
 	return std::max(
 		base::Platform::LastUserInputTime().value_or(0),
 		_lastNonIdleTime);
+}
+
+rpl::producer<> Application::inAppKeyPressed() const {
+	return _inAppKeyPressed.events();
 }
 
 rpl::producer<bool> Application::passcodeLockChanges() const {

@@ -773,6 +773,9 @@ std::shared_ptr<Main::SessionShow> LocationPicker::uiShow() {
 }
 
 bool LocationPicker::Available(const LocationPickerConfig &config) {
+#ifdef _DEBUG
+	return true;
+#endif
 	const auto &availability = Core::CachedWebviewAvailability();
 	return availability.customSchemeRequests
 		&& availability.customReferer

@@ -661,6 +661,7 @@ infoIconMediaGroup: icon {{ "info/info_common_groups", infoIconFg }};
 infoIconMediaChannel: icon {{ "menu/channel", infoIconFg, point(4px, 4px) }};
 infoIconMediaBot: icon {{ "menu/bot", infoIconFg, point(4px, 4px) }};
 infoIconMediaVoice: icon {{ "info/info_media_voice", infoIconFg }};
+infoIconMediaPoll: icon {{ "menu/create_poll", infoIconFg, point(4px, 4px) }};
 infoIconMediaStories: icon {{ "info/info_media_stories", infoIconFg }};
 infoIconMediaSaved: icon {{ "info/info_media_saved", infoIconFg }};
 infoIconMediaStoriesArchive: icon {{ "info/info_stories_archive", infoIconFg }};
@@ -1073,6 +1074,7 @@ topBarInfo: IconButton(topBarSearch) {
 }
 topBarInfoActive: icon {{ "top_bar_profile", windowActiveTextFg }};
 topBarActionSkip: 10px;
+topBarActionButtonLargeRadius: 8px;
 
 topBarInfoButtonSize: size(52px, topBarHeight);
 topBarInfoButtonInnerSize: 42px;

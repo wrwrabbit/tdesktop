@@ -596,6 +596,7 @@ void SessionNavigation::showMessageByLinkResolved(
 	params.origin = SectionShow::OriginMessage{
 		info.clickFromMessageId
 	};
+	params.highlight.pollOption = info.pollOption;
 	const auto peer = item->history()->peer;
 	const auto topicId = peer->isForum() ? item->topicRootId() : 0;
 	if (topicId) {
@@ -615,6 +616,7 @@ void SessionNavigation::showPeerByLinkResolved(
 	params.origin = SectionShow::OriginMessage{
 		info.clickFromMessageId
 	};
+	params.highlight.pollOption = info.pollOption;
 	if (info.voicechatHash && peer->isChannel()) {
 		// First show the channel itself.
 		crl::on_main(this, [=] {
@@ -675,22 +677,6 @@ void SessionNavigation::showPeerByLinkResolved(
 		showPeerInfo(peer, params);
 	} else if (resolveType == ResolveType::HashtagSearch) {
 		searchMessages(info.text, peer->owner().history(peer));
-	} else if (peer->isForum() && resolveType != ResolveType::Boost) {
-		if (!msgId || !useRequestedMessageId) {
-			applyBotStartToken();
-			parentController()->showForum(peer->forum(), params, msgId);
-		} else if (const auto item = peer->owner().message(peer, msgId)) {
-			showMessageByLinkResolved(item, info);
-		} else {
-			const auto callback = crl::guard(this, [=] {
-				if (const auto item = peer->owner().message(peer, msgId)) {
-					showMessageByLinkResolved(item, info);
-				} else {
-					showPeerHistory(peer, params, msgId);
-				}
-			});
-			peer->session().api().requestMessageData(peer, msgId, callback);
-		}
 	} else if (info.storyParam == u"live"_q) {
 		parentController()->openPeerStories(peer->id, std::nullopt, true);
 	} else if (const auto storyId = info.storyParam.toInt()) {
@@ -754,6 +740,24 @@ void SessionNavigation::showPeerByLinkResolved(
 			scope,
 			info.startToken,
 			info.startAdminRights);
+	} else if (resolveType == ResolveType::Boost && peer->isChannel()) {
+		resolveBoostState(peer->asChannel());
+	} else if (peer->isForum()) {
+		if (!msgId || !useRequestedMessageId) {
+			applyBotStartToken();
+			parentController()->showForum(peer->forum(), params, msgId);
+		} else if (const auto item = peer->owner().message(peer, msgId)) {
+			showMessageByLinkResolved(item, info);
+		} else {
+			const auto callback = crl::guard(this, [=] {
+				if (const auto item = peer->owner().message(peer, msgId)) {
+					showMessageByLinkResolved(item, info);
+				} else {
+					showPeerHistory(peer, params, msgId);
+				}
+			});
+			peer->session().api().requestMessageData(peer, msgId, callback);
+		}
 	} else if (resolveType == ResolveType::Mention) {
 		if (bot || peer->isChannel()) {
 			crl::on_main(this, [=] {
@@ -762,8 +766,6 @@ void SessionNavigation::showPeerByLinkResolved(
 		} else {
 			showPeerInfo(peer, params);
 		}
-	} else if (resolveType == ResolveType::Boost && peer->isChannel()) {
-		resolveBoostState(peer->asChannel());
 	} else if (resolveType == ResolveType::ChannelDirect
 		&& !peer->isFullLoaded()) {
 		_waitingDirectChannel = peer;

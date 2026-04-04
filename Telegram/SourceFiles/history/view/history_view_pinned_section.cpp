@@ -268,7 +268,8 @@ bool PinnedWidget::cornerButtonsUnreadMayBeShown() {
 }
 
 bool PinnedWidget::cornerButtonsHas(CornerButtonType type) {
-	return (type == CornerButtonType::Down);
+	return (type == CornerButtonType::Down)
+		|| (type == CornerButtonType::PollVotes);
 }
 
 void PinnedWidget::showAtPosition(

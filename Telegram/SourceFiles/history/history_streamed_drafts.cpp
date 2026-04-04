@@ -35,6 +35,9 @@ void HistoryStreamedDrafts::apply(
 		PeerId fromId,
 		TimeId when,
 		const MTPDsendMessageTextDraftAction &data) {
+	const auto replyToId = rootId
+		? FullMsgId(_history->peer->id, rootId)
+		: FullMsgId();
 	if (!rootId) {
 		rootId = Data::ForumTopic::kGeneralId;
 	}
@@ -56,6 +59,7 @@ void HistoryStreamedDrafts::apply(
 			.flags = MessageFlag::Local | MessageFlag::HasReplyInfo,
 			.from = fromId,
 			.replyTo = {
+				.messageId = replyToId,
 				.topicRootId = rootId,
 			},
 			.date = when,

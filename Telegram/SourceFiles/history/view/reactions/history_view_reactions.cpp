@@ -839,24 +839,8 @@ void InlineList::animate(
 
 void InlineList::resolveUserpicsImage(const Button &button) const {
 	const auto userpics = button.userpics.get();
-	const auto regenerate = [&] {
-		if (!userpics) {
-			return false;
-		} else if (userpics->image.isNull()) {
-			return true;
-		}
-		for (auto &entry : userpics->list) {
-			const auto peer = entry.peer;
-			auto &view = entry.view;
-			const auto wasView = view.cloud.get();
-			if (peer->userpicUniqueKey(view) != entry.uniqueKey
-				|| view.cloud.get() != wasView) {
-				return true;
-			}
-		}
-		return false;
-	}();
-	if (!regenerate) {
+	if (!userpics
+		|| !NeedRegenerateUserpics(userpics->image, userpics->list)) {
 		return;
 	}
 	GenerateUserpicsInRow(

@@ -189,6 +189,7 @@ public:
 
 	QRect effectIconGeometry() const override;
 	QRect innerGeometry() const override;
+	QPoint mediaTopLeft() const override;
 	[[nodiscard]] BottomRippleMask bottomRippleMask(int buttonHeight) const;
 
 private:
@@ -349,6 +350,8 @@ private:
 	void refreshTopicButton();
 	void refreshInfoSkipBlock(HistoryItem *textItem);
 	[[nodiscard]] int monospaceMaxWidth() const;
+	[[nodiscard]] int bubbleTextWidth(int bubbleWidth) const;
+	[[nodiscard]] int bubbleTextualWidth() const;
 
 	void ensureSummarizeButton() const;
 	void paintSummarize(
@@ -368,6 +371,7 @@ private:
 	[[nodiscard]] ClickHandlerPtr createGoToCommentsLink() const;
 	[[nodiscard]] ClickHandlerPtr psaTooltipLink() const;
 	void psaTooltipToggled(bool shown) const;
+	void invalidateTextDependentCache() override;
 
 	void refreshRightBadge();
 	[[nodiscard]] int rightBadgeWidth() const;
@@ -387,12 +391,16 @@ private:
 	mutable std::unique_ptr<FromNameStatus> _fromNameStatus;
 	mutable std::unique_ptr<Ui::RoundCheckbox> _selectionRoundCheckbox;
 	mutable int _fromNameVersion = 0;
-	uint32 _bubbleWidthLimit : 27 = 0;
+	mutable int _bubbleTextualWidthMinimum : 16 = -1;
+	mutable int _bubbleTextualWidthCache : 16 = 0;
+	uint32 _bubbleWidthLimit : 26 = 0;
 	uint32 _invertMedia : 1 = 0;
 	uint32 _hideReply : 1 = 0;
 	uint32 _postShowingAuthor : 1 = 0;
+	mutable uint32 _fromLinkRipplePointSet : 1 = 0;
 
 	BottomInfo _bottomInfo;
+	mutable QPoint _lastMediaPosition;
 
 };
 
