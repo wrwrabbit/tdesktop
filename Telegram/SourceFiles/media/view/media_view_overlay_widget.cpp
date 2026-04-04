@@ -5241,11 +5241,14 @@ void OverlayWidget::applyVideoQuality(VideoQuality value) {
 	const auto startStreaming = StartStreaming(false, time);
 	if (!canInitStreaming() || !initStreaming(startStreaming)) {
 		redisplayContent();
-	} else if (_fullScreenVideo != wasFullScreen) {
-		_fullScreenVideo = wasFullScreen;
-		if (_streamed->controls) {
-			_streamed->controls->setInFullScreen(_fullScreenVideo);
+	} else {
+		if (_fullScreenVideo != wasFullScreen) {
+			_fullScreenVideo = wasFullScreen;
+			if (_streamed->controls) {
+				_streamed->controls->setInFullScreen(_fullScreenVideo);
+			}
 		}
+		refreshCaption();
 	}
 }
 
