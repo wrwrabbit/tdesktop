@@ -7746,6 +7746,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_ptg_location_card_make_portable_pro1" = "Removes Telegram from Add/Remove Programs";
 "lng_ptg_location_card_make_portable_pro2" = "Deletes the uninstaller — your data and settings are not affected";
 "lng_ptg_location_card_make_portable_pro3" = "After conversion, move options become available";
+"lng_ptg_location_card_make_portable_pro4" = "Removes the Start Menu shortcut";
 "lng_ptg_location_card_make_portable_btn" = "Make portable";
 
 "lng_settings_lock_down_privacy#one" = "Lock Down Privacy ({count} not secure)";

@@ -244,6 +244,7 @@ bool ApplyPendingSwitch() {
 			u"log.txt"_q,
 			cExeName(),
 			u"Updater.exe"_q,
+			u"uninstall.exe"_q,
 		}) {
 			const auto filePath = cleanSource + '/' + name;
 			if (!QFile::exists(filePath)) {
@@ -326,6 +327,12 @@ bool ApplyPendingSwitch() {
 					sourceEntries.join(u", "_q)));
 			}
 		}
+#ifdef Q_OS_WIN
+		if (QDir::cleanPath(sourceWorkingDir).toLower()
+				== QDir::cleanPath(psAppDataPath()).toLower()) {
+			RemoveStartMenuShortcut(cleanSource + '/' + cExeName());
+		}
+#endif
 	}
 
 	return true;

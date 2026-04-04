@@ -268,11 +268,13 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 				tr::lng_ptg_location_card_make_portable_pro1(tr::now),
 				tr::lng_ptg_location_card_make_portable_pro2(tr::now),
 				tr::lng_ptg_location_card_make_portable_pro3(tr::now),
+				tr::lng_ptg_location_card_make_portable_pro4(tr::now),
 			},
 			tr::lng_ptg_location_card_make_portable_btn(),
 			[=] {
 				RemoveInnoSetupRegistryKey();
 				QFile::remove(cExeDir() + u"uninstall.exe"_q);
+				RemoveStartMenuShortcut(cExeDir() + cExeName());
 				box->closeBox();
 				box->uiShow()->showBox(Box([firstRun](not_null<Ui::GenericBox*> newBox) {
 					FillLocationChoiceBoxImpl(newBox, firstRun);
