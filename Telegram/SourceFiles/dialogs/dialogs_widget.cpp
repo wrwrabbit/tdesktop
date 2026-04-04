@@ -4307,6 +4307,10 @@ void Widget::paintEvent(QPaintEvent *e) {
 		const auto top = _searchControls->y()
 			+ _searchControls->height()
 			+ suggestionsSkip;
+		const auto aboveBottom = above.y() + above.height();
+		if (top > aboveBottom) {
+			p.fillRect(0, aboveBottom, width(), top - aboveBottom, bg);
+		}
 		p.drawPixmapLeft(0, top, width(), _widthAnimationCache);
 		belowTop = top
 			+ (_widthAnimationCache.height() / style::DevicePixelRatio());
