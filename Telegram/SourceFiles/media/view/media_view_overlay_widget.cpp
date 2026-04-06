@@ -6261,6 +6261,38 @@ void OverlayWidget::handleKeyPress(not_null<QKeyEvent*> e) {
 		} else if (key == Qt::Key_Space) {
 			playbackPauseResume();
 			return;
+		} else if (modifiers.testFlag(Qt::AltModifier)
+			&& (key == Qt::Key_Left || key == Qt::Key_Right)
+			&& _streamed->controls
+			&& !_streamed->controls->timestamps().empty()) {
+			const auto &timestamps = _streamed->controls->timestamps();
+			const auto &state = _streamed->instance.info().video.state;
+			const auto duration = state.duration;
+			if (duration > 0) {
+				const auto progress = state.position
+					/ float64(duration);
+				const auto eps = 0.005;
+				if (key == Qt::Key_Right) {
+					for (const auto &ts : timestamps) {
+						if (ts.position > progress + eps) {
+							activateControls();
+							restartAtProgress(ts.position);
+							return;
+						}
+					}
+				} else {
+					for (auto i = int(timestamps.size()) - 1; i >= 0; --i) {
+						if (timestamps[i].position < progress - eps) {
+							activateControls();
+							restartAtProgress(timestamps[i].position);
+							return;
+						}
+					}
+					activateControls();
+					restartAtSeekPosition(0);
+				}
+			}
+			return;
 		} else if (_fullScreenVideo) {
 			if (key == Qt::Key_Escape) {
 				playbackToggleFullScreen();

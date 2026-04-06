@@ -72,6 +72,9 @@ public:
 	void setTimestamps(std::vector<TimestampData> timestamps);
 	void setInFullScreen(bool inFullScreen);
 	[[nodiscard]] bool hasTimestamps() const;
+	[[nodiscard]] auto &timestamps() const {
+		return _timestamps;
+	}
 	[[nodiscard]] bool hasMenu() const;
 	[[nodiscard]] bool dragging() const;
 
