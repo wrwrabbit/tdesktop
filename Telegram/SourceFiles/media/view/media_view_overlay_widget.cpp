@@ -3526,6 +3526,12 @@ Data::FileOrigin OverlayWidget::fileOrigin() const {
 	} else if (_message) {
 		return _message->fullId();
 	} else if (_photo && _user) {
+		const auto dominated = (_user->hasPersonalPhoto()
+				&& _photo->id == _user->userpicPhotoId())
+			|| SyncUserFallbackPhotoViewer(_user) == _photo->id;
+		if (dominated) {
+			return Data::FileOriginFullUser(peerToUser(_user->id));
+		}
 		return Data::FileOriginUserPhoto(peerToUser(_user->id), _photo->id);
 	} else if (_photo && _peer && _peer->userpicPhotoId() == _photo->id) {
 		return Data::FileOriginPeerPhoto(_peer->id);
@@ -3541,6 +3547,12 @@ Data::FileOrigin OverlayWidget::fileOrigin(const Entity &entity) const {
 	}
 	const auto photo = v::get<not_null<PhotoData*>>(entity.data);
 	if (_user) {
+		const auto dominated = (_user->hasPersonalPhoto()
+				&& photo->id == _user->userpicPhotoId())
+			|| SyncUserFallbackPhotoViewer(_user) == photo->id;
+		if (dominated) {
+			return Data::FileOriginFullUser(peerToUser(_user->id));
+		}
 		return Data::FileOriginUserPhoto(peerToUser(_user->id), photo->id);
 	} else if (_peer && _peer->userpicPhotoId() == photo->id) {
 		return Data::FileOriginPeerPhoto(_peer->id);

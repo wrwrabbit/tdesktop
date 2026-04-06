@@ -174,7 +174,11 @@ struct FileReferenceAccumulator {
 		});
 	}
 	void push(const MTPusers_UserFull &data) {
-		push(data.data().vfull_user().data().vpersonal_photo());
+		const auto &full = data.data().vfull_user().data();
+		push(full.vpersonal_photo());
+		push(full.vfallback_photo());
+		push(full.vprofile_photo());
+	}
 	}
 	void push(const MTPmessages_RecentStickers &data) {
 		data.match([&](const MTPDmessages_recentStickers &data) {
