@@ -695,7 +695,6 @@ proxyApplyBoxSponsorMargin: margins(13px, 8px, 13px, 8px);
 proxyApplyBoxButton: RoundButton(defaultActiveButton) {
 	height: 38px;
 	textTop: 10px;
-	radius: 19px;
 	style: semiboldTextStyle;
 }
 proxyApplyBox: Box(defaultBox) {

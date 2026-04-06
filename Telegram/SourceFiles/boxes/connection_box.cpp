@@ -1672,6 +1672,7 @@ void ProxiesBoxController::ShowApplyConfirmation(
 				Local::writeSettings();
 				box->closeBox();
 			});
+		enableButton->setFullRadius(true);
 		box->events() | rpl::on_next([=](not_null<QEvent*> e) {
 			if ((e->type() != QEvent::KeyPress) || !enableButton) {
 				return;
