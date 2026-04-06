@@ -865,10 +865,10 @@ void BuildCurrencyWithdrawalSection(
 			object_ptr<Ui::RoundButton>(
 				container,
 				rpl::never<QString>(),
-				stButton,
-				Ui::RoundButtonTextToUpper),
+				stButton),
 			st::boxRowPadding,
 			style::al_top);
+		button->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 
 		const auto label = Ui::CreateChild<Ui::FlatLabel>(
 			button,

@@ -117,10 +117,10 @@ TopBarWidget::TopBarWidget(
 : RpWidget(parent)
 , _controller(controller)
 , _primaryWindow(controller->isPrimary())
-, _clear(this, tr::lng_selected_clear(), st::topBarClearButton, Ui::RoundButtonTextToUpper)
-, _forward(this, tr::lng_selected_forward(), st::defaultActiveButton, Ui::RoundButtonTextToUpper)
-, _sendNow(this, tr::lng_selected_send_now(), st::defaultActiveButton, Ui::RoundButtonTextToUpper)
-, _delete(this, tr::lng_selected_delete(), st::defaultActiveButton, Ui::RoundButtonTextToUpper)
+, _clear(this, tr::lng_selected_clear(), st::topBarClearButton)
+, _forward(this, tr::lng_selected_forward(), st::defaultActiveButton)
+, _sendNow(this, tr::lng_selected_send_now(), st::defaultActiveButton)
+, _delete(this, tr::lng_selected_delete(), st::defaultActiveButton)
 , _back(this, st::historyTopBarBack)
 , _cancelChoose(this, st::topBarCloseChoose)
 , _call(this, st::topBarCall)
@@ -131,6 +131,11 @@ TopBarWidget::TopBarWidget(
 , _titlePeerText(st::windowMinWidth / 3)
 , _onlineUpdater([=] { updateOnlineDisplay(); }) {
 	setAttribute(Qt::WA_OpaquePaintEvent);
+
+	_clear->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
+	_forward->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
+	_sendNow->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
+	_delete->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 
 	Lang::Updated(
 	) | rpl::on_next([=] {

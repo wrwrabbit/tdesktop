@@ -17,10 +17,6 @@ namespace style {
 struct RoundButton;
 } // namespace style
 
-namespace Ui {
-enum class RoundButtonTextTransform : uchar;
-} // namespace Ui
-
 namespace ChatHelpers {
 class Show;
 } // namespace ChatHelpers
@@ -97,8 +93,7 @@ struct SubscribeButtonArgs final {
 	not_null<QWidget*> parent,
 	rpl::producer<QString> text,
 	const style::RoundButton &st,
-	rpl::producer<bool> locked,
-	Ui::RoundButtonTextTransform transform = Ui::RoundButtonTextTransform{});
+	rpl::producer<bool> locked);
 
 [[nodiscard]] not_null<Ui::GradientButton*> CreateSubscribeButton(
 	SubscribeButtonArgs &&args);

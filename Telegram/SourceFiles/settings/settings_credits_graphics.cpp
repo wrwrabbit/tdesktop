@@ -3340,8 +3340,8 @@ void AddWithdrawalWidget(
 	const auto button = Ui::CreateChild<Ui::RoundButton>(
 		buttonsContainer,
 		rpl::never<QString>(),
-		stButton,
-		Ui::RoundButtonTextToUpper);
+		stButton);
+	button->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 
 	const auto buttonCredits = Ui::CreateChild<Ui::RoundButton>(
 		buttonsContainer,

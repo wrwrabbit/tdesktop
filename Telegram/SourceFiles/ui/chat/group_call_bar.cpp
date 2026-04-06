@@ -199,8 +199,8 @@ void GroupCallBar::refreshScheduledProcess() {
 		_open = std::make_unique<RoundButton>(
 			_inner.get(),
 			_scheduledProcess->text(GroupCallScheduledLeft::Negative::Show),
-			st::groupCallTopBarOpen,
-			RoundButtonTextToUpper);
+			st::groupCallTopBarOpen);
+		_open->setTextTransform(RoundButtonTextTransform::ToUpper);
 		setupRightButton(_open.get());
 		_open->widthValue(
 		) | rpl::on_next([=] {

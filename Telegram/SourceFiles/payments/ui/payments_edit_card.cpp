@@ -216,13 +216,13 @@ EditCard::EditCard(
 , _submit(
 	this,
 	tr::lng_about_done(),
-	st::paymentsPanelButton,
-	RoundButtonTextToUpper)
+	st::paymentsPanelButton)
 , _cancel(
 		this,
 		tr::lng_cancel(),
-		st::paymentsPanelButton,
-		RoundButtonTextToUpper) {
+		st::paymentsPanelButton) {
+	_submit->setTextTransform(RoundButtonTextTransform::ToUpper);
+	_cancel->setTextTransform(RoundButtonTextTransform::ToUpper);
 	setupControls();
 }
 

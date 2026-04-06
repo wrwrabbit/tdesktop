@@ -156,8 +156,8 @@ void ListController::setupUnlock() {
 			? tr::lng_similar_channels_show_more()
 			: tr::lng_similar_bots_show_more()),
 		st::similarChannelsLock,
-		rpl::single(true),
-		Ui::RoundButtonTextToUpper);
+		rpl::single(true));
+	button->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 	button->setClickedCallback([=] {
 		const auto window = _controller->parentController();
 		::Settings::ShowPremium(window, u"similar_channels"_q);

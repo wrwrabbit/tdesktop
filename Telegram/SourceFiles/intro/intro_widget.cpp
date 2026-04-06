@@ -84,8 +84,7 @@ Widget::Widget(
 	object_ptr<Ui::RoundButton>(
 		this,
 		tr::lng_menu_settings(),
-		st::defaultBoxButton,
-		Ui::RoundButtonTextToUpper))
+		st::defaultBoxButton))
 , _next(
 	this,
 	object_ptr<Ui::RoundButton>(this, nullptr, *_nextStyle))
@@ -93,6 +92,7 @@ Widget::Widget(
 		this,
 		account,
 		rpl::single(true))) {
+	_settings->entity()->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 	controller->setDefaultFloatPlayerDelegate(floatPlayerDelegate());
 
 	getData()->country = ComputeNewAccountCountry();
@@ -319,8 +319,8 @@ void Widget::checkUpdateStatus() {
 			object_ptr<Ui::RoundButton>(
 				this,
 				tr::lng_menu_update(),
-				st::defaultBoxButton,
-				Ui::RoundButtonTextToUpper));
+				st::defaultBoxButton));
+		_update->entity()->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 		if (!_showAnimation) {
 			_update->setVisible(true);
 		}
@@ -494,8 +494,8 @@ void Widget::showResetButton() {
 		auto entity = object_ptr<Ui::RoundButton>(
 			this,
 			tr::lng_signin_reset_account(),
-			st::introResetButton,
-			Ui::RoundButtonTextToUpper);
+			st::introResetButton);
+		entity->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 		_resetAccount.create(this, std::move(entity));
 		_resetAccount->hide(anim::type::instant);
 		_resetAccount->entity()->setClickedCallback([this] { resetAccount(); });

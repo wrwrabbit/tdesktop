@@ -394,10 +394,10 @@ base::options::toggle ShowChannelJoinedBelowAbout({
 		object_ptr<Ui::RoundButton>(
 			parent,
 			rpl::single(QString()),
-			st::infoHoursOuter,
-			Ui::RoundButtonTextToUpper),
+			st::infoHoursOuter),
 		st::infoProfileLabeledPadding - st::infoHoursOuterMargin);
 	const auto button = result->entity();
+	button->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 	const auto inner = Ui::CreateChild<Ui::VerticalLayout>(button);
 	button->widthValue() | rpl::on_next([=](int width) {
 		const auto margin = st::infoHoursOuterMargin;
@@ -882,11 +882,11 @@ void DeleteContactNote(
 		object_ptr<Ui::RoundButton>(
 			parent,
 			rpl::single(QString()),
-			st::infoHoursOuter,
-			Ui::RoundButtonTextToUpper),
+			st::infoHoursOuter),
 		st::infoProfileLabeledPadding - st::infoHoursOuterMargin);
 	result->setDuration(st::infoSlideDuration);
 	const auto button = result->entity();
+	button->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 
 	auto outer = Ui::CreateChild<Ui::SlideWrap<Ui::VerticalLayout>>(
 		button,

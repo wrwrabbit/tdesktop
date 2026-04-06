@@ -2424,13 +2424,13 @@ void EditPeerColorBox(
 	const auto profileButton = Ui::CreateChild<Ui::RoundButton>(
 		buttonContainer,
 		tr::lng_settings_color_apply(),
-		box->getDelegate()->style().button,
-		Ui::RoundButtonTextToUpper);
+		box->getDelegate()->style().button);
+	profileButton->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 	const auto nameButton = Ui::CreateChild<Ui::RoundButton>(
 		buttonContainer,
 		tr::lng_settings_color_apply(),
-		box->getDelegate()->style().button,
-		Ui::RoundButtonTextToUpper);
+		box->getDelegate()->style().button);
+	nameButton->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 	rpl::combine(
 		buttonContainer->widthValue(),
 		profileButton->sizeValue(),

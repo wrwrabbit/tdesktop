@@ -260,20 +260,20 @@ ChooseSourceProcess::ChooseSourceProcess(
 	CreateChild<RoundButton>(
 		_bottom.get(),
 		tr::lng_group_call_screen_share_start(),
-		st::desktopCaptureSubmit,
-		RoundButtonTextToUpper))
+		st::desktopCaptureSubmit))
 , _finish(
 	CreateChild<RoundButton>(
 		_bottom.get(),
 		tr::lng_group_call_screen_share_stop(),
-		st::desktopCaptureFinish,
-		RoundButtonTextToUpper))
+		st::desktopCaptureFinish))
 , _withAudio(
 	CreateChild<Checkbox>(
 		_bottom.get(),
 		tr::lng_group_call_screen_share_audio(tr::now),
 		false,
 		st::desktopCaptureWithAudio)) {
+	_submit->setTextTransform(RoundButtonTextTransform::ToUpper);
+	_finish->setTextTransform(RoundButtonTextTransform::ToUpper);
 	setupPanel();
 	setupSources();
 	activate();
@@ -371,8 +371,8 @@ void ChooseSourceProcess::setupPanel() {
 	const auto cancel = CreateChild<RoundButton>(
 		_bottom.get(),
 		tr::lng_cancel(),
-		st::desktopCaptureCancel,
-		RoundButtonTextToUpper);
+		st::desktopCaptureCancel);
+	cancel->setTextTransform(RoundButtonTextTransform::ToUpper);
 	cancel->setClickedCallback([=] {
 		_window->close();
 	});

@@ -47,13 +47,13 @@ EditInformation::EditInformation(
 , _submit(
 	this,
 	tr::lng_settings_save(),
-	st::paymentsPanelButton,
-	RoundButtonTextToUpper)
+	st::paymentsPanelButton)
 , _cancel(
 		this,
 		tr::lng_cancel(),
-		st::paymentsPanelButton,
-		RoundButtonTextToUpper) {
+		st::paymentsPanelButton) {
+	_submit->setTextTransform(RoundButtonTextTransform::ToUpper);
+	_cancel->setTextTransform(RoundButtonTextTransform::ToUpper);
 	setupControls();
 }
 

@@ -248,8 +248,8 @@ void AboutBox(
 		auto button = object_ptr<Ui::RoundButton>(
 			box,
 			tr::lng_box_ok(),
-			st::defaultActiveButton,
-			Ui::RoundButtonTextToUpper);
+			st::defaultActiveButton);
+		button->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 		button->resizeToWidth(box->width()
 			- st.buttonPadding.left()
 			- st.buttonPadding.left());

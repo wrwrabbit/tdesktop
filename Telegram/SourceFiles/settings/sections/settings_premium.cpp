@@ -1937,13 +1937,11 @@ not_null<Ui::RoundButton*> CreateLockedButton(
 		not_null<QWidget*> parent,
 		rpl::producer<QString> text,
 		const style::RoundButton &st,
-		rpl::producer<bool> locked,
-		Ui::RoundButtonTextTransform transform) {
+		rpl::producer<bool> locked) {
 	const auto result = Ui::CreateChild<Ui::RoundButton>(
 		parent.get(),
 		rpl::single(QString()),
-		st,
-		transform);
+		st);
 
 	const auto labelSt = result->lifetime().make_state<style::FlatLabel>(
 		st::defaultFlatLabel);

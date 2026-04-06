@@ -235,8 +235,8 @@ PanelEditContact::PanelEditContact(
 , _done(
 		this,
 		tr::lng_passport_save_value(),
-		st::passportPanelSaveValue,
-		Ui::RoundButtonTextToUpper) {
+		st::passportPanelSaveValue) {
+	_done->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 	setupControls(data, existing);
 }
 

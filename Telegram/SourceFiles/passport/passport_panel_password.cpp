@@ -47,8 +47,9 @@ PanelAskPassword::PanelAskPassword(
 	this,
 	st::defaultInputField,
 	tr::lng_passport_password_placeholder())
-, _submit(this, tr::lng_passport_next(), st::passportPasswordSubmit, Ui::RoundButtonTextToUpper)
+, _submit(this, tr::lng_passport_next(), st::passportPasswordSubmit)
 , _forgot(this, tr::lng_signin_recover(tr::now), st::defaultLinkButton) {
+	_submit->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 	connect(_password, &Ui::PasswordInput::submitted, this, [=] {
 		submit();
 	});
@@ -227,9 +228,9 @@ void PanelNoPassword::refreshBottom() {
 			object_ptr<Ui::RoundButton>(
 				_inner,
 				tr::lng_passport_password_create(),
-				st::defaultBoxButton,
-				Ui::RoundButtonTextToUpper),
+				st::defaultBoxButton),
 			style::al_top);
+		button->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 		button->addClickHandler([=] {
 			_controller->setupPassword();
 		});
