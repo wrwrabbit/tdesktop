@@ -84,7 +84,8 @@ void TranscribeButton::setLoading(bool loading) {
 						item,
 						_lastPaintedPoint.isNull()
 							? QRect()
-							: QRect(_lastPaintedPoint, size()));
+							: (QRect(_lastPaintedPoint, size()))
+								+ Margins(st::lineWidth));
 				}
 			},
 			st::historyTranscribeRadialAnimation);
