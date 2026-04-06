@@ -325,13 +325,13 @@ PlaybackSponsored::Message::Message(
 , _about(std::make_unique<Ui::RoundButton>(
 	this,
 	tr::lng_search_sponsored_button(),
-	_aboutSt))
+	_aboutSt,
+	Ui::RoundButtonTextNoTransform))
 , _close(
 	std::make_unique<Close>(
 		this,
 		_aboutSt.ripple,
 		std::move(allowCloseAt))) {
-	_about->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 	setMouseTracking(true);
 	populate();
 	hide();

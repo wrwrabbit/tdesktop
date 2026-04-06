@@ -190,8 +190,8 @@ void GroupCallBar::refreshScheduledProcess() {
 			_join = std::make_unique<RoundButton>(
 				_inner.get(),
 				tr::lng_group_call_join(),
-				st::groupCallTopBarJoin);
-			_join->setTextTransform(RoundButton::TextTransform::NoTransform);
+				st::groupCallTopBarJoin,
+				RoundButtonTextNoTransform);
 			setupRightButton(_join.get());
 		}
 	} else if (!_scheduledProcess) {
@@ -200,7 +200,8 @@ void GroupCallBar::refreshScheduledProcess() {
 		_open = std::make_unique<RoundButton>(
 			_inner.get(),
 			_scheduledProcess->text(GroupCallScheduledLeft::Negative::Show),
-			st::groupCallTopBarOpen);
+			st::groupCallTopBarOpen,
+			RoundButtonTextToUpper);
 		setupRightButton(_open.get());
 		_open->widthValue(
 		) | rpl::on_next([=] {

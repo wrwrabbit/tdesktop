@@ -170,7 +170,8 @@ auto WithPinnedTitle(not_null<Main::Session*> session, PinnedId id) {
 	auto button = object_ptr<Ui::RoundButton>(
 		parent,
 		rpl::never<QString>(), // Text is handled by the inner label.
-		stButton);
+		stButton,
+		Ui::RoundButtonTextNoTransform);
 
 	const auto label = Ui::CreateChild<Ui::FlatLabel>(
 		button.data(),
@@ -192,7 +193,6 @@ auto WithPinnedTitle(not_null<Main::Session*> session, PinnedId id) {
 	label->setTextColorOverride(stButton.textFg->c); // Use button's text color for label.
 	label->setAttribute(Qt::WA_TransparentForMouseEvents);
 
-	button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 	button->setFullRadius(true);
 	button->setClickedCallback(std::move(clickCallback));
 

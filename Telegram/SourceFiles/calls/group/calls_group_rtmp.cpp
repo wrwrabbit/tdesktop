@@ -257,8 +257,8 @@ void StartRtmpProcess::FillRtmpRows(
 		auto button = Ui::CreateChild<Ui::RoundButton>(
 			wrap.data(),
 			rpl::duplicate(text),
-			st::groupCallRtmpCopyButton);
-		button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+			st::groupCallRtmpCopyButton,
+			Ui::RoundButtonTextNoTransform);
 		button->setClickedCallback(key
 			? Fn<void()>([=] {
 				QGuiApplication::clipboard()->setText(state->key.current());

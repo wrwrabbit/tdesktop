@@ -168,8 +168,7 @@ LocalStorageBox::Row::Row(
 	this,
 	sizeText(data),
 	st::localStorageRowSize)
-, _clear(this, std::move(clear), st::localStorageClear) {
-	_clear->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+, _clear(this, std::move(clear), st::localStorageClear, Ui::RoundButtonTextNoTransform) {
 	_clear->setVisible(data.count != 0);
 }
 

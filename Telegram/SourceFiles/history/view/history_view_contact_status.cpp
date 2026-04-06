@@ -1014,13 +1014,12 @@ BusinessBotStatus::Bar::Bar(QWidget *parent)
 , _togglePaused(
 	this,
 	rpl::single(QString()),
-	st::historyBusinessBotToggle)
+	st::historyBusinessBotToggle,
+	Ui::RoundButtonTextNoTransform)
 , _settings(this, st::historyBusinessBotSettings) {
 	_name->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_status->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_togglePaused->setFullRadius(true);
-	_togglePaused->setTextTransform(
-		Ui::RoundButton::TextTransform::NoTransform);
 	_settings->setClickedCallback([=] {
 		showMenu();
 	});

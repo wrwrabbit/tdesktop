@@ -40,7 +40,8 @@ PanelForm::PanelForm(
 , _submit(
 		this,
 		tr::lng_passport_authorize(),
-		st::passportPanelAuthorize) {
+		st::passportPanelAuthorize,
+		Ui::RoundButtonTextToUpper) {
 	setupControls();
 }
 

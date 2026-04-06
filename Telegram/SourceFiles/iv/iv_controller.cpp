@@ -97,14 +97,14 @@ public:
 		const auto reset = Ui::CreateChild<Ui::RoundButton>(
 			this,
 			rpl::single<QString>(QString()),
-			st::ivResetZoom);
+			st::ivResetZoom,
+			Ui::RoundButtonTextNoTransform);
 		processTooltip(reset);
 		const auto resetLabel = Ui::CreateChild<Ui::FlatLabel>(
 			reset,
 			tr::lng_background_reset_default(),
 			st::ivResetZoomLabel);
 		resetLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
-		reset->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 		reset->setClickedCallback([this] {
 			_delegate->ivSetZoom(0);
 		});

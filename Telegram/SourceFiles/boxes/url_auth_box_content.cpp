@@ -35,7 +35,6 @@ void PrepareFullWidthRoundButton(
 		not_null<Ui::RoundButton*> button,
 		not_null<Ui::VerticalLayout*> content,
 		const style::margins &padding) {
-	button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 	button->setFullRadius(true);
 	const auto paddingHorizontal = padding.left() + padding.right();
 	content->widthValue() | rpl::on_next([=](int w) {
@@ -83,7 +82,8 @@ void ShowMatchCodesBox(
 		const auto button = Ui::CreateChild<Ui::RoundButton>(
 			buttons,
 			rpl::single(emojiCode ? QString() : code),
-			st::urlAuthCodesButton);
+			st::urlAuthCodesButton,
+			Ui::RoundButtonTextNoTransform);
 		if (emojiCode) {
 			button->setTextFgOverride(QColor(Qt::transparent));
 			const auto overlay = Ui::CreateChild<Ui::RpWidget>(button);
@@ -165,7 +165,6 @@ void ShowMatchCodesBox(
 					(overlay->height() - visible) / 2);
 			});
 		}
-		button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 		button->setFullRadius(true);
 		button->setClickedCallback([=] {
 			callback(code);
@@ -201,7 +200,8 @@ void ShowMatchCodesBox(
 			object_ptr<Ui::RoundButton>(
 				content,
 				tr::lng_cancel(),
-				st::attentionBoxButton),
+				st::attentionBoxButton,
+				Ui::RoundButtonTextNoTransform),
 			padding);
 		PrepareFullWidthRoundButton(button, content, padding);
 		button->setClickedCallback([=] {
@@ -550,7 +550,8 @@ void ShowDetails(
 			object_ptr<Ui::RoundButton>(
 				content,
 				tr::lng_url_auth_login_button(),
-				st::defaultLightButton),
+				st::defaultLightButton,
+				Ui::RoundButtonTextNoTransform),
 			padding);
 		PrepareFullWidthRoundButton(button, content, padding);
 		button->setClickedCallback([=] {
@@ -587,7 +588,8 @@ void ShowDetails(
 			object_ptr<Ui::RoundButton>(
 				content,
 				tr::lng_suggest_action_decline(),
-				st::attentionBoxButton),
+				st::attentionBoxButton,
+				Ui::RoundButtonTextNoTransform),
 			padding);
 		PrepareFullWidthRoundButton(button, content, padding);
 		button->setClickedCallback([=] {

@@ -447,7 +447,8 @@ private:
 	auto result = object_ptr<Ui::RoundButton>(
 		parent,
 		rpl::single(QString()),
-		st::starrefBottomButton);
+		st::starrefBottomButton,
+		Ui::RoundButtonTextToUpper);
 	const auto raw = result.data();
 	rpl::combine(
 		parent->widthValue(),

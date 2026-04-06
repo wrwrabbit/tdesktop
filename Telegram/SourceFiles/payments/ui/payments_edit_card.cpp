@@ -216,11 +216,13 @@ EditCard::EditCard(
 , _submit(
 	this,
 	tr::lng_about_done(),
-	st::paymentsPanelButton)
+	st::paymentsPanelButton,
+	RoundButtonTextToUpper)
 , _cancel(
 		this,
 		tr::lng_cancel(),
-		st::paymentsPanelButton) {
+		st::paymentsPanelButton,
+		RoundButtonTextToUpper) {
 	setupControls();
 }
 

@@ -758,7 +758,8 @@ void BackgroundPreviewBox::applyForPeer() {
 	const auto forMe = CreateChild<RoundButton>(
 		overlay,
 		tr::lng_background_apply_me(),
-		st::backgroundConfirm);
+		st::backgroundConfirm,
+		RoundButtonTextNoTransform);
 	forMe->setClickedCallback([=] {
 		applyForPeer(false);
 	});
@@ -769,6 +770,7 @@ void BackgroundPreviewBox::applyForPeer() {
 			lt_user,
 			rpl::single(_forPeer->shortName())),
 		st::backgroundConfirm,
+		RoundButtonTextNoTransform,
 		Data::AmPremiumValue(&_forPeer->session()) | rpl::map(!_1));
 	forBoth->setClickedCallback([=] {
 		if (_forPeer->session().premium()) {
@@ -782,7 +784,8 @@ void BackgroundPreviewBox::applyForPeer() {
 	const auto cancel = CreateChild<RoundButton>(
 		overlay,
 		tr::lng_cancel(),
-		st::backgroundConfirmCancel);
+		st::backgroundConfirmCancel,
+		RoundButtonTextNoTransform);
 	cancel->setClickedCallback([=] {
 		const auto raw = _forBothOverlay.release();
 		raw->shownValue() | rpl::filter(
@@ -792,10 +795,6 @@ void BackgroundPreviewBox::applyForPeer() {
 		}), raw->lifetime());
 		raw->toggle(false, anim::type::normal);
 	});
-	forMe->setTextTransform(RoundButton::TextTransform::NoTransform);
-	forBoth->setTextTransform(RoundButton::TextTransform::NoTransform);
-	cancel->setTextTransform(RoundButton::TextTransform::NoTransform);
-
 	overlay->sizeValue(
 	) | rpl::on_next([=](QSize size) {
 		const auto padding = st::backgroundConfirmPadding;

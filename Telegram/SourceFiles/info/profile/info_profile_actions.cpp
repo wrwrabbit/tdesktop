@@ -394,7 +394,8 @@ base::options::toggle ShowChannelJoinedBelowAbout({
 		object_ptr<Ui::RoundButton>(
 			parent,
 			rpl::single(QString()),
-			st::infoHoursOuter),
+			st::infoHoursOuter,
+			Ui::RoundButtonTextToUpper),
 		st::infoProfileLabeledPadding - st::infoHoursOuterMargin);
 	const auto button = result->entity();
 	const auto inner = Ui::CreateChild<Ui::VerticalLayout>(button);
@@ -632,8 +633,8 @@ base::options::toggle ShowChannelJoinedBelowAbout({
 	const auto link = Ui::CreateChild<Ui::RoundButton>(
 		labelWrap,
 		std::move(linkText),
-		st::defaultTableSmallButton);
-	link->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+		st::defaultTableSmallButton,
+		Ui::RoundButtonTextNoTransform);
 	link->setClickedCallback([=] {
 		state->myTimezone = !state->myTimezone.current();
 		state->expanded = true;
@@ -882,7 +883,8 @@ void DeleteContactNote(
 		object_ptr<Ui::RoundButton>(
 			parent,
 			rpl::single(QString()),
-			st::infoHoursOuter),
+			st::infoHoursOuter,
+			Ui::RoundButtonTextToUpper),
 		st::infoProfileLabeledPadding - st::infoHoursOuterMargin);
 	result->setDuration(st::infoSlideDuration);
 	const auto button = result->entity();
@@ -2131,10 +2133,10 @@ void DetailsFiller::setupMainApp(bool suppressBottom) {
 		object_ptr<Ui::RoundButton>(
 			_wrap,
 			tr::lng_profile_open_app(),
-			st::infoOpenApp),
+			st::infoOpenApp,
+			Ui::RoundButtonTextNoTransform),
 		st::infoOpenAppMargin,
 		style::al_justify);
-	button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 
 	const auto user = _peer->asUser();
 	const auto controller = _controller->parentController();

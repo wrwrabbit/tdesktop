@@ -201,8 +201,8 @@ void StickerToast::showWithTitle(const QString &title) {
 	const auto button = Ui::CreateChild<Ui::RoundButton>(
 		widget.get(),
 		rpl::single(view),
-		st::historyPremiumViewSet);
-	button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+		st::historyPremiumViewSet,
+		Ui::RoundButtonTextNoTransform);
 	button->show();
 	rpl::combine(
 		widget->sizeValue(),

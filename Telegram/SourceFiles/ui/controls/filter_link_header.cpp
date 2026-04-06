@@ -494,7 +494,7 @@ object_ptr<RoundButton> FilterLinkProcessButton(
 		rpl::producer<int> badge) {
 	const auto st = &st::filterInviteBox.button;
 	const auto badgeSt = &st::filterInviteButtonBadgeStyle;
-	auto result = object_ptr<RoundButton>(parent, rpl::single(u""_q), *st);
+	auto result = object_ptr<RoundButton>(parent, rpl::single(u""_q), *st, RoundButtonTextToUpper);
 
 	struct Data {
 		TextWithEntities text;

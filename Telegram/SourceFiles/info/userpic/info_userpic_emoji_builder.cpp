@@ -44,8 +44,8 @@ void ShowLayer(
 		const auto save = Ui::CreateChild<Ui::RoundButton>(
 			content.get(),
 			tr::lng_connection_save(),
-			st::userpicBuilderEmojiButton);
-		save->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+			st::userpicBuilderEmojiButton,
+			Ui::RoundButtonTextNoTransform);
 		content->sizeValue(
 		) | rpl::on_next([=] {
 			const auto &p = st::userpicBuilderEmojiSavePosiiton;

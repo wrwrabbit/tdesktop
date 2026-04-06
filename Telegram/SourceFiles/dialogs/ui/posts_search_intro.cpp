@@ -185,9 +185,9 @@ void PostsSearchIntro::setup() {
 		object_ptr<Ui::RoundButton>(
 			_content.get(),
 			rpl::single(QString()),
-			st::postsSearchIntroButton),
+			st::postsSearchIntroButton,
+			Ui::RoundButtonTextNoTransform),
 		style::al_top);
-	_button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 	_footer = _content->add(
 		object_ptr<Ui::FlatLabel>(
 			_content.get(),

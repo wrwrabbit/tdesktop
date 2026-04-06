@@ -84,10 +84,11 @@ Widget::Widget(
 	object_ptr<Ui::RoundButton>(
 		this,
 		tr::lng_menu_settings(),
-		st::defaultBoxButton))
+		st::defaultBoxButton,
+		Ui::RoundButtonTextToUpper))
 , _next(
 	this,
-	object_ptr<Ui::RoundButton>(this, nullptr, *_nextStyle))
+	object_ptr<Ui::RoundButton>(this, nullptr, *_nextStyle, Ui::RoundButtonTextNoTransform))
 , _connecting(std::make_unique<Window::ConnectionState>(
 		this,
 		account,
@@ -318,7 +319,8 @@ void Widget::checkUpdateStatus() {
 			object_ptr<Ui::RoundButton>(
 				this,
 				tr::lng_menu_update(),
-				st::defaultBoxButton));
+				st::defaultBoxButton,
+				Ui::RoundButtonTextToUpper));
 		if (!_showAnimation) {
 			_update->setVisible(true);
 		}
@@ -353,7 +355,7 @@ void Widget::setupStep() {
 			_next.destroy();
 			_next.create(
 				this,
-				object_ptr<Ui::RoundButton>(this, nullptr, *nextStyle));
+				object_ptr<Ui::RoundButton>(this, nullptr, *nextStyle, Ui::RoundButtonTextNoTransform));
 			showControls();
 			updateControlsGeometry();
 			_next->toggle(wasShown, anim::type::instant);
@@ -492,7 +494,8 @@ void Widget::showResetButton() {
 		auto entity = object_ptr<Ui::RoundButton>(
 			this,
 			tr::lng_signin_reset_account(),
-			st::introResetButton);
+			st::introResetButton,
+			Ui::RoundButtonTextToUpper);
 		_resetAccount.create(this, std::move(entity));
 		_resetAccount->hide(anim::type::instant);
 		_resetAccount->entity()->setClickedCallback([this] { resetAccount(); });
@@ -723,8 +726,6 @@ void Widget::showControls() {
 
 void Widget::setupNextButton() {
 	_next->entity()->setClickedCallback([=] { getStep()->submit(); });
-	_next->entity()->setTextTransform(
-		Ui::RoundButton::TextTransform::NoTransform);
 
 	_next->entity()->setText(getStep()->nextButtonText(
 	) | rpl::filter([](const QString &text) {

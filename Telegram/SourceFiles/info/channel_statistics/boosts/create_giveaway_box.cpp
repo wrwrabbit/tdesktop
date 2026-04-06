@@ -1344,7 +1344,8 @@ void CreateGiveawayBox(
 		auto button = object_ptr<Ui::RoundButton>(
 			box,
 			rpl::never<QString>(),
-			st::giveawayGiftCodeStartButton);
+			st::giveawayGiftCodeStartButton,
+			Ui::RoundButtonTextNoTransform);
 
 		AddLabelWithBadgeToButton(
 			button,
@@ -1379,7 +1380,6 @@ void CreateGiveawayBox(
 			loadingAnimation->showOn(state->confirmButtonBusy.value());
 		}
 
-		button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 		state->typeValue.value(
 		) | rpl::on_next([=, raw = button.data()] {
 			raw->resizeToWidth(box->width()

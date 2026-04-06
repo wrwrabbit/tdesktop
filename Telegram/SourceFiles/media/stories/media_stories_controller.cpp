@@ -265,8 +265,8 @@ void Controller::Unsupported::setup(not_null<PeerData*> peer) {
 	_button = std::make_unique<Ui::RoundButton>(
 		wrap,
 		tr::lng_update_telegram(),
-		st::storiesUnsupportedUpdate);
-	_button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+		st::storiesUnsupportedUpdate,
+		Ui::RoundButtonTextNoTransform);
 	_button->show();
 
 	rpl::combine(

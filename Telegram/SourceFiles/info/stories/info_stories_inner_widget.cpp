@@ -717,15 +717,14 @@ void InnerWidget::refreshEmpty() {
 			object_ptr<Ui::RoundButton>(
 				empty.get(),
 				rpl::single(QString()),
-				st::collectionEmptyButton),
+				st::collectionEmptyButton,
+				Ui::RoundButtonTextNoTransform),
 			st::collectionEmptyAddMargin,
 			style::al_top);
 		button->setText(tr::lng_stories_album_add_button(
 		) | rpl::map([](const QString &text) {
 			return Ui::Text::IconEmoji(&st::collectionAddIcon).append(text);
 		}));
-		button->setTextTransform(
-			Ui::RoundButton::TextTransform::NoTransform);
 		button->setClickedCallback([=] {
 			editAlbumStories(albumId);
 		});

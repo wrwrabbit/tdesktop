@@ -1983,9 +1983,9 @@ object_ptr<Ui::RpWidget> MakeActiveAuctionRow(
 		object_ptr<Ui::RoundButton>(
 			raw,
 			rpl::single(QString()),
-			st::auctionListRaise),
+			st::auctionListRaise,
+			RoundButtonTextNoTransform),
 		st::auctionListRaisePadding);
-	button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 
 	auto secondsLeft = rpl::duplicate(
 		value

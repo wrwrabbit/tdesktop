@@ -83,13 +83,15 @@ FormSummary::FormSummary(
 		tr::lng_payments_pay_amount(
 			lt_amount,
 			rpl::single(formatAmount(computeTotalAmount()))),
-		st::paymentsPanelSubmit))
+		st::paymentsPanelSubmit,
+		RoundButtonTextNoTransform))
 , _cancel(
 	this,
 	(_invoice.receipt.paid
 		? tr::lng_about_done()
 		: tr::lng_cancel()),
-	st::paymentsPanelButton)
+	st::paymentsPanelButton,
+	RoundButtonTextNoTransform)
 , _tipLightBg(TransparentColor(st::paymentsTipActive, kLightOpacity))
 , _tipLightRipple(
 	TransparentColor(st::paymentsTipActive, kLightRippleOpacity))
@@ -170,13 +172,10 @@ void FormSummary::setupControls() {
 	setupContent(_layout.get());
 
 	if (_submit) {
-		_submit->setTextTransform(
-			Ui::RoundButton::TextTransform::NoTransform);
 		_submit->addClickHandler([=] {
 			_delegate->panelSubmit();
 		});
 	}
-	_cancel->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 	_cancel->addClickHandler([=] {
 		_delegate->panelRequestClose();
 	});
@@ -398,7 +397,8 @@ void FormSummary::setupSuggestedTips(not_null<VerticalLayout*> layout) {
 			.widget = CreateChild<RoundButton>(
 				outer,
 				rpl::single(formatAmount(amount, true)),
-				st),
+				st,
+				RoundButtonTextNoTransform),
 		});
 		auto &button = state->buttons.back();
 		button.widget->show();

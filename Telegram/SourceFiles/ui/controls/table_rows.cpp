@@ -109,8 +109,8 @@ ValueWithSmallButton MakeValueWithSmallButton(
 	const auto button = CreateChild<RoundButton>(
 		raw,
 		std::move(buttonText),
-		table->st().smallButton);
-	button->setTextTransform(RoundButton::TextTransform::NoTransform);
+		table->st().smallButton,
+		RoundButtonTextNoTransform);
 	if (handler) {
 		button->setClickedCallback([button, handler = std::move(handler)] {
 			handler(button);

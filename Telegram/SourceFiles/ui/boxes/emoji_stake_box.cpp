@@ -386,7 +386,8 @@ void AddStakePresets(
 			const auto button = CreateChild<RoundButton>(
 				wrap,
 				rpl::single(FormatTonAmount(nanoTon).full + diamond),
-				st::stakePresetButton);
+				st::stakePresetButton,
+				RoundButtonTextToUpper);
 			button->setClickedCallback([=] {
 				callback(nanoTon);
 			});

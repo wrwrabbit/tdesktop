@@ -209,10 +209,10 @@ void LocalPasscodeEnter::setupContent() {
 				: isCheck
 				? tr::lng_passcode_check_button()
 				: tr::lng_passcode_change_button()),
-			st::changePhoneButton),
+			st::changePhoneButton,
+			Ui::RoundButtonTextNoTransform),
 		st::settingLocalPasscodeButtonPadding,
 		style::al_top);
-	button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 	button->setClickedCallback([=] {
 		const auto newText = newPasscode->text();
 		const auto reenterText = reenterPasscode

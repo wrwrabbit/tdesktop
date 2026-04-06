@@ -328,7 +328,8 @@ TopBar::TopBar(
 	object_ptr<Ui::RoundButton>(
 		this,
 		tr::lng_status_lastseen_when(),
-		st::infoProfileTopBarShowLastSeen))
+		st::infoProfileTopBarShowLastSeen,
+		Ui::RoundButtonTextNoTransform))
 , _forumButton([&, controller = descriptor.controller] {
 	const auto topic = _key.topic();
 	if (!topic) {
@@ -337,7 +338,8 @@ TopBar::TopBar(
 	auto owned = object_ptr<Ui::RoundButton>(
 		this,
 		rpl::single(QString()),
-		st::infoProfileTopBarTopicStatusButton);
+		st::infoProfileTopBarTopicStatusButton,
+		Ui::RoundButtonTextNoTransform);
 	owned->setText(Info::Profile::NameValue(
 		_peer
 	) | rpl::map([=](const QString &name) {
@@ -345,7 +347,6 @@ TopBar::TopBar(
 			.append(' ')
 			.append(Ui::Text::IconEmoji(&st::textMoreIconEmoji, QString()));
 	}));
-	owned->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 	owned->setClickedCallback([=, peer = _peer] {
 		if (const auto forum = peer->forum()) {
 			if (peer->useSubsectionTabs()) {
@@ -2133,8 +2134,6 @@ void TopBar::setupShowLastSeen(
 
 	_showLastSeen->setOpacity(0.);
 
-	using TextTransform = Ui::RoundButton::TextTransform;
-	_showLastSeen->entity()->setTextTransform(TextTransform::NoTransform);
 	_showLastSeen->entity()->setFullRadius(true);
 
 	_showLastSeen->entity()->setClickedCallback([=] {

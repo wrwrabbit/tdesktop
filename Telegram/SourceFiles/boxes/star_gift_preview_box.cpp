@@ -1556,10 +1556,13 @@ void StarGiftPreviewBox(
 			const style::RoundButton &st,
 			const style::icon &active,
 			Tab tab) {
-		auto owned = object_ptr<RoundButton>(buttonsParent, text(), st);
+		auto owned = object_ptr<RoundButton>(
+			buttonsParent,
+			text(),
+			st,
+			RoundButtonTextNoTransform);
 		const auto raw = owned.data();
 
-		raw->setTextTransform(RoundButton::TextTransform::NoTransform);
 		raw->setClickedCallback([=] {
 			state->tab = tab;
 		});

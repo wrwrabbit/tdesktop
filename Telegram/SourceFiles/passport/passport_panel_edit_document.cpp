@@ -221,7 +221,8 @@ PanelEditDocument::PanelEditDocument(
 , _done(
 		this,
 		tr::lng_passport_save_value(),
-		st::passportPanelSaveValue) {
+		st::passportPanelSaveValue,
+		Ui::RoundButtonTextToUpper) {
 	setupControls(
 		&error,
 		&data,
@@ -247,7 +248,8 @@ PanelEditDocument::PanelEditDocument(
 , _done(
 		this,
 		tr::lng_passport_save_value(),
-		st::passportPanelSaveValue) {
+		st::passportPanelSaveValue,
+		Ui::RoundButtonTextToUpper) {
 	setupControls(
 		nullptr,
 		nullptr,
@@ -270,7 +272,8 @@ PanelEditDocument::PanelEditDocument(
 , _done(
 		this,
 		tr::lng_passport_save_value(),
-		st::passportPanelSaveValue) {
+		st::passportPanelSaveValue,
+		Ui::RoundButtonTextToUpper) {
 	setupControls(&error, &data, nullptr, nullptr, {}, {}, {});
 }
 

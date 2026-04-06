@@ -141,15 +141,14 @@ void VerifyBox::setupControls(
 			object_ptr<Ui::RoundButton>(
 				_content,
 				tr::lng_intro_fragment_button(),
-				st::fragmentBoxButton),
+				st::fragmentBoxButton,
+				Ui::RoundButtonTextNoTransform),
 			small);
 		_content->widthValue(
 		) | rpl::on_next([=](int w) {
 			button->setFullWidth(w - small.left() - small.right());
 		}, button->lifetime());
 		button->setClickedCallback([=] { ::File::OpenUrl(openUrl); });
-		button->setTextTransform(
-			Ui::RoundButton::TextTransform::NoTransform);
 	}
 	if (resend) {
 		auto link = TextWithEntities{ tr::lng_cloud_password_resend(tr::now) };
@@ -237,7 +236,8 @@ PanelEditContact::PanelEditContact(
 , _done(
 		this,
 		tr::lng_passport_save_value(),
-		st::passportPanelSaveValue) {
+		st::passportPanelSaveValue,
+		Ui::RoundButtonTextToUpper) {
 	setupControls(data, existing);
 }
 

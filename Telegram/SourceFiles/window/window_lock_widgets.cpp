@@ -98,12 +98,10 @@ PasscodeLockWidget::PasscodeLockWidget(
 	not_null<Controller*> window)
 : LockWidget(parent, window)
 , _passcode(this, st::passcodeInput, tr::lng_passcode_ph())
-, _submit(this, tr::lng_passcode_submit(), st::passcodeSubmit)
+, _submit(this, tr::lng_passcode_submit(), st::passcodeSubmit, Ui::RoundButtonTextNoTransform)
 , _logout(this, tr::lng_passcode_logout(tr::now)) {
 	connect(_passcode, &Ui::MaskedInputField::changed, [=] { changed(); });
 	connect(_passcode, &Ui::MaskedInputField::submitted, [=] { submit(); });
-
-	_submit->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 	_submit->setClickedCallback([=] { submit(); });
 	_logout->setClickedCallback([=] {
 		window->showLogoutConfirmation();

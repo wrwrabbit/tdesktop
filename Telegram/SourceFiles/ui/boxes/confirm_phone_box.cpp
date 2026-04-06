@@ -32,10 +32,9 @@ ConfirmPhoneBox::ConfirmPhoneBox(
 		_fragment.create(
 			this,
 			tr::lng_intro_fragment_button(),
-			st::fragmentBoxButton);
+			st::fragmentBoxButton,
+			RoundButtonTextNoTransform);
 		_fragment->setClickedCallback([=] { File::OpenUrl(openUrl); });
-		_fragment->setTextTransform(
-			Ui::RoundButton::TextTransform::NoTransform);
 	}
 	if (timeout) {
 		_call.setStatus({ Ui::SentCodeCall::State::Waiting, *timeout });

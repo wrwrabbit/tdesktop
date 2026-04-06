@@ -47,7 +47,7 @@ PanelAskPassword::PanelAskPassword(
 	this,
 	st::defaultInputField,
 	tr::lng_passport_password_placeholder())
-, _submit(this, tr::lng_passport_next(), st::passportPasswordSubmit)
+, _submit(this, tr::lng_passport_next(), st::passportPasswordSubmit, Ui::RoundButtonTextToUpper)
 , _forgot(this, tr::lng_signin_recover(tr::now), st::defaultLinkButton) {
 	connect(_password, &Ui::PasswordInput::submitted, this, [=] {
 		submit();
@@ -227,7 +227,8 @@ void PanelNoPassword::refreshBottom() {
 			object_ptr<Ui::RoundButton>(
 				_inner,
 				tr::lng_passport_password_create(),
-				st::defaultBoxButton),
+				st::defaultBoxButton,
+				Ui::RoundButtonTextToUpper),
 			style::al_top);
 		button->addClickHandler([=] {
 			_controller->setupPassword();
@@ -240,18 +241,16 @@ void PanelNoPassword::refreshBottom() {
 		const auto cancel = Ui::CreateChild<Ui::RoundButton>(
 			container,
 			tr::lng_cancel(),
-			st::defaultBoxButton);
-		cancel->setTextTransform(
-			Ui::RoundButton::TextTransform::NoTransform);
+			st::defaultBoxButton,
+			Ui::RoundButtonTextNoTransform);
 		cancel->addClickHandler([=] {
 			_controller->cancelPasswordSubmit();
 		});
 		const auto validate = Ui::CreateChild<Ui::RoundButton>(
 			container,
 			tr::lng_passport_email_validate(),
-			st::defaultBoxButton);
-		validate->setTextTransform(
-			Ui::RoundButton::TextTransform::NoTransform);
+			st::defaultBoxButton,
+			Ui::RoundButtonTextNoTransform);
 		validate->addClickHandler([=] {
 			_controller->validateRecoveryEmail();
 		});

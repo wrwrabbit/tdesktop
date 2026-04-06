@@ -660,7 +660,7 @@ Notification::Notification(
 , _forwardedCount(forwardedCount)
 , _fromScheduled(fromScheduled)
 , _close(this, st::notifyClose)
-, _reply(this, tr::lng_notification_reply(), st::defaultBoxButton) {
+, _reply(this, tr::lng_notification_reply(), st::defaultBoxButton, Ui::RoundButtonTextToUpper) {
 	Lang::Updated(
 	) | rpl::on_next([=] {
 		refreshLang();

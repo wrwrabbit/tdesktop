@@ -260,12 +260,14 @@ ChooseSourceProcess::ChooseSourceProcess(
 	CreateChild<RoundButton>(
 		_bottom.get(),
 		tr::lng_group_call_screen_share_start(),
-		st::desktopCaptureSubmit))
+		st::desktopCaptureSubmit,
+		RoundButtonTextToUpper))
 , _finish(
 	CreateChild<RoundButton>(
 		_bottom.get(),
 		tr::lng_group_call_screen_share_stop(),
-		st::desktopCaptureFinish))
+		st::desktopCaptureFinish,
+		RoundButtonTextToUpper))
 , _withAudio(
 	CreateChild<Checkbox>(
 		_bottom.get(),
@@ -369,7 +371,8 @@ void ChooseSourceProcess::setupPanel() {
 	const auto cancel = CreateChild<RoundButton>(
 		_bottom.get(),
 		tr::lng_cancel(),
-		st::desktopCaptureCancel);
+		st::desktopCaptureCancel,
+		RoundButtonTextToUpper);
 	cancel->setClickedCallback([=] {
 		_window->close();
 	});

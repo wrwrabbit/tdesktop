@@ -41,14 +41,14 @@ void AddCopyShareLinkButtons(
 	const auto copy = CreateChild<RoundButton>(
 		wrap,
 		tr::lng_group_invite_copy(),
-		st::inviteLinkCopy);
-	copy->setTextTransform(RoundButton::TextTransform::NoTransform);
+		st::inviteLinkCopy,
+		RoundButtonTextNoTransform);
 	copy->setClickedCallback(copyLink);
 	const auto share = CreateChild<RoundButton>(
 		wrap,
 		tr::lng_group_invite_share(),
-		st::inviteLinkShare);
-	share->setTextTransform(RoundButton::TextTransform::NoTransform);
+		st::inviteLinkShare,
+		RoundButtonTextNoTransform);
 	share->setClickedCallback(shareLink);
 
 	wrap->widthValue(
@@ -69,9 +69,9 @@ void AddReactivateLinkButton(
 		object_ptr<RoundButton>(
 			container,
 			tr::lng_group_invite_reactivate(),
-			st::inviteLinkReactivate),
+			st::inviteLinkReactivate,
+			RoundButtonTextNoTransform),
 		st::inviteLinkButtonsPadding);
-	button->setTextTransform(RoundButton::TextTransform::NoTransform);
 	button->setClickedCallback(editLink);
 }
 
@@ -82,9 +82,9 @@ void AddDeleteLinkButton(
 		object_ptr<RoundButton>(
 			container,
 			tr::lng_group_invite_delete(),
-			st::inviteLinkDelete),
+			st::inviteLinkDelete,
+			RoundButtonTextNoTransform),
 		st::inviteLinkButtonsPadding);
-	button->setTextTransform(RoundButton::TextTransform::NoTransform);
 	button->setClickedCallback(deleteLink);
 }
 

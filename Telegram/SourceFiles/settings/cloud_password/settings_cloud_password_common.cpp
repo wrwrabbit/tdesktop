@@ -229,10 +229,10 @@ not_null<Ui::RoundButton*> AddDoneButton(
 		object_ptr<Ui::RoundButton>(
 			content,
 			std::move(text),
-			st::changePhoneButton),
+			st::changePhoneButton,
+			Ui::RoundButtonTextNoTransform),
 		st::settingLocalPasscodeButtonPadding,
 		style::al_top);
-	button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 	return button;
 }
 

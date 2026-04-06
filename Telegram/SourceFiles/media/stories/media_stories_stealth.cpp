@@ -240,7 +240,8 @@ struct State {
 	auto result = object_ptr<Ui::RoundButton>(
 		parent,
 		rpl::single(QString()),
-		st.box.button);
+		st.box.button,
+		Ui::RoundButtonTextToUpper);
 	const auto raw = result.data();
 
 	const auto label = Ui::CreateChild<Ui::FlatLabel>(

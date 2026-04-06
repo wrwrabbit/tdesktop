@@ -198,10 +198,10 @@ PreviewWrap::PreviewWrap(
 			item->out()
 				? tr::lng_close()
 				: tr::lng_ttl_voice_close_in(),
-			st::ttlMediaButton);
+			st::ttlMediaButton,
+			Ui::RoundButtonTextNoTransform);
 		close->setFullRadius(true);
 		close->setClickedCallback(closeCallback);
-		close->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 
 		rpl::combine(
 			sizeValue(),

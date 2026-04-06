@@ -3340,14 +3340,14 @@ void AddWithdrawalWidget(
 	const auto button = Ui::CreateChild<Ui::RoundButton>(
 		buttonsContainer,
 		rpl::never<QString>(),
-		stButton);
+		stButton,
+		Ui::RoundButtonTextToUpper);
 
 	const auto buttonCredits = Ui::CreateChild<Ui::RoundButton>(
 		buttonsContainer,
 		tr::lng_bot_earn_balance_button_buy_ads(),
-		stButton);
-	buttonCredits->setTextTransform(
-		Ui::RoundButton::TextTransform::NoTransform);
+		stButton,
+		Ui::RoundButtonTextNoTransform);
 	{
 		const auto icon = Ui::CreateChild<Ui::RpWidget>(buttonCredits);
 		const auto &st = st::msgBotKbUrlIcon;

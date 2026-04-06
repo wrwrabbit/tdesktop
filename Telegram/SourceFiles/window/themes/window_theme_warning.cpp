@@ -29,12 +29,9 @@ WarningWidget::WarningWidget(QWidget *parent)
 : RpWidget(parent)
 , _timer([=] { handleTimer(); })
 , _secondsLeft(kWaitBeforeRevertMs / 1000)
-, _keepChanges(this, tr::lng_theme_keep_changes(), st::defaultBoxButton)
-, _revert(this, tr::lng_theme_revert(), st::defaultBoxButton) {
-	using TextTransform = Ui::RoundButton::TextTransform;
-	_keepChanges->setTextTransform(TextTransform::NoTransform);
+, _keepChanges(this, tr::lng_theme_keep_changes(), st::defaultBoxButton, Ui::RoundButtonTextNoTransform)
+, _revert(this, tr::lng_theme_revert(), st::defaultBoxButton, Ui::RoundButtonTextNoTransform) {
 	_keepChanges->setClickedCallback([] { KeepApplied(); });
-	_revert->setTextTransform(TextTransform::NoTransform);
 	_revert->setClickedCallback([] { Revert(); });
 	updateText();
 }

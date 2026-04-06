@@ -291,13 +291,13 @@ void ChooseThemeController::initButtons() {
 	const auto apply = CreateChild<RoundButton>(
 		controls,
 		tr::lng_chat_theme_apply(),
-		st::defaultLightButton);
-	apply->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+		st::defaultLightButton,
+		RoundButtonTextNoTransform);
 	const auto choose = CreateChild<RoundButton>(
 		controls,
 		tr::lng_chat_theme_change_wallpaper(),
-		st::defaultLightButton);
-	choose->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+		st::defaultLightButton,
+		RoundButtonTextNoTransform);
 
 	const auto &margin = st::chatThemeButtonMargin;
 	controls->resize(

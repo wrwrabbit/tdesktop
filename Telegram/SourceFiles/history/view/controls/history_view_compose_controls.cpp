@@ -3074,10 +3074,10 @@ void SetupRestrictionView(
 		auto unlock = std::make_unique<RoundButton>(
 			widget,
 			rpl::single(text),
-			st->premiumRequired.button);
+			st->premiumRequired.button,
+			RoundButtonTextNoTransform);
 		unlock->show();
 		unlock->setAttribute(Qt::WA_TransparentForMouseEvents);
-		unlock->setTextTransform(RoundButton::TextTransform::NoTransform);
 		unlock->setFullRadius(true);
 		return unlock;
 	};
