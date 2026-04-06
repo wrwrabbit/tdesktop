@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "settings/sections/settings_premium.h"
 #include "spellcheck/platform/platform_language.h"
+#include "ui/boxes/about_cocoon_box.h"
 #include "ui/boxes/choose_language_box.h"
 #include "ui/chat/chat_style.h"
 #include "ui/controls/labeled_emoji_tabs.h"
@@ -1397,8 +1398,11 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 	box->setNoContentMargin(true);
 	box->setWidth(st::boxWideWidth);
 	const auto session = args.session;
-	box->addTopButton(st::boxTitleClose, [=] {
+	box->addTopButton(st::aiComposeBoxClose, [=] {
 		box->closeBox();
+	});
+	box->addTopButton(st::aiComposeBoxInfoButton, [=] {
+		box->uiShow()->show(Box(Ui::AboutCocoonBox));
 	});
 
 	const auto body = box->verticalLayout();
@@ -1493,8 +1497,11 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 		}
 		*sendButton = nullptr;
 		box->clearButtons();
-		box->addTopButton(st::boxTitleClose, [=] {
+		box->addTopButton(st::aiComposeBoxClose, [=] {
 			box->closeBox();
+		});
+		box->addTopButton(st::aiComposeBoxInfoButton, [=] {
+			box->uiShow()->show(Box(Ui::AboutCocoonBox));
 		});
 
 		if (*premiumFlooded) {

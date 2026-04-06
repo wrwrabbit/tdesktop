@@ -1330,3 +1330,11 @@ aiComposeBoxWithSend: Box(aiComposeBox) {
 	buttonPadding: margins(16px, 12px, 66px, 12px);
 }
 aiComposeSendButtonSkip: 8px;
+aiComposeBoxClose: IconButton(boxTitleClose) {
+	ripple: defaultRippleAnimation;
+}
+aiComposeBoxInfoButton: IconButton(boxTitleClose) {
+	icon: icon {{ "menu/info", boxTitleCloseFg }};
+	iconOver: icon {{ "menu/info", boxTitleCloseFgOver }};
+	ripple: defaultRippleAnimation;
+}
