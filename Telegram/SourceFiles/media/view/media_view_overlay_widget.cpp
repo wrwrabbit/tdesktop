@@ -603,6 +603,10 @@ OverlayWidget::OverlayWidget()
 		_saveMsgAnimation.start([=] { updateSaveMsg(); }, 1., 0., delay);
 	});
 
+	_chapterTimer.setCallback([=, delay = st::mediaviewChapterHiding] {
+		_chapterAnimation.start([=] { updateChapter(); }, 1., 0., delay);
+	});
+
 	_docRectImage = QImage(
 		st::mediaviewFileSize * style::DevicePixelRatio(),
 		QImage::Format_ARGB32_Premultiplied);
@@ -5722,6 +5726,9 @@ void OverlayWidget::paint(not_null<Renderer*> renderer) {
 	if (isSaveMsgShown()) {
 		renderer->paintSaveMsg(_saveMsg);
 	}
+	if (isChapterShown()) {
+		renderer->paintChapter(_chapterRect);
+	}
 
 	const auto opacity = _fullScreenVideo ? 0. : _controlsOpacity.current();
 	if (opacity > 0) {
@@ -5980,6 +5987,154 @@ void OverlayWidget::paintSaveMsgContent(
 		.palette = &st::mediaviewTextPalette,
 	});
 	p.setOpacity(1);
+}
+
+void OverlayWidget::showChapterIndicator(
+		const QString &name,
+		int direction) {
+	if (name.isEmpty()) {
+		return;
+	}
+	_chapterText = name;
+
+	const auto font = st::mediaviewChapterFont;
+	const auto padding = st::mediaviewChapterPadding;
+	const auto arrowSpace = st::mediaviewChapterArrowWidth
+		+ st::mediaviewChapterArrowGap;
+	const auto textWidth = font->width(_chapterText);
+	const auto w = padding.left()
+		+ arrowSpace
+		+ textWidth
+		+ arrowSpace
+		+ padding.right();
+	const auto h = rect::m::sum::v(padding) + font->height;
+	_chapterRect = QRect(
+		(width() - w) / 2,
+		_minUsedTop + (_maxUsedHeight - h) / 2,
+		w,
+		h);
+
+	if (isChapterShown()) {
+		_chapterTimer.callOnce(st::mediaviewChapterShown);
+	} else {
+		const auto callback = [=](float64 value) {
+			updateChapter();
+			if (!_chapterAnimation.animating()) {
+				_chapterTimer.callOnce(st::mediaviewChapterShown);
+			}
+		};
+		_chapterAnimation.start(
+			callback,
+			0.,
+			1.,
+			st::mediaviewChapterShowing);
+	}
+
+	_chapterArrows.erase(
+		ranges::remove_if(
+			_chapterArrows,
+			[&](const auto &a) {
+				return !a->animation.animating()
+					|| (a->direction != direction);
+			}),
+		_chapterArrows.end());
+	auto arrow = std::make_unique<ChapterArrow>();
+	arrow->direction = direction;
+	arrow->animation.start(
+		[=] { updateChapter(); },
+		0.,
+		1.,
+		st::mediaviewChapterArrowSlide
+			+ st::mediaviewChapterArrowPause
+			+ st::mediaviewChapterArrowFade);
+	_chapterArrows.push_back(std::move(arrow));
+	updateChapter();
+}
+
+void OverlayWidget::paintChapterContent(
+		Painter &p,
+		QRect outer,
+		QRect clip) {
+	const auto opacity = _chapterAnimation.value(1.);
+	p.setOpacity(opacity);
+	Ui::FillRoundRect(
+		p,
+		outer,
+		st::mediaviewSaveMsgBg,
+		Ui::MediaviewSaveCorners);
+
+	const auto font = st::mediaviewChapterFont;
+	const auto padding = st::mediaviewChapterPadding;
+	const auto arrowSize = st::mediaviewChapterArrowSize;
+	const auto arrowWidth = st::mediaviewChapterArrowWidth;
+	const auto arrowGap = st::mediaviewChapterArrowGap;
+	const auto textX = outer.x()
+		+ padding.left()
+		+ arrowWidth
+		+ arrowGap;
+	const auto textY = outer.y() + padding.top();
+
+	p.setFont(font);
+	p.setPen(st::mediaviewSaveMsgFg);
+	p.drawText(textX, textY + font->ascent, _chapterText);
+
+	const auto cy = outer.y() + outer.height() / 2.;
+	const auto halfH = arrowSize / 2.;
+	const auto totalDuration = float64(st::mediaviewChapterArrowSlide
+		+ st::mediaviewChapterArrowPause
+		+ st::mediaviewChapterArrowFade);
+	const auto slideEnd = st::mediaviewChapterArrowSlide / totalDuration;
+	const auto fadeStart = 1. - st::mediaviewChapterArrowFade / totalDuration;
+	auto hq = PainterHighQualityEnabler(p);
+	auto pen = QPen(st::mediaviewSaveMsgFg->c);
+	pen.setWidthF(st::lineWidth * 1.5);
+	pen.setCapStyle(Qt::RoundCap);
+	pen.setJoinStyle(Qt::RoundJoin);
+	p.setPen(pen);
+	p.setBrush(Qt::NoBrush);
+	for (const auto &arrow : _chapterArrows) {
+		if (!arrow->animation.animating()) {
+			continue;
+		}
+		const auto progress = arrow->animation.value(1.);
+		const auto slideProgress = std::min(progress / slideEnd, 1.);
+		const auto shift = st::mediaviewChapterArrowShift * slideProgress;
+		const auto arrowOpacity = (progress <= fadeStart)
+			? slideProgress
+			: (1. - progress) / (1. - fadeStart);
+		p.setOpacity(opacity * arrowOpacity);
+		auto path = QPainterPath();
+		if (arrow->direction > 0) {
+			const auto ax = outer.x()
+				+ outer.width()
+				- padding.right()
+				- arrowGap
+				- arrowWidth
+				+ shift;
+			path.moveTo(ax, cy - halfH);
+			path.lineTo(ax + arrowWidth, cy);
+			path.lineTo(ax, cy + halfH);
+		} else {
+			const auto ax = outer.x()
+				+ padding.left()
+				+ arrowGap
+				+ arrowWidth
+				- shift;
+			path.moveTo(ax, cy - halfH);
+			path.lineTo(ax - arrowWidth, cy);
+			path.lineTo(ax, cy + halfH);
+		}
+		p.drawPath(path);
+	}
+	p.setOpacity(1);
+}
+
+bool OverlayWidget::isChapterShown() const {
+	return _chapterAnimation.animating() || _chapterTimer.isActive();
+}
+
+void OverlayWidget::updateChapter() {
+	update(_chapterRect);
 }
 
 bool OverlayWidget::saveControlLocked() const {
@@ -6264,32 +6419,28 @@ void OverlayWidget::handleKeyPress(not_null<QKeyEvent*> e) {
 		} else if (modifiers.testFlag(Qt::AltModifier)
 			&& (key == Qt::Key_Left || key == Qt::Key_Right)
 			&& _streamed->controls
-			&& !_streamed->controls->timestamps().empty()) {
-			const auto &timestamps = _streamed->controls->timestamps();
+			&& _streamed->controls->hasTimestamps()) {
 			const auto &state = _streamed->instance.info().video.state;
 			const auto duration = state.duration;
 			if (duration > 0) {
 				const auto progress = state.position
 					/ float64(duration);
-				const auto eps = 0.005;
+				const auto &controls = _streamed->controls;
 				if (key == Qt::Key_Right) {
-					for (const auto &ts : timestamps) {
-						if (ts.position > progress + eps) {
-							activateControls();
-							restartAtProgress(ts.position);
-							return;
-						}
+					if (const auto ts = controls->nextTimestamp(progress)) {
+						activateControls();
+						restartAtProgress(ts->position);
+						showChapterIndicator(ts->label, 1);
 					}
 				} else {
-					for (auto i = int(timestamps.size()) - 1; i >= 0; --i) {
-						if (timestamps[i].position < progress - eps) {
-							activateControls();
-							restartAtProgress(timestamps[i].position);
-							return;
-						}
+					if (const auto ts = controls->prevTimestamp(progress)) {
+						activateControls();
+						restartAtProgress(ts->position);
+						showChapterIndicator(ts->label, -1);
+					} else {
+						activateControls();
+						restartAtSeekPosition(0);
 					}
-					activateControls();
-					restartAtSeekPosition(0);
 				}
 			}
 			return;
@@ -7466,6 +7617,11 @@ void OverlayWidget::clearBeforeHide() {
 	if (_menu) {
 		_menu->hideMenu(true);
 	}
+	_chapterText = QString();
+	_chapterRect = QRect();
+	_chapterAnimation.stop();
+	_chapterTimer.cancel();
+	_chapterArrows.clear();
 	_controlsHideTimer.cancel();
 	_controlsState = ControlsShown;
 	_controlsOpacity = anim::value(1);
