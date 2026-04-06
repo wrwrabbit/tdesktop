@@ -179,6 +179,15 @@ struct FileReferenceAccumulator {
 		push(full.vfallback_photo());
 		push(full.vprofile_photo());
 	}
+	void push(const MTPChatFull &data) {
+		data.match([&](const MTPDchatFull &data) {
+			push(data.vchat_photo());
+		}, [&](const MTPDchannelFull &data) {
+			push(data.vchat_photo());
+		});
+	}
+	void push(const MTPmessages_ChatFull &data) {
+		push(data.data().vfull_chat());
 	}
 	void push(const MTPmessages_RecentStickers &data) {
 		data.match([&](const MTPDmessages_recentStickers &data) {
@@ -247,6 +256,10 @@ UpdatedFileReferences GetFileReferences(const MTPphotos_Photos &data) {
 }
 
 UpdatedFileReferences GetFileReferences(const MTPusers_UserFull &data) {
+	return GetFileReferencesHelper(data);
+}
+
+UpdatedFileReferences GetFileReferences(const MTPmessages_ChatFull &data) {
 	return GetFileReferencesHelper(data);
 }
 
