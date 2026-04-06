@@ -97,8 +97,7 @@ public:
 		const auto reset = Ui::CreateChild<Ui::RoundButton>(
 			this,
 			rpl::single<QString>(QString()),
-			st::ivResetZoom,
-			Ui::RoundButtonTextNoTransform);
+			st::ivResetZoom);
 		processTooltip(reset);
 		const auto resetLabel = Ui::CreateChild<Ui::FlatLabel>(
 			reset,

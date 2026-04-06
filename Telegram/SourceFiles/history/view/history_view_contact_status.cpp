@@ -1014,8 +1014,7 @@ BusinessBotStatus::Bar::Bar(QWidget *parent)
 , _togglePaused(
 	this,
 	rpl::single(QString()),
-	st::historyBusinessBotToggle,
-	Ui::RoundButtonTextNoTransform)
+	st::historyBusinessBotToggle)
 , _settings(this, st::historyBusinessBotSettings) {
 	_name->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_status->setAttribute(Qt::WA_TransparentForMouseEvents);

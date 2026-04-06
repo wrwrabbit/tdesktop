@@ -4333,8 +4333,7 @@ void InnerWidget::refreshEmpty() {
 		_emptyButton.create(
 			this,
 			tr::lng_no_conversations_button(),
-			st::dialogEmptyButton,
-			Ui::RoundButtonTextNoTransform);
+			st::dialogEmptyButton);
 		_emptyButton->setVisible(isListVisible);
 		_emptyButton->setClickedCallback([=, window = _controller] {
 			window->show(PrepareContactsBox(window));

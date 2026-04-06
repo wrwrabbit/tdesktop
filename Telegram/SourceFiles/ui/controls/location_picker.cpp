@@ -686,8 +686,7 @@ not_null<RpWidget*> SetupMapPlaceholder(
 	const auto button = CreateChild<RoundButton>(
 		result,
 		tr::lng_maps_select_on_map(),
-		st::pickLocationChooseOnMap,
-		RoundButtonTextNoTransform);
+		st::pickLocationChooseOnMap);
 	button->setFullRadius(true);
 	button->setClickedCallback(choose);
 

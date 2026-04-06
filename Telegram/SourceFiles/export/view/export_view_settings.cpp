@@ -885,8 +885,7 @@ void SettingsWidget::refreshButtons(
 		? Ui::CreateChild<Ui::RoundButton>(
 			container.get(),
 			tr::lng_export_start(),
-			st::defaultBoxButton,
-			Ui::RoundButtonTextNoTransform)
+			st::defaultBoxButton)
 		: nullptr;
 	if (start) {
 		start->show();
@@ -903,8 +902,7 @@ void SettingsWidget::refreshButtons(
 	const auto cancel = Ui::CreateChild<Ui::RoundButton>(
 		container.get(),
 		tr::lng_cancel(),
-		st::defaultBoxButton,
-		Ui::RoundButtonTextNoTransform);
+		st::defaultBoxButton);
 	cancel->show();
 	_cancelClicks = cancel->clicks() | rpl::to_empty;
 

@@ -633,8 +633,7 @@ base::options::toggle ShowChannelJoinedBelowAbout({
 	const auto link = Ui::CreateChild<Ui::RoundButton>(
 		labelWrap,
 		std::move(linkText),
-		st::defaultTableSmallButton,
-		Ui::RoundButtonTextNoTransform);
+		st::defaultTableSmallButton);
 	link->setClickedCallback([=] {
 		state->myTimezone = !state->myTimezone.current();
 		state->expanded = true;
@@ -2133,8 +2132,7 @@ void DetailsFiller::setupMainApp(bool suppressBottom) {
 		object_ptr<Ui::RoundButton>(
 			_wrap,
 			tr::lng_profile_open_app(),
-			st::infoOpenApp,
-			Ui::RoundButtonTextNoTransform),
+			st::infoOpenApp),
 		st::infoOpenAppMargin,
 		style::al_justify);
 

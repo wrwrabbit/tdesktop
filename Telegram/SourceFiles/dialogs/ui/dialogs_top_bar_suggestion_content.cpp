@@ -126,13 +126,11 @@ not_null<Ui::SlideWrap<Ui::VerticalLayout>*> CreateUnconfirmedAuthContent(
 	const auto yes = Ui::CreateChild<Ui::RoundButton>(
 		buttons,
 		tr::lng_unconfirmed_auth_confirm(),
-		st::dialogsUnconfirmedAuthButton,
-		Ui::RoundButtonTextNoTransform);
+		st::dialogsUnconfirmedAuthButton);
 	const auto no = Ui::CreateChild<Ui::RoundButton>(
 		buttons,
 		tr::lng_unconfirmed_auth_deny(),
-		st::dialogsUnconfirmedAuthButtonNo,
-		Ui::RoundButtonTextNoTransform);
+		st::dialogsUnconfirmedAuthButtonNo);
 	yes->setClickedCallback([=] {
 		wrap->toggle(false, anim::type::normal);
 		base::call_delayed(st::universalDuration, wrap, [=] {
@@ -237,8 +235,7 @@ void ShowAuthDeniedBox(
 		object_ptr<Ui::RoundButton>(
 			box,
 			rpl::single(QString()),
-			st::defaultActiveButton,
-			Ui::RoundButtonTextNoTransform));
+			st::defaultActiveButton));
 	confirm->setClickedCallback([=] {
 		box->closeBox();
 	});
@@ -363,8 +360,7 @@ void TopBarSuggestionContent::setRightButton(
 	_rightButton = base::make_unique_q<RoundButton>(
 		this,
 		rpl::single(QString()),
-		st::dialogsTopBarRightButton,
-		RoundButtonTextNoTransform);
+		st::dialogsTopBarRightButton);
 	_rightButton->setText(std::move(text));
 	rpl::combine(
 		sizeValue(),

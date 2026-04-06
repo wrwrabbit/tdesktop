@@ -599,8 +599,7 @@ void TranslateBar::showToast(
 	const auto button = Ui::CreateChild<Ui::RoundButton>(
 		widget.get(),
 		rpl::single(buttonText),
-		st::historyPremiumViewSet,
-		Ui::RoundButtonTextNoTransform);
+		st::historyPremiumViewSet);
 	button->show();
 	rpl::combine(
 		widget->sizeValue(),

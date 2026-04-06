@@ -198,8 +198,7 @@ PreviewWrap::PreviewWrap(
 			item->out()
 				? tr::lng_close()
 				: tr::lng_ttl_voice_close_in(),
-			st::ttlMediaButton,
-			Ui::RoundButtonTextNoTransform);
+			st::ttlMediaButton);
 		close->setFullRadius(true);
 		close->setClickedCallback(closeCallback);
 

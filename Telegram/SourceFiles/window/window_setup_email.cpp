@@ -125,8 +125,7 @@ SetupEmailLockWidget::SetupEmailLockWidget(
 			_logoutButton = object_ptr<Ui::RoundButton>(
 				this,
 				tr::lng_settings_logout(),
-				st::defaultBoxButton,
-				Ui::RoundButtonTextNoTransform);
+				st::defaultBoxButton);
 			if (session) {
 				session->promoSuggestions().setSetupEmailState(
 					Data::SetupEmailState::SettingUpNoSkip);
@@ -150,8 +149,7 @@ SetupEmailLockWidget::SetupEmailLockWidget(
 			_debugButton = object_ptr<Ui::RoundButton>(
 				this,
 				rpl::single(u"[DEBUG] Clear bio"_q),
-				st::defaultBoxButton,
-				Ui::RoundButtonTextNoTransform);
+				st::defaultBoxButton);
 			_debugButton->setClickedCallback([=] {
 				session->api().saveSelfBio({});
 			});
@@ -225,8 +223,7 @@ SetupEmailLockWidget::SetupEmailLockWidget(
 			object_ptr<Ui::RoundButton>(
 				_layout,
 				tr::lng_settings_cloud_login_email_confirm(),
-				st::changePhoneButton,
-				Ui::RoundButtonTextNoTransform),
+				st::changePhoneButton),
 			st::boxRowPadding,
 			style::al_top);
 

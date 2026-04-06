@@ -35,8 +35,7 @@ void AboutSponsoredBox(not_null<Ui::GenericBox*> box) {
 		const auto button = Ui::CreateChild<RoundButton>(
 			row,
 			rpl::single<QString>(kUrl.utf8()),
-			st,
-			RoundButtonTextNoTransform);
+			st);
 		button->setBrushOverride(Qt::NoBrush);
 		button->setPenOverride(QPen(st::historyLinkInFg));
 		rpl::combine(

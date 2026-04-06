@@ -1937,8 +1937,8 @@ not_null<Ui::RoundButton*> CreateLockedButton(
 		not_null<QWidget*> parent,
 		rpl::producer<QString> text,
 		const style::RoundButton &st,
-		Ui::RoundButtonTextTransform transform,
-		rpl::producer<bool> locked) {
+		rpl::producer<bool> locked,
+		Ui::RoundButtonTextTransform transform) {
 	const auto result = Ui::CreateChild<Ui::RoundButton>(
 		parent.get(),
 		rpl::single(QString()),

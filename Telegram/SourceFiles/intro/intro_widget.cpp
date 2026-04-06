@@ -88,7 +88,7 @@ Widget::Widget(
 		Ui::RoundButtonTextToUpper))
 , _next(
 	this,
-	object_ptr<Ui::RoundButton>(this, nullptr, *_nextStyle, Ui::RoundButtonTextNoTransform))
+	object_ptr<Ui::RoundButton>(this, nullptr, *_nextStyle))
 , _connecting(std::make_unique<Window::ConnectionState>(
 		this,
 		account,
@@ -355,7 +355,7 @@ void Widget::setupStep() {
 			_next.destroy();
 			_next.create(
 				this,
-				object_ptr<Ui::RoundButton>(this, nullptr, *nextStyle, Ui::RoundButtonTextNoTransform));
+				object_ptr<Ui::RoundButton>(this, nullptr, *nextStyle));
 			showControls();
 			updateControlsGeometry();
 			_next->toggle(wasShown, anim::type::instant);

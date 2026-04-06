@@ -328,8 +328,7 @@ TopBar::TopBar(
 	object_ptr<Ui::RoundButton>(
 		this,
 		tr::lng_status_lastseen_when(),
-		st::infoProfileTopBarShowLastSeen,
-		Ui::RoundButtonTextNoTransform))
+		st::infoProfileTopBarShowLastSeen))
 , _forumButton([&, controller = descriptor.controller] {
 	const auto topic = _key.topic();
 	if (!topic) {
@@ -338,8 +337,7 @@ TopBar::TopBar(
 	auto owned = object_ptr<Ui::RoundButton>(
 		this,
 		rpl::single(QString()),
-		st::infoProfileTopBarTopicStatusButton,
-		Ui::RoundButtonTextNoTransform);
+		st::infoProfileTopBarTopicStatusButton);
 	owned->setText(Info::Profile::NameValue(
 		_peer
 	) | rpl::map([=](const QString &name) {

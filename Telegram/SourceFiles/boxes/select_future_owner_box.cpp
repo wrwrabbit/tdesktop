@@ -321,8 +321,7 @@ void SelectFutureOwnerbox(
 			!adminsAreEqual
 				? tr::lng_select_next_owner_box()
 				: tr::lng_select_next_owner_box_admin(),
-			st::defaultLightButton,
-			Ui::RoundButtonTextNoTransform),
+			st::defaultLightButton),
 		st::boxRowPadding,
 		style::al_justify);
 	Ui::AddSkip(content);
@@ -330,8 +329,7 @@ void SelectFutureOwnerbox(
 		object_ptr<Ui::RoundButton>(
 			content,
 			tr::lng_cancel(),
-			st::defaultLightButton,
-			Ui::RoundButtonTextNoTransform),
+			st::defaultLightButton),
 		st::boxRowPadding,
 		style::al_justify);
 	cancel->setClickedCallback([=] {
@@ -344,8 +342,7 @@ void SelectFutureOwnerbox(
 			isGroup
 				? tr::lng_profile_leave_group()
 				: tr::lng_profile_leave_channel(),
-			st::attentionBoxButton,
-			Ui::RoundButtonTextNoTransform),
+			st::attentionBoxButton),
 		st::boxRowPadding,
 		style::al_justify);
 	leave->setClickedCallback([=, revoke = false] {
@@ -479,8 +476,7 @@ void SelectFutureOwnerbox(
 						}),
 						tr::lng_select_next_owner_box_confirm(),
 						tr::lng_close()),
-					st::defaultActiveButton,
-					Ui::RoundButtonTextNoTransform);
+					st::defaultActiveButton);
 				const auto raw = button.data();
 				rpl::combine(
 					state->selectionChanges.events() | rpl::map_to(0),

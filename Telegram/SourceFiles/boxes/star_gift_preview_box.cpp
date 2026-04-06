@@ -1559,8 +1559,7 @@ void StarGiftPreviewBox(
 		auto owned = object_ptr<RoundButton>(
 			buttonsParent,
 			text(),
-			st,
-			RoundButtonTextNoTransform);
+			st);
 		const auto raw = owned.data();
 
 		raw->setClickedCallback([=] {

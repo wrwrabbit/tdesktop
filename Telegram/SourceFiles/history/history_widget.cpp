@@ -5878,8 +5878,7 @@ bool HistoryWidget::updateCmdStartShown() {
 			(_botMenu.text.isEmpty()
 				? tr::lng_bot_menu_button()
 				: rpl::single(_botMenu.text)),
-			st::historyBotMenuButton,
-			Ui::RoundButtonTextNoTransform);
+			st::historyBotMenuButton);
 		orderWidgets();
 
 		_botMenu.button->setFullRadius(true);

@@ -32,8 +32,7 @@ ConfirmPhoneBox::ConfirmPhoneBox(
 		_fragment.create(
 			this,
 			tr::lng_intro_fragment_button(),
-			st::fragmentBoxButton,
-			RoundButtonTextNoTransform);
+			st::fragmentBoxButton);
 		_fragment->setClickedCallback([=] { File::OpenUrl(openUrl); });
 	}
 	if (timeout) {

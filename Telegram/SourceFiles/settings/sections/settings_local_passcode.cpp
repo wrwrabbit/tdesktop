@@ -209,8 +209,7 @@ void LocalPasscodeEnter::setupContent() {
 				: isCheck
 				? tr::lng_passcode_check_button()
 				: tr::lng_passcode_change_button()),
-			st::changePhoneButton,
-			Ui::RoundButtonTextNoTransform),
+			st::changePhoneButton),
 		st::settingLocalPasscodeButtonPadding,
 		style::al_top);
 	button->setClickedCallback([=] {

@@ -496,8 +496,7 @@ void Credits::setupContent() {
 			object_ptr<Ui::RoundButton>(
 				content,
 				nullptr,
-				st::creditsSettingsBigBalanceButton,
-				Ui::RoundButtonTextNoTransform),
+				st::creditsSettingsBigBalanceButton),
 			st::boxRowPadding,
 			style::al_top);
 		button->setContext([&]() -> Ui::Text::MarkedContext {

@@ -594,8 +594,7 @@ void InnerWidget::fill() {
 					auto button = object_ptr<Ui::RoundButton>(
 						container,
 						tr::lng_channel_earn_learn_close(),
-						st::defaultActiveButton,
-						Ui::RoundButtonTextNoTransform);
+						st::defaultActiveButton);
 					button->resizeToWidth(box->width()
 						- st.buttonPadding.left()
 						- st.buttonPadding.left());

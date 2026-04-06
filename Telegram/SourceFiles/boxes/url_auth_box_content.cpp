@@ -82,8 +82,7 @@ void ShowMatchCodesBox(
 		const auto button = Ui::CreateChild<Ui::RoundButton>(
 			buttons,
 			rpl::single(emojiCode ? QString() : code),
-			st::urlAuthCodesButton,
-			Ui::RoundButtonTextNoTransform);
+			st::urlAuthCodesButton);
 		if (emojiCode) {
 			button->setTextFgOverride(QColor(Qt::transparent));
 			const auto overlay = Ui::CreateChild<Ui::RpWidget>(button);
@@ -200,8 +199,7 @@ void ShowMatchCodesBox(
 			object_ptr<Ui::RoundButton>(
 				content,
 				tr::lng_cancel(),
-				st::attentionBoxButton,
-				Ui::RoundButtonTextNoTransform),
+				st::attentionBoxButton),
 			padding);
 		PrepareFullWidthRoundButton(button, content, padding);
 		button->setClickedCallback([=] {
@@ -550,8 +548,7 @@ void ShowDetails(
 			object_ptr<Ui::RoundButton>(
 				content,
 				tr::lng_url_auth_login_button(),
-				st::defaultLightButton,
-				Ui::RoundButtonTextNoTransform),
+				st::defaultLightButton),
 			padding);
 		PrepareFullWidthRoundButton(button, content, padding);
 		button->setClickedCallback([=] {
@@ -588,8 +585,7 @@ void ShowDetails(
 			object_ptr<Ui::RoundButton>(
 				content,
 				tr::lng_suggest_action_decline(),
-				st::attentionBoxButton,
-				Ui::RoundButtonTextNoTransform),
+				st::attentionBoxButton),
 			padding);
 		PrepareFullWidthRoundButton(button, content, padding);
 		button->setClickedCallback([=] {

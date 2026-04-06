@@ -325,8 +325,7 @@ PlaybackSponsored::Message::Message(
 , _about(std::make_unique<Ui::RoundButton>(
 	this,
 	tr::lng_search_sponsored_button(),
-	_aboutSt,
-	Ui::RoundButtonTextNoTransform))
+	_aboutSt))
 , _close(
 	std::make_unique<Close>(
 		this,

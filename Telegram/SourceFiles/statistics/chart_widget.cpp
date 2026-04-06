@@ -1319,8 +1319,7 @@ void ChartWidget::processLocalZoom(int xIndex) {
 	const auto zoomOutButton = Ui::CreateChild<Ui::RoundButton>(
 		header,
 		tr::lng_stats_zoom_out(),
-		st::statisticsHeaderButton,
-		Ui::RoundButtonTextNoTransform);
+		st::statisticsHeaderButton);
 	zoomOutButton->moveToRight(
 		0,
 		(header->height() - zoomOutButton->height()) / 2);
@@ -1532,8 +1531,7 @@ void ChartWidget::setZoomedChartData(
 	const auto zoomOutButton = Ui::CreateChild<Ui::RoundButton>(
 		customHeader,
 		tr::lng_stats_zoom_out(),
-		st::statisticsHeaderButton,
-		Ui::RoundButtonTextNoTransform);
+		st::statisticsHeaderButton);
 	zoomOutButton->moveToRight(
 		0,
 		(customHeader->height() - zoomOutButton->height()) / 2);

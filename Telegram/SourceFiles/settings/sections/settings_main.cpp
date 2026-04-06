@@ -852,8 +852,7 @@ void SetupValidatePhoneNumberSuggestion(
 	const auto yes = Ui::CreateChild<Ui::RoundButton>(
 		wrap,
 		tr::lng_box_yes(),
-		st::inviteLinkButton,
-		Ui::RoundButtonTextNoTransform);
+		st::inviteLinkButton);
 	yes->setClickedCallback([=] {
 		controller->session().promoSuggestions().dismiss(
 			kSugValidatePhone.utf8());
@@ -862,8 +861,7 @@ void SetupValidatePhoneNumberSuggestion(
 	const auto no = Ui::CreateChild<Ui::RoundButton>(
 		wrap,
 		tr::lng_box_no(),
-		st::inviteLinkButton,
-		Ui::RoundButtonTextNoTransform);
+		st::inviteLinkButton);
 	no->setClickedCallback([=] {
 		const auto sharedLabel = std::make_shared<base::weak_qptr<Ui::FlatLabel>>();
 		const auto height = st::boxLabel.style.font->height;
@@ -954,8 +952,7 @@ void SetupValidatePasswordSuggestion(
 	const auto yes = Ui::CreateChild<Ui::RoundButton>(
 		wrap,
 		tr::lng_settings_suggestion_password_yes(),
-		st::inviteLinkButton,
-		Ui::RoundButtonTextNoTransform);
+		st::inviteLinkButton);
 	yes->setClickedCallback([=] {
 		controller->session().promoSuggestions().dismiss(
 			Data::PromoSuggestions::SugValidatePassword());
@@ -964,8 +961,7 @@ void SetupValidatePasswordSuggestion(
 	const auto no = Ui::CreateChild<Ui::RoundButton>(
 		wrap,
 		tr::lng_settings_suggestion_password_no(),
-		st::inviteLinkButton,
-		Ui::RoundButtonTextNoTransform);
+		st::inviteLinkButton);
 	no->setClickedCallback([=] {
 		showOther(Settings::CloudPasswordSuggestionInputId());
 	});

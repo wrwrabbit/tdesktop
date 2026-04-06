@@ -141,8 +141,7 @@ void VerifyBox::setupControls(
 			object_ptr<Ui::RoundButton>(
 				_content,
 				tr::lng_intro_fragment_button(),
-				st::fragmentBoxButton,
-				Ui::RoundButtonTextNoTransform),
+				st::fragmentBoxButton),
 			small);
 		_content->widthValue(
 		) | rpl::on_next([=](int w) {

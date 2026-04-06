@@ -157,8 +157,7 @@ void ShowOrPremiumBox(
 		object_ptr<RoundButton>(
 			box,
 			std::move(skin.showButton),
-			st::showOrShowButton,
-			RoundButtonTextNoTransform),
+			st::showOrShowButton),
 		buttonPadding);
 	box->addRow(
 		MakeShowOrLabel(box, std::move(skin.orPremium)),

@@ -1344,8 +1344,7 @@ void CreateGiveawayBox(
 		auto button = object_ptr<Ui::RoundButton>(
 			box,
 			rpl::never<QString>(),
-			st::giveawayGiftCodeStartButton,
-			Ui::RoundButtonTextNoTransform);
+			st::giveawayGiftCodeStartButton);
 
 		AddLabelWithBadgeToButton(
 			button,

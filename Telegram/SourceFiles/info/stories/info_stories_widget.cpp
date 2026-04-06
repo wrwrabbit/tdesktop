@@ -230,8 +230,7 @@ void Widget::setupBottomButton(int wasBottomHeight) {
 	const auto button = Ui::CreateChild<Ui::RoundButton>(
 		bottom,
 		rpl::single(QString()),
-		st::collectionEditBox.button,
-		Ui::RoundButtonTextNoTransform);
+		st::collectionEditBox.button);
 	button->setText(tr::lng_stories_album_add_button(
 	) | rpl::map([](const QString &text) {
 		return Ui::Text::IconEmoji(&st::collectionAddIcon).append(text);

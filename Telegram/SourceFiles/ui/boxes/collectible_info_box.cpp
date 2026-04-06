@@ -230,8 +230,7 @@ void CollectibleInfoBox(
 		object_ptr<Ui::RoundButton>(
 			box,
 			tr::lng_collectible_learn_more(),
-			st::collectibleMore,
-			RoundButtonTextNoTransform),
+			st::collectibleMore),
 		st::collectibleMorePadding);
 	more->setClickedCallback([url = info.url] {
 		File::OpenUrl(url);
@@ -243,8 +242,7 @@ void CollectibleInfoBox(
 	auto owned = object_ptr<Ui::RoundButton>(
 		box,
 		phrase(),
-		st::collectibleCopy,
-		RoundButtonTextNoTransform);
+		st::collectibleCopy);
 	const auto copy = owned.data();
 	copy->setClickedCallback([copyCallback] {
 		copyCallback(true);

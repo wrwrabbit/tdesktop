@@ -277,8 +277,7 @@ ProgressWidget::ProgressWidget(
 	_cancel = base::make_unique_q<Ui::RoundButton>(
 		this,
 		tr::lng_export_stop(),
-		st::exportCancelButton,
-		Ui::RoundButtonTextNoTransform);
+		st::exportCancelButton);
 	setupBottomButton(_cancel.get());
 }
 
@@ -361,8 +360,7 @@ void ProgressWidget::showDone() {
 	_done = base::make_unique_q<Ui::RoundButton>(
 		this,
 		tr::lng_export_done(),
-		st::exportDoneButton,
-		Ui::RoundButtonTextNoTransform);
+		st::exportDoneButton);
 	const auto desired = std::min(
 		st::exportDoneButton.style.font->width(tr::lng_export_done(tr::now))
 		+ st::exportDoneButton.height

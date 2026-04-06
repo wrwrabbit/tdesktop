@@ -190,8 +190,7 @@ void GroupCallBar::refreshScheduledProcess() {
 			_join = std::make_unique<RoundButton>(
 				_inner.get(),
 				tr::lng_group_call_join(),
-				st::groupCallTopBarJoin,
-				RoundButtonTextNoTransform);
+				st::groupCallTopBarJoin);
 			setupRightButton(_join.get());
 		}
 	} else if (!_scheduledProcess) {

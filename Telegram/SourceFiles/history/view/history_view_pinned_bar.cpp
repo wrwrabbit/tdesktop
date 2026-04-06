@@ -170,8 +170,7 @@ auto WithPinnedTitle(not_null<Main::Session*> session, PinnedId id) {
 	auto button = object_ptr<Ui::RoundButton>(
 		parent,
 		rpl::never<QString>(), // Text is handled by the inner label.
-		stButton,
-		Ui::RoundButtonTextNoTransform);
+		stButton);
 
 	const auto label = Ui::CreateChild<Ui::FlatLabel>(
 		button.data(),

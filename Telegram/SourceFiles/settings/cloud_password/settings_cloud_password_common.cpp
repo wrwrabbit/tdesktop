@@ -229,8 +229,7 @@ not_null<Ui::RoundButton*> AddDoneButton(
 		object_ptr<Ui::RoundButton>(
 			content,
 			std::move(text),
-			st::changePhoneButton,
-			Ui::RoundButtonTextNoTransform),
+			st::changePhoneButton),
 		st::settingLocalPasscodeButtonPadding,
 		style::al_top);
 	return button;

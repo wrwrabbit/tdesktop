@@ -1305,8 +1305,7 @@ void InnerWidget::refreshAbout() {
 			object_ptr<Ui::RoundButton>(
 				about.get(),
 				rpl::single(QString()),
-				st::collectionEmptyButton,
-				Ui::RoundButtonTextNoTransform),
+				st::collectionEmptyButton),
 			st::collectionEmptyAddMargin,
 			style::al_top);
 		button->setText(tr::lng_gift_collection_add_button(
@@ -2495,8 +2494,7 @@ void Widget::setupBottomButton(int wasBottomHeight) {
 	const auto button = Ui::CreateChild<Ui::RoundButton>(
 		bottom,
 		rpl::single(QString()),
-		st::collectionEditBox.button,
-		Ui::RoundButtonTextNoTransform);
+		st::collectionEditBox.button);
 	button->setText(tr::lng_gift_collection_add_button(
 	) | rpl::map([](const QString &text) {
 		return Ui::Text::IconEmoji(&st::collectionAddIcon).append(text);

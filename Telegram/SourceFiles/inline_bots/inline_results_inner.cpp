@@ -512,7 +512,7 @@ void Inner::refreshSwitchPmButton(const CacheEntry *entry) {
 		_switchPmUrl = QByteArray();
 	} else {
 		if (!_switchPmButton) {
-			_switchPmButton.create(this, nullptr, st::switchPmButton, Ui::RoundButtonTextNoTransform);
+			_switchPmButton.create(this, nullptr, st::switchPmButton);
 			_switchPmButton->show();
 			_switchPmButton->addClickHandler([=] { switchPm(); });
 		}

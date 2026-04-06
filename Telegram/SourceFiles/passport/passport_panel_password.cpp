@@ -241,16 +241,14 @@ void PanelNoPassword::refreshBottom() {
 		const auto cancel = Ui::CreateChild<Ui::RoundButton>(
 			container,
 			tr::lng_cancel(),
-			st::defaultBoxButton,
-			Ui::RoundButtonTextNoTransform);
+			st::defaultBoxButton);
 		cancel->addClickHandler([=] {
 			_controller->cancelPasswordSubmit();
 		});
 		const auto validate = Ui::CreateChild<Ui::RoundButton>(
 			container,
 			tr::lng_passport_email_validate(),
-			st::defaultBoxButton,
-			Ui::RoundButtonTextNoTransform);
+			st::defaultBoxButton);
 		validate->addClickHandler([=] {
 			_controller->validateRecoveryEmail();
 		});

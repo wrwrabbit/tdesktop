@@ -758,8 +758,7 @@ void BackgroundPreviewBox::applyForPeer() {
 	const auto forMe = CreateChild<RoundButton>(
 		overlay,
 		tr::lng_background_apply_me(),
-		st::backgroundConfirm,
-		RoundButtonTextNoTransform);
+		st::backgroundConfirm);
 	forMe->setClickedCallback([=] {
 		applyForPeer(false);
 	});
@@ -770,7 +769,6 @@ void BackgroundPreviewBox::applyForPeer() {
 			lt_user,
 			rpl::single(_forPeer->shortName())),
 		st::backgroundConfirm,
-		RoundButtonTextNoTransform,
 		Data::AmPremiumValue(&_forPeer->session()) | rpl::map(!_1));
 	forBoth->setClickedCallback([=] {
 		if (_forPeer->session().premium()) {
@@ -784,8 +782,7 @@ void BackgroundPreviewBox::applyForPeer() {
 	const auto cancel = CreateChild<RoundButton>(
 		overlay,
 		tr::lng_cancel(),
-		st::backgroundConfirmCancel,
-		RoundButtonTextNoTransform);
+		st::backgroundConfirmCancel);
 	cancel->setClickedCallback([=] {
 		const auto raw = _forBothOverlay.release();
 		raw->shownValue() | rpl::filter(

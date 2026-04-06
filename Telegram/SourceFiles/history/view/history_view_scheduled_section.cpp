@@ -1741,8 +1741,7 @@ bool ShowScheduledVideoPublished(
 	const auto button = Ui::CreateChild<Ui::RoundButton>(
 		widget.get(),
 		rpl::single(view),
-		st::processingVideoView,
-		Ui::RoundButtonTextNoTransform);
+		st::processingVideoView);
 	button->show();
 	rpl::combine(
 		widget->sizeValue(),

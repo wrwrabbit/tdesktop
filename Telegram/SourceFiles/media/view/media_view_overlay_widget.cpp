@@ -1794,8 +1794,7 @@ void OverlayWidget::refreshVoteButton() {
 		_voteButton.create(
 			_body,
 			tr::lng_polls_submit_votes(),
-			st::mediaviewVoteButton,
-			Ui::RoundButtonTextNoTransform);
+			st::mediaviewVoteButton);
 		const auto effect = Ui::CreateChild<QGraphicsOpacityEffect>(
 			_voteButton.data());
 		effect->setOpacity(_controlsOpacity.current());
@@ -4909,8 +4908,7 @@ void OverlayWidget::initThemePreview() {
 				_themeApply.create(
 					_body,
 					tr::lng_theme_preview_apply(),
-					st::themePreviewApplyButton,
-					Ui::RoundButtonTextNoTransform);
+					st::themePreviewApplyButton);
 				_themeApply->show();
 				_themeApply->setClickedCallback([=] {
 					const auto &object = Background()->themeObject();
@@ -4926,16 +4924,14 @@ void OverlayWidget::initThemePreview() {
 				_themeCancel.create(
 					_body,
 					tr::lng_cancel(),
-					st::themePreviewCancelButton,
-					Ui::RoundButtonTextNoTransform);
+					st::themePreviewCancelButton);
 				_themeCancel->show();
 				_themeCancel->setClickedCallback([this] { close(); });
 				if (const auto slug = _themeCloudData.slug; !slug.isEmpty()) {
 					_themeShare.create(
 						_body,
 						tr::lng_theme_share(),
-						st::themePreviewCancelButton,
-						Ui::RoundButtonTextNoTransform);
+						st::themePreviewCancelButton);
 					_themeShare->show();
 					_themeShare->setClickedCallback([=] {
 						QGuiApplication::clipboard()->setText(

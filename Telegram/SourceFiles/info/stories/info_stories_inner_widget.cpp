@@ -717,8 +717,7 @@ void InnerWidget::refreshEmpty() {
 			object_ptr<Ui::RoundButton>(
 				empty.get(),
 				rpl::single(QString()),
-				st::collectionEmptyButton,
-				Ui::RoundButtonTextNoTransform),
+				st::collectionEmptyButton),
 			st::collectionEmptyAddMargin,
 			style::al_top);
 		button->setText(tr::lng_stories_album_add_button(

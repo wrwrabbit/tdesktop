@@ -97,8 +97,8 @@ struct SubscribeButtonArgs final {
 	not_null<QWidget*> parent,
 	rpl::producer<QString> text,
 	const style::RoundButton &st,
-	Ui::RoundButtonTextTransform transform,
-	rpl::producer<bool> locked);
+	rpl::producer<bool> locked,
+	Ui::RoundButtonTextTransform transform = Ui::RoundButtonTextTransform{});
 
 [[nodiscard]] not_null<Ui::GradientButton*> CreateSubscribeButton(
 	SubscribeButtonArgs &&args);

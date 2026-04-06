@@ -302,8 +302,7 @@ void ArchiveHintBox(
 		auto button = object_ptr<Ui::RoundButton>(
 			box,
 			tr::lng_archive_hint_button(),
-			st::defaultActiveButton,
-			Ui::RoundButtonTextNoTransform);
+			st::defaultActiveButton);
 		button->resizeToWidth(box->width()
 			- st.buttonPadding.left()
 			- st.buttonPadding.left());

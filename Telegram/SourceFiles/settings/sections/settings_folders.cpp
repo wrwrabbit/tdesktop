@@ -180,12 +180,11 @@ FilterRowButton::FilterRowButton(
 : RippleButton(parent, st::defaultRippleAnimation)
 , _session(session)
 , _remove(this, st::filtersRemove)
-, _restore(this, tr::lng_filters_restore(), st::settingsFilterAddRecommended, Ui::RoundButtonTextNoTransform)
+, _restore(this, tr::lng_filters_restore(), st::settingsFilterAddRecommended)
 , _add(
 	this,
 	tr::lng_filters_recommended_add(),
-	st::settingsFilterAddRecommended,
-	Ui::RoundButtonTextNoTransform)
+	st::settingsFilterAddRecommended)
 , _state(description.isEmpty() ? State::Normal : State::Suggested) {
 	_restore.setFullRadius(true);
 	_add.setFullRadius(true);

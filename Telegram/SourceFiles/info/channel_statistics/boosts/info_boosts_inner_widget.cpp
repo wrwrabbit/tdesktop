@@ -202,14 +202,12 @@ void FillShareLink(
 		const auto copy = CreateChild<Ui::RoundButton>(
 			wrap,
 			tr::lng_group_invite_context_copy(),
-			st::inviteLinkCopy,
-			Ui::RoundButtonTextNoTransform);
+			st::inviteLinkCopy);
 		copy->setClickedCallback(copyLink);
 		const auto share = CreateChild<Ui::RoundButton>(
 			wrap,
 			tr::lng_group_invite_context_share(),
-			st::inviteLinkShare,
-			Ui::RoundButtonTextNoTransform);
+			st::inviteLinkShare);
 		share->setClickedCallback(shareLink);
 
 		wrap->widthValue(
