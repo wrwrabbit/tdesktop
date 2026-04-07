@@ -5129,18 +5129,12 @@ int Message::resizeContentGetHeight(int newWidth) {
 							appearing->shownLines = 1;
 							appearing->revealedLineWidth = 0;
 							appearing->shownWidth = 0;
-							LOG(("appearing start"));
 							startTextAppearingWidthAnimation();
 						} else if (!appearing->heightStarted
 							&& !appearing->widthAnimation.animating()) {
-							LOG(("appearing continue"));
 							startTextAppearingHeightAnimation();
 						}
 					}
-					LOG(("appearing: %1 lines, shown %2, height %3")
-						.arg(appearing->lines.size())
-						.arg(appearing->shownLines)
-						.arg(appearing->shownHeight));
 					newHeight += appearing->shownHeight;
 				} else {
 					newHeight += fullTextHeight;
@@ -5248,9 +5242,6 @@ int Message::resizeContentGetHeight(int newWidth) {
 	}
 
 	newHeight += marginTop() + marginBottom();
-	if (const auto appearing = Get<TextAppearing>()) {
-		LOG(("appearing result: %1").arg(newHeight));
-	}
 	return newHeight;
 }
 
@@ -5276,9 +5267,6 @@ void Message::startTextAppearingWidthAnimation() {
 		kFullLineAppearDuration * lineWidth / st::msgMaxWidth,
 		crl::time(10));
 	appearing->widthDuration = duration;
-	LOG(("appearance - starting width: %1, duration: %2")
-		.arg(lineWidth)
-		.arg(duration));
 	appearing->widthAnimation.start(
 		[=] { textAppearingTick(); },
 		0.,
@@ -5297,10 +5285,6 @@ void Message::startTextAppearingHeightAnimation() {
 	appearing->heightStarted = true;
 	const auto oldHeight = appearing->shownHeight;
 	const auto newTargetHeight = appearing->lines[appearing->shownLines].top;
-	LOG(("appearance - starting height: %1, target: %2, duration: %3")
-		.arg(oldHeight)
-		.arg(newTargetHeight)
-		.arg(kLineHeightAppearDuration));
 	appearing->heightAnimation.start(
 		[=] { textAppearingHeightTick(); },
 		double(oldHeight),
@@ -5325,11 +5309,6 @@ void Message::textAppearingTick() {
 	appearing->shownWidth = std::max(
 		appearing->shownWidth,
 		appearing->revealedLineWidth);
-
-	LOG(("appearance width progress - line %1, progress: %2, revealed width: %3")
-		.arg(lineIndex)
-		.arg(progress)
-		.arg(appearing->revealedLineWidth));
 
 	const auto hasMoreLines =
 		(appearing->shownLines < int(appearing->lines.size()));
@@ -5378,7 +5357,6 @@ void Message::tryAdvanceTextAppearing() {
 		|| appearing->heightAnimation.animating()) {
 		return;
 	}
-	LOG(("appearance - line %1 fully appeared").arg(appearing->shownLines - 1));
 	if (appearing->shownLines < int(appearing->lines.size())) {
 		appearing->shownLines++;
 		startTextAppearingWidthAnimation();
