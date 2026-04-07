@@ -1,3 +1,7 @@
+6.7.5 (07.04.26)
+
+- Support for gradual appearing of bot reply messages.
+
 6.7.4 (07.04.26)
 
 - Add experimental option for "AI Tools" button.
