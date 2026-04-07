@@ -101,6 +101,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_drag_area.h"
 #include "history/history_inner_widget.h"
 #include "history/history_item_components.h"
+#include "history/history_streamed_drafts.h"
 #include "history/history_unread_things.h"
 #include "history/admin_log/history_admin_log_section.h"
 #include "history/view/controls/history_view_characters_limit.h"
@@ -3862,7 +3863,9 @@ void HistoryWidget::newItemAdded(not_null<HistoryItem*> item) {
 		}
 		return;
 	}
-	_itemRevealPending.emplace(item);
+	if (!item->history()->streamedDrafts().hasFor(item)) {
+		_itemRevealPending.emplace(item);
+	}
 }
 
 void HistoryWidget::maybeMarkReactionsRead(not_null<HistoryItem*> item) {

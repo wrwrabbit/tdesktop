@@ -1463,7 +1463,8 @@ void ScheduledWidget::listMarkContentsRead(
 }
 
 MessagesBarData ScheduledWidget::listMessagesBar(
-		const std::vector<not_null<Element*>> &elements) {
+		const std::vector<not_null<Element*>> &elements,
+		bool markLastAsRead) {
 	return {};
 }
 

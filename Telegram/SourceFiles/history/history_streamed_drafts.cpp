@@ -96,6 +96,13 @@ void HistoryStreamedDrafts::clear(MsgId rootId) {
 	}
 }
 
+bool HistoryStreamedDrafts::hasFor(not_null<HistoryItem*> item) const {
+	const auto rootId = item->topicRootId();
+	const auto i = _drafts.find(rootId);
+	return (i != end(_drafts))
+		&& (i->second.message->from() == item->from());
+}
+
 void HistoryStreamedDrafts::applyItemAdded(not_null<HistoryItem*> item) {
 	const auto rootId = item->topicRootId();
 	const auto i = _drafts.find(rootId);

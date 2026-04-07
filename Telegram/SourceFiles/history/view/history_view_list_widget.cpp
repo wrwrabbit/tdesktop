@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_components.h"
 #include "history/history_item_helpers.h"
 #include "history/history_item_text.h"
+#include "history/history_streamed_drafts.h"
 #include "history/view/media/history_view_media.h"
 #include "history/view/media/history_view_sticker.h"
 #include "history/view/reactions/history_view_reactions.h"
@@ -647,6 +648,10 @@ void ListWidget::refreshRows(const Data::MessagesSlice &old) {
 
 	saveScrollState();
 
+	const auto scrolledTillEnd = _itemsKnownTillEnd
+		&& (_visibleBottom == height())
+		&& (_visibleBottom > _visibleTop);
+
 	const auto addedToEndFrom = (old.skippedAfter == 0
 		&& (_slice.skippedAfter == 0)
 		&& !old.ids.empty())
@@ -684,7 +689,10 @@ void ListWidget::refreshRows(const Data::MessagesSlice &old) {
 		_translateTracker->addBunchFrom(_items);
 	}
 	for (auto e = end(_items), i = e - addedToEndCount; i != e; ++i) {
-		_itemRevealPending.emplace(*i);
+		const auto item = (*i)->data();
+		if (!item->history()->streamedDrafts().hasFor(item)) {
+			_itemRevealPending.emplace(*i);
+		}
 	}
 	updateAroundPositionFromNearest(nearestIndex);
 
@@ -705,7 +713,8 @@ void ListWidget::refreshRows(const Data::MessagesSlice &old) {
 	}
 	_viewsCapacity.clear();
 
-	checkUnreadBarCreation();
+	const auto markLastAsRead = (scrolledTillEnd && markingMessagesRead());
+	checkUnreadBarCreation(markLastAsRead);
 	restoreScrollState();
 	if (!_itemsRevealHeight) {
 		mouseActionUpdate(QCursor::pos());
@@ -986,18 +995,21 @@ void ListWidget::computeScrollTo(
 	scrollTo(wanted, position, scrollDelta, type);
 }
 
-void ListWidget::checkUnreadBarCreation() {
-	if (!_bar.element) {
-		if (auto data = _delegate->listMessagesBar(_items); data.bar.element) {
-			_bar = std::move(data.bar);
-			_barText = std::move(data.text);
-			if (!_bar.hidden) {
-				_bar.element->createUnreadBar(_barText.value());
-				const auto i = ranges::find(_items, not_null{ _bar.element });
-				Assert(i != end(_items));
-				refreshAttachmentsAtIndex(i - begin(_items));
-			}
-		}
+void ListWidget::checkUnreadBarCreation(bool markLastAsRead) {
+	if (_bar.element) {
+		return;
+	}
+	auto data = _delegate->listMessagesBar(_items, markLastAsRead);
+	if (!data.bar.element) {
+		return;
+	}
+	_bar = std::move(data.bar);
+	_barText = std::move(data.text);
+	if (!_bar.hidden) {
+		_bar.element->createUnreadBar(_barText.value());
+		const auto i = ranges::find(_items, not_null{ _bar.element });
+		Assert(i != end(_items));
+		refreshAttachmentsAtIndex(i - begin(_items));
 	}
 }
 
