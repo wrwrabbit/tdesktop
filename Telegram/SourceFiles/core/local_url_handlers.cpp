@@ -388,6 +388,8 @@ bool ApplyMtprotoProxy(
 	auto params = url_parse_params(
 		match->captured(1),
 		qthelp::UrlParamNameTransform::ToLower);
+	auto &secret = params[u"secret"_q];
+	secret.replace('+', '-').replace('/', '_');
 	ProxiesBoxController::ShowApplyConfirmation(
 		controller,
 		MTP::ProxyData::Type::Mtproto,

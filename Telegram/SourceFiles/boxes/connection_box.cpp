@@ -153,9 +153,13 @@ void AddProxyFromClipboard(
 				const auto type = isSocks
 					? ProxyData::Type::Socks5
 					: ProxyData::Type::Mtproto;
-				const auto fields = url_parse_params(
+				auto fields = url_parse_params(
 					match->captured(1),
 					qthelp::UrlParamNameTransform::ToLower);
+				if (type == ProxyData::Type::Mtproto) {
+					auto &secret = fields[u"secret"_q];
+					secret.replace('+', '-').replace('/', '_');
+				}
 				const auto proxy = ProxyDataFromFields(type, fields);
 				if (!proxy) {
 					const auto status = proxy.status();
