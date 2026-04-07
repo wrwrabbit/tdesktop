@@ -386,7 +386,8 @@ private:
 	[[nodiscard]] ClickHandlerPtr psaTooltipLink() const;
 	void psaTooltipToggled(bool shown) const;
 	void invalidateTextDependentCache() override;
-	void startTextAppearingAnimation();
+	void startTextAppearingWidthAnimation();
+	void startTextAppearingHeightAnimation();
 	void textAppearingTick();
 	void textAppearingHeightTick();
 	void tryAdvanceTextAppearing();

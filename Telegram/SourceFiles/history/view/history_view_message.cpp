@@ -5129,13 +5129,12 @@ int Message::resizeContentGetHeight(int newWidth) {
 							appearing->shownLines = 1;
 							appearing->revealedLineWidth = 0;
 							appearing->shownWidth = 0;
-							startTextAppearingAnimation();
+							LOG(("appearing start"));
+							startTextAppearingWidthAnimation();
 						} else if (!appearing->heightStarted
-							&& !appearing->widthAnimation.animating()
-							&& !appearing->heightAnimation.animating()
-							&& (appearing->shownLines
-								< appearing->lines.size())) {
-							startTextAppearingAnimation();
+							&& !appearing->widthAnimation.animating()) {
+							LOG(("appearing continue"));
+							startTextAppearingHeightAnimation();
 						}
 					}
 					LOG(("appearing: %1 lines, shown %2, height %3")
@@ -5260,7 +5259,7 @@ void Message::invalidateTextDependentCache() {
 	_bubbleTextualWidthCache = 0;
 }
 
-void Message::startTextAppearingAnimation() {
+void Message::startTextAppearingWidthAnimation() {
 	const auto appearing = Get<TextAppearing>();
 	if (!appearing || appearing->lines.empty()) {
 		return;
@@ -5286,6 +5285,28 @@ void Message::startTextAppearingAnimation() {
 		1.,
 		duration,
 		anim::linear);
+}
+
+void Message::startTextAppearingHeightAnimation() {
+	const auto appearing = Get<TextAppearing>();
+	if (!appearing
+		|| appearing->heightStarted
+		|| (appearing->shownLines >= int(appearing->lines.size()))) {
+		return;
+	}
+	appearing->heightStarted = true;
+	const auto oldHeight = appearing->shownHeight;
+	const auto newTargetHeight = appearing->lines[appearing->shownLines].top;
+	LOG(("appearance - starting height: %1, target: %2, duration: %3")
+		.arg(oldHeight)
+		.arg(newTargetHeight)
+		.arg(kLineHeightAppearDuration));
+	appearing->heightAnimation.start(
+		[=] { textAppearingHeightTick(); },
+		double(oldHeight),
+		double(newTargetHeight),
+		kLineHeightAppearDuration,
+		anim::easeOutCubic);
 }
 
 void Message::textAppearingTick() {
@@ -5317,20 +5338,7 @@ void Message::textAppearingTick() {
 	if (hasMoreLines
 		&& (remaining <= kLineHeightAppearDuration)
 		&& !appearing->heightStarted) {
-		appearing->heightStarted = true;
-		const auto oldHeight = appearing->shownHeight;
-		const auto newTargetHeight
-			= appearing->lines[appearing->shownLines].top;
-		LOG(("appearance - starting height: %1, target: %2, duration: %3")
-			.arg(oldHeight)
-			.arg(newTargetHeight)
-			.arg(kLineHeightAppearDuration));
-		appearing->heightAnimation.start(
-			[=] { textAppearingHeightTick(); },
-			double(oldHeight),
-			double(newTargetHeight),
-			kLineHeightAppearDuration,
-			anim::easeOutCubic);
+		startTextAppearingHeightAnimation();
 	}
 
 	if (!appearing->widthAnimation.animating()) {
@@ -5373,7 +5381,7 @@ void Message::tryAdvanceTextAppearing() {
 	LOG(("appearance - line %1 fully appeared").arg(appearing->shownLines - 1));
 	if (appearing->shownLines < int(appearing->lines.size())) {
 		appearing->shownLines++;
-		startTextAppearingAnimation();
+		startTextAppearingWidthAnimation();
 	}
 }
 
