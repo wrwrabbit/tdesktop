@@ -126,10 +126,10 @@ static_assert(sizeof(ImageUniforms) == 16);
 		std::swap(dright, dbottom);
 	}
 	return { {
-		{ { -dleft, dtop } },
-		{ { dright, dtop } },
-		{ { -dleft, dbottom } },
-		{ { dright, dbottom } },
+		{ { -dleft, 1.f + dtop } },
+		{ { dright, 1.f + dtop } },
+		{ { dright, 1.f - dbottom } },
+		{ { -dleft, 1.f - dbottom } },
 	} };
 }
 
@@ -275,7 +275,6 @@ void Viewport::RendererRhi::createPipelines() {
 			_linearSampler),
 	});
 	_downscaleArgb32Srb->create();
-	_perDrawSrbs.push_back(_downscaleArgb32Srb);
 
 	_downscaleYuv420Srb = _rhi->newShaderResourceBindings();
 	_downscaleYuv420Srb->setBindings({
@@ -296,7 +295,6 @@ void Viewport::RendererRhi::createPipelines() {
 			_linearSampler),
 	});
 	_downscaleYuv420Srb->create();
-	_perDrawSrbs.push_back(_downscaleYuv420Srb);
 
 	_blurHSrb = _rhi->newShaderResourceBindings();
 	_blurHSrb->setBindings({
@@ -313,7 +311,6 @@ void Viewport::RendererRhi::createPipelines() {
 			_nearestSampler),
 	});
 	_blurHSrb->create();
-	_perDrawSrbs.push_back(_blurHSrb);
 
 	{
 		auto *tex = _rhi->newTexture(
@@ -472,6 +469,9 @@ void Viewport::RendererRhi::releaseResources() {
 		delete data.yTexture;
 		delete data.uTexture;
 		delete data.vTexture;
+		delete data.convertedTexture;
+		delete data.convertedRpDesc;
+		delete data.convertedRt;
 		delete data.downscaleTexture;
 		delete data.downscaleRpDesc;
 		delete data.downscaleRt;
@@ -771,6 +771,9 @@ void Viewport::RendererRhi::paintTileOffscreen(
 		_factor);
 
 	uploadFrame(data, tileData);
+	if (!_rgbaFrame) {
+		drawYuv2RgbPass(tileData, frameSize);
+	}
 	prepareOffscreenTargets(tileData, blurSize);
 	drawDownscalePass(tileData, blurSize);
 	drawBlurPass(tileData, blurSize);
@@ -924,6 +927,79 @@ void Viewport::RendererRhi::prepareOffscreenTargets(
 		tileData.blurVRpDesc);
 }
 
+void Viewport::RendererRhi::drawYuv2RgbPass(
+		TileData &tileData,
+		QSize frameSize) {
+	if (!tileData.convertedTexture
+		|| tileData.convertedSize != frameSize) {
+		delete tileData.convertedRt;
+		delete tileData.convertedRpDesc;
+		delete tileData.convertedTexture;
+		tileData.convertedTexture = _rhi->newTexture(
+			QRhiTexture::RGBA8,
+			frameSize,
+			1,
+			QRhiTexture::RenderTarget);
+		tileData.convertedTexture->create();
+		auto colorAtt = QRhiColorAttachment(tileData.convertedTexture);
+		tileData.convertedRt = _rhi->newTextureRenderTarget(
+			QRhiTextureRenderTargetDescription(colorAtt));
+		tileData.convertedRpDesc =
+			tileData.convertedRt->newCompatibleRenderPassDescriptor();
+		tileData.convertedRt->setRenderPassDescriptor(
+			tileData.convertedRpDesc);
+		tileData.convertedRt->create();
+		tileData.convertedSize = frameSize;
+	}
+
+	const float coords[] = {
+		-1.f, -1.f, 0.f, 1.f,
+		 1.f, -1.f, 1.f, 1.f,
+		-1.f,  1.f, 0.f, 0.f,
+		 1.f,  1.f, 1.f, 0.f,
+	};
+
+	if (!_rub) {
+		_rub = _rhi->nextResourceUpdateBatch();
+	}
+	_rub->updateDynamicBuffer(
+		_offscreenVertexBuffer, 0, sizeof(coords), coords);
+
+	auto *srb = _rhi->newShaderResourceBindings();
+	_perDrawSrbs.push_back(srb);
+	srb->setBindings({
+		QRhiShaderResourceBinding::sampledTexture(
+			1,
+			QRhiShaderResourceBinding::FragmentStage,
+			tileData.yTexture,
+			_linearSampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			2,
+			QRhiShaderResourceBinding::FragmentStage,
+			tileData.uTexture,
+			_linearSampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			3,
+			QRhiShaderResourceBinding::FragmentStage,
+			tileData.vTexture,
+			_linearSampler),
+	});
+	srb->create();
+
+	_cb->beginPass(
+		tileData.convertedRt, Qt::black, { 1.0f, 0 }, _rub);
+	_rub = nullptr;
+	_cb->setGraphicsPipeline(_downscaleYuv420Pipeline);
+	_cb->setShaderResources(srb);
+	_cb->setViewport({
+		0, 0, float(frameSize.width()), float(frameSize.height()) });
+	const QRhiCommandBuffer::VertexInput vbuf(
+		_offscreenVertexBuffer, 0);
+	_cb->setVertexInput(0, 1, &vbuf);
+	_cb->draw(4);
+	_cb->endPass();
+}
+
 void Viewport::RendererRhi::drawDownscalePass(
 		TileData &tileData,
 		QSize blurSize) {
@@ -945,40 +1021,23 @@ void Viewport::RendererRhi::drawDownscalePass(
 	auto *srb = _rhi->newShaderResourceBindings();
 	_perDrawSrbs.push_back(srb);
 
-	auto *pipeline = _downscaleArgb32Pipeline;
-	if (_rgbaFrame) {
-		srb->setBindings({
-			QRhiShaderResourceBinding::sampledTexture(
-				1,
-				QRhiShaderResourceBinding::FragmentStage,
-				tileData.rgbaTexture,
-				_linearSampler),
-		});
-	} else {
-		pipeline = _downscaleYuv420Pipeline;
-		srb->setBindings({
-			QRhiShaderResourceBinding::sampledTexture(
-				1,
-				QRhiShaderResourceBinding::FragmentStage,
-				tileData.yTexture,
-				_linearSampler),
-			QRhiShaderResourceBinding::sampledTexture(
-				2,
-				QRhiShaderResourceBinding::FragmentStage,
-				tileData.uTexture,
-				_linearSampler),
-			QRhiShaderResourceBinding::sampledTexture(
-				3,
-				QRhiShaderResourceBinding::FragmentStage,
-				tileData.vTexture,
-				_linearSampler),
-		});
-	}
+	// After drawYuv2RgbPass, YUV420 frames have convertedTexture (RGBA).
+	// Use ARGB32 pipeline for both cases in the downscale pass.
+	auto *srcTexture = _rgbaFrame
+		? tileData.rgbaTexture
+		: tileData.convertedTexture;
+	srb->setBindings({
+		QRhiShaderResourceBinding::sampledTexture(
+			1,
+			QRhiShaderResourceBinding::FragmentStage,
+			srcTexture,
+			_linearSampler),
+	});
 	srb->create();
 
 	_cb->beginPass(tileData.downscaleRt, Qt::black, { 1.0f, 0 }, _rub);
 	_rub = nullptr;
-	_cb->setGraphicsPipeline(pipeline);
+	_cb->setGraphicsPipeline(_downscaleArgb32Pipeline);
 	_cb->setShaderResources(srb);
 	_cb->setViewport({ 0, 0, w, h });
 	const QRhiCommandBuffer::VertexInput vbuf(
@@ -1142,13 +1201,13 @@ void Viewport::RendererRhi::drawFramePass(
 		texCoords[1][0], texCoords[1][1],
 		blurTexCoords[1][0], blurTexCoords[1][1],
 
-		rect.right(), rect.bottom(),
-		texCoords[2][0], texCoords[2][1],
-		blurTexCoords[2][0], blurTexCoords[2][1],
-
 		rect.left(), rect.bottom(),
 		texCoords[3][0], texCoords[3][1],
 		blurTexCoords[3][0], blurTexCoords[3][1],
+
+		rect.right(), rect.bottom(),
+		texCoords[2][0], texCoords[2][1],
+		blurTexCoords[2][0], blurTexCoords[2][1],
 	};
 
 	GroupFrameUniforms uniforms{};
@@ -1213,7 +1272,7 @@ void Viewport::RendererRhi::drawFramePass(
 
 	auto *sTex = _rgbaFrame
 		? tileData.rgbaTexture
-		: tileData.yTexture;
+		: tileData.convertedTexture;
 	srb->setBindings({
 		QRhiShaderResourceBinding::uniformBuffer(
 			0,

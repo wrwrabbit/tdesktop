@@ -82,6 +82,11 @@ private:
 		QSize lumaSize;
 		QSize chromaSize;
 
+		QRhiTexture *convertedTexture = nullptr;
+		QRhiTextureRenderTarget *convertedRt = nullptr;
+		QRhiRenderPassDescriptor *convertedRpDesc = nullptr;
+		QSize convertedSize;
+
 		QRhiTexture *downscaleTexture = nullptr;
 		QRhiTextureRenderTarget *downscaleRt = nullptr;
 		QRhiRenderPassDescriptor *downscaleRpDesc = nullptr;
@@ -130,6 +135,9 @@ private:
 	void uploadFrame(
 		const Webrtc::FrameWithInfo &data,
 		TileData &tileData);
+	void drawYuv2RgbPass(
+		TileData &tileData,
+		QSize frameSize);
 	void prepareOffscreenTargets(
 		TileData &tileData,
 		QSize blurSize);
