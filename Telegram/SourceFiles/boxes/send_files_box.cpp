@@ -1409,7 +1409,10 @@ void SendFilesBox::pushBlock(int from, int till) {
 			entry.videoCover = nullptr;
 		});
 	};
-	const auto showContextMenu = [=](int fileIndex, QPoint globalPosition) {
+	const auto showContextMenu = [=](
+			int fileIndex,
+			QPoint globalPosition,
+			bool forceToLeft = false) {
 		if (from >= till
 			|| fileIndex < from
 			|| fileIndex >= till
@@ -1419,7 +1422,10 @@ void SendFilesBox::pushBlock(int from, int till) {
 		state->menu = base::make_unique_q<Ui::PopupMenu>(
 			widget,
 			_st.tabbed.menu);
-		state->menu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
+		if (forceToLeft) {
+			using Origin = Ui::PanelAnimation::Origin;
+			state->menu->setForcedOrigin(Origin::TopRight);
+		}
 		const auto &file = _list.files[fileIndex];
 		state->menu->addAction(tr::lng_attach_replace(tr::now), [=] {
 			replaceAttachment(fileIndex);
@@ -1552,7 +1558,7 @@ void SendFilesBox::pushBlock(int from, int till) {
 
 	block.itemReplaceRequest(
 	) | rpl::on_next([=](int index) {
-		showContextMenu(index, QCursor::pos());
+		showContextMenu(index, QCursor::pos(), true);
 	}, widget->lifetime());
 
 	block.itemModifyRequest(
