@@ -621,7 +621,6 @@ public:
 
 	virtual void itemDataChanged();
 	void itemTextUpdated();
-	void itemTextUpdatedStreaming();
 	void blockquoteExpandChanged();
 
 	virtual void unloadHeavyPart();

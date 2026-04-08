@@ -3952,7 +3952,7 @@ void HistoryItem::detectTextLinks(
 	}
 }
 
-void HistoryItem::setText(const TextWithEntities &textWithEntities) {
+void HistoryItem::setText(TextWithEntities textWithEntities) {
 	detectTextLinks(textWithEntities);
 	setTextValue((_media && _media->consumeMessageText(textWithEntities))
 		? TextWithEntities()
@@ -3970,13 +3970,6 @@ void HistoryItem::setTextValue(TextWithEntities text, bool force) {
 	if (had || force) {
 		history()->owner().requestItemTextRefresh(this);
 	}
-}
-
-void HistoryItem::setTextStreaming(TextWithEntities text) {
-	detectTextLinks(text);
-	_text = std::move(text);
-	RemoveComponents(HistoryMessageTranslation::Bit());
-	history()->owner().requestItemTextRefreshStreaming(this);
 }
 
 bool HistoryItem::inHighlightProcess() const {

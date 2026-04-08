@@ -2236,7 +2236,7 @@ void Message::paintText(
 	auto highlightRequest = context.computeHighlightCache();
 	text().draw(p, {
 		.position = trect.topLeft(),
-		.availableWidth = trect.width(),
+		.availableWidth = appearing ? appearing->textWidth : trect.width(),
 		.palette = &stm->textPalette,
 		.pre = stm->preCache.get(),
 		.blockquote = context.quoteCache(
@@ -5288,29 +5288,33 @@ bool Message::textAppearCheckLine(not_null<TextAppearing*> appearing) {
 		}
 		return true;
 	}
-	if (appearing->revealedLineWidth >= line->width) {
-		appearing->widthAnimation.stop();
-		appearing->revealedLineWidth
-			= appearing->targetLineWidth
-			= line->width;
-	} else if (appearing->targetLineWidth != line->width) {
-		textAppearStartWidthAnimation(appearing);
+	if (appearing->targetLineWidth != line->width) {
+		if (appearing->revealedLineWidth >= line->width) {
+			appearing->widthAnimation.stop();
+			appearing->revealedLineWidth
+				= appearing->targetLineWidth
+				= line->width;
+		} else {
+			textAppearStartWidthAnimation(appearing);
+		}
 	}
-	if (!shown || appearing->shownHeight >= line->bottom) {
-		appearing->heightAnimation.stop();
-		appearing->shownHeight = appearing->targetHeight = line->bottom;
-	} else if (appearing->targetHeight != line->bottom) {
-		const auto widthStart = appearing->startLineWidth;
-		const auto widthTarget = appearing->targetLineWidth;
-		const auto width = appearing->revealedLineWidth;
-		const auto progress = (width >= widthTarget)
-			? 1.
-			: (widthTarget - width) / float64(widthTarget - widthStart);
-		const auto left = (1. - progress) * appearing->widthDuration;
-		if (appearing->heightAnimation.animating()
-			|| !appearing->widthAnimation.animating()
-			|| left <= kLineHeightAppearDuration) {
-			textAppearStartHeightAnimation(appearing);
+	if (appearing->targetHeight != line->bottom) {
+		if (!shown || appearing->shownHeight >= line->bottom) {
+			appearing->heightAnimation.stop();
+			appearing->shownHeight = appearing->targetHeight = line->bottom;
+		} else {
+			const auto widthStart = appearing->startLineWidth;
+			const auto widthTarget = appearing->targetLineWidth;
+			const auto width = appearing->revealedLineWidth;
+			const auto progress = (width >= widthTarget)
+				? 1.
+				: (widthTarget - width) / float64(widthTarget - widthStart);
+			const auto left = (1. - progress) * appearing->widthDuration;
+			if (appearing->heightAnimation.animating()
+				|| !appearing->widthAnimation.animating()
+				|| left <= kLineHeightAppearDuration) {
+				textAppearStartHeightAnimation(appearing);
+			}
 		}
 	}
 	return true;
@@ -5360,6 +5364,11 @@ void Message::textAppearWidthCallback() {
 	if (now != appearing->revealedLineWidth) {
 		appearing->revealedLineWidth = now;
 		appearing->shownWidth = std::max(appearing->shownWidth, now);
+		if (appearing->lines[appearing->shownLine].rtl) {
+			appearing->shownWidth = std::max(
+				appearing->shownWidth,
+				appearing->textWidth);
+		}
 		repaint();
 	}
 	textAppearValidate(appearing);

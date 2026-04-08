@@ -82,7 +82,7 @@ bool HistoryStreamedDrafts::update(
 	if (i == end(_drafts) || i->second.randomId != randomId) {
 		return false;
 	}
-	i->second.message->setTextStreaming(text);
+	i->second.message->setText(text);
 	i->second.updated = crl::now();
 	return true;
 }

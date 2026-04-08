@@ -521,8 +521,7 @@ public:
 		return _media.get();
 	}
 	[[nodiscard]] bool computeDropForwardedInfo() const;
-	void setText(const TextWithEntities &textWithEntities);
-	void setTextStreaming(TextWithEntities text);
+	void setText(TextWithEntities textWithEntities);
 
 	[[nodiscard]] MsgId replyToId() const;
 	[[nodiscard]] FullMsgId replyToFullId() const;
