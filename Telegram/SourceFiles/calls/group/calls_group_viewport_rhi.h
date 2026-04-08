@@ -178,6 +178,18 @@ private:
 	bool _rgbaFrame = false;
 	bool _userpicFrame = false;
 
+	static constexpr int kMaxOnscreenDraws = 64;
+	static constexpr int kOnscreenVertexSlot = 128;
+	static constexpr int kUniformSlot = 256;
+
+	struct OnscreenDraw {
+		QRhiGraphicsPipeline *pipeline = nullptr;
+		QRhiShaderResourceBindings *srb = nullptr;
+		int vertexOffset = 0;
+	};
+	std::vector<OnscreenDraw> _onscreenDraws;
+	int _nextOnscreenSlot = 0;
+
 	QRhiBuffer *_offscreenVertexBuffer = nullptr;
 	QRhiBuffer *_onscreenVertexBuffer = nullptr;
 	QRhiBuffer *_uniformBuffer = nullptr;

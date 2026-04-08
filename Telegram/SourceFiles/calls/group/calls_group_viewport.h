@@ -207,7 +207,8 @@ private:
 
 	PanelMode _mode = PanelMode();
 	bool _opengl = false;
-	const std::unique_ptr<Ui::RpWidgetWrap> _content;
+	bool _qrhi = false;
+	std::unique_ptr<Ui::RpWidgetWrap> _content;
 	std::vector<std::unique_ptr<VideoTile>> _tiles;
 	std::vector<not_null<VideoTile*>> _tilesForOrder;
 	rpl::variable<int> _fullHeight = 0;

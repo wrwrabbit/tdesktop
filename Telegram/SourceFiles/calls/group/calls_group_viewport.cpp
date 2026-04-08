@@ -61,6 +61,7 @@ Viewport::Viewport(
 	bool borrowedOpenGL)
 : _mode(mode)
 , _opengl(borrowedOpenGL)
+, _qrhi(borrowedRp && (backend == Ui::GL::Backend::QRhi))
 , _content(borrowedRp
 	? nullptr
 	: Ui::GL::CreateSurface(parent, chooseRenderer(backend)))
@@ -82,6 +83,7 @@ Viewport::~Viewport() {
 			ensureBorrowedCleared();
 		}
 	}
+	_content.release();
 }
 
 not_null<QWidget*> Viewport::widget() const {
@@ -892,6 +894,7 @@ Ui::GL::ChosenRenderer Viewport::chooseRenderer(Ui::GL::Backend backend) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 	if (backend == Ui::GL::Backend::QRhi) {
 		_opengl = true;
+		_qrhi = true;
 		return {
 			.renderer = std::make_unique<RendererRhi>(this),
 			.backend = Ui::GL::Backend::QRhi,
@@ -913,6 +916,11 @@ Ui::GL::ChosenRenderer Viewport::chooseRenderer(Ui::GL::Backend backend) {
 }
 
 std::unique_ptr<Ui::GL::Renderer> Viewport::makeRenderer() {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	if (_qrhi) {
+		return std::make_unique<RendererRhi>(this);
+	}
+#endif
 	return _opengl
 		? std::unique_ptr<Ui::GL::Renderer>(
 			std::make_unique<RendererGL>(this))

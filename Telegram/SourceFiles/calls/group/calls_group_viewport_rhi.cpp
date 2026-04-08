@@ -152,7 +152,9 @@ Viewport::RendererRhi::RendererRhi(not_null<Viewport*> owner)
 }
 
 Viewport::RendererRhi::~RendererRhi() {
-	releaseResources();
+	if (_initialized) {
+		releaseResources();
+	}
 }
 
 QColor Viewport::RendererRhi::rhiClearColor() {
@@ -189,13 +191,13 @@ void Viewport::RendererRhi::initialize(
 	_onscreenVertexBuffer = rhi->newBuffer(
 		QRhiBuffer::Dynamic,
 		QRhiBuffer::VertexBuffer,
-		32 * 4 * sizeof(float));
+		kMaxOnscreenDraws * kOnscreenVertexSlot);
 	_onscreenVertexBuffer->create();
 
 	_uniformBuffer = rhi->newBuffer(
 		QRhiBuffer::Dynamic,
 		QRhiBuffer::UniformBuffer,
-		4096);
+		kMaxOnscreenDraws * kUniformSlot);
 	_uniformBuffer->create();
 
 	_linearSampler = rhi->newSampler(
@@ -535,15 +537,28 @@ void Viewport::RendererRhi::render(
 		QRhiCommandBuffer *cb) {
 	renderOffscreen(rhi, rt, cb);
 
-	const auto pw = float(rt->pixelSize().width());
-	const auto ph = float(rt->pixelSize().height());
+	_nextOnscreenSlot = 0;
+	_onscreenDraws.clear();
 	auto *screenRub = _rhi->nextResourceUpdateBatch();
 	if (_rub) {
 		screenRub->merge(_rub);
-		_rub = nullptr;
 	}
-	cb->beginPass(rt, *clearColor(), { 1.0f, 0 }, screenRub);
+	_rub = screenRub;
 	renderOnscreen(rhi, rt, cb);
+	cb->beginPass(rt, *clearColor(), { 1.0f, 0 }, _rub);
+	_rub = nullptr;
+	const auto pw = float(rt->pixelSize().width());
+	const auto ph = float(rt->pixelSize().height());
+	for (const auto &draw : _onscreenDraws) {
+		cb->setGraphicsPipeline(draw.pipeline);
+		cb->setShaderResources(draw.srb);
+		cb->setViewport({ 0, 0, pw, ph });
+		const QRhiCommandBuffer::VertexInput vbuf(
+			_onscreenVertexBuffer, draw.vertexOffset);
+		cb->setVertexInput(0, 1, &vbuf);
+		cb->draw(4);
+	}
+	_onscreenDraws.clear();
 	cb->endPass();
 }
 
@@ -1181,11 +1196,17 @@ void Viewport::RendererRhi::drawFramePass(
 	uniforms.outlineFg[3] = st::groupCallMemberActiveIcon->c.alphaF()
 		* outline;
 
-	auto *rub = _rhi->nextResourceUpdateBatch();
-	rub->updateDynamicBuffer(
-		_onscreenVertexBuffer, 0, sizeof(frameCoords), frameCoords);
-	rub->updateDynamicBuffer(
-		_uniformBuffer, 0, sizeof(uniforms), &uniforms);
+	const auto slot = _nextOnscreenSlot++;
+	if (slot >= kMaxOnscreenDraws) {
+		return;
+	}
+	const auto vOffset = slot * kOnscreenVertexSlot;
+	const auto uOffset = slot * kUniformSlot;
+
+	_rub->updateDynamicBuffer(
+		_onscreenVertexBuffer, vOffset, sizeof(frameCoords), frameCoords);
+	_rub->updateDynamicBuffer(
+		_uniformBuffer, uOffset, sizeof(uniforms), &uniforms);
 
 	auto *srb = _rhi->newShaderResourceBindings();
 	_perDrawSrbs.push_back(srb);
@@ -1199,7 +1220,7 @@ void Viewport::RendererRhi::drawFramePass(
 			QRhiShaderResourceBinding::VertexStage
 				| QRhiShaderResourceBinding::FragmentStage,
 			_uniformBuffer,
-			0,
+			uOffset,
 			sizeof(GroupFrameUniforms)),
 		QRhiShaderResourceBinding::sampledTexture(
 			1,
@@ -1221,14 +1242,7 @@ void Viewport::RendererRhi::drawFramePass(
 	});
 	srb->create();
 
-	_cb->resourceUpdate(rub);
-	_cb->setGraphicsPipeline(_framePipeline);
-	_cb->setShaderResources(srb);
-	_cb->setViewport({ 0, 0, pw, ph });
-	const QRhiCommandBuffer::VertexInput vbuf(
-		_onscreenVertexBuffer, 0);
-	_cb->setVertexInput(0, 1, &vbuf);
-	_cb->draw(4);
+	_onscreenDraws.push_back({ _framePipeline, srb, vOffset });
 }
 
 void Viewport::RendererRhi::drawControls(
@@ -1420,10 +1434,15 @@ void Viewport::RendererRhi::paintUsingRaster(
 		method(painter);
 	}
 
-	auto *rub = _rhi->nextResourceUpdateBatch();
+	const auto slot = _nextOnscreenSlot++;
+	if (slot >= kMaxOnscreenDraws) {
+		return;
+	}
+	const auto vOffset = slot * kOnscreenVertexSlot;
+	const auto uOffset = slot * kUniformSlot;
 
 	auto *tex = acquirePoolTexture(size);
-	rub->uploadTexture(
+	_rub->uploadTexture(
 		tex,
 		QRhiTextureUploadDescription(
 			QRhiTextureUploadEntry(0, 0,
@@ -1436,8 +1455,8 @@ void Viewport::RendererRhi::paintUsingRaster(
 	imgUniforms.viewport[1] = ph;
 	imgUniforms.g_opacity = opacity;
 
-	rub->updateDynamicBuffer(
-		_uniformBuffer, 0, sizeof(imgUniforms), &imgUniforms);
+	_rub->updateDynamicBuffer(
+		_uniformBuffer, uOffset, sizeof(imgUniforms), &imgUniforms);
 
 	const auto rRect = transformRect(rect);
 	const float coords[] = {
@@ -1453,8 +1472,8 @@ void Viewport::RendererRhi::paintUsingRaster(
 		rRect.right(), rRect.top(),
 		1.f, 1.f,
 	};
-	rub->updateDynamicBuffer(
-		_onscreenVertexBuffer, 0, sizeof(coords), coords);
+	_rub->updateDynamicBuffer(
+		_onscreenVertexBuffer, vOffset, sizeof(coords), coords);
 
 	auto *srb = _rhi->newShaderResourceBindings();
 	_perDrawSrbs.push_back(srb);
@@ -1464,7 +1483,7 @@ void Viewport::RendererRhi::paintUsingRaster(
 			QRhiShaderResourceBinding::VertexStage
 				| QRhiShaderResourceBinding::FragmentStage,
 			_uniformBuffer,
-			0,
+			uOffset,
 			sizeof(ImageUniforms)),
 		QRhiShaderResourceBinding::sampledTexture(
 			1,
@@ -1474,14 +1493,7 @@ void Viewport::RendererRhi::paintUsingRaster(
 	});
 	srb->create();
 
-	_cb->resourceUpdate(rub);
-	_cb->setGraphicsPipeline(_controlsPipeline);
-	_cb->setShaderResources(srb);
-	_cb->setViewport({ 0, 0, pw, ph });
-	const QRhiCommandBuffer::VertexInput vbuf(
-		_onscreenVertexBuffer, 0);
-	_cb->setVertexInput(0, 1, &vbuf);
-	_cb->draw(4);
+	_onscreenDraws.push_back({ _controlsPipeline, srb, vOffset });
 }
 
 Rect Viewport::RendererRhi::transformRect(const QRect &raster) const {
