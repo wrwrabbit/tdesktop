@@ -207,6 +207,7 @@ public:
 	[[nodiscard]] bool isPatternWallPaper() const;
 	[[nodiscard]] bool isPatternWallPaperPNG() const;
 	[[nodiscard]] bool isPatternWallPaperSVG() const;
+	[[nodiscard]] bool isSvgImage() const;
 	[[nodiscard]] bool isPremiumSticker() const;
 	[[nodiscard]] bool isPremiumEmoji() const;
 	[[nodiscard]] bool emojiUsesTextColor() const;

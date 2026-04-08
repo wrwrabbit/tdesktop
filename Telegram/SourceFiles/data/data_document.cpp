@@ -784,6 +784,11 @@ bool DocumentData::isPatternWallPaperSVG() const {
 	return isWallPaper() && hasMimeType(u"application/x-tgwallpattern"_q);
 }
 
+bool DocumentData::isSvgImage() const {
+	return hasMimeType(u"image/svg+xml"_q)
+		|| _filename.endsWith(u".svg"_q, Qt::CaseInsensitive);
+}
+
 bool DocumentData::isPremiumSticker() const {
 	if (!(_flags & Flag::PremiumSticker)) {
 		return false;

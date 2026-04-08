@@ -516,6 +516,9 @@ PRIVATE
     ui/text/text_options.cpp
     ui/text/text_options.h
 
+    ui/image/svg_preview.cpp
+    ui/image/svg_preview.h
+
     ui/widgets/fields/special_fields.cpp
     ui/widgets/fields/special_fields.h
     ui/widgets/fields/time_part_input_with_placeholder.cpp
