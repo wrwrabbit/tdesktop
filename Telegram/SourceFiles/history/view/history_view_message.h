@@ -85,15 +85,18 @@ struct RightBadge : RuntimeComponent<RightBadge, Element> {
 struct TextAppearing : RuntimeComponent<TextAppearing, Element> {
 	std::vector<Ui::Text::LineLayoutInfo> lines;
 	int textWidth = 0;
-	int shownLines = 0;
+	int shownLine = 0;
 	int revealedLineWidth = 0;
+	int startLineWidth = 0;
+	int targetLineWidth = 0;
 	int shownWidth = 0;
 	int shownHeight = 0;
+	int targetHeight = 0;
 	crl::time widthDuration = 0;
 	Ui::Animations::Simple widthAnimation;
 	Ui::Animations::Simple heightAnimation;
 	bool geometryValid = false;
-	bool heightStarted = false;
+	bool use = false;
 };
 
 struct BottomRippleMask {
@@ -386,11 +389,13 @@ private:
 	[[nodiscard]] ClickHandlerPtr psaTooltipLink() const;
 	void psaTooltipToggled(bool shown) const;
 	void invalidateTextDependentCache() override;
-	void startTextAppearingWidthAnimation();
-	void startTextAppearingHeightAnimation();
-	void textAppearingTick();
-	void textAppearingHeightTick();
-	void tryAdvanceTextAppearing();
+
+	bool textAppearValidate(not_null<TextAppearing*> appearing);
+	bool textAppearCheckLine(not_null<TextAppearing*> appearing);
+	void textAppearStartWidthAnimation(not_null<TextAppearing*> appearing);
+	void textAppearStartHeightAnimation(not_null<TextAppearing*> appearing);
+	void textAppearWidthCallback();
+	void textAppearHeightCallback();
 
 	void refreshRightBadge();
 	[[nodiscard]] int rightBadgeWidth() const;
