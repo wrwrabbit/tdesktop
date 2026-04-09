@@ -440,6 +440,7 @@ public:
 		bool isForumPost);
 	void setPostAuthor(const QString &author);
 	void setRealId(MsgId newId);
+	void markBeingSentForAdoption();
 	void incrementReplyToTopCounter();
 	void applyEffectWatchedOnUnreadKnown();
 

@@ -2711,6 +2711,10 @@ QString HistoryItem::notificationHeader() const {
 	return QString();
 }
 
+void HistoryItem::markBeingSentForAdoption() {
+	_flags |= MessageFlag::BeingSent;
+}
+
 void HistoryItem::setRealId(MsgId newId) {
 	Expects(_flags & MessageFlag::BeingSent);
 	Expects(IsClientMsgId(id));

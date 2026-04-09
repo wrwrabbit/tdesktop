@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_text_entities.h"
 #include "data/data_forum_topic.h"
+#include "data/data_peer_id.h"
 #include "data/data_session.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -16,6 +17,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace {
 
 constexpr auto kClearTimeout = 30 * crl::time(1000);
+
+[[nodiscard]] int CommonPrefixLength(const QString &a, const QString &b) {
+	const auto count = std::min(a.size(), b.size());
+	auto i = 0;
+	while (i < count && a[i] == b[i]) {
+		++i;
+	}
+	return i;
+}
 
 } // namespace
 
@@ -25,7 +35,7 @@ HistoryStreamedDrafts::HistoryStreamedDrafts(not_null<History*> history)
 }
 
 HistoryStreamedDrafts::~HistoryStreamedDrafts() {
-	for (const auto &[rootId, draft] : base::take(_drafts)) {
+	for (const auto &[randomId, draft] : base::take(_drafts)) {
 		draft.message->destroy();
 	}
 }
@@ -41,19 +51,18 @@ void HistoryStreamedDrafts::apply(
 	if (!rootId) {
 		rootId = Data::ForumTopic::kGeneralId;
 	}
+	const auto randomId = data.vrandom_id().v;
 	if (!when) {
-		clear(rootId);
+		clearByRandomId(randomId);
 		return;
 	}
 	const auto text = Api::ParseTextWithEntities(
 		&_history->session(),
 		data.vtext());
-	const auto randomId = data.vrandom_id().v;
-	if (update(rootId, randomId, text)) {
+	if (update(randomId, text)) {
 		return;
 	}
-	clear(rootId);
-	_drafts.emplace(rootId, Draft{
+	_drafts.emplace(randomId, Draft{
 		.message = _history->addNewLocalMessage({
 			.id = _history->owner().nextLocalMessageId(),
 			.flags = (MessageFlag::Local
@@ -66,7 +75,8 @@ void HistoryStreamedDrafts::apply(
 			},
 			.date = when,
 		}, text, MTP_messageMediaEmpty()),
-		.randomId = randomId,
+		.rootId = rootId,
+		.fromId = fromId,
 		.updated = crl::now(),
 	});
 	if (!_checkTimer.isActive()) {
@@ -75,11 +85,10 @@ void HistoryStreamedDrafts::apply(
 }
 
 bool HistoryStreamedDrafts::update(
-		MsgId rootId,
 		uint64 randomId,
 		const TextWithEntities &text) {
-	const auto i = _drafts.find(rootId);
-	if (i == end(_drafts) || i->second.randomId != randomId) {
+	const auto i = _drafts.find(randomId);
+	if (i == end(_drafts)) {
 		return false;
 	}
 	i->second.message->setText(text);
@@ -87,8 +96,8 @@ bool HistoryStreamedDrafts::update(
 	return true;
 }
 
-void HistoryStreamedDrafts::clear(MsgId rootId) {
-	if (const auto draft = _drafts.take(rootId)) {
+void HistoryStreamedDrafts::clearByRandomId(uint64 randomId) {
+	if (const auto draft = _drafts.take(randomId)) {
 		draft->message->destroy();
 	}
 	if (_drafts.empty()) {
@@ -98,18 +107,13 @@ void HistoryStreamedDrafts::clear(MsgId rootId) {
 
 bool HistoryStreamedDrafts::hasFor(not_null<HistoryItem*> item) const {
 	const auto rootId = item->topicRootId();
-	const auto i = _drafts.find(rootId);
-	return (i != end(_drafts))
-		&& (i->second.message->from() == item->from());
-}
-
-void HistoryStreamedDrafts::applyItemAdded(not_null<HistoryItem*> item) {
-	const auto rootId = item->topicRootId();
-	const auto i = _drafts.find(rootId);
-	if (i == end(_drafts) || i->second.message->from() != item->from()) {
-		return;
+	const auto from = item->from();
+	for (const auto &[randomId, draft] : _drafts) {
+		if (draft.rootId == rootId && draft.message->from() == from) {
+			return true;
+		}
 	}
-	clear(rootId);
+	return false;
 }
 
 void HistoryStreamedDrafts::applyItemRemoved(not_null<HistoryItem*> item) {
@@ -122,6 +126,63 @@ void HistoryStreamedDrafts::applyItemRemoved(not_null<HistoryItem*> item) {
 			return;
 		}
 	}
+}
+
+HistoryItem *HistoryStreamedDrafts::adoptIncoming(
+		const MTPDmessage &data) {
+	if (_drafts.empty()) {
+		return nullptr;
+	}
+	const auto fromId = data.vfrom_id()
+		? peerFromMTP(*data.vfrom_id())
+		: _history->peer->id;
+	auto rootId = MsgId(0);
+	if (const auto reply = data.vreply_to()) {
+		reply->match([&](const MTPDmessageReplyHeader &d) {
+			if (d.is_forum_topic()) {
+				rootId = d.vreply_to_top_id().value_or_empty();
+				if (!rootId) {
+					rootId = d.vreply_to_msg_id().value_or_empty();
+				}
+			}
+		}, [](const MTPDmessageReplyStoryHeader &) {});
+	}
+	if (!rootId) {
+		rootId = Data::ForumTopic::kGeneralId;
+	}
+	const auto incomingText = qs(data.vmessage());
+	auto best = end(_drafts);
+	auto bestPrefix = 0;
+	for (auto i = begin(_drafts); i != end(_drafts); ++i) {
+		const auto &draft = i->second;
+		if (draft.rootId != rootId) {
+			continue;
+		}
+		if (draft.message->from()->id != fromId) {
+			continue;
+		}
+		const auto prefix = CommonPrefixLength(
+			draft.message->originalText().text,
+			incomingText);
+		if (prefix > bestPrefix) {
+			bestPrefix = prefix;
+			best = i;
+		}
+	}
+	if (best == end(_drafts) || bestPrefix <= 0) {
+		return nullptr;
+	}
+	const auto item = best->second.message.get();
+	_drafts.erase(best);
+
+	item->markBeingSentForAdoption();
+	item->setRealId(data.vid().v);
+	item->applySentMessage(data);
+
+	if (_drafts.empty()) {
+		scheduleDestroy();
+	}
+	return item;
 }
 
 void HistoryStreamedDrafts::check() {
