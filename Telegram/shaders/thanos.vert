@@ -12,6 +12,7 @@ layout(std140, binding = 0) uniform Params {
 	vec4 rect;
 	vec2 size;
 	uvec2 particleResolution;
+	vec4 scale;
 };
 
 void main() {
@@ -25,7 +26,10 @@ void main() {
 	v_texcoord = (topLeft + inQuadPos * particleSize) / size;
 
 	topLeft += inOffset;
-	vec2 position = topLeft + inQuadPos * particleSize;
+	float scaleFactor = scale.x;
+	vec2 center = topLeft + (particleSize * 0.5);
+	vec2 position
+		= center + ((inQuadPos - vec2(0.5)) * particleSize * scaleFactor);
 
 	vec2 ndc;
 	ndc.x = rect.x + position.x / size.x * rect.z;
@@ -35,5 +39,5 @@ void main() {
 
 	gl_Position = vec4(ndc, 0.0, 1.0);
 
-	v_alpha = clamp(inLifetime / 0.6, 0.0, 1.0);
+	v_alpha = clamp(inLifetime / 0.6, 0.0, 1.0) * scale.z;
 }

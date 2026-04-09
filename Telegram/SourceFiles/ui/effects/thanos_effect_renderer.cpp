@@ -30,6 +30,9 @@ constexpr auto kTimeStepMultiplier = 1.0f;
 constexpr auto kAccelerationStartPhase = 1.0f;
 constexpr auto kAccelerationRampPhase = 2.5f;
 constexpr auto kAccelerationMaxMultiplier = 2.2f;
+constexpr auto kDisappearStartPhase = kMaxPhaseDuration * 0.15f;
+constexpr auto kDisappearDuration
+	= kMaxPhaseDuration - kDisappearStartPhase;
 constexpr auto kMaxParticleCount = uint32_t(120000);
 
 const float kQuadVertices[kQuadVertexCount * 2] = {
@@ -61,6 +64,7 @@ struct alignas(16) RenderUniforms {
 	float rect[4];
 	float size[2];
 	uint32_t particleResolution[2];
+	float scale[4];
 };
 static_assert(sizeof(RenderUniforms) % 16 == 0);
 
@@ -75,6 +79,15 @@ static_assert(sizeof(RenderUniforms) % 16 == 0);
 	const auto smooth = t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
 	return 1.0f
 		+ ((kAccelerationMaxMultiplier - 1.0f) * smooth);
+}
+
+[[nodiscard]] float DisappearProgress(float phase) {
+	const auto t = std::clamp(
+		(phase - kDisappearStartPhase) / kDisappearDuration,
+		0.0f,
+		1.0f);
+	const auto oneMinus = 1.0f - t;
+	return 1.0f - (oneMinus * oneMinus * oneMinus);
 }
 
 [[nodiscard]] QShader LoadShader(const QString &name) {
@@ -367,6 +380,12 @@ void ThanosEffectRenderer::render(
 			uni.size[1] = float(item.rect.height());
 			uni.particleResolution[0] = item.particleCountX;
 			uni.particleResolution[1] = item.particleCountY;
+			const auto disappearProgress = DisappearProgress(item.phase);
+			const auto inverseDisappear = 1.0f - disappearProgress;
+			uni.scale[0] = inverseDisappear;
+			uni.scale[1] = 0.0f;
+			uni.scale[2] = inverseDisappear;
+			uni.scale[3] = 0.0f;
 
 			renderRub->updateDynamicBuffer(
 				item.renderUniformBuffer,
