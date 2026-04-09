@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/gl/gl_surface.h"
 #include "ui/power_saving.h"
 #include "ui/rp_widget.h"
+#include "ui/ui_utility.h"
 #include "base/debug_log.h"
 
 #include <QTimer>
@@ -72,8 +73,15 @@ void ThanosEffect::ensureSurface() {
 void ThanosEffect::showSurface() {
 	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
 		w->setGeometry(_parent->rect());
-		w->show();
-		w->raise();
+		// Defer show until the current call stack returns to the event
+		// loop, so that all items from a batch deletion are added
+		// before the first render. Without this, w->show() triggers
+		// an immediate platform compositing pass with only the first
+		// item visible.
+		Ui::PostponeCall(w, [w] {
+			w->show();
+			w->raise();
+		});
 		startUpdateTimer();
 	}
 }
