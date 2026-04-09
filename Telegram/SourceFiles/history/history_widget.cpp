@@ -7583,9 +7583,9 @@ void HistoryWidget::startCollapseAnimation(int height, int itemTop) {
 
 	auto merged = false;
 	for (auto &gap : _collapseGaps) {
-		if (gap.absY + gap.currentHeight == itemTop
+		if (gap.absY + gap.originalHeight == itemTop
 			|| (gap.absY <= itemTop
-				&& itemTop <= gap.absY + gap.currentHeight)) {
+				&& itemTop <= gap.absY + gap.originalHeight)) {
 			gap.startHeight += height;
 			gap.currentHeight += height;
 			gap.originalHeight += height;
@@ -7602,14 +7602,17 @@ void HistoryWidget::startCollapseAnimation(int height, int itemTop) {
 		}
 	}
 	if (!merged) {
-		_collapseGaps.push_back({
+		const auto it = std::lower_bound(
+			_collapseGaps.begin(),
+			_collapseGaps.end(),
+			itemTop,
+			[](const auto &gap, int top) { return gap.absY < top; });
+		_collapseGaps.insert(it, {
 			.absY = itemTop,
 			.startHeight = height,
 			.currentHeight = height,
 			.originalHeight = height,
 		});
-		std::sort(_collapseGaps.begin(), _collapseGaps.end(),
-			[](const auto &a, const auto &b) { return a.absY < b.absY; });
 	}
 
 	syncCollapseGapsToList();
@@ -7618,7 +7621,6 @@ void HistoryWidget::startCollapseAnimation(int height, int itemTop) {
 	const auto scrollAdjust = std::min(height, aboveViewport);
 	if (scrollAdjust > 0) {
 		synteticScrollToY(scrollTop + scrollAdjust);
-		_collapseScrollCompensation += scrollAdjust;
 	}
 
 	auto totalHeight = 0;
@@ -7652,20 +7654,13 @@ void HistoryWidget::collapseAnimationCallback() {
 	}
 
 	if (totalDelta != 0) {
+		const auto scrollTop = _scroll->scrollTop();
 		syncCollapseGapsToList();
-		if (_collapseScrollCompensation > 0) {
-			const auto scrollReverse = std::min(
-				totalDelta,
-				_collapseScrollCompensation);
-			_collapseScrollCompensation -= scrollReverse;
-			const auto scrollTop = _scroll->scrollTop();
-			synteticScrollToY(std::max(scrollTop - scrollReverse, 0));
-		}
+		synteticScrollToY(std::max(scrollTop - totalDelta, 0));
 	}
 
 	if (!_collapseAnimation.animating()) {
 		_collapseGaps.clear();
-		_collapseScrollCompensation = 0;
 		if (_list) {
 			_list->setCollapseGaps({});
 		}
