@@ -7614,6 +7614,13 @@ void HistoryWidget::startCollapseAnimation(int height, int itemTop) {
 
 	syncCollapseGapsToList();
 
+	const auto aboveViewport = std::max(0, scrollTop - itemTop);
+	const auto scrollAdjust = std::min(height, aboveViewport);
+	if (scrollAdjust > 0) {
+		synteticScrollToY(scrollTop + scrollAdjust);
+		_collapseScrollCompensation += scrollAdjust;
+	}
+
 	auto totalHeight = 0;
 	for (const auto &gap : _collapseGaps) {
 		totalHeight += gap.currentHeight;
@@ -7646,10 +7653,19 @@ void HistoryWidget::collapseAnimationCallback() {
 
 	if (totalDelta != 0) {
 		syncCollapseGapsToList();
+		if (_collapseScrollCompensation > 0) {
+			const auto scrollReverse = std::min(
+				totalDelta,
+				_collapseScrollCompensation);
+			_collapseScrollCompensation -= scrollReverse;
+			const auto scrollTop = _scroll->scrollTop();
+			synteticScrollToY(std::max(scrollTop - scrollReverse, 0));
+		}
 	}
 
 	if (!_collapseAnimation.animating()) {
 		_collapseGaps.clear();
+		_collapseScrollCompensation = 0;
 		if (_list) {
 			_list->setCollapseGaps({});
 		}
