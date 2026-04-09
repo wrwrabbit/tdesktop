@@ -4233,11 +4233,7 @@ void HistoryInner::captureViewForThanosEffect(
 	// Use the saved height/top from before any destruction started.
 	if (const auto it = _thanosPreCaptured.find(view);
 		it != end(_thanosPreCaptured)) {
-		const auto saved = it->second;
 		_thanosPreCaptured.erase(it);
-		if (saved.top >= 0) {
-			_widget->startCollapseAnimation(saved.height, saved.top);
-		}
 		return;
 	}
 	const auto item = view->data();
