@@ -4213,25 +4213,42 @@ void HistoryInner::captureViewForThanosEffect(
 	if (top < 0) {
 		return;
 	}
-	const auto viewHeight = view->height();
+	// The visual height as it was displayed on screen (for positioning).
+	const auto displayHeight = view->height();
 	const auto viewWidth = width();
-	if (viewWidth <= 0 || viewHeight <= 0) {
+	if (viewWidth <= 0 || displayHeight <= 0) {
 		return;
 	}
 	const auto visibleHeight = _visibleAreaBottom - _visibleAreaTop;
 	const auto screenTop = top - _visibleAreaTop;
-	if (screenTop + viewHeight <= 0 || screenTop >= visibleHeight) {
+	if (screenTop + displayHeight <= 0 || screenTop >= visibleHeight) {
 		return;
 	}
+
+	// If a prior removal in the same batch changed this view's
+	// attach/date flags via previousInBlocksChanged(), the view has
+	// pendingResize: draw() uses the new flags but height() is stale.
+	// Force a re-layout so height() matches what draw() will produce.
+	// The extra height goes to the top (larger marginTop), so we offset
+	// drawing to capture only the content region matching the on-screen view.
+	const auto hadPendingResize = view->pendingResize();
+	if (hadPendingResize) {
+		const_cast<Element*>(view.get())->resizeGetHeight(viewWidth);
+	}
+	const auto viewHeight = view->height();
+	// Extra height added at top after re-layout (0 if no resize happened).
+	const auto heightDelta = viewHeight - displayHeight;
+
 	const auto gapOffset = (_collapseGapAbsY >= 0 && top >= _collapseGapAbsY)
 		? _collapseGapHeight
 		: 0;
 	const auto adjustedScreenTop = screenTop + gapOffset;
-	const auto captureTop = std::clamp(-adjustedScreenTop, 0, viewHeight);
+	// Clip based on displayHeight — that's what was visible on screen.
+	const auto captureTop = std::clamp(-adjustedScreenTop, 0, displayHeight);
 	const auto captureBottom = std::clamp(
 		visibleHeight - adjustedScreenTop,
 		0,
-		viewHeight);
+		displayHeight);
 	if (captureTop >= captureBottom) {
 		return;
 	}
@@ -4245,8 +4262,11 @@ void HistoryInner::captureViewForThanosEffect(
 	image.fill(Qt::transparent);
 	{
 		Painter p(&image);
-		p.translate(0, -captureTop);
-		auto clip = QRect(0, captureTop, viewWidth, captureHeight);
+		// Offset by heightDelta to skip the extra top margin added by
+		// re-layout, so the captured content matches what was on screen.
+		const auto drawTop = captureTop + heightDelta;
+		p.translate(0, -drawTop);
+		auto clip = QRect(0, drawTop, viewWidth, captureHeight);
 		auto context = preparePaintContext(clip);
 		const auto renderedTop = top + gapOffset;
 		context.translate(0, -renderedTop);
@@ -4267,6 +4287,8 @@ void HistoryInner::captureViewForThanosEffect(
 	_thanosEffect->setGeometry(QRect(QPoint(), topLevel->size()));
 	_thanosEffect->raise();
 
+	// Place at the original screen position (no heightDelta shift needed,
+	// since the image already contains only the on-screen content region).
 	const auto globalPos = _scroll->mapTo(
 		topLevel,
 		QPoint(0, adjustedScreenTop + captureTop));
@@ -4274,7 +4296,9 @@ void HistoryInner::captureViewForThanosEffect(
 		std::move(image),
 		QRect(globalPos, QSize(viewWidth, captureHeight)));
 
-	_widget->startCollapseAnimation(viewHeight, top);
+	// Use the original display height for collapse gap calculation,
+	// as that's how much visual space the view occupied on screen.
+	_widget->startCollapseAnimation(displayHeight, top);
 }
 
 HistoryInner::~HistoryInner() {
