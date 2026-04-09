@@ -27,6 +27,9 @@ constexpr auto kComputeWorkgroupSize = int(64);
 constexpr auto kMaxPhaseDuration = 6.0f;
 constexpr auto kPhaseSpeed = 1.0f;
 constexpr auto kTimeStepMultiplier = 1.0f;
+constexpr auto kAccelerationStartPhase = 1.0f;
+constexpr auto kAccelerationRampPhase = 2.5f;
+constexpr auto kAccelerationMaxMultiplier = 2.2f;
 constexpr auto kMaxParticleCount = uint32_t(120000);
 
 const float kQuadVertices[kQuadVertexCount * 2] = {
@@ -60,6 +63,19 @@ struct alignas(16) RenderUniforms {
 	uint32_t particleResolution[2];
 };
 static_assert(sizeof(RenderUniforms) % 16 == 0);
+
+[[nodiscard]] float AnimationSpeedMultiplier(float phase) {
+	if (phase <= kAccelerationStartPhase) {
+		return 1.0f;
+	}
+	const auto t = std::clamp(
+		(phase - kAccelerationStartPhase) / kAccelerationRampPhase,
+		0.0f,
+		1.0f);
+	const auto smooth = t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
+	return 1.0f
+		+ ((kAccelerationMaxMultiplier - 1.0f) * smooth);
+}
 
 [[nodiscard]] QShader LoadShader(const QString &name) {
 	return Rhi::ShaderFromFile(u":/shaders/"_q + name + u".qsb"_q);
@@ -264,19 +280,19 @@ void ThanosEffectRenderer::render(
 	const auto viewW = float(pixelSize.width()) / factor;
 	const auto viewH = float(pixelSize.height()) / factor;
 
-	bool needsInit = false;
-	for (auto &item : _items) {
-		item.phase += dt * kPhaseSpeed;
-		if (!item.particlesInitialized) {
-			needsInit = true;
-		}
-	}
-
 	{
 		auto *rub = rhi->nextResourceUpdateBatch();
+		auto needsInit = false;
 
 		for (auto &item : _items) {
+			if (item.phase >= kMaxPhaseDuration) {
+				continue;
+			}
+			const auto animationTimeStep
+				= dt * AnimationSpeedMultiplier(item.phase);
+			item.phase += animationTimeStep * kPhaseSpeed;
 			if (!item.particlesInitialized) {
+				needsInit = true;
 				item.particlesInitialized = true;
 
 				ComputeInitUniforms uni;
@@ -295,7 +311,7 @@ void ThanosEffectRenderer::render(
 			updateUni.particleCountX = item.particleCountX;
 			updateUni.particleCountY = item.particleCountY;
 			updateUni.phase = item.phase;
-			updateUni.timeStep = dt * kTimeStepMultiplier;
+			updateUni.timeStep = animationTimeStep * kTimeStepMultiplier;
 			rub->updateDynamicBuffer(
 				item.computeUpdateUniformBuffer,
 				0,
@@ -363,6 +379,9 @@ void ThanosEffectRenderer::render(
 		cb->beginPass(rt, bg, { 1.0f, 0 }, renderRub);
 
 		for (auto &item : _items) {
+			if (item.phase >= kMaxPhaseDuration) {
+				continue;
+			}
 			cb->setGraphicsPipeline(_renderPipeline);
 			cb->setShaderResources(item.renderSrb);
 			cb->setViewport({
