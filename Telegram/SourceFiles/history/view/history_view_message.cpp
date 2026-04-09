@@ -1635,53 +1635,59 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 		p.translate(-selectionTranslation, 0);
 	}
 	if (selectionModeResult.progress) {
-		const auto progress = selectionModeResult.progress;
-		if (progress <= 1.) {
-			if (context.selected()) {
-				if (!_selectionRoundCheckbox) {
-					_selectionRoundCheckbox
-						= std::make_unique<Ui::RoundCheckbox>(
-							st::msgSelectionCheck,
-							[this] { repaint(); });
+		if (!context.skipSelectionCheck) {
+			const auto progress = selectionModeResult.progress;
+			if (progress <= 1.) {
+				if (context.selected()) {
+					if (!_selectionRoundCheckbox) {
+						_selectionRoundCheckbox
+							= std::make_unique<Ui::RoundCheckbox>(
+								st::msgSelectionCheck,
+								[this] { repaint(); });
+					}
 				}
+				if (_selectionRoundCheckbox) {
+					_selectionRoundCheckbox->setChecked(
+						context.selected(),
+						anim::type::normal);
+				}
+				const auto o = ScopedPainterOpacity(p, progress);
+				const auto &st = st::msgSelectionCheck;
+				const auto right = (delegate()->elementChatMode()
+					== ElementChatMode::Wide)
+					? std::min(
+						int(_bubbleWidthLimit
+							+ st::msgPhotoSkip
+							+ st::msgSelectionOffset
+							+ st::msgPadding.left()
+							+ st.size),
+						width())
+					: width();
+				const auto pos = QPoint(
+					(right
+						- (st::msgSelectionOffset * progress - st.size) / 2
+						- st::msgPadding.right() / 2
+						- st.size
+						- st::historyScroll.deltax),
+					rect::bottom(g) - st.size - st::msgSelectionBottomSkip);
+				{
+					p.setPen(QPen(st.border, st.width));
+					p.setBrush(context.st->msgServiceBg());
+					auto hq = PainterHighQualityEnabler(p);
+					p.drawEllipse(QRect(pos, Size(st.size)));
+				}
+				if (_selectionRoundCheckbox) {
+					_selectionRoundCheckbox->paint(
+						p,
+						pos.x(),
+						pos.y(),
+						width());
+				}
+			} else {
+				_selectionRoundCheckbox = nullptr;
 			}
-			if (_selectionRoundCheckbox) {
-				_selectionRoundCheckbox->setChecked(
-					context.selected(),
-					anim::type::normal);
-			}
-			const auto o = ScopedPainterOpacity(p, progress);
-			const auto &st = st::msgSelectionCheck;
-			const auto right = (delegate()->elementChatMode()
-				== ElementChatMode::Wide)
-				? std::min(
-					int(_bubbleWidthLimit
-						+ st::msgPhotoSkip
-						+ st::msgSelectionOffset
-						+ st::msgPadding.left()
-						+ st.size),
-					width())
-				: width();
-			const auto pos = QPoint(
-				(right
-					- (st::msgSelectionOffset * progress - st.size) / 2
-					- st::msgPadding.right() / 2
-					- st.size
-					- st::historyScroll.deltax),
-				rect::bottom(g) - st.size - st::msgSelectionBottomSkip);
-			{
-				p.setPen(QPen(st.border, st.width));
-				p.setBrush(context.st->msgServiceBg());
-				auto hq = PainterHighQualityEnabler(p);
-				p.drawEllipse(QRect(pos, Size(st.size)));
-			}
-			if (_selectionRoundCheckbox) {
-				_selectionRoundCheckbox->paint(p, pos.x(), pos.y(), width());
-			}
-		} else {
-			_selectionRoundCheckbox = nullptr;
 		}
-	} else {
+	} else if (!context.skipSelectionCheck) {
 		_selectionRoundCheckbox = nullptr;
 	}
 }
