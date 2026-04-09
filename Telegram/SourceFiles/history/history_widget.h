@@ -949,6 +949,7 @@ private:
 		int absY = -1;
 		int startHeight = 0;
 		int currentHeight = 0;
+		int originalHeight = 0;
 	};
 	std::vector<CollapseGapState> _collapseGaps;
 	Ui::Animations::Simple _collapseAnimation;
