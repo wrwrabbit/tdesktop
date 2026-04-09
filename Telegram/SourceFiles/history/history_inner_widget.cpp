@@ -4223,16 +4223,30 @@ void HistoryInner::captureViewForThanosEffect(
 	if (screenTop + viewHeight <= 0 || screenTop >= visibleHeight) {
 		return;
 	}
+	const auto gapOffset = (_collapseGapAbsY >= 0 && top >= _collapseGapAbsY)
+		? _collapseGapHeight
+		: 0;
+	const auto adjustedScreenTop = screenTop + gapOffset;
+	const auto captureTop = std::clamp(-adjustedScreenTop, 0, viewHeight);
+	const auto captureBottom = std::clamp(
+		visibleHeight - adjustedScreenTop,
+		0,
+		viewHeight);
+	if (captureTop >= captureBottom) {
+		return;
+	}
+	const auto captureHeight = captureBottom - captureTop;
 
 	const auto dpr = style::DevicePixelRatio();
 	auto image = QImage(
-		QSize(viewWidth, viewHeight) * dpr,
+		QSize(viewWidth, captureHeight) * dpr,
 		QImage::Format_RGBA8888_Premultiplied);
 	image.setDevicePixelRatio(dpr);
 	image.fill(Qt::transparent);
 	{
 		Painter p(&image);
-		auto clip = QRect(0, 0, viewWidth, viewHeight);
+		p.translate(0, -captureTop);
+		auto clip = QRect(0, captureTop, viewWidth, captureHeight);
 		auto context = preparePaintContext(clip);
 		context.clip = clip;
 		context.outbg = view->hasOutLayout();
@@ -4250,16 +4264,12 @@ void HistoryInner::captureViewForThanosEffect(
 	_thanosEffect->setGeometry(QRect(QPoint(), topLevel->size()));
 	_thanosEffect->raise();
 
-	const auto gapOffset = (_collapseGapAbsY >= 0 && top >= _collapseGapAbsY)
-		? _collapseGapHeight
-		: 0;
-	const auto adjustedScreenTop = screenTop + gapOffset;
 	const auto globalPos = _scroll->mapTo(
 		topLevel,
-		QPoint(0, adjustedScreenTop));
+		QPoint(0, adjustedScreenTop + captureTop));
 	_thanosEffect->addItem(
 		std::move(image),
-		QRect(globalPos, QSize(viewWidth, viewHeight)));
+		QRect(globalPos, QSize(viewWidth, captureHeight)));
 
 	_widget->startCollapseAnimation(viewHeight, top);
 }
