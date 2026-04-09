@@ -628,6 +628,7 @@ private:
 		int top = 0;
 	};
 	base::flat_map<not_null<const Element*>, PreCapturedView> _thanosPreCaptured;
+	bool _suppressCollapseAnimation = false;
 	std::vector<CollapseGap> _collapseGaps;
 
 };

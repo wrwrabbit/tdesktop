@@ -4211,6 +4211,10 @@ void HistoryInner::captureItemsForThanosEffect(
 	// Pre-capture all views while they are in their original visual
 	// state, before any item->destroy() changes neighbor views'
 	// attach/date flags via previousInBlocksChanged().
+	_suppressCollapseAnimation = true;
+	const auto guard = gsl::finally([&] {
+		_suppressCollapseAnimation = false;
+	});
 	for (const auto &item : items) {
 		if (const auto view = item->mainView()) {
 			const auto top = itemTop(view);
@@ -4233,7 +4237,11 @@ void HistoryInner::captureViewForThanosEffect(
 	// Use the saved height/top from before any destruction started.
 	if (const auto it = _thanosPreCaptured.find(view);
 		it != end(_thanosPreCaptured)) {
+		const auto saved = it->second;
 		_thanosPreCaptured.erase(it);
+		if (saved.top >= 0) {
+			_widget->startCollapseAnimation(saved.height, saved.top);
+		}
 		return;
 	}
 	const auto item = view->data();
@@ -4312,7 +4320,9 @@ void HistoryInner::captureViewForThanosEffect(
 		std::move(image),
 		QRect(globalPos, QSize(viewWidth, captureHeight)));
 
-	_widget->startCollapseAnimation(viewHeight, top);
+	if (!_suppressCollapseAnimation) {
+		_widget->startCollapseAnimation(viewHeight, top);
+	}
 }
 
 HistoryInner::~HistoryInner() {
