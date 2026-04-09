@@ -7575,74 +7575,92 @@ void HistoryWidget::startCollapseAnimation(int height, int itemTop) {
 		return;
 	}
 
-	const auto computeDuration = [](int gapHeight) {
-		return int(std::clamp(
-			kBaseMs + gapHeight * kPerPixelMs,
-			double(kBaseMs),
-			double(kMaxMs)));
-	};
-
-	if (_collapseAnimation && _collapseAnimation->animation.animating()) {
-		const auto gapTop = std::min(_collapseItemTop, itemTop);
-		_collapseHeight += height;
-		_collapseItemTop = gapTop;
-		_collapseAnimation->startHeight = _collapseHeight;
-		_list->setCollapseGap(gapTop, _collapseHeight);
-		synteticScrollToY(scrollTop + height);
-		_collapseAnimation->animation.start(
-			[=] { collapseAnimationCallback(); },
-			0.,
-			1.,
-			computeDuration(_collapseHeight),
-			anim::easeOutCirc);
-		return;
+	auto merged = false;
+	for (auto &gap : _collapseGaps) {
+		if (gap.absY + gap.startHeight == itemTop
+			|| (gap.absY <= itemTop
+				&& itemTop <= gap.absY + gap.startHeight)) {
+			gap.startHeight += height;
+			gap.currentHeight += height;
+			merged = true;
+			break;
+		}
+		if (itemTop + height == gap.absY) {
+			gap.absY = itemTop;
+			gap.startHeight += height;
+			gap.currentHeight += height;
+			merged = true;
+			break;
+		}
+	}
+	if (!merged) {
+		_collapseGaps.push_back({
+			.absY = itemTop,
+			.startHeight = height,
+			.currentHeight = height,
+		});
+		std::sort(_collapseGaps.begin(), _collapseGaps.end(),
+			[](const auto &a, const auto &b) { return a.absY < b.absY; });
 	}
 
-	_collapseItemTop = itemTop;
-	_collapseHeight = height;
-	_list->setCollapseGap(itemTop, height);
+	syncCollapseGapsToList();
 	synteticScrollToY(scrollTop + height);
 
-	_collapseAnimation.emplace();
-	_collapseAnimation->startHeight = height;
-	_collapseAnimation->animation.start(
+	auto totalHeight = 0;
+	for (const auto &gap : _collapseGaps) {
+		totalHeight += gap.currentHeight;
+	}
+	const auto duration = int(std::clamp(
+		kBaseMs + totalHeight * kPerPixelMs,
+		double(kBaseMs),
+		double(kMaxMs)));
+
+	_collapseAnimation.start(
 		[=] { collapseAnimationCallback(); },
 		0.,
 		1.,
-		computeDuration(height),
+		duration,
 		anim::easeOutCirc);
 }
 
 void HistoryWidget::collapseAnimationCallback() {
-	if (!_collapseAnimation) {
+	const auto progress = _collapseAnimation.value(1.);
+
+	auto totalDelta = 0;
+	for (auto &gap : _collapseGaps) {
+		const auto newHeight = anim::interpolate(
+			gap.startHeight,
+			0,
+			progress);
+		totalDelta += (gap.currentHeight - newHeight);
+		gap.currentHeight = newHeight;
+	}
+
+	if (totalDelta > 0) {
+		syncCollapseGapsToList();
+		const auto scrollTop = _scroll->scrollTop();
+		synteticScrollToY(std::max(scrollTop - totalDelta, 0));
+	}
+
+	if (!_collapseAnimation.animating()) {
+		_collapseGaps.clear();
+		if (_list) {
+			_list->setCollapseGaps({});
+		}
+		_collapseAnimation = {};
+	}
+}
+
+void HistoryWidget::syncCollapseGapsToList() {
+	if (!_list) {
 		return;
 	}
-	const auto value = _collapseAnimation->animation.value(1.);
-	const auto newHeight = anim::interpolate(
-		_collapseAnimation->startHeight,
-		0,
-		value);
-
-	if (_collapseHeight != newHeight) {
-		const auto scrollTop = _scroll->scrollTop();
-		const auto delta = _collapseHeight - newHeight;
-
-		_collapseHeight = newHeight;
-		if (_list) {
-			_list->setCollapseGap(_collapseItemTop, _collapseHeight);
-		}
-
-		synteticScrollToY(std::max(scrollTop - delta, 0));
+	auto gaps = std::vector<HistoryInner::CollapseGap>();
+	gaps.reserve(_collapseGaps.size());
+	for (const auto &g : _collapseGaps) {
+		gaps.push_back({ .absY = g.absY, .height = g.currentHeight });
 	}
-
-	if (!_collapseAnimation->animation.animating()) {
-		_collapseHeight = 0;
-		_collapseItemTop = -1;
-		if (_list) {
-			_list->setCollapseGap(-1, 0);
-		}
-		_collapseAnimation.reset();
-	}
+	_list->setCollapseGaps(gaps);
 }
 
 void HistoryWidget::startMessageSendingAnimation(

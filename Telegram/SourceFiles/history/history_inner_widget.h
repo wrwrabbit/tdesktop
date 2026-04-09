@@ -118,6 +118,14 @@ public:
 
 	Ui::ChatPaintContext preparePaintContext(const QRect &clip) const;
 
+	struct CollapseGap {
+		int absY = -1;
+		int height = 0;
+
+		friend bool operator==(const CollapseGap&, const CollapseGap&) = default;
+	};
+	void setCollapseGaps(const std::vector<CollapseGap> &gaps);
+
 	void messagesReceived(
 		not_null<PeerData*> peer,
 		const QVector<MTPMessage> &messages);
@@ -614,18 +622,13 @@ private:
 		const std::vector<not_null<HistoryItem*>> &items);
 	void captureViewForThanosEffect(not_null<const Element*> view);
 
-public:
-	void setCollapseGap(int absY, int height);
-
-private:
 	std::unique_ptr<Ui::ThanosEffect> _thanosEffect;
 	struct PreCapturedView {
 		int height = 0;
 		int top = 0;
 	};
 	base::flat_map<not_null<const Element*>, PreCapturedView> _thanosPreCaptured;
-	int _collapseGapAbsY = -1;
-	int _collapseGapHeight = 0;
+	std::vector<CollapseGap> _collapseGaps;
 
 };
 

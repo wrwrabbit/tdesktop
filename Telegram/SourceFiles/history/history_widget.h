@@ -945,14 +945,15 @@ private:
 		ItemRevealAnimation> _itemRevealAnimations;
 	int _itemsRevealHeight = 0;
 
-	struct CollapseAnimation {
-		Ui::Animations::Simple animation;
+	struct CollapseGapState {
+		int absY = -1;
 		int startHeight = 0;
+		int currentHeight = 0;
 	};
-	std::optional<CollapseAnimation> _collapseAnimation;
-	int _collapseHeight = 0;
-	int _collapseItemTop = -1;
+	std::vector<CollapseGapState> _collapseGaps;
+	Ui::Animations::Simple _collapseAnimation;
 	void collapseAnimationCallback();
+	void syncCollapseGapsToList();
 
 	bool _sponsoredMessagesStateKnown = false;
 	bool _justMarkingAsRead = false;

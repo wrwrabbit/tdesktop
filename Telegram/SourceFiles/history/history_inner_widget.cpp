@@ -1380,14 +1380,14 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 		auto view = block->messages[iItem].get();
 		auto top = htop + block->y() + view->y();
 
+		auto nextGapIndex = 0;
 		auto collapseShift = 0;
-		if (_collapseGapHeight > 0 && _collapseGapAbsY >= 0) {
-			const auto gapAbsY = _collapseGapAbsY;
-			if (top >= gapAbsY) {
-				collapseShift = _collapseGapHeight;
-				top += collapseShift;
-			}
+		for (; nextGapIndex < int(_collapseGaps.size()); ++nextGapIndex) {
+			const auto &gap = _collapseGaps[nextGapIndex];
+			if (top < gap.absY) break;
+			collapseShift += gap.height;
 		}
+		top += collapseShift;
 
 		context.clip = clip.intersected(
 			QRect(0, hdrawtop, width(), clip.top() + clip.height()));
@@ -1395,14 +1395,14 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 		p.translate(0, top);
 		const auto &sendingAnimation = _controller->sendingAnimation();
 		while (top < drawToY) {
-			if (!collapseShift
-				&& _collapseGapHeight > 0
-				&& _collapseGapAbsY >= 0
-				&& top >= _collapseGapAbsY) {
-				collapseShift = _collapseGapHeight;
-				top += collapseShift;
-				context.translate(0, -collapseShift);
-				p.translate(0, collapseShift);
+			while (nextGapIndex < int(_collapseGaps.size())) {
+				const auto &gap = _collapseGaps[nextGapIndex];
+				if (top - collapseShift < gap.absY) break;
+				top += gap.height;
+				collapseShift += gap.height;
+				context.translate(0, -gap.height);
+				p.translate(0, gap.height);
+				++nextGapIndex;
 			}
 
 			const auto height = view->height();
@@ -4105,10 +4105,9 @@ void HistoryInner::setItemsRevealHeight(int revealHeight) {
 	_revealHeight = revealHeight;
 }
 
-void HistoryInner::setCollapseGap(int absY, int height) {
-	_collapseGapAbsY = absY;
-	if (_collapseGapHeight != height) {
-		_collapseGapHeight = height;
+void HistoryInner::setCollapseGaps(const std::vector<CollapseGap> &gaps) {
+	if (_collapseGaps != gaps) {
+		_collapseGaps = gaps;
 		updateSize();
 	}
 }
@@ -4123,7 +4122,11 @@ void HistoryInner::changeItemsRevealHeight(int revealHeight) {
 
 void HistoryInner::updateSize() {
 	const auto visibleHeight = _scroll->height();
-	const auto itemsHeight = historyHeight() - _revealHeight + _collapseGapHeight;
+	auto collapseGapTotal = 0;
+	for (const auto &gap : _collapseGaps) {
+		collapseGapTotal += gap.height;
+	}
+	const auto itemsHeight = historyHeight() - _revealHeight + collapseGapTotal;
 	const auto aboutAboveHistory = _aboutView && _aboutView->aboveHistory();
 	const auto aboutBelowHistory = _aboutView && !aboutAboveHistory;
 	auto newHistoryMarginBottom = st::historyPaddingBottom;
@@ -4259,9 +4262,12 @@ void HistoryInner::captureViewForThanosEffect(
 	if (screenTop + viewHeight <= 0 || screenTop >= visibleHeight) {
 		return;
 	}
-	const auto gapOffset = (_collapseGapAbsY >= 0 && top >= _collapseGapAbsY)
-		? _collapseGapHeight
-		: 0;
+	auto gapOffset = 0;
+	for (const auto &gap : _collapseGaps) {
+		if (gap.absY >= 0 && top >= gap.absY) {
+			gapOffset += gap.height;
+		}
+	}
 	const auto adjustedScreenTop = screenTop + gapOffset;
 	const auto captureTop = std::clamp(-adjustedScreenTop, 0, viewHeight);
 	const auto captureBottom = std::clamp(
