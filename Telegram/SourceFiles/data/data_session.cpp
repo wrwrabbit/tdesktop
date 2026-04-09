@@ -2182,6 +2182,16 @@ rpl::producer<not_null<const HistoryItem*>> Session::itemRemoved(
 	});
 }
 
+void Session::notifyItemsAboutToBeDestroyed(
+		const std::vector<not_null<HistoryItem*>> &items) {
+	_itemsAboutToBeDestroyed.fire_copy(items);
+}
+
+auto Session::itemsAboutToBeDestroyed() const
+-> rpl::producer<std::vector<not_null<HistoryItem*>>> {
+	return _itemsAboutToBeDestroyed.events();
+}
+
 void Session::notifyViewAboutToBeRemoved(
 		not_null<const ViewElement*> view) {
 	_viewAboutToBeRemoved.fire_copy(view);

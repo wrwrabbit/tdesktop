@@ -610,6 +610,8 @@ private:
 	[[nodiscard]] HistoryView::ElementOverlayHost &ensureOverlayHost();
 	std::unique_ptr<HistoryView::ElementOverlayHost> _overlayHost;
 
+	void captureItemsForThanosEffect(
+		const std::vector<not_null<HistoryItem*>> &items);
 	void captureViewForThanosEffect(not_null<const Element*> view);
 
 public:
@@ -617,6 +619,11 @@ public:
 
 private:
 	std::unique_ptr<Ui::ThanosEffect> _thanosEffect;
+	struct PreCapturedView {
+		int height = 0;
+		int top = 0;
+	};
+	base::flat_map<not_null<const Element*>, PreCapturedView> _thanosPreCaptured;
 	int _collapseGapAbsY = -1;
 	int _collapseGapHeight = 0;
 
