@@ -4248,6 +4248,8 @@ void HistoryInner::captureViewForThanosEffect(
 		p.translate(0, -captureTop);
 		auto clip = QRect(0, captureTop, viewWidth, captureHeight);
 		auto context = preparePaintContext(clip);
+		const auto renderedTop = top + gapOffset;
+		context.translate(0, -renderedTop);
 		context.clip = clip;
 		context.skipSelectionCheck = true;
 		context.outbg = view->hasOutLayout();
