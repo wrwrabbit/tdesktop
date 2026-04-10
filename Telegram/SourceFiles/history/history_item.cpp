@@ -2715,16 +2715,19 @@ QString HistoryItem::notificationHeader() const {
 	return QString();
 }
 
-void HistoryItem::markBeingSentForAdoption() {
-	_flags |= MessageFlag::BeingSent;
+void HistoryItem::markTextAppearingStarted() {
+	_flags |= MessageFlag::TextAppearingStarted;
 }
 
 void HistoryItem::setRealId(MsgId newId) {
-	Expects(_flags & MessageFlag::BeingSent);
+	Expects(isSending() || textAppearing());
 	Expects(IsClientMsgId(id));
 
 	const auto oldId = std::exchange(id, newId);
 	_flags &= ~(MessageFlag::BeingSent | MessageFlag::Local);
+	if (textAppearing()) {
+		markTextAppearingStarted();
+	}
 	if (isBusinessShortcut()) {
 		_date = 0;
 	}

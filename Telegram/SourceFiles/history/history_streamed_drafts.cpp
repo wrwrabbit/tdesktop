@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "main/main_session.h"
 
 namespace {
 
@@ -57,9 +58,8 @@ void HistoryStreamedDrafts::apply(
 		clearByRandomId(randomId);
 		return;
 	}
-	const auto text = Api::ParseTextWithEntities(
-		&_history->session(),
-		data.vtext());
+	const auto session = &_history->session();
+	const auto text = Api::ParseTextWithEntities(session, data.vtext());
 	if (update(randomId, text)) {
 		return;
 	}
@@ -83,6 +83,17 @@ void HistoryStreamedDrafts::apply(
 	if (!_checkTimer.isActive()) {
 		_checkTimer.callOnce(kClearTimeout);
 	}
+	crl::on_main(this, [=] {
+		crl::on_main(this, [=] {
+			// Thread topics create views for messages in double on_main:
+			// - First we postpone HistoryUpdate::Flag::ClientSideMessages.
+			// - Then we postpone RepliesList push of new messages list.
+			const auto i = _drafts.find(randomId);
+			if (i != end(_drafts)) {
+				i->second.message->markTextAppearingStarted();
+			}
+		});
+	});
 }
 
 bool HistoryStreamedDrafts::update(
@@ -178,7 +189,6 @@ HistoryItem *HistoryStreamedDrafts::adoptIncoming(
 	const auto item = best->second.message.get();
 	_drafts.erase(best);
 
-	item->markBeingSentForAdoption();
 	item->setRealId(data.vid().v);
 	if (const auto topic = item->topic()) {
 		topic->applyMaybeLast(item);

@@ -2095,6 +2095,11 @@ void Session::requestItemTextRefresh(not_null<HistoryItem*> item) {
 			view->itemTextUpdated();
 		});
 		requestItemResize(item);
+		if (item->textAppearing()) {
+			enumerateItemViews(item, [&](not_null<ViewElement*> view) {
+				view->skipInactiveTextAppearing();
+			});
+		}
 	};
 	if (const auto group = groups().find(item)) {
 		call(group->items.front());

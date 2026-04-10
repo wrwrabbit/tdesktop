@@ -216,12 +216,11 @@ Message::Message(
 	}
 	initPaidInformation();
 
-	if (data->isTextAppearing()) {
+	if (data->textAppearing()) {
 		AddComponents(TextAppearing::Bit());
-
+		const auto appearing = Get<TextAppearing>();
 		if (replacing) {
 			if (const auto was = replacing->Get<TextAppearing>()) {
-				const auto appearing = Get<TextAppearing>();
 				*appearing = std::move(*was);
 				appearing->widthAnimation.setCallback([=] {
 					textAppearWidthCallback();
@@ -230,6 +229,11 @@ Message::Message(
 					textAppearHeightCallback();
 				});
 			}
+		}
+		if (data->textAppearingStarted()
+			&& !appearing->widthAnimation.animating()
+			&& !appearing->heightAnimation.animating()) {
+			skipInactiveTextAppearing();
 		}
 	}
 }
@@ -5024,15 +5028,6 @@ int Message::resizeContentGetHeight(int newWidth) {
 		}
 	}
 
-	auto newHeight = minHeight();
-
-	if (const auto service = Get<ServicePreMessage>()) {
-		service->resizeToWidth(newWidth, delegate()->elementChatMode());
-	}
-
-	const auto botTop = item->isFakeAboutView()
-		? Get<FakeBotAboutTop>()
-		: nullptr;
 	const auto media = this->media();
 	const auto mediaDisplayed = media ? media->isDisplayed() : false;
 	const auto bubble = drawBubble();
@@ -5076,12 +5071,34 @@ int Message::resizeContentGetHeight(int newWidth) {
 	const auto textWidth = bubble
 		? bubbleTextWidth(contentWidth)
 		: bottomInfoWidth;
+
+	auto appearing = Get<TextAppearing>();
+	if (appearing) {
+		if (appearing->textWidth != textWidth) {
+			appearing->geometryValid = false;
+			appearing->textWidth = textWidth;
+		}
+		// This may invalidate composer structure by removing TextAppearing.
+		if (!textAppearValidate(appearing)) {
+			appearing = nullptr;
+		}
+	}
+
 	const auto reactionsInBubble = _reactions && embedReactionsInBubble();
 	const auto bottomInfoHeight = _bottomInfo.resizeGetHeight(
 		std::min(
 			_bottomInfo.optimalSize().width(),
 			bottomInfoWidth - 2 * st::msgDateDelta.x()));
 
+	auto newHeight = minHeight();
+
+	if (const auto service = Get<ServicePreMessage>()) {
+		service->resizeToWidth(newWidth, delegate()->elementChatMode());
+	}
+
+	const auto botTop = item->isFakeAboutView()
+		? Get<FakeBotAboutTop>()
+		: nullptr;
 	if (bubble) {
 		auto reply = Get<Reply>();
 		auto via = item->Get<HistoryMessageVia>();
@@ -5094,17 +5111,6 @@ int Message::resizeContentGetHeight(int newWidth) {
 
 		if (reactionsInBubble) {
 			_reactions->resizeGetHeight(textWidth);
-		}
-
-		auto appearing = Get<TextAppearing>();
-		if (appearing) {
-			if (appearing->textWidth != textWidth) {
-				appearing->geometryValid = false;
-				appearing->textWidth = textWidth;
-			}
-			if (!textAppearValidate(appearing)) {
-				appearing = nullptr;
-			}
 		}
 		if (contentWidth == maxWidth() && !appearing) {
 			if (mediaDisplayed) {
@@ -5279,10 +5285,12 @@ bool Message::textAppearCheckLine(not_null<TextAppearing*> appearing) {
 		if (data()->isRegular()) {
 			RemoveComponents(TextAppearing::Bit());
 			return false;
-		} else if (recount) {
+		} else if (recount && lines) {
 			appearing->shownLine = lines - 1;
-			appearing->revealedLineWidth = line ? line->width : 0;
-			appearing->shownHeight = line ? line->bottom : 0;
+			const auto &line = appearing->lines.back();
+			appearing->revealedLineWidth = line.width;
+			appearing->shownWidth = appearing->textWidth;
+			appearing->shownHeight = line.bottom;
 			appearing->widthAnimation.stop();
 			appearing->heightAnimation.stop();
 		}
