@@ -2336,6 +2336,9 @@ void HistoryItem::applySentMessage(const MTPDmessage &data) {
 				: PeerId();
 			if (!replyToPeer || replyToPeer == history()->peer->id) {
 				if (const auto replyToId = data.vreply_to_msg_id()) {
+					if (!isService() && !Has<HistoryMessageReply>()) {
+						AddComponents(HistoryMessageReply::Bit());
+					}
 					setReplyFields(
 						replyToId->v,
 						data.vreply_to_top_id().value_or(replyToId->v),
@@ -2671,7 +2674,8 @@ void HistoryItem::addToMessagesIndex() {
 }
 
 void HistoryItem::incrementReplyToTopCounter() {
-	if (isRegular() && _history->peer->isMegagroup()) {
+	if (isRegular()
+		&& (_history->peer->isMegagroup() || _history->peer->forum())) {
 		_history->session().changes().messageUpdated(
 			this,
 			Data::MessageUpdate::Flag::ReplyToTopAdded);
@@ -2743,9 +2747,10 @@ void HistoryItem::setRealId(MsgId newId) {
 	_history->owner().requestItemResize(this);
 	_history->owner().requestItemRepaint(this);
 
-	if (Has<HistoryMessageReply>()) {
-		incrementReplyToTopCounter();
-	}
+	incrementReplyToTopCounter();
+	_history->session().changes().messageUpdated(
+		this,
+		Data::MessageUpdate::Flag::NewMaybeAdded);
 
 	if (out() && starsPaid()) {
 		_history->session().credits().load(true);
