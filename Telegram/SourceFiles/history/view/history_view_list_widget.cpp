@@ -4368,6 +4368,9 @@ void ListWidget::setCollapseGaps(std::vector<Ui::CollapseGap> gaps) {
 }
 
 void ListWidget::setupThanosEffect() {
+	if (!_delegate->listThanosEffectEnabled()) {
+		return;
+	}
 	const auto scroll = _delegate->listScrollArea();
 	if (!scroll) {
 		return;

@@ -204,6 +204,7 @@ public:
 		std::unique_ptr<QMimeData> data,
 		Fn<void()> finished) = 0;
 	virtual Ui::ScrollArea *listScrollArea() const { return nullptr; }
+	virtual bool listThanosEffectEnabled() const { return true; }
 };
 
 class WindowListDelegate : public ListDelegate {
