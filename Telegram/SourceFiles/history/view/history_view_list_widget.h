@@ -203,6 +203,7 @@ public:
 	virtual void listLaunchDrag(
 		std::unique_ptr<QMimeData> data,
 		Fn<void()> finished) = 0;
+	virtual Ui::ScrollArea *listScrollArea() const { return nullptr; }
 };
 
 class WindowListDelegate : public ListDelegate {
@@ -915,6 +916,9 @@ private:
 
 	[[nodiscard]] ElementOverlayHost &ensureOverlayHost();
 	std::unique_ptr<ElementOverlayHost> _overlayHost;
+
+	void setupThanosEffect();
+	std::unique_ptr<Ui::ThanosEffectController> _thanosController;
 
 	rpl::lifetime _viewerLifetime;
 

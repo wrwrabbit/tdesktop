@@ -512,6 +512,8 @@ ListWidget::ListWidget(
 		itemRemoved(item);
 	}, lifetime());
 
+	setupThanosEffect();
+
 	using MessageUpdateFlag = Data::MessageUpdate::Flag;
 	_session->changes().realtimeMessageUpdates(
 		MessageUpdateFlag::NewUnreadReaction
@@ -646,6 +648,10 @@ void ListWidget::setGeometryCrashAnnotations(not_null<Element*> view) {
 
 void ListWidget::refreshRows(const Data::MessagesSlice &old) {
 	Expects(_viewsCapacity.empty());
+
+	if (_thanosController) {
+		_thanosController->clearPreCaptured();
+	}
 
 	saveScrollState();
 
@@ -4361,6 +4367,41 @@ void ListWidget::setCollapseGaps(std::vector<Ui::CollapseGap> gaps) {
 	update();
 }
 
+void ListWidget::setupThanosEffect() {
+	const auto scroll = _delegate->listScrollArea();
+	if (!scroll) {
+		return;
+	}
+	_thanosController = std::make_unique<Ui::ThanosEffectController>(
+		_session,
+		Ui::ThanosEffectController::Delegate{
+			.viewForItem = [=](not_null<const HistoryItem*> item)
+					-> HistoryView::Element* {
+				const auto i = _views.find(item);
+				return (i != end(_views))
+					? i->second.get()
+					: nullptr;
+			},
+			.itemTop = [=](not_null<const HistoryView::Element*> view) {
+				return itemTop(view);
+			},
+			.visibleAreaTop = [=] { return _visibleTop; },
+			.visibleAreaBottom = [=] { return _visibleBottom; },
+			.contentWidth = [=] { return width(); },
+			.preparePaintContext = [=](QRect clip) {
+				return preparePaintContext(clip);
+			},
+			.window = [=]() -> QWidget* { return window(); },
+			.scrollArea = [=]() -> not_null<Ui::ScrollArea*> {
+				return scroll;
+			},
+			.setCollapseGaps = [=](std::vector<Ui::CollapseGap> gaps) {
+				setCollapseGaps(std::move(gaps));
+			},
+		},
+		lifetime());
+}
+
 void ListWidget::repaintItem(const Element *view) {
 	if (!view) {
 		return;
@@ -4574,6 +4615,10 @@ void ListWidget::itemRemoved(not_null<const HistoryItem*> item) {
 	const auto i = _views.find(item);
 	if (i == end(_views)) {
 		return;
+	}
+
+	if (_thanosController) {
+		_thanosController->captureOnRemoval(item);
 	}
 
 	saveScrollState();

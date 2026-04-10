@@ -62,6 +62,10 @@ void ThanosEffectController::captureItemsBatch(
 	}
 }
 
+void ThanosEffectController::clearPreCaptured() {
+	_preCaptured.clear();
+}
+
 void ThanosEffectController::captureOnRemoval(
 		not_null<const HistoryItem*> item) {
 	if (!ThanosEffect::Supported()) {
