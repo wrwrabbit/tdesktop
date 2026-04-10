@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_text_entities.h"
 #include "data/data_forum_topic.h"
 #include "data/data_peer_id.h"
+#include "data/data_saved_sublist.h"
 #include "data/data_session.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -91,7 +92,9 @@ bool HistoryStreamedDrafts::update(
 	if (i == end(_drafts)) {
 		return false;
 	}
-	i->second.message->setText(text);
+	const auto item = i->second.message;
+	item->setText(text);
+	item->invalidateChatListEntry();
 	i->second.updated = crl::now();
 	return true;
 }
@@ -177,7 +180,13 @@ HistoryItem *HistoryStreamedDrafts::adoptIncoming(
 
 	item->markBeingSentForAdoption();
 	item->setRealId(data.vid().v);
-	item->applySentMessage(data);
+	if (const auto topic = item->topic()) {
+		topic->applyMaybeLast(item);
+	}
+	if (const auto sublist = item->savedSublist()) {
+		sublist->applyMaybeLast(item);
+	}
+	_history->owner().updateExistingMessage(data);
 
 	if (_drafts.empty()) {
 		scheduleDestroy();
