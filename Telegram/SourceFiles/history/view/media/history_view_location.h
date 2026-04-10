@@ -14,6 +14,11 @@ namespace Data {
 class CloudImage;
 } // namespace Data
 
+namespace Ui {
+class BoxShadow;
+class DynamicImage;
+} // namespace Ui
+
 namespace HistoryView {
 
 class Location : public Media {
@@ -78,6 +83,7 @@ private:
 		TimeId period);
 
 	void ensureMediaCreated() const;
+	void ensureUserpicCreated() const;
 
 	void validateImageCache(
 		QSize outer,
@@ -112,8 +118,11 @@ private:
 	const not_null<Data::CloudImage*> _data;
 	mutable std::unique_ptr<Live> _live;
 	mutable std::shared_ptr<QImage> _media;
+	mutable std::shared_ptr<Ui::DynamicImage> _userpic;
+	mutable std::unique_ptr<Ui::BoxShadow> _pinShadow;
 	Ui::Text::String _title, _description;
 	ClickHandlerPtr _link;
+	bool _liveLocation = false;
 
 	int _thumbnailHeight = 0;
 	mutable QImage _imageCache;
