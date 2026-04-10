@@ -3996,7 +3996,7 @@ TextState Message::bottomInfoTextState(
 }
 
 int Message::infoWidth() const {
-	return _bottomInfo.optimalSize().width();
+	return _bottomInfo.maxWidth();
 }
 
 int Message::bottomInfoFirstLineWidth() const {
@@ -5311,10 +5311,11 @@ bool Message::textAppearCheckLine(not_null<TextAppearing*> appearing) {
 			textAppearStartWidthAnimation(appearing);
 		}
 	}
-	if (appearing->targetHeight != line->bottom) {
-		if (!shown || appearing->shownHeight >= line->bottom) {
+	const auto targetHeight = textAppearTargetHeight(appearing);
+	if (appearing->targetHeight != targetHeight) {
+		if (!shown || appearing->shownHeight >= targetHeight) {
 			appearing->heightAnimation.stop();
-			appearing->shownHeight = appearing->targetHeight = line->bottom;
+			appearing->shownHeight = appearing->targetHeight = targetHeight;
 		} else {
 			const auto widthStart = appearing->startLineWidth;
 			const auto widthTarget = appearing->targetLineWidth;
@@ -5370,13 +5371,31 @@ void Message::textAppearStartHeightAnimation(
 	const auto from = appearing->shownHeight;
 	const auto to
 		= appearing->targetHeight
-		= appearing->lines[appearing->shownLine].bottom;
+		= textAppearTargetHeight(appearing);
 	const auto duration = appearing->finalizing
 		? kLineHeightAppearFinalDuration
 		: kLineHeightAppearDuration;
 	appearing->heightAnimation.start([=] {
 		textAppearHeightCallback();
 	}, from, to, duration, anim::easeOutCubic);
+}
+
+int Message::textAppearTargetHeight(
+		not_null<TextAppearing*> appearing) const {
+	const auto shown = appearing->shownLine;
+	const auto lines = int(appearing->lines.size());
+	if (shown + 1 >= lines) {
+		return appearing->lines.back().bottom;
+	}
+	const auto bottom = appearing->lines[shown].bottom;
+	const auto nextWidth = appearing->lines[shown + 1].width;
+	const auto available = std::max(
+		appearing->lines[shown].width,
+		appearing->shownWidth);
+	if (nextWidth + skipBlockWidth() <= available) {
+		return bottom;
+	}
+	return bottom + skipBlockHeight();
 }
 
 void Message::textAppearWidthCallback() {
