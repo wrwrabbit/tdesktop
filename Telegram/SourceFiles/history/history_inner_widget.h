@@ -12,7 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rp_widget.h"
 #include "ui/controls/swipe_handler_data.h"
 #include "ui/effects/animations.h"
-#include "ui/effects/thanos_effect.h"
+#include "ui/effects/thanos_effect_controller.h"
 #include "ui/dragging_scroll_manager.h"
 #include "ui/widgets/middle_click_autoscroll.h"
 #include "ui/widgets/tooltip.h"
@@ -118,13 +118,8 @@ public:
 
 	Ui::ChatPaintContext preparePaintContext(const QRect &clip) const;
 
-	struct CollapseGap {
-		int absY = -1;
-		int height = 0;
-
-		friend bool operator==(const CollapseGap&, const CollapseGap&) = default;
-	};
-	void setCollapseGaps(const std::vector<CollapseGap> &gaps);
+	using CollapseGap = Ui::CollapseGap;
+	void setCollapseGaps(std::vector<CollapseGap> gaps);
 
 	void messagesReceived(
 		not_null<PeerData*> peer,
@@ -618,17 +613,9 @@ private:
 	[[nodiscard]] HistoryView::ElementOverlayHost &ensureOverlayHost();
 	std::unique_ptr<HistoryView::ElementOverlayHost> _overlayHost;
 
-	void captureItemsForThanosEffect(
-		const std::vector<not_null<HistoryItem*>> &items);
-	void captureViewForThanosEffect(not_null<const Element*> view);
+	void setupThanosEffect();
 
-	std::unique_ptr<Ui::ThanosEffect> _thanosEffect;
-	struct PreCapturedView {
-		int height = 0;
-		int top = 0;
-	};
-	base::flat_map<not_null<const Element*>, PreCapturedView> _thanosPreCaptured;
-	bool _suppressCollapseAnimation = false;
+	std::unique_ptr<Ui::ThanosEffectController> _thanosController;
 	std::vector<CollapseGap> _collapseGaps;
 
 };

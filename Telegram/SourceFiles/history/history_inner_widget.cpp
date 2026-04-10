@@ -435,14 +435,7 @@ HistoryInner::HistoryInner(
 	) | rpl::on_next(
 		[this](auto item) { itemRemoved(item); },
 		lifetime());
-	session().data().itemsAboutToBeDestroyed(
-	) | rpl::on_next(
-		[this](const auto &items) { captureItemsForThanosEffect(items); },
-		lifetime());
-	session().data().viewAboutToBeRemoved(
-	) | rpl::on_next(
-		[this](auto view) { captureViewForThanosEffect(view); },
-		lifetime());
+	setupThanosEffect();
 	session().data().viewRemoved(
 	) | rpl::on_next(
 		[this](auto view) { viewRemoved(view); },
@@ -4105,9 +4098,9 @@ void HistoryInner::setItemsRevealHeight(int revealHeight) {
 	_revealHeight = revealHeight;
 }
 
-void HistoryInner::setCollapseGaps(const std::vector<CollapseGap> &gaps) {
+void HistoryInner::setCollapseGaps(std::vector<CollapseGap> gaps) {
 	if (_collapseGaps != gaps) {
-		_collapseGaps = gaps;
+		_collapseGaps = std::move(gaps);
 		updateSize();
 	}
 }
@@ -4203,126 +4196,43 @@ void HistoryInner::leaveEventHook(QEvent *e) {
 	return RpWidget::leaveEventHook(e);
 }
 
-void HistoryInner::captureItemsForThanosEffect(
-		const std::vector<not_null<HistoryItem*>> &items) {
-	if (!Ui::ThanosEffect::Supported()) {
-		return;
-	}
-	// Pre-capture all views while they are in their original visual
-	// state, before any item->destroy() changes neighbor views'
-	// attach/date flags via previousInBlocksChanged().
-	_suppressCollapseAnimation = true;
-	const auto guard = gsl::finally([&] {
-		_suppressCollapseAnimation = false;
-	});
-	for (const auto &item : items) {
-		if (const auto view = item->mainView()) {
-			const auto top = itemTop(view);
-			const auto height = view->height();
-			captureViewForThanosEffect(view);
-			_thanosPreCaptured.emplace(view, PreCapturedView{
-				.height = height,
-				.top = top,
-			});
-		}
-	}
-}
+void HistoryInner::setupThanosEffect() {
+	const auto history = _history;
+	const auto migrated = [=] { return _migrated; };
+	_thanosController = std::make_unique<Ui::ThanosEffectController>(
+		&session(),
+		Ui::ThanosEffectController::Delegate{
+			.viewForItem = [=](not_null<const HistoryItem*> item)
+					-> HistoryView::Element* {
+				if (item->history() != history
+					&& item->history() != migrated()) {
+					return nullptr;
+				}
+				return item->mainView();
+			},
+			.itemTop = [=](not_null<const HistoryView::Element*> view) {
+				return itemTop(view);
+			},
+			.visibleAreaTop = [=] { return _visibleAreaTop; },
+			.visibleAreaBottom = [=] { return _visibleAreaBottom; },
+			.contentWidth = [=] { return width(); },
+			.preparePaintContext = [=](QRect clip) {
+				return preparePaintContext(clip);
+			},
+			.window = [=]() -> QWidget* { return window(); },
+			.scrollArea = [=]() -> not_null<Ui::ScrollArea*> {
+				return _scroll;
+			},
+			.setCollapseGaps = [=](std::vector<CollapseGap> gaps) {
+				setCollapseGaps(std::move(gaps));
+			},
+		},
+		lifetime());
 
-void HistoryInner::captureViewForThanosEffect(
-		not_null<const Element*> view) {
-	if (!Ui::ThanosEffect::Supported()) {
-		return;
-	}
-	// Skip views that were already pre-captured in the batch signal.
-	// Use the saved height/top from before any destruction started.
-	if (const auto it = _thanosPreCaptured.find(view);
-		it != end(_thanosPreCaptured)) {
-		const auto saved = it->second;
-		_thanosPreCaptured.erase(it);
-		if (saved.top >= 0) {
-			_widget->startCollapseAnimation(saved.height, saved.top);
-		}
-		return;
-	}
-	const auto item = view->data();
-	if (item->history() != _history
-		&& item->history() != _migrated) {
-		return;
-	}
-	if (!item->isRegular() || item->isService()) {
-		return;
-	}
-	const auto top = itemTop(view);
-	if (top < 0) {
-		return;
-	}
-	const auto viewHeight = view->height();
-	const auto viewWidth = width();
-	if (viewWidth <= 0 || viewHeight <= 0) {
-		return;
-	}
-	const auto visibleHeight = _visibleAreaBottom - _visibleAreaTop;
-	const auto screenTop = top - _visibleAreaTop;
-	if (screenTop + viewHeight <= 0 || screenTop >= visibleHeight) {
-		return;
-	}
-	auto gapOffset = 0;
-	for (const auto &gap : _collapseGaps) {
-		if (gap.absY >= 0 && top >= gap.absY) {
-			gapOffset += gap.height;
-		}
-	}
-	const auto adjustedScreenTop = screenTop + gapOffset;
-	const auto captureTop = std::clamp(-adjustedScreenTop, 0, viewHeight);
-	const auto captureBottom = std::clamp(
-		visibleHeight - adjustedScreenTop,
-		0,
-		viewHeight);
-	if (captureTop >= captureBottom) {
-		return;
-	}
-	const auto captureHeight = captureBottom - captureTop;
-
-	const auto dpr = style::DevicePixelRatio();
-	auto image = QImage(
-		QSize(viewWidth, captureHeight) * dpr,
-		QImage::Format_RGBA8888_Premultiplied);
-	image.setDevicePixelRatio(dpr);
-	image.fill(Qt::transparent);
-	{
-		Painter p(&image);
-		p.translate(0, -captureTop);
-		auto clip = QRect(0, captureTop, viewWidth, captureHeight);
-		auto context = preparePaintContext(clip);
-		const auto renderedTop = top + gapOffset;
-		context.translate(0, -renderedTop);
-		context.clip = clip;
-		context.skipSelectionCheck = true;
-		context.outbg = view->hasOutLayout();
-		view->draw(p, context);
-	}
-
-	const auto topLevel = window();
-	if (!topLevel) {
-		return;
-	}
-
-	if (!_thanosEffect) {
-		_thanosEffect = std::make_unique<Ui::ThanosEffect>(topLevel);
-	}
-	_thanosEffect->setGeometry(QRect(QPoint(), topLevel->size()));
-	_thanosEffect->raise();
-
-	const auto globalPos = _scroll->mapTo(
-		topLevel,
-		QPoint(0, adjustedScreenTop + captureTop));
-	_thanosEffect->addItem(
-		std::move(image),
-		QRect(globalPos, QSize(viewWidth, captureHeight)));
-
-	if (!_suppressCollapseAnimation) {
-		_widget->startCollapseAnimation(viewHeight, top);
-	}
+	session().data().viewAboutToBeRemoved(
+	) | rpl::on_next([=](not_null<const HistoryView::Element*> view) {
+		_thanosController->captureOnRemoval(view->data());
+	}, lifetime());
 }
 
 HistoryInner::~HistoryInner() {

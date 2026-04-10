@@ -338,9 +338,6 @@ protected:
 	void mouseReleaseEvent(QMouseEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
 
-public:
-	void startCollapseAnimation(int height, int itemTop);
-
 private:
 	using TabbedPanel = ChatHelpers::TabbedPanel;
 	using TabbedSelector = ChatHelpers::TabbedSelector;
@@ -945,16 +942,6 @@ private:
 		ItemRevealAnimation> _itemRevealAnimations;
 	int _itemsRevealHeight = 0;
 
-	struct CollapseGapState {
-		int absY = -1;
-		int startHeight = 0;
-		int currentHeight = 0;
-		int originalHeight = 0;
-	};
-	std::vector<CollapseGapState> _collapseGaps;
-	Ui::Animations::Simple _collapseAnimation;
-	void collapseAnimationCallback();
-	void syncCollapseGapsToList();
 
 	bool _sponsoredMessagesStateKnown = false;
 	bool _justMarkingAsRead = false;
