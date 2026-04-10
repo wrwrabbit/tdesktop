@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_saved_messages.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "dialogs/dialogs_key.h"
 #include "dialogs/dialogs_search_from_controllers.h" // SearchFromBox
 #include "dialogs/dialogs_search_tags.h"
 #include "dialogs/ui/dialogs_layout.h"
@@ -867,6 +868,8 @@ public:
 	void setQuery(const QString &query);
 	void setTopMsgId(MsgId topMsgId);
 	void setSearchFilter(Api::SearchFilter filter);
+	void setCalendarChat(const Dialogs::Key &chat);
+	void setCalendarJumpHandler(Fn<void(FullMsgId, Fn<void()>)> jump);
 
 	[[nodiscard]] rpl::producer<Activation> activations() const;
 	[[nodiscard]] rpl::producer<> destroyRequests() const;
@@ -895,6 +898,8 @@ private:
 	MsgId _topMsgId;
 	Api::SearchFilter _searchFilter = Api::SearchFilter::NoFilter;
 	rpl::variable<bool> _filterAllowsFrom = true;
+	Dialogs::Key _calendarChat;
+	Fn<void(FullMsgId, Fn<void()>)> _calendarJump;
 
 	rpl::event_stream<Activation> _activations;
 	rpl::event_stream<> _destroyRequests;
@@ -918,7 +923,8 @@ ComposeSearch::Inner::Inner(
 		_topBar->keyEvents() | rpl::filter([](not_null<QKeyEvent*> e) {
 			return e->key() == Qt::Key_PageDown || e->key() == Qt::Key_PageUp;
 		})))
-, _apiSearch(history) {
+, _apiSearch(history)
+, _calendarChat(history) {
 	showAnimated();
 
 	rpl::combine(
@@ -1036,7 +1042,10 @@ ComposeSearch::Inner::Inner(
 	_bottomBar->showCalendarRequests(
 	) | rpl::on_next([=] {
 		hideList();
-		_window->showCalendar({ Dialogs::Key(_history) });
+		auto descriptor = Window::SessionController::ShowCalendarDescriptor();
+		descriptor.chat = _calendarChat;
+		descriptor.customJump = _calendarJump;
+		_window->showCalendar(std::move(descriptor));
 	}, _bottomBar->lifetime());
 
 	_bottomBar->showBoxFromRequests(
@@ -1099,6 +1108,15 @@ void ComposeSearch::Inner::setTopMsgId(MsgId topMsgId) {
 void ComposeSearch::Inner::setSearchFilter(Api::SearchFilter filter) {
 	_searchFilter = filter;
 	_filterAllowsFrom = (filter != Api::SearchFilter::Pinned);
+}
+
+void ComposeSearch::Inner::setCalendarChat(const Dialogs::Key &chat) {
+	_calendarChat = chat;
+}
+
+void ComposeSearch::Inner::setCalendarJumpHandler(
+		Fn<void(FullMsgId, Fn<void()>)> jump) {
+	_calendarJump = std::move(jump);
 }
 
 void ComposeSearch::Inner::showAnimated() {
@@ -1165,6 +1183,15 @@ void ComposeSearch::setTopMsgId(MsgId topMsgId) {
 
 void ComposeSearch::setSearchFilter(Api::SearchFilter filter) {
 	_inner->setSearchFilter(filter);
+}
+
+void ComposeSearch::setCalendarChat(const Dialogs::Key &chat) {
+	_inner->setCalendarChat(chat);
+}
+
+void ComposeSearch::setCalendarJumpHandler(
+		Fn<void(FullMsgId, Fn<void()>)> jump) {
+	_inner->setCalendarJumpHandler(std::move(jump));
 }
 
 rpl::producer<ComposeSearch::Activation> ComposeSearch::activations() const {

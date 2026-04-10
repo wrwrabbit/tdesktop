@@ -277,6 +277,39 @@ void PinnedWidget::searchInPinned() {
 		_history,
 		nullptr);
 	_composeSearch->setSearchFilter(Api::SearchFilter::Pinned);
+	_composeSearch->setCalendarChat(Dialogs::Key(_thread));
+	_composeSearch->setCalendarJumpHandler(crl::guard(this, [=](
+			FullMsgId id,
+			Fn<void()> close) {
+		const auto universalId = (id.peer == _history->peer->id)
+			? id.msg
+			: (id.msg - ServerMaxMsgId);
+		SharedMediaMergedViewer(
+			&_thread->session(),
+			SharedMediaMergedKey(
+				SparseIdsMergedSlice::Key(
+					_history->peer->id,
+					_thread->topicRootId(),
+					_thread->monoforumPeerId(),
+					_migratedPeer ? _migratedPeer->id : 0,
+					universalId),
+				Storage::SharedMediaType::Pinned),
+			1,
+			1
+		) | rpl::filter([=](const SparseIdsMergedSlice &slice) {
+			return (slice.size() > 0)
+				|| (slice.fullCount().value_or(-1) == 0);
+		}) | rpl::take(1) | rpl::on_next([=](
+				const SparseIdsMergedSlice &slice) {
+			if (const auto nearest = slice.nearest(universalId)) {
+				showAtPosition(Data::MessagePosition{
+					.fullId = *nearest,
+					.date = TimeId(0),
+				});
+			}
+			close();
+		}, lifetime());
+	}));
 	if (const auto topic = _thread->asTopic()) {
 		_composeSearch->setTopMsgId(topic->rootId());
 	}

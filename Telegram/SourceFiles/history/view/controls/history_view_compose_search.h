@@ -7,6 +7,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+namespace Dialogs {
+class Key;
+} // namespace Dialogs
+
 namespace Window {
 class SessionController;
 } // namespace Window
@@ -39,6 +43,8 @@ public:
 
 	void setTopMsgId(MsgId topMsgId);
 	void setSearchFilter(Api::SearchFilter filter);
+	void setCalendarChat(const Dialogs::Key &chat);
+	void setCalendarJumpHandler(Fn<void(FullMsgId, Fn<void()>)> jump);
 
 	struct Activation {
 		not_null<HistoryItem*> item;

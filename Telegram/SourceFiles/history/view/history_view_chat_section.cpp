@@ -3516,6 +3516,7 @@ bool ChatWidget::searchInChatEmbedded(
 		_history,
 		sublist->sublistPeer(),
 		query);
+	_composeSearch->setCalendarChat(Dialogs::Key(sublist));
 
 	updateControlsGeometry();
 	setInnerFocus();
