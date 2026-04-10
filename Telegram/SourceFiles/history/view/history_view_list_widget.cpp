@@ -4411,6 +4411,9 @@ void ListWidget::setupThanosEffect() {
 			.scrollArea = [=]() -> not_null<Ui::ScrollArea*> {
 				return scroll;
 			},
+			.scrollToY = [=](int y) {
+				scroll->scrollToY(y);
+			},
 			.setCollapseGaps = [=](std::vector<Ui::CollapseGap> gaps) {
 				setCollapseGaps(std::move(gaps));
 			},

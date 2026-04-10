@@ -338,6 +338,9 @@ protected:
 	void mouseReleaseEvent(QMouseEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
 
+public:
+	void synteticScrollToY(int y);
+
 private:
 	using TabbedPanel = ChatHelpers::TabbedPanel;
 	using TabbedSelector = ChatHelpers::TabbedSelector;
@@ -650,11 +653,6 @@ private:
 	std::optional<int> unreadBarTop() const;
 	int itemTopForHighlight(not_null<HistoryView::Element*> view) const;
 	void scrollToCurrentVoiceMessage(FullMsgId fromId, FullMsgId toId);
-
-	// Scroll to current y without updating the _lastUserScrolled time.
-	// Used to distinguish between user scrolls and syntetic scrolls.
-	// This one is syntetic.
-	void synteticScrollToY(int y);
 
 	void writeDrafts();
 	void writeDraftTexts();

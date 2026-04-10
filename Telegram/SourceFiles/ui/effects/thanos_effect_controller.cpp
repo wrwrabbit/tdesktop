@@ -229,7 +229,7 @@ void ThanosEffectController::startCollapseAnimation(
 	const auto aboveViewport = std::max(0, scrollTop - itemTop);
 	const auto scrollAdjust = std::min(height, aboveViewport);
 	if (scrollAdjust > 0) {
-		scroll->scrollToY(scrollTop + scrollAdjust);
+		_delegate.scrollToY(scrollTop + scrollAdjust);
 	}
 
 	auto totalHeight = 0;
@@ -266,7 +266,7 @@ void ThanosEffectController::collapseAnimationCallback() {
 		const auto scroll = _delegate.scrollArea();
 		const auto scrollTop = scroll->scrollTop();
 		syncCollapseGapsToHost();
-		scroll->scrollToY(std::max(scrollTop - totalDelta, 0));
+		_delegate.scrollToY(std::max(scrollTop - totalDelta, 0));
 	}
 
 	if (!_collapseAnimation.animating()) {

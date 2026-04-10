@@ -4249,6 +4249,9 @@ void HistoryInner::setupThanosEffect() {
 			.scrollArea = [=]() -> not_null<Ui::ScrollArea*> {
 				return _scroll;
 			},
+			.scrollToY = [=](int y) {
+				_widget->synteticScrollToY(y);
+			},
 			.setCollapseGaps = [=](std::vector<CollapseGap> gaps) {
 				setCollapseGaps(std::move(gaps));
 			},

@@ -46,6 +46,7 @@ public:
 		Fn<ChatPaintContext(QRect)> preparePaintContext;
 		Fn<QWidget*()> window;
 		Fn<not_null<ScrollArea*>()> scrollArea;
+		Fn<void(int scrollTop)> scrollToY;
 		Fn<void(std::vector<CollapseGap>)> setCollapseGaps;
 	};
 
