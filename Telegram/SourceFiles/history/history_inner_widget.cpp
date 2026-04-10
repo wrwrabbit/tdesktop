@@ -832,14 +832,6 @@ void HistoryInner::enumerateItemsInHistory(History *history, int historytop, Met
 	for (const auto &gap : _collapseGaps) {
 		collapseGapsTotal += gap.height;
 	}
-	const auto gapShiftAt = [&](int logicalY) {
-		auto shift = 0;
-		for (const auto &gap : _collapseGaps) {
-			if (logicalY < gap.absY) break;
-			shift += gap.height;
-		}
-		return shift;
-	};
 
 	auto searchEdge = TopToBottom
 		? (_visibleAreaTop - collapseGapsTotal)
@@ -854,12 +846,32 @@ void HistoryInner::enumerateItemsInHistory(History *history, int historytop, Met
 	auto blockbottom = blocktop + block->height();
 	auto itemIndex = BinarySearchBlocksOrItems<TopToBottom>(block->messages, searchEdge - blocktop);
 
+	const auto gapCount = int(_collapseGaps.size());
+	auto nextGapIndex = TopToBottom ? 0 : gapCount;
+	auto collapseShift = TopToBottom ? 0 : collapseGapsTotal;
+
 	while (true) {
 		while (true) {
 			auto view = block->messages[itemIndex].get();
 			auto logicalTop = blocktop + view->y();
-			auto shift = gapShiftAt(logicalTop);
-			auto itemtop = logicalTop + shift;
+
+			if (TopToBottom) {
+				while (nextGapIndex < gapCount) {
+					const auto &gap = _collapseGaps[nextGapIndex];
+					if (logicalTop < gap.absY) break;
+					collapseShift += gap.height;
+					++nextGapIndex;
+				}
+			} else {
+				while (nextGapIndex > 0) {
+					const auto &gap = _collapseGaps[nextGapIndex - 1];
+					if (logicalTop >= gap.absY) break;
+					collapseShift -= gap.height;
+					--nextGapIndex;
+				}
+			}
+
+			auto itemtop = logicalTop + collapseShift;
 			auto itembottom = itemtop + view->height();
 
 			if (TopToBottom) {

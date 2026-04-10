@@ -243,14 +243,6 @@ void ListWidget::enumerateItems(Method method) {
 	for (const auto &gap : _collapseGaps) {
 		collapseGapsTotal += gap.height;
 	}
-	const auto gapShiftAt = [&](int logicalY) {
-		auto shift = 0;
-		for (const auto &gap : _collapseGaps) {
-			if (logicalY < gap.absY) break;
-			shift += gap.height;
-		}
-		return shift;
-	};
 
 	const auto beginning = begin(_items);
 	const auto ending = end(_items);
@@ -274,10 +266,41 @@ void ListWidget::enumerateItems(Method method) {
 		--from;
 	}
 
+	const auto gapCount = int(_collapseGaps.size());
+	auto nextGapIndex = 0;
+	auto collapseShift = 0;
+	if (TopToBottom) {
+		const auto firstTop = itemTop(from->get());
+		for (; nextGapIndex < gapCount; ++nextGapIndex) {
+			if (firstTop < _collapseGaps[nextGapIndex].absY) break;
+			collapseShift += _collapseGaps[nextGapIndex].height;
+		}
+	} else {
+		collapseShift = collapseGapsTotal;
+		nextGapIndex = gapCount;
+	}
+
 	while (true) {
 		auto view = from->get();
 		auto logicalTop = itemTop(view);
-		auto itemtop = logicalTop + gapShiftAt(logicalTop);
+
+		if (TopToBottom) {
+			while (nextGapIndex < gapCount) {
+				const auto &gap = _collapseGaps[nextGapIndex];
+				if (logicalTop < gap.absY) break;
+				collapseShift += gap.height;
+				++nextGapIndex;
+			}
+		} else {
+			while (nextGapIndex > 0) {
+				const auto &gap = _collapseGaps[nextGapIndex - 1];
+				if (logicalTop >= gap.absY) break;
+				collapseShift -= gap.height;
+				--nextGapIndex;
+			}
+		}
+
+		auto itemtop = logicalTop + collapseShift;
 		auto itembottom = itemtop + view->height();
 
 		if (TopToBottom) {
