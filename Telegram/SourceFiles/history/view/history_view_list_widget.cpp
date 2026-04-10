@@ -273,15 +273,6 @@ void ListWidget::enumerateItems(Method method) {
 	if (wasEnd) {
 		--from;
 	}
-	if (TopToBottom) {
-		Assert(itemTop(from->get()) + from->get()->height()
-			+ collapseGapsTotal > _visibleTop);
-	} else {
-		if (itemTop(from->get()) >= _visibleBottom) {
-			setGeometryCrashAnnotations(*from);
-			Unexpected("itemTop(from->get()) >= _visibleBottom");
-		}
-	}
 
 	while (true) {
 		auto view = from->get();
@@ -289,13 +280,20 @@ void ListWidget::enumerateItems(Method method) {
 		auto itemtop = logicalTop + gapShiftAt(logicalTop);
 		auto itembottom = itemtop + view->height();
 
-		// Binary search should've skipped all the items that are above / below the visible area.
 		if (TopToBottom) {
-			Assert(itembottom > _visibleTop);
+			if (itembottom <= _visibleTop) {
+				if (++from == ending) {
+					break;
+				}
+				continue;
+			}
 		} else {
 			if (itemtop >= _visibleBottom) {
-				setGeometryCrashAnnotations(view);
-				Unexpected("itemtop >= _visibleBottom");
+				if (from == beginning) {
+					break;
+				}
+				--from;
+				continue;
 			}
 		}
 

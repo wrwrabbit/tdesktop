@@ -858,19 +858,25 @@ void HistoryInner::enumerateItemsInHistory(History *history, int historytop, Met
 		while (true) {
 			auto view = block->messages[itemIndex].get();
 			auto logicalTop = blocktop + view->y();
-			auto logicalBottom = logicalTop + view->height();
-
-			// Binary search should've skipped all the items that are above / below the visible area.
-			if (TopToBottom) {
-				Assert(logicalBottom + collapseGapsTotal
-					> _visibleAreaTop);
-			} else {
-				Assert(logicalTop < _visibleAreaBottom);
-			}
-
 			auto shift = gapShiftAt(logicalTop);
 			auto itemtop = logicalTop + shift;
 			auto itembottom = itemtop + view->height();
+
+			if (TopToBottom) {
+				if (itembottom <= _visibleAreaTop) {
+					if (++itemIndex >= block->messages.size()) {
+						break;
+					}
+					continue;
+				}
+			} else {
+				if (itemtop >= _visibleAreaBottom) {
+					if (--itemIndex < 0) {
+						break;
+					}
+					continue;
+				}
+			}
 
 			if (!method(view, itemtop, itembottom)) {
 				return;
