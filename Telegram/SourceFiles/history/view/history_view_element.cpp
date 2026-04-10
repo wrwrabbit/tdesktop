@@ -1633,10 +1633,16 @@ OnlyEmojiAndSpaces Element::isOnlyEmojiAndSpaces() const {
 }
 
 int Element::textHeightFor(int textWidth) const {
+	constexpr auto kMaxWidth = (1 << 16) - 1;
+	if (textWidth <= 0 || textWidth > kMaxWidth) {
+		return 0;
+	}
 	const_cast<Element*>(this)->validateText();
 	if (_textWidth != textWidth) {
 		_textWidth = textWidth;
-		_textHeight = _text.countHeight(textWidth);
+		const auto result = _text.countSize(textWidth);
+		_textRealWidth = std::clamp(result.width(), 0, kMaxWidth);
+		_textHeight = result.height();
 	}
 	return _textHeight;
 }
@@ -2565,6 +2571,7 @@ void Element::blockquoteExpandChanged() {
 void Element::invalidateTextSizeCache() {
 	_textWidth = -1;
 	_textHeight = 0;
+	_textRealWidth = 0;
 	invalidateTextDependentCache();
 }
 

@@ -2230,7 +2230,7 @@ void Message::paintText(
 		}
 		const auto shownHeight = line.bottom - previousLineBottom;
 		const auto clipLeft = line.rtl
-			? (trect.x() + trect.width() - appearing->revealedLineWidth)
+			? (trect.x() + textRealWidth() - appearing->revealedLineWidth)
 			: trect.x();
 		clipPath.addRect(
 			clipLeft,
@@ -2240,10 +2240,11 @@ void Message::paintText(
 		p.setClipPath(clipPath);
 	}
 
+	const auto realWidth = textRealWidth();
 	auto highlightRequest = context.computeHighlightCache();
 	text().draw(p, {
 		.position = trect.topLeft(),
-		.availableWidth = appearing ? appearing->textWidth : trect.width(),
+		.availableWidth = realWidth ? realWidth : trect.width(),
 		.palette = &stm->textPalette,
 		.pre = stm->preCache.get(),
 		.blockquote = context.quoteCache(
@@ -4933,16 +4934,17 @@ QRect Message::countGeometry() const {
 		} else {
 			contentWidth = mediaWidth;
 		}
-	}
-	if (const auto appearing = Get<TextAppearing>()
-		; appearing && appearing->use) {
-		const auto animatedWidth = st::msgPadding.left()
-			+ appearing->shownWidth
-			+ st::msgPadding.right();
-		const auto minWidth = _bottomInfo.optimalSize().width()
-			+ st::msgPadding.left()
-			+ st::msgPadding.right();
-		accumulate_min(contentWidth, std::max(animatedWidth, minWidth));
+	} else {
+		const auto appearing = Get<TextAppearing>();
+		const auto use = (appearing && appearing->use)
+			? appearing->shownWidth
+			: textRealWidth();
+		if (use > 0) {
+			const auto min = std::max(use, _bottomInfo.width())
+				+ st::msgPadding.left()
+				+ st::msgPadding.right();
+			accumulate_min(contentWidth, min);
+		}
 	}
 	if (contentWidth < availableWidth
 		&& delegate()->elementChatMode() != ElementChatMode::Wide) {
@@ -5292,7 +5294,7 @@ bool Message::textAppearCheckLine(not_null<TextAppearing*> appearing) {
 			appearing->shownLine = lines - 1;
 			const auto &line = appearing->lines.back();
 			appearing->revealedLineWidth = line.width;
-			appearing->shownWidth = appearing->textWidth;
+			appearing->shownWidth = textRealWidth();
 			appearing->shownHeight = line.bottom;
 			appearing->widthAnimation.stop();
 			appearing->heightAnimation.stop();
@@ -5387,7 +5389,7 @@ void Message::textAppearWidthCallback() {
 		if (appearing->lines[appearing->shownLine].rtl) {
 			appearing->shownWidth = std::max(
 				appearing->shownWidth,
-				appearing->textWidth);
+				textRealWidth());
 		}
 		repaint();
 	}
