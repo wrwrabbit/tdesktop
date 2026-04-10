@@ -239,13 +239,26 @@ void ListWidget::enumerateItems(Method method) {
 		return;
 	}
 
+	auto collapseGapsTotal = 0;
+	for (const auto &gap : _collapseGaps) {
+		collapseGapsTotal += gap.height;
+	}
+	const auto gapShiftAt = [&](int logicalY) {
+		auto shift = 0;
+		for (const auto &gap : _collapseGaps) {
+			if (logicalY < gap.absY) break;
+			shift += gap.height;
+		}
+		return shift;
+	};
+
 	const auto beginning = begin(_items);
 	const auto ending = end(_items);
 	auto from = TopToBottom
 		? std::lower_bound(
 			beginning,
 			ending,
-			_visibleTop,
+			_visibleTop - collapseGapsTotal,
 			[this](auto &elem, int top) {
 				return this->itemTop(elem) + elem->height() <= top;
 			})
@@ -261,7 +274,8 @@ void ListWidget::enumerateItems(Method method) {
 		--from;
 	}
 	if (TopToBottom) {
-		Assert(itemTop(from->get()) + from->get()->height() > _visibleTop);
+		Assert(itemTop(from->get()) + from->get()->height()
+			+ collapseGapsTotal > _visibleTop);
 	} else {
 		if (itemTop(from->get()) >= _visibleBottom) {
 			setGeometryCrashAnnotations(*from);
@@ -271,7 +285,8 @@ void ListWidget::enumerateItems(Method method) {
 
 	while (true) {
 		auto view = from->get();
-		auto itemtop = itemTop(view);
+		auto logicalTop = itemTop(view);
+		auto itemtop = logicalTop + gapShiftAt(logicalTop);
 		auto itembottom = itemtop + view->height();
 
 		// Binary search should've skipped all the items that are above / below the visible area.

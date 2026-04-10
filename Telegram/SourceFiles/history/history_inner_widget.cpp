@@ -828,7 +828,22 @@ void HistoryInner::enumerateItemsInHistory(History *history, int historytop, Met
 		return;
 	}
 
-	auto searchEdge = TopToBottom ? _visibleAreaTop : _visibleAreaBottom;
+	auto collapseGapsTotal = 0;
+	for (const auto &gap : _collapseGaps) {
+		collapseGapsTotal += gap.height;
+	}
+	const auto gapShiftAt = [&](int logicalY) {
+		auto shift = 0;
+		for (const auto &gap : _collapseGaps) {
+			if (logicalY < gap.absY) break;
+			shift += gap.height;
+		}
+		return shift;
+	};
+
+	auto searchEdge = TopToBottom
+		? (_visibleAreaTop - collapseGapsTotal)
+		: _visibleAreaBottom;
 
 	// Binary search for blockIndex of the first block that is not completely below the visible area.
 	auto blockIndex = BinarySearchBlocksOrItems<TopToBottom>(history->blocks, searchEdge - historytop);
@@ -842,15 +857,20 @@ void HistoryInner::enumerateItemsInHistory(History *history, int historytop, Met
 	while (true) {
 		while (true) {
 			auto view = block->messages[itemIndex].get();
-			auto itemtop = blocktop + view->y();
-			auto itembottom = itemtop + view->height();
+			auto logicalTop = blocktop + view->y();
+			auto logicalBottom = logicalTop + view->height();
 
 			// Binary search should've skipped all the items that are above / below the visible area.
 			if (TopToBottom) {
-				Assert(itembottom > _visibleAreaTop);
+				Assert(logicalBottom + collapseGapsTotal
+					> _visibleAreaTop);
 			} else {
-				Assert(itemtop < _visibleAreaBottom);
+				Assert(logicalTop < _visibleAreaBottom);
 			}
+
+			auto shift = gapShiftAt(logicalTop);
+			auto itemtop = logicalTop + shift;
+			auto itembottom = itemtop + view->height();
 
 			if (!method(view, itemtop, itembottom)) {
 				return;
