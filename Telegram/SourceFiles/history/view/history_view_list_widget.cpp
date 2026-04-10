@@ -2207,9 +2207,14 @@ void ListWidget::revealItemsCallback() {
 		_itemsTop = (_minHeight > _itemsHeight + st::historyPaddingBottom)
 			? (_minHeight - _itemsHeight - st::historyPaddingBottom)
 			: 0;
+		auto collapseGapTotal = 0;
+		for (const auto &gap : _collapseGaps) {
+			collapseGapTotal += gap.height;
+		}
 		const auto wasHeight = height();
 		const auto nowHeight = _itemsTop
 			+ _itemsHeight
+			+ collapseGapTotal
 			+ st::historyPaddingBottom;
 		if (wasHeight != nowHeight) {
 			resize(width(), nowHeight);
@@ -2245,13 +2250,20 @@ int ListWidget::resizeGetHeight(int newWidth) {
 	startItemRevealAnimations();
 	_itemsWidth = newWidth;
 	_itemsHeight = newHeight - _itemsRevealHeight;
+	auto collapseGapTotal = 0;
+	for (const auto &gap : _collapseGaps) {
+		collapseGapTotal += gap.height;
+	}
 	_itemsTop = (_minHeight > _itemsHeight + st::historyPaddingBottom)
 		? (_minHeight - _itemsHeight - st::historyPaddingBottom)
 		: 0;
 	if (_emptyInfo) {
 		_emptyInfo->setVisible(isEmpty());
 	}
-	return _itemsTop + _itemsHeight + st::historyPaddingBottom;
+	return _itemsTop
+		+ _itemsHeight
+		+ collapseGapTotal
+		+ st::historyPaddingBottom;
 }
 
 void ListWidget::restoreScrollPosition() {
@@ -2407,7 +2419,12 @@ void ListWidget::paintEvent(QPaintEvent *e) {
 
 	auto clip = e->rect();
 
-	auto from = std::lower_bound(begin(_items), end(_items), clip.top(), [this](auto &elem, int top) {
+	auto collapseGapsTotal = 0;
+	for (const auto &gap : _collapseGaps) {
+		collapseGapsTotal += gap.height;
+	}
+
+	auto from = std::lower_bound(begin(_items), end(_items), clip.top() - collapseGapsTotal, [this](auto &elem, int top) {
 		return this->itemTop(elem) + elem->height() <= top;
 	});
 	auto to = std::lower_bound(begin(_items), end(_items), clip.top() + clip.height(), [this](auto &elem, int bottom) {
@@ -2426,10 +2443,30 @@ void ListWidget::paintEvent(QPaintEvent *e) {
 
 	const auto session = &this->session();
 	auto top = itemTop(from->get());
+
+	auto nextGapIndex = 0;
+	auto collapseShift = 0;
+	for (; nextGapIndex < int(_collapseGaps.size()); ++nextGapIndex) {
+		const auto &gap = _collapseGaps[nextGapIndex];
+		if (top < gap.absY) break;
+		collapseShift += gap.height;
+	}
+	top += collapseShift;
+
 	context = context.translated(0, -top);
 	p.translate(0, top);
 	const auto sendingAnimation = _delegate->listSendingAnimation();
 	for (auto i = from; i != to; ++i) {
+		while (nextGapIndex < int(_collapseGaps.size())) {
+			const auto &gap = _collapseGaps[nextGapIndex];
+			if (top - collapseShift < gap.absY) break;
+			top += gap.height;
+			collapseShift += gap.height;
+			context.translate(0, -gap.height);
+			p.translate(0, gap.height);
+			++nextGapIndex;
+		}
+
 		const auto view = *i;
 		const auto item = view->data();
 		const auto height = view->height();
@@ -4303,6 +4340,25 @@ void ListWidget::performDrag() {
 
 int ListWidget::itemTop(not_null<const Element*> view) const {
 	return _itemsTop + view->y();
+}
+
+void ListWidget::setCollapseGaps(std::vector<Ui::CollapseGap> gaps) {
+	if (_collapseGaps == gaps) {
+		return;
+	}
+	_collapseGaps = std::move(gaps);
+	auto gapTotal = 0;
+	for (const auto &gap : _collapseGaps) {
+		gapTotal += gap.height;
+	}
+	const auto nowHeight = _itemsTop
+		+ _itemsHeight
+		+ gapTotal
+		+ st::historyPaddingBottom;
+	if (height() != nowHeight) {
+		resize(width(), nowHeight);
+	}
+	update();
 }
 
 void ListWidget::repaintItem(const Element *view) {
