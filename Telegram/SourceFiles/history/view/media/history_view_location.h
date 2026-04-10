@@ -56,7 +56,7 @@ public:
 
 	bool needsBubble() const override;
 	bool customInfoLayout() const override {
-		return _title.isEmpty() && _description.isEmpty();
+		return _live || (_title.isEmpty() && _description.isEmpty());
 	}
 	QPoint resolveCustomInfoRightBottom() const override;
 

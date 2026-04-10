@@ -161,6 +161,8 @@ void Location::checkLiveFinish() {
 	const auto start = item->date();
 	if (_live->period != kUntilOffPeriod && now - start >= _live->period) {
 		const auto had = hasHeavyPart();
+		_title.clear();
+		_description.clear();
 		_live = nullptr;
 		if (had && !hasHeavyPart()) {
 			_parent->checkHeavyPart();
