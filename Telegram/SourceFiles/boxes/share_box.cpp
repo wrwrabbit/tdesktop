@@ -2026,7 +2026,7 @@ void FastShareMessageToSelf(
 		std::shared_ptr<Main::SessionShow> show,
 		not_null<HistoryItem*> item) {
 	const auto self = show->session().user();
-	const auto &owner = self->owner();
+	auto &owner = self->owner();
 	const auto items = owner.idsToItems(owner.itemOrItsGroup(item));
 	const auto donePhraseArgs = ChatHelpers::ForwardedMessagePhraseArgs{
 		.toCount = 1,
