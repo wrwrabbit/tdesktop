@@ -866,6 +866,7 @@ public:
 	void setInnerFocus();
 	void setQuery(const QString &query);
 	void setTopMsgId(MsgId topMsgId);
+	void setSearchFilter(Api::SearchFilter filter);
 
 	[[nodiscard]] rpl::producer<Activation> activations() const;
 	[[nodiscard]] rpl::producer<> destroyRequests() const;
@@ -892,6 +893,8 @@ private:
 	} _pendingJump;
 
 	MsgId _topMsgId;
+	Api::SearchFilter _searchFilter = Api::SearchFilter::NoFilter;
+	rpl::variable<bool> _filterAllowsFrom = true;
 
 	rpl::event_stream<Activation> _activations;
 	rpl::event_stream<> _destroyRequests;
@@ -942,6 +945,7 @@ ComposeSearch::Inner::Inner(
 			}
 		}
 		search.topMsgId = _topMsgId;
+		search.filter = _searchFilter;
 		_apiSearch.clear();
 
 		_list.controller->addItems({}, true);
@@ -1063,9 +1067,11 @@ ComposeSearch::Inner::Inner(
 		return !from;
 	}));
 
-	_bottomBar->buttonFromToggleOn(_topBar->fromValue(
-	) | rpl::map([=](PeerData *from) {
-		return HasChooseFrom(_history) && !from;
+	_bottomBar->buttonFromToggleOn(rpl::combine(
+		_topBar->fromValue(),
+		_filterAllowsFrom.value()
+	) | rpl::map([=](PeerData *from, bool allowed) {
+		return allowed && HasChooseFrom(_history) && !from;
 	}));
 
 	if (!query.isEmpty()) {
@@ -1088,6 +1094,11 @@ void ComposeSearch::Inner::setTopMsgId(MsgId topMsgId) {
 		_apiSearch.disableMigrated();
 	}
 	_topMsgId = topMsgId;
+}
+
+void ComposeSearch::Inner::setSearchFilter(Api::SearchFilter filter) {
+	_searchFilter = filter;
+	_filterAllowsFrom = (filter != Api::SearchFilter::Pinned);
 }
 
 void ComposeSearch::Inner::showAnimated() {
@@ -1150,6 +1161,10 @@ void ComposeSearch::setQuery(const QString &query) {
 
 void ComposeSearch::setTopMsgId(MsgId topMsgId) {
 	_inner->setTopMsgId(topMsgId);
+}
+
+void ComposeSearch::setSearchFilter(Api::SearchFilter filter) {
+	_inner->setSearchFilter(filter);
 }
 
 rpl::producer<ComposeSearch::Activation> ComposeSearch::activations() const {

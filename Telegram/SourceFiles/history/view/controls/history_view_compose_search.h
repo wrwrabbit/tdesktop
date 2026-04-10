@@ -11,6 +11,10 @@ namespace Window {
 class SessionController;
 } // namespace Window
 
+namespace Api {
+enum class SearchFilter;
+} // namespace Api
+
 namespace Ui {
 class RpWidget;
 } // namespace Ui
@@ -34,6 +38,7 @@ public:
 	void setQuery(const QString &query);
 
 	void setTopMsgId(MsgId topMsgId);
+	void setSearchFilter(Api::SearchFilter filter);
 
 	struct Activation {
 		not_null<HistoryItem*> item;
