@@ -343,7 +343,8 @@ void ThanosEffectRenderer::render(
 			}
 			RenderUniforms uni;
 			uni.rect[0] = float(item.rect.x()) / viewW;
-			uni.rect[1] = float(item.rect.y()) / viewH;
+			uni.rect[1] = (viewH - float(item.rect.y())
+				- float(item.rect.height())) / viewH;
 			uni.rect[2] = float(item.rect.width()) / viewW;
 			uni.rect[3] = float(item.rect.height()) / viewH;
 			uni.size[0] = float(item.rect.width());
