@@ -68,7 +68,9 @@ constexpr auto kPlayStatusLimit = 2;
 constexpr auto kMaxNiceToReadLines = 6;
 const auto kPsaTooltipPrefix = "cloud_lng_tooltip_psa_";
 constexpr auto kFullLineAppearDuration = crl::time(300);
+constexpr auto kFullLineAppearFinalDuration = crl::time(120);
 constexpr auto kLineHeightAppearDuration = crl::time(100);
+constexpr auto kLineHeightAppearFinalDuration = crl::time(60);
 
 struct SecondRightAction {
 	std::unique_ptr<Ui::RippleAnimation> ripple;
@@ -898,6 +900,7 @@ QSize Message::performCountOptimalSize() {
 	}
 	if (const auto appearing = Get<TextAppearing>()) {
 		appearing->geometryValid = false;
+		appearing->finalizing = item->isRegular();
 	}
 	return QSize(maxWidth, minHeight);
 }
@@ -5318,9 +5321,12 @@ bool Message::textAppearCheckLine(not_null<TextAppearing*> appearing) {
 				? 1.
 				: (widthTarget - width) / float64(widthTarget - widthStart);
 			const auto left = (1. - progress) * appearing->widthDuration;
+			const auto duration = appearing->finalizing
+				? kLineHeightAppearFinalDuration
+				: kLineHeightAppearDuration;
 			if (appearing->heightAnimation.animating()
 				|| !appearing->widthAnimation.animating()
-				|| left <= kLineHeightAppearDuration) {
+				|| left <= duration) {
 				textAppearStartHeightAnimation(appearing);
 			}
 		}
@@ -5335,10 +5341,13 @@ void Message::textAppearStartWidthAnimation(
 	const auto shown = appearing->shownLine;
 	const auto lines = int(appearing->lines.size());
 	const auto lineWidth = appearing->lines[shown].width;
+	const auto lineDuration = appearing->finalizing
+		? kFullLineAppearFinalDuration
+		: kFullLineAppearDuration;
 	const auto duration = (shown + 1 == lines)
-		? kFullLineAppearDuration
+		? lineDuration
 		: std::max(
-			kFullLineAppearDuration * lineWidth / st::msgMaxWidth,
+			lineDuration * lineWidth / st::msgMaxWidth,
 			crl::time(10));
 	appearing->widthDuration = duration;
 	const auto from
@@ -5360,9 +5369,12 @@ void Message::textAppearStartHeightAnimation(
 	const auto to
 		= appearing->targetHeight
 		= appearing->lines[appearing->shownLine].bottom;
+	const auto duration = appearing->finalizing
+		? kLineHeightAppearFinalDuration
+		: kLineHeightAppearDuration;
 	appearing->heightAnimation.start([=] {
 		textAppearHeightCallback();
-	}, from, to, kLineHeightAppearDuration, anim::easeOutCubic);
+	}, from, to, duration, anim::easeOutCubic);
 }
 
 void Message::textAppearWidthCallback() {

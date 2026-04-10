@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_streamed_drafts.h"
 
 #include "api/api_text_entities.h"
+#include "chat_helpers/stickers_lottie.h"
+#include "data/stickers/data_custom_emoji.h"
 #include "data/data_forum_topic.h"
 #include "data/data_peer_id.h"
 #include "data/data_saved_sublist.h"
@@ -42,6 +44,17 @@ HistoryStreamedDrafts::~HistoryStreamedDrafts() {
 	}
 }
 
+TextWithEntities HistoryStreamedDrafts::loadingEmoji() {
+	if (_loadingEmoji.empty()) {
+		_loadingEmoji = Data::SingleCustomEmoji(
+			ChatHelpers::GenerateLocalTgsSticker(
+				&_history->session(),
+				u"transcribe_loading"_q,
+				true));
+	}
+	return _loadingEmoji;
+}
+
 void HistoryStreamedDrafts::apply(
 		MsgId rootId,
 		PeerId fromId,
@@ -58,8 +71,10 @@ void HistoryStreamedDrafts::apply(
 		clearByRandomId(randomId);
 		return;
 	}
-	const auto session = &_history->session();
-	const auto text = Api::ParseTextWithEntities(session, data.vtext());
+	const auto text = Api::ParseTextWithEntities(
+		&_history->session(),
+		data.vtext()
+	).append(loadingEmoji());
 	if (update(randomId, text)) {
 		return;
 	}

@@ -44,11 +44,15 @@ private:
 	void check();
 	void scheduleDestroy();
 
+	[[nodiscard]] TextWithEntities loadingEmoji();
+
 	const not_null<History*> _history;
 	base::flat_map<uint64, Draft> _drafts;
 
 	base::Timer _checkTimer;
 
 	rpl::event_stream<> _destroyRequests;
+
+	TextWithEntities _loadingEmoji;
 
 };
