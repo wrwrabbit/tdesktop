@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/scene/scene_item_line.h"
 #include "editor/scene/scene_item_sticker.h"
 #include "editor/scene/scene_item_text.h"
+#include "ui/emoji_config.h"
 #include "ui/image/image_prepare.h"
 #include "ui/rp_widget.h"
 #include "styles/style_editor.h"
@@ -18,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QGraphicsSceneContextMenuEvent>
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsTextItem>
+#include <QGraphicsView>
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTimer>
@@ -505,16 +507,23 @@ void Scene::createTextAtCenter() {
 	proxy->setTextInteractionFlags(Qt::TextEditorInteraction);
 	proxy->setDefaultTextColor(_textColor);
 
+	auto *emojiDoc = new EmojiDocument(proxy);
+	proxy->setDocument(emojiDoc);
+
 	auto font = QFont();
 	font.setPixelSize(int(_textFontSize));
 	font.setWeight(QFont::DemiBold);
 	proxy->setFont(font);
 
 	{
-		auto option = proxy->document()->defaultTextOption();
+		auto option = emojiDoc->defaultTextOption();
 		option.setAlignment(Qt::AlignCenter);
-		proxy->document()->setDefaultTextOption(option);
+		emojiDoc->setDefaultTextOption(option);
 	}
+
+	QObject::connect(emojiDoc, &QTextDocument::contentsChanged, [emojiDoc] {
+		ReplaceEmoji(emojiDoc);
+	});
 
 	const auto shortSide = std::min(
 		sceneRect().width(),
@@ -528,6 +537,9 @@ void Scene::createTextAtCenter() {
 	QGraphicsScene::addItem(proxy);
 	proxy->setZValue((*_lastZ)++);
 	proxy->setFocus();
+	if (!views().isEmpty()) {
+		views().first()->setFocus();
+	}
 
 	proxy->onFinish = crl::guard(this, [=] {
 		finishTextEditing(true);
@@ -553,18 +565,26 @@ void Scene::startTextEditing(ItemText *item) {
 	proxy->setTextInteractionFlags(Qt::TextEditorInteraction);
 	proxy->setDefaultTextColor(item->color());
 
+	auto *emojiDoc = new EmojiDocument(proxy);
+	proxy->setDocument(emojiDoc);
+
 	auto font = QFont();
 	font.setPixelSize(int(item->fontSize()));
 	font.setWeight(QFont::DemiBold);
 	proxy->setFont(font);
 
 	{
-		auto option = proxy->document()->defaultTextOption();
+		auto option = emojiDoc->defaultTextOption();
 		option.setAlignment(Qt::AlignCenter);
-		proxy->document()->setDefaultTextOption(option);
+		emojiDoc->setDefaultTextOption(option);
 	}
 
 	proxy->setPlainText(item->text());
+	ReplaceEmoji(emojiDoc);
+
+	QObject::connect(emojiDoc, &QTextDocument::contentsChanged, [emojiDoc] {
+		ReplaceEmoji(emojiDoc);
+	});
 
 	const auto shortSide = std::min(
 		sceneRect().width(),
@@ -609,7 +629,7 @@ void Scene::finishTextEditing(bool save) {
 	}
 
 	const auto text = save
-		? _textEdit.proxy->toPlainText().trimmed()
+		? RecoverTextFromDocument(_textEdit.proxy->document()).trimmed()
 		: QString();
 	const auto proxyRect = _textEdit.proxy->boundingRect();
 	const auto proxyCenter = _textEdit.proxy->pos()

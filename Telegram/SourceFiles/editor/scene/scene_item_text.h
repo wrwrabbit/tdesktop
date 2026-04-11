@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unique_qptr.h"
 #include "editor/scene/scene_item_base.h"
 
+#include <QTextDocument>
+
 namespace Ui {
 class PopupMenu;
 } // namespace Ui
@@ -21,6 +23,18 @@ enum class TextStyle : uchar {
 	SemiTransparent,
 	Plain,
 };
+
+class EmojiDocument final : public QTextDocument {
+public:
+	explicit EmojiDocument(QObject *parent = nullptr);
+	QVariant loadResource(int type, const QUrl &name) override;
+
+private:
+	std::map<QUrl, QVariant> _cache;
+};
+
+void ReplaceEmoji(QTextDocument *doc);
+[[nodiscard]] QString RecoverTextFromDocument(QTextDocument *doc);
 
 class ItemText : public ItemBase {
 public:
