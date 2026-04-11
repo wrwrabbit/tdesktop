@@ -65,6 +65,7 @@ namespace {
 
 constexpr auto kSummarizeThreshold = 512;
 constexpr auto kPlayStatusLimit = 2;
+constexpr auto kMaxWidth = (1 << 16) - 1;
 constexpr auto kMaxNiceToReadLines = 6;
 const auto kPsaTooltipPrefix = "cloud_lng_tooltip_psa_";
 constexpr auto kFullLineAppearDuration = crl::time(300);
@@ -811,17 +812,21 @@ QSize Message::performCountOptimalSize() {
 		auto mediaOnBottom = (mediaDisplayed && media->isBubbleBottom()) || check || (entry/* && entry->isBubbleBottom()*/);
 		auto mediaOnTop = (mediaDisplayed && media->isBubbleTop()) || (entry && entry->isBubbleTop());
 		maxWidth = textualWidth;
+		auto nonTextMax = 0;
 		if (isCommentsRootView()) {
 			maxWidth = std::max(maxWidth, st::msgMaxWidth);
+			accumulate_max(nonTextMax, st::msgMaxWidth);
 		}
 		minHeight = withVisibleText ? text().minHeight() : 0;
 		if (reactionsInBubble) {
 			const auto reactionsMaxWidth = st::msgPadding.left()
 				+ _reactions->maxWidth()
 				+ st::msgPadding.right();
-			accumulate_max(
-				maxWidth,
-				std::min(st::msgMaxWidth, reactionsMaxWidth));
+			const auto reactionsLimited = std::min(
+				st::msgMaxWidth,
+				reactionsMaxWidth);
+			accumulate_max(maxWidth, reactionsLimited);
+			accumulate_max(nonTextMax, reactionsLimited);
 			if (mediaDisplayed
 				&& !media->additionalInfoString().isEmpty()) {
 				// In round videos in a web page status text is painted
@@ -890,17 +895,20 @@ QSize Message::performCountOptimalSize() {
 					namew += st::msgPadding.right() + rightBadgeWidth();
 				}
 				accumulate_max(maxWidth, namew);
+				accumulate_max(nonTextMax, namew);
 			} else if (via && !displayForwardedFrom()) {
-				accumulate_max(maxWidth, st::msgPadding.left() + via->maxWidth + st::msgPadding.right());
+				const auto viaw = st::msgPadding.left() + via->maxWidth + st::msgPadding.right();
+				accumulate_max(maxWidth, viaw);
+				accumulate_max(nonTextMax, viaw);
 			}
 			if (displayedTopicButton()) {
 				const auto padding = st::msgPadding + st::topicButtonPadding;
-				accumulate_max(
-					maxWidth,
-					(padding.left()
-						+ _topicButton->name.maxWidth()
-						+ st::topicButtonArrowSkip
-						+ padding.right()));
+				const auto topicw = padding.left()
+					+ _topicButton->name.maxWidth()
+					+ st::topicButtonArrowSkip
+					+ padding.right();
+				accumulate_max(maxWidth, topicw);
+				accumulate_max(nonTextMax, topicw);
 			}
 			if (displayForwardedFrom()) {
 				const auto skip1 = forwarded->psaType.isEmpty()
@@ -911,33 +919,41 @@ QSize Message::performCountOptimalSize() {
 					namew += st::msgServiceFont->spacew + via->maxWidth;
 				}
 				accumulate_max(maxWidth, namew);
+				accumulate_max(nonTextMax, namew);
 			}
 			if (reply) {
 				const auto replyw = st::msgPadding.left()
 					+ reply->maxWidth()
 					+ st::msgPadding.right();
 				accumulate_max(maxWidth, replyw);
+				accumulate_max(nonTextMax, replyw);
 			}
 			if (summaryHeader) {
 				const auto summaryHeaderWidth = st::msgPadding.left()
 					+ summaryHeader->maxWidth()
 					+ st::msgPadding.right();
 				accumulate_max(maxWidth, summaryHeaderWidth);
+				accumulate_max(nonTextMax, summaryHeaderWidth);
 			}
 			if (check) {
 				accumulate_max(maxWidth, check->maxWidth());
+				accumulate_max(nonTextMax, check->maxWidth());
 				minHeight += check->minHeight();
 			}
 			if (entry) {
 				accumulate_max(maxWidth, entry->maxWidth());
+				accumulate_max(nonTextMax, entry->maxWidth());
 				minHeight += entry->minHeight();
 			}
 		}
 		if (withVisibleText && botTop) {
 			accumulate_max(maxWidth, botTop->maxWidth);
+			accumulate_max(nonTextMax, botTop->maxWidth);
 			minHeight += botTop->height;
 		}
 		accumulate_max(maxWidth, minWidthForMedia());
+		accumulate_max(nonTextMax, minWidthForMedia());
+		_nonTextMaxWidth = std::min(nonTextMax, kMaxWidth);
 	} else if (media) {
 		media->initDimensions();
 		maxWidth = media->maxWidth();
@@ -950,6 +966,12 @@ QSize Message::performCountOptimalSize() {
 	// but if we have only media we don't do that
 	if (markup && markup->inlineKeyboard && hasVisibleText()) {
 		accumulate_max(maxWidth, markup->inlineKeyboard->naturalWidth());
+		if (bubble) {
+			const auto kbw = markup->inlineKeyboard->naturalWidth();
+			if (kbw > int(_nonTextMaxWidth)) {
+				_nonTextMaxWidth = std::min(kbw, kMaxWidth);
+			}
+		}
 	}
 	if (bubble && withVisibleText && maxWidth < fullTextualWidth) {
 		minHeight -= text().minHeight();
@@ -4998,10 +5020,10 @@ QRect Message::countGeometry() const {
 			? appearing->shownWidth
 			: textRealWidth();
 		if (use > 0) {
-			const auto min = std::max(use, _bottomInfo.width())
-				+ st::msgPadding.left()
-				+ st::msgPadding.right();
-			accumulate_min(contentWidth, min);
+			const auto shrunk = std::max(
+				use + st::msgPadding.left() + st::msgPadding.right(),
+				int(_nonTextMaxWidth));
+			accumulate_min(contentWidth, shrunk);
 		}
 	}
 	if (contentWidth < availableWidth
@@ -5079,7 +5101,7 @@ int Message::resizeContentGetHeight(int newWidth) {
 	const auto postShowingAuthor = item->isPostShowingAuthor() ? 1 : 0;
 	if (_postShowingAuthor != postShowingAuthor) {
 		_postShowingAuthor = postShowingAuthor;
-		_fromNameVersion = -1;
+		_fromNameVersion = 0;
 		previousInBlocksChanged();
 
 		const auto size = _bottomInfo.currentSize();
@@ -5125,6 +5147,19 @@ int Message::resizeContentGetHeight(int newWidth) {
 				accumulate_min(contentWidth, textualWidth);
 			} else {
 				contentWidth = media->width();
+			}
+		}
+	}
+	if (!mediaDisplayed && bubble && hasVisibleText()) {
+		const auto probeTextWidth = bubbleTextWidth(contentWidth);
+		[[maybe_unused]] const auto probeHeight = textHeightFor(probeTextWidth);
+		if (!Get<TextAppearing>()) {
+			const auto use = textRealWidth();
+			if (use > 0) {
+				const auto shrunk = std::max(
+					use + st::msgPadding.left() + st::msgPadding.right(),
+					int(_nonTextMaxWidth));
+				accumulate_min(contentWidth, shrunk);
 			}
 		}
 	}
@@ -5334,6 +5369,17 @@ bool Message::textAppearCheckLine(not_null<TextAppearing*> appearing) {
 	if (recount) {
 		appearing->geometryValid = true;
 		appearing->lines = text().countLinesGeometry(appearing->textWidth);
+		auto &lines = appearing->lines;
+		if (lines.size() > 1 && text().hasSkipBlock()) {
+			const auto &last = lines.back();
+			const auto &prev = lines[lines.size() - 2];
+			if (last.width == skipBlockWidth()
+				&& last.bottom - prev.bottom == skipBlockHeight()) {
+				const auto bottom = last.bottom;
+				lines.pop_back();
+				lines.back().bottom = bottom;
+			}
+		}
 	}
 	const auto lines = int(appearing->lines.size());
 	const auto shown = appearing->shownLine;
@@ -5384,7 +5430,7 @@ bool Message::textAppearCheckLine(not_null<TextAppearing*> appearing) {
 			const auto width = appearing->revealedLineWidth;
 			const auto progress = (width >= widthTarget)
 				? 1.
-				: (widthTarget - width) / float64(widthTarget - widthStart);
+				: (width - widthStart) / float64(widthTarget - widthStart);
 			const auto left = (1. - progress) * appearing->widthDuration;
 			const auto duration = appearing->finalizing
 				? kLineHeightAppearFinalDuration
@@ -5444,18 +5490,18 @@ void Message::textAppearStartHeightAnimation(
 
 int Message::textAppearTargetHeight(
 		not_null<TextAppearing*> appearing) const {
-	const auto shown = appearing->shownLine;
+	const auto next = appearing->shownLine + 1;
 	const auto lines = int(appearing->lines.size());
-	if (shown + 1 >= lines) {
+	if (next >= lines) {
 		return appearing->lines.back().bottom;
 	}
-	const auto bottom = appearing->lines[shown].bottom;
-	const auto nextWidth = appearing->lines[shown + 1].width;
+	const auto &line = appearing->lines[next];
+	const auto bottom = line.bottom;
+	const auto nextWidth = line.width;
 	const auto available = std::max(
-		appearing->lines[shown].width,
+		appearing->lines[appearing->shownLine].width,
 		appearing->shownWidth);
-	if (nextWidth + skipBlockWidth() <= available
-		&& !appearing->lines[shown + 1].rtl) {
+	if (nextWidth + skipBlockWidth() <= available && !line.rtl) {
 		return bottom;
 	}
 	return bottom + skipBlockHeight();
@@ -5467,10 +5513,13 @@ void Message::textAppearWidthCallback() {
 		appearing->widthAnimation.value(appearing->targetLineWidth)));
 	if (now != appearing->revealedLineWidth) {
 		appearing->revealedLineWidth = now;
-		appearing->shownWidth = std::max(appearing->shownWidth, now);
 		if (appearing->lines[appearing->shownLine].rtl) {
-			appearing->shownWidth = std::max(
-				appearing->shownWidth,
+			appearing->shownWidth = textRealWidth();
+		} else {
+			appearing->shownWidth = std::min(
+				std::max(
+					appearing->shownWidth,
+					now + skipBlockWidth()),
 				textRealWidth());
 		}
 		repaint();

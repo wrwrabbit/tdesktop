@@ -419,7 +419,8 @@ private:
 	mutable Ui::Text::String _fromName;
 	mutable std::unique_ptr<FromNameStatus> _fromNameStatus;
 	mutable std::unique_ptr<Ui::RoundCheckbox> _selectionRoundCheckbox;
-	mutable int _fromNameVersion = 0;
+	mutable uint32 _fromNameVersion : 16 = 0;
+	uint32 _nonTextMaxWidth : 16 = 0;
 	mutable int _bubbleTextualWidthMinimum : 16 = -1;
 	mutable int _bubbleTextualWidthCache : 16 = 0;
 	uint32 _bubbleWidthLimit : 26 = 0;
