@@ -1522,13 +1522,20 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 	if (hasPollOption) {
 		const auto raw = result.get();
 		const auto owner = &item->history()->owner();
+		const auto controller = list->controller();
 		raw->stashContent([=](not_null<Ui::PopupMenu*> menu) {
-			FillPollOptionPage(menu, owner, itemId, pollOption, [=] {
-				list->replyToMessageRequestNotify({
-					.messageId = itemId,
-					.pollOption = pollOption,
-				}, base::IsCtrlPressed());
-			});
+			FillPollOptionPage(
+				menu,
+				owner,
+				itemId,
+				pollOption,
+				controller,
+				[=] {
+					list->replyToMessageRequestNotify({
+						.messageId = itemId,
+						.pollOption = pollOption,
+					}, base::IsCtrlPressed());
+				});
 		});
 	}
 	return result;
@@ -1614,6 +1621,7 @@ void FillPollOptionPage(
 		not_null<Data::Session*> owner,
 		FullMsgId itemId,
 		const QByteArray &pollOption,
+		not_null<Window::SessionController*> controller,
 		Fn<void()> replyToOption) {
 	const auto item = owner->message(itemId);
 	if (!item) {
@@ -1722,6 +1730,28 @@ void FillPollOptionPage(
 					.type = Ui::WhoReactedType::RefRecipient,
 					.userpic = std::move(userpic),
 				}));
+	}
+	{
+		auto packIds = std::vector<StickerSetIdentifier>();
+		for (const auto &entity : a->text.entities) {
+			if (entity.type() == EntityType::CustomEmoji) {
+				const auto id = Data::ParseCustomEmojiData(entity.data());
+				if (const auto set = owner->document(id)->sticker()) {
+					if (set->set.id
+						&& !ranges::contains(
+							packIds,
+							set->set.id,
+							&StickerSetIdentifier::id)) {
+						packIds.push_back(set->set);
+					}
+				}
+			}
+		}
+		AddEmojiPacksAction(
+			menu,
+			std::move(packIds),
+			EmojiPacksSource::PollOption,
+			controller);
 	}
 }
 
@@ -2322,6 +2352,18 @@ void AddEmojiPacksAction(
 					count,
 					tr::rich)
 				: tr::lng_context_animated_reactions(
+					tr::now,
+					lt_name,
+					TextWithEntities{ name },
+					tr::rich);
+		case EmojiPacksSource::PollOption:
+			return name.text.isEmpty()
+				? tr::lng_context_animated_poll_option_many(
+					tr::now,
+					lt_count,
+					count,
+					tr::rich)
+				: tr::lng_context_animated_poll_option(
 					tr::now,
 					lt_name,
 					TextWithEntities{ name },
