@@ -1446,6 +1446,8 @@ void History::applyServiceChanges(
 							answer.vtext());
 						if (!poll->answerByOption(parsed.option)) {
 							poll->answers.push_back(std::move(parsed));
+							++poll->version;
+							owner().notifyPollUpdateDelayed(poll);
 						}
 					}, [](const auto &) {});
 				}
@@ -1460,9 +1462,14 @@ void History::applyServiceChanges(
 				if (const auto poll = media->poll()) {
 					const auto option = del->answer.option;
 					auto &answers = poll->answers;
+					const auto size = answers.size();
 					answers.erase(
 						ranges::remove(answers, option, &PollAnswer::option),
 						end(answers));
+					if (answers.size() != size) {
+						++poll->version;
+						owner().notifyPollUpdateDelayed(poll);
+					}
 				}
 			}
 		}
