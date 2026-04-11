@@ -1656,6 +1656,8 @@ PRIVATE
     settings/sections/settings_local_passcode.h
     settings/sections/settings_main.cpp
     settings/sections/settings_main.h
+    settings/settings_recent_searches.cpp
+    settings/settings_recent_searches.h
     settings/settings_search.cpp
     settings/settings_search.h
     settings/settings_faq_suggestions.cpp
