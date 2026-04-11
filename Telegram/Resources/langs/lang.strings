@@ -4509,6 +4509,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_in_dlg_audio_file" = "Audio file";
 "lng_in_dlg_contact" = "Contact";
 "lng_in_dlg_audio" = "Voice message";
+"lng_in_dlg_audio_unread" = "{emoji} Voice message";
 "lng_in_dlg_video_message" = "Video message";
 "lng_in_dlg_voice_message_ttl" = "One-time Voice Message";
 "lng_in_dlg_video_message_ttl" = "One-time Video Message";
