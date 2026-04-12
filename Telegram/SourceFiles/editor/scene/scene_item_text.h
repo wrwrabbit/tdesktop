@@ -70,7 +70,8 @@ public:
 	[[nodiscard]] static QSize computeContentSize(
 		const QString &text,
 		float fontSize,
-		const QSize &imageSize);
+		const QSize &imageSize,
+		TextStyle style);
 
 	void save(SaveState state) override;
 	void restore(SaveState state) override;

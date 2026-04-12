@@ -508,6 +508,7 @@ void Scene::createTextAtCenter() {
 	proxy->setDefaultTextColor(_textColor);
 
 	auto *emojiDoc = new EmojiDocument(proxy);
+	emojiDoc->setDocumentMargin(0);
 	proxy->setDocument(emojiDoc);
 
 	auto font = QFont();
@@ -577,6 +578,7 @@ void Scene::startTextEditing(ItemText *item) {
 	proxy->setDefaultTextColor(item->color());
 
 	auto *emojiDoc = new EmojiDocument(proxy);
+	emojiDoc->setDocumentMargin(0);
 	proxy->setDocument(emojiDoc);
 
 	auto font = QFont();
@@ -675,8 +677,14 @@ void Scene::finishTextEditing(bool save) {
 			const auto contentSize = ItemText::computeContentSize(
 				text,
 				_textFontSize,
-				imageSize);
-			const auto size = std::max(contentSize.width(), 1);
+				imageSize,
+				TextStyle::Plain);
+			const auto zoom = (_currentZoom > 0.) ? _currentZoom : 1.;
+			const auto handleInflate = int(
+				std::ceil(st::photoEditorItemHandleSize / zoom));
+			const auto size = std::max(
+				contentSize.width() + handleInflate,
+				1);
 			auto data = ItemBase::Data{
 				.initialZoom = zoom,
 				.zPtr = _lastZ,

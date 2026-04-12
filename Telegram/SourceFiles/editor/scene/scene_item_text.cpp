@@ -53,8 +53,11 @@ float ComputeBrightness(const QColor &color) {
 LayoutMetrics ComputeMetrics(
 		const QString &text,
 		float fontSize,
-		const QSize &imageSize) {
-	const auto padding = int(fontSize * kPaddingFactor);
+		const QSize &imageSize,
+		TextStyle style) {
+	const auto hasBackground = (style == TextStyle::Framed)
+		|| (style == TextStyle::SemiTransparent);
+	const auto padding = hasBackground ? int(fontSize * kPaddingFactor) : 0;
 	const auto shortSide = std::min(imageSize.width(), imageSize.height());
 	const auto textMaxWidth = int(shortSide * kMaxWidthFactor) - 2 * padding;
 
@@ -64,7 +67,7 @@ LayoutMetrics ComputeMetrics(
 	processedText.replace('\n', QChar::LineSeparator);
 
 	auto option = QTextOption();
-	option.setWrapMode(QTextOption::WordWrap);
+	option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
 
 	auto layout = QTextLayout(processedText, font);
 	layout.setTextOption(option);
@@ -381,7 +384,7 @@ void ItemText::renderContent() {
 		return;
 	}
 
-	const auto m = ComputeMetrics(_text, _fontSize, _imageSize);
+	const auto m = ComputeMetrics(_text, _fontSize, _imageSize, _textStyle);
 	const auto pixWidth = m.contentWidth + 2 * m.padding;
 	const auto pixHeight = m.contentHeight + 2 * m.padding;
 
@@ -391,7 +394,7 @@ void ItemText::renderContent() {
 	processedText.replace('\n', QChar::LineSeparator);
 
 	auto option = QTextOption();
-	option.setWrapMode(QTextOption::WordWrap);
+	option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
 
 	auto layout = QTextLayout(processedText, font);
 	layout.setTextOption(option);
@@ -493,12 +496,17 @@ void ItemText::renderContent() {
 			}
 		}
 
+		const auto lineShift = _fontSize / 7.f;
+		const auto lineCount = layout.lineCount();
 		p.setPen(textColor);
-		for (auto i = 0; i < layout.lineCount(); ++i) {
+		for (auto i = 0; i < lineCount; ++i) {
 			const auto line = layout.lineAt(i);
 			const auto xOffset =
 				(m.contentWidth - line.naturalTextWidth()) / 2.;
-			line.draw(&p, QPointF(m.padding + xOffset, m.padding));
+			const auto yShift = (i < lineCount - 1) ? -lineShift : 0.f;
+			line.draw(
+				&p,
+				QPointF(m.padding + xOffset, m.padding + yShift));
 		}
 
 		p.setRenderHint(QPainter::SmoothPixmapTransform, true);
@@ -507,10 +515,11 @@ void ItemText::renderContent() {
 		const auto sourceLogical = source / float64(factor);
 		const auto emojiSize = float64(QFontMetrics(font).height());
 		const auto emojiScale = emojiSize / sourceLogical;
-		for (auto i = 0; i < layout.lineCount(); ++i) {
+		for (auto i = 0; i < lineCount; ++i) {
 			const auto line = layout.lineAt(i);
 			const auto xOffset =
 				(m.contentWidth - line.naturalTextWidth()) / 2.;
+			const auto yShift = (i < lineCount - 1) ? -lineShift : 0.f;
 			const auto lineStart = line.textStart();
 			const auto lineText = processedText.mid(
 				lineStart,
@@ -535,6 +544,7 @@ void ItemText::renderContent() {
 					+ x
 					+ (glyphWidth - emojiSize) / 2.;
 				const auto drawY = m.padding
+					+ yShift
 					+ line.y()
 					+ (line.height() - emojiSize) / 2.;
 				p.save();
@@ -558,13 +568,14 @@ void ItemText::renderContent() {
 QSize ItemText::computeContentSize(
 		const QString &text,
 		float fontSize,
-		const QSize &imageSize) {
+		const QSize &imageSize,
+		TextStyle style) {
 	if (text.isEmpty()) {
 		return {};
 	}
 	auto processedText = text;
 	processedText.replace('\n', QChar::LineSeparator);
-	const auto m = ComputeMetrics(processedText, fontSize, imageSize);
+	const auto m = ComputeMetrics(processedText, fontSize, imageSize, style);
 	return QSize(
 		m.contentWidth + 2 * m.padding,
 		m.contentHeight + 2 * m.padding);
@@ -629,7 +640,11 @@ float ItemText::fontSize() const {
 }
 
 float64 ItemText::editScale() const {
-	const auto natural = computeContentSize(_text, _fontSize, _imageSize);
+	const auto natural = computeContentSize(
+		_text,
+		_fontSize,
+		_imageSize,
+		_textStyle);
 	if (natural.width() <= 0) {
 		return 1.;
 	}
