@@ -2839,7 +2839,7 @@ void Poll::Options::updateAnswerVotesFromOriginal(
 	}
 	answer.chosen = original.chosen;
 	answer.votes = original.votes;
-	answer.filling = answer.votes / float64(maxVotes);
+	answer.filling = percent / 100.;
 	if (_owner->showVotes() && answer.votes) {
 		answer.votesCountString = Lang::FormatCountDecimal(answer.votes);
 		answer.votesCountWidth = st::normalFont->width(
