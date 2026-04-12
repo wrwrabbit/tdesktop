@@ -10,11 +10,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/scene/scene_item_canvas.h"
 #include "editor/scene/scene_item_line.h"
 #include "editor/scene/scene_item_sticker.h"
+#include "editor/scene/scene_item_text.h"
 #include "ui/image/image_prepare.h"
 #include "ui/rp_widget.h"
 #include "styles/style_editor.h"
 
+#include <QGraphicsSceneContextMenuEvent>
 #include <QGraphicsSceneMouseEvent>
+#include <QGraphicsTextItem>
+#include <QTextCursor>
+#include <QTextDocument>
+#include <QTimer>
 
 namespace Editor {
 namespace {
@@ -99,6 +105,43 @@ private:
 bool SkipMouseEvent(not_null<QGraphicsSceneMouseEvent*> event) {
 	return event->isAccepted() || (event->button() == Qt::RightButton);
 }
+
+class TextEditProxy final : public QGraphicsTextItem {
+public:
+	using QGraphicsTextItem::QGraphicsTextItem;
+
+	Fn<void()> onFinish;
+	Fn<void()> onCancel;
+
+protected:
+	void keyPressEvent(QKeyEvent *event) override {
+		if (event->key() == Qt::Key_Escape) {
+			fire(onCancel);
+			return;
+		}
+		QGraphicsTextItem::keyPressEvent(event);
+	}
+
+	void focusOutEvent(QFocusEvent *event) override {
+		QGraphicsTextItem::focusOutEvent(event);
+		fire(onFinish);
+	}
+
+	void contextMenuEvent(QGraphicsSceneContextMenuEvent *event) override {
+		event->accept();
+	}
+
+private:
+	void fire(Fn<void()> &callback) {
+		if (!callback) {
+			return;
+		}
+		const auto cb = std::exchange(callback, nullptr);
+		onFinish = nullptr;
+		onCancel = nullptr;
+		QTimer::singleShot(0, cb);
+	}
+};
 
 } // namespace
 
@@ -240,6 +283,9 @@ Scene::Scene(const QRectF &rect)
 }
 
 void Scene::cancelDrawing() {
+	if (_textEdit.proxy) {
+		finishTextEditing(false);
+	}
 	_canvas->cancelDrawing();
 }
 
@@ -271,6 +317,16 @@ void Scene::removeItem(const ItemPtr &item) {
 }
 
 void Scene::mousePressEvent(QGraphicsSceneMouseEvent *event) {
+	if (_textEdit.proxy) {
+		const auto clickOnProxy = _textEdit.proxy->contains(
+			_textEdit.proxy->mapFromScene(event->scenePos()));
+		if (!clickOnProxy) {
+			finishTextEditing(true);
+			QGraphicsScene::mousePressEvent(event);
+			return;
+		}
+	}
+
 	QGraphicsScene::mousePressEvent(event);
 	if (SkipMouseEvent(event) || !sceneRect().contains(event->scenePos())) {
 		return;
@@ -280,7 +336,7 @@ void Scene::mousePressEvent(QGraphicsSceneMouseEvent *event) {
 
 void Scene::mouseReleaseEvent(QGraphicsSceneMouseEvent *event) {
 	QGraphicsScene::mouseReleaseEvent(event);
-	if (SkipMouseEvent(event)) {
+	if (SkipMouseEvent(event) || _textEdit.proxy) {
 		return;
 	}
 	_canvas->handleMouseReleaseEvent(event);
@@ -288,7 +344,7 @@ void Scene::mouseReleaseEvent(QGraphicsSceneMouseEvent *event) {
 
 void Scene::mouseMoveEvent(QGraphicsSceneMouseEvent *event) {
 	QGraphicsScene::mouseMoveEvent(event);
-	if (SkipMouseEvent(event)) {
+	if (SkipMouseEvent(event) || _textEdit.proxy) {
 		return;
 	}
 	_canvas->handleMouseMoveEvent(event);
@@ -296,6 +352,17 @@ void Scene::mouseMoveEvent(QGraphicsSceneMouseEvent *event) {
 
 void Scene::applyBrush(const QColor &color, float size, Brush::Tool tool) {
 	_canvas->applyBrush(color, size, tool);
+	for (auto *item : selectedItems()) {
+		if (item->type() == ItemText::Type) {
+			static_cast<ItemText*>(item)->setColor(color);
+		}
+	}
+}
+
+void Scene::setTextDefaults(const QColor &color, float fontSize, int style) {
+	_textColor = color;
+	_textFontSize = fontSize;
+	_textStyle = style;
 }
 
 void Scene::setBlurSource(Fn<QImage(QRect)> source) {
@@ -328,6 +395,7 @@ std::shared_ptr<float64> Scene::lastZ() const {
 }
 
 void Scene::updateZoom(float64 zoom) {
+	_currentZoom = zoom;
 	_canvas->updateZoom(zoom);
 	for (const auto &item : items()) {
 		if (item->type() >= ItemBase::Type) {
@@ -396,6 +464,10 @@ void Scene::clearRedoList() {
 }
 
 void Scene::save(SaveState state) {
+	if (_textEdit.proxy) {
+		finishTextEditing(true);
+	}
+
 	removeIf([](const ItemPtr &item) {
 		return item->isRemovedStatus()
 			&& !item->hasState(SaveState::Keep)
@@ -421,7 +493,183 @@ void Scene::restore(SaveState state) {
 	cancelDrawing();
 }
 
+void Scene::createTextAtCenter() {
+	if (_textEdit.proxy) {
+		return;
+	}
+
+	clearSelection();
+	cancelDrawing();
+
+	auto *proxy = new TextEditProxy();
+	proxy->setTextInteractionFlags(Qt::TextEditorInteraction);
+	proxy->setDefaultTextColor(_textColor);
+
+	auto font = QFont();
+	font.setPixelSize(int(_textFontSize));
+	font.setWeight(QFont::DemiBold);
+	proxy->setFont(font);
+
+	{
+		auto option = proxy->document()->defaultTextOption();
+		option.setAlignment(Qt::AlignCenter);
+		proxy->document()->setDefaultTextOption(option);
+	}
+
+	const auto shortSide = std::min(
+		sceneRect().width(),
+		sceneRect().height());
+	const auto padding = int(_textFontSize * 0.4);
+	const auto textWidth = int(shortSide * 0.8) - 2 * padding;
+	proxy->setTextWidth(textWidth);
+	const auto center = sceneRect().center();
+	proxy->setPos(center.x() - textWidth / 2., center.y());
+
+	QGraphicsScene::addItem(proxy);
+	proxy->setZValue((*_lastZ)++);
+	proxy->setFocus();
+
+	proxy->onFinish = crl::guard(this, [=] {
+		finishTextEditing(true);
+	});
+	proxy->onCancel = crl::guard(this, [=] {
+		finishTextEditing(false);
+	});
+
+	_textEdit = { .item = nullptr, .proxy = proxy };
+}
+
+void Scene::startTextEditing(ItemText *item) {
+	if (_textEdit.proxy) {
+		finishTextEditing(true);
+	}
+	if (!item) {
+		return;
+	}
+
+	cancelDrawing();
+
+	auto *proxy = new TextEditProxy();
+	proxy->setTextInteractionFlags(Qt::TextEditorInteraction);
+	proxy->setDefaultTextColor(item->color());
+
+	auto font = QFont();
+	font.setPixelSize(int(item->fontSize()));
+	font.setWeight(QFont::DemiBold);
+	proxy->setFont(font);
+
+	{
+		auto option = proxy->document()->defaultTextOption();
+		option.setAlignment(Qt::AlignCenter);
+		proxy->document()->setDefaultTextOption(option);
+	}
+
+	proxy->setPlainText(item->text());
+
+	const auto shortSide = std::min(
+		sceneRect().width(),
+		sceneRect().height());
+	const auto padding = int(item->fontSize() * 0.4);
+	const auto textWidth = int(shortSide * 0.8) - 2 * padding;
+	proxy->setTextWidth(textWidth);
+
+	const auto scale = item->editScale();
+	const auto proxyRect = proxy->boundingRect();
+	const auto center = proxyRect.center();
+	proxy->setTransformOriginPoint(center);
+	proxy->setPos(item->scenePos() - center);
+	proxy->setRotation(item->rotation());
+	if (std::abs(scale - 1.) > 0.01) {
+		proxy->setScale(scale);
+	}
+
+	QGraphicsScene::addItem(proxy);
+	proxy->setZValue((*_lastZ)++);
+	proxy->setFocus();
+
+	auto cursor = proxy->textCursor();
+	cursor.select(QTextCursor::Document);
+	proxy->setTextCursor(cursor);
+
+	item->setVisible(false);
+
+	proxy->onFinish = crl::guard(this, [=] {
+		finishTextEditing(true);
+	});
+	proxy->onCancel = crl::guard(this, [=] {
+		finishTextEditing(false);
+	});
+
+	_textEdit = { .item = item, .proxy = proxy };
+}
+
+void Scene::finishTextEditing(bool save) {
+	if (!_textEdit.proxy) {
+		return;
+	}
+
+	const auto text = save
+		? _textEdit.proxy->toPlainText().trimmed()
+		: QString();
+	const auto proxyRect = _textEdit.proxy->boundingRect();
+	const auto proxyCenter = _textEdit.proxy->pos()
+		+ QPointF(proxyRect.width() / 2., proxyRect.height() / 2.);
+	auto *existingItem = _textEdit.item;
+
+	const auto proxy = static_cast<TextEditProxy*>(_textEdit.proxy);
+	proxy->onFinish = nullptr;
+	proxy->onCancel = nullptr;
+	QGraphicsScene::removeItem(proxy);
+	delete proxy;
+	_textEdit.proxy = nullptr;
+	_textEdit.item = nullptr;
+
+	if (!text.isEmpty()) {
+		if (existingItem) {
+			existingItem->setText(text);
+			existingItem->setVisible(true);
+		} else {
+			const auto imageSize = sceneRect().size().toSize();
+			const auto contentSize = ItemText::computeContentSize(
+				text,
+				_textFontSize,
+				imageSize);
+			const auto size = std::max(contentSize.width(), 1);
+			auto data = ItemBase::Data{
+				.initialZoom = zoom,
+				.zPtr = _lastZ,
+				.size = size,
+				.x = int(proxyCenter.x()),
+				.y = int(proxyCenter.y()),
+				.imageSize = imageSize,
+			};
+			auto item = std::make_shared<ItemText>(
+				text,
+				_textColor,
+				_textFontSize,
+				TextStyle::Plain,
+				imageSize,
+				std::move(data));
+			addItem(item);
+		}
+	} else if (existingItem) {
+		if (save) {
+			removeItem(existingItem);
+		} else {
+			existingItem->setVisible(true);
+		}
+	}
+}
+
 Scene::~Scene() {
+	if (_textEdit.proxy) {
+		const auto proxy = static_cast<TextEditProxy*>(_textEdit.proxy);
+		proxy->onFinish = nullptr;
+		proxy->onCancel = nullptr;
+		QGraphicsScene::removeItem(proxy);
+		delete proxy;
+		_textEdit.proxy = nullptr;
+	}
 	// Prevent destroying by scene of all items.
 	QGraphicsScene::removeItem(_canvas.get());
 	for (const auto &item : items()) {

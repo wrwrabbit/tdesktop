@@ -302,6 +302,11 @@ PhotoEditor::PhotoEditor(
 		};
 	}, lifetime());
 
+	_controls->textRequests(
+	) | rpl::on_next([=] {
+		_content->createTextItem();
+	}, lifetime());
+
 	_controls->doneRequests(
 	) | rpl::on_next([=] {
 		const auto mode = _mode.current().mode;

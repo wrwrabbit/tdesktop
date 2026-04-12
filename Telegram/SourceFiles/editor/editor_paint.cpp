@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/scene/scene_item_canvas.h"
 #include "editor/scene/scene_item_image.h"
 #include "editor/scene/scene_item_sticker.h"
+#include "editor/scene/scene_item_text.h"
 #include "editor/scene/scene.h"
 #include "lang/lang_keys.h"
 #include "lottie/lottie_single_player.h"
@@ -64,6 +65,14 @@ Paint::Paint(
 	Expects(modifications.paint != nullptr);
 
 	_scene->setBlurSource(std::move(blurSource));
+
+	{
+		const auto shortSide = std::min(imageSize.width(), imageSize.height());
+		_scene->setTextDefaults(
+			QColor(255, 255, 255),
+			shortSide / 15.f,
+			int(TextStyle::Plain));
+	}
 
 	keepResult();
 
@@ -232,6 +241,10 @@ void Paint::applyBrush(const Brush &brush) {
 		brush.color,
 		(kMinBrush + float64(kMaxBrush - kMinBrush) * brush.sizeRatio),
 		brush.tool);
+}
+
+void Paint::createTextItem() {
+	_scene->createTextAtCenter();
 }
 
 void Paint::handleMimeData(const QMimeData *data) {

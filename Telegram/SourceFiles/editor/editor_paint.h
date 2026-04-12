@@ -41,6 +41,8 @@ public:
 	void keepResult();
 	void updateUndoState();
 
+	void createTextItem();
+
 	void handleMimeData(const QMimeData *data);
 	void paintImage(QPainter &p, const QPixmap &image) const;
 	void resetView();
