@@ -43,6 +43,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/controls/delete_message_context_action.h"
 #include "ui/controls/who_reacted_context_action.h"
+#include "ui/dynamic_image.h"
+#include "ui/dynamic_thumbnails.h"
 #include "ui/boxes/edit_factcheck_box.h"
 #include "ui/boxes/report_box_graphics.h"
 #include "ui/painter.h"
@@ -1705,31 +1707,38 @@ void FillPollOptionPage(
 			},
 			&st::menuIconDelete);
 	}
-	if (a->addedBy) {
+	if (const auto addedBy = a->addedBy) {
 		menu->addSeparator(&st::expandedMenuSeparator);
-		auto view = Ui::PeerUserpicView();
-		auto userpic = PeerData::GenerateUserpicImage(
-			a->addedBy,
-			view,
-			st::defaultWhoRead.photoSize);
 		const auto date = a->addedDate
 			? Ui::FormatDateTime(
 				base::unixtime::parse(a->addedDate))
 			: QString();
-		menu->addAction(
-			base::make_unique_q<Ui::WhoReactedEntryAction>(
-				menu->menu(),
-				nullptr,
-				menu->menu()->st(),
-				Ui::WhoReactedEntryData{
-					.text = tr::lng_polls_option_added_by(
-						tr::now,
-						lt_user,
-						a->addedBy->shortName()),
-					.date = date,
-					.type = Ui::WhoReactedType::RefRecipient,
-					.userpic = std::move(userpic),
-				}));
+		auto action = base::make_unique_q<Ui::WhoReactedEntryAction>(
+			menu->menu(),
+			nullptr,
+			menu->menu()->st(),
+			Ui::WhoReactedEntryData());
+		const auto raw = action.get();
+		const auto thumbnail = Ui::MakeUserpicThumbnail(addedBy);
+		const auto size = st::defaultWhoRead.photoSize;
+		const auto refresh = [=] {
+			raw->setData({
+				.text = tr::lng_polls_option_added_by(
+					tr::now,
+					lt_user,
+					addedBy->shortName()),
+				.date = date,
+				.type = Ui::WhoReactedType::RefRecipient,
+				.userpic = thumbnail->image(size),
+				.callback = [=] { controller->showPeerInfo(addedBy); },
+			});
+		};
+		thumbnail->subscribeToUpdates(refresh);
+		refresh();
+		menu->lifetime().add([=] {
+			thumbnail->subscribeToUpdates(nullptr);
+		});
+		menu->addAction(std::move(action));
 	}
 	{
 		auto packIds = std::vector<StickerSetIdentifier>();
