@@ -31,9 +31,9 @@ public:
 
 	Scene(const QRectF &rect);
 	~Scene();
-	void applyBrush(const QColor &color, float size, Brush::Tool tool);
+	void applyBrush(const QColor &color, float64 size, Brush::Tool tool);
 	void setBlurSource(Fn<QImage(QRect)> source);
-	void setTextDefaults(const QColor &color, float fontSize, int style);
+	void setTextDefaults(const QColor &color, float64 fontSize, int style);
 
 	[[nodiscard]] std::vector<ItemPtr> items(
 		Qt::SortOrder order = Qt::DescendingOrder) const;
@@ -51,6 +51,9 @@ public:
 
 	void startTextEditing(ItemText *item);
 	void createTextAtCenter();
+	void setTextColor(const QColor &color);
+
+	[[nodiscard]] rpl::producer<QColor> textColorRequests() const;
 
 	[[nodiscard]] bool hasUndo() const;
 	[[nodiscard]] bool hasRedo() const;
@@ -69,6 +72,10 @@ protected:
 private:
 	void removeIf(Fn<bool(const ItemPtr &)> proj);
 	void finishTextEditing(bool save);
+	void setupTextProxy(
+		QGraphicsTextItem *proxy,
+		const QColor &color,
+		float64 fontSize);
 
 	const std::shared_ptr<ItemCanvas> _canvas;
 	const std::shared_ptr<float64> _lastZ;
@@ -82,15 +89,16 @@ private:
 	int _itemNumber = 0;
 
 	QColor _textColor;
-	float _textFontSize = 0.f;
-	int _textStyle = 3;
+	float64 _textFontSize = 0.;
+	int _textStyle = 0;
 
 	struct {
-		ItemText *item = nullptr;
-		QGraphicsTextItem *proxy = nullptr;
+		std::weak_ptr<NumberedItem> item;
+		base::unique_qptr<QGraphicsTextItem> proxy;
 	} _textEdit;
 
 	rpl::event_stream<> _addsItem, _removesItem;
+	rpl::event_stream<QColor> _textColorRequests;
 	rpl::lifetime _lifetime;
 
 };

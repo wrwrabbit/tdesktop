@@ -570,6 +570,17 @@ void ColorPicker::storeCurrentBrush() {
 	_toolBrushes[ToolIndex(_brush.tool)] = _brush;
 }
 
+void ColorPicker::setColor(const QColor &color) {
+	_brush.color = color;
+	storeCurrentBrush();
+	updateColorButtonColor(color, true);
+	if (_paletteVisible) {
+		rebuildPalette();
+	} else {
+		_colorButton->update();
+	}
+}
+
 void ColorPicker::updateColorButtonColor(const QColor &color, bool animated) {
 	const auto hasValid = _colorButtonFrom.isValid() && _colorButtonTo.isValid();
 	const auto from = hasValid ? colorButtonColor() : color;

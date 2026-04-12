@@ -149,6 +149,8 @@ PRIVATE
     editor/scene/scene_item_line.h
     editor/scene/scene_item_text.cpp
     editor/scene/scene_item_text.h
+    editor/scene/scene_emoji_document.cpp
+    editor/scene/scene_emoji_document.h
 
     ui/boxes/about_cocoon_box.h
     ui/boxes/about_cocoon_box.cpp

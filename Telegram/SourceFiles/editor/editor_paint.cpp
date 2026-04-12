@@ -67,10 +67,13 @@ Paint::Paint(
 	_scene->setBlurSource(std::move(blurSource));
 
 	{
-		const auto shortSide = std::min(imageSize.width(), imageSize.height());
+		constexpr auto kDefaultFontSizeDivisor = 15.;
+		const auto shortSide = std::min(
+			imageSize.width(),
+			imageSize.height());
 		_scene->setTextDefaults(
 			QColor(255, 255, 255),
-			shortSide / 15.f,
+			shortSide / kDefaultFontSizeDivisor,
 			int(TextStyle::Plain));
 	}
 
@@ -245,6 +248,14 @@ void Paint::applyBrush(const Brush &brush) {
 
 void Paint::createTextItem() {
 	_scene->createTextAtCenter();
+}
+
+void Paint::setTextColor(const QColor &color) {
+	_scene->setTextColor(color);
+}
+
+rpl::producer<QColor> Paint::textColorRequests() const {
+	return _scene->textColorRequests();
 }
 
 void Paint::handleMimeData(const QMimeData *data) {

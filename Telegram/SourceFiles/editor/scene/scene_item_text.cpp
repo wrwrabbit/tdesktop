@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/scene/scene_item_text.h"
 
 #include "editor/scene/scene.h"
+#include "editor/scene/scene_emoji_document.h"
 #include "lang/lang_keys.h"
 #include "ui/emoji_config.h"
 #include "ui/painter.h"
@@ -26,9 +27,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Editor {
 namespace {
 
-constexpr auto kPaddingFactor = 0.4f;
-constexpr auto kMaxWidthFactor = 0.8f;
+constexpr auto kPaddingFactor = 0.4;
+constexpr auto kMaxWidthFactor = 0.8;
 constexpr auto kMinContentWidth = 20;
+constexpr auto kBrightnessFramedThreshold = 0.721;
+constexpr auto kBrightnessSemiTransparentThreshold = 0.25;
+constexpr auto kSemiTransparentAlpha = 0x99;
+constexpr auto kCornerRadiusFactor = 1. / 3.;
+constexpr auto kLinePadHFactor = 1. / 3.;
+constexpr auto kLinePadVFactor = 1. / 8.;
+constexpr auto kMergeRadiusFactor = 1.5;
+constexpr auto kLineShiftFactor = 1. / 7.;
 
 struct LayoutMetrics {
 	int contentWidth = 0;
@@ -37,22 +46,22 @@ struct LayoutMetrics {
 	int textMaxWidth = 0;
 };
 
-QFont TextFont(float fontSize) {
+QFont TextFont(float64 fontSize) {
 	auto font = QFont();
 	font.setPixelSize(std::max(int(fontSize), 1));
 	font.setWeight(QFont::DemiBold);
 	return font;
 }
 
-float ComputeBrightness(const QColor &color) {
-	return (color.red() * 0.2126f
-		+ color.green() * 0.7152f
-		+ color.blue() * 0.0722f) / 255.f;
+float64 ComputeBrightness(const QColor &color) {
+	return (color.red() * 0.2126
+		+ color.green() * 0.7152
+		+ color.blue() * 0.0722) / 255.;
 }
 
 LayoutMetrics ComputeMetrics(
 		const QString &text,
-		float fontSize,
+		float64 fontSize,
 		const QSize &imageSize,
 		TextStyle style) {
 	const auto hasBackground = (style == TextStyle::Framed)
@@ -96,33 +105,33 @@ LayoutMetrics ComputeMetrics(
 }
 
 struct LineRect {
-	float left = 0;
-	float top = 0;
-	float right = 0;
-	float bottom = 0;
-	[[nodiscard]] float width() const { return right - left; }
+	float64 left = 0;
+	float64 top = 0;
+	float64 right = 0;
+	float64 bottom = 0;
+	[[nodiscard]] float64 width() const { return right - left; }
 };
 
 QPainterPath BuildConnectedBackground(
 		const QTextLayout &layout,
 		int contentWidth,
 		int padding,
-		float fontSize) {
-	const auto linePadH = fontSize / 3.f;
-	const auto linePadV = fontSize / 8.f;
-	const auto cornerRadius = fontSize / 3.f;
-	const auto mergeRadius = cornerRadius * 1.5f;
-	const auto centerX = padding + contentWidth / 2.f;
+		float64 fontSize) {
+	const auto linePadH = fontSize * kLinePadHFactor;
+	const auto linePadV = fontSize * kLinePadVFactor;
+	const auto cornerRadius = fontSize * kCornerRadiusFactor;
+	const auto mergeRadius = cornerRadius * kMergeRadiusFactor;
+	const auto centerX = padding + contentWidth / 2.;
 
 	auto rects = std::vector<LineRect>();
 	for (auto i = 0; i < layout.lineCount(); ++i) {
 		const auto line = layout.lineAt(i);
-		const auto hw = float(line.naturalTextWidth()) / 2.f + linePadH;
+		const auto hw = float64(line.naturalTextWidth()) / 2. + linePadH;
 		rects.push_back({
 			.left = centerX - hw,
-			.top = padding + float(line.y()) - linePadV,
+			.top = padding + float64(line.y()) - linePadV,
 			.right = centerX + hw,
-			.bottom = padding + float(line.y() + line.height()) + linePadV,
+			.bottom = padding + float64(line.y() + line.height()) + linePadV,
 		});
 	}
 
@@ -157,7 +166,8 @@ QPainterPath BuildConnectedBackground(
 		}
 		if (traceback) {
 			for (auto j = i; j >= 1; --j) {
-				if (std::abs(rects[j - 1].left - rects[j].left) < mergeRadius) {
+				if (std::abs(rects[j - 1].left - rects[j].left)
+					< mergeRadius) {
 					const auto v = std::min(
 						rects[j - 1].left,
 						rects[j].left);
@@ -174,14 +184,14 @@ QPainterPath BuildConnectedBackground(
 		}
 	}
 
-	struct V { float x, y; };
+	struct V { float64 x, y; };
 	auto verts = std::vector<V>();
 
 	verts.push_back({ rects[0].left, rects[0].top });
 	verts.push_back({ rects[0].right, rects[0].top });
 
 	for (auto i = 1; i < int(rects.size()); ++i) {
-		if (std::abs(rects[i].right - rects[i - 1].right) > 0.5f) {
+		if (std::abs(rects[i].right - rects[i - 1].right) > 0.5) {
 			verts.push_back({ rects[i - 1].right, rects[i].top });
 			verts.push_back({ rects[i].right, rects[i].top });
 		}
@@ -192,7 +202,7 @@ QPainterPath BuildConnectedBackground(
 	verts.push_back({ rects[last].left, rects[last].bottom });
 
 	for (auto i = last - 1; i >= 0; --i) {
-		if (std::abs(rects[i].left - rects[i + 1].left) > 0.5f) {
+		if (std::abs(rects[i].left - rects[i + 1].left) > 0.5) {
 			verts.push_back({ rects[i + 1].left, rects[i + 1].top });
 			verts.push_back({ rects[i].left, rects[i + 1].top });
 		}
@@ -213,7 +223,7 @@ QPainterPath BuildConnectedBackground(
 		const auto dy2 = next.y - curr.y;
 		const auto len2 = std::sqrt(dx2 * dx2 + dy2 * dy2);
 
-		if (len1 < 0.1f || len2 < 0.1f) {
+		if (len1 < 0.1 || len2 < 0.1) {
 			if (i == 0) {
 				path.moveTo(curr.x, curr.y);
 			} else {
@@ -224,8 +234,8 @@ QPainterPath BuildConnectedBackground(
 
 		const auto r = std::min({
 			cornerRadius,
-			len1 / 2.f,
-			len2 / 2.f,
+			len1 / 2.,
+			len2 / 2.,
 		});
 		const auto bx = curr.x - dx1 / len1 * r;
 		const auto by = curr.y - dy1 / len1 * r;
@@ -245,126 +255,10 @@ QPainterPath BuildConnectedBackground(
 
 } // namespace
 
-EmojiDocument::EmojiDocument(QObject *parent)
-: QTextDocument(parent) {
-}
-
-QVariant EmojiDocument::loadResource(int type, const QUrl &name) {
-	if (type != QTextDocument::ImageResource
-		|| name.scheme() != u"emoji"_q) {
-		return QTextDocument::loadResource(type, name);
-	}
-	const auto i = _cache.find(name);
-	if (i != _cache.end()) {
-		return i->second;
-	}
-	auto result = QVariant();
-	if (const auto emoji = Ui::Emoji::FromUrl(name.toDisplayString())) {
-		const auto factor = style::DevicePixelRatio();
-		const auto logical = QFontMetrics(defaultFont()).height();
-		const auto source = Ui::Emoji::GetSizeLarge();
-		auto image = QImage(
-			QSize(logical, logical) * factor,
-			QImage::Format_ARGB32_Premultiplied);
-		image.setDevicePixelRatio(factor);
-		image.fill(Qt::transparent);
-		{
-			auto p = QPainter(&image);
-			auto hq = PainterHighQualityEnabler(p);
-			const auto enlarged = logical * 1.0;
-			const auto sourceLogical = source / float64(factor);
-			const auto scale = enlarged / sourceLogical;
-			const auto offset = (logical - enlarged) / 2.;
-			p.translate(offset, offset);
-			p.scale(scale, scale);
-			Ui::Emoji::Draw(p, emoji, source, 0, 0);
-		}
-		result = QVariant(QPixmap::fromImage(std::move(image)));
-	}
-	_cache.emplace(name, result);
-	return result;
-}
-
-void ReplaceEmoji(QTextDocument *doc) {
-	const auto fontHeight = QFontMetrics(doc->defaultFont()).height();
-	auto cursor = QTextCursor(doc);
-	auto block = doc->begin();
-	while (block.isValid()) {
-		auto text = block.text();
-		auto start = text.constData();
-		auto end = start + text.size();
-		auto ch = start;
-		while (ch < end) {
-			auto emojiLength = 0;
-			const auto emoji = Ui::Emoji::Find(ch, end, &emojiLength);
-			if (!emoji) {
-				++ch;
-				continue;
-			}
-			const auto pos = block.position() + int(ch - start);
-			cursor.setPosition(pos);
-			cursor.setPosition(
-				pos + emojiLength,
-				QTextCursor::KeepAnchor);
-
-			auto format = QTextImageFormat();
-			format.setName(emoji->toUrl());
-			format.setWidth(fontHeight);
-			format.setHeight(fontHeight);
-			format.setVerticalAlignment(
-				QTextCharFormat::AlignBaseline);
-			cursor.insertImage(format);
-
-			block = doc->findBlock(pos);
-			text = block.text();
-			start = text.constData();
-			end = start + text.size();
-			ch = start + (pos - block.position()) + 1;
-			continue;
-		}
-		block = block.next();
-	}
-}
-
-QString RecoverTextFromDocument(QTextDocument *doc) {
-	auto result = QString();
-	auto block = doc->begin();
-	while (block.isValid()) {
-		if (block != doc->begin()) {
-			result += '\n';
-		}
-		auto it = block.begin();
-		while (!it.atEnd()) {
-			const auto fragment = it.fragment();
-			if (!fragment.isValid()) {
-				++it;
-				continue;
-			}
-			const auto text = fragment.text();
-			const auto format = fragment.charFormat();
-			for (const auto &ch : text) {
-				if (ch == QChar::ObjectReplacementCharacter) {
-					if (format.isImageFormat()) {
-						const auto name = format.toImageFormat().name();
-						if (const auto emoji = Ui::Emoji::FromUrl(name)) {
-							result += emoji->text();
-							continue;
-						}
-					}
-				}
-				result += ch;
-			}
-			++it;
-		}
-		block = block.next();
-	}
-	return result;
-}
-
 ItemText::ItemText(
 	const QString &text,
 	const QColor &color,
-	float fontSize,
+	float64 fontSize,
 	TextStyle style,
 	const QSize &imageSize,
 	ItemBase::Data data)
@@ -445,14 +339,14 @@ void ItemText::renderContent() {
 	switch (_textStyle) {
 	case TextStyle::Framed:
 		bgColor = _color;
-		textColor = (brightness >= 0.721f)
+		textColor = (brightness >= kBrightnessFramedThreshold)
 			? QColor(0, 0, 0)
 			: QColor(255, 255, 255);
 		break;
 	case TextStyle::SemiTransparent:
-		bgColor = (brightness >= 0.25f)
-			? QColor(0, 0, 0, 0x99)
-			: QColor(255, 255, 255, 0x99);
+		bgColor = (brightness >= kBrightnessSemiTransparentThreshold)
+			? QColor(0, 0, 0, kSemiTransparentAlpha)
+			: QColor(255, 255, 255, kSemiTransparentAlpha);
 		break;
 	case TextStyle::Plain:
 		break;
@@ -496,14 +390,14 @@ void ItemText::renderContent() {
 			}
 		}
 
-		const auto lineShift = _fontSize / 7.f;
+		const auto lineShift = _fontSize * kLineShiftFactor;
 		const auto lineCount = layout.lineCount();
 		p.setPen(textColor);
 		for (auto i = 0; i < lineCount; ++i) {
 			const auto line = layout.lineAt(i);
 			const auto xOffset =
 				(m.contentWidth - line.naturalTextWidth()) / 2.;
-			const auto yShift = (i < lineCount - 1) ? -lineShift : 0.f;
+			const auto yShift = (i < lineCount - 1) ? -lineShift : 0.;
 			line.draw(
 				&p,
 				QPointF(m.padding + xOffset, m.padding + yShift));
@@ -519,7 +413,7 @@ void ItemText::renderContent() {
 			const auto line = layout.lineAt(i);
 			const auto xOffset =
 				(m.contentWidth - line.naturalTextWidth()) / 2.;
-			const auto yShift = (i < lineCount - 1) ? -lineShift : 0.f;
+			const auto yShift = (i < lineCount - 1) ? -lineShift : 0.;
 			const auto lineStart = line.textStart();
 			const auto lineText = processedText.mid(
 				lineStart,
@@ -567,7 +461,7 @@ void ItemText::renderContent() {
 
 QSize ItemText::computeContentSize(
 		const QString &text,
-		float fontSize,
+		float64 fontSize,
 		const QSize &imageSize,
 		TextStyle style) {
 	if (text.isEmpty()) {
@@ -635,7 +529,7 @@ void ItemText::setColor(const QColor &color) {
 	update();
 }
 
-float ItemText::fontSize() const {
+float64 ItemText::fontSize() const {
 	return _fontSize;
 }
 
@@ -685,9 +579,13 @@ void ItemText::contextMenuEvent(QGraphicsSceneContextMenuEvent *event) {
 			action->setChecked(true);
 		}
 	};
-	add(u"Plain"_q, TextStyle::Plain);
-	add(u"Framed"_q, TextStyle::Framed);
-	add(u"Semi-Transparent"_q, TextStyle::SemiTransparent);
+	add(tr::lng_photo_editor_text_style_plain(tr::now), TextStyle::Plain);
+	add(
+		tr::lng_photo_editor_text_style_framed(tr::now),
+		TextStyle::Framed);
+	add(
+		tr::lng_photo_editor_text_style_semi_transparent(tr::now),
+		TextStyle::SemiTransparent);
 
 	_contextMenu->addSeparator();
 

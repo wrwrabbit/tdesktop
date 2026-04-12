@@ -11,7 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/scene/scene_item_line.h"
 #include "editor/scene/scene_item_sticker.h"
 #include "editor/scene/scene_item_text.h"
-#include "ui/emoji_config.h"
+#include "editor/scene/scene_emoji_document.h"
 #include "ui/image/image_prepare.h"
 #include "ui/rp_widget.h"
 #include "styles/style_editor.h"
@@ -22,7 +22,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QGraphicsView>
 #include <QTextCursor>
 #include <QTextDocument>
-#include <QTimer>
 
 namespace Editor {
 namespace {
@@ -108,6 +107,13 @@ bool SkipMouseEvent(not_null<QGraphicsSceneMouseEvent*> event) {
 	return event->isAccepted() || (event->button() == Qt::RightButton);
 }
 
+constexpr auto kPaddingFactor = 0.4;
+constexpr auto kMaxWidthFactor = 0.8;
+constexpr auto kMinWidthFactor = 0.16;
+constexpr auto kIdealWidthExtra = 2;
+constexpr auto kDefaultFontSizeDivisor = 15.;
+constexpr auto kScaleThreshold = 0.01;
+
 class TextEditProxy final : public QGraphicsTextItem {
 public:
 	using QGraphicsTextItem::QGraphicsTextItem;
@@ -141,7 +147,7 @@ private:
 		const auto cb = std::exchange(callback, nullptr);
 		onFinish = nullptr;
 		onCancel = nullptr;
-		QTimer::singleShot(0, cb);
+		crl::on_main(cb);
 	}
 };
 
@@ -352,19 +358,28 @@ void Scene::mouseMoveEvent(QGraphicsSceneMouseEvent *event) {
 	_canvas->handleMouseMoveEvent(event);
 }
 
-void Scene::applyBrush(const QColor &color, float size, Brush::Tool tool) {
+void Scene::applyBrush(const QColor &color, float64 size, Brush::Tool tool) {
 	_canvas->applyBrush(color, size, tool);
-	for (auto *item : selectedItems()) {
-		if (item->type() == ItemText::Type) {
-			static_cast<ItemText*>(item)->setColor(color);
-		}
-	}
 }
 
-void Scene::setTextDefaults(const QColor &color, float fontSize, int style) {
+void Scene::setTextDefaults(
+		const QColor &color,
+		float64 fontSize,
+		int style) {
 	_textColor = color;
 	_textFontSize = fontSize;
 	_textStyle = style;
+}
+
+void Scene::setTextColor(const QColor &color) {
+	_textColor = color;
+	if (_textEdit.proxy) {
+		_textEdit.proxy->setDefaultTextColor(color);
+	}
+}
+
+rpl::producer<QColor> Scene::textColorRequests() const {
+	return _textColorRequests.events();
 }
 
 void Scene::setBlurSource(Fn<QImage(QRect)> source) {
@@ -495,24 +510,19 @@ void Scene::restore(SaveState state) {
 	cancelDrawing();
 }
 
-void Scene::createTextAtCenter() {
-	if (_textEdit.proxy) {
-		return;
-	}
-
-	clearSelection();
-	cancelDrawing();
-
-	auto *proxy = new TextEditProxy();
+void Scene::setupTextProxy(
+		QGraphicsTextItem *proxy,
+		const QColor &color,
+		float64 fontSize) {
 	proxy->setTextInteractionFlags(Qt::TextEditorInteraction);
-	proxy->setDefaultTextColor(_textColor);
+	proxy->setDefaultTextColor(color);
 
 	auto *emojiDoc = new EmojiDocument(proxy);
 	emojiDoc->setDocumentMargin(0);
 	proxy->setDocument(emojiDoc);
 
 	auto font = QFont();
-	font.setPixelSize(int(_textFontSize));
+	font.setPixelSize(int(fontSize));
 	font.setWeight(QFont::DemiBold);
 	proxy->setFont(font);
 
@@ -521,19 +531,33 @@ void Scene::createTextAtCenter() {
 		option.setAlignment(Qt::AlignCenter);
 		emojiDoc->setDefaultTextOption(option);
 	}
+}
 
+void Scene::createTextAtCenter() {
+	if (_textEdit.proxy) {
+		return;
+	}
+
+	clearSelection();
+	cancelDrawing();
+
+	_textEdit.proxy.reset(new TextEditProxy());
+	const auto proxy = _textEdit.proxy.get();
+	setupTextProxy(proxy, _textColor, _textFontSize);
+
+	const auto emojiDoc = proxy->document();
 	const auto shortSide = std::min(
 		sceneRect().width(),
 		sceneRect().height());
-	const auto padding = int(_textFontSize * 0.4);
-	const auto maxTextWidth = int(shortSide * 0.8) - 2 * padding;
-	const auto minTextWidth = int(shortSide * 0.16) - 2 * padding;
+	const auto padding = int(_textFontSize * kPaddingFactor);
+	const auto maxTextWidth = int(shortSide * kMaxWidthFactor) - 2 * padding;
+	const auto minTextWidth = int(shortSide * kMinWidthFactor) - 2 * padding;
 	const auto sceneCenter = sceneRect().center();
 	const auto adjustWidth = [=] {
 		emojiDoc->setTextWidth(maxTextWidth);
 		const auto ideal = int(std::ceil(emojiDoc->idealWidth()));
 		const auto width = std::clamp(
-			ideal + 2,
+			ideal + kIdealWidthExtra,
 			minTextWidth,
 			maxTextWidth);
 		proxy->setTextWidth(width);
@@ -553,14 +577,16 @@ void Scene::createTextAtCenter() {
 		views().first()->setFocus();
 	}
 
-	proxy->onFinish = crl::guard(this, [=] {
+	const auto raw = static_cast<TextEditProxy*>(proxy);
+	raw->onFinish = crl::guard(this, [=] {
 		finishTextEditing(true);
 	});
-	proxy->onCancel = crl::guard(this, [=] {
+	raw->onCancel = crl::guard(this, [=] {
 		finishTextEditing(false);
 	});
 
-	_textEdit = { .item = nullptr, .proxy = proxy };
+	_textEdit.item.reset();
+	_textColorRequests.fire_copy(_textColor);
 }
 
 void Scene::startTextEditing(ItemText *item) {
@@ -573,40 +599,26 @@ void Scene::startTextEditing(ItemText *item) {
 
 	cancelDrawing();
 
-	auto *proxy = new TextEditProxy();
-	proxy->setTextInteractionFlags(Qt::TextEditorInteraction);
-	proxy->setDefaultTextColor(item->color());
-
-	auto *emojiDoc = new EmojiDocument(proxy);
-	emojiDoc->setDocumentMargin(0);
-	proxy->setDocument(emojiDoc);
-
-	auto font = QFont();
-	font.setPixelSize(int(item->fontSize()));
-	font.setWeight(QFont::DemiBold);
-	proxy->setFont(font);
-
-	{
-		auto option = emojiDoc->defaultTextOption();
-		option.setAlignment(Qt::AlignCenter);
-		emojiDoc->setDefaultTextOption(option);
-	}
+	_textEdit.proxy.reset(new TextEditProxy());
+	const auto proxy = _textEdit.proxy.get();
+	setupTextProxy(proxy, item->color(), item->fontSize());
 
 	proxy->setPlainText(item->text());
-	ReplaceEmoji(emojiDoc);
+	ReplaceEmoji(proxy->document());
 
+	const auto emojiDoc = proxy->document();
 	const auto shortSide = std::min(
 		sceneRect().width(),
 		sceneRect().height());
-	const auto padding = int(item->fontSize() * 0.4);
-	const auto maxTextWidth = int(shortSide * 0.8) - 2 * padding;
-	const auto minTextWidth = int(shortSide * 0.16) - 2 * padding;
+	const auto padding = int(item->fontSize() * kPaddingFactor);
+	const auto maxTextWidth = int(shortSide * kMaxWidthFactor) - 2 * padding;
+	const auto minTextWidth = int(shortSide * kMinWidthFactor) - 2 * padding;
 	const auto anchor = item->scenePos();
 	const auto adjustWidth = [=] {
 		emojiDoc->setTextWidth(maxTextWidth);
 		const auto ideal = int(std::ceil(emojiDoc->idealWidth()));
 		const auto width = std::clamp(
-			ideal + 2,
+			ideal + kIdealWidthExtra,
 			minTextWidth,
 			maxTextWidth);
 		proxy->setTextWidth(width);
@@ -623,7 +635,7 @@ void Scene::startTextEditing(ItemText *item) {
 
 	const auto scale = item->editScale();
 	proxy->setRotation(item->rotation());
-	if (std::abs(scale - 1.) > 0.01) {
+	if (std::abs(scale - 1.) > kScaleThreshold) {
 		proxy->setScale(scale);
 	}
 
@@ -637,14 +649,19 @@ void Scene::startTextEditing(ItemText *item) {
 
 	item->setVisible(false);
 
-	proxy->onFinish = crl::guard(this, [=] {
+	const auto raw = static_cast<TextEditProxy*>(proxy);
+	raw->onFinish = crl::guard(this, [=] {
 		finishTextEditing(true);
 	});
-	proxy->onCancel = crl::guard(this, [=] {
+	raw->onCancel = crl::guard(this, [=] {
 		finishTextEditing(false);
 	});
 
-	_textEdit = { .item = item, .proxy = proxy };
+	const auto it = _itemsByPointer.find(item);
+	_textEdit.item = (it != end(_itemsByPointer))
+		? it->second
+		: std::weak_ptr<NumberedItem>();
+	_textColorRequests.fire_copy(item->color());
 }
 
 void Scene::finishTextEditing(bool save) {
@@ -658,15 +675,19 @@ void Scene::finishTextEditing(bool save) {
 	const auto proxyRect = _textEdit.proxy->boundingRect();
 	const auto proxyCenter = _textEdit.proxy->pos()
 		+ QPointF(proxyRect.width() / 2., proxyRect.height() / 2.);
-	auto *existingItem = _textEdit.item;
+	const auto lockedItem = _textEdit.item.lock();
+	auto *existingItem = lockedItem
+		? static_cast<ItemText*>(lockedItem.get())
+		: (ItemText*)(nullptr);
 
-	const auto proxy = static_cast<TextEditProxy*>(_textEdit.proxy);
-	proxy->onFinish = nullptr;
-	proxy->onCancel = nullptr;
-	QGraphicsScene::removeItem(proxy);
-	delete proxy;
+	const auto raw = static_cast<TextEditProxy*>(_textEdit.proxy.get());
+	raw->onFinish = nullptr;
+	raw->onCancel = nullptr;
+	QGraphicsScene::removeItem(_textEdit.proxy.get());
 	_textEdit.proxy = nullptr;
-	_textEdit.item = nullptr;
+	_textEdit.item.reset();
+
+	const auto defaultStyle = static_cast<TextStyle>(_textStyle);
 
 	if (!text.isEmpty()) {
 		if (existingItem) {
@@ -678,7 +699,7 @@ void Scene::finishTextEditing(bool save) {
 				text,
 				_textFontSize,
 				imageSize,
-				TextStyle::Plain);
+				defaultStyle);
 			const auto zoom = (_currentZoom > 0.) ? _currentZoom : 1.;
 			const auto handleInflate = int(
 				std::ceil(st::photoEditorItemHandleSize / zoom));
@@ -697,7 +718,7 @@ void Scene::finishTextEditing(bool save) {
 				text,
 				_textColor,
 				_textFontSize,
-				TextStyle::Plain,
+				defaultStyle,
 				imageSize,
 				std::move(data));
 			addItem(item);
@@ -713,17 +734,15 @@ void Scene::finishTextEditing(bool save) {
 
 Scene::~Scene() {
 	if (_textEdit.proxy) {
-		const auto proxy = static_cast<TextEditProxy*>(_textEdit.proxy);
-		proxy->onFinish = nullptr;
-		proxy->onCancel = nullptr;
-		QGraphicsScene::removeItem(proxy);
-		delete proxy;
+		const auto raw = static_cast<TextEditProxy*>(
+			_textEdit.proxy.get());
+		raw->onFinish = nullptr;
+		raw->onCancel = nullptr;
+		QGraphicsScene::removeItem(_textEdit.proxy.get());
 		_textEdit.proxy = nullptr;
 	}
-	// Prevent destroying by scene of all items.
 	QGraphicsScene::removeItem(_canvas.get());
 	for (const auto &item : items()) {
-		// Scene loses ownership of an item.
 		QGraphicsScene::removeItem(item.get());
 	}
 }

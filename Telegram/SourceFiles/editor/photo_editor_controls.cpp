@@ -206,9 +206,10 @@ class TextToolButton final : public Ui::AbstractButton {
 public:
 	TextToolButton(not_null<QWidget*> parent)
 	: AbstractButton(parent) {
+		constexpr auto kSizeShrink = 6;
 		resize(
-			st::photoEditorStickersButton.width,
-			st::photoEditorStickersButton.height);
+			st::photoEditorStickersButton.width - kSizeShrink,
+			st::photoEditorStickersButton.height - kSizeShrink);
 		events(
 		) | rpl::on_next([=](not_null<QEvent*> event) {
 			if (event->type() == QEvent::Enter

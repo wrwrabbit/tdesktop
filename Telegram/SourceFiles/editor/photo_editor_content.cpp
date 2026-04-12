@@ -166,6 +166,14 @@ void PhotoEditorContent::createTextItem() {
 	_paint->createTextItem();
 }
 
+void PhotoEditorContent::setTextColor(const QColor &color) {
+	_paint->setTextColor(color);
+}
+
+rpl::producer<QColor> PhotoEditorContent::textColorRequests() const {
+	return _paint->textColorRequests();
+}
+
 bool PhotoEditorContent::handleKeyPress(not_null<QKeyEvent*> e) const {
 	return false;
 }

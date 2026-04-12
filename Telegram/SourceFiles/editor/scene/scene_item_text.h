@@ -10,8 +10,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unique_qptr.h"
 #include "editor/scene/scene_item_base.h"
 
-#include <QTextDocument>
-
 namespace Ui {
 class PopupMenu;
 } // namespace Ui
@@ -24,18 +22,6 @@ enum class TextStyle : uchar {
 	Plain,
 };
 
-class EmojiDocument final : public QTextDocument {
-public:
-	explicit EmojiDocument(QObject *parent = nullptr);
-	QVariant loadResource(int type, const QUrl &name) override;
-
-private:
-	std::map<QUrl, QVariant> _cache;
-};
-
-void ReplaceEmoji(QTextDocument *doc);
-[[nodiscard]] QString RecoverTextFromDocument(QTextDocument *doc);
-
 class ItemText : public ItemBase {
 public:
 	enum { Type = ItemBase::Type + 2 };
@@ -43,7 +29,7 @@ public:
 	ItemText(
 		const QString &text,
 		const QColor &color,
-		float fontSize,
+		float64 fontSize,
 		TextStyle style,
 		const QSize &imageSize,
 		ItemBase::Data data);
@@ -60,7 +46,7 @@ public:
 	[[nodiscard]] const QColor &color() const;
 	void setColor(const QColor &color);
 
-	[[nodiscard]] float fontSize() const;
+	[[nodiscard]] float64 fontSize() const;
 
 	[[nodiscard]] TextStyle textStyle() const;
 	void setTextStyle(TextStyle style);
@@ -69,7 +55,7 @@ public:
 
 	[[nodiscard]] static QSize computeContentSize(
 		const QString &text,
-		float fontSize,
+		float64 fontSize,
 		const QSize &imageSize,
 		TextStyle style);
 
@@ -88,7 +74,7 @@ private:
 
 	QString _text;
 	QColor _color;
-	float _fontSize;
+	float64 _fontSize;
 	TextStyle _textStyle = TextStyle::Plain;
 	QSize _imageSize;
 	QPixmap _pixmap;
@@ -99,7 +85,7 @@ private:
 		NumberedItem::Status status = NumberedItem::Status::Normal;
 		QString text;
 		QColor color;
-		float fontSize = 0;
+		float64 fontSize = 0.;
 		TextStyle textStyle = TextStyle::Plain;
 	};
 	SavedText _savedState, _keepedState;

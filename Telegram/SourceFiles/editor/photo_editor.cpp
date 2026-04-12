@@ -151,7 +151,7 @@ struct BrushState {
 			const auto tool = ToolFromSerialized(entryTool);
 			const auto index = ToolIndex(tool);
 			if (version == kBrushesVersion && size > 0) {
-				result.brushes[index].sizeRatio = size / float(kPrecision);
+				result.brushes[index].sizeRatio = size / float64(kPrecision);
 			}
 			if (color.isValid()) {
 				result.brushes[index].color = color;
@@ -344,6 +344,7 @@ PhotoEditor::PhotoEditor(
 	_colorPicker->saveBrushRequests(
 	) | rpl::on_next([=](const Brush &brush) {
 		_content->applyBrush(brush);
+		_content->setTextColor(brush.color);
 
 		_brushTool = brush.tool;
 		_brushes[ToolIndex(brush.tool)] = brush;
@@ -352,6 +353,11 @@ PhotoEditor::PhotoEditor(
 			Core::App().settings().setPhotoEditorBrush(serialized);
 			Core::App().saveSettingsDelayed();
 		}
+	}, lifetime());
+
+	_content->textColorRequests(
+	) | rpl::on_next([=](const QColor &color) {
+		_colorPicker->setColor(color);
 	}, lifetime());
 }
 

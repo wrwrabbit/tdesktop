@@ -7182,6 +7182,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_photo_editor_menu_flip" = "Flip";
 "lng_photo_editor_menu_duplicate" = "Duplicate";
 
+"lng_photo_editor_text_style_plain" = "Plain";
+"lng_photo_editor_text_style_framed" = "Framed";
+"lng_photo_editor_text_style_semi_transparent" = "Semi-Transparent";
+
 "lng_photo_editor_crop_original" = "Original";
 "lng_photo_editor_crop_square" = "Square";
 "lng_photo_editor_crop_free" = "Free";

@@ -30,6 +30,7 @@ public:
 	void moveLine(const QPoint &position);
 	void setCanvasRect(const QRect &rect);
 	void setVisible(bool visible);
+	void setColor(const QColor &color);
 	bool preventHandleKeyPress() const;
 
 	rpl::producer<Brush> saveBrushRequests() const;
