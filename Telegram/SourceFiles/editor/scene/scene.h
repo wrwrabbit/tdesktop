@@ -104,7 +104,7 @@ private:
 	rpl::event_stream<QColor> _textColorRequests;
 	rpl::event_stream<QColor> _textItemSelections;
 	rpl::event_stream<> _textItemDeselections;
-	bool _textItemWasSelected = false;
+	ItemText *_selectedTextItem = nullptr;
 	rpl::lifetime _lifetime;
 
 };

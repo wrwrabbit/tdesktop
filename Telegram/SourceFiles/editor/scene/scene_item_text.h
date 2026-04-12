@@ -61,7 +61,6 @@ public:
 
 	void save(SaveState state) override;
 	void restore(SaveState state) override;
-	bool hasState(SaveState state) const override;
 
 protected:
 	void mouseDoubleClickEvent(QGraphicsSceneMouseEvent *event) override;
@@ -81,8 +80,6 @@ private:
 	base::unique_qptr<Ui::PopupMenu> _contextMenu;
 
 	struct SavedText {
-		bool saved = false;
-		NumberedItem::Status status = NumberedItem::Status::Normal;
 		QString text;
 		QColor color;
 		float64 fontSize = 0.;

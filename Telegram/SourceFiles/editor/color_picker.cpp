@@ -567,13 +567,15 @@ void ColorPicker::setTool(Brush::Tool tool) {
 }
 
 void ColorPicker::storeCurrentBrush() {
+	if (_toolSelectionSuppressed) {
+		return;
+	}
 	NormalizeBrushColor(_brush);
 	_toolBrushes[ToolIndex(_brush.tool)] = _brush;
 }
 
 void ColorPicker::setColor(const QColor &color) {
 	_brush.color = color;
-	storeCurrentBrush();
 	updateColorButtonColor(color, true);
 	if (_paletteVisible) {
 		rebuildPalette();

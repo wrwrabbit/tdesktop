@@ -299,13 +299,14 @@ Scene::Scene(const QRectF &rect)
 				&& selected.front()->type() == ItemText::Type) {
 				textItem = static_cast<ItemText*>(selected.front());
 			}
+			const auto changed = (textItem != _selectedTextItem);
+			if (!changed) {
+				return;
+			}
+			_selectedTextItem = textItem;
 			if (textItem) {
-				if (!_textItemWasSelected) {
-					_textItemWasSelected = true;
-					_textItemSelections.fire_copy(textItem->color());
-				}
-			} else if (_textItemWasSelected) {
-				_textItemWasSelected = false;
+				_textItemSelections.fire_copy(textItem->color());
+			} else {
 				_textItemDeselections.fire({});
 			}
 		});

@@ -373,8 +373,8 @@ PhotoEditor::PhotoEditor(
 	_content->textItemSelections(
 	) | rpl::on_next([=](const QColor &color) {
 		_textItemSelected = true;
-		_colorPicker->setColor(color);
 		_colorPicker->setToolSelectionVisible(false);
+		_colorPicker->setColor(color);
 	}, lifetime());
 
 	_content->textItemDeselections(

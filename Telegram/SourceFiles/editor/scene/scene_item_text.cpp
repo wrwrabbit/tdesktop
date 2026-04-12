@@ -619,8 +619,6 @@ void ItemText::save(SaveState state) {
 	ItemBase::save(state);
 	auto &saved = (state == SaveState::Keep) ? _keepedState : _savedState;
 	saved = {
-		.saved = true,
-		.status = status(),
 		.text = _text,
 		.color = _color,
 		.fontSize = _fontSize,
@@ -639,10 +637,6 @@ void ItemText::restore(SaveState state) {
 	_textStyle = saved.textStyle;
 	renderContent();
 	ItemBase::restore(state);
-}
-
-bool ItemText::hasState(SaveState state) const {
-	return ItemBase::hasState(state);
 }
 
 } // namespace Editor
