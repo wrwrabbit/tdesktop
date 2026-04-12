@@ -146,6 +146,8 @@ constexpr auto kZoomToScreenLevel = 1024;
 constexpr auto kOverlayLoaderPriority = 2;
 constexpr auto kSeekTimeMs = 5 * crl::time(1000);
 constexpr auto kSeekTimeMsLong = 10 * crl::time(1000);
+constexpr auto kFrameStepFallbackFps = 30.;
+constexpr auto kFrameStepThrottleMs = crl::time(150);
 
 // macOS OpenGL renderer fails to render larger texture
 // even though it reports that max texture size is 16384.
@@ -615,6 +617,10 @@ OverlayWidget::OverlayWidget()
 
 	_speedBoostHoldTimer.setCallback([=] {
 		startSpeedBoost();
+	});
+
+	_frameStepThrottle.setCallback([=] {
+		flushPendingFrameStep();
 	});
 
 	_docRectImage = QImage(
@@ -5071,6 +5077,21 @@ void OverlayWidget::playbackPauseResume() {
 	}
 }
 
+void OverlayWidget::flushPendingFrameStep() {
+	if (!_streamed || !_frameStepPending) {
+		_frameStepThrottle.cancel();
+		return;
+	}
+	const auto fps = _streamed->instance.info().video.fps;
+	const auto stepMs = 1000.
+		/ ((fps > 0.) ? fps : kFrameStepFallbackFps);
+	const auto shift = crl::time(std::round(_frameStepPending * stepMs));
+	_frameStepPending = 0;
+	_streamingStartPaused = true;
+	seekRelativeTime(shift);
+	_frameStepThrottle.callOnce(kFrameStepThrottleMs);
+}
+
 void OverlayWidget::seekRelativeTime(crl::time time) {
 	Expects(_streamed != nullptr);
 
@@ -6614,6 +6635,15 @@ void OverlayWidget::handleKeyPress(not_null<QKeyEvent*> e) {
 		} else if (key == Qt::Key_L) {
 			activateControls();
 			seekRelativeTime(kSeekTimeMsLong);
+			return;
+		} else if ((key == Qt::Key_Period || key == Qt::Key_Comma)
+			&& _streamed->instance.player().paused()) {
+			activateControls();
+			_frameStepPending += (key == Qt::Key_Period) ? 1 : -1;
+			if (!_frameStepThrottle.isActive()) {
+				flushPendingFrameStep();
+				_frameStepThrottle.callOnce(kFrameStepThrottleMs);
+			}
 			return;
 		} else if (modifiers.testFlag(Qt::AltModifier)
 			&& (key == Qt::Key_Left || key == Qt::Key_Right)

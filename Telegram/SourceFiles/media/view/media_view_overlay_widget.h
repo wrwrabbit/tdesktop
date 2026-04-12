@@ -419,6 +419,7 @@ private:
 	void seekRelativeTime(crl::time time);
 	void restartAtProgress(float64 progress);
 	void restartAtSeekPosition(crl::time position);
+	void flushPendingFrameStep();
 
 	void refreshClipControllerGeometry();
 	void refreshCaptionGeometry();
@@ -805,6 +806,8 @@ private:
 	QRect _speedBoostRect;
 	Ui::Animations::Simple _speedBoostAnimation;
 	base::Timer _speedBoostHoldTimer;
+	base::Timer _frameStepThrottle;
+	int _frameStepPending = 0;
 	Ui::Animations::Basic _speedBoostTicker;
 	float64 _speedBoostPhase = 0.;
 	crl::time _speedBoostLastFrame = 0;
