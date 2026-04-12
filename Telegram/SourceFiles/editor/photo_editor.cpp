@@ -348,7 +348,7 @@ PhotoEditor::PhotoEditor(
 
 	_colorPicker->saveBrushRequests(
 	) | rpl::on_next([=](const Brush &brush) {
-		if (_textItemSelected) {
+		if (_textItemSelected || _textEditing) {
 			_content->setSelectedTextColor(brush.color);
 			_content->setTextColor(brush.color);
 		} else {
@@ -362,6 +362,18 @@ PhotoEditor::PhotoEditor(
 				Core::App().settings().setPhotoEditorBrush(serialized);
 				Core::App().saveSettingsDelayed();
 			}
+		}
+	}, lifetime());
+
+	_content->textEditStates(
+	) | rpl::on_next([=](bool editing) {
+		_textEditing = editing;
+		if (_textEditing) {
+			_colorPicker->setToolSelectionVisible(false);
+		} else if (!_textItemSelected) {
+			const auto &brush = _brushes[ToolIndex(_brushTool)];
+			_colorPicker->setColor(brush.color);
+			_colorPicker->setToolSelectionVisible(true);
 		}
 	}, lifetime());
 
@@ -380,6 +392,9 @@ PhotoEditor::PhotoEditor(
 	_content->textItemDeselections(
 	) | rpl::on_next([=] {
 		_textItemSelected = false;
+		if (_textEditing) {
+			return;
+		}
 		const auto &brush = _brushes[ToolIndex(_brushTool)];
 		_colorPicker->setColor(brush.color);
 		_colorPicker->setToolSelectionVisible(true);

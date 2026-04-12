@@ -89,9 +89,17 @@ Paint::Paint(
 	_viewport->setAttribute(Qt::WA_TranslucentBackground, true);
 	_viewport->installEventFilter(this);
 
+	_scene->textEditStates(
+	) | rpl::on_next([=](bool editing) {
+		_textEditing = editing;
+	}, lifetime());
+
 	// Undo / Redo.
 	controllers->undoController->performRequestChanges(
 	) | rpl::on_next([=](const Undo &command) {
+		if (_textEditing.current()) {
+			return;
+		}
 		if (command == Undo::Undo) {
 			_scene->performUndo();
 		} else {
@@ -103,16 +111,22 @@ Paint::Paint(
 	}, lifetime());
 
 	controllers->undoController->setCanPerformChanges(rpl::merge(
-		_hasUndo.value() | rpl::map([](bool enable) {
+		rpl::combine(
+			_hasUndo.value(),
+			_textEditing.value()
+		) | rpl::map([](bool enable, bool editing) {
 			return UndoController::EnableRequest{
 				.command = Undo::Undo,
-				.enable = enable,
+				.enable = enable && !editing,
 			};
 		}),
-		_hasRedo.value() | rpl::map([](bool enable) {
+		rpl::combine(
+			_hasRedo.value(),
+			_textEditing.value()
+		) | rpl::map([](bool enable, bool editing) {
 			return UndoController::EnableRequest{
 				.command = Undo::Redo,
-				.enable = enable,
+				.enable = enable && !editing,
 			};
 		})));
 
@@ -272,6 +286,10 @@ rpl::producer<QColor> Paint::textItemSelections() const {
 
 rpl::producer<> Paint::textItemDeselections() const {
 	return _scene->textItemDeselections();
+}
+
+rpl::producer<bool> Paint::textEditStates() const {
+	return _scene->textEditStates();
 }
 
 void Paint::handleMimeData(const QMimeData *data) {

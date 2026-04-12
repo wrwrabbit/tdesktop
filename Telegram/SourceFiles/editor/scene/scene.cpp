@@ -420,6 +420,10 @@ rpl::producer<> Scene::textItemDeselections() const {
 	return _textItemDeselections.events();
 }
 
+rpl::producer<bool> Scene::textEditStates() const {
+	return _textEditStates.events();
+}
+
 void Scene::setBlurSource(Fn<QImage(QRect)> source) {
 	_blurSource = std::move(source);
 }
@@ -548,6 +552,14 @@ void Scene::restore(SaveState state) {
 	cancelDrawing();
 }
 
+void Scene::setTextEditing(bool editing) {
+	if (_textEditing == editing) {
+		return;
+	}
+	_textEditing = editing;
+	_textEditStates.fire_copy(editing);
+}
+
 void Scene::setupTextProxy(
 		QGraphicsTextItem *proxy,
 		const QColor &color,
@@ -578,6 +590,7 @@ void Scene::createTextAtCenter() {
 
 	clearSelection();
 	cancelDrawing();
+	setTextEditing(true);
 
 	_textEdit.proxy.reset(new TextEditProxy());
 	const auto proxy = _textEdit.proxy.get();
@@ -636,6 +649,7 @@ void Scene::startTextEditing(ItemText *item) {
 	}
 
 	cancelDrawing();
+	setTextEditing(true);
 
 	_textEdit.proxy.reset(new TextEditProxy());
 	const auto proxy = _textEdit.proxy.get();
@@ -724,6 +738,7 @@ void Scene::finishTextEditing(bool save) {
 	QGraphicsScene::removeItem(_textEdit.proxy.get());
 	_textEdit.proxy = nullptr;
 	_textEdit.item.reset();
+	setTextEditing(false);
 
 	const auto defaultStyle = static_cast<TextStyle>(_textStyle);
 
@@ -772,6 +787,7 @@ void Scene::finishTextEditing(bool save) {
 
 Scene::~Scene() {
 	if (_textEdit.proxy) {
+		setTextEditing(false);
 		const auto raw = static_cast<TextEditProxy*>(
 			_textEdit.proxy.get());
 		raw->onFinish = nullptr;

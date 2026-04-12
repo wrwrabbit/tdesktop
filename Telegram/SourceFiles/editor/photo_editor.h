@@ -73,6 +73,7 @@ private:
 		.action = PhotoEditorMode::Action::None,
 	};
 	bool _textItemSelected = false;
+	bool _textEditing = false;
 	rpl::event_stream<PhotoModifications> _done;
 	rpl::event_stream<> _cancel;
 

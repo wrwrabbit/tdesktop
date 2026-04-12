@@ -57,6 +57,7 @@ public:
 	[[nodiscard]] rpl::producer<QColor> textColorRequests() const;
 	[[nodiscard]] rpl::producer<QColor> textItemSelections() const;
 	[[nodiscard]] rpl::producer<> textItemDeselections() const;
+	[[nodiscard]] rpl::producer<bool> textEditStates() const;
 
 	[[nodiscard]] bool hasUndo() const;
 	[[nodiscard]] bool hasRedo() const;
@@ -75,6 +76,7 @@ protected:
 private:
 	void removeIf(Fn<bool(const ItemPtr &)> proj);
 	void finishTextEditing(bool save);
+	void setTextEditing(bool editing);
 	void setupTextProxy(
 		QGraphicsTextItem *proxy,
 		const QColor &color,
@@ -104,7 +106,9 @@ private:
 	rpl::event_stream<QColor> _textColorRequests;
 	rpl::event_stream<QColor> _textItemSelections;
 	rpl::event_stream<> _textItemDeselections;
+	rpl::event_stream<bool> _textEditStates;
 	ItemText *_selectedTextItem = nullptr;
+	bool _textEditing = false;
 	rpl::lifetime _lifetime;
 
 };

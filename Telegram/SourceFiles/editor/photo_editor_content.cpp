@@ -190,6 +190,10 @@ rpl::producer<> PhotoEditorContent::textItemDeselections() const {
 	return _paint->textItemDeselections();
 }
 
+rpl::producer<bool> PhotoEditorContent::textEditStates() const {
+	return _paint->textEditStates();
+}
+
 bool PhotoEditorContent::handleKeyPress(not_null<QKeyEvent*> e) const {
 	return false;
 }

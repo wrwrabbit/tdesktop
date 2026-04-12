@@ -39,6 +39,7 @@ public:
 	[[nodiscard]] rpl::producer<QColor> textColorRequests() const;
 	[[nodiscard]] rpl::producer<QColor> textItemSelections() const;
 	[[nodiscard]] rpl::producer<> textItemDeselections() const;
+	[[nodiscard]] rpl::producer<bool> textEditStates() const;
 	void applyAspectRatio(float64 ratio);
 	void save(PhotoModifications &modifications);
 

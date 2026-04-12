@@ -49,6 +49,7 @@ public:
 	[[nodiscard]] rpl::producer<QColor> textColorRequests() const;
 	[[nodiscard]] rpl::producer<QColor> textItemSelections() const;
 	[[nodiscard]] rpl::producer<> textItemDeselections() const;
+	[[nodiscard]] rpl::producer<bool> textEditStates() const;
 
 	void handleMimeData(const QMimeData *data);
 	void paintImage(QPainter &p, const QPixmap &image) const;
@@ -93,6 +94,7 @@ private:
 
 	rpl::variable<bool> _hasUndo = true;
 	rpl::variable<bool> _hasRedo = true;
+	rpl::variable<bool> _textEditing = false;
 
 
 };
