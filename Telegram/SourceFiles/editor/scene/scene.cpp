@@ -521,18 +521,29 @@ void Scene::createTextAtCenter() {
 		emojiDoc->setDefaultTextOption(option);
 	}
 
-	QObject::connect(emojiDoc, &QTextDocument::contentsChanged, [emojiDoc] {
-		ReplaceEmoji(emojiDoc);
-	});
-
 	const auto shortSide = std::min(
 		sceneRect().width(),
 		sceneRect().height());
 	const auto padding = int(_textFontSize * 0.4);
-	const auto textWidth = int(shortSide * 0.8) - 2 * padding;
-	proxy->setTextWidth(textWidth);
-	const auto center = sceneRect().center();
-	proxy->setPos(center.x() - textWidth / 2., center.y());
+	const auto maxTextWidth = int(shortSide * 0.8) - 2 * padding;
+	const auto minTextWidth = int(shortSide * 0.16) - 2 * padding;
+	const auto sceneCenter = sceneRect().center();
+	const auto adjustWidth = [=] {
+		emojiDoc->setTextWidth(maxTextWidth);
+		const auto ideal = int(std::ceil(emojiDoc->idealWidth()));
+		const auto width = std::clamp(
+			ideal + 2,
+			minTextWidth,
+			maxTextWidth);
+		proxy->setTextWidth(width);
+		proxy->setPos(sceneCenter.x() - width / 2., sceneCenter.y());
+	};
+	adjustWidth();
+
+	QObject::connect(emojiDoc, &QTextDocument::contentsChanged, [=] {
+		ReplaceEmoji(emojiDoc);
+		adjustWidth();
+	});
 
 	QGraphicsScene::addItem(proxy);
 	proxy->setZValue((*_lastZ)++);
@@ -582,22 +593,33 @@ void Scene::startTextEditing(ItemText *item) {
 	proxy->setPlainText(item->text());
 	ReplaceEmoji(emojiDoc);
 
-	QObject::connect(emojiDoc, &QTextDocument::contentsChanged, [emojiDoc] {
-		ReplaceEmoji(emojiDoc);
-	});
-
 	const auto shortSide = std::min(
 		sceneRect().width(),
 		sceneRect().height());
 	const auto padding = int(item->fontSize() * 0.4);
-	const auto textWidth = int(shortSide * 0.8) - 2 * padding;
-	proxy->setTextWidth(textWidth);
+	const auto maxTextWidth = int(shortSide * 0.8) - 2 * padding;
+	const auto minTextWidth = int(shortSide * 0.16) - 2 * padding;
+	const auto anchor = item->scenePos();
+	const auto adjustWidth = [=] {
+		emojiDoc->setTextWidth(maxTextWidth);
+		const auto ideal = int(std::ceil(emojiDoc->idealWidth()));
+		const auto width = std::clamp(
+			ideal + 2,
+			minTextWidth,
+			maxTextWidth);
+		proxy->setTextWidth(width);
+		const auto center = proxy->boundingRect().center();
+		proxy->setTransformOriginPoint(center);
+		proxy->setPos(anchor - center);
+	};
+	adjustWidth();
+
+	QObject::connect(emojiDoc, &QTextDocument::contentsChanged, [=] {
+		ReplaceEmoji(emojiDoc);
+		adjustWidth();
+	});
 
 	const auto scale = item->editScale();
-	const auto proxyRect = proxy->boundingRect();
-	const auto center = proxyRect.center();
-	proxy->setTransformOriginPoint(center);
-	proxy->setPos(item->scenePos() - center);
 	proxy->setRotation(item->rotation());
 	if (std::abs(scale - 1.) > 0.01) {
 		proxy->setScale(scale);
