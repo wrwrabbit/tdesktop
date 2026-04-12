@@ -32,9 +32,13 @@ public:
 	void applyMode(const PhotoEditorMode &mode);
 	void applyBrush(const Brush &brush);
 	void createTextItem();
+	void clearSelection();
 	void setTextColor(const QColor &color);
+	void setSelectedTextColor(const QColor &color);
 
 	[[nodiscard]] rpl::producer<QColor> textColorRequests() const;
+	[[nodiscard]] rpl::producer<QColor> textItemSelections() const;
+	[[nodiscard]] rpl::producer<> textItemDeselections() const;
 	void applyAspectRatio(float64 ratio);
 	void save(PhotoModifications &modifications);
 

@@ -351,6 +351,7 @@ ColorPicker::ColorPicker(
 		button->show();
 	}
 	const auto setToolRequest = [=](Brush::Tool tool) {
+		_toolClicks.fire({});
 		setTool(tool);
 	};
 	if (_toolButtons.size() >= 5) {
@@ -581,6 +582,11 @@ void ColorPicker::setColor(const QColor &color) {
 	}
 }
 
+void ColorPicker::setToolSelectionVisible(bool visible) {
+	_toolSelectionSuppressed = !visible;
+	_toolSelection->setVisible(visible);
+}
+
 void ColorPicker::updateColorButtonColor(const QColor &color, bool animated) {
 	const auto hasValid = _colorButtonFrom.isValid() && _colorButtonTo.isValid();
 	const auto from = hasValid ? colorButtonColor() : color;
@@ -643,17 +649,24 @@ void ColorPicker::setVisible(bool visible) {
 	_paletteWrap->setVisible(visible && _paletteVisible);
 	_sizeControlHoverArea->setVisible(visible);
 	_sizeControl->setVisible(visible);
-	_toolSelection->setVisible(visible && !_paletteVisible);
+	const auto showTools = visible
+		&& !_paletteVisible
+		&& !_toolSelectionSuppressed;
+	_toolSelection->setVisible(showTools);
 	for (const auto &button : _toolButtons) {
 		button->setVisible(visible && !_paletteVisible);
 	}
-	if (visible && !_paletteVisible) {
+	if (showTools) {
 		updateToolSelection(false);
 	}
 }
 
 rpl::producer<Brush> ColorPicker::saveBrushRequests() const {
 	return _saveBrushRequests.events_starting_with_copy(_brush);
+}
+
+rpl::producer<> ColorPicker::toolClicks() const {
+	return _toolClicks.events();
 }
 
 bool ColorPicker::preventHandleKeyPress() const {
@@ -796,13 +809,14 @@ void ColorPicker::setPaletteVisible(bool visible) {
 	_paletteVisible = visible;
 	_paletteWrap->setVisible(visible);
 	_colorButton->setVisible(!visible);
-	_toolSelection->setVisible(!visible);
+	const auto showTools = !visible && !_toolSelectionSuppressed;
+	_toolSelection->setVisible(showTools);
 	for (const auto &button : _toolButtons) {
 		button->setVisible(!visible);
 	}
 	if (visible) {
 		rebuildPalette();
-	} else {
+	} else if (showTools) {
 		updateToolSelection(false);
 	}
 }

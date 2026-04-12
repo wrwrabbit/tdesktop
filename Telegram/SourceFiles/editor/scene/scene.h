@@ -52,8 +52,11 @@ public:
 	void startTextEditing(ItemText *item);
 	void createTextAtCenter();
 	void setTextColor(const QColor &color);
+	void setSelectedTextColor(const QColor &color);
 
 	[[nodiscard]] rpl::producer<QColor> textColorRequests() const;
+	[[nodiscard]] rpl::producer<QColor> textItemSelections() const;
+	[[nodiscard]] rpl::producer<> textItemDeselections() const;
 
 	[[nodiscard]] bool hasUndo() const;
 	[[nodiscard]] bool hasRedo() const;
@@ -99,6 +102,9 @@ private:
 
 	rpl::event_stream<> _addsItem, _removesItem;
 	rpl::event_stream<QColor> _textColorRequests;
+	rpl::event_stream<QColor> _textItemSelections;
+	rpl::event_stream<> _textItemDeselections;
+	bool _textItemWasSelected = false;
 	rpl::lifetime _lifetime;
 
 };

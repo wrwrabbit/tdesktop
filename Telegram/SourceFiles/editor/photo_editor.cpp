@@ -341,23 +341,48 @@ PhotoEditor::PhotoEditor(
 		}
 	}, lifetime());
 
+	_colorPicker->toolClicks(
+	) | rpl::on_next([=] {
+		_content->clearSelection();
+	}, lifetime());
+
 	_colorPicker->saveBrushRequests(
 	) | rpl::on_next([=](const Brush &brush) {
-		_content->applyBrush(brush);
-		_content->setTextColor(brush.color);
+		if (_textItemSelected) {
+			_content->setSelectedTextColor(brush.color);
+			_content->setTextColor(brush.color);
+		} else {
+			_content->applyBrush(brush);
+			_content->setTextColor(brush.color);
 
-		_brushTool = brush.tool;
-		_brushes[ToolIndex(brush.tool)] = brush;
-		const auto serialized = Serialize(_brushes, _brushTool);
-		if (Core::App().settings().photoEditorBrush() != serialized) {
-			Core::App().settings().setPhotoEditorBrush(serialized);
-			Core::App().saveSettingsDelayed();
+			_brushTool = brush.tool;
+			_brushes[ToolIndex(brush.tool)] = brush;
+			const auto serialized = Serialize(_brushes, _brushTool);
+			if (Core::App().settings().photoEditorBrush() != serialized) {
+				Core::App().settings().setPhotoEditorBrush(serialized);
+				Core::App().saveSettingsDelayed();
+			}
 		}
 	}, lifetime());
 
 	_content->textColorRequests(
 	) | rpl::on_next([=](const QColor &color) {
 		_colorPicker->setColor(color);
+	}, lifetime());
+
+	_content->textItemSelections(
+	) | rpl::on_next([=](const QColor &color) {
+		_textItemSelected = true;
+		_colorPicker->setColor(color);
+		_colorPicker->setToolSelectionVisible(false);
+	}, lifetime());
+
+	_content->textItemDeselections(
+	) | rpl::on_next([=] {
+		_textItemSelected = false;
+		const auto &brush = _brushes[ToolIndex(_brushTool)];
+		_colorPicker->setColor(brush.color);
+		_colorPicker->setToolSelectionVisible(true);
 	}, lifetime());
 }
 

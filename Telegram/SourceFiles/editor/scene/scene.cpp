@@ -288,6 +288,27 @@ Scene::Scene(const QRectF &rect)
 		addItem(item);
 		_canvas->setZValue(++_lastLineZ);
 	}, _lifetime);
+
+	QObject::connect(
+		this,
+		&QGraphicsScene::selectionChanged,
+		[=] {
+			const auto selected = selectedItems();
+			auto *textItem = (ItemText*)(nullptr);
+			if (selected.size() == 1
+				&& selected.front()->type() == ItemText::Type) {
+				textItem = static_cast<ItemText*>(selected.front());
+			}
+			if (textItem) {
+				if (!_textItemWasSelected) {
+					_textItemWasSelected = true;
+					_textItemSelections.fire_copy(textItem->color());
+				}
+			} else if (_textItemWasSelected) {
+				_textItemWasSelected = false;
+				_textItemDeselections.fire({});
+			}
+		});
 }
 
 void Scene::cancelDrawing() {
@@ -378,8 +399,24 @@ void Scene::setTextColor(const QColor &color) {
 	}
 }
 
+void Scene::setSelectedTextColor(const QColor &color) {
+	for (auto *item : selectedItems()) {
+		if (item->type() == ItemText::Type) {
+			static_cast<ItemText*>(item)->setColor(color);
+		}
+	}
+}
+
 rpl::producer<QColor> Scene::textColorRequests() const {
 	return _textColorRequests.events();
+}
+
+rpl::producer<QColor> Scene::textItemSelections() const {
+	return _textItemSelections.events();
+}
+
+rpl::producer<> Scene::textItemDeselections() const {
+	return _textItemDeselections.events();
 }
 
 void Scene::setBlurSource(Fn<QImage(QRect)> source) {

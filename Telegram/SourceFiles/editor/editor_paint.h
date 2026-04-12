@@ -42,9 +42,13 @@ public:
 	void updateUndoState();
 
 	void createTextItem();
+	void clearSelection();
 	void setTextColor(const QColor &color);
+	void setSelectedTextColor(const QColor &color);
 
 	[[nodiscard]] rpl::producer<QColor> textColorRequests() const;
+	[[nodiscard]] rpl::producer<QColor> textItemSelections() const;
+	[[nodiscard]] rpl::producer<> textItemDeselections() const;
 
 	void handleMimeData(const QMimeData *data);
 	void paintImage(QPainter &p, const QPixmap &image) const;

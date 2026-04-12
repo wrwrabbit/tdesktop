@@ -250,12 +250,28 @@ void Paint::createTextItem() {
 	_scene->createTextAtCenter();
 }
 
+void Paint::clearSelection() {
+	_scene->clearSelection();
+}
+
 void Paint::setTextColor(const QColor &color) {
 	_scene->setTextColor(color);
 }
 
+void Paint::setSelectedTextColor(const QColor &color) {
+	_scene->setSelectedTextColor(color);
+}
+
 rpl::producer<QColor> Paint::textColorRequests() const {
 	return _scene->textColorRequests();
+}
+
+rpl::producer<QColor> Paint::textItemSelections() const {
+	return _scene->textItemSelections();
+}
+
+rpl::producer<> Paint::textItemDeselections() const {
+	return _scene->textItemDeselections();
 }
 
 void Paint::handleMimeData(const QMimeData *data) {

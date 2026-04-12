@@ -166,12 +166,28 @@ void PhotoEditorContent::createTextItem() {
 	_paint->createTextItem();
 }
 
+void PhotoEditorContent::clearSelection() {
+	_paint->clearSelection();
+}
+
 void PhotoEditorContent::setTextColor(const QColor &color) {
 	_paint->setTextColor(color);
 }
 
+void PhotoEditorContent::setSelectedTextColor(const QColor &color) {
+	_paint->setSelectedTextColor(color);
+}
+
 rpl::producer<QColor> PhotoEditorContent::textColorRequests() const {
 	return _paint->textColorRequests();
+}
+
+rpl::producer<QColor> PhotoEditorContent::textItemSelections() const {
+	return _paint->textItemSelections();
+}
+
+rpl::producer<> PhotoEditorContent::textItemDeselections() const {
+	return _paint->textItemDeselections();
 }
 
 bool PhotoEditorContent::handleKeyPress(not_null<QKeyEvent*> e) const {
