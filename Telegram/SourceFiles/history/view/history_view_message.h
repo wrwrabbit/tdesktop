@@ -98,6 +98,8 @@ struct TextAppearing : RuntimeComponent<TextAppearing, Element> {
 	bool geometryValid = false;
 	bool finalizing = false;
 	bool use = false;
+	mutable QImage lineCache;
+	mutable QImage gradientMask;
 };
 
 struct BottomRippleMask {

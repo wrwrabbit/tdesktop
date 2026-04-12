@@ -72,6 +72,63 @@ constexpr auto kFullLineAppearFinalDuration = crl::time(120);
 constexpr auto kLineHeightAppearDuration = crl::time(100);
 constexpr auto kLineHeightAppearFinalDuration = crl::time(60);
 
+void ApplyRevealGradient(
+		not_null<const TextAppearing*> appearing,
+		QImage &cache,
+		int availableWidth) {
+	const auto ratio = style::DevicePixelRatio();
+	const auto maskWidth = int(st::textRevealGradient) * ratio;
+	if (appearing->gradientMask.width() != maskWidth) {
+		auto mask = QImage(
+			QSize(maskWidth, 1),
+			QImage::Format_ARGB32_Premultiplied);
+		mask.setDevicePixelRatio(ratio);
+		mask.fill(Qt::transparent);
+		{
+			const auto logicalWidth = int(st::textRevealGradient);
+			auto p = QPainter(&mask);
+			auto gradient = QLinearGradient(0, 0, logicalWidth, 0);
+			gradient.setStops({
+				{ 0., QColor(255, 255, 255, 255) },
+				{ 1., QColor(255, 255, 255, 0) },
+			});
+			p.fillRect(0, 0, logicalWidth, 1, gradient);
+		}
+		appearing->gradientMask = std::move(mask);
+	}
+
+	const auto cacheW = int(cache.width() / cache.devicePixelRatio());
+	const auto cacheH = int(cache.height() / cache.devicePixelRatio());
+	const auto revealedWidth = appearing->revealedLineWidth;
+	const auto gradientWidth = std::min(
+		int(st::textRevealGradient),
+		revealedWidth);
+	const auto lineRtl = appearing->lines[appearing->shownLine].rtl;
+
+	auto p = QPainter(&cache);
+	p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+	if (lineRtl) {
+		const auto rightEdge = availableWidth - revealedWidth;
+		p.fillRect(
+			QRect(0, 0, rightEdge, cacheH),
+			Qt::transparent);
+		p.save();
+		p.translate(rightEdge + gradientWidth, 0);
+		p.scale(-1, 1);
+		p.drawImage(
+			QRect(0, 0, gradientWidth, cacheH),
+			appearing->gradientMask);
+		p.restore();
+	} else {
+		p.fillRect(
+			QRect(revealedWidth, 0, cacheW - revealedWidth, cacheH),
+			Qt::transparent);
+		p.drawImage(
+			QRect(revealedWidth - gradientWidth, 0, gradientWidth, cacheH),
+			appearing->gradientMask);
+	}
+}
+
 struct SecondRightAction {
 	std::unique_ptr<Ui::RippleAnimation> ripple;
 	ClickHandlerPtr link;
@@ -2212,32 +2269,32 @@ void Message::paintText(
 
 	const auto appearing = Get<TextAppearing>();
 	const auto appearingClip = appearing && appearing->use;
+	auto linePostprocess = std::optional<Ui::Text::LinePostprocess>();
 	if (appearingClip) {
 		const auto shown = appearing->shownLine;
 		const auto &line = appearing->lines[shown];
 
 		p.save();
-		auto clipPath = QPainterPath();
-		const auto previousLineBottom = (shown > 0)
-			? appearing->lines[shown - 1].bottom
-			: 0;
-		if (previousLineBottom > 0) {
-			clipPath.addRect(
-				trect.x(),
-				trect.y(),
-				trect.width(),
-				previousLineBottom);
-		}
-		const auto shownHeight = line.bottom - previousLineBottom;
-		const auto clipLeft = line.rtl
-			? (trect.x() + textRealWidth() - appearing->revealedLineWidth)
-			: trect.x();
-		clipPath.addRect(
-			clipLeft,
-			trect.y() + previousLineBottom,
-			appearing->revealedLineWidth,
-			shownHeight);
-		p.setClipPath(clipPath);
+		p.setClipRect(QRect(
+			trect.x(),
+			trect.y(),
+			trect.width(),
+			line.bottom));
+
+		const auto revealedWidth = appearing->revealedLineWidth;
+		const auto lineWidth = line.width;
+		const auto availableWidth = textRealWidth();
+		linePostprocess.emplace(Ui::Text::LinePostprocess{
+			.method = [=](int lineIndex) -> Fn<void(QImage&)> {
+				if (lineIndex != shown || revealedWidth >= lineWidth) {
+					return nullptr;
+				}
+				return [=](QImage &cache) {
+					ApplyRevealGradient(appearing, cache, availableWidth);
+				};
+			},
+			.cache = &appearing->lineCache,
+		});
 	}
 
 	const auto realWidth = textRealWidth();
@@ -2260,6 +2317,7 @@ void Message::paintText(
 			? &rippleRequest
 			: (highlightRequest ? &*highlightRequest : nullptr),
 		.useFullWidth = true,
+		.linePostprocess = linePostprocess ? &*linePostprocess : nullptr,
 	});
 	if (needRippleMask && !ripplePath.isEmpty()) {
 		createLinkRippleMask(
@@ -5092,7 +5150,7 @@ int Message::resizeContentGetHeight(int newWidth) {
 	const auto reactionsInBubble = _reactions && embedReactionsInBubble();
 	const auto bottomInfoHeight = _bottomInfo.resizeGetHeight(
 		std::min(
-			_bottomInfo.optimalSize().width(),
+			_bottomInfo.maxWidth(),
 			bottomInfoWidth - 2 * st::msgDateDelta.x()));
 
 	auto newHeight = minHeight();
@@ -5313,7 +5371,11 @@ bool Message::textAppearCheckLine(not_null<TextAppearing*> appearing) {
 	}
 	const auto targetHeight = textAppearTargetHeight(appearing);
 	if (appearing->targetHeight != targetHeight) {
-		if (!shown || appearing->shownHeight >= targetHeight) {
+		if (!shown) {
+			appearing->shownHeight = appearing->lines.front().bottom
+				+ (appearing->lines.size() > 1 ? skipBlockHeight() : 0);
+		}
+		if (appearing->shownHeight >= targetHeight) {
 			appearing->heightAnimation.stop();
 			appearing->shownHeight = appearing->targetHeight = targetHeight;
 		} else {
@@ -5392,7 +5454,8 @@ int Message::textAppearTargetHeight(
 	const auto available = std::max(
 		appearing->lines[shown].width,
 		appearing->shownWidth);
-	if (nextWidth + skipBlockWidth() <= available) {
+	if (nextWidth + skipBlockWidth() <= available
+		&& !appearing->lines[shown + 1].rtl) {
 		return bottom;
 	}
 	return bottom + skipBlockHeight();

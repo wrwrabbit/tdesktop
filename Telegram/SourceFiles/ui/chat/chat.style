@@ -56,6 +56,7 @@ msgSelectionOffset: 30px;
 msgSelectionBottomSkip: 5px;
 
 itemRevealDuration: 150;
+textRevealGradient: 24px;
 middleClickAutoscrollSpeedScale: 30px;
 middleClickAutoscrollMaxSpeed: 7200px;
 
