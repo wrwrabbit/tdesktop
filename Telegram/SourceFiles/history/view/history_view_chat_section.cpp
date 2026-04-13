@@ -458,36 +458,6 @@ ChatWidget::ChatWidget(
 		}, lifetime());
 	}
 
-	session().data().drawToReplyRequests(
-	) | rpl::on_next([=](Data::DrawToReplyRequest request) {
-		if (request.messageId.peer != _peer->id) {
-			return;
-		}
-		auto image = ResolveDrawToReplyImage(
-			&session().data(),
-			request);
-		if (image.isNull()) {
-			return;
-		}
-		const auto replyTo = request.messageId;
-		OpenDrawToReplyEditor(
-			controller,
-			std::move(image),
-			crl::guard(this, [=](QImage &&result) {
-				if (result.isNull()) {
-					return;
-				}
-				if (replyTo) {
-					replyToMessage({ .messageId = replyTo });
-				}
-				auto list = Storage::PrepareMediaFromImage(
-					std::move(result),
-					QByteArray(),
-					st::sendMediaPreviewSize);
-				confirmSendingFiles(std::move(list));
-			}));
-	}, lifetime());
-
 	_selfForwardsTagger = std::make_unique<HistoryView::SelfForwardsTagger>(
 		controller,
 		this,
@@ -3299,6 +3269,34 @@ void ChatWidget::listShowPremiumToast(not_null<DocumentData*> document) {
 			[=] { _stickerToast = nullptr; });
 	}
 	_stickerToast->showFor(document);
+}
+
+bool ChatWidget::handleDrawToReplyRequest(Data::DrawToReplyRequest request) {
+	if (request.messageId.peer != _peer->id) {
+		return false;
+	}
+	auto image = ResolveDrawToReplyImage(&session().data(), request);
+	if (image.isNull()) {
+		return false;
+	}
+	const auto replyTo = request.messageId;
+	OpenDrawToReplyEditor(
+		controller(),
+		std::move(image),
+		crl::guard(this, [=](QImage &&result) {
+			if (result.isNull()) {
+				return;
+			}
+			if (replyTo) {
+				replyToMessage({ .messageId = replyTo });
+			}
+			auto list = Storage::PrepareMediaFromImage(
+				std::move(result),
+				QByteArray(),
+				st::sendMediaPreviewSize);
+			confirmSendingFiles(std::move(list));
+		}));
+	return true;
 }
 
 void ChatWidget::listOpenPhoto(
