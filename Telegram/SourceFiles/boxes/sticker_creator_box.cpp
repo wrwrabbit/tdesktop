@@ -13,6 +13,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/editor_layer_widget.h"
 #include "editor/photo_editor.h"
 #include "editor/photo_editor_common.h"
+#include "editor/scene/scene.h"
+#include "editor/scene/scene_item_image.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "ui/emoji_config.h"
@@ -90,42 +92,60 @@ void OpenPhotoEditorForSticker(
 	const auto windowController = &sessionController->window();
 	const auto parentWidget = sessionController->widget();
 
-	const auto minSide = std::min(image.width(), image.height());
-	if (minSide < kStickerSide) {
-		show->showToast(tr::lng_stickers_create_too_small(
-			tr::now,
-			lt_size,
-			QString::number(kStickerSide)));
-		return;
-	}
 	if ((image.width() > 10 * image.height())
 		|| (image.height() > 10 * image.width())) {
 		show->showToast(tr::lng_stickers_create_open_failed(tr::now));
 		return;
 	}
 
-	const auto fileImage = std::make_shared<Image>(std::move(image));
-	const auto initialCrop = [&] {
-		const auto i = fileImage;
-		const auto side = std::min(i->width(), i->height());
-		return QRect(
-			(i->width() - side) / 2,
-			(i->height() - side) / 2,
-			side,
-			side);
-	}();
+	auto canvas = QImage(
+		kStickerSide,
+		kStickerSide,
+		QImage::Format_ARGB32_Premultiplied);
+	canvas.fill(Qt::transparent);
+	const auto baseImage = std::make_shared<Image>(std::move(canvas));
+
+	auto scene = std::make_shared<Editor::Scene>(
+		QRectF(0, 0, kStickerSide, kStickerSide));
+
+	const auto userPixmap = QPixmap::fromImage(std::move(image));
+	const auto userSize = userPixmap.size();
+	const auto fitted = userSize.scaled(
+		QSize(kStickerSide, kStickerSide),
+		Qt::KeepAspectRatio);
+	auto itemData = Editor::ItemBase::Data{
+		.initialZoom = 1.0,
+		.zPtr = scene->lastZ(),
+		.size = fitted.width(),
+		.x = kStickerSide / 2,
+		.y = kStickerSide / 2,
+		.imageSize = userSize,
+	};
+	auto imageItem = std::make_shared<Editor::ItemImage>(
+		QPixmap(userPixmap),
+		std::move(itemData));
+	scene->addItem(std::move(imageItem));
+
+	auto modifications = Editor::PhotoModifications{
+		.crop = QRect(0, 0, kStickerSide, kStickerSide),
+		.paint = std::move(scene),
+	};
 
 	auto editor = base::make_unique_q<Editor::PhotoEditor>(
 		parentWidget,
 		windowController,
-		fileImage,
-		Editor::PhotoModifications{ .crop = initialCrop },
-		Editor::EditorData{ .exactSize = QSize(kStickerSide, kStickerSide) });
+		baseImage,
+		std::move(modifications),
+		Editor::EditorData{
+			.exactSize = QSize(kStickerSide, kStickerSide),
+			.cropType = Editor::EditorData::CropType::RoundedRect,
+			.keepAspectRatio = true,
+		});
 	const auto raw = editor.get();
 
 	auto applyModifications = [=, done = std::move(onDone)](
 			const Editor::PhotoModifications &mods) mutable {
-		auto result = Editor::ImageModified(fileImage->original(), mods);
+		auto result = Editor::ImageModified(baseImage->original(), mods);
 		if (result.size() != QSize(kStickerSide, kStickerSide)) {
 			result = result.scaled(
 				kStickerSide,
