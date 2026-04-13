@@ -447,10 +447,11 @@ void StickerCreatorBox::prepare() {
 			st::boxLabel),
 		st::boxRowPadding);
 
-	_emojiRow = inner->add(
+	const auto emojiRow = inner->add(
 		object_ptr<EmojiPickerRow>(inner, _show),
 		QMargins(0, 0, 0, st::boxRowPadding.left()));
-	_emojiRow->resize(st::boxWideWidth, st::stickersCreatorRowHeight);
+	emojiRow->resize(st::boxWideWidth, st::stickersCreatorRowHeight);
+	_emojiValue = [=] { return emojiRow->value(); };
 
 	const auto addButton = this->addButton(
 		rpl::conditional(
@@ -501,7 +502,7 @@ void StickerCreatorBox::startUpload() {
 	if (_uploading.current()) {
 		return;
 	}
-	const auto emoji = _emojiRow->value();
+	const auto emoji = _emojiValue ? _emojiValue() : QString();
 	if (emoji.isEmpty()) {
 		_show->showToast(tr::lng_stickers_create_emoji_required(tr::now));
 		return;

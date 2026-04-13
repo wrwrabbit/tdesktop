@@ -4509,6 +4509,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_stickers_create_new" = "Create a New Sticker";
 "lng_stickers_add_existing" = "Add an Existing Sticker";
+"lng_stickers_pack_choose_emoji_title" = "Choose Emoji";
+"lng_stickers_pack_choose_emoji_about" = "Pick an emoji that corresponds to this sticker.";
 "lng_stickers_pick_existing_title" = "Choose Sticker";
 "lng_stickers_pick_existing_about" = "Pick a sticker from your library to add it to this set.";
 "lng_stickers_pick_existing_empty" = "You don't have any stickers yet.";

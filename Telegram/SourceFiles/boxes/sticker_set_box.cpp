@@ -14,7 +14,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "boxes/premium_preview_box.h"
 #include "boxes/sticker_creator_box.h"
-#include "boxes/sticker_picker_box.h"
 #include "chat_helpers/compose/compose_show.h"
 #include "chat_helpers/stickers_list_widget.h"
 #include "chat_helpers/stickers_lottie.h"
@@ -57,6 +56,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/gradient_round_button.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
+#include "ui/widgets/inner_dropdown.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
 #include "window/window_session_controller.h"
@@ -488,6 +488,7 @@ private:
 	bool _previewLocked = false;
 
 	base::unique_qptr<Ui::PopupMenu> _menu;
+	base::unique_qptr<Ui::InnerDropdown> _pickerDropdown;
 
 	rpl::event_stream<uint64> _setInstalled;
 	rpl::event_stream<uint64> _setArchived;
@@ -2353,6 +2354,16 @@ void StickerSetBox::Inner::startAddExistingStickerFlow() {
 	if (!hasAddCell()) {
 		return;
 	}
+	auto box = (Ui::BoxContent*)nullptr;
+	for (auto p = parentWidget(); p; p = p->parentWidget()) {
+		if (const auto candidate = dynamic_cast<Ui::BoxContent*>(p)) {
+			box = candidate;
+			break;
+		}
+	}
+	if (!box) {
+		return;
+	}
 	const auto identifier = StickerSetIdentifier{
 		.id = _setId,
 		.accessHash = _setAccessHash,
@@ -2360,8 +2371,31 @@ void StickerSetBox::Inner::startAddExistingStickerFlow() {
 	};
 	const auto session = _session;
 	const auto show = _show;
-	const auto onChosen = crl::guard(this, [=, this](
-			not_null<DocumentData*> document) {
+
+	_pickerDropdown = base::make_unique_q<Ui::InnerDropdown>(box);
+	const auto dropdown = _pickerDropdown.get();
+	dropdown->setAutoHiding(false);
+	dropdown->setMaxHeight(st::stickersMaxHeight);
+
+	auto descriptor = ChatHelpers::StickersListDescriptor{
+		.show = _show,
+		.mode = ChatHelpers::StickersListMode::UserpicBuilder,
+		.paused = [] { return false; },
+		.excludeSetId = _setId,
+	};
+	const auto list = dropdown->setOwnedWidget(
+		object_ptr<ChatHelpers::StickersListWidget>(
+			dropdown,
+			std::move(descriptor)));
+	list->refreshRecent();
+	list->refreshStickers();
+
+	list->chosen(
+	) | rpl::on_next([=, this](const ChatHelpers::FileChosen &chosen) {
+		const auto document = chosen.document;
+		if (_pickerDropdown) {
+			_pickerDropdown->hideAnimated();
+		}
 		const auto sticker = document->sticker();
 		const auto fallback = QString::fromUtf8("\xF0\x9F\x99\x82");
 		const auto emoji = (sticker && !sticker->alt.isEmpty())
@@ -2382,8 +2416,15 @@ void StickerSetBox::Inner::startAddExistingStickerFlow() {
 					? tr::lng_attach_failed(tr::now)
 					: err);
 			}));
-	});
-	_show->showBox(Box<StickerPickerBox>(_show, onChosen));
+	}, list->lifetime());
+
+	const auto desiredWidth = box->width();
+	list->resizeToWidth(desiredWidth);
+
+	dropdown->resize(desiredWidth, st::stickersMaxHeight);
+	dropdown->move(0, 0);
+	dropdown->setOrigin(Ui::PanelAnimation::Origin::TopLeft);
+	dropdown->showAnimated();
 }
 
 void StickerSetBox::Inner::startCreateNewStickerFlow() {
