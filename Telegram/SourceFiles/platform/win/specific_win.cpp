@@ -817,7 +817,7 @@ bool CreateStartMenuShortcut(const QString &exePath, bool silent) {
 		&programsFolder);
 	const auto guard = gsl::finally([&] { CoTaskMemFree(programsFolder); });
 	if (!SUCCEEDED(hr)) {
-		if (!silent) LOG(("App Error: could not get FOLDERID_Programs: %1").arg(hr));
+		if (!silent) FAKE_LOG(("App Error: could not get FOLDERID_Programs: %1").arg(hr));
 		return false;
 	}
 	const auto lnk = QString::fromWCharArray(programsFolder)
@@ -827,7 +827,7 @@ bool CreateStartMenuShortcut(const QString &exePath, bool silent) {
 	const auto shellLink = base::WinRT::TryCreateInstance<IShellLink>(
 		CLSID_ShellLink);
 	if (!shellLink) {
-		if (!silent) LOG(("App Error: could not create IShellLink for start menu shortcut"));
+		if (!silent) FAKE_LOG(("App Error: could not create IShellLink for start menu shortcut"));
 		return false;
 	}
 	const auto exeNative = QDir::toNativeSeparators(exePath);
@@ -850,12 +850,12 @@ bool CreateStartMenuShortcut(const QString &exePath, bool silent) {
 	}
 	const auto persistFile = shellLink.try_as<IPersistFile>();
 	if (!persistFile) {
-		if (!silent) LOG(("App Error: could not get IPersistFile for start menu shortcut"));
+		if (!silent) FAKE_LOG(("App Error: could not get IPersistFile for start menu shortcut"));
 		return false;
 	}
 	hr = persistFile->Save(lnk.toStdWString().c_str(), TRUE);
 	if (!SUCCEEDED(hr)) {
-		if (!silent) LOG(("App Error: could not save start menu shortcut to %1").arg(lnk));
+		if (!silent) FAKE_LOG(("App Error: could not save start menu shortcut to %1").arg(lnk));
 		return false;
 	}
 	return true;
@@ -898,7 +898,7 @@ bool RemoveStartMenuShortcut(const QString &onlyIfPointingTo) {
 						if (existing.compare(
 								QDir::toNativeSeparators(onlyIfPointingTo),
 								Qt::CaseInsensitive) != 0) {
-							LOG(("Platform: start menu shortcut points to '%1' not '%2', preserving").arg(
+							FAKE_LOG(("Platform: start menu shortcut points to '%1' not '%2', preserving").arg(
 								existing,
 								QDir::toNativeSeparators(onlyIfPointingTo)));
 							return false;
@@ -910,7 +910,7 @@ bool RemoveStartMenuShortcut(const QString &onlyIfPointingTo) {
 	}
 	const auto removed = QFile::remove(lnk);
 	if (!removed) {
-		LOG(("Platform: failed to remove start menu shortcut '%1'").arg(lnk));
+		FAKE_LOG(("Platform: failed to remove start menu shortcut '%1'").arg(lnk));
 	}
 	return removed;
 }

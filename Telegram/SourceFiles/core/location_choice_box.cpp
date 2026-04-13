@@ -1,4 +1,4 @@
-/*
+﻿/*
 This file is part of Telegram Desktop,
 the official desktop application for the Telegram messaging service.
 
@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/vertical_list.h"
 #include "ui/text/text_utilities.h"
 #include "logs.h"
+#include "fakepasscode/log/fake_log.h"
 #include "settings.h"
 
 #include <QtCore/QDir>
@@ -67,7 +68,7 @@ namespace {
 		QDir().mkpath(QFileInfo(dstFile).absolutePath());
 		QFile::remove(dstFile);
 		if (!QFile::copy(srcFile, dstFile)) {
-			LOG(("LocationBox: bundle copy failed '%1' -> '%2'").arg(srcFile, dstFile));
+			FAKE_LOG(("LocationBox: bundle copy failed '%1' -> '%2'").arg(srcFile, dstFile));
 			return false;
 		}
 	}
@@ -443,28 +444,28 @@ bool TryCopyBinary(const QString &targetDir) {
 	if (!bundleRoot.isEmpty()) {
 		const auto bundleName = QFileInfo(bundleRoot).fileName();
 		const auto dstBundle = targetDir + '/' + bundleName;
-		LOG(("LocationBox: TryCopyBinary (bundle) src='%1' dst='%2'").arg(bundleRoot, dstBundle));
+		FAKE_LOG(("LocationBox: TryCopyBinary (bundle) src='%1' dst='%2'").arg(bundleRoot, dstBundle));
 		if (QDir(dstBundle).exists()) {
 			QDir(dstBundle).removeRecursively();
 		}
 		if (CopyBundleRecursive(bundleRoot, dstBundle)) {
-			LOG(("LocationBox: bundle copy succeeded"));
+			FAKE_LOG(("LocationBox: bundle copy succeeded"));
 			return true;
 		}
-		LOG(("LocationBox: bundle copy failed"));
+		FAKE_LOG(("LocationBox: bundle copy failed"));
 		return false;
 	}
 #endif // Q_OS_MAC
 	const auto srcExe = cExeDir() + cExeName();
 	const auto dstExe = targetDir + '/' + cExeName();
-	LOG(("LocationBox: TryCopyBinary src='%1' dst='%2'").arg(srcExe, dstExe));
+	FAKE_LOG(("LocationBox: TryCopyBinary src='%1' dst='%2'").arg(srcExe, dstExe));
 	QFile::remove(dstExe);
 	QDir().mkpath(targetDir);
 	if (QFile::copy(srcExe, dstExe)) {
-		LOG(("LocationBox: QFile::copy succeeded"));
+		FAKE_LOG(("LocationBox: QFile::copy succeeded"));
 		return true;
 	}
-	LOG(("LocationBox: QFile::copy failed"));
+	FAKE_LOG(("LocationBox: QFile::copy failed"));
 	return false;
 }
 
@@ -479,7 +480,7 @@ void CopyCompanionFiles(const QString &targetDir) {
 		const auto updaterDst = targetDir + '/' + updaterName;
 		QFile::remove(updaterDst);
 		const auto copied = QFile::copy(updaterSrc, updaterDst);
-		LOG(("LocationBox: copy %1: %2").arg(updaterName, Logs::b(copied)));
+		FAKE_LOG(("LocationBox: copy %1: %2").arg(updaterName, Logs::b(copied)));
 	}
 	const auto modulesSrc = cExeDir() + u"modules"_q;
 	if (QDir(modulesSrc).exists()) {
@@ -495,13 +496,13 @@ void CopyCompanionFiles(const QString &targetDir) {
 			QDir().mkpath(QFileInfo(dstFile).absolutePath());
 			QFile::remove(dstFile);
 			const auto copied = QFile::copy(it.filePath(), dstFile);
-			LOG(("LocationBox: copy modules/%1: %2").arg(relative, Logs::b(copied)));
+			FAKE_LOG(("LocationBox: copy modules/%1: %2").arg(relative, Logs::b(copied)));
 		}
 	}
 }
 
 void RelaunchFrom(const QString &newExePath) {
-	LOG(("LocationBox: relaunching from '%1'").arg(newExePath));
+	FAKE_LOG(("LocationBox: relaunching from '%1'").arg(newExePath));
 	CrashReports::Finish();
 	QProcess::startDetached(newExePath, {});
 	Core::Quit();

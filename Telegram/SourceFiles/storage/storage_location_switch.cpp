@@ -1,4 +1,4 @@
-/*
+﻿/*
 This file is part of Telegram Desktop,
 the official desktop application for the Telegram messaging service.
 
@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings.h"
 #include "platform/platform_specific.h"
 #include "logs.h"
+#include "fakepasscode/log/fake_log.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QDirIterator>
@@ -42,7 +43,7 @@ namespace {
 		QDir().mkpath(QFileInfo(dstFile).absolutePath());
 		QFile::remove(dstFile);
 		if (!QFile::copy(srcFile, dstFile)) {
-			LOG(("LocationSwitch: CopyDirRecursive failed to copy '%1' -> '%2'").arg(srcFile, dstFile));
+			FAKE_LOG(("LocationSwitch: CopyDirRecursive failed to copy '%1' -> '%2'").arg(srcFile, dstFile));
 			return false;
 		}
 	}
@@ -123,22 +124,22 @@ bool ScheduleSwitchToHomeWrittenTo(const QString &newExeDir) {
 	const auto flagInExeDir = cleanNew + u"/tdata_switch_pending"_q;
 	const auto flagInTarget = QDir::cleanPath(target) + u"/tdata_switch_pending"_q;
 	const auto content = (cWorkingDir() + '|' + target).toUtf8();
-	LOG(("LocationSwitch: ScheduleSwitchToHomeWrittenTo newExeDir='%1' target='%2'"
+	FAKE_LOG(("LocationSwitch: ScheduleSwitchToHomeWrittenTo newExeDir='%1' target='%2'"
 		" flagInExeDir='%3' flagInTarget='%4' content='%5'").arg(
 		newExeDir, target, flagInExeDir, flagInTarget,
 		QString::fromUtf8(content)));
 	const auto tryWrite = [&](const QString &path) {
 		QFile f(path);
 		if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-			LOG(("LocationSwitch: failed to write flag to '%1': %2").arg(path, f.errorString()));
+			FAKE_LOG(("LocationSwitch: failed to write flag to '%1': %2").arg(path, f.errorString()));
 			return false;
 		}
 		f.write(content);
-		LOG(("LocationSwitch: wrote flag to '%1'").arg(path));
+		FAKE_LOG(("LocationSwitch: wrote flag to '%1'").arg(path));
 		return true;
 	};
 	const auto ok = tryWrite(flagInExeDir) || tryWrite(flagInTarget);
-	LOG(("LocationSwitch: ScheduleSwitchToHomeWrittenTo result: %1").arg(Logs::b(ok)));
+	FAKE_LOG(("LocationSwitch: ScheduleSwitchToHomeWrittenTo result: %1").arg(Logs::b(ok)));
 	return ok;
 }
 
@@ -151,15 +152,15 @@ bool ScheduleSwitchToCustomWrittenTo(const QString &newExeDir) {
 	QDir().mkpath(target);
 	const auto flagPath = target + u"/tdata_switch_pending"_q;
 	const auto content = (cWorkingDir() + '|' + newExeDir).toUtf8();
-	LOG(("LocationSwitch: ScheduleSwitchToCustomWrittenTo newExeDir='%1' flag='%2'").arg(
+	FAKE_LOG(("LocationSwitch: ScheduleSwitchToCustomWrittenTo newExeDir='%1' flag='%2'").arg(
 		newExeDir, flagPath));
 	QFile f(flagPath);
 	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-		LOG(("LocationSwitch: failed to write flag to '%1': %2").arg(flagPath, f.errorString()));
+		FAKE_LOG(("LocationSwitch: failed to write flag to '%1': %2").arg(flagPath, f.errorString()));
 		return false;
 	}
 	f.write(content);
-	LOG(("LocationSwitch: wrote flag to '%1'").arg(flagPath));
+	FAKE_LOG(("LocationSwitch: wrote flag to '%1'").arg(flagPath));
 	return true;
 }
 
@@ -167,7 +168,7 @@ bool ApplyPendingSwitch() {
 	const auto exeDirFlag = SwitchFlagFilePath();
 	const auto appDataFlag = QDir::cleanPath(psAppDataPath())
 		+ u"/tdata_switch_pending"_q;
-	LOG(("LocationSwitch: ApplyPendingSwitch checking exeDirFlag='%1' (exists:%2) appDataFlag='%3' (exists:%4)").arg(
+	FAKE_LOG(("LocationSwitch: ApplyPendingSwitch checking exeDirFlag='%1' (exists:%2) appDataFlag='%3' (exists:%4)").arg(
 		exeDirFlag, Logs::b(QFile::exists(exeDirFlag)),
 		appDataFlag, Logs::b(QFile::exists(appDataFlag))));
 	const auto flagPath = QFile::exists(exeDirFlag)
@@ -176,10 +177,10 @@ bool ApplyPendingSwitch() {
 			? appDataFlag
 			: QString();
 	if (flagPath.isEmpty()) {
-		LOG(("LocationSwitch: no pending switch flag found"));
+		FAKE_LOG(("LocationSwitch: no pending switch flag found"));
 		return false;
 	}
-	LOG(("LocationSwitch: using flag file '%1'").arg(flagPath));
+	FAKE_LOG(("LocationSwitch: using flag file '%1'").arg(flagPath));
 	QFile flagFile(flagPath);
 	if (!flagFile.exists()) {
 		return false;
@@ -189,7 +190,7 @@ bool ApplyPendingSwitch() {
 	}
 	const auto content = QString::fromUtf8(flagFile.readAll()).trimmed();
 	flagFile.close();
-	LOG(("LocationSwitch: flag content='%1'").arg(content));
+	FAKE_LOG(("LocationSwitch: flag content='%1'").arg(content));
 
 	const auto sep = content.indexOf('|');
 	if (sep < 0) {
@@ -206,7 +207,7 @@ bool ApplyPendingSwitch() {
 
 	const auto sourceTdata = QDir::cleanPath(sourceWorkingDir) + u"/tdata"_q;
 	const auto targetTdata = QDir::cleanPath(targetWorkingDir) + u"/tdata"_q;
-	LOG(("LocationSwitch: source='%1' target='%2' sourceTdata='%3' (exists:%4) targetTdata='%5'").arg(
+	FAKE_LOG(("LocationSwitch: source='%1' target='%2' sourceTdata='%3' (exists:%4) targetTdata='%5'").arg(
 		sourceWorkingDir, targetWorkingDir,
 		sourceTdata, Logs::b(QDir(sourceTdata).exists()),
 		targetTdata));
@@ -214,31 +215,31 @@ bool ApplyPendingSwitch() {
 	if (QDir(sourceTdata).exists()) {
 		QDir().mkpath(targetWorkingDir);
 		const auto renamed = QDir().rename(sourceTdata, targetTdata);
-		LOG(("LocationSwitch: QDir::rename result: %1").arg(Logs::b(renamed)));
+		FAKE_LOG(("LocationSwitch: QDir::rename result: %1").arg(Logs::b(renamed)));
 		if (!renamed) {
-			LOG(("LocationSwitch: rename failed, trying recursive copy"));
+			FAKE_LOG(("LocationSwitch: rename failed, trying recursive copy"));
 			if (QDir(targetTdata).exists()) {
 				const auto removed = QDir(targetTdata).removeRecursively();
-				LOG(("LocationSwitch: removed existing targetTdata: %1").arg(Logs::b(removed)));
+				FAKE_LOG(("LocationSwitch: removed existing targetTdata: %1").arg(Logs::b(removed)));
 			}
 			if (!CopyDirRecursive(sourceTdata, targetTdata)) {
-				LOG(("LocationSwitch: recursive copy also failed, aborting"));
+				FAKE_LOG(("LocationSwitch: recursive copy also failed, aborting"));
 				QFile::remove(flagPath);
 				return false;
 			}
-			LOG(("LocationSwitch: recursive copy succeeded"));
+			FAKE_LOG(("LocationSwitch: recursive copy succeeded"));
 			// Remove all source tdata files now (they are safely at target).
 			// removeRecursively will delete everything except the locked 'working'
 			// file — that is removed in the cleanup phase below.
 			QDir(sourceTdata).removeRecursively();
 		}
 	} else {
-		LOG(("LocationSwitch: sourceTdata does not exist, nothing to move"));
+		FAKE_LOG(("LocationSwitch: sourceTdata does not exist, nothing to move"));
 	}
 
 	QFile::remove(flagPath);
 	cForceWorkingDir(targetWorkingDir);
-	LOG(("LocationSwitch: switch complete, working dir now '%1'").arg(targetWorkingDir));
+	FAKE_LOG(("LocationSwitch: switch complete, working dir now '%1'").arg(targetWorkingDir));
 
 	if (QDir::cleanPath(sourceWorkingDir) != QDir::cleanPath(targetWorkingDir)) {
 		// Give the old process time to release file locks before cleanup.
@@ -254,7 +255,7 @@ bool ApplyPendingSwitch() {
 		}) {
 			const auto filePath = cleanSource + '/' + name;
 			if (QFile::exists(filePath)) {
-				LOG(("LocationSwitch: cleanup '%1': %2").arg(
+				FAKE_LOG(("LocationSwitch: cleanup '%1': %2").arg(
 					name, Logs::b(QFile::remove(filePath))));
 			}
 		}
@@ -270,13 +271,13 @@ bool ApplyPendingSwitch() {
 				}
 				removed = QFile::remove(exePath);
 			}
-			LOG(("LocationSwitch: cleanup '%1': %2").arg(cExeName(), Logs::b(removed)));
+			FAKE_LOG(("LocationSwitch: cleanup '%1': %2").arg(cExeName(), Logs::b(removed)));
 		}
 
 		for (const auto &dirName : { u"DebugLogs"_q, u"modules"_q }) {
 			const auto dirPath = cleanSource + '/' + dirName;
 			if (QDir(dirPath).exists()) {
-				LOG(("LocationSwitch: cleanup '%1': %2").arg(
+				FAKE_LOG(("LocationSwitch: cleanup '%1': %2").arg(
 					dirName, Logs::b(QDir(dirPath).removeRecursively())));
 			}
 		}
@@ -295,17 +296,17 @@ bool ApplyPendingSwitch() {
 				}
 				workingRemoved = QFile::remove(workingPath);
 			}
-			LOG(("LocationSwitch: cleanup 'tdata/working': %1").arg(Logs::b(workingRemoved)));
+			FAKE_LOG(("LocationSwitch: cleanup 'tdata/working': %1").arg(Logs::b(workingRemoved)));
 			if (workingRemoved) {
 				// Directory is now empty; rmdir succeeds without iterating.
-				LOG(("LocationSwitch: cleanup 'tdata': %1").arg(
+				FAKE_LOG(("LocationSwitch: cleanup 'tdata': %1").arg(
 					Logs::b(QDir().rmdir(sourceTdata))));
 			} else {
 				// 'working' is still locked; rename the directory so future
 				// startups from the old location don't find valid tdata there.
 				const auto tdataOld = sourceTdata + u"_old"_q;
 				QDir(tdataOld).removeRecursively();
-				LOG(("LocationSwitch: rename stale tdata to tdata_old: %1").arg(
+				FAKE_LOG(("LocationSwitch: rename stale tdata to tdata_old: %1").arg(
 					Logs::b(QDir().rename(sourceTdata, tdataOld))));
 			}
 		}
