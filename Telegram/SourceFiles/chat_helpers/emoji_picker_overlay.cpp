@@ -420,6 +420,10 @@ EmojiPickerOverlay::EmojiPickerOverlay(
 		_expandButton->paintRequest(
 		) | rpl::on_next([=](const QRect &clip) {
 			auto p = QPainter(_expandButton);
+			auto hq = PainterHighQualityEnabler(p);
+			p.setPen(Qt::NoPen);
+			p.setBrush(st::stickersEmojiPickerExpandBg);
+			p.drawEllipse(_expandButton->rect());
 			const auto &icon = _expanded.current()
 				? st::stickersEmojiPickerCollapseIcon
 				: st::stickersEmojiPickerExpandIcon;
@@ -428,7 +432,9 @@ EmojiPickerOverlay::EmojiPickerOverlay(
 			icon.paint(p, x, y, _expandButton->width());
 		}, _expandButton->lifetime());
 
-		_scroll = std::make_unique<Ui::ScrollArea>(this);
+		_scroll = std::make_unique<Ui::ScrollArea>(
+			this,
+			st::stickersEmojiPickerScroll);
 		_scroll->setFrameStyle(QFrame::NoFrame);
 		_scroll->hide();
 		const auto gridPtr = _scroll->setOwnedWidget(
@@ -634,13 +640,18 @@ void EmojiPickerOverlay::relayout() {
 		const auto scrollH = std::max(
 			0,
 			bubbleBottom - scrollTop - pad.bottom());
+		const auto scrollContentWidth = bubble.width()
+			- pad.left()
+			- pad.right();
+		const auto scrollAreaWidth = scrollContentWidth
+			+ pad.right();
 		_scroll->setGeometry(
 			bubble.left() + pad.left(),
 			scrollTop,
-			bubble.width() - pad.left() - pad.right(),
+			scrollAreaWidth,
 			scrollH);
 		if (_grid) {
-			_grid->resizeGetHeight(_scroll->width());
+			_grid->resizeGetHeight(scrollContentWidth);
 		}
 	}
 }

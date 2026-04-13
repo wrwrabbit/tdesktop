@@ -444,6 +444,12 @@ stickersEmojiPickerStripBubbleRight: 20px;
 stickersEmojiPickerSelectedBg: windowBgActive;
 stickersEmojiPickerSelectedFg: windowBgActive;
 stickersEmojiPickerHeaderFg: windowSubTextFg;
+stickersEmojiPickerScroll: ScrollArea(boxScroll) {
+	width: 14px;
+	deltax: 5px;
+	deltat: 4px;
+	deltab: 18px;
+}
 stickersEmojiPickerAbout: FlatLabel(defaultFlatLabel) {
 	minWidth: 100px;
 	align: align(top);
@@ -463,6 +469,7 @@ stickersEmojiPickerSectionHeader: FlatLabel(defaultFlatLabel) {
 stickersEmojiPickerExpandIcon: icon {{ "intro_country_dropdown", windowSubTextFg }};
 stickersEmojiPickerCollapseIcon: icon {{ "intro_country_dropdown-flip_vertical", windowSubTextFg }};
 stickersEmojiPickerExpandSize: 24px;
+stickersEmojiPickerExpandBg: windowBgRipple;
 stickersEmojiPickerBoxShadow: BoxShadow {
 	blurRadius: 20px;
 	offset: point(0px, 6px);
