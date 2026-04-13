@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "ui/rp_widget.h"
+#include "ui/effects/animations.h"
 #include "ui/emoji_config.h"
 
 namespace Ui {
@@ -46,15 +47,19 @@ public:
 protected:
 	void paintEvent(QPaintEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
 
 private:
 	class Strip;
 	class Grid;
 
-	void buildSections();
 	void relayout();
-	void toggleEmoji(EmojiPtr emoji);
+	void toggleEmoji(EmojiPtr emoji, bool fromGrid);
 	void notifySelectionChanged();
+	void startExpandAnimation(bool expanded);
+	void applyExpandProgress();
+	[[nodiscard]] float64 currentExpandValue() const;
+	[[nodiscard]] int currentShownHeight() const;
 
 	const QString _aboutText;
 	const std::vector<EmojiPtr> _recent;
@@ -72,6 +77,7 @@ private:
 	Ui::AbstractButton *_expandButton = nullptr;
 	std::unique_ptr<Ui::ScrollArea> _scroll;
 	Grid *_grid = nullptr;
+	Ui::Animations::Simple _expandAnim;
 
 };
 

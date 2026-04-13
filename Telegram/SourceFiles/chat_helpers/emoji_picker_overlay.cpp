@@ -240,7 +240,7 @@ void EmojiPickerOverlay::Strip::mouseReleaseEvent(QMouseEvent *e) {
 	const auto index = _pressed;
 	_pressed = -1;
 	if (released == index && index >= 0 && index < int(_cells.size())) {
-		_owner->toggleEmoji(_cells[index].emoji);
+		_owner->toggleEmoji(_cells[index].emoji, false);
 	}
 }
 
@@ -346,7 +346,7 @@ void EmojiPickerOverlay::Grid::mouseReleaseEvent(QMouseEvent *e) {
 	const auto index = _pressed;
 	_pressed = -1;
 	if (released == index && index >= 0 && index < int(_cells.size())) {
-		_owner->toggleEmoji(_cells[index].emoji);
+		_owner->toggleEmoji(_cells[index].emoji, true);
 	}
 }
 
@@ -402,22 +402,10 @@ EmojiPickerOverlay::EmojiPickerOverlay(
 			object_ptr<Grid>(_scroll.get(), this));
 		_grid = gridPtr.data();
 		_grid->setEmojis(_allForGrid);
-
-		_expanded.value(
-		) | rpl::on_next([=](bool value) {
-			if (_scroll) {
-				_scroll->setVisible(value);
-			}
-			if (_expandButton) {
-				_expandButton->update();
-			}
-			resize(width(), value ? expandedHeight() : collapsedHeight());
-			relayout();
-		}, lifetime());
 	}
 
 	_selectedVar = _selectedList;
-	resize(width(), collapsedHeight());
+	resize(width(), expandedHeight());
 }
 
 EmojiPickerOverlay::~EmojiPickerOverlay() = default;
@@ -432,10 +420,49 @@ EmojiPickerOverlay::selectedValue() const {
 }
 
 void EmojiPickerOverlay::setExpanded(bool expanded) {
-	if (!_allowExpand) {
+	if (!_allowExpand || _expanded.current() == expanded) {
 		return;
 	}
+	startExpandAnimation(expanded);
 	_expanded = expanded;
+	if (_expandButton) {
+		_expandButton->update();
+	}
+}
+
+void EmojiPickerOverlay::startExpandAnimation(bool expanded) {
+	const auto from = _expandAnim.value(expanded ? 0. : 1.);
+	const auto to = expanded ? 1. : 0.;
+	_expandAnim.start(
+		[=] { applyExpandProgress(); },
+		from,
+		to,
+		st::slideWrapDuration,
+		anim::easeOutCirc);
+	applyExpandProgress();
+}
+
+float64 EmojiPickerOverlay::currentExpandValue() const {
+	return _expandAnim.value(_expanded.current() ? 1. : 0.);
+}
+
+int EmojiPickerOverlay::currentShownHeight() const {
+	const auto progress = currentExpandValue();
+	return anim::interpolate(
+		collapsedHeight(),
+		expandedHeight(),
+		progress);
+}
+
+void EmojiPickerOverlay::applyExpandProgress() {
+	const auto h = currentShownHeight();
+	setMask(QRegion(0, 0, width(), h));
+	if (_scroll) {
+		const auto progress = currentExpandValue();
+		_scroll->setVisible(progress > 0.);
+	}
+	relayout();
+	update();
 }
 
 bool EmojiPickerOverlay::expanded() const {
@@ -465,11 +492,19 @@ void EmojiPickerOverlay::paintEvent(QPaintEvent *e) {
 	p.setPen(Qt::NoPen);
 	p.setBrush(st::stickersEmojiPickerBg);
 	const auto radius = st::stickersEmojiPickerRadius;
-	p.drawRoundedRect(rect(), radius, radius);
+	const auto h = currentShownHeight();
+	p.drawRoundedRect(QRect(0, 0, width(), h), radius, radius);
 }
 
 void EmojiPickerOverlay::resizeEvent(QResizeEvent *e) {
+	setMask(QRegion(0, 0, width(), currentShownHeight()));
 	relayout();
+}
+
+void EmojiPickerOverlay::mousePressEvent(QMouseEvent *e) {
+	if (e->pos().y() > currentShownHeight()) {
+		e->ignore();
+	}
 }
 
 void EmojiPickerOverlay::relayout() {
@@ -520,7 +555,7 @@ void EmojiPickerOverlay::relayout() {
 	}
 }
 
-void EmojiPickerOverlay::toggleEmoji(EmojiPtr emoji) {
+void EmojiPickerOverlay::toggleEmoji(EmojiPtr emoji, bool fromGrid) {
 	if (!emoji) {
 		return;
 	}
@@ -537,6 +572,9 @@ void EmojiPickerOverlay::toggleEmoji(EmojiPtr emoji) {
 		_selectedList.push_back(emoji);
 	}
 	notifySelectionChanged();
+	if (fromGrid) {
+		setExpanded(false);
+	}
 }
 
 void EmojiPickerOverlay::notifySelectionChanged() {
@@ -547,10 +585,6 @@ void EmojiPickerOverlay::notifySelectionChanged() {
 	if (_grid) {
 		_grid->refresh();
 	}
-}
-
-void EmojiPickerOverlay::buildSections() {
-	// Reserved for potential future categorised rendering in the grid.
 }
 
 } // namespace ChatHelpers

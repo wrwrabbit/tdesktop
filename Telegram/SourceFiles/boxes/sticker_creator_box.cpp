@@ -212,10 +212,15 @@ void CreateStickerBox(
 		.maxSelected = kMaxEmojis,
 		.allowExpand = true,
 	};
-	const auto overlayExpanded = [&] {
+	const auto pickerCollapsed = [&] {
+		auto probe = ChatHelpers::EmojiPickerOverlay(nullptr, pickerDescriptor);
+		return probe.collapsedHeight();
+	}();
+	const auto pickerExpanded = [&] {
 		auto probe = ChatHelpers::EmojiPickerOverlay(nullptr, pickerDescriptor);
 		return probe.expandedHeight();
 	}();
+	const auto pickerExtra = pickerExpanded - pickerCollapsed;
 
 	const auto previewHolder = inner->add(
 		object_ptr<Ui::RpWidget>(inner),
@@ -223,7 +228,7 @@ void CreateStickerBox(
 		style::al_top);
 	previewHolder->resize(
 		st::boxWideWidth,
-		kPreviewSide + overlayExpanded / 2);
+		kPreviewSide + pickerExtra);
 	const auto preview = Ui::CreateChild<PreviewWidget>(
 		previewHolder,
 		image);
@@ -236,12 +241,9 @@ void CreateStickerBox(
 		const auto w = std::min(
 			previewHolder->width() - 2 * st::boxRowPadding.left(),
 			int(kPreviewSide * 1.1));
-		const auto h = picker->expanded()
-			? picker->expandedHeight()
-			: picker->collapsedHeight();
 		const auto x = (previewHolder->width() - w) / 2;
-		const auto y = kPreviewSide - h;
-		picker->setGeometry(x, y, w, h);
+		const auto y = kPreviewSide - pickerCollapsed;
+		picker->setGeometry(x, y, w, pickerExpanded);
 		picker->raise();
 	};
 
@@ -250,11 +252,6 @@ void CreateStickerBox(
 		preview->move((width - kPreviewSide) / 2, 0);
 		layoutOverlay();
 	}, preview->lifetime());
-
-	picker->expandedValue(
-	) | rpl::on_next([=](bool) {
-		layoutOverlay();
-	}, picker->lifetime());
 
 	Ui::AddSkip(inner);
 
