@@ -475,6 +475,7 @@ void OpenPhotoEditorForSticker(
 			.exactSize = QSize(kStickerSide, kStickerSide),
 			.cropType = Editor::EditorData::CropType::RoundedRect,
 			.keepAspectRatio = true,
+			.fixedCrop = true,
 		});
 	const auto raw = editor.get();
 
