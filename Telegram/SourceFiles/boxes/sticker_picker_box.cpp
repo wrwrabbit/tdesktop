@@ -14,7 +14,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/stickers/data_stickers.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
-#include "ui/widgets/scroll_area.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_layers.h"
 
@@ -29,18 +28,16 @@ StickerPickerBox::StickerPickerBox(
 void StickerPickerBox::prepare() {
 	setTitle(tr::lng_stickers_pick_existing_title());
 
-	const auto wrap = Ui::CreateChild<Ui::RpWidget>(this);
-	_scroll = Ui::CreateChild<Ui::ScrollArea>(wrap, st::stickersScroll);
-
 	auto descriptor = ChatHelpers::StickersListDescriptor{
 		.show = _show,
 		.mode = ChatHelpers::StickersListMode::UserpicBuilder,
 		.paused = [] { return false; },
 	};
-	_list = _scroll->setOwnedWidget(
-		object_ptr<ChatHelpers::StickersListWidget>(
-			_scroll,
-			std::move(descriptor)));
+	auto list = object_ptr<ChatHelpers::StickersListWidget>(
+		this,
+		std::move(descriptor));
+	_list = list.data();
+
 	_list->refreshRecent();
 	_list->refreshStickers();
 
@@ -53,28 +50,25 @@ void StickerPickerBox::prepare() {
 		closeBox();
 	}, _list->lifetime());
 
-	rpl::combine(
-		_scroll->scrollTopValue(),
-		_scroll->heightValue()
-	) | rpl::on_next([=](int top, int height) {
-		_list->setVisibleTopBottom(top, top + height);
-	}, _list->lifetime());
-
+	setInnerWidget(std::move(list));
 	setDimensions(st::boxWideWidth, st::stickersMaxHeight);
 
-	addButton(tr::lng_cancel(), [=] { closeBox(); });
+	scrolls(
+	) | rpl::on_next([=, this] {
+		if (_list) {
+			const auto top = scrollTop();
+			_list->setVisibleTopBottom(top, top + scrollHeight());
+		}
+	}, lifetime());
 
-	wrap->resize(st::boxWideWidth, st::stickersMaxHeight);
-	_scroll->resize(wrap->size());
-	setInnerWidget(object_ptr<Ui::RpWidget>::fromRaw(wrap));
+	addButton(tr::lng_cancel(), [=] { closeBox(); });
 }
 
 void StickerPickerBox::resizeEvent(QResizeEvent *e) {
 	BoxContent::resizeEvent(e);
-	if (_scroll) {
-		_scroll->resize(_scroll->parentWidget()->size());
-		const auto width = _scroll->width();
+	if (_list) {
+		const auto width = this->width();
 		_list->resizeToWidth(width);
-		_list->setMinimalHeight(width, _scroll->height());
+		_list->setMinimalHeight(width, st::stickersMaxHeight);
 	}
 }

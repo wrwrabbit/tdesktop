@@ -212,6 +212,11 @@ void StickerCreatorBox::prepare() {
 	addButton(tr::lng_cancel(), [=] { closeBox(); });
 
 	setDimensionsToContent(st::boxWideWidth, inner);
+
+	boxClosing(
+	) | rpl::on_next([=, this] {
+		_upload = nullptr;
+	}, lifetime());
 }
 
 QByteArray StickerCreatorBox::encodeWebp() const {
@@ -237,6 +242,9 @@ void StickerCreatorBox::setState(State state) {
 	_state = state;
 	const auto uploading = (state == State::Uploading);
 	_emojiField->setEnabled(!uploading);
+	if (_addButton) {
+		_addButton->setDisabled(uploading);
+	}
 	if (uploading) {
 		_status->show();
 		_status->setText(tr::lng_stickers_create_uploading(tr::now));

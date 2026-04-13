@@ -16,10 +16,6 @@ class Show;
 class StickersListWidget;
 } // namespace ChatHelpers
 
-namespace Ui {
-class ScrollArea;
-} // namespace Ui
-
 class StickerPickerBox final : public Ui::BoxContent {
 public:
 	StickerPickerBox(
@@ -35,7 +31,6 @@ private:
 	const std::shared_ptr<ChatHelpers::Show> _show;
 	Fn<void(not_null<DocumentData*>)> _chosen;
 
-	QPointer<Ui::ScrollArea> _scroll;
 	QPointer<ChatHelpers::StickersListWidget> _list;
 
 };
