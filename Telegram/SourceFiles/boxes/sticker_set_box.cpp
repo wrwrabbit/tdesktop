@@ -56,6 +56,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/gradient_round_button.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
+#include "base/event_filter.h"
+#include "chat_helpers/tabbed_panel.h"
+#include "chat_helpers/tabbed_selector.h"
 #include "ui/widgets/inner_dropdown.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
@@ -329,6 +332,7 @@ public:
 	}
 
 	void applySet(const TLStickerSet &set);
+	void setOuterContainer(QPointer<QWidget> container);
 
 	~Inner();
 
@@ -488,7 +492,8 @@ private:
 	bool _previewLocked = false;
 
 	base::unique_qptr<Ui::PopupMenu> _menu;
-	base::unique_qptr<Ui::InnerDropdown> _pickerDropdown;
+	base::unique_qptr<ChatHelpers::TabbedPanel> _pickerPanel;
+	QPointer<QWidget> _outerContainer;
 
 	rpl::event_stream<uint64> _setInstalled;
 	rpl::event_stream<uint64> _setArchived;
@@ -542,6 +547,7 @@ void StickerSetBox::prepare() {
 	_inner = setInnerWidget(
 		object_ptr<Inner>(this, _show, _set, _type),
 		st::stickersScroll);
+	_inner->setOuterContainer(getDelegate()->outerContainer());
 	if (const auto previewId = base::take(_previewDocumentId)) {
 		_inner->showPreviewForDocument(previewId);
 	}
@@ -2350,20 +2356,15 @@ void StickerSetBox::Inner::showAddMenu(QPoint globalPos) {
 	_menu->popup(globalPos);
 }
 
+void StickerSetBox::Inner::setOuterContainer(QPointer<QWidget> container) {
+	_outerContainer = std::move(container);
+}
+
 void StickerSetBox::Inner::startAddExistingStickerFlow() {
-	if (!hasAddCell()) {
+	if (!hasAddCell() || !_outerContainer) {
 		return;
 	}
-	auto box = (Ui::BoxContent*)nullptr;
-	for (auto p = parentWidget(); p; p = p->parentWidget()) {
-		if (const auto candidate = dynamic_cast<Ui::BoxContent*>(p)) {
-			box = candidate;
-			break;
-		}
-	}
-	if (!box) {
-		return;
-	}
+	const auto container = _outerContainer.data();
 	const auto identifier = StickerSetIdentifier{
 		.id = _setId,
 		.accessHash = _setAccessHash,
@@ -2372,29 +2373,34 @@ void StickerSetBox::Inner::startAddExistingStickerFlow() {
 	const auto session = _session;
 	const auto show = _show;
 
-	_pickerDropdown = base::make_unique_q<Ui::InnerDropdown>(box);
-	const auto dropdown = _pickerDropdown.get();
-	dropdown->setAutoHiding(false);
-	dropdown->setMaxHeight(st::stickersMaxHeight);
+	using Selector = ChatHelpers::TabbedSelector;
+	_pickerPanel = base::make_unique_q<ChatHelpers::TabbedPanel>(
+		container,
+		ChatHelpers::TabbedPanelDescriptor{
+			.ownedSelector = object_ptr<Selector>(
+				nullptr,
+				ChatHelpers::TabbedSelectorDescriptor{
+					.show = _show,
+					.st = st::defaultComposeControls.tabbed,
+					.level = Window::GifPauseReason::Layer,
+					.mode = Selector::Mode::StickersOnly,
+					.excludeStickerSetId = _setId,
+				}),
+		});
+	const auto panel = _pickerPanel.get();
+	panel->setDesiredHeightValues(
+		1.,
+		st::emojiPanMinHeight / 2,
+		st::emojiPanMinHeight);
+	panel->setDropDown(true);
+	panel->setShowAnimationOrigin(Ui::PanelAnimation::Origin::TopLeft);
+	panel->hide();
 
-	auto descriptor = ChatHelpers::StickersListDescriptor{
-		.show = _show,
-		.mode = ChatHelpers::StickersListMode::UserpicBuilder,
-		.paused = [] { return false; },
-		.excludeSetId = _setId,
-	};
-	const auto list = dropdown->setOwnedWidget(
-		object_ptr<ChatHelpers::StickersListWidget>(
-			dropdown,
-			std::move(descriptor)));
-	list->refreshRecent();
-	list->refreshStickers();
-
-	list->chosen(
+	panel->selector()->fileChosen(
 	) | rpl::on_next([=, this](const ChatHelpers::FileChosen &chosen) {
 		const auto document = chosen.document;
-		if (_pickerDropdown) {
-			_pickerDropdown->hideAnimated();
+		if (_pickerPanel) {
+			_pickerPanel->hideAnimated();
 		}
 		const auto sticker = document->sticker();
 		const auto fallback = QString::fromUtf8("\xF0\x9F\x99\x82");
@@ -2416,15 +2422,31 @@ void StickerSetBox::Inner::startAddExistingStickerFlow() {
 					? tr::lng_attach_failed(tr::now)
 					: err);
 			}));
-	}, list->lifetime());
+	}, panel->lifetime());
 
-	const auto desiredWidth = box->width();
-	list->resizeToWidth(desiredWidth);
-
-	dropdown->resize(desiredWidth, st::stickersMaxHeight);
-	dropdown->move(0, 0);
-	dropdown->setOrigin(Ui::PanelAnimation::Origin::TopLeft);
-	dropdown->showAnimated();
+	const auto reposition = [=] {
+		const auto size = container->size();
+		const auto margins = st::emojiPanMargins;
+		const auto panelWidth = st::emojiPanWidth
+			+ margins.left()
+			+ margins.right();
+		const auto panelHeight = st::emojiPanMinHeight
+			+ margins.top()
+			+ margins.bottom();
+		const auto top = std::max(0, (size.height() - panelHeight) / 2);
+		const auto right = (size.width() + panelWidth) / 2;
+		panel->moveTopRight(top, right);
+	};
+	base::install_event_filter(panel, container, [=](
+			not_null<QEvent*> event) {
+		const auto type = event->type();
+		if (type == QEvent::Move || type == QEvent::Resize) {
+			crl::on_main(panel, reposition);
+		}
+		return base::EventFilterResult::Continue;
+	});
+	reposition();
+	panel->showAnimated();
 }
 
 void StickerSetBox::Inner::startCreateNewStickerFlow() {
