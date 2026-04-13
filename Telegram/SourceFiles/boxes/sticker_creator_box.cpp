@@ -8,10 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/sticker_creator_box.h"
 
 #include "api/api_stickers_creator.h"
-#include "base/event_filter.h"
 #include "chat_helpers/compose/compose_show.h"
-#include "chat_helpers/tabbed_panel.h"
-#include "chat_helpers/tabbed_selector.h"
+#include "chat_helpers/emoji_picker_overlay.h"
 #include "core/file_utilities.h"
 #include "editor/editor_layer_widget.h"
 #include "editor/photo_editor.h"
@@ -21,7 +19,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/channel_statistics/boosts/giveaway/boost_badge.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
-#include "ui/abstract_button.h"
 #include "ui/emoji_config.h"
 #include "ui/image/image.h"
 #include "ui/image/image_prepare.h"
@@ -31,14 +28,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rp_widget.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
-#include "ui/widgets/labels.h"
-#include "ui/widgets/scroll_area.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
-#include "styles/style_info.h"
 #include "styles/style_layers.h"
 
 #include <QtCore/QBuffer>
@@ -82,335 +76,6 @@ private:
 	const QImage _image;
 
 };
-
-class ActionButton final : public Ui::AbstractButton {
-public:
-	enum class Kind {
-		Emoji,
-		Delete,
-	};
-
-	ActionButton(QWidget *parent, Kind kind)
-	: AbstractButton(parent)
-	, _kind(kind) {
-		resize(
-			st::stickersCreatorActionSize,
-			st::stickersCreatorActionSize);
-	}
-
-protected:
-	void paintEvent(QPaintEvent *e) override {
-		auto p = QPainter(this);
-		auto hq = PainterHighQualityEnabler(p);
-		const auto size = st::stickersCreatorActionSize;
-		const auto rect = QRect(0, 0, size, size);
-		if (isOver()) {
-			p.setPen(Qt::NoPen);
-			p.setBrush(anim::with_alpha(st::windowSubTextFg->c, 0.12));
-			p.drawEllipse(rect);
-		}
-
-		if (_kind == Kind::Emoji) {
-			const auto &icon = st::stickersCreatorEmojiIcon;
-			const auto iconX = (size - icon.width()) / 2;
-			const auto iconY = (size - icon.height()) / 2;
-			icon.paint(p, iconX, iconY, size);
-
-			const auto line = style::ConvertScaleExact(
-				st::historyEmojiCircleLine);
-			auto pen = st::windowSubTextFg->p;
-			pen.setWidthF(line);
-			pen.setCapStyle(Qt::RoundCap);
-			p.setPen(pen);
-			p.setBrush(Qt::NoBrush);
-			const auto skipX = icon.width() / 4;
-			const auto skipY = icon.height() / 4;
-			p.drawEllipse(QRectF(
-				iconX + skipX,
-				iconY + skipY,
-				icon.width() - 2 * skipX,
-				icon.height() - 2 * skipY));
-		} else {
-			paintBackspaceGlyph(p, rect);
-		}
-	}
-
-private:
-	void paintBackspaceGlyph(QPainter &p, QRect rect) {
-		const auto glyphW = style::ConvertScaleExact(18.);
-		const auto glyphH = style::ConvertScaleExact(13.);
-		const auto x = rect.x() + (rect.width() - glyphW) / 2.;
-		const auto y = rect.y() + (rect.height() - glyphH) / 2.;
-		const auto cornerCut = style::ConvertScaleExact(5.);
-		const auto stroke = style::ConvertScaleExact(1.5);
-
-		auto pen = st::windowSubTextFg->p;
-		pen.setWidthF(stroke);
-		pen.setCapStyle(Qt::RoundCap);
-		pen.setJoinStyle(Qt::RoundJoin);
-		p.setPen(pen);
-		p.setBrush(Qt::NoBrush);
-
-		auto path = QPainterPath();
-		path.moveTo(x, y + glyphH / 2.);
-		path.lineTo(x + cornerCut, y);
-		path.lineTo(x + glyphW, y);
-		path.lineTo(x + glyphW, y + glyphH);
-		path.lineTo(x + cornerCut, y + glyphH);
-		path.closeSubpath();
-		p.drawPath(path);
-
-		const auto cx = x + (cornerCut + glyphW) / 2. + stroke;
-		const auto cy = y + glyphH / 2.;
-		const auto half = style::ConvertScaleExact(2.5);
-		p.drawLine(
-			QPointF(cx - half, cy - half),
-			QPointF(cx + half, cy + half));
-		p.drawLine(
-			QPointF(cx - half, cy + half),
-			QPointF(cx + half, cy - half));
-	}
-
-	const Kind _kind;
-
-};
-
-class EmojiPickerRow final : public Ui::RpWidget {
-public:
-	EmojiPickerRow(
-		QWidget *parent,
-		std::shared_ptr<ChatHelpers::Show> show,
-		not_null<QWidget*> panelContainer);
-
-	[[nodiscard]] QString value() const;
-	[[nodiscard]] rpl::producer<int> countValue() const;
-
-protected:
-	void paintEvent(QPaintEvent *e) override;
-	void resizeEvent(QResizeEvent *e) override;
-
-private:
-	void relayout();
-	void ensurePanel();
-	void togglePanel();
-	void updatePanelGeometry();
-	void addEmoji(EmojiPtr emoji);
-	void removeLast();
-	[[nodiscard]] int rowContentWidth() const;
-
-	const std::shared_ptr<ChatHelpers::Show> _show;
-	const not_null<QWidget*> _panelContainer;
-	std::vector<EmojiPtr> _emojis;
-	rpl::variable<int> _count;
-	ActionButton *_plus = nullptr;
-	ActionButton *_minus = nullptr;
-	base::unique_qptr<ChatHelpers::TabbedPanel> _panel;
-
-};
-
-EmojiPickerRow::EmojiPickerRow(
-	QWidget *parent,
-	std::shared_ptr<ChatHelpers::Show> show,
-	not_null<QWidget*> panelContainer)
-: RpWidget(parent)
-, _show(std::move(show))
-, _panelContainer(panelContainer)
-, _plus(Ui::CreateChild<ActionButton>(this, ActionButton::Kind::Emoji))
-, _minus(Ui::CreateChild<ActionButton>(this, ActionButton::Kind::Delete)) {
-	resize(width(), st::stickersCreatorRowHeight);
-	_plus->setClickedCallback([=] { togglePanel(); });
-	_minus->setClickedCallback([=] { removeLast(); });
-	_minus->hide();
-}
-
-QString EmojiPickerRow::value() const {
-	auto result = QString();
-	for (const auto emoji : _emojis) {
-		result.append(emoji->text());
-	}
-	return result;
-}
-
-rpl::producer<int> EmojiPickerRow::countValue() const {
-	return _count.value();
-}
-
-int EmojiPickerRow::rowContentWidth() const {
-	const auto count = int(_emojis.size());
-	const auto plusVisible = (count < kMaxEmojis);
-	const auto minusVisible = (count > 0);
-	auto width = 0;
-	if (plusVisible) {
-		width += st::stickersCreatorActionSize;
-	}
-	if (count > 0) {
-		if (plusVisible) {
-			width += st::stickersCreatorActionMargin;
-		}
-		width += count * st::stickersCreatorEmojiSize
-			+ (count - 1) * st::stickersCreatorEmojiSkip;
-		if (minusVisible) {
-			width += st::stickersCreatorActionMargin;
-		}
-	}
-	if (minusVisible) {
-		width += st::stickersCreatorActionSize;
-	}
-	return width;
-}
-
-void EmojiPickerRow::relayout() {
-	const auto count = int(_emojis.size());
-	const auto plusVisible = (count < kMaxEmojis);
-	const auto minusVisible = (count > 0);
-	const auto contentWidth = rowContentWidth();
-	const auto offsetX = (width() - contentWidth) / 2;
-	const auto centerY = height() / 2;
-	const auto top = centerY - st::stickersCreatorActionSize / 2;
-
-	auto x = offsetX;
-
-	if (plusVisible) {
-		_plus->move(x, top);
-		_plus->show();
-		x += st::stickersCreatorActionSize;
-	} else {
-		_plus->hide();
-	}
-
-	if (count > 0) {
-		if (plusVisible) {
-			x += st::stickersCreatorActionMargin;
-		}
-		x += count * st::stickersCreatorEmojiSize
-			+ (count - 1) * st::stickersCreatorEmojiSkip;
-		if (minusVisible) {
-			x += st::stickersCreatorActionMargin;
-		}
-	}
-
-	if (minusVisible) {
-		_minus->move(x, top);
-		_minus->show();
-	} else {
-		_minus->hide();
-	}
-
-	update();
-}
-
-void EmojiPickerRow::paintEvent(QPaintEvent *e) {
-	auto p = QPainter(this);
-	const auto count = int(_emojis.size());
-	if (!count) {
-		return;
-	}
-	const auto esize = Ui::Emoji::GetSizeLarge();
-	const auto size = esize / style::DevicePixelRatio();
-	const auto contentWidth = rowContentWidth();
-	const auto offsetX = (width() - contentWidth) / 2;
-	const auto centerY = height() / 2;
-	const auto plusVisible = (count < kMaxEmojis);
-
-	auto x = offsetX;
-	if (plusVisible) {
-		x += st::stickersCreatorActionSize
-			+ st::stickersCreatorActionMargin;
-	}
-	const auto slot = st::stickersCreatorEmojiSize;
-	const auto extra = (slot - size) / 2;
-	const auto y = centerY - size / 2;
-	for (const auto emoji : _emojis) {
-		Ui::Emoji::Draw(p, emoji, esize, x + extra, y);
-		x += slot + st::stickersCreatorEmojiSkip;
-	}
-}
-
-void EmojiPickerRow::resizeEvent(QResizeEvent *e) {
-	relayout();
-}
-
-void EmojiPickerRow::ensurePanel() {
-	if (_panel) {
-		return;
-	}
-	using Selector = ChatHelpers::TabbedSelector;
-	_panel = base::make_unique_q<ChatHelpers::TabbedPanel>(
-		_panelContainer.get(),
-		ChatHelpers::TabbedPanelDescriptor{
-			.ownedSelector = object_ptr<Selector>(
-				nullptr,
-				ChatHelpers::TabbedSelectorDescriptor{
-					.show = _show,
-					.st = st::defaultComposeControls.tabbed,
-					.level = Window::GifPauseReason::Layer,
-					.mode = Selector::Mode::PeerTitle,
-				}),
-		});
-	_panel->setDesiredHeightValues(
-		1.,
-		st::emojiPanMinHeight / 2,
-		st::emojiPanMinHeight);
-	_panel->setDropDown(true);
-	_panel->setShowAnimationOrigin(Ui::PanelAnimation::Origin::TopLeft);
-	_panel->hide();
-
-	_panel->selector()->emojiChosen(
-	) | rpl::on_next([=](ChatHelpers::EmojiChosen data) {
-		addEmoji(data.emoji);
-		_panel->hideAnimated();
-	}, _panel->lifetime());
-
-	base::install_event_filter(this, _panelContainer, [=](
-			not_null<QEvent*> event) {
-		const auto type = event->type();
-		if (type == QEvent::Move || type == QEvent::Resize) {
-			crl::on_main(this, [=] { updatePanelGeometry(); });
-		}
-		return base::EventFilterResult::Continue;
-	});
-}
-
-void EmojiPickerRow::updatePanelGeometry() {
-	if (!_panel) {
-		return;
-	}
-	const auto container = _panelContainer->size();
-	const auto margins = st::emojiPanMargins;
-	const auto panelWidth = st::emojiPanWidth
-		+ margins.left()
-		+ margins.right();
-	const auto panelHeight = st::emojiPanMinHeight
-		+ margins.top()
-		+ margins.bottom();
-	const auto top = std::max(0, (container.height() - panelHeight) / 2);
-	const auto right = (container.width() + panelWidth) / 2;
-	_panel->moveTopRight(top, right);
-}
-
-void EmojiPickerRow::togglePanel() {
-	ensurePanel();
-	updatePanelGeometry();
-	_panel->toggleAnimated();
-}
-
-void EmojiPickerRow::addEmoji(EmojiPtr emoji) {
-	if (!emoji || int(_emojis.size()) >= kMaxEmojis) {
-		return;
-	}
-	_emojis.push_back(emoji);
-	_count = int(_emojis.size());
-	relayout();
-}
-
-void EmojiPickerRow::removeLast() {
-	if (_emojis.empty()) {
-		return;
-	}
-	_emojis.pop_back();
-	_count = int(_emojis.size());
-	relayout();
-}
 
 void OpenPhotoEditorForSticker(
 		std::shared_ptr<ChatHelpers::Show> show,
@@ -542,44 +207,66 @@ void CreateStickerBox(
 
 	const auto inner = box->verticalLayout();
 
+	auto pickerDescriptor = ChatHelpers::EmojiPickerOverlayDescriptor{
+		.aboutText = tr::lng_stickers_create_emoji_about(tr::now),
+		.maxSelected = kMaxEmojis,
+		.allowExpand = true,
+	};
+	const auto overlayExpanded = [&] {
+		auto probe = ChatHelpers::EmojiPickerOverlay(nullptr, pickerDescriptor);
+		return probe.expandedHeight();
+	}();
+
 	const auto previewHolder = inner->add(
 		object_ptr<Ui::RpWidget>(inner),
 		QMargins(0, 0, 0, 0),
-		// QMargins(0, st::boxRowPadding.left(), 0, st::boxRowPadding.left()),
 		style::al_top);
-	previewHolder->resize(st::boxWideWidth, kPreviewSide);
+	previewHolder->resize(
+		st::boxWideWidth,
+		kPreviewSide + overlayExpanded / 2);
 	const auto preview = Ui::CreateChild<PreviewWidget>(
 		previewHolder,
 		image);
+
+	const auto picker = Ui::CreateChild<ChatHelpers::EmojiPickerOverlay>(
+		previewHolder,
+		std::move(pickerDescriptor));
+
+	auto layoutOverlay = [=] {
+		const auto w = std::min(
+			previewHolder->width() - 2 * st::boxRowPadding.left(),
+			int(kPreviewSide * 1.1));
+		const auto h = picker->expanded()
+			? picker->expandedHeight()
+			: picker->collapsedHeight();
+		const auto x = (previewHolder->width() - w) / 2;
+		const auto y = kPreviewSide - h;
+		picker->setGeometry(x, y, w, h);
+		picker->raise();
+	};
+
 	previewHolder->widthValue(
 	) | rpl::on_next([=](int width) {
 		preview->move((width - kPreviewSide) / 2, 0);
+		layoutOverlay();
 	}, preview->lifetime());
 
-	Ui::AddSkip(inner);
-	Ui::AddSkip(inner);
+	picker->expandedValue(
+	) | rpl::on_next([=](bool) {
+		layoutOverlay();
+	}, picker->lifetime());
 
-	inner->add(
-		object_ptr<Ui::FlatLabel>(
-			inner,
-			tr::lng_stickers_pack_choose_emoji_about(),
-			st::boxDividerLabel),
-		st::boxRowPadding);
-
-	const auto emojiRow = inner->add(
-		object_ptr<EmojiPickerRow>(
-			inner,
-			show,
-			box->getDelegate()->outerContainer()),
-		QMargins(0, 0, 0, st::boxRowPadding.left()));
-	emojiRow->resize(st::boxWideWidth, st::stickersCreatorRowHeight);
+	Ui::AddSkip(inner);
 
 	const auto startUpload = [=, set = std::move(set), done = std::move(done)](
 			) mutable {
 		if (state->uploading.current()) {
 			return;
 		}
-		const auto emoji = emojiRow->value();
+		auto emoji = QString();
+		for (const auto one : picker->selected()) {
+			emoji.append(one->text());
+		}
 		if (emoji.isEmpty()) {
 			show->showToast(
 				tr::lng_stickers_create_emoji_required(tr::now));

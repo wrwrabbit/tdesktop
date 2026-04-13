@@ -428,13 +428,6 @@ stickersAddCellPlusSize: 22px;
 stickersAddCellPlusThickness: 2px;
 stickersAddCellBgRadius: 28px;
 
-stickersCreatorEmojiSize: 32px;
-stickersCreatorEmojiSkip: 8px;
-stickersCreatorRowHeight: 48px;
-stickersCreatorActionSize: 32px;
-stickersCreatorActionMargin: 12px;
-stickersCreatorEmojiIcon: icon {{ "chat/input_smile_face", windowSubTextFg }};
-
 stickersEmojiPickerRadius: 16px;
 stickersEmojiPickerBg: emojiPanBg;
 stickersEmojiPickerShadow: windowShadowFg;
