@@ -191,6 +191,8 @@ PRIVATE
     api/api_statistics_data_deserialize.h
     api/api_statistics_sender.cpp
     api/api_statistics_sender.h
+    api/api_stickers_creator.cpp
+    api/api_stickers_creator.h
     api/api_suggest_post.cpp
     api/api_suggest_post.h
     api/api_text_entities.cpp
@@ -374,6 +376,8 @@ PRIVATE
     boxes/star_gift_preview_box.h
     boxes/star_gift_resale_box.cpp
     boxes/star_gift_resale_box.h
+    boxes/sticker_picker_box.cpp
+    boxes/sticker_picker_box.h
     boxes/sticker_set_box.cpp
     boxes/sticker_set_box.h
     boxes/stickers_box.cpp

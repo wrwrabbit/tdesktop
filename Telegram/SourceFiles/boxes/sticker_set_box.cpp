@@ -8,10 +8,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/sticker_set_box.h"
 
 #include "api/api_common.h"
+#include "api/api_stickers_creator.h"
 #include "api/api_toggling_media.h"
 #include "apiwrap.h"
 #include "base/unixtime.h"
 #include "boxes/premium_preview_box.h"
+#include "boxes/sticker_picker_box.h"
 #include "chat_helpers/compose/compose_show.h"
 #include "chat_helpers/stickers_list_widget.h"
 #include "chat_helpers/stickers_lottie.h"
@@ -2347,7 +2349,40 @@ void StickerSetBox::Inner::showAddMenu(QPoint globalPos) {
 }
 
 void StickerSetBox::Inner::startAddExistingStickerFlow() {
-	_show->showToast(u"Add an existing sticker: not implemented yet."_q);
+	if (!hasAddCell()) {
+		return;
+	}
+	const auto identifier = StickerSetIdentifier{
+		.id = _setId,
+		.accessHash = _setAccessHash,
+		.shortName = _setShortName,
+	};
+	const auto session = _session;
+	const auto show = _show;
+	const auto onChosen = crl::guard(this, [=, this](
+			not_null<DocumentData*> document) {
+		const auto sticker = document->sticker();
+		const auto fallback = QString::fromUtf8("\xF0\x9F\x99\x82");
+		const auto emoji = (sticker && !sticker->alt.isEmpty())
+			? sticker->alt
+			: fallback;
+		Api::AddExistingStickerToSet(
+			session,
+			identifier,
+			document,
+			emoji,
+			crl::guard(this, [=, this](MTPmessages_StickerSet result) {
+				applySet(result);
+				show->showToast(
+					tr::lng_stickers_create_added(tr::now));
+			}),
+			crl::guard(this, [=](QString err) {
+				show->showToast(err.isEmpty()
+					? tr::lng_attach_failed(tr::now)
+					: err);
+			}));
+	});
+	_show->showBox(Box<StickerPickerBox>(_show, onChosen));
 }
 
 void StickerSetBox::Inner::startCreateNewStickerFlow() {
