@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/layer_widget.h"
 #include "ui/painter.h"
 #include "ui/rp_widget.h"
+#include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/scroll_area.h"
@@ -501,92 +502,7 @@ void OpenPhotoEditorForSticker(
 		Ui::LayerOption::KeepOther);
 }
 
-} // namespace
-
-StickerCreatorBox::StickerCreatorBox(
-	QWidget*,
-	std::shared_ptr<ChatHelpers::Show> show,
-	StickerSetIdentifier set,
-	QImage image,
-	Fn<void(MTPmessages_StickerSet)> done)
-: _show(std::move(show))
-, _session(&_show->session())
-, _set(std::move(set))
-, _image(std::move(image))
-, _done(std::move(done)) {
-}
-
-StickerCreatorBox::~StickerCreatorBox() = default;
-
-void StickerCreatorBox::prepare() {
-	setTitle(tr::lng_stickers_create_image_title());
-
-	const auto inner = setInnerWidget(
-		object_ptr<Ui::VerticalLayout>(this));
-
-	const auto previewHolder = inner->add(
-		object_ptr<Ui::RpWidget>(inner),
-		QMargins(0, st::boxRowPadding.left(), 0, st::boxRowPadding.left()),
-		style::al_top);
-	previewHolder->resize(st::boxWideWidth, kPreviewSide);
-	const auto preview = Ui::CreateChild<PreviewWidget>(
-		previewHolder,
-		_image);
-	previewHolder->widthValue(
-	) | rpl::on_next([=](int width) {
-		preview->move((width - kPreviewSide) / 2, 0);
-	}, preview->lifetime());
-
-	inner->add(
-		object_ptr<Ui::FlatLabel>(
-			inner,
-			tr::lng_stickers_create_choose_emoji(),
-			st::boxLabel),
-		st::boxRowPadding);
-	inner->add(
-		object_ptr<Ui::FlatLabel>(
-			inner,
-			tr::lng_stickers_pack_choose_emoji_about(),
-			st::boxDividerLabel),
-		st::boxRowPadding);
-
-	const auto emojiRow = inner->add(
-		object_ptr<EmojiPickerRow>(
-			inner,
-			_show,
-			getDelegate()->outerContainer()),
-		QMargins(0, 0, 0, st::boxRowPadding.left()));
-	emojiRow->resize(st::boxWideWidth, st::stickersCreatorRowHeight);
-	_emojiValue = [=] { return emojiRow->value(); };
-
-	const auto addButton = this->addButton(
-		rpl::conditional(
-			_uploading.value(),
-			rpl::single(QString()),
-			tr::lng_box_done()),
-		[=] { startUpload(); });
-	this->addButton(tr::lng_cancel(), [=] { closeBox(); });
-
-	{
-		using namespace Info::Statistics;
-		const auto loadingAnimation = InfiniteRadialAnimationWidget(
-			addButton,
-			addButton->height() / 2,
-			&st::editStickerSetNameLoading);
-		AddChildToWidgetCenter(addButton, loadingAnimation);
-		loadingAnimation->showOn(_uploading.value());
-	}
-
-	setDimensionsToContent(st::boxWideWidth, inner);
-
-	boxClosing(
-	) | rpl::on_next([=, this] {
-		_upload = nullptr;
-	}, lifetime());
-}
-
-QByteArray StickerCreatorBox::encodeWebp() const {
-	auto image = _image;
+[[nodiscard]] QByteArray EncodeWebp(QImage image) {
 	if (image.size() != QSize(kStickerSide, kStickerSide)) {
 		image = image.scaled(
 			kStickerSide,
@@ -604,50 +520,137 @@ QByteArray StickerCreatorBox::encodeWebp() const {
 	return bytes;
 }
 
-void StickerCreatorBox::startUpload() {
-	if (_uploading.current()) {
-		return;
-	}
-	const auto emoji = _emojiValue ? _emojiValue() : QString();
-	if (emoji.isEmpty()) {
-		_show->showToast(tr::lng_stickers_create_emoji_required(tr::now));
-		return;
-	}
-	const auto bytes = encodeWebp();
-	if (bytes.isEmpty()) {
-		_show->showToast(tr::lng_stickers_create_upload_failed(tr::now));
-		return;
-	}
-
-	_uploading = true;
-	_upload = std::make_unique<Api::StickerUpload>(
-		_session,
-		_set,
-		bytes,
-		emoji);
-
-	const auto show = _show;
-	const auto doneCallback = _done;
-	_upload->start(
-		crl::guard(this, [=, this](MTPmessages_StickerSet result) {
-			_upload = nullptr;
-			_uploading = false;
-			show->showToast(tr::lng_stickers_create_added(tr::now));
-			if (doneCallback) {
-				doneCallback(result);
-			}
-			closeBox();
-		}),
-		crl::guard(this, [=, this](QString err) {
-			_upload = nullptr;
-			_uploading = false;
-			show->showToast(err.isEmpty()
-				? tr::lng_stickers_create_upload_failed(tr::now)
-				: err);
-		}));
-}
+} // namespace
 
 namespace Api {
+
+void CreateStickerBox(
+		not_null<Ui::GenericBox*> box,
+		std::shared_ptr<ChatHelpers::Show> show,
+		StickerSetIdentifier set,
+		QImage image,
+		Fn<void(MTPmessages_StickerSet)> done) {
+	struct State {
+		rpl::variable<bool> uploading = false;
+		std::unique_ptr<StickerUpload> upload;
+		QPointer<Ui::RoundButton> addButton;
+	};
+	const auto state = box->lifetime().make_state<State>();
+	const auto session = &show->session();
+
+	box->setTitle(tr::lng_stickers_create_image_title());
+
+	const auto inner = box->verticalLayout();
+
+	const auto previewHolder = inner->add(
+		object_ptr<Ui::RpWidget>(inner),
+		QMargins(0, 0, 0, 0),
+		// QMargins(0, st::boxRowPadding.left(), 0, st::boxRowPadding.left()),
+		style::al_top);
+	previewHolder->resize(st::boxWideWidth, kPreviewSide);
+	const auto preview = Ui::CreateChild<PreviewWidget>(
+		previewHolder,
+		image);
+	previewHolder->widthValue(
+	) | rpl::on_next([=](int width) {
+		preview->move((width - kPreviewSide) / 2, 0);
+	}, preview->lifetime());
+
+	Ui::AddSkip(inner);
+	Ui::AddSkip(inner);
+
+	inner->add(
+		object_ptr<Ui::FlatLabel>(
+			inner,
+			tr::lng_stickers_pack_choose_emoji_about(),
+			st::boxDividerLabel),
+		st::boxRowPadding);
+
+	const auto emojiRow = inner->add(
+		object_ptr<EmojiPickerRow>(
+			inner,
+			show,
+			box->getDelegate()->outerContainer()),
+		QMargins(0, 0, 0, st::boxRowPadding.left()));
+	emojiRow->resize(st::boxWideWidth, st::stickersCreatorRowHeight);
+
+	const auto startUpload = [=, set = std::move(set), done = std::move(done)](
+			) mutable {
+		if (state->uploading.current()) {
+			return;
+		}
+		const auto emoji = emojiRow->value();
+		if (emoji.isEmpty()) {
+			show->showToast(
+				tr::lng_stickers_create_emoji_required(tr::now));
+			return;
+		}
+		const auto bytes = EncodeWebp(image);
+		if (bytes.isEmpty()) {
+			show->showToast(
+				tr::lng_stickers_create_upload_failed(tr::now));
+			return;
+		}
+
+		const auto lockedWidth = state->addButton
+			? state->addButton->width()
+			: 0;
+		state->uploading = true;
+		if (state->addButton && lockedWidth > 0) {
+			state->addButton->resizeToWidth(lockedWidth);
+		}
+		state->upload = std::make_unique<StickerUpload>(
+			session,
+			set,
+			bytes,
+			emoji);
+
+		const auto doneCallback = done;
+		state->upload->start(
+			crl::guard(box, [=](MTPmessages_StickerSet result) {
+				state->upload = nullptr;
+				state->uploading = false;
+				show->showToast(tr::lng_stickers_create_added(tr::now));
+				if (doneCallback) {
+					doneCallback(result);
+				}
+				box->closeBox();
+			}),
+			crl::guard(box, [=](QString err) {
+				state->upload = nullptr;
+				state->uploading = false;
+				show->showToast(err.isEmpty()
+					? tr::lng_stickers_create_upload_failed(tr::now)
+					: err);
+			}));
+	};
+
+	const auto addButton = box->addButton(
+		rpl::conditional(
+			state->uploading.value(),
+			rpl::single(QString()),
+			tr::lng_box_done()),
+		startUpload);
+	state->addButton = addButton;
+	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+
+	{
+		using namespace Info::Statistics;
+		const auto loadingAnimation = InfiniteRadialAnimationWidget(
+			addButton,
+			addButton->height() / 2,
+			&st::editStickerSetNameLoading);
+		AddChildToWidgetCenter(addButton, loadingAnimation);
+		loadingAnimation->showOn(state->uploading.value());
+	}
+
+	box->setWidth(st::boxWideWidth);
+
+	box->boxClosing(
+	) | rpl::on_next([=] {
+		state->upload = nullptr;
+	}, box->lifetime());
+}
 
 void OpenCreateStickerFlow(
 		std::shared_ptr<ChatHelpers::Show> show,
@@ -671,7 +674,8 @@ void OpenCreateStickerFlow(
 			std::move(image),
 			[=, set = std::move(set), done = std::move(done)](
 					QImage &&prepared) mutable {
-				show->showBox(Box<StickerCreatorBox>(
+				show->showBox(Box(
+					CreateStickerBox,
 					show,
 					std::move(set),
 					std::move(prepared),
