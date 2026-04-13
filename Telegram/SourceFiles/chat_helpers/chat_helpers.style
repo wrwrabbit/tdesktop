@@ -609,7 +609,7 @@ sendBoxAlbumSmallGroupSize: size(30px, 25px);
 sendBoxAlbumSmallGroupCircleSize: 27px;
 
 sendBoxFileGroupSkipTop: 2px;
-sendBoxFileGroupSkipRight: 5px;
+sendBoxFileGroupSkipRight: 1px;
 sendBoxFileGroupEditInternalSkip: -1px;
 
 sendBoxAlbumGroupButtonFile: IconButton(editMediaButton) {
@@ -622,7 +622,7 @@ sendBoxAlbumGroupDeleteButtonIconFile: icon {{ "send_media/send_media_cross", me
 
 sendBoxAlbumButtonMediaMore: icon {{ "send_media/send_media_more", roundedFg }};
 sendBoxAlbumGroupButtonMediaMore: icon {{ "send_media/send_media_more", roundedFg, point(4px, 1px) }};
-sendBoxAlbumGroupButtonMediaDelete: icon {{ "send_media/send_media_cross", roundedFg, point(-2px, 1px) }};
+sendBoxAlbumGroupButtonMediaDelete: icon {{ "send_media/send_media_cross", roundedFg }};
 
 defaultComposeIcons: ComposeIcons {
 	settings: icon {{ "emoji/emoji_settings", emojiIconFg }};
@@ -1032,6 +1032,19 @@ historyReplyCancel: IconButton {
 historyPinnedShowAll: IconButton(historyReplyCancel) {
 	icon: icon {{ "pinned_show_all", historyReplyCancelFg }};
 	iconOver: icon {{ "pinned_show_all", historyReplyCancelFgOver }};
+}
+sendFilesReplyIconPosition: point(11px, 7px);
+sendFilesReplyCancelSize: 24px;
+sendFilesReplyCancel: IconButton(editMediaButton) {
+	width: sendFilesReplyCancelSize;
+	height: sendFilesReplyCancelSize;
+	icon: icon {{ "send_media/send_media_cross", historyReplyCancelFg }};
+	iconOver: icon {{ "send_media/send_media_cross", historyReplyCancelFgOver }};
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: windowBgRipple;
+	}
+
+	rippleAreaSize: sendFilesReplyCancelSize;
 }
 historyPinnedBotButton: RoundButton(defaultActiveButton) {
 	width: -34px;

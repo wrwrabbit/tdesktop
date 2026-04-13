@@ -356,6 +356,8 @@ PRIVATE
     boxes/send_gif_with_caption_box.h
     boxes/send_files_box.cpp
     boxes/send_files_box.h
+    boxes/send_files_box_reply_header.cpp
+    boxes/send_files_box_reply_header.h
     boxes/share_box.cpp
     boxes/share_box.h
     boxes/star_gift_auction_box.cpp
