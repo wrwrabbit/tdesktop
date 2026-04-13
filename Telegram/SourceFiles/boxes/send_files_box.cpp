@@ -1486,7 +1486,9 @@ void SendFilesBox::pushBlock(int from, int till) {
 					&st::menuIconCaptionShow);
 		}
 		const auto canToggleSpoiler = !hasPrice()
-			&& _sendWay.current().sendImagesAsPhotos();
+			&& _sendWay.current().sendImagesAsPhotos()
+			&& (file.type == Ui::PreparedFile::Type::Photo
+				|| file.type == Ui::PreparedFile::Type::Video);
 		if (canToggleSpoiler) {
 			const auto spoilered = file.spoiler;
 			const auto &icons = _st.tabbed.icons;
