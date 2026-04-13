@@ -428,6 +428,12 @@ stickersAddCellPlusSize: 22px;
 stickersAddCellPlusThickness: 2px;
 stickersAddCellBgRadius: 28px;
 
+stickersCreatorEmojiSize: 32px;
+stickersCreatorEmojiSkip: 8px;
+stickersCreatorRowHeight: 48px;
+stickersCreatorActionSize: 32px;
+stickersCreatorActionMargin: 12px;
+
 emojiStatusDefault: icon {{ "emoji/stickers_premium", emojiIconFg }};
 
 filtersRemove: IconButton(stickersRemove) {

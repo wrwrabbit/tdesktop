@@ -20,12 +20,6 @@ namespace Main {
 class Session;
 } // namespace Main
 
-namespace Ui {
-class FlatLabel;
-class InputField;
-class RoundButton;
-} // namespace Ui
-
 namespace Api {
 class StickerUpload;
 } // namespace Api
@@ -44,12 +38,6 @@ protected:
 	void prepare() override;
 
 private:
-	enum class State {
-		ChooseEmoji,
-		Uploading,
-	};
-
-	void setState(State state);
 	void startUpload();
 	[[nodiscard]] QByteArray encodeWebp() const;
 
@@ -59,10 +47,8 @@ private:
 	const QImage _image;
 	const Fn<void(MTPmessages_StickerSet)> _done;
 
-	State _state = State::ChooseEmoji;
-	Ui::InputField *_emojiField = nullptr;
-	Ui::FlatLabel *_status = nullptr;
-	Ui::RoundButton *_addButton = nullptr;
+	rpl::variable<bool> _uploading = false;
+	Fn<QString()> _emojiValue;
 
 	std::unique_ptr<Api::StickerUpload> _upload;
 
