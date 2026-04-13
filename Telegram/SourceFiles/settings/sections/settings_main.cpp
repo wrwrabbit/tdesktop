@@ -355,9 +355,11 @@ void BuildSectionButtons(SectionBuilder &builder) {
 		.icon = { &st::menuIconLock },
 		.keywords = { u"security"_q, u"passcode"_q, u"password"_q, u"2fa"_q },
 	})) {
+#if 0 // PTG_PRIVACY_UI
 		if (!session->domain().local().IsFake()) {
 			AttachPrivacyCountBadge(privacyBtn, session);
 		}
+#endif // PTG_PRIVACY_UI
 	}
 
 	builder.addSectionButton({

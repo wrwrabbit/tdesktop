@@ -231,7 +231,9 @@ Session::Session(
 		data().stickers().notifySavedGifsUpdated();
 		DEBUG_LOG(("Init: Account stored data load finished."));
 
+#if 0 // PTG_PRIVACY_UI
 		Settings::RunBackgroundSessionCheck(this);
+#endif // PTG_PRIVACY_UI
 	});
 
 #ifndef TDESKTOP_DISABLE_SPELLCHECK

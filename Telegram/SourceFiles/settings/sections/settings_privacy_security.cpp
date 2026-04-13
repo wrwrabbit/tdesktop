@@ -835,6 +835,7 @@ void BuildPrivacySection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
 	const auto session = builder.session();
 
+#if 0 // PTG_PRIVACY_UI
 	auto &localDomain = session->domain().local();
 	if (!localDomain.IsFake() && localDomain.hasLocalPasscode()) {
 		builder.addButton({
@@ -867,6 +868,7 @@ void BuildPrivacySection(SectionBuilder &builder) {
 			) | rpl::map([](int count) { return count > 0; })),
 		});
 	}
+#endif // PTG_PRIVACY_UI
 
 	builder.addSkip(st::settingsPrivacySkip);
 	builder.addSubsectionTitle({
@@ -1340,6 +1342,7 @@ void BuildPrivacySecuritySectionContent(SectionBuilder &builder) {
 		return rpl::duplicate(updateOnTick);
 	};
 
+#if 0 // PTG_PRIVACY_UI
 	const auto controller = builder.controller();
 	const auto session = builder.session();
 
@@ -1393,6 +1396,7 @@ void BuildPrivacySecuritySectionContent(SectionBuilder &builder) {
 			false
 		) | rpl::then(std::move(reviewPending)),
 	});
+#endif // PTG_PRIVACY_UI
 
 	BuildSecuritySection(builder, trigger());
 	BuildPrivacySection(builder);
