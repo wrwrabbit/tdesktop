@@ -424,6 +424,10 @@ stickersScroll: ScrollArea(boxScroll) {
 stickersRowDisabledOpacity: 0.4;
 stickersRowDuration: 200;
 
+stickersAddCellPlusSize: 22px;
+stickersAddCellPlusThickness: 2px;
+stickersAddCellBgRadius: 28px;
+
 emojiStatusDefault: icon {{ "emoji/stickers_premium", emojiIconFg }};
 
 filtersRemove: IconButton(stickersRemove) {
