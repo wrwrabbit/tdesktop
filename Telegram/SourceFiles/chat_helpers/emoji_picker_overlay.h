@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
 #include "ui/emoji_config.h"
+#include "ui/widgets/shadow.h"
 
 namespace Ui {
 class AbstractButton;
@@ -34,6 +35,16 @@ public:
 		EmojiPickerOverlayDescriptor descriptor);
 	~EmojiPickerOverlay();
 
+	struct Metrics {
+		QMargins shadowExtent;
+		int tailHeight = 0;
+		int collapsedHeight = 0;
+		int expandedHeight = 0;
+		int totalCollapsedHeight = 0;
+		int totalExpandedHeight = 0;
+	};
+	[[nodiscard]] static Metrics EstimateMetrics(const QString &aboutText);
+
 	[[nodiscard]] const std::vector<EmojiPtr> &selected() const;
 	[[nodiscard]] rpl::producer<std::vector<EmojiPtr>> selectedValue() const;
 
@@ -43,6 +54,9 @@ public:
 
 	[[nodiscard]] int collapsedHeight() const;
 	[[nodiscard]] int expandedHeight() const;
+	[[nodiscard]] QMargins shadowExtent() const;
+	[[nodiscard]] int totalCollapsedHeight() const;
+	[[nodiscard]] int totalExpandedHeight() const;
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
@@ -58,8 +72,12 @@ private:
 	void notifySelectionChanged();
 	void startExpandAnimation(bool expanded);
 	void applyExpandProgress();
+	void paintTailBubble(QPainter &p, const QRect &bubble, float64 opacity);
 	[[nodiscard]] float64 currentExpandValue() const;
 	[[nodiscard]] int currentShownHeight() const;
+	[[nodiscard]] int tailHeight() const;
+	[[nodiscard]] QRect bubbleRect() const;
+	[[nodiscard]] QRect bubbleShownRect() const;
 
 	const QString _aboutText;
 	const std::vector<EmojiPtr> _recent;
@@ -78,6 +96,7 @@ private:
 	std::unique_ptr<Ui::ScrollArea> _scroll;
 	Grid *_grid = nullptr;
 	Ui::Animations::Simple _expandAnim;
+	Ui::BoxShadow _shadow;
 
 };
 

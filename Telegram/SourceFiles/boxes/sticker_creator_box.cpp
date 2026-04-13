@@ -212,23 +212,25 @@ void CreateStickerBox(
 		.maxSelected = kMaxEmojis,
 		.allowExpand = true,
 	};
-	const auto pickerCollapsed = [&] {
-		auto probe = ChatHelpers::EmojiPickerOverlay(nullptr, pickerDescriptor);
-		return probe.collapsedHeight();
-	}();
-	const auto pickerExpanded = [&] {
-		auto probe = ChatHelpers::EmojiPickerOverlay(nullptr, pickerDescriptor);
-		return probe.expandedHeight();
-	}();
-	const auto pickerExtra = pickerExpanded - pickerCollapsed;
+	const auto metrics = ChatHelpers::EmojiPickerOverlay::EstimateMetrics(
+		pickerDescriptor.aboutText);
+	const auto pickerCollapsed = metrics.collapsedHeight;
+	const auto pickerTotalExpanded = metrics.totalExpandedHeight;
+	const auto shadowExt = metrics.shadowExtent;
+
+	constexpr auto kStickerOverlap = 24;
+	const auto stickerTop = shadowExt.top()
+		+ pickerCollapsed
+		- kStickerOverlap;
+	const auto holderHeight = std::max(
+		stickerTop + kPreviewSide,
+		pickerTotalExpanded);
 
 	const auto previewHolder = inner->add(
 		object_ptr<Ui::RpWidget>(inner),
 		QMargins(0, 0, 0, 0),
 		style::al_top);
-	previewHolder->resize(
-		st::boxWideWidth,
-		kPreviewSide + pickerExtra);
+	previewHolder->resize(st::boxWideWidth, holderHeight);
 	const auto preview = Ui::CreateChild<PreviewWidget>(
 		previewHolder,
 		image);
@@ -238,18 +240,20 @@ void CreateStickerBox(
 		std::move(pickerDescriptor));
 
 	auto layoutOverlay = [=] {
-		const auto w = std::min(
-			previewHolder->width() - 2 * st::boxRowPadding.left(),
+		const auto bubbleW = std::min(
+			previewHolder->width()
+				- 2 * st::boxRowPadding.left()
+				- shadowExt.left() - shadowExt.right(),
 			int(kPreviewSide * 1.1));
-		const auto x = (previewHolder->width() - w) / 2;
-		const auto y = kPreviewSide - pickerCollapsed;
-		picker->setGeometry(x, y, w, pickerExpanded);
+		const auto totalW = bubbleW + shadowExt.left() + shadowExt.right();
+		const auto x = (previewHolder->width() - totalW) / 2;
+		picker->setGeometry(x, 0, totalW, pickerTotalExpanded);
 		picker->raise();
 	};
 
 	previewHolder->widthValue(
 	) | rpl::on_next([=](int width) {
-		preview->move((width - kPreviewSide) / 2, 0);
+		preview->move((width - kPreviewSide) / 2, stickerTop);
 		layoutOverlay();
 	}, preview->lifetime());
 

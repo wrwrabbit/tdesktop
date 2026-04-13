@@ -34,6 +34,11 @@ namespace {
 	return result;
 }
 
+[[nodiscard]] std::vector<EmojiPtr> DefaultRecentVector() {
+	const auto src = Ui::Emoji::GetDefaultRecent();
+	return std::vector<EmojiPtr>(src.begin(), src.end());
+}
+
 } // namespace
 
 class EmojiPickerOverlay::Strip final : public Ui::RpWidget {
@@ -354,19 +359,47 @@ void EmojiPickerOverlay::Grid::leaveEventHook(QEvent *e) {
 	updateHover(-1);
 }
 
+EmojiPickerOverlay::Metrics EmojiPickerOverlay::EstimateMetrics(
+		const QString &aboutText) {
+	const auto tailHeight = st::stickersEmojiPickerStripBubble.height();
+	const auto shadowExtent = Ui::BoxShadow::ExtendFor(
+		st::stickersEmojiPickerBoxShadow);
+	const auto &pad = st::stickersEmojiPickerPadding;
+	auto about = Ui::FlatLabel(
+		nullptr,
+		aboutText,
+		st::stickersEmojiPickerAbout);
+	const auto collapsedHeight = pad.top()
+		+ about.height()
+		+ st::stickersEmojiPickerStripHeight
+		+ pad.bottom();
+	const auto expandedHeight = collapsedHeight
+		+ st::stickersEmojiPickerExpandedHeight;
+	const auto shadowAndTail = shadowExtent.top()
+		+ shadowExtent.bottom()
+		+ tailHeight;
+	return {
+		.shadowExtent = shadowExtent,
+		.tailHeight = tailHeight,
+		.collapsedHeight = collapsedHeight,
+		.expandedHeight = expandedHeight,
+		.totalCollapsedHeight = collapsedHeight + shadowAndTail,
+		.totalExpandedHeight = expandedHeight + shadowAndTail,
+	};
+}
+
 EmojiPickerOverlay::EmojiPickerOverlay(
 	QWidget *parent,
 	EmojiPickerOverlayDescriptor descriptor)
 : RpWidget(parent)
 , _aboutText(std::move(descriptor.aboutText))
 , _recent(descriptor.recent.empty()
-	? std::vector<EmojiPtr>(
-		Ui::Emoji::GetDefaultRecent().begin(),
-		Ui::Emoji::GetDefaultRecent().end())
+	? DefaultRecentVector()
 	: std::move(descriptor.recent))
 , _maxSelected(descriptor.maxSelected)
 , _allowExpand(descriptor.allowExpand)
-, _selectedList(std::move(descriptor.initialSelected)) {
+, _selectedList(std::move(descriptor.initialSelected))
+, _shadow(st::stickersEmojiPickerBoxShadow) {
 	_allForGrid = BuildAllEmojis();
 
 	_about = std::make_unique<Ui::FlatLabel>(
@@ -405,7 +438,35 @@ EmojiPickerOverlay::EmojiPickerOverlay(
 	}
 
 	_selectedVar = _selectedList;
-	resize(width(), expandedHeight());
+	resize(width(), totalExpandedHeight());
+}
+
+QMargins EmojiPickerOverlay::shadowExtent() const {
+	return _shadow.extend();
+}
+
+int EmojiPickerOverlay::totalCollapsedHeight() const {
+	const auto ext = _shadow.extend();
+	return collapsedHeight() + ext.top() + ext.bottom() + tailHeight();
+}
+
+int EmojiPickerOverlay::totalExpandedHeight() const {
+	const auto ext = _shadow.extend();
+	return expandedHeight() + ext.top() + ext.bottom() + tailHeight();
+}
+
+QRect EmojiPickerOverlay::bubbleRect() const {
+	const auto ext = _shadow.extend();
+	return QRect(
+		ext.left(),
+		ext.top(),
+		width() - ext.left() - ext.right(),
+		height() - ext.top() - ext.bottom() - tailHeight());
+}
+
+QRect EmojiPickerOverlay::bubbleShownRect() const {
+	const auto r = bubbleRect();
+	return QRect(r.x(), r.y(), r.width(), currentShownHeight());
 }
 
 EmojiPickerOverlay::~EmojiPickerOverlay() = default;
@@ -455,8 +516,6 @@ int EmojiPickerOverlay::currentShownHeight() const {
 }
 
 void EmojiPickerOverlay::applyExpandProgress() {
-	const auto h = currentShownHeight();
-	setMask(QRegion(0, 0, width(), h));
 	if (_scroll) {
 		const auto progress = currentExpandValue();
 		_scroll->setVisible(progress > 0.);
@@ -489,33 +548,63 @@ int EmojiPickerOverlay::expandedHeight() const {
 void EmojiPickerOverlay::paintEvent(QPaintEvent *e) {
 	auto p = QPainter(this);
 	auto hq = PainterHighQualityEnabler(p);
+	const auto progress = currentExpandValue();
+	const auto shown = bubbleShownRect();
+	const auto radius = st::stickersEmojiPickerExpandedRadius;
+
+	_shadow.paint(p, shown, radius);
 	p.setPen(Qt::NoPen);
 	p.setBrush(st::stickersEmojiPickerBg);
-	const auto radius = st::stickersEmojiPickerRadius;
-	const auto h = currentShownHeight();
-	p.drawRoundedRect(QRect(0, 0, width(), h), radius, radius);
+	p.drawRoundedRect(shown, radius, radius);
+
+	if (progress < 1.) {
+		paintTailBubble(p, shown, 1. - progress);
+	}
+}
+
+void EmojiPickerOverlay::paintTailBubble(
+		QPainter &p,
+		const QRect &bubble,
+		float64 opacity) {
+	const auto &icon = st::stickersEmojiPickerStripBubble;
+	const auto offsetRight = st::stickersEmojiPickerStripBubbleRight;
+	const auto x = bubble.right() + 1 - offsetRight - icon.width();
+	const auto y = bubble.bottom() + 1;
+	if (opacity >= 1.) {
+		icon.paint(p, x, y, width());
+	} else {
+		p.save();
+		p.setOpacity(opacity);
+		icon.paint(p, x, y, width());
+		p.restore();
+	}
 }
 
 void EmojiPickerOverlay::resizeEvent(QResizeEvent *e) {
-	setMask(QRegion(0, 0, width(), currentShownHeight()));
 	relayout();
 }
 
 void EmojiPickerOverlay::mousePressEvent(QMouseEvent *e) {
-	if (e->pos().y() > currentShownHeight()) {
+	if (!bubbleShownRect().contains(e->pos())) {
 		e->ignore();
 	}
 }
 
+int EmojiPickerOverlay::tailHeight() const {
+	return st::stickersEmojiPickerStripBubble.height();
+}
+
 void EmojiPickerOverlay::relayout() {
 	const auto &pad = st::stickersEmojiPickerPadding;
+	const auto bubble = bubbleRect();
+	const auto bubbleShown = currentShownHeight();
 	if (_about) {
-		_about->resizeToWidth(width() - pad.left() - pad.right());
-		_about->moveToLeft(pad.left(), pad.top());
+		_about->resizeToWidth(bubble.width() - pad.left() - pad.right());
+		_about->moveToLeft(bubble.left() + pad.left(), bubble.top() + pad.top());
 	}
 	const auto aboutBottom = _about
 		? (_about->y() + _about->height())
-		: pad.top();
+		: (bubble.top() + pad.top());
 
 	const auto stripTop = aboutBottom;
 	const auto stripH = st::stickersEmojiPickerStripHeight;
@@ -525,29 +614,30 @@ void EmojiPickerOverlay::relayout() {
 	const auto expandGap = _expandButton
 		? st::stickersEmojiPickerItemSkip
 		: 0;
-	const auto stripW = width()
+	const auto stripW = bubble.width()
 		- pad.left()
 		- pad.right()
 		- expandSize
 		- expandGap;
-	_strip->setGeometry(pad.left(), stripTop, stripW, stripH);
+	_strip->setGeometry(bubble.left() + pad.left(), stripTop, stripW, stripH);
 	_strip->refresh();
 
 	if (_expandButton) {
-		const auto bx = width() - pad.right() - expandSize;
+		const auto bx = bubble.right() + 1 - pad.right() - expandSize;
 		const auto by = stripTop + (stripH - expandSize) / 2;
 		_expandButton->moveToLeft(bx, by);
 	}
 
 	if (_scroll) {
 		const auto scrollTop = stripTop + stripH;
+		const auto bubbleBottom = bubble.top() + bubbleShown;
 		const auto scrollH = std::max(
 			0,
-			height() - scrollTop - pad.bottom());
+			bubbleBottom - scrollTop - pad.bottom());
 		_scroll->setGeometry(
-			pad.left(),
+			bubble.left() + pad.left(),
 			scrollTop,
-			width() - pad.left() - pad.right(),
+			bubble.width() - pad.left() - pad.right(),
 			scrollH);
 		if (_grid) {
 			_grid->resizeGetHeight(_scroll->width());

@@ -428,14 +428,19 @@ stickersAddCellPlusSize: 22px;
 stickersAddCellPlusThickness: 2px;
 stickersAddCellBgRadius: 28px;
 
-stickersEmojiPickerRadius: 16px;
+stickersEmojiPickerExpandedRadius: 20px;
 stickersEmojiPickerBg: emojiPanBg;
 stickersEmojiPickerShadow: windowShadowFg;
-stickersEmojiPickerPadding: margins(12px, 10px, 12px, 10px);
+stickersEmojiPickerPadding: margins(12px, 8px, 12px, 0px);
 stickersEmojiPickerItemSize: 30px;
 stickersEmojiPickerItemSkip: 4px;
-stickersEmojiPickerStripHeight: 36px;
+stickersEmojiPickerStripHeight: 40px;
 stickersEmojiPickerExpandedHeight: 220px;
+stickersEmojiPickerStripBubble: icon{
+	{ "chat/reactions_bubble_shadow", windowShadowFg },
+	{ "chat/reactions_bubble", emojiPanBg },
+};
+stickersEmojiPickerStripBubbleRight: 20px;
 stickersEmojiPickerSelectedBg: windowBgActive;
 stickersEmojiPickerSelectedFg: windowBgActive;
 stickersEmojiPickerHeaderFg: windowSubTextFg;
@@ -458,6 +463,11 @@ stickersEmojiPickerSectionHeader: FlatLabel(defaultFlatLabel) {
 stickersEmojiPickerExpandIcon: icon {{ "intro_country_dropdown", windowSubTextFg }};
 stickersEmojiPickerCollapseIcon: icon {{ "intro_country_dropdown-flip_vertical", windowSubTextFg }};
 stickersEmojiPickerExpandSize: 24px;
+stickersEmojiPickerBoxShadow: BoxShadow {
+	blurRadius: 20px;
+	offset: point(0px, 6px);
+	opacity: 0.22;
+}
 
 emojiStatusDefault: icon {{ "emoji/stickers_premium", emojiIconFg }};
 
