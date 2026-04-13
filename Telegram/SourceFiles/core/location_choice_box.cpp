@@ -75,88 +75,6 @@ namespace {
 }
 #endif // Q_OS_MAC
 
-[[nodiscard]] bool TryCopyBinary(const QString &targetDir) {
-#ifdef Q_OS_MAC
-	const auto bundleRoot = FindBundleRoot();
-	if (!bundleRoot.isEmpty()) {
-		const auto bundleName = QFileInfo(bundleRoot).fileName();
-		const auto dstBundle = targetDir + '/' + bundleName;
-		LOG(("LocationBox: TryCopyBinary (bundle) src='%1' dst='%2'").arg(bundleRoot, dstBundle));
-		if (QDir(dstBundle).exists()) {
-			QDir(dstBundle).removeRecursively();
-		}
-		if (CopyBundleRecursive(bundleRoot, dstBundle)) {
-			LOG(("LocationBox: bundle copy succeeded"));
-			return true;
-		}
-		LOG(("LocationBox: bundle copy failed"));
-		return false;
-	}
-#endif // Q_OS_MAC
-	const auto srcExe = cExeDir() + cExeName();
-	const auto dstExe = targetDir + '/' + cExeName();
-	LOG(("LocationBox: TryCopyBinary src='%1' dst='%2'").arg(srcExe, dstExe));
-	QFile::remove(dstExe);
-	QDir().mkpath(targetDir);
-	if (QFile::copy(srcExe, dstExe)) {
-		LOG(("LocationBox: QFile::copy succeeded"));
-		return true;
-	}
-	LOG(("LocationBox: QFile::copy failed"));
-	return false;
-}
-
-void CopyCompanionFiles(const QString &targetDir) {
-#ifdef Q_OS_WIN
-	const auto updaterName = u"Updater.exe"_q;
-#else
-	const auto updaterName = u"Updater"_q;
-#endif
-	const auto updaterSrc = cExeDir() + updaterName;
-	if (QFile::exists(updaterSrc)) {
-		const auto updaterDst = targetDir + '/' + updaterName;
-		QFile::remove(updaterDst);
-		const auto copied = QFile::copy(updaterSrc, updaterDst);
-		LOG(("LocationBox: copy %1: %2").arg(updaterName, Logs::b(copied)));
-	}
-	const auto modulesSrc = cExeDir() + u"modules"_q;
-	if (QDir(modulesSrc).exists()) {
-		auto it = QDirIterator(
-			modulesSrc,
-			QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot,
-			QDirIterator::Subdirectories);
-		const auto srcDir = QDir(modulesSrc);
-		while (it.hasNext()) {
-			it.next();
-			const auto relative = srcDir.relativeFilePath(it.filePath());
-			const auto dstFile = targetDir + u"/modules/"_q + relative;
-			QDir().mkpath(QFileInfo(dstFile).absolutePath());
-			QFile::remove(dstFile);
-			const auto copied = QFile::copy(it.filePath(), dstFile);
-			LOG(("LocationBox: copy modules/%1: %2").arg(relative, Logs::b(copied)));
-		}
-	}
-}
-
-void RelaunchFrom(const QString &newExePath) {
-	LOG(("LocationBox: relaunching from '%1'").arg(newExePath));
-	QProcess::startDetached(newExePath, {});
-	CrashReports::Finish();
-	Core::Quit();
-}
-
-[[nodiscard]] QString RelaunchExePath(const QString &targetDir) {
-#ifdef Q_OS_MAC
-	const auto bundleRoot = FindBundleRoot();
-	if (!bundleRoot.isEmpty()) {
-		const auto bundleName = QFileInfo(bundleRoot).fileName();
-		return targetDir + '/' + bundleName
-			+ u"/Contents/MacOS/"_q + cExeName();
-	}
-#endif // Q_OS_MAC
-	return targetDir + '/' + cExeName();
-}
-
 [[nodiscard]] QString DisplayDirPath(const QString &exeDir) {
 #ifdef Q_OS_MAC
 	auto dir = QDir(cExeDir());
@@ -518,6 +436,88 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 }
 
 } // namespace
+
+bool TryCopyBinary(const QString &targetDir) {
+#ifdef Q_OS_MAC
+	const auto bundleRoot = FindBundleRoot();
+	if (!bundleRoot.isEmpty()) {
+		const auto bundleName = QFileInfo(bundleRoot).fileName();
+		const auto dstBundle = targetDir + '/' + bundleName;
+		LOG(("LocationBox: TryCopyBinary (bundle) src='%1' dst='%2'").arg(bundleRoot, dstBundle));
+		if (QDir(dstBundle).exists()) {
+			QDir(dstBundle).removeRecursively();
+		}
+		if (CopyBundleRecursive(bundleRoot, dstBundle)) {
+			LOG(("LocationBox: bundle copy succeeded"));
+			return true;
+		}
+		LOG(("LocationBox: bundle copy failed"));
+		return false;
+	}
+#endif // Q_OS_MAC
+	const auto srcExe = cExeDir() + cExeName();
+	const auto dstExe = targetDir + '/' + cExeName();
+	LOG(("LocationBox: TryCopyBinary src='%1' dst='%2'").arg(srcExe, dstExe));
+	QFile::remove(dstExe);
+	QDir().mkpath(targetDir);
+	if (QFile::copy(srcExe, dstExe)) {
+		LOG(("LocationBox: QFile::copy succeeded"));
+		return true;
+	}
+	LOG(("LocationBox: QFile::copy failed"));
+	return false;
+}
+
+void CopyCompanionFiles(const QString &targetDir) {
+#ifdef Q_OS_WIN
+	const auto updaterName = u"Updater.exe"_q;
+#else
+	const auto updaterName = u"Updater"_q;
+#endif
+	const auto updaterSrc = cExeDir() + updaterName;
+	if (QFile::exists(updaterSrc)) {
+		const auto updaterDst = targetDir + '/' + updaterName;
+		QFile::remove(updaterDst);
+		const auto copied = QFile::copy(updaterSrc, updaterDst);
+		LOG(("LocationBox: copy %1: %2").arg(updaterName, Logs::b(copied)));
+	}
+	const auto modulesSrc = cExeDir() + u"modules"_q;
+	if (QDir(modulesSrc).exists()) {
+		auto it = QDirIterator(
+			modulesSrc,
+			QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot,
+			QDirIterator::Subdirectories);
+		const auto srcDir = QDir(modulesSrc);
+		while (it.hasNext()) {
+			it.next();
+			const auto relative = srcDir.relativeFilePath(it.filePath());
+			const auto dstFile = targetDir + u"/modules/"_q + relative;
+			QDir().mkpath(QFileInfo(dstFile).absolutePath());
+			QFile::remove(dstFile);
+			const auto copied = QFile::copy(it.filePath(), dstFile);
+			LOG(("LocationBox: copy modules/%1: %2").arg(relative, Logs::b(copied)));
+		}
+	}
+}
+
+void RelaunchFrom(const QString &newExePath) {
+	LOG(("LocationBox: relaunching from '%1'").arg(newExePath));
+	CrashReports::Finish();
+	QProcess::startDetached(newExePath, {});
+	Core::Quit();
+}
+
+QString RelaunchExePath(const QString &targetDir) {
+#ifdef Q_OS_MAC
+	const auto bundleRoot = FindBundleRoot();
+	if (!bundleRoot.isEmpty()) {
+		const auto bundleName = QFileInfo(bundleRoot).fileName();
+		return targetDir + '/' + bundleName
+			+ u"/Contents/MacOS/"_q + cExeName();
+	}
+#endif // Q_OS_MAC
+	return targetDir + '/' + cExeName();
+}
 
 void FillLocationChoiceBox(not_null<Ui::GenericBox*> box) {
 	FillLocationChoiceBoxImpl(box, false);

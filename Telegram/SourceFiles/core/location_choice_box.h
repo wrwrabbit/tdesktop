@@ -17,6 +17,11 @@ class Show;
 
 namespace Core {
 
+[[nodiscard]] bool TryCopyBinary(const QString &targetDir);
+void CopyCompanionFiles(const QString &targetDir);
+void RelaunchFrom(const QString &newExePath);
+[[nodiscard]] QString RelaunchExePath(const QString &targetDir);
+
 void FillLocationChoiceBox(not_null<Ui::GenericBox*> box);
 void ShowLocationChoiceBox(not_null<Ui::Show*> show);
 void ShowLocationChoiceBoxFirstRun(not_null<Ui::Show*> show);

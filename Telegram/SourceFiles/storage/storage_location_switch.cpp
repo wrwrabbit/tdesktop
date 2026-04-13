@@ -217,15 +217,20 @@ bool ApplyPendingSwitch() {
 		LOG(("LocationSwitch: QDir::rename result: %1").arg(Logs::b(renamed)));
 		if (!renamed) {
 			LOG(("LocationSwitch: rename failed, trying recursive copy"));
+			if (QDir(targetTdata).exists()) {
+				const auto removed = QDir(targetTdata).removeRecursively();
+				LOG(("LocationSwitch: removed existing targetTdata: %1").arg(Logs::b(removed)));
+			}
 			if (!CopyDirRecursive(sourceTdata, targetTdata)) {
 				LOG(("LocationSwitch: recursive copy also failed, aborting"));
 				QFile::remove(flagPath);
 				return false;
 			}
-			LOG(("LocationSwitch: recursive copy succeeded, removing source tdata"));
-			const auto removedTdata = QDir(sourceTdata).removeRecursively();
-			LOG(("LocationSwitch: removeRecursively result: %1, sourceTdata still exists: %2").arg(
-				Logs::b(removedTdata), Logs::b(QDir(sourceTdata).exists())));
+			LOG(("LocationSwitch: recursive copy succeeded"));
+			// Remove all source tdata files now (they are safely at target).
+			// removeRecursively will delete everything except the locked 'working'
+			// file — that is removed in the cleanup phase below.
+			QDir(sourceTdata).removeRecursively();
 		}
 	} else {
 		LOG(("LocationSwitch: sourceTdata does not exist, nothing to move"));
@@ -236,97 +241,75 @@ bool ApplyPendingSwitch() {
 	LOG(("LocationSwitch: switch complete, working dir now '%1'").arg(targetWorkingDir));
 
 	if (QDir::cleanPath(sourceWorkingDir) != QDir::cleanPath(targetWorkingDir)) {
-		// Give the old process time to release file locks before attempting cleanup.
+		// Give the old process time to release file locks before cleanup.
 		QThread::msleep(1500);
 
 		const auto cleanSource = QDir::cleanPath(sourceWorkingDir);
+
+		// These files are released well before the old process exits.
 		for (const auto &name : {
 			u"log.txt"_q,
-			cExeName(),
 			u"Updater.exe"_q,
 			u"uninstall.exe"_q,
 		}) {
 			const auto filePath = cleanSource + '/' + name;
-			if (!QFile::exists(filePath)) {
-				LOG(("LocationSwitch: cleanup '%1': not present, skipping").arg(name));
-				continue;
+			if (QFile::exists(filePath)) {
+				LOG(("LocationSwitch: cleanup '%1': %2").arg(
+					name, Logs::b(QFile::remove(filePath))));
 			}
+		}
+
+		// Telegram.exe is locked until the process image is released.
+		// Retry until the old process fully exits.
+		{
+			const auto exePath = cleanSource + '/' + cExeName();
 			auto removed = false;
-			for (int i = 0; !removed && i < 12; ++i) {
-				QFile f(filePath);
-				removed = f.remove();
-				if (!removed) {
-					LOG(("LocationSwitch: cleanup '%1' attempt %2 failed: %3").arg(
-						name, QString::number(i + 1), f.errorString()));
-					if (i + 1 < 12) {
-						QThread::msleep(250);
-					}
+			for (int i = 0; !removed && i < 10; ++i) {
+				if (i > 0) {
+					QThread::msleep(250);
 				}
+				removed = QFile::remove(exePath);
 			}
-			LOG(("LocationSwitch: cleanup '%1': %2").arg(name, Logs::b(removed)));
+			LOG(("LocationSwitch: cleanup '%1': %2").arg(cExeName(), Logs::b(removed)));
 		}
 
-		const auto debugLogs = cleanSource + u"/DebugLogs"_q;
-		if (QDir(debugLogs).exists()) {
-			const auto removed = QDir(debugLogs).removeRecursively();
-			LOG(("LocationSwitch: cleanup 'DebugLogs': %1").arg(Logs::b(removed)));
+		for (const auto &dirName : { u"DebugLogs"_q, u"modules"_q }) {
+			const auto dirPath = cleanSource + '/' + dirName;
+			if (QDir(dirPath).exists()) {
+				LOG(("LocationSwitch: cleanup '%1': %2").arg(
+					dirName, Logs::b(QDir(dirPath).removeRecursively())));
+			}
 		}
 
-		const auto modules = cleanSource + u"/modules"_q;
-		if (QDir(modules).exists()) {
-			const auto removed = QDir(modules).removeRecursively();
-			LOG(("LocationSwitch: cleanup 'modules': %1").arg(Logs::b(removed)));
-		}
-
-		const auto workingPath = sourceTdata + u"/working"_q;
-		LOG(("LocationSwitch: 'tdata/working' exists=%1 isFile=%2 isDir=%3").arg(
-			Logs::b(QFile::exists(workingPath)),
-			Logs::b(QFileInfo(workingPath).isFile()),
-			Logs::b(QFileInfo(workingPath).isDir())));
-		auto workingRemoved = false;
-		for (int i = 0; !workingRemoved && i < 12; ++i) {
-			QFile f(workingPath);
-			workingRemoved = f.remove();
-			if (!workingRemoved) {
-				const auto ferr = f.errorString();
-				workingRemoved = QDir(workingPath).removeRecursively();
-				if (!workingRemoved) {
-					LOG(("LocationSwitch: cleanup 'tdata/working' attempt %1 failed: %2").arg(
-						QString::number(i + 1), ferr));
-					if (i + 1 < 12) {
-						QThread::msleep(250);
-					}
+		// tdata contains only 'working' at this point: all other files were
+		// removed by removeRecursively() above (or the directory is already
+		// gone if rename succeeded). 'working' was released by the old process
+		// in CrashReports::Finish() before startDetached, so it should be
+		// deletable on the first attempt after the 1.5s wait.
+		if (QDir(sourceTdata).exists()) {
+			const auto workingPath = sourceTdata + u"/working"_q;
+			auto workingRemoved = !QFile::exists(workingPath);
+			for (int i = 0; !workingRemoved && i < 10; ++i) {
+				if (i > 0) {
+					QThread::msleep(250);
 				}
+				workingRemoved = QFile::remove(workingPath);
 			}
-		}
-		LOG(("LocationSwitch: cleanup 'tdata/working': %1").arg(Logs::b(workingRemoved)));
-
-		if (!workingRemoved && QFile::exists(workingPath)) {
-			// The working file is still held by the dying old process. Rename the
-			// entire source tdata directory so future startups from the old location
-			// don't pick it up as a valid tdata (directory rename works on Windows
-			// even when files inside are open).
-			const auto tdataOld = sourceTdata + u"_old"_q;
-			QDir(tdataOld).removeRecursively();
-			const auto staleRenamed = QDir().rename(sourceTdata, tdataOld);
-			LOG(("LocationSwitch: renamed stale sourceTdata to tdata_old: %1").arg(
-				Logs::b(staleRenamed)));
-			if (!staleRenamed) {
-				LOG(("LocationSwitch: WARNING stale 'tdata/working' remains at '%1';"
-					" future startups from '%2' may use wrong tdata").arg(
-					workingPath, sourceWorkingDir));
-			}
-		} else {
-			const auto sourceEntries = QDir(sourceTdata).entryList(
-				QDir::AllEntries | QDir::NoDotAndDotDot);
-			if (sourceEntries.isEmpty()) {
-				const auto tdirRemoved = QDir().rmdir(sourceTdata);
-				LOG(("LocationSwitch: cleanup 'tdata' dir: %1").arg(Logs::b(tdirRemoved)));
+			LOG(("LocationSwitch: cleanup 'tdata/working': %1").arg(Logs::b(workingRemoved)));
+			if (workingRemoved) {
+				// Directory is now empty; rmdir succeeds without iterating.
+				LOG(("LocationSwitch: cleanup 'tdata': %1").arg(
+					Logs::b(QDir().rmdir(sourceTdata))));
 			} else {
-				LOG(("LocationSwitch: sourceTdata not empty after cleanup, remaining: %1").arg(
-					sourceEntries.join(u", "_q)));
+				// 'working' is still locked; rename the directory so future
+				// startups from the old location don't find valid tdata there.
+				const auto tdataOld = sourceTdata + u"_old"_q;
+				QDir(tdataOld).removeRecursively();
+				LOG(("LocationSwitch: rename stale tdata to tdata_old: %1").arg(
+					Logs::b(QDir().rename(sourceTdata, tdataOld))));
 			}
 		}
+
 #ifdef Q_OS_WIN
 		if (QDir::cleanPath(sourceWorkingDir).toLower()
 				== QDir::cleanPath(psAppDataPath()).toLower()) {

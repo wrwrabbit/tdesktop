@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings.h"
 #include "core/file_utilities.h"
 #include "core/launcher.h"
+#include "core/location_choice_box.h"
 #include "core/update_checker.h"
 #include "data/data_auto_download.h"
 #include "export/export_manager.h"
@@ -70,6 +71,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #ifdef Q_OS_MAC
 #include "base/platform/mac/base_confirm_quit.h"
 #endif // Q_OS_MAC
+
+#include <QtCore/QDir>
+#include <QtCore/QFile>
 
 #ifndef TDESKTOP_DISABLE_SPELLCHECK
 #include "boxes/dictionaries_manager.h"
@@ -260,8 +264,21 @@ void BuildStorageLocationSection(SectionBuilder &builder) {
 			.title = tr::lng_settings_storage_move_to_appdata(),
 			.icon = { &st::menuIconStorage },
 			.onClick = [=] {
-				const auto home = psAppDataPath();
+				const auto home = QDir(psAppDataPath()).absolutePath();
+				const auto targetExists = QFile::exists(home + '/' + cExeName())
+					|| QDir(home + u"/tdata"_q).exists();
 				const auto confirmed = [=] {
+#ifdef Q_OS_WIN
+					if (Core::TryCopyBinary(home)) {
+						Core::CopyCompanionFiles(home);
+						CreateStartMenuShortcut(home + '/' + cExeName());
+						Storage::ScheduleSwitchToHomeWrittenTo(home);
+						Core::RelaunchFrom(home + '/' + cExeName());
+					} else {
+						controller->show(Ui::MakeInformBox(
+							tr::lng_ptg_location_error_copy()));
+					}
+#else
 					if (Storage::ScheduleSwitchToHome()) {
 						Core::Restart();
 					} else {
@@ -270,11 +287,14 @@ void BuildStorageLocationSection(SectionBuilder &builder) {
 								lt_path,
 								rpl::single(home))));
 					}
+#endif
 				};
 				controller->show(Ui::MakeConfirmBox({
-					.text = tr::lng_settings_storage_move_to_appdata_about(
-						lt_path,
-						rpl::single(home)),
+					.text = targetExists
+						? tr::lng_ptg_location_confirm_overwrite()
+						: tr::lng_settings_storage_move_to_appdata_about(
+							lt_path,
+							rpl::single(home)),
 					.confirmed = confirmed,
 					.confirmText = tr::lng_settings_restart_now(),
 				}));
