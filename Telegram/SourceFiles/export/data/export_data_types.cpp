@@ -303,7 +303,11 @@ std::vector<TextPart> ParseText(
 				return Type::Blockquote; },
 			[](const MTPDmessageEntityBankCard&) { return Type::BankCard; },
 			[](const MTPDmessageEntitySpoiler&) { return Type::Spoiler; },
-			[](const MTPDmessageEntityCustomEmoji&) { return Type::CustomEmoji; });
+			[](const MTPDmessageEntityCustomEmoji&) { return Type::CustomEmoji; },
+			[](const MTPDmessageEntityFormattedDate&) { return Type::Unknown; },
+			[](const MTPDmessageEntityDiffInsert&) { return Type::Unknown; },
+			[](const MTPDmessageEntityDiffReplace&) { return Type::Unknown; },
+			[](const MTPDmessageEntityDiffDelete&) { return Type::Unknown; });
 		part.text = mid(start, length);
 		part.additional = entity.match(
 		[](const MTPDmessageEntityPre &data) {
@@ -786,10 +790,12 @@ Poll ParsePoll(const MTPDmessageMediaPoll &data) {
 		result.answers = ranges::views::all(
 			poll.vanswers().v
 		) | ranges::views::transform([](const MTPPollAnswer &answer) {
-			const auto &data = answer.data();
 			auto result = Poll::Answer();
-			result.text = ParseText(data.vtext());
-			result.option = data.voption().v;
+			answer.match([&](const MTPDpollAnswer &data) {
+				result.text = ParseText(data.vtext());
+				result.option = data.voption().v;
+			}, [](const auto &) {
+			});
 			return result;
 		}) | ranges::to_vector;
 	});
@@ -807,7 +813,9 @@ Poll ParsePoll(const MTPDmessageMediaPoll &data) {
 				if (i == end(result.answers)) {
 					continue;
 				}
-				i->votes = voters.vvoters().v;
+				if (const auto votes = voters.vvoters()) {
+					i->votes = votes->v;
+				}
 				if (voters.is_chosen()) {
 					i->my = true;
 				}
@@ -1795,6 +1803,8 @@ ServiceAction ParseServiceAction(
 				| ranges::views::transform(ParseTodoListItem)
 				| ranges::to_vector,
 		};
+	}, [&](const MTPDmessageActionPollAppendAnswer &data) {
+		result.content = ActionPollAppendAnswer{};
 	}, [&](const MTPDmessageActionSuggestedPostApproval &data) {
 		result.content = ActionSuggestedPostApproval{
 			.rejectComment = data.vreject_comment().value_or_empty(),
@@ -1856,6 +1866,37 @@ ServiceAction ParseServiceAction(
 	}, [&](const MTPDmessageActionChangeCreator &data) {
 		auto content = ActionChangeCreator();
 		content.newCreatorId = data.vnew_creator_id().v;
+		result.content = content;
+	}, [&](const MTPDmessageActionNoForwardsToggle &data) {
+		auto content = ActionNoForwardsToggle();
+		content.newValue = (data.vnew_value().type() == mtpc_boolTrue);
+		result.content = content;
+	}, [&](const MTPDmessageActionNoForwardsRequest &data) {
+		auto content = ActionNoForwardsRequest();
+		content.expired = data.is_expired();
+		content.newValue = (data.vnew_value().type() == mtpc_boolTrue);
+		result.content = content;
+	}, [&](const MTPDmessageActionManagedBotCreated &data) {
+		auto content = ActionManagedBotCreated();
+		content.botId = data.vbot_id().v;
+		result.content = content;
+	}, [&](const MTPDmessageActionPollAppendAnswer &data) {
+		auto content = ActionPollAppendAnswer();
+		data.vanswer().match([&](const MTPDpollAnswer &answer) {
+			content.option = ParseString(answer.vtext().match(
+				[](const MTPDtextWithEntities &d) {
+					return d.vtext();
+				}));
+		}, [](const auto &) {});
+		result.content = content;
+	}, [&](const MTPDmessageActionPollDeleteAnswer &data) {
+		auto content = ActionPollDeleteAnswer();
+		data.vanswer().match([&](const MTPDpollAnswer &answer) {
+			content.option = ParseString(answer.vtext().match(
+				[](const MTPDtextWithEntities &d) {
+					return d.vtext();
+				}));
+		}, [](const auto &) {});
 		result.content = content;
 	}, [](const MTPDmessageActionEmpty &data) {});
 	return result;

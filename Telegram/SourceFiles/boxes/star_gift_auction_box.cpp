@@ -70,6 +70,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_menu_icons.h"
 #include "styles/style_premium.h"
 #include "styles/style_settings.h"
+#include "styles/style_widgets.h"
 
 #include <QtWidgets/QApplication>
 #include <QtGui/QClipboard>
@@ -892,6 +893,8 @@ void AuctionBidBox(not_null<GenericBox*> box, AuctionBidBoxArgs &&args) {
 						lt_count,
 						perRound,
 						tr::rich),
+					.icon = &st::auctionBidToastIcon,
+					.iconPadding = st::auctionBidToast.padding,
 					.st = &st::auctionBidToast,
 					.attach = RectPart::Top,
 					.duration = kBidPlacedToastDuration,
@@ -1823,7 +1826,7 @@ TextWithEntities ActiveAuctionsTitle(const Data::ActiveAuctions &auctions) {
 		).append(' ').append(tr::lng_auction_bar_active(tr::now));
 	}
 	auto result = tr::marked();
-	for (const auto auction : list | ranges::views::take(3)) {
+	for (const auto &auction : list | ranges::views::take(3)) {
 		result.append(Data::SingleCustomEmoji(auction->gift->document));
 	}
 	return result.append(' ').append(
@@ -1851,7 +1854,7 @@ ManyAuctionsState ActiveAuctionsState(const Data::ActiveAuctions &auctions) {
 		return { std::move(text), !position };
 	}
 	auto outbid = 0;
-	for (const auto auction : list) {
+	for (const auto &auction : list) {
 		if (!winning(auction)) {
 			++outbid;
 		}
@@ -2036,7 +2039,7 @@ Fn<void()> ActiveAuctionsCallback(
 			.ends = state.nextRoundAt ? state.nextRoundAt : state.endDate,
 		};
 	};
-	for (const auto auction : list) {
+	for (const auto &auction : list) {
 		state->list.push_back(singleFrom(*auction));
 	}
 	return [=] {

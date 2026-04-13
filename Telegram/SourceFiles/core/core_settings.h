@@ -36,6 +36,9 @@ enum class StickedTooltip;
 
 namespace Core {
 
+inline constexpr auto kScreenReaderModeDisabledKey
+	= "screen-reader-mode-disabled"_cs;
+
 struct WindowPosition {
 	int32 moncrc = 0;
 	int maximized = 0;
@@ -388,6 +391,9 @@ public:
 	[[nodiscard]] Window::Theme::AccentColors &themesAccentColors() {
 		return _themesAccentColors;
 	}
+	[[nodiscard]] const Window::Theme::AccentColors &themesAccentColors() const {
+		return _themesAccentColors;
+	}
 	void setThemesAccentColors(Window::Theme::AccentColors &&colors) {
 		_themesAccentColors = std::move(colors);
 	}
@@ -464,6 +470,18 @@ public:
 	[[nodiscard]] rpl::producer<bool> replaceEmojiChanges() const {
 		return _replaceEmoji.changes();
 	}
+	void setSystemTextReplace(bool value) {
+		_systemTextReplace = value;
+	}
+	[[nodiscard]] bool systemTextReplace() const {
+		return _systemTextReplace.current();
+	}
+	[[nodiscard]] rpl::producer<bool> systemTextReplaceValue() const {
+		return _systemTextReplace.value();
+	}
+	[[nodiscard]] rpl::producer<bool> systemTextReplaceChanges() const {
+		return _systemTextReplace.changes();
+	}
 	[[nodiscard]] bool suggestEmoji() const {
 		return _suggestEmoji;
 	}
@@ -491,8 +509,14 @@ public:
 	[[nodiscard]] rpl::producer<bool> cornerReactionValue() const {
 		return _cornerReaction.value();
 	}
-	[[nodiscard]] rpl::producer<bool> cornerReactionChanges() const {
-		return _cornerReaction.changes();
+	void setCornerReply(bool value) {
+		_cornerReply = value;
+	}
+	[[nodiscard]] bool cornerReply() const {
+		return _cornerReply.current();
+	}
+	[[nodiscard]] rpl::producer<bool> cornerReplyValue() const {
+		return _cornerReply.value();
 	}
 
 	void setSpellcheckerEnabled(bool value) {
@@ -546,14 +570,33 @@ public:
 	}
 	[[nodiscard]] float64 voicePlaybackSpeed(
 			bool lastNonDefault = false) const {
-		return (_voicePlaybackSpeed.enabled || lastNonDefault)
-			? _voicePlaybackSpeed.value
-			: 1.;
+		const auto &s = _voicePlaybackSpeed.current();
+		return (s.enabled || lastNonDefault) ? s.value : 1.;
+	}
+	[[nodiscard]] float64 audioPlaybackSpeed(
+			bool lastNonDefault = false) const {
+		const auto &s = _audioPlaybackSpeed.current();
+		return (s.enabled || lastNonDefault) ? s.value : 1.;
 	}
 	void setVoicePlaybackSpeed(float64 speed) {
-		if ((_voicePlaybackSpeed.enabled = !Media::EqualSpeeds(speed, 1.0))) {
-			_voicePlaybackSpeed.value = speed;
-		}
+		const auto enabled = !Media::EqualSpeeds(speed, 1.0);
+		_voicePlaybackSpeed = PlaybackSpeed{
+			.value = enabled ? speed : _voicePlaybackSpeed.current().value,
+			.enabled = enabled,
+		};
+	}
+	void setAudioPlaybackSpeed(float64 speed) {
+		const auto enabled = !Media::EqualSpeeds(speed, 1.0);
+		_audioPlaybackSpeed = PlaybackSpeed{
+			.value = enabled ? speed : _audioPlaybackSpeed.current().value,
+			.enabled = enabled,
+		};
+	}
+	[[nodiscard]] auto voicePlaybackSpeedChanges() const {
+		return _voicePlaybackSpeed.changes();
+	}
+	[[nodiscard]] auto audioPlaybackSpeedChanges() const {
+		return _audioPlaybackSpeed.changes();
 	}
 
 	// For legacy values read-write outside of Settings.
@@ -694,6 +737,12 @@ public:
 	}
 	[[nodiscard]] rpl::producer<bool> systemDarkModeEnabledChanges() const {
 		return _systemDarkModeEnabled.changes();
+	}
+	void setSystemAccentColorEnabled(bool value) {
+		_systemAccentColorEnabled = value;
+	}
+	[[nodiscard]] bool systemAccentColorEnabled() const {
+		return _systemAccentColorEnabled;
 	}
 	[[nodiscard]] WindowTitleContent windowTitleContent() const {
 		return _windowTitleContent.current();
@@ -840,6 +889,8 @@ public:
 
 	void setTranslateButtonEnabled(bool value);
 	[[nodiscard]] bool translateButtonEnabled() const;
+	void setUsePlatformTranslation(bool value);
+	[[nodiscard]] bool usePlatformTranslation() const;
 	void setTranslateChatEnabled(bool value);
 	[[nodiscard]] bool translateChatEnabled() const;
 	[[nodiscard]] rpl::producer<bool> translateChatEnabledValue() const;
@@ -893,7 +944,6 @@ public:
 	void setTtlVoiceClickTooltipHidden(bool value) {
 		_ttlVoiceClickTooltipHidden = value;
 	}
-
 	[[nodiscard]] const WindowPosition &ivPosition() const {
 		return _ivPosition;
 	}
@@ -939,6 +989,7 @@ public:
 	[[nodiscard]] int ivZoom() const;
 	[[nodiscard]] rpl::producer<int> ivZoomValue() const;
 	void setIvZoom(int value);
+	bool normalizeIvZoom();
 
 	[[nodiscard]] bool chatFiltersHorizontal() const;
 	[[nodiscard]] rpl::producer<bool> chatFiltersHorizontalChanges() const;
@@ -953,6 +1004,10 @@ public:
 	struct PlaybackSpeed {
 		float64 value = Media::kSpedUpDefault;
 		bool enabled = false;
+
+		friend bool operator==(
+			const PlaybackSpeed &,
+			const PlaybackSpeed &) = default;
 	};
 	[[nodiscard]] static qint32 SerializePlaybackSpeed(PlaybackSpeed speed);
 	[[nodiscard]] static PlaybackSpeed DeserializePlaybackSpeed(
@@ -968,10 +1023,34 @@ public:
 		_notificationsVolume = value;
 	}
 
+	template <typename Type, typename Other>
+	void writePref(std::string_view key, Other &&value) {
+		writePrefImpl<Type>(key, std::forward<Other>(value));
+	}
+	void clearPref(std::string_view key);
+
+	template <typename Type, typename Other = Type>
+	[[nodiscard]] Type readPref(
+			std::string_view key,
+			Other &&fallback = Type()) {
+		return readPrefImpl<Type>(key).value_or(
+			std::forward<Other>(fallback));
+	}
+
 	void resetOnLastLogout();
 
 private:
 	void resolveRecentEmoji() const;
+
+	template <typename Type>
+	void writePrefImpl(std::string_view key, Type value);
+
+	template <typename Type>
+	[[nodiscard]] std::optional<Type> readPrefImpl(std::string_view key);
+
+	void writePrefGeneric(std::string_view key, const QByteArray &value);
+	[[nodiscard]] std::optional<QByteArray> readPrefGeneric(
+		std::string_view key);
 
 	static constexpr auto kDefaultThirdColumnWidth = 0;
 	static constexpr auto kDefaultDialogsWidthRatio = 5. / 14;
@@ -1029,13 +1108,16 @@ private:
 	bool _loopAnimatedStickers = true;
 	rpl::variable<bool> _largeEmoji = true;
 	rpl::variable<bool> _replaceEmoji = true;
+	rpl::variable<bool> _systemTextReplace = true;
 	bool _suggestEmoji = true;
 	bool _suggestStickersByEmoji = true;
 	bool _suggestAnimatedEmoji = true;
+	rpl::variable<bool> _cornerReply = true;
 	rpl::variable<bool> _cornerReaction = true;
 	rpl::variable<bool> _spellcheckerEnabled = true;
 	PlaybackSpeed _videoPlaybackSpeed;
-	PlaybackSpeed _voicePlaybackSpeed;
+	rpl::variable<PlaybackSpeed> _voicePlaybackSpeed;
+	rpl::variable<PlaybackSpeed> _audioPlaybackSpeed;
 	QByteArray _videoPipGeometry;
 	rpl::variable<std::vector<int>> _dictionariesEnabled;
 	rpl::variable<bool> _autoDownloadDictionaries = true;
@@ -1059,6 +1141,7 @@ private:
 	rpl::variable<bool> _nativeWindowFrame = false;
 	rpl::variable<std::optional<bool>> _systemDarkMode = std::nullopt;
 	rpl::variable<bool> _systemDarkModeEnabled = true;
+	bool _systemAccentColorEnabled = false;
 	rpl::variable<WindowTitleContent> _windowTitleContent;
 	WindowPosition _windowPosition; // per-window
 	bool _disableOpenGL = false;
@@ -1079,6 +1162,7 @@ private:
 	HistoryView::DoubleClickQuickAction _chatQuickAction
 		= HistoryView::DoubleClickQuickAction();
 	bool _translateButtonEnabled = false;
+	bool _usePlatformTranslation = false;
 	rpl::variable<bool> _translateChatEnabled = true;
 	rpl::variable<int> _translateToRaw = 0;
 	rpl::variable<std::vector<LanguageId>> _skipTranslationLanguages;
@@ -1095,9 +1179,10 @@ private:
 	bool _systemUnlockEnabled = false;
 	std::optional<bool> _weatherInCelsius;
 	QByteArray _tonsiteStorageToken;
-	rpl::variable<int> _ivZoom = 100;
+	rpl::variable<int> _ivZoom = 0;
 	Media::VideoQuality _videoQuality;
 	rpl::variable<bool> _chatFiltersHorizontal = false;
+	base::flat_map<QByteArray, QByteArray> _prefs;
 
 	bool _tabbedReplacedWithInfo = false; // per-window
 	rpl::event_stream<bool> _tabbedReplacedWithInfoValue; // per-window

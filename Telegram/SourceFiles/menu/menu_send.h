@@ -53,10 +53,17 @@ enum class CaptionState : uchar {
 	Above,
 };
 
+enum class PhotoQualityState : uchar {
+	None,
+	Standard,
+	High,
+};
+
 struct Details {
 	Type type = Type::Disabled;
 	SpoilerState spoiler = SpoilerState::None;
 	CaptionState caption = CaptionState::None;
+	PhotoQualityState photoQuality = PhotoQualityState::None;
 	TextWithTags commentPreview;
 	QString commentStreamerName;
 	std::optional<uint64> price;
@@ -78,6 +85,8 @@ enum class ActionType : uchar {
 	SpoilerOff,
 	CaptionUp,
 	CaptionDown,
+	PhotoQualityOn,
+	PhotoQualityOff,
 	ChangePrice,
 };
 struct Action {
@@ -138,5 +147,9 @@ Fn<void()> DefaultAutoDeleteCallback(
 	Fn<void(Api::SendOptions)> send);
 
 Fn<void()> NoAutoDeleteCallback();
+
+void SetupUnreadPollVotesMenu(
+	not_null<Ui::RpWidget*> button,
+	Fn<Data::Thread*()> currentThread);
 
 } // namespace SendMenu

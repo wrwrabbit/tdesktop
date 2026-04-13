@@ -67,6 +67,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
+#include "styles/style_widgets.h"
 
 namespace Settings {
 namespace {
@@ -256,6 +257,7 @@ using Order = std::vector<QString>;
 		u"premium_stickers"_q,
 		u"business"_q,
 		u"effects"_q,
+		u"ai_compose"_q,
 	};
 }
 
@@ -457,6 +459,24 @@ using Order = std::vector<QString>;
 				tr::lng_premium_summary_subtitle_todo_lists(),
 				tr::lng_premium_summary_about_todo_lists(),
 				PremiumFeature::TodoLists,
+			},
+		},
+		{
+			u"no_forwards"_q,
+			Entry{
+				&st::settingsPremiumIconNoForwards,
+				tr::lng_premium_summary_subtitle_no_forwards(),
+				tr::lng_premium_summary_about_no_forwards(),
+				PremiumFeature::NoForwards,
+			},
+		},
+		{
+			u"ai_compose"_q,
+			Entry{
+				&st::settingsPremiumIconAiCompose,
+				tr::lng_premium_summary_subtitle_ai_compose(),
+				tr::lng_premium_summary_about_ai_compose(),
+				PremiumFeature::AiCompose,
 				true,
 			},
 		},
@@ -1021,6 +1041,10 @@ void TopBarWithSticker::resizeEvent(QResizeEvent *e) {
 		return tr::lng_premium_summary_subtitle_effects(tr::now);
 	} else if (key == u"todo"_q) {
 		return tr::lng_premium_summary_subtitle_todo_lists(tr::now);
+	} else if (key == u"no_forwards"_q) {
+		return tr::lng_premium_summary_subtitle_no_forwards(tr::now);
+	} else if (key == u"ai_compose"_q) {
+		return tr::lng_premium_summary_subtitle_ai_compose(tr::now);
 	}
 	return QString();
 }
@@ -1880,21 +1904,30 @@ void ShowPremiumPromoToast(
 	(*toast) = show->showToast({
 		.text = std::move(textWithLink),
 		.filter = crl::guard(&show->session(), [=](
-				const ClickHandlerPtr &,
+				const ClickHandlerPtr &handler,
 				Qt::MouseButton button) {
-			if (button == Qt::LeftButton) {
+			if (button != Qt::LeftButton) {
+				return false;
+			}
+			const auto url = handler ? handler->url() : QString();
+			if (!url.isEmpty() && !url.startsWith(u"internal:"_q)) {
 				if (const auto strong = toast->get()) {
 					strong->hideAnimated();
 					(*toast) = nullptr;
-					if (const auto controller = resolveWindow(
-							&show->session())) {
-						Settings::ShowPremium(controller, ref);
-					}
-					return true;
+				}
+				return true;
+			}
+			if (const auto strong = toast->get()) {
+				strong->hideAnimated();
+				(*toast) = nullptr;
+				if (const auto controller = resolveWindow(
+						&show->session())) {
+					Settings::ShowPremium(controller, ref);
 				}
 			}
-			return false;
+			return true;
 		}),
+		.icon = &st::settingsToastStarIcon,
 		.adaptive = true,
 		.duration = Ui::Toast::kDefaultDuration * 2,
 	});
@@ -2097,6 +2130,10 @@ std::vector<PremiumFeature> PremiumFeaturesOrder(
 			return PremiumFeature::PeerColors;
 		} else if (s == u"gifts"_q) {
 			return PremiumFeature::Gifts;
+		} else if (s == u"no_forwards"_q) {
+			return PremiumFeature::NoForwards;
+		} else if (s == u"ai_compose"_q) {
+			return PremiumFeature::AiCompose;
 		}
 		return PremiumFeature::kCount;
 	}) | ranges::views::filter([](PremiumFeature type) {

@@ -93,7 +93,10 @@ MTPInputReplyTo ReplyToForMTP(
 				| (quoteEntities.v.isEmpty()
 					? Flag()
 					: Flag::f_quote_entities)
-				| (replyTo.todoItemId ? Flag::f_todo_item_id : Flag())),
+				| (replyTo.todoItemId ? Flag::f_todo_item_id : Flag())
+			| (replyTo.pollOption.isEmpty()
+				? Flag()
+				: Flag::f_poll_option)),
 			MTP_int(replyTo.messageId ? replyTo.messageId.msg : 0),
 			MTP_int(replyTo.topicRootId),
 			(external
@@ -105,7 +108,8 @@ MTPInputReplyTo ReplyToForMTP(
 			(replyToMonoforumPeerId
 				? history->owner().peer(replyToMonoforumPeerId)->input()
 				: MTPInputPeer()),
-			MTP_int(replyTo.todoItemId));
+			MTP_int(replyTo.todoItemId),
+			MTP_bytes(replyTo.pollOption));
 	} else if (history->peer->amMonoforumAdmin()
 		&& replyTo.monoforumPeerId) {
 		const auto replyToMonoforumPeer = replyTo.monoforumPeerId
@@ -986,7 +990,7 @@ void Histories::deleteMessages(const MessageIdsList &ids, bool revoke) {
 		document->owner().savedMusic().remove(document);
 	}
 
-	for (const auto item : remove) {
+	for (const auto &item : remove) {
 		const auto history = item->history();
 		const auto wasLast = (history->lastMessage() == item);
 		const auto wasInChats = (history->chatListMessage() == item);

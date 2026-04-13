@@ -527,6 +527,15 @@ MsgId Forum::reserveCreatingId(
 	return result;
 }
 
+ForumTopic *Forum::reserveNewBotTopic() {
+	const auto &colors = ForumTopicColorIds();
+	const auto colorId = colors[base::RandomIndex(colors.size())];
+	return topicFor(reserveCreatingId(
+		tr::lng_bot_new_chat(tr::now),
+		colorId,
+		DocumentId()));
+}
+
 void Forum::discardCreatingId(MsgId rootId) {
 	Expects(creating(rootId));
 
@@ -572,6 +581,12 @@ void Forum::clearAllUnreadMentions() {
 void Forum::clearAllUnreadReactions() {
 	for (const auto &[rootId, topic] : _topics) {
 		topic->unreadReactions().clear();
+	}
+}
+
+void Forum::clearAllUnreadPollVotes() {
+	for (const auto &[rootId, topic] : _topics) {
+		topic->unreadPollVotes().clear();
 	}
 }
 

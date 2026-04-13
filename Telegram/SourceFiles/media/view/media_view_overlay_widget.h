@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/platform_text_recognition.h"
 
 class History;
+struct PollAnswer;
 
 namespace anim {
 enum class activation : uchar;
@@ -158,6 +159,7 @@ private:
 		Share,
 		Rotate,
 		More,
+		Draw,
 		Recognize,
 		Icon,
 		Video,
@@ -287,6 +289,7 @@ private:
 	void showMediaOverview();
 	void copyMedia();
 	void recognize();
+	void draw();
 	void receiveMouse();
 	void showAttachedStickers();
 	[[nodiscard]] auto scaledRecognitionRect(QPoint position)
@@ -374,6 +377,9 @@ private:
 
 	void refreshFromLabel();
 	void refreshCaption();
+	void refreshTimestampDividers(
+		const TextWithEntities &caption,
+		TimeId duration);
 	void refreshMediaViewer();
 	void refreshNavVisibility();
 	void refreshGroupThumbs();
@@ -434,6 +440,12 @@ private:
 	void initSponsoredButton();
 	void refreshSponsoredButtonGeometry();
 	void refreshSponsoredButtonWidth();
+
+	void refreshVoteButton();
+	void refreshVoteButtonGeometry();
+	void refreshPollVotersWidget();
+	void refreshPollVotersWidgetGeometry();
+	[[nodiscard]] const PollAnswer *currentPollAnswer() const;
 
 	void documentUpdated(not_null<DocumentData*> document);
 	void changingMsgId(FullMsgId newId, MsgId oldId);
@@ -514,6 +526,7 @@ private:
 
 	void validatePhotoImage(Image *image, bool blurred);
 	void validatePhotoCurrentImage();
+	void tryStartTextRecognition();
 
 	[[nodiscard]] bool hasCopyMediaRestriction(
 		bool skipPremiumCheck = false) const;
@@ -593,6 +606,7 @@ private:
 	QRect _headerNav, _nameNav, _dateNav, _separatorNav;
 	QRect _rotateNav, _rotateNavOver, _rotateNavIcon;
 	QRect _shareNav, _shareNavOver, _shareNavIcon;
+	QRect _drawNav, _drawNavOver, _drawNavIcon;
 	QRect _recognizeNav, _recognizeNavOver, _recognizeNavIcon;
 	QRect _saveNav, _saveNavOver, _saveNavIcon;
 	QRect _moreNav, _moreNavOver, _moreNavIcon;
@@ -601,6 +615,8 @@ private:
 	bool _saveVisible = false;
 	bool _shareVisible = false;
 	bool _rotateVisible = false;
+	bool _drawButtonEnabled = true;
+	bool _drawVisible = false;
 	bool _recognizeVisible = false;
 	bool _headerHasLink = false;
 	QString _dateText;
@@ -735,9 +751,14 @@ private:
 	base::Timer _dropdownShowTimer;
 
 	base::unique_qptr<SponsoredButton> _sponsoredButton;
+	object_ptr<Ui::RoundButton> _voteButton = { nullptr };
+	object_ptr<Ui::RpWidget> _pollVotersWidget = { nullptr };
+	rpl::lifetime _pollUpdateLifetime;
 
 	bool _receiveMouse = true;
 	bool _processingKeyPress = false;
+	bool _clickHandlerActive = false;
+	bool _clickHandlerPressed = false;
 
 	bool _touchPress = false;
 	bool _touchMove = false;
@@ -763,6 +784,9 @@ private:
 	int _verticalWheelDelta = 0;
 
 	Platform::TextRecognition::Result _recognitionResult;
+	uint64 _recognitionPendingSessionUniqueId = 0;
+	PhotoId _recognitionPendingPhotoId = 0;
+	bool _recognitionRetryOnLarge = false;
 	bool _showRecognitionResults = false;
 	Ui::Animations::Simple _recognitionAnimation;
 

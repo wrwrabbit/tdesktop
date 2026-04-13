@@ -91,6 +91,7 @@ const style::InfoTopBar &TopBarStyle(Wrap wrap) {
 			case Type::Link: return tr::lng_media_selected_link;
 			case Type::RoundVoiceFile: return tr::lng_media_selected_audio;
 			case Type::PhotoVideo: return tr::lng_stories_row_count;
+			case Type::Poll: return tr::lng_media_selected_poll;
 			}
 			Unexpected("Type in TopBar::generateSelectedText()");
 		}()(tr::now, lt_count, count, Ui::StringWithNumbers::FromString);
@@ -378,6 +379,7 @@ void WrapWidget::createTopBar() {
 			base::make_unique_q<Ui::IconButton>(
 				_topBar,
 				st::infoTopBarClose));
+		close->setAccessibleName(tr::lng_sr_close_panel(tr::now));
 		close->addClickHandler([this] {
 			_controller->parentController()->closeThirdSection();
 		});
@@ -392,6 +394,7 @@ void WrapWidget::createTopBar() {
 			base::make_unique_q<Ui::IconButton>(
 				_topBar,
 				st::infoLayerTopBarClose));
+		close->setAccessibleName(tr::lng_sr_close_panel(tr::now));
 		close->addClickHandler([this] {
 			checkBeforeClose([=] {
 				_controller->parentController()->hideSpecialLayer();
@@ -432,6 +435,7 @@ void WrapWidget::setupTopBarMenuToggle() {
 				: st::infoTopBarSearch;
 			const auto button = _topBar->addButton(
 				base::make_unique_q<Ui::IconButton>(_topBar, st));
+			button->setAccessibleName(tr::lng_dlg_filter(tr::now));
 			button->addClickHandler([=] {
 				_controller->showSettings(::Settings::Search::Id());
 			});
@@ -445,6 +449,7 @@ void WrapWidget::setupTopBarMenuToggle() {
 					: st::infoTopBarQr;
 				const auto button = _topBar->addButton(
 					base::make_unique_q<Ui::IconButton>(_topBar, st));
+				button->setAccessibleName(tr::lng_group_invite_context_qr(tr::now));
 				button->addClickHandler([show, self] {
 					Ui::DefaultShowFillPeerQrBoxCallback(show, self);
 				});
@@ -462,6 +467,8 @@ void WrapWidget::setupTopBarMenuToggle() {
 		button->addClickHandler([=] {
 			_controller->showSettings(::Settings::InformationId());
 		});
+	} else if (section.type() == Section::Type::Media) {
+		addTopBarMenuButton();
 	} else if (section.type() == Section::Type::Downloads) {
 		auto &manager = Core::App().downloadManager();
 		rpl::merge(
@@ -529,6 +536,7 @@ void WrapWidget::addTopBarMenuButton() {
 			(wrap() == Wrap::Layer
 				? st::infoLayerTopBarMenu
 				: st::infoTopBarMenu))));
+	_topBarMenuToggle->setAccessibleName(tr::lng_sr_profile_menu(tr::now));
 	_topBarMenuToggle->addClickHandler([this] {
 		showTopBarMenu(false);
 	});
@@ -609,8 +617,9 @@ void WrapWidget::showTopBarMenu(bool check) {
 	}
 	_topBarMenu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
 	_topBarMenuToggle->setForceRippled(true);
-	_topBarMenu->popup(_topBarMenuToggle->mapToGlobal(
-		st::infoLayerTopBarMenuPosition));
+	_topBarMenu->popup(Ui::PopupMenu::ConstrainToParentScreen(
+		_topBarMenu,
+		_topBarMenuToggle->mapToGlobal(st::infoLayerTopBarMenuPosition)));
 }
 
 bool WrapWidget::requireTopBarSearch() const {
@@ -828,7 +837,7 @@ void WrapWidget::showFinishedHook() {
 			showTopBarMenu(false);
 			if (_topBarMenu) {
 				const auto menu = _topBarMenu->menu();
-				for (const auto action : menu->actions()) {
+				for (const auto &action : menu->actions()) {
 					const auto controlId = "highlight-control-id";
 					if (action->property(controlId).toString() == highlightId) {
 						if (const auto item = menu->itemForAction(action)) {

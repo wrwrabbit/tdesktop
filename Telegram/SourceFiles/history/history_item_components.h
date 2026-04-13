@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "data/data_cloud_file.h"
+#include "data/data_poll.h"
 #include "history/history_item.h"
 #include "spellcheck/spellcheck_types.h" // LanguageId.
 #include "ui/empty_userpic.h"
@@ -63,6 +64,7 @@ enum class SuggestionActions : uchar {
 	Decline,
 	AcceptAndDecline,
 	GiftOfferActions,
+	NoForwardsRequest,
 };
 
 struct HistoryMessageVia : RuntimeComponent<HistoryMessageVia, HistoryItem> {
@@ -101,6 +103,11 @@ struct HistoryMessageSigned
 	QString author;
 	UserData *viaBusinessBot = nullptr;
 	bool isAnonymousRank = false;
+};
+
+struct HistoryMessageFromRank
+: RuntimeComponent<HistoryMessageFromRank, HistoryItem> {
+	QString rank;
 };
 
 struct HistoryMessageEdited
@@ -280,6 +287,7 @@ struct ReplyFields {
 	MsgId topMessageId = 0;
 	StoryId storyId = 0;
 	int todoItemId = 0;
+	QByteArray pollOption;
 	uint32 quoteOffset : 30 = 0;
 	uint32 manualQuote : 1 = 0;
 	uint32 topicPost : 1 = 0;
@@ -667,6 +675,11 @@ struct HistoryServicePinned
 , HistoryServiceDependentData {
 };
 
+struct HistoryServiceClearHistory
+: RuntimeComponent<HistoryServiceClearHistory, HistoryItem>
+, HistoryServiceDependentData {
+};
+
 struct HistoryServiceTopicInfo
 : RuntimeComponent<HistoryServiceTopicInfo, HistoryItem>
 , HistoryServiceDependentData {
@@ -709,6 +722,18 @@ struct HistoryServiceTodoAppendTasks
 [[nodiscard]] TextWithEntities ComposeTodoTasksList(
 	not_null<HistoryServiceTodoAppendTasks*> append);
 
+struct HistoryServicePollAppendAnswer
+: RuntimeComponent<HistoryServicePollAppendAnswer, HistoryItem>
+, HistoryServiceDependentData {
+	PollAnswer answer;
+};
+
+struct HistoryServicePollDeleteAnswer
+: RuntimeComponent<HistoryServicePollDeleteAnswer, HistoryItem>
+, HistoryServiceDependentData {
+	PollAnswer answer;
+};
+
 struct HistoryServiceSuggestDecision
 : RuntimeComponent<HistoryServiceSuggestDecision, HistoryItem>
 , HistoryServiceDependentData {
@@ -731,6 +756,18 @@ struct HistoryServiceSuggestFinish
 , HistoryServiceDependentData {
 	CreditsAmount price;
 	SuggestRefundType refundType = SuggestRefundType::None;
+};
+
+struct HistoryServiceNoForwardsRequest
+: RuntimeComponent<HistoryServiceNoForwardsRequest, HistoryItem> {
+	TimeId expiresAt = 0;
+	mtpRequestId requestId = 0;
+	bool expired = false;
+	bool actionTaken = false;
+};
+
+struct HistoryServiceNoForwardsToggle
+: RuntimeComponent<HistoryServiceNoForwardsToggle, HistoryItem> {
 };
 
 struct HistoryServiceGameScore

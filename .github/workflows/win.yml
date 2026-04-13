@@ -57,8 +57,10 @@ jobs:
         qt: ["", qt6]
         # generator: ["", "Ninja Multi-Config"]
         exclude:
-         - arch: arm64
-           qt: ""
+          - arch: arm64
+            qt: ""
+          - arch: x64_x86
+            qt: qt6
 
     env:
       UPLOAD_ARTIFACT: "true"
@@ -92,7 +94,6 @@ jobs:
         shell: bash
         run: |
           DOCPATH=$TBUILD/$REPO_NAME/docs/building-win.md
-          [ "${{ matrix.arch }}" = x64 ] && DOCPATH=$TBUILD/$REPO_NAME/docs/building-win-x64.md
           SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
           echo "SDK=$SDK" >> $GITHUB_ENV
 
@@ -265,7 +266,7 @@ jobs:
           set OUT=%TBUILD%\%REPO_NAME%\out\Debug
           mkdir artifact_${{ matrix.arch }}
           move %OUT%\Telegram.exe artifact_${{ matrix.arch }}/Telegram_${{ matrix.arch }}.exe
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || ${{ github.ref == 'refs/heads/nightly' }}
         with:

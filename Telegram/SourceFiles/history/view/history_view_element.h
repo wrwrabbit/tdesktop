@@ -34,6 +34,7 @@ namespace Ui {
 class PathShiftGradient;
 struct BubblePattern;
 struct ChatPaintContext;
+struct ChatPaintHighlight;
 class ChatStyle;
 struct ReactionFlyAnimationArgs;
 class ReactionFlyAnimation;
@@ -46,9 +47,14 @@ struct ButtonParameters;
 class InlineList;
 } // namespace HistoryView::Reactions
 
+namespace HistoryView::ReplyButton {
+struct ButtonParameters;
+} // namespace HistoryView::ReplyButton
+
 namespace HistoryView {
 
 using PaintContext = Ui::ChatPaintContext;
+enum class BadgeRole : uchar;
 enum class PointState : char;
 enum class InfoDisplayType : char;
 struct StateRequest;
@@ -102,6 +108,12 @@ public:
 	virtual void elementShowPollResults(
 		not_null<PollData*> poll,
 		FullMsgId context) = 0;
+	virtual void elementShowAddPollOption(
+		not_null<Element*> view,
+		not_null<PollData*> poll,
+		FullMsgId context,
+		QRect optionRect) = 0;
+	virtual void elementSubmitAddPollOption(FullMsgId context) = 0;
 	virtual void elementOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) = 0;
@@ -158,6 +170,12 @@ public:
 	void elementShowPollResults(
 		not_null<PollData*> poll,
 		FullMsgId context) override;
+	void elementShowAddPollOption(
+		not_null<Element*> view,
+		not_null<PollData*> poll,
+		FullMsgId context,
+		QRect optionRect) override;
+	void elementSubmitAddPollOption(FullMsgId context) override;
 	void elementOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) override;
@@ -541,6 +559,9 @@ public:
 	[[nodiscard]] virtual auto reactionButtonParameters(
 		QPoint position,
 		const TextState &reactionState) const -> Reactions::ButtonParameters;
+	[[nodiscard]] virtual auto replyButtonParameters(
+		QPoint position,
+		const TextState &replyState) const -> ReplyButton::ButtonParameters;
 	[[nodiscard]] virtual int reactionsOptimalWidth() const;
 
 	// ClickHandlerHost interface.
@@ -629,6 +650,7 @@ public:
 
 	[[nodiscard]] virtual QRect effectIconGeometry() const;
 	[[nodiscard]] virtual QRect innerGeometry() const = 0;
+	[[nodiscard]] virtual QPoint mediaTopLeft() const;
 
 	void customEmojiRepaint();
 	void prepareCustomEmojiPaint(
@@ -661,6 +683,7 @@ public:
 	-> std::unique_ptr<Ui::ReactionFlyAnimation>;
 
 	void overrideMedia(std::unique_ptr<Media> media);
+	void overrideRightBadge(const QString &text, BadgeRole role);
 
 	[[nodiscard]] not_null<PurchasedTag*> enforcePurchasedTag();
 
@@ -698,7 +721,7 @@ protected:
 	virtual void refreshDataIdHook();
 
 	[[nodiscard]] const Ui::Text::String &text() const;
-	[[nodiscard]] int textHeightFor(int textWidth);
+	[[nodiscard]] int textHeightFor(int textWidth) const;
 	void validateText();
 	void validateTextSkipBlock(bool has, int width, int height);
 	void validateInlineKeyboard(HistoryMessageReplyMarkup *markup);
@@ -734,8 +757,11 @@ private:
 
 	virtual QSize performCountOptimalSize() = 0;
 	virtual QSize performCountCurrentSize(int newWidth) = 0;
+	virtual void invalidateTextDependentCache() {
+	}
 
 	void refreshMedia(Element *replacing);
+	void invalidateTextSizeCache();
 	void setTextWithLinks(
 		const TextWithEntities &text,
 		const std::vector<ClickHandlerPtr> &links = {});
@@ -776,6 +802,29 @@ private:
 	not_null<Element*> view,
 	int taskId,
 	int yfrom = 0);
+
+[[nodiscard]] int FindViewPollOptionY(
+	not_null<Element*> view,
+	const QByteArray &option,
+	int yfrom = 0);
+
+struct HighlightYRange {
+	int begin = 0;
+	int end = 0;
+
+	explicit operator bool() const {
+		return begin != end;
+	}
+};
+
+[[nodiscard]] HighlightYRange FindHighlightYRange(
+	not_null<Element*> view,
+	const Ui::ChatPaintHighlight &highlight);
+
+[[nodiscard]] int AdjustScrollForRange(
+	int viewTop,
+	int available,
+	HighlightYRange range);
 
 [[nodiscard]] Window::SessionController *ExtractController(
 	const ClickContext &context);

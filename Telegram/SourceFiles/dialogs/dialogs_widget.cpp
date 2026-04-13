@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_requests_bar.h"
 #include "history/view/history_view_top_bar_widget.h"
 #include "boxes/peers/edit_peer_requests_box.h"
+#include "boxes/choose_filter_box.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/chat_filters_tabs_strip.h"
@@ -122,9 +123,11 @@ base::options::toggle OptionForumHideChatsList({
 
 [[nodiscard]] QImage UpdateIcon() {
 	const auto iconSize = st::dialogsInstallUpdateIconSize;
+	const auto ratio = style::DevicePixelRatio();
 	auto result = QImage(
-		Size(iconSize) * style::DevicePixelRatio(),
+		Size(iconSize) * ratio,
 		QImage::Format_ARGB32_Premultiplied);
+	result.setDevicePixelRatio(ratio);
 	result.fill(Qt::transparent);
 	{
 		auto p = QPainter(&result);
@@ -380,10 +383,10 @@ Widget::Widget(
 	_scroll->setOverscrollTypes(
 		_stories ? OverscrollType::Virtual : OverscrollType::Real,
 		OverscrollType::Real);
-	const auto innerList = _scroll->setOwnedWidget(
+	_innerList = _scroll->setOwnedWidget(
 		object_ptr<Ui::VerticalLayout>(this));
-	_inner = innerList->add(object_ptr<InnerWidget>(
-		innerList,
+	_inner = _innerList->add(object_ptr<InnerWidget>(
+		_innerList,
 		controller,
 		rpl::combine(
 			_childListPeerId.value(),
@@ -393,13 +396,13 @@ Widget::Widget(
 		_scroll->heightValue(),
 		_topBarSuggestionHeightChanged.events_starting_with(0)
 	) | rpl::on_next([=](int height, int topBarHeight) {
-		innerList->setMinimumHeight(height);
+		_innerList->setMinimumHeight(height);
 		_inner->setMinimumHeight(height - topBarHeight);
 		_inner->refresh();
-	}, innerList->lifetime());
+	}, _innerList->lifetime());
 	_scroll->widthValue() | rpl::on_next([=](int width) {
-		innerList->resizeToWidth(width);
-	}, innerList->lifetime());
+		_innerList->resizeToWidth(width);
+	}, _innerList->lifetime());
 	_scrollToTop->raise();
 	_lockUnlock->toggle(false, anim::type::instant);
 
@@ -550,6 +553,20 @@ Widget::Widget(
 	_search->submits(
 	) | rpl::on_next([=] { submit(); }, _search->lifetime());
 
+	_search->setMimeDataHook([=](
+			not_null<const QMimeData*> data,
+			Ui::InputField::MimeAction action) {
+		if (data->hasFormat(u"application/x-telegram-dialog"_q)) {
+			if (const auto history = HistoryFromMimeData(data, &session())) {
+				if (action != Ui::InputField::MimeAction::Check) {
+					controller->searchInChat(history);
+				}
+				return true;
+			}
+		}
+		return false;
+	});
+
 	QObject::connect(
 		_search->rawTextEdit().get(),
 		&QTextEdit::cursorPositionChanged,
@@ -572,14 +589,20 @@ Widget::Widget(
 	_cancelSearch->setClickedCallback([=] {
 		cancelSearch({ .jumpBackToSearchedChat = true });
 	});
+	_cancelSearch->setAccessibleName(tr::lng_sr_cancel_search(tr::now));
 	_jumpToDate->entity()->setClickedCallback([=] { showCalendar(); });
+	_jumpToDate->entity()->setAccessibleName(
+		tr::lng_sr_search_date(tr::now));
 	_chooseFromUser->entity()->setClickedCallback([=] { showSearchFrom(); });
+	_chooseFromUser->entity()->setAccessibleName(
+		tr::lng_search_messages_from(tr::now));
 	rpl::single(rpl::empty) | rpl::then(
 		session().domain().local().localPasscodeChanged()
 	) | rpl::on_next([=] {
 		updateLockUnlockVisibility();
 	}, lifetime());
 	const auto lockUnlock = _lockUnlock->entity();
+	lockUnlock->setAccessibleName(tr::lng_shortcuts_lock(tr::now));
 	lockUnlock->setClickedCallback([=] {
 		lockUnlock->setIconOverride(
 			&st::dialogsUnlockIcon,
@@ -594,6 +617,7 @@ Widget::Widget(
 		setupStories();
 	}
 
+	_searchForNarrowLayout->setAccessibleName(tr::lng_dlg_filter(tr::now));
 	_searchForNarrowLayout->setClickedCallback([=] {
 		_search->setFocusFast();
 		if (_childList) {
@@ -699,7 +723,7 @@ Widget::Widget(
 	}
 
 	setupFrozenAccountBar();
-	setupTopBarSuggestions(innerList);
+	setupTopBarSuggestions();
 }
 
 void Widget::setupSwipeBack() {
@@ -713,6 +737,7 @@ void Widget::setupSwipeBack() {
 	};
 
 	auto update = [=](Ui::Controls::SwipeContextData data) {
+		data.cursorTop -= _inner->y();
 		if (data.translation != 0) {
 			if (data.translation < 0
 				&& _inner
@@ -747,6 +772,7 @@ void Widget::setupSwipeBack() {
 	};
 
 	auto init = [=](int top, Qt::LayoutDirection direction) {
+		top -= _inner->y();
 		_swipeBackIconMirrored = false;
 		_swipeBackMirrored = false;
 		if (_childListShown.current()) {
@@ -839,7 +865,7 @@ void Widget::setupSwipeBack() {
 	};
 
 	Ui::Controls::SetupSwipeHandler({
-		.widget = _inner,
+		.widget = _innerList,
 		.scroll = _scroll.data(),
 		.update = std::move(update),
 		.init = std::move(init),
@@ -1032,6 +1058,7 @@ void Widget::scrollToDefaultChecked(bool verytop) {
 
 void Widget::setupScrollUpButton() {
 	_scrollToTop->setClickedCallback([=] { scrollToDefaultChecked(); });
+	_scrollToTop->setAccessibleName(tr::lng_sr_scroll_to_top(tr::now));
 	trackScroll(_scrollToTop);
 	trackScroll(this);
 	updateScrollUpVisibility();
@@ -1056,12 +1083,12 @@ void Widget::setupFrozenAccountBar() {
 	}, lifetime());
 }
 
-void Widget::setupTopBarSuggestions(not_null<Ui::VerticalLayout*> dialogs) {
+void Widget::setupTopBarSuggestions() {
 	if (_layout == Layout::Child) {
 		return;
 	}
 	using namespace rpl::mappers;
-	crl::on_main(dialogs, [=] {
+	crl::on_main(_innerList, [=] {
 		const auto owner = &session().data();
 		session().api().authorizations().unreviewedChanges(
 		) | rpl::on_next([=] {
@@ -1092,11 +1119,11 @@ void Widget::setupTopBarSuggestions(not_null<Ui::VerticalLayout*> dialogs) {
 					&& !searchInPeer
 					&& (id == owner->chatsFilters().defaultId());
 			});
-			return TopBarSuggestionValue(dialogs, &session(), std::move(on));
+			return TopBarSuggestionValue(_innerList, &session(), std::move(on));
 		}) | rpl::flatten_latest() | rpl::on_next([=](
 				Ui::SlideWrap<Ui::RpWidget> *raw) {
 			if (raw) {
-				_topBarSuggestion = dialogs->insert(
+				_topBarSuggestion = _innerList->insert(
 					0,
 					object_ptr<Ui::SlideWrap<Ui::RpWidget>>::fromRaw(raw));
 				_topBarSuggestion->heightValue(
@@ -1322,6 +1349,7 @@ void Widget::setupMainMenuToggle() {
 	});
 	_mainMenu.under->stackUnder(_mainMenu.toggle);
 	_mainMenu.toggle->setClickedCallback([=] { showMainMenu(); });
+	_mainMenu.toggle->setIsMenuButton(true);
 	_mainMenu.toggle->setAccessibleName(tr::lng_main_menu(tr::now));
 
 	rpl::single(rpl::empty) | rpl::then(
@@ -3320,6 +3348,11 @@ void Widget::updateCancelSearch() {
 		|| (!_searchState.inChat
 			&& (_searchHasFocus || _searchSuggestionsLocked));
 	_cancelSearch->toggle(shown, anim::type::normal);
+	if (_searchState.inChat) {
+		_cancelSearch->setAccessibleName(shown
+			? tr::lng_sr_clear_search(tr::now)
+			: tr::lng_sr_cancel_search(tr::now));
+	}
 }
 
 QString Widget::validateSearchQuery() {
@@ -3717,7 +3750,7 @@ void Widget::clearSearchCache(bool clearPosts) {
 
 void Widget::showCalendar() {
 	if (_searchState.inChat) {
-		controller()->showCalendar(_searchState.inChat, QDate());
+		controller()->showCalendar({ _searchState.inChat });
 	}
 }
 

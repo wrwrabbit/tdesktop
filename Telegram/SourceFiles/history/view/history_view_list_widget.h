@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
 #include "ui/dragging_scroll_manager.h"
+#include "ui/widgets/middle_click_autoscroll.h"
 #include "ui/widgets/tooltip.h"
 #include "mtproto/sender.h"
 #include "data/data_messages.h"
@@ -52,6 +53,11 @@ struct ChosenReaction;
 struct ButtonParameters;
 } // namespace HistoryView::Reactions
 
+namespace HistoryView::ReplyButton {
+class Manager;
+struct ButtonParameters;
+} // namespace HistoryView::ReplyButton
+
 namespace Window {
 struct SectionShow;
 } // namespace Window
@@ -60,8 +66,10 @@ namespace HistoryView {
 
 struct TextState;
 struct StateRequest;
+class ElementOverlayHost;
 class EmojiInteractions;
 class TranslateTracker;
+class ReadMetricsTracker;
 enum class CursorState : char;
 enum class PointState : char;
 enum class Context : char;
@@ -70,6 +78,7 @@ enum class CopyRestrictionType : char {
 	None,
 	Group,
 	Channel,
+	User,
 };
 
 struct SelectedItem {
@@ -380,12 +389,18 @@ public:
 		bool forceAnotherChat = false);
 	[[nodiscard]] rpl::producer<FullMsgId> readMessageRequested() const;
 	[[nodiscard]] rpl::producer<FullMsgId> showMessageRequested() const;
+	void setInsertTextCallback(Fn<void(QString)> callback);
+	void insertTextAtCursor(const QString &text);
 	void replyNextMessage(FullMsgId fullId, bool next = true);
 
 	[[nodiscard]] Reactions::ButtonParameters reactionButtonParameters(
 		not_null<const Element*> view,
 		QPoint position,
 		const TextState &reactionState) const;
+	[[nodiscard]] ReplyButton::ButtonParameters replyButtonParameters(
+		not_null<const Element*> view,
+		QPoint position,
+		const TextState &replyState) const;
 	void toggleFavoriteReaction(not_null<Element*> view) const;
 
 
@@ -404,6 +419,13 @@ public:
 	void elementShowPollResults(
 		not_null<PollData*> poll,
 		FullMsgId context) override;
+	void elementShowAddPollOption(
+		not_null<Element*> view,
+		not_null<PollData*> poll,
+		FullMsgId context,
+		QRect optionRect) override;
+	void elementSubmitAddPollOption(FullMsgId context) override;
+	void hideElementOverlay();
 	void elementOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) override;
@@ -530,6 +552,8 @@ private:
 
 	void onTouchSelect();
 	void onTouchScrollTimer();
+	void markReadMetricsStale();
+	void registerReadMetricsActivity();
 
 	void updateAroundPositionFromNearest(int nearestIndex);
 	void refreshRows(const Data::MessagesSlice &old);
@@ -588,7 +612,6 @@ private:
 	[[nodiscard]] Element *strictFindItemByY(int y) const;
 	[[nodiscard]] int findNearestItem(Data::MessagePosition position) const;
 	void viewReplaced(not_null<const Element*> was, Element *now);
-	[[nodiscard]] HistoryItemsList collectVisibleItems() const;
 
 	void checkMoveToOtherViewer();
 	void updateVisibleTopItem();
@@ -777,9 +800,14 @@ private:
 
 	std::unique_ptr<HistoryView::Reactions::Manager> _reactionsManager;
 	rpl::variable<HistoryItem*> _reactionsItem;
+	bool _useCornerReply = false;
 	bool _useCornerReaction = false;
 
+	std::unique_ptr<ReplyButton::Manager> _replyButtonManager;
+
 	std::unique_ptr<TranslateTracker> _translateTracker;
+	std::unique_ptr<ReadMetricsTracker> _readMetricsTracker;
+	bool _readMetricsStale = false;
 
 	int _minHeight = 0;
 	int _visibleTop = 0;
@@ -867,12 +895,17 @@ private:
 	crl::time _touchAccelerationTime = 0;
 	crl::time _touchTime = 0;
 	base::Timer _touchScrollTimer;
+	Ui::MiddleClickAutoscroll _middleClickAutoscroll;
 
 	rpl::event_stream<FullMsgId> _requestedToEditMessage;
 	rpl::event_stream<ReplyToMessageRequest> _requestedToReplyToMessage;
 	rpl::event_stream<FullMsgId> _requestedToReadMessage;
 	rpl::event_stream<FullMsgId> _requestedToShowMessage;
+	Fn<void(QString)> _insertTextCallback;
 	rpl::event_stream<not_null<QKeyEvent*>> _scrollKeyEvents;
+
+	[[nodiscard]] ElementOverlayHost &ensureOverlayHost();
+	std::unique_ptr<ElementOverlayHost> _overlayHost;
 
 	rpl::lifetime _viewerLifetime;
 

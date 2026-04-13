@@ -68,6 +68,7 @@ FiltersMenu::~FiltersMenu() = default;
 void FiltersMenu::setup() {
 	setupDragAndDrop();
 	setupMainMenuIcon();
+	_menu.setIsMenuButton(true);
 	_menu.setAccessibleName(tr::lng_main_menu(tr::now));
 
 	_outer.setAttribute(Qt::WA_OpaquePaintEvent);
@@ -145,7 +146,12 @@ void FiltersMenu::setupDragAndDrop() {
 			}
 			return std::nullopt;
 		},
-		[=] { return _activeFilterId; });
+		[=] { return _activeFilterId; },
+		[=](FilterId filterId) {
+			for (const auto &[id, button] : _filters) {
+				button->setForceRippled(id == filterId);
+			}
+		});
 }
 
 void FiltersMenu::setupMainMenuIcon() {
