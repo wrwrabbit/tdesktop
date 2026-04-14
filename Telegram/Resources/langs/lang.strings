@@ -4521,6 +4521,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_stickers_create_open_failed" = "Could not load image.";
 "lng_stickers_create_too_small" = "The image must be at least {size} pixels on each side.";
 "lng_stickers_create_choose_emoji" = "Choose an emoji that corresponds to your sticker:";
+"lng_stickers_create_emoji_about" = "Choose emojis that match your sticker";
 "lng_stickers_create_emoji_required" = "Please choose an emoji.";
 "lng_stickers_create_uploading" = "Uploading sticker…";
 "lng_stickers_create_upload_failed" = "Sticker upload failed. Please try again.";

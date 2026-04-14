@@ -473,6 +473,8 @@ PRIVATE
     chat_helpers/emoji_keywords.h
     chat_helpers/emoji_list_widget.cpp
     chat_helpers/emoji_list_widget.h
+    chat_helpers/emoji_picker_overlay.cpp
+    chat_helpers/emoji_picker_overlay.h
     chat_helpers/emoji_sets_manager.cpp
     chat_helpers/emoji_sets_manager.h
     chat_helpers/emoji_suggestions_widget.cpp
