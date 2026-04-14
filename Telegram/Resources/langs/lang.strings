@@ -4503,6 +4503,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_stickers_context_edit_name" = "Edit name";
 "lng_stickers_context_delete" = "Delete sticker";
 "lng_stickers_context_delete_sure" = "Are you sure you want to delete the sticker from your sticker set?";
+"lng_stickers_context_delete_pack" = "Delete Pack";
+"lng_stickers_context_delete_pack_everyone" = "Delete for Everyone";
+"lng_stickers_context_delete_pack_self" = "Delete for Myself";
+"lng_stickers_delete_pack_sure" = "Are you sure you want to delete this sticker set for everyone? This cannot be undone.";
+"lng_stickers_bot_more_options" = "Check the {bot} bot for more options";
 "lng_stickers_box_edit_name_title" = "Edit Sticker Set Name";
 "lng_stickers_box_edit_name_about" = "Choose a name for your set.";
 "lng_stickers_creator_badge" = "edit";

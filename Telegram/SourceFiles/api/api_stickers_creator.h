@@ -27,6 +27,12 @@ void AddExistingStickerToSet(
 	Fn<void(MTPmessages_StickerSet)> done,
 	Fn<void(QString)> fail);
 
+void DeleteStickerSet(
+	not_null<Main::Session*> session,
+	const StickerSetIdentifier &set,
+	Fn<void()> done,
+	Fn<void(QString)> fail);
+
 class StickerUpload final : public base::has_weak_ptr {
 public:
 	StickerUpload(

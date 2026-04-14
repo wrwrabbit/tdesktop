@@ -105,6 +105,26 @@ void AddExistingStickerToSet(
 	}).handleFloodErrors().send();
 }
 
+void DeleteStickerSet(
+		not_null<Main::Session*> session,
+		const StickerSetIdentifier &set,
+		Fn<void()> done,
+		Fn<void(QString)> fail) {
+	session->api().request(MTPstickers_DeleteStickerSet(
+		Data::InputStickerSet(set))
+	).done([=] {
+		session->data().stickers().notifyUpdated(
+			Data::StickersType::Stickers);
+		if (done) {
+			done();
+		}
+	}).fail([=](const MTP::Error &error) {
+		if (fail) {
+			fail(error.type());
+		}
+	}).send();
+}
+
 StickerUpload::StickerUpload(
 	not_null<Main::Session*> session,
 	StickerSetIdentifier set,

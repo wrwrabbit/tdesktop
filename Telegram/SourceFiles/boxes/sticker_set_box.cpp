@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/stickers_list_widget.h"
 #include "chat_helpers/stickers_lottie.h"
 #include "core/application.h"
+#include "core/click_handler_types.h"
 #include "data/data_document.h"
 #include "data/data_document_media.h"
 #include "data/data_file_origin.h"
@@ -54,8 +55,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/gradient_round_button.h"
+#include "ui/widgets/menu/menu_action.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
+#include "ui/widgets/menu/menu_multiline_action.h"
 #include "base/event_filter.h"
 #include "chat_helpers/tabbed_panel.h"
 #include "chat_helpers/tabbed_selector.h"
@@ -63,6 +66,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
 #include "window/window_session_controller.h"
+#include "styles/style_chat.h"
 #include "styles/style_layers.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_info.h"
@@ -794,6 +798,98 @@ void StickerSetBox::updateButtons() {
 					&st::menuIconReorder);
 			});
 		}();
+		const auto fillSetCreatorFooter = [&] {
+			using Filler = Fn<void(not_null<Ui::PopupMenu*>)>;
+			if (!_inner->amSetCreator()) {
+				return Filler(nullptr);
+			}
+			const auto data = &_session->data();
+			return Filler([=, show = _show, set = _set](
+					not_null<Ui::PopupMenu*> menu) {
+				const auto weak = base::weak_qptr<StickerSetBox>(this);
+				const auto deleteEveryone = [=] {
+					const auto confirm = [=](Fn<void()> close) {
+						Api::DeleteStickerSet(
+							&data->session(),
+							set,
+							[=] {
+								if (const auto strong = weak.get()) {
+									strong->closeBox();
+								}
+							},
+							[=](const QString &error) {
+								show->showToast(error);
+							});
+						close();
+					};
+					show->showBox(Ui::MakeConfirmBox({
+						.text = tr::lng_stickers_delete_pack_sure(tr::now),
+						.confirmed = confirm,
+						.confirmText
+							= tr::lng_stickers_remove_pack_confirm(),
+						.confirmStyle = &st::attentionBoxButton,
+					}));
+				};
+				const auto deleteSelf = [show, inner = _inner] {
+					const auto raw = inner.data();
+					if (!raw) {
+						return;
+					}
+					auto box = ChatHelpers::MakeConfirmRemoveSetBox(
+						&show->session(),
+						st::boxLabel,
+						raw->setId());
+					if (box) {
+						show->showBox(std::move(box));
+					}
+				};
+				const auto deleteAction = menu->addAction(
+					base::make_unique_q<Ui::Menu::Action>(
+						menu->menu(),
+						st::menuWithIconsAttention,
+						Ui::Menu::CreateAction(
+							menu->menu().get(),
+							tr::lng_stickers_context_delete_pack(tr::now),
+							nullptr),
+						&st::menuIconDeleteAttention,
+						&st::menuIconDeleteAttention));
+				deleteAction->setMenu(
+					Ui::CreateChild<QMenu>(menu->menu().get()));
+				const auto sub = menu->ensureSubmenu(
+					deleteAction,
+					st::popupMenuWithIcons);
+				const auto addSub = Ui::Menu::CreateAddActionCallback(sub);
+				addSub({
+					.text = tr::lng_stickers_context_delete_pack_everyone(
+						tr::now),
+					.handler = deleteEveryone,
+					.icon = &st::menuIconDeleteAttention,
+					.isAttention = true,
+				});
+				sub->addAction(
+					tr::lng_stickers_context_delete_pack_self(tr::now),
+					deleteSelf,
+					&st::menuIconRemove);
+				menu->addSeparator(&st::expandedMenuSeparator);
+				auto item = base::make_unique_q<Ui::Menu::MultilineAction>(
+					menu->menu(),
+					st::defaultMenu,
+					st::historyHasCustomEmoji,
+					QPoint(
+						st::defaultMenu.itemPadding.left(),
+						st::defaultMenu.itemPadding.top()),
+					tr::lng_stickers_bot_more_options(
+						tr::now,
+						lt_bot,
+						Ui::Text::Colorized(tr::bold(u"@stickers"_q)),
+						Ui::Text::RichLangValue));
+				item->clicks(
+				) | rpl::on_next([] {
+					UrlClickHandler::Open(u"https://t.me/stickers"_q);
+				}, item->lifetime());
+				menu->addAction(std::move(item));
+			});
+		}();
 		if (_inner->notInstalled()) {
 			if (!_session->premium()
 				&& _session->premiumPossible()
@@ -841,6 +937,9 @@ void StickerSetBox::updateButtons() {
 							: tr::lng_stickers_share_pack)(tr::now),
 						[=] { share(); closeBox(); },
 						&st::menuIconShare);
+					if (fillSetCreatorFooter) {
+						fillSetCreatorFooter(*menu);
+					}
 					(*menu)->popup(QCursor::pos());
 					return true;
 				});
@@ -892,6 +991,9 @@ void StickerSetBox::updateButtons() {
 								: tr::lng_stickers_archive_pack(tr::now)),
 							archive,
 							&st::menuIconArchive);
+						if (fillSetCreatorFooter) {
+							fillSetCreatorFooter(*menu);
+						}
 					}
 					(*menu)->popup(QCursor::pos());
 					return true;
