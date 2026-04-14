@@ -376,6 +376,8 @@ PRIVATE
     boxes/star_gift_preview_box.h
     boxes/star_gift_resale_box.cpp
     boxes/star_gift_resale_box.h
+    boxes/sticker_creator_box.cpp
+    boxes/sticker_creator_box.h
     boxes/sticker_picker_box.cpp
     boxes/sticker_picker_box.h
     boxes/sticker_set_box.cpp

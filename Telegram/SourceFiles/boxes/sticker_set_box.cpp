@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "base/unixtime.h"
 #include "boxes/premium_preview_box.h"
+#include "boxes/sticker_creator_box.h"
 #include "boxes/sticker_picker_box.h"
 #include "chat_helpers/compose/compose_show.h"
 #include "chat_helpers/stickers_list_widget.h"
@@ -2386,7 +2387,19 @@ void StickerSetBox::Inner::startAddExistingStickerFlow() {
 }
 
 void StickerSetBox::Inner::startCreateNewStickerFlow() {
-	_show->showToast(u"Create a new sticker: not implemented yet."_q);
+	if (!hasAddCell()) {
+		return;
+	}
+	const auto identifier = StickerSetIdentifier{
+		.id = _setId,
+		.accessHash = _setAccessHash,
+		.shortName = _setShortName,
+	};
+	const auto onDone = crl::guard(this, [=, this](
+			MTPmessages_StickerSet result) {
+		applySet(result);
+	});
+	Api::OpenCreateStickerFlow(_show, identifier, onDone);
 }
 
 StickerSetBox::Inner::~Inner() = default;
