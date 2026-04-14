@@ -72,6 +72,7 @@ constexpr auto kFullLineAppearDuration = crl::time(300);
 constexpr auto kFullLineAppearFinalDuration = crl::time(120);
 constexpr auto kLineHeightAppearDuration = crl::time(100);
 constexpr auto kLineHeightAppearFinalDuration = crl::time(60);
+constexpr auto kMinWidthAppearDuration = crl::time(160);
 
 void ApplyRevealGradient(
 		not_null<const TextAppearing*> appearing,
@@ -979,6 +980,7 @@ QSize Message::performCountOptimalSize() {
 	}
 	if (const auto appearing = Get<TextAppearing>()) {
 		appearing->geometryValid = false;
+		appearing->startedForText = false;
 		appearing->finalizing = item->isRegular();
 	}
 	return QSize(maxWidth, minHeight);
@@ -5454,11 +5456,14 @@ void Message::textAppearStartWidthAnimation(
 	const auto lineDuration = appearing->finalizing
 		? kFullLineAppearFinalDuration
 		: kFullLineAppearDuration;
-	const auto duration = (shown + 1 == lines)
+	const auto computed = (shown + 1 == lines)
 		? lineDuration
 		: std::max(
 			lineDuration * lineWidth / st::msgMaxWidth,
 			crl::time(10));
+	const auto duration = std::exchange(appearing->startedForText, true)
+		? computed
+		: std::max(computed, kMinWidthAppearDuration);
 	appearing->widthDuration = duration;
 	const auto from
 		= appearing->startLineWidth
