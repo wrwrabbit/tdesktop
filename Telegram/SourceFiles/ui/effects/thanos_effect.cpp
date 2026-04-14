@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rp_widget.h"
 #include "ui/ui_utility.h"
 #include "base/debug_log.h"
+#include "base/platform/base_platform_info.h"
 
 #include <QTimer>
 
@@ -21,10 +22,54 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #endif
 
 namespace Ui {
+namespace {
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+[[nodiscard]] bool ProbeComputeSupport() {
+	// Create a throw-away QRhi with the same backend SurfaceRhi will use
+	// in production, ask whether GPU compute is available, then destroy.
+	// This is real hardware/driver capability detection — no OS version
+	// guards. On older Metal-capable Macs the answer is "no", which
+	// is exactly what makes the surface render uninitialized (Y-flipped)
+	// garbage and triggers the mirror bug elsewhere.
+	auto rhi = std::unique_ptr<QRhi>(nullptr);
+#ifdef Q_OS_MAC
+	if (::Platform::MetalSupported()) {
+		auto params = QRhiMetalInitParams();
+		rhi.reset(QRhi::create(QRhi::Metal, &params));
+	}
+#elif defined(Q_OS_WIN)
+	auto params = QRhiD3D11InitParams();
+	rhi.reset(QRhi::create(QRhi::D3D11, &params));
+#endif
+	if (!rhi) {
+		// On Linux (OpenGL) probing requires an offscreen surface,
+		// which is heavier; defer to the renderer's own runtime check
+		// and assume capability here so behavior is unchanged.
+		return true;
+	}
+	const auto supported = rhi->isFeatureSupported(QRhi::Compute);
+	LOG(("ThanosEffect: probe backend=%1 device=%2 compute=%3"
+		).arg(rhi->backendName()
+		).arg(rhi->driverInfo().deviceName
+		).arg(supported ? "yes" : "no"));
+	return supported;
+}
+
+[[nodiscard]] bool RhiComputeSupportedCached() {
+	static const auto cached = ProbeComputeSupport();
+	return cached;
+}
+#endif // Qt >= 6.7
+
+} // namespace
 
 bool ThanosEffect::Supported() {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-	return !PowerSaving::On(PowerSaving::kChatEffects);
+	if (PowerSaving::On(PowerSaving::kChatEffects)) {
+		return false;
+	}
+	return RhiComputeSupportedCached();
 #else
 	return false;
 #endif
