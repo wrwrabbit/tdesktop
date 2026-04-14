@@ -36,6 +36,9 @@ constexpr auto kMinCanvasZoom = 1.;
 constexpr auto kMaxCanvasZoom = 8.;
 constexpr auto kCanvasZoomStep = 1.15;
 constexpr auto kZoomEpsilon = 0.0001;
+constexpr auto kMinItemZoom = 0.1;
+constexpr auto kMaxItemZoom = 10.;
+constexpr auto kCanvasZoomStepFine = 1.015;
 
 std::shared_ptr<Scene> EnsureScene(
 		PhotoModifications &mods,
@@ -55,13 +58,15 @@ Paint::Paint(
 	PhotoModifications &modifications,
 	const QSize &imageSize,
 	std::shared_ptr<Controllers> controllers,
-	Fn<QImage(QRect)> blurSource)
+	Fn<QImage(QRect)> blurSource,
+	bool fixedCrop)
 : RpWidget(parent)
 , _controllers(controllers)
 , _scene(EnsureScene(modifications, imageSize))
 , _view(base::make_unique_q<QGraphicsView>(_scene.get(), this))
 , _viewport(_view->viewport())
-, _imageSize(imageSize) {
+, _imageSize(imageSize)
+, _fixedCrop(fixedCrop) {
 	Expects(modifications.paint != nullptr);
 
 	_scene->setBlurSource(std::move(blurSource));
@@ -163,6 +168,51 @@ Paint::Paint(
 		updateUndoState();
 	}, lifetime());
 
+}
+
+bool Paint::zoomSceneItems(float64 wheelDelta, bool fine) {
+	if (!wheelDelta) {
+		return false;
+	}
+	const auto step = wheelDelta
+		/ float64(QWheelEvent::DefaultDeltasPerStep);
+	const auto base = fine ? kCanvasZoomStepFine : kCanvasZoomStep;
+	const auto factor = std::pow(base, step);
+	const auto center = rect::center(_scene->sceneRect());
+	auto applied = false;
+	for (const auto &item : _scene->items()) {
+		const auto raw = item.get();
+		const auto oldScale = raw->scale();
+		const auto newScale = std::clamp(
+			oldScale * factor,
+			kMinItemZoom,
+			kMaxItemZoom);
+		if (std::abs(newScale - oldScale) < kZoomEpsilon) {
+			continue;
+		}
+		const auto ratio = newScale / oldScale;
+		raw->setScale(newScale);
+		const auto pos = raw->pos();
+		raw->setPos(center + (pos - center) * ratio);
+		applied = true;
+	}
+	return applied;
+}
+
+void Paint::panSceneItems(QPointF sceneDelta) {
+	if (sceneDelta.isNull()) {
+		return;
+	}
+	for (const auto &item : _scene->items()) {
+		item->setPos(item->pos() + sceneDelta);
+	}
+}
+
+QPointF Paint::mapWidgetDeltaToScene(QPoint delta) const {
+	if (!_view) {
+		return QPointF(delta);
+	}
+	return _view->mapToScene(delta) - _view->mapToScene(QPoint());
 }
 
 Paint::~Paint() {
@@ -393,6 +443,12 @@ bool Paint::eventFilter(QObject *obj, QEvent *e) {
 			return true;
 		}
 
+		if (_fixedCrop) {
+			zoomSceneItems(
+				delta,
+				wheel->modifiers().testFlag(Qt::ShiftModifier));
+			return true;
+		}
 		const auto step = delta / float64(QWheelEvent::DefaultDeltasPerStep);
 		const auto factor = std::pow(kCanvasZoomStep, step);
 		const auto newZoom = std::clamp(
@@ -421,7 +477,8 @@ bool Paint::eventFilter(QObject *obj, QEvent *e) {
 		const auto mouse = static_cast<QMouseEvent*>(e);
 		if (mouse->button() == Qt::MiddleButton) {
 			_pan = {
-				.active = (_transform.userZoom > kMinCanvasZoom),
+				.active = (_fixedCrop
+					|| _transform.userZoom > kMinCanvasZoom),
 				.point = mouse->pos(),
 			};
 			if (_pan.active) {
@@ -436,7 +493,9 @@ bool Paint::eventFilter(QObject *obj, QEvent *e) {
 			const auto delta = point - _pan.point;
 			_pan.point = point;
 
-			if (_transform.userZoom > kMinCanvasZoom) {
+			if (_fixedCrop) {
+				panSceneItems(mapWidgetDeltaToScene(delta));
+			} else if (_transform.userZoom > kMinCanvasZoom) {
 				view->horizontalScrollBar()->setValue(
 					view->horizontalScrollBar()->value() - delta.x());
 				view->verticalScrollBar()->setValue(
