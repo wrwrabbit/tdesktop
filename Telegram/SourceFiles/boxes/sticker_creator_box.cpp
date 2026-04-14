@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
+#include "styles/style_editor.h"
 #include "styles/style_layers.h"
 
 #include <QtCore/QBuffer>
@@ -93,7 +94,9 @@ void OpenPhotoEditorForSticker(
 	const auto windowController = &sessionController->window();
 	const auto parentWidget = sessionController->widget();
 
-	if ((image.width() > 10 * image.height())
+	if (image.width() <= 0
+		|| image.height() <= 0
+		|| (image.width() > 10 * image.height())
 		|| (image.height() > 10 * image.width())) {
 		show->showToast(tr::lng_stickers_create_open_failed(tr::now));
 		return;
@@ -114,10 +117,15 @@ void OpenPhotoEditorForSticker(
 	const auto fitted = userSize.scaled(
 		QSize(kStickerSide, kStickerSide),
 		Qt::KeepAspectRatio);
+	const auto handle = st::photoEditorItemHandleSize;
+	const auto itemSize = (userSize.width() >= userSize.height())
+		? int((fitted.height() + handle)
+			* userSize.width() / float64(userSize.height()))
+		: (fitted.width() + handle);
 	auto itemData = Editor::ItemBase::Data{
 		.initialZoom = 1.0,
 		.zPtr = scene->lastZ(),
-		.size = fitted.width(),
+		.size = itemSize,
 		.x = kStickerSide / 2,
 		.y = kStickerSide / 2,
 		.imageSize = userSize,
