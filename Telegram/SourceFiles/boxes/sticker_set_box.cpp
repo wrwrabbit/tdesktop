@@ -75,6 +75,7 @@ constexpr auto kMinRepaintDelay = crl::time(33);
 constexpr auto kMinAfterScrollDelay = crl::time(33);
 constexpr auto kGrayLockOpacity = 0.3;
 constexpr auto kStickerMoveDuration = crl::time(200);
+constexpr auto kOwnedSetStickersMax = 120;
 
 using Data::StickersSet;
 using Data::StickersPack;
@@ -382,6 +383,16 @@ private:
 	void startOverAnimation(int index, float64 from, float64 to);
 	int stickerFromGlobalPos(const QPoint &p) const;
 
+	[[nodiscard]] bool hasAddCell() const;
+	[[nodiscard]] int totalCellsCount() const;
+	[[nodiscard]] QRect addCellRect() const;
+	[[nodiscard]] bool addCellFromGlobalPos(const QPoint &p) const;
+	void setAddCellHovered(bool hovered);
+	void paintAddCell(QPainter &p) const;
+	void showAddMenu(QPoint globalPos);
+	void startAddExistingStickerFlow();
+	void startCreateNewStickerFlow();
+
 	void installDone(const MTPmessages_StickerSetInstallResult &result);
 
 	void requestReorder(not_null<DocumentData*> document, int index);
@@ -465,6 +476,8 @@ private:
 	mtpRequestId _installRequest = 0;
 
 	int _selected = -1;
+	bool _addCellHovered = false;
+	bool _addCellPressed = false;
 
 	base::Timer _previewTimer;
 	int _previewShown = -1;
@@ -1030,15 +1043,15 @@ void StickerSetBox::Inner::applySet(const TLStickerSet &set) {
 		_errors.fire(Error::NotFound);
 		return;
 	}
+	_loaded = true;
 	_perRow = isEmojiSet() ? kEmojiPerRow : kStickersPerRow;
-	_rowsCount = (_pack.size() + _perRow - 1) / _perRow;
 	_singleSize = isEmojiSet() ? st::emojiSetSize : st::stickersSize;
+	_rowsCount = (totalCellsCount() + _perRow - 1) / _perRow;
 
 	resize(
 		_padding.left() + _perRow * _singleSize.width(),
 		_padding.top() + _rowsCount * _singleSize.height() + _padding.bottom());
 
-	_loaded = true;
 	if (const auto previewId = base::take(_previewDocumentId)) {
 		showPreviewForDocument(previewId);
 	}
@@ -1167,6 +1180,10 @@ void StickerSetBox::Inner::mousePressEvent(QMouseEvent *e) {
 		return;
 	}
 	if (e->button() != Qt::LeftButton) {
+		return;
+	}
+	if (addCellFromGlobalPos(e->globalPos())) {
+		_addCellPressed = !_dragging.enabled;
 		return;
 	}
 	const auto index = stickerFromGlobalPos(e->globalPos());
@@ -1307,6 +1324,7 @@ void StickerSetBox::Inner::showPreviewForDocument(DocumentId documentId) {
 
 void StickerSetBox::Inner::leaveEventHook(QEvent *e) {
 	setSelected(-1);
+	setAddCellHovered(false);
 }
 
 void StickerSetBox::Inner::requestReorder(
@@ -1397,6 +1415,13 @@ void StickerSetBox::Inner::mouseReleaseEvent(QMouseEvent *e) {
 			}
 		}
 		_previewShown = -1;
+		return;
+	}
+	if (_addCellPressed) {
+		_addCellPressed = false;
+		if (addCellFromGlobalPos(e->globalPos())) {
+			showAddMenu(e->globalPos());
+		}
 		return;
 	}
 	if (!_previewTimer.isActive()) {
@@ -1653,8 +1678,27 @@ void StickerSetBox::Inner::fillDeleteStickerBox(
 }
 
 void StickerSetBox::Inner::updateSelected() {
-	auto selected = stickerFromGlobalPos(QCursor::pos());
+	const auto cursor = QCursor::pos();
+	const auto onAddCell = addCellFromGlobalPos(cursor);
+	const auto selected = onAddCell
+		? -1
+		: stickerFromGlobalPos(cursor);
 	setSelected(setType() == Data::StickersType::Masks ? -1 : selected);
+	setAddCellHovered(onAddCell);
+}
+
+void StickerSetBox::Inner::setAddCellHovered(bool hovered) {
+	if (_addCellHovered == hovered) {
+		return;
+	}
+	_addCellHovered = hovered;
+	if (hasAddCell()) {
+		setCursor((hovered && !_dragging.enabled)
+			? style::cur_pointer
+			: style::cur_default);
+		const auto rect = addCellRect();
+		rtlupdate(rect.x(), rect.y(), rect.width(), rect.height());
+	}
 }
 
 void StickerSetBox::Inner::setSelected(int selected) {
@@ -1791,6 +1835,10 @@ void StickerSetBox::Inner::paintEvent(QPaintEvent *e) {
 				_shiftAnimations[_dragging.index].yAnimation.value(0))
 			: (mapFromGlobal(QCursor::pos()) - _dragging.point);
 		paintSticker(p, _dragging.index, pos, paused, now);
+	}
+
+	if (hasAddCell()) {
+		paintAddCell(p);
 	}
 
 	if (_lottiePlayer && !paused) {
@@ -2200,6 +2248,110 @@ void StickerSetBox::Inner::updateItems() {
 void StickerSetBox::Inner::repaintItems(crl::time now) {
 	_lastUpdatedAt = now ? now : crl::now();
 	update();
+}
+
+bool StickerSetBox::Inner::hasAddCell() const {
+	return _loaded
+		&& _amSetCreator
+		&& (setType() == Data::StickersType::Stickers)
+		&& !_pack.isEmpty()
+		&& (_pack.size() < kOwnedSetStickersMax);
+}
+
+int StickerSetBox::Inner::totalCellsCount() const {
+	return _pack.size() + (hasAddCell() ? 1 : 0);
+}
+
+QRect StickerSetBox::Inner::addCellRect() const {
+	const auto index = _pack.size();
+	const auto row = index / _perRow;
+	const auto column = index % _perRow;
+	return QRect(
+		_padding.left() + column * _singleSize.width(),
+		_padding.top() + row * _singleSize.height(),
+		_singleSize.width(),
+		_singleSize.height());
+}
+
+bool StickerSetBox::Inner::addCellFromGlobalPos(const QPoint &p) const {
+	if (!hasAddCell()) {
+		return false;
+	}
+	auto local = mapFromGlobal(p);
+	if (rtl()) {
+		local.setX(width() - local.x());
+	}
+	const auto rect = addCellRect();
+	return rect.contains(local);
+}
+
+void StickerSetBox::Inner::paintAddCell(QPainter &p) const {
+	const auto ltrRect = addCellRect();
+	const auto rect = rtl()
+		? QRect(
+			width() - ltrRect.x() - ltrRect.width(),
+			ltrRect.y(),
+			ltrRect.width(),
+			ltrRect.height())
+		: ltrRect;
+	const auto inner = QRect(
+		rect::center(rect) - QPoint(
+			st::stickersAddCellBgRadius,
+			st::stickersAddCellBgRadius),
+		Size(st::stickersAddCellBgRadius * 2));
+
+	auto hq = PainterHighQualityEnabler(p);
+	const auto base = st::windowSubTextFg->c;
+	const auto bgAlpha = (_addCellHovered && !_dragging.enabled)
+		? 0.22
+		: 0.12;
+	p.setPen(Qt::NoPen);
+	p.setBrush(anim::with_alpha(base, bgAlpha));
+	p.drawEllipse(inner);
+
+	const auto plusHalf = st::stickersAddCellPlusSize / 2;
+	const auto thickness = st::stickersAddCellPlusThickness;
+	const auto center = rect.center();
+	const auto plusH = QRectF(
+		center.x() - plusHalf,
+		center.y() - thickness / 2.,
+		plusHalf * 2,
+		thickness);
+	const auto plusV = QRectF(
+		center.x() - thickness / 2.,
+		center.y() - plusHalf,
+		thickness,
+		plusHalf * 2);
+	const auto radius = thickness / 2.;
+	p.setBrush(base);
+	p.drawRoundedRect(plusH, radius, radius);
+	p.drawRoundedRect(plusV, radius, radius);
+}
+
+void StickerSetBox::Inner::showAddMenu(QPoint globalPos) {
+	if (_dragging.enabled) {
+		return;
+	}
+	_menu = base::make_unique_q<Ui::PopupMenu>(
+		this,
+		st::popupMenuWithIcons);
+	_menu->addAction(
+		tr::lng_stickers_create_new(tr::now),
+		crl::guard(this, [=] { startCreateNewStickerFlow(); }),
+		&st::menuIconStickerCreate);
+	_menu->addAction(
+		tr::lng_stickers_add_existing(tr::now),
+		crl::guard(this, [=] { startAddExistingStickerFlow(); }),
+		&st::menuIconStickerAdd);
+	_menu->popup(globalPos);
+}
+
+void StickerSetBox::Inner::startAddExistingStickerFlow() {
+	_show->showToast(u"Add an existing sticker: not implemented yet."_q);
+}
+
+void StickerSetBox::Inner::startCreateNewStickerFlow() {
+	_show->showToast(u"Create a new sticker: not implemented yet."_q);
 }
 
 StickerSetBox::Inner::~Inner() = default;
