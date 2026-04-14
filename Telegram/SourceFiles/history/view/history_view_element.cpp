@@ -2569,7 +2569,7 @@ void Element::blockquoteExpandChanged() {
 }
 
 void Element::invalidateTextSizeCache() {
-	_textWidth = -1;
+	_textWidth = 0;
 	_textHeight = 0;
 	_textRealWidth = 0;
 	invalidateTextDependentCache();
