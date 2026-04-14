@@ -671,7 +671,33 @@ QImage DefaultApplicationIcon() {
 }
 
 void LaunchMaps(const Data::LocationPoint &point, Fn<void()> fail) {
-	fail(); // No specific handler since Bing Maps were deprecated.
+	const auto aar = base::WinRT::TryCreateInstance<
+		IApplicationAssociationRegistration
+	>(CLSID_ApplicationAssociationRegistration);
+	if (!aar) {
+		fail();
+		return;
+	}
+
+	auto handler = base::CoTaskMemString();
+	const auto result = aar->QueryCurrentDefault(
+		L"geo",
+		AT_URLPROTOCOL,
+		AL_EFFECTIVE,
+		handler.put());
+	if (FAILED(result)
+		|| !handler
+		|| !handler.data()
+		|| std::wstring(handler.data()) == L"geo") {
+		fail();
+		return;
+	}
+
+	const auto url = u"geo:%1,%2"_q;
+	if (!QDesktopServices::openUrl(
+		url.arg(point.latAsString(), point.lonAsString()))) {
+		fail();
+	}
 }
 
 } // namespace Platform
