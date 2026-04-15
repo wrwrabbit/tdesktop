@@ -216,7 +216,10 @@ void BuildDataStorageSection(SectionBuilder &builder) {
 
 void BuildStorageLocationSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
-	const auto isPortable = Storage::IsCurrentlyPortable();
+	const auto container = builder.container();
+	const auto tdataLocation = Storage::CurrentTdataLocation();
+	const auto isPortable = (tdataLocation == Storage::TdataLocation::Portable);
+	const auto isInHome = (tdataLocation == Storage::TdataLocation::Home);
 
 	builder.addDivider();
 	builder.addSkip();
@@ -226,41 +229,31 @@ void BuildStorageLocationSection(SectionBuilder &builder) {
 		.keywords = { u"storage"_q, u"portable"_q, u"location"_q, u"data"_q },
 	});
 
+	if (container) {
+		const auto statusText = isPortable
+			? tr::lng_settings_storage_current_portable(tr::now)
+			: isInHome
+				? tr::lng_settings_storage_current_appdata(tr::now)
+				: tr::lng_ptg_storage_current_custom(tr::now);
+		container->add(
+			object_ptr<Ui::FlatLabel>(
+				container,
+				statusText,
+				st::ptgLocationLabel),
+			st::boxRowPadding);
+	}
+
 	builder.addButton({
-		.id = u"advanced/storage_state"_q,
-		.title = isPortable
-			? tr::lng_settings_storage_current_portable()
-			: tr::lng_settings_storage_current_appdata(),
-		.st = &st::settingsButtonNoIcon,
-		.onClick = [] {},
-		.keywords = { u"storage"_q, u"location"_q, u"data"_q },
+		.id = u"advanced/storage_move_custom"_q,
+		.title = tr::lng_ptg_location_move_button(),
+		.icon = { &st::menuIconStorage },
+		.onClick = [=] {
+			Core::ShowLocationChoiceBox(controller->uiShow().get());
+		},
+		.keywords = { u"portable"_q, u"usb"_q, u"data"_q, u"location"_q },
 	});
 
-	if (!isPortable) {
-		builder.addButton({
-			.id = u"advanced/storage_make_portable"_q,
-			.title = tr::lng_settings_storage_make_portable(),
-			.icon = { &st::menuIconStorage },
-			.onClick = [=] {
-				const auto confirmed = [=] {
-					if (Storage::ScheduleSwitchToPortable()) {
-						Core::Restart();
-					} else {
-						controller->show(Ui::MakeInformBox(
-							tr::lng_settings_storage_move_failed(
-								lt_path,
-								rpl::single(cExeDir()))));
-					}
-				};
-				controller->show(Ui::MakeConfirmBox({
-					.text = tr::lng_settings_storage_make_portable_about(),
-					.confirmed = confirmed,
-					.confirmText = tr::lng_settings_restart_now(),
-				}));
-			},
-			.keywords = { u"portable"_q, u"usb"_q, u"data"_q },
-		});
-	} else {
+	if (!isInHome) {
 		builder.addButton({
 			.id = u"advanced/storage_move_to_appdata"_q,
 			.title = tr::lng_settings_storage_move_to_appdata(),

@@ -8004,7 +8004,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_ptg_location_running_from" = "Running from {path}";
 "lng_ptg_location_removable" = "Running from a removable drive ({path})";
 "lng_ptg_location_downloads" = "Running from your Downloads folder";
-"lng_ptg_location_move_button" = "Move to a different location\u2026";
+"lng_ptg_location_move_button" = "Move to a different location…";
+"lng_ptg_storage_current_custom" = "Data is stored in a custom location.";
 "lng_ptg_location_installer_info" = "Telegram is installed via the standard installer. Use the installer to move it.";
 "lng_ptg_location_move_title" = "Move Telegram";
 "lng_ptg_location_running_at" = "Currently running from: {path}";
@@ -8034,7 +8035,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_ptg_location_card_custom_pro3" = "No installer or admin rights needed";
 "lng_ptg_location_card_custom_con1" = "Data lives next to the app \u2014 both must be backed up together";
 "lng_ptg_location_card_custom_con2" = "Not visible in system app launchers (Start Menu, Launchpad)";
-"lng_ptg_location_card_custom_btn" = "Choose folder\u2026";
+"lng_ptg_location_card_custom_btn" = "Choose folder…";
 "lng_ptg_location_card_data_home_title" = "Move data to the standard location";
 "lng_ptg_location_card_data_home_desc" = "Keep the app where it is, but move your Telegram data to the OS standard folder.";
 "lng_ptg_location_card_data_home_pro1" = "Data is in a known, backed-up location";
