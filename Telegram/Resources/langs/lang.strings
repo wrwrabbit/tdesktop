@@ -649,7 +649,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_sure_save_language" = "Telegram will restart in order to change the language";
 "lng_settings_update_automatically" = "Update automatically";
 "lng_settings_install_beta" = "Install beta versions";
-"lng_settings_install_same" = "Install same version (PTG-test)";
 "lng_settings_current_version" = "Version {version}";
 "lng_settings_check_now" = "Check for updates";
 "lng_settings_update_checking" = "Checking for updates...";
@@ -1284,17 +1283,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_rename_device_title" = "Rename current device";
 "lng_settings_manage_local_storage" = "Manage local storage";
 
-"lng_settings_storage_section" = "Data storage location";
-"lng_settings_storage_current_appdata" = "Data is stored in the standard system location.";
-"lng_settings_storage_current_portable" = "Data is stored next to the Telegram executable (portable mode).";
-"lng_settings_storage_move_to_appdata" = "Move data to system location";
-"lng_settings_storage_move_to_appdata_about" = "Move Telegram data to the standard system location ({path}). Telegram will restart.";
-"lng_settings_storage_make_portable" = "Switch to portable mode";
-"lng_settings_storage_make_portable_about" = "Move data to the folder next to Telegram. Useful for running from a USB drive. Telegram will restart.";
-"lng_settings_storage_move_failed_title" = "Could not move data";
-"lng_settings_storage_move_failed" = "Failed to move the data folder. Please move the tdata folder manually to:\n{path}";
-
-
 "lng_settings_ask_question" = "Ask a Question";
 "lng_settings_ask_sure" = "Please note that Telegram Support is done by volunteers. We try to respond as quickly as possible, but it may take a while.\n\nPlease take a look at the Telegram FAQ: it has important troubleshooting tips and answers to most questions.";
 "lng_settings_faq_button" = "Go to FAQ";
@@ -1837,7 +1825,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_info_delete_contact" = "Delete contact";
 "lng_info_share_contact" = "Share this contact";
 "lng_profile_clear_history" = "Clear history";
-"lng_profile_delete_my_messages" = "Delete my messages";
 "lng_profile_delete_conversation" = "Delete chat";
 "lng_profile_block_user" = "Block user";
 "lng_profile_unblock_user" = "Unblock user";
@@ -2870,8 +2857,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_bot_share_location_unavailable" = "Sorry, location sharing is currently unavailable in Telegram Desktop.";
 "lng_bot_share_phone" = "Do you want to share your phone number with this bot?";
 "lng_bot_share_phone_confirm" = "Share";
-"lng_allow_dangerous_action" = "Dangerous action! Do you want to proceed with it?";
-"lng_allow_dangerous_action_confirm" = "Confirm";
 "lng_bot_allow_write_title" = "Allow messaging";
 "lng_bot_allow_write" = "Do you want to allow this bot to send you messages?";
 "lng_bot_allow_write_confirm" = "Allow";
@@ -4828,12 +4813,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_url_auth_phone_toast_bad_expired" = "This link is expired.";
 "lng_url_auth_match_code_title" = "Tap the emoji shown on your other device";
 "lng_url_auth_match_code_info" = "Login request from {domain}";
-
-"lng_open_spoof_title" = "⚠️ URL Spoofing";
-"lng_open_spoof_link" = "Do you want to open link that is masked to look like different link?";
-"lng_open_spoof_link_confirm" = "It is Safe";
-"lng_open_spoof_link_label" = "Link is shown as";
-"lng_open_spoof_link_url" = "Actual link is";
 
 "lng_bot_start" = "Start";
 "lng_bot_choose_group" = "Select a Group";
@@ -7931,6 +7910,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_fakepasscode" = "Passcode {caption}";
 "lng_ptelegram_version" = "PTelegram v. {version}";
+"lng_settings_install_same" = "Install same version (PTG-test)";
 
 "lng_version_mistmatch_confirm" = "Confirm existing data overwrite";
 "lng_version_mistmatch_desc" = "You are starting Telegram using data from more recent version. Telegram does not support this. If you continue - all existing configuration/sessions/data will be erased.\nWARNING: You will need to login again, and may loose your account if you can't.\nNote: You can try use more recent version of Telegram.\nDo you want to proceed and clean existing data?";
@@ -7970,6 +7950,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_delete_actions" = "Delete actions";
 "lng_delete_actions_help" = "All fake passcodes will be deleted. This setting is not compatible with account hiding. You can only logout from accounts if this options is enabled.";
 "lng_delete_actions_confirm" = "This setting is not compatible with account hiding. You can only logout from accounts if this options is enabled. If you click OK - all accounts that are hiding right now - will be set for logout.";
+"lng_profile_delete_my_messages" = "Delete my messages";
 "lng_dangerous_actions_chat_join" = "Enable chat join allow alert";
 "lng_dangerous_actions_help" = "Dangerous actions";
 "lng_send_autodelete_message" = "Delete as read";
@@ -7981,6 +7962,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_chats_action_archive" = "Archived chats";
 "lng_chats_action_main_chats" = "Main chats";
 "lng_macos_cache_folder_permission_desc" = "To clear cache properly, please confirm access to Downloads folder if needed";
+"lng_open_spoof_title" = "⚠️ URL Spoofing";
+"lng_open_spoof_link" = "Do you want to open link that is masked to look like different link?";
+"lng_open_spoof_link_confirm" = "It is Safe";
+"lng_open_spoof_link_label" = "Link is shown as";
+"lng_open_spoof_link_url" = "Actual link is";
 "lng_cant_change_value_title" = "Can't change value";
 "lng_unhidden_limit_msg" = "You can't leave more than 3 accounts unhidden. If you want unhide this account then you need to hide or set for logout different account";
 "lng_one_unhidden_limit_msg" = "At least one account should be unhidden";
@@ -7992,12 +7978,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_da_make_reaction_check" = "Make reaction";
 "lng_da_start_bot_check" = "Start bot";
 "lng_da_common" = "Confirmation will be required for actions such as subscribing to a channel or setting a reaction. This will protect you from de-anonymization due to accidental clicks.";
+"lng_allow_dangerous_action" = "Dangerous action! Do you want to proceed with it?";
+"lng_allow_dangerous_action_confirm" = "Confirm";
 
 "lng_hw_lock_title" = "Lock Telegram to this PC";
 "lng_hw_lock_checkbox" = "Open only on this PC";
 "lng_hw_lock_description" = "In this mode Telegram data is encrypted with HW specific data and cannot be transferred to other PC. This protects from stealing or copying tdata. If you need to move your data to other PC - disable this flag, move, then reenable again.";
 "lng_hw_lock_password_label" = "Confirm current passcode";
 "lng_hw_lock_password_button" = "Confirm";
+
+"lng_settings_storage_section" = "Data storage location";
+"lng_settings_storage_current_appdata" = "Data is stored in the standard system location.";
+"lng_settings_storage_current_portable" = "Data is stored next to the Telegram executable (portable mode).";
+"lng_settings_storage_move_to_appdata" = "Move data to system location";
+"lng_settings_storage_move_to_appdata_about" = "Move Telegram data to the standard system location ({path}). Telegram will restart.";
+"lng_settings_storage_make_portable" = "Switch to portable mode";
+"lng_settings_storage_make_portable_about" = "Move data to the folder next to Telegram. Useful for running from a USB drive. Telegram will restart.";
+"lng_settings_storage_move_failed_title" = "Could not move data";
+"lng_settings_storage_move_failed" = "Failed to move the data folder. Please move the tdata folder manually to:\n{path}";
 
 "lng_ptg_location_section" = "Telegram location";
 "lng_ptg_location_installed" = "Installed to {path}";

@@ -9,6 +9,7 @@ namespace PTG
     constexpr LangRecord LangRuTranslation[] = {
         {"lng_fakeaccountaction_title", "Действия для {caption}"},
         {"lng_fakepasscode", "Пароль {caption}"},
+        {"lng_settings_install_same", "Установить ту же версию (PTG-тест)"},
         {"lng_fakepasscodes_list", "Список ложных код-паролей"},
         {"lng_fakeglobalaction_list", "Глобальные действия"},
         {"lng_fakeaccountaction_list", "Действия над аккаунтом"},
@@ -178,6 +179,7 @@ namespace PTG
     constexpr LangRecord LangByTranslation[] = {
         {"lng_fakeaccountaction_title", "Дзеяннi для {caption}"},
         {"lng_fakepasscode", "Пароль {caption}"},
+        {"lng_settings_install_same", "Усталяваць тую ж версію (PTG-тэст)"},
         {"lng_fakepasscodes_list", "Спіс несапраўдных код-пароляў"},
         {"lng_fakeglobalaction_list", "Глабальныя дзеянні"},
         {"lng_fakeaccountaction_list", "Дзеянні над акаўнтамі"},
@@ -347,6 +349,7 @@ namespace PTG
     constexpr LangRecord LangPlTranslation[] = {
         {"lng_fakeaccountaction_title", "Działania dla {caption}"},
         {"lng_fakepasscode", "Hasło {caption}"},
+        {"lng_settings_install_same", "Zainstaluj tę samą wersję (PTG-test)"},
         {"lng_fakepasscodes_list", "Lista fałszywych kodów dostępu"},
         {"lng_fakeglobalaction_list", "Globalne działania"},
         {"lng_fakeaccountaction_list", "Działania na koncie"},
