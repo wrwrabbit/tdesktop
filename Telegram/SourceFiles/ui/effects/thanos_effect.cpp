@@ -19,6 +19,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 #include <rhi/qrhi.h>
+#ifdef Q_OS_UNIX
+#include <QOffscreenSurface>
+#endif
 #endif
 
 namespace Ui {
@@ -38,21 +41,44 @@ namespace {
 		auto params = QRhiMetalInitParams();
 		rhi.reset(QRhi::create(QRhi::Metal, &params));
 	}
+	if (!rhi) {
+		return false;
+	}
 #elif defined(Q_OS_WIN)
 	auto params = QRhiD3D11InitParams();
 	rhi.reset(QRhi::create(QRhi::D3D11, &params));
-#endif
 	if (!rhi) {
-		// On Linux (OpenGL) probing requires an offscreen surface,
-		// which is heavier; defer to the renderer's own runtime check
-		// and assume capability here so behavior is unchanged.
-		return true;
+		return false;
 	}
+#else
+	// Linux/Unix: probe the OpenGL backend with an offscreen surface.
+	// Matches what SurfaceRhi uses in production so the result is
+	// representative of what the real widget would get. If anything
+	// here fails (no GL context, software fallback without compute,
+	// driver bug), treat compute as unsupported and refuse the effect
+	// rather than show an uninitialized swap-chain.
+	auto format = QRhiGles2InitParams::adjustedFormat();
+	auto offscreen = std::unique_ptr<QOffscreenSurface>(
+		QRhiGles2InitParams::newFallbackSurface(format));
+	if (!offscreen) {
+		LOG(("ThanosEffect: probe failed — no offscreen surface"));
+		return false;
+	}
+	auto params = QRhiGles2InitParams();
+	params.format = format;
+	params.fallbackSurface = offscreen.get();
+	rhi.reset(QRhi::create(QRhi::OpenGLES2, &params));
+	if (!rhi) {
+		LOG(("ThanosEffect: probe failed — no GL RHI"));
+		return false;
+	}
+#endif
 	const auto supported = rhi->isFeatureSupported(QRhi::Compute);
 	LOG(("ThanosEffect: probe backend=%1 device=%2 compute=%3"
 		).arg(rhi->backendName()
 		).arg(rhi->driverInfo().deviceName
 		).arg(supported ? "yes" : "no"));
+	rhi.reset();
 	return supported;
 }
 
