@@ -74,6 +74,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/chats_filter_tag.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/effects/loading_element.h"
+#include "ui/effects/thanos_effect_session.h"
 #include "ui/widgets/multi_select.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/unread_badge.h"
@@ -374,6 +375,8 @@ InnerWidget::InnerWidget(
 	}) | rpl::on_next([=] {
 		refresh();
 	}, lifetime());
+
+	Ui::ScheduleThanosEffectWarmUp(&session(), lifetime());
 
 	rpl::merge(
 		session().settings().archiveCollapsedChanges() | rpl::map_to(false),

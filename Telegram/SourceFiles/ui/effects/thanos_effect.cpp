@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <rhi/qrhi.h>
 #ifdef Q_OS_UNIX
 #include <QOffscreenSurface>
+#include <QSurfaceFormat>
 #endif
 #endif
 
@@ -57,7 +58,7 @@ namespace {
 	// here fails (no GL context, software fallback without compute,
 	// driver bug), treat compute as unsupported and refuse the effect
 	// rather than show an uninitialized swap-chain.
-	auto format = QRhiGles2InitParams::adjustedFormat();
+	auto format = QSurfaceFormat::defaultFormat();
 	auto offscreen = std::unique_ptr<QOffscreenSurface>(
 		QRhiGles2InitParams::newFallbackSurface(format));
 	if (!offscreen) {
@@ -98,6 +99,12 @@ bool ThanosEffect::Supported() {
 	return RhiComputeSupportedCached();
 #else
 	return false;
+#endif
+}
+
+void ThanosEffect::WarmUp() {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	(void)RhiComputeSupportedCached();
 #endif
 }
 
