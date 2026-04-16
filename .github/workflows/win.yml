@@ -229,6 +229,37 @@ jobs:
           
           cmake --build ..\out --config Debug --parallel
 
+      - name: Verify installer build.
+        if: env.ONLY_CACHE == 'false' && matrix.arch != 'arm64'
+        shell: cmd
+        run: |
+          for /f "tokens=2" %%v in ('findstr /b /c:"AppVersionStr " %TBUILD%\%REPO_NAME%\Telegram\build\version') do set VER=%%v
+          if "${{ matrix.arch }}" == "x64" (
+            set TARGET=win64
+          ) else (
+            set TARGET=win
+          )
+          set RELEASEPATH=%TBUILD%\%REPO_NAME%\out\Debug
+          if "${{ matrix.arch }}" == "x64" (set MODULES_ARCH=x64) else (set MODULES_ARCH=x86)
+          if not exist "%RELEASEPATH%\modules\%MODULES_ARCH%\d3d\d3dcompiler_47.dll" (
+            mkdir "%RELEASEPATH%\modules\%MODULES_ARCH%\d3d" 2>nul
+            copy nul "%RELEASEPATH%\modules\%MODULES_ARCH%\d3d\d3dcompiler_47.dll" >nul
+          )
+          iscc /dMyAppVersion=%VER% /dMyAppVersionZero=%VER% /dMyAppVersionFull=%VER% "/dReleasePath=%RELEASEPATH%" "/dMyBuildTarget=%TARGET%" "%TBUILD%\%REPO_NAME%\Telegram\build\setup.iss"
+
+      - name: Move installer artifact.
+        if: env.ONLY_CACHE == 'false' && matrix.arch != 'arm64'
+        run: |
+          mkdir installer_${{ matrix.arch }}
+          move %TBUILD%\%REPO_NAME%\out\Debug\tsetup*.exe installer_${{ matrix.arch }}\
+
+      - uses: actions/upload-artifact@v6
+        name: Upload installer artifact.
+        if: env.ONLY_CACHE == 'false' && matrix.arch != 'arm64'
+        with:
+          name: ${{ env.ARTIFACT_NAME }}_setup
+          path: installer_${{ matrix.arch }}\
+
       - name: Move artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || ${{ github.ref == 'refs/heads/nightly' }}
         run: |

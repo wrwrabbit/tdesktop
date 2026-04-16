@@ -27,6 +27,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "core/crash_reports.h"
 
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QOperatingSystemVersion>
 #include <QtWidgets/QApplication>
 #include <QtGui/QDesktopServices>
@@ -804,6 +806,113 @@ void psSendToMenu(bool send, bool silent) {
 		L"--",
 		L"Telegram send to link.\n"
 		"You can disable send to menu item in Telegram settings.");
+}
+
+bool CreateStartMenuShortcut(const QString &exePath, bool silent) {
+	PWSTR programsFolder = nullptr;
+	HRESULT hr = SHGetKnownFolderPath(
+		FOLDERID_Programs,
+		KF_FLAG_CREATE,
+		nullptr,
+		&programsFolder);
+	const auto guard = gsl::finally([&] { CoTaskMemFree(programsFolder); });
+	if (!SUCCEEDED(hr)) {
+		if (!silent) FAKE_LOG(("App Error: could not get FOLDERID_Programs: %1").arg(hr));
+		return false;
+	}
+	const auto lnk = QString::fromWCharArray(programsFolder)
+		+ '\\'
+		+ AppFile.utf16()
+		+ u".lnk"_q;
+	const auto shellLink = base::WinRT::TryCreateInstance<IShellLink>(
+		CLSID_ShellLink);
+	if (!shellLink) {
+		if (!silent) FAKE_LOG(("App Error: could not create IShellLink for start menu shortcut"));
+		return false;
+	}
+	const auto exeNative = QDir::toNativeSeparators(exePath);
+	const auto dirNative = QDir::toNativeSeparators(
+		QFileInfo(exePath).absolutePath());
+	shellLink->SetArguments(L"");
+	shellLink->SetPath(exeNative.toStdWString().c_str());
+	shellLink->SetWorkingDirectory(dirNative.toStdWString().c_str());
+	shellLink->SetDescription(L"Telegram Desktop");
+	if (const auto propertyStore = shellLink.try_as<IPropertyStore>()) {
+		PROPVARIANT appIdPropVar;
+		hr = InitPropVariantFromString(AppUserModelId::Id().c_str(), &appIdPropVar);
+		if (SUCCEEDED(hr)) {
+			hr = propertyStore->SetValue(AppUserModelId::Key(), appIdPropVar);
+			PropVariantClear(&appIdPropVar);
+			if (SUCCEEDED(hr)) {
+				hr = propertyStore->Commit();
+			}
+		}
+	}
+	const auto persistFile = shellLink.try_as<IPersistFile>();
+	if (!persistFile) {
+		if (!silent) FAKE_LOG(("App Error: could not get IPersistFile for start menu shortcut"));
+		return false;
+	}
+	hr = persistFile->Save(lnk.toStdWString().c_str(), TRUE);
+	if (!SUCCEEDED(hr)) {
+		if (!silent) FAKE_LOG(("App Error: could not save start menu shortcut to %1").arg(lnk));
+		return false;
+	}
+	return true;
+}
+
+void RemoveInnoSetupRegistryKey() {
+	const auto appId = AppId.utf16();
+	const auto key1 = QString("Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId).toStdWString();
+	const auto key2 = QString("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId).toStdWString();
+	RegDeleteKeyW(HKEY_CURRENT_USER, key1.c_str());
+	RegDeleteKeyW(HKEY_CURRENT_USER, key2.c_str());
+}
+
+bool RemoveStartMenuShortcut(const QString &onlyIfPointingTo) {
+	PWSTR programsFolder = nullptr;
+	HRESULT hr = SHGetKnownFolderPath(
+		FOLDERID_Programs,
+		KF_FLAG_DEFAULT,
+		nullptr,
+		&programsFolder);
+	const auto guard = gsl::finally([&] { CoTaskMemFree(programsFolder); });
+	if (!SUCCEEDED(hr)) return false;
+	const auto lnk = QString::fromWCharArray(programsFolder)
+		+ '\\'
+		+ AppFile.utf16()
+		+ u".lnk"_q;
+	if (!QFile::exists(lnk)) return false;
+	if (!onlyIfPointingTo.isEmpty()) {
+		const auto shellLink = base::WinRT::TryCreateInstance<IShellLink>(
+			CLSID_ShellLink);
+		if (shellLink) {
+			const auto persistFile = shellLink.try_as<IPersistFile>();
+			if (persistFile) {
+				hr = persistFile->Load(lnk.toStdWString().c_str(), STGM_READ);
+				if (SUCCEEDED(hr)) {
+					wchar_t target[MAX_PATH] = {};
+					hr = shellLink->GetPath(target, MAX_PATH, nullptr, 0);
+					if (SUCCEEDED(hr)) {
+						const auto existing = QString::fromWCharArray(target);
+						if (existing.compare(
+								QDir::toNativeSeparators(onlyIfPointingTo),
+								Qt::CaseInsensitive) != 0) {
+							FAKE_LOG(("Platform: start menu shortcut points to '%1' not '%2', preserving").arg(
+								existing,
+								QDir::toNativeSeparators(onlyIfPointingTo)));
+							return false;
+						}
+					}
+				}
+			}
+		}
+	}
+	const auto removed = QFile::remove(lnk);
+	if (!removed) {
+		FAKE_LOG(("Platform: failed to remove start menu shortcut '%1'").arg(lnk));
+	}
+	return removed;
 }
 
 // Stub while we still support Windows 7.

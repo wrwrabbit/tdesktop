@@ -45,6 +45,19 @@ namespace PTG {
 
     void SetLastVerifyMSG_ID(quint64);
     quint64 GetLastVerifyMSG_ID();
+
+    // Persistent PTG settings (non-DA)
+    void serialize(QDataStream& out);
+    void deserialize(QDataStream& in);
+
+    TimeId GetPrivacyLastReviewTime();
+    void SetPrivacyLastReviewTime(TimeId t);
+    int GetPrivacyLastReviewInsecureCount();
+    void SetPrivacyLastReviewInsecureCount(int n);
+    TimeId GetLastSessionCheckTime();
+    void SetLastSessionCheckTime(TimeId t);
+    bool IsSessionAnomalyPending();
+    void SetSessionAnomalyPending(bool v);
 }
 
 #endif // TELEGRAM_FAKE_PASSCODE_PTG_SETTINGS_H

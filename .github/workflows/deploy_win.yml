@@ -203,6 +203,7 @@ jobs:
           mkdir artifact
           mkdir symbols
           xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\tportable*.zip artifact\ /E/C
+          xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\tsetup*.exe artifact\ /E/C
           xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\t*upd* artifact\ /E/C
           xcopy %TBUILD%\Dropbox\Telegram\symbols\* symbols\ /E/S/C
       - uses: actions/upload-artifact@v7
@@ -211,6 +212,13 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: artifact\tportable*
+
+      - uses: actions/upload-artifact@v7
+        name: Upload installer artifact.
+        if: (env.UPLOAD_ARTIFACT == 'true')
+        with:
+          name: ${{ env.ARTIFACT_NAME }}_setup
+          path: artifact\tsetup*
 
       - uses: actions/upload-artifact@v7
         name: Upload artifact TG.

@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/crash_reports.h"
 #include "core/update_checker.h"
 #include "core/sandbox.h"
+#include "storage/storage_location_switch.h"
 #include "base/concurrent_timer.h"
 #include "base/options.h"
 
@@ -242,6 +243,10 @@ bool MoveLegacyAlphaFolder() {
 }
 
 bool CheckPortableVersionFolder() {
+	if (Storage::ApplyPendingSwitch()) {
+		return true;
+	}
+
 	if (!MoveLegacyAlphaFolder()) {
 		return false;
 	}

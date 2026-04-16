@@ -16,6 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_instance.h"
 #include "core/sandbox.h"
 #include "core/application.h"
+#include "core/location_choice_box.h"
+#include "core/binary_location.h"
 #include "export/export_manager.h"
 #include "inline_bots/bot_attach_web_view.h" // AttachWebView::cancel.
 #include "intro/intro_widget.h"
@@ -299,6 +301,18 @@ void MainWindow::setupIntro(
 		}
 	}
 	fixOrder();
+
+#ifndef OS_MAC_STORE
+	if (!_passcodeLock
+			&& !_setupEmailLock
+			&& point == Intro::EnterPoint::Start
+			&& Core::BinaryIsInDownloads()) {
+		crl::on_main(this, [=] {
+			auto show = controller().uiShow();
+			Core::ShowLocationChoiceBoxFirstRun(show.get());
+		});
+	}
+#endif // OS_MAC_STORE
 }
 
 void MainWindow::setupMain(

@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_common_session.h"
 
 #include "core/application.h"
+#include "core/binary_location.h"
+#include "core/location_choice_box.h"
 #include "fakepasscode/fake_passcode.h"
 #include "fakepasscode/ptg.h"
 #include "fakepasscode/settings.h"
@@ -24,14 +26,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_builder.h"
 #include "settings/settings_common.h"
 #include "storage/storage_domain.h"
+#include "storage/storage_location_switch.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/labels.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/qt_object_factory.h"
 #include "window/window_session_controller.h"
+#include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
+
+#include <QtCore/QDir>
 
 namespace Settings {
 namespace {
@@ -103,6 +110,75 @@ void PasscodesListWidget::rebuild(size_t passcodesSize) {
 	Ui::AddSkip(_content, st::settingsCheckboxesSkip);
 
 	Ui::ResizeFitChild(this, _content);
+}
+
+void BuildLocationSection(SectionBuilder &builder) {
+	builder.add(nullptr, [] {
+		return SearchEntry{
+			.id = u"ptg/location"_q,
+			.title = tr::lng_ptg_location_section(tr::now),
+			.keywords = { u"location"_q, u"move"_q, u"portable"_q },
+		};
+	});
+
+	const auto controller = builder.controller();
+	const auto container = builder.container();
+
+	builder.addSubsectionTitle(tr::lng_ptg_location_section());
+
+	if (container) {
+		const auto binaryCategory = Core::ClassifyBinaryLocation();
+		const auto exeDir = QDir::toNativeSeparators(
+			QDir(cExeDir()).absolutePath());
+		const auto statusText = [&] {
+			switch (binaryCategory) {
+			case Core::BinaryLocationCategory::SystemAppFolder:
+				return tr::lng_ptg_location_installed(
+					tr::now, lt_path, exeDir);
+			case Core::BinaryLocationCategory::RemovableDrive:
+				return tr::lng_ptg_location_removable(
+					tr::now, lt_path, exeDir);
+			case Core::BinaryLocationCategory::Downloads:
+				return tr::lng_ptg_location_downloads(tr::now);
+			default:
+				return tr::lng_ptg_location_running_from(
+					tr::now, lt_path, exeDir);
+			}
+		}();
+		const auto isDownloads = (
+			binaryCategory == Core::BinaryLocationCategory::Downloads);
+		const auto &labelStyle = isDownloads
+			? st::ptgLocationWarningLabel
+			: st::ptgLocationLabel;
+		container->add(
+			object_ptr<Ui::FlatLabel>(container, statusText, labelStyle),
+			st::boxRowPadding);
+	}
+
+	const auto isSystemApp = Core::BinaryIsInSystemAppFolder();
+
+#ifndef OS_MAC_STORE
+	if (!isSystemApp) {
+		builder.addButton({
+			.id = u"ptg/location_move"_q,
+			.title = tr::lng_ptg_location_move_button(),
+			.icon = { &st::menuIconShowInFolder },
+			.onClick = [=] {
+				Core::ShowLocationChoiceBox(
+					controller->uiShow().get());
+			},
+		});
+	} else if (container) {
+		container->add(
+			object_ptr<Ui::FlatLabel>(
+				container,
+				tr::lng_ptg_location_installer_info(tr::now),
+				st::ptgLocationCardDesc),
+			st::boxRowPadding);
+	}
+#endif // OS_MAC_STORE
+
+	builder.addDivider();
 }
 
 void BuildFakePasscodesContent(SectionBuilder &builder) {
@@ -291,6 +367,8 @@ void BuildFakePasscodesContent(SectionBuilder &builder) {
 	}
 
 	builder.addDividerText(tr::lng_enable_dod_cleaning_help());
+
+	BuildLocationSection(builder);
 }
 
 class FakePasscodes : public Section<FakePasscodes> {

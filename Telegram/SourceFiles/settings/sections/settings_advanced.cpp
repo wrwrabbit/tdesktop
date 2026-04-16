@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings.h"
 #include "core/file_utilities.h"
 #include "core/launcher.h"
+#include "core/location_choice_box.h"
 #include "core/update_checker.h"
 #include "data/data_auto_download.h"
 #include "export/export_manager.h"
@@ -44,6 +45,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_privacy_security.h"
 #include "storage/localstorage.h"
 #include "storage/storage_domain.h"
+#include "storage/storage_location_switch.h"
 #include "tray.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/boxes/single_choice_box.h"
@@ -71,6 +73,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #ifdef Q_OS_MAC
 #include "base/platform/mac/base_confirm_quit.h"
 #endif // Q_OS_MAC
+
+#include <QtCore/QDir>
+#include <QtCore/QFile>
 
 #ifndef TDESKTOP_DISABLE_SPELLCHECK
 #include "boxes/dictionaries_manager.h"
@@ -204,6 +209,93 @@ void BuildDataStorageSection(SectionBuilder &builder) {
 				*showDownloadPath = !checked;
 			}
 		}, askDownloadPath->lifetime());
+	}
+
+	builder.addSkip(st::settingsCheckboxesSkip);
+}
+
+void BuildStorageLocationSection(SectionBuilder &builder) {
+	const auto controller = builder.controller();
+	const auto container = builder.container();
+	const auto tdataLocation = Storage::CurrentTdataLocation();
+	const auto isPortable = (tdataLocation == Storage::TdataLocation::Portable);
+	const auto isInHome = (tdataLocation == Storage::TdataLocation::Home);
+
+	builder.addDivider();
+	builder.addSkip();
+	builder.addSubsectionTitle({
+		.id = u"advanced/storage_location"_q,
+		.title = tr::lng_settings_storage_section(),
+		.keywords = { u"storage"_q, u"portable"_q, u"location"_q, u"data"_q },
+	});
+
+	if (container) {
+		const auto statusText = isPortable
+			? tr::lng_settings_storage_current_portable(tr::now)
+			: isInHome
+				? tr::lng_settings_storage_current_appdata(tr::now)
+				: tr::lng_ptg_storage_current_custom(tr::now);
+		container->add(
+			object_ptr<Ui::FlatLabel>(
+				container,
+				statusText,
+				st::ptgLocationLabel),
+			st::boxRowPadding);
+	}
+
+	builder.addButton({
+		.id = u"advanced/storage_move_custom"_q,
+		.title = tr::lng_ptg_location_move_button(),
+		.icon = { &st::menuIconStorage },
+		.onClick = [=] {
+			Core::ShowLocationChoiceBox(controller->uiShow().get());
+		},
+		.keywords = { u"portable"_q, u"usb"_q, u"data"_q, u"location"_q },
+	});
+
+	if (!isInHome) {
+		builder.addButton({
+			.id = u"advanced/storage_move_to_appdata"_q,
+			.title = tr::lng_settings_storage_move_to_appdata(),
+			.icon = { &st::menuIconStorage },
+			.onClick = [=] {
+				const auto home = QDir(psAppDataPath()).absolutePath();
+				const auto targetExists = QFile::exists(home + '/' + cExeName())
+					|| QDir(home + u"/tdata"_q).exists();
+				const auto confirmed = [=] {
+#ifdef Q_OS_WIN
+					if (Core::TryCopyBinary(home)) {
+						Core::CopyCompanionFiles(home);
+						CreateStartMenuShortcut(home + '/' + cExeName());
+						Storage::ScheduleSwitchToHomeWrittenTo(home);
+						Core::RelaunchFrom(home + '/' + cExeName());
+					} else {
+						controller->show(Ui::MakeInformBox(
+							tr::lng_ptg_location_error_copy()));
+					}
+#else
+					if (Storage::ScheduleSwitchToHome()) {
+						Core::Restart();
+					} else {
+						controller->show(Ui::MakeInformBox(
+							tr::lng_settings_storage_move_failed(
+								lt_path,
+								rpl::single(home))));
+					}
+#endif
+				};
+				controller->show(Ui::MakeConfirmBox({
+					.text = targetExists
+						? tr::lng_ptg_location_confirm_overwrite()
+						: tr::lng_settings_storage_move_to_appdata_about(
+							lt_path,
+							rpl::single(home)),
+					.confirmed = confirmed,
+					.confirmText = tr::lng_settings_restart_now(),
+				}));
+			},
+			.keywords = { u"appdata"_q, u"system"_q, u"location"_q, u"data"_q },
+		});
 	}
 
 	builder.addSkip(st::settingsCheckboxesSkip);
@@ -1245,6 +1337,7 @@ const auto kMeta = BuildHelper({
 		BuildUpdateSection(builder, true);
 	}
 	BuildDataStorageSection(builder);
+	BuildStorageLocationSection(builder);
 	BuildAutoDownloadSection(builder);
 	BuildWindowTitleSection(builder);
 #if !defined Q_OS_WIN && !defined Q_OS_MAC

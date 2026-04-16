@@ -541,6 +541,10 @@ PRIVATE
     core/deep_links/deep_links_types.h
     core/file_utilities.cpp
     core/file_utilities.h
+    core/binary_location.cpp
+    core/binary_location.h
+    core/location_choice_box.cpp
+    core/location_choice_box.h
     core/launcher.cpp
     core/launcher.h
     core/local_url_handlers.cpp
@@ -1722,6 +1726,8 @@ PRIVATE
     settings/sections/settings_notifications.h
     settings/sections/settings_privacy_security.cpp
     settings/sections/settings_privacy_security.h
+    settings/settings_privacy_security_helpers.cpp
+    settings/settings_privacy_security_helpers.h
     settings/sections/settings_notifications_reactions.cpp
     settings/sections/settings_notifications_reactions.h
     settings/sections/settings_notifications_type.cpp
@@ -1773,6 +1779,8 @@ PRIVATE
     storage/storage_domain.h
     storage/storage_facade.cpp
     storage/storage_facade.h
+    storage/storage_location_switch.cpp
+    storage/storage_location_switch.h
     storage/storage_media_prepare.cpp
     storage/storage_media_prepare.h
     storage/storage_shared_media.cpp

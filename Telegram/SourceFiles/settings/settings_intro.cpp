@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_main.h"
 #include "settings/sections/settings_chat.h"
 #include "settings/settings_codes.h"
+#include "core/location_choice_box.h"
+#include "core/binary_location.h"
 #include "ui/basic_click_handlers.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/wrap/vertical_layout.h"
@@ -112,6 +114,22 @@ object_ptr<Ui::RpWidget> CreateIntroSettings(
 	)->addClickHandler([] {
 		OpenFaq(nullptr);
 	});
+
+#ifndef OS_MAC_STORE
+	if (!Core::BinaryIsInSystemAppFolder()) {
+		Ui::AddDivider(result);
+		Ui::AddSkip(result);
+		AddButtonWithIcon(
+			result,
+			tr::lng_ptg_location_move_button(),
+			st::settingsButtonNoIcon
+		)->addClickHandler([=] {
+			auto show = window->uiShow();
+			Core::ShowLocationChoiceBox(show.get());
+		});
+		Ui::AddSkip(result);
+	}
+#endif // OS_MAC_STORE
 
 	return result;
 }

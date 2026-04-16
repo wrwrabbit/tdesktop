@@ -56,8 +56,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_power_saving.h"
 #include "settings/sections/settings_premium.h"
 #include "settings/sections/settings_privacy_security.h"
+#include "settings/settings_privacy_security_helpers.h"
 #include "settings/settings_scale_preview.h"
 #include "storage/localstorage.h"
+#include "storage/storage_domain.h"
 #include "ui/basic_click_handlers.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/boxes/peer_qr_box.h"
@@ -352,12 +354,18 @@ void BuildSectionButtons(SectionBuilder &builder) {
 		.keywords = { u"alerts"_q, u"sounds"_q, u"badge"_q },
 	});
 
-	builder.addSectionButton({
+	if (const auto privacyBtn = builder.addSectionButton({
 		.title = tr::lng_settings_section_privacy(),
 		.targetSection = PrivacySecurityId(),
 		.icon = { &st::menuIconLock },
 		.keywords = { u"security"_q, u"passcode"_q, u"password"_q, u"2fa"_q },
-	});
+	})) {
+#if 0 // PTG_PRIVACY_UI
+		if (!session->domain().local().IsFake()) {
+			AttachPrivacyCountBadge(privacyBtn, session);
+		}
+#endif // PTG_PRIVACY_UI
+	}
 
 	builder.addSectionButton({
 		.title = tr::lng_settings_section_chat_settings(),

@@ -60,6 +60,30 @@ jobs:
           repo: cpartisans/tdesktop
           path: Windows
 
+      - name: Download Windows x64 installer artifact
+        uses: dawidd6/action-download-artifact@v2
+        if: github.event.inputs.releaseWindows == 'true'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: deploy_win.yml
+          workflow_conclusion: success
+          branch: master
+          repo: cpartisans/tdesktop
+          path: WindowsSetup
+          name: Telegram_x64_setup
+
+      - name: Download Windows x86 installer artifact
+        uses: dawidd6/action-download-artifact@v2
+        if: github.event.inputs.releaseWindows == 'true'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: deploy_win.yml
+          workflow_conclusion: success
+          branch: master
+          repo: cpartisans/tdesktop
+          path: WindowsSetup
+          name: Telegram_x64_x86_setup
+
       - name: Download Linux artifacts
         uses: dawidd6/action-download-artifact@v2
         if: github.event.inputs.releaseLinux == 'true'
@@ -139,6 +163,22 @@ jobs:
               repo: context.repo.repo,
               release_id: ${{ steps.create_release.outputs.id }},
               data: await fs.readFile('Windows/Telegram_x64_x86/tportable.latest.zip')
+            });
+            await github.rest.repos.uploadReleaseAsset({
+              name: 'tsetup-x64.latest.exe',
+              label: 'Windows 64 bit: Installer',
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ steps.create_release.outputs.id }},
+              data: await fs.readFile('WindowsSetup/tsetup-x64.latest.exe')
+            });
+            await github.rest.repos.uploadReleaseAsset({
+              name: 'tsetup.latest.exe',
+              label: 'Windows 32 bit: Installer',
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ steps.create_release.outputs.id }},
+              data: await fs.readFile('WindowsSetup/tsetup.latest.exe')
             });
 
       - name: Upload Linux Files

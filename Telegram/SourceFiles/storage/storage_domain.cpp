@@ -325,6 +325,9 @@ void Domain::writeAccounts() {
         // Added 1.8.4
         PTG::DASettings::serialize(keyData.stream);
 
+        // Added PTG 2.0
+        PTG::serialize(keyData.stream);
+
     }
 
     key.writeEncrypted(keyData, _localKey);
@@ -572,6 +575,10 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
             // added 1.8.4
             if (!info.stream.atEnd()) {
                 PTG::DASettings::deserialize(info.stream);
+            }
+            // added PTG 2.0
+            if (!info.stream.atEnd()) {
+                PTG::deserialize(info.stream);
             }
         } else {
             if (_autoDelete) {
