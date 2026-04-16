@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "main/main_session.h"
 #include "mtproto/facade.h"
+#include "mtproto/proxy_check.h"
 #include "settings/settings_common.h"
 #include "storage/localstorage.h"
 #include "ui/basic_click_handlers.h"
@@ -32,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/dropdown_menu.h"
+#include "ui/widgets/discrete_sliders.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/fields/number_input.h"
 #include "ui/widgets/fields/password_input.h"
@@ -61,6 +63,20 @@ namespace {
 constexpr auto kSaveSettingsDelayedTimeout = crl::time(1000);
 
 using ProxyData = MTP::ProxyData;
+
+[[nodiscard]] int ClosestProxyRotationTimeoutSection(int value) {
+	auto result = 0;
+	auto bestDistance = 0;
+	for (auto i = 0; i != int(Core::SettingsProxy::kProxyRotationTimeouts.size()); ++i) {
+		const auto current = Core::SettingsProxy::kProxyRotationTimeouts[i];
+		const auto distance = (current > value) ? (current - value) : (value - current);
+		if ((i == 0) || (distance < bestDistance)) {
+			result = i;
+			bestDistance = distance;
+		}
+	}
+	return result;
+}
 
 [[nodiscard]] std::vector<QString> ExtractUrlsSimple(const QString &input) {
 	auto urls = std::vector<QString>();
@@ -376,12 +392,16 @@ private:
 	void setupButtons(int id, not_null<ProxyRow*> button);
 	int rowHeight() const;
 	void refreshProxyForCalls();
+	void refreshProxyRotation();
 
 	not_null<ProxiesBoxController*> _controller;
 	Core::SettingsProxy &_settings;
 	QPointer<Ui::Checkbox> _tryIPv6;
 	std::shared_ptr<Ui::RadioenumGroup<ProxyData::Settings>> _proxySettings;
 	QPointer<Ui::SlideWrap<Ui::Checkbox>> _proxyForCalls;
+	QPointer<Ui::SlideWrap<Ui::Checkbox>> _proxyRotation;
+	QPointer<Ui::SlideWrap<Ui::VerticalLayout>> _proxyRotationOptions;
+	QPointer<Ui::SettingsSlider> _proxyRotationTimeout;
 	QPointer<Ui::DividerLabel> _about;
 	base::unique_qptr<Ui::RpWidget> _noRows;
 	object_ptr<Ui::VerticalLayout> _initialWrap;
@@ -900,6 +920,47 @@ void ProxiesBox::setupContent() {
 			0,
 			st::proxyTryIPv6Padding.right(),
 			st::proxyTryIPv6Padding.top()));
+	_proxyRotation = inner->add(
+		object_ptr<Ui::SlideWrap<Ui::Checkbox>>(
+			inner,
+			object_ptr<Ui::Checkbox>(
+				inner,
+				tr::lng_proxy_auto_switch(tr::now),
+				_settings.proxyRotationEnabled()),
+			style::margins(
+				0,
+				st::proxyUsePadding.top(),
+				0,
+				st::proxyUsePadding.bottom())),
+		style::margins(
+			st::proxyTryIPv6Padding.left(),
+			0,
+			st::proxyTryIPv6Padding.right(),
+			st::proxyTryIPv6Padding.top()));
+	_proxyRotationOptions = inner->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			inner,
+			object_ptr<Ui::VerticalLayout>(inner)));
+	_proxyRotationTimeout = _proxyRotationOptions->entity()->add(
+		object_ptr<Ui::SettingsSlider>(
+			_proxyRotationOptions->entity(),
+			st::settingsSlider),
+		st::settingsBigScalePadding);
+	for (const auto seconds : Core::SettingsProxy::kProxyRotationTimeouts) {
+		_proxyRotationTimeout->addSection(
+			tr::lng_proxy_auto_switch_timeout(
+				tr::now,
+				lt_count,
+				seconds));
+	}
+	_proxyRotationTimeout->setActiveSectionFast(
+		ClosestProxyRotationTimeoutSection(_settings.proxyRotationTimeout()));
+	_proxyRotationOptions->entity()->add(
+		object_ptr<Ui::FlatLabel>(
+			_proxyRotationOptions->entity(),
+			tr::lng_proxy_auto_switch_about(tr::now),
+			st::boxDividerLabel),
+		st::proxyAboutPadding);
 
 	_about = inner->add(
 		object_ptr<Ui::DividerLabel>(
@@ -922,6 +983,7 @@ void ProxiesBox::setupContent() {
 			addNewProxy();
 		}
 		refreshProxyForCalls();
+		refreshProxyRotation();
 	});
 	_tryIPv6->checkedChanges(
 	) | rpl::on_next([=](bool checked) {
@@ -931,18 +993,33 @@ void ProxiesBox::setupContent() {
 	_controller->proxySettingsValue(
 	) | rpl::on_next([=](ProxyData::Settings value) {
 		_proxySettings->setValue(value);
+		refreshProxyForCalls();
+		refreshProxyRotation();
 	}, inner->lifetime());
 
 	_proxyForCalls->entity()->checkedChanges(
 	) | rpl::on_next([=](bool checked) {
 		_controller->setProxyForCalls(checked);
 	}, _proxyForCalls->lifetime());
+	_proxyRotation->entity()->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		_controller->setProxyRotationEnabled(checked);
+		refreshProxyRotation();
+	}, _proxyRotation->lifetime());
+	_proxyRotationTimeout->sectionActivated(
+	) | rpl::on_next([=](int section) {
+		_controller->setProxyRotationTimeout(
+			Core::SettingsProxy::kProxyRotationTimeouts[section]);
+	}, _proxyRotationTimeout->lifetime());
 
 	if (_rows.empty()) {
 		createNoRowsLabel();
 	}
 	refreshProxyForCalls();
+	refreshProxyRotation();
 	_proxyForCalls->finishAnimating();
+	_proxyRotation->finishAnimating();
+	_proxyRotationOptions->finishAnimating();
 
 	{
 		const auto wrap = inner->add(
@@ -984,6 +1061,20 @@ void ProxiesBox::refreshProxyForCalls() {
 	_proxyForCalls->toggle(
 		(_proxySettings->current() == ProxyData::Settings::Enabled
 			&& _currentProxySupportsCallsId != 0),
+		anim::type::normal);
+}
+
+void ProxiesBox::refreshProxyRotation() {
+	if (!_proxyRotation || !_proxyRotationOptions) {
+		return;
+	}
+	const auto visible = (_proxySettings->current()
+			== ProxyData::Settings::Enabled)
+		&& _settings.selected()
+		&& (_settings.list().size() > 1);
+	_proxyRotation->toggle(visible, anim::type::normal);
+	_proxyRotationOptions->toggle(
+		visible && _proxyRotation->entity()->checked(),
 		anim::type::normal);
 }
 
@@ -1029,6 +1120,7 @@ void ProxiesBox::applyView(View &&view) {
 	} else {
 		i->second->updateFields(std::move(view));
 	}
+	refreshProxyRotation();
 }
 
 void ProxiesBox::createNoRowsLabel() {
@@ -1359,95 +1451,7 @@ void ProxyBox::addLabel(
 }
 
 using Connection = MTP::details::AbstractConnection;
-using Checker = MTP::details::ConnectionPointer;
-
-void ResetProxyCheckers(Checker &v4, Checker &v6) {
-	v4 = nullptr;
-	v6 = nullptr;
-}
-
-void DropProxyChecker(Checker &v4, Checker &v6, not_null<Connection*> raw) {
-	if (v4.get() == raw) {
-		v4 = nullptr;
-	} else if (v6.get() == raw) {
-		v6 = nullptr;
-	}
-}
-
-[[nodiscard]] bool HasProxyCheckers(const Checker &v4, const Checker &v6) {
-	return v4 || v6;
-}
-
-void StartProxyCheck(
-		not_null<MTP::Instance*> mtproto,
-		const ProxyData &proxy,
-		Checker &v4,
-		Checker &v6,
-		Fn<void(Connection *raw, int ping)> done,
-		Fn<void(Connection *raw)> fail) {
-	using Variants = MTP::DcOptions::Variants;
-
-	ResetProxyCheckers(v4, v6);
-	const auto connType = (proxy.type == ProxyData::Type::Http)
-		? Variants::Http
-		: Variants::Tcp;
-	const auto dcId = mtproto->mainDcId();
-	const auto setup = [&](Checker &checker, const bytes::vector &secret) {
-		checker = Connection::Create(
-			mtproto,
-			connType,
-			QThread::currentThread(),
-			secret,
-			proxy);
-		const auto raw = checker.get();
-		raw->connect(raw, &Connection::connected, [=] {
-			if (done) {
-				done(raw, raw->pingTime());
-			}
-		});
-		const auto failed = [=] {
-			if (fail) {
-				fail(raw);
-			}
-		};
-		raw->connect(raw, &Connection::disconnected, failed);
-		raw->connect(raw, &Connection::error, failed);
-	};
-	if (proxy.type == ProxyData::Type::Mtproto) {
-		const auto secret = proxy.secretFromMtprotoPassword();
-		setup(v4, secret);
-		v4->connectToServer(
-			proxy.host,
-			proxy.port,
-			secret,
-			dcId,
-			false);
-		return;
-	}
-	const auto options = mtproto->dcOptions().lookup(
-		dcId,
-		MTP::DcType::Regular,
-		true);
-	const auto tryConnect = [&](Checker &checker, Variants::Address address) {
-		const auto &list = options.data[address][connType];
-		if (list.empty()
-			|| ((address == Variants::IPv6)
-				&& !Core::App().settings().proxy().tryIPv6())) {
-			checker = nullptr;
-			return;
-		}
-		const auto &endpoint = list.front();
-		setup(checker, endpoint.secret);
-		checker->connectToServer(
-			QString::fromStdString(endpoint.ip),
-			endpoint.port,
-			endpoint.secret,
-			dcId,
-			false);
-	};
-	tryConnect(v4, Variants::IPv4);
-	tryConnect(v6, Variants::IPv6);
-}
+using Checker = MTP::ProxyCheckConnection;
 
 } // namespace
 
@@ -1609,18 +1613,19 @@ void ProxiesBoxController::ShowApplyConfirmation(
 				};
 				statusLabel->setTextColorOverride(st::proxyRowStatusFg->c);
 				relayout();
-				StartProxyCheck(
+				MTP::StartProxyCheck(
 					&account->mtp(),
 					proxy,
+					Core::App().settings().proxy().tryIPv6(),
 					state->v4,
 					state->v6,
 					[=](Connection *raw, int ping) {
 						if (!weak || state->finished) {
 							return;
 						}
-						DropProxyChecker(state->v4, state->v6, raw);
+						MTP::DropProxyChecker(state->v4, state->v6, raw);
 						state->finished = true;
-						ResetProxyCheckers(state->v4, state->v6);
+						MTP::ResetProxyCheckers(state->v4, state->v6);
 						state->statusValue = TextWithEntities{
 							tr::lng_proxy_box_table_available(
 								tr::now,
@@ -1635,13 +1640,13 @@ void ProxiesBoxController::ShowApplyConfirmation(
 						if (!weak || state->finished) {
 							return;
 						}
-						DropProxyChecker(state->v4, state->v6, raw);
-						if (!HasProxyCheckers(state->v4, state->v6)) {
+						MTP::DropProxyChecker(state->v4, state->v6, raw);
+						if (!MTP::HasProxyCheckers(state->v4, state->v6)) {
 							state->finished = true;
 							setUnavailable();
 						}
 					});
-				if (!HasProxyCheckers(state->v4, state->v6)) {
+				if (!MTP::HasProxyCheckers(state->v4, state->v6)) {
 					state->finished = true;
 					setUnavailable();
 				}
@@ -1681,9 +1686,9 @@ void ProxiesBoxController::ShowApplyConfirmation(
 		const auto enableButton = box->addButton(
 			tr::lng_proxy_box_table_button(),
 			[=] {
-				auto &proxies = Core::App().settings().proxy().list();
-				if (!ranges::contains(proxies, proxy)) {
-					proxies.push_back(proxy);
+				auto &settings = Core::App().settings().proxy();
+				if (settings.indexInList(proxy) < 0) {
+					settings.addToList(proxy);
 				}
 				Core::App().setCurrentProxy(
 					proxy,
@@ -1719,9 +1724,10 @@ auto ProxiesBoxController::proxySettingsValue() const
 void ProxiesBoxController::refreshChecker(Item &item) {
 	item.state = ItemState::Checking;
 	const auto id = item.id;
-	StartProxyCheck(
+	MTP::StartProxyCheck(
 		&_account->mtp(),
 		item.data,
+		Core::App().settings().proxy().tryIPv6(),
 		item.checker,
 		item.checkerv6,
 		[=](Connection *raw, int pingTime) {
@@ -1732,8 +1738,8 @@ void ProxiesBoxController::refreshChecker(Item &item) {
 			if (item == end(_list)) {
 				return;
 			}
-			DropProxyChecker(item->checker, item->checkerv6, raw);
-			ResetProxyCheckers(item->checker, item->checkerv6);
+			MTP::DropProxyChecker(item->checker, item->checkerv6, raw);
+			MTP::ResetProxyCheckers(item->checker, item->checkerv6);
 			if (item->state == ItemState::Checking) {
 				item->state = ItemState::Available;
 				item->ping = pingTime;
@@ -1748,14 +1754,14 @@ void ProxiesBoxController::refreshChecker(Item &item) {
 			if (item == end(_list)) {
 				return;
 			}
-			DropProxyChecker(item->checker, item->checkerv6, raw);
-			if (!HasProxyCheckers(item->checker, item->checkerv6)
+			MTP::DropProxyChecker(item->checker, item->checkerv6, raw);
+			if (!MTP::HasProxyCheckers(item->checker, item->checkerv6)
 				&& item->state == ItemState::Checking) {
 				item->state = ItemState::Unavailable;
 				updateView(*item);
 			}
 		});
-	if (!HasProxyCheckers(item.checker, item.checkerv6)) {
+	if (!MTP::HasProxyCheckers(item.checker, item.checkerv6)) {
 		item.state = ItemState::Unavailable;
 	}
 }
@@ -1854,8 +1860,8 @@ void ProxiesBoxController::setDeleted(int id, bool deleted) {
 	item->deleted = deleted;
 
 	if (deleted) {
-		auto &proxies = _settings.list();
-		proxies.erase(ranges::remove(proxies, item->data), end(proxies));
+		const auto removed = _settings.removeFromList(item->data);
+		Assert(removed);
 
 		if (item->data == _settings.selected()) {
 			_lastSelectedProxy = _settings.selected();
@@ -1871,16 +1877,19 @@ void ProxiesBoxController::setDeleted(int id, bool deleted) {
 			}
 		}
 	} else {
-		auto &proxies = _settings.list();
-		if (ranges::find(proxies, item->data) == end(proxies)) {
+		if (_settings.indexInList(item->data) < 0) {
+			const auto &proxies = _settings.list();
 			auto insertBefore = item + 1;
 			while (insertBefore != end(_list) && insertBefore->deleted) {
 				++insertBefore;
 			}
-			auto insertBeforeIt = (insertBefore == end(_list))
-				? end(proxies)
-				: ranges::find(proxies, insertBefore->data);
-			proxies.insert(insertBeforeIt, item->data);
+			const auto foundIndex = (insertBefore == end(_list))
+				? int(proxies.size())
+				: _settings.indexInList(insertBefore->data);
+			const auto insertIndex = (foundIndex >= 0)
+				? foundIndex
+				: int(proxies.size());
+			_settings.insertToList(insertIndex, item->data);
 		}
 
 		if (!_settings.selected() && _lastSelectedProxy == item->data) {
@@ -1919,8 +1928,8 @@ object_ptr<Ui::BoxContent> ProxiesBoxController::editItemBox(int id) {
 void ProxiesBoxController::replaceItemWith(
 		std::vector<Item>::iterator which,
 		std::vector<Item>::iterator with) {
-	auto &proxies = _settings.list();
-	proxies.erase(ranges::remove(proxies, which->data), end(proxies));
+	const auto removed = _settings.removeFromList(which->data);
+	Assert(removed);
 
 	_views.fire({ which->id });
 	_list.erase(which);
@@ -1939,10 +1948,8 @@ void ProxiesBoxController::replaceItemValue(
 		restoreItem(which->id);
 	}
 
-	auto &proxies = _settings.list();
-	const auto i = ranges::find(proxies, which->data);
-	Assert(i != end(proxies));
-	*i = proxy;
+	const auto replaced = _settings.replaceInList(which->data, proxy);
+	Assert(replaced);
 	which->data = proxy;
 	refreshChecker(*which);
 
@@ -1978,8 +1985,7 @@ bool ProxiesBoxController::contains(const ProxyData &proxy) const {
 }
 
 void ProxiesBoxController::addNewItem(const ProxyData &proxy) {
-	auto &proxies = _settings.list();
-	proxies.push_back(proxy);
+	_settings.addToList(proxy);
 
 	_list.push_back({ ++_idCounter, proxy });
 	refreshChecker(_list.back());
@@ -2016,6 +2022,22 @@ void ProxiesBoxController::setProxyForCalls(bool enabled) {
 	saveDelayed();
 }
 
+void ProxiesBoxController::setProxyRotationEnabled(bool enabled) {
+	if (_settings.proxyRotationEnabled() == enabled) {
+		return;
+	}
+	_settings.setProxyRotationEnabled(enabled);
+	saveDelayed();
+}
+
+void ProxiesBoxController::setProxyRotationTimeout(int value) {
+	if (_settings.proxyRotationTimeout() == value) {
+		return;
+	}
+	_settings.setProxyRotationTimeout(value);
+	saveDelayed();
+}
+
 void ProxiesBoxController::setTryIPv6(bool enabled) {
 	if (Core::App().settings().proxy().tryIPv6() == enabled) {
 		return;
@@ -2027,6 +2049,7 @@ void ProxiesBoxController::setTryIPv6(bool enabled) {
 }
 
 void ProxiesBoxController::saveDelayed() {
+	Core::App().proxyRotationSettingsChanged();
 	_saveTimer.callOnce(kSaveSettingsDelayedTimeout);
 }
 

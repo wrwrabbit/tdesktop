@@ -503,6 +503,8 @@ PRIVATE
     chat_helpers/ttl_media_layer_widget.h
     core/application.cpp
     core/application.h
+    core/proxy_rotation_manager.cpp
+    core/proxy_rotation_manager.h
     core/cached_webview_availability.h
     core/bank_card_click_handler.cpp
     core/bank_card_click_handler.h
@@ -1436,6 +1438,8 @@ PRIVATE
     mtproto/facade.h
     mtproto/mtp_instance.cpp
     mtproto/mtp_instance.h
+    mtproto/proxy_check.cpp
+    mtproto/proxy_check.h
     mtproto/sender.h
     mtproto/session.cpp
     mtproto/session.h
