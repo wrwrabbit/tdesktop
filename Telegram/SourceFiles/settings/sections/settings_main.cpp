@@ -354,18 +354,25 @@ void BuildSectionButtons(SectionBuilder &builder) {
 		.keywords = { u"alerts"_q, u"sounds"_q, u"badge"_q },
 	});
 
+#if 0 // PTG_PRIVACY_UI
 	if (const auto privacyBtn = builder.addSectionButton({
 		.title = tr::lng_settings_section_privacy(),
 		.targetSection = PrivacySecurityId(),
 		.icon = { &st::menuIconLock },
 		.keywords = { u"security"_q, u"passcode"_q, u"password"_q, u"2fa"_q },
 	})) {
-#if 0 // PTG_PRIVACY_UI
 		if (!session->domain().local().IsFake()) {
 			AttachPrivacyCountBadge(privacyBtn, session);
 		}
-#endif // PTG_PRIVACY_UI
 	}
+#else
+	builder.addSectionButton({
+		.title = tr::lng_settings_section_privacy(),
+		.targetSection = PrivacySecurityId(),
+		.icon = { &st::menuIconLock },
+		.keywords = { u"security"_q, u"passcode"_q, u"password"_q, u"2fa"_q },
+	});
+#endif // PTG_PRIVACY_UI
 
 	builder.addSectionButton({
 		.title = tr::lng_settings_section_chat_settings(),
