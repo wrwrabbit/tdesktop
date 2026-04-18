@@ -2389,3 +2389,5 @@ if (LINUX AND DESKTOP_APP_USE_PACKAGED)
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.service" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/dbus-1/services")
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo")
 endif()
+
+include(cmake/ptg_diagnostics.cmake)
