@@ -1,5 +1,24 @@
 if (DESKTOP_APP_PRINT_LINK_FLAGS)
     include(CMakePrintHelpers)
+
+    foreach(_ptg_diag_var
+        CMAKE_INTERPROCEDURAL_OPTIMIZATION
+        DESKTOP_APP_ENABLE_LTO
+        DESKTOP_APP_SPECIAL_TARGET
+        CMAKE_C_COMPILE_OPTIONS_IPO
+        CMAKE_CXX_COMPILE_OPTIONS_IPO
+        CMAKE_EXE_LINKER_FLAGS_IPO
+        CMAKE_AR
+        CMAKE_RANLIB
+        CMAKE_NM
+        CMAKE_LINKER
+    )
+        if(NOT DEFINED ${_ptg_diag_var})
+            set(${_ptg_diag_var} "")
+        endif()
+    endforeach()
+    unset(_ptg_diag_var)
+
     message(STATUS "")
     message(STATUS "=== LINKER FLAG DIAGNOSTIC ===")
     message(STATUS "")
