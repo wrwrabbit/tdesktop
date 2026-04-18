@@ -55,7 +55,7 @@ jobs:
           curl -sSL https://install.python-poetry.org | python3 -
           cd Telegram/build/docker/centos_env
           poetry install
-          DOCKERFILE=$(DEBUG= LTO= poetry run gen_dockerfile)
+          DOCKERFILE=$(DEBUG= LTO=1 JOBS=2 poetry run gen_dockerfile)
           echo "$DOCKERFILE" > Dockerfile
 
       - name: Free up some disk space.
@@ -70,8 +70,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/.buildx-cache
-          key: ${{ runner.OS }}-libs-${{ hashFiles('Telegram/build/docker/centos_env/**') }}
-          restore-keys: ${{ runner.OS }}-libs-
+          key: ${{ runner.OS }}-libs-release-${{ hashFiles('Telegram/build/docker/centos_env/**') }}
+          restore-keys: ${{ runner.OS }}-libs-release-
 
       - name: Libraries.
         uses: docker/build-push-action@v6
@@ -88,6 +88,7 @@ jobs:
           mv ${{ runner.temp }}/.buildx-cache{-new,}
 
       - name: Telegram Desktop build.
+        if: env.ONLY_CACHE == 'false'
         run: |
           ARTIFACT_PREFIX=""
           
@@ -104,10 +105,6 @@ jobs:
           else
             echo "ARTIFACT_NAME=${ARTIFACT_PREFIX}Telegram" >> $GITHUB_ENV
           fi
-          
-          #          -D CMAKE_C_FLAGS="-Werror" 
-          #          -D CMAKE_CXX_FLAGS="-Werror" 
-          # not used in actual Release build
 
           docker run --rm \
           -u $(id -u) \
@@ -116,9 +113,7 @@ jobs:
           $IMAGE_TAG \
           /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
           -D CMAKE_CONFIGURATION_TYPES=Release \
-          -D CMAKE_C_FLAGS="-O0" \
-          -D CMAKE_CXX_FLAGS="-O0" \
-          -D CMAKE_EXE_LINKER_FLAGS="-s" \
+          -D CMAKE_EXE_LINKER_FLAGS_RELEASE="-s" \
           -D CMAKE_COMPILE_WARNING_AS_ERROR=OFF \
           -D TDESKTOP_API_TEST=OFF \
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
@@ -129,6 +124,7 @@ jobs:
           $DEFINE
 
       - name: Check.
+        if: env.ONLY_CACHE == 'false'
         run: |
           filePath="out/Release/Telegram"
           if test -f "$filePath"; then
