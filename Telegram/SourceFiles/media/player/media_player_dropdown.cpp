@@ -719,9 +719,9 @@ SpeedController::SpeedController(
 	Fn<void(bool)> menuOverCallback,
 	Fn<float64(bool lastNonDefault)> value,
 	Fn<void(float64)> change,
-	std::vector<int> qualities,
+	std::vector<VideoQuality> qualities,
 	Fn<VideoQuality()> quality,
-	Fn<void(int)> changeQuality)
+	Fn<void(VideoQuality)> changeQuality)
 : WithDropdownController(
 	button,
 	menuParent,
@@ -802,7 +802,7 @@ void SpeedController::save() {
 
 void SpeedController::setQuality(VideoQuality quality) {
 	_quality = quality;
-	_changeQuality(quality.manual ? quality.height : 0);
+	_changeQuality(quality);
 }
 
 void SpeedController::fillMenu(not_null<Ui::DropdownMenu*> menu) {
@@ -824,15 +824,16 @@ void SpeedController::fillMenu(not_null<Ui::DropdownMenu*> menu) {
 		raw->addSeparator(&st.dropdown.menu.separator);
 	}
 
-	const auto add = [&](int quality) {
+	const auto add = [&](VideoQuality quality) {
 		const auto automatic = tr::lng_mediaview_quality_auto(tr::now);
-		const auto offset = Media::kVideoQualityOriginalOffset;
-		// Quality is height-based, except for Original which uses offset
-		const auto text = !quality
+		const auto text = (!quality.height && !quality.original)
 			? automatic
-			: (quality >= offset)
-			? u"Original (%1p)"_q.arg(std::clamp(quality - offset, 0, 4320))
-			: u"%1p"_q.arg(quality);
+			: quality.original
+			? tr::lng_mediaview_quality_original(
+				tr::now,
+				lt_quality,
+				QString::number(quality.height))
+			: u"%1p"_q.arg(quality.height);
 		auto action = base::make_unique_q<Ui::Menu::Action>(
 			raw,
 			st.qualityMenu,
@@ -861,17 +862,13 @@ void SpeedController::fillMenu(not_null<Ui::DropdownMenu*> menu) {
 		_quality.value(
 		) | rpl::on_next([=](VideoQuality now) {
 			const auto chosen = now.manual
-				? (now.height == quality)
-				: !quality;
+				? (now == quality)
+				: (!quality.height && !quality.original);
 			rawAction->action()->setEnabled(!chosen);
-			if (!quality) {
-				const auto offset = Media::kVideoQualityOriginalOffset;
-				const auto displayHeight = (now.height >= offset)
-					? std::clamp(int(now.height - offset), 0, 4320)
-					: now.height;
+			if (!quality.height && !quality.original) {
 				const auto suffix = now.manual
 					? QString()
-					: u"\t%1p"_q.arg(displayHeight);
+					: u"\t%1p"_q.arg(now.height);
 				rawAction->action()->setText(automatic + suffix);
 			}
 			check->setVisible(chosen);
@@ -879,8 +876,8 @@ void SpeedController::fillMenu(not_null<Ui::DropdownMenu*> menu) {
 		menu->addAction(std::move(action));
 	};
 
-	add(0);
-	for (const auto quality : _qualities) {
+	add(VideoQuality());
+	for (const auto &quality : _qualities) {
 		add(quality);
 	}
 }

@@ -736,7 +736,6 @@ void VideoTrackObject::callReady() {
 		.size = FFmpeg::TransposeSizeByRotation(
 			FFmpeg::CorrectByAspect(frameSize, _stream.aspect),
 			_stream.rotation),
-		// realSize captures physical resolution before SAR correction
 		.realSize = FFmpeg::TransposeSizeByRotation(
 			frameSize,
 			_stream.rotation),

@@ -1246,7 +1246,6 @@ QSize OverlayWidget::videoSize() const {
 	Expects(videoShown());
 
 	const auto use = (_document && _chosenQuality != _document)
-		// Use chosen quality dimensions instead of original
 		? _chosenQuality->dimensions
 		: _streamed->instance.info().video.size;
 	return flipSizeByRotation(use);
@@ -4715,9 +4714,11 @@ void OverlayWidget::initStreamingThumbnail() {
 void OverlayWidget::streamingReady(Streaming::Information &&info) {
 	markStreamedReady();
 	if (videoShown()) {
-		if (_document && _streamed && _streamed->ready) {
-			const auto targetDocument = _chosenQuality ? _chosenQuality : _document;
-			if (const auto video = targetDocument->video()) {
+		if (_document
+			&& _streamed
+			&& _streamed->ready
+			&& (!_chosenQuality || _chosenQuality == _document)) {
+			if (const auto video = _document->video()) {
 				video->realVideoSize = info.video.realSize;
 			}
 		}
@@ -5239,7 +5240,7 @@ float64 OverlayWidget::playbackControlsCurrentSpeed(bool lastNonDefault) {
 	return Core::App().settings().videoPlaybackSpeed(lastNonDefault);
 }
 
-std::vector<int> OverlayWidget::playbackControlsQualities() {
+std::vector<VideoQuality> OverlayWidget::playbackControlsQualities() {
 	if (!_document) {
 		return {};
 	}
@@ -5247,17 +5248,16 @@ std::vector<int> OverlayWidget::playbackControlsQualities() {
 	if (list.empty()) {
 		return {};
 	}
-	auto result = std::vector<int>();
+	auto result = std::vector<VideoQuality>();
 	result.reserve(list.size());
-	auto seen = std::vector<int>();
 	for (const auto &quality : list) {
-		const auto res = quality->resolveVideoQuality();
-		const auto value = (quality == _document)
-			? (res + Media::kVideoQualityOriginalOffset)
-			: res;
-		if (!ranges::contains(seen, value)) {
+		const auto value = VideoQuality{
+			.manual = 1u,
+			.height = uint32(quality->resolveVideoQuality()),
+			.original = (quality == _document) ? 1u : 0u,
+		};
+		if (!ranges::contains(result, value)) {
 			result.push_back(value);
-			seen.push_back(value);
 		}
 	}
 	return result;
@@ -5267,16 +5267,18 @@ VideoQuality OverlayWidget::playbackControlsCurrentQuality() {
 	if (!_chosenQuality) {
 		return _quality;
 	}
-	auto height = uint32(_chosenQuality->resolveVideoQuality());
-	if (_chosenQuality == _document) {
-		height += Media::kVideoQualityOriginalOffset;
-	}
-	return { .manual = _quality.manual, .height = height };
+	return {
+		.manual = _quality.manual,
+		.height = uint32(_chosenQuality->resolveVideoQuality()),
+		.original = (_chosenQuality == _document) ? 1u : 0u,
+	};
 }
-void OverlayWidget::playbackControlsQualityChanged(int quality) {
+
+void OverlayWidget::playbackControlsQualityChanged(VideoQuality quality) {
 	applyVideoQuality({
-		.manual = (quality > 0),
-		.height = quality ? uint32(quality) : _quality.height,
+		.manual = uint32(quality.height ? 1 : 0),
+		.height = quality.height,
+		.original = quality.original,
 	});
 }
 

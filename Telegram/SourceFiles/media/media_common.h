@@ -27,7 +27,8 @@ enum class OrderMode {
 
 struct VideoQuality {
 	uint32 manual : 1 = 0;
-	uint32 height : 31 = 0;
+	uint32 height : 30 = 0;
+	uint32 original : 1 = 0;
 
 	friend inline constexpr auto operator<=>(
 		VideoQuality,
@@ -40,8 +41,6 @@ struct VideoQuality {
 inline constexpr auto kSpeedMin = 0.5;
 inline constexpr auto kSpeedMax = 2.5;
 inline constexpr auto kSpedUpDefault = 1.7;
-
-inline constexpr auto kVideoQualityOriginalOffset = 1000000;
 
 [[nodiscard]] inline bool EqualSpeeds(float64 a, float64 b) {
 	return int(base::SafeRound(a * 10.)) == int(base::SafeRound(b * 10.));

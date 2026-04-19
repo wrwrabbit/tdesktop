@@ -88,6 +88,16 @@ void UpdateStickerSetIdentifier(
 	});
 }
 
+[[nodiscard]] int ResolveAttributeVsTranscodeQuality(
+		int attributesQuality,
+		int transcodeMax) {
+	return (transcodeMax > 0
+		&& (attributesQuality < transcodeMax
+			|| attributesQuality > transcodeMax * 1.5))
+		? transcodeMax
+		: attributesQuality;
+}
+
 } // namespace
 
 QString FileNameUnsafe(
@@ -544,8 +554,6 @@ void DocumentData::setVideoQualities(
 		return;
 	}
 	const auto good = [&](not_null<DocumentData*> document) {
-		// Transcodes in alt_documents are always streamable,
-		// even if the supports_streaming flag is missing
 		return document->isVideoFile()
 			&& !document->dimensions.isEmpty()
 			&& !document->inappPlaybackFailed()
@@ -590,14 +598,9 @@ void DocumentData::setVideoQualities(
 		const auto attributesQuality = attributesSize.isEmpty()
 			? 0
 			: std::min(attributesSize.width(), attributesSize.height());
-
-		// Heuristic: Trust attributes resolution unless it blatantly
-		// contradicts server-side transcodes (>1.5x delta)
-		auto mine = (transcodeMax > 0
-			&& (attributesQuality < transcodeMax
-				|| attributesQuality > transcodeMax * 1.5))
-			? transcodeMax
-			: attributesQuality;
+		auto mine = ResolveAttributeVsTranscodeQuality(
+			attributesQuality,
+			transcodeMax);
 		if (mine) {
 			qualities.insert(begin(qualities), this);
 		}
@@ -608,7 +611,6 @@ void DocumentData::setVideoQualities(
 int DocumentData::resolveVideoQuality() const {
 	if (const auto data = video()) {
 		if (!data->realVideoSize.isEmpty()) {
-			// Always trust FFmpeg-parsed physical resolution
 			const auto size = data->realVideoSize;
 			return std::min(size.width(), size.height());
 		}
@@ -627,12 +629,9 @@ int DocumentData::resolveVideoQuality() const {
 				}
 			}
 			if (transcodeMax > 0) {
-				// Trust transcodes if attributes appear fake
-				if (attributesQuality < transcodeMax
-					|| attributesQuality > transcodeMax * 1.5) {
-					return transcodeMax;
-				}
-				return attributesQuality;
+				return ResolveAttributeVsTranscodeQuality(
+					attributesQuality,
+					transcodeMax);
 			}
 		}
 	}
@@ -661,7 +660,7 @@ not_null<DocumentData*> DocumentData::chooseQuality(
 		return this;
 	}
 	const auto height = int(request.height);
-	if (height >= Media::kVideoQualityOriginalOffset) {
+	if (request.original) {
 		return this;
 	}
 
@@ -672,8 +671,6 @@ not_null<DocumentData*> DocumentData::chooseQuality(
 	for (const auto &quality : list) {
 		const auto qres = quality->resolveVideoQuality();
 		const auto abs = std::abs(height - qres);
-		// Prefer Original if it fits target resolution best,
-		// falling back to transcode only on exact matches
 		if (!closest
 			|| abs < closestAbs
 			|| (abs == closestAbs && (quality->size < closestSize
