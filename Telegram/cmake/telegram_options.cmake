@@ -51,3 +51,7 @@ endif()
 if (DESKTOP_APP_SPECIAL_TARGET)
     target_compile_definitions(Telegram PRIVATE TDESKTOP_ALLOW_CLOSED_ALPHA)
 endif()
+
+if (UNIX AND NOT APPLE AND CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+    target_link_options(Telegram PRIVATE -fuse-ld=lld)
+endif()
