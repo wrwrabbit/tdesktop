@@ -4217,6 +4217,8 @@ int Message::bubbleTextualWidth() const {
 					}
 				}
 				_bubbleTextualWidthCache = right;
+				[[maybe_unused]] const auto ensureRightCache
+					= textHeightFor(bubbleTextWidth(right));
 			}
 		}
 	}
