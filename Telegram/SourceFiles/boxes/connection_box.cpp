@@ -78,22 +78,41 @@ using ProxyData = MTP::ProxyData;
 	return result;
 }
 
-[[nodiscard]] std::vector<QString> ExtractUrlsSimple(const QString &input) {
+[[nodiscard]] std::vector<QString> ExtractLinkCandidates(const QString &input) {
 	auto urls = std::vector<QString>();
-	static auto urlRegex = QRegularExpression(R"((https?:\/\/[^\s]+))");
+	static const auto urlRegex = QRegularExpression(
+		R"((?:https?:\/\/[^\s]+|tg:\/\/[^\s]+|(?:www\.)?(?:t\.me|telegram\.me|telegram\.dog)\/[^\s]+))",
+		QRegularExpression::CaseInsensitiveOption);
 
 	auto it = urlRegex.globalMatch(input);
 	while (it.hasNext()) {
-		urls.push_back(it.next().captured(1));
+		urls.push_back(it.next().captured(0));
 	}
 
 	return urls;
 }
 
-[[nodiscard]] QString ProxyDataToString(const ProxyData &proxy) {
+[[nodiscard]] bool ProxyDataIsShareable(const ProxyData &proxy) {
 	using Type = ProxyData::Type;
-	return u"tg://"_q
-		+ (proxy.type == Type::Socks5 ? "socks" : "proxy")
+	return (proxy.type == Type::Socks5)
+		|| (proxy.type == Type::Mtproto);
+}
+
+[[nodiscard]] QString ProxyDataToQueryPath(const ProxyData &proxy) {
+	using Type = ProxyData::Type;
+	const auto path = [&] {
+		switch (proxy.type) {
+		case Type::Socks5: return u"socks"_q;
+		case Type::Mtproto: return u"proxy"_q;
+		case Type::None:
+		case Type::Http: return QString();
+		}
+		Unexpected("Proxy type in ProxyDataToQueryPath.");
+	}();
+	if (path.isEmpty()) {
+		return QString();
+	}
+	return path
 		+ "?server=" + proxy.host + "&port=" + QString::number(proxy.port)
 		+ ((proxy.type == Type::Socks5 && !proxy.user.isEmpty())
 			? "&user=" + qthelp::url_encode(proxy.user) : "")
@@ -101,6 +120,20 @@ using ProxyData = MTP::ProxyData;
 			? "&pass=" + qthelp::url_encode(proxy.password) : "")
 		+ ((proxy.type == Type::Mtproto && !proxy.password.isEmpty())
 			? "&secret=" + proxy.password : "");
+}
+
+[[nodiscard]] QString ProxyDataToLocalLink(const ProxyData &proxy) {
+	const auto queryPath = ProxyDataToQueryPath(proxy);
+	return queryPath.isEmpty() ? QString() : (u"tg://"_q + queryPath);
+}
+
+[[nodiscard]] QString ProxyDataToPublicLink(
+		const Main::Session &session,
+		const ProxyData &proxy) {
+	const auto queryPath = ProxyDataToQueryPath(proxy);
+	return queryPath.isEmpty()
+		? QString()
+		: session.createInternalLinkFull(queryPath);
 }
 
 [[nodiscard]] ProxyData ProxyDataFromFields(
@@ -126,7 +159,7 @@ void AddProxyFromClipboard(
 	const auto socksString = u"socks"_q;
 	const auto protocol = u"tg://"_q;
 
-	const auto maybeUrls = ExtractUrlsSimple(
+	const auto maybeUrls = ExtractLinkCandidates(
 		QGuiApplication::clipboard()->text());
 	const auto isSingle = maybeUrls.size() == 1;
 
@@ -144,8 +177,8 @@ void AddProxyFromClipboard(
 			protocol.size(),
 			8192);
 
-		if (local.startsWith(protocol + proxyString)
-			|| local.startsWith(protocol + socksString)) {
+		if (local.startsWith(protocol + proxyString, Qt::CaseInsensitive)
+			|| local.startsWith(protocol + socksString, Qt::CaseInsensitive)) {
 
 			using namespace qthelp;
 			const auto options = RegExOption::CaseInsensitive;
@@ -204,7 +237,10 @@ void AddProxyFromClipboard(
 
 	auto success = Result::Failed;
 	for (const auto &maybeUrl : maybeUrls) {
-		const auto result = proceedUrl(Core::TryConvertUrlToLocal(maybeUrl));
+		const auto trimmed = maybeUrl.trimmed();
+		const auto local = Core::TryConvertUrlToLocal(trimmed);
+		const auto check = local.isEmpty() ? trimmed : local;
+		const auto result = proceedUrl(check);
 		if (success != Result::Success) {
 			success = result;
 		}
@@ -1823,8 +1859,9 @@ void ProxiesBoxController::shareItem(int id, bool qr) {
 void ProxiesBoxController::shareItems() {
 	auto result = QString();
 	for (const auto &item : _list) {
-		if (!item.deleted) {
-			result += ProxyDataToString(item.data) + '\n' + '\n';
+		if (!item.deleted && ProxyDataIsShareable(item.data)) {
+			result += ProxyDataToPublicLink(_account->session(), item.data)
+				+ '\n' + '\n';
 		}
 	}
 	if (result.isEmpty()) {
@@ -2060,7 +2097,7 @@ auto ProxiesBoxController::views() const -> rpl::producer<ItemView> {
 rpl::producer<bool> ProxiesBoxController::listShareableChanges() const {
 	return _views.events_starting_with(ItemView()) | rpl::map([=] {
 		for (const auto &item : _list) {
-			if (!item.deleted) {
+			if (!item.deleted && ProxyDataIsShareable(item.data)) {
 				return true;
 			}
 		}
@@ -2087,8 +2124,7 @@ void ProxiesBoxController::updateView(const Item &item) {
 		}
 		return ItemState::Connecting;
 	}();
-	const auto supportsShare = (item.data.type == Type::Socks5)
-		|| (item.data.type == Type::Mtproto);
+	const auto supportsShare = ProxyDataIsShareable(item.data);
 	const auto supportsCalls = item.data.supportsCalls();
 	_views.fire({
 		item.id,
@@ -2105,18 +2141,19 @@ void ProxiesBoxController::updateView(const Item &item) {
 }
 
 void ProxiesBoxController::share(const ProxyData &proxy, bool qr) {
-	if (proxy.type == Type::Http) {
+	if (!ProxyDataIsShareable(proxy)) {
 		return;
 	}
-	const auto link = ProxyDataToString(proxy);
+	const auto qrLink = ProxyDataToLocalLink(proxy);
+	const auto shareLink = ProxyDataToPublicLink(_account->session(), proxy);
 	if (qr) {
 		_show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
-			Ui::FillPeerQrBox(box, nullptr, link, rpl::single(QString()));
+			Ui::FillPeerQrBox(box, nullptr, qrLink, rpl::single(QString()));
 			box->setTitle(tr::lng_proxy_edit_share_qr_box_title());
 		}));
 		return;
 	}
-	QGuiApplication::clipboard()->setText(link);
+	QGuiApplication::clipboard()->setText(shareLink);
 	_show->showToast(tr::lng_username_copied(tr::now));
 }
 
