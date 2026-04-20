@@ -670,12 +670,13 @@ void EmojiListWidget::applyNextSearchQuery() {
 	}
 	const auto guard = gsl::finally([&] { finish(); });
 	auto plain = collectPlainSearchResults();
-	if (_searchEmoji == _searchEmojiPrevious) {
-		return;
-	}
 	_searchEmoticon = QString();
-	for (const auto emoji : plain) {
-		_searchEmoticon += emoji->text();
+	{
+		auto exactSet = base::flat_set<EmojiPtr>();
+		const auto exact = SearchEmoji(_searchQuery, exactSet, true);
+		for (const auto emoji : exact) {
+			_searchEmoticon += emoji->text();
+		}
 	}
 	_searchResults.clear();
 	_searchCustomIds.clear();
