@@ -4514,6 +4514,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_stickers_create_new" = "Create a New Sticker";
 "lng_stickers_add_existing" = "Add an Existing Sticker";
+"lng_stickers_add_to_set" = "Add to Sticker Set";
+"lng_stickers_already_in_set" = "This Sticker is already in the Set.";
+"lng_stickers_set_is_full" = "This Sticker Set is full.";
 "lng_stickers_pack_choose_emoji_title" = "Choose Emoji";
 "lng_stickers_pack_choose_emoji_about" = "Pick an emoji that corresponds to this sticker.";
 "lng_stickers_pick_existing_title" = "Choose Sticker";

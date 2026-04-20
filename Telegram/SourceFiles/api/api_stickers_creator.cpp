@@ -10,13 +10,23 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "base/random.h"
 #include "base/unixtime.h"
+#include "chat_helpers/compose/compose_show.h"
 #include "data/data_document.h"
+#include "data/data_file_origin.h"
 #include "data/data_session.h"
 #include "data/stickers/data_stickers.h"
 #include "data/stickers/data_stickers_set.h"
+#include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "menu/menu_action_with_thumbnail.h"
 #include "storage/file_upload.h"
 #include "storage/localimageloader.h"
+#include "styles/style_menu_icons.h"
+#include "styles/style_widgets.h"
+#include "ui/dynamic_thumbnails.h"
+#include "ui/widgets/menu/menu_add_action_callback.h"
+#include "ui/widgets/menu/menu_common.h"
+#include "ui/widgets/popup_menu.h"
 
 namespace Api {
 namespace {
@@ -81,6 +91,35 @@ void FeedSetIfFull(
 	});
 }
 
+template <typename Callback>
+void EnumerateOwnedStickerSets(
+		not_null<Main::Session*> session,
+		Callback &&callback) {
+	const auto &stickers = session->data().stickers();
+	const auto &sets = stickers.sets();
+	for (const auto setId : stickers.setsOrder()) {
+		const auto it = sets.find(setId);
+		if (it == sets.end()) {
+			continue;
+		}
+		const auto set = it->second.get();
+		if (!(set->flags & Data::StickersSetFlag::AmCreator)
+			|| (set->type() != Data::StickersType::Stickers)) {
+			continue;
+		}
+		using namespace Data;
+		if constexpr (std::is_same_v<
+				bool,
+				std::invoke_result_t<Callback, not_null<StickersSet*>>>) {
+			if (!callback(set)) {
+				return;
+			}
+		} else {
+			callback(set);
+		}
+	}
+}
+
 } // namespace
 
 void AddExistingStickerToSet(
@@ -103,6 +142,104 @@ void AddExistingStickerToSet(
 			fail(error.type());
 		}
 	}).handleFloodErrors().send();
+}
+
+QString StickerEmojiOrDefault(not_null<DocumentData*> document) {
+	if (const auto sticker = document->sticker()) {
+		if (!sticker->alt.isEmpty()) {
+			return sticker->alt;
+		}
+	}
+	return QString::fromUtf8("\xF0\x9F\x99\x82");
+}
+
+bool HasOwnedStickerSets(not_null<Main::Session*> session) {
+	auto found = false;
+	EnumerateOwnedStickerSets(session, [&](not_null<Data::StickersSet*>) {
+		found = true;
+		return false;
+	});
+	return found;
+}
+
+void FillChooseStickerSetMenu(
+		not_null<Ui::PopupMenu*> menu,
+		std::shared_ptr<ChatHelpers::Show> show,
+		not_null<DocumentData*> document) {
+	const auto session = &show->session();
+	const auto emoji = StickerEmojiOrDefault(document);
+	const auto failToast = [=](QString err) {
+		show->showToast(err.isEmpty()
+			? tr::lng_attach_failed(tr::now)
+			: err);
+	};
+	EnumerateOwnedStickerSets(session, [&](not_null<Data::StickersSet*> set) {
+		const auto identifier = set->identifier();
+		const auto coverDocument = set->lookupThumbnailDocument();
+		auto thumbnail = coverDocument
+			? Ui::MakeDocumentThumbnail(
+				coverDocument,
+				Data::FileOriginStickerSet(set->id, set->accessHash))
+			: nullptr;
+		const auto targetSetId = set->id;
+		const auto handler = crl::guard(session, [=] {
+			const auto &map = session->data().stickers().sets();
+			const auto i = map.find(targetSetId);
+			if (i != map.end()
+				&& i->second->count >= kStickersInOwnedSetMax) {
+				show->showToast(tr::lng_stickers_set_is_full(tr::now));
+				return;
+			}
+			const auto oldCount = (i != map.end())
+				? i->second->count
+				: 0;
+			AddExistingStickerToSet(
+				session,
+				identifier,
+				document,
+				emoji,
+				crl::guard(session, [=](MTPmessages_StickerSet) {
+					const auto &map = session->data().stickers().sets();
+					const auto i = map.find(targetSetId);
+					const auto newCount = (i != map.end())
+						? i->second->count
+						: oldCount;
+					show->showToast(newCount > oldCount
+						? tr::lng_stickers_create_added(tr::now)
+						: tr::lng_stickers_already_in_set(tr::now));
+				}),
+				crl::guard(session, failToast));
+		});
+		const auto rawAction = Ui::Menu::CreateAction(
+			menu.get(),
+			set->title,
+			handler);
+		auto item = base::make_unique_q<Menu::ActionWithThumbnail>(
+			menu->menu(),
+			menu->menu()->st(),
+			rawAction,
+			std::move(thumbnail),
+			st::menuIconStickerAdd.width());
+		menu->addAction(std::move(item));
+	});
+}
+
+void AddAddToStickerSetAction(
+		const Ui::Menu::MenuCallback &addAction,
+		std::shared_ptr<ChatHelpers::Show> show,
+		not_null<DocumentData*> document) {
+	const auto session = &show->session();
+	if (!HasOwnedStickerSets(session)) {
+		return;
+	}
+	addAction({
+		.text = tr::lng_stickers_add_to_set(tr::now),
+		.icon = &st::menuIconStickerAdd,
+		.fillSubmenu = [show, document](not_null<Ui::PopupMenu*> submenu) {
+			FillChooseStickerSetMenu(submenu, show, document);
+		},
+		.submenuSt = &st::popupMenuWithIcons,
+	});
 }
 
 void DeleteStickerSet(

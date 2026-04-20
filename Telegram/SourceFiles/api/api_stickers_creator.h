@@ -13,11 +13,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class DocumentData;
 
+namespace ChatHelpers {
+class Show;
+} // namespace ChatHelpers
+
 namespace Main {
 class Session;
 } // namespace Main
 
+namespace Ui {
+class PopupMenu;
+namespace Menu {
+struct MenuCallback;
+} // namespace Menu
+} // namespace Ui
+
 namespace Api {
+
+inline constexpr auto kStickersInOwnedSetMax = 120;
 
 void AddExistingStickerToSet(
 	not_null<Main::Session*> session,
@@ -32,6 +45,21 @@ void DeleteStickerSet(
 	const StickerSetIdentifier &set,
 	Fn<void()> done,
 	Fn<void(QString)> fail);
+
+[[nodiscard]] bool HasOwnedStickerSets(not_null<Main::Session*> session);
+
+[[nodiscard]] QString StickerEmojiOrDefault(
+	not_null<DocumentData*> document);
+
+void FillChooseStickerSetMenu(
+	not_null<Ui::PopupMenu*> menu,
+	std::shared_ptr<ChatHelpers::Show> show,
+	not_null<DocumentData*> document);
+
+void AddAddToStickerSetAction(
+	const Ui::Menu::MenuCallback &addAction,
+	std::shared_ptr<ChatHelpers::Show> show,
+	not_null<DocumentData*> document);
 
 class StickerUpload final : public base::has_weak_ptr {
 public:

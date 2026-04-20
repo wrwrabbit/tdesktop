@@ -85,7 +85,6 @@ constexpr auto kMinRepaintDelay = crl::time(33);
 constexpr auto kMinAfterScrollDelay = crl::time(33);
 constexpr auto kGrayLockOpacity = 0.3;
 constexpr auto kStickerMoveDuration = crl::time(200);
-constexpr auto kOwnedSetStickersMax = 120;
 
 using Data::StickersSet;
 using Data::StickersPack;
@@ -1638,6 +1637,12 @@ void StickerSetBox::Inner::contextMenuEvent(QContextMenuEvent *e) {
 			(isFaved
 				? &st::menuIconUnfave
 				: &st::menuIconFave));
+		if (!amSetCreator()) {
+			Api::AddAddToStickerSetAction(
+				Ui::Menu::CreateAddActionCallback(_menu.get()),
+				_show,
+				document);
+		}
 		if (amSetCreator()) {
 			const auto addAction = Ui::Menu::CreateAddActionCallback(
 				_menu.get());
@@ -2367,7 +2372,7 @@ bool StickerSetBox::Inner::hasAddCell() const {
 		&& _amSetCreator
 		&& (setType() == Data::StickersType::Stickers)
 		&& !_pack.isEmpty()
-		&& (_pack.size() < kOwnedSetStickersMax);
+		&& (_pack.size() < Api::kStickersInOwnedSetMax);
 }
 
 int StickerSetBox::Inner::totalCellsCount() const {
@@ -2504,11 +2509,7 @@ void StickerSetBox::Inner::startAddExistingStickerFlow() {
 		if (_pickerPanel) {
 			_pickerPanel->hideAnimated();
 		}
-		const auto sticker = document->sticker();
-		const auto fallback = QString::fromUtf8("\xF0\x9F\x99\x82");
-		const auto emoji = (sticker && !sticker->alt.isEmpty())
-			? sticker->alt
-			: fallback;
+		const auto emoji = Api::StickerEmojiOrDefault(document);
 		Api::AddExistingStickerToSet(
 			session,
 			identifier,
