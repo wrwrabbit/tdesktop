@@ -309,7 +309,7 @@ void ItemText::renderContent() {
 		int length = 0;
 		EmojiPtr emoji = nullptr;
 	};
-	auto emojiFormats = QList<QTextLayout::FormatRange>();
+	auto emojiFormats = QVector<QTextLayout::FormatRange>();
 	auto emojiPositions = std::vector<EmojiPos>();
 	{
 		auto pos = 0;
