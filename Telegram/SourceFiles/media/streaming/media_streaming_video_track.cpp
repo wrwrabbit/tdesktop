@@ -16,6 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #ifdef Q_OS_MAC
 #include "media/streaming/media_streaming_native_frame_mac.h"
+
+#include <CoreVideo/CoreVideo.h>
 #endif // Q_OS_MAC
 
 namespace Media {
@@ -464,7 +466,14 @@ void VideoTrackObject::rasterizeFrame(not_null<Frame*> frame) {
 		const auto wantARGB = requireARGB32();
 		const auto isVT = (hwFormat == AV_PIX_FMT_VIDEOTOOLBOX);
 		const auto pb = isVT ? (void*)frame->decoded->data[3] : nullptr;
-		if (!wantARGB && isVT && pb) {
+		const auto pbFormat = pb
+			? CVPixelBufferGetPixelFormatType(
+				static_cast<CVPixelBufferRef>(pb))
+			: 0;
+		const auto pbSupported = (pb != nullptr)
+			&& (pbFormat == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+				|| pbFormat == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange);
+		if (!wantARGB && isVT && pbSupported) {
 				const auto w = frame->decoded->width;
 				const auto h = frame->decoded->height;
 				frame->nativeFrame = NativeFrame{
