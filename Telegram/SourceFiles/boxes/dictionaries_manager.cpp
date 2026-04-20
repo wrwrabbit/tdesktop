@@ -344,24 +344,44 @@ void Inner::setupContent(
 	const auto queryStream = content->lifetime()
 		.make_state<rpl::event_stream<QStringView>>();
 
-	for (const auto &dict : Spellchecker::Dictionaries()) {
-		const auto id = dict.id;
-		const auto row = AddButtonWithLoader(
-			content,
-			session,
-			dict,
-			ranges::contains(enabledDictionaries, id),
-			queryStream->events());
-		row->toggledValue(
-		) | rpl::on_next([=](auto enabled) {
-			if (enabled) {
-				_enabledRows.push_back(id);
-			} else {
-				auto &rows = _enabledRows;
-				rows.erase(ranges::remove(rows, id), end(rows));
-			}
-		}, row->lifetime());
-	}
+	// Rows are created once, when Spellchecker::Dictionaries() becomes
+	// non-empty. Manifest is fetched lazily and may arrive after the box
+	// opens, so we subscribe to DictionariesChanged and populate rows
+	// then if we haven't already.
+	const auto built = content->lifetime().make_state<bool>(false);
+	const auto buildRows = [=] {
+		if (*built) {
+			return;
+		}
+		const auto dicts = Spellchecker::Dictionaries();
+		if (dicts.empty()) {
+			return;
+		}
+		*built = true;
+		for (const auto &dict : dicts) {
+			const auto id = dict.id;
+			const auto row = AddButtonWithLoader(
+				content,
+				session,
+				dict,
+				ranges::contains(enabledDictionaries, id),
+				queryStream->events());
+			row->toggledValue(
+			) | rpl::on_next([=](auto enabled) {
+				if (enabled) {
+					_enabledRows.push_back(id);
+				} else {
+					auto &rows = _enabledRows;
+					rows.erase(ranges::remove(rows, id), end(rows));
+				}
+			}, row->lifetime());
+		}
+	};
+
+	buildRows();
+	Spellchecker::DictionariesChanged(
+	) | rpl::on_next(buildRows, content->lifetime());
+	Spellchecker::RefreshDictionariesManifest(session);
 
 	_queryCallback = [=](const QString &query) {
 		if (query.size() >= kMaxQueryLength) {
