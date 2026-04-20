@@ -68,7 +68,9 @@ LayoutMetrics ComputeMetrics(
 		|| (style == TextStyle::SemiTransparent);
 	const auto padding = hasBackground ? int(fontSize * kPaddingFactor) : 0;
 	const auto shortSide = std::min(imageSize.width(), imageSize.height());
-	const auto textMaxWidth = int(shortSide * kMaxWidthFactor) - 2 * padding;
+	const auto textMaxWidth = std::max(
+		int(shortSide * kMaxWidthFactor) - 2 * padding,
+		kMinContentWidth);
 
 	const auto font = TextFont(fontSize);
 

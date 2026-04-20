@@ -603,8 +603,13 @@ void Scene::createTextAtCenter() {
 		sceneRect().width(),
 		sceneRect().height());
 	const auto padding = int(_textFontSize * kPaddingFactor);
-	const auto maxTextWidth = int(shortSide * kMaxWidthFactor) - 2 * padding;
-	const auto minTextWidth = int(shortSide * kMinWidthFactor) - 2 * padding;
+	const auto maxTextWidth = std::max(
+		int(shortSide * kMaxWidthFactor) - 2 * padding,
+		1);
+	const auto minTextWidth = std::clamp(
+		int(shortSide * kMinWidthFactor) - 2 * padding,
+		1,
+		maxTextWidth);
 	const auto sceneCenter = sceneRect().center();
 	const auto adjustWidth = [=] {
 		emojiDoc->setTextWidth(maxTextWidth);
@@ -671,8 +676,13 @@ void Scene::startTextEditing(ItemText *item) {
 		sceneRect().width(),
 		sceneRect().height());
 	const auto padding = int(item->fontSize() * kPaddingFactor);
-	const auto maxTextWidth = int(shortSide * kMaxWidthFactor) - 2 * padding;
-	const auto minTextWidth = int(shortSide * kMinWidthFactor) - 2 * padding;
+	const auto maxTextWidth = std::max(
+		int(shortSide * kMaxWidthFactor) - 2 * padding,
+		1);
+	const auto minTextWidth = std::clamp(
+		int(shortSide * kMinWidthFactor) - 2 * padding,
+		1,
+		maxTextWidth);
 	const auto anchor = item->scenePos();
 	const auto adjustWidth = [=] {
 		emojiDoc->setTextWidth(maxTextWidth);
