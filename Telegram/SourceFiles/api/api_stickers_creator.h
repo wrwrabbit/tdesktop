@@ -31,6 +31,7 @@ struct MenuCallback;
 namespace Api {
 
 inline constexpr auto kStickersInOwnedSetMax = 120;
+inline constexpr auto kEmojiInOwnedSetMax = 200;
 
 void AddExistingStickerToSet(
 	not_null<Main::Session*> session,
@@ -47,6 +48,7 @@ void DeleteStickerSet(
 	Fn<void(QString)> fail);
 
 [[nodiscard]] bool HasOwnedStickerSets(not_null<Main::Session*> session);
+[[nodiscard]] bool HasOwnedEmojiSets(not_null<Main::Session*> session);
 
 [[nodiscard]] QString StickerEmojiOrDefault(
 	not_null<DocumentData*> document);
@@ -56,7 +58,17 @@ void FillChooseStickerSetMenu(
 	std::shared_ptr<ChatHelpers::Show> show,
 	not_null<DocumentData*> document);
 
+void FillChooseEmojiSetMenu(
+	not_null<Ui::PopupMenu*> menu,
+	std::shared_ptr<ChatHelpers::Show> show,
+	not_null<DocumentData*> document);
+
 void AddAddToStickerSetAction(
+	const Ui::Menu::MenuCallback &addAction,
+	std::shared_ptr<ChatHelpers::Show> show,
+	not_null<DocumentData*> document);
+
+void AddAddToEmojiSetAction(
 	const Ui::Menu::MenuCallback &addAction,
 	std::shared_ptr<ChatHelpers::Show> show,
 	not_null<DocumentData*> document);

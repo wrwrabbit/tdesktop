@@ -1606,6 +1606,12 @@ void StickerSetBox::Inner::contextMenuEvent(QContextMenuEvent *e) {
 				}
 			}, &st::menuIconCopy);
 		}
+		if (!amSetCreator()) {
+			Api::AddAddToEmojiSetAction(
+				Ui::Menu::CreateAddActionCallback(_menu.get()),
+				_show,
+				_pack[index]);
+		}
 	} else if (details.type != SendMenu::Type::Disabled) {
 		const auto document = _pack[index];
 		const auto send = crl::guard(this, [=](Api::SendOptions options) {
