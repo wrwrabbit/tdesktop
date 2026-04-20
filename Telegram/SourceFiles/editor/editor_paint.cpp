@@ -438,7 +438,8 @@ bool Paint::eventFilter(QObject *obj, QEvent *e) {
 	}
 	if (e->type() == QEvent::Wheel) {
 		const auto wheel = static_cast<QWheelEvent*>(e);
-		const auto delta = wheel->angleDelta().y();
+		const auto raw = wheel->angleDelta();
+		const auto delta = raw.y() ? raw.y() : raw.x();
 		if (!delta) {
 			return true;
 		}

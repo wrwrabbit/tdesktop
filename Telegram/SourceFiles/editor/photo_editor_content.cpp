@@ -125,8 +125,9 @@ PhotoEditorContent::PhotoEditorContent(
 			const auto type = e->type();
 			if (type == QEvent::Wheel) {
 				const auto wheel = static_cast<QWheelEvent*>(e.get());
+				const auto raw = wheel->angleDelta();
 				_paint->zoomSceneItems(
-					wheel->angleDelta().y(),
+					raw.y() ? raw.y() : raw.x(),
 					wheel->modifiers().testFlag(Qt::ShiftModifier));
 				e->accept();
 			} else if (type == QEvent::MouseButtonPress) {
