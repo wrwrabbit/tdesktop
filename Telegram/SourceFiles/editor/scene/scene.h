@@ -109,6 +109,7 @@ private:
 	rpl::event_stream<bool> _textEditStates;
 	ItemText *_selectedTextItem = nullptr;
 	bool _textEditing = false;
+	int _textEditGeneration = 0;
 	rpl::lifetime _lifetime;
 
 };

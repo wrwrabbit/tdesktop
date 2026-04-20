@@ -588,6 +588,8 @@ void Scene::createTextAtCenter() {
 		return;
 	}
 
+	const auto generation = ++_textEditGeneration;
+
 	clearSelection();
 	cancelDrawing();
 	setTextEditing(true);
@@ -630,10 +632,14 @@ void Scene::createTextAtCenter() {
 
 	const auto raw = static_cast<TextEditProxy*>(proxy);
 	raw->onFinish = crl::guard(this, [=] {
-		finishTextEditing(true);
+		if (generation == _textEditGeneration) {
+			finishTextEditing(true);
+		}
 	});
 	raw->onCancel = crl::guard(this, [=] {
-		finishTextEditing(false);
+		if (generation == _textEditGeneration) {
+			finishTextEditing(false);
+		}
 	});
 
 	_textEdit.item.reset();
@@ -647,6 +653,8 @@ void Scene::startTextEditing(ItemText *item) {
 	if (!item) {
 		return;
 	}
+
+	const auto generation = ++_textEditGeneration;
 
 	cancelDrawing();
 	setTextEditing(true);
@@ -703,10 +711,14 @@ void Scene::startTextEditing(ItemText *item) {
 
 	const auto raw = static_cast<TextEditProxy*>(proxy);
 	raw->onFinish = crl::guard(this, [=] {
-		finishTextEditing(true);
+		if (generation == _textEditGeneration) {
+			finishTextEditing(true);
+		}
 	});
 	raw->onCancel = crl::guard(this, [=] {
-		finishTextEditing(false);
+		if (generation == _textEditGeneration) {
+			finishTextEditing(false);
+		}
 	});
 
 	const auto it = _itemsByPointer.find(item);
