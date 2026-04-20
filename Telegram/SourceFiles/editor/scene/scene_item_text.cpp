@@ -293,7 +293,13 @@ void ItemText::renderContent() {
 	auto layout = QTextLayout(processedText, font);
 	layout.setTextOption(option);
 
+	struct EmojiPos {
+		int start = 0;
+		int length = 0;
+		EmojiPtr emoji = nullptr;
+	};
 	auto emojiFormats = QList<QTextLayout::FormatRange>();
+	auto emojiPositions = std::vector<EmojiPos>();
 	{
 		auto pos = 0;
 		const auto begin = processedText.constData();
@@ -304,10 +310,11 @@ void ItemText::renderContent() {
 				begin + pos,
 				end,
 				&emojiLen);
-			if (emoji) {
+			if (emoji && emojiLen > 0) {
 				auto fmt = QTextCharFormat();
 				fmt.setForeground(QColor(0, 0, 0, 0));
 				emojiFormats.append({ pos, emojiLen, fmt });
+				emojiPositions.push_back({ pos, emojiLen, emoji });
 				pos += emojiLen;
 			} else {
 				++pos;
@@ -409,45 +416,45 @@ void ItemText::renderContent() {
 		const auto sourceLogical = source / float64(factor);
 		const auto emojiSize = float64(QFontMetrics(font).height());
 		const auto emojiScale = emojiSize / sourceLogical;
-		for (auto i = 0; i < lineCount; ++i) {
-			const auto line = layout.lineAt(i);
+		for (const auto &ep : emojiPositions) {
+			auto lineIndex = -1;
+			for (auto i = 0; i < lineCount; ++i) {
+				const auto line = layout.lineAt(i);
+				const auto lineStart = line.textStart();
+				const auto lineEnd = lineStart + line.textLength();
+				if (ep.start >= lineStart && ep.start < lineEnd) {
+					lineIndex = i;
+					break;
+				}
+			}
+			if (lineIndex < 0) {
+				continue;
+			}
+			const auto line = layout.lineAt(lineIndex);
+			const auto lineStart = line.textStart();
+			const auto lineEnd = lineStart + line.textLength();
+			const auto drawEnd = std::min(ep.start + ep.length, lineEnd);
 			const auto xOffset =
 				(m.contentWidth - line.naturalTextWidth()) / 2.;
-			const auto yShift = (i < lineCount - 1) ? -lineShift : 0.;
-			const auto lineStart = line.textStart();
-			const auto lineText = processedText.mid(
-				lineStart,
-				line.textLength());
-			auto pos = 0;
-			while (pos < lineText.size()) {
-				auto emojiLen = 0;
-				const auto emoji = Ui::Emoji::Find(
-					lineText.constData() + pos,
-					lineText.constData() + lineText.size(),
-					&emojiLen);
-				if (!emoji) {
-					++pos;
-					continue;
-				}
-				const auto x = line.cursorToX(lineStart + pos);
-				const auto nextX = line.cursorToX(
-					lineStart + pos + emojiLen);
-				const auto glyphWidth = float64(nextX - x);
-				const auto drawX = m.padding
-					+ xOffset
-					+ x
-					+ (glyphWidth - emojiSize) / 2.;
-				const auto drawY = m.padding
-					+ yShift
-					+ line.y()
-					+ (line.height() - emojiSize) / 2.;
-				p.save();
-				p.translate(drawX, drawY);
-				p.scale(emojiScale, emojiScale);
-				Ui::Emoji::Draw(p, emoji, source, 0, 0);
-				p.restore();
-				pos += emojiLen;
-			}
+			const auto yShift = (lineIndex < lineCount - 1)
+				? -lineShift
+				: 0.;
+			const auto x = line.cursorToX(ep.start);
+			const auto nextX = line.cursorToX(drawEnd);
+			const auto glyphWidth = float64(nextX - x);
+			const auto drawX = m.padding
+				+ xOffset
+				+ x
+				+ (glyphWidth - emojiSize) / 2.;
+			const auto drawY = m.padding
+				+ yShift
+				+ line.y()
+				+ (line.height() - emojiSize) / 2.;
+			p.save();
+			p.translate(drawX, drawY);
+			p.scale(emojiScale, emojiScale);
+			Ui::Emoji::Draw(p, ep.emoji, source, 0, 0);
+			p.restore();
 		}
 	}
 
