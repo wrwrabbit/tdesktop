@@ -15,6 +15,39 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <CoreVideo/CoreVideo.h>
 
 namespace Media::Streaming {
+namespace {
+
+class PixelBufferLock final {
+public:
+	PixelBufferLock(CVPixelBufferRef buffer, CVPixelBufferLockFlags flags)
+	: _buffer(buffer)
+	, _flags(flags)
+	, _locked(CVPixelBufferLockBaseAddress(buffer, flags) == kCVReturnSuccess) {
+	}
+
+	PixelBufferLock(const PixelBufferLock &) = delete;
+	PixelBufferLock &operator=(const PixelBufferLock &) = delete;
+	PixelBufferLock(PixelBufferLock &&) = delete;
+	PixelBufferLock &operator=(PixelBufferLock &&) = delete;
+
+	~PixelBufferLock() {
+		if (_locked) {
+			CVPixelBufferUnlockBaseAddress(_buffer, _flags);
+		}
+	}
+
+	[[nodiscard]] bool locked() const {
+		return _locked;
+	}
+
+private:
+	CVPixelBufferRef _buffer;
+	CVPixelBufferLockFlags _flags;
+	bool _locked;
+
+};
+
+} // namespace
 
 QImage ConvertNativeFrameToARGB32(const NativeFrame &frame) {
 	if (!frame.pixelBuffer || frame.size.isEmpty()) {
@@ -26,9 +59,10 @@ QImage ConvertNativeFrameToARGB32(const NativeFrame &frame) {
 		&& format != kCVPixelFormatType_420YpCbCr8BiPlanarFullRange) {
 		return QImage();
 	}
-	if (CVPixelBufferLockBaseAddress(
-			pixelBuffer,
-			kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess) {
+	const auto lock = PixelBufferLock(
+		pixelBuffer,
+		kCVPixelBufferLock_ReadOnly);
+	if (!lock.locked()) {
 		return QImage();
 	}
 
@@ -76,7 +110,6 @@ QImage ConvertNativeFrameToARGB32(const NativeFrame &frame) {
 			result = std::move(storage);
 		}
 	}
-	CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
 	return result;
 }
 
