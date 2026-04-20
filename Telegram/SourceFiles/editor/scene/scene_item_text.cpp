@@ -257,6 +257,15 @@ QPainterPath BuildConnectedBackground(
 
 } // namespace
 
+QColor EffectiveTextColor(const QColor &color, TextStyle style) {
+	if (style != TextStyle::Framed) {
+		return color;
+	}
+	return (ComputeBrightness(color) >= kBrightnessFramedThreshold)
+		? QColor(0, 0, 0)
+		: QColor(255, 255, 255);
+}
+
 ItemText::ItemText(
 	const QString &text,
 	const QColor &color,

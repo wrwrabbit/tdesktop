@@ -22,6 +22,8 @@ enum class TextStyle : uchar {
 	Plain,
 };
 
+[[nodiscard]] QColor EffectiveTextColor(const QColor &color, TextStyle style);
+
 class ItemText : public ItemBase {
 public:
 	enum { Type = ItemBase::Type + 2 };

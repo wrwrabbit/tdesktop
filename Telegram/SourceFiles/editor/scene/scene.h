@@ -96,6 +96,7 @@ private:
 	QColor _textColor;
 	float64 _textFontSize = 0.;
 	int _textStyle = 0;
+	int _textEditStyle = 0;
 
 	struct {
 		std::weak_ptr<NumberedItem> item;

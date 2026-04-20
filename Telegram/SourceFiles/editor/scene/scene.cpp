@@ -396,7 +396,9 @@ void Scene::setTextDefaults(
 void Scene::setTextColor(const QColor &color) {
 	_textColor = color;
 	if (_textEdit.proxy) {
-		_textEdit.proxy->setDefaultTextColor(color);
+		_textEdit.proxy->setDefaultTextColor(EffectiveTextColor(
+			color,
+			static_cast<TextStyle>(_textEditStyle)));
 	}
 }
 
@@ -593,10 +595,16 @@ void Scene::createTextAtCenter() {
 	clearSelection();
 	cancelDrawing();
 	setTextEditing(true);
+	_textEditStyle = _textStyle;
 
 	_textEdit.proxy.reset(new TextEditProxy());
 	const auto proxy = _textEdit.proxy.get();
-	setupTextProxy(proxy, _textColor, _textFontSize);
+	setupTextProxy(
+		proxy,
+		EffectiveTextColor(
+			_textColor,
+			static_cast<TextStyle>(_textEditStyle)),
+		_textFontSize);
 
 	const auto emojiDoc = proxy->document();
 	const auto shortSide = std::min(
@@ -663,10 +671,14 @@ void Scene::startTextEditing(ItemText *item) {
 
 	cancelDrawing();
 	setTextEditing(true);
+	_textEditStyle = int(item->textStyle());
 
 	_textEdit.proxy.reset(new TextEditProxy());
 	const auto proxy = _textEdit.proxy.get();
-	setupTextProxy(proxy, item->color(), item->fontSize());
+	setupTextProxy(
+		proxy,
+		EffectiveTextColor(item->color(), item->textStyle()),
+		item->fontSize());
 
 	proxy->setPlainText(item->text());
 	ReplaceEmoji(proxy->document());
