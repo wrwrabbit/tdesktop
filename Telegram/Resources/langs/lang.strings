@@ -8047,12 +8047,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_ptg_location_card_portable_con1" = "If you move the app folder, you must also bring the data folder";
 "lng_ptg_location_card_portable_btn" = "Make portable";
 "lng_ptg_location_confirm_title" = "Confirm move";
+"lng_ptg_location_confirm_overwrite_title" = "✋ Confirm Overwrite";
 "lng_ptg_location_confirm_text" = "PTelegram will restart and move to: {path}";
 "lng_ptg_location_confirm_text_simple" = "PTelegram will restart to apply the change.";
-"lng_ptg_location_confirm_overwrite_tdata" = "There is already PTelegram data at the destination. It will be merged with your current data. Continue?";
-"lng_ptg_location_confirm_overwrite" = "Files already exist at the destination. They will be overwritten. Continue?";
-"lng_ptg_location_error_copy" = "Could not copy PTelegram to the selected folder. Please try again or choose a different folder.";
-"lng_ptg_location_error_folder" = "Cannot move PTelegram to that folder. Please choose a different location.";
+"lng_ptg_location_confirm_overwrite" = "⚠️ Files already exist at the destination. Existing data will be permanently deleted and replaced with your data.\n\n❗ Any accounts previously stored at the destination will be lost forever.\n\nContinue?";
+"lng_ptg_location_error_copy" = "❌ Could not copy PTelegram to the selected folder. Please try again or choose a different folder.";
+"lng_ptg_location_error_folder" = "❌ Cannot move PTelegram to that folder. Please choose a different location.";
 "lng_ptg_location_same_dir" = "PTelegram is already running from that folder.";
 "lng_ptg_location_setup_title" = "Choose where to keep PTelegram";
 "lng_ptg_location_continue_downloads" = "Continue in Downloads";

@@ -233,7 +233,9 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 				const auto targetExists = QFile::exists(appDataPath + '/' + cExeName())
 					|| QDir(appDataPath + u"/tdata"_q).exists();
 				box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
-					confirm->setTitle(tr::lng_ptg_location_confirm_title());
+					confirm->setTitle(targetExists
+						? tr::lng_ptg_location_confirm_overwrite_title()
+						: tr::lng_ptg_location_confirm_title());
 					confirm->addRow(object_ptr<Ui::FlatLabel>(
 						confirm,
 						targetExists
@@ -325,7 +327,9 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 				[=] {
 					const auto targetExists = QFile::exists(homeBinPath + '/' + cExeName());
 					box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
-						confirm->setTitle(tr::lng_ptg_location_confirm_title());
+						confirm->setTitle(targetExists
+							? tr::lng_ptg_location_confirm_overwrite_title()
+							: tr::lng_ptg_location_confirm_title());
 						confirm->addRow(object_ptr<Ui::FlatLabel>(
 							confirm,
 							targetExists
@@ -399,7 +403,9 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 				box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
 					const auto targetExists = QFile::exists(cleanChosen + '/' + cExeName())
 						|| QDir(cleanChosen + u"/tdata"_q).exists();
-					confirm->setTitle(tr::lng_ptg_location_confirm_title());
+					confirm->setTitle(targetExists
+						? tr::lng_ptg_location_confirm_overwrite_title()
+						: tr::lng_ptg_location_confirm_title());
 					confirm->addRow(object_ptr<Ui::FlatLabel>(
 						confirm,
 						targetExists
