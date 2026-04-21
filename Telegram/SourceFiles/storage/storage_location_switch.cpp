@@ -39,6 +39,18 @@ namespace {
 		if (relative == u"working"_q) {
 			continue;
 		}
+		if (relative.startsWith(u"temp"_q)) {
+			continue;
+		}
+		if (relative.startsWith(u"user_data"_q)) {
+			continue;
+		}
+		if (relative.startsWith(u"dumps"_q)) {
+			continue;
+		}
+		if (relative.startsWith(u"emoji"_q)) {
+			continue;
+		}
 		const auto dstFile = target + '/' + relative;
 		QDir().mkpath(QFileInfo(dstFile).absolutePath());
 		QFile::remove(dstFile);
