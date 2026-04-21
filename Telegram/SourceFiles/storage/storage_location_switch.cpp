@@ -248,11 +248,20 @@ bool ApplyPendingSwitch() {
 		const auto cleanSource = QDir::cleanPath(sourceWorkingDir);
 
 		// These files are released well before the old process exits.
-		for (const auto &name : {
+#ifdef Q_OS_WIN
+		const auto updaterName = u"Updater.exe"_q;
+#else
+		const auto updaterName = u"Updater"_q;
+#endif
+		const auto filesToClean = {
 			u"log.txt"_q,
-			u"Updater.exe"_q,
-			u"uninstall.exe"_q,
-		}) {
+			updaterName,
+#ifdef Q_OS_WIN
+			u"unins000.exe"_q,
+			u"unins000.dat"_q,
+#endif
+		};
+		for (const auto &name : filesToClean) {
 			const auto filePath = cleanSource + '/' + name;
 			if (QFile::exists(filePath)) {
 				FAKE_LOG(("LocationSwitch: cleanup '%1': %2").arg(

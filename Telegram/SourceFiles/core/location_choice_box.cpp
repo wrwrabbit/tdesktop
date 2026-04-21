@@ -177,7 +177,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 
 	auto isInstallerManaged = false;
 #ifdef Q_OS_WIN
-	isInstallerManaged = QFile::exists(cExeDir() + u"uninstall.exe"_q);
+	isInstallerManaged = QFile::exists(cExeDir() + u"unins000.exe"_q);
 	if (isInstallerManaged) {
 		AddOptionCard(
 			layout,
@@ -192,7 +192,8 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 			tr::lng_ptg_location_card_make_portable_btn(),
 			[=] {
 				RemoveInnoSetupRegistryKey();
-				QFile::remove(cExeDir() + u"uninstall.exe"_q);
+				QFile::remove(cExeDir() + u"unins000.exe"_q);
+				QFile::remove(cExeDir() + u"unins000.dat"_q);
 				RemoveStartMenuShortcut(cExeDir() + cExeName());
 				box->closeBox();
 				box->uiShow()->showBox(Box([firstRun](not_null<Ui::GenericBox*> newBox) {
