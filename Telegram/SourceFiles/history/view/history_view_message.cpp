@@ -5221,6 +5221,7 @@ int Message::resizeContentGetHeight(int newWidth) {
 		}
 		if (contentWidth == maxWidth() && !appearing) {
 			if (mediaDisplayed) {
+				newHeight += media->height() - media->minHeight();
 				if (check) {
 					newHeight += check->resizeGetHeight(contentWidth) + st::mediaInBubbleSkip;
 				}
