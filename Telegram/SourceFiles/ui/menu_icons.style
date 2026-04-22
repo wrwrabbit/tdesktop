@@ -211,6 +211,9 @@ menuIconDownloadOff: icon {{ "menu/download_off-24x24", menuIconColor }};
 menuIconShareOff: icon {{ "menu/share_off-24x24", menuIconColor }};
 menuIconShareOn: icon {{ "menu/share_on-24x24", menuIconColor }};
 menuIconStar: icon {{ "menu/star", menuIconColor }};
+menuIconTextStylePlain: icon {{ "menu/text_style_plain-22x22", menuIconColor, point(0px, 2px) }};
+menuIconTextStyleFramed: icon {{ "menu/text_style_framed-22x22", menuIconColor, point(0px, 2px) }};
+menuIconTextStyleSemiTransparent: icon {{ "menu/text_style_semi-22x22", menuIconColor, point(0px, 2px) }};
 
 menuIconTTLAny: icon {{ "menu/auto_delete_plain", menuIconColor }};
 menuIconTTLAnyTextPosition: point(11px, 22px);

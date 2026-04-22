@@ -588,33 +588,42 @@ void ItemText::contextMenuEvent(QGraphicsSceneContextMenuEvent *event) {
 	_contextMenu = base::make_unique_q<Ui::PopupMenu>(
 		nullptr,
 		st::popupMenuWithIcons);
-	const auto add = [&](const QString &text, TextStyle style) {
+	const auto add = [&](
+			const QString &text,
+			TextStyle style,
+			const style::icon *icon) {
 		const auto checked = (_textStyle == style);
-		auto action = _contextMenu->addAction(text, [=] {
-			setTextStyle(style);
-		});
+		auto action = _contextMenu->addAction(
+			text,
+			[=] { setTextStyle(style); },
+			icon);
 		if (checked) {
 			action->setChecked(true);
 		}
 	};
-	add(tr::lng_photo_editor_text_style_plain(tr::now), TextStyle::Plain);
+	add(
+		tr::lng_photo_editor_text_style_plain(tr::now),
+		TextStyle::Plain,
+		&st::menuIconTextStylePlain);
 	add(
 		tr::lng_photo_editor_text_style_framed(tr::now),
-		TextStyle::Framed);
+		TextStyle::Framed,
+		&st::menuIconTextStyleFramed);
 	add(
 		tr::lng_photo_editor_text_style_semi_transparent(tr::now),
-		TextStyle::SemiTransparent);
+		TextStyle::SemiTransparent,
+		&st::menuIconTextStyleSemiTransparent);
 
 	_contextMenu->addSeparator();
 
 	_contextMenu->addAction(
-		tr::lng_photo_editor_menu_delete(tr::now),
-		[=] { actionDelete(); },
-		&st::menuIconDelete);
-	_contextMenu->addAction(
 		tr::lng_photo_editor_menu_duplicate(tr::now),
 		[=] { actionDuplicate(); },
 		&st::menuIconCopy);
+	_contextMenu->addAction(
+		tr::lng_photo_editor_menu_delete(tr::now),
+		[=] { actionDelete(); },
+		&st::menuIconDelete);
 
 	_contextMenu->popup(event->screenPos());
 }
