@@ -65,7 +65,7 @@ RUN git init Implib.so \
 		../implib-gen.py -q $1; \
 		gcc $CFLAGS -c -o $LIBFILE.tramp.o $LIBFILE.tramp.S; \
 		gcc $CFLAGS -c -o $LIBFILE.init.o $LIBFILE.init.c; \
-		ar rcs /usr/local/lib64/$LIBNAME.a $LIBFILE.tramp.o $LIBFILE.init.o; \
+		$AR rcs /usr/local/lib64/$LIBNAME.a $LIBFILE.tramp.o $LIBFILE.init.o; \
 	} \
 	&& implib /usr/lib64/libgtk-3.so \
 	&& implib /usr/lib64/libgdk-3.so \

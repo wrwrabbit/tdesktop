@@ -37,20 +37,6 @@ namespace {
 	return cleanPath == cleanPrefix || cleanPath.startsWith(withSlash);
 }
 
-[[nodiscard]] QString GetProgramFilesPath() {
-#ifdef Q_OS_WIN
-	const auto pf64 = qEnvironmentVariable("PROGRAMFILES");
-	if (!pf64.isEmpty()) {
-		return QDir(pf64).absolutePath();
-	}
-	const auto pf = qEnvironmentVariable("PROGRAMFILES(X86)");
-	if (!pf.isEmpty()) {
-		return QDir(pf).absolutePath();
-	}
-#endif // Q_OS_WIN
-	return QString();
-}
-
 } // namespace
 
 QString DownloadsFolderPath() {

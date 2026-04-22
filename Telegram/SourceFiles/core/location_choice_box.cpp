@@ -93,22 +93,6 @@ namespace {
 	return exeDir;
 }
 
-[[nodiscard]] QString LocationStatusText(
-		Core::BinaryLocationCategory category) {
-	const auto exeDir = QDir::toNativeSeparators(
-		QDir(cExeDir()).absolutePath());
-	switch (category) {
-	case BinaryLocationCategory::SystemAppFolder:
-		return tr::lng_ptg_location_installed(tr::now, lt_path, exeDir);
-	case BinaryLocationCategory::RemovableDrive:
-		return tr::lng_ptg_location_removable(tr::now, lt_path, exeDir);
-	case BinaryLocationCategory::Downloads:
-		return tr::lng_ptg_location_downloads(tr::now);
-	default:
-		return tr::lng_ptg_location_running_from(tr::now, lt_path, exeDir);
-	}
-}
-
 void AddOptionCard(
 		not_null<Ui::VerticalLayout*> container,
 		const QString &title,
@@ -212,10 +196,9 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 			st::boxRowPadding);
 	}
 
-	auto isAlreadyInAppData = false;
 #ifdef Q_OS_WIN
 	const auto appDataPath = QDir(psAppDataPath()).absolutePath();
-	isAlreadyInAppData = (QDir::cleanPath(QDir(cExeDir()).absolutePath()).toLower()
+	const auto isAlreadyInAppData = (QDir::cleanPath(QDir(cExeDir()).absolutePath()).toLower()
 		== QDir::cleanPath(appDataPath).toLower());
 	if (!isSystemApp && !isInstallerManaged && !isAlreadyInAppData) {
 		AddOptionCard(

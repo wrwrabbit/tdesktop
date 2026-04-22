@@ -1204,6 +1204,7 @@ void BuildConfirmationExtensions(SectionBuilder &builder) {
 	builder.addDividerText(tr::lng_settings_edit_extensions_about());
 }
 
+#if 0 // PTG_PRIVACY_UI
 void ShowPrivacyReviewBox(
 		not_null<Window::SessionController*> controller) {
 	const auto session = &controller->session();
@@ -1334,6 +1335,7 @@ void ShowPrivacyReviewBox(
 		});
 	}));
 }
+#endif // PTG_PRIVACY_UI
 
 void BuildPrivacySecuritySectionContent(SectionBuilder &builder) {
 	auto updateOnTick = rpl::single(
