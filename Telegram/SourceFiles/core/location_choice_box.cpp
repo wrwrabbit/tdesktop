@@ -161,7 +161,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 
 	auto isInstallerManaged = false;
 #ifdef Q_OS_WIN
-	isInstallerManaged = QFile::exists(cExeDir() + u"uninstall.exe"_q);
+	isInstallerManaged = QFile::exists(cExeDir() + u"unins000.exe"_q);
 	if (isInstallerManaged) {
 		AddOptionCard(
 			layout,
@@ -176,7 +176,8 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 			tr::lng_ptg_location_card_make_portable_btn(),
 			[=] {
 				RemoveInnoSetupRegistryKey();
-				QFile::remove(cExeDir() + u"uninstall.exe"_q);
+				QFile::remove(cExeDir() + u"unins000.exe"_q);
+				QFile::remove(cExeDir() + u"unins000.dat"_q);
 				RemoveStartMenuShortcut(cExeDir() + cExeName());
 				box->closeBox();
 				box->uiShow()->showBox(Box([firstRun](not_null<Ui::GenericBox*> newBox) {
@@ -215,7 +216,9 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 				const auto targetExists = QFile::exists(appDataPath + '/' + cExeName())
 					|| QDir(appDataPath + u"/tdata"_q).exists();
 				box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
-					confirm->setTitle(tr::lng_ptg_location_confirm_title());
+					confirm->setTitle(targetExists
+						? tr::lng_ptg_location_confirm_overwrite_title()
+						: tr::lng_ptg_location_confirm_title());
 					confirm->addRow(object_ptr<Ui::FlatLabel>(
 						confirm,
 						targetExists
@@ -307,7 +310,9 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 				[=] {
 					const auto targetExists = QFile::exists(homeBinPath + '/' + cExeName());
 					box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
-						confirm->setTitle(tr::lng_ptg_location_confirm_title());
+						confirm->setTitle(targetExists
+							? tr::lng_ptg_location_confirm_overwrite_title()
+							: tr::lng_ptg_location_confirm_title());
 						confirm->addRow(object_ptr<Ui::FlatLabel>(
 							confirm,
 							targetExists
@@ -381,7 +386,9 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 				box->uiShow()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
 					const auto targetExists = QFile::exists(cleanChosen + '/' + cExeName())
 						|| QDir(cleanChosen + u"/tdata"_q).exists();
-					confirm->setTitle(tr::lng_ptg_location_confirm_title());
+					confirm->setTitle(targetExists
+						? tr::lng_ptg_location_confirm_overwrite_title()
+						: tr::lng_ptg_location_confirm_title());
 					confirm->addRow(object_ptr<Ui::FlatLabel>(
 						confirm,
 						targetExists

@@ -39,6 +39,18 @@ namespace {
 		if (relative == u"working"_q) {
 			continue;
 		}
+		if (relative.startsWith(u"temp"_q)) {
+			continue;
+		}
+		if (relative.startsWith(u"user_data"_q)) {
+			continue;
+		}
+		if (relative.startsWith(u"dumps"_q)) {
+			continue;
+		}
+		if (relative.startsWith(u"emoji"_q)) {
+			continue;
+		}
 		const auto dstFile = target + '/' + relative;
 		QDir().mkpath(QFileInfo(dstFile).absolutePath());
 		QFile::remove(dstFile);
@@ -248,11 +260,20 @@ bool ApplyPendingSwitch() {
 		const auto cleanSource = QDir::cleanPath(sourceWorkingDir);
 
 		// These files are released well before the old process exits.
-		for (const auto &name : {
+#ifdef Q_OS_WIN
+		const auto updaterName = u"Updater.exe"_q;
+#else
+		const auto updaterName = u"Updater"_q;
+#endif
+		const auto filesToClean = {
 			u"log.txt"_q,
-			u"Updater.exe"_q,
-			u"uninstall.exe"_q,
-		}) {
+			updaterName,
+#ifdef Q_OS_WIN
+			u"unins000.exe"_q,
+			u"unins000.dat"_q,
+#endif
+		};
+		for (const auto &name : filesToClean) {
 			const auto filePath = cleanSource + '/' + name;
 			if (QFile::exists(filePath)) {
 				FAKE_LOG(("LocationSwitch: cleanup '%1': %2").arg(
