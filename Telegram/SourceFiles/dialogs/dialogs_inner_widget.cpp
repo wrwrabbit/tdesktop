@@ -2839,7 +2839,11 @@ void InnerWidget::dialogRowReplaced(
 		_selected = newRow;
 	}
 	if (_pressed == oldRow) {
-		setPressed(newRow, _pressedTopicJump, _pressedRightButton);
+		if (newRow) {
+			setPressed(newRow, _pressedTopicJump, _pressedRightButton);
+		} else {
+			clearPressed();
+		}
 	}
 	if (_dragging == oldRow) {
 		if (newRow) {
@@ -4334,8 +4338,6 @@ void InnerWidget::refreshEmpty() {
 			this,
 			tr::lng_no_conversations_button(),
 			st::dialogEmptyButton);
-		_emptyButton->setTextTransform(
-			Ui::RoundButton::TextTransform::NoTransform);
 		_emptyButton->setVisible(isListVisible);
 		_emptyButton->setClickedCallback([=, window = _controller] {
 			window->show(PrepareContactsBox(window));

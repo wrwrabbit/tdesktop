@@ -633,7 +633,7 @@ private:
 	crl::time _lastFullUpdate = 0;
 
 	QString _name;
-	uint32 _nameVersion : 29 = 1;
+	uint32 _nameVersion : 16 = 1;
 	uint32 _sensitiveContent : 1 = 0;
 	uint32 _wallPaperOverriden : 1 = 0;
 	uint32 _checkedTrustedPayForMessage : 1 = 0;

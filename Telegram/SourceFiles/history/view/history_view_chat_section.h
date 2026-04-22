@@ -54,6 +54,7 @@ class Result;
 namespace Data {
 class RepliesList;
 class ForumTopic;
+struct DrawToReplyRequest;
 } // namespace Data
 
 namespace HistoryView {
@@ -163,7 +164,8 @@ public:
 	void listMarkContentsRead(
 		const base::flat_set<not_null<HistoryItem*>> &items) override;
 	MessagesBarData listMessagesBar(
-		const std::vector<not_null<Element*>> &elements) override;
+		const std::vector<not_null<Element*>> &elements,
+		bool markLastAsRead) override;
 	void listContentRefreshed() override;
 	void listUpdateDateLink(
 		ClickHandlerPtr &link,
@@ -186,6 +188,7 @@ public:
 	auto listAllowedReactionsValue()
 		->rpl::producer<Data::AllowedReactions> override;
 	void listShowPremiumToast(not_null<DocumentData*> document) override;
+	bool handleDrawToReplyRequest(Data::DrawToReplyRequest request);
 	void listOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) override;

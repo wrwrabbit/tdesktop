@@ -668,8 +668,11 @@ bool ReplyArea::confirmSendingFiles(
 	}
 
 	const auto show = _controller->uiShow();
-	auto confirmed = [=](auto &&...args) {
-		sendingFilesConfirmed(std::forward<decltype(args)>(args)...);
+	auto confirmed = [=](
+			std::shared_ptr<Ui::PreparedBundle> bundle,
+			Api::SendOptions options,
+			FullReplyTo) {
+		sendingFilesConfirmed(std::move(bundle), options);
 	};
 	show->show(Box<SendFilesBox>(SendFilesBoxDescriptor{
 		.show = show,
@@ -765,6 +768,12 @@ void ReplyArea::initActions() {
 			this,
 			[=] { chooseAttach(overrideCompress); });
 	}, _lifetime);
+
+	_controls->setSendAsFileConfirmed(crl::guard(this, [=](
+			std::shared_ptr<Ui::PreparedBundle> bundle,
+			Api::SendOptions options) {
+		sendingFilesConfirmed(std::move(bundle), options);
+	}));
 
 	_controls->fileChosen(
 	) | rpl::on_next([=](ChatHelpers::FileChosen data) {

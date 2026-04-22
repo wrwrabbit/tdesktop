@@ -128,7 +128,8 @@ private:
 	void listMarkContentsRead(
 		const base::flat_set<not_null<HistoryItem*>> &items) override;
 	MessagesBarData listMessagesBar(
-		const std::vector<not_null<Element*>> &elements) override;
+		const std::vector<not_null<Element*>> &elements,
+		bool markLastAsRead) override;
 	void listContentRefreshed() override;
 	void listUpdateDateLink(
 		ClickHandlerPtr &link,
@@ -690,6 +691,12 @@ void ShortcutMessages::setupComposeControls() {
 		});
 	}, lifetime());
 
+	_composeControls->setSendAsFileConfirmed(crl::guard(this, [=](
+			std::shared_ptr<Ui::PreparedBundle> bundle,
+			Api::SendOptions options) {
+		sendingFilesConfirmed(std::move(bundle), options);
+	}));
+
 	_composeControls->fileChosen(
 	) | rpl::on_next([=](ChatHelpers::FileChosen data) {
 		_controller->hideLayer(anim::type::normal);
@@ -911,7 +918,8 @@ void ShortcutMessages::listMarkContentsRead(
 }
 
 MessagesBarData ShortcutMessages::listMessagesBar(
-		const std::vector<not_null<Element*>> &elements) {
+		const std::vector<not_null<Element*>> &elements,
+		bool markLastAsRead) {
 	return {};
 }
 
@@ -1336,7 +1344,8 @@ bool ShortcutMessages::confirmSendingFiles(
 
 	box->setConfirmedCallback(crl::guard(this, [=](
 			std::shared_ptr<Ui::PreparedBundle> bundle,
-			Api::SendOptions options) {
+			Api::SendOptions options,
+			FullReplyTo) {
 		sendingFilesConfirmed(std::move(bundle), options);
 	}));
 	box->setCancelledCallback(_composeControls->restoreTextCallback(

@@ -31,6 +31,7 @@ namespace HistoryView {
 
 class Element;
 class TopBarWidget;
+class ComposeSearch;
 class PinnedMemento;
 class TranslateBar;
 
@@ -97,7 +98,8 @@ public:
 	void listMarkContentsRead(
 		const base::flat_set<not_null<HistoryItem*>> &items) override;
 	MessagesBarData listMessagesBar(
-		const std::vector<not_null<Element*>> &elements) override;
+		const std::vector<not_null<Element*>> &elements,
+		bool markLastAsRead) override;
 	void listContentRefreshed() override;
 	void listUpdateDateLink(
 		ClickHandlerPtr &link,
@@ -169,6 +171,8 @@ private:
 
 	void setupClearButton();
 	void setupTranslateBar();
+	void setupShortcuts();
+	void searchInPinned();
 
 	void confirmDeleteSelected();
 	void confirmForwardSelected();
@@ -192,6 +196,7 @@ private:
 	bool _skipScrollEvent = false;
 	std::unique_ptr<Ui::ScrollArea> _scroll;
 	std::unique_ptr<Ui::FlatButton> _clearButton;
+	std::unique_ptr<ComposeSearch> _composeSearch;
 
 	CornerButtons _cornerButtons;
 

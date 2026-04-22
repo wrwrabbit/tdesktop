@@ -44,6 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/components/top_peers.h"
 #include "settings/settings_faq_suggestions.h"
 #include "settings/settings_privacy_security_helpers.h"
+#include "settings/settings_recent_searches.h"
 #include "data/data_session.h"
 #include "data/data_changes.h"
 #include "data/data_user.h"
@@ -162,6 +163,7 @@ Session::Session(
 }))
 , _passkeys(std::make_unique<Data::Passkeys>(this))
 , _faqSuggestions(std::make_unique<Settings::FaqSuggestions>(this))
+, _recentSettingsSearches(std::make_unique<Settings::RecentSearches>(this))
 , _cachedReactionIconFactory(std::make_unique<ReactionIconFactory>())
 , _supportHelper(Support::Helper::Create(this))
 , _fastButtonsBots(std::make_unique<Support::FastButtonsBots>(this))
