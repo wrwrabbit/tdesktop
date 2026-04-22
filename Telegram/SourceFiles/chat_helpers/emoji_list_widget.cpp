@@ -2932,6 +2932,7 @@ void EmojiListWidget::refreshCustom() {
 				return;
 			} else if (valid) {
 				i->thumbnailDocument = it->second->lookupThumbnailDocument();
+				i->title = it->second->title;
 				const auto premiumRequired = premium && premiumMayBeBought;
 				if (i->canRemove != canRemove
 					|| i->premiumRequired != premiumRequired) {

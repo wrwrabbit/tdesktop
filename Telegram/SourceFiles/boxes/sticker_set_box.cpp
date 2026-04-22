@@ -976,10 +976,17 @@ void StickerSetBox::updateButtons() {
 						top,
 						st::popupMenuWithIcons);
 					if (type == Data::StickersType::Emoji) {
-						(*menu)->addAction(
-							tr::lng_custom_emoji_remove_pack_button(tr::now),
-							remove,
-							&st::menuIconRemove);
+						if (fillSetCreatorMenu) {
+							fillSetCreatorMenu(*menu);
+						}
+						if (fillSetCreatorFooter) {
+							fillSetCreatorFooter(*menu);
+						} else {
+							(*menu)->addAction(
+								tr::lng_custom_emoji_remove_pack_button(tr::now),
+								remove,
+								&st::menuIconRemove);
+						}
 					} else {
 						if (fillSetCreatorMenu) {
 							fillSetCreatorMenu(*menu);
@@ -1137,7 +1144,8 @@ void StickerSetBox::Inner::applySet(const TLStickerSet &set) {
 					& (SetFlag::Featured
 						| SetFlag::NotLoaded
 						| SetFlag::Unread
-						| SetFlag::Special);
+						| SetFlag::Special
+						| SetFlag::Installed);
 				_setFlags |= clientFlags;
 				set->flags = _setFlags;
 				set->installDate = _setInstallDate;
@@ -1611,6 +1619,19 @@ void StickerSetBox::Inner::contextMenuEvent(QContextMenuEvent *e) {
 				Ui::Menu::CreateAddActionCallback(_menu.get()),
 				_show,
 				_pack[index]);
+		} else {
+			const auto addAction = Ui::Menu::CreateAddActionCallback(
+				_menu.get());
+			addAction({
+				.text = tr::lng_emoji_context_delete(tr::now),
+				.handler = [index, this, show = _show] {
+					show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+						fillDeleteStickerBox(box, index);
+					}));
+				},
+				.icon = &st::menuIconDeleteAttention,
+				.isAttention = true,
+			});
 		}
 	} else if (details.type != SendMenu::Type::Disabled) {
 		const auto document = _pack[index];
@@ -1684,6 +1705,8 @@ void StickerSetBox::Inner::fillDeleteStickerBox(
 	const auto document = _pack[index];
 	const auto weak = base::make_weak(this);
 	const auto show = _show;
+	const auto type = setType();
+	const auto isEmoji = (type == Data::StickersType::Emoji);
 
 	const auto container = box->verticalLayout();
 	Ui::AddSkip(container);
@@ -1718,7 +1741,9 @@ void StickerSetBox::Inner::fillDeleteStickerBox(
 	}, sticker->lifetime());
 	const auto label = Ui::CreateChild<Ui::FlatLabel>(
 		line,
-		tr::lng_stickers_context_delete(),
+		isEmoji
+			? tr::lng_emoji_context_delete()
+			: tr::lng_stickers_context_delete(),
 		box->getDelegate()->style().title);
 	line->widthValue(
 	) | rpl::on_next([=](int width) {
@@ -1742,7 +1767,9 @@ void StickerSetBox::Inner::fillDeleteStickerBox(
 	box->addRow(
 		object_ptr<Ui::FlatLabel>(
 			container,
-			tr::lng_stickers_context_delete_sure(),
+			isEmoji
+				? tr::lng_emoji_context_delete_sure()
+				: tr::lng_stickers_context_delete_sure(),
 			st::boxLabel));
 	const auto save = [=] {
 		if (state->requestId.current()) {
@@ -1757,8 +1784,7 @@ void StickerSetBox::Inner::fillDeleteStickerBox(
 		)).done([=](const TLStickerSet &result) {
 			result.match([&](const MTPDmessages_stickerSet &d) {
 				document->owner().stickers().feedSetFull(d);
-				document->owner().stickers().notifyUpdated(
-					Data::StickersType::Stickers);
+				document->owner().stickers().notifyUpdated(type);
 			}, [](const auto &) {
 			});
 			if ([[maybe_unused]] const auto strong = weak.get()) {
