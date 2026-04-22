@@ -373,6 +373,11 @@ auto VideoTrackObject::readFrame(not_null<Frame*> frame) -> FrameResult {
 		_waitingForData.fire({});
 		return FrameResult::Waiting;
 	}
+	const auto decodedFrame = _stream.decodedFrame.get();
+	if (int64(decodedFrame->width) * decodedFrame->height > kMaxFrameArea) {
+		fail(Error::InvalidData);
+		return FrameResult::Error;
+	}
 	const auto position = currentFramePosition();
 	if (position == kTimeUnknown) {
 		fail(Error::InvalidData);
@@ -649,7 +654,7 @@ bool VideoTrackObject::tryReadFirstFrame(FFmpeg::Packet &&packet) {
 
 bool VideoTrackObject::processFirstFrame() {
 	const auto decodedFrame = _stream.decodedFrame.get();
-	if (decodedFrame->width * decodedFrame->height > kMaxFrameArea) {
+	if (int64(decodedFrame->width) * decodedFrame->height > kMaxFrameArea) {
 		return false;
 	} else if (decodedFrame->hw_frames_ctx) {
 		if (!_stream.transferredFrame) {
@@ -716,6 +721,10 @@ void VideoTrackObject::callReady() {
 	const auto frame = _shared->frameForPaint();
 	++_frameIndex;
 
+	const auto frameSize = frame->original.isNull()
+		? frame->yuv.size
+		: frame->original.size();
+
 	base::take(_ready)({ VideoInformation{
 		.state = {
 			.position = _syncTimePoint.trackTime,
@@ -725,10 +734,14 @@ void VideoTrackObject::callReady() {
 			.duration = _stream.duration,
 		},
 		.size = FFmpeg::TransposeSizeByRotation(
-			FFmpeg::CorrectByAspect(frame->original.size(), _stream.aspect),
+			FFmpeg::CorrectByAspect(frameSize, _stream.aspect),
+			_stream.rotation),
+		.realSize = FFmpeg::TransposeSizeByRotation(
+			frameSize,
 			_stream.rotation),
 		.cover = frame->original,
 		.rotation = _stream.rotation,
+		.fps = _stream.fps,
 		.alpha = frame->alpha,
 	} });
 }

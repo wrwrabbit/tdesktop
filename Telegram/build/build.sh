@@ -321,7 +321,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
       echo "Done."
     fi
   fi
-  if [ "$NotarizeRequestId" == "" ]; then
+  if [ "$NotarizeRequestId" == "" ] || [ "$NotarizeRequestId" == "go" ]; then
     if [ "$BuildTarget" == "mac" ]; then
       if [ ! -f "$ReleasePath/$BundleName/Contents/Frameworks/Updater" ]; then
         Error "Updater not found!"
@@ -463,7 +463,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
 
     if [ "$CP_ARCH" != "" ]; then
       echo "CP_ARCH set to $CP_ARCH, skipping DMG creation."
-    elif [ "$NotarizeRequestId" == "" ]; then
+    elif [ "$NotarizeRequestId" == "" ] || [ "$NotarizeRequestId" == "go" ]; then
       if [ "$AlphaVersion" == "0" ]; then
         #cp -f tsetup_template.dmg tsetup.temp.dmg
         #TempDiskPath=`hdiutil attach -nobrowse -noautoopenrw -readwrite tsetup.temp.dmg | awk -F "\t" 'END {print $3}'`
@@ -519,7 +519,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
         SetupFile="talpha${AlphaVersion}_${AlphaSignature}.zip"
       fi
 
-      if [ "$NotarizeRequestId" == "" ]; then
+      if [ "$NotarizeRequestId" == "" ] || [ "$NotarizeRequestId" == "go" ]; then
         rm -rf "$ReleasePath/AlphaTemp"
         mkdir "$ReleasePath/AlphaTemp"
         mkdir "$ReleasePath/AlphaTemp/$BinaryName"

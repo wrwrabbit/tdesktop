@@ -7,11 +7,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/controls/compose_ai_button_factory.h"
 
+#include "base/options.h"
 #include "boxes/compose_ai_box.h"
+#include "config.h"
+#include "core/mime_type.h"
 #include "history/view/controls/history_view_compose_ai_button.h"
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
+#include "ui/chat/attach/attach_prepare.h"
+#include "ui/text/text.h"
 #include "ui/text/text_entity.h"
 #include "ui/widgets/fields/input_field.h"
 
@@ -19,10 +24,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Ui {
 
+const char kOptionHideAiButton[] = "hide-ai-button";
+
+base::options::toggle HideAiButtonOption({
+	.id = kOptionHideAiButton,
+	.name = "Hide AI button",
+	.description = "Hide the AI Tools button in message compose fields.",
+});
+
 bool HasEnoughLinesForAi(
 		not_null<Main::Session*> session,
 		not_null<Ui::InputField*> field) {
-	if (session->appConfig().aiComposeStyles().empty()) {
+	if (HideAiButtonOption.value()
+		|| session->appConfig().aiComposeStyles().empty()) {
 		return false;
 	}
 	const auto &style = field->st().style;
@@ -33,7 +47,66 @@ bool HasEnoughLinesForAi(
 	const auto contentHeight = field->height()
 		- margins.top()
 		- margins.bottom();
-	return contentHeight >= (3 * lineHeight);
+	if (contentHeight < (3 * lineHeight)) {
+		return false;
+	}
+	const auto &text = field->getLastText();
+	if (text.size() > MaxMessageSize) {
+		return false;
+	}
+	for (const auto &ch : text) {
+		if (!Text::IsTrimmed(ch) && !Text::IsReplacedBySpace(ch)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+PreparedList PrepareTextAsFile(const QString &text) {
+	auto content = text.toUtf8();
+	auto result = PreparedList();
+	auto file = PreparedFile(QString());
+	file.content = content;
+	file.displayName = u"message.txt"_q;
+	file.size = content.size();
+	file.information = std::make_unique<PreparedFileInformation>();
+	file.information->filemime = u"text/plain"_q;
+	result.files.push_back(std::move(file));
+	return result;
+}
+
+constexpr auto kSendAsFilePasteMultiplier = 8;
+
+int SendAsFilePasteThreshold() {
+	return kSendAsFilePasteMultiplier * MaxMessageSize;
+}
+
+LargeTextPasteResult CheckLargeTextPaste(
+		not_null<Ui::InputField*> field,
+		not_null<const QMimeData*> data) {
+	if (data->hasImage()) {
+		return {};
+	}
+	const auto pasteText = Core::ReadMimeText(data);
+	if (pasteText.isEmpty()) {
+		return {};
+	}
+	const auto cursor = field->textCursor();
+	const auto currentText = field->getLastText();
+	const auto selStart = cursor.selectionStart();
+	const auto selEnd = cursor.selectionEnd();
+	const auto resultingSize = currentText.size()
+		- (selEnd - selStart)
+		+ pasteText.size();
+	if (resultingSize < SendAsFilePasteThreshold()) {
+		return {};
+	}
+	return {
+		.exceeds = true,
+		.resultingText = currentText.mid(0, selStart)
+			+ pasteText
+			+ currentText.mid(selEnd),
+	};
 }
 
 void UpdateCaptionAiButtonGeometry(

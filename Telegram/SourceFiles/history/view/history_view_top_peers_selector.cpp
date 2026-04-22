@@ -69,15 +69,18 @@ void ShowTopPeersSelector(
 
 	const auto send = [=](not_null<PeerData*> peer) {
 		if (const auto item = session->data().message(fullId)) {
+			const auto items = session->data().idsToItems(
+				session->data().itemOrItsGroup(item));
+			const auto single = (items.size() == 1);
 			session->api().forwardMessages(
-				Data::ResolvedForwardDraft{ .items = { item } },
+				Data::ResolvedForwardDraft{ .items = items },
 				Api::SendAction(session->data().history(peer)),
 				[=] {
 					using namespace ChatHelpers;
 					auto text = rpl::variable<TextWithEntities>(
 						ForwardedMessagePhrase({
 							.toCount = 1,
-							.singleMessage = 1,
+							.singleMessage = single,
 							.to1 = peer,
 						})).current();
 					show->showToast(std::move(text));
@@ -90,10 +93,11 @@ void ShowTopPeersSelector(
 	const auto contentHeight = int(
 		st::topPeersSelectorUserpicSize
 			* (1. + st::topPeersSelectorUserpicExpand));
-	const auto selectorWidth = contentWidth
-		+ 2 * st::topPeersSelectorPadding;
 	const auto selectorHeight = contentHeight
 		+ 2 * st::topPeersSelectorPadding;
+	const auto selectorWidth = (peers.size() == 1)
+		? selectorHeight
+		: (contentWidth + 2 * st::topPeersSelectorPadding);
 
 	struct State {
 		base::unique_qptr<Ui::PopupSelector> selector;
@@ -159,7 +163,10 @@ void ShowTopPeersSelector(
 					peers[info.index]->isSelf()
 						? tr::lng_saved_messages(tr::rich)
 						: NameValue(peers[info.index]) | rpl::map(tr::rich),
-					userpicsWidget->width(),
+					std::max(
+						userpicsWidget->width(),
+						st::topPeersSelectorImportantTooltipLabel.minWidth
+							+ st::lineWidth),
 					st::topPeersSelectorImportantTooltipLabel),
 				st::topPeersSelectorImportantTooltip.padding),
 			st::topPeersSelectorImportantTooltip);

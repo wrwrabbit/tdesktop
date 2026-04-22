@@ -175,8 +175,19 @@ void AbstractSingleMediaPreview::paintEvent(QPaintEvent *e) {
 		}
 	});
 
+	auto hq = std::optional<PainterHighQualityEnabler>();
 	if (drawBackground()) {
 		const auto &padding = st::boxPhotoPadding;
+		const auto bgRect = QRect(
+			padding.left(),
+			0,
+			width() - padding.left() - padding.right(),
+			height());
+		const auto radius = st::bubbleRadiusSmall;
+		auto clipPath = QPainterPath();
+		clipPath.addRoundedRect(bgRect, radius, radius);
+		hq.emplace(p);
+		p.setClipPath(clipPath);
 		if (_previewLeft > padding.left()) {
 			p.fillRect(
 				padding.left(),
@@ -259,7 +270,7 @@ void AbstractSingleMediaPreview::mouseMoveEvent(QMouseEvent *e) {
 
 void AbstractSingleMediaPreview::mouseReleaseEvent(QMouseEvent *e) {
 	if (base::take(_pressed) && isOverPreview(e->pos())) {
-		if (isPhoto()) {
+		if (e->button() == Qt::LeftButton && isPhoto()) {
 			_photoEditorRequests.fire({});
 		}
 	}

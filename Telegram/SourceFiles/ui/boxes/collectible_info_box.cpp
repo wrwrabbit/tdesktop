@@ -30,8 +30,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Ui {
 namespace {
 
-constexpr auto kTonMultiplier = uint64(1000000000);
-
 [[nodiscard]] QString FormatEntity(CollectibleType type, QString entity) {
 	switch (type) {
 	case CollectibleType::Phone: {
@@ -232,7 +230,6 @@ void CollectibleInfoBox(
 			tr::lng_collectible_learn_more(),
 			st::collectibleMore),
 		st::collectibleMorePadding);
-	more->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 	more->setClickedCallback([url = info.url] {
 		File::OpenUrl(url);
 	});
@@ -245,7 +242,6 @@ void CollectibleInfoBox(
 		phrase(),
 		st::collectibleCopy);
 	const auto copy = owned.data();
-	copy->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 	copy->setClickedCallback([copyCallback] {
 		copyCallback(true);
 	});

@@ -462,36 +462,6 @@ ChatWidget::ChatWidget(
 		}, lifetime());
 	}
 
-	session().data().drawToReplyRequests(
-	) | rpl::on_next([=](Data::DrawToReplyRequest request) {
-		if (request.messageId.peer != _peer->id) {
-			return;
-		}
-		auto image = ResolveDrawToReplyImage(
-			&session().data(),
-			request);
-		if (image.isNull()) {
-			return;
-		}
-		const auto replyTo = request.messageId;
-		OpenDrawToReplyEditor(
-			controller,
-			std::move(image),
-			crl::guard(this, [=](QImage &&result) {
-				if (result.isNull()) {
-					return;
-				}
-				if (replyTo) {
-					replyToMessage({ .messageId = replyTo });
-				}
-				auto list = Storage::PrepareMediaFromImage(
-					std::move(result),
-					QByteArray(),
-					st::sendMediaPreviewSize);
-				confirmSendingFiles(std::move(list));
-			}));
-	}, lifetime());
-
 	_selfForwardsTagger = std::make_unique<HistoryView::SelfForwardsTagger>(
 		controller,
 		this,
@@ -920,6 +890,12 @@ void ChatWidget::setupComposeControls() {
 			[=] { chooseAttach(overrideCompress); });
 	}, lifetime());
 
+	_composeControls->setSendAsFileConfirmed(crl::guard(this, [=](
+			std::shared_ptr<Ui::PreparedBundle> bundle,
+			Api::SendOptions options) {
+		sendingFilesConfirmed(std::move(bundle), options);
+	}));
+
 	_composeControls->fileChosen(
 	) | rpl::on_next([=](ChatHelpers::FileChosen data) {
 		controller()->hideLayer(anim::type::normal);
@@ -1220,10 +1196,16 @@ bool ChatWidget::confirmSendingFiles(
 		_peer,
 		Api::SendType::Normal,
 		sendMenuDetails());
+	box->setReplyTo(_composeControls->replyingToMessage());
 
 	box->setConfirmedCallback(crl::guard(this, [=](
 			std::shared_ptr<Ui::PreparedBundle> bundle,
-			Api::SendOptions options) {
+			Api::SendOptions options,
+			FullReplyTo currentReplyTo) {
+		if (!currentReplyTo.messageId
+				&& _composeControls->replyingToMessage().messageId) {
+			_composeControls->cancelReplyMessage();
+		}
 		sendingFilesConfirmed(std::move(bundle), options);
 	}));
 	box->setCancelledCallback(_composeControls->restoreTextCallback(
@@ -3149,7 +3131,8 @@ void ChatWidget::listMarkContentsRead(
 }
 
 MessagesBarData ChatWidget::listMessagesBar(
-		const std::vector<not_null<Element*>> &elements) {
+		const std::vector<not_null<Element*>> &elements,
+		bool markLastAsRead) {
 	if ((!_sublist && !_replies) || elements.empty()) {
 		return {};
 	}
@@ -3160,7 +3143,15 @@ MessagesBarData ChatWidget::listMessagesBar(
 	for (auto i = 0, count = int(elements.size()); i != count; ++i) {
 		const auto item = elements[i]->data();
 		if (item->isRegular() && item->id > till) {
-			if (item->out() || (_replies && !item->replyToId())) {
+			if (markLastAsRead
+				|| item->out()
+				|| (_replies && !item->replyToId())) {
+				if (markLastAsRead) {
+					if (item->isUnreadMention() && !item->isUnreadMedia()) {
+						session().api().markContentsRead(item);
+					}
+					item->markClientSideAsRead();
+				}
 				if (_replies) {
 					_replies->readTill(item);
 				} else {
@@ -3320,6 +3311,34 @@ void ChatWidget::listShowPremiumToast(not_null<DocumentData*> document) {
 			[=] { _stickerToast = nullptr; });
 	}
 	_stickerToast->showFor(document);
+}
+
+bool ChatWidget::handleDrawToReplyRequest(Data::DrawToReplyRequest request) {
+	if (request.messageId.peer != _peer->id) {
+		return false;
+	}
+	auto image = ResolveDrawToReplyImage(&session().data(), request);
+	if (image.isNull()) {
+		return false;
+	}
+	const auto replyTo = request.messageId;
+	OpenDrawToReplyEditor(
+		controller(),
+		std::move(image),
+		crl::guard(this, [=](QImage &&result) {
+			if (result.isNull()) {
+				return;
+			}
+			if (replyTo) {
+				replyToMessage({ .messageId = replyTo });
+			}
+			auto list = Storage::PrepareMediaFromImage(
+				std::move(result),
+				QByteArray(),
+				st::sendMediaPreviewSize);
+			confirmSendingFiles(std::move(list));
+		}));
+	return true;
 }
 
 void ChatWidget::listOpenPhoto(
@@ -3543,6 +3562,7 @@ bool ChatWidget::searchInChatEmbedded(
 		_history,
 		sublist->sublistPeer(),
 		query);
+	_composeSearch->setCalendarChat(Dialogs::Key(sublist));
 
 	updateControlsGeometry();
 	setInnerFocus();
