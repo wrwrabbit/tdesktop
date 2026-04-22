@@ -482,12 +482,18 @@ void InstallLauncher() {
 	const auto currentDesktopId = QGuiApplication::desktopFileName();
 	const auto lastDesktopIdPath = cWorkingDir() + u"tdata/last_desktop_id"_q;
 
-	{
+	static const auto ValidDesktopId = [](const QString &id) {
+		static const auto re = QRegularExpression(
+			u"^[A-Za-z0-9._-]+$"_q);
+		return !id.isEmpty() && re.match(id).hasMatch();
+	};
+
+	if (ValidDesktopId(currentDesktopId)) {
 		QFile lastFile(lastDesktopIdPath);
 		if (lastFile.open(QIODevice::ReadOnly)) {
 			const auto previousId = QString::fromUtf8(
 				lastFile.readAll()).trimmed();
-			if (!previousId.isEmpty() && previousId != currentDesktopId) {
+			if (ValidDesktopId(previousId) && previousId != currentDesktopId) {
 				DEBUG_LOG(("App Info: removing stale launcher files for '%1'"
 					).arg(previousId));
 				QFile::remove(applicationsPath + previousId + u".desktop"_q);
@@ -502,10 +508,11 @@ void InstallLauncher() {
 	GenerateDesktopFile(applicationsPath);
 	GenerateServiceFile();
 
-	{
-		QFile lastFile(lastDesktopIdPath);
-		if (lastFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+	if (ValidDesktopId(currentDesktopId)) {
+		QSaveFile lastFile(lastDesktopIdPath);
+		if (lastFile.open(QIODevice::WriteOnly)) {
 			lastFile.write(currentDesktopId.toUtf8());
+			lastFile.commit();
 		}
 	}
 
