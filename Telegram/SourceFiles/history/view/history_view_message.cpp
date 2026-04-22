@@ -4791,7 +4791,11 @@ ClickHandlerPtr Message::prepareRightActionLink() const {
 			}
 		}
 	});
-	result->setProperty(kFastShareProperty, QVariant::fromValue(true));
+	const auto navigates = data()->externalReply()
+		|| (savedFromPeer && savedFromMsgId);
+	if (!navigates) {
+		result->setProperty(kFastShareProperty, QVariant::fromValue(true));
+	}
 	return result;
 }
 
