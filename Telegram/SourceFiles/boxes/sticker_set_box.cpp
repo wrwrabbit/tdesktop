@@ -919,16 +919,17 @@ void StickerSetBox::updateButtons() {
 
 			if (!_inner->shortName().isEmpty()) {
 				const auto top = addTopButton(st::infoTopBarMenu);
-				const auto menu
-					= std::make_shared<base::unique_qptr<Ui::PopupMenu>>();
+				const auto menu = top->lifetime().make_state<
+					base::unique_qptr<Ui::PopupMenu>>();
 				top->setClickedCallback([=] {
 					*menu = base::make_unique_q<Ui::PopupMenu>(
 						top,
 						st::popupMenuWithIcons);
+					const auto raw = menu->get();
 					if (fillSetCreatorMenu) {
-						fillSetCreatorMenu(*menu);
+						fillSetCreatorMenu(raw);
 					}
-					(*menu)->addAction(
+					raw->addAction(
 						((type == Data::StickersType::Emoji)
 							? tr::lng_stickers_share_emoji
 							: (type == Data::StickersType::Masks)
@@ -937,9 +938,19 @@ void StickerSetBox::updateButtons() {
 						[=] { share(); closeBox(); },
 						&st::menuIconShare);
 					if (fillSetCreatorFooter) {
-						fillSetCreatorFooter(*menu);
+						fillSetCreatorFooter(raw);
 					}
-					(*menu)->popup(QCursor::pos());
+					raw->setForcedOrigin(
+						Ui::PanelAnimation::Origin::TopRight);
+					top->setForceRippled(true);
+					raw->setDestroyedCallback([=] {
+						if (const auto strong = top.data()) {
+							strong->setForceRippled(false);
+						}
+					});
+					raw->popup(top->mapToGlobal(QPoint(
+						top->width(),
+						top->height() - st::lineWidth * 3)));
 					return true;
 				});
 			}
@@ -969,39 +980,50 @@ void StickerSetBox::updateButtons() {
 						_show->showBox(std::move(box));
 					}
 				};
-				const auto menu
-					= std::make_shared<base::unique_qptr<Ui::PopupMenu>>();
+				const auto menu = top->lifetime().make_state<
+					base::unique_qptr<Ui::PopupMenu>>();
 				top->setClickedCallback([=] {
 					*menu = base::make_unique_q<Ui::PopupMenu>(
 						top,
 						st::popupMenuWithIcons);
+					const auto raw = menu->get();
 					if (type == Data::StickersType::Emoji) {
 						if (fillSetCreatorMenu) {
-							fillSetCreatorMenu(*menu);
+							fillSetCreatorMenu(raw);
 						}
 						if (fillSetCreatorFooter) {
-							fillSetCreatorFooter(*menu);
+							fillSetCreatorFooter(raw);
 						} else {
-							(*menu)->addAction(
+							raw->addAction(
 								tr::lng_custom_emoji_remove_pack_button(tr::now),
 								remove,
 								&st::menuIconRemove);
 						}
 					} else {
 						if (fillSetCreatorMenu) {
-							fillSetCreatorMenu(*menu);
+							fillSetCreatorMenu(raw);
 						}
-						(*menu)->addAction(
+						raw->addAction(
 							(type == Data::StickersType::Masks
 								? tr::lng_masks_archive_pack(tr::now)
 								: tr::lng_stickers_archive_pack(tr::now)),
 							archive,
 							&st::menuIconArchive);
 						if (fillSetCreatorFooter) {
-							fillSetCreatorFooter(*menu);
+							fillSetCreatorFooter(raw);
 						}
 					}
-					(*menu)->popup(QCursor::pos());
+					raw->setForcedOrigin(
+						Ui::PanelAnimation::Origin::TopRight);
+					top->setForceRippled(true);
+					raw->setDestroyedCallback([=] {
+						if (const auto strong = top.data()) {
+							strong->setForceRippled(false);
+						}
+					});
+					raw->popup(top->mapToGlobal(QPoint(
+						top->width(),
+						top->height() - st::lineWidth * 3)));
 					return true;
 				});
 			}
