@@ -7913,7 +7913,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_install_same" = "Install same version (PTG-test)";
 
 "lng_version_mistmatch_confirm" = "Confirm existing data overwrite";
-"lng_version_mistmatch_desc" = "You are starting PTelegram using data from more recent version. PTelegram does not support this. If you continue - all existing configuration/sessions/data will be erased.\nWARNING: You will need to login again, and may loose your account if you can't.\nNote: You can try use more recent version of PTelegram.\nDo you want to proceed and clean existing data?";
+"lng_version_mistmatch_desc" = "You are starting PTelegram using data from more recent version. PTelegram does not support this. If you continue - all existing configuration/sessions/data will be erased.\nWARNING: You will need to login again, and may lose your account if you can't.\nNote: You can try a more recent version of PTelegram.\nDo you want to proceed and clean existing data?";
 
 "lng_fakepasscodes_list" = "Fake passcodes list";
 "lng_fakeglobalaction_list" = "Global actions";
