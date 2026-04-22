@@ -181,7 +181,7 @@ Image *DocumentMedia::goodThumbnail() const {
 }
 
 void DocumentMedia::setGoodThumbnail(QImage thumbnail) {
-	if (!(_flags & Flag::GoodThumbnailWanted)) {
+	if (!(_flags & Flag::GoodThumbnailWanted) || thumbnail.isNull()) {
 		return;
 	}
 	_goodThumbnail = std::make_unique<Image>(std::move(thumbnail));
@@ -285,7 +285,10 @@ void DocumentMedia::checkStickerLarge() {
 void DocumentMedia::automaticLoad(
 		Data::FileOrigin origin,
 		const HistoryItem *item) {
-	if (_owner->status != FileReady || loaded() || _owner->cancelled()) {
+	if (_owner->status != FileReady
+		|| loaded()
+		|| _owner->uploading()
+		|| _owner->cancelled()) {
 		return;
 	} else if (!item && !_owner->sticker() && !_owner->isAnimation()) {
 		return;

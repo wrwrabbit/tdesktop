@@ -267,7 +267,6 @@ private:
 	mtpRequestId _loadMoreRequestId = 0;
 	Fn<void()> _collectionsLoadedCallback;
 	QString _offset;
-	bool _reloading = false;
 	bool _collectionsLoaded = false;
 
 	rpl::event_stream<Descriptor> _descriptorChanges;
@@ -1312,8 +1311,6 @@ void InnerWidget::refreshAbout() {
 		) | rpl::map([](const QString &text) {
 			return Ui::Text::IconEmoji(&st::collectionAddIcon).append(text);
 		}));
-		button->setTextTransform(
-			Ui::RoundButton::TextTransform::NoTransform);
 		button->setClickedCallback([=] {
 			editCollectionGifts(collectionId);
 		});
@@ -2497,7 +2494,6 @@ void Widget::setupBottomButton(int wasBottomHeight) {
 		bottom,
 		rpl::single(QString()),
 		st::collectionEditBox.button);
-	button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 	button->setText(tr::lng_gift_collection_add_button(
 	) | rpl::map([](const QString &text) {
 		return Ui::Text::IconEmoji(&st::collectionAddIcon).append(text);

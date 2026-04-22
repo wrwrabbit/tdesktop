@@ -56,6 +56,7 @@ msgSelectionOffset: 30px;
 msgSelectionBottomSkip: 5px;
 
 itemRevealDuration: 150;
+textRevealGradient: 24px;
 middleClickAutoscrollSpeedScale: 30px;
 middleClickAutoscrollMaxSpeed: 7200px;
 
@@ -594,6 +595,8 @@ historyVideoMessageMute: icon {{ "volume_mute", historyFileThumbIconFg }};
 historyVideoMessageMuteSelected: icon {{ "volume_mute", historyFileThumbIconFgSelected }};
 historyVideoMessageMuteSize: 25px;
 historyVideoMessageProgressOpacity: 0.72;
+historyVideoMessageSeekInset: 12px;
+historyVideoMessageSeekDotSize: 13px;
 historyVideoMessageTtlIcon: icon {{ "chat/audio_once", historyFileThumbIconFg }};
 historyVideoMessageTtlIconSelected: icon {{ "chat/audio_once", historyFileThumbIconFgSelected }};
 
@@ -654,6 +657,18 @@ historyGroupRadialLine: 3px;
 
 historyMapPoint: icon {{ "map_point", mapPointDrop }};
 historyMapPointInner: icon {{ "map_point_inner", mapPointDot }};
+
+historyMapPinRadius: 28px;
+historyMapPinUserpicSize: 52px;
+historyMapPinTailHeight: 12px;
+historyMapPinTailHalfWidth: 12px;
+historyMapPinDotRadius: 4px;
+historyMapPinDotStroke: 2px;
+historyMapPinShadow: BoxShadow {
+	blurRadius: 6px;
+	offset: point(0px, 2px);
+	opacity: 0.29;
+}
 
 historyPsaForwardPalette: TextPalette(defaultTextPalette) {
 	linkFg: boxTextFgGood;

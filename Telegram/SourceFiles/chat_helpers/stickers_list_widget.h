@@ -57,6 +57,7 @@ struct FlatLabel;
 namespace ChatHelpers {
 
 extern const char kOptionUnlimitedRecentStickers[];
+[[nodiscard]] QVector<MTPstring> SearchStickersLangCodes();
 
 struct StickerIcon;
 enum class ValidateIconAnimations;
@@ -83,6 +84,7 @@ struct StickersListDescriptor {
 	std::vector<StickerCustomRecentDescriptor> customRecentList;
 	const style::EmojiPan *st = nullptr;
 	ComposeFeatures features;
+	uint64 excludeSetId = 0;
 };
 
 class StickersListWidget final : public TabbedSelector::Inner {
@@ -357,8 +359,21 @@ private:
 
 	void cancelSetsSearch();
 	void showSearchResults();
-	void searchResultsDone(const MTPmessages_FoundStickerSets &result);
-	void searchStickersResultsDone(const MTPmessages_FoundStickers &result);
+	void sendSearchSetsRequest(const QString &query);
+	void searchResultsDone(
+		const QString &query,
+		const MTPmessages_FoundStickerSets &result);
+	void requestSearchStickers(
+		const QString &query,
+		int offset,
+		bool requestSetsOnEmpty);
+	void searchStickersResultsDone(
+		const QString &query,
+		int requestedOffset,
+		bool requestSetsOnEmpty,
+		const MTPmessages_FoundStickers &result);
+	void loadMoreSearchStickers();
+	void checkPaginateSearchStickers(int visibleTop, int visibleBottom);
 	void refreshSearchRows();
 	void refreshSearchRows(const std::vector<uint64> *cloudSets);
 	void fillFilteredStickersRow();
@@ -405,6 +420,7 @@ private:
 	Section _section = Section::Stickers;
 	const bool _isMasks;
 	const bool _isEffects;
+	const uint64 _excludeSetId = 0;
 
 	base::Timer _updateItemsTimer;
 	base::Timer _updateSetsTimer;
@@ -447,6 +463,7 @@ private:
 	rpl::variable<int> _recentShownCount;
 	std::map<QString, std::vector<uint64>> _searchSetsCache;
 	std::map<QString, std::vector<DocumentId>> _searchStickersCache;
+	std::map<QString, int> _searchStickersNextOffset;
 	std::vector<std::pair<uint64, QStringList>> _searchIndex;
 	base::Timer _searchRequestTimer;
 	QString _searchQuery, _searchNextQuery;

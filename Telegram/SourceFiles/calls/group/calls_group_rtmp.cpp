@@ -37,8 +37,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Calls::Group {
 namespace {
 
-constexpr auto kPasswordCharAmount = 24;
-
 void StartWithBox(
 		not_null<Ui::GenericBox*> box,
 		Fn<void()> done,
@@ -258,7 +256,6 @@ void StartRtmpProcess::FillRtmpRows(
 			wrap.data(),
 			rpl::duplicate(text),
 			st::groupCallRtmpCopyButton);
-		button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 		button->setClickedCallback(key
 			? Fn<void()>([=] {
 				QGuiApplication::clipboard()->setText(state->key.current());
