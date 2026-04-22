@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/image/image_prepare.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
+#include "ui/widgets/menu/menu_multiline_action.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/painter.h"
@@ -276,6 +277,11 @@ PhotoEditorControls::PhotoEditorControls(
 	: base::make_unique_q<Ui::IconButton>(
 		_transformButtons,
 		st::photoEditorCropRatioButton))
+, _cornersButton((data.cropType == EditorData::CropType::RoundedRect)
+	? base::make_unique_q<Ui::IconButton>(
+		_transformButtons,
+		st::photoEditorCornersButton)
+	: nullptr)
 , _transformDone(base::make_unique_q<EdgeButton>(
 	_transformButtons,
 	(data.confirm.isEmpty() ? tr::lng_box_done(tr::now) : data.confirm),
@@ -516,6 +522,69 @@ PhotoEditorControls::PhotoEditorControls(
 		});
 	}
 
+	_currentCornersLevel = modifications.cornersLevel;
+	if (_cornersButton) {
+		const auto updateIcon = [=] {
+			const auto active = (_currentCornersLevel
+				!= RoundedCornersLevel::Large);
+			const auto icon = active
+				? &st::photoEditorCornersIconActive
+				: nullptr;
+			_cornersButton->setIconOverride(icon, icon);
+		};
+		updateIcon();
+		_cornersButton->setClickedCallback([=] {
+			_cornersMenu = base::make_unique_q<Ui::PopupMenu>(
+				_cornersButton.get(),
+				st::photoEditorCropRatioMenu);
+			_cornersMenu->setForcedOrigin(
+				Ui::PanelAnimation::Origin::BottomRight);
+			auto about = base::make_unique_q<Ui::Menu::MultilineAction>(
+				_cornersMenu->menu(),
+				_cornersMenu->menu()->st(),
+				st::photoEditorCornersMenuAboutLabel,
+				st::photoEditorCornersMenuAboutPosition,
+				TextWithEntities{
+					tr::lng_photo_editor_corners_about(tr::now),
+				});
+			_cornersMenu->addAction(std::move(about));
+			_cornersMenu->addSeparator();
+			const auto check = &st::mediaPlayerMenuCheck;
+			const auto add = [&](
+					const QString &text,
+					RoundedCornersLevel level) {
+				const auto selected = (_currentCornersLevel == level);
+				_cornersMenu->addAction(
+					text,
+					[=] {
+						if (_currentCornersLevel == level) {
+							return;
+						}
+						_currentCornersLevel = level;
+						updateIcon();
+						_cornersLevelChanges.fire_copy(level);
+					},
+					selected ? check : nullptr);
+			};
+			add(
+				tr::lng_photo_editor_corners_large(tr::now),
+				RoundedCornersLevel::Large);
+			add(
+				tr::lng_photo_editor_corners_medium(tr::now),
+				RoundedCornersLevel::Medium);
+			add(
+				tr::lng_photo_editor_corners_small(tr::now),
+				RoundedCornersLevel::Small);
+			add(
+				tr::lng_photo_editor_corners_none(tr::now),
+				RoundedCornersLevel::None);
+			const auto button = _cornersButton.get();
+			const auto bottomRight = button->mapToGlobal(
+				QPoint(button->width(), 0));
+			_cornersMenu->popup(bottomRight);
+		});
+	}
+
 	updateInputMask();
 
 }
@@ -562,6 +631,11 @@ rpl::producer<> PhotoEditorControls::cancelRequests() const {
 
 rpl::producer<float64> PhotoEditorControls::aspectRatioChanges() const {
 	return _aspectRatioChanges.events();
+}
+
+auto PhotoEditorControls::cornersLevelChanges() const
+-> rpl::producer<RoundedCornersLevel> {
+	return _cornersLevelChanges.events();
 }
 
 int PhotoEditorControls::bottomButtonsTop() const {
