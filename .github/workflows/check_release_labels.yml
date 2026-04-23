@@ -1,0 +1,20 @@
+name: Check Release Asset Consistency
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    paths:
+      - 'Telegram/build/release.py'
+      - 'Telegram/build/ptg_check_labels.py'
+      - '.github/workflows/deploy_finish.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check labels and filenames are consistent
+        run: python3 Telegram/build/ptg_check_labels.py
