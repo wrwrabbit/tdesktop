@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QDesktopServices>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QProcess>
+#include <QtCore/QSaveFile>
 
 #include <kshell.h>
 #include <ksandbox.h>
