@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "ui/widgets/popup_menu.h"
 #include "styles/style_editor.h"
+#include "styles/style_media_view.h"
 #include "styles/style_menu_icons.h"
 
 #include <QGraphicsSceneMouseEvent>
@@ -587,7 +588,7 @@ void ItemText::contextMenuEvent(QGraphicsSceneContextMenuEvent *event) {
 
 	_contextMenu = base::make_unique_q<Ui::PopupMenu>(
 		nullptr,
-		st::popupMenuWithIcons);
+		st::mediaviewPopupMenu);
 	const auto add = [&](
 			const QString &text,
 			TextStyle style,
@@ -604,26 +605,26 @@ void ItemText::contextMenuEvent(QGraphicsSceneContextMenuEvent *event) {
 	add(
 		tr::lng_photo_editor_text_style_plain(tr::now),
 		TextStyle::Plain,
-		&st::menuIconTextStylePlain);
+		&st::mediaMenuIconTextStylePlain);
 	add(
 		tr::lng_photo_editor_text_style_framed(tr::now),
 		TextStyle::Framed,
-		&st::menuIconTextStyleFramed);
+		&st::mediaMenuIconTextStyleFramed);
 	add(
 		tr::lng_photo_editor_text_style_semi_transparent(tr::now),
 		TextStyle::SemiTransparent,
-		&st::menuIconTextStyleSemiTransparent);
+		&st::mediaMenuIconTextStyleSemiTransparent);
 
 	_contextMenu->addSeparator();
 
 	_contextMenu->addAction(
 		tr::lng_photo_editor_menu_duplicate(tr::now),
 		[=] { actionDuplicate(); },
-		&st::menuIconCopy);
+		&st::mediaMenuIconCopy);
 	_contextMenu->addAction(
 		tr::lng_photo_editor_menu_delete(tr::now),
 		[=] { actionDelete(); },
-		&st::menuIconDelete);
+		&st::mediaMenuIconDelete);
 
 	_contextMenu->popup(event->screenPos());
 }

@@ -10,6 +10,7 @@ using "ui/basic.style";
 using "window/window.style";
 using "ui/widgets/widgets.style";
 using "ui/chat/chat.style";
+using "media/view/media_view.style";
 
 // photoEditorControlsBottomSkip * 2 + photoEditorControlsCenterSkip + photoEditorButtonBarHeight * 2
 photoEditorControlsHeight: 146px;
@@ -106,12 +107,16 @@ photoEditorCornersMenuAboutLabel: FlatLabel(defaultFlatLabel) {
 		font: font(11px);
 	}
 	minWidth: 136px;
+	textFg: groupCallMemberNotJoinedStatus;
 }
 photoEditorCornersMenuAboutPosition: point(12px, 4px);
 
-photoEditorCropRatioMenu: PopupMenu(popupMenuWithIcons) {
-	menu: Menu(menuWithIcons) {
+photoEditorMenuSubmenuArrow: icon {{ "menu/submenu_arrow", groupCallMemberNotJoinedStatus }};
+
+photoEditorCropRatioMenu: PopupMenu(mediaviewPopupMenu) {
+	menu: Menu(mediaviewMenu) {
 		widthMin: 108px;
+		arrow: photoEditorMenuSubmenuArrow;
 	}
 }
 
