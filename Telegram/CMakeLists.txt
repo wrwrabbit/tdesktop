@@ -1511,6 +1511,8 @@ PRIVATE
     platform/linux/webauthn_linux.cpp
     platform/mac/file_utilities_mac.mm
     platform/mac/file_utilities_mac.h
+    platform/mac/global_menu_mac.h
+    platform/mac/global_menu_mac.mm
     platform/mac/launcher_mac.mm
     platform/mac/launcher_mac.h
     platform/mac/integration_mac.mm
