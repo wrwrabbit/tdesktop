@@ -513,6 +513,7 @@ PhotoEditorControls::PhotoEditorControls(
 			add(tr::lng_photo_editor_crop_square(tr::now), 1.);
 			add(u"3:2"_q, 3. / 2.);
 			add(u"16:9"_q, 16. / 9.);
+			add(u"3:4"_q, 3. / 4.);
 			add(u"9:16"_q, 9. / 16.);
 			add(tr::lng_photo_editor_crop_free(tr::now), 0.);
 			const auto button = _cropRatioButton.get();
