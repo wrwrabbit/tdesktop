@@ -409,7 +409,24 @@ QString DictionariesPath() {
 
 bool UnpackDictionary(const QString &path, int langId) {
 	const auto folder = DictPathByLangId(langId);
-	return UnpackBlob(path, folder, IsGoodPartName);
+	if (!UnpackBlob(path, folder, IsGoodPartName)) {
+		return false;
+	}
+	// The Serbian archive ships "sr_Cyrl_RS.{dic,aff}", but
+	// QLocale(QLocale::Serbian).name() is "sr_RS" on our Qt, so the
+	// Hunspell loader and DictionaryExists miss them. Rename to the
+	// expected stem.
+	if (langId == int(QLocale::Serbian)) {
+		const auto dir = QDir(folder);
+		for (const auto &ext : kDictExtensions) {
+			const auto from = u"sr_Cyrl_RS.%1"_q.arg(ext);
+			const auto to = u"sr_RS.%1"_q.arg(ext);
+			if (dir.exists(from) && !dir.exists(to)) {
+				QFile::rename(dir.filePath(from), dir.filePath(to));
+			}
+		}
+	}
+	return true;
 }
 
 bool DictionaryExists(int langId) {
