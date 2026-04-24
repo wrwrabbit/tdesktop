@@ -424,11 +424,6 @@ void ManageDictionariesBox::prepare() {
 		multiSelect->setInnerFocus();
 	};
 
-	// The initial list of enabled rows may differ from the list of languages
-	// in settings, so we should store it when box opens
-	// and save it when box closes (don't do it when "Save" was pressed).
-	const auto initialEnabledRows = inner->enabledRows();
-
 	setTitle(tr::lng_settings_manage_dictionaries());
 
 	addButton(tr::lng_settings_save(), [=] {
@@ -442,8 +437,12 @@ void ManageDictionariesBox::prepare() {
 	addButton(tr::lng_close(), [=] { closeBox(); });
 
 	boxClosing() | rpl::on_next([=] {
-		Core::App().settings().setDictionariesEnabled(
-			FilterEnabledDict(initialEnabledRows));
+		const auto &current = Core::App().settings().dictionariesEnabled();
+		const auto filtered = FilterEnabledDict(current);
+		if (filtered.size() == current.size()) {
+			return;
+		}
+		Core::App().settings().setDictionariesEnabled(filtered);
 		Core::App().saveSettingsDelayed();
 	}, lifetime());
 
