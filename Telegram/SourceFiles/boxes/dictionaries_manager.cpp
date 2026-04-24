@@ -211,6 +211,7 @@ auto AddButtonWithLoader(
 		buttonState->value() | rpl::map(StateDescription),
 		st::settingsUpdateState);
 	label->setAttribute(Qt::WA_TransparentForMouseEvents);
+	label->show();
 
 	rpl::combine(
 		button->widthValue(),
