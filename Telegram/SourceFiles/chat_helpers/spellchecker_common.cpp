@@ -64,8 +64,8 @@ inline auto LanguageFromLocale(QLocale loc) {
 			: int(locLang);
 }
 
-constexpr auto kDictionariesManifestChannel = "tdhbcfeed"_cs;
-constexpr auto kDictionariesManifestPostId = 0;
+constexpr auto kDictionariesManifestChannel = "tdhbcfiles"_cs;
+constexpr auto kDictionariesManifestPostId = 2949;
 
 // Runtime-loaded dictionaries manifest. Kept in memory only: fetched from
 // the pinned JSON post the first time something actually needs it
