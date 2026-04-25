@@ -1207,6 +1207,10 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 	raw->setIncomingVideoOutput(_videoIncoming->sink());
 	raw->setAudioOutputDuckingEnabled(settings.callAudioDuckingEnabled());
 
+	_muted.value() | rpl::on_next([=](bool muted) {
+		Core::App().mediaDevices().setCaptureMuted(muted);
+	}, _instanceLifetime);
+
 	_state.value() | rpl::on_next([=](State state) {
 		const auto track = (state != State::FailedHangingUp)
 			&& (state != State::Failed)
@@ -1216,10 +1220,6 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 			&& (state != State::EndedByOtherDevice)
 			&& (state != State::Busy);
 		Core::App().mediaDevices().setCaptureMuteTracker(this, track);
-	}, _instanceLifetime);
-
-	_muted.value() | rpl::on_next([=](bool muted) {
-		Core::App().mediaDevices().setCaptureMuted(muted);
 	}, _instanceLifetime);
 
 #if 0
