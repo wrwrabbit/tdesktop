@@ -28,6 +28,11 @@ on:
         type: boolean
         required: false
         default: true
+      existing_release_tag:
+        description: 'Add to existing release (tag, e.g. v.1234567). Leave empty to create a new release.'
+        type: string
+        required: false
+        default: ''
 
 jobs:
   release:
@@ -46,6 +51,7 @@ jobs:
           echo "VERSION=$(cat version.h | grep PTelegramAppVersionStr | awk -F " " 'END { print $5 }' | sed 's/"//g' | sed 's/;//g')" >> $GITHUB_ENV
 
       - name: Prepare changelog
+        if: github.event.inputs.existing_release_tag == ''
         run: |
           python3 ptelegram_release_body.py --input_file ptelegram_changelog.md --output_file ptelegram_changelog_${{ env.VERSION }}.md --version ${{ env.VERSION }}
 
@@ -129,17 +135,40 @@ jobs:
             exit 1
           fi
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve or Create Release
+        id: resolve_release
+        uses: actions/github-script@v8
         with:
-          tag_name: "v.${{ env.VERSION }}"
-          release_name: "Version ${{ env.VERSION }}"
-          body_path: ptelegram_changelog_${{ env.VERSION }}.md
-          draft: false
-          prerelease: ${{ github.event.inputs.prerelease }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const existingTag = '${{ github.event.inputs.existing_release_tag }}';
+            let release;
+            if (existingTag) {
+              const resp = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: existingTag,
+              });
+              release = resp.data;
+              console.log(`Using existing release: ${release.name} (id=${release.id})`);
+            } else {
+              const fs = require('fs');
+              const body = fs.readFileSync('ptelegram_changelog_${{ env.VERSION }}.md', 'utf8');
+              const resp = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: 'v.${{ env.VERSION }}',
+                name: 'Version ${{ env.VERSION }}',
+                body: body,
+                draft: false,
+                prerelease: ${{ github.event.inputs.prerelease }},
+              });
+              release = resp.data;
+              console.log(`Created new release: ${release.name} (id=${release.id})`);
+            }
+            core.setOutput('release_id', String(release.id));
+            core.setOutput('tag_name', release.tag_name);
+            core.setOutput('release_name', release.name);
 
       - name: Upload Windows Files
         uses: "actions/github-script@v8"
@@ -153,7 +182,7 @@ jobs:
               label: 'Windows 64 bit: Portable',
               owner: context.repo.owner,
               repo: context.repo.repo,
-              release_id: ${{ steps.create_release.outputs.id }},
+              release_id: ${{ steps.resolve_release.outputs.release_id }},
               data: await fs.readFile('Windows/Telegram_x64/tportable-x64.latest.zip')
             });
             await github.rest.repos.uploadReleaseAsset({
@@ -161,7 +190,7 @@ jobs:
               label: 'Windows 32 bit: Portable',
               owner: context.repo.owner,
               repo: context.repo.repo,
-              release_id: ${{ steps.create_release.outputs.id }},
+              release_id: ${{ steps.resolve_release.outputs.release_id }},
               data: await fs.readFile('Windows/Telegram_x64_x86/tportable.latest.zip')
             });
             await github.rest.repos.uploadReleaseAsset({
@@ -169,7 +198,7 @@ jobs:
               label: 'Windows 64 bit: Installer',
               owner: context.repo.owner,
               repo: context.repo.repo,
-              release_id: ${{ steps.create_release.outputs.id }},
+              release_id: ${{ steps.resolve_release.outputs.release_id }},
               data: await fs.readFile('WindowsSetup/tsetup-x64.latest.exe')
             });
             await github.rest.repos.uploadReleaseAsset({
@@ -177,7 +206,7 @@ jobs:
               label: 'Windows 32 bit: Installer',
               owner: context.repo.owner,
               repo: context.repo.repo,
-              release_id: ${{ steps.create_release.outputs.id }},
+              release_id: ${{ steps.resolve_release.outputs.release_id }},
               data: await fs.readFile('WindowsSetup/tsetup.latest.exe')
             });
 
@@ -193,7 +222,7 @@ jobs:
               label: 'Linux 64 bit: Binary',
               owner: context.repo.owner,
               repo: context.repo.repo,
-              release_id: ${{ steps.create_release.outputs.id }},
+              release_id: ${{ steps.resolve_release.outputs.release_id }},
               data: await fs.readFile('Linux/tsetup.latest.tar.xz')
             });
 
@@ -209,7 +238,7 @@ jobs:
               label: 'macOS 10.13+: Installer',
               owner: context.repo.owner,
               repo: context.repo.repo,
-              release_id: ${{ steps.create_release.outputs.id }},
+              release_id: ${{ steps.resolve_release.outputs.release_id }},
               data: await fs.readFile('MacOS/tsetup.latest.dmg')
             });
 
@@ -219,9 +248,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: "v.${{ env.VERSION }}"
-          name: "Version ${{ env.VERSION }}"
-          prerelease: ${{ github.event.inputs.prerelease }}
+          tag_name: "${{ steps.resolve_release.outputs.tag_name }}"
+          name: "${{ steps.resolve_release.outputs.release_name }}"
           files: |
             Snap/**
 
