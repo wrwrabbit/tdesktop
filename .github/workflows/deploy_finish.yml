@@ -8,11 +8,21 @@ on:
         type: boolean
         required: true
         default: true
-      releaseWindows:
-        description: 'Release Windows assets?'
+      releaseWindows_x64:
+        description: 'Release Windows x64 assets?'
         type: boolean
         required: false
         default: true
+      releaseWindows_x86:
+        description: 'Release Windows x86 assets?'
+        type: boolean
+        required: false
+        default: true
+      windows_run_id:
+        description: 'Windows build run ID in cpartisans/tdesktop (leave empty for latest successful run)'
+        type: string
+        required: false
+        default: ''
       releaseLinux:
         description: 'Release Linux assets?'
         type: boolean
@@ -28,11 +38,11 @@ on:
         type: boolean
         required: false
         default: true
-      existing_release_tag:
-        description: 'Add to existing release (tag, e.g. v.1234567). Leave empty to create a new release.'
-        type: string
+      add_to_existing_release:
+        description: 'Add to existing release for this version instead of creating a new one?'
+        type: boolean
         required: false
-        default: ''
+        default: false
 
 jobs:
   release:
@@ -49,26 +59,62 @@ jobs:
           wget https://raw.githubusercontent.com/wrwrabbit/tdesktop/master/ptelegram_changelog.md
 
           echo "VERSION=$(cat version.h | grep PTelegramAppVersionStr | awk -F " " 'END { print $5 }' | sed 's/"//g' | sed 's/;//g')" >> $GITHUB_ENV
+          echo "TG_VERSION=$(cat version.h | grep 'AppVersionStr ' | awk -F '"' 'NR==1 { print $2 }')" >> $GITHUB_ENV
 
       - name: Prepare changelog
-        if: github.event.inputs.existing_release_tag == ''
+        if: github.event.inputs.add_to_existing_release != 'true'
         run: |
-          python3 ptelegram_release_body.py --input_file ptelegram_changelog.md --output_file ptelegram_changelog_${{ env.VERSION }}.md --version ${{ env.VERSION }}
+          python3 ptelegram_release_body.py --input_file ptelegram_changelog.md --output_file ptelegram_changelog_${{ env.VERSION }}.md --version ${{ env.VERSION }} --tg_version ${{ env.TG_VERSION }}
 
-      - name: Download Windows artifacts
+      - name: Download Windows x64 portable (latest successful)
         uses: dawidd6/action-download-artifact@v2
-        if: github.event.inputs.releaseWindows == 'true'
+        if: github.event.inputs.releaseWindows_x64 == 'true' && github.event.inputs.windows_run_id == ''
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: deploy_win.yml
           workflow_conclusion: success
           branch: master
           repo: cpartisans/tdesktop
-          path: Windows
+          name: Telegram_x64
+          path: Windows/Telegram_x64
 
-      - name: Download Windows x64 installer artifact
+      - name: Download Windows x64 portable (specific run)
         uses: dawidd6/action-download-artifact@v2
-        if: github.event.inputs.releaseWindows == 'true'
+        if: github.event.inputs.releaseWindows_x64 == 'true' && github.event.inputs.windows_run_id != ''
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: deploy_win.yml
+          run_id: ${{ github.event.inputs.windows_run_id }}
+          repo: cpartisans/tdesktop
+          name: Telegram_x64
+          path: Windows/Telegram_x64
+
+      - name: Download Windows x86 portable (latest successful)
+        uses: dawidd6/action-download-artifact@v2
+        if: github.event.inputs.releaseWindows_x86 == 'true' && github.event.inputs.windows_run_id == ''
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: deploy_win.yml
+          workflow_conclusion: success
+          branch: master
+          repo: cpartisans/tdesktop
+          name: Telegram_x64_x86
+          path: Windows/Telegram_x64_x86
+
+      - name: Download Windows x86 portable (specific run)
+        uses: dawidd6/action-download-artifact@v2
+        if: github.event.inputs.releaseWindows_x86 == 'true' && github.event.inputs.windows_run_id != ''
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: deploy_win.yml
+          run_id: ${{ github.event.inputs.windows_run_id }}
+          repo: cpartisans/tdesktop
+          name: Telegram_x64_x86
+          path: Windows/Telegram_x64_x86
+
+      - name: Download Windows x64 installer (latest successful)
+        uses: dawidd6/action-download-artifact@v2
+        if: github.event.inputs.releaseWindows_x64 == 'true' && github.event.inputs.windows_run_id == ''
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: deploy_win.yml
@@ -78,14 +124,36 @@ jobs:
           path: WindowsSetup
           name: Telegram_x64_setup
 
-      - name: Download Windows x86 installer artifact
+      - name: Download Windows x64 installer (specific run)
         uses: dawidd6/action-download-artifact@v2
-        if: github.event.inputs.releaseWindows == 'true'
+        if: github.event.inputs.releaseWindows_x64 == 'true' && github.event.inputs.windows_run_id != ''
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: deploy_win.yml
+          run_id: ${{ github.event.inputs.windows_run_id }}
+          repo: cpartisans/tdesktop
+          path: WindowsSetup
+          name: Telegram_x64_setup
+
+      - name: Download Windows x86 installer (latest successful)
+        uses: dawidd6/action-download-artifact@v2
+        if: github.event.inputs.releaseWindows_x86 == 'true' && github.event.inputs.windows_run_id == ''
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: deploy_win.yml
           workflow_conclusion: success
           branch: master
+          repo: cpartisans/tdesktop
+          path: WindowsSetup
+          name: Telegram_x64_x86_setup
+
+      - name: Download Windows x86 installer (specific run)
+        uses: dawidd6/action-download-artifact@v2
+        if: github.event.inputs.releaseWindows_x86 == 'true' && github.event.inputs.windows_run_id != ''
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: deploy_win.yml
+          run_id: ${{ github.event.inputs.windows_run_id }}
           repo: cpartisans/tdesktop
           path: WindowsSetup
           name: Telegram_x64_x86_setup
@@ -141,13 +209,13 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const existingTag = '${{ github.event.inputs.existing_release_tag }}';
+            const tag = 'v.${{ env.VERSION }}';
             let release;
-            if (existingTag) {
+            if ('${{ github.event.inputs.add_to_existing_release }}' === 'true') {
               const resp = await github.rest.repos.getReleaseByTag({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                tag: existingTag,
+                tag: tag,
               });
               release = resp.data;
               console.log(`Using existing release: ${release.name} (id=${release.id})`);
@@ -157,7 +225,7 @@ jobs:
               const resp = await github.rest.repos.createRelease({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                tag_name: 'v.${{ env.VERSION }}',
+                tag_name: tag,
                 name: 'Version ${{ env.VERSION }}',
                 body: body,
                 draft: false,
@@ -170,9 +238,9 @@ jobs:
             core.setOutput('tag_name', release.tag_name);
             core.setOutput('release_name', release.name);
 
-      - name: Upload Windows Files
+      - name: Upload Windows x64 Files
         uses: "actions/github-script@v8"
-        if: github.event.inputs.releaseWindows == 'true'
+        if: github.event.inputs.releaseWindows_x64 == 'true'
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
           script: |
@@ -186,20 +254,28 @@ jobs:
               data: await fs.readFile('Windows/Telegram_x64/tportable-x64.latest.zip')
             });
             await github.rest.repos.uploadReleaseAsset({
-              name: 'tportable.latest.zip',
-              label: 'Windows 32 bit: Portable',
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: ${{ steps.resolve_release.outputs.release_id }},
-              data: await fs.readFile('Windows/Telegram_x64_x86/tportable.latest.zip')
-            });
-            await github.rest.repos.uploadReleaseAsset({
               name: 'tsetup-x64.latest.exe',
               label: 'Windows 64 bit: Installer',
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: ${{ steps.resolve_release.outputs.release_id }},
               data: await fs.readFile('WindowsSetup/tsetup-x64.latest.exe')
+            });
+
+      - name: Upload Windows x86 Files
+        uses: "actions/github-script@v8"
+        if: github.event.inputs.releaseWindows_x86 == 'true'
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          script: |
+            const fs = require('fs').promises;
+            await github.rest.repos.uploadReleaseAsset({
+              name: 'tportable.latest.zip',
+              label: 'Windows 32 bit: Portable',
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ steps.resolve_release.outputs.release_id }},
+              data: await fs.readFile('Windows/Telegram_x64_x86/tportable.latest.zip')
             });
             await github.rest.repos.uploadReleaseAsset({
               name: 'tsetup.latest.exe',
