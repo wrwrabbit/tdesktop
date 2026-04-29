@@ -21,6 +21,36 @@ PRIVATE
     iv/iv_prepare.h
 )
 
+if (TDESKTOP_NATIVE_MARKDOWN_IV)
+    nice_target_sources(td_iv ${src_loc}
+    PRIVATE
+        iv/markdown/README.md
+        iv/markdown/iv_markdown_common.cpp
+        iv/markdown/iv_markdown_common.h
+        iv/markdown/iv_markdown_controller.cpp
+        iv/markdown/iv_markdown_controller.h
+        iv/markdown/iv_markdown_document.cpp
+        iv/markdown/iv_markdown_document.h
+        iv/markdown/iv_markdown_microtex.cpp
+        iv/markdown/iv_markdown_microtex.h
+        iv/markdown/iv_markdown_parse.cpp
+        iv/markdown/iv_markdown_parse.h
+        iv/markdown/iv_markdown_view.cpp
+        iv/markdown/iv_markdown_view.h
+    )
+
+    target_link_libraries(td_iv
+    PRIVATE
+        desktop-app::external_cmark_gfm
+        desktop-app::external_microtex
+    )
+
+    target_compile_definitions(td_iv
+    PRIVATE
+        TDESKTOP_NATIVE_MARKDOWN_IV
+    )
+endif()
+
 nice_target_sources(td_iv ${res_loc}
 PRIVATE
     iv_html/page.css
@@ -39,7 +69,6 @@ PUBLIC
 PRIVATE
     desktop-app::lib_webview
     desktop-app::external_ada
-    desktop-app::external_cmark_gfm
     tdesktop::td_lang
     tdesktop::td_ui
 )
