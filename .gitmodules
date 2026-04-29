@@ -94,3 +94,9 @@
 [submodule "Telegram/lib_translate"]
 	path = Telegram/lib_translate
 	url = https://github.com/desktop-app/lib_translate
+[submodule "Telegram/ThirdParty/cmark-gfm"]
+	path = Telegram/ThirdParty/cmark-gfm
+	url = https://github.com/github/cmark-gfm.git
+[submodule "Telegram/ThirdParty/MicroTeX"]
+	path = Telegram/ThirdParty/MicroTeX
+	url = https://github.com/desktop-app/MicroTeX.git

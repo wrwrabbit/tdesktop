@@ -39,6 +39,7 @@ PUBLIC
 PRIVATE
     desktop-app::lib_webview
     desktop-app::external_ada
+    desktop-app::external_cmark_gfm
     tdesktop::td_lang
     tdesktop::td_ui
 )
