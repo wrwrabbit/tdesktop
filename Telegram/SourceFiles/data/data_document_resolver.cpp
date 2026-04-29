@@ -17,9 +17,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document_media.h"
 #include "data/data_file_click_handler.h"
 #include "data/data_session.h"
+#include "history/view/media/history_view_gif.h"
 #include "history/history.h"
 #include "history/history_item.h"
-#include "history/view/media/history_view_gif.h"
+#ifdef TDESKTOP_NATIVE_MARKDOWN_IV
+#include "iv/markdown/iv_markdown_common.h"
+#include "iv/markdown/iv_markdown_controller.h"
+#endif
 #include "lang/lang_keys.h"
 #include "media/player/media_player_instance.h"
 #include "platform/platform_file_utilities.h"
@@ -29,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/checkbox.h"
 #include "ui/wrap/slide_wrap.h"
 #include "window/window_session_controller.h"
+
 #include "styles/style_layers.h"
 
 #include <QtCore/QBuffer>
@@ -247,8 +252,16 @@ void ResolveDocument(
 	} else {
 		document->saveFromDataSilent();
 		if (!openImageInApp()) {
-			if (!document->filepath(true).isEmpty()) {
-				LaunchWithWarning(location.name(), item);
+			const auto path = document->filepath(true);
+			if (!path.isEmpty()) {
+#ifdef TDESKTOP_NATIVE_MARKDOWN_IV
+				const auto fileName = QFileInfo(path).fileName();
+				if (Iv::Markdown::LooksLikeMarkdownFile(fileName)
+					&& Iv::Markdown::TryOpenLocalFile(path)) {
+					return;
+				}
+#endif
+				LaunchWithWarning(path, item);
 			} else if (document->status == FileReady
 				|| document->status == FileDownloadFailed) {
 				DocumentSaveClickHandler::Save(

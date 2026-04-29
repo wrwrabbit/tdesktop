@@ -42,3 +42,39 @@ set_target_properties(test_text PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINA
 add_dependencies(Telegram test_text)
 
 target_prepare_qrc(test_text)
+
+if (TDESKTOP_NATIVE_MARKDOWN_IV)
+    add_executable(test_markdown_iv)
+    init_target(test_markdown_iv "(tests)")
+
+    target_include_directories(test_markdown_iv PRIVATE ${src_loc})
+
+    nice_target_sources(test_markdown_iv ${src_loc}
+    PRIVATE
+        tests/test_markdown_iv.cpp
+        iv/markdown/iv_markdown_common.cpp
+        iv/markdown/iv_markdown_common.h
+        iv/markdown/iv_markdown_document.cpp
+        iv/markdown/iv_markdown_document.h
+        iv/markdown/iv_markdown_math.cpp
+        iv/markdown/iv_markdown_math.h
+        iv/markdown/iv_markdown_parse.cpp
+        iv/markdown/iv_markdown_parse.h
+    )
+
+    target_compile_definitions(test_markdown_iv
+    PRIVATE
+        TDESKTOP_NATIVE_MARKDOWN_IV
+    )
+
+    target_link_libraries(test_markdown_iv
+    PRIVATE
+        desktop-app::external_cmark_gfm
+        desktop-app::external_qt
+        desktop-app::lib_base
+    )
+
+    set_target_properties(test_markdown_iv PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+
+    add_dependencies(Telegram test_markdown_iv)
+endif()

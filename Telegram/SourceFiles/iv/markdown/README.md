@@ -9,4 +9,4 @@ cmake -S . -B out -D TDESKTOP_NATIVE_MARKDOWN_IV=ON
 cmake --build out --config Debug --target Telegram
 ```
 
-The current skeleton is inert. It adds API and source structure plus dependency linkage only, with no file-opening hook, UI entry point, WebView Instant View change, localization, settings, or real Markdown/MicroTeX rendering.
+The gated state now builds a cmark-gfm parser adapter, a value document model, a deterministic debug dump, and math extraction metadata. It also intercepts already-local `.md` and `.markdown` files and opens a minimal native diagnostic window. Full native Markdown rendering and MicroTeX output are still future work.

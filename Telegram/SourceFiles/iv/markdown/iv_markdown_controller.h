@@ -1,18 +1,9 @@
 #pragma once
 
-#include "iv/markdown/iv_markdown_common.h"
+#include <QtCore/QString>
 
 namespace Iv::Markdown {
 
-class Controller final {
-public:
-	explicit Controller(OpenOptions options = {});
-
-	[[nodiscard]] const OpenOptions &options() const;
-
-private:
-	OpenOptions _options;
-
-};
+[[nodiscard]] bool TryOpenLocalFile(const QString &path);
 
 } // namespace Iv::Markdown
