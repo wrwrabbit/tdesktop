@@ -1,15 +1,17 @@
 #include "iv/markdown/iv_markdown_view.h"
+#include "iv/markdown/iv_markdown_math_renderer.h"
 
 #include <QtCore/QDebug>
 
 #include "base/weak_ptr.h"
 #include "core/credits_amount.h"
 #include "core/click_handler_types.h"
-#include "ui/text/text.h"
-#include "ui/widgets/scroll_area.h"
 #include "ui/click_handler.h"
 #include "ui/painter.h"
 #include "ui/rp_widget.h"
+#include "ui/style/style_core.h"
+#include "ui/text/text.h"
+#include "ui/widgets/scroll_area.h"
 
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPen>
@@ -44,6 +46,7 @@ enum class PreparedBlockKind {
 	List,
 	ListItem,
 	Quote,
+	DisplayMath,
 	Table,
 };
 
@@ -72,10 +75,13 @@ struct PreparedBlock {
 	std::vector<PreparedTableRow> tableRows;
 	std::vector<TableAlignment> tableAlignments;
 	QString codeLanguage;
+	QString formulaTex;
 	ListKind listKind = ListKind::Bullet;
 	ListDelimiter listDelimiter = ListDelimiter::None;
+	MathKind mathKind = MathKind::Display;
 	TaskState taskState = TaskState::None;
 	int headingLevel = 0;
+	int formulaIndex = -1;
 	int orderedNumber = 0;
 	int startNumber = 1;
 	int actualDepth = 0;
@@ -113,16 +119,20 @@ struct LaidOutBlock {
 	Ui::Text::String leaf;
 	Ui::Text::String marker;
 	Ui::Text::String language;
+	Ui::Text::String fallbackLeaf;
 	std::vector<LaidOutBlock> children;
 	std::vector<LaidOutTableRow> tableRows;
 	std::vector<int> tableColumnWidths;
+	RenderedFormula formula;
 	QRect outer;
 	QRect textRect;
 	QRect markerRect;
 	QRect contentRect;
 	QRect borderRect;
+	QRect formulaRect;
 	QRect languageRect;
 	QRect tableRect;
+	QRect visibleFormulaRect;
 	QRect visibleTableRect;
 	int textWidth = 0;
 	int markerWidth = 0;
@@ -131,6 +141,7 @@ struct LaidOutBlock {
 	ListDelimiter listDelimiter = ListDelimiter::None;
 	TaskState taskState = TaskState::None;
 	int orderedNumber = 0;
+	style::align formulaAlign = style::al_left;
 	bool overflowed = false;
 };
 
@@ -525,6 +536,15 @@ void AppendRichBlock(
 	return block;
 }
 
+[[nodiscard]] PreparedBlock PrepareDisplayMathBlock(const MarkdownNode &node) {
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::DisplayMath;
+	block.formulaTex = !node.text.isEmpty() ? node.text : node.raw;
+	block.mathKind = MathKind::Display;
+	block.formulaIndex = node.formulaIndex;
+	return block;
+}
+
 [[nodiscard]] std::vector<PreparedBlock> PrepareBlocks(
 	const MarkdownNode &node,
 	PrepareContext context);
@@ -666,7 +686,7 @@ void AppendRichBlock(
 	case NodeKind::Unsupported:
 		return PrepareFallbackBlocks(node, context);
 	case NodeKind::DisplayMath:
-		return {};
+		return { PrepareDisplayMathBlock(node) };
 	case NodeKind::Paragraph:
 		return PrepareFlowBlock(node, PreparedBlockKind::Paragraph);
 	case NodeKind::Heading:
@@ -717,6 +737,8 @@ void AppendRichBlock(
 		return st::ivMarkdownParagraphSkip;
 	case PreparedBlockKind::Quote:
 		return st::ivMarkdownQuoteSkip;
+	case PreparedBlockKind::DisplayMath:
+		return st::ivMarkdownDisplayMathSkip;
 	case PreparedBlockKind::Table:
 		return st::ivMarkdownTableSkip;
 	}
@@ -1011,6 +1033,100 @@ struct TableRowLayoutData {
 	return block;
 }
 
+[[nodiscard]] LaidOutBlock LayoutDisplayMathBlock(
+		const PreparedBlock &prepared,
+		MathRenderer &renderer,
+		int left,
+		int top,
+		int width) {
+	auto block = LaidOutBlock();
+	block.kind = PreparedBlockKind::DisplayMath;
+
+	const auto &padding = st::ivMarkdownDisplayMathPadding;
+	const auto contentLeft = left + padding.left();
+	const auto contentTop = top + padding.top();
+	const auto contentWidth = std::max(
+		width - padding.left() - padding.right(),
+		1);
+
+	block.formula = renderer.renderFormula(
+		{
+			.trimmedTex = prepared.formulaTex.trimmed(),
+			.kind = prepared.mathKind,
+			.textSize = st::ivMarkdownDisplayMathTextSize,
+			.renderWidthCap = st::ivMarkdownDisplayMathMaxRenderWidth,
+			.foreground = st::windowFg->c,
+			.devicePixelRatio = style::DevicePixelRatio(),
+		},
+		style::PaletteVersion());
+
+	auto formulaWidth = 0;
+	auto formulaHeight = 0;
+	if (block.formula.success) {
+		formulaWidth = std::max(block.formula.logicalSize.width(), 1);
+		formulaHeight = std::max(block.formula.logicalSize.height(), 1);
+	} else {
+		const auto &fallbackPadding = st::ivMarkdownDisplayMathFallbackPadding;
+		const auto fallbackPaddingWidth = fallbackPadding.left()
+			+ fallbackPadding.right();
+		block.fallbackLeaf.setMarkedText(
+			st::ivMarkdownDisplayMathFallbackStyle,
+			TextWithEntities::Simple(block.formula.fallbackText),
+			kIvMarkedTextOptions);
+		block.textWidth = std::max(contentWidth - fallbackPaddingWidth, 1);
+		block.textWidth = std::min(
+			block.textWidth,
+			std::max(block.fallbackLeaf.maxWidth(), 1));
+		auto textHeight = std::max(
+			block.fallbackLeaf.countHeight(block.textWidth, true),
+			TextLineHeight(st::ivMarkdownDisplayMathFallbackStyle));
+		formulaWidth = std::min(
+			block.textWidth + fallbackPaddingWidth,
+			contentWidth);
+		block.textWidth = std::max(formulaWidth - fallbackPaddingWidth, 1);
+		textHeight = std::max(
+			block.fallbackLeaf.countHeight(block.textWidth, true),
+			TextLineHeight(st::ivMarkdownDisplayMathFallbackStyle));
+		formulaHeight = fallbackPadding.top()
+			+ textHeight
+			+ fallbackPadding.bottom();
+		block.textRect.setSize(QSize(block.textWidth, textHeight));
+	}
+
+	const auto centered = (st::ivMarkdownDisplayMathAlign == style::al_center)
+		&& (formulaWidth <= contentWidth);
+	block.formulaAlign = centered ? style::al_center : style::al_left;
+
+	block.contentRect = QRect(
+		contentLeft,
+		contentTop,
+		contentWidth,
+		formulaHeight);
+	block.formulaRect = QRect(
+		centered
+			? (contentLeft + ((contentWidth - formulaWidth) / 2))
+			: contentLeft,
+		contentTop,
+		formulaWidth,
+		formulaHeight);
+	block.visibleFormulaRect = block.formulaRect.intersected(block.contentRect);
+	block.outer = QRect(
+		left,
+		top,
+		std::max(width, 1),
+		padding.top() + formulaHeight + padding.bottom());
+	block.overflowed = block.formula.success
+		&& (block.formulaRect.width() > block.visibleFormulaRect.width());
+
+	if (!block.formula.success) {
+		const auto &fallbackPadding = st::ivMarkdownDisplayMathFallbackPadding;
+		block.textRect.moveTo(
+			block.formulaRect.x() + fallbackPadding.left(),
+			block.formulaRect.y() + fallbackPadding.top());
+	}
+	return block;
+}
+
 [[nodiscard]] LaidOutBlock LayoutTableBlock(
 		const PreparedBlock &prepared,
 		int left,
@@ -1118,6 +1234,7 @@ struct TableRowLayoutData {
 
 [[nodiscard]] LaidOutBlock LayoutBlock(
 	const PreparedBlock &prepared,
+	MathRenderer &renderer,
 	int left,
 	int top,
 	int width,
@@ -1126,6 +1243,7 @@ struct TableRowLayoutData {
 [[nodiscard]] int LayoutBlocks(
 		const std::vector<PreparedBlock> &prepared,
 		std::vector<LaidOutBlock> *blocks,
+		MathRenderer &renderer,
 		int left,
 		int top,
 		int width,
@@ -1138,6 +1256,7 @@ struct TableRowLayoutData {
 		}
 		auto laidOut = LayoutBlock(
 			block,
+			renderer,
 			left,
 			y,
 			std::max(width, 1),
@@ -1151,6 +1270,7 @@ struct TableRowLayoutData {
 
 [[nodiscard]] LaidOutBlock LayoutListItemBlock(
 		const PreparedBlock &prepared,
+		MathRenderer &renderer,
 		int left,
 		int top,
 		int width,
@@ -1196,6 +1316,7 @@ struct TableRowLayoutData {
 	const auto childBottom = LayoutBlocks(
 		prepared.children,
 		&block.children,
+		renderer,
 		bodyLeft,
 		top,
 		bodyWidth,
@@ -1234,6 +1355,7 @@ struct TableRowLayoutData {
 
 [[nodiscard]] LaidOutBlock LayoutListBlock(
 		const PreparedBlock &prepared,
+		MathRenderer &renderer,
 		int left,
 		int top,
 		int width,
@@ -1264,12 +1386,19 @@ struct TableRowLayoutData {
 		auto laidOut = (child.kind == PreparedBlockKind::ListItem)
 			? LayoutListItemBlock(
 				child,
+				renderer,
 				listLeft,
 				y,
 				listWidth,
 				childContext,
 				prepared.tight)
-			: LayoutBlock(child, listLeft, y, listWidth, childContext);
+			: LayoutBlock(
+				child,
+				renderer,
+				listLeft,
+				y,
+				listWidth,
+				childContext);
 		y = BlockBottom(laidOut);
 		block.children.push_back(std::move(laidOut));
 	}
@@ -1285,6 +1414,7 @@ struct TableRowLayoutData {
 
 [[nodiscard]] LaidOutBlock LayoutQuoteBlock(
 		const PreparedBlock &prepared,
+		MathRenderer &renderer,
 		int left,
 		int top,
 		int width,
@@ -1317,6 +1447,7 @@ struct TableRowLayoutData {
 	const auto childBottom = LayoutBlocks(
 		prepared.children,
 		&block.children,
+		renderer,
 		contentLeft,
 		contentTop,
 		contentWidth,
@@ -1344,6 +1475,7 @@ struct TableRowLayoutData {
 
 [[nodiscard]] LaidOutBlock LayoutBlock(
 		const PreparedBlock &prepared,
+		MathRenderer &renderer,
 		int left,
 		int top,
 		int width,
@@ -1357,11 +1489,20 @@ struct TableRowLayoutData {
 	case PreparedBlockKind::Rule:
 		return LayoutRuleBlock(left, top, width);
 	case PreparedBlockKind::List:
-		return LayoutListBlock(prepared, left, top, width, context);
+		return LayoutListBlock(prepared, renderer, left, top, width, context);
 	case PreparedBlockKind::ListItem:
-		return LayoutListItemBlock(prepared, left, top, width, context, false);
+		return LayoutListItemBlock(
+			prepared,
+			renderer,
+			left,
+			top,
+			width,
+			context,
+			false);
 	case PreparedBlockKind::Quote:
-		return LayoutQuoteBlock(prepared, left, top, width, context);
+		return LayoutQuoteBlock(prepared, renderer, left, top, width, context);
+	case PreparedBlockKind::DisplayMath:
+		return LayoutDisplayMathBlock(prepared, renderer, left, top, width);
 	case PreparedBlockKind::Table:
 		return LayoutTableBlock(prepared, left, top, width);
 	}
@@ -1370,7 +1511,11 @@ struct TableRowLayoutData {
 
 class DocumentLayout final {
 public:
-	void relayout(const PreparedRenderDocument &document, int width);
+	void invalidate();
+	void relayout(
+		const PreparedRenderDocument &document,
+		MathRenderer &renderer,
+		int width);
 
 	[[nodiscard]] int height() const;
 	[[nodiscard]] const std::vector<LaidOutBlock> &blocks() const;
@@ -1404,11 +1549,17 @@ protected:
 private:
 	[[nodiscard]] ClickHandlerPtr linkAt(QPoint point) const;
 
+	[[nodiscard]] bool refreshRenderState();
+	void relayoutCurrentWidth();
+	void forceRelayoutCurrentWidth();
 	void updateHover(QPoint point);
 	void applyCursor(style::cursor cursor);
 
 	const PreparedRenderDocument _prepared;
 	DocumentLayout _layout;
+	MathRenderer _mathRenderer;
+	int _paletteVersion = 0;
+	int _devicePixelRatio = 0;
 	style::cursor _cursor = style::cur_default;
 
 };
@@ -1576,6 +1727,57 @@ void PaintTableBlock(
 	p.restore();
 }
 
+void PaintDisplayMathBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		QRect clip) {
+	const auto formulaClip = clip.intersected(block.visibleFormulaRect);
+	if (formulaClip.isEmpty()) {
+		return;
+	}
+
+	p.save();
+	p.setClipRect(formulaClip);
+
+	if (block.formula.success) {
+		p.drawImage(block.formulaRect.topLeft(), block.formula.image);
+	} else {
+		const auto radius = st::ivMarkdownDisplayMathFallbackRadius;
+		p.setPen(Qt::NoPen);
+		p.setBrush(st::ivMarkdownDisplayMathFallbackBg);
+		if (radius > 0) {
+			auto hq = PainterHighQualityEnabler(p);
+			p.drawRoundedRect(block.formulaRect, radius, radius);
+		} else {
+			p.fillRect(block.formulaRect, st::ivMarkdownDisplayMathFallbackBg);
+		}
+		p.setPen(st::windowFg);
+		PaintTextLeaf(
+			p,
+			block.fallbackLeaf,
+			block.textRect,
+			block.textWidth,
+			formulaClip);
+	}
+
+	if (block.overflowed) {
+		const auto indicatorWidth = std::min(
+			std::max(st::ivMarkdownDisplayMathOverflowWidth, 1),
+			block.visibleFormulaRect.width());
+		p.fillRect(
+			QRect(
+				block.visibleFormulaRect.x()
+					+ block.visibleFormulaRect.width()
+					- indicatorWidth,
+				block.visibleFormulaRect.y(),
+				indicatorWidth,
+				block.visibleFormulaRect.height()),
+			st::ivMarkdownDisplayMathOverflowFg);
+	}
+
+	p.restore();
+}
+
 void PaintBlock(Painter &p, const LaidOutBlock &block, QRect clip) {
 	if (!block.outer.intersects(clip)) {
 		return;
@@ -1632,6 +1834,9 @@ void PaintBlock(Painter &p, const LaidOutBlock &block, QRect clip) {
 	case PreparedBlockKind::Quote:
 		p.fillRect(block.borderRect, st::ivMarkdownQuoteBorderFg);
 		PaintBlocks(p, block.children, clip);
+		break;
+	case PreparedBlockKind::DisplayMath:
+		PaintDisplayMathBlock(p, block, clip);
 		break;
 	case PreparedBlockKind::Table:
 		PaintTableBlock(p, block, clip);
@@ -1748,6 +1953,8 @@ void PaintBlocks(
 	case PreparedBlockKind::ListItem:
 	case PreparedBlockKind::Quote:
 		return LinkAtBlocks(block.children, point);
+	case PreparedBlockKind::DisplayMath:
+		return nullptr;
 	case PreparedBlockKind::Table:
 		return LinkAtTableBlock(block, point);
 	case PreparedBlockKind::CodeBlock:
@@ -1775,6 +1982,7 @@ void PaintBlocks(
 
 void DocumentLayout::relayout(
 		const PreparedRenderDocument &document,
+		MathRenderer &renderer,
 		int width) {
 	width = std::max(width, 1);
 	if (_width == width) {
@@ -1788,11 +1996,18 @@ void DocumentLayout::relayout(
 	const auto y = LayoutBlocks(
 		document.blocks,
 		&_blocks,
+		renderer,
 		page.left(),
 		page.top(),
 		innerWidth,
 		{});
 	_height = y + page.bottom();
+}
+
+void DocumentLayout::invalidate() {
+	_width = -1;
+	_height = 0;
+	_blocks.clear();
 }
 
 int DocumentLayout::height() const {
@@ -1807,18 +2022,37 @@ MarkdownDocumentWidget::MarkdownDocumentWidget(
 	QWidget *parent,
 	const PreparedDocument &document)
 : Ui::RpWidget(parent)
-, _prepared(PrepareRenderData(document)) {
+, _prepared(PrepareRenderData(document))
+, _paletteVersion(style::PaletteVersion())
+, _devicePixelRatio(style::DevicePixelRatio()) {
 	setMouseTracking(true);
+
+	style::PaletteChanged() | rpl::on_next([=] {
+		if (refreshRenderState()) {
+			forceRelayoutCurrentWidth();
+		}
+	}, lifetime());
+
+	screenValue() | rpl::on_next([=](auto) {
+		if (refreshRenderState()) {
+			forceRelayoutCurrentWidth();
+		}
+	}, lifetime());
 }
 
 int MarkdownDocumentWidget::resizeGetHeight(int newWidth) {
+	const auto refreshed = refreshRenderState();
+	(void)refreshed;
 	ClickHandler::clearActive(this);
 	applyCursor(style::cur_default);
-	_layout.relayout(_prepared, newWidth);
+	_layout.relayout(_prepared, _mathRenderer, newWidth);
 	return std::max(_layout.height(), 1);
 }
 
 void MarkdownDocumentWidget::paintEvent(QPaintEvent *e) {
+	if (refreshRenderState()) {
+		relayoutCurrentWidth();
+	}
 	auto p = Painter(this);
 	p.setTextPalette(st::ivMarkdownTextPalette);
 
@@ -1871,6 +2105,29 @@ void MarkdownDocumentWidget::clickHandlerPressedChanged(
 
 ClickHandlerPtr MarkdownDocumentWidget::linkAt(QPoint point) const {
 	return LinkAtBlocks(_layout.blocks(), point);
+}
+
+bool MarkdownDocumentWidget::refreshRenderState() {
+	const auto paletteVersion = style::PaletteVersion();
+	const auto devicePixelRatio = style::DevicePixelRatio();
+	if (_paletteVersion == paletteVersion
+		&& _devicePixelRatio == devicePixelRatio) {
+		return false;
+	}
+	_paletteVersion = paletteVersion;
+	_devicePixelRatio = devicePixelRatio;
+	_mathRenderer.clearCache();
+	_layout.invalidate();
+	return true;
+}
+
+void MarkdownDocumentWidget::relayoutCurrentWidth() {
+	_layout.relayout(_prepared, _mathRenderer, width());
+}
+
+void MarkdownDocumentWidget::forceRelayoutCurrentWidth() {
+	resizeToWidth(width());
+	update();
 }
 
 void MarkdownDocumentWidget::updateHover(QPoint point) {

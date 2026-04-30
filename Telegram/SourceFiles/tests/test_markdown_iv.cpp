@@ -10,6 +10,8 @@
 #include <QtCore/QString>
 
 #include <iostream>
+#include <initializer_list>
+#include <iterator>
 #include <utility>
 
 namespace {
@@ -130,6 +132,20 @@ void PrintError(const QString &line) {
 	return false;
 }
 
+[[nodiscard]] bool HasTextContaining(
+		const MarkdownNode &node,
+		const QString &text) {
+	if (node.text.contains(text) || node.raw.contains(text)) {
+		return true;
+	}
+	for (const auto &child : node.children) {
+		if (HasTextContaining(child, text)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 [[nodiscard]] bool HasTaskState(const MarkdownNode &node, TaskState state) {
 	if (node.taskState == state) {
 		return true;
@@ -223,6 +239,165 @@ void CollectTables(
 	return result;
 }
 
+[[nodiscard]] bool SameRange(
+		const SourceRange &range,
+		int startLine,
+		int startColumn,
+		int endLine,
+		int endColumn) {
+	return range.available
+		&& (range.startLine == startLine)
+		&& (range.startColumn == startColumn)
+		&& (range.endLine == endLine)
+		&& (range.endColumn == endColumn);
+}
+
+[[nodiscard]] bool CoversLineRange(
+		const SourceRange &range,
+		int firstLine,
+		int lastLine) {
+	return range.available
+		&& (range.startLine <= firstLine)
+		&& (range.endLine >= lastLine);
+}
+
+[[nodiscard]] const MarkdownNode *FindNodeByKindAndRange(
+		const MarkdownNode &node,
+		NodeKind kind,
+		int startLine,
+		int startColumn,
+		int endLine,
+		int endColumn) {
+	if (node.kind == kind
+		&& SameRange(
+			node.range,
+			startLine,
+			startColumn,
+			endLine,
+			endColumn)) {
+		return &node;
+	}
+	for (const auto &child : node.children) {
+		if (const auto found = FindNodeByKindAndRange(
+				child,
+				kind,
+				startLine,
+				startColumn,
+				endLine,
+				endColumn)) {
+			return found;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] int CountNodesByKindAndRange(
+		const MarkdownNode &node,
+		NodeKind kind,
+		int startLine,
+		int startColumn,
+		int endLine,
+		int endColumn) {
+	auto result = (node.kind == kind
+		&& SameRange(
+			node.range,
+			startLine,
+			startColumn,
+			endLine,
+			endColumn))
+		? 1
+		: 0;
+	for (const auto &child : node.children) {
+		result += CountNodesByKindAndRange(
+			child,
+			kind,
+			startLine,
+			startColumn,
+			endLine,
+			endColumn);
+	}
+	return result;
+}
+
+using NodeKindPath = std::initializer_list<NodeKind>;
+using NodeKindPathIter = NodeKindPath::const_iterator;
+
+[[nodiscard]] const MarkdownNode *FindNodeByPathAndRange(
+		const MarkdownNode &node,
+		NodeKindPathIter begin,
+		NodeKindPathIter end,
+		int startLine,
+		int startColumn,
+		int endLine,
+		int endColumn) {
+	if (begin == end || node.kind != *begin) {
+		return nullptr;
+	}
+	if (std::next(begin) == end) {
+		return SameRange(
+			node.range,
+			startLine,
+			startColumn,
+			endLine,
+			endColumn)
+			? &node
+			: nullptr;
+	}
+	const auto next = std::next(begin);
+	for (const auto &child : node.children) {
+		if (const auto found = FindNodeByPathAndRange(
+				child,
+				next,
+				end,
+				startLine,
+				startColumn,
+				endLine,
+				endColumn)) {
+			return found;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] const MarkdownNode *FindNodeByPathAndRange(
+		const MarkdownNode &node,
+		NodeKindPath path,
+		int startLine,
+		int startColumn,
+		int endLine,
+		int endColumn) {
+	return path.size()
+		? FindNodeByPathAndRange(
+			node,
+			path.begin(),
+			path.end(),
+			startLine,
+			startColumn,
+			endLine,
+			endColumn)
+		: nullptr;
+}
+
+[[nodiscard]] const MarkdownNode *FindNodeByKindAndLineRange(
+		const MarkdownNode &node,
+		NodeKind kind,
+		int firstLine,
+		int lastLine) {
+	if (node.kind == kind && CoversLineRange(node.range, firstLine, lastLine)) {
+		return &node;
+	}
+	for (const auto &child : node.children) {
+		if (const auto found = FindNodeByKindAndLineRange(
+				child,
+				kind,
+				firstLine,
+				lastLine)) {
+			return found;
+		}
+	}
+	return nullptr;
+}
+
 [[nodiscard]] int CountFormulas(
 		const PreparedDocument &document,
 		MathKind kind) {
@@ -266,6 +441,24 @@ void CollectTables(
 		}
 	}
 	return false;
+}
+
+[[nodiscard]] int CountFormulasInLineRange(
+		const PreparedDocument &document,
+		MathKind kind,
+		int firstLine,
+		int lastLine) {
+	auto result = 0;
+	for (const auto &formula : document.formulas) {
+		if (!formula.range.available || formula.kind != kind) {
+			continue;
+		}
+		if (formula.range.startLine <= lastLine
+			&& formula.range.endLine >= firstLine) {
+			++result;
+		}
+	}
+	return result;
 }
 
 [[nodiscard]] QString YesNo(bool value) {
@@ -521,6 +714,26 @@ int main(int argc, char **argv) {
 		FromLatin1("markdown-example.md display math node count"),
 		&ok);
 	Check(
+		FindNodeByKindAndRange(
+			markdown.document,
+			NodeKind::DisplayMath,
+			281,
+			1,
+			283,
+			2) != nullptr,
+		FromLatin1("markdown-example.md display formula range"),
+		&ok);
+	Check(
+		CountNodesByKindAndRange(
+			markdown.document,
+			NodeKind::Paragraph,
+			281,
+			1,
+			283,
+			2) == 0,
+		FromLatin1("markdown-example.md duplicate display paragraph removed"),
+		&ok);
+	Check(
 		HasKind(markdown.document, NodeKind::Table),
 		FromLatin1("markdown-example.md table coverage"),
 		&ok);
@@ -589,6 +802,61 @@ int main(int argc, char **argv) {
 		FromLatin1("latex-markdown-test.md display math node count"),
 		&ok);
 	Check(
+		FindNodeByPathAndRange(
+			latex.document,
+			{
+				NodeKind::Document,
+				NodeKind::List,
+				NodeKind::ListItem,
+				NodeKind::DisplayMath,
+			},
+			299,
+			4,
+			301,
+			5) != nullptr,
+		FromLatin1("latex-markdown-test.md list display formula nested"),
+		&ok);
+	Check(
+		FindNodeByPathAndRange(
+			latex.document,
+			{
+				NodeKind::Document,
+				NodeKind::DisplayMath,
+			},
+			299,
+			4,
+			301,
+			5) == nullptr,
+		FromLatin1("latex-markdown-test.md list display formula not hoisted"),
+		&ok);
+	Check(
+		FindNodeByPathAndRange(
+			latex.document,
+			{
+				NodeKind::Document,
+				NodeKind::Blockquote,
+				NodeKind::DisplayMath,
+			},
+			307,
+			3,
+			309,
+			4) != nullptr,
+		FromLatin1("latex-markdown-test.md blockquote display formula nested"),
+		&ok);
+	Check(
+		FindNodeByPathAndRange(
+			latex.document,
+			{
+				NodeKind::Document,
+				NodeKind::DisplayMath,
+			},
+			307,
+			3,
+			309,
+			4) == nullptr,
+		FromLatin1("latex-markdown-test.md blockquote display formula not hoisted"),
+		&ok);
+	Check(
 		HasKind(latex.document, NodeKind::Table),
 		FromLatin1("latex-markdown-test.md table coverage"),
 		&ok);
@@ -613,6 +881,151 @@ int main(int argc, char **argv) {
 			FromLatin1("latex-markdown-test.md table column order"),
 			&ok);
 	}
+	const auto tableMath = FindNodeByKindAndLineRange(
+		latex.document,
+		NodeKind::Table,
+		313,
+		318);
+	Check(
+		tableMath != nullptr,
+		FromLatin1("latex-markdown-test.md table range"),
+		&ok);
+	if (tableMath) {
+		Check(
+			!HasKind(*tableMath, NodeKind::DisplayMath),
+			FromLatin1("latex-markdown-test.md table display math stays literal"),
+			&ok);
+		Check(
+			!HasKind(*tableMath, NodeKind::InlineMath),
+			FromLatin1("latex-markdown-test.md table inline math stays literal"),
+			&ok);
+	}
+	Check(
+		CountFormulasInLineRange(latex, MathKind::Inline, 315, 318) == 12,
+		FromLatin1("latex-markdown-test.md table inline formulas preserved"),
+		&ok);
+	Check(
+		CountFormulasInLineRange(latex, MathKind::Display, 315, 318) == 0,
+		FromLatin1("latex-markdown-test.md table display formulas absent"),
+		&ok);
+	const auto headerMath = FindNodeByKindAndLineRange(
+		latex.document,
+		NodeKind::Heading,
+		322,
+		322);
+	Check(
+		headerMath != nullptr,
+		FromLatin1("latex-markdown-test.md heading range"),
+		&ok);
+	if (headerMath) {
+		Check(
+			!HasKind(*headerMath, NodeKind::DisplayMath),
+			FromLatin1("latex-markdown-test.md heading display math stays inline"),
+			&ok);
+		Check(
+			!HasKind(*headerMath, NodeKind::InlineMath),
+			FromLatin1("latex-markdown-test.md heading inline math stays literal"),
+			&ok);
+	}
+	Check(
+		headerMath
+			&& HasTextContaining(
+				*headerMath,
+				FromLatin1("$ax^2 + bx + c = 0$")),
+		FromLatin1("latex-markdown-test.md heading inline formula preserved"),
+		&ok);
+	const auto strongMath = FindNodeByKindAndLineRange(
+		latex.document,
+		NodeKind::Strong,
+		326,
+		326);
+	Check(
+		strongMath != nullptr,
+		FromLatin1("latex-markdown-test.md strong range"),
+		&ok);
+	if (strongMath) {
+		Check(
+			!HasKind(*strongMath, NodeKind::DisplayMath),
+			FromLatin1("latex-markdown-test.md strong display math stays inline"),
+			&ok);
+		Check(
+			!HasKind(*strongMath, NodeKind::InlineMath),
+			FromLatin1("latex-markdown-test.md strong inline math stays literal"),
+			&ok);
+	}
+	Check(
+		HasFormulaOnLine(latex, 326, FromLatin1("E = mc^2")),
+		FromLatin1("latex-markdown-test.md strong inline formula preserved"),
+		&ok);
+	const auto emphasisMath = FindNodeByKindAndLineRange(
+		latex.document,
+		NodeKind::Emphasis,
+		328,
+		328);
+	Check(
+		emphasisMath != nullptr,
+		FromLatin1("latex-markdown-test.md emphasis range"),
+		&ok);
+	if (emphasisMath) {
+		Check(
+			!HasKind(*emphasisMath, NodeKind::DisplayMath),
+			FromLatin1("latex-markdown-test.md emphasis display math stays inline"),
+			&ok);
+		Check(
+			!HasKind(*emphasisMath, NodeKind::InlineMath),
+			FromLatin1("latex-markdown-test.md emphasis inline math stays literal"),
+			&ok);
+	}
+	Check(
+		HasFormulaOnLine(latex, 328, FromLatin1("\\pi \\approx 3.14")),
+		FromLatin1("latex-markdown-test.md emphasis inline formula preserved"),
+		&ok);
+	const auto fencedCode = FindNodeByKindAndLineRange(
+		latex.document,
+		NodeKind::CodeBlock,
+		332,
+		334);
+	Check(
+		fencedCode != nullptr,
+		FromLatin1("latex-markdown-test.md fenced code range"),
+		&ok);
+	if (fencedCode) {
+		Check(
+			!HasKind(*fencedCode, NodeKind::DisplayMath),
+			FromLatin1("latex-markdown-test.md fenced code display math stays literal"),
+			&ok);
+		Check(
+			!HasKind(*fencedCode, NodeKind::InlineMath),
+			FromLatin1("latex-markdown-test.md fenced code inline math stays literal"),
+			&ok);
+	}
+	const auto inlineCode = FindNodeByKindAndLineRange(
+		latex.document,
+		NodeKind::InlineCode,
+		336,
+		336);
+	Check(
+		inlineCode != nullptr,
+		FromLatin1("latex-markdown-test.md inline code range"),
+		&ok);
+	if (inlineCode) {
+		Check(
+			!HasKind(*inlineCode, NodeKind::DisplayMath),
+			FromLatin1("latex-markdown-test.md inline code display math stays literal"),
+			&ok);
+		Check(
+			!HasKind(*inlineCode, NodeKind::InlineMath),
+			FromLatin1("latex-markdown-test.md inline code math stays literal"),
+			&ok);
+	}
+	Check(
+		CountFormulasInLineRange(latex, MathKind::Inline, 332, 336) == 0,
+		FromLatin1("latex-markdown-test.md code inline formulas excluded"),
+		&ok);
+	Check(
+		CountFormulasInLineRange(latex, MathKind::Display, 332, 336) == 0,
+		FromLatin1("latex-markdown-test.md code display formulas excluded"),
+		&ok);
 	Check(
 		!HasFormulaInLineRange(latex, 281, 281),
 		FromLatin1("latex-markdown-test.md line 281 exclusion"),

@@ -426,6 +426,57 @@ void EnsureCmarkExtensionsRegistered() {
 	return QString::fromUtf8(slice.constData(), slice.size());
 }
 
+void OffsetToPosition(
+		const std::vector<int> &lineStarts,
+		int offset,
+		int *line,
+		int *column) {
+	const auto clampedOffset = std::max(offset, 0);
+	auto resultLine = 1;
+	auto resultColumn = clampedOffset + 1;
+	if (!lineStarts.empty()) {
+		auto i = std::upper_bound(
+			lineStarts.begin(),
+			lineStarts.end(),
+			clampedOffset);
+		if (i != lineStarts.begin()) {
+			--i;
+			resultLine = static_cast<int>(i - lineStarts.begin()) + 1;
+			resultColumn = clampedOffset - *i + 1;
+		}
+	}
+	if (line) {
+		*line = resultLine;
+	}
+	if (column) {
+		*column = resultColumn;
+	}
+}
+
+[[nodiscard]] SourceRange RangeForOffsets(
+		const std::vector<int> &lineStarts,
+		int sourceSize,
+		int startOffset,
+		int endOffset) {
+	auto startLine = 0;
+	auto startColumn = 0;
+	auto endLine = 0;
+	auto endColumn = 0;
+	OffsetToPosition(lineStarts, startOffset, &startLine, &startColumn);
+	OffsetToPosition(
+		lineStarts,
+		std::max(startOffset, endOffset - 1),
+		&endLine,
+		&endColumn);
+	return RangeFromLineColumns(
+		lineStarts,
+		sourceSize,
+		startLine,
+		startColumn,
+		endLine,
+		endColumn);
+}
+
 template <std::size_t Size>
 [[nodiscard]] bool IsAnyKind(
 		const QString &kind,
@@ -831,10 +882,264 @@ void FillNodeAttributes(cmark_node *node, MarkdownNode *out) {
 	return result;
 }
 
+[[nodiscard]] int RangeEndOffset(const SourceRange &range) {
+	return range.available ? range.endOffset : std::numeric_limits<int>::min();
+}
+
 [[nodiscard]] int RangeStartOffset(const SourceRange &range) {
 	return range.available
 		? range.startOffset
 		: std::numeric_limits<int>::max();
+}
+
+[[nodiscard]] bool IsBreakNode(NodeKind kind) {
+	return kind == NodeKind::SoftBreak || kind == NodeKind::LineBreak;
+}
+
+void TrimBreakEdges(std::vector<MarkdownNode> *children) {
+	if (!children) {
+		return;
+	}
+	while (!children->empty() && IsBreakNode(children->front().kind)) {
+		children->erase(children->begin());
+	}
+	while (!children->empty() && IsBreakNode(children->back().kind)) {
+		children->pop_back();
+	}
+}
+
+[[nodiscard]] bool RangeContains(
+		const SourceRange &outer,
+		const SourceRange &inner) {
+	return outer.available
+		&& inner.available
+		&& outer.startOffset <= inner.startOffset
+		&& outer.endOffset >= inner.endOffset;
+}
+
+[[nodiscard]] bool RangeOverlaps(
+		const SourceRange &range,
+		int clipStart,
+		int clipEnd) {
+	return range.available
+		&& (range.endOffset > clipStart)
+		&& (range.startOffset < clipEnd);
+}
+
+[[nodiscard]] bool FirstAvailableRange(
+		const MarkdownNode &node,
+		SourceRange *out);
+[[nodiscard]] bool LastAvailableRange(
+		const MarkdownNode &node,
+		SourceRange *out);
+
+[[nodiscard]] bool FirstAvailableRangeInChildren(
+		const std::vector<MarkdownNode> &children,
+		SourceRange *out) {
+	for (const auto &child : children) {
+		if (FirstAvailableRange(child, out)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+[[nodiscard]] bool LastAvailableRangeInChildren(
+		const std::vector<MarkdownNode> &children,
+		SourceRange *out) {
+	for (auto i = children.rbegin(); i != children.rend(); ++i) {
+		if (LastAvailableRange(*i, out)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+[[nodiscard]] bool FirstAvailableRange(
+		const MarkdownNode &node,
+		SourceRange *out) {
+	if (node.range.available) {
+		if (out) {
+			*out = node.range;
+		}
+		return true;
+	}
+	return FirstAvailableRangeInChildren(node.children, out);
+}
+
+[[nodiscard]] bool LastAvailableRange(
+		const MarkdownNode &node,
+		SourceRange *out) {
+	if (node.range.available) {
+		if (out) {
+			*out = node.range;
+		}
+		return true;
+	}
+	return LastAvailableRangeInChildren(node.children, out);
+}
+
+[[nodiscard]] bool RangeFromChildren(
+		const std::vector<MarkdownNode> &children,
+		SourceRange *out) {
+	auto first = SourceRange();
+	auto last = SourceRange();
+	if (!FirstAvailableRangeInChildren(children, &first)
+		|| !LastAvailableRangeInChildren(children, &last)) {
+		return false;
+	}
+	auto result = first;
+	result.endLine = last.endLine;
+	result.endColumn = last.endColumn;
+	result.endOffset = last.endOffset;
+	if (out) {
+		*out = result;
+	}
+	return true;
+}
+
+[[nodiscard]] bool ClipNodeToOffsets(
+		const MarkdownNode &node,
+		const QByteArray &source,
+		const std::vector<int> &lineStarts,
+		int clipStart,
+		int clipEnd,
+		MarkdownNode *out) {
+	if (!out || clipEnd <= clipStart || IsBreakNode(node.kind)) {
+		return false;
+	}
+	if (node.range.available && !RangeOverlaps(node.range, clipStart, clipEnd)) {
+		return false;
+	}
+	if (node.children.empty()) {
+		if (!node.range.available) {
+			return false;
+		}
+		const auto clippedStart = std::max(node.range.startOffset, clipStart);
+		const auto clippedEnd = std::min(node.range.endOffset, clipEnd);
+		if (clippedEnd <= clippedStart) {
+			return false;
+		}
+		*out = node;
+		out->range = RangeForOffsets(
+			lineStarts,
+			static_cast<int>(source.size()),
+			clippedStart,
+			clippedEnd);
+		if (clippedStart == node.range.startOffset
+			&& clippedEnd == node.range.endOffset) {
+			return true;
+		}
+		switch (node.kind) {
+		case NodeKind::Text:
+		case NodeKind::InlineCode:
+			out->text = SourceSlice(source, out->range);
+			break;
+		case NodeKind::HtmlBlock:
+		case NodeKind::HtmlInline:
+		case NodeKind::Unsupported:
+			out->raw = SourceSlice(source, out->range);
+			break;
+		default:
+			return false;
+		}
+		return true;
+	}
+	auto result = node;
+	result.children.clear();
+	for (const auto &child : node.children) {
+		if (IsBreakNode(child.kind)) {
+			if (!result.children.empty()) {
+				result.children.push_back(child);
+			}
+			continue;
+		}
+		auto clippedChild = MarkdownNode();
+		if (ClipNodeToOffsets(
+				child,
+				source,
+				lineStarts,
+				clipStart,
+				clipEnd,
+				&clippedChild)) {
+			result.children.push_back(std::move(clippedChild));
+		}
+	}
+	TrimBreakEdges(&result.children);
+	if (result.children.empty()) {
+		return false;
+	}
+	auto clippedRange = SourceRange();
+	if (RangeFromChildren(result.children, &clippedRange)) {
+		result.range = clippedRange;
+	}
+	*out = std::move(result);
+	return true;
+}
+
+[[nodiscard]] bool ParagraphSegment(
+		const MarkdownNode &paragraph,
+		const QByteArray &source,
+		const std::vector<int> &lineStarts,
+		int clipStart,
+		int clipEnd,
+		MarkdownNode *out) {
+	if (clipEnd <= clipStart) {
+		return false;
+	}
+	return ClipNodeToOffsets(
+		paragraph,
+		source,
+		lineStarts,
+		clipStart,
+		clipEnd,
+		out);
+}
+
+[[nodiscard]] std::vector<MarkdownNode> SplitParagraphAroundDisplayMath(
+		const MarkdownNode &paragraph,
+		const std::vector<MathFormula> &formulas,
+		const std::vector<int> &displayIndexes,
+		int begin,
+		int end,
+		const QByteArray &source,
+		const std::vector<int> &lineStarts) {
+	auto result = std::vector<MarkdownNode>();
+	if (!paragraph.range.available) {
+		result.push_back(paragraph);
+		return result;
+	}
+	auto cursor = paragraph.range.startOffset;
+	for (auto i = begin; i != end; ++i) {
+		const auto formulaIndex = displayIndexes[i];
+		const auto &formula = formulas[formulaIndex];
+		if (!RangeContains(paragraph.range, formula.range)) {
+			continue;
+		}
+		auto segment = MarkdownNode();
+		if (ParagraphSegment(
+				paragraph,
+				source,
+				lineStarts,
+				cursor,
+				formula.range.startOffset,
+				&segment)) {
+			result.push_back(std::move(segment));
+		}
+		result.push_back(DisplayMathNode(formula, formulaIndex));
+		cursor = std::max(cursor, formula.range.endOffset);
+	}
+	auto tail = MarkdownNode();
+	if (ParagraphSegment(
+			paragraph,
+			source,
+			lineStarts,
+			cursor,
+			paragraph.range.endOffset,
+			&tail)) {
+		result.push_back(std::move(tail));
+	}
+	return result;
 }
 
 [[nodiscard]] std::vector<int> DisplayFormulaIndexes(
@@ -859,40 +1164,120 @@ void FillNodeAttributes(cmark_node *node, MarkdownNode *out) {
 	return result;
 }
 
-void InsertDisplayMathBlocks(PreparedDocument *document) {
+[[nodiscard]] bool CanNormalizeDisplayMathChildren(NodeKind kind) {
+	switch (kind) {
+	case NodeKind::Document:
+	case NodeKind::List:
+	case NodeKind::ListItem:
+	case NodeKind::Blockquote:
+	case NodeKind::Table:
+	case NodeKind::TableRow:
+		return true;
+	default:
+		return false;
+	}
+}
+
+void NormalizeDisplayMathChildren(
+		MarkdownNode *node,
+		const std::vector<MathFormula> &formulas,
+		const std::vector<int> &displayIndexes,
+		int begin,
+		int end,
+		const QByteArray &source,
+		const std::vector<int> &lineStarts) {
+	if (!node || begin >= end || node->children.empty()) {
+		return;
+	}
+	auto originalChildren = std::move(node->children);
+	auto children = std::vector<MarkdownNode>();
+	children.reserve(originalChildren.size() + (end - begin));
+	auto formula = begin;
+	for (auto &child : originalChildren) {
+		while (formula != end
+			&& child.range.available
+			&& RangeEndOffset(formulas[displayIndexes[formula]].range)
+				<= child.range.startOffset) {
+			const auto formulaIndex = displayIndexes[formula];
+			children.push_back(DisplayMathNode(formulas[formulaIndex], formulaIndex));
+			++formula;
+		}
+		auto childEnd = formula;
+		while (childEnd != end) {
+			const auto &formulaRange = formulas[displayIndexes[childEnd]].range;
+			if (!RangeContains(child.range, formulaRange)) {
+				break;
+			}
+			++childEnd;
+		}
+		if (formula != childEnd && child.kind == NodeKind::Paragraph) {
+			auto split = SplitParagraphAroundDisplayMath(
+				child,
+				formulas,
+				displayIndexes,
+				formula,
+				childEnd,
+				source,
+				lineStarts);
+			for (auto &part : split) {
+				children.push_back(std::move(part));
+			}
+			formula = childEnd;
+			continue;
+		}
+		if (formula != childEnd && child.kind == NodeKind::TableCell) {
+			children.push_back(std::move(child));
+			formula = childEnd;
+			continue;
+		}
+		if (formula != childEnd && CanNormalizeDisplayMathChildren(child.kind)) {
+			NormalizeDisplayMathChildren(
+				&child,
+				formulas,
+				displayIndexes,
+				formula,
+				childEnd,
+				source,
+				lineStarts);
+			formula = childEnd;
+		}
+		children.push_back(std::move(child));
+	}
+	while (formula != end) {
+		const auto formulaIndex = displayIndexes[formula];
+		children.push_back(DisplayMathNode(formulas[formulaIndex], formulaIndex));
+		++formula;
+	}
+	node->children = std::move(children);
+}
+
+[[nodiscard]] int CountNodes(const MarkdownNode &node) {
+	auto result = 1;
+	for (const auto &child : node.children) {
+		result += CountNodes(child);
+	}
+	return result;
+}
+
+void NormalizeDisplayMathBlocks(
+		PreparedDocument *document,
+		const QByteArray &source,
+		const std::vector<int> &lineStarts) {
 	if (!document) {
 		return;
 	}
 	const auto displayIndexes = DisplayFormulaIndexes(document->formulas);
-	if (displayIndexes.empty()) {
-		return;
+	if (!displayIndexes.empty()) {
+		NormalizeDisplayMathChildren(
+			&document->document,
+			document->formulas,
+			displayIndexes,
+			0,
+			static_cast<int>(displayIndexes.size()),
+			source,
+			lineStarts);
 	}
-	auto originalChildren = std::move(document->document.children);
-	auto children = std::vector<MarkdownNode>();
-	children.reserve(originalChildren.size() + displayIndexes.size());
-	auto displayIndex = std::size_t(0);
-	const auto appendDisplayBefore = [&](int offset) {
-		while (displayIndex != displayIndexes.size()) {
-			const auto formulaIndex = displayIndexes[displayIndex];
-			const auto formulaOffset = RangeStartOffset(
-				document->formulas[formulaIndex].range);
-			if (formulaOffset > offset) {
-				break;
-			}
-			children.push_back(DisplayMathNode(
-				document->formulas[formulaIndex],
-				formulaIndex));
-			++displayIndex;
-		}
-	};
-	for (auto &child : originalChildren) {
-		appendDisplayBefore(RangeStartOffset(child.range));
-		children.push_back(std::move(child));
-	}
-	appendDisplayBefore(std::numeric_limits<int>::max());
-	const auto displayCount = static_cast<int>(displayIndexes.size());
-	document->stats.convertedNodeCount += displayCount;
-	document->document.children = std::move(children);
+	document->stats.convertedNodeCount = CountNodes(document->document);
 }
 
 [[nodiscard]] QString FirstHeadingTitle(const MarkdownNode &node) {
@@ -997,10 +1382,8 @@ ParseResult ParseMarkdownForIv(const QByteArray &source, ParseOptions options) {
 				: std::move(state.error));
 	}
 	FillFormulaStats(&document);
+	NormalizeDisplayMathBlocks(&document, normalized, lineStarts);
 	document.title = FirstHeadingTitle(document.document);
-	document.empty = document.document.children.empty()
-		&& document.formulas.empty();
-	InsertDisplayMathBlocks(&document);
 	document.empty = document.document.children.empty()
 		&& document.formulas.empty();
 	return ParseResult{ std::move(document), QString(), true };

@@ -33,6 +33,8 @@ if (TDESKTOP_NATIVE_MARKDOWN_IV)
         iv/markdown/iv_markdown_document.h
         iv/markdown/iv_markdown_math.cpp
         iv/markdown/iv_markdown_math.h
+        iv/markdown/iv_markdown_math_renderer.cpp
+        iv/markdown/iv_markdown_math_renderer.h
         iv/markdown/iv_markdown_microtex.cpp
         iv/markdown/iv_markdown_microtex.h
         iv/markdown/iv_markdown_parse.cpp

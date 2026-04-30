@@ -135,6 +135,19 @@ ivMarkdownCodeLanguageFg: windowSubTextFg;
 ivMarkdownCodeLanguageSkip: 8px;
 ivMarkdownRuleFg: boxDividerBg;
 ivMarkdownRuleHeight: 1px;
+ivMarkdownDisplayMathSkip: 20px;
+ivMarkdownDisplayMathPadding: margins(10px, 12px, 10px, 12px);
+ivMarkdownDisplayMathAlign: align(center);
+ivMarkdownDisplayMathTextSize: 20px;
+ivMarkdownDisplayMathMaxRenderWidth: 1600px;
+ivMarkdownDisplayMathMaxRenderHeight: 1200px;
+ivMarkdownDisplayMathFallbackStyle: TextStyle(ivMarkdownCodeStyle) {
+}
+ivMarkdownDisplayMathFallbackBg: windowBgOver;
+ivMarkdownDisplayMathFallbackRadius: 6px;
+ivMarkdownDisplayMathFallbackPadding: margins(10px, 12px, 10px, 12px);
+ivMarkdownDisplayMathOverflowWidth: 4px;
+ivMarkdownDisplayMathOverflowFg: windowSubTextFg;
 ivMarkdownTableSkip: 20px;
 ivMarkdownTableCellPadding: margins(8px, 10px, 8px, 10px);
 ivMarkdownTableBorder: 1px;
