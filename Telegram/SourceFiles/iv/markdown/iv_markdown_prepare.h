@@ -32,9 +32,17 @@ struct PreparedLink {
 	QString target;
 };
 
+struct PreparedInlineObject {
+	int position = 0;
+	int formulaIndex = -1;
+	int sourceLength = 0;
+	QString copySource;
+};
+
 struct PreparedTableCell {
 	TextWithEntities text;
 	std::vector<PreparedLink> links;
+	std::vector<PreparedInlineObject> inlineObjects;
 	int column = 0;
 	TableAlignment alignment = TableAlignment::None;
 };
@@ -48,6 +56,7 @@ struct PreparedBlock {
 	PreparedBlockKind kind = PreparedBlockKind::Paragraph;
 	TextWithEntities text;
 	std::vector<PreparedLink> links;
+	std::vector<PreparedInlineObject> inlineObjects;
 	std::vector<PreparedBlock> children;
 	std::vector<PreparedTableRow> tableRows;
 	std::vector<TableAlignment> tableAlignments;
@@ -153,6 +162,9 @@ struct MarkdownStyleSnapshot {
 struct PreparedFormulaSlot {
 	QString trimmedTex;
 	MathKind kind = MathKind::Display;
+	int textSize = 0;
+	int renderWidthCap = 0;
+	int renderHeightCap = 0;
 	RenderedFormula rendered;
 	bool present = false;
 };

@@ -1,5 +1,7 @@
 #include "iv/markdown/iv_markdown_common.h"
 
+#include "base/basic_types.h"
+
 #include <array>
 
 namespace Iv::Markdown {

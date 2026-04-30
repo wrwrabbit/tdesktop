@@ -2,6 +2,8 @@
 
 #include "base/call_delayed.h"
 
+#include <QtCore/QByteArray>
+
 #include <algorithm>
 #include <limits>
 #include <utility>
@@ -28,6 +30,7 @@ struct PrepareContext {
 struct PrepareState {
 	const PrepareRequest *request = nullptr;
 	PreparedResult result;
+	QByteArray sourceUtf8;
 
 	[[nodiscard]] bool cancelled() {
 		if (!request->cancelled) {
@@ -39,19 +42,65 @@ struct PrepareState {
 		return true;
 	}
 
-	void rememberFormula(const PreparedBlock &block) {
-		if (block.formulaIndex < 0) {
+	void rememberFormula(
+			int index,
+			MathKind kind,
+			QString formulaTex,
+			int textSize,
+			int renderWidthCap,
+			int renderHeightCap) {
+		if (index < 0) {
 			return;
 		}
-		const auto index = block.formulaIndex;
 		if (index >= int(result.formulas.size())) {
 			result.formulas.resize(index + 1);
 		}
 		auto &slot = result.formulas[index];
-		slot.trimmedTex = block.formulaTex.trimmed();
-		slot.kind = block.mathKind;
+		slot.trimmedTex = formulaTex.trimmed();
+		slot.kind = kind;
+		slot.textSize = textSize;
+		slot.renderWidthCap = renderWidthCap;
+		slot.renderHeightCap = renderHeightCap;
 		slot.present = true;
 	}
+
+	void rememberFormula(const PreparedBlock &block) {
+		rememberFormula(
+			block.formulaIndex,
+			block.mathKind,
+			block.formulaTex,
+			result.style.displayMathTextSize,
+			result.style.displayMathMaxRenderWidth,
+			result.style.displayMathMaxRenderHeight);
+	}
+
+	[[nodiscard]] QString formulaSourceText(int index) const {
+		if (!request
+			|| !request->document
+			|| index < 0
+			|| index >= int(request->document->formulas.size())) {
+			return QString();
+		}
+		const auto &range = request->document->formulas[index].range;
+		const auto from = std::clamp(range.startOffset, 0, sourceUtf8.size());
+		const auto till = std::clamp(range.endOffset, from, sourceUtf8.size());
+		return QString::fromUtf8(sourceUtf8.constData() + from, till - from);
+	}
+};
+
+struct InlineFormulaSource {
+	int formulaIndex = -1;
+	SourceRange range;
+	QString copySource;
+};
+
+struct InlineFormulaContext {
+	const std::vector<InlineFormulaSource> *formulas = nullptr;
+	std::vector<PreparedInlineObject> *prepared = nullptr;
+	int next = 0;
+	int textSize = 0;
+	int renderWidthCap = 0;
+	int renderHeightCap = 0;
 };
 
 void ClearPreparedOutput(PreparedResult *result) {
@@ -96,22 +145,283 @@ void SortEntities(TextWithEntities *text) {
 		});
 }
 
+[[nodiscard]] bool RangeContains(
+		const SourceRange &outer,
+		const SourceRange &inner) {
+	return outer.available
+		&& inner.available
+		&& outer.startOffset <= inner.startOffset
+		&& outer.endOffset >= inner.endOffset;
+}
+
+[[nodiscard]] bool IsEscapableAscii(char ch) {
+	const auto value = uchar(ch);
+	return (value >= 0x21 && value <= 0x2F)
+		|| (value >= 0x3A && value <= 0x40)
+		|| (value >= 0x5B && value <= 0x60)
+		|| (value >= 0x7B && value <= 0x7E);
+}
+
+[[nodiscard]] bool AppendHtmlEntityText(
+		const QByteArray &entity,
+		QString *result) {
+	if (entity == "amp") {
+		result->append(QChar('&'));
+	} else if (entity == "lt") {
+		result->append(QChar('<'));
+	} else if (entity == "gt") {
+		result->append(QChar('>'));
+	} else if (entity == "quot") {
+		result->append(QChar('"'));
+	} else if (entity == "apos") {
+		result->append(QChar('\''));
+	} else if (entity.startsWith("#x") || entity.startsWith("#X")) {
+		auto ok = false;
+		const auto value = entity.mid(2).toUInt(&ok, 16);
+		if (!ok || value > 0xFFFF) {
+			return false;
+		}
+		result->append(QChar(ushort(value)));
+	} else if (entity.startsWith("#")) {
+		auto ok = false;
+		const auto value = entity.mid(1).toUInt(&ok, 10);
+		if (!ok || value > 0xFFFF) {
+			return false;
+		}
+		result->append(QChar(ushort(value)));
+	} else {
+		return false;
+	}
+	return true;
+}
+
+[[nodiscard]] QString DecodeMarkdownTextPrefix(QByteArray bytes) {
+	auto result = QString();
+	auto plainFrom = 0;
+	const auto flushPlain = [&](int till) {
+		if (till > plainFrom) {
+			result.append(QString::fromUtf8(
+				bytes.constData() + plainFrom,
+				till - plainFrom));
+		}
+	};
+	for (auto i = 0; i != bytes.size();) {
+		if (bytes[i] == '\\'
+			&& (i + 1) < bytes.size()
+			&& IsEscapableAscii(bytes[i + 1])) {
+			flushPlain(i);
+			result.append(QChar(ushort(uchar(bytes[i + 1]))));
+			i += 2;
+			plainFrom = i;
+		} else if (bytes[i] == '&') {
+			const auto semicolon = bytes.indexOf(';', i + 1);
+			if (semicolon > i && semicolon - i <= 32) {
+				auto entityText = QString();
+				if (AppendHtmlEntityText(
+						bytes.mid(i + 1, semicolon - i - 1),
+						&entityText)) {
+					flushPlain(i);
+					result.append(entityText);
+					i = semicolon + 1;
+					plainFrom = i;
+					continue;
+				}
+			}
+			++i;
+		} else {
+			++i;
+		}
+	}
+	flushPlain(bytes.size());
+	return result;
+}
+
+[[nodiscard]] int DisplayOffsetForSourceOffset(
+		const MarkdownNode &node,
+		const QString &value,
+		int sourceOffset,
+		const PrepareState *state) {
+	if (!state
+		|| !node.range.available
+		|| sourceOffset < node.range.startOffset
+		|| sourceOffset > node.range.endOffset) {
+		return -1;
+	}
+	const auto prefixSize = sourceOffset - node.range.startOffset;
+	if (!prefixSize) {
+		return 0;
+	}
+	const auto prefix = state->sourceUtf8.mid(
+		node.range.startOffset,
+		prefixSize);
+	const auto displayPrefix = DecodeMarkdownTextPrefix(prefix);
+	return value.startsWith(displayPrefix) ? displayPrefix.size() : -1;
+}
+
+[[nodiscard]] int TextSizeForFormula(const style::TextStyle &textStyle) {
+	return std::max(textStyle.font->height, 1);
+}
+
+[[nodiscard]] int ScaleFormulaCap(int cap, int textSize, int baseTextSize) {
+	if (cap <= 0) {
+		return 0;
+	}
+	const auto numerator = int64(cap) * std::max(textSize, 1);
+	const auto denominator = std::max(baseTextSize, 1);
+	return std::max(int((numerator + denominator - 1) / denominator), 1);
+}
+
+[[nodiscard]] const style::TextStyle &FlowTextStyle(
+		PreparedBlockKind kind,
+		int headingLevel,
+		const MarkdownStyleSnapshot &style) {
+	if (kind != PreparedBlockKind::Heading) {
+		return style.paragraphStyle;
+	}
+	switch (std::clamp(headingLevel, 1, 6)) {
+	case 1: return style.heading1Style;
+	case 2: return style.heading2Style;
+	case 3: return style.heading3Style;
+	case 4: return style.heading4Style;
+	case 5: return style.heading5Style;
+	case 6: return style.heading6Style;
+	}
+	return style.heading6Style;
+}
+
+[[nodiscard]] const style::TextStyle &TableCellTextStyle(
+		bool header,
+		const MarkdownStyleSnapshot &style) {
+	return header ? style.tableHeaderStyle : style.paragraphStyle;
+}
+
+[[nodiscard]] std::vector<InlineFormulaSource> CollectInlineFormulas(
+		const MarkdownNode &node,
+		PrepareState *state) {
+	auto result = std::vector<InlineFormulaSource>();
+	if (!state
+		|| !state->request
+		|| !state->request->document
+		|| !node.range.available) {
+		return result;
+	}
+	const auto &formulas = state->request->document->formulas;
+	for (auto i = 0, count = int(formulas.size()); i != count; ++i) {
+		const auto &formula = formulas[i];
+		if (formula.kind != MathKind::Inline
+			|| !RangeContains(node.range, formula.range)) {
+			continue;
+		}
+		auto copySource = state->formulaSourceText(i);
+		if (copySource.isEmpty()) {
+			copySource = u"$"_q + formula.tex + u"$"_q;
+		}
+		result.push_back({
+			.formulaIndex = i,
+			.range = formula.range,
+			.copySource = std::move(copySource),
+		});
+	}
+	return result;
+}
+
+void ReplaceInlineFormulasInAppendedText(
+		const MarkdownNode &node,
+		const QString &value,
+		int from,
+		TextWithEntities *text,
+		InlineFormulaContext *inlineFormulas,
+		PrepareState *state) {
+	if (!text
+		|| !inlineFormulas
+		|| !inlineFormulas->formulas
+		|| !inlineFormulas->prepared
+		|| !state
+		|| inlineFormulas->next >= int(inlineFormulas->formulas->size())
+		|| !node.range.available) {
+		return;
+	}
+	auto removedLength = 0;
+	while (inlineFormulas->next < int(inlineFormulas->formulas->size())) {
+		const auto &formula = (*inlineFormulas->formulas)[inlineFormulas->next];
+		if (formula.range.endOffset <= node.range.startOffset) {
+			++inlineFormulas->next;
+			continue;
+		} else if (!RangeContains(node.range, formula.range)) {
+			break;
+		}
+
+		const auto originalOffset = DisplayOffsetForSourceOffset(
+			node,
+			value,
+			formula.range.startOffset,
+			state);
+		const auto sourceLength = formula.copySource.size();
+		if (originalOffset < 0
+			|| value.mid(originalOffset, sourceLength) != formula.copySource) {
+			++inlineFormulas->next;
+			continue;
+		}
+		const auto found = from + originalOffset - removedLength;
+		text->text.replace(
+			found,
+			sourceLength,
+			QString(QChar::ObjectReplacementCharacter));
+		inlineFormulas->prepared->push_back({
+			.position = found,
+			.formulaIndex = formula.formulaIndex,
+			.sourceLength = sourceLength,
+			.copySource = formula.copySource,
+		});
+		removedLength += (sourceLength - 1);
+
+		const auto &source = state->request->document->formulas[formula.formulaIndex];
+		state->rememberFormula(
+			formula.formulaIndex,
+			MathKind::Inline,
+			source.tex,
+			inlineFormulas->textSize,
+			inlineFormulas->renderWidthCap,
+			inlineFormulas->renderHeightCap);
+		++inlineFormulas->next;
+	}
+}
+
+void AppendTextWithInlineFormulas(
+		const MarkdownNode &node,
+		const QString &value,
+		TextWithEntities *text,
+		InlineFormulaContext *inlineFormulas,
+		PrepareState *state) {
+	const auto from = text->text.size();
+	text->append(value);
+	ReplaceInlineFormulasInAppendedText(
+		node,
+		value,
+		from,
+		text,
+		inlineFormulas,
+		state);
+}
+
 void AppendInline(
 	const MarkdownNode &node,
 	TextWithEntities *text,
 	std::vector<PreparedLink> *links,
+	InlineFormulaContext *inlineFormulas,
 	PrepareState *state);
 
 void AppendInlineChildren(
 		const MarkdownNode &node,
 		TextWithEntities *text,
 		std::vector<PreparedLink> *links,
+		InlineFormulaContext *inlineFormulas,
 		PrepareState *state) {
 	for (const auto &child : node.children) {
 		if (state->cancelled()) {
 			return;
 		}
-		AppendInline(child, text, links, state);
+		AppendInline(child, text, links, inlineFormulas, state);
 	}
 }
 
@@ -119,6 +429,7 @@ void AppendInline(
 		const MarkdownNode &node,
 		TextWithEntities *text,
 		std::vector<PreparedLink> *links,
+		InlineFormulaContext *inlineFormulas,
 		PrepareState *state) {
 	if (state->cancelled()) {
 		return;
@@ -128,7 +439,12 @@ void AppendInline(
 	switch (node.kind) {
 	case NodeKind::Text:
 	case NodeKind::InlineMath:
-		text->append(node.text);
+		AppendTextWithInlineFormulas(
+			node,
+			node.text,
+			text,
+			inlineFormulas,
+			state);
 		break;
 	case NodeKind::SoftBreak:
 		text->append(QChar(' '));
@@ -137,7 +453,7 @@ void AppendInline(
 		text->append(QChar('\n'));
 		break;
 	case NodeKind::Emphasis:
-		AppendInlineChildren(node, text, links, state);
+		AppendInlineChildren(node, text, links, inlineFormulas, state);
 		if (text->text.size() > from) {
 			text->entities.push_back(
 				EntityInText(
@@ -147,7 +463,7 @@ void AppendInline(
 		}
 		break;
 	case NodeKind::Strong:
-		AppendInlineChildren(node, text, links, state);
+		AppendInlineChildren(node, text, links, inlineFormulas, state);
 		if (text->text.size() > from) {
 			text->entities.push_back(
 				EntityInText(
@@ -157,7 +473,7 @@ void AppendInline(
 		}
 		break;
 	case NodeKind::Strike:
-		AppendInlineChildren(node, text, links, state);
+		AppendInlineChildren(node, text, links, inlineFormulas, state);
 		if (text->text.size() > from) {
 			text->entities.push_back(
 				EntityInText(
@@ -170,7 +486,7 @@ void AppendInline(
 		if (!node.text.isEmpty()) {
 			text->append(node.text);
 		} else {
-			AppendInlineChildren(node, text, links, state);
+			AppendInlineChildren(node, text, links, inlineFormulas, state);
 		}
 		if (text->text.size() > from) {
 			text->entities.push_back(
@@ -181,7 +497,7 @@ void AppendInline(
 		}
 		break;
 	case NodeKind::Link: {
-		AppendInlineChildren(node, text, links, state);
+		AppendInlineChildren(node, text, links, inlineFormulas, state);
 		if (text->text.size() == from && !node.url.isEmpty()) {
 			text->append(node.url);
 		}
@@ -207,16 +523,26 @@ void AppendInline(
 	case NodeKind::HtmlInline:
 	case NodeKind::Unsupported:
 		if (!node.children.empty()) {
-			AppendInlineChildren(node, text, links, state);
+			AppendInlineChildren(node, text, links, inlineFormulas, state);
 		} else if (!node.text.isEmpty()) {
-			text->append(node.text);
+			AppendTextWithInlineFormulas(
+				node,
+				node.text,
+				text,
+				inlineFormulas,
+				state);
 		}
 		break;
 	default:
 		if (!node.children.empty()) {
-			AppendInlineChildren(node, text, links, state);
+			AppendInlineChildren(node, text, links, inlineFormulas, state);
 		} else if (!node.text.isEmpty()) {
-			text->append(node.text);
+			AppendTextWithInlineFormulas(
+				node,
+				node.text,
+				text,
+				inlineFormulas,
+				state);
 		}
 		break;
 	}
@@ -224,15 +550,43 @@ void AppendInline(
 
 void PrepareTableCellText(
 		const MarkdownNode &cell,
+		bool header,
 		TextWithEntities *text,
 		std::vector<PreparedLink> *links,
+		std::vector<PreparedInlineObject> *inlineObjects,
 		PrepareState *state) {
+	const auto &renderStyle = TableCellTextStyle(header, state->result.style);
+	const auto textSize = TextSizeForFormula(renderStyle);
+	auto formulas = CollectInlineFormulas(cell, state);
+	auto inlineFormulas = InlineFormulaContext{
+		.formulas = &formulas,
+		.prepared = inlineObjects,
+		.textSize = textSize,
+		.renderWidthCap = ScaleFormulaCap(
+			state->result.style.displayMathMaxRenderWidth,
+			textSize,
+			state->result.style.displayMathTextSize),
+		.renderHeightCap = ScaleFormulaCap(
+			state->result.style.displayMathMaxRenderHeight,
+			textSize,
+			state->result.style.displayMathTextSize),
+	};
 	if (!cell.children.empty()) {
-		AppendInlineChildren(cell, text, links, state);
+		AppendInlineChildren(cell, text, links, &inlineFormulas, state);
 	} else if (!cell.text.isEmpty()) {
-		text->append(cell.text);
+		AppendTextWithInlineFormulas(
+			cell,
+			cell.text,
+			text,
+			&inlineFormulas,
+			state);
 	} else if (!cell.raw.isEmpty()) {
-		text->append(cell.raw);
+		AppendTextWithInlineFormulas(
+			cell,
+			cell.raw,
+			text,
+			&inlineFormulas,
+			state);
 	}
 	SortEntities(text);
 }
@@ -366,7 +720,13 @@ void PrepareTableCellText(
 			auto cell = PreparedTableCell();
 			cell.column = column;
 			cell.alignment = block.tableAlignments[column];
-			PrepareTableCellText(cellNode, &cell.text, &cell.links, state);
+			PrepareTableCellText(
+				cellNode,
+				rowNode.tableHeader,
+				&cell.text,
+				&cell.links,
+				&cell.inlineObjects,
+				state);
 			row.cells.push_back(std::move(cell));
 			++expectedColumn;
 		}
@@ -395,6 +755,7 @@ void AppendRichBlock(
 		int headingLevel,
 		TextWithEntities text,
 		std::vector<PreparedLink> links,
+		std::vector<PreparedInlineObject> inlineObjects,
 		bool allowEmpty = false) {
 	SortEntities(&text);
 	if (text.text.isEmpty() && !allowEmpty) {
@@ -405,6 +766,7 @@ void AppendRichBlock(
 	block.headingLevel = headingLevel;
 	block.text = std::move(text);
 	block.links = std::move(links);
+	block.inlineObjects = std::move(inlineObjects);
 	blocks->push_back(std::move(block));
 }
 
@@ -466,10 +828,35 @@ void AppendRichBlock(
 	auto result = std::vector<PreparedBlock>();
 	auto text = TextWithEntities();
 	auto links = std::vector<PreparedLink>();
+	auto inlineObjects = std::vector<PreparedInlineObject>();
+	const auto &renderStyle = FlowTextStyle(
+		kind,
+		(kind == PreparedBlockKind::Heading) ? node.headingLevel : 0,
+		state->result.style);
+	const auto textSize = TextSizeForFormula(renderStyle);
+	auto formulas = CollectInlineFormulas(node, state);
+	auto inlineFormulas = InlineFormulaContext{
+		.formulas = &formulas,
+		.prepared = &inlineObjects,
+		.textSize = textSize,
+		.renderWidthCap = ScaleFormulaCap(
+			state->result.style.displayMathMaxRenderWidth,
+			textSize,
+			state->result.style.displayMathTextSize),
+		.renderHeightCap = ScaleFormulaCap(
+			state->result.style.displayMathMaxRenderHeight,
+			textSize,
+			state->result.style.displayMathTextSize),
+	};
 	if (!node.children.empty()) {
-		AppendInlineChildren(node, &text, &links, state);
+		AppendInlineChildren(node, &text, &links, &inlineFormulas, state);
 	} else if (!node.text.isEmpty()) {
-		text.append(node.text);
+		AppendTextWithInlineFormulas(
+			node,
+			node.text,
+			&text,
+			&inlineFormulas,
+			state);
 	}
 	if (state->cancelled()) {
 		return {};
@@ -479,7 +866,8 @@ void AppendRichBlock(
 		kind,
 		(kind == PreparedBlockKind::Heading) ? node.headingLevel : 0,
 		std::move(text),
-		std::move(links));
+		std::move(links),
+		std::move(inlineObjects));
 	return result;
 }
 
@@ -602,7 +990,8 @@ void AppendRichBlock(
 		PreparedBlockKind::Paragraph,
 		0,
 		TextWithEntities::Simple(text),
-		std::vector<PreparedLink>());
+		std::vector<PreparedLink>(),
+		std::vector<PreparedInlineObject>());
 	return result;
 }
 
@@ -698,9 +1087,15 @@ void AppendRichBlock(
 		slot.rendered = renderer.renderFormula({
 			.trimmedTex = slot.trimmedTex,
 			.kind = slot.kind,
-			.textSize = style.displayMathTextSize,
-			.renderWidthCap = style.displayMathMaxRenderWidth,
-			.renderHeightCap = style.displayMathMaxRenderHeight,
+			.textSize = slot.textSize
+				? slot.textSize
+				: style.displayMathTextSize,
+			.renderWidthCap = slot.renderWidthCap
+				? slot.renderWidthCap
+				: style.displayMathMaxRenderWidth,
+			.renderHeightCap = slot.renderHeightCap
+				? slot.renderHeightCap
+				: style.displayMathMaxRenderHeight,
 			.foreground = style.displayMathForegroundColor,
 			.devicePixelRatio = style.devicePixelRatio,
 		}, style.paletteVersion);
@@ -800,6 +1195,7 @@ PreparedResult PrepareSynchronously(PrepareRequest request) {
 		return state.result;
 	}
 
+	state.sourceUtf8 = request.document->sourceText.toUtf8();
 	state.result.formulas.resize(FormulaSlotCount(*request.document));
 	if (state.cancelled()) {
 		return std::move(state.result);

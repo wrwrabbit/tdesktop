@@ -282,6 +282,13 @@ void BindLinks(
 	return style.paragraphStyle;
 }
 
+void SetTextLeaf(
+		Ui::Text::String *leaf,
+		const style::TextStyle &textStyle,
+		const TextWithEntities &text,
+		const std::vector<PreparedInlineObject> &inlineObjects,
+		const std::vector<PreparedFormulaSlot> &formulas);
+
 struct TableCellLayoutData {
 	LaidOutTableCell cell;
 	int preferredWidth = 0;
@@ -296,14 +303,17 @@ struct TableRowLayoutData {
 [[nodiscard]] TableCellLayoutData InitializeTableCellLayout(
 		const PreparedTableCell &prepared,
 		bool header,
+		const std::vector<PreparedFormulaSlot> &formulas,
 		const MarkdownStyleSnapshot &style) {
 	auto result = TableCellLayoutData();
 	const auto &textStyle = TableCellTextStyle(header, style);
 	result.cell.align = CellAlign(prepared.alignment);
-	result.cell.leaf.setMarkedText(
+	SetTextLeaf(
+		&result.cell.leaf,
 		textStyle,
 		prepared.text,
-		kIvMarkedTextOptions);
+		prepared.inlineObjects,
+		formulas);
 	BindLinks(&result.cell.leaf, prepared.links);
 	result.preferredWidth = result.cell.leaf.maxWidth();
 	result.preferredHeight = std::max(
@@ -397,8 +407,80 @@ struct TableRowLayoutData {
 	return &formulas[formulaIndex].rendered;
 }
 
+[[nodiscard]] const PreparedFormulaSlot *PreparedFormulaFor(
+		const std::vector<PreparedFormulaSlot> &formulas,
+		int formulaIndex) {
+	if (formulaIndex < 0 || formulaIndex >= int(formulas.size())) {
+		return nullptr;
+	} else if (!formulas[formulaIndex].present) {
+		return nullptr;
+	}
+	return &formulas[formulaIndex];
+}
+
+[[nodiscard]] QString InlineFormulaFallbackText(
+		const PreparedInlineObject &prepared,
+		const PreparedFormulaSlot *formula) {
+	if (!prepared.copySource.isEmpty()) {
+		return prepared.copySource;
+	} else if (formula && !formula->rendered.fallbackText.isEmpty()) {
+		return formula->rendered.fallbackText;
+	} else if (formula && !formula->trimmedTex.isEmpty()) {
+		return formula->trimmedTex;
+	}
+	return u"[math]"_q;
+}
+
+[[nodiscard]] std::vector<Ui::Text::InlineObjectPlacement> InlineFormulaPlacements(
+		const std::vector<PreparedInlineObject> &preparedInlineObjects,
+		const std::vector<PreparedFormulaSlot> &formulas,
+		const style::TextStyle &textStyle) {
+	auto result = std::vector<Ui::Text::InlineObjectPlacement>();
+	result.reserve(preparedInlineObjects.size());
+	for (const auto &prepared : preparedInlineObjects) {
+		const auto formula = PreparedFormulaFor(formulas, prepared.formulaIndex);
+		auto placement = Ui::Text::InlineObjectPlacement();
+		placement.position = prepared.position;
+		placement.object.align = Ui::Text::InlineObjectVerticalAlign::CenterInText;
+		placement.object.copySource = prepared.copySource;
+		if (formula && formula->rendered.success) {
+			placement.object.image = formula->rendered.image;
+			placement.object.width = std::max(
+				formula->rendered.logicalSize.width(),
+				1);
+			placement.object.fallbackText = InlineFormulaFallbackText(
+				prepared,
+				formula);
+		} else {
+			placement.object.fallbackText = InlineFormulaFallbackText(
+				prepared,
+				formula);
+			placement.object.width = std::max(
+				textStyle.font->width(placement.object.fallbackText),
+				1);
+		}
+		result.push_back(std::move(placement));
+	}
+	return result;
+}
+
+void SetTextLeaf(
+		Ui::Text::String *leaf,
+		const style::TextStyle &textStyle,
+		const TextWithEntities &text,
+	const std::vector<PreparedInlineObject> &inlineObjects,
+	const std::vector<PreparedFormulaSlot> &formulas) {
+	auto context = Ui::Text::MarkedContext();
+	auto placements = InlineFormulaPlacements(inlineObjects, formulas, textStyle);
+	context.inlineObjects = Ui::Text::InlineObjectPlacements(
+		placements.data(),
+		placements.size());
+	leaf->setMarkedText(textStyle, text, kIvMarkedTextOptions, context);
+}
+
 [[nodiscard]] LaidOutBlock LayoutFlowBlock(
 		const PreparedBlock &prepared,
+		const std::vector<PreparedFormulaSlot> &formulas,
 		const MarkdownStyleSnapshot &style,
 		int left,
 		int top,
@@ -409,10 +491,12 @@ struct TableRowLayoutData {
 	block.textWidth = std::max(width, 1);
 
 	const auto &textStyle = TextStyleFor(prepared, style);
-	block.leaf.setMarkedText(
+	SetTextLeaf(
+		&block.leaf,
 		textStyle,
 		prepared.text,
-		kIvMarkedTextOptions);
+		prepared.inlineObjects,
+		formulas);
 	BindLinks(&block.leaf, prepared.links);
 
 	const auto height = std::max(
@@ -580,6 +664,7 @@ struct TableRowLayoutData {
 
 [[nodiscard]] LaidOutBlock LayoutTableBlock(
 		const PreparedBlock &prepared,
+		const std::vector<PreparedFormulaSlot> &formulas,
 		const MarkdownStyleSnapshot &style,
 		int left,
 		int top,
@@ -603,6 +688,7 @@ struct TableRowLayoutData {
 			row.cells.push_back(InitializeTableCellLayout(
 				preparedCell,
 				preparedRow.header,
+				formulas,
 				style));
 		}
 		rows.push_back(std::move(row));
@@ -939,7 +1025,7 @@ struct TableRowLayoutData {
 	switch (prepared.kind) {
 	case PreparedBlockKind::Paragraph:
 	case PreparedBlockKind::Heading:
-		return LayoutFlowBlock(prepared, style, left, top, width);
+		return LayoutFlowBlock(prepared, formulas, style, left, top, width);
 	case PreparedBlockKind::CodeBlock:
 		return LayoutCodeBlock(prepared, style, left, top, width);
 	case PreparedBlockKind::Rule:
@@ -981,9 +1067,9 @@ struct TableRowLayoutData {
 			top,
 			width);
 	case PreparedBlockKind::Table:
-		return LayoutTableBlock(prepared, style, left, top, width);
+		return LayoutTableBlock(prepared, formulas, style, left, top, width);
 	}
-	return LayoutFlowBlock(prepared, style, left, top, width);
+	return LayoutFlowBlock(prepared, formulas, style, left, top, width);
 }
 
 class DocumentLayout final {

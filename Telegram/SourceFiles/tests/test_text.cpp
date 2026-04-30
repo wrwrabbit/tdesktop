@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QAbstractNativeEventFilter>
 #include <QThread>
 #include <QDir>
+#include <QImage>
 
 namespace Test {
 
@@ -57,8 +58,64 @@ fugiatnullapariaturExcepteursintoccaecatcupidatatnonproident, sunt in culpa \
 qui officia deserunt mollit anim id est laborum. \
 Duisauteiruredolorinreprehenderitinvoluptate.");
 	data.append(data);
+	data.append(u"\n\nInline formula image: "_q);
+	data.append(QChar::ObjectReplacementCharacter);
+	data.append(u" and fallback: "_q);
+	data.append(QChar::ObjectReplacementCharacter);
+	data.append(u" inside wrapped text."_q);
 	//data.append("hi\n\nguys");
-	text->setMarkedText(st::defaultTextStyle, data);
+
+	auto formulaImage = QImage(
+		QSize(scale(56), scale(24)),
+		QImage::Format_ARGB32_Premultiplied);
+	formulaImage.fill(Qt::transparent);
+	{
+		auto p = QPainter(&formulaImage);
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(Qt::NoPen);
+		p.setBrush(QColor(32, 96, 192, 48));
+		p.drawRoundedRect(
+			QRect(0, 0, formulaImage.width(), formulaImage.height()),
+			scale(6),
+			scale(6));
+		p.setPen(QColor(32, 96, 192));
+		p.drawText(
+			QRect(0, 0, formulaImage.width(), formulaImage.height()),
+			Qt::AlignCenter,
+			u"a / b"_q);
+	}
+
+	const auto firstInlineObject = data.text.indexOf(
+		QChar::ObjectReplacementCharacter);
+	const auto secondInlineObject = data.text.indexOf(
+		QChar::ObjectReplacementCharacter,
+		firstInlineObject + 1);
+	const auto fallbackSource = u"$\\int_0^1 x^2 \\, dx$"_q;
+	auto inlineObjects = std::vector<Ui::Text::InlineObjectPlacement>();
+	inlineObjects.push_back({
+		.position = firstInlineObject,
+		.object = {
+			.width = formulaImage.width(),
+			.align = Ui::Text::InlineObjectVerticalAlign::CenterInText,
+			.copySource = u"$\\frac{a}{b}$"_q,
+			.fallbackText = u"$\\frac{a}{b}$"_q,
+			.image = formulaImage,
+		},
+	});
+	inlineObjects.push_back({
+		.position = secondInlineObject,
+		.object = {
+			.width = st::defaultTextStyle.font->width(fallbackSource),
+			.align = Ui::Text::InlineObjectVerticalAlign::CenterInText,
+			.copySource = fallbackSource,
+			.fallbackText = fallbackSource,
+		},
+	});
+	auto context = Ui::Text::MarkedContext();
+	context.inlineObjects = Ui::Text::InlineObjectPlacements(
+		inlineObjects.data(),
+		inlineObjects.size());
+	text->setMarkedText(st::defaultTextStyle, data, kMarkupTextOptions, context);
 
 	body->paintRequest() | rpl::on_next([=](QRect clip) {
 		auto p = QPainter(body);
@@ -86,16 +143,17 @@ Duisauteiruredolorinreprehenderitinvoluptate.");
 			text->countHeight(inner.width())
 		}, QColor(128, 0, 0, 16));
 
-		auto widths = text->countLineWidths(inner.width());
+		auto lines = text->countLinesGeometry(inner.width());
 		auto top = 0;
-		for (const auto width : widths) {
+		for (const auto &line : lines) {
+			const auto lineHeight = std::max(line.bottom - top, 1);
 			p.fillRect(QRect{
-				inner.x(),
+				inner.x() + line.left,
 				inner.y() + top,
-				width,
-				st::defaultTextStyle.font->height
+				line.width,
+				lineHeight
 			}, QColor(0, 0, 128, 16));
-			top += st::defaultTextStyle.font->height;
+			top = line.bottom;
 		}
 
 		text->draw(p, {
