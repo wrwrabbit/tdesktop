@@ -47,40 +47,6 @@ constexpr auto kMaxSourceBytes = 4 * 1024 * 1024;
 	return true;
 }
 
-[[nodiscard]] bool HasUtf8Bom(const QByteArray &source) {
-	return source.size() >= 3
-		&& static_cast<unsigned char>(source[0]) == 0xEF
-		&& static_cast<unsigned char>(source[1]) == 0xBB
-		&& static_cast<unsigned char>(source[2]) == 0xBF;
-}
-
-[[nodiscard]] unsigned char ByteAt(const QByteArray &source, int index) {
-	return static_cast<unsigned char>(source[index]);
-}
-
-[[nodiscard]] bool IsAllowedControl(unsigned char byte) {
-	return byte == '\t' || byte == '\n' || byte == '\r';
-}
-
-[[nodiscard]] bool LooksBinaryOrNonText(const QByteArray &source) {
-	const auto normalized = HasUtf8Bom(source) ? source.mid(3) : source;
-	const auto size = normalized.size();
-	if (size == 0) {
-		return false;
-	}
-	auto controlBytes = 0;
-	for (auto i = 0; i != size; ++i) {
-		const auto byte = ByteAt(normalized, i);
-		if (byte == 0) {
-			return true;
-		} else if ((byte < 0x20 || byte == 0x7F)
-			&& !IsAllowedControl(byte)) {
-			++controlBytes;
-		}
-	}
-	return (controlBytes * 10) > size;
-}
-
 [[nodiscard]] bool HasPreviewableContent(const MarkdownNode &node) {
 	switch (node.kind) {
 	case NodeKind::Document:
@@ -248,14 +214,17 @@ bool TryOpenLocalFile(const QString &path) {
 			).arg(path));
 		return false;
 	}
-	if (LooksBinaryOrNonText(bytes)) {
-		DEBUG_LOG(("Native Markdown IV: rejected local file as binary/non-text: %1"
+
+	const auto title = info.fileName();
+	auto validated = ValidateMarkdownSourceForIv(bytes, ParseOptions{ title });
+	if (!validated.ok) {
+		DEBUG_LOG(("Native Markdown IV: source validation failure (%1): %2"
+			).arg(validated.error
 			).arg(path));
 		return false;
 	}
 
-	const auto title = info.fileName();
-	auto result = ParseMarkdownForIv(bytes, ParseOptions{ title });
+	auto result = ParseMarkdownForIv(std::move(validated.source));
 	if (!result.ok) {
 		const auto &error = result.error;
 		if (error.startsWith(u"cmark-"_q)) {

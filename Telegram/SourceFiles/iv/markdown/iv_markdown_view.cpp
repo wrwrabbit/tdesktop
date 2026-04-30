@@ -1,17 +1,19 @@
 #include "iv/markdown/iv_markdown_view.h"
-#include "iv/markdown/iv_markdown_math_renderer.h"
+#include "iv/markdown/iv_markdown_prepare.h"
 
 #include <QtCore/QDebug>
 
 #include "base/weak_ptr.h"
 #include "core/credits_amount.h"
 #include "core/click_handler_types.h"
+#include "lang/lang_keys.h"
 #include "ui/click_handler.h"
 #include "ui/painter.h"
 #include "ui/rp_widget.h"
 #include "ui/style/style_core.h"
 #include "ui/text/text.h"
 #include "ui/widgets/scroll_area.h"
+#include "ui/widgets/labels.h"
 
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPen>
@@ -20,11 +22,11 @@
 #include <initializer_list>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
-#include "styles/palette.h"
-
+#include "styles/style_boxes.h"
 #include "styles/style_iv.h"
 #include "styles/style_layers.h"
 
@@ -38,66 +40,39 @@ constexpr auto kIvMarkedTextOptions = TextParseOptions{
 	Qt::LayoutDirectionAuto,
 };
 
-enum class PreparedBlockKind {
-	Paragraph,
-	Heading,
-	CodeBlock,
-	Rule,
-	List,
-	ListItem,
-	Quote,
-	DisplayMath,
-	Table,
-};
+struct SnapshotTextPalette {
+	explicit SnapshotTextPalette(const MarkdownTextPaletteSnapshot &snapshot)
+	: link(snapshot.link)
+	, mono(snapshot.mono)
+	, spoiler(snapshot.spoiler)
+	, selectBackground(snapshot.selectBackground)
+	, selectText(snapshot.selectText)
+	, selectLink(snapshot.selectLink)
+	, selectMono(snapshot.selectMono)
+	, selectSpoiler(snapshot.selectSpoiler)
+	, selectOverlay(snapshot.selectOverlay) {
+		palette.linkFg = link.color();
+		palette.monoFg = mono.color();
+		palette.spoilerFg = spoiler.color();
+		palette.selectBg = selectBackground.color();
+		palette.selectFg = selectText.color();
+		palette.selectLinkFg = selectLink.color();
+		palette.selectMonoFg = selectMono.color();
+		palette.selectSpoilerFg = selectSpoiler.color();
+		palette.selectOverlay = selectOverlay.color();
+		palette.linkAlwaysActive = snapshot.linkAlwaysActive;
+	}
 
-struct PreparedLink {
-	uint16 index = 0;
-	QString target;
-};
-
-struct PreparedTableCell {
-	TextWithEntities text;
-	std::vector<PreparedLink> links;
-	int column = 0;
-	TableAlignment alignment = TableAlignment::None;
-};
-
-struct PreparedTableRow {
-	std::vector<PreparedTableCell> cells;
-	bool header = false;
-};
-
-struct PreparedBlock {
-	PreparedBlockKind kind = PreparedBlockKind::Paragraph;
-	TextWithEntities text;
-	std::vector<PreparedLink> links;
-	std::vector<PreparedBlock> children;
-	std::vector<PreparedTableRow> tableRows;
-	std::vector<TableAlignment> tableAlignments;
-	QString codeLanguage;
-	QString formulaTex;
-	ListKind listKind = ListKind::Bullet;
-	ListDelimiter listDelimiter = ListDelimiter::None;
-	MathKind mathKind = MathKind::Display;
-	TaskState taskState = TaskState::None;
-	int headingLevel = 0;
-	int formulaIndex = -1;
-	int orderedNumber = 0;
-	int startNumber = 1;
-	int actualDepth = 0;
-	int visualDepth = 0;
-	int tableColumnCount = 0;
-	bool depthClamped = false;
-	bool tight = false;
-};
-
-struct PreparedRenderDocument {
-	std::vector<PreparedBlock> blocks;
-};
-
-struct PrepareContext {
-	int listDepth = 0;
-	int quoteDepth = 0;
+	style::owned_color link;
+	style::owned_color mono;
+	style::owned_color spoiler;
+	style::owned_color selectBackground;
+	style::owned_color selectText;
+	style::owned_color selectLink;
+	style::owned_color selectMono;
+	style::owned_color selectSpoiler;
+	style::owned_color selectOverlay;
+	style::TextPalette palette;
 };
 
 struct LaidOutTableCell {
@@ -123,7 +98,6 @@ struct LaidOutBlock {
 	std::vector<LaidOutBlock> children;
 	std::vector<LaidOutTableRow> tableRows;
 	std::vector<int> tableColumnWidths;
-	RenderedFormula formula;
 	QRect outer;
 	QRect textRect;
 	QRect markerRect;
@@ -140,6 +114,7 @@ struct LaidOutBlock {
 	ListKind listKind = ListKind::Bullet;
 	ListDelimiter listDelimiter = ListDelimiter::None;
 	TaskState taskState = TaskState::None;
+	int formulaIndex = -1;
 	int orderedNumber = 0;
 	style::align formulaAlign = style::al_left;
 	bool overflowed = false;
@@ -151,46 +126,19 @@ struct LayoutContext {
 	bool tightList = false;
 };
 
-constexpr auto kMaxVisualListDepth = 6;
-constexpr auto kMaxVisualQuoteDepth = 3;
 constexpr auto kCodeTabColumns = 4;
 constexpr auto kCodeTrailingGuard = 0x2060;
-constexpr auto kMaxRenderedTableRows = 128;
-constexpr auto kMaxRenderedTableColumns = 16;
-constexpr auto kMaxRenderedTableCells = 1024;
-
-[[nodiscard]] QString InternalLinkData(uint16 index) {
-	return QStringLiteral("internal:index") + QChar(index);
-}
 
 [[nodiscard]] bool IsFlowKind(PreparedBlockKind kind) {
 	return (kind == PreparedBlockKind::Paragraph)
 		|| (kind == PreparedBlockKind::Heading);
 }
 
-[[nodiscard]] int CappedListDepth(int depth) {
-	return std::min(depth, kMaxVisualListDepth);
-}
-
-[[nodiscard]] int CappedQuoteDepth(int depth) {
-	return std::min(depth, kMaxVisualQuoteDepth);
-}
-
-[[nodiscard]] QString FirstInfoToken(const QString &info) {
-	const auto trimmed = info.trimmed();
-	for (auto i = 0; i != trimmed.size(); ++i) {
-		if (trimmed[i].isSpace()) {
-			return trimmed.left(i);
-		}
-	}
-	return trimmed;
-}
-
 [[nodiscard]] QString ListMarkerText(const PreparedBlock &block) {
 	if (block.listKind == ListKind::Ordered) {
 		const auto delimiter = (block.listDelimiter == ListDelimiter::Parenthesis)
-			? QStringLiteral(")")
-			: QStringLiteral(".");
+			? u")"_q
+			: u"."_q;
 		return QString::number(block.orderedNumber) + delimiter;
 	}
 	return Ui::kQBullet;
@@ -206,541 +154,27 @@ constexpr auto kMaxRenderedTableCells = 1024;
 	return result;
 }
 
-void SortEntities(TextWithEntities *text) {
-	auto &entities = text->entities;
-	std::sort(
-		entities.begin(),
-		entities.end(),
-		[](const EntityInText &left, const EntityInText &right) {
-			if (left.offset() != right.offset()) {
-				return left.offset() < right.offset();
-			} else if (left.length() != right.length()) {
-				return left.length() > right.length();
-			}
-			return int(left.type()) < int(right.type());
-		});
-}
-
-void AppendInline(
-		const MarkdownNode &node,
-		TextWithEntities *text,
-		std::vector<PreparedLink> *links);
-
-void AppendInlineChildren(
-		const MarkdownNode &node,
-		TextWithEntities *text,
-		std::vector<PreparedLink> *links) {
-	for (const auto &child : node.children) {
-		AppendInline(child, text, links);
-	}
-}
-
-void AppendInline(
-		const MarkdownNode &node,
-		TextWithEntities *text,
-		std::vector<PreparedLink> *links) {
-	const auto from = text->text.size();
-	switch (node.kind) {
-	case NodeKind::Text:
-	case NodeKind::InlineMath:
-		text->append(node.text);
-		break;
-	case NodeKind::SoftBreak:
-		text->append(QChar(' '));
-		break;
-	case NodeKind::LineBreak:
-		text->append(QChar('\n'));
-		break;
-	case NodeKind::Emphasis:
-		AppendInlineChildren(node, text, links);
-		if (text->text.size() > from) {
-			text->entities.push_back(
-				EntityInText(
-					EntityType::Italic,
-					from,
-					text->text.size() - from));
-		}
-		break;
-	case NodeKind::Strong:
-		AppendInlineChildren(node, text, links);
-		if (text->text.size() > from) {
-			text->entities.push_back(
-				EntityInText(
-					EntityType::Bold,
-					from,
-					text->text.size() - from));
-		}
-		break;
-	case NodeKind::Strike:
-		AppendInlineChildren(node, text, links);
-		if (text->text.size() > from) {
-			text->entities.push_back(
-				EntityInText(
-					EntityType::StrikeOut,
-					from,
-					text->text.size() - from));
-		}
-		break;
-	case NodeKind::InlineCode:
-		if (!node.text.isEmpty()) {
-			text->append(node.text);
-		} else {
-			AppendInlineChildren(node, text, links);
-		}
-		if (text->text.size() > from) {
-			text->entities.push_back(
-				EntityInText(
-					EntityType::Code,
-					from,
-					text->text.size() - from));
-		}
-		break;
-	case NodeKind::Link: {
-		AppendInlineChildren(node, text, links);
-		if (text->text.size() == from && !node.url.isEmpty()) {
-			text->append(node.url);
-		}
-		const auto length = text->text.size() - from;
-		if (length <= 0 || node.url.isEmpty()) {
-			break;
-		}
-		const auto index = links->size() + 1;
-		if (index > std::numeric_limits<uint16>::max()) {
-			break;
-		}
-		text->entities.push_back(
-			EntityInText(
-				EntityType::CustomUrl,
-				from,
-				length,
-				InternalLinkData(uint16(index))));
-		links->push_back({
-			.index = uint16(index),
-			.target = node.url,
-		});
-	} break;
-	case NodeKind::HtmlInline:
-	case NodeKind::Unsupported:
-		if (!node.children.empty()) {
-			AppendInlineChildren(node, text, links);
-		} else if (!node.text.isEmpty()) {
-			text->append(node.text);
-		}
-		break;
-	default:
-		if (!node.children.empty()) {
-			AppendInlineChildren(node, text, links);
-		} else if (!node.text.isEmpty()) {
-			text->append(node.text);
-		}
-		break;
-	}
-}
-
-void PrepareTableCellText(
-		const MarkdownNode &cell,
-		TextWithEntities *text,
-		std::vector<PreparedLink> *links) {
-	if (!cell.children.empty()) {
-		AppendInlineChildren(cell, text, links);
-	} else if (!cell.text.isEmpty()) {
-		text->append(cell.text);
-	} else if (!cell.raw.isEmpty()) {
-		text->append(cell.raw);
-	}
-	SortEntities(text);
-}
-
-[[nodiscard]] int EffectiveTableRowWidth(const MarkdownNode &row) {
-	auto result = 0;
-	auto expectedColumn = 0;
-	for (const auto &cell : row.children) {
-		if (cell.kind != NodeKind::TableCell) {
-			return 0;
-		}
-		const auto column = (cell.tableColumn >= 0)
-			? cell.tableColumn
-			: expectedColumn;
-		if (column != expectedColumn) {
-			return 0;
-		}
-		result = std::max(result, column + 1);
-		++expectedColumn;
-	}
-	return result;
-}
-
-[[nodiscard]] int EffectiveTableColumnCount(const MarkdownNode &node) {
-	auto result = int(node.tableAlignments.size());
-	for (const auto &row : node.children) {
-		if (row.kind != NodeKind::TableRow) {
-			return 0;
-		}
-		const auto width = EffectiveTableRowWidth(row);
-		if (!width) {
-			return 0;
-		}
-		result = std::max(result, width);
-	}
-	return result;
-}
-
-[[nodiscard]] std::vector<TableAlignment> NormalizedTableAlignments(
-		const MarkdownNode &node,
-		int columnCount) {
-	auto result = std::vector<TableAlignment>(
-		std::max(columnCount, 0),
-		TableAlignment::None);
-	const auto limit = std::min(columnCount, int(node.tableAlignments.size()));
-	for (auto i = 0; i != limit; ++i) {
-		result[i] = node.tableAlignments[i];
-	}
-	return result;
-}
-
-[[nodiscard]] bool ShouldFlattenTable(
-		const MarkdownNode &node,
-		PrepareContext context) {
-	if (context.listDepth > 0 || context.quoteDepth > 0) {
-		return true;
-	}
-	if (node.children.empty()) {
-		return true;
-	}
-	const auto rowCount = int(node.children.size());
-	if (rowCount > kMaxRenderedTableRows) {
-		return true;
-	}
-	auto cellCount = 0;
-	for (const auto &row : node.children) {
-		if (row.kind != NodeKind::TableRow || row.children.empty()) {
-			return true;
-		}
-		const auto width = EffectiveTableRowWidth(row);
-		if (!width || width > kMaxRenderedTableColumns) {
-			return true;
-		}
-		cellCount += width;
-		if (cellCount > kMaxRenderedTableCells) {
-			return true;
-		}
-	}
-	const auto columnCount = EffectiveTableColumnCount(node);
-	if (!columnCount || columnCount > kMaxRenderedTableColumns) {
-		return true;
-	}
-	return (rowCount * columnCount) > kMaxRenderedTableCells;
-}
-
-[[nodiscard]] std::vector<PreparedBlock> PrepareFallbackBlocks(
-		const MarkdownNode &node,
-		PrepareContext context);
-
-[[nodiscard]] std::vector<PreparedBlock> PrepareTableBlocks(
-		const MarkdownNode &node,
-		PrepareContext context) {
-	const auto columnCount = EffectiveTableColumnCount(node);
-	if (ShouldFlattenTable(node, context) || !columnCount) {
-		return PrepareFallbackBlocks(node, context);
-	}
-
-	auto block = PreparedBlock();
-	block.kind = PreparedBlockKind::Table;
-	block.tableColumnCount = columnCount;
-	block.tableAlignments = NormalizedTableAlignments(node, columnCount);
-	block.tableRows.reserve(node.children.size());
-
-	for (const auto &rowNode : node.children) {
-		if (rowNode.kind != NodeKind::TableRow) {
-			return PrepareFallbackBlocks(node, context);
-		}
-
-		auto row = PreparedTableRow();
-		row.header = rowNode.tableHeader;
-		row.cells.reserve(columnCount);
-
-		auto expectedColumn = 0;
-		for (const auto &cellNode : rowNode.children) {
-			if (cellNode.kind != NodeKind::TableCell) {
-				return PrepareFallbackBlocks(node, context);
-			}
-			const auto column = (cellNode.tableColumn >= 0)
-				? cellNode.tableColumn
-				: expectedColumn;
-			if (column != expectedColumn || column >= columnCount) {
-				return PrepareFallbackBlocks(node, context);
-			}
-
-			auto cell = PreparedTableCell();
-			cell.column = column;
-			cell.alignment = block.tableAlignments[column];
-			PrepareTableCellText(cellNode, &cell.text, &cell.links);
-			row.cells.push_back(std::move(cell));
-			++expectedColumn;
-		}
-		for (auto column = expectedColumn; column != columnCount; ++column) {
-			auto cell = PreparedTableCell();
-			cell.column = column;
-			cell.alignment = block.tableAlignments[column];
-			row.cells.push_back(std::move(cell));
-		}
-		block.tableRows.push_back(std::move(row));
-	}
-	return { std::move(block) };
-}
-
-void AppendPrepared(
-		std::vector<PreparedBlock> &&from,
-		std::vector<PreparedBlock> *to) {
-	for (auto &block : from) {
-		to->push_back(std::move(block));
-	}
-}
-
-void AppendRichBlock(
-		std::vector<PreparedBlock> *blocks,
-		PreparedBlockKind kind,
-		int headingLevel,
-		TextWithEntities text,
-		std::vector<PreparedLink> links,
-		bool allowEmpty = false) {
-	SortEntities(&text);
-	if (text.text.isEmpty() && !allowEmpty) {
-		return;
-	}
-	auto block = PreparedBlock();
-	block.kind = kind;
-	block.headingLevel = headingLevel;
-	block.text = std::move(text);
-	block.links = std::move(links);
-	blocks->push_back(std::move(block));
-}
-
-[[nodiscard]] PreparedBlock EmptyParagraphBlock() {
-	auto block = PreparedBlock();
-	block.kind = PreparedBlockKind::Paragraph;
-	return block;
-}
-
-[[nodiscard]] PreparedBlock PrepareCodeBlock(const MarkdownNode &node) {
-	auto block = PreparedBlock();
-	block.kind = PreparedBlockKind::CodeBlock;
-	block.text.text = node.text;
-	block.codeLanguage = FirstInfoToken(node.info);
-	return block;
-}
-
-[[nodiscard]] PreparedBlock PrepareRuleBlock() {
-	auto block = PreparedBlock();
-	block.kind = PreparedBlockKind::Rule;
-	return block;
-}
-
-[[nodiscard]] PreparedBlock PrepareDisplayMathBlock(const MarkdownNode &node) {
-	auto block = PreparedBlock();
-	block.kind = PreparedBlockKind::DisplayMath;
-	block.formulaTex = !node.text.isEmpty() ? node.text : node.raw;
-	block.mathKind = MathKind::Display;
-	block.formulaIndex = node.formulaIndex;
-	return block;
-}
-
-[[nodiscard]] std::vector<PreparedBlock> PrepareBlocks(
-	const MarkdownNode &node,
-	PrepareContext context);
-
-[[nodiscard]] std::vector<PreparedBlock> PrepareChildren(
-		const MarkdownNode &node,
-		PrepareContext context) {
-	auto result = std::vector<PreparedBlock>();
-	for (const auto &child : node.children) {
-		AppendPrepared(PrepareBlocks(child, context), &result);
-	}
-	return result;
-}
-
-[[nodiscard]] std::vector<PreparedBlock> PrepareFlowBlock(
-		const MarkdownNode &node,
-		PreparedBlockKind kind) {
-	auto result = std::vector<PreparedBlock>();
-	auto text = TextWithEntities();
-	auto links = std::vector<PreparedLink>();
-	if (!node.children.empty()) {
-		AppendInlineChildren(node, &text, &links);
-	} else if (!node.text.isEmpty()) {
-		text.append(node.text);
-	}
-	AppendRichBlock(
-		&result,
-		kind,
-		(kind == PreparedBlockKind::Heading) ? node.headingLevel : 0,
-		std::move(text),
-		std::move(links));
-	return result;
-}
-
-[[nodiscard]] PreparedBlock PrepareListItemBlock(
-		const MarkdownNode &node,
-		PrepareContext context,
-		const PreparedBlock &list,
-		int orderedNumber) {
-	auto block = PreparedBlock();
-	block.kind = PreparedBlockKind::ListItem;
-	block.listKind = list.listKind;
-	block.listDelimiter = list.listDelimiter;
-	block.taskState = node.taskState;
-	block.orderedNumber = orderedNumber;
-	block.actualDepth = list.actualDepth;
-	block.visualDepth = list.visualDepth;
-	block.depthClamped = list.depthClamped;
-
-	auto childContext = context;
-	childContext.listDepth = context.listDepth + 1;
-	for (const auto &child : node.children) {
-		AppendPrepared(PrepareBlocks(child, childContext), &block.children);
-	}
-	if (block.children.empty()) {
-		block.children.push_back(EmptyParagraphBlock());
-	}
-	return block;
-}
-
-[[nodiscard]] PreparedBlock PrepareListBlock(
-		const MarkdownNode &node,
-		PrepareContext context) {
-	auto block = PreparedBlock();
-	block.kind = PreparedBlockKind::List;
-	block.listKind = node.listKind;
-	block.listDelimiter = node.listDelimiter;
-	block.startNumber = (node.listKind == ListKind::Ordered && node.listStart > 0)
-		? node.listStart
-		: 1;
-	block.actualDepth = context.listDepth;
-	block.visualDepth = CappedListDepth(block.actualDepth);
-	block.depthClamped = (block.actualDepth > block.visualDepth);
-	block.tight = node.tight;
-
-	auto nextNumber = block.startNumber;
-	auto childContext = context;
-	childContext.listDepth = context.listDepth + 1;
-	for (const auto &child : node.children) {
-		if (child.kind == NodeKind::ListItem) {
-			block.children.push_back(PrepareListItemBlock(
-				child,
-				context,
-				block,
-				(node.listKind == ListKind::Ordered) ? nextNumber : 0));
-			if (node.listKind == ListKind::Ordered) {
-				++nextNumber;
-			}
-		} else {
-			AppendPrepared(PrepareBlocks(child, childContext), &block.children);
-		}
-	}
-	return block;
-}
-
-[[nodiscard]] PreparedBlock PrepareQuoteBlock(
-		const MarkdownNode &node,
-		PrepareContext context) {
-	auto block = PreparedBlock();
-	block.kind = PreparedBlockKind::Quote;
-	block.actualDepth = context.quoteDepth;
-	block.visualDepth = CappedQuoteDepth(block.actualDepth);
-	block.depthClamped = (block.actualDepth > block.visualDepth);
-
-	auto childContext = context;
-	childContext.quoteDepth = context.quoteDepth + 1;
-	block.children = PrepareChildren(node, childContext);
-	return block;
-}
-
-[[nodiscard]] std::vector<PreparedBlock> PrepareFallbackBlocks(
-		const MarkdownNode &node,
-		PrepareContext context) {
-	if (!node.children.empty()) {
-		return PrepareChildren(node, context);
-	}
-	const auto text = !node.text.isEmpty() ? node.text : node.raw;
-	if (text.isEmpty()) {
-		return {};
-	}
-	auto result = std::vector<PreparedBlock>();
-	AppendRichBlock(
-		&result,
-		PreparedBlockKind::Paragraph,
-		0,
-		TextWithEntities::Simple(text),
-		std::vector<PreparedLink>());
-	return result;
-}
-
-[[nodiscard]] std::vector<PreparedBlock> PrepareBlocks(
-		const MarkdownNode &node,
-		PrepareContext context) {
-	switch (node.kind) {
-	case NodeKind::Document:
-	case NodeKind::TableRow:
-	case NodeKind::TableCell:
-	case NodeKind::HtmlBlock:
-	case NodeKind::Unsupported:
-		return PrepareFallbackBlocks(node, context);
-	case NodeKind::DisplayMath:
-		return { PrepareDisplayMathBlock(node) };
-	case NodeKind::Paragraph:
-		return PrepareFlowBlock(node, PreparedBlockKind::Paragraph);
-	case NodeKind::Heading:
-		return PrepareFlowBlock(node, PreparedBlockKind::Heading);
-	case NodeKind::CodeBlock:
-		return { PrepareCodeBlock(node) };
-	case NodeKind::ThematicBreak:
-		return { PrepareRuleBlock() };
-	case NodeKind::List:
-		return { PrepareListBlock(node, context) };
-	case NodeKind::ListItem: {
-		auto list = PreparedBlock();
-		list.kind = PreparedBlockKind::List;
-		list.actualDepth = context.listDepth;
-		list.visualDepth = CappedListDepth(list.actualDepth);
-		list.depthClamped = (list.actualDepth > list.visualDepth);
-		return { PrepareListItemBlock(node, context, list, 0) };
-	} break;
-	case NodeKind::Blockquote:
-		return { PrepareQuoteBlock(node, context) };
-	case NodeKind::Table:
-		return PrepareTableBlocks(node, context);
-	default:
-		return PrepareFallbackBlocks(node, context);
-	}
-	return {};
-}
-
-[[nodiscard]] PreparedRenderDocument PrepareRenderData(
-		const PreparedDocument &document) {
-	auto result = PreparedRenderDocument();
-	result.blocks = PrepareBlocks(document.document, {});
-	return result;
-}
-
-[[nodiscard]] int BlockSkip(const PreparedBlock &block) {
+[[nodiscard]] int BlockSkip(
+		const PreparedBlock &block,
+		const MarkdownStyleSnapshot &style) {
 	switch (block.kind) {
 	case PreparedBlockKind::Paragraph:
-		return st::ivMarkdownParagraphSkip;
+		return style.paragraphSkip;
 	case PreparedBlockKind::Heading:
-		return st::ivMarkdownHeadingSkip;
+		return style.headingSkip;
 	case PreparedBlockKind::CodeBlock:
-		return st::ivMarkdownCodeSkip;
+		return style.codeSkip;
 	case PreparedBlockKind::Rule:
-		return st::ivMarkdownRuleSkip;
+		return style.ruleSkip;
 	case PreparedBlockKind::List:
 	case PreparedBlockKind::ListItem:
-		return st::ivMarkdownParagraphSkip;
+		return style.paragraphSkip;
 	case PreparedBlockKind::Quote:
-		return st::ivMarkdownQuoteSkip;
+		return style.quoteSkip;
 	case PreparedBlockKind::DisplayMath:
-		return st::ivMarkdownDisplayMathSkip;
+		return style.displayMathSkip;
 	case PreparedBlockKind::Table:
-		return st::ivMarkdownTableSkip;
+		return style.tableSkip;
 	}
 	return 0;
 }
@@ -748,31 +182,33 @@ void AppendRichBlock(
 [[nodiscard]] int BlockSkip(
 		const PreparedBlock &previous,
 		const PreparedBlock &block,
-		LayoutContext context) {
+		LayoutContext context,
+		const MarkdownStyleSnapshot &style) {
 	if (context.tightList
 		&& IsFlowKind(previous.kind)
 		&& IsFlowKind(block.kind)) {
 		return 0;
 	}
-	return BlockSkip(block);
+	return BlockSkip(block, style);
 }
 
 [[nodiscard]] const style::TextStyle &TextStyleFor(
-		const PreparedBlock &block) {
+		const PreparedBlock &block,
+		const MarkdownStyleSnapshot &style) {
 	if (block.kind == PreparedBlockKind::CodeBlock) {
-		return st::ivMarkdownCodeStyle;
+		return style.codeStyle;
 	} else if (block.kind != PreparedBlockKind::Heading) {
-		return st::ivMarkdownParagraphStyle;
+		return style.paragraphStyle;
 	}
 	switch (std::clamp(block.headingLevel, 1, 6)) {
-	case 1: return st::ivMarkdownHeading1Style;
-	case 2: return st::ivMarkdownHeading2Style;
-	case 3: return st::ivMarkdownHeading3Style;
-	case 4: return st::ivMarkdownHeading4Style;
-	case 5: return st::ivMarkdownHeading5Style;
-	case 6: return st::ivMarkdownHeading6Style;
+	case 1: return style.heading1Style;
+	case 2: return style.heading2Style;
+	case 3: return style.heading3Style;
+	case 4: return style.heading4Style;
+	case 5: return style.heading5Style;
+	case 6: return style.heading6Style;
 	}
-	return st::ivMarkdownHeading6Style;
+	return style.heading6Style;
 }
 
 [[nodiscard]] QString CodeBlockDisplayText(const QString &text) {
@@ -837,11 +273,13 @@ void BindLinks(
 	return style::al_left;
 }
 
-[[nodiscard]] const style::TextStyle &TableCellTextStyle(bool header) {
+[[nodiscard]] const style::TextStyle &TableCellTextStyle(
+		bool header,
+		const MarkdownStyleSnapshot &style) {
 	if (header) {
-		return st::ivMarkdownTableHeaderStyle;
+		return style.tableHeaderStyle;
 	}
-	return st::ivMarkdownParagraphStyle;
+	return style.paragraphStyle;
 }
 
 struct TableCellLayoutData {
@@ -857,19 +295,20 @@ struct TableRowLayoutData {
 
 [[nodiscard]] TableCellLayoutData InitializeTableCellLayout(
 		const PreparedTableCell &prepared,
-		bool header) {
+		bool header,
+		const MarkdownStyleSnapshot &style) {
 	auto result = TableCellLayoutData();
-	const auto &style = TableCellTextStyle(header);
+	const auto &textStyle = TableCellTextStyle(header, style);
 	result.cell.align = CellAlign(prepared.alignment);
 	result.cell.leaf.setMarkedText(
-		style,
+		textStyle,
 		prepared.text,
 		kIvMarkedTextOptions);
 	BindLinks(&result.cell.leaf, prepared.links);
 	result.preferredWidth = result.cell.leaf.maxWidth();
 	result.preferredHeight = std::max(
 		result.cell.leaf.countHeight(std::max(result.preferredWidth, 1), true),
-		TextLineHeight(style));
+		TextLineHeight(textStyle));
 	return result;
 }
 
@@ -877,10 +316,11 @@ struct TableRowLayoutData {
 		const std::vector<TableRowLayoutData> &rows,
 		int columnCount,
 		int width,
+		const MarkdownStyleSnapshot &style,
 		bool *overflowed) {
-	const auto &padding = st::ivMarkdownTableCellPadding;
-	const auto border = st::ivMarkdownTableBorder;
-	const auto minimum = st::ivMarkdownTableMinColumnWidth;
+	const auto &padding = style.tableCellPadding;
+	const auto border = style.tableBorder;
+	const auto minimum = style.tableMinColumnWidth;
 	auto result = std::vector<int>(std::max(columnCount, 0), minimum);
 	auto preferred = std::vector<int>(std::max(columnCount, 0), minimum);
 	for (const auto &row : rows) {
@@ -946,8 +386,20 @@ struct TableRowLayoutData {
 	return block.outer.y() + block.outer.height();
 }
 
+[[nodiscard]] const RenderedFormula *RenderedFormulaFor(
+		const std::vector<PreparedFormulaSlot> &formulas,
+		int formulaIndex) {
+	if (formulaIndex < 0 || formulaIndex >= int(formulas.size())) {
+		return nullptr;
+	} else if (!formulas[formulaIndex].present) {
+		return nullptr;
+	}
+	return &formulas[formulaIndex].rendered;
+}
+
 [[nodiscard]] LaidOutBlock LayoutFlowBlock(
 		const PreparedBlock &prepared,
+		const MarkdownStyleSnapshot &style,
 		int left,
 		int top,
 		int width) {
@@ -955,16 +407,17 @@ struct TableRowLayoutData {
 	block.kind = prepared.kind;
 	block.headingLevel = prepared.headingLevel;
 	block.textWidth = std::max(width, 1);
+
+	const auto &textStyle = TextStyleFor(prepared, style);
 	block.leaf.setMarkedText(
-		TextStyleFor(prepared),
+		textStyle,
 		prepared.text,
 		kIvMarkedTextOptions);
 	BindLinks(&block.leaf, prepared.links);
 
-	const auto &style = TextStyleFor(prepared);
 	const auto height = std::max(
 		block.leaf.countHeight(block.textWidth, true),
-		TextLineHeight(style));
+		TextLineHeight(textStyle));
 	block.textRect = QRect(left, top, block.textWidth, height);
 	block.outer = QRect(left, top, block.textWidth, height);
 	return block;
@@ -972,39 +425,40 @@ struct TableRowLayoutData {
 
 [[nodiscard]] LaidOutBlock LayoutCodeBlock(
 		const PreparedBlock &prepared,
+		const MarkdownStyleSnapshot &style,
 		int left,
 		int top,
 		int width) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::CodeBlock;
 
-	const auto &padding = st::ivMarkdownCodePadding;
+	const auto &padding = style.codePadding;
 	block.textWidth = std::max(width - padding.left() - padding.right(), 1);
 
 	auto y = top + padding.top();
 	if (!prepared.codeLanguage.isEmpty()) {
 		block.language.setMarkedText(
-			st::ivMarkdownCodeLanguageStyle,
+			style.codeLanguageStyle,
 			TextWithEntities::Simple(prepared.codeLanguage),
 			kIvMarkedTextOptions);
 		const auto languageHeight = std::max(
 			block.language.countHeight(block.textWidth, true),
-			TextLineHeight(st::ivMarkdownCodeLanguageStyle));
+			TextLineHeight(style.codeLanguageStyle));
 		block.languageRect = QRect(
 			left + padding.left(),
 			y,
 			block.textWidth,
 			languageHeight);
-		y += languageHeight + st::ivMarkdownCodeLanguageSkip;
+		y += languageHeight + style.codeLanguageSkip;
 	}
 
 	block.leaf.setMarkedText(
-		st::ivMarkdownCodeStyle,
+		style.codeStyle,
 		CodeBlockText(prepared.text.text),
 		kIvMarkedTextOptions);
 	const auto codeHeight = std::max(
 		block.leaf.countHeight(block.textWidth, true),
-		TextLineHeight(st::ivMarkdownCodeStyle));
+		TextLineHeight(style.codeStyle));
 	block.textRect = QRect(
 		left + padding.left(),
 		y,
@@ -1019,6 +473,7 @@ struct TableRowLayoutData {
 }
 
 [[nodiscard]] LaidOutBlock LayoutRuleBlock(
+		const MarkdownStyleSnapshot &style,
 		int left,
 		int top,
 		int width) {
@@ -1028,50 +483,45 @@ struct TableRowLayoutData {
 		left,
 		top,
 		std::max(width, 1),
-		st::ivMarkdownRuleHeight);
+		style.ruleHeight);
 	block.textRect = block.outer;
 	return block;
 }
 
 [[nodiscard]] LaidOutBlock LayoutDisplayMathBlock(
 		const PreparedBlock &prepared,
-		MathRenderer &renderer,
+		const std::vector<PreparedFormulaSlot> &formulas,
+		const MarkdownStyleSnapshot &style,
 		int left,
 		int top,
 		int width) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::DisplayMath;
+	block.formulaIndex = prepared.formulaIndex;
 
-	const auto &padding = st::ivMarkdownDisplayMathPadding;
+	const auto &padding = style.displayMathPadding;
 	const auto contentLeft = left + padding.left();
 	const auto contentTop = top + padding.top();
 	const auto contentWidth = std::max(
 		width - padding.left() - padding.right(),
 		1);
-
-	block.formula = renderer.renderFormula(
-		{
-			.trimmedTex = prepared.formulaTex.trimmed(),
-			.kind = prepared.mathKind,
-			.textSize = st::ivMarkdownDisplayMathTextSize,
-			.renderWidthCap = st::ivMarkdownDisplayMathMaxRenderWidth,
-			.foreground = st::windowFg->c,
-			.devicePixelRatio = style::DevicePixelRatio(),
-		},
-		style::PaletteVersion());
+	const auto formula = RenderedFormulaFor(formulas, prepared.formulaIndex);
 
 	auto formulaWidth = 0;
 	auto formulaHeight = 0;
-	if (block.formula.success) {
-		formulaWidth = std::max(block.formula.logicalSize.width(), 1);
-		formulaHeight = std::max(block.formula.logicalSize.height(), 1);
+	if (formula && formula->success) {
+		formulaWidth = std::max(formula->logicalSize.width(), 1);
+		formulaHeight = std::max(formula->logicalSize.height(), 1);
 	} else {
-		const auto &fallbackPadding = st::ivMarkdownDisplayMathFallbackPadding;
+		const auto &fallbackPadding = style.displayMathFallbackPadding;
 		const auto fallbackPaddingWidth = fallbackPadding.left()
 			+ fallbackPadding.right();
+		const auto fallbackText = formula
+			? formula->fallbackText
+			: prepared.formulaTex.trimmed();
 		block.fallbackLeaf.setMarkedText(
-			st::ivMarkdownDisplayMathFallbackStyle,
-			TextWithEntities::Simple(block.formula.fallbackText),
+			style.displayMathFallbackStyle,
+			TextWithEntities::Simple(fallbackText),
 			kIvMarkedTextOptions);
 		block.textWidth = std::max(contentWidth - fallbackPaddingWidth, 1);
 		block.textWidth = std::min(
@@ -1079,23 +529,23 @@ struct TableRowLayoutData {
 			std::max(block.fallbackLeaf.maxWidth(), 1));
 		auto textHeight = std::max(
 			block.fallbackLeaf.countHeight(block.textWidth, true),
-			TextLineHeight(st::ivMarkdownDisplayMathFallbackStyle));
+			TextLineHeight(style.displayMathFallbackStyle));
 		formulaWidth = std::min(
 			block.textWidth + fallbackPaddingWidth,
 			contentWidth);
 		block.textWidth = std::max(formulaWidth - fallbackPaddingWidth, 1);
 		textHeight = std::max(
 			block.fallbackLeaf.countHeight(block.textWidth, true),
-			TextLineHeight(st::ivMarkdownDisplayMathFallbackStyle));
+			TextLineHeight(style.displayMathFallbackStyle));
 		formulaHeight = fallbackPadding.top()
 			+ textHeight
 			+ fallbackPadding.bottom();
 		block.textRect.setSize(QSize(block.textWidth, textHeight));
 	}
 
-	const auto centered = (st::ivMarkdownDisplayMathAlign == style::al_center)
+	const auto centered = (style.displayMathAlign == ::style::al_center)
 		&& (formulaWidth <= contentWidth);
-	block.formulaAlign = centered ? style::al_center : style::al_left;
+	block.formulaAlign = centered ? ::style::al_center : ::style::al_left;
 
 	block.contentRect = QRect(
 		contentLeft,
@@ -1115,11 +565,12 @@ struct TableRowLayoutData {
 		top,
 		std::max(width, 1),
 		padding.top() + formulaHeight + padding.bottom());
-	block.overflowed = block.formula.success
+	block.overflowed = formula
+		&& formula->success
 		&& (block.formulaRect.width() > block.visibleFormulaRect.width());
 
-	if (!block.formula.success) {
-		const auto &fallbackPadding = st::ivMarkdownDisplayMathFallbackPadding;
+	if (!(formula && formula->success)) {
+		const auto &fallbackPadding = style.displayMathFallbackPadding;
 		block.textRect.moveTo(
 			block.formulaRect.x() + fallbackPadding.left(),
 			block.formulaRect.y() + fallbackPadding.top());
@@ -1129,6 +580,7 @@ struct TableRowLayoutData {
 
 [[nodiscard]] LaidOutBlock LayoutTableBlock(
 		const PreparedBlock &prepared,
+		const MarkdownStyleSnapshot &style,
 		int left,
 		int top,
 		int width) {
@@ -1150,7 +602,8 @@ struct TableRowLayoutData {
 		for (const auto &preparedCell : preparedRow.cells) {
 			row.cells.push_back(InitializeTableCellLayout(
 				preparedCell,
-				preparedRow.header));
+				preparedRow.header,
+				style));
 		}
 		rows.push_back(std::move(row));
 	}
@@ -1159,10 +612,11 @@ struct TableRowLayoutData {
 		rows,
 		columnCount,
 		width,
+		style,
 		&block.overflowed);
 
-	const auto &padding = st::ivMarkdownTableCellPadding;
-	const auto border = st::ivMarkdownTableBorder;
+	const auto &padding = style.tableCellPadding;
+	const auto border = style.tableBorder;
 	auto tableWidth = border;
 	for (const auto columnWidth : block.tableColumnWidths) {
 		tableWidth += columnWidth + border;
@@ -1174,7 +628,7 @@ struct TableRowLayoutData {
 		auto rowHeight = 0;
 		auto textHeights = std::vector<int>(columnCount, 0);
 		for (auto column = 0; column != columnCount; ++column) {
-			const auto &style = TableCellTextStyle(rowData.header);
+			const auto &textStyle = TableCellTextStyle(rowData.header, style);
 			const auto contentWidth = std::max(
 				block.tableColumnWidths[column]
 					- padding.left()
@@ -1188,7 +642,7 @@ struct TableRowLayoutData {
 					rowData.cells[column].cell.leaf.countHeight(
 						contentWidth,
 						true),
-					TextLineHeight(style));
+					TextLineHeight(textStyle));
 			rowHeight = std::max(
 				rowHeight,
 				textHeights[column] + padding.top() + padding.bottom());
@@ -1234,7 +688,8 @@ struct TableRowLayoutData {
 
 [[nodiscard]] LaidOutBlock LayoutBlock(
 	const PreparedBlock &prepared,
-	MathRenderer &renderer,
+	const MarkdownStyleSnapshot &style,
+	const std::vector<PreparedFormulaSlot> &formulas,
 	int left,
 	int top,
 	int width,
@@ -1243,7 +698,8 @@ struct TableRowLayoutData {
 [[nodiscard]] int LayoutBlocks(
 		const std::vector<PreparedBlock> &prepared,
 		std::vector<LaidOutBlock> *blocks,
-		MathRenderer &renderer,
+		const MarkdownStyleSnapshot &style,
+		const std::vector<PreparedFormulaSlot> &formulas,
 		int left,
 		int top,
 		int width,
@@ -1252,11 +708,12 @@ struct TableRowLayoutData {
 	auto previous = static_cast<const PreparedBlock*>(nullptr);
 	for (const auto &block : prepared) {
 		if (previous) {
-			y += BlockSkip(*previous, block, context);
+			y += BlockSkip(*previous, block, context, style);
 		}
 		auto laidOut = LayoutBlock(
 			block,
-			renderer,
+			style,
+			formulas,
 			left,
 			y,
 			std::max(width, 1),
@@ -1270,7 +727,8 @@ struct TableRowLayoutData {
 
 [[nodiscard]] LaidOutBlock LayoutListItemBlock(
 		const PreparedBlock &prepared,
-		MathRenderer &renderer,
+		const MarkdownStyleSnapshot &style,
+		const std::vector<PreparedFormulaSlot> &formulas,
 		int left,
 		int top,
 		int width,
@@ -1288,27 +746,23 @@ struct TableRowLayoutData {
 	auto markerTextWidth = 0;
 	auto markerTextHeight = 0;
 	if (task) {
-		markerTextWidth = st::ivMarkdownTaskMarkerSize;
-		markerTextHeight = st::ivMarkdownTaskMarkerSize;
+		markerTextWidth = style.taskMarkerSize;
+		markerTextHeight = style.taskMarkerSize;
 	} else {
 		block.marker.setMarkedText(
-			st::ivMarkdownParagraphStyle,
+			style.paragraphStyle,
 			TextWithEntities::Simple(markerText),
 			kIvMarkedTextOptions);
 		markerTextWidth = std::max(block.marker.maxWidth(), 1);
 		markerTextHeight = std::max(
 			block.marker.countHeight(markerTextWidth, true),
-			TextLineHeight(st::ivMarkdownParagraphStyle));
+			TextLineHeight(style.paragraphStyle));
 	}
 
-	block.markerWidth = std::max(
-		st::ivMarkdownListMarkerWidth,
-		markerTextWidth);
-	const auto bodyLeft = left
-		+ block.markerWidth
-		+ st::ivMarkdownListMarkerSkip;
+	block.markerWidth = std::max(style.listMarkerWidth, markerTextWidth);
+	const auto bodyLeft = left + block.markerWidth + style.listMarkerSkip;
 	const auto bodyWidth = std::max(
-		width - block.markerWidth - st::ivMarkdownListMarkerSkip,
+		width - block.markerWidth - style.listMarkerSkip,
 		1);
 
 	auto childContext = context;
@@ -1316,7 +770,8 @@ struct TableRowLayoutData {
 	const auto childBottom = LayoutBlocks(
 		prepared.children,
 		&block.children,
-		renderer,
+		style,
+		formulas,
 		bodyLeft,
 		top,
 		bodyWidth,
@@ -1325,18 +780,18 @@ struct TableRowLayoutData {
 	const auto rowHeight = std::max({
 		contentHeight,
 		markerTextHeight,
-		TextLineHeight(st::ivMarkdownParagraphStyle),
+		TextLineHeight(style.paragraphStyle),
 	});
 
 	const auto markerTop = top + std::max(
-		(TextLineHeight(st::ivMarkdownParagraphStyle) - markerTextHeight) / 2,
+		(TextLineHeight(style.paragraphStyle) - markerTextHeight) / 2,
 		0);
 	if (task) {
 		block.markerRect = QRect(
 			left,
 			markerTop,
-			st::ivMarkdownTaskMarkerSize,
-			st::ivMarkdownTaskMarkerSize);
+			style.taskMarkerSize,
+			style.taskMarkerSize);
 	} else {
 		const auto markerLeft = (prepared.listKind == ListKind::Ordered)
 			? left + block.markerWidth - markerTextWidth
@@ -1355,7 +810,8 @@ struct TableRowLayoutData {
 
 [[nodiscard]] LaidOutBlock LayoutListBlock(
 		const PreparedBlock &prepared,
-		MathRenderer &renderer,
+		const MarkdownStyleSnapshot &style,
+		const std::vector<PreparedFormulaSlot> &formulas,
 		int left,
 		int top,
 		int width,
@@ -1366,9 +822,9 @@ struct TableRowLayoutData {
 	block.listDelimiter = prepared.listDelimiter;
 
 	const auto depthDelta = std::max(prepared.visualDepth - context.listDepth, 0);
-	const auto listLeft = left + depthDelta * st::ivMarkdownListIndent;
+	const auto listLeft = left + depthDelta * style.listIndent;
 	const auto listWidth = std::max(
-		width - depthDelta * st::ivMarkdownListIndent,
+		width - depthDelta * style.listIndent,
 		1);
 
 	auto childContext = context;
@@ -1379,14 +835,15 @@ struct TableRowLayoutData {
 	auto first = true;
 	for (const auto &child : prepared.children) {
 		if (!first) {
-			y += prepared.tight ? 0 : BlockSkip(child);
+			y += prepared.tight ? 0 : BlockSkip(child, style);
 		}
 		first = false;
 
 		auto laidOut = (child.kind == PreparedBlockKind::ListItem)
 			? LayoutListItemBlock(
 				child,
-				renderer,
+				style,
+				formulas,
 				listLeft,
 				y,
 				listWidth,
@@ -1394,7 +851,8 @@ struct TableRowLayoutData {
 				prepared.tight)
 			: LayoutBlock(
 				child,
-				renderer,
+				style,
+				formulas,
 				listLeft,
 				y,
 				listWidth,
@@ -1414,7 +872,8 @@ struct TableRowLayoutData {
 
 [[nodiscard]] LaidOutBlock LayoutQuoteBlock(
 		const PreparedBlock &prepared,
-		MathRenderer &renderer,
+		const MarkdownStyleSnapshot &style,
+		const std::vector<PreparedFormulaSlot> &formulas,
 		int left,
 		int top,
 		int width,
@@ -1425,20 +884,15 @@ struct TableRowLayoutData {
 	const auto depthDelta = std::max(
 		prepared.visualDepth - context.quoteDepth,
 		0);
-	const auto quoteLeft = left + depthDelta * st::ivMarkdownQuoteIndent;
+	const auto quoteLeft = left + depthDelta * style.quoteIndent;
 	const auto quoteWidth = std::max(
-		width - depthDelta * st::ivMarkdownQuoteIndent,
+		width - depthDelta * style.quoteIndent,
 		1);
-	const auto &padding = st::ivMarkdownQuotePadding;
-	const auto contentLeft = quoteLeft
-		+ st::ivMarkdownQuoteBorder
-		+ padding.left();
+	const auto &padding = style.quotePadding;
+	const auto contentLeft = quoteLeft + style.quoteBorder + padding.left();
 	const auto contentTop = top + padding.top();
 	const auto contentWidth = std::max(
-		quoteWidth
-			- st::ivMarkdownQuoteBorder
-			- padding.left()
-			- padding.right(),
+		quoteWidth - style.quoteBorder - padding.left() - padding.right(),
 		1);
 
 	auto childContext = context;
@@ -1447,7 +901,8 @@ struct TableRowLayoutData {
 	const auto childBottom = LayoutBlocks(
 		prepared.children,
 		&block.children,
-		renderer,
+		style,
+		formulas,
 		contentLeft,
 		contentTop,
 		contentWidth,
@@ -1455,7 +910,7 @@ struct TableRowLayoutData {
 	const auto contentHeight = std::max(
 		childBottom - contentTop,
 		prepared.children.empty()
-			? TextLineHeight(st::ivMarkdownParagraphStyle)
+			? TextLineHeight(style.paragraphStyle)
 			: 0);
 	const auto quoteHeight = padding.top() + contentHeight + padding.bottom();
 
@@ -1463,7 +918,7 @@ struct TableRowLayoutData {
 	block.borderRect = QRect(
 		quoteLeft,
 		top,
-		st::ivMarkdownQuoteBorder,
+		style.quoteBorder,
 		quoteHeight);
 	block.contentRect = QRect(
 		contentLeft,
@@ -1475,7 +930,8 @@ struct TableRowLayoutData {
 
 [[nodiscard]] LaidOutBlock LayoutBlock(
 		const PreparedBlock &prepared,
-		MathRenderer &renderer,
+		const MarkdownStyleSnapshot &style,
+		const std::vector<PreparedFormulaSlot> &formulas,
 		int left,
 		int top,
 		int width,
@@ -1483,39 +939,57 @@ struct TableRowLayoutData {
 	switch (prepared.kind) {
 	case PreparedBlockKind::Paragraph:
 	case PreparedBlockKind::Heading:
-		return LayoutFlowBlock(prepared, left, top, width);
+		return LayoutFlowBlock(prepared, style, left, top, width);
 	case PreparedBlockKind::CodeBlock:
-		return LayoutCodeBlock(prepared, left, top, width);
+		return LayoutCodeBlock(prepared, style, left, top, width);
 	case PreparedBlockKind::Rule:
-		return LayoutRuleBlock(left, top, width);
+		return LayoutRuleBlock(style, left, top, width);
 	case PreparedBlockKind::List:
-		return LayoutListBlock(prepared, renderer, left, top, width, context);
+		return LayoutListBlock(
+			prepared,
+			style,
+			formulas,
+			left,
+			top,
+			width,
+			context);
 	case PreparedBlockKind::ListItem:
 		return LayoutListItemBlock(
 			prepared,
-			renderer,
+			style,
+			formulas,
 			left,
 			top,
 			width,
 			context,
 			false);
 	case PreparedBlockKind::Quote:
-		return LayoutQuoteBlock(prepared, renderer, left, top, width, context);
+		return LayoutQuoteBlock(
+			prepared,
+			style,
+			formulas,
+			left,
+			top,
+			width,
+			context);
 	case PreparedBlockKind::DisplayMath:
-		return LayoutDisplayMathBlock(prepared, renderer, left, top, width);
+		return LayoutDisplayMathBlock(
+			prepared,
+			formulas,
+			style,
+			left,
+			top,
+			width);
 	case PreparedBlockKind::Table:
-		return LayoutTableBlock(prepared, left, top, width);
+		return LayoutTableBlock(prepared, style, left, top, width);
 	}
-	return LayoutFlowBlock(prepared, left, top, width);
+	return LayoutFlowBlock(prepared, style, left, top, width);
 }
 
 class DocumentLayout final {
 public:
 	void invalidate();
-	void relayout(
-		const PreparedRenderDocument &document,
-		MathRenderer &renderer,
-		int width);
+	void relayout(const PreparedResult &prepared, int width);
 
 	[[nodiscard]] int height() const;
 	[[nodiscard]] const std::vector<LaidOutBlock> &blocks() const;
@@ -1531,10 +1005,9 @@ class MarkdownDocumentWidget final
 	: public Ui::RpWidget
 	, public ClickHandlerHost {
 public:
-	MarkdownDocumentWidget(
-		QWidget *parent,
-		const PreparedDocument &document);
+	explicit MarkdownDocumentWidget(QWidget *parent);
 
+	void setPreparedResult(PreparedResult prepared);
 	int resizeGetHeight(int newWidth) override;
 
 protected:
@@ -1549,17 +1022,14 @@ protected:
 private:
 	[[nodiscard]] ClickHandlerPtr linkAt(QPoint point) const;
 
-	[[nodiscard]] bool refreshRenderState();
 	void relayoutCurrentWidth();
 	void forceRelayoutCurrentWidth();
 	void updateHover(QPoint point);
 	void applyCursor(style::cursor cursor);
 
-	const PreparedRenderDocument _prepared;
+	PreparedResult _prepared;
 	DocumentLayout _layout;
-	MathRenderer _mathRenderer;
-	int _paletteVersion = 0;
-	int _devicePixelRatio = 0;
+	std::optional<SnapshotTextPalette> _textPalette;
 	style::cursor _cursor = style::cur_default;
 
 };
@@ -1577,26 +1047,29 @@ void PaintTextLeaf(
 		.geometry = TextGeometry(width),
 		.align = align,
 		.clip = clip,
-		.palette = &st::ivMarkdownTextPalette,
+		.palette = &p.textPalette(),
 		.spoiler = Ui::Text::DefaultSpoilerCache(),
 		.now = crl::now(),
 	});
 }
 
-void PaintTaskMarker(Painter &p, const LaidOutBlock &block) {
+void PaintTaskMarker(
+		Painter &p,
+		const LaidOutBlock &block,
+		const MarkdownStyleSnapshot &style) {
 	const auto rect = block.markerRect;
 	if (rect.isEmpty()) {
 		return;
 	}
-	const auto border = st::ivMarkdownTaskMarkerBorder;
+	const auto border = style.taskMarkerBorder;
 	if (block.taskState == TaskState::Checked) {
 		p.setPen(Qt::NoPen);
-		p.setBrush(st::ivMarkdownTaskMarkerFg);
+		p.setBrush(style.taskMarkerColor);
 		p.drawRect(rect);
 
 		auto hq = PainterHighQualityEnabler(p);
 		p.setPen(QPen(
-			st::ivMarkdownTaskMarkerCheckFg,
+			style.taskMarkerCheckColor,
 			border,
 			Qt::SolidLine,
 			Qt::RoundCap,
@@ -1615,7 +1088,7 @@ void PaintTaskMarker(Painter &p, const LaidOutBlock &block) {
 		p.drawLine(middle, last);
 	} else {
 		p.setBrush(Qt::NoBrush);
-		p.setPen(QPen(st::ivMarkdownTaskMarkerFg, border));
+		p.setPen(QPen(style.taskMarkerColor, border));
 		p.drawRect(rect.adjusted(0, 0, -border, -border));
 	}
 }
@@ -1623,11 +1096,13 @@ void PaintTaskMarker(Painter &p, const LaidOutBlock &block) {
 void PaintBlocks(
 	Painter &p,
 	const std::vector<LaidOutBlock> &blocks,
+	const PreparedResult &prepared,
 	QRect clip);
 
 void PaintTableBlock(
 		Painter &p,
 		const LaidOutBlock &block,
+		const MarkdownStyleSnapshot &style,
 		QRect clip) {
 	const auto tableClip = clip.intersected(block.visibleTableRect);
 	if (tableClip.isEmpty()) {
@@ -1645,11 +1120,11 @@ void PaintTableBlock(
 			if (!cell.outer.intersects(block.visibleTableRect)) {
 				continue;
 			}
-			p.fillRect(cell.outer, st::ivMarkdownTableHeaderBg);
+			p.fillRect(cell.outer, style.tableHeaderBackgroundColor);
 		}
 	}
 
-	const auto border = st::ivMarkdownTableBorder;
+	const auto border = style.tableBorder;
 	if (border > 0 && !block.tableRect.isEmpty()) {
 		const auto left = block.tableRect.x();
 		const auto top = block.tableRect.y();
@@ -1658,14 +1133,14 @@ void PaintTableBlock(
 		const auto right = left + width - border;
 		const auto bottom = top + height - border;
 
-		p.fillRect(QRect(left, top, width, border), st::ivMarkdownTableBorderFg);
+		p.fillRect(QRect(left, top, width, border), style.tableBorderColor);
 		p.fillRect(
 			QRect(left, bottom, width, border),
-			st::ivMarkdownTableBorderFg);
-		p.fillRect(QRect(left, top, border, height), st::ivMarkdownTableBorderFg);
+			style.tableBorderColor);
+		p.fillRect(QRect(left, top, border, height), style.tableBorderColor);
 		p.fillRect(
 			QRect(right, top, border, height),
-			st::ivMarkdownTableBorderFg);
+			style.tableBorderColor);
 
 		auto separatorLeft = left + border;
 		for (auto i = 0, count = int(block.tableColumnWidths.size()); i != count; ++i) {
@@ -1673,7 +1148,7 @@ void PaintTableBlock(
 			if (i + 1 != count) {
 				p.fillRect(
 					QRect(separatorLeft, top, border, height),
-					st::ivMarkdownTableBorderFg);
+					style.tableBorderColor);
 				separatorLeft += border;
 			}
 		}
@@ -1686,11 +1161,11 @@ void PaintTableBlock(
 				+ block.tableRows[i].outer.height();
 			p.fillRect(
 				QRect(left, separatorTop, width, border),
-				st::ivMarkdownTableBorderFg);
+				style.tableBorderColor);
 		}
 	}
 
-	p.setPen(st::windowFg);
+	p.setPen(style.defaultTextColor);
 	for (const auto &row : block.tableRows) {
 		if (!row.outer.intersects(block.visibleTableRect)) {
 			continue;
@@ -1711,7 +1186,7 @@ void PaintTableBlock(
 
 	if (block.overflowed) {
 		const auto indicatorWidth = std::min(
-			std::max(st::ivMarkdownTableOverflowWidth, 1),
+			std::max(style.tableOverflowWidth, 1),
 			block.visibleTableRect.width());
 		p.fillRect(
 			QRect(
@@ -1721,7 +1196,7 @@ void PaintTableBlock(
 				block.visibleTableRect.y(),
 				indicatorWidth,
 				block.visibleTableRect.height()),
-			st::ivMarkdownTableOverflowFg);
+			style.tableOverflowColor);
 	}
 
 	p.restore();
@@ -1730,6 +1205,7 @@ void PaintTableBlock(
 void PaintDisplayMathBlock(
 		Painter &p,
 		const LaidOutBlock &block,
+		const PreparedResult &prepared,
 		QRect clip) {
 	const auto formulaClip = clip.intersected(block.visibleFormulaRect);
 	if (formulaClip.isEmpty()) {
@@ -1739,19 +1215,21 @@ void PaintDisplayMathBlock(
 	p.save();
 	p.setClipRect(formulaClip);
 
-	if (block.formula.success) {
-		p.drawImage(block.formulaRect.topLeft(), block.formula.image);
+	const auto &style = prepared.style;
+	const auto formula = RenderedFormulaFor(prepared.formulas, block.formulaIndex);
+	if (formula && formula->success) {
+		p.drawImage(block.formulaRect.topLeft(), formula->image);
 	} else {
-		const auto radius = st::ivMarkdownDisplayMathFallbackRadius;
+		const auto radius = style.displayMathFallbackRadius;
 		p.setPen(Qt::NoPen);
-		p.setBrush(st::ivMarkdownDisplayMathFallbackBg);
+		p.setBrush(style.displayMathFallbackBackgroundColor);
 		if (radius > 0) {
 			auto hq = PainterHighQualityEnabler(p);
 			p.drawRoundedRect(block.formulaRect, radius, radius);
 		} else {
-			p.fillRect(block.formulaRect, st::ivMarkdownDisplayMathFallbackBg);
+			p.fillRect(block.formulaRect, style.displayMathFallbackBackgroundColor);
 		}
-		p.setPen(st::windowFg);
+		p.setPen(style.defaultTextColor);
 		PaintTextLeaf(
 			p,
 			block.fallbackLeaf,
@@ -1762,7 +1240,7 @@ void PaintDisplayMathBlock(
 
 	if (block.overflowed) {
 		const auto indicatorWidth = std::min(
-			std::max(st::ivMarkdownDisplayMathOverflowWidth, 1),
+			std::max(style.displayMathOverflowWidth, 1),
 			block.visibleFormulaRect.width());
 		p.fillRect(
 			QRect(
@@ -1772,35 +1250,40 @@ void PaintDisplayMathBlock(
 				block.visibleFormulaRect.y(),
 				indicatorWidth,
 				block.visibleFormulaRect.height()),
-			st::ivMarkdownDisplayMathOverflowFg);
+			style.displayMathOverflowColor);
 	}
 
 	p.restore();
 }
 
-void PaintBlock(Painter &p, const LaidOutBlock &block, QRect clip) {
+void PaintBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		const PreparedResult &prepared,
+		QRect clip) {
 	if (!block.outer.intersects(clip)) {
 		return;
 	}
 
+	const auto &style = prepared.style;
 	switch (block.kind) {
 	case PreparedBlockKind::Paragraph:
 	case PreparedBlockKind::Heading:
-		p.setPen(st::windowFg);
+		p.setPen(style.defaultTextColor);
 		PaintTextLeaf(p, block.leaf, block.textRect, block.textWidth, clip);
 		break;
 	case PreparedBlockKind::CodeBlock: {
-		const auto radius = st::ivMarkdownCodeRadius;
+		const auto radius = style.codeRadius;
 		p.setPen(Qt::NoPen);
-		p.setBrush(st::ivMarkdownCodeBg);
+		p.setBrush(style.codeBackgroundColor);
 		if (radius > 0) {
 			auto hq = PainterHighQualityEnabler(p);
 			p.drawRoundedRect(block.outer, radius, radius);
 		} else {
-			p.fillRect(block.outer, st::ivMarkdownCodeBg);
+			p.fillRect(block.outer, style.codeBackgroundColor);
 		}
 		if (!block.languageRect.isEmpty()) {
-			p.setPen(st::ivMarkdownCodeLanguageFg);
+			p.setPen(style.codeLanguageColor);
 			PaintTextLeaf(
 				p,
 				block.language,
@@ -1808,20 +1291,20 @@ void PaintBlock(Painter &p, const LaidOutBlock &block, QRect clip) {
 				block.textWidth,
 				clip);
 		}
-		p.setPen(st::windowFg);
+		p.setPen(style.defaultTextColor);
 		PaintTextLeaf(p, block.leaf, block.textRect, block.textWidth, clip);
 	} break;
 	case PreparedBlockKind::Rule:
-		p.fillRect(block.outer, st::ivMarkdownRuleFg);
+		p.fillRect(block.outer, style.ruleColor);
 		break;
 	case PreparedBlockKind::List:
-		PaintBlocks(p, block.children, clip);
+		PaintBlocks(p, block.children, prepared, clip);
 		break;
 	case PreparedBlockKind::ListItem:
 		if (block.taskState != TaskState::None) {
-			PaintTaskMarker(p, block);
+			PaintTaskMarker(p, block, style);
 		} else if (!block.markerRect.isEmpty()) {
-			p.setPen(st::windowFg);
+			p.setPen(style.defaultTextColor);
 			PaintTextLeaf(
 				p,
 				block.marker,
@@ -1829,17 +1312,17 @@ void PaintBlock(Painter &p, const LaidOutBlock &block, QRect clip) {
 				block.markerWidth,
 				clip);
 		}
-		PaintBlocks(p, block.children, clip);
+		PaintBlocks(p, block.children, prepared, clip);
 		break;
 	case PreparedBlockKind::Quote:
-		p.fillRect(block.borderRect, st::ivMarkdownQuoteBorderFg);
-		PaintBlocks(p, block.children, clip);
+		p.fillRect(block.borderRect, style.quoteBorderColor);
+		PaintBlocks(p, block.children, prepared, clip);
 		break;
 	case PreparedBlockKind::DisplayMath:
-		PaintDisplayMathBlock(p, block, clip);
+		PaintDisplayMathBlock(p, block, prepared, clip);
 		break;
 	case PreparedBlockKind::Table:
-		PaintTableBlock(p, block, clip);
+		PaintTableBlock(p, block, style, clip);
 		break;
 	}
 }
@@ -1847,6 +1330,7 @@ void PaintBlock(Painter &p, const LaidOutBlock &block, QRect clip) {
 void PaintBlocks(
 		Painter &p,
 		const std::vector<LaidOutBlock> &blocks,
+		const PreparedResult &prepared,
 		QRect clip) {
 	for (const auto &block : blocks) {
 		if (block.outer.bottom() < clip.top()) {
@@ -1854,7 +1338,7 @@ void PaintBlocks(
 		} else if (block.outer.top() > clip.bottom()) {
 			break;
 		}
-		PaintBlock(p, block, clip);
+		PaintBlock(p, block, prepared, clip);
 	}
 }
 
@@ -1981,8 +1465,7 @@ void PaintBlocks(
 }
 
 void DocumentLayout::relayout(
-		const PreparedRenderDocument &document,
-		MathRenderer &renderer,
+		const PreparedResult &prepared,
 		int width) {
 	width = std::max(width, 1);
 	if (_width == width) {
@@ -1991,12 +1474,13 @@ void DocumentLayout::relayout(
 	_width = width;
 	_blocks.clear();
 
-	const auto &page = st::ivMarkdownPagePadding;
+	const auto &page = prepared.style.pagePadding;
 	const auto innerWidth = std::max(width - page.left() - page.right(), 1);
 	const auto y = LayoutBlocks(
-		document.blocks,
+		prepared.blocks.blocks,
 		&_blocks,
-		renderer,
+		prepared.style,
+		prepared.formulas,
 		page.left(),
 		page.top(),
 		innerWidth,
@@ -2019,44 +1503,34 @@ const std::vector<LaidOutBlock> &DocumentLayout::blocks() const {
 }
 
 MarkdownDocumentWidget::MarkdownDocumentWidget(
-	QWidget *parent,
-	const PreparedDocument &document)
-: Ui::RpWidget(parent)
-, _prepared(PrepareRenderData(document))
-, _paletteVersion(style::PaletteVersion())
-, _devicePixelRatio(style::DevicePixelRatio()) {
+	QWidget *parent)
+: Ui::RpWidget(parent) {
 	setMouseTracking(true);
+}
 
-	style::PaletteChanged() | rpl::on_next([=] {
-		if (refreshRenderState()) {
-			forceRelayoutCurrentWidth();
-		}
-	}, lifetime());
-
-	screenValue() | rpl::on_next([=](auto) {
-		if (refreshRenderState()) {
-			forceRelayoutCurrentWidth();
-		}
-	}, lifetime());
+void MarkdownDocumentWidget::setPreparedResult(PreparedResult prepared) {
+	ClickHandler::clearActive(this);
+	applyCursor(style::cur_default);
+	_layout.invalidate();
+	_prepared = std::move(prepared);
+	_textPalette.emplace(_prepared.style.textPalette);
+	forceRelayoutCurrentWidth();
 }
 
 int MarkdownDocumentWidget::resizeGetHeight(int newWidth) {
-	const auto refreshed = refreshRenderState();
-	(void)refreshed;
 	ClickHandler::clearActive(this);
 	applyCursor(style::cur_default);
-	_layout.relayout(_prepared, _mathRenderer, newWidth);
+	_layout.relayout(_prepared, newWidth);
 	return std::max(_layout.height(), 1);
 }
 
 void MarkdownDocumentWidget::paintEvent(QPaintEvent *e) {
-	if (refreshRenderState()) {
-		relayoutCurrentWidth();
-	}
 	auto p = Painter(this);
-	p.setTextPalette(st::ivMarkdownTextPalette);
+	if (_textPalette) {
+		p.setTextPalette(_textPalette->palette);
+	}
 
-	PaintBlocks(p, _layout.blocks(), e->rect());
+	PaintBlocks(p, _layout.blocks(), _prepared, e->rect());
 }
 
 void MarkdownDocumentWidget::mouseMoveEvent(QMouseEvent *e) {
@@ -2107,22 +1581,8 @@ ClickHandlerPtr MarkdownDocumentWidget::linkAt(QPoint point) const {
 	return LinkAtBlocks(_layout.blocks(), point);
 }
 
-bool MarkdownDocumentWidget::refreshRenderState() {
-	const auto paletteVersion = style::PaletteVersion();
-	const auto devicePixelRatio = style::DevicePixelRatio();
-	if (_paletteVersion == paletteVersion
-		&& _devicePixelRatio == devicePixelRatio) {
-		return false;
-	}
-	_paletteVersion = paletteVersion;
-	_devicePixelRatio = devicePixelRatio;
-	_mathRenderer.clearCache();
-	_layout.invalidate();
-	return true;
-}
-
 void MarkdownDocumentWidget::relayoutCurrentWidth() {
-	_layout.relayout(_prepared, _mathRenderer, width());
+	_layout.relayout(_prepared, width());
 }
 
 void MarkdownDocumentWidget::forceRelayoutCurrentWidth() {
@@ -2144,32 +1604,190 @@ void MarkdownDocumentWidget::applyCursor(style::cursor cursor) {
 	}
 }
 
+constexpr auto kDeferredPreparationSourceBytes = 128 * 1024;
+constexpr auto kDeferredPreparationFormulaCount = 4;
+constexpr auto kDeferredPreparationConvertedNodes = 1200;
+
+class MarkdownPreviewRoot final : public Ui::RpWidget {
+public:
+	MarkdownPreviewRoot(
+		const PreparedDocument &document,
+		const OpenOptions &options,
+		QWidget *parent = nullptr);
+	~MarkdownPreviewRoot();
+
+private:
+	[[nodiscard]] bool shouldDeferPreparation() const;
+
+	void startPreparation(
+		bool deferred,
+		std::optional<MarkdownStyleSnapshot> style = std::nullopt);
+	void applyPreparedResult(PreparedResult prepared);
+	void updateChildrenGeometry(QSize size);
+	void updateLoadingGeometry();
+	void cancelInFlightRequest();
+
+	const std::shared_ptr<const PreparedDocument> _document;
+	Ui::ScrollArea *_scroll = nullptr;
+	MarkdownDocumentWidget *_body = nullptr;
+	Ui::FlatLabel *_loading = nullptr;
+	PrepareGeneration _generation = 0;
+	int _requestedDevicePixelRatio = 0;
+	std::shared_ptr<std::atomic_bool> _cancelled;
+
+};
+
+MarkdownPreviewRoot::MarkdownPreviewRoot(
+	const PreparedDocument &document,
+	const OpenOptions &options,
+	QWidget *parent)
+: Ui::RpWidget(parent)
+, _document(std::make_shared<PreparedDocument>(document))
+, _cancelled(std::make_shared<std::atomic_bool>(false)) {
+	(void)options;
+
+	_scroll = Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll);
+	_body = _scroll->setOwnedWidget(object_ptr<MarkdownDocumentWidget>(_scroll));
+	_loading = Ui::CreateChild<Ui::FlatLabel>(
+		this,
+		tr::lng_contacts_loading(tr::now),
+		st::membersAbout);
+
+	_scroll->hide();
+	if (_body) {
+		_body->hide();
+	}
+	_loading->hide();
+
+	const auto initialStyle = CaptureMarkdownStyleSnapshot();
+	_requestedDevicePixelRatio = initialStyle.devicePixelRatio;
+
+	sizeValue() | rpl::on_next([=](QSize size) {
+		updateChildrenGeometry(size);
+	}, lifetime());
+
+	style::PaletteChanged() | rpl::on_next([=] {
+		startPreparation(shouldDeferPreparation());
+	}, lifetime());
+
+	screenValue() | rpl::on_next([=](not_null<QScreen*>) {
+		const auto style = CaptureMarkdownStyleSnapshot();
+		if (style.devicePixelRatio == _requestedDevicePixelRatio) {
+			return;
+		}
+		startPreparation(shouldDeferPreparation(), std::move(style));
+	}, lifetime());
+
+	startPreparation(shouldDeferPreparation(), std::move(initialStyle));
+}
+
+MarkdownPreviewRoot::~MarkdownPreviewRoot() {
+	cancelInFlightRequest();
+}
+
+bool MarkdownPreviewRoot::shouldDeferPreparation() const {
+	return (_document->sourceText.size() >= kDeferredPreparationSourceBytes)
+		|| (int(_document->formulas.size()) >= kDeferredPreparationFormulaCount)
+		|| (_document->stats.convertedNodeCount
+			>= kDeferredPreparationConvertedNodes);
+}
+
+void MarkdownPreviewRoot::startPreparation(
+		bool deferred,
+		std::optional<MarkdownStyleSnapshot> style) {
+	cancelInFlightRequest();
+
+	_cancelled = std::make_shared<std::atomic_bool>(false);
+	const auto cancelled = _cancelled;
+	const auto generation = ++_generation;
+	const auto showLoading = deferred
+		|| !_loading->isHidden()
+		|| !_scroll->isHidden();
+	if (!style) {
+		style = CaptureMarkdownStyleSnapshot();
+	}
+	_requestedDevicePixelRatio = style->devicePixelRatio;
+	auto request = PrepareRequest{
+		.document = _document,
+		.style = std::move(*style),
+		.generation = generation,
+		.cancelled = cancelled,
+	};
+
+	if (showLoading) {
+		_scroll->hide();
+		if (_body) {
+			_body->hide();
+		}
+		_loading->show();
+		_loading->raise();
+		updateLoadingGeometry();
+	} else {
+		_loading->hide();
+	}
+
+	const auto weak = base::make_weak(this);
+	auto done = [=](PreparedResult result) mutable {
+		const auto strong = weak.get();
+		if (!strong) {
+			return;
+		} else if (cancelled->load(std::memory_order_relaxed)) {
+			return;
+		} else if (result.cancelled) {
+			return;
+		} else if (result.generation != strong->_generation) {
+			return;
+		}
+		strong->applyPreparedResult(std::move(result));
+	};
+
+	if (deferred) {
+		PrepareAsync(std::move(request), std::move(done));
+	} else {
+		done(PrepareSynchronously(std::move(request)));
+	}
+}
+
+void MarkdownPreviewRoot::applyPreparedResult(PreparedResult prepared) {
+	if (!_body) {
+		return;
+	}
+	_body->setPreparedResult(std::move(prepared));
+	_body->resizeToWidth(_scroll->width());
+	_scroll->show();
+	_body->show();
+	_loading->hide();
+}
+
+void MarkdownPreviewRoot::updateChildrenGeometry(QSize size) {
+	_scroll->setGeometry(QRect(QPoint(), size));
+	if (_body) {
+		_body->resizeToWidth(_scroll->width());
+	}
+	updateLoadingGeometry();
+}
+
+void MarkdownPreviewRoot::updateLoadingGeometry() {
+	const auto availableWidth = std::max(width(), 1);
+	_loading->resizeToWidth(availableWidth);
+	_loading->moveToLeft(
+		0,
+		std::max((height() - _loading->height()) / 2, 0),
+		availableWidth);
+}
+
+void MarkdownPreviewRoot::cancelInFlightRequest() {
+	if (_cancelled) {
+		_cancelled->store(true, std::memory_order_relaxed);
+	}
+}
+
 } // namespace
 
 std::unique_ptr<Ui::RpWidget> CreateMarkdownPreviewWidget(
 	const PreparedDocument &document,
 	const OpenOptions &options) {
-	(void)options;
-
-	auto root = std::make_unique<Ui::RpWidget>();
-	const auto scroll = Ui::CreateChild<Ui::ScrollArea>(
-		root.get(),
-		st::boxScroll);
-	const auto body = scroll->setOwnedWidget(
-		object_ptr<MarkdownDocumentWidget>(scroll, document));
-
-	root->sizeValue() | rpl::on_next([=](QSize size) {
-		scroll->setGeometry(QRect(QPoint(), size));
-		if (body) {
-			body->resizeToWidth(scroll->width());
-		}
-	}, root->lifetime());
-
-	scroll->show();
-	if (body) {
-		body->show();
-	}
-	return root;
+	return std::make_unique<MarkdownPreviewRoot>(document, options);
 }
 
 } // namespace Iv::Markdown

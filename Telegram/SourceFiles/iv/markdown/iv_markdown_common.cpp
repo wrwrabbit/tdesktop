@@ -6,8 +6,8 @@ namespace Iv::Markdown {
 
 bool LooksLikeMarkdownFile(const QString &fileName, const QString &mimeType) {
 	const auto suffixes = std::array{
-		QStringLiteral(".md"),
-		QStringLiteral(".markdown"),
+		u".md"_q,
+		u".markdown"_q,
 	};
 	auto suffixMatches = false;
 	for (const auto &suffix : suffixes) {
@@ -25,9 +25,9 @@ bool LooksLikeMarkdownFile(const QString &fileName, const QString &mimeType) {
 
 	const auto normalized = mimeType.trimmed().toLower();
 	const auto acceptedMimeTypes = std::array{
-		QStringLiteral("text/markdown"),
-		QStringLiteral("text/x-markdown"),
-		QStringLiteral("text/plain"),
+		u"text/markdown"_q,
+		u"text/x-markdown"_q,
+		u"text/plain"_q,
 	};
 	for (const auto &accepted : acceptedMimeTypes) {
 		if (normalized == accepted) {

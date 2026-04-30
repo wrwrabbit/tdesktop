@@ -5,10 +5,6 @@
 #include <limits>
 #include <utility>
 
-#include "ui/style/style_core.h"
-
-#include "styles/style_iv.h"
-
 namespace Iv::Markdown {
 namespace {
 
@@ -28,6 +24,7 @@ constexpr auto kMaxFormulaImageBytes = int64(128) * 1024 * 1024;
 		.kind = request.kind,
 		.textSize = request.textSize,
 		.renderWidthCap = request.renderWidthCap,
+		.renderHeightCap = request.renderHeightCap,
 		.foregroundRgba = foreground.rgba(),
 		.paletteVersion = paletteVersion,
 		.devicePixelRatio = request.devicePixelRatio,
@@ -36,7 +33,7 @@ constexpr auto kMaxFormulaImageBytes = int64(128) * 1024 * 1024;
 
 [[nodiscard]] QString FallbackText(const FormulaCacheKey &key) {
 	return key.trimmedTex.isEmpty()
-		? QStringLiteral("[math]")
+		? u"[math]"_q
 		: key.trimmedTex;
 }
 
@@ -54,10 +51,10 @@ constexpr auto kMaxFormulaImageBytes = int64(128) * 1024 * 1024;
 }
 
 [[nodiscard]] bool TooLargeFailure(const QString &error) {
-	return (error == QStringLiteral("render-width-cap-exceeded"))
-		|| (error == QStringLiteral("physical-size-cap-exceeded"))
-		|| (error == QStringLiteral("logical-size-cap-exceeded"))
-		|| (error == QStringLiteral("physical-image-cap-exceeded"));
+	return (error == u"render-width-cap-exceeded"_q)
+		|| (error == u"physical-size-cap-exceeded"_q)
+		|| (error == u"logical-size-cap-exceeded"_q)
+		|| (error == u"physical-image-cap-exceeded"_q);
 }
 
 } // namespace
@@ -95,6 +92,7 @@ RenderedFormula MathRenderer::renderFormula(
 	normalized.trimmedTex = key.trimmedTex;
 	normalized.textSize = key.textSize;
 	normalized.renderWidthCap = key.renderWidthCap;
+	normalized.renderHeightCap = key.renderHeightCap;
 	normalized.foreground = QColor::fromRgba(key.foregroundRgba);
 	normalized.devicePixelRatio = key.devicePixelRatio;
 	auto rendered = RenderWithMicrotex(normalized);
@@ -165,55 +163,41 @@ RenderedFormula MathRenderer::makeFailure(
 bool MathRenderer::rejectRequestByCaps(
 		const FormulaCacheKey &key,
 		QString *error) const {
-	const auto maxWidth = st::ivMarkdownDisplayMathMaxRenderWidth;
-	const auto maxHeight = st::ivMarkdownDisplayMathMaxRenderHeight;
 	if (key.trimmedTex.isEmpty()) {
 		if (error) {
-			*error = QStringLiteral("empty-tex");
+			*error = u"empty-tex"_q;
 		}
 		return true;
 	}
 	if (key.textSize <= 0) {
 		if (error) {
-			*error = QStringLiteral("invalid-text-size");
+			*error = u"invalid-text-size"_q;
 		}
 		return true;
 	}
 	if (key.renderWidthCap <= 0) {
 		if (error) {
-			*error = QStringLiteral("invalid-render-width");
+			*error = u"invalid-render-width"_q;
+		}
+		return true;
+	}
+	if (key.renderHeightCap <= 0) {
+		if (error) {
+			*error = u"invalid-render-height"_q;
 		}
 		return true;
 	}
 	if (key.devicePixelRatio <= 0) {
 		if (error) {
-			*error = QStringLiteral("invalid-device-pixel-ratio");
-		}
-		return true;
-	}
-	if (maxWidth <= 0) {
-		if (error) {
-			*error = QStringLiteral("invalid-render-width-cap");
-		}
-		return true;
-	}
-	if (key.renderWidthCap > maxWidth) {
-		if (error) {
-			*error = QStringLiteral("render-width-cap-exceeded");
-		}
-		return true;
-	}
-	if (maxHeight <= 0) {
-		if (error) {
-			*error = QStringLiteral("invalid-render-height-cap");
+			*error = u"invalid-device-pixel-ratio"_q;
 		}
 		return true;
 	}
 	if (PhysicalImageRejected(
-		int64(key.renderWidthCap) * key.devicePixelRatio,
-		int64(maxHeight) * key.devicePixelRatio)) {
+			int64(key.renderWidthCap) * key.devicePixelRatio,
+			int64(key.renderHeightCap) * key.devicePixelRatio)) {
 		if (error) {
-			*error = QStringLiteral("physical-size-cap-exceeded");
+			*error = u"physical-size-cap-exceeded"_q;
 		}
 		return true;
 	}
@@ -224,30 +208,28 @@ bool MathRenderer::rejectResultByCaps(
 		const FormulaCacheKey &key,
 		const MicrotexRenderResult &result,
 		QString *error) const {
-	const auto maxWidth = st::ivMarkdownDisplayMathMaxRenderWidth;
-	const auto maxHeight = st::ivMarkdownDisplayMathMaxRenderHeight;
 	if (result.logicalSize.width() <= 0 || result.logicalSize.height() <= 0) {
 		if (error) {
-			*error = QStringLiteral("invalid-logical-size");
+			*error = u"invalid-logical-size"_q;
 		}
 		return true;
 	}
-	if (result.logicalSize.width() > maxWidth
-		|| result.logicalSize.height() > maxHeight) {
+	if (result.logicalSize.width() > key.renderWidthCap
+		|| result.logicalSize.height() > key.renderHeightCap) {
 		if (error) {
-			*error = QStringLiteral("logical-size-cap-exceeded");
+			*error = u"logical-size-cap-exceeded"_q;
 		}
 		return true;
 	}
 	if (PhysicalImageRejected(result.image.size())) {
 		if (error) {
-			*error = QStringLiteral("physical-image-cap-exceeded");
+			*error = u"physical-image-cap-exceeded"_q;
 		}
 		return true;
 	}
 	if (result.image.devicePixelRatio() != key.devicePixelRatio) {
 		if (error) {
-			*error = QStringLiteral("unexpected-device-pixel-ratio");
+			*error = u"unexpected-device-pixel-ratio"_q;
 		}
 		return true;
 	}

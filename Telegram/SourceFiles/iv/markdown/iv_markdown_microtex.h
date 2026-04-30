@@ -13,6 +13,7 @@ struct MicrotexRenderRequest {
 	MathKind kind = MathKind::Display;
 	int textSize = 0;
 	int renderWidthCap = 0;
+	int renderHeightCap = 0;
 	QColor foreground = Qt::black;
 	int devicePixelRatio = 1;
 };

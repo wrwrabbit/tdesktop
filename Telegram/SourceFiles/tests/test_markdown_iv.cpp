@@ -488,6 +488,77 @@ using NodeKindPathIter = NodeKindPath::const_iterator;
 	return false;
 }
 
+void Check(bool condition, const QString &message, bool *ok);
+
+[[nodiscard]] MarkdownSourceValidationResult CheckValidationSuccess(
+		const QByteArray &source,
+		const QString &label,
+		bool *ok) {
+	auto validated = ValidateMarkdownSourceForIv(source, ParseOptions{ label });
+	Check(
+		validated.ok,
+		label + FromLatin1(" validation failed: ") + validated.error,
+		ok);
+	return validated;
+}
+
+void CheckValidationFailure(
+		const QByteArray &source,
+		const QString &label,
+		const QString &expectedError,
+		bool *ok) {
+	const auto validated = ValidateMarkdownSourceForIv(
+		source,
+		ParseOptions{ label });
+	Check(
+		!validated.ok,
+		label + FromLatin1(" validation should fail"),
+		ok);
+	if (!validated.ok) {
+		Check(
+			validated.error == expectedError,
+			label + FromLatin1(" validation error should be ")
+				+ expectedError
+				+ FromLatin1(", got ")
+				+ validated.error,
+			ok);
+	}
+}
+
+void CheckMatchingParseCounts(
+		const PreparedDocument &legacy,
+		const PreparedDocument &validated,
+		const QString &label,
+		bool *ok) {
+	Check(
+		legacy.stats.cmarkNodeCount == validated.stats.cmarkNodeCount,
+		label + FromLatin1(" validated path cmark node count"),
+		ok);
+	Check(
+		CountNodes(legacy.document) == CountNodes(validated.document),
+		label + FromLatin1(" validated path converted node count"),
+		ok);
+	Check(
+		legacy.formulas.size() == validated.formulas.size(),
+		label + FromLatin1(" validated path formula count"),
+		ok);
+	Check(
+		CountFormulas(legacy, MathKind::Inline)
+			== CountFormulas(validated, MathKind::Inline),
+		label + FromLatin1(" validated path inline formula count"),
+		ok);
+	Check(
+		CountFormulas(legacy, MathKind::Display)
+			== CountFormulas(validated, MathKind::Display),
+		label + FromLatin1(" validated path display formula count"),
+		ok);
+	Check(
+		CountDisplayMathNodes(legacy.document)
+			== CountDisplayMathNodes(validated.document),
+		label + FromLatin1(" validated path display math node count"),
+		ok);
+}
+
 void AppendSummaryCounts(QString *line, const PreparedDocument &document) {
 	line->append(FromLatin1(" nodes="));
 	line->append(QString::number(document.stats.cmarkNodeCount));
@@ -528,6 +599,29 @@ void PrintSummary(const PreparedDocument &document, const QString &label) {
 	auto parsed = ParseMarkdownForIv(bytes, ParseOptions{ label });
 	if (!parsed.ok) {
 		PrintError(label + FromLatin1(" parse-failed: ") + parsed.error);
+		return false;
+	}
+	auto validated = ValidateMarkdownSourceForIv(
+		bytes,
+		ParseOptions{ label });
+	if (!validated.ok) {
+		PrintError(label + FromLatin1(" validate-failed: ") + validated.error);
+		return false;
+	}
+	auto parsedValidated = ParseMarkdownForIv(std::move(validated.source));
+	if (!parsedValidated.ok) {
+		PrintError(
+			label + FromLatin1(" validated-parse-failed: ")
+				+ parsedValidated.error);
+		return false;
+	}
+	auto countsOk = true;
+	CheckMatchingParseCounts(
+		parsed.document,
+		parsedValidated.document,
+		label,
+		&countsOk);
+	if (!countsOk) {
 		return false;
 	}
 	PrintSummary(parsed.document, label);
@@ -582,20 +676,52 @@ void CheckParseFailure(
 void CheckValidationEdges(bool *ok) {
 	auto utf8BomSource = QByteArray::fromHex("EFBBBF");
 	utf8BomSource.append("# Title\n");
+	auto validatedUtf8Bom = CheckValidationSuccess(
+		utf8BomSource,
+		FromLatin1("utf8 bom"),
+		ok);
+	if (validatedUtf8Bom.ok) {
+		Check(
+			validatedUtf8Bom.source.normalized == QByteArray("# Title\n"),
+			FromLatin1("utf8 bom normalized bytes"),
+			ok);
+		const auto parsedValidated = ParseMarkdownForIv(
+			std::move(validatedUtf8Bom.source));
+		Check(
+			parsedValidated.ok,
+			FromLatin1("utf8 bom validated parse failed: ")
+				+ parsedValidated.error,
+			ok);
+	}
 	CheckParseSuccess(
 		utf8BomSource,
 		FromLatin1("utf8 bom"),
 		ok);
 
-	CheckParseFailure(
+	CheckValidationFailure(
 		QByteArray::fromHex("FFFE2300"),
 		FromLatin1("utf16 bom"),
 		FromLatin1("source-unsupported-bom"),
 		ok);
 	CheckParseFailure(
+		QByteArray::fromHex("FFFE2300"),
+		FromLatin1("utf16 bom"),
+		FromLatin1("source-unsupported-bom"),
+		ok);
+	CheckValidationFailure(
 		QByteArray("a\0b", 3),
 		FromLatin1("nul byte"),
 		FromLatin1("source-binary"),
+		ok);
+	CheckParseFailure(
+		QByteArray("a\0b", 3),
+		FromLatin1("nul byte"),
+		FromLatin1("source-binary"),
+		ok);
+	CheckValidationFailure(
+		QByteArray::fromHex("C328"),
+		FromLatin1("invalid utf8"),
+		FromLatin1("source-invalid-utf8"),
 		ok);
 	CheckParseFailure(
 		QByteArray::fromHex("C328"),
@@ -604,6 +730,11 @@ void CheckValidationEdges(bool *ok) {
 		ok);
 
 	const auto oversizedSource = QByteArray(kValidationSourceLimit + 1, 'a');
+	CheckValidationFailure(
+		oversizedSource,
+		FromLatin1("source size"),
+		FromLatin1("source-too-large"),
+		ok);
 	CheckParseFailure(
 		oversizedSource,
 		FromLatin1("source size"),

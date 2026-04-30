@@ -17,8 +17,6 @@
 #endif // _MSC_VER
 #include "platform/qt/graphic_qt.h"
 
-#include "styles/style_iv.h"
-
 namespace Iv::Markdown {
 namespace {
 
@@ -51,10 +49,6 @@ QString MicrotexInitError;
 		|| (width * height > (kMaxFormulaImageBytes / kBytesPerPixel));
 }
 
-[[nodiscard]] bool PhysicalImageRejected(QSize size) {
-	return PhysicalImageRejected(size.width(), size.height());
-}
-
 [[nodiscard]] bool ComputePhysicalSize(
 		QSize logicalSize,
 		int ratio,
@@ -77,7 +71,7 @@ QString MicrotexInitError;
 [[nodiscard]] QString PreparedTeX(MathKind kind, const QString &trimmedTex) {
 	auto result = trimmedTex;
 	if (kind == MathKind::Display) {
-		result = QStringLiteral("\\displaystyle ") + result;
+		result = u"\\displaystyle "_q + result;
 	}
 	return result;
 }
@@ -93,7 +87,7 @@ bool EnsureMicrotexInitialized(QString *error) {
 		} catch (const std::exception &exception) {
 			MicrotexInitError = ExceptionText(exception);
 		} catch (...) {
-			MicrotexInitError = QStringLiteral("unknown-exception");
+			MicrotexInitError = u"unknown-exception"_q;
 		}
 	});
 	if (!MicrotexInitialized && error) {
@@ -110,20 +104,24 @@ MicrotexRenderResult RenderWithMicrotex(const MicrotexRenderRequest &request) {
 		return result;
 	}
 	if (request.devicePixelRatio <= 0) {
-		result.error = QStringLiteral("invalid-device-pixel-ratio");
+		result.error = u"invalid-device-pixel-ratio"_q;
 		return result;
 	}
 	if (request.textSize <= 0) {
-		result.error = QStringLiteral("invalid-text-size");
+		result.error = u"invalid-text-size"_q;
 		return result;
 	}
 	if (request.renderWidthCap <= 0) {
-		result.error = QStringLiteral("invalid-render-width");
+		result.error = u"invalid-render-width"_q;
+		return result;
+	}
+	if (request.renderHeightCap <= 0) {
+		result.error = u"invalid-render-height"_q;
 		return result;
 	}
 	const auto trimmedTex = request.trimmedTex.trimmed();
 	if (trimmedTex.isEmpty()) {
-		result.error = QStringLiteral("empty-tex");
+		result.error = u"empty-tex"_q;
 		return result;
 	}
 	try {
@@ -131,11 +129,11 @@ MicrotexRenderResult RenderWithMicrotex(const MicrotexRenderRequest &request) {
 		const auto textSize = int64(request.textSize);
 		const auto maxWidth = int64(request.renderWidthCap);
 		if (textSize > std::numeric_limits<int>::max()) {
-			result.error = QStringLiteral("text-size-overflow");
+			result.error = u"text-size-overflow"_q;
 			return result;
 		}
 		if (maxWidth > std::numeric_limits<int>::max()) {
-			result.error = QStringLiteral("render-width-overflow");
+			result.error = u"render-width-overflow"_q;
 			return result;
 		}
 		const auto tex = PreparedTeX(request.kind, trimmedTex);
@@ -146,31 +144,31 @@ MicrotexRenderResult RenderWithMicrotex(const MicrotexRenderRequest &request) {
 			float(textSize) * 0.25f,
 			NormalizeForeground(request.foreground).rgba()));
 		if (!render) {
-			result.error = QStringLiteral("parse-returned-null");
+			result.error = u"parse-returned-null"_q;
 			return result;
 		}
 		const auto logicalSize = QSize(
 			render->getWidth(),
 			render->getHeight());
 		if (logicalSize.width() <= 0 || logicalSize.height() <= 0) {
-			result.error = QStringLiteral("invalid-render-size");
+			result.error = u"invalid-render-size"_q;
 			return result;
 		}
-		if (logicalSize.width() > st::ivMarkdownDisplayMathMaxRenderWidth
-			|| logicalSize.height() > st::ivMarkdownDisplayMathMaxRenderHeight) {
-			result.error = QStringLiteral("logical-size-cap-exceeded");
+		if (logicalSize.width() > request.renderWidthCap
+			|| logicalSize.height() > request.renderHeightCap) {
+			result.error = u"logical-size-cap-exceeded"_q;
 			return result;
 		}
 		auto physicalSize = QSize();
 		if (!ComputePhysicalSize(logicalSize, ratio, &physicalSize)) {
-			result.error = QStringLiteral("physical-image-cap-exceeded");
+			result.error = u"physical-image-cap-exceeded"_q;
 			return result;
 		}
 		auto image = QImage(
 			physicalSize,
 			QImage::Format_ARGB32_Premultiplied);
 		if (image.isNull()) {
-			result.error = QStringLiteral("image-allocation-failed");
+			result.error = u"image-allocation-failed"_q;
 			return result;
 		}
 		image.setDevicePixelRatio(ratio);
@@ -190,7 +188,7 @@ MicrotexRenderResult RenderWithMicrotex(const MicrotexRenderRequest &request) {
 		result.error = ExceptionText(exception);
 		return result;
 	} catch (...) {
-		result.error = QStringLiteral("unknown-exception");
+		result.error = u"unknown-exception"_q;
 		return result;
 	}
 }

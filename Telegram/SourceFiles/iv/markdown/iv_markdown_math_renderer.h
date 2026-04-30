@@ -17,6 +17,7 @@ struct FormulaCacheKey {
 	MathKind kind = MathKind::Display;
 	int textSize = 0;
 	int renderWidthCap = 0;
+	int renderHeightCap = 0;
 	QRgb foregroundRgba = 0;
 	int paletteVersion = 0;
 	int devicePixelRatio = 1;
@@ -27,6 +28,7 @@ struct FormulaCacheKey {
 			a.kind,
 			a.textSize,
 			a.renderWidthCap,
+			a.renderHeightCap,
 			a.foregroundRgba,
 			a.paletteVersion,
 			a.devicePixelRatio) == std::tie(
@@ -34,6 +36,7 @@ struct FormulaCacheKey {
 			b.kind,
 			b.textSize,
 			b.renderWidthCap,
+			b.renderHeightCap,
 			b.foregroundRgba,
 			b.paletteVersion,
 			b.devicePixelRatio);
@@ -45,6 +48,7 @@ struct FormulaCacheKey {
 			a.kind,
 			a.textSize,
 			a.renderWidthCap,
+			a.renderHeightCap,
 			a.foregroundRgba,
 			a.paletteVersion,
 			a.devicePixelRatio) < std::tie(
@@ -52,6 +56,7 @@ struct FormulaCacheKey {
 			b.kind,
 			b.textSize,
 			b.renderWidthCap,
+			b.renderHeightCap,
 			b.foregroundRgba,
 			b.paletteVersion,
 			b.devicePixelRatio);

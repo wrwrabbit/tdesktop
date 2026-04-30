@@ -39,6 +39,8 @@ if (TDESKTOP_NATIVE_MARKDOWN_IV)
         iv/markdown/iv_markdown_microtex.h
         iv/markdown/iv_markdown_parse.cpp
         iv/markdown/iv_markdown_parse.h
+        iv/markdown/iv_markdown_prepare.cpp
+        iv/markdown/iv_markdown_prepare.h
         iv/markdown/iv_markdown_view.cpp
         iv/markdown/iv_markdown_view.h
     )

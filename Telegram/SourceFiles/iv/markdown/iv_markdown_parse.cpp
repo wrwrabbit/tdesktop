@@ -98,6 +98,16 @@ template <std::size_t Size>
 	return result;
 }
 
+[[nodiscard]] MarkdownSourceValidationResult ValidationFailure(
+		QString sourceName,
+		QString error) {
+	auto result = MarkdownSourceValidationResult();
+	result.source.sourceName = std::move(sourceName);
+	result.error = std::move(error);
+	result.ok = false;
+	return result;
+}
+
 [[nodiscard]] bool HasUtf8Bom(const QByteArray &source) {
 	constexpr auto kUtf8Bom = std::array<unsigned char, 3>{
 		0xEF,
@@ -207,44 +217,6 @@ template <std::size_t Size>
 			return false;
 		}
 		i += extraBytes;
-	}
-	return true;
-}
-
-[[nodiscard]] bool ValidateSource(
-		const QByteArray &source,
-		QByteArray *normalized,
-		QString *decoded,
-		QString *error) {
-	const auto fail = [=](const char *value) {
-		if (error) {
-			*error = FromLatin1(value);
-		}
-		return false;
-	};
-	if (source.size() > kMaxSourceBytes) {
-		return fail("source-too-large");
-	}
-	if (HasUnsupportedUnicodeBom(source)) {
-		return fail("source-unsupported-bom");
-	}
-	auto normalizedSource = StripUtf8Bom(source);
-	if (LooksBinary(normalizedSource)) {
-		return fail("source-binary");
-	}
-	if (!IsValidUtf8(normalizedSource)) {
-		return fail("source-invalid-utf8");
-	}
-	if (decoded) {
-		*decoded = QString::fromUtf8(
-			normalizedSource.constData(),
-			normalizedSource.size());
-	}
-	if (normalized) {
-		*normalized = std::move(normalizedSource);
-	}
-	if (error) {
-		error->clear();
 	}
 	return true;
 }
@@ -1313,15 +1285,42 @@ void FillFormulaStats(PreparedDocument *document) {
 
 } // namespace
 
-ParseResult ParseMarkdownForIv(const QByteArray &source, ParseOptions options) {
-	auto normalized = QByteArray();
-	auto decoded = QString();
-	auto error = QString();
-	if (!ValidateSource(source, &normalized, &decoded, &error)) {
-		return Failure(std::move(options.sourceName), std::move(error));
+MarkdownSourceValidationResult ValidateMarkdownSourceForIv(
+		const QByteArray &source,
+		ParseOptions options) {
+	if (source.size() > kMaxSourceBytes) {
+		return ValidationFailure(
+			std::move(options.sourceName),
+			FromLatin1("source-too-large"));
 	}
-	const auto lineStarts = BuildLineStarts(normalized);
-	auto mask = std::vector<bool>(normalized.size(), false);
+	if (HasUnsupportedUnicodeBom(source)) {
+		return ValidationFailure(
+			std::move(options.sourceName),
+			FromLatin1("source-unsupported-bom"));
+	}
+	auto normalized = StripUtf8Bom(source);
+	if (LooksBinary(normalized)) {
+		return ValidationFailure(
+			std::move(options.sourceName),
+			FromLatin1("source-binary"));
+	}
+	if (!IsValidUtf8(normalized)) {
+		return ValidationFailure(
+			std::move(options.sourceName),
+			FromLatin1("source-invalid-utf8"));
+	}
+	auto result = MarkdownSourceValidationResult();
+	result.source.normalized = std::move(normalized);
+	result.source.decoded = QString::fromUtf8(
+		result.source.normalized.constData(),
+		result.source.normalized.size());
+	result.source.lineStarts = BuildLineStarts(result.source.normalized);
+	result.source.sourceName = std::move(options.sourceName);
+	return result;
+}
+
+ParseResult ParseMarkdownForIv(ValidatedMarkdownSource source) {
+	auto mask = std::vector<bool>(source.normalized.size(), false);
 	const auto parserOptions = CMARK_OPT_DEFAULT
 		| CMARK_OPT_SOURCEPOS
 		| CMARK_OPT_FOOTNOTES
@@ -1329,28 +1328,29 @@ ParseResult ParseMarkdownForIv(const QByteArray &source, ParseOptions options) {
 	auto parser = ParserPointer(cmark_parser_new(parserOptions));
 	if (!parser) {
 		return Failure(
-			std::move(options.sourceName),
+			source.sourceName,
 			FromLatin1("cmark-parser-failed"));
 	}
+	auto error = QString();
 	if (!AttachExtensions(parser.get(), &error)) {
-		return Failure(std::move(options.sourceName), std::move(error));
+		return Failure(source.sourceName, std::move(error));
 	}
 	cmark_parser_feed(
 		parser.get(),
-		normalized.constData(),
-		static_cast<std::size_t>(normalized.size()));
+		source.normalized.constData(),
+		static_cast<std::size_t>(source.normalized.size()));
 	auto root = NodePointer(cmark_parser_finish(parser.get()));
 	if (!root) {
 		return Failure(
-			std::move(options.sourceName),
+			source.sourceName,
 			FromLatin1("cmark-parser-failed"));
 	}
-	auto document = EmptyDocument(std::move(options.sourceName));
-	document.sourceText = std::move(decoded);
+	auto document = EmptyDocument(std::move(source.sourceName));
+	document.sourceText = std::move(source.decoded);
 	auto scanBlocks = std::vector<MathScanBlock>();
 	auto state = ParserState{
-		normalized,
-		lineStarts,
+		source.normalized,
+		source.lineStarts,
 		&mask,
 		&scanBlocks,
 		&document.stats,
@@ -1360,9 +1360,9 @@ ParseResult ParseMarkdownForIv(const QByteArray &source, ParseOptions options) {
 		return Failure(std::move(document.sourceName), std::move(state.error));
 	}
 	if (!ExtractMathRegions(
-			normalized,
+			source.normalized,
 			mask,
-			lineStarts,
+			source.lineStarts,
 			scanBlocks,
 			kMaxFormulaBytes,
 			kMaxFormulaCount,
@@ -1382,11 +1382,23 @@ ParseResult ParseMarkdownForIv(const QByteArray &source, ParseOptions options) {
 				: std::move(state.error));
 	}
 	FillFormulaStats(&document);
-	NormalizeDisplayMathBlocks(&document, normalized, lineStarts);
+	NormalizeDisplayMathBlocks(
+		&document,
+		source.normalized,
+		source.lineStarts);
 	document.title = FirstHeadingTitle(document.document);
 	document.empty = document.document.children.empty()
 		&& document.formulas.empty();
 	return ParseResult{ std::move(document), QString(), true };
+}
+
+ParseResult ParseMarkdownForIv(const QByteArray &source, ParseOptions options) {
+	auto validated = ValidateMarkdownSourceForIv(source, std::move(options));
+	return validated.ok
+		? ParseMarkdownForIv(std::move(validated.source))
+		: Failure(
+			std::move(validated.source.sourceName),
+			std::move(validated.error));
 }
 
 } // namespace Iv::Markdown
