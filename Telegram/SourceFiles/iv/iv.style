@@ -69,3 +69,69 @@ ivSubtitleHeight: 48px;
 ivSubtitleTop: 12px;
 ivSubtitleLeft: 22px;
 ivSubtitleSkip: 0px;
+
+ivMarkdownTextPalette: TextPalette(defaultTextPalette) {
+	linkFg: windowActiveTextFg;
+	monoFg: windowSubTextFg;
+	selectMonoFg: windowSubTextFg;
+}
+ivMarkdownParagraphStyle: TextStyle(defaultTextStyle) {
+	lineHeight: 24px;
+}
+ivMarkdownHeading1Style: TextStyle(defaultTextStyle) {
+	font: font(30px semibold);
+	lineHeight: 36px;
+}
+ivMarkdownHeading2Style: TextStyle(defaultTextStyle) {
+	font: font(26px semibold);
+	lineHeight: 32px;
+}
+ivMarkdownHeading3Style: TextStyle(defaultTextStyle) {
+	font: font(22px semibold);
+	lineHeight: 28px;
+}
+ivMarkdownHeading4Style: TextStyle(defaultTextStyle) {
+	font: font(19px semibold);
+	lineHeight: 25px;
+}
+ivMarkdownHeading5Style: TextStyle(defaultTextStyle) {
+	font: font(17px semibold);
+	lineHeight: 23px;
+}
+ivMarkdownHeading6Style: TextStyle(defaultTextStyle) {
+	font: font(15px semibold);
+	lineHeight: 21px;
+}
+ivMarkdownCodeStyle: TextStyle(defaultTextStyle) {
+	font: font(15px);
+	lineHeight: 22px;
+}
+ivMarkdownPagePadding: margins(26px, 32px, 32px, 32px);
+ivMarkdownParagraphSkip: 16px;
+ivMarkdownHeadingSkip: 24px;
+ivMarkdownCodeSkip: 20px;
+ivMarkdownRuleSkip: 24px;
+ivMarkdownListIndent: 28px;
+ivMarkdownListContinuationIndent: 22px;
+ivMarkdownListMarkerWidth: 22px;
+ivMarkdownListMarkerSkip: 8px;
+ivMarkdownTaskMarkerSize: 15px;
+ivMarkdownTaskMarkerBorder: 2px;
+ivMarkdownTaskMarkerFg: windowActiveTextFg;
+ivMarkdownTaskMarkerCheckFg: windowBg;
+ivMarkdownQuoteIndent: 18px;
+ivMarkdownQuoteBorder: 3px;
+ivMarkdownQuoteBorderFg: windowActiveTextFg;
+ivMarkdownQuotePadding: margins(4px, 0px, 4px, 12px);
+ivMarkdownQuoteSkip: 18px;
+ivMarkdownCodePadding: margins(14px, 16px, 14px, 16px);
+ivMarkdownCodeBg: windowBgOver;
+ivMarkdownCodeRadius: 6px;
+ivMarkdownCodeLanguageStyle: TextStyle(defaultTextStyle) {
+	font: font(12px semibold);
+	lineHeight: 18px;
+}
+ivMarkdownCodeLanguageFg: windowSubTextFg;
+ivMarkdownCodeLanguageSkip: 8px;
+ivMarkdownRuleFg: boxDividerBg;
+ivMarkdownRuleHeight: 1px;
