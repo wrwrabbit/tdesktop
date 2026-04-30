@@ -287,6 +287,7 @@ void SetTextLeaf(
 		const style::TextStyle &textStyle,
 		const TextWithEntities &text,
 		const std::vector<PreparedInlineObject> &inlineObjects,
+		const MarkdownStyleSnapshot &style,
 		const std::vector<PreparedFormulaSlot> &formulas);
 
 struct TableCellLayoutData {
@@ -313,6 +314,7 @@ struct TableRowLayoutData {
 		textStyle,
 		prepared.text,
 		prepared.inlineObjects,
+		style,
 		formulas);
 	BindLinks(&result.cell.leaf, prepared.links);
 	result.preferredWidth = result.cell.leaf.maxWidth();
@@ -464,17 +466,30 @@ struct TableRowLayoutData {
 	return result;
 }
 
+[[nodiscard]] Ui::Text::InlineHtmlMetrics InlineHtmlMetricsFor(
+		const MarkdownStyleSnapshot &style) {
+	return {
+		.subscriptScale = style.subscriptScale,
+		.superscriptScale = style.superscriptScale,
+		.subscriptBaselineOffset = style.subscriptBaselineOffset,
+		.superscriptBaselineOffset = style.superscriptBaselineOffset,
+		.markBackgroundColor = style.markBackgroundColor,
+	};
+}
+
 void SetTextLeaf(
 		Ui::Text::String *leaf,
 		const style::TextStyle &textStyle,
 		const TextWithEntities &text,
-	const std::vector<PreparedInlineObject> &inlineObjects,
-	const std::vector<PreparedFormulaSlot> &formulas) {
+		const std::vector<PreparedInlineObject> &inlineObjects,
+		const MarkdownStyleSnapshot &style,
+		const std::vector<PreparedFormulaSlot> &formulas) {
 	auto context = Ui::Text::MarkedContext();
 	auto placements = InlineFormulaPlacements(inlineObjects, formulas, textStyle);
 	context.inlineObjects = Ui::Text::InlineObjectPlacements(
 		placements.data(),
 		placements.size());
+	context.other = InlineHtmlMetricsFor(style);
 	leaf->setMarkedText(textStyle, text, kIvMarkedTextOptions, context);
 }
 
@@ -496,6 +511,7 @@ void SetTextLeaf(
 		textStyle,
 		prepared.text,
 		prepared.inlineObjects,
+		style,
 		formulas);
 	BindLinks(&block.leaf, prepared.links);
 

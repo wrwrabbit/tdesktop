@@ -106,6 +106,11 @@ ivMarkdownCodeStyle: TextStyle(defaultTextStyle) {
 	font: font(15px);
 	lineHeight: 22px;
 }
+ivMarkdownSubscriptScale: 0.75;
+ivMarkdownSubscriptBaselineOffset: 3px;
+ivMarkdownSuperscriptScale: 0.75;
+ivMarkdownSuperscriptBaselineOffset: -4px;
+ivMarkdownMarkBackground: windowBgOver;
 ivMarkdownPagePadding: margins(26px, 32px, 32px, 32px);
 ivMarkdownParagraphSkip: 16px;
 ivMarkdownHeadingSkip: 24px;

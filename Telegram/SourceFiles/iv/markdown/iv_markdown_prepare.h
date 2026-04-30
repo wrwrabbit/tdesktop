@@ -122,6 +122,7 @@ struct MarkdownStyleSnapshot {
 	QColor taskMarkerCheckColor = Qt::black;
 	QColor quoteBorderColor = Qt::black;
 	QColor codeBackgroundColor = Qt::black;
+	QColor markBackgroundColor = Qt::black;
 	QColor ruleColor = Qt::black;
 	QColor displayMathForegroundColor = Qt::black;
 	QColor displayMathFallbackBackgroundColor = Qt::black;
@@ -129,6 +130,8 @@ struct MarkdownStyleSnapshot {
 	QColor tableBorderColor = Qt::black;
 	QColor tableHeaderBackgroundColor = Qt::black;
 	QColor tableOverflowColor = Qt::black;
+	double subscriptScale = 1.;
+	double superscriptScale = 1.;
 	int paragraphSkip = 0;
 	int headingSkip = 0;
 	int codeSkip = 0;
@@ -146,6 +149,8 @@ struct MarkdownStyleSnapshot {
 	int quoteBorder = 0;
 	int codeRadius = 0;
 	int codeLanguageSkip = 0;
+	int subscriptBaselineOffset = 0;
+	int superscriptBaselineOffset = 0;
 	int ruleHeight = 0;
 	int displayMathTextSize = 0;
 	int displayMathMaxRenderWidth = 0;

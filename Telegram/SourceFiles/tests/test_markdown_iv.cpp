@@ -25,6 +25,7 @@ struct Args {
 	QString markdownPath;
 	QString latexMarkdownPath;
 	bool dump = false;
+	bool inlineHtml = false;
 	bool ok = true;
 	QString error;
 };
@@ -53,6 +54,8 @@ void PrintError(const QString &line) {
 		const auto argument = QString::fromLocal8Bit(argv[i]);
 		if (argument == FromLatin1("--dump")) {
 			result.dump = true;
+		} else if (argument == FromLatin1("--inline-html")) {
+			result.inlineHtml = true;
 		} else if (argument == FromLatin1("--markdown")
 			|| argument == FromLatin1("--latex-md")) {
 			if (i + 1 == argc) {
@@ -77,6 +80,15 @@ void PrintError(const QString &line) {
 
 [[nodiscard]] QString DefaultFixturePath(const QString &name) {
 	const auto applicationDir = QDir(QCoreApplication::applicationDirPath());
+	const auto applicationCandidate = applicationDir.filePath(name);
+	if (QFileInfo::exists(applicationCandidate)) {
+		return applicationCandidate;
+	}
+	const auto outDebug = QDir::current().filePath(
+		FromLatin1("out/Debug/") + name);
+	if (QFileInfo::exists(outDebug)) {
+		return outDebug;
+	}
 	const auto repoFixtureFromApplication = QDir::cleanPath(
 		applicationDir.filePath(
 			FromLatin1("../../Telegram/MarkdownMathProbes/fixtures/") + name));
@@ -87,15 +99,6 @@ void PrintError(const QString &line) {
 		FromLatin1("Telegram/MarkdownMathProbes/fixtures/") + name);
 	if (QFileInfo::exists(repoFixtureFromCurrent)) {
 		return repoFixtureFromCurrent;
-	}
-	const auto applicationCandidate = applicationDir.filePath(name);
-	if (QFileInfo::exists(applicationCandidate)) {
-		return applicationCandidate;
-	}
-	const auto outDebug = QDir::current().filePath(
-		FromLatin1("out/Debug/") + name);
-	if (QFileInfo::exists(outDebug)) {
-		return outDebug;
 	}
 	return outDebug;
 }
@@ -140,6 +143,37 @@ void PrintError(const QString &line) {
 	}
 	for (const auto &child : node.children) {
 		if (HasTextContaining(child, text)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+[[nodiscard]] bool HasExactInlineHtmlTriplet(
+		const MarkdownNode &node,
+		const QString &openingTag,
+		const QString &innerText,
+		const QString &closingTag) {
+	const auto count = int(node.children.size());
+	for (auto i = 0; (i + 2) < count; ++i) {
+		const auto &opening = node.children[i];
+		const auto &text = node.children[i + 1];
+		const auto &closing = node.children[i + 2];
+		if (opening.kind == NodeKind::HtmlInline
+			&& opening.raw == openingTag
+			&& text.kind == NodeKind::Text
+			&& text.text == innerText
+			&& closing.kind == NodeKind::HtmlInline
+			&& closing.raw == closingTag) {
+			return true;
+		}
+	}
+	for (const auto &child : node.children) {
+		if (HasExactInlineHtmlTriplet(
+				child,
+				openingTag,
+				innerText,
+				closingTag)) {
 			return true;
 		}
 	}
@@ -392,6 +426,20 @@ using NodeKindPathIter = NodeKindPath::const_iterator;
 				kind,
 				firstLine,
 				lastLine)) {
+			return found;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] const MarkdownNode *FindHtmlInlineByRaw(
+		const MarkdownNode &node,
+		const QString &raw) {
+	if (node.kind == NodeKind::HtmlInline && node.raw == raw) {
+		return &node;
+	}
+	for (const auto &child : node.children) {
+		if (const auto found = FindHtmlInlineByRaw(child, raw)) {
 			return found;
 		}
 	}
@@ -786,6 +834,126 @@ void CheckValidationEdges(bool *ok) {
 	}
 }
 
+void CheckInlineHtmlCoverage(bool dump, bool *ok) {
+	const auto source = QByteArray(
+		"H<sub>2</sub>O\n"
+		"E = mc<sup>2</sup>\n"
+		"<mark>Highlighted text using HTML mark</mark>\n"
+		"<br>\n");
+	const auto label = FromLatin1("generated-inline-html.md");
+	const auto parsed = ParseMarkdownForIv(source, ParseOptions{ label });
+	Check(
+		parsed.ok,
+		label + FromLatin1(" parse failed: ") + parsed.error,
+		ok);
+	if (!parsed.ok) {
+		return;
+	}
+	const auto validated = CheckValidationSuccess(source, label, ok);
+	if (!validated.ok) {
+		return;
+	}
+	const auto parsedValidated = ParseMarkdownForIv(std::move(validated.source));
+	Check(
+		parsedValidated.ok,
+		label + FromLatin1(" validated parse failed: ")
+			+ parsedValidated.error,
+		ok);
+	if (!parsedValidated.ok) {
+		return;
+	}
+	CheckMatchingParseCounts(
+		parsed.document,
+		parsedValidated.document,
+		label,
+		ok);
+	if (dump) {
+		PrintLine(DumpForDebug(parsed.document));
+	}
+	const auto &document = parsed.document.document;
+	const auto subscriptParagraph = FindNodeByKindAndLineRange(
+		document,
+		NodeKind::Paragraph,
+		1,
+		1);
+	Check(
+		subscriptParagraph != nullptr,
+		label + FromLatin1(" subscript paragraph range"),
+		ok);
+	if (subscriptParagraph) {
+		Check(
+			HasExactInlineHtmlTriplet(
+				*subscriptParagraph,
+				FromLatin1("<sub>"),
+				FromLatin1("2"),
+				FromLatin1("</sub>")),
+			label + FromLatin1(" subscript HTML triplet"),
+			ok);
+	}
+	const auto superscriptParagraph = FindNodeByKindAndLineRange(
+		document,
+		NodeKind::Paragraph,
+		2,
+		2);
+	Check(
+		superscriptParagraph != nullptr,
+		label + FromLatin1(" superscript paragraph range"),
+		ok);
+	if (superscriptParagraph) {
+		Check(
+			HasExactInlineHtmlTriplet(
+				*superscriptParagraph,
+				FromLatin1("<sup>"),
+				FromLatin1("2"),
+				FromLatin1("</sup>")),
+			label + FromLatin1(" superscript HTML triplet"),
+			ok);
+	}
+	const auto markParagraph = FindNodeByKindAndLineRange(
+		document,
+		NodeKind::Paragraph,
+		3,
+		3);
+	Check(
+		markParagraph != nullptr,
+		label + FromLatin1(" mark paragraph range"),
+		ok);
+	if (markParagraph) {
+		Check(
+			HasExactInlineHtmlTriplet(
+				*markParagraph,
+				FromLatin1("<mark>"),
+				FromLatin1("Highlighted text using HTML mark"),
+				FromLatin1("</mark>")),
+			label + FromLatin1(" mark HTML triplet"),
+			ok);
+	}
+	const auto htmlLineBreakParagraph = FindNodeByKindAndLineRange(
+		document,
+		NodeKind::Paragraph,
+		4,
+		4);
+	Check(
+		htmlLineBreakParagraph != nullptr,
+		label + FromLatin1(" html line break paragraph range"),
+		ok);
+	if (htmlLineBreakParagraph) {
+		const auto brInline = FindHtmlInlineByRaw(
+			*htmlLineBreakParagraph,
+			FromLatin1("<br>"));
+		Check(
+			brInline != nullptr,
+			label + FromLatin1(" html line break raw node"),
+			ok);
+		if (brInline) {
+			Check(
+				brInline->text.isEmpty() && brInline->children.empty(),
+				label + FromLatin1(" html line break lone HtmlInline"),
+				ok);
+		}
+	}
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -796,6 +964,11 @@ int main(int argc, char **argv) {
 	if (!args.ok) {
 		PrintError(args.error);
 		return 1;
+	}
+	if (args.inlineHtml) {
+		auto ok = true;
+		CheckInlineHtmlCoverage(args.dump, &ok);
+		return ok ? 0 : 1;
 	}
 	if (args.markdownPath.isEmpty()) {
 		args.markdownPath = DefaultFixturePath(FromLatin1("markdown-example.md"));
@@ -1170,6 +1343,7 @@ int main(int argc, char **argv) {
 		FromLatin1("latex-markdown-test.md lines 332-340 exclusions"),
 		&ok);
 
+	CheckInlineHtmlCoverage(args.dump, &ok);
 	CheckValidationEdges(&ok);
 
 	return ok ? 0 : 1;

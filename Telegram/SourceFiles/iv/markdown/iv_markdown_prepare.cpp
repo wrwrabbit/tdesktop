@@ -103,6 +103,16 @@ struct InlineFormulaContext {
 	int renderHeightCap = 0;
 };
 
+enum class RawInlineTag {
+	None,
+	SubOpen,
+	SubClose,
+	SupOpen,
+	SupClose,
+	MarkOpen,
+	MarkClose,
+};
+
 void ClearPreparedOutput(PreparedResult *result) {
 	result->blocks.blocks.clear();
 	result->formulas.clear();
@@ -404,6 +414,77 @@ void AppendTextWithInlineFormulas(
 		state);
 }
 
+[[nodiscard]] RawInlineTag ParseRawInlineTag(const MarkdownNode &node) {
+	if (node.kind != NodeKind::HtmlInline) {
+		return RawInlineTag::None;
+	} else if (node.raw == u"<sub>"_q) {
+		return RawInlineTag::SubOpen;
+	} else if (node.raw == u"</sub>"_q) {
+		return RawInlineTag::SubClose;
+	} else if (node.raw == u"<sup>"_q) {
+		return RawInlineTag::SupOpen;
+	} else if (node.raw == u"</sup>"_q) {
+		return RawInlineTag::SupClose;
+	} else if (node.raw == u"<mark>"_q) {
+		return RawInlineTag::MarkOpen;
+	} else if (node.raw == u"</mark>"_q) {
+		return RawInlineTag::MarkClose;
+	}
+	return RawInlineTag::None;
+}
+
+[[nodiscard]] bool IsOpeningRawInlineTag(RawInlineTag tag) {
+	return (tag == RawInlineTag::SubOpen)
+		|| (tag == RawInlineTag::SupOpen)
+		|| (tag == RawInlineTag::MarkOpen);
+}
+
+[[nodiscard]] RawInlineTag MatchingClosingRawInlineTag(RawInlineTag tag) {
+	switch (tag) {
+	case RawInlineTag::SubOpen: return RawInlineTag::SubClose;
+	case RawInlineTag::SupOpen: return RawInlineTag::SupClose;
+	case RawInlineTag::MarkOpen: return RawInlineTag::MarkClose;
+	default: return RawInlineTag::None;
+	}
+}
+
+[[nodiscard]] EntityType EntityTypeForRawInlineTag(RawInlineTag tag) {
+	switch (tag) {
+	case RawInlineTag::SubOpen: return EntityType::Subscript;
+	case RawInlineTag::SupOpen: return EntityType::Superscript;
+	case RawInlineTag::MarkOpen: return EntityType::Marked;
+	default: return EntityType::Invalid;
+	}
+}
+
+[[nodiscard]] int FindMatchingRawInlineTag(
+		const std::vector<MarkdownNode> &nodes,
+		int from,
+		int till,
+		RawInlineTag openingTag) {
+	if (!IsOpeningRawInlineTag(openingTag)) {
+		return -1;
+	}
+	auto stack = std::vector<RawInlineTag>();
+	stack.push_back(openingTag);
+	for (auto i = from; i != till; ++i) {
+		const auto tag = ParseRawInlineTag(nodes[i]);
+		if (tag == RawInlineTag::None) {
+			continue;
+		} else if (IsOpeningRawInlineTag(tag)) {
+			stack.push_back(tag);
+		} else if (stack.empty()
+			|| MatchingClosingRawInlineTag(stack.back()) != tag) {
+			return -1;
+		} else if (stack.size() == 1) {
+			return i;
+		} else {
+			stack.pop_back();
+		}
+	}
+	return -1;
+}
+
 void AppendInline(
 	const MarkdownNode &node,
 	TextWithEntities *text,
@@ -411,17 +492,51 @@ void AppendInline(
 	InlineFormulaContext *inlineFormulas,
 	PrepareState *state);
 
-void AppendInlineChildren(
-		const MarkdownNode &node,
+void AppendInlineRange(
+		const std::vector<MarkdownNode> &nodes,
+		int from,
+		int till,
 		TextWithEntities *text,
 		std::vector<PreparedLink> *links,
 		InlineFormulaContext *inlineFormulas,
 		PrepareState *state) {
-	for (const auto &child : node.children) {
+	for (auto i = from; i != till; ++i) {
 		if (state->cancelled()) {
 			return;
 		}
-		AppendInline(child, text, links, inlineFormulas, state);
+		const auto &node = nodes[i];
+		const auto tag = ParseRawInlineTag(node);
+		if (IsOpeningRawInlineTag(tag)) {
+			const auto closing = FindMatchingRawInlineTag(
+				nodes,
+				i + 1,
+				till,
+				tag);
+			if (closing > i) {
+				const auto entityFrom = text->text.size();
+				AppendInlineRange(
+					nodes,
+					i + 1,
+					closing,
+					text,
+					links,
+					inlineFormulas,
+					state);
+				if (state->cancelled()) {
+					return;
+				}
+				const auto entityLength = text->text.size() - entityFrom;
+				if (entityLength > 0) {
+					text->entities.push_back(EntityInText(
+						EntityTypeForRawInlineTag(tag),
+						entityFrom,
+						entityLength));
+				}
+				i = closing;
+				continue;
+			}
+		}
+		AppendInline(node, text, links, inlineFormulas, state);
 	}
 }
 
@@ -453,7 +568,14 @@ void AppendInline(
 		text->append(QChar('\n'));
 		break;
 	case NodeKind::Emphasis:
-		AppendInlineChildren(node, text, links, inlineFormulas, state);
+		AppendInlineRange(
+			node.children,
+			0,
+			int(node.children.size()),
+			text,
+			links,
+			inlineFormulas,
+			state);
 		if (text->text.size() > from) {
 			text->entities.push_back(
 				EntityInText(
@@ -463,7 +585,14 @@ void AppendInline(
 		}
 		break;
 	case NodeKind::Strong:
-		AppendInlineChildren(node, text, links, inlineFormulas, state);
+		AppendInlineRange(
+			node.children,
+			0,
+			int(node.children.size()),
+			text,
+			links,
+			inlineFormulas,
+			state);
 		if (text->text.size() > from) {
 			text->entities.push_back(
 				EntityInText(
@@ -473,7 +602,14 @@ void AppendInline(
 		}
 		break;
 	case NodeKind::Strike:
-		AppendInlineChildren(node, text, links, inlineFormulas, state);
+		AppendInlineRange(
+			node.children,
+			0,
+			int(node.children.size()),
+			text,
+			links,
+			inlineFormulas,
+			state);
 		if (text->text.size() > from) {
 			text->entities.push_back(
 				EntityInText(
@@ -486,7 +622,14 @@ void AppendInline(
 		if (!node.text.isEmpty()) {
 			text->append(node.text);
 		} else {
-			AppendInlineChildren(node, text, links, inlineFormulas, state);
+			AppendInlineRange(
+				node.children,
+				0,
+				int(node.children.size()),
+				text,
+				links,
+				inlineFormulas,
+				state);
 		}
 		if (text->text.size() > from) {
 			text->entities.push_back(
@@ -497,7 +640,14 @@ void AppendInline(
 		}
 		break;
 	case NodeKind::Link: {
-		AppendInlineChildren(node, text, links, inlineFormulas, state);
+		AppendInlineRange(
+			node.children,
+			0,
+			int(node.children.size()),
+			text,
+			links,
+			inlineFormulas,
+			state);
 		if (text->text.size() == from && !node.url.isEmpty()) {
 			text->append(node.url);
 		}
@@ -522,8 +672,22 @@ void AppendInline(
 	} break;
 	case NodeKind::HtmlInline:
 	case NodeKind::Unsupported:
-		if (!node.children.empty()) {
-			AppendInlineChildren(node, text, links, inlineFormulas, state);
+		if (!node.raw.isEmpty()) {
+			AppendTextWithInlineFormulas(
+				node,
+				node.raw,
+				text,
+				inlineFormulas,
+				state);
+		} else if (!node.children.empty()) {
+			AppendInlineRange(
+				node.children,
+				0,
+				int(node.children.size()),
+				text,
+				links,
+				inlineFormulas,
+				state);
 		} else if (!node.text.isEmpty()) {
 			AppendTextWithInlineFormulas(
 				node,
@@ -535,11 +699,25 @@ void AppendInline(
 		break;
 	default:
 		if (!node.children.empty()) {
-			AppendInlineChildren(node, text, links, inlineFormulas, state);
+			AppendInlineRange(
+				node.children,
+				0,
+				int(node.children.size()),
+				text,
+				links,
+				inlineFormulas,
+				state);
 		} else if (!node.text.isEmpty()) {
 			AppendTextWithInlineFormulas(
 				node,
 				node.text,
+				text,
+				inlineFormulas,
+				state);
+		} else if (!node.raw.isEmpty()) {
+			AppendTextWithInlineFormulas(
+				node,
+				node.raw,
 				text,
 				inlineFormulas,
 				state);
@@ -572,7 +750,14 @@ void PrepareTableCellText(
 			state->result.style.displayMathTextSize),
 	};
 	if (!cell.children.empty()) {
-		AppendInlineChildren(cell, text, links, &inlineFormulas, state);
+		AppendInlineRange(
+			cell.children,
+			0,
+			int(cell.children.size()),
+			text,
+			links,
+			&inlineFormulas,
+			state);
 	} else if (!cell.text.isEmpty()) {
 		AppendTextWithInlineFormulas(
 			cell,
@@ -849,7 +1034,14 @@ void AppendRichBlock(
 			state->result.style.displayMathTextSize),
 	};
 	if (!node.children.empty()) {
-		AppendInlineChildren(node, &text, &links, &inlineFormulas, state);
+		AppendInlineRange(
+			node.children,
+			0,
+			int(node.children.size()),
+			&text,
+			&links,
+			&inlineFormulas,
+			state);
 	} else if (!node.text.isEmpty()) {
 		AppendTextWithInlineFormulas(
 			node,
@@ -1146,6 +1338,7 @@ MarkdownStyleSnapshot CaptureMarkdownStyleSnapshot() {
 	result.taskMarkerCheckColor = Resolve(st::ivMarkdownTaskMarkerCheckFg);
 	result.quoteBorderColor = Resolve(st::ivMarkdownQuoteBorderFg);
 	result.codeBackgroundColor = Resolve(st::ivMarkdownCodeBg);
+	result.markBackgroundColor = Resolve(st::ivMarkdownMarkBackground);
 	result.ruleColor = Resolve(st::ivMarkdownRuleFg);
 	result.displayMathForegroundColor = Resolve(st::windowFg);
 	result.displayMathFallbackBackgroundColor = Resolve(
@@ -1154,6 +1347,8 @@ MarkdownStyleSnapshot CaptureMarkdownStyleSnapshot() {
 	result.tableBorderColor = Resolve(st::ivMarkdownTableBorderFg);
 	result.tableHeaderBackgroundColor = Resolve(st::ivMarkdownTableHeaderBg);
 	result.tableOverflowColor = Resolve(st::ivMarkdownTableOverflowFg);
+	result.subscriptScale = st::ivMarkdownSubscriptScale;
+	result.superscriptScale = st::ivMarkdownSuperscriptScale;
 	result.paragraphSkip = st::ivMarkdownParagraphSkip;
 	result.headingSkip = st::ivMarkdownHeadingSkip;
 	result.codeSkip = st::ivMarkdownCodeSkip;
@@ -1171,6 +1366,8 @@ MarkdownStyleSnapshot CaptureMarkdownStyleSnapshot() {
 	result.quoteBorder = st::ivMarkdownQuoteBorder;
 	result.codeRadius = st::ivMarkdownCodeRadius;
 	result.codeLanguageSkip = st::ivMarkdownCodeLanguageSkip;
+	result.subscriptBaselineOffset = st::ivMarkdownSubscriptBaselineOffset;
+	result.superscriptBaselineOffset = st::ivMarkdownSuperscriptBaselineOffset;
 	result.ruleHeight = st::ivMarkdownRuleHeight;
 	result.displayMathTextSize = st::ivMarkdownDisplayMathTextSize;
 	result.displayMathMaxRenderWidth = st::ivMarkdownDisplayMathMaxRenderWidth;
