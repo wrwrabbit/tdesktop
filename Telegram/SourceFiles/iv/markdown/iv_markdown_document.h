@@ -28,6 +28,8 @@ enum class NodeKind {
 	TableCell,
 	HtmlInline,
 	HtmlBlock,
+	FootnoteReference,
+	FootnoteDefinition,
 	DisplayMath,
 	InlineMath,
 	SoftBreak,
@@ -64,6 +66,13 @@ enum class TableAlignment {
 	Right,
 };
 
+enum class HtmlBlockKind {
+	None,
+	Comment,
+	Details,
+	Unsupported,
+};
+
 struct SourceRange {
 	bool available = false;
 	int startLine = 0;
@@ -82,6 +91,10 @@ struct MarkdownNode {
 	QString title;
 	QString info;
 	QString raw;
+	QString anchorId;
+	QString footnoteLabel;
+	QString detailsSummary;
+	QString detailsBody;
 	QString unsupportedKind;
 	std::vector<MarkdownNode> children;
 	std::vector<TableAlignment> tableAlignments;
@@ -89,12 +102,15 @@ struct MarkdownNode {
 	int listStart = 0;
 	int tableColumn = -1;
 	int formulaIndex = -1;
+	int footnoteOrdinal = 0;
 	ListKind listKind = ListKind::Bullet;
 	ListDelimiter listDelimiter = ListDelimiter::None;
 	TaskState taskState = TaskState::None;
+	HtmlBlockKind htmlBlockKind = HtmlBlockKind::None;
 	bool tight = false;
 	bool autolink = false;
 	bool tableHeader = false;
+	bool detailsOpen = false;
 };
 
 struct MathFormula {

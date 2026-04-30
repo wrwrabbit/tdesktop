@@ -2,6 +2,8 @@
 
 #include "iv/markdown/iv_markdown_math.h"
 
+#include "base/basic_types.h"
+
 #include <QtCore/QByteArray>
 #include <QtCore/QString>
 
@@ -49,6 +51,13 @@ struct ParserState {
 	bool failed = false;
 };
 
+struct ParsedDetailsBlock {
+	QString summary;
+	QString body;
+	bool open = false;
+	bool ok = false;
+};
+
 void ParserDeleter::operator()(cmark_parser *parser) const {
 	if (parser) {
 		cmark_parser_free(parser);
@@ -69,6 +78,12 @@ void NodeDeleter::operator()(cmark_node *node) const {
 	return FromLatin1("%1-%2").arg(
 		FromLatin1(prefix),
 		FromLatin1(name));
+}
+
+void AddWarning(ParserState *state, QString warning) {
+	if (state && state->warnings && !warning.isEmpty()) {
+		state->warnings->push_back(std::move(warning));
+	}
 }
 
 [[nodiscard]] unsigned char ByteAt(const QByteArray &source, int index) {
@@ -645,6 +660,7 @@ void RecordCapabilities(cmark_node *node, ParserState *state) {
 	case CMARK_NODE_PARAGRAPH: return NodeKind::Paragraph;
 	case CMARK_NODE_HEADING: return NodeKind::Heading;
 	case CMARK_NODE_THEMATIC_BREAK: return NodeKind::ThematicBreak;
+	case CMARK_NODE_FOOTNOTE_DEFINITION: return NodeKind::FootnoteDefinition;
 	case CMARK_NODE_TEXT: return NodeKind::Text;
 	case CMARK_NODE_SOFTBREAK: return NodeKind::SoftBreak;
 	case CMARK_NODE_LINEBREAK: return NodeKind::LineBreak;
@@ -653,6 +669,7 @@ void RecordCapabilities(cmark_node *node, ParserState *state) {
 	case CMARK_NODE_EMPH: return NodeKind::Emphasis;
 	case CMARK_NODE_STRONG: return NodeKind::Strong;
 	case CMARK_NODE_LINK: return NodeKind::Link;
+	case CMARK_NODE_FOOTNOTE_REFERENCE: return NodeKind::FootnoteReference;
 	default: break;
 	}
 	return ExtensionNodeKind(RawTypeString(node));
@@ -732,6 +749,110 @@ void RecordCapabilities(cmark_node *node, ParserState *state) {
 	return result;
 }
 
+[[nodiscard]] QString NormalizeFragmentId(QString fragment) {
+	fragment = QString::fromUtf8(
+		QByteArray::fromPercentEncoding(fragment.toUtf8()));
+	fragment = fragment.trimmed().toLower();
+	while (fragment.startsWith(u"#"_q)) {
+		fragment.remove(0, 1);
+	}
+	return fragment;
+}
+
+[[nodiscard]] QString AnchorIdBaseFromText(QString text) {
+	text = text.trimmed().toLower();
+	auto result = QString();
+	auto pendingHyphen = false;
+	for (const auto ch : text) {
+		if (ch.isLetterOrNumber()) {
+			if (pendingHyphen && !result.isEmpty()) {
+				result.append(QChar('-'));
+			}
+			result.append(ch);
+			pendingHyphen = false;
+		} else if (!result.isEmpty()) {
+			pendingHyphen = true;
+		}
+	}
+	if (result.isEmpty()) {
+		return u"section"_q;
+	}
+	return result;
+}
+
+[[nodiscard]] QString FootnoteDefinitionAnchorId(int ordinal) {
+	return (ordinal > 0) ? (u"fn-"_q + QString::number(ordinal)) : QString();
+}
+
+[[nodiscard]] QString ExtractFootnoteLabel(
+		QString raw,
+		bool definition) {
+	raw = raw.trimmed();
+	if (!raw.startsWith(u"[^"_q)) {
+		return QString();
+	}
+	const auto closing = raw.indexOf(u']');
+	if (closing <= 2) {
+		return QString();
+	}
+	if (definition && (closing + 1 >= raw.size() || raw[closing + 1] != u':')) {
+		return QString();
+	}
+	return raw.mid(2, closing - 2).trimmed();
+}
+
+[[nodiscard]] bool ParseDetailsOpenAttribute(QString raw) {
+	raw = raw.trimmed().toLower();
+	if (raw.isEmpty()) {
+		return false;
+	}
+	return (raw == u"open"_q)
+		|| (raw == u"open=\"\""_q)
+		|| (raw == u"open=''"_q)
+		|| (raw == u"open=\"open\""_q)
+		|| (raw == u"open='open'"_q);
+}
+
+[[nodiscard]] ParsedDetailsBlock ParseDetailsBlock(QString raw) {
+	auto result = ParsedDetailsBlock();
+	raw = raw.trimmed();
+	if (!raw.startsWith(u"<details"_q, Qt::CaseInsensitive)
+		|| !raw.endsWith(u"</details>"_q, Qt::CaseInsensitive)) {
+		return result;
+	}
+	const auto openingEnd = raw.indexOf(QChar('>'));
+	if (openingEnd < 0) {
+		return result;
+	}
+	const auto openingAttributes = raw.mid(8, openingEnd - 8);
+	if (!openingAttributes.trimmed().isEmpty()
+		&& !ParseDetailsOpenAttribute(openingAttributes)) {
+		return result;
+	}
+	result.open = ParseDetailsOpenAttribute(openingAttributes);
+	auto inner = raw.mid(
+		openingEnd + 1,
+		raw.size() - openingEnd - 11);
+	if (inner.contains(u"<details"_q, Qt::CaseInsensitive)) {
+		return result;
+	}
+	inner = inner.trimmed();
+	if (!inner.startsWith(u"<summary>"_q, Qt::CaseInsensitive)) {
+		return result;
+	}
+	const auto summaryClosing = inner.indexOf(
+		u"</summary>"_q,
+		0,
+		Qt::CaseInsensitive);
+	if (summaryClosing < 0) {
+		return result;
+	}
+	result.summary = inner.mid(9, summaryClosing - 9).trimmed();
+	result.body = inner.mid(summaryClosing + 10).trimmed();
+	result.ok = !result.summary.isEmpty();
+	return result;
+}
+
 [[nodiscard]] QString PlainText(const MarkdownNode &node) {
 	auto result = node.text;
 	for (const auto &child : node.children) {
@@ -753,7 +874,10 @@ void RecordCapabilities(cmark_node *node, ParserState *state) {
 		&& text == node.url.mid(mailto.size());
 }
 
-void FillNodeAttributes(cmark_node *node, MarkdownNode *out) {
+void FillNodeAttributes(
+		cmark_node *node,
+		ParserState *state,
+		MarkdownNode *out) {
 	switch (out->kind) {
 	case NodeKind::Text:
 	case NodeKind::InlineCode:
@@ -763,7 +887,37 @@ void FillNodeAttributes(cmark_node *node, MarkdownNode *out) {
 		out->text = FromCmarkString(cmark_node_get_literal(node));
 		out->info = FromCmarkString(cmark_node_get_fence_info(node));
 		break;
-	case NodeKind::HtmlBlock:
+	case NodeKind::HtmlBlock: {
+		out->raw = FromCmarkString(cmark_node_get_literal(node));
+		const auto trimmed = out->raw.trimmed();
+		if (trimmed.startsWith(u"<!--"_q) && trimmed.endsWith(u"-->"_q)) {
+			out->htmlBlockKind = HtmlBlockKind::Comment;
+		} else if (trimmed.startsWith(u"<details"_q, Qt::CaseInsensitive)) {
+			const auto details = ParseDetailsBlock(out->raw);
+			if (details.ok) {
+				out->htmlBlockKind = HtmlBlockKind::Details;
+				out->detailsSummary = details.summary;
+				out->detailsBody = details.body;
+				out->detailsOpen = details.open;
+			} else {
+				out->htmlBlockKind = HtmlBlockKind::Unsupported;
+				AddWarning(
+					state,
+					FromLatin1("Malformed details block at %1:%2").arg(
+						out->range.startLine
+					).arg(
+						out->range.startColumn));
+			}
+		} else if (!trimmed.isEmpty()) {
+			out->htmlBlockKind = HtmlBlockKind::Unsupported;
+			AddWarning(
+				state,
+				FromLatin1("Unsupported HTML block at %1:%2").arg(
+					out->range.startLine
+				).arg(
+					out->range.startColumn));
+		}
+	} break;
 	case NodeKind::HtmlInline:
 		out->raw = FromCmarkString(cmark_node_get_literal(node));
 		break;
@@ -796,6 +950,22 @@ void FillNodeAttributes(cmark_node *node, MarkdownNode *out) {
 		out->url = FromCmarkString(cmark_node_get_url(node));
 		out->title = FromCmarkString(cmark_node_get_title(node));
 		break;
+	case NodeKind::FootnoteReference:
+		out->raw = SourceSlice(state->normalizedSource, out->range);
+		if (const auto parent = cmark_node_parent_footnote_def(node)) {
+			out->footnoteLabel = FromCmarkString(cmark_node_get_literal(parent));
+		}
+		if (out->footnoteLabel.isEmpty()) {
+			out->footnoteLabel = ExtractFootnoteLabel(out->raw, false);
+		}
+		break;
+	case NodeKind::FootnoteDefinition:
+		out->raw = SourceSlice(state->normalizedSource, out->range);
+		out->footnoteLabel = FromCmarkString(cmark_node_get_literal(node));
+		if (out->footnoteLabel.isEmpty()) {
+			out->footnoteLabel = ExtractFootnoteLabel(out->raw, true);
+		}
+		break;
 	default:
 		break;
 	}
@@ -821,7 +991,7 @@ void FillNodeAttributes(cmark_node *node, MarkdownNode *out) {
 		out->unsupportedKind = CmarkKind(node);
 		out->raw = SourceSlice(state->normalizedSource, out->range);
 	}
-	FillNodeAttributes(node, out);
+	FillNodeAttributes(node, state, out);
 	for (auto child = cmark_node_first_child(node); child;) {
 		const auto next = cmark_node_next(child);
 		auto converted = MarkdownNode();
@@ -1231,6 +1401,199 @@ void NormalizeDisplayMathChildren(
 	return result;
 }
 
+[[nodiscard]] int *FindNamedCounter(
+		std::vector<std::pair<QString, int>> *entries,
+		const QString &key) {
+	if (!entries) {
+		return nullptr;
+	}
+	for (auto &entry : *entries) {
+		if (entry.first == key) {
+			return &entry.second;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] int FindNamedValue(
+		const std::vector<std::pair<QString, int>> &entries,
+		const QString &key) {
+	for (const auto &entry : entries) {
+		if (entry.first == key) {
+			return entry.second;
+		}
+	}
+	return 0;
+}
+
+[[nodiscard]] bool ContainsAnchorId(
+		const std::vector<QString> &anchors,
+		const QString &value) {
+	return std::find(anchors.begin(), anchors.end(), value) != anchors.end();
+}
+
+void AssignHeadingAnchors(
+		MarkdownNode *node,
+		std::vector<std::pair<QString, int>> *counts,
+		QStringList *warnings) {
+	if (!node) {
+		return;
+	}
+	if (node->kind == NodeKind::Heading) {
+		const auto base = AnchorIdBaseFromText(PlainText(*node));
+		auto count = FindNamedCounter(counts, base);
+		if (count) {
+			++(*count);
+			node->anchorId = base + u"-"_q + QString::number(*count);
+			if (warnings) {
+				warnings->push_back(FromLatin1(
+					"Duplicate heading anchor \"%1\" remapped to \"%2\"").arg(
+						base
+					).arg(
+						node->anchorId));
+			}
+		} else {
+			counts->push_back({ base, 1 });
+			node->anchorId = base;
+		}
+	}
+	for (auto &child : node->children) {
+		AssignHeadingAnchors(&child, counts, warnings);
+	}
+}
+
+void AssignFootnoteDefinitionOrdinals(
+		MarkdownNode *node,
+		std::vector<std::pair<QString, int>> *definitions,
+		int *nextOrdinal,
+		QStringList *warnings) {
+	if (!node || !definitions || !nextOrdinal) {
+		return;
+	}
+	if (node->kind == NodeKind::FootnoteDefinition) {
+		if (node->footnoteLabel.isEmpty()) {
+			if (warnings) {
+				warnings->push_back(FromLatin1(
+					"Footnote definition without label at %1:%2").arg(
+						node->range.startLine
+					).arg(
+						node->range.startColumn));
+			}
+		} else if (const auto existing = FindNamedValue(
+				*definitions,
+				node->footnoteLabel)) {
+			node->footnoteOrdinal = existing;
+			node->anchorId = FootnoteDefinitionAnchorId(existing);
+			if (warnings) {
+				warnings->push_back(FromLatin1(
+					"Duplicate footnote definition \"%1\"").arg(
+						node->footnoteLabel));
+			}
+		} else {
+			node->footnoteOrdinal = *nextOrdinal;
+			node->anchorId = FootnoteDefinitionAnchorId(*nextOrdinal);
+			definitions->push_back({ node->footnoteLabel, *nextOrdinal });
+			++(*nextOrdinal);
+		}
+	}
+	for (auto &child : node->children) {
+		AssignFootnoteDefinitionOrdinals(&child, definitions, nextOrdinal, warnings);
+	}
+}
+
+void AssignFootnoteReferenceOrdinals(
+		MarkdownNode *node,
+		const std::vector<std::pair<QString, int>> &definitions,
+		QStringList *warnings) {
+	if (!node) {
+		return;
+	}
+	if (node->kind == NodeKind::FootnoteReference) {
+		if (node->footnoteLabel.isEmpty()) {
+			if (warnings) {
+				warnings->push_back(FromLatin1(
+					"Footnote reference without label at %1:%2").arg(
+						node->range.startLine
+					).arg(
+						node->range.startColumn));
+			}
+		} else if (const auto ordinal = FindNamedValue(
+				definitions,
+				node->footnoteLabel)) {
+			node->footnoteOrdinal = ordinal;
+		} else if (warnings) {
+			warnings->push_back(FromLatin1(
+				"Unresolved footnote reference \"%1\"").arg(
+					node->footnoteLabel));
+		}
+	}
+	for (auto &child : node->children) {
+		AssignFootnoteReferenceOrdinals(&child, definitions, warnings);
+	}
+}
+
+void CollectAnchorIds(
+		const MarkdownNode &node,
+		std::vector<QString> *anchors) {
+	if (!anchors) {
+		return;
+	}
+	if (!node.anchorId.isEmpty()
+		&& (node.kind == NodeKind::Heading
+			|| node.kind == NodeKind::FootnoteDefinition)) {
+		anchors->push_back(node.anchorId);
+	}
+	for (const auto &child : node.children) {
+		CollectAnchorIds(child, anchors);
+	}
+}
+
+void ValidateLocalFragments(
+		const MarkdownNode &node,
+		const std::vector<QString> &anchors,
+		QStringList *warnings) {
+	if (node.kind == NodeKind::Link && node.url.startsWith(QChar('#'))) {
+		const auto fragment = NormalizeFragmentId(node.url.mid(1));
+		if (fragment.isEmpty() || !ContainsAnchorId(anchors, fragment)) {
+			if (warnings) {
+				warnings->push_back(FromLatin1(
+					"Unresolved local fragment \"%1\"").arg(
+						node.url));
+			}
+		}
+	}
+	for (const auto &child : node.children) {
+		ValidateLocalFragments(child, anchors, warnings);
+	}
+}
+
+void FinalizeDocumentSemantics(PreparedDocument *document) {
+	if (!document) {
+		return;
+	}
+	auto headingCounts = std::vector<std::pair<QString, int>>();
+	AssignHeadingAnchors(
+		&document->document,
+		&headingCounts,
+		&document->warnings);
+
+	auto footnoteDefinitions = std::vector<std::pair<QString, int>>();
+	auto nextFootnoteOrdinal = 1;
+	AssignFootnoteDefinitionOrdinals(
+		&document->document,
+		&footnoteDefinitions,
+		&nextFootnoteOrdinal,
+		&document->warnings);
+	AssignFootnoteReferenceOrdinals(
+		&document->document,
+		footnoteDefinitions,
+		&document->warnings);
+
+	auto anchors = std::vector<QString>();
+	CollectAnchorIds(document->document, &anchors);
+	ValidateLocalFragments(document->document, anchors, &document->warnings);
+}
+
 void NormalizeDisplayMathBlocks(
 		PreparedDocument *document,
 		const QByteArray &source,
@@ -1386,6 +1749,7 @@ ParseResult ParseMarkdownForIv(ValidatedMarkdownSource source) {
 		&document,
 		source.normalized,
 		source.lineStarts);
+	FinalizeDocumentSemantics(&document);
 	document.title = FirstHeadingTitle(document.document);
 	document.empty = document.document.children.empty()
 		&& document.formulas.empty();

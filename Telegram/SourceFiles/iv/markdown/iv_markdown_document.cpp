@@ -34,6 +34,8 @@ namespace {
 	case NodeKind::TableCell: return FromLatin1("TableCell");
 	case NodeKind::HtmlInline: return FromLatin1("HtmlInline");
 	case NodeKind::HtmlBlock: return FromLatin1("HtmlBlock");
+	case NodeKind::FootnoteReference: return FromLatin1("FootnoteReference");
+	case NodeKind::FootnoteDefinition: return FromLatin1("FootnoteDefinition");
 	case NodeKind::DisplayMath: return FromLatin1("DisplayMath");
 	case NodeKind::InlineMath: return FromLatin1("InlineMath");
 	case NodeKind::SoftBreak: return FromLatin1("SoftBreak");
@@ -64,6 +66,16 @@ namespace {
 	case ListDelimiter::None: return FromLatin1("None");
 	case ListDelimiter::Period: return FromLatin1("Period");
 	case ListDelimiter::Parenthesis: return FromLatin1("Parenthesis");
+	}
+	return FromLatin1("None");
+}
+
+[[nodiscard]] QString HtmlBlockKindName(HtmlBlockKind kind) {
+	switch (kind) {
+	case HtmlBlockKind::None: return FromLatin1("None");
+	case HtmlBlockKind::Comment: return FromLatin1("Comment");
+	case HtmlBlockKind::Details: return FromLatin1("Details");
+	case HtmlBlockKind::Unsupported: return FromLatin1("Unsupported");
 	}
 	return FromLatin1("None");
 }
@@ -171,6 +183,10 @@ void DumpNode(
 	AddStringAttribute(&line, "title", node.title);
 	AddStringAttribute(&line, "info", node.info);
 	AddStringAttribute(&line, "raw", node.raw);
+	AddStringAttribute(&line, "anchorId", node.anchorId);
+	AddStringAttribute(&line, "footnoteLabel", node.footnoteLabel);
+	AddStringAttribute(&line, "detailsSummary", node.detailsSummary);
+	AddStringAttribute(&line, "detailsBody", node.detailsBody);
 	AddStringAttribute(&line, "unsupportedKind", node.unsupportedKind);
 	if (node.headingLevel != 0) {
 		AddIntAttribute(&line, "headingLevel", node.headingLevel);
@@ -184,6 +200,9 @@ void DumpNode(
 	if (node.formulaIndex != -1) {
 		AddIntAttribute(&line, "formulaIndex", node.formulaIndex);
 	}
+	if (node.footnoteOrdinal != 0) {
+		AddIntAttribute(&line, "footnoteOrdinal", node.footnoteOrdinal);
+	}
 	if (node.kind == NodeKind::List) {
 		AddStringAttribute(&line, "listKind", ListKindName(node.listKind));
 		AddStringAttribute(
@@ -191,12 +210,19 @@ void DumpNode(
 			"listDelimiter",
 			ListDelimiterName(node.listDelimiter));
 	}
+	if (node.htmlBlockKind != HtmlBlockKind::None) {
+		AddStringAttribute(
+			&line,
+			"htmlBlockKind",
+			HtmlBlockKindName(node.htmlBlockKind));
+	}
 	if (node.taskState != TaskState::None) {
 		AddStringAttribute(&line, "taskState", TaskStateName(node.taskState));
 	}
 	AddBoolAttribute(&line, "tight", node.tight);
 	AddBoolAttribute(&line, "autolink", node.autolink);
 	AddBoolAttribute(&line, "tableHeader", node.tableHeader);
+	AddBoolAttribute(&line, "detailsOpen", node.detailsOpen);
 	if (!node.tableAlignments.empty()) {
 		AddStringAttribute(
 			&line,

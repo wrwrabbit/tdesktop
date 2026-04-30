@@ -2,10 +2,17 @@
 
 #include <QtCore/QString>
 
+namespace Iv {
+class Delegate;
+} // namespace Iv
+
 namespace Iv::Markdown {
 
 struct OpenOptions {
 	QString sourceName;
+	QString sourcePath;
+	QString initialFragment;
+	Iv::Delegate *delegate = nullptr;
 };
 
 struct ParseOptions {

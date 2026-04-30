@@ -23,6 +23,12 @@ namespace Iv::Markdown {
 namespace {
 
 constexpr auto kMaxSourceBytes = 4 * 1024 * 1024;
+constexpr auto kZoomStep = int(10);
+
+struct OpenTarget {
+	QString path;
+	QString fragment;
+};
 
 [[nodiscard]] bool IsReadableLocalFile(const QFileInfo &info) {
 	return info.exists() && info.isFile() && info.isReadable();
@@ -47,6 +53,35 @@ constexpr auto kMaxSourceBytes = 4 * 1024 * 1024;
 	return true;
 }
 
+[[nodiscard]] QString NormalizeFragmentId(QString fragment) {
+	fragment = QString::fromUtf8(
+		QByteArray::fromPercentEncoding(fragment.toUtf8()));
+	fragment = fragment.trimmed().toLower();
+	while (fragment.startsWith(QChar('#'))) {
+		fragment.remove(0, 1);
+	}
+	return fragment;
+}
+
+[[nodiscard]] OpenTarget ParseOpenTarget(QString path) {
+	const auto direct = QFileInfo(path);
+	if (direct.exists()) {
+		return { path, QString() };
+	}
+	const auto hash = path.lastIndexOf(QChar('#'));
+	if (hash <= 0) {
+		return { path, QString() };
+	}
+	const auto candidate = path.mid(0, hash);
+	if (candidate.isEmpty()) {
+		return { path, QString() };
+	}
+	const auto info = QFileInfo(candidate);
+	return info.exists()
+		? OpenTarget{ candidate, NormalizeFragmentId(path.mid(hash + 1)) }
+		: OpenTarget{ path, QString() };
+}
+
 [[nodiscard]] bool HasPreviewableContent(const MarkdownNode &node) {
 	switch (node.kind) {
 	case NodeKind::Document:
@@ -68,9 +103,23 @@ constexpr auto kMaxSourceBytes = 4 * 1024 * 1024;
 		|| !document.formulas.empty();
 }
 
+void LogDocumentWarnings(
+		const PreparedDocument &document,
+		const QString &path) {
+	for (const auto &warning : document.warnings) {
+		DEBUG_LOG(("Native Markdown IV: warning (%1): %2"
+			).arg(warning
+			).arg(path));
+	}
+}
+
 class Controller final {
 public:
-	Controller(PreparedDocument document, QString title);
+	Controller(
+		PreparedDocument document,
+		QString title,
+		QString sourcePath,
+		QString initialFragment);
 
 	void activate();
 
@@ -81,6 +130,8 @@ private:
 
 	PreparedDocument _document;
 	QString _title;
+	QString _sourcePath;
+	QString _initialFragment;
 	Iv::DelegateImpl _delegate;
 	std::unique_ptr<Ui::RpWindow> _window;
 	std::unique_ptr<Ui::RpWidget> _preview;
@@ -106,18 +157,30 @@ void RemoveController(Controller *controller) {
 	}
 }
 
-void OpenDocumentWindow(PreparedDocument document, QString title) {
+void OpenDocumentWindow(
+		PreparedDocument document,
+		QString title,
+		QString sourcePath,
+		QString initialFragment) {
 	auto controller = std::make_unique<Controller>(
 		std::move(document),
-		std::move(title));
+		std::move(title),
+		std::move(sourcePath),
+		std::move(initialFragment));
 	const auto raw = controller.get();
 	ActiveControllers().push_back(std::move(controller));
 	raw->activate();
 }
 
-Controller::Controller(PreparedDocument document, QString title)
+Controller::Controller(
+		PreparedDocument document,
+		QString title,
+		QString sourcePath,
+		QString initialFragment)
 : _document(std::move(document))
-, _title(std::move(title)) {
+, _title(std::move(title))
+, _sourcePath(std::move(sourcePath))
+, _initialFragment(std::move(initialFragment)) {
 	createWindow();
 }
 
@@ -159,7 +222,12 @@ void Controller::createWindow() {
 
 	_preview = CreateMarkdownPreviewWidget(
 		_document,
-		OpenOptions{ .sourceName = _title });
+		OpenOptions{
+			.sourceName = _title,
+			.sourcePath = _sourcePath,
+			.initialFragment = _initialFragment,
+			.delegate = &_delegate,
+		});
 	_preview->setParent(window->body().get());
 	_preview->setGeometry(QRect(QPoint(), window->body()->size()));
 	window->body()->sizeValue() | rpl::on_next([=](QSize size) {
@@ -172,6 +240,22 @@ void Controller::createWindow() {
 			finishClose();
 		} else if (e->type() == QEvent::KeyPress) {
 			const auto event = static_cast<QKeyEvent*>(e.get());
+			if (event->modifiers() & Qt::ControlModifier) {
+				if (event->key() == Qt::Key_Plus
+					|| event->key() == Qt::Key_Equal) {
+					event->accept();
+					_delegate.ivSetZoom(_delegate.ivZoom() + kZoomStep);
+					return;
+				} else if (event->key() == Qt::Key_Minus) {
+					event->accept();
+					_delegate.ivSetZoom(_delegate.ivZoom() - kZoomStep);
+					return;
+				} else if (event->key() == Qt::Key_0) {
+					event->accept();
+					_delegate.ivSetZoom(0);
+					return;
+				}
+			}
 			if (event->key() == Qt::Key_Escape) {
 				event->accept();
 				close();
@@ -195,32 +279,35 @@ void Controller::finishClose() {
 } // namespace
 
 bool TryOpenLocalFile(const QString &path) {
-	const auto info = QFileInfo(path);
+	const auto target = ParseOpenTarget(path);
+	const auto info = QFileInfo(target.path);
 	if (!IsReadableLocalFile(info)) {
 		return false;
 	}
 	if (info.size() > kMaxSourceBytes) {
 		DEBUG_LOG(("Native Markdown IV: rejected local file too large: %1"
-			).arg(path));
+			).arg(target.path));
 		return false;
 	}
 
 	auto bytes = QByteArray();
-	if (!ReadLocalSource(path, &bytes)) {
+	if (!ReadLocalSource(target.path, &bytes)) {
 		return false;
 	}
 	if (bytes.size() > kMaxSourceBytes) {
 		DEBUG_LOG(("Native Markdown IV: rejected local file too large: %1"
-			).arg(path));
+			).arg(target.path));
 		return false;
 	}
 
-	const auto title = info.fileName();
-	auto validated = ValidateMarkdownSourceForIv(bytes, ParseOptions{ title });
+	const auto fallbackTitle = info.fileName();
+	auto validated = ValidateMarkdownSourceForIv(
+		bytes,
+		ParseOptions{ fallbackTitle });
 	if (!validated.ok) {
 		DEBUG_LOG(("Native Markdown IV: source validation failure (%1): %2"
 			).arg(validated.error
-			).arg(path));
+			).arg(target.path));
 		return false;
 	}
 
@@ -230,23 +317,31 @@ bool TryOpenLocalFile(const QString &path) {
 		if (error.startsWith(u"cmark-"_q)) {
 			DEBUG_LOG(("Native Markdown IV: cmark parse failure (%1): %2"
 				).arg(error
-				).arg(path));
+				).arg(target.path));
 		} else {
 			DEBUG_LOG(("Native Markdown IV: parse failure (%1): %2"
 				).arg(error
-				).arg(path));
+				).arg(target.path));
 		}
 		return false;
 	}
 	if (!AcceptsPreview(result.document)) {
 		DEBUG_LOG(("Native Markdown IV: unsupported or empty document: %1"
-			).arg(path));
+			).arg(target.path));
 		return false;
 	}
+	LogDocumentWarnings(result.document, target.path);
 
-	OpenDocumentWindow(std::move(result.document), title);
+	const auto title = result.document.title.trimmed().isEmpty()
+		? fallbackTitle
+		: result.document.title.trimmed();
+	OpenDocumentWindow(
+		std::move(result.document),
+		title,
+		info.absoluteFilePath(),
+		target.fragment);
 	DEBUG_LOG(("Native Markdown IV: opened as native Markdown IV: %1"
-		).arg(path));
+		).arg(target.path));
 	return true;
 }
 

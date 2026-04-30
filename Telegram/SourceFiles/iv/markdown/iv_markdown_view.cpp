@@ -1,5 +1,7 @@
 #include "iv/markdown/iv_markdown_view.h"
+#include "iv/markdown/iv_markdown_controller.h"
 #include "iv/markdown/iv_markdown_prepare.h"
+#include "iv/iv_delegate.h"
 
 #include <QtCore/QDebug>
 
@@ -7,6 +9,7 @@
 #include "core/credits_amount.h"
 #include "core/click_handler_types.h"
 #include "lang/lang_keys.h"
+#include "logs.h"
 #include "ui/click_handler.h"
 #include "ui/painter.h"
 #include "ui/rp_widget.h"
@@ -23,6 +26,8 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <cmath>
+#include <functional>
 #include <utility>
 #include <vector>
 
@@ -108,6 +113,7 @@ struct LaidOutBlock {
 	QRect tableRect;
 	QRect visibleFormulaRect;
 	QRect visibleTableRect;
+	QString anchorId;
 	int textWidth = 0;
 	int markerWidth = 0;
 	int headingLevel = 0;
@@ -117,6 +123,7 @@ struct LaidOutBlock {
 	int formulaIndex = -1;
 	int orderedNumber = 0;
 	style::align formulaAlign = style::al_left;
+	bool collapsed = false;
 	bool overflowed = false;
 };
 
@@ -175,6 +182,8 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 		return style.displayMathSkip;
 	case PreparedBlockKind::Table:
 		return style.tableSkip;
+	case PreparedBlockKind::Details:
+		return style.paragraphSkip;
 	}
 	return 0;
 }
@@ -250,13 +259,35 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 	return result;
 }
 
+class PreparedLinkClickHandler final : public ClickHandler {
+public:
+	explicit PreparedLinkClickHandler(PreparedLink link)
+	: _link(std::move(link)) {
+	}
+
+	void onClick(ClickContext) const override {
+	}
+
+	[[nodiscard]] const PreparedLink &link() const {
+		return _link;
+	}
+
+	QString url() const override {
+		return _link.target;
+	}
+
+private:
+	PreparedLink _link;
+
+};
+
 void BindLinks(
 		Ui::Text::String *leaf,
 		const std::vector<PreparedLink> &links) {
 	for (const auto &link : links) {
 		leaf->setLink(
 			link.index,
-			std::make_shared<HiddenUrlClickHandler>(link.target));
+			std::make_shared<PreparedLinkClickHandler>(link));
 	}
 }
 
@@ -502,6 +533,7 @@ void SetTextLeaf(
 		int width) {
 	auto block = LaidOutBlock();
 	block.kind = prepared.kind;
+	block.anchorId = prepared.anchorId;
 	block.headingLevel = prepared.headingLevel;
 	block.textWidth = std::max(width, 1);
 
@@ -838,6 +870,7 @@ void SetTextLeaf(
 		bool tight) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::ListItem;
+	block.anchorId = prepared.anchorId;
 	block.listKind = prepared.listKind;
 	block.listDelimiter = prepared.listDelimiter;
 	block.taskState = prepared.taskState;
@@ -1030,6 +1063,56 @@ void SetTextLeaf(
 	return block;
 }
 
+[[nodiscard]] LaidOutBlock LayoutDetailsBlock(
+		const PreparedBlock &prepared,
+		const MarkdownStyleSnapshot &style,
+		const std::vector<PreparedFormulaSlot> &formulas,
+		int left,
+		int top,
+		int width,
+		LayoutContext context) {
+	auto block = LaidOutBlock();
+	block.kind = PreparedBlockKind::Details;
+	block.anchorId = prepared.anchorId;
+	block.collapsed = prepared.collapsed;
+	block.textWidth = std::max(width, 1);
+
+	SetTextLeaf(
+		&block.leaf,
+		style.paragraphStyle,
+		prepared.text,
+		prepared.inlineObjects,
+		style,
+		formulas);
+	BindLinks(&block.leaf, prepared.links);
+
+	const auto summaryHeight = std::max(
+		block.leaf.countHeight(block.textWidth, true),
+		TextLineHeight(style.paragraphStyle));
+	block.textRect = QRect(left, top, block.textWidth, summaryHeight);
+
+	auto bottom = top + summaryHeight;
+	if (!prepared.collapsed && !prepared.children.empty()) {
+		const auto childLeft = left + style.listContinuationIndent;
+		const auto childWidth = std::max(
+			width - style.listContinuationIndent,
+			1);
+		const auto childTop = bottom + style.listMarkerSkip;
+		bottom = LayoutBlocks(
+			prepared.children,
+			&block.children,
+			style,
+			formulas,
+			childLeft,
+			childTop,
+			childWidth,
+			context);
+	}
+	block.outer = QRect(left, top, std::max(width, 1), std::max(bottom - top, summaryHeight));
+	block.contentRect = block.textRect;
+	return block;
+}
+
 [[nodiscard]] LaidOutBlock LayoutBlock(
 		const PreparedBlock &prepared,
 		const MarkdownStyleSnapshot &style,
@@ -1084,6 +1167,15 @@ void SetTextLeaf(
 			width);
 	case PreparedBlockKind::Table:
 		return LayoutTableBlock(prepared, formulas, style, left, top, width);
+	case PreparedBlockKind::Details:
+		return LayoutDetailsBlock(
+			prepared,
+			style,
+			formulas,
+			left,
+			top,
+			width,
+			context);
 	}
 	return LayoutFlowBlock(prepared, formulas, style, left, top, width);
 }
@@ -1094,12 +1186,14 @@ public:
 	void relayout(const PreparedResult &prepared, int width);
 
 	[[nodiscard]] int height() const;
+	[[nodiscard]] int anchorTop(const QString &anchorId) const;
 	[[nodiscard]] const std::vector<LaidOutBlock> &blocks() const;
 
 private:
 	int _width = -1;
 	int _height = 0;
 	std::vector<LaidOutBlock> _blocks;
+	std::vector<std::pair<QString, int>> _anchors;
 
 };
 
@@ -1109,7 +1203,12 @@ class MarkdownDocumentWidget final
 public:
 	explicit MarkdownDocumentWidget(QWidget *parent);
 
+	void setLinkActivationCallback(
+		std::function<void(const PreparedLink &, Qt::MouseButton)> callback);
 	void setPreparedResult(PreparedResult prepared);
+	void setZoom(int value);
+	[[nodiscard]] int anchorTop(const QString &anchorId) const;
+	[[nodiscard]] bool toggleDetails(const QString &anchorId);
 	int resizeGetHeight(int newWidth) override;
 
 protected:
@@ -1128,11 +1227,14 @@ private:
 	void forceRelayoutCurrentWidth();
 	void updateHover(QPoint point);
 	void applyCursor(style::cursor cursor);
+	[[nodiscard]] double zoomScale() const;
 
 	PreparedResult _prepared;
 	DocumentLayout _layout;
 	std::optional<SnapshotTextPalette> _textPalette;
+	std::function<void(const PreparedLink &, Qt::MouseButton)> _activateLink;
 	style::cursor _cursor = style::cur_default;
+	int _zoom = 100;
 
 };
 
@@ -1426,6 +1528,15 @@ void PaintBlock(
 	case PreparedBlockKind::Table:
 		PaintTableBlock(p, block, style, clip);
 		break;
+	case PreparedBlockKind::Details:
+		PaintTextLeaf(
+			p,
+			block.leaf,
+			block.textRect,
+			block.textWidth,
+			clip);
+		PaintBlocks(p, block.children, prepared, clip);
+		break;
 	}
 }
 
@@ -1543,6 +1654,11 @@ void PaintBlocks(
 		return nullptr;
 	case PreparedBlockKind::Table:
 		return LinkAtTableBlock(block, point);
+	case PreparedBlockKind::Details:
+		if (const auto result = LinkAtTextBlock(block, point)) {
+			return result;
+		}
+		return LinkAtBlocks(block.children, point);
 	case PreparedBlockKind::CodeBlock:
 	case PreparedBlockKind::Rule:
 		return nullptr;
@@ -1566,6 +1682,20 @@ void PaintBlocks(
 	return nullptr;
 }
 
+void CollectAnchors(
+		const std::vector<LaidOutBlock> &blocks,
+		std::vector<std::pair<QString, int>> *anchors) {
+	if (!anchors) {
+		return;
+	}
+	for (const auto &block : blocks) {
+		if (!block.anchorId.isEmpty()) {
+			anchors->push_back({ block.anchorId, block.outer.top() });
+		}
+		CollectAnchors(block.children, anchors);
+	}
+}
+
 void DocumentLayout::relayout(
 		const PreparedResult &prepared,
 		int width) {
@@ -1575,6 +1705,7 @@ void DocumentLayout::relayout(
 	}
 	_width = width;
 	_blocks.clear();
+	_anchors.clear();
 
 	const auto &page = prepared.style.pagePadding;
 	const auto innerWidth = std::max(width - page.left() - page.right(), 1);
@@ -1588,26 +1719,68 @@ void DocumentLayout::relayout(
 		innerWidth,
 		{});
 	_height = y + page.bottom();
+	CollectAnchors(_blocks, &_anchors);
 }
 
 void DocumentLayout::invalidate() {
 	_width = -1;
 	_height = 0;
 	_blocks.clear();
+	_anchors.clear();
 }
 
 int DocumentLayout::height() const {
 	return _height;
 }
 
+int DocumentLayout::anchorTop(const QString &anchorId) const {
+	for (const auto &entry : _anchors) {
+		if (entry.first == anchorId) {
+			return entry.second;
+		}
+	}
+	return -1;
+}
+
 const std::vector<LaidOutBlock> &DocumentLayout::blocks() const {
 	return _blocks;
+}
+
+[[nodiscard]] bool ToggleDetailsBlock(
+		std::vector<PreparedBlock> *blocks,
+		const QString &anchorId) {
+	if (!blocks) {
+		return false;
+	}
+	for (auto &block : *blocks) {
+		if (block.kind == PreparedBlockKind::Details
+			&& block.anchorId == anchorId) {
+			block.collapsed = !block.collapsed;
+			if (block.text.text.startsWith(u"> "_q)
+				|| block.text.text.startsWith(u"v "_q)) {
+				block.text.text.replace(
+					0,
+					2,
+					block.collapsed ? u"> "_q : u"v "_q);
+			}
+			return true;
+		}
+		if (ToggleDetailsBlock(&block.children, anchorId)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 MarkdownDocumentWidget::MarkdownDocumentWidget(
 	QWidget *parent)
 : Ui::RpWidget(parent) {
 	setMouseTracking(true);
+}
+
+void MarkdownDocumentWidget::setLinkActivationCallback(
+		std::function<void(const PreparedLink &, Qt::MouseButton)> callback) {
+	_activateLink = std::move(callback);
 }
 
 void MarkdownDocumentWidget::setPreparedResult(PreparedResult prepared) {
@@ -1619,11 +1792,39 @@ void MarkdownDocumentWidget::setPreparedResult(PreparedResult prepared) {
 	forceRelayoutCurrentWidth();
 }
 
+void MarkdownDocumentWidget::setZoom(int value) {
+	value = (value > 0) ? value : 100;
+	if (_zoom == value) {
+		return;
+	}
+	_zoom = value;
+	forceRelayoutCurrentWidth();
+}
+
+int MarkdownDocumentWidget::anchorTop(const QString &anchorId) const {
+	const auto top = _layout.anchorTop(anchorId);
+	if (top < 0) {
+		return -1;
+	}
+	return int(std::floor(top * zoomScale()));
+}
+
+bool MarkdownDocumentWidget::toggleDetails(const QString &anchorId) {
+	if (!ToggleDetailsBlock(&_prepared.blocks.blocks, anchorId)) {
+		return false;
+	}
+	_layout.invalidate();
+	forceRelayoutCurrentWidth();
+	return true;
+}
+
 int MarkdownDocumentWidget::resizeGetHeight(int newWidth) {
 	ClickHandler::clearActive(this);
 	applyCursor(style::cur_default);
-	_layout.relayout(_prepared, newWidth);
-	return std::max(_layout.height(), 1);
+	const auto scale = zoomScale();
+	const auto layoutWidth = std::max(int(std::floor(newWidth / scale)), 1);
+	_layout.relayout(_prepared, layoutWidth);
+	return std::max(int(std::ceil(_layout.height() * scale)), 1);
 }
 
 void MarkdownDocumentWidget::paintEvent(QPaintEvent *e) {
@@ -1632,7 +1833,20 @@ void MarkdownDocumentWidget::paintEvent(QPaintEvent *e) {
 		p.setTextPalette(_textPalette->palette);
 	}
 
-	PaintBlocks(p, _layout.blocks(), _prepared, e->rect());
+	const auto scale = zoomScale();
+	if (scale == 1.) {
+		PaintBlocks(p, _layout.blocks(), _prepared, e->rect());
+		return;
+	}
+	const auto clip = QRect(
+		int(std::floor(e->rect().x() / scale)),
+		int(std::floor(e->rect().y() / scale)),
+		int(std::ceil(e->rect().width() / scale)) + 1,
+		int(std::ceil(e->rect().height() / scale)) + 1);
+	p.save();
+	p.scale(scale, scale);
+	PaintBlocks(p, _layout.blocks(), _prepared, clip);
+	p.restore();
 }
 
 void MarkdownDocumentWidget::mouseMoveEvent(QMouseEvent *e) {
@@ -1651,7 +1865,14 @@ void MarkdownDocumentWidget::mouseReleaseEvent(QMouseEvent *e) {
 	if (activated
 		&& (e->button() == Qt::LeftButton
 			|| e->button() == Qt::MiddleButton)) {
-		ActivateClickHandler(window(), activated, e->button());
+		if (const auto prepared = std::dynamic_pointer_cast<PreparedLinkClickHandler>(
+				activated)) {
+			if (_activateLink) {
+				_activateLink(prepared->link(), e->button());
+			}
+		} else {
+			ActivateClickHandler(window(), activated, e->button());
+		}
 	}
 	if (rect().contains(e->pos())) {
 		updateHover(e->pos());
@@ -1680,11 +1901,19 @@ void MarkdownDocumentWidget::clickHandlerPressedChanged(
 }
 
 ClickHandlerPtr MarkdownDocumentWidget::linkAt(QPoint point) const {
+	const auto scale = zoomScale();
+	if (scale != 1.) {
+		point = QPoint(
+			int(std::floor(point.x() / scale)),
+			int(std::floor(point.y() / scale)));
+	}
 	return LinkAtBlocks(_layout.blocks(), point);
 }
 
 void MarkdownDocumentWidget::relayoutCurrentWidth() {
-	_layout.relayout(_prepared, width());
+	const auto scale = zoomScale();
+	const auto layoutWidth = std::max(int(std::floor(width() / scale)), 1);
+	_layout.relayout(_prepared, layoutWidth);
 }
 
 void MarkdownDocumentWidget::forceRelayoutCurrentWidth() {
@@ -1706,6 +1935,10 @@ void MarkdownDocumentWidget::applyCursor(style::cursor cursor) {
 	}
 }
 
+double MarkdownDocumentWidget::zoomScale() const {
+	return std::max(_zoom, 1) / 100.;
+}
+
 constexpr auto kDeferredPreparationSourceBytes = 128 * 1024;
 constexpr auto kDeferredPreparationFormulaCount = 4;
 constexpr auto kDeferredPreparationConvertedNodes = 1200;
@@ -1724,17 +1957,21 @@ private:
 	void startPreparation(
 		bool deferred,
 		std::optional<MarkdownStyleSnapshot> style = std::nullopt);
+	void activateLink(const PreparedLink &link, Qt::MouseButton button);
 	void applyPreparedResult(PreparedResult prepared);
+	[[nodiscard]] bool scrollToAnchor(const QString &anchorId);
 	void updateChildrenGeometry(QSize size);
 	void updateLoadingGeometry();
 	void cancelInFlightRequest();
 
+	const OpenOptions _options;
 	const std::shared_ptr<const PreparedDocument> _document;
 	Ui::ScrollArea *_scroll = nullptr;
 	MarkdownDocumentWidget *_body = nullptr;
 	Ui::FlatLabel *_loading = nullptr;
 	PrepareGeneration _generation = 0;
 	int _requestedDevicePixelRatio = 0;
+	QString _pendingFragment;
 	std::shared_ptr<std::atomic_bool> _cancelled;
 
 };
@@ -1744,10 +1981,10 @@ MarkdownPreviewRoot::MarkdownPreviewRoot(
 	const OpenOptions &options,
 	QWidget *parent)
 : Ui::RpWidget(parent)
+, _options(options)
 , _document(std::make_shared<PreparedDocument>(document))
+, _pendingFragment(options.initialFragment)
 , _cancelled(std::make_shared<std::atomic_bool>(false)) {
-	(void)options;
-
 	_scroll = Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll);
 	_body = _scroll->setOwnedWidget(object_ptr<MarkdownDocumentWidget>(_scroll));
 	_loading = Ui::CreateChild<Ui::FlatLabel>(
@@ -1758,6 +1995,14 @@ MarkdownPreviewRoot::MarkdownPreviewRoot(
 	_scroll->hide();
 	if (_body) {
 		_body->hide();
+		_body->setLinkActivationCallback([=](
+				const PreparedLink &link,
+				Qt::MouseButton button) {
+			activateLink(link, button);
+		});
+		if (_options.delegate) {
+			_body->setZoom(_options.delegate->ivZoom());
+		}
 	}
 	_loading->hide();
 
@@ -1779,6 +2024,15 @@ MarkdownPreviewRoot::MarkdownPreviewRoot(
 		}
 		startPreparation(shouldDeferPreparation(), std::move(style));
 	}, lifetime());
+
+	if (_options.delegate) {
+		_options.delegate->ivZoomValue(
+		) | rpl::on_next([=](int value) {
+			if (_body) {
+				_body->setZoom(value);
+			}
+		}, lifetime());
+	}
 
 	startPreparation(shouldDeferPreparation(), std::move(initialStyle));
 }
@@ -1813,6 +2067,7 @@ void MarkdownPreviewRoot::startPreparation(
 		.document = _document,
 		.style = std::move(*style),
 		.generation = generation,
+		.sourcePath = _options.sourcePath,
 		.cancelled = cancelled,
 	};
 
@@ -1850,15 +2105,76 @@ void MarkdownPreviewRoot::startPreparation(
 	}
 }
 
+void MarkdownPreviewRoot::activateLink(
+		const PreparedLink &link,
+		Qt::MouseButton button) {
+	if (button != Qt::LeftButton && button != Qt::MiddleButton) {
+		return;
+	}
+	switch (link.kind) {
+	case PreparedLinkKind::External:
+		HiddenUrlClickHandler::Open(link.target);
+		break;
+	case PreparedLinkKind::Anchor:
+	case PreparedLinkKind::Footnote:
+	case PreparedLinkKind::FootnoteBacklink:
+		if (!scrollToAnchor(link.target)) {
+			DEBUG_LOG(("Native Markdown IV: unresolved anchor: %1").arg(
+				link.target));
+		}
+		break;
+	case PreparedLinkKind::LocalFile: {
+		auto path = link.target;
+		if (!link.fragment.isEmpty()) {
+			path += u"#"_q + link.fragment;
+		}
+		if (!TryOpenLocalFile(path)) {
+			DEBUG_LOG(("Native Markdown IV: failed local markdown link: %1").arg(
+				path));
+		}
+	} break;
+	case PreparedLinkKind::RejectedRelative:
+		DEBUG_LOG(("Native Markdown IV: rejected relative markdown link: %1").arg(
+			link.target));
+		break;
+	case PreparedLinkKind::ToggleDetails:
+		if (_body && !_body->toggleDetails(link.target)) {
+			DEBUG_LOG(("Native Markdown IV: failed details toggle: %1").arg(
+				link.target));
+		}
+		break;
+	}
+}
+
 void MarkdownPreviewRoot::applyPreparedResult(PreparedResult prepared) {
 	if (!_body) {
 		return;
 	}
 	_body->setPreparedResult(std::move(prepared));
+	if (_options.delegate) {
+		_body->setZoom(_options.delegate->ivZoom());
+	}
 	_body->resizeToWidth(_scroll->width());
 	_scroll->show();
 	_body->show();
 	_loading->hide();
+	if (!_pendingFragment.isEmpty()) {
+		const auto scrolled = scrollToAnchor(_pendingFragment);
+		static_cast<void>(scrolled);
+		_pendingFragment.clear();
+	}
+}
+
+bool MarkdownPreviewRoot::scrollToAnchor(const QString &anchorId) {
+	if (!_body || !_scroll || anchorId.isEmpty()) {
+		return false;
+	}
+	const auto top = _body->anchorTop(anchorId);
+	if (top < 0) {
+		return false;
+	}
+	_scroll->scrollToY(top, top + 1);
+	return true;
 }
 
 void MarkdownPreviewRoot::updateChildrenGeometry(QSize size) {

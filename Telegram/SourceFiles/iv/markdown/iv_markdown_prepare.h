@@ -25,11 +25,24 @@ enum class PreparedBlockKind {
 	Quote,
 	DisplayMath,
 	Table,
+	Details,
+};
+
+enum class PreparedLinkKind {
+	External,
+	Anchor,
+	Footnote,
+	FootnoteBacklink,
+	LocalFile,
+	RejectedRelative,
+	ToggleDetails,
 };
 
 struct PreparedLink {
 	uint16 index = 0;
+	PreparedLinkKind kind = PreparedLinkKind::External;
 	QString target;
+	QString fragment;
 };
 
 struct PreparedInlineObject {
@@ -62,6 +75,7 @@ struct PreparedBlock {
 	std::vector<TableAlignment> tableAlignments;
 	QString codeLanguage;
 	QString formulaTex;
+	QString anchorId;
 	ListKind listKind = ListKind::Bullet;
 	ListDelimiter listDelimiter = ListDelimiter::None;
 	MathKind mathKind = MathKind::Display;
@@ -73,6 +87,7 @@ struct PreparedBlock {
 	int actualDepth = 0;
 	int visualDepth = 0;
 	int tableColumnCount = 0;
+	bool collapsed = false;
 	bool depthClamped = false;
 	bool tight = false;
 };
@@ -178,6 +193,7 @@ struct PrepareRequest {
 	std::shared_ptr<const PreparedDocument> document;
 	MarkdownStyleSnapshot style;
 	PrepareGeneration generation = 0;
+	QString sourcePath;
 	std::shared_ptr<std::atomic_bool> cancelled;
 };
 

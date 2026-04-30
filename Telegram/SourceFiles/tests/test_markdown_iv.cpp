@@ -446,6 +446,60 @@ using NodeKindPathIter = NodeKindPath::const_iterator;
 	return nullptr;
 }
 
+[[nodiscard]] const MarkdownNode *FindHtmlBlockContaining(
+		const MarkdownNode &node,
+		const QString &text) {
+	if (node.kind == NodeKind::HtmlBlock && node.raw.contains(text)) {
+		return &node;
+	}
+	for (const auto &child : node.children) {
+		if (const auto found = FindHtmlBlockContaining(child, text)) {
+			return found;
+		}
+	}
+	return nullptr;
+}
+
+void CollectNodesByKind(
+		const MarkdownNode &node,
+		NodeKind kind,
+		std::vector<const MarkdownNode*> *out) {
+	if (!out) {
+		return;
+	}
+	if (node.kind == kind) {
+		out->push_back(&node);
+	}
+	for (const auto &child : node.children) {
+		CollectNodesByKind(child, kind, out);
+	}
+}
+
+[[nodiscard]] const MarkdownNode *FindLinkByTarget(
+		const MarkdownNode &node,
+		const QString &target) {
+	if (node.kind == NodeKind::Link && node.url == target) {
+		return &node;
+	}
+	for (const auto &child : node.children) {
+		if (const auto found = FindLinkByTarget(child, target)) {
+			return found;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] bool WarningContains(
+		const PreparedDocument &document,
+		const QString &snippet) {
+	for (const auto &warning : document.warnings) {
+		if (warning.contains(snippet, Qt::CaseInsensitive)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 [[nodiscard]] int CountFormulas(
 		const PreparedDocument &document,
 		MathKind kind) {
@@ -954,6 +1008,136 @@ void CheckInlineHtmlCoverage(bool dump, bool *ok) {
 	}
 }
 
+void CheckFixtureSemanticCoverage(
+		const PreparedDocument &document,
+		const QString &path,
+		bool *ok) {
+	auto footnoteReferences = std::vector<const MarkdownNode*>();
+	CollectNodesByKind(
+		document.document,
+		NodeKind::FootnoteReference,
+		&footnoteReferences);
+	Check(
+		footnoteReferences.size() >= 2,
+		FromLatin1("markdown-example.md footnote reference count"),
+		ok);
+	if (footnoteReferences.size() >= 2) {
+		Check(
+			footnoteReferences[0]->footnoteLabel == FromLatin1("1")
+				&& footnoteReferences[0]->footnoteOrdinal == 1,
+			FromLatin1("markdown-example.md first footnote reference label"),
+			ok);
+		Check(
+			footnoteReferences[1]->footnoteLabel == FromLatin1("long-note")
+				&& footnoteReferences[1]->footnoteOrdinal == 2,
+			FromLatin1("markdown-example.md second footnote reference label"),
+			ok);
+	}
+
+	auto footnoteDefinitions = std::vector<const MarkdownNode*>();
+	CollectNodesByKind(
+		document.document,
+		NodeKind::FootnoteDefinition,
+		&footnoteDefinitions);
+	Check(
+		footnoteDefinitions.size() >= 2,
+		FromLatin1("markdown-example.md footnote definition count"),
+		ok);
+	if (footnoteDefinitions.size() >= 2) {
+		Check(
+			footnoteDefinitions[0]->anchorId == FromLatin1("fn-1")
+				&& footnoteDefinitions[1]->anchorId == FromLatin1("fn-2"),
+			FromLatin1("markdown-example.md footnote anchors"),
+			ok);
+	}
+
+	const auto headingsLink = FindLinkByTarget(document.document, FromLatin1("#headings"));
+	Check(
+		headingsLink != nullptr,
+		FromLatin1("markdown-example.md toc fragment link"),
+		ok);
+
+	const auto relativeLink = FindLinkByTarget(
+		document.document,
+		FromLatin1("./docs/getting-started.md"));
+	Check(
+		relativeLink != nullptr,
+		FromLatin1("markdown-example.md relative link parse"),
+		ok);
+
+	const auto headings = FindNodeByKindAndLineRange(
+		document.document,
+		NodeKind::Heading,
+		27,
+		27);
+	Check(
+		headings != nullptr && headings->anchorId == FromLatin1("headings"),
+		FromLatin1("markdown-example.md headings anchor id"),
+		ok);
+	const auto definitionLists = FindNodeByKindAndLineRange(
+		document.document,
+		NodeKind::Heading,
+		266,
+		266);
+	Check(
+		definitionLists != nullptr
+			&& definitionLists->anchorId
+				== FromLatin1("definition-lists-renderer-dependent"),
+		FromLatin1("markdown-example.md punctuation heading anchor id"),
+		ok);
+
+	const auto details = FindNodeByKindAndLineRange(
+		document.document,
+		NodeKind::HtmlBlock,
+		261,
+		264);
+	Check(
+		details != nullptr,
+		FromLatin1("markdown-example.md details block range"),
+		ok);
+	if (details) {
+		Check(
+			details->htmlBlockKind == HtmlBlockKind::Details
+				&& details->detailsSummary
+					== FromLatin1("Click to expand details/summary block"),
+			FromLatin1("markdown-example.md details classification"),
+			ok);
+	}
+	const auto comment = FindHtmlBlockContaining(
+		document.document,
+		FromLatin1("markdown-renderer-test"));
+	Check(
+		comment != nullptr && comment->htmlBlockKind == HtmlBlockKind::Comment,
+		FromLatin1("markdown-example.md comment classification"),
+		ok);
+	Check(
+		WarningContains(document, FromLatin1("Unsupported HTML block")),
+		FromLatin1("markdown-example.md unsupported html warning"),
+		ok);
+
+	const auto duplicateHeadings = ParseMarkdownForIv(
+		QByteArray("## Same\n## Same\n"),
+		ParseOptions{ FromLatin1("generated-duplicate-headings.md") });
+	Check(
+		duplicateHeadings.ok,
+		FromLatin1("generated duplicate headings parse failed"),
+		ok);
+	if (duplicateHeadings.ok) {
+		auto duplicateNodes = std::vector<const MarkdownNode*>();
+		CollectNodesByKind(
+			duplicateHeadings.document.document,
+			NodeKind::Heading,
+			&duplicateNodes);
+		Check(
+			duplicateNodes.size() == 2
+				&& duplicateNodes[0]->anchorId == FromLatin1("same")
+				&& duplicateNodes[1]->anchorId == FromLatin1("same-2"),
+			FromLatin1("generated duplicate headings anchors"),
+			ok);
+	}
+
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1089,6 +1273,7 @@ int main(int argc, char **argv) {
 			FromLatin1("markdown-example.md second table alignments"),
 			&ok);
 	}
+	CheckFixtureSemanticCoverage(markdown, args.markdownPath, &ok);
 	Check(
 		latex.stats.cmarkNodeCount == 532,
 		FromLatin1("latex-markdown-test.md cmark node count"),

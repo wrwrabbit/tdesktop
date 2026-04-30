@@ -1,8 +1,12 @@
 #include "iv/markdown/iv_markdown_prepare.h"
 
+#include "iv/markdown/iv_markdown_parse.h"
+
 #include "base/call_delayed.h"
 
 #include <QtCore/QByteArray>
+#include <QtCore/QDir>
+#include <QtCore/QFileInfo>
 
 #include <algorithm>
 #include <limits>
@@ -27,10 +31,17 @@ struct PrepareContext {
 	int quoteDepth = 0;
 };
 
+struct FootnoteDefinitionEntry {
+	const MarkdownNode *node = nullptr;
+};
+
 struct PrepareState {
 	const PrepareRequest *request = nullptr;
 	PreparedResult result;
 	QByteArray sourceUtf8;
+	std::vector<FootnoteDefinitionEntry> footnoteDefinitions;
+	std::vector<std::pair<QString, QString>> firstFootnoteReferences;
+	int nextGeneratedId = 0;
 
 	[[nodiscard]] bool cancelled() {
 		if (!request->cancelled) {
@@ -86,6 +97,35 @@ struct PrepareState {
 		const auto till = std::clamp(range.endOffset, from, sourceUtf8.size());
 		return QString::fromUtf8(sourceUtf8.constData() + from, till - from);
 	}
+
+	[[nodiscard]] QString firstFootnoteReferenceAnchor(
+			const QString &label) const {
+		for (const auto &entry : firstFootnoteReferences) {
+			if (entry.first == label) {
+				return entry.second;
+			}
+		}
+		return QString();
+	}
+
+	[[nodiscard]] QString rememberFootnoteReferenceAnchor(
+			const QString &label,
+			QString *blockAnchorId) {
+		if (label.isEmpty()) {
+			return QString();
+		}
+		if (const auto existing = firstFootnoteReferenceAnchor(label); !existing.isEmpty()) {
+			return existing;
+		}
+		auto anchorId = (blockAnchorId && !blockAnchorId->isEmpty())
+			? *blockAnchorId
+			: (u"fnref-"_q + QString::number(++nextGeneratedId));
+		if (blockAnchorId && blockAnchorId->isEmpty()) {
+			*blockAnchorId = anchorId;
+		}
+		firstFootnoteReferences.push_back({ label, anchorId });
+		return anchorId;
+	}
 };
 
 struct InlineFormulaSource {
@@ -97,6 +137,7 @@ struct InlineFormulaSource {
 struct InlineFormulaContext {
 	const std::vector<InlineFormulaSource> *formulas = nullptr;
 	std::vector<PreparedInlineObject> *prepared = nullptr;
+	QString *blockAnchorId = nullptr;
 	int next = 0;
 	int textSize = 0;
 	int renderWidthCap = 0;
@@ -120,6 +161,154 @@ void ClearPreparedOutput(PreparedResult *result) {
 
 [[nodiscard]] QString InternalLinkData(uint16 index) {
 	return u"internal:index"_q + QChar(index);
+}
+
+[[nodiscard]] QString NormalizeFragmentId(QString fragment) {
+	fragment = QString::fromUtf8(
+		QByteArray::fromPercentEncoding(fragment.toUtf8()));
+	fragment = fragment.trimmed().toLower();
+	while (fragment.startsWith(u"#"_q)) {
+		fragment.remove(0, 1);
+	}
+	return fragment;
+}
+
+[[nodiscard]] bool HasUrlScheme(const QString &target) {
+	if (target.isEmpty()) {
+		return false;
+	}
+	const auto colon = target.indexOf(QChar(':'));
+	if (colon <= 0) {
+		return false;
+	}
+	const auto slash = target.indexOf(QChar('/'));
+	const auto question = target.indexOf(QChar('?'));
+	const auto hash = target.indexOf(QChar('#'));
+	auto limit = target.size();
+	for (const auto value : { slash, question, hash }) {
+		if (value >= 0) {
+			limit = std::min(limit, value);
+		}
+	}
+	if (colon >= limit) {
+		return false;
+	}
+	if (!target[0].isLetter()) {
+		return false;
+	}
+	for (auto i = 1; i != colon; ++i) {
+		const auto ch = target[i];
+		if (!ch.isLetterOrNumber() && ch != QChar('+') && ch != QChar('-')
+			&& ch != QChar('.')) {
+			return false;
+		}
+	}
+	return true;
+}
+
+[[nodiscard]] bool LooksLikeWindowsDrivePath(const QString &target) {
+	return target.size() >= 2
+		&& target[0].isLetter()
+		&& target[1] == QChar(':');
+}
+
+[[nodiscard]] bool LooksLikeFileUrl(const QString &target) {
+	return target.size() >= 5
+		&& target.left(5).compare(u"file:"_q, Qt::CaseInsensitive) == 0;
+}
+
+[[nodiscard]] bool LooksLikeFilesystemTarget(const QString &target) {
+	return target.startsWith(u"/"_q)
+		|| target.startsWith(u"\\"_q)
+		|| target.startsWith(u"//"_q)
+		|| target.startsWith(u"\\\\"_q)
+		|| LooksLikeWindowsDrivePath(target)
+		|| LooksLikeFileUrl(target);
+}
+
+[[nodiscard]] QString ComparablePath(QString path) {
+	path = QDir::fromNativeSeparators(QDir::cleanPath(path));
+	return path.toLower();
+}
+
+[[nodiscard]] bool IsContainedPath(
+		const QString &baseDirectory,
+		const QString &resolvedPath) {
+	const auto base = ComparablePath(baseDirectory);
+	const auto resolved = ComparablePath(resolvedPath);
+	return (resolved == base) || resolved.startsWith(base + u"/"_q);
+}
+
+[[nodiscard]] QString DetailsAnchorId(PrepareState *state) {
+	return u"details-"_q + QString::number(++state->nextGeneratedId);
+}
+
+[[nodiscard]] QString FootnoteDefinitionAnchor(const MarkdownNode &node) {
+	return !node.anchorId.isEmpty()
+		? node.anchorId
+		: (node.footnoteOrdinal > 0
+			? (u"fn-"_q + QString::number(node.footnoteOrdinal))
+			: QString());
+}
+
+[[nodiscard]] PreparedLink ClassifiedLink(
+		uint16 index,
+		QString target,
+		const PrepareState *state) {
+	auto result = PreparedLink();
+	result.index = index;
+	if (target.startsWith(QChar('#'))) {
+		result.kind = PreparedLinkKind::Anchor;
+		result.target = NormalizeFragmentId(target.mid(1));
+		return result;
+	}
+
+	auto fragmentIndex = target.indexOf(QChar('#'));
+	if (fragmentIndex >= 0) {
+		result.fragment = NormalizeFragmentId(target.mid(fragmentIndex + 1));
+		target = target.left(fragmentIndex);
+	}
+	result.target = target;
+
+	if (target.isEmpty()) {
+		result.kind = PreparedLinkKind::Anchor;
+		result.target = result.fragment;
+		result.fragment = QString();
+		return result;
+	}
+	if (LooksLikeFilesystemTarget(target)) {
+		result.kind = PreparedLinkKind::RejectedRelative;
+		return result;
+	}
+	if (HasUrlScheme(target)) {
+		result.kind = PreparedLinkKind::External;
+		return result;
+	}
+	if (!state
+		|| !state->request
+		|| state->request->sourcePath.isEmpty()) {
+		result.kind = PreparedLinkKind::RejectedRelative;
+		return result;
+	}
+	if (target.contains(QChar('?'))) {
+		result.kind = PreparedLinkKind::RejectedRelative;
+		return result;
+	}
+	const auto baseDirectory = QFileInfo(state->request->sourcePath).absolutePath();
+	if (baseDirectory.isEmpty()) {
+		result.kind = PreparedLinkKind::RejectedRelative;
+		return result;
+	}
+	const auto resolved = QDir(baseDirectory).absoluteFilePath(target);
+	const auto cleanedResolved = QDir::cleanPath(resolved);
+	if (!IsContainedPath(baseDirectory, cleanedResolved)
+		|| !LooksLikeMarkdownFile(cleanedResolved)) {
+		result.kind = PreparedLinkKind::RejectedRelative;
+		return result;
+	}
+	result.kind = PreparedLinkKind::LocalFile;
+	result.target = cleanedResolved;
+	return result;
 }
 
 [[nodiscard]] int CappedListDepth(int depth) {
@@ -659,6 +848,7 @@ void AppendInline(
 		if (index > std::numeric_limits<uint16>::max()) {
 			break;
 		}
+		const auto preparedLink = ClassifiedLink(uint16(index), node.url, state);
 		text->entities.push_back(
 			EntityInText(
 				EntityType::CustomUrl,
@@ -667,8 +857,51 @@ void AppendInline(
 				InternalLinkData(uint16(index))));
 		links->push_back({
 			.index = uint16(index),
-			.target = node.url,
+			.kind = preparedLink.kind,
+			.target = preparedLink.target,
+			.fragment = preparedLink.fragment,
 		});
+	} break;
+	case NodeKind::FootnoteReference: {
+		if (node.footnoteOrdinal <= 0) {
+			const auto fallback = !node.raw.isEmpty()
+				? node.raw
+				: (u"[^"_q + node.footnoteLabel + u"]"_q);
+			AppendTextWithInlineFormulas(
+				node,
+				fallback,
+				text,
+				inlineFormulas,
+				state);
+			break;
+		}
+		const auto index = links->size() + 1;
+		const auto display = QString::number(node.footnoteOrdinal);
+		text->append(display);
+		if (text->text.size() > from) {
+			text->entities.push_back(EntityInText(
+				EntityType::Superscript,
+				from,
+				text->text.size() - from));
+		}
+		if (index <= std::numeric_limits<uint16>::max()) {
+			text->entities.push_back(EntityInText(
+				EntityType::CustomUrl,
+				from,
+				display.size(),
+				InternalLinkData(uint16(index))));
+			links->push_back({
+				.index = uint16(index),
+				.kind = PreparedLinkKind::Footnote,
+				.target = FootnoteDefinitionAnchor(node),
+			});
+			if (inlineFormulas) {
+				const auto remembered = state->rememberFootnoteReferenceAnchor(
+					node.footnoteLabel,
+					inlineFormulas->blockAnchorId);
+				static_cast<void>(remembered);
+			}
+		}
 	} break;
 	case NodeKind::HtmlInline:
 	case NodeKind::Unsupported:
@@ -941,6 +1174,8 @@ void AppendRichBlock(
 		TextWithEntities text,
 		std::vector<PreparedLink> links,
 		std::vector<PreparedInlineObject> inlineObjects,
+		QString anchorId = QString(),
+		bool collapsed = false,
 		bool allowEmpty = false) {
 	SortEntities(&text);
 	if (text.text.isEmpty() && !allowEmpty) {
@@ -952,6 +1187,8 @@ void AppendRichBlock(
 	block.text = std::move(text);
 	block.links = std::move(links);
 	block.inlineObjects = std::move(inlineObjects);
+	block.anchorId = std::move(anchorId);
+	block.collapsed = collapsed;
 	blocks->push_back(std::move(block));
 }
 
@@ -987,6 +1224,26 @@ void AppendRichBlock(
 	return block;
 }
 
+void CollectFootnoteDefinitions(
+		const MarkdownNode &node,
+		std::vector<FootnoteDefinitionEntry> *definitions) {
+	if (!definitions) {
+		return;
+	}
+	if (node.kind == NodeKind::FootnoteDefinition && node.footnoteOrdinal > 0) {
+		if (node.footnoteOrdinal > int(definitions->size())) {
+			definitions->resize(node.footnoteOrdinal);
+		}
+		auto &entry = (*definitions)[node.footnoteOrdinal - 1];
+		if (!entry.node) {
+			entry.node = &node;
+		}
+	}
+	for (const auto &child : node.children) {
+		CollectFootnoteDefinitions(child, definitions);
+	}
+}
+
 [[nodiscard]] std::vector<PreparedBlock> PrepareBlocks(
 	const MarkdownNode &node,
 	PrepareContext context,
@@ -1006,11 +1263,153 @@ void AppendRichBlock(
 	return result;
 }
 
+void AppendFootnoteBacklink(PreparedBlock *block, const QString &target) {
+	if (!block || target.isEmpty()) {
+		return;
+	}
+	const auto index = block->links.size() + 1;
+	if (index > std::numeric_limits<uint16>::max()) {
+		return;
+	}
+	if (!block->text.text.isEmpty()) {
+		block->text.append(QChar(' '));
+	}
+	const auto from = block->text.text.size();
+	const auto label = u"[back]"_q;
+	block->text.append(label);
+	block->text.entities.push_back(EntityInText(
+		EntityType::CustomUrl,
+		from,
+		label.size(),
+		InternalLinkData(uint16(index))));
+	block->links.push_back({
+		.index = uint16(index),
+		.kind = PreparedLinkKind::FootnoteBacklink,
+		.target = target,
+	});
+	SortEntities(&block->text);
+}
+
+void AppendFootnotes(
+		std::vector<PreparedBlock> *blocks,
+		PrepareState *state) {
+	if (!blocks || !state || state->footnoteDefinitions.empty()) {
+		return;
+	}
+	auto list = PreparedBlock();
+	list.kind = PreparedBlockKind::List;
+	list.listKind = ListKind::Ordered;
+	list.listDelimiter = ListDelimiter::Period;
+	list.startNumber = 1;
+	for (const auto &entry : state->footnoteDefinitions) {
+		if (state->cancelled() || !entry.node) {
+			return;
+		}
+		auto item = PreparedBlock();
+		item.kind = PreparedBlockKind::ListItem;
+		item.listKind = ListKind::Ordered;
+		item.listDelimiter = ListDelimiter::Period;
+		item.orderedNumber = entry.node->footnoteOrdinal;
+		item.anchorId = FootnoteDefinitionAnchor(*entry.node);
+		item.children = PrepareChildren(*entry.node, {}, state);
+		if (item.children.empty()) {
+			item.children.push_back(EmptyParagraphBlock());
+		}
+		const auto backlink = state->firstFootnoteReferenceAnchor(
+			entry.node->footnoteLabel);
+		if (!item.children.empty()
+			&& item.children.back().kind == PreparedBlockKind::Paragraph) {
+			AppendFootnoteBacklink(&item.children.back(), backlink);
+		} else if (!backlink.isEmpty()) {
+			auto paragraph = EmptyParagraphBlock();
+			AppendFootnoteBacklink(&paragraph, backlink);
+			item.children.push_back(std::move(paragraph));
+		}
+		list.children.push_back(std::move(item));
+	}
+	if (list.children.empty()) {
+		return;
+	}
+	blocks->push_back(PrepareRuleBlock());
+	blocks->push_back(std::move(list));
+}
+
+[[nodiscard]] std::vector<PreparedBlock> PrepareNestedDetailsBody(
+		const MarkdownNode &node,
+		PrepareState *state) {
+	if (node.detailsBody.isEmpty()) {
+		return {};
+	}
+	const auto parsed = ParseMarkdownForIv(
+		node.detailsBody.toUtf8(),
+		ParseOptions{ state->request->document->sourceName + u"#details"_q });
+	if (!parsed.ok
+		|| !parsed.document.formulas.empty()
+		|| parsed.document.stats.footnotesSeen) {
+		auto fallback = std::vector<PreparedBlock>();
+		AppendRichBlock(
+			&fallback,
+			PreparedBlockKind::Paragraph,
+			0,
+			TextWithEntities::Simple(node.detailsBody),
+			std::vector<PreparedLink>(),
+			std::vector<PreparedInlineObject>());
+		return fallback;
+	}
+	auto nestedRequest = PrepareRequest{
+		.document = std::make_shared<const PreparedDocument>(parsed.document),
+		.style = state->result.style,
+		.sourcePath = state->request->sourcePath,
+	};
+	auto nested = PrepareSynchronously(std::move(nestedRequest));
+	return nested.cancelled
+		? std::vector<PreparedBlock>()
+		: std::move(nested.blocks.blocks);
+}
+
+[[nodiscard]] std::vector<PreparedBlock> PrepareDetailsBlocks(
+		const MarkdownNode &node,
+		PrepareState *state) {
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Details;
+	block.anchorId = DetailsAnchorId(state);
+	block.collapsed = !node.detailsOpen;
+	block.text.text = (node.detailsOpen ? u"v "_q : u"> "_q)
+		+ node.detailsSummary;
+	if (!block.text.text.isEmpty()) {
+		block.text.entities.push_back(EntityInText(
+			EntityType::CustomUrl,
+			0,
+			block.text.text.size(),
+			InternalLinkData(1)));
+		block.links.push_back({
+			.index = 1,
+			.kind = PreparedLinkKind::ToggleDetails,
+			.target = block.anchorId,
+		});
+	}
+	block.children = PrepareNestedDetailsBody(node, state);
+	return { std::move(block) };
+}
+
+[[nodiscard]] std::vector<PreparedBlock> PrepareDocumentBlocks(
+		const MarkdownNode &node,
+		PrepareState *state) {
+	auto result = PrepareChildren(node, {}, state);
+	if (!state->result.cancelled) {
+		AppendFootnotes(&result, state);
+	}
+	return result;
+}
+
 [[nodiscard]] std::vector<PreparedBlock> PrepareFlowBlock(
 		const MarkdownNode &node,
 		PreparedBlockKind kind,
 		PrepareState *state) {
 	auto result = std::vector<PreparedBlock>();
+	auto anchorId = (kind == PreparedBlockKind::Heading)
+		? node.anchorId
+		: QString();
 	auto text = TextWithEntities();
 	auto links = std::vector<PreparedLink>();
 	auto inlineObjects = std::vector<PreparedInlineObject>();
@@ -1023,6 +1422,7 @@ void AppendRichBlock(
 	auto inlineFormulas = InlineFormulaContext{
 		.formulas = &formulas,
 		.prepared = &inlineObjects,
+		.blockAnchorId = &anchorId,
 		.textSize = textSize,
 		.renderWidthCap = ScaleFormulaCap(
 			state->result.style.displayMathMaxRenderWidth,
@@ -1059,7 +1459,8 @@ void AppendRichBlock(
 		(kind == PreparedBlockKind::Heading) ? node.headingLevel : 0,
 		std::move(text),
 		std::move(links),
-		std::move(inlineObjects));
+		std::move(inlineObjects),
+		std::move(anchorId));
 	return result;
 }
 
@@ -1169,6 +1570,13 @@ void AppendRichBlock(
 	if (state->cancelled()) {
 		return {};
 	}
+	if (node.kind == NodeKind::HtmlBlock) {
+		if (node.htmlBlockKind == HtmlBlockKind::Comment) {
+			return {};
+		} else if (node.htmlBlockKind == HtmlBlockKind::Details) {
+			return PrepareDetailsBlocks(node, state);
+		}
+	}
 	if (!node.children.empty()) {
 		return PrepareChildren(node, context, state);
 	}
@@ -1197,6 +1605,7 @@ void AppendRichBlock(
 
 	switch (node.kind) {
 	case NodeKind::Document:
+		return PrepareDocumentBlocks(node, state);
 	case NodeKind::TableRow:
 	case NodeKind::TableCell:
 	case NodeKind::HtmlBlock:
@@ -1208,6 +1617,8 @@ void AppendRichBlock(
 		return PrepareFlowBlock(node, PreparedBlockKind::Paragraph, state);
 	case NodeKind::Heading:
 		return PrepareFlowBlock(node, PreparedBlockKind::Heading, state);
+	case NodeKind::FootnoteDefinition:
+		return {};
 	case NodeKind::CodeBlock:
 		return { PrepareCodeBlock(node) };
 	case NodeKind::ThematicBreak:
@@ -1250,6 +1661,8 @@ void AppendRichBlock(
 		const PreparedDocument &document,
 		PrepareState *state) {
 	auto result = PreparedRenderDocument();
+	state->footnoteDefinitions.clear();
+	CollectFootnoteDefinitions(document.document, &state->footnoteDefinitions);
 	result.blocks = PrepareBlocks(document.document, {}, state);
 	return result;
 }
