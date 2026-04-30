@@ -135,3 +135,15 @@ ivMarkdownCodeLanguageFg: windowSubTextFg;
 ivMarkdownCodeLanguageSkip: 8px;
 ivMarkdownRuleFg: boxDividerBg;
 ivMarkdownRuleHeight: 1px;
+ivMarkdownTableSkip: 20px;
+ivMarkdownTableCellPadding: margins(8px, 10px, 8px, 10px);
+ivMarkdownTableBorder: 1px;
+ivMarkdownTableBorderFg: boxDividerBg;
+ivMarkdownTableHeaderBg: windowBgOver;
+ivMarkdownTableHeaderStyle: TextStyle(ivMarkdownParagraphStyle) {
+	font: font(16px semibold);
+	lineHeight: 24px;
+}
+ivMarkdownTableMinColumnWidth: 96px;
+ivMarkdownTableOverflowWidth: 4px;
+ivMarkdownTableOverflowFg: windowSubTextFg;

@@ -44,6 +44,7 @@ enum class PreparedBlockKind {
 	List,
 	ListItem,
 	Quote,
+	Table,
 };
 
 struct PreparedLink {
@@ -51,11 +52,25 @@ struct PreparedLink {
 	QString target;
 };
 
+struct PreparedTableCell {
+	TextWithEntities text;
+	std::vector<PreparedLink> links;
+	int column = 0;
+	TableAlignment alignment = TableAlignment::None;
+};
+
+struct PreparedTableRow {
+	std::vector<PreparedTableCell> cells;
+	bool header = false;
+};
+
 struct PreparedBlock {
 	PreparedBlockKind kind = PreparedBlockKind::Paragraph;
 	TextWithEntities text;
 	std::vector<PreparedLink> links;
 	std::vector<PreparedBlock> children;
+	std::vector<PreparedTableRow> tableRows;
+	std::vector<TableAlignment> tableAlignments;
 	QString codeLanguage;
 	ListKind listKind = ListKind::Bullet;
 	ListDelimiter listDelimiter = ListDelimiter::None;
@@ -65,6 +80,7 @@ struct PreparedBlock {
 	int startNumber = 1;
 	int actualDepth = 0;
 	int visualDepth = 0;
+	int tableColumnCount = 0;
 	bool depthClamped = false;
 	bool tight = false;
 };
@@ -78,18 +94,36 @@ struct PrepareContext {
 	int quoteDepth = 0;
 };
 
+struct LaidOutTableCell {
+	Ui::Text::String leaf;
+	QRect outer;
+	QRect textRect;
+	int textWidth = 0;
+	style::align align = style::al_left;
+};
+
+struct LaidOutTableRow {
+	std::vector<LaidOutTableCell> cells;
+	QRect outer;
+	bool header = false;
+};
+
 struct LaidOutBlock {
 	PreparedBlockKind kind = PreparedBlockKind::Paragraph;
 	Ui::Text::String leaf;
 	Ui::Text::String marker;
 	Ui::Text::String language;
 	std::vector<LaidOutBlock> children;
+	std::vector<LaidOutTableRow> tableRows;
+	std::vector<int> tableColumnWidths;
 	QRect outer;
 	QRect textRect;
 	QRect markerRect;
 	QRect contentRect;
 	QRect borderRect;
 	QRect languageRect;
+	QRect tableRect;
+	QRect visibleTableRect;
 	int textWidth = 0;
 	int markerWidth = 0;
 	int headingLevel = 0;
@@ -97,6 +131,7 @@ struct LaidOutBlock {
 	ListDelimiter listDelimiter = ListDelimiter::None;
 	TaskState taskState = TaskState::None;
 	int orderedNumber = 0;
+	bool overflowed = false;
 };
 
 struct LayoutContext {
@@ -109,6 +144,9 @@ constexpr auto kMaxVisualListDepth = 6;
 constexpr auto kMaxVisualQuoteDepth = 3;
 constexpr auto kCodeTabColumns = 4;
 constexpr auto kCodeTrailingGuard = 0x2060;
+constexpr auto kMaxRenderedTableRows = 128;
+constexpr auto kMaxRenderedTableColumns = 16;
+constexpr auto kMaxRenderedTableCells = 1024;
 
 [[nodiscard]] QString InternalLinkData(uint16 index) {
 	return QStringLiteral("internal:index") + QChar(index);
@@ -286,6 +324,158 @@ void AppendInline(
 		}
 		break;
 	}
+}
+
+void PrepareTableCellText(
+		const MarkdownNode &cell,
+		TextWithEntities *text,
+		std::vector<PreparedLink> *links) {
+	if (!cell.children.empty()) {
+		AppendInlineChildren(cell, text, links);
+	} else if (!cell.text.isEmpty()) {
+		text->append(cell.text);
+	} else if (!cell.raw.isEmpty()) {
+		text->append(cell.raw);
+	}
+	SortEntities(text);
+}
+
+[[nodiscard]] int EffectiveTableRowWidth(const MarkdownNode &row) {
+	auto result = 0;
+	auto expectedColumn = 0;
+	for (const auto &cell : row.children) {
+		if (cell.kind != NodeKind::TableCell) {
+			return 0;
+		}
+		const auto column = (cell.tableColumn >= 0)
+			? cell.tableColumn
+			: expectedColumn;
+		if (column != expectedColumn) {
+			return 0;
+		}
+		result = std::max(result, column + 1);
+		++expectedColumn;
+	}
+	return result;
+}
+
+[[nodiscard]] int EffectiveTableColumnCount(const MarkdownNode &node) {
+	auto result = int(node.tableAlignments.size());
+	for (const auto &row : node.children) {
+		if (row.kind != NodeKind::TableRow) {
+			return 0;
+		}
+		const auto width = EffectiveTableRowWidth(row);
+		if (!width) {
+			return 0;
+		}
+		result = std::max(result, width);
+	}
+	return result;
+}
+
+[[nodiscard]] std::vector<TableAlignment> NormalizedTableAlignments(
+		const MarkdownNode &node,
+		int columnCount) {
+	auto result = std::vector<TableAlignment>(
+		std::max(columnCount, 0),
+		TableAlignment::None);
+	const auto limit = std::min(columnCount, int(node.tableAlignments.size()));
+	for (auto i = 0; i != limit; ++i) {
+		result[i] = node.tableAlignments[i];
+	}
+	return result;
+}
+
+[[nodiscard]] bool ShouldFlattenTable(
+		const MarkdownNode &node,
+		PrepareContext context) {
+	if (context.listDepth > 0 || context.quoteDepth > 0) {
+		return true;
+	}
+	if (node.children.empty()) {
+		return true;
+	}
+	const auto rowCount = int(node.children.size());
+	if (rowCount > kMaxRenderedTableRows) {
+		return true;
+	}
+	auto cellCount = 0;
+	for (const auto &row : node.children) {
+		if (row.kind != NodeKind::TableRow || row.children.empty()) {
+			return true;
+		}
+		const auto width = EffectiveTableRowWidth(row);
+		if (!width || width > kMaxRenderedTableColumns) {
+			return true;
+		}
+		cellCount += width;
+		if (cellCount > kMaxRenderedTableCells) {
+			return true;
+		}
+	}
+	const auto columnCount = EffectiveTableColumnCount(node);
+	if (!columnCount || columnCount > kMaxRenderedTableColumns) {
+		return true;
+	}
+	return (rowCount * columnCount) > kMaxRenderedTableCells;
+}
+
+[[nodiscard]] std::vector<PreparedBlock> PrepareFallbackBlocks(
+		const MarkdownNode &node,
+		PrepareContext context);
+
+[[nodiscard]] std::vector<PreparedBlock> PrepareTableBlocks(
+		const MarkdownNode &node,
+		PrepareContext context) {
+	const auto columnCount = EffectiveTableColumnCount(node);
+	if (ShouldFlattenTable(node, context) || !columnCount) {
+		return PrepareFallbackBlocks(node, context);
+	}
+
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Table;
+	block.tableColumnCount = columnCount;
+	block.tableAlignments = NormalizedTableAlignments(node, columnCount);
+	block.tableRows.reserve(node.children.size());
+
+	for (const auto &rowNode : node.children) {
+		if (rowNode.kind != NodeKind::TableRow) {
+			return PrepareFallbackBlocks(node, context);
+		}
+
+		auto row = PreparedTableRow();
+		row.header = rowNode.tableHeader;
+		row.cells.reserve(columnCount);
+
+		auto expectedColumn = 0;
+		for (const auto &cellNode : rowNode.children) {
+			if (cellNode.kind != NodeKind::TableCell) {
+				return PrepareFallbackBlocks(node, context);
+			}
+			const auto column = (cellNode.tableColumn >= 0)
+				? cellNode.tableColumn
+				: expectedColumn;
+			if (column != expectedColumn || column >= columnCount) {
+				return PrepareFallbackBlocks(node, context);
+			}
+
+			auto cell = PreparedTableCell();
+			cell.column = column;
+			cell.alignment = block.tableAlignments[column];
+			PrepareTableCellText(cellNode, &cell.text, &cell.links);
+			row.cells.push_back(std::move(cell));
+			++expectedColumn;
+		}
+		for (auto column = expectedColumn; column != columnCount; ++column) {
+			auto cell = PreparedTableCell();
+			cell.column = column;
+			cell.alignment = block.tableAlignments[column];
+			row.cells.push_back(std::move(cell));
+		}
+		block.tableRows.push_back(std::move(row));
+	}
+	return { std::move(block) };
 }
 
 void AppendPrepared(
@@ -470,7 +660,6 @@ void AppendRichBlock(
 		PrepareContext context) {
 	switch (node.kind) {
 	case NodeKind::Document:
-	case NodeKind::Table:
 	case NodeKind::TableRow:
 	case NodeKind::TableCell:
 	case NodeKind::HtmlBlock:
@@ -498,6 +687,8 @@ void AppendRichBlock(
 	} break;
 	case NodeKind::Blockquote:
 		return { PrepareQuoteBlock(node, context) };
+	case NodeKind::Table:
+		return PrepareTableBlocks(node, context);
 	default:
 		return PrepareFallbackBlocks(node, context);
 	}
@@ -526,6 +717,8 @@ void AppendRichBlock(
 		return st::ivMarkdownParagraphSkip;
 	case PreparedBlockKind::Quote:
 		return st::ivMarkdownQuoteSkip;
+	case PreparedBlockKind::Table:
+		return st::ivMarkdownTableSkip;
 	}
 	return 0;
 }
@@ -599,12 +792,132 @@ void AppendRichBlock(
 	return result;
 }
 
-void BindLinks(LaidOutBlock *block, const PreparedBlock &prepared) {
-	for (const auto &link : prepared.links) {
-		block->leaf.setLink(
+void BindLinks(
+		Ui::Text::String *leaf,
+		const std::vector<PreparedLink> &links) {
+	for (const auto &link : links) {
+		leaf->setLink(
 			link.index,
 			std::make_shared<HiddenUrlClickHandler>(link.target));
 	}
+}
+
+[[nodiscard]] style::align CellAlign(TableAlignment alignment) {
+	switch (alignment) {
+	case TableAlignment::Center:
+		return style::al_center;
+	case TableAlignment::Right:
+		return style::al_right;
+	case TableAlignment::None:
+	case TableAlignment::Left:
+		return style::al_left;
+	}
+	return style::al_left;
+}
+
+[[nodiscard]] const style::TextStyle &TableCellTextStyle(bool header) {
+	if (header) {
+		return st::ivMarkdownTableHeaderStyle;
+	}
+	return st::ivMarkdownParagraphStyle;
+}
+
+struct TableCellLayoutData {
+	LaidOutTableCell cell;
+	int preferredWidth = 0;
+	int preferredHeight = 0;
+};
+
+struct TableRowLayoutData {
+	std::vector<TableCellLayoutData> cells;
+	bool header = false;
+};
+
+[[nodiscard]] TableCellLayoutData InitializeTableCellLayout(
+		const PreparedTableCell &prepared,
+		bool header) {
+	auto result = TableCellLayoutData();
+	const auto &style = TableCellTextStyle(header);
+	result.cell.align = CellAlign(prepared.alignment);
+	result.cell.leaf.setMarkedText(
+		style,
+		prepared.text,
+		kIvMarkedTextOptions);
+	BindLinks(&result.cell.leaf, prepared.links);
+	result.preferredWidth = result.cell.leaf.maxWidth();
+	result.preferredHeight = std::max(
+		result.cell.leaf.countHeight(std::max(result.preferredWidth, 1), true),
+		TextLineHeight(style));
+	return result;
+}
+
+[[nodiscard]] std::vector<int> ComputeTableColumnWidths(
+		const std::vector<TableRowLayoutData> &rows,
+		int columnCount,
+		int width,
+		bool *overflowed) {
+	const auto &padding = st::ivMarkdownTableCellPadding;
+	const auto border = st::ivMarkdownTableBorder;
+	const auto minimum = st::ivMarkdownTableMinColumnWidth;
+	auto result = std::vector<int>(std::max(columnCount, 0), minimum);
+	auto preferred = std::vector<int>(std::max(columnCount, 0), minimum);
+	for (const auto &row : rows) {
+		for (auto column = 0; column != columnCount; ++column) {
+			preferred[column] = std::max(
+				preferred[column],
+				row.cells[column].preferredWidth
+					+ padding.left()
+					+ padding.right());
+		}
+	}
+
+	const auto availableWidth = std::max(width, 1);
+	const auto minimumGridWidth = border
+		+ columnCount * (minimum + border);
+	*overflowed = (minimumGridWidth > availableWidth);
+	if (*overflowed || !columnCount) {
+		return result;
+	}
+
+	auto extra = availableWidth - minimumGridWidth;
+	auto remaining = 0;
+	auto deficits = std::vector<int>(columnCount, 0);
+	for (auto column = 0; column != columnCount; ++column) {
+		deficits[column] = std::max(preferred[column] - minimum, 0);
+		remaining += deficits[column];
+	}
+
+	while (extra > 0 && remaining > 0) {
+		auto active = 0;
+		for (const auto deficit : deficits) {
+			if (deficit > 0) {
+				++active;
+			}
+		}
+		if (!active) {
+			break;
+		}
+		const auto step = std::max(extra / active, 1);
+		for (auto column = 0; column != columnCount && extra > 0; ++column) {
+			if (!deficits[column]) {
+				continue;
+			}
+			const auto delta = std::min({ deficits[column], step, extra });
+			result[column] += delta;
+			deficits[column] -= delta;
+			remaining -= delta;
+			extra -= delta;
+		}
+	}
+
+	if (extra > 0) {
+		const auto base = extra / columnCount;
+		const auto tail = extra % columnCount;
+		for (auto column = 0; column != columnCount; ++column) {
+			result[column] += base + ((column < tail) ? 1 : 0);
+		}
+	}
+	return result;
 }
 
 [[nodiscard]] int BlockBottom(const LaidOutBlock &block) {
@@ -624,7 +937,7 @@ void BindLinks(LaidOutBlock *block, const PreparedBlock &prepared) {
 		TextStyleFor(prepared),
 		prepared.text,
 		kIvMarkedTextOptions);
-	BindLinks(&block, prepared);
+	BindLinks(&block.leaf, prepared.links);
 
 	const auto &style = TextStyleFor(prepared);
 	const auto height = std::max(
@@ -695,6 +1008,111 @@ void BindLinks(LaidOutBlock *block, const PreparedBlock &prepared) {
 		std::max(width, 1),
 		st::ivMarkdownRuleHeight);
 	block.textRect = block.outer;
+	return block;
+}
+
+[[nodiscard]] LaidOutBlock LayoutTableBlock(
+		const PreparedBlock &prepared,
+		int left,
+		int top,
+		int width) {
+	auto block = LaidOutBlock();
+	block.kind = PreparedBlockKind::Table;
+
+	const auto columnCount = prepared.tableColumnCount;
+	if (!columnCount || prepared.tableRows.empty()) {
+		block.outer = QRect(left, top, std::max(width, 1), 0);
+		return block;
+	}
+
+	auto rows = std::vector<TableRowLayoutData>();
+	rows.reserve(prepared.tableRows.size());
+	for (const auto &preparedRow : prepared.tableRows) {
+		auto row = TableRowLayoutData();
+		row.header = preparedRow.header;
+		row.cells.reserve(columnCount);
+		for (const auto &preparedCell : preparedRow.cells) {
+			row.cells.push_back(InitializeTableCellLayout(
+				preparedCell,
+				preparedRow.header));
+		}
+		rows.push_back(std::move(row));
+	}
+
+	block.tableColumnWidths = ComputeTableColumnWidths(
+		rows,
+		columnCount,
+		width,
+		&block.overflowed);
+
+	const auto &padding = st::ivMarkdownTableCellPadding;
+	const auto border = st::ivMarkdownTableBorder;
+	auto tableWidth = border;
+	for (const auto columnWidth : block.tableColumnWidths) {
+		tableWidth += columnWidth + border;
+	}
+
+	auto y = top + border;
+	block.tableRows.reserve(rows.size());
+	for (auto &rowData : rows) {
+		auto rowHeight = 0;
+		auto textHeights = std::vector<int>(columnCount, 0);
+		for (auto column = 0; column != columnCount; ++column) {
+			const auto &style = TableCellTextStyle(rowData.header);
+			const auto contentWidth = std::max(
+				block.tableColumnWidths[column]
+					- padding.left()
+					- padding.right(),
+				1);
+			rowData.cells[column].cell.textWidth = contentWidth;
+			textHeights[column] = (contentWidth
+				>= rowData.cells[column].preferredWidth)
+				? rowData.cells[column].preferredHeight
+				: std::max(
+					rowData.cells[column].cell.leaf.countHeight(
+						contentWidth,
+						true),
+					TextLineHeight(style));
+			rowHeight = std::max(
+				rowHeight,
+				textHeights[column] + padding.top() + padding.bottom());
+		}
+
+		auto row = LaidOutTableRow();
+		row.header = rowData.header;
+		row.outer = QRect(
+			left + border,
+			y,
+			std::max(tableWidth - (2 * border), 0),
+			rowHeight);
+
+		auto x = left + border;
+		row.cells.reserve(columnCount);
+		for (auto column = 0; column != columnCount; ++column) {
+			auto cell = std::move(rowData.cells[column].cell);
+			const auto columnWidth = block.tableColumnWidths[column];
+			cell.outer = QRect(x, y, columnWidth, rowHeight);
+			cell.textRect = QRect(
+				x + padding.left(),
+				y + padding.top(),
+				cell.textWidth,
+				textHeights[column]);
+			row.cells.push_back(std::move(cell));
+			x += columnWidth + border;
+		}
+		block.tableRows.push_back(std::move(row));
+		y += rowHeight + border;
+	}
+
+	const auto tableHeight = std::max(y - top, border);
+	block.tableRect = QRect(left, top, tableWidth, tableHeight);
+	block.visibleTableRect = QRect(
+		left,
+		top,
+		std::min(tableWidth, std::max(width, 1)),
+		tableHeight);
+	block.contentRect = block.visibleTableRect;
+	block.outer = block.visibleTableRect;
 	return block;
 }
 
@@ -944,6 +1362,8 @@ void BindLinks(LaidOutBlock *block, const PreparedBlock &prepared) {
 		return LayoutListItemBlock(prepared, left, top, width, context, false);
 	case PreparedBlockKind::Quote:
 		return LayoutQuoteBlock(prepared, left, top, width, context);
+	case PreparedBlockKind::Table:
+		return LayoutTableBlock(prepared, left, top, width);
 	}
 	return LayoutFlowBlock(prepared, left, top, width);
 }
@@ -998,11 +1418,13 @@ void PaintTextLeaf(
 		const Ui::Text::String &leaf,
 		QRect rect,
 		int width,
-		QRect clip) {
+		QRect clip,
+		style::align align = style::al_left) {
 	leaf.draw(p, {
 		.position = rect.topLeft(),
 		.availableWidth = width,
 		.geometry = TextGeometry(width),
+		.align = align,
 		.clip = clip,
 		.palette = &st::ivMarkdownTextPalette,
 		.spoiler = Ui::Text::DefaultSpoilerCache(),
@@ -1051,6 +1473,108 @@ void PaintBlocks(
 	Painter &p,
 	const std::vector<LaidOutBlock> &blocks,
 	QRect clip);
+
+void PaintTableBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		QRect clip) {
+	const auto tableClip = clip.intersected(block.visibleTableRect);
+	if (tableClip.isEmpty()) {
+		return;
+	}
+
+	p.save();
+	p.setClipRect(tableClip);
+
+	for (const auto &row : block.tableRows) {
+		if (!row.header || !row.outer.intersects(block.visibleTableRect)) {
+			continue;
+		}
+		for (const auto &cell : row.cells) {
+			if (!cell.outer.intersects(block.visibleTableRect)) {
+				continue;
+			}
+			p.fillRect(cell.outer, st::ivMarkdownTableHeaderBg);
+		}
+	}
+
+	const auto border = st::ivMarkdownTableBorder;
+	if (border > 0 && !block.tableRect.isEmpty()) {
+		const auto left = block.tableRect.x();
+		const auto top = block.tableRect.y();
+		const auto width = block.tableRect.width();
+		const auto height = block.tableRect.height();
+		const auto right = left + width - border;
+		const auto bottom = top + height - border;
+
+		p.fillRect(QRect(left, top, width, border), st::ivMarkdownTableBorderFg);
+		p.fillRect(
+			QRect(left, bottom, width, border),
+			st::ivMarkdownTableBorderFg);
+		p.fillRect(QRect(left, top, border, height), st::ivMarkdownTableBorderFg);
+		p.fillRect(
+			QRect(right, top, border, height),
+			st::ivMarkdownTableBorderFg);
+
+		auto separatorLeft = left + border;
+		for (auto i = 0, count = int(block.tableColumnWidths.size()); i != count; ++i) {
+			separatorLeft += block.tableColumnWidths[i];
+			if (i + 1 != count) {
+				p.fillRect(
+					QRect(separatorLeft, top, border, height),
+					st::ivMarkdownTableBorderFg);
+				separatorLeft += border;
+			}
+		}
+
+		for (auto i = 0, count = int(block.tableRows.size()); i != count; ++i) {
+			if (i + 1 == count) {
+				break;
+			}
+			const auto separatorTop = block.tableRows[i].outer.y()
+				+ block.tableRows[i].outer.height();
+			p.fillRect(
+				QRect(left, separatorTop, width, border),
+				st::ivMarkdownTableBorderFg);
+		}
+	}
+
+	p.setPen(st::windowFg);
+	for (const auto &row : block.tableRows) {
+		if (!row.outer.intersects(block.visibleTableRect)) {
+			continue;
+		}
+		for (const auto &cell : row.cells) {
+			if (!cell.textRect.intersects(block.visibleTableRect)) {
+				continue;
+			}
+			PaintTextLeaf(
+				p,
+				cell.leaf,
+				cell.textRect,
+				cell.textWidth,
+				tableClip,
+				cell.align);
+		}
+	}
+
+	if (block.overflowed) {
+		const auto indicatorWidth = std::min(
+			std::max(st::ivMarkdownTableOverflowWidth, 1),
+			block.visibleTableRect.width());
+		p.fillRect(
+			QRect(
+				block.visibleTableRect.x()
+					+ block.visibleTableRect.width()
+					- indicatorWidth,
+				block.visibleTableRect.y(),
+				indicatorWidth,
+				block.visibleTableRect.height()),
+			st::ivMarkdownTableOverflowFg);
+	}
+
+	p.restore();
+}
 
 void PaintBlock(Painter &p, const LaidOutBlock &block, QRect clip) {
 	if (!block.outer.intersects(clip)) {
@@ -1109,6 +1633,9 @@ void PaintBlock(Painter &p, const LaidOutBlock &block, QRect clip) {
 		p.fillRect(block.borderRect, st::ivMarkdownQuoteBorderFg);
 		PaintBlocks(p, block.children, clip);
 		break;
+	case PreparedBlockKind::Table:
+		PaintTableBlock(p, block, clip);
+		break;
 	}
 }
 
@@ -1126,19 +1653,81 @@ void PaintBlocks(
 	}
 }
 
+[[nodiscard]] Ui::Text::StateResult TextStateAtLeaf(
+		const Ui::Text::String &leaf,
+		QRect rect,
+		int width,
+		QPoint point,
+		style::align align = style::al_left) {
+	if (!rect.contains(point)) {
+		return {};
+	}
+	auto request = Ui::Text::StateRequest();
+	request.align = align;
+	request.flags |= Ui::Text::StateRequest::Flag::BreakEverywhere;
+	return leaf.getState(
+		point - rect.topLeft(),
+		TextGeometry(width),
+		request);
+}
+
+[[nodiscard]] ClickHandlerPtr LinkAtTextLeaf(
+		const Ui::Text::String &leaf,
+		QRect rect,
+		int width,
+		QPoint point,
+		style::align align = style::al_left) {
+	const auto state = TextStateAtLeaf(leaf, rect, width, point, align);
+	return state.link;
+}
+
 [[nodiscard]] ClickHandlerPtr LinkAtTextBlock(
 		const LaidOutBlock &block,
 		QPoint point) {
-	if (!block.textRect.contains(point)) {
-		return nullptr;
+	return LinkAtTextLeaf(
+		block.leaf,
+		block.textRect,
+		block.textWidth,
+		point);
+}
+
+[[nodiscard]] ClickHandlerPtr LinkAtTableCell(
+		const LaidOutTableCell &cell,
+		QPoint point) {
+	return LinkAtTextLeaf(
+		cell.leaf,
+		cell.textRect,
+		cell.textWidth,
+		point,
+		cell.align);
+}
+
+[[nodiscard]] ClickHandlerPtr LinkAtTableBlock(
+		const LaidOutBlock &block,
+		QPoint point) {
+	const auto visibleTableRect = block.visibleTableRect;
+	for (const auto &row : block.tableRows) {
+		if (!row.outer.intersects(visibleTableRect)) {
+			continue;
+		} else if (row.outer.bottom() < point.y()) {
+			continue;
+		} else if (row.outer.top() > point.y()) {
+			break;
+		}
+		for (const auto &cell : row.cells) {
+			if (!cell.outer.intersects(visibleTableRect)) {
+				continue;
+			} else if (cell.outer.right() < point.x()) {
+				continue;
+			} else if (cell.outer.left() > point.x()) {
+				break;
+			}
+			if (const auto result = LinkAtTableCell(cell, point)) {
+				return result;
+			}
+		}
 	}
-	auto request = Ui::Text::StateRequest();
-	request.flags |= Ui::Text::StateRequest::Flag::BreakEverywhere;
-	const auto state = block.leaf.getState(
-		point - block.textRect.topLeft(),
-		TextGeometry(block.textWidth),
-		request);
-	return state.link;
+	return nullptr;
 }
 
 [[nodiscard]] ClickHandlerPtr LinkAtBlocks(
@@ -1159,6 +1748,8 @@ void PaintBlocks(
 	case PreparedBlockKind::ListItem:
 	case PreparedBlockKind::Quote:
 		return LinkAtBlocks(block.children, point);
+	case PreparedBlockKind::Table:
+		return LinkAtTableBlock(block, point);
 	case PreparedBlockKind::CodeBlock:
 	case PreparedBlockKind::Rule:
 		return nullptr;

@@ -142,6 +142,79 @@ void PrintError(const QString &line) {
 	return false;
 }
 
+void CollectTables(
+		const MarkdownNode &node,
+		std::vector<const MarkdownNode*> *out) {
+	if (!out) {
+		return;
+	}
+	if (node.kind == NodeKind::Table) {
+		out->push_back(&node);
+	}
+	for (const auto &child : node.children) {
+		CollectTables(child, out);
+	}
+}
+
+[[nodiscard]] int TableHeaderRowCount(const MarkdownNode &table) {
+	auto result = 0;
+	for (const auto &row : table.children) {
+		if (row.kind == NodeKind::TableRow && row.tableHeader) {
+			++result;
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] bool HasTableHeaderRow(const MarkdownNode &table) {
+	return TableHeaderRowCount(table) > 0;
+}
+
+[[nodiscard]] bool HasSequentialTableColumns(const MarkdownNode &table) {
+	for (const auto &row : table.children) {
+		if (row.kind != NodeKind::TableRow) {
+			return false;
+		}
+		auto expectedColumn = 0;
+		for (const auto &cell : row.children) {
+			if (cell.kind != NodeKind::TableCell
+				|| cell.tableColumn != expectedColumn) {
+				return false;
+			}
+			++expectedColumn;
+		}
+	}
+	return !table.children.empty();
+}
+
+[[nodiscard]] bool HasTableAlignments(
+		const MarkdownNode &table,
+		const std::vector<TableAlignment> &expected) {
+	if (table.tableAlignments.size() != expected.size()) {
+		return false;
+	}
+	for (auto i = 0, count = int(expected.size()); i != count; ++i) {
+		if (table.tableAlignments[i] != expected[i]) {
+			return false;
+		}
+	}
+	return true;
+}
+
+[[nodiscard]] int TableColumnCount(const MarkdownNode &table) {
+	auto result = 0;
+	for (const auto &row : table.children) {
+		if (row.kind != NodeKind::TableRow) {
+			return 0;
+		}
+		const auto count = int(row.children.size());
+		if (count > result) {
+			result = count;
+		}
+	}
+	return result;
+}
+
 [[nodiscard]] int CountDisplayMathNodes(const MarkdownNode &node) {
 	auto result = (node.kind == NodeKind::DisplayMath) ? 1 : 0;
 	for (const auto &child : node.children) {
@@ -463,6 +536,42 @@ int main(int argc, char **argv) {
 		HasTaskState(markdown.document, TaskState::Unchecked),
 		FromLatin1("markdown-example.md unchecked task"),
 		&ok);
+	auto markdownTables = std::vector<const MarkdownNode*>();
+	CollectTables(markdown.document, &markdownTables);
+	Check(
+		int(markdownTables.size()) >= 2,
+		FromLatin1("markdown-example.md table count"),
+		&ok);
+	if (markdownTables.size() >= 2) {
+		const auto &firstTable = *markdownTables[0];
+		const auto &secondTable = *markdownTables[1];
+		Check(
+			HasTableHeaderRow(firstTable),
+			FromLatin1("markdown-example.md first table header row"),
+			&ok);
+		Check(
+			TableHeaderRowCount(firstTable) == 1,
+			FromLatin1("markdown-example.md first table header row count"),
+			&ok);
+		Check(
+			TableColumnCount(firstTable) == 3,
+			FromLatin1("markdown-example.md first table column count"),
+			&ok);
+		Check(
+			HasSequentialTableColumns(firstTable),
+			FromLatin1("markdown-example.md first table column order"),
+			&ok);
+		Check(
+			HasTableAlignments(
+				secondTable,
+				{
+					TableAlignment::Left,
+					TableAlignment::Center,
+					TableAlignment::Right,
+				}),
+			FromLatin1("markdown-example.md second table alignments"),
+			&ok);
+	}
 	Check(
 		latex.stats.cmarkNodeCount == 532,
 		FromLatin1("latex-markdown-test.md cmark node count"),
@@ -483,6 +592,27 @@ int main(int argc, char **argv) {
 		HasKind(latex.document, NodeKind::Table),
 		FromLatin1("latex-markdown-test.md table coverage"),
 		&ok);
+	auto latexTables = std::vector<const MarkdownNode*>();
+	CollectTables(latex.document, &latexTables);
+	Check(
+		!latexTables.empty(),
+		FromLatin1("latex-markdown-test.md table count"),
+		&ok);
+	if (!latexTables.empty()) {
+		const auto &table = *latexTables[0];
+		Check(
+			HasTableHeaderRow(table),
+			FromLatin1("latex-markdown-test.md table header row"),
+			&ok);
+		Check(
+			TableColumnCount(table) == 3,
+			FromLatin1("latex-markdown-test.md table column count"),
+			&ok);
+		Check(
+			HasSequentialTableColumns(table),
+			FromLatin1("latex-markdown-test.md table column order"),
+			&ok);
+	}
 	Check(
 		!HasFormulaInLineRange(latex, 281, 281),
 		FromLatin1("latex-markdown-test.md line 281 exclusion"),
