@@ -20,10 +20,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_gif.h"
 #include "history/history.h"
 #include "history/history_item.h"
-#ifdef TDESKTOP_NATIVE_MARKDOWN_IV
 #include "iv/markdown/iv_markdown_common.h"
 #include "iv/markdown/iv_markdown_controller.h"
-#endif
 #include "lang/lang_keys.h"
 #include "media/player/media_player_instance.h"
 #include "platform/platform_file_utilities.h"
@@ -254,13 +252,11 @@ void ResolveDocument(
 		if (!openImageInApp()) {
 			const auto path = document->filepath(true);
 			if (!path.isEmpty()) {
-#ifdef TDESKTOP_NATIVE_MARKDOWN_IV
 				const auto fileName = QFileInfo(path).fileName();
 				if (Iv::Markdown::LooksLikeMarkdownFile(fileName)
 					&& Iv::Markdown::TryOpenLocalFile(path)) {
 					return;
 				}
-#endif
 				LaunchWithWarning(path, item);
 			} else if (document->status == FileReady
 				|| document->status == FileDownloadFailed) {

@@ -106,12 +106,15 @@ void PrintError(const QString &line) {
 	}
 	const auto repoFixtureFromApplication = QDir::cleanPath(
 		applicationDir.filePath(
-			FromLatin1("../../Telegram/MarkdownMathProbes/fixtures/") + name));
+			FromLatin1(
+				"../../Telegram/SourceFiles/tests/fixtures/markdown_iv/")
+				+ name));
 	if (QFileInfo::exists(repoFixtureFromApplication)) {
 		return repoFixtureFromApplication;
 	}
 	const auto repoFixtureFromCurrent = QDir::current().filePath(
-		FromLatin1("Telegram/MarkdownMathProbes/fixtures/") + name);
+		FromLatin1("Telegram/SourceFiles/tests/fixtures/markdown_iv/")
+			+ name);
 	if (QFileInfo::exists(repoFixtureFromCurrent)) {
 		return repoFixtureFromCurrent;
 	}

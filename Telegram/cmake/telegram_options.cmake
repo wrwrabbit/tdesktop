@@ -5,7 +5,6 @@
 # https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 option(TDESKTOP_API_TEST "Use test API credentials." OFF)
-option(TDESKTOP_NATIVE_MARKDOWN_IV "Build native Markdown Instant View proof of concept." OFF)
 set(TDESKTOP_API_ID "0" CACHE STRING "Provide 'api_id' for the Telegram API access.")
 set(TDESKTOP_API_HASH "" CACHE STRING "Provide 'api_hash' for the Telegram API access.")
 
@@ -51,10 +50,6 @@ endif()
 
 if (DESKTOP_APP_SPECIAL_TARGET)
     target_compile_definitions(Telegram PRIVATE TDESKTOP_ALLOW_CLOSED_ALPHA)
-endif()
-
-if (TDESKTOP_NATIVE_MARKDOWN_IV)
-    target_compile_definitions(Telegram PRIVATE TDESKTOP_NATIVE_MARKDOWN_IV)
 endif()
 
 option(DESKTOP_APP_DISABLE_SWIFT6 "Disable local on-device translation (build without Swift 6 on macOS)." OFF)

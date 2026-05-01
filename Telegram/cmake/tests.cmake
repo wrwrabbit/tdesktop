@@ -43,63 +43,66 @@ add_dependencies(Telegram test_text)
 
 target_prepare_qrc(test_text)
 
-if (TDESKTOP_NATIVE_MARKDOWN_IV)
-    add_executable(test_markdown_iv)
-    init_target(test_markdown_iv "(tests)")
+add_executable(test_markdown_iv)
+init_target(test_markdown_iv "(tests)")
 
-    target_precompile_headers(test_markdown_iv PRIVATE ${src_loc}/iv/iv_pch.h)
+target_precompile_headers(test_markdown_iv PRIVATE ${src_loc}/iv/iv_pch.h)
 
-    target_include_directories(test_markdown_iv PRIVATE
-        ${src_loc}
-        ${CMAKE_BINARY_DIR}/Telegram/gen
-        ${CMAKE_BINARY_DIR}/Telegram/lib_ui/gen
-    )
+target_include_directories(test_markdown_iv PRIVATE
+    ${src_loc}
+    ${CMAKE_BINARY_DIR}/Telegram/gen
+    ${CMAKE_BINARY_DIR}/Telegram/lib_ui/gen
+)
 
-    nice_target_sources(test_markdown_iv ${src_loc}
-    PRIVATE
-        tests/test_markdown_iv.cpp
-        iv/markdown/iv_markdown_common.cpp
-        iv/markdown/iv_markdown_common.h
-        iv/markdown/iv_markdown_document.cpp
-        iv/markdown/iv_markdown_document.h
-        iv/markdown/iv_markdown_math.cpp
-        iv/markdown/iv_markdown_math.h
-        iv/markdown/iv_markdown_math_renderer.cpp
-        iv/markdown/iv_markdown_math_renderer.h
-        iv/markdown/iv_markdown_microtex.cpp
-        iv/markdown/iv_markdown_microtex.h
-        iv/markdown/iv_markdown_parse.cpp
-        iv/markdown/iv_markdown_parse.h
-        iv/markdown/iv_markdown_prepare.cpp
-        iv/markdown/iv_markdown_prepare.h
-    )
+nice_target_sources(test_markdown_iv ${src_loc}
+PRIVATE
+    tests/test_markdown_iv.cpp
+    iv/markdown/iv_markdown_common.cpp
+    iv/markdown/iv_markdown_common.h
+    iv/markdown/iv_markdown_document.cpp
+    iv/markdown/iv_markdown_document.h
+    iv/markdown/iv_markdown_math.cpp
+    iv/markdown/iv_markdown_math.h
+    iv/markdown/iv_markdown_math_renderer.cpp
+    iv/markdown/iv_markdown_math_renderer.h
+    iv/markdown/iv_markdown_microtex.cpp
+    iv/markdown/iv_markdown_microtex.h
+    iv/markdown/iv_markdown_parse.cpp
+    iv/markdown/iv_markdown_parse.h
+    iv/markdown/iv_markdown_prepare.cpp
+    iv/markdown/iv_markdown_prepare.h
+)
 
-    target_sources(test_markdown_iv PRIVATE
-        ${CMAKE_BINARY_DIR}/Telegram/gen/styles/style_iv.cpp
-        ${CMAKE_BINARY_DIR}/Telegram/lib_ui/gen/styles/palette.cpp
-        ${CMAKE_BINARY_DIR}/Telegram/lib_ui/gen/styles/style_basic.cpp
-        ${CMAKE_BINARY_DIR}/Telegram/lib_ui/gen/styles/style_widgets.cpp
-    )
+target_sources(test_markdown_iv PRIVATE
+    ${CMAKE_BINARY_DIR}/Telegram/gen/styles/style_iv.cpp
+    ${CMAKE_BINARY_DIR}/Telegram/lib_ui/gen/styles/palette.cpp
+    ${CMAKE_BINARY_DIR}/Telegram/lib_ui/gen/styles/style_basic.cpp
+    ${CMAKE_BINARY_DIR}/Telegram/lib_ui/gen/styles/style_widgets.cpp
+)
 
-    target_compile_definitions(test_markdown_iv
-    PRIVATE
-        TDESKTOP_NATIVE_MARKDOWN_IV
-    )
+target_link_libraries(test_markdown_iv
+PRIVATE
+    desktop-app::external_cmark_gfm
+    desktop-app::external_microtex
+    desktop-app::external_qt
+    desktop-app::external_qt_static_plugins
+    desktop-app::lib_base
+    desktop-app::lib_crl
+    desktop-app::lib_tl
+    desktop-app::lib_ui
+)
 
-    target_link_libraries(test_markdown_iv
-    PRIVATE
-        desktop-app::external_cmark_gfm
-        desktop-app::external_microtex
-        desktop-app::external_qt
-        desktop-app::external_qt_static_plugins
-        desktop-app::lib_base
-        desktop-app::lib_crl
-        desktop-app::lib_tl
-        desktop-app::lib_ui
-    )
+set_target_properties(
+    test_markdown_iv
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+)
 
-    set_target_properties(test_markdown_iv PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+add_custom_command(TARGET test_markdown_iv POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${src_loc}/tests/fixtures/markdown_iv/markdown-example.md
+        ${src_loc}/tests/fixtures/markdown_iv/latex-markdown-test.md
+        $<TARGET_FILE_DIR:test_markdown_iv>
+)
 
-    add_dependencies(Telegram test_markdown_iv)
-    add_dependencies(test_markdown_iv lib_ui_styles td_scheme_scheme td_ui_styles)
-endif()
+add_dependencies(Telegram test_markdown_iv)
+add_dependencies(test_markdown_iv lib_ui_styles td_scheme_scheme td_ui_styles)
