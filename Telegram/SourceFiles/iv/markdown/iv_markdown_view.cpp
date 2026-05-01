@@ -275,7 +275,7 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 
 [[nodiscard]] int LeafTextLength(const Ui::Text::String &leaf) {
 	return std::clamp(
-		leaf.toString().size(),
+		int(leaf.toString().size()),
 		0,
 		int(std::numeric_limits<uint16>::max()));
 }
@@ -401,7 +401,7 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 	auto column = 0;
 	auto found = false;
 	const auto &text = block.copyText;
-	for (auto i = 0, count = text.size(); i != count; ++i) {
+	for (auto i = 0, count = int(text.size()); i != count; ++i) {
 		const auto ch = text[i];
 		const auto width = (ch == QChar::Tabulation)
 			? (kCodeTabColumns - (column % kCodeTabColumns))

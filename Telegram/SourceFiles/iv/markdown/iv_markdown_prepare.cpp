@@ -134,8 +134,9 @@ struct PrepareState {
 			return QString();
 		}
 		const auto &range = request->document->formulas[index].range;
-		const auto from = std::clamp(range.startOffset, 0, sourceUtf8.size());
-		const auto till = std::clamp(range.endOffset, from, sourceUtf8.size());
+		const auto size = int(sourceUtf8.size());
+		const auto from = std::clamp(range.startOffset, 0, size);
+		const auto till = std::clamp(range.endOffset, from, size);
 		return QString::fromUtf8(sourceUtf8.constData() + from, till - from);
 	}
 
@@ -659,7 +660,7 @@ void ReplaceInlineFormulasInAppendedText(
 		inlineFormulas->prepared->push_back({
 			.position = found,
 			.formulaIndex = formula.formulaIndex,
-			.sourceLength = sourceLength,
+			.sourceLength = int(sourceLength),
 			.copySource = formula.copySource,
 		});
 		removedLength += (displaySpan.length - 1);

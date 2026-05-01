@@ -1,5 +1,7 @@
 #include "iv/markdown/iv_markdown_microtex.h"
 
+#include "base/base_file_utilities.h"
+
 #include <QtCore/QSize>
 #include <QtCore/QString>
 #include <QtGui/QColor>
@@ -12,9 +14,6 @@
 #include <utility>
 
 #include "latex.h"
-#ifdef _MSC_VER
-#pragma include_alias("config.h", "../../../ThirdParty/MicroTeX/src/config.h")
-#endif // _MSC_VER
 #include "platform/qt/graphic_qt.h"
 
 namespace Iv::Markdown {
@@ -81,7 +80,16 @@ QString MicrotexInitError;
 bool EnsureMicrotexInitialized(QString *error) {
 	std::call_once(MicrotexInitOnce, [] {
 		try {
+#ifdef Q_OS_MAC // Use resources from the .app bundle on macOS.
+
+			base::RegisterBundledResources(u"external_microtex_bundled.rcc"_q);
+
+#else // Q_OS_MAC
+
 			Q_INIT_RESOURCE(bundled);
+
+#endif // Q_OS_MAC
+
 			tex::LaTeX::initBundled();
 			MicrotexInitialized = true;
 		} catch (const std::exception &exception) {
