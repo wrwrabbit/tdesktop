@@ -165,3 +165,11 @@ ivMarkdownTableHeaderStyle: TextStyle(ivMarkdownParagraphStyle) {
 ivMarkdownTableMinColumnWidth: 96px;
 ivMarkdownTableOverflowWidth: 4px;
 ivMarkdownTableOverflowFg: windowSubTextFg;
+ivMarkdownFailureLabel: FlatLabel(defaultFlatLabel) {
+	minWidth: 280px;
+	textFg: windowSubTextFg;
+	align: align(center);
+	style: ivMarkdownParagraphStyle;
+}
+ivMarkdownFailureWidth: 360px;
+ivMarkdownFailureSkip: 12px;

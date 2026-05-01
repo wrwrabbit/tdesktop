@@ -6,6 +6,7 @@
 
 #include <QtCore/QByteArray>
 #include <QtCore/QDir>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QFileInfo>
 
 #include <algorithm>
@@ -18,13 +19,27 @@
 #include "styles/style_iv.h"
 
 namespace Iv::Markdown {
+
+const MarkdownPrepareLimits &PrepareLimitsForIv() {
+	static const auto result = MarkdownPrepareLimits{
+		.tableRender = {
+			.maxRows = 128,
+			.maxColumns = 16,
+			.maxCells = 1024,
+		},
+		.maxPreparedBlocks = 4096,
+	};
+	return result;
+}
+
+const MarkdownPrepareTableRenderLimits &PrepareTableRenderLimitsForIv() {
+	return PrepareLimitsForIv().tableRender;
+}
+
 namespace {
 
 constexpr auto kMaxVisualListDepth = 6;
 constexpr auto kMaxVisualQuoteDepth = 3;
-constexpr auto kMaxRenderedTableRows = 128;
-constexpr auto kMaxRenderedTableColumns = 16;
-constexpr auto kMaxRenderedTableCells = 1024;
 
 struct PrepareContext {
 	int listDepth = 0;
@@ -44,7 +59,7 @@ struct PrepareState {
 	int nextGeneratedId = 0;
 
 	[[nodiscard]] bool cancelled() {
-		if (!request->cancelled) {
+		if (!request || !request->cancelled) {
 			return false;
 		} else if (!request->cancelled->load(std::memory_order_relaxed)) {
 			return false;
@@ -83,6 +98,32 @@ struct PrepareState {
 			result.style.displayMathTextSize,
 			result.style.displayMathMaxRenderWidth,
 			result.style.displayMathMaxRenderHeight);
+	}
+
+	void addPrepareWarning() {
+		++result.debug.prepareWarningCount;
+	}
+
+	void addFormulaWarning() {
+		++result.debug.formulaWarningCount;
+	}
+
+	void addPrepareWarnings(int count) {
+		result.debug.prepareWarningCount += count;
+	}
+
+	void addFormulaWarnings(int count) {
+		result.debug.formulaWarningCount += count;
+	}
+
+	void setTerminalFailure(
+			PrepareTerminalFailure terminal,
+			QString debugReason) {
+		if (result.failure.failed()) {
+			return;
+		}
+		result.failure.terminal = terminal;
+		result.failure.debugReason = std::move(debugReason);
 	}
 
 	[[nodiscard]] QString formulaSourceText(int index) const {
@@ -153,6 +194,14 @@ enum class RawInlineTag {
 	MarkOpen,
 	MarkClose,
 };
+
+[[nodiscard]] QString InvalidStyleReason(
+		const MarkdownStyleSnapshot &style) {
+	if (style.devicePixelRatio <= 0) {
+		return u"invalid-device-pixel-ratio"_q;
+	}
+	return QString();
+}
 
 void ClearPreparedOutput(PreparedResult *result) {
 	result->blocks.blocks.clear();
@@ -257,6 +306,7 @@ void ClearPreparedOutput(PreparedResult *result) {
 		const PrepareState *state) {
 	auto result = PreparedLink();
 	result.index = index;
+	result.copyText = target;
 	if (target.startsWith(QChar('#'))) {
 		result.kind = PreparedLinkKind::Anchor;
 		result.target = NormalizeFragmentId(target.mid(1));
@@ -860,6 +910,7 @@ void AppendInline(
 			.kind = preparedLink.kind,
 			.target = preparedLink.target,
 			.fragment = preparedLink.fragment,
+			.copyText = preparedLink.copyText,
 		});
 	} break;
 	case NodeKind::FootnoteReference: {
@@ -894,6 +945,7 @@ void AppendInline(
 				.index = uint16(index),
 				.kind = PreparedLinkKind::Footnote,
 				.target = FootnoteDefinitionAnchor(node),
+				.copyText = u"#"_q + FootnoteDefinitionAnchor(node),
 			});
 			if (inlineFormulas) {
 				const auto remembered = state->rememberFootnoteReferenceAnchor(
@@ -1058,36 +1110,65 @@ void PrepareTableCellText(
 
 [[nodiscard]] bool ShouldFlattenTable(
 		const MarkdownNode &node,
-		PrepareContext context) {
+		PrepareContext context,
+		PrepareState *state) {
+	const auto &limits = PrepareLimitsForIv().tableRender;
 	if (context.listDepth > 0 || context.quoteDepth > 0) {
+		if (state) {
+			state->addPrepareWarning();
+		}
 		return true;
 	}
 	if (node.children.empty()) {
+		if (state) {
+			state->addPrepareWarning();
+		}
 		return true;
 	}
 	const auto rowCount = int(node.children.size());
-	if (rowCount > kMaxRenderedTableRows) {
+	if (rowCount > limits.maxRows) {
+		if (state) {
+			state->addPrepareWarning();
+		}
 		return true;
 	}
 	auto cellCount = 0;
 	for (const auto &row : node.children) {
 		if (row.kind != NodeKind::TableRow || row.children.empty()) {
+			if (state) {
+				state->addPrepareWarning();
+			}
 			return true;
 		}
 		const auto width = EffectiveTableRowWidth(row);
-		if (!width || width > kMaxRenderedTableColumns) {
+		if (!width || width > limits.maxColumns) {
+			if (state) {
+				state->addPrepareWarning();
+			}
 			return true;
 		}
 		cellCount += width;
-		if (cellCount > kMaxRenderedTableCells) {
+		if (cellCount > limits.maxCells) {
+			if (state) {
+				state->addPrepareWarning();
+			}
 			return true;
 		}
 	}
 	const auto columnCount = EffectiveTableColumnCount(node);
-	if (!columnCount || columnCount > kMaxRenderedTableColumns) {
+	if (!columnCount || columnCount > limits.maxColumns) {
+		if (state) {
+			state->addPrepareWarning();
+		}
 		return true;
 	}
-	return (rowCount * columnCount) > kMaxRenderedTableCells;
+	if ((rowCount * columnCount) > limits.maxCells) {
+		if (state) {
+			state->addPrepareWarning();
+		}
+		return true;
+	}
+	return false;
 }
 
 [[nodiscard]] std::vector<PreparedBlock> PrepareFallbackBlocks(
@@ -1098,9 +1179,9 @@ void PrepareTableCellText(
 [[nodiscard]] std::vector<PreparedBlock> PrepareTableBlocks(
 		const MarkdownNode &node,
 		PrepareContext context,
-		PrepareState *state) {
+	PrepareState *state) {
 	const auto columnCount = EffectiveTableColumnCount(node);
-	if (ShouldFlattenTable(node, context) || !columnCount) {
+	if (ShouldFlattenTable(node, context, state) || !columnCount) {
 		return PrepareFallbackBlocks(node, context, state);
 	}
 
@@ -1286,6 +1367,7 @@ void AppendFootnoteBacklink(PreparedBlock *block, const QString &target) {
 		.index = uint16(index),
 		.kind = PreparedLinkKind::FootnoteBacklink,
 		.target = target,
+		.copyText = u"#"_q + target,
 	});
 	SortEntities(&block->text);
 }
@@ -1337,6 +1419,20 @@ void AppendFootnotes(
 [[nodiscard]] std::vector<PreparedBlock> PrepareNestedDetailsBody(
 		const MarkdownNode &node,
 		PrepareState *state) {
+	const auto fallback = [&] {
+		if (state) {
+			state->addPrepareWarning();
+		}
+		auto blocks = std::vector<PreparedBlock>();
+		AppendRichBlock(
+			&blocks,
+			PreparedBlockKind::Paragraph,
+			0,
+			TextWithEntities::Simple(node.detailsBody),
+			std::vector<PreparedLink>(),
+			std::vector<PreparedInlineObject>());
+		return blocks;
+	};
 	if (node.detailsBody.isEmpty()) {
 		return {};
 	}
@@ -1346,24 +1442,23 @@ void AppendFootnotes(
 	if (!parsed.ok
 		|| !parsed.document.formulas.empty()
 		|| parsed.document.stats.footnotesSeen) {
-		auto fallback = std::vector<PreparedBlock>();
-		AppendRichBlock(
-			&fallback,
-			PreparedBlockKind::Paragraph,
-			0,
-			TextWithEntities::Simple(node.detailsBody),
-			std::vector<PreparedLink>(),
-			std::vector<PreparedInlineObject>());
-		return fallback;
+		return fallback();
 	}
 	auto nestedRequest = PrepareRequest{
 		.document = std::make_shared<const PreparedDocument>(parsed.document),
+		.renderer = state->request->renderer,
 		.style = state->result.style,
+		.generation = state->request->generation,
 		.sourcePath = state->request->sourcePath,
+		.cancelled = state->request->cancelled,
 	};
 	auto nested = PrepareSynchronously(std::move(nestedRequest));
+	state->addPrepareWarnings(nested.debug.prepareWarningCount);
+	state->addFormulaWarnings(nested.debug.formulaWarningCount);
 	return nested.cancelled
 		? std::vector<PreparedBlock>()
+		: nested.failure.failed()
+		? fallback()
 		: std::move(nested.blocks.blocks);
 }
 
@@ -1667,6 +1762,15 @@ void AppendFootnotes(
 	return result;
 }
 
+[[nodiscard]] int CountPreparedBlocks(const std::vector<PreparedBlock> &blocks) {
+	auto result = 0;
+	for (const auto &block : blocks) {
+		++result;
+		result += CountPreparedBlocks(block.children);
+	}
+	return result;
+}
+
 [[nodiscard]] int FormulaSlotCount(const PreparedDocument &document) {
 	auto result = 0;
 	for (const auto &formula : document.formulas) {
@@ -1681,7 +1785,14 @@ void AppendFootnotes(
 
 [[nodiscard]] bool RenderPreparedFormulas(PrepareState *state) {
 	const auto &style = state->result.style;
-	auto renderer = MathRenderer();
+	auto ownedRenderer = std::shared_ptr<MathRenderer>();
+	auto renderer = state->request ? state->request->renderer.get() : nullptr;
+	if (!renderer) {
+		ownedRenderer = std::make_shared<MathRenderer>();
+		renderer = ownedRenderer.get();
+	}
+	auto timer = QElapsedTimer();
+	timer.start();
 	for (auto &slot : state->result.formulas) {
 		if (!slot.present) {
 			continue;
@@ -1689,7 +1800,7 @@ void AppendFootnotes(
 		if (state->cancelled()) {
 			return false;
 		}
-		slot.rendered = renderer.renderFormula({
+		slot.rendered = renderer->renderFormula({
 			.trimmedTex = slot.trimmedTex,
 			.kind = slot.kind,
 			.textSize = slot.textSize
@@ -1704,10 +1815,15 @@ void AppendFootnotes(
 			.foreground = style.displayMathForegroundColor,
 			.devicePixelRatio = style.devicePixelRatio,
 		}, style.paletteVersion);
+		if (!slot.rendered.success) {
+			state->addFormulaWarning();
+		}
 		if (state->cancelled()) {
+			state->result.debug.formulaRenderMs = int(timer.elapsed());
 			return false;
 		}
 	}
+	state->result.debug.formulaRenderMs = int(timer.elapsed());
 	return true;
 }
 
@@ -1797,29 +1913,58 @@ MarkdownStyleSnapshot CaptureMarkdownStyleSnapshot() {
 
 PreparedResult PrepareSynchronously(PrepareRequest request) {
 	auto state = PrepareState();
+	auto timer = QElapsedTimer();
+	timer.start();
 	state.request = &request;
 	state.result.style = request.style;
 	state.result.generation = request.generation;
+	const auto finish = [&] {
+		state.result.debug.prepareMs = int(timer.elapsed());
+		return std::move(state.result);
+	};
 
 	if (!request.document) {
-		return state.result;
+		state.setTerminalFailure(
+			PrepareTerminalFailure::InvalidRequest,
+			u"missing-document"_q);
+		return finish();
+	}
+	if (const auto invalidStyle = InvalidStyleReason(request.style);
+		!invalidStyle.isEmpty()) {
+		state.setTerminalFailure(
+			PrepareTerminalFailure::InvalidStyle,
+			invalidStyle);
+		return finish();
 	}
 
 	state.sourceUtf8 = request.document->sourceText.toUtf8();
 	state.result.formulas.resize(FormulaSlotCount(*request.document));
+	state.result.debug.sourceWarningCount = int(request.document->warnings.size());
 	if (state.cancelled()) {
-		return std::move(state.result);
+		return finish();
 	}
 
 	state.result.blocks = PrepareRenderData(*request.document, &state);
 	if (state.result.cancelled) {
 		ClearPreparedOutput(&state.result);
-		return std::move(state.result);
+		return finish();
+	}
+	if (CountPreparedBlocks(state.result.blocks.blocks)
+		> PrepareLimitsForIv().maxPreparedBlocks) {
+		state.setTerminalFailure(
+			PrepareTerminalFailure::DocumentTooLarge,
+			u"prepared-block-limit"_q);
+		ClearPreparedOutput(&state.result);
+		return finish();
 	}
 	if (!RenderPreparedFormulas(&state)) {
 		ClearPreparedOutput(&state.result);
+		return finish();
 	}
-	return std::move(state.result);
+	if (state.result.failure.failed()) {
+		ClearPreparedOutput(&state.result);
+	}
+	return finish();
 }
 
 void PrepareAsync(PrepareRequest request, Fn<void(PreparedResult)> done) {

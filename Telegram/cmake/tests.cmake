@@ -47,7 +47,13 @@ if (TDESKTOP_NATIVE_MARKDOWN_IV)
     add_executable(test_markdown_iv)
     init_target(test_markdown_iv "(tests)")
 
-    target_include_directories(test_markdown_iv PRIVATE ${src_loc})
+    target_precompile_headers(test_markdown_iv PRIVATE ${src_loc}/iv/iv_pch.h)
+
+    target_include_directories(test_markdown_iv PRIVATE
+        ${src_loc}
+        ${CMAKE_BINARY_DIR}/Telegram/gen
+        ${CMAKE_BINARY_DIR}/Telegram/lib_ui/gen
+    )
 
     nice_target_sources(test_markdown_iv ${src_loc}
     PRIVATE
@@ -58,8 +64,21 @@ if (TDESKTOP_NATIVE_MARKDOWN_IV)
         iv/markdown/iv_markdown_document.h
         iv/markdown/iv_markdown_math.cpp
         iv/markdown/iv_markdown_math.h
+        iv/markdown/iv_markdown_math_renderer.cpp
+        iv/markdown/iv_markdown_math_renderer.h
+        iv/markdown/iv_markdown_microtex.cpp
+        iv/markdown/iv_markdown_microtex.h
         iv/markdown/iv_markdown_parse.cpp
         iv/markdown/iv_markdown_parse.h
+        iv/markdown/iv_markdown_prepare.cpp
+        iv/markdown/iv_markdown_prepare.h
+    )
+
+    target_sources(test_markdown_iv PRIVATE
+        ${CMAKE_BINARY_DIR}/Telegram/gen/styles/style_iv.cpp
+        ${CMAKE_BINARY_DIR}/Telegram/lib_ui/gen/styles/palette.cpp
+        ${CMAKE_BINARY_DIR}/Telegram/lib_ui/gen/styles/style_basic.cpp
+        ${CMAKE_BINARY_DIR}/Telegram/lib_ui/gen/styles/style_widgets.cpp
     )
 
     target_compile_definitions(test_markdown_iv
@@ -70,11 +89,17 @@ if (TDESKTOP_NATIVE_MARKDOWN_IV)
     target_link_libraries(test_markdown_iv
     PRIVATE
         desktop-app::external_cmark_gfm
+        desktop-app::external_microtex
         desktop-app::external_qt
+        desktop-app::external_qt_static_plugins
         desktop-app::lib_base
+        desktop-app::lib_crl
+        desktop-app::lib_tl
+        desktop-app::lib_ui
     )
 
     set_target_properties(test_markdown_iv PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
     add_dependencies(Telegram test_markdown_iv)
+    add_dependencies(test_markdown_iv lib_ui_styles td_scheme_scheme td_ui_styles)
 endif()

@@ -21,13 +21,19 @@
 #include <vector>
 
 namespace Iv::Markdown {
-namespace {
 
-constexpr auto kMaxSourceBytes = 4 * 1024 * 1024;
-constexpr auto kMaxCmarkNodes = 100000;
-constexpr auto kMaxNesting = 128;
-constexpr auto kMaxFormulaBytes = 64 * 1024;
-constexpr auto kMaxFormulaCount = 10000;
+const MarkdownParseLimits &ParseLimitsForIv() {
+	static const auto result = MarkdownParseLimits{
+		.maxSourceBytes = 4 * 1024 * 1024,
+		.maxCmarkNodes = 100000,
+		.maxNesting = 128,
+		.maxFormulaBytes = 64 * 1024,
+		.maxFormulaCount = 10000,
+	};
+	return result;
+}
+
+namespace {
 
 struct ParserDeleter {
 	void operator()(cmark_parser *parser) const;
@@ -589,18 +595,19 @@ void RecordCapabilities(cmark_node *node, ParserState *state) {
 		cmark_node *node,
 		ParserState *state,
 		int depth) {
+	const auto &limits = ParseLimitsForIv();
 	if (!node || !state || state->failed) {
 		return false;
 	}
 	if (state->stats) {
 		state->stats->maxDepth = std::max(state->stats->maxDepth, depth);
 	}
-	if (depth > kMaxNesting) {
+	if (depth > limits.maxNesting) {
 		return FailScanMetadata(state, "cmark-nesting-too-deep");
 	}
 	if (state->stats) {
 		++state->stats->cmarkNodeCount;
-		if (state->stats->cmarkNodeCount > kMaxCmarkNodes) {
+		if (state->stats->cmarkNodeCount > limits.maxCmarkNodes) {
 			return FailScanMetadata(state, "too-many-cmark-nodes");
 		}
 	}
@@ -976,10 +983,11 @@ void FillNodeAttributes(
 		ParserState *state,
 		int depth,
 		MarkdownNode *out) {
+	const auto &limits = ParseLimitsForIv();
 	if (!node || !state || !out || state->failed) {
 		return false;
 	}
-	if (depth > kMaxNesting) {
+	if (depth > limits.maxNesting) {
 		return FailScanMetadata(state, "cmark-nesting-too-deep");
 	}
 	out->kind = NodeKindFor(node);
@@ -1651,7 +1659,8 @@ void FillFormulaStats(PreparedDocument *document) {
 MarkdownSourceValidationResult ValidateMarkdownSourceForIv(
 		const QByteArray &source,
 		ParseOptions options) {
-	if (source.size() > kMaxSourceBytes) {
+	const auto &limits = ParseLimitsForIv();
+	if (source.size() > limits.maxSourceBytes) {
 		return ValidationFailure(
 			std::move(options.sourceName),
 			FromLatin1("source-too-large"));
@@ -1683,6 +1692,7 @@ MarkdownSourceValidationResult ValidateMarkdownSourceForIv(
 }
 
 ParseResult ParseMarkdownForIv(ValidatedMarkdownSource source) {
+	const auto &limits = ParseLimitsForIv();
 	auto mask = std::vector<bool>(source.normalized.size(), false);
 	const auto parserOptions = CMARK_OPT_DEFAULT
 		| CMARK_OPT_SOURCEPOS
@@ -1727,8 +1737,8 @@ ParseResult ParseMarkdownForIv(ValidatedMarkdownSource source) {
 			mask,
 			source.lineStarts,
 			scanBlocks,
-			kMaxFormulaBytes,
-			kMaxFormulaCount,
+			limits.maxFormulaBytes,
+			limits.maxFormulaCount,
 			&document.formulas,
 			&error)) {
 		return Failure(std::move(document.sourceName), std::move(error));

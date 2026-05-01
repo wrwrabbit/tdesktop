@@ -2,6 +2,7 @@
 
 #include <QtGui/QColor>
 
+#include <algorithm>
 #include <limits>
 #include <utility>
 
@@ -57,19 +58,115 @@ constexpr auto kMaxFormulaImageBytes = int64(128) * 1024 * 1024;
 		|| (error == u"physical-image-cap-exceeded"_q);
 }
 
-} // namespace
-
-const RenderedFormula *FormulaCache::find(const FormulaCacheKey &key) const {
-	const auto i = _entries.find(key);
-	return (i != _entries.end()) ? &i->second : nullptr;
+[[nodiscard]] int64 EstimateQStringBytes(const QString &value) {
+	return int64(value.size()) * sizeof(QChar);
 }
 
-void FormulaCache::put(FormulaCacheKey key, RenderedFormula value) {
-	_entries[std::move(key)] = std::move(value);
+[[nodiscard]] int64 EstimateQImageBytes(const QImage &image) {
+	return image.isNull() ? 0 : int64(image.sizeInBytes());
+}
+
+} // namespace
+
+const RenderedFormula *FormulaCache::find(const FormulaCacheKey &key) {
+	const auto i = _entries.find(key);
+	if (i == _entries.end()) {
+		return nullptr;
+	}
+	touch(i);
+	return &i->second.value;
+}
+
+FormulaCacheMutation FormulaCache::put(
+		FormulaCacheKey key,
+		RenderedFormula value) {
+	if (_budgetBytes <= 0) {
+		if (const auto i = _entries.find(key); i != _entries.end()) {
+			erase(i);
+		}
+		return {};
+	}
+	const auto sizeBytes = estimateBytes(key, value);
+	if (sizeBytes > _budgetBytes) {
+		if (const auto i = _entries.find(key); i != _entries.end()) {
+			erase(i);
+		}
+		return {};
+	}
+	if (const auto i = _entries.find(key); i != _entries.end()) {
+		erase(i);
+	}
+	_lru.push_back(key);
+	const auto lru = std::prev(_lru.end());
+	_entries.emplace(std::move(key), Entry{
+		.value = std::move(value),
+		.sizeBytes = sizeBytes,
+		.lru = lru,
+	});
+	_sizeBytes += sizeBytes;
+	return evictToBudget();
+}
+
+FormulaCacheMutation FormulaCache::setBudgetBytes(int64 bytes) {
+	_budgetBytes = std::max<int64>(0, bytes);
+	return evictToBudget();
+}
+
+int64 FormulaCache::budgetBytes() const {
+	return _budgetBytes;
+}
+
+int64 FormulaCache::sizeBytes() const {
+	return _sizeBytes;
+}
+
+int FormulaCache::size() const {
+	return int(_entries.size());
 }
 
 void FormulaCache::clear() {
 	_entries.clear();
+	_lru.clear();
+	_sizeBytes = 0;
+}
+
+int64 FormulaCache::estimateBytes(
+		const FormulaCacheKey &key,
+		const RenderedFormula &value) const {
+	return sizeof(FormulaCacheKey)
+		+ sizeof(Entry)
+		+ EstimateQStringBytes(key.trimmedTex)
+		+ EstimateQImageBytes(value.image)
+		+ EstimateQStringBytes(value.fallbackText)
+		+ EstimateQStringBytes(value.error);
+}
+
+void FormulaCache::touch(std::map<FormulaCacheKey, Entry>::iterator i) {
+	_lru.erase(i->second.lru);
+	_lru.push_back(i->first);
+	i->second.lru = std::prev(_lru.end());
+}
+
+void FormulaCache::erase(std::map<FormulaCacheKey, Entry>::iterator i) {
+	_sizeBytes -= i->second.sizeBytes;
+	_lru.erase(i->second.lru);
+	_entries.erase(i);
+}
+
+FormulaCacheMutation FormulaCache::evictToBudget() {
+	auto result = FormulaCacheMutation();
+	while (((_budgetBytes <= 0) || (_sizeBytes > _budgetBytes)) && !_lru.empty()) {
+		const auto oldest = _lru.front();
+		const auto i = _entries.find(oldest);
+		if (i == _entries.end()) {
+			_lru.pop_front();
+			continue;
+		}
+		result.evictedBytes += i->second.sizeBytes;
+		++result.evictedEntries;
+		erase(i);
+	}
+	return result;
 }
 
 RenderedFormula MathRenderer::renderFormula(
@@ -85,7 +182,7 @@ RenderedFormula MathRenderer::renderFormula(
 	if (rejectRequestByCaps(key, &error)) {
 		++_debugCounters.failed;
 		auto failure = makeFailure(key, error, TooLargeFailure(error));
-		_cache.put(key, failure);
+		applyCacheMutation(_cache.put(key, failure));
 		return failure;
 	}
 	auto normalized = request;
@@ -102,13 +199,13 @@ RenderedFormula MathRenderer::renderFormula(
 			key,
 			rendered.error,
 			TooLargeFailure(rendered.error));
-		_cache.put(key, failure);
+		applyCacheMutation(_cache.put(key, failure));
 		return failure;
 	}
 	if (rejectResultByCaps(key, rendered, &error)) {
 		++_debugCounters.failed;
 		auto failure = makeFailure(key, error, TooLargeFailure(error));
-		_cache.put(key, failure);
+		applyCacheMutation(_cache.put(key, failure));
 		return failure;
 	}
 	auto result = RenderedFormula();
@@ -116,7 +213,7 @@ RenderedFormula MathRenderer::renderFormula(
 	result.logicalSize = rendered.logicalSize;
 	result.success = true;
 	++_debugCounters.rendered;
-	_cache.put(key, result);
+	applyCacheMutation(_cache.put(key, result));
 	return result;
 }
 
@@ -124,6 +221,8 @@ void MathRenderer::clearCache(bool resetDebugCounters) {
 	_cache.clear();
 	if (resetDebugCounters) {
 		_debugCounters = FormulaDebugCounters();
+	} else {
+		syncCacheCounters();
 	}
 }
 
@@ -133,10 +232,23 @@ void MathRenderer::invalidate(bool resetDebugCounters) {
 
 void MathRenderer::resetDebugCounters() {
 	_debugCounters = FormulaDebugCounters();
+	syncCacheCounters();
+}
+
+void MathRenderer::setCacheBudgetBytes(int64 bytes) {
+	applyCacheMutation(_cache.setBudgetBytes(bytes));
 }
 
 const FormulaDebugCounters &MathRenderer::debugCounters() const {
 	return _debugCounters;
+}
+
+int64 MathRenderer::cacheBudgetBytes() const {
+	return _cache.budgetBytes();
+}
+
+int64 MathRenderer::cacheUsageBytes() const {
+	return _cache.sizeBytes();
 }
 
 FormulaCacheKey MathRenderer::makeKey(
@@ -234,6 +346,17 @@ bool MathRenderer::rejectResultByCaps(
 		return true;
 	}
 	return false;
+}
+
+void MathRenderer::syncCacheCounters() {
+	_debugCounters.cacheEntries = _cache.size();
+	_debugCounters.cacheBytes = _cache.sizeBytes();
+}
+
+void MathRenderer::applyCacheMutation(FormulaCacheMutation mutation) {
+	_debugCounters.evictedEntries += mutation.evictedEntries;
+	_debugCounters.evictedBytes += mutation.evictedBytes;
+	syncCacheCounters();
 }
 
 } // namespace Iv::Markdown

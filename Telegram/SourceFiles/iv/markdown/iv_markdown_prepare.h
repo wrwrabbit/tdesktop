@@ -43,6 +43,7 @@ struct PreparedLink {
 	PreparedLinkKind kind = PreparedLinkKind::External;
 	QString target;
 	QString fragment;
+	QString copyText;
 };
 
 struct PreparedInlineObject {
@@ -179,6 +180,42 @@ struct MarkdownStyleSnapshot {
 	int devicePixelRatio = 1;
 };
 
+struct MarkdownPrepareTableRenderLimits {
+	int maxRows = 0;
+	int maxColumns = 0;
+	int maxCells = 0;
+};
+
+struct MarkdownPrepareLimits {
+	MarkdownPrepareTableRenderLimits tableRender;
+	int maxPreparedBlocks = 0;
+};
+
+enum class PrepareTerminalFailure {
+	None,
+	InvalidRequest,
+	InvalidStyle,
+	DocumentTooLarge,
+	InternalError,
+};
+
+struct PrepareFailureStatus {
+	PrepareTerminalFailure terminal = PrepareTerminalFailure::None;
+	QString debugReason;
+
+	[[nodiscard]] bool failed() const {
+		return (terminal != PrepareTerminalFailure::None);
+	}
+};
+
+struct PrepareDebugStats {
+	int prepareMs = 0;
+	int formulaRenderMs = 0;
+	int sourceWarningCount = 0;
+	int prepareWarningCount = 0;
+	int formulaWarningCount = 0;
+};
+
 struct PreparedFormulaSlot {
 	QString trimmedTex;
 	MathKind kind = MathKind::Display;
@@ -191,6 +228,7 @@ struct PreparedFormulaSlot {
 
 struct PrepareRequest {
 	std::shared_ptr<const PreparedDocument> document;
+	std::shared_ptr<MathRenderer> renderer;
 	MarkdownStyleSnapshot style;
 	PrepareGeneration generation = 0;
 	QString sourcePath;
@@ -201,10 +239,14 @@ struct PreparedResult {
 	PreparedRenderDocument blocks;
 	MarkdownStyleSnapshot style;
 	std::vector<PreparedFormulaSlot> formulas;
+	PrepareFailureStatus failure;
+	PrepareDebugStats debug;
 	PrepareGeneration generation = 0;
 	bool cancelled = false;
 };
 
+[[nodiscard]] const MarkdownPrepareTableRenderLimits &PrepareTableRenderLimitsForIv();
+[[nodiscard]] const MarkdownPrepareLimits &PrepareLimitsForIv();
 [[nodiscard]] MarkdownStyleSnapshot CaptureMarkdownStyleSnapshot();
 [[nodiscard]] PreparedResult PrepareSynchronously(PrepareRequest request);
 void PrepareAsync(PrepareRequest request, Fn<void(PreparedResult)> done);

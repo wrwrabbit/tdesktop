@@ -2,11 +2,14 @@
 
 #include "iv/markdown/iv_markdown_microtex.h"
 
+#include "base/basic_types.h"
+
 #include <QtCore/QSize>
 #include <QtCore/QString>
 #include <QtGui/QImage>
 #include <QtGui/qrgb.h>
 
+#include <list>
 #include <map>
 #include <tuple>
 
@@ -78,17 +81,48 @@ struct FormulaDebugCounters {
 	int failed = 0;
 	int hits = 0;
 	int misses = 0;
+	int evictedEntries = 0;
+	int64 evictedBytes = 0;
+	int cacheEntries = 0;
+	int64 cacheBytes = 0;
+};
+
+struct FormulaCacheMutation {
+	int evictedEntries = 0;
+	int64 evictedBytes = 0;
 };
 
 class FormulaCache {
 public:
 	[[nodiscard]] const RenderedFormula *find(
-		const FormulaCacheKey &key) const;
-	void put(FormulaCacheKey key, RenderedFormula value);
+		const FormulaCacheKey &key);
+	[[nodiscard]] FormulaCacheMutation put(
+		FormulaCacheKey key,
+		RenderedFormula value);
+	[[nodiscard]] FormulaCacheMutation setBudgetBytes(int64 bytes);
+	[[nodiscard]] int64 budgetBytes() const;
+	[[nodiscard]] int64 sizeBytes() const;
+	[[nodiscard]] int size() const;
 	void clear();
 
 private:
-	std::map<FormulaCacheKey, RenderedFormula> _entries;
+	struct Entry {
+		RenderedFormula value;
+		int64 sizeBytes = 0;
+		std::list<FormulaCacheKey>::iterator lru;
+	};
+
+	[[nodiscard]] int64 estimateBytes(
+		const FormulaCacheKey &key,
+		const RenderedFormula &value) const;
+	void touch(std::map<FormulaCacheKey, Entry>::iterator i);
+	void erase(std::map<FormulaCacheKey, Entry>::iterator i);
+	[[nodiscard]] FormulaCacheMutation evictToBudget();
+
+	std::map<FormulaCacheKey, Entry> _entries;
+	std::list<FormulaCacheKey> _lru;
+	int64 _budgetBytes = 32 * 1024 * 1024;
+	int64 _sizeBytes = 0;
 
 };
 
@@ -100,8 +134,11 @@ public:
 	void clearCache(bool resetDebugCounters = false);
 	void invalidate(bool resetDebugCounters = false);
 	void resetDebugCounters();
+	void setCacheBudgetBytes(int64 bytes);
 
 	[[nodiscard]] const FormulaDebugCounters &debugCounters() const;
+	[[nodiscard]] int64 cacheBudgetBytes() const;
+	[[nodiscard]] int64 cacheUsageBytes() const;
 
 private:
 	[[nodiscard]] FormulaCacheKey makeKey(
@@ -118,6 +155,8 @@ private:
 		const FormulaCacheKey &key,
 		const MicrotexRenderResult &result,
 		QString *error) const;
+	void syncCacheCounters();
+	void applyCacheMutation(FormulaCacheMutation mutation);
 
 	FormulaCache _cache;
 	FormulaDebugCounters _debugCounters;

@@ -1596,6 +1596,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_preview_loading" = "Getting Link Info...";
 "lng_preview_cant" = "Could not generate preview for this link.";
+"lng_markdown_preview_cant" = "Can't preview this Markdown file";
+"lng_markdown_preview_open_file" = "Open file";
 
 "lng_profile_settings_section" = "Settings";
 "lng_profile_bot_settings" = "Bot Settings";

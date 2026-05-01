@@ -3,23 +3,36 @@
 #include "iv/markdown/iv_markdown_prepare.h"
 #include "iv/iv_delegate.h"
 
+#include <QtCore/QUrl>
+
 #include <QtCore/QDebug>
+#include <QtCore/QElapsedTimer>
 
 #include "base/weak_ptr.h"
 #include "core/credits_amount.h"
 #include "core/click_handler_types.h"
+#include "core/file_utilities.h"
 #include "lang/lang_keys.h"
 #include "logs.h"
 #include "ui/click_handler.h"
+#include "ui/integration.h"
 #include "ui/painter.h"
 #include "ui/rp_widget.h"
 #include "ui/style/style_core.h"
 #include "ui/text/text.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
+#include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 
+#include <QtGui/QContextMenuEvent>
+#include <QtGui/QCursor>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QKeyEvent>
+#include <QtGui/QKeySequence>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPen>
+#include <QtWidgets/QApplication>
 
 #include <algorithm>
 #include <initializer_list>
@@ -34,6 +47,7 @@
 #include "styles/style_boxes.h"
 #include "styles/style_iv.h"
 #include "styles/style_layers.h"
+#include "styles/style_menu_icons.h"
 
 namespace Iv::Markdown {
 namespace {
@@ -86,6 +100,8 @@ struct LaidOutTableCell {
 	QRect textRect;
 	int textWidth = 0;
 	style::align align = style::al_left;
+	int segmentIndex = -1;
+	int tableSegmentIndex = -1;
 };
 
 struct LaidOutTableRow {
@@ -100,6 +116,7 @@ struct LaidOutBlock {
 	Ui::Text::String marker;
 	Ui::Text::String language;
 	Ui::Text::String fallbackLeaf;
+	QString copyText;
 	std::vector<LaidOutBlock> children;
 	std::vector<LaidOutTableRow> tableRows;
 	std::vector<int> tableColumnWidths;
@@ -125,7 +142,102 @@ struct LaidOutBlock {
 	style::align formulaAlign = style::al_left;
 	bool collapsed = false;
 	bool overflowed = false;
+	int segmentIndex = -1;
 };
+
+enum class SelectableSegmentKind {
+	TextLeaf,
+	CodeBlock,
+	DisplayMath,
+	Table,
+};
+
+struct SelectableSegment {
+	SelectableSegmentKind kind = SelectableSegmentKind::TextLeaf;
+	const Ui::Text::String *leaf = nullptr;
+	const LaidOutBlock *block = nullptr;
+	const LaidOutTableCell *cell = nullptr;
+	QRect outerRect;
+	QRect textRect;
+	int textWidth = 0;
+	style::align align = style::al_left;
+	int index = -1;
+	int length = 0;
+	int tableSegmentIndex = -1;
+
+	[[nodiscard]] bool isTextLeaf() const {
+		return (leaf != nullptr);
+	}
+};
+
+struct DocumentHitTestResult {
+	int segmentIndex = -1;
+	Ui::Text::StateResult state;
+	int forcedOffset = -1;
+	bool direct = false;
+
+	[[nodiscard]] bool valid() const {
+		return (segmentIndex >= 0);
+	}
+};
+
+struct DocumentSelectionPosition {
+	int segment = -1;
+	int offset = 0;
+
+	[[nodiscard]] bool valid() const {
+		return (segment >= 0);
+	}
+};
+
+inline bool operator==(
+		DocumentSelectionPosition a,
+		DocumentSelectionPosition b) {
+	return (a.segment == b.segment) && (a.offset == b.offset);
+}
+
+inline bool operator!=(
+		DocumentSelectionPosition a,
+		DocumentSelectionPosition b) {
+	return !(a == b);
+}
+
+struct DocumentSelection {
+	DocumentSelectionPosition from;
+	DocumentSelectionPosition to;
+
+	[[nodiscard]] bool empty() const {
+		return !from.valid()
+			|| !to.valid()
+			|| (from == to);
+	}
+};
+
+struct SelectionEndpoint {
+	int segment = -1;
+	bool direct = false;
+
+	[[nodiscard]] bool valid() const {
+		return (segment >= 0);
+	}
+};
+
+struct SelectionEndpoints {
+	SelectionEndpoint from;
+	SelectionEndpoint to;
+};
+
+inline bool operator==(
+		DocumentSelection a,
+		DocumentSelection b) {
+	return (a.from == b.from) && (a.to == b.to);
+}
+
+inline bool operator!=(
+		DocumentSelection a,
+		DocumentSelection b) {
+	return !(a == b);
+}
 
 struct LayoutContext {
 	int listDepth = 0;
@@ -159,6 +271,13 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 	auto result = Ui::Text::SimpleGeometry(std::max(width, 1), 0, 0, false);
 	result.breakEverywhere = true;
 	return result;
+}
+
+[[nodiscard]] int LeafTextLength(const Ui::Text::String &leaf) {
+	return std::clamp(
+		leaf.toString().size(),
+		0,
+		int(std::numeric_limits<uint16>::max()));
 }
 
 [[nodiscard]] int BlockSkip(
@@ -259,6 +378,108 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 	return result;
 }
 
+[[nodiscard]] TextForMimeData CopyTextForDisplayMath(const LaidOutBlock &block) {
+	return TextForMimeData::Simple(u"$$"_q + block.copyText + u"$$"_q);
+}
+
+[[nodiscard]] TextForMimeData CopyTextForCodeBlock(
+		const LaidOutBlock &block,
+		TextSelection selection = AllTextSelection) {
+	if (selection == AllTextSelection) {
+		auto rich = TextWithEntities::Simple(block.copyText);
+		if (!rich.text.isEmpty()) {
+			rich.entities.push_back(EntityInText(
+				EntityType::Code,
+				0,
+				rich.text.size()));
+		}
+		return TextForMimeData::Rich(std::move(rich));
+	}
+	auto from = 0;
+	auto to = 0;
+	auto displayPosition = 0;
+	auto column = 0;
+	auto found = false;
+	const auto &text = block.copyText;
+	for (auto i = 0, count = text.size(); i != count; ++i) {
+		const auto ch = text[i];
+		const auto width = (ch == QChar::Tabulation)
+			? (kCodeTabColumns - (column % kCodeTabColumns))
+			: 1;
+		const auto nextDisplayPosition = displayPosition + width;
+		if (selection.to <= displayPosition) {
+			break;
+		}
+		if (selection.from < nextDisplayPosition
+			&& selection.to > displayPosition) {
+			if (!found) {
+				from = i;
+				found = true;
+			}
+			to = i + 1;
+		}
+		displayPosition = nextDisplayPosition;
+		if (Ui::Text::IsNewline(ch)) {
+			column = 0;
+		} else {
+			column += width;
+		}
+	}
+	if (!found || to <= from) {
+		return TextForMimeData();
+	}
+	auto rich = TextWithEntities::Simple(text.mid(from, to - from));
+	if (!rich.text.isEmpty()) {
+		rich.entities.push_back(EntityInText(
+			EntityType::Code,
+			0,
+			rich.text.size()));
+	}
+	return TextForMimeData::Rich(std::move(rich));
+}
+
+[[nodiscard]] TextForMimeData CopyTextForTable(const LaidOutBlock &block) {
+	auto result = TextForMimeData();
+	auto firstRow = true;
+	for (const auto &row : block.tableRows) {
+		if (!firstRow) {
+			result.append(u"\n"_q);
+		}
+		firstRow = false;
+		auto firstCell = true;
+		for (const auto &cell : row.cells) {
+			if (!firstCell) {
+				result.append(u"\t"_q);
+			}
+			firstCell = false;
+			result.append(cell.leaf.toTextForMimeData());
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] QString CopyableLinkText(const PreparedLink &link) {
+	if (!link.copyText.isEmpty()) {
+		return link.copyText;
+	}
+	switch (link.kind) {
+	case PreparedLinkKind::Anchor:
+	case PreparedLinkKind::Footnote:
+	case PreparedLinkKind::FootnoteBacklink:
+		return link.target.isEmpty() ? QString() : (u"#"_q + link.target);
+	case PreparedLinkKind::LocalFile:
+		return link.fragment.isEmpty()
+			? link.target
+			: (link.target + u"#"_q + link.fragment);
+	case PreparedLinkKind::External:
+		return link.target;
+	case PreparedLinkKind::RejectedRelative:
+	case PreparedLinkKind::ToggleDetails:
+		return QString();
+	}
+	return QString();
+}
+
 class PreparedLinkClickHandler final : public ClickHandler {
 public:
 	explicit PreparedLinkClickHandler(PreparedLink link)
@@ -274,6 +495,27 @@ public:
 
 	QString url() const override {
 		return _link.target;
+	}
+
+	QString copyToClipboardText() const override {
+		return CopyableLinkText(_link);
+	}
+
+	QString copyToClipboardContextItemText() const override {
+		switch (_link.kind) {
+		case PreparedLinkKind::RejectedRelative:
+		case PreparedLinkKind::ToggleDetails:
+			return QString();
+		case PreparedLinkKind::External:
+		case PreparedLinkKind::Anchor:
+		case PreparedLinkKind::Footnote:
+		case PreparedLinkKind::FootnoteBacklink:
+		case PreparedLinkKind::LocalFile:
+			return copyToClipboardText().isEmpty()
+				? QString()
+				: tr::lng_context_copy_link(tr::now);
+		}
+		return QString();
 	}
 
 private:
@@ -563,6 +805,7 @@ void SetTextLeaf(
 		int width) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::CodeBlock;
+	block.copyText = prepared.text.text;
 
 	const auto &padding = style.codePadding;
 	block.textWidth = std::max(width - padding.left() - padding.right(), 1);
@@ -630,6 +873,7 @@ void SetTextLeaf(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::DisplayMath;
 	block.formulaIndex = prepared.formulaIndex;
+	block.copyText = prepared.formulaTex;
 
 	const auto &padding = style.displayMathPadding;
 	const auto contentLeft = left + padding.left();
@@ -1180,6 +1424,101 @@ void SetTextLeaf(
 	return LayoutFlowBlock(prepared, formulas, style, left, top, width);
 }
 
+[[nodiscard]] int AddSelectableSegment(
+		std::vector<SelectableSegment> *segments,
+		SelectableSegment segment) {
+	segment.index = int(segments->size());
+	segment.length = std::max(segment.length, 0);
+	segments->push_back(std::move(segment));
+	return segment.index;
+}
+
+void CollectSelectableSegments(
+		std::vector<LaidOutBlock> *blocks,
+		std::vector<SelectableSegment> *segments) {
+	if (!blocks) {
+		return;
+	}
+	for (auto &block : *blocks) {
+		block.segmentIndex = -1;
+		switch (block.kind) {
+		case PreparedBlockKind::Paragraph:
+		case PreparedBlockKind::Heading:
+		case PreparedBlockKind::Details: {
+			auto segment = SelectableSegment();
+			segment.kind = SelectableSegmentKind::TextLeaf;
+			segment.leaf = &block.leaf;
+			segment.block = &block;
+			segment.outerRect = block.textRect;
+			segment.textRect = block.textRect;
+			segment.textWidth = block.textWidth;
+			segment.length = LeafTextLength(block.leaf);
+			block.segmentIndex = AddSelectableSegment(
+				segments,
+				std::move(segment));
+		} break;
+		case PreparedBlockKind::CodeBlock: {
+			auto segment = SelectableSegment();
+			segment.kind = SelectableSegmentKind::CodeBlock;
+			segment.leaf = &block.leaf;
+			segment.block = &block;
+			segment.outerRect = block.outer;
+			segment.textRect = block.textRect;
+			segment.textWidth = block.textWidth;
+			segment.length = LeafTextLength(block.leaf);
+			block.segmentIndex = AddSelectableSegment(
+				segments,
+				std::move(segment));
+		} break;
+		case PreparedBlockKind::DisplayMath: {
+			auto segment = SelectableSegment();
+			segment.kind = SelectableSegmentKind::DisplayMath;
+			segment.block = &block;
+			segment.outerRect = block.visibleFormulaRect;
+			segment.length = 1;
+			block.segmentIndex = AddSelectableSegment(
+				segments,
+				std::move(segment));
+		} break;
+		case PreparedBlockKind::Table: {
+			auto segment = SelectableSegment();
+			segment.kind = SelectableSegmentKind::Table;
+			segment.block = &block;
+			segment.outerRect = block.visibleTableRect;
+			segment.length = 1;
+			block.segmentIndex = AddSelectableSegment(
+				segments,
+				std::move(segment));
+			for (auto &row : block.tableRows) {
+				for (auto &cell : row.cells) {
+					auto cellSegment = SelectableSegment();
+					cellSegment.kind = SelectableSegmentKind::TextLeaf;
+					cellSegment.leaf = &cell.leaf;
+					cellSegment.block = &block;
+					cellSegment.cell = &cell;
+					cellSegment.outerRect = cell.outer;
+					cellSegment.textRect = cell.textRect;
+					cellSegment.textWidth = cell.textWidth;
+					cellSegment.align = cell.align;
+					cellSegment.length = LeafTextLength(cell.leaf);
+					cellSegment.tableSegmentIndex = block.segmentIndex;
+					cell.tableSegmentIndex = block.segmentIndex;
+					cell.segmentIndex = AddSelectableSegment(
+						segments,
+						std::move(cellSegment));
+				}
+			}
+		} break;
+		case PreparedBlockKind::List:
+		case PreparedBlockKind::ListItem:
+		case PreparedBlockKind::Quote:
+		case PreparedBlockKind::Rule:
+			break;
+		}
+		CollectSelectableSegments(&block.children, segments);
+	}
+}
+
 class DocumentLayout final {
 public:
 	void invalidate();
@@ -1188,12 +1527,18 @@ public:
 	[[nodiscard]] int height() const;
 	[[nodiscard]] int anchorTop(const QString &anchorId) const;
 	[[nodiscard]] const std::vector<LaidOutBlock> &blocks() const;
+	[[nodiscard]] const std::vector<SelectableSegment> &segments() const;
+	[[nodiscard]] const SelectableSegment *segment(int index) const;
+	[[nodiscard]] DocumentHitTestResult hitTest(
+		QPoint point,
+		Ui::Text::StateRequest::Flags flags) const;
 
 private:
 	int _width = -1;
 	int _height = 0;
 	std::vector<LaidOutBlock> _blocks;
 	std::vector<std::pair<QString, int>> _anchors;
+	std::vector<SelectableSegment> _segments;
 
 };
 
@@ -1209,23 +1554,62 @@ public:
 	void setZoom(int value);
 	[[nodiscard]] int anchorTop(const QString &anchorId) const;
 	[[nodiscard]] bool toggleDetails(const QString &anchorId);
+	[[nodiscard]] int lastRelayoutMs() const;
 	int resizeGetHeight(int newWidth) override;
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
+	void keyPressEvent(QKeyEvent *e) override;
+	void contextMenuEvent(QContextMenuEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
+	void mouseDoubleClickEvent(QMouseEvent *e) override;
+	void focusOutEvent(QFocusEvent *e) override;
+	void focusInEvent(QFocusEvent *e) override;
 	void leaveEventHook(QEvent *e) override;
 	void clickHandlerActiveChanged(const ClickHandlerPtr &, bool) override;
 	void clickHandlerPressedChanged(const ClickHandlerPtr &, bool) override;
 
 private:
+	enum DragAction {
+		NoDrag = 0x00,
+		PrepareDrag = 0x01,
+		Dragging = 0x02,
+		Selecting = 0x04,
+	};
+
 	[[nodiscard]] ClickHandlerPtr linkAt(QPoint point) const;
+	[[nodiscard]] DocumentHitTestResult hitTest(
+		QPoint point,
+		Ui::Text::StateRequest::Flags flags) const;
+	[[nodiscard]] DocumentSelection selectionForCopy() const;
+	[[nodiscard]] SelectionEndpoints selectionEndpointsForCopy() const;
+	[[nodiscard]] bool selectionContains(
+		DocumentSelection selection,
+		const DocumentHitTestResult &result) const;
+	[[nodiscard]] TextForMimeData textForSegment(
+		const SelectableSegment &segment,
+		TextSelection selection = AllTextSelection) const;
+	[[nodiscard]] TextForMimeData textForContext(
+		const DocumentHitTestResult &result) const;
+	[[nodiscard]] int selectionOffsetFromHit(
+		const DocumentHitTestResult &result) const;
+	[[nodiscard]] DocumentSelection selectionFromHit(
+		const DocumentHitTestResult &result) const;
+	[[nodiscard]] TextForMimeData getSelectedText() const;
+	void copySelectedText();
 
 	void relayoutCurrentWidth();
 	void forceRelayoutCurrentWidth();
-	void updateHover(QPoint point);
+	void updateHover(const DocumentHitTestResult &state);
+	void resetSelection();
+	void clearSelection();
+	void dragActionStart(QPoint point, Qt::MouseButton button);
+	DocumentHitTestResult dragActionUpdate(QPoint point);
+	DocumentHitTestResult dragActionFinish(
+		QPoint point,
+		Qt::MouseButton button);
 	void applyCursor(style::cursor cursor);
 	[[nodiscard]] double zoomScale() const;
 
@@ -1233,10 +1617,292 @@ private:
 	DocumentLayout _layout;
 	std::optional<SnapshotTextPalette> _textPalette;
 	std::function<void(const PreparedLink &, Qt::MouseButton)> _activateLink;
+	DocumentSelection _selection;
+	DocumentSelection _savedSelection;
+	SelectionEndpoints _selectionEndpoints;
+	SelectionEndpoints _savedSelectionEndpoints;
+	TextSelectType _selectionType = TextSelectType::Letters;
 	style::cursor _cursor = style::cur_default;
+	DragAction _dragAction = NoDrag;
+	QPoint _dragStartPosition;
+	int _dragSegment = -1;
+	int _dragSymbol = 0;
+	TextSelection _dragExpandedSelection;
+	int _lastRelayoutMs = 0;
 	int _zoom = 100;
+	base::unique_qptr<Ui::PopupMenu> _contextMenu;
 
 };
+
+struct PaintSelectionState {
+	const std::vector<SelectableSegment> *segments = nullptr;
+	DocumentSelection selection;
+	const SelectionEndpoints *endpoints = nullptr;
+
+	[[nodiscard]] bool empty() const {
+		return !segments || selection.empty();
+	}
+};
+
+[[nodiscard]] int CompareSelectionPositions(
+		DocumentSelectionPosition a,
+		DocumentSelectionPosition b) {
+	if (a.segment != b.segment) {
+		return (a.segment < b.segment) ? -1 : 1;
+	}
+	if (a.offset != b.offset) {
+		return (a.offset < b.offset) ? -1 : 1;
+	}
+	return 0;
+}
+
+[[nodiscard]] DocumentSelection NormalizeSelection(
+		DocumentSelection selection) {
+	if (selection.empty()) {
+		return {};
+	}
+	if (CompareSelectionPositions(selection.from, selection.to) > 0) {
+		std::swap(selection.from, selection.to);
+	}
+	return selection;
+}
+
+[[nodiscard]] SelectionEndpoint MakeSelectionEndpoint(
+		const DocumentHitTestResult &result) {
+	return {
+		.segment = result.segmentIndex,
+		.direct = result.direct,
+	};
+}
+
+[[nodiscard]] const SelectableSegment *FindSegment(
+		const std::vector<SelectableSegment> *segments,
+		int index) {
+	if (!segments || index < 0 || index >= int(segments->size())) {
+		return nullptr;
+	}
+	return &(*segments)[index];
+}
+
+[[nodiscard]] int LastTableCellSegmentIndex(
+		const std::vector<SelectableSegment> *segments,
+		int tableSegmentIndex) {
+	auto result = tableSegmentIndex;
+	if (!segments) {
+		return result;
+	}
+	for (const auto &segment : *segments) {
+		if (segment.tableSegmentIndex == tableSegmentIndex) {
+			result = std::max(result, segment.index);
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] int SegmentLength(const SelectableSegment &segment) {
+	return std::max(segment.length, 0);
+}
+
+[[nodiscard]] std::optional<int> SingleTableCellSelection(
+		const PaintSelectionState &selectionState,
+		int tableSegmentIndex) {
+	if (selectionState.empty()
+		|| !selectionState.endpoints
+		|| tableSegmentIndex < 0) {
+		return std::nullopt;
+	}
+	const auto normalized = NormalizeSelection(selectionState.selection);
+	if (normalized.empty()) {
+		return std::nullopt;
+	}
+	const auto lastCellSegment = LastTableCellSegmentIndex(
+		selectionState.segments,
+		tableSegmentIndex);
+	const auto spansWholeTable = (normalized.from.segment < tableSegmentIndex)
+		&& (normalized.to.segment > lastCellSegment);
+	auto tableHit = false;
+	auto cellSegment = -1;
+	auto multipleCells = false;
+	const auto consider = [&](SelectionEndpoint endpoint) {
+		if (!endpoint.valid() || !endpoint.direct) {
+			return;
+		}
+		const auto segment = FindSegment(selectionState.segments, endpoint.segment);
+		if (!segment) {
+			return;
+		}
+		if (segment->index == tableSegmentIndex) {
+			tableHit = true;
+			return;
+		}
+		if (segment->tableSegmentIndex != tableSegmentIndex) {
+			return;
+		}
+		if (cellSegment < 0) {
+			cellSegment = segment->index;
+		} else if (cellSegment != segment->index) {
+			multipleCells = true;
+		}
+	};
+	consider(selectionState.endpoints->from);
+	consider(selectionState.endpoints->to);
+	if (tableHit || multipleCells || cellSegment < 0 || spansWholeTable) {
+		return std::nullopt;
+	}
+	return cellSegment;
+}
+
+[[nodiscard]] std::optional<TextSelection> BaseTextSelectionForSegment(
+		const SelectableSegment &segment,
+		DocumentSelection selection) {
+	if (selection.empty() || !segment.isTextLeaf()) {
+		return std::nullopt;
+	}
+	selection = NormalizeSelection(selection);
+	if (selection.empty()
+		|| selection.from.segment > segment.index
+		|| selection.to.segment < segment.index) {
+		return std::nullopt;
+	}
+	auto from = 0;
+	auto to = SegmentLength(segment);
+	if (selection.from.segment == segment.index) {
+		from = selection.from.offset;
+	}
+	if (selection.to.segment == segment.index) {
+		to = selection.to.offset;
+	}
+	from = std::clamp(from, 0, SegmentLength(segment));
+	to = std::clamp(to, 0, SegmentLength(segment));
+	if (from >= to) {
+		return std::nullopt;
+	}
+	return TextSelection(uint16(from), uint16(to));
+}
+
+[[nodiscard]] bool RangeSelectsWholeSegment(
+		const SelectableSegment &segment,
+		DocumentSelection selection) {
+	selection = NormalizeSelection(selection);
+	if (selection.empty()
+		|| selection.from.segment > segment.index
+		|| selection.to.segment < segment.index) {
+		return false;
+	}
+	auto from = 0;
+	auto to = SegmentLength(segment);
+	if (selection.from.segment == segment.index) {
+		from = selection.from.offset;
+	}
+	if (selection.to.segment == segment.index) {
+		to = selection.to.offset;
+	}
+	from = std::clamp(from, 0, SegmentLength(segment));
+	to = std::clamp(to, 0, SegmentLength(segment));
+	return (from < to);
+}
+
+[[nodiscard]] bool TableSegmentSelected(
+		const PaintSelectionState &selectionState,
+		int tableSegmentIndex) {
+	if (selectionState.empty() || tableSegmentIndex < 0) {
+		return false;
+	}
+	if (SingleTableCellSelection(selectionState, tableSegmentIndex)) {
+		return false;
+	}
+	const auto normalized = NormalizeSelection(selectionState.selection);
+	if (normalized.empty()) {
+		return false;
+	}
+	auto selectedCells = 0;
+	auto selectedCellIndex = -1;
+	for (const auto &segment : *selectionState.segments) {
+		if (segment.tableSegmentIndex != tableSegmentIndex
+			|| segment.index == tableSegmentIndex) {
+			continue;
+		}
+		const auto textSelection = BaseTextSelectionForSegment(
+			segment,
+			normalized);
+		if (!textSelection || textSelection->empty()) {
+			continue;
+		}
+		if (++selectedCells == 1) {
+			selectedCellIndex = segment.index;
+		} else {
+			return true;
+		}
+	}
+	const auto table = FindSegment(selectionState.segments, tableSegmentIndex);
+	if (!table || !RangeSelectsWholeSegment(*table, normalized)) {
+		return false;
+	}
+	if (selectedCells != 1) {
+		return true;
+	}
+	if (normalized.from.segment == tableSegmentIndex
+		|| normalized.to.segment == tableSegmentIndex) {
+		return true;
+	}
+	const auto lower = std::min(tableSegmentIndex, selectedCellIndex);
+	const auto upper = std::max(tableSegmentIndex, selectedCellIndex);
+	return (normalized.from.segment < lower)
+		&& (normalized.to.segment > upper);
+}
+
+[[nodiscard]] std::optional<TextSelection> TextSelectionForSegment(
+		const SelectableSegment &segment,
+		const PaintSelectionState &selectionState) {
+	if (selectionState.empty()) {
+		return std::nullopt;
+	}
+	if (segment.tableSegmentIndex >= 0) {
+		if (const auto singleCell = SingleTableCellSelection(
+				selectionState,
+				segment.tableSegmentIndex);
+			singleCell && *singleCell != segment.index) {
+			return std::nullopt;
+		}
+	}
+	if (segment.tableSegmentIndex >= 0
+		&& TableSegmentSelected(
+			selectionState,
+			segment.tableSegmentIndex)) {
+		return std::nullopt;
+	}
+	return BaseTextSelectionForSegment(segment, selectionState.selection);
+}
+
+[[nodiscard]] std::optional<TextSelection> TextSelectionForSegmentIndex(
+		const PaintSelectionState &selectionState,
+		int index) {
+	const auto segment = FindSegment(selectionState.segments, index);
+	return segment
+		? TextSelectionForSegment(*segment, selectionState)
+		: std::nullopt;
+}
+
+[[nodiscard]] bool WholeSegmentSelected(
+		const SelectableSegment &segment,
+		const PaintSelectionState &selectionState) {
+	if (selectionState.empty() || segment.isTextLeaf()) {
+		return false;
+	}
+	if (segment.kind == SelectableSegmentKind::Table) {
+		return TableSegmentSelected(selectionState, segment.index);
+	}
+	return RangeSelectsWholeSegment(segment, selectionState.selection);
+}
+
+[[nodiscard]] bool WholeSegmentSelected(
+		const PaintSelectionState &selectionState,
+		int index) {
+	const auto segment = FindSegment(selectionState.segments, index);
+	return segment
+		? WholeSegmentSelected(*segment, selectionState)
+		: false;
+}
 
 void PaintTextLeaf(
 		Painter &p,
@@ -1244,7 +1910,8 @@ void PaintTextLeaf(
 		QRect rect,
 		int width,
 		QRect clip,
-		style::align align = style::al_left) {
+		style::align align = style::al_left,
+		std::optional<TextSelection> selection = std::nullopt) {
 	leaf.draw(p, {
 		.position = rect.topLeft(),
 		.availableWidth = width,
@@ -1254,6 +1921,7 @@ void PaintTextLeaf(
 		.palette = &p.textPalette(),
 		.spoiler = Ui::Text::DefaultSpoilerCache(),
 		.now = crl::now(),
+		.selection = selection.value_or(TextSelection()),
 	});
 }
 
@@ -1301,12 +1969,14 @@ void PaintBlocks(
 	Painter &p,
 	const std::vector<LaidOutBlock> &blocks,
 	const PreparedResult &prepared,
+	const PaintSelectionState &selectionState,
 	QRect clip);
 
 void PaintTableBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const MarkdownStyleSnapshot &style,
+		const PaintSelectionState &selectionState,
 		QRect clip) {
 	const auto tableClip = clip.intersected(block.visibleTableRect);
 	if (tableClip.isEmpty()) {
@@ -1384,8 +2054,16 @@ void PaintTableBlock(
 				cell.textRect,
 				cell.textWidth,
 				tableClip,
-				cell.align);
+				cell.align,
+				TextSelectionForSegmentIndex(
+					selectionState,
+					cell.segmentIndex));
 		}
+	}
+
+	if (block.segmentIndex >= 0
+		&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
+		p.fillRect(block.visibleTableRect, p.textPalette().selectOverlay);
 	}
 
 	if (block.overflowed) {
@@ -1410,6 +2088,7 @@ void PaintDisplayMathBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const PreparedResult &prepared,
+		const PaintSelectionState &selectionState,
 		QRect clip) {
 	const auto formulaClip = clip.intersected(block.visibleFormulaRect);
 	if (formulaClip.isEmpty()) {
@@ -1442,6 +2121,11 @@ void PaintDisplayMathBlock(
 			formulaClip);
 	}
 
+	if (block.segmentIndex >= 0
+		&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
+		p.fillRect(block.visibleFormulaRect, p.textPalette().selectOverlay);
+	}
+
 	if (block.overflowed) {
 		const auto indicatorWidth = std::min(
 			std::max(style.displayMathOverflowWidth, 1),
@@ -1464,6 +2148,7 @@ void PaintBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const PreparedResult &prepared,
+		const PaintSelectionState &selectionState,
 		QRect clip) {
 	if (!block.outer.intersects(clip)) {
 		return;
@@ -1474,7 +2159,16 @@ void PaintBlock(
 	case PreparedBlockKind::Paragraph:
 	case PreparedBlockKind::Heading:
 		p.setPen(style.defaultTextColor);
-		PaintTextLeaf(p, block.leaf, block.textRect, block.textWidth, clip);
+		PaintTextLeaf(
+			p,
+			block.leaf,
+			block.textRect,
+			block.textWidth,
+			clip,
+			style::al_left,
+			TextSelectionForSegmentIndex(
+				selectionState,
+				block.segmentIndex));
 		break;
 	case PreparedBlockKind::CodeBlock: {
 		const auto radius = style.codeRadius;
@@ -1496,13 +2190,22 @@ void PaintBlock(
 				clip);
 		}
 		p.setPen(style.defaultTextColor);
-		PaintTextLeaf(p, block.leaf, block.textRect, block.textWidth, clip);
+		PaintTextLeaf(
+			p,
+			block.leaf,
+			block.textRect,
+			block.textWidth,
+			clip,
+			style::al_left,
+			TextSelectionForSegmentIndex(
+				selectionState,
+				block.segmentIndex));
 	} break;
 	case PreparedBlockKind::Rule:
 		p.fillRect(block.outer, style.ruleColor);
 		break;
 	case PreparedBlockKind::List:
-		PaintBlocks(p, block.children, prepared, clip);
+		PaintBlocks(p, block.children, prepared, selectionState, clip);
 		break;
 	case PreparedBlockKind::ListItem:
 		if (block.taskState != TaskState::None) {
@@ -1516,17 +2219,17 @@ void PaintBlock(
 				block.markerWidth,
 				clip);
 		}
-		PaintBlocks(p, block.children, prepared, clip);
+		PaintBlocks(p, block.children, prepared, selectionState, clip);
 		break;
 	case PreparedBlockKind::Quote:
 		p.fillRect(block.borderRect, style.quoteBorderColor);
-		PaintBlocks(p, block.children, prepared, clip);
+		PaintBlocks(p, block.children, prepared, selectionState, clip);
 		break;
 	case PreparedBlockKind::DisplayMath:
-		PaintDisplayMathBlock(p, block, prepared, clip);
+		PaintDisplayMathBlock(p, block, prepared, selectionState, clip);
 		break;
 	case PreparedBlockKind::Table:
-		PaintTableBlock(p, block, style, clip);
+		PaintTableBlock(p, block, style, selectionState, clip);
 		break;
 	case PreparedBlockKind::Details:
 		PaintTextLeaf(
@@ -1534,8 +2237,12 @@ void PaintBlock(
 			block.leaf,
 			block.textRect,
 			block.textWidth,
-			clip);
-		PaintBlocks(p, block.children, prepared, clip);
+			clip,
+			style::al_left,
+			TextSelectionForSegmentIndex(
+				selectionState,
+				block.segmentIndex));
+		PaintBlocks(p, block.children, prepared, selectionState, clip);
 		break;
 	}
 }
@@ -1544,6 +2251,7 @@ void PaintBlocks(
 		Painter &p,
 		const std::vector<LaidOutBlock> &blocks,
 		const PreparedResult &prepared,
+		const PaintSelectionState &selectionState,
 		QRect clip) {
 	for (const auto &block : blocks) {
 		if (block.outer.bottom() < clip.top()) {
@@ -1551,7 +2259,7 @@ void PaintBlocks(
 		} else if (block.outer.top() > clip.bottom()) {
 			break;
 		}
-		PaintBlock(p, block, prepared, clip);
+		PaintBlock(p, block, prepared, selectionState, clip);
 	}
 }
 
@@ -1560,126 +2268,111 @@ void PaintBlocks(
 		QRect rect,
 		int width,
 		QPoint point,
-		style::align align = style::al_left) {
-	if (!rect.contains(point)) {
+		Ui::Text::StateRequest::Flags flags,
+		style::align align = style::al_left,
+		bool clampToRect = false) {
+	if (rect.isEmpty()) {
 		return {};
+	}
+	if (!rect.contains(point)) {
+		if (!clampToRect) {
+			return {};
+		}
+		point.setX(std::clamp(point.x(), rect.left(), rect.right()));
+		point.setY(std::clamp(point.y(), rect.top(), rect.bottom()));
 	}
 	auto request = Ui::Text::StateRequest();
 	request.align = align;
-	request.flags |= Ui::Text::StateRequest::Flag::BreakEverywhere;
+	request.flags = flags | Ui::Text::StateRequest::Flag::BreakEverywhere;
 	return leaf.getState(
 		point - rect.topLeft(),
 		TextGeometry(width),
 		request);
 }
 
-[[nodiscard]] ClickHandlerPtr LinkAtTextLeaf(
-		const Ui::Text::String &leaf,
-		QRect rect,
-		int width,
+[[nodiscard]] DocumentHitTestResult HitSegmentBoundary(
+		const SelectableSegment &segment,
+		int offset) {
+	auto result = DocumentHitTestResult();
+	result.segmentIndex = segment.index;
+	result.forcedOffset = std::clamp(offset, 0, SegmentLength(segment));
+	result.state.uponSymbol = true;
+	result.state.afterSymbol = (result.forcedOffset > 0);
+	return result;
+}
+
+[[nodiscard]] DocumentHitTestResult HitTextSegment(
+		const SelectableSegment &segment,
 		QPoint point,
-		style::align align = style::al_left) {
-	const auto state = TextStateAtLeaf(leaf, rect, width, point, align);
-	return state.link;
-}
-
-[[nodiscard]] ClickHandlerPtr LinkAtTextBlock(
-		const LaidOutBlock &block,
-		QPoint point) {
-	return LinkAtTextLeaf(
-		block.leaf,
-		block.textRect,
-		block.textWidth,
-		point);
-}
-
-[[nodiscard]] ClickHandlerPtr LinkAtTableCell(
-		const LaidOutTableCell &cell,
-		QPoint point) {
-	return LinkAtTextLeaf(
-		cell.leaf,
-		cell.textRect,
-		cell.textWidth,
+		Ui::Text::StateRequest::Flags flags) {
+	if (!segment.isTextLeaf() || !segment.outerRect.contains(point)) {
+		return {};
+	}
+	const auto insideText = segment.textRect.contains(point);
+	if (!insideText
+		&& !(flags & Ui::Text::StateRequest::Flag::LookupSymbol)) {
+		return {};
+	}
+	auto result = DocumentHitTestResult();
+	result.segmentIndex = segment.index;
+	result.state = TextStateAtLeaf(
+		*segment.leaf,
+		segment.textRect,
+		segment.textWidth,
 		point,
-		cell.align);
+		flags,
+		segment.align,
+		!insideText);
+	if (!insideText) {
+		result.state.link = nullptr;
+	}
+	result.direct = true;
+	return result;
 }
 
-[[nodiscard]] ClickHandlerPtr LinkAtTableBlock(
-		const LaidOutBlock &block,
+[[nodiscard]] DocumentHitTestResult HitBlockSegment(
+		const SelectableSegment &segment,
+		QPoint point,
+		Ui::Text::StateRequest::Flags flags) {
+	if (segment.isTextLeaf()
+		|| !(flags & Ui::Text::StateRequest::Flag::LookupSymbol)
+		|| !segment.outerRect.contains(point)) {
+		return {};
+	}
+	const auto after = (point.y() > segment.outerRect.center().y())
+		|| ((point.y() == segment.outerRect.center().y())
+			&& (point.x() >= segment.outerRect.center().x()));
+	auto result = HitSegmentBoundary(
+		segment,
+		after ? SegmentLength(segment) : 0);
+	result.direct = true;
+	return result;
+}
+
+[[nodiscard]] DocumentHitTestResult HitSegmentFallback(
+		const std::vector<SelectableSegment> &segments,
 		QPoint point) {
-	const auto visibleTableRect = block.visibleTableRect;
-	for (const auto &row : block.tableRows) {
-		if (!row.outer.intersects(visibleTableRect)) {
-			continue;
-		} else if (row.outer.bottom() < point.y()) {
-			continue;
-		} else if (row.outer.top() > point.y()) {
-			break;
+	if (segments.empty()) {
+		return {};
+	}
+	for (const auto &segment : segments) {
+		const auto &rect = segment.outerRect;
+		if (point.y() < rect.top()) {
+			return HitSegmentBoundary(segment, 0);
 		}
-		for (const auto &cell : row.cells) {
-			if (!cell.outer.intersects(visibleTableRect)) {
-				continue;
-			} else if (cell.outer.right() < point.x()) {
-				continue;
-			} else if (cell.outer.left() > point.x()) {
-				break;
+		if (point.y() <= rect.bottom()) {
+			if (point.x() < rect.left()) {
+				return HitSegmentBoundary(segment, 0);
+			} else if (point.x() > rect.right()) {
+				return HitSegmentBoundary(
+					segment,
+					SegmentLength(segment));
 			}
-			if (const auto result = LinkAtTableCell(cell, point)) {
-				return result;
-			}
 		}
 	}
-	return nullptr;
-}
-
-[[nodiscard]] ClickHandlerPtr LinkAtBlocks(
-	const std::vector<LaidOutBlock> &blocks,
-	QPoint point);
-
-[[nodiscard]] ClickHandlerPtr LinkAtBlock(
-		const LaidOutBlock &block,
-		QPoint point) {
-	if (!block.outer.contains(point)) {
-		return nullptr;
-	}
-	switch (block.kind) {
-	case PreparedBlockKind::Paragraph:
-	case PreparedBlockKind::Heading:
-		return LinkAtTextBlock(block, point);
-	case PreparedBlockKind::List:
-	case PreparedBlockKind::ListItem:
-	case PreparedBlockKind::Quote:
-		return LinkAtBlocks(block.children, point);
-	case PreparedBlockKind::DisplayMath:
-		return nullptr;
-	case PreparedBlockKind::Table:
-		return LinkAtTableBlock(block, point);
-	case PreparedBlockKind::Details:
-		if (const auto result = LinkAtTextBlock(block, point)) {
-			return result;
-		}
-		return LinkAtBlocks(block.children, point);
-	case PreparedBlockKind::CodeBlock:
-	case PreparedBlockKind::Rule:
-		return nullptr;
-	}
-	return nullptr;
-}
-
-[[nodiscard]] ClickHandlerPtr LinkAtBlocks(
-		const std::vector<LaidOutBlock> &blocks,
-		QPoint point) {
-	for (const auto &block : blocks) {
-		if (block.outer.bottom() < point.y()) {
-			continue;
-		} else if (block.outer.top() > point.y()) {
-			break;
-		}
-		if (const auto result = LinkAtBlock(block, point)) {
-			return result;
-		}
-	}
-	return nullptr;
+	return HitSegmentBoundary(
+		segments.back(),
+		SegmentLength(segments.back()));
 }
 
 void CollectAnchors(
@@ -1706,6 +2399,7 @@ void DocumentLayout::relayout(
 	_width = width;
 	_blocks.clear();
 	_anchors.clear();
+	_segments.clear();
 
 	const auto &page = prepared.style.pagePadding;
 	const auto innerWidth = std::max(width - page.left() - page.right(), 1);
@@ -1720,6 +2414,7 @@ void DocumentLayout::relayout(
 		{});
 	_height = y + page.bottom();
 	CollectAnchors(_blocks, &_anchors);
+	CollectSelectableSegments(&_blocks, &_segments);
 }
 
 void DocumentLayout::invalidate() {
@@ -1727,6 +2422,7 @@ void DocumentLayout::invalidate() {
 	_height = 0;
 	_blocks.clear();
 	_anchors.clear();
+	_segments.clear();
 }
 
 int DocumentLayout::height() const {
@@ -1744,6 +2440,35 @@ int DocumentLayout::anchorTop(const QString &anchorId) const {
 
 const std::vector<LaidOutBlock> &DocumentLayout::blocks() const {
 	return _blocks;
+}
+
+const std::vector<SelectableSegment> &DocumentLayout::segments() const {
+	return _segments;
+}
+
+const SelectableSegment *DocumentLayout::segment(int index) const {
+	return FindSegment(&_segments, index);
+}
+
+DocumentHitTestResult DocumentLayout::hitTest(
+		QPoint point,
+		Ui::Text::StateRequest::Flags flags) const {
+	for (const auto &segment : _segments) {
+		if (const auto result = HitTextSegment(segment, point, flags);
+			result.valid()) {
+			return result;
+		}
+	}
+	for (const auto &segment : _segments) {
+		if (const auto result = HitBlockSegment(segment, point, flags);
+			result.valid()) {
+			return result;
+		}
+	}
+	if (flags & Ui::Text::StateRequest::Flag::LookupSymbol) {
+		return HitSegmentFallback(_segments, point);
+	}
+	return {};
 }
 
 [[nodiscard]] bool ToggleDetailsBlock(
@@ -1776,6 +2501,7 @@ MarkdownDocumentWidget::MarkdownDocumentWidget(
 	QWidget *parent)
 : Ui::RpWidget(parent) {
 	setMouseTracking(true);
+	setFocusPolicy(Qt::StrongFocus);
 }
 
 void MarkdownDocumentWidget::setLinkActivationCallback(
@@ -1787,8 +2513,10 @@ void MarkdownDocumentWidget::setPreparedResult(PreparedResult prepared) {
 	ClickHandler::clearActive(this);
 	applyCursor(style::cur_default);
 	_layout.invalidate();
+	_lastRelayoutMs = 0;
 	_prepared = std::move(prepared);
 	_textPalette.emplace(_prepared.style.textPalette);
+	resetSelection();
 	forceRelayoutCurrentWidth();
 }
 
@@ -1798,6 +2526,7 @@ void MarkdownDocumentWidget::setZoom(int value) {
 		return;
 	}
 	_zoom = value;
+	clearSelection();
 	forceRelayoutCurrentWidth();
 }
 
@@ -1813,17 +2542,26 @@ bool MarkdownDocumentWidget::toggleDetails(const QString &anchorId) {
 	if (!ToggleDetailsBlock(&_prepared.blocks.blocks, anchorId)) {
 		return false;
 	}
+	clearSelection();
 	_layout.invalidate();
 	forceRelayoutCurrentWidth();
 	return true;
 }
 
+int MarkdownDocumentWidget::lastRelayoutMs() const {
+	return _lastRelayoutMs;
+}
+
 int MarkdownDocumentWidget::resizeGetHeight(int newWidth) {
 	ClickHandler::clearActive(this);
 	applyCursor(style::cur_default);
+	clearSelection();
 	const auto scale = zoomScale();
 	const auto layoutWidth = std::max(int(std::floor(newWidth / scale)), 1);
+	auto timer = QElapsedTimer();
+	timer.start();
 	_layout.relayout(_prepared, layoutWidth);
+	_lastRelayoutMs = int(timer.elapsed());
 	return std::max(int(std::ceil(_layout.height() * scale)), 1);
 }
 
@@ -1832,10 +2570,20 @@ void MarkdownDocumentWidget::paintEvent(QPaintEvent *e) {
 	if (_textPalette) {
 		p.setTextPalette(_textPalette->palette);
 	}
+	const auto selectionState = PaintSelectionState{
+		.segments = &_layout.segments(),
+		.selection = _selection,
+		.endpoints = &_selectionEndpoints,
+	};
 
 	const auto scale = zoomScale();
 	if (scale == 1.) {
-		PaintBlocks(p, _layout.blocks(), _prepared, e->rect());
+		PaintBlocks(
+			p,
+			_layout.blocks(),
+			_prepared,
+			selectionState,
+			e->rect());
 		return;
 	}
 	const auto clip = QRect(
@@ -1845,46 +2593,187 @@ void MarkdownDocumentWidget::paintEvent(QPaintEvent *e) {
 		int(std::ceil(e->rect().height() / scale)) + 1);
 	p.save();
 	p.scale(scale, scale);
-	PaintBlocks(p, _layout.blocks(), _prepared, clip);
+	PaintBlocks(p, _layout.blocks(), _prepared, selectionState, clip);
 	p.restore();
 }
 
+void MarkdownDocumentWidget::keyPressEvent(QKeyEvent *e) {
+	if (e == QKeySequence::Copy && !selectionForCopy().empty()) {
+		copySelectedText();
+		return;
+	}
+	Ui::RpWidget::keyPressEvent(e);
+}
+
+void MarkdownDocumentWidget::contextMenuEvent(QContextMenuEvent *e) {
+	const auto globalPoint = (e->reason() == QContextMenuEvent::Mouse)
+		? e->globalPos()
+		: QCursor::pos();
+	const auto localPoint = (e->reason() == QContextMenuEvent::Mouse)
+		? e->pos()
+		: mapFromGlobal(globalPoint);
+	const auto state = hitTest(
+		localPoint,
+		Ui::Text::StateRequest::Flag::LookupLink
+			| Ui::Text::StateRequest::Flag::LookupSymbol);
+	const auto selection = selectionForCopy();
+	const auto uponSelection = !selection.empty()
+		&& ((e->reason() != QContextMenuEvent::Mouse)
+			|| selectionContains(selection, state));
+	const auto contextText = uponSelection ? TextForMimeData() : textForContext(state);
+	const auto link = state.direct
+		? std::dynamic_pointer_cast<PreparedLinkClickHandler>(state.state.link)
+		: nullptr;
+
+	_contextMenu = base::make_unique_q<Ui::PopupMenu>(this);
+	if (uponSelection) {
+		_contextMenu->addAction(
+			Ui::Integration::Instance().phraseContextCopySelected(),
+			[=] { copySelectedText(); },
+			&st::menuIconCopy);
+	} else if (!contextText.empty()) {
+		_contextMenu->addAction(
+			tr::lng_context_copy_text(tr::now),
+			[text = contextText] {
+				TextUtilities::SetClipboardText(text);
+			},
+			&st::menuIconCopy);
+	}
+
+	if (link) {
+		if (const auto label = link->copyToClipboardContextItemText();
+			!label.isEmpty()) {
+			_contextMenu->addAction(
+				label,
+				[text = link->copyToClipboardText()] {
+					QGuiApplication::clipboard()->setText(text);
+				},
+				&st::menuIconCopy);
+		}
+		switch (link->link().kind) {
+		case PreparedLinkKind::RejectedRelative:
+		case PreparedLinkKind::ToggleDetails:
+			break;
+		case PreparedLinkKind::External:
+		case PreparedLinkKind::Anchor:
+		case PreparedLinkKind::Footnote:
+		case PreparedLinkKind::FootnoteBacklink:
+		case PreparedLinkKind::LocalFile:
+			_contextMenu->addAction(
+				tr::lng_open_link(tr::now),
+				[=, prepared = link->link()] {
+					if (_activateLink) {
+						_activateLink(prepared, Qt::LeftButton);
+					}
+				},
+				&st::menuIconAddress);
+			break;
+		}
+	}
+
+	if (_contextMenu->empty()) {
+		_contextMenu = nullptr;
+		return;
+	}
+	_contextMenu->popup(globalPoint);
+	e->accept();
+}
+
 void MarkdownDocumentWidget::mouseMoveEvent(QMouseEvent *e) {
-	updateHover(e->pos());
+	dragActionUpdate(e->pos());
 }
 
 void MarkdownDocumentWidget::mousePressEvent(QMouseEvent *e) {
-	updateHover(e->pos());
-	if (e->button() == Qt::LeftButton || e->button() == Qt::MiddleButton) {
+	if (e->button() == Qt::LeftButton) {
+		dragActionStart(e->pos(), e->button());
+		return;
+	}
+	updateHover(hitTest(
+		e->pos(),
+		Ui::Text::StateRequest::Flag::LookupLink
+			| Ui::Text::StateRequest::Flag::LookupSymbol));
+	if (e->button() == Qt::MiddleButton) {
 		ClickHandler::pressed();
 	}
 }
 
 void MarkdownDocumentWidget::mouseReleaseEvent(QMouseEvent *e) {
-	const auto activated = ClickHandler::unpressed();
-	if (activated
-		&& (e->button() == Qt::LeftButton
-			|| e->button() == Qt::MiddleButton)) {
-		if (const auto prepared = std::dynamic_pointer_cast<PreparedLinkClickHandler>(
-				activated)) {
-			if (_activateLink) {
-				_activateLink(prepared->link(), e->button());
-			}
-		} else {
-			ActivateClickHandler(window(), activated, e->button());
-		}
-	}
-	if (rect().contains(e->pos())) {
-		updateHover(e->pos());
-	} else {
+	dragActionFinish(e->pos(), e->button());
+	if (!rect().contains(e->pos())) {
 		ClickHandler::clearActive(this);
 		applyCursor(style::cur_default);
 	}
 }
 
-void MarkdownDocumentWidget::leaveEventHook(QEvent *e) {
+void MarkdownDocumentWidget::mouseDoubleClickEvent(QMouseEvent *e) {
+	dragActionStart(e->pos(), e->button());
+	if (_dragAction != Selecting || _selectionType != TextSelectType::Letters) {
+		return;
+	}
+	const auto state = hitTest(
+		e->pos(),
+		Ui::Text::StateRequest::Flag::LookupLink
+			| Ui::Text::StateRequest::Flag::LookupSymbol);
+	const auto segment = _layout.segment(state.segmentIndex);
+	if (!segment
+		|| !segment->isTextLeaf()
+		|| !state.direct
+		|| !state.state.uponSymbol) {
+		return;
+	}
+	_dragSegment = state.segmentIndex;
+	_dragSymbol = std::clamp(
+		int(state.state.symbol),
+		0,
+		SegmentLength(*segment));
+	_selectionType = TextSelectType::Words;
+	_selection = selectionFromHit(state);
+	_savedSelection = {};
+	_selectionEndpoints = {
+		.from = MakeSelectionEndpoint(state),
+		.to = MakeSelectionEndpoint(state),
+	};
+	_savedSelectionEndpoints = {};
+	if (_selection.from.segment == _dragSegment
+		&& _selection.to.segment == _dragSegment) {
+		_dragExpandedSelection = TextSelection(
+			uint16(_selection.from.offset),
+			uint16(_selection.to.offset));
+	}
+	setFocus();
+	updateHover(state);
+	update();
+}
+
+void MarkdownDocumentWidget::focusOutEvent(QFocusEvent *e) {
+	if (!_selection.empty()) {
+		_savedSelection = _selection;
+		_savedSelectionEndpoints = _selectionEndpoints;
+		_selection = {};
+		_selectionEndpoints = {};
+		update();
+	}
 	ClickHandler::clearActive(this);
 	applyCursor(style::cur_default);
+	Ui::RpWidget::focusOutEvent(e);
+}
+
+void MarkdownDocumentWidget::focusInEvent(QFocusEvent *e) {
+	if (!_savedSelection.empty()) {
+		_selection = _savedSelection;
+		_selectionEndpoints = _savedSelectionEndpoints;
+		_savedSelection = {};
+		_savedSelectionEndpoints = {};
+		update();
+	}
+	Ui::RpWidget::focusInEvent(e);
+}
+
+void MarkdownDocumentWidget::leaveEventHook(QEvent *e) {
+	ClickHandler::clearActive(this);
+	applyCursor((_dragAction == Selecting)
+		? style::cur_text
+		: style::cur_default);
 	Ui::RpWidget::leaveEventHook(e);
 }
 
@@ -1901,19 +2790,218 @@ void MarkdownDocumentWidget::clickHandlerPressedChanged(
 }
 
 ClickHandlerPtr MarkdownDocumentWidget::linkAt(QPoint point) const {
+	return hitTest(
+		point,
+		Ui::Text::StateRequest::Flag::LookupLink
+			| Ui::Text::StateRequest::Flag::LookupSymbol).state.link;
+}
+
+DocumentHitTestResult MarkdownDocumentWidget::hitTest(
+		QPoint point,
+		Ui::Text::StateRequest::Flags flags) const {
 	const auto scale = zoomScale();
 	if (scale != 1.) {
 		point = QPoint(
 			int(std::floor(point.x() / scale)),
 			int(std::floor(point.y() / scale)));
 	}
-	return LinkAtBlocks(_layout.blocks(), point);
+	return _layout.hitTest(point, flags);
+}
+
+DocumentSelection MarkdownDocumentWidget::selectionForCopy() const {
+	return !_selection.empty()
+		? _selection
+		: _contextMenu
+		? _savedSelection
+		: DocumentSelection();
+}
+
+SelectionEndpoints MarkdownDocumentWidget::selectionEndpointsForCopy() const {
+	return !_selection.empty()
+		? _selectionEndpoints
+		: _contextMenu
+		? _savedSelectionEndpoints
+		: SelectionEndpoints();
+}
+
+bool MarkdownDocumentWidget::selectionContains(
+		DocumentSelection selection,
+		const DocumentHitTestResult &result) const {
+	const auto segment = _layout.segment(result.segmentIndex);
+	if (!segment || selection.empty() || !result.valid()) {
+		return false;
+	}
+	const auto endpoints = selectionEndpointsForCopy();
+	const auto selectionState = PaintSelectionState{
+		.segments = &_layout.segments(),
+		.selection = selection,
+		.endpoints = &endpoints,
+	};
+	if (segment->tableSegmentIndex >= 0
+		&& TableSegmentSelected(selectionState, segment->tableSegmentIndex)) {
+		return true;
+	}
+	if (!segment->isTextLeaf()) {
+		return WholeSegmentSelected(*segment, selectionState);
+	}
+	const auto textSelection = TextSelectionForSegment(*segment, selectionState);
+	if (!textSelection || textSelection->empty()) {
+		return false;
+	}
+	const auto offset = selectionOffsetFromHit(result);
+	return (offset >= textSelection->from) && (offset < textSelection->to);
+}
+
+TextForMimeData MarkdownDocumentWidget::textForSegment(
+		const SelectableSegment &segment,
+		TextSelection selection) const {
+	switch (segment.kind) {
+	case SelectableSegmentKind::TextLeaf:
+		return segment.leaf
+			? segment.leaf->toTextForMimeData(selection)
+			: TextForMimeData();
+	case SelectableSegmentKind::CodeBlock:
+		return segment.block
+			? CopyTextForCodeBlock(*segment.block, selection)
+			: TextForMimeData();
+	case SelectableSegmentKind::DisplayMath:
+		return segment.block
+			? CopyTextForDisplayMath(*segment.block)
+			: TextForMimeData();
+	case SelectableSegmentKind::Table:
+		return segment.block
+			? CopyTextForTable(*segment.block)
+			: TextForMimeData();
+	}
+	return TextForMimeData();
+}
+
+TextForMimeData MarkdownDocumentWidget::textForContext(
+		const DocumentHitTestResult &result) const {
+	if (!result.valid() || !result.direct) {
+		return TextForMimeData();
+	}
+	const auto segment = _layout.segment(result.segmentIndex);
+	if (!segment) {
+		return TextForMimeData();
+	}
+	return textForSegment(*segment);
+}
+
+int MarkdownDocumentWidget::selectionOffsetFromHit(
+		const DocumentHitTestResult &result) const {
+	const auto segment = _layout.segment(result.segmentIndex);
+	if (!segment) {
+		return 0;
+	}
+	if (result.forcedOffset >= 0) {
+		return std::clamp(result.forcedOffset, 0, SegmentLength(*segment));
+	}
+	auto offset = int(result.state.symbol);
+	if (_selectionType == TextSelectType::Letters
+		&& result.state.afterSymbol) {
+		++offset;
+	}
+	return std::clamp(offset, 0, SegmentLength(*segment));
+}
+
+DocumentSelection MarkdownDocumentWidget::selectionFromHit(
+		const DocumentHitTestResult &result) const {
+	if (_dragSegment < 0 || !result.valid()) {
+		return {};
+	}
+	auto first = _dragSymbol;
+	auto second = selectionOffsetFromHit(result);
+	if (_selectionType != TextSelectType::Letters
+		&& !_dragExpandedSelection.empty()
+		&& result.segmentIndex != _dragSegment) {
+		first = (CompareSelectionPositions(
+			DocumentSelectionPosition{ result.segmentIndex, second },
+			DocumentSelectionPosition{ _dragSegment, _dragSymbol }) < 0)
+			? _dragExpandedSelection.to
+			: _dragExpandedSelection.from;
+	}
+	if (result.segmentIndex == _dragSegment) {
+		if (const auto segment = _layout.segment(_dragSegment);
+			segment && segment->isTextLeaf()) {
+			const auto adjusted = segment->leaf->adjustSelection(
+				TextSelection(
+					uint16(std::min(first, second)),
+					uint16(std::max(first, second))),
+				_selectionType);
+			return {
+				{ _dragSegment, adjusted.from },
+				{ _dragSegment, adjusted.to },
+			};
+		}
+	}
+	return NormalizeSelection({
+		{ _dragSegment, first },
+		{ result.segmentIndex, second },
+	});
+}
+
+TextForMimeData MarkdownDocumentWidget::getSelectedText() const {
+	const auto selection = selectionForCopy();
+	if (selection.empty()) {
+		return TextForMimeData();
+	}
+	const auto endpoints = selectionEndpointsForCopy();
+	const auto selectionState = PaintSelectionState{
+		.segments = &_layout.segments(),
+		.selection = selection,
+		.endpoints = &endpoints,
+	};
+	auto pieces = std::vector<TextForMimeData>();
+	for (const auto &segment : _layout.segments()) {
+		if (segment.isTextLeaf()) {
+			if (const auto textSelection = TextSelectionForSegment(
+					segment,
+					selectionState);
+				textSelection && !textSelection->empty()) {
+				if (auto text = textForSegment(segment, *textSelection);
+					!text.empty()) {
+					pieces.push_back(std::move(text));
+				}
+			}
+			continue;
+		}
+		if (!WholeSegmentSelected(segment, selectionState)) {
+			continue;
+		}
+		if (auto text = textForSegment(segment); !text.empty()) {
+			pieces.push_back(std::move(text));
+		}
+	}
+	if (pieces.empty()) {
+		return TextForMimeData();
+	} else if (pieces.size() == 1) {
+		return std::move(pieces.front());
+	}
+	auto result = TextForMimeData();
+	for (auto i = 0, count = int(pieces.size()); i != count; ++i) {
+		if (i) {
+			result.append(u"\n"_q);
+		}
+		result.append(std::move(pieces[i]));
+	}
+	return result;
+}
+
+void MarkdownDocumentWidget::copySelectedText() {
+	if (const auto text = getSelectedText(); !text.empty()) {
+		TextUtilities::SetClipboardText(text);
+	}
 }
 
 void MarkdownDocumentWidget::relayoutCurrentWidth() {
+	clearSelection();
 	const auto scale = zoomScale();
 	const auto layoutWidth = std::max(int(std::floor(width() / scale)), 1);
+	auto timer = QElapsedTimer();
+	timer.start();
 	_layout.relayout(_prepared, layoutWidth);
+	_lastRelayoutMs = int(timer.elapsed());
 }
 
 void MarkdownDocumentWidget::forceRelayoutCurrentWidth() {
@@ -1921,11 +3009,160 @@ void MarkdownDocumentWidget::forceRelayoutCurrentWidth() {
 	update();
 }
 
-void MarkdownDocumentWidget::updateHover(QPoint point) {
-	ClickHandler::setActive(linkAt(point), this);
-	applyCursor(ClickHandler::getActive()
-		? style::cur_pointer
-		: style::cur_default);
+void MarkdownDocumentWidget::updateHover(const DocumentHitTestResult &state) {
+	const auto changed = ClickHandler::setActive(state.state.link, this);
+	auto cursor = style::cur_default;
+	if (_dragAction == NoDrag) {
+		if (state.state.link) {
+			cursor = style::cur_pointer;
+		} else if (state.direct) {
+			cursor = style::cur_text;
+		}
+	} else {
+		if (_dragAction == Selecting) {
+			const auto selection = selectionFromHit(state);
+			const auto endpoints = SelectionEndpoints{
+				.from = _selectionEndpoints.from.valid()
+					? _selectionEndpoints.from
+					: SelectionEndpoint{ _dragSegment, false },
+				.to = MakeSelectionEndpoint(state),
+			};
+			const auto endpointsChanged
+				= (_selectionEndpoints.from.segment != endpoints.from.segment)
+				|| (_selectionEndpoints.from.direct != endpoints.from.direct)
+				|| (_selectionEndpoints.to.segment != endpoints.to.segment)
+				|| (_selectionEndpoints.to.direct != endpoints.to.direct);
+			if (_selection != selection || endpointsChanged) {
+				_selection = selection;
+				_selectionEndpoints = endpoints;
+				_savedSelection = {};
+				_savedSelectionEndpoints = {};
+				setFocus();
+				update();
+			} else {
+				_selectionEndpoints = endpoints;
+			}
+			cursor = style::cur_text;
+		} else if (ClickHandler::getPressed()) {
+			cursor = style::cur_pointer;
+		}
+	}
+	if (changed || cursor != _cursor) {
+		applyCursor(cursor);
+	}
+}
+
+void MarkdownDocumentWidget::resetSelection() {
+	_selection = {};
+	_savedSelection = {};
+	_selectionEndpoints = {};
+	_savedSelectionEndpoints = {};
+	_selectionType = TextSelectType::Letters;
+	_dragAction = NoDrag;
+	_dragStartPosition = QPoint();
+	_dragSegment = -1;
+	_dragSymbol = 0;
+	_dragExpandedSelection = {};
+}
+
+void MarkdownDocumentWidget::clearSelection() {
+	const auto hadSelection = !_selection.empty()
+		|| !_savedSelection.empty()
+		|| (_dragAction != NoDrag);
+	resetSelection();
+	if (hadSelection) {
+		update();
+	}
+}
+
+void MarkdownDocumentWidget::dragActionStart(
+		QPoint point,
+		Qt::MouseButton button) {
+	const auto state = hitTest(
+		point,
+		Ui::Text::StateRequest::Flag::LookupLink
+			| Ui::Text::StateRequest::Flag::LookupSymbol);
+	updateHover(state);
+	if (button != Qt::LeftButton) {
+		return;
+	}
+	ClickHandler::pressed();
+	_dragAction = NoDrag;
+	_dragExpandedSelection = {};
+	_dragSegment = -1;
+	_dragSymbol = 0;
+	if (ClickHandler::getPressed()) {
+		_dragStartPosition = point;
+		_dragAction = PrepareDrag;
+		return;
+	}
+	if (!state.valid()) {
+		clearSelection();
+		return;
+	}
+	_dragSegment = state.segmentIndex;
+	_dragSymbol = selectionOffsetFromHit(state);
+	_selection = {
+		{ _dragSegment, _dragSymbol },
+		{ _dragSegment, _dragSymbol },
+	};
+	_savedSelection = {};
+	_selectionEndpoints = {
+		.from = MakeSelectionEndpoint(state),
+		.to = MakeSelectionEndpoint(state),
+	};
+	_savedSelectionEndpoints = {};
+	_dragAction = Selecting;
+	update();
+}
+
+DocumentHitTestResult MarkdownDocumentWidget::dragActionUpdate(QPoint point) {
+	const auto state = hitTest(
+		point,
+		Ui::Text::StateRequest::Flag::LookupLink
+			| Ui::Text::StateRequest::Flag::LookupSymbol);
+	if (_dragAction == PrepareDrag
+		&& (point - _dragStartPosition).manhattanLength()
+			>= QApplication::startDragDistance()) {
+		_dragAction = Dragging;
+	}
+	updateHover(state);
+	return state;
+}
+
+DocumentHitTestResult MarkdownDocumentWidget::dragActionFinish(
+		QPoint point,
+		Qt::MouseButton button) {
+	const auto state = dragActionUpdate(point);
+	auto activated = ClickHandler::unpressed();
+	if (_dragAction == Dragging
+		|| (_dragAction == Selecting && !_selection.empty())) {
+		activated = nullptr;
+	} else if (_dragAction == PrepareDrag && button != Qt::RightButton) {
+		clearSelection();
+	}
+	_dragAction = NoDrag;
+	_selectionType = TextSelectType::Letters;
+	_dragExpandedSelection = {};
+	updateHover(state);
+	if (activated
+		&& (button == Qt::LeftButton || button == Qt::MiddleButton)) {
+		if (const auto prepared = std::dynamic_pointer_cast<
+				PreparedLinkClickHandler>(activated)) {
+			if (_activateLink) {
+				_activateLink(prepared->link(), button);
+			}
+		} else {
+			ActivateClickHandler(window(), activated, button);
+		}
+	}
+	if (QGuiApplication::clipboard()->supportsSelection()
+		&& !_selection.empty()) {
+		if (const auto text = getSelectedText(); !text.empty()) {
+			TextUtilities::SetClipboardText(text, QClipboard::Selection);
+		}
+	}
+	return state;
 }
 
 void MarkdownDocumentWidget::applyCursor(style::cursor cursor) {
@@ -1943,6 +3180,30 @@ constexpr auto kDeferredPreparationSourceBytes = 128 * 1024;
 constexpr auto kDeferredPreparationFormulaCount = 4;
 constexpr auto kDeferredPreparationConvertedNodes = 1200;
 
+[[nodiscard]] QString PrepareTerminalFailureName(
+		PrepareTerminalFailure failure) {
+	switch (failure) {
+	case PrepareTerminalFailure::None:
+		return u"none"_q;
+	case PrepareTerminalFailure::InvalidRequest:
+		return u"invalid-request"_q;
+	case PrepareTerminalFailure::InvalidStyle:
+		return u"invalid-style"_q;
+	case PrepareTerminalFailure::DocumentTooLarge:
+		return u"document-too-large"_q;
+	case PrepareTerminalFailure::InternalError:
+		return u"internal-error"_q;
+	}
+	return u"unknown"_q;
+}
+
+[[nodiscard]] QString PrepareFailureReasonText(
+		const PrepareFailureStatus &failure) {
+	return !failure.debugReason.isEmpty()
+		? failure.debugReason
+		: PrepareTerminalFailureName(failure.terminal);
+}
+
 class MarkdownPreviewRoot final : public Ui::RpWidget {
 public:
 	MarkdownPreviewRoot(
@@ -1956,12 +3217,19 @@ private:
 
 	void startPreparation(
 		bool deferred,
-		std::optional<MarkdownStyleSnapshot> style = std::nullopt);
+		std::optional<MarkdownStyleSnapshot> style = std::nullopt,
+		bool clearRendererCache = false);
 	void activateLink(const PreparedLink &link, Qt::MouseButton button);
 	void applyPreparedResult(PreparedResult prepared);
 	[[nodiscard]] bool scrollToAnchor(const QString &anchorId);
 	void updateChildrenGeometry(QSize size);
 	void updateLoadingGeometry();
+	void updateFailureGeometry();
+	void logPreparationSummary(
+		const PrepareFailureStatus &failure,
+		const PrepareDebugStats &debug,
+		int prepareMs,
+		int layoutMs) const;
 	void cancelInFlightRequest();
 
 	const OpenOptions _options;
@@ -1969,10 +3237,16 @@ private:
 	Ui::ScrollArea *_scroll = nullptr;
 	MarkdownDocumentWidget *_body = nullptr;
 	Ui::FlatLabel *_loading = nullptr;
+	Ui::FlatLabel *_failure = nullptr;
+	Ui::LinkButton *_failureOpen = nullptr;
+	std::shared_ptr<MathRenderer> _renderer;
 	PrepareGeneration _generation = 0;
 	int _requestedDevicePixelRatio = 0;
 	QString _pendingFragment;
 	std::shared_ptr<std::atomic_bool> _cancelled;
+	QElapsedTimer _prepareTimer;
+	PrepareGeneration _prepareTimerGeneration = 0;
+	bool _prepareTimerActive = false;
 
 };
 
@@ -1983,6 +3257,7 @@ MarkdownPreviewRoot::MarkdownPreviewRoot(
 : Ui::RpWidget(parent)
 , _options(options)
 , _document(std::make_shared<PreparedDocument>(document))
+, _renderer(std::make_shared<MathRenderer>())
 , _pendingFragment(options.initialFragment)
 , _cancelled(std::make_shared<std::atomic_bool>(false)) {
 	_scroll = Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll);
@@ -1991,6 +3266,13 @@ MarkdownPreviewRoot::MarkdownPreviewRoot(
 		this,
 		tr::lng_contacts_loading(tr::now),
 		st::membersAbout);
+	_failure = Ui::CreateChild<Ui::FlatLabel>(
+		this,
+		tr::lng_markdown_preview_cant(tr::now),
+		st::ivMarkdownFailureLabel);
+	_failureOpen = Ui::CreateChild<Ui::LinkButton>(
+		this,
+		tr::lng_markdown_preview_open_file(tr::now));
 
 	_scroll->hide();
 	if (_body) {
@@ -2005,6 +3287,13 @@ MarkdownPreviewRoot::MarkdownPreviewRoot(
 		}
 	}
 	_loading->hide();
+	_failure->hide();
+	_failureOpen->hide();
+	_failureOpen->setClickedCallback([=] {
+		if (!_options.sourcePath.isEmpty()) {
+			File::Launch(_options.sourcePath);
+		}
+	});
 
 	const auto initialStyle = CaptureMarkdownStyleSnapshot();
 	_requestedDevicePixelRatio = initialStyle.devicePixelRatio;
@@ -2014,7 +3303,7 @@ MarkdownPreviewRoot::MarkdownPreviewRoot(
 	}, lifetime());
 
 	style::PaletteChanged() | rpl::on_next([=] {
-		startPreparation(shouldDeferPreparation());
+		startPreparation(shouldDeferPreparation(), std::nullopt, true);
 	}, lifetime());
 
 	screenValue() | rpl::on_next([=](not_null<QScreen*>) {
@@ -2022,7 +3311,7 @@ MarkdownPreviewRoot::MarkdownPreviewRoot(
 		if (style.devicePixelRatio == _requestedDevicePixelRatio) {
 			return;
 		}
-		startPreparation(shouldDeferPreparation(), std::move(style));
+		startPreparation(shouldDeferPreparation(), std::move(style), true);
 	}, lifetime());
 
 	if (_options.delegate) {
@@ -2050,7 +3339,8 @@ bool MarkdownPreviewRoot::shouldDeferPreparation() const {
 
 void MarkdownPreviewRoot::startPreparation(
 		bool deferred,
-		std::optional<MarkdownStyleSnapshot> style) {
+		std::optional<MarkdownStyleSnapshot> style,
+		bool clearRendererCache) {
 	cancelInFlightRequest();
 
 	_cancelled = std::make_shared<std::atomic_bool>(false);
@@ -2063,8 +3353,18 @@ void MarkdownPreviewRoot::startPreparation(
 		style = CaptureMarkdownStyleSnapshot();
 	}
 	_requestedDevicePixelRatio = style->devicePixelRatio;
+	if (_renderer) {
+		if (clearRendererCache) {
+			_renderer->clearCache();
+		}
+		_renderer->resetDebugCounters();
+	}
+	_prepareTimer.start();
+	_prepareTimerGeneration = generation;
+	_prepareTimerActive = true;
 	auto request = PrepareRequest{
 		.document = _document,
+		.renderer = _renderer,
 		.style = std::move(*style),
 		.generation = generation,
 		.sourcePath = _options.sourcePath,
@@ -2076,11 +3376,15 @@ void MarkdownPreviewRoot::startPreparation(
 		if (_body) {
 			_body->hide();
 		}
+		_failure->hide();
+		_failureOpen->hide();
 		_loading->show();
 		_loading->raise();
 		updateLoadingGeometry();
 	} else {
 		_loading->hide();
+		_failure->hide();
+		_failureOpen->hide();
 	}
 
 	const auto weak = base::make_weak(this);
@@ -2147,22 +3451,58 @@ void MarkdownPreviewRoot::activateLink(
 }
 
 void MarkdownPreviewRoot::applyPreparedResult(PreparedResult prepared) {
-	if (!_body) {
+	const auto prepareMs = (_prepareTimerActive
+			&& (prepared.generation == _prepareTimerGeneration))
+		? int(_prepareTimer.elapsed())
+		: prepared.debug.prepareMs;
+	_prepareTimerActive = false;
+
+	const auto failure = prepared.failure;
+	const auto debug = prepared.debug;
+	if (failure.failed()) {
+		_scroll->hide();
+		if (_body) {
+			_body->hide();
+		}
+		_loading->hide();
+		_failure->show();
+		if (_options.sourcePath.isEmpty()) {
+			_failureOpen->hide();
+		} else {
+			_failureOpen->show();
+		}
+		_failure->raise();
+		_failureOpen->raise();
+		updateFailureGeometry();
+		logPreparationSummary(failure, debug, prepareMs, 0);
 		return;
 	}
+
+	if (!_body) {
+		logPreparationSummary(failure, debug, prepareMs, 0);
+		return;
+	}
+
+	updateChildrenGeometry(size());
 	_body->setPreparedResult(std::move(prepared));
 	if (_options.delegate) {
 		_body->setZoom(_options.delegate->ivZoom());
 	}
-	_body->resizeToWidth(_scroll->width());
 	_scroll->show();
 	_body->show();
 	_loading->hide();
+	_failure->hide();
+	_failureOpen->hide();
 	if (!_pendingFragment.isEmpty()) {
 		const auto scrolled = scrollToAnchor(_pendingFragment);
 		static_cast<void>(scrolled);
 		_pendingFragment.clear();
 	}
+	logPreparationSummary(
+		failure,
+		debug,
+		prepareMs,
+		_body->lastRelayoutMs());
 }
 
 bool MarkdownPreviewRoot::scrollToAnchor(const QString &anchorId) {
@@ -2183,6 +3523,7 @@ void MarkdownPreviewRoot::updateChildrenGeometry(QSize size) {
 		_body->resizeToWidth(_scroll->width());
 	}
 	updateLoadingGeometry();
+	updateFailureGeometry();
 }
 
 void MarkdownPreviewRoot::updateLoadingGeometry() {
@@ -2192,6 +3533,55 @@ void MarkdownPreviewRoot::updateLoadingGeometry() {
 		0,
 		std::max((height() - _loading->height()) / 2, 0),
 		availableWidth);
+}
+
+void MarkdownPreviewRoot::updateFailureGeometry() {
+	const auto availableWidth = std::max(width(), 1);
+	const auto failureWidth = std::min(availableWidth, st::ivMarkdownFailureWidth);
+	_failure->resizeToWidth(failureWidth);
+	_failureOpen->resizeToNaturalWidth(failureWidth);
+	const auto openVisible = !_failureOpen->isHidden();
+	const auto totalHeight = _failure->height()
+		+ (openVisible ? (st::ivMarkdownFailureSkip + _failureOpen->height()) : 0);
+	const auto top = std::max((height() - totalHeight) / 2, 0);
+	_failure->moveToLeft(
+		(availableWidth - failureWidth) / 2,
+		top,
+		availableWidth);
+	if (openVisible) {
+		_failureOpen->moveToLeft(
+			(availableWidth - _failureOpen->width()) / 2,
+			top + _failure->height() + st::ivMarkdownFailureSkip,
+			availableWidth);
+	}
+}
+
+void MarkdownPreviewRoot::logPreparationSummary(
+		const PrepareFailureStatus &failure,
+		const PrepareDebugStats &debug,
+		int prepareMs,
+		int layoutMs) const {
+#ifndef NDEBUG
+	const auto counters = _renderer ? _renderer->debugCounters() : FormulaDebugCounters();
+	const auto reason = PrepareFailureReasonText(failure);
+	DEBUG_LOG((
+		failure.failed()
+			? "Native Markdown IV: unexpected preview prepare failure (%1 ms prepare, %2 ms layout, %3 ms formulas, cache hits=%4 misses=%5 bytes=%6, terminal=%7): %8"
+			: "Native Markdown IV: preview prepare success (%1 ms prepare, %2 ms layout, %3 ms formulas, cache hits=%4 misses=%5 bytes=%6, terminal=%7): %8"
+		).arg(prepareMs
+		).arg(layoutMs
+		).arg(debug.formulaRenderMs
+		).arg(counters.hits
+		).arg(counters.misses
+		).arg(qlonglong(counters.cacheBytes)
+		).arg(reason
+		).arg(_options.sourcePath));
+#else
+	Q_UNUSED(failure);
+	Q_UNUSED(debug);
+	Q_UNUSED(prepareMs);
+	Q_UNUSED(layoutMs);
+#endif
 }
 
 void MarkdownPreviewRoot::cancelInFlightRequest() {

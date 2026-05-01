@@ -9,6 +9,7 @@
 #include "styles/palette.h"
 #include "styles/style_window.h"
 
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtGui/QKeyEvent>
@@ -22,7 +23,6 @@
 namespace Iv::Markdown {
 namespace {
 
-constexpr auto kMaxSourceBytes = 4 * 1024 * 1024;
 constexpr auto kZoomStep = int(10);
 
 struct OpenTarget {
@@ -279,12 +279,13 @@ void Controller::finishClose() {
 } // namespace
 
 bool TryOpenLocalFile(const QString &path) {
+	const auto &limits = ParseLimitsForIv();
 	const auto target = ParseOpenTarget(path);
 	const auto info = QFileInfo(target.path);
 	if (!IsReadableLocalFile(info)) {
 		return false;
 	}
-	if (info.size() > kMaxSourceBytes) {
+	if (info.size() > limits.maxSourceBytes) {
 		DEBUG_LOG(("Native Markdown IV: rejected local file too large: %1"
 			).arg(target.path));
 		return false;
@@ -294,40 +295,85 @@ bool TryOpenLocalFile(const QString &path) {
 	if (!ReadLocalSource(target.path, &bytes)) {
 		return false;
 	}
-	if (bytes.size() > kMaxSourceBytes) {
+	if (bytes.size() > limits.maxSourceBytes) {
 		DEBUG_LOG(("Native Markdown IV: rejected local file too large: %1"
 			).arg(target.path));
 		return false;
 	}
 
 	const auto fallbackTitle = info.fileName();
+#ifndef NDEBUG
+	auto validationTimer = QElapsedTimer();
+	validationTimer.start();
+#endif
 	auto validated = ValidateMarkdownSourceForIv(
 		bytes,
 		ParseOptions{ fallbackTitle });
+#ifndef NDEBUG
+	const auto validationMs = validationTimer.elapsed();
+#endif
 	if (!validated.ok) {
+#ifndef NDEBUG
+		DEBUG_LOG(("Native Markdown IV: source validation failure (%1, %2 ms): %3"
+			).arg(validated.error
+			).arg(validationMs
+			).arg(target.path));
+#else
 		DEBUG_LOG(("Native Markdown IV: source validation failure (%1): %2"
 			).arg(validated.error
 			).arg(target.path));
+#endif
 		return false;
 	}
 
+#ifndef NDEBUG
+	auto parseTimer = QElapsedTimer();
+	parseTimer.start();
+#endif
 	auto result = ParseMarkdownForIv(std::move(validated.source));
+#ifndef NDEBUG
+	const auto parseMs = parseTimer.elapsed();
+#endif
 	if (!result.ok) {
 		const auto &error = result.error;
 		if (error.startsWith(u"cmark-"_q)) {
+#ifndef NDEBUG
+			DEBUG_LOG(("Native Markdown IV: cmark parse failure (%1, %2 ms): %3"
+				).arg(error
+				).arg(parseMs
+				).arg(target.path));
+#else
 			DEBUG_LOG(("Native Markdown IV: cmark parse failure (%1): %2"
 				).arg(error
 				).arg(target.path));
+#endif
 		} else {
+#ifndef NDEBUG
+			DEBUG_LOG(("Native Markdown IV: parse failure (%1, %2 ms): %3"
+				).arg(error
+				).arg(parseMs
+				).arg(target.path));
+#else
 			DEBUG_LOG(("Native Markdown IV: parse failure (%1): %2"
 				).arg(error
 				).arg(target.path));
+#endif
 		}
 		return false;
 	}
+#ifndef NDEBUG
+	auto previewEligibilityTimer = QElapsedTimer();
+	previewEligibilityTimer.start();
+#endif
 	if (!AcceptsPreview(result.document)) {
+#ifndef NDEBUG
+		DEBUG_LOG(("Native Markdown IV: unsupported or empty document (%1 ms): %2"
+			).arg(previewEligibilityTimer.elapsed()
+			).arg(target.path));
+#else
 		DEBUG_LOG(("Native Markdown IV: unsupported or empty document: %1"
 			).arg(target.path));
+#endif
 		return false;
 	}
 	LogDocumentWarnings(result.document, target.path);
@@ -340,8 +386,15 @@ bool TryOpenLocalFile(const QString &path) {
 		title,
 		info.absoluteFilePath(),
 		target.fragment);
+#ifndef NDEBUG
+	DEBUG_LOG(("Native Markdown IV: opened as native Markdown IV (%1 ms validate, %2 ms parse): %3"
+		).arg(validationMs
+		).arg(parseMs
+		).arg(target.path));
+#else
 	DEBUG_LOG(("Native Markdown IV: opened as native Markdown IV: %1"
 		).arg(target.path));
+#endif
 	return true;
 }
 

@@ -6,6 +6,14 @@
 
 namespace Iv::Markdown {
 
+struct MarkdownParseLimits {
+	int maxSourceBytes = 0;
+	int maxCmarkNodes = 0;
+	int maxNesting = 0;
+	int maxFormulaBytes = 0;
+	int maxFormulaCount = 0;
+};
+
 struct ValidatedMarkdownSource {
 	QByteArray normalized;
 	QString decoded;
@@ -19,6 +27,7 @@ struct MarkdownSourceValidationResult {
 	bool ok = true;
 };
 
+[[nodiscard]] const MarkdownParseLimits &ParseLimitsForIv();
 [[nodiscard]] MarkdownSourceValidationResult ValidateMarkdownSourceForIv(
 	const QByteArray &source,
 	ParseOptions options = {});

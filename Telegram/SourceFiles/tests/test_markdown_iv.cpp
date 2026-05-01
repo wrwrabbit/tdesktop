@@ -1,5 +1,11 @@
 #include "iv/markdown/iv_markdown_document.h"
+#include "iv/markdown/iv_markdown_math_renderer.h"
+#include "iv/markdown/iv_markdown_microtex.h"
 #include "iv/markdown/iv_markdown_parse.h"
+#include "iv/markdown/iv_markdown_prepare.h"
+
+#include "ui/style/style_core.h"
+#include "ui/style/style_core_scale.h"
 
 #include <QtCore/QByteArray>
 #include <QtCore/QCoreApplication>
@@ -8,18 +14,20 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QIODevice>
 #include <QtCore/QString>
+#include <QtGui/QGuiApplication>
 
+#include <rpl/never.h>
+
+#include <atomic>
 #include <iostream>
 #include <initializer_list>
 #include <iterator>
+#include <memory>
 #include <utility>
 
 namespace {
 
 using namespace Iv::Markdown;
-
-constexpr auto kValidationSourceLimit = 4 * 1024 * 1024;
-constexpr auto kValidationFormulaLimit = 64 * 1024;
 
 struct Args {
 	QString markdownPath;
@@ -28,6 +36,13 @@ struct Args {
 	bool inlineHtml = false;
 	bool ok = true;
 	QString error;
+};
+
+struct PreparedFixture {
+	QString label;
+	QString path;
+	PreparedDocument parsed;
+	PreparedResult prepared;
 };
 
 [[nodiscard]] QString FromLatin1(const char *value) {
@@ -733,6 +748,135 @@ void PrintSummary(const PreparedDocument &document, const QString &label) {
 	return true;
 }
 
+[[nodiscard]] QString AbsolutePath(const QString &path) {
+	return QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+}
+
+[[nodiscard]] QString PrepareFailureReason(
+		const PrepareFailureStatus &failure) {
+	return !failure.debugReason.isEmpty()
+		? failure.debugReason
+		: QString::number(int(failure.terminal));
+}
+
+[[nodiscard]] PreparedResult PrepareParsedDocumentForTest(
+		const PreparedDocument &document,
+		const QString &sourcePath,
+		const std::shared_ptr<MathRenderer> &renderer,
+		MarkdownStyleSnapshot style = CaptureMarkdownStyleSnapshot()) {
+	return PrepareSynchronously({
+		.document = std::make_shared<const PreparedDocument>(document),
+		.renderer = renderer,
+		.style = std::move(style),
+		.generation = 1,
+		.sourcePath = AbsolutePath(sourcePath),
+		.cancelled = std::make_shared<std::atomic_bool>(false),
+	});
+}
+
+[[nodiscard]] int CountPreparedFormulaSlots(const PreparedResult &prepared) {
+	auto result = 0;
+	for (const auto &slot : prepared.formulas) {
+		if (slot.present) {
+			++result;
+		}
+	}
+	return result;
+}
+
+void PrintPrepareSummary(
+		const QString &label,
+		const PreparedResult &prepared) {
+	auto line = label;
+	line.append(FromLatin1(" prepare_ms="));
+	line.append(QString::number(prepared.debug.prepareMs));
+	line.append(FromLatin1(" formula_ms="));
+	line.append(QString::number(prepared.debug.formulaRenderMs));
+	line.append(FromLatin1(" prepare_warnings="));
+	line.append(QString::number(prepared.debug.prepareWarningCount));
+	line.append(FromLatin1(" formula_warnings="));
+	line.append(QString::number(prepared.debug.formulaWarningCount));
+	line.append(FromLatin1(" prepared_formulas="));
+	line.append(QString::number(CountPreparedFormulaSlots(prepared)));
+	PrintLine(line);
+}
+
+[[nodiscard]] bool PrepareFixture(
+		const QString &path,
+		const QString &label,
+		const std::shared_ptr<MathRenderer> &renderer,
+		PreparedFixture *fixture) {
+	auto parsed = PreparedDocument();
+	if (!ParseFixture(path, label, &parsed)) {
+		return false;
+	}
+	auto prepared = PrepareParsedDocumentForTest(parsed, path, renderer);
+	if (prepared.cancelled) {
+		PrintError(label + FromLatin1(" prepare-cancelled"));
+		return false;
+	}
+	if (prepared.failure.failed()) {
+		PrintError(
+			label + FromLatin1(" prepare-failed: ")
+				+ PrepareFailureReason(prepared.failure));
+		return false;
+	}
+	PrintPrepareSummary(label, prepared);
+	if (fixture) {
+		fixture->label = label;
+		fixture->path = AbsolutePath(path);
+		fixture->parsed = std::move(parsed);
+		fixture->prepared = std::move(prepared);
+	}
+	return true;
+}
+
+template <typename Callback>
+void ForEachPreparedBlock(
+		const std::vector<PreparedBlock> &blocks,
+		Callback &&callback) {
+	for (const auto &block : blocks) {
+		callback(block);
+		ForEachPreparedBlock(block.children, callback);
+	}
+}
+
+template <typename Callback>
+void ForEachPreparedLink(
+		const std::vector<PreparedBlock> &blocks,
+		Callback &&callback) {
+	ForEachPreparedBlock(blocks, [&](const PreparedBlock &block) {
+		for (const auto &link : block.links) {
+			callback(link);
+		}
+		for (const auto &row : block.tableRows) {
+			for (const auto &cell : row.cells) {
+				for (const auto &link : cell.links) {
+					callback(link);
+				}
+			}
+		}
+	});
+}
+
+template <typename Callback>
+void ForEachPreparedInlineObject(
+		const std::vector<PreparedBlock> &blocks,
+		Callback &&callback) {
+	ForEachPreparedBlock(blocks, [&](const PreparedBlock &block) {
+		for (const auto &object : block.inlineObjects) {
+			callback(object);
+		}
+		for (const auto &row : block.tableRows) {
+			for (const auto &cell : row.cells) {
+				for (const auto &object : cell.inlineObjects) {
+					callback(object);
+				}
+			}
+		}
+	});
+}
+
 void Check(bool condition, const QString &message, bool *ok) {
 	if (condition) {
 		return;
@@ -776,6 +920,7 @@ void CheckParseFailure(
 }
 
 void CheckValidationEdges(bool *ok) {
+	const auto &limits = ParseLimitsForIv();
 	auto utf8BomSource = QByteArray::fromHex("EFBBBF");
 	utf8BomSource.append("# Title\n");
 	auto validatedUtf8Bom = CheckValidationSuccess(
@@ -831,7 +976,7 @@ void CheckValidationEdges(bool *ok) {
 		FromLatin1("source-invalid-utf8"),
 		ok);
 
-	const auto oversizedSource = QByteArray(kValidationSourceLimit + 1, 'a');
+	const auto oversizedSource = QByteArray(limits.maxSourceBytes + 1, 'a');
 	CheckValidationFailure(
 		oversizedSource,
 		FromLatin1("source size"),
@@ -844,9 +989,9 @@ void CheckValidationEdges(bool *ok) {
 		ok);
 
 	auto oversizedFormula = QByteArray();
-	oversizedFormula.reserve(kValidationFormulaLimit + 2);
+	oversizedFormula.reserve(limits.maxFormulaBytes + 2);
 	oversizedFormula.append('$');
-	oversizedFormula.append(QByteArray(kValidationFormulaLimit + 1, '+'));
+	oversizedFormula.append(QByteArray(limits.maxFormulaBytes + 1, '+'));
 	oversizedFormula.append('$');
 	CheckParseFailure(
 		oversizedFormula,
@@ -1138,12 +1283,493 @@ void CheckFixtureSemanticCoverage(
 
 }
 
-} // namespace
+void CheckPrepareCoverage(
+		const PreparedFixture &markdownFixture,
+		const PreparedFixture &latexFixture,
+		bool *ok) {
+	const auto &markdown = markdownFixture.prepared;
+	const auto &latex = latexFixture.prepared;
 
-int main(int argc, char **argv) {
-	auto application = QCoreApplication(argc, argv);
-	(void)application;
+	auto inlineCopySourceFound = false;
+	ForEachPreparedInlineObject(markdown.blocks.blocks, [&](const PreparedInlineObject &object) {
+		if (object.copySource == FromLatin1("$a^2 + b^2 = c^2$")) {
+			inlineCopySourceFound = true;
+		}
+	});
+	Check(
+		inlineCopySourceFound,
+		FromLatin1("markdown-example.md prepared inline formula copySource"),
+		ok);
 
+	auto markdownTables = std::vector<const PreparedBlock*>();
+	const PreparedBlock *markdownDisplayMath = nullptr;
+	const PreparedBlock *detailsBlock = nullptr;
+	const PreparedBlock *footnoteList = nullptr;
+	ForEachPreparedBlock(markdown.blocks.blocks, [&](const PreparedBlock &block) {
+		if (block.kind == PreparedBlockKind::Table) {
+			markdownTables.push_back(&block);
+		}
+		if (!markdownDisplayMath
+			&& block.kind == PreparedBlockKind::DisplayMath
+			&& block.formulaTex.trimmed()
+				== FromLatin1("\\int_0^1 x^2\\,dx = \\frac{1}{3}")) {
+			markdownDisplayMath = &block;
+		}
+		if (!detailsBlock
+			&& block.kind == PreparedBlockKind::Details
+			&& block.text.text.contains(
+				FromLatin1("Click to expand details/summary block"))) {
+			detailsBlock = &block;
+		}
+		if (!footnoteList
+			&& block.kind == PreparedBlockKind::List
+			&& block.listKind == ListKind::Ordered
+			&& block.children.size() >= 2
+			&& block.children[0].anchorId == FromLatin1("fn-1")
+			&& block.children[1].anchorId == FromLatin1("fn-2")) {
+			footnoteList = &block;
+		}
+	});
+	Check(
+		markdownDisplayMath != nullptr,
+		FromLatin1("markdown-example.md prepared display math formulaTex"),
+		ok);
+	Check(
+		markdownTables.size() >= 2,
+		FromLatin1("markdown-example.md prepared table count"),
+		ok);
+	if (markdownTables.size() >= 2) {
+		const auto &firstTable = *markdownTables[0];
+		const auto &secondTable = *markdownTables[1];
+		Check(
+			firstTable.tableColumnCount == 3,
+			FromLatin1("markdown-example.md prepared first table column count"),
+			ok);
+		Check(
+			firstTable.tableRows.size() == 4,
+			FromLatin1("markdown-example.md prepared first table row count"),
+			ok);
+		if (firstTable.tableRows.size() == 4) {
+			Check(
+				firstTable.tableRows[0].header,
+				FromLatin1("markdown-example.md prepared first table header row"),
+				ok);
+			Check(
+				firstTable.tableRows[0].cells.size() == 3
+					&& firstTable.tableRows[1].cells.size() == 3,
+				FromLatin1("markdown-example.md prepared first table cell shape"),
+				ok);
+		}
+		Check(
+			secondTable.tableAlignments.size() == 3
+				&& secondTable.tableAlignments[0] == TableAlignment::Left
+				&& secondTable.tableAlignments[1] == TableAlignment::Center
+				&& secondTable.tableAlignments[2] == TableAlignment::Right,
+			FromLatin1("markdown-example.md prepared second table alignments"),
+			ok);
+	}
+	Check(
+		detailsBlock != nullptr,
+		FromLatin1("markdown-example.md prepared details block"),
+		ok);
+	if (detailsBlock) {
+		Check(
+			detailsBlock->collapsed,
+			FromLatin1("markdown-example.md prepared details collapsed"),
+			ok);
+		Check(
+			!detailsBlock->children.empty()
+				&& detailsBlock->children[0].kind == PreparedBlockKind::Paragraph
+				&& detailsBlock->children[0].text.text.contains(
+					FromLatin1("Hidden content inside details.")),
+			FromLatin1("markdown-example.md prepared details body"),
+			ok);
+	}
+	Check(
+		footnoteList != nullptr,
+		FromLatin1("markdown-example.md prepared footnote list"),
+		ok);
+	auto footnoteReferenceOne = false;
+	auto footnoteReferenceTwo = false;
+	auto footnoteBacklinkFound = false;
+	ForEachPreparedLink(markdown.blocks.blocks, [&](const PreparedLink &link) {
+		if (link.kind == PreparedLinkKind::Footnote
+			&& link.target == FromLatin1("fn-1")) {
+			footnoteReferenceOne = true;
+		}
+		if (link.kind == PreparedLinkKind::Footnote
+			&& link.target == FromLatin1("fn-2")) {
+			footnoteReferenceTwo = true;
+		}
+		if (link.kind == PreparedLinkKind::FootnoteBacklink
+			&& !link.target.isEmpty()) {
+			footnoteBacklinkFound = true;
+		}
+	});
+	Check(
+		footnoteReferenceOne && footnoteReferenceTwo,
+		FromLatin1("markdown-example.md prepared footnote references"),
+		ok);
+	Check(
+		footnoteBacklinkFound,
+		FromLatin1("markdown-example.md prepared footnote backlink"),
+		ok);
+
+	auto latexTables = std::vector<const PreparedBlock*>();
+	auto latexTableCopySourceFound = false;
+	ForEachPreparedBlock(latex.blocks.blocks, [&](const PreparedBlock &block) {
+		if (block.kind == PreparedBlockKind::Table) {
+			latexTables.push_back(&block);
+		}
+	});
+	ForEachPreparedInlineObject(latex.blocks.blocks, [&](const PreparedInlineObject &object) {
+		if (object.copySource == FromLatin1("$x^n$")
+			|| object.copySource
+				== FromLatin1("$\\frac{x^{n+1}}{n+1}$")) {
+			latexTableCopySourceFound = true;
+		}
+	});
+	Check(
+		!latexTables.empty(),
+		FromLatin1("latex-markdown-test.md prepared table count"),
+		ok);
+	if (!latexTables.empty()) {
+		const auto &table = *latexTables[0];
+		Check(
+			table.tableColumnCount == 3,
+			FromLatin1("latex-markdown-test.md prepared table column count"),
+			ok);
+		Check(
+			table.tableRows.size() == 5,
+			FromLatin1("latex-markdown-test.md prepared table row count"),
+			ok);
+		if (table.tableRows.size() == 5) {
+			Check(
+				table.tableRows[0].header,
+				FromLatin1("latex-markdown-test.md prepared table header row"),
+				ok);
+			Check(
+				table.tableRows[1].cells.size() == 3,
+				FromLatin1("latex-markdown-test.md prepared table cell count"),
+				ok);
+		}
+	}
+	Check(
+		latexTableCopySourceFound,
+		FromLatin1("latex-markdown-test.md prepared table inline formula copySource"),
+		ok);
+
+	const auto &limits = PrepareTableRenderLimitsForIv();
+	auto overflowTable = QByteArray("| A | B |\n| --- | --- |\n");
+	for (auto i = 0; i != limits.maxRows; ++i) {
+		overflowTable.append("| row ");
+		overflowTable.append(QByteArray::number(i));
+		overflowTable.append(" | value |\n");
+	}
+	const auto overflowLabel = FromLatin1("generated-overflow-table.md");
+	const auto overflowParsed = ParseMarkdownForIv(
+		overflowTable,
+		ParseOptions{ overflowLabel });
+	Check(
+		overflowParsed.ok,
+		overflowLabel + FromLatin1(" parse failed: ") + overflowParsed.error,
+		ok);
+	if (overflowParsed.ok) {
+		const auto overflowPrepared = PrepareParsedDocumentForTest(
+			overflowParsed.document,
+			overflowLabel,
+			std::make_shared<MathRenderer>());
+		Check(
+			!overflowPrepared.cancelled,
+			overflowLabel + FromLatin1(" prepare cancelled"),
+			ok);
+		Check(
+			!overflowPrepared.failure.failed(),
+			overflowLabel + FromLatin1(" prepare failure: ")
+				+ PrepareFailureReason(overflowPrepared.failure),
+			ok);
+		auto overflowTableBlocks = 0;
+		ForEachPreparedBlock(
+			overflowPrepared.blocks.blocks,
+			[&](const PreparedBlock &block) {
+				if (block.kind == PreparedBlockKind::Table) {
+					++overflowTableBlocks;
+				}
+			});
+		Check(
+			overflowPrepared.debug.prepareWarningCount > 0,
+			overflowLabel + FromLatin1(" flatten warning count"),
+			ok);
+		Check(
+			overflowTableBlocks == 0,
+			overflowLabel + FromLatin1(" flattened table block removed"),
+			ok);
+		Check(
+			!overflowPrepared.blocks.blocks.empty(),
+			overflowLabel + FromLatin1(" flattened fallback blocks present"),
+			ok);
+	}
+}
+
+void CheckPrepareLinkClassification(
+		const QString &sourcePath,
+		bool *ok) {
+	const auto label = FromLatin1("generated-relative-links.md");
+	const auto parsed = ParseMarkdownForIv(
+		QByteArray(
+			"[Local](./docs/getting-started.md#section-1)\n"
+			"[Rejected](../outside.md)\n"),
+		ParseOptions{ label });
+	Check(
+		parsed.ok,
+		label + FromLatin1(" parse failed: ") + parsed.error,
+		ok);
+	if (!parsed.ok) {
+		return;
+	}
+	const auto prepared = PrepareParsedDocumentForTest(
+		parsed.document,
+		sourcePath,
+		std::make_shared<MathRenderer>());
+	Check(
+		!prepared.cancelled,
+		label + FromLatin1(" prepare cancelled"),
+		ok);
+	Check(
+		!prepared.failure.failed(),
+		label + FromLatin1(" prepare failure: ")
+			+ PrepareFailureReason(prepared.failure),
+		ok);
+	const auto expectedLocalTarget = QDir(
+		QFileInfo(sourcePath).absolutePath()).absoluteFilePath(
+			FromLatin1("docs/getting-started.md"));
+	auto foundLocal = false;
+	auto foundRejected = false;
+	ForEachPreparedLink(prepared.blocks.blocks, [&](const PreparedLink &link) {
+		if (link.kind == PreparedLinkKind::LocalFile
+			&& link.target == QDir::cleanPath(expectedLocalTarget)
+			&& link.fragment == FromLatin1("section-1")
+			&& link.copyText
+				== FromLatin1("./docs/getting-started.md#section-1")) {
+			foundLocal = true;
+		}
+		if (link.kind == PreparedLinkKind::RejectedRelative
+			&& link.copyText == FromLatin1("../outside.md")) {
+			foundRejected = true;
+		}
+	});
+	Check(
+		foundLocal,
+		FromLatin1("generated-relative-links.md local markdown classification"),
+		ok);
+	Check(
+		foundRejected,
+		FromLatin1("generated-relative-links.md rejected relative classification"),
+		ok);
+}
+
+void CheckPrepareRenderSmoke(
+		const PreparedFixture &markdownFixture,
+		const PreparedFixture &latexFixture,
+		bool *ok) {
+	Check(
+		MicrotexBackendLinked(),
+		FromLatin1("microtex backend should be linked"),
+		ok);
+	auto renderer = std::make_shared<MathRenderer>();
+	const auto firstMarkdown = PrepareParsedDocumentForTest(
+		markdownFixture.parsed,
+		markdownFixture.path,
+		renderer);
+	const auto firstLatex = PrepareParsedDocumentForTest(
+		latexFixture.parsed,
+		latexFixture.path,
+		renderer);
+	Check(
+		!firstMarkdown.cancelled && !firstLatex.cancelled,
+		FromLatin1("prepare cache smoke first pass cancelled"),
+		ok);
+	Check(
+		!firstMarkdown.failure.failed() && !firstLatex.failure.failed(),
+		FromLatin1("prepare cache smoke first pass failed"),
+		ok);
+	const auto firstCounters = renderer->debugCounters();
+	Check(
+		renderer->cacheUsageBytes() > 0,
+		FromLatin1("prepare cache smoke first pass cache bytes"),
+		ok);
+	renderer->resetDebugCounters();
+	const auto secondMarkdown = PrepareParsedDocumentForTest(
+		markdownFixture.parsed,
+		markdownFixture.path,
+		renderer);
+	const auto secondLatex = PrepareParsedDocumentForTest(
+		latexFixture.parsed,
+		latexFixture.path,
+		renderer);
+	Check(
+		!secondMarkdown.cancelled && !secondLatex.cancelled,
+		FromLatin1("prepare cache smoke second pass cancelled"),
+		ok);
+	Check(
+		!secondMarkdown.failure.failed() && !secondLatex.failure.failed(),
+		FromLatin1("prepare cache smoke second pass failed"),
+		ok);
+	const auto secondCounters = renderer->debugCounters();
+	const auto expectedHits = CountPreparedFormulaSlots(firstMarkdown)
+		+ CountPreparedFormulaSlots(firstLatex);
+	Check(
+		secondCounters.hits >= expectedHits,
+		FromLatin1("prepare cache smoke second pass cache hits"),
+		ok);
+	Check(
+		secondCounters.misses == 0,
+		FromLatin1("prepare cache smoke second pass cache misses"),
+		ok);
+	auto smokeLine = FromLatin1("prepare-cache-smoke");
+	smokeLine.append(FromLatin1(" first_hits="));
+	smokeLine.append(QString::number(firstCounters.hits));
+	smokeLine.append(FromLatin1(" first_misses="));
+	smokeLine.append(QString::number(firstCounters.misses));
+	smokeLine.append(FromLatin1(" second_hits="));
+	smokeLine.append(QString::number(secondCounters.hits));
+	smokeLine.append(FromLatin1(" second_misses="));
+	smokeLine.append(QString::number(secondCounters.misses));
+	smokeLine.append(FromLatin1(" cache_bytes="));
+	smokeLine.append(QString::number(secondCounters.cacheBytes));
+	PrintLine(smokeLine);
+
+	const auto failureLabel = FromLatin1("generated-formula-cap.md");
+	const auto failureParsed = ParseMarkdownForIv(
+		QByteArray("$$\nE = mc^2\n$$\n"),
+		ParseOptions{ failureLabel });
+	Check(
+		failureParsed.ok,
+		failureLabel + FromLatin1(" parse failed: ") + failureParsed.error,
+		ok);
+	if (!failureParsed.ok) {
+		return;
+	}
+	auto failureStyle = CaptureMarkdownStyleSnapshot();
+	failureStyle.displayMathMaxRenderWidth = 1;
+	const auto failurePrepared = PrepareParsedDocumentForTest(
+		failureParsed.document,
+		failureLabel,
+		std::make_shared<MathRenderer>(),
+		std::move(failureStyle));
+	Check(
+		!failurePrepared.cancelled,
+		failureLabel + FromLatin1(" prepare cancelled"),
+		ok);
+	Check(
+		!failurePrepared.failure.failed(),
+		failureLabel + FromLatin1(" terminal prepare failure"),
+		ok);
+	Check(
+		failurePrepared.debug.formulaWarningCount > 0,
+		failureLabel + FromLatin1(" formula warning count"),
+		ok);
+	auto failedFormulaFound = false;
+	for (const auto &slot : failurePrepared.formulas) {
+		if (!slot.present) {
+			continue;
+		}
+		if (!slot.rendered.success
+			&& (slot.rendered.tooLarge || slot.rendered.overflow)) {
+			failedFormulaFound = true;
+		}
+	}
+	Check(
+		failedFormulaFound,
+		failureLabel + FromLatin1(" formula cap fallback result"),
+		ok);
+
+	const auto &prepareLimits = PrepareLimitsForIv();
+	auto blockLimitSource = QByteArray();
+	for (auto i = 0; i != (prepareLimits.maxPreparedBlocks + 1); ++i) {
+		blockLimitSource.append("Paragraph ");
+		blockLimitSource.append(QByteArray::number(i));
+		blockLimitSource.append("\n\n");
+	}
+	const auto blockLimitLabel = FromLatin1("generated-prepare-block-limit.md");
+	const auto blockLimitParsed = ParseMarkdownForIv(
+		blockLimitSource,
+		ParseOptions{ blockLimitLabel });
+	Check(
+		blockLimitParsed.ok,
+		blockLimitLabel + FromLatin1(" parse failed: ") + blockLimitParsed.error,
+		ok);
+	if (blockLimitParsed.ok) {
+		const auto blockLimitPrepared = PrepareParsedDocumentForTest(
+			blockLimitParsed.document,
+			blockLimitLabel,
+			std::make_shared<MathRenderer>());
+		Check(
+			!blockLimitPrepared.cancelled,
+			blockLimitLabel + FromLatin1(" prepare cancelled"),
+			ok);
+		Check(
+			blockLimitPrepared.failure.failed(),
+			blockLimitLabel + FromLatin1(
+				" missing real terminal prepare failure"),
+			ok);
+		Check(
+			blockLimitPrepared.failure.terminal
+				== PrepareTerminalFailure::DocumentTooLarge,
+			blockLimitLabel + FromLatin1(
+				" real terminal prepare failure kind"),
+			ok);
+		Check(
+			PrepareFailureReason(blockLimitPrepared.failure)
+				== FromLatin1("prepared-block-limit"),
+			blockLimitLabel + FromLatin1(
+				" real terminal prepare failure reason"),
+			ok);
+		Check(
+			blockLimitPrepared.blocks.blocks.empty(),
+			blockLimitLabel + FromLatin1(
+				" real terminal prepare clears blocks"),
+			ok);
+	}
+
+	const auto invalidStyleLabel = FromLatin1(
+		"generated-invalid-style-internal.md");
+	auto invalidStyle = CaptureMarkdownStyleSnapshot();
+	invalidStyle.devicePixelRatio = 0;
+	const auto invalidStylePrepared = PrepareParsedDocumentForTest(
+		markdownFixture.parsed,
+		markdownFixture.path,
+		std::make_shared<MathRenderer>(),
+		std::move(invalidStyle));
+	Check(
+		!invalidStylePrepared.cancelled,
+		invalidStyleLabel + FromLatin1(" synthetic prepare cancelled"),
+		ok);
+	Check(
+		invalidStylePrepared.failure.failed(),
+		invalidStyleLabel + FromLatin1(
+			" missing synthetic terminal prepare failure"),
+		ok);
+	Check(
+		invalidStylePrepared.failure.terminal
+			== PrepareTerminalFailure::InvalidStyle,
+		invalidStyleLabel + FromLatin1(
+			" synthetic terminal prepare failure kind"),
+		ok);
+	Check(
+		PrepareFailureReason(invalidStylePrepared.failure)
+			== FromLatin1("invalid-device-pixel-ratio"),
+		invalidStyleLabel + FromLatin1(
+			" synthetic terminal prepare failure reason"),
+		ok);
+	Check(
+		invalidStylePrepared.blocks.blocks.empty(),
+		invalidStyleLabel + FromLatin1(
+			" synthetic terminal prepare clears blocks"),
+		ok);
+}
+
+[[nodiscard]] int RunTests(int argc, char **argv) {
 	auto args = ParseArgs(argc, argv);
 	if (!args.ok) {
 		PrintError(args.error);
@@ -1162,28 +1788,33 @@ int main(int argc, char **argv) {
 			FromLatin1("latex-markdown-test.md"));
 	}
 
-	auto markdown = PreparedDocument();
-	if (!ParseFixture(
+	auto fixtureRenderer = std::make_shared<MathRenderer>();
+	auto markdownFixture = PreparedFixture();
+	if (!PrepareFixture(
 			args.markdownPath,
 			FromLatin1("markdown-example.md"),
-			&markdown)) {
+			fixtureRenderer,
+			&markdownFixture)) {
 		return 1;
 	}
 	if (args.dump) {
-		PrintLine(DumpForDebug(markdown));
+		PrintLine(DumpForDebug(markdownFixture.parsed));
 	}
 
-	auto latex = PreparedDocument();
-	if (!ParseFixture(
+	auto latexFixture = PreparedFixture();
+	if (!PrepareFixture(
 			args.latexMarkdownPath,
 			FromLatin1("latex-markdown-test.md"),
-			&latex)) {
+			fixtureRenderer,
+			&latexFixture)) {
 		return 1;
 	}
 	if (args.dump) {
-		PrintLine(DumpForDebug(latex));
+		PrintLine(DumpForDebug(latexFixture.parsed));
 	}
 
+	const auto &markdown = markdownFixture.parsed;
+	const auto &latex = latexFixture.parsed;
 	auto ok = true;
 	Check(
 		markdown.stats.cmarkNodeCount == 562,
@@ -1528,8 +2159,33 @@ int main(int argc, char **argv) {
 		FromLatin1("latex-markdown-test.md lines 332-340 exclusions"),
 		&ok);
 
+	CheckPrepareCoverage(markdownFixture, latexFixture, &ok);
+	CheckPrepareLinkClassification(markdownFixture.path, &ok);
+	CheckPrepareRenderSmoke(markdownFixture, latexFixture, &ok);
 	CheckInlineHtmlCoverage(args.dump, &ok);
 	CheckValidationEdges(&ok);
 
 	return ok ? 0 : 1;
 }
+
+} // namespace
+
+int main(int argc, char **argv) {
+	QCoreApplication::setAttribute(Qt::AA_Use96Dpi);
+	auto application = QGuiApplication(argc, argv);
+	(void)application;
+
+	style::SetDevicePixelRatio(1);
+	style::StartManager(style::kScaleDefault);
+	const auto result = RunTests(argc, argv);
+	style::StopManager();
+	return result;
+}
+
+namespace crl {
+
+rpl::producer<> on_main_update_requests() {
+	return rpl::never<>();
+}
+
+} // namespace crl
