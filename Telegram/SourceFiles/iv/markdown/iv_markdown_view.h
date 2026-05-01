@@ -11,7 +11,9 @@ class RpWidget;
 namespace Iv::Markdown {
 
 [[nodiscard]] std::unique_ptr<Ui::RpWidget> CreateMarkdownPreviewWidget(
+	QWidget *parent,
 	const PreparedDocument &document,
+	Fn<void(Event)> callback,
 	const OpenOptions &options = {});
 
 } // namespace Iv::Markdown

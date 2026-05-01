@@ -34,23 +34,42 @@ struct OpenTarget {
 	return info.exists() && info.isFile() && info.isReadable();
 }
 
-[[nodiscard]] bool ReadLocalSource(const QString &path, QByteArray *bytes) {
+struct ReadSource {
+	QString path;
+	QString name;
+	QByteArray bytes;
+
+	explicit operator bool() const {
+		return !path.isEmpty();
+	}
+};
+[[nodiscard]] ReadSource ReadLocalSource(
+		const QString &path,
+		const MarkdownParseLimits &limits) {
 	const auto info = QFileInfo(path);
-	if (!IsReadableLocalFile(info)) {
-		return false;
+	auto name = info.fileName();
+	if (!IsReadableLocalFile(info) || !LooksLikeMarkdownFile(name)) {
+		return {};
+	} else if (info.size() > limits.maxSourceBytes) {
+		DEBUG_LOG(("Native Markdown IV: rejected local file too large: %1"
+			).arg(path));
+		return {};
 	}
 	auto file = QFile(path);
 	if (!file.open(QIODevice::ReadOnly)) {
-		return false;
+		return {};
 	}
-	const auto data = file.readAll();
-	if (file.error() != QFileDevice::NoError) {
-		return false;
+	auto data = file.read(limits.maxSourceBytes);
+	if (file.error() != QFileDevice::NoError || !file.atEnd()) {
+		DEBUG_LOG(("Native Markdown IV: could not read local file: %1"
+			).arg(path));
+		return {};
 	}
-	if (bytes) {
-		*bytes = data;
-	}
-	return true;
+	return {
+		.path = info.absoluteFilePath(),
+		.name = std::move(name),
+		.bytes = std::move(data),
+	};
 }
 
 [[nodiscard]] QString NormalizeFragmentId(QString fragment) {
@@ -113,75 +132,26 @@ void LogDocumentWarnings(
 	}
 }
 
-class Controller final {
-public:
-	Controller(
-		PreparedDocument document,
-		QString title,
-		QString sourcePath,
-		QString initialFragment);
-
-	void activate();
-
-private:
-	void close();
-	void createWindow();
-	void finishClose();
-
-	PreparedDocument _document;
-	QString _title;
-	QString _sourcePath;
-	QString _initialFragment;
-	Iv::DelegateImpl _delegate;
-	std::unique_ptr<Ui::RpWindow> _window;
-	std::unique_ptr<Ui::RpWidget> _preview;
-	bool _closing = false;
-
-};
-
-[[nodiscard]] auto &ActiveControllers() {
-	static auto controllers = std::vector<std::unique_ptr<Controller>>();
-	return controllers;
-}
-
-void RemoveController(Controller *controller) {
-	auto &active = ActiveControllers();
-	const auto i = std::find_if(
-		active.begin(),
-		active.end(),
-		[=](const std::unique_ptr<Controller> &value) {
-			return value.get() == controller;
-		});
-	if (i != active.end()) {
-		active.erase(i);
-	}
-}
-
-void OpenDocumentWindow(
-		PreparedDocument document,
-		QString title,
-		QString sourcePath,
-		QString initialFragment) {
-	auto controller = std::make_unique<Controller>(
-		std::move(document),
-		std::move(title),
-		std::move(sourcePath),
-		std::move(initialFragment));
-	const auto raw = controller.get();
-	ActiveControllers().push_back(std::move(controller));
-	raw->activate();
-}
+} // namespace
 
 Controller::Controller(
-		PreparedDocument document,
-		QString title,
-		QString sourcePath,
-		QString initialFragment)
-: _document(std::move(document))
+	not_null<Delegate*> delegate,
+	PreparedDocument document,
+	QString title,
+	QString sourcePath,
+	QString initialFragment)
+: _delegate(delegate)
+, _document(std::move(document))
 , _title(std::move(title))
 , _sourcePath(std::move(sourcePath))
 , _initialFragment(std::move(initialFragment)) {
 	createWindow();
+}
+
+Controller::~Controller() = default;
+
+rpl::lifetime &Controller::lifetime() {
+	return _lifetime;
 }
 
 void Controller::activate() {
@@ -199,9 +169,7 @@ void Controller::activate() {
 }
 
 void Controller::close() {
-	if (_window) {
-		_window->close();
-	}
+	_events.fire({ Event::Type::Close });
 }
 
 void Controller::createWindow() {
@@ -209,50 +177,51 @@ void Controller::createWindow() {
 	const auto window = _window.get();
 	window->setTitle(_title);
 	window->setWindowTitle(_title);
-	window->setGeometry(_delegate.ivGeometry(window));
+	window->setGeometry(_delegate->ivGeometry(window));
 	window->setMinimumSize({ st::windowMinWidth, st::windowMinHeight });
 	window->geometryValue(
 	) | rpl::distinct_until_changed(
 	) | rpl::skip(1) | rpl::on_next([=] {
-		_delegate.ivSaveGeometry(window);
+		_delegate->ivSaveGeometry(window);
 	}, window->lifetime());
 	window->body()->paintRequest() | rpl::on_next([=](QRect clip) {
 		QPainter(window->body().get()).fillRect(clip, st::windowBg);
 	}, window->body()->lifetime());
 
-	_preview = CreateMarkdownPreviewWidget(
-		_document,
-		OpenOptions{
-			.sourceName = _title,
-			.sourcePath = _sourcePath,
-			.initialFragment = _initialFragment,
-			.delegate = &_delegate,
-		});
-	_preview->setParent(window->body().get());
-	_preview->setGeometry(QRect(QPoint(), window->body()->size()));
-	window->body()->sizeValue() | rpl::on_next([=](QSize size) {
-		_preview->setGeometry(QRect(QPoint(), size));
+	const auto parent = window->body();
+	const auto callback = [=](Event event) {
+		_events.fire(std::move(event));
+	};
+	_preview = CreateMarkdownPreviewWidget(parent, _document, callback, {
+		.sourceName = _title,
+		.sourcePath = _sourcePath,
+		.initialFragment = _initialFragment,
+		.delegate = _delegate,
+	});
+	_preview->setGeometry(parent->rect());
+	parent->sizeValue() | rpl::on_next([=](QSize size) {
+		_preview->resize(size);
 	}, _preview->lifetime());
 	_preview->show();
 
 	window->events() | rpl::on_next([=](not_null<QEvent*> e) {
 		if (e->type() == QEvent::Close) {
-			finishClose();
+			close();
 		} else if (e->type() == QEvent::KeyPress) {
 			const auto event = static_cast<QKeyEvent*>(e.get());
 			if (event->modifiers() & Qt::ControlModifier) {
 				if (event->key() == Qt::Key_Plus
 					|| event->key() == Qt::Key_Equal) {
 					event->accept();
-					_delegate.ivSetZoom(_delegate.ivZoom() + kZoomStep);
+					_delegate->ivSetZoom(_delegate->ivZoom() + kZoomStep);
 					return;
 				} else if (event->key() == Qt::Key_Minus) {
 					event->accept();
-					_delegate.ivSetZoom(_delegate.ivZoom() - kZoomStep);
+					_delegate->ivSetZoom(_delegate->ivZoom() - kZoomStep);
 					return;
 				} else if (event->key() == Qt::Key_0) {
 					event->accept();
-					_delegate.ivSetZoom(0);
+					_delegate->ivSetZoom(0);
 					return;
 				}
 			}
@@ -266,136 +235,73 @@ void Controller::createWindow() {
 	window->show();
 }
 
-void Controller::finishClose() {
-	if (_closing) {
-		return;
-	}
-	_closing = true;
-	crl::on_main([controller = this] {
-		RemoveController(controller);
-	});
-}
-
-} // namespace
-
-bool TryOpenLocalFile(const QString &path) {
+std::unique_ptr<Controller> TryOpenLocalFile(
+		not_null<Delegate*> delegate,
+		const QString &path) {
 	const auto &limits = ParseLimitsForIv();
 	const auto target = ParseOpenTarget(path);
-	const auto info = QFileInfo(target.path);
-	if (!IsReadableLocalFile(info)) {
-		return false;
-	}
-	if (info.size() > limits.maxSourceBytes) {
-		DEBUG_LOG(("Native Markdown IV: rejected local file too large: %1"
-			).arg(target.path));
-		return false;
-	}
 
-	auto bytes = QByteArray();
-	if (!ReadLocalSource(target.path, &bytes)) {
-		return false;
+	const auto source = ReadLocalSource(target.path, limits);
+	if (!source) {
+		return nullptr;
 	}
-	if (bytes.size() > limits.maxSourceBytes) {
-		DEBUG_LOG(("Native Markdown IV: rejected local file too large: %1"
-			).arg(target.path));
-		return false;
-	}
+	const auto &bytes = source.bytes;
+	const auto &fallbackTitle = source.name;
 
-	const auto fallbackTitle = info.fileName();
-#ifndef NDEBUG
-	auto validationTimer = QElapsedTimer();
-	validationTimer.start();
-#endif
-	auto validated = ValidateMarkdownSourceForIv(
+	const auto start = crl::now();
+	auto validateResult = ValidateMarkdownSourceForIv(
 		bytes,
 		ParseOptions{ fallbackTitle });
-#ifndef NDEBUG
-	const auto validationMs = validationTimer.elapsed();
-#endif
-	if (!validated.ok) {
-#ifndef NDEBUG
-		DEBUG_LOG(("Native Markdown IV: source validation failure (%1, %2 ms): %3"
-			).arg(validated.error
-			).arg(validationMs
+	const auto validated = crl::now();
+	if (!validateResult.ok) {
+		DEBUG_LOG(("Native Markdown IV: "
+			"source validation failure (%1, %2 ms): %3"
+			).arg(validateResult.error
+			).arg(validated - start
 			).arg(target.path));
-#else
-		DEBUG_LOG(("Native Markdown IV: source validation failure (%1): %2"
-			).arg(validated.error
-			).arg(target.path));
-#endif
-		return false;
+		return nullptr;
 	}
 
-#ifndef NDEBUG
-	auto parseTimer = QElapsedTimer();
-	parseTimer.start();
-#endif
-	auto result = ParseMarkdownForIv(std::move(validated.source));
-#ifndef NDEBUG
-	const auto parseMs = parseTimer.elapsed();
-#endif
-	if (!result.ok) {
-		const auto &error = result.error;
+	auto parseResult = ParseMarkdownForIv(std::move(validateResult.source));
+	const auto parsed = crl::now();
+	if (!parseResult.ok) {
+		const auto &error = parseResult.error;
 		if (error.startsWith(u"cmark-"_q)) {
-#ifndef NDEBUG
-			DEBUG_LOG(("Native Markdown IV: cmark parse failure (%1, %2 ms): %3"
+			DEBUG_LOG(("Native Markdown IV: "
+				"cmark parse failure (%1, %2 ms): %3"
 				).arg(error
-				).arg(parseMs
+				).arg(parsed - validated
 				).arg(target.path));
-#else
-			DEBUG_LOG(("Native Markdown IV: cmark parse failure (%1): %2"
-				).arg(error
-				).arg(target.path));
-#endif
 		} else {
-#ifndef NDEBUG
 			DEBUG_LOG(("Native Markdown IV: parse failure (%1, %2 ms): %3"
 				).arg(error
-				).arg(parseMs
+				).arg(parsed - validated
 				).arg(target.path));
-#else
-			DEBUG_LOG(("Native Markdown IV: parse failure (%1): %2"
-				).arg(error
-				).arg(target.path));
-#endif
 		}
-		return false;
-	}
-#ifndef NDEBUG
-	auto previewEligibilityTimer = QElapsedTimer();
-	previewEligibilityTimer.start();
-#endif
-	if (!AcceptsPreview(result.document)) {
-#ifndef NDEBUG
-		DEBUG_LOG(("Native Markdown IV: unsupported or empty document (%1 ms): %2"
-			).arg(previewEligibilityTimer.elapsed()
+		return nullptr;
+	} else if (!AcceptsPreview(parseResult.document)) {
+		DEBUG_LOG(("Native Markdown IV: "
+			"unsupported or empty document (%1 ms): %2"
+			).arg(crl::now() - parsed
 			).arg(target.path));
-#else
-		DEBUG_LOG(("Native Markdown IV: unsupported or empty document: %1"
-			).arg(target.path));
-#endif
-		return false;
+		return nullptr;
 	}
-	LogDocumentWarnings(result.document, target.path);
+	LogDocumentWarnings(parseResult.document, target.path);
 
-	const auto title = result.document.title.trimmed().isEmpty()
-		? fallbackTitle
-		: result.document.title.trimmed();
-	OpenDocumentWindow(
-		std::move(result.document),
-		title,
-		info.absoluteFilePath(),
-		target.fragment);
-#ifndef NDEBUG
-	DEBUG_LOG(("Native Markdown IV: opened as native Markdown IV (%1 ms validate, %2 ms parse): %3"
-		).arg(validationMs
-		).arg(parseMs
+	DEBUG_LOG(("Native Markdown IV: "
+		"opening as native Markdown IV (%1 ms validate, %2 ms parse): %3"
+		).arg(validated - start
+		).arg(parsed - validated
 		).arg(target.path));
-#else
-	DEBUG_LOG(("Native Markdown IV: opened as native Markdown IV: %1"
-		).arg(target.path));
-#endif
-	return true;
+
+	return std::make_unique<Controller>(
+		delegate,
+		std::move(parseResult.document),
+		(parseResult.document.title.trimmed().isEmpty()
+			? fallbackTitle
+			: parseResult.document.title.trimmed()),
+		std::move(source.path),
+		std::move(target.fragment));
 }
 
 } // namespace Iv::Markdown

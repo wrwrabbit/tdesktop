@@ -3227,9 +3227,10 @@ constexpr auto kDeferredPreparationConvertedNodes = 1200;
 class MarkdownPreviewRoot final : public Ui::RpWidget {
 public:
 	MarkdownPreviewRoot(
+		QWidget *parent,
 		const PreparedDocument &document,
-		const OpenOptions &options,
-		QWidget *parent = nullptr);
+		Fn<void(Event)> callback,
+		const OpenOptions &options);
 	~MarkdownPreviewRoot();
 
 private:
@@ -3254,6 +3255,7 @@ private:
 
 	const OpenOptions _options;
 	const std::shared_ptr<const PreparedDocument> _document;
+	const Fn<void(Event)> _callback;
 	Ui::ScrollArea *_scroll = nullptr;
 	MarkdownDocumentWidget *_body = nullptr;
 	Ui::FlatLabel *_loading = nullptr;
@@ -3271,12 +3273,14 @@ private:
 };
 
 MarkdownPreviewRoot::MarkdownPreviewRoot(
+	QWidget *parent,
 	const PreparedDocument &document,
-	const OpenOptions &options,
-	QWidget *parent)
+	Fn<void(Event)> callback,
+	const OpenOptions &options)
 : Ui::RpWidget(parent)
 , _options(options)
 , _document(std::make_shared<PreparedDocument>(document))
+, _callback(std::move(callback))
 , _renderer(std::make_shared<MathRenderer>())
 , _pendingFragment(options.initialFragment)
 , _cancelled(std::make_shared<std::atomic_bool>(false)) {
@@ -3448,17 +3452,18 @@ void MarkdownPreviewRoot::activateLink(
 		}
 		break;
 	case PreparedLinkKind::LocalFile: {
-		auto path = link.target;
-		if (!link.fragment.isEmpty()) {
-			path += u"#"_q + link.fragment;
-		}
-		if (!TryOpenLocalFile(path)) {
-			DEBUG_LOG(("Native Markdown IV: failed local markdown link: %1").arg(
-				path));
-		}
+		// Don't try opening local files from downloaded.
+		// The downloaded files should not known any local files.
+		//
+		//auto path = link.target;
+		//if (!link.fragment.isEmpty()) {
+		//	path += u"#"_q + link.fragment;
+		//}
+		//_callback({ .type = Event::Type::OpenFile, .url = path });
 	} break;
 	case PreparedLinkKind::RejectedRelative:
-		DEBUG_LOG(("Native Markdown IV: rejected relative markdown link: %1").arg(
+		DEBUG_LOG(("Native Markdown IV: "
+			"rejected relative markdown link: %1").arg(
 			link.target));
 		break;
 	case PreparedLinkKind::ToggleDetails:
@@ -3613,9 +3618,15 @@ void MarkdownPreviewRoot::cancelInFlightRequest() {
 } // namespace
 
 std::unique_ptr<Ui::RpWidget> CreateMarkdownPreviewWidget(
-	const PreparedDocument &document,
-	const OpenOptions &options) {
-	return std::make_unique<MarkdownPreviewRoot>(document, options);
+		QWidget *parent,
+		const PreparedDocument &document,
+		Fn<void(Event)> callback,
+		const OpenOptions &options) {
+	return std::make_unique<MarkdownPreviewRoot>(
+		parent,
+		document,
+		std::move(callback),
+		options);
 }
 
 } // namespace Iv::Markdown

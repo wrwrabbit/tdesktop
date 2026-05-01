@@ -23,4 +23,14 @@ struct ParseOptions {
 	const QString &fileName,
 	const QString &mimeType = QString());
 
+struct Event {
+	enum class Type {
+		Close,
+		Quit,
+		OpenFile,
+	};
+	Type type = Type::Close;
+	QString url;
+};
+
 } // namespace Iv::Markdown

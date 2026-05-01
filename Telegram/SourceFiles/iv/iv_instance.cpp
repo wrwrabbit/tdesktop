@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "history/history_item_helpers.h"
 #include "info/profile/info_profile_values.h"
+#include "iv/markdown/iv_markdown_controller.h"
 #include "iv/iv_controller.h"
 #include "iv/iv_data.h"
 #include "lang/lang_keys.h"
@@ -202,6 +203,10 @@ private:
 
 	rpl::lifetime _lifetime;
 
+};
+
+struct MarkdownShown {
+	std::unique_ptr<Markdown::Controller> controller;
 };
 
 Shown::Shown(
@@ -1130,6 +1135,40 @@ void Instance::showTonSite(
 			break;
 		}
 	}, _tonSite->lifetime());
+}
+
+bool Instance::showMarkdown(
+		const QString &path,
+		QVariant context) {
+	auto i = _markdowns.find(path);
+	if (i == end(_markdowns)) {
+		if (auto controller = Markdown::TryOpenLocalFile(_delegate, path)) {
+			controller->events() | rpl::on_next([=](Markdown::Event event) {
+				using Type = Markdown::Event::Type;
+				switch (event.type) {
+				case Type::Close:
+					_markdowns.take(path);
+					break;
+				case Type::Quit:
+					Shortcuts::Launch(Shortcuts::Command::Quit);
+					break;
+				case Type::OpenFile:
+					if (!showMarkdown(event.url)) {
+						DEBUG_LOG(("Native Markdown IV: "
+							"failed local markdown link: %1"
+							).arg(event.url));
+					}
+					break;
+				}
+			}, controller->lifetime());
+
+			i = _markdowns.emplace(path, std::move(controller)).first;
+		} else {
+			return false;
+		}
+	}
+	i->second->activate();
+	return true;
 }
 
 void Instance::requestFull(

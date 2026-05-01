@@ -20,8 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_gif.h"
 #include "history/history.h"
 #include "history/history_item.h"
-#include "iv/markdown/iv_markdown_common.h"
-#include "iv/markdown/iv_markdown_controller.h"
+#include "iv/iv_instance.h"
 #include "lang/lang_keys.h"
 #include "media/player/media_player_instance.h"
 #include "platform/platform_file_utilities.h"
@@ -252,12 +251,9 @@ void ResolveDocument(
 		if (!openImageInApp()) {
 			const auto path = document->filepath(true);
 			if (!path.isEmpty()) {
-				const auto fileName = QFileInfo(path).fileName();
-				if (Iv::Markdown::LooksLikeMarkdownFile(fileName)
-					&& Iv::Markdown::TryOpenLocalFile(path)) {
-					return;
+				if (!Core::App().iv().showMarkdown(path)) {
+					LaunchWithWarning(path, item);
 				}
-				LaunchWithWarning(path, item);
 			} else if (document->status == FileReady
 				|| document->status == FileDownloadFailed) {
 				DocumentSaveClickHandler::Save(
