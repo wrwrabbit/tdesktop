@@ -485,6 +485,11 @@ void SortEntities(TextWithEntities *text) {
 	return result;
 }
 
+struct DecodedDisplaySpan {
+	int offset = -1;
+	int length = 0;
+};
+
 [[nodiscard]] int DisplayOffsetForSourceOffset(
 		const MarkdownNode &node,
 		const QString &value,
@@ -505,6 +510,42 @@ void SortEntities(TextWithEntities *text) {
 		prefixSize);
 	const auto displayPrefix = DecodeMarkdownTextPrefix(prefix);
 	return value.startsWith(displayPrefix) ? displayPrefix.size() : -1;
+}
+
+[[nodiscard]] DecodedDisplaySpan DisplaySpanForSourceRange(
+		const MarkdownNode &node,
+		const QString &value,
+		const SourceRange &range,
+		const PrepareState *state) {
+	auto result = DecodedDisplaySpan();
+	if (!state
+		|| !node.range.available
+		|| !range.available
+		|| range.startOffset < node.range.startOffset
+		|| range.endOffset < range.startOffset
+		|| range.endOffset > node.range.endOffset) {
+		return result;
+	}
+	const auto offset = DisplayOffsetForSourceOffset(
+		node,
+		value,
+		range.startOffset,
+		state);
+	if (offset < 0) {
+		return result;
+	}
+	const auto decoded = DecodeMarkdownTextPrefix(
+		state->sourceUtf8.mid(
+			range.startOffset,
+			range.endOffset - range.startOffset));
+	const auto length = int(decoded.size());
+	if ((offset + length) > value.size()
+		|| value.mid(offset, length) != decoded) {
+		return result;
+	}
+	result.offset = offset;
+	result.length = length;
+	return result;
 }
 
 [[nodiscard]] int TextSizeForFormula(const style::TextStyle &textStyle) {
@@ -600,21 +641,20 @@ void ReplaceInlineFormulasInAppendedText(
 			break;
 		}
 
-		const auto originalOffset = DisplayOffsetForSourceOffset(
+		const auto displaySpan = DisplaySpanForSourceRange(
 			node,
 			value,
-			formula.range.startOffset,
+			formula.range,
 			state);
 		const auto sourceLength = formula.copySource.size();
-		if (originalOffset < 0
-			|| value.mid(originalOffset, sourceLength) != formula.copySource) {
+		if (displaySpan.offset < 0 || displaySpan.length <= 0) {
 			++inlineFormulas->next;
 			continue;
 		}
-		const auto found = from + originalOffset - removedLength;
+		const auto found = from + displaySpan.offset - removedLength;
 		text->text.replace(
 			found,
-			sourceLength,
+			displaySpan.length,
 			QString(QChar::ObjectReplacementCharacter));
 		inlineFormulas->prepared->push_back({
 			.position = found,
@@ -622,7 +662,7 @@ void ReplaceInlineFormulasInAppendedText(
 			.sourceLength = sourceLength,
 			.copySource = formula.copySource,
 		});
-		removedLength += (sourceLength - 1);
+		removedLength += (displaySpan.length - 1);
 
 		const auto &source = state->request->document->formulas[formula.formulaIndex];
 		state->rememberFormula(

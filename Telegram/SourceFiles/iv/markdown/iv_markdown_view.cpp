@@ -706,6 +706,21 @@ struct TableRowLayoutData {
 	return u"[math]"_q;
 }
 
+struct InlineFormulaMetrics {
+	int ascent = 0;
+	int descent = 0;
+};
+
+[[nodiscard]] InlineFormulaMetrics InlineFormulaMetricsFromRendered(
+		const RenderedFormula &formula) {
+	const auto height = std::max(formula.logicalSize.height(), 0);
+	const auto descent = std::clamp(formula.logicalDepth, 0, height);
+	return {
+		.ascent = height - descent,
+		.descent = descent,
+	};
+}
+
 [[nodiscard]] std::vector<Ui::Text::InlineObjectPlacement> InlineFormulaPlacements(
 		const std::vector<PreparedInlineObject> &preparedInlineObjects,
 		const std::vector<PreparedFormulaSlot> &formulas,
@@ -716,13 +731,18 @@ struct TableRowLayoutData {
 		const auto formula = PreparedFormulaFor(formulas, prepared.formulaIndex);
 		auto placement = Ui::Text::InlineObjectPlacement();
 		placement.position = prepared.position;
-		placement.object.align = Ui::Text::InlineObjectVerticalAlign::CenterInText;
 		placement.object.copySource = prepared.copySource;
 		if (formula && formula->rendered.success) {
+			const auto metrics = InlineFormulaMetricsFromRendered(
+				formula->rendered);
 			placement.object.image = formula->rendered.image;
 			placement.object.width = std::max(
 				formula->rendered.logicalSize.width(),
 				1);
+			placement.object.ascent = metrics.ascent;
+			placement.object.descent = metrics.descent;
+			placement.object.align
+				= Ui::Text::InlineObjectVerticalAlign::AscentDescent;
 			placement.object.fallbackText = InlineFormulaFallbackText(
 				prepared,
 				formula);

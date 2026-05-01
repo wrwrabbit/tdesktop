@@ -150,6 +150,7 @@ MicrotexRenderResult RenderWithMicrotex(const MicrotexRenderRequest &request) {
 		const auto logicalSize = QSize(
 			render->getWidth(),
 			render->getHeight());
+		const auto logicalDepth = render->getDepth();
 		if (logicalSize.width() <= 0 || logicalSize.height() <= 0) {
 			result.error = u"invalid-render-size"_q;
 			return result;
@@ -182,6 +183,7 @@ MicrotexRenderResult RenderWithMicrotex(const MicrotexRenderRequest &request) {
 		}
 		result.image = std::move(image);
 		result.logicalSize = logicalSize;
+		result.logicalDepth = logicalDepth;
 		result.ok = true;
 		return result;
 	} catch (const std::exception &exception) {

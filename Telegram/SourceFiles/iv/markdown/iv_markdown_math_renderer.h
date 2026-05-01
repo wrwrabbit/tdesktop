@@ -69,6 +69,7 @@ struct FormulaCacheKey {
 struct RenderedFormula {
 	QImage image;
 	QSize logicalSize;
+	int logicalDepth = 0;
 	QString fallbackText;
 	QString error;
 	bool success = false;

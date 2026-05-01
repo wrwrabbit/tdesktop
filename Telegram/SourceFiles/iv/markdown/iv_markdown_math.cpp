@@ -103,6 +103,54 @@ void OffsetToPosition(
 	return hasDigit;
 }
 
+[[nodiscard]] bool HasStrongMathSignal(const QByteArray &content) {
+	const auto size = static_cast<int>(content.size());
+	const auto hasVisibleNeighbors = [&](int position) {
+		auto left = position - 1;
+		while (left >= 0) {
+			const auto ch = content.at(left);
+			if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r') {
+				break;
+			}
+			--left;
+		}
+		auto right = position + 1;
+		while (right < size) {
+			const auto ch = content.at(right);
+			if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r') {
+				break;
+			}
+			++right;
+		}
+		return (left >= 0) && (right < size);
+	};
+	for (auto i = 0; i != size; ++i) {
+		const auto ch = content.at(i);
+		if (ch == '\\' && (i + 1) < size) {
+			const auto next = content.at(i + 1);
+			if (IsAsciiLetter(next)
+				|| next == ','
+				|| next == ':'
+				|| next == ';'
+				|| next == '!') {
+				return true;
+			}
+		} else if (ch == '^' || ch == '_') {
+			if (hasVisibleNeighbors(i)) {
+				return true;
+			}
+		} else if (ch == '+'
+			|| ch == '='
+			|| ch == '<'
+			|| ch == '>') {
+			if (hasVisibleNeighbors(i)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 [[nodiscard]] bool LooksLikeProse(const QByteArray &content) {
 	auto alphaWords = 0;
 	auto longestRun = 0;
@@ -309,7 +357,9 @@ bool ExtractMathRegions(
 			++i;
 			continue;
 		}
-		if (!display && LooksLikeProse(content)) {
+		if (!display
+			&& !HasStrongMathSignal(content)
+			&& LooksLikeProse(content)) {
 			++i;
 			continue;
 		}

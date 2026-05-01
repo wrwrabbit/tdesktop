@@ -1290,12 +1290,31 @@ void CheckPrepareCoverage(
 	const auto &markdown = markdownFixture.prepared;
 	const auto &latex = latexFixture.prepared;
 
-	auto inlineCopySourceFound = false;
-	ForEachPreparedInlineObject(markdown.blocks.blocks, [&](const PreparedInlineObject &object) {
-		if (object.copySource == FromLatin1("$a^2 + b^2 = c^2$")) {
-			inlineCopySourceFound = true;
+	const auto preparedHasInlineCopySource = [&](
+			const std::vector<PreparedBlock> &blocks,
+			const QString &copySource) {
+		auto found = false;
+		ForEachPreparedInlineObject(blocks, [&](const PreparedInlineObject &object) {
+			if (object.copySource == copySource) {
+				found = true;
+			}
+		});
+		return found;
+	};
+	const auto blockHasInlineCopySource = [](
+			const PreparedBlock &block,
+			const QString &copySource) {
+		for (const auto &object : block.inlineObjects) {
+			if (object.copySource == copySource) {
+				return true;
+			}
 		}
-	});
+		return false;
+	};
+
+	const auto inlineCopySourceFound = preparedHasInlineCopySource(
+		markdown.blocks.blocks,
+		FromLatin1("$a^2 + b^2 = c^2$"));
 	Check(
 		inlineCopySourceFound,
 		FromLatin1("markdown-example.md prepared inline formula copySource"),
@@ -1416,19 +1435,25 @@ void CheckPrepareCoverage(
 		ok);
 
 	auto latexTables = std::vector<const PreparedBlock*>();
-	auto latexTableCopySourceFound = false;
+	const PreparedBlock *latexHeadingBlock = nullptr;
 	ForEachPreparedBlock(latex.blocks.blocks, [&](const PreparedBlock &block) {
 		if (block.kind == PreparedBlockKind::Table) {
 			latexTables.push_back(&block);
 		}
-	});
-	ForEachPreparedInlineObject(latex.blocks.blocks, [&](const PreparedInlineObject &object) {
-		if (object.copySource == FromLatin1("$x^n$")
-			|| object.copySource
-				== FromLatin1("$\\frac{x^{n+1}}{n+1}$")) {
-			latexTableCopySourceFound = true;
+		if (!latexHeadingBlock
+			&& block.kind == PreparedBlockKind::Heading
+			&& block.headingLevel == 4
+			&& block.text.text.contains(FromLatin1("The equation"))) {
+			latexHeadingBlock = &block;
 		}
 	});
+	const auto latexTableCopySourceFound
+		= preparedHasInlineCopySource(
+			latex.blocks.blocks,
+			FromLatin1("$x^n$"))
+		|| preparedHasInlineCopySource(
+			latex.blocks.blocks,
+			FromLatin1("$\\frac{x^{n+1}}{n+1}$"));
 	Check(
 		!latexTables.empty(),
 		FromLatin1("latex-markdown-test.md prepared table count"),
@@ -1458,6 +1483,66 @@ void CheckPrepareCoverage(
 		latexTableCopySourceFound,
 		FromLatin1("latex-markdown-test.md prepared table inline formula copySource"),
 		ok);
+	Check(
+		preparedHasInlineCopySource(
+			latex.blocks.blocks,
+			FromLatin1("$\\int_0^1 x \\, dx$")),
+		FromLatin1("latex-markdown-test.md prepared line 71 inline copySource"),
+		ok);
+	Check(
+		preparedHasInlineCopySource(
+			latex.blocks.blocks,
+			FromLatin1(
+				"$\\mathbb{E}[X] = \\int_{-\\infty}^{\\infty} x f(x) \\, dx$")),
+		FromLatin1("latex-markdown-test.md prepared line 259 inline copySource"),
+		ok);
+	Check(
+		preparedHasInlineCopySource(
+			latex.blocks.blocks,
+			FromLatin1("$ax^2 + bx + c = 0$")),
+		FromLatin1("latex-markdown-test.md prepared line 322 inline copySource"),
+		ok);
+	Check(
+		preparedHasInlineCopySource(
+			latex.blocks.blocks,
+			FromLatin1("$a\\,b$")),
+		FromLatin1("latex-markdown-test.md prepared line 381 inline copySource"),
+		ok);
+	Check(
+		preparedHasInlineCopySource(
+			latex.blocks.blocks,
+			FromLatin1("$a\\:b$")),
+		FromLatin1("latex-markdown-test.md prepared line 383 inline copySource"),
+		ok);
+	Check(
+		preparedHasInlineCopySource(
+			latex.blocks.blocks,
+			FromLatin1("$a\\;b$")),
+		FromLatin1("latex-markdown-test.md prepared line 385 inline copySource"),
+		ok);
+	Check(
+		preparedHasInlineCopySource(
+			latex.blocks.blocks,
+			FromLatin1("$a\\!b$")),
+		FromLatin1("latex-markdown-test.md prepared line 391 inline copySource"),
+		ok);
+	Check(
+		latexHeadingBlock != nullptr,
+		FromLatin1("latex-markdown-test.md prepared heading block"),
+		ok);
+	if (latexHeadingBlock) {
+		Check(
+			blockHasInlineCopySource(
+				*latexHeadingBlock,
+				FromLatin1("$ax^2 + bx + c = 0$")),
+			FromLatin1("latex-markdown-test.md prepared heading inline object"),
+			ok);
+		Check(
+			!latexHeadingBlock->text.text.contains(
+				FromLatin1("$ax^2 + bx + c = 0$")),
+			FromLatin1("latex-markdown-test.md prepared heading removes raw formula"),
+			ok);
+	}
 
 	const auto &limits = PrepareTableRenderLimitsForIv();
 	auto overflowTable = QByteArray("| A | B |\n| --- | --- |\n");
@@ -1910,7 +1995,7 @@ void CheckPrepareRenderSmoke(
 		FromLatin1("latex-markdown-test.md cmark node count"),
 		&ok);
 	Check(
-		CountFormulas(latex, MathKind::Inline) == 99,
+		CountFormulas(latex, MathKind::Inline) == 100,
 		FromLatin1("latex-markdown-test.md inline formula count"),
 		&ok);
 	Check(
@@ -2028,6 +2113,18 @@ void CheckPrepareRenderSmoke(
 		CountFormulasInLineRange(latex, MathKind::Display, 315, 318) == 0,
 		FromLatin1("latex-markdown-test.md table display formulas absent"),
 		&ok);
+	Check(
+		HasFormulaOnLine(latex, 71, FromLatin1("\\int_0^1 x \\, dx")),
+		FromLatin1("latex-markdown-test.md line 71 inline formula"),
+		&ok);
+	Check(
+		HasFormulaOnLine(
+			latex,
+			259,
+			FromLatin1(
+				"\\mathbb{E}[X] = \\int_{-\\infty}^{\\infty} x f(x) \\, dx")),
+		FromLatin1("latex-markdown-test.md line 259 inline formula"),
+		&ok);
 	const auto headerMath = FindNodeByKindAndLineRange(
 		latex.document,
 		NodeKind::Heading,
@@ -2042,17 +2139,10 @@ void CheckPrepareRenderSmoke(
 			!HasKind(*headerMath, NodeKind::DisplayMath),
 			FromLatin1("latex-markdown-test.md heading display math stays inline"),
 			&ok);
-		Check(
-			!HasKind(*headerMath, NodeKind::InlineMath),
-			FromLatin1("latex-markdown-test.md heading inline math stays literal"),
-			&ok);
 	}
 	Check(
-		headerMath
-			&& HasTextContaining(
-				*headerMath,
-				FromLatin1("$ax^2 + bx + c = 0$")),
-		FromLatin1("latex-markdown-test.md heading inline formula preserved"),
+		HasFormulaOnLine(latex, 322, FromLatin1("ax^2 + bx + c = 0")),
+		FromLatin1("latex-markdown-test.md line 322 inline formula"),
 		&ok);
 	const auto strongMath = FindNodeByKindAndLineRange(
 		latex.document,
@@ -2099,6 +2189,22 @@ void CheckPrepareRenderSmoke(
 	Check(
 		HasFormulaOnLine(latex, 328, FromLatin1("\\pi \\approx 3.14")),
 		FromLatin1("latex-markdown-test.md emphasis inline formula preserved"),
+		&ok);
+	Check(
+		HasFormulaOnLine(latex, 381, FromLatin1("a\\,b")),
+		FromLatin1("latex-markdown-test.md line 381 inline formula"),
+		&ok);
+	Check(
+		HasFormulaOnLine(latex, 383, FromLatin1("a\\:b")),
+		FromLatin1("latex-markdown-test.md line 383 inline formula"),
+		&ok);
+	Check(
+		HasFormulaOnLine(latex, 385, FromLatin1("a\\;b")),
+		FromLatin1("latex-markdown-test.md line 385 inline formula"),
+		&ok);
+	Check(
+		HasFormulaOnLine(latex, 391, FromLatin1("a\\!b")),
+		FromLatin1("latex-markdown-test.md line 391 inline formula"),
 		&ok);
 	const auto fencedCode = FindNodeByKindAndLineRange(
 		latex.document,

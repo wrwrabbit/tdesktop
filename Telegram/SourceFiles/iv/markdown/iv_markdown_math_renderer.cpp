@@ -211,6 +211,7 @@ RenderedFormula MathRenderer::renderFormula(
 	auto result = RenderedFormula();
 	result.image = std::move(rendered.image);
 	result.logicalSize = rendered.logicalSize;
+	result.logicalDepth = rendered.logicalDepth;
 	result.success = true;
 	++_debugCounters.rendered;
 	applyCacheMutation(_cache.put(key, result));
@@ -264,6 +265,7 @@ RenderedFormula MathRenderer::makeFailure(
 	return {
 		.image = QImage(),
 		.logicalSize = QSize(),
+		.logicalDepth = 0,
 		.fallbackText = FallbackText(key),
 		.error = error,
 		.success = false,

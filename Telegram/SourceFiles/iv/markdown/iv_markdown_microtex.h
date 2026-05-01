@@ -21,6 +21,7 @@ struct MicrotexRenderRequest {
 struct MicrotexRenderResult {
 	QImage image;
 	QSize logicalSize;
+	int logicalDepth = 0;
 	QString error;
 	bool ok = false;
 };
