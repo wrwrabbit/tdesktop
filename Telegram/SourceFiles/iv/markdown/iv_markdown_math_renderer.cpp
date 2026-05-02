@@ -1,7 +1,5 @@
 #include "iv/markdown/iv_markdown_math_renderer.h"
 
-#include <QtGui/QColor>
-
 #include <algorithm>
 #include <limits>
 #include <utility>
@@ -12,22 +10,14 @@ namespace {
 constexpr auto kBytesPerPixel = int64(4);
 constexpr auto kMaxFormulaImageBytes = int64(128) * 1024 * 1024;
 
-[[nodiscard]] QColor NormalizeForeground(QColor color) {
-	return color.isValid() ? color : QColor(Qt::black);
-}
-
 [[nodiscard]] FormulaCacheKey NormalizeKey(
-		const MicrotexRenderRequest &request,
-		int paletteVersion) {
-	const auto foreground = NormalizeForeground(request.foreground);
+		const MicrotexRenderRequest &request) {
 	return {
 		.trimmedTex = request.trimmedTex.trimmed(),
 		.kind = request.kind,
 		.textSize = request.textSize,
 		.renderWidthCap = request.renderWidthCap,
 		.renderHeightCap = request.renderHeightCap,
-		.foregroundRgba = foreground.rgba(),
-		.paletteVersion = paletteVersion,
 		.devicePixelRatio = request.devicePixelRatio,
 	};
 }
@@ -170,9 +160,8 @@ FormulaCacheMutation FormulaCache::evictToBudget() {
 }
 
 RenderedFormula MathRenderer::renderFormula(
-		const MicrotexRenderRequest &request,
-		int paletteVersion) {
-	const auto key = makeKey(request, paletteVersion);
+		const MicrotexRenderRequest &request) {
+	const auto key = makeKey(request);
 	if (const auto cached = _cache.find(key)) {
 		++_debugCounters.hits;
 		return *cached;
@@ -190,7 +179,6 @@ RenderedFormula MathRenderer::renderFormula(
 	normalized.textSize = key.textSize;
 	normalized.renderWidthCap = key.renderWidthCap;
 	normalized.renderHeightCap = key.renderHeightCap;
-	normalized.foreground = QColor::fromRgba(key.foregroundRgba);
 	normalized.devicePixelRatio = key.devicePixelRatio;
 	auto rendered = RenderWithMicrotex(normalized);
 	if (!rendered.ok) {
@@ -253,9 +241,8 @@ int64 MathRenderer::cacheUsageBytes() const {
 }
 
 FormulaCacheKey MathRenderer::makeKey(
-		const MicrotexRenderRequest &request,
-		int paletteVersion) const {
-	return NormalizeKey(request, paletteVersion);
+		const MicrotexRenderRequest &request) const {
+	return NormalizeKey(request);
 }
 
 RenderedFormula MathRenderer::makeFailure(

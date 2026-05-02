@@ -763,18 +763,30 @@ void PrintSummary(const PreparedDocument &document, const QString &label) {
 }
 
 [[nodiscard]] PreparedResult PrepareParsedDocumentForTest(
-		const PreparedDocument &document,
+		std::shared_ptr<const PreparedDocument> document,
 		const QString &sourcePath,
 		const std::shared_ptr<MathRenderer> &renderer,
-		MarkdownStyleSnapshot style = CaptureMarkdownStyleSnapshot()) {
+		MarkdownPrepareDimensions dimensions = CaptureMarkdownPrepareDimensions()) {
 	return PrepareSynchronously({
-		.document = std::make_shared<const PreparedDocument>(document),
+		.document = std::move(document),
 		.renderer = renderer,
-		.style = std::move(style),
+		.dimensions = std::move(dimensions),
 		.generation = 1,
 		.sourcePath = AbsolutePath(sourcePath),
 		.cancelled = std::make_shared<std::atomic_bool>(false),
 	});
+}
+
+[[nodiscard]] PreparedResult PrepareParsedDocumentForTest(
+		const PreparedDocument &document,
+		const QString &sourcePath,
+		const std::shared_ptr<MathRenderer> &renderer,
+		MarkdownPrepareDimensions dimensions = CaptureMarkdownPrepareDimensions()) {
+	return PrepareParsedDocumentForTest(
+		std::make_shared<const PreparedDocument>(document),
+		sourcePath,
+		renderer,
+		std::move(dimensions));
 }
 
 [[nodiscard]] int CountPreparedFormulaSlots(const PreparedResult &prepared) {
@@ -1708,24 +1720,99 @@ void CheckPrepareRenderSmoke(
 		+ CountPreparedFormulaSlots(firstLatex);
 	Check(
 		secondCounters.hits >= expectedHits,
-		FromLatin1("prepare cache smoke second pass cache hits"),
+		FromLatin1("renderer cache smoke second pass cache hits"),
 		ok);
 	Check(
 		secondCounters.misses == 0,
-		FromLatin1("prepare cache smoke second pass cache misses"),
+		FromLatin1("renderer cache smoke second pass cache misses"),
 		ok);
-	auto smokeLine = FromLatin1("prepare-cache-smoke");
-	smokeLine.append(FromLatin1(" first_hits="));
-	smokeLine.append(QString::number(firstCounters.hits));
-	smokeLine.append(FromLatin1(" first_misses="));
-	smokeLine.append(QString::number(firstCounters.misses));
-	smokeLine.append(FromLatin1(" second_hits="));
-	smokeLine.append(QString::number(secondCounters.hits));
-	smokeLine.append(FromLatin1(" second_misses="));
-	smokeLine.append(QString::number(secondCounters.misses));
-	smokeLine.append(FromLatin1(" cache_bytes="));
-	smokeLine.append(QString::number(secondCounters.cacheBytes));
-	PrintLine(smokeLine);
+	auto rendererSmokeLine = FromLatin1("renderer-cache-smoke");
+	rendererSmokeLine.append(FromLatin1(" first_hits="));
+	rendererSmokeLine.append(QString::number(firstCounters.hits));
+	rendererSmokeLine.append(FromLatin1(" first_misses="));
+	rendererSmokeLine.append(QString::number(firstCounters.misses));
+	rendererSmokeLine.append(FromLatin1(" second_hits="));
+	rendererSmokeLine.append(QString::number(secondCounters.hits));
+	rendererSmokeLine.append(FromLatin1(" second_misses="));
+	rendererSmokeLine.append(QString::number(secondCounters.misses));
+	rendererSmokeLine.append(FromLatin1(" cache_bytes="));
+	rendererSmokeLine.append(QString::number(secondCounters.cacheBytes));
+	PrintLine(rendererSmokeLine);
+
+	const auto sharedMarkdown = std::make_shared<const PreparedDocument>(
+		markdownFixture.parsed);
+	const auto sharedLatex = std::make_shared<const PreparedDocument>(
+		latexFixture.parsed);
+	auto documentRenderer = std::make_shared<MathRenderer>();
+	const auto documentFirstMarkdown = PrepareParsedDocumentForTest(
+		sharedMarkdown,
+		markdownFixture.path,
+		documentRenderer);
+	const auto documentFirstLatex = PrepareParsedDocumentForTest(
+		sharedLatex,
+		latexFixture.path,
+		documentRenderer);
+	Check(
+		!documentFirstMarkdown.cancelled && !documentFirstLatex.cancelled,
+		FromLatin1("document cache smoke first pass cancelled"),
+		ok);
+	Check(
+		!documentFirstMarkdown.failure.failed()
+			&& !documentFirstLatex.failure.failed(),
+		FromLatin1("document cache smoke first pass failed"),
+		ok);
+	const auto documentFirstCounters = documentRenderer->debugCounters();
+	Check(
+		documentRenderer->cacheUsageBytes() > 0,
+		FromLatin1("document cache smoke first pass cache bytes"),
+		ok);
+	auto freshRenderer = std::make_shared<MathRenderer>();
+	const auto documentSecondMarkdown = PrepareParsedDocumentForTest(
+		sharedMarkdown,
+		markdownFixture.path,
+		freshRenderer);
+	const auto documentSecondLatex = PrepareParsedDocumentForTest(
+		sharedLatex,
+		latexFixture.path,
+		freshRenderer);
+	Check(
+		!documentSecondMarkdown.cancelled && !documentSecondLatex.cancelled,
+		FromLatin1("document cache smoke second pass cancelled"),
+		ok);
+	Check(
+		!documentSecondMarkdown.failure.failed()
+			&& !documentSecondLatex.failure.failed(),
+		FromLatin1("document cache smoke second pass failed"),
+		ok);
+	const auto documentSecondCounters = freshRenderer->debugCounters();
+	Check(
+		documentSecondCounters.hits == 0,
+		FromLatin1("document cache smoke second pass renderer hits stay zero"),
+		ok);
+	Check(
+		documentSecondCounters.misses == 0,
+		FromLatin1("document cache smoke second pass renderer misses stay zero"),
+		ok);
+	Check(
+		documentSecondCounters.rendered == 0,
+		FromLatin1("document cache smoke second pass renderer work stays zero"),
+		ok);
+	Check(
+		freshRenderer->cacheUsageBytes() == 0,
+		FromLatin1("document cache smoke second pass fresh renderer cache bytes"),
+		ok);
+	auto documentSmokeLine = FromLatin1("document-cache-smoke");
+	documentSmokeLine.append(FromLatin1(" first_hits="));
+	documentSmokeLine.append(QString::number(documentFirstCounters.hits));
+	documentSmokeLine.append(FromLatin1(" first_misses="));
+	documentSmokeLine.append(QString::number(documentFirstCounters.misses));
+	documentSmokeLine.append(FromLatin1(" second_hits="));
+	documentSmokeLine.append(QString::number(documentSecondCounters.hits));
+	documentSmokeLine.append(FromLatin1(" second_misses="));
+	documentSmokeLine.append(QString::number(documentSecondCounters.misses));
+	documentSmokeLine.append(FromLatin1(" second_rendered="));
+	documentSmokeLine.append(QString::number(documentSecondCounters.rendered));
+	PrintLine(documentSmokeLine);
 
 	const auto failureLabel = FromLatin1("generated-formula-cap.md");
 	const auto failureParsed = ParseMarkdownForIv(
@@ -1738,13 +1825,13 @@ void CheckPrepareRenderSmoke(
 	if (!failureParsed.ok) {
 		return;
 	}
-	auto failureStyle = CaptureMarkdownStyleSnapshot();
-	failureStyle.displayMathMaxRenderWidth = 1;
+	auto failureDimensions = CaptureMarkdownPrepareDimensions();
+	failureDimensions.displayMathMaxRenderWidth = 1;
 	const auto failurePrepared = PrepareParsedDocumentForTest(
 		failureParsed.document,
 		failureLabel,
 		std::make_shared<MathRenderer>(),
-		std::move(failureStyle));
+		std::move(failureDimensions));
 	Check(
 		!failurePrepared.cancelled,
 		failureLabel + FromLatin1(" prepare cancelled"),
@@ -1822,13 +1909,13 @@ void CheckPrepareRenderSmoke(
 
 	const auto invalidStyleLabel = FromLatin1(
 		"generated-invalid-style-internal.md");
-	auto invalidStyle = CaptureMarkdownStyleSnapshot();
-	invalidStyle.devicePixelRatio = 0;
+	auto invalidDimensions = CaptureMarkdownPrepareDimensions();
+	invalidDimensions.devicePixelRatio = 0;
 	const auto invalidStylePrepared = PrepareParsedDocumentForTest(
 		markdownFixture.parsed,
 		markdownFixture.path,
 		std::make_shared<MathRenderer>(),
-		std::move(invalidStyle));
+		std::move(invalidDimensions));
 	Check(
 		!invalidStylePrepared.cancelled,
 		invalidStyleLabel + FromLatin1(" synthetic prepare cancelled"),

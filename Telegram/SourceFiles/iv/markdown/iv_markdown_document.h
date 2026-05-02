@@ -4,6 +4,7 @@
 
 #include <QtCore/QStringList>
 
+#include <memory>
 #include <vector>
 
 namespace Iv::Markdown {
@@ -134,6 +135,37 @@ struct ParseStats {
 	bool footnotesSeen = false;
 };
 
+struct PreparedFormulaRenderData;
+
+struct PreparedFormulaRenderSignature {
+	QString trimmedTex;
+	MathKind kind = MathKind::Display;
+	int textSize = 0;
+	int renderWidthCap = 0;
+	int renderHeightCap = 0;
+	int devicePixelRatio = 1;
+
+	friend inline bool operator==(
+			const PreparedFormulaRenderSignature &a,
+			const PreparedFormulaRenderSignature &b) {
+		return a.trimmedTex == b.trimmedTex
+			&& a.kind == b.kind
+			&& a.textSize == b.textSize
+			&& a.renderWidthCap == b.renderWidthCap
+			&& a.renderHeightCap == b.renderHeightCap
+			&& a.devicePixelRatio == b.devicePixelRatio;
+	}
+};
+
+struct PreparedFormulaRenderCacheEntry {
+	PreparedFormulaRenderSignature signature;
+	std::shared_ptr<const PreparedFormulaRenderData> data;
+};
+
+struct PreparedFormulaRenderCacheState {
+	std::vector<PreparedFormulaRenderCacheEntry> slots;
+};
+
 struct PreparedDocument {
 	QString sourceName;
 	QString title;
@@ -143,6 +175,41 @@ struct PreparedDocument {
 	ParseStats stats;
 	QStringList warnings;
 	bool empty = true;
+	std::shared_ptr<PreparedFormulaRenderCacheState> formulaRenderCache
+		= std::make_shared<PreparedFormulaRenderCacheState>();
+
+	PreparedDocument() = default;
+
+	PreparedDocument(const PreparedDocument &other)
+	: sourceName(other.sourceName)
+	, title(other.title)
+	, sourceText(other.sourceText)
+	, document(other.document)
+	, formulas(other.formulas)
+	, stats(other.stats)
+	, warnings(other.warnings)
+	, empty(other.empty)
+	, formulaRenderCache(std::make_shared<PreparedFormulaRenderCacheState>()) {
+	}
+
+	PreparedDocument &operator=(const PreparedDocument &other) {
+		if (this != &other) {
+			sourceName = other.sourceName;
+			title = other.title;
+			sourceText = other.sourceText;
+			document = other.document;
+			formulas = other.formulas;
+			stats = other.stats;
+			warnings = other.warnings;
+			empty = other.empty;
+			formulaRenderCache = std::make_shared<
+				PreparedFormulaRenderCacheState>();
+		}
+		return *this;
+	}
+
+	PreparedDocument(PreparedDocument &&) noexcept = default;
+	PreparedDocument &operator=(PreparedDocument &&) noexcept = default;
 };
 
 struct ParseResult {

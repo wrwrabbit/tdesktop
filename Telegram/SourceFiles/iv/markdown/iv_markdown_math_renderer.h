@@ -7,7 +7,6 @@
 #include <QtCore/QSize>
 #include <QtCore/QString>
 #include <QtGui/QImage>
-#include <QtGui/qrgb.h>
 
 #include <list>
 #include <map>
@@ -21,8 +20,6 @@ struct FormulaCacheKey {
 	int textSize = 0;
 	int renderWidthCap = 0;
 	int renderHeightCap = 0;
-	QRgb foregroundRgba = 0;
-	int paletteVersion = 0;
 	int devicePixelRatio = 1;
 
 	friend inline bool operator==(const FormulaCacheKey &a, const FormulaCacheKey &b) {
@@ -32,16 +29,12 @@ struct FormulaCacheKey {
 			a.textSize,
 			a.renderWidthCap,
 			a.renderHeightCap,
-			a.foregroundRgba,
-			a.paletteVersion,
 			a.devicePixelRatio) == std::tie(
 			b.trimmedTex,
 			b.kind,
 			b.textSize,
 			b.renderWidthCap,
 			b.renderHeightCap,
-			b.foregroundRgba,
-			b.paletteVersion,
 			b.devicePixelRatio);
 	}
 
@@ -52,16 +45,12 @@ struct FormulaCacheKey {
 			a.textSize,
 			a.renderWidthCap,
 			a.renderHeightCap,
-			a.foregroundRgba,
-			a.paletteVersion,
 			a.devicePixelRatio) < std::tie(
 			b.trimmedTex,
 			b.kind,
 			b.textSize,
 			b.renderWidthCap,
 			b.renderHeightCap,
-			b.foregroundRgba,
-			b.paletteVersion,
 			b.devicePixelRatio);
 	}
 };
@@ -130,8 +119,7 @@ private:
 class MathRenderer {
 public:
 	[[nodiscard]] RenderedFormula renderFormula(
-		const MicrotexRenderRequest &request,
-		int paletteVersion);
+		const MicrotexRenderRequest &request);
 	void clearCache(bool resetDebugCounters = false);
 	void invalidate(bool resetDebugCounters = false);
 	void resetDebugCounters();
@@ -143,8 +131,7 @@ public:
 
 private:
 	[[nodiscard]] FormulaCacheKey makeKey(
-		const MicrotexRenderRequest &request,
-		int paletteVersion) const;
+		const MicrotexRenderRequest &request) const;
 	[[nodiscard]] RenderedFormula makeFailure(
 		const FormulaCacheKey &key,
 		const QString &error,

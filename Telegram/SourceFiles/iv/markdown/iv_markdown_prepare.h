@@ -4,11 +4,7 @@
 #include "iv/markdown/iv_markdown_math_renderer.h"
 
 #include "base/basic_types.h"
-#include "styles/style_basic.h"
-#include "styles/style_iv.h"
 #include "ui/text/text_entity.h"
-
-#include <QtGui/QColor>
 
 #include <array>
 #include <atomic>
@@ -101,50 +97,13 @@ struct PreparedRenderDocument {
 
 using PrepareGeneration = uint64;
 
-struct MarkdownTextPaletteSnapshot {
-	QColor link;
-	QColor mono;
-	QColor mark;
-	QColor spoiler;
-	QColor selectBackground;
-	QColor selectText;
-	QColor selectLink;
-	QColor selectMono;
-	QColor selectSpoiler;
-	QColor selectOverlay;
-	bool linkAlwaysActive = false;
-};
-
-struct MarkdownQuotePaintColorsSnapshot {
-	std::array<QColor, 3> outlines = {
-		QColor(0, 0, 0, 0),
-		QColor(0, 0, 0, 0),
-		QColor(0, 0, 0, 0),
-	};
-	QColor background = QColor(0, 0, 0, 0);
-	QColor header = QColor(0, 0, 0, 0);
-	QColor icon = QColor(0, 0, 0, 0);
-};
-
-struct MarkdownStyleSnapshot {
-	MarkdownTextPaletteSnapshot textPalette;
-	style::Markdown markdown;
-	QColor defaultTextColor = Qt::black;
-	QColor bulletColor = Qt::black;
-	QColor taskMarkerColor = Qt::black;
-	QColor taskMarkerCheckColor = Qt::black;
-	QColor ruleColor = Qt::black;
-	QColor displayMathForegroundColor = Qt::black;
-	QColor displayMathFallbackBackgroundColor = Qt::black;
-	QColor displayMathOverflowColor = Qt::black;
-	QColor tableBorderColor = Qt::black;
-	QColor tableHeaderBackgroundColor = Qt::black;
-	QColor tableOverflowColor = Qt::black;
-	MarkdownQuotePaintColorsSnapshot blockquotePaint;
-	MarkdownQuotePaintColorsSnapshot prePaint;
+struct MarkdownPrepareDimensions {
+	int bodyTextSize = 0;
+	std::array<int, 6> headingTextSizes = { 0, 0, 0, 0, 0, 0 };
+	int tableHeaderTextSize = 0;
+	int displayMathTextSize = 0;
 	int displayMathMaxRenderWidth = 0;
 	int displayMathMaxRenderHeight = 0;
-	int paletteVersion = 0;
 	int devicePixelRatio = 1;
 };
 
@@ -184,12 +143,17 @@ struct PrepareDebugStats {
 	int formulaWarningCount = 0;
 };
 
+struct PreparedFormulaRenderData {
+	RenderedFormula rendered;
+};
+
 struct PreparedFormulaSlot {
 	QString trimmedTex;
 	MathKind kind = MathKind::Display;
 	int textSize = 0;
 	int renderWidthCap = 0;
 	int renderHeightCap = 0;
+	std::shared_ptr<const PreparedFormulaRenderData> renderData;
 	RenderedFormula rendered;
 	bool present = false;
 };
@@ -197,7 +161,7 @@ struct PreparedFormulaSlot {
 struct PrepareRequest {
 	std::shared_ptr<const PreparedDocument> document;
 	std::shared_ptr<MathRenderer> renderer;
-	MarkdownStyleSnapshot style;
+	MarkdownPrepareDimensions dimensions;
 	PrepareGeneration generation = 0;
 	QString sourcePath;
 	std::shared_ptr<std::atomic_bool> cancelled;
@@ -205,7 +169,6 @@ struct PrepareRequest {
 
 struct PreparedResult {
 	PreparedRenderDocument blocks;
-	MarkdownStyleSnapshot style;
 	std::vector<PreparedFormulaSlot> formulas;
 	PrepareFailureStatus failure;
 	PrepareDebugStats debug;
@@ -215,7 +178,7 @@ struct PreparedResult {
 
 [[nodiscard]] const MarkdownPrepareTableRenderLimits &PrepareTableRenderLimitsForIv();
 [[nodiscard]] const MarkdownPrepareLimits &PrepareLimitsForIv();
-[[nodiscard]] MarkdownStyleSnapshot CaptureMarkdownStyleSnapshot();
+[[nodiscard]] MarkdownPrepareDimensions CaptureMarkdownPrepareDimensions();
 [[nodiscard]] PreparedResult PrepareSynchronously(PrepareRequest request);
 void PrepareAsync(PrepareRequest request, Fn<void(PreparedResult)> done);
 

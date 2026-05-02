@@ -3,7 +3,6 @@
 #include "iv/markdown/iv_markdown_document.h"
 
 #include <QtCore/QSize>
-#include <QtGui/QColor>
 #include <QtGui/QImage>
 
 namespace Iv::Markdown {
@@ -14,7 +13,6 @@ struct MicrotexRenderRequest {
 	int textSize = 0;
 	int renderWidthCap = 0;
 	int renderHeightCap = 0;
-	QColor foreground = Qt::black;
 	int devicePixelRatio = 1;
 };
 

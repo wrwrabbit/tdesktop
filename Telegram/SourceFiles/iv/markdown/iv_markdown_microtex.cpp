@@ -4,7 +4,6 @@
 
 #include <QtCore/QSize>
 #include <QtCore/QString>
-#include <QtGui/QColor>
 #include <QtGui/QPainter>
 
 #include <exception>
@@ -21,6 +20,7 @@ namespace {
 
 constexpr auto kBytesPerPixel = int64(4);
 constexpr auto kMaxFormulaImageBytes = int64(128) * 1024 * 1024;
+constexpr auto kFormulaForegroundRgba = 0xFFFFFFFFU;
 
 std::once_flag MicrotexInitOnce;
 bool MicrotexInitialized = false;
@@ -61,10 +61,6 @@ QString MicrotexInitError;
 		*physicalSize = QSize(int(width), int(height));
 	}
 	return true;
-}
-
-[[nodiscard]] QColor NormalizeForeground(QColor color) {
-	return color.isValid() ? color : QColor(Qt::black);
 }
 
 [[nodiscard]] QString PreparedTeX(MathKind kind, const QString &trimmedTex) {
@@ -150,7 +146,7 @@ MicrotexRenderResult RenderWithMicrotex(const MicrotexRenderRequest &request) {
 			int(maxWidth),
 			float(textSize),
 			float(textSize) * 0.25f,
-			NormalizeForeground(request.foreground).rgba()));
+			kFormulaForegroundRgba));
 		if (!render) {
 			result.error = u"parse-returned-null"_q;
 			return result;

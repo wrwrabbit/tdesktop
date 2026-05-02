@@ -3,7 +3,7 @@
 #include "iv/markdown/iv_markdown_parse.h"
 
 #include "base/call_delayed.h"
-#include "ui/chat/chat_style.h"
+#include "ui/style/style_core_scale.h"
 
 #include <QtCore/QByteArray>
 #include <QtCore/QDir>
@@ -13,10 +13,6 @@
 #include <algorithm>
 #include <limits>
 #include <utility>
-
-#include "ui/style/style_core.h"
-
-#include "styles/palette.h"
 #include "styles/style_iv.h"
 
 namespace Iv::Markdown {
@@ -96,9 +92,9 @@ struct PrepareState {
 			block.formulaIndex,
 			block.mathKind,
 			block.formulaTex,
-			result.style.markdown.displayMath.textSize,
-			result.style.displayMathMaxRenderWidth,
-			result.style.displayMathMaxRenderHeight);
+			request->dimensions.displayMathTextSize,
+			request->dimensions.displayMathMaxRenderWidth,
+			request->dimensions.displayMathMaxRenderHeight);
 	}
 
 	void addPrepareWarning() {
@@ -198,8 +194,8 @@ enum class RawInlineTag {
 };
 
 [[nodiscard]] QString InvalidStyleReason(
-		const MarkdownStyleSnapshot &style) {
-	if (style.devicePixelRatio <= 0) {
+		const MarkdownPrepareDimensions &dimensions) {
+	if (dimensions.devicePixelRatio <= 0) {
 		return u"invalid-device-pixel-ratio"_q;
 	}
 	return QString();
@@ -563,28 +559,26 @@ struct DecodedDisplaySpan {
 	return std::max(int((numerator + denominator - 1) / denominator), 1);
 }
 
-[[nodiscard]] const style::TextStyle &FlowTextStyle(
+[[nodiscard]] int FlowFormulaTextSize(
 		PreparedBlockKind kind,
 		int headingLevel,
-		const MarkdownStyleSnapshot &style) {
+		const MarkdownPrepareDimensions &dimensions) {
 	if (kind != PreparedBlockKind::Heading) {
-		return style.markdown.body;
+		return dimensions.bodyTextSize;
 	}
-	switch (std::clamp(headingLevel, 1, 6)) {
-	case 1: return style.markdown.heading1;
-	case 2: return style.markdown.heading2;
-	case 3: return style.markdown.heading3;
-	case 4: return style.markdown.heading4;
-	case 5: return style.markdown.heading5;
-	case 6: return style.markdown.heading6;
+	const auto index = std::clamp(headingLevel, 1, 6) - 1;
+	if (index < int(dimensions.headingTextSizes.size())) {
+		return dimensions.headingTextSizes[index];
 	}
-	return style.markdown.heading6;
+	return dimensions.bodyTextSize;
 }
 
-[[nodiscard]] const style::TextStyle &TableCellTextStyle(
+[[nodiscard]] int TableCellFormulaTextSize(
 		bool header,
-		const MarkdownStyleSnapshot &style) {
-	return header ? style.markdown.table.headerStyle : style.markdown.body;
+		const MarkdownPrepareDimensions &dimensions) {
+	return header
+		? dimensions.tableHeaderTextSize
+		: dimensions.bodyTextSize;
 }
 
 [[nodiscard]] std::vector<InlineFormulaSource> CollectInlineFormulas(
@@ -1060,21 +1054,22 @@ void PrepareTableCellText(
 		std::vector<PreparedLink> *links,
 		std::vector<PreparedInlineObject> *inlineObjects,
 		PrepareState *state) {
-	const auto &renderStyle = TableCellTextStyle(header, state->result.style);
-	const auto textSize = TextSizeForFormula(renderStyle);
+	const auto textSize = TableCellFormulaTextSize(
+		header,
+		state->request->dimensions);
 	auto formulas = CollectInlineFormulas(cell, state);
 	auto inlineFormulas = InlineFormulaContext{
 		.formulas = &formulas,
 		.prepared = inlineObjects,
 		.textSize = textSize,
 		.renderWidthCap = ScaleFormulaCap(
-			state->result.style.displayMathMaxRenderWidth,
+			state->request->dimensions.displayMathMaxRenderWidth,
 			textSize,
-			state->result.style.markdown.displayMath.textSize),
+			state->request->dimensions.displayMathTextSize),
 		.renderHeightCap = ScaleFormulaCap(
-			state->result.style.displayMathMaxRenderHeight,
+			state->request->dimensions.displayMathMaxRenderHeight,
 			textSize,
-			state->result.style.markdown.displayMath.textSize),
+			state->request->dimensions.displayMathTextSize),
 	};
 	if (!cell.children.empty()) {
 		AppendInlineRange(
@@ -1489,7 +1484,7 @@ void AppendFootnotes(
 	auto nestedRequest = PrepareRequest{
 		.document = std::make_shared<const PreparedDocument>(parsed.document),
 		.renderer = state->request->renderer,
-		.style = state->result.style,
+		.dimensions = state->request->dimensions,
 		.generation = state->request->generation,
 		.sourcePath = state->request->sourcePath,
 		.cancelled = state->request->cancelled,
@@ -1550,11 +1545,10 @@ void AppendFootnotes(
 	auto text = TextWithEntities();
 	auto links = std::vector<PreparedLink>();
 	auto inlineObjects = std::vector<PreparedInlineObject>();
-	const auto &renderStyle = FlowTextStyle(
+	const auto textSize = FlowFormulaTextSize(
 		kind,
 		(kind == PreparedBlockKind::Heading) ? node.headingLevel : 0,
-		state->result.style);
-	const auto textSize = TextSizeForFormula(renderStyle);
+		state->request->dimensions);
 	auto formulas = CollectInlineFormulas(node, state);
 	auto inlineFormulas = InlineFormulaContext{
 		.formulas = &formulas,
@@ -1562,13 +1556,13 @@ void AppendFootnotes(
 		.blockAnchorId = &anchorId,
 		.textSize = textSize,
 		.renderWidthCap = ScaleFormulaCap(
-			state->result.style.displayMathMaxRenderWidth,
+			state->request->dimensions.displayMathMaxRenderWidth,
 			textSize,
-			state->result.style.markdown.displayMath.textSize),
+			state->request->dimensions.displayMathTextSize),
 		.renderHeightCap = ScaleFormulaCap(
-			state->result.style.displayMathMaxRenderHeight,
+			state->request->dimensions.displayMathMaxRenderHeight,
 			textSize,
-			state->result.style.markdown.displayMath.textSize),
+			state->request->dimensions.displayMathTextSize),
 	};
 	if (!node.children.empty()) {
 		AppendInlineRange(
@@ -1821,39 +1815,63 @@ void AppendFootnotes(
 	return result;
 }
 
-[[nodiscard]] QColor Resolve(style::color color) {
-	return color->c;
+[[nodiscard]] PreparedFormulaRenderSignature FormulaRenderSignature(
+		const PreparedFormulaSlot &slot,
+		const MarkdownPrepareDimensions &dimensions) {
+	return {
+		.trimmedTex = slot.trimmedTex.trimmed(),
+		.kind = slot.kind,
+		.textSize = slot.textSize
+			? slot.textSize
+			: dimensions.displayMathTextSize,
+		.renderWidthCap = slot.renderWidthCap
+			? slot.renderWidthCap
+			: dimensions.displayMathMaxRenderWidth,
+		.renderHeightCap = slot.renderHeightCap
+			? slot.renderHeightCap
+			: dimensions.displayMathMaxRenderHeight,
+		.devicePixelRatio = dimensions.devicePixelRatio,
+	};
 }
 
-[[nodiscard]] QColor WithAlpha(QColor color, float64 alpha) {
-	color.setAlpha(int(alpha * 255));
-	return color;
+[[nodiscard]] std::shared_ptr<const PreparedFormulaRenderData>
+FindDocumentFormulaRender(
+		const std::shared_ptr<const PreparedDocument> &document,
+		int index,
+		const PreparedFormulaRenderSignature &signature) {
+	const auto cache = document ? document->formulaRenderCache : nullptr;
+	if (!cache || index < 0) {
+		return nullptr;
+	}
+	if (index >= int(cache->slots.size())) {
+		return nullptr;
+	}
+	const auto &entry = cache->slots[index];
+	return (entry.data && entry.signature == signature)
+		? entry.data
+		: nullptr;
 }
 
-[[nodiscard]] MarkdownQuotePaintColorsSnapshot ResolveBlockquotePaintColors(
-		style::color color) {
-	auto result = MarkdownQuotePaintColorsSnapshot();
-	const auto base = Resolve(color);
-	result.background = WithAlpha(base, Ui::kDefaultBgOpacity);
-	result.outlines[0] = WithAlpha(base, Ui::kDefaultOutline1Opacity);
-	result.icon = base;
-	return result;
-}
-
-[[nodiscard]] MarkdownQuotePaintColorsSnapshot ResolvePrePaintColors(
-		style::color color,
-		style::color background) {
-	auto result = MarkdownQuotePaintColorsSnapshot();
-	const auto base = Resolve(color);
-	result.background = Resolve(background);
-	result.outlines[0] = WithAlpha(base, Ui::kDefaultOutline1Opacity);
-	result.header = WithAlpha(base, Ui::kDefaultOutline2Opacity);
-	result.icon = WithAlpha(base, Ui::kDefaultOutline3Opacity);
-	return result;
+void RememberDocumentFormulaRender(
+		const std::shared_ptr<const PreparedDocument> &document,
+		int index,
+		PreparedFormulaRenderSignature signature,
+		std::shared_ptr<const PreparedFormulaRenderData> data) {
+	const auto cache = document ? document->formulaRenderCache : nullptr;
+	if (!cache || index < 0 || !data) {
+		return;
+	}
+	if (index >= int(cache->slots.size())) {
+		cache->slots.resize(index + 1);
+	}
+	cache->slots[index] = {
+		.signature = std::move(signature),
+		.data = std::move(data),
+	};
 }
 
 [[nodiscard]] bool RenderPreparedFormulas(PrepareState *state) {
-	const auto &style = state->result.style;
+	const auto &dimensions = state->request->dimensions;
 	auto ownedRenderer = std::shared_ptr<MathRenderer>();
 	auto renderer = state->request ? state->request->renderer.get() : nullptr;
 	if (!renderer) {
@@ -1862,28 +1880,39 @@ void AppendFootnotes(
 	}
 	auto timer = QElapsedTimer();
 	timer.start();
-	for (auto &slot : state->result.formulas) {
+	for (auto i = 0, count = int(state->result.formulas.size()); i != count; ++i) {
+		auto &slot = state->result.formulas[i];
 		if (!slot.present) {
 			continue;
 		}
 		if (state->cancelled()) {
 			return false;
 		}
-		slot.rendered = renderer->renderFormula({
-			.trimmedTex = slot.trimmedTex,
-			.kind = slot.kind,
-			.textSize = slot.textSize
-				? slot.textSize
-				: style.markdown.displayMath.textSize,
-			.renderWidthCap = slot.renderWidthCap
-				? slot.renderWidthCap
-				: style.displayMathMaxRenderWidth,
-			.renderHeightCap = slot.renderHeightCap
-				? slot.renderHeightCap
-				: style.displayMathMaxRenderHeight,
-			.foreground = style.displayMathForegroundColor,
-			.devicePixelRatio = style.devicePixelRatio,
-		}, style.paletteVersion);
+		const auto signature = FormulaRenderSignature(slot, dimensions);
+		if (const auto cached = FindDocumentFormulaRender(
+				state->request->document,
+				i,
+				signature)) {
+			slot.renderData = cached;
+			slot.rendered = cached->rendered;
+		} else {
+			auto data = std::make_shared<PreparedFormulaRenderData>();
+			data->rendered = renderer->renderFormula({
+				.trimmedTex = signature.trimmedTex,
+				.kind = signature.kind,
+				.textSize = signature.textSize,
+				.renderWidthCap = signature.renderWidthCap,
+				.renderHeightCap = signature.renderHeightCap,
+				.devicePixelRatio = signature.devicePixelRatio,
+			});
+			slot.renderData = data;
+			slot.rendered = data->rendered;
+			RememberDocumentFormulaRender(
+				state->request->document,
+				i,
+				signature,
+				std::move(data));
+		}
 		if (!slot.rendered.success) {
 			state->addFormulaWarning();
 		}
@@ -1898,43 +1927,22 @@ void AppendFootnotes(
 
 } // namespace
 
-MarkdownStyleSnapshot CaptureMarkdownStyleSnapshot() {
-	auto result = MarkdownStyleSnapshot();
+MarkdownPrepareDimensions CaptureMarkdownPrepareDimensions() {
+	auto result = MarkdownPrepareDimensions();
 	const auto &markdown = st::defaultMarkdown;
-	result.textPalette = {
-		.link = Resolve(markdown.textPalette.linkFg),
-		.mono = Resolve(markdown.textPalette.monoFg),
-		.mark = Resolve(markdown.textPalette.markBg),
-		.spoiler = Resolve(markdown.textPalette.spoilerFg),
-		.selectBackground = Resolve(markdown.textPalette.selectBg),
-		.selectText = Resolve(markdown.textPalette.selectFg),
-		.selectLink = Resolve(markdown.textPalette.selectLinkFg),
-		.selectMono = Resolve(markdown.textPalette.selectMonoFg),
-		.selectSpoiler = Resolve(markdown.textPalette.selectSpoilerFg),
-		.selectOverlay = Resolve(markdown.textPalette.selectOverlay),
-		.linkAlwaysActive = markdown.textPalette.linkAlwaysActive,
+	result.bodyTextSize = TextSizeForFormula(markdown.body);
+	result.headingTextSizes = {
+		TextSizeForFormula(markdown.heading1),
+		TextSizeForFormula(markdown.heading2),
+		TextSizeForFormula(markdown.heading3),
+		TextSizeForFormula(markdown.heading4),
+		TextSizeForFormula(markdown.heading5),
+		TextSizeForFormula(markdown.heading6),
 	};
-	result.markdown = markdown;
-	result.defaultTextColor = Resolve(markdown.textColor);
-	result.bulletColor = Resolve(markdown.list.bulletFg);
-	result.taskMarkerColor = Resolve(markdown.list.taskMarkerFg);
-	result.taskMarkerCheckColor = Resolve(markdown.list.taskMarkerCheckFg);
-	result.ruleColor = Resolve(markdown.rule.fg);
-	result.displayMathForegroundColor = Resolve(markdown.displayMath.fg);
-	result.displayMathFallbackBackgroundColor = Resolve(
-		markdown.displayMath.fallbackBg);
-	result.displayMathOverflowColor = Resolve(markdown.displayMath.overflowFg);
-	result.tableBorderColor = Resolve(markdown.table.borderFg);
-	result.tableHeaderBackgroundColor = Resolve(markdown.table.headerBg);
-	result.tableOverflowColor = Resolve(markdown.table.overflowFg);
-	result.blockquotePaint = ResolveBlockquotePaintColors(
-		markdown.quotePaintColors.blockquote);
-	result.prePaint = ResolvePrePaintColors(
-		markdown.quotePaintColors.pre,
-		markdown.quotePaintColors.preBg);
+	result.tableHeaderTextSize = TextSizeForFormula(markdown.table.headerStyle);
+	result.displayMathTextSize = markdown.displayMath.textSize;
 	result.displayMathMaxRenderWidth = markdown.displayMath.maxRenderWidth;
 	result.displayMathMaxRenderHeight = markdown.displayMath.maxRenderHeight;
-	result.paletteVersion = style::PaletteVersion();
 	result.devicePixelRatio = style::DevicePixelRatio();
 	return result;
 }
@@ -1944,7 +1952,6 @@ PreparedResult PrepareSynchronously(PrepareRequest request) {
 	auto timer = QElapsedTimer();
 	timer.start();
 	state.request = &request;
-	state.result.style = request.style;
 	state.result.generation = request.generation;
 	const auto finish = [&] {
 		state.result.debug.prepareMs = int(timer.elapsed());
@@ -1957,7 +1964,7 @@ PreparedResult PrepareSynchronously(PrepareRequest request) {
 			u"missing-document"_q);
 		return finish();
 	}
-	if (const auto invalidStyle = InvalidStyleReason(request.style);
+	if (const auto invalidStyle = InvalidStyleReason(request.dimensions);
 		!invalidStyle.isEmpty()) {
 		state.setTerminalFailure(
 			PrepareTerminalFailure::InvalidStyle,
