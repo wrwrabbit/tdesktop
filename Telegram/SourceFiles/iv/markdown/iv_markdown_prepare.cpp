@@ -1875,6 +1875,7 @@ MarkdownStyleSnapshot CaptureMarkdownStyleSnapshot() {
 	result.textPalette = {
 		.link = Resolve(st::ivMarkdownTextPalette.linkFg),
 		.mono = Resolve(st::ivMarkdownTextPalette.monoFg),
+		.mark = Resolve(st::ivMarkdownTextPalette.markBg),
 		.spoiler = Resolve(st::ivMarkdownTextPalette.spoilerFg),
 		.selectBackground = Resolve(st::ivMarkdownTextPalette.selectBg),
 		.selectText = Resolve(st::ivMarkdownTextPalette.selectFg),

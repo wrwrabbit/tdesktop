@@ -63,6 +63,7 @@ struct SnapshotTextPalette {
 	explicit SnapshotTextPalette(const MarkdownTextPaletteSnapshot &snapshot)
 	: link(snapshot.link)
 	, mono(snapshot.mono)
+	, mark(snapshot.mark)
 	, spoiler(snapshot.spoiler)
 	, selectBackground(snapshot.selectBackground)
 	, selectText(snapshot.selectText)
@@ -72,6 +73,7 @@ struct SnapshotTextPalette {
 	, selectOverlay(snapshot.selectOverlay) {
 		palette.linkFg = link.color();
 		palette.monoFg = mono.color();
+		palette.markBg = mark.color();
 		palette.spoilerFg = spoiler.color();
 		palette.selectBg = selectBackground.color();
 		palette.selectFg = selectText.color();
@@ -84,6 +86,7 @@ struct SnapshotTextPalette {
 
 	style::owned_color link;
 	style::owned_color mono;
+	style::owned_color mark;
 	style::owned_color spoiler;
 	style::owned_color selectBackground;
 	style::owned_color selectText;
@@ -759,17 +762,6 @@ struct InlineFormulaMetrics {
 	return result;
 }
 
-[[nodiscard]] Ui::Text::InlineHtmlMetrics InlineHtmlMetricsFor(
-		const MarkdownStyleSnapshot &style) {
-	return {
-		.subscriptScale = style.subscriptScale,
-		.superscriptScale = style.superscriptScale,
-		.subscriptBaselineOffset = style.subscriptBaselineOffset,
-		.superscriptBaselineOffset = style.superscriptBaselineOffset,
-		.markBackgroundColor = style.markBackgroundColor,
-	};
-}
-
 void SetTextLeaf(
 		Ui::Text::String *leaf,
 		const style::TextStyle &textStyle,
@@ -782,7 +774,6 @@ void SetTextLeaf(
 	context.inlineObjects = Ui::Text::InlineObjectPlacements(
 		placements.data(),
 		placements.size());
-	context.other = InlineHtmlMetricsFor(style);
 	leaf->setMarkedText(textStyle, text, kIvMarkedTextOptions, context);
 }
 

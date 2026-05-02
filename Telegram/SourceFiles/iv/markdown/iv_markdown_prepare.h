@@ -102,6 +102,7 @@ using PrepareGeneration = uint64;
 struct MarkdownTextPaletteSnapshot {
 	QColor link;
 	QColor mono;
+	QColor mark;
 	QColor spoiler;
 	QColor selectBackground;
 	QColor selectText;
