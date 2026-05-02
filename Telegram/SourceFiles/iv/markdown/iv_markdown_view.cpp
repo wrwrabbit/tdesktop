@@ -97,6 +97,11 @@ struct SnapshotTextPalette {
 	style::TextPalette palette;
 };
 
+struct TextPaintCaches {
+	Ui::Text::QuotePaintCache *pre = nullptr;
+	Ui::Text::QuotePaintCache *blockquote = nullptr;
+};
+
 struct LaidOutTableCell {
 	Ui::Text::String leaf;
 	QRect outer;
@@ -117,9 +122,9 @@ struct LaidOutBlock {
 	PreparedBlockKind kind = PreparedBlockKind::Paragraph;
 	Ui::Text::String leaf;
 	Ui::Text::String marker;
-	Ui::Text::String language;
 	Ui::Text::String fallbackLeaf;
 	QString copyText;
+	QString codeLanguage;
 	std::vector<LaidOutBlock> children;
 	std::vector<LaidOutTableRow> tableRows;
 	std::vector<int> tableColumnWidths;
@@ -127,12 +132,11 @@ struct LaidOutBlock {
 	QRect textRect;
 	QRect markerRect;
 	QRect contentRect;
-	QRect borderRect;
 	QRect formulaRect;
-	QRect languageRect;
 	QRect tableRect;
 	QRect visibleFormulaRect;
 	QRect visibleTableRect;
+	QPoint markerCenter;
 	QString anchorId;
 	int textWidth = 0;
 	int markerWidth = 0;
@@ -263,11 +267,27 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 			: u"."_q;
 		return QString::number(block.orderedNumber) + delimiter;
 	}
-	return Ui::kQBullet;
+	return QString();
 }
 
 [[nodiscard]] int TextLineHeight(const style::TextStyle &style) {
 	return std::max(style.lineHeight, style.font->height);
+}
+
+[[nodiscard]] QPoint BulletMarkerCenter(
+		int left,
+		int top,
+		const MarkdownStyleSnapshot &style) {
+	const auto &list = style.markdown.list;
+	const auto lineHeight = TextLineHeight(style.markdown.body);
+	return QPoint(
+		left + list.markerWidth - list.bulletLeftShift - (lineHeight / 2),
+		top + (lineHeight / 2));
+}
+
+[[nodiscard]] QMargins BlockquotePadding(const style::QuoteStyle &style) {
+	return style.padding
+		+ QMargins(0, style.header + style.verticalSkip, 0, style.verticalSkip);
 }
 
 [[nodiscard]] Ui::Text::GeometryDescriptor TextGeometry(int width) {
@@ -286,26 +306,27 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 [[nodiscard]] int BlockSkip(
 		const PreparedBlock &block,
 		const MarkdownStyleSnapshot &style) {
+	const auto &skips = style.markdown.blockSkips;
 	switch (block.kind) {
 	case PreparedBlockKind::Paragraph:
-		return style.paragraphSkip;
+		return skips.paragraph;
 	case PreparedBlockKind::Heading:
-		return style.headingSkip;
+		return skips.heading;
 	case PreparedBlockKind::CodeBlock:
-		return style.codeSkip;
+		return skips.code;
 	case PreparedBlockKind::Rule:
-		return style.ruleSkip;
+		return skips.rule;
 	case PreparedBlockKind::List:
 	case PreparedBlockKind::ListItem:
-		return style.paragraphSkip;
+		return skips.paragraph;
 	case PreparedBlockKind::Quote:
-		return style.quoteSkip;
+		return skips.quote;
 	case PreparedBlockKind::DisplayMath:
-		return style.displayMathSkip;
+		return skips.displayMath;
 	case PreparedBlockKind::Table:
-		return style.tableSkip;
+		return skips.table;
 	case PreparedBlockKind::Details:
-		return style.paragraphSkip;
+		return skips.paragraph;
 	}
 	return 0;
 }
@@ -327,19 +348,19 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 		const PreparedBlock &block,
 		const MarkdownStyleSnapshot &style) {
 	if (block.kind == PreparedBlockKind::CodeBlock) {
-		return style.codeStyle;
+		return style.markdown.code;
 	} else if (block.kind != PreparedBlockKind::Heading) {
-		return style.paragraphStyle;
+		return style.markdown.body;
 	}
 	switch (std::clamp(block.headingLevel, 1, 6)) {
-	case 1: return style.heading1Style;
-	case 2: return style.heading2Style;
-	case 3: return style.heading3Style;
-	case 4: return style.heading4Style;
-	case 5: return style.heading5Style;
-	case 6: return style.heading6Style;
+	case 1: return style.markdown.heading1;
+	case 2: return style.markdown.heading2;
+	case 3: return style.markdown.heading3;
+	case 4: return style.markdown.heading4;
+	case 5: return style.markdown.heading5;
+	case 6: return style.markdown.heading6;
 	}
-	return style.heading6Style;
+	return style.markdown.heading6;
 }
 
 [[nodiscard]] QString CodeBlockDisplayText(const QString &text) {
@@ -369,14 +390,16 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 	return result;
 }
 
-[[nodiscard]] TextWithEntities CodeBlockText(const QString &text) {
-	auto result = TextWithEntities();
-	result.text = CodeBlockDisplayText(text);
+[[nodiscard]] TextWithEntities CodeBlockText(
+		const QString &text,
+		const QString &language) {
+	auto result = tr::marked(CodeBlockDisplayText(text));
 	if (!result.text.isEmpty()) {
 		result.entities.push_back(EntityInText(
-			EntityType::Code,
+			EntityType::Pre,
 			0,
-			result.text.size()));
+			result.text.size(),
+			language));
 	}
 	return result;
 }
@@ -389,12 +412,13 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 		const LaidOutBlock &block,
 		TextSelection selection = AllTextSelection) {
 	if (selection == AllTextSelection) {
-		auto rich = TextWithEntities::Simple(block.copyText);
+		auto rich = tr::marked(block.copyText);
 		if (!rich.text.isEmpty()) {
 			rich.entities.push_back(EntityInText(
-				EntityType::Code,
+				EntityType::Pre,
 				0,
-				rich.text.size()));
+				rich.text.size(),
+				block.codeLanguage));
 		}
 		return TextForMimeData::Rich(std::move(rich));
 	}
@@ -431,12 +455,13 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 	if (!found || to <= from) {
 		return TextForMimeData();
 	}
-	auto rich = TextWithEntities::Simple(text.mid(from, to - from));
+	auto rich = tr::marked(text.mid(from, to - from));
 	if (!rich.text.isEmpty()) {
 		rich.entities.push_back(EntityInText(
-			EntityType::Code,
+			EntityType::Pre,
 			0,
-			rich.text.size()));
+			rich.text.size(),
+			block.codeLanguage));
 	}
 	return TextForMimeData::Rich(std::move(rich));
 }
@@ -553,9 +578,9 @@ void BindLinks(
 		bool header,
 		const MarkdownStyleSnapshot &style) {
 	if (header) {
-		return style.tableHeaderStyle;
+		return style.markdown.table.headerStyle;
 	}
-	return style.paragraphStyle;
+	return style.markdown.body;
 }
 
 void SetTextLeaf(
@@ -606,9 +631,9 @@ struct TableRowLayoutData {
 		int width,
 		const MarkdownStyleSnapshot &style,
 		bool *overflowed) {
-	const auto &padding = style.tableCellPadding;
-	const auto border = style.tableBorder;
-	const auto minimum = style.tableMinColumnWidth;
+	const auto &padding = style.markdown.table.cellPadding;
+	const auto border = style.markdown.table.border;
+	const auto minimum = style.markdown.table.minColumnWidth;
 	auto result = std::vector<int>(std::max(columnCount, 0), minimum);
 	auto preferred = std::vector<int>(std::max(columnCount, 0), minimum);
 	for (const auto &row : rows) {
@@ -817,44 +842,17 @@ void SetTextLeaf(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::CodeBlock;
 	block.copyText = prepared.text.text;
-
-	const auto &padding = style.codePadding;
-	block.textWidth = std::max(width - padding.left() - padding.right(), 1);
-
-	auto y = top + padding.top();
-	if (!prepared.codeLanguage.isEmpty()) {
-		block.language.setMarkedText(
-			style.codeLanguageStyle,
-			TextWithEntities::Simple(prepared.codeLanguage),
-			kIvMarkedTextOptions);
-		const auto languageHeight = std::max(
-			block.language.countHeight(block.textWidth, true),
-			TextLineHeight(style.codeLanguageStyle));
-		block.languageRect = QRect(
-			left + padding.left(),
-			y,
-			block.textWidth,
-			languageHeight);
-		y += languageHeight + style.codeLanguageSkip;
-	}
-
+	block.codeLanguage = prepared.codeLanguage;
 	block.leaf.setMarkedText(
-		style.codeStyle,
-		CodeBlockText(prepared.text.text),
+		style.markdown.code,
+		CodeBlockText(prepared.text.text, prepared.codeLanguage),
 		kIvMarkedTextOptions);
-	const auto codeHeight = std::max(
+	block.textWidth = std::max(width, 1);
+	const auto height = std::max(
 		block.leaf.countHeight(block.textWidth, true),
-		TextLineHeight(style.codeStyle));
-	block.textRect = QRect(
-		left + padding.left(),
-		y,
-		block.textWidth,
-		codeHeight);
-	block.outer = QRect(
-		left,
-		top,
-		std::max(width, 1),
-		y + codeHeight + padding.bottom() - top);
+		TextLineHeight(style.markdown.code));
+	block.textRect = QRect(left, top, block.textWidth, height);
+	block.outer = block.textRect;
 	return block;
 }
 
@@ -869,7 +867,7 @@ void SetTextLeaf(
 		left,
 		top,
 		std::max(width, 1),
-		style.ruleHeight);
+		style.markdown.rule.height);
 	block.textRect = block.outer;
 	return block;
 }
@@ -886,7 +884,7 @@ void SetTextLeaf(
 	block.formulaIndex = prepared.formulaIndex;
 	block.copyText = prepared.formulaTex;
 
-	const auto &padding = style.displayMathPadding;
+	const auto &padding = style.markdown.displayMath.padding;
 	const auto contentLeft = left + padding.left();
 	const auto contentTop = top + padding.top();
 	const auto contentWidth = std::max(
@@ -900,14 +898,14 @@ void SetTextLeaf(
 		formulaWidth = std::max(formula->logicalSize.width(), 1);
 		formulaHeight = std::max(formula->logicalSize.height(), 1);
 	} else {
-		const auto &fallbackPadding = style.displayMathFallbackPadding;
+		const auto &fallbackPadding = style.markdown.displayMath.fallbackPadding;
 		const auto fallbackPaddingWidth = fallbackPadding.left()
 			+ fallbackPadding.right();
 		const auto fallbackText = formula
 			? formula->fallbackText
 			: prepared.formulaTex.trimmed();
 		block.fallbackLeaf.setMarkedText(
-			style.displayMathFallbackStyle,
+			style.markdown.displayMath.fallbackStyle,
 			TextWithEntities::Simple(fallbackText),
 			kIvMarkedTextOptions);
 		block.textWidth = std::max(contentWidth - fallbackPaddingWidth, 1);
@@ -916,21 +914,21 @@ void SetTextLeaf(
 			std::max(block.fallbackLeaf.maxWidth(), 1));
 		auto textHeight = std::max(
 			block.fallbackLeaf.countHeight(block.textWidth, true),
-			TextLineHeight(style.displayMathFallbackStyle));
+			TextLineHeight(style.markdown.displayMath.fallbackStyle));
 		formulaWidth = std::min(
 			block.textWidth + fallbackPaddingWidth,
 			contentWidth);
 		block.textWidth = std::max(formulaWidth - fallbackPaddingWidth, 1);
 		textHeight = std::max(
 			block.fallbackLeaf.countHeight(block.textWidth, true),
-			TextLineHeight(style.displayMathFallbackStyle));
+			TextLineHeight(style.markdown.displayMath.fallbackStyle));
 		formulaHeight = fallbackPadding.top()
 			+ textHeight
 			+ fallbackPadding.bottom();
 		block.textRect.setSize(QSize(block.textWidth, textHeight));
 	}
 
-	const auto centered = (style.displayMathAlign == ::style::al_center)
+	const auto centered = (style.markdown.displayMath.align == ::style::al_center)
 		&& (formulaWidth <= contentWidth);
 	block.formulaAlign = centered ? ::style::al_center : ::style::al_left;
 
@@ -957,7 +955,7 @@ void SetTextLeaf(
 		&& (block.formulaRect.width() > block.visibleFormulaRect.width());
 
 	if (!(formula && formula->success)) {
-		const auto &fallbackPadding = style.displayMathFallbackPadding;
+		const auto &fallbackPadding = style.markdown.displayMath.fallbackPadding;
 		block.textRect.moveTo(
 			block.formulaRect.x() + fallbackPadding.left(),
 			block.formulaRect.y() + fallbackPadding.top());
@@ -1004,8 +1002,8 @@ void SetTextLeaf(
 		style,
 		&block.overflowed);
 
-	const auto &padding = style.tableCellPadding;
-	const auto border = style.tableBorder;
+	const auto &padding = style.markdown.table.cellPadding;
+	const auto border = style.markdown.table.border;
 	auto tableWidth = border;
 	for (const auto columnWidth : block.tableColumnWidths) {
 		tableWidth += columnWidth + border;
@@ -1131,28 +1129,31 @@ void SetTextLeaf(
 	block.taskState = prepared.taskState;
 	block.orderedNumber = prepared.orderedNumber;
 
+	const auto &list = style.markdown.list;
+	const auto bodyLineHeight = TextLineHeight(style.markdown.body);
 	const auto task = (prepared.taskState != TaskState::None);
-	const auto markerText = task ? QString() : ListMarkerText(prepared);
+	const auto ordered = !task && (prepared.listKind == ListKind::Ordered);
+	const auto markerText = ordered ? ListMarkerText(prepared) : QString();
 	auto markerTextWidth = 0;
-	auto markerTextHeight = 0;
+	auto markerTextHeight = bodyLineHeight;
 	if (task) {
-		markerTextWidth = style.taskMarkerSize;
-		markerTextHeight = style.taskMarkerSize;
-	} else {
+		markerTextWidth = list.taskMarkerSize;
+		markerTextHeight = list.taskMarkerSize;
+	} else if (ordered) {
 		block.marker.setMarkedText(
-			style.paragraphStyle,
+			style.markdown.body,
 			TextWithEntities::Simple(markerText),
 			kIvMarkedTextOptions);
 		markerTextWidth = std::max(block.marker.maxWidth(), 1);
 		markerTextHeight = std::max(
 			block.marker.countHeight(markerTextWidth, true),
-			TextLineHeight(style.paragraphStyle));
+			bodyLineHeight);
 	}
 
-	block.markerWidth = std::max(style.listMarkerWidth, markerTextWidth);
-	const auto bodyLeft = left + block.markerWidth + style.listMarkerSkip;
+	block.markerWidth = std::max(list.markerWidth, markerTextWidth);
+	const auto bodyLeft = left + block.markerWidth + list.markerSkip;
 	const auto bodyWidth = std::max(
-		width - block.markerWidth - style.listMarkerSkip,
+		width - block.markerWidth - list.markerSkip,
 		1);
 
 	auto childContext = context;
@@ -1170,27 +1171,27 @@ void SetTextLeaf(
 	const auto rowHeight = std::max({
 		contentHeight,
 		markerTextHeight,
-		TextLineHeight(style.paragraphStyle),
+		bodyLineHeight,
 	});
 
 	const auto markerTop = top + std::max(
-		(TextLineHeight(style.paragraphStyle) - markerTextHeight) / 2,
+		(bodyLineHeight - markerTextHeight) / 2,
 		0);
 	if (task) {
 		block.markerRect = QRect(
 			left,
 			markerTop,
-			style.taskMarkerSize,
-			style.taskMarkerSize);
-	} else {
-		const auto markerLeft = (prepared.listKind == ListKind::Ordered)
-			? left + block.markerWidth - markerTextWidth
-			: left;
+			list.taskMarkerSize,
+			list.taskMarkerSize);
+	} else if (ordered) {
+		const auto markerLeft = left + block.markerWidth - markerTextWidth;
 		block.markerRect = QRect(
 			markerLeft,
 			top,
 			markerTextWidth,
 			markerTextHeight);
+	} else {
+		block.markerCenter = BulletMarkerCenter(left, top, style);
 	}
 
 	block.contentRect = QRect(bodyLeft, top, bodyWidth, rowHeight);
@@ -1212,9 +1213,9 @@ void SetTextLeaf(
 	block.listDelimiter = prepared.listDelimiter;
 
 	const auto depthDelta = std::max(prepared.visualDepth - context.listDepth, 0);
-	const auto listLeft = left + depthDelta * style.listIndent;
+	const auto listLeft = left + depthDelta * style.markdown.list.indent;
 	const auto listWidth = std::max(
-		width - depthDelta * style.listIndent,
+		width - depthDelta * style.markdown.list.indent,
 		1);
 
 	auto childContext = context;
@@ -1274,15 +1275,16 @@ void SetTextLeaf(
 	const auto depthDelta = std::max(
 		prepared.visualDepth - context.quoteDepth,
 		0);
-	const auto quoteLeft = left + depthDelta * style.quoteIndent;
+	const auto quoteLeft = left + depthDelta * style.markdown.quoteIndent;
 	const auto quoteWidth = std::max(
-		width - depthDelta * style.quoteIndent,
+		width - depthDelta * style.markdown.quoteIndent,
 		1);
-	const auto &padding = style.quotePadding;
-	const auto contentLeft = quoteLeft + style.quoteBorder + padding.left();
+	const auto &quoteStyle = style.markdown.body.blockquote;
+	const auto padding = BlockquotePadding(quoteStyle);
+	const auto contentLeft = quoteLeft + padding.left();
 	const auto contentTop = top + padding.top();
 	const auto contentWidth = std::max(
-		quoteWidth - style.quoteBorder - padding.left() - padding.right(),
+		quoteWidth - padding.left() - padding.right(),
 		1);
 
 	auto childContext = context;
@@ -1300,16 +1302,11 @@ void SetTextLeaf(
 	const auto contentHeight = std::max(
 		childBottom - contentTop,
 		prepared.children.empty()
-			? TextLineHeight(style.paragraphStyle)
+			? TextLineHeight(style.markdown.body)
 			: 0);
 	const auto quoteHeight = padding.top() + contentHeight + padding.bottom();
 
 	block.outer = QRect(quoteLeft, top, quoteWidth, quoteHeight);
-	block.borderRect = QRect(
-		quoteLeft,
-		top,
-		style.quoteBorder,
-		quoteHeight);
 	block.contentRect = QRect(
 		contentLeft,
 		contentTop,
@@ -1334,7 +1331,7 @@ void SetTextLeaf(
 
 	SetTextLeaf(
 		&block.leaf,
-		style.paragraphStyle,
+		style.markdown.body,
 		prepared.text,
 		prepared.inlineObjects,
 		style,
@@ -1343,16 +1340,16 @@ void SetTextLeaf(
 
 	const auto summaryHeight = std::max(
 		block.leaf.countHeight(block.textWidth, true),
-		TextLineHeight(style.paragraphStyle));
+		TextLineHeight(style.markdown.body));
 	block.textRect = QRect(left, top, block.textWidth, summaryHeight);
 
 	auto bottom = top + summaryHeight;
 	if (!prepared.collapsed && !prepared.children.empty()) {
-		const auto childLeft = left + style.listContinuationIndent;
+		const auto childLeft = left + style.markdown.list.continuationIndent;
 		const auto childWidth = std::max(
-			width - style.listContinuationIndent,
+			width - style.markdown.list.continuationIndent,
 			1);
-		const auto childTop = bottom + style.listMarkerSkip;
+		const auto childTop = bottom + style.markdown.list.markerSkip;
 		bottom = LayoutBlocks(
 			prepared.children,
 			&block.children,
@@ -1616,6 +1613,10 @@ private:
 	void updateHover(const DocumentHitTestResult &state);
 	void resetSelection();
 	void clearSelection();
+	void resetTextPaintCaches();
+	[[nodiscard]] Ui::Text::QuotePaintCache *ensurePrePaintCache();
+	[[nodiscard]] Ui::Text::QuotePaintCache *ensureBlockquotePaintCache();
+	[[nodiscard]] TextPaintCaches textPaintCaches();
 	void dragActionStart(QPoint point, Qt::MouseButton button);
 	DocumentHitTestResult dragActionUpdate(QPoint point);
 	DocumentHitTestResult dragActionFinish(
@@ -1627,6 +1628,8 @@ private:
 	PreparedResult _prepared;
 	DocumentLayout _layout;
 	std::optional<SnapshotTextPalette> _textPalette;
+	std::unique_ptr<Ui::Text::QuotePaintCache> _prePaintCache;
+	std::unique_ptr<Ui::Text::QuotePaintCache> _blockquotePaintCache;
 	std::function<void(const PreparedLink &, Qt::MouseButton)> _activateLink;
 	DocumentSelection _selection;
 	DocumentSelection _savedSelection;
@@ -1918,18 +1921,22 @@ struct PaintSelectionState {
 void PaintTextLeaf(
 		Painter &p,
 		const Ui::Text::String &leaf,
+		const TextPaintCaches &caches,
 		QRect rect,
 		int width,
 		QRect clip,
 		style::align align = style::al_left,
 		std::optional<TextSelection> selection = std::nullopt) {
+	const auto availableWidth = std::max(width, 1);
 	leaf.draw(p, {
 		.position = rect.topLeft(),
-		.availableWidth = width,
-		.geometry = TextGeometry(width),
+		.availableWidth = availableWidth,
+		.geometry = TextGeometry(availableWidth),
 		.align = align,
 		.clip = clip,
 		.palette = &p.textPalette(),
+		.pre = caches.pre,
+		.blockquote = caches.blockquote,
 		.spoiler = Ui::Text::DefaultSpoilerCache(),
 		.now = crl::now(),
 		.selection = selection.value_or(TextSelection()),
@@ -1944,7 +1951,7 @@ void PaintTaskMarker(
 	if (rect.isEmpty()) {
 		return;
 	}
-	const auto border = style.taskMarkerBorder;
+	const auto border = style.markdown.list.taskMarkerBorder;
 	if (block.taskState == TaskState::Checked) {
 		p.setPen(Qt::NoPen);
 		p.setBrush(style.taskMarkerColor);
@@ -1976,19 +1983,36 @@ void PaintTaskMarker(
 	}
 }
 
+void PaintBulletMarker(
+		Painter &p,
+		const LaidOutBlock &block,
+		const MarkdownStyleSnapshot &style) {
+	const auto radius = style.markdown.list.bulletRadius;
+	if (radius <= 0) {
+		return;
+	}
+	auto hq = PainterHighQualityEnabler(p);
+	p.setPen(Qt::NoPen);
+	p.setBrush(style.bulletColor);
+	p.drawEllipse(QPointF(block.markerCenter), radius, radius);
+}
+
 void PaintBlocks(
-	Painter &p,
-	const std::vector<LaidOutBlock> &blocks,
-	const PreparedResult &prepared,
-	const PaintSelectionState &selectionState,
-	QRect clip);
+		Painter &p,
+		const std::vector<LaidOutBlock> &blocks,
+		const PreparedResult &prepared,
+		const TextPaintCaches &caches,
+		const PaintSelectionState &selectionState,
+		QRect clip);
 
 void PaintTableBlock(
 		Painter &p,
 		const LaidOutBlock &block,
-		const MarkdownStyleSnapshot &style,
+		const PreparedResult &prepared,
+		const TextPaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
+	const auto &style = prepared.style;
 	const auto tableClip = clip.intersected(block.visibleTableRect);
 	if (tableClip.isEmpty()) {
 		return;
@@ -2009,7 +2033,7 @@ void PaintTableBlock(
 		}
 	}
 
-	const auto border = style.tableBorder;
+	const auto border = style.markdown.table.border;
 	if (border > 0 && !block.tableRect.isEmpty()) {
 		const auto left = block.tableRect.x();
 		const auto top = block.tableRect.y();
@@ -2062,6 +2086,7 @@ void PaintTableBlock(
 			PaintTextLeaf(
 				p,
 				cell.leaf,
+				caches,
 				cell.textRect,
 				cell.textWidth,
 				tableClip,
@@ -2079,7 +2104,7 @@ void PaintTableBlock(
 
 	if (block.overflowed) {
 		const auto indicatorWidth = std::min(
-			std::max(style.tableOverflowWidth, 1),
+			std::max(style.markdown.table.overflowWidth, 1),
 			block.visibleTableRect.width());
 		p.fillRect(
 			QRect(
@@ -2099,6 +2124,7 @@ void PaintDisplayMathBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const PreparedResult &prepared,
+		const TextPaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
 	const auto formulaClip = clip.intersected(block.visibleFormulaRect);
@@ -2114,7 +2140,7 @@ void PaintDisplayMathBlock(
 	if (formula && formula->success) {
 		p.drawImage(block.formulaRect.topLeft(), formula->image);
 	} else {
-		const auto radius = style.displayMathFallbackRadius;
+		const auto radius = style.markdown.displayMath.fallbackRadius;
 		p.setPen(Qt::NoPen);
 		p.setBrush(style.displayMathFallbackBackgroundColor);
 		if (radius > 0) {
@@ -2127,6 +2153,7 @@ void PaintDisplayMathBlock(
 		PaintTextLeaf(
 			p,
 			block.fallbackLeaf,
+			caches,
 			block.textRect,
 			block.textWidth,
 			formulaClip);
@@ -2139,7 +2166,7 @@ void PaintDisplayMathBlock(
 
 	if (block.overflowed) {
 		const auto indicatorWidth = std::min(
-			std::max(style.displayMathOverflowWidth, 1),
+			std::max(style.markdown.displayMath.overflowWidth, 1),
 			block.visibleFormulaRect.width());
 		p.fillRect(
 			QRect(
@@ -2155,10 +2182,46 @@ void PaintDisplayMathBlock(
 	p.restore();
 }
 
+void PaintQuoteBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		const PreparedResult &prepared,
+		const TextPaintCaches &caches,
+		const PaintSelectionState &selectionState,
+		QRect clip) {
+	const auto quoteClip = clip.intersected(block.outer);
+	if (quoteClip.isEmpty()) {
+		return;
+	}
+
+	if (caches.blockquote) {
+		const auto &quoteStyle = prepared.style.markdown.body.blockquote;
+		Ui::Text::ValidateQuotePaintCache(*caches.blockquote, quoteStyle);
+
+		p.save();
+		p.setClipRect(quoteClip);
+		Ui::Text::FillQuotePaint(
+			p,
+			block.outer,
+			*caches.blockquote,
+			quoteStyle);
+		p.restore();
+	}
+
+	PaintBlocks(
+		p,
+		block.children,
+		prepared,
+		caches,
+		selectionState,
+		clip.intersected(block.contentRect));
+}
+
 void PaintBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const PreparedResult &prepared,
+		const TextPaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
 	if (!block.outer.intersects(clip)) {
@@ -2173,6 +2236,7 @@ void PaintBlock(
 		PaintTextLeaf(
 			p,
 			block.leaf,
+			caches,
 			block.textRect,
 			block.textWidth,
 			clip,
@@ -2182,28 +2246,11 @@ void PaintBlock(
 				block.segmentIndex));
 		break;
 	case PreparedBlockKind::CodeBlock: {
-		const auto radius = style.codeRadius;
-		p.setPen(Qt::NoPen);
-		p.setBrush(style.codeBackgroundColor);
-		if (radius > 0) {
-			auto hq = PainterHighQualityEnabler(p);
-			p.drawRoundedRect(block.outer, radius, radius);
-		} else {
-			p.fillRect(block.outer, style.codeBackgroundColor);
-		}
-		if (!block.languageRect.isEmpty()) {
-			p.setPen(style.codeLanguageColor);
-			PaintTextLeaf(
-				p,
-				block.language,
-				block.languageRect,
-				block.textWidth,
-				clip);
-		}
 		p.setPen(style.defaultTextColor);
 		PaintTextLeaf(
 			p,
 			block.leaf,
+			caches,
 			block.textRect,
 			block.textWidth,
 			clip,
@@ -2216,36 +2263,52 @@ void PaintBlock(
 		p.fillRect(block.outer, style.ruleColor);
 		break;
 	case PreparedBlockKind::List:
-		PaintBlocks(p, block.children, prepared, selectionState, clip);
+		PaintBlocks(p, block.children, prepared, caches, selectionState, clip);
 		break;
 	case PreparedBlockKind::ListItem:
 		if (block.taskState != TaskState::None) {
 			PaintTaskMarker(p, block, style);
-		} else if (!block.markerRect.isEmpty()) {
+		} else if (block.listKind == ListKind::Ordered
+			&& !block.markerRect.isEmpty()) {
 			p.setPen(style.defaultTextColor);
 			PaintTextLeaf(
 				p,
 				block.marker,
+				caches,
 				block.markerRect,
 				block.markerWidth,
 				clip);
+		} else if (block.listKind == ListKind::Bullet) {
+			PaintBulletMarker(p, block, style);
 		}
-		PaintBlocks(p, block.children, prepared, selectionState, clip);
+		PaintBlocks(p, block.children, prepared, caches, selectionState, clip);
 		break;
 	case PreparedBlockKind::Quote:
-		p.fillRect(block.borderRect, style.quoteBorderColor);
-		PaintBlocks(p, block.children, prepared, selectionState, clip);
+		PaintQuoteBlock(
+			p,
+			block,
+			prepared,
+			caches,
+			selectionState,
+			clip);
 		break;
 	case PreparedBlockKind::DisplayMath:
-		PaintDisplayMathBlock(p, block, prepared, selectionState, clip);
+		PaintDisplayMathBlock(
+			p,
+			block,
+			prepared,
+			caches,
+			selectionState,
+			clip);
 		break;
 	case PreparedBlockKind::Table:
-		PaintTableBlock(p, block, style, selectionState, clip);
+		PaintTableBlock(p, block, prepared, caches, selectionState, clip);
 		break;
 	case PreparedBlockKind::Details:
 		PaintTextLeaf(
 			p,
 			block.leaf,
+			caches,
 			block.textRect,
 			block.textWidth,
 			clip,
@@ -2253,7 +2316,7 @@ void PaintBlock(
 			TextSelectionForSegmentIndex(
 				selectionState,
 				block.segmentIndex));
-		PaintBlocks(p, block.children, prepared, selectionState, clip);
+		PaintBlocks(p, block.children, prepared, caches, selectionState, clip);
 		break;
 	}
 }
@@ -2262,6 +2325,7 @@ void PaintBlocks(
 		Painter &p,
 		const std::vector<LaidOutBlock> &blocks,
 		const PreparedResult &prepared,
+		const TextPaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
 	for (const auto &block : blocks) {
@@ -2270,7 +2334,7 @@ void PaintBlocks(
 		} else if (block.outer.top() > clip.bottom()) {
 			break;
 		}
-		PaintBlock(p, block, prepared, selectionState, clip);
+		PaintBlock(p, block, prepared, caches, selectionState, clip);
 	}
 }
 
@@ -2295,9 +2359,10 @@ void PaintBlocks(
 	auto request = Ui::Text::StateRequest();
 	request.align = align;
 	request.flags = flags | Ui::Text::StateRequest::Flag::BreakEverywhere;
+	const auto availableWidth = std::max(width, 1);
 	return leaf.getState(
 		point - rect.topLeft(),
-		TextGeometry(width),
+		TextGeometry(availableWidth),
 		request);
 }
 
@@ -2412,7 +2477,7 @@ void DocumentLayout::relayout(
 	_anchors.clear();
 	_segments.clear();
 
-	const auto &page = prepared.style.pagePadding;
+	const auto &page = prepared.style.markdown.pagePadding;
 	const auto innerWidth = std::max(width - page.left() - page.right(), 1);
 	const auto y = LayoutBlocks(
 		prepared.blocks.blocks,
@@ -2508,6 +2573,19 @@ DocumentHitTestResult DocumentLayout::hitTest(
 	return false;
 }
 
+void EnsureQuotePaintCache(
+		std::unique_ptr<Ui::Text::QuotePaintCache> &cache,
+		const MarkdownQuotePaintColorsSnapshot &colors) {
+	if (cache) {
+		return;
+	}
+	cache = std::make_unique<Ui::Text::QuotePaintCache>();
+	cache->outlines = colors.outlines;
+	cache->bg = colors.background;
+	cache->header = colors.header;
+	cache->icon = colors.icon;
+}
+
 MarkdownDocumentWidget::MarkdownDocumentWidget(
 	QWidget *parent)
 : Ui::RpWidget(parent) {
@@ -2527,6 +2605,7 @@ void MarkdownDocumentWidget::setPreparedResult(PreparedResult prepared) {
 	_lastRelayoutMs = 0;
 	_prepared = std::move(prepared);
 	_textPalette.emplace(_prepared.style.textPalette);
+	resetTextPaintCaches();
 	resetSelection();
 	forceRelayoutCurrentWidth();
 }
@@ -2586,6 +2665,7 @@ void MarkdownDocumentWidget::paintEvent(QPaintEvent *e) {
 		.selection = _selection,
 		.endpoints = &_selectionEndpoints,
 	};
+	const auto caches = textPaintCaches();
 
 	const auto scale = zoomScale();
 	if (scale == 1.) {
@@ -2593,6 +2673,7 @@ void MarkdownDocumentWidget::paintEvent(QPaintEvent *e) {
 			p,
 			_layout.blocks(),
 			_prepared,
+			caches,
 			selectionState,
 			e->rect());
 		return;
@@ -2604,7 +2685,7 @@ void MarkdownDocumentWidget::paintEvent(QPaintEvent *e) {
 		int(std::ceil(e->rect().height() / scale)) + 1);
 	p.save();
 	p.scale(scale, scale);
-	PaintBlocks(p, _layout.blocks(), _prepared, selectionState, clip);
+	PaintBlocks(p, _layout.blocks(), _prepared, caches, selectionState, clip);
 	p.restore();
 }
 
@@ -3086,6 +3167,28 @@ void MarkdownDocumentWidget::clearSelection() {
 	}
 }
 
+void MarkdownDocumentWidget::resetTextPaintCaches() {
+	_prePaintCache = nullptr;
+	_blockquotePaintCache = nullptr;
+}
+
+Ui::Text::QuotePaintCache *MarkdownDocumentWidget::ensurePrePaintCache() {
+	EnsureQuotePaintCache(_prePaintCache, _prepared.style.prePaint);
+	return _prePaintCache.get();
+}
+
+Ui::Text::QuotePaintCache *MarkdownDocumentWidget::ensureBlockquotePaintCache() {
+	EnsureQuotePaintCache(_blockquotePaintCache, _prepared.style.blockquotePaint);
+	return _blockquotePaintCache.get();
+}
+
+TextPaintCaches MarkdownDocumentWidget::textPaintCaches() {
+	return {
+		.pre = ensurePrePaintCache(),
+		.blockquote = ensureBlockquotePaintCache(),
+	};
+}
+
 void MarkdownDocumentWidget::dragActionStart(
 		QPoint point,
 		Qt::MouseButton button) {
@@ -3284,7 +3387,7 @@ MarkdownPreviewRoot::MarkdownPreviewRoot(
 	_failure = Ui::CreateChild<Ui::FlatLabel>(
 		this,
 		tr::lng_markdown_preview_cant(tr::now),
-		st::ivMarkdownFailureLabel);
+		st::defaultMarkdown.failure.label);
 	_failureOpen = Ui::CreateChild<Ui::LinkButton>(
 		this,
 		tr::lng_markdown_preview_open_file(tr::now));
@@ -3553,12 +3656,16 @@ void MarkdownPreviewRoot::updateLoadingGeometry() {
 
 void MarkdownPreviewRoot::updateFailureGeometry() {
 	const auto availableWidth = std::max(width(), 1);
-	const auto failureWidth = std::min(availableWidth, st::ivMarkdownFailureWidth);
+	const auto failureWidth = std::min(
+		availableWidth,
+		st::defaultMarkdown.failure.width);
 	_failure->resizeToWidth(failureWidth);
 	_failureOpen->resizeToNaturalWidth(failureWidth);
 	const auto openVisible = !_failureOpen->isHidden();
 	const auto totalHeight = _failure->height()
-		+ (openVisible ? (st::ivMarkdownFailureSkip + _failureOpen->height()) : 0);
+		+ (openVisible
+			? (st::defaultMarkdown.failure.skip + _failureOpen->height())
+			: 0);
 	const auto top = std::max((height() - totalHeight) / 2, 0);
 	_failure->moveToLeft(
 		(availableWidth - failureWidth) / 2,
@@ -3567,7 +3674,7 @@ void MarkdownPreviewRoot::updateFailureGeometry() {
 	if (openVisible) {
 		_failureOpen->moveToLeft(
 			(availableWidth - _failureOpen->width()) / 2,
-			top + _failure->height() + st::ivMarkdownFailureSkip,
+			top + _failure->height() + st::defaultMarkdown.failure.skip,
 			availableWidth);
 	}
 }

@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+using "chat_helpers/chat_helpers.style";
 using "ui/basic.style";
 using "ui/widgets/widgets.style";
 
@@ -70,106 +71,208 @@ ivSubtitleTop: 12px;
 ivSubtitleLeft: 22px;
 ivSubtitleSkip: 0px;
 
-ivMarkdownTextPalette: TextPalette(defaultTextPalette) {
+MarkdownBlockSkips {
+	paragraph: pixels;
+	heading: pixels;
+	code: pixels;
+	rule: pixels;
+	quote: pixels;
+	displayMath: pixels;
+	table: pixels;
+}
+MarkdownList {
+	indent: pixels;
+	continuationIndent: pixels;
+	markerWidth: pixels;
+	markerSkip: pixels;
+	bulletRadius: pixels;
+	bulletLeftShift: pixels;
+	bulletFg: color;
+	taskMarkerSize: pixels;
+	taskMarkerBorder: pixels;
+	taskMarkerFg: color;
+	taskMarkerCheckFg: color;
+}
+MarkdownQuotePaintColors {
+	blockquote: color;
+	pre: color;
+	preBg: color;
+}
+MarkdownRule {
+	fg: color;
+	height: pixels;
+}
+MarkdownDisplayMath {
+	padding: margins;
+	align: align;
+	textSize: pixels;
+	maxRenderWidth: pixels;
+	maxRenderHeight: pixels;
+	fg: color;
+	fallbackStyle: TextStyle;
+	fallbackBg: color;
+	fallbackRadius: pixels;
+	fallbackPadding: margins;
+	overflowWidth: pixels;
+	overflowFg: color;
+}
+MarkdownTable {
+	cellPadding: margins;
+	border: pixels;
+	borderFg: color;
+	headerBg: color;
+	headerStyle: TextStyle;
+	minColumnWidth: pixels;
+	overflowWidth: pixels;
+	overflowFg: color;
+}
+MarkdownFailure {
+	label: FlatLabel;
+	width: pixels;
+	skip: pixels;
+}
+Markdown {
+	textPalette: TextPalette;
+	textColor: color;
+	body: TextStyle;
+	heading1: TextStyle;
+	heading2: TextStyle;
+	heading3: TextStyle;
+	heading4: TextStyle;
+	heading5: TextStyle;
+	heading6: TextStyle;
+	code: TextStyle;
+	pagePadding: margins;
+	blockSkips: MarkdownBlockSkips;
+	list: MarkdownList;
+	quoteIndent: pixels;
+	quotePaintColors: MarkdownQuotePaintColors;
+	rule: MarkdownRule;
+	displayMath: MarkdownDisplayMath;
+	table: MarkdownTable;
+	failure: MarkdownFailure;
+}
+
+defaultMarkdownTextPalette: TextPalette(defaultTextPalette) {
 	linkFg: windowActiveTextFg;
 	monoFg: windowSubTextFg;
 	selectMonoFg: windowSubTextFg;
 }
-ivMarkdownParagraphStyle: TextStyle(defaultTextStyle) {
+defaultMarkdownBodyStyle: TextStyle(historyTextStyle) {
 	lineHeight: 24px;
 }
-ivMarkdownHeading1Style: TextStyle(defaultTextStyle) {
-	font: font(30px semibold);
-	lineHeight: 36px;
-}
-ivMarkdownHeading2Style: TextStyle(defaultTextStyle) {
-	font: font(26px semibold);
-	lineHeight: 32px;
-}
-ivMarkdownHeading3Style: TextStyle(defaultTextStyle) {
-	font: font(22px semibold);
-	lineHeight: 28px;
-}
-ivMarkdownHeading4Style: TextStyle(defaultTextStyle) {
-	font: font(19px semibold);
-	lineHeight: 25px;
-}
-ivMarkdownHeading5Style: TextStyle(defaultTextStyle) {
-	font: font(17px semibold);
-	lineHeight: 23px;
-}
-ivMarkdownHeading6Style: TextStyle(defaultTextStyle) {
-	font: font(15px semibold);
-	lineHeight: 21px;
-}
-ivMarkdownCodeStyle: TextStyle(defaultTextStyle) {
+defaultMarkdownCodeStyle: TextStyle(defaultMarkdownBodyStyle) {
 	font: font(15px);
 	lineHeight: 22px;
 }
-ivMarkdownSubscriptScale: 0.75;
-ivMarkdownSubscriptBaselineOffset: 3px;
-ivMarkdownSuperscriptScale: 0.75;
-ivMarkdownSuperscriptBaselineOffset: -4px;
-ivMarkdownMarkBackground: windowBgOver;
-ivMarkdownPagePadding: margins(26px, 32px, 32px, 32px);
-ivMarkdownParagraphSkip: 16px;
-ivMarkdownHeadingSkip: 24px;
-ivMarkdownCodeSkip: 20px;
-ivMarkdownRuleSkip: 24px;
-ivMarkdownListIndent: 28px;
-ivMarkdownListContinuationIndent: 22px;
-ivMarkdownListMarkerWidth: 22px;
-ivMarkdownListMarkerSkip: 8px;
-ivMarkdownTaskMarkerSize: 15px;
-ivMarkdownTaskMarkerBorder: 2px;
-ivMarkdownTaskMarkerFg: windowActiveTextFg;
-ivMarkdownTaskMarkerCheckFg: windowBg;
-ivMarkdownQuoteIndent: 18px;
-ivMarkdownQuoteBorder: 3px;
-ivMarkdownQuoteBorderFg: windowActiveTextFg;
-ivMarkdownQuotePadding: margins(4px, 0px, 4px, 12px);
-ivMarkdownQuoteSkip: 18px;
-ivMarkdownCodePadding: margins(14px, 16px, 14px, 16px);
-ivMarkdownCodeBg: windowBgOver;
-ivMarkdownCodeRadius: 6px;
-ivMarkdownCodeLanguageStyle: TextStyle(defaultTextStyle) {
-	font: font(12px semibold);
-	lineHeight: 18px;
+defaultMarkdownDisplayMathFallbackStyle: TextStyle(defaultMarkdownCodeStyle) {
 }
-ivMarkdownCodeLanguageFg: windowSubTextFg;
-ivMarkdownCodeLanguageSkip: 8px;
-ivMarkdownRuleFg: boxDividerBg;
-ivMarkdownRuleHeight: 1px;
-ivMarkdownDisplayMathSkip: 20px;
-ivMarkdownDisplayMathPadding: margins(10px, 12px, 10px, 12px);
-ivMarkdownDisplayMathAlign: align(center);
-ivMarkdownDisplayMathTextSize: 20px;
-ivMarkdownDisplayMathMaxRenderWidth: 1600px;
-ivMarkdownDisplayMathMaxRenderHeight: 1200px;
-ivMarkdownDisplayMathFallbackStyle: TextStyle(ivMarkdownCodeStyle) {
-}
-ivMarkdownDisplayMathFallbackBg: windowBgOver;
-ivMarkdownDisplayMathFallbackRadius: 6px;
-ivMarkdownDisplayMathFallbackPadding: margins(10px, 12px, 10px, 12px);
-ivMarkdownDisplayMathOverflowWidth: 4px;
-ivMarkdownDisplayMathOverflowFg: windowSubTextFg;
-ivMarkdownTableSkip: 20px;
-ivMarkdownTableCellPadding: margins(8px, 10px, 8px, 10px);
-ivMarkdownTableBorder: 1px;
-ivMarkdownTableBorderFg: boxDividerBg;
-ivMarkdownTableHeaderBg: windowBgOver;
-ivMarkdownTableHeaderStyle: TextStyle(ivMarkdownParagraphStyle) {
+defaultMarkdownTableHeaderStyle: TextStyle(defaultMarkdownBodyStyle) {
 	font: font(16px semibold);
 	lineHeight: 24px;
 }
-ivMarkdownTableMinColumnWidth: 96px;
-ivMarkdownTableOverflowWidth: 4px;
-ivMarkdownTableOverflowFg: windowSubTextFg;
-ivMarkdownFailureLabel: FlatLabel(defaultFlatLabel) {
+defaultMarkdownBlockSkips: MarkdownBlockSkips {
+	paragraph: 16px;
+	heading: 24px;
+	code: 20px;
+	rule: 24px;
+	quote: 18px;
+	displayMath: 20px;
+	table: 20px;
+}
+defaultMarkdownList: MarkdownList {
+	indent: 28px;
+	continuationIndent: 22px;
+	markerWidth: 22px;
+	markerSkip: 8px;
+	bulletRadius: 3px;
+	bulletLeftShift: 0px;
+	bulletFg: windowFg;
+	taskMarkerSize: 15px;
+	taskMarkerBorder: 2px;
+	taskMarkerFg: windowActiveTextFg;
+	taskMarkerCheckFg: windowBg;
+}
+defaultMarkdownQuotePaintColors: MarkdownQuotePaintColors {
+	blockquote: windowActiveTextFg;
+	pre: windowSubTextFg;
+	preBg: windowBgOver;
+}
+defaultMarkdownRule: MarkdownRule {
+	fg: boxDividerBg;
+	height: 1px;
+}
+defaultMarkdownDisplayMath: MarkdownDisplayMath {
+	padding: margins(10px, 12px, 10px, 12px);
+	align: align(center);
+	textSize: 20px;
+	maxRenderWidth: 1600px;
+	maxRenderHeight: 1200px;
+	fg: windowFg;
+	fallbackStyle: defaultMarkdownDisplayMathFallbackStyle;
+	fallbackBg: windowBgOver;
+	fallbackRadius: 6px;
+	fallbackPadding: margins(10px, 12px, 10px, 12px);
+	overflowWidth: 4px;
+	overflowFg: windowSubTextFg;
+}
+defaultMarkdownTable: MarkdownTable {
+	cellPadding: margins(8px, 10px, 8px, 10px);
+	border: 1px;
+	borderFg: boxDividerBg;
+	headerBg: windowBgOver;
+	headerStyle: defaultMarkdownTableHeaderStyle;
+	minColumnWidth: 96px;
+	overflowWidth: 4px;
+	overflowFg: windowSubTextFg;
+}
+defaultMarkdownFailureLabel: FlatLabel(defaultFlatLabel) {
 	minWidth: 280px;
 	textFg: windowSubTextFg;
 	align: align(center);
-	style: ivMarkdownParagraphStyle;
+	style: defaultMarkdownBodyStyle;
 }
-ivMarkdownFailureWidth: 360px;
-ivMarkdownFailureSkip: 12px;
+defaultMarkdownFailure: MarkdownFailure {
+	label: defaultMarkdownFailureLabel;
+	width: 360px;
+	skip: 12px;
+}
+defaultMarkdown: Markdown {
+	textPalette: defaultMarkdownTextPalette;
+	textColor: windowFg;
+	body: defaultMarkdownBodyStyle;
+	heading1: TextStyle(defaultMarkdownBodyStyle) {
+		font: font(30px semibold);
+		lineHeight: 36px;
+	}
+	heading2: TextStyle(defaultMarkdownBodyStyle) {
+		font: font(26px semibold);
+		lineHeight: 32px;
+	}
+	heading3: TextStyle(defaultMarkdownBodyStyle) {
+		font: font(22px semibold);
+		lineHeight: 28px;
+	}
+	heading4: TextStyle(defaultMarkdownBodyStyle) {
+		font: font(19px semibold);
+		lineHeight: 25px;
+	}
+	heading5: TextStyle(defaultMarkdownBodyStyle) {
+		font: font(17px semibold);
+		lineHeight: 23px;
+	}
+	heading6: TextStyle(defaultMarkdownBodyStyle) {
+		font: font(15px semibold);
+		lineHeight: 21px;
+	}
+	code: defaultMarkdownCodeStyle;
+	pagePadding: margins(26px, 32px, 32px, 32px);
+	blockSkips: defaultMarkdownBlockSkips;
+	list: defaultMarkdownList;
+	quoteIndent: 18px;
+	quotePaintColors: defaultMarkdownQuotePaintColors;
+	rule: defaultMarkdownRule;
+	displayMath: defaultMarkdownDisplayMath;
+	table: defaultMarkdownTable;
+	failure: defaultMarkdownFailure;
+}

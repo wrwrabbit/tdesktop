@@ -3,6 +3,7 @@
 #include "iv/markdown/iv_markdown_parse.h"
 
 #include "base/call_delayed.h"
+#include "ui/chat/chat_style.h"
 
 #include <QtCore/QByteArray>
 #include <QtCore/QDir>
@@ -95,7 +96,7 @@ struct PrepareState {
 			block.formulaIndex,
 			block.mathKind,
 			block.formulaTex,
-			result.style.displayMathTextSize,
+			result.style.markdown.displayMath.textSize,
 			result.style.displayMathMaxRenderWidth,
 			result.style.displayMathMaxRenderHeight);
 	}
@@ -567,23 +568,23 @@ struct DecodedDisplaySpan {
 		int headingLevel,
 		const MarkdownStyleSnapshot &style) {
 	if (kind != PreparedBlockKind::Heading) {
-		return style.paragraphStyle;
+		return style.markdown.body;
 	}
 	switch (std::clamp(headingLevel, 1, 6)) {
-	case 1: return style.heading1Style;
-	case 2: return style.heading2Style;
-	case 3: return style.heading3Style;
-	case 4: return style.heading4Style;
-	case 5: return style.heading5Style;
-	case 6: return style.heading6Style;
+	case 1: return style.markdown.heading1;
+	case 2: return style.markdown.heading2;
+	case 3: return style.markdown.heading3;
+	case 4: return style.markdown.heading4;
+	case 5: return style.markdown.heading5;
+	case 6: return style.markdown.heading6;
 	}
-	return style.heading6Style;
+	return style.markdown.heading6;
 }
 
 [[nodiscard]] const style::TextStyle &TableCellTextStyle(
 		bool header,
 		const MarkdownStyleSnapshot &style) {
-	return header ? style.tableHeaderStyle : style.paragraphStyle;
+	return header ? style.markdown.table.headerStyle : style.markdown.body;
 }
 
 [[nodiscard]] std::vector<InlineFormulaSource> CollectInlineFormulas(
@@ -1069,11 +1070,11 @@ void PrepareTableCellText(
 		.renderWidthCap = ScaleFormulaCap(
 			state->result.style.displayMathMaxRenderWidth,
 			textSize,
-			state->result.style.displayMathTextSize),
+			state->result.style.markdown.displayMath.textSize),
 		.renderHeightCap = ScaleFormulaCap(
 			state->result.style.displayMathMaxRenderHeight,
 			textSize,
-			state->result.style.displayMathTextSize),
+			state->result.style.markdown.displayMath.textSize),
 	};
 	if (!cell.children.empty()) {
 		AppendInlineRange(
@@ -1563,11 +1564,11 @@ void AppendFootnotes(
 		.renderWidthCap = ScaleFormulaCap(
 			state->result.style.displayMathMaxRenderWidth,
 			textSize,
-			state->result.style.displayMathTextSize),
+			state->result.style.markdown.displayMath.textSize),
 		.renderHeightCap = ScaleFormulaCap(
 			state->result.style.displayMathMaxRenderHeight,
 			textSize,
-			state->result.style.displayMathTextSize),
+			state->result.style.markdown.displayMath.textSize),
 	};
 	if (!node.children.empty()) {
 		AppendInlineRange(
@@ -1824,6 +1825,33 @@ void AppendFootnotes(
 	return color->c;
 }
 
+[[nodiscard]] QColor WithAlpha(QColor color, float64 alpha) {
+	color.setAlpha(int(alpha * 255));
+	return color;
+}
+
+[[nodiscard]] MarkdownQuotePaintColorsSnapshot ResolveBlockquotePaintColors(
+		style::color color) {
+	auto result = MarkdownQuotePaintColorsSnapshot();
+	const auto base = Resolve(color);
+	result.background = WithAlpha(base, Ui::kDefaultBgOpacity);
+	result.outlines[0] = WithAlpha(base, Ui::kDefaultOutline1Opacity);
+	result.icon = base;
+	return result;
+}
+
+[[nodiscard]] MarkdownQuotePaintColorsSnapshot ResolvePrePaintColors(
+		style::color color,
+		style::color background) {
+	auto result = MarkdownQuotePaintColorsSnapshot();
+	const auto base = Resolve(color);
+	result.background = Resolve(background);
+	result.outlines[0] = WithAlpha(base, Ui::kDefaultOutline1Opacity);
+	result.header = WithAlpha(base, Ui::kDefaultOutline2Opacity);
+	result.icon = WithAlpha(base, Ui::kDefaultOutline3Opacity);
+	return result;
+}
+
 [[nodiscard]] bool RenderPreparedFormulas(PrepareState *state) {
 	const auto &style = state->result.style;
 	auto ownedRenderer = std::shared_ptr<MathRenderer>();
@@ -1846,7 +1874,7 @@ void AppendFootnotes(
 			.kind = slot.kind,
 			.textSize = slot.textSize
 				? slot.textSize
-				: style.displayMathTextSize,
+				: style.markdown.displayMath.textSize,
 			.renderWidthCap = slot.renderWidthCap
 				? slot.renderWidthCap
 				: style.displayMathMaxRenderWidth,
@@ -1872,82 +1900,40 @@ void AppendFootnotes(
 
 MarkdownStyleSnapshot CaptureMarkdownStyleSnapshot() {
 	auto result = MarkdownStyleSnapshot();
+	const auto &markdown = st::defaultMarkdown;
 	result.textPalette = {
-		.link = Resolve(st::ivMarkdownTextPalette.linkFg),
-		.mono = Resolve(st::ivMarkdownTextPalette.monoFg),
-		.mark = Resolve(st::ivMarkdownTextPalette.markBg),
-		.spoiler = Resolve(st::ivMarkdownTextPalette.spoilerFg),
-		.selectBackground = Resolve(st::ivMarkdownTextPalette.selectBg),
-		.selectText = Resolve(st::ivMarkdownTextPalette.selectFg),
-		.selectLink = Resolve(st::ivMarkdownTextPalette.selectLinkFg),
-		.selectMono = Resolve(st::ivMarkdownTextPalette.selectMonoFg),
-		.selectSpoiler = Resolve(st::ivMarkdownTextPalette.selectSpoilerFg),
-		.selectOverlay = Resolve(st::ivMarkdownTextPalette.selectOverlay),
-		.linkAlwaysActive = st::ivMarkdownTextPalette.linkAlwaysActive,
+		.link = Resolve(markdown.textPalette.linkFg),
+		.mono = Resolve(markdown.textPalette.monoFg),
+		.mark = Resolve(markdown.textPalette.markBg),
+		.spoiler = Resolve(markdown.textPalette.spoilerFg),
+		.selectBackground = Resolve(markdown.textPalette.selectBg),
+		.selectText = Resolve(markdown.textPalette.selectFg),
+		.selectLink = Resolve(markdown.textPalette.selectLinkFg),
+		.selectMono = Resolve(markdown.textPalette.selectMonoFg),
+		.selectSpoiler = Resolve(markdown.textPalette.selectSpoilerFg),
+		.selectOverlay = Resolve(markdown.textPalette.selectOverlay),
+		.linkAlwaysActive = markdown.textPalette.linkAlwaysActive,
 	};
-	result.paragraphStyle = st::ivMarkdownParagraphStyle;
-	result.heading1Style = st::ivMarkdownHeading1Style;
-	result.heading2Style = st::ivMarkdownHeading2Style;
-	result.heading3Style = st::ivMarkdownHeading3Style;
-	result.heading4Style = st::ivMarkdownHeading4Style;
-	result.heading5Style = st::ivMarkdownHeading5Style;
-	result.heading6Style = st::ivMarkdownHeading6Style;
-	result.codeStyle = st::ivMarkdownCodeStyle;
-	result.codeLanguageStyle = st::ivMarkdownCodeLanguageStyle;
-	result.displayMathFallbackStyle = st::ivMarkdownDisplayMathFallbackStyle;
-	result.tableHeaderStyle = st::ivMarkdownTableHeaderStyle;
-	result.pagePadding = st::ivMarkdownPagePadding;
-	result.quotePadding = st::ivMarkdownQuotePadding;
-	result.codePadding = st::ivMarkdownCodePadding;
-	result.displayMathPadding = st::ivMarkdownDisplayMathPadding;
-	result.displayMathFallbackPadding = st::ivMarkdownDisplayMathFallbackPadding;
-	result.tableCellPadding = st::ivMarkdownTableCellPadding;
-	result.displayMathAlign = st::ivMarkdownDisplayMathAlign;
-	result.defaultTextColor = Resolve(st::windowFg);
-	result.codeLanguageColor = Resolve(st::ivMarkdownCodeLanguageFg);
-	result.taskMarkerColor = Resolve(st::ivMarkdownTaskMarkerFg);
-	result.taskMarkerCheckColor = Resolve(st::ivMarkdownTaskMarkerCheckFg);
-	result.quoteBorderColor = Resolve(st::ivMarkdownQuoteBorderFg);
-	result.codeBackgroundColor = Resolve(st::ivMarkdownCodeBg);
-	result.markBackgroundColor = Resolve(st::ivMarkdownMarkBackground);
-	result.ruleColor = Resolve(st::ivMarkdownRuleFg);
-	result.displayMathForegroundColor = Resolve(st::windowFg);
+	result.markdown = markdown;
+	result.defaultTextColor = Resolve(markdown.textColor);
+	result.bulletColor = Resolve(markdown.list.bulletFg);
+	result.taskMarkerColor = Resolve(markdown.list.taskMarkerFg);
+	result.taskMarkerCheckColor = Resolve(markdown.list.taskMarkerCheckFg);
+	result.ruleColor = Resolve(markdown.rule.fg);
+	result.displayMathForegroundColor = Resolve(markdown.displayMath.fg);
 	result.displayMathFallbackBackgroundColor = Resolve(
-		st::ivMarkdownDisplayMathFallbackBg);
-	result.displayMathOverflowColor = Resolve(st::ivMarkdownDisplayMathOverflowFg);
-	result.tableBorderColor = Resolve(st::ivMarkdownTableBorderFg);
-	result.tableHeaderBackgroundColor = Resolve(st::ivMarkdownTableHeaderBg);
-	result.tableOverflowColor = Resolve(st::ivMarkdownTableOverflowFg);
-	result.subscriptScale = st::ivMarkdownSubscriptScale;
-	result.superscriptScale = st::ivMarkdownSuperscriptScale;
-	result.paragraphSkip = st::ivMarkdownParagraphSkip;
-	result.headingSkip = st::ivMarkdownHeadingSkip;
-	result.codeSkip = st::ivMarkdownCodeSkip;
-	result.ruleSkip = st::ivMarkdownRuleSkip;
-	result.displayMathSkip = st::ivMarkdownDisplayMathSkip;
-	result.tableSkip = st::ivMarkdownTableSkip;
-	result.quoteSkip = st::ivMarkdownQuoteSkip;
-	result.listIndent = st::ivMarkdownListIndent;
-	result.listContinuationIndent = st::ivMarkdownListContinuationIndent;
-	result.listMarkerWidth = st::ivMarkdownListMarkerWidth;
-	result.listMarkerSkip = st::ivMarkdownListMarkerSkip;
-	result.taskMarkerSize = st::ivMarkdownTaskMarkerSize;
-	result.taskMarkerBorder = st::ivMarkdownTaskMarkerBorder;
-	result.quoteIndent = st::ivMarkdownQuoteIndent;
-	result.quoteBorder = st::ivMarkdownQuoteBorder;
-	result.codeRadius = st::ivMarkdownCodeRadius;
-	result.codeLanguageSkip = st::ivMarkdownCodeLanguageSkip;
-	result.subscriptBaselineOffset = st::ivMarkdownSubscriptBaselineOffset;
-	result.superscriptBaselineOffset = st::ivMarkdownSuperscriptBaselineOffset;
-	result.ruleHeight = st::ivMarkdownRuleHeight;
-	result.displayMathTextSize = st::ivMarkdownDisplayMathTextSize;
-	result.displayMathMaxRenderWidth = st::ivMarkdownDisplayMathMaxRenderWidth;
-	result.displayMathMaxRenderHeight = st::ivMarkdownDisplayMathMaxRenderHeight;
-	result.displayMathFallbackRadius = st::ivMarkdownDisplayMathFallbackRadius;
-	result.displayMathOverflowWidth = st::ivMarkdownDisplayMathOverflowWidth;
-	result.tableBorder = st::ivMarkdownTableBorder;
-	result.tableMinColumnWidth = st::ivMarkdownTableMinColumnWidth;
-	result.tableOverflowWidth = st::ivMarkdownTableOverflowWidth;
+		markdown.displayMath.fallbackBg);
+	result.displayMathOverflowColor = Resolve(markdown.displayMath.overflowFg);
+	result.tableBorderColor = Resolve(markdown.table.borderFg);
+	result.tableHeaderBackgroundColor = Resolve(markdown.table.headerBg);
+	result.tableOverflowColor = Resolve(markdown.table.overflowFg);
+	result.blockquotePaint = ResolveBlockquotePaintColors(
+		markdown.quotePaintColors.blockquote);
+	result.prePaint = ResolvePrePaintColors(
+		markdown.quotePaintColors.pre,
+		markdown.quotePaintColors.preBg);
+	result.displayMathMaxRenderWidth = markdown.displayMath.maxRenderWidth;
+	result.displayMathMaxRenderHeight = markdown.displayMath.maxRenderHeight;
 	result.paletteVersion = style::PaletteVersion();
 	result.devicePixelRatio = style::DevicePixelRatio();
 	return result;
