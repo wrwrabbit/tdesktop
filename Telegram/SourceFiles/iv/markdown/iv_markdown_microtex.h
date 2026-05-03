@@ -7,6 +7,14 @@
 
 namespace Iv::Markdown {
 
+struct MicrotexMeasureRequest {
+	QString trimmedTex;
+	MathKind kind = MathKind::Display;
+	int textSize = 0;
+	int renderWidthCap = 0;
+	int renderHeightCap = 0;
+};
+
 struct MicrotexRenderRequest {
 	QString trimmedTex;
 	MathKind kind = MathKind::Display;
@@ -18,13 +26,12 @@ struct MicrotexRenderRequest {
 
 struct MicrotexRenderResult {
 	QImage image;
-	QSize logicalSize;
-	int logicalDepth = 0;
-	QString error;
-	bool ok = false;
+	MeasuredFormula measured;
 };
 
 [[nodiscard]] bool EnsureMicrotexInitialized(QString *error = nullptr);
+[[nodiscard]] MeasuredFormula MeasureWithMicrotex(
+	const MicrotexMeasureRequest &request);
 [[nodiscard]] MicrotexRenderResult RenderWithMicrotex(
 	const MicrotexRenderRequest &request);
 [[nodiscard]] bool MicrotexBackendLinked();

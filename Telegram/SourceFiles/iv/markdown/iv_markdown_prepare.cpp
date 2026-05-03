@@ -2,9 +2,6 @@
 
 #include "iv/markdown/iv_markdown_parse.h"
 
-#include "base/call_delayed.h"
-#include "ui/style/style_core_scale.h"
-
 #include <QtCore/QByteArray>
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
@@ -49,21 +46,11 @@ struct FootnoteDefinitionEntry {
 
 struct PrepareState {
 	const PrepareRequest *request = nullptr;
-	PreparedResult result;
+	MarkdownArticleContent result;
 	QByteArray sourceUtf8;
 	std::vector<FootnoteDefinitionEntry> footnoteDefinitions;
 	std::vector<std::pair<QString, QString>> firstFootnoteReferences;
 	int nextGeneratedId = 0;
-
-	[[nodiscard]] bool cancelled() {
-		if (!request || !request->cancelled) {
-			return false;
-		} else if (!request->cancelled->load(std::memory_order_relaxed)) {
-			return false;
-		}
-		result.cancelled = true;
-		return true;
-	}
 
 	void rememberFormula(
 			int index,
@@ -195,13 +182,11 @@ enum class RawInlineTag {
 
 [[nodiscard]] QString InvalidStyleReason(
 		const MarkdownPrepareDimensions &dimensions) {
-	if (dimensions.devicePixelRatio <= 0) {
-		return u"invalid-device-pixel-ratio"_q;
-	}
+	Q_UNUSED(dimensions);
 	return QString();
 }
 
-void ClearPreparedOutput(PreparedResult *result) {
+void ClearPreparedOutput(MarkdownArticleContent *result) {
 	result->blocks.blocks.clear();
 	result->formulas.clear();
 }
@@ -776,9 +761,6 @@ void AppendInlineRange(
 		InlineFormulaContext *inlineFormulas,
 		PrepareState *state) {
 	for (auto i = from; i != till; ++i) {
-		if (state->cancelled()) {
-			return;
-		}
 		const auto &node = nodes[i];
 		const auto tag = ParseRawInlineTag(node);
 		if (IsOpeningRawInlineTag(tag)) {
@@ -797,9 +779,6 @@ void AppendInlineRange(
 					links,
 					inlineFormulas,
 					state);
-				if (state->cancelled()) {
-					return;
-				}
 				const auto entityLength = text->text.size() - entityFrom;
 				if (entityLength > 0) {
 					text->entities.push_back(EntityInText(
@@ -821,10 +800,6 @@ void AppendInline(
 		std::vector<PreparedLink> *links,
 		InlineFormulaContext *inlineFormulas,
 		PrepareState *state) {
-	if (state->cancelled()) {
-		return;
-	}
-
 	const auto from = text->text.size();
 	switch (node.kind) {
 	case NodeKind::Text:
@@ -1229,9 +1204,7 @@ void PrepareTableCellText(
 	block.tableRows.reserve(node.children.size());
 
 	for (const auto &rowNode : node.children) {
-		if (state->cancelled()) {
-			return {};
-		} else if (rowNode.kind != NodeKind::TableRow) {
+		if (rowNode.kind != NodeKind::TableRow) {
 			return PrepareFallbackBlocks(node, context, state);
 		}
 
@@ -1241,9 +1214,7 @@ void PrepareTableCellText(
 
 		auto expectedColumn = 0;
 		for (const auto &cellNode : rowNode.children) {
-			if (state->cancelled()) {
-				return {};
-			} else if (cellNode.kind != NodeKind::TableCell) {
+			if (cellNode.kind != NodeKind::TableCell) {
 				return PrepareFallbackBlocks(node, context, state);
 			}
 			const auto column = (cellNode.tableColumn >= 0)
@@ -1373,9 +1344,6 @@ void CollectFootnoteDefinitions(
 		PrepareState *state) {
 	auto result = std::vector<PreparedBlock>();
 	for (const auto &child : node.children) {
-		if (state->cancelled()) {
-			return {};
-		}
 		AppendPrepared(PrepareBlocks(child, context, state), &result);
 	}
 	return result;
@@ -1421,7 +1389,7 @@ void AppendFootnotes(
 	list.listDelimiter = ListDelimiter::Period;
 	list.startNumber = 1;
 	for (const auto &entry : state->footnoteDefinitions) {
-		if (state->cancelled() || !entry.node) {
+		if (!entry.node) {
 			return;
 		}
 		auto item = PreparedBlock();
@@ -1485,16 +1453,12 @@ void AppendFootnotes(
 		.document = std::make_shared<const PreparedDocument>(parsed.document),
 		.renderer = state->request->renderer,
 		.dimensions = state->request->dimensions,
-		.generation = state->request->generation,
 		.sourcePath = state->request->sourcePath,
-		.cancelled = state->request->cancelled,
 	};
 	auto nested = PrepareSynchronously(std::move(nestedRequest));
 	state->addPrepareWarnings(nested.debug.prepareWarningCount);
 	state->addFormulaWarnings(nested.debug.formulaWarningCount);
-	return nested.cancelled
-		? std::vector<PreparedBlock>()
-		: nested.failure.failed()
+	return nested.failure.failed()
 		? fallback()
 		: std::move(nested.blocks.blocks);
 }
@@ -1528,9 +1492,7 @@ void AppendFootnotes(
 		const MarkdownNode &node,
 		PrepareState *state) {
 	auto result = PrepareChildren(node, {}, state);
-	if (!state->result.cancelled) {
-		AppendFootnotes(&result, state);
-	}
+	AppendFootnotes(&result, state);
 	return result;
 }
 
@@ -1581,9 +1543,6 @@ void AppendFootnotes(
 			&inlineFormulas,
 			state);
 	}
-	if (state->cancelled()) {
-		return {};
-	}
 	AppendRichBlock(
 		&result,
 		kind,
@@ -1614,15 +1573,9 @@ void AppendFootnotes(
 	auto childContext = context;
 	childContext.listDepth = context.listDepth + 1;
 	for (const auto &child : node.children) {
-		if (state->cancelled()) {
-			return {};
-		}
 		AppendPrepared(PrepareBlocks(child, childContext, state), &block.children);
-		if (state->result.cancelled) {
-			return {};
-		}
 	}
-	if (block.children.empty() && !state->result.cancelled) {
+	if (block.children.empty()) {
 		block.children.push_back(EmptyParagraphBlock());
 	}
 	return block;
@@ -1648,9 +1601,6 @@ void AppendFootnotes(
 	auto childContext = context;
 	childContext.listDepth = context.listDepth + 1;
 	for (const auto &child : node.children) {
-		if (state->cancelled()) {
-			return {};
-		}
 		if (child.kind == NodeKind::ListItem) {
 			auto item = PrepareListItemBlock(
 				child,
@@ -1658,18 +1608,12 @@ void AppendFootnotes(
 				block,
 				(node.listKind == ListKind::Ordered) ? nextNumber : 0,
 				state);
-			if (state->result.cancelled) {
-				return {};
-			}
 			block.children.push_back(std::move(item));
 			if (node.listKind == ListKind::Ordered) {
 				++nextNumber;
 			}
 		} else {
 			AppendPrepared(PrepareBlocks(child, childContext, state), &block.children);
-			if (state->result.cancelled) {
-				return {};
-			}
 		}
 	}
 	return block;
@@ -1688,9 +1632,6 @@ void AppendFootnotes(
 	auto childContext = context;
 	childContext.quoteDepth = context.quoteDepth + 1;
 	block.children = PrepareChildren(node, childContext, state);
-	if (state->result.cancelled) {
-		return {};
-	}
 	return block;
 }
 
@@ -1698,9 +1639,6 @@ void AppendFootnotes(
 		const MarkdownNode &node,
 		PrepareContext context,
 		PrepareState *state) {
-	if (state->cancelled()) {
-		return {};
-	}
 	if (node.kind == NodeKind::HtmlBlock) {
 		if (node.htmlBlockKind == HtmlBlockKind::Comment) {
 			return {};
@@ -1730,10 +1668,6 @@ void AppendFootnotes(
 		const MarkdownNode &node,
 		PrepareContext context,
 		PrepareState *state) {
-	if (state->cancelled()) {
-		return {};
-	}
-
 	switch (node.kind) {
 	case NodeKind::Document:
 		return PrepareDocumentBlocks(node, state);
@@ -1756,9 +1690,6 @@ void AppendFootnotes(
 		return { PrepareRuleBlock() };
 	case NodeKind::List: {
 		auto block = PrepareListBlock(node, context, state);
-		if (state->result.cancelled) {
-			return {};
-		}
 		return { std::move(block) };
 	} break;
 	case NodeKind::ListItem: {
@@ -1768,16 +1699,10 @@ void AppendFootnotes(
 		list.visualDepth = CappedListDepth(list.actualDepth);
 		list.depthClamped = (list.actualDepth > list.visualDepth);
 		auto block = PrepareListItemBlock(node, context, list, 0, state);
-		if (state->result.cancelled) {
-			return {};
-		}
 		return { std::move(block) };
 	} break;
 	case NodeKind::Blockquote: {
 		auto block = PrepareQuoteBlock(node, context, state);
-		if (state->result.cancelled) {
-			return {};
-		}
 		return { std::move(block) };
 	} break;
 	case NodeKind::Table:
@@ -1815,7 +1740,7 @@ void AppendFootnotes(
 	return result;
 }
 
-[[nodiscard]] PreparedFormulaRenderSignature FormulaRenderSignature(
+[[nodiscard]] PreparedFormulaMeasurementSignature FormulaMeasurementSignature(
 		const PreparedFormulaSlot &slot,
 		const MarkdownPrepareDimensions &dimensions) {
 	return {
@@ -1830,16 +1755,15 @@ void AppendFootnotes(
 		.renderHeightCap = slot.renderHeightCap
 			? slot.renderHeightCap
 			: dimensions.displayMathMaxRenderHeight,
-		.devicePixelRatio = dimensions.devicePixelRatio,
 	};
 }
 
-[[nodiscard]] std::shared_ptr<const PreparedFormulaRenderData>
-FindDocumentFormulaRender(
+[[nodiscard]] std::shared_ptr<const MeasuredFormula>
+FindDocumentFormulaMeasurement(
 		const std::shared_ptr<const PreparedDocument> &document,
 		int index,
-		const PreparedFormulaRenderSignature &signature) {
-	const auto cache = document ? document->formulaRenderCache : nullptr;
+		const PreparedFormulaMeasurementSignature &signature) {
+	const auto cache = document ? document->formulaMeasurementCache : nullptr;
 	if (!cache || index < 0) {
 		return nullptr;
 	}
@@ -1852,12 +1776,12 @@ FindDocumentFormulaRender(
 		: nullptr;
 }
 
-void RememberDocumentFormulaRender(
+void RememberDocumentFormulaMeasurement(
 		const std::shared_ptr<const PreparedDocument> &document,
 		int index,
-		PreparedFormulaRenderSignature signature,
-		std::shared_ptr<const PreparedFormulaRenderData> data) {
-	const auto cache = document ? document->formulaRenderCache : nullptr;
+		PreparedFormulaMeasurementSignature signature,
+		std::shared_ptr<const MeasuredFormula> data) {
+	const auto cache = document ? document->formulaMeasurementCache : nullptr;
 	if (!cache || index < 0 || !data) {
 		return;
 	}
@@ -1870,7 +1794,7 @@ void RememberDocumentFormulaRender(
 	};
 }
 
-[[nodiscard]] bool RenderPreparedFormulas(PrepareState *state) {
+void MeasurePreparedFormulas(PrepareState *state) {
 	const auto &dimensions = state->request->dimensions;
 	auto ownedRenderer = std::shared_ptr<MathRenderer>();
 	auto renderer = state->request ? state->request->renderer.get() : nullptr;
@@ -1885,44 +1809,36 @@ void RememberDocumentFormulaRender(
 		if (!slot.present) {
 			continue;
 		}
-		if (state->cancelled()) {
-			return false;
-		}
-		const auto signature = FormulaRenderSignature(slot, dimensions);
-		if (const auto cached = FindDocumentFormulaRender(
+		const auto signature = FormulaMeasurementSignature(slot, dimensions);
+		if (const auto cached = FindDocumentFormulaMeasurement(
 				state->request->document,
 				i,
 				signature)) {
-			slot.renderData = cached;
-			slot.rendered = cached->rendered;
+			slot.measuredData = cached;
+			slot.measured = *cached;
 		} else {
-			auto data = std::make_shared<PreparedFormulaRenderData>();
-			data->rendered = renderer->renderFormula({
+			auto data = std::make_shared<MeasuredFormula>(renderer->measureFormula({
 				.trimmedTex = signature.trimmedTex,
 				.kind = signature.kind,
 				.textSize = signature.textSize,
 				.renderWidthCap = signature.renderWidthCap,
 				.renderHeightCap = signature.renderHeightCap,
-				.devicePixelRatio = signature.devicePixelRatio,
-			});
-			slot.renderData = data;
-			slot.rendered = data->rendered;
-			RememberDocumentFormulaRender(
+			}));
+			slot.measuredData = data;
+			slot.measured = *data;
+			RememberDocumentFormulaMeasurement(
 				state->request->document,
 				i,
 				signature,
 				std::move(data));
 		}
-		if (!slot.rendered.success) {
+		if (!slot.measured.success) {
 			state->addFormulaWarning();
 		}
-		if (state->cancelled()) {
-			state->result.debug.formulaRenderMs = int(timer.elapsed());
-			return false;
-		}
 	}
-	state->result.debug.formulaRenderMs = int(timer.elapsed());
-	return true;
+	state->result.debug.formulaMeasureMs = int(timer.elapsed());
+	state->result.debug.formulaRenderMs
+		= state->result.debug.formulaMeasureMs;
 }
 
 } // namespace
@@ -1943,16 +1859,14 @@ MarkdownPrepareDimensions CaptureMarkdownPrepareDimensions() {
 	result.displayMathTextSize = markdown.displayMath.textSize;
 	result.displayMathMaxRenderWidth = markdown.displayMath.maxRenderWidth;
 	result.displayMathMaxRenderHeight = markdown.displayMath.maxRenderHeight;
-	result.devicePixelRatio = style::DevicePixelRatio();
 	return result;
 }
 
-PreparedResult PrepareSynchronously(PrepareRequest request) {
+MarkdownArticleContent PrepareSynchronously(PrepareRequest request) {
 	auto state = PrepareState();
 	auto timer = QElapsedTimer();
 	timer.start();
 	state.request = &request;
-	state.result.generation = request.generation;
 	const auto finish = [&] {
 		state.result.debug.prepareMs = int(timer.elapsed());
 		return std::move(state.result);
@@ -1975,15 +1889,8 @@ PreparedResult PrepareSynchronously(PrepareRequest request) {
 	state.sourceUtf8 = request.document->sourceText.toUtf8();
 	state.result.formulas.resize(FormulaSlotCount(*request.document));
 	state.result.debug.sourceWarningCount = int(request.document->warnings.size());
-	if (state.cancelled()) {
-		return finish();
-	}
 
 	state.result.blocks = PrepareRenderData(*request.document, &state);
-	if (state.result.cancelled) {
-		ClearPreparedOutput(&state.result);
-		return finish();
-	}
 	if (CountPreparedBlocks(state.result.blocks.blocks)
 		> PrepareLimitsForIv().maxPreparedBlocks) {
 		state.setTerminalFailure(
@@ -1992,26 +1899,11 @@ PreparedResult PrepareSynchronously(PrepareRequest request) {
 		ClearPreparedOutput(&state.result);
 		return finish();
 	}
-	if (!RenderPreparedFormulas(&state)) {
-		ClearPreparedOutput(&state.result);
-		return finish();
-	}
+	MeasurePreparedFormulas(&state);
 	if (state.result.failure.failed()) {
 		ClearPreparedOutput(&state.result);
 	}
 	return finish();
-}
-
-void PrepareAsync(PrepareRequest request, Fn<void(PreparedResult)> done) {
-	if (!done) {
-		return;
-	}
-	base::call_delayed(0, [
-		request = std::move(request),
-		done = std::move(done)
-	]() mutable {
-		done(PrepareSynchronously(std::move(request)));
-	});
 }
 
 } // namespace Iv::Markdown

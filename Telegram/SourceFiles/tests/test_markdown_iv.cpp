@@ -1,3 +1,4 @@
+#include "iv/markdown/iv_markdown_article.h"
 #include "iv/markdown/iv_markdown_document.h"
 #include "iv/markdown/iv_markdown_math_renderer.h"
 #include "iv/markdown/iv_markdown_microtex.h"
@@ -15,10 +16,10 @@
 #include <QtCore/QIODevice>
 #include <QtCore/QString>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QImage>
 
 #include <rpl/never.h>
 
-#include <atomic>
 #include <iostream>
 #include <initializer_list>
 #include <iterator>
@@ -42,7 +43,7 @@ struct PreparedFixture {
 	QString label;
 	QString path;
 	PreparedDocument parsed;
-	PreparedResult prepared;
+	MarkdownArticleContent prepared;
 };
 
 [[nodiscard]] QString FromLatin1(const char *value) {
@@ -762,7 +763,7 @@ void PrintSummary(const PreparedDocument &document, const QString &label) {
 		: QString::number(int(failure.terminal));
 }
 
-[[nodiscard]] PreparedResult PrepareParsedDocumentForTest(
+[[nodiscard]] MarkdownArticleContent PrepareParsedDocumentForTest(
 		std::shared_ptr<const PreparedDocument> document,
 		const QString &sourcePath,
 		const std::shared_ptr<MathRenderer> &renderer,
@@ -771,13 +772,11 @@ void PrintSummary(const PreparedDocument &document, const QString &label) {
 		.document = std::move(document),
 		.renderer = renderer,
 		.dimensions = std::move(dimensions),
-		.generation = 1,
 		.sourcePath = AbsolutePath(sourcePath),
-		.cancelled = std::make_shared<std::atomic_bool>(false),
 	});
 }
 
-[[nodiscard]] PreparedResult PrepareParsedDocumentForTest(
+[[nodiscard]] MarkdownArticleContent PrepareParsedDocumentForTest(
 		const PreparedDocument &document,
 		const QString &sourcePath,
 		const std::shared_ptr<MathRenderer> &renderer,
@@ -789,7 +788,8 @@ void PrintSummary(const PreparedDocument &document, const QString &label) {
 		std::move(dimensions));
 }
 
-[[nodiscard]] int CountPreparedFormulaSlots(const PreparedResult &prepared) {
+[[nodiscard]] int CountPreparedFormulaSlots(
+		const MarkdownArticleContent &prepared) {
 	auto result = 0;
 	for (const auto &slot : prepared.formulas) {
 		if (slot.present) {
@@ -799,13 +799,26 @@ void PrintSummary(const PreparedDocument &document, const QString &label) {
 	return result;
 }
 
+[[nodiscard]] int CountMeasuredFormulaSlots(
+		const MarkdownArticleContent &prepared) {
+	auto result = 0;
+	for (const auto &slot : prepared.formulas) {
+		if (slot.present && slot.measured.success) {
+			++result;
+		}
+	}
+	return result;
+}
+
 void PrintPrepareSummary(
 		const QString &label,
-		const PreparedResult &prepared) {
+		const MarkdownArticleContent &prepared) {
 	auto line = label;
 	line.append(FromLatin1(" prepare_ms="));
 	line.append(QString::number(prepared.debug.prepareMs));
-	line.append(FromLatin1(" formula_ms="));
+	line.append(FromLatin1(" formula_measure_ms="));
+	line.append(QString::number(prepared.debug.formulaMeasureMs));
+	line.append(FromLatin1(" formula_render_ms="));
 	line.append(QString::number(prepared.debug.formulaRenderMs));
 	line.append(FromLatin1(" prepare_warnings="));
 	line.append(QString::number(prepared.debug.prepareWarningCount));
@@ -826,10 +839,6 @@ void PrintPrepareSummary(
 		return false;
 	}
 	auto prepared = PrepareParsedDocumentForTest(parsed, path, renderer);
-	if (prepared.cancelled) {
-		PrintError(label + FromLatin1(" prepare-cancelled"));
-		return false;
-	}
 	if (prepared.failure.failed()) {
 		PrintError(
 			label + FromLatin1(" prepare-failed: ")
@@ -844,6 +853,71 @@ void PrintPrepareSummary(
 		fixture->prepared = std::move(prepared);
 	}
 	return true;
+}
+
+[[nodiscard]] std::unique_ptr<MarkdownArticle> BuildArticleForTest(
+		MarkdownArticleContent content,
+		const std::shared_ptr<MathRenderer> &renderer,
+		int width,
+		int *height = nullptr) {
+	auto article = std::make_unique<MarkdownArticle>(renderer);
+	article->setContent(std::move(content));
+	if (height) {
+		*height = article->resizeGetHeight(width);
+	} else {
+		article->resizeGetHeight(width);
+	}
+	return article;
+}
+
+[[nodiscard]] QImage PaintArticleForTest(
+		MarkdownArticle *article,
+		int width,
+		int height,
+		int devicePixelRatio = 1) {
+	const auto previousDevicePixelRatio = style::DevicePixelRatio();
+	style::SetDevicePixelRatio(devicePixelRatio);
+
+	auto image = QImage(
+		QSize(width * devicePixelRatio, height * devicePixelRatio),
+		QImage::Format_ARGB32_Premultiplied);
+	image.setDevicePixelRatio(devicePixelRatio);
+	image.fill(Qt::transparent);
+	{
+		auto painter = Painter(&image);
+		article->paint(
+			painter,
+			QRect(0, 0, width, height),
+			MarkdownArticlePaintCaches());
+	}
+
+	style::SetDevicePixelRatio(previousDevicePixelRatio);
+	return image;
+}
+
+[[nodiscard]] bool HasPaintedPixels(const QImage &image) {
+	const auto bits = image.constBits();
+	if (!bits) {
+		return false;
+	}
+	const auto count = image.sizeInBytes();
+	for (auto i = qsizetype(0); i != count; ++i) {
+		if (bits[i] != 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+[[nodiscard]] std::vector<const MeasuredFormula*> MeasuredFormulaPointers(
+		const MarkdownArticleContent &prepared) {
+	auto result = std::vector<const MeasuredFormula*>();
+	for (const auto &slot : prepared.formulas) {
+		if (slot.present && slot.measuredData) {
+			result.push_back(slot.measuredData.get());
+		}
+	}
+	return result;
 }
 
 template <typename Callback>
@@ -1580,10 +1654,6 @@ void CheckPrepareCoverage(
 			overflowLabel,
 			std::make_shared<MathRenderer>());
 		Check(
-			!overflowPrepared.cancelled,
-			overflowLabel + FromLatin1(" prepare cancelled"),
-			ok);
-		Check(
 			!overflowPrepared.failure.failed(),
 			overflowLabel + FromLatin1(" prepare failure: ")
 				+ PrepareFailureReason(overflowPrepared.failure),
@@ -1632,10 +1702,6 @@ void CheckPrepareLinkClassification(
 		sourcePath,
 		std::make_shared<MathRenderer>());
 	Check(
-		!prepared.cancelled,
-		label + FromLatin1(" prepare cancelled"),
-		ok);
-	Check(
 		!prepared.failure.failed(),
 		label + FromLatin1(" prepare failure: ")
 			+ PrepareFailureReason(prepared.failure),
@@ -1668,7 +1734,7 @@ void CheckPrepareLinkClassification(
 		ok);
 }
 
-void CheckPrepareRenderSmoke(
+void CheckArticleRenderSmoke(
 		const PreparedFixture &markdownFixture,
 		const PreparedFixture &latexFixture,
 		bool *ok) {
@@ -1677,141 +1743,181 @@ void CheckPrepareRenderSmoke(
 		FromLatin1("microtex backend should be linked"),
 		ok);
 	auto renderer = std::make_shared<MathRenderer>();
-	const auto firstMarkdown = PrepareParsedDocumentForTest(
+	auto firstMarkdown = PrepareParsedDocumentForTest(
 		markdownFixture.parsed,
 		markdownFixture.path,
 		renderer);
-	const auto firstLatex = PrepareParsedDocumentForTest(
+	auto firstLatex = PrepareParsedDocumentForTest(
 		latexFixture.parsed,
 		latexFixture.path,
 		renderer);
-	Check(
-		!firstMarkdown.cancelled && !firstLatex.cancelled,
-		FromLatin1("prepare cache smoke first pass cancelled"),
-		ok);
 	Check(
 		!firstMarkdown.failure.failed() && !firstLatex.failure.failed(),
-		FromLatin1("prepare cache smoke first pass failed"),
+		FromLatin1("article prepare smoke first pass failed"),
 		ok);
-	const auto firstCounters = renderer->debugCounters();
+	Check(
+		renderer->cacheUsageBytes() == 0,
+		FromLatin1("article prepare smoke keeps renderer cache empty"),
+		ok);
+	const auto prepareCounters = renderer->debugCounters();
+	Check(
+		prepareCounters.hits == 0
+			&& prepareCounters.misses == 0
+			&& prepareCounters.rendered == 0,
+		FromLatin1("article prepare smoke has no raster work"),
+		ok);
+	auto prepareSmokeLine = FromLatin1("prepare-lazy-smoke");
+	prepareSmokeLine.append(FromLatin1(" measured_slots="));
+	prepareSmokeLine.append(QString::number(
+		CountMeasuredFormulaSlots(firstMarkdown)
+			+ CountMeasuredFormulaSlots(firstLatex)));
+	prepareSmokeLine.append(FromLatin1(" hits="));
+	prepareSmokeLine.append(QString::number(prepareCounters.hits));
+	prepareSmokeLine.append(FromLatin1(" misses="));
+	prepareSmokeLine.append(QString::number(prepareCounters.misses));
+	prepareSmokeLine.append(FromLatin1(" rendered="));
+	prepareSmokeLine.append(QString::number(prepareCounters.rendered));
+	PrintLine(prepareSmokeLine);
+
+	const auto articleWidth = 640;
+	const auto expectedArticleFormulaHits = CountMeasuredFormulaSlots(
+		firstMarkdown);
+	auto firstArticleHeight = 0;
+	auto firstArticle = BuildArticleForTest(
+		std::move(firstMarkdown),
+		renderer,
+		articleWidth,
+		&firstArticleHeight);
+	const auto firstImage = PaintArticleForTest(
+		firstArticle.get(),
+		articleWidth,
+		firstArticleHeight);
+	Check(
+		HasPaintedPixels(firstImage),
+		FromLatin1("article first paint produced pixels"),
+		ok);
+	const auto firstPaintCounters = renderer->debugCounters();
+	Check(
+		firstPaintCounters.misses >= expectedArticleFormulaHits,
+		FromLatin1("article first paint lazy raster misses"),
+		ok);
+	Check(
+		firstPaintCounters.rendered >= expectedArticleFormulaHits,
+		FromLatin1("article first paint lazy raster rendered"),
+		ok);
 	Check(
 		renderer->cacheUsageBytes() > 0,
-		FromLatin1("prepare cache smoke first pass cache bytes"),
+		FromLatin1("article first paint populated renderer cache"),
 		ok);
+	const auto secondImage = PaintArticleForTest(
+		firstArticle.get(),
+		articleWidth,
+		firstArticleHeight);
+	Check(
+		HasPaintedPixels(secondImage),
+		FromLatin1("article second paint produced pixels"),
+		ok);
+	const auto secondPaintCounters = renderer->debugCounters();
+	Check(
+		secondPaintCounters.hits == firstPaintCounters.hits
+			&& secondPaintCounters.misses == firstPaintCounters.misses
+			&& secondPaintCounters.rendered == firstPaintCounters.rendered,
+		FromLatin1("article same-instance raster cache reuse"),
+		ok);
+	auto articleSmokeLine = FromLatin1("article-lazy-smoke");
+	articleSmokeLine.append(FromLatin1(" first_hits="));
+	articleSmokeLine.append(QString::number(firstPaintCounters.hits));
+	articleSmokeLine.append(FromLatin1(" first_misses="));
+	articleSmokeLine.append(QString::number(firstPaintCounters.misses));
+	articleSmokeLine.append(FromLatin1(" first_rendered="));
+	articleSmokeLine.append(QString::number(firstPaintCounters.rendered));
+	articleSmokeLine.append(FromLatin1(" second_hits="));
+	articleSmokeLine.append(QString::number(secondPaintCounters.hits));
+	articleSmokeLine.append(FromLatin1(" second_misses="));
+	articleSmokeLine.append(QString::number(secondPaintCounters.misses));
+	PrintLine(articleSmokeLine);
+
 	renderer->resetDebugCounters();
-	const auto secondMarkdown = PrepareParsedDocumentForTest(
+	auto secondMarkdown = PrepareParsedDocumentForTest(
 		markdownFixture.parsed,
 		markdownFixture.path,
 		renderer);
-	const auto secondLatex = PrepareParsedDocumentForTest(
-		latexFixture.parsed,
-		latexFixture.path,
-		renderer);
 	Check(
-		!secondMarkdown.cancelled && !secondLatex.cancelled,
-		FromLatin1("prepare cache smoke second pass cancelled"),
+		!secondMarkdown.failure.failed(),
+		FromLatin1("article renderer cache smoke second prepare failed"),
+		ok);
+	auto secondArticleHeight = 0;
+	auto secondArticle = BuildArticleForTest(
+		std::move(secondMarkdown),
+		renderer,
+		articleWidth,
+		&secondArticleHeight);
+	const auto cachedImage = PaintArticleForTest(
+		secondArticle.get(),
+		articleWidth,
+		secondArticleHeight);
+	Check(
+		HasPaintedPixels(cachedImage),
+		FromLatin1("article renderer cache paint produced pixels"),
+		ok);
+	const auto rendererReuseCounters = renderer->debugCounters();
+	Check(
+		rendererReuseCounters.hits >= expectedArticleFormulaHits,
+		FromLatin1("article renderer cache reuse hits"),
 		ok);
 	Check(
-		!secondMarkdown.failure.failed() && !secondLatex.failure.failed(),
-		FromLatin1("prepare cache smoke second pass failed"),
-		ok);
-	const auto secondCounters = renderer->debugCounters();
-	const auto expectedHits = CountPreparedFormulaSlots(firstMarkdown)
-		+ CountPreparedFormulaSlots(firstLatex);
-	Check(
-		secondCounters.hits >= expectedHits,
-		FromLatin1("renderer cache smoke second pass cache hits"),
+		rendererReuseCounters.misses == 0,
+		FromLatin1("article renderer cache reuse misses stay zero"),
 		ok);
 	Check(
-		secondCounters.misses == 0,
-		FromLatin1("renderer cache smoke second pass cache misses"),
+		rendererReuseCounters.rendered == 0,
+		FromLatin1("article renderer cache reuse rendered stays zero"),
 		ok);
 	auto rendererSmokeLine = FromLatin1("renderer-cache-smoke");
-	rendererSmokeLine.append(FromLatin1(" first_hits="));
-	rendererSmokeLine.append(QString::number(firstCounters.hits));
-	rendererSmokeLine.append(FromLatin1(" first_misses="));
-	rendererSmokeLine.append(QString::number(firstCounters.misses));
-	rendererSmokeLine.append(FromLatin1(" second_hits="));
-	rendererSmokeLine.append(QString::number(secondCounters.hits));
-	rendererSmokeLine.append(FromLatin1(" second_misses="));
-	rendererSmokeLine.append(QString::number(secondCounters.misses));
-	rendererSmokeLine.append(FromLatin1(" cache_bytes="));
-	rendererSmokeLine.append(QString::number(secondCounters.cacheBytes));
+	rendererSmokeLine.append(FromLatin1(" hits="));
+	rendererSmokeLine.append(QString::number(rendererReuseCounters.hits));
+	rendererSmokeLine.append(FromLatin1(" misses="));
+	rendererSmokeLine.append(QString::number(rendererReuseCounters.misses));
+	rendererSmokeLine.append(FromLatin1(" rendered="));
+	rendererSmokeLine.append(QString::number(rendererReuseCounters.rendered));
 	PrintLine(rendererSmokeLine);
 
 	const auto sharedMarkdown = std::make_shared<const PreparedDocument>(
 		markdownFixture.parsed);
-	const auto sharedLatex = std::make_shared<const PreparedDocument>(
-		latexFixture.parsed);
-	auto documentRenderer = std::make_shared<MathRenderer>();
-	const auto documentFirstMarkdown = PrepareParsedDocumentForTest(
+	auto measurementFirst = PrepareParsedDocumentForTest(
 		sharedMarkdown,
 		markdownFixture.path,
-		documentRenderer);
-	const auto documentFirstLatex = PrepareParsedDocumentForTest(
-		sharedLatex,
-		latexFixture.path,
-		documentRenderer);
+		std::make_shared<MathRenderer>());
 	Check(
-		!documentFirstMarkdown.cancelled && !documentFirstLatex.cancelled,
-		FromLatin1("document cache smoke first pass cancelled"),
+		!measurementFirst.failure.failed(),
+		FromLatin1("document measurement cache smoke first pass failed"),
 		ok);
-	Check(
-		!documentFirstMarkdown.failure.failed()
-			&& !documentFirstLatex.failure.failed(),
-		FromLatin1("document cache smoke first pass failed"),
-		ok);
-	const auto documentFirstCounters = documentRenderer->debugCounters();
-	Check(
-		documentRenderer->cacheUsageBytes() > 0,
-		FromLatin1("document cache smoke first pass cache bytes"),
-		ok);
-	auto freshRenderer = std::make_shared<MathRenderer>();
-	const auto documentSecondMarkdown = PrepareParsedDocumentForTest(
+	auto measurementSecond = PrepareParsedDocumentForTest(
 		sharedMarkdown,
 		markdownFixture.path,
-		freshRenderer);
-	const auto documentSecondLatex = PrepareParsedDocumentForTest(
-		sharedLatex,
-		latexFixture.path,
-		freshRenderer);
+		std::make_shared<MathRenderer>());
 	Check(
-		!documentSecondMarkdown.cancelled && !documentSecondLatex.cancelled,
-		FromLatin1("document cache smoke second pass cancelled"),
+		!measurementSecond.failure.failed(),
+		FromLatin1("document measurement cache smoke second pass failed"),
 		ok);
+	const auto firstMeasurements = MeasuredFormulaPointers(measurementFirst);
+	const auto secondMeasurements = MeasuredFormulaPointers(measurementSecond);
 	Check(
-		!documentSecondMarkdown.failure.failed()
-			&& !documentSecondLatex.failure.failed(),
-		FromLatin1("document cache smoke second pass failed"),
+		!firstMeasurements.empty()
+			&& (firstMeasurements.size() == secondMeasurements.size()),
+		FromLatin1("document measurement cache smoke pointer shape"),
 		ok);
-	const auto documentSecondCounters = freshRenderer->debugCounters();
-	Check(
-		documentSecondCounters.hits == 0,
-		FromLatin1("document cache smoke second pass renderer hits stay zero"),
-		ok);
-	Check(
-		documentSecondCounters.misses == 0,
-		FromLatin1("document cache smoke second pass renderer misses stay zero"),
-		ok);
-	Check(
-		documentSecondCounters.rendered == 0,
-		FromLatin1("document cache smoke second pass renderer work stays zero"),
-		ok);
-	Check(
-		freshRenderer->cacheUsageBytes() == 0,
-		FromLatin1("document cache smoke second pass fresh renderer cache bytes"),
-		ok);
+	for (auto i = 0, count = int(firstMeasurements.size()); i != count; ++i) {
+		Check(
+			firstMeasurements[i] == secondMeasurements[i],
+			FromLatin1("document measurement cache smoke pointer reuse"),
+			ok);
+	}
 	auto documentSmokeLine = FromLatin1("document-cache-smoke");
-	documentSmokeLine.append(FromLatin1(" first_hits="));
-	documentSmokeLine.append(QString::number(documentFirstCounters.hits));
-	documentSmokeLine.append(FromLatin1(" first_misses="));
-	documentSmokeLine.append(QString::number(documentFirstCounters.misses));
-	documentSmokeLine.append(FromLatin1(" second_hits="));
-	documentSmokeLine.append(QString::number(documentSecondCounters.hits));
-	documentSmokeLine.append(FromLatin1(" second_misses="));
-	documentSmokeLine.append(QString::number(documentSecondCounters.misses));
-	documentSmokeLine.append(FromLatin1(" second_rendered="));
-	documentSmokeLine.append(QString::number(documentSecondCounters.rendered));
+	documentSmokeLine.append(FromLatin1(" slots="));
+	documentSmokeLine.append(QString::number(firstMeasurements.size()));
+	documentSmokeLine.append(FromLatin1(" reused="));
+	documentSmokeLine.append(YesNo(firstMeasurements == secondMeasurements));
 	PrintLine(documentSmokeLine);
 
 	const auto failureLabel = FromLatin1("generated-formula-cap.md");
@@ -1827,15 +1933,12 @@ void CheckPrepareRenderSmoke(
 	}
 	auto failureDimensions = CaptureMarkdownPrepareDimensions();
 	failureDimensions.displayMathMaxRenderWidth = 1;
-	const auto failurePrepared = PrepareParsedDocumentForTest(
+	auto failureRenderer = std::make_shared<MathRenderer>();
+	auto failurePrepared = PrepareParsedDocumentForTest(
 		failureParsed.document,
 		failureLabel,
-		std::make_shared<MathRenderer>(),
+		failureRenderer,
 		std::move(failureDimensions));
-	Check(
-		!failurePrepared.cancelled,
-		failureLabel + FromLatin1(" prepare cancelled"),
-		ok);
 	Check(
 		!failurePrepared.failure.failed(),
 		failureLabel + FromLatin1(" terminal prepare failure"),
@@ -1849,14 +1952,36 @@ void CheckPrepareRenderSmoke(
 		if (!slot.present) {
 			continue;
 		}
-		if (!slot.rendered.success
-			&& (slot.rendered.tooLarge || slot.rendered.overflow)) {
+		if (!slot.measured.success
+			&& (slot.measured.tooLarge || slot.measured.overflow)
+			&& !slot.measured.fallbackText.isEmpty()) {
 			failedFormulaFound = true;
 		}
 	}
 	Check(
 		failedFormulaFound,
 		failureLabel + FromLatin1(" formula cap fallback result"),
+		ok);
+	auto fallbackArticleHeight = 0;
+	auto fallbackArticle = BuildArticleForTest(
+		std::move(failurePrepared),
+		failureRenderer,
+		articleWidth,
+		&fallbackArticleHeight);
+	const auto fallbackImage = PaintArticleForTest(
+		fallbackArticle.get(),
+		articleWidth,
+		fallbackArticleHeight);
+	Check(
+		HasPaintedPixels(fallbackImage),
+		failureLabel + FromLatin1(" fallback paint produced pixels"),
+		ok);
+	const auto fallbackCounters = failureRenderer->debugCounters();
+	Check(
+		fallbackCounters.hits == 0
+			&& fallbackCounters.misses == 0
+			&& fallbackCounters.rendered == 0,
+		failureLabel + FromLatin1(" fallback paint avoided raster renderer"),
 		ok);
 
 	const auto &prepareLimits = PrepareLimitsForIv();
@@ -1880,10 +2005,6 @@ void CheckPrepareRenderSmoke(
 			blockLimitLabel,
 			std::make_shared<MathRenderer>());
 		Check(
-			!blockLimitPrepared.cancelled,
-			blockLimitLabel + FromLatin1(" prepare cancelled"),
-			ok);
-		Check(
 			blockLimitPrepared.failure.failed(),
 			blockLimitLabel + FromLatin1(
 				" missing real terminal prepare failure"),
@@ -1906,42 +2027,6 @@ void CheckPrepareRenderSmoke(
 				" real terminal prepare clears blocks"),
 			ok);
 	}
-
-	const auto invalidStyleLabel = FromLatin1(
-		"generated-invalid-style-internal.md");
-	auto invalidDimensions = CaptureMarkdownPrepareDimensions();
-	invalidDimensions.devicePixelRatio = 0;
-	const auto invalidStylePrepared = PrepareParsedDocumentForTest(
-		markdownFixture.parsed,
-		markdownFixture.path,
-		std::make_shared<MathRenderer>(),
-		std::move(invalidDimensions));
-	Check(
-		!invalidStylePrepared.cancelled,
-		invalidStyleLabel + FromLatin1(" synthetic prepare cancelled"),
-		ok);
-	Check(
-		invalidStylePrepared.failure.failed(),
-		invalidStyleLabel + FromLatin1(
-			" missing synthetic terminal prepare failure"),
-		ok);
-	Check(
-		invalidStylePrepared.failure.terminal
-			== PrepareTerminalFailure::InvalidStyle,
-		invalidStyleLabel + FromLatin1(
-			" synthetic terminal prepare failure kind"),
-		ok);
-	Check(
-		PrepareFailureReason(invalidStylePrepared.failure)
-			== FromLatin1("invalid-device-pixel-ratio"),
-		invalidStyleLabel + FromLatin1(
-			" synthetic terminal prepare failure reason"),
-		ok);
-	Check(
-		invalidStylePrepared.blocks.blocks.empty(),
-		invalidStyleLabel + FromLatin1(
-			" synthetic terminal prepare clears blocks"),
-		ok);
 }
 
 [[nodiscard]] int RunTests(int argc, char **argv) {
@@ -2357,7 +2442,7 @@ void CheckPrepareRenderSmoke(
 
 	CheckPrepareCoverage(markdownFixture, latexFixture, &ok);
 	CheckPrepareLinkClassification(markdownFixture.path, &ok);
-	CheckPrepareRenderSmoke(markdownFixture, latexFixture, &ok);
+	CheckArticleRenderSmoke(markdownFixture, latexFixture, &ok);
 	CheckInlineHtmlCoverage(args.dump, &ok);
 	CheckValidationEdges(&ok);
 

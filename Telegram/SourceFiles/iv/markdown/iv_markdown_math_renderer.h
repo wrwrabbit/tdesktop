@@ -118,6 +118,8 @@ private:
 
 class MathRenderer {
 public:
+	[[nodiscard]] MeasuredFormula measureFormula(
+		const MicrotexMeasureRequest &request);
 	[[nodiscard]] RenderedFormula renderFormula(
 		const MicrotexRenderRequest &request);
 	void clearCache(bool resetDebugCounters = false);
@@ -132,17 +134,6 @@ public:
 private:
 	[[nodiscard]] FormulaCacheKey makeKey(
 		const MicrotexRenderRequest &request) const;
-	[[nodiscard]] RenderedFormula makeFailure(
-		const FormulaCacheKey &key,
-		const QString &error,
-		bool tooLarge) const;
-	[[nodiscard]] bool rejectRequestByCaps(
-		const FormulaCacheKey &key,
-		QString *error) const;
-	[[nodiscard]] bool rejectResultByCaps(
-		const FormulaCacheKey &key,
-		const MicrotexRenderResult &result,
-		QString *error) const;
 	void syncCacheCounters();
 	void applyCacheMutation(FormulaCacheMutation mutation);
 

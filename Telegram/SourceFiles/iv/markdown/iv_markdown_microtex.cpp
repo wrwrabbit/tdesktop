@@ -26,6 +26,19 @@ std::once_flag MicrotexInitOnce;
 bool MicrotexInitialized = false;
 QString MicrotexInitError;
 
+struct PreparedMicrotexRequest {
+	QString trimmedTex;
+	MathKind kind = MathKind::Display;
+	int textSize = 0;
+	int renderWidthCap = 0;
+	int renderHeightCap = 0;
+};
+
+struct ParsedMicrotexFormula {
+	std::unique_ptr<tex::TeXRender> render;
+	MeasuredFormula measured;
+};
+
 [[nodiscard]] QString ExceptionText(const std::exception &exception) {
 	return QString::fromUtf8(exception.what());
 }
@@ -71,6 +84,109 @@ QString MicrotexInitError;
 	return result;
 }
 
+[[nodiscard]] bool TooLargeFailure(const QString &error) {
+	return (error == u"render-width-cap-exceeded"_q)
+		|| (error == u"logical-size-cap-exceeded"_q)
+		|| (error == u"physical-image-cap-exceeded"_q);
+}
+
+void FinalizeFailure(MeasuredFormula *result) {
+	if (!result || result->success) {
+		return;
+	}
+	const auto tooLarge = TooLargeFailure(result->error);
+	result->overflow = tooLarge;
+	result->tooLarge = tooLarge;
+}
+
+[[nodiscard]] bool PrepareRequest(
+		const MicrotexMeasureRequest &request,
+		PreparedMicrotexRequest *prepared,
+		MeasuredFormula *result) {
+	if (!prepared || !result) {
+		return false;
+	}
+	if (!EnsureMicrotexInitialized(&result->error)) {
+		return false;
+	}
+	if (request.textSize <= 0) {
+		result->error = u"invalid-text-size"_q;
+		return false;
+	}
+	if (request.renderWidthCap <= 0) {
+		result->error = u"invalid-render-width"_q;
+		return false;
+	}
+	if (request.renderHeightCap <= 0) {
+		result->error = u"invalid-render-height"_q;
+		return false;
+	}
+	const auto trimmedTex = request.trimmedTex.trimmed();
+	if (trimmedTex.isEmpty()) {
+		result->error = u"empty-tex"_q;
+		return false;
+	}
+	if (int64(request.textSize) > std::numeric_limits<int>::max()) {
+		result->error = u"text-size-overflow"_q;
+		return false;
+	}
+	if (int64(request.renderWidthCap) > std::numeric_limits<int>::max()) {
+		result->error = u"render-width-overflow"_q;
+		return false;
+	}
+	*prepared = {
+		.trimmedTex = trimmedTex,
+		.kind = request.kind,
+		.textSize = request.textSize,
+		.renderWidthCap = request.renderWidthCap,
+		.renderHeightCap = request.renderHeightCap,
+	};
+	return true;
+}
+
+[[nodiscard]] ParsedMicrotexFormula ParseFormula(
+		const PreparedMicrotexRequest &request) {
+	auto result = ParsedMicrotexFormula();
+	try {
+		auto render = std::unique_ptr<tex::TeXRender>(tex::LaTeX::parse(
+			ToWide(PreparedTeX(request.kind, request.trimmedTex)),
+			request.renderWidthCap,
+			float(request.textSize),
+			float(request.textSize) * 0.25f,
+			kFormulaForegroundRgba));
+		if (!render) {
+			result.measured.error = u"parse-returned-null"_q;
+			return result;
+		}
+		const auto logicalSize = QSize(
+			render->getWidth(),
+			render->getHeight());
+		const auto logicalDepth = render->getDepth();
+		result.measured.logicalSize = logicalSize;
+		result.measured.logicalDepth = logicalDepth;
+		if (logicalSize.width() <= 0 || logicalSize.height() <= 0) {
+			result.measured.error = u"invalid-render-size"_q;
+			return result;
+		}
+		if (logicalSize.width() > request.renderWidthCap
+			|| logicalSize.height() > request.renderHeightCap) {
+			result.measured.error = u"logical-size-cap-exceeded"_q;
+			result.measured.overflow = true;
+			result.measured.tooLarge = true;
+			return result;
+		}
+		result.measured.success = true;
+		result.render = std::move(render);
+		return result;
+	} catch (const std::exception &exception) {
+		result.measured.error = ExceptionText(exception);
+		return result;
+	} catch (...) {
+		result.measured.error = u"unknown-exception"_q;
+		return result;
+	}
+}
+
 } // namespace
 
 bool EnsureMicrotexInitialized(QString *error) {
@@ -102,101 +218,71 @@ bool EnsureMicrotexInitialized(QString *error) {
 	return MicrotexInitialized;
 }
 
+MeasuredFormula MeasureWithMicrotex(const MicrotexMeasureRequest &request) {
+	auto prepared = PreparedMicrotexRequest();
+	auto result = MeasuredFormula();
+	if (!PrepareRequest(request, &prepared, &result)) {
+		FinalizeFailure(&result);
+		return result;
+	}
+	return ParseFormula(prepared).measured;
+}
+
 MicrotexRenderResult RenderWithMicrotex(const MicrotexRenderRequest &request) {
 	auto result = MicrotexRenderResult();
-	if (!EnsureMicrotexInitialized(&result.error)) {
+	auto prepared = PreparedMicrotexRequest();
+	if (!PrepareRequest(
+			MicrotexMeasureRequest{
+				.trimmedTex = request.trimmedTex,
+				.kind = request.kind,
+				.textSize = request.textSize,
+				.renderWidthCap = request.renderWidthCap,
+				.renderHeightCap = request.renderHeightCap,
+			},
+			&prepared,
+			&result.measured)) {
+		FinalizeFailure(&result.measured);
 		return result;
 	}
 	if (request.devicePixelRatio <= 0) {
-		result.error = u"invalid-device-pixel-ratio"_q;
+		result.measured.error = u"invalid-device-pixel-ratio"_q;
 		return result;
 	}
-	if (request.textSize <= 0) {
-		result.error = u"invalid-text-size"_q;
+	auto parsed = ParseFormula(prepared);
+	result.measured = std::move(parsed.measured);
+	if (!result.measured.success) {
 		return result;
 	}
-	if (request.renderWidthCap <= 0) {
-		result.error = u"invalid-render-width"_q;
+	auto physicalSize = QSize();
+	if (!ComputePhysicalSize(
+			result.measured.logicalSize,
+			request.devicePixelRatio,
+			&physicalSize)) {
+		result.measured.success = false;
+		result.measured.error = u"physical-image-cap-exceeded"_q;
+		result.measured.overflow = true;
+		result.measured.tooLarge = true;
 		return result;
 	}
-	if (request.renderHeightCap <= 0) {
-		result.error = u"invalid-render-height"_q;
+	auto image = QImage(
+		physicalSize,
+		QImage::Format_ARGB32_Premultiplied);
+	if (image.isNull()) {
+		result.measured.success = false;
+		result.measured.error = u"image-allocation-failed"_q;
 		return result;
 	}
-	const auto trimmedTex = request.trimmedTex.trimmed();
-	if (trimmedTex.isEmpty()) {
-		result.error = u"empty-tex"_q;
-		return result;
+	image.setDevicePixelRatio(request.devicePixelRatio);
+	image.fill(Qt::transparent);
+	{
+		QPainter painter(&image);
+		painter.setRenderHint(QPainter::Antialiasing, true);
+		painter.setRenderHint(QPainter::TextAntialiasing, true);
+		tex::Graphics2D_qt graphics(&painter);
+		parsed.render->draw(graphics, 0, 0);
 	}
-	try {
-		const auto ratio = request.devicePixelRatio;
-		const auto textSize = int64(request.textSize);
-		const auto maxWidth = int64(request.renderWidthCap);
-		if (textSize > std::numeric_limits<int>::max()) {
-			result.error = u"text-size-overflow"_q;
-			return result;
-		}
-		if (maxWidth > std::numeric_limits<int>::max()) {
-			result.error = u"render-width-overflow"_q;
-			return result;
-		}
-		const auto tex = PreparedTeX(request.kind, trimmedTex);
-		auto render = std::unique_ptr<tex::TeXRender>(tex::LaTeX::parse(
-			ToWide(tex),
-			int(maxWidth),
-			float(textSize),
-			float(textSize) * 0.25f,
-			kFormulaForegroundRgba));
-		if (!render) {
-			result.error = u"parse-returned-null"_q;
-			return result;
-		}
-		const auto logicalSize = QSize(
-			render->getWidth(),
-			render->getHeight());
-		const auto logicalDepth = render->getDepth();
-		if (logicalSize.width() <= 0 || logicalSize.height() <= 0) {
-			result.error = u"invalid-render-size"_q;
-			return result;
-		}
-		if (logicalSize.width() > request.renderWidthCap
-			|| logicalSize.height() > request.renderHeightCap) {
-			result.error = u"logical-size-cap-exceeded"_q;
-			return result;
-		}
-		auto physicalSize = QSize();
-		if (!ComputePhysicalSize(logicalSize, ratio, &physicalSize)) {
-			result.error = u"physical-image-cap-exceeded"_q;
-			return result;
-		}
-		auto image = QImage(
-			physicalSize,
-			QImage::Format_ARGB32_Premultiplied);
-		if (image.isNull()) {
-			result.error = u"image-allocation-failed"_q;
-			return result;
-		}
-		image.setDevicePixelRatio(ratio);
-		image.fill(Qt::transparent);
-		{
-			QPainter painter(&image);
-			painter.setRenderHint(QPainter::Antialiasing, true);
-			painter.setRenderHint(QPainter::TextAntialiasing, true);
-			tex::Graphics2D_qt graphics(&painter);
-			render->draw(graphics, 0, 0);
-		}
-		result.image = std::move(image);
-		result.logicalSize = logicalSize;
-		result.logicalDepth = logicalDepth;
-		result.ok = true;
-		return result;
-	} catch (const std::exception &exception) {
-		result.error = ExceptionText(exception);
-		return result;
-	} catch (...) {
-		result.error = u"unknown-exception"_q;
-		return result;
-	}
+	result.image = std::move(image);
+	return result;
 }
 
 bool MicrotexBackendLinked() {

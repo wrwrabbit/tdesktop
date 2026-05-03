@@ -62,8 +62,11 @@ Duisauteiruredolorinreprehenderitinvoluptate.");
 	data.append(QChar::ObjectReplacementCharacter);
 	data.append(u" and fallback: "_q);
 	data.append(QChar::ObjectReplacementCharacter);
+	data.append(u" and provider image: "_q);
+	data.append(QChar::ObjectReplacementCharacter);
+	data.append(u" and provider fallback: "_q);
+	data.append(QChar::ObjectReplacementCharacter);
 	data.append(u" inside wrapped text."_q);
-	//data.append("hi\n\nguys");
 
 	auto formulaImage = QImage(
 		QSize(scale(56), scale(24)),
@@ -85,15 +88,19 @@ Duisauteiruredolorinreprehenderitinvoluptate.");
 			u"a / b"_q);
 	}
 
-	const auto firstInlineObject = data.text.indexOf(
-		QChar::ObjectReplacementCharacter);
-	const auto secondInlineObject = data.text.indexOf(
-		QChar::ObjectReplacementCharacter,
-		firstInlineObject + 1);
 	const auto fallbackSource = u"$\\int_0^1 x^2 \\, dx$"_q;
+	const auto providerImageSource = u"$\\sqrt{x + 1}$"_q;
+	const auto providerFallbackSource = u"$\\sum_{n=1}^{4} n$"_q;
+	auto inlineObjectPositions = std::vector<int>();
+	for (auto i = data.text.indexOf(QChar::ObjectReplacementCharacter);
+		i >= 0;
+		i = data.text.indexOf(QChar::ObjectReplacementCharacter, i + 1)) {
+		inlineObjectPositions.push_back(i);
+	}
+	Expects(inlineObjectPositions.size() == 4);
 	auto inlineObjects = std::vector<Ui::Text::InlineObjectPlacement>();
 	inlineObjects.push_back({
-		.position = firstInlineObject,
+		.position = inlineObjectPositions[0],
 		.object = {
 			.width = formulaImage.width(),
 			.align = Ui::Text::InlineObjectVerticalAlign::CenterInText,
@@ -103,7 +110,7 @@ Duisauteiruredolorinreprehenderitinvoluptate.");
 		},
 	});
 	inlineObjects.push_back({
-		.position = secondInlineObject,
+		.position = inlineObjectPositions[1],
 		.object = {
 			.width = st::defaultTextStyle.font->width(fallbackSource),
 			.align = Ui::Text::InlineObjectVerticalAlign::CenterInText,
@@ -111,11 +118,39 @@ Duisauteiruredolorinreprehenderitinvoluptate.");
 			.fallbackText = fallbackSource,
 		},
 	});
+	inlineObjects.push_back({
+		.position = inlineObjectPositions[2],
+		.object = {
+			.width = formulaImage.width(),
+			.align = Ui::Text::InlineObjectVerticalAlign::CenterInText,
+			.copySource = providerImageSource,
+			.fallbackText = providerImageSource,
+			.imageProvider = [formulaImage](int) {
+				return formulaImage;
+			},
+		},
+	});
+	inlineObjects.push_back({
+		.position = inlineObjectPositions[3],
+		.object = {
+			.width = st::defaultTextStyle.font->width(providerFallbackSource),
+			.align = Ui::Text::InlineObjectVerticalAlign::CenterInText,
+			.fallbackText = providerFallbackSource,
+			.imageProvider = [](int) {
+				return QImage();
+			},
+		},
+	});
 	auto context = Ui::Text::MarkedContext();
 	context.inlineObjects = Ui::Text::InlineObjectPlacements(
 		inlineObjects.data(),
 		inlineObjects.size());
 	text->setMarkedText(st::defaultTextStyle, data, kMarkupTextOptions, context);
+	const auto copyText = text->toString();
+	Expects(copyText.contains(u"$\\frac{a}{b}$"_q));
+	Expects(copyText.contains(fallbackSource));
+	Expects(copyText.contains(providerImageSource));
+	Expects(copyText.contains(providerFallbackSource));
 
 	body->paintRequest() | rpl::on_next([=](QRect clip) {
 		auto p = QPainter(body);

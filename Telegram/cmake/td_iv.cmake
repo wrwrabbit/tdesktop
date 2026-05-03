@@ -25,6 +25,8 @@ nice_target_sources(td_iv ${src_loc}
 PRIVATE
     iv/markdown/iv_markdown_common.cpp
     iv/markdown/iv_markdown_common.h
+    iv/markdown/iv_markdown_article.cpp
+    iv/markdown/iv_markdown_article.h
     iv/markdown/iv_markdown_controller.cpp
     iv/markdown/iv_markdown_controller.h
     iv/markdown/iv_markdown_document.cpp

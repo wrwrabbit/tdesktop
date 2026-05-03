@@ -59,6 +59,8 @@ PRIVATE
     tests/test_markdown_iv.cpp
     iv/markdown/iv_markdown_common.cpp
     iv/markdown/iv_markdown_common.h
+    iv/markdown/iv_markdown_article.cpp
+    iv/markdown/iv_markdown_article.h
     iv/markdown/iv_markdown_document.cpp
     iv/markdown/iv_markdown_document.h
     iv/markdown/iv_markdown_math.cpp

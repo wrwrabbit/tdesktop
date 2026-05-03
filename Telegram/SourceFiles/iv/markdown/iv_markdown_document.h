@@ -2,6 +2,7 @@
 
 #include "iv/markdown/iv_markdown_common.h"
 
+#include <QtCore/QSize>
 #include <QtCore/QStringList>
 
 #include <memory>
@@ -135,35 +136,41 @@ struct ParseStats {
 	bool footnotesSeen = false;
 };
 
-struct PreparedFormulaRenderData;
+struct MeasuredFormula {
+	QSize logicalSize;
+	int logicalDepth = 0;
+	QString fallbackText;
+	QString error;
+	bool success = false;
+	bool overflow = false;
+	bool tooLarge = false;
+};
 
-struct PreparedFormulaRenderSignature {
+struct PreparedFormulaMeasurementSignature {
 	QString trimmedTex;
 	MathKind kind = MathKind::Display;
 	int textSize = 0;
 	int renderWidthCap = 0;
 	int renderHeightCap = 0;
-	int devicePixelRatio = 1;
 
 	friend inline bool operator==(
-			const PreparedFormulaRenderSignature &a,
-			const PreparedFormulaRenderSignature &b) {
+			const PreparedFormulaMeasurementSignature &a,
+			const PreparedFormulaMeasurementSignature &b) {
 		return a.trimmedTex == b.trimmedTex
 			&& a.kind == b.kind
 			&& a.textSize == b.textSize
 			&& a.renderWidthCap == b.renderWidthCap
-			&& a.renderHeightCap == b.renderHeightCap
-			&& a.devicePixelRatio == b.devicePixelRatio;
+			&& a.renderHeightCap == b.renderHeightCap;
 	}
 };
 
-struct PreparedFormulaRenderCacheEntry {
-	PreparedFormulaRenderSignature signature;
-	std::shared_ptr<const PreparedFormulaRenderData> data;
+struct PreparedFormulaMeasurementCacheEntry {
+	PreparedFormulaMeasurementSignature signature;
+	std::shared_ptr<const MeasuredFormula> data;
 };
 
-struct PreparedFormulaRenderCacheState {
-	std::vector<PreparedFormulaRenderCacheEntry> slots;
+struct PreparedFormulaMeasurementCacheState {
+	std::vector<PreparedFormulaMeasurementCacheEntry> slots;
 };
 
 struct PreparedDocument {
@@ -175,8 +182,8 @@ struct PreparedDocument {
 	ParseStats stats;
 	QStringList warnings;
 	bool empty = true;
-	std::shared_ptr<PreparedFormulaRenderCacheState> formulaRenderCache
-		= std::make_shared<PreparedFormulaRenderCacheState>();
+	std::shared_ptr<PreparedFormulaMeasurementCacheState> formulaMeasurementCache
+		= std::make_shared<PreparedFormulaMeasurementCacheState>();
 
 	PreparedDocument() = default;
 
@@ -189,7 +196,8 @@ struct PreparedDocument {
 	, stats(other.stats)
 	, warnings(other.warnings)
 	, empty(other.empty)
-	, formulaRenderCache(std::make_shared<PreparedFormulaRenderCacheState>()) {
+	, formulaMeasurementCache(
+		std::make_shared<PreparedFormulaMeasurementCacheState>()) {
 	}
 
 	PreparedDocument &operator=(const PreparedDocument &other) {
@@ -202,8 +210,8 @@ struct PreparedDocument {
 			stats = other.stats;
 			warnings = other.warnings;
 			empty = other.empty;
-			formulaRenderCache = std::make_shared<
-				PreparedFormulaRenderCacheState>();
+			formulaMeasurementCache = std::make_shared<
+				PreparedFormulaMeasurementCacheState>();
 		}
 		return *this;
 	}

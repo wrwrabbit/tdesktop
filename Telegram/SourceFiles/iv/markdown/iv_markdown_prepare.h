@@ -3,11 +3,9 @@
 #include "iv/markdown/iv_markdown_document.h"
 #include "iv/markdown/iv_markdown_math_renderer.h"
 
-#include "base/basic_types.h"
 #include "ui/text/text_entity.h"
 
 #include <array>
-#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -95,8 +93,6 @@ struct PreparedRenderDocument {
 	std::vector<PreparedBlock> blocks;
 };
 
-using PrepareGeneration = uint64;
-
 struct MarkdownPrepareDimensions {
 	int bodyTextSize = 0;
 	std::array<int, 6> headingTextSizes = { 0, 0, 0, 0, 0, 0 };
@@ -104,7 +100,6 @@ struct MarkdownPrepareDimensions {
 	int displayMathTextSize = 0;
 	int displayMathMaxRenderWidth = 0;
 	int displayMathMaxRenderHeight = 0;
-	int devicePixelRatio = 1;
 };
 
 struct MarkdownPrepareTableRenderLimits {
@@ -137,14 +132,11 @@ struct PrepareFailureStatus {
 
 struct PrepareDebugStats {
 	int prepareMs = 0;
+	int formulaMeasureMs = 0;
 	int formulaRenderMs = 0;
 	int sourceWarningCount = 0;
 	int prepareWarningCount = 0;
 	int formulaWarningCount = 0;
-};
-
-struct PreparedFormulaRenderData {
-	RenderedFormula rendered;
 };
 
 struct PreparedFormulaSlot {
@@ -153,8 +145,8 @@ struct PreparedFormulaSlot {
 	int textSize = 0;
 	int renderWidthCap = 0;
 	int renderHeightCap = 0;
-	std::shared_ptr<const PreparedFormulaRenderData> renderData;
-	RenderedFormula rendered;
+	std::shared_ptr<const MeasuredFormula> measuredData;
+	MeasuredFormula measured;
 	bool present = false;
 };
 
@@ -162,24 +154,19 @@ struct PrepareRequest {
 	std::shared_ptr<const PreparedDocument> document;
 	std::shared_ptr<MathRenderer> renderer;
 	MarkdownPrepareDimensions dimensions;
-	PrepareGeneration generation = 0;
 	QString sourcePath;
-	std::shared_ptr<std::atomic_bool> cancelled;
 };
 
-struct PreparedResult {
+struct MarkdownArticleContent {
 	PreparedRenderDocument blocks;
 	std::vector<PreparedFormulaSlot> formulas;
 	PrepareFailureStatus failure;
 	PrepareDebugStats debug;
-	PrepareGeneration generation = 0;
-	bool cancelled = false;
 };
 
 [[nodiscard]] const MarkdownPrepareTableRenderLimits &PrepareTableRenderLimitsForIv();
 [[nodiscard]] const MarkdownPrepareLimits &PrepareLimitsForIv();
 [[nodiscard]] MarkdownPrepareDimensions CaptureMarkdownPrepareDimensions();
-[[nodiscard]] PreparedResult PrepareSynchronously(PrepareRequest request);
-void PrepareAsync(PrepareRequest request, Fn<void(PreparedResult)> done);
+[[nodiscard]] MarkdownArticleContent PrepareSynchronously(PrepareRequest request);
 
 } // namespace Iv::Markdown

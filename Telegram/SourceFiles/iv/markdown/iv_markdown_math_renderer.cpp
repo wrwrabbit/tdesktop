@@ -1,14 +1,10 @@
 #include "iv/markdown/iv_markdown_math_renderer.h"
 
 #include <algorithm>
-#include <limits>
 #include <utility>
 
 namespace Iv::Markdown {
 namespace {
-
-constexpr auto kBytesPerPixel = int64(4);
-constexpr auto kMaxFormulaImageBytes = int64(128) * 1024 * 1024;
 
 [[nodiscard]] FormulaCacheKey NormalizeKey(
 		const MicrotexRenderRequest &request) {
@@ -22,30 +18,21 @@ constexpr auto kMaxFormulaImageBytes = int64(128) * 1024 * 1024;
 	};
 }
 
-[[nodiscard]] QString FallbackText(const FormulaCacheKey &key) {
-	return key.trimmedTex.isEmpty()
+[[nodiscard]] MicrotexMeasureRequest NormalizeRequest(
+		const MicrotexMeasureRequest &request) {
+	return {
+		.trimmedTex = request.trimmedTex.trimmed(),
+		.kind = request.kind,
+		.textSize = request.textSize,
+		.renderWidthCap = request.renderWidthCap,
+		.renderHeightCap = request.renderHeightCap,
+	};
+}
+
+[[nodiscard]] QString FallbackText(const QString &trimmedTex) {
+	return trimmedTex.isEmpty()
 		? u"[math]"_q
-		: key.trimmedTex;
-}
-
-[[nodiscard]] bool PhysicalImageRejected(int64 width, int64 height) {
-	if (width <= 0 || height <= 0) {
-		return true;
-	}
-	return (width > std::numeric_limits<int>::max())
-		|| (height > std::numeric_limits<int>::max())
-		|| (width * height > (kMaxFormulaImageBytes / kBytesPerPixel));
-}
-
-[[nodiscard]] bool PhysicalImageRejected(QSize size) {
-	return PhysicalImageRejected(size.width(), size.height());
-}
-
-[[nodiscard]] bool TooLargeFailure(const QString &error) {
-	return (error == u"render-width-cap-exceeded"_q)
-		|| (error == u"physical-size-cap-exceeded"_q)
-		|| (error == u"logical-size-cap-exceeded"_q)
-		|| (error == u"physical-image-cap-exceeded"_q);
+		: trimmedTex;
 }
 
 [[nodiscard]] int64 EstimateQStringBytes(const QString &value) {
@@ -54,6 +41,31 @@ constexpr auto kMaxFormulaImageBytes = int64(128) * 1024 * 1024;
 
 [[nodiscard]] int64 EstimateQImageBytes(const QImage &image) {
 	return image.isNull() ? 0 : int64(image.sizeInBytes());
+}
+
+[[nodiscard]] MeasuredFormula FinalizeMeasured(
+		QString trimmedTex,
+		MeasuredFormula result) {
+	result.fallbackText = FallbackText(trimmedTex);
+	return result;
+}
+
+[[nodiscard]] RenderedFormula FinalizeRendered(
+		QString trimmedTex,
+		MicrotexRenderResult result) {
+	auto measured = FinalizeMeasured(
+		std::move(trimmedTex),
+		std::move(result.measured));
+	auto rendered = RenderedFormula();
+	rendered.image = std::move(result.image);
+	rendered.logicalSize = measured.logicalSize;
+	rendered.logicalDepth = measured.logicalDepth;
+	rendered.fallbackText = std::move(measured.fallbackText);
+	rendered.error = std::move(measured.error);
+	rendered.success = measured.success && !rendered.image.isNull();
+	rendered.overflow = measured.overflow;
+	rendered.tooLarge = measured.tooLarge;
+	return rendered;
 }
 
 } // namespace
@@ -159,6 +171,14 @@ FormulaCacheMutation FormulaCache::evictToBudget() {
 	return result;
 }
 
+MeasuredFormula MathRenderer::measureFormula(
+		const MicrotexMeasureRequest &request) {
+	const auto normalized = NormalizeRequest(request);
+	return FinalizeMeasured(
+		normalized.trimmedTex,
+		MeasureWithMicrotex(normalized));
+}
+
 RenderedFormula MathRenderer::renderFormula(
 		const MicrotexRenderRequest &request) {
 	const auto key = makeKey(request);
@@ -167,43 +187,23 @@ RenderedFormula MathRenderer::renderFormula(
 		return *cached;
 	}
 	++_debugCounters.misses;
-	QString error;
-	if (rejectRequestByCaps(key, &error)) {
+	auto rendered = FinalizeRendered(
+		key.trimmedTex,
+		RenderWithMicrotex({
+			.trimmedTex = key.trimmedTex,
+			.kind = key.kind,
+			.textSize = key.textSize,
+			.renderWidthCap = key.renderWidthCap,
+			.renderHeightCap = key.renderHeightCap,
+			.devicePixelRatio = key.devicePixelRatio,
+		}));
+	if (rendered.success) {
+		++_debugCounters.rendered;
+	} else {
 		++_debugCounters.failed;
-		auto failure = makeFailure(key, error, TooLargeFailure(error));
-		applyCacheMutation(_cache.put(key, failure));
-		return failure;
 	}
-	auto normalized = request;
-	normalized.trimmedTex = key.trimmedTex;
-	normalized.textSize = key.textSize;
-	normalized.renderWidthCap = key.renderWidthCap;
-	normalized.renderHeightCap = key.renderHeightCap;
-	normalized.devicePixelRatio = key.devicePixelRatio;
-	auto rendered = RenderWithMicrotex(normalized);
-	if (!rendered.ok) {
-		++_debugCounters.failed;
-		auto failure = makeFailure(
-			key,
-			rendered.error,
-			TooLargeFailure(rendered.error));
-		applyCacheMutation(_cache.put(key, failure));
-		return failure;
-	}
-	if (rejectResultByCaps(key, rendered, &error)) {
-		++_debugCounters.failed;
-		auto failure = makeFailure(key, error, TooLargeFailure(error));
-		applyCacheMutation(_cache.put(key, failure));
-		return failure;
-	}
-	auto result = RenderedFormula();
-	result.image = std::move(rendered.image);
-	result.logicalSize = rendered.logicalSize;
-	result.logicalDepth = rendered.logicalDepth;
-	result.success = true;
-	++_debugCounters.rendered;
-	applyCacheMutation(_cache.put(key, result));
-	return result;
+	applyCacheMutation(_cache.put(key, rendered));
+	return rendered;
 }
 
 void MathRenderer::clearCache(bool resetDebugCounters) {
@@ -243,98 +243,6 @@ int64 MathRenderer::cacheUsageBytes() const {
 FormulaCacheKey MathRenderer::makeKey(
 		const MicrotexRenderRequest &request) const {
 	return NormalizeKey(request);
-}
-
-RenderedFormula MathRenderer::makeFailure(
-		const FormulaCacheKey &key,
-		const QString &error,
-		bool tooLarge) const {
-	return {
-		.image = QImage(),
-		.logicalSize = QSize(),
-		.logicalDepth = 0,
-		.fallbackText = FallbackText(key),
-		.error = error,
-		.success = false,
-		.overflow = tooLarge,
-		.tooLarge = tooLarge,
-	};
-}
-
-bool MathRenderer::rejectRequestByCaps(
-		const FormulaCacheKey &key,
-		QString *error) const {
-	if (key.trimmedTex.isEmpty()) {
-		if (error) {
-			*error = u"empty-tex"_q;
-		}
-		return true;
-	}
-	if (key.textSize <= 0) {
-		if (error) {
-			*error = u"invalid-text-size"_q;
-		}
-		return true;
-	}
-	if (key.renderWidthCap <= 0) {
-		if (error) {
-			*error = u"invalid-render-width"_q;
-		}
-		return true;
-	}
-	if (key.renderHeightCap <= 0) {
-		if (error) {
-			*error = u"invalid-render-height"_q;
-		}
-		return true;
-	}
-	if (key.devicePixelRatio <= 0) {
-		if (error) {
-			*error = u"invalid-device-pixel-ratio"_q;
-		}
-		return true;
-	}
-	if (PhysicalImageRejected(
-			int64(key.renderWidthCap) * key.devicePixelRatio,
-			int64(key.renderHeightCap) * key.devicePixelRatio)) {
-		if (error) {
-			*error = u"physical-size-cap-exceeded"_q;
-		}
-		return true;
-	}
-	return false;
-}
-
-bool MathRenderer::rejectResultByCaps(
-		const FormulaCacheKey &key,
-		const MicrotexRenderResult &result,
-		QString *error) const {
-	if (result.logicalSize.width() <= 0 || result.logicalSize.height() <= 0) {
-		if (error) {
-			*error = u"invalid-logical-size"_q;
-		}
-		return true;
-	}
-	if (result.logicalSize.width() > key.renderWidthCap
-		|| result.logicalSize.height() > key.renderHeightCap) {
-		if (error) {
-			*error = u"logical-size-cap-exceeded"_q;
-		}
-		return true;
-	}
-	if (PhysicalImageRejected(result.image.size())) {
-		if (error) {
-			*error = u"physical-image-cap-exceeded"_q;
-		}
-		return true;
-	}
-	if (result.image.devicePixelRatio() != key.devicePixelRatio) {
-		if (error) {
-			*error = u"unexpected-device-pixel-ratio"_q;
-		}
-		return true;
-	}
-	return false;
 }
 
 void MathRenderer::syncCacheCounters() {
