@@ -378,7 +378,9 @@ void MarkdownDocumentWidget::contextMenuEvent(QContextMenuEvent *e) {
 		: (_article ? _article->textForContext(state) : TextForMimeData());
 	const auto link = state.preparedLink;
 
-	_contextMenu = base::make_unique_q<Ui::PopupMenu>(this);
+	_contextMenu = base::make_unique_q<Ui::PopupMenu>(
+		this,
+		st::popupMenuWithIcons);
 	if (uponSelection) {
 		_contextMenu->addAction(
 			Ui::Integration::Instance().phraseContextCopySelected(),

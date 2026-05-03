@@ -88,10 +88,7 @@ MarkdownList {
 	bulletRadius: pixels;
 	bulletLeftShift: pixels;
 	bulletFg: color;
-	taskMarkerSize: pixels;
-	taskMarkerBorder: pixels;
-	taskMarkerFg: color;
-	taskMarkerCheckFg: color;
+	taskCheck: Check;
 }
 MarkdownQuotePaintColors {
 	blockquote: color;
@@ -188,10 +185,7 @@ defaultMarkdownList: MarkdownList {
 	bulletRadius: 3px;
 	bulletLeftShift: 0px;
 	bulletFg: windowFg;
-	taskMarkerSize: 15px;
-	taskMarkerBorder: 2px;
-	taskMarkerFg: windowActiveTextFg;
-	taskMarkerCheckFg: windowBg;
+	taskCheck: defaultCheck;
 }
 defaultMarkdownQuotePaintColors: MarkdownQuotePaintColors {
 	blockquote: windowActiveTextFg;

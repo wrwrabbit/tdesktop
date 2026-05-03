@@ -1,11 +1,10 @@
 #include "iv/markdown/iv_markdown_article.h"
 
-#include <QtGui/QPen>
-
 #include "lang/lang_keys.h"
 #include "ui/click_handler.h"
 #include "ui/style/style_core.h"
 #include "ui/style/style_core_scale.h"
+#include "ui/widgets/checkbox.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1119,8 +1118,8 @@ void SetTextLeaf(
 	auto markerTextWidth = 0;
 	auto markerTextHeight = bodyLineHeight;
 	if (task) {
-		markerTextWidth = list.taskMarkerSize;
-		markerTextHeight = list.taskMarkerSize;
+		markerTextWidth = list.taskCheck.diameter;
+		markerTextHeight = list.taskCheck.diameter;
 	} else if (ordered) {
 		block.marker.setMarkedText(
 			markdown.body,
@@ -1165,8 +1164,8 @@ void SetTextLeaf(
 		block.markerRect = QRect(
 			left,
 			markerTop,
-			list.taskMarkerSize,
-			list.taskMarkerSize);
+			list.taskCheck.diameter,
+			list.taskCheck.diameter);
 	} else if (ordered) {
 		const auto markerLeft = left + block.markerWidth - markerTextWidth;
 		block.markerRect = QRect(
@@ -1850,41 +1849,17 @@ void PaintTextLeaf(
 void PaintTaskMarker(
 		Painter &p,
 		const LaidOutBlock &block,
-		const style::Markdown &markdown) {
+		const style::Markdown &markdown,
+		int outerWidth) {
 	const auto rect = block.markerRect;
 	if (rect.isEmpty()) {
 		return;
 	}
-	const auto border = markdown.list.taskMarkerBorder;
-	if (block.taskState == TaskState::Checked) {
-		p.setPen(Qt::NoPen);
-		p.setBrush(markdown.list.taskMarkerFg->c);
-		p.drawRect(rect);
-
-		auto hq = PainterHighQualityEnabler(p);
-		p.setPen(QPen(
-			markdown.list.taskMarkerCheckFg->c,
-			border,
-			Qt::SolidLine,
-			Qt::RoundCap,
-			Qt::RoundJoin));
-		const auto size = rect.width();
-		const auto first = QPoint(
-			rect.left() + size / 4,
-			rect.top() + size / 2);
-		const auto middle = QPoint(
-			rect.left() + size / 2,
-			rect.top() + (2 * size) / 3);
-		const auto last = QPoint(
-			rect.right() - size / 5,
-			rect.top() + size / 3);
-		p.drawLine(first, middle);
-		p.drawLine(middle, last);
-	} else {
-		p.setBrush(Qt::NoBrush);
-		p.setPen(QPen(markdown.list.taskMarkerFg->c, border));
-		p.drawRect(rect.adjusted(0, 0, -border, -border));
-	}
+	auto view = Ui::CheckView(
+		markdown.list.taskCheck,
+		block.taskState == TaskState::Checked);
+	view.finishAnimating();
+	view.paint(p, rect.left(), rect.top(), outerWidth);
 }
 
 void PaintBulletMarker(
@@ -1908,6 +1883,7 @@ void PaintBlocks(
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
 		int devicePixelRatio,
+		int outerWidth,
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip);
@@ -2127,6 +2103,7 @@ void PaintQuoteBlock(
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
 		int devicePixelRatio,
+		int outerWidth,
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
@@ -2156,6 +2133,7 @@ void PaintQuoteBlock(
 		renderedFormulas,
 		renderer,
 		devicePixelRatio,
+		outerWidth,
 		caches,
 		selectionState,
 		clip.intersected(block.contentRect));
@@ -2168,6 +2146,7 @@ void PaintBlock(
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
 		int devicePixelRatio,
+		int outerWidth,
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
@@ -2217,13 +2196,14 @@ void PaintBlock(
 			renderedFormulas,
 			renderer,
 			devicePixelRatio,
+			outerWidth,
 			caches,
 			selectionState,
 			clip);
 		break;
 	case PreparedBlockKind::ListItem:
 		if (block.taskState != TaskState::None) {
-			PaintTaskMarker(p, block, markdown);
+			PaintTaskMarker(p, block, markdown, outerWidth);
 		} else if (block.listKind == ListKind::Ordered
 			&& !block.markerRect.isEmpty()) {
 			p.setPen(markdown.textColor->c);
@@ -2244,6 +2224,7 @@ void PaintBlock(
 			renderedFormulas,
 			renderer,
 			devicePixelRatio,
+			outerWidth,
 			caches,
 			selectionState,
 			clip);
@@ -2256,6 +2237,7 @@ void PaintBlock(
 			renderedFormulas,
 			renderer,
 			devicePixelRatio,
+			outerWidth,
 			caches,
 			selectionState,
 			clip);
@@ -2300,6 +2282,7 @@ void PaintBlock(
 			renderedFormulas,
 			renderer,
 			devicePixelRatio,
+			outerWidth,
 			caches,
 			selectionState,
 			clip);
@@ -2314,6 +2297,7 @@ void PaintBlocks(
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
 		int devicePixelRatio,
+		int outerWidth,
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
@@ -2330,6 +2314,7 @@ void PaintBlocks(
 			renderedFormulas,
 			renderer,
 			devicePixelRatio,
+			outerWidth,
 			caches,
 			selectionState,
 			clip);
@@ -2557,6 +2542,7 @@ public:
 			&_formulaRenders,
 			_renderer.get(),
 			currentDevicePixelRatio(),
+			std::max(_width, 1),
 			caches,
 			selectionState,
 			clip);
