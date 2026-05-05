@@ -1,5 +1,6 @@
 #pragma once
 
+#include "iv/markdown/iv_markdown_common.h"
 #include "iv/markdown/iv_markdown_prepare.h"
 
 #include "ui/painter.h"
@@ -13,12 +14,14 @@ namespace Iv::Markdown {
 struct MarkdownArticlePaintCaches {
 	Ui::Text::QuotePaintCache *pre = nullptr;
 	Ui::Text::QuotePaintCache *blockquote = nullptr;
+	Fn<void()> repaint;
 };
 
 struct MarkdownArticleHitTestResult {
 	int segmentIndex = -1;
 	Ui::Text::StateResult state;
 	std::optional<PreparedLink> preparedLink;
+	MediaActivation mediaActivation;
 	int forcedOffset = -1;
 	bool direct = false;
 

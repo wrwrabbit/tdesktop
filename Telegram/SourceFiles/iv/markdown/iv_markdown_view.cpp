@@ -143,6 +143,8 @@ public:
 
 	void setLinkActivationCallback(
 		std::function<void(const PreparedLink &, Qt::MouseButton)> callback);
+	void setMediaActivationCallback(
+		std::function<bool(const MediaActivation &, Qt::MouseButton)> callback);
 	void setArticle(std::shared_ptr<MarkdownArticle> article);
 	void setZoom(int value);
 	void refreshPalette();
@@ -213,6 +215,7 @@ private:
 	std::unique_ptr<Ui::Text::QuotePaintCache> _prePaintCache;
 	std::unique_ptr<Ui::Text::QuotePaintCache> _blockquotePaintCache;
 	std::function<void(const PreparedLink &, Qt::MouseButton)> _activateLink;
+	std::function<bool(const MediaActivation &, Qt::MouseButton)> _activateMedia;
 	MarkdownArticleSelection _selection;
 	MarkdownArticleSelection _savedSelection;
 	MarkdownArticleSelectionEndpoints _selectionEndpoints;
@@ -241,6 +244,11 @@ MarkdownDocumentWidget::MarkdownDocumentWidget(
 void MarkdownDocumentWidget::setLinkActivationCallback(
 		std::function<void(const PreparedLink &, Qt::MouseButton)> callback) {
 	_activateLink = std::move(callback);
+}
+
+void MarkdownDocumentWidget::setMediaActivationCallback(
+		std::function<bool(const MediaActivation &, Qt::MouseButton)> callback) {
+	_activateMedia = std::move(callback);
 }
 
 void MarkdownDocumentWidget::setArticle(std::shared_ptr<MarkdownArticle> article) {
@@ -721,7 +729,8 @@ void MarkdownDocumentWidget::updateHover(
 	const auto changed = ClickHandler::setActive(state.state.link, this);
 	auto cursor = style::cur_default;
 	if (_dragAction == NoDrag) {
-		if (state.state.link) {
+		if (state.state.link
+			|| state.mediaActivation.kind != MediaActivationKind::None) {
 			cursor = style::cur_pointer;
 		} else if (state.direct) {
 			cursor = style::cur_text;
@@ -804,6 +813,11 @@ MarkdownArticlePaintCaches MarkdownDocumentWidget::textPaintCaches() {
 	return {
 		.pre = ensurePrePaintCache(),
 		.blockquote = ensureBlockquotePaintCache(),
+		.repaint = [=] {
+			crl::on_main(this, [=] {
+				update();
+			});
+		},
 	};
 }
 
@@ -879,11 +893,21 @@ MarkdownArticleHitTestResult MarkdownDocumentWidget::dragActionFinish(
 	updateHover(state);
 	if (activated
 		&& (button == Qt::LeftButton || button == Qt::MiddleButton)) {
+		if (state.mediaActivation.kind != MediaActivationKind::None
+			&& _activateMedia
+			&& _activateMedia(state.mediaActivation, button)) {
+			return state;
+		}
 		if (state.preparedLink && _activateLink) {
 			_activateLink(*state.preparedLink, button);
 		} else {
 			ActivateClickHandler(window(), activated, button);
 		}
+	} else if ((button == Qt::LeftButton || button == Qt::MiddleButton)
+		&& state.mediaActivation.kind != MediaActivationKind::None
+		&& _activateMedia
+		&& _activateMedia(state.mediaActivation, button)) {
+		return state;
 	}
 	if (QGuiApplication::clipboard()->supportsSelection()
 		&& !_selection.empty()) {
@@ -912,8 +936,15 @@ public:
 		const PreparedDocument &document,
 		Fn<void(Event)> callback,
 		const OpenOptions &options);
+	MarkdownPreviewRoot(
+		QWidget *parent,
+		MarkdownArticleContent content,
+		std::shared_ptr<MathRenderer> renderer,
+		Fn<void(Event)> callback,
+		const OpenOptions &options);
 
 private:
+	void setup();
 	void prepareArticle();
 	void activateLink(const PreparedLink &link, Qt::MouseButton button);
 	void applyPreparedContent(MarkdownArticleContent prepared, int prepareMs);
@@ -929,12 +960,13 @@ private:
 
 	const OpenOptions _options;
 	const std::shared_ptr<const PreparedDocument> _document;
+	std::optional<MarkdownArticleContent> _preparedContent;
 	const Fn<void(Event)> _callback;
 	Ui::ScrollArea *_scroll = nullptr;
 	MarkdownDocumentWidget *_body = nullptr;
 	Ui::FlatLabel *_failure = nullptr;
 	Ui::LinkButton *_failureOpen = nullptr;
-	std::shared_ptr<MathRenderer> _renderer;
+	const std::shared_ptr<MathRenderer> _renderer;
 	QString _pendingFragment;
 	int _devicePixelRatio = 0;
 
@@ -951,6 +983,25 @@ MarkdownPreviewRoot::MarkdownPreviewRoot(
 , _callback(std::move(callback))
 , _renderer(std::make_shared<MathRenderer>())
 , _pendingFragment(options.initialFragment) {
+	setup();
+}
+
+MarkdownPreviewRoot::MarkdownPreviewRoot(
+	QWidget *parent,
+	MarkdownArticleContent content,
+	std::shared_ptr<MathRenderer> renderer,
+	Fn<void(Event)> callback,
+	const OpenOptions &options)
+: Ui::RpWidget(parent)
+, _options(options)
+, _preparedContent(std::move(content))
+, _callback(std::move(callback))
+, _renderer(renderer ? std::move(renderer) : std::make_shared<MathRenderer>())
+, _pendingFragment(options.initialFragment) {
+	setup();
+}
+
+void MarkdownPreviewRoot::setup() {
 	_scroll = Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll);
 	_body = _scroll->setOwnedWidget(object_ptr<MarkdownDocumentWidget>(_scroll));
 	_failure = Ui::CreateChild<Ui::FlatLabel>(
@@ -968,6 +1019,13 @@ MarkdownPreviewRoot::MarkdownPreviewRoot(
 				const PreparedLink &link,
 				Qt::MouseButton button) {
 			activateLink(link, button);
+		});
+		_body->setMediaActivationCallback([=](
+				const MediaActivation &activation,
+				Qt::MouseButton button) {
+			return _options.activateMedia
+				? _options.activateMedia(activation, button)
+				: false;
 		});
 		if (_options.delegate) {
 			_body->setZoom(_options.delegate->ivZoom());
@@ -1023,6 +1081,11 @@ MarkdownPreviewRoot::MarkdownPreviewRoot(
 }
 
 void MarkdownPreviewRoot::prepareArticle() {
+	if (_preparedContent) {
+		applyPreparedContent(std::move(*_preparedContent), 0);
+		_preparedContent.reset();
+		return;
+	}
 	if (_renderer) {
 		_renderer->resetDebugCounters();
 	}
@@ -1056,6 +1119,14 @@ void MarkdownPreviewRoot::activateLink(
 		}
 		break;
 	case PreparedLinkKind::LocalFile: {
+		auto target = link.target;
+		if (!link.fragment.isEmpty()) {
+			target += u"#"_q + link.fragment;
+		}
+		_callback({
+			.type = Event::Type::OpenFile,
+			.url = std::move(target),
+		});
 	} break;
 	case PreparedLinkKind::RejectedRelative:
 		DEBUG_LOG(("Native Markdown IV: "
@@ -1214,6 +1285,20 @@ std::unique_ptr<Ui::RpWidget> CreateMarkdownPreviewWidget(
 	return std::make_unique<MarkdownPreviewRoot>(
 		parent,
 		document,
+		std::move(callback),
+		options);
+}
+
+std::unique_ptr<Ui::RpWidget> CreateMarkdownPreviewWidget(
+		QWidget *parent,
+		MarkdownArticleContent content,
+		std::shared_ptr<MathRenderer> renderer,
+		Fn<void(Event)> callback,
+		const OpenOptions &options) {
+	return std::make_unique<MarkdownPreviewRoot>(
+		parent,
+		std::move(content),
+		std::move(renderer),
 		std::move(callback),
 		options);
 }

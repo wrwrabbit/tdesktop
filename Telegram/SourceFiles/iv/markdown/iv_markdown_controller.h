@@ -1,7 +1,10 @@
 #pragma once
 
 #include "iv/markdown/iv_markdown_document.h"
+#include "iv/markdown/iv_markdown_prepare.h"
 #include "ui/widgets/rp_window.h"
+
+#include <optional>
 
 #include <QtCore/QString>
 
@@ -13,11 +16,20 @@ public:
 		not_null<Delegate*> delegate,
 		PreparedDocument document,
 		QString title,
-		QString sourcePath,
-		QString initialFragment);
+		OpenOptions options = {});
+	Controller(
+		not_null<Delegate*> delegate,
+		MarkdownArticleContent content,
+		QString title,
+		std::shared_ptr<MathRenderer> renderer = nullptr,
+		OpenOptions options = {});
 	~Controller();
 
 	void activate();
+	void update(
+		MarkdownArticleContent content,
+		QString title,
+		OpenOptions options = {});
 
 	[[nodiscard]] bool active() const;
 	void minimize();
@@ -31,13 +43,15 @@ public:
 private:
 	void close();
 	void createWindow();
+	void createPreview();
 
 	const not_null<Delegate*> _delegate;
 
-	PreparedDocument _document;
+	const std::shared_ptr<const PreparedDocument> _document;
+	std::optional<MarkdownArticleContent> _preparedContent;
 	QString _title;
-	QString _sourcePath;
-	QString _initialFragment;
+	const std::shared_ptr<MathRenderer> _renderer;
+	OpenOptions _options;
 	std::unique_ptr<Ui::RpWindow> _window;
 	std::unique_ptr<Ui::RpWidget> _preview;
 

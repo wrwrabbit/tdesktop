@@ -25,6 +25,17 @@ namespace {
 
 constexpr auto kZoomStep = int(10);
 
+[[nodiscard]] OpenOptions PrepareOpenOptions(
+		OpenOptions options,
+		not_null<Delegate*> delegate,
+		const QString &title) {
+	options.delegate = delegate;
+	if (options.sourceName.isEmpty()) {
+		options.sourceName = title;
+	}
+	return options;
+}
+
 struct OpenTarget {
 	QString path;
 	QString fragment;
@@ -138,13 +149,26 @@ Controller::Controller(
 	not_null<Delegate*> delegate,
 	PreparedDocument document,
 	QString title,
-	QString sourcePath,
-	QString initialFragment)
+	OpenOptions options)
 : _delegate(delegate)
-, _document(std::move(document))
+, _document(std::make_shared<PreparedDocument>(std::move(document)))
 , _title(std::move(title))
-, _sourcePath(std::move(sourcePath))
-, _initialFragment(std::move(initialFragment)) {
+, _renderer(nullptr)
+, _options(PrepareOpenOptions(std::move(options), delegate, _title)) {
+	createWindow();
+}
+
+Controller::Controller(
+	not_null<Delegate*> delegate,
+	MarkdownArticleContent content,
+	QString title,
+	std::shared_ptr<MathRenderer> renderer,
+	OpenOptions options)
+: _delegate(delegate)
+, _preparedContent(std::move(content))
+, _title(std::move(title))
+, _renderer(renderer ? std::move(renderer) : std::make_shared<MathRenderer>())
+, _options(PrepareOpenOptions(std::move(options), delegate, _title)) {
 	createWindow();
 }
 
@@ -168,8 +192,64 @@ void Controller::activate() {
 	}
 }
 
+void Controller::update(
+		MarkdownArticleContent content,
+		QString title,
+		OpenOptions options) {
+	_preparedContent = std::move(content);
+	_title = std::move(title);
+	_options = PrepareOpenOptions(std::move(options), _delegate, _title);
+	if (_window) {
+		_window->setTitle(_title);
+		_window->setWindowTitle(_title);
+	}
+	createPreview();
+	if (_window && _window->isActiveWindow() && _preview) {
+		_preview->setFocus();
+	}
+}
+
+bool Controller::active() const {
+	return _window && _window->isActiveWindow();
+}
+
+void Controller::minimize() {
+	if (_window) {
+		_window->setWindowState(_window->windowState() | Qt::WindowMinimized);
+	}
+}
+
 void Controller::close() {
 	_events.fire({ Event::Type::Close });
+}
+
+void Controller::createPreview() {
+	if (!_window) {
+		return;
+	}
+	const auto parent = _window->body();
+	const auto callback = [=](Event event) {
+		_events.fire(std::move(event));
+	};
+	_preview = nullptr;
+	_preview = _preparedContent
+		? CreateMarkdownPreviewWidget(
+			parent,
+			std::move(*_preparedContent),
+			_renderer,
+			callback,
+			_options)
+		: CreateMarkdownPreviewWidget(
+			parent,
+			*_document,
+			callback,
+			_options);
+	_preparedContent.reset();
+	_preview->setGeometry(parent->rect());
+	parent->sizeValue() | rpl::on_next([=](QSize size) {
+		_preview->resize(size);
+	}, _preview->lifetime());
+	_preview->show();
 }
 
 void Controller::createWindow() {
@@ -188,21 +268,7 @@ void Controller::createWindow() {
 		QPainter(window->body().get()).fillRect(clip, st::windowBg);
 	}, window->body()->lifetime());
 
-	const auto parent = window->body();
-	const auto callback = [=](Event event) {
-		_events.fire(std::move(event));
-	};
-	_preview = CreateMarkdownPreviewWidget(parent, _document, callback, {
-		.sourceName = _title,
-		.sourcePath = _sourcePath,
-		.initialFragment = _initialFragment,
-		.delegate = _delegate,
-	});
-	_preview->setGeometry(parent->rect());
-	parent->sizeValue() | rpl::on_next([=](QSize size) {
-		_preview->resize(size);
-	}, _preview->lifetime());
-	_preview->show();
+	createPreview();
 
 	window->events() | rpl::on_next([=](not_null<QEvent*> e) {
 		if (e->type() == QEvent::Close) {
@@ -294,14 +360,16 @@ std::unique_ptr<Controller> TryOpenLocalFile(
 		).arg(parsed - validated
 		).arg(target.path));
 
+	auto options = OpenOptions();
+	options.sourcePath = std::move(source.path);
+	options.initialFragment = std::move(target.fragment);
 	return std::make_unique<Controller>(
 		delegate,
 		std::move(parseResult.document),
 		(parseResult.document.title.trimmed().isEmpty()
 			? fallbackTitle
 			: parseResult.document.title.trimmed()),
-		std::move(source.path),
-		std::move(target.fragment));
+		std::move(options));
 }
 
 } // namespace Iv::Markdown

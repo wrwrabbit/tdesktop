@@ -1,6 +1,9 @@
 #include "iv/markdown/iv_markdown_prepare.h"
 
 #include "iv/markdown/iv_markdown_parse.h"
+#include "base/unixtime.h"
+#include "iv/iv_prepare.h"
+#include "lang/lang_keys.h"
 
 #include <QtCore/QByteArray>
 #include <QtCore/QDir>
@@ -1865,6 +1868,1102 @@ void MeasurePreparedFormulas(PrepareState *state) {
 		= state->result.debug.formulaMeasureMs;
 }
 
+struct NativeIvPhotoInfo {
+	uint64 id = 0;
+	int width = 0;
+	int height = 0;
+};
+
+struct NativeIvPrepareState {
+	MarkdownArticleContent result;
+	std::vector<NativeIvPhotoInfo> photos;
+	int nextGeneratedId = 0;
+
+	void setFailure(
+			PrepareTerminalFailure terminal,
+			QString debugReason) {
+		if (result.failure.failed()) {
+			return;
+		}
+		result.failure.terminal = terminal;
+		result.failure.debugReason = std::move(debugReason);
+	}
+
+	[[nodiscard]] bool blocked() const {
+		return result.failure.failed();
+	}
+};
+
+struct PreparedIvRichText {
+	TextWithEntities text;
+	std::vector<PreparedLink> links;
+};
+
+[[nodiscard]] bool PrepareNativeIvBlocks(
+	const QVector<MTPPageBlock> &blocks,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state);
+[[nodiscard]] bool PrepareNativeIvBlock(
+	const MTPPageBlock &block,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state);
+[[nodiscard]] bool AppendNativeIvRichText(
+	const MTPRichText &text,
+	TextWithEntities *result,
+	std::vector<PreparedLink> *links,
+	QString *blockAnchorId,
+	NativeIvPrepareState *state);
+
+void ShiftEntities(EntitiesInText *entities, int delta) {
+	if (!delta) {
+		return;
+	}
+	for (auto &entity : *entities) {
+		entity = EntityInText(
+			entity.type(),
+			entity.offset() + delta,
+			entity.length(),
+			entity.data());
+	}
+}
+
+void PrependText(TextWithEntities *text, QString prefix) {
+	if (prefix.isEmpty()) {
+		return;
+	}
+	text->text.prepend(prefix);
+	ShiftEntities(&text->entities, prefix.size());
+}
+
+[[nodiscard]] QString NativeIvDateText(TimeId date) {
+	return langDateTimeFull(base::unixtime::parse(date));
+}
+
+[[nodiscard]] QString NativeIvDetailsAnchorId(NativeIvPrepareState *state) {
+	return u"details-"_q + QString::number(++state->nextGeneratedId);
+}
+
+void RememberNativeIvPhoto(
+		NativeIvPrepareState *state,
+		const MTPPhoto &photo) {
+	auto info = NativeIvPhotoInfo{
+		.id = photo.match([](const auto &data) {
+			return data.vid().v;
+		}),
+	};
+	photo.match([](const MTPDphotoEmpty &) {
+	}, [&](const MTPDphoto &data) {
+		auto width = 0;
+		auto height = 0;
+		const auto assign = [&](int w, int h) {
+			if (w > 0 && h > 0) {
+				width = w;
+				height = h;
+			}
+		};
+		for (const auto &size : data.vsizes().v) {
+			size.match([&](const MTPDphotoSizeEmpty &) {
+			}, [&](const MTPDphotoSize &data) {
+				if (data.vtype().v == u"y"_q) {
+					assign(data.vw().v, data.vh().v);
+				} else if (!width && data.vtype().v == u"x"_q) {
+					assign(data.vw().v, data.vh().v);
+				} else if (!width && data.vtype().v == u"w"_q) {
+					assign(data.vw().v, data.vh().v);
+				}
+			}, [&](const MTPDphotoCachedSize &data) {
+				if (data.vtype().v == u"y"_q) {
+					assign(data.vw().v, data.vh().v);
+				} else if (!width && data.vtype().v == u"x"_q) {
+					assign(data.vw().v, data.vh().v);
+				} else if (!width && data.vtype().v == u"w"_q) {
+					assign(data.vw().v, data.vh().v);
+				}
+			}, [&](const MTPDphotoStrippedSize &) {
+			}, [&](const MTPDphotoSizeProgressive &data) {
+				if (data.vtype().v == u"y"_q) {
+					assign(data.vw().v, data.vh().v);
+				} else if (!width && data.vtype().v == u"x"_q) {
+					assign(data.vw().v, data.vh().v);
+				} else if (!width && data.vtype().v == u"w"_q) {
+					assign(data.vw().v, data.vh().v);
+				}
+			}, [&](const MTPDphotoPathSize &) {
+			});
+		}
+		info.width = width;
+		info.height = height;
+	});
+	if (!info.id) {
+		return;
+	}
+	for (auto &existing : state->photos) {
+		if (existing.id == info.id) {
+			existing = info;
+			return;
+		}
+	}
+	state->photos.push_back(info);
+}
+
+[[nodiscard]] const NativeIvPhotoInfo *FindNativeIvPhoto(
+		uint64 id,
+		const NativeIvPrepareState &state) {
+	for (const auto &photo : state.photos) {
+		if (photo.id == id) {
+			return &photo;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] bool AddNativeIvPreparedLink(
+		TextWithEntities *text,
+		std::vector<PreparedLink> *links,
+		int from,
+		int length,
+		QString target) {
+	if (!length || target.isEmpty()) {
+		return true;
+	}
+	const auto index = links->size() + 1;
+	if (index > std::numeric_limits<uint16>::max()) {
+		return true;
+	}
+	const auto prepared = ClassifiedLink(uint16(index), target, nullptr);
+	if (prepared.kind == PreparedLinkKind::RejectedRelative
+		|| prepared.kind == PreparedLinkKind::LocalFile) {
+		return true;
+	}
+	text->entities.push_back(EntityInText(
+		EntityType::CustomUrl,
+		from,
+		length,
+		InternalLinkData(uint16(index))));
+	links->push_back({
+		.index = uint16(index),
+		.kind = prepared.kind,
+		.target = prepared.target,
+		.fragment = prepared.fragment,
+		.copyText = prepared.copyText,
+	});
+	return true;
+}
+
+[[nodiscard]] bool AddNativeIvEntity(
+		TextWithEntities *text,
+		int from,
+		EntityType type) {
+	const auto length = text->text.size() - from;
+	if (length <= 0) {
+		return true;
+	}
+	text->entities.push_back(EntityInText(type, from, length));
+	return true;
+}
+
+[[nodiscard]] bool AppendNativeIvRichText(
+		const MTPRichText &text,
+		TextWithEntities *result,
+		std::vector<PreparedLink> *links,
+		QString *blockAnchorId,
+		NativeIvPrepareState *state) {
+	if (state->blocked()) {
+		return false;
+	}
+	return text.match([&](const MTPDtextEmpty &) {
+		return true;
+	}, [&](const MTPDtextPlain &data) {
+		result->append(qs(data.vtext()));
+		return true;
+	}, [&](const MTPDtextConcat &data) {
+		for (const auto &part : data.vtexts().v) {
+			if (!AppendNativeIvRichText(
+					part,
+					result,
+					links,
+					blockAnchorId,
+					state)) {
+				return false;
+			}
+		}
+		return true;
+	}, [&](const MTPDtextImage &data) {
+		const auto replacementText = u"[image]"_q;
+		if (!data.vdocument_id().v || data.vw().v <= 0 || data.vh().v <= 0) {
+			result->append(replacementText);
+			return true;
+		}
+		const auto entityData = SerializeInlineTextObjectEntity({
+			.kind = InlineTextObjectKind::IvImage,
+			.data = InlineTextObjectIvImageData{
+				.documentId = uint64(data.vdocument_id().v),
+				.width = data.vw().v,
+				.height = data.vh().v,
+				.replacementText = replacementText,
+			},
+		});
+		if (entityData.isEmpty()) {
+			result->append(replacementText);
+			return true;
+		}
+		const auto from = result->text.size();
+		result->append(QChar::ObjectReplacementCharacter);
+		result->entities.push_back(EntityInText(
+			EntityType::CustomEmoji,
+			from,
+			1,
+			entityData));
+		return true;
+	}, [&](const MTPDtextBold &data) {
+		const auto from = result->text.size();
+		if (!AppendNativeIvRichText(
+				data.vtext(),
+				result,
+				links,
+				blockAnchorId,
+				state)) {
+			return false;
+		}
+		return AddNativeIvEntity(result, from, EntityType::Bold);
+	}, [&](const MTPDtextItalic &data) {
+		const auto from = result->text.size();
+		if (!AppendNativeIvRichText(
+				data.vtext(),
+				result,
+				links,
+				blockAnchorId,
+				state)) {
+			return false;
+		}
+		return AddNativeIvEntity(result, from, EntityType::Italic);
+	}, [&](const MTPDtextUnderline &data) {
+		const auto from = result->text.size();
+		if (!AppendNativeIvRichText(
+				data.vtext(),
+				result,
+				links,
+				blockAnchorId,
+				state)) {
+			return false;
+		}
+		return AddNativeIvEntity(result, from, EntityType::Underline);
+	}, [&](const MTPDtextStrike &data) {
+		const auto from = result->text.size();
+		if (!AppendNativeIvRichText(
+				data.vtext(),
+				result,
+				links,
+				blockAnchorId,
+				state)) {
+			return false;
+		}
+		return AddNativeIvEntity(result, from, EntityType::StrikeOut);
+	}, [&](const MTPDtextFixed &data) {
+		const auto from = result->text.size();
+		if (!AppendNativeIvRichText(
+				data.vtext(),
+				result,
+				links,
+				blockAnchorId,
+				state)) {
+			return false;
+		}
+		return AddNativeIvEntity(result, from, EntityType::Code);
+	}, [&](const MTPDtextUrl &data) {
+		const auto from = result->text.size();
+		if (!AppendNativeIvRichText(
+				data.vtext(),
+				result,
+				links,
+				blockAnchorId,
+				state)) {
+			return false;
+		}
+		if (result->text.size() == from) {
+			result->append(qs(data.vurl()));
+		}
+		return AddNativeIvPreparedLink(
+			result,
+			links,
+			from,
+			result->text.size() - from,
+			qs(data.vurl()));
+	}, [&](const MTPDtextEmail &data) {
+		const auto from = result->text.size();
+		if (!AppendNativeIvRichText(
+				data.vtext(),
+				result,
+				links,
+				blockAnchorId,
+				state)) {
+			return false;
+		}
+		if (result->text.size() == from) {
+			result->append(qs(data.vemail()));
+		}
+		return AddNativeIvPreparedLink(
+			result,
+			links,
+			from,
+			result->text.size() - from,
+			u"mailto:"_q + qs(data.vemail()));
+	}, [&](const MTPDtextSubscript &data) {
+		const auto from = result->text.size();
+		if (!AppendNativeIvRichText(
+				data.vtext(),
+				result,
+				links,
+				blockAnchorId,
+				state)) {
+			return false;
+		}
+		return AddNativeIvEntity(result, from, EntityType::Subscript);
+	}, [&](const MTPDtextSuperscript &data) {
+		const auto from = result->text.size();
+		if (!AppendNativeIvRichText(
+				data.vtext(),
+				result,
+				links,
+				blockAnchorId,
+				state)) {
+			return false;
+		}
+		return AddNativeIvEntity(result, from, EntityType::Superscript);
+	}, [&](const MTPDtextMarked &data) {
+		const auto from = result->text.size();
+		if (!AppendNativeIvRichText(
+				data.vtext(),
+				result,
+				links,
+				blockAnchorId,
+				state)) {
+			return false;
+		}
+		return AddNativeIvEntity(result, from, EntityType::Marked);
+	}, [&](const MTPDtextPhone &data) {
+		const auto from = result->text.size();
+		if (!AppendNativeIvRichText(
+				data.vtext(),
+				result,
+				links,
+				blockAnchorId,
+				state)) {
+			return false;
+		}
+		if (result->text.size() == from) {
+			result->append(qs(data.vphone()));
+		}
+		return AddNativeIvPreparedLink(
+			result,
+			links,
+			from,
+			result->text.size() - from,
+			u"tel:"_q + qs(data.vphone()));
+	}, [&](const MTPDtextAnchor &data) {
+		if (blockAnchorId && blockAnchorId->isEmpty()) {
+			*blockAnchorId = NormalizeFragmentId(qs(data.vname()));
+		}
+		return AppendNativeIvRichText(
+			data.vtext(),
+			result,
+			links,
+			blockAnchorId,
+			state);
+	});
+}
+
+[[nodiscard]] bool PrepareNativeIvRichText(
+		const MTPRichText &text,
+		PreparedIvRichText *result,
+		QString *blockAnchorId,
+		NativeIvPrepareState *state) {
+	return AppendNativeIvRichText(
+		text,
+		&result->text,
+		&result->links,
+		blockAnchorId,
+		state);
+}
+
+[[nodiscard]] bool PrepareNativeIvCaption(
+		const MTPPageCaption &caption,
+		PreparedIvRichText *result,
+		QString *blockAnchorId,
+		NativeIvPrepareState *state) {
+	if (!AppendNativeIvRichText(
+			caption.data().vtext(),
+			&result->text,
+			&result->links,
+			blockAnchorId,
+			state)) {
+		return false;
+	}
+	auto credit = PreparedIvRichText();
+	if (!PrepareNativeIvRichText(
+			caption.data().vcredit(),
+			&credit,
+			blockAnchorId,
+			state)) {
+		return false;
+	}
+	if (!credit.text.text.isEmpty()) {
+		if (!result->text.text.isEmpty()) {
+			result->text.append(QChar('\n'));
+		}
+		if (!AppendNativeIvRichText(
+				caption.data().vcredit(),
+				&result->text,
+				&result->links,
+				blockAnchorId,
+				state)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void SortPreparedIvRichText(PreparedIvRichText *text) {
+	SortEntities(&text->text);
+}
+
+[[nodiscard]] bool AppendPreparedIvRichBlock(
+		std::vector<PreparedBlock> *result,
+		PreparedBlockKind kind,
+		int headingLevel,
+		PreparedIvRichText prepared,
+		QString anchorId = QString(),
+		bool allowEmpty = false) {
+	SortPreparedIvRichText(&prepared);
+	AppendRichBlock(
+		result,
+		kind,
+		headingLevel,
+		std::move(prepared.text),
+		std::move(prepared.links),
+		std::move(anchorId),
+		false,
+		allowEmpty);
+	return true;
+}
+
+[[nodiscard]] bool AppendNativeIvFlowBlock(
+		std::vector<PreparedBlock> *result,
+		PreparedBlockKind kind,
+		int headingLevel,
+		const MTPRichText &text,
+		NativeIvPrepareState *state,
+		bool allowEmpty = false) {
+	auto prepared = PreparedIvRichText();
+	auto anchorId = QString();
+	if (!PrepareNativeIvRichText(text, &prepared, &anchorId, state)) {
+		return false;
+	}
+	return AppendPreparedIvRichBlock(
+		result,
+		kind,
+		headingLevel,
+		std::move(prepared),
+		std::move(anchorId),
+		allowEmpty);
+}
+
+bool PrepareNativeIvPlainPlaceholderBlock(
+		QString label,
+		std::vector<PreparedBlock> *result) {
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Placeholder;
+	block.placeholder.label = std::move(label);
+	block.placeholder.copyText = block.placeholder.label;
+	result->push_back(std::move(block));
+	return true;
+}
+
+[[nodiscard]] bool PrepareNativeIvPlaceholderBlock(
+		QString label,
+		const MTPPageCaption &caption,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state);
+
+[[nodiscard]] bool PrepareNativeIvPhotoBlock(
+		const MTPDpageBlockPhoto &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	const auto info = FindNativeIvPhoto(uint64(data.vphoto_id().v), *state);
+	if (!info || info->width <= 0 || info->height <= 0) {
+		return PrepareNativeIvPlaceholderBlock(
+			u"Photo Placeholder"_q,
+			data.vcaption(),
+			result,
+			state);
+	}
+	auto caption = PreparedIvRichText();
+	auto anchorId = QString();
+	if (!PrepareNativeIvCaption(data.vcaption(), &caption, &anchorId, state)) {
+		return false;
+	}
+	SortPreparedIvRichText(&caption);
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Photo;
+	block.text = std::move(caption.text);
+	block.links = std::move(caption.links);
+	block.anchorId = std::move(anchorId);
+	block.photo.photoId = info->id;
+	block.photo.width = info->width;
+	block.photo.height = info->height;
+	block.photo.urlOverride = data.vurl() ? qs(*data.vurl()) : QString();
+	block.photo.viewerOpen = true;
+	result->push_back(std::move(block));
+	return true;
+}
+
+[[nodiscard]] QString NativeIvPlaceholderCopyText(
+		const QString &label,
+		const TextWithEntities &caption) {
+	return caption.text.isEmpty()
+		? label
+		: (label + u"\n"_q + caption.text);
+}
+
+[[nodiscard]] bool PrepareNativeIvPlaceholderBlock(
+		QString label,
+		const MTPPageCaption &caption,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto prepared = PreparedIvRichText();
+	auto anchorId = QString();
+	if (!PrepareNativeIvCaption(caption, &prepared, &anchorId, state)) {
+		return state->result.failure.failed()
+			? false
+			: PrepareNativeIvPlainPlaceholderBlock(std::move(label), result);
+	}
+	SortPreparedIvRichText(&prepared);
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Placeholder;
+	block.text = std::move(prepared.text);
+	block.links = std::move(prepared.links);
+	block.anchorId = std::move(anchorId);
+	block.placeholder.label = label;
+	block.placeholder.copyText = NativeIvPlaceholderCopyText(
+		block.placeholder.label,
+		block.text);
+	result->push_back(std::move(block));
+	return true;
+}
+
+[[nodiscard]] bool PrepareNativeIvQuoteBlock(
+		const MTPRichText &text,
+		const MTPRichText &caption,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Quote;
+	auto body = PreparedIvRichText();
+	if (!PrepareNativeIvRichText(text, &body, &block.anchorId, state)) {
+		return false;
+	}
+	if (!AppendPreparedIvRichBlock(
+		&block.children,
+		PreparedBlockKind::Paragraph,
+		0,
+		std::move(body))) {
+		return false;
+	}
+	auto cite = PreparedIvRichText();
+	if (!PrepareNativeIvRichText(caption, &cite, &block.anchorId, state)) {
+		return false;
+	}
+	if (!AppendPreparedIvRichBlock(
+		&block.children,
+		PreparedBlockKind::Paragraph,
+		0,
+		std::move(cite))) {
+		return false;
+	}
+	if (block.children.empty()) {
+		block.children.push_back(EmptyParagraphBlock());
+	}
+	result->push_back(std::move(block));
+	return true;
+}
+
+[[nodiscard]] bool PrepareNativeIvList(
+		const QVector<MTPPageListItem> &items,
+		PreparedBlock *result,
+		NativeIvPrepareState *state) {
+	for (const auto &item : items) {
+		auto block = PreparedBlock();
+		block.kind = PreparedBlockKind::ListItem;
+		block.listKind = result->listKind;
+		block.listDelimiter = result->listDelimiter;
+		const auto ok = item.match([&](const MTPDpageListItemText &data) {
+			auto prepared = PreparedIvRichText();
+			if (!PrepareNativeIvRichText(
+					data.vtext(),
+					&prepared,
+					&block.anchorId,
+					state)) {
+				return false;
+			}
+			return AppendPreparedIvRichBlock(
+				&block.children,
+				PreparedBlockKind::Paragraph,
+				0,
+				std::move(prepared));
+		}, [&](const MTPDpageListItemBlocks &data) {
+			return PrepareNativeIvBlocks(data.vblocks().v, &block.children, state);
+		});
+		if (!ok) {
+			return false;
+		}
+		if (block.children.empty()) {
+			block.children.push_back(EmptyParagraphBlock());
+		}
+		result->children.push_back(std::move(block));
+	}
+	return true;
+}
+
+[[nodiscard]] bool ParseOrderedNumber(
+		const QString &value,
+		int *result) {
+	auto ok = false;
+	const auto parsed = value.toInt(&ok);
+	if (!ok) {
+		return false;
+	}
+	*result = parsed;
+	return true;
+}
+
+[[nodiscard]] int NextNativeIvOrderedNumber(const PreparedBlock &result) {
+	return result.children.empty()
+		? result.startNumber
+		: (result.children.back().orderedNumber + 1);
+}
+
+[[nodiscard]] bool PrepareNativeIvOrderedList(
+		const QVector<MTPPageListOrderedItem> &items,
+		PreparedBlock *result,
+		NativeIvPrepareState *state) {
+	auto firstNumber = true;
+	for (const auto &item : items) {
+		auto block = PreparedBlock();
+		block.kind = PreparedBlockKind::ListItem;
+		block.listKind = result->listKind;
+		block.listDelimiter = result->listDelimiter;
+		const auto ok = item.match([&](const MTPDpageListOrderedItemText &data) {
+			auto orderedNumber = 0;
+			if (!ParseOrderedNumber(qs(data.vnum()), &orderedNumber)) {
+				orderedNumber = NextNativeIvOrderedNumber(*result);
+			}
+			block.orderedNumber = orderedNumber;
+			auto prepared = PreparedIvRichText();
+			if (!PrepareNativeIvRichText(
+					data.vtext(),
+					&prepared,
+					&block.anchorId,
+					state)) {
+				return false;
+			}
+			return AppendPreparedIvRichBlock(
+				&block.children,
+				PreparedBlockKind::Paragraph,
+				0,
+				std::move(prepared));
+		}, [&](const MTPDpageListOrderedItemBlocks &data) {
+			auto orderedNumber = 0;
+			if (!ParseOrderedNumber(qs(data.vnum()), &orderedNumber)) {
+				orderedNumber = NextNativeIvOrderedNumber(*result);
+			}
+			block.orderedNumber = orderedNumber;
+			return PrepareNativeIvBlocks(data.vblocks().v, &block.children, state);
+		});
+		if (!ok) {
+			return false;
+		}
+		if (firstNumber) {
+			result->startNumber = block.orderedNumber;
+			firstNumber = false;
+		}
+		if (block.children.empty()) {
+			block.children.push_back(EmptyParagraphBlock());
+		}
+		result->children.push_back(std::move(block));
+	}
+	return true;
+}
+
+[[nodiscard]] TableAlignment NativeIvTableAlignment(
+		const MTPDpageTableCell &cell) {
+	if (cell.is_align_right()) {
+		return TableAlignment::Right;
+	} else if (cell.is_align_center()) {
+		return TableAlignment::Center;
+	}
+	return TableAlignment::Left;
+}
+
+[[nodiscard]] bool PrepareNativeIvTableBlock(
+		const MTPDpageBlockTable &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto title = PreparedIvRichText();
+	auto anchorId = QString();
+	if (!PrepareNativeIvRichText(data.vtitle(), &title, &anchorId, state)) {
+		return false;
+	}
+	if (!AppendPreparedIvRichBlock(
+		result,
+		PreparedBlockKind::Paragraph,
+		0,
+		std::move(title),
+		std::move(anchorId))) {
+		return false;
+	}
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Table;
+	for (const auto &row : data.vrows().v) {
+		auto preparedRow = PreparedTableRow();
+		auto header = std::optional<bool>();
+		auto column = 0;
+		const auto ok = row.match([&](const MTPDpageTableRow &data) {
+			for (const auto &cell : data.vcells().v) {
+				auto preparedCell = PreparedTableCell();
+				const auto cellOk = cell.match([&](const MTPDpageTableCell &data) {
+					if ((data.vcolspan() && data.vcolspan()->v > 1)
+						|| (data.vrowspan() && data.vrowspan()->v > 1)) {
+						return false;
+					}
+					const auto cellHeader = data.is_header();
+					if (header && *header != cellHeader) {
+						return false;
+					}
+					header = cellHeader;
+					preparedCell.column = column++;
+					preparedCell.alignment = NativeIvTableAlignment(data);
+					if (data.vtext()) {
+						auto rich = PreparedIvRichText();
+						if (!PrepareNativeIvRichText(
+								*data.vtext(),
+								&rich,
+								nullptr,
+								state)) {
+							return false;
+						}
+						SortPreparedIvRichText(&rich);
+						preparedCell.text = std::move(rich.text);
+						preparedCell.links = std::move(rich.links);
+					}
+					return true;
+				});
+				if (!cellOk) {
+					return false;
+				}
+				preparedRow.cells.push_back(std::move(preparedCell));
+			}
+			return true;
+		});
+		if (!ok) {
+			return state->result.failure.failed()
+				? false
+				: PrepareNativeIvPlainPlaceholderBlock(
+					u"Table Placeholder"_q,
+					result);
+		}
+		preparedRow.header = header.value_or(false);
+		if (!block.tableColumnCount) {
+			block.tableColumnCount = column;
+			block.tableAlignments.resize(column, TableAlignment::Left);
+		} else if (block.tableColumnCount != column) {
+			return PrepareNativeIvPlainPlaceholderBlock(
+				u"Table Placeholder"_q,
+				result);
+		}
+		for (const auto &cell : preparedRow.cells) {
+			if (cell.column >= 0 && cell.column < int(block.tableAlignments.size())) {
+				block.tableAlignments[cell.column] = cell.alignment;
+			}
+		}
+		block.tableRows.push_back(std::move(preparedRow));
+	}
+	result->push_back(std::move(block));
+	return true;
+}
+
+[[nodiscard]] bool PrepareNativeIvDetailsBlock(
+		const MTPDpageBlockDetails &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto summary = PreparedIvRichText();
+	auto anchorId = NativeIvDetailsAnchorId(state);
+	if (!PrepareNativeIvRichText(
+			data.vtitle(),
+			&summary,
+			&anchorId,
+			state)) {
+		return false;
+	}
+	if (!summary.links.empty()) {
+		const auto isLink = [](const EntityInText &entity) {
+			return entity.type() == EntityType::CustomUrl;
+		};
+		const auto from = std::remove_if(
+			summary.text.entities.begin(),
+			summary.text.entities.end(),
+			isLink);
+		summary.text.entities.erase(from, summary.text.entities.end());
+		summary.links.clear();
+	}
+	PrependText(&summary.text, data.is_open() ? u"v "_q : u"> "_q);
+	SortPreparedIvRichText(&summary);
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Details;
+	block.anchorId = std::move(anchorId);
+	block.collapsed = !data.is_open();
+	block.text = std::move(summary.text);
+	block.links = std::move(summary.links);
+	const auto toggleIndex = block.links.size() + 1;
+	if (toggleIndex <= std::numeric_limits<uint16>::max()) {
+		block.text.entities.push_back(EntityInText(
+			EntityType::CustomUrl,
+			0,
+			block.text.text.size(),
+			InternalLinkData(uint16(toggleIndex))));
+		block.links.push_back({
+			.index = uint16(toggleIndex),
+			.kind = PreparedLinkKind::ToggleDetails,
+			.target = block.anchorId,
+		});
+	}
+	if (!PrepareNativeIvBlocks(data.vblocks().v, &block.children, state)) {
+		return false;
+	}
+	result->push_back(std::move(block));
+	return true;
+}
+
+[[nodiscard]] bool PrepareNativeIvBlocks(
+		const QVector<MTPPageBlock> &blocks,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	for (const auto &block : blocks) {
+		if (!PrepareNativeIvBlock(block, result, state)) {
+			if (state->result.failure.failed()) {
+				return false;
+			}
+			PrepareNativeIvPlainPlaceholderBlock(
+				u"Unsupported Block Placeholder"_q,
+				result);
+		}
+	}
+	return !state->result.failure.failed();
+}
+
+[[nodiscard]] bool PrepareNativeIvBlock(
+		const MTPPageBlock &block,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	if (state->blocked()) {
+		return false;
+	}
+	return block.match([&](const MTPDpageBlockUnsupported &) {
+		return PrepareNativeIvPlainPlaceholderBlock(
+			u"Unsupported Block Placeholder"_q,
+			result);
+	}, [&](const MTPDpageBlockTitle &data) {
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Heading,
+			1,
+			data.vtext(),
+			state);
+	}, [&](const MTPDpageBlockSubtitle &data) {
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Heading,
+			2,
+			data.vtext(),
+			state);
+	}, [&](const MTPDpageBlockAuthorDate &data) {
+		auto prepared = PreparedIvRichText();
+		auto anchorId = QString();
+		if (!PrepareNativeIvRichText(
+				data.vauthor(),
+				&prepared,
+				&anchorId,
+				state)) {
+			return false;
+		}
+		if (const auto date = data.vpublished_date().v) {
+			if (!prepared.text.text.isEmpty()) {
+				prepared.text.append(u" • "_q);
+			}
+			prepared.text.append(NativeIvDateText(date));
+		}
+		return AppendPreparedIvRichBlock(
+			result,
+			PreparedBlockKind::Paragraph,
+			0,
+			std::move(prepared),
+			std::move(anchorId));
+	}, [&](const MTPDpageBlockHeader &data) {
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Heading,
+			3,
+			data.vtext(),
+			state);
+	}, [&](const MTPDpageBlockSubheader &data) {
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Heading,
+			4,
+			data.vtext(),
+			state);
+	}, [&](const MTPDpageBlockParagraph &data) {
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Paragraph,
+			0,
+			data.vtext(),
+			state);
+	}, [&](const MTPDpageBlockPreformatted &data) {
+		auto prepared = PreparedIvRichText();
+		auto anchorId = QString();
+		if (!PrepareNativeIvRichText(
+				data.vtext(),
+				&prepared,
+				&anchorId,
+				state)) {
+			return false;
+		}
+		auto block = PreparedBlock();
+		block.kind = PreparedBlockKind::CodeBlock;
+		block.anchorId = std::move(anchorId);
+		block.codeLanguage = qs(data.vlanguage()).trimmed();
+		block.text.text = prepared.text.text;
+		result->push_back(std::move(block));
+		return true;
+	}, [&](const MTPDpageBlockFooter &data) {
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Paragraph,
+			0,
+			data.vtext(),
+			state);
+	}, [&](const MTPDpageBlockDivider &) {
+		result->push_back(PrepareRuleBlock());
+		return true;
+	}, [&](const MTPDpageBlockAnchor &data) {
+		const auto anchorId = NormalizeFragmentId(qs(data.vname()));
+		if (anchorId.isEmpty()) {
+			return true;
+		}
+		auto prepared = PreparedIvRichText();
+		return AppendPreparedIvRichBlock(
+			result,
+			PreparedBlockKind::Paragraph,
+			0,
+			std::move(prepared),
+			anchorId,
+			true);
+	}, [&](const MTPDpageBlockList &data) {
+		auto prepared = PreparedBlock();
+		prepared.kind = PreparedBlockKind::List;
+		prepared.listKind = ListKind::Bullet;
+		return PrepareNativeIvList(data.vitems().v, &prepared, state)
+			? (result->push_back(std::move(prepared)), true)
+			: false;
+	}, [&](const MTPDpageBlockBlockquote &data) {
+		return PrepareNativeIvQuoteBlock(
+			data.vtext(),
+			data.vcaption(),
+			result,
+			state);
+	}, [&](const MTPDpageBlockPullquote &data) {
+		return PrepareNativeIvQuoteBlock(
+			data.vtext(),
+			data.vcaption(),
+			result,
+			state);
+	}, [&](const MTPDpageBlockPhoto &data) {
+		return PrepareNativeIvPhotoBlock(data, result, state);
+	}, [&](const MTPDpageBlockVideo &data) {
+		return PrepareNativeIvPlaceholderBlock(
+			u"Video Placeholder"_q,
+			data.vcaption(),
+			result,
+			state);
+	}, [&](const MTPDpageBlockCover &data) {
+		return PrepareNativeIvBlock(data.vcover(), result, state);
+	}, [&](const MTPDpageBlockEmbed &data) {
+		return PrepareNativeIvPlaceholderBlock(
+			u"Embed Placeholder"_q,
+			data.vcaption(),
+			result,
+			state);
+	}, [&](const MTPDpageBlockEmbedPost &data) {
+		return PrepareNativeIvPlaceholderBlock(
+			u"Embed Placeholder"_q,
+			data.vcaption(),
+			result,
+			state);
+	}, [&](const MTPDpageBlockCollage &data) {
+		return PrepareNativeIvPlaceholderBlock(
+			u"Collage placeholder"_q,
+			data.vcaption(),
+			result,
+			state);
+	}, [&](const MTPDpageBlockSlideshow &data) {
+		return PrepareNativeIvPlaceholderBlock(
+			u"Grouped Media Placeholder"_q,
+			data.vcaption(),
+			result,
+			state);
+	}, [&](const MTPDpageBlockChannel &) {
+		return PrepareNativeIvPlainPlaceholderBlock(
+			u"Channel Placeholder"_q,
+			result);
+	}, [&](const MTPDpageBlockAudio &data) {
+		return PrepareNativeIvPlaceholderBlock(
+			u"Audio File Placeholder"_q,
+			data.vcaption(),
+			result,
+			state);
+	}, [&](const MTPDpageBlockKicker &data) {
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Heading,
+			5,
+			data.vtext(),
+			state);
+	}, [&](const MTPDpageBlockTable &data) {
+		return PrepareNativeIvTableBlock(data, result, state);
+	}, [&](const MTPDpageBlockOrderedList &data) {
+		auto prepared = PreparedBlock();
+		prepared.kind = PreparedBlockKind::List;
+		prepared.listKind = ListKind::Ordered;
+		prepared.listDelimiter = ListDelimiter::Period;
+		prepared.startNumber = 1;
+		return PrepareNativeIvOrderedList(data.vitems().v, &prepared, state)
+			? (result->push_back(std::move(prepared)), true)
+			: false;
+	}, [&](const MTPDpageBlockDetails &data) {
+		return PrepareNativeIvDetailsBlock(data, result, state);
+	}, [&](const MTPDpageBlockRelatedArticles &) {
+		return PrepareNativeIvPlainPlaceholderBlock(
+			u"Related Articles Placeholder"_q,
+			result);
+	}, [&](const MTPDpageBlockMap &data) {
+		return PrepareNativeIvPlaceholderBlock(
+			u"Map Placeholder"_q,
+			data.vcaption(),
+			result,
+			state);
+	});
+}
+
 } // namespace
 
 QString SerializeInlineTextObjectEntity(const InlineTextObjectEntity &object) {
@@ -2002,6 +3101,67 @@ MarkdownArticleContent PrepareSynchronously(PrepareRequest request) {
 		ClearPreparedOutput(&state.result);
 	}
 	return finish();
+}
+
+NativeInstantViewPrepareResult TryPrepareNativeInstantView(
+		NativeInstantViewPrepareRequest request) {
+	auto state = NativeIvPrepareState();
+	auto timer = QElapsedTimer();
+	timer.start();
+	state.result.mediaRuntime = std::move(request.mediaRuntime);
+	const auto finish = [&](NativeInstantViewPrepareResultKind kind, QString reason) {
+		state.result.debug.prepareMs = int(timer.elapsed());
+		return NativeInstantViewPrepareResult{
+			.kind = kind,
+			.content = std::move(state.result),
+			.debugReason = std::move(reason),
+		};
+	};
+
+	if (!request.source) {
+		state.setFailure(
+			PrepareTerminalFailure::InvalidRequest,
+			u"missing-native-iv-source"_q);
+		ClearPreparedOutput(&state.result);
+		return finish(
+			NativeInstantViewPrepareResultKind::Failure,
+			state.result.failure.debugReason);
+	}
+
+	for (const auto &photo : request.source->page.data().vphotos().v) {
+		RememberNativeIvPhoto(&state, photo);
+	}
+	if (request.source->webpagePhoto) {
+		RememberNativeIvPhoto(&state, *request.source->webpagePhoto);
+	}
+
+	if (!PrepareNativeIvBlocks(
+			request.source->page.data().vblocks().v,
+			&state.result.blocks.blocks,
+			&state)) {
+		if (state.result.failure.failed()) {
+			ClearPreparedOutput(&state.result);
+			return finish(
+				NativeInstantViewPrepareResultKind::Failure,
+				state.result.failure.debugReason);
+		}
+		PrepareNativeIvPlainPlaceholderBlock(
+			u"Unsupported Block Placeholder"_q,
+			&state.result.blocks.blocks);
+	}
+	if (CountPreparedBlocks(state.result.blocks.blocks)
+		> PrepareLimitsForIv().maxPreparedBlocks) {
+		state.setFailure(
+			PrepareTerminalFailure::DocumentTooLarge,
+			u"prepared-block-limit"_q);
+		ClearPreparedOutput(&state.result);
+		return finish(
+			NativeInstantViewPrepareResultKind::Failure,
+			state.result.failure.debugReason);
+	}
+	return finish(
+		NativeInstantViewPrepareResultKind::Supported,
+		QString());
 }
 
 } // namespace Iv::Markdown

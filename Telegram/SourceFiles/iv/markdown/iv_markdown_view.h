@@ -1,6 +1,7 @@
 #pragma once
 
 #include "iv/markdown/iv_markdown_document.h"
+#include "iv/markdown/iv_markdown_prepare.h"
 
 #include <memory>
 
@@ -13,6 +14,12 @@ namespace Iv::Markdown {
 [[nodiscard]] std::unique_ptr<Ui::RpWidget> CreateMarkdownPreviewWidget(
 	QWidget *parent,
 	const PreparedDocument &document,
+	Fn<void(Event)> callback,
+	const OpenOptions &options = {});
+[[nodiscard]] std::unique_ptr<Ui::RpWidget> CreateMarkdownPreviewWidget(
+	QWidget *parent,
+	MarkdownArticleContent content,
+	std::shared_ptr<MathRenderer> renderer,
 	Fn<void(Event)> callback,
 	const OpenOptions &options = {});
 

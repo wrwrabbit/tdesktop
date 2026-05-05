@@ -11,6 +11,10 @@
 #include <variant>
 #include <vector>
 
+namespace Iv {
+struct Source;
+} // namespace Iv
+
 namespace Iv::Markdown {
 
 enum class PreparedBlockKind {
@@ -24,6 +28,8 @@ enum class PreparedBlockKind {
 	DisplayMath,
 	Table,
 	Details,
+	Photo,
+	Placeholder,
 };
 
 enum class PreparedLinkKind {
@@ -80,6 +86,19 @@ struct PreparedTableRow {
 	bool header = false;
 };
 
+struct PreparedPhotoBlockData {
+	uint64 photoId = 0;
+	int width = 0;
+	int height = 0;
+	QString urlOverride;
+	bool viewerOpen = false;
+};
+
+struct PreparedPlaceholderBlockData {
+	QString label;
+	QString copyText;
+};
+
 struct PreparedBlock {
 	PreparedBlockKind kind = PreparedBlockKind::Paragraph;
 	TextWithEntities text;
@@ -90,6 +109,8 @@ struct PreparedBlock {
 	QString codeLanguage;
 	QString formulaTex;
 	QString anchorId;
+	PreparedPhotoBlockData photo;
+	PreparedPlaceholderBlockData placeholder;
 	ListKind listKind = ListKind::Bullet;
 	ListDelimiter listDelimiter = ListDelimiter::None;
 	MathKind mathKind = MathKind::Display;
@@ -174,11 +195,42 @@ struct PrepareRequest {
 	QString sourcePath;
 };
 
+struct NativeInstantViewPrepareRequest {
+	const Iv::Source *source = nullptr;
+	std::shared_ptr<MediaRuntime> mediaRuntime;
+};
+
 struct MarkdownArticleContent {
 	PreparedRenderDocument blocks;
 	std::vector<PreparedFormulaSlot> formulas;
+	std::shared_ptr<MediaRuntime> mediaRuntime;
 	PrepareFailureStatus failure;
 	PrepareDebugStats debug;
+};
+
+enum class NativeInstantViewPrepareResultKind {
+	Supported,
+	Unsupported,
+	Failure,
+};
+
+struct NativeInstantViewPrepareResult {
+	NativeInstantViewPrepareResultKind kind
+		= NativeInstantViewPrepareResultKind::Unsupported;
+	MarkdownArticleContent content;
+	QString debugReason;
+
+	[[nodiscard]] bool supported() const {
+		return (kind == NativeInstantViewPrepareResultKind::Supported);
+	}
+
+	[[nodiscard]] bool unsupported() const {
+		return (kind == NativeInstantViewPrepareResultKind::Unsupported);
+	}
+
+	[[nodiscard]] bool failed() const {
+		return (kind == NativeInstantViewPrepareResultKind::Failure);
+	}
 };
 
 [[nodiscard]] const MarkdownPrepareTableRenderLimits &PrepareTableRenderLimitsForIv();
@@ -189,5 +241,7 @@ struct MarkdownArticleContent {
 [[nodiscard]] std::optional<InlineTextObjectEntity> ParseInlineTextObjectEntity(
 	const QString &data);
 [[nodiscard]] MarkdownArticleContent PrepareSynchronously(PrepareRequest request);
+[[nodiscard]] NativeInstantViewPrepareResult TryPrepareNativeInstantView(
+	NativeInstantViewPrepareRequest request);
 
 } // namespace Iv::Markdown

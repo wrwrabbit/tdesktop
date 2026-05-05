@@ -644,6 +644,10 @@ public:
 	void documentLoadDone(not_null<DocumentData*> document);
 	void documentLoadFail(not_null<DocumentData*> document, bool started);
 
+	[[nodiscard]] auto photoLoadProgress() const
+	-> rpl::producer<not_null<PhotoData*>> {
+		return _photoLoadProgress.events();
+	}
 	[[nodiscard]] auto documentLoadProgress() const
 	-> rpl::producer<not_null<DocumentData*>> {
 		return _documentLoadProgress.events();
@@ -1285,6 +1289,7 @@ private:
 	rpl::event_stream<not_null<WebPageData*>> _webpageUpdates;
 	rpl::event_stream<not_null<PollData*>> _pollUpdates;
 	rpl::event_stream<not_null<ChannelData*>> _channelDifferenceTooLong;
+	rpl::event_stream<not_null<PhotoData*>> _photoLoadProgress;
 	rpl::event_stream<not_null<DocumentData*>> _documentLoadProgress;
 	base::flat_set<not_null<ChannelData*>> _suggestToGigagroup;
 

@@ -1817,16 +1817,19 @@ void Session::documentLoadFail(
 
 void Session::photoLoadProgress(not_null<PhotoData*> photo) {
 	requestPhotoViewRepaint(photo);
+	_photoLoadProgress.fire_copy(photo);
 }
 
 void Session::photoLoadDone(not_null<PhotoData*> photo) {
 	notifyPhotoLayoutChanged(photo);
+	_photoLoadProgress.fire_copy(photo);
 }
 
 void Session::photoLoadFail(
 		not_null<PhotoData*> photo,
 		bool started) {
 	notifyPhotoLayoutChanged(photo);
+	_photoLoadProgress.fire_copy(photo);
 }
 
 void Session::markMediaRead(not_null<const DocumentData*> document) {

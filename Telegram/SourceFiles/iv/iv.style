@@ -79,6 +79,8 @@ MarkdownBlockSkips {
 	quote: pixels;
 	displayMath: pixels;
 	table: pixels;
+	photo: pixels;
+	placeholder: pixels;
 }
 MarkdownList {
 	indent: pixels;
@@ -123,6 +125,18 @@ MarkdownTable {
 	overflowWidth: pixels;
 	overflowFg: color;
 }
+MarkdownPlaceholder {
+	padding: margins;
+	minHeight: pixels;
+	captionSkip: pixels;
+	labelStyle: TextStyle;
+}
+MarkdownPhoto {
+	padding: margins;
+	captionSkip: pixels;
+	progressSize: pixels;
+	progressWidth: pixels;
+}
 MarkdownFailure {
 	label: FlatLabel;
 	width: pixels;
@@ -147,6 +161,8 @@ Markdown {
 	rule: MarkdownRule;
 	displayMath: MarkdownDisplayMath;
 	table: MarkdownTable;
+	placeholder: MarkdownPlaceholder;
+	photo: MarkdownPhoto;
 	failure: MarkdownFailure;
 }
 
@@ -176,6 +192,8 @@ defaultMarkdownBlockSkips: MarkdownBlockSkips {
 	quote: 18px;
 	displayMath: 20px;
 	table: 20px;
+	photo: 20px;
+	placeholder: 20px;
 }
 defaultMarkdownList: MarkdownList {
 	indent: 28px;
@@ -219,6 +237,22 @@ defaultMarkdownTable: MarkdownTable {
 	minColumnWidth: 96px;
 	overflowWidth: 4px;
 	overflowFg: windowSubTextFg;
+}
+defaultMarkdownPlaceholderLabelStyle: TextStyle(defaultMarkdownBodyStyle) {
+	font: font(16px semibold);
+	lineHeight: 24px;
+}
+defaultMarkdownPlaceholder: MarkdownPlaceholder {
+	padding: margins(24px, 28px, 24px, 28px);
+	minHeight: 124px;
+	captionSkip: 14px;
+	labelStyle: defaultMarkdownPlaceholderLabelStyle;
+}
+defaultMarkdownPhoto: MarkdownPhoto {
+	padding: margins(4px, 0px, 0px, 0px);
+	captionSkip: 12px;
+	progressSize: 36px;
+	progressWidth: 3px;
 }
 defaultMarkdownFailureLabel: FlatLabel(defaultFlatLabel) {
 	minWidth: 280px;
@@ -268,5 +302,7 @@ defaultMarkdown: Markdown {
 	rule: defaultMarkdownRule;
 	displayMath: defaultMarkdownDisplayMath;
 	table: defaultMarkdownTable;
+	placeholder: defaultMarkdownPlaceholder;
+	photo: defaultMarkdownPhoto;
 	failure: defaultMarkdownFailure;
 }

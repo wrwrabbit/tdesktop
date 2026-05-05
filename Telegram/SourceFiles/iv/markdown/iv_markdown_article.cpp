@@ -1,6 +1,7 @@
 #include "iv/markdown/iv_markdown_article.h"
 
 #include "lang/lang_keys.h"
+#include "ui/dynamic_image.h"
 #include "ui/style/style_core.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/text/text_custom_emoji.h"
@@ -15,6 +16,7 @@
 #include <vector>
 
 #include "styles/style_iv.h"
+#include "styles/palette.h"
 
 namespace Iv::Markdown {
 namespace {
@@ -29,6 +31,7 @@ constexpr auto kIvMarkedTextOptions = TextParseOptions{
 constexpr auto kCodeTabColumns = 4;
 constexpr auto kCodeTrailingGuard = 0x2060;
 constexpr auto kArticleMaxWidth = 32767;
+const auto kPhotoCopyLabel = u"Photo"_q;
 
 struct LaidOutTableCell {
 	Ui::Text::String leaf;
@@ -49,24 +52,30 @@ struct LaidOutTableRow {
 struct LaidOutBlock {
 	PreparedBlockKind kind = PreparedBlockKind::Paragraph;
 	Ui::Text::String leaf;
+	Ui::Text::String labelLeaf;
 	Ui::Text::String marker;
 	Ui::Text::String fallbackLeaf;
 	QString copyText;
+	QString labelText;
 	QString codeLanguage;
 	std::vector<LaidOutBlock> children;
 	std::vector<LaidOutTableRow> tableRows;
 	std::vector<int> tableColumnWidths;
 	QRect outer;
 	QRect textRect;
+	QRect labelRect;
 	QRect markerRect;
 	QRect contentRect;
 	QRect formulaRect;
 	QRect tableRect;
+	QRect mediaRect;
 	QRect visibleFormulaRect;
 	QRect visibleTableRect;
+	QRect visibleMediaRect;
 	QPoint markerCenter;
 	QString anchorId;
 	int textWidth = 0;
+	int labelWidth = 0;
 	int markerWidth = 0;
 	int headingLevel = 0;
 	ListKind listKind = ListKind::Bullet;
@@ -78,6 +87,13 @@ struct LaidOutBlock {
 	bool collapsed = false;
 	bool overflowed = false;
 	int segmentIndex = -1;
+	int secondarySegmentIndex = -1;
+	std::shared_ptr<PhotoRuntime> photoRuntime;
+	std::shared_ptr<Ui::DynamicImage> thumbnailImage;
+	std::shared_ptr<Ui::DynamicImage> fullImage;
+	MediaActivation activation;
+	mutable bool thumbnailSubscribed = false;
+	mutable bool fullSubscribed = false;
 	mutable QImage colorizedFormulaImage;
 	mutable QColor colorizedFormulaColor;
 	mutable QSize colorizedFormulaSize;
@@ -88,6 +104,8 @@ enum class SelectableSegmentKind {
 	CodeBlock,
 	DisplayMath,
 	Table,
+	Placeholder,
+	Photo,
 };
 
 struct SelectableSegment {
@@ -102,6 +120,7 @@ struct SelectableSegment {
 	int index = -1;
 	int length = 0;
 	int tableSegmentIndex = -1;
+	int mediaSegmentIndex = -1;
 
 	[[nodiscard]] bool isTextLeaf() const {
 		return (leaf != nullptr);
@@ -299,6 +318,10 @@ void BindLinks(
 		return skips.displayMath;
 	case PreparedBlockKind::Table:
 		return skips.table;
+	case PreparedBlockKind::Photo:
+		return skips.photo;
+	case PreparedBlockKind::Placeholder:
+		return skips.placeholder;
 	case PreparedBlockKind::Details:
 		return skips.paragraph;
 	}
@@ -458,6 +481,56 @@ void BindLinks(
 		}
 	}
 	return result;
+}
+
+[[nodiscard]] TextForMimeData CopyTextForMediaBlock(
+		const QString &label,
+		const Ui::Text::String &captionLeaf) {
+	auto result = TextForMimeData::Simple(label);
+	if (!captionLeaf.toString().isEmpty()) {
+		result.append(u"\n"_q);
+		result.append(captionLeaf.toTextForMimeData());
+	}
+	return result;
+}
+
+[[nodiscard]] TextForMimeData CopyTextForPhotoBlock(const LaidOutBlock &block) {
+	return CopyTextForMediaBlock(
+		block.copyText.isEmpty() ? kPhotoCopyLabel : block.copyText,
+		block.leaf);
+}
+
+[[nodiscard]] TextForMimeData CopyTextForPlaceholderBlock(
+		const LaidOutBlock &block) {
+	return CopyTextForMediaBlock(
+		block.labelText.isEmpty() ? block.copyText : block.labelText,
+		block.leaf);
+}
+
+[[nodiscard]] bool PaintDynamicImage(
+		Painter &p,
+		const std::shared_ptr<Ui::DynamicImage> &image,
+		QRect rect) {
+	if (!image || rect.isEmpty()) {
+		return false;
+	}
+	if (const auto frame = image->image(std::max(rect.width(), rect.height()));
+		!frame.isNull()) {
+		p.drawImage(rect, frame);
+		return true;
+	}
+	return false;
+}
+
+void SubscribeDynamicImage(
+		const std::shared_ptr<Ui::DynamicImage> &image,
+		const Fn<void()> &repaint,
+		bool *subscribed) {
+	if (!image || !repaint || *subscribed) {
+		return;
+	}
+	*subscribed = true;
+	image->subscribeToUpdates(repaint);
 }
 
 [[nodiscard]] const PreparedFormulaSlot *PreparedFormulaFor(
@@ -733,7 +806,37 @@ private:
 	std::map<
 		PreparedFormulaMeasurementSignature,
 		std::shared_ptr<InlineFormulaSharedState>,
-		PreparedFormulaMeasurementSignatureLess> _states;
+	PreparedFormulaMeasurementSignatureLess> _states;
+
+};
+
+class InlineIvImageObject final : public Ui::Text::CustomEmoji {
+public:
+	InlineIvImageObject(
+		QString replacementText,
+		int width,
+		int height,
+		std::shared_ptr<Ui::DynamicImage> image,
+		Fn<void()> repaint);
+
+	int width() override;
+	QString entityData() override;
+	std::optional<Ui::Text::CustomEmojiVerticalMetrics> vertical(
+		const style::TextStyle &textStyle) override;
+	QString replacementText() override;
+	Ui::Text::CustomEmojiSemantics semantics() override;
+	void paint(QPainter &p, const Context &context) override;
+	void unload() override;
+	bool ready() override;
+	bool readyInDefaultState() override;
+
+private:
+	QString _replacementText;
+	int _width = 1;
+	int _height = 1;
+	const std::shared_ptr<Ui::DynamicImage> _image;
+	const Fn<void()> _repaint;
+	bool _subscribed = false;
 
 };
 
@@ -1021,6 +1124,97 @@ void InlineFormulaObjectCache::invalidateRasterCache() {
 	}
 }
 
+InlineIvImageObject::InlineIvImageObject(
+	QString replacementText,
+	int width,
+	int height,
+	std::shared_ptr<Ui::DynamicImage> image,
+	Fn<void()> repaint)
+: _replacementText(std::move(replacementText))
+, _width(std::max(width, 1))
+, _height(std::max(height, 1))
+, _image(std::move(image))
+, _repaint(std::move(repaint)) {
+}
+
+int InlineIvImageObject::width() {
+	return _width;
+}
+
+QString InlineIvImageObject::entityData() {
+	return QString();
+}
+
+std::optional<Ui::Text::CustomEmojiVerticalMetrics>
+InlineIvImageObject::vertical(const style::TextStyle &textStyle) {
+	if (_height > 0) {
+		return Ui::Text::CustomEmojiVerticalMetrics{
+			.ascent = _height,
+			.descent = 0,
+		};
+	}
+	const auto ascent = std::max(textStyle.font->ascent, 0);
+	return Ui::Text::CustomEmojiVerticalMetrics{
+		.ascent = ascent,
+		.descent = std::max(textStyle.font->height - ascent, 0),
+	};
+}
+
+QString InlineIvImageObject::replacementText() {
+	return _replacementText;
+}
+
+Ui::Text::CustomEmojiSemantics InlineIvImageObject::semantics() {
+	return {
+		.isEmoji = false,
+		.isRealCustomEmoji = false,
+		.exportEntity = false,
+		.unloadPersistentAnimation = false,
+		.allowCustomEmojiClick = false,
+	};
+}
+
+void InlineIvImageObject::paint(QPainter &p, const Context &context) {
+	if (_image) {
+		if (!_subscribed && _repaint) {
+			_subscribed = true;
+			_image->subscribeToUpdates(_repaint);
+		}
+		if (const auto image = _image->image(std::max(_width, _height));
+			!image.isNull()) {
+			p.drawImage(
+				QRect(context.position, QSize(_width, _height)),
+				image);
+			return;
+		}
+	}
+	if (_replacementText.isEmpty()) {
+		return;
+	}
+	p.save();
+	p.setPen(context.textColor);
+	p.drawText(
+		QRect(context.position, QSize(_width, _height)),
+		Qt::AlignCenter | Qt::TextWordWrap,
+		_replacementText);
+	p.restore();
+}
+
+void InlineIvImageObject::unload() {
+	if (_subscribed && _image) {
+		_subscribed = false;
+		_image->subscribeToUpdates(nullptr);
+	}
+}
+
+bool InlineIvImageObject::ready() {
+	return true;
+}
+
+bool InlineIvImageObject::readyInDefaultState() {
+	return true;
+}
+
 std::unique_ptr<Ui::Text::CustomEmoji> InlineFormulaObjectCache::create(
 		const InlineTextObjectFormulaData &data,
 		const style::TextStyle &textStyle,
@@ -1086,28 +1280,52 @@ void SetTextLeaf(
 		const TextWithEntities &text,
 		const std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		int minResizeWidth) {
 	*leaf = Ui::Text::String(TextMinResizeWidth(minResizeWidth));
 	auto context = Ui::Text::MarkedContext();
 	context.customEmojiFactory = [
 		formulas,
 		inlineFormulaObjects,
+		mediaRuntime,
 		&textStyle
-	](QStringView data, const Ui::Text::MarkedContext &) {
+	](
+			QStringView data,
+			const Ui::Text::MarkedContext &context
+	) -> std::unique_ptr<Ui::Text::CustomEmoji> {
 		const auto parsed = ParseInlineTextObjectEntity(data.toString());
-		if (!parsed || !inlineFormulaObjects) {
+		if (!parsed) {
 			return std::unique_ptr<Ui::Text::CustomEmoji>();
 		}
 		switch (parsed->kind) {
 		case InlineTextObjectKind::Formula: {
+			if (!inlineFormulaObjects) {
+				return std::unique_ptr<Ui::Text::CustomEmoji>();
+			}
 			const auto formula = std::get_if<InlineTextObjectFormulaData>(
 				&parsed->data);
 			return formula
 				? inlineFormulaObjects->create(*formula, textStyle, formulas)
 				: std::unique_ptr<Ui::Text::CustomEmoji>();
+		} break;
+		case InlineTextObjectKind::IvImage: {
+			const auto image = std::get_if<InlineTextObjectIvImageData>(
+				&parsed->data);
+			if (!image) {
+				return std::unique_ptr<Ui::Text::CustomEmoji>();
+			}
+			const auto resolved = mediaRuntime
+				? mediaRuntime->resolveInlineImage(
+					image->documentId,
+					QSize(image->width, image->height))
+				: nullptr;
+			return std::make_unique<InlineIvImageObject>(
+				image->replacementText,
+				image->width,
+				image->height,
+				std::move(resolved),
+				context.repaint);
 		}
-		case InlineTextObjectKind::IvImage:
-			return std::unique_ptr<Ui::Text::CustomEmoji>();
 		}
 		return std::unique_ptr<Ui::Text::CustomEmoji>();
 	};
@@ -1141,6 +1359,7 @@ void SetTextLeaf(
 		bool header,
 		const std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		const style::Markdown &markdown) {
 	auto result = TableCellLayoutData();
 	const auto &textStyle = TableCellTextStyle(header, markdown);
@@ -1151,6 +1370,7 @@ void SetTextLeaf(
 		prepared.text,
 		formulas,
 		inlineFormulaObjects,
+		mediaRuntime,
 		TableCellTextMinResizeWidth(textStyle, markdown));
 	BindLinks(&result.cell.leaf, prepared.links);
 	result.preferredWidth = result.cell.leaf.maxWidth();
@@ -1247,6 +1467,7 @@ void SetTextLeaf(
 		const PreparedBlock &prepared,
 		const std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		const style::Markdown &markdown,
 		int left,
 		int top,
@@ -1264,6 +1485,7 @@ void SetTextLeaf(
 		prepared.text,
 		formulas,
 		inlineFormulaObjects,
+		mediaRuntime,
 		block.textWidth);
 	BindLinks(&block.leaf, prepared.links);
 
@@ -1412,6 +1634,7 @@ void SetTextLeaf(
 		const PreparedBlock &prepared,
 		std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		const style::Markdown &markdown,
 		int left,
 		int top,
@@ -1437,6 +1660,7 @@ void SetTextLeaf(
 				preparedRow.header,
 				formulas,
 				inlineFormulaObjects,
+				mediaRuntime,
 				markdown));
 		}
 		rows.push_back(std::move(row));
@@ -1520,12 +1744,165 @@ void SetTextLeaf(
 	return block;
 }
 
+[[nodiscard]] LaidOutBlock LayoutPlaceholderBlock(
+		const PreparedBlock &prepared,
+		std::vector<PreparedFormulaSlot> *formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &markdown,
+		int left,
+		int top,
+		int width) {
+	auto block = LaidOutBlock();
+	block.kind = PreparedBlockKind::Placeholder;
+	block.anchorId = prepared.anchorId;
+	block.copyText = prepared.placeholder.copyText;
+	block.labelText = prepared.placeholder.label;
+
+	const auto &style = markdown.placeholder;
+	const auto blockWidth = std::max(width, 1);
+	const auto contentLeft = left + style.padding.left();
+	const auto contentWidth = std::max(
+		blockWidth - style.padding.left() - style.padding.right(),
+		1);
+	block.labelWidth = contentWidth;
+	block.labelLeaf = Ui::Text::String(TextMinResizeWidth(contentWidth));
+	block.labelLeaf.setMarkedText(
+		style.labelStyle,
+		TextWithEntities::Simple(block.labelText),
+		kIvMarkedTextOptions);
+	const auto labelHeight = std::max(
+		block.labelLeaf.countHeight(contentWidth, true),
+		TextLineHeight(style.labelStyle));
+	const auto mediaHeight = std::max(
+		style.minHeight,
+		labelHeight + style.padding.top() + style.padding.bottom());
+	block.mediaRect = QRect(left, top, blockWidth, mediaHeight);
+	block.visibleMediaRect = block.mediaRect;
+	block.labelRect = QRect(
+		contentLeft,
+		top + std::max((mediaHeight - labelHeight) / 2, 0),
+		contentWidth,
+		labelHeight);
+
+	auto bottom = top + mediaHeight;
+	if (!prepared.text.text.isEmpty()) {
+		block.textWidth = contentWidth;
+		SetTextLeaf(
+			&block.leaf,
+			markdown.body,
+			prepared.text,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
+			block.textWidth);
+		BindLinks(&block.leaf, prepared.links);
+		const auto captionTop = bottom + style.captionSkip;
+		const auto captionHeight = std::max(
+			block.leaf.countHeight(block.textWidth, true),
+			TextLineHeight(markdown.body));
+		block.textRect = QRect(
+			contentLeft,
+			captionTop,
+			block.textWidth,
+			captionHeight);
+		bottom = captionTop + captionHeight;
+	}
+
+	block.contentRect = QRect(
+		left,
+		top,
+		blockWidth,
+		std::max(bottom - top, mediaHeight));
+	block.outer = block.contentRect;
+	return block;
+}
+
+[[nodiscard]] LaidOutBlock LayoutPhotoBlock(
+		const PreparedBlock &prepared,
+		std::vector<PreparedFormulaSlot> *formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &markdown,
+		int left,
+		int top,
+		int width) {
+	auto block = LaidOutBlock();
+	block.kind = PreparedBlockKind::Photo;
+	block.anchorId = prepared.anchorId;
+	block.copyText = kPhotoCopyLabel;
+
+	const auto &style = markdown.photo;
+	const auto blockWidth = std::max(width, 1);
+	const auto mediaLeft = left + style.padding.left();
+	const auto mediaTop = top + style.padding.top();
+	const auto mediaWidth = std::max(
+		blockWidth - style.padding.left() - style.padding.right(),
+		1);
+	const auto aspectWidth = std::max(prepared.photo.width, 1);
+	const auto aspectHeight = std::max(prepared.photo.height, 1);
+	const auto mediaHeight = std::max(
+		int((int64(mediaWidth) * aspectHeight + aspectWidth - 1) / aspectWidth),
+		1);
+	block.mediaRect = QRect(mediaLeft, mediaTop, mediaWidth, mediaHeight);
+	block.visibleMediaRect = block.mediaRect;
+
+	if (mediaRuntime) {
+		block.photoRuntime = mediaRuntime->resolvePhoto(prepared.photo.photoId);
+	}
+	if (block.photoRuntime) {
+		const auto size = QSize(mediaWidth, mediaHeight);
+		block.thumbnailImage = block.photoRuntime->thumbnail(size);
+		block.fullImage = block.photoRuntime->full(size);
+	}
+	if (!prepared.photo.urlOverride.isEmpty()) {
+		block.activation.kind = MediaActivationKind::ExternalUrl;
+		block.activation.url = prepared.photo.urlOverride;
+	} else if (prepared.photo.viewerOpen && block.photoRuntime) {
+		block.activation.kind = MediaActivationKind::Photo;
+		block.activation.photo = block.photoRuntime;
+	}
+
+	auto bottom = mediaTop + mediaHeight + style.padding.bottom();
+	if (!prepared.text.text.isEmpty()) {
+		block.textWidth = mediaWidth;
+		SetTextLeaf(
+			&block.leaf,
+			markdown.body,
+			prepared.text,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
+			block.textWidth);
+		BindLinks(&block.leaf, prepared.links);
+		const auto captionTop = bottom + style.captionSkip;
+		const auto captionHeight = std::max(
+			block.leaf.countHeight(block.textWidth, true),
+			TextLineHeight(markdown.body));
+		block.textRect = QRect(
+			mediaLeft,
+			captionTop,
+			block.textWidth,
+			captionHeight);
+		bottom = captionTop + captionHeight;
+	}
+
+	block.contentRect = QRect(
+		mediaLeft,
+		mediaTop,
+		mediaWidth,
+		std::max(bottom - mediaTop, mediaHeight));
+	block.outer = QRect(left, top, blockWidth, std::max(bottom - top, mediaHeight));
+	return block;
+}
+
 [[nodiscard]] LaidOutBlock LayoutBlock(
 	const PreparedBlock &prepared,
 	std::vector<PreparedFormulaSlot> *formulas,
 	std::vector<RenderedFormula> *renderedFormulas,
 	MathRenderer *renderer,
 	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
 	const style::Markdown &markdown,
 	int left,
 	int top,
@@ -1538,6 +1915,7 @@ void SetTextLeaf(
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
 		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		std::vector<LaidOutBlock> *blocks,
 		const style::Markdown &markdown,
 		int left,
@@ -1556,6 +1934,7 @@ void SetTextLeaf(
 			renderedFormulas,
 			renderer,
 			inlineFormulaObjects,
+			mediaRuntime,
 			markdown,
 			left,
 			y,
@@ -1574,6 +1953,7 @@ void SetTextLeaf(
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
 		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		const style::Markdown &markdown,
 		int left,
 		int top,
@@ -1623,6 +2003,7 @@ void SetTextLeaf(
 		renderedFormulas,
 		renderer,
 		inlineFormulaObjects,
+		mediaRuntime,
 		&block.children,
 		markdown,
 		bodyLeft,
@@ -1667,6 +2048,7 @@ void SetTextLeaf(
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
 		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		const style::Markdown &markdown,
 		int left,
 		int top,
@@ -1702,6 +2084,7 @@ void SetTextLeaf(
 				renderedFormulas,
 				renderer,
 				inlineFormulaObjects,
+				mediaRuntime,
 				markdown,
 				listLeft,
 				y,
@@ -1714,6 +2097,7 @@ void SetTextLeaf(
 				renderedFormulas,
 				renderer,
 				inlineFormulaObjects,
+				mediaRuntime,
 				markdown,
 				listLeft,
 				y,
@@ -1738,6 +2122,7 @@ void SetTextLeaf(
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
 		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		const style::Markdown &markdown,
 		int left,
 		int top,
@@ -1770,6 +2155,7 @@ void SetTextLeaf(
 		renderedFormulas,
 		renderer,
 		inlineFormulaObjects,
+		mediaRuntime,
 		&block.children,
 		markdown,
 		contentLeft,
@@ -1798,6 +2184,7 @@ void SetTextLeaf(
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
 		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		const style::Markdown &markdown,
 		int left,
 		int top,
@@ -1815,6 +2202,7 @@ void SetTextLeaf(
 		prepared.text,
 		formulas,
 		inlineFormulaObjects,
+		mediaRuntime,
 		block.textWidth);
 	BindLinks(&block.leaf, prepared.links);
 
@@ -1836,6 +2224,7 @@ void SetTextLeaf(
 			renderedFormulas,
 			renderer,
 			inlineFormulaObjects,
+			mediaRuntime,
 			&block.children,
 			markdown,
 			childLeft,
@@ -1858,6 +2247,7 @@ void SetTextLeaf(
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
 		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		const style::Markdown &markdown,
 		int left,
 		int top,
@@ -1870,6 +2260,7 @@ void SetTextLeaf(
 			prepared,
 			formulas,
 			inlineFormulaObjects,
+			mediaRuntime,
 			markdown,
 			left,
 			top,
@@ -1885,6 +2276,7 @@ void SetTextLeaf(
 			renderedFormulas,
 			renderer,
 			inlineFormulaObjects,
+			mediaRuntime,
 			markdown,
 			left,
 			top,
@@ -1897,6 +2289,7 @@ void SetTextLeaf(
 			renderedFormulas,
 			renderer,
 			inlineFormulaObjects,
+			mediaRuntime,
 			markdown,
 			left,
 			top,
@@ -1910,6 +2303,7 @@ void SetTextLeaf(
 			renderedFormulas,
 			renderer,
 			inlineFormulaObjects,
+			mediaRuntime,
 			markdown,
 			left,
 			top,
@@ -1922,6 +2316,27 @@ void SetTextLeaf(
 			prepared,
 			formulas,
 			inlineFormulaObjects,
+			mediaRuntime,
+			markdown,
+			left,
+			top,
+			width);
+	case PreparedBlockKind::Photo:
+		return LayoutPhotoBlock(
+			prepared,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
+			markdown,
+			left,
+			top,
+			width);
+	case PreparedBlockKind::Placeholder:
+		return LayoutPlaceholderBlock(
+			prepared,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
 			markdown,
 			left,
 			top,
@@ -1933,6 +2348,7 @@ void SetTextLeaf(
 			renderedFormulas,
 			renderer,
 			inlineFormulaObjects,
+			mediaRuntime,
 			markdown,
 			left,
 			top,
@@ -1943,6 +2359,7 @@ void SetTextLeaf(
 		prepared,
 		formulas,
 		inlineFormulaObjects,
+		mediaRuntime,
 		markdown,
 		left,
 		top,
@@ -1966,6 +2383,7 @@ void CollectSelectableSegments(
 	}
 	for (auto &block : *blocks) {
 		block.segmentIndex = -1;
+		block.secondarySegmentIndex = -1;
 		switch (block.kind) {
 		case PreparedBlockKind::Paragraph:
 		case PreparedBlockKind::Heading:
@@ -2032,6 +2450,33 @@ void CollectSelectableSegments(
 						segments,
 						std::move(cellSegment));
 				}
+			}
+		} break;
+		case PreparedBlockKind::Placeholder:
+		case PreparedBlockKind::Photo: {
+			auto segment = SelectableSegment();
+			segment.kind = (block.kind == PreparedBlockKind::Photo)
+				? SelectableSegmentKind::Photo
+				: SelectableSegmentKind::Placeholder;
+			segment.block = &block;
+			segment.outerRect = block.mediaRect;
+			segment.length = 1;
+			block.segmentIndex = AddSelectableSegment(
+				segments,
+				std::move(segment));
+			if (!block.textRect.isEmpty() && !block.leaf.toString().isEmpty()) {
+				auto textSegment = SelectableSegment();
+				textSegment.kind = SelectableSegmentKind::TextLeaf;
+				textSegment.leaf = &block.leaf;
+				textSegment.block = &block;
+				textSegment.outerRect = block.textRect;
+				textSegment.textRect = block.textRect;
+				textSegment.textWidth = block.textWidth;
+				textSegment.length = LeafTextLength(block.leaf);
+				textSegment.mediaSegmentIndex = block.segmentIndex;
+				block.secondarySegmentIndex = AddSelectableSegment(
+					segments,
+					std::move(textSegment));
 			}
 		} break;
 		case PreparedBlockKind::List:
@@ -2630,7 +3075,136 @@ void PaintQuoteBlock(
 		outerWidth,
 		caches,
 		selectionState,
-		clip.intersected(block.contentRect));
+			clip.intersected(block.contentRect));
+}
+
+void PaintPlaceholderBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		const MarkdownArticlePaintCaches &caches,
+		const PaintSelectionState &selectionState,
+		QRect clip) {
+	const auto visible = clip.intersected(block.visibleMediaRect);
+	if (!visible.isEmpty()) {
+		p.save();
+		p.setClipRect(visible);
+		p.fillRect(block.mediaRect, st::windowBgOver->c);
+		p.setPen(st::windowSubTextFg->c);
+		PaintTextLeaf(
+			p,
+			block.labelLeaf,
+			caches,
+			block.labelRect,
+			block.labelWidth,
+			visible,
+			style::al_center);
+		if (block.segmentIndex >= 0
+			&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
+			p.fillRect(block.visibleMediaRect, p.textPalette().selectOverlay);
+		}
+		p.restore();
+	}
+	if (!block.textRect.isEmpty()) {
+		p.setPen(st::defaultMarkdown.textColor->c);
+		PaintTextLeaf(
+			p,
+			block.leaf,
+			caches,
+			block.textRect,
+			block.textWidth,
+			clip,
+			style::al_left,
+			TextSelectionForSegmentIndex(
+				selectionState,
+				block.secondarySegmentIndex));
+	}
+}
+
+void PaintPhotoProgress(
+		Painter &p,
+		QRect rect,
+		const style::MarkdownPhoto &style,
+		double progress) {
+	const auto size = std::min({
+		style.progressSize,
+		rect.width(),
+		rect.height(),
+	});
+	if (size <= 0) {
+		return;
+	}
+	const auto thickness = std::max(style.progressWidth, 1);
+	const auto ring = QRect(
+		rect.center().x() - (size / 2),
+		rect.center().y() - (size / 2),
+		size,
+		size);
+	auto hq = PainterHighQualityEnabler(p);
+	p.setBrush(Qt::NoBrush);
+	p.setPen(QPen(QColor(0, 0, 0, 96), thickness));
+	p.drawEllipse(ring);
+	p.setPen(QPen(st::windowFg->c, thickness));
+	p.drawArc(
+		ring,
+		90 * 16,
+		-int(std::round(360. * 16. * std::clamp(progress, 0., 1.))));
+}
+
+void PaintPhotoBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		const MarkdownArticlePaintCaches &caches,
+		const PaintSelectionState &selectionState,
+		QRect clip) {
+	const auto visible = clip.intersected(block.visibleMediaRect);
+	if (!visible.isEmpty()) {
+		p.save();
+		p.setClipRect(visible);
+		p.fillRect(block.mediaRect, st::windowBgOver->c);
+		SubscribeDynamicImage(
+			block.thumbnailImage,
+			caches.repaint,
+			&block.thumbnailSubscribed);
+		SubscribeDynamicImage(
+			block.fullImage,
+			caches.repaint,
+			&block.fullSubscribed);
+		const auto paintedThumb = PaintDynamicImage(p, block.thumbnailImage, block.mediaRect);
+		const auto paintedFull = PaintDynamicImage(p, block.fullImage, block.mediaRect);
+		if (!paintedThumb && !paintedFull) {
+			p.setPen(st::windowSubTextFg->c);
+			p.drawText(
+				block.mediaRect,
+				Qt::AlignCenter | Qt::TextWordWrap,
+				block.copyText);
+		}
+		if (block.photoRuntime && block.photoRuntime->loading()) {
+			PaintPhotoProgress(
+				p,
+				block.mediaRect,
+				st::defaultMarkdown.photo,
+				block.photoRuntime->progress());
+		}
+		if (block.segmentIndex >= 0
+			&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
+			p.fillRect(block.visibleMediaRect, p.textPalette().selectOverlay);
+		}
+		p.restore();
+	}
+	if (!block.textRect.isEmpty()) {
+		p.setPen(st::defaultMarkdown.textColor->c);
+		PaintTextLeaf(
+			p,
+			block.leaf,
+			caches,
+			block.textRect,
+			block.textWidth,
+			clip,
+			style::al_left,
+			TextSelectionForSegmentIndex(
+				selectionState,
+				block.secondarySegmentIndex));
+	}
 }
 
 void PaintBlock(
@@ -2750,6 +3324,22 @@ void PaintBlock(
 		break;
 	case PreparedBlockKind::Table:
 		PaintTableBlock(
+			p,
+			block,
+			caches,
+			selectionState,
+			clip);
+		break;
+	case PreparedBlockKind::Photo:
+		PaintPhotoBlock(
+			p,
+			block,
+			caches,
+			selectionState,
+			clip);
+		break;
+	case PreparedBlockKind::Placeholder:
+		PaintPlaceholderBlock(
 			p,
 			block,
 			caches,
@@ -2902,6 +3492,18 @@ void RebuildVisibleSegmentLookup(
 	return (from < till) ? SegmentSpan{ from, till } : SegmentSpan();
 }
 
+[[nodiscard]] std::optional<PreparedLink> PreparedLinkForMediaActivation(
+		const MediaActivation &activation) {
+	if (activation.kind != MediaActivationKind::ExternalUrl
+		|| activation.url.isEmpty()) {
+		return std::nullopt;
+	}
+	return PreparedLink{
+		.kind = PreparedLinkKind::External,
+		.target = activation.url,
+	};
+}
+
 [[nodiscard]] MarkdownArticleHitTestResult HitSegmentBoundary(
 		const SelectableSegment &segment,
 		int offset) {
@@ -2958,6 +3560,15 @@ void RebuildVisibleSegmentLookup(
 	auto result = HitSegmentBoundary(
 		segment,
 		after ? SegmentLength(segment) : 0);
+	if (segment.block) {
+		result.mediaActivation = segment.block->activation;
+		if (const auto prepared = PreparedLinkForMediaActivation(
+				result.mediaActivation)) {
+			result.preparedLink = prepared;
+			result.state.link = std::make_shared<PreparedLinkClickHandler>(
+				*prepared);
+		}
+	}
 	result.direct = true;
 	return result;
 }
@@ -3068,6 +3679,7 @@ public:
 			&_formulaRenders,
 			_renderer.get(),
 			&_inlineFormulaObjects,
+			_content.mediaRuntime,
 			&blocks,
 			markdown,
 			page.left(),
@@ -3254,6 +3866,12 @@ public:
 		auto pieces = std::vector<TextForMimeData>();
 		for (const auto &segment : _segments) {
 			if (segment.isTextLeaf()) {
+				if (segment.mediaSegmentIndex >= 0
+					&& WholeSegmentSelected(
+						selectionState,
+						segment.mediaSegmentIndex)) {
+					continue;
+				}
 				if (const auto textSelection = TextSelectionForSegment(
 						segment,
 						selectionState);
@@ -3369,6 +3987,7 @@ private:
 			&_formulaRenders,
 			_renderer.get(),
 			&_inlineFormulaObjects,
+			_content.mediaRuntime,
 			&_blocks,
 			markdown,
 			page.left(),
@@ -3400,6 +4019,14 @@ private:
 		case SelectableSegmentKind::Table:
 			return segment.block
 				? CopyTextForTable(*segment.block)
+				: TextForMimeData();
+		case SelectableSegmentKind::Placeholder:
+			return segment.block
+				? CopyTextForPlaceholderBlock(*segment.block)
+				: TextForMimeData();
+		case SelectableSegmentKind::Photo:
+			return segment.block
+				? CopyTextForPhotoBlock(*segment.block)
 				: TextForMimeData();
 		}
 		return TextForMimeData();
