@@ -154,6 +154,7 @@ public:
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
+	void visibleTopBottomUpdated(int visibleTop, int visibleBottom) override;
 	void keyPressEvent(QKeyEvent *e) override;
 	void contextMenuEvent(QContextMenuEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
@@ -190,6 +191,7 @@ private:
 	[[nodiscard]] TextForMimeData getSelectedText() const;
 	void copySelectedText();
 
+	void syncArticleVisibleTopBottom();
 	void relayoutCurrentWidth(bool clearSelection);
 	void forceRelayoutCurrentWidth();
 	void updateHover(const MarkdownArticleHitTestResult &state);
@@ -224,6 +226,7 @@ private:
 	TextSelection _dragExpandedSelection;
 	int _lastRelayoutMs = 0;
 	int _zoom = 100;
+	Ui::VisibleRange _visibleRange;
 	base::unique_qptr<Ui::PopupMenu> _contextMenu;
 
 };
@@ -313,6 +316,7 @@ int MarkdownDocumentWidget::resizeGetHeight(int newWidth) {
 	auto timer = QElapsedTimer();
 	timer.start();
 	const auto layoutHeight = _article->resizeGetHeight(layoutWidth);
+	syncArticleVisibleTopBottom();
 	_lastRelayoutMs = int(timer.elapsed());
 	return std::max(int(std::ceil(layoutHeight * scale)), 1);
 }
@@ -348,6 +352,16 @@ void MarkdownDocumentWidget::paintEvent(QPaintEvent *e) {
 		_selection,
 		&_selectionEndpoints);
 	p.restore();
+}
+
+void MarkdownDocumentWidget::visibleTopBottomUpdated(
+		int visibleTop,
+		int visibleBottom) {
+	_visibleRange = Ui::VisibleRange{
+		.top = visibleTop,
+		.bottom = visibleBottom,
+	};
+	syncArticleVisibleTopBottom();
 }
 
 void MarkdownDocumentWidget::keyPressEvent(QKeyEvent *e) {
@@ -669,6 +683,16 @@ void MarkdownDocumentWidget::copySelectedText() {
 	}
 }
 
+void MarkdownDocumentWidget::syncArticleVisibleTopBottom() {
+	if (!_article) {
+		return;
+	}
+	const auto scale = zoomScale();
+	_article->setVisibleTopBottom(
+		int(std::floor(_visibleRange.top / scale)),
+		int(std::ceil(_visibleRange.bottom / scale)));
+}
+
 void MarkdownDocumentWidget::relayoutCurrentWidth(bool clearSelection) {
 	if (clearSelection) {
 		this->clearSelection();
@@ -682,6 +706,7 @@ void MarkdownDocumentWidget::relayoutCurrentWidth(bool clearSelection) {
 	auto timer = QElapsedTimer();
 	timer.start();
 	const auto articleHeight = _article->resizeGetHeight(layoutWidth);
+	syncArticleVisibleTopBottom();
 	(void)articleHeight;
 	_lastRelayoutMs = int(timer.elapsed());
 }
@@ -893,6 +918,7 @@ private:
 	void activateLink(const PreparedLink &link, Qt::MouseButton button);
 	void applyPreparedContent(MarkdownArticleContent prepared, int prepareMs);
 	[[nodiscard]] bool scrollToAnchor(const QString &anchorId);
+	void updateBodyVisibleTopBottom();
 	void updateChildrenGeometry(QSize size);
 	void updateFailureGeometry();
 	void logPreparationSummary(
@@ -957,6 +983,13 @@ MarkdownPreviewRoot::MarkdownPreviewRoot(
 
 	sizeValue() | rpl::on_next([=](QSize size) {
 		updateChildrenGeometry(size);
+	}, lifetime());
+
+	rpl::combine(
+		_scroll->scrollTopValue(),
+		_scroll->heightValue()
+	) | rpl::on_next([=](int, int) {
+		updateBodyVisibleTopBottom();
 	}, lifetime());
 
 	style::PaletteChanged() | rpl::on_next([=] {
@@ -1073,6 +1106,7 @@ void MarkdownPreviewRoot::applyPreparedContent(
 	if (_options.delegate) {
 		_body->setZoom(_options.delegate->ivZoom());
 	}
+	updateBodyVisibleTopBottom();
 	_scroll->show();
 	_body->show();
 	_failure->hide();
@@ -1101,10 +1135,18 @@ bool MarkdownPreviewRoot::scrollToAnchor(const QString &anchorId) {
 	return true;
 }
 
+void MarkdownPreviewRoot::updateBodyVisibleTopBottom() {
+	if (_body) {
+		const auto scrollTop = _scroll->scrollTop();
+		_body->setVisibleTopBottom(scrollTop, scrollTop + _scroll->height());
+	}
+}
+
 void MarkdownPreviewRoot::updateChildrenGeometry(QSize size) {
 	_scroll->setGeometry(QRect(QPoint(), size));
 	if (_body) {
 		_body->resizeToWidth(_scroll->width());
+		updateBodyVisibleTopBottom();
 	}
 	updateFailureGeometry();
 }

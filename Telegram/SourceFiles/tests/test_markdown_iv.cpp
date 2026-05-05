@@ -8,6 +8,8 @@
 #include "ui/style/style_core.h"
 #include "ui/style/style_core_scale.h"
 
+#include "styles/style_iv.h"
+
 #include <QtCore/QByteArray>
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
@@ -978,6 +980,42 @@ void PrintPrepareSummary(
 			if (!hit.valid()
 				|| !hit.state.uponSymbol
 				|| (int(hit.state.symbol) != offset)) {
+				continue;
+			}
+			left = std::min(left, x);
+			top = std::min(top, y);
+			right = std::max(right, x);
+			bottom = std::max(bottom, y);
+		}
+	}
+	return (right >= left) && (bottom >= top)
+		? std::make_optional(QRect(QPoint(left, top), QPoint(right, bottom)))
+		: std::nullopt;
+}
+
+[[nodiscard]] std::optional<QRect> SegmentHitBounds(
+		MarkdownArticle *article,
+		int width,
+		int height,
+		int expectedSegmentIndex) {
+	if (!article
+		|| (width <= 0)
+		|| (height <= 0)
+		|| (expectedSegmentIndex < 0)) {
+		return std::nullopt;
+	}
+	auto flags = Ui::Text::StateRequest::Flags();
+	flags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+	auto left = width;
+	auto top = height;
+	auto right = -1;
+	auto bottom = -1;
+	for (auto y = 0; y != height; ++y) {
+		for (auto x = 0; x != width; ++x) {
+			const auto hit = article->hitTest(QPoint(x, y), flags);
+			if (!hit.valid()
+				|| !hit.direct
+				|| (hit.segmentIndex != expectedSegmentIndex)) {
 				continue;
 			}
 			left = std::min(left, x);
@@ -2628,6 +2666,192 @@ void CheckArticleRenderSmoke(
 	}
 }
 
+void CheckArticleHorizontalRelayoutRegression(bool *ok) {
+	const auto label = FromLatin1("generated-horizontal-relayout-regression.md");
+	const auto parsed = ParseMarkdownForIv(
+		QByteArray(R"(# Horizontal resize regression heading that wraps when narrowed
+
+This body paragraph also needs to reflow after a horizontal resize so the article must rebuild later block offsets instead of leaving them behind.
+
+$$
+\int_0^1 x^2 \, dx = \frac{1}{3}
+$$
+
+ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
+)"),
+		ParseOptions{ label });
+	Check(
+		parsed.ok,
+		label + FromLatin1(" parse failed: ") + parsed.error,
+		ok);
+	if (!parsed.ok) {
+		return;
+	}
+	const auto &topLevelBlocks = parsed.document.document.children;
+	Check(
+		topLevelBlocks.size() == 4,
+		label + FromLatin1(" parse top-level block count"),
+		ok);
+	if (topLevelBlocks.size() != 4) {
+		return;
+	}
+	Check(
+		topLevelBlocks[0].kind == NodeKind::Heading,
+		label + FromLatin1(" parse heading block kind"),
+		ok);
+	Check(
+		topLevelBlocks[1].kind == NodeKind::Paragraph,
+		label + FromLatin1(" parse body paragraph block kind"),
+		ok);
+	Check(
+		topLevelBlocks[2].kind == NodeKind::DisplayMath,
+		label + FromLatin1(" parse display math block kind"),
+		ok);
+	Check(
+		topLevelBlocks[3].kind == NodeKind::Paragraph,
+		label + FromLatin1(" parse trailing paragraph block kind"),
+		ok);
+	auto renderer = std::make_shared<MathRenderer>();
+	auto prepared = PrepareParsedDocumentForTest(
+		parsed.document,
+		label,
+		renderer);
+	Check(
+		!prepared.failure.failed(),
+		label + FromLatin1(" prepare failure: ")
+			+ PrepareFailureReason(prepared.failure),
+		ok);
+	if (prepared.failure.failed()) {
+		return;
+	}
+	Check(
+		prepared.blocks.blocks.size() == 4,
+		label + FromLatin1(" prepared top-level block count"),
+		ok);
+	if (prepared.blocks.blocks.size() != 4) {
+		return;
+	}
+	const auto wideWidth = 640;
+	const auto narrowWidth = 280;
+	auto wideHeight = 0;
+	auto article = BuildArticleForTest(
+		std::move(prepared),
+		renderer,
+		wideWidth,
+		&wideHeight);
+	const auto wideImage = PaintArticleForTest(
+		article.get(),
+		wideWidth,
+		wideHeight);
+	Check(
+		HasPaintedPixels(wideImage),
+		label + FromLatin1(" wide paint produced pixels"),
+		ok);
+	const auto wideFinalBounds = SegmentHitBounds(
+		article.get(),
+		wideWidth,
+		wideHeight,
+		3);
+	Check(
+		wideFinalBounds.has_value(),
+		label + FromLatin1(" wide final segment hit bounds"),
+		ok);
+	const auto narrowHeight = article->resizeGetHeight(narrowWidth);
+	const auto narrowImage = PaintArticleForTest(
+		article.get(),
+		narrowWidth,
+		narrowHeight);
+	Check(
+		HasPaintedPixels(narrowImage),
+		label + FromLatin1(" narrow paint produced pixels"),
+		ok);
+	Check(
+		narrowHeight > wideHeight,
+		label + FromLatin1(" narrow relayout height grows"),
+		ok);
+	auto segmentBounds = std::vector<std::optional<QRect>>();
+	segmentBounds.reserve(4);
+	for (auto segmentIndex = 0; segmentIndex != 4; ++segmentIndex) {
+		segmentBounds.push_back(SegmentHitBounds(
+			article.get(),
+			narrowWidth,
+			narrowHeight,
+			segmentIndex));
+		Check(
+			segmentBounds.back().has_value(),
+			label + FromLatin1(" segment hit bounds ")
+				+ QString::number(segmentIndex),
+			ok);
+	}
+	auto haveAllSegmentBounds = true;
+	for (const auto &bounds : segmentBounds) {
+		if (!bounds.has_value()) {
+			haveAllSegmentBounds = false;
+			break;
+		}
+	}
+	if (!haveAllSegmentBounds) {
+		return;
+	}
+	for (auto segmentIndex = 1; segmentIndex != 4; ++segmentIndex) {
+		const auto &previousBounds = *segmentBounds[segmentIndex - 1];
+		const auto &currentBounds = *segmentBounds[segmentIndex];
+		Check(
+			currentBounds.top() > previousBounds.top(),
+			label + FromLatin1(" segment document order ")
+				+ QString::number(segmentIndex),
+			ok);
+		Check(
+			currentBounds.top() > previousBounds.bottom(),
+			label + FromLatin1(" segment vertical separation ")
+				+ QString::number(segmentIndex),
+			ok);
+	}
+	const auto &finalBounds = *segmentBounds.back();
+	if (wideFinalBounds) {
+		Check(
+			finalBounds.height() > wideFinalBounds->height(),
+			label + FromLatin1(" long final segment wraps when narrowed"),
+			ok);
+	}
+	Check(
+		finalBounds.height() > st::defaultMarkdown.body.lineHeight,
+		label + FromLatin1(" long final segment spans multiple lines"),
+		ok);
+	auto lookupFlags = Ui::Text::StateRequest::Flags();
+	lookupFlags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+	auto finalProbePoint = std::optional<QPoint>();
+	for (auto y = finalBounds.top();
+		(y <= finalBounds.bottom()) && !finalProbePoint;
+		++y) {
+		for (auto x = finalBounds.left(); x <= finalBounds.right(); ++x) {
+			const auto hit = article->hitTest(QPoint(x, y), lookupFlags);
+			if (hit.valid() && hit.direct && (hit.segmentIndex == 3)) {
+				finalProbePoint = QPoint(x, y);
+				break;
+			}
+		}
+	}
+	Check(
+		finalProbePoint.has_value(),
+		label + FromLatin1(" final segment direct probe point"),
+		ok);
+	if (!finalProbePoint) {
+		return;
+	}
+	const auto finalHit = article->hitTest(*finalProbePoint, lookupFlags);
+	Check(
+		finalBounds.contains(*finalProbePoint),
+		label + FromLatin1(" final probe point inside final segment bounds"),
+		ok);
+	Check(
+		finalHit.valid()
+			&& finalHit.direct
+			&& (finalHit.segmentIndex == 3),
+		label + FromLatin1(" final segment hit after relayout"),
+		ok);
+}
+
 [[nodiscard]] int RunTests(int argc, char **argv) {
 	auto args = ParseArgs(argc, argv);
 	if (!args.ok) {
@@ -3043,6 +3267,7 @@ void CheckArticleRenderSmoke(
 	CheckPrepareCoverage(markdownFixture, latexFixture, &ok);
 	CheckPrepareLinkClassification(markdownFixture.path, &ok);
 	CheckArticleRenderSmoke(markdownFixture, latexFixture, &ok);
+	CheckArticleHorizontalRelayoutRegression(&ok);
 	CheckInlineTextObjectArticleCoverage(&ok);
 	CheckInlineHtmlCoverage(args.dump, &ok);
 	CheckValidationEdges(&ok);

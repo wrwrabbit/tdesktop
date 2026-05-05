@@ -255,6 +255,21 @@ void BindLinks(
 	return result;
 }
 
+[[nodiscard]] int TextMinResizeWidth(int width) {
+	return std::max(width, 1);
+}
+
+[[nodiscard]] int TableCellTextMinResizeWidth(
+		const style::TextStyle &textStyle,
+		const style::Markdown &markdown) {
+	const auto &padding = markdown.table.cellPadding;
+	return std::max({
+		markdown.table.minColumnWidth - padding.left() - padding.right(),
+		textStyle.font->spacew,
+		1,
+	});
+}
+
 [[nodiscard]] int LeafTextLength(const Ui::Text::String &leaf) {
 	return std::clamp(
 		int(leaf.toString().size()),
@@ -1070,7 +1085,9 @@ void SetTextLeaf(
 		const style::TextStyle &textStyle,
 		const TextWithEntities &text,
 		const std::vector<PreparedFormulaSlot> *formulas,
-		InlineFormulaObjectCache *inlineFormulaObjects) {
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		int minResizeWidth) {
+	*leaf = Ui::Text::String(TextMinResizeWidth(minResizeWidth));
 	auto context = Ui::Text::MarkedContext();
 	context.customEmojiFactory = [
 		formulas,
@@ -1133,7 +1150,8 @@ void SetTextLeaf(
 		textStyle,
 		prepared.text,
 		formulas,
-		inlineFormulaObjects);
+		inlineFormulaObjects,
+		TableCellTextMinResizeWidth(textStyle, markdown));
 	BindLinks(&result.cell.leaf, prepared.links);
 	result.preferredWidth = result.cell.leaf.maxWidth();
 	result.preferredHeight = std::max(
@@ -1245,7 +1263,8 @@ void SetTextLeaf(
 		textStyle,
 		prepared.text,
 		formulas,
-		inlineFormulaObjects);
+		inlineFormulaObjects,
+		block.textWidth);
 	BindLinks(&block.leaf, prepared.links);
 
 	const auto height = std::max(
@@ -1266,11 +1285,12 @@ void SetTextLeaf(
 	block.kind = PreparedBlockKind::CodeBlock;
 	block.copyText = prepared.text.text;
 	block.codeLanguage = prepared.codeLanguage;
+	block.textWidth = std::max(width, 1);
+	block.leaf = Ui::Text::String(TextMinResizeWidth(block.textWidth));
 	block.leaf.setMarkedText(
 		markdown.code,
 		CodeBlockText(prepared.text.text, prepared.codeLanguage),
 		kIvMarkedTextOptions);
-	block.textWidth = std::max(width, 1);
 	const auto height = std::max(
 		block.leaf.countHeight(block.textWidth, true),
 		TextLineHeight(markdown.code));
@@ -1327,11 +1347,13 @@ void SetTextLeaf(
 		const auto fallbackText = formula
 			? formula->measured.fallbackText
 			: prepared.formulaTex.trimmed();
+		block.textWidth = std::max(contentWidth - fallbackPaddingWidth, 1);
+		block.fallbackLeaf = Ui::Text::String(
+			TextMinResizeWidth(block.textWidth));
 		block.fallbackLeaf.setMarkedText(
 			markdown.displayMath.fallbackStyle,
 			TextWithEntities::Simple(fallbackText),
 			kIvMarkedTextOptions);
-		block.textWidth = std::max(contentWidth - fallbackPaddingWidth, 1);
 		block.textWidth = std::min(
 			block.textWidth,
 			std::max(block.fallbackLeaf.maxWidth(), 1));
@@ -1792,7 +1814,8 @@ void SetTextLeaf(
 		markdown.body,
 		prepared.text,
 		formulas,
-		inlineFormulaObjects);
+		inlineFormulaObjects,
+		block.textWidth);
 	BindLinks(&block.leaf, prepared.links);
 
 	const auto summaryHeight = std::max(
@@ -2820,6 +2843,65 @@ void PaintBlocks(
 		request);
 }
 
+struct LogicalVisibleRange {
+	int top = 0;
+	int bottom = 0;
+};
+
+struct SegmentSpan {
+	int from = 0;
+	int till = 0;
+
+	[[nodiscard]] bool empty() const {
+		return (from >= till);
+	}
+};
+
+[[nodiscard]] SegmentSpan FullSegmentSpan(
+		const std::vector<SelectableSegment> &segments) {
+	return { 0, int(segments.size()) };
+}
+
+void RebuildVisibleSegmentLookup(
+		const std::vector<SelectableSegment> &segments,
+		std::vector<int> *tops,
+		std::vector<int> *bottoms) {
+	if (!tops || !bottoms) {
+		return;
+	}
+	tops->clear();
+	bottoms->clear();
+	tops->reserve(segments.size());
+	bottoms->reserve(segments.size());
+	auto runningBottom = std::numeric_limits<int>::lowest();
+	for (const auto &segment : segments) {
+		tops->push_back(segment.outerRect.top());
+		runningBottom = std::max(runningBottom, segment.outerRect.bottom());
+		bottoms->push_back(runningBottom);
+	}
+}
+
+[[nodiscard]] SegmentSpan LookupVisibleSegmentSpan(
+		const std::vector<int> &tops,
+		const std::vector<int> &bottoms,
+		LogicalVisibleRange range) {
+	if (tops.empty() || bottoms.empty() || (range.bottom <= range.top)) {
+		return {};
+	}
+	const auto from = int(std::lower_bound(
+		bottoms.begin(),
+		bottoms.end(),
+		range.top) - bottoms.begin());
+	if (from >= int(tops.size())) {
+		return {};
+	}
+	const auto till = int(std::upper_bound(
+		tops.begin() + from,
+		tops.end(),
+		range.bottom - 1) - tops.begin());
+	return (from < till) ? SegmentSpan{ from, till } : SegmentSpan();
+}
+
 [[nodiscard]] MarkdownArticleHitTestResult HitSegmentBoundary(
 		const SelectableSegment &segment,
 		int offset) {
@@ -2882,11 +2964,13 @@ void PaintBlocks(
 
 [[nodiscard]] MarkdownArticleHitTestResult HitSegmentFallback(
 		const std::vector<SelectableSegment> &segments,
+		SegmentSpan span,
 		QPoint point) {
-	if (segments.empty()) {
+	if (segments.empty() || span.empty()) {
 		return {};
 	}
-	for (const auto &segment : segments) {
+	for (auto i = span.from; i != span.till; ++i) {
+		const auto &segment = segments[i];
 		const auto &rect = segment.outerRect;
 		if (point.y() < rect.top()) {
 			return HitSegmentBoundary(segment, 0);
@@ -2902,8 +2986,8 @@ void PaintBlocks(
 		}
 	}
 	return HitSegmentBoundary(
-		segments.back(),
-		SegmentLength(segments.back()));
+		segments[span.till - 1],
+		SegmentLength(segments[span.till - 1]));
 }
 
 [[nodiscard]] bool ToggleDetailsBlock(
@@ -2999,6 +3083,19 @@ public:
 		return std::max(_height, 1);
 	}
 
+	void setVisibleTopBottom(int visibleTop, int visibleBottom) {
+		if (visibleBottom <= visibleTop) {
+			_visibleRange = std::nullopt;
+			_visibleSegmentSpan = {};
+			return;
+		}
+		_visibleRange = LogicalVisibleRange{
+			.top = visibleTop,
+			.bottom = visibleBottom,
+		};
+		refreshVisibleSegmentSpan();
+	}
+
 	void paint(
 			Painter &p,
 			QRect clip,
@@ -3026,20 +3123,23 @@ public:
 	[[nodiscard]] MarkdownArticleHitTestResult hitTest(
 			QPoint point,
 			Ui::Text::StateRequest::Flags flags) const {
-		for (const auto &segment : _segments) {
+		const auto span = candidateSegmentSpan(point);
+		for (auto i = span.from; i != span.till; ++i) {
+			const auto &segment = _segments[i];
 			if (const auto result = HitTextSegment(segment, point, flags);
 				result.valid()) {
 				return result;
 			}
 		}
-		for (const auto &segment : _segments) {
+		for (auto i = span.from; i != span.till; ++i) {
+			const auto &segment = _segments[i];
 			if (const auto result = HitBlockSegment(segment, point, flags);
 				result.valid()) {
 				return result;
 			}
 		}
 		if (flags & Ui::Text::StateRequest::Flag::LookupSymbol) {
-			return HitSegmentFallback(_segments, point);
+			return HitSegmentFallback(_segments, span, point);
 		}
 		return {};
 	}
@@ -3203,12 +3303,43 @@ private:
 		return std::max(style::DevicePixelRatio(), 1);
 	}
 
+	void rebuildVisibleSegmentLookup() {
+		RebuildVisibleSegmentLookup(
+			_segments,
+			&_segmentTops,
+			&_segmentBottoms);
+		refreshVisibleSegmentSpan();
+	}
+
+	void refreshVisibleSegmentSpan() {
+		_visibleSegmentSpan = _visibleRange
+			? LookupVisibleSegmentSpan(
+				_segmentTops,
+				_segmentBottoms,
+				*_visibleRange)
+			: SegmentSpan();
+	}
+
+	[[nodiscard]] SegmentSpan candidateSegmentSpan(QPoint point) const {
+		if (_visibleRange
+			&& (_visibleRange->top <= point.y())
+			&& (point.y() < _visibleRange->bottom)) {
+			return _visibleSegmentSpan.empty()
+				? FullSegmentSpan(_segments)
+				: _visibleSegmentSpan;
+		}
+		return FullSegmentSpan(_segments);
+	}
+
 	void invalidateLayout() {
 		_width = -1;
 		_height = 0;
 		_blocks.clear();
 		_anchors.clear();
 		_segments.clear();
+		_visibleSegmentSpan = {};
+		_segmentTops.clear();
+		_segmentBottoms.clear();
 	}
 
 	void resetFormulaRasterCache() {
@@ -3225,6 +3356,9 @@ private:
 		_blocks.clear();
 		_anchors.clear();
 		_segments.clear();
+		_visibleSegmentSpan = {};
+		_segmentTops.clear();
+		_segmentBottoms.clear();
 
 		const auto &markdown = st::defaultMarkdown;
 		const auto &page = markdown.pagePadding;
@@ -3244,6 +3378,7 @@ private:
 		_height = y + page.bottom();
 		CollectAnchors(_blocks, &_anchors);
 		CollectSelectableSegments(&_blocks, &_segments);
+		rebuildVisibleSegmentLookup();
 	}
 
 	[[nodiscard]] TextForMimeData textForSegment(
@@ -3279,6 +3414,10 @@ private:
 	std::vector<LaidOutBlock> _blocks;
 	std::vector<std::pair<QString, int>> _anchors;
 	std::vector<SelectableSegment> _segments;
+	std::optional<LogicalVisibleRange> _visibleRange;
+	SegmentSpan _visibleSegmentSpan;
+	std::vector<int> _segmentTops;
+	std::vector<int> _segmentBottoms;
 };
 
 MarkdownArticle::MarkdownArticle(std::shared_ptr<MathRenderer> renderer)
@@ -3303,6 +3442,10 @@ int MarkdownArticle::maxWidth() const {
 
 int MarkdownArticle::resizeGetHeight(int width) {
 	return _impl->resizeGetHeight(width);
+}
+
+void MarkdownArticle::setVisibleTopBottom(int visibleTop, int visibleBottom) {
+	_impl->setVisibleTopBottom(visibleTop, visibleBottom);
 }
 
 void MarkdownArticle::paint(

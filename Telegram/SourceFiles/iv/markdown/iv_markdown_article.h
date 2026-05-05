@@ -97,6 +97,7 @@ public:
 	void setContent(MarkdownArticleContent content);
 	[[nodiscard]] int maxWidth() const;
 	[[nodiscard]] int resizeGetHeight(int width);
+	void setVisibleTopBottom(int visibleTop, int visibleBottom);
 	void paint(
 		Painter &p,
 		QRect clip,
