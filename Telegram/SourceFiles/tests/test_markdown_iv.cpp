@@ -909,6 +909,88 @@ void PrintPrepareSummary(
 	return false;
 }
 
+[[nodiscard]] bool PaintTouchesBottomOrRightImageEdge(const QImage &image) {
+	if (image.isNull()) {
+		return false;
+	}
+	const auto width = image.width();
+	const auto height = image.height();
+	const auto painted = [&](int x, int y) {
+		return (image.pixel(x, y) & 0xFF000000U) != 0;
+	};
+	for (auto x = 0; x != width; ++x) {
+		if (painted(x, height - 1)) {
+			return true;
+		}
+	}
+	for (auto y = 0; y != height; ++y) {
+		if (painted(width - 1, y)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+[[nodiscard]] std::optional<QRect> PaintedBoundsInRect(
+		const QImage &image,
+		QRect rect) {
+	rect = rect.intersected(QRect(QPoint(), image.size()));
+	if (rect.isEmpty()) {
+		return std::nullopt;
+	}
+	auto left = rect.right();
+	auto top = rect.bottom();
+	auto right = rect.left() - 1;
+	auto bottom = rect.top() - 1;
+	for (auto y = rect.top(); y <= rect.bottom(); ++y) {
+		for (auto x = rect.left(); x <= rect.right(); ++x) {
+			if (!(image.pixel(x, y) & 0xFF000000U)) {
+				continue;
+			}
+			left = std::min(left, x);
+			top = std::min(top, y);
+			right = std::max(right, x);
+			bottom = std::max(bottom, y);
+		}
+	}
+	return (right >= left) && (bottom >= top)
+		? std::make_optional(QRect(QPoint(left, top), QPoint(right, bottom)))
+		: std::nullopt;
+}
+
+[[nodiscard]] std::optional<QRect> SymbolHitBounds(
+		MarkdownArticle *article,
+		int width,
+		int height,
+		int offset) {
+	if (!article || (width <= 0) || (height <= 0) || (offset < 0)) {
+		return std::nullopt;
+	}
+	auto flags = Ui::Text::StateRequest::Flags();
+	flags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+	auto left = width;
+	auto top = height;
+	auto right = -1;
+	auto bottom = -1;
+	for (auto y = 0; y != height; ++y) {
+		for (auto x = 0; x != width; ++x) {
+			const auto hit = article->hitTest(QPoint(x, y), flags);
+			if (!hit.valid()
+				|| !hit.state.uponSymbol
+				|| (int(hit.state.symbol) != offset)) {
+				continue;
+			}
+			left = std::min(left, x);
+			top = std::min(top, y);
+			right = std::max(right, x);
+			bottom = std::max(bottom, y);
+		}
+	}
+	return (right >= left) && (bottom >= top)
+		? std::make_optional(QRect(QPoint(left, top), QPoint(right, bottom)))
+		: std::nullopt;
+}
+
 [[nodiscard]] std::vector<const MeasuredFormula*> MeasuredFormulaPointers(
 		const MarkdownArticleContent &prepared) {
 	auto result = std::vector<const MeasuredFormula*>();
@@ -948,22 +1030,62 @@ void ForEachPreparedLink(
 	});
 }
 
-template <typename Callback>
-void ForEachPreparedInlineObject(
-		const std::vector<PreparedBlock> &blocks,
-		Callback &&callback) {
-	ForEachPreparedBlock(blocks, [&](const PreparedBlock &block) {
-		for (const auto &object : block.inlineObjects) {
-			callback(object);
+struct InlineTextObjectMatch {
+	EntityInText entity;
+	InlineTextObjectEntity object;
+};
+
+[[nodiscard]] std::vector<InlineTextObjectMatch> CollectInlineTextObjectMatches(
+		const TextWithEntities &text) {
+	auto result = std::vector<InlineTextObjectMatch>();
+	for (const auto &entity : text.entities) {
+		if (entity.type() != EntityType::CustomEmoji
+			|| entity.length() != 1
+			|| entity.offset() < 0
+			|| entity.offset() >= text.text.size()
+			|| text.text[entity.offset()] != QChar::ObjectReplacementCharacter) {
+			continue;
 		}
-		for (const auto &row : block.tableRows) {
-			for (const auto &cell : row.cells) {
-				for (const auto &object : cell.inlineObjects) {
-					callback(object);
-				}
-			}
+		if (const auto parsed = ParseInlineTextObjectEntity(entity.data())) {
+			result.push_back(InlineTextObjectMatch{
+				.entity = entity,
+				.object = *parsed,
+			});
 		}
-	});
+	}
+	return result;
+}
+
+[[nodiscard]] bool TextHasInlineFormulaEntity(
+		const TextWithEntities &text,
+		const QString &copySource,
+		const QString &trimmedTex = QString()) {
+	for (const auto &match : CollectInlineTextObjectMatches(text)) {
+		if (match.object.kind != InlineTextObjectKind::Formula) {
+			continue;
+		}
+		const auto formula = std::get_if<InlineTextObjectFormulaData>(
+			&match.object.data);
+		if (!formula) {
+			continue;
+		}
+		if ((formula->copySource == copySource)
+			&& (trimmedTex.isEmpty() || formula->trimmedTex == trimmedTex)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+[[nodiscard]] bool HasEntityType(
+		const EntitiesInText &entities,
+		EntityType type) {
+	for (const auto &entity : entities) {
+		if (entity.type() == type) {
+			return true;
+		}
+	}
+	return false;
 }
 
 void Check(bool condition, const QString &message, bool *ok) {
@@ -1372,42 +1494,121 @@ void CheckFixtureSemanticCoverage(
 
 }
 
+void CheckInlineTextObjectPrepareCoverage(bool *ok) {
+	const auto label = FromLatin1("generated-inline-text-objects.md");
+	const auto parsed = ParseMarkdownForIv(
+		QByteArray(
+			"Paragraph $a^2 + b^2 = c^2$ text.\n\n"
+			"#### Heading $ax^2 + bx + c = 0$\n\n"
+			"| Formula | Value |\n"
+			"| --- | --- |\n"
+			"| $x^n$ | n |\n"),
+		ParseOptions{ label });
+	Check(
+		parsed.ok,
+		label + FromLatin1(" parse failed: ") + parsed.error,
+		ok);
+	if (!parsed.ok) {
+		return;
+	}
+	const auto prepared = PrepareParsedDocumentForTest(
+		parsed.document,
+		label,
+		std::make_shared<MathRenderer>());
+	Check(
+		!prepared.failure.failed(),
+		label + FromLatin1(" prepare failure: ")
+			+ PrepareFailureReason(prepared.failure),
+		ok);
+	if (prepared.failure.failed()) {
+		return;
+	}
+
+	const PreparedBlock *paragraph = nullptr;
+	const PreparedBlock *heading = nullptr;
+	const PreparedBlock *table = nullptr;
+	ForEachPreparedBlock(prepared.blocks.blocks, [&](const PreparedBlock &block) {
+		if (!paragraph
+			&& block.kind == PreparedBlockKind::Paragraph
+			&& block.text.text.contains(FromLatin1("Paragraph"))) {
+			paragraph = &block;
+		}
+		if (!heading
+			&& block.kind == PreparedBlockKind::Heading
+			&& block.text.text.contains(FromLatin1("Heading"))) {
+			heading = &block;
+		}
+		if (!table && block.kind == PreparedBlockKind::Table) {
+			table = &block;
+		}
+	});
+	Check(
+		paragraph != nullptr,
+		label + FromLatin1(" prepared paragraph block"),
+		ok);
+	if (paragraph) {
+		Check(
+			paragraph->text.text.count(QChar::ObjectReplacementCharacter) == 1,
+			label + FromLatin1(" paragraph ORC count"),
+			ok);
+		Check(
+			TextHasInlineFormulaEntity(
+				paragraph->text,
+				FromLatin1("$a^2 + b^2 = c^2$"),
+				FromLatin1("a^2 + b^2 = c^2")),
+			label + FromLatin1(" paragraph inline formula entity"),
+			ok);
+	}
+	Check(
+		heading != nullptr,
+		label + FromLatin1(" prepared heading block"),
+		ok);
+	if (heading) {
+		Check(
+			heading->text.text.count(QChar::ObjectReplacementCharacter) == 1,
+			label + FromLatin1(" heading ORC count"),
+			ok);
+		Check(
+			TextHasInlineFormulaEntity(
+				heading->text,
+				FromLatin1("$ax^2 + bx + c = 0$"),
+				FromLatin1("ax^2 + bx + c = 0")),
+			label + FromLatin1(" heading inline formula entity"),
+			ok);
+	}
+	Check(
+		table != nullptr,
+		label + FromLatin1(" prepared table block"),
+		ok);
+	if (table) {
+		Check(
+			table->tableRows.size() == 2,
+			label + FromLatin1(" table row count"),
+			ok);
+		if (table->tableRows.size() == 2
+			&& table->tableRows[1].cells.size() == 2) {
+			const auto &formulaCell = table->tableRows[1].cells[0];
+			Check(
+				formulaCell.text.text.count(QChar::ObjectReplacementCharacter) == 1,
+				label + FromLatin1(" table cell ORC count"),
+				ok);
+			Check(
+				TextHasInlineFormulaEntity(
+					formulaCell.text,
+					FromLatin1("$x^n$"),
+					FromLatin1("x^n")),
+				label + FromLatin1(" table cell inline formula entity"),
+				ok);
+		}
+	}
+}
+
 void CheckPrepareCoverage(
 		const PreparedFixture &markdownFixture,
 		const PreparedFixture &latexFixture,
 		bool *ok) {
 	const auto &markdown = markdownFixture.prepared;
 	const auto &latex = latexFixture.prepared;
-
-	const auto preparedHasInlineCopySource = [&](
-			const std::vector<PreparedBlock> &blocks,
-			const QString &copySource) {
-		auto found = false;
-		ForEachPreparedInlineObject(blocks, [&](const PreparedInlineObject &object) {
-			if (object.copySource == copySource) {
-				found = true;
-			}
-		});
-		return found;
-	};
-	const auto blockHasInlineCopySource = [](
-			const PreparedBlock &block,
-			const QString &copySource) {
-		for (const auto &object : block.inlineObjects) {
-			if (object.copySource == copySource) {
-				return true;
-			}
-		}
-		return false;
-	};
-
-	const auto inlineCopySourceFound = preparedHasInlineCopySource(
-		markdown.blocks.blocks,
-		FromLatin1("$a^2 + b^2 = c^2$"));
-	Check(
-		inlineCopySourceFound,
-		FromLatin1("markdown-example.md prepared inline formula copySource"),
-		ok);
 
 	auto markdownTables = std::vector<const PreparedBlock*>();
 	const PreparedBlock *markdownDisplayMath = nullptr;
@@ -1524,25 +1725,11 @@ void CheckPrepareCoverage(
 		ok);
 
 	auto latexTables = std::vector<const PreparedBlock*>();
-	const PreparedBlock *latexHeadingBlock = nullptr;
 	ForEachPreparedBlock(latex.blocks.blocks, [&](const PreparedBlock &block) {
 		if (block.kind == PreparedBlockKind::Table) {
 			latexTables.push_back(&block);
 		}
-		if (!latexHeadingBlock
-			&& block.kind == PreparedBlockKind::Heading
-			&& block.headingLevel == 4
-			&& block.text.text.contains(FromLatin1("The equation"))) {
-			latexHeadingBlock = &block;
-		}
 	});
-	const auto latexTableCopySourceFound
-		= preparedHasInlineCopySource(
-			latex.blocks.blocks,
-			FromLatin1("$x^n$"))
-		|| preparedHasInlineCopySource(
-			latex.blocks.blocks,
-			FromLatin1("$\\frac{x^{n+1}}{n+1}$"));
 	Check(
 		!latexTables.empty(),
 		FromLatin1("latex-markdown-test.md prepared table count"),
@@ -1567,70 +1754,6 @@ void CheckPrepareCoverage(
 				FromLatin1("latex-markdown-test.md prepared table cell count"),
 				ok);
 		}
-	}
-	Check(
-		latexTableCopySourceFound,
-		FromLatin1("latex-markdown-test.md prepared table inline formula copySource"),
-		ok);
-	Check(
-		preparedHasInlineCopySource(
-			latex.blocks.blocks,
-			FromLatin1("$\\int_0^1 x \\, dx$")),
-		FromLatin1("latex-markdown-test.md prepared line 71 inline copySource"),
-		ok);
-	Check(
-		preparedHasInlineCopySource(
-			latex.blocks.blocks,
-			FromLatin1(
-				"$\\mathbb{E}[X] = \\int_{-\\infty}^{\\infty} x f(x) \\, dx$")),
-		FromLatin1("latex-markdown-test.md prepared line 259 inline copySource"),
-		ok);
-	Check(
-		preparedHasInlineCopySource(
-			latex.blocks.blocks,
-			FromLatin1("$ax^2 + bx + c = 0$")),
-		FromLatin1("latex-markdown-test.md prepared line 322 inline copySource"),
-		ok);
-	Check(
-		preparedHasInlineCopySource(
-			latex.blocks.blocks,
-			FromLatin1("$a\\,b$")),
-		FromLatin1("latex-markdown-test.md prepared line 381 inline copySource"),
-		ok);
-	Check(
-		preparedHasInlineCopySource(
-			latex.blocks.blocks,
-			FromLatin1("$a\\:b$")),
-		FromLatin1("latex-markdown-test.md prepared line 383 inline copySource"),
-		ok);
-	Check(
-		preparedHasInlineCopySource(
-			latex.blocks.blocks,
-			FromLatin1("$a\\;b$")),
-		FromLatin1("latex-markdown-test.md prepared line 385 inline copySource"),
-		ok);
-	Check(
-		preparedHasInlineCopySource(
-			latex.blocks.blocks,
-			FromLatin1("$a\\!b$")),
-		FromLatin1("latex-markdown-test.md prepared line 391 inline copySource"),
-		ok);
-	Check(
-		latexHeadingBlock != nullptr,
-		FromLatin1("latex-markdown-test.md prepared heading block"),
-		ok);
-	if (latexHeadingBlock) {
-		Check(
-			blockHasInlineCopySource(
-				*latexHeadingBlock,
-				FromLatin1("$ax^2 + bx + c = 0$")),
-			FromLatin1("latex-markdown-test.md prepared heading inline object"),
-			ok);
-		Check(
-			!latexHeadingBlock->text.text.contains(
-				FromLatin1("$ax^2 + bx + c = 0$")),
-			FromLatin1("latex-markdown-test.md prepared heading removes raw formula"),
-			ok);
 	}
 
 	const auto &limits = PrepareTableRenderLimitsForIv();
@@ -1734,6 +1857,226 @@ void CheckPrepareLinkClassification(
 		ok);
 }
 
+void CheckInlineTextObjectArticleCoverage(bool *ok) {
+	const auto selectionLabel = FromLatin1("generated-inline-selection.md");
+	const auto selectionParsed = ParseMarkdownForIv(
+		QByteArray("Inline formula $\\frac{a}{b}$ export.\n"),
+		ParseOptions{ selectionLabel });
+	Check(
+		selectionParsed.ok,
+		selectionLabel + FromLatin1(" parse failed: ")
+			+ selectionParsed.error,
+		ok);
+	if (selectionParsed.ok) {
+		auto selectionRenderer = std::make_shared<MathRenderer>();
+		auto selectionPrepared = PrepareParsedDocumentForTest(
+			selectionParsed.document,
+			selectionLabel,
+			selectionRenderer);
+		Check(
+			!selectionPrepared.failure.failed(),
+			selectionLabel + FromLatin1(" prepare failure: ")
+				+ PrepareFailureReason(selectionPrepared.failure),
+			ok);
+		if (!selectionPrepared.failure.failed()) {
+			auto selectionObjectOffset = -1;
+			ForEachPreparedBlock(
+				selectionPrepared.blocks.blocks,
+				[&](const PreparedBlock &block) {
+					if (selectionObjectOffset >= 0) {
+						return;
+					}
+					const auto matches = CollectInlineTextObjectMatches(block.text);
+					if (!matches.empty()) {
+						selectionObjectOffset = matches.front().entity.offset();
+					}
+				});
+			auto selectionFormulaWidth = 0;
+			for (const auto &slot : selectionPrepared.formulas) {
+				if (slot.present
+					&& (slot.kind == MathKind::Inline)
+					&& slot.measured.success) {
+					selectionFormulaWidth = std::max(
+						slot.measured.logicalSize.width(),
+						1);
+					break;
+				}
+			}
+			auto selectionArticleHeight = 0;
+			auto selectionArticle = BuildArticleForTest(
+				std::move(selectionPrepared),
+				selectionRenderer,
+				480,
+				&selectionArticleHeight);
+			const auto selectionImage = PaintArticleForTest(
+				selectionArticle.get(),
+				480,
+				selectionArticleHeight);
+			Check(
+				HasPaintedPixels(selectionImage),
+				selectionLabel + FromLatin1(" paint produced pixels"),
+				ok);
+			const auto selectionHitBounds = SymbolHitBounds(
+				selectionArticle.get(),
+				480,
+				selectionArticleHeight,
+				selectionObjectOffset);
+			Check(
+				selectionHitBounds.has_value(),
+				selectionLabel + FromLatin1(" inline formula hit bounds"),
+				ok);
+			if (selectionHitBounds && (selectionFormulaWidth > 0)) {
+				Check(
+					selectionHitBounds->width() >= selectionFormulaWidth,
+					selectionLabel + FromLatin1(
+						" inline formula hit width uses object width"),
+					ok);
+			}
+			Check(
+				selectionArticle->segmentIsText(0),
+				selectionLabel + FromLatin1(" first segment is text"),
+				ok);
+			if (selectionArticle->segmentIsText(0)) {
+				const auto exported = selectionArticle->textForSelection({
+					.from = { .segment = 0, .offset = 0 },
+					.to = {
+						.segment = 0,
+						.offset = selectionArticle->segmentLength(0),
+					},
+				}, nullptr);
+				const auto expected = FromLatin1(
+					"Inline formula $\\frac{a}{b}$ export.");
+				Check(
+					exported.expanded == expected,
+					selectionLabel + FromLatin1(" expanded export"),
+					ok);
+				Check(
+					exported.rich.text == expected,
+					selectionLabel + FromLatin1(" rich export text"),
+					ok);
+				Check(
+					!HasEntityType(exported.rich.entities, EntityType::CustomEmoji),
+					selectionLabel + FromLatin1(" export drops custom emoji entity"),
+					ok);
+			}
+		}
+	}
+
+	const auto repeatedLabel = FromLatin1("generated-repeated-inline-formulas.md");
+	const auto repeatedParsed = ParseMarkdownForIv(
+		QByteArray("Repeated $x^2$ then $x^2$ then $x^2$.\n"),
+		ParseOptions{ repeatedLabel });
+	Check(
+		repeatedParsed.ok,
+		repeatedLabel + FromLatin1(" parse failed: ") + repeatedParsed.error,
+		ok);
+	if (!repeatedParsed.ok) {
+		return;
+	}
+	auto repeatedRenderer = std::make_shared<MathRenderer>();
+	auto repeatedPrepared = PrepareParsedDocumentForTest(
+		repeatedParsed.document,
+		repeatedLabel,
+		repeatedRenderer);
+	Check(
+		!repeatedPrepared.failure.failed(),
+		repeatedLabel + FromLatin1(" prepare failure: ")
+			+ PrepareFailureReason(repeatedPrepared.failure),
+		ok);
+	if (repeatedPrepared.failure.failed()) {
+		return;
+	}
+	const auto repeatedPointers = MeasuredFormulaPointers(repeatedPrepared);
+	Check(
+		repeatedPointers.size() == 3,
+		repeatedLabel + FromLatin1(" measured pointer count"),
+		ok);
+	if (repeatedPointers.size() == 3) {
+		Check(
+			repeatedPointers[0] == repeatedPointers[1]
+				&& repeatedPointers[1] == repeatedPointers[2],
+			repeatedLabel + FromLatin1(" measured pointer reuse in one prepare"),
+			ok);
+	}
+	auto repeatedArticleHeight = 0;
+	auto repeatedArticle = BuildArticleForTest(
+		std::move(repeatedPrepared),
+		repeatedRenderer,
+		480,
+		&repeatedArticleHeight);
+	const auto repeatedFirstImage = PaintArticleForTest(
+		repeatedArticle.get(),
+		480,
+		repeatedArticleHeight);
+	Check(
+		HasPaintedPixels(repeatedFirstImage),
+		repeatedLabel + FromLatin1(" first paint produced pixels"),
+		ok);
+	const auto repeatedFirstCounters = repeatedRenderer->debugCounters();
+	Check(
+		repeatedFirstCounters.misses >= 1,
+		repeatedLabel + FromLatin1(" first paint raster misses"),
+		ok);
+	Check(
+		repeatedFirstCounters.rendered >= 1,
+		repeatedLabel + FromLatin1(" first paint raster rendered"),
+		ok);
+	const auto repeatedSecondImage = PaintArticleForTest(
+		repeatedArticle.get(),
+		480,
+		repeatedArticleHeight);
+	Check(
+		HasPaintedPixels(repeatedSecondImage),
+		repeatedLabel + FromLatin1(" second paint produced pixels"),
+		ok);
+	const auto repeatedSecondCounters = repeatedRenderer->debugCounters();
+	Check(
+		repeatedSecondCounters.hits == repeatedFirstCounters.hits
+			&& repeatedSecondCounters.misses == repeatedFirstCounters.misses
+			&& repeatedSecondCounters.rendered == repeatedFirstCounters.rendered,
+		repeatedLabel + FromLatin1(" same article paint cache reuse"),
+		ok);
+	repeatedRenderer->resetDebugCounters();
+	auto repeatedPreparedAgain = PrepareParsedDocumentForTest(
+		repeatedParsed.document,
+		repeatedLabel,
+		repeatedRenderer);
+	Check(
+		!repeatedPreparedAgain.failure.failed(),
+		repeatedLabel + FromLatin1(" second prepare failure: ")
+			+ PrepareFailureReason(repeatedPreparedAgain.failure),
+		ok);
+	if (!repeatedPreparedAgain.failure.failed()) {
+		auto repeatedArticleAgainHeight = 0;
+		auto repeatedArticleAgain = BuildArticleForTest(
+			std::move(repeatedPreparedAgain),
+			repeatedRenderer,
+			480,
+			&repeatedArticleAgainHeight);
+		const auto repeatedCachedImage = PaintArticleForTest(
+			repeatedArticleAgain.get(),
+			480,
+			repeatedArticleAgainHeight);
+		Check(
+			HasPaintedPixels(repeatedCachedImage),
+			repeatedLabel + FromLatin1(" cached paint produced pixels"),
+			ok);
+		const auto repeatedReuseCounters = repeatedRenderer->debugCounters();
+		Check(
+			repeatedReuseCounters.hits >= 1,
+			repeatedLabel + FromLatin1(" renderer cache reuse hits"),
+			ok);
+		Check(
+			repeatedReuseCounters.misses == 0,
+			repeatedLabel + FromLatin1(" renderer cache reuse misses"),
+			ok);
+		Check(
+			repeatedReuseCounters.rendered == 0,
+			repeatedLabel + FromLatin1(" renderer cache reuse rendered"),
+			ok);
+	}
+}
+
 void CheckArticleRenderSmoke(
 		const PreparedFixture &markdownFixture,
 		const PreparedFixture &latexFixture,
@@ -1742,6 +2085,57 @@ void CheckArticleRenderSmoke(
 		MicrotexBackendLinked(),
 		FromLatin1("microtex backend should be linked"),
 		ok);
+	auto marginRenderer = MathRenderer();
+	const auto dimensions = CaptureMarkdownPrepareDimensions();
+	const auto checkFormulaRasterMargins = [&](
+			const QString &label,
+			const QString &tex,
+			MathKind kind,
+			int textSize) {
+		const auto rendered = marginRenderer.renderFormula({
+			.trimmedTex = tex,
+			.kind = kind,
+			.textSize = textSize,
+			.renderWidthCap = dimensions.displayMathMaxRenderWidth,
+			.renderHeightCap = dimensions.displayMathMaxRenderHeight,
+			.devicePixelRatio = 2,
+		});
+		Check(
+			rendered.success,
+			label + FromLatin1(" formula raster success"),
+			ok);
+		if (rendered.success) {
+			Check(
+				!PaintTouchesBottomOrRightImageEdge(rendered.image),
+				label + FromLatin1(" formula raster margin"),
+				ok);
+		}
+	};
+	checkFormulaRasterMargins(
+		FromLatin1("inline-x"),
+		FromLatin1("x"),
+		MathKind::Inline,
+		dimensions.bodyTextSize);
+	checkFormulaRasterMargins(
+		FromLatin1("inline-y"),
+		FromLatin1("y"),
+		MathKind::Inline,
+		dimensions.bodyTextSize);
+	checkFormulaRasterMargins(
+		FromLatin1("inline-alpha"),
+		FromLatin1("\\alpha"),
+		MathKind::Inline,
+		dimensions.bodyTextSize);
+	checkFormulaRasterMargins(
+		FromLatin1("inline-beta"),
+		FromLatin1("\\beta"),
+		MathKind::Inline,
+		dimensions.bodyTextSize);
+	checkFormulaRasterMargins(
+		FromLatin1("display-quadratic"),
+		FromLatin1("x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}"),
+		MathKind::Display,
+		dimensions.displayMathTextSize);
 	auto renderer = std::make_shared<MathRenderer>();
 	auto firstMarkdown = PrepareParsedDocumentForTest(
 		markdownFixture.parsed,
@@ -1983,6 +2377,211 @@ void CheckArticleRenderSmoke(
 			&& fallbackCounters.rendered == 0,
 		failureLabel + FromLatin1(" fallback paint avoided raster renderer"),
 		ok);
+
+	const auto inlineFailureLabel = FromLatin1("generated-inline-formula-cap.md");
+	const auto inlineFailureParsed = ParseMarkdownForIv(
+		QByteArray("Inline fallback $\\frac{a}{b}$ text.\n"),
+		ParseOptions{ inlineFailureLabel });
+	Check(
+		inlineFailureParsed.ok,
+		inlineFailureLabel + FromLatin1(" parse failed: ")
+			+ inlineFailureParsed.error,
+		ok);
+	if (!inlineFailureParsed.ok) {
+		return;
+	}
+	auto inlineFailureDimensions = CaptureMarkdownPrepareDimensions();
+	inlineFailureDimensions.displayMathMaxRenderWidth = 1;
+	auto inlineFailureRenderer = std::make_shared<MathRenderer>();
+	auto inlineFailurePrepared = PrepareParsedDocumentForTest(
+		inlineFailureParsed.document,
+		inlineFailureLabel,
+		inlineFailureRenderer,
+		std::move(inlineFailureDimensions));
+	Check(
+		!inlineFailurePrepared.failure.failed(),
+		inlineFailureLabel + FromLatin1(" terminal prepare failure"),
+		ok);
+	auto inlineMeasuredFallbackText = QString();
+	for (const auto &slot : inlineFailurePrepared.formulas) {
+		if (!slot.present || (slot.kind != MathKind::Inline)) {
+			continue;
+		}
+		if (!slot.measured.success
+			&& (slot.measured.tooLarge || slot.measured.overflow)
+			&& (slot.measured.logicalSize.width() > 0)
+			&& !slot.measured.fallbackText.isEmpty()) {
+			inlineMeasuredFallbackText = slot.measured.fallbackText;
+			break;
+		}
+	}
+	auto inlineDisplayedFallbackText = QString();
+	auto inlineFailureObjectOffset = -1;
+	ForEachPreparedBlock(
+		inlineFailurePrepared.blocks.blocks,
+		[&](const PreparedBlock &block) {
+			if (!inlineDisplayedFallbackText.isEmpty()) {
+				return;
+			}
+			for (const auto &match : CollectInlineTextObjectMatches(block.text)) {
+				if (match.object.kind != InlineTextObjectKind::Formula) {
+					continue;
+				}
+				const auto formula = std::get_if<InlineTextObjectFormulaData>(
+					&match.object.data);
+				if (!formula || formula->copySource.isEmpty()) {
+					continue;
+				}
+				inlineDisplayedFallbackText = formula->copySource;
+				inlineFailureObjectOffset = match.entity.offset();
+				break;
+			}
+		});
+	Check(
+		!inlineMeasuredFallbackText.isEmpty(),
+		inlineFailureLabel + FromLatin1(" inline fallback result"),
+		ok);
+	Check(
+		!inlineDisplayedFallbackText.isEmpty(),
+		inlineFailureLabel + FromLatin1(" inline displayed fallback text"),
+		ok);
+	Check(
+		inlineFailureObjectOffset >= 0,
+		inlineFailureLabel + FromLatin1(" inline object offset"),
+		ok);
+	Check(
+		inlineDisplayedFallbackText != inlineMeasuredFallbackText,
+		inlineFailureLabel + FromLatin1(
+			" displayed fallback differs from trimmed fallback"),
+		ok);
+	if (!inlineFailurePrepared.failure.failed()
+		&& !inlineDisplayedFallbackText.isEmpty()
+		&& (inlineFailureObjectOffset >= 0)) {
+		auto inlineFailureArticleHeight = 0;
+		auto inlineFailureArticle = BuildArticleForTest(
+			std::move(inlineFailurePrepared),
+			inlineFailureRenderer,
+			articleWidth,
+			&inlineFailureArticleHeight);
+		const auto inlineFailureImage = PaintArticleForTest(
+			inlineFailureArticle.get(),
+			articleWidth,
+			inlineFailureArticleHeight);
+		Check(
+			HasPaintedPixels(inlineFailureImage),
+			inlineFailureLabel + FromLatin1(" fallback paint produced pixels"),
+			ok);
+		const auto inlineFailureCounters = inlineFailureRenderer->debugCounters();
+		Check(
+			inlineFailureCounters.hits == 0
+				&& inlineFailureCounters.misses == 0
+				&& inlineFailureCounters.rendered == 0,
+			inlineFailureLabel
+				+ FromLatin1(" fallback paint avoided raster renderer"),
+			ok);
+		const auto inlineFailureHitBounds = SymbolHitBounds(
+			inlineFailureArticle.get(),
+			articleWidth,
+			inlineFailureArticleHeight,
+			inlineFailureObjectOffset);
+		Check(
+			inlineFailureHitBounds.has_value(),
+			inlineFailureLabel + FromLatin1(" inline hit bounds"),
+			ok);
+		const auto inlineFailurePaintStrip = inlineFailureHitBounds
+			? QRect(
+				inlineFailureHitBounds->x(),
+				0,
+				inlineFailureHitBounds->width(),
+				inlineFailureImage.height())
+			: QRect();
+		const auto inlineFailurePaintedBounds = inlineFailureHitBounds
+			? PaintedBoundsInRect(inlineFailureImage, inlineFailurePaintStrip)
+			: std::nullopt;
+		Check(
+			inlineFailurePaintedBounds.has_value(),
+			inlineFailureLabel + FromLatin1(" fallback paint strip bounds"),
+			ok);
+		if (inlineFailureHitBounds && inlineFailurePaintedBounds) {
+			Check(
+				inlineFailurePaintedBounds->top()
+					>= inlineFailureHitBounds->top()
+					&& inlineFailurePaintedBounds->bottom()
+						<= inlineFailureHitBounds->bottom(),
+				inlineFailureLabel
+					+ FromLatin1(" fallback paint stays within line bounds"),
+				ok);
+		}
+
+		const auto inlinePlainLabel = FromLatin1(
+			"generated-inline-formula-cap-plain.md");
+		auto inlinePlainText = inlineDisplayedFallbackText;
+		inlinePlainText.replace(u"$"_q, u"\\$"_q);
+		const auto inlinePlainSource = QByteArray("Inline fallback ")
+			+ inlinePlainText.toUtf8()
+			+ QByteArray(" text.\n");
+		const auto inlinePlainParsed = ParseMarkdownForIv(
+			inlinePlainSource,
+			ParseOptions{ inlinePlainLabel });
+		Check(
+			inlinePlainParsed.ok,
+			inlinePlainLabel + FromLatin1(" parse failed: ")
+				+ inlinePlainParsed.error,
+			ok);
+		if (inlinePlainParsed.ok) {
+			auto inlinePlainRenderer = std::make_shared<MathRenderer>();
+			auto inlinePlainPrepared = PrepareParsedDocumentForTest(
+				inlinePlainParsed.document,
+				inlinePlainLabel,
+				inlinePlainRenderer);
+			Check(
+				!inlinePlainPrepared.failure.failed(),
+				inlinePlainLabel + FromLatin1(" prepare failure: ")
+					+ PrepareFailureReason(inlinePlainPrepared.failure),
+				ok);
+			if (!inlinePlainPrepared.failure.failed()) {
+				auto inlinePlainArticleHeight = 0;
+				auto inlinePlainArticle = BuildArticleForTest(
+					std::move(inlinePlainPrepared),
+					inlinePlainRenderer,
+					articleWidth,
+					&inlinePlainArticleHeight);
+				const auto inlinePlainImage = PaintArticleForTest(
+					inlinePlainArticle.get(),
+					articleWidth,
+					inlinePlainArticleHeight);
+				Check(
+					inlineFailureArticle->maxWidth()
+						== inlinePlainArticle->maxWidth(),
+					inlineFailureLabel
+						+ FromLatin1(" fallback max width matches plain text"),
+					ok);
+				Check(
+					inlineFailureArticleHeight == inlinePlainArticleHeight,
+					inlineFailureLabel
+						+ FromLatin1(" fallback height matches plain text"),
+					ok);
+				const auto inlinePlainPaintedBounds = inlineFailureHitBounds
+					? PaintedBoundsInRect(inlinePlainImage, inlineFailurePaintStrip)
+					: std::nullopt;
+				Check(
+					inlinePlainPaintedBounds.has_value(),
+					inlinePlainLabel + FromLatin1(" fallback paint strip bounds"),
+					ok);
+				if (inlineFailurePaintedBounds && inlinePlainPaintedBounds) {
+					Check(
+						inlineFailurePaintedBounds->top()
+							== inlinePlainPaintedBounds->top()
+							&& inlineFailurePaintedBounds->bottom()
+								== inlinePlainPaintedBounds->bottom(),
+						inlineFailureLabel
+							+ FromLatin1(
+								" fallback paint vertical bounds match plain text"),
+						ok);
+				}
+			}
+		}
+	}
 
 	const auto &prepareLimits = PrepareLimitsForIv();
 	auto blockLimitSource = QByteArray();
@@ -2440,9 +3039,11 @@ void CheckArticleRenderSmoke(
 		FromLatin1("latex-markdown-test.md lines 332-340 exclusions"),
 		&ok);
 
+	CheckInlineTextObjectPrepareCoverage(&ok);
 	CheckPrepareCoverage(markdownFixture, latexFixture, &ok);
 	CheckPrepareLinkClassification(markdownFixture.path, &ok);
 	CheckArticleRenderSmoke(markdownFixture, latexFixture, &ok);
+	CheckInlineTextObjectArticleCoverage(&ok);
 	CheckInlineHtmlCoverage(args.dump, &ok);
 	CheckValidationEdges(&ok);
 

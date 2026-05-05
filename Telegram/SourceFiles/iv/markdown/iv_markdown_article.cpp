@@ -1,14 +1,16 @@
 #include "iv/markdown/iv_markdown_article.h"
 
 #include "lang/lang_keys.h"
-#include "ui/click_handler.h"
 #include "ui/style/style_core.h"
 #include "ui/style/style_core_scale.h"
+#include "ui/text/text_custom_emoji.h"
 #include "ui/widgets/checkbox.h"
+#include "ui/click_handler.h"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <utility>
 #include <vector>
 
@@ -465,15 +467,64 @@ void BindLinks(
 	return &(*formulas)[formulaIndex];
 }
 
-[[nodiscard]] RenderedFormula MeasuredFallback(const PreparedFormulaSlot &slot) {
+[[nodiscard]] int FormulaTextSize(const style::TextStyle &textStyle) {
+	return std::max(textStyle.font->height, 1);
+}
+
+[[nodiscard]] int ScaleFormulaCap(int cap, int textSize, int baseTextSize) {
+	if (cap <= 0) {
+		return 0;
+	}
+	const auto numerator = int64(cap) * std::max(textSize, 1);
+	const auto denominator = std::max(baseTextSize, 1);
+	return std::max(int((numerator + denominator - 1) / denominator), 1);
+}
+
+[[nodiscard]] PreparedFormulaMeasurementSignature FormulaRenderSignature(
+		const PreparedFormulaSlot &slot) {
+	const auto &displayMath = st::defaultMarkdown.displayMath;
+	return {
+		.trimmedTex = slot.trimmedTex.trimmed(),
+		.kind = slot.kind,
+		.textSize = slot.textSize ? slot.textSize : displayMath.textSize,
+		.renderWidthCap = slot.renderWidthCap
+			? slot.renderWidthCap
+			: displayMath.maxRenderWidth,
+		.renderHeightCap = slot.renderHeightCap
+			? slot.renderHeightCap
+			: displayMath.maxRenderHeight,
+	};
+}
+
+[[nodiscard]] PreparedFormulaMeasurementSignature InlineFormulaSignature(
+		QString trimmedTex,
+		const style::TextStyle &textStyle) {
+	const auto &displayMath = st::defaultMarkdown.displayMath;
+	const auto textSize = FormulaTextSize(textStyle);
+	return {
+		.trimmedTex = std::move(trimmedTex).trimmed(),
+		.kind = MathKind::Inline,
+		.textSize = textSize,
+		.renderWidthCap = ScaleFormulaCap(
+			displayMath.maxRenderWidth,
+			textSize,
+			displayMath.textSize),
+		.renderHeightCap = ScaleFormulaCap(
+			displayMath.maxRenderHeight,
+			textSize,
+			displayMath.textSize),
+	};
+}
+
+[[nodiscard]] RenderedFormula MeasuredFallback(const MeasuredFormula &measured) {
 	auto result = RenderedFormula();
-	result.logicalSize = slot.measured.logicalSize;
-	result.logicalDepth = slot.measured.logicalDepth;
-	result.fallbackText = slot.measured.fallbackText;
-	result.error = slot.measured.error;
+	result.logicalSize = measured.logicalSize;
+	result.logicalDepth = measured.logicalDepth;
+	result.fallbackText = measured.fallbackText;
+	result.error = measured.error;
 	result.success = false;
-	result.overflow = slot.measured.overflow;
-	result.tooLarge = slot.measured.tooLarge;
+	result.overflow = measured.overflow;
+	result.tooLarge = measured.tooLarge;
 	return result;
 }
 
@@ -495,15 +546,13 @@ void BindLinks(
 }
 
 [[nodiscard]] RenderedFormula EnsureFormulaRendered(
-		const PreparedFormulaSlot *slot,
+		const PreparedFormulaMeasurementSignature &signature,
+		const MeasuredFormula &measured,
 		RenderedFormula *rendered,
 		MathRenderer *renderer,
 		int devicePixelRatio) {
-	if (!slot) {
-		return RenderedFormula();
-	}
-	if (!slot->measured.success) {
-		return MeasuredFallback(*slot);
+	if (!measured.success) {
+		return MeasuredFallback(measured);
 	}
 	if (rendered
 		&& rendered->success
@@ -516,39 +565,42 @@ void BindLinks(
 		renderer = ownedRenderer.get();
 	}
 	auto local = renderer->renderFormula({
-		.trimmedTex = slot->trimmedTex,
-		.kind = slot->kind,
-		.textSize = slot->textSize,
-		.renderWidthCap = slot->renderWidthCap,
-		.renderHeightCap = slot->renderHeightCap,
+		.trimmedTex = signature.trimmedTex,
+		.kind = signature.kind,
+		.textSize = signature.textSize,
+		.renderWidthCap = signature.renderWidthCap,
+		.renderHeightCap = signature.renderHeightCap,
 		.devicePixelRatio = devicePixelRatio,
 	});
 	if (local.logicalSize.isEmpty()) {
-		local.logicalSize = slot->measured.logicalSize;
-		local.logicalDepth = slot->measured.logicalDepth;
-		local.fallbackText = slot->measured.fallbackText;
-		local.error = slot->measured.error;
-		local.overflow = slot->measured.overflow;
-		local.tooLarge = slot->measured.tooLarge;
+		local.logicalSize = measured.logicalSize;
+		local.logicalDepth = measured.logicalDepth;
+		local.fallbackText = measured.fallbackText;
+		local.error = measured.error;
+		local.overflow = measured.overflow;
+		local.tooLarge = measured.tooLarge;
 	}
 	if (rendered) {
 		*rendered = std::move(local);
-		return rendered->success ? *rendered : MeasuredFallback(*slot);
+		return rendered->success ? *rendered : MeasuredFallback(measured);
 	}
-	return local.success ? local : MeasuredFallback(*slot);
+	return local.success ? local : MeasuredFallback(measured);
 }
 
-[[nodiscard]] QString InlineFormulaFallbackText(
-		const PreparedInlineObject &prepared,
-		const PreparedFormulaSlot *formula) {
-	if (!prepared.copySource.isEmpty()) {
-		return prepared.copySource;
-	} else if (formula && !formula->measured.fallbackText.isEmpty()) {
-		return formula->measured.fallbackText;
-	} else if (formula && !formula->trimmedTex.isEmpty()) {
-		return formula->trimmedTex;
+[[nodiscard]] RenderedFormula EnsureFormulaRendered(
+		const PreparedFormulaSlot *slot,
+		RenderedFormula *rendered,
+		MathRenderer *renderer,
+		int devicePixelRatio) {
+	if (!slot) {
+		return RenderedFormula();
 	}
-	return u"[math]"_q;
+	return EnsureFormulaRendered(
+		FormulaRenderSignature(*slot),
+		slot->measured,
+		rendered,
+		renderer,
+		devicePixelRatio);
 }
 
 struct InlineFormulaMetrics {
@@ -566,74 +618,482 @@ struct InlineFormulaMetrics {
 	};
 }
 
-[[nodiscard]] std::vector<Ui::Text::InlineObjectPlacement> InlineFormulaPlacements(
-		const std::vector<PreparedInlineObject> &preparedInlineObjects,
-		std::vector<PreparedFormulaSlot> *formulas,
-		std::vector<RenderedFormula> *renderedFormulas,
-		MathRenderer *renderer,
-		const style::TextStyle &textStyle) {
-	auto result = std::vector<Ui::Text::InlineObjectPlacement>();
-	result.reserve(preparedInlineObjects.size());
-	for (const auto &prepared : preparedInlineObjects) {
-		const auto formula = PreparedFormulaFor(formulas, prepared.formulaIndex);
-		auto placement = Ui::Text::InlineObjectPlacement();
-		placement.position = prepared.position;
-		placement.object.copySource = prepared.copySource;
-		placement.object.fallbackText = InlineFormulaFallbackText(
-			prepared,
-			formula);
-		if (formula && formula->measured.success) {
-			const auto metrics = InlineFormulaMetricsFromMeasured(
-				formula->measured);
-			placement.object.imageProvider = [
-				formulas,
-				renderedFormulas,
-				renderer,
-				formulaIndex = prepared.formulaIndex
-			](int devicePixelRatio) {
-				const auto rendered = EnsureFormulaRendered(
-					PreparedFormulaFor(formulas, formulaIndex),
-					FormulaRasterSlot(renderedFormulas, formulaIndex),
-					renderer,
-					devicePixelRatio);
-				return rendered.success ? rendered.image : QImage();
-			};
-			placement.object.colorizeToTextColor = true;
-			placement.object.width = std::max(
-				formula->measured.logicalSize.width(),
-				1);
-			placement.object.ascent = metrics.ascent;
-			placement.object.descent = metrics.descent;
-			placement.object.align
-				= Ui::Text::InlineObjectVerticalAlign::AscentDescent;
-		} else {
-			placement.object.width = std::max(
-				textStyle.font->width(placement.object.fallbackText),
-				1);
+struct InlineFormulaColorizedKey {
+	QRgb color = 0;
+	int devicePixelRatio = 0;
+
+	friend inline bool operator<(
+			InlineFormulaColorizedKey a,
+			InlineFormulaColorizedKey b) {
+		if (a.color != b.color) {
+			return a.color < b.color;
 		}
-		result.push_back(std::move(placement));
+		return a.devicePixelRatio < b.devicePixelRatio;
 	}
-	return result;
+};
+
+class InlineFormulaSharedState final {
+public:
+	InlineFormulaSharedState(
+		PreparedFormulaMeasurementSignature signature,
+		std::shared_ptr<const MeasuredFormula> measuredData,
+		QString displayFallbackText,
+		std::shared_ptr<MathRenderer> renderer);
+
+	[[nodiscard]] int width() const;
+	[[nodiscard]] bool failed() const;
+	[[nodiscard]] std::optional<Ui::Text::CustomEmojiVerticalMetrics> vertical(
+		const style::TextStyle &textStyle) const;
+	void paint(
+		QPainter &p,
+		const Ui::Text::CustomEmoji::Context &context,
+		const QString &replacementText,
+		int fallbackWidth) const;
+	void setRenderer(std::shared_ptr<MathRenderer> renderer);
+	void invalidatePaletteCache();
+	void invalidateRasterCache();
+
+private:
+	[[nodiscard]] const MeasuredFormula &measured() const;
+	[[nodiscard]] MathRenderer *renderer() const;
+	[[nodiscard]] RenderedFormula ensureRendered(int devicePixelRatio) const;
+	[[nodiscard]] const QImage *colorizedImage(
+		const QColor &color,
+		int devicePixelRatio) const;
+
+	PreparedFormulaMeasurementSignature _signature;
+	std::shared_ptr<const MeasuredFormula> _measuredData;
+	QString _displayFallbackText;
+	mutable std::shared_ptr<MathRenderer> _renderer;
+	mutable std::map<int, RenderedFormula> _rendered;
+	mutable std::map<InlineFormulaColorizedKey, QImage> _colorized;
+
+};
+
+class InlineFormulaObject final : public Ui::Text::CustomEmoji {
+public:
+	InlineFormulaObject(
+		QString replacementText,
+		int fallbackWidth,
+		std::shared_ptr<InlineFormulaSharedState> state);
+
+	int width() override;
+	QString entityData() override;
+	std::optional<Ui::Text::CustomEmojiVerticalMetrics> vertical(
+		const style::TextStyle &textStyle) override;
+	QString replacementText() override;
+	Ui::Text::CustomEmojiSemantics semantics() override;
+	void paint(QPainter &p, const Context &context) override;
+	void unload() override;
+	bool ready() override;
+	bool readyInDefaultState() override;
+
+private:
+	QString _replacementText;
+	int _fallbackWidth = 1;
+	const std::shared_ptr<InlineFormulaSharedState> _state;
+
+};
+
+class InlineFormulaObjectCache final {
+public:
+	InlineFormulaObjectCache() = default;
+
+	void setRenderer(std::shared_ptr<MathRenderer> renderer);
+	void clear();
+	void invalidatePaletteCache();
+	void invalidateRasterCache();
+	[[nodiscard]] std::unique_ptr<Ui::Text::CustomEmoji> create(
+		const InlineTextObjectFormulaData &data,
+		const style::TextStyle &textStyle,
+		const std::vector<PreparedFormulaSlot> *formulas);
+
+private:
+	[[nodiscard]] std::shared_ptr<InlineFormulaSharedState> lookupOrCreate(
+		const PreparedFormulaMeasurementSignature &signature,
+		const style::TextStyle &textStyle,
+		const std::vector<PreparedFormulaSlot> *formulas);
+
+	std::shared_ptr<MathRenderer> _renderer;
+	std::map<
+		PreparedFormulaMeasurementSignature,
+		std::shared_ptr<InlineFormulaSharedState>,
+		PreparedFormulaMeasurementSignatureLess> _states;
+
+};
+
+[[nodiscard]] QString InlineFormulaDisplayFallbackText(
+		const PreparedFormulaMeasurementSignature &signature,
+		const MeasuredFormula &measured) {
+	if (!measured.fallbackText.isEmpty()) {
+		return measured.fallbackText;
+	} else if (!signature.trimmedTex.isEmpty()) {
+		return signature.trimmedTex;
+	}
+	return u"[math]"_q;
+}
+
+[[nodiscard]] std::shared_ptr<const MeasuredFormula>
+FindInlineFormulaMeasuredData(
+		const std::vector<PreparedFormulaSlot> *formulas,
+		const PreparedFormulaMeasurementSignature &signature,
+		MeasuredFormula *measured) {
+	if (!formulas) {
+		return nullptr;
+	}
+	for (const auto &slot : *formulas) {
+		if (!slot.present || FormulaRenderSignature(slot) != signature) {
+			continue;
+		}
+		if (measured) {
+			*measured = slot.measured;
+		}
+		if (slot.measuredData) {
+			return slot.measuredData;
+		}
+		return std::make_shared<MeasuredFormula>(slot.measured);
+	}
+	return nullptr;
+}
+
+InlineFormulaSharedState::InlineFormulaSharedState(
+	PreparedFormulaMeasurementSignature signature,
+	std::shared_ptr<const MeasuredFormula> measuredData,
+	QString displayFallbackText,
+	std::shared_ptr<MathRenderer> renderer)
+: _signature(std::move(signature))
+, _measuredData(std::move(measuredData))
+, _displayFallbackText(std::move(displayFallbackText))
+, _renderer(std::move(renderer)) {
+}
+
+int InlineFormulaSharedState::width() const {
+	const auto &formula = measured();
+	return (formula.success && (formula.logicalSize.width() > 0))
+		? formula.logicalSize.width()
+		: 1;
+}
+
+bool InlineFormulaSharedState::failed() const {
+	return !measured().success;
+}
+
+std::optional<Ui::Text::CustomEmojiVerticalMetrics>
+InlineFormulaSharedState::vertical(const style::TextStyle &textStyle) const {
+	const auto &formula = measured();
+	const auto height = std::max(formula.logicalSize.height(), 0);
+	if (formula.success && (height > 0)) {
+		const auto metrics = InlineFormulaMetricsFromMeasured(formula);
+		return Ui::Text::CustomEmojiVerticalMetrics{
+			.ascent = metrics.ascent,
+			.descent = metrics.descent,
+		};
+	}
+	const auto ascent = std::max(textStyle.font->ascent, 0);
+	return Ui::Text::CustomEmojiVerticalMetrics{
+		.ascent = ascent,
+		.descent = std::max(textStyle.font->height - ascent, 0),
+	};
+}
+
+void InlineFormulaSharedState::paint(
+		QPainter &p,
+		const Ui::Text::CustomEmoji::Context &context,
+		const QString &replacementText,
+		int fallbackWidth) const {
+	const auto rendered = ensureRendered(std::max(style::DevicePixelRatio(), 1));
+	if (rendered.success) {
+		if (const auto image = colorizedImage(
+				context.textColor,
+				std::max(style::DevicePixelRatio(), 1))) {
+			p.drawImage(context.position, *image);
+		}
+		return;
+	}
+	const auto fallbackText = replacementText.isEmpty()
+		? _displayFallbackText
+		: replacementText;
+	if (fallbackText.isEmpty()) {
+		return;
+	}
+	p.save();
+	p.setPen(context.textColor);
+	p.drawText(
+		QRect(
+			context.position.x(),
+			context.position.y(),
+			std::max(fallbackWidth, 1),
+			p.fontMetrics().height()),
+		Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
+		fallbackText);
+	p.restore();
+}
+
+void InlineFormulaSharedState::setRenderer(std::shared_ptr<MathRenderer> renderer) {
+	_renderer = std::move(renderer);
+	invalidateRasterCache();
+}
+
+void InlineFormulaSharedState::invalidatePaletteCache() {
+	_colorized.clear();
+}
+
+void InlineFormulaSharedState::invalidateRasterCache() {
+	_rendered.clear();
+	_colorized.clear();
+}
+
+const MeasuredFormula &InlineFormulaSharedState::measured() const {
+	static const auto kEmpty = MeasuredFormula();
+	return _measuredData ? *_measuredData : kEmpty;
+}
+
+MathRenderer *InlineFormulaSharedState::renderer() const {
+	if (!_renderer) {
+		_renderer = std::make_shared<MathRenderer>();
+	}
+	return _renderer.get();
+}
+
+RenderedFormula InlineFormulaSharedState::ensureRendered(
+		int devicePixelRatio) const {
+	if (!measured().success) {
+		return MeasuredFallback(measured());
+	}
+	if (const auto i = _rendered.find(devicePixelRatio); i != end(_rendered)) {
+		return i->second;
+	}
+	auto rendered = renderer()->renderFormula({
+		.trimmedTex = _signature.trimmedTex,
+		.kind = _signature.kind,
+		.textSize = _signature.textSize,
+		.renderWidthCap = _signature.renderWidthCap,
+		.renderHeightCap = _signature.renderHeightCap,
+		.devicePixelRatio = devicePixelRatio,
+	});
+	if (rendered.logicalSize.isEmpty()) {
+		rendered.logicalSize = measured().logicalSize;
+		rendered.logicalDepth = measured().logicalDepth;
+		rendered.fallbackText = measured().fallbackText;
+		rendered.error = measured().error;
+		rendered.overflow = measured().overflow;
+		rendered.tooLarge = measured().tooLarge;
+	}
+	if (!rendered.success) {
+		rendered = MeasuredFallback(measured());
+	}
+	const auto i = _rendered.emplace(
+		devicePixelRatio,
+		std::move(rendered)).first;
+	return i->second;
+}
+
+const QImage *InlineFormulaSharedState::colorizedImage(
+		const QColor &color,
+		int devicePixelRatio) const {
+	const auto rendered = ensureRendered(devicePixelRatio);
+	if (!rendered.success) {
+		return nullptr;
+	}
+	const auto key = InlineFormulaColorizedKey{
+		.color = color.rgba(),
+		.devicePixelRatio = devicePixelRatio,
+	};
+	if (const auto i = _colorized.find(key); i != end(_colorized)) {
+		return &i->second;
+	}
+	auto colorized = QImage(
+		rendered.image.size(),
+		QImage::Format_ARGB32_Premultiplied);
+	style::colorizeImage(
+		rendered.image,
+		color,
+		&colorized,
+		QRect(),
+		QPoint(),
+		true);
+	const auto i = _colorized.emplace(
+		key,
+		std::move(colorized)).first;
+	return &i->second;
+}
+
+InlineFormulaObject::InlineFormulaObject(
+	QString replacementText,
+	int fallbackWidth,
+	std::shared_ptr<InlineFormulaSharedState> state)
+: _replacementText(std::move(replacementText))
+, _fallbackWidth(std::max(fallbackWidth, 1))
+, _state(std::move(state)) {
+}
+
+int InlineFormulaObject::width() {
+	if (!_state || _state->failed()) {
+		return _fallbackWidth;
+	}
+	return _state->width();
+}
+
+QString InlineFormulaObject::entityData() {
+	return QString();
+}
+
+std::optional<Ui::Text::CustomEmojiVerticalMetrics>
+InlineFormulaObject::vertical(const style::TextStyle &textStyle) {
+	return _state ? _state->vertical(textStyle) : std::nullopt;
+}
+
+QString InlineFormulaObject::replacementText() {
+	return _replacementText;
+}
+
+Ui::Text::CustomEmojiSemantics InlineFormulaObject::semantics() {
+	return {
+		.isEmoji = false,
+		.isRealCustomEmoji = false,
+		.exportEntity = false,
+		.unloadPersistentAnimation = false,
+		.allowCustomEmojiClick = false,
+	};
+}
+
+void InlineFormulaObject::paint(QPainter &p, const Context &context) {
+	if (_state) {
+		_state->paint(p, context, _replacementText, _fallbackWidth);
+	}
+}
+
+void InlineFormulaObject::unload() {
+}
+
+bool InlineFormulaObject::ready() {
+	return true;
+}
+
+bool InlineFormulaObject::readyInDefaultState() {
+	return true;
+}
+
+void InlineFormulaObjectCache::setRenderer(std::shared_ptr<MathRenderer> renderer) {
+	_renderer = std::move(renderer);
+	for (const auto &entry : _states) {
+		const auto &state = entry.second;
+		if (state) {
+			state->setRenderer(_renderer);
+		}
+	}
+}
+
+void InlineFormulaObjectCache::clear() {
+	_states.clear();
+}
+
+void InlineFormulaObjectCache::invalidatePaletteCache() {
+	for (const auto &entry : _states) {
+		const auto &state = entry.second;
+		if (state) {
+			state->invalidatePaletteCache();
+		}
+	}
+}
+
+void InlineFormulaObjectCache::invalidateRasterCache() {
+	for (const auto &entry : _states) {
+		const auto &state = entry.second;
+		if (state) {
+			state->invalidateRasterCache();
+		}
+	}
+}
+
+std::unique_ptr<Ui::Text::CustomEmoji> InlineFormulaObjectCache::create(
+		const InlineTextObjectFormulaData &data,
+		const style::TextStyle &textStyle,
+		const std::vector<PreparedFormulaSlot> *formulas) {
+	auto replacementText = data.copySource;
+	if (replacementText.isEmpty()) {
+		replacementText = u"$"_q + data.trimmedTex + u"$"_q;
+	}
+	auto state = lookupOrCreate(
+		InlineFormulaSignature(data.trimmedTex, textStyle),
+		textStyle,
+		formulas);
+	if (!state) {
+		return nullptr;
+	}
+	const auto fallbackWidth = std::max(
+		textStyle.font->width(replacementText),
+		1);
+	return std::make_unique<InlineFormulaObject>(
+		std::move(replacementText),
+		fallbackWidth,
+		std::move(state));
+}
+
+std::shared_ptr<InlineFormulaSharedState> InlineFormulaObjectCache::lookupOrCreate(
+		const PreparedFormulaMeasurementSignature &signature,
+		const style::TextStyle &textStyle,
+		const std::vector<PreparedFormulaSlot> *formulas) {
+	if (const auto i = _states.find(signature); i != end(_states)) {
+		return i->second;
+	}
+	auto measured = MeasuredFormula();
+	auto measuredData = FindInlineFormulaMeasuredData(
+		formulas,
+		signature,
+		&measured);
+	if (measuredData) {
+		measured = *measuredData;
+	} else {
+		measured.logicalSize = QSize(
+			std::max(textStyle.font->width(signature.trimmedTex), 1),
+			std::max(textStyle.font->height, 1));
+		measured.logicalDepth = std::max(
+			textStyle.font->height - textStyle.font->ascent,
+			0);
+		measured.fallbackText = signature.trimmedTex;
+		measured.success = false;
+		measuredData = std::make_shared<MeasuredFormula>(measured);
+	}
+	const auto fallbackText = InlineFormulaDisplayFallbackText(signature, measured);
+	auto state = std::make_shared<InlineFormulaSharedState>(
+		signature,
+		std::move(measuredData),
+		fallbackText,
+		_renderer);
+	_states.emplace(signature, state);
+	return state;
 }
 
 void SetTextLeaf(
 		Ui::Text::String *leaf,
 		const style::TextStyle &textStyle,
 		const TextWithEntities &text,
-		const std::vector<PreparedInlineObject> &inlineObjects,
-		std::vector<PreparedFormulaSlot> *formulas,
-		std::vector<RenderedFormula> *renderedFormulas,
-		MathRenderer *renderer) {
+		const std::vector<PreparedFormulaSlot> *formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects) {
 	auto context = Ui::Text::MarkedContext();
-	auto placements = InlineFormulaPlacements(
-		inlineObjects,
+	context.customEmojiFactory = [
 		formulas,
-		renderedFormulas,
-		renderer,
-		textStyle);
-	context.inlineObjects = Ui::Text::InlineObjectPlacements(
-		placements.data(),
-		placements.size());
+		inlineFormulaObjects,
+		&textStyle
+	](QStringView data, const Ui::Text::MarkedContext &) {
+		const auto parsed = ParseInlineTextObjectEntity(data.toString());
+		if (!parsed || !inlineFormulaObjects) {
+			return std::unique_ptr<Ui::Text::CustomEmoji>();
+		}
+		switch (parsed->kind) {
+		case InlineTextObjectKind::Formula: {
+			const auto formula = std::get_if<InlineTextObjectFormulaData>(
+				&parsed->data);
+			return formula
+				? inlineFormulaObjects->create(*formula, textStyle, formulas)
+				: std::unique_ptr<Ui::Text::CustomEmoji>();
+		}
+		case InlineTextObjectKind::IvImage:
+			return std::unique_ptr<Ui::Text::CustomEmoji>();
+		}
+		return std::unique_ptr<Ui::Text::CustomEmoji>();
+	};
 	leaf->setMarkedText(textStyle, text, kIvMarkedTextOptions, context);
 }
 
@@ -662,9 +1122,8 @@ void SetTextLeaf(
 [[nodiscard]] TableCellLayoutData InitializeTableCellLayout(
 		const PreparedTableCell &prepared,
 		bool header,
-		std::vector<PreparedFormulaSlot> *formulas,
-		std::vector<RenderedFormula> *renderedFormulas,
-		MathRenderer *renderer,
+		const std::vector<PreparedFormulaSlot> *formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
 		const style::Markdown &markdown) {
 	auto result = TableCellLayoutData();
 	const auto &textStyle = TableCellTextStyle(header, markdown);
@@ -673,10 +1132,8 @@ void SetTextLeaf(
 		&result.cell.leaf,
 		textStyle,
 		prepared.text,
-		prepared.inlineObjects,
 		formulas,
-		renderedFormulas,
-		renderer);
+		inlineFormulaObjects);
 	BindLinks(&result.cell.leaf, prepared.links);
 	result.preferredWidth = result.cell.leaf.maxWidth();
 	result.preferredHeight = std::max(
@@ -770,9 +1227,8 @@ void SetTextLeaf(
 
 [[nodiscard]] LaidOutBlock LayoutFlowBlock(
 		const PreparedBlock &prepared,
-		std::vector<PreparedFormulaSlot> *formulas,
-		std::vector<RenderedFormula> *renderedFormulas,
-		MathRenderer *renderer,
+		const std::vector<PreparedFormulaSlot> *formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
 		const style::Markdown &markdown,
 		int left,
 		int top,
@@ -788,10 +1244,8 @@ void SetTextLeaf(
 		&block.leaf,
 		textStyle,
 		prepared.text,
-		prepared.inlineObjects,
 		formulas,
-		renderedFormulas,
-		renderer);
+		inlineFormulaObjects);
 	BindLinks(&block.leaf, prepared.links);
 
 	const auto height = std::max(
@@ -935,8 +1389,7 @@ void SetTextLeaf(
 [[nodiscard]] LaidOutBlock LayoutTableBlock(
 		const PreparedBlock &prepared,
 		std::vector<PreparedFormulaSlot> *formulas,
-		std::vector<RenderedFormula> *renderedFormulas,
-		MathRenderer *renderer,
+		InlineFormulaObjectCache *inlineFormulaObjects,
 		const style::Markdown &markdown,
 		int left,
 		int top,
@@ -961,8 +1414,7 @@ void SetTextLeaf(
 				preparedCell,
 				preparedRow.header,
 				formulas,
-				renderedFormulas,
-				renderer,
+				inlineFormulaObjects,
 				markdown));
 		}
 		rows.push_back(std::move(row));
@@ -1051,6 +1503,7 @@ void SetTextLeaf(
 	std::vector<PreparedFormulaSlot> *formulas,
 	std::vector<RenderedFormula> *renderedFormulas,
 	MathRenderer *renderer,
+	InlineFormulaObjectCache *inlineFormulaObjects,
 	const style::Markdown &markdown,
 	int left,
 	int top,
@@ -1062,6 +1515,7 @@ void SetTextLeaf(
 		std::vector<PreparedFormulaSlot> *formulas,
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
+		InlineFormulaObjectCache *inlineFormulaObjects,
 		std::vector<LaidOutBlock> *blocks,
 		const style::Markdown &markdown,
 		int left,
@@ -1079,6 +1533,7 @@ void SetTextLeaf(
 			formulas,
 			renderedFormulas,
 			renderer,
+			inlineFormulaObjects,
 			markdown,
 			left,
 			y,
@@ -1096,6 +1551,7 @@ void SetTextLeaf(
 		std::vector<PreparedFormulaSlot> *formulas,
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
+		InlineFormulaObjectCache *inlineFormulaObjects,
 		const style::Markdown &markdown,
 		int left,
 		int top,
@@ -1144,6 +1600,7 @@ void SetTextLeaf(
 		formulas,
 		renderedFormulas,
 		renderer,
+		inlineFormulaObjects,
 		&block.children,
 		markdown,
 		bodyLeft,
@@ -1187,6 +1644,7 @@ void SetTextLeaf(
 		std::vector<PreparedFormulaSlot> *formulas,
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
+		InlineFormulaObjectCache *inlineFormulaObjects,
 		const style::Markdown &markdown,
 		int left,
 		int top,
@@ -1221,6 +1679,7 @@ void SetTextLeaf(
 				formulas,
 				renderedFormulas,
 				renderer,
+				inlineFormulaObjects,
 				markdown,
 				listLeft,
 				y,
@@ -1232,6 +1691,7 @@ void SetTextLeaf(
 				formulas,
 				renderedFormulas,
 				renderer,
+				inlineFormulaObjects,
 				markdown,
 				listLeft,
 				y,
@@ -1255,6 +1715,7 @@ void SetTextLeaf(
 		std::vector<PreparedFormulaSlot> *formulas,
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
+		InlineFormulaObjectCache *inlineFormulaObjects,
 		const style::Markdown &markdown,
 		int left,
 		int top,
@@ -1286,6 +1747,7 @@ void SetTextLeaf(
 		formulas,
 		renderedFormulas,
 		renderer,
+		inlineFormulaObjects,
 		&block.children,
 		markdown,
 		contentLeft,
@@ -1313,6 +1775,7 @@ void SetTextLeaf(
 		std::vector<PreparedFormulaSlot> *formulas,
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
+		InlineFormulaObjectCache *inlineFormulaObjects,
 		const style::Markdown &markdown,
 		int left,
 		int top,
@@ -1328,10 +1791,8 @@ void SetTextLeaf(
 		&block.leaf,
 		markdown.body,
 		prepared.text,
-		prepared.inlineObjects,
 		formulas,
-		renderedFormulas,
-		renderer);
+		inlineFormulaObjects);
 	BindLinks(&block.leaf, prepared.links);
 
 	const auto summaryHeight = std::max(
@@ -1351,6 +1812,7 @@ void SetTextLeaf(
 			formulas,
 			renderedFormulas,
 			renderer,
+			inlineFormulaObjects,
 			&block.children,
 			markdown,
 			childLeft,
@@ -1372,6 +1834,7 @@ void SetTextLeaf(
 		std::vector<PreparedFormulaSlot> *formulas,
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
+		InlineFormulaObjectCache *inlineFormulaObjects,
 		const style::Markdown &markdown,
 		int left,
 		int top,
@@ -1383,8 +1846,7 @@ void SetTextLeaf(
 		return LayoutFlowBlock(
 			prepared,
 			formulas,
-			renderedFormulas,
-			renderer,
+			inlineFormulaObjects,
 			markdown,
 			left,
 			top,
@@ -1399,6 +1861,7 @@ void SetTextLeaf(
 			formulas,
 			renderedFormulas,
 			renderer,
+			inlineFormulaObjects,
 			markdown,
 			left,
 			top,
@@ -1410,6 +1873,7 @@ void SetTextLeaf(
 			formulas,
 			renderedFormulas,
 			renderer,
+			inlineFormulaObjects,
 			markdown,
 			left,
 			top,
@@ -1422,6 +1886,7 @@ void SetTextLeaf(
 			formulas,
 			renderedFormulas,
 			renderer,
+			inlineFormulaObjects,
 			markdown,
 			left,
 			top,
@@ -1433,8 +1898,7 @@ void SetTextLeaf(
 		return LayoutTableBlock(
 			prepared,
 			formulas,
-			renderedFormulas,
-			renderer,
+			inlineFormulaObjects,
 			markdown,
 			left,
 			top,
@@ -1445,6 +1909,7 @@ void SetTextLeaf(
 			formulas,
 			renderedFormulas,
 			renderer,
+			inlineFormulaObjects,
 			markdown,
 			left,
 			top,
@@ -1454,8 +1919,7 @@ void SetTextLeaf(
 	return LayoutFlowBlock(
 		prepared,
 		formulas,
-		renderedFormulas,
-		renderer,
+		inlineFormulaObjects,
 		markdown,
 		left,
 		top,
@@ -1896,9 +2360,16 @@ void PaintBlocks(
 	if (block.colorizedFormulaImage.isNull()
 		|| (block.colorizedFormulaSize != size)
 		|| (block.colorizedFormulaColor != color)) {
-		block.colorizedFormulaImage = style::colorizeImage(
+		block.colorizedFormulaImage = QImage(
+			size,
+			QImage::Format_ARGB32_Premultiplied);
+		style::colorizeImage(
 			formula.image,
-			color);
+			color,
+			&block.colorizedFormulaImage,
+			QRect(),
+			QPoint(),
+			true);
 		block.colorizedFormulaColor = color;
 		block.colorizedFormulaSize = size;
 	}
@@ -2479,16 +2950,19 @@ class MarkdownArticle::Impl {
 public:
 	explicit Impl(std::shared_ptr<MathRenderer> renderer)
 	: _renderer(std::move(renderer)) {
+		_inlineFormulaObjects.setRenderer(_renderer);
 	}
 
 	void setRenderer(std::shared_ptr<MathRenderer> renderer) {
 		_renderer = std::move(renderer);
+		_inlineFormulaObjects.setRenderer(_renderer);
 		invalidateRasterCache();
 		invalidateLayout();
 	}
 
 	void setContent(MarkdownArticleContent content) {
 		_content = std::move(content);
+		_inlineFormulaObjects.clear();
 		resetFormulaRasterCache();
 		invalidateLayout();
 	}
@@ -2509,6 +2983,7 @@ public:
 			&_content.formulas,
 			&_formulaRenders,
 			_renderer.get(),
+			&_inlineFormulaObjects,
 			&blocks,
 			markdown,
 			page.left(),
@@ -2713,11 +3188,13 @@ public:
 	}
 
 	void invalidatePaletteCache() {
+		_inlineFormulaObjects.invalidatePaletteCache();
 		ClearColorizedFormulaImages(&_blocks);
 	}
 
 	void invalidateRasterCache() {
 		resetFormulaRasterCache();
+		_inlineFormulaObjects.invalidateRasterCache();
 		ClearColorizedFormulaImages(&_blocks);
 	}
 
@@ -2757,6 +3234,7 @@ private:
 			&_content.formulas,
 			&_formulaRenders,
 			_renderer.get(),
+			&_inlineFormulaObjects,
 			&_blocks,
 			markdown,
 			page.left(),
@@ -2795,6 +3273,7 @@ private:
 	mutable MarkdownArticleContent _content;
 	std::vector<RenderedFormula> _formulaRenders;
 	std::shared_ptr<MathRenderer> _renderer;
+	InlineFormulaObjectCache _inlineFormulaObjects;
 	int _width = -1;
 	int _height = 0;
 	std::vector<LaidOutBlock> _blocks;

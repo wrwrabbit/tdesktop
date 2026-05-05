@@ -162,7 +162,6 @@ struct InlineFormulaSource {
 
 struct InlineFormulaContext {
 	const std::vector<InlineFormulaSource> *formulas = nullptr;
-	std::vector<PreparedInlineObject> *prepared = nullptr;
 	QString *blockAnchorId = nullptr;
 	int next = 0;
 	int textSize = 0;
@@ -193,6 +192,14 @@ void ClearPreparedOutput(MarkdownArticleContent *result) {
 
 [[nodiscard]] QString InternalLinkData(uint16 index) {
 	return u"internal:index"_q + QChar(index);
+}
+
+[[nodiscard]] QString EncodeInlineTextObjectField(const QString &value) {
+	return QString::fromLatin1(value.toUtf8().toPercentEncoding());
+}
+
+[[nodiscard]] QString DecodeInlineTextObjectField(const QString &value) {
+	return QString::fromUtf8(QByteArray::fromPercentEncoding(value.toLatin1()));
 }
 
 [[nodiscard]] QString NormalizeFragmentId(QString fragment) {
@@ -606,7 +613,6 @@ void ReplaceInlineFormulasInAppendedText(
 	if (!text
 		|| !inlineFormulas
 		|| !inlineFormulas->formulas
-		|| !inlineFormulas->prepared
 		|| !state
 		|| inlineFormulas->next >= int(inlineFormulas->formulas->size())
 		|| !node.range.available) {
@@ -627,7 +633,6 @@ void ReplaceInlineFormulasInAppendedText(
 			value,
 			formula.range,
 			state);
-		const auto sourceLength = formula.copySource.size();
 		if (displaySpan.offset < 0 || displaySpan.length <= 0) {
 			++inlineFormulas->next;
 			continue;
@@ -637,15 +642,23 @@ void ReplaceInlineFormulasInAppendedText(
 			found,
 			displaySpan.length,
 			QString(QChar::ObjectReplacementCharacter));
-		inlineFormulas->prepared->push_back({
-			.position = found,
-			.formulaIndex = formula.formulaIndex,
-			.sourceLength = int(sourceLength),
-			.copySource = formula.copySource,
+		const auto &source = state->request->document->formulas[formula.formulaIndex];
+		const auto entityData = SerializeInlineTextObjectEntity({
+			.kind = InlineTextObjectKind::Formula,
+			.data = InlineTextObjectFormulaData{
+				.copySource = formula.copySource,
+				.trimmedTex = source.tex.trimmed(),
+			},
 		});
+		if (!entityData.isEmpty()) {
+			text->entities.push_back(EntityInText(
+				EntityType::CustomEmoji,
+				found,
+				1,
+				entityData));
+		}
 		removedLength += (displaySpan.length - 1);
 
-		const auto &source = state->request->document->formulas[formula.formulaIndex];
 		state->rememberFormula(
 			formula.formulaIndex,
 			MathKind::Inline,
@@ -1027,7 +1040,6 @@ void PrepareTableCellText(
 		bool header,
 		TextWithEntities *text,
 		std::vector<PreparedLink> *links,
-		std::vector<PreparedInlineObject> *inlineObjects,
 		PrepareState *state) {
 	const auto textSize = TableCellFormulaTextSize(
 		header,
@@ -1035,7 +1047,6 @@ void PrepareTableCellText(
 	auto formulas = CollectInlineFormulas(cell, state);
 	auto inlineFormulas = InlineFormulaContext{
 		.formulas = &formulas,
-		.prepared = inlineObjects,
 		.textSize = textSize,
 		.renderWidthCap = ScaleFormulaCap(
 			state->request->dimensions.displayMathMaxRenderWidth,
@@ -1232,7 +1243,6 @@ void PrepareTableCellText(
 				rowNode.tableHeader,
 				&cell.text,
 				&cell.links,
-				&cell.inlineObjects,
 				state);
 			row.cells.push_back(std::move(cell));
 			++expectedColumn;
@@ -1262,7 +1272,6 @@ void AppendRichBlock(
 		int headingLevel,
 		TextWithEntities text,
 		std::vector<PreparedLink> links,
-		std::vector<PreparedInlineObject> inlineObjects,
 		QString anchorId = QString(),
 		bool collapsed = false,
 		bool allowEmpty = false) {
@@ -1275,7 +1284,6 @@ void AppendRichBlock(
 	block.headingLevel = headingLevel;
 	block.text = std::move(text);
 	block.links = std::move(links);
-	block.inlineObjects = std::move(inlineObjects);
 	block.anchorId = std::move(anchorId);
 	block.collapsed = collapsed;
 	blocks->push_back(std::move(block));
@@ -1434,8 +1442,7 @@ void AppendFootnotes(
 			PreparedBlockKind::Paragraph,
 			0,
 			TextWithEntities::Simple(node.detailsBody),
-			std::vector<PreparedLink>(),
-			std::vector<PreparedInlineObject>());
+			std::vector<PreparedLink>());
 		return blocks;
 	};
 	if (node.detailsBody.isEmpty()) {
@@ -1506,7 +1513,6 @@ void AppendFootnotes(
 		: QString();
 	auto text = TextWithEntities();
 	auto links = std::vector<PreparedLink>();
-	auto inlineObjects = std::vector<PreparedInlineObject>();
 	const auto textSize = FlowFormulaTextSize(
 		kind,
 		(kind == PreparedBlockKind::Heading) ? node.headingLevel : 0,
@@ -1514,7 +1520,6 @@ void AppendFootnotes(
 	auto formulas = CollectInlineFormulas(node, state);
 	auto inlineFormulas = InlineFormulaContext{
 		.formulas = &formulas,
-		.prepared = &inlineObjects,
 		.blockAnchorId = &anchorId,
 		.textSize = textSize,
 		.renderWidthCap = ScaleFormulaCap(
@@ -1549,7 +1554,6 @@ void AppendFootnotes(
 		(kind == PreparedBlockKind::Heading) ? node.headingLevel : 0,
 		std::move(text),
 		std::move(links),
-		std::move(inlineObjects),
 		std::move(anchorId));
 	return result;
 }
@@ -1659,8 +1663,7 @@ void AppendFootnotes(
 		PreparedBlockKind::Paragraph,
 		0,
 		TextWithEntities::Simple(text),
-		std::vector<PreparedLink>(),
-		std::vector<PreparedInlineObject>());
+		std::vector<PreparedLink>());
 	return result;
 }
 
@@ -1764,16 +1767,30 @@ FindDocumentFormulaMeasurement(
 		int index,
 		const PreparedFormulaMeasurementSignature &signature) {
 	const auto cache = document ? document->formulaMeasurementCache : nullptr;
-	if (!cache || index < 0) {
+	if (!cache) {
 		return nullptr;
 	}
-	if (index >= int(cache->slots.size())) {
-		return nullptr;
+	if (index >= 0 && index < int(cache->slots.size())) {
+		const auto &entry = cache->slots[index];
+		if (entry.data && entry.signature == signature) {
+			cache->bySignature.emplace(signature, entry.data);
+			return entry.data;
+		}
 	}
-	const auto &entry = cache->slots[index];
-	return (entry.data && entry.signature == signature)
-		? entry.data
-		: nullptr;
+	if (const auto i = cache->bySignature.find(signature)
+		; i != end(cache->bySignature)) {
+		if (index >= 0) {
+			if (index >= int(cache->slots.size())) {
+				cache->slots.resize(index + 1);
+			}
+			cache->slots[index] = {
+				.signature = signature,
+				.data = i->second,
+			};
+		}
+		return i->second;
+	}
+	return nullptr;
 }
 
 void RememberDocumentFormulaMeasurement(
@@ -1785,12 +1802,19 @@ void RememberDocumentFormulaMeasurement(
 	if (!cache || index < 0 || !data) {
 		return;
 	}
+	auto shared = std::move(data);
+	if (const auto i = cache->bySignature.find(signature)
+		; i != end(cache->bySignature)) {
+		shared = i->second;
+	} else {
+		cache->bySignature.emplace(signature, shared);
+	}
 	if (index >= int(cache->slots.size())) {
 		cache->slots.resize(index + 1);
 	}
 	cache->slots[index] = {
 		.signature = std::move(signature),
-		.data = std::move(data),
+		.data = std::move(shared),
 	};
 }
 
@@ -1842,6 +1866,80 @@ void MeasurePreparedFormulas(PrepareState *state) {
 }
 
 } // namespace
+
+QString SerializeInlineTextObjectEntity(const InlineTextObjectEntity &object) {
+	switch (object.kind) {
+	case InlineTextObjectKind::Formula: {
+		const auto data = std::get_if<InlineTextObjectFormulaData>(&object.data);
+		if (!data) {
+			return QString();
+		}
+		return u"iv-markdown:inline-text-object;formula;"_q
+			+ EncodeInlineTextObjectField(data->copySource)
+			+ u";"_q
+			+ EncodeInlineTextObjectField(data->trimmedTex);
+	} break;
+	case InlineTextObjectKind::IvImage: {
+		const auto data = std::get_if<InlineTextObjectIvImageData>(&object.data);
+		if (!data) {
+			return QString();
+		}
+		return u"iv-markdown:inline-text-object;iv-image;"_q
+			+ QString::number(data->documentId)
+			+ u";"_q
+			+ QString::number(data->width)
+			+ u";"_q
+			+ QString::number(data->height)
+			+ u";"_q
+			+ EncodeInlineTextObjectField(data->replacementText);
+	} break;
+	}
+	return QString();
+}
+
+std::optional<InlineTextObjectEntity> ParseInlineTextObjectEntity(
+		const QString &data) {
+	const auto parts = data.split(QChar(';'), Qt::KeepEmptyParts);
+	if (parts.size() < 2
+		|| parts[0] != u"iv-markdown:inline-text-object"_q) {
+		return std::nullopt;
+	}
+	if (parts[1] == u"formula"_q) {
+		if (parts.size() != 4) {
+			return std::nullopt;
+		}
+		return InlineTextObjectEntity{
+			.kind = InlineTextObjectKind::Formula,
+			.data = InlineTextObjectFormulaData{
+				.copySource = DecodeInlineTextObjectField(parts[2]),
+				.trimmedTex = DecodeInlineTextObjectField(parts[3]),
+			},
+		};
+	} else if (parts[1] == u"iv-image"_q) {
+		if (parts.size() != 6) {
+			return std::nullopt;
+		}
+		auto documentIdOk = false;
+		auto widthOk = false;
+		auto heightOk = false;
+		const auto documentId = parts[2].toULongLong(&documentIdOk);
+		const auto width = parts[3].toInt(&widthOk);
+		const auto height = parts[4].toInt(&heightOk);
+		if (!documentIdOk || !widthOk || !heightOk) {
+			return std::nullopt;
+		}
+		return InlineTextObjectEntity{
+			.kind = InlineTextObjectKind::IvImage,
+			.data = InlineTextObjectIvImageData{
+				.documentId = documentId,
+				.width = width,
+				.height = height,
+				.replacementText = DecodeInlineTextObjectField(parts[5]),
+			},
+		};
+	}
+	return std::nullopt;
+}
 
 MarkdownPrepareDimensions CaptureMarkdownPrepareDimensions() {
 	auto result = MarkdownPrepareDimensions();

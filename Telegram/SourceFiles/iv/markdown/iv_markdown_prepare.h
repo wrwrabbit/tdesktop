@@ -7,6 +7,8 @@
 
 #include <array>
 #include <memory>
+#include <optional>
+#include <variant>
 #include <vector>
 
 namespace Iv::Markdown {
@@ -42,17 +44,33 @@ struct PreparedLink {
 	QString copyText;
 };
 
-struct PreparedInlineObject {
-	int position = 0;
-	int formulaIndex = -1;
-	int sourceLength = 0;
+enum class InlineTextObjectKind {
+	Formula,
+	IvImage,
+};
+
+struct InlineTextObjectFormulaData {
 	QString copySource;
+	QString trimmedTex;
+};
+
+struct InlineTextObjectIvImageData {
+	uint64 documentId = 0;
+	int width = 0;
+	int height = 0;
+	QString replacementText;
+};
+
+struct InlineTextObjectEntity {
+	InlineTextObjectKind kind = InlineTextObjectKind::Formula;
+	std::variant<
+		InlineTextObjectFormulaData,
+		InlineTextObjectIvImageData> data = InlineTextObjectFormulaData();
 };
 
 struct PreparedTableCell {
 	TextWithEntities text;
 	std::vector<PreparedLink> links;
-	std::vector<PreparedInlineObject> inlineObjects;
 	int column = 0;
 	TableAlignment alignment = TableAlignment::None;
 };
@@ -66,7 +84,6 @@ struct PreparedBlock {
 	PreparedBlockKind kind = PreparedBlockKind::Paragraph;
 	TextWithEntities text;
 	std::vector<PreparedLink> links;
-	std::vector<PreparedInlineObject> inlineObjects;
 	std::vector<PreparedBlock> children;
 	std::vector<PreparedTableRow> tableRows;
 	std::vector<TableAlignment> tableAlignments;
@@ -167,6 +184,10 @@ struct MarkdownArticleContent {
 [[nodiscard]] const MarkdownPrepareTableRenderLimits &PrepareTableRenderLimitsForIv();
 [[nodiscard]] const MarkdownPrepareLimits &PrepareLimitsForIv();
 [[nodiscard]] MarkdownPrepareDimensions CaptureMarkdownPrepareDimensions();
+[[nodiscard]] QString SerializeInlineTextObjectEntity(
+	const InlineTextObjectEntity &object);
+[[nodiscard]] std::optional<InlineTextObjectEntity> ParseInlineTextObjectEntity(
+	const QString &data);
 [[nodiscard]] MarkdownArticleContent PrepareSynchronously(PrepareRequest request);
 
 } // namespace Iv::Markdown

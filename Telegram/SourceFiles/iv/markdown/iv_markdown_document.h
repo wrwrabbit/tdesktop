@@ -5,6 +5,7 @@
 #include <QtCore/QSize>
 #include <QtCore/QStringList>
 
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -169,8 +170,29 @@ struct PreparedFormulaMeasurementCacheEntry {
 	std::shared_ptr<const MeasuredFormula> data;
 };
 
+struct PreparedFormulaMeasurementSignatureLess {
+	[[nodiscard]] bool operator()(
+		const PreparedFormulaMeasurementSignature &a,
+		const PreparedFormulaMeasurementSignature &b) const {
+		if (a.trimmedTex != b.trimmedTex) {
+			return a.trimmedTex < b.trimmedTex;
+		} else if (a.kind != b.kind) {
+			return (int(a.kind) < int(b.kind));
+		} else if (a.textSize != b.textSize) {
+			return a.textSize < b.textSize;
+		} else if (a.renderWidthCap != b.renderWidthCap) {
+			return a.renderWidthCap < b.renderWidthCap;
+		}
+		return a.renderHeightCap < b.renderHeightCap;
+	}
+};
+
 struct PreparedFormulaMeasurementCacheState {
 	std::vector<PreparedFormulaMeasurementCacheEntry> slots;
+	std::map<
+		PreparedFormulaMeasurementSignature,
+		std::shared_ptr<const MeasuredFormula>,
+		PreparedFormulaMeasurementSignatureLess> bySignature;
 };
 
 struct PreparedDocument {
