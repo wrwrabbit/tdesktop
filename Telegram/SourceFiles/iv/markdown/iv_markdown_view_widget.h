@@ -10,6 +10,7 @@
 
 #include <functional>
 #include <memory>
+#include <QtCore/QVariant>
 
 namespace Ui {
 class PopupMenu;
@@ -31,6 +32,9 @@ public:
 		std::function<void(const PreparedLink &, Qt::MouseButton)> callback);
 	void setMediaActivationCallback(
 		std::function<bool(const MediaActivation &, Qt::MouseButton)> callback);
+	void setClickHandlerContext(
+		QVariant context,
+		std::shared_ptr<QVariant> contextRef = nullptr);
 	void setArticle(std::shared_ptr<MarkdownArticle> article);
 	void setZoom(int value);
 	void refreshPalette();
@@ -77,6 +81,8 @@ private:
 	[[nodiscard]] MarkdownArticleSelection selectionFromHit(
 		const MarkdownArticleHitTestResult &result) const;
 	[[nodiscard]] TextForMimeData getSelectedText() const;
+	[[nodiscard]] QVariant clickHandlerContext() const;
+	void showToast(const QString &text) const;
 	void copySelectedText();
 
 	void syncArticleVisibleTopBottom();
@@ -102,6 +108,8 @@ private:
 	std::unique_ptr<Ui::Text::QuotePaintCache> _blockquotePaintCache;
 	std::function<void(const PreparedLink &, Qt::MouseButton)> _activateLink;
 	std::function<bool(const MediaActivation &, Qt::MouseButton)> _activateMedia;
+	QVariant _clickHandlerContext;
+	std::shared_ptr<QVariant> _clickHandlerContextRef;
 	MarkdownArticleSelection _selection;
 	MarkdownArticleSelection _savedSelection;
 	MarkdownArticleSelectionEndpoints _selectionEndpoints;

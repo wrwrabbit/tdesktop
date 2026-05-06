@@ -1,12 +1,23 @@
 #pragma once
 
+#include "base/object_ptr.h"
+#include "base/unique_qptr.h"
 #include "iv/markdown/iv_markdown_document.h"
 #include "iv/markdown/iv_markdown_prepare.h"
 #include "ui/widgets/rp_window.h"
 
 #include <optional>
-
 #include <QtCore/QString>
+#include <QtCore/QVariant>
+
+namespace Ui {
+class FlatLabel;
+class IconButton;
+class LayerManager;
+class PopupMenu;
+class Show;
+class FadeShadow;
+} // namespace Ui
 
 namespace Iv::Markdown {
 
@@ -30,6 +41,7 @@ public:
 		MarkdownArticleContent content,
 		QString title,
 		OpenOptions options = {});
+	void updateOptions(OpenOptions options = {});
 
 	[[nodiscard]] bool active() const;
 	void minimize();
@@ -43,7 +55,16 @@ public:
 private:
 	void close();
 	void createWindow();
+	void createLayerManager();
 	void createPreview();
+	void updateTitleGeometry(int newWidth) const;
+	void showMenu();
+	void openSource();
+	[[nodiscard]] ViewerKind viewerKind() const;
+	[[nodiscard]] QString subtitleText() const;
+	[[nodiscard]] bool canOpenSource() const;
+	[[nodiscard]] bool canShare() const;
+	void refreshTitle();
 
 	const not_null<Delegate*> _delegate;
 
@@ -52,7 +73,16 @@ private:
 	QString _title;
 	const std::shared_ptr<MathRenderer> _renderer;
 	OpenOptions _options;
+	std::shared_ptr<QVariant> _clickHandlerContextRef;
 	std::unique_ptr<Ui::RpWindow> _window;
+	std::unique_ptr<Ui::RpWidget> _subtitleWrap;
+	std::unique_ptr<Ui::FlatLabel> _subtitle;
+	object_ptr<Ui::IconButton> _menuToggle = { nullptr };
+	object_ptr<Ui::FadeShadow> _titleShadow = { nullptr };
+	base::unique_qptr<Ui::PopupMenu> _menu;
+	Ui::RpWidget *_container = nullptr;
+	std::unique_ptr<Ui::LayerManager> _layerManager;
+	std::shared_ptr<Ui::Show> _show;
 	std::unique_ptr<Ui::RpWidget> _preview;
 
 	rpl::event_stream<Event> _events;
@@ -63,6 +93,7 @@ private:
 
 [[nodiscard]] std::unique_ptr<Controller> TryOpenLocalFile(
 	not_null<Delegate*> delegate,
-	const QString &path);
+	const QString &path,
+	OpenOptions options = {});
 
 } // namespace Iv::Markdown

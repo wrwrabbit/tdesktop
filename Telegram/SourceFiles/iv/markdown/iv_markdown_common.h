@@ -2,12 +2,14 @@
 
 #include <QtCore/QSize>
 #include <QtCore/QString>
+#include <QtCore/QVariant>
 
 #include <functional>
 #include <memory>
 
 namespace Ui {
 class DynamicImage;
+class Show;
 } // namespace Ui
 
 namespace Iv {
@@ -53,11 +55,23 @@ struct MediaActivation {
 	std::shared_ptr<PhotoRuntime> photo;
 };
 
+enum class ViewerKind {
+	Auto,
+	LocalFile,
+	InstantView,
+};
+
 struct OpenOptions {
 	QString sourceName;
 	QString sourcePath;
+	QString sourceUrl;
 	QString initialFragment;
+	ViewerKind viewerKind = ViewerKind::Auto;
 	Iv::Delegate *delegate = nullptr;
+	QVariant clickHandlerContext;
+	std::shared_ptr<QVariant> clickHandlerContextRef;
+	std::function<void()> openSource;
+	std::function<void(std::shared_ptr<Ui::Show>)> share;
 	std::function<bool(const MediaActivation &, Qt::MouseButton)> activateMedia;
 };
 
@@ -77,6 +91,7 @@ struct Event {
 	};
 	Type type = Type::Close;
 	QString url;
+	QVariant context;
 };
 
 } // namespace Iv::Markdown

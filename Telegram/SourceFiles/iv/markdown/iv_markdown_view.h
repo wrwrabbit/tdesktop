@@ -22,5 +22,10 @@ namespace Iv::Markdown {
 	std::shared_ptr<MathRenderer> renderer,
 	Fn<void(Event)> callback,
 	const OpenOptions &options = {});
+bool ScrollMarkdownPreviewToAnchor(
+	Ui::RpWidget *preview,
+	const QString &anchorId);
+[[nodiscard]] rpl::producer<int> MarkdownPreviewScrollTopValue(
+	Ui::RpWidget *preview);
 
 } // namespace Iv::Markdown

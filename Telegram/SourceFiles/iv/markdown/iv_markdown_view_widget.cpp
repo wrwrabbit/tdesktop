@@ -1,5 +1,9 @@
 #include "iv/markdown/iv_markdown_view_widget.h"
 
+#include "base/weak_ptr.h"
+#include "core/credits_amount.h"
+#include "core/click_handler_types.h"
+
 #include <QtCore/QElapsedTimer>
 #include <QtGui/QClipboard>
 #include <QtGui/QContextMenuEvent>
@@ -10,9 +14,9 @@
 #include <QtGui/QMouseEvent>
 #include <QtWidgets/QApplication>
 
-#include "base/weak_ptr.h"
 #include "core/file_utilities.h"
 #include "lang/lang_keys.h"
+#include "ui/layers/show.h"
 #include "ui/chat/chat_style.h"
 #include "ui/integration.h"
 #include "ui/widgets/popup_menu.h"
@@ -112,6 +116,13 @@ void MarkdownDocumentWidget::setLinkActivationCallback(
 void MarkdownDocumentWidget::setMediaActivationCallback(
 		std::function<bool(const MediaActivation &, Qt::MouseButton)> callback) {
 	_activateMedia = std::move(callback);
+}
+
+void MarkdownDocumentWidget::setClickHandlerContext(
+		QVariant context,
+		std::shared_ptr<QVariant> contextRef) {
+	_clickHandlerContext = std::move(context);
+	_clickHandlerContextRef = std::move(contextRef);
 }
 
 void MarkdownDocumentWidget::setArticle(
@@ -275,8 +286,9 @@ void MarkdownDocumentWidget::contextMenuEvent(QContextMenuEvent *e) {
 	} else if (!contextText.empty()) {
 		_contextMenu->addAction(
 			tr::lng_context_copy_text(tr::now),
-			[text = contextText] {
+			[text = contextText, this] {
 				TextUtilities::SetClipboardText(text);
+				showToast(tr::lng_text_copied(tr::now));
 			},
 			&st::menuIconCopy);
 	}
@@ -549,9 +561,23 @@ TextForMimeData MarkdownDocumentWidget::getSelectedText() const {
 		: TextForMimeData();
 }
 
+QVariant MarkdownDocumentWidget::clickHandlerContext() const {
+	return _clickHandlerContextRef
+		? *_clickHandlerContextRef
+		: _clickHandlerContext;
+}
+
+void MarkdownDocumentWidget::showToast(const QString &text) const {
+	const auto context = clickHandlerContext().value<ClickHandlerContext>();
+	if (context.show) {
+		context.show->showToast(text);
+	}
+}
+
 void MarkdownDocumentWidget::copySelectedText() {
 	if (const auto text = getSelectedText(); !text.empty()) {
 		TextUtilities::SetClipboardText(text);
+		showToast(tr::lng_text_copied(tr::now));
 	}
 }
 
@@ -765,7 +791,31 @@ MarkdownArticleHitTestResult MarkdownDocumentWidget::dragActionFinish(
 		if (state.preparedLink && _activateLink) {
 			_activateLink(*state.preparedLink, button);
 		} else {
-			ActivateClickHandler(window(), activated, button);
+			auto clickHandlerContext = this->clickHandlerContext();
+			if (std::dynamic_pointer_cast<MonospaceClickHandler>(activated)) {
+				const auto context = clickHandlerContext.value<ClickHandlerContext>();
+				if (context.show) {
+					auto sanitized = ClickHandlerContext();
+					sanitized.itemId = context.itemId;
+					sanitized.elementDelegate = context.elementDelegate;
+					sanitized.botWebviewContext = context.botWebviewContext;
+					sanitized.show = context.show;
+					sanitized.mayShowConfirmation = context.mayShowConfirmation;
+					sanitized.skipBotAutoLogin = context.skipBotAutoLogin;
+					sanitized.botStartAutoSubmit = context.botStartAutoSubmit;
+					sanitized.ignoreIv = context.ignoreIv;
+					sanitized.dark = context.dark;
+					sanitized.peer = context.peer;
+					clickHandlerContext = QVariant::fromValue(sanitized);
+					const auto handled = Ui::Integration::Instance().copyPreOnClick(
+						clickHandlerContext);
+					static_cast<void>(handled);
+				}
+			}
+			auto context = ClickContext();
+			context.button = button;
+			context.other = std::move(clickHandlerContext);
+			ActivateClickHandler(window(), activated, context);
 		}
 	} else if ((button == Qt::LeftButton || button == Qt::MiddleButton)
 		&& state.mediaActivation.kind != MediaActivationKind::None

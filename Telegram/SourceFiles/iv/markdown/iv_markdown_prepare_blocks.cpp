@@ -37,6 +37,18 @@ constexpr auto kMaxVisualQuoteDepth = 3;
 	return std::max(int((numerator + denominator - 1) / denominator), 1);
 }
 
+[[nodiscard]] QString StripOneTrailingNewline(QString text) {
+	if (text.endsWith(u"\r\n"_q)) {
+		text.chop(2);
+	} else if (!text.isEmpty()) {
+		const auto last = text.back();
+		if ((last == QChar(u'\n')) || (last == QChar(u'\r'))) {
+			text.chop(1);
+		}
+	}
+	return text;
+}
+
 [[nodiscard]] int FlowFormulaTextSize(
 		PreparedBlockKind kind,
 		int headingLevel,
@@ -300,7 +312,7 @@ void AppendRichBlock(
 [[nodiscard]] PreparedBlock PrepareCodeBlock(const MarkdownNode &node) {
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::CodeBlock;
-	block.text.text = node.text;
+	block.text.text = StripOneTrailingNewline(node.text);
 	block.codeLanguage = FirstInfoToken(node.info);
 	return block;
 }

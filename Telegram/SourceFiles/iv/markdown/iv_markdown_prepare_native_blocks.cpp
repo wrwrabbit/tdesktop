@@ -45,6 +45,18 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	SortEntities(&text->text);
 }
 
+[[nodiscard]] QString StripOneTrailingNewline(QString text) {
+	if (text.endsWith(u"\r\n"_q)) {
+		text.chop(2);
+	} else if (!text.isEmpty()) {
+		const auto last = text.back();
+		if ((last == QChar(u'\n')) || (last == QChar(u'\r'))) {
+			text.chop(1);
+		}
+	}
+	return text;
+}
+
 [[nodiscard]] PreparedBlock EmptyParagraphBlock() {
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::Paragraph;
@@ -456,7 +468,7 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 		block.kind = PreparedBlockKind::CodeBlock;
 		block.anchorId = std::move(anchorId);
 		block.codeLanguage = qs(data.vlanguage()).trimmed();
-		block.text.text = prepared.text.text;
+		block.text.text = StripOneTrailingNewline(prepared.text.text);
 		result->push_back(std::move(block));
 		return true;
 	}, [&](const MTPDpageBlockFooter &data) {

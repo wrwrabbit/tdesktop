@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/abstract_box.h" // Ui::show().
 #include "chat_helpers/ttl_media_layer_widget.h"
 #include "core/application.h"
+#include "core/click_handler_types.h"
 #include "core/core_settings.h"
 #include "core/mime_type.h"
 #include "data/data_document.h"
@@ -251,7 +252,17 @@ void ResolveDocument(
 		if (!openImageInApp()) {
 			const auto path = document->filepath(true);
 			if (!path.isEmpty()) {
-				if (!Core::App().iv().showMarkdown(path)) {
+				auto context = QVariant();
+				if (item) {
+					auto clickHandlerContext = ClickHandlerContext();
+					clickHandlerContext.itemId = item->fullId();
+					if (controller) {
+						clickHandlerContext.sessionWindow = controller;
+						clickHandlerContext.show = controller->uiShow();
+					}
+					context = QVariant::fromValue(clickHandlerContext);
+				}
+				if (!Core::App().iv().showMarkdown(path, context)) {
 					LaunchWithWarning(path, item);
 				}
 			} else if (document->status == FileReady

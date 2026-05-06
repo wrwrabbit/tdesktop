@@ -53,6 +53,12 @@ namespace {
 		: PrepareTerminalFailureName(failure.terminal);
 }
 
+[[nodiscard]] QVariant CurrentClickHandlerContext(const OpenOptions &options) {
+	return options.clickHandlerContextRef
+		? *options.clickHandlerContextRef
+		: options.clickHandlerContext;
+}
+
 } // namespace
 
 class MarkdownPreviewRoot final : public Ui::RpWidget {
@@ -66,15 +72,16 @@ public:
 		QWidget *parent,
 		MarkdownArticleContent content,
 		std::shared_ptr<MathRenderer> renderer,
-		Fn<void(Event)> callback,
-		const OpenOptions &options);
+	Fn<void(Event)> callback,
+	const OpenOptions &options);
+	bool scrollToAnchor(const QString &anchorId);
+	[[nodiscard]] rpl::producer<int> scrollTopValue() const;
 
 private:
 	void setup();
 	void prepareArticle();
 	void activateLink(const PreparedLink &link, Qt::MouseButton button);
 	void applyPreparedContent(MarkdownArticleContent prepared, int prepareMs);
-	[[nodiscard]] bool scrollToAnchor(const QString &anchorId);
 	void updateBodyVisibleTopBottom();
 	void updateChildrenGeometry(QSize size);
 	void updateFailureGeometry();
@@ -141,6 +148,9 @@ void MarkdownPreviewRoot::setup() {
 	_scroll->hide();
 	if (_body) {
 		_body->hide();
+		_body->setClickHandlerContext(
+			CurrentClickHandlerContext(_options),
+			_options.clickHandlerContextRef);
 		_body->setLinkActivationCallback([=](
 				const PreparedLink &link,
 				Qt::MouseButton button) {
@@ -234,7 +244,9 @@ void MarkdownPreviewRoot::activateLink(
 	}
 	switch (link.kind) {
 	case PreparedLinkKind::External:
-		HiddenUrlClickHandler::Open(link.target);
+		HiddenUrlClickHandler::Open(
+			link.target,
+			CurrentClickHandlerContext(_options));
 		break;
 	case PreparedLinkKind::Anchor:
 	case PreparedLinkKind::Footnote:
@@ -252,6 +264,7 @@ void MarkdownPreviewRoot::activateLink(
 		_callback({
 			.type = Event::Type::OpenFile,
 			.url = std::move(target),
+			.context = CurrentClickHandlerContext(_options),
 		});
 	} break;
 	case PreparedLinkKind::RejectedRelative:
@@ -330,6 +343,24 @@ bool MarkdownPreviewRoot::scrollToAnchor(const QString &anchorId) {
 	}
 	_scroll->scrollToY(top, top + 1);
 	return true;
+}
+
+rpl::producer<int> MarkdownPreviewRoot::scrollTopValue() const {
+	return _scroll
+		? _scroll->scrollTopValue()
+		: rpl::single(0);
+}
+
+bool ScrollMarkdownPreviewToAnchor(
+		Ui::RpWidget *preview,
+		const QString &anchorId) {
+	const auto root = dynamic_cast<MarkdownPreviewRoot*>(preview);
+	return root ? root->scrollToAnchor(anchorId) : false;
+}
+
+rpl::producer<int> MarkdownPreviewScrollTopValue(Ui::RpWidget *preview) {
+	const auto root = dynamic_cast<MarkdownPreviewRoot*>(preview);
+	return root ? root->scrollTopValue() : rpl::single(0);
 }
 
 void MarkdownPreviewRoot::updateBodyVisibleTopBottom() {

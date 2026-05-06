@@ -24,6 +24,13 @@ constexpr auto kCodeTabColumns = 4;
 constexpr auto kCodeTrailingGuard = 0x2060;
 const auto kPhotoCopyLabel = u"Photo"_q;
 
+[[nodiscard]] int SingleDigitOrderedMarkerWidth(
+		const style::Markdown &markdown) {
+	return std::max(
+		markdown.body.font->width(u"8."_q),
+		markdown.body.font->width(u"8)"_q));
+}
+
 [[nodiscard]] QString CodeBlockDisplayText(const QString &text) {
 	auto result = QString();
 	result.reserve(text.size());
@@ -210,8 +217,9 @@ QPoint BulletMarkerCenter(
 		const style::Markdown &markdown) {
 	const auto &list = markdown.list;
 	const auto lineHeight = TextLineHeight(markdown.body);
+	const auto markerWidth = SingleDigitOrderedMarkerWidth(markdown);
 	return QPoint(
-		left + list.markerWidth - list.bulletLeftShift - (lineHeight / 2),
+		left + list.markerWidth - list.bulletLeftShift - ((markerWidth + 1) / 2),
 		top + (lineHeight / 2));
 }
 

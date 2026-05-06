@@ -26,6 +26,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_thread.h"
 #include "data/data_web_page.h"
 #include "data/data_user.h"
+#include "history/history.h"
+#include "history/history_item.h"
 #include "history/history_item_helpers.h"
 #include "info/profile/info_profile_values.h"
 #include "iv/markdown/iv_markdown_controller.h"
@@ -54,8 +56,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "window/window_session_controller_link_info.h"
 
+#include <QtCore/QByteArray>
+#include <QtCore/QFileInfo>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QWindow>
+
+#include <optional>
 
 namespace Iv {
 namespace {
@@ -278,6 +284,119 @@ private:
 
 };
 
+struct MarkdownMessageContext {
+	ClickHandlerContext clickHandlerContext;
+	base::weak_ptr<Window::SessionController> sessionWindow;
+};
+
+struct LocalMarkdownTarget {
+	QString key;
+	QString path;
+	QString sourceName;
+	QString fragment;
+};
+
+[[nodiscard]] QString NormalizeLocalMarkdownFragment(QString fragment) {
+	fragment = QString::fromUtf8(
+		QByteArray::fromPercentEncoding(fragment.toUtf8()));
+	fragment = fragment.trimmed().toLower();
+	while (fragment.startsWith(QChar('#'))) {
+		fragment.remove(0, 1);
+	}
+	return fragment;
+}
+
+[[nodiscard]] LocalMarkdownTarget ParseLocalMarkdownTarget(QString path) {
+	auto sourcePath = path;
+	auto fragment = QString();
+	if (!QFileInfo(sourcePath).exists()) {
+		const auto hash = sourcePath.lastIndexOf(QChar('#'));
+		const auto candidate = (hash > 0) ? sourcePath.mid(0, hash) : QString();
+		if (!candidate.isEmpty() && QFileInfo(candidate).exists()) {
+			fragment = NormalizeLocalMarkdownFragment(sourcePath.mid(hash + 1));
+			sourcePath = candidate;
+		}
+	}
+	const auto info = QFileInfo(sourcePath);
+	if (!info.exists()) {
+		return {
+			.key = path,
+			.path = std::move(path),
+		};
+	}
+	auto result = LocalMarkdownTarget{
+		.key = info.absoluteFilePath(),
+		.path = info.absoluteFilePath(),
+		.sourceName = info.fileName(),
+		.fragment = std::move(fragment),
+	};
+	if (!result.fragment.isEmpty()) {
+		result.path += u"#"_q + result.fragment;
+	}
+	return result;
+}
+
+[[nodiscard]] auto ExtractMarkdownMessageContext(const QVariant &context) {
+	if (!context.isValid() || !context.canConvert<ClickHandlerContext>()) {
+		return std::optional<MarkdownMessageContext>();
+	}
+	const auto clickHandlerContext = context.value<ClickHandlerContext>();
+	return std::make_optional(MarkdownMessageContext{
+		.clickHandlerContext = clickHandlerContext,
+		.sessionWindow = clickHandlerContext.sessionWindow,
+	});
+}
+
+[[nodiscard]] Main::Session *ResolveMarkdownSession(
+		const MarkdownMessageContext &context) {
+	if (const auto controller = context.sessionWindow.get()) {
+		return &controller->session();
+	}
+	return nullptr;
+}
+
+[[nodiscard]] HistoryItem *ResolveMarkdownItem(
+		const MarkdownMessageContext &context) {
+	const auto session = ResolveMarkdownSession(context);
+	const auto itemId = context.clickHandlerContext.itemId;
+	return (session && itemId) ? session->data().message(itemId) : nullptr;
+}
+
+[[nodiscard]] bool CanShareMarkdownItem(not_null<HistoryItem*> item) {
+	const auto peer = item->history()->peer;
+	return peer->allowsForwarding() && !item->forbidsForward();
+}
+
+[[nodiscard]] Markdown::OpenOptions PrepareLocalMarkdownOptions(
+		QVariant context) {
+	auto options = Markdown::OpenOptions{
+		.viewerKind = Markdown::ViewerKind::LocalFile,
+		.clickHandlerContext = std::move(context),
+	};
+	const auto messageContext = ExtractMarkdownMessageContext(
+		options.clickHandlerContext);
+	const auto item = messageContext
+		? ResolveMarkdownItem(*messageContext)
+		: nullptr;
+	if (item && CanShareMarkdownItem(not_null{ item })) {
+		options.share = [context = *messageContext](
+				std::shared_ptr<Ui::Show> show) {
+			const auto session = ResolveMarkdownSession(context);
+			const auto itemId = context.clickHandlerContext.itemId;
+			const auto current = (session && itemId)
+				? session->data().message(itemId)
+				: nullptr;
+			if (!show || !current || !CanShareMarkdownItem(not_null{ current })) {
+				return;
+			}
+			FastShareMessage(
+				Main::MakeSessionShow(show, not_null{ session }),
+				not_null{ current });
+		};
+	}
+	return options;
+}
+
 } // namespace
 
 class Shown final : public base::has_weak_ptr {
@@ -322,7 +441,7 @@ private:
 	};
 	struct FileStream {
 		not_null<DocumentData*> document;
-		std::unique_ptr<Media::Streaming::Loader> loader;
+		std::unique_ptr<::Media::Streaming::Loader> loader;
 		std::vector<PartRequest> requests;
 		std::string mime;
 		rpl::lifetime lifetime;
@@ -339,6 +458,9 @@ private:
 		QString title,
 		QString initialFragment,
 		not_null<WebPageData*> page);
+	[[nodiscard]] Markdown::OpenOptions markdownOpenOptions(
+		QString initialFragment,
+		not_null<WebPageData*> page) const;
 
 	void showWindowed(Prepared result, Source source, bool refresh);
 	void showHtmlWindowed(Prepared result, bool refresh);
@@ -352,7 +474,8 @@ private:
 		not_null<WebPageData*> page) const;
 	[[nodiscard]] bool activateMarkdownMedia(
 		const Markdown::MediaActivation &activation,
-		Qt::MouseButton button) const;
+		Qt::MouseButton button,
+		const QVariant &clickHandlerContext) const;
 
 	[[nodiscard]] ::Data::FileOrigin fileOrigin(
 		not_null<WebPageData*> page) const;
@@ -361,10 +484,10 @@ private:
 	void streamFile(FileStream &file, Webview::DataRequest request);
 	void processPartInFile(
 		FileStream &file,
-		Media::Streaming::LoadedPart &&part);
+		::Media::Streaming::LoadedPart &&part);
 	bool finishRequestWithPart(
 		PartRequest &request,
-		const Media::Streaming::LoadedPart &part);
+		const ::Media::Streaming::LoadedPart &part);
 	void streamMap(QString params, Webview::DataRequest request);
 	void sendEmbed(QByteArray hash, Webview::DataRequest request);
 
@@ -640,6 +763,33 @@ void Shown::createController() {
 	}, _controller->lifetime());
 }
 
+Markdown::OpenOptions Shown::markdownOpenOptions(
+		QString initialFragment,
+		not_null<WebPageData*> page) const {
+	const auto clickHandlerContext = std::make_shared<QVariant>();
+	auto options = Markdown::OpenOptions{
+		.sourceName = page->displayedSiteName(),
+		.sourceUrl = page->url,
+		.initialFragment = std::move(initialFragment),
+		.viewerKind = Markdown::ViewerKind::InstantView,
+		.clickHandlerContextRef = clickHandlerContext,
+		.activateMedia = [=](
+				const Markdown::MediaActivation &activation,
+				Qt::MouseButton button) {
+			return activateMarkdownMedia(activation, button, *clickHandlerContext);
+		},
+	};
+	if (!page->url.isEmpty()) {
+		options.share = [=, url = page->url](std::shared_ptr<Ui::Show> show) {
+			if (!show) {
+				return;
+			}
+			FastShareLink(Main::MakeSessionShow(show, _session), url);
+		};
+	}
+	return options;
+}
+
 void Shown::createMarkdownController(
 		Markdown::MarkdownArticleContent content,
 		QString title,
@@ -647,14 +797,7 @@ void Shown::createMarkdownController(
 		not_null<WebPageData*> page) {
 	Expects(!_markdownController);
 
-	auto options = Markdown::OpenOptions{
-		.initialFragment = std::move(initialFragment),
-		.activateMedia = [=](
-				const Markdown::MediaActivation &activation,
-				Qt::MouseButton button) {
-			return activateMarkdownMedia(activation, button);
-		},
-	};
+	auto options = markdownOpenOptions(std::move(initialFragment), page);
 	_markdownController = std::make_unique<Markdown::Controller>(
 		_delegate,
 		std::move(content),
@@ -717,15 +860,8 @@ void Shown::showMarkdownWindowed(
 		QString initialFragment,
 		not_null<WebPageData*> page) {
 	_controller = nullptr;
+	auto options = markdownOpenOptions(std::move(initialFragment), page);
 	if (_markdownController) {
-		auto options = Markdown::OpenOptions{
-			.initialFragment = std::move(initialFragment),
-			.activateMedia = [=](
-					const Markdown::MediaActivation &activation,
-					Qt::MouseButton button) {
-				return activateMarkdownMedia(activation, button);
-			},
-		};
 		_markdownController->update(
 			std::move(content),
 			std::move(title),
@@ -746,7 +882,8 @@ std::shared_ptr<Markdown::MediaRuntime> Shown::createMediaRuntime(
 
 bool Shown::activateMarkdownMedia(
 		const Markdown::MediaActivation &activation,
-		Qt::MouseButton button) const {
+		Qt::MouseButton button,
+		const QVariant &clickHandlerContext) const {
 	if (button != Qt::LeftButton && button != Qt::MiddleButton) {
 		return false;
 	}
@@ -757,7 +894,7 @@ bool Shown::activateMarkdownMedia(
 		if (activation.url.isEmpty()) {
 			return false;
 		}
-		HiddenUrlClickHandler::Open(activation.url);
+		HiddenUrlClickHandler::Open(activation.url, clickHandlerContext);
 		return true;
 	case Markdown::MediaActivationKind::Photo:
 		if (!activation.photo) {
@@ -862,7 +999,7 @@ void Shown::streamFile(
 		}).first->second;
 
 	file.loader->parts(
-	) | rpl::on_next([=](Media::Streaming::LoadedPart &&part) {
+	) | rpl::on_next([=](::Media::Streaming::LoadedPart &&part) {
 		const auto i = _streams.find(documentId);
 		Assert(i != end(_streams));
 		processPartInFile(i->second, std::move(part));
@@ -872,7 +1009,7 @@ void Shown::streamFile(
 }
 
 void Shown::streamFile(FileStream &file, Webview::DataRequest request) {
-	constexpr auto kPart = Media::Streaming::Loader::kPartSize;
+	constexpr auto kPart = ::Media::Streaming::Loader::kPartSize;
 	const auto size = file.document->size;
 	const auto last = int((size + kPart - 1) / kPart);
 	const auto from = int(std::min(int64(request.offset), size) / kPart);
@@ -938,7 +1075,7 @@ QByteArray Shown::readFile(
 
 void Shown::processPartInFile(
 		FileStream &file,
-		Media::Streaming::LoadedPart &&part) {
+		::Media::Streaming::LoadedPart &&part) {
 	for (auto i = begin(file.requests); i != end(file.requests);) {
 		if (finishRequestWithPart(*i, part)) {
 			auto done = base::take(*i);
@@ -957,16 +1094,16 @@ void Shown::processPartInFile(
 
 bool Shown::finishRequestWithPart(
 		PartRequest &request,
-		const Media::Streaming::LoadedPart &part) {
+		const ::Media::Streaming::LoadedPart &part) {
 	const auto offset = part.offset;
-	if (offset == Media::Streaming::LoadedPart::kFailedOffset) {
+	if (offset == ::Media::Streaming::LoadedPart::kFailedOffset) {
 		request.data = QByteArray();
 		return true;
 	} else if (offset < request.offset
 		|| offset >= request.offset + request.data.size()) {
 		return false;
 	}
-	constexpr auto kPart = Media::Streaming::Loader::kPartSize;
+	constexpr auto kPart = ::Media::Streaming::Loader::kPartSize;
 	const auto copy = std::min(
 		int(part.bytes.size()),
 		int(request.data.size() - (offset - request.offset)));
@@ -1493,20 +1630,30 @@ void Instance::showTonSite(
 bool Instance::showMarkdown(
 		const QString &path,
 		QVariant context) {
-	auto i = _markdowns.find(path);
+	const auto target = ParseLocalMarkdownTarget(path);
+	auto options = PrepareLocalMarkdownOptions(context);
+	if (!target.sourceName.isEmpty()) {
+		options.sourceName = target.sourceName;
+		options.sourcePath = target.key;
+	}
+	options.initialFragment = target.fragment;
+	auto i = _markdowns.find(target.key);
 	if (i == end(_markdowns)) {
-		if (auto controller = Markdown::TryOpenLocalFile(_delegate, path)) {
+		if (auto controller = Markdown::TryOpenLocalFile(
+				_delegate,
+				target.path,
+				std::move(options))) {
 			controller->events() | rpl::on_next([=](Markdown::Event event) {
 				using Type = Markdown::Event::Type;
 				switch (event.type) {
 				case Type::Close:
-					_markdowns.take(path);
+					_markdowns.take(target.key);
 					break;
 				case Type::Quit:
 					Shortcuts::Launch(Shortcuts::Command::Quit);
 					break;
 				case Type::OpenFile:
-					if (!showMarkdown(event.url)) {
+					if (!showMarkdown(event.url, event.context)) {
 						DEBUG_LOG(("Native Markdown IV: "
 							"failed local markdown link: %1"
 							).arg(event.url));
@@ -1515,10 +1662,12 @@ bool Instance::showMarkdown(
 				}
 			}, controller->lifetime());
 
-			i = _markdowns.emplace(path, std::move(controller)).first;
+			i = _markdowns.emplace(target.key, std::move(controller)).first;
 		} else {
 			return false;
 		}
+	} else {
+		i->second->updateOptions(std::move(options));
 	}
 	i->second->activate();
 	return true;

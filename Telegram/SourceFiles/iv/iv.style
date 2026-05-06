@@ -175,7 +175,7 @@ defaultMarkdownBodyStyle: TextStyle(historyTextStyle) {
 	lineHeight: 24px;
 }
 defaultMarkdownCodeStyle: TextStyle(defaultMarkdownBodyStyle) {
-	font: font(15px);
+	font: font(14px);
 	lineHeight: 22px;
 }
 defaultMarkdownDisplayMathFallbackStyle: TextStyle(defaultMarkdownCodeStyle) {
@@ -200,7 +200,7 @@ defaultMarkdownList: MarkdownList {
 	continuationIndent: 22px;
 	markerWidth: 22px;
 	markerSkip: 8px;
-	bulletRadius: 3px;
+	bulletRadius: 2px;
 	bulletLeftShift: 0px;
 	bulletFg: windowFg;
 	taskCheck: defaultCheck;

@@ -1,18 +1,34 @@
 #include "iv/markdown/iv_markdown_controller.h"
 
+#include "base/event_filter.h"
+#include "base/weak_ptr.h"
+#include "core/credits_amount.h"
+#include "core/click_handler_types.h"
 #include "iv/markdown/iv_markdown_parse.h"
 #include "iv/markdown/iv_markdown_view.h"
 #include "iv/iv_delegate_impl.h"
+#include "core/file_utilities.h"
+#include "lang/lang_keys.h"
 #include "logs.h"
+#include "ui/layers/layer_manager.h"
+#include "ui/layers/show.h"
+#include "ui/widgets/buttons.h"
+#include "ui/widgets/labels.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/widgets/rp_window.h"
+#include "ui/wrap/fade_wrap.h"
 
+#include "styles/style_iv.h"
+#include "styles/style_menu_icons.h"
 #include "styles/palette.h"
 #include "styles/style_window.h"
 
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QUrl>
 #include <QtGui/QKeyEvent>
+#include <QtGui/QKeySequence>
 #include <QtGui/QPainter>
 
 #include <algorithm>
@@ -30,10 +46,78 @@ constexpr auto kZoomStep = int(10);
 		not_null<Delegate*> delegate,
 		const QString &title) {
 	options.delegate = delegate;
-	if (options.sourceName.isEmpty()) {
-		options.sourceName = title;
-	}
+	Q_UNUSED(title);
 	return options;
+}
+
+[[nodiscard]] ViewerKind ResolveViewerKind(const OpenOptions &options) {
+	return (options.viewerKind != ViewerKind::Auto)
+		? options.viewerKind
+		: options.sourcePath.isEmpty()
+		? ViewerKind::InstantView
+		: ViewerKind::LocalFile;
+}
+
+[[nodiscard]] QString SubtitleText(
+		const OpenOptions &options,
+		const QString &title) {
+	if (!options.sourceName.trimmed().isEmpty()) {
+		return options.sourceName.trimmed();
+	}
+	const auto host = QUrl(options.sourceUrl).host().trimmed();
+	return !host.isEmpty() ? host : title.trimmed();
+}
+
+[[nodiscard]] QString OpenSourceLabel(ViewerKind kind) {
+	return (kind == ViewerKind::InstantView)
+		? tr::lng_iv_open_in_browser(tr::now)
+		: tr::lng_markdown_preview_open_file(tr::now);
+}
+
+[[nodiscard]] const style::icon *OpenSourceIcon(ViewerKind kind) {
+	return (kind == ViewerKind::InstantView)
+		? &st::menuIconIpAddress
+		: &st::menuIconFile;
+}
+
+[[nodiscard]] QVariant ExtendClickHandlerContext(
+		QVariant context,
+		const std::shared_ptr<Ui::Show> &show) {
+	if (!show) {
+		return context;
+	} else if (!context.isValid()
+		|| context.canConvert<ClickHandlerContext>()) {
+		auto clickContext = context.isValid()
+			? context.value<ClickHandlerContext>()
+			: ClickHandlerContext();
+		clickContext.show = show;
+		return QVariant::fromValue(clickContext);
+	}
+	return context;
+}
+
+[[nodiscard]] std::shared_ptr<QVariant> ResolveClickHandlerContextRef(
+		const std::shared_ptr<QVariant> &current,
+		const OpenOptions &options) {
+	return options.clickHandlerContextRef
+		? options.clickHandlerContextRef
+		: (current ? current : std::make_shared<QVariant>());
+}
+
+void ProcessZoomShortcut(not_null<Delegate*> delegate, QKeyEvent *event) {
+	if (!(event->modifiers() & Qt::ControlModifier)) {
+		return;
+	}
+	if (event->key() == Qt::Key_Plus || event->key() == Qt::Key_Equal) {
+		event->accept();
+		delegate->ivSetZoom(delegate->ivZoom() + kZoomStep);
+	} else if (event->key() == Qt::Key_Minus) {
+		event->accept();
+		delegate->ivSetZoom(delegate->ivZoom() - kZoomStep);
+	} else if (event->key() == Qt::Key_0) {
+		event->accept();
+		delegate->ivSetZoom(0);
+	}
 }
 
 struct OpenTarget {
@@ -155,6 +239,10 @@ Controller::Controller(
 , _title(std::move(title))
 , _renderer(nullptr)
 , _options(PrepareOpenOptions(std::move(options), delegate, _title)) {
+	_clickHandlerContextRef = ResolveClickHandlerContextRef(
+		_clickHandlerContextRef,
+		_options);
+	_options.clickHandlerContextRef = _clickHandlerContextRef;
 	createWindow();
 }
 
@@ -169,6 +257,10 @@ Controller::Controller(
 , _title(std::move(title))
 , _renderer(renderer ? std::move(renderer) : std::make_shared<MathRenderer>())
 , _options(PrepareOpenOptions(std::move(options), delegate, _title)) {
+	_clickHandlerContextRef = ResolveClickHandlerContextRef(
+		_clickHandlerContextRef,
+		_options);
+	_options.clickHandlerContextRef = _clickHandlerContextRef;
 	createWindow();
 }
 
@@ -199,11 +291,63 @@ void Controller::update(
 	_preparedContent = std::move(content);
 	_title = std::move(title);
 	_options = PrepareOpenOptions(std::move(options), _delegate, _title);
-	if (_window) {
-		_window->setTitle(_title);
-		_window->setWindowTitle(_title);
+	_clickHandlerContextRef = ResolveClickHandlerContextRef(
+		_clickHandlerContextRef,
+		_options);
+	_options.clickHandlerContextRef = _clickHandlerContextRef;
+	if (_menu) {
+		_menu = nullptr;
+		_menuToggle->setForceRippled(false);
 	}
+	refreshTitle();
 	createPreview();
+	if (_window && _window->isActiveWindow() && _preview) {
+		_preview->setFocus();
+	}
+}
+
+void Controller::updateOptions(OpenOptions options) {
+	const auto initialFragment = options.initialFragment;
+	auto refreshed = PrepareOpenOptions(std::move(options), _delegate, _title);
+	if (refreshed.sourceName.isEmpty()) {
+		refreshed.sourceName = _options.sourceName;
+	}
+	if (refreshed.sourcePath.isEmpty()) {
+		refreshed.sourcePath = _options.sourcePath;
+	}
+	if (refreshed.sourceUrl.isEmpty()) {
+		refreshed.sourceUrl = _options.sourceUrl;
+	}
+	if (refreshed.viewerKind == ViewerKind::Auto) {
+		refreshed.viewerKind = _options.viewerKind;
+	}
+	if (!refreshed.openSource) {
+		refreshed.openSource = _options.openSource;
+	}
+	if (!refreshed.activateMedia) {
+		refreshed.activateMedia = _options.activateMedia;
+	}
+	_options = std::move(refreshed);
+	if (!_clickHandlerContextRef) {
+		_clickHandlerContextRef = std::make_shared<QVariant>();
+	}
+	_options.clickHandlerContextRef = _clickHandlerContextRef;
+	if (_clickHandlerContextRef) {
+		*_clickHandlerContextRef = ExtendClickHandlerContext(
+			_options.clickHandlerContext,
+			_show);
+	}
+	if (_menu) {
+		_menu = nullptr;
+		_menuToggle->setForceRippled(false);
+	}
+	refreshTitle();
+	if (!initialFragment.isEmpty() && _preview) {
+		const auto scrolled = ScrollMarkdownPreviewToAnchor(
+			_preview.get(),
+			initialFragment);
+		static_cast<void>(scrolled);
+	}
 	if (_window && _window->isActiveWindow() && _preview) {
 		_preview->setFocus();
 	}
@@ -223,11 +367,122 @@ void Controller::close() {
 	_events.fire({ Event::Type::Close });
 }
 
-void Controller::createPreview() {
-	if (!_window) {
+ViewerKind Controller::viewerKind() const {
+	return ResolveViewerKind(_options);
+}
+
+QString Controller::subtitleText() const {
+	return SubtitleText(_options, _title);
+}
+
+bool Controller::canOpenSource() const {
+	if (_options.openSource) {
+		return true;
+	}
+	return (viewerKind() == ViewerKind::InstantView)
+		? !_options.sourceUrl.isEmpty()
+		: !_options.sourcePath.isEmpty();
+}
+
+bool Controller::canShare() const {
+	return static_cast<bool>(_options.share);
+}
+
+void Controller::refreshTitle() {
+	if (_window) {
+		_window->setTitle(_title);
+		_window->setWindowTitle(_title);
+	}
+	if (_subtitle) {
+		_subtitle->setText(subtitleText());
+		updateTitleGeometry(_window->body()->width());
+	}
+}
+
+void Controller::updateTitleGeometry(int newWidth) const {
+	_subtitleWrap->setGeometry(0, 0, newWidth, st::ivSubtitleHeight);
+	_subtitle->resizeToWidth(newWidth
+		- st::ivSubtitleLeft
+		- _menuToggle->width());
+	_subtitle->moveToLeft(st::ivSubtitleLeft, st::ivSubtitleTop);
+	_menuToggle->moveToRight(0, 0);
+	if (_titleShadow) {
+		_titleShadow->resizeToWidth(newWidth);
+		_titleShadow->move(0, st::ivSubtitleHeight);
+	}
+}
+
+void Controller::openSource() {
+	if (_options.openSource) {
+		_options.openSource();
+	} else if (viewerKind() == ViewerKind::InstantView) {
+		File::OpenUrl(_options.sourceUrl);
+	} else {
+		File::Launch(_options.sourcePath);
+	}
+}
+
+void Controller::showMenu() {
+	if (!_window || _menu) {
 		return;
 	}
-	const auto parent = _window->body();
+	_menu = base::make_unique_q<Ui::PopupMenu>(
+		_window.get(),
+		st::popupMenuWithIcons);
+	_menu->setDestroyedCallback(crl::guard(_window.get(), [
+			this,
+			menu = _menu.get()] {
+		if (_menu == menu) {
+			_menuToggle->setForceRippled(false);
+		}
+	}));
+	_menuToggle->setForceRippled(true);
+
+	const auto action = _menu->addAction(
+		OpenSourceLabel(viewerKind()),
+		crl::guard(_window.get(), [=] {
+			openSource();
+		}),
+		OpenSourceIcon(viewerKind()));
+	action->setEnabled(canOpenSource());
+
+	if (canShare()) {
+		_menu->addAction(
+			tr::lng_iv_share(tr::now),
+			crl::guard(_window.get(), [=, share = _options.share] {
+				share(_show);
+			}),
+			&st::menuIconShare);
+	}
+
+	_menu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
+	_menu->popup(_window->body()->mapToGlobal(
+		QPoint(_window->body()->width(), 0) + st::ivMenuPosition));
+}
+
+void Controller::createLayerManager() {
+	if (!_window || _layerManager) {
+		return;
+	}
+	_layerManager = std::make_unique<Ui::LayerManager>(
+		not_null{ _window->body().get() });
+	_layerManager->setHideByBackgroundClick(false);
+	_show = _layerManager->uiShow();
+}
+
+void Controller::createPreview() {
+	if (!_container) {
+		return;
+	}
+	const auto parent = _container;
+	auto options = _options;
+	options.clickHandlerContextRef = _clickHandlerContextRef;
+	options.clickHandlerContext = ExtendClickHandlerContext(
+		std::move(options.clickHandlerContext),
+		_show);
+	if (options.clickHandlerContextRef) {
+		*options.clickHandlerContextRef = options.clickHandlerContext;
+	}
 	const auto callback = [=](Event event) {
 		_events.fire(std::move(event));
 	};
@@ -238,23 +493,48 @@ void Controller::createPreview() {
 			std::move(*_preparedContent),
 			_renderer,
 			callback,
-			_options)
+			options)
 		: CreateMarkdownPreviewWidget(
 			parent,
 			*_document,
 			callback,
-			_options);
+			options);
 	_preparedContent.reset();
 	_preview->setGeometry(parent->rect());
 	parent->sizeValue() | rpl::on_next([=](QSize size) {
 		_preview->resize(size);
 	}, _preview->lifetime());
+	if (_titleShadow) {
+		MarkdownPreviewScrollTopValue(
+			_preview.get()
+		) | rpl::on_next([=](int scrollTop) {
+			_titleShadow->toggle(
+				(scrollTop > 0),
+				anim::type::normal);
+		}, _preview->lifetime());
+	}
 	_preview->show();
 }
 
 void Controller::createWindow() {
 	_window = std::make_unique<Ui::RpWindow>();
 	const auto window = _window.get();
+	_subtitleWrap = std::make_unique<Ui::RpWidget>(window->body().get());
+	_subtitle = std::make_unique<Ui::FlatLabel>(
+		_subtitleWrap.get(),
+		subtitleText(),
+		st::ivSubtitle);
+	_subtitle->setSelectable(true);
+	_menuToggle.create(_subtitleWrap.get(), st::ivMenuToggle);
+	_menuToggle->setClickedCallback([=] {
+		showMenu();
+	});
+	_subtitleWrap->paintRequest() | rpl::on_next([=](QRect clip) {
+		QPainter(_subtitleWrap.get()).fillRect(clip, st::windowBg);
+	}, _subtitleWrap->lifetime());
+	window->body()->widthValue() | rpl::on_next([=](int width) {
+		updateTitleGeometry(width);
+	}, _subtitle->lifetime());
 	window->setTitle(_title);
 	window->setWindowTitle(_title);
 	window->setGeometry(_delegate->ivGeometry(window));
@@ -267,43 +547,58 @@ void Controller::createWindow() {
 	window->body()->paintRequest() | rpl::on_next([=](QRect clip) {
 		QPainter(window->body().get()).fillRect(clip, st::windowBg);
 	}, window->body()->lifetime());
+	_container = Ui::CreateChild<Ui::RpWidget>(window->body().get());
+	rpl::combine(
+		window->body()->sizeValue(),
+		_subtitleWrap->heightValue()
+	) | rpl::on_next([=](QSize size, int titleHeight) {
+		_container->setGeometry(QRect(QPoint(), size).marginsRemoved(
+			{ 0, titleHeight, 0, 0 }));
+	}, _container->lifetime());
+	_container->paintRequest() | rpl::on_next([=](QRect clip) {
+		QPainter(_container).fillRect(clip, st::windowBg);
+	}, _container->lifetime());
+	_titleShadow.create(window->body().get());
+	updateTitleGeometry(window->body()->width());
 
+	createLayerManager();
 	createPreview();
+	_container->show();
 
 	window->events() | rpl::on_next([=](not_null<QEvent*> e) {
 		if (e->type() == QEvent::Close) {
 			close();
 		} else if (e->type() == QEvent::KeyPress) {
 			const auto event = static_cast<QKeyEvent*>(e.get());
-			if (event->modifiers() & Qt::ControlModifier) {
-				if (event->key() == Qt::Key_Plus
-					|| event->key() == Qt::Key_Equal) {
-					event->accept();
-					_delegate->ivSetZoom(_delegate->ivZoom() + kZoomStep);
-					return;
-				} else if (event->key() == Qt::Key_Minus) {
-					event->accept();
-					_delegate->ivSetZoom(_delegate->ivZoom() - kZoomStep);
-					return;
-				} else if (event->key() == Qt::Key_0) {
-					event->accept();
-					_delegate->ivSetZoom(0);
-					return;
-				}
-			}
 			if (event->key() == Qt::Key_Escape) {
 				event->accept();
 				close();
 			}
 		}
 	}, window->lifetime());
+	base::install_event_filter(window, qApp, [=](not_null<QEvent*> e) {
+		if (e->type() != QEvent::ShortcutOverride || !window->isActiveWindow()) {
+			return base::EventFilterResult::Continue;
+		}
+		const auto event = static_cast<QKeyEvent*>(e.get());
+		if (event->matches(QKeySequence::Close)) {
+			close();
+			return base::EventFilterResult::Cancel;
+		}
+		const auto previousAccepted = event->isAccepted();
+		ProcessZoomShortcut(_delegate, event);
+		return event->isAccepted() && !previousAccepted
+			? base::EventFilterResult::Cancel
+			: base::EventFilterResult::Continue;
+	});
 
 	window->show();
 }
 
 std::unique_ptr<Controller> TryOpenLocalFile(
 		not_null<Delegate*> delegate,
-		const QString &path) {
+		const QString &path,
+		OpenOptions options) {
 	const auto &limits = ParseLimitsForIv();
 	const auto target = ParseOpenTarget(path);
 
@@ -360,9 +655,14 @@ std::unique_ptr<Controller> TryOpenLocalFile(
 		).arg(parsed - validated
 		).arg(target.path));
 
-	auto options = OpenOptions();
+	if (options.sourceName.isEmpty()) {
+		options.sourceName = source.name;
+	}
 	options.sourcePath = std::move(source.path);
 	options.initialFragment = std::move(target.fragment);
+	if (options.viewerKind == ViewerKind::Auto) {
+		options.viewerKind = ViewerKind::LocalFile;
+	}
 	return std::make_unique<Controller>(
 		delegate,
 		std::move(parseResult.document),

@@ -46,6 +46,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QJsonValue>
 #include <QtCore/QFile>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QKeySequence>
 #include <QtGui/QPainter>
 #include <QtGui/QWindow>
 #include <charconv>
@@ -689,6 +690,10 @@ void Controller::createWebview(const Webview::StorageId &storageId) {
 				return base::EventFilterResult::Continue;
 			}
 			const auto event = static_cast<QKeyEvent*>(e.get());
+			if (event->matches(QKeySequence::Close)) {
+				close();
+				return base::EventFilterResult::Cancel;
+			}
 			if (event->modifiers() & Qt::ControlModifier) {
 				if (event->key() == Qt::Key_Plus
 					|| event->key() == Qt::Key_Equal) {

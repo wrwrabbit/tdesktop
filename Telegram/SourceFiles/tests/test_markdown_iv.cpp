@@ -1382,6 +1382,18 @@ void ForEachPreparedLink(
 	});
 }
 
+[[nodiscard]] std::vector<const PreparedBlock*> CollectPreparedBlocksByKind(
+		const std::vector<PreparedBlock> &blocks,
+		PreparedBlockKind kind) {
+	auto result = std::vector<const PreparedBlock*>();
+	ForEachPreparedBlock(blocks, [&](const PreparedBlock &block) {
+		if (block.kind == kind) {
+			result.push_back(&block);
+		}
+	});
+	return result;
+}
+
 struct InlineTextObjectMatch {
 	EntityInText entity;
 	InlineTextObjectEntity object;
@@ -2259,6 +2271,96 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 		Check(
 			block.text.text == u"Missing photo"_q,
 			u"native-iv missing-photo placeholder caption"_q,
+			ok);
+	}
+}
+
+void CheckCodeBlockTrailingNewlineTrim(bool *ok) {
+	const auto markdownLabel = u"generated-code-block-trailing-newline"_q;
+	const auto parsed = ParseMarkdownForIv(QByteArray(R"(```cpp
+alpha
+
+```
+
+    beta
+)"), ParseOptions{ markdownLabel });
+	Check(
+		parsed.ok,
+		markdownLabel + u" parse failed: "_q + parsed.error,
+		ok);
+	if (!parsed.ok) {
+		return;
+	}
+	auto renderer = std::make_shared<MathRenderer>();
+	const auto prepared = PrepareParsedDocumentForTest(
+		parsed.document,
+		markdownLabel,
+		renderer);
+	Check(
+		!prepared.failure.failed(),
+		markdownLabel + u" prepare failed: "_q
+			+ PrepareFailureReason(prepared.failure),
+		ok);
+	if (prepared.failure.failed()) {
+		return;
+	}
+	const auto markdownCodeBlocks = CollectPreparedBlocksByKind(
+		prepared.blocks.blocks,
+		PreparedBlockKind::CodeBlock);
+	Check(
+		markdownCodeBlocks.size() == 2,
+		markdownLabel + u" code block count"_q,
+		ok);
+	if (markdownCodeBlocks.size() == 2) {
+		Check(
+			markdownCodeBlocks[0]->text.text == u"alpha\n"_q,
+			markdownLabel + u" fenced block trims one newline"_q,
+			ok);
+		Check(
+			markdownCodeBlocks[1]->text.text == u"beta"_q,
+			markdownLabel + u" indented block trims one newline"_q,
+			ok);
+	}
+
+	const auto nativeLabel = u"native-iv-preformatted-trailing-newline"_q;
+	auto nativeBlocks = QVector<MTPPageBlock>();
+	nativeBlocks.push_back(MTP_pageBlockPreformatted(
+		NativeIvText(u"single\n"_q),
+		MTP_string("txt")));
+	nativeBlocks.push_back(MTP_pageBlockPreformatted(
+		NativeIvText(u"double\n\n"_q),
+		MTP_string("txt")));
+	auto nativeSource = NativeIvSource(std::move(nativeBlocks));
+	const auto nativePrepared = TryPrepareNativeInstantView({
+		.source = &nativeSource,
+	});
+	Check(
+		nativePrepared.supported(),
+		nativeLabel + u" prepare supported"_q,
+		ok);
+	Check(
+		!nativePrepared.content.failure.failed(),
+		nativeLabel + u" prepare failed"_q,
+		ok);
+	if (!nativePrepared.supported()
+		|| nativePrepared.content.failure.failed()) {
+		return;
+	}
+	const auto nativeCodeBlocks = CollectPreparedBlocksByKind(
+		nativePrepared.content.blocks.blocks,
+		PreparedBlockKind::CodeBlock);
+	Check(
+		nativeCodeBlocks.size() == 2,
+		nativeLabel + u" code block count"_q,
+		ok);
+	if (nativeCodeBlocks.size() == 2) {
+		Check(
+			nativeCodeBlocks[0]->text.text == u"single"_q,
+			nativeLabel + u" single trailing newline trimmed"_q,
+			ok);
+		Check(
+			nativeCodeBlocks[1]->text.text == u"double\n"_q,
+			nativeLabel + u" extra trailing newline preserved"_q,
 			ok);
 	}
 }
@@ -4208,6 +4310,7 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 
 	CheckInlineTextObjectPrepareCoverage(&ok);
 	CheckNativeInstantViewPrepareCoverage(&ok);
+	CheckCodeBlockTrailingNewlineTrim(&ok);
 	CheckPrepareCoverage(markdownFixture, latexFixture, &ok);
 	CheckPrepareLinkClassification(markdownFixture.path, &ok);
 	CheckArticleRenderSmoke(markdownFixture, latexFixture, &ok);
