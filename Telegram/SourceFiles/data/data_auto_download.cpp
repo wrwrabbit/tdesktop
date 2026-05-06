@@ -194,6 +194,26 @@ int64 Full::bytesLimit(Source source, Type type) const {
 	return setOrDefault(source, type).bytesLimit(type);
 }
 
+void Full::setPeerOverride(PeerId peerId, Override value) {
+	if (value == Override::Default) {
+		_peerOverrides.remove(peerId);
+	} else {
+		_peerOverrides[peerId] = value;
+	}
+}
+
+Override Full::peerOverride(PeerId peerId) const {
+	const auto i = _peerOverrides.find(peerId);
+	return (i != end(_peerOverrides)) ? i->second : Override::Default;
+}
+
+void Full::enumeratePeerOverrides(
+		Fn<void(PeerId, Override)> callback) const {
+	for (const auto &[peerId, value] : _peerOverrides) {
+		callback(peerId, value);
+	}
+}
+
 QByteArray Full::serialize() const {
 	auto result = QByteArray();
 	auto size = sizeof(qint8);
