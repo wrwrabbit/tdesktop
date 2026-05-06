@@ -3,6 +3,7 @@
 #include "iv/markdown/iv_markdown_article_text.h"
 
 #include "lang/lang_keys.h"
+#include "spellcheck/spellcheck_highlight_syntax.h"
 
 #include <algorithm>
 #include <limits>
@@ -24,54 +25,6 @@ constexpr auto kIvMarkedTextOptions = TextParseOptions{
 constexpr auto kCodeTabColumns = 4;
 constexpr auto kCodeTrailingGuard = 0x2060;
 const auto kPhotoCopyLabel = u"Photo"_q;
-
-[[nodiscard]] int SingleDigitOrderedMarkerWidth(
-		const style::Markdown &markdown) {
-	return std::max(
-		markdown.body.font->width(u"8."_q),
-		markdown.body.font->width(u"8)"_q));
-}
-
-[[nodiscard]] QString CodeBlockDisplayText(const QString &text) {
-	auto result = QString();
-	result.reserve(text.size());
-
-	auto column = 0;
-	for (const auto ch : text) {
-		if (ch == QChar::Tabulation) {
-			const auto count = kCodeTabColumns - (column % kCodeTabColumns);
-			for (auto i = 0; i != count; ++i) {
-				result.append(QChar::Space);
-			}
-			column += count;
-			continue;
-		}
-		result.append(ch);
-		if (Ui::Text::IsNewline(ch)) {
-			column = 0;
-		} else {
-			++column;
-		}
-	}
-	if (result.isEmpty() || Ui::Text::IsTrimmed(result.back())) {
-		result.append(QChar(kCodeTrailingGuard));
-	}
-	return result;
-}
-
-[[nodiscard]] TextWithEntities CodeBlockText(
-		const QString &text,
-		const QString &language) {
-	auto result = tr::marked(CodeBlockDisplayText(text));
-	if (!result.text.isEmpty()) {
-		result.entities.push_back(EntityInText(
-			EntityType::Pre,
-			0,
-			result.text.size(),
-			language));
-	}
-	return result;
-}
 
 [[nodiscard]] style::align CellAlign(TableAlignment alignment) {
 	switch (alignment) {
@@ -192,6 +145,40 @@ const auto kPhotoCopyLabel = u"Photo"_q;
 }
 
 } // namespace
+
+[[nodiscard]] int SingleDigitOrderedMarkerWidth(
+		const style::Markdown &markdown) {
+	return std::max(
+		markdown.body.font->width(u"8."_q),
+		markdown.body.font->width(u"8)"_q));
+}
+
+QString CodeBlockDisplayText(const QString &text) {
+	auto result = QString();
+	result.reserve(text.size());
+
+	auto column = 0;
+	for (const auto ch : text) {
+		if (ch == QChar::Tabulation) {
+			const auto count = kCodeTabColumns - (column % kCodeTabColumns);
+			for (auto i = 0; i != count; ++i) {
+				result.append(QChar::Space);
+			}
+			column += count;
+			continue;
+		}
+		result.append(ch);
+		if (Ui::Text::IsNewline(ch)) {
+			column = 0;
+		} else {
+			++column;
+		}
+	}
+	if (result.isEmpty() || Ui::Text::IsTrimmed(result.back())) {
+		result.append(QChar(kCodeTrailingGuard));
+	}
+	return result;
+}
 
 bool IsFlowKind(PreparedBlockKind kind) {
 	return (kind == PreparedBlockKind::Paragraph)
@@ -330,6 +317,33 @@ int BlockMaxRight(const std::vector<LaidOutBlock> &blocks) {
 	return result;
 }
 
+void RepopulateCodeBlockLeaf(
+		LaidOutBlock &block,
+		const style::Markdown &markdown,
+		bool allowAsyncSyntaxHighlighting,
+		CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker) {
+	auto marked = tr::marked(CodeBlockDisplayText(block.copyText));
+	if (!marked.text.isEmpty()) {
+		marked.entities.push_back(EntityInText(
+			EntityType::Pre,
+			0,
+			marked.text.size(),
+			block.codeLanguage));
+	}
+	block.syntaxHighlightProcessId = allowAsyncSyntaxHighlighting
+		? (syntaxHighlightTracker
+			? syntaxHighlightTracker->tryHighlightSyntax(
+				marked.text,
+				block.codeLanguage,
+				marked)
+			: Spellchecker::TryHighlightSyntax(marked))
+		: 0;
+	block.leaf.setMarkedText(
+		markdown.code,
+		std::move(marked),
+		kIvMarkedTextOptions);
+}
+
 LaidOutBlock LayoutFlowBlock(
 		const PreparedBlock &prepared,
 		const std::vector<PreparedFormulaSlot> *formulas,
@@ -369,17 +383,20 @@ LaidOutBlock LayoutCodeBlock(
 		const style::Markdown &markdown,
 		int left,
 		int top,
-		int width) {
+		int width,
+		bool allowAsyncSyntaxHighlighting,
+		CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::CodeBlock;
 	block.copyText = prepared.text.text;
 	block.codeLanguage = prepared.codeLanguage;
 	block.textWidth = std::max(width, 1);
 	block.leaf = Ui::Text::String(TextMinResizeWidth(block.textWidth));
-	block.leaf.setMarkedText(
-		markdown.code,
-		CodeBlockText(prepared.text.text, prepared.codeLanguage),
-		kIvMarkedTextOptions);
+	RepopulateCodeBlockLeaf(
+		block,
+		markdown,
+		allowAsyncSyntaxHighlighting,
+		syntaxHighlightTracker);
 	const auto height = std::max(
 		block.leaf.countHeight(block.textWidth, true),
 		TextLineHeight(markdown.code));

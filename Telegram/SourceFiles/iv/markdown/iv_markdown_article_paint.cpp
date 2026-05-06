@@ -61,6 +61,7 @@ void PaintTextLeaf(
 		.palette = &p.textPalette(),
 		.pre = caches.pre,
 		.blockquote = caches.blockquote,
+		.colors = caches.colors,
 		.spoiler = Ui::Text::DefaultSpoilerCache(),
 		.now = crl::now(),
 		.selection = selection.value_or(TextSelection()),

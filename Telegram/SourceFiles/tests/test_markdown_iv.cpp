@@ -7,7 +7,9 @@
 #include "iv/iv_prepare.h"
 #include "scheme.h"
 
+#include "spellcheck/spellcheck_highlight_syntax.h"
 #include "ui/basic_click_handlers.h"
+#include "ui/chat/chat_style.h"
 #include "ui/dynamic_image.h"
 #include "ui/style/style_core.h"
 #include "ui/style/style_core_scale.h"
@@ -17,6 +19,8 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
+#include <QtCore/QElapsedTimer>
+#include <QtCore/QEventLoop>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QIODevice>
@@ -1228,6 +1232,78 @@ void PrintPrepareSummary(
 	return image;
 }
 
+[[nodiscard]] QImage PaintArticleForSyntaxHighlightTest(
+		MarkdownArticle *article,
+		int width,
+		int height,
+		int devicePixelRatio = 1) {
+	static auto preCache = [] {
+		auto result = Ui::Text::QuotePaintCache();
+		const auto color = st::inTextPalette.monoFg->c;
+		result.bg = color;
+		result.bg.setAlpha(Ui::kDefaultBgOpacity * 255);
+		result.outlines[0] = color;
+		result.outlines[0].setAlpha(Ui::kDefaultOutline1Opacity * 255);
+		result.outlines[1] = result.outlines[2] = QColor(0, 0, 0, 0);
+		result.header = color;
+		result.header.setAlpha(Ui::kDefaultOutline2Opacity * 255);
+		result.icon = color;
+		result.icon.setAlpha(Ui::kDefaultOutline3Opacity * 255);
+		return result;
+	}();
+	static auto highlightColors = Ui::SyntaxHighlightColors(
+		style::main_palette::get());
+
+	const auto previousDevicePixelRatio = style::DevicePixelRatio();
+	style::SetDevicePixelRatio(devicePixelRatio);
+
+	auto image = QImage(
+		QSize(width * devicePixelRatio, height * devicePixelRatio),
+		QImage::Format_ARGB32_Premultiplied);
+	image.setDevicePixelRatio(devicePixelRatio);
+	image.fill(Qt::transparent);
+	{
+		auto painter = Painter(&image);
+		article->paint(
+			painter,
+			QRect(0, 0, width, height),
+			MarkdownArticlePaintCaches{
+				.pre = &preCache,
+				.colors = highlightColors,
+			});
+	}
+
+	style::SetDevicePixelRatio(previousDevicePixelRatio);
+	return image;
+}
+
+class MarkdownArticleHighlightWaiter final {
+public:
+	explicit MarkdownArticleHighlightWaiter(MarkdownArticle *article)
+	: _article(article) {
+		Spellchecker::HighlightReady(
+		) | rpl::on_next([=](Spellchecker::HighlightProcessId processId) {
+			if (_article && _article->highlightProcessDone(processId)) {
+				_done = true;
+			}
+		}, _lifetime);
+	}
+
+	[[nodiscard]] bool wait(int timeoutMs = 5000) {
+		auto timer = QElapsedTimer();
+		timer.start();
+		while (!_done && (timer.elapsed() < timeoutMs)) {
+			QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+		}
+		return _done;
+	}
+
+private:
+	MarkdownArticle *_article = nullptr;
+	rpl::lifetime _lifetime;
+	bool _done = false;
+};
+
 [[nodiscard]] bool HasPaintedPixels(const QImage &image) {
 	const auto bits = image.constBits();
 	if (!bits) {
@@ -1289,6 +1365,27 @@ void PrintPrepareSummary(
 	return (right >= left) && (bottom >= top)
 		? std::make_optional(QRect(QPoint(left, top), QPoint(right, bottom)))
 		: std::nullopt;
+}
+
+[[nodiscard]] bool PixelsDifferInRect(
+		const QImage &first,
+		const QImage &second,
+		QRect rect) {
+	if (first.size() != second.size()) {
+		return false;
+	}
+	rect = rect.intersected(QRect(QPoint(), first.size()));
+	if (rect.isEmpty()) {
+		return false;
+	}
+	for (auto y = rect.top(); y <= rect.bottom(); ++y) {
+		for (auto x = rect.left(); x <= rect.right(); ++x) {
+			if (first.pixel(x, y) != second.pixel(x, y)) {
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 [[nodiscard]] std::optional<QRect> SymbolHitBounds(
@@ -2369,7 +2466,7 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 
 void CheckCodeBlockTrailingNewlineTrim(bool *ok) {
 	const auto markdownLabel = u"generated-code-block-trailing-newline"_q;
-	const auto parsed = ParseMarkdownForIv(QByteArray(R"(```cpp
+	const auto parsed = ParseMarkdownForIv(QByteArray(R"(```cpp extra-token
 alpha
 
 ```
@@ -2409,8 +2506,16 @@ alpha
 			markdownLabel + u" fenced block trims one newline"_q,
 			ok);
 		Check(
+			markdownCodeBlocks[0]->codeLanguage == u"cpp"_q,
+			markdownLabel + u" fenced block keeps first info token"_q,
+			ok);
+		Check(
 			markdownCodeBlocks[1]->text.text == u"beta"_q,
 			markdownLabel + u" indented block trims one newline"_q,
+			ok);
+		Check(
+			markdownCodeBlocks[1]->codeLanguage.isEmpty(),
+			markdownLabel + u" indented block keeps empty language"_q,
 			ok);
 	}
 
@@ -2418,10 +2523,10 @@ alpha
 	auto nativeBlocks = QVector<MTPPageBlock>();
 	nativeBlocks.push_back(MTP_pageBlockPreformatted(
 		NativeIvText(u"single\n"_q),
-		MTP_string("txt")));
+		MTP_string(" txt ")));
 	nativeBlocks.push_back(MTP_pageBlockPreformatted(
 		NativeIvText(u"double\n\n"_q),
-		MTP_string("txt")));
+		MTP_string(" txt ")));
 	auto nativeSource = NativeIvSource(std::move(nativeBlocks));
 	const auto nativePrepared = TryPrepareNativeInstantView({
 		.source = &nativeSource,
@@ -2451,10 +2556,261 @@ alpha
 			nativeLabel + u" single trailing newline trimmed"_q,
 			ok);
 		Check(
+			nativeCodeBlocks[0]->codeLanguage == u"txt"_q,
+			nativeLabel + u" native language trimmed"_q,
+			ok);
+		Check(
 			nativeCodeBlocks[1]->text.text == u"double\n"_q,
 			nativeLabel + u" extra trailing newline preserved"_q,
 			ok);
+		Check(
+			nativeCodeBlocks[1]->codeLanguage == u"txt"_q,
+			nativeLabel + u" native language trimmed on second block"_q,
+			ok);
 	}
+}
+
+void CheckCodeBlockSelectionExportCoverage(bool *ok) {
+	const auto renderer = std::make_shared<MathRenderer>();
+	const auto checkSelectionExport = [&](std::unique_ptr<MarkdownArticle> article,
+			const QString &expectedLanguage,
+			const QString &label) {
+		Check(
+			article != nullptr,
+			label + u" article built"_q,
+			ok);
+		if (!article) {
+			return;
+		}
+		Check(
+			article->segmentIsText(0),
+			label + u" code block segment is text"_q,
+			ok);
+		const auto length = article->segmentLength(0);
+		Check(
+			length >= 4,
+			label + u" code block segment length"_q,
+			ok);
+		if (!article->segmentIsText(0) || (length < 4)) {
+			return;
+		}
+		const auto checkExport = [&](const TextForMimeData &exported,
+				const QString &selectionLabel) {
+			auto preCount = 0;
+			const auto pre = [&] {
+				const EntityInText *result = nullptr;
+				for (const auto &entity : exported.rich.entities) {
+					if (entity.type() != EntityType::Pre) {
+						continue;
+					}
+					++preCount;
+					if (!result) {
+						result = &entity;
+					}
+				}
+				return result;
+			}();
+			Check(
+				preCount == 1,
+				selectionLabel + u" exports exactly one pre entity"_q,
+				ok);
+			Check(
+				pre != nullptr
+					&& pre->offset() == 0
+					&& pre->length() == exported.rich.text.size(),
+				selectionLabel + u" pre entity spans exported text"_q,
+				ok);
+			Check(
+				pre != nullptr && pre->data() == expectedLanguage,
+				selectionLabel + u" pre entity keeps language"_q,
+				ok);
+		};
+		checkExport(
+			article->textForSelection({
+				.from = { .segment = 0, .offset = 0 },
+				.to = { .segment = 0, .offset = length },
+			}, nullptr),
+			label + u" full selection"_q);
+		checkExport(
+			article->textForSelection({
+				.from = { .segment = 0, .offset = 1 },
+				.to = { .segment = 0, .offset = length - 1 },
+			}, nullptr),
+			label + u" partial selection"_q);
+	};
+
+	const auto markdownLabel = u"generated-code-block-selection-language"_q;
+	const auto markdownParsed = ParseMarkdownForIv(QByteArray(R"(```cpp ignored-token
+alpha
+beta
+```
+)"), ParseOptions{ markdownLabel });
+	Check(
+		markdownParsed.ok,
+		markdownLabel + u" parse failed: "_q + markdownParsed.error,
+		ok);
+	if (markdownParsed.ok) {
+		auto markdownPrepared = PrepareParsedDocumentForTest(
+			markdownParsed.document,
+			markdownLabel,
+			renderer);
+		Check(
+			!markdownPrepared.failure.failed(),
+			markdownLabel + u" prepare failed: "_q
+				+ PrepareFailureReason(markdownPrepared.failure),
+			ok);
+		if (!markdownPrepared.failure.failed()) {
+			auto markdownArticleHeight = 0;
+			checkSelectionExport(
+				BuildArticleForTest(
+					std::move(markdownPrepared),
+					renderer,
+					420,
+					&markdownArticleHeight),
+				u"cpp"_q,
+				markdownLabel);
+		}
+	}
+
+	const auto nativeLabel = u"native-iv-code-block-selection-language"_q;
+	auto nativeBlocks = QVector<MTPPageBlock>();
+	nativeBlocks.push_back(MTP_pageBlockPreformatted(
+		NativeIvText(u"alpha\nbeta\n"_q),
+		MTP_string("  rust  ")));
+	auto nativeSource = NativeIvSource(std::move(nativeBlocks));
+	auto nativePrepared = TryPrepareNativeInstantView({
+		.source = &nativeSource,
+	});
+	Check(
+		nativePrepared.supported(),
+		nativeLabel + u" prepare supported"_q,
+		ok);
+	Check(
+		!nativePrepared.content.failure.failed(),
+		nativeLabel + u" prepare failed"_q,
+		ok);
+	if (nativePrepared.supported() && !nativePrepared.content.failure.failed()) {
+		auto nativeArticleHeight = 0;
+		checkSelectionExport(
+			BuildArticleForTest(
+				std::move(nativePrepared.content),
+				renderer,
+				420,
+				&nativeArticleHeight),
+			u"rust"_q,
+			nativeLabel);
+	}
+}
+
+void CheckCodeBlockAsyncSyntaxHighlightCoverage(bool *ok) {
+	const auto label = u"generated-code-block-async-highlight"_q;
+	const auto parsed = ParseMarkdownForIv(QByteArray(R"(```cpp
+namespace phase3_async_highlight_unique_z {
+auto value = 42;
+auto text = "native-markdown-iv-phase-z-highlight";
+}
+```
+
+```cpp
+namespace phase3_async_highlight_unique_z {
+auto value = 42;
+auto text = "native-markdown-iv-phase-z-highlight";
+}
+```
+)"), ParseOptions{ label });
+	Check(
+		parsed.ok,
+		label + u" parse failed: "_q + parsed.error,
+		ok);
+	if (!parsed.ok) {
+		return;
+	}
+	auto renderer = std::make_shared<MathRenderer>();
+	auto prepared = PrepareParsedDocumentForTest(
+		parsed.document,
+		label,
+		renderer);
+	Check(
+		!prepared.failure.failed(),
+		label + u" prepare failed: "_q
+			+ PrepareFailureReason(prepared.failure),
+		ok);
+	if (prepared.failure.failed()) {
+		return;
+	}
+	auto height = 0;
+	auto article = BuildArticleForTest(
+		std::move(prepared),
+		renderer,
+		420,
+		&height);
+	auto highlightWaiter = MarkdownArticleHighlightWaiter(article.get());
+	const auto firstImage = PaintArticleForSyntaxHighlightTest(
+		article.get(),
+		420,
+		height);
+	Check(
+		HasPaintedPixels(firstImage),
+		label + u" first paint produced pixels"_q,
+		ok);
+	const auto firstBounds = SegmentHitBounds(article.get(), 420, height, 0);
+	const auto repeatedBounds = SegmentHitBounds(article.get(), 420, height, 1);
+	Check(
+		firstBounds.has_value(),
+		label + u" code block segment hit bounds"_q,
+		ok);
+	Check(
+		repeatedBounds.has_value(),
+		label + u" repeated code block segment hit bounds"_q,
+		ok);
+	const auto highlightCompleted = highlightWaiter.wait();
+	Check(
+		highlightCompleted,
+		label + u" async highlight completion"_q,
+		ok);
+	if (!firstBounds || !repeatedBounds || !highlightCompleted) {
+		return;
+	}
+	const auto heightAfterHighlight = article->resizeGetHeight(420);
+	const auto secondBounds = SegmentHitBounds(
+		article.get(),
+		420,
+		heightAfterHighlight,
+		0);
+	const auto repeatedSecondBounds = SegmentHitBounds(
+		article.get(),
+		420,
+		heightAfterHighlight,
+		1);
+	const auto secondImage = PaintArticleForSyntaxHighlightTest(
+		article.get(),
+		420,
+		heightAfterHighlight);
+	Check(
+		HasPaintedPixels(secondImage),
+		label + u" second paint produced pixels"_q,
+		ok);
+	Check(
+		heightAfterHighlight == height,
+		label + u" highlight keeps article height"_q,
+		ok);
+	Check(
+		secondBounds.has_value() && (*secondBounds == *firstBounds),
+		label + u" highlight keeps code block bounds"_q,
+		ok);
+	Check(
+		repeatedSecondBounds.has_value()
+			&& (*repeatedSecondBounds == *repeatedBounds),
+		label + u" highlight keeps repeated code block bounds"_q,
+		ok);
+	Check(
+		PixelsDifferInRect(firstImage, secondImage, *firstBounds),
+		label + u" highlight repaint changes code block pixels"_q,
+		ok);
+	Check(
+		PixelsDifferInRect(firstImage, secondImage, *repeatedBounds),
+		label + u" highlight repaint changes repeated code block pixels"_q,
+		ok);
 }
 
 void CheckNativeInstantViewArticleCoverage(bool *ok) {
@@ -5165,6 +5521,8 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 	CheckInlineTextObjectPrepareCoverage(&ok);
 	CheckNativeInstantViewPrepareCoverage(&ok);
 	CheckCodeBlockTrailingNewlineTrim(&ok);
+	CheckCodeBlockSelectionExportCoverage(&ok);
+	CheckCodeBlockAsyncSyntaxHighlightCoverage(&ok);
 	CheckPrepareCoverage(markdownFixture, latexFixture, &ok);
 	CheckPrepareLinkClassification(markdownFixture.path, &ok);
 	CheckPreparedExternalLinkCoverage(&ok);

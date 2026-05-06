@@ -5,6 +5,7 @@
 #include "base/weak_ptr.h"
 #include "core/credits_amount.h"
 #include "core/click_handler_types.h"
+#include "spellcheck/spellcheck_highlight_syntax.h"
 
 #include <QtCore/QElapsedTimer>
 #include <QtGui/QClipboard>
@@ -29,6 +30,7 @@
 #include <cmath>
 #include <utility>
 
+#include "styles/palette.h"
 #include "styles/style_iv.h"
 #include "styles/style_chat.h"
 #include "styles/style_layers.h"
@@ -118,9 +120,17 @@ void EnsurePrePaintCache(
 } // namespace
 
 MarkdownDocumentWidget::MarkdownDocumentWidget(QWidget *parent)
-: Ui::RpWidget(parent) {
+: Ui::RpWidget(parent)
+, _highlightColors(Ui::SyntaxHighlightColors(style::main_palette::get())) {
 	setMouseTracking(true);
 	setFocusPolicy(Qt::StrongFocus);
+
+	Spellchecker::HighlightReady(
+	) | rpl::on_next([=](Spellchecker::HighlightProcessId processId) {
+		if (_article && _article->highlightProcessDone(processId)) {
+			update();
+		}
+	}, _highlightReadyLifetime);
 }
 
 MarkdownDocumentWidget::~MarkdownDocumentWidget() = default;
@@ -166,6 +176,7 @@ void MarkdownDocumentWidget::setZoom(int value) {
 void MarkdownDocumentWidget::refreshPalette() {
 	ClickHandler::clearActive(this);
 	applyCursor(style::cur_default);
+	_highlightColors = Ui::SyntaxHighlightColors(style::main_palette::get());
 	resetTextPaintCaches();
 	if (_article) {
 		_article->invalidatePaletteCache();
@@ -730,6 +741,7 @@ MarkdownArticlePaintCaches MarkdownDocumentWidget::textPaintCaches() {
 	return {
 		.pre = ensurePrePaintCache(),
 		.blockquote = ensureBlockquotePaintCache(),
+		.colors = _highlightColors,
 		.repaint = [=] {
 			crl::on_main(this, [=] {
 				update();

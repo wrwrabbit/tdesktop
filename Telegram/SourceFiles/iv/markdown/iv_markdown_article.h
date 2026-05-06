@@ -3,17 +3,20 @@
 #include "iv/markdown/iv_markdown_common.h"
 #include "iv/markdown/iv_markdown_prepare.h"
 
+#include "spellcheck/spellcheck_highlight_syntax.h"
 #include "ui/painter.h"
 #include "ui/text/text.h"
 
 #include <memory>
 #include <optional>
+#include <span>
 
 namespace Iv::Markdown {
 
 struct MarkdownArticlePaintCaches {
 	Ui::Text::QuotePaintCache *pre = nullptr;
 	Ui::Text::QuotePaintCache *blockquote = nullptr;
+	std::span<Ui::Text::SpecialColor> colors;
 	Fn<void()> repaint;
 };
 
@@ -130,6 +133,8 @@ public:
 	[[nodiscard]] TextForMimeData textForSelection(
 		MarkdownArticleSelection selection,
 		const MarkdownArticleSelectionEndpoints *endpoints) const;
+	[[nodiscard]] bool highlightProcessDone(
+		Spellchecker::HighlightProcessId processId);
 	void invalidatePaletteCache();
 	void invalidateRasterCache();
 

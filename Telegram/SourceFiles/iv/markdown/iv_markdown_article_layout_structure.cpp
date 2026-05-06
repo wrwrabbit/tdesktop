@@ -394,7 +394,14 @@ namespace {
 			top,
 			width);
 	case PreparedBlockKind::CodeBlock:
-		return LayoutCodeBlock(prepared, markdown, left, top, width);
+		return LayoutCodeBlock(
+			prepared,
+			markdown,
+			left,
+			top,
+			width,
+			context.allowAsyncSyntaxHighlighting,
+			context.syntaxHighlightTracker);
 	case PreparedBlockKind::Rule:
 		return LayoutRuleBlock(markdown, left, top, width);
 	case PreparedBlockKind::List:

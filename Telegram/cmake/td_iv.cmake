@@ -83,6 +83,7 @@ target_link_libraries(td_iv
 PRIVATE
     desktop-app::external_cmark_gfm
     desktop-app::external_microtex
+    desktop-app::lib_spellcheck
 )
 
 nice_target_sources(td_iv ${res_loc}

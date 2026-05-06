@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <unordered_map>
 #include <utility>
 
 #include "styles/style_iv.h"
@@ -18,6 +19,39 @@ namespace Iv::Markdown {
 namespace {
 
 constexpr auto kArticleMaxWidth = 32767;
+
+struct PendingHighlightKey {
+	QString text;
+	QString language;
+};
+
+[[nodiscard]] bool operator==(
+		const PendingHighlightKey &a,
+		const PendingHighlightKey &b) {
+	return (a.text == b.text) && (a.language == b.language);
+}
+
+struct PendingHighlightKeyHasher {
+	[[nodiscard]] size_t operator()(
+			const PendingHighlightKey &key) const noexcept {
+		auto result = size_t(qHash(key.text));
+		result = (result * 1315423911U) ^ size_t(qHash(key.language));
+		return result;
+	}
+};
+
+struct PendingHighlightEntry {
+	PendingHighlightKey key;
+	std::vector<LaidOutBlock*> blocks;
+};
+
+[[nodiscard]] PendingHighlightKey PendingHighlightKeyForBlock(
+		const LaidOutBlock &block) {
+	return {
+		.text = CodeBlockDisplayText(block.copyText),
+		.language = block.codeLanguage,
+	};
+}
 
 [[nodiscard]] Ui::Text::StateResult TextStateAtLeaf(
 		const Ui::Text::String &leaf,
@@ -262,7 +296,7 @@ void ClearColorizedFormulaImages(std::vector<LaidOutBlock> *blocks) {
 
 } // namespace
 
-class MarkdownArticle::Impl {
+class MarkdownArticle::Impl final : public CodeBlockSyntaxHighlightTracker {
 public:
 	explicit Impl(std::shared_ptr<MathRenderer> renderer)
 	: _renderer(std::move(renderer))
@@ -306,7 +340,7 @@ public:
 			page.left(),
 			page.top(),
 			innerWidth,
-			{});
+			LayoutContext{ .allowAsyncSyntaxHighlighting = false });
 		(void)layoutBottom;
 		return BlockMaxRight(blocks) + page.right();
 	}
@@ -478,6 +512,25 @@ public:
 		return TextForSelectedSegments(_segments, selection, endpoints);
 	}
 
+	[[nodiscard]] bool highlightProcessDone(
+			Spellchecker::HighlightProcessId processId) {
+		const auto i = _pendingHighlightEntries.find(processId);
+		if (i == end(_pendingHighlightEntries)) {
+			return false;
+		}
+		auto entry = std::move(i->second);
+		_pendingHighlightEntries.erase(i);
+		_pendingHighlightProcesses.erase(entry.key);
+
+		auto rebuilt = false;
+		for (const auto block : entry.blocks) {
+			RepopulateCodeBlockLeaf(*block, st::defaultMarkdown, true, this);
+			registerPendingHighlightBlock(*block);
+			rebuilt = true;
+		}
+		return rebuilt;
+	}
+
 	void invalidatePaletteCache() {
 		InvalidateInlineFormulaPaletteCache(_inlineFormulaObjects);
 		ClearColorizedFormulaImages(&_blocks);
@@ -511,6 +564,25 @@ private:
 			: SegmentSpan();
 	}
 
+	[[nodiscard]] Spellchecker::HighlightProcessId tryHighlightSyntax(
+			const QString &displayText,
+			const QString &language,
+			TextWithEntities &marked) override {
+		const auto key = PendingHighlightKey{
+			.text = displayText,
+			.language = language,
+		};
+		if (const auto i = _pendingHighlightProcesses.find(key);
+			i != end(_pendingHighlightProcesses)) {
+			return i->second;
+		}
+		const auto processId = Spellchecker::TryHighlightSyntax(marked);
+		if (processId) {
+			registerPendingHighlightProcess(key, processId);
+		}
+		return processId;
+	}
+
 	[[nodiscard]] SegmentSpan candidateSegmentSpan(QPoint point) const {
 		if (_visibleRange
 			&& (_visibleRange->top <= point.y())
@@ -522,9 +594,44 @@ private:
 		return FullSegmentSpan(_segments);
 	}
 
+	void clearPendingHighlightBlockPointers() {
+		for (auto &entry : _pendingHighlightEntries) {
+			entry.second.blocks.clear();
+		}
+	}
+
+	void registerPendingHighlightProcess(
+			const PendingHighlightKey &key,
+			Spellchecker::HighlightProcessId processId) {
+		_pendingHighlightProcesses[key] = processId;
+		auto &entry = _pendingHighlightEntries[processId];
+		entry.key = key;
+	}
+
+	void registerPendingHighlightBlock(LaidOutBlock &block) {
+		if (!block.syntaxHighlightProcessId) {
+			return;
+		}
+		if (!_pendingHighlightEntries.contains(block.syntaxHighlightProcessId)) {
+			registerPendingHighlightProcess(
+				PendingHighlightKeyForBlock(block),
+				block.syntaxHighlightProcessId);
+		}
+		_pendingHighlightEntries[block.syntaxHighlightProcessId].blocks.push_back(
+			&block);
+	}
+
+	void registerPendingHighlightBlocks(std::vector<LaidOutBlock> &blocks) {
+		for (auto &block : blocks) {
+			registerPendingHighlightBlock(block);
+			registerPendingHighlightBlocks(block.children);
+		}
+	}
+
 	void invalidateLayout() {
 		_width = -1;
 		_height = 0;
+		clearPendingHighlightBlockPointers();
 		_blocks.clear();
 		_anchors.clear();
 		_segments.clear();
@@ -544,6 +651,7 @@ private:
 			return;
 		}
 		_width = width;
+		clearPendingHighlightBlockPointers();
 		_blocks.clear();
 		_anchors.clear();
 		_segments.clear();
@@ -566,8 +674,9 @@ private:
 			page.left(),
 			page.top(),
 			innerWidth,
-			{});
+			LayoutContext{ .syntaxHighlightTracker = this });
 		_height = y + page.bottom();
+		registerPendingHighlightBlocks(_blocks);
 		CollectAnchors(_blocks, &_anchors);
 		CollectSelectableSegments(&_blocks, &_segments);
 		rebuildVisibleSegmentLookup();
@@ -580,6 +689,13 @@ private:
 	int _width = -1;
 	int _height = 0;
 	std::vector<LaidOutBlock> _blocks;
+	std::unordered_map<
+		PendingHighlightKey,
+		Spellchecker::HighlightProcessId,
+		PendingHighlightKeyHasher> _pendingHighlightProcesses;
+	std::unordered_map<
+		Spellchecker::HighlightProcessId,
+		PendingHighlightEntry> _pendingHighlightEntries;
 	std::vector<std::pair<QString, int>> _anchors;
 	std::vector<SelectableSegment> _segments;
 	std::optional<LogicalVisibleRange> _visibleRange;
@@ -682,6 +798,11 @@ TextForMimeData MarkdownArticle::textForSelection(
 		MarkdownArticleSelection selection,
 		const MarkdownArticleSelectionEndpoints *endpoints) const {
 	return _impl->textForSelection(selection, endpoints);
+}
+
+bool MarkdownArticle::highlightProcessDone(
+		Spellchecker::HighlightProcessId processId) {
+	return _impl->highlightProcessDone(processId);
 }
 
 void MarkdownArticle::invalidatePaletteCache() {

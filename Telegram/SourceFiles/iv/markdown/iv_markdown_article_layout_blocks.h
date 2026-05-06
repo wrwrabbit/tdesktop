@@ -1,6 +1,7 @@
 #pragma once
 
 #include "iv/markdown/iv_markdown_article.h"
+#include "spellcheck/spellcheck_highlight_syntax.h"
 
 #include <memory>
 #include <optional>
@@ -15,6 +16,15 @@ struct TextStyle;
 namespace Iv::Markdown {
 
 class InlineFormulaObjectCache;
+class CodeBlockSyntaxHighlightTracker {
+public:
+	virtual ~CodeBlockSyntaxHighlightTracker() = default;
+
+	[[nodiscard]] virtual Spellchecker::HighlightProcessId tryHighlightSyntax(
+		const QString &displayText,
+		const QString &language,
+		TextWithEntities &marked) = 0;
+};
 
 struct LaidOutTableCell {
 	Ui::Text::String leaf;
@@ -41,6 +51,7 @@ struct LaidOutBlock {
 	QString copyText;
 	QString labelText;
 	QString codeLanguage;
+	Spellchecker::HighlightProcessId syntaxHighlightProcessId = 0;
 	std::vector<LaidOutBlock> children;
 	std::vector<LaidOutTableRow> tableRows;
 	std::vector<int> tableColumnWidths;
@@ -89,6 +100,8 @@ struct LayoutContext {
 	int listDepth = 0;
 	int quoteDepth = 0;
 	bool tightList = false;
+	bool allowAsyncSyntaxHighlighting = true;
+	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr;
 };
 
 struct TableCellLayoutData {
@@ -116,6 +129,7 @@ struct TableRowLayoutData {
 	const style::TextStyle &textStyle,
 	const style::Markdown &markdown);
 [[nodiscard]] int LeafTextLength(const Ui::Text::String &leaf);
+[[nodiscard]] QString CodeBlockDisplayText(const QString &text);
 [[nodiscard]] int BlockSkip(
 	const PreparedBlock &block,
 	const style::Markdown &markdown);
@@ -128,6 +142,11 @@ struct TableRowLayoutData {
 	const PreparedBlock &block,
 	const style::Markdown &markdown);
 [[nodiscard]] int BlockMaxRight(const std::vector<LaidOutBlock> &blocks);
+void RepopulateCodeBlockLeaf(
+	LaidOutBlock &block,
+	const style::Markdown &markdown,
+	bool allowAsyncSyntaxHighlighting,
+	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr);
 
 [[nodiscard]] LaidOutBlock LayoutFlowBlock(
 	const PreparedBlock &prepared,
@@ -143,7 +162,9 @@ struct TableRowLayoutData {
 	const style::Markdown &markdown,
 	int left,
 	int top,
-	int width);
+	int width,
+	bool allowAsyncSyntaxHighlighting,
+	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr);
 [[nodiscard]] LaidOutBlock LayoutRuleBlock(
 	const style::Markdown &markdown,
 	int left,

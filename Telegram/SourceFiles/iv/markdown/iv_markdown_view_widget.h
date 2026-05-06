@@ -4,6 +4,7 @@
 #include "iv/markdown/iv_markdown_view.h"
 
 #include "base/unique_qptr.h"
+#include "rpl/lifetime.h"
 #include "ui/click_handler.h"
 #include "ui/rp_widget.h"
 #include "ui/style/style_core_types.h"
@@ -11,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <vector>
 #include <QtCore/QVariant>
 
 namespace Ui {
@@ -107,8 +109,10 @@ private:
 	[[nodiscard]] double zoomScale() const;
 
 	std::shared_ptr<MarkdownArticle> _article;
+	std::vector<Ui::Text::SpecialColor> _highlightColors;
 	std::unique_ptr<Ui::Text::QuotePaintCache> _prePaintCache;
 	std::unique_ptr<Ui::Text::QuotePaintCache> _blockquotePaintCache;
+	rpl::lifetime _highlightReadyLifetime;
 	std::function<void(const PreparedLink &, Qt::MouseButton)> _activateLink;
 	std::function<bool(const MediaActivation &, Qt::MouseButton)> _activateMedia;
 	QVariant _clickHandlerContext;
