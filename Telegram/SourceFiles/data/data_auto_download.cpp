@@ -81,6 +81,26 @@ Type AutoPlayTypeFromDocument(not_null<DocumentData*> document) {
 		: Type::AutoPlayGIF;
 }
 
+[[nodiscard]] int64 ForceAllowLimit(
+		const Full &data,
+		Source source,
+		Type type) {
+	const auto user = data.bytesLimit(source, type);
+	return (user > 0) ? user : Defaults().bytesLimit(source, type);
+}
+
+[[nodiscard]] bool ForceAllowed(
+		const Full &data,
+		Source source,
+		Type type,
+		int64 fileSize) {
+	if (ranges::find(kStreamedTypes, type) != end(kStreamedTypes)) {
+		return false;
+	}
+	const auto limit = ForceAllowLimit(data, source, type);
+	return (limit > 0) && (fileSize <= limit);
+}
+
 } // namespace
 
 void Single::setBytesLimit(int64 bytesLimit) {
@@ -335,6 +355,27 @@ bool Should(
 		const Full &data,
 		not_null<PeerData*> peer,
 		not_null<DocumentData*> document) {
+	if (document->sticker()) {
+		return true;
+	}
+	const auto override = data.peerOverride(peer->id);
+	if (override == Override::ForceDeny) {
+		return false;
+	} else if (document->isGifv()) {
+		return true;
+	} else if (override == Override::ForceAllow) {
+		if (document->isVoiceMessage()
+			|| document->isVideoMessage()
+			|| document->isSong()
+			|| document->isVideoFile()) {
+			return false;
+		}
+		return ForceAllowed(
+			data,
+			SourceFromPeer(peer),
+			Type::File,
+			document->size);
+	}
 	return Should(data, SourceFromPeer(peer), document);
 }
 
@@ -353,6 +394,16 @@ bool Should(
 		const Full &data,
 		not_null<PeerData*> peer,
 		not_null<PhotoData*> photo) {
+	const auto override = data.peerOverride(peer->id);
+	if (override == Override::ForceDeny) {
+		return false;
+	} else if (override == Override::ForceAllow) {
+		return ForceAllowed(
+			data,
+			SourceFromPeer(peer),
+			Type::Photo,
+			photo->imageByteSize(PhotoSize::Large));
+	}
 	return data.shouldDownload(
 		SourceFromPeer(peer),
 		Type::Photo,
@@ -363,7 +414,20 @@ bool ShouldAutoPlay(
 		const Full &data,
 		not_null<PeerData*> peer,
 		not_null<DocumentData*> document) {
-	return document->sticker() || data.shouldDownload(
+	if (document->sticker()) {
+		return true;
+	}
+	const auto override = data.peerOverride(peer->id);
+	if (override == Override::ForceDeny) {
+		return false;
+	} else if (override == Override::ForceAllow) {
+		return ForceAllowed(
+			data,
+			SourceFromPeer(peer),
+			AutoPlayTypeFromDocument(document),
+			document->size);
+	}
+	return data.shouldDownload(
 		SourceFromPeer(peer),
 		AutoPlayTypeFromDocument(document),
 		document->size);
@@ -373,12 +437,23 @@ bool ShouldAutoPlay(
 		const Full &data,
 		not_null<PeerData*> peer,
 		not_null<PhotoData*> photo) {
+	if (!photo->hasVideo()) {
+		return false;
+	}
+	const auto override = data.peerOverride(peer->id);
+	if (override == Override::ForceDeny) {
+		return false;
+	}
 	const auto source = SourceFromPeer(peer);
 	const auto size = photo->videoByteSize(PhotoSize::Large);
-	return photo->hasVideo()
-		&& (data.shouldDownload(source, Type::AutoPlayGIF, size)
-			|| data.shouldDownload(source, Type::AutoPlayVideo, size)
-			|| data.shouldDownload(source, Type::AutoPlayVideoMessage, size));
+	if (override == Override::ForceAllow) {
+		return ForceAllowed(data, source, Type::AutoPlayGIF, size)
+			|| ForceAllowed(data, source, Type::AutoPlayVideo, size)
+			|| ForceAllowed(data, source, Type::AutoPlayVideoMessage, size);
+	}
+	return data.shouldDownload(source, Type::AutoPlayGIF, size)
+		|| data.shouldDownload(source, Type::AutoPlayVideo, size)
+		|| data.shouldDownload(source, Type::AutoPlayVideoMessage, size);
 }
 
 Full WithDisabledAutoPlay(const Full &data) {
@@ -387,6 +462,15 @@ Full WithDisabledAutoPlay(const Full &data) {
 		for (const auto type : kAutoPlayTypes) {
 			result.setBytesLimit(source, type, 0);
 		}
+	}
+	auto toClear = std::vector<PeerId>();
+	data.enumeratePeerOverrides([&](PeerId id, Override value) {
+		if (value == Override::ForceAllow) {
+			toClear.push_back(id);
+		}
+	});
+	for (const auto id : toClear) {
+		result.setPeerOverride(id, Override::Default);
 	}
 	return result;
 }
