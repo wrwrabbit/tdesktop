@@ -13,14 +13,10 @@
 namespace Iv::Markdown {
 namespace {
 
-[[nodiscard]] QString FromLatin1(const char *value) {
-	return QString::fromLatin1(value);
-}
-
-[[nodiscard]] QString ExtensionError(const char *prefix, const char *name) {
-	return FromLatin1("%1-%2").arg(
-		FromLatin1(prefix),
-		FromLatin1(name));
+[[nodiscard]] QString ExtensionError(
+		const QString &prefix,
+		const char *name) {
+	return u"%1-%2"_q.arg(prefix, QString::fromUtf8(name));
 }
 
 void AddWarning(ParserState *state, QString warning) {
@@ -68,41 +64,41 @@ void AddWarning(ParserState *state, QString warning) {
 
 [[nodiscard]] QString CmarkKind(cmark_node *node) {
 	if (!node) {
-		return FromLatin1("unknown");
+		return u"unknown"_q;
 	}
 	const auto type = cmark_node_get_type(node);
 	const auto raw = RawTypeString(node);
 	if (!IsCoreNodeType(type)) {
-		return raw.isEmpty() ? FromLatin1("unknown") : raw;
+		return raw.isEmpty() ? u"unknown"_q : raw;
 	}
 	switch (type) {
-	case CMARK_NODE_DOCUMENT: return FromLatin1("document");
-	case CMARK_NODE_BLOCK_QUOTE: return FromLatin1("block_quote");
-	case CMARK_NODE_LIST: return FromLatin1("list");
-	case CMARK_NODE_ITEM: return FromLatin1("item");
-	case CMARK_NODE_CODE_BLOCK: return FromLatin1("code_block");
-	case CMARK_NODE_HTML_BLOCK: return FromLatin1("html_block");
-	case CMARK_NODE_CUSTOM_BLOCK: return FromLatin1("custom_block");
-	case CMARK_NODE_PARAGRAPH: return FromLatin1("paragraph");
-	case CMARK_NODE_HEADING: return FromLatin1("heading");
-	case CMARK_NODE_THEMATIC_BREAK: return FromLatin1("thematic_break");
+	case CMARK_NODE_DOCUMENT: return u"document"_q;
+	case CMARK_NODE_BLOCK_QUOTE: return u"block_quote"_q;
+	case CMARK_NODE_LIST: return u"list"_q;
+	case CMARK_NODE_ITEM: return u"item"_q;
+	case CMARK_NODE_CODE_BLOCK: return u"code_block"_q;
+	case CMARK_NODE_HTML_BLOCK: return u"html_block"_q;
+	case CMARK_NODE_CUSTOM_BLOCK: return u"custom_block"_q;
+	case CMARK_NODE_PARAGRAPH: return u"paragraph"_q;
+	case CMARK_NODE_HEADING: return u"heading"_q;
+	case CMARK_NODE_THEMATIC_BREAK: return u"thematic_break"_q;
 	case CMARK_NODE_FOOTNOTE_DEFINITION:
-		return FromLatin1("footnote_definition");
-	case CMARK_NODE_TEXT: return FromLatin1("text");
-	case CMARK_NODE_SOFTBREAK: return FromLatin1("softbreak");
-	case CMARK_NODE_LINEBREAK: return FromLatin1("linebreak");
-	case CMARK_NODE_CODE: return FromLatin1("code");
-	case CMARK_NODE_HTML_INLINE: return FromLatin1("html_inline");
-	case CMARK_NODE_CUSTOM_INLINE: return FromLatin1("custom_inline");
-	case CMARK_NODE_EMPH: return FromLatin1("emph");
-	case CMARK_NODE_STRONG: return FromLatin1("strong");
-	case CMARK_NODE_LINK: return FromLatin1("link");
-	case CMARK_NODE_IMAGE: return FromLatin1("image");
+		return u"footnote_definition"_q;
+	case CMARK_NODE_TEXT: return u"text"_q;
+	case CMARK_NODE_SOFTBREAK: return u"softbreak"_q;
+	case CMARK_NODE_LINEBREAK: return u"linebreak"_q;
+	case CMARK_NODE_CODE: return u"code"_q;
+	case CMARK_NODE_HTML_INLINE: return u"html_inline"_q;
+	case CMARK_NODE_CUSTOM_INLINE: return u"custom_inline"_q;
+	case CMARK_NODE_EMPH: return u"emph"_q;
+	case CMARK_NODE_STRONG: return u"strong"_q;
+	case CMARK_NODE_LINK: return u"link"_q;
+	case CMARK_NODE_IMAGE: return u"image"_q;
 	case CMARK_NODE_FOOTNOTE_REFERENCE:
-		return FromLatin1("footnote_reference");
-	case CMARK_NODE_NONE: return FromLatin1("none");
+		return u"footnote_reference"_q;
+	case CMARK_NODE_NONE: return u"none"_q;
 	}
-	return raw.isEmpty() ? FromLatin1("unknown") : raw;
+	return raw.isEmpty() ? u"unknown"_q : raw;
 }
 
 [[nodiscard]] SourceRange RangeFromCmarkLines(
@@ -166,9 +162,9 @@ void AddWarning(ParserState *state, QString warning) {
 template <std::size_t Size>
 [[nodiscard]] bool IsAnyKind(
 		const QString &kind,
-		const std::array<const char *, Size> &values) {
-	for (const auto value : values) {
-		if (kind == FromLatin1(value)) {
+		const std::array<QString, Size> &values) {
+	for (const auto &value : values) {
+		if (kind == value) {
 			return true;
 		}
 	}
@@ -215,7 +211,7 @@ void MarkMaskRange(std::vector<bool> *mask, const SourceRange &range) {
 [[nodiscard]] bool IsTaskListItem(cmark_node *node) {
 	if (!node
 		|| cmark_node_get_type(node) != CMARK_NODE_ITEM
-		|| RawTypeString(node) != FromLatin1("tasklist")) {
+		|| RawTypeString(node) != u"tasklist"_q) {
 		return false;
 	}
 	(void)cmark_gfm_extensions_get_tasklist_item_checked(node);
@@ -227,20 +223,20 @@ void MarkMaskRange(std::vector<bool> *mask, const SourceRange &range) {
 		return false;
 	}
 	const auto kind = CmarkKind(node);
-	constexpr auto kBlockKinds = std::array<const char *, 13>{
-		"paragraph",
-		"heading",
-		"list",
-		"item",
-		"block_quote",
-		"code_block",
-		"html_block",
-		"thematic_break",
-		"table",
-		"table_header",
-		"table_row",
-		"table_cell",
-		"footnote_definition",
+	static const auto kBlockKinds = std::array{
+		u"paragraph"_q,
+		u"heading"_q,
+		u"list"_q,
+		u"item"_q,
+		u"block_quote"_q,
+		u"code_block"_q,
+		u"html_block"_q,
+		u"thematic_break"_q,
+		u"table"_q,
+		u"table_header"_q,
+		u"table_row"_q,
+		u"table_cell"_q,
+		u"footnote_definition"_q,
 	};
 	if (IsAnyKind(kind, kBlockKinds)) {
 		return true;
@@ -256,11 +252,11 @@ void RecordCapabilities(cmark_node *node, ParserState *state) {
 		return;
 	}
 	const auto kind = CmarkKind(node);
-	constexpr auto kTableKinds = std::array<const char *, 4>{
-		"table",
-		"table_header",
-		"table_row",
-		"table_cell",
+	static const auto kTableKinds = std::array{
+		u"table"_q,
+		u"table_header"_q,
+		u"table_row"_q,
+		u"table_cell"_q,
 	};
 	if (IsAnyKind(kind, kTableKinds)) {
 		state->stats->tablesSeen = true;
@@ -268,17 +264,17 @@ void RecordCapabilities(cmark_node *node, ParserState *state) {
 	if (IsTaskListItem(node)) {
 		state->stats->taskListsSeen = true;
 	}
-	if (kind == FromLatin1("strikethrough")) {
+	if (kind == u"strikethrough"_q) {
 		state->stats->strikethroughSeen = true;
-	} else if (kind == FromLatin1("footnote_reference")
-		|| kind == FromLatin1("footnote_definition")) {
+	} else if (kind == u"footnote_reference"_q
+		|| kind == u"footnote_definition"_q) {
 		state->stats->footnotesSeen = true;
 	}
 }
 
-[[nodiscard]] bool FailScanMetadata(ParserState *state, const char *error) {
+[[nodiscard]] bool FailScanMetadata(ParserState *state, QString error) {
 	if (state) {
-		state->error = FromLatin1(error);
+		state->error = std::move(error);
 		state->failed = true;
 	}
 	return false;
@@ -286,18 +282,18 @@ void RecordCapabilities(cmark_node *node, ParserState *state) {
 
 [[nodiscard]] NodeKind ExtensionNodeKind(const QString &raw) {
 	struct Entry {
-		const char *name = nullptr;
+		QString name;
 		NodeKind kind = NodeKind::Unsupported;
 	};
-	constexpr auto kEntries = std::array{
-		Entry{ "strikethrough", NodeKind::Strike },
-		Entry{ "table", NodeKind::Table },
-		Entry{ "table_header", NodeKind::TableRow },
-		Entry{ "table_row", NodeKind::TableRow },
-		Entry{ "table_cell", NodeKind::TableCell },
+	static const auto kEntries = std::array{
+		Entry{ u"strikethrough"_q, NodeKind::Strike },
+		Entry{ u"table"_q, NodeKind::Table },
+		Entry{ u"table_header"_q, NodeKind::TableRow },
+		Entry{ u"table_row"_q, NodeKind::TableRow },
+		Entry{ u"table_cell"_q, NodeKind::TableCell },
 	};
 	for (const auto &entry : kEntries) {
-		if (raw == FromLatin1(entry.name)) {
+		if (raw == entry.name) {
 			return entry.kind;
 		}
 	}
@@ -493,7 +489,7 @@ void RecordCapabilities(cmark_node *node, ParserState *state) {
 	if (text == node.url) {
 		return true;
 	}
-	const auto mailto = FromLatin1("mailto:");
+	const auto mailto = u"mailto:"_q;
 	return node.url.startsWith(mailto, Qt::CaseInsensitive)
 		&& text == node.url.mid(mailto.size());
 }
@@ -527,7 +523,7 @@ void FillNodeAttributes(
 				out->htmlBlockKind = HtmlBlockKind::Unsupported;
 				AddWarning(
 					state,
-					FromLatin1("Malformed details block at %1:%2").arg(
+					u"Malformed details block at %1:%2"_q.arg(
 						out->range.startLine
 					).arg(
 						out->range.startColumn));
@@ -536,7 +532,7 @@ void FillNodeAttributes(
 			out->htmlBlockKind = HtmlBlockKind::Unsupported;
 			AddWarning(
 				state,
-				FromLatin1("Unsupported HTML block at %1:%2").arg(
+				u"Unsupported HTML block at %1:%2"_q.arg(
 					out->range.startLine
 				).arg(
 					out->range.startColumn));
@@ -547,7 +543,7 @@ void FillNodeAttributes(
 		break;
 	case NodeKind::SoftBreak:
 	case NodeKind::LineBreak:
-		out->text = FromLatin1("\n");
+		out->text = u"\n"_q;
 		break;
 	case NodeKind::Heading:
 		out->headingLevel = cmark_node_get_heading_level(node);
@@ -619,7 +615,7 @@ void NodeDeleter::operator()(cmark_node *node) const {
 bool AttachExtensions(cmark_parser *parser, QString *error) {
 	if (!parser) {
 		if (error) {
-			*error = FromLatin1("cmark-parser-failed");
+			*error = u"cmark-parser-failed"_q;
 		}
 		return false;
 	}
@@ -635,13 +631,15 @@ bool AttachExtensions(cmark_parser *parser, QString *error) {
 		const auto extension = cmark_find_syntax_extension(name);
 		if (!extension) {
 			if (error) {
-				*error = ExtensionError("cmark-extension-missing", name);
+				*error = ExtensionError(u"cmark-extension-missing"_q, name);
 			}
 			return false;
 		}
 		if (!cmark_parser_attach_syntax_extension(parser, extension)) {
 			if (error) {
-				*error = ExtensionError("cmark-extension-attach-failed", name);
+				*error = ExtensionError(
+					u"cmark-extension-attach-failed"_q,
+					name);
 			}
 			return false;
 		}
@@ -664,12 +662,12 @@ bool CollectScanMetadata(
 		state->stats->maxDepth = std::max(state->stats->maxDepth, depth);
 	}
 	if (depth > limits.maxNesting) {
-		return FailScanMetadata(state, "cmark-nesting-too-deep");
+		return FailScanMetadata(state, u"cmark-nesting-too-deep"_q);
 	}
 	if (state->stats) {
 		++state->stats->cmarkNodeCount;
 		if (state->stats->cmarkNodeCount > limits.maxCmarkNodes) {
-			return FailScanMetadata(state, "too-many-cmark-nodes");
+			return FailScanMetadata(state, u"too-many-cmark-nodes"_q);
 		}
 	}
 	RecordCapabilities(node, state);
@@ -713,7 +711,7 @@ bool ConvertNode(
 		return false;
 	}
 	if (depth > limits.maxNesting) {
-		return FailScanMetadata(state, "cmark-nesting-too-deep");
+		return FailScanMetadata(state, u"cmark-nesting-too-deep"_q);
 	}
 	out->kind = NodeKindFor(node);
 	out->range = NodeRange(

@@ -5,105 +5,101 @@
 namespace Iv::Markdown {
 namespace {
 
-[[nodiscard]] QString FromLatin1(const char *value) {
-	return QString::fromLatin1(value);
-}
-
 [[nodiscard]] QString BoolString(bool value) {
-	return FromLatin1(value ? "true" : "false");
+	return value ? u"true"_q : u"false"_q;
 }
 
 [[nodiscard]] QString NodeKindName(NodeKind kind) {
 	switch (kind) {
-	case NodeKind::Document: return FromLatin1("Document");
-	case NodeKind::Paragraph: return FromLatin1("Paragraph");
-	case NodeKind::Heading: return FromLatin1("Heading");
-	case NodeKind::Text: return FromLatin1("Text");
-	case NodeKind::Emphasis: return FromLatin1("Emphasis");
-	case NodeKind::Strong: return FromLatin1("Strong");
-	case NodeKind::Strike: return FromLatin1("Strike");
-	case NodeKind::InlineCode: return FromLatin1("InlineCode");
-	case NodeKind::CodeBlock: return FromLatin1("CodeBlock");
-	case NodeKind::Link: return FromLatin1("Link");
-	case NodeKind::List: return FromLatin1("List");
-	case NodeKind::ListItem: return FromLatin1("ListItem");
-	case NodeKind::Blockquote: return FromLatin1("Blockquote");
-	case NodeKind::ThematicBreak: return FromLatin1("ThematicBreak");
-	case NodeKind::Table: return FromLatin1("Table");
-	case NodeKind::TableRow: return FromLatin1("TableRow");
-	case NodeKind::TableCell: return FromLatin1("TableCell");
-	case NodeKind::HtmlInline: return FromLatin1("HtmlInline");
-	case NodeKind::HtmlBlock: return FromLatin1("HtmlBlock");
-	case NodeKind::FootnoteReference: return FromLatin1("FootnoteReference");
-	case NodeKind::FootnoteDefinition: return FromLatin1("FootnoteDefinition");
-	case NodeKind::DisplayMath: return FromLatin1("DisplayMath");
-	case NodeKind::InlineMath: return FromLatin1("InlineMath");
-	case NodeKind::SoftBreak: return FromLatin1("SoftBreak");
-	case NodeKind::LineBreak: return FromLatin1("LineBreak");
-	case NodeKind::Unsupported: return FromLatin1("Unsupported");
+	case NodeKind::Document: return u"Document"_q;
+	case NodeKind::Paragraph: return u"Paragraph"_q;
+	case NodeKind::Heading: return u"Heading"_q;
+	case NodeKind::Text: return u"Text"_q;
+	case NodeKind::Emphasis: return u"Emphasis"_q;
+	case NodeKind::Strong: return u"Strong"_q;
+	case NodeKind::Strike: return u"Strike"_q;
+	case NodeKind::InlineCode: return u"InlineCode"_q;
+	case NodeKind::CodeBlock: return u"CodeBlock"_q;
+	case NodeKind::Link: return u"Link"_q;
+	case NodeKind::List: return u"List"_q;
+	case NodeKind::ListItem: return u"ListItem"_q;
+	case NodeKind::Blockquote: return u"Blockquote"_q;
+	case NodeKind::ThematicBreak: return u"ThematicBreak"_q;
+	case NodeKind::Table: return u"Table"_q;
+	case NodeKind::TableRow: return u"TableRow"_q;
+	case NodeKind::TableCell: return u"TableCell"_q;
+	case NodeKind::HtmlInline: return u"HtmlInline"_q;
+	case NodeKind::HtmlBlock: return u"HtmlBlock"_q;
+	case NodeKind::FootnoteReference: return u"FootnoteReference"_q;
+	case NodeKind::FootnoteDefinition: return u"FootnoteDefinition"_q;
+	case NodeKind::DisplayMath: return u"DisplayMath"_q;
+	case NodeKind::InlineMath: return u"InlineMath"_q;
+	case NodeKind::SoftBreak: return u"SoftBreak"_q;
+	case NodeKind::LineBreak: return u"LineBreak"_q;
+	case NodeKind::Unsupported: return u"Unsupported"_q;
 	}
-	return FromLatin1("Unsupported");
+	return u"Unsupported"_q;
 }
 
 [[nodiscard]] QString MathKindName(MathKind kind) {
 	switch (kind) {
-	case MathKind::Inline: return FromLatin1("Inline");
-	case MathKind::Display: return FromLatin1("Display");
+	case MathKind::Inline: return u"Inline"_q;
+	case MathKind::Display: return u"Display"_q;
 	}
-	return FromLatin1("Inline");
+	return u"Inline"_q;
 }
 
 [[nodiscard]] QString ListKindName(ListKind kind) {
 	switch (kind) {
-	case ListKind::Bullet: return FromLatin1("Bullet");
-	case ListKind::Ordered: return FromLatin1("Ordered");
+	case ListKind::Bullet: return u"Bullet"_q;
+	case ListKind::Ordered: return u"Ordered"_q;
 	}
-	return FromLatin1("Bullet");
+	return u"Bullet"_q;
 }
 
 [[nodiscard]] QString ListDelimiterName(ListDelimiter delimiter) {
 	switch (delimiter) {
-	case ListDelimiter::None: return FromLatin1("None");
-	case ListDelimiter::Period: return FromLatin1("Period");
-	case ListDelimiter::Parenthesis: return FromLatin1("Parenthesis");
+	case ListDelimiter::None: return u"None"_q;
+	case ListDelimiter::Period: return u"Period"_q;
+	case ListDelimiter::Parenthesis: return u"Parenthesis"_q;
 	}
-	return FromLatin1("None");
+	return u"None"_q;
 }
 
 [[nodiscard]] QString HtmlBlockKindName(HtmlBlockKind kind) {
 	switch (kind) {
-	case HtmlBlockKind::None: return FromLatin1("None");
-	case HtmlBlockKind::Comment: return FromLatin1("Comment");
-	case HtmlBlockKind::Details: return FromLatin1("Details");
-	case HtmlBlockKind::Unsupported: return FromLatin1("Unsupported");
+	case HtmlBlockKind::None: return u"None"_q;
+	case HtmlBlockKind::Comment: return u"Comment"_q;
+	case HtmlBlockKind::Details: return u"Details"_q;
+	case HtmlBlockKind::Unsupported: return u"Unsupported"_q;
 	}
-	return FromLatin1("None");
+	return u"None"_q;
 }
 
 [[nodiscard]] QString TaskStateName(TaskState state) {
 	switch (state) {
-	case TaskState::None: return FromLatin1("None");
-	case TaskState::Unchecked: return FromLatin1("Unchecked");
-	case TaskState::Checked: return FromLatin1("Checked");
+	case TaskState::None: return u"None"_q;
+	case TaskState::Unchecked: return u"Unchecked"_q;
+	case TaskState::Checked: return u"Checked"_q;
 	}
-	return FromLatin1("None");
+	return u"None"_q;
 }
 
 [[nodiscard]] QString TableAlignmentName(TableAlignment alignment) {
 	switch (alignment) {
-	case TableAlignment::None: return FromLatin1("None");
-	case TableAlignment::Left: return FromLatin1("Left");
-	case TableAlignment::Center: return FromLatin1("Center");
-	case TableAlignment::Right: return FromLatin1("Right");
+	case TableAlignment::None: return u"None"_q;
+	case TableAlignment::Left: return u"Left"_q;
+	case TableAlignment::Center: return u"Center"_q;
+	case TableAlignment::Right: return u"Right"_q;
 	}
-	return FromLatin1("None");
+	return u"None"_q;
 }
 
 [[nodiscard]] QString RangeString(const SourceRange &range) {
 	if (!range.available) {
-		return FromLatin1("unavailable");
+		return u"unavailable"_q;
 	}
-	return FromLatin1("%1:%2-%3:%4[%5,%6]").arg(
+	return u"%1:%2-%3:%4[%5,%6]"_q.arg(
 		range.startLine
 	).arg(
 		range.startColumn
@@ -118,45 +114,48 @@ namespace {
 }
 
 [[nodiscard]] QString EscapedValue(QString value) {
-	value.replace(FromLatin1("\\"), FromLatin1("\\\\"));
-	value.replace(FromLatin1("\r"), FromLatin1("\\r"));
-	value.replace(FromLatin1("\n"), FromLatin1("\\n"));
-	value.replace(FromLatin1("\t"), FromLatin1("\\t"));
+	value.replace(u"\\"_q, u"\\\\"_q);
+	value.replace(u"\r"_q, u"\\r"_q);
+	value.replace(u"\n"_q, u"\\n"_q);
+	value.replace(u"\t"_q, u"\\t"_q);
 	return value;
 }
 
 void AddRequiredStringAttribute(
 		QString *line,
-		const char *name,
+		const QString &name,
 		const QString &value) {
-	line->append(FromLatin1(" "));
-	line->append(FromLatin1(name));
-	line->append(FromLatin1("=\""));
+	line->append(u" "_q);
+	line->append(name);
+	line->append(u"=\""_q);
 	line->append(EscapedValue(value));
-	line->append(FromLatin1("\""));
+	line->append(u"\""_q);
 }
 
-void AddStringAttribute(QString *line, const char *name, const QString &value) {
+void AddStringAttribute(
+		QString *line,
+		const QString &name,
+		const QString &value) {
 	if (value.isEmpty()) {
 		return;
 	}
 	AddRequiredStringAttribute(line, name, value);
 }
 
-void AddIntAttribute(QString *line, const char *name, int value) {
-	line->append(FromLatin1(" "));
-	line->append(FromLatin1(name));
-	line->append(FromLatin1("="));
+void AddIntAttribute(QString *line, const QString &name, int value) {
+	line->append(u" "_q);
+	line->append(name);
+	line->append(u"="_q);
 	line->append(QString::number(value));
 }
 
-void AddBoolAttribute(QString *line, const char *name, bool value) {
+void AddBoolAttribute(QString *line, const QString &name, bool value) {
 	if (!value) {
 		return;
 	}
-	line->append(FromLatin1(" "));
-	line->append(FromLatin1(name));
-	line->append(FromLatin1("="));
+	line->append(u" "_q);
+	line->append(name);
+	line->append(u"="_q);
 	line->append(BoolString(value));
 }
 
@@ -166,67 +165,70 @@ void AddBoolAttribute(QString *line, const char *name, bool value) {
 	for (const auto alignment : alignments) {
 		names.append(TableAlignmentName(alignment));
 	}
-	return names.join(FromLatin1(","));
+	return names.join(u","_q);
 }
 
 void DumpNode(
 		const MarkdownNode &node,
 		int depth,
 		QStringList *lines) {
-	auto line = FromLatin1("node");
-	AddIntAttribute(&line, "depth", depth);
-	AddStringAttribute(&line, "kind", NodeKindName(node.kind));
-	AddStringAttribute(&line, "range", RangeString(node.range));
-	AddIntAttribute(&line, "children", static_cast<int>(node.children.size()));
-	AddStringAttribute(&line, "text", node.text);
-	AddStringAttribute(&line, "url", node.url);
-	AddStringAttribute(&line, "title", node.title);
-	AddStringAttribute(&line, "info", node.info);
-	AddStringAttribute(&line, "raw", node.raw);
-	AddStringAttribute(&line, "anchorId", node.anchorId);
-	AddStringAttribute(&line, "footnoteLabel", node.footnoteLabel);
-	AddStringAttribute(&line, "detailsSummary", node.detailsSummary);
-	AddStringAttribute(&line, "detailsBody", node.detailsBody);
-	AddStringAttribute(&line, "unsupportedKind", node.unsupportedKind);
+	auto line = u"node"_q;
+	AddIntAttribute(&line, u"depth"_q, depth);
+	AddStringAttribute(&line, u"kind"_q, NodeKindName(node.kind));
+	AddStringAttribute(&line, u"range"_q, RangeString(node.range));
+	AddIntAttribute(
+		&line,
+		u"children"_q,
+		static_cast<int>(node.children.size()));
+	AddStringAttribute(&line, u"text"_q, node.text);
+	AddStringAttribute(&line, u"url"_q, node.url);
+	AddStringAttribute(&line, u"title"_q, node.title);
+	AddStringAttribute(&line, u"info"_q, node.info);
+	AddStringAttribute(&line, u"raw"_q, node.raw);
+	AddStringAttribute(&line, u"anchorId"_q, node.anchorId);
+	AddStringAttribute(&line, u"footnoteLabel"_q, node.footnoteLabel);
+	AddStringAttribute(&line, u"detailsSummary"_q, node.detailsSummary);
+	AddStringAttribute(&line, u"detailsBody"_q, node.detailsBody);
+	AddStringAttribute(&line, u"unsupportedKind"_q, node.unsupportedKind);
 	if (node.headingLevel != 0) {
-		AddIntAttribute(&line, "headingLevel", node.headingLevel);
+		AddIntAttribute(&line, u"headingLevel"_q, node.headingLevel);
 	}
 	if (node.listStart != 0) {
-		AddIntAttribute(&line, "listStart", node.listStart);
+		AddIntAttribute(&line, u"listStart"_q, node.listStart);
 	}
 	if (node.tableColumn != -1) {
-		AddIntAttribute(&line, "tableColumn", node.tableColumn);
+		AddIntAttribute(&line, u"tableColumn"_q, node.tableColumn);
 	}
 	if (node.formulaIndex != -1) {
-		AddIntAttribute(&line, "formulaIndex", node.formulaIndex);
+		AddIntAttribute(&line, u"formulaIndex"_q, node.formulaIndex);
 	}
 	if (node.footnoteOrdinal != 0) {
-		AddIntAttribute(&line, "footnoteOrdinal", node.footnoteOrdinal);
+		AddIntAttribute(&line, u"footnoteOrdinal"_q, node.footnoteOrdinal);
 	}
 	if (node.kind == NodeKind::List) {
-		AddStringAttribute(&line, "listKind", ListKindName(node.listKind));
+		AddStringAttribute(&line, u"listKind"_q, ListKindName(node.listKind));
 		AddStringAttribute(
 			&line,
-			"listDelimiter",
+			u"listDelimiter"_q,
 			ListDelimiterName(node.listDelimiter));
 	}
 	if (node.htmlBlockKind != HtmlBlockKind::None) {
 		AddStringAttribute(
 			&line,
-			"htmlBlockKind",
+			u"htmlBlockKind"_q,
 			HtmlBlockKindName(node.htmlBlockKind));
 	}
 	if (node.taskState != TaskState::None) {
-		AddStringAttribute(&line, "taskState", TaskStateName(node.taskState));
+		AddStringAttribute(&line, u"taskState"_q, TaskStateName(node.taskState));
 	}
-	AddBoolAttribute(&line, "tight", node.tight);
-	AddBoolAttribute(&line, "autolink", node.autolink);
-	AddBoolAttribute(&line, "tableHeader", node.tableHeader);
-	AddBoolAttribute(&line, "detailsOpen", node.detailsOpen);
+	AddBoolAttribute(&line, u"tight"_q, node.tight);
+	AddBoolAttribute(&line, u"autolink"_q, node.autolink);
+	AddBoolAttribute(&line, u"tableHeader"_q, node.tableHeader);
+	AddBoolAttribute(&line, u"detailsOpen"_q, node.detailsOpen);
 	if (!node.tableAlignments.empty()) {
 		AddStringAttribute(
 			&line,
-			"tableAlignments",
+			u"tableAlignments"_q,
 			TableAlignmentsString(node.tableAlignments));
 	}
 	lines->append(line);
@@ -246,55 +248,55 @@ PreparedDocument EmptyDocument(QString sourceName) {
 
 QString DumpForDebug(const PreparedDocument &document) {
 	auto lines = QStringList();
-	lines.append(FromLatin1("sourceName=\"%1\"").arg(
+	lines.append(u"sourceName=\"%1\""_q.arg(
 		EscapedValue(document.sourceName)));
-	lines.append(FromLatin1("title=\"%1\"").arg(
+	lines.append(u"title=\"%1\""_q.arg(
 		EscapedValue(document.title)));
-	lines.append(FromLatin1("sourceLength=%1").arg(
+	lines.append(u"sourceLength=%1"_q.arg(
 		static_cast<qlonglong>(document.sourceText.size())));
-	lines.append(FromLatin1("empty=%1").arg(BoolString(document.empty)));
-	lines.append(FromLatin1("cmarkNodeCount=%1").arg(
+	lines.append(u"empty=%1"_q.arg(BoolString(document.empty)));
+	lines.append(u"cmarkNodeCount=%1"_q.arg(
 		document.stats.cmarkNodeCount));
-	lines.append(FromLatin1("convertedNodeCount=%1").arg(
+	lines.append(u"convertedNodeCount=%1"_q.arg(
 		document.stats.convertedNodeCount));
-	lines.append(FromLatin1("maxDepth=%1").arg(
+	lines.append(u"maxDepth=%1"_q.arg(
 		document.stats.maxDepth));
-	lines.append(FromLatin1("inlineFormulaCount=%1").arg(
+	lines.append(u"inlineFormulaCount=%1"_q.arg(
 		document.stats.inlineFormulaCount));
-	lines.append(FromLatin1("displayFormulaCount=%1").arg(
+	lines.append(u"displayFormulaCount=%1"_q.arg(
 		document.stats.displayFormulaCount));
-	lines.append(FromLatin1("tablesSeen=%1").arg(
+	lines.append(u"tablesSeen=%1"_q.arg(
 		BoolString(document.stats.tablesSeen)));
-	lines.append(FromLatin1("taskListsSeen=%1").arg(
+	lines.append(u"taskListsSeen=%1"_q.arg(
 		BoolString(document.stats.taskListsSeen)));
-	lines.append(FromLatin1("strikethroughSeen=%1").arg(
+	lines.append(u"strikethroughSeen=%1"_q.arg(
 		BoolString(document.stats.strikethroughSeen)));
-	lines.append(FromLatin1("autolinksSeen=%1").arg(
+	lines.append(u"autolinksSeen=%1"_q.arg(
 		BoolString(document.stats.autolinksSeen)));
-	lines.append(FromLatin1("footnotesSeen=%1").arg(
+	lines.append(u"footnotesSeen=%1"_q.arg(
 		BoolString(document.stats.footnotesSeen)));
-	lines.append(FromLatin1("warnings=%1").arg(
+	lines.append(u"warnings=%1"_q.arg(
 		static_cast<qlonglong>(document.warnings.size())));
 	for (auto i = qsizetype(0); i != document.warnings.size(); ++i) {
-		lines.append(FromLatin1("warning index=%1 text=\"%2\"").arg(
+		lines.append(u"warning index=%1 text=\"%2\""_q.arg(
 			i + 1
 		).arg(
 			EscapedValue(document.warnings[i])));
 	}
-	lines.append(FromLatin1("nodes=preorder"));
+	lines.append(u"nodes=preorder"_q);
 	DumpNode(document.document, 0, &lines);
-	lines.append(FromLatin1("formulas=%1").arg(
+	lines.append(u"formulas=%1"_q.arg(
 		static_cast<qlonglong>(document.formulas.size())));
 	for (const auto &formula : document.formulas) {
-		auto line = FromLatin1("formula");
-		AddIntAttribute(&line, "index", formula.index);
-		AddStringAttribute(&line, "kind", MathKindName(formula.kind));
-		AddStringAttribute(&line, "range", RangeString(formula.range));
-		AddRequiredStringAttribute(&line, "parent", formula.parentNodeKind);
-		AddRequiredStringAttribute(&line, "tex", formula.tex);
+		auto line = u"formula"_q;
+		AddIntAttribute(&line, u"index"_q, formula.index);
+		AddStringAttribute(&line, u"kind"_q, MathKindName(formula.kind));
+		AddStringAttribute(&line, u"range"_q, RangeString(formula.range));
+		AddRequiredStringAttribute(&line, u"parent"_q, formula.parentNodeKind);
+		AddRequiredStringAttribute(&line, u"tex"_q, formula.tex);
 		lines.append(line);
 	}
-	return lines.join(FromLatin1("\n"));
+	return lines.join(u"\n"_q);
 }
 
 } // namespace Iv::Markdown

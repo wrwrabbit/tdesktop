@@ -10,13 +10,9 @@
 namespace Iv::Markdown {
 namespace {
 
-[[nodiscard]] QString FromLatin1(const char *value) {
-	return QString::fromLatin1(value);
-}
-
-[[nodiscard]] bool SetError(QString *error, const char *value) {
+[[nodiscard]] bool SetError(QString *error, QString value) {
 	if (error) {
-		*error = FromLatin1(value);
+		*error = std::move(value);
 	}
 	return false;
 }
@@ -63,7 +59,7 @@ void OffsetToPosition(
 		const std::vector<MathScanBlock> &blocks,
 		int line,
 		int column) {
-	auto best = FromLatin1("document");
+	auto best = u"document"_q;
 	auto bestSpan = std::numeric_limits<int>::max();
 	for (const auto &block : blocks) {
 		const auto &range = block.range;
@@ -301,7 +297,7 @@ bool ExtractMathRegions(
 		std::vector<MathFormula> *out,
 		QString *error) {
 	if (!out) {
-		return SetError(error, "invalid-output");
+		return SetError(error, u"invalid-output"_q);
 	}
 	auto formulas = std::vector<MathFormula>();
 	const auto size = static_cast<int>(source.size());
@@ -367,10 +363,10 @@ bool ExtractMathRegions(
 			content = StripBlockquoteMarkers(std::move(content));
 		}
 		if (ExceedsFormulaBytes(content, maxFormulaBytes)) {
-			return SetError(error, "formula-too-large");
+			return SetError(error, u"formula-too-large"_q);
 		}
 		if (ExceedsFormulaCount(formulas, maxFormulaCount)) {
-			return SetError(error, "too-many-formulas");
+			return SetError(error, u"too-many-formulas"_q);
 		}
 		auto startLine = 0;
 		auto startColumn = 0;

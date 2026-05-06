@@ -9,10 +9,6 @@
 namespace Iv::Markdown {
 namespace {
 
-[[nodiscard]] QString FromLatin1(const char *value) {
-	return QString::fromLatin1(value);
-}
-
 [[nodiscard]] unsigned char ByteAt(const QByteArray &source, int index) {
 	return static_cast<unsigned char>(source.at(index));
 }
@@ -172,23 +168,23 @@ MarkdownSourceValidationResult ValidateMarkdownSourceForIv(
 	if (source.size() > limits.maxSourceBytes) {
 		return ValidationFailure(
 			std::move(options.sourceName),
-			FromLatin1("source-too-large"));
+			u"source-too-large"_q);
 	}
 	if (HasUnsupportedUnicodeBom(source)) {
 		return ValidationFailure(
 			std::move(options.sourceName),
-			FromLatin1("source-unsupported-bom"));
+			u"source-unsupported-bom"_q);
 	}
 	auto normalized = StripUtf8Bom(source);
 	if (LooksBinary(normalized)) {
 		return ValidationFailure(
 			std::move(options.sourceName),
-			FromLatin1("source-binary"));
+			u"source-binary"_q);
 	}
 	if (!IsValidUtf8(normalized)) {
 		return ValidationFailure(
 			std::move(options.sourceName),
-			FromLatin1("source-invalid-utf8"));
+			u"source-invalid-utf8"_q);
 	}
 	auto result = MarkdownSourceValidationResult();
 	result.source.normalized = std::move(normalized);

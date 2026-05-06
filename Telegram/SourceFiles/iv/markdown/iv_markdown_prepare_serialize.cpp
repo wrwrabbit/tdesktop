@@ -10,7 +10,7 @@ namespace Iv::Markdown {
 namespace {
 
 [[nodiscard]] QString EncodeInlineTextObjectField(const QString &value) {
-	return QString::fromLatin1(value.toUtf8().toPercentEncoding());
+	return QString::fromUtf8(value.toUtf8().toPercentEncoding());
 }
 
 [[nodiscard]] QString DecodeInlineTextObjectField(const QString &value) {

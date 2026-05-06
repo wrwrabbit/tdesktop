@@ -11,10 +11,6 @@
 namespace Iv::Markdown {
 namespace {
 
-[[nodiscard]] QString FromLatin1(const char *value) {
-	return QString::fromLatin1(value);
-}
-
 void OffsetToPosition(
 		const std::vector<int> &lineStarts,
 		int offset,
@@ -545,8 +541,8 @@ void AssignHeadingAnchors(
 			++(*count);
 			node->anchorId = base + u"-"_q + QString::number(*count);
 			if (warnings) {
-				warnings->push_back(FromLatin1(
-					"Duplicate heading anchor \"%1\" remapped to \"%2\"").arg(
+				warnings->push_back(
+					u"Duplicate heading anchor \"%1\" remapped to \"%2\""_q.arg(
 						base
 					).arg(
 						node->anchorId));
@@ -572,8 +568,8 @@ void AssignFootnoteDefinitionOrdinals(
 	if (node->kind == NodeKind::FootnoteDefinition) {
 		if (node->footnoteLabel.isEmpty()) {
 			if (warnings) {
-				warnings->push_back(FromLatin1(
-					"Footnote definition without label at %1:%2").arg(
+				warnings->push_back(
+					u"Footnote definition without label at %1:%2"_q.arg(
 						node->range.startLine
 					).arg(
 						node->range.startColumn));
@@ -584,8 +580,8 @@ void AssignFootnoteDefinitionOrdinals(
 			node->footnoteOrdinal = existing;
 			node->anchorId = FootnoteDefinitionAnchorId(existing);
 			if (warnings) {
-				warnings->push_back(FromLatin1(
-					"Duplicate footnote definition \"%1\"").arg(
+				warnings->push_back(
+					u"Duplicate footnote definition \"%1\""_q.arg(
 						node->footnoteLabel));
 			}
 		} else {
@@ -610,8 +606,8 @@ void AssignFootnoteReferenceOrdinals(
 	if (node->kind == NodeKind::FootnoteReference) {
 		if (node->footnoteLabel.isEmpty()) {
 			if (warnings) {
-				warnings->push_back(FromLatin1(
-					"Footnote reference without label at %1:%2").arg(
+				warnings->push_back(
+					u"Footnote reference without label at %1:%2"_q.arg(
 						node->range.startLine
 					).arg(
 						node->range.startColumn));
@@ -621,8 +617,8 @@ void AssignFootnoteReferenceOrdinals(
 				node->footnoteLabel)) {
 			node->footnoteOrdinal = ordinal;
 		} else if (warnings) {
-			warnings->push_back(FromLatin1(
-				"Unresolved footnote reference \"%1\"").arg(
+			warnings->push_back(
+				u"Unresolved footnote reference \"%1\""_q.arg(
 					node->footnoteLabel));
 		}
 	}
@@ -655,8 +651,8 @@ void ValidateLocalFragments(
 		const auto fragment = NormalizeParsedFragmentId(node.url.mid(1));
 		if (fragment.isEmpty() || !ContainsAnchorId(anchors, fragment)) {
 			if (warnings) {
-				warnings->push_back(FromLatin1(
-					"Unresolved local fragment \"%1\"").arg(
+				warnings->push_back(
+					u"Unresolved local fragment \"%1\""_q.arg(
 						node.url));
 			}
 		}
@@ -758,7 +754,7 @@ ParseResult ParseMarkdownForIv(ValidatedMarkdownSource source) {
 	if (!parser) {
 		return Failure(
 			source.sourceName,
-			FromLatin1("cmark-parser-failed"));
+			u"cmark-parser-failed"_q);
 	}
 	auto error = QString();
 	if (!AttachExtensions(parser.get(), &error)) {
@@ -772,7 +768,7 @@ ParseResult ParseMarkdownForIv(ValidatedMarkdownSource source) {
 	if (!root) {
 		return Failure(
 			source.sourceName,
-			FromLatin1("cmark-parser-failed"));
+			u"cmark-parser-failed"_q);
 	}
 	auto document = EmptyDocument(std::move(source.sourceName));
 	document.sourceText = std::move(source.decoded);
@@ -807,7 +803,7 @@ ParseResult ParseMarkdownForIv(ValidatedMarkdownSource source) {
 		return Failure(
 			std::move(document.sourceName),
 			state.error.isEmpty()
-				? FromLatin1("cmark-conversion-failed")
+				? u"cmark-conversion-failed"_q
 				: std::move(state.error));
 	}
 	FillFormulaStats(&document);

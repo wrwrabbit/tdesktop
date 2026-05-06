@@ -115,7 +115,7 @@ NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 				state.result.failure.debugReason);
 		}
 		(void)PrepareNativeIvPlainPlaceholderBlock(
-			u"Unsupported Content"_q,
+			u"Prepare Failed"_q,
 			&state.result.blocks.blocks);
 	}
 	if (CountPreparedBlocks(state.result.blocks.blocks)
