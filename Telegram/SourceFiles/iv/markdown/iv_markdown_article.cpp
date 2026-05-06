@@ -311,6 +311,7 @@ public:
 			MarkdownArticlePaintCaches caches,
 			MarkdownArticleSelection selection,
 			const MarkdownArticleSelectionEndpoints *endpoints) {
+		const auto &markdown = st::defaultMarkdown;
 		const auto selectionState = PaintSelectionState{
 			.segments = &_segments,
 			.selection = selection,
@@ -324,6 +325,7 @@ public:
 			_renderer.get(),
 			currentDevicePixelRatio(),
 			std::max(_width, 1),
+			markdown,
 			caches,
 			selectionState,
 			clip);

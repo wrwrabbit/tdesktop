@@ -383,7 +383,7 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	}
 	return block.match([&](const MTPDpageBlockUnsupported &) {
 		return PrepareNativeIvPlainPlaceholderBlock(
-			u"Unsupported Block Placeholder"_q,
+			u"Unsupported Content"_q,
 			result);
 	}, [&](const MTPDpageBlockTitle &data) {
 		return AppendNativeIvFlowBlock(
@@ -590,7 +590,7 @@ bool PrepareNativeIvBlocks(
 				return false;
 			}
 			(void)PrepareNativeIvPlainPlaceholderBlock(
-				u"Unsupported Block Placeholder"_q,
+				u"Unsupported Block"_q,
 				result);
 		}
 	}

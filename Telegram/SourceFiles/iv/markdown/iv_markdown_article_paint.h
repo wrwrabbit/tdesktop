@@ -12,6 +12,7 @@ void PaintBlocks(
 	MathRenderer *renderer,
 	int devicePixelRatio,
 	int outerWidth,
+	const style::Markdown &markdown,
 	const MarkdownArticlePaintCaches &caches,
 	const PaintSelectionState &selectionState,
 	QRect clip);

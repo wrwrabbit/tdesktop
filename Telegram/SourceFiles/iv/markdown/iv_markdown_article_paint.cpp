@@ -122,10 +122,10 @@ void PaintBulletMarker(
 void PaintTableBlock(
 		Painter &p,
 		const LaidOutBlock &block,
+		const style::Markdown &markdown,
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
-	const auto &markdown = st::defaultMarkdown;
 	const auto tableClip = clip.intersected(block.visibleTableRect);
 	if (tableClip.isEmpty()) {
 		return;
@@ -240,6 +240,7 @@ void PaintDisplayMathBlock(
 		std::vector<RenderedFormula> *renderedFormulas,
 		MathRenderer *renderer,
 		int devicePixelRatio,
+		const style::Markdown &markdown,
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
@@ -251,7 +252,6 @@ void PaintDisplayMathBlock(
 	p.save();
 	p.setClipRect(formulaClip);
 
-	const auto &markdown = st::defaultMarkdown;
 	const auto formula = PreparedFormulaFor(formulas, block.formulaIndex);
 	p.setPen(markdown.textColor->c);
 	const auto rendered = EnsureFormulaRendered(
@@ -318,6 +318,7 @@ void PaintQuoteBlock(
 		MathRenderer *renderer,
 		int devicePixelRatio,
 		int outerWidth,
+		const style::Markdown &markdown,
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
@@ -327,7 +328,7 @@ void PaintQuoteBlock(
 	}
 
 	if (caches.blockquote) {
-		const auto &quoteStyle = st::defaultMarkdown.body.blockquote;
+		const auto &quoteStyle = markdown.body.blockquote;
 		Ui::Text::ValidateQuotePaintCache(*caches.blockquote, quoteStyle);
 
 		p.save();
@@ -348,6 +349,7 @@ void PaintQuoteBlock(
 		renderer,
 		devicePixelRatio,
 		outerWidth,
+		markdown,
 		caches,
 		selectionState,
 		clip.intersected(block.contentRect));
@@ -356,6 +358,7 @@ void PaintQuoteBlock(
 void PaintPlaceholderBlock(
 		Painter &p,
 		const LaidOutBlock &block,
+		const style::Markdown &markdown,
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
@@ -363,7 +366,20 @@ void PaintPlaceholderBlock(
 	if (!visible.isEmpty()) {
 		p.save();
 		p.setClipRect(visible);
-		p.fillRect(block.mediaRect, st::windowBgOver->c);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto max = block.labelLeaf.maxWidth();
+		const auto radius = markdown.placeholder.padding.left();
+		p.setBrush(st::windowBgOver);
+		p.setPen(Qt::NoPen);
+		const auto skip = (max < block.labelRect.width())
+			? ((block.labelRect.width() - max) / 2)
+			: 0;
+		p.drawRoundedRect(
+			block.labelRect.marginsRemoved(
+				{ skip, 0, skip, 0 }
+			).marginsAdded(markdown.placeholder.padding),
+			radius,
+			radius);
 		p.setPen(st::windowSubTextFg->c);
 		PaintTextLeaf(
 			p,
@@ -380,7 +396,7 @@ void PaintPlaceholderBlock(
 		p.restore();
 	}
 	if (!block.textRect.isEmpty()) {
-		p.setPen(st::defaultMarkdown.textColor->c);
+		p.setPen(markdown.textColor->c);
 		PaintTextLeaf(
 			p,
 			block.leaf,
@@ -428,6 +444,7 @@ void PaintPhotoProgress(
 void PaintPhotoBlock(
 		Painter &p,
 		const LaidOutBlock &block,
+		const style::Markdown &markdown,
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
@@ -463,7 +480,7 @@ void PaintPhotoBlock(
 			PaintPhotoProgress(
 				p,
 				block.mediaRect,
-				st::defaultMarkdown.photo,
+				markdown.photo,
 				block.photoRuntime->progress());
 		}
 		if (block.segmentIndex >= 0
@@ -473,7 +490,7 @@ void PaintPhotoBlock(
 		p.restore();
 	}
 	if (!block.textRect.isEmpty()) {
-		p.setPen(st::defaultMarkdown.textColor->c);
+		p.setPen(markdown.textColor->c);
 		PaintTextLeaf(
 			p,
 			block.leaf,
@@ -496,6 +513,7 @@ void PaintBlock(
 		MathRenderer *renderer,
 		int devicePixelRatio,
 		int outerWidth,
+		const style::Markdown &markdown,
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
@@ -503,7 +521,6 @@ void PaintBlock(
 		return;
 	}
 
-	const auto &markdown = st::defaultMarkdown;
 	switch (block.kind) {
 	case PreparedBlockKind::Paragraph:
 	case PreparedBlockKind::Heading:
@@ -546,6 +563,7 @@ void PaintBlock(
 			renderer,
 			devicePixelRatio,
 			outerWidth,
+			markdown,
 			caches,
 			selectionState,
 			clip);
@@ -574,6 +592,7 @@ void PaintBlock(
 			renderer,
 			devicePixelRatio,
 			outerWidth,
+			markdown,
 			caches,
 			selectionState,
 			clip);
@@ -587,6 +606,7 @@ void PaintBlock(
 			renderer,
 			devicePixelRatio,
 			outerWidth,
+			markdown,
 			caches,
 			selectionState,
 			clip);
@@ -599,6 +619,7 @@ void PaintBlock(
 			renderedFormulas,
 			renderer,
 			devicePixelRatio,
+			markdown,
 			caches,
 			selectionState,
 			clip);
@@ -607,6 +628,7 @@ void PaintBlock(
 		PaintTableBlock(
 			p,
 			block,
+			markdown,
 			caches,
 			selectionState,
 			clip);
@@ -615,6 +637,7 @@ void PaintBlock(
 		PaintPhotoBlock(
 			p,
 			block,
+			markdown,
 			caches,
 			selectionState,
 			clip);
@@ -623,6 +646,7 @@ void PaintBlock(
 		PaintPlaceholderBlock(
 			p,
 			block,
+			markdown,
 			caches,
 			selectionState,
 			clip);
@@ -648,6 +672,7 @@ void PaintBlock(
 			renderer,
 			devicePixelRatio,
 			outerWidth,
+			markdown,
 			caches,
 			selectionState,
 			clip);
@@ -665,6 +690,7 @@ void PaintBlocks(
 		MathRenderer *renderer,
 		int devicePixelRatio,
 		int outerWidth,
+		const style::Markdown &markdown,
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
@@ -682,6 +708,7 @@ void PaintBlocks(
 			renderer,
 			devicePixelRatio,
 			outerWidth,
+			markdown,
 			caches,
 			selectionState,
 			clip);
