@@ -1571,6 +1571,91 @@ template <typename Predicate>
 	return result;
 }
 
+[[nodiscard]] const PreparedFootnote *FindPreparedFootnote(
+		const MarkdownArticleContent &prepared,
+		const QString &label) {
+	for (const auto &footnote : prepared.footnotes) {
+		if (footnote.label == label) {
+			return &footnote;
+		}
+	}
+	return nullptr;
+}
+
+template <typename Callback>
+void ForEachPreparedFootnoteLink(
+		const MarkdownArticleContent &prepared,
+		Callback &&callback) {
+	for (const auto &footnote : prepared.footnotes) {
+		for (const auto &link : footnote.links) {
+			callback(link);
+		}
+		ForEachPreparedLink(footnote.blocks, callback);
+	}
+}
+
+[[nodiscard]] const PreparedBlock *FindPreparedParagraphContaining(
+		const MarkdownArticleContent &prepared,
+		const QString &text) {
+	const PreparedBlock *result = nullptr;
+	ForEachPreparedBlock(prepared.blocks.blocks, [&](const PreparedBlock &block) {
+		if (!result
+			&& block.kind == PreparedBlockKind::Paragraph
+			&& block.text.text.contains(text)) {
+			result = &block;
+		}
+	});
+	return result;
+}
+
+[[nodiscard]] bool HasEntityRange(
+		const TextWithEntities &text,
+		EntityType type,
+		int offset,
+		int length) {
+	for (const auto &entity : text.entities) {
+		if (entity.type() == type
+			&& entity.offset() == offset
+			&& entity.length() == length) {
+			return true;
+		}
+	}
+	return false;
+}
+
+[[nodiscard]] uint16 PreparedLinkIndexFromCustomUrlData(
+		const QString &data) {
+	const auto prefix = FromLatin1("internal:index");
+	if (!data.startsWith(prefix) || data.size() != prefix.size() + 1) {
+		return 0;
+	}
+	return static_cast<uint16>(data[prefix.size()].unicode());
+}
+
+[[nodiscard]] const PreparedLink *FindPreparedLinkByCustomUrlRange(
+		const TextWithEntities &text,
+		const std::vector<PreparedLink> &links,
+		int offset,
+		int length) {
+	for (const auto &entity : text.entities) {
+		if (entity.type() != EntityType::CustomUrl
+			|| entity.offset() != offset
+			|| entity.length() != length) {
+			continue;
+		}
+		const auto index = PreparedLinkIndexFromCustomUrlData(entity.data());
+		if (!index) {
+			continue;
+		}
+		for (const auto &link : links) {
+			if (link.index == index) {
+				return &link;
+			}
+		}
+	}
+	return nullptr;
+}
+
 [[nodiscard]] std::vector<const PreparedBlock*> CollectPreparedBlocksByKind(
 		const std::vector<PreparedBlock> &blocks,
 		PreparedBlockKind kind) {
@@ -3144,7 +3229,12 @@ void CheckPrepareCoverage(
 	auto markdownTables = std::vector<const PreparedBlock*>();
 	const PreparedBlock *markdownDisplayMath = nullptr;
 	const PreparedBlock *detailsBlock = nullptr;
-	const PreparedBlock *footnoteList = nullptr;
+	auto footnoteDefinitionListFound = false;
+	auto footnoteDefinitionAnchorFound = false;
+	const auto isFootnoteDefinitionAnchor = [](const QString &anchorId) {
+		return anchorId == FromLatin1("fn-1")
+			|| anchorId == FromLatin1("fn-2");
+	};
 	ForEachPreparedBlock(markdown.blocks.blocks, [&](const PreparedBlock &block) {
 		if (block.kind == PreparedBlockKind::Table) {
 			markdownTables.push_back(&block);
@@ -3158,13 +3248,15 @@ void CheckPrepareCoverage(
 		if (!detailsBlock && block.kind == PreparedBlockKind::Details) {
 			detailsBlock = &block;
 		}
-		if (!footnoteList
-			&& block.kind == PreparedBlockKind::List
-			&& block.listKind == ListKind::Ordered
-			&& block.children.size() >= 2
-			&& block.children[0].anchorId == FromLatin1("fn-1")
-			&& block.children[1].anchorId == FromLatin1("fn-2")) {
-			footnoteList = &block;
+		if (isFootnoteDefinitionAnchor(block.anchorId)) {
+			footnoteDefinitionAnchorFound = true;
+		}
+		if (block.kind == PreparedBlockKind::List) {
+			for (const auto &child : block.children) {
+				if (isFootnoteDefinitionAnchor(child.anchorId)) {
+					footnoteDefinitionListFound = true;
+				}
+			}
 		}
 	});
 	Check(
@@ -3239,34 +3331,174 @@ void CheckPrepareCoverage(
 			ok);
 	}
 	Check(
-		footnoteList != nullptr,
-		FromLatin1("markdown-example.md prepared footnote list"),
+		!footnoteDefinitionListFound,
+		FromLatin1("markdown-example.md no prepared footnote list"),
 		ok);
-	auto footnoteReferenceOne = false;
-	auto footnoteReferenceTwo = false;
-	auto footnoteBacklinkFound = false;
+	Check(
+		!footnoteDefinitionAnchorFound,
+		FromLatin1("markdown-example.md no prepared footnote anchors"),
+		ok);
+	const auto footnoteOne = FindPreparedFootnote(markdown, FromLatin1("1"));
+	const auto longFootnote = FindPreparedFootnote(
+		markdown,
+		FromLatin1("long-note"));
+	Check(
+		footnoteOne != nullptr
+			&& footnoteOne->displayText == FromLatin1("[1]"),
+		FromLatin1("markdown-example.md prepared footnote one display"),
+		ok);
+	Check(
+		longFootnote != nullptr
+			&& longFootnote->displayText == FromLatin1("[long-note]"),
+		FromLatin1("markdown-example.md prepared long footnote display"),
+		ok);
+
+	auto normalFootnoteBacklinkFound = false;
 	ForEachPreparedLink(markdown.blocks.blocks, [&](const PreparedLink &link) {
-		if (link.kind == PreparedLinkKind::Footnote
-			&& link.target == FromLatin1("fn-1")) {
-			footnoteReferenceOne = true;
+		if (link.kind == PreparedLinkKind::FootnoteBacklink) {
+			normalFootnoteBacklinkFound = true;
 		}
-		if (link.kind == PreparedLinkKind::Footnote
-			&& link.target == FromLatin1("fn-2")) {
-			footnoteReferenceTwo = true;
-		}
-		if (link.kind == PreparedLinkKind::FootnoteBacklink
-			&& !link.target.isEmpty()) {
-			footnoteBacklinkFound = true;
+	});
+	auto preparedFootnoteBacklinkFound = false;
+	ForEachPreparedFootnoteLink(markdown, [&](const PreparedLink &link) {
+		if (link.kind == PreparedLinkKind::FootnoteBacklink) {
+			preparedFootnoteBacklinkFound = true;
 		}
 	});
 	Check(
-		footnoteReferenceOne && footnoteReferenceTwo,
-		FromLatin1("markdown-example.md prepared footnote references"),
+		!normalFootnoteBacklinkFound,
+		FromLatin1("markdown-example.md no normal footnote backlink"),
 		ok);
 	Check(
-		footnoteBacklinkFound,
-		FromLatin1("markdown-example.md prepared footnote backlink"),
+		!preparedFootnoteBacklinkFound,
+		FromLatin1("markdown-example.md no prepared footnote backlink"),
 		ok);
+
+	const auto firstReferenceText = FromLatin1("[1]");
+	const auto firstReferenceParagraph = FindPreparedParagraphContaining(
+		markdown,
+		FromLatin1("Footnote reference one."));
+	Check(
+		firstReferenceParagraph != nullptr,
+		FromLatin1("markdown-example.md first prepared footnote paragraph"),
+		ok);
+	if (firstReferenceParagraph) {
+		const auto &text = firstReferenceParagraph->text;
+		Check(
+			text.text.contains(FromLatin1("Footnote reference one.[1]")),
+			FromLatin1("markdown-example.md first footnote display text"),
+			ok);
+		const auto offset = text.text.indexOf(firstReferenceText);
+		Check(
+			offset >= 0,
+			FromLatin1("markdown-example.md first footnote text range"),
+			ok);
+		if (offset >= 0) {
+			const auto length = firstReferenceText.size();
+			Check(
+				HasEntityRange(text, EntityType::Superscript, offset, length),
+				FromLatin1("markdown-example.md first footnote superscript"),
+				ok);
+			Check(
+				HasEntityRange(text, EntityType::CustomUrl, offset, length),
+				FromLatin1("markdown-example.md first footnote custom url"),
+				ok);
+			const auto link = FindPreparedLinkByCustomUrlRange(
+				text,
+				firstReferenceParagraph->links,
+				offset,
+				length);
+			Check(
+				link != nullptr
+					&& link->kind == PreparedLinkKind::Footnote
+					&& link->target == FromLatin1("1")
+					&& link->copyText == FromLatin1("[1]"),
+				FromLatin1("markdown-example.md first footnote prepared link"),
+				ok);
+		}
+	}
+
+	const auto secondReferenceText = FromLatin1("[long-note]");
+	const auto secondReferenceParagraph = FindPreparedParagraphContaining(
+		markdown,
+		FromLatin1("Footnote reference two with more text."));
+	Check(
+		secondReferenceParagraph != nullptr,
+		FromLatin1("markdown-example.md second prepared footnote paragraph"),
+		ok);
+	if (secondReferenceParagraph) {
+		const auto &text = secondReferenceParagraph->text;
+		Check(
+			text.text.contains(secondReferenceText),
+			FromLatin1("markdown-example.md second footnote display text"),
+			ok);
+		Check(
+			!text.text.contains(FromLatin1("[2]")),
+			FromLatin1("markdown-example.md second footnote no ordinal display"),
+			ok);
+		const auto offset = text.text.indexOf(secondReferenceText);
+		Check(
+			offset >= 0,
+			FromLatin1("markdown-example.md second footnote text range"),
+			ok);
+		if (offset >= 0) {
+			const auto length = secondReferenceText.size();
+			Check(
+				HasEntityRange(text, EntityType::Superscript, offset, length),
+				FromLatin1("markdown-example.md second footnote superscript"),
+				ok);
+			Check(
+				HasEntityRange(text, EntityType::CustomUrl, offset, length),
+				FromLatin1("markdown-example.md second footnote custom url"),
+				ok);
+			const auto link = FindPreparedLinkByCustomUrlRange(
+				text,
+				secondReferenceParagraph->links,
+				offset,
+				length);
+			Check(
+				link != nullptr
+					&& link->kind == PreparedLinkKind::Footnote
+					&& link->target == FromLatin1("long-note")
+					&& link->copyText == FromLatin1("[long-note]"),
+				FromLatin1("markdown-example.md second footnote prepared link"),
+				ok);
+		}
+	}
+
+	if (longFootnote) {
+		const auto &text = longFootnote->text;
+		Check(
+			text.text.contains(FromLatin1(
+				"This is a longer footnote with formatting, code, and a link.")),
+			FromLatin1("markdown-example.md long footnote text"),
+			ok);
+		Check(
+			HasEntityType(text.entities, EntityType::Bold),
+			FromLatin1("markdown-example.md long footnote bold entity"),
+			ok);
+		Check(
+			HasEntityType(text.entities, EntityType::Code),
+			FromLatin1("markdown-example.md long footnote code entity"),
+			ok);
+		Check(
+			HasEntityType(text.entities, EntityType::CustomUrl),
+			FromLatin1("markdown-example.md long footnote custom url entity"),
+			ok);
+		auto externalLinkFound = false;
+		for (const auto &link : longFootnote->links) {
+			if (link.kind == PreparedLinkKind::External
+				&& (link.target.contains(FromLatin1("https://example.com"))
+					|| link.copyText.contains(
+						FromLatin1("https://example.com")))) {
+				externalLinkFound = true;
+			}
+		}
+		Check(
+			externalLinkFound,
+			FromLatin1("markdown-example.md long footnote external link"),
+			ok);
+	}
 
 	auto latexTables = std::vector<const PreparedBlock*>();
 	ForEachPreparedBlock(latex.blocks.blocks, [&](const PreparedBlock &block) {

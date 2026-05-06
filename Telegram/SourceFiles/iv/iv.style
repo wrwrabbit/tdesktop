@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 using "chat_helpers/chat_helpers.style";
 using "ui/basic.style";
+using "ui/layers/layers.style";
 using "ui/widgets/widgets.style";
 
 ivMenuToggle: IconButton(defaultIconButton) {
@@ -293,6 +294,18 @@ defaultMarkdownFailure: MarkdownFailure {
 	width: 360px;
 	skip: 12px;
 }
+markdownFootnoteBox: Box(defaultBox) {
+	buttonPadding: margins(0px, 0px, 0px, 0px);
+	buttonHeight: 0px;
+}
+markdownFootnoteLabel: FlatLabel(defaultFlatLabel) {
+	minWidth: 95px;
+	textFg: windowFg;
+	align: align(topleft);
+	style: defaultMarkdownBodyStyle;
+	palette: defaultMarkdownTextPalette;
+}
+markdownFootnotePadding: margins(24px, 12px, 24px, 12px);
 defaultMarkdown: Markdown {
 	textPalette: defaultMarkdownTextPalette;
 	textColor: windowFg;

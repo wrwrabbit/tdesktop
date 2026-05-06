@@ -523,32 +523,30 @@ void AppendInline(
 			break;
 		}
 		const auto index = links->size() + 1;
-		const auto display = QString::number(node.footnoteOrdinal);
+		const auto label = !node.footnoteLabel.isEmpty()
+			? node.footnoteLabel
+			: QString::number(node.footnoteOrdinal);
+		const auto display = u"["_q + label + u"]"_q;
 		text->append(display);
-		if (text->text.size() > from) {
+		const auto length = display.size();
+		if (length > 0) {
 			text->entities.push_back(EntityInText(
 				EntityType::Superscript,
 				from,
-				text->text.size() - from));
+				length));
 		}
 		if (index <= std::numeric_limits<uint16>::max()) {
 			text->entities.push_back(EntityInText(
 				EntityType::CustomUrl,
 				from,
-				display.size(),
+				length,
 				InternalLinkData(uint16(index))));
 			links->push_back({
 				.index = uint16(index),
 				.kind = PreparedLinkKind::Footnote,
-				.target = FootnoteDefinitionAnchor(node),
-				.copyText = u"#"_q + FootnoteDefinitionAnchor(node),
+				.target = label,
+				.copyText = display,
 			});
-			if (inlineFormulas) {
-				const auto remembered = state->rememberFootnoteReferenceAnchor(
-					node.footnoteLabel,
-					inlineFormulas->blockAnchorId);
-				static_cast<void>(remembered);
-			}
 		}
 	} break;
 	case NodeKind::HtmlInline:

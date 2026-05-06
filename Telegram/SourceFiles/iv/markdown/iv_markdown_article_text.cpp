@@ -74,9 +74,10 @@ struct PreparedLinkExternalData {
 	}
 	switch (link.kind) {
 	case PreparedLinkKind::Anchor:
-	case PreparedLinkKind::Footnote:
 	case PreparedLinkKind::FootnoteBacklink:
 		return link.target.isEmpty() ? QString() : (u"#"_q + link.target);
+	case PreparedLinkKind::Footnote:
+		return !link.copyText.isEmpty() ? link.copyText : link.target;
 	case PreparedLinkKind::LocalFile:
 		return link.fragment.isEmpty()
 			? link.target

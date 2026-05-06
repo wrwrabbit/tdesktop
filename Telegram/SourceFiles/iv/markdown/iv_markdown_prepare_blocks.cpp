@@ -371,76 +371,122 @@ void CollectFootnoteDefinitions(
 	return result;
 }
 
-void AppendFootnoteBacklink(PreparedBlock *block, const QString &target) {
-	if (!block || target.isEmpty()) {
-		return;
-	}
-	const auto index = block->links.size() + 1;
-	if (index > std::numeric_limits<uint16>::max()) {
-		return;
-	}
-	if (!block->text.text.isEmpty()) {
-		block->text.append(QChar(' '));
-	}
-	const auto from = block->text.text.size();
-	const auto label = u"[back]"_q;
-	block->text.append(label);
-	block->text.entities.push_back(EntityInText(
-		EntityType::CustomUrl,
-		from,
-		label.size(),
-		InternalLinkData(uint16(index))));
-	block->links.push_back({
-		.index = uint16(index),
-		.kind = PreparedLinkKind::FootnoteBacklink,
-		.target = target,
-		.copyText = u"#"_q + target,
-	});
-	SortEntities(&block->text);
+[[nodiscard]] uint16 InternalPreparedLinkIndex(const QString &data) {
+	const auto prefix = u"internal:index"_q;
+	return (data.size() == prefix.size() + 1 && data.startsWith(prefix))
+		? uint16(data.back().unicode())
+		: uint16(0);
 }
 
-void AppendFootnotes(
-		std::vector<PreparedBlock> *blocks,
-		PrepareState *state) {
-	if (!blocks || !state || state->footnoteDefinitions.empty()) {
+[[nodiscard]] uint16 RemappedPreparedLinkIndex(
+		const std::vector<std::pair<uint16, uint16>> &remapped,
+		uint16 index) {
+	for (const auto &[from, to] : remapped) {
+		if (from == index) {
+			return to;
+		}
+	}
+	return 0;
+}
+
+void AppendFootnoteTextFragment(
+		const TextWithEntities &fromText,
+		const std::vector<PreparedLink> &fromLinks,
+		TextWithEntities *toText,
+		std::vector<PreparedLink> *toLinks) {
+	auto remapped = std::vector<std::pair<uint16, uint16>>();
+	remapped.reserve(fromLinks.size());
+	for (const auto &link : fromLinks) {
+		const auto index = toLinks->size() + 1;
+		if (index > std::numeric_limits<uint16>::max()) {
+			continue;
+		}
+		auto copy = link;
+		copy.index = uint16(index);
+		remapped.push_back({ link.index, copy.index });
+		toLinks->push_back(std::move(copy));
+	}
+
+	const auto shift = toText->text.size();
+	toText->text.append(fromText.text);
+	toText->entities.reserve(toText->entities.size() + fromText.entities.size());
+	for (const auto &entity : fromText.entities) {
+		auto data = entity.data();
+		if (entity.type() == EntityType::CustomUrl) {
+			if (const auto from = InternalPreparedLinkIndex(data)) {
+				if (const auto to = RemappedPreparedLinkIndex(remapped, from)) {
+					data = InternalLinkData(to);
+				}
+			}
+		}
+		toText->entities.push_back(EntityInText(
+			entity.type(),
+			entity.offset() + shift,
+			entity.length(),
+			data));
+	}
+}
+
+void AppendFootnoteVisibleText(
+		const TextWithEntities &fromText,
+		const std::vector<PreparedLink> &fromLinks,
+		TextWithEntities *toText,
+		std::vector<PreparedLink> *toLinks) {
+	if (fromText.text.isEmpty()) {
 		return;
 	}
-	auto list = PreparedBlock();
-	list.kind = PreparedBlockKind::List;
-	list.listKind = ListKind::Ordered;
-	list.listDelimiter = ListDelimiter::Period;
-	list.startNumber = 1;
+	if (!toText->text.isEmpty()) {
+		toText->text.append(u"\n\n"_q);
+	}
+	AppendFootnoteTextFragment(fromText, fromLinks, toText, toLinks);
+}
+
+void FlattenFootnoteBlock(
+		const PreparedBlock &block,
+		TextWithEntities *text,
+		std::vector<PreparedLink> *links) {
+	AppendFootnoteVisibleText(block.text, block.links, text, links);
+	for (const auto &row : block.tableRows) {
+		for (const auto &cell : row.cells) {
+			AppendFootnoteVisibleText(cell.text, cell.links, text, links);
+		}
+	}
+	for (const auto &child : block.children) {
+		FlattenFootnoteBlock(child, text, links);
+	}
+}
+
+void FlattenFootnoteBlocks(
+		const std::vector<PreparedBlock> &blocks,
+		TextWithEntities *text,
+		std::vector<PreparedLink> *links) {
+	for (const auto &block : blocks) {
+		FlattenFootnoteBlock(block, text, links);
+	}
+	SortEntities(text);
+}
+
+void PrepareFootnotes(PrepareState *state) {
+	if (!state || state->footnoteDefinitions.empty()) {
+		return;
+	}
+	state->result.footnotes.reserve(state->footnoteDefinitions.size());
 	for (const auto &entry : state->footnoteDefinitions) {
 		if (!entry.node) {
-			return;
+			continue;
 		}
-		auto item = PreparedBlock();
-		item.kind = PreparedBlockKind::ListItem;
-		item.listKind = ListKind::Ordered;
-		item.listDelimiter = ListDelimiter::Period;
-		item.orderedNumber = entry.node->footnoteOrdinal;
-		item.anchorId = FootnoteDefinitionAnchor(*entry.node);
-		item.children = PrepareChildren(*entry.node, {}, state);
-		if (item.children.empty()) {
-			item.children.push_back(EmptyParagraphBlock());
+		auto footnote = PreparedFootnote();
+		footnote.label = !entry.node->footnoteLabel.isEmpty()
+			? entry.node->footnoteLabel
+			: QString::number(entry.node->footnoteOrdinal);
+		footnote.displayText = u"["_q + footnote.label + u"]"_q;
+		footnote.blocks = PrepareChildren(*entry.node, {}, state);
+		FlattenFootnoteBlocks(footnote.blocks, &footnote.text, &footnote.links);
+		if (footnote.text.text.isEmpty()) {
+			footnote.text = TextWithEntities::Simple(footnote.displayText);
 		}
-		const auto backlink = state->firstFootnoteReferenceAnchor(
-			entry.node->footnoteLabel);
-		if (!item.children.empty()
-			&& item.children.back().kind == PreparedBlockKind::Paragraph) {
-			AppendFootnoteBacklink(&item.children.back(), backlink);
-		} else if (!backlink.isEmpty()) {
-			auto paragraph = EmptyParagraphBlock();
-			AppendFootnoteBacklink(&paragraph, backlink);
-			item.children.push_back(std::move(paragraph));
-		}
-		list.children.push_back(std::move(item));
+		state->result.footnotes.push_back(std::move(footnote));
 	}
-	if (list.children.empty()) {
-		return;
-	}
-	blocks->push_back(PrepareRuleBlock());
-	blocks->push_back(std::move(list));
 }
 
 [[nodiscard]] std::vector<PreparedBlock> PrepareNestedDetailsBody(
@@ -499,9 +545,7 @@ void AppendFootnotes(
 [[nodiscard]] std::vector<PreparedBlock> PrepareDocumentBlocks(
 		const MarkdownNode &node,
 		PrepareState *state) {
-	auto result = PrepareChildren(node, {}, state);
-	AppendFootnotes(&result, state);
-	return result;
+	return PrepareChildren(node, {}, state);
 }
 
 
@@ -708,9 +752,11 @@ PreparedRenderDocument PrepareRenderData(
 		const PreparedDocument &document,
 		PrepareState *state) {
 	auto result = PreparedRenderDocument();
+	state->result.footnotes.clear();
 	state->footnoteDefinitions.clear();
 	CollectFootnoteDefinitions(document.document, &state->footnoteDefinitions);
 	result.blocks = PrepareBlocks(document.document, {}, state);
+	PrepareFootnotes(state);
 	return result;
 }
 

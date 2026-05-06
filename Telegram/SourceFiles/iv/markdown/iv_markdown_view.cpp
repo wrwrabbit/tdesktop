@@ -1,5 +1,6 @@
 #include "iv/markdown/iv_markdown_view.h"
 
+#include "iv/markdown/iv_markdown_article_text.h"
 #include "iv/markdown/iv_markdown_view_widget.h"
 
 #include "iv/iv_delegate.h"
@@ -14,6 +15,9 @@
 #include "lang/lang_keys.h"
 #include "logs.h"
 #include "ui/integration.h"
+#include "ui/layers/generic_box.h"
+#include "ui/layers/layer_manager.h"
+#include "ui/rect.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/text/text.h"
 #include "ui/widgets/buttons.h"
@@ -59,6 +63,47 @@ namespace {
 	return options.clickHandlerContextRef
 		? *options.clickHandlerContextRef
 		: options.clickHandlerContext;
+}
+
+[[nodiscard]] const PreparedFootnote *FindFootnote(
+		const std::vector<PreparedFootnote> &footnotes,
+		const QString &target) {
+	const auto i = std::find_if(
+		footnotes.begin(),
+		footnotes.end(),
+		[&](const PreparedFootnote &footnote) {
+			return (footnote.label == target);
+		});
+	return (i != footnotes.end()) ? &*i : nullptr;
+}
+
+[[nodiscard]] int FootnoteLabelContentWidth(
+		not_null<Ui::FlatLabel*> label,
+		int maxWidth) {
+	const auto heightForWidth = [&](int width) {
+		label->resizeToWidth(width);
+		return label->heightNoMargins();
+	};
+	const auto natural = label->naturalWidth();
+	const auto minWidth = std::min(st::markdownFootnoteLabel.minWidth, maxWidth);
+	auto result = std::max(
+		(natural >= 0) ? std::min(natural, maxWidth) : maxWidth,
+		minWidth);
+	if (result >= label->textMaxWidth()) {
+		return result;
+	}
+	auto large = result;
+	auto small = std::max(result / 2, minWidth);
+	const auto largeHeight = heightForWidth(large);
+	while (large - small > 1) {
+		const auto middle = (large + small) / 2;
+		if (largeHeight == heightForWidth(middle)) {
+			large = middle;
+		} else {
+			small = middle;
+		}
+	}
+	return large;
 }
 
 [[nodiscard]] std::optional<EntityLinkData> ExternalEntityLinkData(
@@ -124,6 +169,10 @@ private:
 	void setup();
 	void prepareArticle();
 	void activateLink(const PreparedLink &link, Qt::MouseButton button);
+	void showFootnote(const PreparedLink &link, Qt::MouseButton button);
+	void fillFootnoteBox(
+		not_null<Ui::GenericBox*> box,
+		PreparedFootnote footnote);
 	void applyPreparedContent(MarkdownArticleContent prepared, int prepareMs);
 	void updateBodyVisibleTopBottom();
 	void updateChildrenGeometry(QSize size);
@@ -138,6 +187,8 @@ private:
 	const std::shared_ptr<const PreparedDocument> _document;
 	std::optional<MarkdownArticleContent> _preparedContent;
 	const Fn<void(Event)> _callback;
+	std::vector<PreparedFootnote> _footnotes;
+	std::unique_ptr<Ui::LayerManager> _footnoteLayerManager;
 	Ui::ScrollArea *_scroll = nullptr;
 	MarkdownDocumentWidget *_body = nullptr;
 	Ui::FlatLabel *_failure = nullptr;
@@ -178,6 +229,9 @@ MarkdownPreviewRoot::MarkdownPreviewRoot(
 }
 
 void MarkdownPreviewRoot::setup() {
+	_footnoteLayerManager = std::make_unique<Ui::LayerManager>(not_null{ this });
+	_footnoteLayerManager->setHideByBackgroundClick(true);
+
 	_scroll = Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll);
 	_body = _scroll->setOwnedWidget(object_ptr<MarkdownDocumentWidget>(_scroll));
 	_failure = Ui::CreateChild<Ui::FlatLabel>(
@@ -296,12 +350,14 @@ void MarkdownPreviewRoot::activateLink(
 		}
 		break;
 	case PreparedLinkKind::Anchor:
-	case PreparedLinkKind::Footnote:
 	case PreparedLinkKind::FootnoteBacklink:
 		if (!scrollToAnchor(link.target)) {
 			DEBUG_LOG(("Native Markdown IV: unresolved anchor: %1").arg(
 				link.target));
 		}
+		break;
+	case PreparedLinkKind::Footnote:
+		showFootnote(link, button);
 		break;
 	case PreparedLinkKind::LocalFile: {
 		auto target = link.target;
@@ -328,12 +384,73 @@ void MarkdownPreviewRoot::activateLink(
 	}
 }
 
+void MarkdownPreviewRoot::showFootnote(
+		const PreparedLink &link,
+		Qt::MouseButton button) {
+	Q_UNUSED(button);
+
+	const auto found = FindFootnote(_footnotes, link.target);
+	if (!found) {
+		DEBUG_LOG(("Native Markdown IV: unresolved footnote: %1").arg(
+			link.target));
+		return;
+	}
+	if (!_footnoteLayerManager) {
+		DEBUG_LOG(("Native Markdown IV: missing footnote layer manager: %1").arg(
+			link.target));
+		return;
+	}
+
+	const auto footnote = *found;
+	_footnoteLayerManager->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		fillFootnoteBox(box, footnote);
+	}));
+}
+
+void MarkdownPreviewRoot::fillFootnoteBox(
+		not_null<Ui::GenericBox*> box,
+		PreparedFootnote footnote) {
+	box->setStyle(st::markdownFootnoteBox);
+	box->setNoContentMargin(true);
+	box->setCloseByOutsideClick(true);
+	box->clearButtons();
+
+	auto label = object_ptr<Ui::FlatLabel>(
+		box->verticalLayout().get(),
+		st::markdownFootnoteLabel);
+	label->setMarkedText(footnote.text);
+	label->setTryMakeSimilarLines(true);
+	for (const auto &link : footnote.links) {
+		label->setLink(link.index, CreatePreparedLinkHandler(link));
+	}
+	label->setClickHandlerFilter([=](
+			const ClickHandlerPtr &handler,
+			Qt::MouseButton button) {
+		if (const auto prepared = ExtractPreparedLink(handler)) {
+			activateLink(*prepared, button);
+			return false;
+		}
+		return true;
+	});
+
+	const auto horizontalPadding = rect::m::sum::h(st::markdownFootnotePadding);
+	const auto contentWidth = FootnoteLabelContentWidth(
+		label.get(),
+		std::max(
+			st::boxWideWidth - horizontalPadding,
+			st::markdownFootnoteLabel.minWidth));
+	label->resizeToWidth(contentWidth);
+	box->setWidth(contentWidth + horizontalPadding);
+	box->addRow(std::move(label), st::markdownFootnotePadding);
+}
+
 void MarkdownPreviewRoot::applyPreparedContent(
 		MarkdownArticleContent prepared,
 		int prepareMs) {
 	const auto failure = prepared.failure;
 	const auto debug = prepared.debug;
 	if (failure.failed()) {
+		_footnotes.clear();
 		_scroll->hide();
 		if (_body) {
 			_body->hide();
@@ -350,6 +467,8 @@ void MarkdownPreviewRoot::applyPreparedContent(
 		logPreparationSummary(failure, debug, prepareMs, 0);
 		return;
 	}
+
+	_footnotes = prepared.footnotes;
 
 	if (!_body) {
 		logPreparationSummary(failure, debug, prepareMs, 0);

@@ -77,35 +77,6 @@ QString PrepareState::formulaSourceText(int index) const {
 	return QString::fromUtf8(sourceUtf8.constData() + from, till - from);
 }
 
-QString PrepareState::firstFootnoteReferenceAnchor(
-		const QString &label) const {
-	for (const auto &entry : firstFootnoteReferences) {
-		if (entry.first == label) {
-			return entry.second;
-		}
-	}
-	return QString();
-}
-
-QString PrepareState::rememberFootnoteReferenceAnchor(
-		const QString &label,
-		QString *blockAnchorId) {
-	if (label.isEmpty()) {
-		return QString();
-	}
-	if (const auto existing = firstFootnoteReferenceAnchor(label); !existing.isEmpty()) {
-		return existing;
-	}
-	auto anchorId = (blockAnchorId && !blockAnchorId->isEmpty())
-		? *blockAnchorId
-		: (u"fnref-"_q + QString::number(++nextGeneratedId));
-	if (blockAnchorId && blockAnchorId->isEmpty()) {
-		*blockAnchorId = anchorId;
-	}
-	firstFootnoteReferences.push_back({ label, anchorId });
-	return anchorId;
-}
-
 void NativeIvPrepareState::setFailure(
 		PrepareTerminalFailure terminal,
 		QString debugReason) {
@@ -127,15 +98,8 @@ QString InvalidStyleReason(const MarkdownPrepareDimensions &dimensions) {
 
 void ClearPreparedOutput(MarkdownArticleContent *result) {
 	result->blocks.blocks.clear();
+	result->footnotes.clear();
 	result->formulas.clear();
-}
-
-QString FootnoteDefinitionAnchor(const MarkdownNode &node) {
-	return !node.anchorId.isEmpty()
-		? node.anchorId
-		: (node.footnoteOrdinal > 0
-			? (u"fn-"_q + QString::number(node.footnoteOrdinal))
-			: QString());
 }
 
 } // namespace Iv::Markdown

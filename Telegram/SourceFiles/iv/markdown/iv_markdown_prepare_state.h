@@ -25,7 +25,6 @@ struct PrepareState {
 	MarkdownArticleContent result;
 	QByteArray sourceUtf8;
 	std::vector<FootnoteDefinitionEntry> footnoteDefinitions;
-	std::vector<std::pair<QString, QString>> firstFootnoteReferences;
 	int nextGeneratedId = 0;
 
 	void rememberFormula(
@@ -44,11 +43,6 @@ struct PrepareState {
 		PrepareTerminalFailure terminal,
 		QString debugReason);
 	[[nodiscard]] QString formulaSourceText(int index) const;
-	[[nodiscard]] QString firstFootnoteReferenceAnchor(
-		const QString &label) const;
-	[[nodiscard]] QString rememberFootnoteReferenceAnchor(
-		const QString &label,
-		QString *blockAnchorId);
 };
 
 struct NativeIvPhotoInfo {
@@ -71,6 +65,5 @@ struct NativeIvPrepareState {
 [[nodiscard]] QString InvalidStyleReason(
 	const MarkdownPrepareDimensions &dimensions);
 void ClearPreparedOutput(MarkdownArticleContent *result);
-[[nodiscard]] QString FootnoteDefinitionAnchor(const MarkdownNode &node);
 
 } // namespace Iv::Markdown

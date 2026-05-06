@@ -133,6 +133,14 @@ struct PreparedRenderDocument {
 	std::vector<PreparedBlock> blocks;
 };
 
+struct PreparedFootnote {
+	QString label;
+	QString displayText;
+	TextWithEntities text;
+	std::vector<PreparedLink> links;
+	std::vector<PreparedBlock> blocks;
+};
+
 struct MarkdownPrepareDimensions {
 	int bodyTextSize = 0;
 	std::array<int, 6> headingTextSizes = { 0, 0, 0, 0, 0, 0 };
@@ -205,6 +213,7 @@ struct NativeInstantViewPrepareRequest {
 
 struct MarkdownArticleContent {
 	PreparedRenderDocument blocks;
+	std::vector<PreparedFootnote> footnotes;
 	std::vector<PreparedFormulaSlot> formulas;
 	std::shared_ptr<MediaRuntime> mediaRuntime;
 	PrepareFailureStatus failure;

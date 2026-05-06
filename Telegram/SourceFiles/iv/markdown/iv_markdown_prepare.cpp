@@ -11,6 +11,18 @@
 #include <utility>
 
 namespace Iv::Markdown {
+namespace {
+
+[[nodiscard]] int CountPreparedContentBlocks(
+		const MarkdownArticleContent &content) {
+	auto result = CountPreparedBlocks(content.blocks.blocks);
+	for (const auto &footnote : content.footnotes) {
+		result += CountPreparedBlocks(footnote.blocks);
+	}
+	return result;
+}
+
+} // namespace
 
 const MarkdownPrepareLimits &PrepareLimitsForIv() {
 	static const auto result = MarkdownPrepareLimits{
@@ -57,7 +69,7 @@ MarkdownArticleContent PrepareSynchronously(PrepareRequest request) {
 	state.result.debug.sourceWarningCount = int(request.document->warnings.size());
 
 	state.result.blocks = PrepareRenderData(*request.document, &state);
-	if (CountPreparedBlocks(state.result.blocks.blocks)
+	if (CountPreparedContentBlocks(state.result)
 		> PrepareLimitsForIv().maxPreparedBlocks) {
 		state.setTerminalFailure(
 			PrepareTerminalFailure::DocumentTooLarge,
