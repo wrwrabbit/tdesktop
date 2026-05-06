@@ -1,0 +1,594 @@
+#include "iv/markdown/iv_markdown_article_selection.h"
+
+#include "lang/lang_keys.h"
+
+#include <algorithm>
+
+namespace Iv::Markdown {
+namespace {
+
+constexpr auto kCodeTabColumns = 4;
+const auto kPhotoCopyLabel = u"Photo"_q;
+
+[[nodiscard]] TextForMimeData CopyTextForDisplayMath(const LaidOutBlock &block) {
+	return TextForMimeData::Simple(u"$$"_q + block.copyText + u"$$"_q);
+}
+
+[[nodiscard]] TextForMimeData CopyTextForCodeBlock(
+		const LaidOutBlock &block,
+		TextSelection selection = AllTextSelection) {
+	if (selection == AllTextSelection) {
+		auto rich = tr::marked(block.copyText);
+		if (!rich.text.isEmpty()) {
+			rich.entities.push_back(EntityInText(
+				EntityType::Pre,
+				0,
+				rich.text.size(),
+				block.codeLanguage));
+		}
+		return TextForMimeData::Rich(std::move(rich));
+	}
+	auto from = 0;
+	auto to = 0;
+	auto displayPosition = 0;
+	auto column = 0;
+	auto found = false;
+	const auto &text = block.copyText;
+	for (auto i = 0, count = int(text.size()); i != count; ++i) {
+		const auto ch = text[i];
+		const auto width = (ch == QChar::Tabulation)
+			? (kCodeTabColumns - (column % kCodeTabColumns))
+			: 1;
+		const auto nextDisplayPosition = displayPosition + width;
+		if (selection.to <= displayPosition) {
+			break;
+		}
+		if (selection.from < nextDisplayPosition
+			&& selection.to > displayPosition) {
+			if (!found) {
+				from = i;
+				found = true;
+			}
+			to = i + 1;
+		}
+		displayPosition = nextDisplayPosition;
+		if (Ui::Text::IsNewline(ch)) {
+			column = 0;
+		} else {
+			column += width;
+		}
+	}
+	if (!found || to <= from) {
+		return TextForMimeData();
+	}
+	auto rich = tr::marked(text.mid(from, to - from));
+	if (!rich.text.isEmpty()) {
+		rich.entities.push_back(EntityInText(
+			EntityType::Pre,
+			0,
+			rich.text.size(),
+			block.codeLanguage));
+	}
+	return TextForMimeData::Rich(std::move(rich));
+}
+
+[[nodiscard]] TextForMimeData CopyTextForTable(const LaidOutBlock &block) {
+	auto result = TextForMimeData();
+	auto firstRow = true;
+	for (const auto &row : block.tableRows) {
+		if (!firstRow) {
+			result.append(u"\n"_q);
+		}
+		firstRow = false;
+		auto firstCell = true;
+		for (const auto &cell : row.cells) {
+			if (!firstCell) {
+				result.append(u"\t"_q);
+			}
+			firstCell = false;
+			result.append(cell.leaf.toTextForMimeData());
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] TextForMimeData CopyTextForMediaBlock(
+		const QString &label,
+		const Ui::Text::String &captionLeaf) {
+	auto result = TextForMimeData::Simple(label);
+	if (!captionLeaf.toString().isEmpty()) {
+		result.append(u"\n"_q);
+		result.append(captionLeaf.toTextForMimeData());
+	}
+	return result;
+}
+
+[[nodiscard]] TextForMimeData CopyTextForPhotoBlock(const LaidOutBlock &block) {
+	return CopyTextForMediaBlock(
+		block.copyText.isEmpty() ? kPhotoCopyLabel : block.copyText,
+		block.leaf);
+}
+
+[[nodiscard]] TextForMimeData CopyTextForPlaceholderBlock(
+		const LaidOutBlock &block) {
+	return CopyTextForMediaBlock(
+		block.labelText.isEmpty() ? block.copyText : block.labelText,
+		block.leaf);
+}
+
+[[nodiscard]] int AddSelectableSegment(
+		std::vector<SelectableSegment> *segments,
+		SelectableSegment segment) {
+	segment.index = int(segments->size());
+	segment.length = std::max(segment.length, 0);
+	segments->push_back(std::move(segment));
+	return segment.index;
+}
+
+[[nodiscard]] int CompareSelectionPositions(
+		MarkdownArticleSelectionPosition a,
+		MarkdownArticleSelectionPosition b) {
+	if (a.segment != b.segment) {
+		return (a.segment < b.segment) ? -1 : 1;
+	}
+	if (a.offset != b.offset) {
+		return (a.offset < b.offset) ? -1 : 1;
+	}
+	return 0;
+}
+
+[[nodiscard]] MarkdownArticleSelection NormalizeSelection(
+		MarkdownArticleSelection selection) {
+	if (selection.empty()) {
+		return {};
+	}
+	if (CompareSelectionPositions(selection.from, selection.to) > 0) {
+		std::swap(selection.from, selection.to);
+	}
+	return selection;
+}
+
+[[nodiscard]] int LastTableCellSegmentIndex(
+		const std::vector<SelectableSegment> *segments,
+		int tableSegmentIndex) {
+	auto result = tableSegmentIndex;
+	if (!segments) {
+		return result;
+	}
+	for (const auto &segment : *segments) {
+		if (segment.tableSegmentIndex == tableSegmentIndex) {
+			result = std::max(result, segment.index);
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] std::optional<int> SingleTableCellSelection(
+		const PaintSelectionState &selectionState,
+		int tableSegmentIndex) {
+	if (selectionState.empty()
+		|| !selectionState.endpoints
+		|| tableSegmentIndex < 0) {
+		return std::nullopt;
+	}
+	const auto normalized = NormalizeSelection(selectionState.selection);
+	if (normalized.empty()) {
+		return std::nullopt;
+	}
+	const auto lastCellSegment = LastTableCellSegmentIndex(
+		selectionState.segments,
+		tableSegmentIndex);
+	const auto spansWholeTable = (normalized.from.segment < tableSegmentIndex)
+		&& (normalized.to.segment > lastCellSegment);
+	auto tableHit = false;
+	auto cellSegment = -1;
+	auto multipleCells = false;
+	const auto consider = [&](MarkdownArticleSelectionEndpoint endpoint) {
+		if (!endpoint.valid() || !endpoint.direct) {
+			return;
+		}
+		const auto segment = FindSegment(selectionState.segments, endpoint.segment);
+		if (!segment) {
+			return;
+		}
+		if (segment->index == tableSegmentIndex) {
+			tableHit = true;
+			return;
+		}
+		if (segment->tableSegmentIndex != tableSegmentIndex) {
+			return;
+		}
+		if (cellSegment < 0) {
+			cellSegment = segment->index;
+		} else if (cellSegment != segment->index) {
+			multipleCells = true;
+		}
+	};
+	consider(selectionState.endpoints->from);
+	consider(selectionState.endpoints->to);
+	if (tableHit || multipleCells || cellSegment < 0 || spansWholeTable) {
+		return std::nullopt;
+	}
+	return cellSegment;
+}
+
+[[nodiscard]] std::optional<TextSelection> BaseTextSelectionForSegment(
+		const SelectableSegment &segment,
+		MarkdownArticleSelection selection) {
+	if (selection.empty() || !segment.isTextLeaf()) {
+		return std::nullopt;
+	}
+	selection = NormalizeSelection(selection);
+	if (selection.empty()
+		|| selection.from.segment > segment.index
+		|| selection.to.segment < segment.index) {
+		return std::nullopt;
+	}
+	auto from = 0;
+	auto to = SegmentLength(segment);
+	if (selection.from.segment == segment.index) {
+		from = selection.from.offset;
+	}
+	if (selection.to.segment == segment.index) {
+		to = selection.to.offset;
+	}
+	from = std::clamp(from, 0, SegmentLength(segment));
+	to = std::clamp(to, 0, SegmentLength(segment));
+	if (from >= to) {
+		return std::nullopt;
+	}
+	return TextSelection(uint16(from), uint16(to));
+}
+
+[[nodiscard]] bool RangeSelectsWholeSegment(
+		const SelectableSegment &segment,
+		MarkdownArticleSelection selection) {
+	selection = NormalizeSelection(selection);
+	if (selection.empty()
+		|| selection.from.segment > segment.index
+		|| selection.to.segment < segment.index) {
+		return false;
+	}
+	auto from = 0;
+	auto to = SegmentLength(segment);
+	if (selection.from.segment == segment.index) {
+		from = selection.from.offset;
+	}
+	if (selection.to.segment == segment.index) {
+		to = selection.to.offset;
+	}
+	from = std::clamp(from, 0, SegmentLength(segment));
+	to = std::clamp(to, 0, SegmentLength(segment));
+	return (from < to);
+}
+
+} // namespace
+
+void CollectSelectableSegments(
+		std::vector<LaidOutBlock> *blocks,
+		std::vector<SelectableSegment> *segments) {
+	if (!blocks) {
+		return;
+	}
+	for (auto &block : *blocks) {
+		block.segmentIndex = -1;
+		block.secondarySegmentIndex = -1;
+		switch (block.kind) {
+		case PreparedBlockKind::Paragraph:
+		case PreparedBlockKind::Heading:
+		case PreparedBlockKind::Details: {
+			auto segment = SelectableSegment();
+			segment.kind = SelectableSegmentKind::TextLeaf;
+			segment.leaf = &block.leaf;
+			segment.block = &block;
+			segment.outerRect = block.textRect;
+			segment.textRect = block.textRect;
+			segment.textWidth = block.textWidth;
+			segment.length = LeafTextLength(block.leaf);
+			block.segmentIndex = AddSelectableSegment(
+				segments,
+				std::move(segment));
+		} break;
+		case PreparedBlockKind::CodeBlock: {
+			auto segment = SelectableSegment();
+			segment.kind = SelectableSegmentKind::CodeBlock;
+			segment.leaf = &block.leaf;
+			segment.block = &block;
+			segment.outerRect = block.outer;
+			segment.textRect = block.textRect;
+			segment.textWidth = block.textWidth;
+			segment.length = LeafTextLength(block.leaf);
+			block.segmentIndex = AddSelectableSegment(
+				segments,
+				std::move(segment));
+		} break;
+		case PreparedBlockKind::DisplayMath: {
+			auto segment = SelectableSegment();
+			segment.kind = SelectableSegmentKind::DisplayMath;
+			segment.block = &block;
+			segment.outerRect = block.visibleFormulaRect;
+			segment.length = 1;
+			block.segmentIndex = AddSelectableSegment(
+				segments,
+				std::move(segment));
+		} break;
+		case PreparedBlockKind::Table: {
+			auto segment = SelectableSegment();
+			segment.kind = SelectableSegmentKind::Table;
+			segment.block = &block;
+			segment.outerRect = block.visibleTableRect;
+			segment.length = 1;
+			block.segmentIndex = AddSelectableSegment(
+				segments,
+				std::move(segment));
+			for (auto &row : block.tableRows) {
+				for (auto &cell : row.cells) {
+					auto cellSegment = SelectableSegment();
+					cellSegment.kind = SelectableSegmentKind::TextLeaf;
+					cellSegment.leaf = &cell.leaf;
+					cellSegment.block = &block;
+					cellSegment.cell = &cell;
+					cellSegment.outerRect = cell.outer;
+					cellSegment.textRect = cell.textRect;
+					cellSegment.textWidth = cell.textWidth;
+					cellSegment.align = cell.align;
+					cellSegment.length = LeafTextLength(cell.leaf);
+					cellSegment.tableSegmentIndex = block.segmentIndex;
+					cell.tableSegmentIndex = block.segmentIndex;
+					cell.segmentIndex = AddSelectableSegment(
+						segments,
+						std::move(cellSegment));
+				}
+			}
+		} break;
+		case PreparedBlockKind::Placeholder:
+		case PreparedBlockKind::Photo: {
+			auto segment = SelectableSegment();
+			segment.kind = (block.kind == PreparedBlockKind::Photo)
+				? SelectableSegmentKind::Photo
+				: SelectableSegmentKind::Placeholder;
+			segment.block = &block;
+			segment.outerRect = block.mediaRect;
+			segment.length = 1;
+			block.segmentIndex = AddSelectableSegment(
+				segments,
+				std::move(segment));
+			if (!block.textRect.isEmpty() && !block.leaf.toString().isEmpty()) {
+				auto textSegment = SelectableSegment();
+				textSegment.kind = SelectableSegmentKind::TextLeaf;
+				textSegment.leaf = &block.leaf;
+				textSegment.block = &block;
+				textSegment.outerRect = block.textRect;
+				textSegment.textRect = block.textRect;
+				textSegment.textWidth = block.textWidth;
+				textSegment.length = LeafTextLength(block.leaf);
+				textSegment.mediaSegmentIndex = block.segmentIndex;
+				block.secondarySegmentIndex = AddSelectableSegment(
+					segments,
+					std::move(textSegment));
+			}
+		} break;
+		case PreparedBlockKind::List:
+		case PreparedBlockKind::ListItem:
+		case PreparedBlockKind::Quote:
+		case PreparedBlockKind::Rule:
+			break;
+		}
+		CollectSelectableSegments(&block.children, segments);
+	}
+}
+
+void CollectAnchors(
+		const std::vector<LaidOutBlock> &blocks,
+		std::vector<std::pair<QString, int>> *anchors) {
+	if (!anchors) {
+		return;
+	}
+	for (const auto &block : blocks) {
+		if (!block.anchorId.isEmpty()) {
+			anchors->push_back({ block.anchorId, block.outer.top() });
+		}
+		CollectAnchors(block.children, anchors);
+	}
+}
+
+const SelectableSegment *FindSegment(
+		const std::vector<SelectableSegment> *segments,
+		int index) {
+	if (!segments || index < 0 || index >= int(segments->size())) {
+		return nullptr;
+	}
+	return &(*segments)[index];
+}
+
+int SegmentLength(const SelectableSegment &segment) {
+	return std::max(segment.length, 0);
+}
+
+bool TableSegmentSelected(
+		const PaintSelectionState &selectionState,
+		int tableSegmentIndex) {
+	if (selectionState.empty() || tableSegmentIndex < 0) {
+		return false;
+	}
+	if (SingleTableCellSelection(selectionState, tableSegmentIndex)) {
+		return false;
+	}
+	const auto normalized = NormalizeSelection(selectionState.selection);
+	if (normalized.empty()) {
+		return false;
+	}
+	auto selectedCells = 0;
+	auto selectedCellIndex = -1;
+	for (const auto &segment : *selectionState.segments) {
+		if (segment.tableSegmentIndex != tableSegmentIndex
+			|| segment.index == tableSegmentIndex) {
+			continue;
+		}
+		const auto textSelection = BaseTextSelectionForSegment(
+			segment,
+			normalized);
+		if (!textSelection || textSelection->empty()) {
+			continue;
+		}
+		if (++selectedCells == 1) {
+			selectedCellIndex = segment.index;
+		} else {
+			return true;
+		}
+	}
+	const auto table = FindSegment(selectionState.segments, tableSegmentIndex);
+	if (!table || !RangeSelectsWholeSegment(*table, normalized)) {
+		return false;
+	}
+	if (selectedCells != 1) {
+		return true;
+	}
+	if (normalized.from.segment == tableSegmentIndex
+		|| normalized.to.segment == tableSegmentIndex) {
+		return true;
+	}
+	const auto lower = std::min(tableSegmentIndex, selectedCellIndex);
+	const auto upper = std::max(tableSegmentIndex, selectedCellIndex);
+	return (normalized.from.segment < lower)
+		&& (normalized.to.segment > upper);
+}
+
+std::optional<TextSelection> TextSelectionForSegment(
+		const SelectableSegment &segment,
+		const PaintSelectionState &selectionState) {
+	if (selectionState.empty()) {
+		return std::nullopt;
+	}
+	if (segment.tableSegmentIndex >= 0) {
+		if (const auto singleCell = SingleTableCellSelection(
+				selectionState,
+				segment.tableSegmentIndex);
+			singleCell && *singleCell != segment.index) {
+			return std::nullopt;
+		}
+	}
+	if (segment.tableSegmentIndex >= 0
+		&& TableSegmentSelected(selectionState, segment.tableSegmentIndex)) {
+		return std::nullopt;
+	}
+	return BaseTextSelectionForSegment(segment, selectionState.selection);
+}
+
+std::optional<TextSelection> TextSelectionForSegmentIndex(
+		const PaintSelectionState &selectionState,
+		int index) {
+	const auto segment = FindSegment(selectionState.segments, index);
+	return segment
+		? TextSelectionForSegment(*segment, selectionState)
+		: std::nullopt;
+}
+
+bool WholeSegmentSelected(
+		const SelectableSegment &segment,
+		const PaintSelectionState &selectionState) {
+	if (selectionState.empty() || segment.isTextLeaf()) {
+		return false;
+	}
+	if (segment.kind == SelectableSegmentKind::Table) {
+		return TableSegmentSelected(selectionState, segment.index);
+	}
+	return RangeSelectsWholeSegment(segment, selectionState.selection);
+}
+
+bool WholeSegmentSelected(
+		const PaintSelectionState &selectionState,
+		int index) {
+	const auto segment = FindSegment(selectionState.segments, index);
+	return segment
+		? WholeSegmentSelected(*segment, selectionState)
+		: false;
+}
+
+TextForMimeData TextForSegment(
+		const SelectableSegment &segment,
+		TextSelection selection) {
+	switch (segment.kind) {
+	case SelectableSegmentKind::TextLeaf:
+		return segment.leaf
+			? segment.leaf->toTextForMimeData(selection)
+			: TextForMimeData();
+	case SelectableSegmentKind::CodeBlock:
+		return segment.block
+			? CopyTextForCodeBlock(*segment.block, selection)
+			: TextForMimeData();
+	case SelectableSegmentKind::DisplayMath:
+		return segment.block
+			? CopyTextForDisplayMath(*segment.block)
+			: TextForMimeData();
+	case SelectableSegmentKind::Table:
+		return segment.block
+			? CopyTextForTable(*segment.block)
+			: TextForMimeData();
+	case SelectableSegmentKind::Placeholder:
+		return segment.block
+			? CopyTextForPlaceholderBlock(*segment.block)
+			: TextForMimeData();
+	case SelectableSegmentKind::Photo:
+		return segment.block
+			? CopyTextForPhotoBlock(*segment.block)
+			: TextForMimeData();
+	}
+	return TextForMimeData();
+}
+
+TextForMimeData TextForSelectedSegments(
+		const std::vector<SelectableSegment> &segments,
+		MarkdownArticleSelection selection,
+		const MarkdownArticleSelectionEndpoints *endpoints) {
+	if (selection.empty()) {
+		return TextForMimeData();
+	}
+	const auto selectionState = PaintSelectionState{
+		.segments = &segments,
+		.selection = selection,
+		.endpoints = endpoints,
+	};
+	auto pieces = std::vector<TextForMimeData>();
+	for (const auto &segment : segments) {
+		if (segment.isTextLeaf()) {
+			if (segment.mediaSegmentIndex >= 0
+				&& WholeSegmentSelected(
+					selectionState,
+					segment.mediaSegmentIndex)) {
+				continue;
+			}
+			if (const auto textSelection = TextSelectionForSegment(
+					segment,
+					selectionState);
+				textSelection && !textSelection->empty()) {
+				if (auto text = TextForSegment(segment, *textSelection);
+					!text.empty()) {
+					pieces.push_back(std::move(text));
+				}
+			}
+			continue;
+		}
+		if (!WholeSegmentSelected(segment, selectionState)) {
+			continue;
+		}
+		if (auto text = TextForSegment(segment); !text.empty()) {
+			pieces.push_back(std::move(text));
+		}
+	}
+	if (pieces.empty()) {
+		return TextForMimeData();
+	} else if (pieces.size() == 1) {
+		return std::move(pieces.front());
+	}
+	auto result = TextForMimeData();
+	for (auto i = 0, count = int(pieces.size()); i != count; ++i) {
+		if (i) {
+			result.append(u"\n"_q);
+		}
+		result.append(std::move(pieces[i]));
+	}
+	return result;
+}
+
+} // namespace Iv::Markdown

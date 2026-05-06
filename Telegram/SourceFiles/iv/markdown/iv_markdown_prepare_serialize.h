@@ -1,0 +1,13 @@
+#pragma once
+
+#include "iv/markdown/iv_markdown_prepare.h"
+
+namespace Iv::Markdown {
+
+[[nodiscard]] QString SerializeInlineTextObjectEntity(
+	const InlineTextObjectEntity &object);
+[[nodiscard]] std::optional<InlineTextObjectEntity> ParseInlineTextObjectEntity(
+	const QString &data);
+[[nodiscard]] MarkdownPrepareDimensions CaptureMarkdownPrepareDimensions();
+
+} // namespace Iv::Markdown

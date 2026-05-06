@@ -1,0 +1,123 @@
+#pragma once
+
+#include "iv/markdown/iv_markdown_article.h"
+#include "iv/markdown/iv_markdown_view.h"
+
+#include "base/unique_qptr.h"
+#include "ui/click_handler.h"
+#include "ui/rp_widget.h"
+#include "ui/style/style_core_types.h"
+
+#include <functional>
+#include <memory>
+
+namespace Ui {
+class PopupMenu;
+namespace Text {
+struct QuotePaintCache;
+} // namespace Text
+} // namespace Ui
+
+namespace Iv::Markdown {
+
+class MarkdownDocumentWidget final
+	: public Ui::RpWidget
+	, public ClickHandlerHost {
+public:
+	explicit MarkdownDocumentWidget(QWidget *parent);
+	~MarkdownDocumentWidget() override;
+
+	void setLinkActivationCallback(
+		std::function<void(const PreparedLink &, Qt::MouseButton)> callback);
+	void setMediaActivationCallback(
+		std::function<bool(const MediaActivation &, Qt::MouseButton)> callback);
+	void setArticle(std::shared_ptr<MarkdownArticle> article);
+	void setZoom(int value);
+	void refreshPalette();
+	void invalidateRasterCache();
+	[[nodiscard]] int anchorTop(const QString &anchorId) const;
+	[[nodiscard]] bool toggleDetails(const QString &anchorId);
+	[[nodiscard]] int lastRelayoutMs() const;
+	int resizeGetHeight(int newWidth) override;
+
+protected:
+	void paintEvent(QPaintEvent *e) override;
+	void visibleTopBottomUpdated(int visibleTop, int visibleBottom) override;
+	void keyPressEvent(QKeyEvent *e) override;
+	void contextMenuEvent(QContextMenuEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseReleaseEvent(QMouseEvent *e) override;
+	void mouseDoubleClickEvent(QMouseEvent *e) override;
+	void focusOutEvent(QFocusEvent *e) override;
+	void focusInEvent(QFocusEvent *e) override;
+	void leaveEventHook(QEvent *e) override;
+	void clickHandlerActiveChanged(const ClickHandlerPtr &, bool) override;
+	void clickHandlerPressedChanged(const ClickHandlerPtr &, bool) override;
+
+private:
+	enum DragAction {
+		NoDrag = 0x00,
+		PrepareDrag = 0x01,
+		Dragging = 0x02,
+		Selecting = 0x04,
+	};
+
+	[[nodiscard]] ClickHandlerPtr linkAt(QPoint point) const;
+	[[nodiscard]] MarkdownArticleHitTestResult hitTest(
+		QPoint point,
+		Ui::Text::StateRequest::Flags flags) const;
+	[[nodiscard]] MarkdownArticleSelection selectionForCopy() const;
+	[[nodiscard]] MarkdownArticleSelectionEndpoints selectionEndpointsForCopy() const;
+	[[nodiscard]] bool selectionContains(
+		MarkdownArticleSelection selection,
+		const MarkdownArticleHitTestResult &result) const;
+	[[nodiscard]] int selectionOffsetFromHit(
+		const MarkdownArticleHitTestResult &result) const;
+	[[nodiscard]] MarkdownArticleSelection selectionFromHit(
+		const MarkdownArticleHitTestResult &result) const;
+	[[nodiscard]] TextForMimeData getSelectedText() const;
+	void copySelectedText();
+
+	void syncArticleVisibleTopBottom();
+	void relayoutCurrentWidth(bool clearSelection);
+	void forceRelayoutCurrentWidth();
+	void updateHover(const MarkdownArticleHitTestResult &state);
+	void resetSelection();
+	void clearSelection();
+	void resetTextPaintCaches();
+	[[nodiscard]] Ui::Text::QuotePaintCache *ensurePrePaintCache();
+	[[nodiscard]] Ui::Text::QuotePaintCache *ensureBlockquotePaintCache();
+	[[nodiscard]] MarkdownArticlePaintCaches textPaintCaches();
+	void dragActionStart(QPoint point, Qt::MouseButton button);
+	MarkdownArticleHitTestResult dragActionUpdate(QPoint point);
+	MarkdownArticleHitTestResult dragActionFinish(
+		QPoint point,
+		Qt::MouseButton button);
+	void applyCursor(style::cursor cursor);
+	[[nodiscard]] double zoomScale() const;
+
+	std::shared_ptr<MarkdownArticle> _article;
+	std::unique_ptr<Ui::Text::QuotePaintCache> _prePaintCache;
+	std::unique_ptr<Ui::Text::QuotePaintCache> _blockquotePaintCache;
+	std::function<void(const PreparedLink &, Qt::MouseButton)> _activateLink;
+	std::function<bool(const MediaActivation &, Qt::MouseButton)> _activateMedia;
+	MarkdownArticleSelection _selection;
+	MarkdownArticleSelection _savedSelection;
+	MarkdownArticleSelectionEndpoints _selectionEndpoints;
+	MarkdownArticleSelectionEndpoints _savedSelectionEndpoints;
+	TextSelectType _selectionType = TextSelectType::Letters;
+	style::cursor _cursor = style::cur_default;
+	DragAction _dragAction = NoDrag;
+	QPoint _dragStartPosition;
+	int _dragSegment = -1;
+	int _dragSymbol = 0;
+	TextSelection _dragExpandedSelection;
+	int _lastRelayoutMs = 0;
+	int _zoom = 100;
+	Ui::VisibleRange _visibleRange;
+	base::unique_qptr<Ui::PopupMenu> _contextMenu;
+
+};
+
+} // namespace Iv::Markdown

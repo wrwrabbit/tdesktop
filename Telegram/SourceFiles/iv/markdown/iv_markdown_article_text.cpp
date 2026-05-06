@@ -1,0 +1,952 @@
+#include "iv/markdown/iv_markdown_article_text.h"
+
+#include "iv/markdown/iv_markdown_article_layout_blocks.h"
+
+#include "lang/lang_keys.h"
+#include "ui/dynamic_image.h"
+#include "ui/style/style_core.h"
+#include "ui/style/style_core_scale.h"
+#include "ui/text/text_custom_emoji.h"
+
+#include <algorithm>
+#include <cmath>
+#include <map>
+#include <utility>
+
+#include "styles/palette.h"
+#include "styles/style_iv.h"
+
+namespace Iv::Markdown {
+namespace {
+
+constexpr auto kIvMarkedTextOptions = TextParseOptions{
+	TextParseMultiline,
+	0,
+	0,
+	Qt::LayoutDirectionAuto,
+};
+
+class PreparedLinkClickHandler final : public ClickHandler {
+public:
+	explicit PreparedLinkClickHandler(PreparedLink link)
+	: _link(std::move(link)) {
+	}
+
+	void onClick(ClickContext) const override {
+	}
+
+	[[nodiscard]] const PreparedLink &link() const {
+		return _link;
+	}
+
+	QString url() const override {
+		return _link.target;
+	}
+
+	QString copyToClipboardText() const override {
+		if (!_link.copyText.isEmpty()) {
+			return _link.copyText;
+		}
+		switch (_link.kind) {
+		case PreparedLinkKind::Anchor:
+		case PreparedLinkKind::Footnote:
+		case PreparedLinkKind::FootnoteBacklink:
+			return _link.target.isEmpty() ? QString() : (u"#"_q + _link.target);
+		case PreparedLinkKind::LocalFile:
+			return _link.fragment.isEmpty()
+				? _link.target
+				: (_link.target + u"#"_q + _link.fragment);
+		case PreparedLinkKind::External:
+			return _link.target;
+		case PreparedLinkKind::RejectedRelative:
+		case PreparedLinkKind::ToggleDetails:
+			return QString();
+		}
+		return QString();
+	}
+
+	QString copyToClipboardContextItemText() const override {
+		switch (_link.kind) {
+		case PreparedLinkKind::RejectedRelative:
+		case PreparedLinkKind::ToggleDetails:
+			return QString();
+		case PreparedLinkKind::External:
+		case PreparedLinkKind::Anchor:
+		case PreparedLinkKind::Footnote:
+		case PreparedLinkKind::FootnoteBacklink:
+		case PreparedLinkKind::LocalFile:
+			return copyToClipboardText().isEmpty()
+				? QString()
+				: tr::lng_context_copy_link(tr::now);
+		}
+		return QString();
+	}
+
+private:
+	PreparedLink _link;
+
+};
+
+[[nodiscard]] int FormulaTextSize(const style::TextStyle &textStyle) {
+	return std::max(textStyle.font->height, 1);
+}
+
+[[nodiscard]] int ScaleFormulaCap(int cap, int textSize, int baseTextSize) {
+	if (cap <= 0) {
+		return 0;
+	}
+	const auto numerator = int64(cap) * std::max(textSize, 1);
+	const auto denominator = std::max(baseTextSize, 1);
+	return std::max(int((numerator + denominator - 1) / denominator), 1);
+}
+
+[[nodiscard]] PreparedFormulaMeasurementSignature FormulaRenderSignature(
+		const PreparedFormulaSlot &slot) {
+	const auto &displayMath = st::defaultMarkdown.displayMath;
+	return {
+		.trimmedTex = slot.trimmedTex.trimmed(),
+		.kind = slot.kind,
+		.textSize = slot.textSize ? slot.textSize : displayMath.textSize,
+		.renderWidthCap = slot.renderWidthCap
+			? slot.renderWidthCap
+			: displayMath.maxRenderWidth,
+		.renderHeightCap = slot.renderHeightCap
+			? slot.renderHeightCap
+			: displayMath.maxRenderHeight,
+	};
+}
+
+[[nodiscard]] PreparedFormulaMeasurementSignature InlineFormulaSignature(
+		QString trimmedTex,
+		const style::TextStyle &textStyle) {
+	const auto &displayMath = st::defaultMarkdown.displayMath;
+	const auto textSize = FormulaTextSize(textStyle);
+	return {
+		.trimmedTex = std::move(trimmedTex).trimmed(),
+		.kind = MathKind::Inline,
+		.textSize = textSize,
+		.renderWidthCap = ScaleFormulaCap(
+			displayMath.maxRenderWidth,
+			textSize,
+			displayMath.textSize),
+		.renderHeightCap = ScaleFormulaCap(
+			displayMath.maxRenderHeight,
+			textSize,
+			displayMath.textSize),
+	};
+}
+
+[[nodiscard]] RenderedFormula MeasuredFallback(const MeasuredFormula &measured) {
+	auto result = RenderedFormula();
+	result.logicalSize = measured.logicalSize;
+	result.logicalDepth = measured.logicalDepth;
+	result.fallbackText = measured.fallbackText;
+	result.error = measured.error;
+	result.success = false;
+	result.overflow = measured.overflow;
+	result.tooLarge = measured.tooLarge;
+	return result;
+}
+
+[[nodiscard]] int RenderFormulaDevicePixelRatio(const RenderedFormula &formula) {
+	const auto ratio = formula.image.devicePixelRatio();
+	return (ratio > 0.) ? int(std::round(ratio)) : 0;
+}
+
+struct InlineFormulaMetrics {
+	int ascent = 0;
+	int descent = 0;
+};
+
+[[nodiscard]] InlineFormulaMetrics InlineFormulaMetricsFromMeasured(
+		const MeasuredFormula &formula) {
+	const auto height = std::max(formula.logicalSize.height(), 0);
+	const auto descent = std::clamp(formula.logicalDepth, 0, height);
+	return {
+		.ascent = height - descent,
+		.descent = descent,
+	};
+}
+
+struct InlineFormulaColorizedKey {
+	QRgb color = 0;
+	int devicePixelRatio = 0;
+
+	friend inline bool operator<(
+			InlineFormulaColorizedKey a,
+			InlineFormulaColorizedKey b) {
+		if (a.color != b.color) {
+			return a.color < b.color;
+		}
+		return a.devicePixelRatio < b.devicePixelRatio;
+	}
+};
+
+class InlineFormulaSharedState final {
+public:
+	InlineFormulaSharedState(
+		PreparedFormulaMeasurementSignature signature,
+		std::shared_ptr<const MeasuredFormula> measuredData,
+		QString displayFallbackText,
+		std::shared_ptr<MathRenderer> renderer);
+
+	[[nodiscard]] int width() const;
+	[[nodiscard]] bool failed() const;
+	[[nodiscard]] std::optional<Ui::Text::CustomEmojiVerticalMetrics> vertical(
+		const style::TextStyle &textStyle) const;
+	void paint(
+		QPainter &p,
+		const Ui::Text::CustomEmoji::Context &context,
+		const QString &replacementText,
+		int fallbackWidth) const;
+	void setRenderer(std::shared_ptr<MathRenderer> renderer);
+	void invalidatePaletteCache();
+	void invalidateRasterCache();
+
+private:
+	[[nodiscard]] const MeasuredFormula &measured() const;
+	[[nodiscard]] MathRenderer *renderer() const;
+	[[nodiscard]] RenderedFormula ensureRendered(int devicePixelRatio) const;
+	[[nodiscard]] const QImage *colorizedImage(
+		const QColor &color,
+		int devicePixelRatio) const;
+
+	PreparedFormulaMeasurementSignature _signature;
+	std::shared_ptr<const MeasuredFormula> _measuredData;
+	QString _displayFallbackText;
+	mutable std::shared_ptr<MathRenderer> _renderer;
+	mutable std::map<int, RenderedFormula> _rendered;
+	mutable std::map<InlineFormulaColorizedKey, QImage> _colorized;
+
+};
+
+class InlineFormulaObject final : public Ui::Text::CustomEmoji {
+public:
+	InlineFormulaObject(
+		QString replacementText,
+		int fallbackWidth,
+		std::shared_ptr<InlineFormulaSharedState> state);
+
+	int width() override;
+	QString entityData() override;
+	std::optional<Ui::Text::CustomEmojiVerticalMetrics> vertical(
+		const style::TextStyle &textStyle) override;
+	QString replacementText() override;
+	Ui::Text::CustomEmojiSemantics semantics() override;
+	void paint(QPainter &p, const Context &context) override;
+	void unload() override;
+	bool ready() override;
+	bool readyInDefaultState() override;
+
+private:
+	QString _replacementText;
+	int _fallbackWidth = 1;
+	const std::shared_ptr<InlineFormulaSharedState> _state;
+
+};
+
+class InlineIvImageObject final : public Ui::Text::CustomEmoji {
+public:
+	InlineIvImageObject(
+		QString replacementText,
+		int width,
+		int height,
+		std::shared_ptr<Ui::DynamicImage> image,
+		Fn<void()> repaint);
+
+	int width() override;
+	QString entityData() override;
+	std::optional<Ui::Text::CustomEmojiVerticalMetrics> vertical(
+		const style::TextStyle &textStyle) override;
+	QString replacementText() override;
+	Ui::Text::CustomEmojiSemantics semantics() override;
+	void paint(QPainter &p, const Context &context) override;
+	void unload() override;
+	bool ready() override;
+	bool readyInDefaultState() override;
+
+private:
+	QString _replacementText;
+	int _width = 1;
+	int _height = 1;
+	const std::shared_ptr<Ui::DynamicImage> _image;
+	const Fn<void()> _repaint;
+	bool _subscribed = false;
+
+};
+
+[[nodiscard]] QString InlineFormulaDisplayFallbackText(
+		const PreparedFormulaMeasurementSignature &signature,
+		const MeasuredFormula &measured) {
+	if (!measured.fallbackText.isEmpty()) {
+		return measured.fallbackText;
+	} else if (!signature.trimmedTex.isEmpty()) {
+		return signature.trimmedTex;
+	}
+	return u"[math]"_q;
+}
+
+[[nodiscard]] std::shared_ptr<const MeasuredFormula>
+FindInlineFormulaMeasuredData(
+		const std::vector<PreparedFormulaSlot> *formulas,
+		const PreparedFormulaMeasurementSignature &signature,
+		MeasuredFormula *measured) {
+	if (!formulas) {
+		return nullptr;
+	}
+	for (const auto &slot : *formulas) {
+		if (!slot.present || FormulaRenderSignature(slot) != signature) {
+			continue;
+		}
+		if (measured) {
+			*measured = slot.measured;
+		}
+		if (slot.measuredData) {
+			return slot.measuredData;
+		}
+		return std::make_shared<MeasuredFormula>(slot.measured);
+	}
+	return nullptr;
+}
+
+} // namespace
+
+ClickHandlerPtr CreatePreparedLinkHandler(PreparedLink link) {
+	return std::make_shared<PreparedLinkClickHandler>(std::move(link));
+}
+
+std::optional<PreparedLink> ExtractPreparedLink(const ClickHandlerPtr &link) {
+	if (const auto prepared = std::dynamic_pointer_cast<PreparedLinkClickHandler>(
+			link)) {
+		return prepared->link();
+	}
+	return std::nullopt;
+}
+
+void BindLinks(
+		Ui::Text::String *leaf,
+		const std::vector<PreparedLink> &links) {
+	for (const auto &link : links) {
+		leaf->setLink(
+			link.index,
+			CreatePreparedLinkHandler(link));
+	}
+}
+
+const PreparedFormulaSlot *PreparedFormulaFor(
+		const std::vector<PreparedFormulaSlot> &formulas,
+		int formulaIndex) {
+	if (formulaIndex < 0 || formulaIndex >= int(formulas.size())) {
+		return nullptr;
+	} else if (!formulas[formulaIndex].present) {
+		return nullptr;
+	}
+	return &formulas[formulaIndex];
+}
+
+PreparedFormulaSlot *PreparedFormulaFor(
+		std::vector<PreparedFormulaSlot> *formulas,
+		int formulaIndex) {
+	if (!formulas || formulaIndex < 0 || formulaIndex >= int(formulas->size())) {
+		return nullptr;
+	} else if (!(*formulas)[formulaIndex].present) {
+		return nullptr;
+	}
+	return &(*formulas)[formulaIndex];
+}
+
+RenderedFormula *FormulaRasterSlot(
+		std::vector<RenderedFormula> *rendered,
+		int formulaIndex) {
+	if (!rendered || formulaIndex < 0) {
+		return nullptr;
+	}
+	if (formulaIndex >= int(rendered->size())) {
+		rendered->resize(formulaIndex + 1);
+	}
+	return &(*rendered)[formulaIndex];
+}
+
+RenderedFormula EnsureFormulaRendered(
+		const PreparedFormulaMeasurementSignature &signature,
+		const MeasuredFormula &measured,
+		RenderedFormula *rendered,
+		MathRenderer *renderer,
+		int devicePixelRatio) {
+	if (!measured.success) {
+		return MeasuredFallback(measured);
+	}
+	if (rendered
+		&& rendered->success
+		&& (RenderFormulaDevicePixelRatio(*rendered) == devicePixelRatio)) {
+		return *rendered;
+	}
+	auto ownedRenderer = std::shared_ptr<MathRenderer>();
+	if (!renderer) {
+		ownedRenderer = std::make_shared<MathRenderer>();
+		renderer = ownedRenderer.get();
+	}
+	auto local = renderer->renderFormula({
+		.trimmedTex = signature.trimmedTex,
+		.kind = signature.kind,
+		.textSize = signature.textSize,
+		.renderWidthCap = signature.renderWidthCap,
+		.renderHeightCap = signature.renderHeightCap,
+		.devicePixelRatio = devicePixelRatio,
+	});
+	if (local.logicalSize.isEmpty()) {
+		local.logicalSize = measured.logicalSize;
+		local.logicalDepth = measured.logicalDepth;
+		local.fallbackText = measured.fallbackText;
+		local.error = measured.error;
+		local.overflow = measured.overflow;
+		local.tooLarge = measured.tooLarge;
+	}
+	if (rendered) {
+		*rendered = std::move(local);
+		return rendered->success ? *rendered : MeasuredFallback(measured);
+	}
+	return local.success ? local : MeasuredFallback(measured);
+}
+
+RenderedFormula EnsureFormulaRendered(
+		const PreparedFormulaSlot *slot,
+		RenderedFormula *rendered,
+		MathRenderer *renderer,
+		int devicePixelRatio) {
+	if (!slot) {
+		return RenderedFormula();
+	}
+	return EnsureFormulaRendered(
+		FormulaRenderSignature(*slot),
+		slot->measured,
+		rendered,
+		renderer,
+		devicePixelRatio);
+}
+
+class InlineFormulaObjectCache final {
+public:
+	InlineFormulaObjectCache() = default;
+
+	void setRenderer(std::shared_ptr<MathRenderer> renderer);
+	void clear();
+	void invalidatePaletteCache();
+	void invalidateRasterCache();
+	[[nodiscard]] std::unique_ptr<Ui::Text::CustomEmoji> create(
+		const InlineTextObjectFormulaData &data,
+		const style::TextStyle &textStyle,
+		const std::vector<PreparedFormulaSlot> *formulas);
+
+private:
+	[[nodiscard]] std::shared_ptr<InlineFormulaSharedState> lookupOrCreate(
+		const PreparedFormulaMeasurementSignature &signature,
+		const style::TextStyle &textStyle,
+		const std::vector<PreparedFormulaSlot> *formulas);
+
+	std::shared_ptr<MathRenderer> _renderer;
+	std::map<
+		PreparedFormulaMeasurementSignature,
+		std::shared_ptr<InlineFormulaSharedState>,
+		PreparedFormulaMeasurementSignatureLess> _states;
+
+};
+
+InlineFormulaSharedState::InlineFormulaSharedState(
+	PreparedFormulaMeasurementSignature signature,
+	std::shared_ptr<const MeasuredFormula> measuredData,
+	QString displayFallbackText,
+	std::shared_ptr<MathRenderer> renderer)
+: _signature(std::move(signature))
+, _measuredData(std::move(measuredData))
+, _displayFallbackText(std::move(displayFallbackText))
+, _renderer(std::move(renderer)) {
+}
+
+int InlineFormulaSharedState::width() const {
+	const auto &formula = measured();
+	return (formula.success && (formula.logicalSize.width() > 0))
+		? formula.logicalSize.width()
+		: 1;
+}
+
+bool InlineFormulaSharedState::failed() const {
+	return !measured().success;
+}
+
+std::optional<Ui::Text::CustomEmojiVerticalMetrics>
+InlineFormulaSharedState::vertical(const style::TextStyle &textStyle) const {
+	const auto &formula = measured();
+	const auto height = std::max(formula.logicalSize.height(), 0);
+	if (formula.success && (height > 0)) {
+		const auto metrics = InlineFormulaMetricsFromMeasured(formula);
+		return Ui::Text::CustomEmojiVerticalMetrics{
+			.ascent = metrics.ascent,
+			.descent = metrics.descent,
+		};
+	}
+	const auto ascent = std::max(textStyle.font->ascent, 0);
+	return Ui::Text::CustomEmojiVerticalMetrics{
+		.ascent = ascent,
+		.descent = std::max(textStyle.font->height - ascent, 0),
+	};
+}
+
+void InlineFormulaSharedState::paint(
+		QPainter &p,
+		const Ui::Text::CustomEmoji::Context &context,
+		const QString &replacementText,
+		int fallbackWidth) const {
+	const auto rendered = ensureRendered(std::max(style::DevicePixelRatio(), 1));
+	if (rendered.success) {
+		if (const auto image = colorizedImage(
+				context.textColor,
+				std::max(style::DevicePixelRatio(), 1))) {
+			p.drawImage(context.position, *image);
+		}
+		return;
+	}
+	const auto fallbackText = replacementText.isEmpty()
+		? _displayFallbackText
+		: replacementText;
+	if (fallbackText.isEmpty()) {
+		return;
+	}
+	p.save();
+	p.setPen(context.textColor);
+	p.drawText(
+		QRect(
+			context.position.x(),
+			context.position.y(),
+			std::max(fallbackWidth, 1),
+			p.fontMetrics().height()),
+		Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
+		fallbackText);
+	p.restore();
+}
+
+void InlineFormulaSharedState::setRenderer(std::shared_ptr<MathRenderer> renderer) {
+	_renderer = std::move(renderer);
+	invalidateRasterCache();
+}
+
+void InlineFormulaSharedState::invalidatePaletteCache() {
+	_colorized.clear();
+}
+
+void InlineFormulaSharedState::invalidateRasterCache() {
+	_rendered.clear();
+	_colorized.clear();
+}
+
+const MeasuredFormula &InlineFormulaSharedState::measured() const {
+	static const auto kEmpty = MeasuredFormula();
+	return _measuredData ? *_measuredData : kEmpty;
+}
+
+MathRenderer *InlineFormulaSharedState::renderer() const {
+	if (!_renderer) {
+		_renderer = std::make_shared<MathRenderer>();
+	}
+	return _renderer.get();
+}
+
+RenderedFormula InlineFormulaSharedState::ensureRendered(
+		int devicePixelRatio) const {
+	if (!measured().success) {
+		return MeasuredFallback(measured());
+	}
+	if (const auto i = _rendered.find(devicePixelRatio); i != end(_rendered)) {
+		return i->second;
+	}
+	auto rendered = renderer()->renderFormula({
+		.trimmedTex = _signature.trimmedTex,
+		.kind = _signature.kind,
+		.textSize = _signature.textSize,
+		.renderWidthCap = _signature.renderWidthCap,
+		.renderHeightCap = _signature.renderHeightCap,
+		.devicePixelRatio = devicePixelRatio,
+	});
+	if (rendered.logicalSize.isEmpty()) {
+		rendered.logicalSize = measured().logicalSize;
+		rendered.logicalDepth = measured().logicalDepth;
+		rendered.fallbackText = measured().fallbackText;
+		rendered.error = measured().error;
+		rendered.overflow = measured().overflow;
+		rendered.tooLarge = measured().tooLarge;
+	}
+	if (!rendered.success) {
+		rendered = MeasuredFallback(measured());
+	}
+	const auto i = _rendered.emplace(
+		devicePixelRatio,
+		std::move(rendered)).first;
+	return i->second;
+}
+
+const QImage *InlineFormulaSharedState::colorizedImage(
+		const QColor &color,
+		int devicePixelRatio) const {
+	const auto rendered = ensureRendered(devicePixelRatio);
+	if (!rendered.success) {
+		return nullptr;
+	}
+	const auto key = InlineFormulaColorizedKey{
+		.color = color.rgba(),
+		.devicePixelRatio = devicePixelRatio,
+	};
+	if (const auto i = _colorized.find(key); i != end(_colorized)) {
+		return &i->second;
+	}
+	auto colorized = QImage(
+		rendered.image.size(),
+		QImage::Format_ARGB32_Premultiplied);
+	style::colorizeImage(
+		rendered.image,
+		color,
+		&colorized,
+		QRect(),
+		QPoint(),
+		true);
+	const auto i = _colorized.emplace(
+		key,
+		std::move(colorized)).first;
+	return &i->second;
+}
+
+InlineFormulaObject::InlineFormulaObject(
+	QString replacementText,
+	int fallbackWidth,
+	std::shared_ptr<InlineFormulaSharedState> state)
+: _replacementText(std::move(replacementText))
+, _fallbackWidth(std::max(fallbackWidth, 1))
+, _state(std::move(state)) {
+}
+
+int InlineFormulaObject::width() {
+	if (!_state || _state->failed()) {
+		return _fallbackWidth;
+	}
+	return _state->width();
+}
+
+QString InlineFormulaObject::entityData() {
+	return QString();
+}
+
+std::optional<Ui::Text::CustomEmojiVerticalMetrics>
+InlineFormulaObject::vertical(const style::TextStyle &textStyle) {
+	return _state ? _state->vertical(textStyle) : std::nullopt;
+}
+
+QString InlineFormulaObject::replacementText() {
+	return _replacementText;
+}
+
+Ui::Text::CustomEmojiSemantics InlineFormulaObject::semantics() {
+	return {
+		.isEmoji = false,
+		.isRealCustomEmoji = false,
+		.exportEntity = false,
+		.unloadPersistentAnimation = false,
+		.allowCustomEmojiClick = false,
+	};
+}
+
+void InlineFormulaObject::paint(QPainter &p, const Context &context) {
+	if (_state) {
+		_state->paint(p, context, _replacementText, _fallbackWidth);
+	}
+}
+
+void InlineFormulaObject::unload() {
+}
+
+bool InlineFormulaObject::ready() {
+	return true;
+}
+
+bool InlineFormulaObject::readyInDefaultState() {
+	return true;
+}
+
+void InlineFormulaObjectCache::setRenderer(std::shared_ptr<MathRenderer> renderer) {
+	_renderer = std::move(renderer);
+	for (const auto &entry : _states) {
+		const auto &state = entry.second;
+		if (state) {
+			state->setRenderer(_renderer);
+		}
+	}
+}
+
+void InlineFormulaObjectCache::clear() {
+	_states.clear();
+}
+
+void InlineFormulaObjectCache::invalidatePaletteCache() {
+	for (const auto &entry : _states) {
+		const auto &state = entry.second;
+		if (state) {
+			state->invalidatePaletteCache();
+		}
+	}
+}
+
+void InlineFormulaObjectCache::invalidateRasterCache() {
+	for (const auto &entry : _states) {
+		const auto &state = entry.second;
+		if (state) {
+			state->invalidateRasterCache();
+		}
+	}
+}
+
+InlineIvImageObject::InlineIvImageObject(
+	QString replacementText,
+	int width,
+	int height,
+	std::shared_ptr<Ui::DynamicImage> image,
+	Fn<void()> repaint)
+: _replacementText(std::move(replacementText))
+, _width(std::max(width, 1))
+, _height(std::max(height, 1))
+, _image(std::move(image))
+, _repaint(std::move(repaint)) {
+}
+
+int InlineIvImageObject::width() {
+	return _width;
+}
+
+QString InlineIvImageObject::entityData() {
+	return QString();
+}
+
+std::optional<Ui::Text::CustomEmojiVerticalMetrics>
+InlineIvImageObject::vertical(const style::TextStyle &textStyle) {
+	if (_height > 0) {
+		return Ui::Text::CustomEmojiVerticalMetrics{
+			.ascent = _height,
+			.descent = 0,
+		};
+	}
+	const auto ascent = std::max(textStyle.font->ascent, 0);
+	return Ui::Text::CustomEmojiVerticalMetrics{
+		.ascent = ascent,
+		.descent = std::max(textStyle.font->height - ascent, 0),
+	};
+}
+
+QString InlineIvImageObject::replacementText() {
+	return _replacementText;
+}
+
+Ui::Text::CustomEmojiSemantics InlineIvImageObject::semantics() {
+	return {
+		.isEmoji = false,
+		.isRealCustomEmoji = false,
+		.exportEntity = false,
+		.unloadPersistentAnimation = false,
+		.allowCustomEmojiClick = false,
+	};
+}
+
+void InlineIvImageObject::paint(QPainter &p, const Context &context) {
+	if (_image) {
+		if (!_subscribed && _repaint) {
+			_subscribed = true;
+			_image->subscribeToUpdates(_repaint);
+		}
+		if (const auto image = _image->image(std::max(_width, _height));
+			!image.isNull()) {
+			p.drawImage(
+				QRect(context.position, QSize(_width, _height)),
+				image);
+			return;
+		}
+	}
+	if (_replacementText.isEmpty()) {
+		return;
+	}
+	p.save();
+	p.setPen(context.textColor);
+	p.drawText(
+		QRect(context.position, QSize(_width, _height)),
+		Qt::AlignCenter | Qt::TextWordWrap,
+		_replacementText);
+	p.restore();
+}
+
+void InlineIvImageObject::unload() {
+	if (_subscribed && _image) {
+		_subscribed = false;
+		_image->subscribeToUpdates(nullptr);
+	}
+}
+
+bool InlineIvImageObject::ready() {
+	return true;
+}
+
+bool InlineIvImageObject::readyInDefaultState() {
+	return true;
+}
+
+std::unique_ptr<Ui::Text::CustomEmoji> InlineFormulaObjectCache::create(
+		const InlineTextObjectFormulaData &data,
+		const style::TextStyle &textStyle,
+		const std::vector<PreparedFormulaSlot> *formulas) {
+	auto replacementText = data.copySource;
+	if (replacementText.isEmpty()) {
+		replacementText = u"$"_q + data.trimmedTex + u"$"_q;
+	}
+	auto state = lookupOrCreate(
+		InlineFormulaSignature(data.trimmedTex, textStyle),
+		textStyle,
+		formulas);
+	if (!state) {
+		return nullptr;
+	}
+	const auto fallbackWidth = std::max(
+		textStyle.font->width(replacementText),
+		1);
+	return std::make_unique<InlineFormulaObject>(
+		std::move(replacementText),
+		fallbackWidth,
+		std::move(state));
+}
+
+std::shared_ptr<InlineFormulaSharedState>
+InlineFormulaObjectCache::lookupOrCreate(
+		const PreparedFormulaMeasurementSignature &signature,
+		const style::TextStyle &textStyle,
+		const std::vector<PreparedFormulaSlot> *formulas) {
+	if (const auto i = _states.find(signature); i != end(_states)) {
+		return i->second;
+	}
+	auto measured = MeasuredFormula();
+	auto measuredData = FindInlineFormulaMeasuredData(
+		formulas,
+		signature,
+		&measured);
+	if (measuredData) {
+		measured = *measuredData;
+	} else {
+		measured.logicalSize = QSize(
+			std::max(textStyle.font->width(signature.trimmedTex), 1),
+			std::max(textStyle.font->height, 1));
+		measured.logicalDepth = std::max(
+			textStyle.font->height - textStyle.font->ascent,
+			0);
+		measured.fallbackText = signature.trimmedTex;
+		measured.success = false;
+		measuredData = std::make_shared<MeasuredFormula>(measured);
+	}
+	const auto fallbackText = InlineFormulaDisplayFallbackText(
+		signature,
+		measured);
+	auto state = std::make_shared<InlineFormulaSharedState>(
+		signature,
+		std::move(measuredData),
+		fallbackText,
+		_renderer);
+	_states.emplace(signature, state);
+	return state;
+}
+
+std::shared_ptr<InlineFormulaObjectCache> CreateInlineFormulaObjectCache(
+		std::shared_ptr<MathRenderer> renderer) {
+	auto result = std::make_shared<InlineFormulaObjectCache>();
+	result->setRenderer(std::move(renderer));
+	return result;
+}
+
+void SetInlineFormulaObjectCacheRenderer(
+		const std::shared_ptr<InlineFormulaObjectCache> &cache,
+		std::shared_ptr<MathRenderer> renderer) {
+	if (cache) {
+		cache->setRenderer(std::move(renderer));
+	}
+}
+
+void ClearInlineFormulaObjectCache(
+		const std::shared_ptr<InlineFormulaObjectCache> &cache) {
+	if (cache) {
+		cache->clear();
+	}
+}
+
+void InvalidateInlineFormulaPaletteCache(
+		const std::shared_ptr<InlineFormulaObjectCache> &cache) {
+	if (cache) {
+		cache->invalidatePaletteCache();
+	}
+}
+
+void InvalidateInlineFormulaRasterCache(
+		const std::shared_ptr<InlineFormulaObjectCache> &cache) {
+	if (cache) {
+		cache->invalidateRasterCache();
+	}
+}
+
+void SetTextLeaf(
+		Ui::Text::String *leaf,
+		const style::TextStyle &textStyle,
+		const TextWithEntities &text,
+		const std::vector<PreparedFormulaSlot> *formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		int minResizeWidth) {
+	*leaf = Ui::Text::String(TextMinResizeWidth(minResizeWidth));
+	auto context = Ui::Text::MarkedContext();
+	context.customEmojiFactory = [
+		formulas,
+		inlineFormulaObjects,
+		mediaRuntime,
+		&textStyle
+	](
+			QStringView data,
+			const Ui::Text::MarkedContext &context
+	) -> std::unique_ptr<Ui::Text::CustomEmoji> {
+		const auto parsed = ParseInlineTextObjectEntity(data.toString());
+		if (!parsed) {
+			return std::unique_ptr<Ui::Text::CustomEmoji>();
+		}
+		switch (parsed->kind) {
+		case InlineTextObjectKind::Formula: {
+			if (!inlineFormulaObjects) {
+				return std::unique_ptr<Ui::Text::CustomEmoji>();
+			}
+			const auto formula = std::get_if<InlineTextObjectFormulaData>(
+				&parsed->data);
+			return formula
+				? inlineFormulaObjects->create(*formula, textStyle, formulas)
+				: std::unique_ptr<Ui::Text::CustomEmoji>();
+		} break;
+		case InlineTextObjectKind::IvImage: {
+			const auto image = std::get_if<InlineTextObjectIvImageData>(
+				&parsed->data);
+			if (!image) {
+				return std::unique_ptr<Ui::Text::CustomEmoji>();
+			}
+			const auto resolved = mediaRuntime
+				? mediaRuntime->resolveInlineImage(
+					image->documentId,
+					QSize(image->width, image->height))
+				: nullptr;
+			return std::make_unique<InlineIvImageObject>(
+				image->replacementText,
+				image->width,
+				image->height,
+				std::move(resolved),
+				context.repaint);
+		}
+		}
+		return std::unique_ptr<Ui::Text::CustomEmoji>();
+	};
+	leaf->setMarkedText(textStyle, text, kIvMarkedTextOptions, context);
+}
+
+} // namespace Iv::Markdown

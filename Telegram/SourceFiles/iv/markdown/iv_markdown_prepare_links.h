@@ -1,0 +1,17 @@
+#pragma once
+
+#include "iv/markdown/iv_markdown_prepare_state.h"
+
+namespace Iv::Markdown {
+
+[[nodiscard]] QString InternalLinkData(uint16 index);
+[[nodiscard]] QString NormalizeFragmentId(QString fragment);
+[[nodiscard]] PreparedLink ClassifiedLink(
+	uint16 index,
+	QString target,
+	const PrepareState *state);
+void SortEntities(TextWithEntities *text);
+[[nodiscard]] QString FirstInfoToken(const QString &info);
+[[nodiscard]] QString DecodeMarkdownTextPrefix(QByteArray bytes);
+
+} // namespace Iv::Markdown
