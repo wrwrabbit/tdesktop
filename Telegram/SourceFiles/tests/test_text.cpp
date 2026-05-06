@@ -61,6 +61,40 @@ namespace {
 	return image;
 }
 
+[[nodiscard]] QImage RenderTextOffscreen(
+		const Ui::Text::String &text,
+		int availableWidth) {
+	const auto padding = scale(6);
+	const auto image = QImage(
+		QSize(
+			std::max(text.maxWidth(), availableWidth) + (2 * padding),
+			std::max(text.countHeight(availableWidth), text.minHeight())
+				+ (2 * padding)),
+		QImage::Format_ARGB32_Premultiplied);
+	auto result = image;
+	result.fill(Qt::transparent);
+	auto painter = QPainter(&result);
+	text.draw(painter, {
+		.position = QPoint(padding, padding),
+		.availableWidth = availableWidth,
+	});
+	return result;
+}
+
+[[nodiscard]] bool HasPaintedPixels(const QImage &image) {
+	const auto bits = image.constBits();
+	if (!bits) {
+		return false;
+	}
+	const auto count = image.sizeInBytes();
+	for (auto i = qsizetype(0); i != count; ++i) {
+		if (bits[i] != 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
 class FormulaLikeObject final : public Ui::Text::CustomEmoji {
 public:
 	FormulaLikeObject(QString entityData, QString replacementText, QImage image);
@@ -272,6 +306,40 @@ void test(not_null<Ui::RpWindow*> window, not_null<Ui::RpWidget*> body) {
 		HasEntityType(
 			controlText->toTextWithEntities().entities,
 			EntityType::CustomEmoji));
+
+	auto leadingFormulaData = TextWithEntities();
+	leadingFormulaData.append(QChar::ObjectReplacementCharacter);
+	leadingFormulaData.entities.push_back(EntityInText(
+		EntityType::CustomEmoji,
+		0,
+		1,
+		formulaEntityData));
+	const auto leadingFormulaText = Ui::Text::String(
+		st::defaultTextStyle,
+		leadingFormulaData,
+		kMarkupTextOptions,
+		scale(32),
+		context);
+	const auto leadingFormulaRender = RenderTextOffscreen(
+		leadingFormulaText,
+		std::max(formulaImage.width() / 2, 1));
+	Expects(HasPaintedPixels(leadingFormulaRender));
+
+	auto skipOnlyText = Ui::Text::String(
+		st::defaultTextStyle,
+		u""_q,
+		kDefaultTextOptions,
+		scale(32));
+	const auto skipBlockWidth = scale(36);
+	const auto skipBlockHeight = scale(7);
+	Expects(skipOnlyText.updateSkipBlock(skipBlockWidth, skipBlockHeight));
+	Expects(skipOnlyText.countHeight(skipBlockWidth * 2) == skipBlockHeight);
+	Expects(
+		skipOnlyText.countDimensions(Ui::Text::SimpleGeometry(
+			skipBlockWidth * 2,
+			0,
+			0,
+			false)).height == skipBlockHeight);
 
 	body->paintRequest() | rpl::on_next([=](QRect clip) {
 		auto p = QPainter(body);

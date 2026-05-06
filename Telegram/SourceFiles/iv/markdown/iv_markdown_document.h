@@ -2,6 +2,7 @@
 
 #include "iv/markdown/iv_markdown_common.h"
 
+#include <QtCore/QMargins>
 #include <QtCore/QSize>
 #include <QtCore/QStringList>
 
@@ -137,9 +138,18 @@ struct ParseStats {
 	bool footnotesSeen = false;
 };
 
+inline constexpr auto kFormulaExactMetricScale = 64;
+
+struct FormulaExactMetrics {
+	QSize scaledSize;
+	int scaledAscent = 0;
+	QMargins scaledInsets;
+};
+
 struct MeasuredFormula {
 	QSize logicalSize;
 	int logicalDepth = 0;
+	FormulaExactMetrics exact;
 	QString fallbackText;
 	QString error;
 	bool success = false;

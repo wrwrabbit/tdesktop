@@ -1295,8 +1295,13 @@ void PrintPrepareSummary(
 		MarkdownArticle *article,
 		int width,
 		int height,
-		int offset) {
-	if (!article || (width <= 0) || (height <= 0) || (offset < 0)) {
+		int offset,
+		int expectedSegmentIndex = -1) {
+	if (!article
+		|| (width <= 0)
+		|| (height <= 0)
+		|| (offset < 0)
+		|| (expectedSegmentIndex < -1)) {
 		return std::nullopt;
 	}
 	auto flags = Ui::Text::StateRequest::Flags();
@@ -1310,7 +1315,50 @@ void PrintPrepareSummary(
 			const auto hit = article->hitTest(QPoint(x, y), flags);
 			if (!hit.valid()
 				|| !hit.state.uponSymbol
+				|| ((expectedSegmentIndex >= 0)
+					&& (hit.segmentIndex != expectedSegmentIndex))
 				|| (int(hit.state.symbol) != offset)) {
+				continue;
+			}
+			left = std::min(left, x);
+			top = std::min(top, y);
+			right = std::max(right, x);
+			bottom = std::max(bottom, y);
+		}
+	}
+	return (right >= left) && (bottom >= top)
+		? std::make_optional(QRect(QPoint(left, top), QPoint(right, bottom)))
+		: std::nullopt;
+}
+
+[[nodiscard]] std::optional<QRect> SymbolRangeHitBounds(
+		MarkdownArticle *article,
+		int width,
+		int height,
+		int offset,
+		int length) {
+	if (!article
+		|| (width <= 0)
+		|| (height <= 0)
+		|| (offset < 0)
+		|| (length <= 0)) {
+		return std::nullopt;
+	}
+	auto flags = Ui::Text::StateRequest::Flags();
+	flags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+	auto left = width;
+	auto top = height;
+	auto right = -1;
+	auto bottom = -1;
+	const auto end = offset + length;
+	for (auto y = 0; y != height; ++y) {
+		for (auto x = 0; x != width; ++x) {
+			const auto hit = article->hitTest(QPoint(x, y), flags);
+			if (!hit.valid() || !hit.state.uponSymbol) {
+				continue;
+			}
+			const auto symbol = int(hit.state.symbol);
+			if (symbol < offset || symbol >= end) {
 				continue;
 			}
 			left = std::min(left, x);
@@ -3548,6 +3596,424 @@ void CheckInlineTextObjectArticleCoverage(bool *ok) {
 	}
 }
 
+void CheckArticleRasterRegressionCoverage(bool *ok) {
+	struct SymbolProbe {
+		int segmentIndex = -1;
+		int offset = -1;
+
+		[[nodiscard]] bool valid() const {
+			return (segmentIndex >= 0) && (offset >= 0);
+		}
+	};
+	const auto wideFormulaTex = [] {
+		auto result = QByteArray();
+		for (auto i = 0; i != 24; ++i) {
+			if (!result.isEmpty()) {
+				result.append(" + ");
+			}
+			result.append("x_");
+			result.append(QByteArray::number(i));
+		}
+		return result;
+	}();
+	const auto findFirstInlineFormulaProbe = [](
+			const MarkdownArticleContent &prepared) {
+		auto result = SymbolProbe();
+		auto segmentIndex = 0;
+		const auto collectTextSegment = [&](const TextWithEntities &text) {
+			if (result.valid()) {
+				return;
+			}
+			for (const auto &match : CollectInlineTextObjectMatches(text)) {
+				if (match.object.kind == InlineTextObjectKind::Formula) {
+					result = {
+						.segmentIndex = segmentIndex,
+						.offset = match.entity.offset(),
+					};
+					return;
+				}
+			}
+			++segmentIndex;
+		};
+		const auto visitBlock = [&](const auto &self, const PreparedBlock &block)
+		-> void {
+			if (result.valid()) {
+				return;
+			}
+			switch (block.kind) {
+			case PreparedBlockKind::Paragraph:
+			case PreparedBlockKind::Heading:
+			case PreparedBlockKind::Details:
+			case PreparedBlockKind::CodeBlock:
+				collectTextSegment(block.text);
+				break;
+			case PreparedBlockKind::DisplayMath:
+				++segmentIndex;
+				break;
+			case PreparedBlockKind::Table:
+				++segmentIndex;
+				for (const auto &row : block.tableRows) {
+					for (const auto &cell : row.cells) {
+						collectTextSegment(cell.text);
+						if (result.valid()) {
+							return;
+						}
+					}
+				}
+				break;
+			case PreparedBlockKind::Placeholder:
+			case PreparedBlockKind::Photo:
+				++segmentIndex;
+				if (!block.text.text.isEmpty()) {
+					collectTextSegment(block.text);
+				}
+				break;
+			case PreparedBlockKind::Rule:
+			case PreparedBlockKind::List:
+			case PreparedBlockKind::ListItem:
+			case PreparedBlockKind::Quote:
+				break;
+			}
+			if (result.valid()) {
+				return;
+			}
+			for (const auto &child : block.children) {
+				self(self, child);
+				if (result.valid()) {
+					return;
+				}
+			}
+		};
+		for (const auto &block : prepared.blocks.blocks) {
+			visitBlock(visitBlock, block);
+			if (result.valid()) {
+				break;
+			}
+		}
+		return result;
+	};
+	const auto findTextOffset = [](
+			const MarkdownArticleContent &prepared,
+			const QString &text) {
+		auto result = -1;
+		const auto collectOffset = [&](const TextWithEntities &blockText) {
+			if (result >= 0) {
+				return;
+			}
+			result = blockText.text.indexOf(text);
+		};
+		ForEachPreparedBlock(prepared.blocks.blocks, [&](const PreparedBlock &block) {
+			collectOffset(block.text);
+			if (result >= 0) {
+				return;
+			}
+			for (const auto &row : block.tableRows) {
+				for (const auto &cell : row.cells) {
+					collectOffset(cell.text);
+					if (result >= 0) {
+						return;
+					}
+				}
+			}
+		});
+		return result;
+	};
+	const auto firstMeasuredInlineFormulaWidth = [](
+			const MarkdownArticleContent &prepared) {
+		for (const auto &slot : prepared.formulas) {
+			if (slot.present
+				&& (slot.kind == MathKind::Inline)
+				&& slot.measured.success) {
+				return slot.measured.logicalSize.width();
+			}
+		}
+		return 0;
+	};
+	const auto logicalRectToImageRect = [](QRect rect, int devicePixelRatio) {
+		return QRect(
+			rect.x() * devicePixelRatio,
+			rect.y() * devicePixelRatio,
+			rect.width() * devicePixelRatio,
+			rect.height() * devicePixelRatio);
+	};
+	const auto withinOneLogicalPixel = [](double left, double right) {
+		const auto delta = left - right;
+		return (delta <= 1.) && (delta >= -1.);
+	};
+
+	const auto wideInlineLabel = FromLatin1("generated-inline-wide-raster.md");
+	const auto wideInlineParsed = ParseMarkdownForIv(
+		QByteArray("$") + wideFormulaTex + QByteArray("$\n"),
+		ParseOptions{ wideInlineLabel });
+	Check(
+		wideInlineParsed.ok,
+		wideInlineLabel + FromLatin1(" parse failed: ")
+			+ wideInlineParsed.error,
+		ok);
+	if (wideInlineParsed.ok) {
+		const auto articleWidth = 180;
+		auto renderer = std::make_shared<MathRenderer>();
+		auto prepared = PrepareParsedDocumentForTest(
+			wideInlineParsed.document,
+			wideInlineLabel,
+			renderer);
+		Check(
+			!prepared.failure.failed(),
+			wideInlineLabel + FromLatin1(" prepare failure: ")
+				+ PrepareFailureReason(prepared.failure),
+			ok);
+		if (!prepared.failure.failed()) {
+			const auto formulaWidth = firstMeasuredInlineFormulaWidth(prepared);
+			const auto formulaProbe = findFirstInlineFormulaProbe(prepared);
+			Check(
+				formulaWidth > articleWidth,
+				wideInlineLabel + FromLatin1(" formula is wider than article"),
+				ok);
+			Check(
+				formulaProbe.valid(),
+				wideInlineLabel + FromLatin1(" inline formula probe"),
+				ok);
+			auto articleHeight = 0;
+			auto article = BuildArticleForTest(
+				std::move(prepared),
+				renderer,
+				articleWidth,
+				&articleHeight);
+			const auto image = PaintArticleForTest(
+				article.get(),
+				articleWidth,
+				articleHeight);
+			Check(
+				HasPaintedPixels(image),
+				wideInlineLabel + FromLatin1(" paint produced pixels"),
+				ok);
+			const auto bounds = SymbolHitBounds(
+				article.get(),
+				articleWidth,
+				articleHeight,
+				formulaProbe.offset,
+				formulaProbe.segmentIndex);
+			Check(
+				bounds.has_value(),
+				wideInlineLabel + FromLatin1(" inline formula hit bounds"),
+				ok);
+			Check(
+				bounds
+					&& PaintedBoundsInRect(image, *bounds).has_value(),
+				wideInlineLabel + FromLatin1(" inline formula paints at line start"),
+				ok);
+		}
+	}
+
+	const auto tableLabel = FromLatin1("generated-table-inline-wide-raster.md");
+	const auto tableParsed = ParseMarkdownForIv(
+		QByteArray("| Header | Notes | Tail |\n"
+			"| --- | --- | --- |\n"
+			"| $")
+			+ wideFormulaTex
+			+ QByteArray("$ | cell | tail |\n"),
+		ParseOptions{ tableLabel });
+	Check(
+		tableParsed.ok,
+		tableLabel + FromLatin1(" parse failed: ") + tableParsed.error,
+		ok);
+	if (tableParsed.ok) {
+		const auto articleWidth = 240;
+		auto renderer = std::make_shared<MathRenderer>();
+		auto prepared = PrepareParsedDocumentForTest(
+			tableParsed.document,
+			tableLabel,
+			renderer);
+		Check(
+			!prepared.failure.failed(),
+			tableLabel + FromLatin1(" prepare failure: ")
+				+ PrepareFailureReason(prepared.failure),
+			ok);
+		if (!prepared.failure.failed()) {
+			const auto formulaWidth = firstMeasuredInlineFormulaWidth(prepared);
+			const auto formulaProbe = findFirstInlineFormulaProbe(prepared);
+			Check(
+				formulaWidth > (articleWidth / 3),
+				tableLabel + FromLatin1(" formula is wider than cell budget"),
+				ok);
+			Check(
+				formulaProbe.valid(),
+				tableLabel + FromLatin1(" table formula probe"),
+				ok);
+			auto articleHeight = 0;
+			auto article = BuildArticleForTest(
+				std::move(prepared),
+				renderer,
+				articleWidth,
+				&articleHeight);
+			const auto image = PaintArticleForTest(
+				article.get(),
+				articleWidth,
+				articleHeight);
+			Check(
+				HasPaintedPixels(image),
+				tableLabel + FromLatin1(" paint produced pixels"),
+				ok);
+			const auto bounds = SymbolHitBounds(
+				article.get(),
+				articleWidth,
+				articleHeight,
+				formulaProbe.offset,
+				formulaProbe.segmentIndex);
+			Check(
+				bounds.has_value(),
+				tableLabel + FromLatin1(" table formula hit bounds"),
+				ok);
+			Check(
+				bounds
+					&& PaintedBoundsInRect(image, *bounds).has_value(),
+				tableLabel + FromLatin1(" table formula paints in narrow cell"),
+				ok);
+		}
+	}
+
+	const auto baselineLabel = FromLatin1("generated-inline-baseline-dpr.md");
+	const auto baselineParsed = ParseMarkdownForIv(
+		QByteArray(
+			"Multiple inline: We have $a = 1$, and plain text a = 1"
+			" on the same line.\n"),
+		ParseOptions{ baselineLabel });
+	Check(
+		baselineParsed.ok,
+		baselineLabel + FromLatin1(" parse failed: ")
+			+ baselineParsed.error,
+		ok);
+	if (baselineParsed.ok) {
+		const auto articleWidth = 480;
+		auto renderer = std::make_shared<MathRenderer>();
+		auto prepared = PrepareParsedDocumentForTest(
+			baselineParsed.document,
+			baselineLabel,
+			renderer);
+		Check(
+			!prepared.failure.failed(),
+			baselineLabel + FromLatin1(" prepare failure: ")
+				+ PrepareFailureReason(prepared.failure),
+			ok);
+		if (!prepared.failure.failed()) {
+			const auto formulaProbe = findFirstInlineFormulaProbe(prepared);
+			const auto controlText = FromLatin1("a = 1");
+			const auto controlOffset = findTextOffset(prepared, controlText);
+			Check(
+				formulaProbe.valid(),
+				baselineLabel + FromLatin1(" inline formula probe"),
+				ok);
+			Check(
+				controlOffset >= 0,
+				baselineLabel + FromLatin1(" plain-text control offset"),
+				ok);
+			auto articleHeight = 0;
+			auto article = BuildArticleForTest(
+				std::move(prepared),
+				renderer,
+				articleWidth,
+				&articleHeight);
+			const auto dpr1Image = PaintArticleForTest(
+				article.get(),
+				articleWidth,
+				articleHeight,
+				1);
+			const auto dpr2Image = PaintArticleForTest(
+				article.get(),
+				articleWidth,
+				articleHeight,
+				2);
+			Check(
+				HasPaintedPixels(dpr1Image),
+				baselineLabel + FromLatin1(" DPR1 paint produced pixels"),
+				ok);
+			Check(
+				HasPaintedPixels(dpr2Image),
+				baselineLabel + FromLatin1(" DPR2 paint produced pixels"),
+				ok);
+			const auto bounds = SymbolHitBounds(
+				article.get(),
+				articleWidth,
+				articleHeight,
+				formulaProbe.offset,
+				formulaProbe.segmentIndex);
+			Check(
+				bounds.has_value(),
+				baselineLabel + FromLatin1(" inline formula hit bounds"),
+				ok);
+			const auto controlBounds = SymbolRangeHitBounds(
+				article.get(),
+				articleWidth,
+				articleHeight,
+				controlOffset,
+				controlText.size());
+			Check(
+				controlBounds.has_value(),
+				baselineLabel + FromLatin1(" plain-text control hit bounds"),
+				ok);
+			if (bounds && controlBounds) {
+				const auto dpr1Painted = PaintedBoundsInRect(dpr1Image, *bounds);
+				const auto dpr1ControlPainted = PaintedBoundsInRect(
+					dpr1Image,
+					*controlBounds);
+				const auto dpr2Painted = PaintedBoundsInRect(
+					dpr2Image,
+					logicalRectToImageRect(*bounds, 2));
+				const auto dpr2ControlPainted = PaintedBoundsInRect(
+					dpr2Image,
+					logicalRectToImageRect(*controlBounds, 2));
+				Check(
+					dpr1Painted.has_value(),
+					baselineLabel + FromLatin1(" DPR1 painted bounds"),
+					ok);
+				Check(
+					dpr1ControlPainted.has_value(),
+					baselineLabel + FromLatin1(" DPR1 plain-text control bounds"),
+					ok);
+				Check(
+					dpr2Painted.has_value(),
+					baselineLabel + FromLatin1(" DPR2 painted bounds"),
+					ok);
+				Check(
+					dpr2ControlPainted.has_value(),
+					baselineLabel + FromLatin1(" DPR2 plain-text control bounds"),
+					ok);
+				if (dpr1Painted
+					&& dpr1ControlPainted
+					&& dpr2Painted
+					&& dpr2ControlPainted) {
+					Check(
+						withinOneLogicalPixel(
+							double(dpr1Painted->bottom()),
+							double(dpr1ControlPainted->bottom())),
+						baselineLabel + FromLatin1(
+							" DPR1 formula bottom matches plain-text control"),
+						ok);
+					Check(
+						withinOneLogicalPixel(
+							double(dpr2Painted->bottom()) / 2.,
+							double(dpr2ControlPainted->bottom()) / 2.),
+						baselineLabel + FromLatin1(
+							" DPR2 formula bottom matches plain-text control"),
+						ok);
+					Check(
+						withinOneLogicalPixel(
+							double(dpr1Painted->top()),
+							double(dpr2Painted->top()) / 2.),
+						baselineLabel + FromLatin1(" DPR top alignment"),
+						ok);
+					Check(
+						withinOneLogicalPixel(
+							double(dpr1Painted->bottom()),
+							double(dpr2Painted->bottom()) / 2.),
+						baselineLabel + FromLatin1(" DPR bottom alignment"),
+						ok);
+				}
+			}
+		}
+	}
+}
+
 void CheckArticleRenderSmoke(
 		const PreparedFixture &markdownFixture,
 		const PreparedFixture &latexFixture,
@@ -4705,8 +5171,9 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 	CheckDetailsSummaryHitCoverage(&ok);
 	CheckTableFormulaTextSizeCoverage(&ok);
 	CheckArticleRenderSmoke(markdownFixture, latexFixture, &ok);
-	CheckArticleHorizontalRelayoutRegression(&ok);
 	CheckInlineTextObjectArticleCoverage(&ok);
+	CheckArticleRasterRegressionCoverage(&ok);
+	CheckArticleHorizontalRelayoutRegression(&ok);
 	CheckNativeInstantViewArticleCoverage(&ok);
 	CheckInlineHtmlCoverage(args.dump, &ok);
 	CheckValidationEdges(&ok);

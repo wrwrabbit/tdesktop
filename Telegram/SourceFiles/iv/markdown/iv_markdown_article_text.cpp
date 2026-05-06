@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <utility>
 
@@ -192,15 +193,20 @@ private:
 	};
 }
 
+template <typename Formula>
+void NormalizeInlineFormulaRasterMetrics(Formula *formula);
+
 [[nodiscard]] RenderedFormula MeasuredFallback(const MeasuredFormula &measured) {
 	auto result = RenderedFormula();
 	result.logicalSize = measured.logicalSize;
 	result.logicalDepth = measured.logicalDepth;
+	result.exact = measured.exact;
 	result.fallbackText = measured.fallbackText;
 	result.error = measured.error;
 	result.success = false;
 	result.overflow = measured.overflow;
 	result.tooLarge = measured.tooLarge;
+	NormalizeInlineFormulaRasterMetrics(&result);
 	return result;
 }
 
@@ -209,18 +215,51 @@ private:
 	return (ratio > 0.) ? int(std::round(ratio)) : 0;
 }
 
-struct InlineFormulaMetrics {
-	int ascent = 0;
-	int descent = 0;
-};
+[[nodiscard]] int ScaledInlineFormulaMetric(int logicalValue) {
+	const auto safe = std::clamp(
+		logicalValue,
+		0,
+		std::numeric_limits<int>::max() / kFormulaExactMetricScale);
+	return safe * kFormulaExactMetricScale;
+}
 
-[[nodiscard]] InlineFormulaMetrics InlineFormulaMetricsFromMeasured(
-		const MeasuredFormula &formula) {
-	const auto height = std::max(formula.logicalSize.height(), 0);
-	const auto descent = std::clamp(formula.logicalDepth, 0, height);
+[[nodiscard]] int RoundedInlineFormulaMetric(int scaledValue) {
+	return (scaledValue > 0)
+		? ((scaledValue + kFormulaExactMetricScale - 1)
+			/ kFormulaExactMetricScale)
+		: 0;
+}
+
+[[nodiscard]] int FlooredInlineFormulaMetric(int scaledValue) {
+	return (scaledValue >= 0)
+		? (scaledValue / kFormulaExactMetricScale)
+		: -((-scaledValue + kFormulaExactMetricScale - 1)
+			/ kFormulaExactMetricScale);
+}
+
+[[nodiscard]] qreal LogicalInlineFormulaMetric(int scaledValue) {
+	return qreal(scaledValue) / qreal(kFormulaExactMetricScale);
+}
+
+[[nodiscard]] FormulaExactMetrics InlineFormulaExactMetricsFromLogical(
+		QSize logicalSize,
+		int logicalAscent,
+		QMargins logicalInsets = {}) {
+	const auto scaledHeight = ScaledInlineFormulaMetric(
+		std::max(logicalSize.height(), 0));
 	return {
-		.ascent = height - descent,
-		.descent = descent,
+		.scaledSize = QSize(
+			ScaledInlineFormulaMetric(std::max(logicalSize.width(), 0)),
+			scaledHeight),
+		.scaledAscent = std::clamp(
+			ScaledInlineFormulaMetric(logicalAscent),
+			0,
+			scaledHeight),
+		.scaledInsets = QMargins(
+			ScaledInlineFormulaMetric(std::max(logicalInsets.left(), 0)),
+			ScaledInlineFormulaMetric(std::max(logicalInsets.top(), 0)),
+			ScaledInlineFormulaMetric(std::max(logicalInsets.right(), 0)),
+			ScaledInlineFormulaMetric(std::max(logicalInsets.bottom(), 0))),
 	};
 }
 
@@ -275,6 +314,74 @@ private:
 	mutable std::map<InlineFormulaColorizedKey, QImage> _colorized;
 
 };
+
+struct InlineFormulaGeometry {
+	int width = 1;
+	int imageHeight = 0;
+	int imageDescent = 0;
+	int ascent = 0;
+	int descent = 0;
+	int paintOffsetYScaled = 0;
+};
+
+template <typename Formula>
+[[nodiscard]] InlineFormulaGeometry InlineFormulaGeometryFrom(
+		const Formula &formula) {
+	const auto imageHeight = std::max(formula.logicalSize.height(), 0);
+	const auto imageDescent = std::clamp(formula.logicalDepth, 0, imageHeight);
+	auto result = InlineFormulaGeometry{
+		.width = std::max(formula.logicalSize.width(), 1),
+		.imageHeight = imageHeight,
+		.imageDescent = imageDescent,
+		.ascent = imageHeight - imageDescent,
+		.descent = imageDescent,
+	};
+	const auto &exact = formula.exact;
+	const auto exactHeight = exact.scaledSize.height();
+	if ((exact.scaledSize.width() <= 0) || (exactHeight <= 0)) {
+		return result;
+	}
+	const auto exactAscent = std::clamp(exact.scaledAscent, 0, exactHeight);
+	const auto exactDescent = std::max(exactHeight - exactAscent, 0);
+	const auto topInset = std::clamp(exact.scaledInsets.top(), 0, exactAscent);
+	const auto bottomInset = std::clamp(
+		exact.scaledInsets.bottom(),
+		0,
+		exactDescent);
+	const auto paintTop = topInset - exactAscent;
+	const auto paintBottom = std::max(exactDescent - bottomInset, 0);
+	const auto imageWidth = RoundedInlineFormulaMetric(
+		exact.scaledSize.width());
+	const auto exactImageHeight = RoundedInlineFormulaMetric(exactHeight);
+	const auto exactImageAscent = std::clamp(
+		RoundedInlineFormulaMetric(exactAscent),
+		0,
+		exactImageHeight);
+	const auto top = FlooredInlineFormulaMetric(paintTop);
+	const auto bottom = RoundedInlineFormulaMetric(paintBottom);
+	result.width = std::max(imageWidth, 1);
+	result.imageHeight = exactImageHeight;
+	result.imageDescent = std::max(exactImageHeight - exactImageAscent, 0);
+	if (top < 0 || bottom > 0) {
+		result.ascent = std::max(-top, 0);
+		result.descent = std::max(bottom, 0);
+		result.paintOffsetYScaled = (-exactAscent) - (top * kFormulaExactMetricScale);
+	} else if (exactImageHeight > 0) {
+		result.ascent = exactImageHeight - result.imageDescent;
+		result.descent = result.imageDescent;
+	}
+	return result;
+}
+
+template <typename Formula>
+void NormalizeInlineFormulaRasterMetrics(Formula *formula) {
+	if (!formula) {
+		return;
+	}
+	const auto geometry = InlineFormulaGeometryFrom(*formula);
+	formula->logicalSize = QSize(geometry.width, geometry.imageHeight);
+	formula->logicalDepth = geometry.imageDescent;
+}
 
 class InlineFormulaObject final : public Ui::Text::CustomEmoji {
 public:
@@ -453,10 +560,12 @@ RenderedFormula EnsureFormulaRendered(
 	if (local.logicalSize.isEmpty()) {
 		local.logicalSize = measured.logicalSize;
 		local.logicalDepth = measured.logicalDepth;
+		local.exact = measured.exact;
 		local.fallbackText = measured.fallbackText;
 		local.error = measured.error;
 		local.overflow = measured.overflow;
 		local.tooLarge = measured.tooLarge;
+		NormalizeInlineFormulaRasterMetrics(&local);
 	}
 	if (rendered) {
 		*rendered = std::move(local);
@@ -520,9 +629,9 @@ InlineFormulaSharedState::InlineFormulaSharedState(
 }
 
 int InlineFormulaSharedState::width() const {
-	const auto &formula = measured();
-	return (formula.success && (formula.logicalSize.width() > 0))
-		? formula.logicalSize.width()
+	const auto geometry = InlineFormulaGeometryFrom(measured());
+	return (measured().success && (geometry.width > 0))
+		? geometry.width
 		: 1;
 }
 
@@ -533,12 +642,11 @@ bool InlineFormulaSharedState::failed() const {
 std::optional<Ui::Text::CustomEmojiVerticalMetrics>
 InlineFormulaSharedState::vertical(const style::TextStyle &textStyle) const {
 	const auto &formula = measured();
-	const auto height = std::max(formula.logicalSize.height(), 0);
-	if (formula.success && (height > 0)) {
-		const auto metrics = InlineFormulaMetricsFromMeasured(formula);
+	const auto geometry = InlineFormulaGeometryFrom(formula);
+	if (formula.success && (geometry.imageHeight > 0)) {
 		return Ui::Text::CustomEmojiVerticalMetrics{
-			.ascent = metrics.ascent,
-			.descent = metrics.descent,
+			.ascent = geometry.ascent,
+			.descent = geometry.descent,
 		};
 	}
 	const auto ascent = std::max(textStyle.font->ascent, 0);
@@ -555,10 +663,15 @@ void InlineFormulaSharedState::paint(
 		int fallbackWidth) const {
 	const auto rendered = ensureRendered(std::max(style::DevicePixelRatio(), 1));
 	if (rendered.success) {
+		const auto geometry = InlineFormulaGeometryFrom(rendered);
 		if (const auto image = colorizedImage(
 				context.textColor,
 				std::max(style::DevicePixelRatio(), 1))) {
-			p.drawImage(context.position, *image);
+			p.drawImage(
+				QPointF(context.position)
+					+ QPointF(0., LogicalInlineFormulaMetric(
+						geometry.paintOffsetYScaled)),
+				*image);
 		}
 		return;
 	}
@@ -626,10 +739,12 @@ RenderedFormula InlineFormulaSharedState::ensureRendered(
 	if (rendered.logicalSize.isEmpty()) {
 		rendered.logicalSize = measured().logicalSize;
 		rendered.logicalDepth = measured().logicalDepth;
+		rendered.exact = measured().exact;
 		rendered.fallbackText = measured().fallbackText;
 		rendered.error = measured().error;
 		rendered.overflow = measured().overflow;
 		rendered.tooLarge = measured().tooLarge;
+		NormalizeInlineFormulaRasterMetrics(&rendered);
 	}
 	if (!rendered.success) {
 		rendered = MeasuredFallback(measured());
@@ -889,14 +1004,20 @@ InlineFormulaObjectCache::lookupOrCreate(
 	if (measuredData) {
 		measured = *measuredData;
 	} else {
-		measured.logicalSize = QSize(
+		const auto fallbackSize = QSize(
 			std::max(textStyle.font->width(signature.trimmedTex), 1),
 			std::max(textStyle.font->height, 1));
+		const auto fallbackAscent = std::max(textStyle.font->ascent, 0);
+		measured.logicalSize = fallbackSize;
 		measured.logicalDepth = std::max(
-			textStyle.font->height - textStyle.font->ascent,
+			fallbackSize.height() - fallbackAscent,
 			0);
+		measured.exact = InlineFormulaExactMetricsFromLogical(
+			fallbackSize,
+			fallbackAscent);
 		measured.fallbackText = signature.trimmedTex;
 		measured.success = false;
+		NormalizeInlineFormulaRasterMetrics(&measured);
 		measuredData = std::make_shared<MeasuredFormula>(measured);
 	}
 	const auto fallbackText = InlineFormulaDisplayFallbackText(

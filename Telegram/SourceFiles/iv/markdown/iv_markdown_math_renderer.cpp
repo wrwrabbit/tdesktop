@@ -60,6 +60,7 @@ namespace {
 	rendered.image = std::move(result.image);
 	rendered.logicalSize = measured.logicalSize;
 	rendered.logicalDepth = measured.logicalDepth;
+	rendered.exact = measured.exact;
 	rendered.fallbackText = std::move(measured.fallbackText);
 	rendered.error = std::move(measured.error);
 	rendered.success = measured.success && !rendered.image.isNull();

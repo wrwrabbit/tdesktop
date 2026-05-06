@@ -6,6 +6,8 @@
 #include <QtCore/QString>
 #include <QtGui/QPainter>
 
+#include <algorithm>
+#include <cmath>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -32,6 +34,9 @@ struct PreparedMicrotexRequest {
 	int textSize = 0;
 	int renderWidthCap = 0;
 	int renderHeightCap = 0;
+	int metricTextSize = 0;
+	int metricRenderWidthCap = 0;
+	int metricRenderHeightCap = 0;
 };
 
 struct ParsedMicrotexFormula {
@@ -90,6 +95,67 @@ struct ParsedMicrotexFormula {
 		|| (error == u"physical-image-cap-exceeded"_q);
 }
 
+[[nodiscard]] bool ScaleMetricValue(
+		int value,
+		int *scaled) {
+	if (!scaled) {
+		return false;
+	}
+	const auto scaledValue = int64(value) * kFormulaExactMetricScale;
+	if (scaledValue > std::numeric_limits<int>::max()) {
+		return false;
+	}
+	*scaled = int(scaledValue);
+	return true;
+}
+
+[[nodiscard]] int RoundedLogicalMetric(int scaledValue) {
+	return (scaledValue > 0)
+		? ((scaledValue + kFormulaExactMetricScale - 1)
+			/ kFormulaExactMetricScale)
+		: 0;
+}
+
+[[nodiscard]] FormulaExactMetrics ExtractExactMetrics(
+		tex::TeXRender &render) {
+	const auto scaledSize = QSize(
+		render.getWidth(),
+		render.getHeight());
+	const auto scaledAscent = std::clamp(
+		int(std::lround(render.getBaseline() * scaledSize.height())),
+		0,
+		scaledSize.height());
+	const auto insets = render.getInsets();
+	return {
+		.scaledSize = scaledSize,
+		.scaledAscent = scaledAscent,
+		.scaledInsets = QMargins(
+			insets.left,
+			insets.top,
+			insets.right,
+			insets.bottom),
+	};
+}
+
+void FillMeasuredMetrics(
+		MeasuredFormula *measured,
+		const FormulaExactMetrics &exact) {
+	if (!measured) {
+		return;
+	}
+	measured->exact = exact;
+	measured->logicalSize = QSize(
+		RoundedLogicalMetric(exact.scaledSize.width()),
+		RoundedLogicalMetric(exact.scaledSize.height()));
+	const auto scaledDepth = std::max(
+		exact.scaledSize.height() - exact.scaledAscent,
+		0);
+	measured->logicalDepth = std::clamp(
+		RoundedLogicalMetric(scaledDepth),
+		0,
+		measured->logicalSize.height());
+}
+
 void FinalizeFailure(MeasuredFormula *result) {
 	if (!result || result->success) {
 		return;
@@ -126,12 +192,23 @@ void FinalizeFailure(MeasuredFormula *result) {
 		result->error = u"empty-tex"_q;
 		return false;
 	}
-	if (int64(request.textSize) > std::numeric_limits<int>::max()) {
+	auto metricTextSize = 0;
+	auto metricRenderWidthCap = 0;
+	auto metricRenderHeightCap = 0;
+	if (!ScaleMetricValue(request.textSize, &metricTextSize)) {
 		result->error = u"text-size-overflow"_q;
 		return false;
 	}
-	if (int64(request.renderWidthCap) > std::numeric_limits<int>::max()) {
+	if (!ScaleMetricValue(
+			request.renderWidthCap,
+			&metricRenderWidthCap)) {
 		result->error = u"render-width-overflow"_q;
+		return false;
+	}
+	if (!ScaleMetricValue(
+			request.renderHeightCap,
+			&metricRenderHeightCap)) {
+		result->error = u"render-height-overflow"_q;
 		return false;
 	}
 	*prepared = {
@@ -140,6 +217,9 @@ void FinalizeFailure(MeasuredFormula *result) {
 		.textSize = request.textSize,
 		.renderWidthCap = request.renderWidthCap,
 		.renderHeightCap = request.renderHeightCap,
+		.metricTextSize = metricTextSize,
+		.metricRenderWidthCap = metricRenderWidthCap,
+		.metricRenderHeightCap = metricRenderHeightCap,
 	};
 	return true;
 }
@@ -150,20 +230,16 @@ void FinalizeFailure(MeasuredFormula *result) {
 	try {
 		auto render = std::unique_ptr<tex::TeXRender>(tex::LaTeX::parse(
 			ToWide(PreparedTeX(request.kind, request.trimmedTex)),
-			request.renderWidthCap,
-			float(request.textSize),
-			float(request.textSize) * 0.25f,
+			request.metricRenderWidthCap,
+			float(request.metricTextSize),
+			float(request.metricTextSize) * 0.25f,
 			kFormulaForegroundRgba));
 		if (!render) {
 			result.measured.error = u"parse-returned-null"_q;
 			return result;
 		}
-		const auto logicalSize = QSize(
-			render->getWidth(),
-			render->getHeight());
-		const auto logicalDepth = render->getDepth();
-		result.measured.logicalSize = logicalSize;
-		result.measured.logicalDepth = logicalDepth;
+		FillMeasuredMetrics(&result.measured, ExtractExactMetrics(*render));
+		const auto logicalSize = result.measured.logicalSize;
 		if (logicalSize.width() <= 0 || logicalSize.height() <= 0) {
 			result.measured.error = u"invalid-render-size"_q;
 			return result;
@@ -278,6 +354,9 @@ MicrotexRenderResult RenderWithMicrotex(const MicrotexRenderRequest &request) {
 		QPainter painter(&image);
 		painter.setRenderHint(QPainter::Antialiasing, true);
 		painter.setRenderHint(QPainter::TextAntialiasing, true);
+		painter.scale(
+			1. / double(kFormulaExactMetricScale),
+			1. / double(kFormulaExactMetricScale));
 		tex::Graphics2D_qt graphics(&painter);
 		parsed.render->draw(graphics, 0, 0);
 	}

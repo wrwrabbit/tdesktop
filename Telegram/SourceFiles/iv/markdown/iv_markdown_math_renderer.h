@@ -59,6 +59,7 @@ struct RenderedFormula {
 	QImage image;
 	QSize logicalSize;
 	int logicalDepth = 0;
+	FormulaExactMetrics exact;
 	QString fallbackText;
 	QString error;
 	bool success = false;
