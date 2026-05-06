@@ -48,6 +48,8 @@ struct PreparedLink {
 	QString target;
 	QString fragment;
 	QString copyText;
+	EntityType entityType = EntityType::Invalid;
+	EntityLinkShown shown = EntityLinkShown::Full;
 };
 
 enum class InlineTextObjectKind {
@@ -135,6 +137,7 @@ struct MarkdownPrepareDimensions {
 	int bodyTextSize = 0;
 	std::array<int, 6> headingTextSizes = { 0, 0, 0, 0, 0, 0 };
 	int tableHeaderTextSize = 0;
+	int tableBodyTextSize = 0;
 	int displayMathTextSize = 0;
 	int displayMathMaxRenderWidth = 0;
 	int displayMathMaxRenderHeight = 0;

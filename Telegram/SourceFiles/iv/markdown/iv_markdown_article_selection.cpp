@@ -281,7 +281,9 @@ void CollectSelectableSegments(
 			segment.kind = SelectableSegmentKind::TextLeaf;
 			segment.leaf = &block.leaf;
 			segment.block = &block;
-			segment.outerRect = block.textRect;
+			segment.outerRect = (block.kind == PreparedBlockKind::Details)
+				? block.headerRect
+				: block.textRect;
 			segment.textRect = block.textRect;
 			segment.textWidth = block.textWidth;
 			segment.length = LeafTextLength(block.leaf);

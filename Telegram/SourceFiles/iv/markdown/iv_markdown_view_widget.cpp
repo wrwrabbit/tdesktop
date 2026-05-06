@@ -1,5 +1,7 @@
 #include "iv/markdown/iv_markdown_view_widget.h"
 
+#include "iv/markdown/iv_markdown_article_text.h"
+
 #include "base/weak_ptr.h"
 #include "core/credits_amount.h"
 #include "core/click_handler_types.h"
@@ -16,9 +18,11 @@
 
 #include "core/file_utilities.h"
 #include "lang/lang_keys.h"
+#include "ui/color_contrast.h"
 #include "ui/layers/show.h"
 #include "ui/chat/chat_style.h"
 #include "ui/integration.h"
+#include "ui/text/text_extended_data.h"
 #include "ui/widgets/popup_menu.h"
 
 #include <algorithm>
@@ -26,6 +30,7 @@
 #include <utility>
 
 #include "styles/style_iv.h"
+#include "styles/style_chat.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 
@@ -50,20 +55,32 @@ void EnsureBlockquotePaintCache(
 	cache->icon.setAlpha(Ui::kDefaultOutline3Opacity * 255);
 }
 
+[[nodiscard]] bool UseDarkPrePaintBackground() {
+	const auto withBg = [](const QColor &color) {
+		return Ui::CountContrast(st::windowBg->c, color);
+	};
+	return withBg({ 0, 0, 0 }) < withBg({ 255, 255, 255 });
+}
+
 void EnsurePrePaintCache(
 		std::unique_ptr<Ui::Text::QuotePaintCache> &cache,
-		const style::MarkdownQuotePaintColors &colors) {
+		const style::color &color) {
 	if (cache) {
 		return;
 	}
 	cache = std::make_unique<Ui::Text::QuotePaintCache>();
-	cache->bg = colors.preBg->c;
-	cache->outlines[0] = colors.pre->c;
+	if (UseDarkPrePaintBackground()) {
+		cache->bg = QColor(0, 0, 0, 192);
+	} else {
+		cache->bg = color->c;
+		cache->bg.setAlpha(Ui::kDefaultBgOpacity * 255);
+	}
+	cache->outlines[0] = color->c;
 	cache->outlines[0].setAlpha(Ui::kDefaultOutline1Opacity * 255);
 	cache->outlines[1] = cache->outlines[2] = QColor(0, 0, 0, 0);
-	cache->header = colors.pre->c;
+	cache->header = color->c;
 	cache->header.setAlpha(Ui::kDefaultOutline2Opacity * 255);
-	cache->icon = colors.pre->c;
+	cache->icon = color->c;
 	cache->icon.setAlpha(Ui::kDefaultOutline3Opacity * 255);
 }
 
@@ -180,6 +197,7 @@ bool MarkdownDocumentWidget::toggleDetails(const QString &anchorId) {
 	}
 	clearSelection();
 	forceRelayoutCurrentWidth();
+	updateHoverAtCursor();
 	return true;
 }
 
@@ -209,7 +227,7 @@ void MarkdownDocumentWidget::paintEvent(QPaintEvent *e) {
 		return;
 	}
 	auto p = Painter(this);
-	p.setTextPalette(st::defaultMarkdown.textPalette);
+	p.setTextPalette(st::inTextPalette);
 	const auto caches = textPaintCaches();
 	const auto scale = zoomScale();
 	if (scale == 1.) {
@@ -294,32 +312,14 @@ void MarkdownDocumentWidget::contextMenuEvent(QContextMenuEvent *e) {
 	}
 
 	if (link) {
-		const auto copyText = [&] {
-			if (!link->copyText.isEmpty()) {
-				return link->copyText;
-			}
-			switch (link->kind) {
-			case PreparedLinkKind::Anchor:
-			case PreparedLinkKind::Footnote:
-			case PreparedLinkKind::FootnoteBacklink:
-				return link->target.isEmpty() ? QString() : (u"#"_q + link->target);
-			case PreparedLinkKind::LocalFile:
-				return link->fragment.isEmpty()
-					? link->target
-					: (link->target + u"#"_q + link->fragment);
-			case PreparedLinkKind::External:
-				return link->target;
-			case PreparedLinkKind::RejectedRelative:
-			case PreparedLinkKind::ToggleDetails:
-				return QString();
-			}
-			return QString();
-		}();
-		if (!copyText.isEmpty()
-			&& link->kind != PreparedLinkKind::RejectedRelative
-			&& link->kind != PreparedLinkKind::ToggleDetails) {
+		const auto handler = CreatePreparedLinkHandler(*link);
+		const auto copyText = handler ? handler->copyToClipboardText() : QString();
+		const auto copyLabel = handler
+			? handler->copyToClipboardContextItemText()
+			: QString();
+		if (!copyText.isEmpty() && !copyLabel.isEmpty()) {
 			_contextMenu->addAction(
-				tr::lng_context_copy_link(tr::now),
+				copyLabel,
 				[text = copyText] {
 					QGuiApplication::clipboard()->setText(text);
 				},
@@ -567,6 +567,16 @@ QVariant MarkdownDocumentWidget::clickHandlerContext() const {
 		: _clickHandlerContext;
 }
 
+QVariant MarkdownDocumentWidget::viewerToastClickHandlerContext() const {
+	const auto context = clickHandlerContext().value<ClickHandlerContext>();
+	if (!context.show) {
+		return clickHandlerContext();
+	}
+	auto sanitized = context;
+	sanitized.sessionWindow = base::weak_ptr<Window::SessionController>();
+	return QVariant::fromValue(sanitized);
+}
+
 void MarkdownDocumentWidget::showToast(const QString &text) const {
 	const auto context = clickHandlerContext().value<ClickHandlerContext>();
 	if (context.show) {
@@ -620,6 +630,8 @@ void MarkdownDocumentWidget::updateHover(
 	auto cursor = style::cur_default;
 	if (_dragAction == NoDrag) {
 		if (state.state.link
+			|| (state.preparedLink
+				&& state.preparedLink->kind == PreparedLinkKind::ToggleDetails)
 			|| state.mediaActivation.kind != MediaActivationKind::None) {
 			cursor = style::cur_pointer;
 		} else if (state.direct) {
@@ -659,6 +671,19 @@ void MarkdownDocumentWidget::updateHover(
 	}
 }
 
+void MarkdownDocumentWidget::updateHoverAtCursor() {
+	const auto point = mapFromGlobal(QCursor::pos());
+	if (rect().contains(point)) {
+		updateHover(hitTest(
+			point,
+			Ui::Text::StateRequest::Flag::LookupLink
+				| Ui::Text::StateRequest::Flag::LookupSymbol));
+	} else {
+		ClickHandler::clearActive(this);
+		applyCursor(style::cur_default);
+	}
+}
+
 void MarkdownDocumentWidget::resetSelection() {
 	_selection = {};
 	_savedSelection = {};
@@ -670,6 +695,8 @@ void MarkdownDocumentWidget::resetSelection() {
 	_dragSegment = -1;
 	_dragSymbol = 0;
 	_dragExpandedSelection = {};
+	_selectionClickPreparedLink = std::nullopt;
+	_dragStartHadSelection = false;
 }
 
 void MarkdownDocumentWidget::clearSelection() {
@@ -688,7 +715,7 @@ void MarkdownDocumentWidget::resetTextPaintCaches() {
 }
 
 Ui::Text::QuotePaintCache *MarkdownDocumentWidget::ensurePrePaintCache() {
-	EnsurePrePaintCache(_prePaintCache, st::defaultMarkdown.quotePaintColors);
+	EnsurePrePaintCache(_prePaintCache, st::inTextPalette.monoFg);
 	return _prePaintCache.get();
 }
 
@@ -722,6 +749,12 @@ void MarkdownDocumentWidget::dragActionStart(
 	if (button != Qt::LeftButton) {
 		return;
 	}
+	_dragStartPosition = point;
+	_dragStartHadSelection = !selectionForCopy().empty();
+	_selectionClickPreparedLink = (state.preparedLink
+		&& state.preparedLink->kind == PreparedLinkKind::ToggleDetails)
+		? state.preparedLink
+		: std::nullopt;
 	ClickHandler::pressed();
 	_dragAction = NoDrag;
 	_dragExpandedSelection = {};
@@ -771,12 +804,25 @@ MarkdownArticleHitTestResult MarkdownDocumentWidget::dragActionFinish(
 		Qt::MouseButton button) {
 	const auto state = dragActionUpdate(point);
 	auto activated = ClickHandler::unpressed();
+	const auto dragStartHadSelection = _dragStartHadSelection;
+	const auto toggleFromDetailsClick = !dragStartHadSelection
+		&& _selection.empty()
+		&& _selectionClickPreparedLink
+		&& (point - _dragStartPosition).manhattanLength()
+			< QApplication::startDragDistance()
+		&& state.preparedLink
+		&& state.preparedLink->kind == PreparedLinkKind::ToggleDetails
+		&& state.preparedLink->target == _selectionClickPreparedLink->target;
 	if (_dragAction == Dragging
 		|| (_dragAction == Selecting && !_selection.empty())) {
 		activated = nullptr;
 	} else if (_dragAction == PrepareDrag && button != Qt::RightButton) {
 		clearSelection();
 	}
+	const auto preparedToggle = toggleFromDetailsClick
+		? state.preparedLink
+		: std::nullopt;
+	_dragStartHadSelection = false;
 	_dragAction = NoDrag;
 	_selectionType = TextSelectType::Letters;
 	_dragExpandedSelection = {};
@@ -789,24 +835,23 @@ MarkdownArticleHitTestResult MarkdownDocumentWidget::dragActionFinish(
 			return state;
 		}
 		if (state.preparedLink && _activateLink) {
+			if (state.preparedLink->kind == PreparedLinkKind::ToggleDetails
+				&& dragStartHadSelection) {
+				return state;
+			}
 			_activateLink(*state.preparedLink, button);
 		} else {
 			auto clickHandlerContext = this->clickHandlerContext();
-			if (std::dynamic_pointer_cast<MonospaceClickHandler>(activated)) {
+			const auto monospace = std::dynamic_pointer_cast<MonospaceClickHandler>(
+				activated);
+			const auto pre = dynamic_cast<Ui::Text::PreClickHandler*>(
+				activated.get());
+			if (monospace || pre) {
+				clickHandlerContext = viewerToastClickHandlerContext();
+			}
+			if (monospace) {
 				const auto context = clickHandlerContext.value<ClickHandlerContext>();
 				if (context.show) {
-					auto sanitized = ClickHandlerContext();
-					sanitized.itemId = context.itemId;
-					sanitized.elementDelegate = context.elementDelegate;
-					sanitized.botWebviewContext = context.botWebviewContext;
-					sanitized.show = context.show;
-					sanitized.mayShowConfirmation = context.mayShowConfirmation;
-					sanitized.skipBotAutoLogin = context.skipBotAutoLogin;
-					sanitized.botStartAutoSubmit = context.botStartAutoSubmit;
-					sanitized.ignoreIv = context.ignoreIv;
-					sanitized.dark = context.dark;
-					sanitized.peer = context.peer;
-					clickHandlerContext = QVariant::fromValue(sanitized);
 					const auto handled = Ui::Integration::Instance().copyPreOnClick(
 						clickHandlerContext);
 					static_cast<void>(handled);
@@ -817,6 +862,12 @@ MarkdownArticleHitTestResult MarkdownDocumentWidget::dragActionFinish(
 			context.other = std::move(clickHandlerContext);
 			ActivateClickHandler(window(), activated, context);
 		}
+	} else if (preparedToggle
+		&& (button == Qt::LeftButton || button == Qt::MiddleButton)
+		&& _activateLink) {
+		clearSelection();
+		_activateLink(*preparedToggle, button);
+		return state;
 	} else if ((button == Qt::LeftButton || button == Qt::MiddleButton)
 		&& state.mediaActivation.kind != MediaActivationKind::None
 		&& _activateMedia

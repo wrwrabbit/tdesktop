@@ -3,7 +3,9 @@
 #include "iv/markdown/iv_markdown_article_paint.h"
 #include "iv/markdown/iv_markdown_article_selection.h"
 #include "iv/markdown/iv_markdown_article_text.h"
+#include "iv/markdown/iv_markdown_prepare_links.h"
 
+#include "ui/basic_click_handlers.h"
 #include "ui/style/style_core_scale.h"
 
 #include <algorithm>
@@ -96,9 +98,29 @@ void RebuildVisibleSegmentLookup(
 		|| activation.url.isEmpty()) {
 		return std::nullopt;
 	}
+	if (const auto prepared = ClassifiedLink(0, activation.url, nullptr);
+		prepared.kind == PreparedLinkKind::External) {
+		return prepared;
+	}
 	return PreparedLink{
 		.kind = PreparedLinkKind::External,
 		.target = activation.url,
+		.copyText = UrlClickHandler::EncodeForOpening(activation.url),
+		.entityType = EntityType::Url,
+		.shown = EntityLinkShown::Full,
+	};
+}
+
+[[nodiscard]] std::optional<PreparedLink> PreparedLinkForDetailsBlock(
+		const SelectableSegment &segment) {
+	if (!segment.block
+		|| segment.block->kind != PreparedBlockKind::Details
+		|| segment.block->anchorId.isEmpty()) {
+		return std::nullopt;
+	}
+	return PreparedLink{
+		.kind = PreparedLinkKind::ToggleDetails,
+		.target = segment.block->anchorId,
 	};
 }
 
@@ -139,6 +161,15 @@ void RebuildVisibleSegmentLookup(
 		result.state.link = nullptr;
 	}
 	result.preparedLink = ExtractPreparedLink(result.state.link);
+	if (!result.preparedLink
+		&& (flags & Ui::Text::StateRequest::Flag::LookupLink)) {
+		if (const auto prepared = PreparedLinkForDetailsBlock(segment)) {
+			result.preparedLink = prepared;
+			if (!insideText) {
+				result.state.link = CreatePreparedLinkHandler(*prepared);
+			}
+		}
+	}
 	result.direct = true;
 	return result;
 }
@@ -208,13 +239,6 @@ void RebuildVisibleSegmentLookup(
 		if (block.kind == PreparedBlockKind::Details
 			&& block.anchorId == anchorId) {
 			block.collapsed = !block.collapsed;
-			if (block.text.text.startsWith(u"> "_q)
-				|| block.text.text.startsWith(u"v "_q)) {
-				block.text.text.replace(
-					0,
-					2,
-					block.collapsed ? u"> "_q : u"v "_q);
-			}
 			return true;
 		}
 		if (ToggleDetailsBlock(&block.children, anchorId)) {

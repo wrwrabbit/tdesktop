@@ -45,6 +45,9 @@ struct LaidOutBlock {
 	std::vector<LaidOutTableRow> tableRows;
 	std::vector<int> tableColumnWidths;
 	QRect outer;
+	QRect headerRect;
+	QRect bodyRect;
+	QRect iconRect;
 	QRect textRect;
 	QRect labelRect;
 	QRect markerRect;

@@ -3,7 +3,9 @@
 #include "iv/markdown/iv_markdown_article_layout_blocks.h"
 
 #include "lang/lang_keys.h"
+#include "ui/basic_click_handlers.h"
 #include "ui/dynamic_image.h"
+#include "ui/integration.h"
 #include "ui/style/style_core.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/text/text_custom_emoji.h"
@@ -26,6 +28,85 @@ constexpr auto kIvMarkedTextOptions = TextParseOptions{
 	Qt::LayoutDirectionAuto,
 };
 
+struct PreparedLinkExternalData {
+	ClickHandler::TextEntity entity;
+	QString copyText;
+	QString copyLabel;
+};
+
+[[nodiscard]] std::optional<PreparedLinkExternalData> ExternalDataForLink(
+		const PreparedLink &link) {
+	if (link.kind != PreparedLinkKind::External) {
+		return std::nullopt;
+	}
+	auto type = link.entityType;
+	if (type != EntityType::Url
+		&& type != EntityType::CustomUrl
+		&& type != EntityType::Email) {
+		if (link.target.isEmpty()) {
+			return std::nullopt;
+		}
+		type = UrlClickHandler::IsEmail(link.target)
+			? EntityType::Email
+			: EntityType::CustomUrl;
+	}
+	return PreparedLinkExternalData{
+		.entity = { type, link.target },
+		.copyText = !link.copyText.isEmpty() ? link.copyText : link.target,
+		.copyLabel = (type == EntityType::Email)
+			? Ui::Integration::Instance().phraseContextCopyEmail()
+			: Ui::Integration::Instance().phraseContextCopyLink(),
+	};
+}
+
+[[nodiscard]] ClickHandler::TextEntity TextEntityForLink(
+		const PreparedLink &link) {
+	if (const auto external = ExternalDataForLink(link)) {
+		return external->entity;
+	}
+	return {};
+}
+
+[[nodiscard]] QString CopyTextForLink(const PreparedLink &link) {
+	if (const auto external = ExternalDataForLink(link)) {
+		return external->copyText;
+	}
+	switch (link.kind) {
+	case PreparedLinkKind::Anchor:
+	case PreparedLinkKind::Footnote:
+	case PreparedLinkKind::FootnoteBacklink:
+		return link.target.isEmpty() ? QString() : (u"#"_q + link.target);
+	case PreparedLinkKind::LocalFile:
+		return link.fragment.isEmpty()
+			? link.target
+			: (link.target + u"#"_q + link.fragment);
+	case PreparedLinkKind::External:
+		return link.target;
+	case PreparedLinkKind::RejectedRelative:
+	case PreparedLinkKind::ToggleDetails:
+		return QString();
+	}
+	return QString();
+}
+
+[[nodiscard]] QString CopyLabelForLink(const PreparedLink &link) {
+	if (const auto external = ExternalDataForLink(link)) {
+		return external->copyLabel;
+	}
+	switch (link.kind) {
+	case PreparedLinkKind::RejectedRelative:
+	case PreparedLinkKind::ToggleDetails:
+		return QString();
+	case PreparedLinkKind::External:
+	case PreparedLinkKind::Anchor:
+	case PreparedLinkKind::Footnote:
+	case PreparedLinkKind::FootnoteBacklink:
+	case PreparedLinkKind::LocalFile:
+		return tr::lng_context_copy_link(tr::now);
+	}
+	return QString();
+}
+
 class PreparedLinkClickHandler final : public ClickHandler {
 public:
 	explicit PreparedLinkClickHandler(PreparedLink link)
@@ -44,42 +125,17 @@ public:
 	}
 
 	QString copyToClipboardText() const override {
-		if (!_link.copyText.isEmpty()) {
-			return _link.copyText;
-		}
-		switch (_link.kind) {
-		case PreparedLinkKind::Anchor:
-		case PreparedLinkKind::Footnote:
-		case PreparedLinkKind::FootnoteBacklink:
-			return _link.target.isEmpty() ? QString() : (u"#"_q + _link.target);
-		case PreparedLinkKind::LocalFile:
-			return _link.fragment.isEmpty()
-				? _link.target
-				: (_link.target + u"#"_q + _link.fragment);
-		case PreparedLinkKind::External:
-			return _link.target;
-		case PreparedLinkKind::RejectedRelative:
-		case PreparedLinkKind::ToggleDetails:
-			return QString();
-		}
-		return QString();
+		return CopyTextForLink(_link);
 	}
 
 	QString copyToClipboardContextItemText() const override {
-		switch (_link.kind) {
-		case PreparedLinkKind::RejectedRelative:
-		case PreparedLinkKind::ToggleDetails:
-			return QString();
-		case PreparedLinkKind::External:
-		case PreparedLinkKind::Anchor:
-		case PreparedLinkKind::Footnote:
-		case PreparedLinkKind::FootnoteBacklink:
-		case PreparedLinkKind::LocalFile:
-			return copyToClipboardText().isEmpty()
-				? QString()
-				: tr::lng_context_copy_link(tr::now);
-		}
-		return QString();
+		return copyToClipboardText().isEmpty()
+			? QString()
+			: CopyLabelForLink(_link);
+	}
+
+	TextEntity getTextEntity() const override {
+		return TextEntityForLink(_link);
 	}
 
 private:

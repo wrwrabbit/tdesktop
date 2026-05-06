@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "styles/style_iv.h"
+#include "styles/style_widgets.h"
 
 namespace Iv::Markdown {
 namespace {
@@ -87,11 +88,11 @@ const auto kPhotoCopyLabel = u"Photo"_q;
 
 [[nodiscard]] const style::TextStyle &TableCellTextStyle(
 		bool header,
-		const style::Markdown &markdown) {
+		const style::Markdown &) {
 	if (header) {
-		return markdown.table.headerStyle;
+		return st::defaultTable.defaultLabel.style;
 	}
-	return markdown.body;
+	return st::defaultTable.defaultValue.style;
 }
 
 [[nodiscard]] TableCellLayoutData InitializeTableCellLayout(
@@ -127,7 +128,7 @@ const auto kPhotoCopyLabel = u"Photo"_q;
 		const style::Markdown &markdown,
 		bool *overflowed) {
 	const auto &padding = markdown.table.cellPadding;
-	const auto border = markdown.table.border;
+	const auto border = st::defaultTable.border;
 	const auto minimum = markdown.table.minColumnWidth;
 	auto result = std::vector<int>(std::max(columnCount, 0), minimum);
 	auto preferred = std::vector<int>(std::max(columnCount, 0), minimum);
@@ -540,7 +541,7 @@ LaidOutBlock LayoutTableBlock(
 		&block.overflowed);
 
 	const auto &padding = markdown.table.cellPadding;
-	const auto border = markdown.table.border;
+	const auto border = st::defaultTable.border;
 	auto tableWidth = border;
 	for (const auto columnWidth : block.tableColumnWidths) {
 		tableWidth += columnWidth + border;

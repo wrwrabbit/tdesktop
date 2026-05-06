@@ -2,6 +2,9 @@
 
 #include "iv/markdown/iv_markdown_prepare_links.h"
 #include "iv/markdown/iv_markdown_prepare_serialize.h"
+#include "ui/basic_click_handlers.h"
+
+#include <QtCore/QUrl>
 
 #include <algorithm>
 #include <limits>
@@ -33,6 +36,36 @@ enum class RawInlineTag {
 	MarkOpen,
 	MarkClose,
 };
+
+[[nodiscard]] QString ExternalLinkDisplayText(const PreparedLink &link) {
+	if (link.entityType == EntityType::Email) {
+		return link.target;
+	}
+	const auto original = QUrl(link.target);
+	const auto good = QUrl(original.isValid()
+		? original.toEncoded()
+		: QString());
+	return good.isValid() ? good.toDisplayString() : link.target;
+}
+
+void FinalizePreparedExternalLink(
+		PreparedLink *link,
+		QStringView renderedText) {
+	if (!link
+		|| link->kind != PreparedLinkKind::External
+		|| link->entityType != EntityType::Url) {
+		return;
+	}
+	if (renderedText == QStringView(ExternalLinkDisplayText(*link))) {
+		return;
+	}
+	if (UrlClickHandler::EncodeForOpening(renderedText.toString())
+		== link->target) {
+		link->shown = EntityLinkShown::Partial;
+		return;
+	}
+	link->entityType = EntityType::CustomUrl;
+}
 
 [[nodiscard]] bool RangeContains(
 		const SourceRange &outer,
@@ -464,20 +497,17 @@ void AppendInline(
 		if (index > std::numeric_limits<uint16>::max()) {
 			break;
 		}
-		const auto preparedLink = ClassifiedLink(uint16(index), node.url, state);
+		auto preparedLink = ClassifiedLink(uint16(index), node.url, state);
+		FinalizePreparedExternalLink(
+			&preparedLink,
+			QStringView(text->text).mid(from, length));
 		text->entities.push_back(
 			EntityInText(
 				EntityType::CustomUrl,
 				from,
 				length,
 				InternalLinkData(uint16(index))));
-		links->push_back({
-			.index = uint16(index),
-			.kind = preparedLink.kind,
-			.target = preparedLink.target,
-			.fragment = preparedLink.fragment,
-			.copyText = preparedLink.copyText,
-		});
+		links->push_back(std::move(preparedLink));
 	} break;
 	case NodeKind::FootnoteReference: {
 		if (node.footnoteOrdinal <= 0) {

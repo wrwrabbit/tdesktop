@@ -68,7 +68,7 @@ constexpr auto kMaxVisualQuoteDepth = 3;
 		const MarkdownPrepareDimensions &dimensions) {
 	return header
 		? dimensions.tableHeaderTextSize
-		: dimensions.bodyTextSize;
+		: dimensions.tableBodyTextSize;
 }
 
 void PrepareTableCellText(
@@ -491,20 +491,7 @@ void AppendFootnotes(
 	block.kind = PreparedBlockKind::Details;
 	block.anchorId = DetailsAnchorId(state);
 	block.collapsed = !node.detailsOpen;
-	block.text.text = (node.detailsOpen ? u"v "_q : u"> "_q)
-		+ node.detailsSummary;
-	if (!block.text.text.isEmpty()) {
-		block.text.entities.push_back(EntityInText(
-			EntityType::CustomUrl,
-			0,
-			block.text.text.size(),
-			InternalLinkData(1)));
-		block.links.push_back({
-			.index = 1,
-			.kind = PreparedLinkKind::ToggleDetails,
-			.target = block.anchorId,
-		});
-	}
+	block.text = TextWithEntities::Simple(node.detailsSummary);
 	block.children = PrepareNestedDetailsBody(node, state);
 	return { std::move(block) };
 }

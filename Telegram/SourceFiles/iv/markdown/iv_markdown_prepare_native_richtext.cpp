@@ -1,6 +1,9 @@
 #include "iv/markdown/iv_markdown_prepare_native_richtext.h"
 
 #include "iv/markdown/iv_markdown_prepare_links.h"
+#include "ui/basic_click_handlers.h"
+
+#include <QtCore/QUrl>
 
 #include <limits>
 #include <utility>
@@ -36,6 +39,36 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	SortEntities(&text->text);
 }
 
+[[nodiscard]] QString ExternalLinkDisplayText(const PreparedLink &link) {
+	if (link.entityType == EntityType::Email) {
+		return link.target;
+	}
+	const auto original = QUrl(link.target);
+	const auto good = QUrl(original.isValid()
+		? original.toEncoded()
+		: QString());
+	return good.isValid() ? good.toDisplayString() : link.target;
+}
+
+void FinalizePreparedExternalLink(
+		PreparedLink *link,
+		QStringView renderedText) {
+	if (!link
+		|| link->kind != PreparedLinkKind::External
+		|| link->entityType != EntityType::Url) {
+		return;
+	}
+	if (renderedText == QStringView(ExternalLinkDisplayText(*link))) {
+		return;
+	}
+	if (UrlClickHandler::EncodeForOpening(renderedText.toString())
+		== link->target) {
+		link->shown = EntityLinkShown::Partial;
+		return;
+	}
+	link->entityType = EntityType::CustomUrl;
+}
+
 [[nodiscard]] bool AddNativeIvPreparedLink(
 		TextWithEntities *text,
 		std::vector<PreparedLink> *links,
@@ -49,23 +82,20 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	if (index > std::numeric_limits<uint16>::max()) {
 		return true;
 	}
-	const auto prepared = ClassifiedLink(uint16(index), target, nullptr);
+	auto prepared = ClassifiedLink(uint16(index), target, nullptr);
 	if (prepared.kind == PreparedLinkKind::RejectedRelative
 		|| prepared.kind == PreparedLinkKind::LocalFile) {
 		return true;
 	}
+	FinalizePreparedExternalLink(
+		&prepared,
+		QStringView(text->text).mid(from, length));
 	text->entities.push_back(EntityInText(
 		EntityType::CustomUrl,
 		from,
 		length,
 		InternalLinkData(uint16(index))));
-	links->push_back({
-		.index = uint16(index),
-		.kind = prepared.kind,
-		.target = prepared.target,
-		.fragment = prepared.fragment,
-		.copyText = prepared.copyText,
-	});
+	links->push_back(std::move(prepared));
 	return true;
 }
 

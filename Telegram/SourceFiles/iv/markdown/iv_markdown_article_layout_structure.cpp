@@ -278,11 +278,26 @@ namespace {
 	block.kind = PreparedBlockKind::Details;
 	block.anchorId = prepared.anchorId;
 	block.collapsed = prepared.collapsed;
-	block.textWidth = std::max(width, 1);
+	const auto &details = markdown.details;
+	const auto headerWidth = std::max(width, 1);
+	const auto iconWidth = details.icon.width();
+	const auto iconHeight = details.icon.height();
+	const auto iconSkip = iconWidth ? details.iconSkip : 0;
+	const auto textLeft = left
+		+ details.headerPadding.left()
+		+ iconWidth
+		+ iconSkip;
+	block.textWidth = std::max(
+		headerWidth
+			- details.headerPadding.left()
+			- details.headerPadding.right()
+			- iconWidth
+			- iconSkip,
+		1);
 
 	SetTextLeaf(
 		&block.leaf,
-		markdown.body,
+		details.summaryStyle,
 		prepared.text,
 		formulas,
 		inlineFormulaObjects,
@@ -292,17 +307,36 @@ namespace {
 
 	const auto summaryHeight = std::max(
 		block.leaf.countHeight(block.textWidth, true),
-		TextLineHeight(markdown.body));
-	block.textRect = QRect(left, top, block.textWidth, summaryHeight);
+		TextLineHeight(details.summaryStyle));
+	const auto headerContentHeight = std::max(summaryHeight, iconHeight);
+	const auto headerHeight = details.headerPadding.top()
+		+ headerContentHeight
+		+ details.headerPadding.bottom();
+	block.headerRect = QRect(left, top, headerWidth, headerHeight);
+	if (iconWidth > 0 && iconHeight > 0) {
+		block.iconRect = QRect(
+			left + details.headerPadding.left(),
+			top + (headerHeight - iconHeight) / 2,
+			iconWidth,
+			iconHeight);
+	}
+	block.textRect = QRect(
+		textLeft,
+		top + details.headerPadding.top()
+			+ std::max((headerContentHeight - summaryHeight) / 2, 0),
+		block.textWidth,
+		summaryHeight);
 
-	auto bottom = top + summaryHeight;
-	if (!prepared.collapsed && !prepared.children.empty()) {
-		const auto childLeft = left + markdown.list.continuationIndent;
+	auto bottom = top + headerHeight;
+	if (!prepared.collapsed) {
+		const auto childLeft = left + details.bodyPadding.left();
+		const auto childTop = bottom + details.bodyPadding.top();
 		const auto childWidth = std::max(
-			width - markdown.list.continuationIndent,
+			headerWidth
+				- details.bodyPadding.left()
+				- details.bodyPadding.right(),
 			1);
-		const auto childTop = bottom + markdown.list.markerSkip;
-		bottom = LayoutBlocks(
+		const auto childBottom = LayoutBlocks(
 			prepared.children,
 			formulas,
 			renderedFormulas,
@@ -315,13 +349,23 @@ namespace {
 			childTop,
 			childWidth,
 			context);
+		const auto contentHeight = std::max(childBottom - childTop, 0);
+		const auto bodyHeight = details.bodyPadding.top()
+			+ contentHeight
+			+ details.bodyPadding.bottom();
+		block.bodyRect = QRect(left, bottom, headerWidth, bodyHeight);
+		block.contentRect = QRect(
+			childLeft,
+			childTop,
+			childWidth,
+			contentHeight);
+		bottom += bodyHeight;
 	}
 	block.outer = QRect(
 		left,
 		top,
-		std::max(width, 1),
-		std::max(bottom - top, summaryHeight));
-	block.contentRect = block.textRect;
+		headerWidth,
+		std::max(bottom - top, headerHeight));
 	return block;
 }
 

@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "styles/style_iv.h"
+#include "styles/style_widgets.h"
 
 namespace Iv::Markdown {
 namespace {
@@ -109,7 +110,10 @@ MarkdownPrepareDimensions CaptureMarkdownPrepareDimensions() {
 		TextSizeForFormula(markdown.heading5),
 		TextSizeForFormula(markdown.heading6),
 	};
-	result.tableHeaderTextSize = TextSizeForFormula(markdown.table.headerStyle);
+	result.tableHeaderTextSize = TextSizeForFormula(
+		st::defaultTable.defaultLabel.style);
+	result.tableBodyTextSize = TextSizeForFormula(
+		st::defaultTable.defaultValue.style);
 	result.displayMathTextSize = markdown.displayMath.textSize;
 	result.displayMathMaxRenderWidth = markdown.displayMath.maxRenderWidth;
 	result.displayMathMaxRenderHeight = markdown.displayMath.maxRenderHeight;

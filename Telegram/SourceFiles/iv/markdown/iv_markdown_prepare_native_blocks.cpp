@@ -354,7 +354,6 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 		summary.text.entities.erase(from, summary.text.entities.end());
 		summary.links.clear();
 	}
-	PrependText(&summary.text, data.is_open() ? u"v "_q : u"> "_q);
 	SortPreparedIvRichText(&summary);
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::Details;
@@ -362,19 +361,6 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	block.collapsed = !data.is_open();
 	block.text = std::move(summary.text);
 	block.links = std::move(summary.links);
-	const auto toggleIndex = block.links.size() + 1;
-	if (toggleIndex <= std::numeric_limits<uint16>::max()) {
-		block.text.entities.push_back(EntityInText(
-			EntityType::CustomUrl,
-			0,
-			block.text.text.size(),
-			InternalLinkData(uint16(toggleIndex))));
-		block.links.push_back({
-			.index = uint16(toggleIndex),
-			.kind = PreparedLinkKind::ToggleDetails,
-			.target = block.anchorId,
-		});
-	}
 	if (!PrepareNativeIvBlocks(data.vblocks().v, &block.children, state)) {
 		return false;
 	}

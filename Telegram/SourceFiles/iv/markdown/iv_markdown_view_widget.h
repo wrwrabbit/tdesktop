@@ -10,6 +10,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <QtCore/QVariant>
 
 namespace Ui {
@@ -82,6 +83,7 @@ private:
 		const MarkdownArticleHitTestResult &result) const;
 	[[nodiscard]] TextForMimeData getSelectedText() const;
 	[[nodiscard]] QVariant clickHandlerContext() const;
+	[[nodiscard]] QVariant viewerToastClickHandlerContext() const;
 	void showToast(const QString &text) const;
 	void copySelectedText();
 
@@ -89,6 +91,7 @@ private:
 	void relayoutCurrentWidth(bool clearSelection);
 	void forceRelayoutCurrentWidth();
 	void updateHover(const MarkdownArticleHitTestResult &state);
+	void updateHoverAtCursor();
 	void resetSelection();
 	void clearSelection();
 	void resetTextPaintCaches();
@@ -121,6 +124,8 @@ private:
 	int _dragSegment = -1;
 	int _dragSymbol = 0;
 	TextSelection _dragExpandedSelection;
+	std::optional<PreparedLink> _selectionClickPreparedLink;
+	bool _dragStartHadSelection = false;
 	int _lastRelayoutMs = 0;
 	int _zoom = 100;
 	Ui::VisibleRange _visibleRange;

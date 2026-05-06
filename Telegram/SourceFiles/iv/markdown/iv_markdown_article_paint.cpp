@@ -7,9 +7,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <QtGui/QPainterPath>
 
 #include "styles/palette.h"
 #include "styles/style_iv.h"
+#include "styles/style_widgets.h"
 
 namespace Iv::Markdown {
 namespace {
@@ -134,57 +136,60 @@ void PaintTableBlock(
 	p.save();
 	p.setClipRect(tableClip);
 
+	const auto &table = st::defaultTable;
+	const auto half = table.border / 2.;
+	const auto inner = QRectF(block.tableRect).marginsRemoved(
+		{ half, half, half, half });
+	const auto radius = table.radius;
+	auto outerPath = QPainterPath();
+	outerPath.addRoundedRect(inner, radius, radius);
+
+	auto headerBottom = 0;
 	for (const auto &row : block.tableRows) {
-		if (!row.header || !row.outer.intersects(block.visibleTableRect)) {
-			continue;
+		if (!row.header) {
+			break;
 		}
-		for (const auto &cell : row.cells) {
-			if (!cell.outer.intersects(block.visibleTableRect)) {
-				continue;
-			}
-			p.fillRect(cell.outer, markdown.table.headerBg->c);
-		}
+		headerBottom = row.outer.y() + row.outer.height();
+	}
+	if (headerBottom > 0) {
+		auto hq = PainterHighQualityEnabler(p);
+		p.setClipRect(
+			QRect(
+				block.tableRect.x(),
+				block.tableRows.front().outer.y(),
+				block.tableRect.width(),
+				headerBottom - block.tableRows.front().outer.y()),
+			Qt::IntersectClip);
+		p.setBrush(table.headerBg);
+		p.setPen(Qt::NoPen);
+		p.drawRoundedRect(inner, radius, radius);
+		p.setClipping(false);
+		p.setClipRect(tableClip);
 	}
 
-	const auto border = markdown.table.border;
-	if (border > 0 && !block.tableRect.isEmpty()) {
-		const auto left = block.tableRect.x();
-		const auto top = block.tableRect.y();
-		const auto width = block.tableRect.width();
-		const auto height = block.tableRect.height();
-		const auto right = left + width - border;
-		const auto bottom = top + height - border;
+	if (table.border > 0 && !block.tableRect.isEmpty()) {
+		auto path = outerPath;
+		for (auto i = 1, count = int(block.tableRows.size()); i != count; ++i) {
+			const auto y = block.tableRows[i].outer.y() - half;
+			path.moveTo(inner.x(), y);
+			path.lineTo(inner.x() + inner.width(), y);
+		}
 
-		p.fillRect(QRect(left, top, width, border), markdown.table.borderFg->c);
-		p.fillRect(
-			QRect(left, bottom, width, border),
-			markdown.table.borderFg->c);
-		p.fillRect(QRect(left, top, border, height), markdown.table.borderFg->c);
-		p.fillRect(
-			QRect(right, top, border, height),
-			markdown.table.borderFg->c);
-
-		auto separatorLeft = left + border;
-		for (auto i = 0, count = int(block.tableColumnWidths.size()); i != count; ++i) {
+		auto separatorLeft = block.tableRect.x() + table.border;
+		for (auto i = 0, count = int(block.tableColumnWidths.size()); i + 1 < count; ++i) {
 			separatorLeft += block.tableColumnWidths[i];
-			if (i + 1 != count) {
-				p.fillRect(
-					QRect(separatorLeft, top, border, height),
-					markdown.table.borderFg->c);
-				separatorLeft += border;
-			}
+			const auto x = separatorLeft + half;
+			path.moveTo(x, inner.y());
+			path.lineTo(x, inner.y() + inner.height());
+			separatorLeft += table.border;
 		}
 
-		for (auto i = 0, count = int(block.tableRows.size()); i != count; ++i) {
-			if (i + 1 == count) {
-				break;
-			}
-			const auto separatorTop = block.tableRows[i].outer.y()
-				+ block.tableRows[i].outer.height();
-			p.fillRect(
-				QRect(left, separatorTop, width, border),
-				markdown.table.borderFg->c);
-		}
+		auto hq = PainterHighQualityEnabler(p);
+		auto pen = table.borderFg->p;
+		pen.setWidth(table.border);
+		p.setPen(pen);
+		p.setBrush(Qt::NoBrush);
+		p.drawPath(path);
 	}
 
 	p.setPen(markdown.textColor->c);
@@ -212,13 +217,18 @@ void PaintTableBlock(
 
 	if (block.segmentIndex >= 0
 		&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
-		p.fillRect(block.visibleTableRect, p.textPalette().selectOverlay);
+		p.save();
+		p.setClipPath(outerPath, Qt::IntersectClip);
+		p.fillRect(block.tableRect, p.textPalette().selectOverlay);
+		p.restore();
 	}
 
 	if (block.overflowed) {
 		const auto indicatorWidth = std::min(
 			std::max(markdown.table.overflowWidth, 1),
 			block.visibleTableRect.width());
+		p.save();
+		p.setClipPath(outerPath, Qt::IntersectClip);
 		p.fillRect(
 			QRect(
 				block.visibleTableRect.x()
@@ -228,6 +238,7 @@ void PaintTableBlock(
 				indicatorWidth,
 				block.visibleTableRect.height()),
 			markdown.table.overflowFg->c);
+		p.restore();
 	}
 
 	p.restore();
@@ -505,6 +516,94 @@ void PaintPhotoBlock(
 	}
 }
 
+void PaintDetailsBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		std::vector<PreparedFormulaSlot> *formulas,
+		std::vector<RenderedFormula> *renderedFormulas,
+		MathRenderer *renderer,
+		int devicePixelRatio,
+		int outerWidth,
+		const style::Markdown &markdown,
+		const MarkdownArticlePaintCaches &caches,
+		const PaintSelectionState &selectionState,
+		QRect clip) {
+	const auto visible = clip.intersected(block.outer);
+	if (visible.isEmpty()) {
+		return;
+	}
+
+	const auto &details = markdown.details;
+	const auto half = details.border / 2.;
+	const auto outer = QRectF(block.outer).marginsRemoved({
+		half,
+		half,
+		half,
+		half,
+	});
+	auto outerPath = QPainterPath();
+	outerPath.addRoundedRect(outer, details.radius, details.radius);
+
+	p.save();
+	p.setClipRect(visible);
+	{
+		auto hq = PainterHighQualityEnabler(p);
+		p.fillPath(
+			outerPath,
+			(block.bodyRect.isEmpty() ? details.headerBg : details.bodyBg)->c);
+		p.save();
+		p.setClipPath(outerPath, Qt::IntersectClip);
+		p.fillRect(block.headerRect, details.headerBg->c);
+		if (!block.bodyRect.isEmpty()) {
+			p.setPen(QPen(details.borderFg->c, details.border));
+			const auto separatorY = block.bodyRect.top() + half;
+			p.drawLine(
+				QPointF(outer.left(), separatorY),
+				QPointF(outer.right(), separatorY));
+		}
+		p.restore();
+
+		p.setBrush(Qt::NoBrush);
+		p.setPen(QPen(details.borderFg->c, details.border));
+		p.drawPath(outerPath);
+	}
+	if (!block.iconRect.isEmpty()) {
+		details.icon.paint(
+			p,
+			block.iconRect.x(),
+			block.iconRect.y(),
+			outerWidth);
+	}
+	p.setPen(details.summaryFg->c);
+	PaintTextLeaf(
+		p,
+		block.leaf,
+		caches,
+		block.textRect,
+		block.textWidth,
+		clip,
+		style::al_left,
+		TextSelectionForSegmentIndex(
+			selectionState,
+			block.segmentIndex));
+	p.restore();
+
+	if (!block.bodyRect.isEmpty()) {
+		PaintBlocks(
+			p,
+			block.children,
+			formulas,
+			renderedFormulas,
+			renderer,
+			devicePixelRatio,
+			outerWidth,
+			markdown,
+			caches,
+			selectionState,
+			clip.intersected(block.bodyRect));
+	}
+}
+
 void PaintBlock(
 		Painter &p,
 		const LaidOutBlock &block,
@@ -552,7 +651,7 @@ void PaintBlock(
 				block.segmentIndex));
 		break;
 	case PreparedBlockKind::Rule:
-		p.fillRect(block.outer, markdown.rule.fg->c);
+		p.fillRect(block.outer, st::defaultTable.borderFg->c);
 		break;
 	case PreparedBlockKind::List:
 		PaintBlocks(
@@ -652,21 +751,9 @@ void PaintBlock(
 			clip);
 		break;
 	case PreparedBlockKind::Details:
-		p.setPen(markdown.textColor->c);
-		PaintTextLeaf(
+		PaintDetailsBlock(
 			p,
-			block.leaf,
-			caches,
-			block.textRect,
-			block.textWidth,
-			clip,
-			style::al_left,
-			TextSelectionForSegmentIndex(
-				selectionState,
-				block.segmentIndex));
-		PaintBlocks(
-			p,
-			block.children,
+			block,
 			formulas,
 			renderedFormulas,
 			renderer,

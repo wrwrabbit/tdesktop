@@ -7,6 +7,7 @@
 #include "iv/iv_prepare.h"
 #include "scheme.h"
 
+#include "ui/basic_click_handlers.h"
 #include "ui/dynamic_image.h"
 #include "ui/style/style_core.h"
 #include "ui/style/style_core_scale.h"
@@ -198,6 +199,22 @@ struct NativeIvPlaceholderFixture {
 		list.push_back(part);
 	}
 	return MTP_textConcat(MTP_vector<MTPRichText>(std::move(list)));
+}
+
+[[nodiscard]] MTPRichText NativeIvTextUrl(
+		QString text,
+		QString url,
+		int64 webpageId = 0) {
+	return MTP_textUrl(
+		NativeIvText(std::move(text)),
+		MTP_string(url),
+		MTP_long(webpageId));
+}
+
+[[nodiscard]] MTPRichText NativeIvTextEmail(QString text, QString email) {
+	return MTP_textEmail(
+		NativeIvText(std::move(text)),
+		MTP_string(email));
 }
 
 [[nodiscard]] MTPPageCaption NativeIvCaption(
@@ -1354,6 +1371,20 @@ void PrintPrepareSummary(
 	return result;
 }
 
+[[nodiscard]] const PreparedFormulaSlot *FindPreparedFormulaSlot(
+		const MarkdownArticleContent &prepared,
+		const QString &trimmedTex,
+		MathKind kind) {
+	for (const auto &slot : prepared.formulas) {
+		if (slot.present
+			&& slot.kind == kind
+			&& slot.trimmedTex == trimmedTex) {
+			return &slot;
+		}
+	}
+	return nullptr;
+}
+
 template <typename Callback>
 void ForEachPreparedBlock(
 		const std::vector<PreparedBlock> &blocks,
@@ -1380,6 +1411,19 @@ void ForEachPreparedLink(
 			}
 		}
 	});
+}
+
+template <typename Predicate>
+[[nodiscard]] const PreparedLink *FindPreparedLink(
+		const std::vector<PreparedBlock> &blocks,
+		Predicate &&predicate) {
+	const PreparedLink *result = nullptr;
+	ForEachPreparedLink(blocks, [&](const PreparedLink &link) {
+		if (!result && predicate(link)) {
+			result = &link;
+		}
+	});
+	return result;
 }
 
 [[nodiscard]] std::vector<const PreparedBlock*> CollectPreparedBlocksByKind(
@@ -2707,10 +2751,7 @@ void CheckPrepareCoverage(
 				== FromLatin1("\\int_0^1 x^2\\,dx = \\frac{1}{3}")) {
 			markdownDisplayMath = &block;
 		}
-		if (!detailsBlock
-			&& block.kind == PreparedBlockKind::Details
-			&& block.text.text.contains(
-				FromLatin1("Click to expand details/summary block"))) {
+		if (!detailsBlock && block.kind == PreparedBlockKind::Details) {
 			detailsBlock = &block;
 		}
 		if (!footnoteList
@@ -2768,6 +2809,22 @@ void CheckPrepareCoverage(
 		Check(
 			detailsBlock->collapsed,
 			FromLatin1("markdown-example.md prepared details collapsed"),
+			ok);
+		Check(
+			detailsBlock->anchorId.startsWith(FromLatin1("details-")),
+			FromLatin1("markdown-example.md prepared details anchor id"),
+			ok);
+		Check(
+			detailsBlock->text.text
+				== FromLatin1("Click to expand details/summary block"),
+			FromLatin1("markdown-example.md prepared details summary text"),
+			ok);
+		Check(
+			detailsBlock->links.empty()
+				&& !HasEntityType(
+					detailsBlock->text.entities,
+					EntityType::CustomUrl),
+			FromLatin1("markdown-example.md prepared details summary toggle"),
 			ok);
 		Check(
 			!detailsBlock->children.empty()
@@ -2938,6 +2995,337 @@ void CheckPrepareLinkClassification(
 		foundRejected,
 		FromLatin1("generated-relative-links.md rejected relative classification"),
 		ok);
+}
+
+void CheckPreparedExternalLinkCoverage(bool *ok) {
+	const auto markdownLabel = FromLatin1("generated-prepared-external-links.md");
+	const auto markdownParsed = ParseMarkdownForIv(
+		QByteArray(
+			"[https://visible.example.com/path?q=1](https://visible.example.com/path?q=1)\n"
+			"[partial-visible.example.com/path?q=3](https://partial-visible.example.com/path?q=3)\n"
+			"[Hidden label](https://hidden.example.com/path?q=2)\n"
+			"[support@example.com](mailto:support@example.com?subject=Hello%20Telegram)\n"),
+		ParseOptions{ markdownLabel });
+	Check(
+		markdownParsed.ok,
+		markdownLabel + FromLatin1(" parse failed: ") + markdownParsed.error,
+		ok);
+	if (markdownParsed.ok) {
+		const auto markdownPrepared = PrepareParsedDocumentForTest(
+			markdownParsed.document,
+			markdownLabel,
+			std::make_shared<MathRenderer>());
+		Check(
+			!markdownPrepared.failure.failed(),
+			markdownLabel + FromLatin1(" prepare failure: ")
+				+ PrepareFailureReason(markdownPrepared.failure),
+			ok);
+		if (!markdownPrepared.failure.failed()) {
+			const auto visibleTarget = UrlClickHandler::EncodeForOpening(
+				FromLatin1("https://visible.example.com/path?q=1"));
+			const auto partialTarget = UrlClickHandler::EncodeForOpening(
+				FromLatin1("https://partial-visible.example.com/path?q=3"));
+			const auto hiddenTarget = UrlClickHandler::EncodeForOpening(
+				FromLatin1("https://hidden.example.com/path?q=2"));
+			const auto emailTarget = FromLatin1("support@example.com");
+			const auto markdownVisible = FindPreparedLink(
+				markdownPrepared.blocks.blocks,
+				[&](const PreparedLink &link) {
+					return link.kind == PreparedLinkKind::External
+						&& link.target == visibleTarget;
+				});
+			const auto markdownHidden = FindPreparedLink(
+				markdownPrepared.blocks.blocks,
+				[&](const PreparedLink &link) {
+					return link.kind == PreparedLinkKind::External
+						&& link.target == hiddenTarget;
+				});
+			const auto markdownPartial = FindPreparedLink(
+				markdownPrepared.blocks.blocks,
+				[&](const PreparedLink &link) {
+					return link.kind == PreparedLinkKind::External
+						&& link.target == partialTarget;
+				});
+			const auto markdownEmail = FindPreparedLink(
+				markdownPrepared.blocks.blocks,
+				[&](const PreparedLink &link) {
+					return link.kind == PreparedLinkKind::External
+						&& link.target == emailTarget;
+				});
+			Check(
+				markdownVisible != nullptr
+					&& markdownVisible->entityType == EntityType::Url
+					&& markdownVisible->copyText == visibleTarget
+					&& markdownVisible->shown == EntityLinkShown::Full,
+				markdownLabel + FromLatin1(" visible URL semantics"),
+				ok);
+			Check(
+				markdownPartial != nullptr
+					&& markdownPartial->entityType == EntityType::Url
+					&& markdownPartial->copyText == partialTarget
+					&& markdownPartial->shown == EntityLinkShown::Partial,
+				markdownLabel + FromLatin1(" partial visible URL semantics"),
+				ok);
+			Check(
+				markdownHidden != nullptr
+					&& markdownHidden->entityType == EntityType::CustomUrl
+					&& markdownHidden->copyText == hiddenTarget
+					&& markdownHidden->shown == EntityLinkShown::Full,
+				markdownLabel + FromLatin1(" hidden URL semantics"),
+				ok);
+			Check(
+				markdownEmail != nullptr
+					&& markdownEmail->entityType == EntityType::Email
+					&& markdownEmail->copyText == emailTarget
+					&& markdownEmail->target == emailTarget
+					&& !markdownEmail->target.contains(QChar(':')),
+				markdownLabel + FromLatin1(" email target normalization"),
+				ok);
+		}
+	}
+
+	const auto nativeLabel = u"native-iv-prepared-external-links"_q;
+	auto nativeBlocks = QVector<MTPPageBlock>();
+	nativeBlocks.push_back(MTP_pageBlockParagraph(NativeIvConcat({
+		NativeIvTextUrl(
+			u"https://native-visible.example/path?q=1"_q,
+			u"https://native-visible.example/path?q=1"_q),
+		NativeIvText(u" "_q),
+		NativeIvTextUrl(
+			u"native-partial.example/path?q=3"_q,
+			u"https://native-partial.example/path?q=3"_q),
+		NativeIvText(u" "_q),
+		NativeIvTextUrl(
+			u"Native hidden label"_q,
+			u"https://native-hidden.example/path?q=2"_q),
+		NativeIvText(u" "_q),
+		NativeIvTextEmail(u"native@example.com"_q, u"native@example.com"_q),
+	})));
+	auto nativeSource = NativeIvSource(std::move(nativeBlocks));
+	const auto nativePrepared = TryPrepareNativeInstantView({
+		.source = &nativeSource,
+	});
+	Check(
+		nativePrepared.supported(),
+		nativeLabel + u" prepare supported"_q,
+		ok);
+	Check(
+		!nativePrepared.content.failure.failed(),
+		nativeLabel + u" prepare failure"_q,
+		ok);
+	if (nativePrepared.supported() && !nativePrepared.content.failure.failed()) {
+		const auto visibleTarget = UrlClickHandler::EncodeForOpening(
+			FromLatin1("https://native-visible.example/path?q=1"));
+		const auto partialTarget = UrlClickHandler::EncodeForOpening(
+			FromLatin1("https://native-partial.example/path?q=3"));
+		const auto hiddenTarget = UrlClickHandler::EncodeForOpening(
+			FromLatin1("https://native-hidden.example/path?q=2"));
+		const auto emailTarget = FromLatin1("native@example.com");
+		const auto nativeVisible = FindPreparedLink(
+			nativePrepared.content.blocks.blocks,
+			[&](const PreparedLink &link) {
+				return link.kind == PreparedLinkKind::External
+					&& link.target == visibleTarget;
+			});
+		const auto nativeHidden = FindPreparedLink(
+			nativePrepared.content.blocks.blocks,
+			[&](const PreparedLink &link) {
+				return link.kind == PreparedLinkKind::External
+					&& link.target == hiddenTarget;
+			});
+		const auto nativePartial = FindPreparedLink(
+			nativePrepared.content.blocks.blocks,
+			[&](const PreparedLink &link) {
+				return link.kind == PreparedLinkKind::External
+					&& link.target == partialTarget;
+			});
+		const auto nativeEmail = FindPreparedLink(
+			nativePrepared.content.blocks.blocks,
+			[&](const PreparedLink &link) {
+				return link.kind == PreparedLinkKind::External
+					&& link.target == emailTarget;
+			});
+		Check(
+			nativeVisible != nullptr
+				&& nativeVisible->entityType == EntityType::Url
+				&& nativeVisible->copyText == visibleTarget
+				&& nativeVisible->shown == EntityLinkShown::Full,
+			nativeLabel + u" visible URL semantics"_q,
+			ok);
+		Check(
+			nativePartial != nullptr
+				&& nativePartial->entityType == EntityType::Url
+				&& nativePartial->copyText == partialTarget
+				&& nativePartial->shown == EntityLinkShown::Partial,
+			nativeLabel + u" partial visible URL semantics"_q,
+			ok);
+		Check(
+			nativeHidden != nullptr
+				&& nativeHidden->entityType == EntityType::CustomUrl
+				&& nativeHidden->copyText == hiddenTarget
+				&& nativeHidden->shown == EntityLinkShown::Full,
+			nativeLabel + u" hidden URL semantics"_q,
+			ok);
+		Check(
+			nativeEmail != nullptr
+				&& nativeEmail->entityType == EntityType::Email
+				&& nativeEmail->copyText == emailTarget
+				&& nativeEmail->target == emailTarget,
+			nativeLabel + u" email semantics"_q,
+			ok);
+	}
+}
+
+void CheckDetailsSummaryHitCoverage(bool *ok) {
+	const auto label = FromLatin1("generated-details-summary-hit.md");
+	const auto parsed = ParseMarkdownForIv(
+		QByteArray(
+			"<details>\n"
+			"<summary>Summary text for selection</summary>\n"
+			"\n"
+			"Hidden body.\n"
+			"</details>\n"),
+		ParseOptions{ label });
+	Check(
+		parsed.ok,
+		label + FromLatin1(" parse failed: ") + parsed.error,
+		ok);
+	if (!parsed.ok) {
+		return;
+	}
+	const auto prepared = PrepareParsedDocumentForTest(
+		parsed.document,
+		label,
+		std::make_shared<MathRenderer>());
+	Check(
+		!prepared.failure.failed(),
+		label + FromLatin1(" prepare failure: ")
+			+ PrepareFailureReason(prepared.failure),
+		ok);
+	if (prepared.failure.failed()) {
+		return;
+	}
+	auto height = 0;
+	auto article = BuildArticleForTest(
+		prepared,
+		std::make_shared<MathRenderer>(),
+		420,
+		&height);
+	const auto bounds = SegmentHitBounds(article.get(), 420, height, 0);
+	Check(
+		bounds.has_value(),
+		label + FromLatin1(" details segment hit bounds"),
+		ok);
+	Check(
+		article->segmentIsText(0),
+		label + FromLatin1(" details segment remains text-selectable"),
+		ok);
+	if (!bounds || !article->segmentIsText(0)) {
+		return;
+	}
+	auto flags = Ui::Text::StateRequest::Flags();
+	flags |= Ui::Text::StateRequest::Flag::LookupLink;
+	flags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+	auto summaryTextHit = false;
+	auto summaryPaddingHit = false;
+	for (auto y = bounds->top();
+		(y <= bounds->bottom()) && !(summaryTextHit && summaryPaddingHit);
+		++y) {
+		for (auto x = bounds->left();
+			(x <= bounds->right()) && !(summaryTextHit && summaryPaddingHit);
+			++x) {
+			const auto hit = article->hitTest(QPoint(x, y), flags);
+			if (!hit.valid()
+				|| !hit.direct
+				|| (hit.segmentIndex != 0)
+				|| !hit.preparedLink
+				|| (hit.preparedLink->kind != PreparedLinkKind::ToggleDetails)) {
+				continue;
+			}
+			if (hit.state.link) {
+				summaryPaddingHit = true;
+			} else {
+				summaryTextHit = true;
+			}
+		}
+	}
+	Check(
+		summaryTextHit,
+		label + FromLatin1(" summary text hit leaves link inactive"),
+		ok);
+	Check(
+		summaryPaddingHit,
+		label + FromLatin1(" summary padding hit keeps toggle link"),
+		ok);
+}
+
+void CheckTableFormulaTextSizeCoverage(bool *ok) {
+	const auto label = FromLatin1("generated-table-formula-text-sizes.md");
+	const auto parsed = ParseMarkdownForIv(
+		QByteArray(
+			"| Header $x$ | Value |\n"
+			"| --- | --- |\n"
+			"| Body $y$ | Value |\n"),
+		ParseOptions{ label });
+	Check(
+		parsed.ok,
+		label + FromLatin1(" parse failed: ") + parsed.error,
+		ok);
+	if (!parsed.ok) {
+		return;
+	}
+	auto dimensions = CaptureMarkdownPrepareDimensions();
+	dimensions.bodyTextSize = 11;
+	dimensions.tableHeaderTextSize = 29;
+	dimensions.tableBodyTextSize = 17;
+	const auto prepared = PrepareParsedDocumentForTest(
+		parsed.document,
+		label,
+		std::make_shared<MathRenderer>(),
+		dimensions);
+	Check(
+		!prepared.failure.failed(),
+		label + FromLatin1(" prepare failure: ")
+			+ PrepareFailureReason(prepared.failure),
+		ok);
+	if (prepared.failure.failed()) {
+		return;
+	}
+	const auto headerFormula = FindPreparedFormulaSlot(
+		prepared,
+		FromLatin1("x"),
+		MathKind::Inline);
+	const auto bodyFormula = FindPreparedFormulaSlot(
+		prepared,
+		FromLatin1("y"),
+		MathKind::Inline);
+	Check(
+		headerFormula != nullptr,
+		label + FromLatin1(" header formula slot"),
+		ok);
+	Check(
+		bodyFormula != nullptr,
+		label + FromLatin1(" body formula slot"),
+		ok);
+	if (headerFormula && bodyFormula) {
+		Check(
+			headerFormula->textSize == dimensions.tableHeaderTextSize,
+			label + FromLatin1(" header formula text size"),
+			ok);
+		Check(
+			bodyFormula->textSize == dimensions.tableBodyTextSize,
+			label + FromLatin1(" body formula text size"),
+			ok);
+		Check(
+			headerFormula->textSize != bodyFormula->textSize,
+			label + FromLatin1(" header/body formula size split"),
+			ok);
+		Check(
+			headerFormula->textSize != dimensions.bodyTextSize
+				&& bodyFormula->textSize != dimensions.bodyTextSize,
+			label + FromLatin1(" table formulas avoid body text size"),
+			ok);
+	}
 }
 
 void CheckInlineTextObjectArticleCoverage(bool *ok) {
@@ -4313,6 +4701,9 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 	CheckCodeBlockTrailingNewlineTrim(&ok);
 	CheckPrepareCoverage(markdownFixture, latexFixture, &ok);
 	CheckPrepareLinkClassification(markdownFixture.path, &ok);
+	CheckPreparedExternalLinkCoverage(&ok);
+	CheckDetailsSummaryHitCoverage(&ok);
+	CheckTableFormulaTextSizeCoverage(&ok);
 	CheckArticleRenderSmoke(markdownFixture, latexFixture, &ok);
 	CheckArticleHorizontalRelayoutRegression(&ok);
 	CheckInlineTextObjectArticleCoverage(&ok);

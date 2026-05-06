@@ -125,6 +125,19 @@ MarkdownTable {
 	overflowWidth: pixels;
 	overflowFg: color;
 }
+MarkdownDetails {
+	headerPadding: margins;
+	bodyPadding: margins;
+	border: pixels;
+	borderFg: color;
+	headerBg: color;
+	bodyBg: color;
+	summaryFg: color;
+	radius: pixels;
+	summaryStyle: TextStyle;
+	icon: icon;
+	iconSkip: pixels;
+}
 MarkdownPlaceholder {
 	padding: margins;
 	minHeight: pixels;
@@ -161,6 +174,7 @@ Markdown {
 	rule: MarkdownRule;
 	displayMath: MarkdownDisplayMath;
 	table: MarkdownTable;
+	details: MarkdownDetails;
 	placeholder: MarkdownPlaceholder;
 	photo: MarkdownPhoto;
 	failure: MarkdownFailure;
@@ -168,8 +182,6 @@ Markdown {
 
 defaultMarkdownTextPalette: TextPalette(defaultTextPalette) {
 	linkFg: windowActiveTextFg;
-	monoFg: windowSubTextFg;
-	selectMonoFg: windowSubTextFg;
 }
 defaultMarkdownBodyStyle: TextStyle(historyTextStyle) {
 	lineHeight: 24px;
@@ -238,6 +250,24 @@ defaultMarkdownTable: MarkdownTable {
 	overflowWidth: 4px;
 	overflowFg: windowSubTextFg;
 }
+defaultMarkdownDetailsSummaryStyle: TextStyle(defaultTextStyle) {
+	font: font(12px);
+	linkUnderline: kLinkUnderlineNever;
+	lineHeight: 18px;
+}
+defaultMarkdownDetails: MarkdownDetails {
+	headerPadding: margins(8px, 12px, 8px, 12px);
+	bodyPadding: margins(10px, 12px, 10px, 12px);
+	border: 1px;
+	borderFg: inputBorderFg;
+	headerBg: windowBgOver;
+	bodyBg: windowBg;
+	summaryFg: windowFg;
+	radius: 6px;
+	summaryStyle: defaultMarkdownDetailsSummaryStyle;
+	icon: icon {{ "history_comments_open", windowSubTextFg }};
+	iconSkip: 8px;
+}
 defaultMarkdownPlaceholder: MarkdownPlaceholder {
 	padding: margins(16px, 12px, 16px, 12px);
 	minHeight: 48px;
@@ -300,6 +330,7 @@ defaultMarkdown: Markdown {
 	rule: defaultMarkdownRule;
 	displayMath: defaultMarkdownDisplayMath;
 	table: defaultMarkdownTable;
+	details: defaultMarkdownDetails;
 	placeholder: defaultMarkdownPlaceholder;
 	photo: defaultMarkdownPhoto;
 	failure: defaultMarkdownFailure;

@@ -1,7 +1,10 @@
 #include "iv/markdown/iv_markdown_prepare_links.h"
 
+#include "ui/basic_click_handlers.h"
+
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
+#include <QtCore/QUrl>
 
 #include <algorithm>
 
@@ -115,6 +118,40 @@ namespace {
 	return true;
 }
 
+[[nodiscard]] QString NormalizeMailtoTarget(const QString &target) {
+	const auto parsed = QUrl(target);
+	auto result = parsed.path(QUrl::FullyDecoded);
+	if (result.isEmpty()) {
+		result = target.mid(target.indexOf(QChar(':')) + 1);
+		const auto question = result.indexOf(QChar('?'));
+		if (question >= 0) {
+			result = result.left(question);
+		}
+		result = QString::fromUtf8(
+			QByteArray::fromPercentEncoding(result.toUtf8()));
+	}
+	while (result.startsWith(u"/"_q)) {
+		result.remove(0, 1);
+	}
+	return result.trimmed();
+}
+
+void NormalizeExternalLink(PreparedLink *result, const QString &target) {
+	result->kind = PreparedLinkKind::External;
+	result->fragment = QString();
+	if (target.startsWith(u"mailto:"_q, Qt::CaseInsensitive)) {
+		result->target = NormalizeMailtoTarget(target);
+		result->copyText = result->target;
+		result->entityType = EntityType::Email;
+		result->shown = EntityLinkShown::Full;
+		return;
+	}
+	result->target = UrlClickHandler::EncodeForOpening(target);
+	result->copyText = result->target;
+	result->entityType = EntityType::Url;
+	result->shown = EntityLinkShown::Full;
+}
+
 } // namespace
 
 QString InternalLinkData(uint16 index) {
@@ -137,10 +174,17 @@ PreparedLink ClassifiedLink(
 		const PrepareState *state) {
 	auto result = PreparedLink();
 	result.index = index;
-	result.copyText = target;
 	if (target.startsWith(QChar('#'))) {
 		result.kind = PreparedLinkKind::Anchor;
 		result.target = NormalizeFragmentId(target.mid(1));
+		return result;
+	}
+	if (LooksLikeFilesystemTarget(target)) {
+		result.kind = PreparedLinkKind::RejectedRelative;
+		return result;
+	}
+	if (HasUrlScheme(target)) {
+		NormalizeExternalLink(&result, target);
 		return result;
 	}
 
@@ -155,14 +199,6 @@ PreparedLink ClassifiedLink(
 		result.kind = PreparedLinkKind::Anchor;
 		result.target = result.fragment;
 		result.fragment = QString();
-		return result;
-	}
-	if (LooksLikeFilesystemTarget(target)) {
-		result.kind = PreparedLinkKind::RejectedRelative;
-		return result;
-	}
-	if (HasUrlScheme(target)) {
-		result.kind = PreparedLinkKind::External;
 		return result;
 	}
 	if (!state

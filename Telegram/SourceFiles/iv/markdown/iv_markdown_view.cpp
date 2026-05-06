@@ -13,7 +13,9 @@
 #include "core/file_utilities.h"
 #include "lang/lang_keys.h"
 #include "logs.h"
+#include "ui/integration.h"
 #include "ui/style/style_core_scale.h"
+#include "ui/text/text.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/scroll_area.h"
@@ -57,6 +59,47 @@ namespace {
 	return options.clickHandlerContextRef
 		? *options.clickHandlerContextRef
 		: options.clickHandlerContext;
+}
+
+[[nodiscard]] std::optional<EntityLinkData> ExternalEntityLinkData(
+		const PreparedLink &link) {
+	if (link.kind != PreparedLinkKind::External || link.target.isEmpty()) {
+		return std::nullopt;
+	}
+	switch (link.entityType) {
+	case EntityType::Url:
+	case EntityType::CustomUrl:
+	case EntityType::Email:
+		return EntityLinkData{
+			.text = !link.copyText.isEmpty() ? link.copyText : link.target,
+			.data = link.target,
+			.type = link.entityType,
+			.shown = link.shown,
+		};
+	default:
+		return std::nullopt;
+	}
+}
+
+[[nodiscard]] bool ActivateExternalLink(
+		const PreparedLink &link,
+		Qt::MouseButton button,
+		QVariant context) {
+	const auto data = ExternalEntityLinkData(link);
+	if (!data) {
+		return false;
+	}
+	const auto handler = Ui::Integration::Instance().createLinkHandler(
+		*data,
+		Ui::Text::MarkedContext());
+	if (!handler) {
+		return false;
+	}
+	auto click = ClickContext();
+	click.button = button;
+	click.other = std::move(context);
+	handler->onClick(std::move(click));
+	return true;
 }
 
 } // namespace
@@ -244,9 +287,13 @@ void MarkdownPreviewRoot::activateLink(
 	}
 	switch (link.kind) {
 	case PreparedLinkKind::External:
-		HiddenUrlClickHandler::Open(
-			link.target,
-			CurrentClickHandlerContext(_options));
+		if (!ActivateExternalLink(
+				link,
+				button,
+				CurrentClickHandlerContext(_options))) {
+			DEBUG_LOG(("Native Markdown IV: failed external link activation: %1").arg(
+				link.target));
+		}
 		break;
 	case PreparedLinkKind::Anchor:
 	case PreparedLinkKind::Footnote:
