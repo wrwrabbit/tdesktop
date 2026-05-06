@@ -20,7 +20,8 @@ namespace {
 constexpr auto kDefaultMaxSize = 8 * int64(1024 * 1024);
 constexpr auto kDefaultAutoPlaySize = 50 * int64(1024 * 1024);
 constexpr auto kVersion1 = char(1);
-constexpr auto kVersion = char(2);
+constexpr auto kVersion2 = char(2);
+constexpr auto kVersion = char(3);
 
 template <typename Enum>
 auto enums_view(int from, int till) {
@@ -218,6 +219,8 @@ QByteArray Full::serialize() const {
 	auto result = QByteArray();
 	auto size = sizeof(qint8);
 	size += kSourcesCount * kTypesCount * sizeof(qint32);
+	size += sizeof(qint32);
+	size += _peerOverrides.size() * (sizeof(quint64) + sizeof(qint8));
 	result.reserve(size);
 	{
 		auto buffer = QBuffer(&result);
@@ -228,6 +231,12 @@ QByteArray Full::serialize() const {
 			for (const auto type : enums_view<Type>(kTypesCount)) {
 				stream << set(source).serialize(type);
 			}
+		}
+		stream << qint32(_peerOverrides.size());
+		for (const auto &[peerId, override] : _peerOverrides) {
+			stream
+				<< SerializePeerId(peerId)
+				<< qint8(static_cast<char>(override));
 		}
 	}
 	return result;
@@ -243,7 +252,9 @@ bool Full::setFromSerialized(const QByteArray &serialized) {
 	stream >> version;
 	if (stream.status() != QDataStream::Ok) {
 		return false;
-	} else if (version != kVersion && version != kVersion1) {
+	} else if (version != kVersion
+		&& version != kVersion2
+		&& version != kVersion1) {
 		return false;
 	}
 	auto temp = Full();
@@ -265,7 +276,33 @@ bool Full::setFromSerialized(const QByteArray &serialized) {
 			}
 		}
 	}
+	if (version >= kVersion && !stream.atEnd()) {
+		auto count = qint32();
+		stream >> count;
+		if (stream.status() != QDataStream::Ok || count < 0) {
+			return false;
+		}
+		for (auto i = 0; i != count; ++i) {
+			auto serializedPeerId = quint64();
+			auto rawOverride = qint8();
+			stream >> serializedPeerId >> rawOverride;
+			if (stream.status() != QDataStream::Ok) {
+				return false;
+			}
+			const auto value = (rawOverride == qint8(Override::ForceAllow))
+				? Override::ForceAllow
+				: (rawOverride == qint8(Override::ForceDeny))
+				? Override::ForceDeny
+				: Override::Default;
+			if (value != Override::Default) {
+				temp.setPeerOverride(
+					DeserializePeerId(serializedPeerId),
+					value);
+			}
+		}
+	}
 	_data = temp._data;
+	_peerOverrides = std::move(temp._peerOverrides);
 	return true;
 }
 
