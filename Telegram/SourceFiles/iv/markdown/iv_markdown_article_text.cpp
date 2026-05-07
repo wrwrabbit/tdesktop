@@ -1,6 +1,7 @@
 #include "iv/markdown/iv_markdown_article_text.h"
 
 #include "iv/markdown/iv_markdown_article_layout_blocks.h"
+#include "iv/markdown/iv_markdown_prepare_serialize.h"
 
 #include "lang/lang_keys.h"
 #include "ui/basic_click_handlers.h"
@@ -1088,7 +1089,7 @@ void SetTextLeaf(
 			QStringView data,
 			const Ui::Text::MarkedContext &context
 	) -> std::unique_ptr<Ui::Text::CustomEmoji> {
-		const auto parsed = ParseInlineTextObjectEntity(data.toString());
+		const auto parsed = ParseInlineTextObjectEntity(data);
 		if (!parsed) {
 			return std::unique_ptr<Ui::Text::CustomEmoji>();
 		}

@@ -7,8 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "tests/test_main.h"
 
-#include "iv/markdown/iv_markdown_prepare.h"
-
 #include "base/invoke_queued.h"
 #include "base/integration.h"
 #include "ui/effects/animations.h"
@@ -61,10 +59,15 @@ namespace {
 	return image;
 }
 
+[[nodiscard]] int RenderTextPadding() {
+	return scale(6);
+}
+
 [[nodiscard]] QImage RenderTextOffscreen(
 		const Ui::Text::String &text,
-		int availableWidth) {
-	const auto padding = scale(6);
+		int availableWidth,
+		std::optional<TextSelection> selection = std::nullopt) {
+	const auto padding = RenderTextPadding();
 	const auto image = QImage(
 		QSize(
 			std::max(text.maxWidth(), availableWidth) + (2 * padding),
@@ -77,8 +80,118 @@ namespace {
 	text.draw(painter, {
 		.position = QPoint(padding, padding),
 		.availableWidth = availableWidth,
+		.selection = selection.value_or(TextSelection()),
 	});
 	return result;
+}
+
+[[nodiscard]] std::optional<QRect> ChangedBoundsInRect(
+		const QImage &first,
+		const QImage &second,
+		QRect rect) {
+	if (first.size() != second.size()) {
+		return std::nullopt;
+	}
+	rect = rect.intersected(QRect(QPoint(), first.size()));
+	if (rect.isEmpty()) {
+		return std::nullopt;
+	}
+	auto left = rect.right();
+	auto top = rect.bottom();
+	auto right = rect.left() - 1;
+	auto bottom = rect.top() - 1;
+	for (auto y = rect.top(); y <= rect.bottom(); ++y) {
+		for (auto x = rect.left(); x <= rect.right(); ++x) {
+			if (first.pixel(x, y) == second.pixel(x, y)) {
+				continue;
+			}
+			left = std::min(left, x);
+			top = std::min(top, y);
+			right = std::max(right, x);
+			bottom = std::max(bottom, y);
+		}
+	}
+	return (right >= left) && (bottom >= top)
+		? std::make_optional(QRect(QPoint(left, top), QPoint(right, bottom)))
+		: std::nullopt;
+}
+
+[[nodiscard]] std::optional<QRect> SymbolHitBounds(
+		const Ui::Text::String &text,
+		int availableWidth,
+		int offset) {
+	if ((availableWidth <= 0) || (offset < 0)) {
+		return std::nullopt;
+	}
+	const auto padding = RenderTextPadding();
+	const auto height = std::max(
+		text.countHeight(availableWidth),
+		text.minHeight());
+	auto flags = Ui::Text::StateRequest::Flags();
+	flags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+	auto request = Ui::Text::StateRequest();
+	request.flags = flags;
+	auto left = padding + availableWidth;
+	auto top = padding + height;
+	auto right = -1;
+	auto bottom = -1;
+	for (auto y = 0; y != height; ++y) {
+		for (auto x = 0; x != availableWidth; ++x) {
+			const auto hit = text.getState(QPoint(x, y), availableWidth, request);
+			if (!hit.uponSymbol || (int(hit.symbol) != offset)) {
+				continue;
+			}
+			left = std::min(left, x + padding);
+			top = std::min(top, y + padding);
+			right = std::max(right, x + padding);
+			bottom = std::max(bottom, y + padding);
+		}
+	}
+	return (right >= left) && (bottom >= top)
+		? std::make_optional(QRect(QPoint(left, top), QPoint(right, bottom)))
+		: std::nullopt;
+}
+
+[[nodiscard]] std::optional<QRect> SymbolRangeHitBounds(
+		const Ui::Text::String &text,
+		int availableWidth,
+		int offset,
+		int length) {
+	if ((availableWidth <= 0) || (offset < 0) || (length <= 0)) {
+		return std::nullopt;
+	}
+	const auto padding = RenderTextPadding();
+	const auto height = std::max(
+		text.countHeight(availableWidth),
+		text.minHeight());
+	auto flags = Ui::Text::StateRequest::Flags();
+	flags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+	auto request = Ui::Text::StateRequest();
+	request.flags = flags;
+	auto left = padding + availableWidth;
+	auto top = padding + height;
+	auto right = -1;
+	auto bottom = -1;
+	const auto end = offset + length;
+	for (auto y = 0; y != height; ++y) {
+		for (auto x = 0; x != availableWidth; ++x) {
+			const auto hit = text.getState(QPoint(x, y), availableWidth, request);
+			if (!hit.uponSymbol) {
+				continue;
+			}
+			const auto symbol = int(hit.symbol);
+			if ((symbol < offset) || (symbol >= end)) {
+				continue;
+			}
+			left = std::min(left, x + padding);
+			top = std::min(top, y + padding);
+			right = std::max(right, x + padding);
+			bottom = std::max(bottom, y + padding);
+		}
+	}
+	return (right >= left) && (bottom >= top)
+		? std::make_optional(QRect(QPoint(left, top), QPoint(right, bottom)))
+		: std::nullopt;
 }
 
 [[nodiscard]] bool HasPaintedPixels(const QImage &image) {
@@ -182,13 +295,8 @@ QString name() {
 void test(not_null<Ui::RpWindow*> window, not_null<Ui::RpWidget*> body) {
 	(void)window;
 
-	const auto formulaEntityData = Iv::Markdown::SerializeInlineTextObjectEntity({
-		.kind = Iv::Markdown::InlineTextObjectKind::Formula,
-		.data = Iv::Markdown::InlineTextObjectFormulaData{
-			.copySource = u"$\\frac{a}{b}$"_q,
-			.trimmedTex = u"\\frac{a}{b}"_q,
-		},
-	});
+	const auto formulaEntityData = u"test-formula-like-object"_q;
+	const auto formulaReplacementText = u"$\\frac{a}{b}$"_q;
 	const auto controlEntityData = u"test-custom-emoji"_q;
 	const auto formulaImage = MakeObjectImage(
 		QSize(scale(64), scale(28)),
@@ -201,22 +309,17 @@ void test(not_null<Ui::RpWindow*> window, not_null<Ui::RpWidget*> body) {
 
 	auto context = Ui::Text::MarkedContext();
 	context.customEmojiFactory = [
+		formulaEntityData,
+		formulaReplacementText,
 		formulaImage,
 		controlImage
 	](QStringView data, const Ui::Text::MarkedContext &)
 	-> std::unique_ptr<Ui::Text::CustomEmoji> {
-		if (const auto parsed = Iv::Markdown::ParseInlineTextObjectEntity(
-				data.toString())) {
-			if (parsed->kind == Iv::Markdown::InlineTextObjectKind::Formula) {
-				if (const auto formula = std::get_if<
-						Iv::Markdown::InlineTextObjectFormulaData>(&parsed->data)) {
-					return std::make_unique<FormulaLikeObject>(
-						data.toString(),
-						formula->copySource,
-						formulaImage);
-				}
-			}
-			return std::unique_ptr<Ui::Text::CustomEmoji>();
+		if (data == formulaEntityData) {
+			return std::make_unique<FormulaLikeObject>(
+				data.toString(),
+				formulaReplacementText,
+				formulaImage);
 		}
 		if (data == u"test-custom-emoji"_q) {
 			return std::make_unique<Ui::Text::PaletteDependentCustomEmoji>(
@@ -306,6 +409,82 @@ void test(not_null<Ui::RpWindow*> window, not_null<Ui::RpWidget*> body) {
 		HasEntityType(
 			controlText->toTextWithEntities().entities,
 			EntityType::CustomEmoji));
+	const auto controlProbeText = u"a / b"_q;
+	const auto controlLineSource = u"Alpha a / b omega"_q;
+	const auto controlProbePosition = controlLineSource.indexOf(controlProbeText);
+	Expects(controlProbePosition >= 0);
+	const auto controlLineText = Ui::Text::String(
+		st::defaultTextStyle,
+		controlLineSource,
+		kMarkupTextOptions,
+		scale(64));
+	const auto selectionWidth = std::max(
+		formulaText->maxWidth(),
+		controlLineText.maxWidth());
+	const auto formulaSelection = TextSelection(
+		0,
+		uint16(formulaData.text.size()));
+	const auto formulaUnselected = RenderTextOffscreen(
+		*formulaText,
+		selectionWidth);
+	const auto formulaSelected = RenderTextOffscreen(
+		*formulaText,
+		selectionWidth,
+		formulaSelection);
+	const auto formulaHitBounds = SymbolHitBounds(
+		*formulaText,
+		selectionWidth,
+		formulaPosition);
+	Expects(formulaHitBounds.has_value());
+	const auto controlSelection = TextSelection(
+		0,
+		uint16(controlLineSource.size()));
+	const auto controlUnselected = RenderTextOffscreen(
+		controlLineText,
+		selectionWidth);
+	const auto controlSelected = RenderTextOffscreen(
+		controlLineText,
+		selectionWidth,
+		controlSelection);
+	const auto controlHitBounds = SymbolRangeHitBounds(
+		controlLineText,
+		selectionWidth,
+		controlProbePosition,
+		controlProbeText.size());
+	Expects(controlHitBounds.has_value());
+	if (formulaHitBounds && controlHitBounds) {
+		const auto formulaChangedBounds = ChangedBoundsInRect(
+			formulaUnselected,
+			formulaSelected,
+			QRect(
+				formulaHitBounds->x(),
+				0,
+				formulaHitBounds->width(),
+				formulaSelected.height()));
+		const auto controlChangedBounds = ChangedBoundsInRect(
+			controlUnselected,
+			controlSelected,
+			QRect(
+				controlHitBounds->x(),
+				0,
+				controlHitBounds->width(),
+				controlSelected.height()));
+		Expects(formulaChangedBounds.has_value());
+		Expects(controlChangedBounds.has_value());
+		if (formulaChangedBounds && controlChangedBounds) {
+			Expects(
+				formulaChangedBounds->top()
+					<= controlChangedBounds->top());
+			Expects(
+				formulaChangedBounds->bottom()
+					>= controlChangedBounds->bottom());
+			Expects(
+				(formulaChangedBounds->top()
+					< controlChangedBounds->top())
+				|| (formulaChangedBounds->bottom()
+					> controlChangedBounds->bottom()));
+		}
+	}
 
 	auto leadingFormulaData = TextWithEntities();
 	leadingFormulaData.append(QChar::ObjectReplacementCharacter);

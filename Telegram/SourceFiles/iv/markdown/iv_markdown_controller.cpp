@@ -538,7 +538,7 @@ void Controller::createWindow() {
 	window->setTitle(_title);
 	window->setWindowTitle(_title);
 	window->setGeometry(_delegate->ivGeometry(window));
-	window->setMinimumSize({ st::windowMinWidth, st::windowMinHeight });
+	window->setMinimumSize({ st::ivWidthMin, st::ivHeightMin });
 	window->geometryValue(
 	) | rpl::distinct_until_changed(
 	) | rpl::skip(1) | rpl::on_next([=] {
@@ -581,10 +581,6 @@ void Controller::createWindow() {
 			return base::EventFilterResult::Continue;
 		}
 		const auto event = static_cast<QKeyEvent*>(e.get());
-		if (event->matches(QKeySequence::Close)) {
-			close();
-			return base::EventFilterResult::Cancel;
-		}
 		const auto previousAccepted = event->isAccepted();
 		ProcessZoomShortcut(_delegate, event);
 		return event->isAccepted() && !previousAccepted

@@ -128,7 +128,6 @@ struct TableRowLayoutData {
 [[nodiscard]] int TableCellTextMinResizeWidth(
 	const style::TextStyle &textStyle,
 	const style::Markdown &markdown);
-[[nodiscard]] int LeafTextLength(const Ui::Text::String &leaf);
 [[nodiscard]] QString CodeBlockDisplayText(const QString &text);
 [[nodiscard]] int BlockSkip(
 	const PreparedBlock &block,

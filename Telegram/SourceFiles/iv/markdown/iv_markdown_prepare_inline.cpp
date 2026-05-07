@@ -281,6 +281,10 @@ void AppendTextWithInlineFormulas(
 	return RawInlineTag::None;
 }
 
+[[nodiscard]] bool IsSimpleRawInlineLineBreak(const MarkdownNode &node) {
+	return (node.kind == NodeKind::HtmlInline) && (node.raw == u"<br>"_q);
+}
+
 [[nodiscard]] bool IsOpeningRawInlineTag(RawInlineTag tag) {
 	return (tag == RawInlineTag::SubOpen)
 		|| (tag == RawInlineTag::SupOpen)
@@ -377,6 +381,13 @@ void AppendInlineRange(
 				i = closing;
 				continue;
 			}
+		}
+		if (IsSimpleRawInlineLineBreak(node)
+			&& ((i + 1) < till)
+			&& (nodes[i + 1].kind == NodeKind::SoftBreak)) {
+			text->append(QChar('\n'));
+			++i;
+			continue;
 		}
 		AppendInline(node, text, links, inlineFormulas, state);
 	}

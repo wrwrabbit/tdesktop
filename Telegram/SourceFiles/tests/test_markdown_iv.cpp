@@ -4,6 +4,8 @@
 #include "iv/markdown/iv_markdown_microtex.h"
 #include "iv/markdown/iv_markdown_parse.h"
 #include "iv/markdown/iv_markdown_prepare.h"
+#include "iv/markdown/iv_markdown_view.h"
+#include "iv/markdown/iv_markdown_view_widget.h"
 #include "iv/iv_prepare.h"
 #include "scheme.h"
 
@@ -13,6 +15,8 @@
 #include "ui/dynamic_image.h"
 #include "ui/style/style_core.h"
 #include "ui/style/style_core_scale.h"
+#include "ui/widgets/rp_window.h"
+#include "ui/widgets/scroll_area.h"
 
 #include "styles/style_iv.h"
 
@@ -26,9 +30,9 @@
 #include <QtCore/QIODevice>
 #include <QtCore/QString>
 #include <QtCore/QVector>
-#include <QtGui/QGuiApplication>
 #include <QtGui/QColor>
 #include <QtGui/QImage>
+#include <QtWidgets/QApplication>
 
 #include <rpl/never.h>
 
@@ -1202,7 +1206,8 @@ void PrintPrepareSummary(
 	if (height) {
 		*height = article->resizeGetHeight(width);
 	} else {
-		article->resizeGetHeight(width);
+		const auto computed = article->resizeGetHeight(width);
+		(void)computed;
 	}
 	return article;
 }
@@ -1211,7 +1216,8 @@ void PrintPrepareSummary(
 		MarkdownArticle *article,
 		int width,
 		int height,
-		int devicePixelRatio = 1) {
+		int devicePixelRatio = 1,
+		std::optional<MarkdownArticleSelection> selection = std::nullopt) {
 	const auto previousDevicePixelRatio = style::DevicePixelRatio();
 	style::SetDevicePixelRatio(devicePixelRatio);
 
@@ -1225,7 +1231,8 @@ void PrintPrepareSummary(
 		article->paint(
 			painter,
 			QRect(0, 0, width, height),
-			MarkdownArticlePaintCaches());
+			MarkdownArticlePaintCaches(),
+			selection.value_or(MarkdownArticleSelection()));
 	}
 
 	style::SetDevicePixelRatio(previousDevicePixelRatio);
@@ -1239,7 +1246,7 @@ void PrintPrepareSummary(
 		int devicePixelRatio = 1) {
 	static auto preCache = [] {
 		auto result = Ui::Text::QuotePaintCache();
-		const auto color = st::inTextPalette.monoFg->c;
+		const auto color = st::defaultMarkdownTextPalette.monoFg->c;
 		result.bg = color;
 		result.bg.setAlpha(Ui::kDefaultBgOpacity * 255);
 		result.outlines[0] = color;
@@ -1318,6 +1325,29 @@ private:
 	return false;
 }
 
+void FlushPendingWidgetEvents() {
+	for (auto i = 0; i != 3; ++i) {
+		QCoreApplication::sendPostedEvents();
+		QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+	}
+}
+
+template <typename Object>
+[[nodiscard]] Object *FindChildObject(QObject *root) {
+	if (!root) {
+		return nullptr;
+	}
+	for (auto child : root->children()) {
+		if (const auto object = dynamic_cast<Object*>(child)) {
+			return object;
+		}
+		if (const auto nested = FindChildObject<Object>(child)) {
+			return nested;
+		}
+	}
+	return nullptr;
+}
+
 [[nodiscard]] bool PaintTouchesBottomOrRightImageEdge(const QImage &image) {
 	if (image.isNull()) {
 		return false;
@@ -1386,6 +1416,37 @@ private:
 		}
 	}
 	return false;
+}
+
+[[nodiscard]] std::optional<QRect> ChangedBoundsInRect(
+		const QImage &first,
+		const QImage &second,
+		QRect rect) {
+	if (first.size() != second.size()) {
+		return std::nullopt;
+	}
+	rect = rect.intersected(QRect(QPoint(), first.size()));
+	if (rect.isEmpty()) {
+		return std::nullopt;
+	}
+	auto left = rect.right();
+	auto top = rect.bottom();
+	auto right = rect.left() - 1;
+	auto bottom = rect.top() - 1;
+	for (auto y = rect.top(); y <= rect.bottom(); ++y) {
+		for (auto x = rect.left(); x <= rect.right(); ++x) {
+			if (first.pixel(x, y) == second.pixel(x, y)) {
+				continue;
+			}
+			left = std::min(left, x);
+			top = std::min(top, y);
+			right = std::max(right, x);
+			bottom = std::max(bottom, y);
+		}
+	}
+	return (right >= left) && (bottom >= top)
+		? std::make_optional(QRect(QPoint(left, top), QPoint(right, bottom)))
+		: std::nullopt;
 }
 
 [[nodiscard]] std::optional<QRect> SymbolHitBounds(
@@ -2000,6 +2061,58 @@ void CheckInlineHtmlCoverage(bool dump, bool *ok) {
 				ok);
 		}
 	}
+}
+
+void CheckInlineHtmlPrepareCoverage(bool *ok) {
+	const auto source = QByteArray(
+		"HTML line break test:<br>\n"
+		"This should also be on a new line.\n");
+	const auto label = FromLatin1("generated-inline-html-prepare.md");
+	const auto parsed = ParseMarkdownForIv(source, ParseOptions{ label });
+	Check(
+		parsed.ok,
+		label + FromLatin1(" parse failed: ") + parsed.error,
+		ok);
+	if (!parsed.ok) {
+		return;
+	}
+	const auto prepared = PrepareParsedDocumentForTest(
+		parsed.document,
+		label,
+		std::make_shared<MathRenderer>());
+	Check(
+		!prepared.failure.failed(),
+		label + FromLatin1(" prepare failure: ")
+			+ PrepareFailureReason(prepared.failure),
+		ok);
+	if (prepared.failure.failed()) {
+		return;
+	}
+	const auto paragraph = FindPreparedParagraphContaining(
+		prepared,
+		FromLatin1("HTML line break test:"));
+	Check(
+		paragraph != nullptr,
+		label + FromLatin1(" prepared paragraph found"),
+		ok);
+	if (!paragraph) {
+		return;
+	}
+	const auto expected = FromLatin1(
+		"HTML line break test:\nThis should also be on a new line.");
+	const auto &text = paragraph->text.text;
+	Check(
+		text.contains(expected),
+		label + FromLatin1(" prepared text keeps real newline"),
+		ok);
+	Check(
+		!text.contains(FromLatin1("<br>")),
+		label + FromLatin1(" prepared text drops literal br"),
+		ok);
+	Check(
+		!text.contains(FromLatin1("\n ")),
+		label + FromLatin1(" prepared text has no post-break space"),
+		ok);
 }
 
 void CheckFixtureSemanticCoverage(
@@ -4539,6 +4652,10 @@ void CheckArticleRasterRegressionCoverage(bool *ok) {
 				controlBounds.has_value(),
 				baselineLabel + FromLatin1(" plain-text control hit bounds"),
 				ok);
+			Check(
+				article->segmentIsText(0),
+				baselineLabel + FromLatin1(" first segment is text"),
+				ok);
 			if (bounds && controlBounds) {
 				const auto dpr1Painted = PaintedBoundsInRect(dpr1Image, *bounds);
 				const auto dpr1ControlPainted = PaintedBoundsInRect(
@@ -4570,6 +4687,10 @@ void CheckArticleRasterRegressionCoverage(bool *ok) {
 					&& dpr1ControlPainted
 					&& dpr2Painted
 					&& dpr2ControlPainted) {
+					const auto formulaExtendsAboveControl
+						= dpr1Painted->top() < dpr1ControlPainted->top();
+					const auto formulaExtendsBelowControl
+						= dpr1Painted->bottom() > dpr1ControlPainted->bottom();
 					Check(
 						withinOneLogicalPixel(
 							double(dpr1Painted->bottom()),
@@ -4596,10 +4717,76 @@ void CheckArticleRasterRegressionCoverage(bool *ok) {
 							double(dpr2Painted->bottom()) / 2.),
 						baselineLabel + FromLatin1(" DPR bottom alignment"),
 						ok);
+					if (article->segmentIsText(0)) {
+						const auto selectedImage = PaintArticleForTest(
+							article.get(),
+							articleWidth,
+							articleHeight,
+							1,
+							MarkdownArticleSelection{
+								.from = { .segment = 0, .offset = 0 },
+								.to = {
+									.segment = 0,
+									.offset = article->segmentLength(0),
+								},
+							});
+						const auto selectionFormulaBounds = ChangedBoundsInRect(
+							dpr1Image,
+							selectedImage,
+							QRect(bounds->x(), 0, bounds->width(), articleHeight));
+						const auto selectionControlBounds = ChangedBoundsInRect(
+							dpr1Image,
+							selectedImage,
+							QRect(
+								controlBounds->x(),
+								0,
+								controlBounds->width(),
+								articleHeight));
+						Check(
+							selectionFormulaBounds.has_value(),
+							baselineLabel + FromLatin1(
+								" formula selection changed bounds"),
+							ok);
+						Check(
+							selectionControlBounds.has_value(),
+							baselineLabel + FromLatin1(
+								" plain-text control selection changed bounds"),
+							ok);
+						if (selectionFormulaBounds && selectionControlBounds) {
+							Check(
+								selectionFormulaBounds->top()
+									<= selectionControlBounds->top(),
+								baselineLabel + FromLatin1(
+									" formula selection reaches control top"),
+								ok);
+							Check(
+								selectionFormulaBounds->bottom()
+									>= selectionControlBounds->bottom(),
+								baselineLabel + FromLatin1(
+									" formula selection reaches control bottom"),
+								ok);
+							if (formulaExtendsAboveControl) {
+								Check(
+									selectionFormulaBounds->top()
+										< selectionControlBounds->top(),
+									baselineLabel + FromLatin1(
+										" formula selection keeps extra top"),
+									ok);
+							}
+							if (formulaExtendsBelowControl) {
+								Check(
+									selectionFormulaBounds->bottom()
+										> selectionControlBounds->bottom(),
+									baselineLabel + FromLatin1(
+										" formula selection keeps extra bottom"),
+									ok);
+							}
+						}
+					}
 				}
-			}
 		}
 	}
+}
 }
 
 void CheckArticleRenderSmoke(
@@ -5153,6 +5340,70 @@ void CheckArticleRenderSmoke(
 	}
 }
 
+void CheckAnchorScrollAlignmentCoverage(bool *ok) {
+	const auto label = FromLatin1("markdown-example.md");
+	auto renderer = std::make_shared<MathRenderer>();
+	auto fixture = PreparedFixture();
+	if (!PrepareFixture(
+			DefaultFixturePath(label),
+			label,
+			renderer,
+			&fixture)) {
+		Check(false, label + FromLatin1(" fixture preparation"), ok);
+		return;
+	}
+	auto window = Ui::RpWindow();
+	window.setGeometry(QRect(0, 0, 520, 240));
+	window.show();
+	FlushPendingWidgetEvents();
+	auto preview = CreateMarkdownPreviewWidget(
+		window.body(),
+		std::move(fixture.prepared),
+		renderer,
+		[](Event) {
+		});
+	preview->setGeometry(QRect(QPoint(), window.body()->size()));
+	preview->show();
+	FlushPendingWidgetEvents();
+	const auto scroll = FindChildObject<Ui::ScrollArea>(preview.get());
+	const auto body = FindChildObject<MarkdownDocumentWidget>(preview.get());
+	Check(
+		scroll != nullptr,
+		label + FromLatin1(" preview scroll area"),
+		ok);
+	Check(
+		body != nullptr,
+		label + FromLatin1(" preview body widget"),
+		ok);
+	if (!scroll || !body) {
+		return;
+	}
+	const auto initialTop = scroll->scrollTop();
+	const auto anchorId = u"headings"_q;
+	Check(
+		scroll->scrollTopMax() > 0,
+		label + FromLatin1(" preview can scroll"),
+		ok);
+	Check(
+		body->anchorTop(anchorId) > initialTop,
+		label + FromLatin1(" headings anchor starts below viewport top"),
+		ok);
+	if (!(scroll->scrollTopMax() > 0)
+		|| !(body->anchorTop(anchorId) > initialTop)) {
+		return;
+	}
+	Check(
+		ScrollMarkdownPreviewToAnchor(preview.get(), anchorId),
+		label + FromLatin1(" anchor scroll request"),
+		ok);
+	FlushPendingWidgetEvents();
+	Check(
+		scroll->scrollTop()
+			== std::min(body->anchorTop(anchorId), scroll->scrollTopMax()),
+		label + FromLatin1(" anchor scroll aligns to viewport top"),
+		ok);
+}
+
 void CheckArticleHorizontalRelayoutRegression(bool *ok) {
 	const auto label = FromLatin1("generated-horizontal-relayout-regression.md");
 	const auto parsed = ParseMarkdownForIv(
@@ -5348,6 +5599,7 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 	if (args.inlineHtml) {
 		auto ok = true;
 		CheckInlineHtmlCoverage(args.dump, &ok);
+		CheckInlineHtmlPrepareCoverage(&ok);
 		return ok ? 0 : 1;
 	}
 	if (args.markdownPath.isEmpty()) {
@@ -5763,9 +6015,11 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 	CheckArticleRenderSmoke(markdownFixture, latexFixture, &ok);
 	CheckInlineTextObjectArticleCoverage(&ok);
 	CheckArticleRasterRegressionCoverage(&ok);
+	CheckAnchorScrollAlignmentCoverage(&ok);
 	CheckArticleHorizontalRelayoutRegression(&ok);
 	CheckNativeInstantViewArticleCoverage(&ok);
 	CheckInlineHtmlCoverage(args.dump, &ok);
+	CheckInlineHtmlPrepareCoverage(&ok);
 	CheckValidationEdges(&ok);
 
 	return ok ? 0 : 1;
@@ -5775,7 +6029,7 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 
 int main(int argc, char **argv) {
 	QCoreApplication::setAttribute(Qt::AA_Use96Dpi);
-	auto application = QGuiApplication(argc, argv);
+	auto application = QApplication(argc, argv);
 	(void)application;
 
 	style::SetDevicePixelRatio(1);

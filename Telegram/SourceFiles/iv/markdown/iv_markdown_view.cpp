@@ -415,9 +415,7 @@ void MarkdownPreviewRoot::fillFootnoteBox(
 	box->setCloseByOutsideClick(true);
 	box->clearButtons();
 
-	auto label = object_ptr<Ui::FlatLabel>(
-		box->verticalLayout().get(),
-		st::markdownFootnoteLabel);
+	auto label = object_ptr<Ui::FlatLabel>(box, st::markdownFootnoteLabel);
 	label->setMarkedText(footnote.text);
 	label->setTryMakeSimilarLines(true);
 	for (const auto &link : footnote.links) {
@@ -433,14 +431,14 @@ void MarkdownPreviewRoot::fillFootnoteBox(
 		return true;
 	});
 
-	const auto horizontalPadding = rect::m::sum::h(st::markdownFootnotePadding);
+	const auto skips = rect::m::sum::h(st::markdownFootnotePadding);
 	const auto contentWidth = FootnoteLabelContentWidth(
 		label.get(),
 		std::max(
-			st::boxWideWidth - horizontalPadding,
+			st::boxWideWidth - skips,
 			st::markdownFootnoteLabel.minWidth));
 	label->resizeToWidth(contentWidth);
-	box->setWidth(contentWidth + horizontalPadding);
+	box->setWidth(contentWidth + skips);
 	box->addRow(std::move(label), st::markdownFootnotePadding);
 }
 
@@ -507,7 +505,7 @@ bool MarkdownPreviewRoot::scrollToAnchor(const QString &anchorId) {
 	if (top < 0) {
 		return false;
 	}
-	_scroll->scrollToY(top, top + 1);
+	_scroll->scrollToY(top);
 	return true;
 }
 

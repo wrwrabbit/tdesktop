@@ -7,7 +7,7 @@ namespace Iv::Markdown {
 [[nodiscard]] QString SerializeInlineTextObjectEntity(
 	const InlineTextObjectEntity &object);
 [[nodiscard]] std::optional<InlineTextObjectEntity> ParseInlineTextObjectEntity(
-	const QString &data);
+	QStringView data);
 [[nodiscard]] MarkdownPrepareDimensions CaptureMarkdownPrepareDimensions();
 
 } // namespace Iv::Markdown

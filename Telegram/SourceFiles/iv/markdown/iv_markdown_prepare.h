@@ -250,8 +250,6 @@ struct NativeInstantViewPrepareResult {
 [[nodiscard]] MarkdownPrepareDimensions CaptureMarkdownPrepareDimensions();
 [[nodiscard]] QString SerializeInlineTextObjectEntity(
 	const InlineTextObjectEntity &object);
-[[nodiscard]] std::optional<InlineTextObjectEntity> ParseInlineTextObjectEntity(
-	const QString &data);
 [[nodiscard]] MarkdownArticleContent PrepareSynchronously(PrepareRequest request);
 [[nodiscard]] NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 	NativeInstantViewPrepareRequest request);

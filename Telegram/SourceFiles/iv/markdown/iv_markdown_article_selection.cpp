@@ -96,7 +96,7 @@ const auto kPhotoCopyLabel = u"Photo"_q;
 		const QString &label,
 		const Ui::Text::String &captionLeaf) {
 	auto result = TextForMimeData::Simple(label);
-	if (!captionLeaf.toString().isEmpty()) {
+	if (!captionLeaf.isEmpty()) {
 		result.append(u"\n"_q);
 		result.append(captionLeaf.toTextForMimeData());
 	}
@@ -286,7 +286,7 @@ void CollectSelectableSegments(
 				: block.textRect;
 			segment.textRect = block.textRect;
 			segment.textWidth = block.textWidth;
-			segment.length = LeafTextLength(block.leaf);
+			segment.length = block.leaf.length();
 			block.segmentIndex = AddSelectableSegment(
 				segments,
 				std::move(segment));
@@ -299,7 +299,7 @@ void CollectSelectableSegments(
 			segment.outerRect = block.outer;
 			segment.textRect = block.textRect;
 			segment.textWidth = block.textWidth;
-			segment.length = LeafTextLength(block.leaf);
+			segment.length = block.leaf.length();
 			block.segmentIndex = AddSelectableSegment(
 				segments,
 				std::move(segment));
@@ -334,7 +334,7 @@ void CollectSelectableSegments(
 					cellSegment.textRect = cell.textRect;
 					cellSegment.textWidth = cell.textWidth;
 					cellSegment.align = cell.align;
-					cellSegment.length = LeafTextLength(cell.leaf);
+					cellSegment.length = cell.leaf.length();
 					cellSegment.tableSegmentIndex = block.segmentIndex;
 					cell.tableSegmentIndex = block.segmentIndex;
 					cell.segmentIndex = AddSelectableSegment(
@@ -355,7 +355,7 @@ void CollectSelectableSegments(
 			block.segmentIndex = AddSelectableSegment(
 				segments,
 				std::move(segment));
-			if (!block.textRect.isEmpty() && !block.leaf.toString().isEmpty()) {
+			if (!block.textRect.isEmpty() && !block.leaf.isEmpty()) {
 				auto textSegment = SelectableSegment();
 				textSegment.kind = SelectableSegmentKind::TextLeaf;
 				textSegment.leaf = &block.leaf;
@@ -363,7 +363,7 @@ void CollectSelectableSegments(
 				textSegment.outerRect = block.textRect;
 				textSegment.textRect = block.textRect;
 				textSegment.textWidth = block.textWidth;
-				textSegment.length = LeafTextLength(block.leaf);
+				textSegment.length = block.leaf.length();
 				textSegment.mediaSegmentIndex = block.segmentIndex;
 				block.secondarySegmentIndex = AddSelectableSegment(
 					segments,

@@ -6,7 +6,6 @@
 #include "spellcheck/spellcheck_highlight_syntax.h"
 
 #include <algorithm>
-#include <limits>
 #include <utility>
 
 #include "styles/style_iv.h"
@@ -235,13 +234,6 @@ int TableCellTextMinResizeWidth(
 		textStyle.font->spacew,
 		1,
 	});
-}
-
-int LeafTextLength(const Ui::Text::String &leaf) {
-	return std::clamp(
-		int(leaf.toString().size()),
-		0,
-		int(std::numeric_limits<uint16>::max()));
 }
 
 int BlockSkip(

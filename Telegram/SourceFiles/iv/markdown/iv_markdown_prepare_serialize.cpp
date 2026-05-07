@@ -14,8 +14,9 @@ namespace {
 	return QString::fromUtf8(value.toUtf8().toPercentEncoding());
 }
 
-[[nodiscard]] QString DecodeInlineTextObjectField(const QString &value) {
-	return QString::fromUtf8(QByteArray::fromPercentEncoding(value.toLatin1()));
+[[nodiscard]] QString DecodeInlineTextObjectField(QStringView value) {
+	return QString::fromUtf8(
+		QByteArray::fromPercentEncoding(value.toLatin1()));
 }
 
 [[nodiscard]] int TextSizeForFormula(const style::TextStyle &textStyle) {
@@ -55,7 +56,7 @@ QString SerializeInlineTextObjectEntity(const InlineTextObjectEntity &object) {
 }
 
 std::optional<InlineTextObjectEntity> ParseInlineTextObjectEntity(
-		const QString &data) {
+		QStringView data) {
 	const auto parts = data.split(QChar(';'), Qt::KeepEmptyParts);
 	if (parts.size() < 2
 		|| parts[0] != u"iv-markdown:inline-text-object"_q) {

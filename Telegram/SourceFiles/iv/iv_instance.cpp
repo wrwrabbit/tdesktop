@@ -1652,13 +1652,17 @@ bool Instance::showMarkdown(
 				case Type::Quit:
 					Shortcuts::Launch(Shortcuts::Command::Quit);
 					break;
-				case Type::OpenFile:
-					if (!showMarkdown(event.url, event.context)) {
-						DEBUG_LOG(("Native Markdown IV: "
-							"failed local markdown link: %1"
-							).arg(event.url));
-					}
-					break;
+				// Don't try opening markdown links inside markdown viewer,
+				// messenger-provided markdown files should know nothing
+				// about other local files and their paths.
+				//
+				//case Type::OpenFile:
+				//	if (!showMarkdown(event.url, event.context)) {
+				//		DEBUG_LOG(("Native Markdown IV: "
+				//			"failed local markdown link: %1"
+				//			).arg(event.url));
+				//	}
+				//	break;
 				}
 			}, controller->lifetime());
 
@@ -1774,6 +1778,12 @@ bool Instance::closeActive() {
 	} else if (_tonSite && _tonSite->active()) {
 		_tonSite = nullptr;
 		return true;
+	}
+	for (auto &[key, controller] : _markdowns) {
+		if (controller->active()) {
+			_markdowns.take(key);
+			return true;
+		}
 	}
 	return false;
 }

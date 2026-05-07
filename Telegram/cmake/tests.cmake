@@ -105,9 +105,14 @@ PRIVATE
     iv/markdown/iv_markdown_prepare_serialize.h
     iv/markdown/iv_markdown_prepare_state.cpp
     iv/markdown/iv_markdown_prepare_state.h
+    iv/markdown/iv_markdown_view.cpp
+    iv/markdown/iv_markdown_view.h
+    iv/markdown/iv_markdown_view_widget.cpp
+    iv/markdown/iv_markdown_view_widget.h
 )
 
 target_sources(test_markdown_iv PRIVATE
+    ${CMAKE_BINARY_DIR}/Telegram/gen/styles/style_chat_helpers.cpp
     ${CMAKE_BINARY_DIR}/Telegram/gen/styles/style_iv.cpp
     ${CMAKE_BINARY_DIR}/Telegram/lib_ui/gen/styles/palette.cpp
     ${CMAKE_BINARY_DIR}/Telegram/lib_ui/gen/styles/style_basic.cpp
@@ -122,8 +127,10 @@ PRIVATE
     desktop-app::external_qt_static_plugins
     desktop-app::lib_base
     desktop-app::lib_crl
+    desktop-app::lib_spellcheck
     desktop-app::lib_tl
     desktop-app::lib_ui
+    tdesktop::td_scheme
 )
 
 set_target_properties(
