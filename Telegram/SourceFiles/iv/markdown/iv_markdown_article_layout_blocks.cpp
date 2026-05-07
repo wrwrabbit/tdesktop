@@ -1,15 +1,20 @@
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
 #include "iv/markdown/iv_markdown_article_layout_blocks.h"
-
 #include "iv/markdown/iv_markdown_article_text.h"
-
 #include "lang/lang_keys.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 
-#include <algorithm>
-#include <utility>
-
 #include "styles/style_iv.h"
 #include "styles/style_widgets.h"
+
+#include <algorithm>
+#include <utility>
 
 namespace Iv::Markdown {
 namespace {
@@ -198,16 +203,37 @@ int TextLineHeight(const style::TextStyle &style) {
 	return std::max(style.lineHeight, style.font->height);
 }
 
+[[nodiscard]] int NominalTextBaseline(
+		const style::TextStyle &style,
+		int top) {
+	const auto lineHeight = TextLineHeight(style);
+	const auto textTop = top
+		+ (std::max(lineHeight - style.font->height, 0) / 2);
+	return textTop + style.font->ascent;
+}
+
+[[nodiscard]] int LeafFirstLineBaseline(
+		const Ui::Text::String &leaf,
+		const QRect &textRect,
+		const style::TextStyle &style,
+		bool breakEverywhere = true) {
+	const auto lines = leaf.countLinesGeometry(textRect.width(), breakEverywhere);
+	return textRect.y() + (lines.empty()
+		? NominalTextBaseline(style, 0)
+		: lines.front().baseline);
+}
+
 QPoint BulletMarkerCenter(
 		int left,
-		int top,
+		int baseline,
 		const style::Markdown &markdown) {
 	const auto &list = markdown.list;
 	const auto lineHeight = TextLineHeight(markdown.body);
 	const auto markerWidth = SingleDigitOrderedMarkerWidth(markdown);
+	const auto nominalBaseline = NominalTextBaseline(markdown.body, 0);
 	return QPoint(
 		left + list.markerWidth - list.bulletLeftShift - ((markerWidth + 1) / 2),
-		top + (lineHeight / 2));
+		baseline + (lineHeight / 2) - nominalBaseline);
 }
 
 QMargins BlockquotePadding(const style::QuoteStyle &style) {
@@ -367,6 +393,10 @@ LaidOutBlock LayoutFlowBlock(
 		TextLineHeight(textStyle));
 	block.textRect = QRect(left, top, block.textWidth, height);
 	block.outer = QRect(left, top, block.textWidth, height);
+	block.firstLineBaseline = LeafFirstLineBaseline(
+		block.leaf,
+		block.textRect,
+		textStyle);
 	return block;
 }
 
@@ -394,6 +424,10 @@ LaidOutBlock LayoutCodeBlock(
 		TextLineHeight(markdown.code));
 	block.textRect = QRect(left, top, block.textWidth, height);
 	block.outer = block.textRect;
+	block.firstLineBaseline = LeafFirstLineBaseline(
+		block.leaf,
+		block.textRect,
+		markdown.code);
 	return block;
 }
 
@@ -502,6 +536,10 @@ LaidOutBlock LayoutDisplayMathBlock(
 		block.textRect.moveTo(
 			block.formulaRect.x() + fallbackPadding.left(),
 			block.formulaRect.y() + fallbackPadding.top());
+		block.firstLineBaseline = LeafFirstLineBaseline(
+			block.fallbackLeaf,
+			block.textRect,
+			markdown.displayMath.fallbackStyle);
 	}
 	return block;
 }
@@ -617,6 +655,19 @@ LaidOutBlock LayoutTableBlock(
 		tableHeight);
 	block.contentRect = block.visibleTableRect;
 	block.outer = block.visibleTableRect;
+	for (const auto &row : block.tableRows) {
+		const auto &textStyle = TableCellTextStyle(row.header, markdown);
+		for (const auto &cell : row.cells) {
+			if (cell.leaf.isEmpty()) {
+				continue;
+			}
+			block.firstLineBaseline = LeafFirstLineBaseline(
+				cell.leaf,
+				cell.textRect,
+				textStyle);
+			return block;
+		}
+	}
 	return block;
 }
 
@@ -660,6 +711,10 @@ LaidOutBlock LayoutPlaceholderBlock(
 		top + std::max((mediaHeight - labelHeight) / 2, 0),
 		contentWidth,
 		labelHeight);
+	block.firstLineBaseline = LeafFirstLineBaseline(
+		block.labelLeaf,
+		block.labelRect,
+		style.labelStyle);
 
 	auto bottom = top + mediaHeight;
 	if (!prepared.text.text.isEmpty()) {

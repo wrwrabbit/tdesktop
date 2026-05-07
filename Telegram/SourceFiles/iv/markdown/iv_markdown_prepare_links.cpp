@@ -1,5 +1,11 @@
-#include "iv/markdown/iv_markdown_prepare_links.h"
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
 
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+#include "iv/markdown/iv_markdown_prepare_links.h"
 #include "ui/basic_click_handlers.h"
 
 #include <QtCore/QDir>

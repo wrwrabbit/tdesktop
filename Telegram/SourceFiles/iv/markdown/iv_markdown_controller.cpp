@@ -1,15 +1,20 @@
-#include "iv/markdown/iv_markdown_controller.h"
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
 
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+#include "iv/markdown/iv_markdown_controller.h"
 #include "base/event_filter.h"
 #include "base/weak_ptr.h"
-#include "core/credits_amount.h"
 #include "core/click_handler_types.h"
+#include "core/credits_amount.h"
+#include "core/file_utilities.h"
 #include "iv/markdown/iv_markdown_parse.h"
 #include "iv/markdown/iv_markdown_view.h"
 #include "iv/iv_delegate_impl.h"
-#include "core/file_utilities.h"
 #include "lang/lang_keys.h"
-#include "logs.h"
 #include "ui/layers/layer_manager.h"
 #include "ui/layers/show.h"
 #include "ui/widgets/buttons.h"
@@ -17,10 +22,11 @@
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/rp_window.h"
 #include "ui/wrap/fade_wrap.h"
+#include "logs.h"
 
+#include "styles/palette.h"
 #include "styles/style_iv.h"
 #include "styles/style_menu_icons.h"
-#include "styles/palette.h"
 #include "styles/style_window.h"
 
 #include <QtCore/QElapsedTimer>

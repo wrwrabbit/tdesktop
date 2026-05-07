@@ -1,8 +1,13 @@
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
 #include "iv/markdown/iv_markdown_prepare_native_blocks.h"
-
-#include "iv/markdown/iv_markdown_prepare_links.h"
-
 #include "base/unixtime.h"
+#include "iv/markdown/iv_markdown_prepare_links.h"
 #include "lang/lang_keys.h"
 
 #include <algorithm>

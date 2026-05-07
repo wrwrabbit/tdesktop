@@ -1,11 +1,30 @@
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
 #include "iv/markdown/iv_markdown_view_widget.h"
-
-#include "iv/markdown/iv_markdown_article_text.h"
-
 #include "base/weak_ptr.h"
-#include "core/credits_amount.h"
 #include "core/click_handler_types.h"
+#include "core/credits_amount.h"
+#include "core/file_utilities.h"
+#include "iv/markdown/iv_markdown_article_text.h"
+#include "lang/lang_keys.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
+#include "ui/chat/chat_style.h"
+#include "ui/layers/show.h"
+#include "ui/text/text_extended_data.h"
+#include "ui/widgets/popup_menu.h"
+#include "ui/color_contrast.h"
+#include "ui/integration.h"
+
+#include "styles/palette.h"
+#include "styles/style_chat.h"
+#include "styles/style_iv.h"
+#include "styles/style_layers.h"
+#include "styles/style_menu_icons.h"
 
 #include <QtCore/QElapsedTimer>
 #include <QtGui/QClipboard>
@@ -17,24 +36,9 @@
 #include <QtGui/QMouseEvent>
 #include <QtWidgets/QApplication>
 
-#include "core/file_utilities.h"
-#include "lang/lang_keys.h"
-#include "ui/color_contrast.h"
-#include "ui/layers/show.h"
-#include "ui/chat/chat_style.h"
-#include "ui/integration.h"
-#include "ui/text/text_extended_data.h"
-#include "ui/widgets/popup_menu.h"
-
 #include <algorithm>
 #include <cmath>
 #include <utility>
-
-#include "styles/palette.h"
-#include "styles/style_iv.h"
-#include "styles/style_chat.h"
-#include "styles/style_layers.h"
-#include "styles/style_menu_icons.h"
 
 namespace Iv::Markdown {
 namespace {

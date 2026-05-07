@@ -1,36 +1,40 @@
-#include "iv/markdown/iv_markdown_view.h"
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
 
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+#include "iv/markdown/iv_markdown_view.h"
+#include "base/weak_ptr.h"
+#include "core/click_handler_types.h"
+#include "core/credits_amount.h"
+#include "core/file_utilities.h"
 #include "iv/markdown/iv_markdown_article_text.h"
 #include "iv/markdown/iv_markdown_view_widget.h"
-
 #include "iv/iv_delegate.h"
-
-#include <QtCore/QElapsedTimer>
-#include <QtGui/QScreen>
-
-#include "base/weak_ptr.h"
-#include "core/credits_amount.h"
-#include "core/click_handler_types.h"
-#include "core/file_utilities.h"
 #include "lang/lang_keys.h"
-#include "logs.h"
-#include "ui/integration.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/layer_manager.h"
-#include "ui/rect.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/text/text.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/scroll_area.h"
+#include "ui/integration.h"
+#include "ui/rect.h"
+#include "logs.h"
+
+#include "styles/style_iv.h"
+#include "styles/style_layers.h"
+
+#include <QtCore/QElapsedTimer>
+#include <QtGui/QScreen>
 
 #include <algorithm>
 #include <memory>
 #include <optional>
 #include <utility>
-
-#include "styles/style_iv.h"
-#include "styles/style_layers.h"
 
 namespace Iv::Markdown {
 namespace {

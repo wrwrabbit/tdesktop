@@ -1,3 +1,10 @@
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
 #include "iv/markdown/iv_markdown_parse.h"
 #include "iv/markdown/iv_markdown_parse_finalize.h"
 #include "iv/markdown/iv_markdown_parse_validate.h"

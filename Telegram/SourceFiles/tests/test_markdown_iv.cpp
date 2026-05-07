@@ -1,4 +1,5 @@
 #include "iv/markdown/iv_markdown_article.h"
+#include "iv/markdown/iv_markdown_article_text.h"
 #include "iv/markdown/iv_markdown_document.h"
 #include "iv/markdown/iv_markdown_math_renderer.h"
 #include "iv/markdown/iv_markdown_microtex.h"
@@ -1494,12 +1495,14 @@ template <typename Object>
 		int width,
 		int height,
 		int offset,
-		int length) {
+		int length,
+		int expectedSegmentIndex = -1) {
 	if (!article
 		|| (width <= 0)
 		|| (height <= 0)
 		|| (offset < 0)
-		|| (length <= 0)) {
+		|| (length <= 0)
+		|| (expectedSegmentIndex < -1)) {
 		return std::nullopt;
 	}
 	auto flags = Ui::Text::StateRequest::Flags();
@@ -1512,7 +1515,10 @@ template <typename Object>
 	for (auto y = 0; y != height; ++y) {
 		for (auto x = 0; x != width; ++x) {
 			const auto hit = article->hitTest(QPoint(x, y), flags);
-			if (!hit.valid() || !hit.state.uponSymbol) {
+			if (!hit.valid()
+				|| !hit.state.uponSymbol
+				|| ((expectedSegmentIndex >= 0)
+					&& (hit.segmentIndex != expectedSegmentIndex))) {
 				continue;
 			}
 			const auto symbol = int(hit.state.symbol);
@@ -4298,12 +4304,14 @@ void CheckInlineTextObjectArticleCoverage(bool *ok) {
 }
 
 void CheckArticleRasterRegressionCoverage(bool *ok) {
-	struct SymbolProbe {
+	struct SegmentTextProbe {
 		int segmentIndex = -1;
 		int offset = -1;
+		int length = 0;
+		TextWithEntities segment;
 
 		[[nodiscard]] bool valid() const {
-			return (segmentIndex >= 0) && (offset >= 0);
+			return (segmentIndex >= 0) && (offset >= 0) && (length > 0);
 		}
 	};
 	const auto wideFormulaTex = [] {
@@ -4317,36 +4325,27 @@ void CheckArticleRasterRegressionCoverage(bool *ok) {
 		}
 		return result;
 	}();
-	const auto findFirstInlineFormulaProbe = [](
-			const MarkdownArticleContent &prepared) {
-		auto result = SymbolProbe();
+	const auto forEachPreparedTextSegment = [](
+			const MarkdownArticleContent &prepared,
+			auto &&callback) {
 		auto segmentIndex = 0;
 		const auto collectTextSegment = [&](const TextWithEntities &text) {
-			if (result.valid()) {
-				return;
-			}
-			for (const auto &match : CollectInlineTextObjectMatches(text)) {
-				if (match.object.kind == InlineTextObjectKind::Formula) {
-					result = {
-						.segmentIndex = segmentIndex,
-						.offset = match.entity.offset(),
-					};
-					return;
-				}
+			if (callback(segmentIndex, text)) {
+				return true;
 			}
 			++segmentIndex;
+			return false;
 		};
 		const auto visitBlock = [&](const auto &self, const PreparedBlock &block)
-		-> void {
-			if (result.valid()) {
-				return;
-			}
+		-> bool {
 			switch (block.kind) {
 			case PreparedBlockKind::Paragraph:
 			case PreparedBlockKind::Heading:
 			case PreparedBlockKind::Details:
 			case PreparedBlockKind::CodeBlock:
-				collectTextSegment(block.text);
+				if (collectTextSegment(block.text)) {
+					return true;
+				}
 				break;
 			case PreparedBlockKind::DisplayMath:
 				++segmentIndex;
@@ -4355,9 +4354,8 @@ void CheckArticleRasterRegressionCoverage(bool *ok) {
 				++segmentIndex;
 				for (const auto &row : block.tableRows) {
 					for (const auto &cell : row.cells) {
-						collectTextSegment(cell.text);
-						if (result.valid()) {
-							return;
+						if (collectTextSegment(cell.text)) {
+							return true;
 						}
 					}
 				}
@@ -4365,8 +4363,9 @@ void CheckArticleRasterRegressionCoverage(bool *ok) {
 			case PreparedBlockKind::Placeholder:
 			case PreparedBlockKind::Photo:
 				++segmentIndex;
-				if (!block.text.text.isEmpty()) {
-					collectTextSegment(block.text);
+				if (!block.text.text.isEmpty()
+					&& collectTextSegment(block.text)) {
+					return true;
 				}
 				break;
 			case PreparedBlockKind::Rule:
@@ -4375,49 +4374,82 @@ void CheckArticleRasterRegressionCoverage(bool *ok) {
 			case PreparedBlockKind::Quote:
 				break;
 			}
-			if (result.valid()) {
-				return;
-			}
 			for (const auto &child : block.children) {
-				self(self, child);
-				if (result.valid()) {
-					return;
+				if (self(self, child)) {
+					return true;
 				}
 			}
+			return false;
 		};
 		for (const auto &block : prepared.blocks.blocks) {
-			visitBlock(visitBlock, block);
-			if (result.valid()) {
+			if (visitBlock(visitBlock, block)) {
 				break;
 			}
 		}
-		return result;
 	};
-	const auto findTextOffset = [](
+	const auto findInlineFormulaProbe = [&](
 			const MarkdownArticleContent &prepared,
-			const QString &text) {
-		auto result = -1;
-		const auto collectOffset = [&](const TextWithEntities &blockText) {
-			if (result >= 0) {
-				return;
+			const QString &segmentText) {
+		auto result = SegmentTextProbe();
+		forEachPreparedTextSegment(prepared, [&](
+				int segmentIndex,
+				const TextWithEntities &text) {
+			if (!segmentText.isEmpty() && !text.text.contains(segmentText)) {
+				return false;
 			}
-			result = blockText.text.indexOf(text);
-		};
-		ForEachPreparedBlock(prepared.blocks.blocks, [&](const PreparedBlock &block) {
-			collectOffset(block.text);
-			if (result >= 0) {
-				return;
-			}
-			for (const auto &row : block.tableRows) {
-				for (const auto &cell : row.cells) {
-					collectOffset(cell.text);
-					if (result >= 0) {
-						return;
-					}
+			for (const auto &match : CollectInlineTextObjectMatches(text)) {
+				if (match.object.kind == InlineTextObjectKind::Formula) {
+					result = {
+						.segmentIndex = segmentIndex,
+						.offset = match.entity.offset(),
+						.length = match.entity.length(),
+						.segment = text,
+					};
+					return true;
 				}
 			}
+			return false;
 		});
 		return result;
+	};
+	const auto findFirstInlineFormulaProbe = [&](
+			const MarkdownArticleContent &prepared) {
+		return findInlineFormulaProbe(prepared, QString());
+	};
+	const auto findTextProbe = [&](
+			const MarkdownArticleContent &prepared,
+			const QString &segmentText,
+			const QString &text,
+			int requiredSegmentIndex = -1) {
+		auto result = SegmentTextProbe();
+		forEachPreparedTextSegment(prepared, [&](
+				int segmentIndex,
+				const TextWithEntities &segment) {
+			if ((requiredSegmentIndex >= 0)
+				&& (segmentIndex != requiredSegmentIndex)) {
+				return false;
+			}
+			if (!segmentText.isEmpty() && !segment.text.contains(segmentText)) {
+				return false;
+			}
+			const auto offset = int(segment.text.indexOf(text));
+			if (offset < 0) {
+				return false;
+			}
+			result = {
+				.segmentIndex = segmentIndex,
+				.offset = offset,
+				.length = int(text.size()),
+				.segment = segment,
+			};
+			return true;
+		});
+		return result;
+	};
+	const auto findTextOffset = [&](
+			const MarkdownArticleContent &prepared,
+			const QString &text) {
+		return findTextProbe(prepared, QString(), text).offset;
 	};
 	const auto firstMeasuredInlineFormulaWidth = [](
 			const MarkdownArticleContent &prepared) {
@@ -4440,6 +4472,254 @@ void CheckArticleRasterRegressionCoverage(bool *ok) {
 	const auto withinOneLogicalPixel = [](double left, double right) {
 		const auto delta = left - right;
 		return (delta <= 1.) && (delta >= -1.);
+	};
+	const auto sameVerticalBounds = [](
+			const QRect &left,
+			const QRect &right) {
+		return (left.top() == right.top())
+			&& (left.bottom() == right.bottom());
+	};
+	const auto markerSearchStripFromLineBounds = [](QRect lineBounds) {
+		lineBounds = lineBounds.adjusted(0, -1, 0, 1);
+		return QRect(
+			0,
+			lineBounds.y(),
+			std::max(lineBounds.left(), 1),
+			std::max(lineBounds.height(), 1));
+	};
+	const auto buildSegmentLeaf = [&](
+			const MarkdownArticleContent &prepared,
+			const SegmentTextProbe &probe,
+			const std::shared_ptr<MathRenderer> &renderer,
+			int width) {
+		auto leaf = Ui::Text::String();
+		auto cache = CreateInlineFormulaObjectCache(renderer);
+		SetTextLeaf(
+			&leaf,
+			st::defaultMarkdown.body,
+			probe.segment,
+			&prepared.formulas,
+			cache.get(),
+			prepared.mediaRuntime,
+			width);
+		return leaf;
+	};
+	const auto resolveSegmentBaseline = [&](
+			const QString &label,
+			const MarkdownArticleContent &prepared,
+			const SegmentTextProbe &probe,
+			const std::shared_ptr<MathRenderer> &renderer,
+			const QRect &lineBounds,
+			int width) -> std::optional<int> {
+		const auto leaf = buildSegmentLeaf(prepared, probe, renderer, width);
+		const auto lines = leaf.countLinesGeometry(width, true);
+		Check(
+			!lines.empty(),
+			label + FromLatin1(" control line geometry"),
+			ok);
+		return !lines.empty()
+			? std::make_optional(lineBounds.top() + lines.front().baseline)
+			: std::nullopt;
+	};
+	struct ArticleLayoutProbe {
+		int width = 0;
+		int height = 0;
+	};
+	const auto resolveArticleWidth = [&](
+			const QString &label,
+			const MarkdownArticleContent &prepared,
+			const std::shared_ptr<MathRenderer> &renderer,
+			const SegmentTextProbe &formulaProbe,
+			const SegmentTextProbe &controlProbe) {
+		auto result = ArticleLayoutProbe();
+		for (auto width = 320; width <= 1280; width += 32) {
+			auto height = 0;
+			auto article = BuildArticleForTest(prepared, renderer, width, &height);
+			const auto formulaBounds = SymbolHitBounds(
+				article.get(),
+				width,
+				height,
+				formulaProbe.offset,
+				formulaProbe.segmentIndex);
+			const auto controlBounds = SymbolRangeHitBounds(
+				article.get(),
+				width,
+				height,
+				controlProbe.offset,
+				controlProbe.length,
+				controlProbe.segmentIndex);
+			if (!formulaBounds
+				|| !controlBounds
+				|| !sameVerticalBounds(*formulaBounds, *controlBounds)) {
+				continue;
+			}
+			result = {
+				.width = width,
+				.height = height,
+			};
+			break;
+		}
+		Check(
+			result.width > 0,
+			label + FromLatin1(" derived article width"),
+			ok);
+		return result;
+	};
+	const auto checkListMarkerBaselineRegression = [&](
+			const QString &label,
+			const MarkdownArticleContent &prepared,
+			const std::shared_ptr<MathRenderer> &renderer,
+			const SegmentTextProbe &referenceControlProbe,
+			const SegmentTextProbe &formulaProbe,
+			const SegmentTextProbe &controlProbe) {
+		Check(
+			referenceControlProbe.valid(),
+			label + FromLatin1(" plain-text reference probe"),
+			ok);
+		Check(
+			formulaProbe.valid(),
+			label + FromLatin1(" inline formula probe"),
+			ok);
+		Check(
+			controlProbe.valid(),
+			label + FromLatin1(" plain-text control probe"),
+			ok);
+		if (!referenceControlProbe.valid()
+			|| !formulaProbe.valid()
+			|| !controlProbe.valid()) {
+			return;
+		}
+		Check(
+			formulaProbe.segmentIndex == controlProbe.segmentIndex,
+			label + FromLatin1(" formula and control share a segment"),
+			ok);
+		Check(
+			referenceControlProbe.segmentIndex != controlProbe.segmentIndex,
+			label + FromLatin1(" reference and formula use distinct segments"),
+			ok);
+		if ((formulaProbe.segmentIndex != controlProbe.segmentIndex)
+			|| (referenceControlProbe.segmentIndex == controlProbe.segmentIndex)) {
+			return;
+		}
+		const auto layout = resolveArticleWidth(
+			label,
+			prepared,
+			renderer,
+			formulaProbe,
+			controlProbe);
+		if (layout.width <= 0) {
+			return;
+		}
+		auto articleHeight = 0;
+		auto article = BuildArticleForTest(
+			prepared,
+			renderer,
+			layout.width,
+			&articleHeight);
+		const auto image = PaintArticleForTest(
+			article.get(),
+			layout.width,
+			articleHeight);
+		Check(
+			HasPaintedPixels(image),
+			label + FromLatin1(" paint produced pixels"),
+			ok);
+		const auto referenceControlBounds = SymbolRangeHitBounds(
+			article.get(),
+			layout.width,
+			articleHeight,
+			referenceControlProbe.offset,
+			referenceControlProbe.length,
+			referenceControlProbe.segmentIndex);
+		const auto formulaBounds = SymbolHitBounds(
+			article.get(),
+			layout.width,
+			articleHeight,
+			formulaProbe.offset,
+			formulaProbe.segmentIndex);
+		const auto controlBounds = SymbolRangeHitBounds(
+			article.get(),
+			layout.width,
+			articleHeight,
+			controlProbe.offset,
+			controlProbe.length,
+			controlProbe.segmentIndex);
+		Check(
+			referenceControlBounds.has_value(),
+			label + FromLatin1(" reference control hit bounds"),
+			ok);
+		Check(
+			formulaBounds.has_value(),
+			label + FromLatin1(" inline formula hit bounds"),
+			ok);
+		Check(
+			controlBounds.has_value(),
+			label + FromLatin1(" plain-text control hit bounds"),
+			ok);
+		if (!referenceControlBounds || !formulaBounds || !controlBounds) {
+			return;
+		}
+		Check(
+			sameVerticalBounds(*formulaBounds, *controlBounds),
+			label + FromLatin1(" formula stays on first rendered line"),
+			ok);
+		const auto referenceBaseline = resolveSegmentBaseline(
+			label + FromLatin1(" reference"),
+			prepared,
+			referenceControlProbe,
+			renderer,
+			*referenceControlBounds,
+			layout.width);
+		const auto controlBaseline = resolveSegmentBaseline(
+			label,
+			prepared,
+			controlProbe,
+			renderer,
+			*controlBounds,
+			layout.width);
+		Check(
+			referenceBaseline.has_value(),
+			label + FromLatin1(" reference baseline"),
+			ok);
+		Check(
+			controlBaseline.has_value(),
+			label + FromLatin1(" control baseline"),
+			ok);
+		if (!referenceBaseline || !controlBaseline) {
+			return;
+		}
+		const auto referenceMarkerPainted = PaintedBoundsInRect(
+			image,
+			markerSearchStripFromLineBounds(*referenceControlBounds));
+		const auto markerPainted = PaintedBoundsInRect(
+			image,
+			markerSearchStripFromLineBounds(*controlBounds));
+		Check(
+			referenceMarkerPainted.has_value(),
+			label + FromLatin1(" reference gutter marker painted bounds"),
+			ok);
+		Check(
+			markerPainted.has_value(),
+			label + FromLatin1(" gutter marker painted bounds"),
+			ok);
+		if (!referenceMarkerPainted || !markerPainted) {
+			return;
+		}
+		Check(
+			referenceMarkerPainted->right() < referenceControlBounds->left(),
+			label + FromLatin1(" reference gutter marker stays left of text"),
+			ok);
+		Check(
+			markerPainted->right() < controlBounds->left(),
+			label + FromLatin1(" gutter marker stays left of text"),
+			ok);
+		Check(
+			withinOneLogicalPixel(
+				double(markerPainted->center().y()
+					- referenceMarkerPainted->center().y()),
+				double(*controlBaseline - *referenceBaseline)),
+			label + FromLatin1(" gutter marker follows baseline shift"),
+			ok);
 	};
 
 	const auto wideInlineLabel = FromLatin1("generated-inline-wide-raster.md");
@@ -4784,6 +5064,102 @@ void CheckArticleRasterRegressionCoverage(bool *ok) {
 						}
 					}
 				}
+		}
+	}
+
+	const auto orderedListLabel = FromLatin1(
+		"generated-ordered-list-marker-baseline.md");
+	const auto orderedParsed = ParseMarkdownForIv(
+		QByteArray(
+			"3. Third with fraction: p / q\n"
+			"\n"
+			"3. Third with fraction: $\\frac{p}{q}$\n"),
+		ParseOptions{ orderedListLabel });
+	Check(
+		orderedParsed.ok,
+		orderedListLabel + FromLatin1(" parse failed: ")
+			+ orderedParsed.error,
+		ok);
+	if (orderedParsed.ok) {
+		auto orderedRenderer = std::make_shared<MathRenderer>();
+		auto orderedPrepared = PrepareParsedDocumentForTest(
+			orderedParsed.document,
+			orderedListLabel,
+			orderedRenderer);
+		Check(
+			!orderedPrepared.failure.failed(),
+			orderedListLabel + FromLatin1(" prepare failure: ")
+				+ PrepareFailureReason(orderedPrepared.failure),
+			ok);
+		if (!orderedPrepared.failure.failed()) {
+			const auto controlText = FromLatin1("Third with fraction:");
+			const auto formulaProbe = findInlineFormulaProbe(
+				orderedPrepared,
+				controlText);
+			const auto referenceControlProbe = findTextProbe(
+				orderedPrepared,
+				controlText,
+				controlText);
+			const auto controlProbe = findTextProbe(
+				orderedPrepared,
+				controlText,
+				controlText,
+				formulaProbe.segmentIndex);
+			checkListMarkerBaselineRegression(
+				orderedListLabel,
+				orderedPrepared,
+				orderedRenderer,
+				referenceControlProbe,
+				formulaProbe,
+				controlProbe);
+		}
+	}
+
+	const auto bulletListLabel = FromLatin1(
+		"generated-bullet-list-marker-baseline.md");
+	const auto bulletParsed = ParseMarkdownForIv(
+		QByteArray(
+			"- Bullet with fraction: p / q\n"
+			"\n"
+			"- Bullet with fraction: $\\frac{p}{q}$\n"),
+		ParseOptions{ bulletListLabel });
+	Check(
+		bulletParsed.ok,
+		bulletListLabel + FromLatin1(" parse failed: ")
+			+ bulletParsed.error,
+		ok);
+	if (bulletParsed.ok) {
+		auto bulletRenderer = std::make_shared<MathRenderer>();
+		auto bulletPrepared = PrepareParsedDocumentForTest(
+			bulletParsed.document,
+			bulletListLabel,
+			bulletRenderer);
+		Check(
+			!bulletPrepared.failure.failed(),
+			bulletListLabel + FromLatin1(" prepare failure: ")
+				+ PrepareFailureReason(bulletPrepared.failure),
+			ok);
+		if (!bulletPrepared.failure.failed()) {
+			const auto controlText = FromLatin1("Bullet with fraction:");
+			const auto formulaProbe = findInlineFormulaProbe(
+				bulletPrepared,
+				controlText);
+			const auto referenceControlProbe = findTextProbe(
+				bulletPrepared,
+				controlText,
+				controlText);
+			const auto controlProbe = findTextProbe(
+				bulletPrepared,
+				controlText,
+				controlText,
+				formulaProbe.segmentIndex);
+			checkListMarkerBaselineRegression(
+				bulletListLabel,
+				bulletPrepared,
+				bulletRenderer,
+				referenceControlProbe,
+				formulaProbe,
+				controlProbe);
 		}
 	}
 }

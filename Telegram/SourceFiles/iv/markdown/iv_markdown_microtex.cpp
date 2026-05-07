@@ -1,6 +1,14 @@
-#include "iv/markdown/iv_markdown_microtex.h"
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
 
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+#include "iv/markdown/iv_markdown_microtex.h"
 #include "base/base_file_utilities.h"
+#include "platform/qt/graphic_qt.h"
+#include "latex.h"
 
 #include <QtCore/QSize>
 #include <QtCore/QString>
@@ -13,9 +21,6 @@
 #include <memory>
 #include <mutex>
 #include <utility>
-
-#include "latex.h"
-#include "platform/qt/graphic_qt.h"
 
 namespace Iv::Markdown {
 namespace {

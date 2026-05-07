@@ -1,5 +1,11 @@
-#include "iv/markdown/iv_markdown_article_selection.h"
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
 
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+#include "iv/markdown/iv_markdown_article_selection.h"
 #include "lang/lang_keys.h"
 
 #include <algorithm>

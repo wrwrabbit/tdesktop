@@ -1,10 +1,16 @@
-#include "iv/markdown/iv_markdown_parse_convert.h"
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
 
-#include <cmark-gfm-core-extensions.h>
-#include <cmark-gfm-extension_api.h>
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+#include "iv/markdown/iv_markdown_parse_convert.h"
 
 #include <algorithm>
 #include <array>
+#include <cmark-gfm-core-extensions.h>
+#include <cmark-gfm-extension_api.h>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>

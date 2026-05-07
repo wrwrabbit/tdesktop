@@ -1,17 +1,23 @@
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
 #include "iv/markdown/iv_markdown_article_paint.h"
-
 #include "iv/markdown/iv_markdown_article_text.h"
-
-#include "ui/dynamic_image.h"
 #include "ui/widgets/checkbox.h"
-
-#include <algorithm>
-#include <cmath>
-#include <QtGui/QPainterPath>
+#include "ui/dynamic_image.h"
 
 #include "styles/palette.h"
 #include "styles/style_iv.h"
 #include "styles/style_widgets.h"
+
+#include <QtGui/QPainterPath>
+
+#include <algorithm>
+#include <cmath>
 
 namespace Iv::Markdown {
 namespace {

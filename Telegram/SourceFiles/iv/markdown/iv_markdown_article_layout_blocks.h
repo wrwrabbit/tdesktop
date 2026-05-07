@@ -1,3 +1,10 @@
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
 #pragma once
 
 #include "iv/markdown/iv_markdown_article.h"
@@ -74,6 +81,7 @@ struct LaidOutBlock {
 	int textWidth = 0;
 	int labelWidth = 0;
 	int markerWidth = 0;
+	int firstLineBaseline = -1;
 	int headingLevel = 0;
 	ListKind listKind = ListKind::Bullet;
 	ListDelimiter listDelimiter = ListDelimiter::None;
@@ -120,7 +128,7 @@ struct TableRowLayoutData {
 [[nodiscard]] int TextLineHeight(const style::TextStyle &style);
 [[nodiscard]] QPoint BulletMarkerCenter(
 	int left,
-	int top,
+	int baseline,
 	const style::Markdown &markdown);
 [[nodiscard]] QMargins BlockquotePadding(const style::QuoteStyle &style);
 [[nodiscard]] Ui::Text::GeometryDescriptor TextGeometry(int width);

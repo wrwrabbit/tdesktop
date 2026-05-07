@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include <QtCore/QUrl>
+
 namespace Main {
 class Session;
 } // namespace Main

@@ -1,5 +1,11 @@
-#include "iv/markdown/iv_markdown_prepare.h"
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
 
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+#include "iv/markdown/iv_markdown_prepare.h"
 #include "iv/markdown/iv_markdown_prepare_blocks.h"
 #include "iv/markdown/iv_markdown_prepare_formulas.h"
 #include "iv/markdown/iv_markdown_prepare_native_blocks.h"

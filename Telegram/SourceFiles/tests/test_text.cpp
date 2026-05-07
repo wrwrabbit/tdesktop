@@ -421,6 +421,20 @@ void test(not_null<Ui::RpWindow*> window, not_null<Ui::RpWidget*> body) {
 	const auto selectionWidth = std::max(
 		formulaText->maxWidth(),
 		controlLineText.maxWidth());
+	const auto formulaLinesGeometry = formulaText->countLinesGeometry(
+		selectionWidth);
+	const auto controlLinesGeometry = controlLineText.countLinesGeometry(
+		selectionWidth);
+	Expects(formulaLinesGeometry.size() == 1);
+	Expects(controlLinesGeometry.size() == 1);
+	if ((formulaLinesGeometry.size() == 1)
+		&& (controlLinesGeometry.size() == 1)) {
+		const auto &formulaLine = formulaLinesGeometry.front();
+		const auto &controlLine = controlLinesGeometry.front();
+		Expects(formulaLine.baseline > controlLine.baseline);
+		Expects(formulaLine.baseline < formulaLine.bottom);
+		Expects(controlLine.baseline < controlLine.bottom);
+	}
 	const auto formulaSelection = TextSelection(
 		0,
 		uint16(formulaData.text.size()));

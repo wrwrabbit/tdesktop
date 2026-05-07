@@ -1,24 +1,29 @@
-#include "iv/markdown/iv_markdown_article_text.h"
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
 
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+#include "iv/markdown/iv_markdown_article_text.h"
 #include "iv/markdown/iv_markdown_article_layout_blocks.h"
 #include "iv/markdown/iv_markdown_prepare_serialize.h"
-
 #include "lang/lang_keys.h"
-#include "ui/basic_click_handlers.h"
-#include "ui/dynamic_image.h"
-#include "ui/integration.h"
 #include "ui/style/style_core.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/text/text_custom_emoji.h"
+#include "ui/basic_click_handlers.h"
+#include "ui/dynamic_image.h"
+#include "ui/integration.h"
+
+#include "styles/palette.h"
+#include "styles/style_iv.h"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <map>
 #include <utility>
-
-#include "styles/palette.h"
-#include "styles/style_iv.h"
 
 namespace Iv::Markdown {
 namespace {

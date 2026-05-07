@@ -1,16 +1,84 @@
-#include "iv/markdown/iv_markdown_article_layout_structure.h"
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
 
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+#include "iv/markdown/iv_markdown_article_layout_structure.h"
 #include "iv/markdown/iv_markdown_article_text.h"
 
-#include <algorithm>
-
 #include "styles/style_iv.h"
+
+#include <algorithm>
 
 namespace Iv::Markdown {
 namespace {
 
+[[nodiscard]] int NominalTextBaseline(
+		const style::TextStyle &style,
+		int top) {
+	const auto lineHeight = TextLineHeight(style);
+	const auto textTop = top
+		+ (std::max(lineHeight - style.font->height, 0) / 2);
+	return textTop + style.font->ascent;
+}
+
+[[nodiscard]] int LeafFirstLineBaseline(
+		const Ui::Text::String &leaf,
+		const QRect &textRect,
+		const style::TextStyle &style) {
+	const auto lines = leaf.countLinesGeometry(textRect.width(), true);
+	return textRect.y() + (lines.empty()
+		? NominalTextBaseline(style, 0)
+		: lines.front().baseline);
+}
+
+[[nodiscard]] int MarkdownBodyBaseline(
+		int top,
+		const style::Markdown &markdown) {
+	return NominalTextBaseline(markdown.body, top);
+}
+
 [[nodiscard]] int BlockBottom(const LaidOutBlock &block) {
 	return block.outer.y() + block.outer.height();
+}
+
+[[nodiscard]] bool FirstLineComesFromChildren(const LaidOutBlock &block) {
+	switch (block.kind) {
+	case PreparedBlockKind::List:
+	case PreparedBlockKind::ListItem:
+	case PreparedBlockKind::Quote:
+		return true;
+	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Heading:
+	case PreparedBlockKind::CodeBlock:
+	case PreparedBlockKind::Rule:
+	case PreparedBlockKind::DisplayMath:
+	case PreparedBlockKind::Table:
+	case PreparedBlockKind::Photo:
+	case PreparedBlockKind::Placeholder:
+	case PreparedBlockKind::Details:
+		return false;
+	}
+	return false;
+}
+
+[[nodiscard]] int ResolveFirstDisplayedLineBaseline(
+		const LaidOutBlock &block,
+		const style::Markdown &markdown) {
+	if (block.firstLineBaseline >= 0) {
+		return block.firstLineBaseline;
+	}
+	if (FirstLineComesFromChildren(block)) {
+		for (const auto &child : block.children) {
+			if (child.outer.height() <= 0) {
+				continue;
+			}
+			return ResolveFirstDisplayedLineBaseline(child, markdown);
+		}
+	}
+	return MarkdownBodyBaseline(block.outer.y(), markdown);
 }
 
 [[nodiscard]] LaidOutBlock LayoutBlock(
@@ -94,6 +162,15 @@ namespace {
 		top,
 		bodyWidth,
 		childContext);
+	const auto markerBaseline = [&] {
+		for (const auto &child : block.children) {
+			if (child.outer.height() <= 0) {
+				continue;
+			}
+			return ResolveFirstDisplayedLineBaseline(child, markdown);
+		}
+		return MarkdownBodyBaseline(top, markdown);
+	}();
 	const auto contentHeight = childBottom - top;
 	const auto rowHeight = std::max({
 		contentHeight,
@@ -112,17 +189,22 @@ namespace {
 			list.taskCheck.diameter);
 	} else if (ordered) {
 		const auto markerLeft = left + block.markerWidth - markerTextWidth;
+		const auto markerLeafBaseline = LeafFirstLineBaseline(
+			block.marker,
+			QRect(0, 0, markerTextWidth, markerTextHeight),
+			markdown.body);
 		block.markerRect = QRect(
 			markerLeft,
-			top,
+			markerBaseline - markerLeafBaseline,
 			markerTextWidth,
 			markerTextHeight);
 	} else {
-		block.markerCenter = BulletMarkerCenter(left, top, markdown);
+		block.markerCenter = BulletMarkerCenter(left, markerBaseline, markdown);
 	}
 
 	block.contentRect = QRect(bodyLeft, top, bodyWidth, rowHeight);
 	block.outer = QRect(left, top, std::max(width, 1), rowHeight);
+	block.firstLineBaseline = markerBaseline;
 	return block;
 }
 
@@ -197,6 +279,7 @@ namespace {
 		listWidth,
 		std::max(y - top, 0));
 	block.contentRect = block.outer;
+	block.firstLineBaseline = ResolveFirstDisplayedLineBaseline(block, markdown);
 	return block;
 }
 
@@ -259,6 +342,7 @@ namespace {
 		contentTop,
 		contentWidth,
 		contentHeight);
+	block.firstLineBaseline = ResolveFirstDisplayedLineBaseline(block, markdown);
 	return block;
 }
 
@@ -326,6 +410,10 @@ namespace {
 			+ std::max((headerContentHeight - summaryHeight) / 2, 0),
 		block.textWidth,
 		summaryHeight);
+	block.firstLineBaseline = LeafFirstLineBaseline(
+		block.leaf,
+		block.textRect,
+		details.summaryStyle);
 
 	auto bottom = top + headerHeight;
 	if (!prepared.collapsed) {
