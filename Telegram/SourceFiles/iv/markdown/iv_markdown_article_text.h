@@ -22,6 +22,21 @@ namespace Iv::Markdown {
 
 class InlineFormulaObjectCache;
 
+class InlineIvImageRepaintScope {
+public:
+	InlineIvImageRepaintScope(
+		Fn<void()> repaint,
+		Fn<void(QRect)> repaintRect);
+	~InlineIvImageRepaintScope();
+
+	InlineIvImageRepaintScope(const InlineIvImageRepaintScope &) = delete;
+	InlineIvImageRepaintScope &operator=(
+		const InlineIvImageRepaintScope &) = delete;
+
+private:
+	bool _active = false;
+};
+
 [[nodiscard]] ClickHandlerPtr CreatePreparedLinkHandler(PreparedLink link);
 [[nodiscard]] std::optional<PreparedLink> ExtractPreparedLink(
 	const ClickHandlerPtr &link);

@@ -201,7 +201,6 @@ private:
 	std::shared_ptr<MarkdownArticle> _article;
 	QString _pendingFragment;
 	int _devicePixelRatio = 0;
-	rpl::lifetime _channelJoinedLifetime;
 
 };
 
@@ -449,11 +448,10 @@ void MarkdownPreviewRoot::fillFootnoteBox(
 }
 
 void MarkdownPreviewRoot::applyPreparedContent(
-		MarkdownArticleContent prepared,
-		int prepareMs) {
+	MarkdownArticleContent prepared,
+	int prepareMs) {
 	const auto failure = prepared.failure;
 	const auto debug = prepared.debug;
-	_channelJoinedLifetime.destroy();
 	if (failure.failed()) {
 		_article = nullptr;
 		_footnotes.clear();
@@ -480,17 +478,6 @@ void MarkdownPreviewRoot::applyPreparedContent(
 		_article = nullptr;
 		logPreparationSummary(failure, debug, prepareMs, 0);
 		return;
-	}
-
-	if (prepared.mediaRuntime) {
-		prepared.mediaRuntime->channelJoinedChanges(
-		) | rpl::on_next([=](uint64) {
-			if (_body && !_body->isHidden() && _article) {
-				_article->invalidateLayout();
-				updateChildrenGeometry(size());
-				_body->update();
-			}
-		}, _channelJoinedLifetime);
 	}
 
 	auto article = std::make_shared<MarkdownArticle>(_renderer);

@@ -526,6 +526,7 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 		return PrepareNativeIvGroupedMediaBlock(
 			data.vitems().v,
 			data.vcaption(),
+			PreparedGroupedMediaIntent::Collage,
 			u"Collage placeholder"_q,
 			result,
 			state);
@@ -533,6 +534,7 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 		return PrepareNativeIvGroupedMediaBlock(
 			data.vitems().v,
 			data.vcaption(),
+			PreparedGroupedMediaIntent::Slideshow,
 			u"Grouped Media Placeholder"_q,
 			result,
 			state);

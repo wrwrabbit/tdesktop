@@ -8,7 +8,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_article_paint.h"
 #include "iv/markdown/iv_markdown_article_text.h"
 #include "ui/widgets/checkbox.h"
-#include "ui/dynamic_image.h"
 
 #include "styles/palette.h"
 #include "styles/style_iv.h"
@@ -21,32 +20,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Iv::Markdown {
 namespace {
-
-[[nodiscard]] bool PaintDynamicImage(
-		Painter &p,
-		const std::shared_ptr<Ui::DynamicImage> &image,
-		QRect rect) {
-	if (!image || rect.isEmpty()) {
-		return false;
-	}
-	if (const auto frame = image->image(std::max(rect.width(), rect.height()));
-		!frame.isNull()) {
-		p.drawImage(rect, frame);
-		return true;
-	}
-	return false;
-}
-
-void SubscribeDynamicImage(
-		const std::shared_ptr<Ui::DynamicImage> &image,
-		const Fn<void()> &repaint,
-		bool *subscribed) {
-	if (!image || !repaint || *subscribed) {
-		return;
-	}
-	*subscribed = true;
-	image->subscribeToUpdates(repaint);
-}
 
 void PaintTextLeaf(
 		Painter &p,
@@ -429,80 +402,10 @@ void PaintPlaceholderBlock(
 	}
 }
 
-void PaintPhotoProgress(
-		Painter &p,
-		QRect rect,
-		const style::MarkdownPhoto &style,
-		double progress) {
-	const auto size = std::min({
-		style.progressSize,
-		rect.width(),
-		rect.height(),
-	});
-	if (size <= 0) {
-		return;
-	}
-	const auto thickness = std::max(style.progressWidth, 1);
-	const auto ring = QRect(
-		rect.center().x() - (size / 2),
-		rect.center().y() - (size / 2),
-		size,
-		size);
-	auto hq = PainterHighQualityEnabler(p);
-	p.setBrush(Qt::NoBrush);
-	p.setPen(QPen(QColor(0, 0, 0, 96), thickness));
-	p.drawEllipse(ring);
-	p.setPen(QPen(st::windowFg->c, thickness));
-	p.drawArc(
-		ring,
-		90 * 16,
-		-int(std::round(360. * 16. * std::clamp(progress, 0., 1.))));
-}
-
 [[nodiscard]] QPainterPath RoundedRectPath(QRect rect, int radius) {
 	auto path = QPainterPath();
 	path.addRoundedRect(QRectF(rect), radius, radius);
 	return path;
-}
-
-[[nodiscard]] bool MediaLoading(const LaidOutBlock &block) {
-	if (block.photoRuntime) {
-		return block.photoRuntime->loading();
-	} else if (block.documentRuntime) {
-		return block.documentRuntime->loading();
-	} else if (block.mapRuntime) {
-		return block.mapRuntime->loading();
-	}
-	return false;
-}
-
-[[nodiscard]] double MediaProgress(const LaidOutBlock &block) {
-	if (block.photoRuntime) {
-		return block.photoRuntime->progress();
-	} else if (block.documentRuntime) {
-		return block.documentRuntime->progress();
-	} else if (block.mapRuntime) {
-		return block.mapRuntime->progress();
-	}
-	return 0.;
-}
-
-[[nodiscard]] bool MediaLoading(const LaidOutGroupedMediaItem &item) {
-	if (item.photoRuntime) {
-		return item.photoRuntime->loading();
-	} else if (item.documentRuntime) {
-		return item.documentRuntime->loading();
-	}
-	return false;
-}
-
-[[nodiscard]] double MediaProgress(const LaidOutGroupedMediaItem &item) {
-	if (item.photoRuntime) {
-		return item.photoRuntime->progress();
-	} else if (item.documentRuntime) {
-		return item.documentRuntime->progress();
-	}
-	return 0.;
 }
 
 void PaintMediaCaption(
@@ -529,85 +432,26 @@ void PaintMediaCaption(
 			block.secondarySegmentIndex));
 }
 
-void PaintImageBackedMedia(
-		Painter &p,
-		QRect rect,
-		const QString &copyText,
-		const std::shared_ptr<Ui::DynamicImage> &thumbnailImage,
-		const std::shared_ptr<Ui::DynamicImage> &fullImage,
-		bool *thumbnailSubscribed,
-		bool *fullSubscribed,
-		bool loading,
-		double progress,
-		const style::Markdown &markdown,
-		const MarkdownArticlePaintCaches &caches,
-		bool selected,
-		QRect clip) {
-	const auto visible = clip.intersected(rect);
-	if (!visible.isEmpty()) {
-		p.save();
-		p.setClipRect(visible);
-		p.fillRect(rect, st::windowBgOver->c);
-		SubscribeDynamicImage(
-			thumbnailImage,
-			caches.repaint,
-			thumbnailSubscribed);
-		SubscribeDynamicImage(
-			fullImage,
-			caches.repaint,
-			fullSubscribed);
-		const auto paintedThumb = PaintDynamicImage(
-			p,
-			thumbnailImage,
-			rect);
-		const auto paintedFull = PaintDynamicImage(
-			p,
-			fullImage,
-			rect);
-		if (!paintedThumb && !paintedFull) {
-			p.setPen(st::windowSubTextFg->c);
-			p.drawText(
-				rect,
-				Qt::AlignCenter | Qt::TextWordWrap,
-				copyText);
-		}
-		if (loading) {
-			PaintPhotoProgress(
-				p,
-				rect,
-				markdown.photo,
-				progress);
-		}
-		if (selected) {
-			p.fillRect(rect, p.textPalette().selectOverlay);
-		}
-		p.restore();
-	}
-}
-
-void PaintImageBackedMediaBlock(
+void PaintPersistentMediaBlock(
 		Painter &p,
 		const LaidOutBlock &block,
-		const style::Markdown &markdown,
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
-	PaintImageBackedMedia(
-		p,
-		block.mediaRect,
-		block.copyText,
-		block.thumbnailImage,
-		block.fullImage,
-		&block.thumbnailSubscribed,
-		&block.fullSubscribed,
-		MediaLoading(block),
-		MediaProgress(block),
-		markdown,
-		caches,
-		block.segmentIndex >= 0
-			&& WholeSegmentSelected(selectionState, block.segmentIndex),
-		clip);
-	PaintMediaCaption(p, block, markdown, caches, selectionState, clip);
+	if (!block.mediaBlock) {
+		return;
+	}
+	block.mediaBlock->paint(p, clip, caches);
+	if (block.segmentIndex >= 0
+		&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
+		const auto visible = clip.intersected(block.visibleMediaRect);
+		if (!visible.isEmpty()) {
+			p.save();
+			p.setClipRect(visible);
+			p.fillRect(block.mediaRect, p.textPalette().selectOverlay);
+			p.restore();
+		}
+	}
 }
 
 void PaintCardSurface(
@@ -640,6 +484,11 @@ void PaintAudioBlock(
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
+	if (block.mediaBlock) {
+		PaintPersistentMediaBlock(p, block, caches, selectionState, clip);
+		PaintMediaCaption(p, block, markdown, caches, selectionState, clip);
+		return;
+	}
 	const auto visible = clip.intersected(block.visibleMediaRect);
 	if (!visible.isEmpty()) {
 		const auto &style = markdown.audio;
@@ -686,6 +535,11 @@ void PaintChannelBlock(
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
+	if (block.mediaBlock) {
+		PaintPersistentMediaBlock(p, block, caches, selectionState, clip);
+		PaintMediaCaption(p, block, markdown, caches, selectionState, clip);
+		return;
+	}
 	const auto visible = clip.intersected(block.visibleMediaRect);
 	if (!visible.isEmpty()) {
 		const auto &style = markdown.channel;
@@ -760,13 +614,8 @@ void PaintPhotoBlock(
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
-	PaintImageBackedMediaBlock(
-		p,
-		block,
-		markdown,
-		caches,
-		selectionState,
-		clip);
+	PaintPersistentMediaBlock(p, block, caches, selectionState, clip);
+	PaintMediaCaption(p, block, markdown, caches, selectionState, clip);
 }
 
 void PaintVideoBlock(
@@ -776,13 +625,8 @@ void PaintVideoBlock(
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
-	PaintImageBackedMediaBlock(
-		p,
-		block,
-		markdown,
-		caches,
-		selectionState,
-		clip);
+	PaintPersistentMediaBlock(p, block, caches, selectionState, clip);
+	PaintMediaCaption(p, block, markdown, caches, selectionState, clip);
 }
 
 void PaintMapBlock(
@@ -792,13 +636,8 @@ void PaintMapBlock(
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
-	PaintImageBackedMediaBlock(
-		p,
-		block,
-		markdown,
-		caches,
-		selectionState,
-		clip);
+	PaintPersistentMediaBlock(p, block, caches, selectionState, clip);
+	PaintMediaCaption(p, block, markdown, caches, selectionState, clip);
 }
 
 void PaintGroupedMediaBlock(
@@ -808,37 +647,23 @@ void PaintGroupedMediaBlock(
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
-	const auto selected = (block.segmentIndex >= 0)
-		&& WholeSegmentSelected(selectionState, block.segmentIndex);
-	const auto visible = clip.intersected(block.visibleMediaRect);
-	if (!visible.isEmpty()) {
-		const auto &style = markdown.groupedMedia;
-		p.save();
-		p.setClipRect(visible);
-		const auto path = RoundedRectPath(block.mediaRect, style.radius);
-		p.setClipPath(path, Qt::IntersectClip);
-		for (const auto &item : block.groupedMediaItems) {
-			PaintImageBackedMedia(
-				p,
-				item.rect,
-				item.copyText,
-				item.thumbnailImage,
-				item.fullImage,
-				&item.thumbnailSubscribed,
-				&item.fullSubscribed,
-				MediaLoading(item),
-				MediaProgress(item),
-				markdown,
-				caches,
-				false,
-				clip);
+	if (block.mediaBlock) {
+		block.mediaBlock->paint(p, clip, caches);
+		if ((block.segmentIndex >= 0)
+			&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
+			const auto visible = clip.intersected(block.visibleMediaRect);
+			if (!visible.isEmpty()) {
+				const auto &style = markdown.groupedMedia;
+				auto overlay = p.textPalette().selectOverlay->c;
+				overlay.setAlphaF(std::clamp(style.overlayOpacity, 0., 1.));
+				p.save();
+				p.setClipRect(visible);
+				p.fillPath(RoundedRectPath(block.mediaRect, style.radius), overlay);
+				p.restore();
+			}
 		}
-		if (selected) {
-			auto overlay = p.textPalette().selectOverlay->c;
-			overlay.setAlphaF(std::clamp(style.overlayOpacity, 0., 1.));
-			p.fillPath(path, overlay);
-		}
-		p.restore();
+		PaintMediaCaption(p, block, markdown, caches, selectionState, clip);
+		return;
 	}
 	PaintMediaCaption(p, block, markdown, caches, selectionState, clip);
 }

@@ -53,6 +53,7 @@ void RememberNativeIvDocument(
 [[nodiscard]] bool PrepareNativeIvGroupedMediaBlock(
 	const QVector<MTPPageBlock> &items,
 	const MTPPageCaption &caption,
+	PreparedGroupedMediaIntent intent,
 	QString placeholderLabel,
 	std::vector<PreparedBlock> *result,
 	NativeIvPrepareState *state);

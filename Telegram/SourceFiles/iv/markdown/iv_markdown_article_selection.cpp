@@ -116,7 +116,12 @@ const auto kPhotoCopyLabel = u"Photo"_q;
 [[nodiscard]] TextForMimeData CopyTextForSingleMediaBlock(
 		const LaidOutBlock &block,
 		const QString &fallback = QString()) {
-	const auto label = !block.copyText.isEmpty()
+	const auto selectionData = block.mediaBlock
+		? block.mediaBlock->selectionData()
+		: MediaBlockSelectionData();
+	const auto label = !selectionData.copyText.isEmpty()
+		? selectionData.copyText
+		: !block.copyText.isEmpty()
 		? block.copyText
 		: !block.labelText.isEmpty()
 		? block.labelText

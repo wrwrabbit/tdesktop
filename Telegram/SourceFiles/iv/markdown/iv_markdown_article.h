@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "iv/markdown/iv_markdown_common.h"
+#include "iv/markdown/iv_markdown_media_block.h"
 #include "iv/markdown/iv_markdown_prepare.h"
 
 #include "spellcheck/spellcheck_highlight_syntax.h"
@@ -25,6 +26,7 @@ struct MarkdownArticlePaintCaches {
 	Ui::Text::QuotePaintCache *blockquote = nullptr;
 	std::span<Ui::Text::SpecialColor> colors;
 	Fn<void()> repaint;
+	Fn<void(QRect)> repaintRect;
 };
 
 struct MarkdownArticleHitTestResult {
@@ -107,6 +109,10 @@ public:
 	MarkdownArticle &operator=(MarkdownArticle &&) noexcept;
 
 	void setRenderer(std::shared_ptr<MathRenderer> renderer);
+	void setMediaBlockHost(MediaBlockHost *host);
+	void setTextRepaintCallbacks(
+		Fn<void()> repaint,
+		Fn<void(QRect)> repaintRect);
 	void setContent(MarkdownArticleContent content);
 	void invalidateLayout();
 	[[nodiscard]] int maxWidth() const;
@@ -145,6 +151,7 @@ public:
 		Spellchecker::HighlightProcessId processId);
 	void invalidatePaletteCache();
 	void invalidateRasterCache();
+	[[nodiscard]] MediaBlockHost *mediaBlockHost() const;
 
 private:
 	class Impl;

@@ -22,6 +22,11 @@ struct GeoPointLocation;
 namespace Iv::Markdown {
 namespace {
 
+[[nodiscard]] PreparedMediaBlockId GeneratePreparedMediaBlockId(
+		NativeIvPrepareState *state) {
+	return { .value = uint64(++state->nextGeneratedId) };
+}
+
 void ShiftEntities(EntitiesInText *entities, int delta) {
 	if (!delta) {
 		return;
@@ -620,6 +625,7 @@ bool PrepareNativeIvPhotoBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = std::move(anchorId);
+	block.photo.id = GeneratePreparedMediaBlockId(state);
 	block.photo.photoId = info->id;
 	block.photo.width = info->width;
 	block.photo.height = info->height;
@@ -655,6 +661,7 @@ bool PrepareNativeIvVideoBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = std::move(anchorId);
+	block.video.id = GeneratePreparedMediaBlockId(state);
 	block.video.media.kind = PreparedMediaItemKind::Document;
 	block.video.media.id = info->id;
 	block.video.media.width = info->width;
@@ -686,6 +693,7 @@ bool PrepareNativeIvAudioBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = std::move(anchorId);
+	block.audio.id = GeneratePreparedMediaBlockId(state);
 	block.audio.documentId = info->id;
 	block.audio.title = info->title;
 	block.audio.performer = info->performer;
@@ -733,6 +741,7 @@ bool PrepareNativeIvMapBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = std::move(anchorId);
+	prepared.id = GeneratePreparedMediaBlockId(state);
 	block.map = std::move(prepared);
 	result->push_back(std::move(block));
 	return true;
@@ -741,7 +750,7 @@ bool PrepareNativeIvMapBlock(
 bool PrepareNativeIvChannelBlock(
 		const MTPDpageBlockChannel &data,
 		std::vector<PreparedBlock> *result,
-		NativeIvPrepareState *) {
+		NativeIvPrepareState *state) {
 	auto prepared = PreparedChannelBlockData();
 	const auto supported = data.vchannel().match([&](const MTPDchannel &channel) {
 		prepared.channelId = channel.vid().v;
@@ -770,6 +779,7 @@ bool PrepareNativeIvChannelBlock(
 	}
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::Channel;
+	prepared.id = GeneratePreparedMediaBlockId(state);
 	block.channel = std::move(prepared);
 	result->push_back(std::move(block));
 	return true;
@@ -778,6 +788,7 @@ bool PrepareNativeIvChannelBlock(
 bool PrepareNativeIvGroupedMediaBlock(
 		const QVector<MTPPageBlock> &items,
 		const MTPPageCaption &caption,
+		PreparedGroupedMediaIntent intent,
 		QString placeholderLabel,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
@@ -790,9 +801,12 @@ bool PrepareNativeIvGroupedMediaBlock(
 	}
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::GroupedMedia;
+	block.groupedMedia.id = GeneratePreparedMediaBlockId(state);
+	block.groupedMedia.intent = intent;
 	block.groupedMedia.items.reserve(items.size());
 	for (const auto &item : items) {
 		auto prepared = PreparedGroupedMediaItemData();
+		prepared.id = GeneratePreparedMediaBlockId(state);
 		if (!PrepareNativeIvGroupedMediaItem(item, &prepared, *state)) {
 			return PrepareNativeIvPlaceholderBlock(
 				std::move(placeholderLabel),

@@ -100,7 +100,16 @@ struct PreparedTableRow {
 	bool header = false;
 };
 
+struct PreparedMediaBlockId {
+	uint64 value = 0;
+
+	[[nodiscard]] explicit operator bool() const {
+		return (value != 0);
+	}
+};
+
 struct PreparedPhotoBlockData {
+	PreparedMediaBlockId id;
 	uint64 photoId = 0;
 	int width = 0;
 	int height = 0;
@@ -121,10 +130,12 @@ struct PreparedMediaItemData {
 };
 
 struct PreparedVideoBlockData {
+	PreparedMediaBlockId id;
 	PreparedMediaItemData media;
 };
 
 struct PreparedAudioBlockData {
+	PreparedMediaBlockId id;
 	uint64 documentId = 0;
 	QString title;
 	QString performer;
@@ -133,6 +144,7 @@ struct PreparedAudioBlockData {
 };
 
 struct PreparedMapBlockData {
+	PreparedMediaBlockId id;
 	double latitude = 0.;
 	double longitude = 0.;
 	uint64 accessHash = 0;
@@ -143,16 +155,25 @@ struct PreparedMapBlockData {
 };
 
 struct PreparedChannelBlockData {
+	PreparedMediaBlockId id;
 	uint64 channelId = 0;
 	QString title;
 	QString username;
 };
 
+enum class PreparedGroupedMediaIntent {
+	Collage,
+	Slideshow,
+};
+
 struct PreparedGroupedMediaItemData {
+	PreparedMediaBlockId id;
 	PreparedMediaItemData media;
 };
 
 struct PreparedGroupedMediaBlockData {
+	PreparedMediaBlockId id;
+	PreparedGroupedMediaIntent intent = PreparedGroupedMediaIntent::Collage;
 	std::vector<PreparedGroupedMediaItemData> items;
 };
 

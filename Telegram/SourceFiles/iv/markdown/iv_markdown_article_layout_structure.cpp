@@ -485,7 +485,8 @@ namespace {
 			markdown,
 			left,
 			top,
-			width);
+			width,
+			context);
 	case PreparedBlockKind::CodeBlock:
 		return LayoutCodeBlock(
 			prepared,
@@ -558,7 +559,8 @@ namespace {
 			markdown,
 			left,
 			top,
-			width);
+			width,
+			context);
 	case PreparedBlockKind::Video:
 		return LayoutVideoBlock(
 			prepared,
@@ -568,7 +570,8 @@ namespace {
 			markdown,
 			left,
 			top,
-			width);
+			width,
+			context);
 	case PreparedBlockKind::Audio:
 		return LayoutAudioBlock(
 			prepared,
@@ -578,7 +581,8 @@ namespace {
 			markdown,
 			left,
 			top,
-			width);
+			width,
+			context);
 	case PreparedBlockKind::Map:
 		return LayoutMapBlock(
 			prepared,
@@ -588,7 +592,8 @@ namespace {
 			markdown,
 			left,
 			top,
-			width);
+			width,
+			context);
 	case PreparedBlockKind::Channel:
 		return LayoutChannelBlock(
 			prepared,
@@ -598,7 +603,8 @@ namespace {
 			markdown,
 			left,
 			top,
-			width);
+			width,
+			context);
 	case PreparedBlockKind::Placeholder:
 		return LayoutPlaceholderBlock(
 			prepared,
@@ -631,7 +637,8 @@ namespace {
 		markdown,
 		left,
 		top,
-		width);
+		width,
+		context);
 }
 
 } // namespace

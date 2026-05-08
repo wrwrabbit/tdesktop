@@ -422,7 +422,8 @@ public:
 		int width,
 		int height,
 		std::shared_ptr<Ui::DynamicImage> image,
-		Fn<void()> repaint);
+		Fn<void()> repaint,
+		Fn<void(QRect)> repaintRect);
 
 	int width() override;
 	QString entityData() override;
@@ -441,9 +442,23 @@ private:
 	int _height = 1;
 	const std::shared_ptr<Ui::DynamicImage> _image;
 	const Fn<void()> _repaint;
+	const Fn<void(QRect)> _repaintRect;
+	const std::shared_ptr<QRect> _lastPaintRect = std::make_shared<QRect>();
 	bool _subscribed = false;
 
 };
+
+struct InlineIvImageMarkedContext {
+	Fn<void(QRect)> repaintRect;
+};
+
+struct InlineIvImageRepaintCallbacks {
+	Fn<void()> repaint;
+	Fn<void(QRect)> repaintRect;
+};
+
+thread_local auto CurrentInlineIvImageRepaintCallbacks
+	= std::vector<InlineIvImageRepaintCallbacks>();
 
 [[nodiscard]] QString InlineFormulaDisplayFallbackText(
 		const PreparedFormulaMeasurementSignature &signature,
@@ -483,6 +498,22 @@ FindInlineFormulaMeasuredData(
 
 ClickHandlerPtr CreatePreparedLinkHandler(PreparedLink link) {
 	return std::make_shared<PreparedLinkClickHandler>(std::move(link));
+}
+
+InlineIvImageRepaintScope::InlineIvImageRepaintScope(
+		Fn<void()> repaint,
+		Fn<void(QRect)> repaintRect)
+: _active(true) {
+	CurrentInlineIvImageRepaintCallbacks.push_back({
+		.repaint = std::move(repaint),
+		.repaintRect = std::move(repaintRect),
+	});
+}
+
+InlineIvImageRepaintScope::~InlineIvImageRepaintScope() {
+	if (_active) {
+		CurrentInlineIvImageRepaintCallbacks.pop_back();
+	}
 }
 
 std::optional<PreparedLink> ExtractPreparedLink(const ClickHandlerPtr &link) {
@@ -885,12 +916,14 @@ InlineIvImageObject::InlineIvImageObject(
 	int width,
 	int height,
 	std::shared_ptr<Ui::DynamicImage> image,
-	Fn<void()> repaint)
+	Fn<void()> repaint,
+	Fn<void(QRect)> repaintRect)
 : _replacementText(std::move(replacementText))
 , _width(std::max(width, 1))
 , _height(std::max(height, 1))
 , _image(std::move(image))
-, _repaint(std::move(repaint)) {
+, _repaint(std::move(repaint))
+, _repaintRect(std::move(repaintRect)) {
 }
 
 int InlineIvImageObject::width() {
@@ -931,10 +964,20 @@ Ui::Text::CustomEmojiSemantics InlineIvImageObject::semantics() {
 }
 
 void InlineIvImageObject::paint(QPainter &p, const Context &context) {
+	*_lastPaintRect = QRect(context.position, QSize(_width, _height));
 	if (_image) {
 		if (!_subscribed) {
 			_subscribed = true;
-			_image->subscribeToUpdates(_repaint ? _repaint : [] {});
+			const auto repaint = _repaint;
+			const auto repaintRect = _repaintRect;
+			const auto lastPaintRect = _lastPaintRect;
+			_image->subscribeToUpdates([=] {
+				if (repaintRect && lastPaintRect && !lastPaintRect->isEmpty()) {
+					repaintRect(*lastPaintRect);
+				} else if (repaint) {
+					repaint();
+				}
+			});
 		}
 		if (const auto image = _image->image(std::max(_width, _height));
 			!image.isNull()) {
@@ -1082,9 +1125,16 @@ void SetTextLeaf(
 		const std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		int minResizeWidth) {
+	int minResizeWidth) {
 	*leaf = Ui::Text::String(TextMinResizeWidth(minResizeWidth));
 	auto context = Ui::Text::MarkedContext();
+	if (!CurrentInlineIvImageRepaintCallbacks.empty()) {
+		const auto &callbacks = CurrentInlineIvImageRepaintCallbacks.back();
+		context.repaint = callbacks.repaint;
+		context.other = InlineIvImageMarkedContext{
+			.repaintRect = callbacks.repaintRect,
+		};
+	}
 	context.customEmojiFactory = [
 		formulas,
 		inlineFormulaObjects,
@@ -1120,12 +1170,20 @@ void SetTextLeaf(
 					image->documentId,
 					QSize(image->width, image->height))
 				: nullptr;
+			const auto repaintRect = [&]() -> Fn<void(QRect)> {
+				if (const auto data = std::any_cast<InlineIvImageMarkedContext>(
+						&context.other)) {
+					return data->repaintRect;
+				}
+				return nullptr;
+			}();
 			return std::make_unique<InlineIvImageObject>(
 				image->replacementText,
 				image->width,
 				image->height,
 				std::move(resolved),
-				context.repaint);
+				context.repaint,
+				std::move(repaintRect));
 		}
 		}
 		return std::unique_ptr<Ui::Text::CustomEmoji>();

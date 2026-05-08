@@ -33,7 +33,8 @@ namespace Iv::Markdown {
 
 class MarkdownDocumentWidget final
 	: public Ui::RpWidget
-	, public ClickHandlerHost {
+	, public ClickHandlerHost
+	, public MediaBlockHost {
 public:
 	explicit MarkdownDocumentWidget(QWidget *parent);
 	~MarkdownDocumentWidget() override;
@@ -53,6 +54,8 @@ public:
 	[[nodiscard]] bool toggleDetails(const QString &anchorId);
 	[[nodiscard]] int lastRelayoutMs() const;
 	int resizeGetHeight(int newWidth) override;
+	void requestRepaint(QRect articleRect) override;
+	void requestRelayout(QRect articleRect) override;
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
@@ -104,6 +107,7 @@ private:
 	void resetSelection();
 	void clearSelection();
 	void resetTextPaintCaches();
+	[[nodiscard]] QRect articleRectToWidget(QRect articleRect) const;
 	[[nodiscard]] Ui::Text::QuotePaintCache *ensurePrePaintCache();
 	[[nodiscard]] Ui::Text::QuotePaintCache *ensureBlockquotePaintCache();
 	[[nodiscard]] MarkdownArticlePaintCaches textPaintCaches();

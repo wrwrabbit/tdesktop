@@ -237,24 +237,19 @@ void RebuildVisibleSegmentLookup(
 		}
 	};
 	if (segment.block) {
-		if (!segment.block->actionRect.isEmpty()
+		if (segment.block->mediaBlock) {
+			if (const auto link = segment.block->mediaBlock->linkAt(point)) {
+				result.state.link = link;
+				result.preparedLink = std::nullopt;
+				result.mediaActivation = {};
+			} else {
+				applyActivation(segment.block->mediaBlock->activationAt(point));
+			}
+		} else if (!segment.block->actionRect.isEmpty()
 			&& segment.block->actionRect.contains(point)
 			&& segment.block->channelRuntime
 			&& segment.block->channelRuntime->joinVisible()) {
 			applyActivation(segment.block->actionActivation);
-		} else if (segment.block->kind == PreparedBlockKind::GroupedMedia) {
-			auto matchedItem = false;
-			for (const auto &item : segment.block->groupedMediaItems) {
-				if (!item.rect.contains(point)) {
-					continue;
-				}
-				applyActivation(item.activation);
-				matchedItem = true;
-				break;
-			}
-			if (!matchedItem) {
-				applyActivation(segment.block->activation);
-			}
 		} else {
 			applyActivation(segment.block->activation);
 		}
@@ -338,7 +333,20 @@ public:
 		invalidateLayout();
 	}
 
+	void setMediaBlockHost(MediaBlockHost *host) {
+		_mediaBlockHost = host;
+		refreshMediaBlockHosts();
+	}
+
+	void setTextRepaintCallbacks(
+			Fn<void()> repaint,
+			Fn<void(QRect)> repaintRect) {
+		_textRepaint = std::move(repaint);
+		_textRepaintRect = std::move(repaintRect);
+	}
+
 	void setContent(MarkdownArticleContent content) {
+		clearMediaBlocks();
 		_content = std::move(content);
 		ClearInlineFormulaObjectCache(_inlineFormulaObjects);
 		resetFormulaRasterCache();
@@ -356,6 +364,9 @@ public:
 		const auto innerWidth = std::max(
 			kArticleMaxWidth - page.left() - page.right(),
 			1);
+		auto repaintScope = InlineIvImageRepaintScope(
+			_textRepaint,
+			_textRepaintRect);
 		const auto layoutBottom = LayoutBlocks(
 			_content.blocks.blocks,
 			&_content.formulas,
@@ -368,7 +379,9 @@ public:
 			page.left(),
 			page.top(),
 			innerWidth,
-			LayoutContext{ .allowAsyncSyntaxHighlighting = false });
+			LayoutContext{
+				.allowAsyncSyntaxHighlighting = false,
+			});
 		(void)layoutBottom;
 		return BlockMaxRight(blocks) + page.right();
 	}
@@ -570,6 +583,10 @@ public:
 		ClearColorizedFormulaImages(&_blocks);
 	}
 
+	[[nodiscard]] MediaBlockHost *mediaBlockHost() const {
+		return _mediaBlockHost;
+	}
+
 	void invalidateLayout() {
 		_width = -1;
 		_height = 0;
@@ -602,6 +619,98 @@ private:
 				_segmentBottoms,
 				*_visibleRange)
 			: SegmentSpan();
+	}
+
+	void clearMediaBlocks() {
+		for (const auto &[id, block] : _mediaBlocks) {
+			if (block) {
+				block->setHost(nullptr);
+			}
+		}
+		_mediaBlocks.clear();
+	}
+
+	void refreshMediaBlockHosts() {
+		for (const auto &[id, block] : _mediaBlocks) {
+			if (block) {
+				block->setHost(_mediaBlockHost);
+			}
+		}
+	}
+
+	[[nodiscard]] std::shared_ptr<MediaBlock> getOrCreateMediaBlock(
+			const PreparedBlock &prepared) {
+		switch (prepared.kind) {
+		case PreparedBlockKind::Photo:
+			return getOrCreateMediaBlock(
+				prepared.photo.id,
+				[=] {
+					return CreatePhotoMediaBlock(
+						prepared.photo,
+						_content.mediaRuntime);
+				});
+		case PreparedBlockKind::Video:
+			return getOrCreateMediaBlock(
+				prepared.video.id,
+				[=] {
+					return CreateVideoMediaBlock(
+						prepared.video,
+						_content.mediaRuntime);
+				});
+		case PreparedBlockKind::Map:
+			return getOrCreateMediaBlock(
+				prepared.map.id,
+				[=] {
+					return CreateMapMediaBlock(
+						prepared.map,
+						_content.mediaRuntime);
+				});
+		case PreparedBlockKind::Audio:
+			return getOrCreateMediaBlock(
+				prepared.audio.id,
+				[=] {
+					return CreateAudioMediaBlock(
+						prepared.audio,
+						_content.mediaRuntime);
+				});
+		case PreparedBlockKind::Channel:
+			return getOrCreateMediaBlock(
+				prepared.channel.id,
+				[=] {
+					return CreateChannelMediaBlock(
+						prepared.channel,
+						_content.mediaRuntime);
+				});
+		case PreparedBlockKind::GroupedMedia:
+			return getOrCreateMediaBlock(
+				prepared.groupedMedia.id,
+				[=] {
+					return CreateGroupedMediaBlock(
+						prepared.groupedMedia,
+						_content.mediaRuntime);
+				});
+		default:
+			return nullptr;
+		}
+	}
+
+	template <typename Factory>
+	[[nodiscard]] std::shared_ptr<MediaBlock> getOrCreateMediaBlock(
+			PreparedMediaBlockId id,
+			Factory &&factory) {
+		if (!id) {
+			return nullptr;
+		}
+		if (const auto i = _mediaBlocks.find(id.value);
+			i != end(_mediaBlocks)) {
+			return i->second;
+		}
+		auto block = factory();
+		if (block) {
+			block->setHost(_mediaBlockHost);
+		}
+		_mediaBlocks.emplace(id.value, block);
+		return block;
 	}
 
 	[[nodiscard]] Spellchecker::HighlightProcessId tryHighlightSyntax(
@@ -690,6 +799,15 @@ private:
 		const auto &markdown = st::defaultMarkdown;
 		const auto &page = markdown.pagePadding;
 		const auto innerWidth = std::max(width - page.left() - page.right(), 1);
+		auto repaintScope = InlineIvImageRepaintScope(
+			_textRepaint,
+			_textRepaintRect);
+		auto context = LayoutContext{
+			.syntaxHighlightTracker = this,
+		};
+		context.mediaBlockFactory = [=](const PreparedBlock &prepared) {
+			return getOrCreateMediaBlock(prepared);
+		};
 		const auto y = LayoutBlocks(
 			_content.blocks.blocks,
 			&_content.formulas,
@@ -702,7 +820,7 @@ private:
 			page.left(),
 			page.top(),
 			innerWidth,
-			LayoutContext{ .syntaxHighlightTracker = this });
+			std::move(context));
 		_height = y + page.bottom();
 		registerPendingHighlightBlocks(_blocks);
 		CollectAnchors(_blocks, &_anchors);
@@ -714,9 +832,13 @@ private:
 	std::vector<RenderedFormula> _formulaRenders;
 	std::shared_ptr<MathRenderer> _renderer;
 	std::shared_ptr<InlineFormulaObjectCache> _inlineFormulaObjects;
+	MediaBlockHost *_mediaBlockHost = nullptr;
+	Fn<void()> _textRepaint;
+	Fn<void(QRect)> _textRepaintRect;
 	int _width = -1;
 	int _height = 0;
 	std::vector<LaidOutBlock> _blocks;
+	std::unordered_map<uint64, std::shared_ptr<MediaBlock>> _mediaBlocks;
 	std::unordered_map<
 		PendingHighlightKey,
 		Spellchecker::HighlightProcessId,
@@ -743,6 +865,18 @@ MarkdownArticle &MarkdownArticle::operator=(MarkdownArticle &&) noexcept = defau
 
 void MarkdownArticle::setRenderer(std::shared_ptr<MathRenderer> renderer) {
 	_impl->setRenderer(std::move(renderer));
+}
+
+void MarkdownArticle::setMediaBlockHost(MediaBlockHost *host) {
+	_impl->setMediaBlockHost(host);
+}
+
+void MarkdownArticle::setTextRepaintCallbacks(
+		Fn<void()> repaint,
+		Fn<void(QRect)> repaintRect) {
+	_impl->setTextRepaintCallbacks(
+		std::move(repaint),
+		std::move(repaintRect));
 }
 
 void MarkdownArticle::setContent(MarkdownArticleContent content) {
@@ -843,6 +977,10 @@ void MarkdownArticle::invalidatePaletteCache() {
 
 void MarkdownArticle::invalidateRasterCache() {
 	_impl->invalidateRasterCache();
+}
+
+MediaBlockHost *MarkdownArticle::mediaBlockHost() const {
+	return _impl->mediaBlockHost();
 }
 
 } // namespace Iv::Markdown

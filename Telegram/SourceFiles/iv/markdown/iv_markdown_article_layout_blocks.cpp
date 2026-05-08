@@ -6,10 +6,10 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_article_layout_blocks.h"
+#include "iv/markdown/iv_markdown_media_block.h"
 #include "iv/markdown/iv_markdown_article_text.h"
 #include "lang/lang_keys.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
-#include "ui/grouped_layout.h"
 
 #include "styles/style_iv.h"
 #include "styles/style_widgets.h"
@@ -151,23 +151,6 @@ const auto kUsernamePrefix = u"@"_q;
 	return result;
 }
 
-template <typename Runtime>
-void ResolveRuntimeImages(
-		const std::shared_ptr<Runtime> &runtime,
-		QSize size,
-		std::shared_ptr<Ui::DynamicImage> *thumbnail,
-		std::shared_ptr<Ui::DynamicImage> *full) {
-	if (!runtime) {
-		return;
-	}
-	if (thumbnail) {
-		*thumbnail = runtime->thumbnail(size);
-	}
-	if (full) {
-		*full = runtime->full(size);
-	}
-}
-
 void SetPlainTextLeaf(
 		Ui::Text::String *leaf,
 		const style::TextStyle &textStyle,
@@ -198,10 +181,6 @@ void SetPlainTextLeaf(
 	return std::max(
 		int((int64(width) * aspectHeight + aspectWidth - 1) / aspectWidth),
 		1);
-}
-
-[[nodiscard]] int GroupedMediaMinWidth(int width, int spacing) {
-	return std::max((width - 2 * spacing) / 3, 1);
 }
 
 void LayoutMediaCaption(
@@ -294,74 +273,6 @@ void LayoutMediaCaption(
 		return tr::lng_media_selected_video(tr::now, lt_count, videos);
 	}
 	return QString();
-}
-
-[[nodiscard]] QString GroupedMediaItemCopyText(PreparedMediaItemKind kind) {
-	return (kind == PreparedMediaItemKind::Photo)
-		? kPhotoCopyLabel
-		: tr::lng_in_dlg_video(tr::now);
-}
-
-[[nodiscard]] int GroupedMediaLayoutWidth(
-		const std::vector<Ui::GroupMediaLayout> &layout) {
-	auto result = 0;
-	for (const auto &part : layout) {
-		result = std::max(
-			result,
-			part.geometry.x() + part.geometry.width());
-	}
-	return result;
-}
-
-[[nodiscard]] int GroupedMediaLayoutHeight(
-		const std::vector<Ui::GroupMediaLayout> &layout) {
-	auto result = 0;
-	for (const auto &part : layout) {
-		result = std::max(
-			result,
-			part.geometry.y() + part.geometry.height());
-	}
-	return result;
-}
-
-void ResolveGroupedMediaItemLayout(
-		LaidOutGroupedMediaItem *item,
-		const PreparedGroupedMediaItemData &prepared,
-		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		QRect rect) {
-	if (!item) {
-		return;
-	}
-	item->kind = prepared.media.kind;
-	item->copyText = GroupedMediaItemCopyText(prepared.media.kind);
-	item->rect = rect;
-	if (prepared.media.kind == PreparedMediaItemKind::Photo) {
-		if (mediaRuntime) {
-			item->photoRuntime = mediaRuntime->resolvePhoto(prepared.media.id);
-		}
-		ResolveRuntimeImages(
-			item->photoRuntime,
-			rect.size(),
-			&item->thumbnailImage,
-			&item->fullImage);
-		if (item->photoRuntime) {
-			item->activation.kind = MediaActivationKind::Photo;
-			item->activation.photo = item->photoRuntime;
-		}
-		return;
-	}
-	if (mediaRuntime) {
-		item->documentRuntime = mediaRuntime->resolveDocument(prepared.media.id);
-	}
-	ResolveRuntimeImages(
-		item->documentRuntime,
-		rect.size(),
-		&item->thumbnailImage,
-		&item->fullImage);
-	if (item->documentRuntime) {
-		item->activation.kind = MediaActivationKind::Document;
-		item->activation.document = item->documentRuntime;
-	}
 }
 
 } // namespace
@@ -596,7 +507,8 @@ LaidOutBlock LayoutFlowBlock(
 		const style::Markdown &markdown,
 		int left,
 		int top,
-		int width) {
+		int width,
+		LayoutContext context) {
 	if (prepared.kind == PreparedBlockKind::GroupedMedia) {
 		return LayoutGroupedMediaBlock(
 			prepared,
@@ -606,7 +518,8 @@ LaidOutBlock LayoutFlowBlock(
 			markdown,
 			left,
 			top,
-			width);
+			width,
+			context);
 	}
 	auto block = LaidOutBlock();
 	block.kind = prepared.kind;
@@ -984,11 +897,20 @@ LaidOutBlock LayoutPhotoBlock(
 		const style::Markdown &markdown,
 		int left,
 		int top,
-		int width) {
+		int width,
+		LayoutContext context) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Photo;
 	block.anchorId = prepared.anchorId;
-	block.copyText = kPhotoCopyLabel;
+	if (context.mediaBlockFactory) {
+		block.mediaBlock = context.mediaBlockFactory(prepared);
+	}
+	if (block.mediaBlock) {
+		block.copyText = block.mediaBlock->selectionData().copyText;
+	}
+	if (block.copyText.isEmpty()) {
+		block.copyText = kPhotoCopyLabel;
+	}
 
 	const auto &style = markdown.photo;
 	const auto blockWidth = std::max(width, 1);
@@ -997,27 +919,16 @@ LaidOutBlock LayoutPhotoBlock(
 	const auto mediaWidth = std::max(
 		blockWidth - style.padding.left() - style.padding.right(),
 		1);
-	const auto mediaHeight = MediaHeightForWidth(
-		mediaWidth,
-		prepared.photo.width,
-		prepared.photo.height);
+	const auto mediaHeight = block.mediaBlock
+		? block.mediaBlock->resizeGetHeight(mediaWidth)
+		: MediaHeightForWidth(
+			mediaWidth,
+			prepared.photo.width,
+			prepared.photo.height);
 	block.mediaRect = QRect(mediaLeft, mediaTop, mediaWidth, mediaHeight);
 	block.visibleMediaRect = block.mediaRect;
-
-	if (mediaRuntime) {
-		block.photoRuntime = mediaRuntime->resolvePhoto(prepared.photo.photoId);
-	}
-	ResolveRuntimeImages(
-		block.photoRuntime,
-		QSize(mediaWidth, mediaHeight),
-		&block.thumbnailImage,
-		&block.fullImage);
-	if (!prepared.photo.urlOverride.isEmpty()) {
-		block.activation.kind = MediaActivationKind::ExternalUrl;
-		block.activation.url = prepared.photo.urlOverride;
-	} else if (prepared.photo.viewerOpen && block.photoRuntime) {
-		block.activation.kind = MediaActivationKind::Photo;
-		block.activation.photo = block.photoRuntime;
+	if (block.mediaBlock) {
+		block.mediaBlock->setGeometry(block.mediaRect);
 	}
 
 	auto bottom = mediaTop + mediaHeight + style.padding.bottom();
@@ -1051,11 +962,20 @@ LaidOutBlock LayoutVideoBlock(
 		const style::Markdown &markdown,
 		int left,
 		int top,
-		int width) {
+		int width,
+		LayoutContext context) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Video;
 	block.anchorId = prepared.anchorId;
-	block.copyText = tr::lng_in_dlg_video(tr::now);
+	if (context.mediaBlockFactory) {
+		block.mediaBlock = context.mediaBlockFactory(prepared);
+	}
+	if (block.mediaBlock) {
+		block.copyText = block.mediaBlock->selectionData().copyText;
+	}
+	if (block.copyText.isEmpty()) {
+		block.copyText = tr::lng_in_dlg_video(tr::now);
+	}
 
 	const auto &style = markdown.photo;
 	const auto blockWidth = std::max(width, 1);
@@ -1064,25 +984,16 @@ LaidOutBlock LayoutVideoBlock(
 	const auto mediaWidth = std::max(
 		blockWidth - style.padding.left() - style.padding.right(),
 		1);
-	const auto mediaHeight = MediaHeightForWidth(
-		mediaWidth,
-		prepared.video.media.width,
-		prepared.video.media.height);
+	const auto mediaHeight = block.mediaBlock
+		? block.mediaBlock->resizeGetHeight(mediaWidth)
+		: MediaHeightForWidth(
+			mediaWidth,
+			prepared.video.media.width,
+			prepared.video.media.height);
 	block.mediaRect = QRect(mediaLeft, mediaTop, mediaWidth, mediaHeight);
 	block.visibleMediaRect = block.mediaRect;
-
-	if (mediaRuntime) {
-		block.documentRuntime = mediaRuntime->resolveDocument(
-			prepared.video.media.id);
-	}
-	ResolveRuntimeImages(
-		block.documentRuntime,
-		QSize(mediaWidth, mediaHeight),
-		&block.thumbnailImage,
-		&block.fullImage);
-	if (block.documentRuntime) {
-		block.activation.kind = MediaActivationKind::Document;
-		block.activation.document = block.documentRuntime;
+	if (block.mediaBlock) {
+		block.mediaBlock->setGeometry(block.mediaRect);
 	}
 
 	auto bottom = mediaTop + mediaHeight + style.padding.bottom();
@@ -1116,19 +1027,56 @@ LaidOutBlock LayoutAudioBlock(
 		const style::Markdown &markdown,
 		int left,
 		int top,
-		int width) {
+		int width,
+		LayoutContext context) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Audio;
 	block.anchorId = prepared.anchorId;
 	block.labelText = AudioTitleText(prepared.audio);
-	block.copyText = AudioCopyText(prepared.audio);
+	if (context.mediaBlockFactory) {
+		block.mediaBlock = context.mediaBlockFactory(prepared);
+	}
+	if (block.mediaBlock) {
+		block.copyText = block.mediaBlock->selectionData().copyText;
+	} else {
+		block.copyText = AudioCopyText(prepared.audio);
+	}
 
 	const auto &card = markdown.audio;
+	const auto blockWidth = std::max(width, 1);
+	if (block.mediaBlock) {
+		const auto cardHeight = block.mediaBlock->resizeGetHeight(blockWidth);
+		block.mediaRect = QRect(left, top, blockWidth, cardHeight);
+		block.visibleMediaRect = block.mediaRect;
+		block.mediaBlock->setGeometry(block.mediaRect);
+		block.firstLineBaseline = block.mediaBlock->firstLineBaseline();
+
+		auto bottom = top + cardHeight;
+		LayoutMediaCaption(
+			&block,
+			prepared,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
+			markdown,
+			left + card.padding.left(),
+			bottom,
+			std::max(blockWidth - card.padding.left() - card.padding.right(), 1),
+			markdown.audio.captionSkip,
+			&bottom);
+		block.contentRect = QRect(
+			left,
+			top,
+			blockWidth,
+			std::max(bottom - top, cardHeight));
+		block.outer = block.contentRect;
+		return block;
+	}
+
 	const auto &padding = card.padding;
 	const auto &titleStyle = card.titleStyle;
 	const auto &subtitleStyle = card.subtitleStyle;
 	const auto subtitleText = AudioSubtitleText(prepared.audio);
-	const auto blockWidth = std::max(width, 1);
 	const auto contentLeft = left + padding.left();
 	const auto contentWidth = std::max(
 		blockWidth - padding.left() - padding.right(),
@@ -1216,11 +1164,20 @@ LaidOutBlock LayoutMapBlock(
 		const style::Markdown &markdown,
 		int left,
 		int top,
-		int width) {
+		int width,
+		LayoutContext context) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Map;
 	block.anchorId = prepared.anchorId;
-	block.copyText = tr::lng_maps_point(tr::now);
+	if (context.mediaBlockFactory) {
+		block.mediaBlock = context.mediaBlockFactory(prepared);
+	}
+	if (block.mediaBlock) {
+		block.copyText = block.mediaBlock->selectionData().copyText;
+	}
+	if (block.copyText.isEmpty()) {
+		block.copyText = tr::lng_maps_point(tr::now);
+	}
 
 	const auto &style = markdown.photo;
 	const auto blockWidth = std::max(width, 1);
@@ -1229,29 +1186,16 @@ LaidOutBlock LayoutMapBlock(
 	const auto mediaWidth = std::max(
 		blockWidth - style.padding.left() - style.padding.right(),
 		1);
-	const auto mediaHeight = MediaHeightForWidth(
-		mediaWidth,
-		prepared.map.width,
-		prepared.map.height);
+	const auto mediaHeight = block.mediaBlock
+		? block.mediaBlock->resizeGetHeight(mediaWidth)
+		: MediaHeightForWidth(
+			mediaWidth,
+			prepared.map.width,
+			prepared.map.height);
 	block.mediaRect = QRect(mediaLeft, mediaTop, mediaWidth, mediaHeight);
 	block.visibleMediaRect = block.mediaRect;
-
-	if (mediaRuntime) {
-		block.mapRuntime = mediaRuntime->resolveMap(
-			prepared.map.latitude,
-			prepared.map.longitude,
-			prepared.map.accessHash,
-			QSize(mediaWidth, mediaHeight),
-			prepared.map.zoom);
-	}
-	ResolveRuntimeImages(
-		block.mapRuntime,
-		QSize(mediaWidth, mediaHeight),
-		&block.thumbnailImage,
-		&block.fullImage);
-	if (!prepared.map.url.isEmpty()) {
-		block.activation.kind = MediaActivationKind::ExternalUrl;
-		block.activation.url = prepared.map.url;
+	if (block.mediaBlock) {
+		block.mediaBlock->setGeometry(block.mediaRect);
 	}
 
 	auto bottom = mediaTop + mediaHeight + style.padding.bottom();
@@ -1285,14 +1229,52 @@ LaidOutBlock LayoutChannelBlock(
 		const style::Markdown &markdown,
 		int left,
 		int top,
-		int width) {
+		int width,
+		LayoutContext context) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Channel;
 	block.anchorId = prepared.anchorId;
 	block.labelText = prepared.channel.title;
-	block.copyText = ChannelCopyText(prepared.channel);
+	if (context.mediaBlockFactory) {
+		block.mediaBlock = context.mediaBlockFactory(prepared);
+	}
+	if (block.mediaBlock) {
+		block.copyText = block.mediaBlock->selectionData().copyText;
+	} else {
+		block.copyText = ChannelCopyText(prepared.channel);
+	}
 
 	const auto &card = markdown.channel;
+	const auto blockWidth = std::max(width, 1);
+	if (block.mediaBlock) {
+		const auto cardHeight = block.mediaBlock->resizeGetHeight(blockWidth);
+		block.mediaRect = QRect(left, top, blockWidth, cardHeight);
+		block.visibleMediaRect = block.mediaRect;
+		block.mediaBlock->setGeometry(block.mediaRect);
+		block.firstLineBaseline = block.mediaBlock->firstLineBaseline();
+
+		auto bottom = top + cardHeight;
+		LayoutMediaCaption(
+			&block,
+			prepared,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
+			markdown,
+			left + card.padding.left(),
+			bottom,
+			std::max(blockWidth - card.padding.left() - card.padding.right(), 1),
+			markdown.audio.captionSkip,
+			&bottom);
+		block.contentRect = QRect(
+			left,
+			top,
+			blockWidth,
+			std::max(bottom - top, cardHeight));
+		block.outer = block.contentRect;
+		return block;
+	}
+
 	const auto &padding = card.padding;
 	const auto &button = card.button;
 	const auto &buttonPadding = button.padding;
@@ -1300,7 +1282,6 @@ LaidOutBlock LayoutChannelBlock(
 	const auto &subtitleStyle = card.subtitleStyle;
 	const auto &actionStyle = button.textStyle;
 	const auto subtitleText = ChannelSubtitleText(prepared.channel);
-	const auto blockWidth = std::max(width, 1);
 	const auto contentLeft = left + padding.left();
 	const auto contentWidth = std::max(
 		blockWidth - padding.left() - padding.right(),
@@ -1418,11 +1399,20 @@ LaidOutBlock LayoutGroupedMediaBlock(
 		const style::Markdown &markdown,
 		int left,
 		int top,
-		int width) {
+		int width,
+		LayoutContext context) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::GroupedMedia;
 	block.anchorId = prepared.anchorId;
-	block.copyText = GroupedMediaCopyText(prepared.groupedMedia);
+	if (context.mediaBlockFactory) {
+		block.mediaBlock = context.mediaBlockFactory(prepared);
+	}
+	if (block.mediaBlock) {
+		block.copyText = block.mediaBlock->selectionData().copyText;
+	}
+	if (block.copyText.isEmpty()) {
+		block.copyText = GroupedMediaCopyText(prepared.groupedMedia);
+	}
 
 	const auto &style = markdown.groupedMedia;
 	const auto blockWidth = std::max(width, 1);
@@ -1431,38 +1421,15 @@ LaidOutBlock LayoutGroupedMediaBlock(
 	const auto mediaWidth = std::max(
 		blockWidth - style.padding.left() - style.padding.right(),
 		1);
-
-	auto sizes = std::vector<QSize>();
-	sizes.reserve(prepared.groupedMedia.items.size());
-	for (const auto &item : prepared.groupedMedia.items) {
-		sizes.push_back(QSize(
-			std::max(item.media.width, 1),
-			std::max(item.media.height, 1)));
+	const auto mediaHeight = block.mediaBlock
+		? block.mediaBlock->resizeGetHeight(mediaWidth)
+		: std::max(st::defaultMarkdown.placeholder.minHeight, 1);
+	block.mediaRect = QRect(mediaLeft, mediaTop, mediaWidth, mediaHeight);
+	if (block.mediaBlock) {
+		block.mediaBlock->setGeometry(block.mediaRect);
+		block.mediaRect = block.mediaBlock->geometry();
+		block.firstLineBaseline = block.mediaBlock->firstLineBaseline();
 	}
-	auto layout = Ui::LayoutMediaGroup(
-		sizes,
-		mediaWidth,
-		GroupedMediaMinWidth(mediaWidth, style.itemSkip),
-		style.itemSkip);
-	block.groupedMediaItems.reserve(layout.size());
-	for (auto i = 0, count = std::min(
-			int(layout.size()),
-			int(prepared.groupedMedia.items.size())); i != count; ++i) {
-		auto item = LaidOutGroupedMediaItem();
-		ResolveGroupedMediaItemLayout(
-			&item,
-			prepared.groupedMedia.items[i],
-			mediaRuntime,
-			layout[i].geometry.translated(mediaLeft, mediaTop));
-		block.groupedMediaItems.push_back(std::move(item));
-	}
-	const auto mediaHeight = GroupedMediaLayoutHeight(layout);
-	const auto laidOutWidth = GroupedMediaLayoutWidth(layout);
-	block.mediaRect = QRect(
-		mediaLeft,
-		mediaTop,
-		std::max(laidOutWidth, 1),
-		std::max(mediaHeight, 1));
 	block.visibleMediaRect = block.mediaRect;
 
 	auto bottom = block.mediaRect.y() + block.mediaRect.height()
@@ -1476,7 +1443,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
 		markdown,
 		mediaLeft,
 		bottom,
-		block.mediaRect.width(),
+		std::max(block.mediaRect.width(), 1),
 		style.captionSkip,
 		&bottom);
 

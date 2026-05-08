@@ -87,6 +87,8 @@ PRIVATE
     iv/markdown/iv_markdown_parse_finalize.h
     iv/markdown/iv_markdown_parse_validate.cpp
     iv/markdown/iv_markdown_parse_validate.h
+    iv/markdown/iv_markdown_media_block.cpp
+    iv/markdown/iv_markdown_media_block.h
     iv/markdown/iv_markdown_prepare.cpp
     iv/markdown/iv_markdown_prepare.h
     iv/markdown/iv_markdown_prepare_blocks.cpp

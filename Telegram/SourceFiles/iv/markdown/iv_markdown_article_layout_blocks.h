@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_article.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -49,19 +50,6 @@ struct LaidOutTableRow {
 	bool header = false;
 };
 
-struct LaidOutGroupedMediaItem {
-	PreparedMediaItemKind kind = PreparedMediaItemKind::Photo;
-	QString copyText;
-	QRect rect;
-	std::shared_ptr<PhotoRuntime> photoRuntime;
-	std::shared_ptr<DocumentRuntime> documentRuntime;
-	std::shared_ptr<Ui::DynamicImage> thumbnailImage;
-	std::shared_ptr<Ui::DynamicImage> fullImage;
-	MediaActivation activation;
-	mutable bool thumbnailSubscribed = false;
-	mutable bool fullSubscribed = false;
-};
-
 struct LaidOutBlock {
 	PreparedBlockKind kind = PreparedBlockKind::Paragraph;
 	Ui::Text::String leaf;
@@ -75,7 +63,6 @@ struct LaidOutBlock {
 	QString codeLanguage;
 	Spellchecker::HighlightProcessId syntaxHighlightProcessId = 0;
 	std::vector<LaidOutBlock> children;
-	std::vector<LaidOutGroupedMediaItem> groupedMediaItems;
 	std::vector<LaidOutTableRow> tableRows;
 	std::vector<int> tableColumnWidths;
 	QRect outer;
@@ -113,16 +100,11 @@ struct LaidOutBlock {
 	bool overflowed = false;
 	int segmentIndex = -1;
 	int secondarySegmentIndex = -1;
-	std::shared_ptr<PhotoRuntime> photoRuntime;
+	std::shared_ptr<MediaBlock> mediaBlock;
 	std::shared_ptr<DocumentRuntime> documentRuntime;
-	std::shared_ptr<MapRuntime> mapRuntime;
 	std::shared_ptr<ChannelRuntime> channelRuntime;
-	std::shared_ptr<Ui::DynamicImage> thumbnailImage;
-	std::shared_ptr<Ui::DynamicImage> fullImage;
 	MediaActivation activation;
 	MediaActivation actionActivation;
-	mutable bool thumbnailSubscribed = false;
-	mutable bool fullSubscribed = false;
 	mutable QImage colorizedFormulaImage;
 	mutable QColor colorizedFormulaColor;
 	mutable QSize colorizedFormulaSize;
@@ -134,6 +116,7 @@ struct LayoutContext {
 	bool tightList = false;
 	bool allowAsyncSyntaxHighlighting = true;
 	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr;
+	std::function<std::shared_ptr<MediaBlock>(const PreparedBlock&)> mediaBlockFactory;
 };
 
 struct TableCellLayoutData {
@@ -187,7 +170,8 @@ void RepopulateCodeBlockLeaf(
 	const style::Markdown &markdown,
 	int left,
 	int top,
-	int width);
+	int width,
+	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutCodeBlock(
 	const PreparedBlock &prepared,
 	const style::Markdown &markdown,
@@ -234,7 +218,8 @@ void RepopulateCodeBlockLeaf(
 	const style::Markdown &markdown,
 	int left,
 	int top,
-	int width);
+	int width,
+	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutVideoBlock(
 	const PreparedBlock &prepared,
 	std::vector<PreparedFormulaSlot> *formulas,
@@ -243,7 +228,8 @@ void RepopulateCodeBlockLeaf(
 	const style::Markdown &markdown,
 	int left,
 	int top,
-	int width);
+	int width,
+	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutAudioBlock(
 	const PreparedBlock &prepared,
 	std::vector<PreparedFormulaSlot> *formulas,
@@ -252,7 +238,8 @@ void RepopulateCodeBlockLeaf(
 	const style::Markdown &markdown,
 	int left,
 	int top,
-	int width);
+	int width,
+	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutMapBlock(
 	const PreparedBlock &prepared,
 	std::vector<PreparedFormulaSlot> *formulas,
@@ -261,7 +248,8 @@ void RepopulateCodeBlockLeaf(
 	const style::Markdown &markdown,
 	int left,
 	int top,
-	int width);
+	int width,
+	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutChannelBlock(
 	const PreparedBlock &prepared,
 	std::vector<PreparedFormulaSlot> *formulas,
@@ -270,7 +258,8 @@ void RepopulateCodeBlockLeaf(
 	const style::Markdown &markdown,
 	int left,
 	int top,
-	int width);
+	int width,
+	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutGroupedMediaBlock(
 	const PreparedBlock &prepared,
 	const std::vector<PreparedFormulaSlot> *formulas,
@@ -279,6 +268,7 @@ void RepopulateCodeBlockLeaf(
 	const style::Markdown &markdown,
 	int left,
 	int top,
-	int width);
+	int width,
+	LayoutContext context = {});
 
 } // namespace Iv::Markdown

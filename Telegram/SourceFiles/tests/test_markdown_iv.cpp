@@ -791,26 +791,34 @@ struct NativeIvMediaFixture {
 	};
 }
 
-[[nodiscard]] NativeIvMediaFixture NativeIvSlideshowFixture() {
+[[nodiscard]] NativeIvMediaFixture NativeIvSlideshowFixture(int count = 2) {
+	count = std::max(count, 2);
 	auto items = QVector<MTPPageBlock>();
-	items.push_back(MTP_pageBlockVideo(
-		MTP_flags(0),
-		MTP_long(7004),
-		NativeIvCaption()));
-	items.push_back(MTP_pageBlockVideo(
-		MTP_flags(0),
-		MTP_long(7005),
-		NativeIvCaption()));
+	auto documents = QVector<MTPDocument>();
+	items.reserve(count);
+	documents.reserve(count);
+	for (auto i = 0; i != count; ++i) {
+		const auto id = uint64(7004 + i);
+		const auto wide = (i % 2 == 0) ? 960 : 854;
+		const auto high = (i % 2 == 0) ? 540 : 480;
+		items.push_back(MTP_pageBlockVideo(
+			MTP_flags(0),
+			MTP_long(id),
+			NativeIvCaption()));
+		documents.push_back(NativeIvVideoDocument(
+			id,
+			wide,
+			high,
+			u"slide-"_q + QString::number(i + 1) + u".mp4"_q,
+			11. + i));
+	}
 	return {
 		.label = u"Slideshow"_q,
 		.caption = u"Slideshow caption"_q,
 		.block = MTP_pageBlockSlideshow(
 			MTP_vector<MTPPageBlock>(std::move(items)),
 			NativeIvCaption(u"Slideshow caption"_q)),
-		.documents = {
-			NativeIvVideoDocument(7004, 960, 540, u"slide-a.mp4"_q, 11.),
-			NativeIvVideoDocument(7005, 854, 480, u"slide-b.mp4"_q, 9.),
-		},
+		.documents = std::move(documents),
 	};
 }
 
@@ -1899,6 +1907,25 @@ protected:
 		}
 		return false;
 	}
+};
+
+class ArticleMediaBlockHost final : public MediaBlockHost {
+public:
+	void reset() {
+		repaintRects.clear();
+		relayoutRects.clear();
+	}
+
+	void requestRepaint(QRect articleRect) override {
+		repaintRects.push_back(articleRect);
+	}
+
+	void requestRelayout(QRect articleRect) override {
+		relayoutRects.push_back(articleRect);
+	}
+
+	std::vector<QRect> repaintRects;
+	std::vector<QRect> relayoutRects;
 };
 
 template <typename Object>
@@ -4099,6 +4126,7 @@ auto text = "native-markdown-iv-phase-z-highlight";
 void CheckNativeInstantViewArticleCoverage(bool *ok) {
 	const auto renderer = std::make_shared<MathRenderer>();
 	auto lookupFlags = Ui::Text::StateRequest::Flags();
+	lookupFlags |= Ui::Text::StateRequest::Flag::LookupLink;
 	lookupFlags |= Ui::Text::StateRequest::Flag::LookupSymbol;
 
 	const auto videoFixture = NativeIvVideoFixture();
@@ -4227,6 +4255,17 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			ok);
 	}
 
+	auto mixedBlockHost = ArticleMediaBlockHost();
+	auto inlineFallbackRepaintCount = 0;
+	auto inlineFallbackRepaintRects = std::vector<QRect>();
+	mixedArticle->setMediaBlockHost(&mixedBlockHost);
+	mixedArticle->setTextRepaintCallbacks(
+		[&] {
+			++inlineFallbackRepaintCount;
+		},
+		[&](QRect articleRect) {
+			inlineFallbackRepaintRects.push_back(articleRect);
+		});
 	const auto narrowHeight = mixedArticle->resizeGetHeight(260);
 	const auto narrowImage = PaintArticleForTest(
 		mixedArticle.get(),
@@ -4239,6 +4278,32 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 	Check(
 		narrowHeight > wideHeight,
 		mixedLabel + u" narrow relayout grows height"_q,
+		ok);
+	Check(
+		mixedRuntime->documentRequests.size() == 1,
+		mixedLabel + u" video runtime persists across relayout"_q,
+		ok);
+	Check(
+		mixedRuntime->photoRequests.size() == 1,
+		mixedLabel + u" photo runtime persists across relayout"_q,
+		ok);
+	Check(
+		videoRuntime->thumbnailSizes.size() == 2
+			&& videoRuntime->fullSizes.size() == 2
+			&& (videoRuntime->thumbnailSizes.front()
+				!= videoRuntime->thumbnailSizes.back())
+			&& (videoRuntime->fullSizes.front()
+				!= videoRuntime->fullSizes.back()),
+		mixedLabel + u" video images refresh across relayout"_q,
+		ok);
+	Check(
+		mixedPhotoRuntime->thumbnailSizes.size() == 2
+			&& mixedPhotoRuntime->fullSizes.size() == 2
+			&& (mixedPhotoRuntime->thumbnailSizes.front()
+				!= mixedPhotoRuntime->thumbnailSizes.back())
+			&& (mixedPhotoRuntime->fullSizes.front()
+				!= mixedPhotoRuntime->fullSizes.back()),
+		mixedLabel + u" photo images refresh across relayout"_q,
 		ok);
 	Check(
 		inlineImage->subscriptionCount >= 1,
@@ -4278,6 +4343,50 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			segmentBounds[segmentIndex]->top()
 				> segmentBounds[segmentIndex - 1]->bottom(),
 			mixedLabel + u" segment order "_q + QString::number(segmentIndex),
+			ok);
+	}
+	mixedBlockHost.reset();
+	videoRuntime->fullImage->notify();
+	Check(
+		mixedBlockHost.relayoutRects.empty(),
+		mixedLabel + u" media update avoids relayout request"_q,
+		ok);
+	Check(
+		mixedBlockHost.repaintRects.size() == 1,
+		mixedLabel + u" media update requests one block repaint"_q,
+		ok);
+	if (mixedBlockHost.repaintRects.size() == 1) {
+		Check(
+			mixedBlockHost.repaintRects.front().contains(
+				segmentBounds[1]->center()),
+			mixedLabel + u" media repaint covers video block"_q,
+			ok);
+		Check(
+			!mixedBlockHost.repaintRects.front().contains(
+				segmentBounds[2]->center()),
+			mixedLabel + u" media repaint stays local"_q,
+			ok);
+	}
+	inlineFallbackRepaintCount = 0;
+	inlineFallbackRepaintRects.clear();
+	inlineImage->notify();
+	Check(
+		inlineFallbackRepaintCount == 0,
+		mixedLabel + u" inline image repaint prefers rect callback"_q,
+		ok);
+	Check(
+		inlineFallbackRepaintRects.size() == 1,
+		mixedLabel + u" inline image repaint emits one rect"_q,
+		ok);
+	if (inlineFallbackRepaintRects.size() == 1) {
+		Check(
+			inlineFallbackRepaintRects.front().size() == QSize(24, 18),
+			mixedLabel + u" inline image repaint rect keeps image size"_q,
+			ok);
+		Check(
+			segmentBounds[0]->contains(
+				inlineFallbackRepaintRects.front().center()),
+			mixedLabel + u" inline image repaint stays inside paragraph"_q,
 			ok);
 	}
 
@@ -4416,6 +4525,41 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 		updatedInlineBounds.has_value()
 			&& (*updatedInlineBounds == *segmentBounds[0]),
 		mixedLabel + u" inline-image repaint keeps bounds"_q,
+		ok);
+	const auto restoredWideHeight = mixedArticle->resizeGetHeight(520);
+	const auto restoredWideImage = PaintArticleForTest(
+		mixedArticle.get(),
+		520,
+		restoredWideHeight);
+	Check(
+		HasPaintedPixels(restoredWideImage),
+		mixedLabel + u" restored wide paint produced pixels"_q,
+		ok);
+	Check(
+		mixedRuntime->documentRequests.size() == 1,
+		mixedLabel + u" loaded video runtime survives width restore"_q,
+		ok);
+	Check(
+		mixedRuntime->photoRequests.size() == 1,
+		mixedLabel + u" loaded photo runtime survives width restore"_q,
+		ok);
+	Check(
+		(videoRuntime->thumbnailSizes.size() >= 2)
+			&& (videoRuntime->thumbnailSizes.size() <= 3)
+			&& (videoRuntime->fullSizes.size() >= 2)
+			&& (videoRuntime->fullSizes.size() <= 3)
+			&& videoRuntime->thumbnailImage->subscriptionCount == 1
+			&& videoRuntime->fullImage->subscriptionCount == 1,
+		mixedLabel + u" loaded video images stay stable across width restore"_q,
+		ok);
+	Check(
+		(mixedPhotoRuntime->thumbnailSizes.size() >= 2)
+			&& (mixedPhotoRuntime->thumbnailSizes.size() <= 3)
+			&& (mixedPhotoRuntime->fullSizes.size() >= 2)
+			&& (mixedPhotoRuntime->fullSizes.size() <= 3)
+			&& mixedPhotoRuntime->thumbnailImage->subscriptionCount == 1
+			&& mixedPhotoRuntime->fullImage->subscriptionCount == 1,
+		mixedLabel + u" loaded photo images stay stable across width restore"_q,
 		ok);
 
 	const auto audioLabel = u"native-iv-audio-article"_q;
@@ -4614,6 +4758,46 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 		Check(
 			mapCaptionSelection.expanded == mapFixture.caption,
 			mapLabel + u" caption selection export"_q,
+			ok);
+		auto narrowMapHeight = mapArticle->resizeGetHeight(280);
+		const auto narrowMapImage = PaintArticleForTest(
+			mapArticle.get(),
+			280,
+			narrowMapHeight);
+		Check(
+			HasPaintedPixels(narrowMapImage),
+			mapLabel + u" narrow paint produced pixels"_q,
+			ok);
+		Check(
+			mapRuntime->mapRequests.size() == 2
+				&& (mapRuntime->mapRequests.front().size
+					!= mapRuntime->mapRequests.back().size),
+			mapLabel + u" size change refreshes map runtime"_q,
+			ok);
+		Check(
+			mapImageRuntime->thumbnailSizes.size() == 2
+				&& mapImageRuntime->fullSizes.size() == 2
+				&& (mapImageRuntime->thumbnailSizes.front()
+					!= mapImageRuntime->thumbnailSizes.back())
+				&& (mapImageRuntime->fullSizes.front()
+					!= mapImageRuntime->fullSizes.back()),
+			mapLabel + u" size change refreshes map images"_q,
+			ok);
+		const auto restoredMapHeight = mapArticle->resizeGetHeight(420);
+		const auto restoredMapImage = PaintArticleForTest(
+			mapArticle.get(),
+			420,
+			restoredMapHeight);
+		Check(
+			HasPaintedPixels(restoredMapImage),
+			mapLabel + u" restored paint produced pixels"_q,
+			ok);
+		Check(
+			(mapRuntime->mapRequests.size() >= 2)
+				&& (mapRuntime->mapRequests.size() <= 3)
+				&& mapImageRuntime->thumbnailImage->subscriptionCount == 1
+				&& mapImageRuntime->fullImage->subscriptionCount == 1,
+			mapLabel + u" map subscriptions stay stable across width restore"_q,
 			ok);
 	}
 
@@ -5150,30 +5334,50 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			slideshowLabel + u" paint produced pixels"_q,
 			ok);
 		Check(
-			slideshowRuntime->documentRequests.size() == 2,
-			slideshowLabel + u" document resolve request count"_q,
+			(slideshowRuntime->documentRequests.size() == 1)
+				&& (slideshowRuntime->documentRequests.front() == 7004),
+			slideshowLabel + u" resolves only the active slide"_q,
 			ok);
-		const auto slideshowItemBounds = HitBoundsWhere(
+		const auto slideshowBlockBounds = HitBoundsWhere(
 			slideshowArticle.get(),
 			460,
 			slideshowHeight,
 			lookupFlags,
 			[&](const MarkdownArticleHitTestResult &hit) {
-				return hit.mediaActivation.kind == MediaActivationKind::Document
-					&& hit.mediaActivation.document.get()
-						== slideshowDocumentA.get();
+				return hit.segmentIndex == 0;
 			});
 		Check(
-			slideshowItemBounds.has_value(),
-			slideshowLabel + u" document item bounds"_q,
+			slideshowBlockBounds.has_value(),
+			slideshowLabel + u" slideshow media bounds"_q,
 			ok);
-		if (slideshowItemBounds) {
+		const auto slideshowMediaBounds = HitBoundsWhere(
+			slideshowArticle.get(),
+			460,
+			slideshowHeight,
+			lookupFlags,
+			[&](const MarkdownArticleHitTestResult &hit) {
+				return (hit.segmentIndex == 0)
+					&& (hit.mediaActivation.kind == MediaActivationKind::Document);
+			});
+		Check(
+			slideshowMediaBounds.has_value(),
+			slideshowLabel + u" slideshow active slide bounds"_q,
+			ok);
+		if (slideshowMediaBounds && slideshowBlockBounds) {
 			const auto hit = slideshowArticle->hitTest(
-				slideshowItemBounds->center(),
+				slideshowMediaBounds->center(),
 				lookupFlags);
+			Check(
+				hit.mediaActivation.kind == MediaActivationKind::Document,
+				slideshowLabel + u" active slide activation"_q,
+				ok);
 			if (hit.mediaActivation.document) {
 				hit.mediaActivation.document->open(Qt::LeftButton);
 			}
+			Check(
+				slideshowDocumentA->openedButtons.size() == 1,
+				slideshowLabel + u" first slide open intent"_q,
+				ok);
 			const auto context = slideshowArticle->textForContext(hit);
 			Check(
 				context.expanded
@@ -5181,6 +5385,112 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 						+ u"\n"_q
 						+ slideshowFixture.caption),
 				slideshowLabel + u" context export text"_q,
+				ok);
+			const auto &grouped = st::defaultMarkdown.groupedMedia;
+			const auto navButtonSize = std::min({
+				grouped.navButtonSize,
+				std::max(slideshowBlockBounds->height(), 0),
+				std::max(
+					(slideshowBlockBounds->width() - 2 * grouped.navButtonSkip) / 2,
+					0),
+			});
+			const auto nextPoint = QPoint(
+				slideshowBlockBounds->x()
+					+ slideshowBlockBounds->width()
+					- grouped.navButtonSkip
+					- (navButtonSize / 2),
+				slideshowBlockBounds->center().y());
+			const auto nextHit = slideshowArticle->hitTest(nextPoint, lookupFlags);
+			Check(
+				(nextHit.state.link != nullptr)
+					&& (nextHit.mediaActivation.kind == MediaActivationKind::None),
+				slideshowLabel + u" next nav uses click handler"_q,
+				ok);
+			if (nextHit.state.link) {
+				nextHit.state.link->onClick(ClickContext{
+					.button = Qt::LeftButton,
+				});
+			}
+			Check(
+				(slideshowRuntime->documentRequests.size() == 2)
+					&& (slideshowRuntime->documentRequests.back() == 7005),
+				slideshowLabel + u" next nav resolves second slide"_q,
+				ok);
+			const auto secondHit = slideshowArticle->hitTest(
+				slideshowMediaBounds->center(),
+				lookupFlags);
+			Check(
+				secondHit.mediaActivation.document.get() == slideshowDocumentB.get(),
+				slideshowLabel + u" second slide becomes active"_q,
+				ok);
+			if (secondHit.mediaActivation.document) {
+				secondHit.mediaActivation.document->open(Qt::LeftButton);
+			}
+			Check(
+				slideshowDocumentB->openedButtons.size() == 1,
+				slideshowLabel + u" second slide open intent"_q,
+				ok);
+			auto resizedHeight = slideshowArticle->resizeGetHeight(360);
+			const auto resizedBounds = HitBoundsWhere(
+				slideshowArticle.get(),
+				360,
+				resizedHeight,
+				lookupFlags,
+				[&](const MarkdownArticleHitTestResult &resizedHit) {
+					return (resizedHit.segmentIndex == 0)
+						&& (resizedHit.mediaActivation.kind
+							== MediaActivationKind::Document);
+				});
+			Check(
+				resizedBounds.has_value(),
+				slideshowLabel + u" resized active slide bounds"_q,
+				ok);
+			if (resizedBounds) {
+				const auto resizedHit = slideshowArticle->hitTest(
+					resizedBounds->center(),
+					lookupFlags);
+				Check(
+					resizedHit.mediaActivation.document.get()
+						== slideshowDocumentB.get(),
+					slideshowLabel + u" active slide persists after relayout"_q,
+					ok);
+			}
+			Check(
+				(slideshowRuntime->documentRequests.size() == 2)
+					&& (slideshowRuntime->documentRequests.back() == 7005),
+				slideshowLabel + u" relayout keeps active slide runtime"_q,
+				ok);
+			Check(
+				slideshowDocumentA->thumbnailSizes.size() == 1
+					&& slideshowDocumentA->fullSizes.size() == 1,
+				slideshowLabel + u" relayout skips inactive slide images"_q,
+				ok);
+			Check(
+				slideshowDocumentB->thumbnailSizes.size() == 2
+					&& slideshowDocumentB->fullSizes.size() == 2
+					&& (slideshowDocumentB->thumbnailSizes.front()
+						!= slideshowDocumentB->thumbnailSizes.back())
+					&& (slideshowDocumentB->fullSizes.front()
+						!= slideshowDocumentB->fullSizes.back()),
+				slideshowLabel + u" relayout refreshes active slide images"_q,
+				ok);
+			auto slideshowBlockHost = ArticleMediaBlockHost();
+			slideshowArticle->setMediaBlockHost(&slideshowBlockHost);
+			const auto slideshowMaxWidth = slideshowArticle->maxWidth();
+			Check(
+				slideshowMaxWidth > 0,
+				slideshowLabel + u" max width computed"_q,
+				ok);
+			slideshowBlockHost.reset();
+			slideshowDocumentB->fullImage->notify();
+			Check(
+				slideshowBlockHost.repaintRects.size() == 1,
+				slideshowLabel + u" max width keeps active slide repaint"_q,
+				ok);
+			Check(
+				slideshowDocumentB->thumbnailImage->subscriptionCount == 1
+					&& slideshowDocumentB->fullImage->subscriptionCount == 1,
+				slideshowLabel + u" max width avoids transient slide subscriptions"_q,
 				ok);
 		}
 		const auto slideshowSelection = slideshowArticle->textForSelection({
@@ -5205,9 +5515,46 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			slideshowCaptionSelection.expanded == slideshowFixture.caption,
 			slideshowLabel + u" caption selection export"_q,
 			ok);
+	}
+
+	const auto largeSlideshowLabel = u"native-iv-large-slideshow-article"_q;
+	const auto largeSlideshowFixture = NativeIvSlideshowFixture(44);
+	auto largeSlideshowRuntime = std::make_shared<TestMediaRuntime>();
+	auto largeSlideshowDocument = std::make_shared<TestDocumentRuntime>();
+	largeSlideshowDocument->thumbnailImage = std::make_shared<TestDynamicImage>();
+	largeSlideshowDocument->fullImage = std::make_shared<TestDynamicImage>();
+	largeSlideshowRuntime->addDocumentRuntime(7004, largeSlideshowDocument);
+	auto largeSlideshowSource = NativeIvSource(
+		QVector<MTPPageBlock>{ largeSlideshowFixture.block },
+		largeSlideshowFixture.photos,
+		largeSlideshowFixture.documents);
+	auto largeSlideshowPrepared = TryPrepareNativeInstantView({
+		.source = &largeSlideshowSource,
+		.mediaRuntime = largeSlideshowRuntime,
+	});
+	Check(
+		largeSlideshowPrepared.supported(),
+		largeSlideshowLabel + u" prepare supported"_q,
+		ok);
+	if (largeSlideshowPrepared.supported()) {
+		auto largeSlideshowHeight = 0;
+		auto largeSlideshowArticle = BuildArticleForTest(
+			std::move(largeSlideshowPrepared.content),
+			renderer,
+			460,
+			&largeSlideshowHeight);
+		const auto largeSlideshowImage = PaintArticleForTest(
+			largeSlideshowArticle.get(),
+			460,
+			largeSlideshowHeight);
 		Check(
-			slideshowDocumentA->openedButtons.size() == 1,
-			slideshowLabel + u" document open intent"_q,
+			HasPaintedPixels(largeSlideshowImage),
+			largeSlideshowLabel + u" paint produced pixels"_q,
+			ok);
+		Check(
+			(largeSlideshowRuntime->documentRequests.size() == 1)
+				&& (largeSlideshowRuntime->documentRequests.front() == 7004),
+			largeSlideshowLabel + u" skips grouped-grid bulk resolves"_q,
 			ok);
 	}
 }

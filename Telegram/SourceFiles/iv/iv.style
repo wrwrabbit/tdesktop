@@ -198,6 +198,14 @@ MarkdownGroupedMedia {
 	itemSkip: pixels;
 	radius: pixels;
 	overlayOpacity: double;
+	navButtonSize: pixels;
+	navButtonSkip: pixels;
+	navButtonBg: color;
+	navButtonBgOver: color;
+	navPreviousIcon: icon;
+	navPreviousIconOver: icon;
+	navNextIcon: icon;
+	navNextIconOver: icon;
 }
 MarkdownFailure {
 	label: FlatLabel;
@@ -392,6 +400,14 @@ defaultMarkdownGroupedMedia: MarkdownGroupedMedia {
 	itemSkip: 4px;
 	radius: 6px;
 	overlayOpacity: 0.2;
+	navButtonSize: 36px;
+	navButtonSkip: 12px;
+	navButtonBg: windowBg;
+	navButtonBgOver: windowBgOver;
+	navPreviousIcon: ivBackIcon;
+	navPreviousIconOver: ivBackIcon;
+	navNextIcon: ivForwardIcon;
+	navNextIconOver: ivForwardIcon;
 }
 defaultMarkdownFailureLabel: FlatLabel(defaultFlatLabel) {
 	minWidth: 280px;

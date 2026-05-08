@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_menu_icons.h"
 
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QPointer>
 #include <QtGui/QClipboard>
 #include <QtGui/QContextMenuEvent>
 #include <QtGui/QCursor>
@@ -137,7 +138,12 @@ MarkdownDocumentWidget::MarkdownDocumentWidget(QWidget *parent)
 	}, _highlightReadyLifetime);
 }
 
-MarkdownDocumentWidget::~MarkdownDocumentWidget() = default;
+MarkdownDocumentWidget::~MarkdownDocumentWidget() {
+	if (_article && (_article->mediaBlockHost() == this)) {
+		_article->setTextRepaintCallbacks(nullptr, nullptr);
+		_article->setMediaBlockHost(nullptr);
+	}
+}
 
 void MarkdownDocumentWidget::setLinkActivationCallback(
 		std::function<void(const PreparedLink &, Qt::MouseButton)> callback) {
@@ -160,7 +166,26 @@ void MarkdownDocumentWidget::setArticle(
 		std::shared_ptr<MarkdownArticle> article) {
 	ClickHandler::clearActive(this);
 	applyCursor(style::cur_default);
+	if (_article && (_article->mediaBlockHost() == this)) {
+		_article->setTextRepaintCallbacks(nullptr, nullptr);
+		_article->setMediaBlockHost(nullptr);
+	}
 	_article = std::move(article);
+	if (_article) {
+		const auto weak = QPointer<MarkdownDocumentWidget>(this);
+		_article->setTextRepaintCallbacks(
+			[=] {
+				if (weak) {
+					weak->requestRepaint(QRect());
+				}
+			},
+			[=](QRect articleRect) {
+				if (weak) {
+					weak->requestRepaint(articleRect);
+				}
+			});
+		_article->setMediaBlockHost(this);
+	}
 	_lastRelayoutMs = 0;
 	resetTextPaintCaches();
 	resetSelection();
@@ -235,6 +260,46 @@ int MarkdownDocumentWidget::resizeGetHeight(int newWidth) {
 	syncArticleVisibleTopBottom();
 	_lastRelayoutMs = int(timer.elapsed());
 	return std::max(int(std::ceil(layoutHeight * scale)), 1);
+}
+
+void MarkdownDocumentWidget::requestRepaint(QRect articleRect) {
+	crl::on_main(this, [=] {
+		if (!_article) {
+			return;
+		}
+		if (articleRect.isEmpty()) {
+			update();
+		} else {
+			update(articleRectToWidget(articleRect));
+		}
+	});
+}
+
+void MarkdownDocumentWidget::requestRelayout(QRect articleRect) {
+	crl::on_main(this, [=] {
+		if (!_article) {
+			return;
+		}
+		_article->invalidateLayout();
+		const auto previousHeight = height();
+		const auto scale = zoomScale();
+		const auto layoutWidth = std::max(int(std::floor(width() / scale)), 1);
+		auto timer = QElapsedTimer();
+		timer.start();
+		const auto articleHeight = _article->resizeGetHeight(layoutWidth);
+		syncArticleVisibleTopBottom();
+		_lastRelayoutMs = int(timer.elapsed());
+		const auto newHeight = std::max(int(std::ceil(articleHeight * scale)), 1);
+		if (previousHeight != newHeight) {
+			resize(width(), newHeight);
+			update();
+		} else if (articleRect.isEmpty()) {
+			update();
+		} else {
+			update(articleRectToWidget(articleRect));
+		}
+		updateHoverAtCursor();
+	});
 }
 
 void MarkdownDocumentWidget::paintEvent(QPaintEvent *e) {
@@ -729,6 +794,24 @@ void MarkdownDocumentWidget::resetTextPaintCaches() {
 	_blockquotePaintCache = nullptr;
 }
 
+QRect MarkdownDocumentWidget::articleRectToWidget(QRect articleRect) const {
+	if (articleRect.isEmpty()) {
+		return rect();
+	}
+	const auto scale = zoomScale();
+	const auto left = int(std::floor(articleRect.x() * scale));
+	const auto top = int(std::floor(articleRect.y() * scale));
+	const auto right = int(std::ceil(
+		(articleRect.x() + articleRect.width()) * scale));
+	const auto bottom = int(std::ceil(
+		(articleRect.y() + articleRect.height()) * scale));
+	return QRect(
+		left,
+		top,
+		std::max(right - left, 1),
+		std::max(bottom - top, 1));
+}
+
 Ui::Text::QuotePaintCache *MarkdownDocumentWidget::ensurePrePaintCache() {
 	EnsurePrePaintCache(_prePaintCache, st::inTextPalette.monoFg);
 	return _prePaintCache.get();
@@ -749,6 +832,15 @@ MarkdownArticlePaintCaches MarkdownDocumentWidget::textPaintCaches() {
 		.repaint = [=] {
 			crl::on_main(this, [=] {
 				update();
+			});
+		},
+		.repaintRect = [=](QRect articleRect) {
+			crl::on_main(this, [=] {
+				if (articleRect.isEmpty()) {
+					update();
+				} else {
+					update(articleRectToWidget(articleRect));
+				}
 			});
 		},
 	};
