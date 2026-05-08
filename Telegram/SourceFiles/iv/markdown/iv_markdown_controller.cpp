@@ -363,6 +363,12 @@ bool Controller::active() const {
 	return _window && _window->isActiveWindow();
 }
 
+void Controller::showJoinedTooltip() {
+	if (_show) {
+		_show->showToast(tr::lng_action_you_joined(tr::now));
+	}
+}
+
 void Controller::minimize() {
 	if (_window) {
 		_window->setWindowState(_window->windowState() | Qt::WindowMinimized);

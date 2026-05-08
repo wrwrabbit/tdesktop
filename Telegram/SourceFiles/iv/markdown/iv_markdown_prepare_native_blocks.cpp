@@ -507,11 +507,7 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	}, [&](const MTPDpageBlockPhoto &data) {
 		return PrepareNativeIvPhotoBlock(data, result, state);
 	}, [&](const MTPDpageBlockVideo &data) {
-		return PrepareNativeIvPlaceholderBlock(
-			u"Video Placeholder"_q,
-			data.vcaption(),
-			result,
-			state);
+		return PrepareNativeIvVideoBlock(data, result, state);
 	}, [&](const MTPDpageBlockCover &data) {
 		return PrepareNativeIvBlock(data.vcover(), result, state);
 	}, [&](const MTPDpageBlockEmbed &data) {
@@ -527,27 +523,23 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 			result,
 			state);
 	}, [&](const MTPDpageBlockCollage &data) {
-		return PrepareNativeIvPlaceholderBlock(
-			u"Collage placeholder"_q,
+		return PrepareNativeIvGroupedMediaBlock(
+			data.vitems().v,
 			data.vcaption(),
+			u"Collage placeholder"_q,
 			result,
 			state);
 	}, [&](const MTPDpageBlockSlideshow &data) {
-		return PrepareNativeIvPlaceholderBlock(
+		return PrepareNativeIvGroupedMediaBlock(
+			data.vitems().v,
+			data.vcaption(),
 			u"Grouped Media Placeholder"_q,
-			data.vcaption(),
 			result,
 			state);
-	}, [&](const MTPDpageBlockChannel &) {
-		return PrepareNativeIvPlainPlaceholderBlock(
-			u"Channel Placeholder"_q,
-			result);
+	}, [&](const MTPDpageBlockChannel &data) {
+		return PrepareNativeIvChannelBlock(data, result, state);
 	}, [&](const MTPDpageBlockAudio &data) {
-		return PrepareNativeIvPlaceholderBlock(
-			u"Audio File Placeholder"_q,
-			data.vcaption(),
-			result,
-			state);
+		return PrepareNativeIvAudioBlock(data, result, state);
 	}, [&](const MTPDpageBlockKicker &data) {
 		return AppendNativeIvFlowBlock(
 			result,
@@ -573,11 +565,7 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 			u"Related Articles Placeholder"_q,
 			result);
 	}, [&](const MTPDpageBlockMap &data) {
-		return PrepareNativeIvPlaceholderBlock(
-			u"Map Placeholder"_q,
-			data.vcaption(),
-			result,
-			state);
+		return PrepareNativeIvMapBlock(data, result, state);
 		});
 }
 

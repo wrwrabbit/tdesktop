@@ -459,7 +459,181 @@ void PaintPhotoProgress(
 		-int(std::round(360. * 16. * std::clamp(progress, 0., 1.))));
 }
 
-void PaintPhotoBlock(
+[[nodiscard]] QPainterPath RoundedRectPath(QRect rect, int radius) {
+	auto path = QPainterPath();
+	path.addRoundedRect(QRectF(rect), radius, radius);
+	return path;
+}
+
+[[nodiscard]] bool MediaLoading(const LaidOutBlock &block) {
+	if (block.photoRuntime) {
+		return block.photoRuntime->loading();
+	} else if (block.documentRuntime) {
+		return block.documentRuntime->loading();
+	} else if (block.mapRuntime) {
+		return block.mapRuntime->loading();
+	}
+	return false;
+}
+
+[[nodiscard]] double MediaProgress(const LaidOutBlock &block) {
+	if (block.photoRuntime) {
+		return block.photoRuntime->progress();
+	} else if (block.documentRuntime) {
+		return block.documentRuntime->progress();
+	} else if (block.mapRuntime) {
+		return block.mapRuntime->progress();
+	}
+	return 0.;
+}
+
+[[nodiscard]] bool MediaLoading(const LaidOutGroupedMediaItem &item) {
+	if (item.photoRuntime) {
+		return item.photoRuntime->loading();
+	} else if (item.documentRuntime) {
+		return item.documentRuntime->loading();
+	}
+	return false;
+}
+
+[[nodiscard]] double MediaProgress(const LaidOutGroupedMediaItem &item) {
+	if (item.photoRuntime) {
+		return item.photoRuntime->progress();
+	} else if (item.documentRuntime) {
+		return item.documentRuntime->progress();
+	}
+	return 0.;
+}
+
+void PaintMediaCaption(
+		Painter &p,
+		const LaidOutBlock &block,
+		const style::Markdown &markdown,
+		const MarkdownArticlePaintCaches &caches,
+		const PaintSelectionState &selectionState,
+		QRect clip) {
+	if (block.textRect.isEmpty()) {
+		return;
+	}
+	p.setPen(markdown.textColor->c);
+	PaintTextLeaf(
+		p,
+		block.leaf,
+		caches,
+		block.textRect,
+		block.textWidth,
+		clip,
+		style::al_left,
+		TextSelectionForSegmentIndex(
+			selectionState,
+			block.secondarySegmentIndex));
+}
+
+void PaintImageBackedMedia(
+		Painter &p,
+		QRect rect,
+		const QString &copyText,
+		const std::shared_ptr<Ui::DynamicImage> &thumbnailImage,
+		const std::shared_ptr<Ui::DynamicImage> &fullImage,
+		bool *thumbnailSubscribed,
+		bool *fullSubscribed,
+		bool loading,
+		double progress,
+		const style::Markdown &markdown,
+		const MarkdownArticlePaintCaches &caches,
+		bool selected,
+		QRect clip) {
+	const auto visible = clip.intersected(rect);
+	if (!visible.isEmpty()) {
+		p.save();
+		p.setClipRect(visible);
+		p.fillRect(rect, st::windowBgOver->c);
+		SubscribeDynamicImage(
+			thumbnailImage,
+			caches.repaint,
+			thumbnailSubscribed);
+		SubscribeDynamicImage(
+			fullImage,
+			caches.repaint,
+			fullSubscribed);
+		const auto paintedThumb = PaintDynamicImage(
+			p,
+			thumbnailImage,
+			rect);
+		const auto paintedFull = PaintDynamicImage(
+			p,
+			fullImage,
+			rect);
+		if (!paintedThumb && !paintedFull) {
+			p.setPen(st::windowSubTextFg->c);
+			p.drawText(
+				rect,
+				Qt::AlignCenter | Qt::TextWordWrap,
+				copyText);
+		}
+		if (loading) {
+			PaintPhotoProgress(
+				p,
+				rect,
+				markdown.photo,
+				progress);
+		}
+		if (selected) {
+			p.fillRect(rect, p.textPalette().selectOverlay);
+		}
+		p.restore();
+	}
+}
+
+void PaintImageBackedMediaBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		const style::Markdown &markdown,
+		const MarkdownArticlePaintCaches &caches,
+		const PaintSelectionState &selectionState,
+		QRect clip) {
+	PaintImageBackedMedia(
+		p,
+		block.mediaRect,
+		block.copyText,
+		block.thumbnailImage,
+		block.fullImage,
+		&block.thumbnailSubscribed,
+		&block.fullSubscribed,
+		MediaLoading(block),
+		MediaProgress(block),
+		markdown,
+		caches,
+		block.segmentIndex >= 0
+			&& WholeSegmentSelected(selectionState, block.segmentIndex),
+		clip);
+	PaintMediaCaption(p, block, markdown, caches, selectionState, clip);
+}
+
+void PaintCardSurface(
+		Painter &p,
+		QRect rect,
+		int border,
+		const style::color &borderFg,
+		const style::color &bg,
+		int radius) {
+	if (rect.isEmpty()) {
+		return;
+	}
+	const auto half = border / 2.;
+	const auto inner = QRectF(rect).marginsRemoved({
+		half,
+		half,
+		half,
+		half,
+	});
+	auto hq = PainterHighQualityEnabler(p);
+	p.setPen(QPen(borderFg->c, border));
+	p.setBrush(bg->c);
+	p.drawRoundedRect(inner, radius, radius);
+}
+
+void PaintAudioBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &markdown,
@@ -468,38 +642,33 @@ void PaintPhotoBlock(
 		QRect clip) {
 	const auto visible = clip.intersected(block.visibleMediaRect);
 	if (!visible.isEmpty()) {
+		const auto &style = markdown.audio;
 		p.save();
 		p.setClipRect(visible);
-		p.fillRect(block.mediaRect, st::windowBgOver->c);
-		SubscribeDynamicImage(
-			block.thumbnailImage,
-			caches.repaint,
-			&block.thumbnailSubscribed);
-		SubscribeDynamicImage(
-			block.fullImage,
-			caches.repaint,
-			&block.fullSubscribed);
-		const auto paintedThumb = PaintDynamicImage(
+		PaintCardSurface(
 			p,
-			block.thumbnailImage,
-			block.mediaRect);
-		const auto paintedFull = PaintDynamicImage(
+			block.mediaRect,
+			style.border,
+			style.borderFg,
+			style.bg,
+			style.radius);
+		p.setPen(style.titleFg->c);
+		PaintTextLeaf(
 			p,
-			block.fullImage,
-			block.mediaRect);
-		if (!paintedThumb && !paintedFull) {
-			p.setPen(st::windowSubTextFg->c);
-			p.drawText(
-				block.mediaRect,
-				Qt::AlignCenter | Qt::TextWordWrap,
-				block.copyText);
-		}
-		if (block.photoRuntime && block.photoRuntime->loading()) {
-			PaintPhotoProgress(
+			block.labelLeaf,
+			caches,
+			block.labelRect,
+			block.labelWidth,
+			visible);
+		if (!block.subtitleRect.isEmpty()) {
+			p.setPen(style.subtitleFg->c);
+			PaintTextLeaf(
 				p,
-				block.mediaRect,
-				markdown.photo,
-				block.photoRuntime->progress());
+				block.subtitleLeaf,
+				caches,
+				block.subtitleRect,
+				block.subtitleWidth,
+				visible);
 		}
 		if (block.segmentIndex >= 0
 			&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
@@ -507,20 +676,171 @@ void PaintPhotoBlock(
 		}
 		p.restore();
 	}
-	if (!block.textRect.isEmpty()) {
-		p.setPen(markdown.textColor->c);
+	PaintMediaCaption(p, block, markdown, caches, selectionState, clip);
+}
+
+void PaintChannelBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		const style::Markdown &markdown,
+		const MarkdownArticlePaintCaches &caches,
+		const PaintSelectionState &selectionState,
+		QRect clip) {
+	const auto visible = clip.intersected(block.visibleMediaRect);
+	if (!visible.isEmpty()) {
+		const auto &style = markdown.channel;
+		const auto &button = style.button;
+		p.save();
+		p.setClipRect(visible);
+		PaintCardSurface(
+			p,
+			block.mediaRect,
+			style.border,
+			style.borderFg,
+			style.bg,
+			style.radius);
+		p.setPen(style.titleFg->c);
 		PaintTextLeaf(
 			p,
-			block.leaf,
+			block.labelLeaf,
 			caches,
-			block.textRect,
-			block.textWidth,
-			clip,
-			style::al_left,
-			TextSelectionForSegmentIndex(
-				selectionState,
-				block.secondarySegmentIndex));
+			block.labelRect,
+			block.labelWidth,
+			visible);
+		if (!block.subtitleRect.isEmpty()) {
+			p.setPen(style.subtitleFg->c);
+			PaintTextLeaf(
+				p,
+				block.subtitleLeaf,
+				caches,
+				block.subtitleRect,
+				block.subtitleWidth,
+				visible);
+		}
+		if (block.channelRuntime
+			&& block.channelRuntime->joinVisible()
+			&& !block.actionRect.isEmpty()) {
+			const auto innerRect = block.actionRect.marginsRemoved(button.padding);
+			const auto half = button.border / 2.;
+			const auto outer = QRectF(block.actionRect).marginsRemoved({
+				half,
+				half,
+				half,
+				half,
+			});
+			{
+				auto hq = PainterHighQualityEnabler(p);
+				p.setPen(QPen(button.borderFg->c, button.border));
+				p.setBrush(button.bg->c);
+				p.drawRoundedRect(outer, button.radius, button.radius);
+			}
+			p.setPen(button.textFg->c);
+			PaintTextLeaf(
+				p,
+				block.actionLeaf,
+				caches,
+				innerRect,
+				block.actionWidth,
+				visible,
+				style::al_center);
+		}
+		if (block.segmentIndex >= 0
+			&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
+			p.fillRect(block.visibleMediaRect, p.textPalette().selectOverlay);
+		}
+		p.restore();
 	}
+	PaintMediaCaption(p, block, markdown, caches, selectionState, clip);
+}
+
+void PaintPhotoBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		const style::Markdown &markdown,
+		const MarkdownArticlePaintCaches &caches,
+		const PaintSelectionState &selectionState,
+		QRect clip) {
+	PaintImageBackedMediaBlock(
+		p,
+		block,
+		markdown,
+		caches,
+		selectionState,
+		clip);
+}
+
+void PaintVideoBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		const style::Markdown &markdown,
+		const MarkdownArticlePaintCaches &caches,
+		const PaintSelectionState &selectionState,
+		QRect clip) {
+	PaintImageBackedMediaBlock(
+		p,
+		block,
+		markdown,
+		caches,
+		selectionState,
+		clip);
+}
+
+void PaintMapBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		const style::Markdown &markdown,
+		const MarkdownArticlePaintCaches &caches,
+		const PaintSelectionState &selectionState,
+		QRect clip) {
+	PaintImageBackedMediaBlock(
+		p,
+		block,
+		markdown,
+		caches,
+		selectionState,
+		clip);
+}
+
+void PaintGroupedMediaBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		const style::Markdown &markdown,
+		const MarkdownArticlePaintCaches &caches,
+		const PaintSelectionState &selectionState,
+		QRect clip) {
+	const auto selected = (block.segmentIndex >= 0)
+		&& WholeSegmentSelected(selectionState, block.segmentIndex);
+	const auto visible = clip.intersected(block.visibleMediaRect);
+	if (!visible.isEmpty()) {
+		const auto &style = markdown.groupedMedia;
+		p.save();
+		p.setClipRect(visible);
+		const auto path = RoundedRectPath(block.mediaRect, style.radius);
+		p.setClipPath(path, Qt::IntersectClip);
+		for (const auto &item : block.groupedMediaItems) {
+			PaintImageBackedMedia(
+				p,
+				item.rect,
+				item.copyText,
+				item.thumbnailImage,
+				item.fullImage,
+				&item.thumbnailSubscribed,
+				&item.fullSubscribed,
+				MediaLoading(item),
+				MediaProgress(item),
+				markdown,
+				caches,
+				false,
+				clip);
+		}
+		if (selected) {
+			auto overlay = p.textPalette().selectOverlay->c;
+			overlay.setAlphaF(std::clamp(style.overlayOpacity, 0., 1.));
+			p.fillPath(path, overlay);
+		}
+		p.restore();
+	}
+	PaintMediaCaption(p, block, markdown, caches, selectionState, clip);
 }
 
 void PaintDetailsBlock(
@@ -748,8 +1068,53 @@ void PaintBlock(
 			selectionState,
 			clip);
 		break;
+	case PreparedBlockKind::Video:
+		PaintVideoBlock(
+			p,
+			block,
+			markdown,
+			caches,
+			selectionState,
+			clip);
+		break;
+	case PreparedBlockKind::Audio:
+		PaintAudioBlock(
+			p,
+			block,
+			markdown,
+			caches,
+			selectionState,
+			clip);
+		break;
+	case PreparedBlockKind::Map:
+		PaintMapBlock(
+			p,
+			block,
+			markdown,
+			caches,
+			selectionState,
+			clip);
+		break;
+	case PreparedBlockKind::Channel:
+		PaintChannelBlock(
+			p,
+			block,
+			markdown,
+			caches,
+			selectionState,
+			clip);
+		break;
 	case PreparedBlockKind::Placeholder:
 		PaintPlaceholderBlock(
+			p,
+			block,
+			markdown,
+			caches,
+			selectionState,
+			clip);
+		break;
+	case PreparedBlockKind::GroupedMedia:
+		PaintGroupedMediaBlock(
 			p,
 			block,
 			markdown,

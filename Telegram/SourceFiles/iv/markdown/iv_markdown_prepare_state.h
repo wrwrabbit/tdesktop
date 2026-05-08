@@ -58,9 +58,21 @@ struct NativeIvPhotoInfo {
 	int height = 0;
 };
 
+struct NativeIvDocumentInfo {
+	uint64 id = 0;
+	int width = 0;
+	int height = 0;
+	QString fileName;
+	QString title;
+	QString performer;
+	int duration = 0;
+	bool isVideoFile = false;
+};
+
 struct NativeIvPrepareState {
 	MarkdownArticleContent result;
 	std::vector<NativeIvPhotoInfo> photos;
+	std::vector<NativeIvDocumentInfo> documents;
 	int nextGeneratedId = 0;
 
 	void setFailure(

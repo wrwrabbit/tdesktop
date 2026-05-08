@@ -9,11 +9,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_article_text.h"
 #include "lang/lang_keys.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
+#include "ui/grouped_layout.h"
 
 #include "styles/style_iv.h"
 #include "styles/style_widgets.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace Iv::Markdown {
@@ -29,6 +31,7 @@ constexpr auto kIvMarkedTextOptions = TextParseOptions{
 constexpr auto kCodeTabColumns = 4;
 constexpr auto kCodeTrailingGuard = 0x2060;
 const auto kPhotoCopyLabel = u"Photo"_q;
+const auto kUsernamePrefix = u"@"_q;
 
 [[nodiscard]] style::align CellAlign(TableAlignment alignment) {
 	switch (alignment) {
@@ -146,6 +149,219 @@ const auto kPhotoCopyLabel = u"Photo"_q;
 		}
 	}
 	return result;
+}
+
+template <typename Runtime>
+void ResolveRuntimeImages(
+		const std::shared_ptr<Runtime> &runtime,
+		QSize size,
+		std::shared_ptr<Ui::DynamicImage> *thumbnail,
+		std::shared_ptr<Ui::DynamicImage> *full) {
+	if (!runtime) {
+		return;
+	}
+	if (thumbnail) {
+		*thumbnail = runtime->thumbnail(size);
+	}
+	if (full) {
+		*full = runtime->full(size);
+	}
+}
+
+void SetPlainTextLeaf(
+		Ui::Text::String *leaf,
+		const style::TextStyle &textStyle,
+		const QString &text,
+		int width) {
+	*leaf = Ui::Text::String(TextMinResizeWidth(width));
+	leaf->setMarkedText(
+		textStyle,
+		TextWithEntities::Simple(text),
+		kIvMarkedTextOptions);
+}
+
+[[nodiscard]] int LeafHeight(
+		const Ui::Text::String &leaf,
+		const style::TextStyle &textStyle,
+		int width) {
+	return std::max(
+		leaf.countHeight(width, true),
+		TextLineHeight(textStyle));
+}
+
+[[nodiscard]] int MediaHeightForWidth(
+		int width,
+		int aspectWidth,
+		int aspectHeight) {
+	aspectWidth = std::max(aspectWidth, 1);
+	aspectHeight = std::max(aspectHeight, 1);
+	return std::max(
+		int((int64(width) * aspectHeight + aspectWidth - 1) / aspectWidth),
+		1);
+}
+
+[[nodiscard]] int GroupedMediaMinWidth(int width, int spacing) {
+	return std::max((width - 2 * spacing) / 3, 1);
+}
+
+void LayoutMediaCaption(
+		LaidOutBlock *block,
+		const PreparedBlock &prepared,
+		const std::vector<PreparedFormulaSlot> *formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &markdown,
+		int left,
+		int top,
+		int width,
+		int skip,
+		int *bottom) {
+	if (prepared.text.text.isEmpty()) {
+		return;
+	}
+	block->textWidth = std::max(width, 1);
+	SetTextLeaf(
+		&block->leaf,
+		markdown.body,
+		prepared.text,
+		formulas,
+		inlineFormulaObjects,
+		mediaRuntime,
+		block->textWidth);
+	BindLinks(&block->leaf, prepared.links);
+	const auto captionTop = top + skip;
+	const auto captionHeight = std::max(
+		block->leaf.countHeight(block->textWidth, true),
+		TextLineHeight(markdown.body));
+	block->textRect = QRect(left, captionTop, block->textWidth, captionHeight);
+	*bottom = captionTop + captionHeight;
+}
+
+[[nodiscard]] QString AudioTitleText(const PreparedAudioBlockData &audio) {
+	if (!audio.title.isEmpty()) {
+		return audio.title;
+	}
+	if (!audio.fileName.isEmpty()) {
+		return audio.fileName;
+	}
+	return tr::lng_in_dlg_audio_file(tr::now);
+}
+
+[[nodiscard]] QString AudioSubtitleText(const PreparedAudioBlockData &audio) {
+	if (!audio.performer.isEmpty()) {
+		return audio.performer;
+	}
+	if (!audio.fileName.isEmpty() && audio.fileName != AudioTitleText(audio)) {
+		return audio.fileName;
+	}
+	return QString();
+}
+
+[[nodiscard]] QString AudioCopyText(const PreparedAudioBlockData &audio) {
+	const auto title = AudioTitleText(audio);
+	const auto subtitle = AudioSubtitleText(audio);
+	return subtitle.isEmpty() ? title : (title + u"\n"_q + subtitle);
+}
+
+[[nodiscard]] QString ChannelSubtitleText(
+		const PreparedChannelBlockData &channel) {
+	return channel.username.isEmpty()
+		? QString()
+		: (kUsernamePrefix + channel.username);
+}
+
+[[nodiscard]] QString ChannelCopyText(const PreparedChannelBlockData &channel) {
+	const auto subtitle = ChannelSubtitleText(channel);
+	return subtitle.isEmpty()
+		? channel.title
+		: (channel.title + u"\n"_q + subtitle);
+}
+
+[[nodiscard]] QString GroupedMediaCopyText(
+		const PreparedGroupedMediaBlockData &grouped) {
+	auto photos = 0;
+	auto videos = 0;
+	for (const auto &item : grouped.items) {
+		if (item.media.kind == PreparedMediaItemKind::Photo) {
+			++photos;
+		} else {
+			++videos;
+		}
+	}
+	if (photos && !videos) {
+		return tr::lng_media_selected_photo(tr::now, lt_count, photos);
+	} else if (videos && !photos) {
+		return tr::lng_media_selected_video(tr::now, lt_count, videos);
+	}
+	return QString();
+}
+
+[[nodiscard]] QString GroupedMediaItemCopyText(PreparedMediaItemKind kind) {
+	return (kind == PreparedMediaItemKind::Photo)
+		? kPhotoCopyLabel
+		: tr::lng_in_dlg_video(tr::now);
+}
+
+[[nodiscard]] int GroupedMediaLayoutWidth(
+		const std::vector<Ui::GroupMediaLayout> &layout) {
+	auto result = 0;
+	for (const auto &part : layout) {
+		result = std::max(
+			result,
+			part.geometry.x() + part.geometry.width());
+	}
+	return result;
+}
+
+[[nodiscard]] int GroupedMediaLayoutHeight(
+		const std::vector<Ui::GroupMediaLayout> &layout) {
+	auto result = 0;
+	for (const auto &part : layout) {
+		result = std::max(
+			result,
+			part.geometry.y() + part.geometry.height());
+	}
+	return result;
+}
+
+void ResolveGroupedMediaItemLayout(
+		LaidOutGroupedMediaItem *item,
+		const PreparedGroupedMediaItemData &prepared,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		QRect rect) {
+	if (!item) {
+		return;
+	}
+	item->kind = prepared.media.kind;
+	item->copyText = GroupedMediaItemCopyText(prepared.media.kind);
+	item->rect = rect;
+	if (prepared.media.kind == PreparedMediaItemKind::Photo) {
+		if (mediaRuntime) {
+			item->photoRuntime = mediaRuntime->resolvePhoto(prepared.media.id);
+		}
+		ResolveRuntimeImages(
+			item->photoRuntime,
+			rect.size(),
+			&item->thumbnailImage,
+			&item->fullImage);
+		if (item->photoRuntime) {
+			item->activation.kind = MediaActivationKind::Photo;
+			item->activation.photo = item->photoRuntime;
+		}
+		return;
+	}
+	if (mediaRuntime) {
+		item->documentRuntime = mediaRuntime->resolveDocument(prepared.media.id);
+	}
+	ResolveRuntimeImages(
+		item->documentRuntime,
+		rect.size(),
+		&item->thumbnailImage,
+		&item->fullImage);
+	if (item->documentRuntime) {
+		item->activation.kind = MediaActivationKind::Document;
+		item->activation.document = item->documentRuntime;
+	}
 }
 
 } // namespace
@@ -286,10 +502,20 @@ int BlockSkip(
 		return skips.table;
 	case PreparedBlockKind::Photo:
 		return skips.photo;
+	case PreparedBlockKind::Video:
+		return skips.video;
+	case PreparedBlockKind::Audio:
+		return skips.audio;
+	case PreparedBlockKind::Map:
+		return skips.map;
+	case PreparedBlockKind::Channel:
+		return skips.channel;
 	case PreparedBlockKind::Placeholder:
 		return skips.placeholder;
 	case PreparedBlockKind::Details:
 		return skips.paragraph;
+	case PreparedBlockKind::GroupedMedia:
+		return skips.groupedMedia;
 	}
 	return 0;
 }
@@ -371,6 +597,17 @@ LaidOutBlock LayoutFlowBlock(
 		int left,
 		int top,
 		int width) {
+	if (prepared.kind == PreparedBlockKind::GroupedMedia) {
+		return LayoutGroupedMediaBlock(
+			prepared,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
+			markdown,
+			left,
+			top,
+			width);
+	}
 	auto block = LaidOutBlock();
 	block.kind = prepared.kind;
 	block.anchorId = prepared.anchorId;
@@ -717,28 +954,18 @@ LaidOutBlock LayoutPlaceholderBlock(
 		style.labelStyle);
 
 	auto bottom = top + mediaHeight;
-	if (!prepared.text.text.isEmpty()) {
-		block.textWidth = contentWidth;
-		SetTextLeaf(
-			&block.leaf,
-			markdown.body,
-			prepared.text,
-			formulas,
-			inlineFormulaObjects,
-			mediaRuntime,
-			block.textWidth);
-		BindLinks(&block.leaf, prepared.links);
-		const auto captionTop = bottom + style.captionSkip;
-		const auto captionHeight = std::max(
-			block.leaf.countHeight(block.textWidth, true),
-			TextLineHeight(markdown.body));
-		block.textRect = QRect(
-			contentLeft,
-			captionTop,
-			block.textWidth,
-			captionHeight);
-		bottom = captionTop + captionHeight;
-	}
+	LayoutMediaCaption(
+		&block,
+		prepared,
+		formulas,
+		inlineFormulaObjects,
+		mediaRuntime,
+		markdown,
+		contentLeft,
+		bottom,
+		contentWidth,
+		style.captionSkip,
+		&bottom);
 
 	block.contentRect = QRect(
 		left,
@@ -770,22 +997,21 @@ LaidOutBlock LayoutPhotoBlock(
 	const auto mediaWidth = std::max(
 		blockWidth - style.padding.left() - style.padding.right(),
 		1);
-	const auto aspectWidth = std::max(prepared.photo.width, 1);
-	const auto aspectHeight = std::max(prepared.photo.height, 1);
-	const auto mediaHeight = std::max(
-		int((int64(mediaWidth) * aspectHeight + aspectWidth - 1) / aspectWidth),
-		1);
+	const auto mediaHeight = MediaHeightForWidth(
+		mediaWidth,
+		prepared.photo.width,
+		prepared.photo.height);
 	block.mediaRect = QRect(mediaLeft, mediaTop, mediaWidth, mediaHeight);
 	block.visibleMediaRect = block.mediaRect;
 
 	if (mediaRuntime) {
 		block.photoRuntime = mediaRuntime->resolvePhoto(prepared.photo.photoId);
 	}
-	if (block.photoRuntime) {
-		const auto size = QSize(mediaWidth, mediaHeight);
-		block.thumbnailImage = block.photoRuntime->thumbnail(size);
-		block.fullImage = block.photoRuntime->full(size);
-	}
+	ResolveRuntimeImages(
+		block.photoRuntime,
+		QSize(mediaWidth, mediaHeight),
+		&block.thumbnailImage,
+		&block.fullImage);
 	if (!prepared.photo.urlOverride.isEmpty()) {
 		block.activation.kind = MediaActivationKind::ExternalUrl;
 		block.activation.url = prepared.photo.urlOverride;
@@ -795,28 +1021,18 @@ LaidOutBlock LayoutPhotoBlock(
 	}
 
 	auto bottom = mediaTop + mediaHeight + style.padding.bottom();
-	if (!prepared.text.text.isEmpty()) {
-		block.textWidth = mediaWidth;
-		SetTextLeaf(
-			&block.leaf,
-			markdown.body,
-			prepared.text,
-			formulas,
-			inlineFormulaObjects,
-			mediaRuntime,
-			block.textWidth);
-		BindLinks(&block.leaf, prepared.links);
-		const auto captionTop = bottom + style.captionSkip;
-		const auto captionHeight = std::max(
-			block.leaf.countHeight(block.textWidth, true),
-			TextLineHeight(markdown.body));
-		block.textRect = QRect(
-			mediaLeft,
-			captionTop,
-			block.textWidth,
-			captionHeight);
-		bottom = captionTop + captionHeight;
-	}
+	LayoutMediaCaption(
+		&block,
+		prepared,
+		formulas,
+		inlineFormulaObjects,
+		mediaRuntime,
+		markdown,
+		mediaLeft,
+		bottom,
+		mediaWidth,
+		style.captionSkip,
+		&bottom);
 
 	block.contentRect = QRect(
 		mediaLeft,
@@ -824,6 +1040,456 @@ LaidOutBlock LayoutPhotoBlock(
 		mediaWidth,
 		std::max(bottom - mediaTop, mediaHeight));
 	block.outer = QRect(left, top, blockWidth, std::max(bottom - top, mediaHeight));
+	return block;
+}
+
+LaidOutBlock LayoutVideoBlock(
+		const PreparedBlock &prepared,
+		std::vector<PreparedFormulaSlot> *formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &markdown,
+		int left,
+		int top,
+		int width) {
+	auto block = LaidOutBlock();
+	block.kind = PreparedBlockKind::Video;
+	block.anchorId = prepared.anchorId;
+	block.copyText = tr::lng_in_dlg_video(tr::now);
+
+	const auto &style = markdown.photo;
+	const auto blockWidth = std::max(width, 1);
+	const auto mediaLeft = left + style.padding.left();
+	const auto mediaTop = top + style.padding.top();
+	const auto mediaWidth = std::max(
+		blockWidth - style.padding.left() - style.padding.right(),
+		1);
+	const auto mediaHeight = MediaHeightForWidth(
+		mediaWidth,
+		prepared.video.media.width,
+		prepared.video.media.height);
+	block.mediaRect = QRect(mediaLeft, mediaTop, mediaWidth, mediaHeight);
+	block.visibleMediaRect = block.mediaRect;
+
+	if (mediaRuntime) {
+		block.documentRuntime = mediaRuntime->resolveDocument(
+			prepared.video.media.id);
+	}
+	ResolveRuntimeImages(
+		block.documentRuntime,
+		QSize(mediaWidth, mediaHeight),
+		&block.thumbnailImage,
+		&block.fullImage);
+	if (block.documentRuntime) {
+		block.activation.kind = MediaActivationKind::Document;
+		block.activation.document = block.documentRuntime;
+	}
+
+	auto bottom = mediaTop + mediaHeight + style.padding.bottom();
+	LayoutMediaCaption(
+		&block,
+		prepared,
+		formulas,
+		inlineFormulaObjects,
+		mediaRuntime,
+		markdown,
+		mediaLeft,
+		bottom,
+		mediaWidth,
+		style.captionSkip,
+		&bottom);
+
+	block.contentRect = QRect(
+		mediaLeft,
+		mediaTop,
+		mediaWidth,
+		std::max(bottom - mediaTop, mediaHeight));
+	block.outer = QRect(left, top, blockWidth, std::max(bottom - top, mediaHeight));
+	return block;
+}
+
+LaidOutBlock LayoutAudioBlock(
+		const PreparedBlock &prepared,
+		std::vector<PreparedFormulaSlot> *formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &markdown,
+		int left,
+		int top,
+		int width) {
+	auto block = LaidOutBlock();
+	block.kind = PreparedBlockKind::Audio;
+	block.anchorId = prepared.anchorId;
+	block.labelText = AudioTitleText(prepared.audio);
+	block.copyText = AudioCopyText(prepared.audio);
+
+	const auto &card = markdown.audio;
+	const auto &padding = card.padding;
+	const auto &titleStyle = card.titleStyle;
+	const auto &subtitleStyle = card.subtitleStyle;
+	const auto subtitleText = AudioSubtitleText(prepared.audio);
+	const auto blockWidth = std::max(width, 1);
+	const auto contentLeft = left + padding.left();
+	const auto contentWidth = std::max(
+		blockWidth - padding.left() - padding.right(),
+		1);
+
+	block.labelWidth = contentWidth;
+	SetPlainTextLeaf(
+		&block.labelLeaf,
+		titleStyle,
+		block.labelText,
+		block.labelWidth);
+	const auto titleHeight = LeafHeight(
+		block.labelLeaf,
+		titleStyle,
+		block.labelWidth);
+
+	auto subtitleHeight = 0;
+	if (!subtitleText.isEmpty()) {
+		block.subtitleWidth = contentWidth;
+		SetPlainTextLeaf(
+			&block.subtitleLeaf,
+			subtitleStyle,
+			subtitleText,
+			block.subtitleWidth);
+		subtitleHeight = LeafHeight(
+			block.subtitleLeaf,
+			subtitleStyle,
+			block.subtitleWidth);
+	}
+	const auto textSkip = subtitleHeight ? card.textSkip : 0;
+	const auto textHeight = titleHeight + textSkip + subtitleHeight;
+	const auto cardHeight = padding.top() + textHeight + padding.bottom();
+
+	block.mediaRect = QRect(left, top, blockWidth, cardHeight);
+	block.visibleMediaRect = block.mediaRect;
+	block.labelRect = QRect(
+		contentLeft,
+		top + padding.top(),
+		block.labelWidth,
+		titleHeight);
+	if (subtitleHeight) {
+		block.subtitleRect = QRect(
+			contentLeft,
+			block.labelRect.y() + block.labelRect.height() + textSkip,
+			block.subtitleWidth,
+			subtitleHeight);
+	}
+	block.firstLineBaseline = LeafFirstLineBaseline(
+		block.labelLeaf,
+		block.labelRect,
+		titleStyle);
+
+	if (mediaRuntime) {
+		block.documentRuntime = mediaRuntime->resolveDocument(
+			prepared.audio.documentId);
+	}
+	if (block.documentRuntime) {
+		block.activation.kind = MediaActivationKind::Document;
+		block.activation.document = block.documentRuntime;
+	}
+
+	auto bottom = top + cardHeight;
+	LayoutMediaCaption(
+		&block,
+		prepared,
+		formulas,
+		inlineFormulaObjects,
+		mediaRuntime,
+		markdown,
+		contentLeft,
+		bottom,
+		contentWidth,
+		card.captionSkip,
+		&bottom);
+	block.contentRect = QRect(left, top, blockWidth, std::max(bottom - top, cardHeight));
+	block.outer = block.contentRect;
+	return block;
+}
+
+LaidOutBlock LayoutMapBlock(
+		const PreparedBlock &prepared,
+		std::vector<PreparedFormulaSlot> *formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &markdown,
+		int left,
+		int top,
+		int width) {
+	auto block = LaidOutBlock();
+	block.kind = PreparedBlockKind::Map;
+	block.anchorId = prepared.anchorId;
+	block.copyText = tr::lng_maps_point(tr::now);
+
+	const auto &style = markdown.photo;
+	const auto blockWidth = std::max(width, 1);
+	const auto mediaLeft = left + style.padding.left();
+	const auto mediaTop = top + style.padding.top();
+	const auto mediaWidth = std::max(
+		blockWidth - style.padding.left() - style.padding.right(),
+		1);
+	const auto mediaHeight = MediaHeightForWidth(
+		mediaWidth,
+		prepared.map.width,
+		prepared.map.height);
+	block.mediaRect = QRect(mediaLeft, mediaTop, mediaWidth, mediaHeight);
+	block.visibleMediaRect = block.mediaRect;
+
+	if (mediaRuntime) {
+		block.mapRuntime = mediaRuntime->resolveMap(
+			prepared.map.latitude,
+			prepared.map.longitude,
+			prepared.map.accessHash,
+			QSize(mediaWidth, mediaHeight),
+			prepared.map.zoom);
+	}
+	ResolveRuntimeImages(
+		block.mapRuntime,
+		QSize(mediaWidth, mediaHeight),
+		&block.thumbnailImage,
+		&block.fullImage);
+	if (!prepared.map.url.isEmpty()) {
+		block.activation.kind = MediaActivationKind::ExternalUrl;
+		block.activation.url = prepared.map.url;
+	}
+
+	auto bottom = mediaTop + mediaHeight + style.padding.bottom();
+	LayoutMediaCaption(
+		&block,
+		prepared,
+		formulas,
+		inlineFormulaObjects,
+		mediaRuntime,
+		markdown,
+		mediaLeft,
+		bottom,
+		mediaWidth,
+		style.captionSkip,
+		&bottom);
+
+	block.contentRect = QRect(
+		mediaLeft,
+		mediaTop,
+		mediaWidth,
+		std::max(bottom - mediaTop, mediaHeight));
+	block.outer = QRect(left, top, blockWidth, std::max(bottom - top, mediaHeight));
+	return block;
+}
+
+LaidOutBlock LayoutChannelBlock(
+		const PreparedBlock &prepared,
+		std::vector<PreparedFormulaSlot> *formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &markdown,
+		int left,
+		int top,
+		int width) {
+	auto block = LaidOutBlock();
+	block.kind = PreparedBlockKind::Channel;
+	block.anchorId = prepared.anchorId;
+	block.labelText = prepared.channel.title;
+	block.copyText = ChannelCopyText(prepared.channel);
+
+	const auto &card = markdown.channel;
+	const auto &padding = card.padding;
+	const auto &button = card.button;
+	const auto &buttonPadding = button.padding;
+	const auto &titleStyle = card.titleStyle;
+	const auto &subtitleStyle = card.subtitleStyle;
+	const auto &actionStyle = button.textStyle;
+	const auto subtitleText = ChannelSubtitleText(prepared.channel);
+	const auto blockWidth = std::max(width, 1);
+	const auto contentLeft = left + padding.left();
+	const auto contentWidth = std::max(
+		blockWidth - padding.left() - padding.right(),
+		1);
+
+	if (mediaRuntime) {
+		block.channelRuntime = mediaRuntime->resolveChannel(
+			prepared.channel.channelId,
+			prepared.channel.username);
+	}
+	const auto joinVisible = block.channelRuntime
+		&& block.channelRuntime->joinVisible();
+	if (block.channelRuntime) {
+		block.activation.kind = MediaActivationKind::OpenChannel;
+		block.activation.channel = block.channelRuntime;
+	}
+	if (joinVisible) {
+		block.actionActivation.kind = MediaActivationKind::JoinChannel;
+		block.actionActivation.channel = block.channelRuntime;
+	}
+
+	auto actionTextHeight = 0;
+	auto actionOuterWidth = 0;
+	auto actionOuterHeight = 0;
+	if (joinVisible) {
+		SetPlainTextLeaf(
+			&block.actionLeaf,
+			actionStyle,
+			tr::lng_iv_join_channel(tr::now),
+			contentWidth);
+		block.actionWidth = std::max(block.actionLeaf.maxWidth(), 1);
+		actionTextHeight = LeafHeight(
+			block.actionLeaf,
+			actionStyle,
+			block.actionWidth);
+		actionOuterWidth = block.actionWidth
+			+ buttonPadding.left()
+			+ buttonPadding.right();
+		actionOuterHeight = actionTextHeight
+			+ buttonPadding.top()
+			+ buttonPadding.bottom();
+	}
+
+	block.labelWidth = std::max(
+		contentWidth
+			- (joinVisible ? (actionOuterWidth + card.buttonSkip) : 0),
+		1);
+	SetPlainTextLeaf(
+		&block.labelLeaf,
+		titleStyle,
+		block.labelText,
+		block.labelWidth);
+	const auto titleHeight = LeafHeight(
+		block.labelLeaf,
+		titleStyle,
+		block.labelWidth);
+
+	auto subtitleHeight = 0;
+	if (!subtitleText.isEmpty()) {
+		block.subtitleWidth = block.labelWidth;
+		SetPlainTextLeaf(
+			&block.subtitleLeaf,
+			subtitleStyle,
+			subtitleText,
+			block.subtitleWidth);
+		subtitleHeight = LeafHeight(
+			block.subtitleLeaf,
+			subtitleStyle,
+			block.subtitleWidth);
+	}
+	const auto textSkip = subtitleHeight ? card.textSkip : 0;
+	const auto textHeight = titleHeight + textSkip + subtitleHeight;
+	const auto cardContentHeight = std::max(textHeight, actionOuterHeight);
+	const auto cardHeight = padding.top() + cardContentHeight + padding.bottom();
+
+	block.mediaRect = QRect(left, top, blockWidth, cardHeight);
+	block.visibleMediaRect = block.mediaRect;
+
+	const auto textTop = top + padding.top()
+		+ std::max((cardContentHeight - textHeight) / 2, 0);
+	block.labelRect = QRect(
+		contentLeft,
+		textTop,
+		block.labelWidth,
+		titleHeight);
+	if (subtitleHeight) {
+		block.subtitleRect = QRect(
+			contentLeft,
+			block.labelRect.y() + block.labelRect.height() + textSkip,
+			block.subtitleWidth,
+			subtitleHeight);
+	}
+	if (joinVisible) {
+		block.actionRect = QRect(
+			left + blockWidth - padding.right() - actionOuterWidth,
+			top + padding.top()
+				+ std::max((cardContentHeight - actionOuterHeight) / 2, 0),
+			actionOuterWidth,
+			actionOuterHeight);
+	}
+	block.firstLineBaseline = LeafFirstLineBaseline(
+		block.labelLeaf,
+		block.labelRect,
+		titleStyle);
+	block.contentRect = block.mediaRect;
+	block.outer = block.mediaRect;
+	return block;
+}
+
+LaidOutBlock LayoutGroupedMediaBlock(
+		const PreparedBlock &prepared,
+		const std::vector<PreparedFormulaSlot> *formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &markdown,
+		int left,
+		int top,
+		int width) {
+	auto block = LaidOutBlock();
+	block.kind = PreparedBlockKind::GroupedMedia;
+	block.anchorId = prepared.anchorId;
+	block.copyText = GroupedMediaCopyText(prepared.groupedMedia);
+
+	const auto &style = markdown.groupedMedia;
+	const auto blockWidth = std::max(width, 1);
+	const auto mediaLeft = left + style.padding.left();
+	const auto mediaTop = top + style.padding.top();
+	const auto mediaWidth = std::max(
+		blockWidth - style.padding.left() - style.padding.right(),
+		1);
+
+	auto sizes = std::vector<QSize>();
+	sizes.reserve(prepared.groupedMedia.items.size());
+	for (const auto &item : prepared.groupedMedia.items) {
+		sizes.push_back(QSize(
+			std::max(item.media.width, 1),
+			std::max(item.media.height, 1)));
+	}
+	auto layout = Ui::LayoutMediaGroup(
+		sizes,
+		mediaWidth,
+		GroupedMediaMinWidth(mediaWidth, style.itemSkip),
+		style.itemSkip);
+	block.groupedMediaItems.reserve(layout.size());
+	for (auto i = 0, count = std::min(
+			int(layout.size()),
+			int(prepared.groupedMedia.items.size())); i != count; ++i) {
+		auto item = LaidOutGroupedMediaItem();
+		ResolveGroupedMediaItemLayout(
+			&item,
+			prepared.groupedMedia.items[i],
+			mediaRuntime,
+			layout[i].geometry.translated(mediaLeft, mediaTop));
+		block.groupedMediaItems.push_back(std::move(item));
+	}
+	const auto mediaHeight = GroupedMediaLayoutHeight(layout);
+	const auto laidOutWidth = GroupedMediaLayoutWidth(layout);
+	block.mediaRect = QRect(
+		mediaLeft,
+		mediaTop,
+		std::max(laidOutWidth, 1),
+		std::max(mediaHeight, 1));
+	block.visibleMediaRect = block.mediaRect;
+
+	auto bottom = block.mediaRect.y() + block.mediaRect.height()
+		+ style.padding.bottom();
+	LayoutMediaCaption(
+		&block,
+		prepared,
+		formulas,
+		inlineFormulaObjects,
+		mediaRuntime,
+		markdown,
+		mediaLeft,
+		bottom,
+		block.mediaRect.width(),
+		style.captionSkip,
+		&bottom);
+
+	block.contentRect = QRect(
+		mediaLeft,
+		mediaTop,
+		block.mediaRect.width(),
+		std::max(bottom - mediaTop, block.mediaRect.height()));
+	block.outer = QRect(
+		left,
+		top,
+		blockWidth,
+		std::max(bottom - top, block.mediaRect.height()));
 	return block;
 }
 

@@ -101,18 +101,31 @@ const auto kPhotoCopyLabel = u"Photo"_q;
 [[nodiscard]] TextForMimeData CopyTextForMediaBlock(
 		const QString &label,
 		const Ui::Text::String &captionLeaf) {
-	auto result = TextForMimeData::Simple(label);
+	auto result = label.isEmpty()
+		? TextForMimeData()
+		: TextForMimeData::Simple(label);
 	if (!captionLeaf.isEmpty()) {
-		result.append(u"\n"_q);
+		if (!result.empty()) {
+			result.append(u"\n"_q);
+		}
 		result.append(captionLeaf.toTextForMimeData());
 	}
 	return result;
 }
 
+[[nodiscard]] TextForMimeData CopyTextForSingleMediaBlock(
+		const LaidOutBlock &block,
+		const QString &fallback = QString()) {
+	const auto label = !block.copyText.isEmpty()
+		? block.copyText
+		: !block.labelText.isEmpty()
+		? block.labelText
+		: fallback;
+	return CopyTextForMediaBlock(label, block.leaf);
+}
+
 [[nodiscard]] TextForMimeData CopyTextForPhotoBlock(const LaidOutBlock &block) {
-	return CopyTextForMediaBlock(
-		block.copyText.isEmpty() ? kPhotoCopyLabel : block.copyText,
-		block.leaf);
+	return CopyTextForSingleMediaBlock(block, kPhotoCopyLabel);
 }
 
 [[nodiscard]] TextForMimeData CopyTextForPlaceholderBlock(
@@ -350,11 +363,18 @@ void CollectSelectableSegments(
 			}
 		} break;
 		case PreparedBlockKind::Placeholder:
-		case PreparedBlockKind::Photo: {
+		case PreparedBlockKind::Photo:
+		case PreparedBlockKind::Video:
+		case PreparedBlockKind::Audio:
+		case PreparedBlockKind::Map:
+		case PreparedBlockKind::Channel:
+		case PreparedBlockKind::GroupedMedia: {
 			auto segment = SelectableSegment();
 			segment.kind = (block.kind == PreparedBlockKind::Photo)
 				? SelectableSegmentKind::Photo
-				: SelectableSegmentKind::Placeholder;
+				: (block.kind == PreparedBlockKind::Placeholder)
+				? SelectableSegmentKind::Placeholder
+				: SelectableSegmentKind::Media;
 			segment.block = &block;
 			segment.outerRect = block.mediaRect;
 			segment.length = 1;
@@ -540,6 +560,10 @@ TextForMimeData TextForSegment(
 	case SelectableSegmentKind::Photo:
 		return segment.block
 			? CopyTextForPhotoBlock(*segment.block)
+			: TextForMimeData();
+	case SelectableSegmentKind::Media:
+		return segment.block
+			? CopyTextForSingleMediaBlock(*segment.block)
 			: TextForMimeData();
 	}
 	return TextForMimeData();

@@ -49,10 +49,25 @@ struct LaidOutTableRow {
 	bool header = false;
 };
 
+struct LaidOutGroupedMediaItem {
+	PreparedMediaItemKind kind = PreparedMediaItemKind::Photo;
+	QString copyText;
+	QRect rect;
+	std::shared_ptr<PhotoRuntime> photoRuntime;
+	std::shared_ptr<DocumentRuntime> documentRuntime;
+	std::shared_ptr<Ui::DynamicImage> thumbnailImage;
+	std::shared_ptr<Ui::DynamicImage> fullImage;
+	MediaActivation activation;
+	mutable bool thumbnailSubscribed = false;
+	mutable bool fullSubscribed = false;
+};
+
 struct LaidOutBlock {
 	PreparedBlockKind kind = PreparedBlockKind::Paragraph;
 	Ui::Text::String leaf;
 	Ui::Text::String labelLeaf;
+	Ui::Text::String subtitleLeaf;
+	Ui::Text::String actionLeaf;
 	Ui::Text::String marker;
 	Ui::Text::String fallbackLeaf;
 	QString copyText;
@@ -60,6 +75,7 @@ struct LaidOutBlock {
 	QString codeLanguage;
 	Spellchecker::HighlightProcessId syntaxHighlightProcessId = 0;
 	std::vector<LaidOutBlock> children;
+	std::vector<LaidOutGroupedMediaItem> groupedMediaItems;
 	std::vector<LaidOutTableRow> tableRows;
 	std::vector<int> tableColumnWidths;
 	QRect outer;
@@ -68,6 +84,8 @@ struct LaidOutBlock {
 	QRect iconRect;
 	QRect textRect;
 	QRect labelRect;
+	QRect subtitleRect;
+	QRect actionRect;
 	QRect markerRect;
 	QRect contentRect;
 	QRect formulaRect;
@@ -80,6 +98,8 @@ struct LaidOutBlock {
 	QString anchorId;
 	int textWidth = 0;
 	int labelWidth = 0;
+	int subtitleWidth = 0;
+	int actionWidth = 0;
 	int markerWidth = 0;
 	int firstLineBaseline = -1;
 	int headingLevel = 0;
@@ -94,9 +114,13 @@ struct LaidOutBlock {
 	int segmentIndex = -1;
 	int secondarySegmentIndex = -1;
 	std::shared_ptr<PhotoRuntime> photoRuntime;
+	std::shared_ptr<DocumentRuntime> documentRuntime;
+	std::shared_ptr<MapRuntime> mapRuntime;
+	std::shared_ptr<ChannelRuntime> channelRuntime;
 	std::shared_ptr<Ui::DynamicImage> thumbnailImage;
 	std::shared_ptr<Ui::DynamicImage> fullImage;
 	MediaActivation activation;
+	MediaActivation actionActivation;
 	mutable bool thumbnailSubscribed = false;
 	mutable bool fullSubscribed = false;
 	mutable QImage colorizedFormulaImage;
@@ -205,6 +229,51 @@ void RepopulateCodeBlockLeaf(
 [[nodiscard]] LaidOutBlock LayoutPhotoBlock(
 	const PreparedBlock &prepared,
 	std::vector<PreparedFormulaSlot> *formulas,
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
+	const style::Markdown &markdown,
+	int left,
+	int top,
+	int width);
+[[nodiscard]] LaidOutBlock LayoutVideoBlock(
+	const PreparedBlock &prepared,
+	std::vector<PreparedFormulaSlot> *formulas,
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
+	const style::Markdown &markdown,
+	int left,
+	int top,
+	int width);
+[[nodiscard]] LaidOutBlock LayoutAudioBlock(
+	const PreparedBlock &prepared,
+	std::vector<PreparedFormulaSlot> *formulas,
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
+	const style::Markdown &markdown,
+	int left,
+	int top,
+	int width);
+[[nodiscard]] LaidOutBlock LayoutMapBlock(
+	const PreparedBlock &prepared,
+	std::vector<PreparedFormulaSlot> *formulas,
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
+	const style::Markdown &markdown,
+	int left,
+	int top,
+	int width);
+[[nodiscard]] LaidOutBlock LayoutChannelBlock(
+	const PreparedBlock &prepared,
+	std::vector<PreparedFormulaSlot> *formulas,
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
+	const style::Markdown &markdown,
+	int left,
+	int top,
+	int width);
+[[nodiscard]] LaidOutBlock LayoutGroupedMediaBlock(
+	const PreparedBlock &prepared,
+	const std::vector<PreparedFormulaSlot> *formulas,
 	InlineFormulaObjectCache *inlineFormulaObjects,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
 	const style::Markdown &markdown,

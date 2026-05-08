@@ -198,8 +198,10 @@ private:
 	Ui::FlatLabel *_failure = nullptr;
 	Ui::LinkButton *_failureOpen = nullptr;
 	const std::shared_ptr<MathRenderer> _renderer;
+	std::shared_ptr<MarkdownArticle> _article;
 	QString _pendingFragment;
 	int _devicePixelRatio = 0;
+	rpl::lifetime _channelJoinedLifetime;
 
 };
 
@@ -451,7 +453,9 @@ void MarkdownPreviewRoot::applyPreparedContent(
 		int prepareMs) {
 	const auto failure = prepared.failure;
 	const auto debug = prepared.debug;
+	_channelJoinedLifetime.destroy();
 	if (failure.failed()) {
+		_article = nullptr;
 		_footnotes.clear();
 		_scroll->hide();
 		if (_body) {
@@ -473,14 +477,27 @@ void MarkdownPreviewRoot::applyPreparedContent(
 	_footnotes = prepared.footnotes;
 
 	if (!_body) {
+		_article = nullptr;
 		logPreparationSummary(failure, debug, prepareMs, 0);
 		return;
 	}
 
+	if (prepared.mediaRuntime) {
+		prepared.mediaRuntime->channelJoinedChanges(
+		) | rpl::on_next([=](uint64) {
+			if (_body && !_body->isHidden() && _article) {
+				_article->invalidateLayout();
+				updateChildrenGeometry(size());
+				_body->update();
+			}
+		}, _channelJoinedLifetime);
+	}
+
 	auto article = std::make_shared<MarkdownArticle>(_renderer);
 	article->setContent(std::move(prepared));
+	_article = article;
 	updateChildrenGeometry(size());
-	_body->setArticle(std::move(article));
+	_body->setArticle(article);
 	if (_options.delegate) {
 		_body->setZoom(_options.delegate->ivZoom());
 	}

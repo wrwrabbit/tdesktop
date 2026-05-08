@@ -932,9 +932,9 @@ Ui::Text::CustomEmojiSemantics InlineIvImageObject::semantics() {
 
 void InlineIvImageObject::paint(QPainter &p, const Context &context) {
 	if (_image) {
-		if (!_subscribed && _repaint) {
+		if (!_subscribed) {
 			_subscribed = true;
-			_image->subscribeToUpdates(_repaint);
+			_image->subscribeToUpdates(_repaint ? _repaint : [] {});
 		}
 		if (const auto image = _image->image(std::max(_width, _height));
 			!image.isNull()) {

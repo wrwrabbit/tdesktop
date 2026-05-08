@@ -229,12 +229,34 @@ void RebuildVisibleSegmentLookup(
 	auto result = HitSegmentBoundary(
 		segment,
 		after ? SegmentLength(segment) : 0);
-	if (segment.block) {
-		result.mediaActivation = segment.block->activation;
-		if (const auto prepared = PreparedLinkForMediaActivation(
-				result.mediaActivation)) {
+	const auto applyActivation = [&](const MediaActivation &activation) {
+		result.mediaActivation = activation;
+		if (const auto prepared = PreparedLinkForMediaActivation(activation)) {
 			result.preparedLink = prepared;
 			result.state.link = CreatePreparedLinkHandler(*prepared);
+		}
+	};
+	if (segment.block) {
+		if (!segment.block->actionRect.isEmpty()
+			&& segment.block->actionRect.contains(point)
+			&& segment.block->channelRuntime
+			&& segment.block->channelRuntime->joinVisible()) {
+			applyActivation(segment.block->actionActivation);
+		} else if (segment.block->kind == PreparedBlockKind::GroupedMedia) {
+			auto matchedItem = false;
+			for (const auto &item : segment.block->groupedMediaItems) {
+				if (!item.rect.contains(point)) {
+					continue;
+				}
+				applyActivation(item.activation);
+				matchedItem = true;
+				break;
+			}
+			if (!matchedItem) {
+				applyActivation(segment.block->activation);
+			}
+		} else {
+			applyActivation(segment.block->activation);
 		}
 	}
 	result.direct = true;
@@ -548,6 +570,18 @@ public:
 		ClearColorizedFormulaImages(&_blocks);
 	}
 
+	void invalidateLayout() {
+		_width = -1;
+		_height = 0;
+		clearPendingHighlightBlockPointers();
+		_blocks.clear();
+		_anchors.clear();
+		_segments.clear();
+		_visibleSegmentSpan = {};
+		_segmentTops.clear();
+		_segmentBottoms.clear();
+	}
+
 private:
 	[[nodiscard]] int currentDevicePixelRatio() const {
 		return std::max(style::DevicePixelRatio(), 1);
@@ -634,18 +668,6 @@ private:
 		}
 	}
 
-	void invalidateLayout() {
-		_width = -1;
-		_height = 0;
-		clearPendingHighlightBlockPointers();
-		_blocks.clear();
-		_anchors.clear();
-		_segments.clear();
-		_visibleSegmentSpan = {};
-		_segmentTops.clear();
-		_segmentBottoms.clear();
-	}
-
 	void resetFormulaRasterCache() {
 		_formulaRenders.clear();
 		_formulaRenders.resize(_content.formulas.size());
@@ -725,6 +747,10 @@ void MarkdownArticle::setRenderer(std::shared_ptr<MathRenderer> renderer) {
 
 void MarkdownArticle::setContent(MarkdownArticleContent content) {
 	_impl->setContent(std::move(content));
+}
+
+void MarkdownArticle::invalidateLayout() {
+	_impl->invalidateLayout();
 }
 
 int MarkdownArticle::maxWidth() const {

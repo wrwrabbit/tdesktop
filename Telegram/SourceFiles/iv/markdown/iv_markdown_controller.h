@@ -51,6 +51,7 @@ public:
 	void updateOptions(OpenOptions options = {});
 
 	[[nodiscard]] bool active() const;
+	void showJoinedTooltip();
 	void minimize();
 
 	[[nodiscard]] rpl::producer<Event> events() const {

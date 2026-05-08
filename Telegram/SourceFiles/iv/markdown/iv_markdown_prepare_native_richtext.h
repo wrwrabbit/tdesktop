@@ -19,6 +19,9 @@ struct PreparedIvRichText {
 void RememberNativeIvPhoto(
 	NativeIvPrepareState *state,
 	const MTPPhoto &photo);
+void RememberNativeIvDocument(
+	NativeIvPrepareState *state,
+	const MTPDocument &document);
 [[nodiscard]] bool PrepareNativeIvPlainPlaceholderBlock(
 	QString label,
 	std::vector<PreparedBlock> *result);
@@ -29,6 +32,28 @@ void RememberNativeIvPhoto(
 	NativeIvPrepareState *state);
 [[nodiscard]] bool PrepareNativeIvPhotoBlock(
 	const MTPDpageBlockPhoto &data,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state);
+[[nodiscard]] bool PrepareNativeIvVideoBlock(
+	const MTPDpageBlockVideo &data,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state);
+[[nodiscard]] bool PrepareNativeIvAudioBlock(
+	const MTPDpageBlockAudio &data,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state);
+[[nodiscard]] bool PrepareNativeIvMapBlock(
+	const MTPDpageBlockMap &data,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state);
+[[nodiscard]] bool PrepareNativeIvChannelBlock(
+	const MTPDpageBlockChannel &data,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state);
+[[nodiscard]] bool PrepareNativeIvGroupedMediaBlock(
+	const QVector<MTPPageBlock> &items,
+	const MTPPageCaption &caption,
+	QString placeholderLabel,
 	std::vector<PreparedBlock> *result,
 	NativeIvPrepareState *state);
 [[nodiscard]] bool PrepareNativeIvRichText(

@@ -121,6 +121,12 @@ NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 	if (request.source->webpagePhoto) {
 		RememberNativeIvPhoto(&state, *request.source->webpagePhoto);
 	}
+	for (const auto &document : request.source->page.data().vdocuments().v) {
+		RememberNativeIvDocument(&state, document);
+	}
+	if (request.source->webpageDocument) {
+		RememberNativeIvDocument(&state, *request.source->webpageDocument);
+	}
 
 	if (!PrepareNativeIvBlocks(
 			request.source->page.data().vblocks().v,

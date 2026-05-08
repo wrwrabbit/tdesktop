@@ -108,6 +108,7 @@ public:
 
 	void setRenderer(std::shared_ptr<MathRenderer> renderer);
 	void setContent(MarkdownArticleContent content);
+	void invalidateLayout();
 	[[nodiscard]] int maxWidth() const;
 	[[nodiscard]] int resizeGetHeight(int width);
 	void setVisibleTopBottom(int visibleTop, int visibleBottom);

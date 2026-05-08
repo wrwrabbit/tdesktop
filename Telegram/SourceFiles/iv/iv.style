@@ -81,6 +81,11 @@ MarkdownBlockSkips {
 	displayMath: pixels;
 	table: pixels;
 	photo: pixels;
+	video: pixels;
+	audio: pixels;
+	map: pixels;
+	channel: pixels;
+	groupedMedia: pixels;
 	placeholder: pixels;
 }
 MarkdownList {
@@ -151,6 +156,49 @@ MarkdownPhoto {
 	progressSize: pixels;
 	progressWidth: pixels;
 }
+MarkdownAudio {
+	padding: margins;
+	captionSkip: pixels;
+	textSkip: pixels;
+	border: pixels;
+	borderFg: color;
+	bg: color;
+	radius: pixels;
+	titleStyle: TextStyle;
+	titleFg: color;
+	subtitleStyle: TextStyle;
+	subtitleFg: color;
+}
+MarkdownChannelButton {
+	padding: margins;
+	border: pixels;
+	borderFg: color;
+	bg: color;
+	radius: pixels;
+	textStyle: TextStyle;
+	textFg: color;
+}
+MarkdownChannel {
+	padding: margins;
+	border: pixels;
+	borderFg: color;
+	bg: color;
+	radius: pixels;
+	textSkip: pixels;
+	buttonSkip: pixels;
+	titleStyle: TextStyle;
+	titleFg: color;
+	subtitleStyle: TextStyle;
+	subtitleFg: color;
+	button: MarkdownChannelButton;
+}
+MarkdownGroupedMedia {
+	padding: margins;
+	captionSkip: pixels;
+	itemSkip: pixels;
+	radius: pixels;
+	overlayOpacity: double;
+}
 MarkdownFailure {
 	label: FlatLabel;
 	width: pixels;
@@ -178,6 +226,9 @@ Markdown {
 	details: MarkdownDetails;
 	placeholder: MarkdownPlaceholder;
 	photo: MarkdownPhoto;
+	audio: MarkdownAudio;
+	channel: MarkdownChannel;
+	groupedMedia: MarkdownGroupedMedia;
 	failure: MarkdownFailure;
 }
 
@@ -206,6 +257,11 @@ defaultMarkdownBlockSkips: MarkdownBlockSkips {
 	displayMath: 20px;
 	table: 20px;
 	photo: 20px;
+	video: 20px;
+	audio: 20px;
+	map: 20px;
+	channel: 20px;
+	groupedMedia: 20px;
 	placeholder: 20px;
 }
 defaultMarkdownList: MarkdownList {
@@ -283,6 +339,60 @@ defaultMarkdownPhoto: MarkdownPhoto {
 	progressSize: 36px;
 	progressWidth: 3px;
 }
+defaultMarkdownAudioTitleStyle: TextStyle(defaultMarkdownBodyStyle) {
+	font: font(16px semibold);
+}
+defaultMarkdownAudioSubtitleStyle: TextStyle(defaultMarkdownDetailsSummaryStyle) {
+}
+defaultMarkdownAudio: MarkdownAudio {
+	padding: margins(8px, 12px, 8px, 12px);
+	captionSkip: 14px;
+	textSkip: 8px;
+	border: 1px;
+	borderFg: inputBorderFg;
+	bg: windowBgOver;
+	radius: 6px;
+	titleStyle: defaultMarkdownAudioTitleStyle;
+	titleFg: windowFg;
+	subtitleStyle: defaultMarkdownAudioSubtitleStyle;
+	subtitleFg: windowSubTextFg;
+}
+defaultMarkdownChannelTitleStyle: TextStyle(defaultMarkdownAudioTitleStyle) {
+}
+defaultMarkdownChannelSubtitleStyle: TextStyle(defaultMarkdownDetailsSummaryStyle) {
+}
+defaultMarkdownChannelButtonStyle: TextStyle(defaultMarkdownDetailsSummaryStyle) {
+}
+defaultMarkdownChannelButton: MarkdownChannelButton {
+	padding: margins(10px, 12px, 10px, 12px);
+	border: 1px;
+	borderFg: windowActiveTextFg;
+	bg: windowBg;
+	radius: 6px;
+	textStyle: defaultMarkdownChannelButtonStyle;
+	textFg: windowActiveTextFg;
+}
+defaultMarkdownChannel: MarkdownChannel {
+	padding: margins(8px, 12px, 8px, 12px);
+	border: 1px;
+	borderFg: inputBorderFg;
+	bg: windowBgOver;
+	radius: 6px;
+	textSkip: 8px;
+	buttonSkip: 8px;
+	titleStyle: defaultMarkdownChannelTitleStyle;
+	titleFg: windowFg;
+	subtitleStyle: defaultMarkdownChannelSubtitleStyle;
+	subtitleFg: windowSubTextFg;
+	button: defaultMarkdownChannelButton;
+}
+defaultMarkdownGroupedMedia: MarkdownGroupedMedia {
+	padding: margins(4px, 0px, 0px, 0px);
+	captionSkip: 12px;
+	itemSkip: 4px;
+	radius: 6px;
+	overlayOpacity: 0.2;
+}
 defaultMarkdownFailureLabel: FlatLabel(defaultFlatLabel) {
 	minWidth: 280px;
 	textFg: windowSubTextFg;
@@ -346,5 +456,8 @@ defaultMarkdown: Markdown {
 	details: defaultMarkdownDetails;
 	placeholder: defaultMarkdownPlaceholder;
 	photo: defaultMarkdownPhoto;
+	audio: defaultMarkdownAudio;
+	channel: defaultMarkdownChannel;
+	groupedMedia: defaultMarkdownGroupedMedia;
 	failure: defaultMarkdownFailure;
 }

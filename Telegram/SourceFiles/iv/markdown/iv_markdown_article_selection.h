@@ -18,6 +18,7 @@ enum class SelectableSegmentKind {
 	Table,
 	Placeholder,
 	Photo,
+	Media,
 };
 
 struct SelectableSegment {

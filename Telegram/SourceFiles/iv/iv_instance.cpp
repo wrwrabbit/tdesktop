@@ -50,11 +50,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/basic_click_handlers.h"
 #include "ui/dynamic_image.h"
 #include "ui/dynamic_thumbnails.h"
+#include "ui/painter.h"
 #include "webview/webview_data_stream_memory.h"
 #include "webview/webview_interface.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "window/window_session_controller_link_info.h"
+
+#include "styles/palette.h"
+#include "styles/style_chat.h"
 
 #include <QtCore/QByteArray>
 #include <QtCore/QFileInfo>
@@ -64,6 +68,39 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <optional>
 
 namespace Iv {
+
+struct NativeIvChannelContext {
+	uint64 channelId = 0;
+	QString username;
+};
+
+[[nodiscard]] NativeIvChannelContext ParseNativeIvChannelContext(
+		const QString &context) {
+	const auto separator = context.indexOf(u'\n');
+	return {
+		.channelId = (separator >= 0)
+			? context.mid(0, separator).toULongLong()
+			: context.toULongLong(),
+		.username = (separator >= 0) ? context.mid(separator + 1) : QString(),
+	};
+}
+
+[[nodiscard]] QString SerializeNativeIvChannelContext(
+		uint64 channelId,
+		QString username) {
+	auto result = QString::number(channelId);
+	if (!username.isEmpty()) {
+		result += u"\n"_q + username;
+	}
+	return result;
+}
+
+[[nodiscard]] QString ResolveNativeIvChannelUsername(
+		const QString &channelUsername,
+		const QString &contextUsername) {
+	return !channelUsername.isEmpty() ? channelUsername : contextUsername;
+}
+
 namespace {
 
 constexpr auto kGeoPointScale = 1;
@@ -242,13 +279,297 @@ private:
 
 };
 
+[[nodiscard]] ImageWithLocation CachedPageMapImageData(
+		double latitude,
+		double longitude,
+		uint64 accessHash,
+		QSize size,
+		int zoom) {
+	const auto location = GeoPointLocation{
+		.lat = latitude,
+		.lon = longitude,
+		.access = accessHash,
+		.width = std::max(size.width(), 1),
+		.height = std::max(size.height(), 1),
+		.zoom = std::max(zoom, kGeoPointZoomMin),
+		.scale = kGeoPointScale,
+	};
+	return {
+		.location = ImageLocation(
+			{ location },
+			location.width,
+			location.height),
+	};
+}
+
+class CachedPageDocumentRuntime final : public Markdown::DocumentRuntime {
+public:
+	CachedPageDocumentRuntime(
+		not_null<Main::Session*> session,
+		not_null<DocumentData*> document,
+		::Data::FileOrigin origin)
+	: _session(session)
+	, _document(document)
+	, _origin(std::move(origin))
+	, _media(document->createMediaView()) {
+	}
+
+	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> thumbnail(
+			QSize size) const override {
+		Q_UNUSED(size);
+		return Ui::MakeDocumentThumbnailFit(_document, _origin);
+	}
+
+	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> full(
+			QSize size) const override {
+		Q_UNUSED(size);
+		return Ui::MakeDocumentThumbnail(_document, _origin);
+	}
+
+	[[nodiscard]] bool loaded() const override {
+		return _media->loaded();
+	}
+
+	[[nodiscard]] bool loading() const override {
+		return _document->displayLoading();
+	}
+
+	[[nodiscard]] double progress() const override {
+		return _document->progress();
+	}
+
+	void open(Qt::MouseButton button) const override {
+		if (button != Qt::LeftButton && button != Qt::MiddleButton) {
+			return;
+		}
+		if (const auto window = Core::App().activeWindow()) {
+			const auto item = (HistoryItem*)nullptr;
+			window->openInMediaView({
+				CurrentSessionController(_session),
+				_document,
+				item,
+				MsgId(0),
+				PeerId(0),
+			});
+		}
+	}
+
+private:
+	const not_null<Main::Session*> _session;
+	const not_null<DocumentData*> _document;
+	const ::Data::FileOrigin _origin;
+	const std::shared_ptr<::Data::DocumentMedia> _media;
+
+};
+
+class CachedPageMapDynamicImage final : public Ui::DynamicImage {
+public:
+	CachedPageMapDynamicImage(
+		not_null<::Data::CloudImage*> data,
+		not_null<Main::Session*> session,
+		::Data::FileOrigin origin)
+	: _data(data)
+	, _session(session)
+	, _origin(std::move(origin)) {
+	}
+
+	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> clone() override {
+		return std::make_shared<CachedPageMapDynamicImage>(
+			_data,
+			_session,
+			_origin);
+	}
+
+	[[nodiscard]] QImage image(int size) override {
+		Q_UNUSED(size);
+		const auto loaded = _view ? *_view : QImage();
+		if (loaded.isNull()) {
+			return QImage();
+		}
+		const auto paletteVersion = style::PaletteVersion();
+		if (_prepared.size() == loaded.size()
+			&& _prepared.devicePixelRatio() == loaded.devicePixelRatio()
+			&& _paletteVersion == paletteVersion) {
+			return _prepared;
+		}
+		_paletteVersion = paletteVersion;
+		_prepared = loaded.copy();
+		_prepared.setDevicePixelRatio(loaded.devicePixelRatio());
+		const auto ratio = loaded.devicePixelRatio();
+		const auto width = int(loaded.width() / ratio);
+		const auto height = int(loaded.height() / ratio);
+		const auto markerSize = std::min(width, height);
+		auto p = Painter(&_prepared);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto pinScale = std::min({
+			1.0,
+			width / (st::historyMapPoint.height() * 2.5),
+			height / (st::historyMapPoint.height() * 2.5),
+		});
+		const auto center = QPointF(width / 2.0, height / 2.0);
+		p.translate(center);
+		p.scale(pinScale, pinScale);
+		p.translate(-center);
+		const auto paintMarker = [&](const style::icon &icon) {
+			icon.paint(
+				p,
+				(width - icon.width()) / 2,
+				(height / 2) - icon.height(),
+				markerSize);
+		};
+		paintMarker(st::historyMapPoint);
+		paintMarker(st::historyMapPointInner);
+		return _prepared;
+	}
+
+	void subscribeToUpdates(Fn<void()> callback) override {
+		_subscription.destroy();
+		if (!callback) {
+			_view = nullptr;
+			_prepared = QImage();
+			return;
+		}
+		_view = _data->createView();
+		_data->load(_session, _origin);
+		if (!_view->isNull()) {
+			return;
+		}
+		_subscription = _session->downloaderTaskFinished(
+		) | rpl::filter([=] {
+			return !_view->isNull();
+		}) | rpl::take(1) | rpl::on_next([=] {
+			_prepared = QImage();
+			callback();
+		});
+	}
+
+private:
+	const not_null<::Data::CloudImage*> _data;
+	const not_null<Main::Session*> _session;
+	const ::Data::FileOrigin _origin;
+	std::shared_ptr<QImage> _view;
+	QImage _prepared;
+	int _paletteVersion = 0;
+	rpl::lifetime _subscription;
+
+};
+
+class CachedPageMapRuntime final : public Markdown::MapRuntime {
+public:
+	CachedPageMapRuntime(
+		not_null<Main::Session*> session,
+		::Data::FileOrigin origin,
+		double latitude,
+		double longitude,
+		uint64 accessHash,
+		QSize size,
+		int zoom)
+	: _session(session)
+	, _origin(std::move(origin))
+	, _image(session, CachedPageMapImageData(
+		latitude,
+		longitude,
+		accessHash,
+		size,
+		zoom)) {
+	}
+
+	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> thumbnail(
+			QSize size) const override {
+		Q_UNUSED(size);
+		ensureLoaded();
+		return std::make_shared<CachedPageMapDynamicImage>(
+			&_image,
+			_session,
+			_origin);
+	}
+
+	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> full(
+			QSize size) const override {
+		Q_UNUSED(size);
+		ensureLoaded();
+		return std::make_shared<CachedPageMapDynamicImage>(
+			&_image,
+			_session,
+			_origin);
+	}
+
+	[[nodiscard]] bool loaded() const override {
+		ensureLoaded();
+		return _image.loadedOnce();
+	}
+
+	[[nodiscard]] bool loading() const override {
+		ensureLoaded();
+		return _image.loading();
+	}
+
+	[[nodiscard]] double progress() const override {
+		ensureLoaded();
+		return _image.loadedOnce() ? 1. : 0.;
+	}
+
+private:
+	void ensureLoaded() const {
+		_image.load(_session, _origin);
+	}
+
+	const not_null<Main::Session*> _session;
+	const ::Data::FileOrigin _origin;
+	mutable ::Data::CloudImage _image;
+
+};
+
+class CachedPageChannelRuntime final : public Markdown::ChannelRuntime {
+public:
+	CachedPageChannelRuntime(
+		not_null<ChannelData*> channel,
+		QString context,
+		Fn<void(QString)> openChannel,
+		Fn<void(QString)> joinChannel)
+	: _channel(channel)
+	, _context(std::move(context))
+	, _openChannel(std::move(openChannel))
+	, _joinChannel(std::move(joinChannel)) {
+	}
+
+	[[nodiscard]] bool joinVisible() const override {
+		return !_channel->amIn();
+	}
+
+	void open(Qt::MouseButton button) const override {
+		if ((button == Qt::LeftButton || button == Qt::MiddleButton)
+			&& _openChannel) {
+			_openChannel(_context);
+		}
+	}
+
+	void join(Qt::MouseButton button) const override {
+		if ((button == Qt::LeftButton || button == Qt::MiddleButton)
+			&& _joinChannel) {
+			_joinChannel(_context);
+		}
+	}
+
+private:
+	const not_null<ChannelData*> _channel;
+	const QString _context;
+	const Fn<void(QString)> _openChannel;
+	const Fn<void(QString)> _joinChannel;
+
+};
+
 class CachedPageMediaRuntime final : public Markdown::MediaRuntime {
 public:
 	CachedPageMediaRuntime(
 		not_null<Main::Session*> session,
-		not_null<WebPageData*> page)
+		not_null<WebPageData*> page,
+		Fn<void(QString)> openChannel,
+		Fn<void(QString)> joinChannel)
 	: _session(session)
-	, _page(page) {
+	, _page(page)
+	, _openChannel(std::move(openChannel))
+	, _joinChannel(std::move(joinChannel)) {
 	}
 
 	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> resolveInlineImage(
@@ -274,13 +595,73 @@ public:
 			fileOrigin());
 	}
 
+	[[nodiscard]] std::shared_ptr<Markdown::DocumentRuntime> resolveDocument(
+			uint64 documentId) const override {
+		const auto document = _session->data().document(DocumentId(documentId));
+		if (document->isNull()) {
+			return nullptr;
+		}
+		return std::make_shared<CachedPageDocumentRuntime>(
+			_session,
+			document,
+			fileOrigin());
+	}
+
+	[[nodiscard]] std::shared_ptr<Markdown::MapRuntime> resolveMap(
+			double latitude,
+			double longitude,
+			uint64 accessHash,
+			QSize size,
+			int zoom) const override {
+		return std::make_shared<CachedPageMapRuntime>(
+			_session,
+			fileOrigin(),
+			latitude,
+			longitude,
+			accessHash,
+			size,
+			zoom);
+	}
+
+	[[nodiscard]] std::shared_ptr<Markdown::ChannelRuntime> resolveChannel(
+			uint64 channelId,
+			const QString &username) const override {
+		const auto channel = _session->data().channel(ChannelId(channelId));
+		subscribeToChannel(channelId, channel);
+		return std::make_shared<CachedPageChannelRuntime>(
+			channel,
+			SerializeNativeIvChannelContext(channelId, username),
+			_openChannel,
+			_joinChannel);
+	}
+
+	[[nodiscard]] rpl::producer<uint64> channelJoinedChanges() const override {
+		return _channelJoinedChanges.events();
+	}
+
 private:
+	void subscribeToChannel(
+			uint64 channelId,
+			not_null<ChannelData*> channel) const {
+		if (_channelJoinedSubscriptions.find(channelId)
+			!= end(_channelJoinedSubscriptions)) {
+			return;
+		}
+		Info::Profile::AmInChannelValue(channel) | rpl::on_next([=](bool) {
+			_channelJoinedChanges.fire_copy(channelId);
+		}, _channelJoinedSubscriptions[channelId]);
+	}
+
 	[[nodiscard]] ::Data::FileOrigin fileOrigin() const {
 		return ::Data::FileOriginWebPage{ _page->url };
 	}
 
 	const not_null<Main::Session*> _session;
 	const not_null<WebPageData*> _page;
+	const Fn<void(QString)> _openChannel;
+	const Fn<void(QString)> _joinChannel;
+	mutable base::flat_map<uint64, rpl::lifetime> _channelJoinedSubscriptions;
+	mutable rpl::event_stream<uint64> _channelJoinedChanges;
 
 };
 
@@ -405,7 +786,9 @@ public:
 		not_null<Delegate*> delegate,
 		not_null<Main::Session*> session,
 		not_null<Data*> data,
-		QString hash);
+		QString hash,
+		Fn<void(QString)> openChannel,
+		Fn<void(QString)> joinChannel);
 
 	[[nodiscard]] bool showing(
 		not_null<Main::Session*> session,
@@ -506,6 +889,8 @@ private:
 
 	const not_null<Delegate*> _delegate;
 	const not_null<Main::Session*> _session;
+	const Fn<void(QString)> _openChannel;
+	const Fn<void(QString)> _joinChannel;
 	std::shared_ptr<Main::SessionShow> _show;
 	QString _id;
 	std::unique_ptr<Controller> _controller;
@@ -568,9 +953,13 @@ Shown::Shown(
 	not_null<Delegate*> delegate,
 	not_null<Main::Session*> session,
 	not_null<Data*> data,
-	QString hash)
+	QString hash,
+	Fn<void(QString)> openChannel,
+	Fn<void(QString)> joinChannel)
 : _delegate(delegate)
-, _session(session) {
+, _session(session)
+, _openChannel(std::move(openChannel))
+, _joinChannel(std::move(joinChannel)) {
 	prepare(data, hash);
 }
 
@@ -877,7 +1266,11 @@ void Shown::showMarkdownWindowed(
 
 std::shared_ptr<Markdown::MediaRuntime> Shown::createMediaRuntime(
 		not_null<WebPageData*> page) const {
-	return std::make_shared<CachedPageMediaRuntime>(_session, page);
+	return std::make_shared<CachedPageMediaRuntime>(
+		_session,
+		page,
+		_openChannel,
+		_joinChannel);
 }
 
 bool Shown::activateMarkdownMedia(
@@ -901,6 +1294,24 @@ bool Shown::activateMarkdownMedia(
 			return false;
 		}
 		activation.photo->open(button);
+		return true;
+	case Markdown::MediaActivationKind::Document:
+		if (!activation.document) {
+			return false;
+		}
+		activation.document->open(button);
+		return true;
+	case Markdown::MediaActivationKind::OpenChannel:
+		if (!activation.channel) {
+			return false;
+		}
+		activation.channel->open(button);
+		return true;
+	case Markdown::MediaActivationKind::JoinChannel:
+		if (!activation.channel) {
+			return false;
+		}
+		activation.channel->join(button);
 		return true;
 	}
 	return false;
@@ -1261,6 +1672,8 @@ void Shown::update(not_null<Data*> data) {
 void Shown::showJoinedTooltip() {
 	if (_controller) {
 		_controller->showJoinedTooltip();
+	} else if (_markdownController) {
+		_markdownController->showJoinedTooltip();
 	}
 }
 
@@ -1353,7 +1766,17 @@ void Instance::show(
 		_shown->moveTo(data, hash);
 		return;
 	}
-	_shown = std::make_unique<Shown>(_delegate, session, data, hash);
+	_shown = std::make_unique<Shown>(
+		_delegate,
+		session,
+		data,
+		hash,
+		[=](QString context) {
+			processOpenChannel(context);
+		},
+		[=](QString context) {
+			processJoinChannel(context);
+		});
 	_shownSession = session;
 	_shown->events() | rpl::on_next([=](Controller::Event event) {
 		using Type = Controller::Event::Type;
@@ -1730,17 +2153,21 @@ WebPageData *Instance::processReceivedPage(
 void Instance::processOpenChannel(const QString &context) {
 	if (!_shownSession) {
 		return;
-	} else if (const auto channelId = ChannelId(context.toLongLong())) {
+	}
+	const auto parsed = ParseNativeIvChannelContext(context);
+	if (const auto channelId = ChannelId(parsed.channelId)) {
 		const auto channel = _shownSession->data().channel(channelId);
 		if (channel->isLoaded()) {
 			if (const auto controller = _shownSession->tryResolveWindow(channel)) {
 				controller->showPeerHistory(channel);
 				_shown = nullptr;
 			}
-		} else if (!channel->username().isEmpty()) {
+		} else if (const auto username = ResolveNativeIvChannelUsername(
+				channel->username(),
+				parsed.username); !username.isEmpty()) {
 			if (const auto controller = _shownSession->tryResolveWindow(channel)) {
 				controller->showPeerByLink({
-					.usernameOrId = channel->username(),
+					.usernameOrId = username,
 				});
 				_shown = nullptr;
 			}
@@ -1751,15 +2178,19 @@ void Instance::processOpenChannel(const QString &context) {
 void Instance::processJoinChannel(const QString &context) {
 	if (!_shownSession) {
 		return;
-	} else if (const auto channelId = ChannelId(context.toLongLong())) {
+	}
+	const auto parsed = ParseNativeIvChannelContext(context);
+	if (const auto channelId = ChannelId(parsed.channelId)) {
 		const auto channel = _shownSession->data().channel(channelId);
 		_joining[_shownSession].emplace(channel);
 		if (channel->isLoaded()) {
 			_shownSession->api().joinChannel(channel);
-		} else if (!channel->username().isEmpty()) {
+		} else if (const auto username = ResolveNativeIvChannelUsername(
+				channel->username(),
+				parsed.username); !username.isEmpty()) {
 			if (const auto controller = _shownSession->tryResolveWindow(channel)) {
 				controller->showPeerByLink({
-					.usernameOrId = channel->username(),
+					.usernameOrId = username,
 					.joinChannel = true,
 				});
 			}

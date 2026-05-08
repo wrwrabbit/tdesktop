@@ -36,6 +36,11 @@ enum class PreparedBlockKind {
 	Table,
 	Details,
 	Photo,
+	Video,
+	Audio,
+	Map,
+	Channel,
+	GroupedMedia,
 	Placeholder,
 };
 
@@ -103,6 +108,54 @@ struct PreparedPhotoBlockData {
 	bool viewerOpen = false;
 };
 
+enum class PreparedMediaItemKind {
+	Photo,
+	Document,
+};
+
+struct PreparedMediaItemData {
+	PreparedMediaItemKind kind = PreparedMediaItemKind::Photo;
+	uint64 id = 0;
+	int width = 0;
+	int height = 0;
+};
+
+struct PreparedVideoBlockData {
+	PreparedMediaItemData media;
+};
+
+struct PreparedAudioBlockData {
+	uint64 documentId = 0;
+	QString title;
+	QString performer;
+	QString fileName;
+	int duration = 0;
+};
+
+struct PreparedMapBlockData {
+	double latitude = 0.;
+	double longitude = 0.;
+	uint64 accessHash = 0;
+	int width = 0;
+	int height = 0;
+	int zoom = 0;
+	QString url;
+};
+
+struct PreparedChannelBlockData {
+	uint64 channelId = 0;
+	QString title;
+	QString username;
+};
+
+struct PreparedGroupedMediaItemData {
+	PreparedMediaItemData media;
+};
+
+struct PreparedGroupedMediaBlockData {
+	std::vector<PreparedGroupedMediaItemData> items;
+};
+
 struct PreparedPlaceholderBlockData {
 	QString label;
 	QString copyText;
@@ -119,6 +172,11 @@ struct PreparedBlock {
 	QString formulaTex;
 	QString anchorId;
 	PreparedPhotoBlockData photo;
+	PreparedVideoBlockData video;
+	PreparedAudioBlockData audio;
+	PreparedMapBlockData map;
+	PreparedChannelBlockData channel;
+	PreparedGroupedMediaBlockData groupedMedia;
 	PreparedPlaceholderBlockData placeholder;
 	ListKind listKind = ListKind::Bullet;
 	ListDelimiter listDelimiter = ListDelimiter::None;

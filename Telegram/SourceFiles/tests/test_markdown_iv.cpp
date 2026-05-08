@@ -5,11 +5,13 @@
 #include "iv/markdown/iv_markdown_microtex.h"
 #include "iv/markdown/iv_markdown_parse.h"
 #include "iv/markdown/iv_markdown_prepare.h"
+#include "iv/markdown/iv_markdown_prepare_serialize.h"
 #include "iv/markdown/iv_markdown_view.h"
 #include "iv/markdown/iv_markdown_view_widget.h"
 #include "iv/iv_prepare.h"
 #include "scheme.h"
 
+#include "lang/lang_keys.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 #include "ui/basic_click_handlers.h"
 #include "ui/chat/chat_style.h"
@@ -25,6 +27,7 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QEvent>
 #include <QtCore/QEventLoop>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -35,6 +38,7 @@
 #include <QtGui/QImage>
 #include <QtWidgets/QApplication>
 
+#include <rpl/event_stream.h>
 #include <rpl/never.h>
 
 #include <algorithm>
@@ -48,6 +52,38 @@
 namespace {
 
 using namespace Iv::Markdown;
+
+struct TestNativeIvChannelContext {
+	uint64 channelId = 0;
+	QString username;
+};
+
+[[nodiscard]] TestNativeIvChannelContext ParseTestNativeIvChannelContext(
+		const QString &context) {
+	const auto separator = context.indexOf(u'\n');
+	return {
+		.channelId = (separator >= 0)
+			? context.mid(0, separator).toULongLong()
+			: context.toULongLong(),
+		.username = (separator >= 0) ? context.mid(separator + 1) : QString(),
+	};
+}
+
+[[nodiscard]] QString SerializeTestNativeIvChannelContext(
+		uint64 channelId,
+		QString username) {
+	auto result = QString::number(channelId);
+	if (!username.isEmpty()) {
+		result += u"\n"_q + username;
+	}
+	return result;
+}
+
+[[nodiscard]] QString ResolveTestNativeIvChannelUsername(
+		const QString &channelUsername,
+		const QString &contextUsername) {
+	return !channelUsername.isEmpty() ? channelUsername : contextUsername;
+}
 
 struct Args {
 	QString markdownPath;
@@ -143,27 +179,293 @@ public:
 	mutable std::vector<Qt::MouseButton> openedButtons;
 };
 
+class TestDocumentRuntime final : public DocumentRuntime {
+public:
+	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> thumbnail(
+			QSize size) const override {
+		thumbnailSizes.push_back(size);
+		return thumbnailImage;
+	}
+
+	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> full(
+			QSize size) const override {
+		fullSizes.push_back(size);
+		return fullImage;
+	}
+
+	[[nodiscard]] bool loaded() const override {
+		return loadedValue;
+	}
+
+	[[nodiscard]] bool loading() const override {
+		return loadingValue;
+	}
+
+	[[nodiscard]] double progress() const override {
+		return progressValue;
+	}
+
+	void open(Qt::MouseButton button) const override {
+		openedButtons.push_back(button);
+	}
+
+	std::shared_ptr<TestDynamicImage> thumbnailImage;
+	std::shared_ptr<TestDynamicImage> fullImage;
+	bool loadedValue = false;
+	bool loadingValue = false;
+	double progressValue = 0.;
+	mutable std::vector<QSize> thumbnailSizes;
+	mutable std::vector<QSize> fullSizes;
+	mutable std::vector<Qt::MouseButton> openedButtons;
+};
+
+class TestMapRuntime final : public MapRuntime {
+public:
+	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> thumbnail(
+			QSize size) const override {
+		thumbnailSizes.push_back(size);
+		return thumbnailImage;
+	}
+
+	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> full(
+			QSize size) const override {
+		fullSizes.push_back(size);
+		return fullImage;
+	}
+
+	[[nodiscard]] bool loaded() const override {
+		return loadedValue;
+	}
+
+	[[nodiscard]] bool loading() const override {
+		return loadingValue;
+	}
+
+	[[nodiscard]] double progress() const override {
+		return progressValue;
+	}
+
+	std::shared_ptr<TestDynamicImage> thumbnailImage;
+	std::shared_ptr<TestDynamicImage> fullImage;
+	bool loadedValue = false;
+	bool loadingValue = false;
+	double progressValue = 0.;
+	mutable std::vector<QSize> thumbnailSizes;
+	mutable std::vector<QSize> fullSizes;
+};
+
+class TestChannelRuntime final : public ChannelRuntime {
+public:
+	[[nodiscard]] bool joinVisible() const override {
+		return joinVisibleValue;
+	}
+
+	void open(Qt::MouseButton button) const override {
+		openedButtons.push_back(button);
+	}
+
+	void join(Qt::MouseButton button) const override {
+		joinedButtons.push_back(button);
+	}
+
+	bool joinVisibleValue = true;
+	mutable std::vector<Qt::MouseButton> openedButtons;
+	mutable std::vector<Qt::MouseButton> joinedButtons;
+};
+
 class TestMediaRuntime final : public MediaRuntime {
 public:
+	struct InlineBinding {
+		uint64 documentId = 0;
+		std::shared_ptr<TestDynamicImage> image;
+	};
+
+	struct PhotoBinding {
+		uint64 photoId = 0;
+		std::shared_ptr<TestPhotoRuntime> runtime;
+	};
+
+	struct DocumentBinding {
+		uint64 documentId = 0;
+		std::shared_ptr<TestDocumentRuntime> runtime;
+	};
+
+	struct MapBinding {
+		double latitude = 0.;
+		double longitude = 0.;
+		uint64 accessHash = 0;
+		int zoom = 0;
+		std::shared_ptr<TestMapRuntime> runtime;
+	};
+
+	struct ChannelBinding {
+		uint64 channelId = 0;
+		QString username;
+		std::shared_ptr<TestChannelRuntime> runtime;
+	};
+
+	struct MapRequest {
+		double latitude = 0.;
+		double longitude = 0.;
+		uint64 accessHash = 0;
+		QSize size;
+		int zoom = 0;
+	};
+
+	struct ChannelRequest {
+		uint64 channelId = 0;
+		QString username;
+	};
+
 	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> resolveInlineImage(
 			uint64 documentId,
 			QSize size) const override {
 		inlineRequests.push_back({ documentId, size });
-		return (documentId == inlineDocumentId) ? inlineImage : nullptr;
+		const auto i = std::find_if(
+			inlineBindings.begin(),
+			inlineBindings.end(),
+			[=](const InlineBinding &binding) {
+				return binding.documentId == documentId;
+			});
+		return (i != inlineBindings.end()) ? i->image : nullptr;
 	}
 
 	[[nodiscard]] std::shared_ptr<PhotoRuntime> resolvePhoto(
 			uint64 photoId) const override {
 		photoRequests.push_back(photoId);
-		return (photoId == preparedPhotoId) ? photoRuntime : nullptr;
+		const auto i = std::find_if(
+			photoBindings.begin(),
+			photoBindings.end(),
+			[=](const PhotoBinding &binding) {
+				return binding.photoId == photoId;
+			});
+		return (i != photoBindings.end()) ? i->runtime : nullptr;
 	}
 
-	uint64 inlineDocumentId = 0;
-	uint64 preparedPhotoId = 0;
-	std::shared_ptr<TestDynamicImage> inlineImage;
-	std::shared_ptr<TestPhotoRuntime> photoRuntime;
+	[[nodiscard]] std::shared_ptr<DocumentRuntime> resolveDocument(
+			uint64 documentId) const override {
+		documentRequests.push_back(documentId);
+		const auto i = std::find_if(
+			documentBindings.begin(),
+			documentBindings.end(),
+			[=](const DocumentBinding &binding) {
+				return binding.documentId == documentId;
+			});
+		return (i != documentBindings.end()) ? i->runtime : nullptr;
+	}
+
+	[[nodiscard]] std::shared_ptr<MapRuntime> resolveMap(
+			double latitude,
+			double longitude,
+			uint64 accessHash,
+			QSize size,
+			int zoom) const override {
+		mapRequests.push_back({
+			.latitude = latitude,
+			.longitude = longitude,
+			.accessHash = accessHash,
+			.size = size,
+			.zoom = zoom,
+		});
+		const auto i = std::find_if(
+			mapBindings.begin(),
+			mapBindings.end(),
+			[=](const MapBinding &binding) {
+				return binding.latitude == latitude
+					&& binding.longitude == longitude
+					&& binding.accessHash == accessHash
+					&& binding.zoom == zoom;
+			});
+		return (i != mapBindings.end()) ? i->runtime : nullptr;
+	}
+
+	[[nodiscard]] std::shared_ptr<ChannelRuntime> resolveChannel(
+			uint64 channelId,
+			const QString &username) const override {
+		channelRequests.push_back({
+			.channelId = channelId,
+			.username = username,
+		});
+		const auto i = std::find_if(
+			channelBindings.begin(),
+			channelBindings.end(),
+			[=](const ChannelBinding &binding) {
+				return binding.channelId == channelId
+					&& binding.username == username;
+			});
+		return (i != channelBindings.end()) ? i->runtime : nullptr;
+	}
+
+	[[nodiscard]] rpl::producer<uint64> channelJoinedChanges() const override {
+		return _channelJoinedChanges.events();
+	}
+
+	void addInlineImage(uint64 documentId, std::shared_ptr<TestDynamicImage> image) {
+		inlineBindings.push_back({
+			.documentId = documentId,
+			.image = std::move(image),
+		});
+	}
+
+	void addPhotoRuntime(uint64 photoId, std::shared_ptr<TestPhotoRuntime> runtime) {
+		photoBindings.push_back({
+			.photoId = photoId,
+			.runtime = std::move(runtime),
+		});
+	}
+
+	void addDocumentRuntime(
+			uint64 documentId,
+			std::shared_ptr<TestDocumentRuntime> runtime) {
+		documentBindings.push_back({
+			.documentId = documentId,
+			.runtime = std::move(runtime),
+		});
+	}
+
+	void addMapRuntime(
+			double latitude,
+			double longitude,
+			uint64 accessHash,
+			int zoom,
+			std::shared_ptr<TestMapRuntime> runtime) {
+		mapBindings.push_back({
+			.latitude = latitude,
+			.longitude = longitude,
+			.accessHash = accessHash,
+			.zoom = zoom,
+			.runtime = std::move(runtime),
+		});
+	}
+
+	void addChannelRuntime(
+			uint64 channelId,
+			QString username,
+			std::shared_ptr<TestChannelRuntime> runtime) {
+		channelBindings.push_back({
+			.channelId = channelId,
+			.username = std::move(username),
+			.runtime = std::move(runtime),
+		});
+	}
+
+	void fireChannelJoinedChange(uint64 channelId) const {
+		_channelJoinedChanges.fire_copy(channelId);
+	}
+
+	std::vector<InlineBinding> inlineBindings;
+	std::vector<PhotoBinding> photoBindings;
+	std::vector<DocumentBinding> documentBindings;
+	std::vector<MapBinding> mapBindings;
+	std::vector<ChannelBinding> channelBindings;
 	mutable std::vector<std::pair<uint64, QSize>> inlineRequests;
 	mutable std::vector<uint64> photoRequests;
+	mutable std::vector<uint64> documentRequests;
+	mutable std::vector<MapRequest> mapRequests;
+	mutable std::vector<ChannelRequest> channelRequests;
+
+private:
+	mutable rpl::event_stream<uint64> _channelJoinedChanges;
 };
 
 enum class NativeIvPlaceholderKind {
@@ -181,6 +483,14 @@ struct NativeIvPlaceholderFixture {
 	QString caption;
 	QString expectedLabel;
 	MTPPageBlock block;
+};
+
+struct NativeIvMediaFixture {
+	QString label;
+	QString caption;
+	MTPPageBlock block;
+	QVector<MTPPhoto> photos;
+	QVector<MTPDocument> documents;
 };
 
 [[nodiscard]] QImage SolidTestImage(
@@ -278,6 +588,230 @@ struct NativeIvPlaceholderFixture {
 		std::move(caption),
 		std::move(credit),
 		std::move(urlOverride)));
+}
+
+[[nodiscard]] MTPDocument NativeIvDocument(
+		uint64 id,
+		QString mimeType,
+		QVector<MTPDocumentAttribute> attributes) {
+	return MTP_document(
+		MTP_flags(0),
+		MTP_long(id),
+		MTP_long(id + 1000),
+		MTP_bytes(),
+		MTP_int(0),
+		MTP_string(mimeType),
+		MTP_long(0),
+		MTPVector<MTPPhotoSize>(),
+		MTPVector<MTPVideoSize>(),
+		MTP_int(0),
+		MTP_vector<MTPDocumentAttribute>(std::move(attributes)));
+}
+
+[[nodiscard]] MTPDocument NativeIvVideoDocument(
+		uint64 id,
+		int width,
+		int height,
+		QString fileName = u"video.mp4"_q,
+		double duration = 0.) {
+	const auto flags = MTPDdocumentAttributeVideo::Flags(
+		MTPDdocumentAttributeVideo::Flag::f_supports_streaming);
+	auto attributes = QVector<MTPDocumentAttribute>();
+	attributes.push_back(MTP_documentAttributeFilename(MTP_string(fileName)));
+	attributes.push_back(MTP_documentAttributeVideo(
+		MTP_flags(flags),
+		MTP_double(duration),
+		MTP_int(width),
+		MTP_int(height),
+		MTPint(),
+		MTPdouble(),
+		MTPstring()));
+	return NativeIvDocument(id, u"video/mp4"_q, std::move(attributes));
+}
+
+[[nodiscard]] MTPDocument NativeIvImageDocument(
+		uint64 id,
+		int width,
+		int height,
+		QString fileName = u"image.jpg"_q) {
+	auto attributes = QVector<MTPDocumentAttribute>();
+	attributes.push_back(MTP_documentAttributeFilename(MTP_string(fileName)));
+	attributes.push_back(MTP_documentAttributeImageSize(
+		MTP_int(width),
+		MTP_int(height)));
+	return NativeIvDocument(id, u"image/jpeg"_q, std::move(attributes));
+}
+
+[[nodiscard]] MTPDocument NativeIvAudioDocument(
+		uint64 id,
+		QString title,
+		QString performer,
+		QString fileName,
+		int duration) {
+	auto flags = MTPDdocumentAttributeAudio::Flags(0);
+	if (!title.isEmpty()) {
+		flags |= MTPDdocumentAttributeAudio::Flag::f_title;
+	}
+	if (!performer.isEmpty()) {
+		flags |= MTPDdocumentAttributeAudio::Flag::f_performer;
+	}
+	auto attributes = QVector<MTPDocumentAttribute>();
+	attributes.push_back(MTP_documentAttributeFilename(MTP_string(fileName)));
+	attributes.push_back(MTP_documentAttributeAudio(
+		MTP_flags(flags),
+		MTP_int(duration),
+		MTP_string(title),
+		MTP_string(performer),
+		MTPbytes()));
+	return NativeIvDocument(id, u"audio/mpeg"_q, std::move(attributes));
+}
+
+[[nodiscard]] MTPGeoPoint NativeIvGeoPoint(
+		double latitude,
+		double longitude,
+		uint64 accessHash) {
+	return MTP_geoPoint(
+		MTP_flags(0),
+		MTP_double(longitude),
+		MTP_double(latitude),
+		MTP_long(accessHash),
+		MTPint());
+}
+
+[[nodiscard]] MTPChat NativeIvChannelChat(
+		uint64 id,
+		QString title,
+		QString username = QString(),
+		uint64 accessHash = 0x12345678ULL) {
+	auto flags = MTPDchannel::Flags(
+		MTPDchannel::Flag::f_broadcast
+		| MTPDchannel::Flag::f_access_hash);
+	if (!username.isEmpty()) {
+		flags |= MTPDchannel::Flag::f_username;
+	}
+	return MTP_channel(
+		MTP_flags(flags),
+		MTP_long(id),
+		MTP_long(accessHash),
+		MTP_string(title),
+		MTP_string(username),
+		MTP_chatPhotoEmpty(),
+		MTP_int(0),
+		MTPVector<MTPRestrictionReason>(),
+		MTPChatAdminRights(),
+		MTPChatBannedRights(),
+		MTPChatBannedRights(),
+		MTPint(),
+		MTPVector<MTPUsername>(),
+		MTPrecentStory(),
+		MTPPeerColor(),
+		MTPPeerColor(),
+		MTPEmojiStatus(),
+		MTPint(),
+		MTPint(),
+		MTPlong(),
+		MTPlong(),
+		MTPlong());
+}
+
+[[nodiscard]] NativeIvMediaFixture NativeIvVideoFixture() {
+	return {
+		.label = u"Video"_q,
+		.caption = u"Video caption"_q,
+		.block = MTP_pageBlockVideo(
+			MTP_flags(0),
+			MTP_long(7001),
+			NativeIvCaption(u"Video caption"_q)),
+		.documents = {
+			NativeIvVideoDocument(7001, 1280, 720, u"video.mp4"_q, 42.),
+		},
+	};
+}
+
+[[nodiscard]] NativeIvMediaFixture NativeIvAudioFixture() {
+	return {
+		.label = u"Audio"_q,
+		.caption = u"Audio caption"_q,
+		.block = MTP_pageBlockAudio(
+			MTP_long(7002),
+			NativeIvCaption(u"Audio caption"_q)),
+		.documents = {
+			NativeIvAudioDocument(
+				7002,
+				u"Song Title"_q,
+				u"Sample Artist"_q,
+				u"track.mp3"_q,
+				215),
+		},
+	};
+}
+
+[[nodiscard]] NativeIvMediaFixture NativeIvMapFixture() {
+	return {
+		.label = u"Map"_q,
+		.caption = u"Map caption"_q,
+		.block = MTP_pageBlockMap(
+			NativeIvGeoPoint(51.5007, -0.1246, 880088),
+			MTP_int(13),
+			MTP_int(320),
+			MTP_int(180),
+			NativeIvCaption(u"Map caption"_q)),
+	};
+}
+
+[[nodiscard]] NativeIvMediaFixture NativeIvChannelFixture() {
+	return {
+		.label = u"Channel"_q,
+		.block = MTP_pageBlockChannel(NativeIvChannelChat(
+			7006,
+			u"Native IV Channel"_q,
+			u"nativeiv"_q)),
+	};
+}
+
+[[nodiscard]] NativeIvMediaFixture NativeIvCollageFixture() {
+	auto items = QVector<MTPPageBlock>();
+	items.push_back(NativeIvPhotoBlock(9102));
+	items.push_back(MTP_pageBlockVideo(
+		MTP_flags(0),
+		MTP_long(7003),
+		NativeIvCaption()));
+	return {
+		.label = u"Collage"_q,
+		.caption = u"Collage caption"_q,
+		.block = MTP_pageBlockCollage(
+			MTP_vector<MTPPageBlock>(std::move(items)),
+			NativeIvCaption(u"Collage caption"_q)),
+		.photos = {
+			NativeIvPhoto(9102, 400, 300),
+		},
+		.documents = {
+			NativeIvVideoDocument(7003, 640, 360, u"collage.mp4"_q, 13.),
+		},
+	};
+}
+
+[[nodiscard]] NativeIvMediaFixture NativeIvSlideshowFixture() {
+	auto items = QVector<MTPPageBlock>();
+	items.push_back(MTP_pageBlockVideo(
+		MTP_flags(0),
+		MTP_long(7004),
+		NativeIvCaption()));
+	items.push_back(MTP_pageBlockVideo(
+		MTP_flags(0),
+		MTP_long(7005),
+		NativeIvCaption()));
+	return {
+		.label = u"Slideshow"_q,
+		.caption = u"Slideshow caption"_q,
+		.block = MTP_pageBlockSlideshow(
+			MTP_vector<MTPPageBlock>(std::move(items)),
+			NativeIvCaption(u"Slideshow caption"_q)),
+		.documents = {
+			NativeIvVideoDocument(7004, 960, 540, u"slide-a.mp4"_q, 11.),
+			NativeIvVideoDocument(7005, 854, 480, u"slide-b.mp4"_q, 9.),
+		},
+	};
 }
 
 [[nodiscard]] QString NativeIvPlaceholderLabel(NativeIvPlaceholderKind kind) {
@@ -1285,6 +1819,18 @@ void PrintPrepareSummary(
 	return image;
 }
 
+[[nodiscard]] QImage RenderWidgetForTest(QWidget *widget) {
+	if (!widget || widget->size().isEmpty()) {
+		return QImage();
+	}
+	auto image = QImage(
+		widget->size(),
+		QImage::Format_ARGB32_Premultiplied);
+	image.fill(Qt::transparent);
+	widget->render(&image);
+	return image;
+}
+
 class MarkdownArticleHighlightWaiter final {
 public:
 	explicit MarkdownArticleHighlightWaiter(MarkdownArticle *article)
@@ -1332,6 +1878,28 @@ void FlushPendingWidgetEvents() {
 		QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
 	}
 }
+
+class WidgetEventCounter final : public QObject {
+public:
+	void reset() {
+		paintCount = 0;
+		updateRequestCount = 0;
+	}
+
+	int paintCount = 0;
+	int updateRequestCount = 0;
+
+protected:
+	bool eventFilter(QObject *object, QEvent *event) override {
+		Q_UNUSED(object);
+		if (event->type() == QEvent::Paint) {
+			++paintCount;
+		} else if (event->type() == QEvent::UpdateRequest) {
+			++updateRequestCount;
+		}
+		return false;
+	}
+};
 
 template <typename Object>
 [[nodiscard]] Object *FindChildObject(QObject *root) {
@@ -1559,6 +2127,37 @@ template <typename Object>
 			if (!hit.valid()
 				|| !hit.direct
 				|| (hit.segmentIndex != expectedSegmentIndex)) {
+				continue;
+			}
+			left = std::min(left, x);
+			top = std::min(top, y);
+			right = std::max(right, x);
+			bottom = std::max(bottom, y);
+		}
+	}
+	return (right >= left) && (bottom >= top)
+		? std::make_optional(QRect(QPoint(left, top), QPoint(right, bottom)))
+		: std::nullopt;
+}
+
+template <typename Predicate>
+[[nodiscard]] std::optional<QRect> HitBoundsWhere(
+		MarkdownArticle *article,
+		int width,
+		int height,
+		Ui::Text::StateRequest::Flags flags,
+		Predicate &&predicate) {
+	if (!article || (width <= 0) || (height <= 0)) {
+		return std::nullopt;
+	}
+	auto left = width;
+	auto top = height;
+	auto right = -1;
+	auto bottom = -1;
+	for (auto y = 0; y != height; ++y) {
+		for (auto x = 0; x != width; ++x) {
+			const auto hit = article->hitTest(QPoint(x, y), flags);
+			if (!hit.valid() || !hit.direct || !predicate(hit)) {
 				continue;
 			}
 			left = std::min(left, x);
@@ -2371,15 +2970,9 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 			.replacementText = u"[inline image]"_q,
 		},
 	});
-	Check(
-		!serialized.isEmpty(),
-		entityLabel + u" serialize"_q,
-		ok);
+	Check(!serialized.isEmpty(), entityLabel + u" serialize"_q, ok);
 	const auto parsedEntity = ParseInlineTextObjectEntity(serialized);
-	Check(
-		parsedEntity.has_value(),
-		entityLabel + u" parse"_q,
-		ok);
+	Check(parsedEntity.has_value(), entityLabel + u" parse"_q, ok);
 	if (parsedEntity) {
 		Check(
 			parsedEntity->kind == InlineTextObjectKind::IvImage,
@@ -2404,6 +2997,13 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 		}
 	}
 
+	const auto videoFixture = NativeIvVideoFixture();
+	const auto audioFixture = NativeIvAudioFixture();
+	const auto mapFixture = NativeIvMapFixture();
+	const auto channelFixture = NativeIvChannelFixture();
+	const auto collageFixture = NativeIvCollageFixture();
+	const auto slideshowFixture = NativeIvSlideshowFixture();
+
 	auto placeholderFixtures = std::vector<NativeIvPlaceholderFixture>();
 	const auto addPlaceholder = [&](
 			NativeIvPlaceholderKind kind,
@@ -2415,15 +3015,8 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 			.block = NativeIvPlaceholderBlock(kind, caption),
 		});
 	};
-	addPlaceholder(NativeIvPlaceholderKind::Video, u"Video caption"_q);
 	addPlaceholder(NativeIvPlaceholderKind::Embed, u"Embed caption"_q);
 	addPlaceholder(NativeIvPlaceholderKind::EmbedPost, u"Embed post caption"_q);
-	addPlaceholder(NativeIvPlaceholderKind::Collage, u"Collage caption"_q);
-	addPlaceholder(
-		NativeIvPlaceholderKind::Slideshow,
-		u"Grouped caption"_q);
-	addPlaceholder(NativeIvPlaceholderKind::Audio, u"Audio caption"_q);
-	addPlaceholder(NativeIvPlaceholderKind::Map, u"Map caption"_q);
 
 	auto supportedBlocks = QVector<MTPPageBlock>();
 	supportedBlocks.push_back(NativeIvInlineImageParagraph(
@@ -2437,18 +3030,44 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 		u"Photo caption"_q,
 		u"Photo credit"_q,
 		u"https://example.com/photo"_q));
+	supportedBlocks.push_back(videoFixture.block);
 	for (const auto &fixture : placeholderFixtures) {
 		supportedBlocks.push_back(fixture.block);
 	}
+	supportedBlocks.push_back(collageFixture.block);
+	supportedBlocks.push_back(slideshowFixture.block);
+	supportedBlocks.push_back(audioFixture.block);
+	supportedBlocks.push_back(mapFixture.block);
+	supportedBlocks.push_back(channelFixture.block);
 	supportedBlocks.push_back(NativeIvCoveredPhotoBlock(
 		9002,
 		u"Cover caption"_q));
+
 	auto supportedPhotos = QVector<MTPPhoto>();
 	supportedPhotos.push_back(NativeIvPhoto(9001, 640, 360));
 	supportedPhotos.push_back(NativeIvPhoto(9002, 320, 200));
+	for (const auto &photo : collageFixture.photos) {
+		supportedPhotos.push_back(photo);
+	}
+
+	auto supportedDocuments = QVector<MTPDocument>();
+	for (const auto &document : videoFixture.documents) {
+		supportedDocuments.push_back(document);
+	}
+	for (const auto &document : audioFixture.documents) {
+		supportedDocuments.push_back(document);
+	}
+	for (const auto &document : collageFixture.documents) {
+		supportedDocuments.push_back(document);
+	}
+	for (const auto &document : slideshowFixture.documents) {
+		supportedDocuments.push_back(document);
+	}
+
 	auto supportedSource = NativeIvSource(
 		std::move(supportedBlocks),
-		std::move(supportedPhotos));
+		std::move(supportedPhotos),
+		std::move(supportedDocuments));
 	const auto supported = TryPrepareNativeInstantView({
 		.source = &supportedSource,
 	});
@@ -2465,12 +3084,18 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 		u"native-iv supported source failure state"_q,
 		ok);
 	Check(
-		supported.content.blocks.blocks.size() == 10,
+		supported.content.blocks.blocks.size() == 11,
 		u"native-iv supported prepared block count"_q,
 		ok);
 
 	const PreparedBlock *inlineParagraph = nullptr;
 	const PreparedBlock *photo = nullptr;
+	const PreparedBlock *video = nullptr;
+	const PreparedBlock *collage = nullptr;
+	const PreparedBlock *slideshow = nullptr;
+	const PreparedBlock *audio = nullptr;
+	const PreparedBlock *map = nullptr;
+	const PreparedBlock *channel = nullptr;
 	const PreparedBlock *coveredPhoto = nullptr;
 	auto preparedPlaceholders = std::vector<const PreparedBlock*>();
 	ForEachPreparedBlock(
@@ -2486,6 +3111,34 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 				&& block.photo.photoId == 9001) {
 				photo = &block;
 			}
+			if (!video
+				&& block.kind == PreparedBlockKind::Video
+				&& block.video.media.id == 7001) {
+				video = &block;
+			}
+			if (!collage
+				&& block.kind == PreparedBlockKind::GroupedMedia
+				&& block.text.text == collageFixture.caption) {
+				collage = &block;
+			}
+			if (!slideshow
+				&& block.kind == PreparedBlockKind::GroupedMedia
+				&& block.text.text == slideshowFixture.caption) {
+				slideshow = &block;
+			}
+			if (!audio
+				&& block.kind == PreparedBlockKind::Audio
+				&& block.audio.documentId == 7002) {
+				audio = &block;
+			}
+			if (!map && block.kind == PreparedBlockKind::Map) {
+				map = &block;
+			}
+			if (!channel
+				&& block.kind == PreparedBlockKind::Channel
+				&& block.channel.channelId == 7006) {
+				channel = &block;
+			}
 			if (!coveredPhoto
 				&& block.kind == PreparedBlockKind::Photo
 				&& block.photo.photoId == 9002) {
@@ -2495,13 +3148,13 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 				preparedPlaceholders.push_back(&block);
 			}
 		});
+
 	Check(
 		inlineParagraph != nullptr,
 		u"native-iv inline-image paragraph block"_q,
 		ok);
 	if (inlineParagraph) {
-		const auto matches = CollectInlineTextObjectMatches(
-			inlineParagraph->text);
+		const auto matches = CollectInlineTextObjectMatches(inlineParagraph->text);
 		Check(
 			matches.size() == 1,
 			u"native-iv inline-image entity count"_q,
@@ -2535,16 +3188,14 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 			}
 		}
 	}
+
 	Check(photo != nullptr, u"native-iv photo block"_q, ok);
 	if (photo) {
 		Check(
 			photo->text.text == u"Photo caption\nPhoto credit"_q,
 			u"native-iv photo caption text"_q,
 			ok);
-		Check(
-			photo->photo.photoId == 9001,
-			u"native-iv photo id"_q,
-			ok);
+		Check(photo->photo.photoId == 9001, u"native-iv photo id"_q, ok);
 		Check(
 			photo->photo.width == 640 && photo->photo.height == 360,
 			u"native-iv photo aspect metadata"_q,
@@ -2553,11 +3204,174 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 			photo->photo.urlOverride == u"https://example.com/photo"_q,
 			u"native-iv photo url override"_q,
 			ok);
+		Check(photo->photo.viewerOpen, u"native-iv photo viewer flag"_q, ok);
+	}
+
+	Check(video != nullptr, u"native-iv video block"_q, ok);
+	if (video) {
 		Check(
-			photo->photo.viewerOpen,
-			u"native-iv photo viewer flag"_q,
+			video->text.text == videoFixture.caption,
+			u"native-iv video caption text"_q,
+			ok);
+		Check(
+			video->video.media.kind == PreparedMediaItemKind::Document,
+			u"native-iv video media kind"_q,
+			ok);
+		Check(video->video.media.id == 7001, u"native-iv video id"_q, ok);
+		Check(
+			video->video.media.width == 1280
+				&& video->video.media.height == 720,
+			u"native-iv video dimensions"_q,
 			ok);
 	}
+
+	Check(audio != nullptr, u"native-iv audio block"_q, ok);
+	if (audio) {
+		Check(
+			audio->text.text == audioFixture.caption,
+			u"native-iv audio caption text"_q,
+			ok);
+		Check(audio->audio.documentId == 7002, u"native-iv audio id"_q, ok);
+		Check(audio->audio.title == u"Song Title"_q, u"native-iv audio title"_q, ok);
+		Check(
+			audio->audio.performer == u"Sample Artist"_q,
+			u"native-iv audio performer"_q,
+			ok);
+		Check(
+			audio->audio.fileName == u"track.mp3"_q,
+			u"native-iv audio file name"_q,
+			ok);
+		Check(audio->audio.duration == 215, u"native-iv audio duration"_q, ok);
+	}
+
+	Check(map != nullptr, u"native-iv map block"_q, ok);
+	if (map) {
+		Check(
+			map->text.text == mapFixture.caption,
+			u"native-iv map caption text"_q,
+			ok);
+		Check(
+			map->map.latitude == 51.5007
+				&& map->map.longitude == -0.1246,
+			u"native-iv map coordinates"_q,
+			ok);
+		Check(map->map.accessHash == 880088, u"native-iv map access hash"_q, ok);
+		Check(
+			map->map.width == 320 && map->map.height == 180,
+			u"native-iv map dimensions"_q,
+			ok);
+		Check(map->map.zoom == 13, u"native-iv map zoom"_q, ok);
+		Check(!map->map.url.isEmpty(), u"native-iv map url"_q, ok);
+	}
+
+	Check(channel != nullptr, u"native-iv channel block"_q, ok);
+	if (channel) {
+		Check(channel->text.text.isEmpty(), u"native-iv channel text empty"_q, ok);
+		Check(
+			channel->channel.channelId == 7006,
+			u"native-iv channel id"_q,
+			ok);
+		Check(
+			channel->channel.title == u"Native IV Channel"_q,
+			u"native-iv channel title"_q,
+			ok);
+		Check(
+			channel->channel.username == u"nativeiv"_q,
+			u"native-iv channel username"_q,
+			ok);
+	}
+	const auto unresolvedChannelLabel = u"native-iv-channel-unresolved"_q;
+	const auto unresolvedChannelContext = SerializeTestNativeIvChannelContext(
+		7006,
+		u"nativeiv"_q);
+	const auto parsedChannelContext = ParseTestNativeIvChannelContext(
+		unresolvedChannelContext);
+	Check(
+		parsedChannelContext.channelId == 7006,
+		unresolvedChannelLabel + u" parsed id"_q,
+		ok);
+	Check(
+		parsedChannelContext.username == u"nativeiv"_q,
+		unresolvedChannelLabel + u" parsed username"_q,
+		ok);
+	Check(
+		ResolveTestNativeIvChannelUsername(
+			QString(),
+			parsedChannelContext.username) == u"nativeiv"_q,
+		unresolvedChannelLabel
+			+ u" unresolved local peer uses cached-page username"_q,
+		ok);
+	Check(
+		ResolveTestNativeIvChannelUsername(
+			u"localnativeiv"_q,
+			parsedChannelContext.username) == u"localnativeiv"_q,
+		unresolvedChannelLabel + u" loaded local username wins"_q,
+		ok);
+
+	Check(collage != nullptr, u"native-iv collage block"_q, ok);
+	if (collage) {
+		Check(
+			collage->groupedMedia.items.size() == 2,
+			u"native-iv collage item count"_q,
+			ok);
+		Check(
+			collage->text.text == collageFixture.caption,
+			u"native-iv collage caption text"_q,
+			ok);
+		if (collage->groupedMedia.items.size() == 2) {
+			Check(
+				collage->groupedMedia.items[0].media.kind
+					== PreparedMediaItemKind::Photo,
+				u"native-iv collage first item kind"_q,
+				ok);
+			Check(
+				collage->groupedMedia.items[0].media.id == 9102,
+				u"native-iv collage first item id"_q,
+				ok);
+			Check(
+				collage->groupedMedia.items[1].media.kind
+					== PreparedMediaItemKind::Document,
+				u"native-iv collage second item kind"_q,
+				ok);
+			Check(
+				collage->groupedMedia.items[1].media.id == 7003,
+				u"native-iv collage second item id"_q,
+				ok);
+		}
+	}
+
+	Check(slideshow != nullptr, u"native-iv slideshow block"_q, ok);
+	if (slideshow) {
+		Check(
+			slideshow->groupedMedia.items.size() == 2,
+			u"native-iv slideshow item count"_q,
+			ok);
+		Check(
+			slideshow->text.text == slideshowFixture.caption,
+			u"native-iv slideshow caption text"_q,
+			ok);
+		if (slideshow->groupedMedia.items.size() == 2) {
+			Check(
+				slideshow->groupedMedia.items[0].media.kind
+					== PreparedMediaItemKind::Document,
+				u"native-iv slideshow first item kind"_q,
+				ok);
+			Check(
+				slideshow->groupedMedia.items[0].media.id == 7004,
+				u"native-iv slideshow first item id"_q,
+				ok);
+			Check(
+				slideshow->groupedMedia.items[1].media.kind
+					== PreparedMediaItemKind::Document,
+				u"native-iv slideshow second item kind"_q,
+				ok);
+			Check(
+				slideshow->groupedMedia.items[1].media.id == 7005,
+				u"native-iv slideshow second item id"_q,
+				ok);
+		}
+	}
+
 	Check(
 		coveredPhoto != nullptr,
 		u"native-iv covered photo unwrapped"_q,
@@ -2572,10 +3386,12 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 			u"native-iv covered photo id"_q,
 			ok);
 		Check(
-			coveredPhoto->photo.width == 320 && coveredPhoto->photo.height == 200,
+			coveredPhoto->photo.width == 320
+				&& coveredPhoto->photo.height == 200,
 			u"native-iv covered photo size"_q,
 			ok);
 	}
+
 	Check(
 		preparedPlaceholders.size() == placeholderFixtures.size(),
 		u"native-iv placeholder prepared count"_q,
@@ -2628,24 +3444,20 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 			u"native-iv unsupported block placeholder kind"_q,
 			ok);
 		Check(
-			block.placeholder.label == u"Unsupported Block Placeholder"_q,
+			block.placeholder.label == u"Unsupported Content"_q,
 			u"native-iv unsupported block placeholder label"_q,
 			ok);
 	}
 
-	auto missingPhotoBlocks = QVector<MTPPageBlock>();
-	missingPhotoBlocks.push_back(NativeIvPhotoBlock(9999, u"Missing photo"_q));
-	auto missingPhotoSource = NativeIvSource(std::move(missingPhotoBlocks));
+	auto missingPhotoSource = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvPhotoBlock(9999, u"Missing photo"_q),
+	});
 	const auto missingPhoto = TryPrepareNativeInstantView({
 		.source = &missingPhotoSource,
 	});
 	Check(
 		missingPhoto.supported(),
 		u"native-iv missing-photo placeholder classification"_q,
-		ok);
-	Check(
-		!missingPhoto.unsupported() && !missingPhoto.failed(),
-		u"native-iv missing-photo nonterminal classification"_q,
 		ok);
 	Check(
 		missingPhoto.content.blocks.blocks.size() == 1,
@@ -2664,6 +3476,273 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 		Check(
 			block.text.text == u"Missing photo"_q,
 			u"native-iv missing-photo placeholder caption"_q,
+			ok);
+	}
+
+	auto missingVideoSource = NativeIvSource(QVector<MTPPageBlock>{
+		videoFixture.block,
+	});
+	const auto missingVideo = TryPrepareNativeInstantView({
+		.source = &missingVideoSource,
+	});
+	Check(
+		missingVideo.supported(),
+		u"native-iv missing-video placeholder classification"_q,
+		ok);
+	if (missingVideo.content.blocks.blocks.size() == 1) {
+		const auto &block = missingVideo.content.blocks.blocks.front();
+		Check(
+			block.kind == PreparedBlockKind::Placeholder,
+			u"native-iv missing-video placeholder kind"_q,
+			ok);
+		Check(
+			block.placeholder.label == u"Video Placeholder"_q,
+			u"native-iv missing-video placeholder label"_q,
+			ok);
+		Check(
+			block.text.text == videoFixture.caption,
+			u"native-iv missing-video placeholder caption"_q,
+			ok);
+	}
+
+	auto nonVideoVideoSource = NativeIvSource(
+		QVector<MTPPageBlock>{ videoFixture.block },
+		QVector<MTPPhoto>(),
+		QVector<MTPDocument>{
+			NativeIvImageDocument(7001, 1280, 720, u"video-poster.jpg"_q),
+		});
+	const auto nonVideoVideo = TryPrepareNativeInstantView({
+		.source = &nonVideoVideoSource,
+	});
+	Check(
+		nonVideoVideo.supported(),
+		u"native-iv non-video-video placeholder classification"_q,
+		ok);
+	if (nonVideoVideo.content.blocks.blocks.size() == 1) {
+		const auto &block = nonVideoVideo.content.blocks.blocks.front();
+		Check(
+			block.kind == PreparedBlockKind::Placeholder,
+			u"native-iv non-video-video placeholder kind"_q,
+			ok);
+		Check(
+			block.placeholder.label == u"Video Placeholder"_q,
+			u"native-iv non-video-video placeholder label"_q,
+			ok);
+		Check(
+			block.text.text == videoFixture.caption,
+			u"native-iv non-video-video placeholder caption"_q,
+			ok);
+	}
+
+	auto duplicatePoorerVideoSource = NativeIvSource(
+		QVector<MTPPageBlock>{ videoFixture.block },
+		QVector<MTPPhoto>(),
+		videoFixture.documents);
+	duplicatePoorerVideoSource.webpageDocument = NativeIvDocument(
+		7001,
+		u"video/mp4"_q,
+		QVector<MTPDocumentAttribute>());
+	const auto duplicatePoorerVideo = TryPrepareNativeInstantView({
+		.source = &duplicatePoorerVideoSource,
+	});
+	Check(
+		duplicatePoorerVideo.supported(),
+		u"native-iv duplicate poorer video classification"_q,
+		ok);
+	if (duplicatePoorerVideo.content.blocks.blocks.size() == 1) {
+		const auto &block = duplicatePoorerVideo.content.blocks.blocks.front();
+		Check(
+			block.kind == PreparedBlockKind::Video,
+			u"native-iv duplicate poorer video kind"_q,
+			ok);
+		if (block.kind == PreparedBlockKind::Video) {
+			Check(
+				block.video.media.id == 7001,
+				u"native-iv duplicate poorer video id"_q,
+				ok);
+			Check(
+				block.video.media.width == 1280
+					&& block.video.media.height == 720,
+				u"native-iv duplicate poorer video dimensions"_q,
+				ok);
+		}
+	}
+
+	auto missingAudioSource = NativeIvSource(QVector<MTPPageBlock>{
+		audioFixture.block,
+	});
+	const auto missingAudio = TryPrepareNativeInstantView({
+		.source = &missingAudioSource,
+	});
+	Check(
+		missingAudio.supported(),
+		u"native-iv missing-audio placeholder classification"_q,
+		ok);
+	if (missingAudio.content.blocks.blocks.size() == 1) {
+		const auto &block = missingAudio.content.blocks.blocks.front();
+		Check(
+			block.kind == PreparedBlockKind::Placeholder,
+			u"native-iv missing-audio placeholder kind"_q,
+			ok);
+		Check(
+			block.placeholder.label == u"Audio File Placeholder"_q,
+			u"native-iv missing-audio placeholder label"_q,
+			ok);
+		Check(
+			block.text.text == audioFixture.caption,
+			u"native-iv missing-audio placeholder caption"_q,
+			ok);
+	}
+
+	auto invalidMapBlocks = QVector<MTPPageBlock>();
+	invalidMapBlocks.push_back(MTP_pageBlockMap(
+		MTP_geoPointEmpty(),
+		MTP_int(13),
+		MTP_int(320),
+		MTP_int(180),
+		NativeIvCaption(u"Invalid map"_q)));
+	auto invalidMapSource = NativeIvSource(std::move(invalidMapBlocks));
+	const auto invalidMap = TryPrepareNativeInstantView({
+		.source = &invalidMapSource,
+	});
+	Check(
+		invalidMap.supported(),
+		u"native-iv invalid-map placeholder classification"_q,
+		ok);
+	if (invalidMap.content.blocks.blocks.size() == 1) {
+		const auto &block = invalidMap.content.blocks.blocks.front();
+		Check(
+			block.kind == PreparedBlockKind::Placeholder,
+			u"native-iv invalid-map placeholder kind"_q,
+			ok);
+		Check(
+			block.placeholder.label == u"Map Placeholder"_q,
+			u"native-iv invalid-map placeholder label"_q,
+			ok);
+		Check(
+			block.text.text == u"Invalid map"_q,
+			u"native-iv invalid-map placeholder caption"_q,
+			ok);
+	}
+
+	auto unsupportedCollageItems = QVector<MTPPageBlock>();
+	unsupportedCollageItems.push_back(NativeIvPhotoBlock(9102));
+	unsupportedCollageItems.push_back(MTP_pageBlockParagraph(NativeIvText(
+		u"unsupported child"_q)));
+	auto unsupportedCollageSource = NativeIvSource(
+		QVector<MTPPageBlock>{
+			MTP_pageBlockCollage(
+			MTP_vector<MTPPageBlock>(std::move(unsupportedCollageItems)),
+			NativeIvCaption(u"Broken collage"_q)),
+		},
+		collageFixture.photos,
+		collageFixture.documents);
+	const auto unsupportedCollage = TryPrepareNativeInstantView({
+		.source = &unsupportedCollageSource,
+	});
+	Check(
+		unsupportedCollage.supported(),
+		u"native-iv unsupported-collage placeholder classification"_q,
+		ok);
+	if (unsupportedCollage.content.blocks.blocks.size() == 1) {
+		const auto &block = unsupportedCollage.content.blocks.blocks.front();
+		Check(
+			block.kind == PreparedBlockKind::Placeholder,
+			u"native-iv unsupported-collage placeholder kind"_q,
+			ok);
+		Check(
+			block.placeholder.label == u"Collage placeholder"_q,
+			u"native-iv unsupported-collage placeholder label"_q,
+			ok);
+		Check(
+			block.text.text == u"Broken collage"_q,
+			u"native-iv unsupported-collage placeholder caption"_q,
+			ok);
+	}
+
+	auto nonVideoCollageSource = NativeIvSource(
+		QVector<MTPPageBlock>{ collageFixture.block },
+		collageFixture.photos,
+		QVector<MTPDocument>{
+			NativeIvImageDocument(7003, 640, 360, u"collage-still.jpg"_q),
+		});
+	const auto nonVideoCollage = TryPrepareNativeInstantView({
+		.source = &nonVideoCollageSource,
+	});
+	Check(
+		nonVideoCollage.supported(),
+		u"native-iv non-video-collage placeholder classification"_q,
+		ok);
+	if (nonVideoCollage.content.blocks.blocks.size() == 1) {
+		const auto &block = nonVideoCollage.content.blocks.blocks.front();
+		Check(
+			block.kind == PreparedBlockKind::Placeholder,
+			u"native-iv non-video-collage placeholder kind"_q,
+			ok);
+		Check(
+			block.placeholder.label == u"Collage placeholder"_q,
+			u"native-iv non-video-collage placeholder label"_q,
+			ok);
+		Check(
+			block.text.text == collageFixture.caption,
+			u"native-iv non-video-collage placeholder caption"_q,
+			ok);
+	}
+
+	auto nonVideoSlideshowSource = NativeIvSource(
+		QVector<MTPPageBlock>{ slideshowFixture.block },
+		slideshowFixture.photos,
+		QVector<MTPDocument>{
+			NativeIvImageDocument(7004, 960, 540, u"slide-a.jpg"_q),
+			slideshowFixture.documents[1],
+		});
+	const auto nonVideoSlideshow = TryPrepareNativeInstantView({
+		.source = &nonVideoSlideshowSource,
+	});
+	Check(
+		nonVideoSlideshow.supported(),
+		u"native-iv non-video-slideshow placeholder classification"_q,
+		ok);
+	if (nonVideoSlideshow.content.blocks.blocks.size() == 1) {
+		const auto &block = nonVideoSlideshow.content.blocks.blocks.front();
+		Check(
+			block.kind == PreparedBlockKind::Placeholder,
+			u"native-iv non-video-slideshow placeholder kind"_q,
+			ok);
+		Check(
+			block.placeholder.label == u"Grouped Media Placeholder"_q,
+			u"native-iv non-video-slideshow placeholder label"_q,
+			ok);
+		Check(
+			block.text.text == slideshowFixture.caption,
+			u"native-iv non-video-slideshow placeholder caption"_q,
+			ok);
+	}
+
+	auto missingGroupedDocumentSource = NativeIvSource(
+		QVector<MTPPageBlock>{ slideshowFixture.block },
+		slideshowFixture.photos,
+		QVector<MTPDocument>{ slideshowFixture.documents.front() });
+	const auto missingGroupedDocument = TryPrepareNativeInstantView({
+		.source = &missingGroupedDocumentSource,
+	});
+	Check(
+		missingGroupedDocument.supported(),
+		u"native-iv missing-grouped-document placeholder classification"_q,
+		ok);
+	if (missingGroupedDocument.content.blocks.blocks.size() == 1) {
+		const auto &block = missingGroupedDocument.content.blocks.blocks.front();
+		Check(
+			block.kind == PreparedBlockKind::Placeholder,
+			u"native-iv missing-grouped-document placeholder kind"_q,
+			ok);
+		Check(
+			block.placeholder.label == u"Grouped Media Placeholder"_q,
+			u"native-iv missing-grouped-document placeholder label"_q,
+			ok);
+		Check(
+			block.text.text == slideshowFixture.caption,
+			u"native-iv missing-grouped-document placeholder caption"_q,
 			ok);
 	}
 }
@@ -3018,94 +4097,33 @@ auto text = "native-markdown-iv-phase-z-highlight";
 }
 
 void CheckNativeInstantViewArticleCoverage(bool *ok) {
-	const auto placeholderLabel = u"native-iv-placeholder-article"_q;
-	auto placeholderBlocks = QVector<MTPPageBlock>();
-	placeholderBlocks.push_back(NativeIvPlaceholderBlock(
-		NativeIvPlaceholderKind::Video,
-		u"Placeholder caption"_q));
-	auto placeholderSource = NativeIvSource(std::move(placeholderBlocks));
-	auto placeholderPrepared = TryPrepareNativeInstantView({
-		.source = &placeholderSource,
-	});
-	Check(
-		placeholderPrepared.supported(),
-		placeholderLabel + u" prepare supported"_q,
-		ok);
-	if (placeholderPrepared.supported()) {
-		auto placeholderHeight = 0;
-		auto placeholderArticle = BuildArticleForTest(
-			std::move(placeholderPrepared.content),
-			std::make_shared<MathRenderer>(),
-			420,
-			&placeholderHeight);
-		const auto placeholderImage = PaintArticleForTest(
-			placeholderArticle.get(),
-			420,
-			placeholderHeight);
-		Check(
-			HasPaintedPixels(placeholderImage),
-			placeholderLabel + u" paint produced pixels"_q,
-			ok);
-		const auto placeholderBounds = SegmentHitBounds(
-			placeholderArticle.get(),
-			420,
-			placeholderHeight,
-			0);
-		Check(
-			placeholderBounds.has_value(),
-			placeholderLabel + u" media hit bounds"_q,
-			ok);
-		if (placeholderBounds) {
-			auto flags = Ui::Text::StateRequest::Flags();
-			flags |= Ui::Text::StateRequest::Flag::LookupSymbol;
-			const auto hit = placeholderArticle->hitTest(
-				placeholderBounds->center(),
-				flags);
-			Check(
-				hit.valid() && hit.direct && (hit.segmentIndex == 0),
-				placeholderLabel + u" direct media hit"_q,
-				ok);
-			Check(
-				hit.mediaActivation.kind == MediaActivationKind::None,
-				placeholderLabel + u" no media activation"_q,
-				ok);
-			Check(
-				!placeholderArticle->segmentIsText(0),
-				placeholderLabel + u" segment is media"_q,
-				ok);
-			Check(
-				placeholderArticle->segmentLength(0) == 1,
-				placeholderLabel + u" media segment length"_q,
-				ok);
-			const auto context = placeholderArticle->textForContext(hit);
-			Check(
-				context.expanded
-					== u"Video Placeholder\nPlaceholder caption"_q,
-				placeholderLabel + u" context export text"_q,
-				ok);
-			const auto selection = placeholderArticle->textForSelection({
-				.from = { .segment = 0, .offset = 0 },
-				.to = { .segment = 0, .offset = 1 },
-			}, nullptr);
-			Check(
-				selection.expanded == context.expanded,
-				placeholderLabel + u" selection export text"_q,
-				ok);
-		}
-	}
+	const auto renderer = std::make_shared<MathRenderer>();
+	auto lookupFlags = Ui::Text::StateRequest::Flags();
+	lookupFlags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+
+	const auto videoFixture = NativeIvVideoFixture();
+	const auto audioFixture = NativeIvAudioFixture();
+	const auto mapFixture = NativeIvMapFixture();
+	const auto channelFixture = NativeIvChannelFixture();
+	const auto collageFixture = NativeIvCollageFixture();
+	const auto slideshowFixture = NativeIvSlideshowFixture();
 
 	const auto mixedLabel = u"native-iv-mixed-article"_q;
 	auto mixedRuntime = std::make_shared<TestMediaRuntime>();
-	mixedRuntime->inlineDocumentId = 8801;
-	mixedRuntime->inlineImage = std::make_shared<TestDynamicImage>();
-	mixedRuntime->preparedPhotoId = 9101;
-	mixedRuntime->photoRuntime = std::make_shared<TestPhotoRuntime>();
-	mixedRuntime->photoRuntime->thumbnailImage
-		= std::make_shared<TestDynamicImage>();
-	mixedRuntime->photoRuntime->fullImage
-		= std::make_shared<TestDynamicImage>();
-	mixedRuntime->photoRuntime->loadingValue = true;
-	mixedRuntime->photoRuntime->progressValue = 0.5;
+	auto inlineImage = std::make_shared<TestDynamicImage>();
+	auto videoRuntime = std::make_shared<TestDocumentRuntime>();
+	videoRuntime->thumbnailImage = std::make_shared<TestDynamicImage>();
+	videoRuntime->fullImage = std::make_shared<TestDynamicImage>();
+	videoRuntime->loadingValue = true;
+	videoRuntime->progressValue = 0.25;
+	auto mixedPhotoRuntime = std::make_shared<TestPhotoRuntime>();
+	mixedPhotoRuntime->thumbnailImage = std::make_shared<TestDynamicImage>();
+	mixedPhotoRuntime->fullImage = std::make_shared<TestDynamicImage>();
+	mixedPhotoRuntime->loadingValue = true;
+	mixedPhotoRuntime->progressValue = 0.5;
+	mixedRuntime->addInlineImage(8801, inlineImage);
+	mixedRuntime->addDocumentRuntime(7001, videoRuntime);
+	mixedRuntime->addPhotoRuntime(9101, mixedPhotoRuntime);
 
 	auto mixedBlocks = QVector<MTPPageBlock>();
 	mixedBlocks.push_back(NativeIvInlineImageParagraph(
@@ -3114,8 +4132,7 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 		18,
 		u"Intro "_q,
 		u" tail."_q));
-	mixedBlocks.push_back(NativeIvPlaceholderBlock(
-		NativeIvPlaceholderKind::Video));
+	mixedBlocks.push_back(videoFixture.block);
 	mixedBlocks.push_back(NativeIvPhotoBlock(9101));
 	mixedBlocks.push_back(MTP_pageBlockParagraph(NativeIvText(
 		u"Outro paragraph."_q)));
@@ -3123,7 +4140,8 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 	mixedPhotos.push_back(NativeIvPhoto(9101, 320, 180));
 	auto mixedSource = NativeIvSource(
 		std::move(mixedBlocks),
-		std::move(mixedPhotos));
+		std::move(mixedPhotos),
+		videoFixture.documents);
 	auto mixedPrepared = TryPrepareNativeInstantView({
 		.source = &mixedSource,
 		.mediaRuntime = mixedRuntime,
@@ -3139,14 +4157,16 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 		mixedPrepared.content.mediaRuntime.get() == mixedRuntime.get(),
 		mixedLabel + u" media runtime forwarded"_q,
 		ok);
-	auto renderer = std::make_shared<MathRenderer>();
 	auto wideHeight = 0;
-	auto article = BuildArticleForTest(
+	auto mixedArticle = BuildArticleForTest(
 		std::move(mixedPrepared.content),
 		renderer,
 		520,
 		&wideHeight);
-	const auto wideImage = PaintArticleForTest(article.get(), 520, wideHeight);
+	const auto wideImage = PaintArticleForTest(
+		mixedArticle.get(),
+		520,
+		wideHeight);
 	Check(
 		HasPaintedPixels(wideImage),
 		mixedLabel + u" wide paint produced pixels"_q,
@@ -3166,33 +4186,35 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			ok);
 	}
 	Check(
+		!mixedRuntime->documentRequests.empty()
+			&& (mixedRuntime->documentRequests.front() == 7001),
+		mixedLabel + u" video runtime resolve request"_q,
+		ok);
+	Check(
 		!mixedRuntime->photoRequests.empty()
 			&& (mixedRuntime->photoRequests.front() == 9101),
 		mixedLabel + u" photo runtime resolve request"_q,
 		ok);
 	Check(
-		!mixedRuntime->photoRuntime->thumbnailSizes.empty()
-			&& !mixedRuntime->photoRuntime->fullSizes.empty(),
+		!videoRuntime->thumbnailSizes.empty()
+			&& !videoRuntime->fullSizes.empty(),
+		mixedLabel + u" video image size requests"_q,
+		ok);
+	Check(
+		!mixedPhotoRuntime->thumbnailSizes.empty()
+			&& !mixedPhotoRuntime->fullSizes.empty(),
 		mixedLabel + u" photo image size requests"_q,
 		ok);
-	if (!mixedRuntime->photoRuntime->thumbnailSizes.empty()
-		&& !mixedRuntime->photoRuntime->fullSizes.empty()) {
-		Check(
-			mixedRuntime->photoRuntime->thumbnailSizes.front()
-				== mixedRuntime->photoRuntime->fullSizes.front(),
-			mixedLabel + u" photo image request sizes match"_q,
-			ok);
-	}
 	Check(
-		article->segmentIsText(0),
+		mixedArticle->segmentIsText(0),
 		mixedLabel + u" inline-image paragraph remains text segment"_q,
 		ok);
-	if (article->segmentIsText(0)) {
-		const auto exported = article->textForSelection({
+	if (mixedArticle->segmentIsText(0)) {
+		const auto exported = mixedArticle->textForSelection({
 			.from = { .segment = 0, .offset = 0 },
 			.to = {
 				.segment = 0,
-				.offset = article->segmentLength(0),
+				.offset = mixedArticle->segmentLength(0),
 			},
 		}, nullptr);
 		Check(
@@ -3205,9 +4227,9 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			ok);
 	}
 
-	const auto narrowHeight = article->resizeGetHeight(260);
+	const auto narrowHeight = mixedArticle->resizeGetHeight(260);
 	const auto narrowImage = PaintArticleForTest(
-		article.get(),
+		mixedArticle.get(),
 		260,
 		narrowHeight);
 	Check(
@@ -3219,25 +4241,26 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 		mixedLabel + u" narrow relayout grows height"_q,
 		ok);
 	Check(
-		mixedRuntime->inlineImage->subscriptionCount >= 1,
+		inlineImage->subscriptionCount >= 1,
 		mixedLabel + u" inline image subscribed for repaint"_q,
 		ok);
 	Check(
-		!mixedRuntime->inlineImage->requestedSizes.empty()
-			&& (mixedRuntime->inlineImage->requestedSizes.front() == 24),
+		!inlineImage->requestedSizes.empty()
+			&& (inlineImage->requestedSizes.front() == 24),
 		mixedLabel + u" inline image paint request size"_q,
 		ok);
 
 	auto segmentBounds = std::vector<std::optional<QRect>>();
 	for (auto segmentIndex = 0; segmentIndex != 4; ++segmentIndex) {
 		segmentBounds.push_back(SegmentHitBounds(
-			article.get(),
+			mixedArticle.get(),
 			260,
 			narrowHeight,
 			segmentIndex));
 		Check(
 			segmentBounds.back().has_value(),
-			mixedLabel + u" segment hit bounds "_q + QString::number(segmentIndex),
+			mixedLabel + u" segment hit bounds "_q
+				+ QString::number(segmentIndex),
 			ok);
 	}
 	auto haveBounds = true;
@@ -3257,9 +4280,54 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			mixedLabel + u" segment order "_q + QString::number(segmentIndex),
 			ok);
 	}
-	auto flags = Ui::Text::StateRequest::Flags();
-	flags |= Ui::Text::StateRequest::Flag::LookupSymbol;
-	const auto photoHit = article->hitTest(segmentBounds[2]->center(), flags);
+
+	const auto videoHit = mixedArticle->hitTest(
+		segmentBounds[1]->center(),
+		lookupFlags);
+	Check(
+		videoHit.valid() && videoHit.direct && (videoHit.segmentIndex == 1),
+		mixedLabel + u" video direct hit"_q,
+		ok);
+	Check(
+		videoHit.mediaActivation.kind == MediaActivationKind::Document,
+		mixedLabel + u" video activation kind"_q,
+		ok);
+	Check(
+		videoHit.mediaActivation.document.get() == videoRuntime.get(),
+		mixedLabel + u" video runtime forwarded to hit"_q,
+		ok);
+	Check(
+		!videoHit.preparedLink.has_value(),
+		mixedLabel + u" video hit has no prepared link"_q,
+		ok);
+	const auto videoContext = mixedArticle->textForContext(videoHit);
+	Check(
+		videoContext.expanded
+			== (tr::lng_in_dlg_video(tr::now)
+				+ u"\n"_q
+				+ videoFixture.caption),
+		mixedLabel + u" video context export text"_q,
+		ok);
+	const auto videoSelection = mixedArticle->textForSelection({
+		.from = { .segment = 1, .offset = 0 },
+		.to = { .segment = 1, .offset = 1 },
+	}, nullptr);
+	Check(
+		videoSelection.expanded == videoContext.expanded,
+		mixedLabel + u" video selection export text"_q,
+		ok);
+	if (videoHit.mediaActivation.document) {
+		videoHit.mediaActivation.document->open(Qt::LeftButton);
+	}
+	Check(
+		videoRuntime->openedButtons.size() == 1
+			&& (videoRuntime->openedButtons.front() == Qt::LeftButton),
+		mixedLabel + u" video open intent"_q,
+		ok);
+
+	const auto photoHit = mixedArticle->hitTest(
+		segmentBounds[2]->center(),
+		lookupFlags);
 	Check(
 		photoHit.valid() && photoHit.direct && (photoHit.segmentIndex == 2),
 		mixedLabel + u" photo direct hit"_q,
@@ -3269,63 +4337,76 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 		mixedLabel + u" photo activation kind"_q,
 		ok);
 	Check(
-		!photoHit.preparedLink.has_value(),
-		mixedLabel + u" photo hit has no external prepared link"_q,
-		ok);
-	Check(
-		photoHit.mediaActivation.photo.get() == mixedRuntime->photoRuntime.get(),
+		photoHit.mediaActivation.photo.get() == mixedPhotoRuntime.get(),
 		mixedLabel + u" photo runtime forwarded to hit"_q,
 		ok);
 	if (photoHit.mediaActivation.photo) {
 		photoHit.mediaActivation.photo->open(Qt::LeftButton);
 	}
 	Check(
-		mixedRuntime->photoRuntime->openedButtons.size() == 1
-			&& mixedRuntime->photoRuntime->openedButtons.front()
-				== Qt::LeftButton,
+		mixedPhotoRuntime->openedButtons.size() == 1
+			&& (mixedPhotoRuntime->openedButtons.front() == Qt::LeftButton),
 		mixedLabel + u" photo open intent"_q,
 		ok);
 
-	mixedRuntime->inlineImage->setFrame(SolidTestImage(
-		24,
-		18,
-		QColor(0, 160, 220)));
-	mixedRuntime->inlineImage->notify();
-	mixedRuntime->photoRuntime->thumbnailImage->setFrame(SolidTestImage(
+	inlineImage->setFrame(SolidTestImage(24, 18, QColor(0, 160, 220)));
+	inlineImage->notify();
+	videoRuntime->thumbnailImage->setFrame(SolidTestImage(
+		160,
+		90,
+		QColor(20, 120, 220)));
+	videoRuntime->fullImage->setFrame(SolidTestImage(
+		320,
+		180,
+		QColor(0, 120, 90)));
+	videoRuntime->loadingValue = false;
+	videoRuntime->loadedValue = true;
+	videoRuntime->progressValue = 1.;
+	mixedPhotoRuntime->thumbnailImage->setFrame(SolidTestImage(
 		160,
 		90,
 		QColor(220, 160, 0)));
-	mixedRuntime->photoRuntime->fullImage->setFrame(SolidTestImage(
+	mixedPhotoRuntime->fullImage->setFrame(SolidTestImage(
 		320,
 		180,
 		QColor(0, 200, 90)));
-	mixedRuntime->photoRuntime->loadingValue = false;
-	mixedRuntime->photoRuntime->loadedValue = true;
-	mixedRuntime->photoRuntime->progressValue = 1.;
+	mixedPhotoRuntime->loadingValue = false;
+	mixedPhotoRuntime->loadedValue = true;
+	mixedPhotoRuntime->progressValue = 1.;
 
-	const auto narrowHeightAfterUpdate = article->resizeGetHeight(260);
+	const auto narrowHeightAfterUpdate = mixedArticle->resizeGetHeight(260);
 	Check(
 		narrowHeightAfterUpdate == narrowHeight,
 		mixedLabel + u" media repaint keeps layout height"_q,
 		ok);
 	const auto updatedImage = PaintArticleForTest(
-		article.get(),
+		mixedArticle.get(),
 		260,
 		narrowHeightAfterUpdate);
 	Check(
 		HasPaintedPixels(updatedImage),
 		mixedLabel + u" updated paint produced pixels"_q,
 		ok);
+	const auto updatedVideoBounds = SegmentHitBounds(
+		mixedArticle.get(),
+		260,
+		narrowHeightAfterUpdate,
+		1);
 	const auto updatedPhotoBounds = SegmentHitBounds(
-		article.get(),
+		mixedArticle.get(),
 		260,
 		narrowHeightAfterUpdate,
 		2);
 	const auto updatedInlineBounds = SegmentHitBounds(
-		article.get(),
+		mixedArticle.get(),
 		260,
 		narrowHeightAfterUpdate,
 		0);
+	Check(
+		updatedVideoBounds.has_value()
+			&& (*updatedVideoBounds == *segmentBounds[1]),
+		mixedLabel + u" video repaint keeps bounds"_q,
+		ok);
 	Check(
 		updatedPhotoBounds.has_value()
 			&& (*updatedPhotoBounds == *segmentBounds[2]),
@@ -3336,6 +4417,799 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			&& (*updatedInlineBounds == *segmentBounds[0]),
 		mixedLabel + u" inline-image repaint keeps bounds"_q,
 		ok);
+
+	const auto audioLabel = u"native-iv-audio-article"_q;
+	auto audioRuntime = std::make_shared<TestMediaRuntime>();
+	auto audioDocumentRuntime = std::make_shared<TestDocumentRuntime>();
+	audioRuntime->addDocumentRuntime(7002, audioDocumentRuntime);
+	auto audioSource = NativeIvSource(
+		QVector<MTPPageBlock>{ audioFixture.block },
+		audioFixture.photos,
+		audioFixture.documents);
+	auto audioPrepared = TryPrepareNativeInstantView({
+		.source = &audioSource,
+		.mediaRuntime = audioRuntime,
+	});
+	Check(audioPrepared.supported(), audioLabel + u" prepare supported"_q, ok);
+	if (audioPrepared.supported()) {
+		auto audioHeight = 0;
+		auto audioArticle = BuildArticleForTest(
+			std::move(audioPrepared.content),
+			renderer,
+			420,
+			&audioHeight);
+		const auto audioImage = PaintArticleForTest(
+			audioArticle.get(),
+			420,
+			audioHeight);
+		Check(
+			HasPaintedPixels(audioImage),
+			audioLabel + u" paint produced pixels"_q,
+			ok);
+		Check(
+			audioRuntime->documentRequests.size() == 1
+				&& (audioRuntime->documentRequests.front() == 7002),
+			audioLabel + u" document resolve request"_q,
+			ok);
+		const auto audioBounds = SegmentHitBounds(
+			audioArticle.get(),
+			420,
+			audioHeight,
+			0);
+		Check(audioBounds.has_value(), audioLabel + u" media bounds"_q, ok);
+		if (audioBounds) {
+			const auto audioHit = audioArticle->hitTest(
+				audioBounds->center(),
+				lookupFlags);
+			Check(
+				audioHit.valid()
+					&& audioHit.direct
+					&& (audioHit.segmentIndex == 0),
+				audioLabel + u" direct hit"_q,
+				ok);
+			Check(
+				audioHit.mediaActivation.kind == MediaActivationKind::Document,
+				audioLabel + u" activation kind"_q,
+				ok);
+			Check(
+				audioHit.mediaActivation.document.get()
+					== audioDocumentRuntime.get(),
+				audioLabel + u" runtime forwarded"_q,
+				ok);
+			const auto audioContext = audioArticle->textForContext(audioHit);
+			Check(
+				audioContext.expanded
+					== u"Song Title\nSample Artist\nAudio caption"_q,
+				audioLabel + u" context export text"_q,
+				ok);
+			const auto audioSelection = audioArticle->textForSelection({
+				.from = { .segment = 0, .offset = 0 },
+				.to = { .segment = 0, .offset = 1 },
+			}, nullptr);
+			Check(
+				audioSelection.expanded == audioContext.expanded,
+				audioLabel + u" selection export text"_q,
+				ok);
+			if (audioHit.mediaActivation.document) {
+				audioHit.mediaActivation.document->open(Qt::LeftButton);
+			}
+			Check(
+				audioDocumentRuntime->openedButtons.size() == 1
+					&& (audioDocumentRuntime->openedButtons.front()
+						== Qt::LeftButton),
+				audioLabel + u" open intent"_q,
+				ok);
+		}
+		const auto audioCaptionSelection = audioArticle->textForSelection({
+			.from = { .segment = 1, .offset = 0 },
+			.to = {
+				.segment = 1,
+				.offset = audioArticle->segmentLength(1),
+			},
+		}, nullptr);
+		Check(
+			audioCaptionSelection.expanded == audioFixture.caption,
+			audioLabel + u" caption selection export"_q,
+			ok);
+	}
+
+	const auto mapLabel = u"native-iv-map-article"_q;
+	auto mapRuntime = std::make_shared<TestMediaRuntime>();
+	auto mapImageRuntime = std::make_shared<TestMapRuntime>();
+	mapImageRuntime->thumbnailImage = std::make_shared<TestDynamicImage>();
+	mapImageRuntime->fullImage = std::make_shared<TestDynamicImage>();
+	mapRuntime->addMapRuntime(51.5007, -0.1246, 880088, 13, mapImageRuntime);
+	auto mapSource = NativeIvSource(QVector<MTPPageBlock>{
+		mapFixture.block,
+	});
+	auto mapPrepared = TryPrepareNativeInstantView({
+		.source = &mapSource,
+		.mediaRuntime = mapRuntime,
+	});
+	Check(mapPrepared.supported(), mapLabel + u" prepare supported"_q, ok);
+	if (mapPrepared.supported()) {
+		auto mapHeight = 0;
+		auto mapArticle = BuildArticleForTest(
+			std::move(mapPrepared.content),
+			renderer,
+			420,
+			&mapHeight);
+		const auto mapImage = PaintArticleForTest(
+			mapArticle.get(),
+			420,
+			mapHeight);
+		Check(
+			HasPaintedPixels(mapImage),
+			mapLabel + u" paint produced pixels"_q,
+			ok);
+		Check(
+			mapRuntime->mapRequests.size() == 1,
+			mapLabel + u" runtime resolve request"_q,
+			ok);
+		if (!mapRuntime->mapRequests.empty()) {
+			const auto &request = mapRuntime->mapRequests.front();
+			Check(
+				request.latitude == 51.5007
+					&& request.longitude == -0.1246,
+				mapLabel + u" coordinates forwarded"_q,
+				ok);
+			Check(
+				request.accessHash == 880088 && request.zoom == 13,
+				mapLabel + u" access hash and zoom forwarded"_q,
+				ok);
+		}
+		const auto mapBounds = SegmentHitBounds(
+			mapArticle.get(),
+			420,
+			mapHeight,
+			0);
+		Check(mapBounds.has_value(), mapLabel + u" media bounds"_q, ok);
+		if (mapBounds) {
+			const auto mapHit = mapArticle->hitTest(
+				mapBounds->center(),
+				lookupFlags);
+			Check(
+				mapHit.valid() && mapHit.direct && (mapHit.segmentIndex == 0),
+				mapLabel + u" direct hit"_q,
+				ok);
+			Check(
+				mapHit.mediaActivation.kind == MediaActivationKind::ExternalUrl,
+				mapLabel + u" activation kind"_q,
+				ok);
+			Check(
+				mapHit.preparedLink.has_value()
+					&& !mapHit.preparedLink->target.isEmpty(),
+				mapLabel + u" prepared link created"_q,
+				ok);
+			if (mapHit.preparedLink) {
+				Check(
+					mapHit.mediaActivation.url == mapHit.preparedLink->target,
+					mapLabel + u" media activation url matches prepared link"_q,
+					ok);
+			}
+			const auto mapContext = mapArticle->textForContext(mapHit);
+			Check(
+				mapContext.expanded
+					== (tr::lng_maps_point(tr::now)
+						+ u"\n"_q
+						+ mapFixture.caption),
+				mapLabel + u" context export text"_q,
+				ok);
+			const auto mapSelection = mapArticle->textForSelection({
+				.from = { .segment = 0, .offset = 0 },
+				.to = { .segment = 0, .offset = 1 },
+			}, nullptr);
+			Check(
+				mapSelection.expanded == mapContext.expanded,
+				mapLabel + u" selection export text"_q,
+				ok);
+		}
+		const auto mapCaptionSelection = mapArticle->textForSelection({
+			.from = { .segment = 1, .offset = 0 },
+			.to = {
+				.segment = 1,
+				.offset = mapArticle->segmentLength(1),
+			},
+		}, nullptr);
+		Check(
+			mapCaptionSelection.expanded == mapFixture.caption,
+			mapLabel + u" caption selection export"_q,
+			ok);
+	}
+
+	const auto channelLabel = u"native-iv-channel-article"_q;
+	auto channelRuntime = std::make_shared<TestMediaRuntime>();
+	auto channelCardRuntime = std::make_shared<TestChannelRuntime>();
+	channelRuntime->addChannelRuntime(7006, u"nativeiv"_q, channelCardRuntime);
+	auto channelSource = NativeIvSource(QVector<MTPPageBlock>{
+		channelFixture.block,
+	});
+	auto channelPrepared = TryPrepareNativeInstantView({
+		.source = &channelSource,
+		.mediaRuntime = channelRuntime,
+	});
+	Check(
+		channelPrepared.supported(),
+		channelLabel + u" prepare supported"_q,
+		ok);
+	if (channelPrepared.supported()) {
+		auto channelHeight = 0;
+		auto channelArticle = BuildArticleForTest(
+			std::move(channelPrepared.content),
+			renderer,
+			420,
+			&channelHeight);
+		const auto channelBefore = PaintArticleForTest(
+			channelArticle.get(),
+			420,
+			channelHeight);
+		Check(
+			HasPaintedPixels(channelBefore),
+			channelLabel + u" paint produced pixels"_q,
+			ok);
+		Check(
+			channelRuntime->channelRequests.size() == 1
+				&& (channelRuntime->channelRequests.front().channelId == 7006)
+				&& (channelRuntime->channelRequests.front().username
+					== u"nativeiv"_q),
+			channelLabel + u" runtime resolve request"_q,
+			ok);
+		const auto openBounds = HitBoundsWhere(
+			channelArticle.get(),
+			420,
+			channelHeight,
+			lookupFlags,
+			[](const MarkdownArticleHitTestResult &hit) {
+				return hit.mediaActivation.kind
+					== MediaActivationKind::OpenChannel;
+			});
+		const auto joinBounds = HitBoundsWhere(
+			channelArticle.get(),
+			420,
+			channelHeight,
+			lookupFlags,
+			[](const MarkdownArticleHitTestResult &hit) {
+				return hit.mediaActivation.kind
+					== MediaActivationKind::JoinChannel;
+			});
+		Check(openBounds.has_value(), channelLabel + u" open bounds"_q, ok);
+		Check(joinBounds.has_value(), channelLabel + u" join bounds"_q, ok);
+		if (openBounds) {
+			const auto openHit = channelArticle->hitTest(
+				openBounds->center(),
+				lookupFlags);
+			Check(
+				openHit.mediaActivation.kind == MediaActivationKind::OpenChannel,
+				channelLabel + u" open activation kind"_q,
+				ok);
+			Check(
+				openHit.mediaActivation.channel.get() == channelCardRuntime.get(),
+				channelLabel + u" open runtime forwarded"_q,
+				ok);
+			if (openHit.mediaActivation.channel) {
+				openHit.mediaActivation.channel->open(Qt::LeftButton);
+			}
+		}
+		if (joinBounds) {
+			const auto joinHit = channelArticle->hitTest(
+				joinBounds->center(),
+				lookupFlags);
+			Check(
+				joinHit.mediaActivation.kind == MediaActivationKind::JoinChannel,
+				channelLabel + u" join activation kind"_q,
+				ok);
+			Check(
+				joinHit.mediaActivation.channel.get() == channelCardRuntime.get(),
+				channelLabel + u" join runtime forwarded"_q,
+				ok);
+			const auto joinContext = channelArticle->textForContext(joinHit);
+			Check(
+				joinContext.expanded == u"Native IV Channel\n@nativeiv"_q,
+				channelLabel + u" context export text"_q,
+				ok);
+			const auto joinSelection = channelArticle->textForSelection({
+				.from = { .segment = 0, .offset = 0 },
+				.to = { .segment = 0, .offset = 1 },
+			}, nullptr);
+			Check(
+				joinSelection.expanded == joinContext.expanded,
+				channelLabel + u" selection export text"_q,
+				ok);
+			if (joinHit.mediaActivation.channel) {
+				joinHit.mediaActivation.channel->join(Qt::LeftButton);
+			}
+		}
+		Check(
+			channelCardRuntime->openedButtons.size() == 1
+				&& (channelCardRuntime->openedButtons.front()
+					== Qt::LeftButton),
+			channelLabel + u" open intent"_q,
+			ok);
+		Check(
+			channelCardRuntime->joinedButtons.size() == 1
+				&& (channelCardRuntime->joinedButtons.front()
+					== Qt::LeftButton),
+			channelLabel + u" join intent"_q,
+			ok);
+		if (joinBounds) {
+			channelCardRuntime->joinVisibleValue = false;
+			const auto joinedHit = channelArticle->hitTest(
+				joinBounds->center(),
+				lookupFlags);
+			Check(
+				joinedHit.mediaActivation.kind == MediaActivationKind::OpenChannel,
+				channelLabel + u" joined state hides join action"_q,
+				ok);
+			const auto channelAfter = PaintArticleForTest(
+				channelArticle.get(),
+				420,
+				channelHeight);
+			Check(
+				PixelsDifferInRect(channelBefore, channelAfter, *joinBounds),
+				channelLabel + u" joined state repaint changes button pixels"_q,
+				ok);
+		}
+
+		auto previewRuntime = std::make_shared<TestMediaRuntime>();
+		auto previewChannelRuntime = std::make_shared<TestChannelRuntime>();
+		previewRuntime->addChannelRuntime(
+			7006,
+			u"nativeiv"_q,
+			previewChannelRuntime);
+		auto previewSource = NativeIvSource(QVector<MTPPageBlock>{
+			channelFixture.block,
+		});
+		auto previewPrepared = TryPrepareNativeInstantView({
+			.source = &previewSource,
+			.mediaRuntime = previewRuntime,
+		});
+		Check(
+			previewPrepared.supported(),
+			channelLabel + u" preview prepare supported"_q,
+			ok);
+		if (previewPrepared.supported()) {
+			auto window = Ui::RpWindow();
+			window.setGeometry(QRect(0, 0, 420, 240));
+			window.show();
+			FlushPendingWidgetEvents();
+			auto preview = CreateMarkdownPreviewWidget(
+				window.body(),
+				std::move(previewPrepared.content),
+				renderer,
+				[](Event) {
+				});
+			preview->setGeometry(QRect(QPoint(), window.body()->size()));
+			preview->show();
+			FlushPendingWidgetEvents();
+			const auto body = FindChildObject<MarkdownDocumentWidget>(
+				preview.get());
+			Check(
+				body != nullptr,
+				channelLabel + u" preview body widget"_q,
+				ok);
+			if (body) {
+				auto counter = WidgetEventCounter();
+				body->installEventFilter(&counter);
+				const auto previewBefore = RenderWidgetForTest(body);
+				counter.reset();
+				previewChannelRuntime->joinVisibleValue = false;
+				previewRuntime->fireChannelJoinedChange(7006);
+				FlushPendingWidgetEvents();
+				const auto repainted = (counter.paintCount > 0)
+					|| (counter.updateRequestCount > 0);
+				const auto previewAfter = RenderWidgetForTest(body);
+				Check(
+					repainted,
+					channelLabel + u" joined change triggers preview repaint"_q,
+					ok);
+				Check(
+					PixelsDifferInRect(
+						previewBefore,
+						previewAfter,
+						QRect(QPoint(), previewAfter.size())),
+					channelLabel + u" preview repaint changes rendered pixels"_q,
+					ok);
+				body->removeEventFilter(&counter);
+			}
+		}
+	}
+
+	const auto channelRelayoutLabel = u"native-iv-channel-relayout"_q;
+	const auto relayoutChannelId = uint64(7007);
+	const auto relayoutChannelUsername = u"nativeinstantviewrelayout"_q;
+	const auto relayoutChannelBlock = MTP_pageBlockChannel(NativeIvChannelChat(
+		relayoutChannelId,
+		u"Native Instant View Channel Title That Wraps When The Join Button Is Visible"_q,
+		relayoutChannelUsername));
+	auto joinedLayoutRuntime = std::make_shared<TestMediaRuntime>();
+	auto joinedLayoutChannelRuntime = std::make_shared<TestChannelRuntime>();
+	joinedLayoutChannelRuntime->joinVisibleValue = false;
+	joinedLayoutRuntime->addChannelRuntime(
+		relayoutChannelId,
+		relayoutChannelUsername,
+		joinedLayoutChannelRuntime);
+	auto joinedLayoutSource = NativeIvSource(QVector<MTPPageBlock>{
+		relayoutChannelBlock,
+	});
+	auto joinedLayoutPrepared = TryPrepareNativeInstantView({
+		.source = &joinedLayoutSource,
+		.mediaRuntime = joinedLayoutRuntime,
+	});
+	Check(
+		joinedLayoutPrepared.supported(),
+		channelRelayoutLabel + u" hidden prepare supported"_q,
+		ok);
+	auto joinedLayoutHeight = 0;
+	if (joinedLayoutPrepared.supported()) {
+		auto joinedLayoutArticle = BuildArticleForTest(
+			std::move(joinedLayoutPrepared.content),
+			renderer,
+			320,
+			&joinedLayoutHeight);
+		const auto joinedLayoutJoinBounds = HitBoundsWhere(
+			joinedLayoutArticle.get(),
+			320,
+			joinedLayoutHeight,
+			lookupFlags,
+			[](const MarkdownArticleHitTestResult &hit) {
+				return hit.mediaActivation.kind
+					== MediaActivationKind::JoinChannel;
+			});
+		Check(
+			!joinedLayoutJoinBounds.has_value(),
+			channelRelayoutLabel + u" hidden layout has no join bounds"_q,
+			ok);
+	}
+
+	auto articleRelayoutRuntime = std::make_shared<TestMediaRuntime>();
+	auto articleRelayoutChannelRuntime = std::make_shared<TestChannelRuntime>();
+	articleRelayoutRuntime->addChannelRuntime(
+		relayoutChannelId,
+		relayoutChannelUsername,
+		articleRelayoutChannelRuntime);
+	auto articleRelayoutSource = NativeIvSource(QVector<MTPPageBlock>{
+		relayoutChannelBlock,
+	});
+	auto articleRelayoutPrepared = TryPrepareNativeInstantView({
+		.source = &articleRelayoutSource,
+		.mediaRuntime = articleRelayoutRuntime,
+	});
+	Check(
+		articleRelayoutPrepared.supported(),
+		channelRelayoutLabel + u" article prepare supported"_q,
+		ok);
+	if (articleRelayoutPrepared.supported() && (joinedLayoutHeight > 0)) {
+		auto articleRelayoutHeight = 0;
+		auto articleRelayout = BuildArticleForTest(
+			std::move(articleRelayoutPrepared.content),
+			renderer,
+			320,
+			&articleRelayoutHeight);
+		const auto articleJoinBounds = HitBoundsWhere(
+			articleRelayout.get(),
+			320,
+			articleRelayoutHeight,
+			lookupFlags,
+			[](const MarkdownArticleHitTestResult &hit) {
+				return hit.mediaActivation.kind
+					== MediaActivationKind::JoinChannel;
+			});
+		Check(
+			articleJoinBounds.has_value(),
+			channelRelayoutLabel + u" visible layout has join bounds"_q,
+			ok);
+		articleRelayoutChannelRuntime->joinVisibleValue = false;
+		articleRelayout->invalidateLayout();
+		articleRelayoutHeight = articleRelayout->resizeGetHeight(320);
+		const auto articleJoinedBounds = HitBoundsWhere(
+			articleRelayout.get(),
+			320,
+			articleRelayoutHeight,
+			lookupFlags,
+			[](const MarkdownArticleHitTestResult &hit) {
+				return hit.mediaActivation.kind
+					== MediaActivationKind::JoinChannel;
+			});
+		Check(
+			!articleJoinedBounds.has_value(),
+			channelRelayoutLabel
+				+ u" invalidated relayout hides join bounds"_q,
+			ok);
+		Check(
+			articleRelayoutHeight == joinedLayoutHeight,
+			channelRelayoutLabel
+				+ u" invalidated relayout matches hidden layout"_q,
+			ok);
+	}
+
+	auto previewRelayoutRuntime = std::make_shared<TestMediaRuntime>();
+	auto previewRelayoutChannelRuntime = std::make_shared<TestChannelRuntime>();
+	previewRelayoutRuntime->addChannelRuntime(
+		relayoutChannelId,
+		relayoutChannelUsername,
+		previewRelayoutChannelRuntime);
+	auto previewRelayoutSource = NativeIvSource(QVector<MTPPageBlock>{
+		relayoutChannelBlock,
+	});
+	auto previewRelayoutPrepared = TryPrepareNativeInstantView({
+		.source = &previewRelayoutSource,
+		.mediaRuntime = previewRelayoutRuntime,
+	});
+	Check(
+		previewRelayoutPrepared.supported(),
+		channelRelayoutLabel + u" preview prepare supported"_q,
+		ok);
+	if (previewRelayoutPrepared.supported() && (joinedLayoutHeight > 0)) {
+		auto window = Ui::RpWindow();
+		window.setGeometry(QRect(0, 0, 320, 320));
+		window.show();
+		FlushPendingWidgetEvents();
+		auto preview = CreateMarkdownPreviewWidget(
+			window.body(),
+			std::move(previewRelayoutPrepared.content),
+			renderer,
+			[](Event) {
+			});
+		preview->setGeometry(QRect(QPoint(), window.body()->size()));
+		preview->show();
+		FlushPendingWidgetEvents();
+		const auto body = FindChildObject<MarkdownDocumentWidget>(
+			preview.get());
+		Check(
+			body != nullptr,
+			channelRelayoutLabel + u" preview body widget"_q,
+			ok);
+		if (body) {
+			auto counter = WidgetEventCounter();
+			body->installEventFilter(&counter);
+			const auto beforeHeight = body->height();
+			counter.reset();
+			previewRelayoutChannelRuntime->joinVisibleValue = false;
+			previewRelayoutRuntime->fireChannelJoinedChange(relayoutChannelId);
+			FlushPendingWidgetEvents();
+			const auto repainted = (counter.paintCount > 0)
+				|| (counter.updateRequestCount > 0);
+			const auto afterHeight = body->height();
+			Check(
+				beforeHeight > joinedLayoutHeight,
+				channelRelayoutLabel + u" join visible height larger"_q,
+				ok);
+			Check(
+				afterHeight == joinedLayoutHeight,
+				channelRelayoutLabel
+					+ u" joined change relayout matches hidden layout"_q,
+				ok);
+			Check(
+				repainted,
+				channelRelayoutLabel + u" joined change triggers preview repaint"_q,
+				ok);
+			body->removeEventFilter(&counter);
+		}
+	}
+
+	const auto collageLabel = u"native-iv-collage-article"_q;
+	auto collageRuntime = std::make_shared<TestMediaRuntime>();
+	auto collagePhotoRuntime = std::make_shared<TestPhotoRuntime>();
+	collagePhotoRuntime->thumbnailImage = std::make_shared<TestDynamicImage>();
+	collagePhotoRuntime->fullImage = std::make_shared<TestDynamicImage>();
+	auto collageDocumentRuntime = std::make_shared<TestDocumentRuntime>();
+	collageDocumentRuntime->thumbnailImage = std::make_shared<TestDynamicImage>();
+	collageDocumentRuntime->fullImage = std::make_shared<TestDynamicImage>();
+	collageRuntime->addPhotoRuntime(9102, collagePhotoRuntime);
+	collageRuntime->addDocumentRuntime(7003, collageDocumentRuntime);
+	auto collageSource = NativeIvSource(
+		QVector<MTPPageBlock>{ collageFixture.block },
+		collageFixture.photos,
+		collageFixture.documents);
+	auto collagePrepared = TryPrepareNativeInstantView({
+		.source = &collageSource,
+		.mediaRuntime = collageRuntime,
+	});
+	Check(
+		collagePrepared.supported(),
+		collageLabel + u" prepare supported"_q,
+		ok);
+	if (collagePrepared.supported()) {
+		auto collageHeight = 0;
+		auto collageArticle = BuildArticleForTest(
+			std::move(collagePrepared.content),
+			renderer,
+			460,
+			&collageHeight);
+		const auto collageImage = PaintArticleForTest(
+			collageArticle.get(),
+			460,
+			collageHeight);
+		Check(
+			HasPaintedPixels(collageImage),
+			collageLabel + u" paint produced pixels"_q,
+			ok);
+		Check(
+			collageRuntime->photoRequests.size() == 1
+				&& (collageRuntime->photoRequests.front() == 9102),
+			collageLabel + u" photo resolve request"_q,
+			ok);
+		Check(
+			collageRuntime->documentRequests.size() == 1
+				&& (collageRuntime->documentRequests.front() == 7003),
+			collageLabel + u" document resolve request"_q,
+			ok);
+		const auto collagePhotoBounds = HitBoundsWhere(
+			collageArticle.get(),
+			460,
+			collageHeight,
+			lookupFlags,
+			[&](const MarkdownArticleHitTestResult &hit) {
+				return hit.mediaActivation.kind == MediaActivationKind::Photo
+					&& hit.mediaActivation.photo.get()
+						== collagePhotoRuntime.get();
+			});
+		const auto collageVideoBounds = HitBoundsWhere(
+			collageArticle.get(),
+			460,
+			collageHeight,
+			lookupFlags,
+			[&](const MarkdownArticleHitTestResult &hit) {
+				return hit.mediaActivation.kind == MediaActivationKind::Document
+					&& hit.mediaActivation.document.get()
+						== collageDocumentRuntime.get();
+			});
+		Check(
+			collagePhotoBounds.has_value(),
+			collageLabel + u" photo item bounds"_q,
+			ok);
+		Check(
+			collageVideoBounds.has_value(),
+			collageLabel + u" video item bounds"_q,
+			ok);
+		if (collagePhotoBounds) {
+			const auto hit = collageArticle->hitTest(
+				collagePhotoBounds->center(),
+				lookupFlags);
+			if (hit.mediaActivation.photo) {
+				hit.mediaActivation.photo->open(Qt::LeftButton);
+			}
+			const auto context = collageArticle->textForContext(hit);
+			Check(
+				context.expanded == collageFixture.caption,
+				collageLabel + u" context export text"_q,
+				ok);
+		}
+		if (collageVideoBounds) {
+			const auto hit = collageArticle->hitTest(
+				collageVideoBounds->center(),
+				lookupFlags);
+			if (hit.mediaActivation.document) {
+				hit.mediaActivation.document->open(Qt::LeftButton);
+			}
+		}
+		Check(
+			collagePhotoRuntime->openedButtons.size() == 1,
+			collageLabel + u" photo open intent"_q,
+			ok);
+		Check(
+			collageDocumentRuntime->openedButtons.size() == 1,
+			collageLabel + u" video open intent"_q,
+			ok);
+		const auto collageSelection = collageArticle->textForSelection({
+			.from = { .segment = 0, .offset = 0 },
+			.to = { .segment = 0, .offset = 1 },
+		}, nullptr);
+		Check(
+			collageSelection.expanded == collageFixture.caption,
+			collageLabel + u" selection export text"_q,
+			ok);
+		const auto collageCaptionSelection = collageArticle->textForSelection({
+			.from = { .segment = 1, .offset = 0 },
+			.to = {
+				.segment = 1,
+				.offset = collageArticle->segmentLength(1),
+			},
+		}, nullptr);
+		Check(
+			collageCaptionSelection.expanded == collageFixture.caption,
+			collageLabel + u" caption selection export"_q,
+			ok);
+	}
+
+	const auto slideshowLabel = u"native-iv-slideshow-article"_q;
+	auto slideshowRuntime = std::make_shared<TestMediaRuntime>();
+	auto slideshowDocumentA = std::make_shared<TestDocumentRuntime>();
+	slideshowDocumentA->thumbnailImage = std::make_shared<TestDynamicImage>();
+	slideshowDocumentA->fullImage = std::make_shared<TestDynamicImage>();
+	auto slideshowDocumentB = std::make_shared<TestDocumentRuntime>();
+	slideshowDocumentB->thumbnailImage = std::make_shared<TestDynamicImage>();
+	slideshowDocumentB->fullImage = std::make_shared<TestDynamicImage>();
+	slideshowRuntime->addDocumentRuntime(7004, slideshowDocumentA);
+	slideshowRuntime->addDocumentRuntime(7005, slideshowDocumentB);
+	auto slideshowSource = NativeIvSource(
+		QVector<MTPPageBlock>{ slideshowFixture.block },
+		slideshowFixture.photos,
+		slideshowFixture.documents);
+	auto slideshowPrepared = TryPrepareNativeInstantView({
+		.source = &slideshowSource,
+		.mediaRuntime = slideshowRuntime,
+	});
+	Check(
+		slideshowPrepared.supported(),
+		slideshowLabel + u" prepare supported"_q,
+		ok);
+	if (slideshowPrepared.supported()) {
+		auto slideshowHeight = 0;
+		auto slideshowArticle = BuildArticleForTest(
+			std::move(slideshowPrepared.content),
+			renderer,
+			460,
+			&slideshowHeight);
+		const auto slideshowImage = PaintArticleForTest(
+			slideshowArticle.get(),
+			460,
+			slideshowHeight);
+		Check(
+			HasPaintedPixels(slideshowImage),
+			slideshowLabel + u" paint produced pixels"_q,
+			ok);
+		Check(
+			slideshowRuntime->documentRequests.size() == 2,
+			slideshowLabel + u" document resolve request count"_q,
+			ok);
+		const auto slideshowItemBounds = HitBoundsWhere(
+			slideshowArticle.get(),
+			460,
+			slideshowHeight,
+			lookupFlags,
+			[&](const MarkdownArticleHitTestResult &hit) {
+				return hit.mediaActivation.kind == MediaActivationKind::Document
+					&& hit.mediaActivation.document.get()
+						== slideshowDocumentA.get();
+			});
+		Check(
+			slideshowItemBounds.has_value(),
+			slideshowLabel + u" document item bounds"_q,
+			ok);
+		if (slideshowItemBounds) {
+			const auto hit = slideshowArticle->hitTest(
+				slideshowItemBounds->center(),
+				lookupFlags);
+			if (hit.mediaActivation.document) {
+				hit.mediaActivation.document->open(Qt::LeftButton);
+			}
+			const auto context = slideshowArticle->textForContext(hit);
+			Check(
+				context.expanded
+					== (tr::lng_media_selected_video(tr::now, lt_count, 2)
+						+ u"\n"_q
+						+ slideshowFixture.caption),
+				slideshowLabel + u" context export text"_q,
+				ok);
+		}
+		const auto slideshowSelection = slideshowArticle->textForSelection({
+			.from = { .segment = 0, .offset = 0 },
+			.to = { .segment = 0, .offset = 1 },
+		}, nullptr);
+		Check(
+			slideshowSelection.expanded
+				== (tr::lng_media_selected_video(tr::now, lt_count, 2)
+					+ u"\n"_q
+					+ slideshowFixture.caption),
+			slideshowLabel + u" selection export text"_q,
+			ok);
+		const auto slideshowCaptionSelection = slideshowArticle->textForSelection({
+			.from = { .segment = 1, .offset = 0 },
+			.to = {
+				.segment = 1,
+				.offset = slideshowArticle->segmentLength(1),
+			},
+		}, nullptr);
+		Check(
+			slideshowCaptionSelection.expanded == slideshowFixture.caption,
+			slideshowLabel + u" caption selection export"_q,
+			ok);
+		Check(
+			slideshowDocumentA->openedButtons.size() == 1,
+			slideshowLabel + u" document open intent"_q,
+			ok);
+	}
 }
 
 void CheckPrepareCoverage(

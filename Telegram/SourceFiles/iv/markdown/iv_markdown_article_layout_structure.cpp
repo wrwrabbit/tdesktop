@@ -57,6 +57,11 @@ namespace {
 	case PreparedBlockKind::DisplayMath:
 	case PreparedBlockKind::Table:
 	case PreparedBlockKind::Photo:
+	case PreparedBlockKind::Video:
+	case PreparedBlockKind::Audio:
+	case PreparedBlockKind::Map:
+	case PreparedBlockKind::Channel:
+	case PreparedBlockKind::GroupedMedia:
 	case PreparedBlockKind::Placeholder:
 	case PreparedBlockKind::Details:
 		return false;
@@ -546,6 +551,46 @@ namespace {
 			width);
 	case PreparedBlockKind::Photo:
 		return LayoutPhotoBlock(
+			prepared,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
+			markdown,
+			left,
+			top,
+			width);
+	case PreparedBlockKind::Video:
+		return LayoutVideoBlock(
+			prepared,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
+			markdown,
+			left,
+			top,
+			width);
+	case PreparedBlockKind::Audio:
+		return LayoutAudioBlock(
+			prepared,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
+			markdown,
+			left,
+			top,
+			width);
+	case PreparedBlockKind::Map:
+		return LayoutMapBlock(
+			prepared,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
+			markdown,
+			left,
+			top,
+			width);
+	case PreparedBlockKind::Channel:
+		return LayoutChannelBlock(
 			prepared,
 			formulas,
 			inlineFormulaObjects,
