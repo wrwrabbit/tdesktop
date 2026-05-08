@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "webview/webview_interface.h"
 #include "base/debug_log.h"
 #include "base/invoke_queued.h"
+#include "base/options.h"
 #include "base/qt_signal_producer.h"
 #include "styles/style_chat.h"
 #include "styles/style_payments.h"
@@ -46,6 +47,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/qpa/qplatformscreen.h>
 
 namespace Ui::BotWebView {
+
+const char kOptionLinuxExternalBotWebApps[] = "linux-external-bot-webapps";
+
 namespace {
 
 constexpr auto kClipboardReadTimeout = crl::time(10000);
@@ -53,6 +57,15 @@ constexpr auto kProgressDuration = crl::time(200);
 constexpr auto kProgressOpacity = 0.3;
 constexpr auto kLightnessThreshold = 128;
 constexpr auto kLightnessDelta = 32;
+
+base::options::toggle OptionLinuxExternalBotWebApps({
+	.id = kOptionLinuxExternalBotWebApps,
+	.name = "Use external Linux bot web app windows",
+	.description = "Open bot web apps in a top-level WebKitGTK window"
+		" with an HTML shell instead of embedding the GTK surface.",
+	.scope = base::options::linux,
+	.restartRequired = true,
+});
 
 struct ButtonArgs {
 	bool isActive = false;
@@ -86,6 +99,466 @@ struct ButtonArgs {
 		return {};
 	}
 	return dictionary.object();
+}
+
+[[nodiscard]] bool UseExternalBotWebApps() {
+	static const auto Result = OptionLinuxExternalBotWebApps.relevant()
+		&& OptionLinuxExternalBotWebApps.value();
+	return Result;
+}
+
+[[nodiscard]] QByteArray JsonValue(QJsonValue value) {
+	auto array = QJsonArray();
+	array.push_back(std::move(value));
+	auto result = QJsonDocument(array).toJson(QJsonDocument::Compact);
+	return result.mid(1, result.size() - 2);
+}
+
+[[nodiscard]] QByteArray JsonObject(QJsonObject object) {
+	return QJsonDocument(std::move(object)).toJson(QJsonDocument::Compact);
+}
+
+[[nodiscard]] QJsonValue ColorValue(QColor color) {
+	return color.isValid()
+		? QJsonValue(color.name(QColor::HexRgb))
+		: QJsonValue();
+}
+
+[[nodiscard]] QByteArray ExternalShellCss() {
+	return R"(
+html, body, #root {
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	overflow: hidden;
+}
+body {
+	font: 14px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	background: var(--body-bg, #ffffff);
+	color: var(--fg, #000000);
+}
+#root {
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr) auto;
+	position: relative;
+}
+#header {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+	align-items: center;
+	height: 48px;
+	background: var(--title-bg, #ffffff);
+	color: var(--title-fg, #000000);
+	border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+#title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-weight: 600;
+	padding: 0 10px;
+}
+.icon {
+	width: 44px;
+	height: 44px;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	font-size: 22px;
+	cursor: default;
+}
+.icon:hover {
+	background: rgba(127, 127, 127, 0.14);
+}
+.hidden {
+	display: none !important;
+}
+#frame-wrap {
+	min-height: 0;
+}
+#frame-wrap iframe {
+	display: block;
+	width: 100%;
+	height: 100%;
+	border: 0;
+	background: var(--body-bg, #ffffff);
+}
+#footer {
+	background: var(--bottom-bg, var(--body-bg, #ffffff));
+	border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+#buttons {
+	display: grid;
+	gap: 8px;
+	padding: 10px;
+}
+.shell-button {
+	height: 42px;
+	border: 0;
+	border-radius: 8px;
+	padding: 0 14px;
+	font: inherit;
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.shell-button:disabled {
+	opacity: 0.55;
+}
+.shell-button.progress::after {
+	content: "";
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	margin-left: 8px;
+	border: 2px solid currentColor;
+	border-right-color: transparent;
+	border-radius: 50%;
+	vertical-align: -2px;
+	animation: spin 0.8s linear infinite;
+}
+#blocker {
+	display: none;
+	position: absolute;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.10);
+	z-index: 10;
+}
+#root.blocked #blocker {
+	display: block;
+}
+@keyframes spin {
+	to { transform: rotate(360deg); }
+}
+)";
+}
+
+[[nodiscard]] QByteArray ExternalShellJs() {
+	return R"(
+(function() {
+	'use strict';
+
+	const root = document.getElementById('root');
+	const frameWrap = document.getElementById('frame-wrap');
+	const title = document.getElementById('title');
+	const footer = document.getElementById('footer');
+	const buttonsWrap = document.getElementById('buttons');
+	const controls = {
+		back: document.getElementById('back'),
+		settings: document.getElementById('settings'),
+		reload: document.getElementById('reload'),
+		close: document.getElementById('close')
+		};
+		let iframe = null;
+		let frameLoaded = false;
+		let frameUrl = 'about:blank';
+		let reloadSupported = false;
+		let reloadTimeout = null;
+		const pendingEvents = [];
+		const buttonState = {
+			main: null,
+			secondary: null
+		};
+
+	function invoke(eventType, eventData) {
+		if (window.external && window.external.invoke) {
+			window.external.invoke(JSON.stringify([
+				eventType,
+				JSON.stringify(eventData || {})
+			]));
+			}
+		}
+
+		function sendToFrame(eventType, eventData) {
+			iframe.contentWindow.postMessage(JSON.stringify({
+				eventType: eventType,
+				eventData: eventData || {}
+			}), '*');
+		}
+
+		function postToFrame(eventType, eventData) {
+			if (!iframe || !iframe.contentWindow || !frameLoaded) {
+				pendingEvents.push({
+					eventType: eventType,
+					eventData: eventData || {}
+				});
+				return;
+			}
+			sendToFrame(eventType, eventData);
+		}
+
+	function flushPendingEvents() {
+		const pending = pendingEvents.splice(0);
+		for (const event of pending) {
+			postToFrame(event.eventType, event.eventData);
+		}
+	}
+
+	function sendViewportChanged() {
+		if (!iframe) {
+			return;
+		}
+		const height = Math.max(0, Math.round(iframe.getBoundingClientRect().height));
+		postToFrame('viewport_changed', {
+			height: height,
+			is_state_stable: true,
+			is_expanded: true
+		});
+	}
+
+		function colorForBackground(value) {
+			if (!/^#[0-9a-f]{6}$/i.test(value || '')) {
+				return null;
+			}
+			const red = parseInt(value.slice(1, 3), 16) / 255;
+			const green = parseInt(value.slice(3, 5), 16) / 255;
+			const blue = parseInt(value.slice(5, 7), 16) / 255;
+			const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+			return luminance > 0.5 ? '#000000' : '#ffffff';
+		}
+
+		function applyColors(data) {
+			if (data.bodyBg) {
+				root.style.setProperty('--body-bg', data.bodyBg);
+			}
+			if (data.titleBg) {
+				root.style.setProperty('--title-bg', data.titleBg);
+				const titleFg = colorForBackground(data.titleBg);
+				if (titleFg) {
+					root.style.setProperty('--title-fg', titleFg);
+				}
+			}
+			if (data.bottomBg) {
+				root.style.setProperty('--bottom-bg', data.bottomBg);
+		}
+	}
+
+	function renderButtons() {
+		buttonsWrap.textContent = '';
+		const visible = [];
+		if (buttonState.secondary && buttonState.secondary.visible) {
+			visible.push(buttonState.secondary);
+		}
+		if (buttonState.main && buttonState.main.visible) {
+			visible.push(buttonState.main);
+		}
+		for (const state of visible) {
+			const button = document.createElement('button');
+			button.type = 'button';
+			button.className = 'shell-button';
+			if (state.progress) {
+				button.classList.add('progress');
+			}
+			button.textContent = state.text || '';
+			button.disabled = !state.active;
+			button.style.background = state.color || '#40a7e3';
+			button.style.color = state.textColor || '#ffffff';
+			button.addEventListener('click', function() {
+				if (!button.disabled) {
+					postToFrame(state.name + '_button_pressed', {});
+				}
+			});
+			buttonsWrap.appendChild(button);
+		}
+		footer.classList.toggle('hidden', !visible.length);
+		requestAnimationFrame(sendViewportChanged);
+	}
+
+		function parseFrameMessage(data) {
+			if (typeof data === 'string') {
+				try {
+					return JSON.parse(data);
+				} catch (e) {
+				return null;
+			}
+		}
+		return data && typeof data === 'object' ? data : null;
+	}
+
+	window.addEventListener('message', function(event) {
+		if (!iframe || event.source !== iframe.contentWindow) {
+			return;
+		}
+		const message = parseFrameMessage(event.data);
+			if (!message || !message.eventType) {
+				return;
+			}
+			if (message.eventType === 'iframe_ready') {
+				reloadSupported = !!(message.eventData && message.eventData.reload_supported);
+			} else if (message.eventType === 'iframe_will_reload') {
+				if (reloadTimeout) {
+					window.clearTimeout(reloadTimeout);
+					reloadTimeout = null;
+				}
+				frameLoaded = false;
+			}
+			invoke(message.eventType, message.eventData || {});
+		});
+
+		function createIframe(url) {
+			if (reloadTimeout) {
+				window.clearTimeout(reloadTimeout);
+				reloadTimeout = null;
+			}
+			const next = document.createElement('iframe');
+			next.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen');
+			next.addEventListener('load', function() {
+				if (iframe !== next) {
+					return;
+				}
+				frameLoaded = true;
+				flushPendingEvents();
+				sendViewportChanged();
+			});
+			frameLoaded = false;
+			reloadSupported = false;
+			if (iframe) {
+				iframe.remove();
+			}
+			iframe = next;
+			iframe.src = url || 'about:blank';
+			frameWrap.appendChild(iframe);
+		}
+
+		function fallbackReloadFrame() {
+			createIframe(frameUrl || 'about:blank');
+		}
+
+		controls.close.addEventListener('click', function() {
+			invoke('tdesktop_shell_close', {});
+		});
+		controls.back.addEventListener('click', function() {
+			postToFrame('back_button_pressed', {});
+	});
+	controls.settings.addEventListener('click', function() {
+			postToFrame('settings_button_pressed', {});
+		});
+		controls.reload.addEventListener('click', function() {
+			if (!iframe) {
+				return;
+			}
+			if (reloadSupported && frameLoaded && iframe.contentWindow) {
+				sendToFrame('reload_iframe', {});
+				if (reloadTimeout) {
+					window.clearTimeout(reloadTimeout);
+				}
+				reloadTimeout = window.setTimeout(function() {
+					reloadTimeout = null;
+					fallbackReloadFrame();
+				}, 500);
+				return;
+			}
+			fallbackReloadFrame();
+		});
+
+		window.TelegramDesktopShell = {
+			bootstrap: function(data) {
+				applyColors(data || {});
+				title.textContent = data.title || '';
+				document.title = data.title || 'Telegram';
+				frameUrl = data.url || 'about:blank';
+				createIframe(frameUrl);
+				controls.back.classList.toggle('hidden', !data.backVisible);
+				controls.settings.classList.toggle('hidden', !data.settingsVisible);
+			},
+		nativeEvent: function(eventType, eventData) {
+			postToFrame(eventType, eventData || {});
+		},
+			setTitle: function(data) {
+				title.textContent = (data && data.title) || '';
+				document.title = (data && data.title) || 'Telegram';
+			},
+		setChrome: function(data) {
+			controls.back.classList.toggle('hidden', !(data && data.backVisible));
+			controls.settings.classList.toggle('hidden', !(data && data.settingsVisible));
+		},
+		setColors: function(data) {
+			applyColors(data || {});
+		},
+		setBottomText: function(data) {
+			requestAnimationFrame(sendViewportChanged);
+		},
+		setButton: function(data) {
+			if (!data || !data.name) {
+				return;
+			}
+			buttonState[data.name] = data;
+			renderButtons();
+		},
+		setBlocked: function(data) {
+			root.classList.toggle('blocked', !!(data && data.blocked));
+		},
+		setProgress: function(data) {
+			root.classList.toggle('loading', !!(data && data.shown));
+		},
+		sendViewport: sendViewportChanged
+	};
+})();
+)";
+}
+
+[[nodiscard]] QByteArray ExternalShellBodyHtml() {
+	auto result = QByteArray();
+	result.reserve(1024);
+	result += R"(<div id="root">
+<header id="header">
+<button id="back" class="icon hidden" type="button">&lsaquo;</button>
+<div id="title"></div>
+<button id="settings" class="icon hidden" type="button">&#9881;</button>
+<button id="reload" class="icon" type="button">&#8635;</button>
+<button id="close" class="icon" type="button">&times;</button>
+</header>
+<main id="frame-wrap"></main>
+<footer id="footer" class="hidden">
+<div id="buttons"></div>
+</footer>
+<div id="blocker"></div>
+</div>)";
+	return result;
+}
+
+[[nodiscard]] QByteArray ExternalShellInstallScript() {
+	const auto css = QString::fromUtf8(ExternalShellCss());
+	const auto body = QString::fromUtf8(ExternalShellBodyHtml());
+	auto script = QByteArray();
+	script += "if (window === window.top"
+		" && !window.TelegramDesktopShell"
+		" && !window.TelegramDesktopShellInstalling) {"
+		"window.TelegramDesktopShellInstalling = true;"
+		"try {"
+		"if (!document.head) {"
+		"document.documentElement.insertBefore("
+		"document.createElement('head'),"
+		"document.documentElement.firstChild);"
+		"}"
+		"if (!document.body) {"
+		"document.documentElement.appendChild(document.createElement('body'));"
+		"}"
+		"document.title = 'Telegram';"
+		"const metaRobots = document.createElement('meta');"
+		"metaRobots.name = 'robots';"
+		"metaRobots.content = 'noindex, nofollow';"
+		"document.head.appendChild(metaRobots);"
+		"const metaViewport = document.createElement('meta');"
+		"metaViewport.name = 'viewport';"
+		"metaViewport.content = 'width=device-width, initial-scale=1.0';"
+		"document.head.appendChild(metaViewport);"
+		"const style = document.createElement('style');"
+		"style.textContent = ";
+	script += JsonValue(css);
+	script += ";"
+		"document.head.appendChild(style);"
+		"document.body.insertAdjacentHTML('beforeend', ";
+	script += JsonValue(body);
+	script += ");";
+	script += ExternalShellJs();
+	script += "} finally {"
+		"window.TelegramDesktopShellInstalling = false;"
+		"}"
+		"}";
+	return script;
 }
 
 [[nodiscard]] std::optional<QColor> ParseColor(const QString &text) {
@@ -402,12 +875,18 @@ Panel::Progress::Progress(QWidget *parent, Fn<QRect()> rect)
 Panel::Panel(Args &&args)
 : _storageId(args.storageId)
 , _delegate(args.delegate)
+, _externalShell(UseExternalBotWebApps())
 , _menuButtons(args.menuButtons)
+, _externalPanelParent(_externalShell ? std::make_unique<RpWidget>() : nullptr)
 , _widget(std::make_unique<SeparatePanel>(Ui::SeparatePanelArgs{
-	.menuSt = &st::botWebViewMenu,
-}))
+			.parent = _externalPanelParent.get(),
+			.menuSt = &st::botWebViewMenu,
+		}))
 , _fullscreen(args.fullscreen)
 , _allowClipboardRead(args.allowClipboardRead) {
+	if (_externalShell) {
+		_widget->setAttribute(Qt::WA_DontShowOnScreen);
+	}
 	_widget->setWindowFlag(Qt::WindowStaysOnTopHint, false);
 	_widget->setInnerSize(st::botWebViewPanelSize, true);
 
@@ -476,6 +955,7 @@ Panel::Panel(Args &&args)
 	_widget->setTitleBadge(std::move(args.titleBadge));
 
 	if (!showWebview(std::move(args), params)) {
+		_externalShell = false;
 		const auto available = Webview::Availability();
 		if (available.error != Webview::Available::Error::None) {
 			showWebviewError(tr::lng_bot_no_webview(tr::now), available);
@@ -488,7 +968,9 @@ Panel::Panel(Args &&args)
 Panel::~Panel() {
 	base::take(_webview);
 	_progress = nullptr;
+	_externalWebviewParent = nullptr;
 	_widget = nullptr;
+	_externalPanelParent = nullptr;
 }
 
 void Panel::setupDownloadsProgress(
@@ -589,6 +1071,12 @@ void Panel::setupDownloadsProgress(
 }
 
 void Panel::requestActivate() {
+	if (_externalShell) {
+		if (_webview) {
+			_webview->window.focus();
+		}
+		return;
+	}
 	_widget->showAndActivate();
 	if (const auto widget = _webview ? _webview->window.widget() : nullptr) {
 		InvokeQueued(widget, [=] {
@@ -600,6 +1088,10 @@ void Panel::requestActivate() {
 }
 
 void Panel::toggleProgress(bool shown) {
+	if (_externalShell) {
+		sendExternalShellMethod("setProgress", { { u"shown"_q, shown } });
+		return;
+	}
 	if (!_progress) {
 		if (!shown) {
 			return;
@@ -717,20 +1209,33 @@ void Panel::hideWebviewProgress() {
 
 bool Panel::showWebview(Args &&args, const Webview::ThemeParams &params) {
 	_bottomText = std::move(args.bottom);
+	_externalUrl = args.url;
 	if (!_webview && !createWebview(params)) {
 		return false;
 	}
 	const auto allowBack = false;
 	showWebviewProgress();
-	_widget->hideLayer(anim::type::instant);
+	if (!_externalShell) {
+		_widget->hideLayer(anim::type::instant);
+	}
 	updateThemeParams(params);
 	const auto url = args.url;
-	_webview->window.navigate(url);
-	_widget->setBackAllowed(allowBack);
+	if (_externalShell) {
+		_externalShellBootstrapped = false;
+		_webview->window.navigate(
+			u"https://web.telegram.org/blank.html"_q);
+	} else {
+		_webview->window.navigate(url);
+		_widget->setBackAllowed(allowBack);
+	}
 
 	rpl::duplicate(args.downloadsProgress) | rpl::on_next([=] {
 		_downloadsUpdated.fire({});
 	}, lifetime());
+
+	if (_externalShell) {
+		return true;
+	}
 
 	_widget->setMenuAllowed([=](
 			const Ui::Menu::MenuCallback &callback) {
@@ -817,6 +1322,123 @@ bool Panel::showWebview(Args &&args, const Webview::ThemeParams &params) {
 	return true;
 }
 
+void Panel::installExternalShellDocument() {
+	if (!_webview) {
+		return;
+	}
+	_webview->window.eval(ExternalShellInstallScript());
+}
+
+void Panel::sendExternalShellBootstrap() {
+	const auto params = _delegate->botThemeParams();
+	sendExternalShellMethod("bootstrap", {
+		{ u"url"_q, _externalUrl },
+		{ u"title"_q, _externalTitle },
+		{ u"backVisible"_q, _externalBackVisible },
+		{ u"settingsVisible"_q, _hasSettingsButton },
+		{ u"bodyBg"_q, ColorValue(params.bodyBg) },
+		{ u"titleBg"_q, ColorValue(params.titleBg) },
+		{ u"bottomBg"_q, _bottomBarColor
+			? QJsonValue(_bottomBarColor->name(QColor::HexRgb))
+			: ColorValue(params.bodyBg) },
+	});
+	postEvent("theme_changed", "{\"theme_params\": " + params.json + "}");
+	sendFullScreen();
+	sendSafeArea();
+	sendContentSafeArea();
+}
+
+void Panel::sendExternalShellMethod(
+		const QByteArray &method,
+		const QJsonObject &data) {
+	if (!_webview) {
+		return;
+	}
+	const auto payload = JsonObject(data);
+	auto script = QByteArray();
+	script.reserve(method.size() * 2 + payload.size() + 96);
+	script += "if (window.TelegramDesktopShell"
+		" && window.TelegramDesktopShell.";
+	script += method;
+	script += ") { window.TelegramDesktopShell.";
+	script += method;
+	script += "(";
+	script += payload;
+	script += "); }";
+	_webview->window.eval(script);
+}
+
+void Panel::sendExternalShellEvent(
+		const QString &event,
+		const QByteArray &data) {
+	if (!_webview) {
+		return;
+	}
+	auto script = QByteArray();
+	script += "if (window.TelegramDesktopShell) {"
+		"window.TelegramDesktopShell.nativeEvent(";
+	script += JsonValue(event);
+	script += ", ";
+	script += (data.isEmpty() ? QByteArray("{}") : data);
+	script += "); }";
+	_webview->window.eval(script);
+}
+
+void Panel::sendExternalShellButton(
+		const char *name,
+		const QJsonObject &args) {
+	const auto text = args["text"].toString().trimmed();
+	const auto visible = args["is_visible"].toBool() && !text.isEmpty();
+	sendExternalShellMethod("setButton", {
+		{ u"name"_q, QString::fromLatin1(name) },
+		{ u"visible"_q, visible },
+		{ u"active"_q, args["is_active"].toBool() },
+		{ u"progress"_q, args["is_progress_visible"].toBool() },
+		{ u"text"_q, args["text"].toString() },
+		{ u"color"_q, args["color"].toString() },
+		{ u"textColor"_q, args["text_color"].toString() },
+		{ u"position"_q, args["position"].toString() },
+	});
+}
+
+void Panel::sendExternalShellChrome() {
+	sendExternalShellMethod("setChrome", {
+		{ u"backVisible"_q, _externalBackVisible },
+		{ u"settingsVisible"_q, _hasSettingsButton },
+	});
+}
+
+void Panel::setExternalShellBlocked(bool blocked) {
+	if (!_externalShell) {
+		return;
+	}
+	const auto was = (_externalBlockCount > 0);
+	if (blocked) {
+		++_externalBlockCount;
+	} else if (_externalBlockCount > 0) {
+		--_externalBlockCount;
+	}
+	const auto now = (_externalBlockCount > 0);
+	if (was != now) {
+		sendExternalShellMethod("setBlocked", { { u"blocked"_q, now } });
+	}
+}
+
+Webview::PopupResult Panel::showBlockingPopup(Webview::PopupArgs &&args) {
+	if (!_externalShell) {
+		return Webview::ShowBlockingPopup(std::move(args));
+	}
+	args.parent = nullptr;
+	setExternalShellBlocked(true);
+	const auto weak = base::make_weak(this);
+	const auto guard = gsl::finally([=] {
+		if (weak) {
+			weak->setExternalShellBlocked(false);
+		}
+	});
+	return Webview::ShowBlockingPopup(std::move(args));
+}
+
 void Panel::createWebviewBottom() {
 	_webviewBottom = std::make_unique<RpWidget>(_widget.get());
 	const auto bottom = _webviewBottom.get();
@@ -854,23 +1476,36 @@ void Panel::createWebviewBottom() {
 }
 
 bool Panel::createWebview(const Webview::ThemeParams &params) {
-	auto outer = base::make_unique_q<RpWidget>(_widget.get());
-	const auto container = outer.get();
-	_widget->showInner(std::move(outer));
+	RpWidget *container = nullptr;
+	if (_externalShell) {
+		_externalWebviewParent = std::make_unique<RpWidget>();
+		container = _externalWebviewParent.get();
+	} else {
+		auto outer = base::make_unique_q<RpWidget>(_widget.get());
+		container = outer.get();
+		_widget->showInner(std::move(outer));
+	}
 	_webviewParent = container;
 
 	_headerColorReceived = false;
 	_bodyColorReceived = false;
 	_bottomColorReceived = false;
 	updateColorOverrides(params);
-	createWebviewBottom();
+	if (!_externalShell) {
+		createWebviewBottom();
+	}
 
-	container->show();
+	if (!_externalShell) {
+		container->show();
+	}
 	_webview = std::make_unique<WebviewWithLifetime>(
 		container,
 		Webview::WindowConfig{
 			.opaqueBg = params.bodyBg,
 			.storageId = _storageId,
+			.mode = _externalShell
+				? Webview::WindowMode::External
+				: Webview::WindowMode::Embedded,
 		});
 	const auto raw = &_webview->window;
 
@@ -898,8 +1533,10 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 	}
 
 #if !defined Q_OS_WIN && !defined Q_OS_MAC
-	_widget->allowChildFullScreenControls(
-		!raw->widget()->inherits("QWindowContainer"));
+	if (!_externalShell) {
+		_widget->allowChildFullScreenControls(
+			!raw->widget()->inherits("QWindowContainer"));
+	}
 #endif // !Q_OS_WIN && !Q_OS_MAC
 
 	raw->setInteractionHandler([=] {
@@ -910,30 +1547,39 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 		const auto parent = _webviewParent.data();
 		if (!_webview
 			|| &_webview->window != raw
-			|| !parent
-			|| _widget->inner() != parent) {
+			|| (!_externalShell
+				&& (!parent || _widget->inner() != parent))) {
 			// If we destroyed _webview ourselves,
 			// or if we changed _widget->inner ourselves,
 			// we don't show any message, nothing crashed.
 			return;
 		}
 		crl::on_main(this, [=] {
-			showCriticalError({ "Error: WebView has crashed." });
+			if (_externalShell) {
+				_delegate->botClose();
+			} else {
+				showCriticalError({ "Error: WebView has crashed." });
+			}
 		});
 	});
 
-	rpl::combine(
-		container->geometryValue(),
-		_footerHeight.value()
-	) | rpl::on_next([=](QRect geometry, int footer) {
-		if (const auto view = raw->widget()) {
-			view->setGeometry(geometry.marginsRemoved({ 0, 0, 0, footer }));
-			crl::on_main(view, [=] {
-				sendViewport();
-				InvokeQueued(view, [=] { sendViewport(); });
-			});
-		}
-	}, _webview->lifetime);
+	if (_externalShell) {
+		raw->resize(st::botWebViewPanelSize);
+		raw->widget()->resize(st::botWebViewPanelSize);
+	} else {
+		rpl::combine(
+			container->geometryValue(),
+			_footerHeight.value()
+		) | rpl::on_next([=](QRect geometry, int footer) {
+			if (const auto view = raw->widget()) {
+				view->setGeometry(geometry.marginsRemoved({ 0, 0, 0, footer }));
+				crl::on_main(view, [=] {
+					sendViewport();
+					InvokeQueued(view, [=] { sendViewport(); });
+				});
+			}
+		}, _webview->lifetime);
+	}
 
 	raw->setMessageHandler([=](const QJsonDocument &message) {
 		if (!message.isArray()) {
@@ -946,6 +1592,12 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 		const auto arguments = ParseMethodArgs(list.at(1).toString());
 		if (command == "web_app_close") {
 			_delegate->botClose();
+		} else if (command == "tdesktop_shell_close") {
+			if (_closeNeedConfirmation) {
+				scheduleCloseWithConfirmation();
+			} else {
+				_delegate->botClose();
+			}
 		} else if (command == "web_app_data_send") {
 			sendDataMessage(arguments);
 		} else if (command == "web_app_switch_inline_query") {
@@ -1072,9 +1724,33 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 	});
 	raw->setNavigationDoneHandler([=](bool success) {
 		hideWebviewProgress();
+		if (_externalShell && !_externalShellBootstrapped) {
+			if (!success) {
+				_externalShell = false;
+				showCriticalError({ "Error: Could not initialize WebView." });
+				_widget->showAndActivate();
+				return;
+			}
+			_externalShellBootstrapped = true;
+			installExternalShellDocument();
+			sendExternalShellBootstrap();
+		}
 	});
+	if (_externalShell) {
+		raw->setDialogHandler([=](Webview::DialogArgs args) {
+			args.parent = nullptr;
+			setExternalShellBlocked(true);
+			const auto weak = base::make_weak(this);
+			const auto guard = gsl::finally([=] {
+				if (weak) {
+					weak->setExternalShellBlocked(false);
+				}
+			});
+			return Webview::DefaultDialogHandler(std::move(args));
+		});
+	}
 
-	raw->init(R"(
+	auto initScript = QByteArray(R"(
 window.TelegramWebviewProxy = {
 postEvent: function(eventType, eventData) {
 	if (window.external && window.external.invoke) {
@@ -1082,13 +1758,16 @@ postEvent: function(eventType, eventData) {
 	}
 }
 };)");
+		raw->init(initScript);
 
 	if (!_webview) {
 		return false;
 	}
 
-	layoutButtons();
-	setupProgressGeometry();
+	if (!_externalShell) {
+		layoutButtons();
+		setupProgressGeometry();
+	}
 
 	base::qt_signal_producer(
 		qApp,
@@ -1108,6 +1787,10 @@ postEvent: function(eventType, eventData) {
 }
 
 void Panel::sendViewport() {
+	if (_externalShell) {
+		sendExternalShellMethod("sendViewport", {});
+		return;
+	}
 	postEvent("viewport_changed", "{ "
 		"height: window.innerHeight, "
 		"is_state_stable: true, "
@@ -1145,7 +1828,14 @@ void Panel::sendContentSafeArea() {
 }
 
 void Panel::setTitle(rpl::producer<QString> title) {
-	_widget->setTitle(std::move(title));
+	if (!_externalShell) {
+		_widget->setTitle(std::move(title));
+		return;
+	}
+	std::move(title) | rpl::on_next([=](const QString &title) {
+		_externalTitle = title;
+		sendExternalShellMethod("setTitle", { { u"title"_q, title } });
+	}, _widget->lifetime());
 }
 
 void Panel::sendDataMessage(const QJsonObject &args) {
@@ -1435,7 +2125,7 @@ void Panel::openPopup(const QJsonObject &args) {
 	}
 	const auto widget = _webview->window.widget();
 	const auto weak = base::make_weak(this);
-	const auto result = Webview::ShowBlockingPopup({
+	const auto result = showBlockingPopup({
 		.parent = widget ? widget->window() : nullptr,
 		.title = args["title"].toString(),
 		.text = message,
@@ -1450,7 +2140,7 @@ void Panel::openPopup(const QJsonObject &args) {
 
 void Panel::openScanQrPopup(const QJsonObject &args) {
 	const auto widget = _webview->window.widget();
-	[[maybe_unused]] const auto ok = Webview::ShowBlockingPopup({
+	[[maybe_unused]] const auto ok = showBlockingPopup({
 		.parent = widget ? widget->window() : nullptr,
 		.text = tr::lng_bot_no_scan_qr(tr::now),
 		.buttons = { {
@@ -1463,7 +2153,7 @@ void Panel::openScanQrPopup(const QJsonObject &args) {
 
 void Panel::openShareStory(const QJsonObject &args) {
 	const auto widget = _webview->window.widget();
-	[[maybe_unused]] const auto ok = Webview::ShowBlockingPopup({
+	[[maybe_unused]] const auto ok = showBlockingPopup({
 		.parent = widget ? widget->window() : nullptr,
 		.text = tr::lng_bot_no_share_story(tr::now),
 		.buttons = { {
@@ -1495,7 +2185,7 @@ void Panel::requestWriteAccess() {
 		using Button = Webview::PopupArgs::Button;
 		const auto widget = _webview->window.widget();
 		const auto integration = &Ui::Integration::Instance();
-		const auto result = Webview::ShowBlockingPopup({
+		const auto result = showBlockingPopup({
 			.parent = widget ? widget->window() : nullptr,
 			.title = integration->phraseBotAllowWriteTitle(),
 			.text = integration->phraseBotAllowWrite(),
@@ -1537,7 +2227,7 @@ void Panel::requestPhone() {
 	const auto widget = _webview->window.widget();
 	const auto weak = base::make_weak(this);
 	const auto integration = &Ui::Integration::Instance();
-	const auto result = Webview::ShowBlockingPopup({
+	const auto result = showBlockingPopup({
 		.parent = widget ? widget->window() : nullptr,
 		.title = integration->phraseBotSharePhoneTitle(),
 		.text = integration->phraseBotSharePhone(),
@@ -1648,7 +2338,7 @@ void Panel::closeWithConfirmation() {
 	const auto widget = _webview->window.widget();
 	const auto weak = base::make_weak(this);
 	const auto integration = &Ui::Integration::Instance();
-	const auto result = Webview::ShowBlockingPopup({
+	const auto result = showBlockingPopup({
 		.parent = widget ? widget->window() : nullptr,
 		.title = integration->phrasePanelCloseWarning(),
 		.text = integration->phrasePanelCloseUnsaved(),
@@ -1680,6 +2370,13 @@ void Panel::processButtonMessage(
 		const QJsonObject &args) {
 	if (args.isEmpty()) {
 		_delegate->botClose();
+		return;
+	}
+	if (_externalShell) {
+		sendExternalShellButton(
+			(&button == &_mainButton) ? "main" : "secondary",
+			args);
+		sendViewport();
 		return;
 	}
 
@@ -1738,15 +2435,36 @@ void Panel::processButtonMessage(
 }
 
 void Panel::processBackButtonMessage(const QJsonObject &args) {
+	if (_externalShell) {
+		_externalBackVisible = args["is_visible"].toBool();
+		sendExternalShellChrome();
+		return;
+	}
 	_widget->setBackAllowed(args["is_visible"].toBool());
 }
 
 void Panel::processSettingsButtonMessage(const QJsonObject &args) {
 	_hasSettingsButton = args["is_visible"].toBool();
+	if (_externalShell) {
+		sendExternalShellChrome();
+	}
 }
 
 void Panel::processHeaderColor(const QJsonObject &args) {
 	_headerColorReceived = true;
+	if (_externalShell) {
+		if (const auto color = ParseColor(args["color"].toString())) {
+			sendExternalShellMethod(
+				"setColors",
+				{ { u"titleBg"_q, color->name(QColor::HexRgb) } });
+		} else if (const auto color = LookupNamedColor(
+				args["color_key"].toString())) {
+			sendExternalShellMethod(
+				"setColors",
+				{ { u"titleBg"_q, (*color)->c.name(QColor::HexRgb) } });
+		}
+		return;
+	}
 	if (const auto color = ParseColor(args["color"].toString())) {
 		_widget->overrideTitleColor(color);
 		_headerColorLifetime.destroy();
@@ -1764,6 +2482,14 @@ void Panel::processHeaderColor(const QJsonObject &args) {
 }
 
 void Panel::overrideBodyColor(std::optional<QColor> color) {
+	if (_externalShell) {
+		if (color) {
+			sendExternalShellMethod(
+				"setColors",
+				{ { u"bodyBg"_q, color->name(QColor::HexRgb) } });
+		}
+		return;
+	}
 	_widget->overrideBodyColor(color);
 	const auto raw = _webviewBottomLabel.data();
 	if (!raw) {
@@ -1814,6 +2540,23 @@ void Panel::processBackgroundColor(const QJsonObject &args) {
 
 void Panel::processBottomBarColor(const QJsonObject &args) {
 	_bottomColorReceived = true;
+	if (_externalShell) {
+		if (const auto color = ParseColor(args["color"].toString())) {
+			_bottomBarColor = color;
+			sendExternalShellMethod(
+				"setColors",
+				{ { u"bottomBg"_q, color->name(QColor::HexRgb) } });
+		} else if (const auto color = LookupNamedColor(
+				args["color_key"].toString())) {
+			_bottomBarColor = (*color)->c;
+			sendExternalShellMethod(
+				"setColors",
+				{ { u"bottomBg"_q, (*color)->c.name(QColor::HexRgb) } });
+		} else {
+			_bottomBarColor = std::nullopt;
+		}
+		return;
+	}
 	if (const auto color = ParseColor(args["color"].toString())) {
 		_widget->overrideBottomBarColor(color);
 		_bottomBarColor = color;
@@ -2004,6 +2747,26 @@ void Panel::showBox(
 		object_ptr<BoxContent> box,
 		LayerOptions options,
 		anim::type animated) {
+	if (_externalShell) {
+		setExternalShellBlocked(true);
+		auto panel = std::make_unique<SeparatePanel>();
+		panel->setWindowFlag(Qt::WindowStaysOnTopHint, false);
+		panel->setInnerSize(st::botWebViewPanelSize, true);
+		const auto rawPanel = panel.get();
+		const auto rawBox = box.data();
+		rawBox->boxClosing(
+		) | rpl::on_next([=] {
+			finishExternalBox(rawPanel);
+		}, rawPanel->lifetime());
+		rawPanel->closeEvents(
+		) | rpl::on_next([=] {
+			finishExternalBox(rawPanel);
+		}, rawPanel->lifetime());
+		rawPanel->showBox(std::move(box), options, animated);
+		rawPanel->showAndActivate();
+		_externalBoxes.push_back(std::move(panel));
+		return;
+	}
 	if (const auto widget = _webview ? _webview->window.widget() : nullptr) {
 		_layerShown = true;
 		const auto hideNow = !widget->isHidden();
@@ -2062,6 +2825,18 @@ void Panel::showBox(
 		anim::type::normal);
 }
 
+void Panel::finishExternalBox(not_null<SeparatePanel*> panel) {
+	const auto i = ranges::find_if(_externalBoxes, [&](const auto &entry) {
+		return entry.get() == panel.get();
+	});
+	if (i == end(_externalBoxes)) {
+		return;
+	}
+	panel->hideGetDuration();
+	_externalBoxes.erase(i);
+	setExternalShellBlocked(false);
+}
+
 void Panel::showToast(TextWithEntities &&text) {
 	_widget->showToast(std::move(text));
 }
@@ -2111,6 +2886,23 @@ void Panel::updateThemeParams(const Webview::ThemeParams &params) {
 	if (!_webview || !_webview->window.widget()) {
 		return;
 	}
+	if (_externalShell) {
+		_webview->window.updateTheme(
+			params.bodyBg,
+			params.scrollBg,
+			params.scrollBgOver,
+			params.scrollBarBg,
+			params.scrollBarBgOver);
+		sendExternalShellMethod("setColors", {
+			{ u"bodyBg"_q, ColorValue(params.bodyBg) },
+			{ u"titleBg"_q, ColorValue(params.titleBg) },
+			{ u"bottomBg"_q, _bottomBarColor
+				? QJsonValue(_bottomBarColor->name(QColor::HexRgb))
+				: ColorValue(params.bodyBg) },
+		});
+		postEvent("theme_changed", "{\"theme_params\": " + params.json + "}");
+		return;
+	}
 	_webview->window.updateTheme(
 		params.bodyBg,
 		params.scrollBg,
@@ -2122,7 +2914,13 @@ void Panel::updateThemeParams(const Webview::ThemeParams &params) {
 
 void Panel::updateColorOverrides(const Webview::ThemeParams &params) {
 	if (!_headerColorReceived && params.titleBg.alpha() == 255) {
-		_widget->overrideTitleColor(params.titleBg);
+		if (_externalShell) {
+			sendExternalShellMethod(
+				"setColors",
+				{ { u"titleBg"_q, ColorValue(params.titleBg) } });
+		} else {
+			_widget->overrideTitleColor(params.titleBg);
+		}
 	}
 	if (!_bodyColorReceived && params.bodyBg.alpha() == 255) {
 		overrideBodyColor(params.bodyBg);
@@ -2139,13 +2937,21 @@ void Panel::invoiceClosed(const QString &slug, const QString &status) {
 	});
 	if (_hiddenForPayment) {
 		_hiddenForPayment = false;
-		_widget->showAndActivate();
+		if (_externalShell) {
+			setExternalShellBlocked(false);
+		} else {
+			_widget->showAndActivate();
+		}
 	}
 }
 
 void Panel::hideForPayment() {
 	_hiddenForPayment = true;
-	_widget->hideGetDuration();
+	if (_externalShell) {
+		setExternalShellBlocked(true);
+	} else {
+		_widget->hideGetDuration();
+	}
 }
 
 void Panel::postEvent(const QString &event) {
@@ -2162,9 +2968,13 @@ void Panel::postEvent(const QString &event, EventData data) {
 		? v::get<QString>(data).toUtf8()
 		: QJsonDocument(
 			v::get<QJsonObject>(data)).toJson(QJsonDocument::Compact);
+	if (_externalShell) {
+		sendExternalShellEvent(event, written);
+		return;
+	}
 	_webview->window.eval(R"(
 if (window.TelegramGameProxy) {
-	window.TelegramGameProxy.receiveEvent(
+window.TelegramGameProxy.receiveEvent(
 		")"
 		+ event.toUtf8()
 		+ '"' + (written.isEmpty() ? QByteArray() : ", " + written)

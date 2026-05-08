@@ -31,6 +31,8 @@ using LayerOptions = base::flags<LayerOption>;
 
 namespace Webview {
 struct Available;
+struct PopupArgs;
+struct PopupResult;
 } // namespace Webview
 
 namespace Ui::Text {
@@ -38,6 +40,8 @@ struct MarkedContext;
 } // namespace Ui::Text
 
 namespace Ui::BotWebView {
+
+extern const char kOptionLinuxExternalBotWebApps[];
 
 struct DownloadsProgress;
 struct DownloadsEntry;
@@ -171,6 +175,20 @@ private:
 	bool showWebview(Args &&args, const Webview::ThemeParams &params);
 
 	bool createWebview(const Webview::ThemeParams &params);
+	void installExternalShellDocument();
+	void sendExternalShellBootstrap();
+	void sendExternalShellMethod(
+		const QByteArray &method,
+		const QJsonObject &data);
+	void sendExternalShellEvent(
+		const QString &event,
+		const QByteArray &data);
+	void sendExternalShellButton(
+		const char *name,
+		const QJsonObject &args);
+	void sendExternalShellChrome();
+	void setExternalShellBlocked(bool blocked);
+	Webview::PopupResult showBlockingPopup(Webview::PopupArgs &&args);
 	void createWebviewBottom();
 	void showWebviewProgress();
 	void hideWebviewProgress();
@@ -238,14 +256,24 @@ private:
 	[[nodiscard]] QRect progressRect() const;
 	void setupProgressGeometry();
 	void layoutButtons();
+	void finishExternalBox(not_null<SeparatePanel*> panel);
 
 	Webview::StorageId _storageId;
 	const not_null<Delegate*> _delegate;
+	QString _externalUrl;
+	QString _externalTitle;
+	int _externalBlockCount = 0;
 	bool _closeNeedConfirmation = false;
 	bool _hasSettingsButton = false;
+	bool _externalShell = false;
+	bool _externalShellBootstrapped = false;
+	bool _externalBackVisible = false;
 	MenuButtons _menuButtons = {};
+	std::unique_ptr<RpWidget> _externalPanelParent;
 	std::unique_ptr<SeparatePanel> _widget;
 	std::unique_ptr<WebviewWithLifetime> _webview;
+	std::vector<std::unique_ptr<SeparatePanel>> _externalBoxes;
+	std::unique_ptr<RpWidget> _externalWebviewParent;
 	std::unique_ptr<RpWidget> _webviewBottom;
 	QPointer<FlatLabel> _webviewBottomLabel;
 	rpl::variable<QString> _bottomText;

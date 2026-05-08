@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/vertical_list.h"
 #include "ui/gl/gl_detection.h"
+#include "ui/chat/attach/attach_bot_webview.h"
 #include "ui/chat/chat_style_radius.h"
 #include "ui/controls/compose_ai_button_factory.h"
 #include "base/options.h"
@@ -251,6 +252,7 @@ void SetupExperimental(
 	addToggle(Info::Profile::kOptionShowPeerIdBelowAbout);
 	addToggle(Info::Profile::kOptionShowChannelJoinedBelowAbout);
 	addToggle(Ui::kOptionUseSmallMsgBubbleRadius);
+	addToggle(Ui::BotWebView::kOptionLinuxExternalBotWebApps);
 	addToggle(Media::Player::kOptionDisableAutoplayNext);
 	addToggle(Webview::kOptionWebviewDebugEnabled);
 	addToggle(Webview::kOptionWebviewLegacyEdge);
