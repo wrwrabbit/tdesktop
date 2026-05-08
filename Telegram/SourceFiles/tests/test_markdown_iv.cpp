@@ -273,6 +273,230 @@ public:
 	mutable std::vector<Qt::MouseButton> joinedButtons;
 };
 
+enum class TestHostedMediaKind {
+	Photo,
+	Video,
+	Audio,
+	Map,
+};
+
+class TestHostedMediaBlock final : public MediaBlock {
+public:
+	TestHostedMediaBlock(
+		TestHostedMediaKind kind,
+		uint64 stableId,
+		QString copyText,
+		MediaActivation activation)
+	: _kind(kind)
+	, _stableId(stableId)
+	, _copyText(std::move(copyText))
+	, _activation(std::move(activation))
+	, _auxiliaryLink(std::make_shared<LambdaClickHandler>([] {
+	})) {
+	}
+
+	[[nodiscard]] uint64 stableId() const override {
+		return _stableId;
+	}
+
+	[[nodiscard]] int resizeGetHeight(int width) override {
+		resizeWidths.push_back(width);
+		return std::max(width / 2, 72);
+	}
+
+	void setGeometry(QRect geometry) override {
+		requestedGeometries.push_back(geometry);
+		_geometry = QRect(
+			geometry.topLeft() + QPoint(7, 5),
+			QSize(
+				std::max(geometry.width() - 32, 1),
+				std::max(geometry.height() - 48, 1)));
+		appliedGeometries.push_back(_geometry);
+	}
+
+	[[nodiscard]] QRect geometry() const override {
+		return _geometry;
+	}
+
+	[[nodiscard]] int firstLineBaseline() const override {
+		return _geometry.y() + std::min(_geometry.height(), 12);
+	}
+
+	void paint(
+			Painter &p,
+			QRect clip,
+			const MarkdownArticlePaintCaches &caches) const override {
+		Q_UNUSED(caches);
+		const auto visible = clip.intersected(_geometry);
+		if (visible.isEmpty()) {
+			return;
+		}
+		p.save();
+		p.setClipRect(visible);
+		p.fillRect(_geometry, color());
+		p.restore();
+	}
+
+	[[nodiscard]] ClickHandlerPtr linkAt(QPoint point) const override {
+		return auxiliaryArticleRect().contains(point) ? _auxiliaryLink : nullptr;
+	}
+
+	[[nodiscard]] MediaActivation activationAt(QPoint point) const override {
+		return _geometry.contains(point) ? _activation : MediaActivation();
+	}
+
+	[[nodiscard]] MediaBlockSelectionData selectionData() const override {
+		return {
+			.copyText = _copyText,
+		};
+	}
+
+	[[nodiscard]] QPoint primaryArticlePoint() const {
+		return _geometry.center();
+	}
+
+	[[nodiscard]] QRect auxiliaryArticleRect() const {
+		return QRect(
+			_geometry.topLeft() + QPoint(2, 2),
+			QSize(
+				std::max(std::min(_geometry.width() / 4, 24), 1),
+				std::max(std::min(_geometry.height() / 4, 24), 1)));
+	}
+
+	[[nodiscard]] ClickHandlerPtr auxiliaryLink() const {
+		return _auxiliaryLink;
+	}
+
+	void triggerRepaint(QRect localRect) const {
+		requestRepaint(localRect.translated(_geometry.topLeft()).intersected(
+			_geometry));
+	}
+
+	void triggerRelayout(QRect localRect) const {
+		requestRelayout(localRect.translated(_geometry.topLeft()).intersected(
+			_geometry));
+	}
+
+	std::vector<int> resizeWidths;
+	std::vector<QRect> requestedGeometries;
+	std::vector<QRect> appliedGeometries;
+
+private:
+	[[nodiscard]] QColor color() const {
+		switch (_kind) {
+		case TestHostedMediaKind::Photo:
+			return QColor(220, 150, 30);
+		case TestHostedMediaKind::Video:
+			return QColor(30, 120, 210);
+		case TestHostedMediaKind::Audio:
+			return QColor(130, 80, 190);
+		case TestHostedMediaKind::Map:
+			return QColor(50, 170, 120);
+		}
+		return QColor(0, 0, 0);
+	}
+
+	TestHostedMediaKind _kind = TestHostedMediaKind::Photo;
+	uint64 _stableId = 0;
+	QString _copyText;
+	QRect _geometry;
+	MediaActivation _activation;
+	ClickHandlerPtr _auxiliaryLink;
+};
+
+class TestHostedMediaBlockFactory final : public HostedMediaBlockFactory {
+public:
+	TestHostedMediaBlockFactory()
+	: photoRuntime(std::make_shared<TestPhotoRuntime>())
+	, documentRuntime(std::make_shared<TestDocumentRuntime>()) {
+	}
+
+	[[nodiscard]] std::shared_ptr<MediaBlock> createPhoto(
+			const PreparedPhotoBlockData &prepared) const override {
+		++photoRequests;
+		auto activation = MediaActivation();
+		activation.kind = MediaActivationKind::Photo;
+		activation.photo = photoRuntime;
+		return create(
+			photoBlocks,
+			TestHostedMediaKind::Photo,
+			prepared.id.value,
+			u"Hosted Photo"_q,
+			std::move(activation));
+	}
+
+	[[nodiscard]] std::shared_ptr<MediaBlock> createVideo(
+			const PreparedVideoBlockData &prepared) const override {
+		++videoRequests;
+		auto activation = MediaActivation();
+		activation.kind = MediaActivationKind::Document;
+		activation.document = documentRuntime;
+		return create(
+			videoBlocks,
+			TestHostedMediaKind::Video,
+			prepared.id.value,
+			u"Hosted Video"_q,
+			std::move(activation));
+	}
+
+	[[nodiscard]] std::shared_ptr<MediaBlock> createAudio(
+			const PreparedAudioBlockData &prepared) const override {
+		++audioRequests;
+		auto activation = MediaActivation();
+		activation.kind = MediaActivationKind::Document;
+		activation.document = documentRuntime;
+		return create(
+			audioBlocks,
+			TestHostedMediaKind::Audio,
+			prepared.id.value,
+			u"Hosted Audio"_q,
+			std::move(activation));
+	}
+
+	[[nodiscard]] std::shared_ptr<MediaBlock> createMap(
+			const PreparedMapBlockData &prepared) const override {
+		++mapRequests;
+		auto activation = MediaActivation();
+		activation.kind = MediaActivationKind::ExternalUrl;
+		activation.url = prepared.url.isEmpty()
+			? u"https://maps.example.test/point"_q
+			: prepared.url;
+		return create(
+			mapBlocks,
+			TestHostedMediaKind::Map,
+			prepared.id.value,
+			u"Hosted Map"_q,
+			std::move(activation));
+	}
+
+	std::shared_ptr<TestPhotoRuntime> photoRuntime;
+	std::shared_ptr<TestDocumentRuntime> documentRuntime;
+	mutable int photoRequests = 0;
+	mutable int videoRequests = 0;
+	mutable int audioRequests = 0;
+	mutable int mapRequests = 0;
+	mutable std::vector<std::shared_ptr<TestHostedMediaBlock>> photoBlocks;
+	mutable std::vector<std::shared_ptr<TestHostedMediaBlock>> videoBlocks;
+	mutable std::vector<std::shared_ptr<TestHostedMediaBlock>> audioBlocks;
+	mutable std::vector<std::shared_ptr<TestHostedMediaBlock>> mapBlocks;
+
+private:
+	[[nodiscard]] std::shared_ptr<MediaBlock> create(
+			std::vector<std::shared_ptr<TestHostedMediaBlock>> &blocks,
+			TestHostedMediaKind kind,
+			uint64 stableId,
+			QString copyText,
+			MediaActivation activation) const {
+		auto block = std::make_shared<TestHostedMediaBlock>(
+			kind,
+			stableId,
+			std::move(copyText),
+			std::move(activation));
+		blocks.push_back(block);
+		return block;
+	}
+};
+
 class TestMediaRuntime final : public MediaRuntime {
 public:
 	struct InlineBinding {
@@ -400,6 +624,27 @@ public:
 		return _channelJoinedChanges.events();
 	}
 
+	[[nodiscard]] std::shared_ptr<HostedMediaBlockFactory>
+	hostedMediaBlockFactory() const override {
+		return hostedFactory;
+	}
+
+	[[nodiscard]] int hostedPhotoRequests() const {
+		return hostedFactory ? hostedFactory->photoRequests : 0;
+	}
+
+	[[nodiscard]] int hostedVideoRequests() const {
+		return hostedFactory ? hostedFactory->videoRequests : 0;
+	}
+
+	[[nodiscard]] int hostedAudioRequests() const {
+		return hostedFactory ? hostedFactory->audioRequests : 0;
+	}
+
+	[[nodiscard]] int hostedMapRequests() const {
+		return hostedFactory ? hostedFactory->mapRequests : 0;
+	}
+
 	void addInlineImage(uint64 documentId, std::shared_ptr<TestDynamicImage> image) {
 		inlineBindings.push_back({
 			.documentId = documentId,
@@ -463,6 +708,7 @@ public:
 	mutable std::vector<uint64> documentRequests;
 	mutable std::vector<MapRequest> mapRequests;
 	mutable std::vector<ChannelRequest> channelRequests;
+	std::shared_ptr<TestHostedMediaBlockFactory> hostedFactory;
 
 private:
 	mutable rpl::event_stream<uint64> _channelJoinedChanges;
@@ -629,6 +875,20 @@ struct NativeIvMediaFixture {
 	return NativeIvDocument(id, u"video/mp4"_q, std::move(attributes));
 }
 
+[[nodiscard]] MTPDocument NativeIvAnimationDocument(
+		uint64 id,
+		int width,
+		int height,
+		QString fileName = u"animation.mp4"_q) {
+	auto attributes = QVector<MTPDocumentAttribute>();
+	attributes.push_back(MTP_documentAttributeFilename(MTP_string(fileName)));
+	attributes.push_back(MTP_documentAttributeAnimated());
+	attributes.push_back(MTP_documentAttributeImageSize(
+		MTP_int(width),
+		MTP_int(height)));
+	return NativeIvDocument(id, u"video/mp4"_q, std::move(attributes));
+}
+
 [[nodiscard]] MTPDocument NativeIvImageDocument(
 		uint64 id,
 		int width,
@@ -724,6 +984,20 @@ struct NativeIvMediaFixture {
 			NativeIvCaption(u"Video caption"_q)),
 		.documents = {
 			NativeIvVideoDocument(7001, 1280, 720, u"video.mp4"_q, 42.),
+		},
+	};
+}
+
+[[nodiscard]] NativeIvMediaFixture NativeIvAnimationFixture() {
+	return {
+		.label = u"Animation"_q,
+		.caption = u"Animation caption"_q,
+		.block = MTP_pageBlockVideo(
+			MTP_flags(0),
+			MTP_long(7601),
+			NativeIvCaption(u"Animation caption"_q)),
+		.documents = {
+			NativeIvAnimationDocument(7601, 480, 270),
 		},
 	};
 }
@@ -2196,6 +2470,545 @@ template <typename Predicate>
 	return (right >= left) && (bottom >= top)
 		? std::make_optional(QRect(QPoint(left, top), QPoint(right, bottom)))
 		: std::nullopt;
+}
+
+[[nodiscard]] int HostedRequestCount(
+		const TestMediaRuntime &runtime,
+		TestHostedMediaKind kind) {
+	switch (kind) {
+	case TestHostedMediaKind::Photo:
+		return runtime.hostedPhotoRequests();
+	case TestHostedMediaKind::Video:
+		return runtime.hostedVideoRequests();
+	case TestHostedMediaKind::Audio:
+		return runtime.hostedAudioRequests();
+	case TestHostedMediaKind::Map:
+		return runtime.hostedMapRequests();
+	}
+	return 0;
+}
+
+[[nodiscard]] const std::vector<std::shared_ptr<TestHostedMediaBlock>> &HostedBlocks(
+		const TestHostedMediaBlockFactory &factory,
+		TestHostedMediaKind kind) {
+	switch (kind) {
+	case TestHostedMediaKind::Photo:
+		return factory.photoBlocks;
+	case TestHostedMediaKind::Video:
+		return factory.videoBlocks;
+	case TestHostedMediaKind::Audio:
+		return factory.audioBlocks;
+	case TestHostedMediaKind::Map:
+		return factory.mapBlocks;
+	}
+	return factory.photoBlocks;
+}
+
+[[nodiscard]] MediaActivationKind HostedActivationKind(
+		TestHostedMediaKind kind) {
+	switch (kind) {
+	case TestHostedMediaKind::Photo:
+		return MediaActivationKind::Photo;
+	case TestHostedMediaKind::Video:
+	case TestHostedMediaKind::Audio:
+		return MediaActivationKind::Document;
+	case TestHostedMediaKind::Map:
+		return MediaActivationKind::ExternalUrl;
+	}
+	return MediaActivationKind::None;
+}
+
+void CheckHostedNativeIvSingleMediaCase(
+		const NativeIvMediaFixture &fixture,
+		TestHostedMediaKind kind,
+		const std::shared_ptr<MathRenderer> &renderer,
+		bool *ok) {
+	const auto label = u"native-iv-hosted-"_q
+		+ fixture.label.toLower()
+		+ u"-article"_q;
+	auto runtime = std::make_shared<TestMediaRuntime>();
+	runtime->hostedFactory = std::make_shared<TestHostedMediaBlockFactory>();
+	auto source = NativeIvSource(
+		QVector<MTPPageBlock>{ fixture.block },
+		fixture.photos,
+		fixture.documents);
+	auto prepared = TryPrepareNativeInstantView({
+		.source = &source,
+		.mediaRuntime = runtime,
+	});
+	Check(prepared.supported(), label + u" prepare supported"_q, ok);
+	if (!prepared.supported()) {
+		return;
+	}
+	auto height = 0;
+	auto article = BuildArticleForTest(
+		std::move(prepared.content),
+		renderer,
+		420,
+		&height);
+	const auto image = PaintArticleForTest(article.get(), 420, height);
+	Check(HasPaintedPixels(image), label + u" paint produced pixels"_q, ok);
+	Check(
+		HostedRequestCount(*runtime, kind) == 1,
+		label + u" hosted create request"_q,
+		ok);
+	switch (kind) {
+	case TestHostedMediaKind::Photo:
+		Check(
+			runtime->photoRequests.empty(),
+			label + u" skips markdown photo resolve"_q,
+			ok);
+		break;
+	case TestHostedMediaKind::Video:
+		Check(
+			runtime->documentRequests.empty(),
+			label + u" skips markdown document resolve"_q,
+			ok);
+		break;
+	case TestHostedMediaKind::Map:
+		Check(
+			runtime->mapRequests.empty(),
+			label + u" skips markdown map resolve"_q,
+			ok);
+		break;
+	case TestHostedMediaKind::Audio:
+		break;
+	}
+	const auto &blocks = HostedBlocks(*runtime->hostedFactory, kind);
+	Check(blocks.size() == 1, label + u" hosted block count"_q, ok);
+	if (blocks.empty()) {
+		return;
+	}
+	const auto block = blocks.front();
+	Check(block->stableId() != 0, label + u" stable id"_q, ok);
+	Check(
+		!block->requestedGeometries.empty()
+			&& (block->geometry() != block->requestedGeometries.front())
+			&& (block->geometry().width()
+				< block->requestedGeometries.front().width())
+			&& (block->geometry().height()
+				< block->requestedGeometries.front().height()),
+		label + u" geometry read-back differs from provisional rect"_q,
+		ok);
+	const auto initialRequested = block->requestedGeometries.empty()
+		? QRect()
+		: block->requestedGeometries.back();
+	auto lookupFlags = Ui::Text::StateRequest::Flags();
+	lookupFlags |= Ui::Text::StateRequest::Flag::LookupLink;
+	lookupFlags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+	const auto expectedActivation = HostedActivationKind(kind);
+	const auto activationBounds = HitBoundsWhere(
+		article.get(),
+		420,
+		height,
+		lookupFlags,
+		[=](const MarkdownArticleHitTestResult &hit) {
+			return (hit.segmentIndex == 0)
+				&& (hit.mediaActivation.kind == expectedActivation);
+		});
+	Check(
+		activationBounds.has_value()
+			&& (*activationBounds == block->geometry()),
+		label + u" activation bounds use hosted geometry"_q,
+		ok);
+	const auto captionBounds = SegmentHitBounds(article.get(), 420, height, 1);
+	Check(captionBounds.has_value(), label + u" caption bounds"_q, ok);
+	if (captionBounds && !initialRequested.isEmpty()) {
+		Check(
+			captionBounds->top() < initialRequested.bottom(),
+			label + u" caption follows hosted geometry read-back"_q,
+			ok);
+	}
+	const auto primaryHit = article->hitTest(
+		block->primaryArticlePoint(),
+		lookupFlags);
+	Check(
+		primaryHit.valid()
+			&& primaryHit.direct
+			&& (primaryHit.segmentIndex == 0),
+		label + u" primary direct hit"_q,
+		ok);
+	Check(
+		primaryHit.mediaActivation.kind == expectedActivation,
+		label + u" primary activation kind"_q,
+		ok);
+	if (kind == TestHostedMediaKind::Photo) {
+		Check(
+			primaryHit.mediaActivation.photo.get()
+				== runtime->hostedFactory->photoRuntime.get(),
+			label + u" primary photo runtime"_q,
+			ok);
+		Check(
+			!primaryHit.state.link,
+			label + u" primary photo hit has no auxiliary link"_q,
+			ok);
+	} else if (kind == TestHostedMediaKind::Video) {
+		Check(
+			primaryHit.mediaActivation.document.get()
+				== runtime->hostedFactory->documentRuntime.get(),
+			label + u" primary document runtime"_q,
+			ok);
+		Check(
+			!primaryHit.state.link,
+			label + u" primary video hit has no auxiliary link"_q,
+			ok);
+	} else if (kind == TestHostedMediaKind::Map) {
+		Check(
+			primaryHit.preparedLink.has_value()
+				&& (primaryHit.mediaActivation.url
+					== primaryHit.preparedLink->target),
+			label + u" primary map prepared link"_q,
+			ok);
+	}
+	const auto context = article->textForContext(primaryHit);
+	Check(
+		context.expanded
+			== (block->selectionData().copyText
+				+ u"\n"_q
+				+ fixture.caption),
+		label + u" context export text"_q,
+		ok);
+	const auto selection = article->textForSelection({
+		.from = { .segment = 0, .offset = 0 },
+		.to = { .segment = 0, .offset = 1 },
+	}, nullptr);
+	Check(
+		selection.expanded == context.expanded,
+		label + u" selection export text"_q,
+		ok);
+	const auto auxiliaryHit = article->hitTest(
+		block->auxiliaryArticleRect().center(),
+		lookupFlags);
+	Check(
+		auxiliaryHit.valid()
+			&& auxiliaryHit.direct
+			&& (auxiliaryHit.segmentIndex == 0),
+		label + u" auxiliary direct hit"_q,
+		ok);
+	Check(
+		auxiliaryHit.state.link == block->auxiliaryLink(),
+		label + u" auxiliary click handler"_q,
+		ok);
+	Check(
+		auxiliaryHit.mediaActivation.kind == MediaActivationKind::None,
+		label + u" auxiliary suppresses primary activation"_q,
+		ok);
+	auto host = ArticleMediaBlockHost();
+	article->setMediaBlockHost(&host);
+	const auto previousGeometry = block->geometry();
+	const auto previousSetGeometryCount = block->requestedGeometries.size();
+	const auto previousCreateCount = HostedRequestCount(*runtime, kind);
+	const auto narrowWidth = 300;
+	const auto narrowHeight = article->resizeGetHeight(narrowWidth);
+	Check(
+		HostedRequestCount(*runtime, kind) == previousCreateCount,
+		label + u" relayout reuses hosted block"_q,
+		ok);
+	Check(
+		(block->requestedGeometries.size() > previousSetGeometryCount)
+			&& (block->geometry() != previousGeometry)
+			&& !block->resizeWidths.empty()
+			&& (block->resizeWidths.front() != block->resizeWidths.back()),
+		label + u" hosted block sees width-only relayout"_q,
+		ok);
+	host.reset();
+	const auto repaintLocal = QRect(3, 4, 12, 10);
+	const auto expectedRepaint = repaintLocal
+		.translated(block->geometry().topLeft())
+		.intersected(block->geometry());
+	block->triggerRepaint(repaintLocal);
+	Check(
+		host.repaintRects.size() == 1
+			&& (host.repaintRects.front() == expectedRepaint)
+			&& !host.repaintRects.front().isEmpty()
+			&& (host.repaintRects.front() != block->geometry())
+			&& (host.repaintRects.front()
+				!= QRect(0, 0, narrowWidth, narrowHeight)),
+		label + u" rect-scoped repaint request"_q,
+		ok);
+	const auto relayoutLocal = QRect(6, 7, 9, 8);
+	const auto expectedRelayout = relayoutLocal
+		.translated(block->geometry().topLeft())
+		.intersected(block->geometry());
+	block->triggerRelayout(relayoutLocal);
+	Check(
+		host.relayoutRects.size() == 1
+			&& (host.relayoutRects.front() == expectedRelayout)
+			&& !host.relayoutRects.front().isEmpty()
+			&& (host.relayoutRects.front() != block->geometry())
+			&& (host.relayoutRects.front()
+				!= QRect(0, 0, narrowWidth, narrowHeight)),
+		label + u" rect-scoped relayout request"_q,
+		ok);
+}
+
+void CheckNativeInstantViewHostedMediaCoverage(bool *ok) {
+	const auto renderer = std::make_shared<MathRenderer>();
+	auto photoFixture = NativeIvMediaFixture{
+		.label = u"Photo"_q,
+		.caption = u"Hosted photo caption"_q,
+		.block = NativeIvPhotoBlock(9401, u"Hosted photo caption"_q),
+		.photos = { NativeIvPhoto(9401, 640, 360) },
+	};
+	CheckHostedNativeIvSingleMediaCase(
+		photoFixture,
+		TestHostedMediaKind::Photo,
+		renderer,
+		ok);
+	CheckHostedNativeIvSingleMediaCase(
+		NativeIvVideoFixture(),
+		TestHostedMediaKind::Video,
+		renderer,
+		ok);
+	CheckHostedNativeIvSingleMediaCase(
+		NativeIvAnimationFixture(),
+		TestHostedMediaKind::Video,
+		renderer,
+		ok);
+	CheckHostedNativeIvSingleMediaCase(
+		NativeIvMapFixture(),
+		TestHostedMediaKind::Map,
+		renderer,
+		ok);
+}
+
+void CheckNativeInstantViewHostedMediaFallbackCoverage(bool *ok) {
+	const auto renderer = std::make_shared<MathRenderer>();
+	const auto videoFixture = NativeIvVideoFixture();
+	const auto audioFixture = NativeIvAudioFixture();
+	const auto mapFixture = NativeIvMapFixture();
+
+	const auto noHostedLabel = u"native-iv-no-hosted-media-fallback"_q;
+	auto noHostedRuntime = std::make_shared<TestMediaRuntime>();
+	noHostedRuntime->addPhotoRuntime(
+		9501,
+		std::make_shared<TestPhotoRuntime>());
+	noHostedRuntime->addDocumentRuntime(
+		7001,
+		std::make_shared<TestDocumentRuntime>());
+	noHostedRuntime->addDocumentRuntime(
+		7002,
+		std::make_shared<TestDocumentRuntime>());
+	noHostedRuntime->addMapRuntime(
+		51.5007,
+		-0.1246,
+		880088,
+		13,
+		std::make_shared<TestMapRuntime>());
+	auto noHostedSource = NativeIvSource(
+		QVector<MTPPageBlock>{
+			NativeIvPhotoBlock(9501, u"Fallback photo caption"_q),
+			videoFixture.block,
+			mapFixture.block,
+			audioFixture.block,
+		},
+		QVector<MTPPhoto>{ NativeIvPhoto(9501, 640, 360) },
+		QVector<MTPDocument>{
+			videoFixture.documents.front(),
+			audioFixture.documents.front(),
+		});
+	auto noHostedPrepared = TryPrepareNativeInstantView({
+		.source = &noHostedSource,
+		.mediaRuntime = noHostedRuntime,
+	});
+	Check(
+		noHostedPrepared.supported(),
+		noHostedLabel + u" prepare supported"_q,
+		ok);
+	if (noHostedPrepared.supported()) {
+		auto height = 0;
+		auto article = BuildArticleForTest(
+			std::move(noHostedPrepared.content),
+			renderer,
+			420,
+			&height);
+		const auto image = PaintArticleForTest(article.get(), 420, height);
+		Check(
+			HasPaintedPixels(image),
+			noHostedLabel + u" paint produced pixels"_q,
+			ok);
+		Check(
+			noHostedRuntime->photoRequests.size() == 1
+				&& (noHostedRuntime->photoRequests.front() == 9501),
+			noHostedLabel + u" photo resolves through markdown runtime"_q,
+			ok);
+		Check(
+			std::find(
+				noHostedRuntime->documentRequests.begin(),
+				noHostedRuntime->documentRequests.end(),
+				7001) != noHostedRuntime->documentRequests.end(),
+			noHostedLabel + u" video resolves through markdown runtime"_q,
+			ok);
+		Check(
+			std::find(
+				noHostedRuntime->documentRequests.begin(),
+				noHostedRuntime->documentRequests.end(),
+				7002) != noHostedRuntime->documentRequests.end(),
+			noHostedLabel + u" audio resolves through markdown runtime"_q,
+			ok);
+		Check(
+			noHostedRuntime->mapRequests.size() == 1,
+			noHostedLabel + u" map resolves through markdown runtime"_q,
+			ok);
+	}
+
+	const auto urlPhotoLabel = u"native-iv-hosted-photo-url-fallback"_q;
+	auto urlPhotoRuntime = std::make_shared<TestMediaRuntime>();
+	urlPhotoRuntime->hostedFactory = std::make_shared<TestHostedMediaBlockFactory>();
+	urlPhotoRuntime->addPhotoRuntime(
+		9502,
+		std::make_shared<TestPhotoRuntime>());
+	auto urlPhotoSource = NativeIvSource(
+		QVector<MTPPageBlock>{
+			NativeIvPhotoBlock(
+				9502,
+				u"Linked photo caption"_q,
+				QString(),
+				u"https://example.com/photo"_q),
+		},
+		QVector<MTPPhoto>{ NativeIvPhoto(9502, 640, 360) });
+	auto urlPhotoPrepared = TryPrepareNativeInstantView({
+		.source = &urlPhotoSource,
+		.mediaRuntime = urlPhotoRuntime,
+	});
+	Check(
+		urlPhotoPrepared.supported(),
+		urlPhotoLabel + u" prepare supported"_q,
+		ok);
+	if (urlPhotoPrepared.supported()) {
+		auto height = 0;
+		auto article = BuildArticleForTest(
+			std::move(urlPhotoPrepared.content),
+			renderer,
+			420,
+			&height);
+		const auto bounds = SegmentHitBounds(article.get(), 420, height, 0);
+		Check(bounds.has_value(), urlPhotoLabel + u" media bounds"_q, ok);
+		Check(
+			urlPhotoRuntime->hostedPhotoRequests() == 0,
+			urlPhotoLabel + u" skips hosted photo"_q,
+			ok);
+		Check(
+			urlPhotoRuntime->photoRequests.size() == 1
+				&& (urlPhotoRuntime->photoRequests.front() == 9502),
+			urlPhotoLabel + u" resolves markdown photo"_q,
+			ok);
+		if (bounds) {
+			auto lookupFlags = Ui::Text::StateRequest::Flags();
+			lookupFlags |= Ui::Text::StateRequest::Flag::LookupLink;
+			lookupFlags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+			const auto hit = article->hitTest(bounds->center(), lookupFlags);
+			Check(
+				hit.mediaActivation.kind == MediaActivationKind::ExternalUrl
+					&& hit.preparedLink.has_value(),
+				urlPhotoLabel + u" keeps external-url activation"_q,
+				ok);
+		}
+	}
+
+	const auto viewerClosedLabel = u"markdown-photo-viewer-closed-fallback"_q;
+	auto viewerClosedRuntime = std::make_shared<TestMediaRuntime>();
+	viewerClosedRuntime->hostedFactory =
+		std::make_shared<TestHostedMediaBlockFactory>();
+	viewerClosedRuntime->addPhotoRuntime(
+		9503,
+		std::make_shared<TestPhotoRuntime>());
+	auto viewerClosedContent = MarkdownArticleContent();
+	viewerClosedContent.mediaRuntime = viewerClosedRuntime;
+	auto viewerClosedBlock = PreparedBlock();
+	viewerClosedBlock.kind = PreparedBlockKind::Photo;
+	viewerClosedBlock.photo.id.value = 9503;
+	viewerClosedBlock.photo.photoId = 9503;
+	viewerClosedBlock.photo.width = 640;
+	viewerClosedBlock.photo.height = 360;
+	viewerClosedBlock.photo.viewerOpen = false;
+	viewerClosedContent.blocks.blocks.push_back(std::move(viewerClosedBlock));
+	auto viewerClosedHeight = 0;
+	auto viewerClosedArticle = BuildArticleForTest(
+		std::move(viewerClosedContent),
+		renderer,
+		420,
+		&viewerClosedHeight);
+	const auto viewerClosedBounds = SegmentHitBounds(
+		viewerClosedArticle.get(),
+		420,
+		viewerClosedHeight,
+		0);
+	Check(
+		viewerClosedBounds.has_value(),
+		viewerClosedLabel + u" media bounds"_q,
+		ok);
+	Check(
+		viewerClosedRuntime->hostedPhotoRequests() == 0,
+		viewerClosedLabel + u" skips hosted photo"_q,
+		ok);
+	Check(
+		viewerClosedRuntime->photoRequests.size() == 1
+			&& (viewerClosedRuntime->photoRequests.front() == 9503),
+		viewerClosedLabel + u" resolves markdown photo"_q,
+		ok);
+	if (viewerClosedBounds) {
+		auto lookupFlags = Ui::Text::StateRequest::Flags();
+		lookupFlags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+		const auto hit = viewerClosedArticle->hitTest(
+			viewerClosedBounds->center(),
+			lookupFlags);
+		Check(
+			hit.valid()
+				&& hit.direct
+				&& (hit.mediaActivation.kind == MediaActivationKind::None),
+			viewerClosedLabel + u" keeps photo activation disabled"_q,
+			ok);
+	}
+
+	const auto hostedAudioLabel = u"native-iv-hosted-audio-fallback"_q;
+	auto hostedAudioRuntime = std::make_shared<TestMediaRuntime>();
+	hostedAudioRuntime->hostedFactory =
+		std::make_shared<TestHostedMediaBlockFactory>();
+	auto audioDocumentRuntime = std::make_shared<TestDocumentRuntime>();
+	hostedAudioRuntime->addDocumentRuntime(7002, audioDocumentRuntime);
+	auto hostedAudioSource = NativeIvSource(
+		QVector<MTPPageBlock>{ audioFixture.block },
+		audioFixture.photos,
+		audioFixture.documents);
+	auto hostedAudioPrepared = TryPrepareNativeInstantView({
+		.source = &hostedAudioSource,
+		.mediaRuntime = hostedAudioRuntime,
+	});
+	Check(
+		hostedAudioPrepared.supported(),
+		hostedAudioLabel + u" prepare supported"_q,
+		ok);
+	if (hostedAudioPrepared.supported()) {
+		auto height = 0;
+		auto article = BuildArticleForTest(
+			std::move(hostedAudioPrepared.content),
+			renderer,
+			420,
+			&height);
+		const auto bounds = SegmentHitBounds(article.get(), 420, height, 0);
+		Check(bounds.has_value(), hostedAudioLabel + u" media bounds"_q, ok);
+		Check(
+			hostedAudioRuntime->hostedAudioRequests() == 0,
+			hostedAudioLabel + u" skips hosted audio"_q,
+			ok);
+		Check(
+			hostedAudioRuntime->documentRequests.size() == 1
+				&& (hostedAudioRuntime->documentRequests.front() == 7002),
+			hostedAudioLabel + u" resolves markdown audio document"_q,
+			ok);
+		if (bounds) {
+			auto lookupFlags = Ui::Text::StateRequest::Flags();
+			lookupFlags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+			const auto hit = article->hitTest(bounds->center(), lookupFlags);
+			Check(
+				hit.mediaActivation.kind == MediaActivationKind::Document
+					&& (hit.mediaActivation.document.get()
+						== audioDocumentRuntime.get()),
+				hostedAudioLabel + u" keeps document activation"_q,
+				ok);
+		}
+	}
 }
 
 [[nodiscard]] std::vector<const MeasuredFormula*> MeasuredFormulaPointers(
@@ -8615,6 +9428,8 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 	CheckAnchorScrollAlignmentCoverage(&ok);
 	CheckArticleHorizontalRelayoutRegression(&ok);
 	CheckNativeInstantViewArticleCoverage(&ok);
+	CheckNativeInstantViewHostedMediaCoverage(&ok);
+	CheckNativeInstantViewHostedMediaFallbackCoverage(&ok);
 	CheckInlineHtmlCoverage(args.dump, &ok);
 	CheckInlineHtmlPrepareCoverage(&ok);
 	CheckValidationEdges(&ok);

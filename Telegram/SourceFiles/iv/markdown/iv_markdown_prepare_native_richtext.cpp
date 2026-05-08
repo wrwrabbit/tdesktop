@@ -89,6 +89,14 @@ void MergeNativeIvDocumentInfo(
 	if (!existing->isVideoFile && info.isVideoFile) {
 		existing->isVideoFile = true;
 	}
+	if (!existing->isAnimation && info.isAnimation) {
+		existing->isAnimation = true;
+	}
+}
+
+[[nodiscard]] bool IsNativeIvVideoDocument(
+		const NativeIvDocumentInfo &info) {
+	return info.isVideoFile || info.isAnimation;
 }
 
 [[nodiscard]] bool PrepareNativeIvGroupedMediaItem(
@@ -108,7 +116,7 @@ void MergeNativeIvDocumentInfo(
 	}, [&](const MTPDpageBlockVideo &data) {
 		const auto info = FindNativeIvDocument(uint64(data.vvideo_id().v), state);
 		if (!info
-			|| !info->isVideoFile
+			|| !IsNativeIvVideoDocument(*info)
 			|| info->width <= 0
 			|| info->height <= 0) {
 			return false;
@@ -540,6 +548,8 @@ void RememberNativeIvDocument(
 				info.fileName = qs(data.vfile_name());
 			}, [&](const MTPDdocumentAttributeImageSize &data) {
 				assignDimensions(data.vw().v, data.vh().v, false);
+			}, [&](const MTPDdocumentAttributeAnimated &) {
+				info.isAnimation = true;
 			}, [&](const MTPDdocumentAttributeVideo &data) {
 				info.isVideoFile = true;
 				assignDimensions(data.vw().v, data.vh().v, true);
@@ -641,7 +651,7 @@ bool PrepareNativeIvVideoBlock(
 		NativeIvPrepareState *state) {
 	const auto info = FindNativeIvDocument(uint64(data.vvideo_id().v), *state);
 	if (!info
-		|| !info->isVideoFile
+		|| !IsNativeIvVideoDocument(*info)
 		|| info->width <= 0
 		|| info->height <= 0) {
 		return PrepareNativeIvPlaceholderBlock(

@@ -1772,12 +1772,28 @@ void MediaBlock::requestRelayout(QRect articleRect) const {
 std::shared_ptr<MediaBlock> CreatePhotoMediaBlock(
 		const PreparedPhotoBlockData &prepared,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime) {
+	if (mediaRuntime
+		&& prepared.viewerOpen
+		&& prepared.urlOverride.isEmpty()) {
+		if (const auto hosted = mediaRuntime->hostedMediaBlockFactory()) {
+			if (const auto block = hosted->createPhoto(prepared)) {
+				return block;
+			}
+		}
+	}
 	return std::make_shared<ImageBackedMediaBlock>(prepared, mediaRuntime);
 }
 
 std::shared_ptr<MediaBlock> CreateVideoMediaBlock(
 		const PreparedVideoBlockData &prepared,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime) {
+	if (mediaRuntime) {
+		if (const auto hosted = mediaRuntime->hostedMediaBlockFactory()) {
+			if (const auto block = hosted->createVideo(prepared)) {
+				return block;
+			}
+		}
+	}
 	return std::make_shared<ImageBackedMediaBlock>(prepared, mediaRuntime);
 }
 
@@ -1790,6 +1806,13 @@ std::shared_ptr<MediaBlock> CreateAudioMediaBlock(
 std::shared_ptr<MediaBlock> CreateMapMediaBlock(
 		const PreparedMapBlockData &prepared,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime) {
+	if (mediaRuntime) {
+		if (const auto hosted = mediaRuntime->hostedMediaBlockFactory()) {
+			if (const auto block = hosted->createMap(prepared)) {
+				return block;
+			}
+		}
+	}
 	return std::make_shared<ImageBackedMediaBlock>(prepared, mediaRuntime);
 }
 

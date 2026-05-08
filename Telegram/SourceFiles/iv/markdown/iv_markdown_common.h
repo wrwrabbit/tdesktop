@@ -28,6 +28,8 @@ class Delegate;
 
 namespace Iv::Markdown {
 
+class MediaBlock;
+class HostedMediaBlockFactory;
 class PhotoRuntime {
 public:
 	virtual ~PhotoRuntime() = default;
@@ -78,6 +80,33 @@ public:
 	virtual void join(Qt::MouseButton button) const = 0;
 };
 
+struct PreparedPhotoBlockData;
+struct PreparedVideoBlockData;
+struct PreparedAudioBlockData;
+struct PreparedMapBlockData;
+
+class HostedMediaBlockFactory {
+public:
+	virtual ~HostedMediaBlockFactory() = default;
+
+	[[nodiscard]] virtual std::shared_ptr<MediaBlock> createPhoto(
+		const PreparedPhotoBlockData &prepared) const {
+		return nullptr;
+	}
+	[[nodiscard]] virtual std::shared_ptr<MediaBlock> createVideo(
+		const PreparedVideoBlockData &prepared) const {
+		return nullptr;
+	}
+	[[nodiscard]] virtual std::shared_ptr<MediaBlock> createAudio(
+		const PreparedAudioBlockData &prepared) const {
+		return nullptr;
+	}
+	[[nodiscard]] virtual std::shared_ptr<MediaBlock> createMap(
+		const PreparedMapBlockData &prepared) const {
+		return nullptr;
+	}
+};
+
 class MediaRuntime {
 public:
 	virtual ~MediaRuntime() = default;
@@ -106,6 +135,10 @@ public:
 	}
 	[[nodiscard]] virtual rpl::producer<uint64> channelJoinedChanges() const {
 		return rpl::never<uint64>();
+	}
+	[[nodiscard]] virtual std::shared_ptr<HostedMediaBlockFactory>
+	hostedMediaBlockFactory() const {
+		return nullptr;
 	}
 };
 

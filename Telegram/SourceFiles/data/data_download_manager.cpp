@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_account.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/history_item_components.h"
 #include "history/history_item_helpers.h"
 #include "core/application.h"
 #include "core/mime_type.h"
@@ -67,6 +68,13 @@ constexpr auto ByDocument = [](const auto &entry) {
 }
 
 [[nodiscard]] bool ItemContainsMedia(const DownloadObject &object) {
+	if (const auto iv = object.item->Get<HistoryMessageMediaForInstantView>()) {
+		if (object.photo && iv->photo == object.photo) {
+			return true;
+		} else if (object.document && iv->document == object.document) {
+			return true;
+		}
+	}
 	if (const auto photo = object.photo) {
 		if (const auto media = object.item->media()) {
 			if (const auto page = media->webpage()) {
@@ -839,9 +847,15 @@ void DownloadManager::changed(not_null<const HistoryItem*> item) {
 		const auto i = ranges::find(data.downloaded, item.get(), ByItem);
 		Assert(i != end(data.downloaded));
 
-		const auto media = item->media();
-		const auto photo = media ? media->photo() : nullptr;
-		const auto document = media ? media->document() : nullptr;
+		auto photo = (PhotoData*)nullptr;
+		auto document = (DocumentData*)nullptr;
+		if (const auto iv = item->Get<HistoryMessageMediaForInstantView>()) {
+			photo = iv->photo;
+			document = iv->document;
+		} else if (const auto media = item->media()) {
+			photo = media->photo();
+			document = media->document();
+		}
 		if (i->object->photo != photo || i->object->document != document) {
 			detach(*i);
 		}

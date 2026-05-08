@@ -929,9 +929,13 @@ LaidOutBlock LayoutPhotoBlock(
 	block.visibleMediaRect = block.mediaRect;
 	if (block.mediaBlock) {
 		block.mediaBlock->setGeometry(block.mediaRect);
+		block.mediaRect = block.mediaBlock->geometry();
+		block.firstLineBaseline = block.mediaBlock->firstLineBaseline();
+		block.visibleMediaRect = block.mediaRect;
 	}
 
-	auto bottom = mediaTop + mediaHeight + style.padding.bottom();
+	auto bottom = block.mediaRect.y() + block.mediaRect.height()
+		+ style.padding.bottom();
 	LayoutMediaCaption(
 		&block,
 		prepared,
@@ -939,18 +943,22 @@ LaidOutBlock LayoutPhotoBlock(
 		inlineFormulaObjects,
 		mediaRuntime,
 		markdown,
-		mediaLeft,
+		block.mediaRect.x(),
 		bottom,
-		mediaWidth,
+		std::max(block.mediaRect.width(), 1),
 		style.captionSkip,
 		&bottom);
 
 	block.contentRect = QRect(
-		mediaLeft,
-		mediaTop,
-		mediaWidth,
-		std::max(bottom - mediaTop, mediaHeight));
-	block.outer = QRect(left, top, blockWidth, std::max(bottom - top, mediaHeight));
+		block.mediaRect.x(),
+		block.mediaRect.y(),
+		block.mediaRect.width(),
+		std::max(bottom - block.mediaRect.y(), block.mediaRect.height()));
+	block.outer = QRect(
+		left,
+		top,
+		blockWidth,
+		std::max(bottom - top, block.mediaRect.bottom() - top + 1));
 	return block;
 }
 
@@ -994,9 +1002,13 @@ LaidOutBlock LayoutVideoBlock(
 	block.visibleMediaRect = block.mediaRect;
 	if (block.mediaBlock) {
 		block.mediaBlock->setGeometry(block.mediaRect);
+		block.mediaRect = block.mediaBlock->geometry();
+		block.firstLineBaseline = block.mediaBlock->firstLineBaseline();
+		block.visibleMediaRect = block.mediaRect;
 	}
 
-	auto bottom = mediaTop + mediaHeight + style.padding.bottom();
+	auto bottom = block.mediaRect.y() + block.mediaRect.height()
+		+ style.padding.bottom();
 	LayoutMediaCaption(
 		&block,
 		prepared,
@@ -1004,18 +1016,22 @@ LaidOutBlock LayoutVideoBlock(
 		inlineFormulaObjects,
 		mediaRuntime,
 		markdown,
-		mediaLeft,
+		block.mediaRect.x(),
 		bottom,
-		mediaWidth,
+		std::max(block.mediaRect.width(), 1),
 		style.captionSkip,
 		&bottom);
 
 	block.contentRect = QRect(
-		mediaLeft,
-		mediaTop,
-		mediaWidth,
-		std::max(bottom - mediaTop, mediaHeight));
-	block.outer = QRect(left, top, blockWidth, std::max(bottom - top, mediaHeight));
+		block.mediaRect.x(),
+		block.mediaRect.y(),
+		block.mediaRect.width(),
+		std::max(bottom - block.mediaRect.y(), block.mediaRect.height()));
+	block.outer = QRect(
+		left,
+		top,
+		blockWidth,
+		std::max(bottom - top, block.mediaRect.bottom() - top + 1));
 	return block;
 }
 
@@ -1196,9 +1212,13 @@ LaidOutBlock LayoutMapBlock(
 	block.visibleMediaRect = block.mediaRect;
 	if (block.mediaBlock) {
 		block.mediaBlock->setGeometry(block.mediaRect);
+		block.mediaRect = block.mediaBlock->geometry();
+		block.firstLineBaseline = block.mediaBlock->firstLineBaseline();
+		block.visibleMediaRect = block.mediaRect;
 	}
 
-	auto bottom = mediaTop + mediaHeight + style.padding.bottom();
+	auto bottom = block.mediaRect.y() + block.mediaRect.height()
+		+ style.padding.bottom();
 	LayoutMediaCaption(
 		&block,
 		prepared,
@@ -1206,18 +1226,22 @@ LaidOutBlock LayoutMapBlock(
 		inlineFormulaObjects,
 		mediaRuntime,
 		markdown,
-		mediaLeft,
+		block.mediaRect.x(),
 		bottom,
-		mediaWidth,
+		std::max(block.mediaRect.width(), 1),
 		style.captionSkip,
 		&bottom);
 
 	block.contentRect = QRect(
-		mediaLeft,
-		mediaTop,
-		mediaWidth,
-		std::max(bottom - mediaTop, mediaHeight));
-	block.outer = QRect(left, top, blockWidth, std::max(bottom - top, mediaHeight));
+		block.mediaRect.x(),
+		block.mediaRect.y(),
+		block.mediaRect.width(),
+		std::max(bottom - block.mediaRect.y(), block.mediaRect.height()));
+	block.outer = QRect(
+		left,
+		top,
+		blockWidth,
+		std::max(bottom - top, block.mediaRect.bottom() - top + 1));
 	return block;
 }
 

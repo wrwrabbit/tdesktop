@@ -18,6 +18,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 struct WebPageData;
 struct TodoListItem;
+class DocumentData;
+class PhotoData;
 class VoiceSeekClickHandler;
 class ReplyKeyboard;
 
@@ -125,6 +127,13 @@ struct HistoryMessageFromRank
 struct HistoryMessageEdited
 : RuntimeComponent<HistoryMessageEdited, HistoryItem> {
 	TimeId date = 0;
+};
+
+struct HistoryMessageMediaForInstantView
+: RuntimeComponent<HistoryMessageMediaForInstantView, HistoryItem> {
+	QString url;
+	DocumentData *document = nullptr;
+	PhotoData *photo = nullptr;
 };
 
 class HiddenSenderInfo {

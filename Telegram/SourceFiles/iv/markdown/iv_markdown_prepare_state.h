@@ -67,6 +67,7 @@ struct NativeIvDocumentInfo {
 	QString performer;
 	int duration = 0;
 	bool isVideoFile = false;
+	bool isAnimation = false;
 };
 
 struct NativeIvPrepareState {

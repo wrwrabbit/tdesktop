@@ -41,6 +41,8 @@ PRIVATE
     iv/markdown/iv_markdown_controller.h
     iv/markdown/iv_markdown_document.cpp
     iv/markdown/iv_markdown_document.h
+    iv/markdown/iv_markdown_history_view_media.cpp
+    iv/markdown/iv_markdown_history_view_media.h
     iv/markdown/iv_markdown_math.cpp
     iv/markdown/iv_markdown_math.h
     iv/markdown/iv_markdown_math_renderer.cpp
@@ -105,6 +107,7 @@ PUBLIC
     tdesktop::td_scheme
 PRIVATE
     desktop-app::lib_webview
+    desktop-app::lib_storage
     desktop-app::external_ada
     tdesktop::td_lang
     tdesktop::td_ui

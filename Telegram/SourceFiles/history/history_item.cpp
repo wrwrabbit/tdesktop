@@ -1542,6 +1542,17 @@ void HistoryItem::customEmojiRepaint() {
 	}
 }
 
+void HistoryItem::setMediaForInstantView(
+		QString url,
+		DocumentData *document,
+		PhotoData *photo) {
+	AddComponents(HistoryMessageMediaForInstantView::Bit());
+	const auto data = Get<HistoryMessageMediaForInstantView>();
+	data->url = std::move(url);
+	data->document = document;
+	data->photo = photo;
+}
+
 bool HistoryItem::needsUpdateForVideoQualities(const MTPMessage &data) {
 	// When video gets the converted alt-videos lists, we need to update
 	// the message data even without edit-message update.

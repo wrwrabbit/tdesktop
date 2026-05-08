@@ -15,6 +15,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class HiddenSenderInfo;
 class History;
+class DocumentData;
+class PhotoData;
 
 struct HistoryMessageReply;
 struct HistoryMessageViews;
@@ -601,6 +603,10 @@ public:
 	void updateDate(TimeId newDate);
 	[[nodiscard]] bool canUpdateDate() const;
 	void customEmojiRepaint();
+	void setMediaForInstantView(
+		QString url,
+		DocumentData *document = nullptr,
+		PhotoData *photo = nullptr);
 
 	[[nodiscard]] SuggestionActions computeSuggestionActions() const;
 	[[nodiscard]] SuggestionActions computeSuggestionActions(

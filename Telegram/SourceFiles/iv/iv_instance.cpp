@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "base/platform/base_platform_info.h"
 #include "base/qt_signal_producer.h"
+#include "base/unixtime.h"
 #include "boxes/share_box.h"
 #include "core/application.h"
 #include "core/file_utilities.h"
@@ -21,6 +22,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document.h"
 #include "data/data_document_media.h"
 #include "data/data_file_origin.h"
+#include "data/data_location.h"
+#include "data/data_media_types.h"
 #include "data/data_photo_media.h"
 #include "data/data_session.h"
 #include "data/data_thread.h"
@@ -29,8 +32,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_helpers.h"
+#include "history/view/history_view_element.h"
+#include "history/view/media/history_view_location.h"
+#include "history/view/media/history_view_photo.h"
 #include "info/profile/info_profile_values.h"
 #include "iv/markdown/iv_markdown_controller.h"
+#include "iv/markdown/iv_markdown_history_view_media.h"
 #include "iv/iv_controller.h"
 #include "iv/iv_data.h"
 #include "iv/iv_prepare.h"
@@ -302,6 +309,51 @@ private:
 	};
 }
 
+[[nodiscard]] ::Data::LocationPoint CachedPageMapPoint(
+		double latitude,
+		double longitude,
+		uint64 accessHash) {
+	const auto point = MTP_geoPoint(
+		MTP_flags(0),
+		MTP_double(longitude),
+		MTP_double(latitude),
+		MTP_long(accessHash),
+		MTP_int(0));
+	return ::Data::LocationPoint(point.c_geoPoint());
+}
+
+[[nodiscard]] not_null<HistoryItem*> AddIvNeutralHostMessage(
+		not_null<History*> history,
+		QString pageUrl,
+		DocumentData *document = nullptr,
+		PhotoData *photo = nullptr) {
+	const auto item = history->addNewLocalMessage({
+		.id = history->nextNonHistoryEntryId(),
+		.flags = (MessageFlag::FakeHistoryItem
+			| MessageFlag::Local
+			| MessageFlag::HideDisplayDate),
+		.date = base::unixtime::now(),
+	}, TextWithEntities(), MTP_messageMediaEmpty());
+	item->setMediaForInstantView(std::move(pageUrl), document, photo);
+	return item;
+}
+
+[[nodiscard]] bool CanHostNativeIvVideoDocument(
+		not_null<DocumentData*> document) {
+	return !document->isVideoMessage()
+		&& (document->isVideoFile() || document->isAnimation());
+}
+
+[[nodiscard]] ::Data::MediaFile::Args CachedPageVideoMediaArgs(
+		not_null<Main::Session*> session,
+		not_null<DocumentData*> document) {
+	const auto video = document->video();
+	return {
+		.hasQualitiesList = video && !video->qualities.empty(),
+		.skipPremiumEffect = !session->premium(),
+	};
+}
+
 class CachedPageDocumentRuntime final : public Markdown::DocumentRuntime {
 public:
 	CachedPageDocumentRuntime(
@@ -359,6 +411,65 @@ private:
 	const not_null<DocumentData*> _document;
 	const ::Data::FileOrigin _origin;
 	const std::shared_ptr<::Data::DocumentMedia> _media;
+
+};
+
+class CachedPageInlineDocumentImage final : public Ui::DynamicImage {
+public:
+	CachedPageInlineDocumentImage(
+		not_null<DocumentData*> document,
+		::Data::FileOrigin origin)
+	: _document(document)
+	, _origin(std::move(origin))
+	, _media(document->createMediaView()) {
+	}
+
+	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> clone() override {
+		return std::make_shared<CachedPageInlineDocumentImage>(
+			_document,
+			_origin);
+	}
+
+	[[nodiscard]] QImage image(int size) override {
+		Q_UNUSED(size);
+		ensureWanted();
+		if (const auto image = resolvedImage()) {
+			return image->original();
+		}
+		return QImage();
+	}
+
+	void subscribeToUpdates(Fn<void()> callback) override {
+		_subscription.destroy();
+		if (!callback) {
+			return;
+		}
+		ensureWanted();
+		if (_media->thumbnail()) {
+			return;
+		}
+		_document->session().downloaderTaskFinished(
+		) | rpl::filter([=] {
+			return (_media->thumbnail() != nullptr);
+		}) | rpl::take(1) | rpl::on_next(std::move(callback), _subscription);
+	}
+
+private:
+	void ensureWanted() {
+		_media->thumbnailWanted(_origin);
+	}
+
+	[[nodiscard]] Image *resolvedImage() const {
+		if (const auto image = _media->thumbnail()) {
+			return image;
+		}
+		return _media->thumbnailInline();
+	}
+
+	const not_null<DocumentData*> _document;
+	const ::Data::FileOrigin _origin;
+	const std::shared_ptr<::Data::DocumentMedia> _media;
+	rpl::lifetime _subscription;
 
 };
 
@@ -580,7 +691,9 @@ public:
 		if (document->isNull()) {
 			return nullptr;
 		}
-		return Ui::MakeDocumentThumbnailFit(document, fileOrigin());
+		return std::make_shared<CachedPageInlineDocumentImage>(
+			document,
+			fileOrigin());
 	}
 
 	[[nodiscard]] std::shared_ptr<Markdown::PhotoRuntime> resolvePhoto(
@@ -637,6 +750,151 @@ public:
 
 	[[nodiscard]] rpl::producer<uint64> channelJoinedChanges() const override {
 		return _channelJoinedChanges.events();
+	}
+
+	[[nodiscard]] std::shared_ptr<Markdown::HostedMediaBlockFactory>
+	hostedMediaBlockFactory() const override {
+		const auto controller = CurrentSessionController(_session);
+		if (!controller || !_session->data().peerLoaded(
+				PeerData::kServiceNotificationsId)) {
+			return nullptr;
+		}
+		const auto history = _session->data().history(
+			PeerData::kServiceNotificationsId);
+		if (!history->peer->isUser()) {
+			return nullptr;
+		}
+		return std::make_shared<Markdown::IvHistoryViewMediaBlockFactory>(
+			base::make_weak(controller),
+			[session = _session, pageUrl = _page->url, history](
+					Window::SessionController *controller,
+					const Markdown::PreparedPhotoBlockData &prepared) {
+				if (!controller
+					|| !prepared.viewerOpen
+					|| !prepared.urlOverride.isEmpty()) {
+					return std::shared_ptr<Markdown::MediaBlock>();
+				}
+				const auto photo = session->data().photo(PhotoId(prepared.photoId));
+				if (photo->isNull()) {
+					return std::shared_ptr<Markdown::MediaBlock>();
+				}
+				const auto item = AddIvNeutralHostMessage(
+					history,
+					pageUrl,
+					nullptr,
+					photo);
+
+				auto descriptor = Markdown::IvHistoryViewMediaDescriptor();
+				descriptor.stableId = prepared.id.value;
+				descriptor.kind = Markdown::IvHistoryViewMediaKind::Photo;
+				descriptor.copyText = u"Photo"_q;
+				descriptor.layoutHint = QSize(prepared.width, prepared.height);
+				descriptor.session = &session->data();
+				descriptor.item = item;
+				descriptor.mediaFactory = [photo](
+						not_null<HistoryView::Element*> view) {
+					return std::make_unique<HistoryView::Photo>(
+						view,
+						view->data(),
+						photo,
+						false);
+				};
+				descriptor.photo = std::make_shared<CachedPagePhotoRuntime>(
+					session,
+					photo,
+					::Data::FileOriginWebPage{ pageUrl });
+				return Markdown::CreateIvHistoryViewMediaBlock(
+					controller,
+					std::move(descriptor));
+			},
+			[session = _session, pageUrl = _page->url, history](
+					Window::SessionController *controller,
+					const Markdown::PreparedVideoBlockData &prepared) {
+				if (!controller
+					|| prepared.media.kind
+						!= Markdown::PreparedMediaItemKind::Document) {
+					return std::shared_ptr<Markdown::MediaBlock>();
+				}
+				const auto document = session->data().document(
+					DocumentId(prepared.media.id));
+				if (document->isNull()
+					|| !CanHostNativeIvVideoDocument(document)) {
+					return std::shared_ptr<Markdown::MediaBlock>();
+				}
+				const auto item = AddIvNeutralHostMessage(
+					history,
+					pageUrl,
+					document);
+				auto media = std::make_shared<::Data::MediaFile>(
+					item,
+					document,
+					CachedPageVideoMediaArgs(session, document));
+
+				auto descriptor = Markdown::IvHistoryViewMediaDescriptor();
+				descriptor.stableId = prepared.id.value;
+				descriptor.kind = Markdown::IvHistoryViewMediaKind::Document;
+				descriptor.copyText = tr::lng_in_dlg_video(tr::now);
+				descriptor.layoutHint = QSize(
+					prepared.media.width,
+					prepared.media.height);
+				descriptor.session = &session->data();
+				descriptor.item = item;
+				descriptor.mediaFactory = [media](
+						not_null<HistoryView::Element*> view) {
+					return media->createView(
+						view,
+						view->data());
+				};
+				descriptor.itemKeepAlive.push_back(base::take(media));
+				descriptor.document = std::make_shared<CachedPageDocumentRuntime>(
+					session,
+					document,
+					::Data::FileOriginWebPage{ pageUrl });
+				return Markdown::CreateIvHistoryViewMediaBlock(
+					controller,
+					std::move(descriptor));
+			},
+			Markdown::IvHistoryViewMediaBlockFactory::AudioFactory(),
+			[session = _session, pageUrl = _page->url, history](
+					Window::SessionController *controller,
+					const Markdown::PreparedMapBlockData &prepared) {
+				if (!controller) {
+					return std::shared_ptr<Markdown::MediaBlock>();
+				}
+				const auto item = AddIvNeutralHostMessage(history, pageUrl);
+				const auto point = CachedPageMapPoint(
+					prepared.latitude,
+					prepared.longitude,
+					prepared.accessHash);
+				const auto mapImage = std::make_shared<::Data::CloudImage>(
+					session,
+					CachedPageMapImageData(
+						prepared.latitude,
+						prepared.longitude,
+						prepared.accessHash,
+						QSize(prepared.width, prepared.height),
+						prepared.zoom));
+				const auto mapImagePtr = mapImage.get();
+
+				auto descriptor = Markdown::IvHistoryViewMediaDescriptor();
+				descriptor.stableId = prepared.id.value;
+				descriptor.kind = Markdown::IvHistoryViewMediaKind::Map;
+				descriptor.copyText = tr::lng_maps_point(tr::now);
+				descriptor.layoutHint = QSize(prepared.width, prepared.height);
+				descriptor.session = &session->data();
+				descriptor.item = item;
+				descriptor.mediaFactory = [mapImagePtr, point](
+						not_null<HistoryView::Element*> view) {
+					return std::make_unique<HistoryView::Location>(
+						view,
+						not_null{ mapImagePtr },
+						point);
+				};
+				descriptor.keepAlive.push_back(mapImage);
+				return Markdown::CreateIvHistoryViewMediaBlock(
+					controller,
+					std::move(descriptor));
+			});
 	}
 
 private:
