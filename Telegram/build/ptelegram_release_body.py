@@ -35,6 +35,7 @@ if __name__ == "__main__":
     parser.add_argument("--input_file", type=str, default=os.curdir + "../../ptelegram_changelog.md")
     parser.add_argument("--output_file", type=str, default="ptelegram_cur_changelog.md")
     parser.add_argument("--version", type=str, default=None)
+    parser.add_argument("--tg_version", type=str, default=None)
 
     args = parser.parse_args()
     with open(args.input_file) as reader:
@@ -43,5 +44,9 @@ if __name__ == "__main__":
         else:
             top_lines = read_version_log(reader.readlines(), args.version)
         with open(args.output_file, "w") as writer:
+            if args.tg_version:
+                writer.write(f"Based on Telegram {args.tg_version}\n")
+                if top_lines:
+                    writer.write("\n")
             for line in top_lines:
                 writer.write(f"{line}")
