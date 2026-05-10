@@ -2396,7 +2396,12 @@ bool MediaPoll::updateInlineResultMedia(const MTPMessageMedia &media) {
 }
 
 bool MediaPoll::updateSentMedia(const MTPMessageMedia &media) {
-	return false;
+	return media.match([&](const MTPDmessageMediaPoll &data) {
+		parent()->history()->owner().processPoll(data);
+		return true;
+	}, [](const auto &) {
+		return false;
+	});
 }
 
 std::unique_ptr<HistoryView::Media> MediaPoll::createView(
