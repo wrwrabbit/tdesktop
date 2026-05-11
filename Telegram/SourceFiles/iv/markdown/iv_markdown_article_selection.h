@@ -33,7 +33,7 @@ struct SelectableSegment {
 	int index = -1;
 	int length = 0;
 	int tableSegmentIndex = -1;
-	int mediaSegmentIndex = -1;
+	int parentSegmentIndex = -1;
 
 	[[nodiscard]] bool isTextLeaf() const {
 		return (leaf != nullptr);

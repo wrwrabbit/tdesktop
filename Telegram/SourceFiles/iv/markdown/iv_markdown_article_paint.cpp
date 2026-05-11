@@ -101,6 +101,71 @@ void PaintBulletMarker(
 	return block.colorizedFormulaImage;
 }
 
+[[nodiscard]] int TableBorder(
+		const LaidOutBlock &block,
+		const style::Markdown &markdown) {
+	return block.tableBordered ? markdown.table.border : 0;
+}
+
+struct TableOwnershipSlot {
+	const LaidOutTableCell *cell = nullptr;
+};
+
+using TableOwnershipGrid = std::vector<std::vector<TableOwnershipSlot>>;
+
+[[nodiscard]] TableOwnershipGrid BuildTableOwnershipGrid(
+		const LaidOutBlock &block) {
+	const auto rowCount = int(block.tableRows.size());
+	const auto columnCount = int(block.tableColumnWidths.size());
+	auto result = TableOwnershipGrid(
+		std::max(rowCount, 0),
+		std::vector<TableOwnershipSlot>(std::max(columnCount, 0)));
+	for (auto row = 0; row != rowCount; ++row) {
+		for (const auto &cell : block.tableRows[row].cells) {
+			const auto fromRow = std::clamp(row, 0, rowCount);
+			const auto toRow = std::clamp(row + cell.rowspan, 0, rowCount);
+			const auto fromColumn = std::clamp(cell.column, 0, columnCount);
+			const auto toColumn = std::clamp(
+				cell.column + cell.colspan,
+				0,
+				columnCount);
+			for (auto currentRow = fromRow; currentRow != toRow; ++currentRow) {
+				for (auto currentColumn = fromColumn;
+					currentColumn != toColumn;
+					++currentColumn) {
+					result[currentRow][currentColumn].cell = &cell;
+				}
+			}
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] QPainterPath TableShapePath(
+		const LaidOutBlock &block,
+		int border,
+		int radius) {
+	auto path = QPainterPath();
+	if (block.tableRect.isEmpty()) {
+		return path;
+	}
+	if (border > 0) {
+		const auto half = border / 2.;
+		path.addRoundedRect(
+			QRectF(block.tableRect).marginsRemoved({
+				half,
+				half,
+				half,
+				half,
+			}),
+			radius,
+			radius);
+	} else {
+		path.addRect(block.tableRect);
+	}
+	return path;
+}
+
 void PaintTableBlock(
 		Painter &p,
 		const LaidOutBlock &block,
@@ -108,65 +173,126 @@ void PaintTableBlock(
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
 		QRect clip) {
+	if (!block.textRect.isEmpty()) {
+		p.setPen(markdown.textColor->c);
+		PaintTextLeaf(
+			p,
+			block.leaf,
+			caches,
+			block.textRect,
+			block.textWidth,
+			clip,
+			style::al_left,
+			TextSelectionForSegmentIndex(
+				selectionState,
+				block.secondarySegmentIndex));
+	}
+
 	const auto tableClip = clip.intersected(block.visibleTableRect);
 	if (tableClip.isEmpty()) {
 		return;
 	}
 
+	const auto border = TableBorder(block, markdown);
+	const auto radius = st::defaultTable.radius;
+	const auto half = border / 2.;
+	const auto shapePath = TableShapePath(block, border, radius);
+
 	p.save();
 	p.setClipRect(tableClip);
-
-	const auto &table = st::defaultTable;
-	const auto half = table.border / 2.;
-	const auto inner = QRectF(block.tableRect).marginsRemoved(
-		{ half, half, half, half });
-	const auto radius = table.radius;
-	auto outerPath = QPainterPath();
-	outerPath.addRoundedRect(inner, radius, radius);
-
-	auto headerBottom = 0;
-	for (const auto &row : block.tableRows) {
-		if (!row.header) {
-			break;
+	p.save();
+	p.setClipPath(shapePath, Qt::IntersectClip);
+	for (auto rowIndex = 0, rowCount = int(block.tableRows.size()); rowIndex != rowCount; ++rowIndex) {
+		const auto striped = block.tableStriped && ((rowIndex % 2) == 0);
+		for (const auto &cell : block.tableRows[rowIndex].cells) {
+			if (!cell.outer.intersects(block.visibleTableRect)) {
+				continue;
+			}
+			if (!cell.header && !striped) {
+				continue;
+			}
+			p.fillRect(cell.outer, markdown.table.headerBg->c);
 		}
-		headerBottom = row.outer.y() + row.outer.height();
 	}
-	if (headerBottom > 0) {
-		auto hq = PainterHighQualityEnabler(p);
-		p.setClipRect(
-			QRect(
-				block.tableRect.x(),
-				block.tableRows.front().outer.y(),
-				block.tableRect.width(),
-				headerBottom - block.tableRows.front().outer.y()),
-			Qt::IntersectClip);
-		p.setBrush(table.headerBg);
-		p.setPen(Qt::NoPen);
-		p.drawRoundedRect(inner, radius, radius);
-		p.setClipping(false);
-		p.setClipRect(tableClip);
-	}
+	p.restore();
 
-	if (table.border > 0 && !block.tableRect.isEmpty()) {
-		auto path = outerPath;
-		for (auto i = 1, count = int(block.tableRows.size()); i != count; ++i) {
-			const auto y = block.tableRows[i].outer.y() - half;
-			path.moveTo(inner.x(), y);
-			path.lineTo(inner.x() + inner.width(), y);
+	if (border > 0 && !block.tableRect.isEmpty()) {
+		const auto ownership = BuildTableOwnershipGrid(block);
+		const auto rowCount = int(ownership.size());
+		const auto columnCount = rowCount
+			? int(ownership.front().size())
+			: int(block.tableColumnWidths.size());
+		auto columnLefts = std::vector<int>(columnCount, block.tableRect.x() + border);
+		auto separatorLeft = block.tableRect.x() + border;
+		for (auto column = 0; column != columnCount; ++column) {
+			columnLefts[column] = separatorLeft;
+			separatorLeft += block.tableColumnWidths[column] + border;
+		}
+		const auto inner = QRectF(block.tableRect).marginsRemoved({
+			half,
+			half,
+			half,
+			half,
+		});
+		auto path = shapePath;
+		for (auto boundaryRow = 1; boundaryRow != rowCount; ++boundaryRow) {
+			auto segmentStart = -1;
+			for (auto column = 0; column != columnCount; ++column) {
+				const auto split = ownership[boundaryRow - 1][column].cell
+					!= ownership[boundaryRow][column].cell;
+				if (split && (segmentStart < 0)) {
+					segmentStart = column;
+				} else if (!split && (segmentStart >= 0)) {
+					const auto fromX = (segmentStart == 0)
+						? inner.x()
+						: (columnLefts[segmentStart] - half);
+					const auto toX = columnLefts[column] - half;
+					const auto y = block.tableRows[boundaryRow].outer.y() - half;
+					path.moveTo(fromX, y);
+					path.lineTo(toX, y);
+					segmentStart = -1;
+				}
+			}
+			if (segmentStart >= 0) {
+				const auto fromX = (segmentStart == 0)
+					? inner.x()
+					: (columnLefts[segmentStart] - half);
+				const auto y = block.tableRows[boundaryRow].outer.y() - half;
+				path.moveTo(fromX, y);
+				path.lineTo(inner.x() + inner.width(), y);
+			}
+		}
+		for (auto boundaryColumn = 1; boundaryColumn != columnCount; ++boundaryColumn) {
+			auto segmentStart = -1;
+			for (auto row = 0; row != rowCount; ++row) {
+				const auto split = ownership[row][boundaryColumn - 1].cell
+					!= ownership[row][boundaryColumn].cell;
+				if (split && (segmentStart < 0)) {
+					segmentStart = row;
+				} else if (!split && (segmentStart >= 0)) {
+					const auto fromY = (segmentStart == 0)
+						? inner.y()
+						: (block.tableRows[segmentStart].outer.y() - half);
+					const auto toY = block.tableRows[row].outer.y() - half;
+					const auto x = columnLefts[boundaryColumn] - half;
+					path.moveTo(x, fromY);
+					path.lineTo(x, toY);
+					segmentStart = -1;
+				}
+			}
+			if (segmentStart >= 0) {
+				const auto fromY = (segmentStart == 0)
+					? inner.y()
+					: (block.tableRows[segmentStart].outer.y() - half);
+				const auto x = columnLefts[boundaryColumn] - half;
+				path.moveTo(x, fromY);
+				path.lineTo(x, inner.y() + inner.height());
+			}
 		}
 
-		auto separatorLeft = block.tableRect.x() + table.border;
-		for (auto i = 0, count = int(block.tableColumnWidths.size()); i + 1 < count; ++i) {
-			separatorLeft += block.tableColumnWidths[i];
-			const auto x = separatorLeft + half;
-			path.moveTo(x, inner.y());
-			path.lineTo(x, inner.y() + inner.height());
-			separatorLeft += table.border;
-		}
-
 		auto hq = PainterHighQualityEnabler(p);
-		auto pen = table.borderFg->p;
-		pen.setWidth(table.border);
+		auto pen = markdown.table.borderFg->p;
+		pen.setWidth(border);
 		p.setPen(pen);
 		p.setBrush(Qt::NoBrush);
 		p.drawPath(path);
@@ -198,7 +324,7 @@ void PaintTableBlock(
 	if (block.segmentIndex >= 0
 		&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
 		p.save();
-		p.setClipPath(outerPath, Qt::IntersectClip);
+		p.setClipPath(shapePath, Qt::IntersectClip);
 		p.fillRect(block.tableRect, p.textPalette().selectOverlay);
 		p.restore();
 	}
@@ -208,7 +334,7 @@ void PaintTableBlock(
 			std::max(markdown.table.overflowWidth, 1),
 			block.visibleTableRect.width());
 		p.save();
-		p.setClipPath(outerPath, Qt::IntersectClip);
+		p.setClipPath(shapePath, Qt::IntersectClip);
 		p.fillRect(
 			QRect(
 				block.visibleTableRect.x()

@@ -88,11 +88,22 @@ struct InlineTextObjectEntity {
 		InlineTextObjectIvImageData> data = InlineTextObjectFormulaData();
 };
 
+enum class PreparedTableCellVerticalAlignment {
+	Top,
+	Middle,
+	Bottom,
+};
+
 struct PreparedTableCell {
 	TextWithEntities text;
 	std::vector<PreparedLink> links;
 	int column = 0;
 	TableAlignment alignment = TableAlignment::None;
+	bool header = false;
+	PreparedTableCellVerticalAlignment verticalAlignment
+		= PreparedTableCellVerticalAlignment::Top;
+	int colspan = 1;
+	int rowspan = 1;
 };
 
 struct PreparedTableRow {
@@ -210,6 +221,8 @@ struct PreparedBlock {
 	int actualDepth = 0;
 	int visualDepth = 0;
 	int tableColumnCount = 0;
+	bool tableBordered = true;
+	bool tableStriped = false;
 	bool collapsed = false;
 	bool depthClamped = false;
 	bool tight = false;

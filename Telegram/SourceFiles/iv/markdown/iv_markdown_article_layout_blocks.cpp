@@ -47,24 +47,43 @@ const auto kUsernamePrefix = u"@"_q;
 }
 
 [[nodiscard]] const style::TextStyle &TableCellTextStyle(
-		bool header,
+		const PreparedTableCell &prepared,
 		const style::Markdown &) {
-	if (header) {
+	if (prepared.header) {
 		return st::defaultTable.defaultLabel.style;
 	}
 	return st::defaultTable.defaultValue.style;
 }
 
+[[nodiscard]] const style::TextStyle &TableCellTextStyle(
+		const LaidOutTableCell &cell,
+		const style::Markdown &) {
+	if (cell.header) {
+		return st::defaultTable.defaultLabel.style;
+	}
+	return st::defaultTable.defaultValue.style;
+}
+
+[[nodiscard]] int TableBorder(
+		bool bordered,
+		const style::Markdown &markdown) {
+	return bordered ? markdown.table.border : 0;
+}
+
 [[nodiscard]] TableCellLayoutData InitializeTableCellLayout(
 		const PreparedTableCell &prepared,
-		bool header,
 		const std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		const style::Markdown &markdown) {
 	auto result = TableCellLayoutData();
-	const auto &textStyle = TableCellTextStyle(header, markdown);
+	const auto &textStyle = TableCellTextStyle(prepared, markdown);
+	result.cell.header = prepared.header;
+	result.cell.verticalAlignment = prepared.verticalAlignment;
 	result.cell.align = CellAlign(prepared.alignment);
+	result.cell.column = std::max(prepared.column, 0);
+	result.cell.colspan = std::max(prepared.colspan, 1);
+	result.cell.rowspan = std::max(prepared.rowspan, 1);
 	SetTextLeaf(
 		&result.cell.leaf,
 		textStyle,
@@ -81,24 +100,128 @@ const auto kUsernamePrefix = u"@"_q;
 	return result;
 }
 
+[[nodiscard]] int TableSpanWidth(
+		const std::vector<int> &columnWidths,
+		int column,
+		int colspan,
+		int border) {
+	const auto from = std::clamp(column, 0, int(columnWidths.size()));
+	const auto to = std::clamp(column + colspan, 0, int(columnWidths.size()));
+	if (from >= to) {
+		return 0;
+	}
+	auto result = 0;
+	for (auto current = from; current != to; ++current) {
+		result += columnWidths[current];
+	}
+	return result + std::max(to - from - 1, 0) * border;
+}
+
+[[nodiscard]] int TableSpanHeight(
+		const std::vector<int> &rowHeights,
+		int row,
+		int rowspan,
+		int border) {
+	const auto from = std::clamp(row, 0, int(rowHeights.size()));
+	const auto to = std::clamp(row + rowspan, 0, int(rowHeights.size()));
+	if (from >= to) {
+		return 0;
+	}
+	auto result = 0;
+	for (auto current = from; current != to; ++current) {
+		result += rowHeights[current];
+	}
+	return result + std::max(to - from - 1, 0) * border;
+}
+
+void DistributeSizeDeficits(
+		std::vector<int> *sizes,
+		std::vector<int> deficits,
+		int *extra) {
+	auto remaining = 0;
+	for (const auto deficit : deficits) {
+		remaining += std::max(deficit, 0);
+	}
+	while (*extra > 0 && remaining > 0) {
+		auto active = 0;
+		for (const auto deficit : deficits) {
+			if (deficit > 0) {
+				++active;
+			}
+		}
+		if (!active) {
+			break;
+		}
+		const auto step = std::max(*extra / active, 1);
+		for (auto i = 0, count = int(deficits.size()); i != count && *extra > 0; ++i) {
+			if (deficits[i] <= 0) {
+				continue;
+			}
+			const auto delta = std::min({ deficits[i], step, *extra });
+			(*sizes)[i] += delta;
+			deficits[i] -= delta;
+			remaining -= delta;
+			*extra -= delta;
+		}
+	}
+}
+
+void DistributeSpanDelta(
+		std::vector<int> *sizes,
+		int from,
+		int to,
+		int delta) {
+	from = std::clamp(from, 0, int(sizes->size()));
+	to = std::clamp(to, 0, int(sizes->size()));
+	while (delta > 0 && from < to) {
+		const auto active = to - from;
+		const auto step = std::max(delta / active, 1);
+		for (auto i = from; i != to && delta > 0; ++i) {
+			const auto current = std::min(step, delta);
+			(*sizes)[i] += current;
+			delta -= current;
+		}
+	}
+}
+
+struct TableSpannedCellLayout {
+	int row = 0;
+	const TableCellLayoutData *cell = nullptr;
+};
+
 [[nodiscard]] std::vector<int> ComputeTableColumnWidths(
 		const std::vector<TableRowLayoutData> &rows,
 		int columnCount,
 		int width,
 		const style::Markdown &markdown,
+		bool bordered,
 		bool *overflowed) {
 	const auto &padding = markdown.table.cellPadding;
-	const auto border = st::defaultTable.border;
+	const auto border = TableBorder(bordered, markdown);
 	const auto minimum = markdown.table.minColumnWidth;
 	auto result = std::vector<int>(std::max(columnCount, 0), minimum);
-	auto preferred = std::vector<int>(std::max(columnCount, 0), minimum);
-	for (const auto &row : rows) {
-		for (auto column = 0; column != columnCount; ++column) {
-			preferred[column] = std::max(
-				preferred[column],
-				row.cells[column].preferredWidth
-					+ padding.left()
-					+ padding.right());
+	auto singleColumnDeficits = std::vector<int>(std::max(columnCount, 0), 0);
+	auto spannedCells = std::vector<TableSpannedCellLayout>();
+	for (auto row = 0, rowCount = int(rows.size()); row != rowCount; ++row) {
+		for (const auto &cell : rows[row].cells) {
+			const auto from = std::clamp(cell.cell.column, 0, columnCount);
+			const auto to = std::clamp(
+				cell.cell.column + cell.cell.colspan,
+				0,
+				columnCount);
+			if (from >= to) {
+				continue;
+			}
+			const auto preferredWidth = cell.preferredWidth
+				+ padding.left()
+				+ padding.right();
+			if ((to - from) == 1) {
+				singleColumnDeficits[from] = std::max(
+					singleColumnDeficits[from],
+					preferredWidth - minimum);
+			} else {
+				spannedCells.push_back({ row, &cell });
+			}
 		}
 	}
 
@@ -111,34 +234,46 @@ const auto kUsernamePrefix = u"@"_q;
 	}
 
 	auto extra = availableWidth - minimumGridWidth;
-	auto remaining = 0;
-	auto deficits = std::vector<int>(columnCount, 0);
-	for (auto column = 0; column != columnCount; ++column) {
-		deficits[column] = std::max(preferred[column] - minimum, 0);
-		remaining += deficits[column];
-	}
-
-	while (extra > 0 && remaining > 0) {
-		auto active = 0;
-		for (const auto deficit : deficits) {
-			if (deficit > 0) {
-				++active;
-			}
-		}
-		if (!active) {
+	DistributeSizeDeficits(&result, std::move(singleColumnDeficits), &extra);
+	std::sort(
+		spannedCells.begin(),
+		spannedCells.end(),
+		[](const TableSpannedCellLayout &a, const TableSpannedCellLayout &b) {
+			const auto aSpan = a.cell ? a.cell->cell.colspan : 0;
+			const auto bSpan = b.cell ? b.cell->cell.colspan : 0;
+			return (aSpan < bSpan)
+				|| ((aSpan == bSpan) && (a.row < b.row))
+				|| ((aSpan == bSpan)
+					&& (a.row == b.row)
+					&& a.cell
+					&& b.cell
+					&& (a.cell->cell.column < b.cell->cell.column));
+		});
+	for (const auto &spanned : spannedCells) {
+		if (!spanned.cell || extra <= 0) {
 			break;
 		}
-		const auto step = std::max(extra / active, 1);
-		for (auto column = 0; column != columnCount && extra > 0; ++column) {
-			if (!deficits[column]) {
-				continue;
-			}
-			const auto delta = std::min({ deficits[column], step, extra });
-			result[column] += delta;
-			deficits[column] -= delta;
-			remaining -= delta;
-			extra -= delta;
+		const auto from = std::clamp(spanned.cell->cell.column, 0, columnCount);
+		const auto to = std::clamp(
+			spanned.cell->cell.column + spanned.cell->cell.colspan,
+			0,
+			columnCount);
+		if (from >= to) {
+			continue;
 		}
+		const auto preferredWidth = spanned.cell->preferredWidth
+			+ padding.left()
+			+ padding.right();
+		const auto currentWidth = TableSpanWidth(
+			result,
+			from,
+			to - from,
+			border);
+		const auto delta = std::min(
+			std::max(preferredWidth - currentWidth, 0),
+			extra);
+		DistributeSpanDelta(&result, from, to, delta);
+		extra -= delta;
 	}
 
 	if (extra > 0) {
@@ -185,6 +320,36 @@ void SetPlainTextLeaf(
 
 void LayoutMediaCaption(
 		LaidOutBlock *block,
+		const TextWithEntities &text,
+		const std::vector<PreparedLink> &links,
+		const std::vector<PreparedFormulaSlot> *formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::TextStyle &textStyle,
+		int left,
+		int top,
+		int width) {
+	block->textWidth = std::max(width, 1);
+	SetTextLeaf(
+		&block->leaf,
+		textStyle,
+		text,
+		formulas,
+		inlineFormulaObjects,
+		mediaRuntime,
+		block->textWidth);
+	BindLinks(&block->leaf, links);
+	block->textRect = QRect(
+		left,
+		top,
+		block->textWidth,
+		std::max(
+			block->leaf.countHeight(block->textWidth, true),
+			TextLineHeight(textStyle)));
+}
+
+void LayoutMediaCaption(
+		LaidOutBlock *block,
 		const PreparedBlock &prepared,
 		const std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
@@ -198,22 +363,18 @@ void LayoutMediaCaption(
 	if (prepared.text.text.isEmpty()) {
 		return;
 	}
-	block->textWidth = std::max(width, 1);
-	SetTextLeaf(
-		&block->leaf,
-		markdown.body,
+	LayoutMediaCaption(
+		block,
 		prepared.text,
+		prepared.links,
 		formulas,
 		inlineFormulaObjects,
 		mediaRuntime,
-		block->textWidth);
-	BindLinks(&block->leaf, prepared.links);
-	const auto captionTop = top + skip;
-	const auto captionHeight = std::max(
-		block->leaf.countHeight(block->textWidth, true),
-		TextLineHeight(markdown.body));
-	block->textRect = QRect(left, captionTop, block->textWidth, captionHeight);
-	*bottom = captionTop + captionHeight;
+		markdown.body,
+		left,
+		top + skip,
+		width);
+	*bottom = block->textRect.y() + block->textRect.height();
 }
 
 [[nodiscard]] QString AudioTitleText(const PreparedAudioBlockData &audio) {
@@ -705,10 +866,40 @@ LaidOutBlock LayoutTableBlock(
 		int width) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Table;
+	block.anchorId = prepared.anchorId;
+	block.tableBordered = prepared.tableBordered;
+	block.tableStriped = prepared.tableStriped;
+
+	auto tableTop = top;
+	if (!prepared.text.text.isEmpty()) {
+		LayoutMediaCaption(
+			&block,
+			prepared.text,
+			prepared.links,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
+			markdown.body,
+			left,
+			top,
+			width);
+		block.firstLineBaseline = LeafFirstLineBaseline(
+			block.leaf,
+			block.textRect,
+			markdown.body);
+		tableTop = block.textRect.y()
+			+ block.textRect.height()
+			+ markdown.table.captionSkip;
+	}
 
 	const auto columnCount = prepared.tableColumnCount;
 	if (!columnCount || prepared.tableRows.empty()) {
-		block.outer = QRect(left, top, std::max(width, 1), 0);
+		if (!block.textRect.isEmpty()) {
+			block.contentRect = block.textRect;
+			block.outer = block.textRect;
+		} else {
+			block.outer = QRect(left, top, std::max(width, 1), 0);
+		}
 		return block;
 	}
 
@@ -717,11 +908,10 @@ LaidOutBlock LayoutTableBlock(
 	for (const auto &preparedRow : prepared.tableRows) {
 		auto row = TableRowLayoutData();
 		row.header = preparedRow.header;
-		row.cells.reserve(columnCount);
+		row.cells.reserve(preparedRow.cells.size());
 		for (const auto &preparedCell : preparedRow.cells) {
 			row.cells.push_back(InitializeTableCellLayout(
 				preparedCell,
-				preparedRow.header,
 				formulas,
 				inlineFormulaObjects,
 				mediaRuntime,
@@ -735,41 +925,90 @@ LaidOutBlock LayoutTableBlock(
 		columnCount,
 		width,
 		markdown,
+		block.tableBordered,
 		&block.overflowed);
 
 	const auto &padding = markdown.table.cellPadding;
-	const auto border = st::defaultTable.border;
+	const auto border = TableBorder(block.tableBordered, markdown);
 	auto tableWidth = border;
 	for (const auto columnWidth : block.tableColumnWidths) {
 		tableWidth += columnWidth + border;
 	}
+	auto columnLefts = std::vector<int>(columnCount, left + border);
+	auto x = left + border;
+	for (auto column = 0; column != columnCount; ++column) {
+		columnLefts[column] = x;
+		x += block.tableColumnWidths[column] + border;
+	}
 
-	auto y = top + border;
-	block.tableRows.reserve(rows.size());
-	for (auto &rowData : rows) {
-		auto rowHeight = 0;
-		auto textHeights = std::vector<int>(columnCount, 0);
-		for (auto column = 0; column != columnCount; ++column) {
-			const auto &textStyle = TableCellTextStyle(rowData.header, markdown);
-			const auto contentWidth = std::max(
-				block.tableColumnWidths[column]
-					- padding.left()
-					- padding.right(),
+	auto rowHeights = std::vector<int>(rows.size(), 0);
+	auto rowSpans = std::vector<TableSpannedCellLayout>();
+	for (auto rowIndex = 0, rowCount = int(rows.size()); rowIndex != rowCount; ++rowIndex) {
+		for (auto &cellData : rows[rowIndex].cells) {
+			const auto spanWidth = TableSpanWidth(
+				block.tableColumnWidths,
+				cellData.cell.column,
+				cellData.cell.colspan,
+				border);
+			cellData.cell.textWidth = std::max(
+				spanWidth - padding.left() - padding.right(),
 				1);
-			rowData.cells[column].cell.textWidth = contentWidth;
-			textHeights[column] = (contentWidth
-				>= rowData.cells[column].preferredWidth)
-				? rowData.cells[column].preferredHeight
+			const auto &textStyle = TableCellTextStyle(cellData.cell, markdown);
+			cellData.textHeight = (cellData.cell.textWidth >= cellData.preferredWidth)
+				? cellData.preferredHeight
 				: std::max(
-					rowData.cells[column].cell.leaf.countHeight(
-						contentWidth,
+					cellData.cell.leaf.countHeight(
+						cellData.cell.textWidth,
 						true),
 					TextLineHeight(textStyle));
-			rowHeight = std::max(
-				rowHeight,
-				textHeights[column] + padding.top() + padding.bottom());
+			const auto outerHeight = cellData.textHeight
+				+ padding.top()
+				+ padding.bottom();
+			if (cellData.cell.rowspan == 1) {
+				rowHeights[rowIndex] = std::max(rowHeights[rowIndex], outerHeight);
+			} else {
+				rowSpans.push_back({ rowIndex, &cellData });
+			}
 		}
+	}
+	std::sort(
+		rowSpans.begin(),
+		rowSpans.end(),
+		[](const TableSpannedCellLayout &a, const TableSpannedCellLayout &b) {
+			const auto aSpan = a.cell ? a.cell->cell.rowspan : 0;
+			const auto bSpan = b.cell ? b.cell->cell.rowspan : 0;
+			return (aSpan < bSpan)
+				|| ((aSpan == bSpan) && (a.row < b.row))
+				|| ((aSpan == bSpan)
+					&& (a.row == b.row)
+					&& a.cell
+					&& b.cell
+					&& (a.cell->cell.column < b.cell->cell.column));
+		});
+	for (const auto &spanned : rowSpans) {
+		if (!spanned.cell) {
+			continue;
+		}
+		const auto outerHeight = spanned.cell->textHeight
+			+ padding.top()
+			+ padding.bottom();
+		const auto currentHeight = TableSpanHeight(
+			rowHeights,
+			spanned.row,
+			spanned.cell->cell.rowspan,
+			border);
+		DistributeSpanDelta(
+			&rowHeights,
+			spanned.row,
+			spanned.row + spanned.cell->cell.rowspan,
+			std::max(outerHeight - currentHeight, 0));
+	}
 
+	auto y = tableTop + border;
+	block.tableRows.reserve(rows.size());
+	for (auto rowIndex = 0, rowCount = int(rows.size()); rowIndex != rowCount; ++rowIndex) {
+		auto &rowData = rows[rowIndex];
+		const auto rowHeight = rowHeights[rowIndex];
 		auto row = LaidOutTableRow();
 		row.header = rowData.header;
 		row.outer = QRect(
@@ -778,35 +1017,71 @@ LaidOutBlock LayoutTableBlock(
 			std::max(tableWidth - (2 * border), 0),
 			rowHeight);
 
-		auto x = left + border;
-		row.cells.reserve(columnCount);
-		for (auto column = 0; column != columnCount; ++column) {
-			auto cell = std::move(rowData.cells[column].cell);
-			const auto columnWidth = block.tableColumnWidths[column];
-			cell.outer = QRect(x, y, columnWidth, rowHeight);
+		row.cells.reserve(rowData.cells.size());
+		for (auto &cellData : rowData.cells) {
+			auto cell = std::move(cellData.cell);
+			const auto column = std::clamp(cell.column, 0, columnCount - 1);
+			const auto spanWidth = TableSpanWidth(
+				block.tableColumnWidths,
+				cell.column,
+				cell.colspan,
+				border);
+			const auto spanHeight = TableSpanHeight(
+				rowHeights,
+				rowIndex,
+				cell.rowspan,
+				border);
+			const auto cellTop = y;
+			const auto contentHeight = std::max(
+				spanHeight - padding.top() - padding.bottom(),
+				0);
+			auto textTop = cellTop + padding.top();
+			switch (cell.verticalAlignment) {
+			case PreparedTableCellVerticalAlignment::Middle:
+				textTop += std::max((contentHeight - cellData.textHeight) / 2, 0);
+				break;
+			case PreparedTableCellVerticalAlignment::Bottom:
+				textTop = cellTop
+					+ spanHeight
+					- padding.bottom()
+					- cellData.textHeight;
+				break;
+			case PreparedTableCellVerticalAlignment::Top:
+				break;
+			}
+			cell.outer = QRect(
+				columnLefts[column],
+				cellTop,
+				spanWidth,
+				spanHeight);
 			cell.textRect = QRect(
-				x + padding.left(),
-				y + padding.top(),
+				columnLefts[column] + padding.left(),
+				textTop,
 				cell.textWidth,
-				textHeights[column]);
+				cellData.textHeight);
 			row.cells.push_back(std::move(cell));
-			x += columnWidth + border;
 		}
 		block.tableRows.push_back(std::move(row));
 		y += rowHeight + border;
 	}
 
-	const auto tableHeight = std::max(y - top, border);
-	block.tableRect = QRect(left, top, tableWidth, tableHeight);
+	const auto tableHeight = std::max(y - tableTop, border);
+	block.tableRect = QRect(left, tableTop, tableWidth, tableHeight);
 	block.visibleTableRect = QRect(
 		left,
-		top,
+		tableTop,
 		std::min(tableWidth, std::max(width, 1)),
 		tableHeight);
-	block.contentRect = block.visibleTableRect;
-	block.outer = block.visibleTableRect;
+	block.contentRect = block.textRect.isEmpty()
+		? block.visibleTableRect
+		: block.visibleTableRect.isEmpty()
+		? block.textRect
+		: block.textRect.united(block.visibleTableRect);
+	block.outer = block.contentRect;
+	if (!block.textRect.isEmpty()) {
+		return block;
+	}
 	for (const auto &row : block.tableRows) {
-		const auto &textStyle = TableCellTextStyle(row.header, markdown);
 		for (const auto &cell : row.cells) {
 			if (cell.leaf.isEmpty()) {
 				continue;
@@ -814,7 +1089,7 @@ LaidOutBlock LayoutTableBlock(
 			block.firstLineBaseline = LeafFirstLineBaseline(
 				cell.leaf,
 				cell.textRect,
-				textStyle);
+				TableCellTextStyle(cell, markdown));
 			return block;
 		}
 	}

@@ -127,6 +127,7 @@ MarkdownTable {
 	borderFg: color;
 	headerBg: color;
 	headerStyle: TextStyle;
+	captionSkip: pixels;
 	minColumnWidth: pixels;
 	overflowWidth: pixels;
 	overflowFg: color;
@@ -311,6 +312,7 @@ defaultMarkdownTable: MarkdownTable {
 	borderFg: boxDividerBg;
 	headerBg: windowBgOver;
 	headerStyle: defaultMarkdownTableHeaderStyle;
+	captionSkip: 7px;
 	minColumnWidth: 96px;
 	overflowWidth: 4px;
 	overflowFg: windowSubTextFg;

@@ -36,6 +36,7 @@ ThreeStateIcon {
 }
 
 VerifiedBadge {
+	position: point;
 	color: color;
 	height: pixels;
 }
@@ -436,6 +437,7 @@ dialogsLockIcon: ThreeStateIcon {
 dialogsVerifiedColors: VerifiedBadge {
 	height: 20px;
 	color: dialogsVerifiedIconBg;
+	position: point(-1px, 0px);
 }
 dialogsVerifiedColorsOver: VerifiedBadge(dialogsVerifiedColors) {
 	color: dialogsVerifiedIconBgOver;

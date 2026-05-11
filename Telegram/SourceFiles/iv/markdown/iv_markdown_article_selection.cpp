@@ -16,6 +16,11 @@ namespace {
 constexpr auto kCodeTabColumns = 4;
 const auto kPhotoCopyLabel = u"Photo"_q;
 
+struct TableCopySlot {
+	const LaidOutTableCell *cell = nullptr;
+	bool origin = false;
+};
+
 [[nodiscard]] TextForMimeData CopyTextForDisplayMath(const LaidOutBlock &block) {
 	return TextForMimeData::Simple(u"$$"_q + block.copyText + u"$$"_q);
 }
@@ -80,19 +85,50 @@ const auto kPhotoCopyLabel = u"Photo"_q;
 
 [[nodiscard]] TextForMimeData CopyTextForTable(const LaidOutBlock &block) {
 	auto result = TextForMimeData();
-	auto firstRow = true;
-	for (const auto &row : block.tableRows) {
-		if (!firstRow) {
+	const auto rowCount = int(block.tableRows.size());
+	const auto columnCount = int(block.tableColumnWidths.size());
+	auto grid = std::vector<std::vector<TableCopySlot>>(
+		std::max(rowCount, 0),
+		std::vector<TableCopySlot>(std::max(columnCount, 0)));
+	for (auto rowIndex = 0; rowIndex != rowCount; ++rowIndex) {
+		for (const auto &cell : block.tableRows[rowIndex].cells) {
+			const auto fromRow = std::clamp(rowIndex, 0, rowCount);
+			const auto toRow = std::clamp(rowIndex + cell.rowspan, 0, rowCount);
+			const auto fromColumn = std::clamp(cell.column, 0, columnCount);
+			const auto toColumn = std::clamp(
+				cell.column + cell.colspan,
+				0,
+				columnCount);
+			for (auto currentRow = fromRow; currentRow != toRow; ++currentRow) {
+				for (auto currentColumn = fromColumn;
+					currentColumn != toColumn;
+					++currentColumn) {
+					auto &slot = grid[currentRow][currentColumn];
+					slot.cell = &cell;
+					slot.origin = (currentRow == rowIndex)
+						&& (currentColumn == cell.column);
+				}
+			}
+		}
+	}
+	if (!block.leaf.isEmpty()) {
+		result.append(block.leaf.toTextForMimeData());
+		if (rowCount > 0 && columnCount > 0) {
 			result.append(u"\n"_q);
 		}
-		firstRow = false;
-		auto firstCell = true;
-		for (const auto &cell : row.cells) {
-			if (!firstCell) {
+	}
+	for (auto rowIndex = 0; rowIndex != rowCount; ++rowIndex) {
+		if (rowIndex) {
+			result.append(u"\n"_q);
+		}
+		for (auto column = 0; column != columnCount; ++column) {
+			if (column) {
 				result.append(u"\t"_q);
 			}
-			firstCell = false;
-			result.append(cell.leaf.toTextForMimeData());
+			const auto &slot = grid[rowIndex][column];
+			if (slot.origin && slot.cell) {
+				result.append(slot.cell->leaf.toTextForMimeData());
+			}
 		}
 	}
 	return result;
@@ -339,6 +375,19 @@ void CollectSelectableSegments(
 				std::move(segment));
 		} break;
 		case PreparedBlockKind::Table: {
+			if (!block.textRect.isEmpty() && !block.leaf.isEmpty()) {
+				auto textSegment = SelectableSegment();
+				textSegment.kind = SelectableSegmentKind::TextLeaf;
+				textSegment.leaf = &block.leaf;
+				textSegment.block = &block;
+				textSegment.outerRect = block.textRect;
+				textSegment.textRect = block.textRect;
+				textSegment.textWidth = block.textWidth;
+				textSegment.length = block.leaf.length();
+				block.secondarySegmentIndex = AddSelectableSegment(
+					segments,
+					std::move(textSegment));
+			}
 			auto segment = SelectableSegment();
 			segment.kind = SelectableSegmentKind::Table;
 			segment.block = &block;
@@ -347,6 +396,10 @@ void CollectSelectableSegments(
 			block.segmentIndex = AddSelectableSegment(
 				segments,
 				std::move(segment));
+			if (block.secondarySegmentIndex >= 0) {
+				(*segments)[block.secondarySegmentIndex].parentSegmentIndex
+					= block.segmentIndex;
+			}
 			for (auto &row : block.tableRows) {
 				for (auto &cell : row.cells) {
 					auto cellSegment = SelectableSegment();
@@ -395,7 +448,7 @@ void CollectSelectableSegments(
 				textSegment.textRect = block.textRect;
 				textSegment.textWidth = block.textWidth;
 				textSegment.length = block.leaf.length();
-				textSegment.mediaSegmentIndex = block.segmentIndex;
+				textSegment.parentSegmentIndex = block.segmentIndex;
 				block.secondarySegmentIndex = AddSelectableSegment(
 					segments,
 					std::move(textSegment));
@@ -589,10 +642,10 @@ TextForMimeData TextForSelectedSegments(
 	auto pieces = std::vector<TextForMimeData>();
 	for (const auto &segment : segments) {
 		if (segment.isTextLeaf()) {
-			if (segment.mediaSegmentIndex >= 0
+			if (segment.parentSegmentIndex >= 0
 				&& WholeSegmentSelected(
 					selectionState,
-					segment.mediaSegmentIndex)) {
+					segment.parentSegmentIndex)) {
 				continue;
 			}
 			if (const auto textSelection = TextSelectionForSegment(

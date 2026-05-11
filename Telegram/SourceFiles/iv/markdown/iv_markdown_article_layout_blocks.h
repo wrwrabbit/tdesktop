@@ -39,7 +39,13 @@ struct LaidOutTableCell {
 	QRect outer;
 	QRect textRect;
 	int textWidth = 0;
+	bool header = false;
+	PreparedTableCellVerticalAlignment verticalAlignment
+		= PreparedTableCellVerticalAlignment::Top;
 	style::align align = style::al_left;
+	int column = 0;
+	int colspan = 1;
+	int rowspan = 1;
 	int segmentIndex = -1;
 	int tableSegmentIndex = -1;
 };
@@ -98,6 +104,8 @@ struct LaidOutBlock {
 	style::align formulaAlign = style::al_left;
 	bool collapsed = false;
 	bool overflowed = false;
+	bool tableBordered = true;
+	bool tableStriped = false;
 	int segmentIndex = -1;
 	int secondarySegmentIndex = -1;
 	std::shared_ptr<MediaBlock> mediaBlock;
@@ -123,6 +131,7 @@ struct TableCellLayoutData {
 	LaidOutTableCell cell;
 	int preferredWidth = 0;
 	int preferredHeight = 0;
+	int textHeight = 0;
 };
 
 struct TableRowLayoutData {

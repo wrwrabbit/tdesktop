@@ -232,6 +232,8 @@ void PrepareTableCellText(
 	block.kind = PreparedBlockKind::Table;
 	block.tableColumnCount = columnCount;
 	block.tableAlignments = NormalizedTableAlignments(node, columnCount);
+	block.tableBordered = true;
+	block.tableStriped = false;
 	block.tableRows.reserve(node.children.size());
 
 	for (const auto &rowNode : node.children) {
@@ -258,6 +260,10 @@ void PrepareTableCellText(
 			auto cell = PreparedTableCell();
 			cell.column = column;
 			cell.alignment = block.tableAlignments[column];
+			cell.header = rowNode.tableHeader;
+			cell.verticalAlignment = PreparedTableCellVerticalAlignment::Top;
+			cell.colspan = 1;
+			cell.rowspan = 1;
 			PrepareTableCellText(
 				cellNode,
 				rowNode.tableHeader,
@@ -271,6 +277,10 @@ void PrepareTableCellText(
 			auto cell = PreparedTableCell();
 			cell.column = column;
 			cell.alignment = block.tableAlignments[column];
+			cell.header = rowNode.tableHeader;
+			cell.verticalAlignment = PreparedTableCellVerticalAlignment::Top;
+			cell.colspan = 1;
+			cell.rowspan = 1;
 			row.cells.push_back(std::move(cell));
 		}
 		block.tableRows.push_back(std::move(row));

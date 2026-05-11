@@ -248,48 +248,279 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	return TableAlignment::Left;
 }
 
+[[nodiscard]] PreparedTableCellVerticalAlignment NativeIvTableVerticalAlignment(
+		const MTPDpageTableCell &cell) {
+	if (cell.is_valign_bottom()) {
+		return PreparedTableCellVerticalAlignment::Bottom;
+	} else if (cell.is_valign_middle()) {
+		return PreparedTableCellVerticalAlignment::Middle;
+	}
+	return PreparedTableCellVerticalAlignment::Top;
+}
+
+using NativeIvTableOccupancyRow = std::vector<char>;
+using NativeIvTableOccupancyGrid = std::vector<NativeIvTableOccupancyRow>;
+
+[[nodiscard]] int NormalizeNativeIvTableSpan(int span) {
+	return std::max(span, 1);
+}
+
+[[nodiscard]] int ClampNativeIvTableRowspan(
+		int rawRowspan,
+		int row,
+		int rowCount) {
+	if ((row < 0) || (row >= rowCount) || (rowCount <= 0)) {
+		return 0;
+	}
+	const auto remainingRows = int64(rowCount) - row;
+	return int(std::min<int64>(
+		NormalizeNativeIvTableSpan(rawRowspan),
+		remainingRows));
+}
+
+[[nodiscard]] int ClampNativeIvTableColspan(
+		int rawColspan,
+		int column,
+		int maxColumns) {
+	if ((column < 0) || (column >= maxColumns) || (maxColumns <= 0)) {
+		return 0;
+	}
+	const auto remainingColumns = int64(maxColumns) - column;
+	return int(std::min<int64>(
+		NormalizeNativeIvTableSpan(rawColspan),
+		remainingColumns));
+}
+
+[[nodiscard]] bool CanOccupyNativeIvTableSlots(
+		const NativeIvTableOccupancyGrid &occupancy,
+		int row,
+		int column,
+		int rowspan,
+		int colspan) {
+	if ((row < 0)
+		|| (column < 0)
+		|| (rowspan <= 0)
+		|| (colspan <= 0)
+		|| (row >= int(occupancy.size()))) {
+		return false;
+	}
+	const auto rowLimit = int(std::min<int64>(
+		int64(row) + rowspan,
+		occupancy.size()));
+	const auto columnLimit64 = int64(column) + colspan;
+	if (columnLimit64 <= column) {
+		return false;
+	}
+	const auto columnLimit = int(std::min<int64>(
+		columnLimit64,
+		std::numeric_limits<int>::max()));
+	for (auto currentRow = row; currentRow < rowLimit; ++currentRow) {
+		const auto &occupied = occupancy[currentRow];
+		const auto occupiedLimit = std::min(columnLimit, int(occupied.size()));
+		for (auto currentColumn = column;
+			currentColumn < occupiedLimit;
+			++currentColumn) {
+			if (occupied[currentColumn]) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+[[nodiscard]] int FirstAvailableNativeIvTableColumn(
+		const NativeIvTableOccupancyGrid &occupancy,
+		int row,
+		int rowspan,
+		int colspan,
+		int maxColumns) {
+	if ((row < 0)
+		|| (row >= int(occupancy.size()))
+		|| (rowspan <= 0)
+		|| (colspan <= 0)
+		|| (maxColumns <= 0)) {
+		return -1;
+	}
+	for (auto column = 0; column < maxColumns; ++column) {
+		const auto effectiveColspan = ClampNativeIvTableColspan(
+			colspan,
+			column,
+			maxColumns);
+		if (effectiveColspan <= 0) {
+			continue;
+		}
+		if (CanOccupyNativeIvTableSlots(
+				occupancy,
+				row,
+				column,
+				rowspan,
+				effectiveColspan)) {
+			return column;
+		}
+	}
+	return -1;
+}
+
+void MarkNativeIvTableSlots(
+		NativeIvTableOccupancyGrid *occupancy,
+		int row,
+		int column,
+		int rowspan,
+		int colspan) {
+	if ((row < 0)
+		|| (column < 0)
+		|| (rowspan <= 0)
+		|| (colspan <= 0)
+		|| (row >= int(occupancy->size()))) {
+		return;
+	}
+	const auto rowLimit = int(std::min<int64>(
+		int64(row) + rowspan,
+		occupancy->size()));
+	const auto columnLimit64 = int64(column) + colspan;
+	if (columnLimit64 <= column) {
+		return;
+	}
+	const auto columnLimit = int(std::min<int64>(
+		columnLimit64,
+		std::numeric_limits<int>::max()));
+	for (auto currentRow = row; currentRow < rowLimit; ++currentRow) {
+		auto &occupied = (*occupancy)[currentRow];
+		if (columnLimit > int(occupied.size())) {
+			occupied.resize(columnLimit, false);
+		}
+		for (auto currentColumn = column;
+			currentColumn < columnLimit;
+			++currentColumn) {
+			occupied[currentColumn] = true;
+		}
+	}
+}
+
+[[nodiscard]] int NativeIvTableColumnCount(
+		const NativeIvTableOccupancyGrid &occupancy) {
+	auto result = 0;
+	for (const auto &row : occupancy) {
+		result = std::max(result, int(row.size()));
+	}
+	return result;
+}
+
+[[nodiscard]] int NativeIvTableOccupiedSlotCount(
+		const NativeIvTableOccupancyGrid &occupancy) {
+	auto result = 0;
+	for (const auto &row : occupancy) {
+		result += int(std::count(row.begin(), row.end(), char(true)));
+	}
+	return result;
+}
+
 [[nodiscard]] bool PrepareNativeIvTableBlock(
 		const MTPDpageBlockTable &data,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
-	auto title = PreparedIvRichText();
-	auto anchorId = QString();
-	if (!PrepareNativeIvRichText(data.vtitle(), &title, &anchorId, state)) {
-		return false;
-	}
-	if (!AppendPreparedIvRichBlock(
-		result,
-		PreparedBlockKind::Paragraph,
-		0,
-		std::move(title),
-		std::move(anchorId))) {
-		return false;
-	}
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::Table;
+	block.tableBordered = data.is_bordered();
+	block.tableStriped = data.is_striped();
+
+	auto title = PreparedIvRichText();
+	if (!PrepareNativeIvRichText(
+			data.vtitle(),
+			&title,
+			&block.anchorId,
+			state)) {
+		return false;
+	}
+	SortPreparedIvRichText(&title);
+	block.text = std::move(title.text);
+	block.links = std::move(title.links);
+
+	const auto &limits = PrepareTableRenderLimitsForIv();
+	const auto rowCount = int(data.vrows().v.size());
+
+	const auto placeholder = [&] {
+		if (state->result.failure.failed()) {
+			return false;
+		}
+		if (!block.text.text.isEmpty() || !block.anchorId.isEmpty()) {
+			auto titleBlock = EmptyParagraphBlock();
+			titleBlock.text = std::move(block.text);
+			titleBlock.links = std::move(block.links);
+			titleBlock.anchorId = std::move(block.anchorId);
+			result->push_back(std::move(titleBlock));
+		}
+		return PrepareNativeIvPlainPlaceholderBlock(
+			u"Table Placeholder"_q,
+			result);
+	};
+
+	if (rowCount > limits.maxRows) {
+		return placeholder();
+	}
+
+	auto occupancy = NativeIvTableOccupancyGrid(rowCount);
+	block.tableRows.reserve(rowCount);
+	auto occupiedSlotCountSoFar = int64(0);
+
+	auto rowIndex = 0;
 	for (const auto &row : data.vrows().v) {
 		auto preparedRow = PreparedTableRow();
-		auto header = std::optional<bool>();
-		auto column = 0;
-		const auto ok = row.match([&](const MTPDpageTableRow &data) {
-			for (const auto &cell : data.vcells().v) {
+		const auto ok = row.match([&](const MTPDpageTableRow &rowData) {
+			preparedRow.cells.reserve(std::min(
+				int(rowData.vcells().v.size()),
+				limits.maxColumns));
+			for (const auto &cell : rowData.vcells().v) {
 				auto preparedCell = PreparedTableCell();
-				const auto cellOk = cell.match([&](const MTPDpageTableCell &data) {
-					if ((data.vcolspan() && data.vcolspan()->v > 1)
-						|| (data.vrowspan() && data.vrowspan()->v > 1)) {
-						return false;
+				const auto cellOk = cell.match([&](const MTPDpageTableCell &cellData) {
+					const auto rawColspan = cellData.vcolspan()
+						? cellData.vcolspan()->v
+						: 1;
+					const auto rawRowspan = cellData.vrowspan()
+						? cellData.vrowspan()->v
+						: 1;
+					const auto normalizedColspan = NormalizeNativeIvTableSpan(
+						rawColspan);
+					const auto rowspan = ClampNativeIvTableRowspan(
+						rawRowspan,
+						rowIndex,
+						rowCount);
+					if (rowspan <= 0) {
+						return true;
 					}
-					const auto cellHeader = data.is_header();
-					if (header && *header != cellHeader) {
-						return false;
+					const auto column = FirstAvailableNativeIvTableColumn(
+						occupancy,
+						rowIndex,
+						rowspan,
+						normalizedColspan,
+						limits.maxColumns);
+					if (column < 0) {
+						return true;
 					}
-					header = cellHeader;
-					preparedCell.column = column++;
-					preparedCell.alignment = NativeIvTableAlignment(data);
-					if (data.vtext()) {
+					const auto colspan = ClampNativeIvTableColspan(
+						normalizedColspan,
+						column,
+						limits.maxColumns);
+					if (colspan <= 0) {
+						return true;
+					}
+					const auto occupiedSlotGrowth = int64(rowspan) * colspan;
+					if (occupiedSlotGrowth > limits.maxCells
+						|| (occupiedSlotCountSoFar + occupiedSlotGrowth)
+							> limits.maxCells) {
+						return true;
+					}
+					preparedCell.column = column;
+					preparedCell.alignment = NativeIvTableAlignment(cellData);
+					preparedCell.header = cellData.is_header();
+					preparedCell.verticalAlignment
+						= NativeIvTableVerticalAlignment(cellData);
+					preparedCell.colspan = colspan;
+					preparedCell.rowspan = rowspan;
+					if (cellData.vtext()) {
 						auto rich = PreparedIvRichText();
 						if (!PrepareNativeIvRichText(
-								*data.vtext(),
+								*cellData.vtext(),
 								&rich,
 								nullptr,
 								state)) {
@@ -299,37 +530,56 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 						preparedCell.text = std::move(rich.text);
 						preparedCell.links = std::move(rich.links);
 					}
+					MarkNativeIvTableSlots(
+						&occupancy,
+						rowIndex,
+						column,
+						rowspan,
+						colspan);
+					occupiedSlotCountSoFar += occupiedSlotGrowth;
+					preparedRow.cells.push_back(std::move(preparedCell));
 					return true;
 				});
 				if (!cellOk) {
 					return false;
 				}
-				preparedRow.cells.push_back(std::move(preparedCell));
 			}
+			preparedRow.header = !preparedRow.cells.empty()
+				&& std::all_of(
+					preparedRow.cells.begin(),
+					preparedRow.cells.end(),
+					[](const PreparedTableCell &cell) {
+						return cell.header;
+					});
 			return true;
 		});
 		if (!ok) {
-			return state->result.failure.failed()
-				? false
-				: PrepareNativeIvPlainPlaceholderBlock(
-					u"Table Placeholder"_q,
-					result);
-		}
-		preparedRow.header = header.value_or(false);
-		if (!block.tableColumnCount) {
-			block.tableColumnCount = column;
-			block.tableAlignments.resize(column, TableAlignment::Left);
-		} else if (block.tableColumnCount != column) {
-			return PrepareNativeIvPlainPlaceholderBlock(
-				u"Table Placeholder"_q,
-				result);
-		}
-		for (const auto &cell : preparedRow.cells) {
-			if (cell.column >= 0 && cell.column < int(block.tableAlignments.size())) {
-				block.tableAlignments[cell.column] = cell.alignment;
-			}
+			return placeholder();
 		}
 		block.tableRows.push_back(std::move(preparedRow));
+		++rowIndex;
+	}
+
+	block.tableColumnCount = NativeIvTableColumnCount(occupancy);
+	const auto occupiedSlotCount = NativeIvTableOccupiedSlotCount(occupancy);
+	if (rowCount > limits.maxRows
+		|| block.tableColumnCount > limits.maxColumns
+		|| occupiedSlotCount > limits.maxCells
+		|| (int64(rowCount) * block.tableColumnCount) > limits.maxCells) {
+		return placeholder();
+	}
+
+	block.tableAlignments.resize(block.tableColumnCount, TableAlignment::Left);
+	for (const auto &preparedRow : block.tableRows) {
+		for (const auto &preparedCell : preparedRow.cells) {
+			const auto from = std::max(preparedCell.column, 0);
+			const auto to = std::min(
+				preparedCell.column + preparedCell.colspan,
+				block.tableColumnCount);
+			for (auto column = from; column != to; ++column) {
+				block.tableAlignments[column] = preparedCell.alignment;
+			}
+		}
 	}
 	result->push_back(std::move(block));
 	return true;

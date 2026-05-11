@@ -790,6 +790,88 @@ struct NativeIvMediaFixture {
 		NativeIvText(std::move(credit)));
 }
 
+[[nodiscard]] MTPPageTableCell NativeIvTableCell(
+		QString text = QString(),
+		int colspan = 1,
+		int rowspan = 1,
+		bool header = false,
+		TableAlignment alignment = TableAlignment::Left,
+		PreparedTableCellVerticalAlignment verticalAlignment
+			= PreparedTableCellVerticalAlignment::Top) {
+	auto flags = MTPDpageTableCell::Flags();
+	if (header) {
+		flags |= MTPDpageTableCell::Flag::f_header;
+	}
+	if (!text.isEmpty()) {
+		flags |= MTPDpageTableCell::Flag::f_text;
+	}
+	if (colspan != 1) {
+		flags |= MTPDpageTableCell::Flag::f_colspan;
+	}
+	if (rowspan != 1) {
+		flags |= MTPDpageTableCell::Flag::f_rowspan;
+	}
+	switch (alignment) {
+	case TableAlignment::Center:
+		flags |= MTPDpageTableCell::Flag::f_align_center;
+		break;
+	case TableAlignment::Right:
+		flags |= MTPDpageTableCell::Flag::f_align_right;
+		break;
+	case TableAlignment::None:
+	case TableAlignment::Left:
+		break;
+	}
+	switch (verticalAlignment) {
+	case PreparedTableCellVerticalAlignment::Middle:
+		flags |= MTPDpageTableCell::Flag::f_valign_middle;
+		break;
+	case PreparedTableCellVerticalAlignment::Bottom:
+		flags |= MTPDpageTableCell::Flag::f_valign_bottom;
+		break;
+	case PreparedTableCellVerticalAlignment::Top:
+		break;
+	}
+	return MTP_pageTableCell(
+		MTP_flags(flags),
+		NativeIvText(std::move(text)),
+		MTP_int(colspan),
+		MTP_int(rowspan));
+}
+
+[[nodiscard]] MTPPageTableRow NativeIvTableRow(
+		std::initializer_list<MTPPageTableCell> cells) {
+	auto list = QVector<MTPPageTableCell>();
+	list.reserve(int(cells.size()));
+	for (const auto &cell : cells) {
+		list.push_back(cell);
+	}
+	return MTP_pageTableRow(MTP_vector<MTPPageTableCell>(std::move(list)));
+}
+
+[[nodiscard]] MTPPageBlock NativeIvTableBlock(
+		QString title,
+		std::initializer_list<MTPPageTableRow> rows,
+		bool bordered = true,
+		bool striped = false) {
+	auto flags = MTPDpageBlockTable::Flags();
+	if (bordered) {
+		flags |= MTPDpageBlockTable::Flag::f_bordered;
+	}
+	if (striped) {
+		flags |= MTPDpageBlockTable::Flag::f_striped;
+	}
+	auto list = QVector<MTPPageTableRow>();
+	list.reserve(int(rows.size()));
+	for (const auto &row : rows) {
+		list.push_back(row);
+	}
+	return MTP_pageBlockTable(
+		MTP_flags(flags),
+		NativeIvText(std::move(title)),
+		MTP_vector<MTPPageTableRow>(std::move(list)));
+}
+
 [[nodiscard]] MTPPhoto NativeIvPhoto(uint64 id, int width, int height) {
 	auto sizes = QVector<MTPPhotoSize>();
 	sizes.push_back(MTP_photoSize(
@@ -4232,6 +4314,590 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 			ok);
 	}
 
+	const auto mergedTableLabel = u"native-iv merged-table prepare"_q;
+	auto mergedTableSource = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvTableBlock(
+			u"Merged native table"_q,
+			{
+				NativeIvTableRow({
+					NativeIvTableCell(
+						u"Stub"_q,
+						1,
+						2,
+						true),
+					NativeIvTableCell(
+						u"A"_q,
+						1,
+						1,
+						true,
+						TableAlignment::Center),
+					NativeIvTableCell(
+						u"B"_q,
+						1,
+						1,
+						true,
+						TableAlignment::Right),
+				}),
+				NativeIvTableRow({
+					NativeIvTableCell(
+						u"Bottom merged"_q,
+						2,
+						2,
+						false,
+						TableAlignment::Center,
+						PreparedTableCellVerticalAlignment::Bottom),
+				}),
+				NativeIvTableRow({
+					NativeIvTableCell(
+						u"Tail"_q,
+						1,
+						1,
+						false,
+						TableAlignment::Left),
+				}),
+			},
+			true,
+			true),
+	});
+	const auto mergedTablePrepared = TryPrepareNativeInstantView({
+		.source = &mergedTableSource,
+	});
+	Check(
+		mergedTablePrepared.supported(),
+		mergedTableLabel + u" prepare supported"_q,
+		ok);
+	Check(
+		!mergedTablePrepared.content.failure.failed(),
+		mergedTableLabel + u" prepare failure"_q,
+		ok);
+	Check(
+		mergedTablePrepared.content.blocks.blocks.size() == 1,
+		mergedTableLabel + u" prepared block count"_q,
+		ok);
+	if (mergedTablePrepared.supported()
+		&& !mergedTablePrepared.content.failure.failed()
+		&& (mergedTablePrepared.content.blocks.blocks.size() == 1)) {
+		const auto &table = mergedTablePrepared.content.blocks.blocks.front();
+		Check(
+			table.kind == PreparedBlockKind::Table,
+			mergedTableLabel + u" prepared block kind"_q,
+			ok);
+		if (table.kind == PreparedBlockKind::Table) {
+			Check(
+				table.text.text == u"Merged native table"_q,
+				mergedTableLabel + u" caption text"_q,
+				ok);
+			Check(
+				table.tableBordered && table.tableStriped,
+				mergedTableLabel + u" table flags"_q,
+				ok);
+			Check(
+				table.tableColumnCount == 3,
+				mergedTableLabel + u" resolved column count"_q,
+				ok);
+			Check(
+				table.tableRows.size() == 3,
+				mergedTableLabel + u" prepared row count"_q,
+				ok);
+			if (table.tableRows.size() == 3) {
+				Check(
+					table.tableRows[0].header,
+					mergedTableLabel + u" header row state"_q,
+					ok);
+				Check(
+					!table.tableRows[1].header
+						&& !table.tableRows[2].header,
+					mergedTableLabel + u" body row state"_q,
+					ok);
+				Check(
+					table.tableRows[0].cells.size() == 3
+						&& table.tableRows[1].cells.size() == 1
+						&& table.tableRows[2].cells.size() == 1,
+					mergedTableLabel + u" logical origin cell counts"_q,
+					ok);
+				if ((table.tableRows[0].cells.size() == 3)
+					&& (table.tableRows[1].cells.size() == 1)
+					&& (table.tableRows[2].cells.size() == 1)) {
+					const auto &stub = table.tableRows[0].cells[0];
+					const auto &headerCenter = table.tableRows[0].cells[1];
+					const auto &headerRight = table.tableRows[0].cells[2];
+					const auto &bottomMerged = table.tableRows[1].cells[0];
+					const auto &tail = table.tableRows[2].cells[0];
+					Check(
+						stub.text.text == u"Stub"_q
+							&& (stub.column == 0)
+							&& stub.header
+							&& (stub.alignment == TableAlignment::Left)
+							&& (stub.verticalAlignment
+								== PreparedTableCellVerticalAlignment::Top)
+							&& (stub.colspan == 1)
+							&& (stub.rowspan == 2),
+						mergedTableLabel + u" stub metadata"_q,
+						ok);
+					Check(
+						headerCenter.text.text == u"A"_q
+							&& (headerCenter.column == 1)
+							&& headerCenter.header
+							&& (headerCenter.alignment == TableAlignment::Center)
+							&& (headerCenter.verticalAlignment
+								== PreparedTableCellVerticalAlignment::Top)
+							&& (headerCenter.colspan == 1)
+							&& (headerCenter.rowspan == 1),
+						mergedTableLabel + u" center header metadata"_q,
+						ok);
+					Check(
+						headerRight.text.text == u"B"_q
+							&& (headerRight.column == 2)
+							&& headerRight.header
+							&& (headerRight.alignment == TableAlignment::Right)
+							&& (headerRight.verticalAlignment
+								== PreparedTableCellVerticalAlignment::Top)
+							&& (headerRight.colspan == 1)
+							&& (headerRight.rowspan == 1),
+						mergedTableLabel + u" right header metadata"_q,
+						ok);
+					Check(
+						bottomMerged.text.text == u"Bottom merged"_q
+							&& (bottomMerged.column == 1)
+							&& !bottomMerged.header
+							&& (bottomMerged.alignment
+								== TableAlignment::Center)
+							&& (bottomMerged.verticalAlignment
+								== PreparedTableCellVerticalAlignment::Bottom)
+							&& (bottomMerged.colspan == 2)
+							&& (bottomMerged.rowspan == 2),
+						mergedTableLabel + u" merged body metadata"_q,
+						ok);
+					Check(
+						tail.text.text == u"Tail"_q
+							&& (tail.column == 0)
+							&& !tail.header
+							&& (tail.alignment == TableAlignment::Left)
+							&& (tail.verticalAlignment
+								== PreparedTableCellVerticalAlignment::Top)
+							&& (tail.colspan == 1)
+							&& (tail.rowspan == 1),
+						mergedTableLabel + u" tail metadata"_q,
+						ok);
+				}
+			}
+		}
+	}
+
+	const auto invalidTableLabel = u"native-iv invalid-table salvage"_q;
+	const auto invalidTableTitleAnchor = u"invalid-table-title"_q;
+	auto invalidTableSource = NativeIvSource(QVector<MTPPageBlock>{
+		MTP_pageBlockTable(
+			MTP_flags(MTPDpageBlockTable::Flag::f_bordered),
+			MTP_textAnchor(
+				NativeIvText(u"Invalid table"_q),
+				MTP_string(invalidTableTitleAnchor)),
+			MTP_vector<MTPPageTableRow>(QVector<MTPPageTableRow>{
+				NativeIvTableRow({
+					NativeIvTableCell(
+						u"Too tall"_q,
+						1,
+						3),
+				}),
+				NativeIvTableRow({
+					NativeIvTableCell(u"Tail"_q),
+				}),
+			})),
+	});
+	const auto invalidTablePrepared = TryPrepareNativeInstantView({
+		.source = &invalidTableSource,
+	});
+	Check(
+		invalidTablePrepared.supported(),
+		invalidTableLabel + u" prepare supported"_q,
+		ok);
+	Check(
+		!invalidTablePrepared.content.failure.failed(),
+		invalidTableLabel + u" prepare failure"_q,
+		ok);
+	Check(
+		invalidTablePrepared.content.blocks.blocks.size() == 1,
+		invalidTableLabel + u" block count"_q,
+		ok);
+	if (invalidTablePrepared.supported()
+		&& !invalidTablePrepared.content.failure.failed()
+		&& (invalidTablePrepared.content.blocks.blocks.size() == 1)) {
+		const auto &table = invalidTablePrepared.content.blocks.blocks.front();
+		Check(
+			table.kind == PreparedBlockKind::Table,
+			invalidTableLabel + u" prepared block kind"_q,
+			ok);
+		if (table.kind == PreparedBlockKind::Table) {
+			Check(
+				table.text.text == u"Invalid table"_q,
+				invalidTableLabel + u" title text"_q,
+				ok);
+			Check(
+				table.anchorId == invalidTableTitleAnchor,
+				invalidTableLabel + u" title anchor"_q,
+				ok);
+			Check(
+				table.tableColumnCount == 2,
+				invalidTableLabel + u" resolved column count"_q,
+				ok);
+			Check(
+				table.tableRows.size() == 2,
+				invalidTableLabel + u" row count"_q,
+				ok);
+			if (table.tableRows.size() == 2) {
+				Check(
+					(table.tableRows[0].cells.size() == 1)
+						&& (table.tableRows[1].cells.size() == 1),
+					invalidTableLabel + u" logical origin cell counts"_q,
+					ok);
+				if ((table.tableRows[0].cells.size() == 1)
+					&& (table.tableRows[1].cells.size() == 1)) {
+					const auto &tooTall = table.tableRows[0].cells[0];
+					const auto &tail = table.tableRows[1].cells[0];
+					Check(
+						tooTall.text.text == u"Too tall"_q
+							&& (tooTall.column == 0)
+							&& (tooTall.colspan == 1)
+							&& (tooTall.rowspan == 2),
+						invalidTableLabel + u" clamped rowspan metadata"_q,
+						ok);
+					Check(
+						tail.text.text == u"Tail"_q
+							&& (tail.column == 1)
+							&& (tail.colspan == 1)
+							&& (tail.rowspan == 1),
+						invalidTableLabel + u" trailing cell placement"_q,
+						ok);
+				}
+			}
+		}
+	}
+
+	const auto crashTableLabel = u"native-iv short-row-occupancy salvage"_q;
+	auto crashTableSource = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvTableBlock(
+			u"Short row occupancy"_q,
+			{
+				NativeIvTableRow({
+					NativeIvTableCell(u"A"_q, 1, 4),
+					NativeIvTableCell(u"B"_q, 1, 4),
+				}),
+				NativeIvTableRow({}),
+				NativeIvTableRow({
+					NativeIvTableCell(u"C"_q),
+					NativeIvTableCell(u"D"_q),
+					NativeIvTableCell(u"E"_q, 1, 2),
+				}),
+				NativeIvTableRow({}),
+				NativeIvTableRow({}),
+				NativeIvTableRow({}),
+				NativeIvTableRow({}),
+				NativeIvTableRow({}),
+				NativeIvTableRow({}),
+				NativeIvTableRow({}),
+			},
+			false,
+			false),
+	});
+	const auto crashTablePrepared = TryPrepareNativeInstantView({
+		.source = &crashTableSource,
+	});
+	Check(
+		crashTablePrepared.supported(),
+		crashTableLabel + u" prepare supported"_q,
+		ok);
+	Check(
+		!crashTablePrepared.content.failure.failed(),
+		crashTableLabel + u" prepare failure"_q,
+		ok);
+	Check(
+		crashTablePrepared.content.blocks.blocks.size() == 1,
+		crashTableLabel + u" block count"_q,
+		ok);
+	if (crashTablePrepared.supported()
+		&& !crashTablePrepared.content.failure.failed()
+		&& (crashTablePrepared.content.blocks.blocks.size() == 1)) {
+		const auto &table = crashTablePrepared.content.blocks.blocks.front();
+		Check(
+			table.kind == PreparedBlockKind::Table,
+			crashTableLabel + u" prepared block kind"_q,
+			ok);
+		if (table.kind == PreparedBlockKind::Table) {
+			Check(
+				table.text.text == u"Short row occupancy"_q,
+				crashTableLabel + u" title text"_q,
+				ok);
+			Check(
+				table.tableColumnCount == 5,
+				crashTableLabel + u" resolved column count"_q,
+				ok);
+			Check(
+				table.tableRows.size() == 10,
+				crashTableLabel + u" row count"_q,
+				ok);
+			if (table.tableRows.size() == 10) {
+				Check(
+					(table.tableRows[0].cells.size() == 2)
+						&& table.tableRows[1].cells.empty()
+						&& (table.tableRows[2].cells.size() == 3)
+						&& table.tableRows[3].cells.empty()
+						&& table.tableRows[4].cells.empty()
+						&& table.tableRows[5].cells.empty()
+						&& table.tableRows[6].cells.empty()
+						&& table.tableRows[7].cells.empty()
+						&& table.tableRows[8].cells.empty()
+						&& table.tableRows[9].cells.empty(),
+					crashTableLabel + u" sparse row occupancy"_q,
+					ok);
+				if ((table.tableRows[0].cells.size() == 2)
+					&& (table.tableRows[2].cells.size() == 3)) {
+					const auto &a = table.tableRows[0].cells[0];
+					const auto &b = table.tableRows[0].cells[1];
+					const auto &c = table.tableRows[2].cells[0];
+					const auto &d = table.tableRows[2].cells[1];
+					const auto &e = table.tableRows[2].cells[2];
+					Check(
+						a.text.text == u"A"_q
+							&& (a.column == 0)
+							&& (a.rowspan == 4),
+						crashTableLabel + u" left carry metadata"_q,
+						ok);
+					Check(
+						b.text.text == u"B"_q
+							&& (b.column == 1)
+							&& (b.rowspan == 4),
+						crashTableLabel + u" right carry metadata"_q,
+						ok);
+					Check(
+						c.text.text == u"C"_q
+							&& (c.column == 2)
+							&& (c.colspan == 1)
+							&& (c.rowspan == 1),
+						crashTableLabel + u" third-column salvage"_q,
+						ok);
+					Check(
+						d.text.text == u"D"_q
+							&& (d.column == 3)
+							&& (d.colspan == 1)
+							&& (d.rowspan == 1),
+						crashTableLabel + u" fourth-column salvage"_q,
+						ok);
+					Check(
+						e.text.text == u"E"_q
+							&& (e.column == 4)
+							&& (e.colspan == 1)
+							&& (e.rowspan == 2),
+						crashTableLabel + u" crash-shape trailing placement"_q,
+						ok);
+				}
+			}
+		}
+	}
+
+	const auto spanNormalizationLabel = u"native-iv span-normalization salvage"_q;
+	auto spanNormalizationSource = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvTableBlock(
+			u"Span normalization"_q,
+			{
+				NativeIvTableRow({
+					NativeIvTableCell(u"Zero"_q, 0, 0),
+					NativeIvTableCell(u"Negative"_q, -2, -3),
+				}),
+			},
+			false,
+			false),
+	});
+	const auto spanNormalizationPrepared = TryPrepareNativeInstantView({
+		.source = &spanNormalizationSource,
+	});
+	Check(
+		spanNormalizationPrepared.supported(),
+		spanNormalizationLabel + u" prepare supported"_q,
+		ok);
+	Check(
+		!spanNormalizationPrepared.content.failure.failed(),
+		spanNormalizationLabel + u" prepare failure"_q,
+		ok);
+	Check(
+		spanNormalizationPrepared.content.blocks.blocks.size() == 1,
+		spanNormalizationLabel + u" block count"_q,
+		ok);
+	if (spanNormalizationPrepared.supported()
+		&& !spanNormalizationPrepared.content.failure.failed()
+		&& (spanNormalizationPrepared.content.blocks.blocks.size() == 1)) {
+		const auto &table = spanNormalizationPrepared.content.blocks.blocks.front();
+		Check(
+			table.kind == PreparedBlockKind::Table,
+			spanNormalizationLabel + u" prepared block kind"_q,
+			ok);
+		if (table.kind == PreparedBlockKind::Table) {
+			Check(
+				(table.tableColumnCount == 2)
+					&& (table.tableRows.size() == 1)
+					&& (table.tableRows[0].cells.size() == 2),
+				spanNormalizationLabel + u" normalized table shape"_q,
+				ok);
+			if ((table.tableRows.size() == 1)
+				&& (table.tableRows[0].cells.size() == 2)) {
+				const auto &zero = table.tableRows[0].cells[0];
+				const auto &negative = table.tableRows[0].cells[1];
+				Check(
+					zero.text.text == u"Zero"_q
+						&& (zero.column == 0)
+						&& (zero.colspan == 1)
+						&& (zero.rowspan == 1),
+					spanNormalizationLabel + u" zero span normalization"_q,
+					ok);
+				Check(
+					negative.text.text == u"Negative"_q
+						&& (negative.column == 1)
+						&& (negative.colspan == 1)
+						&& (negative.rowspan == 1),
+					spanNormalizationLabel + u" negative span normalization"_q,
+					ok);
+			}
+		}
+	}
+
+	const auto rowspanOverflowLabel = u"native-iv rowspan-overflow salvage"_q;
+	auto rowspanOverflowSource = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvTableBlock(
+			u"Rowspan overflow"_q,
+			{
+				NativeIvTableRow({
+					NativeIvTableCell(u"Tall"_q, 1, 5),
+				}),
+				NativeIvTableRow({}),
+				NativeIvTableRow({
+					NativeIvTableCell(u"Tail"_q),
+				}),
+			},
+			false,
+			false),
+	});
+	const auto rowspanOverflowPrepared = TryPrepareNativeInstantView({
+		.source = &rowspanOverflowSource,
+	});
+	Check(
+		rowspanOverflowPrepared.supported(),
+		rowspanOverflowLabel + u" prepare supported"_q,
+		ok);
+	Check(
+		!rowspanOverflowPrepared.content.failure.failed(),
+		rowspanOverflowLabel + u" prepare failure"_q,
+		ok);
+	Check(
+		rowspanOverflowPrepared.content.blocks.blocks.size() == 1,
+		rowspanOverflowLabel + u" block count"_q,
+		ok);
+	if (rowspanOverflowPrepared.supported()
+		&& !rowspanOverflowPrepared.content.failure.failed()
+		&& (rowspanOverflowPrepared.content.blocks.blocks.size() == 1)) {
+		const auto &table = rowspanOverflowPrepared.content.blocks.blocks.front();
+		Check(
+			table.kind == PreparedBlockKind::Table,
+			rowspanOverflowLabel + u" prepared block kind"_q,
+			ok);
+		if (table.kind == PreparedBlockKind::Table) {
+			Check(
+				(table.tableColumnCount == 2)
+					&& (table.tableRows.size() == 3),
+				rowspanOverflowLabel + u" salvaged table shape"_q,
+				ok);
+			if (table.tableRows.size() == 3) {
+				Check(
+					(table.tableRows[0].cells.size() == 1)
+						&& table.tableRows[1].cells.empty()
+						&& (table.tableRows[2].cells.size() == 1),
+					rowspanOverflowLabel + u" sparse row layout"_q,
+					ok);
+				if ((table.tableRows[0].cells.size() == 1)
+					&& (table.tableRows[2].cells.size() == 1)) {
+					const auto &tall = table.tableRows[0].cells[0];
+					const auto &tail = table.tableRows[2].cells[0];
+					Check(
+						tall.text.text == u"Tall"_q
+							&& (tall.column == 0)
+							&& (tall.colspan == 1)
+							&& (tall.rowspan == 3),
+						rowspanOverflowLabel + u" clamped overflow rowspan"_q,
+						ok);
+					Check(
+						tail.text.text == u"Tail"_q
+							&& (tail.column == 1)
+							&& (tail.colspan == 1)
+							&& (tail.rowspan == 1),
+						rowspanOverflowLabel + u" tail placement after clamp"_q,
+						ok);
+				}
+			}
+		}
+	}
+
+	const auto oversizedSpanLabel = u"native-iv oversized-span salvage"_q;
+	const auto &tableLimits = PrepareTableRenderLimitsForIv();
+	auto oversizedSpanSource = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvTableBlock(
+			u"Oversized span table"_q,
+			{
+				NativeIvTableRow({
+					NativeIvTableCell(
+						u"Too wide"_q,
+						tableLimits.maxColumns + 1),
+				}),
+			}),
+	});
+	const auto oversizedSpanPrepared = TryPrepareNativeInstantView({
+		.source = &oversizedSpanSource,
+	});
+	Check(
+		oversizedSpanPrepared.supported(),
+		oversizedSpanLabel + u" prepare supported"_q,
+		ok);
+	Check(
+		!oversizedSpanPrepared.content.failure.failed(),
+		oversizedSpanLabel + u" prepare failure"_q,
+		ok);
+	Check(
+		oversizedSpanPrepared.content.blocks.blocks.size() == 1,
+		oversizedSpanLabel + u" block count"_q,
+		ok);
+	if (oversizedSpanPrepared.supported()
+		&& !oversizedSpanPrepared.content.failure.failed()
+		&& (oversizedSpanPrepared.content.blocks.blocks.size() == 1)) {
+		const auto &table = oversizedSpanPrepared.content.blocks.blocks.front();
+		Check(
+			table.kind == PreparedBlockKind::Table,
+			oversizedSpanLabel + u" prepared block kind"_q,
+			ok);
+		if (table.kind == PreparedBlockKind::Table) {
+			Check(
+				table.text.text == u"Oversized span table"_q,
+				oversizedSpanLabel + u" title text"_q,
+				ok);
+			Check(
+				table.tableColumnCount == tableLimits.maxColumns,
+				oversizedSpanLabel + u" clamped column count"_q,
+				ok);
+			Check(
+				(table.tableRows.size() == 1)
+					&& (table.tableRows[0].cells.size() == 1),
+				oversizedSpanLabel + u" logical origin cell counts"_q,
+				ok);
+			if ((table.tableRows.size() == 1)
+				&& (table.tableRows[0].cells.size() == 1)) {
+				const auto &wide = table.tableRows[0].cells[0];
+				Check(
+					wide.text.text == u"Too wide"_q
+						&& (wide.column == 0)
+						&& (wide.colspan == tableLimits.maxColumns)
+						&& (wide.rowspan == 1),
+					oversizedSpanLabel + u" clamped colspan metadata"_q,
+					ok);
+			}
+		}
+	}
+
 	Check(
 		preparedPlaceholders.size() == placeholderFixtures.size(),
 		u"native-iv placeholder prepared count"_q,
@@ -4941,6 +5607,28 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 	auto lookupFlags = Ui::Text::StateRequest::Flags();
 	lookupFlags |= Ui::Text::StateRequest::Flag::LookupLink;
 	lookupFlags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+	const auto insetRect = [](QRect rect, int margin) {
+		const auto inset = rect.marginsRemoved(
+			QMargins(margin, margin, margin, margin));
+		return inset.isEmpty() ? rect : inset;
+	};
+	const auto anyPixelInRect = [](
+			const QImage &image,
+			QRect rect,
+			auto &&predicate) {
+		rect = rect.intersected(QRect(QPoint(), image.size()));
+		if (rect.isEmpty()) {
+			return false;
+		}
+		for (auto y = rect.top(); y <= rect.bottom(); ++y) {
+			for (auto x = rect.left(); x <= rect.right(); ++x) {
+				if (predicate(image.pixel(x, y))) {
+					return true;
+				}
+			}
+		}
+		return false;
+	};
 
 	const auto videoFixture = NativeIvVideoFixture();
 	const auto audioFixture = NativeIvAudioFixture();
@@ -5374,6 +6062,384 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			&& mixedPhotoRuntime->fullImage->subscriptionCount == 1,
 		mixedLabel + u" loaded photo images stay stable across width restore"_q,
 		ok);
+
+	const auto tableLabel = u"native-iv-table-article"_q;
+	enum : int {
+		kTableCaptionSegment = 0,
+		kTableWholeSegment = 1,
+		kTableStubSegment = 2,
+		kTableHeaderCenterSegment = 3,
+		kTableHeaderRightSegment = 4,
+		kTableMergedBodySegment = 5,
+		kTableTailSegment = 6,
+	};
+	auto tableSource = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvTableBlock(
+			u"Merged native table"_q,
+			{
+				NativeIvTableRow({
+					NativeIvTableCell(
+						u"Stub"_q,
+						1,
+						2,
+						true),
+					NativeIvTableCell(
+						u"A"_q,
+						1,
+						1,
+						true,
+						TableAlignment::Center),
+					NativeIvTableCell(
+						u"B"_q,
+						1,
+						1,
+						true,
+						TableAlignment::Right),
+				}),
+				NativeIvTableRow({
+					NativeIvTableCell(
+						u"Bottom merged"_q,
+						2,
+						2,
+						false,
+						TableAlignment::Center,
+						PreparedTableCellVerticalAlignment::Bottom),
+				}),
+				NativeIvTableRow({
+					NativeIvTableCell(u"Tail"_q),
+				}),
+			},
+			true,
+			true),
+	});
+	auto tablePrepared = TryPrepareNativeInstantView({
+		.source = &tableSource,
+	});
+	Check(tablePrepared.supported(), tableLabel + u" prepare supported"_q, ok);
+	if (tablePrepared.supported()) {
+		auto tableHeight = 0;
+		auto tableArticle = BuildArticleForTest(
+			std::move(tablePrepared.content),
+			renderer,
+			360,
+			&tableHeight);
+		const auto tableImage = PaintArticleForTest(
+			tableArticle.get(),
+			360,
+			tableHeight);
+		Check(
+			HasPaintedPixels(tableImage),
+			tableLabel + u" paint produced pixels"_q,
+			ok);
+		auto segmentBounds = std::vector<std::optional<QRect>>();
+		for (auto segmentIndex = 0; segmentIndex != 7; ++segmentIndex) {
+			segmentBounds.push_back(SegmentHitBounds(
+				tableArticle.get(),
+				360,
+				tableHeight,
+				segmentIndex));
+			Check(
+				segmentBounds.back().has_value(),
+				tableLabel + u" segment bounds "_q + QString::number(segmentIndex),
+				ok);
+		}
+		Check(
+			tableArticle->segmentIsText(kTableCaptionSegment),
+			tableLabel + u" caption segment is text"_q,
+			ok);
+		Check(
+			!tableArticle->segmentIsText(kTableWholeSegment),
+			tableLabel + u" whole table segment is block"_q,
+			ok);
+		Check(
+			tableArticle->segmentIsText(kTableStubSegment)
+				&& tableArticle->segmentIsText(kTableHeaderCenterSegment)
+				&& tableArticle->segmentIsText(kTableHeaderRightSegment)
+				&& tableArticle->segmentIsText(kTableMergedBodySegment)
+				&& tableArticle->segmentIsText(kTableTailSegment),
+			tableLabel + u" logical cell segments are text"_q,
+			ok);
+		Check(
+			!tableArticle->segmentIsText(7)
+				&& (tableArticle->segmentLength(7) == 0),
+			tableLabel + u" expected segment count"_q,
+			ok);
+		auto haveAllBounds = true;
+		for (const auto &bounds : segmentBounds) {
+			if (!bounds) {
+				haveAllBounds = false;
+				break;
+			}
+		}
+		if (haveAllBounds) {
+			Check(
+				segmentBounds[kTableCaptionSegment]->bottom()
+					< segmentBounds[kTableWholeSegment]->top(),
+				tableLabel + u" caption precedes table grid"_q,
+				ok);
+			Check(
+				segmentBounds[kTableWholeSegment]->contains(
+					segmentBounds[kTableStubSegment]->center())
+					&& segmentBounds[kTableWholeSegment]->contains(
+						segmentBounds[kTableMergedBodySegment]->center())
+					&& segmentBounds[kTableWholeSegment]->contains(
+						segmentBounds[kTableTailSegment]->center()),
+				tableLabel + u" whole table contains logical cells"_q,
+				ok);
+			const auto mergedBodyPainted = PaintedBoundsInRect(
+				tableImage,
+				insetRect(*segmentBounds[kTableMergedBodySegment], 4));
+			Check(
+				mergedBodyPainted.has_value(),
+				tableLabel + u" merged body painted bounds"_q,
+				ok);
+			if (mergedBodyPainted) {
+				Check(
+					mergedBodyPainted->center().y()
+						> segmentBounds[kTableMergedBodySegment]->center().y(),
+					tableLabel + u" bottom-aligned text stays low in merged rect"_q,
+					ok);
+			}
+			const auto headerBg = st::defaultMarkdown.table.headerBg->c.rgba();
+			Check(
+				anyPixelInRect(
+					tableImage,
+					insetRect(*segmentBounds[kTableTailSegment], 4),
+					[&](QRgb pixel) { return pixel == headerBg; }),
+				tableLabel + u" striped row tint"_q,
+				ok);
+			Check(
+				!anyPixelInRect(
+					tableImage,
+					insetRect(*segmentBounds[kTableMergedBodySegment], 4),
+					[&](QRgb pixel) { return pixel == headerBg; }),
+				tableLabel + u" unstriped merged body avoids tint"_q,
+				ok);
+		}
+		const auto wholeTableSelection = tableArticle->textForSelection({
+			.from = { .segment = kTableCaptionSegment, .offset = 0 },
+			.to = { .segment = kTableWholeSegment, .offset = 1 },
+		}, nullptr);
+		Check(
+			wholeTableSelection.expanded
+				== u"Merged native table\nStub\tA\tB\n\tBottom merged\t\nTail\t\t"_q,
+			tableLabel + u" whole-table export includes caption once"_q,
+			ok);
+		const auto mergedCellSelection = tableArticle->textForSelection({
+			.from = { .segment = kTableMergedBodySegment, .offset = 0 },
+			.to = {
+				.segment = kTableMergedBodySegment,
+				.offset = tableArticle->segmentLength(kTableMergedBodySegment),
+			},
+		}, nullptr);
+		Check(
+			mergedCellSelection.expanded == u"Bottom merged"_q,
+			tableLabel + u" single merged cell export"_q,
+			ok);
+	}
+
+	const auto salvagedTableLabel = u"native-iv-salvaged-table-article"_q;
+	enum : int {
+		kSalvagedTableCaptionSegment = 0,
+		kSalvagedTableWholeSegment = 1,
+		kSalvagedTableASegment = 2,
+		kSalvagedTableBSegment = 3,
+		kSalvagedTableCSegment = 4,
+		kSalvagedTableDSegment = 5,
+		kSalvagedTableESegment = 6,
+	};
+	auto salvagedTableSource = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvTableBlock(
+			u"Short row occupancy"_q,
+			{
+				NativeIvTableRow({
+					NativeIvTableCell(u"A"_q, 1, 4),
+					NativeIvTableCell(u"B"_q, 1, 4),
+				}),
+				NativeIvTableRow({}),
+				NativeIvTableRow({
+					NativeIvTableCell(u"C"_q),
+					NativeIvTableCell(u"D"_q),
+					NativeIvTableCell(u"E"_q, 1, 2),
+				}),
+				NativeIvTableRow({}),
+			},
+			false,
+			false),
+	});
+	auto salvagedTablePrepared = TryPrepareNativeInstantView({
+		.source = &salvagedTableSource,
+	});
+	Check(
+		salvagedTablePrepared.supported(),
+		salvagedTableLabel + u" prepare supported"_q,
+		ok);
+	if (salvagedTablePrepared.supported()) {
+		auto salvagedTableHeight = 0;
+		auto salvagedTableArticle = BuildArticleForTest(
+			std::move(salvagedTablePrepared.content),
+			renderer,
+			360,
+			&salvagedTableHeight);
+		const auto salvagedTableImage = PaintArticleForTest(
+			salvagedTableArticle.get(),
+			360,
+			salvagedTableHeight);
+		Check(
+			HasPaintedPixels(salvagedTableImage),
+			salvagedTableLabel + u" paint produced pixels"_q,
+			ok);
+		auto segmentBounds = std::vector<std::optional<QRect>>();
+		for (auto segmentIndex = 0; segmentIndex != 7; ++segmentIndex) {
+			segmentBounds.push_back(SegmentHitBounds(
+				salvagedTableArticle.get(),
+				360,
+				salvagedTableHeight,
+				segmentIndex));
+			Check(
+				segmentBounds.back().has_value(),
+				salvagedTableLabel + u" segment bounds "_q
+					+ QString::number(segmentIndex),
+				ok);
+		}
+		Check(
+			salvagedTableArticle->segmentIsText(kSalvagedTableCaptionSegment)
+				&& !salvagedTableArticle->segmentIsText(
+					kSalvagedTableWholeSegment)
+				&& salvagedTableArticle->segmentIsText(kSalvagedTableASegment)
+				&& salvagedTableArticle->segmentIsText(kSalvagedTableBSegment)
+				&& salvagedTableArticle->segmentIsText(kSalvagedTableCSegment)
+				&& salvagedTableArticle->segmentIsText(kSalvagedTableDSegment)
+				&& salvagedTableArticle->segmentIsText(kSalvagedTableESegment),
+			salvagedTableLabel + u" segment kinds"_q,
+			ok);
+		Check(
+			!salvagedTableArticle->segmentIsText(7)
+				&& (salvagedTableArticle->segmentLength(7) == 0),
+			salvagedTableLabel + u" expected segment count"_q,
+			ok);
+		auto haveAllBounds = true;
+		for (const auto &bounds : segmentBounds) {
+			if (!bounds) {
+				haveAllBounds = false;
+				break;
+			}
+		}
+		if (haveAllBounds) {
+			Check(
+				segmentBounds[kSalvagedTableCaptionSegment]->bottom()
+					< segmentBounds[kSalvagedTableWholeSegment]->top(),
+				salvagedTableLabel + u" caption precedes table grid"_q,
+				ok);
+			Check(
+				segmentBounds[kSalvagedTableWholeSegment]->contains(
+					segmentBounds[kSalvagedTableASegment]->center())
+					&& segmentBounds[kSalvagedTableWholeSegment]->contains(
+						segmentBounds[kSalvagedTableBSegment]->center())
+					&& segmentBounds[kSalvagedTableWholeSegment]->contains(
+						segmentBounds[kSalvagedTableCSegment]->center())
+					&& segmentBounds[kSalvagedTableWholeSegment]->contains(
+						segmentBounds[kSalvagedTableDSegment]->center())
+					&& segmentBounds[kSalvagedTableWholeSegment]->contains(
+						segmentBounds[kSalvagedTableESegment]->center()),
+				salvagedTableLabel + u" whole table contains logical cells"_q,
+				ok);
+		}
+		const auto wholeTableSelection = salvagedTableArticle->textForSelection({
+			.from = { .segment = kSalvagedTableCaptionSegment, .offset = 0 },
+			.to = { .segment = kSalvagedTableWholeSegment, .offset = 1 },
+		}, nullptr);
+		Check(
+			wholeTableSelection.expanded
+				== u"Short row occupancy\nA\tB\t\t\t\n\t\t\t\t\n\t\tC\tD\tE\n\t\t\t\t"_q,
+			salvagedTableLabel + u" whole-table export preserves sparse grid"_q,
+			ok);
+	}
+
+	const auto borderlessTableLabel = u"native-iv-borderless-table-article"_q;
+	auto borderlessTableSource = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvTableBlock(
+			QString(),
+			{
+				NativeIvTableRow({
+					NativeIvTableCell(u"H1"_q, 1, 1, true),
+					NativeIvTableCell(u"H2"_q, 1, 1, true),
+					NativeIvTableCell(u"H3"_q, 1, 1, true),
+				}),
+				NativeIvTableRow({
+					NativeIvTableCell(u"Left"_q),
+					NativeIvTableCell(u"Wide"_q, 2, 2),
+				}),
+				NativeIvTableRow({
+					NativeIvTableCell(u"Tail"_q),
+				}),
+			},
+			false,
+			false),
+	});
+	auto borderlessPrepared = TryPrepareNativeInstantView({
+		.source = &borderlessTableSource,
+	});
+	Check(
+		borderlessPrepared.supported(),
+		borderlessTableLabel + u" prepare supported"_q,
+		ok);
+	if (borderlessPrepared.supported()) {
+		auto borderlessHeight = 0;
+		auto borderlessArticle = BuildArticleForTest(
+			std::move(borderlessPrepared.content),
+			renderer,
+			360,
+			&borderlessHeight);
+		const auto borderlessImage = PaintArticleForTest(
+			borderlessArticle.get(),
+			360,
+			borderlessHeight);
+		Check(
+			HasPaintedPixels(borderlessImage),
+			borderlessTableLabel + u" paint produced pixels"_q,
+			ok);
+		const auto headerCenterBounds = SegmentHitBounds(
+			borderlessArticle.get(),
+			360,
+			borderlessHeight,
+			2);
+		const auto headerRightBounds = SegmentHitBounds(
+			borderlessArticle.get(),
+			360,
+			borderlessHeight,
+			3);
+		const auto wideBounds = SegmentHitBounds(
+			borderlessArticle.get(),
+			360,
+			borderlessHeight,
+			5);
+		Check(
+			headerCenterBounds.has_value()
+				&& headerRightBounds.has_value()
+				&& wideBounds.has_value(),
+			borderlessTableLabel + u" merged-cell bounds"_q,
+			ok);
+		if (headerCenterBounds && headerRightBounds && wideBounds) {
+			const auto boundaryX = headerRightBounds->left();
+			const auto coveredStrip = QRect(
+				boundaryX - 1,
+				wideBounds->center().y() - 6,
+				3,
+				13).intersected(insetRect(*wideBounds, 4));
+			Check(
+				!coveredStrip.isEmpty(),
+				borderlessTableLabel + u" covered strip bounds"_q,
+				ok);
+			if (!coveredStrip.isEmpty()) {
+				Check(
+					!PaintedBoundsInRect(borderlessImage, coveredStrip).has_value(),
+					borderlessTableLabel
+						+ u" borderless merged slot has no separator pixels"_q,
+					ok);
+			}
+		}
+	}
 
 	const auto audioLabel = u"native-iv-audio-article"_q;
 	auto audioRuntime = std::make_shared<TestMediaRuntime>();
@@ -7385,6 +8451,10 @@ void CheckArticleRasterRegressionCoverage(bool *ok) {
 				++segmentIndex;
 				break;
 			case PreparedBlockKind::Table:
+				if (!block.text.text.isEmpty()
+					&& collectTextSegment(block.text)) {
+					return true;
+				}
 				++segmentIndex;
 				for (const auto &row : block.tableRows) {
 					for (const auto &cell : row.cells) {
