@@ -1049,7 +1049,7 @@ not_null<HistoryItem*> History::addNewToBack(
 	}
 	const auto from = item->from();
 	const auto guestMessage = item->Has<HistoryMessageGuestChat>();
-	if (const auto user = guestMessage ? from->asUser() : nullptr) {
+	if (const auto user = guestMessage ? nullptr : from->asUser()) {
 		const auto lastAuthors = [&]() -> std::deque<not_null<UserData*>>* {
 			if (auto chat = peer->asChat()) {
 				return &chat->lastAuthors;
