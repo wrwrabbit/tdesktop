@@ -41,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_userpic_suggestion.h"
 #include "dialogs/ui/dialogs_message_view.h"
 #include "ui/boxes/emoji_stake_box.h"
+#include "ui/controls/ton_common.h"
 #include "ui/image/image.h"
 #include "ui/effects/spoiler_mess.h"
 #include "ui/text/format_song_document_name.h"
@@ -56,6 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localstorage.h"
 #include "chat_helpers/stickers_dice_pack.h" // Stickers::DicePacks::IsSlot.
 #include "chat_helpers/stickers_gift_box_pack.h"
+#include "data/components/credits.h"
 #include "data/data_session.h"
 #include "data/data_auto_download.h"
 #include "data/data_photo.h"
@@ -2488,6 +2490,7 @@ MediaDice::MediaDice(
 , _outcome(outcome)
 , _emoji(emoji)
 , _value(value) {
+	parent->history()->session().credits().tonLoad();
 }
 
 std::unique_ptr<Media> MediaDice::clone(not_null<HistoryItem*> parent) {
@@ -2549,6 +2552,9 @@ bool MediaDice::updateSentMedia(const MTPMessageMedia &media) {
 		};
 	} else {
 		_outcome = {};
+	}
+	if (parent()->out() && _outcome.stakeNanoTon > 0) {
+		parent()->history()->session().credits().tonLoad(true);
 	}
 	parent()->history()->owner().notifyItemDataChange(parent());
 	return true;
@@ -2646,6 +2652,23 @@ ClickHandlerPtr MediaDice::MakeHandler(
 				const auto window = weak.get();
 				const auto seedHash = options.seedHash;
 				const auto sendWithStake = [=](int64 stakeNanoTon) {
+					if (stakeNanoTon > 0 && window) {
+						const auto session = &window->session();
+						const auto credits = &session->credits();
+						const auto required = CreditsAmount(
+							stakeNanoTon / Ui::kNanosInOne,
+							stakeNanoTon % Ui::kNanosInOne,
+							CreditsType::Ton);
+						if (credits->tonLoaded()
+							&& credits->tonBalance() < required) {
+							HideExisting();
+							window->uiShow()->show(Box(
+								Ui::InsufficientTonBox,
+								session,
+								required));
+							return;
+						}
+					}
 					sendWith(seedHash, stakeNanoTon);
 				};
 				if (!options || !window) {

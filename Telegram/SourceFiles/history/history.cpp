@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/ui_integration.h"
 #include "dialogs/ui/dialogs_layout.h"
 #include "data/business/data_shortcut_messages.h"
+#include "data/components/credits.h"
 #include "data/components/scheduled_messages.h"
 #include "data/components/sponsored_messages.h"
 #include "data/components/top_peers.h"
@@ -1643,6 +1644,11 @@ void History::newItemAdded(not_null<HistoryItem*> item, NewAddType type) {
 					owner().emojiStatuses().refreshCollectibles();
 				}
 			}
+		}
+		if (type == NewAddType::Outgoing
+			&& !item->isLocal()
+			&& media->diceGameOutcome().stakeNanoTon > 0) {
+			session().credits().tonLoad(true);
 		}
 	}
 }
