@@ -777,7 +777,10 @@ not_null<HistoryItem*> History::addNewItem(
 	if (!loadedAtBottom() || peer->migrateTo()) {
 		setLastMessage(item);
 		if (unread) {
-			newItemAdded(item);
+			const auto type = item->out()
+				? NewAddType::Outgoing
+				: NewAddType::RegularIncoming;
+			newItemAdded(item, type);
 		}
 	} else {
 		addNewToBack(item, unread);
@@ -1148,7 +1151,10 @@ not_null<HistoryItem*> History::addNewToBack(
 
 	setLastMessage(item);
 	if (unread) {
-		newItemAdded(item);
+		const auto type = item->out()
+			? NewAddType::Outgoing
+			: NewAddType::RegularIncoming;
+		newItemAdded(item, type);
 	}
 
 	owner().notifyHistoryChangeDelayed(this);
@@ -1566,7 +1572,7 @@ void History::mainViewRemoved(
 	}
 }
 
-void History::newItemAdded(not_null<HistoryItem*> item) {
+void History::newItemAdded(not_null<HistoryItem*> item, NewAddType type) {
 	item->indexAsNewItem();
 	item->addToMessagesIndex();
 	if (const auto from = item->from() ? item->from()->asUser() : nullptr) {
@@ -1616,7 +1622,10 @@ void History::newItemAdded(not_null<HistoryItem*> item) {
 			inboxRead(item);
 		}
 	}
-	item->incrementReplyToTopCounter();
+	if (type != NewAddType::StreamedDraftFinish) {
+		// In StreamedDraftFinish setRealId() already incremented this.
+		item->incrementReplyToTopCounter();
+	}
 	if (!folderKnown()) {
 		owner().histories().requestDialogEntry(this);
 	}
