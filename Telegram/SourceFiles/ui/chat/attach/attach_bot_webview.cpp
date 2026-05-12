@@ -7,12 +7,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/chat/attach/attach_bot_webview.h"
 
-#include "core/file_utilities.h"
-#include "ui/boxes/confirm_box.h"
 #include "ui/chat/attach/attach_bot_downloads.h"
+#include "ui/chat/attach/attach_bot_webview_linux_shell.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/layers/box_content.h"
+#include "ui/round_rect.h"
 #include "ui/style/style_core_palette.h"
 #include "ui/text/format_values.h"
 #include "ui/text/text_utilities.h"
@@ -20,12 +20,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
-#include "ui/wrap/fade_wrap.h"
+#include "ui/wrap/padding_wrap.h"
 #include "ui/integration.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
 #include "ui/ui_utility.h"
 #include "lang/lang_keys.h"
+#include "core/file_utilities.h"
 #include "webview/webview_embed.h"
 #include "webview/webview_dialog.h"
 #include "webview/webview_interface.h"
@@ -105,174 +106,8 @@ base::options::toggle OptionLinuxExternalBotWebApps({
 	return Result;
 }
 
-[[nodiscard]] QByteArray JsonValue(QJsonValue value) {
-	auto array = QJsonArray();
-	array.push_back(std::move(value));
-	auto result = QJsonDocument(array).toJson(QJsonDocument::Compact);
-	return result.mid(1, result.size() - 2);
-}
-
-[[nodiscard]] QByteArray JsonObject(QJsonObject object) {
-	return QJsonDocument(std::move(object)).toJson(QJsonDocument::Compact);
-}
-
-[[nodiscard]] QJsonValue ColorValue(QColor color) {
-	return color.isValid()
-		? QJsonValue(color.name(QColor::HexRgb))
-		: QJsonValue();
-}
-
-struct ExternalShellColorState {
-	bool titleUsesTheme = true;
-	bool bodyUsesTheme = true;
-	bool bottomUsesTheme = true;
-	std::optional<QColor> title;
-	std::optional<QColor> body;
-	std::optional<QColor> bottom;
-};
-
-[[nodiscard]] auto &ExternalShellColorStates() {
-	static auto result
-		= std::vector<std::pair<const Panel*, ExternalShellColorState>>();
-	return result;
-}
-
-[[nodiscard]] ExternalShellColorState &ExternalShellColorStateFor(
-		const Panel *panel) {
-	auto &states = ExternalShellColorStates();
-	const auto i = std::find_if(begin(states), end(states), [=](
-			const std::pair<const Panel*, ExternalShellColorState> &entry) {
-		return (entry.first == panel);
-	});
-	if (i != end(states)) {
-		return i->second;
-	}
-	states.push_back({ panel, {} });
-	return states.back().second;
-}
-
-void ForgetExternalShellColorState(const Panel *panel) {
-	auto &states = ExternalShellColorStates();
-	const auto i = std::find_if(begin(states), end(states), [=](
-			const std::pair<const Panel*, ExternalShellColorState> &entry) {
-		return (entry.first == panel);
-	});
-	if (i != end(states)) {
-		states.erase(i);
-	}
-}
-
-void SetExternalShellTitleColor(
-		const Panel *panel,
-		std::optional<QColor> color) {
-	auto &state = ExternalShellColorStateFor(panel);
-	state.titleUsesTheme = !color.has_value();
-	state.title = std::move(color);
-}
-
-void SetExternalShellBodyColor(
-		const Panel *panel,
-		std::optional<QColor> color) {
-	auto &state = ExternalShellColorStateFor(panel);
-	state.bodyUsesTheme = !color.has_value();
-	state.body = std::move(color);
-}
-
-void SetExternalShellBottomColor(
-		const Panel *panel,
-		std::optional<QColor> color) {
-	auto &state = ExternalShellColorStateFor(panel);
-	state.bottomUsesTheme = !color.has_value();
-	state.bottom = std::move(color);
-}
-
-[[nodiscard]] QColor ExternalShellBodyColor(
-		const Panel *panel,
-		const Webview::ThemeParams &params) {
-	const auto &state = ExternalShellColorStateFor(panel);
-	return state.bodyUsesTheme
-		? (params.bodyBg.alpha() == 255 ? params.bodyBg : st::windowBg->c)
-		: state.body.value_or(params.bodyBg);
-}
-
-[[nodiscard]] QColor ExternalShellTitleColor(
-		const Panel *panel,
-		const Webview::ThemeParams &params) {
-	const auto &state = ExternalShellColorStateFor(panel);
-	return state.titleUsesTheme
-		? (params.titleBg.alpha() == 255 ? params.titleBg : st::windowBg->c)
-		: state.title.value_or(params.titleBg);
-}
-
-[[nodiscard]] QColor ExternalShellBottomBarColor(
-		const Panel *panel,
-		const Webview::ThemeParams &params) {
-	const auto &state = ExternalShellColorStateFor(panel);
-	const auto body = ExternalShellBodyColor(panel, params);
-	return state.bottomUsesTheme
-		? body
-		: state.bottom.value_or(body);
-}
-
-[[nodiscard]] QJsonObject ExternalShellColorPayload(
-		const Panel *panel,
-		const Webview::ThemeParams &params) {
-	return {
-		{ u"bodyBg"_q, ColorValue(ExternalShellBodyColor(panel, params)) },
-		{ u"titleBg"_q, ColorValue(ExternalShellTitleColor(panel, params)) },
-		{ u"bottomBg"_q, ColorValue(ExternalShellBottomBarColor(panel, params)) },
-	};
-}
-
-[[nodiscard]] QJsonObject ExternalShellMetrics() {
-	const auto &shellPadding = st::botWebViewShellPadding;
-	const auto &shadowPadding = st::botWebViewShellShadowPadding;
-	const auto &titlePadding = st::botWebViewShellTitlePadding;
-	const auto &menuButtonSize = st::botWebViewShellMenuButtonSize;
-	const auto fullscreenButtonSize = QSize(
-		st::fullScreenPanelClose.width,
-		st::fullScreenPanelClose.height);
-	const auto fullscreenControlShift
-		= st::separatePanelClose.rippleAreaPosition;
-	return {
-		{ u"shellRadius"_q, st::botWebViewShellRadius },
-		{ u"shellPaddingTop"_q, shellPadding.top() },
-		{ u"shellPaddingRight"_q, shellPadding.right() },
-		{ u"shellPaddingBottom"_q, shellPadding.bottom() },
-		{ u"shellPaddingLeft"_q, shellPadding.left() },
-		{ u"shadowPaddingTop"_q, shadowPadding.top() },
-		{ u"shadowPaddingRight"_q, shadowPadding.right() },
-		{ u"shadowPaddingBottom"_q, shadowPadding.bottom() },
-		{ u"shadowPaddingLeft"_q, shadowPadding.left() },
-		{ u"headerHeight"_q, st::botWebViewShellHeaderHeight },
-		{ u"titlePaddingTop"_q, titlePadding.top() },
-		{ u"titlePaddingRight"_q, titlePadding.right() },
-		{ u"titlePaddingBottom"_q, titlePadding.bottom() },
-		{ u"titlePaddingLeft"_q, titlePadding.left() },
-		{ u"badgeSkip"_q, st::botWebViewShellBadgeSkip },
-		{ u"frameRadius"_q, st::botWebViewShellFrameRadius },
-		{ u"controlWidth"_q, menuButtonSize.width() },
-		{ u"controlHeight"_q, menuButtonSize.height() },
-		{ u"buttonHeight"_q, st::botWebViewBottomButton.height },
-		{ u"buttonGapX"_q, st::botWebViewBottomSkip.x() },
-		{ u"buttonGapY"_q, st::botWebViewBottomSkip.y() },
-		{ u"disclosureSkip"_q, st::botWebViewShellDisclosureSkip },
-		{ u"footerButtonSkip"_q, st::botWebViewShellFooterButtonSkip },
-		{ u"fullscreenControlWidth"_q, fullscreenButtonSize.width() },
-		{ u"fullscreenControlHeight"_q, fullscreenButtonSize.height() },
-		{ u"fullscreenControlTop"_q, fullscreenControlShift.y() },
-		{ u"fullscreenControlRight"_q, fullscreenControlShift.x() },
-		{ u"fullscreenControlGap"_q, fullscreenControlShift.x() },
-	};
-}
-
-[[nodiscard]] QSize ExternalShellWindowSize(QSize contentSize) {
-	const auto &shadowPadding = st::botWebViewShellShadowPadding;
-	return contentSize + QSize(
-		shadowPadding.left() + shadowPadding.right(),
-		shadowPadding.top()
-			+ st::botWebViewShellHeaderHeight
-			+ shadowPadding.bottom());
+[[nodiscard]] QColor ResolveExternalShellThemeColor(QColor color) {
+	return (color.alpha() == 255) ? color : st::windowBg->c;
 }
 
 enum class SharedPanelMenuAction {
@@ -691,17 +526,6 @@ void FillNativeSharedPanelMenu(
 		tr::lng_sr_verified_badge(tr::now));
 }
 
-[[nodiscard]] QJsonObject SerializeExternalShellMenuPalette() {
-	return {
-		{ u"bg"_q, st::windowBg->c.name(QColor::HexRgb) },
-		{ u"fg"_q, st::windowFg->c.name(QColor::HexRgb) },
-		{ u"hoverBg"_q, st::windowBgOver->c.name(QColor::HexRgb) },
-		{ u"separator"_q, st::menuSeparatorFg->c.name(QColor::HexRgb) },
-		{ u"attention"_q,
-			st::menuIconAttentionColor->c.name(QColor::HexRgb) },
-	};
-}
-
 void CollectSharedPanelMenuIcons(
 		const std::vector<SharedPanelMenuItem> &items,
 		QJsonObject &result) {
@@ -754,1453 +578,6 @@ void CollectSharedPanelMenuIcons(
 		result.push_back(SerializeSharedPanelMenuItem(item));
 	}
 	return result;
-}
-
-[[nodiscard]] QByteArray ExternalShellCss() {
-	return R"(
-html,
-body {
-	width: 100%;
-	height: 100%;
-	margin: 0;
-	overflow: hidden;
-	background: transparent;
-}
-:root {
-	--font-sans: -apple-system, BlinkMacSystemFont, avenir next, avenir, Segoe UI Variable Text, segoe ui, helvetica neue, helvetica, Cantarell, Ubuntu, roboto, noto, tahoma, arial, sans-serif;
-}
-body {
-	font: 14px/1.35 var(--font-sans);
-	color: var(--title-fg, #000000);
-	-webkit-font-smoothing: antialiased;
-	text-rendering: optimizeLegibility;
-}
-button,
-input,
-textarea,
-select {
-	font: inherit;
-}
-* {
-	box-sizing: border-box;
-}
-#root {
-	width: 100%;
-	height: 100%;
-	position: relative;
-	--shell-radius: 7px;
-	--shell-pad-top: 12px;
-	--shell-pad-right: 12px;
-	--shell-pad-bottom: 12px;
-	--shell-pad-left: 12px;
-	--shadow-pad-top: 12px;
-	--shadow-pad-right: 14px;
-	--shadow-pad-bottom: 16px;
-	--shadow-pad-left: 14px;
-	--header-height: 60px;
-	--title-pad-top: 0px;
-	--title-pad-right: 0px;
-	--title-pad-bottom: 0px;
-	--title-pad-left: 0px;
-	--badge-skip: 4px;
-	--frame-radius: 6px;
-	--control-width: 36px;
-	--control-height: 36px;
-	--button-height: 40px;
-	--button-gap-x: 12px;
-	--button-gap-y: 8px;
-	--disclosure-skip: 12px;
-	--footer-button-skip: 10px;
-	--footer-gap: var(--disclosure-skip);
-	--fullscreen-control-width: 44px;
-	--fullscreen-control-height: 44px;
-	--fullscreen-control-top: 8px;
-	--fullscreen-control-right: 8px;
-	--fullscreen-control-gap: 8px;
-	--body-bg: #ffffff;
-	--title-bg: #ffffff;
-	--bottom-bg: #ffffff;
-	--body-fg: #000000;
-	--title-fg: #000000;
-	--footer-fg: rgba(0, 0, 0, 0.55);
-	--menu-bg: #ffffff;
-	--menu-fg: #000000;
-	--menu-hover-bg: #f1f1f1;
-	--menu-separator: rgba(0, 0, 0, 0.08);
-	--menu-attention: #d05c5c;
-}
-.hidden {
-	display: none !important;
-}
-#scene {
-	position: absolute;
-	inset: 0;
-	padding: var(--shadow-pad-top)
-		var(--shadow-pad-right)
-		var(--shadow-pad-bottom)
-		var(--shadow-pad-left);
-}
-#shell {
-	position: relative;
-	width: 100%;
-	height: 100%;
-	display: flex;
-	flex-direction: column;
-	border-radius: var(--shell-radius);
-	background: var(--body-bg, #ffffff);
-	box-shadow:
-		0 0 0 1px rgba(0, 0, 0, 0.08),
-		0 1px 2px rgba(0, 0, 0, 0.18),
-		0 3px 8px -1px rgba(0, 0, 0, 0.16),
-		0 8px 14px -5px rgba(0, 0, 0, 0.20);
-	overflow: hidden;
-}
-#header {
-	flex: 0 0 auto;
-	min-height: var(--header-height);
-	display: grid;
-	grid-template-columns: auto minmax(0, 1fr) auto auto;
-	align-items: center;
-	gap: 4px;
-	padding: 0 var(--shell-pad-right) 0 var(--shell-pad-left);
-	background: var(--title-bg, #ffffff);
-	color: var(--title-fg, #000000);
-	border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-	-webkit-user-select: none;
-	user-select: none;
-}
-#back {
-	grid-column: 1;
-}
-#title-row {
-	grid-column: 2;
-}
-#menu-toggle {
-	grid-column: 3;
-}
-#close {
-	grid-column: 4;
-}
-.title-control {
-	width: var(--control-width);
-	height: var(--control-height);
-	border: 0;
-	border-radius: 999px;
-	background: transparent;
-	color: inherit;
-	cursor: default;
-	padding: 0;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	transition: background-color 120ms linear, opacity 120ms linear;
-}
-.title-control svg {
-	width: 20px;
-	height: 20px;
-	stroke: currentColor;
-	stroke-width: 2;
-	stroke-linecap: round;
-	stroke-linejoin: round;
-	fill: none;
-}
-.title-control .fill-icon {
-	fill: currentColor;
-	stroke: none;
-}
-.title-control:hover:not(:disabled),
-.title-control.active {
-	background: rgba(127, 127, 127, 0.14);
-}
-.title-control:disabled {
-	opacity: 0.45;
-}
-#title-row {
-	display: flex;
-	align-items: center;
-	min-width: 0;
-	padding: var(--title-pad-top)
-		var(--title-pad-right)
-		var(--title-pad-bottom)
-		var(--title-pad-left);
-	-webkit-user-select: none;
-	user-select: none;
-}
-#title {
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	font-size: 20px;
-	line-height: 24px;
-	font-weight: 600;
-	-webkit-user-select: none;
-	user-select: none;
-}
-#badge {
-	margin-left: var(--badge-skip);
-	width: 16px;
-	height: 16px;
-	flex: 0 0 auto;
-	background-position: center;
-	background-repeat: no-repeat;
-	background-size: contain;
-}
-#body {
-	flex: 1 1 auto;
-	min-height: 0;
-	display: flex;
-	flex-direction: column;
-	gap: var(--footer-gap);
-	padding: 0;
-	background: var(--body-bg, #ffffff);
-}
-#frame-shell {
-	flex: 1 1 auto;
-	min-height: 0;
-	border-radius: 0;
-	overflow: hidden;
-	background: var(--body-bg, #ffffff);
-	box-shadow: none;
-}
-#frame-wrap,
-#frame-wrap iframe {
-	display: block;
-	width: 100%;
-	height: 100%;
-	border: 0;
-	background: var(--body-bg, #ffffff);
-}
-#footer {
-	display: none;
-	flex: 0 0 auto;
-	color: var(--footer-fg);
-	padding: var(--shell-pad-top)
-		var(--shell-pad-right)
-		var(--shell-pad-bottom)
-		var(--shell-pad-left);
-	background: var(--bottom-bg, var(--body-bg));
-}
-#footer.visible {
-	display: flex;
-	flex-direction: column;
-}
-#disclosure {
-	display: none;
-	text-align: center;
-	font-size: 12px;
-	line-height: 16px;
-	padding: 0 4px;
-	word-break: break-word;
-}
-#disclosure.visible {
-	display: block;
-}
-#buttons-wrap {
-	display: none;
-	background: var(--bottom-bg, var(--body-bg));
-	border-radius: var(--frame-radius);
-	overflow: hidden;
-}
-#buttons-wrap.visible {
-	display: block;
-}
-#buttons {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr);
-	column-gap: var(--button-gap-x);
-	row-gap: var(--button-gap-y);
-}
-#buttons[data-layout="horizontal"] {
-	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-}
-.shell-button {
-	min-width: 0;
-	height: var(--button-height);
-	border: 0;
-	border-radius: calc(var(--frame-radius) - 1px);
-	padding: 0 14px;
-	font-weight: 600;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	gap: 8px;
-	cursor: default;
-	transition: opacity 120ms linear;
-}
-.shell-button:disabled {
-	opacity: 0.55;
-}
-.button-icon {
-	display: none;
-	flex: 0 0 auto;
-	width: 20px;
-	height: 20px;
-	background-position: center;
-	background-repeat: no-repeat;
-	background-size: contain;
-}
-.button-icon.visible {
-	display: block;
-}
-.button-icon.pending {
-	border-radius: 999px;
-	background-color: currentColor;
-	opacity: 0.18;
-}
-.button-label {
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-.button-spinner {
-	display: none;
-	flex: 0 0 auto;
-	width: 14px;
-	height: 14px;
-	border: 2px solid currentColor;
-	border-right-color: transparent;
-	border-radius: 50%;
-	animation: spin 0.8s linear infinite;
-}
-.button-spinner.visible {
-	display: block;
-}
-#menu {
-	position: absolute;
-	top: calc(var(--shadow-pad-top) + var(--header-height) - 4px);
-	right: var(--shadow-pad-right);
-	display: none;
-	min-width: 220px;
-	max-width: calc(100% - var(--shadow-pad-left) - var(--shadow-pad-right));
-	background: var(--menu-bg, #ffffff);
-	color: var(--menu-fg, #000000);
-	border-radius: 12px;
-	box-shadow:
-		0 20px 38px rgba(0, 0, 0, 0.22),
-		0 4px 12px rgba(0, 0, 0, 0.12);
-	overflow: hidden;
-	z-index: 12;
-}
-#root.fullscreen #scene {
-	padding: 0;
-}
-#root.fullscreen #shell {
-	border-radius: 0;
-	box-shadow: none;
-}
-#root.fullscreen #header {
-	position: absolute;
-	top: var(--fullscreen-control-top);
-	right: var(--fullscreen-control-right);
-	z-index: 13;
-	width: auto;
-	min-height: var(--fullscreen-control-height);
-	display: flex;
-	justify-content: flex-end;
-	gap: var(--fullscreen-control-gap);
-	padding: 0;
-	background: transparent;
-	border-bottom: 0;
-	pointer-events: none;
-}
-#root.fullscreen #back,
-#root.fullscreen #title-row {
-	display: none !important;
-}
-#root.fullscreen .title-control {
-	width: var(--fullscreen-control-width);
-	height: var(--fullscreen-control-height);
-	color: #ffffff;
-	background: rgba(0, 0, 0, 0.35);
-	pointer-events: auto;
-}
-#root.fullscreen .title-control:hover:not(:disabled),
-#root.fullscreen .title-control.active {
-	background: rgba(0, 0, 0, 0.45);
-}
-#root.fullscreen #body {
-	gap: 0;
-}
-#root.fullscreen #menu {
-	top: calc(
-		var(--fullscreen-control-top)
-			+ var(--fullscreen-control-height)
-			+ var(--fullscreen-control-gap));
-	right: var(--fullscreen-control-right);
-}
-#root.fullscreen #resize-handles {
-	display: none;
-}
-#resize-handles {
-	position: absolute;
-	inset: 0;
-	z-index: 11;
-	pointer-events: none;
-}
-.resize-handle {
-	position: absolute;
-	pointer-events: auto;
-}
-.resize-handle[data-resize-edge="top"] {
-	top: 0;
-	left: var(--shadow-pad-left);
-	right: var(--shadow-pad-right);
-	height: var(--shadow-pad-top);
-	cursor: ns-resize;
-}
-.resize-handle[data-resize-edge="bottom"] {
-	bottom: 0;
-	left: var(--shadow-pad-left);
-	right: var(--shadow-pad-right);
-	height: var(--shadow-pad-bottom);
-	cursor: ns-resize;
-}
-.resize-handle[data-resize-edge="left"] {
-	top: var(--shadow-pad-top);
-	bottom: var(--shadow-pad-bottom);
-	left: 0;
-	width: var(--shadow-pad-left);
-	cursor: ew-resize;
-}
-.resize-handle[data-resize-edge="right"] {
-	top: var(--shadow-pad-top);
-	bottom: var(--shadow-pad-bottom);
-	right: 0;
-	width: var(--shadow-pad-right);
-	cursor: ew-resize;
-}
-.resize-handle[data-resize-edge="top-left"] {
-	top: 0;
-	left: 0;
-	width: var(--shadow-pad-left);
-	height: var(--shadow-pad-top);
-	cursor: nwse-resize;
-}
-.resize-handle[data-resize-edge="top-right"] {
-	top: 0;
-	right: 0;
-	width: var(--shadow-pad-right);
-	height: var(--shadow-pad-top);
-	cursor: nesw-resize;
-}
-.resize-handle[data-resize-edge="bottom-left"] {
-	bottom: 0;
-	left: 0;
-	width: var(--shadow-pad-left);
-	height: var(--shadow-pad-bottom);
-	cursor: nesw-resize;
-}
-.resize-handle[data-resize-edge="bottom-right"] {
-	right: 0;
-	bottom: 0;
-	width: var(--shadow-pad-right);
-	height: var(--shadow-pad-bottom);
-	cursor: nwse-resize;
-}
-#menu.visible {
-	display: block;
-}
-#menu-list {
-	padding: 6px 0;
-}
-.menu-separator {
-	height: 1px;
-	margin: 6px 0;
-	background: var(--menu-separator, rgba(0, 0, 0, 0.08));
-}
-.menu-item,
-.menu-download {
-	width: 100%;
-	border: 0;
-	background: transparent;
-	color: inherit;
-	display: flex;
-	align-items: center;
-	gap: 12px;
-	padding: 10px 14px;
-	text-align: left;
-	cursor: default;
-	transition: background-color 120ms linear, opacity 120ms linear;
-}
-.menu-download {
-	padding-left: 0;
-	padding-right: 0;
-}
-.menu-item:hover,
-.menu-download:hover {
-	background: var(--menu-hover-bg, rgba(127, 127, 127, 0.14));
-}
-.menu-item.disabled,
-.menu-download.disabled {
-	opacity: 0.72;
-}
-.menu-item.attention,
-.menu-download.attention {
-	color: var(--menu-attention, #d05c5c);
-}
-.menu-group {
-	padding: 0 14px;
-}
-.menu-group-title {
-	padding-left: 0;
-	padding-right: 0;
-	cursor: default;
-}
-.menu-group-children {
-	display: flex;
-	flex-direction: column;
-	gap: 2px;
-	padding: 0 0 6px 32px;
-}
-.menu-item-icon {
-	flex: 0 0 20px;
-	width: 20px;
-	height: 20px;
-	background-position: center;
-	background-repeat: no-repeat;
-	background-size: contain;
-}
-.menu-item-copy {
-	min-width: 0;
-	flex: 1 1 auto;
-	display: flex;
-	flex-direction: column;
-	align-items: flex-start;
-}
-.menu-item-title,
-.menu-item-subtitle,
-.menu-item-action {
-	display: block;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-.menu-item-title {
-	font-size: 14px;
-	line-height: 18px;
-}
-.menu-item-subtitle,
-.menu-item-action {
-	font-size: 12px;
-	line-height: 16px;
-}
-.menu-item-subtitle {
-	opacity: 0.64;
-}
-.menu-item-action {
-	flex: 0 0 auto;
-	padding-left: 12px;
-	opacity: 0.8;
-}
-#blocker {
-	position: absolute;
-	inset: 0;
-	display: none;
-	background: rgba(0, 0, 0, 0.12);
-	z-index: 20;
-}
-#root.blocked #blocker {
-	display: block;
-}
-@keyframes spin {
-	to { transform: rotate(360deg); }
-}
-)";
-}
-
-[[nodiscard]] QByteArray ExternalShellJs() {
-	return R"(
-(function() {
-	'use strict';
-
-	const root = document.getElementById('root');
-	const header = document.getElementById('header');
-	const frameShell = document.getElementById('frame-shell');
-	const frameWrap = document.getElementById('frame-wrap');
-	const disclosure = document.getElementById('disclosure');
-	const footer = document.getElementById('footer');
-	const buttonsWrap = document.getElementById('buttons-wrap');
-	const buttons = document.getElementById('buttons');
-	const badge = document.getElementById('badge');
-	const menu = document.getElementById('menu');
-	const menuList = document.getElementById('menu-list');
-	const resizeHandles = Array.prototype.slice.call(
-		document.querySelectorAll('.resize-handle'));
-	const title = document.getElementById('title');
-	const controls = {
-		back: document.getElementById('back'),
-		menu: document.getElementById('menu-toggle'),
-		close: document.getElementById('close')
-	};
-	const shellState = {
-		backVisible: false,
-		menuVisible: false,
-		badgeVisible: false,
-		bottomText: '',
-		isFullscreen: false,
-		blocked: false,
-		menuOpen: false,
-		menuItems: [],
-		buttons: {
-			main: null,
-			secondary: null
-		}
-	};
-	const shellAssets = {
-		icons: Object.create(null),
-		verifiedBadge: null,
-		menuPalette: null
-	};
-	let iframe = null;
-	let frameLoaded = false;
-	let frameUrl = 'about:blank';
-	let reloadSupported = false;
-	let reloadTimeout = null;
-	let viewportScheduled = false;
-	let resizeObserver = null;
-	const pendingEvents = [];
-
-	function invoke(eventType, eventData) {
-		if (window.external && window.external.invoke) {
-			window.external.invoke(JSON.stringify([
-				eventType,
-				JSON.stringify(eventData || {})
-			]));
-		}
-	}
-
-	function sendToFrame(eventType, eventData) {
-		iframe.contentWindow.postMessage(JSON.stringify({
-			eventType: eventType,
-			eventData: eventData || {}
-		}), '*');
-	}
-
-	function postToFrame(eventType, eventData) {
-		if (!iframe || !iframe.contentWindow || !frameLoaded) {
-			pendingEvents.push({
-				eventType: eventType,
-				eventData: eventData || {}
-			});
-			return;
-		}
-		sendToFrame(eventType, eventData);
-	}
-
-	function shellPointerPayload(event, extra) {
-		const payload = {
-			button: event.button,
-			x: event.clientX,
-			y: event.clientY,
-			rootX: event.screenX,
-			rootY: event.screenY,
-			timeStamp: Math.round(event.timeStamp || 0)
-		};
-		if (extra && typeof extra === 'object') {
-			for (const key in extra) {
-				payload[key] = extra[key];
-			}
-		}
-		return payload;
-	}
-
-	function beginShellControl(command, event, extra) {
-		if (shellState.blocked
-			|| shellState.isFullscreen
-			|| event.defaultPrevented
-			|| event.button !== 0) {
-			return;
-		}
-		closeMenu();
-		invoke(command, shellPointerPayload(event, extra));
-		event.preventDefault();
-	}
-
-	function beginShellMove(event) {
-		const target = event.target;
-		if (target
-			&& target.closest
-			&& target.closest('.title-control, #menu')) {
-			return;
-		}
-		beginShellControl('tdesktop_shell_begin_move', event);
-	}
-
-	function beginShellResize(edge, event) {
-		beginShellControl('tdesktop_shell_begin_resize', event, {
-			edge: edge
-		});
-	}
-
-	function flushPendingEvents() {
-		const pending = pendingEvents.splice(0);
-		for (const event of pending) {
-			postToFrame(event.eventType, event.eventData);
-		}
-	}
-
-	function sendViewportChanged() {
-		if (!iframe) {
-			return;
-		}
-		const height = Math.max(
-			0,
-			Math.round(frameShell.getBoundingClientRect().height));
-		postToFrame('viewport_changed', {
-			height: height,
-			is_state_stable: true,
-			is_expanded: true
-		});
-	}
-
-	function scheduleViewport() {
-		if (viewportScheduled) {
-			return;
-		}
-		viewportScheduled = true;
-		window.requestAnimationFrame(function() {
-			viewportScheduled = false;
-			sendViewportChanged();
-		});
-	}
-
-	function setMetric(name, value) {
-		if (typeof value === 'number' && Number.isFinite(value)) {
-			root.style.setProperty(name, String(value) + 'px');
-		}
-	}
-
-	function applyMetrics(data) {
-		if (!data || typeof data !== 'object') {
-			return;
-		}
-		setMetric('--shell-radius', data.shellRadius);
-		setMetric('--shell-pad-top', data.shellPaddingTop);
-		setMetric('--shell-pad-right', data.shellPaddingRight);
-		setMetric('--shell-pad-bottom', data.shellPaddingBottom);
-		setMetric('--shell-pad-left', data.shellPaddingLeft);
-		setMetric('--shadow-pad-top', data.shadowPaddingTop);
-		setMetric('--shadow-pad-right', data.shadowPaddingRight);
-		setMetric('--shadow-pad-bottom', data.shadowPaddingBottom);
-		setMetric('--shadow-pad-left', data.shadowPaddingLeft);
-		setMetric('--header-height', data.headerHeight);
-		setMetric('--title-pad-top', data.titlePaddingTop);
-		setMetric('--title-pad-right', data.titlePaddingRight);
-		setMetric('--title-pad-bottom', data.titlePaddingBottom);
-		setMetric('--title-pad-left', data.titlePaddingLeft);
-		setMetric('--badge-skip', data.badgeSkip);
-		setMetric('--frame-radius', data.frameRadius);
-		setMetric('--control-width', data.controlWidth);
-		setMetric('--control-height', data.controlHeight);
-		setMetric('--button-height', data.buttonHeight);
-		setMetric('--button-gap-x', data.buttonGapX);
-		setMetric('--button-gap-y', data.buttonGapY);
-		setMetric('--disclosure-skip', data.disclosureSkip);
-		setMetric('--footer-button-skip', data.footerButtonSkip);
-		setMetric('--fullscreen-control-width', data.fullscreenControlWidth);
-		setMetric('--fullscreen-control-height', data.fullscreenControlHeight);
-		setMetric('--fullscreen-control-top', data.fullscreenControlTop);
-		setMetric('--fullscreen-control-right', data.fullscreenControlRight);
-		setMetric('--fullscreen-control-gap', data.fullscreenControlGap);
-	}
-
-	function colorForBackground(value) {
-		if (!/^#[0-9a-f]{6}$/i.test(value || '')) {
-			return null;
-		}
-		const red = parseInt(value.slice(1, 3), 16) / 255;
-		const green = parseInt(value.slice(3, 5), 16) / 255;
-		const blue = parseInt(value.slice(5, 7), 16) / 255;
-		const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-		return luminance > 0.5 ? '#000000' : '#ffffff';
-	}
-
-	function footerColorForBackground(value) {
-		if (!/^#[0-9a-f]{6}$/i.test(value || '')) {
-			return null;
-		}
-		const red = parseInt(value.slice(1, 3), 16) / 255;
-		const green = parseInt(value.slice(3, 5), 16) / 255;
-		const blue = parseInt(value.slice(5, 7), 16) / 255;
-		const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-		const contrast = 2.5;
-		const textLuminance = (luminance > 0.5) ? 0 : 1;
-		const adaptiveOpacity = (luminance - textLuminance + contrast) / contrast;
-		const opacity = Math.max(0.5, Math.min(0.64, adaptiveOpacity));
-		const channel = (luminance > 0.5) ? 0 : 255;
-		return 'rgba('
-			+ String(channel) + ', '
-			+ String(channel) + ', '
-			+ String(channel) + ', '
-			+ String(opacity) + ')';
-	}
-
-	function applyColors(data) {
-		const next = (data && data.colors) ? data.colors : data;
-		if (!next || typeof next !== 'object') {
-			return;
-		}
-		if (next.bodyBg) {
-			root.style.setProperty('--body-bg', next.bodyBg);
-			const footerFg = footerColorForBackground(next.bodyBg);
-			if (footerFg) {
-				root.style.setProperty('--footer-fg', footerFg);
-			}
-		}
-		if (next.titleBg) {
-			root.style.setProperty('--title-bg', next.titleBg);
-			const titleFg = colorForBackground(next.titleBg);
-			if (titleFg) {
-				root.style.setProperty('--title-fg', titleFg);
-			}
-		}
-		if (next.bottomBg) {
-			root.style.setProperty('--bottom-bg', next.bottomBg);
-		}
-	}
-
-	function applyAssets(data) {
-		if (!data || typeof data !== 'object') {
-			return;
-		}
-		if (data.icons && typeof data.icons === 'object') {
-			shellAssets.icons = data.icons;
-		}
-		if (data.verifiedBadge && typeof data.verifiedBadge === 'object') {
-			shellAssets.verifiedBadge = data.verifiedBadge;
-		}
-		if (data.menuPalette && typeof data.menuPalette === 'object') {
-			shellAssets.menuPalette = data.menuPalette;
-			if (data.menuPalette.bg) {
-				root.style.setProperty('--menu-bg', data.menuPalette.bg);
-			}
-			if (data.menuPalette.fg) {
-				root.style.setProperty('--menu-fg', data.menuPalette.fg);
-			}
-			if (data.menuPalette.hoverBg) {
-				root.style.setProperty(
-					'--menu-hover-bg',
-					data.menuPalette.hoverBg);
-			}
-			if (data.menuPalette.separator) {
-				root.style.setProperty(
-					'--menu-separator',
-					data.menuPalette.separator);
-			}
-			if (data.menuPalette.attention) {
-				root.style.setProperty(
-					'--menu-attention',
-					data.menuPalette.attention);
-			}
-		}
-		if (shellAssets.verifiedBadge && shellAssets.verifiedBadge.url) {
-			badge.style.backgroundImage = 'url('
-				+ shellAssets.verifiedBadge.url + ')';
-			if (shellAssets.verifiedBadge.width) {
-				badge.style.width = String(shellAssets.verifiedBadge.width) + 'px';
-			}
-			if (shellAssets.verifiedBadge.height) {
-				badge.style.height = String(shellAssets.verifiedBadge.height) + 'px';
-			}
-			if (shellAssets.verifiedBadge.alt) {
-				badge.setAttribute('aria-label', shellAssets.verifiedBadge.alt);
-			}
-		} else {
-			badge.style.backgroundImage = '';
-			badge.removeAttribute('aria-label');
-		}
-		applyChrome({});
-		renderMenu();
-	}
-
-	function applyChrome(data) {
-		if (!data || typeof data !== 'object') {
-			return;
-		}
-		if (Object.prototype.hasOwnProperty.call(data, 'backVisible')) {
-			shellState.backVisible = !!data.backVisible;
-		}
-		if (Object.prototype.hasOwnProperty.call(data, 'menuVisible')) {
-			shellState.menuVisible = !!data.menuVisible;
-		}
-		if (Object.prototype.hasOwnProperty.call(data, 'badgeVisible')) {
-			shellState.badgeVisible = !!data.badgeVisible;
-		}
-		controls.back.classList.toggle('hidden', !shellState.backVisible);
-		controls.menu.classList.toggle('hidden', !shellState.menuVisible);
-		controls.menu.disabled = !shellState.menuVisible
-			|| !shellState.menuItems.length;
-		badge.classList.toggle(
-			'hidden',
-			!shellState.badgeVisible
-				|| !(shellAssets.verifiedBadge && shellAssets.verifiedBadge.url));
-		badge.setAttribute(
-			'aria-hidden',
-			badge.classList.contains('hidden') ? 'true' : 'false');
-		if (controls.menu.disabled) {
-			closeMenu();
-		}
-	}
-
-	function visibleButtons() {
-		const main = shellState.buttons.main && shellState.buttons.main.visible
-			? shellState.buttons.main
-			: null;
-		const secondary = shellState.buttons.secondary
-			&& shellState.buttons.secondary.visible
-			? shellState.buttons.secondary
-			: null;
-		const result = {
-			layout: 'single',
-			buttons: []
-		};
-		if (main && secondary) {
-			const position = secondary.position || 'left';
-			if (position === 'top') {
-				result.layout = 'vertical';
-				result.buttons = [secondary, main];
-			} else if (position === 'bottom') {
-				result.layout = 'vertical';
-				result.buttons = [main, secondary];
-			} else if (position === 'left') {
-				result.layout = 'horizontal';
-				result.buttons = [secondary, main];
-			} else {
-				result.layout = 'horizontal';
-				result.buttons = [main, secondary];
-			}
-		} else if (main) {
-			result.buttons = [main];
-		} else if (secondary) {
-			result.buttons = [secondary];
-		}
-		return result;
-	}
-
-	function requestButtonIcon(state) {
-		if (!state
-			|| !state.visible
-			|| !state.iconCustomEmojiId
-			|| state.iconResolvedGeneration === state.iconGeneration
-			|| state.iconRequestGeneration === state.iconGeneration) {
-			return;
-		}
-		state.iconRequestGeneration = state.iconGeneration;
-		invoke('tdesktop_shell_request_button_icon', {
-			name: state.name
-		});
-	}
-
-	function updateFooter() {
-		const visible = visibleButtons();
-		const hasButtons = !!visible.buttons.length;
-		disclosure.textContent = '';
-		disclosure.classList.remove('visible');
-		buttonsWrap.classList.toggle('visible', hasButtons);
-		footer.classList.toggle('visible', hasButtons);
-		root.style.setProperty(
-			'--footer-gap',
-			shellState.isFullscreen
-				? '0px'
-				: hasButtons
-				? 'var(--footer-button-skip)'
-				: 'var(--disclosure-skip)');
-		scheduleViewport();
-	}
-
-	function renderButtons() {
-		const visible = visibleButtons();
-		buttons.textContent = '';
-		buttons.dataset.layout = visible.layout;
-		for (const state of visible.buttons) {
-			const button = document.createElement('button');
-			button.type = 'button';
-			button.className = 'shell-button';
-			button.disabled = !state.active;
-			button.style.background = state.color || '#40a7e3';
-			button.style.color = state.textColor || '#ffffff';
-
-			const icon = document.createElement('span');
-			icon.className = 'button-icon';
-			const iconReady = state.iconResolvedGeneration === state.iconGeneration;
-			if (state.iconCustomEmojiId && state.iconUrl) {
-				icon.classList.add('visible');
-				icon.style.backgroundImage = 'url(' + state.iconUrl + ')';
-			} else if (state.iconCustomEmojiId && !iconReady) {
-				icon.classList.add('visible', 'pending');
-				requestButtonIcon(state);
-			}
-			button.appendChild(icon);
-
-			const label = document.createElement('span');
-			label.className = 'button-label';
-			label.textContent = state.text || '';
-			button.appendChild(label);
-
-			const spinner = document.createElement('span');
-			spinner.className = 'button-spinner';
-			if (state.progress) {
-				spinner.classList.add('visible');
-			}
-			button.appendChild(spinner);
-
-			button.addEventListener('click', function() {
-				if (!button.disabled) {
-					postToFrame(state.name + '_button_pressed', {});
-				}
-			});
-			buttons.appendChild(button);
-		}
-		updateFooter();
-	}
-
-	function menuIconUrl(name) {
-		const asset = shellAssets.icons && name ? shellAssets.icons[name] : null;
-		return (asset && asset.url) ? asset.url : '';
-	}
-
-	function createMenuNode(item, className) {
-		const clickable = !!item.id && item.enabled !== false;
-		const node = document.createElement(clickable ? 'button' : 'div');
-		node.className = className
-			+ (item.attention ? ' attention' : '')
-			+ (clickable ? '' : ' disabled');
-		if (clickable) {
-			node.type = 'button';
-			node.addEventListener('click', function() {
-				if (!shellState.blocked) {
-					invoke('tdesktop_shell_menu_action', { id: item.id });
-					closeMenu();
-				}
-			});
-		}
-		return node;
-	}
-
-	function createMenuCopy(item) {
-		const copy = document.createElement('span');
-		copy.className = 'menu-item-copy';
-		const titleNode = document.createElement('span');
-		titleNode.className = 'menu-item-title';
-		titleNode.textContent = item.text || '';
-		copy.appendChild(titleNode);
-		if (item.subtitle) {
-			const subtitleNode = document.createElement('span');
-			subtitleNode.className = 'menu-item-subtitle';
-			subtitleNode.textContent = item.subtitle;
-			copy.appendChild(subtitleNode);
-		}
-		return copy;
-	}
-
-	function renderMenu() {
-		menuList.textContent = '';
-		for (const item of shellState.menuItems) {
-			if (item.separator) {
-				const separator = document.createElement('div');
-				separator.className = 'menu-separator';
-				menuList.appendChild(separator);
-				continue;
-			}
-			if (Array.isArray(item.children) && item.children.length) {
-				const group = document.createElement('div');
-				group.className = 'menu-group';
-
-				const header = document.createElement('div');
-				header.className = 'menu-item menu-group-title';
-				const headerIcon = document.createElement('span');
-				headerIcon.className = 'menu-item-icon';
-				const headerIconUrl = menuIconUrl(item.icon);
-				if (headerIconUrl) {
-					headerIcon.style.backgroundImage = 'url('
-						+ headerIconUrl + ')';
-				}
-				header.appendChild(headerIcon);
-				header.appendChild(createMenuCopy(item));
-				group.appendChild(header);
-
-				const children = document.createElement('div');
-				children.className = 'menu-group-children';
-				for (const child of item.children) {
-					if (child.separator) {
-						const separator = document.createElement('div');
-						separator.className = 'menu-separator';
-						children.appendChild(separator);
-						continue;
-					}
-					const row = createMenuNode(child, 'menu-download');
-					row.appendChild(createMenuCopy(child));
-					if (child.actionLabel) {
-						const action = document.createElement('span');
-						action.className = 'menu-item-action';
-						action.textContent = child.actionLabel;
-						row.appendChild(action);
-					}
-					children.appendChild(row);
-				}
-				group.appendChild(children);
-				menuList.appendChild(group);
-				continue;
-			}
-
-			const row = createMenuNode(item, 'menu-item');
-			const icon = document.createElement('span');
-			icon.className = 'menu-item-icon';
-			const iconUrl = menuIconUrl(item.icon);
-			if (iconUrl) {
-				icon.style.backgroundImage = 'url(' + iconUrl + ')';
-			}
-			row.appendChild(icon);
-			row.appendChild(createMenuCopy(item));
-			menuList.appendChild(row);
-		}
-		menu.classList.toggle(
-			'visible',
-			shellState.menuOpen
-				&& shellState.menuVisible
-				&& !!shellState.menuItems.length);
-		controls.menu.classList.toggle(
-			'active',
-			menu.classList.contains('visible'));
-	}
-	function closeMenu() {
-		if (!shellState.menuOpen) {
-			return;
-		}
-		shellState.menuOpen = false;
-		renderMenu();
-	}
-
-	function toggleMenu() {
-		if (shellState.blocked) {
-			return;
-		}
-		if (shellState.menuOpen) {
-			closeMenu();
-			return;
-		}
-		invoke('tdesktop_shell_menu_request', {});
-		shellState.menuOpen = true;
-		renderMenu();
-	}
-
-	function parseFrameMessage(data) {
-		if (typeof data === 'string') {
-			try {
-				return JSON.parse(data);
-			} catch (e) {
-				return null;
-			}
-		}
-		return data && typeof data === 'object' ? data : null;
-	}
-
-	window.addEventListener('message', function(event) {
-		if (!iframe || event.source !== iframe.contentWindow) {
-			return;
-		}
-		const message = parseFrameMessage(event.data);
-		if (!message || !message.eventType) {
-			return;
-		}
-		if (message.eventType === 'iframe_ready') {
-			reloadSupported = !!(message.eventData && message.eventData.reload_supported);
-		} else if (message.eventType === 'iframe_will_reload') {
-			if (reloadTimeout) {
-				window.clearTimeout(reloadTimeout);
-				reloadTimeout = null;
-			}
-			frameLoaded = false;
-		}
-		invoke(message.eventType, message.eventData || {});
-	});
-
-	document.addEventListener('mousedown', function(event) {
-		if (!shellState.menuOpen) {
-			return;
-		}
-		const target = event.target;
-		if (menu.contains(target) || controls.menu.contains(target)) {
-			return;
-		}
-		closeMenu();
-	});
-
-	window.addEventListener('keydown', function(event) {
-		if (event.key === 'Escape' && shellState.menuOpen) {
-			event.preventDefault();
-			closeMenu();
-		}
-	});
-
-	window.addEventListener('resize', scheduleViewport);
-	if (window.ResizeObserver) {
-		resizeObserver = new window.ResizeObserver(scheduleViewport);
-		resizeObserver.observe(frameShell);
-		resizeObserver.observe(root);
-	}
-
-	controls.close.addEventListener('click', function() {
-		invoke('tdesktop_shell_close', {});
-	});
-	controls.back.addEventListener('click', function() {
-		postToFrame('back_button_pressed', {});
-	});
-	controls.menu.addEventListener('click', toggleMenu);
-	header.addEventListener('selectstart', function(event) {
-		event.preventDefault();
-	});
-	header.addEventListener('mousedown', beginShellMove);
-	for (const handle of resizeHandles) {
-		handle.addEventListener('mousedown', function(event) {
-			beginShellResize(handle.getAttribute('data-resize-edge'), event);
-		});
-	}
-
-	function createIframe(url) {
-		closeMenu();
-		if (reloadTimeout) {
-			window.clearTimeout(reloadTimeout);
-			reloadTimeout = null;
-		}
-		const next = document.createElement('iframe');
-		next.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen');
-		next.addEventListener('load', function() {
-			if (iframe !== next) {
-				return;
-			}
-			frameLoaded = true;
-			flushPendingEvents();
-			scheduleViewport();
-		});
-		frameLoaded = false;
-		reloadSupported = false;
-		if (iframe) {
-			iframe.remove();
-		}
-		iframe = next;
-		iframe.src = url || 'about:blank';
-		frameWrap.appendChild(iframe);
-	}
-
-	function fallbackReloadFrame() {
-		createIframe(frameUrl || 'about:blank');
-	}
-
-	function reloadFrame() {
-		if (!iframe) {
-			return;
-		}
-		if (reloadSupported && frameLoaded && iframe.contentWindow) {
-			sendToFrame('reload_iframe', {});
-			if (reloadTimeout) {
-				window.clearTimeout(reloadTimeout);
-			}
-			reloadTimeout = window.setTimeout(function() {
-				reloadTimeout = null;
-				fallbackReloadFrame();
-			}, 500);
-			return;
-		}
-		fallbackReloadFrame();
-	}
-
-	window.TelegramDesktopShell = {
-		bootstrap: function(data) {
-			applyMetrics(data && data.metrics);
-			applyColors(data && data.colors);
-			applyChrome(data || {});
-			shellState.bottomText = '';
-			title.textContent = (data && data.title) || '';
-			document.title = (data && data.title) || 'Telegram';
-			frameUrl = (data && data.url) || 'about:blank';
-			createIframe(frameUrl);
-			renderButtons();
-			renderMenu();
-		},
-		nativeEvent: function(eventType, eventData) {
-			if (eventType === 'fullscreen_changed' && eventData) {
-				shellState.isFullscreen = !!eventData.is_fullscreen;
-				root.classList.toggle('fullscreen', shellState.isFullscreen);
-				updateFooter();
-			}
-			postToFrame(eventType, eventData || {});
-		},
-		setTitle: function(data) {
-			title.textContent = (data && data.title) || '';
-			document.title = (data && data.title) || 'Telegram';
-		},
-		setChrome: function(data) {
-			applyChrome(data || {});
-		},
-		setColors: function(data) {
-			applyColors(data || {});
-		},
-		setAssets: function(data) {
-			applyAssets(data || {});
-		},
-		setMenu: function(data) {
-			shellState.menuItems = Array.isArray(data && data.items)
-				? data.items
-				: [];
-			applyChrome({});
-			renderMenu();
-		},
-		setBottomText: function(data) {
-			shellState.bottomText = '';
-			updateFooter();
-		},
-		setButton: function(data) {
-			if (!data || !data.name) {
-				return;
-			}
-			const previous = shellState.buttons[data.name] || {};
-			const next = Object.assign({}, previous, data);
-			if (next.iconGeneration !== previous.iconGeneration
-				|| next.iconCustomEmojiId !== previous.iconCustomEmojiId) {
-				next.iconRequestGeneration = '';
-				next.iconResolvedGeneration = '';
-				next.iconUrl = '';
-			}
-			if (!next.iconCustomEmojiId) {
-				next.iconRequestGeneration = '';
-				next.iconResolvedGeneration = next.iconGeneration || '';
-				next.iconUrl = '';
-			}
-			shellState.buttons[data.name] = next;
-			renderButtons();
-		},
-		setButtonIcon: function(data) {
-			if (!data || !data.name) {
-				return;
-			}
-			const state = shellState.buttons[data.name];
-			if (!state || state.iconGeneration !== (data.generation || '')) {
-				return;
-			}
-			const icon = (data.icon && typeof data.icon === 'object')
-				? data.icon
-				: null;
-			state.iconRequestGeneration = '';
-			state.iconResolvedGeneration = state.iconGeneration;
-			state.iconUrl = (icon && icon.url) ? icon.url : '';
-			renderButtons();
-		},
-		setBlocked: function(data) {
-			shellState.blocked = !!(data && data.blocked);
-			root.classList.toggle('blocked', shellState.blocked);
-			if (shellState.blocked) {
-				closeMenu();
-			}
-		},
-		setProgress: function(data) {
-			root.classList.toggle('loading', !!(data && data.shown));
-		},
-		reloadFrame: reloadFrame,
-		sendViewport: scheduleViewport
-	};
-})();
-)";
-}
-
-[[nodiscard]] QByteArray ExternalShellBodyHtml() {
-	auto result = QByteArray();
-	result.reserve(4096);
-	result += R"(<div id="root">
-<div id="scene">
-<div id="shell">
-<header id="header">
-<button id="back" class="title-control hidden" type="button" aria-label="Back">
-<svg viewBox="0 0 24 24" aria-hidden="true">
-<path d="M14.5 5.5L8 12l6.5 6.5"></path>
-</svg>
-</button>
-<div id="title-row">
-<div id="title"></div>
-<div id="badge" class="hidden" aria-hidden="true"></div>
-</div>
-<button id="menu-toggle" class="title-control" type="button" aria-label="Menu">
-<svg viewBox="0 0 24 24" aria-hidden="true">
-<circle class="fill-icon" cx="12" cy="6.5" r="1.7"></circle>
-<circle class="fill-icon" cx="12" cy="12" r="1.7"></circle>
-<circle class="fill-icon" cx="12" cy="17.5" r="1.7"></circle>
-</svg>
-</button>
-<button id="close" class="title-control" type="button" aria-label="Close">
-<svg viewBox="0 0 24 24" aria-hidden="true">
-<path d="M6 6l12 12"></path>
-<path d="M18 6L6 18"></path>
-</svg>
-</button>
-</header>
-<div id="body">
-<div id="frame-shell"><main id="frame-wrap"></main></div>
-<footer id="footer">
-<div id="disclosure"></div>
-<div id="buttons-wrap"><div id="buttons"></div></div>
-</footer>
-</div>
-<div id="menu"><div id="menu-list"></div></div>
-<div id="blocker"></div>
-</div>
-</div>
-<div id="resize-handles">
-<div class="resize-handle" data-resize-edge="top-left"></div>
-<div class="resize-handle" data-resize-edge="top"></div>
-<div class="resize-handle" data-resize-edge="top-right"></div>
-<div class="resize-handle" data-resize-edge="left"></div>
-<div class="resize-handle" data-resize-edge="right"></div>
-<div class="resize-handle" data-resize-edge="bottom-left"></div>
-<div class="resize-handle" data-resize-edge="bottom"></div>
-<div class="resize-handle" data-resize-edge="bottom-right"></div>
-</div>
-</div>)";
-	return result;
-}
-
-[[nodiscard]] QByteArray ExternalShellInstallScript() {
-	const auto css = QString::fromUtf8(ExternalShellCss());
-	const auto body = QString::fromUtf8(ExternalShellBodyHtml());
-	auto script = QByteArray();
-	script += "if (window === window.top"
-		" && !window.TelegramDesktopShell"
-		" && !window.TelegramDesktopShellInstalling) {"
-		"window.TelegramDesktopShellInstalling = true;"
-		"try {"
-		"if (!document.head) {"
-		"document.documentElement.insertBefore("
-		"document.createElement('head'),"
-		"document.documentElement.firstChild);"
-		"}"
-		"if (!document.body) {"
-		"document.documentElement.appendChild(document.createElement('body'));"
-		"}"
-		"document.title = 'Telegram';"
-		"const metaRobots = document.createElement('meta');"
-		"metaRobots.name = 'robots';"
-		"metaRobots.content = 'noindex, nofollow';"
-		"document.head.appendChild(metaRobots);"
-		"const metaViewport = document.createElement('meta');"
-		"metaViewport.name = 'viewport';"
-		"metaViewport.content = 'width=device-width, initial-scale=1.0';"
-		"document.head.appendChild(metaViewport);"
-		"const style = document.createElement('style');"
-		"style.textContent = ";
-	script += JsonValue(css);
-	script += ";"
-		"document.head.appendChild(style);"
-		"document.body.insertAdjacentHTML('beforeend', ";
-	script += JsonValue(body);
-	script += ");";
-	script += ExternalShellJs();
-	script += "} finally {"
-		"window.TelegramDesktopShellInstalling = false;"
-		"}"
-		"}";
-	return script;
 }
 
 [[nodiscard]] std::optional<QColor> ParseColor(const QString &text) {
@@ -2627,7 +1004,6 @@ Panel::Panel(Args &&args)
 }
 
 Panel::~Panel() {
-	ForgetExternalShellColorState(this);
 	base::take(_webview);
 	_progress = nullptr;
 	_externalWebviewParent = nullptr;
@@ -2963,11 +1339,48 @@ bool Panel::showWebview(Args &&args, const Webview::ThemeParams &params) {
 	return true;
 }
 
+void Panel::setExternalShellTitleColor(std::optional<QColor> color) {
+	_externalShellColorState.titleUsesTheme = !color.has_value();
+	_externalShellColorState.title = std::move(color);
+}
+
+void Panel::setExternalShellBodyColor(std::optional<QColor> color) {
+	_externalShellColorState.bodyUsesTheme = !color.has_value();
+	_externalShellColorState.body = std::move(color);
+}
+
+void Panel::setExternalShellBottomColor(std::optional<QColor> color) {
+	_externalShellColorState.bottomUsesTheme = !color.has_value();
+	_externalShellColorState.bottom = std::move(color);
+}
+
+LinuxShell::ResolvedColors Panel::externalShellColors(
+		const Webview::ThemeParams &params) const {
+	const auto body = _externalShellColorState.bodyUsesTheme
+		? ResolveExternalShellThemeColor(params.bodyBg)
+		: _externalShellColorState.body.value_or(params.bodyBg);
+	return {
+		.titleBg = _externalShellColorState.titleUsesTheme
+			? ResolveExternalShellThemeColor(params.titleBg)
+			: _externalShellColorState.title.value_or(params.titleBg),
+		.bodyBg = body,
+		.bottomBg = _externalShellColorState.bottomUsesTheme
+			? body
+			: _externalShellColorState.bottom.value_or(body),
+	};
+}
+
+void Panel::sendExternalShellColors(const Webview::ThemeParams &params) {
+	sendExternalShellMethod(
+		"setColors",
+		LinuxShell::ColorPayload(externalShellColors(params)));
+}
+
 void Panel::installExternalShellDocument() {
 	if (!_webview) {
 		return;
 	}
-	_webview->window.eval(ExternalShellInstallScript());
+	_webview->window.eval(LinuxShell::InstallScript());
 }
 
 void Panel::sendExternalShellBootstrap() {
@@ -2975,8 +1388,8 @@ void Panel::sendExternalShellBootstrap() {
 	sendExternalShellMethod("bootstrap", {
 		{ u"url"_q, _externalUrl },
 		{ u"title"_q, _externalTitle },
-		{ u"metrics"_q, ExternalShellMetrics() },
-		{ u"colors"_q, ExternalShellColorPayload(this, params) },
+		{ u"metrics"_q, LinuxShell::Metrics() },
+		{ u"colors"_q, LinuxShell::ColorPayload(externalShellColors(params)) },
 		{ u"bottomText"_q, QString() },
 		{ u"backVisible"_q, _externalBackVisible },
 		{ u"menuVisible"_q, true },
@@ -2996,18 +1409,7 @@ void Panel::sendExternalShellMethod(
 	if (!_webview) {
 		return;
 	}
-	const auto payload = JsonObject(data);
-	auto script = QByteArray();
-	script.reserve(method.size() * 2 + payload.size() + 96);
-	script += "if (window.TelegramDesktopShell"
-		" && window.TelegramDesktopShell.";
-	script += method;
-	script += ") { window.TelegramDesktopShell.";
-	script += method;
-	script += "(";
-	script += payload;
-	script += "); }";
-	_webview->window.eval(script);
+	_webview->window.eval(LinuxShell::MethodCallScript(method, data));
 }
 
 void Panel::sendExternalShellEvent(
@@ -3016,14 +1418,7 @@ void Panel::sendExternalShellEvent(
 	if (!_webview) {
 		return;
 	}
-	auto script = QByteArray();
-	script += "if (window.TelegramDesktopShell) {"
-		"window.TelegramDesktopShell.nativeEvent(";
-	script += JsonValue(event);
-	script += ", ";
-	script += (data.isEmpty() ? QByteArray("{}") : data);
-	script += "); }";
-	_webview->window.eval(script);
+	_webview->window.eval(LinuxShell::EventScript(event, data));
 }
 
 void Panel::sendExternalShellButton(
@@ -3082,7 +1477,7 @@ void Panel::setInitialExternalShellWindowSize() {
 	if (!view) {
 		return;
 	}
-	const auto size = ExternalShellWindowSize(st::botWebViewPanelSize);
+	const auto size = LinuxShell::WindowSize(st::botWebViewPanelSize);
 	_webview->window.resize(size);
 	view->resize(size);
 }
@@ -3168,7 +1563,7 @@ void Panel::sendExternalShellAssets() {
 	sendExternalShellMethod("setAssets", {
 		{ u"icons"_q, icons },
 		{ u"verifiedBadge"_q, SerializeVerifiedBadgeAsset() },
-		{ u"menuPalette"_q, SerializeExternalShellMenuPalette() },
+		{ u"menuPalette"_q, LinuxShell::MenuPalette() },
 	});
 }
 
@@ -4267,10 +2662,8 @@ void Panel::processHeaderColor(const QJsonObject &args) {
 	_headerColorReceived = true;
 	const auto apply = [&](std::optional<QColor> color) {
 		if (_externalShell) {
-			SetExternalShellTitleColor(this, color);
-			sendExternalShellMethod(
-				"setColors",
-				ExternalShellColorPayload(this, _delegate->botThemeParams()));
+			setExternalShellTitleColor(color);
+			sendExternalShellColors(_delegate->botThemeParams());
 		} else {
 			_widget->overrideTitleColor(color);
 		}
@@ -4294,11 +2687,9 @@ void Panel::processHeaderColor(const QJsonObject &args) {
 void Panel::overrideBodyColor(std::optional<QColor> color) {
 	if (_externalShell) {
 		if (_bodyColorReceived) {
-			SetExternalShellBodyColor(this, color);
+			setExternalShellBodyColor(color);
 		}
-		sendExternalShellMethod(
-			"setColors",
-			ExternalShellColorPayload(this, _delegate->botThemeParams()));
+		sendExternalShellColors(_delegate->botThemeParams());
 		return;
 	}
 	_widget->overrideBodyColor(color);
@@ -4354,10 +2745,8 @@ void Panel::processBottomBarColor(const QJsonObject &args) {
 	const auto apply = [&](std::optional<QColor> color) {
 		_bottomBarColor = color;
 		if (_externalShell) {
-			SetExternalShellBottomColor(this, color);
-			sendExternalShellMethod(
-				"setColors",
-				ExternalShellColorPayload(this, _delegate->botThemeParams()));
+			setExternalShellBottomColor(color);
+			sendExternalShellColors(_delegate->botThemeParams());
 		} else {
 			_widget->overrideBottomBarColor(color);
 		}
@@ -4697,9 +3086,7 @@ void Panel::updateThemeParams(const Webview::ThemeParams &params) {
 			params.scrollBgOver,
 			params.scrollBarBg,
 			params.scrollBarBgOver);
-		sendExternalShellMethod(
-			"setColors",
-			ExternalShellColorPayload(this, params));
+		sendExternalShellColors(params);
 		sendExternalShellAssets();
 		postEvent("theme_changed", "{\"theme_params\": " + params.json + "}");
 		return;
@@ -4716,9 +3103,7 @@ void Panel::updateThemeParams(const Webview::ThemeParams &params) {
 void Panel::updateColorOverrides(const Webview::ThemeParams &params) {
 	if (!_headerColorReceived && params.titleBg.alpha() == 255) {
 		if (_externalShell) {
-			sendExternalShellMethod(
-				"setColors",
-				ExternalShellColorPayload(this, params));
+			sendExternalShellColors(params);
 		} else {
 			_widget->overrideTitleColor(params.titleBg);
 		}

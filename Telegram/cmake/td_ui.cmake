@@ -372,6 +372,8 @@ PRIVATE
     ui/chat/attach/attach_bot_downloads.h
     ui/chat/attach/attach_bot_webview.cpp
     ui/chat/attach/attach_bot_webview.h
+    ui/chat/attach/attach_bot_webview_linux_shell.cpp
+    ui/chat/attach/attach_bot_webview_linux_shell.h
     ui/chat/attach/attach_controls.cpp
     ui/chat/attach/attach_controls.h
     ui/chat/attach/attach_extensions.cpp
@@ -589,9 +591,18 @@ PRIVATE
 
 nice_target_sources(td_ui ${res_loc}
 PRIVATE
+    bot_webview_shell_html/body.html
+    bot_webview_shell_html/page.css
+    bot_webview_shell_html/page.js
     picker_html/picker.css
     picker_html/picker.js
 )
+
+if (WIN32 OR APPLE)
+    remove_target_sources(td_ui ${src_loc}
+        ui/chat/attach/attach_bot_webview_linux_shell.cpp
+    )
+endif()
 
 if (DESKTOP_APP_SPECIAL_TARGET)
     remove_target_sources(td_ui ${src_loc}

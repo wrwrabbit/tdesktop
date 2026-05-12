@@ -2111,6 +2111,11 @@ elseif (APPLE)
         )
     endif()
 else()
+    nice_target_sources(Telegram ${res_loc}
+    PRIVATE
+        qrc/telegram/bot_webview_shell.qrc
+    )
+
     include(${cmake_helpers_loc}/external/glib/generate_dbus.cmake)
     generate_dbus(Telegram org.freedesktop.portal. XdpBackground ${third_party_loc}/xdg-desktop-portal/data/org.freedesktop.portal.Background.xml)
     generate_dbus(Telegram org.freedesktop. XdgNotifications ${src_loc}/platform/linux/org.freedesktop.Notifications.xml)

@@ -12,7 +12,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/weak_ptr.h"
 #include "base/flags.h"
 #include "ui/rect_part.h"
-#include "ui/round_rect.h"
 #include "webview/webview_common.h"
 #include <crl/crl_time.h>
 #include <QtGui/QColor>
@@ -26,7 +25,6 @@ class FlatLabel;
 class BoxContent;
 class RpWidget;
 class SeparatePanel;
-class IconButton;
 enum class LayerOption;
 using LayerOptions = base::flags<LayerOption>;
 } // namespace Ui
@@ -40,6 +38,10 @@ struct PopupResult;
 namespace Ui::Text {
 struct MarkedContext;
 } // namespace Ui::Text
+
+namespace Ui::BotWebView::LinuxShell {
+struct ResolvedColors;
+} // namespace Ui::BotWebView::LinuxShell
 
 namespace Ui::BotWebView {
 
@@ -192,6 +194,14 @@ private:
 		QString position;
 		uint64 iconGeneration = 0;
 	};
+	struct ExternalShellColorState {
+		bool titleUsesTheme = true;
+		bool bodyUsesTheme = true;
+		bool bottomUsesTheme = true;
+		std::optional<QColor> title;
+		std::optional<QColor> body;
+		std::optional<QColor> bottom;
+	};
 	class Button;
 	struct Progress;
 	struct WebviewWithLifetime;
@@ -244,6 +254,12 @@ private:
 	void processHeaderColor(const QJsonObject &args);
 	void processBackgroundColor(const QJsonObject &args);
 	void processBottomBarColor(const QJsonObject &args);
+	void setExternalShellTitleColor(std::optional<QColor> color);
+	void setExternalShellBodyColor(std::optional<QColor> color);
+	void setExternalShellBottomColor(std::optional<QColor> color);
+	[[nodiscard]] LinuxShell::ResolvedColors externalShellColors(
+		const Webview::ThemeParams &params) const;
+	void sendExternalShellColors(const Webview::ThemeParams &params);
 	void processDownloadRequest(const QJsonObject &args);
 	void openTgLink(const QJsonObject &args);
 	void openExternalLink(const QJsonObject &args);
@@ -299,6 +315,7 @@ private:
 	bool _externalShell = false;
 	bool _externalShellBootstrapped = false;
 	bool _externalBackVisible = false;
+	ExternalShellColorState _externalShellColorState;
 	MenuButtons _menuButtons = {};
 	ExternalButtonState _externalMainButton;
 	ExternalButtonState _externalSecondaryButton;
