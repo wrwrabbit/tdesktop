@@ -1562,6 +1562,8 @@ void Panel::sendExternalShellAssets() {
 	CollectSharedPanelMenuIcons(items, icons);
 	sendExternalShellMethod("setAssets", {
 		{ u"icons"_q, icons },
+		{ u"titleMenuIcon"_q,
+			SerializeStyleIconAsset(st::separatePanelMenu.icon) },
 		{ u"verifiedBadge"_q, SerializeVerifiedBadgeAsset() },
 		{ u"menuPalette"_q, LinuxShell::MenuPalette() },
 	});

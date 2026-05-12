@@ -10,6 +10,7 @@
 	const buttonsWrap = document.getElementById('buttons-wrap');
 	const buttons = document.getElementById('buttons');
 	const badge = document.getElementById('badge');
+	const menuBackdrop = document.getElementById('menu-backdrop');
 	const menu = document.getElementById('menu');
 	const menuList = document.getElementById('menu-list');
 	const resizeHandles = Array.prototype.slice.call(
@@ -18,6 +19,7 @@
 	const controls = {
 		back: document.getElementById('back'),
 		menu: document.getElementById('menu-toggle'),
+		menuIcon: document.getElementById('menu-toggle-icon'),
 		close: document.getElementById('close')
 	};
 	const shellState = {
@@ -36,6 +38,7 @@
 	};
 	const shellAssets = {
 		icons: Object.create(null),
+		titleMenuIcon: null,
 		verifiedBadge: null,
 		menuPalette: null
 	};
@@ -223,6 +226,96 @@
 			+ String(opacity) + ')';
 	}
 
+	function titleControlColorsForBackground(value) {
+		if (!/^#[0-9a-f]{6}$/i.test(value || '')) {
+			return null;
+		}
+		const red = parseInt(value.slice(1, 3), 16) / 255;
+		const green = parseInt(value.slice(3, 5), 16) / 255;
+		const blue = parseInt(value.slice(5, 7), 16) / 255;
+		const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+		const contrast = 2.5;
+		const textLuminance = (luminance > 0.5) ? 0 : 1;
+		const adaptiveOpacity = (luminance - textLuminance + contrast) / contrast;
+		const opacity = Math.max(0.5, Math.min(0.64, adaptiveOpacity));
+		const channel = (luminance > 0.5) ? 0 : 255;
+		return {
+			fg: 'rgba('
+				+ String(channel) + ', '
+				+ String(channel) + ', '
+				+ String(channel) + ', '
+				+ String(opacity) + ')',
+			ripple: 'rgba('
+				+ String(channel) + ', '
+				+ String(channel) + ', '
+				+ String(channel) + ', '
+				+ String(opacity * 0.1) + ')'
+		};
+	}
+
+	function hexByte(value) {
+		const text = Math.max(
+			0,
+			Math.min(255, Math.round(value))).toString(16);
+		return (text.length < 2 ? '0' : '') + text;
+	}
+
+	function buttonRippleForBackground(value) {
+		if (!/^#[0-9a-f]{6}$/i.test(value || '')) {
+			return null;
+		}
+		const red = parseInt(value.slice(1, 3), 16);
+		const green = parseInt(value.slice(3, 5), 16);
+		const blue = parseInt(value.slice(5, 7), 16);
+		const maximum = Math.max(red, green, blue);
+		const minimum = Math.min(red, green, blue);
+		const delta = maximum - minimum;
+		let hue = 0;
+		if (delta !== 0 && maximum === red) {
+			hue = 60 * (((green - blue) / delta) % 6);
+		} else if (delta !== 0 && maximum === green) {
+			hue = 60 * ((blue - red) / delta + 2);
+		} else if (delta !== 0) {
+			hue = 60 * ((red - green) / delta + 4);
+		}
+		if (hue < 0) {
+			hue += 360;
+		}
+		const saturation = maximum === 0 ? 0 : delta / maximum;
+		const nextValue = Math.max(
+			0,
+			Math.min(255, maximum + (maximum > 128 ? -32 : 32)));
+		const chroma = nextValue * saturation;
+		const x = chroma * (1 - Math.abs((hue / 60) % 2 - 1));
+		const m = nextValue - chroma;
+		let nextRed = 0;
+		let nextGreen = 0;
+		let nextBlue = 0;
+		if (hue < 60) {
+			nextRed = chroma;
+			nextGreen = x;
+		} else if (hue < 120) {
+			nextRed = x;
+			nextGreen = chroma;
+		} else if (hue < 180) {
+			nextGreen = chroma;
+			nextBlue = x;
+		} else if (hue < 240) {
+			nextGreen = x;
+			nextBlue = chroma;
+		} else if (hue < 300) {
+			nextRed = x;
+			nextBlue = chroma;
+		} else {
+			nextRed = chroma;
+			nextBlue = x;
+		}
+		return '#'
+			+ hexByte(nextRed + m)
+			+ hexByte(nextGreen + m)
+			+ hexByte(nextBlue + m);
+	}
+
 	function applyColors(data) {
 		const next = (data && data.colors) ? data.colors : data;
 		if (!next || typeof next !== 'object') {
@@ -241,6 +334,13 @@
 			if (titleFg) {
 				root.style.setProperty('--title-fg', titleFg);
 			}
+			const titleControl = titleControlColorsForBackground(next.titleBg);
+			if (titleControl) {
+				root.style.setProperty('--title-control-fg', titleControl.fg);
+				root.style.setProperty(
+					'--title-control-ripple',
+					titleControl.ripple);
+			}
 		}
 		if (next.bottomBg) {
 			root.style.setProperty('--bottom-bg', next.bottomBg);
@@ -253,6 +353,9 @@
 		}
 		if (data.icons && typeof data.icons === 'object') {
 			shellAssets.icons = data.icons;
+		}
+		if (data.titleMenuIcon && typeof data.titleMenuIcon === 'object') {
+			shellAssets.titleMenuIcon = data.titleMenuIcon;
 		}
 		if (data.verifiedBadge && typeof data.verifiedBadge === 'object') {
 			shellAssets.verifiedBadge = data.verifiedBadge;
@@ -270,6 +373,9 @@
 					'--menu-hover-bg',
 					data.menuPalette.hoverBg);
 			}
+			if (data.menuPalette.ripple) {
+				root.style.setProperty('--menu-ripple', data.menuPalette.ripple);
+			}
 			if (data.menuPalette.separator) {
 				root.style.setProperty(
 					'--menu-separator',
@@ -279,6 +385,20 @@
 				root.style.setProperty(
 					'--menu-attention',
 					data.menuPalette.attention);
+			}
+		}
+		if (shellAssets.titleMenuIcon && shellAssets.titleMenuIcon.url) {
+			controls.menuIcon.style.webkitMaskImage = 'url('
+				+ shellAssets.titleMenuIcon.url + ')';
+			controls.menuIcon.style.maskImage = 'url('
+				+ shellAssets.titleMenuIcon.url + ')';
+			if (shellAssets.titleMenuIcon.width) {
+				controls.menuIcon.style.width
+					= String(shellAssets.titleMenuIcon.width) + 'px';
+			}
+			if (shellAssets.titleMenuIcon.height) {
+				controls.menuIcon.style.height
+					= String(shellAssets.titleMenuIcon.height) + 'px';
 			}
 		}
 		if (shellAssets.verifiedBadge && shellAssets.verifiedBadge.url) {
@@ -405,8 +525,13 @@
 			button.type = 'button';
 			button.className = 'shell-button';
 			button.disabled = !state.active;
-			button.style.background = state.color || '#40a7e3';
+			const buttonColor = state.color || '#40a7e3';
+			button.style.background = buttonColor;
 			button.style.color = state.textColor || '#ffffff';
+			const rippleColor = buttonRippleForBackground(buttonColor);
+			if (rippleColor) {
+				button.style.setProperty('--button-ripple', rippleColor);
+			}
 
 			const icon = document.createElement('span');
 			icon.className = 'button-icon';
@@ -437,6 +562,7 @@
 					postToFrame(state.name + '_button_pressed', {});
 				}
 			});
+			setupRipple(button);
 			buttons.appendChild(button);
 		}
 		updateFooter();
@@ -455,6 +581,7 @@
 			+ (clickable ? '' : ' disabled');
 		if (clickable) {
 			node.type = 'button';
+			setupRipple(node);
 			node.addEventListener('click', function() {
 				if (!shellState.blocked) {
 					invoke('tdesktop_shell_menu_action', { id: item.id });
@@ -547,6 +674,9 @@
 			shellState.menuOpen
 				&& shellState.menuVisible
 				&& !!shellState.menuItems.length);
+		menuBackdrop.classList.toggle(
+			'visible',
+			menu.classList.contains('visible'));
 		controls.menu.classList.toggle(
 			'active',
 			menu.classList.contains('visible'));
@@ -583,6 +713,53 @@
 		return data && typeof data === 'object' ? data : null;
 	}
 
+	function addRipple(button, x, y) {
+		if (!button || button.disabled) {
+			return;
+		}
+		const rect = button.getBoundingClientRect();
+		const ripple = document.createElement('span');
+		ripple.className = 'ripple';
+		const inner = document.createElement('span');
+		inner.className = 'inner';
+		const size = 2 * Math.hypot(
+			Math.max(x, rect.width - x),
+			Math.max(y, rect.height - y));
+		inner.style.width = String(size) + 'px';
+		inner.style.height = String(size) + 'px';
+		inner.style.left = String(x - size / 2) + 'px';
+		inner.style.top = String(y - size / 2) + 'px';
+		ripple.appendChild(inner);
+		button.appendChild(ripple);
+	}
+
+	function stopRipples(button) {
+		const ripples = Array.prototype.slice.call(
+			button.querySelectorAll('.ripple:not(.hiding)'));
+		for (const ripple of ripples) {
+			ripple.classList.add('hiding');
+			window.setTimeout(function() {
+				ripple.remove();
+			}, 200);
+		}
+	}
+
+	function setupRipple(button) {
+		button.addEventListener('mousedown', function(event) {
+			if (event.button !== 0) {
+				return;
+			}
+			const rect = button.getBoundingClientRect();
+			addRipple(button, event.clientX - rect.left, event.clientY - rect.top);
+		});
+		button.addEventListener('mouseup', function() {
+			stopRipples(button);
+		});
+		button.addEventListener('mouseleave', function() {
+			stopRipples(button);
+		});
+	}
+
 	window.addEventListener('message', function(event) {
 		if (!iframe || event.source !== iframe.contentWindow) {
 			return;
@@ -603,12 +780,16 @@
 		invoke(message.eventType, message.eventData || {});
 	});
 
+	menuBackdrop.addEventListener('mousedown', closeMenu);
+
 	document.addEventListener('mousedown', function(event) {
 		if (!shellState.menuOpen) {
 			return;
 		}
 		const target = event.target;
-		if (menu.contains(target) || controls.menu.contains(target)) {
+		if (menu.contains(target)
+			|| controls.menu.contains(target)
+			|| menuBackdrop.contains(target)) {
 			return;
 		}
 		closeMenu();
@@ -635,6 +816,9 @@
 		postToFrame('back_button_pressed', {});
 	});
 	controls.menu.addEventListener('click', toggleMenu);
+	setupRipple(controls.close);
+	setupRipple(controls.back);
+	setupRipple(controls.menu);
 	header.addEventListener('selectstart', function(event) {
 		event.preventDefault();
 	});

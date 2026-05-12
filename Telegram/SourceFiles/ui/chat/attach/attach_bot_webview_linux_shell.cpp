@@ -190,6 +190,7 @@ QJsonObject MenuPalette() {
 		{ u"bg"_q, st::windowBg->c.name(QColor::HexRgb) },
 		{ u"fg"_q, st::windowFg->c.name(QColor::HexRgb) },
 		{ u"hoverBg"_q, st::windowBgOver->c.name(QColor::HexRgb) },
+		{ u"ripple"_q, st::windowBgRipple->c.name(QColor::HexRgb) },
 		{ u"separator"_q, st::menuSeparatorFg->c.name(QColor::HexRgb) },
 		{ u"attention"_q,
 			st::menuIconAttentionColor->c.name(QColor::HexRgb) },
