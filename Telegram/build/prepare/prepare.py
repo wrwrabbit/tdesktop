@@ -1558,31 +1558,6 @@ win:
 
     jom -j%NUMBER_OF_PROCESSORS%
     jom -j%NUMBER_OF_PROCESSORS% install
-mac:
-    find ../../patches/qtbase_$QT -type f -print0 | sort -z | xargs -0 git -C qtbase apply
-
-    CONFIGURATIONS=-debug
-release:
-    CONFIGURATIONS=-debug-and-release
-mac:
-    ./configure -prefix "$USED_PREFIX/Qt-$QT" \
-        $CONFIGURATIONS \
-        -force-debug-info \
-        -opensource \
-        -confirm-license \
-        -static \
-        -opengl desktop \
-        -no-openssl \
-        -securetransport \
-        -I "$USED_PREFIX/include" \
-        LIBJPEG_LIBS="$USED_PREFIX/lib/libjpeg.a" \
-        ZLIB_LIBS="$USED_PREFIX/lib/libz.a" \
-        -nomake examples \
-        -nomake tests \
-        -platform macx-clang
-
-    make $MAKE_THREADS_CNT
-    make install
 """)
 else: # qt > '6'
     branch = 'v$QT' + ('-lts-lgpl' if qt.startswith('6.2.') else '')
