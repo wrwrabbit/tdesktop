@@ -395,6 +395,9 @@ private:
 
 	QPoint mapPointToItem(QPoint p, const Element *view) const;
 	QPoint mapPointToItem(QPoint p, const HistoryItem *item) const;
+	[[nodiscard]] not_null<HistoryItem*> lookupItemByPoint(
+		QPoint point,
+		not_null<Element*> view) const;
 	[[nodiscard]] HistoryView::SelectedQuote selectedQuote(
 		not_null<HistoryItem*> item) const;
 

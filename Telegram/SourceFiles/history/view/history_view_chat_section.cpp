@@ -1065,23 +1065,33 @@ void ChatWidget::setupSwipeReplyAndBack() {
 			|| view->data()->isService()) {
 			return result;
 		}
-		if (!can(view->data())) {
+		const auto item = _inner->lookupItemByPoint(
+			data.cursorPosition,
+			view);
+		if (!can(item)) {
 			return result;
 		}
 
 		_inner->hideElementOverlay();
-		result.msgBareId = view->data()->fullId().msg.bare;
-		result.callback = [=, itemId = view->data()->fullId()] {
-			const auto still = show->session().data().message(itemId);
-			const auto view = _inner->viewByPosition(still->position());
-			const auto selected = view
+		const auto viewItemId = view->data()->fullId();
+		const auto itemId = item->fullId();
+		result.msgBareId = viewItemId.msg.bare;
+		result.callback = [=] {
+			const auto still = show->session().data().message(viewItemId);
+			const auto view = still
+				? _inner->viewByPosition(still->position())
+				: nullptr;
+			const auto selected = (still && view)
 				? view->selectedQuote(_inner->getSelectedTextRange(still))
 				: SelectedQuote();
-			const auto replyToItemId = (selected.item
+			const auto exact = selected.item
 				? selected.item
-				: still)->fullId();
+				: show->session().data().message(itemId);
+			if (!exact) {
+				return;
+			}
 			_inner->replyToMessageRequestNotify({
-				.messageId = replyToItemId,
+				.messageId = exact->fullId(),
 				.quote = selected.highlight.quote,
 				.quoteOffset = selected.highlight.quoteOffset,
 				.todoItemId = selected.highlight.todoItemId,

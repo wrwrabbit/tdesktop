@@ -1781,6 +1781,13 @@ Element *ListWidget::lookupItemByY(int y) const {
 	return strictFindItemByY(y);
 }
 
+not_null<HistoryItem*> ListWidget::lookupItemByPoint(
+		QPoint point,
+		not_null<Element*> view) const {
+	point -= QPoint(SelectionViewOffset(this, view), 0);
+	return LookupItemByPoint(view, mapPointToItem(point, view));
+}
+
 auto ListWidget::findViewForPinnedTracking(int top) const
 -> std::pair<Element*, int> {
 	const auto findScrollTopItem = [&](int top)
