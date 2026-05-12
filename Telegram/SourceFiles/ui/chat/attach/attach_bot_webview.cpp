@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/ripple_animation.h"
 #include "ui/layers/box_content.h"
 #include "ui/style/style_core_palette.h"
+#include "ui/text/format_values.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/separate_panel.h"
 #include "ui/widgets/buttons.h"
@@ -33,10 +34,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/options.h"
 #include "base/qt_signal_producer.h"
 #include "styles/style_chat.h"
+#include "styles/style_info.h"
 #include "styles/style_payments.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 
+#include <QtCore/QBuffer>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonArray>
@@ -45,6 +48,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QWindow>
 #include <QtGui/QScreen>
 #include <QtGui/qpa/qplatformscreen.h>
+
+#include <algorithm>
 
 namespace Ui::BotWebView {
 
@@ -57,6 +62,7 @@ constexpr auto kProgressDuration = crl::time(200);
 constexpr auto kProgressOpacity = 0.3;
 constexpr auto kLightnessThreshold = 128;
 constexpr auto kLightnessDelta = 32;
+constexpr auto kExternalShellButtonIconSize = 20;
 
 base::options::toggle OptionLinuxExternalBotWebApps({
 	.id = kOptionLinuxExternalBotWebApps,
@@ -66,14 +72,6 @@ base::options::toggle OptionLinuxExternalBotWebApps({
 	.scope = base::options::linux,
 	.restartRequired = true,
 });
-
-struct ButtonArgs {
-	bool isActive = false;
-	bool isVisible = false;
-	bool isProgressVisible = false;
-	uint64 iconCustomEmojiId = 0;
-	QString text;
-};
 
 [[nodiscard]] RectPart ParsePosition(const QString &position) {
 	if (position == u"left"_q) {
@@ -124,59 +122,779 @@ struct ButtonArgs {
 		: QJsonValue();
 }
 
+struct ExternalShellColorState {
+	bool titleUsesTheme = true;
+	bool bodyUsesTheme = true;
+	bool bottomUsesTheme = true;
+	std::optional<QColor> title;
+	std::optional<QColor> body;
+	std::optional<QColor> bottom;
+};
+
+[[nodiscard]] auto &ExternalShellColorStates() {
+	static auto result
+		= std::vector<std::pair<const Panel*, ExternalShellColorState>>();
+	return result;
+}
+
+[[nodiscard]] ExternalShellColorState &ExternalShellColorStateFor(
+		const Panel *panel) {
+	auto &states = ExternalShellColorStates();
+	const auto i = std::find_if(begin(states), end(states), [=](
+			const std::pair<const Panel*, ExternalShellColorState> &entry) {
+		return (entry.first == panel);
+	});
+	if (i != end(states)) {
+		return i->second;
+	}
+	states.push_back({ panel, {} });
+	return states.back().second;
+}
+
+void ForgetExternalShellColorState(const Panel *panel) {
+	auto &states = ExternalShellColorStates();
+	const auto i = std::find_if(begin(states), end(states), [=](
+			const std::pair<const Panel*, ExternalShellColorState> &entry) {
+		return (entry.first == panel);
+	});
+	if (i != end(states)) {
+		states.erase(i);
+	}
+}
+
+void SetExternalShellTitleColor(
+		const Panel *panel,
+		std::optional<QColor> color) {
+	auto &state = ExternalShellColorStateFor(panel);
+	state.titleUsesTheme = !color.has_value();
+	state.title = std::move(color);
+}
+
+void SetExternalShellBodyColor(
+		const Panel *panel,
+		std::optional<QColor> color) {
+	auto &state = ExternalShellColorStateFor(panel);
+	state.bodyUsesTheme = !color.has_value();
+	state.body = std::move(color);
+}
+
+void SetExternalShellBottomColor(
+		const Panel *panel,
+		std::optional<QColor> color) {
+	auto &state = ExternalShellColorStateFor(panel);
+	state.bottomUsesTheme = !color.has_value();
+	state.bottom = std::move(color);
+}
+
+[[nodiscard]] QColor ExternalShellBodyColor(
+		const Panel *panel,
+		const Webview::ThemeParams &params) {
+	const auto &state = ExternalShellColorStateFor(panel);
+	return state.bodyUsesTheme
+		? params.bodyBg
+		: state.body.value_or(params.bodyBg);
+}
+
+[[nodiscard]] QColor ExternalShellTitleColor(
+		const Panel *panel,
+		const Webview::ThemeParams &params) {
+	const auto &state = ExternalShellColorStateFor(panel);
+	return state.titleUsesTheme
+		? params.titleBg
+		: state.title.value_or(params.titleBg);
+}
+
+[[nodiscard]] QColor ExternalShellBottomBarColor(
+		const Panel *panel,
+		const Webview::ThemeParams &params) {
+	const auto &state = ExternalShellColorStateFor(panel);
+	const auto body = ExternalShellBodyColor(panel, params);
+	return state.bottomUsesTheme
+		? body
+		: state.bottom.value_or(body);
+}
+
+[[nodiscard]] QJsonObject ExternalShellColorPayload(
+		const Panel *panel,
+		const Webview::ThemeParams &params) {
+	return {
+		{ u"bodyBg"_q, ColorValue(ExternalShellBodyColor(panel, params)) },
+		{ u"titleBg"_q, ColorValue(ExternalShellTitleColor(panel, params)) },
+		{ u"bottomBg"_q, ColorValue(ExternalShellBottomBarColor(panel, params)) },
+	};
+}
+
+[[nodiscard]] QJsonObject ExternalShellMetrics() {
+	const auto &shellPadding = st::botWebViewShellPadding;
+	const auto &titlePadding = st::botWebViewShellTitlePadding;
+	const auto &menuButtonSize = st::botWebViewShellMenuButtonSize;
+	return {
+		{ u"shellRadius"_q, st::botWebViewShellRadius },
+		{ u"shellPaddingTop"_q, shellPadding.top() },
+		{ u"shellPaddingRight"_q, shellPadding.right() },
+		{ u"shellPaddingBottom"_q, shellPadding.bottom() },
+		{ u"shellPaddingLeft"_q, shellPadding.left() },
+		{ u"headerHeight"_q, st::botWebViewShellHeaderHeight },
+		{ u"titlePaddingTop"_q, titlePadding.top() },
+		{ u"titlePaddingRight"_q, titlePadding.right() },
+		{ u"titlePaddingBottom"_q, titlePadding.bottom() },
+		{ u"titlePaddingLeft"_q, titlePadding.left() },
+		{ u"badgeSkip"_q, st::botWebViewShellBadgeSkip },
+		{ u"frameRadius"_q, st::botWebViewShellFrameRadius },
+		{ u"controlWidth"_q, menuButtonSize.width() },
+		{ u"controlHeight"_q, menuButtonSize.height() },
+		{ u"buttonHeight"_q, st::botWebViewBottomButton.height },
+		{ u"buttonGapX"_q, st::botWebViewBottomSkip.x() },
+		{ u"buttonGapY"_q, st::botWebViewBottomSkip.y() },
+		{ u"disclosureSkip"_q, st::botWebViewShellDisclosureSkip },
+		{ u"footerButtonSkip"_q, st::botWebViewShellFooterButtonSkip },
+	};
+}
+
+enum class SharedPanelMenuAction {
+	None,
+	Settings,
+	OpenBot,
+	Reload,
+	ShareGame,
+	Terms,
+	Privacy,
+	RemoveFromMenu,
+	RemoveFromMainMenu,
+	DownloadOpen,
+	DownloadRetry,
+	DownloadCancel,
+};
+
+struct SharedPanelMenuItem {
+	QString id;
+	QString text;
+	QString subtitle;
+	QString actionLabel;
+	QString iconKey;
+	const style::icon *icon = nullptr;
+	bool isSeparator = false;
+	bool isAttention = false;
+	bool isEnabled = true;
+	std::vector<SharedPanelMenuItem> children;
+};
+
+struct SharedPanelMenuBuildArgs {
+	const std::vector<DownloadsEntry> *downloads = nullptr;
+	bool hasSettings = false;
+	MenuButtons buttons = {};
+};
+
+struct SharedPanelMenuDispatchArgs {
+	Fn<void()> settings;
+	Fn<void()> reload;
+	Fn<void()> terms;
+	Fn<void()> privacy;
+	Fn<void(MenuButton)> menuButton;
+	Fn<void(uint32, DownloadsAction)> download;
+};
+
+[[nodiscard]] QString SharedPanelMenuActionId(SharedPanelMenuAction action) {
+	switch (action) {
+	case SharedPanelMenuAction::Settings:
+		return u"settings"_q;
+	case SharedPanelMenuAction::OpenBot:
+		return u"open_bot"_q;
+	case SharedPanelMenuAction::Reload:
+		return u"reload"_q;
+	case SharedPanelMenuAction::ShareGame:
+		return u"share_game"_q;
+	case SharedPanelMenuAction::Terms:
+		return u"terms"_q;
+	case SharedPanelMenuAction::Privacy:
+		return u"privacy"_q;
+	case SharedPanelMenuAction::RemoveFromMenu:
+		return u"remove_from_menu"_q;
+	case SharedPanelMenuAction::RemoveFromMainMenu:
+		return u"remove_from_main_menu"_q;
+	case SharedPanelMenuAction::None:
+	case SharedPanelMenuAction::DownloadOpen:
+	case SharedPanelMenuAction::DownloadRetry:
+	case SharedPanelMenuAction::DownloadCancel:
+		break;
+	}
+	return QString();
+}
+
+[[nodiscard]] QString DownloadPanelMenuActionId(
+		uint32 id,
+		DownloadsAction action) {
+	auto type = QString();
+	switch (action) {
+	case DownloadsAction::Open:
+		type = u"open"_q;
+		break;
+	case DownloadsAction::Retry:
+		type = u"retry"_q;
+		break;
+	case DownloadsAction::Cancel:
+		type = u"cancel"_q;
+		break;
+	}
+	return u"download:%1:%2"_q.arg(id).arg(type);
+}
+
+[[nodiscard]] SharedPanelMenuAction ParseSharedPanelMenuActionType(
+		const QString &type) {
+	if (type == u"open"_q) {
+		return SharedPanelMenuAction::DownloadOpen;
+	} else if (type == u"retry"_q) {
+		return SharedPanelMenuAction::DownloadRetry;
+	} else if (type == u"cancel"_q) {
+		return SharedPanelMenuAction::DownloadCancel;
+	}
+	return SharedPanelMenuAction::None;
+}
+
+struct ParsedSharedPanelMenuAction {
+	SharedPanelMenuAction action = SharedPanelMenuAction::None;
+	uint32 downloadId = 0;
+};
+
+[[nodiscard]] ParsedSharedPanelMenuAction ParseSharedPanelMenuAction(
+		const QString &id) {
+	if (id == u"settings"_q) {
+		return { SharedPanelMenuAction::Settings };
+	} else if (id == u"open_bot"_q) {
+		return { SharedPanelMenuAction::OpenBot };
+	} else if (id == u"reload"_q) {
+		return { SharedPanelMenuAction::Reload };
+	} else if (id == u"share_game"_q) {
+		return { SharedPanelMenuAction::ShareGame };
+	} else if (id == u"terms"_q) {
+		return { SharedPanelMenuAction::Terms };
+	} else if (id == u"privacy"_q) {
+		return { SharedPanelMenuAction::Privacy };
+	} else if (id == u"remove_from_menu"_q) {
+		return { SharedPanelMenuAction::RemoveFromMenu };
+	} else if (id == u"remove_from_main_menu"_q) {
+		return { SharedPanelMenuAction::RemoveFromMainMenu };
+	} else if (id.startsWith(u"download:"_q)) {
+		const auto parts = id.split(u':');
+		const auto downloadId = (parts.size() == 3)
+			? parts[1].toUInt()
+			: 0;
+		return {
+			.action = (parts.size() == 3)
+				? ParseSharedPanelMenuActionType(parts[2])
+				: SharedPanelMenuAction::None,
+			.downloadId = downloadId,
+		};
+	}
+	return {};
+}
+
+void DispatchSharedPanelMenuAction(
+		const QString &id,
+		const SharedPanelMenuDispatchArgs &dispatch) {
+	const auto parsed = ParseSharedPanelMenuAction(id);
+	switch (parsed.action) {
+	case SharedPanelMenuAction::Settings:
+		if (dispatch.settings) {
+			dispatch.settings();
+		}
+		break;
+	case SharedPanelMenuAction::OpenBot:
+		if (dispatch.menuButton) {
+			dispatch.menuButton(MenuButton::OpenBot);
+		}
+		break;
+	case SharedPanelMenuAction::Reload:
+		if (dispatch.reload) {
+			dispatch.reload();
+		}
+		break;
+	case SharedPanelMenuAction::ShareGame:
+		if (dispatch.menuButton) {
+			dispatch.menuButton(MenuButton::ShareGame);
+		}
+		break;
+	case SharedPanelMenuAction::Terms:
+		if (dispatch.terms) {
+			dispatch.terms();
+		}
+		break;
+	case SharedPanelMenuAction::Privacy:
+		if (dispatch.privacy) {
+			dispatch.privacy();
+		}
+		break;
+	case SharedPanelMenuAction::RemoveFromMenu:
+		if (dispatch.menuButton) {
+			dispatch.menuButton(MenuButton::RemoveFromMenu);
+		}
+		break;
+	case SharedPanelMenuAction::RemoveFromMainMenu:
+		if (dispatch.menuButton) {
+			dispatch.menuButton(MenuButton::RemoveFromMainMenu);
+		}
+		break;
+	case SharedPanelMenuAction::DownloadOpen:
+		if (dispatch.download) {
+			dispatch.download(parsed.downloadId, DownloadsAction::Open);
+		}
+		break;
+	case SharedPanelMenuAction::DownloadRetry:
+		if (dispatch.download) {
+			dispatch.download(parsed.downloadId, DownloadsAction::Retry);
+		}
+		break;
+	case SharedPanelMenuAction::DownloadCancel:
+		if (dispatch.download) {
+			dispatch.download(parsed.downloadId, DownloadsAction::Cancel);
+		}
+		break;
+	case SharedPanelMenuAction::None:
+		break;
+	}
+}
+
+[[nodiscard]] SharedPanelMenuItem BuildDownloadPanelMenuItem(
+		const DownloadsEntry &entry) {
+	auto item = SharedPanelMenuItem();
+	item.text = entry.path.section(u'/', -1);
+	if (item.text.isEmpty()) {
+		item.text = entry.path;
+	}
+	if (item.text.isEmpty()) {
+		item.text = entry.url;
+	}
+	if (entry.total && (entry.total == entry.ready)) {
+		item.id = DownloadPanelMenuActionId(entry.id, DownloadsAction::Open);
+		item.subtitle = FormatSizeText(entry.total);
+	} else if (entry.loading) {
+		item.id = DownloadPanelMenuActionId(entry.id, DownloadsAction::Cancel);
+		item.subtitle = entry.total
+			? FormatProgressText(entry.ready, entry.total)
+			: tr::lng_bot_download_starting(tr::now);
+		item.actionLabel = tr::lng_cancel(tr::now);
+	} else {
+		item.id = DownloadPanelMenuActionId(entry.id, DownloadsAction::Retry);
+		item.subtitle = tr::lng_bot_download_failed(
+			tr::now,
+			lt_retry,
+			tr::lng_bot_download_retry(tr::now));
+		item.actionLabel = tr::lng_bot_download_retry(tr::now);
+	}
+	item.isEnabled = !item.id.isEmpty();
+	return item;
+}
+
+[[nodiscard]] std::vector<SharedPanelMenuItem> BuildSharedPanelMenuItems(
+		const SharedPanelMenuBuildArgs &args) {
+	auto result = std::vector<SharedPanelMenuItem>();
+	if (args.downloads && !args.downloads->empty()) {
+		auto children = std::vector<SharedPanelMenuItem>();
+		children.reserve(args.downloads->size());
+		for (const auto &entry : *args.downloads | ranges::views::reverse) {
+			children.push_back(BuildDownloadPanelMenuItem(entry));
+		}
+		result.push_back({
+			.id = u"downloads"_q,
+			.text = tr::lng_downloads_section(tr::now),
+			.iconKey = u"downloads"_q,
+			.icon = &st::menuIconDownload,
+			.children = std::move(children),
+		});
+		result.push_back({
+			.isSeparator = true,
+		});
+	}
+	if (args.hasSettings) {
+		result.push_back({
+			.id = SharedPanelMenuActionId(SharedPanelMenuAction::Settings),
+			.text = tr::lng_bot_settings(tr::now),
+			.iconKey = u"settings"_q,
+			.icon = &st::menuIconSettings,
+		});
+	}
+	if (args.buttons & MenuButton::OpenBot) {
+		result.push_back({
+			.id = SharedPanelMenuActionId(SharedPanelMenuAction::OpenBot),
+			.text = tr::lng_bot_open(tr::now),
+			.iconKey = u"open_bot"_q,
+			.icon = &st::menuIconLeave,
+		});
+	}
+	result.push_back({
+		.id = SharedPanelMenuActionId(SharedPanelMenuAction::Reload),
+		.text = tr::lng_bot_reload_page(tr::now),
+		.iconKey = u"reload"_q,
+		.icon = &st::menuIconRestore,
+	});
+	if (args.buttons & MenuButton::ShareGame) {
+		result.push_back({
+			.id = SharedPanelMenuActionId(SharedPanelMenuAction::ShareGame),
+			.text = tr::lng_iv_share(tr::now),
+			.iconKey = u"share_game"_q,
+			.icon = &st::menuIconShare,
+		});
+	} else {
+		result.push_back({
+			.id = SharedPanelMenuActionId(SharedPanelMenuAction::Terms),
+			.text = tr::lng_bot_terms(tr::now),
+			.iconKey = u"terms"_q,
+			.icon = &st::menuIconGroupLog,
+		});
+		result.push_back({
+			.id = SharedPanelMenuActionId(SharedPanelMenuAction::Privacy),
+			.text = tr::lng_bot_privacy(tr::now),
+			.iconKey = u"privacy"_q,
+			.icon = &st::menuIconAntispam,
+		});
+	}
+	if (args.buttons & MenuButton::RemoveFromMainMenu) {
+		result.push_back({
+			.id = SharedPanelMenuActionId(
+				SharedPanelMenuAction::RemoveFromMainMenu),
+			.text = tr::lng_bot_remove_from_side_menu(tr::now),
+			.iconKey = u"remove"_q,
+			.icon = &st::menuIconDeleteAttention,
+			.isAttention = true,
+		});
+	} else if (args.buttons & MenuButton::RemoveFromMenu) {
+		result.push_back({
+			.id = SharedPanelMenuActionId(
+				SharedPanelMenuAction::RemoveFromMenu),
+			.text = tr::lng_bot_remove_from_menu(tr::now),
+			.iconKey = u"remove"_q,
+			.icon = &st::menuIconDeleteAttention,
+			.isAttention = true,
+		});
+	}
+	return result;
+}
+
+void FillNativeSharedPanelMenu(
+		const Ui::Menu::MenuCallback &callback,
+		const std::vector<SharedPanelMenuItem> &items,
+		Fn<rpl::producer<std::vector<DownloadsEntry>>()> makeDownloads,
+		const SharedPanelMenuDispatchArgs &dispatch) {
+	for (const auto &item : items) {
+		if (item.isSeparator) {
+			callback({
+				.separatorSt = &st::expandedMenuSeparator,
+				.isSeparator = true,
+			});
+		} else if (!item.children.empty()) {
+			callback(Ui::Menu::MenuCallback::Args{
+				.text = item.text,
+				.icon = item.icon,
+				.fillSubmenu = FillAttachBotDownloadsSubmenu(
+					makeDownloads(),
+					[download = dispatch.download](
+							uint32 id,
+							DownloadsAction type) {
+						if (download) {
+							download(id, type);
+						}
+					}),
+			});
+		} else {
+			callback(Ui::Menu::MenuCallback::Args{
+				.text = item.text,
+				.handler = [=] {
+					DispatchSharedPanelMenuAction(item.id, dispatch);
+				},
+				.icon = item.icon,
+				.isAttention = item.isAttention,
+			});
+		}
+	}
+}
+
+[[nodiscard]] QImage RasterizeStyleIcon(const style::icon &icon) {
+	const auto size = icon.size();
+	const auto ratio = style::DevicePixelRatio();
+	auto image = QImage(size * ratio, QImage::Format_ARGB32_Premultiplied);
+	image.setDevicePixelRatio(ratio);
+	image.fill(Qt::transparent);
+	auto painter = Painter(&image);
+	icon.paintInCenter(painter, QRect(QPoint(), size));
+	return image;
+}
+
+[[nodiscard]] QImage RasterizeVerifiedBadge() {
+	const auto size = st::infoVerifiedStar.size() + QSize(0, st::lineWidth);
+	const auto ratio = style::DevicePixelRatio();
+	auto image = QImage(size * ratio, QImage::Format_ARGB32_Premultiplied);
+	image.setDevicePixelRatio(ratio);
+	image.fill(Qt::transparent);
+	auto painter = Painter(&image);
+	const auto width = size.width();
+	st::infoVerifiedStar.paint(painter, st::lineWidth, 0, width);
+	st::infoPeerBadge.verifiedCheck.paint(painter, st::lineWidth, 0, width);
+	return image;
+}
+
+[[nodiscard]] QString PngDataUrl(const QImage &image) {
+	auto bytes = QByteArray();
+	auto buffer = QBuffer(&bytes);
+	buffer.open(QIODevice::WriteOnly);
+	image.save(&buffer, "PNG");
+	return u"data:image/png;base64,"_q + QString::fromLatin1(bytes.toBase64());
+}
+
+[[nodiscard]] QJsonObject SerializeRasterAsset(
+		const QImage &image,
+		QSize size,
+		QString alt = QString()) {
+	auto result = QJsonObject{
+		{ u"url"_q, PngDataUrl(image) },
+		{ u"width"_q, size.width() },
+		{ u"height"_q, size.height() },
+	};
+	if (!alt.isEmpty()) {
+		result.insert(u"alt"_q, alt);
+	}
+	return result;
+}
+
+[[nodiscard]] QJsonObject SerializeStyleIconAsset(const style::icon &icon) {
+	return SerializeRasterAsset(RasterizeStyleIcon(icon), icon.size());
+}
+
+[[nodiscard]] QJsonObject SerializeVerifiedBadgeAsset() {
+	const auto size = st::infoVerifiedStar.size() + QSize(0, st::lineWidth);
+	return SerializeRasterAsset(
+		RasterizeVerifiedBadge(),
+		size,
+		tr::lng_sr_verified_badge(tr::now));
+}
+
+void CollectSharedPanelMenuIcons(
+		const std::vector<SharedPanelMenuItem> &items,
+		QJsonObject &result) {
+	for (const auto &item : items) {
+		if (!item.iconKey.isEmpty()
+			&& item.icon
+			&& !result.contains(item.iconKey)) {
+			result.insert(item.iconKey, SerializeStyleIconAsset(*item.icon));
+		}
+		if (!item.children.empty()) {
+			CollectSharedPanelMenuIcons(item.children, result);
+		}
+	}
+}
+
+[[nodiscard]] QJsonObject SerializeSharedPanelMenuItem(
+		const SharedPanelMenuItem &item) {
+	if (item.isSeparator) {
+		return { { u"separator"_q, true } };
+	}
+	auto result = QJsonObject{
+		{ u"id"_q, item.id },
+		{ u"text"_q, item.text },
+		{ u"attention"_q, item.isAttention },
+		{ u"enabled"_q, item.isEnabled },
+	};
+	if (!item.subtitle.isEmpty()) {
+		result.insert(u"subtitle"_q, item.subtitle);
+	}
+	if (!item.actionLabel.isEmpty()) {
+		result.insert(u"actionLabel"_q, item.actionLabel);
+	}
+	if (!item.iconKey.isEmpty()) {
+		result.insert(u"icon"_q, item.iconKey);
+	}
+	if (!item.children.empty()) {
+		auto children = QJsonArray();
+		for (const auto &child : item.children) {
+			children.push_back(SerializeSharedPanelMenuItem(child));
+		}
+		result.insert(u"children"_q, children);
+	}
+	return result;
+}
+
+[[nodiscard]] QJsonArray SerializeSharedPanelMenu(
+		const std::vector<SharedPanelMenuItem> &items) {
+	auto result = QJsonArray();
+	for (const auto &item : items) {
+		result.push_back(SerializeSharedPanelMenuItem(item));
+	}
+	return result;
+}
+
 [[nodiscard]] QByteArray ExternalShellCss() {
 	return R"(
-html, body, #root {
+html,
+body {
 	width: 100%;
 	height: 100%;
 	margin: 0;
 	overflow: hidden;
+	background: transparent;
 }
 body {
 	font: 14px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-	background: var(--body-bg, #ffffff);
-	color: var(--fg, #000000);
+	color: var(--title-fg, #000000);
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+}
+button,
+input,
+textarea,
+select {
+	font: inherit;
+}
+* {
+	box-sizing: border-box;
 }
 #root {
-	display: grid;
-	grid-template-rows: auto minmax(0, 1fr) auto;
+	width: 100%;
+	height: 100%;
 	position: relative;
-}
-#header {
-	display: grid;
-	grid-template-columns: auto minmax(0, 1fr) auto auto auto;
-	align-items: center;
-	height: 48px;
-	background: var(--title-bg, #ffffff);
-	color: var(--title-fg, #000000);
-	border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-}
-#title {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	font-weight: 600;
-	padding: 0 10px;
-}
-.icon {
-	width: 44px;
-	height: 44px;
-	border: 0;
-	background: transparent;
-	color: inherit;
-	font: inherit;
-	font-size: 22px;
-	cursor: default;
-}
-.icon:hover {
-	background: rgba(127, 127, 127, 0.14);
+	--shell-radius: 14px;
+	--shell-pad-top: 12px;
+	--shell-pad-right: 12px;
+	--shell-pad-bottom: 12px;
+	--shell-pad-left: 12px;
+	--header-height: 48px;
+	--title-pad-top: 0px;
+	--title-pad-right: 10px;
+	--title-pad-bottom: 0px;
+	--title-pad-left: 10px;
+	--badge-skip: 4px;
+	--frame-radius: 12px;
+	--control-width: 44px;
+	--control-height: 44px;
+	--button-height: 40px;
+	--button-gap-x: 12px;
+	--button-gap-y: 8px;
+	--disclosure-skip: 12px;
+	--footer-button-skip: 10px;
+	--resize-handle-size: calc(var(--frame-radius) / 2);
+	--resize-corner-size: var(--frame-radius);
+	--footer-gap: var(--disclosure-skip);
+	--body-bg: #ffffff;
+	--title-bg: #ffffff;
+	--bottom-bg: #ffffff;
+	--body-fg: #000000;
+	--title-fg: #000000;
+	--footer-fg: rgba(0, 0, 0, 0.55);
 }
 .hidden {
 	display: none !important;
 }
-#frame-wrap {
-	min-height: 0;
+#scene {
+	position: absolute;
+	inset: 0;
+	padding: var(--shell-pad-top)
+		var(--shell-pad-right)
+		var(--shell-pad-bottom)
+		var(--shell-pad-left);
 }
+#shell {
+	position: relative;
+	width: 100%;
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	border-radius: var(--shell-radius);
+	background: var(--body-bg, #ffffff);
+	box-shadow:
+		0 18px 42px rgba(0, 0, 0, 0.32),
+		0 6px 18px rgba(0, 0, 0, 0.18);
+	overflow: hidden;
+}
+#header {
+	flex: 0 0 auto;
+	min-height: var(--header-height);
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+	align-items: center;
+	gap: 4px;
+	padding: 0 var(--shell-pad-right) 0 var(--shell-pad-left);
+	background: var(--title-bg, #ffffff);
+	color: var(--title-fg, #000000);
+	border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+.title-control {
+	width: var(--control-width);
+	height: var(--control-height);
+	border: 0;
+	border-radius: 999px;
+	background: transparent;
+	color: inherit;
+	cursor: default;
+	padding: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	transition: background-color 120ms linear, opacity 120ms linear;
+}
+.title-control svg {
+	width: 20px;
+	height: 20px;
+	stroke: currentColor;
+	stroke-width: 2;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	fill: none;
+}
+.title-control .fill-icon {
+	fill: currentColor;
+	stroke: none;
+}
+.title-control:hover:not(:disabled),
+.title-control.active {
+	background: rgba(127, 127, 127, 0.14);
+}
+.title-control:disabled {
+	opacity: 0.45;
+}
+#title-row {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+	padding: var(--title-pad-top)
+		var(--title-pad-right)
+		var(--title-pad-bottom)
+		var(--title-pad-left);
+}
+#title {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-weight: 600;
+}
+#badge {
+	margin-left: var(--badge-skip);
+	width: 16px;
+	height: 16px;
+	flex: 0 0 auto;
+	background-position: center;
+	background-repeat: no-repeat;
+	background-size: contain;
+}
+#body {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--footer-gap);
+	padding: var(--shell-pad-top)
+		var(--shell-pad-right)
+		var(--shell-pad-bottom)
+		var(--shell-pad-left);
+	background: var(--body-bg, #ffffff);
+}
+#frame-shell {
+	flex: 1 1 auto;
+	min-height: 0;
+	border-radius: var(--frame-radius);
+	overflow: hidden;
+	background: var(--body-bg, #ffffff);
+	box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+#frame-wrap,
 #frame-wrap iframe {
 	display: block;
 	width: 100%;
@@ -185,46 +903,281 @@ body {
 	background: var(--body-bg, #ffffff);
 }
 #footer {
-	background: var(--bottom-bg, var(--body-bg, #ffffff));
-	border-top: 1px solid rgba(0, 0, 0, 0.08);
+	display: none;
+	flex: 0 0 auto;
+	color: var(--footer-fg);
+}
+#footer.visible {
+	display: flex;
+	flex-direction: column;
+}
+#disclosure {
+	display: none;
+	text-align: center;
+	font-size: 12px;
+	line-height: 16px;
+	padding: 0 4px;
+	word-break: break-word;
+}
+#disclosure.visible {
+	display: block;
+}
+#buttons-wrap {
+	display: none;
+	background: var(--bottom-bg, var(--body-bg));
+	border-radius: var(--frame-radius);
+	overflow: hidden;
+}
+#buttons-wrap.visible {
+	display: block;
 }
 #buttons {
 	display: grid;
-	gap: 8px;
-	padding: 10px;
+	grid-template-columns: minmax(0, 1fr);
+	column-gap: var(--button-gap-x);
+	row-gap: var(--button-gap-y);
+}
+#buttons[data-layout="horizontal"] {
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 .shell-button {
-	height: 42px;
+	min-width: 0;
+	height: var(--button-height);
 	border: 0;
-	border-radius: 8px;
+	border-radius: calc(var(--frame-radius) - 2px);
 	padding: 0 14px;
-	font: inherit;
 	font-weight: 600;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	cursor: default;
+	transition: opacity 120ms linear;
 }
 .shell-button:disabled {
 	opacity: 0.55;
 }
-.shell-button.progress::after {
-	content: "";
-	display: inline-block;
+.button-icon {
+	display: none;
+	flex: 0 0 auto;
+	width: 20px;
+	height: 20px;
+	background-position: center;
+	background-repeat: no-repeat;
+	background-size: contain;
+}
+.button-icon.visible {
+	display: block;
+}
+.button-icon.pending {
+	border-radius: 999px;
+	background-color: currentColor;
+	opacity: 0.18;
+}
+.button-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.button-spinner {
+	display: none;
+	flex: 0 0 auto;
 	width: 14px;
 	height: 14px;
-	margin-left: 8px;
 	border: 2px solid currentColor;
 	border-right-color: transparent;
 	border-radius: 50%;
-	vertical-align: -2px;
 	animation: spin 0.8s linear infinite;
 }
-#blocker {
+.button-spinner.visible {
+	display: block;
+}
+#menu {
+	position: absolute;
+	top: calc(var(--shell-pad-top) + var(--header-height) - 4px);
+	right: var(--shell-pad-right);
 	display: none;
+	min-width: 220px;
+	max-width: calc(100% - var(--shell-pad-left) - var(--shell-pad-right));
+	background: var(--title-bg, #ffffff);
+	color: var(--title-fg, #000000);
+	border-radius: 12px;
+	box-shadow:
+		0 20px 38px rgba(0, 0, 0, 0.22),
+		0 4px 12px rgba(0, 0, 0, 0.12);
+	overflow: hidden;
+	z-index: 12;
+}
+#resize-handles {
 	position: absolute;
 	inset: 0;
-	background: rgba(0, 0, 0, 0.10);
-	z-index: 10;
+	z-index: 11;
+	pointer-events: none;
+}
+.resize-handle {
+	position: absolute;
+	pointer-events: auto;
+}
+.resize-handle[data-resize-edge="top"] {
+	top: 0;
+	left: var(--resize-corner-size);
+	right: var(--resize-corner-size);
+	height: var(--resize-handle-size);
+	cursor: ns-resize;
+}
+.resize-handle[data-resize-edge="bottom"] {
+	bottom: 0;
+	left: var(--resize-corner-size);
+	right: var(--resize-corner-size);
+	height: var(--resize-handle-size);
+	cursor: ns-resize;
+}
+.resize-handle[data-resize-edge="left"] {
+	top: var(--resize-corner-size);
+	bottom: var(--resize-corner-size);
+	left: 0;
+	width: var(--resize-handle-size);
+	cursor: ew-resize;
+}
+.resize-handle[data-resize-edge="right"] {
+	top: var(--resize-corner-size);
+	bottom: var(--resize-corner-size);
+	right: 0;
+	width: var(--resize-handle-size);
+	cursor: ew-resize;
+}
+.resize-handle[data-resize-edge="top-left"] {
+	top: 0;
+	left: 0;
+	width: var(--resize-corner-size);
+	height: var(--resize-corner-size);
+	cursor: nwse-resize;
+}
+.resize-handle[data-resize-edge="top-right"] {
+	top: 0;
+	right: 0;
+	width: var(--resize-corner-size);
+	height: var(--resize-corner-size);
+	cursor: nesw-resize;
+}
+.resize-handle[data-resize-edge="bottom-left"] {
+	bottom: 0;
+	left: 0;
+	width: var(--resize-corner-size);
+	height: var(--resize-corner-size);
+	cursor: nesw-resize;
+}
+.resize-handle[data-resize-edge="bottom-right"] {
+	right: 0;
+	bottom: 0;
+	width: var(--resize-corner-size);
+	height: var(--resize-corner-size);
+	cursor: nwse-resize;
+}
+#menu.visible {
+	display: block;
+}
+#menu-list {
+	padding: 6px 0;
+}
+.menu-separator {
+	height: 1px;
+	margin: 6px 0;
+	background: rgba(0, 0, 0, 0.08);
+}
+.menu-item,
+.menu-download {
+	width: 100%;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 10px 14px;
+	text-align: left;
+	cursor: default;
+	border-radius: 10px;
+	transition: background-color 120ms linear, opacity 120ms linear;
+}
+.menu-download {
+	padding-left: 0;
+	padding-right: 0;
+}
+.menu-item:hover,
+.menu-download:hover {
+	background: rgba(127, 127, 127, 0.14);
+}
+.menu-item.disabled,
+.menu-download.disabled {
+	opacity: 0.72;
+}
+.menu-item.attention,
+.menu-download.attention {
+	color: var(--menu-attention, #d05c5c);
+}
+.menu-group {
+	padding: 0 14px;
+}
+.menu-group-title {
+	padding-left: 0;
+	padding-right: 0;
+	cursor: default;
+}
+.menu-group-children {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 0 0 6px 32px;
+}
+.menu-item-icon {
+	flex: 0 0 20px;
+	width: 20px;
+	height: 20px;
+	background-position: center;
+	background-repeat: no-repeat;
+	background-size: contain;
+}
+.menu-item-copy {
+	min-width: 0;
+	flex: 1 1 auto;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+}
+.menu-item-title,
+.menu-item-subtitle,
+.menu-item-action {
+	display: block;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.menu-item-title {
+	font-size: 14px;
+	line-height: 18px;
+}
+.menu-item-subtitle,
+.menu-item-action {
+	font-size: 12px;
+	line-height: 16px;
+}
+.menu-item-subtitle {
+	opacity: 0.64;
+}
+.menu-item-action {
+	flex: 0 0 auto;
+	padding-left: 12px;
+	opacity: 0.8;
+}
+#blocker {
+	position: absolute;
+	inset: 0;
+	display: none;
+	background: rgba(0, 0, 0, 0.12);
+	z-index: 20;
 }
 #root.blocked #blocker {
 	display: block;
@@ -241,26 +1194,53 @@ body {
 	'use strict';
 
 	const root = document.getElementById('root');
+	const header = document.getElementById('header');
+	const frameShell = document.getElementById('frame-shell');
 	const frameWrap = document.getElementById('frame-wrap');
-	const title = document.getElementById('title');
+	const disclosure = document.getElementById('disclosure');
 	const footer = document.getElementById('footer');
-	const buttonsWrap = document.getElementById('buttons');
+	const buttonsWrap = document.getElementById('buttons-wrap');
+	const buttons = document.getElementById('buttons');
+	const badge = document.getElementById('badge');
+	const menu = document.getElementById('menu');
+	const menuList = document.getElementById('menu-list');
+	const resizeHandles = Array.prototype.slice.call(
+		document.querySelectorAll('.resize-handle'));
+	const title = document.getElementById('title');
 	const controls = {
 		back: document.getElementById('back'),
 		settings: document.getElementById('settings'),
-		reload: document.getElementById('reload'),
+		menu: document.getElementById('menu-toggle'),
 		close: document.getElementById('close')
-		};
-		let iframe = null;
-		let frameLoaded = false;
-		let frameUrl = 'about:blank';
-		let reloadSupported = false;
-		let reloadTimeout = null;
-		const pendingEvents = [];
-		const buttonState = {
+	};
+	const shellState = {
+		backVisible: false,
+		settingsVisible: false,
+		menuVisible: false,
+		badgeVisible: false,
+		bottomText: '',
+		isFullscreen: false,
+		blocked: false,
+		menuOpen: false,
+		menuItems: [],
+		buttons: {
 			main: null,
 			secondary: null
-		};
+		}
+	};
+	const shellAssets = {
+		icons: Object.create(null),
+		verifiedBadge: null,
+		attentionColor: ''
+	};
+	let iframe = null;
+	let frameLoaded = false;
+	let frameUrl = 'about:blank';
+	let reloadSupported = false;
+	let reloadTimeout = null;
+	let viewportScheduled = false;
+	let resizeObserver = null;
+	const pendingEvents = [];
 
 	function invoke(eventType, eventData) {
 		if (window.external && window.external.invoke) {
@@ -268,26 +1248,71 @@ body {
 				eventType,
 				JSON.stringify(eventData || {})
 			]));
-			}
 		}
+	}
 
-		function sendToFrame(eventType, eventData) {
-			iframe.contentWindow.postMessage(JSON.stringify({
+	function sendToFrame(eventType, eventData) {
+		iframe.contentWindow.postMessage(JSON.stringify({
+			eventType: eventType,
+			eventData: eventData || {}
+		}), '*');
+	}
+
+	function postToFrame(eventType, eventData) {
+		if (!iframe || !iframe.contentWindow || !frameLoaded) {
+			pendingEvents.push({
 				eventType: eventType,
 				eventData: eventData || {}
-			}), '*');
+			});
+			return;
 		}
+		sendToFrame(eventType, eventData);
+	}
 
-		function postToFrame(eventType, eventData) {
-			if (!iframe || !iframe.contentWindow || !frameLoaded) {
-				pendingEvents.push({
-					eventType: eventType,
-					eventData: eventData || {}
-				});
-				return;
+	function shellPointerPayload(event, extra) {
+		const payload = {
+			button: event.button,
+			x: event.clientX,
+			y: event.clientY,
+			rootX: event.screenX,
+			rootY: event.screenY,
+			timeStamp: Math.round(event.timeStamp || 0)
+		};
+		if (extra && typeof extra === 'object') {
+			for (const key in extra) {
+				payload[key] = extra[key];
 			}
-			sendToFrame(eventType, eventData);
 		}
+		return payload;
+	}
+
+	function beginShellControl(command, event, extra) {
+		if (shellState.blocked
+			|| shellState.isFullscreen
+			|| event.defaultPrevented
+			|| event.button !== 0) {
+			return;
+		}
+		closeMenu();
+		invoke(command, shellPointerPayload(event, extra));
+		event.preventDefault();
+	}
+
+	function beginShellMove(event) {
+		const target = event.target;
+		if (target
+			&& target.closest
+			&& target.closest('.title-control, #menu')) {
+			return;
+		}
+		beginShellControl('tdesktop_shell_begin_move', event);
+	}
+
+	function beginShellResize(edge, event) {
+		beginShellControl('tdesktop_shell_begin_resize', event, {
+			edge: edge
+		});
+	}
 
 	function flushPendingEvents() {
 		const pending = pendingEvents.splice(0);
@@ -300,7 +1325,9 @@ body {
 		if (!iframe) {
 			return;
 		}
-		const height = Math.max(0, Math.round(iframe.getBoundingClientRect().height));
+		const height = Math.max(
+			0,
+			Math.round(frameShell.getBoundingClientRect().height));
 		postToFrame('viewport_changed', {
 			height: height,
 			is_state_stable: true,
@@ -308,69 +1335,416 @@ body {
 		});
 	}
 
-		function colorForBackground(value) {
-			if (!/^#[0-9a-f]{6}$/i.test(value || '')) {
-				return null;
-			}
-			const red = parseInt(value.slice(1, 3), 16) / 255;
-			const green = parseInt(value.slice(3, 5), 16) / 255;
-			const blue = parseInt(value.slice(5, 7), 16) / 255;
-			const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-			return luminance > 0.5 ? '#000000' : '#ffffff';
+	function scheduleViewport() {
+		if (viewportScheduled) {
+			return;
 		}
+		viewportScheduled = true;
+		window.requestAnimationFrame(function() {
+			viewportScheduled = false;
+			sendViewportChanged();
+		});
+	}
 
-		function applyColors(data) {
-			if (data.bodyBg) {
-				root.style.setProperty('--body-bg', data.bodyBg);
-			}
-			if (data.titleBg) {
-				root.style.setProperty('--title-bg', data.titleBg);
-				const titleFg = colorForBackground(data.titleBg);
-				if (titleFg) {
-					root.style.setProperty('--title-fg', titleFg);
-				}
-			}
-			if (data.bottomBg) {
-				root.style.setProperty('--bottom-bg', data.bottomBg);
+	function setMetric(name, value) {
+		if (typeof value === 'number' && Number.isFinite(value)) {
+			root.style.setProperty(name, String(value) + 'px');
 		}
 	}
 
+	function applyMetrics(data) {
+		if (!data || typeof data !== 'object') {
+			return;
+		}
+		setMetric('--shell-radius', data.shellRadius);
+		setMetric('--shell-pad-top', data.shellPaddingTop);
+		setMetric('--shell-pad-right', data.shellPaddingRight);
+		setMetric('--shell-pad-bottom', data.shellPaddingBottom);
+		setMetric('--shell-pad-left', data.shellPaddingLeft);
+		setMetric('--header-height', data.headerHeight);
+		setMetric('--title-pad-top', data.titlePaddingTop);
+		setMetric('--title-pad-right', data.titlePaddingRight);
+		setMetric('--title-pad-bottom', data.titlePaddingBottom);
+		setMetric('--title-pad-left', data.titlePaddingLeft);
+		setMetric('--badge-skip', data.badgeSkip);
+		setMetric('--frame-radius', data.frameRadius);
+		setMetric('--control-width', data.controlWidth);
+		setMetric('--control-height', data.controlHeight);
+		setMetric('--button-height', data.buttonHeight);
+		setMetric('--button-gap-x', data.buttonGapX);
+		setMetric('--button-gap-y', data.buttonGapY);
+		setMetric('--disclosure-skip', data.disclosureSkip);
+		setMetric('--footer-button-skip', data.footerButtonSkip);
+	}
+
+	function colorForBackground(value) {
+		if (!/^#[0-9a-f]{6}$/i.test(value || '')) {
+			return null;
+		}
+		const red = parseInt(value.slice(1, 3), 16) / 255;
+		const green = parseInt(value.slice(3, 5), 16) / 255;
+		const blue = parseInt(value.slice(5, 7), 16) / 255;
+		const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+		return luminance > 0.5 ? '#000000' : '#ffffff';
+	}
+
+	function footerColorForBackground(value) {
+		if (!/^#[0-9a-f]{6}$/i.test(value || '')) {
+			return null;
+		}
+		const red = parseInt(value.slice(1, 3), 16) / 255;
+		const green = parseInt(value.slice(3, 5), 16) / 255;
+		const blue = parseInt(value.slice(5, 7), 16) / 255;
+		const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+		const contrast = 2.5;
+		const textLuminance = (luminance > 0.5) ? 0 : 1;
+		const adaptiveOpacity = (luminance - textLuminance + contrast) / contrast;
+		const opacity = Math.max(0.5, Math.min(0.64, adaptiveOpacity));
+		const channel = (luminance > 0.5) ? 0 : 255;
+		return 'rgba('
+			+ String(channel) + ', '
+			+ String(channel) + ', '
+			+ String(channel) + ', '
+			+ String(opacity) + ')';
+	}
+
+	function applyColors(data) {
+		const next = (data && data.colors) ? data.colors : data;
+		if (!next || typeof next !== 'object') {
+			return;
+		}
+		if (next.bodyBg) {
+			root.style.setProperty('--body-bg', next.bodyBg);
+			const footerFg = footerColorForBackground(next.bodyBg);
+			if (footerFg) {
+				root.style.setProperty('--footer-fg', footerFg);
+			}
+		}
+		if (next.titleBg) {
+			root.style.setProperty('--title-bg', next.titleBg);
+			const titleFg = colorForBackground(next.titleBg);
+			if (titleFg) {
+				root.style.setProperty('--title-fg', titleFg);
+			}
+		}
+		if (next.bottomBg) {
+			root.style.setProperty('--bottom-bg', next.bottomBg);
+		}
+	}
+
+	function applyAssets(data) {
+		if (!data || typeof data !== 'object') {
+			return;
+		}
+		if (data.icons && typeof data.icons === 'object') {
+			shellAssets.icons = data.icons;
+		}
+		if (data.verifiedBadge && typeof data.verifiedBadge === 'object') {
+			shellAssets.verifiedBadge = data.verifiedBadge;
+		}
+		if (data.attentionColor) {
+			shellAssets.attentionColor = data.attentionColor;
+			root.style.setProperty('--menu-attention', data.attentionColor);
+		}
+		if (shellAssets.verifiedBadge && shellAssets.verifiedBadge.url) {
+			badge.style.backgroundImage = 'url('
+				+ shellAssets.verifiedBadge.url + ')';
+			if (shellAssets.verifiedBadge.width) {
+				badge.style.width = String(shellAssets.verifiedBadge.width) + 'px';
+			}
+			if (shellAssets.verifiedBadge.height) {
+				badge.style.height = String(shellAssets.verifiedBadge.height) + 'px';
+			}
+			if (shellAssets.verifiedBadge.alt) {
+				badge.setAttribute('aria-label', shellAssets.verifiedBadge.alt);
+			}
+		} else {
+			badge.style.backgroundImage = '';
+			badge.removeAttribute('aria-label');
+		}
+		applyChrome({});
+		renderMenu();
+	}
+
+	function applyChrome(data) {
+		if (!data || typeof data !== 'object') {
+			return;
+		}
+		if (Object.prototype.hasOwnProperty.call(data, 'backVisible')) {
+			shellState.backVisible = !!data.backVisible;
+		}
+		if (Object.prototype.hasOwnProperty.call(data, 'settingsVisible')) {
+			shellState.settingsVisible = !!data.settingsVisible;
+		}
+		if (Object.prototype.hasOwnProperty.call(data, 'menuVisible')) {
+			shellState.menuVisible = !!data.menuVisible;
+		}
+		if (Object.prototype.hasOwnProperty.call(data, 'badgeVisible')) {
+			shellState.badgeVisible = !!data.badgeVisible;
+		}
+		controls.back.classList.toggle('hidden', !shellState.backVisible);
+		controls.settings.classList.toggle('hidden', !shellState.settingsVisible);
+		controls.menu.classList.toggle('hidden', !shellState.menuVisible);
+		controls.menu.disabled = !shellState.menuVisible
+			|| !shellState.menuItems.length;
+		badge.classList.toggle(
+			'hidden',
+			!shellState.badgeVisible
+				|| !(shellAssets.verifiedBadge && shellAssets.verifiedBadge.url));
+		badge.setAttribute(
+			'aria-hidden',
+			badge.classList.contains('hidden') ? 'true' : 'false');
+		if (controls.menu.disabled) {
+			closeMenu();
+		}
+	}
+
+	function visibleButtons() {
+		const main = shellState.buttons.main && shellState.buttons.main.visible
+			? shellState.buttons.main
+			: null;
+		const secondary = shellState.buttons.secondary
+			&& shellState.buttons.secondary.visible
+			? shellState.buttons.secondary
+			: null;
+		const result = {
+			layout: 'single',
+			buttons: []
+		};
+		if (main && secondary) {
+			const position = secondary.position || 'left';
+			if (position === 'top') {
+				result.layout = 'vertical';
+				result.buttons = [secondary, main];
+			} else if (position === 'bottom') {
+				result.layout = 'vertical';
+				result.buttons = [main, secondary];
+			} else if (position === 'left') {
+				result.layout = 'horizontal';
+				result.buttons = [secondary, main];
+			} else {
+				result.layout = 'horizontal';
+				result.buttons = [main, secondary];
+			}
+		} else if (main) {
+			result.buttons = [main];
+		} else if (secondary) {
+			result.buttons = [secondary];
+		}
+		return result;
+	}
+
+	function requestButtonIcon(state) {
+		if (!state
+			|| !state.visible
+			|| !state.iconCustomEmojiId
+			|| state.iconResolvedGeneration === state.iconGeneration
+			|| state.iconRequestGeneration === state.iconGeneration) {
+			return;
+		}
+		state.iconRequestGeneration = state.iconGeneration;
+		invoke('tdesktop_shell_request_button_icon', {
+			name: state.name
+		});
+	}
+
+	function updateFooter() {
+		const visible = visibleButtons();
+		const hasButtons = !!visible.buttons.length;
+		const disclosureVisible = !!shellState.bottomText.trim()
+			&& !hasButtons
+			&& !shellState.isFullscreen;
+		disclosure.textContent = shellState.bottomText;
+		disclosure.classList.toggle('visible', disclosureVisible);
+		buttonsWrap.classList.toggle('visible', hasButtons);
+		footer.classList.toggle('visible', disclosureVisible || hasButtons);
+		root.style.setProperty(
+			'--footer-gap',
+			hasButtons ? 'var(--footer-button-skip)' : 'var(--disclosure-skip)');
+		scheduleViewport();
+	}
+
 	function renderButtons() {
-		buttonsWrap.textContent = '';
-		const visible = [];
-		if (buttonState.secondary && buttonState.secondary.visible) {
-			visible.push(buttonState.secondary);
-		}
-		if (buttonState.main && buttonState.main.visible) {
-			visible.push(buttonState.main);
-		}
-		for (const state of visible) {
+		const visible = visibleButtons();
+		buttons.textContent = '';
+		buttons.dataset.layout = visible.layout;
+		for (const state of visible.buttons) {
 			const button = document.createElement('button');
 			button.type = 'button';
 			button.className = 'shell-button';
-			if (state.progress) {
-				button.classList.add('progress');
-			}
-			button.textContent = state.text || '';
 			button.disabled = !state.active;
 			button.style.background = state.color || '#40a7e3';
 			button.style.color = state.textColor || '#ffffff';
+
+			const icon = document.createElement('span');
+			icon.className = 'button-icon';
+			const iconReady = state.iconResolvedGeneration === state.iconGeneration;
+			if (state.iconCustomEmojiId && state.iconUrl) {
+				icon.classList.add('visible');
+				icon.style.backgroundImage = 'url(' + state.iconUrl + ')';
+			} else if (state.iconCustomEmojiId && !iconReady) {
+				icon.classList.add('visible', 'pending');
+				requestButtonIcon(state);
+			}
+			button.appendChild(icon);
+
+			const label = document.createElement('span');
+			label.className = 'button-label';
+			label.textContent = state.text || '';
+			button.appendChild(label);
+
+			const spinner = document.createElement('span');
+			spinner.className = 'button-spinner';
+			if (state.progress) {
+				spinner.classList.add('visible');
+			}
+			button.appendChild(spinner);
+
 			button.addEventListener('click', function() {
 				if (!button.disabled) {
 					postToFrame(state.name + '_button_pressed', {});
 				}
 			});
-			buttonsWrap.appendChild(button);
+			buttons.appendChild(button);
 		}
-		footer.classList.toggle('hidden', !visible.length);
-		requestAnimationFrame(sendViewportChanged);
+		updateFooter();
 	}
 
-		function parseFrameMessage(data) {
-			if (typeof data === 'string') {
-				try {
-					return JSON.parse(data);
-				} catch (e) {
+	function menuIconUrl(name) {
+		const asset = shellAssets.icons && name ? shellAssets.icons[name] : null;
+		return (asset && asset.url) ? asset.url : '';
+	}
+
+	function createMenuNode(item, className) {
+		const clickable = !!item.id && item.enabled !== false;
+		const node = document.createElement(clickable ? 'button' : 'div');
+		node.className = className
+			+ (item.attention ? ' attention' : '')
+			+ (clickable ? '' : ' disabled');
+		if (clickable) {
+			node.type = 'button';
+			node.addEventListener('click', function() {
+				if (!shellState.blocked) {
+					invoke('tdesktop_shell_menu_action', { id: item.id });
+					closeMenu();
+				}
+			});
+		}
+		return node;
+	}
+
+	function createMenuCopy(item) {
+		const copy = document.createElement('span');
+		copy.className = 'menu-item-copy';
+		const titleNode = document.createElement('span');
+		titleNode.className = 'menu-item-title';
+		titleNode.textContent = item.text || '';
+		copy.appendChild(titleNode);
+		if (item.subtitle) {
+			const subtitleNode = document.createElement('span');
+			subtitleNode.className = 'menu-item-subtitle';
+			subtitleNode.textContent = item.subtitle;
+			copy.appendChild(subtitleNode);
+		}
+		return copy;
+	}
+
+	function renderMenu() {
+		menuList.textContent = '';
+		for (const item of shellState.menuItems) {
+			if (item.separator) {
+				const separator = document.createElement('div');
+				separator.className = 'menu-separator';
+				menuList.appendChild(separator);
+				continue;
+			}
+			if (Array.isArray(item.children) && item.children.length) {
+				const group = document.createElement('div');
+				group.className = 'menu-group';
+
+				const header = document.createElement('div');
+				header.className = 'menu-item menu-group-title';
+				const headerIcon = document.createElement('span');
+				headerIcon.className = 'menu-item-icon';
+				const headerIconUrl = menuIconUrl(item.icon);
+				if (headerIconUrl) {
+					headerIcon.style.backgroundImage = 'url('
+						+ headerIconUrl + ')';
+				}
+				header.appendChild(headerIcon);
+				header.appendChild(createMenuCopy(item));
+				group.appendChild(header);
+
+				const children = document.createElement('div');
+				children.className = 'menu-group-children';
+				for (const child of item.children) {
+					if (child.separator) {
+						const separator = document.createElement('div');
+						separator.className = 'menu-separator';
+						children.appendChild(separator);
+						continue;
+					}
+					const row = createMenuNode(child, 'menu-download');
+					row.appendChild(createMenuCopy(child));
+					if (child.actionLabel) {
+						const action = document.createElement('span');
+						action.className = 'menu-item-action';
+						action.textContent = child.actionLabel;
+						row.appendChild(action);
+					}
+					children.appendChild(row);
+				}
+				group.appendChild(children);
+				menuList.appendChild(group);
+				continue;
+			}
+
+			const row = createMenuNode(item, 'menu-item');
+			const icon = document.createElement('span');
+			icon.className = 'menu-item-icon';
+			const iconUrl = menuIconUrl(item.icon);
+			if (iconUrl) {
+				icon.style.backgroundImage = 'url(' + iconUrl + ')';
+			}
+			row.appendChild(icon);
+			row.appendChild(createMenuCopy(item));
+			menuList.appendChild(row);
+		}
+		menu.classList.toggle(
+			'visible',
+			shellState.menuOpen
+				&& shellState.menuVisible
+				&& !!shellState.menuItems.length);
+		controls.menu.classList.toggle(
+			'active',
+			menu.classList.contains('visible'));
+	}
+	function closeMenu() {
+		if (!shellState.menuOpen) {
+			return;
+		}
+		shellState.menuOpen = false;
+		renderMenu();
+	}
+
+	function toggleMenu() {
+		if (shellState.blocked) {
+			return;
+		}
+		if (shellState.menuOpen) {
+			closeMenu();
+			return;
+		}
+		invoke('tdesktop_shell_menu_request', {});
+		shellState.menuOpen = true;
+		renderMenu();
+	}
+
+	function parseFrameMessage(data) {
+		if (typeof data === 'string') {
+			try {
+				return JSON.parse(data);
+			} catch (e) {
 				return null;
 			}
 		}
@@ -382,118 +1756,184 @@ body {
 			return;
 		}
 		const message = parseFrameMessage(event.data);
-			if (!message || !message.eventType) {
-				return;
-			}
-			if (message.eventType === 'iframe_ready') {
-				reloadSupported = !!(message.eventData && message.eventData.reload_supported);
-			} else if (message.eventType === 'iframe_will_reload') {
-				if (reloadTimeout) {
-					window.clearTimeout(reloadTimeout);
-					reloadTimeout = null;
-				}
-				frameLoaded = false;
-			}
-			invoke(message.eventType, message.eventData || {});
-		});
-
-		function createIframe(url) {
+		if (!message || !message.eventType) {
+			return;
+		}
+		if (message.eventType === 'iframe_ready') {
+			reloadSupported = !!(message.eventData && message.eventData.reload_supported);
+		} else if (message.eventType === 'iframe_will_reload') {
 			if (reloadTimeout) {
 				window.clearTimeout(reloadTimeout);
 				reloadTimeout = null;
 			}
-			const next = document.createElement('iframe');
-			next.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen');
-			next.addEventListener('load', function() {
-				if (iframe !== next) {
-					return;
-				}
-				frameLoaded = true;
-				flushPendingEvents();
-				sendViewportChanged();
-			});
 			frameLoaded = false;
-			reloadSupported = false;
-			if (iframe) {
-				iframe.remove();
-			}
-			iframe = next;
-			iframe.src = url || 'about:blank';
-			frameWrap.appendChild(iframe);
 		}
+		invoke(message.eventType, message.eventData || {});
+	});
 
-		function fallbackReloadFrame() {
-			createIframe(frameUrl || 'about:blank');
+	document.addEventListener('mousedown', function(event) {
+		if (!shellState.menuOpen) {
+			return;
 		}
+		const target = event.target;
+		if (menu.contains(target) || controls.menu.contains(target)) {
+			return;
+		}
+		closeMenu();
+	});
 
-		controls.close.addEventListener('click', function() {
-			invoke('tdesktop_shell_close', {});
-		});
-		controls.back.addEventListener('click', function() {
-			postToFrame('back_button_pressed', {});
+	window.addEventListener('keydown', function(event) {
+		if (event.key === 'Escape' && shellState.menuOpen) {
+			event.preventDefault();
+			closeMenu();
+		}
+	});
+
+	window.addEventListener('resize', scheduleViewport);
+	if (window.ResizeObserver) {
+		resizeObserver = new window.ResizeObserver(scheduleViewport);
+		resizeObserver.observe(frameShell);
+		resizeObserver.observe(root);
+	}
+
+	controls.close.addEventListener('click', function() {
+		invoke('tdesktop_shell_close', {});
+	});
+	controls.back.addEventListener('click', function() {
+		postToFrame('back_button_pressed', {});
 	});
 	controls.settings.addEventListener('click', function() {
-			postToFrame('settings_button_pressed', {});
+		postToFrame('settings_button_pressed', {});
+	});
+	controls.menu.addEventListener('click', toggleMenu);
+	header.addEventListener('mousedown', beginShellMove);
+	for (const handle of resizeHandles) {
+		handle.addEventListener('mousedown', function(event) {
+			beginShellResize(handle.getAttribute('data-resize-edge'), event);
 		});
-		controls.reload.addEventListener('click', function() {
-			if (!iframe) {
-				return;
-			}
-			if (reloadSupported && frameLoaded && iframe.contentWindow) {
-				sendToFrame('reload_iframe', {});
-				if (reloadTimeout) {
-					window.clearTimeout(reloadTimeout);
-				}
-				reloadTimeout = window.setTimeout(function() {
-					reloadTimeout = null;
-					fallbackReloadFrame();
-				}, 500);
-				return;
-			}
-			fallbackReloadFrame();
-		});
+	}
 
-		window.TelegramDesktopShell = {
-			bootstrap: function(data) {
-				applyColors(data || {});
-				title.textContent = data.title || '';
-				document.title = data.title || 'Telegram';
-				frameUrl = data.url || 'about:blank';
-				createIframe(frameUrl);
-				controls.back.classList.toggle('hidden', !data.backVisible);
-				controls.settings.classList.toggle('hidden', !data.settingsVisible);
-			},
+	function createIframe(url) {
+		closeMenu();
+		if (reloadTimeout) {
+			window.clearTimeout(reloadTimeout);
+			reloadTimeout = null;
+		}
+		const next = document.createElement('iframe');
+		next.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen');
+		next.addEventListener('load', function() {
+			if (iframe !== next) {
+				return;
+			}
+			frameLoaded = true;
+			flushPendingEvents();
+			scheduleViewport();
+		});
+		frameLoaded = false;
+		reloadSupported = false;
+		if (iframe) {
+			iframe.remove();
+		}
+		iframe = next;
+		iframe.src = url || 'about:blank';
+		frameWrap.appendChild(iframe);
+	}
+
+	function fallbackReloadFrame() {
+		createIframe(frameUrl || 'about:blank');
+	}
+
+	window.TelegramDesktopShell = {
+		bootstrap: function(data) {
+			applyMetrics(data && data.metrics);
+			applyColors(data && data.colors);
+			applyChrome(data || {});
+			shellState.bottomText = (data && data.bottomText) || '';
+			title.textContent = (data && data.title) || '';
+			document.title = (data && data.title) || 'Telegram';
+			frameUrl = (data && data.url) || 'about:blank';
+			createIframe(frameUrl);
+			renderButtons();
+			renderMenu();
+		},
 		nativeEvent: function(eventType, eventData) {
+			if (eventType === 'fullscreen_changed' && eventData) {
+				shellState.isFullscreen = !!eventData.is_fullscreen;
+				updateFooter();
+			}
 			postToFrame(eventType, eventData || {});
 		},
-			setTitle: function(data) {
-				title.textContent = (data && data.title) || '';
-				document.title = (data && data.title) || 'Telegram';
-			},
+		setTitle: function(data) {
+			title.textContent = (data && data.title) || '';
+			document.title = (data && data.title) || 'Telegram';
+		},
 		setChrome: function(data) {
-			controls.back.classList.toggle('hidden', !(data && data.backVisible));
-			controls.settings.classList.toggle('hidden', !(data && data.settingsVisible));
+			applyChrome(data || {});
 		},
 		setColors: function(data) {
 			applyColors(data || {});
 		},
+		setAssets: function(data) {
+			applyAssets(data || {});
+		},
+		setMenu: function(data) {
+			shellState.menuItems = Array.isArray(data && data.items)
+				? data.items
+				: [];
+			applyChrome({});
+			renderMenu();
+		},
 		setBottomText: function(data) {
-			requestAnimationFrame(sendViewportChanged);
+			shellState.bottomText = (data && data.text) || '';
+			updateFooter();
 		},
 		setButton: function(data) {
 			if (!data || !data.name) {
 				return;
 			}
-			buttonState[data.name] = data;
+			const previous = shellState.buttons[data.name] || {};
+			const next = Object.assign({}, previous, data);
+			if (next.iconGeneration !== previous.iconGeneration
+				|| next.iconCustomEmojiId !== previous.iconCustomEmojiId) {
+				next.iconRequestGeneration = '';
+				next.iconResolvedGeneration = '';
+				next.iconUrl = '';
+			}
+			if (!next.iconCustomEmojiId) {
+				next.iconRequestGeneration = '';
+				next.iconResolvedGeneration = next.iconGeneration || '';
+				next.iconUrl = '';
+			}
+			shellState.buttons[data.name] = next;
+			renderButtons();
+		},
+		setButtonIcon: function(data) {
+			if (!data || !data.name) {
+				return;
+			}
+			const state = shellState.buttons[data.name];
+			if (!state || state.iconGeneration !== (data.generation || '')) {
+				return;
+			}
+			const icon = (data.icon && typeof data.icon === 'object')
+				? data.icon
+				: null;
+			state.iconRequestGeneration = '';
+			state.iconResolvedGeneration = state.iconGeneration;
+			state.iconUrl = (icon && icon.url) ? icon.url : '';
 			renderButtons();
 		},
 		setBlocked: function(data) {
-			root.classList.toggle('blocked', !!(data && data.blocked));
+			shellState.blocked = !!(data && data.blocked);
+			root.classList.toggle('blocked', shellState.blocked);
+			if (shellState.blocked) {
+				closeMenu();
+			}
 		},
 		setProgress: function(data) {
 			root.classList.toggle('loading', !!(data && data.shown));
 		},
-		sendViewport: sendViewportChanged
+		sendViewport: scheduleViewport
 	};
 })();
 )";
@@ -501,20 +1941,61 @@ body {
 
 [[nodiscard]] QByteArray ExternalShellBodyHtml() {
 	auto result = QByteArray();
-	result.reserve(1024);
+	result.reserve(4096);
 	result += R"(<div id="root">
+<div id="scene">
+<div id="shell">
 <header id="header">
-<button id="back" class="icon hidden" type="button">&lsaquo;</button>
+<button id="back" class="title-control hidden" type="button" aria-label="Back">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+<path d="M14.5 5.5L8 12l6.5 6.5"></path>
+</svg>
+</button>
+<div id="title-row">
 <div id="title"></div>
-<button id="settings" class="icon hidden" type="button">&#9881;</button>
-<button id="reload" class="icon" type="button">&#8635;</button>
-<button id="close" class="icon" type="button">&times;</button>
+<div id="badge" class="hidden" aria-hidden="true"></div>
+</div>
+<button id="settings" class="title-control hidden" type="button" aria-label="Settings">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+<path d="M12 8.75a3.25 3.25 0 1 1 0 6.5a3.25 3.25 0 0 1 0-6.5z"></path>
+<path d="M4.75 13.1v-2.2l1.8-.45c.18-.58.41-1.12.7-1.62L6.2 7.2l1.55-1.55l1.63 1.05c.5-.29 1.04-.52 1.62-.7L11.45 4h2.2l.45 1.8c.58.18 1.12.41 1.62.7l1.63-1.05L18.9 7.2l-1.05 1.63c.29.5.52 1.04.7 1.62l1.8.45v2.2l-1.8.45c-.18.58-.41 1.12-.7 1.62l1.05 1.63l-1.55 1.55l-1.63-1.05c-.5.29-1.04.52-1.62.7l-.45 1.8h-2.2l-.45-1.8a7.06 7.06 0 0 1-1.62-.7l-1.63 1.05L6.2 16.8l1.05-1.63a7.06 7.06 0 0 1-.7-1.62L4.75 13.1z"></path>
+</svg>
+</button>
+<button id="menu-toggle" class="title-control" type="button" aria-label="Menu">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+<circle class="fill-icon" cx="6.5" cy="12" r="1.7"></circle>
+<circle class="fill-icon" cx="12" cy="12" r="1.7"></circle>
+<circle class="fill-icon" cx="17.5" cy="12" r="1.7"></circle>
+</svg>
+</button>
+<button id="close" class="title-control" type="button" aria-label="Close">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+<path d="M6 6l12 12"></path>
+<path d="M18 6L6 18"></path>
+</svg>
+</button>
 </header>
-<main id="frame-wrap"></main>
-<footer id="footer" class="hidden">
-<div id="buttons"></div>
+<div id="body">
+<div id="frame-shell"><main id="frame-wrap"></main></div>
+<footer id="footer">
+<div id="disclosure"></div>
+<div id="buttons-wrap"><div id="buttons"></div></div>
 </footer>
+</div>
+<div id="resize-handles">
+<div class="resize-handle" data-resize-edge="top-left"></div>
+<div class="resize-handle" data-resize-edge="top"></div>
+<div class="resize-handle" data-resize-edge="top-right"></div>
+<div class="resize-handle" data-resize-edge="left"></div>
+<div class="resize-handle" data-resize-edge="right"></div>
+<div class="resize-handle" data-resize-edge="bottom-left"></div>
+<div class="resize-handle" data-resize-edge="bottom"></div>
+<div class="resize-handle" data-resize-edge="bottom-right"></div>
+</div>
+<div id="menu"><div id="menu-list"></div></div>
 <div id="blocker"></div>
+</div>
+</div>
 </div>)";
 	return result;
 }
@@ -623,7 +2104,7 @@ public:
 	void updateFg(QColor fg);
 	void updateFg(not_null<const style::color*> paletteFg);
 
-	void updateArgs(ButtonArgs &&args);
+	void updateArgs(Panel::ButtonArgs &&args);
 
 private:
 	void paintEvent(QPaintEvent *e) override;
@@ -736,7 +2217,7 @@ void Panel::Button::updateFg(not_null<const style::color*> paletteFg) {
 	});
 }
 
-void Panel::Button::updateArgs(ButtonArgs &&args) {
+void Panel::Button::updateArgs(Panel::ButtonArgs &&args) {
 	updateText(args.iconCustomEmojiId, args.text);
 	setDisabled(!args.isActive);
 	setPointerCursor(false);
@@ -952,6 +2433,14 @@ Panel::Panel(Args &&args)
 	}, _widget->lifetime());
 
 	setTitle(std::move(args.title));
+	_bottomText.value() | rpl::on_next([=](const QString &text) {
+		if (_externalShell) {
+			sendExternalShellMethod(
+				"setBottomText",
+				{ { u"text"_q, text } });
+		}
+	}, _widget->lifetime());
+	_externalTitleBadgeVisible = (args.titleBadge != nullptr);
 	_widget->setTitleBadge(std::move(args.titleBadge));
 
 	if (!showWebview(std::move(args), params)) {
@@ -966,6 +2455,7 @@ Panel::Panel(Args &&args)
 }
 
 Panel::~Panel() {
+	ForgetExternalShellColorState(this);
 	base::take(_webview);
 	_progress = nullptr;
 	_externalWebviewParent = nullptr;
@@ -1231,48 +2721,21 @@ bool Panel::showWebview(Args &&args, const Webview::ThemeParams &params) {
 
 	rpl::duplicate(args.downloadsProgress) | rpl::on_next([=] {
 		_downloadsUpdated.fire({});
+		if (_externalShell && _externalShellBootstrapped) {
+			sendExternalShellAssets();
+			sendExternalShellMenu();
+		}
 	}, lifetime());
 
 	if (_externalShell) {
 		return true;
 	}
 
-	_widget->setMenuAllowed([=](
-			const Ui::Menu::MenuCallback &callback) {
-		auto list = _delegate->botDownloads(true);
-		if (!list.empty()) {
-			auto value = rpl::single(
-				std::move(list)
-			) | rpl::then(_downloadsUpdated.events(
-			) | rpl::map([=] {
-				return _delegate->botDownloads();
-			}));
-			const auto action = [=](uint32 id, DownloadsAction type) {
-				_delegate->botDownloadsAction(id, type);
-			};
-			callback(Ui::Menu::MenuCallback::Args{
-				.text = tr::lng_downloads_section(tr::now),
-				.icon = &st::menuIconDownload,
-				.fillSubmenu = FillAttachBotDownloadsSubmenu(
-					std::move(value),
-					action),
-			});
-			callback({
-				.separatorSt = &st::expandedMenuSeparator,
-				.isSeparator = true,
-			});
-		}
-		if (_webview && _webview->window.widget() && _hasSettingsButton) {
-			callback(tr::lng_bot_settings(tr::now), [=] {
-				postEvent("settings_button_pressed");
-			}, &st::menuIconSettings);
-		}
-		if (_menuButtons & MenuButton::OpenBot) {
-			callback(tr::lng_bot_open(tr::now), [=] {
-				_delegate->botHandleMenuButton(MenuButton::OpenBot);
-			}, &st::menuIconLeave);
-		}
-		callback(tr::lng_bot_reload_page(tr::now), [=] {
+	const auto dispatch = SharedPanelMenuDispatchArgs{
+		.settings = [=] {
+			postEvent("settings_button_pressed");
+		},
+		.reload = [=] {
 			if (_webview && _webview->window.widget()) {
 				_webview->window.reload();
 			} else if (const auto params = _delegate->botThemeParams()
@@ -1281,35 +2744,41 @@ bool Panel::showWebview(Args &&args, const Webview::ThemeParams &params) {
 				updateThemeParams(params);
 				_webview->window.navigate(url);
 			}
-		}, &st::menuIconRestore);
-		if (_menuButtons & MenuButton::ShareGame) {
-			callback(tr::lng_iv_share(tr::now), [=] {
-				_delegate->botHandleMenuButton(MenuButton::ShareGame);
-			}, &st::menuIconShare);
-		} else {
-			callback(tr::lng_bot_terms(tr::now), [=] {
-				File::OpenUrl(tr::lng_mini_apps_tos_url(tr::now));
-			}, &st::menuIconGroupLog);
-			callback(tr::lng_bot_privacy(tr::now), [=] {
-				_delegate->botOpenPrivacyPolicy();
-			}, &st::menuIconAntispam);
-		}
-		const auto main = (_menuButtons & MenuButton::RemoveFromMainMenu);
-		if (main || (_menuButtons & MenuButton::RemoveFromMenu)) {
-			const auto handler = [=] {
-				_delegate->botHandleMenuButton(main
-					? MenuButton::RemoveFromMainMenu
-					: MenuButton::RemoveFromMenu);
-			};
-			callback({
-				.text = (main
-					? tr::lng_bot_remove_from_side_menu
-					: tr::lng_bot_remove_from_menu)(tr::now),
-				.handler = handler,
-				.icon = &st::menuIconDeleteAttention,
-				.isAttention = true,
-			});
-		}
+		},
+		.terms = [=] {
+			File::OpenUrl(tr::lng_mini_apps_tos_url(tr::now));
+		},
+		.privacy = [=] {
+			_delegate->botOpenPrivacyPolicy();
+		},
+		.menuButton = [=](MenuButton button) {
+			_delegate->botHandleMenuButton(button);
+		},
+		.download = [=](uint32 id, DownloadsAction type) {
+			_delegate->botDownloadsAction(id, type);
+		},
+	};
+	_widget->setMenuAllowed([=](
+			const Ui::Menu::MenuCallback &callback) {
+		const auto &downloads = _delegate->botDownloads(true);
+		const auto items = BuildSharedPanelMenuItems({
+			.downloads = &downloads,
+			.hasSettings = _webview
+				&& _webview->window.widget()
+				&& _hasSettingsButton,
+			.buttons = _menuButtons,
+		});
+		FillNativeSharedPanelMenu(
+			callback,
+			items,
+			[=] {
+				return rpl::single(_delegate->botDownloads(true))
+					| rpl::then(_downloadsUpdated.events(
+					) | rpl::map([=] {
+						return _delegate->botDownloads();
+					}));
+			},
+			dispatch);
 	}, [=, progress = std::move(args.downloadsProgress)](
 			not_null<RpWidget*> button,
 			bool fullscreen) {
@@ -1334,14 +2803,16 @@ void Panel::sendExternalShellBootstrap() {
 	sendExternalShellMethod("bootstrap", {
 		{ u"url"_q, _externalUrl },
 		{ u"title"_q, _externalTitle },
+		{ u"metrics"_q, ExternalShellMetrics() },
+		{ u"colors"_q, ExternalShellColorPayload(this, params) },
+		{ u"bottomText"_q, _bottomText.current() },
 		{ u"backVisible"_q, _externalBackVisible },
 		{ u"settingsVisible"_q, _hasSettingsButton },
-		{ u"bodyBg"_q, ColorValue(params.bodyBg) },
-		{ u"titleBg"_q, ColorValue(params.titleBg) },
-		{ u"bottomBg"_q, _bottomBarColor
-			? QJsonValue(_bottomBarColor->name(QColor::HexRgb))
-			: ColorValue(params.bodyBg) },
+		{ u"menuVisible"_q, true },
+		{ u"badgeVisible"_q, _externalTitleBadgeVisible },
 	});
+	sendExternalShellAssets();
+	sendExternalShellMenu();
 	postEvent("theme_changed", "{\"theme_params\": " + params.json + "}");
 	sendFullScreen();
 	sendSafeArea();
@@ -1387,17 +2858,161 @@ void Panel::sendExternalShellEvent(
 void Panel::sendExternalShellButton(
 		const char *name,
 		const QJsonObject &args) {
-	const auto text = args["text"].toString().trimmed();
-	const auto visible = args["is_visible"].toBool() && !text.isEmpty();
+	auto &state = (name[0] == 'm')
+		? _externalMainButton
+		: _externalSecondaryButton;
+	const auto text = args["text"].toString();
+	const auto trimmed = text.trimmed();
+	const auto iconCustomEmojiId
+		= args["icon_custom_emoji_id"].toString().toULongLong();
+	const auto color = ParseColor(args["color"].toString()).value_or(
+		st::windowBgActive->c);
+	const auto textColor = ParseColor(args["text_color"].toString()).value_or(
+		st::windowFgActive->c);
+	const auto iconAffectingChanged
+		= (state.args.iconCustomEmojiId != iconCustomEmojiId)
+		|| (iconCustomEmojiId && state.textColor != textColor);
+	state.args = {
+		.isActive = args["is_active"].toBool(),
+		.isVisible = args["is_visible"].toBool()
+			&& (!trimmed.isEmpty() || iconCustomEmojiId),
+		.isProgressVisible = args["is_progress_visible"].toBool(),
+		.iconCustomEmojiId = iconCustomEmojiId,
+		.text = text,
+	};
+	state.color = color;
+	state.textColor = textColor;
+	state.position = args["position"].toString();
+	if (iconAffectingChanged) {
+		++state.iconGeneration;
+	}
+	const auto visible = state.args.isVisible;
 	sendExternalShellMethod("setButton", {
 		{ u"name"_q, QString::fromLatin1(name) },
 		{ u"visible"_q, visible },
-		{ u"active"_q, args["is_active"].toBool() },
-		{ u"progress"_q, args["is_progress_visible"].toBool() },
-		{ u"text"_q, args["text"].toString() },
-		{ u"color"_q, args["color"].toString() },
-		{ u"textColor"_q, args["text_color"].toString() },
-		{ u"position"_q, args["position"].toString() },
+		{ u"active"_q, state.args.isActive },
+		{ u"progress"_q, state.args.isProgressVisible },
+		{ u"text"_q, state.args.text },
+		{ u"color"_q, state.color.name(QColor::HexRgb) },
+		{ u"textColor"_q, state.textColor.name(QColor::HexRgb) },
+		{ u"position"_q, state.position },
+		{ u"iconCustomEmojiId"_q, state.args.iconCustomEmojiId
+			? QString::number(state.args.iconCustomEmojiId)
+			: QString() },
+		{ u"iconGeneration"_q, QString::number(state.iconGeneration) },
+	});
+}
+
+void Panel::requestExternalShellButtonEmoji(const QString &name) {
+	auto *state = (name == u"main"_q)
+		? &_externalMainButton
+		: (name == u"secondary"_q)
+		? &_externalSecondaryButton
+		: nullptr;
+	if (!state || !_externalShell) {
+		return;
+	}
+	const auto generation = state->iconGeneration;
+	const auto responseName = name;
+	const auto weak = base::make_weak(this);
+	auto send = [=](QImage image = QImage()) {
+		const auto panel = weak.get();
+		if (!panel) {
+			return;
+		}
+		const auto *current = (responseName == u"main"_q)
+			? &panel->_externalMainButton
+			: &panel->_externalSecondaryButton;
+		if (current->iconGeneration != generation) {
+			return;
+		}
+		auto data = QJsonObject{
+			{ u"name"_q, responseName },
+			{ u"generation"_q, QString::number(generation) },
+		};
+		if (!image.isNull()) {
+			data.insert(
+				u"icon"_q,
+				SerializeRasterAsset(
+					image,
+					QSize(
+						kExternalShellButtonIconSize,
+						kExternalShellButtonIconSize)));
+		}
+		panel->sendExternalShellMethod("setButtonIcon", data);
+	};
+	if (!state->args.isVisible || !state->args.iconCustomEmojiId) {
+		send();
+		return;
+	}
+	_delegate->botResolveButtonEmoji({
+		.customEmojiId = state->args.iconCustomEmojiId,
+		.textColor = state->textColor,
+		.size = kExternalShellButtonIconSize,
+		.callback = std::move(send),
+	});
+}
+
+void Panel::sendExternalShellMenu() {
+	const auto &downloads = _delegate->botDownloads(true);
+	const auto items = BuildSharedPanelMenuItems({
+		.downloads = &downloads,
+		.hasSettings = _webview && _webview->window.widget() && _hasSettingsButton,
+		.buttons = _menuButtons,
+	});
+	sendExternalShellMethod("setMenu", {
+		{ u"items"_q, SerializeSharedPanelMenu(items) },
+	});
+}
+
+void Panel::sendExternalShellAssets() {
+	const auto &downloads = _delegate->botDownloads(true);
+	const auto items = BuildSharedPanelMenuItems({
+		.downloads = &downloads,
+		.hasSettings = _webview && _webview->window.widget() && _hasSettingsButton,
+		.buttons = _menuButtons,
+	});
+	auto icons = QJsonObject();
+	CollectSharedPanelMenuIcons(items, icons);
+	sendExternalShellMethod("setAssets", {
+		{ u"icons"_q, icons },
+		{ u"verifiedBadge"_q, SerializeVerifiedBadgeAsset() },
+		{ u"attentionColor"_q,
+			st::menuIconAttentionColor->c.name(QColor::HexRgb) },
+	});
+}
+
+void Panel::handleExternalShellMenuAction(const QString &id) {
+	DispatchSharedPanelMenuAction(id, {
+		.settings = [=] {
+			postEvent("settings_button_pressed");
+		},
+		.reload = [=] {
+			if (_webview && _webview->window.widget()) {
+				_externalShellBootstrapped = false;
+				_webview->window.navigate(
+					u"https://web.telegram.org/blank.html"_q);
+			} else if (const auto params = _delegate->botThemeParams()
+				; createWebview(params)) {
+				showWebviewProgress();
+				updateThemeParams(params);
+				_externalShellBootstrapped = false;
+				_webview->window.navigate(
+					u"https://web.telegram.org/blank.html"_q);
+			}
+		},
+		.terms = [=] {
+			File::OpenUrl(tr::lng_mini_apps_tos_url(tr::now));
+		},
+		.privacy = [=] {
+			_delegate->botOpenPrivacyPolicy();
+		},
+		.menuButton = [=](MenuButton button) {
+			_delegate->botHandleMenuButton(button);
+		},
+		.download = [=](uint32 downloadId, DownloadsAction type) {
+			_delegate->botDownloadsAction(downloadId, type);
+		},
 	});
 }
 
@@ -1405,6 +3020,8 @@ void Panel::sendExternalShellChrome() {
 	sendExternalShellMethod("setChrome", {
 		{ u"backVisible"_q, _externalBackVisible },
 		{ u"settingsVisible"_q, _hasSettingsButton },
+		{ u"menuVisible"_q, true },
+		{ u"badgeVisible"_q, _externalTitleBadgeVisible },
 	});
 }
 
@@ -1598,6 +3215,13 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 			} else {
 				_delegate->botClose();
 			}
+		} else if (command == "tdesktop_shell_menu_request") {
+			sendExternalShellAssets();
+			sendExternalShellMenu();
+		} else if (command == "tdesktop_shell_menu_action") {
+			handleExternalShellMenuAction(arguments["id"].toString());
+		} else if (command == "tdesktop_shell_request_button_icon") {
+			requestExternalShellButtonEmoji(arguments["name"].toString());
 		} else if (command == "web_app_data_send") {
 			sendDataMessage(arguments);
 		} else if (command == "web_app_switch_inline_query") {
@@ -2447,47 +4071,47 @@ void Panel::processSettingsButtonMessage(const QJsonObject &args) {
 	_hasSettingsButton = args["is_visible"].toBool();
 	if (_externalShell) {
 		sendExternalShellChrome();
+		sendExternalShellAssets();
+		sendExternalShellMenu();
 	}
 }
 
 void Panel::processHeaderColor(const QJsonObject &args) {
 	_headerColorReceived = true;
-	if (_externalShell) {
-		if (const auto color = ParseColor(args["color"].toString())) {
+	const auto apply = [&](std::optional<QColor> color) {
+		if (_externalShell) {
+			SetExternalShellTitleColor(this, color);
 			sendExternalShellMethod(
 				"setColors",
-				{ { u"titleBg"_q, color->name(QColor::HexRgb) } });
-		} else if (const auto color = LookupNamedColor(
-				args["color_key"].toString())) {
-			sendExternalShellMethod(
-				"setColors",
-				{ { u"titleBg"_q, (*color)->c.name(QColor::HexRgb) } });
+				ExternalShellColorPayload(this, _delegate->botThemeParams()));
+		} else {
+			_widget->overrideTitleColor(color);
 		}
-		return;
-	}
+	};
 	if (const auto color = ParseColor(args["color"].toString())) {
-		_widget->overrideTitleColor(color);
+		apply(*color);
 		_headerColorLifetime.destroy();
 	} else if (const auto color = LookupNamedColor(
 			args["color_key"].toString())) {
-		_widget->overrideTitleColor((*color)->c);
+		apply((*color)->c);
 		_headerColorLifetime = style::PaletteChanged(
 		) | rpl::on_next([=] {
-			_widget->overrideTitleColor((*color)->c);
+			apply((*color)->c);
 		});
 	} else {
-		_widget->overrideTitleColor(std::nullopt);
+		apply(std::nullopt);
 		_headerColorLifetime.destroy();
 	}
 }
 
 void Panel::overrideBodyColor(std::optional<QColor> color) {
 	if (_externalShell) {
-		if (color) {
-			sendExternalShellMethod(
-				"setColors",
-				{ { u"bodyBg"_q, color->name(QColor::HexRgb) } });
+		if (_bodyColorReceived) {
+			SetExternalShellBodyColor(this, color);
 		}
+		sendExternalShellMethod(
+			"setColors",
+			ExternalShellColorPayload(this, _delegate->botThemeParams()));
 		return;
 	}
 	_widget->overrideBodyColor(color);
@@ -2540,40 +4164,33 @@ void Panel::processBackgroundColor(const QJsonObject &args) {
 
 void Panel::processBottomBarColor(const QJsonObject &args) {
 	_bottomColorReceived = true;
-	if (_externalShell) {
-		if (const auto color = ParseColor(args["color"].toString())) {
-			_bottomBarColor = color;
-			sendExternalShellMethod(
-				"setColors",
-				{ { u"bottomBg"_q, color->name(QColor::HexRgb) } });
-		} else if (const auto color = LookupNamedColor(
-				args["color_key"].toString())) {
-			_bottomBarColor = (*color)->c;
-			sendExternalShellMethod(
-				"setColors",
-				{ { u"bottomBg"_q, (*color)->c.name(QColor::HexRgb) } });
-		} else {
-			_bottomBarColor = std::nullopt;
-		}
-		return;
-	}
-	if (const auto color = ParseColor(args["color"].toString())) {
-		_widget->overrideBottomBarColor(color);
+	const auto apply = [&](std::optional<QColor> color) {
 		_bottomBarColor = color;
+		if (_externalShell) {
+			SetExternalShellBottomColor(this, color);
+			sendExternalShellMethod(
+				"setColors",
+				ExternalShellColorPayload(this, _delegate->botThemeParams()));
+		} else {
+			_widget->overrideBottomBarColor(color);
+		}
+	};
+	if (const auto color = ParseColor(args["color"].toString())) {
+		apply(*color);
 		_bottomBarColorLifetime.destroy();
 	} else if (const auto color = LookupNamedColor(
 			args["color_key"].toString())) {
-		_widget->overrideBottomBarColor((*color)->c);
-		_bottomBarColor = (*color)->c;
+		apply((*color)->c);
 		_bottomBarColorLifetime = style::PaletteChanged(
 		) | rpl::on_next([=] {
-			_widget->overrideBottomBarColor((*color)->c);
-			_bottomBarColor = (*color)->c;
+			apply((*color)->c);
 		});
 	} else {
-		_widget->overrideBottomBarColor(std::nullopt);
-		_bottomBarColor = std::nullopt;
+		apply(std::nullopt);
 		_bottomBarColorLifetime.destroy();
+	}
+	if (_externalShell) {
+		return;
 	}
 	if (const auto raw = _bottomButtonsBg.get()) {
 		raw->update();
@@ -2893,13 +4510,10 @@ void Panel::updateThemeParams(const Webview::ThemeParams &params) {
 			params.scrollBgOver,
 			params.scrollBarBg,
 			params.scrollBarBgOver);
-		sendExternalShellMethod("setColors", {
-			{ u"bodyBg"_q, ColorValue(params.bodyBg) },
-			{ u"titleBg"_q, ColorValue(params.titleBg) },
-			{ u"bottomBg"_q, _bottomBarColor
-				? QJsonValue(_bottomBarColor->name(QColor::HexRgb))
-				: ColorValue(params.bodyBg) },
-		});
+		sendExternalShellMethod(
+			"setColors",
+			ExternalShellColorPayload(this, params));
+		sendExternalShellAssets();
 		postEvent("theme_changed", "{\"theme_params\": " + params.json + "}");
 		return;
 	}
@@ -2917,7 +4531,7 @@ void Panel::updateColorOverrides(const Webview::ThemeParams &params) {
 		if (_externalShell) {
 			sendExternalShellMethod(
 				"setColors",
-				{ { u"titleBg"_q, ColorValue(params.titleBg) } });
+				ExternalShellColorPayload(this, params));
 		} else {
 			_widget->overrideTitleColor(params.titleBg);
 		}

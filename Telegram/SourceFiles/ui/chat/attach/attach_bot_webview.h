@@ -15,6 +15,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/round_rect.h"
 #include "webview/webview_common.h"
 #include <crl/crl_time.h>
+#include <QtGui/QColor>
+#include <QtGui/QImage>
 
 class QJsonObject;
 class QJsonValue;
@@ -78,6 +80,13 @@ struct DownloadFileRequest {
 	Fn<void(bool)> callback;
 };
 
+struct ResolveButtonEmojiRequest {
+	uint64 customEmojiId = 0;
+	QColor textColor;
+	int size = 0;
+	Fn<void(QImage)> callback;
+};
+
 struct SendPreparedMessageRequest {
 	QString id = 0;
 	Fn<void(QString)> callback;
@@ -118,6 +127,7 @@ public:
 	virtual void botInvokeCustomMethod(CustomMethodRequest request) = 0;
 	virtual void botSetEmojiStatus(SetEmojiStatusRequest request) = 0;
 	virtual void botDownloadFile(DownloadFileRequest request) = 0;
+	virtual void botResolveButtonEmoji(ResolveButtonEmojiRequest request) = 0;
 	virtual void botSendPreparedMessage(
 		SendPreparedMessageRequest request) = 0;
 	virtual void botRequestChat(RequestChatRequest request) = 0;
@@ -168,6 +178,20 @@ public:
 	[[nodiscard]] rpl::lifetime &lifetime();
 
 private:
+	struct ButtonArgs {
+		bool isActive = false;
+		bool isVisible = false;
+		bool isProgressVisible = false;
+		uint64 iconCustomEmojiId = 0;
+		QString text;
+	};
+	struct ExternalButtonState {
+		ButtonArgs args;
+		QColor color;
+		QColor textColor;
+		QString position;
+		uint64 iconGeneration = 0;
+	};
 	class Button;
 	struct Progress;
 	struct WebviewWithLifetime;
@@ -186,6 +210,10 @@ private:
 	void sendExternalShellButton(
 		const char *name,
 		const QJsonObject &args);
+	void sendExternalShellMenu();
+	void sendExternalShellAssets();
+	void handleExternalShellMenuAction(const QString &id);
+	void requestExternalShellButtonEmoji(const QString &name);
 	void sendExternalShellChrome();
 	void setExternalShellBlocked(bool blocked);
 	Webview::PopupResult showBlockingPopup(Webview::PopupArgs &&args);
@@ -265,10 +293,13 @@ private:
 	int _externalBlockCount = 0;
 	bool _closeNeedConfirmation = false;
 	bool _hasSettingsButton = false;
+	bool _externalTitleBadgeVisible = false;
 	bool _externalShell = false;
 	bool _externalShellBootstrapped = false;
 	bool _externalBackVisible = false;
 	MenuButtons _menuButtons = {};
+	ExternalButtonState _externalMainButton;
+	ExternalButtonState _externalSecondaryButton;
 	std::unique_ptr<RpWidget> _externalPanelParent;
 	std::unique_ptr<SeparatePanel> _widget;
 	std::unique_ptr<WebviewWithLifetime> _webview;

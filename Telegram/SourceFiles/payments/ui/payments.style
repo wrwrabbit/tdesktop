@@ -154,3 +154,12 @@ botWebViewRadialStroke: 3px;
 botWebViewMenu: PopupMenu(popupMenuWithIcons) {
 	maxHeight: 360px;
 }
+botWebViewShellRadius: 14px;
+botWebViewShellPadding: margins(12px, 12px, 12px, 12px);
+botWebViewShellHeaderHeight: 48px;
+botWebViewShellTitlePadding: margins(0px, 10px, 0px, 10px);
+botWebViewShellBadgeSkip: 4px;
+botWebViewShellFrameRadius: 12px;
+botWebViewShellMenuButtonSize: size(44px, 44px);
+botWebViewShellDisclosureSkip: 12px;
+botWebViewShellFooterButtonSkip: 10px;
