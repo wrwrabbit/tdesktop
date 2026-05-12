@@ -191,7 +191,7 @@ void SetExternalShellBottomColor(
 		const Webview::ThemeParams &params) {
 	const auto &state = ExternalShellColorStateFor(panel);
 	return state.bodyUsesTheme
-		? params.bodyBg
+		? (params.bodyBg.alpha() == 255 ? params.bodyBg : st::windowBg->c)
 		: state.body.value_or(params.bodyBg);
 }
 
@@ -200,7 +200,7 @@ void SetExternalShellBottomColor(
 		const Webview::ThemeParams &params) {
 	const auto &state = ExternalShellColorStateFor(panel);
 	return state.titleUsesTheme
-		? params.titleBg
+		? (params.titleBg.alpha() == 255 ? params.titleBg : st::windowBg->c)
 		: state.title.value_or(params.titleBg);
 }
 
@@ -226,14 +226,24 @@ void SetExternalShellBottomColor(
 
 [[nodiscard]] QJsonObject ExternalShellMetrics() {
 	const auto &shellPadding = st::botWebViewShellPadding;
+	const auto &shadowPadding = st::botWebViewShellShadowPadding;
 	const auto &titlePadding = st::botWebViewShellTitlePadding;
 	const auto &menuButtonSize = st::botWebViewShellMenuButtonSize;
+	const auto fullscreenButtonSize = QSize(
+		st::fullScreenPanelClose.width,
+		st::fullScreenPanelClose.height);
+	const auto fullscreenControlShift
+		= st::separatePanelClose.rippleAreaPosition;
 	return {
 		{ u"shellRadius"_q, st::botWebViewShellRadius },
 		{ u"shellPaddingTop"_q, shellPadding.top() },
 		{ u"shellPaddingRight"_q, shellPadding.right() },
 		{ u"shellPaddingBottom"_q, shellPadding.bottom() },
 		{ u"shellPaddingLeft"_q, shellPadding.left() },
+		{ u"shadowPaddingTop"_q, shadowPadding.top() },
+		{ u"shadowPaddingRight"_q, shadowPadding.right() },
+		{ u"shadowPaddingBottom"_q, shadowPadding.bottom() },
+		{ u"shadowPaddingLeft"_q, shadowPadding.left() },
 		{ u"headerHeight"_q, st::botWebViewShellHeaderHeight },
 		{ u"titlePaddingTop"_q, titlePadding.top() },
 		{ u"titlePaddingRight"_q, titlePadding.right() },
@@ -248,7 +258,21 @@ void SetExternalShellBottomColor(
 		{ u"buttonGapY"_q, st::botWebViewBottomSkip.y() },
 		{ u"disclosureSkip"_q, st::botWebViewShellDisclosureSkip },
 		{ u"footerButtonSkip"_q, st::botWebViewShellFooterButtonSkip },
+		{ u"fullscreenControlWidth"_q, fullscreenButtonSize.width() },
+		{ u"fullscreenControlHeight"_q, fullscreenButtonSize.height() },
+		{ u"fullscreenControlTop"_q, fullscreenControlShift.y() },
+		{ u"fullscreenControlRight"_q, fullscreenControlShift.x() },
+		{ u"fullscreenControlGap"_q, fullscreenControlShift.x() },
 	};
+}
+
+[[nodiscard]] QSize ExternalShellWindowSize(QSize contentSize) {
+	const auto &shadowPadding = st::botWebViewShellShadowPadding;
+	return contentSize + QSize(
+		shadowPadding.left() + shadowPadding.right(),
+		shadowPadding.top()
+			+ st::botWebViewShellHeaderHeight
+			+ shadowPadding.bottom());
 }
 
 enum class SharedPanelMenuAction {
@@ -667,6 +691,17 @@ void FillNativeSharedPanelMenu(
 		tr::lng_sr_verified_badge(tr::now));
 }
 
+[[nodiscard]] QJsonObject SerializeExternalShellMenuPalette() {
+	return {
+		{ u"bg"_q, st::windowBg->c.name(QColor::HexRgb) },
+		{ u"fg"_q, st::windowFg->c.name(QColor::HexRgb) },
+		{ u"hoverBg"_q, st::windowBgOver->c.name(QColor::HexRgb) },
+		{ u"separator"_q, st::menuSeparatorFg->c.name(QColor::HexRgb) },
+		{ u"attention"_q,
+			st::menuIconAttentionColor->c.name(QColor::HexRgb) },
+	};
+}
+
 void CollectSharedPanelMenuIcons(
 		const std::vector<SharedPanelMenuItem> &items,
 		QJsonObject &result) {
@@ -731,8 +766,11 @@ body {
 	overflow: hidden;
 	background: transparent;
 }
+:root {
+	--font-sans: -apple-system, BlinkMacSystemFont, avenir next, avenir, Segoe UI Variable Text, segoe ui, helvetica neue, helvetica, Cantarell, Ubuntu, roboto, noto, tahoma, arial, sans-serif;
+}
 body {
-	font: 14px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	font: 14px/1.35 var(--font-sans);
 	color: var(--title-fg, #000000);
 	-webkit-font-smoothing: antialiased;
 	text-rendering: optimizeLegibility;
@@ -750,34 +788,46 @@ select {
 	width: 100%;
 	height: 100%;
 	position: relative;
-	--shell-radius: 14px;
+	--shell-radius: 7px;
 	--shell-pad-top: 12px;
 	--shell-pad-right: 12px;
 	--shell-pad-bottom: 12px;
 	--shell-pad-left: 12px;
-	--header-height: 48px;
+	--shadow-pad-top: 12px;
+	--shadow-pad-right: 14px;
+	--shadow-pad-bottom: 16px;
+	--shadow-pad-left: 14px;
+	--header-height: 60px;
 	--title-pad-top: 0px;
-	--title-pad-right: 10px;
+	--title-pad-right: 0px;
 	--title-pad-bottom: 0px;
-	--title-pad-left: 10px;
+	--title-pad-left: 0px;
 	--badge-skip: 4px;
-	--frame-radius: 12px;
-	--control-width: 44px;
-	--control-height: 44px;
+	--frame-radius: 6px;
+	--control-width: 36px;
+	--control-height: 36px;
 	--button-height: 40px;
 	--button-gap-x: 12px;
 	--button-gap-y: 8px;
 	--disclosure-skip: 12px;
 	--footer-button-skip: 10px;
-	--resize-handle-size: calc(var(--frame-radius) / 2);
-	--resize-corner-size: var(--frame-radius);
 	--footer-gap: var(--disclosure-skip);
+	--fullscreen-control-width: 44px;
+	--fullscreen-control-height: 44px;
+	--fullscreen-control-top: 8px;
+	--fullscreen-control-right: 8px;
+	--fullscreen-control-gap: 8px;
 	--body-bg: #ffffff;
 	--title-bg: #ffffff;
 	--bottom-bg: #ffffff;
 	--body-fg: #000000;
 	--title-fg: #000000;
 	--footer-fg: rgba(0, 0, 0, 0.55);
+	--menu-bg: #ffffff;
+	--menu-fg: #000000;
+	--menu-hover-bg: #f1f1f1;
+	--menu-separator: rgba(0, 0, 0, 0.08);
+	--menu-attention: #d05c5c;
 }
 .hidden {
 	display: none !important;
@@ -785,10 +835,10 @@ select {
 #scene {
 	position: absolute;
 	inset: 0;
-	padding: var(--shell-pad-top)
-		var(--shell-pad-right)
-		var(--shell-pad-bottom)
-		var(--shell-pad-left);
+	padding: var(--shadow-pad-top)
+		var(--shadow-pad-right)
+		var(--shadow-pad-bottom)
+		var(--shadow-pad-left);
 }
 #shell {
 	position: relative;
@@ -799,21 +849,37 @@ select {
 	border-radius: var(--shell-radius);
 	background: var(--body-bg, #ffffff);
 	box-shadow:
-		0 18px 42px rgba(0, 0, 0, 0.32),
-		0 6px 18px rgba(0, 0, 0, 0.18);
+		0 0 0 1px rgba(0, 0, 0, 0.08),
+		0 1px 2px rgba(0, 0, 0, 0.18),
+		0 3px 8px -1px rgba(0, 0, 0, 0.16),
+		0 8px 14px -5px rgba(0, 0, 0, 0.20);
 	overflow: hidden;
 }
 #header {
 	flex: 0 0 auto;
 	min-height: var(--header-height);
 	display: grid;
-	grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+	grid-template-columns: auto minmax(0, 1fr) auto auto;
 	align-items: center;
 	gap: 4px;
 	padding: 0 var(--shell-pad-right) 0 var(--shell-pad-left);
 	background: var(--title-bg, #ffffff);
 	color: var(--title-fg, #000000);
 	border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+	-webkit-user-select: none;
+	user-select: none;
+}
+#back {
+	grid-column: 1;
+}
+#title-row {
+	grid-column: 2;
+}
+#menu-toggle {
+	grid-column: 3;
+}
+#close {
+	grid-column: 4;
 }
 .title-control {
 	width: var(--control-width);
@@ -857,13 +923,19 @@ select {
 		var(--title-pad-right)
 		var(--title-pad-bottom)
 		var(--title-pad-left);
+	-webkit-user-select: none;
+	user-select: none;
 }
 #title {
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	font-size: 20px;
+	line-height: 24px;
 	font-weight: 600;
+	-webkit-user-select: none;
+	user-select: none;
 }
 #badge {
 	margin-left: var(--badge-skip);
@@ -880,19 +952,16 @@ select {
 	display: flex;
 	flex-direction: column;
 	gap: var(--footer-gap);
-	padding: var(--shell-pad-top)
-		var(--shell-pad-right)
-		var(--shell-pad-bottom)
-		var(--shell-pad-left);
+	padding: 0;
 	background: var(--body-bg, #ffffff);
 }
 #frame-shell {
 	flex: 1 1 auto;
 	min-height: 0;
-	border-radius: var(--frame-radius);
+	border-radius: 0;
 	overflow: hidden;
 	background: var(--body-bg, #ffffff);
-	box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+	box-shadow: none;
 }
 #frame-wrap,
 #frame-wrap iframe {
@@ -906,6 +975,11 @@ select {
 	display: none;
 	flex: 0 0 auto;
 	color: var(--footer-fg);
+	padding: var(--shell-pad-top)
+		var(--shell-pad-right)
+		var(--shell-pad-bottom)
+		var(--shell-pad-left);
+	background: var(--bottom-bg, var(--body-bg));
 }
 #footer.visible {
 	display: flex;
@@ -944,7 +1018,7 @@ select {
 	min-width: 0;
 	height: var(--button-height);
 	border: 0;
-	border-radius: calc(var(--frame-radius) - 2px);
+	border-radius: calc(var(--frame-radius) - 1px);
 	padding: 0 14px;
 	font-weight: 600;
 	display: inline-flex;
@@ -995,19 +1069,69 @@ select {
 }
 #menu {
 	position: absolute;
-	top: calc(var(--shell-pad-top) + var(--header-height) - 4px);
-	right: var(--shell-pad-right);
+	top: calc(var(--shadow-pad-top) + var(--header-height) - 4px);
+	right: var(--shadow-pad-right);
 	display: none;
 	min-width: 220px;
-	max-width: calc(100% - var(--shell-pad-left) - var(--shell-pad-right));
-	background: var(--title-bg, #ffffff);
-	color: var(--title-fg, #000000);
+	max-width: calc(100% - var(--shadow-pad-left) - var(--shadow-pad-right));
+	background: var(--menu-bg, #ffffff);
+	color: var(--menu-fg, #000000);
 	border-radius: 12px;
 	box-shadow:
 		0 20px 38px rgba(0, 0, 0, 0.22),
 		0 4px 12px rgba(0, 0, 0, 0.12);
 	overflow: hidden;
 	z-index: 12;
+}
+#root.fullscreen #scene {
+	padding: 0;
+}
+#root.fullscreen #shell {
+	border-radius: 0;
+	box-shadow: none;
+}
+#root.fullscreen #header {
+	position: absolute;
+	top: var(--fullscreen-control-top);
+	right: var(--fullscreen-control-right);
+	z-index: 13;
+	width: auto;
+	min-height: var(--fullscreen-control-height);
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--fullscreen-control-gap);
+	padding: 0;
+	background: transparent;
+	border-bottom: 0;
+	pointer-events: none;
+}
+#root.fullscreen #back,
+#root.fullscreen #title-row {
+	display: none !important;
+}
+#root.fullscreen .title-control {
+	width: var(--fullscreen-control-width);
+	height: var(--fullscreen-control-height);
+	color: #ffffff;
+	background: rgba(0, 0, 0, 0.35);
+	pointer-events: auto;
+}
+#root.fullscreen .title-control:hover:not(:disabled),
+#root.fullscreen .title-control.active {
+	background: rgba(0, 0, 0, 0.45);
+}
+#root.fullscreen #body {
+	gap: 0;
+}
+#root.fullscreen #menu {
+	top: calc(
+		var(--fullscreen-control-top)
+			+ var(--fullscreen-control-height)
+			+ var(--fullscreen-control-gap));
+	right: var(--fullscreen-control-right);
+}
+#root.fullscreen #resize-handles {
+	display: none;
 }
 #resize-handles {
 	position: absolute;
@@ -1021,58 +1145,58 @@ select {
 }
 .resize-handle[data-resize-edge="top"] {
 	top: 0;
-	left: var(--resize-corner-size);
-	right: var(--resize-corner-size);
-	height: var(--resize-handle-size);
+	left: var(--shadow-pad-left);
+	right: var(--shadow-pad-right);
+	height: var(--shadow-pad-top);
 	cursor: ns-resize;
 }
 .resize-handle[data-resize-edge="bottom"] {
 	bottom: 0;
-	left: var(--resize-corner-size);
-	right: var(--resize-corner-size);
-	height: var(--resize-handle-size);
+	left: var(--shadow-pad-left);
+	right: var(--shadow-pad-right);
+	height: var(--shadow-pad-bottom);
 	cursor: ns-resize;
 }
 .resize-handle[data-resize-edge="left"] {
-	top: var(--resize-corner-size);
-	bottom: var(--resize-corner-size);
+	top: var(--shadow-pad-top);
+	bottom: var(--shadow-pad-bottom);
 	left: 0;
-	width: var(--resize-handle-size);
+	width: var(--shadow-pad-left);
 	cursor: ew-resize;
 }
 .resize-handle[data-resize-edge="right"] {
-	top: var(--resize-corner-size);
-	bottom: var(--resize-corner-size);
+	top: var(--shadow-pad-top);
+	bottom: var(--shadow-pad-bottom);
 	right: 0;
-	width: var(--resize-handle-size);
+	width: var(--shadow-pad-right);
 	cursor: ew-resize;
 }
 .resize-handle[data-resize-edge="top-left"] {
 	top: 0;
 	left: 0;
-	width: var(--resize-corner-size);
-	height: var(--resize-corner-size);
+	width: var(--shadow-pad-left);
+	height: var(--shadow-pad-top);
 	cursor: nwse-resize;
 }
 .resize-handle[data-resize-edge="top-right"] {
 	top: 0;
 	right: 0;
-	width: var(--resize-corner-size);
-	height: var(--resize-corner-size);
+	width: var(--shadow-pad-right);
+	height: var(--shadow-pad-top);
 	cursor: nesw-resize;
 }
 .resize-handle[data-resize-edge="bottom-left"] {
 	bottom: 0;
 	left: 0;
-	width: var(--resize-corner-size);
-	height: var(--resize-corner-size);
+	width: var(--shadow-pad-left);
+	height: var(--shadow-pad-bottom);
 	cursor: nesw-resize;
 }
 .resize-handle[data-resize-edge="bottom-right"] {
 	right: 0;
 	bottom: 0;
-	width: var(--resize-corner-size);
-	height: var(--resize-corner-size);
+	width: var(--shadow-pad-right);
+	height: var(--shadow-pad-bottom);
 	cursor: nwse-resize;
 }
 #menu.visible {
@@ -1084,7 +1208,7 @@ select {
 .menu-separator {
 	height: 1px;
 	margin: 6px 0;
-	background: rgba(0, 0, 0, 0.08);
+	background: var(--menu-separator, rgba(0, 0, 0, 0.08));
 }
 .menu-item,
 .menu-download {
@@ -1098,7 +1222,6 @@ select {
 	padding: 10px 14px;
 	text-align: left;
 	cursor: default;
-	border-radius: 10px;
 	transition: background-color 120ms linear, opacity 120ms linear;
 }
 .menu-download {
@@ -1107,7 +1230,7 @@ select {
 }
 .menu-item:hover,
 .menu-download:hover {
-	background: rgba(127, 127, 127, 0.14);
+	background: var(--menu-hover-bg, rgba(127, 127, 127, 0.14));
 }
 .menu-item.disabled,
 .menu-download.disabled {
@@ -1209,13 +1332,11 @@ select {
 	const title = document.getElementById('title');
 	const controls = {
 		back: document.getElementById('back'),
-		settings: document.getElementById('settings'),
 		menu: document.getElementById('menu-toggle'),
 		close: document.getElementById('close')
 	};
 	const shellState = {
 		backVisible: false,
-		settingsVisible: false,
 		menuVisible: false,
 		badgeVisible: false,
 		bottomText: '',
@@ -1231,7 +1352,7 @@ select {
 	const shellAssets = {
 		icons: Object.create(null),
 		verifiedBadge: null,
-		attentionColor: ''
+		menuPalette: null
 	};
 	let iframe = null;
 	let frameLoaded = false;
@@ -1361,6 +1482,10 @@ select {
 		setMetric('--shell-pad-right', data.shellPaddingRight);
 		setMetric('--shell-pad-bottom', data.shellPaddingBottom);
 		setMetric('--shell-pad-left', data.shellPaddingLeft);
+		setMetric('--shadow-pad-top', data.shadowPaddingTop);
+		setMetric('--shadow-pad-right', data.shadowPaddingRight);
+		setMetric('--shadow-pad-bottom', data.shadowPaddingBottom);
+		setMetric('--shadow-pad-left', data.shadowPaddingLeft);
 		setMetric('--header-height', data.headerHeight);
 		setMetric('--title-pad-top', data.titlePaddingTop);
 		setMetric('--title-pad-right', data.titlePaddingRight);
@@ -1375,6 +1500,11 @@ select {
 		setMetric('--button-gap-y', data.buttonGapY);
 		setMetric('--disclosure-skip', data.disclosureSkip);
 		setMetric('--footer-button-skip', data.footerButtonSkip);
+		setMetric('--fullscreen-control-width', data.fullscreenControlWidth);
+		setMetric('--fullscreen-control-height', data.fullscreenControlHeight);
+		setMetric('--fullscreen-control-top', data.fullscreenControlTop);
+		setMetric('--fullscreen-control-right', data.fullscreenControlRight);
+		setMetric('--fullscreen-control-gap', data.fullscreenControlGap);
 	}
 
 	function colorForBackground(value) {
@@ -1442,9 +1572,29 @@ select {
 		if (data.verifiedBadge && typeof data.verifiedBadge === 'object') {
 			shellAssets.verifiedBadge = data.verifiedBadge;
 		}
-		if (data.attentionColor) {
-			shellAssets.attentionColor = data.attentionColor;
-			root.style.setProperty('--menu-attention', data.attentionColor);
+		if (data.menuPalette && typeof data.menuPalette === 'object') {
+			shellAssets.menuPalette = data.menuPalette;
+			if (data.menuPalette.bg) {
+				root.style.setProperty('--menu-bg', data.menuPalette.bg);
+			}
+			if (data.menuPalette.fg) {
+				root.style.setProperty('--menu-fg', data.menuPalette.fg);
+			}
+			if (data.menuPalette.hoverBg) {
+				root.style.setProperty(
+					'--menu-hover-bg',
+					data.menuPalette.hoverBg);
+			}
+			if (data.menuPalette.separator) {
+				root.style.setProperty(
+					'--menu-separator',
+					data.menuPalette.separator);
+			}
+			if (data.menuPalette.attention) {
+				root.style.setProperty(
+					'--menu-attention',
+					data.menuPalette.attention);
+			}
 		}
 		if (shellAssets.verifiedBadge && shellAssets.verifiedBadge.url) {
 			badge.style.backgroundImage = 'url('
@@ -1473,9 +1623,6 @@ select {
 		if (Object.prototype.hasOwnProperty.call(data, 'backVisible')) {
 			shellState.backVisible = !!data.backVisible;
 		}
-		if (Object.prototype.hasOwnProperty.call(data, 'settingsVisible')) {
-			shellState.settingsVisible = !!data.settingsVisible;
-		}
 		if (Object.prototype.hasOwnProperty.call(data, 'menuVisible')) {
 			shellState.menuVisible = !!data.menuVisible;
 		}
@@ -1483,7 +1630,6 @@ select {
 			shellState.badgeVisible = !!data.badgeVisible;
 		}
 		controls.back.classList.toggle('hidden', !shellState.backVisible);
-		controls.settings.classList.toggle('hidden', !shellState.settingsVisible);
 		controls.menu.classList.toggle('hidden', !shellState.menuVisible);
 		controls.menu.disabled = !shellState.menuVisible
 			|| !shellState.menuItems.length;
@@ -1551,16 +1697,17 @@ select {
 	function updateFooter() {
 		const visible = visibleButtons();
 		const hasButtons = !!visible.buttons.length;
-		const disclosureVisible = !!shellState.bottomText.trim()
-			&& !hasButtons
-			&& !shellState.isFullscreen;
-		disclosure.textContent = shellState.bottomText;
-		disclosure.classList.toggle('visible', disclosureVisible);
+		disclosure.textContent = '';
+		disclosure.classList.remove('visible');
 		buttonsWrap.classList.toggle('visible', hasButtons);
-		footer.classList.toggle('visible', disclosureVisible || hasButtons);
+		footer.classList.toggle('visible', hasButtons);
 		root.style.setProperty(
 			'--footer-gap',
-			hasButtons ? 'var(--footer-button-skip)' : 'var(--disclosure-skip)');
+			shellState.isFullscreen
+				? '0px'
+				: hasButtons
+				? 'var(--footer-button-skip)'
+				: 'var(--disclosure-skip)');
 		scheduleViewport();
 	}
 
@@ -1802,10 +1949,10 @@ select {
 	controls.back.addEventListener('click', function() {
 		postToFrame('back_button_pressed', {});
 	});
-	controls.settings.addEventListener('click', function() {
-		postToFrame('settings_button_pressed', {});
-	});
 	controls.menu.addEventListener('click', toggleMenu);
+	header.addEventListener('selectstart', function(event) {
+		event.preventDefault();
+	});
 	header.addEventListener('mousedown', beginShellMove);
 	for (const handle of resizeHandles) {
 		handle.addEventListener('mousedown', function(event) {
@@ -1843,12 +1990,30 @@ select {
 		createIframe(frameUrl || 'about:blank');
 	}
 
+	function reloadFrame() {
+		if (!iframe) {
+			return;
+		}
+		if (reloadSupported && frameLoaded && iframe.contentWindow) {
+			sendToFrame('reload_iframe', {});
+			if (reloadTimeout) {
+				window.clearTimeout(reloadTimeout);
+			}
+			reloadTimeout = window.setTimeout(function() {
+				reloadTimeout = null;
+				fallbackReloadFrame();
+			}, 500);
+			return;
+		}
+		fallbackReloadFrame();
+	}
+
 	window.TelegramDesktopShell = {
 		bootstrap: function(data) {
 			applyMetrics(data && data.metrics);
 			applyColors(data && data.colors);
 			applyChrome(data || {});
-			shellState.bottomText = (data && data.bottomText) || '';
+			shellState.bottomText = '';
 			title.textContent = (data && data.title) || '';
 			document.title = (data && data.title) || 'Telegram';
 			frameUrl = (data && data.url) || 'about:blank';
@@ -1859,6 +2024,7 @@ select {
 		nativeEvent: function(eventType, eventData) {
 			if (eventType === 'fullscreen_changed' && eventData) {
 				shellState.isFullscreen = !!eventData.is_fullscreen;
+				root.classList.toggle('fullscreen', shellState.isFullscreen);
 				updateFooter();
 			}
 			postToFrame(eventType, eventData || {});
@@ -1884,7 +2050,7 @@ select {
 			renderMenu();
 		},
 		setBottomText: function(data) {
-			shellState.bottomText = (data && data.text) || '';
+			shellState.bottomText = '';
 			updateFooter();
 		},
 		setButton: function(data) {
@@ -1933,6 +2099,7 @@ select {
 		setProgress: function(data) {
 			root.classList.toggle('loading', !!(data && data.shown));
 		},
+		reloadFrame: reloadFrame,
 		sendViewport: scheduleViewport
 	};
 })();
@@ -1955,17 +2122,11 @@ select {
 <div id="title"></div>
 <div id="badge" class="hidden" aria-hidden="true"></div>
 </div>
-<button id="settings" class="title-control hidden" type="button" aria-label="Settings">
-<svg viewBox="0 0 24 24" aria-hidden="true">
-<path d="M12 8.75a3.25 3.25 0 1 1 0 6.5a3.25 3.25 0 0 1 0-6.5z"></path>
-<path d="M4.75 13.1v-2.2l1.8-.45c.18-.58.41-1.12.7-1.62L6.2 7.2l1.55-1.55l1.63 1.05c.5-.29 1.04-.52 1.62-.7L11.45 4h2.2l.45 1.8c.58.18 1.12.41 1.62.7l1.63-1.05L18.9 7.2l-1.05 1.63c.29.5.52 1.04.7 1.62l1.8.45v2.2l-1.8.45c-.18.58-.41 1.12-.7 1.62l1.05 1.63l-1.55 1.55l-1.63-1.05c-.5.29-1.04.52-1.62.7l-.45 1.8h-2.2l-.45-1.8a7.06 7.06 0 0 1-1.62-.7l-1.63 1.05L6.2 16.8l1.05-1.63a7.06 7.06 0 0 1-.7-1.62L4.75 13.1z"></path>
-</svg>
-</button>
 <button id="menu-toggle" class="title-control" type="button" aria-label="Menu">
 <svg viewBox="0 0 24 24" aria-hidden="true">
-<circle class="fill-icon" cx="6.5" cy="12" r="1.7"></circle>
+<circle class="fill-icon" cx="12" cy="6.5" r="1.7"></circle>
 <circle class="fill-icon" cx="12" cy="12" r="1.7"></circle>
-<circle class="fill-icon" cx="17.5" cy="12" r="1.7"></circle>
+<circle class="fill-icon" cx="12" cy="17.5" r="1.7"></circle>
 </svg>
 </button>
 <button id="close" class="title-control" type="button" aria-label="Close">
@@ -1982,6 +2143,10 @@ select {
 <div id="buttons-wrap"><div id="buttons"></div></div>
 </footer>
 </div>
+<div id="menu"><div id="menu-list"></div></div>
+<div id="blocker"></div>
+</div>
+</div>
 <div id="resize-handles">
 <div class="resize-handle" data-resize-edge="top-left"></div>
 <div class="resize-handle" data-resize-edge="top"></div>
@@ -1991,10 +2156,6 @@ select {
 <div class="resize-handle" data-resize-edge="bottom-left"></div>
 <div class="resize-handle" data-resize-edge="bottom"></div>
 <div class="resize-handle" data-resize-edge="bottom-right"></div>
-</div>
-<div id="menu"><div id="menu-list"></div></div>
-<div id="blocker"></div>
-</div>
 </div>
 </div>)";
 	return result;
@@ -2386,6 +2547,17 @@ Panel::Panel(Args &&args)
 
 	_fullscreen.value(
 	) | rpl::on_next([=](bool fullscreen) {
+		if (_externalShell) {
+			if (!_webview) {
+				return;
+			}
+			applyExternalShellFullscreen(fullscreen);
+			sendFullScreen();
+			sendSafeArea();
+			sendContentSafeArea();
+			sendViewport();
+			return;
+		}
 		_widget->toggleFullScreen(fullscreen);
 		layoutButtons();
 		sendFullScreen();
@@ -2395,7 +2567,9 @@ Panel::Panel(Args &&args)
 
 	_widget->fullScreenValue(
 	) | rpl::on_next([=](bool fullscreen) {
-		_fullscreen = fullscreen;
+		if (!_externalShell) {
+			_fullscreen = fullscreen;
+		}
 	}, _widget->lifetime());
 
 	_widget->closeRequests(
@@ -2435,9 +2609,7 @@ Panel::Panel(Args &&args)
 	setTitle(std::move(args.title));
 	_bottomText.value() | rpl::on_next([=](const QString &text) {
 		if (_externalShell) {
-			sendExternalShellMethod(
-				"setBottomText",
-				{ { u"text"_q, text } });
+			return;
 		}
 	}, _widget->lifetime());
 	_externalTitleBadgeVisible = (args.titleBadge != nullptr);
@@ -2805,9 +2977,8 @@ void Panel::sendExternalShellBootstrap() {
 		{ u"title"_q, _externalTitle },
 		{ u"metrics"_q, ExternalShellMetrics() },
 		{ u"colors"_q, ExternalShellColorPayload(this, params) },
-		{ u"bottomText"_q, _bottomText.current() },
+		{ u"bottomText"_q, QString() },
 		{ u"backVisible"_q, _externalBackVisible },
-		{ u"settingsVisible"_q, _hasSettingsButton },
 		{ u"menuVisible"_q, true },
 		{ u"badgeVisible"_q, _externalTitleBadgeVisible },
 	});
@@ -2903,6 +3074,26 @@ void Panel::sendExternalShellButton(
 	});
 }
 
+void Panel::setInitialExternalShellWindowSize() {
+	if (!_externalShell || !_webview) {
+		return;
+	}
+	const auto view = _webview->window.widget();
+	if (!view) {
+		return;
+	}
+	const auto size = ExternalShellWindowSize(st::botWebViewPanelSize);
+	_webview->window.resize(size);
+	view->resize(size);
+}
+
+void Panel::applyExternalShellFullscreen(bool fullscreen) {
+	if (!_externalShell || !_webview) {
+		return;
+	}
+	_webview->window.setFullscreen(fullscreen);
+}
+
 void Panel::requestExternalShellButtonEmoji(const QString &name) {
 	auto *state = (name == u"main"_q)
 		? &_externalMainButton
@@ -2977,8 +3168,7 @@ void Panel::sendExternalShellAssets() {
 	sendExternalShellMethod("setAssets", {
 		{ u"icons"_q, icons },
 		{ u"verifiedBadge"_q, SerializeVerifiedBadgeAsset() },
-		{ u"attentionColor"_q,
-			st::menuIconAttentionColor->c.name(QColor::HexRgb) },
+		{ u"menuPalette"_q, SerializeExternalShellMenuPalette() },
 	});
 }
 
@@ -2989,9 +3179,7 @@ void Panel::handleExternalShellMenuAction(const QString &id) {
 		},
 		.reload = [=] {
 			if (_webview && _webview->window.widget()) {
-				_externalShellBootstrapped = false;
-				_webview->window.navigate(
-					u"https://web.telegram.org/blank.html"_q);
+				sendExternalShellMethod("reloadFrame", {});
 			} else if (const auto params = _delegate->botThemeParams()
 				; createWebview(params)) {
 				showWebviewProgress();
@@ -3019,7 +3207,6 @@ void Panel::handleExternalShellMenuAction(const QString &id) {
 void Panel::sendExternalShellChrome() {
 	sendExternalShellMethod("setChrome", {
 		{ u"backVisible"_q, _externalBackVisible },
-		{ u"settingsVisible"_q, _hasSettingsButton },
 		{ u"menuVisible"_q, true },
 		{ u"badgeVisible"_q, _externalTitleBadgeVisible },
 	});
@@ -3181,8 +3368,8 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 	});
 
 	if (_externalShell) {
-		raw->resize(st::botWebViewPanelSize);
-		raw->widget()->resize(st::botWebViewPanelSize);
+		setInitialExternalShellWindowSize();
+		applyExternalShellFullscreen(_fullscreen.current());
 	} else {
 		rpl::combine(
 			container->geometryValue(),

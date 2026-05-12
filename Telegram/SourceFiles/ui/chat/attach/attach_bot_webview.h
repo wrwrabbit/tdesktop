@@ -214,6 +214,8 @@ private:
 	void sendExternalShellAssets();
 	void handleExternalShellMenuAction(const QString &id);
 	void requestExternalShellButtonEmoji(const QString &name);
+	void setInitialExternalShellWindowSize();
+	void applyExternalShellFullscreen(bool fullscreen);
 	void sendExternalShellChrome();
 	void setExternalShellBlocked(bool blocked);
 	Webview::PopupResult showBlockingPopup(Webview::PopupArgs &&args);
