@@ -3358,12 +3358,6 @@ void EmojiListWidget::processHideFinished() {
 }
 
 void EmojiListWidget::processPanelHideFinished() {
-	if (_search) {
-		_search->cancel();
-	}
-	_nextSearchQuery.clear();
-	applyNextSearchQuery();
-	cancelSearchRequest();
 	unloadAllCustom();
 	if (_localSetsManager->clearInstalledLocally()) {
 		refreshCustom();
