@@ -167,15 +167,20 @@ public:
 	}
 	void setDeleteEventMeta(
 			base::flat_map<not_null<const HistoryItem*>, uint64> &&itemEventIds,
-			base::flat_map<uint64, UserId> &&eventAdminIds) {
+			base::flat_map<uint64, UserId> &&eventAdminIds,
+			base::flat_map<uint64, TimeId> &&eventDates) {
 		_itemEventIds = std::move(itemEventIds);
 		_eventAdminIds = std::move(eventAdminIds);
+		_eventDates = std::move(eventDates);
 	}
 	auto takeItemEventIds() {
 		return std::move(_itemEventIds);
 	}
 	auto takeEventAdminIds() {
 		return std::move(_eventAdminIds);
+	}
+	auto takeEventDates() {
+		return std::move(_eventDates);
 	}
 
 private:
@@ -192,6 +197,7 @@ private:
 	std::set<uint64> _expandedGroups;
 	base::flat_map<not_null<const HistoryItem*>, uint64> _itemEventIds;
 	base::flat_map<uint64, UserId> _eventAdminIds;
+	base::flat_map<uint64, TimeId> _eventDates;
 
 };
 

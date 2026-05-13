@@ -244,8 +244,16 @@ private:
 
 	void requestAdmins();
 	void checkPreloadMore();
+	[[nodiscard]] int displayItemsAboveVisibleTop() const;
 	void updateVisibleTopItem();
 	void preloadMore(Direction direction);
+
+	struct ScrollAnchor {
+		Element *view = nullptr;
+		int delta = 0;
+	};
+	[[nodiscard]] ScrollAnchor captureScrollAnchor() const;
+	[[nodiscard]] int computeScrollFromAnchor(ScrollAnchor anchor) const;
 	void updateSize();
 	void updateMinMaxIds();
 	void updateEmptyText();
@@ -337,12 +345,20 @@ private:
 	base::flat_map<FullMsgId, MsgId> _realIdsForReport;
 
 	// Delete event grouping.
-	std::vector<Element*> _displayItems;
+	struct DisplayEntry {
+		Element *view = nullptr;
+		// Largest _items index covered by this entry (reverse layout).
+		int topItemsIndex = 0;
+	};
+	std::vector<DisplayEntry> _displayItems;
 	std::vector<DeleteGroup> _deleteGroups;
 	std::set<uint64> _expandedGroups;
 	std::vector<OwnedItem> _summaryItems;
 	base::flat_map<not_null<const HistoryItem*>, uint64> _itemEventIds;
 	base::flat_map<uint64, UserId> _eventAdminIds;
+	base::flat_map<uint64, TimeId> _eventDates;
+	// Old-edge eventId of each group from the previous pass; sticky boundary.
+	base::flat_set<uint64> _previousDeleteGroupAnchors;
 	base::flat_set<not_null<HistoryItem*>> _expandMarkupItems;
 	Ui::Animations::Simple _toggleAnimation;
 	bool _skipScrollRestore = false;
@@ -356,6 +372,7 @@ private:
 	int _visibleBottom = 0;
 	Element *_visibleTopItem = nullptr;
 	int _visibleTopFromItem = 0;
+	int _visibleTopDisplayIndex = -1;
 
 	bool _isChatWide = false;
 	bool _scrollDateShown = false;
