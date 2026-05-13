@@ -237,7 +237,12 @@ void RebuildVisibleSegmentLookup(
 		}
 	};
 	if (segment.block) {
-		if (segment.block->mediaBlock) {
+		if (segment.block->kind == PreparedBlockKind::RelatedArticle
+			&& segment.block->preparedLink) {
+			result.preparedLink = segment.block->preparedLink;
+			result.state.link = segment.block->preparedLinkHandler;
+			result.mediaActivation = {};
+		} else if (segment.block->mediaBlock) {
 			if (const auto link = segment.block->mediaBlock->linkAt(point)) {
 				result.state.link = link;
 				result.preparedLink = std::nullopt;

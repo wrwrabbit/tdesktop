@@ -374,6 +374,18 @@ void MarkdownPreviewRoot::activateLink(
 				link.target));
 		}
 		break;
+	case PreparedLinkKind::InstantViewPage: {
+		auto target = link.target;
+		if (!link.fragment.isEmpty()) {
+			target += u"#"_q + link.fragment;
+		}
+		_callback({
+			.type = Event::Type::OpenPage,
+			.webpageId = link.webpageId,
+			.url = std::move(target),
+			.context = CurrentClickHandlerContext(_options),
+		});
+	} break;
 	case PreparedLinkKind::Anchor:
 	case PreparedLinkKind::FootnoteBacklink:
 		if (!scrollToAnchor(link.target)) {

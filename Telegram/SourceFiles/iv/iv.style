@@ -53,11 +53,12 @@ ivResetZoomLabel: FlatLabel(defaultFlatLabel) {
 ivResetZoomInnerPadding: 20px;
 ivBackIconDisabled: icon {{ "box_button_back", menuIconFg }};
 ivForwardIcon: icon {{ "box_button_back-flip_horizontal", menuIconColor }};
+ivForwardIconDisabled: icon {{ "box_button_back-flip_horizontal", menuIconFg }};
 ivForward: IconButton(ivBack) {
 	width: 48px;
 	icon: ivForwardIcon;
 	iconOver: ivForwardIcon;
-	rippleAreaPosition: point(0px, 6px);
+	rippleAreaPosition: point(6px, 6px);
 }
 ivSubtitleFont: font(16px semibold);
 ivSubtitle: FlatLabel(defaultFlatLabel) {
@@ -86,6 +87,7 @@ MarkdownBlockSkips {
 	map: pixels;
 	channel: pixels;
 	groupedMedia: pixels;
+	relatedArticle: pixels;
 	placeholder: pixels;
 }
 MarkdownList {
@@ -193,6 +195,27 @@ MarkdownChannel {
 	subtitleFg: color;
 	button: MarkdownChannelButton;
 }
+MarkdownRelatedArticle {
+	padding: margins;
+	border: pixels;
+	borderFg: color;
+	bg: color;
+	radius: pixels;
+	textSkip: pixels;
+	footerSkip: pixels;
+	thumbnailSize: pixels;
+	thumbnailSkip: pixels;
+	thumbnailRadius: pixels;
+	titleLines: int;
+	subtitleLines: int;
+	footerLines: int;
+	titleStyle: TextStyle;
+	titleFg: color;
+	subtitleStyle: TextStyle;
+	subtitleFg: color;
+	footerStyle: TextStyle;
+	footerFg: color;
+}
 MarkdownGroupedMedia {
 	padding: margins;
 	captionSkip: pixels;
@@ -246,6 +269,7 @@ Markdown {
 	photo: MarkdownPhoto;
 	audio: MarkdownAudio;
 	channel: MarkdownChannel;
+	relatedArticle: MarkdownRelatedArticle;
 	groupedMedia: MarkdownGroupedMedia;
 	failure: MarkdownFailure;
 }
@@ -280,6 +304,7 @@ defaultMarkdownBlockSkips: MarkdownBlockSkips {
 	map: 20px;
 	channel: 20px;
 	groupedMedia: 20px;
+	relatedArticle: 10px;
 	placeholder: 20px;
 }
 defaultMarkdownList: MarkdownList {
@@ -405,6 +430,37 @@ defaultMarkdownChannel: MarkdownChannel {
 	subtitleFg: windowSubTextFg;
 	button: defaultMarkdownChannelButton;
 }
+defaultMarkdownRelatedArticleTitleStyle: TextStyle(defaultMarkdownBodyStyle) {
+	font: font(16px semibold);
+	lineHeight: 22px;
+}
+defaultMarkdownRelatedArticleSubtitleStyle: TextStyle(defaultMarkdownBodyStyle) {
+	font: font(15px);
+	lineHeight: 21px;
+}
+defaultMarkdownRelatedArticleFooterStyle: TextStyle(defaultMarkdownDetailsSummaryStyle) {
+}
+defaultMarkdownRelatedArticle: MarkdownRelatedArticle {
+	padding: margins(12px, 12px, 12px, 12px);
+	border: 1px;
+	borderFg: inputBorderFg;
+	bg: windowBgOver;
+	radius: 6px;
+	textSkip: 6px;
+	footerSkip: 8px;
+	thumbnailSize: 87px;
+	thumbnailSkip: 12px;
+	thumbnailRadius: 6px;
+	titleLines: 2;
+	subtitleLines: 3;
+	footerLines: 1;
+	titleStyle: defaultMarkdownRelatedArticleTitleStyle;
+	titleFg: windowFg;
+	subtitleStyle: defaultMarkdownRelatedArticleSubtitleStyle;
+	subtitleFg: windowSubTextFg;
+	footerStyle: defaultMarkdownRelatedArticleFooterStyle;
+	footerFg: windowSubTextFg;
+}
 defaultMarkdownGroupedMedia: MarkdownGroupedMedia {
 	padding: margins(4px, 0px, 0px, 0px);
 	captionSkip: 12px;
@@ -500,6 +556,7 @@ defaultMarkdown: Markdown {
 	photo: defaultMarkdownPhoto;
 	audio: defaultMarkdownAudio;
 	channel: defaultMarkdownChannel;
+	relatedArticle: defaultMarkdownRelatedArticle;
 	groupedMedia: defaultMarkdownGroupedMedia;
 	failure: defaultMarkdownFailure;
 }

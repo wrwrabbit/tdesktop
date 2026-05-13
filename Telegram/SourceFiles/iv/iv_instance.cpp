@@ -1419,6 +1419,7 @@ Markdown::OpenOptions Shown::markdownOpenOptions(
 		.sourceName = page->displayedSiteName(),
 		.sourceUrl = page->url,
 		.initialFragment = std::move(initialFragment),
+		.currentPageId = page->id,
 		.viewerKind = Markdown::ViewerKind::InstantView,
 		.clickHandlerContextRef = clickHandlerContext,
 		.ivWebviewDataRequest = [=](
@@ -1482,11 +1483,17 @@ void Shown::createMarkdownController(
 		case FromType::Quit:
 			_events.fire({ .type = ToType::Quit });
 			break;
+		case FromType::OpenPage:
+			_events.fire({
+				.type = ToType::OpenPage,
+				.url = event.url,
+				.context = QString::number(event.webpageId),
+			});
+			break;
 		case FromType::OpenFile:
 			break;
 		}
 	}, _markdownController->lifetime());
-	Q_UNUSED(page);
 }
 
 void Shown::showWindowed(Prepared result, Source source, bool refresh) {

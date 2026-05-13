@@ -62,6 +62,7 @@ namespace {
 	case PreparedBlockKind::Map:
 	case PreparedBlockKind::Channel:
 	case PreparedBlockKind::GroupedMedia:
+	case PreparedBlockKind::RelatedArticle:
 	case PreparedBlockKind::Placeholder:
 	case PreparedBlockKind::Details:
 		return false;
@@ -605,6 +606,14 @@ namespace {
 			top,
 			width,
 			context);
+	case PreparedBlockKind::RelatedArticle:
+		return LayoutRelatedArticleBlock(
+			prepared,
+			markdown,
+			left,
+			top,
+			width,
+			mediaRuntime);
 	case PreparedBlockKind::Placeholder:
 		return LayoutPlaceholderBlock(
 			prepared,

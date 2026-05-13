@@ -142,8 +142,23 @@ namespace {
 	return result.trimmed();
 }
 
-void NormalizeExternalLink(PreparedLink *result, const QString &target) {
-	result->kind = PreparedLinkKind::External;
+[[nodiscard]] QString ExternalLinkDisplayText(const PreparedLink &link) {
+	if (link.entityType == EntityType::Email) {
+		return link.target;
+	}
+	const auto original = QUrl(link.target);
+	const auto good = QUrl(original.isValid()
+		? original.toEncoded()
+		: QString());
+	return good.isValid() ? good.toDisplayString() : link.target;
+}
+
+} // namespace
+
+void NormalizePreparedUrlLink(PreparedLink *result, const QString &target) {
+	if (!result) {
+		return;
+	}
 	result->fragment = QString();
 	if (target.startsWith(u"mailto:"_q, Qt::CaseInsensitive)) {
 		result->target = NormalizeMailtoTarget(target);
@@ -158,7 +173,22 @@ void NormalizeExternalLink(PreparedLink *result, const QString &target) {
 	result->shown = EntityLinkShown::Full;
 }
 
-} // namespace
+void FinalizePreparedUrlLink(
+		PreparedLink *link,
+		QStringView renderedText) {
+	if (!link || link->entityType != EntityType::Url) {
+		return;
+	}
+	if (renderedText == QStringView(ExternalLinkDisplayText(*link))) {
+		return;
+	}
+	if (UrlClickHandler::EncodeForOpening(renderedText.toString())
+		== link->target) {
+		link->shown = EntityLinkShown::Partial;
+		return;
+	}
+	link->entityType = EntityType::CustomUrl;
+}
 
 QString InternalLinkData(uint16 index) {
 	return u"internal:index"_q + QChar(index);
@@ -190,7 +220,8 @@ PreparedLink ClassifiedLink(
 		return result;
 	}
 	if (HasUrlScheme(target)) {
-		NormalizeExternalLink(&result, target);
+		result.kind = PreparedLinkKind::External;
+		NormalizePreparedUrlLink(&result, target);
 		return result;
 	}
 

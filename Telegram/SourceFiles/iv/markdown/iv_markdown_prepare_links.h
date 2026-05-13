@@ -9,10 +9,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "iv/markdown/iv_markdown_prepare_state.h"
 
+#include <QtCore/QStringView>
+
 namespace Iv::Markdown {
 
 [[nodiscard]] QString InternalLinkData(uint16 index);
 [[nodiscard]] QString NormalizeFragmentId(QString fragment);
+void NormalizePreparedUrlLink(PreparedLink *result, const QString &target);
+void FinalizePreparedUrlLink(PreparedLink *link, QStringView renderedText);
 [[nodiscard]] PreparedLink ClassifiedLink(
 	uint16 index,
 	QString target,

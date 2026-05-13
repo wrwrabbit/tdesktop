@@ -45,6 +45,39 @@ void PrependText(TextWithEntities *text, QString prefix) {
 	return langDateTimeFull(base::unixtime::parse(date));
 }
 
+[[nodiscard]] QString NativeIvRelatedArticleFooterText(
+		const MTPDpageRelatedArticle &data) {
+	const auto author = qs(data.vauthor().value_or_empty()).trimmed();
+	const auto published = data.vpublished_date();
+	if (published && !author.isEmpty()) {
+		return author + u", "_q + NativeIvDateText(published->v);
+	} else if (published) {
+		return NativeIvDateText(published->v);
+	}
+	return author;
+}
+
+[[nodiscard]] PreparedLink PrepareNativeIvRelatedArticleLink(
+		QString url,
+		uint64 webpageId,
+		QStringView renderedText) {
+	auto result = PreparedLink();
+	if (webpageId) {
+		result.kind = PreparedLinkKind::InstantViewPage;
+		result.webpageId = webpageId;
+		NormalizePreparedUrlLink(&result, url);
+	} else {
+		result = ClassifiedLink(0, url, nullptr);
+		if (result.kind == PreparedLinkKind::RejectedRelative
+			|| result.kind == PreparedLinkKind::LocalFile) {
+			result.kind = PreparedLinkKind::External;
+			NormalizePreparedUrlLink(&result, url);
+		}
+	}
+	FinalizePreparedUrlLink(&result, renderedText);
+	return result;
+}
+
 [[nodiscard]] QString NativeIvDetailsAnchorId(NativeIvPrepareState *state) {
 	return u"details-"_q + QString::number(++state->nextGeneratedId);
 }
@@ -1532,6 +1565,87 @@ void MarkNativeIvTableSlots(
 	return true;
 }
 
+[[nodiscard]] bool PrepareNativeIvRelatedArticlesBlock(
+		const MTPDpageBlockRelatedArticles &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto related = std::vector<PreparedBlock>();
+	related.reserve(data.varticles().v.size());
+	for (const auto &article : data.varticles().v) {
+		auto prepared = PreparedBlock();
+		prepared.kind = PreparedBlockKind::RelatedArticle;
+		const auto &row = article.data();
+		prepared.relatedArticle.title = qs(
+			row.vtitle().value_or_empty()).trimmed();
+		prepared.relatedArticle.description = qs(
+			row.vdescription().value_or_empty()).trimmed();
+		prepared.relatedArticle.footer = NativeIvRelatedArticleFooterText(row);
+		prepared.relatedArticle.photoId = row.vphoto_id().value_or_empty();
+		if (prepared.relatedArticle.title.isEmpty()
+			&& prepared.relatedArticle.description.isEmpty()
+			&& prepared.relatedArticle.footer.isEmpty()) {
+			prepared.relatedArticle.title = qs(row.vurl()).trimmed();
+		}
+		const auto linkText = !prepared.relatedArticle.title.isEmpty()
+			? prepared.relatedArticle.title
+			: !prepared.relatedArticle.description.isEmpty()
+			? prepared.relatedArticle.description
+			: prepared.relatedArticle.footer;
+		prepared.relatedArticle.link = PrepareNativeIvRelatedArticleLink(
+			qs(row.vurl()),
+			uint64(row.vwebpage_id().v),
+			linkText);
+		const auto appendLine = [&](QString *copyText, const QString &line) {
+			if (line.isEmpty()) {
+				return;
+			} else if (!copyText->isEmpty()) {
+				copyText->append(QChar('\n'));
+			}
+			copyText->append(line);
+		};
+		appendLine(&prepared.relatedArticle.copyText, prepared.relatedArticle.title);
+		appendLine(
+			&prepared.relatedArticle.copyText,
+			prepared.relatedArticle.description);
+		appendLine(&prepared.relatedArticle.copyText, prepared.relatedArticle.footer);
+		if (prepared.relatedArticle.copyText.isEmpty()) {
+			prepared.relatedArticle.copyText = prepared.relatedArticle.link.target;
+		}
+		related.push_back(std::move(prepared));
+	}
+	if (related.empty()) {
+		return true;
+	}
+
+	auto title = PreparedIvRichText();
+	auto anchorId = QString();
+	if (!PrepareNativeIvRichText(
+			data.vtitle(),
+			&title,
+			&anchorId,
+			state)) {
+		return false;
+	}
+	SortPreparedIvRichText(&title);
+	if (!title.text.text.isEmpty()) {
+		if (!AppendPreparedIvRichBlock(
+				result,
+				PreparedBlockKind::Heading,
+				4,
+				std::move(title),
+				std::move(anchorId))) {
+			return false;
+		}
+	} else if (!anchorId.isEmpty() && related.front().anchorId.isEmpty()) {
+		related.front().anchorId = std::move(anchorId);
+	}
+	result->insert(
+		result->end(),
+		std::make_move_iterator(related.begin()),
+		std::make_move_iterator(related.end()));
+	return true;
+}
+
 [[nodiscard]] bool PrepareNativeIvBlock(
 		const MTPPageBlock &block,
 		std::vector<PreparedBlock> *result,
@@ -1713,10 +1827,8 @@ void MarkNativeIvTableSlots(
 			: false;
 	}, [&](const MTPDpageBlockDetails &data) {
 		return PrepareNativeIvDetailsBlock(data, result, state);
-	}, [&](const MTPDpageBlockRelatedArticles &) {
-		return PrepareNativeIvPlainPlaceholderBlock(
-			u"Related Articles Placeholder"_q,
-			result);
+	}, [&](const MTPDpageBlockRelatedArticles &data) {
+		return PrepareNativeIvRelatedArticlesBlock(data, result, state);
 	}, [&](const MTPDpageBlockMap &data) {
 		return PrepareNativeIvMapBlock(data, result, state);
 		});

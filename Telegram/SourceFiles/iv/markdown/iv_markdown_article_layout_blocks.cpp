@@ -307,6 +307,18 @@ void SetPlainTextLeaf(
 		TextLineHeight(textStyle));
 }
 
+[[nodiscard]] int LeafHeightWithLineLimit(
+		const Ui::Text::String &leaf,
+		const style::TextStyle &textStyle,
+		int width,
+		int lines) {
+	auto result = LeafHeight(leaf, textStyle, width);
+	if (lines > 0) {
+		result = std::min(result, lines * TextLineHeight(textStyle));
+	}
+	return result;
+}
+
 [[nodiscard]] int MediaHeightForWidth(
 		int width,
 		int aspectWidth,
@@ -582,6 +594,8 @@ int BlockSkip(
 		return skips.map;
 	case PreparedBlockKind::Channel:
 		return skips.channel;
+	case PreparedBlockKind::RelatedArticle:
+		return skips.relatedArticle;
 	case PreparedBlockKind::Placeholder:
 		return skips.placeholder;
 	case PreparedBlockKind::Details:
@@ -1165,6 +1179,169 @@ LaidOutBlock LayoutPlaceholderBlock(
 		blockWidth,
 		std::max(bottom - top, mediaHeight));
 	block.outer = block.contentRect;
+	return block;
+}
+
+LaidOutBlock LayoutRelatedArticleBlock(
+		const PreparedBlock &prepared,
+		const style::Markdown &markdown,
+		int left,
+		int top,
+		int width,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime) {
+	auto block = LaidOutBlock();
+	block.kind = PreparedBlockKind::RelatedArticle;
+	block.anchorId = prepared.anchorId;
+	block.copyText = prepared.relatedArticle.copyText;
+	block.labelText = prepared.relatedArticle.title;
+	block.preparedLink = prepared.relatedArticle.link;
+	block.preparedLinkHandler = CreatePreparedLinkHandler(
+		prepared.relatedArticle.link);
+	if (prepared.relatedArticle.photoId && mediaRuntime) {
+		block.photoRuntime = mediaRuntime->resolvePhoto(
+			prepared.relatedArticle.photoId);
+	}
+
+	const auto &card = markdown.relatedArticle;
+	const auto blockWidth = std::max(width, 1);
+	const auto hasThumbnail = (prepared.relatedArticle.photoId != 0);
+	const auto thumbnailSize = hasThumbnail
+		? std::max(card.thumbnailSize, 1)
+		: 0;
+	const auto thumbnailSkip = hasThumbnail ? card.thumbnailSkip : 0;
+	const auto contentLeft = left + card.padding.left();
+	const auto contentWidth = std::max(
+		blockWidth
+			- card.padding.left()
+			- card.padding.right()
+			- thumbnailSize
+			- thumbnailSkip,
+		1);
+
+	auto titleHeight = 0;
+	if (!prepared.relatedArticle.title.isEmpty()) {
+		block.labelWidth = contentWidth;
+		SetPlainTextLeaf(
+			&block.labelLeaf,
+			card.titleStyle,
+			prepared.relatedArticle.title,
+			block.labelWidth);
+		titleHeight = LeafHeightWithLineLimit(
+			block.labelLeaf,
+			card.titleStyle,
+			block.labelWidth,
+			card.titleLines);
+	}
+
+	auto subtitleHeight = 0;
+	if (!prepared.relatedArticle.description.isEmpty()) {
+		block.subtitleWidth = contentWidth;
+		SetPlainTextLeaf(
+			&block.subtitleLeaf,
+			card.subtitleStyle,
+			prepared.relatedArticle.description,
+			block.subtitleWidth);
+		subtitleHeight = LeafHeightWithLineLimit(
+			block.subtitleLeaf,
+			card.subtitleStyle,
+			block.subtitleWidth,
+			card.subtitleLines);
+	}
+
+	auto footerHeight = 0;
+	if (!prepared.relatedArticle.footer.isEmpty()) {
+		block.actionWidth = contentWidth;
+		SetPlainTextLeaf(
+			&block.actionLeaf,
+			card.footerStyle,
+			prepared.relatedArticle.footer,
+			block.actionWidth);
+		footerHeight = LeafHeightWithLineLimit(
+			block.actionLeaf,
+			card.footerStyle,
+			block.actionWidth,
+			card.footerLines);
+	}
+
+	auto textHeight = 0;
+	if (titleHeight) {
+		textHeight += titleHeight;
+	}
+	if (subtitleHeight) {
+		textHeight += subtitleHeight + (textHeight ? card.textSkip : 0);
+	}
+	if (footerHeight) {
+		textHeight += footerHeight
+			+ (textHeight ? card.footerSkip : 0);
+	}
+	const auto cardContentHeight = std::max(textHeight, thumbnailSize);
+	const auto cardHeight = card.padding.top()
+		+ cardContentHeight
+		+ card.padding.bottom();
+
+	block.mediaRect = QRect(left, top, blockWidth, cardHeight);
+	block.visibleMediaRect = block.mediaRect;
+	if (hasThumbnail) {
+		block.thumbnailRect = QRect(
+			left + blockWidth - card.padding.right() - thumbnailSize,
+			top + card.padding.top()
+				+ std::max((cardContentHeight - thumbnailSize) / 2, 0),
+			thumbnailSize,
+			thumbnailSize);
+	}
+
+	auto textTop = top + card.padding.top()
+		+ std::max((cardContentHeight - textHeight) / 2, 0);
+	if (titleHeight) {
+		block.labelRect = QRect(
+			contentLeft,
+			textTop,
+			block.labelWidth,
+			titleHeight);
+		textTop += titleHeight;
+	}
+	if (subtitleHeight) {
+		textTop += block.labelRect.isEmpty() ? 0 : card.textSkip;
+		block.subtitleRect = QRect(
+			contentLeft,
+			textTop,
+			block.subtitleWidth,
+			subtitleHeight);
+		textTop += subtitleHeight;
+	}
+	if (footerHeight) {
+		textTop += (block.labelRect.isEmpty() && block.subtitleRect.isEmpty())
+			? 0
+			: card.footerSkip;
+		block.actionRect = QRect(
+			contentLeft,
+			textTop,
+			block.actionWidth,
+			footerHeight);
+	}
+
+	const auto setBaseline = [&](const Ui::Text::String &leaf,
+			QRect rect,
+			const style::TextStyle &textStyle) {
+		if (rect.isEmpty() || leaf.isEmpty()) {
+			return false;
+		}
+		block.firstLineBaseline = LeafFirstLineBaseline(
+			leaf,
+			rect,
+			textStyle);
+		return true;
+	};
+	if (!setBaseline(block.labelLeaf, block.labelRect, card.titleStyle)
+		&& !setBaseline(
+			block.subtitleLeaf,
+			block.subtitleRect,
+			card.subtitleStyle)
+		&& !setBaseline(block.actionLeaf, block.actionRect, card.footerStyle)) {
+		block.firstLineBaseline = top + card.padding.top();
+	}
+	block.contentRect = block.mediaRect;
+	block.outer = block.mediaRect;
 	return block;
 }
 

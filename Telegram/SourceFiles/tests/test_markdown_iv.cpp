@@ -792,6 +792,54 @@ struct NativeIvMediaFixture {
 		MTP_string(email));
 }
 
+[[nodiscard]] MTPPageRelatedArticle NativeIvRelatedArticle(
+		QString url,
+		int64 webpageId = 0,
+		QString title = QString(),
+		QString description = QString(),
+		uint64 photoId = 0,
+		QString author = QString(),
+		int publishedDate = 0) {
+	auto flags = MTPDpageRelatedArticle::Flags();
+	if (!title.isEmpty()) {
+		flags |= MTPDpageRelatedArticle::Flag::f_title;
+	}
+	if (!description.isEmpty()) {
+		flags |= MTPDpageRelatedArticle::Flag::f_description;
+	}
+	if (photoId) {
+		flags |= MTPDpageRelatedArticle::Flag::f_photo_id;
+	}
+	if (!author.isEmpty()) {
+		flags |= MTPDpageRelatedArticle::Flag::f_author;
+	}
+	if (publishedDate > 0) {
+		flags |= MTPDpageRelatedArticle::Flag::f_published_date;
+	}
+	return MTP_pageRelatedArticle(
+		MTP_flags(flags),
+		MTP_string(url),
+		MTP_long(webpageId),
+		MTP_string(title),
+		MTP_string(description),
+		MTP_long(photoId),
+		MTP_string(author),
+		MTP_int(publishedDate));
+}
+
+[[nodiscard]] MTPPageBlock NativeIvRelatedArticlesBlock(
+		QString title,
+		std::initializer_list<MTPPageRelatedArticle> articles) {
+	auto list = QVector<MTPPageRelatedArticle>();
+	list.reserve(int(articles.size()));
+	for (const auto &article : articles) {
+		list.push_back(article);
+	}
+	return MTP_pageBlockRelatedArticles(
+		NativeIvText(std::move(title)),
+		MTP_vector<MTPPageRelatedArticle>(std::move(list)));
+}
+
 [[nodiscard]] MTPPageCaption NativeIvCaption(
 		QString text = QString(),
 		QString credit = QString()) {
@@ -5304,6 +5352,180 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 		}
 	}
 
+	const auto relatedLabel = u"native-iv-related-articles"_q;
+	const auto relatedPhotoId = uint64(9201);
+	auto relatedBlocks = QVector<MTPPageBlock>();
+	relatedBlocks.push_back(NativeIvRelatedArticlesBlock(
+		u"Related articles"_q,
+		{
+			NativeIvRelatedArticle(
+				u"https://example.com/native-iv-page#section"_q,
+				88001,
+				u"Native IV article"_q,
+				u"Native IV description"_q,
+				relatedPhotoId,
+				u"Test Author"_q),
+			NativeIvRelatedArticle(
+				u"https://example.com/external-article"_q,
+				0,
+				u"External article"_q,
+				u"External article description"_q),
+		}));
+	relatedBlocks.push_back(MTP_pageBlockParagraph(NativeIvConcat({
+		NativeIvText(u"Read "_q),
+		NativeIvTextUrl(
+			u"native page"_q,
+			u"https://example.com/native-iv-inline#details"_q,
+			88002),
+		NativeIvText(u" or "_q),
+		NativeIvTextUrl(
+			u"external page"_q,
+			u"https://example.com/external-inline"_q),
+		NativeIvText(u"."_q),
+	})));
+	auto relatedSource = NativeIvSource(
+		std::move(relatedBlocks),
+		QVector<MTPPhoto>{ NativeIvPhoto(relatedPhotoId, 87, 87) });
+	const auto relatedPrepared = TryPrepareNativeInstantView({
+		.source = &relatedSource,
+	});
+	Check(
+		relatedPrepared.supported(),
+		relatedLabel + u" prepare supported"_q,
+		ok);
+	Check(
+		!relatedPrepared.content.failure.failed(),
+		relatedLabel + u" prepare failure"_q,
+		ok);
+	if (relatedPrepared.supported()
+		&& !relatedPrepared.content.failure.failed()) {
+		const auto relatedArticleBlocks = CollectPreparedBlocksByKind(
+			relatedPrepared.content.blocks.blocks,
+			PreparedBlockKind::RelatedArticle);
+		const PreparedBlock *relatedHeading = nullptr;
+		const PreparedBlock *relatedParagraph = nullptr;
+		ForEachPreparedBlock(
+			relatedPrepared.content.blocks.blocks,
+			[&](const PreparedBlock &block) {
+				if (!relatedHeading
+					&& block.kind == PreparedBlockKind::Heading
+					&& block.text.text == u"Related articles"_q) {
+					relatedHeading = &block;
+				}
+				if (!relatedParagraph
+					&& block.kind == PreparedBlockKind::Paragraph
+					&& block.text.text.contains(u"native page"_q)) {
+					relatedParagraph = &block;
+				}
+			});
+		Check(
+			relatedPrepared.content.blocks.blocks.size() == 4,
+			relatedLabel + u" prepared block count"_q,
+			ok);
+		Check(
+			relatedHeading != nullptr
+				&& (relatedHeading->headingLevel == 4),
+			relatedLabel + u" heading block"_q,
+			ok);
+		Check(
+			relatedArticleBlocks.size() == 2,
+			relatedLabel + u" related article block count"_q,
+			ok);
+		Check(
+			relatedParagraph != nullptr,
+			relatedLabel + u" paragraph block"_q,
+			ok);
+		if (relatedArticleBlocks.size() == 2) {
+			const auto *internalArticle = relatedArticleBlocks[0];
+			const auto *externalArticle = relatedArticleBlocks[1];
+			Check(
+				internalArticle->relatedArticle.link.kind
+					== PreparedLinkKind::InstantViewPage
+					&& (internalArticle->relatedArticle.link.webpageId == 88001),
+				relatedLabel + u" internal article IV link"_q,
+				ok);
+			Check(
+				internalArticle->relatedArticle.title == u"Native IV article"_q
+					&& internalArticle->relatedArticle.description
+						== u"Native IV description"_q
+					&& internalArticle->relatedArticle.footer
+						== u"Test Author"_q
+					&& (internalArticle->relatedArticle.photoId == relatedPhotoId),
+				relatedLabel + u" internal article fields"_q,
+				ok);
+			Check(
+				internalArticle->relatedArticle.copyText
+					== u"Native IV article\nNative IV description\nTest Author"_q,
+				relatedLabel + u" internal article copy text"_q,
+				ok);
+			Check(
+				externalArticle->relatedArticle.link.kind
+					== PreparedLinkKind::External,
+				relatedLabel + u" external article link kind"_q,
+				ok);
+			Check(
+				externalArticle->relatedArticle.copyText
+					== u"External article\nExternal article description"_q,
+				relatedLabel + u" external article copy text"_q,
+				ok);
+		}
+		if (relatedParagraph) {
+			const auto ivText = u"native page"_q;
+			const auto ivOffset = relatedParagraph->text.text.indexOf(ivText);
+			const auto externalText = u"external page"_q;
+			const auto externalOffset = relatedParagraph->text.text.indexOf(
+				externalText);
+			Check(
+				ivOffset >= 0,
+				relatedLabel + u" inline IV text range"_q,
+				ok);
+			Check(
+				externalOffset >= 0,
+				relatedLabel + u" inline external text range"_q,
+				ok);
+			if ((ivOffset >= 0) && (externalOffset >= 0)) {
+				const auto ivPreparedLink = FindPreparedLinkByCustomUrlRange(
+					relatedParagraph->text,
+					relatedParagraph->links,
+					ivOffset,
+					ivText.size());
+				const auto externalPreparedLink = FindPreparedLinkByCustomUrlRange(
+					relatedParagraph->text,
+					relatedParagraph->links,
+					externalOffset,
+					externalText.size());
+				const auto ivColorized = std::find_if(
+					relatedParagraph->text.entities.begin(),
+					relatedParagraph->text.entities.end(),
+					[&](const EntityInText &entity) {
+						return entity.type() == EntityType::Colorized
+							&& (entity.offset() == ivOffset)
+							&& (entity.length() == ivText.size());
+					});
+				Check(
+					ivPreparedLink != nullptr
+						&& ivPreparedLink->kind
+							== PreparedLinkKind::InstantViewPage
+						&& (ivPreparedLink->webpageId == 88002),
+					relatedLabel + u" inline IV prepared link"_q,
+					ok);
+				Check(
+					externalPreparedLink != nullptr
+						&& externalPreparedLink->kind
+							== PreparedLinkKind::External,
+					relatedLabel + u" inline external prepared link"_q,
+					ok);
+				Check(
+					ivColorized != relatedParagraph->text.entities.end()
+						&& (ivColorized->data().size() == 2)
+						&& (ivColorized->data()[0].unicode() == 9)
+						&& (ivColorized->data()[1].unicode() == 9),
+					relatedLabel + u" inline IV colorized entity"_q,
+					ok);
+			}
+		}
+	}
+
 	auto unsupportedBlocks = QVector<MTPPageBlock>();
 	unsupportedBlocks.push_back(MTP_pageBlockCover(MTP_pageBlockUnsupported()));
 	auto unsupportedSource = NativeIvSource(std::move(unsupportedBlocks));
@@ -6015,6 +6237,178 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 	const auto channelFixture = NativeIvChannelFixture();
 	const auto collageFixture = NativeIvCollageFixture();
 	const auto slideshowFixture = NativeIvSlideshowFixture();
+
+	const auto relatedArticleLabel = u"native-iv-related-article"_q;
+	const auto relatedPhotoId = uint64(9201);
+	const auto relatedThumbnailColor = QColor(24, 160, 220);
+	auto relatedRuntime = std::make_shared<TestMediaRuntime>();
+	auto relatedPhotoRuntime = std::make_shared<TestPhotoRuntime>();
+	relatedPhotoRuntime->thumbnailImage = std::make_shared<TestDynamicImage>(
+		SolidTestImage(87, 87, relatedThumbnailColor));
+	relatedPhotoRuntime->fullImage = std::make_shared<TestDynamicImage>(
+		SolidTestImage(174, 174, QColor(12, 110, 180)));
+	relatedRuntime->addPhotoRuntime(relatedPhotoId, relatedPhotoRuntime);
+	auto relatedSource = NativeIvSource(
+		QVector<MTPPageBlock>{
+			NativeIvRelatedArticlesBlock(
+				u"Related articles"_q,
+				{
+					NativeIvRelatedArticle(
+						u"https://example.com/native-iv-page#section"_q,
+						88001,
+						u"Native IV article"_q,
+						u"Native IV description"_q,
+						relatedPhotoId,
+						u"Test Author"_q),
+					NativeIvRelatedArticle(
+						u"https://example.com/external-article"_q,
+						0,
+						u"External article"_q,
+						u"External article description"_q),
+				}),
+		},
+		QVector<MTPPhoto>{ NativeIvPhoto(relatedPhotoId, 87, 87) });
+	auto relatedPrepared = TryPrepareNativeInstantView({
+		.source = &relatedSource,
+		.mediaRuntime = relatedRuntime,
+	});
+	Check(
+		relatedPrepared.supported(),
+		relatedArticleLabel + u" prepare supported"_q,
+		ok);
+	if (relatedPrepared.supported()) {
+		auto relatedHeight = 0;
+		auto relatedArticle = BuildArticleForTest(
+			std::move(relatedPrepared.content),
+			renderer,
+			420,
+			&relatedHeight);
+		const auto relatedImage = PaintArticleForTest(
+			relatedArticle.get(),
+			420,
+			relatedHeight);
+		Check(
+			HasPaintedPixels(relatedImage),
+			relatedArticleLabel + u" paint produced pixels"_q,
+			ok);
+		Check(
+			relatedRuntime->photoRequests.size() == 1
+				&& (relatedRuntime->photoRequests.front() == relatedPhotoId),
+			relatedArticleLabel + u" photo runtime resolve request"_q,
+			ok);
+		Check(
+			!relatedPhotoRuntime->thumbnailSizes.empty()
+				&& !relatedPhotoRuntime->fullSizes.empty(),
+			relatedArticleLabel + u" thumbnail size requests"_q,
+			ok);
+		const auto headingBounds = SegmentHitBounds(
+			relatedArticle.get(),
+			420,
+			relatedHeight,
+			0);
+		const auto internalBounds = HitBoundsWhere(
+			relatedArticle.get(),
+			420,
+			relatedHeight,
+			lookupFlags,
+			[](const MarkdownArticleHitTestResult &hit) {
+				return hit.preparedLink.has_value()
+					&& hit.preparedLink->kind
+						== PreparedLinkKind::InstantViewPage
+					&& (hit.preparedLink->webpageId == 88001);
+			});
+		const auto externalBounds = HitBoundsWhere(
+			relatedArticle.get(),
+			420,
+			relatedHeight,
+			lookupFlags,
+			[](const MarkdownArticleHitTestResult &hit) {
+				return hit.preparedLink.has_value()
+					&& hit.preparedLink->kind == PreparedLinkKind::External
+					&& hit.preparedLink->copyText
+						== u"https://example.com/external-article"_q;
+			});
+		Check(
+			headingBounds.has_value(),
+			relatedArticleLabel + u" heading bounds"_q,
+			ok);
+		Check(
+			internalBounds.has_value(),
+			relatedArticleLabel + u" internal related bounds"_q,
+			ok);
+		Check(
+			externalBounds.has_value(),
+			relatedArticleLabel + u" external related bounds"_q,
+			ok);
+		if (headingBounds && internalBounds && externalBounds) {
+			Check(
+				internalBounds->top() > headingBounds->bottom(),
+				relatedArticleLabel + u" internal article below heading"_q,
+				ok);
+			Check(
+				externalBounds->top() > internalBounds->bottom(),
+				relatedArticleLabel + u" external article below internal"_q,
+				ok);
+			Check(
+				anyPixelInRect(
+					relatedImage,
+					*internalBounds,
+					[&](QRgb pixel) {
+						return pixel == relatedThumbnailColor.rgba();
+					}),
+				relatedArticleLabel + u" thumbnail paint"_q,
+				ok);
+		}
+		if (internalBounds) {
+			const auto internalHit = relatedArticle->hitTest(
+				internalBounds->center(),
+				lookupFlags);
+			Check(
+				internalHit.preparedLink.has_value()
+					&& internalHit.preparedLink->kind
+						== PreparedLinkKind::InstantViewPage
+					&& (internalHit.preparedLink->webpageId == 88001),
+				relatedArticleLabel + u" internal hit prepared link"_q,
+				ok);
+			Check(
+				!relatedArticle->segmentIsText(internalHit.segmentIndex),
+				relatedArticleLabel + u" related row remains block segment"_q,
+				ok);
+			const auto internalContext = relatedArticle->textForContext(
+				internalHit);
+			Check(
+				internalContext.expanded
+					== u"Native IV article\nNative IV description\nTest Author"_q,
+				relatedArticleLabel + u" internal context export"_q,
+				ok);
+			const auto internalSelection = relatedArticle->textForSelection({
+				.from = { .segment = internalHit.segmentIndex, .offset = 0 },
+				.to = { .segment = internalHit.segmentIndex, .offset = 1 },
+			}, nullptr);
+			Check(
+				internalSelection.expanded == internalContext.expanded,
+				relatedArticleLabel + u" internal selection export"_q,
+				ok);
+		}
+		if (externalBounds) {
+			const auto externalHit = relatedArticle->hitTest(
+				externalBounds->center(),
+				lookupFlags);
+			Check(
+				externalHit.preparedLink.has_value()
+					&& externalHit.preparedLink->kind
+						== PreparedLinkKind::External,
+				relatedArticleLabel + u" external hit prepared link"_q,
+				ok);
+			const auto externalContext = relatedArticle->textForContext(
+				externalHit);
+			Check(
+				externalContext.expanded
+					== u"External article\nExternal article description"_q,
+				relatedArticleLabel + u" external context export"_q,
+				ok);
+		}
+	}
 
 	const auto mixedLabel = u"native-iv-mixed-article"_q;
 	auto mixedRuntime = std::make_shared<TestMediaRuntime>();
@@ -7815,6 +8209,160 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			largeSlideshowLabel + u" skips grouped-grid bulk resolves"_q,
 			ok);
 	}
+}
+
+void CheckNativeInstantViewPreviewOpenPageCoverage(bool *ok) {
+	const auto renderer = std::make_shared<MathRenderer>();
+	auto lookupFlags = Ui::Text::StateRequest::Flags();
+	lookupFlags |= Ui::Text::StateRequest::Flag::LookupLink;
+	lookupFlags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+	const auto runPreviewOpenPageCase = [&](
+			QString label,
+			Iv::Source *source,
+			std::shared_ptr<MediaRuntime> runtime,
+			auto &&predicate,
+			uint64 expectedPageId,
+			QString expectedUrl) {
+		const auto prepareRequest = NativeInstantViewPrepareRequest{
+			.source = source,
+			.mediaRuntime = runtime,
+		};
+		auto prepared = TryPrepareNativeInstantView(prepareRequest);
+		Check(
+			prepared.supported(),
+			label + u" preview prepare supported"_q,
+			ok);
+		Check(
+			!prepared.content.failure.failed(),
+			label + u" preview prepare failure"_q,
+			ok);
+		if (!prepared.supported() || prepared.content.failure.failed()) {
+			return;
+		}
+		auto window = Ui::RpWindow();
+		window.setGeometry(QRect(0, 0, 460, 320));
+		window.show();
+		FlushPendingWidgetEvents();
+		auto events = std::vector<Event>();
+		auto preview = CreateMarkdownPreviewWidget(
+			window.body(),
+			std::move(prepared.content),
+			renderer,
+			[&](Event event) {
+				events.push_back(std::move(event));
+			});
+		preview->setGeometry(QRect(QPoint(), window.body()->size()));
+		preview->show();
+		FlushPendingWidgetEvents();
+		const auto body = FindChildObject<MarkdownDocumentWidget>(preview.get());
+		Check(
+			body != nullptr,
+			label + u" preview body widget"_q,
+			ok);
+		if (!body) {
+			return;
+		}
+		auto probePrepared = TryPrepareNativeInstantView(prepareRequest);
+		Check(
+			probePrepared.supported(),
+			label + u" probe prepare supported"_q,
+			ok);
+		Check(
+			!probePrepared.content.failure.failed(),
+			label + u" probe prepare failure"_q,
+			ok);
+		if (!probePrepared.supported() || probePrepared.content.failure.failed()) {
+			return;
+		}
+		auto probeHeight = 0;
+		auto probeArticle = BuildArticleForTest(
+			std::move(probePrepared.content),
+			renderer,
+			body->width(),
+			&probeHeight);
+		const auto clickBounds = HitBoundsWhere(
+			probeArticle.get(),
+			body->width(),
+			probeHeight,
+			lookupFlags,
+			std::forward<decltype(predicate)>(predicate));
+		Check(
+			clickBounds.has_value(),
+			label + u" click bounds"_q,
+			ok);
+		if (!clickBounds) {
+			return;
+		}
+		SendMouseClick(body, clickBounds->center(), Qt::LeftButton);
+		FlushPendingWidgetEvents();
+		Check(
+			events.size() == 1,
+			label + u" open-page event count"_q,
+			ok);
+		if (events.size() == 1) {
+			Check(
+				events.front().type == Event::Type::OpenPage,
+				label + u" open-page event type"_q,
+				ok);
+			Check(
+				events.front().webpageId == expectedPageId,
+				label + u" open-page id"_q,
+				ok);
+			Check(
+				events.front().url == expectedUrl,
+				label + u" open-page url"_q,
+				ok);
+		}
+	};
+
+	const auto inlineLabel = u"native-iv-preview-inline-open-page"_q;
+	auto inlineSource = NativeIvSource(QVector<MTPPageBlock>{
+		MTP_pageBlockParagraph(NativeIvConcat({
+			NativeIvText(u"Open "_q),
+			NativeIvTextUrl(
+				u"native page"_q,
+				u"https://example.com/inline-open#part"_q,
+				99001),
+			NativeIvText(u" now."_q),
+		})),
+	});
+	runPreviewOpenPageCase(
+		inlineLabel,
+		&inlineSource,
+		nullptr,
+		[](const MarkdownArticleHitTestResult &hit) {
+			return hit.preparedLink.has_value()
+				&& hit.preparedLink->kind == PreparedLinkKind::InstantViewPage
+				&& (hit.preparedLink->webpageId == 99001);
+		},
+		99001,
+		UrlClickHandler::EncodeForOpening(
+			u"https://example.com/inline-open#part"_q));
+
+	const auto relatedLabel = u"native-iv-preview-related-open-page"_q;
+	auto relatedSource = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvRelatedArticlesBlock(
+			u"Related articles"_q,
+			{
+				NativeIvRelatedArticle(
+					u"https://example.com/related-open#jump"_q,
+					99002,
+					u"Related native article"_q,
+					u"Preview row"_q),
+			}),
+	});
+	runPreviewOpenPageCase(
+		relatedLabel,
+		&relatedSource,
+		nullptr,
+		[](const MarkdownArticleHitTestResult &hit) {
+			return hit.preparedLink.has_value()
+				&& hit.preparedLink->kind == PreparedLinkKind::InstantViewPage
+				&& (hit.preparedLink->webpageId == 99002);
+		},
+		99002,
+		UrlClickHandler::EncodeForOpening(
+			u"https://example.com/related-open#jump"_q));
 }
 
 void CheckPrepareCoverage(
@@ -10877,6 +11425,7 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 	CheckAnchorScrollAlignmentCoverage(&ok);
 	CheckArticleHorizontalRelayoutRegression(&ok);
 	CheckNativeInstantViewArticleCoverage(&ok);
+	CheckNativeInstantViewPreviewOpenPageCoverage(&ok);
 	CheckNativeInstantViewHostedMediaCoverage(&ok);
 	CheckNativeInstantViewHostedMediaFallbackCoverage(&ok);
 	CheckInlineHtmlCoverage(args.dump, &ok);

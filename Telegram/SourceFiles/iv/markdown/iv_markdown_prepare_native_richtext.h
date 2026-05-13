@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Iv::Markdown {
 
+inline constexpr auto kNativeIvLinkSpecialColorIndex = 9;
+
 struct PreparedIvRichText {
 	TextWithEntities text;
 	std::vector<PreparedLink> links;

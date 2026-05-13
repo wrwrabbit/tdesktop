@@ -131,6 +131,12 @@ struct OpenTarget {
 	QString fragment;
 };
 
+struct PageHistoryTarget {
+	uint64 pageId = 0;
+	QString sourceUrl;
+	QString hash;
+};
+
 [[nodiscard]] bool IsReadableLocalFile(const QFileInfo &info) {
 	return info.exists() && info.isFile() && info.isReadable();
 }
@@ -181,6 +187,28 @@ struct ReadSource {
 		fragment.remove(0, 1);
 	}
 	return fragment;
+}
+
+[[nodiscard]] PageHistoryTarget ParsePageHistoryTarget(
+		uint64 pageId,
+		QString url) {
+	const auto hash = url.indexOf(QChar('#'));
+	return (hash < 0)
+		? PageHistoryTarget{
+			.pageId = pageId,
+			.sourceUrl = std::move(url),
+		}
+		: PageHistoryTarget{
+			.pageId = pageId,
+			.sourceUrl = url.mid(0, hash),
+			.hash = NormalizeFragmentId(url.mid(hash + 1)),
+		};
+}
+
+[[nodiscard]] QString ComposePageHistoryUrl(const PageHistoryTarget &target) {
+	return target.hash.isEmpty()
+		? target.sourceUrl
+		: (target.sourceUrl + u"#"_q + target.hash);
 }
 
 [[nodiscard]] OpenTarget ParseOpenTarget(QString path) {
@@ -322,11 +350,59 @@ void Controller::setContent(
 		? MarkdownPreviewScrollTop(_preview.get())
 		: 0;
 	if (preserveScroll) {
-		options.initialFragment = QString();
+		saveCurrentHistoryScroll(scrollTop);
+	}
+	auto refreshed = PrepareOpenOptions(std::move(options), _delegate, title);
+	if (preserveScroll && historyEnabled(refreshed)) {
+		auto activeIndex = -1;
+		if (_shownHistoryIndex >= 0
+			&& _shownHistoryIndex < int(_history.size())) {
+			activeIndex = _shownHistoryIndex;
+		} else if (_historyIndex >= 0
+			&& _historyIndex < int(_history.size())) {
+			activeIndex = _historyIndex;
+		}
+		if (activeIndex >= 0
+			&& sameHistoryPage(
+				_history[activeIndex],
+				refreshed.currentPageId,
+				refreshed.sourceUrl)) {
+			refreshed.initialFragment = _history[activeIndex].hash;
+		}
+	}
+	if (historyEnabled(refreshed)
+		&& _shownHistoryIndex >= 0
+		&& _shownHistoryIndex < int(_history.size())
+		&& !sameHistoryPage(
+			_history[_shownHistoryIndex],
+			refreshed.currentPageId,
+			refreshed.sourceUrl)) {
+		saveCurrentHistoryScroll();
+	}
+	if (historyEnabled(refreshed)) {
+		auto index = findHistoryEntry(
+			refreshed.currentPageId,
+			refreshed.sourceUrl,
+			refreshed.initialFragment);
+		if (index < 0) {
+			if (_historyIndex < 0) {
+				_history.push_back({});
+				index = 0;
+			} else {
+				_history.resize(_historyIndex + 1);
+				index = int(_history.size());
+				_history.push_back({});
+			}
+			_historyIndex = index;
+		} else if (index != _historyIndex) {
+			updateCurrentHistoryEntry(content, title, refreshed);
+			updateHistoryButtons();
+			return;
+		}
 	}
 	_preparedContent = std::move(content);
 	_title = std::move(title);
-	_options = PrepareOpenOptions(std::move(options), _delegate, _title);
+	_options = refreshed;
 	_clickHandlerContextRef = ResolveClickHandlerContextRef(
 		_clickHandlerContextRef,
 		_options);
@@ -343,6 +419,7 @@ void Controller::setContent(
 	if (_window && _window->isActiveWindow() && _preview) {
 		_preview->setFocus();
 	}
+	updateHistoryButtons();
 }
 
 void Controller::updateOptions(OpenOptions options) {
@@ -433,6 +510,261 @@ bool Controller::canShare() const {
 	return static_cast<bool>(_options.share);
 }
 
+bool Controller::historyEnabled(const OpenOptions &options) const {
+	return (ResolveViewerKind(options) == ViewerKind::InstantView)
+		&& (options.currentPageId != 0);
+}
+
+bool Controller::sameHistoryPage(
+		const HistoryEntry &entry,
+		uint64 pageId,
+		const QString &sourceUrl) const {
+	return entry.pageId
+		? (entry.pageId == pageId)
+		: (!sourceUrl.isEmpty() && entry.sourceUrl == sourceUrl);
+}
+
+bool Controller::sameHistoryLocation(
+		const HistoryEntry &entry,
+		uint64 pageId,
+		const QString &sourceUrl,
+		const QString &hash) const {
+	return sameHistoryPage(entry, pageId, sourceUrl)
+		&& (entry.hash == hash);
+}
+
+int Controller::findHistoryEntry(
+		uint64 pageId,
+		const QString &sourceUrl,
+		const QString &hash) const {
+	if (_historyIndex >= 0
+		&& _historyIndex < int(_history.size())
+		&& sameHistoryLocation(
+			_history[_historyIndex],
+			pageId,
+			sourceUrl,
+			hash)) {
+		return _historyIndex;
+	}
+	if (_shownHistoryIndex >= 0
+		&& _shownHistoryIndex < int(_history.size())
+		&& _shownHistoryIndex != _historyIndex
+		&& sameHistoryLocation(
+			_history[_shownHistoryIndex],
+			pageId,
+			sourceUrl,
+			hash)) {
+		return _shownHistoryIndex;
+	}
+	for (auto i = 0, count = int(_history.size()); i != count; ++i) {
+		if (sameHistoryLocation(_history[i], pageId, sourceUrl, hash)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+void Controller::saveCurrentHistoryScroll(std::optional<int> scrollTop) {
+	const auto index = (_shownHistoryIndex >= 0)
+		? _shownHistoryIndex
+		: _historyIndex;
+	if (!_preview
+		|| index < 0
+		|| index >= int(_history.size())) {
+		return;
+	}
+	_history[index].scrollTop = scrollTop.value_or(
+		MarkdownPreviewScrollTop(_preview.get()));
+}
+
+void Controller::updateCurrentHistoryEntry(
+		const MarkdownArticleContent &content,
+		const QString &title,
+		const OpenOptions &options) {
+	if (!historyEnabled(options)) {
+		return;
+	}
+	auto index = findHistoryEntry(
+		options.currentPageId,
+		options.sourceUrl,
+		options.initialFragment);
+	if (index < 0) {
+		if (_historyIndex < 0) {
+			_history.push_back({});
+			index = 0;
+			_historyIndex = 0;
+		} else {
+			_history.resize(_historyIndex + 1);
+			index = int(_history.size());
+			_history.push_back({});
+			_historyIndex = index;
+		}
+	}
+	auto &entry = _history[index];
+	entry.pageId = options.currentPageId;
+	entry.sourceUrl = options.sourceUrl;
+	entry.hash = options.initialFragment;
+	entry.title = title;
+	entry.preparedContent = std::make_shared<MarkdownArticleContent>(content);
+	entry.options = options;
+}
+
+void Controller::handleOpenPage(Event event) {
+	if (!historyEnabled(_options)) {
+		_events.fire(std::move(event));
+		return;
+	}
+	const auto target = ParsePageHistoryTarget(event.webpageId, event.url);
+	if (!target.pageId || target.sourceUrl.isEmpty()) {
+		_events.fire(std::move(event));
+		return;
+	}
+	const auto currentIndex = (_historyIndex >= 0 && _historyIndex < int(_history.size()))
+		? _historyIndex
+		: -1;
+	const auto current = (currentIndex >= 0) ? &_history[currentIndex] : nullptr;
+	const auto samePage = current
+		&& sameHistoryPage(*current, target.pageId, target.sourceUrl);
+	const auto currentEntry = samePage ? *current : HistoryEntry();
+	if (samePage
+		&& sameHistoryLocation(
+			*current,
+			target.pageId,
+			target.sourceUrl,
+			target.hash)) {
+		return;
+	}
+	saveCurrentHistoryScroll();
+	auto targetIndex = -1;
+	if ((_historyIndex + 1) < int(_history.size())
+		&& sameHistoryLocation(
+			_history[_historyIndex + 1],
+			target.pageId,
+			target.sourceUrl,
+			target.hash)) {
+		targetIndex = _historyIndex + 1;
+	} else {
+		auto options = samePage ? currentEntry.options : _options;
+		options.sourceUrl = target.sourceUrl;
+		options.initialFragment = target.hash;
+		options.currentPageId = target.pageId;
+		_history.resize(_historyIndex + 1);
+		_history.push_back({
+			.pageId = target.pageId,
+			.sourceUrl = target.sourceUrl,
+			.hash = target.hash,
+			.options = std::move(options),
+		});
+		targetIndex = int(_history.size()) - 1;
+	}
+	auto &entry = _history[targetIndex];
+	entry.pageId = target.pageId;
+	entry.sourceUrl = target.sourceUrl;
+	entry.hash = target.hash;
+	entry.options.sourceUrl = target.sourceUrl;
+	entry.options.initialFragment = target.hash;
+	entry.options.currentPageId = target.pageId;
+	_historyIndex = targetIndex;
+	updateHistoryButtons();
+	if (samePage) {
+		if (showHistoryEntry(targetIndex)) {
+			return;
+		}
+		if (_preview) {
+			if (target.hash.isEmpty()) {
+				ScrollMarkdownPreviewToY(_preview.get(), 0);
+			}
+			if (target.hash.isEmpty()
+				|| ScrollMarkdownPreviewToAnchor(_preview.get(), target.hash)) {
+				entry.title = _title;
+				entry.preparedContent = currentEntry.preparedContent;
+				entry.scrollTop = MarkdownPreviewScrollTop(_preview.get());
+				_options.initialFragment = target.hash;
+				_shownHistoryIndex = targetIndex;
+				return;
+			}
+		}
+		_events.fire(std::move(event));
+		return;
+	}
+	if (!showHistoryEntry(targetIndex)) {
+		event.url = ComposePageHistoryUrl(target);
+		_events.fire(std::move(event));
+	}
+}
+
+bool Controller::showHistoryEntry(int index) {
+	if (index < 0 || index >= int(_history.size())) {
+		return false;
+	}
+	const auto &entry = _history[index];
+	if (!entry.hydrated()) {
+		return false;
+	}
+	auto options = entry.options;
+	options.sourceUrl = entry.sourceUrl;
+	options.initialFragment = entry.hash;
+	options.currentPageId = entry.pageId;
+	setContent(*entry.preparedContent, entry.title, std::move(options), false);
+	if (_preview) {
+		ScrollMarkdownPreviewToY(_preview.get(), entry.scrollTop);
+	}
+	return true;
+}
+
+void Controller::stepHistory(int delta) {
+	const auto index = _historyIndex + delta;
+	if (index < 0 || index >= int(_history.size())) {
+		return;
+	}
+	saveCurrentHistoryScroll();
+	_historyIndex = index;
+	updateHistoryButtons();
+	if (!showHistoryEntry(index)) {
+		const auto &entry = _history[index];
+		_events.fire({
+			.type = Event::Type::OpenPage,
+			.webpageId = entry.pageId,
+			.url = ComposePageHistoryUrl(PageHistoryTarget{
+				.pageId = entry.pageId,
+				.sourceUrl = entry.sourceUrl,
+				.hash = entry.hash,
+			}),
+		});
+	}
+}
+
+void Controller::updateHistoryButtons() {
+	if (!_back || !_forward) {
+		return;
+	}
+	const auto canGoBack = (_historyIndex > 0);
+	const auto canGoForward = (_historyIndex >= 0)
+		&& ((_historyIndex + 1) < int(_history.size()));
+	const auto updateButton = [](
+			Ui::FadeWrapScaled<Ui::IconButton> *button,
+			bool enabled,
+			const style::icon &disabledIcon) {
+		Expects(button != nullptr);
+		button->entity()->setDisabled(!enabled);
+		button->entity()->setIconOverride(
+			enabled ? nullptr : &disabledIcon,
+			enabled ? nullptr : &disabledIcon);
+		button->entity()->setPointerCursor(enabled);
+		button->setAttribute(Qt::WA_TransparentForMouseEvents, !enabled);
+		if (!enabled) {
+			button->entity()->clearState();
+		}
+	};
+	_back->toggle(canGoBack || canGoForward, anim::type::normal);
+	_forward->toggle(canGoForward, anim::type::normal);
+	updateButton(_back, canGoBack, st::ivBackIconDisabled);
+	updateButton(_forward, canGoForward, st::ivForwardIconDisabled);
+	if (_window) {
+		updateTitleGeometry(_window->body()->width());
+	}
+}
+
 void Controller::refreshTitle() {
 	if (_window) {
 		_window->setTitle(_title);
@@ -446,10 +778,29 @@ void Controller::refreshTitle() {
 
 void Controller::updateTitleGeometry(int newWidth) const {
 	_subtitleWrap->setGeometry(0, 0, newWidth, st::ivSubtitleHeight);
-	_subtitle->resizeToWidth(newWidth
-		- st::ivSubtitleLeft
-		- _menuToggle->width());
-	_subtitle->moveToLeft(st::ivSubtitleLeft, st::ivSubtitleTop);
+	const auto progressBack = _back
+		? _subtitleBackShift.value(_back->toggled() ? 1. : 0.)
+		: 0.;
+	const auto progressForward = _forward
+		? _subtitleForwardShift.value(_forward->toggled() ? 1. : 0.)
+		: 0.;
+	const auto backAdded = (_back
+		? (_back->width() + st::ivSubtitleSkip - st::ivSubtitleLeft)
+		: 0);
+	const auto forwardAdded = _forward ? _forward->width() : 0;
+	const auto left = int(st::ivSubtitleLeft
+		+ anim::interpolate(0, backAdded, progressBack)
+		+ anim::interpolate(0, forwardAdded, progressForward));
+	_subtitle->resizeToWidth(newWidth - left - _menuToggle->width());
+	_subtitle->moveToLeft(left, st::ivSubtitleTop);
+	if (_back) {
+		_back->moveToLeft(0, 0);
+	}
+	if (_forward) {
+		_forward->moveToLeft(
+			_back ? int(_back->width() * progressBack) : 0,
+			0);
+	}
 	_menuToggle->moveToRight(0, 0);
 	_titleShadow->resizeToWidth(newWidth);
 	_titleShadow->move(0, st::ivSubtitleHeight);
@@ -527,9 +878,21 @@ void Controller::createPreview() {
 		*options.clickHandlerContextRef = options.clickHandlerContext;
 	}
 	const auto callback = [=](Event event) {
-		_events.fire(std::move(event));
+		switch (event.type) {
+		case Event::Type::OpenPage:
+			handleOpenPage(std::move(event));
+			break;
+		case Event::Type::Close:
+		case Event::Type::Quit:
+		case Event::Type::OpenFile:
+			_events.fire(std::move(event));
+			break;
+		}
 	};
 	_preview = nullptr;
+	const auto preparedForHistory = (_preparedContent && historyEnabled(options))
+		? std::make_shared<MarkdownArticleContent>(*_preparedContent)
+		: nullptr;
 	_preview = _preparedContent
 		? CreateMarkdownPreviewWidget(
 			parent,
@@ -543,6 +906,12 @@ void Controller::createPreview() {
 			callback,
 			options);
 	_preparedContent.reset();
+	if (preparedForHistory) {
+		updateCurrentHistoryEntry(*preparedForHistory, _title, options);
+		_shownHistoryIndex = _historyIndex;
+	} else {
+		_shownHistoryIndex = -1;
+	}
 	_preview->setGeometry(parent->rect());
 	parent->sizeValue() | rpl::on_next([=](QSize size) {
 		_preview->resize(size);
@@ -551,6 +920,7 @@ void Controller::createPreview() {
 	_titleShadow->show(anim::type::instant);
 
 	_preview->show();
+	updateHistoryButtons();
 }
 
 void Controller::createWindow() {
@@ -567,6 +937,38 @@ void Controller::createWindow() {
 	_menuToggle->setClickedCallback([=] {
 		showMenu();
 	});
+	_back.create(
+		_subtitleWrap.get(),
+		object_ptr<Ui::IconButton>(_subtitleWrap.get(), st::ivBack));
+	_back->entity()->setClickedCallback([=] {
+		stepHistory(-1);
+	});
+	_forward.create(
+		_subtitleWrap.get(),
+		object_ptr<Ui::IconButton>(_subtitleWrap.get(), st::ivForward));
+	_forward->entity()->setClickedCallback([=] {
+		stepHistory(1);
+	});
+	_back->toggledValue(
+	) | rpl::on_next([=](bool toggled) {
+		_subtitleBackShift.start(
+			[=] { updateTitleGeometry(_window->body()->width()); },
+			toggled ? 0. : 1.,
+			toggled ? 1. : 0.,
+			st::fadeWrapDuration);
+	}, _back->lifetime());
+	_back->hide(anim::type::instant);
+	_forward->toggledValue(
+	) | rpl::on_next([=](bool toggled) {
+		_subtitleForwardShift.start(
+			[=] { updateTitleGeometry(_window->body()->width()); },
+			toggled ? 0. : 1.,
+			toggled ? 1. : 0.,
+			st::fadeWrapDuration);
+	}, _forward->lifetime());
+	_forward->hide(anim::type::instant);
+	_subtitleBackShift.stop();
+	_subtitleForwardShift.stop();
 	_subtitleWrap->paintRequest() | rpl::on_next([=](QRect clip) {
 		QPainter(_subtitleWrap.get()).fillRect(clip, st::windowBg);
 	}, _subtitleWrap->lifetime());
@@ -601,6 +1003,7 @@ void Controller::createWindow() {
 	createLayerManager();
 	createPreview();
 	_container->show();
+	updateHistoryButtons();
 
 	window->events() | rpl::on_next([=](not_null<QEvent*> e) {
 		if (e->type() == QEvent::Close) {
@@ -625,6 +1028,7 @@ void Controller::createWindow() {
 			: base::EventFilterResult::Continue;
 	});
 
+	_titleShadow->raise();
 	window->show();
 }
 

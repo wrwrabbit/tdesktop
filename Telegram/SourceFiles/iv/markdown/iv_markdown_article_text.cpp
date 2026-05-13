@@ -41,25 +41,35 @@ struct PreparedLinkExternalData {
 	QString copyLabel;
 };
 
+[[nodiscard]] QString OpenableTargetForLink(const PreparedLink &link) {
+	return link.fragment.isEmpty()
+		? link.target
+		: (link.target + u"#"_q + link.fragment);
+}
+
 [[nodiscard]] std::optional<PreparedLinkExternalData> ExternalDataForLink(
 		const PreparedLink &link) {
-	if (link.kind != PreparedLinkKind::External) {
+	if (link.kind != PreparedLinkKind::External
+		&& link.kind != PreparedLinkKind::InstantViewPage) {
 		return std::nullopt;
 	}
+	const auto target = OpenableTargetForLink(link);
 	auto type = link.entityType;
 	if (type != EntityType::Url
 		&& type != EntityType::CustomUrl
 		&& type != EntityType::Email) {
-		if (link.target.isEmpty()) {
+		if (target.isEmpty()) {
 			return std::nullopt;
 		}
-		type = UrlClickHandler::IsEmail(link.target)
+		type = UrlClickHandler::IsEmail(target)
 			? EntityType::Email
 			: EntityType::CustomUrl;
 	}
 	return PreparedLinkExternalData{
-		.entity = { type, link.target },
-		.copyText = !link.copyText.isEmpty() ? link.copyText : link.target,
+		.entity = { type, target },
+		.copyText = link.fragment.isEmpty() && !link.copyText.isEmpty()
+			? link.copyText
+			: target,
 		.copyLabel = (type == EntityType::Email)
 			? Ui::Integration::Instance().phraseContextCopyEmail()
 			: Ui::Integration::Instance().phraseContextCopyLink(),
@@ -89,6 +99,7 @@ struct PreparedLinkExternalData {
 			? link.target
 			: (link.target + u"#"_q + link.fragment);
 	case PreparedLinkKind::External:
+	case PreparedLinkKind::InstantViewPage:
 		return link.target;
 	case PreparedLinkKind::RejectedRelative:
 	case PreparedLinkKind::ToggleDetails:
@@ -106,6 +117,7 @@ struct PreparedLinkExternalData {
 	case PreparedLinkKind::ToggleDetails:
 		return QString();
 	case PreparedLinkKind::External:
+	case PreparedLinkKind::InstantViewPage:
 	case PreparedLinkKind::Anchor:
 	case PreparedLinkKind::Footnote:
 	case PreparedLinkKind::FootnoteBacklink:

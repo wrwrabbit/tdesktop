@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/invoke_queued.h"
 #include "base/integration.h"
 #include "ui/effects/animations.h"
+#include "ui/style/style_core.h"
 #include "ui/text/text.h"
 #include "ui/text/text_custom_emoji.h"
 #include "ui/text/text_utilities.h"
@@ -23,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QImage>
 
 #include <algorithm>
+#include <span>
 #include <utility>
 
 namespace Test {
@@ -66,7 +68,9 @@ namespace {
 [[nodiscard]] QImage RenderTextOffscreen(
 		const Ui::Text::String &text,
 		int availableWidth,
-		std::optional<TextSelection> selection = std::nullopt) {
+		std::optional<TextSelection> selection = std::nullopt,
+		std::span<Ui::Text::SpecialColor> colors = {},
+		std::optional<QPen> pen = std::nullopt) {
 	const auto padding = RenderTextPadding();
 	const auto image = QImage(
 		QSize(
@@ -77,9 +81,13 @@ namespace {
 	auto result = image;
 	result.fill(Qt::transparent);
 	auto painter = QPainter(&result);
+	if (pen) {
+		painter.setPen(*pen);
+	}
 	text.draw(painter, {
 		.position = QPoint(padding, padding),
 		.availableWidth = availableWidth,
+		.colors = colors,
 		.selection = selection.value_or(TextSelection()),
 	});
 	return result;
@@ -192,6 +200,31 @@ namespace {
 	return (right >= left) && (bottom >= top)
 		? std::make_optional(QRect(QPoint(left, top), QPoint(right, bottom)))
 		: std::nullopt;
+}
+
+[[nodiscard]] bool ImagesEqualInRect(
+		const QImage &first,
+		const QImage &second,
+		QRect rect) {
+	return !ChangedBoundsInRect(first, second, rect).has_value();
+}
+
+[[nodiscard]] bool HasPixelColorInRect(
+		const QImage &image,
+		QRect rect,
+		QRgb color) {
+	rect = rect.intersected(QRect(QPoint(), image.size()));
+	if (rect.isEmpty()) {
+		return false;
+	}
+	for (auto y = rect.top(); y <= rect.bottom(); ++y) {
+		for (auto x = rect.left(); x <= rect.right(); ++x) {
+			if (image.pixel(x, y) == color) {
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 [[nodiscard]] bool HasPaintedPixels(const QImage &image) {
@@ -533,6 +566,102 @@ void test(not_null<Ui::RpWindow*> window, not_null<Ui::RpWidget*> body) {
 			0,
 			0,
 			false)).height == skipBlockHeight);
+
+	const auto colorizedText = u"Colorized link span"_q;
+	const auto colorizedWidth = scale(280);
+	const auto plainColorizedText = Ui::Text::String(
+		st::defaultTextStyle,
+		colorizedText,
+		kMarkupTextOptions,
+		scale(96));
+	const auto emptyColorizedText = Ui::Text::String(
+		st::defaultTextStyle,
+		Ui::Text::Colorized(colorizedText),
+		kMarkupTextOptions,
+		scale(96));
+	const auto emptyColorizedRender = RenderTextOffscreen(
+		emptyColorizedText,
+		colorizedWidth);
+	const auto colorizedBoundsRect = QRect(
+		QPoint(),
+		emptyColorizedRender.size());
+	const auto linkPenRender = RenderTextOffscreen(
+		plainColorizedText,
+		colorizedWidth,
+		std::nullopt,
+		{},
+		st::defaultTextPalette.linkFg->p);
+	const auto plainColorizedRender = RenderTextOffscreen(
+		plainColorizedText,
+		colorizedWidth);
+	Expects(ImagesEqualInRect(
+		emptyColorizedRender,
+		linkPenRender,
+		colorizedBoundsRect));
+	Expects(!ImagesEqualInRect(
+		emptyColorizedRender,
+		plainColorizedRender,
+		colorizedBoundsRect));
+
+	const auto &specialFg = st::defaultTextPalette.linkFg;
+	const auto &specialBg = st::defaultTextPalette.markBg;
+	auto specialColors = std::vector<Ui::Text::SpecialColor>{
+		Ui::Text::SpecialColor{
+			&specialFg->p,
+			&specialFg->p,
+			&specialBg->b,
+			&specialBg->b },
+	};
+	const auto explicitColorizedNoBgText = Ui::Text::String(
+		st::defaultTextStyle,
+		Ui::Text::Colorized(colorizedText, 1, 0),
+		kMarkupTextOptions,
+		scale(96));
+	const auto explicitColorizedBgText = Ui::Text::String(
+		st::defaultTextStyle,
+		Ui::Text::Colorized(colorizedText, 1, 1),
+		kMarkupTextOptions,
+		scale(96));
+	const auto explicitColorizedNoBgRender = RenderTextOffscreen(
+		explicitColorizedNoBgText,
+		colorizedWidth,
+		std::nullopt,
+		specialColors);
+	const auto explicitColorizedBgRender = RenderTextOffscreen(
+		explicitColorizedBgText,
+		colorizedWidth,
+		std::nullopt,
+		specialColors);
+	const auto specialPenRender = RenderTextOffscreen(
+		plainColorizedText,
+		colorizedWidth,
+		std::nullopt,
+		{},
+		specialFg->p);
+	const auto colorizedSymbolBounds = SymbolRangeHitBounds(
+		explicitColorizedBgText,
+		colorizedWidth,
+		0,
+		colorizedText.size());
+	Expects(ImagesEqualInRect(
+		explicitColorizedNoBgRender,
+		specialPenRender,
+		colorizedBoundsRect));
+	Expects(colorizedSymbolBounds.has_value());
+	if (colorizedSymbolBounds) {
+		Expects(!ImagesEqualInRect(
+			explicitColorizedBgRender,
+			explicitColorizedNoBgRender,
+			*colorizedSymbolBounds));
+		Expects(HasPixelColorInRect(
+			explicitColorizedBgRender,
+			*colorizedSymbolBounds,
+			specialBg->c.rgba()));
+		Expects(!HasPixelColorInRect(
+			explicitColorizedNoBgRender,
+			*colorizedSymbolBounds,
+			specialBg->c.rgba()));
+	}
 
 	body->paintRequest() | rpl::on_next([=](QRect clip) {
 		auto p = QPainter(body);

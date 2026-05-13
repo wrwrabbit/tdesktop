@@ -6,11 +6,13 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_view_widget.h"
+
 #include "base/weak_ptr.h"
 #include "core/click_handler_types.h"
 #include "core/credits_amount.h"
 #include "core/file_utilities.h"
 #include "iv/markdown/iv_markdown_article_text.h"
+#include "iv/markdown/iv_markdown_prepare_native_richtext.h"
 #include "lang/lang_keys.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 #include "ui/chat/chat_style.h"
@@ -122,11 +124,23 @@ void EnsurePrePaintCache(
 	};
 }
 
+[[nodiscard]] std::vector<Ui::Text::SpecialColor> HighlightColors(
+		not_null<const style::palette*> palette) {
+	auto result = Ui::SyntaxHighlightColors(palette);
+
+	const auto &fg = palette->lightButtonFg();
+	const auto &bg = palette->lightButtonBgOver();
+	result.push_back({ &fg->p, &fg->p, &bg->b, &bg->b });
+
+	Ensures(result.size() == kNativeIvLinkSpecialColorIndex);
+	return result;
+}
+
 } // namespace
 
 MarkdownDocumentWidget::MarkdownDocumentWidget(QWidget *parent)
 : Ui::RpWidget(parent)
-, _highlightColors(Ui::SyntaxHighlightColors(style::main_palette::get())) {
+, _highlightColors(HighlightColors(style::main_palette::get())) {
 	setMouseTracking(true);
 	setFocusPolicy(Qt::StrongFocus);
 
@@ -205,7 +219,7 @@ void MarkdownDocumentWidget::setZoom(int value) {
 void MarkdownDocumentWidget::refreshPalette() {
 	ClickHandler::clearActive(this);
 	applyCursor(style::cur_default);
-	_highlightColors = Ui::SyntaxHighlightColors(style::main_palette::get());
+	_highlightColors = HighlightColors(style::main_palette::get());
 	resetTextPaintCaches();
 	if (_article) {
 		_article->invalidatePaletteCache();
@@ -410,6 +424,7 @@ void MarkdownDocumentWidget::contextMenuEvent(QContextMenuEvent *e) {
 		case PreparedLinkKind::ToggleDetails:
 			break;
 		case PreparedLinkKind::External:
+		case PreparedLinkKind::InstantViewPage:
 		case PreparedLinkKind::Anchor:
 		case PreparedLinkKind::Footnote:
 		case PreparedLinkKind::FootnoteBacklink:
@@ -453,8 +468,9 @@ void MarkdownDocumentWidget::mousePressEvent(QMouseEvent *e) {
 }
 
 void MarkdownDocumentWidget::mouseReleaseEvent(QMouseEvent *e) {
+	const auto weak = base::make_weak(this);
 	dragActionFinish(e->pos(), e->button());
-	if (!rect().contains(e->pos())) {
+	if (weak && !rect().contains(e->pos())) {
 		ClickHandler::clearActive(this);
 		applyCursor(style::cur_default);
 	}

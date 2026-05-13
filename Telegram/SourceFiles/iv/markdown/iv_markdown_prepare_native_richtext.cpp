@@ -14,8 +14,6 @@ struct GeoPointLocation;
 #include "ui/basic_click_handlers.h"
 #include "history/history_location_manager.h"
 
-#include <QtCore/QUrl>
-
 #include <limits>
 #include <utility>
 
@@ -135,34 +133,15 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	SortEntities(&text->text);
 }
 
-[[nodiscard]] QString ExternalLinkDisplayText(const PreparedLink &link) {
-	if (link.entityType == EntityType::Email) {
-		return link.target;
-	}
-	const auto original = QUrl(link.target);
-	const auto good = QUrl(original.isValid()
-		? original.toEncoded()
-		: QString());
-	return good.isValid() ? good.toDisplayString() : link.target;
-}
-
-void FinalizePreparedExternalLink(
-		PreparedLink *link,
-		QStringView renderedText) {
-	if (!link
-		|| link->kind != PreparedLinkKind::External
-		|| link->entityType != EntityType::Url) {
-		return;
-	}
-	if (renderedText == QStringView(ExternalLinkDisplayText(*link))) {
-		return;
-	}
-	if (UrlClickHandler::EncodeForOpening(renderedText.toString())
-		== link->target) {
-		link->shown = EntityLinkShown::Partial;
-		return;
-	}
-	link->entityType = EntityType::CustomUrl;
+[[nodiscard]] const QString &NativeIvLinkColorizedEntityData() {
+	static const auto result = [] {
+		auto value = QString();
+		value.reserve(2);
+		value.push_back(QChar(kNativeIvLinkSpecialColorIndex));
+		value.push_back(QChar(kNativeIvLinkSpecialColorIndex));
+		return value;
+	}();
+	return result;
 }
 
 [[nodiscard]] bool AddNativeIvPreparedLink(
@@ -170,7 +149,8 @@ void FinalizePreparedExternalLink(
 		std::vector<PreparedLink> *links,
 		int from,
 		int length,
-		QString target) {
+		QString target,
+		uint64 webpageId = 0) {
 	if (!length || target.isEmpty()) {
 		return true;
 	}
@@ -178,14 +158,27 @@ void FinalizePreparedExternalLink(
 	if (index > std::numeric_limits<uint16>::max()) {
 		return true;
 	}
-	auto prepared = ClassifiedLink(uint16(index), target, nullptr);
+	auto prepared = PreparedLink();
+	if (webpageId) {
+		prepared.index = uint16(index);
+		prepared.kind = PreparedLinkKind::InstantViewPage;
+		prepared.webpageId = webpageId;
+		NormalizePreparedUrlLink(&prepared, target);
+	} else {
+		prepared = ClassifiedLink(uint16(index), target, nullptr);
+	}
 	if (prepared.kind == PreparedLinkKind::RejectedRelative
 		|| prepared.kind == PreparedLinkKind::LocalFile) {
 		return true;
 	}
-	FinalizePreparedExternalLink(
-		&prepared,
-		QStringView(text->text).mid(from, length));
+	FinalizePreparedUrlLink(&prepared, QStringView(text->text).mid(from, length));
+	if (prepared.kind == PreparedLinkKind::InstantViewPage) {
+		text->entities.push_back(EntityInText(
+			EntityType::Colorized,
+			from,
+			length,
+			NativeIvLinkColorizedEntityData()));
+	}
 	text->entities.push_back(EntityInText(
 		EntityType::CustomUrl,
 		from,
@@ -328,12 +321,14 @@ void FinalizePreparedExternalLink(
 		if (result->text.size() == from) {
 			result->append(qs(data.vurl()));
 		}
+		const auto webpageId = uint64(data.vwebpage_id().v);
 		return AddNativeIvPreparedLink(
 			result,
 			links,
 			from,
 			result->text.size() - from,
-			qs(data.vurl()));
+			qs(data.vurl()),
+			webpageId);
 	}, [&](const MTPDtextEmail &data) {
 		const auto from = result->text.size();
 		if (!AppendNativeIvRichText(

@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_article_paint.h"
 #include "iv/markdown/iv_markdown_article_text.h"
+#include "ui/dynamic_image.h"
 #include "ui/widgets/checkbox.h"
 
 #include "styles/palette.h"
@@ -20,6 +21,62 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Iv::Markdown {
 namespace {
+
+[[nodiscard]] bool PaintDynamicImage(
+		Painter &p,
+		const std::shared_ptr<Ui::DynamicImage> &image,
+		QRect rect) {
+	if (!image || rect.isEmpty()) {
+		return false;
+	}
+	if (const auto frame = image->image(std::max(rect.width(), rect.height()));
+		!frame.isNull()) {
+		p.drawImage(rect, frame);
+		return true;
+	}
+	return false;
+}
+
+[[nodiscard]] bool PaintRelatedArticleThumbnailImage(
+		Painter &p,
+		QRect rect,
+		const std::shared_ptr<Ui::DynamicImage> &thumbnail,
+		const std::shared_ptr<Ui::DynamicImage> &previousThumbnail) {
+	return PaintDynamicImage(p, thumbnail, rect)
+		|| PaintDynamicImage(p, previousThumbnail, rect);
+}
+
+void RefreshRelatedArticleThumbnail(
+		const LaidOutBlock &block,
+		const MarkdownArticlePaintCaches &caches) {
+	if (!block.photoRuntime || block.thumbnailRect.isEmpty()) {
+		return;
+	}
+	const auto size = block.thumbnailRect.size();
+	if (size.isEmpty() || block.thumbnailRequestSize == size) {
+		return;
+	}
+	block.thumbnailRequestSize = size;
+	if (const auto image = block.photoRuntime->thumbnail(size)) {
+		if (image != block.thumbnailImage) {
+			block.previousThumbnailImage = std::move(block.thumbnailImage);
+			block.thumbnailImage = image;
+		}
+		if (image != block.subscribedThumbnailImage) {
+			block.subscribedThumbnailImage = image;
+			const auto repaint = caches.repaint;
+			const auto repaintRect = caches.repaintRect;
+			const auto rect = block.mediaRect;
+			image->subscribeToUpdates([repaint, repaintRect, rect] {
+				if (repaintRect && !rect.isEmpty()) {
+					repaintRect(rect);
+				} else if (repaint) {
+					repaint();
+				}
+			});
+		}
+	}
+}
 
 void PaintTextLeaf(
 		Painter &p,
@@ -733,6 +790,79 @@ void PaintChannelBlock(
 	PaintMediaCaption(p, block, markdown, caches, selectionState, clip);
 }
 
+void PaintRelatedArticleBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		const style::Markdown &markdown,
+		const MarkdownArticlePaintCaches &caches,
+		const PaintSelectionState &selectionState,
+		QRect clip) {
+	const auto visible = clip.intersected(block.visibleMediaRect);
+	if (visible.isEmpty()) {
+		return;
+	}
+	const auto &style = markdown.relatedArticle;
+	RefreshRelatedArticleThumbnail(block, caches);
+
+	p.save();
+	p.setClipRect(visible);
+	PaintCardSurface(
+		p,
+		block.mediaRect,
+		style.border,
+		style.borderFg,
+		style.bg,
+		style.radius);
+	if (!block.thumbnailRect.isEmpty()) {
+		auto hq = PainterHighQualityEnabler(p);
+		auto path = RoundedRectPath(block.thumbnailRect, style.thumbnailRadius);
+		p.fillPath(path, st::windowBg->c);
+		p.save();
+		p.setClipPath(path, Qt::IntersectClip);
+		(void)PaintRelatedArticleThumbnailImage(
+			p,
+			block.thumbnailRect,
+			block.thumbnailImage,
+			block.previousThumbnailImage);
+		p.restore();
+	}
+	if (!block.labelRect.isEmpty()) {
+		p.setPen(style.titleFg->c);
+		PaintTextLeaf(
+			p,
+			block.labelLeaf,
+			caches,
+			block.labelRect,
+			block.labelWidth,
+			visible);
+	}
+	if (!block.subtitleRect.isEmpty()) {
+		p.setPen(style.subtitleFg->c);
+		PaintTextLeaf(
+			p,
+			block.subtitleLeaf,
+			caches,
+			block.subtitleRect,
+			block.subtitleWidth,
+			visible);
+	}
+	if (!block.actionRect.isEmpty()) {
+		p.setPen(style.footerFg->c);
+		PaintTextLeaf(
+			p,
+			block.actionLeaf,
+			caches,
+			block.actionRect,
+			block.actionWidth,
+			visible);
+	}
+	if (block.segmentIndex >= 0
+		&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
+		p.fillRect(block.visibleMediaRect, p.textPalette().selectOverlay);
+	}
+	p.restore();
+}
+
 void PaintPhotoBlock(
 		Painter &p,
 		const LaidOutBlock &block,
@@ -1048,6 +1178,15 @@ void PaintBlock(
 		break;
 	case PreparedBlockKind::Channel:
 		PaintChannelBlock(
+			p,
+			block,
+			markdown,
+			caches,
+			selectionState,
+			clip);
+		break;
+	case PreparedBlockKind::RelatedArticle:
+		PaintRelatedArticleBlock(
 			p,
 			block,
 			markdown,

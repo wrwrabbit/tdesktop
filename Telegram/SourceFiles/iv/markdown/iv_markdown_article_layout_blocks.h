@@ -15,6 +15,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <optional>
 #include <vector>
 
+namespace Ui {
+class DynamicImage;
+} // namespace Ui
+
 namespace style {
 struct Markdown;
 struct QuoteStyle;
@@ -67,6 +71,8 @@ struct LaidOutBlock {
 	QString copyText;
 	QString labelText;
 	QString codeLanguage;
+	std::optional<PreparedLink> preparedLink;
+	ClickHandlerPtr preparedLinkHandler;
 	Spellchecker::HighlightProcessId syntaxHighlightProcessId = 0;
 	std::vector<LaidOutBlock> children;
 	std::vector<LaidOutTableRow> tableRows;
@@ -84,6 +90,7 @@ struct LaidOutBlock {
 	QRect formulaRect;
 	QRect tableRect;
 	QRect mediaRect;
+	QRect thumbnailRect;
 	QRect visibleFormulaRect;
 	QRect visibleTableRect;
 	QRect visibleMediaRect;
@@ -109,10 +116,15 @@ struct LaidOutBlock {
 	int segmentIndex = -1;
 	int secondarySegmentIndex = -1;
 	std::shared_ptr<MediaBlock> mediaBlock;
+	std::shared_ptr<PhotoRuntime> photoRuntime;
 	std::shared_ptr<DocumentRuntime> documentRuntime;
 	std::shared_ptr<ChannelRuntime> channelRuntime;
 	MediaActivation activation;
 	MediaActivation actionActivation;
+	mutable std::shared_ptr<Ui::DynamicImage> thumbnailImage;
+	mutable std::shared_ptr<Ui::DynamicImage> previousThumbnailImage;
+	mutable std::shared_ptr<Ui::DynamicImage> subscribedThumbnailImage;
+	mutable QSize thumbnailRequestSize;
 	mutable QImage colorizedFormulaImage;
 	mutable QColor colorizedFormulaColor;
 	mutable QSize colorizedFormulaSize;
@@ -219,6 +231,13 @@ void RepopulateCodeBlockLeaf(
 	int left,
 	int top,
 	int width);
+[[nodiscard]] LaidOutBlock LayoutRelatedArticleBlock(
+	const PreparedBlock &prepared,
+	const style::Markdown &markdown,
+	int left,
+	int top,
+	int width,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime);
 [[nodiscard]] LaidOutBlock LayoutPhotoBlock(
 	const PreparedBlock &prepared,
 	std::vector<PreparedFormulaSlot> *formulas,

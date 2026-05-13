@@ -420,6 +420,7 @@ void CollectSelectableSegments(
 				}
 			}
 		} break;
+		case PreparedBlockKind::RelatedArticle:
 		case PreparedBlockKind::Placeholder:
 		case PreparedBlockKind::Photo:
 		case PreparedBlockKind::Video:

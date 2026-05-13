@@ -42,11 +42,13 @@ enum class PreparedBlockKind {
 	Map,
 	Channel,
 	GroupedMedia,
+	RelatedArticle,
 	Placeholder,
 };
 
 enum class PreparedLinkKind {
 	External,
+	InstantViewPage,
 	Anchor,
 	Footnote,
 	FootnoteBacklink,
@@ -63,6 +65,7 @@ struct PreparedLink {
 	QString copyText;
 	EntityType entityType = EntityType::Invalid;
 	EntityLinkShown shown = EntityLinkShown::Full;
+	uint64 webpageId = 0;
 };
 
 enum class InlineTextObjectKind {
@@ -195,6 +198,15 @@ struct PreparedPlaceholderBlockData {
 	std::optional<EmbedRequest> embed;
 };
 
+struct PreparedRelatedArticleBlockData {
+	PreparedLink link;
+	QString copyText;
+	QString title;
+	QString description;
+	QString footer;
+	uint64 photoId = 0;
+};
+
 struct PreparedBlock {
 	PreparedBlockKind kind = PreparedBlockKind::Paragraph;
 	TextWithEntities text;
@@ -212,6 +224,7 @@ struct PreparedBlock {
 	PreparedChannelBlockData channel;
 	PreparedGroupedMediaBlockData groupedMedia;
 	PreparedPlaceholderBlockData placeholder;
+	PreparedRelatedArticleBlockData relatedArticle;
 	ListKind listKind = ListKind::Bullet;
 	ListDelimiter listDelimiter = ListDelimiter::None;
 	MathKind mathKind = MathKind::Display;

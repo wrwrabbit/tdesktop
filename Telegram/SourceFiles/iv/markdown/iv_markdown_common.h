@@ -191,6 +191,7 @@ struct OpenOptions {
 	QString sourcePath;
 	QString sourceUrl;
 	QString initialFragment;
+	uint64 currentPageId = 0;
 	ViewerKind viewerKind = ViewerKind::Auto;
 	Iv::Delegate *delegate = nullptr;
 	QVariant clickHandlerContext;
@@ -214,9 +215,11 @@ struct Event {
 	enum class Type {
 		Close,
 		Quit,
+		OpenPage,
 		OpenFile,
 	};
 	Type type = Type::Close;
+	uint64 webpageId = 0;
 	QString url;
 	QVariant context;
 };
