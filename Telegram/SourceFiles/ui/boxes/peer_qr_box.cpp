@@ -775,9 +775,9 @@ void FillPeerQrBox(
 				st::settingsScale),
 			st::boxRowPadding);
 		slider->resize(slider->width(), seekSize);
-		const auto kSizeAmount = 8;
-		const auto kMinSize = 20;
-		const auto kMaxSize = 36;
+		const auto kSizeAmount = 15;
+		const auto kMinSize = 14;
+		const auto kMaxSize = 44;
 		const auto kStep = (kMaxSize - kMinSize) / (kSizeAmount - 1);
 		const auto updateGeometry = AddDotsToSlider(
 			slider,
@@ -789,6 +789,25 @@ void FillPeerQrBox(
 		const auto indexToFontSize = [=](int index) {
 			return kMinSize + index * kStep;
 		};
+		{
+			const auto username = peer->username();
+			if (!username.isEmpty()) {
+				const auto measured = ('@' + username).toUpper();
+				const auto qrMaxSize = st::boxWideWidth
+					- rect::m::sum::h(st::boxRowPadding)
+					- rect::m::sum::h(st::profileQrBackgroundMargins);
+				auto picked = kMinSize;
+				for (auto i = kSizeAmount - 1; i >= 0; --i) {
+					const auto size = indexToFontSize(i);
+					const auto font = CreateFont(size, style::Scale());
+					if (font->width(measured) <= qrMaxSize) {
+						picked = size;
+						break;
+					}
+				}
+				state->fontSizeValue = picked;
+			}
+		}
 		slider->geometryValue(
 		) | rpl::on_next([=](const QRect &rect) {
 			updateGeometry(fontSizeToIndex(state->fontSizeValue.current()));
