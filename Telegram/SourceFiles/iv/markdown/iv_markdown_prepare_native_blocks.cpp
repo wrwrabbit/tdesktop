@@ -1348,15 +1348,6 @@ void MarkNativeIvTableSlots(
 	return result;
 }
 
-[[nodiscard]] int NativeIvTableOccupiedSlotCount(
-		const NativeIvTableOccupancyGrid &occupancy) {
-	auto result = 0;
-	for (const auto &row : occupancy) {
-		result += int(std::count(row.begin(), row.end(), char(true)));
-	}
-	return result;
-}
-
 [[nodiscard]] bool PrepareNativeIvTableBlock(
 		const MTPDpageBlockTable &data,
 		std::vector<PreparedBlock> *result,
@@ -1379,27 +1370,7 @@ void MarkNativeIvTableSlots(
 	block.links = std::move(title.links);
 
 	const auto &limits = PrepareTableRenderLimitsForIv();
-	const auto rowCount = int(data.vrows().v.size());
-
-	const auto placeholder = [&] {
-		if (state->result.failure.failed()) {
-			return false;
-		}
-		if (!block.text.text.isEmpty() || !block.anchorId.isEmpty()) {
-			auto titleBlock = EmptyParagraphBlock();
-			titleBlock.text = std::move(block.text);
-			titleBlock.links = std::move(block.links);
-			titleBlock.anchorId = std::move(block.anchorId);
-			result->push_back(std::move(titleBlock));
-		}
-		return PrepareNativeIvPlainPlaceholderBlock(
-			u"Table Placeholder"_q,
-			result);
-	};
-
-	if (rowCount > limits.maxRows) {
-		return placeholder();
-	}
+	const auto rowCount = std::min(int(data.vrows().v.size()), limits.maxRows);
 
 	auto occupancy = NativeIvTableOccupancyGrid(rowCount);
 	block.tableRows.reserve(rowCount);
@@ -1407,6 +1378,9 @@ void MarkNativeIvTableSlots(
 
 	auto rowIndex = 0;
 	for (const auto &row : data.vrows().v) {
+		if (rowIndex >= rowCount) {
+			break;
+		}
 		auto preparedRow = PreparedTableRow();
 		const auto ok = row.match([&](const MTPDpageTableRow &rowData) {
 			preparedRow.cells.reserve(std::min(
@@ -1496,20 +1470,13 @@ void MarkNativeIvTableSlots(
 			return true;
 		});
 		if (!ok) {
-			return placeholder();
+			return false;
 		}
 		block.tableRows.push_back(std::move(preparedRow));
 		++rowIndex;
 	}
 
 	block.tableColumnCount = NativeIvTableColumnCount(occupancy);
-	const auto occupiedSlotCount = NativeIvTableOccupiedSlotCount(occupancy);
-	if (rowCount > limits.maxRows
-		|| block.tableColumnCount > limits.maxColumns
-		|| occupiedSlotCount > limits.maxCells
-		|| (int64(rowCount) * block.tableColumnCount) > limits.maxCells) {
-		return placeholder();
-	}
 
 	block.tableAlignments.resize(block.tableColumnCount, TableAlignment::Left);
 	for (const auto &preparedRow : block.tableRows) {

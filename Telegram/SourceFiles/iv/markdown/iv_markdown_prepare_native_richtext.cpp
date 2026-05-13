@@ -613,11 +613,7 @@ bool PrepareNativeIvPhotoBlock(
 		NativeIvPrepareState *state) {
 	const auto info = FindNativeIvPhoto(uint64(data.vphoto_id().v), *state);
 	if (!info || info->width <= 0 || info->height <= 0) {
-		return PrepareNativeIvPlaceholderBlock(
-			u"Photo Placeholder"_q,
-			data.vcaption(),
-			result,
-			state);
+		return true;
 	}
 	auto caption = PreparedIvRichText();
 	auto anchorId = QString();
@@ -649,11 +645,7 @@ bool PrepareNativeIvVideoBlock(
 		|| !IsNativeIvVideoDocument(*info)
 		|| info->width <= 0
 		|| info->height <= 0) {
-		return PrepareNativeIvPlaceholderBlock(
-			u"Video Placeholder"_q,
-			data.vcaption(),
-			result,
-			state);
+		return true;
 	}
 	auto caption = PreparedIvRichText();
 	auto anchorId = QString();
@@ -681,11 +673,7 @@ bool PrepareNativeIvAudioBlock(
 		NativeIvPrepareState *state) {
 	const auto info = FindNativeIvDocument(uint64(data.vaudio_id().v), *state);
 	if (!info) {
-		return PrepareNativeIvPlaceholderBlock(
-			u"Audio File Placeholder"_q,
-			data.vcaption(),
-			result,
-			state);
+		return true;
 	}
 	auto caption = PreparedIvRichText();
 	auto anchorId = QString();
@@ -729,11 +717,7 @@ bool PrepareNativeIvMapBlock(
 		return false;
 	});
 	if (!supported) {
-		return PrepareNativeIvPlaceholderBlock(
-			u"Map Placeholder"_q,
-			data.vcaption(),
-			result,
-			state);
+		return true;
 	}
 	auto caption = PreparedIvRichText();
 	auto anchorId = QString();
@@ -778,9 +762,7 @@ bool PrepareNativeIvChannelBlock(
 		return false;
 	});
 	if (!supported || !prepared.channelId || prepared.title.isEmpty()) {
-		return PrepareNativeIvPlainPlaceholderBlock(
-			u"Channel Placeholder"_q,
-			result);
+		return true;
 	}
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::Channel;
@@ -797,13 +779,7 @@ bool PrepareNativeIvGroupedMediaBlock(
 		QString placeholderLabel,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
-	if (items.size() < 2) {
-		return PrepareNativeIvPlaceholderBlock(
-			std::move(placeholderLabel),
-			caption,
-			result,
-			state);
-	}
+	Q_UNUSED(placeholderLabel);
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::GroupedMedia;
 	block.groupedMedia.id = GeneratePreparedMediaBlockId(state);
@@ -813,20 +789,12 @@ bool PrepareNativeIvGroupedMediaBlock(
 		auto prepared = PreparedGroupedMediaItemData();
 		prepared.id = GeneratePreparedMediaBlockId(state);
 		if (!PrepareNativeIvGroupedMediaItem(item, &prepared, *state)) {
-			return PrepareNativeIvPlaceholderBlock(
-				std::move(placeholderLabel),
-				caption,
-				result,
-				state);
+			continue;
 		}
 		block.groupedMedia.items.push_back(std::move(prepared));
 	}
 	if (block.groupedMedia.items.empty()) {
-		return PrepareNativeIvPlaceholderBlock(
-			std::move(placeholderLabel),
-			caption,
-			result,
-			state);
+		return true;
 	}
 	auto preparedCaption = PreparedIvRichText();
 	if (!PrepareNativeIvCaption(

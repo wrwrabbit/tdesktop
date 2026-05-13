@@ -1497,21 +1497,22 @@ void Shown::createMarkdownController(
 }
 
 void Shown::showWindowed(Prepared result, Source source, bool refresh) {
-	const auto page = _session->data().webpage(result.pageId);
-	auto native = Markdown::TryPrepareNativeInstantView({
-		.source = &source,
-		.mediaRuntime = createMediaRuntime(page),
-	});
-	if (!native.supported()) {
+	if constexpr (true) {
+		const auto page = _session->data().webpage(result.pageId);
+		auto native = Markdown::TryPrepareNativeInstantView({
+			.source = &source,
+			.mediaRuntime = createMediaRuntime(page),
+		});
+		showMarkdownWindowed(
+			std::move(native.content),
+			std::move(result.name),
+			std::move(result.hash),
+			page,
+			refresh);
+	} else {
+		Q_UNUSED(source);
 		showHtmlWindowed(std::move(result), refresh);
-		return;
 	}
-	showMarkdownWindowed(
-		std::move(native.content),
-		std::move(result.name),
-		std::move(result.hash),
-		page,
-		refresh);
 }
 
 void Shown::showHtmlWindowed(Prepared result, bool refresh) {

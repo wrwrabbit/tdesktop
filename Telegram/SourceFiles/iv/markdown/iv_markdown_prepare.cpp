@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QElapsedTimer>
 
+#include <algorithm>
 #include <utility>
 
 namespace Iv::Markdown {
@@ -26,6 +27,40 @@ namespace {
 		result += CountPreparedBlocks(footnote.blocks);
 	}
 	return result;
+}
+
+[[nodiscard]] PreparedBlock ContentTooLongBlock() {
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Placeholder;
+	block.placeholder.label = u"Content Too Long"_q;
+	block.placeholder.copyText = block.placeholder.label;
+	return block;
+}
+
+void KeepPreparedBlocksUpToLimit(
+		std::vector<PreparedBlock> *blocks,
+		int *remaining) {
+	auto keep = size_t(0);
+	for (; keep != blocks->size(); ++keep) {
+		if (*remaining <= 0) {
+			break;
+		}
+		--*remaining;
+		KeepPreparedBlocksUpToLimit(&(*blocks)[keep].children, remaining);
+	}
+	if (keep != blocks->size()) {
+		blocks->erase(blocks->begin() + keep, blocks->end());
+	}
+}
+
+void ApplySoftPreparedBlockLimit(std::vector<PreparedBlock> *blocks) {
+	const auto limit = PrepareLimitsForIv().maxPreparedBlocks;
+	if (CountPreparedBlocks(*blocks) <= limit) {
+		return;
+	}
+	auto remaining = std::max(limit - 1, 0);
+	KeepPreparedBlocksUpToLimit(blocks, &remaining);
+	blocks->push_back(ContentTooLongBlock());
 }
 
 } // namespace
@@ -142,16 +177,7 @@ NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 			u"Prepare Failed"_q,
 			&state.result.blocks.blocks);
 	}
-	if (CountPreparedBlocks(state.result.blocks.blocks)
-		> PrepareLimitsForIv().maxPreparedBlocks) {
-		state.setFailure(
-			PrepareTerminalFailure::DocumentTooLarge,
-			u"prepared-block-limit"_q);
-		ClearPreparedOutput(&state.result);
-		return finish(
-			NativeInstantViewPrepareResultKind::Failure,
-			state.result.failure.debugReason);
-	}
+	ApplySoftPreparedBlockLimit(&state.result.blocks.blocks);
 	return finish(
 		NativeInstantViewPrepareResultKind::Supported,
 		QString());
