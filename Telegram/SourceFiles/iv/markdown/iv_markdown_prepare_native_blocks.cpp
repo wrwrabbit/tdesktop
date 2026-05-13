@@ -173,9 +173,10 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 		"<style>"
 		"html,body{margin:0;padding:0;background:#fff;color:#000;}"
 		"body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}"
-		"figure{margin:0;}img,video{display:block;max-width:100%;height:auto;}"
-		"iframe{display:block;width:100%;border:0;}"
-		".iframe-wrap{margin:0 auto;max-width:100%;}"
+		"figure{display:block;margin:0;max-width:100%;}"
+		"img,video{display:block;max-width:100%;height:auto;}"
+		".iframe-wrap{display:block;margin:0 auto;max-width:100%;overflow:hidden;}"
+		"iframe{display:block;width:100%;max-width:100%;border:0;}"
 		".embed-post{box-sizing:border-box;margin:0;padding:16px;"
 		"border:1px solid rgba(0,0,0,.08);border-radius:12px;}"
 		".embed-post address{display:flex;align-items:center;gap:10px;"
@@ -192,7 +193,206 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 		".embed-post small{display:block;margin-top:8px;}"
 		"</style></head><body>")
 		+ body
-		+ "</body></html>";
+		+ QByteArray(
+		"<script>"
+		"(function(){"
+		"var iframeWindows=new Map();"
+		"var lastPreferredWidth=0;"
+		"var lastPreferredHeight=0;"
+		"var measureScheduled=false;"
+		"function clamp(value,max){"
+		"value=Number(value);"
+		"if(!isFinite(value)){return 0;}"
+		"value=Math.round(value);"
+		"if(value<1){return 0;}"
+		"return Math.min(value,max||100000);"
+		"}"
+		"function findWrap(iframe){"
+		"var node=iframe;"
+		"while(node&&node!==document.body){"
+		"if(node.classList&&node.classList.contains('iframe-wrap')){"
+		"return node;"
+		"}"
+		"node=node.parentNode;"
+		"}"
+		"return null;"
+		"}"
+		"function rememberIframe(iframe){"
+		"try{"
+		"if(iframe.contentWindow){"
+		"iframeWindows.set(iframe.contentWindow,iframe);"
+		"}"
+		"}catch(e){"
+		"}"
+		"}"
+		"function seedIframeHeight(iframe){"
+		"var wrap=findWrap(iframe);"
+		"if(!wrap){return;}"
+		"var fixed=clamp(wrap.getAttribute('data-height'),100000);"
+		"if(fixed){"
+		"iframe.style.height=fixed+'px';"
+		"return;"
+		"}"
+		"if(iframe.getAttribute('data-native-iv-resized')==='1'){"
+		"return;"
+		"}"
+		"var ratio=Number(wrap.getAttribute('data-aspect-ratio'));"
+		"if(!isFinite(ratio)||ratio<=0){"
+		"return;"
+		"}"
+		"var width=clamp(Math.ceil("
+		"wrap.getBoundingClientRect().width"
+		"||iframe.getBoundingClientRect().width"
+		"||0),100000);"
+		"if(!width){"
+		"return;"
+		"}"
+		"var height=clamp(width*ratio,100000);"
+		"if(height){"
+		"iframe.style.height=height+'px';"
+		"}"
+		"}"
+		"function syncIframe(iframe){"
+		"rememberIframe(iframe);"
+		"seedIframeHeight(iframe);"
+		"if(iframe.getAttribute('data-native-iv-registered')==='1'){"
+		"return;"
+		"}"
+		"iframe.setAttribute('data-native-iv-registered','1');"
+		"iframe.addEventListener('load',function(){"
+		"rememberIframe(iframe);"
+		"seedIframeHeight(iframe);"
+		"scheduleMeasure();"
+		"},false);"
+		"}"
+		"function syncIframes(){"
+		"var iframes=document.getElementsByTagName('iframe');"
+		"for(var i=0;i<iframes.length;i++){"
+		"syncIframe(iframes[i]);"
+		"}"
+		"}"
+		"function measurePreferredSize(){"
+		"var width=0;"
+		"var height=0;"
+		"var body=document.body;"
+		"if(body){"
+		"var bodyRect=body.getBoundingClientRect();"
+		"height=Math.max(height,body.scrollHeight,body.offsetHeight,bodyRect.height);"
+		"var children=body.children;"
+		"for(var i=0;i<children.length;i++){"
+		"var child=children[i];"
+		"var rect=child.getBoundingClientRect();"
+		"width=Math.max(width,child.scrollWidth,child.offsetWidth,rect.width);"
+		"height=Math.max(height,child.scrollHeight,child.offsetHeight,rect.bottom-bodyRect.top);"
+		"}"
+		"if(!width){"
+		"width=Math.max(body.scrollWidth,body.offsetWidth,bodyRect.width);"
+		"}"
+		"}"
+		"var doc=document.documentElement;"
+		"if(doc&&(!width||!height)){"
+		"var docRect=doc.getBoundingClientRect();"
+		"if(!width){"
+		"width=Math.max(doc.scrollWidth,doc.offsetWidth,doc.clientWidth,docRect.width);"
+		"}"
+		"if(!height){"
+		"height=Math.max(doc.scrollHeight,doc.offsetHeight,doc.clientHeight,docRect.height);"
+		"}"
+		"}"
+		"return{"
+		"width:clamp(width,100000),"
+		"height:clamp(height,100000)"
+		"};"
+		"}"
+		"function reportPreferredSize(){"
+		"var size=measurePreferredSize();"
+		"if(!size.width||!size.height){"
+		"return;"
+		"}"
+		"if(size.width===lastPreferredWidth&&size.height===lastPreferredHeight){"
+		"return;"
+		"}"
+		"lastPreferredWidth=size.width;"
+		"lastPreferredHeight=size.height;"
+		"if(window.external&&typeof window.external.invoke==='function'){"
+		"try{"
+		"window.external.invoke(JSON.stringify({"
+		"event:'preferred_size',"
+		"width:size.width,"
+		"height:size.height"
+		"}));"
+		"}catch(e){"
+		"}"
+		"}"
+		"}"
+		"function scheduleMeasure(){"
+		"if(measureScheduled){"
+		"return;"
+		"}"
+		"measureScheduled=true;"
+		"var callback=function(){"
+		"measureScheduled=false;"
+		"reportPreferredSize();"
+		"};"
+		"if(window.requestAnimationFrame){"
+		"window.requestAnimationFrame(callback);"
+		"}else{"
+		"setTimeout(callback,0);"
+		"}"
+		"}"
+		"window.addEventListener('message',function(event){"
+		"var iframe=iframeWindows.get(event.source);"
+		"if(!iframe){"
+		"return;"
+		"}"
+		"var data=event.data;"
+		"if(typeof data==='string'){"
+		"try{"
+		"data=JSON.parse(data);"
+		"}catch(e){"
+		"return;"
+		"}"
+		"}"
+		"if(!data||data.eventType!=='resize_frame'||!data.eventData){"
+		"return;"
+		"}"
+		"var height=clamp(data.eventData.height,100000);"
+		"if(!height){"
+		"return;"
+		"}"
+		"iframe.setAttribute('data-native-iv-resized','1');"
+		"iframe.style.height=height+'px';"
+		"scheduleMeasure();"
+		"},false);"
+		"document.addEventListener('DOMContentLoaded',function(){"
+		"syncIframes();"
+		"scheduleMeasure();"
+		"},false);"
+		"window.addEventListener('load',function(){"
+		"syncIframes();"
+		"scheduleMeasure();"
+		"},false);"
+		"window.addEventListener('resize',function(){"
+		"syncIframes();"
+		"scheduleMeasure();"
+		"},false);"
+		"if(window.ResizeObserver){"
+		"var observer=new ResizeObserver(function(){"
+		"scheduleMeasure();"
+		"});"
+		"if(document.documentElement){"
+		"observer.observe(document.documentElement);"
+		"}"
+		"if(document.body){"
+		"observer.observe(document.body);"
+		"}"
+		"}else{"
+		"setInterval(scheduleMeasure,250);"
+		"}"
+		"syncIframes();"
+		"scheduleMeasure();"
+		"})();"
+		"</script></body></html>");
 }
 
 [[nodiscard]] const NativeIvPhotoInfo *FindNativeIvPhoto(
@@ -378,6 +578,7 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 	auto iframeHeight = QByteArray();
 	auto width = QByteArray();
 	auto height = QByteArray();
+	auto aspectRatio = QByteArray();
 	auto iframeAttributes = NativeIvHtmlAttributes();
 	const auto autosize = !data.vw();
 	if (autosize) {
@@ -389,8 +590,10 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 		iframeHeight = height;
 	} else {
 		width = QByteArray::number(data.vw()->v) + "px";
-		height = QByteArray::number(
-			(data.vh()->v * 100.) / std::max(data.vw()->v, 1));
+		aspectRatio = QByteArray::number(
+			double(data.vh()->v) / std::max(data.vw()->v, 1),
+			'g',
+			16);
 	}
 	if (!iframeWidth.isEmpty()) {
 		iframeAttributes.push_back({ "width", iframeWidth });
@@ -427,20 +630,28 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 	iframeAttributes.push_back({ "allowfullscreen", "true" });
 	auto content = NativeIvHtmlTag("iframe", iframeAttributes);
 	if (!autosize) {
+		auto wrapAttributes = NativeIvHtmlAttributes{
+			{ "class", "iframe-wrap" },
+		};
 		auto style = QByteArray();
 		if (!width.isEmpty()) {
 			style += QByteArray("width:") + width + ';';
 		}
-		const auto innerStyle = height.endsWith("px")
-			? (QByteArray("padding-bottom:") + height + ';')
-			: (QByteArray("padding-bottom:") + height + "%;");
-		content = NativeIvHtmlTag(
-			"div",
-			{
-				{ "class", "iframe-wrap" },
-				{ "style", style },
-			},
-			NativeIvHtmlTag("div", { { "style", innerStyle } }, content));
+		if (!style.isEmpty()) {
+			wrapAttributes.push_back({ "style", style });
+		}
+		if (!height.isEmpty()) {
+			wrapAttributes.push_back({
+				"data-height",
+				QByteArray::number(data.vh()->v),
+			});
+		} else if (!aspectRatio.isEmpty()) {
+			wrapAttributes.push_back({
+				"data-aspect-ratio",
+				aspectRatio,
+			});
+		}
+		content = NativeIvHtmlTag("div", wrapAttributes, content);
 	}
 	if (includeCaption) {
 		content += NativeIvCaptionHtml(data.vcaption(), state);

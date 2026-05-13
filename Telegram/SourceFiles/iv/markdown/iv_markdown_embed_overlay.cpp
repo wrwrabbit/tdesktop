@@ -12,7 +12,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/cached_round_corners.h"
 #include "ui/style/style_core_direction.h"
 #include "ui/text/text_utilities.h"
-#include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/shadow.h"
 #include "ui/wrap/padding_wrap.h"
@@ -23,12 +22,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_iv.h"
 
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
+#include <QtCore/QJsonValue>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPainter>
 #include <QtWidgets/QApplication>
 
 #include <algorithm>
 #include <array>
+#include <limits>
 
 namespace Iv::Markdown {
 namespace {
@@ -71,6 +74,19 @@ namespace {
 		fallbackUrl));
 }
 
+[[nodiscard]] int ParsePositiveInt(const QJsonValue &value) {
+	if (!value.isDouble()) {
+		return 0;
+	}
+	const auto parsed = value.toDouble();
+	if (parsed <= 0.
+		|| parsed > static_cast<double>(std::numeric_limits<int>::max())) {
+		return 0;
+	}
+	const auto result = static_cast<int>(parsed);
+	return (parsed == result) ? result : 0;
+}
+
 } // namespace
 
 EmbedOverlay::EmbedOverlay(
@@ -91,15 +107,6 @@ EmbedOverlay::EmbedOverlay(
 	_content = Ui::CreateChild<Ui::RpWidget>(this);
 	_content->setObjectName(u"nativeIvEmbedOverlayShell"_q);
 	_content->show();
-
-	_close = Ui::CreateChild<Ui::IconButton>(
-		_content,
-		st::markdownEmbedOverlay.close);
-	_close->setObjectName(u"nativeIvEmbedOverlayClose"_q);
-	_close->setClickedCallback([=] {
-		hide();
-	});
-	_close->show();
 }
 
 EmbedOverlay::~EmbedOverlay() = default;
@@ -112,6 +119,7 @@ bool EmbedOverlay::showEmbed(const EmbedRequest &request) {
 		_focusRestore = QApplication::focusWidget();
 	}
 	_request = request;
+	_preferredBodySize = QSize();
 	clearWebviewError();
 	QWidget::show();
 	raise();
@@ -134,7 +142,6 @@ bool EmbedOverlay::showEmbed(const EmbedRequest &request) {
 		} else {
 			showWebviewError(GenericWebviewErrorText());
 		}
-		_close->raise();
 		if (_error && !_error->isHidden()) {
 			_error->raise();
 		}
@@ -161,18 +168,29 @@ void EmbedOverlay::updateGeometry(QRect geometry) {
 	}
 }
 
+void EmbedOverlay::testHandleWebviewMessage(const QJsonDocument &message) {
+	handleWebviewMessage(message);
+}
+
 void EmbedOverlay::paintEvent(QPaintEvent *e) {
 	auto p = QPainter(this);
 	p.fillRect(e->rect(), st::markdownEmbedOverlay.scrimBg);
 	if (_contentGeometry.isEmpty()) {
 		return;
 	}
-	Ui::Shadow::paint(p, _contentGeometry, width(), st::boxRoundShadow);
+	Ui::Shadow::paint(
+		p,
+		_contentGeometry,
+		width(),
+		st::boxRoundShadow,
+		Ui::CachedCornersMasks(Ui::CachedCornerRadius::Small));
 	Ui::FillRoundRect(
 		p,
 		_contentGeometry,
 		st::markdownEmbedOverlay.bg,
-		Ui::BoxCorners);
+		Ui::PrepareCornerPixmaps(
+			st::roundRadiusSmall,
+			st::markdownEmbedOverlay.bg));
 }
 
 void EmbedOverlay::mousePressEvent(QMouseEvent *e) {
@@ -233,6 +251,49 @@ void EmbedOverlay::ensureWebview() {
 		}
 		return false;
 	});
+	raw->setMessageHandler([=](const QJsonDocument &message) {
+		crl::on_main(this, [=] {
+			if (_webview && (_webview.get() == raw)) {
+				handleWebviewMessage(message);
+			}
+		});
+	});
+	updateContentGeometry();
+}
+
+void EmbedOverlay::handleWebviewMessage(const QJsonDocument &message) {
+	if (!_request) {
+		return;
+	}
+	const auto object = message.object();
+	if (object.value("event").toString() != u"preferred_size"_q) {
+		return;
+	}
+	const auto width = ParsePositiveInt(object.value("width"));
+	const auto height = ParsePositiveInt(object.value("height"));
+	if (!width || !height) {
+		return;
+	}
+	auto resourceId = object.value("resourceId").toString();
+	if (resourceId.isEmpty()) {
+		resourceId = object.value("resource_id").toString();
+	}
+	if (!resourceId.isEmpty()
+		&& normalizedRequestId(resourceId.toStdString()) != _request.resourceId) {
+		return;
+	}
+	const auto size = QSize(width, height);
+	if (_preferredBodySize == size) {
+		return;
+	}
+	applyPreferredBodySize(size);
+}
+
+void EmbedOverlay::applyPreferredBodySize(QSize size) {
+	if (!size.isValid()) {
+		return;
+	}
+	_preferredBodySize = size;
 	updateContentGeometry();
 }
 
@@ -245,35 +306,58 @@ void EmbedOverlay::updateContentGeometry() {
 	if (available.isEmpty()) {
 		_contentGeometry = QRect();
 		_content->setGeometry(_contentGeometry);
+		if (_webview && _webview->widget()) {
+			_webview->widget()->setGeometry(QRect());
+		}
+		if (_error) {
+			_error->setGeometry(QRect());
+		}
 		update();
 		return;
 	}
 	const auto padding = st::markdownEmbedOverlay.padding;
-	const auto chromeHeight = padding.top()
-		+ st::markdownEmbedOverlay.close.height
-		+ padding.bottom();
-	const auto desiredWidth = _request.fullWidth
-		? available.width()
-		: (_request.width > 0
-			? _request.width
-			: st::markdownEmbedOverlay.size.width());
-	const auto desiredHeight = (_request.height > 0
-		? _request.height
-		: st::markdownEmbedOverlay.size.height()) + chromeHeight;
-	const auto width = std::max(
-		1,
-		std::min(available.width(), desiredWidth));
-	const auto height = std::max(
-		chromeHeight,
-		std::min(available.height(), desiredHeight));
+	const auto horizontalPadding = padding.left() + padding.right();
+	const auto verticalPadding = padding.top() + padding.bottom();
+	const auto availableWidth = std::max(available.width(), 1);
+	const auto availableHeight = std::max(available.height(), 1);
+	const auto availableBodyWidth = std::max(
+		availableWidth - horizontalPadding,
+		1);
+	const auto availableBodyHeight = std::max(
+		availableHeight - verticalPadding,
+		1);
+	const auto desiredBodyWidth = [&] {
+		if (_preferredBodySize.width() > 0) {
+			return _preferredBodySize.width();
+		}
+		if (_request.width > 0) {
+			return _request.width;
+		}
+		return st::markdownEmbedOverlay.size.width();
+	}();
+	const auto width = _request.fullWidth
+		? availableWidth
+		: std::min(
+			std::clamp(desiredBodyWidth, 1, availableBodyWidth)
+				+ horizontalPadding,
+			availableWidth);
+	const auto desiredBodyHeight = [&] {
+		if (_preferredBodySize.height() > 0) {
+			return _preferredBodySize.height();
+		}
+		if (_request.height > 0) {
+			return _request.height;
+		}
+		return st::markdownEmbedOverlay.size.height();
+	}();
+	const auto height = std::min(
+		std::clamp(desiredBodyHeight, 1, availableBodyHeight)
+			+ verticalPadding,
+		availableHeight);
 	_contentGeometry = style::centerrect(
 		available,
 		QRect(0, 0, width, height));
 	_content->setGeometry(_contentGeometry);
-	_close->moveToRight(
-		st::markdownEmbedOverlay.closePosition.x(),
-		st::markdownEmbedOverlay.closePosition.y(),
-		_content->width());
 	const auto body = bodyRect();
 	if (_webview && _webview->widget()) {
 		_webview->widget()->setGeometry(body);
@@ -287,7 +371,6 @@ void EmbedOverlay::updateContentGeometry() {
 			_content->width());
 		_error->raise();
 	}
-	_close->raise();
 	update();
 }
 
@@ -344,14 +427,11 @@ void EmbedOverlay::restoreFocus() {
 
 QRect EmbedOverlay::bodyRect() const {
 	const auto padding = st::markdownEmbedOverlay.padding;
-	const auto top = padding.top()
-		+ st::markdownEmbedOverlay.close.height
-		+ padding.bottom();
 	return QRect(
 		padding.left(),
-		top,
-		std::max(_content->width() - padding.left() - padding.right(), 1),
-		std::max(_content->height() - top - padding.bottom(), 1));
+		padding.top(),
+		std::max(_contentGeometry.width() - padding.left() - padding.right(), 1),
+		std::max(_contentGeometry.height() - padding.top() - padding.bottom(), 1));
 }
 
 QByteArray EmbedOverlay::normalizedRequestId(const std::string &id) const {

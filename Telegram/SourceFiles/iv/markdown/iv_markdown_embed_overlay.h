@@ -17,7 +17,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QPointer>
 #include <QtCore/QRect>
+#include <QtCore/QSize>
 
+class QJsonDocument;
 class QMouseEvent;
 class QPaintEvent;
 class QWidget;
@@ -25,7 +27,6 @@ struct TextWithEntities;
 
 namespace Ui {
 class FlatLabel;
-class IconButton;
 template <typename Widget>
 class PaddingWrap;
 class RpWidget;
@@ -50,6 +51,7 @@ public:
 	[[nodiscard]] bool showEmbed(const EmbedRequest &request);
 	void hide();
 	void updateGeometry(QRect geometry);
+	void testHandleWebviewMessage(const QJsonDocument &message);
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
@@ -58,6 +60,8 @@ protected:
 
 private:
 	void ensureWebview();
+	void handleWebviewMessage(const QJsonDocument &message);
+	void applyPreferredBodySize(QSize size);
 	void updateContentGeometry();
 	void showWebviewError();
 	void showWebviewError(const TextWithEntities &text);
@@ -73,12 +77,12 @@ private:
 	const std::function<Webview::DataResult(QByteArray, Webview::DataRequest)>
 		_dataRequestHandler;
 	Ui::RpWidget *_content = nullptr;
-	Ui::IconButton *_close = nullptr;
 	Ui::PaddingWrap<Ui::FlatLabel> *_error = nullptr;
 	Ui::FlatLabel *_errorLabel = nullptr;
 	std::unique_ptr<Webview::Window> _webview;
 	EmbedRequest _request;
 	QRect _contentGeometry;
+	QSize _preferredBodySize;
 	QPointer<QWidget> _focusRestore;
 	bool _pressedOutside = false;
 

@@ -1,6 +1,7 @@
 #include "iv/markdown/iv_markdown_article.h"
 #include "iv/markdown/iv_markdown_article_text.h"
 #include "iv/markdown/iv_markdown_document.h"
+#include "iv/markdown/iv_markdown_embed_overlay.h"
 #include "iv/markdown/iv_markdown_math_renderer.h"
 #include "iv/markdown/iv_markdown_microtex.h"
 #include "iv/markdown/iv_markdown_parse.h"
@@ -21,6 +22,7 @@
 #include "ui/widgets/rp_window.h"
 #include "ui/widgets/scroll_area.h"
 
+#include "styles/style_layers.h"
 #include "styles/style_iv.h"
 
 #include <QtCore/QByteArray>
@@ -32,6 +34,8 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QIODevice>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QString>
 #include <QtCore/QVector>
 #include <QtGui/QColor>
@@ -2344,6 +2348,28 @@ template <typename Object>
 		}
 	}
 	return nullptr;
+}
+
+[[nodiscard]] QJsonDocument NativeIvPreferredSizeMessage(QSize bodySize) {
+	return QJsonDocument(QJsonObject{
+		{ u"event"_q, u"preferred_size"_q },
+		{ u"width"_q, bodySize.width() },
+		{ u"height"_q, bodySize.height() },
+	});
+}
+
+[[nodiscard]] QSize NativeIvOverlayShellSizeForBody(QSize bodySize) {
+	const auto padding = st::markdownEmbedOverlay.padding;
+	return QSize(
+		bodySize.width() + padding.left() + padding.right(),
+		bodySize.height() + padding.top() + padding.bottom());
+}
+
+[[nodiscard]] QRect NativeIvOverlayAvailableRect(const EmbedOverlay *overlay) {
+	return overlay
+		? overlay->rect().marginsRemoved(
+			st::markdownEmbedOverlay.margin + st::boxRoundShadow.extend)
+		: QRect();
 }
 
 [[nodiscard]] bool PaintTouchesBottomOrRightImageEdge(const QImage &image) {
@@ -5028,10 +5054,30 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 						!= supported.content.embedHtmlResources.end(),
 					fixture.expectedLabel + u" placeholder embed resource stored"_q,
 					ok);
-				if (fixture.kind == NativeIvPlaceholderKind::EmbedPost) {
-					const auto resource = supported.content.embedHtmlResources.find(
-						embed.resourceId);
-					if (resource != supported.content.embedHtmlResources.end()) {
+				const auto resource = supported.content.embedHtmlResources.find(
+					embed.resourceId);
+				if (resource != supported.content.embedHtmlResources.end()) {
+					Check(
+						resource->second.contains("window.external.invoke"),
+						fixture.expectedLabel
+							+ u" embed wrapper native invoke bridge"_q,
+						ok);
+					Check(
+						resource->second.contains("resize_frame"),
+						fixture.expectedLabel
+							+ u" embed wrapper resize frame bridge"_q,
+						ok);
+					Check(
+						resource->second.contains("preferred_size"),
+						fixture.expectedLabel
+							+ u" embed wrapper preferred size event"_q,
+						ok);
+					Check(
+						!resource->second.contains("padding-bottom:"),
+						fixture.expectedLabel
+							+ u" embed wrapper removed iframe spacer"_q,
+						ok);
+					if (fixture.kind == NativeIvPlaceholderKind::EmbedPost) {
 						Check(
 							resource->second.contains(
 								"https://telegra.ph/embed-post-link"),
@@ -5155,6 +5201,8 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 		preview->show();
 		FlushPendingWidgetEvents();
 		const auto body = FindChildObject<MarkdownDocumentWidget>(preview.get());
+		const auto overlay = preview->findChild<EmbedOverlay*>(
+			u"nativeIvEmbedOverlay"_q);
 		const auto overlayShell = preview->findChild<QWidget*>(
 			u"nativeIvEmbedOverlayShell"_q);
 		Check(
@@ -5162,10 +5210,19 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 			previewEmbedLabel + u" preview body widget"_q,
 			ok);
 		Check(
+			overlay != nullptr,
+			previewEmbedLabel + u" overlay object"_q,
+			ok);
+		Check(
 			overlayShell != nullptr,
 			previewEmbedLabel + u" overlay shell object"_q,
 			ok);
-		if (body && overlayShell) {
+		Check(
+			preview->findChild<QWidget*>(u"nativeIvEmbedOverlayClose"_q)
+				== nullptr,
+			previewEmbedLabel + u" overlay close removed"_q,
+			ok);
+		if (body && overlay && overlayShell) {
 			auto previewProbeSource = NativeIvSource(QVector<MTPPageBlock>{
 				placeholderFixtures[0].block,
 			});
@@ -5214,6 +5271,34 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 						overlayShell->isVisible(),
 						previewEmbedLabel + u" overlay visible after click"_q,
 						ok);
+					const auto preferredBodySize = QSize(180, 96);
+					overlay->testHandleWebviewMessage(
+						NativeIvPreferredSizeMessage(preferredBodySize));
+					FlushPendingWidgetEvents();
+					Check(
+						overlayShell->size()
+							== NativeIvOverlayShellSizeForBody(preferredBodySize),
+						previewEmbedLabel
+							+ u" overlay resize applies preferred body size"_q,
+						ok);
+					const auto availableRect = NativeIvOverlayAvailableRect(
+						overlay);
+					Check(
+						availableRect.isValid(),
+						previewEmbedLabel + u" overlay available rect"_q,
+						ok);
+					if (availableRect.isValid()) {
+						overlay->testHandleWebviewMessage(
+							NativeIvPreferredSizeMessage(QSize(
+								availableRect.width() * 2,
+								availableRect.height() * 2)));
+						FlushPendingWidgetEvents();
+						Check(
+							overlayShell->geometry() == availableRect,
+							previewEmbedLabel
+								+ u" overlay resize clamps to available rect"_q,
+							ok);
+					}
 				}
 			}
 		}

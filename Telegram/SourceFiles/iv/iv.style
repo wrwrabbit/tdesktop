@@ -219,8 +219,6 @@ MarkdownEmbedOverlay {
 	size: size;
 	margin: margins;
 	padding: margins;
-	close: IconButton;
-	closePosition: point;
 	errorLabel: FlatLabel;
 	errorPadding: margins;
 }
@@ -456,9 +454,7 @@ markdownEmbedOverlay: MarkdownEmbedOverlay {
 	bg: windowBg;
 	size: size(384px, 694px);
 	margin: margins(12px, 12px, 12px, 12px);
-	padding: margins(12px, 12px, 12px, 12px);
-	close: boxTitleClose;
-	closePosition: point(12px, 12px);
+	padding: margins(8px, 8px, 8px, 8px);
 	errorLabel: markdownEmbedOverlayError;
 	errorPadding: margins(12px, 24px, 12px, 24px);
 }
