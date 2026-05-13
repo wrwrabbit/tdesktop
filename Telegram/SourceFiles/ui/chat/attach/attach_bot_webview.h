@@ -25,6 +25,7 @@ class FlatLabel;
 class BoxContent;
 class RpWidget;
 class SeparatePanel;
+class StandaloneLayerStack;
 enum class LayerOption;
 using LayerOptions = base::flags<LayerOption>;
 } // namespace Ui
@@ -302,7 +303,6 @@ private:
 	[[nodiscard]] QRect progressRect() const;
 	void setupProgressGeometry();
 	void layoutButtons();
-	void finishExternalBox(not_null<SeparatePanel*> panel);
 
 	Webview::StorageId _storageId;
 	const not_null<Delegate*> _delegate;
@@ -322,7 +322,7 @@ private:
 	std::unique_ptr<RpWidget> _externalPanelParent;
 	std::unique_ptr<SeparatePanel> _widget;
 	std::unique_ptr<WebviewWithLifetime> _webview;
-	std::vector<std::unique_ptr<SeparatePanel>> _externalBoxes;
+	std::unique_ptr<StandaloneLayerStack> _externalLayer;
 	std::unique_ptr<RpWidget> _externalWebviewParent;
 	std::unique_ptr<RpWidget> _webviewBottom;
 	QPointer<FlatLabel> _webviewBottomLabel;

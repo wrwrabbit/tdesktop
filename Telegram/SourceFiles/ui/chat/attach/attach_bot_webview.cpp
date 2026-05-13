@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/radial_animation.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/layers/box_content.h"
+#include "ui/layers/standalone_layer_stack.h"
 #include "ui/round_rect.h"
 #include "ui/style/style_core_palette.h"
 #include "ui/text/format_values.h"
@@ -901,10 +902,21 @@ Panel::Panel(Args &&args)
 			.parent = _externalPanelParent.get(),
 			.menuSt = &st::botWebViewMenu,
 		}))
+, _externalLayer(_externalShell
+	? std::make_unique<StandaloneLayerStack>()
+	: nullptr)
 , _fullscreen(args.fullscreen)
 , _allowClipboardRead(args.allowClipboardRead) {
 	if (_externalShell) {
 		_widget->setAttribute(Qt::WA_DontShowOnScreen);
+		_externalLayer->boxAdded(
+		) | rpl::on_next([=] {
+			setExternalShellBlocked(true);
+		}, _widget->lifetime());
+		_externalLayer->boxClosed(
+		) | rpl::on_next([=] {
+			setExternalShellBlocked(false);
+		}, _widget->lifetime());
 	}
 	_widget->setWindowFlag(Qt::WindowStaysOnTopHint, false);
 	_widget->setInnerSize(st::botWebViewPanelSize, true);
@@ -1006,6 +1018,7 @@ Panel::Panel(Args &&args)
 Panel::~Panel() {
 	base::take(_webview);
 	_progress = nullptr;
+	_externalLayer = nullptr;
 	_externalWebviewParent = nullptr;
 	_widget = nullptr;
 	_externalPanelParent = nullptr;
@@ -2943,23 +2956,7 @@ void Panel::showBox(
 		LayerOptions options,
 		anim::type animated) {
 	if (_externalShell) {
-		setExternalShellBlocked(true);
-		auto panel = std::make_unique<SeparatePanel>();
-		panel->setWindowFlag(Qt::WindowStaysOnTopHint, false);
-		panel->setInnerSize(st::botWebViewPanelSize, true);
-		const auto rawPanel = panel.get();
-		const auto rawBox = box.data();
-		rawBox->boxClosing(
-		) | rpl::on_next([=] {
-			finishExternalBox(rawPanel);
-		}, rawPanel->lifetime());
-		rawPanel->closeEvents(
-		) | rpl::on_next([=] {
-			finishExternalBox(rawPanel);
-		}, rawPanel->lifetime());
-		rawPanel->showBox(std::move(box), options, animated);
-		rawPanel->showAndActivate();
-		_externalBoxes.push_back(std::move(panel));
+		_externalLayer->showBox(std::move(box), options, animated);
 		return;
 	}
 	if (const auto widget = _webview ? _webview->window.widget() : nullptr) {
@@ -3020,18 +3017,6 @@ void Panel::showBox(
 		anim::type::normal);
 }
 
-void Panel::finishExternalBox(not_null<SeparatePanel*> panel) {
-	const auto i = ranges::find_if(_externalBoxes, [&](const auto &entry) {
-		return entry.get() == panel.get();
-	});
-	if (i == end(_externalBoxes)) {
-		return;
-	}
-	panel->hideGetDuration();
-	_externalBoxes.erase(i);
-	setExternalShellBlocked(false);
-}
-
 void Panel::showToast(TextWithEntities &&text) {
 	_widget->showToast(std::move(text));
 }
@@ -3041,6 +3026,10 @@ not_null<QWidget*> Panel::toastParent() const {
 }
 
 void Panel::hideLayer(anim::type animated) {
+	if (_externalShell && _externalLayer) {
+		_externalLayer->hideLayers(animated);
+		return;
+	}
 	_widget->hideLayer(animated);
 }
 

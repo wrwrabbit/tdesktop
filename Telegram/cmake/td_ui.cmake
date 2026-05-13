@@ -374,6 +374,8 @@ PRIVATE
     ui/chat/attach/attach_bot_webview.h
     ui/chat/attach/attach_bot_webview_linux_shell.cpp
     ui/chat/attach/attach_bot_webview_linux_shell.h
+    ui/layers/standalone_layer_stack.cpp
+    ui/layers/standalone_layer_stack.h
     ui/chat/attach/attach_controls.cpp
     ui/chat/attach/attach_controls.h
     ui/chat/attach/attach_extensions.cpp
