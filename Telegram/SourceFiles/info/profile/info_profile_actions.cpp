@@ -115,6 +115,21 @@ namespace {
 
 constexpr auto kDay = Data::WorkingInterval::kDay;
 
+class DraggableUrlClickHandler final : public UrlClickHandler {
+public:
+	DraggableUrlClickHandler(const QString &url, QString drag)
+	: UrlClickHandler(url, false)
+	, _drag(std::move(drag)) {
+	}
+	QString dragText() const override {
+		return _drag;
+	}
+
+private:
+	const QString _drag;
+
+};
+
 base::options::toggle ShowPeerIdBelowAbout({
 	.id = kOptionShowPeerIdBelowAbout,
 	.name = "Show Peer IDs in Profile",
@@ -1691,6 +1706,19 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 		usernameLine.subtext->overrideLinkClickHandler(callback);
 		usernameLine.text->setContextMenuHook(lnkHook);
 		usernameLine.subtext->setContextMenuHook(lnkHook);
+		UsernameValue(
+			user,
+			true
+		) | rpl::on_next([=, label = usernameLine.text](
+				const TextWithEntities &u) {
+			if (u.text.isEmpty()) {
+				return;
+			}
+			const auto username = u.text.mid(1);
+			label->setLink(1, std::make_shared<DraggableUrlClickHandler>(
+				UsernameUrl(user, username),
+				user->session().createInternalLinkFull(username)));
+		}, usernameLine.text->lifetime());
 
 		const auto qrButton = Ui::CreateChild<Ui::IconButton>(
 			usernameLine.text->parentWidget(),
@@ -1772,6 +1800,18 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 		linkLine.subtext->overrideLinkClickHandler(linkCallback);
 		linkLine.text->setContextMenuHook(lnkHook);
 		linkLine.subtext->setContextMenuHook(lnkHook);
+		LinkValue(
+			_peer,
+			true,
+			topicRootId
+		) | rpl::on_next([=, label = linkLine.text](const LinkWithUrl &link) {
+			if (link.text.isEmpty()) {
+				return;
+			}
+			label->setLink(1, std::make_shared<DraggableUrlClickHandler>(
+				addToLink.isEmpty() ? link.url : (link.text + addToLink),
+				link.text + addToLink));
+		}, linkLine.text->lifetime());
 		if (!topicRootId || !_peer->username().isEmpty()) {
 			const auto qr = Ui::CreateChild<Ui::IconButton>(
 				linkLine.text->parentWidget(),
