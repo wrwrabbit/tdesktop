@@ -772,7 +772,7 @@ void FillPeerQrBox(
 			},
 			[](int) {});
 	}
-	{
+	if (peer && !customLink) {
 		Ui::AddSkip(box->verticalLayout());
 		Ui::AddSkip(box->verticalLayout());
 		Ui::AddSubsectionTitle(
