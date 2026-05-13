@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/click_handler_types.h"
 #include "core/credits_amount.h"
 #include "core/file_utilities.h"
+#include "iv/markdown/iv_markdown_embed_overlay.h"
 #include "iv/markdown/iv_markdown_article_text.h"
 #include "iv/markdown/iv_markdown_view_widget.h"
 #include "iv/iv_delegate.h"
@@ -173,7 +174,9 @@ private:
 	void setup();
 	void prepareArticle();
 	void activateLink(const PreparedLink &link, Qt::MouseButton button);
+	void openEmbedLink(QString url);
 	void showFootnote(const PreparedLink &link, Qt::MouseButton button);
+	[[nodiscard]] bool showEmbed(const MediaActivation &activation);
 	void fillFootnoteBox(
 		not_null<Ui::GenericBox*> box,
 		PreparedFootnote footnote);
@@ -192,7 +195,9 @@ private:
 	std::optional<MarkdownArticleContent> _preparedContent;
 	const Fn<void(Event)> _callback;
 	std::vector<PreparedFootnote> _footnotes;
+	base::flat_map<QByteArray, QByteArray> _embedHtmlResources;
 	std::unique_ptr<Ui::LayerManager> _footnoteLayerManager;
+	EmbedOverlay *_embedOverlay = nullptr;
 	Ui::ScrollArea *_scroll = nullptr;
 	MarkdownDocumentWidget *_body = nullptr;
 	Ui::FlatLabel *_failure = nullptr;
@@ -246,6 +251,14 @@ void MarkdownPreviewRoot::setup() {
 	_failureOpen = Ui::CreateChild<Ui::LinkButton>(
 		this,
 		tr::lng_markdown_preview_open_file(tr::now));
+	_embedOverlay = Ui::CreateChild<EmbedOverlay>(
+		this,
+		&_embedHtmlResources,
+		[=](QString url) {
+			openEmbedLink(std::move(url));
+		},
+		_options.ivWebviewDataRequest);
+	_embedOverlay->hide();
 
 	_scroll->hide();
 	if (_body) {
@@ -261,6 +274,11 @@ void MarkdownPreviewRoot::setup() {
 		_body->setMediaActivationCallback([=](
 				const MediaActivation &activation,
 				Qt::MouseButton button) {
+			if (activation.kind == MediaActivationKind::Embed) {
+				return (button == Qt::LeftButton || button == Qt::MiddleButton)
+					? showEmbed(activation)
+					: false;
+			}
 			return _options.activateMedia
 				? _options.activateMedia(activation, button)
 				: false;
@@ -389,6 +407,16 @@ void MarkdownPreviewRoot::activateLink(
 	}
 }
 
+void MarkdownPreviewRoot::openEmbedLink(QString url) {
+	if (url.isEmpty()) {
+		return;
+	}
+	if (_embedOverlay) {
+		_embedOverlay->hide();
+	}
+	HiddenUrlClickHandler::Open(url, CurrentClickHandlerContext(_options));
+}
+
 void MarkdownPreviewRoot::showFootnote(
 		const PreparedLink &link,
 		Qt::MouseButton button) {
@@ -410,6 +438,12 @@ void MarkdownPreviewRoot::showFootnote(
 	_footnoteLayerManager->showBox(Box([=](not_null<Ui::GenericBox*> box) {
 		fillFootnoteBox(box, footnote);
 	}));
+}
+
+bool MarkdownPreviewRoot::showEmbed(const MediaActivation &activation) {
+	return _embedOverlay
+		? _embedOverlay->showEmbed(activation.embed)
+		: false;
 }
 
 void MarkdownPreviewRoot::fillFootnoteBox(
@@ -452,9 +486,13 @@ void MarkdownPreviewRoot::applyPreparedContent(
 	int prepareMs) {
 	const auto failure = prepared.failure;
 	const auto debug = prepared.debug;
+	if (_embedOverlay) {
+		_embedOverlay->hide();
+	}
 	if (failure.failed()) {
 		_article = nullptr;
 		_footnotes.clear();
+		_embedHtmlResources.clear();
 		_scroll->hide();
 		if (_body) {
 			_body->hide();
@@ -473,6 +511,7 @@ void MarkdownPreviewRoot::applyPreparedContent(
 	}
 
 	_footnotes = prepared.footnotes;
+	_embedHtmlResources = std::move(prepared.embedHtmlResources);
 
 	if (!_body) {
 		_article = nullptr;
@@ -547,6 +586,9 @@ void MarkdownPreviewRoot::updateChildrenGeometry(QSize size) {
 	if (_body) {
 		_body->resizeToWidth(_scroll->width());
 		updateBodyVisibleTopBottom();
+	}
+	if (_embedOverlay) {
+		_embedOverlay->updateGeometry(QRect(QPoint(), size));
 	}
 	updateFailureGeometry();
 }

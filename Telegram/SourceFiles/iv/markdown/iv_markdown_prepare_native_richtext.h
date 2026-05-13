@@ -29,7 +29,8 @@ void RememberNativeIvDocument(
 	QString label,
 	const MTPPageCaption &caption,
 	std::vector<PreparedBlock> *result,
-	NativeIvPrepareState *state);
+	NativeIvPrepareState *state,
+	std::optional<EmbedRequest> embed = std::nullopt);
 [[nodiscard]] bool PrepareNativeIvPhotoBlock(
 	const MTPDpageBlockPhoto &data,
 	std::vector<PreparedBlock> *result,

@@ -864,7 +864,8 @@ bool PrepareNativeIvPlaceholderBlock(
 		QString label,
 		const MTPPageCaption &caption,
 		std::vector<PreparedBlock> *result,
-		NativeIvPrepareState *state) {
+		NativeIvPrepareState *state,
+		std::optional<EmbedRequest> embed) {
 	auto prepared = PreparedIvRichText();
 	auto anchorId = QString();
 	if (!PrepareNativeIvCaption(caption, &prepared, &anchorId, state)) {
@@ -879,6 +880,7 @@ bool PrepareNativeIvPlaceholderBlock(
 	block.links = std::move(prepared.links);
 	block.anchorId = std::move(anchorId);
 	block.placeholder.label = label;
+	block.placeholder.embed = std::move(embed);
 	block.placeholder.copyText = NativeIvPlaceholderCopyText(
 		block.placeholder.label,
 		block.text);

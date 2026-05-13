@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include <QtCore/QByteArray>
 #include <QtCore/QSize>
 #include <QtCore/QString>
 #include <QtCore/QVariant>
@@ -21,6 +22,11 @@ namespace Ui {
 class DynamicImage;
 class Show;
 } // namespace Ui
+
+namespace Webview {
+enum class DataResult;
+struct DataRequest;
+} // namespace Webview
 
 namespace Iv {
 class Delegate;
@@ -145,15 +151,30 @@ public:
 enum class MediaActivationKind {
 	None,
 	ExternalUrl,
+	Embed,
 	Photo,
 	Document,
 	OpenChannel,
 	JoinChannel,
 };
 
+struct EmbedRequest {
+	QByteArray resourceId;
+	QString fallbackUrl;
+	int width = 0;
+	int height = 0;
+	bool fullWidth = false;
+	bool allowScrolling = false;
+
+	[[nodiscard]] explicit operator bool() const {
+		return !resourceId.isEmpty();
+	}
+};
+
 struct MediaActivation {
 	MediaActivationKind kind = MediaActivationKind::None;
 	QString url;
+	EmbedRequest embed;
 	std::shared_ptr<PhotoRuntime> photo;
 	std::shared_ptr<DocumentRuntime> document;
 	std::shared_ptr<ChannelRuntime> channel;
@@ -176,6 +197,8 @@ struct OpenOptions {
 	std::shared_ptr<QVariant> clickHandlerContextRef;
 	std::function<void()> openSource;
 	std::function<void(std::shared_ptr<Ui::Show>)> share;
+	std::function<Webview::DataResult(QByteArray, Webview::DataRequest)>
+		ivWebviewDataRequest;
 	std::function<bool(const MediaActivation &, Qt::MouseButton)> activateMedia;
 };
 

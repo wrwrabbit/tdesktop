@@ -36,6 +36,7 @@
 #include <QtCore/QVector>
 #include <QtGui/QColor>
 #include <QtGui/QImage>
+#include <QtGui/QMouseEvent>
 #include <QtWidgets/QApplication>
 
 #include <rpl/event_stream.h>
@@ -728,6 +729,11 @@ struct NativeIvPlaceholderFixture {
 	NativeIvPlaceholderKind kind = NativeIvPlaceholderKind::Video;
 	QString caption;
 	QString expectedLabel;
+	QString expectedFallbackUrl;
+	int expectedWidth = 0;
+	int expectedHeight = 0;
+	bool expectedFullWidth = false;
+	bool expectedAllowScrolling = false;
 	MTPPageBlock block;
 };
 
@@ -1209,12 +1215,17 @@ struct NativeIvMediaFixture {
 			pageCaption);
 	case NativeIvPlaceholderKind::Embed:
 		return MTP_pageBlockEmbed(
-			MTP_flags(0),
-			MTP_string(),
+			MTP_flags(
+				MTPDpageBlockEmbed::Flag::f_full_width
+				| MTPDpageBlockEmbed::Flag::f_allow_scrolling
+				| MTPDpageBlockEmbed::Flag::f_url
+				| MTPDpageBlockEmbed::Flag::f_w
+				| MTPDpageBlockEmbed::Flag::f_h),
+			MTP_string("https://example.com/embed"),
 			MTP_string(),
 			MTP_long(0),
-			MTP_int(0),
-			MTP_int(0),
+			MTP_int(640),
+			MTP_int(360),
 			pageCaption);
 	case NativeIvPlaceholderKind::EmbedPost:
 		return MTP_pageBlockEmbedPost(
@@ -1223,7 +1234,19 @@ struct NativeIvMediaFixture {
 			MTP_long(0),
 			MTP_string("Author"),
 			MTP_int(0),
-			MTP_vector<MTPPageBlock>(),
+			MTP_vector<MTPPageBlock>(QVector<MTPPageBlock>{
+				MTP_pageBlockParagraph(NativeIvConcat({
+					NativeIvText(u"Links: "_q),
+					NativeIvTextUrl(
+						u"instant view"_q,
+						u"https://telegra.ph/embed-post-link"_q,
+						777),
+					NativeIvText(u" and "_q),
+					NativeIvTextUrl(
+						u"external"_q,
+						u"https://example.com/external-link"_q),
+				})),
+			}),
 			pageCaption);
 	case NativeIvPlaceholderKind::Collage:
 		return MTP_pageBlockCollage(
@@ -2241,6 +2264,29 @@ void FlushPendingWidgetEvents() {
 		QCoreApplication::sendPostedEvents();
 		QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
 	}
+}
+
+void SendMouseClick(QWidget *widget, QPoint point, Qt::MouseButton button) {
+	if (!widget) {
+		return;
+	}
+	const auto global = widget->mapToGlobal(point);
+	auto press = QMouseEvent(
+		QEvent::MouseButtonPress,
+		point,
+		global,
+		button,
+		button,
+		Qt::NoModifier);
+	QApplication::sendEvent(widget, &press);
+	auto release = QMouseEvent(
+		QEvent::MouseButtonRelease,
+		point,
+		global,
+		button,
+		Qt::NoButton,
+		Qt::NoModifier);
+	QApplication::sendEvent(widget, &release);
 }
 
 class WidgetEventCounter final : public QObject {
@@ -3929,16 +3975,40 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 	auto placeholderFixtures = std::vector<NativeIvPlaceholderFixture>();
 	const auto addPlaceholder = [&](
 			NativeIvPlaceholderKind kind,
-			QString caption) {
+			QString caption,
+			QString fallbackUrl = QString(),
+			int width = 0,
+			int height = 0,
+			bool fullWidth = false,
+			bool allowScrolling = false) {
 		placeholderFixtures.push_back({
 			.kind = kind,
 			.caption = caption,
 			.expectedLabel = NativeIvPlaceholderLabel(kind),
+			.expectedFallbackUrl = fallbackUrl,
+			.expectedWidth = width,
+			.expectedHeight = height,
+			.expectedFullWidth = fullWidth,
+			.expectedAllowScrolling = allowScrolling,
 			.block = NativeIvPlaceholderBlock(kind, caption),
 		});
 	};
-	addPlaceholder(NativeIvPlaceholderKind::Embed, u"Embed caption"_q);
-	addPlaceholder(NativeIvPlaceholderKind::EmbedPost, u"Embed post caption"_q);
+	addPlaceholder(
+		NativeIvPlaceholderKind::Embed,
+		u"Embed caption"_q,
+		u"https://example.com/embed"_q,
+		640,
+		360,
+		true,
+		true);
+	addPlaceholder(
+		NativeIvPlaceholderKind::EmbedPost,
+		u"Embed post caption"_q,
+		u"https://example.com/embed-post"_q,
+		0,
+		0,
+		false,
+		true);
 
 	auto supportedBlocks = QVector<MTPPageBlock>();
 	supportedBlocks.push_back(NativeIvInlineImageParagraph(
@@ -4902,6 +4972,10 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 		preparedPlaceholders.size() == placeholderFixtures.size(),
 		u"native-iv placeholder prepared count"_q,
 		ok);
+	Check(
+		supported.content.embedHtmlResources.size() == placeholderFixtures.size(),
+		u"native-iv placeholder embed resource count"_q,
+		ok);
 	for (const auto &fixture : placeholderFixtures) {
 		const auto it = std::find_if(
 			preparedPlaceholders.begin(),
@@ -4922,6 +4996,226 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 					== (fixture.expectedLabel + u"\n"_q + fixture.caption),
 				fixture.expectedLabel + u" placeholder copy text"_q,
 				ok);
+			Check(
+				block->placeholder.embed.has_value(),
+				fixture.expectedLabel + u" placeholder embed metadata"_q,
+				ok);
+			if (block->placeholder.embed) {
+				const auto &embed = *block->placeholder.embed;
+				Check(
+					!embed.resourceId.isEmpty(),
+					fixture.expectedLabel + u" placeholder embed resource id"_q,
+					ok);
+				Check(
+					embed.fallbackUrl == fixture.expectedFallbackUrl,
+					fixture.expectedLabel + u" placeholder embed fallback url"_q,
+					ok);
+				Check(
+					embed.width == fixture.expectedWidth
+						&& embed.height == fixture.expectedHeight,
+					fixture.expectedLabel + u" placeholder embed size"_q,
+					ok);
+				Check(
+					embed.fullWidth == fixture.expectedFullWidth,
+					fixture.expectedLabel + u" placeholder embed full-width"_q,
+					ok);
+				Check(
+					embed.allowScrolling == fixture.expectedAllowScrolling,
+					fixture.expectedLabel + u" placeholder embed scrolling"_q,
+					ok);
+				Check(
+					supported.content.embedHtmlResources.find(embed.resourceId)
+						!= supported.content.embedHtmlResources.end(),
+					fixture.expectedLabel + u" placeholder embed resource stored"_q,
+					ok);
+				if (fixture.kind == NativeIvPlaceholderKind::EmbedPost) {
+					const auto resource = supported.content.embedHtmlResources.find(
+						embed.resourceId);
+					if (resource != supported.content.embedHtmlResources.end()) {
+						Check(
+							resource->second.contains(
+								"https://telegra.ph/embed-post-link"),
+							fixture.expectedLabel
+								+ u" embed post iv link restored"_q,
+							ok);
+						Check(
+							resource->second.contains(
+								"https://example.com/external-link"),
+							fixture.expectedLabel
+								+ u" embed post external link restored"_q,
+							ok);
+						Check(
+							!resource->second.contains("internal-iv-link"),
+							fixture.expectedLabel
+								+ u" embed post iv marker removed"_q,
+							ok);
+						Check(
+							!resource->second.contains("data-context"),
+							fixture.expectedLabel
+								+ u" embed post data context removed"_q,
+							ok);
+					}
+				}
+			}
+		}
+	}
+
+	const auto placeholderArticleLabel = u"native-iv-embed-placeholders-article"_q;
+	auto placeholderArticleSource = NativeIvSource(QVector<MTPPageBlock>{
+		placeholderFixtures[0].block,
+		placeholderFixtures[1].block,
+	});
+	const auto placeholderArticlePrepared = TryPrepareNativeInstantView({
+		.source = &placeholderArticleSource,
+	});
+	Check(
+		placeholderArticlePrepared.supported(),
+		placeholderArticleLabel + u" prepare supported"_q,
+		ok);
+	Check(
+		!placeholderArticlePrepared.content.failure.failed(),
+		placeholderArticleLabel + u" prepare failure"_q,
+		ok);
+	if (placeholderArticlePrepared.supported()
+		&& !placeholderArticlePrepared.content.failure.failed()) {
+		auto placeholderArticleRenderer = std::make_shared<MathRenderer>();
+		auto placeholderArticleHeight = 0;
+		auto placeholderArticle = BuildArticleForTest(
+			std::move(placeholderArticlePrepared.content),
+			placeholderArticleRenderer,
+			420,
+			&placeholderArticleHeight);
+		auto lookupFlags = Ui::Text::StateRequest::Flags();
+		lookupFlags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+		for (const auto &fixture : placeholderFixtures) {
+			const auto bounds = HitBoundsWhere(
+				placeholderArticle.get(),
+				420,
+				placeholderArticleHeight,
+				lookupFlags,
+				[&](const MarkdownArticleHitTestResult &hit) {
+					return hit.mediaActivation.kind == MediaActivationKind::Embed
+						&& hit.mediaActivation.embed.fallbackUrl
+							== fixture.expectedFallbackUrl;
+				});
+			Check(
+				bounds.has_value(),
+				fixture.expectedLabel + u" article embed hit bounds"_q,
+				ok);
+			if (bounds) {
+				const auto hit = placeholderArticle->hitTest(
+					bounds->center(),
+					lookupFlags);
+				Check(
+					hit.mediaActivation.kind == MediaActivationKind::Embed,
+					fixture.expectedLabel + u" article embed activation kind"_q,
+					ok);
+				Check(
+					hit.mediaActivation.embed.fallbackUrl
+						== fixture.expectedFallbackUrl,
+					fixture.expectedLabel + u" article embed activation fallback url"_q,
+					ok);
+				Check(
+					hit.mediaActivation.embed.allowScrolling
+						== fixture.expectedAllowScrolling,
+					fixture.expectedLabel + u" article embed activation scrolling"_q,
+					ok);
+			}
+		}
+	}
+
+	const auto previewEmbedLabel = u"native-iv-embed-preview-overlay"_q;
+	auto previewEmbedSource = NativeIvSource(QVector<MTPPageBlock>{
+		placeholderFixtures[0].block,
+	});
+	const auto previewEmbedPrepared = TryPrepareNativeInstantView({
+		.source = &previewEmbedSource,
+	});
+	Check(
+		previewEmbedPrepared.supported(),
+		previewEmbedLabel + u" prepare supported"_q,
+		ok);
+	Check(
+		!previewEmbedPrepared.content.failure.failed(),
+		previewEmbedLabel + u" prepare failure"_q,
+		ok);
+	if (previewEmbedPrepared.supported()
+		&& !previewEmbedPrepared.content.failure.failed()) {
+		auto window = Ui::RpWindow();
+		window.setGeometry(QRect(0, 0, 420, 320));
+		window.show();
+		FlushPendingWidgetEvents();
+		auto preview = CreateMarkdownPreviewWidget(
+			window.body(),
+			std::move(previewEmbedPrepared.content),
+			std::make_shared<MathRenderer>(),
+			[](Event) {
+			});
+		preview->setGeometry(QRect(QPoint(), window.body()->size()));
+		preview->show();
+		FlushPendingWidgetEvents();
+		const auto body = FindChildObject<MarkdownDocumentWidget>(preview.get());
+		const auto overlayShell = preview->findChild<QWidget*>(
+			u"nativeIvEmbedOverlayShell"_q);
+		Check(
+			body != nullptr,
+			previewEmbedLabel + u" preview body widget"_q,
+			ok);
+		Check(
+			overlayShell != nullptr,
+			previewEmbedLabel + u" overlay shell object"_q,
+			ok);
+		if (body && overlayShell) {
+			auto previewProbeSource = NativeIvSource(QVector<MTPPageBlock>{
+				placeholderFixtures[0].block,
+			});
+			const auto previewProbePrepared = TryPrepareNativeInstantView({
+				.source = &previewProbeSource,
+			});
+			Check(
+				previewProbePrepared.supported(),
+				previewEmbedLabel + u" probe prepare supported"_q,
+				ok);
+			Check(
+				!previewProbePrepared.content.failure.failed(),
+				previewEmbedLabel + u" probe prepare failure"_q,
+				ok);
+			if (previewProbePrepared.supported()
+				&& !previewProbePrepared.content.failure.failed()) {
+				auto probeHeight = 0;
+				auto probeArticle = BuildArticleForTest(
+					std::move(previewProbePrepared.content),
+					std::make_shared<MathRenderer>(),
+					body->width(),
+					&probeHeight);
+				auto lookupFlags = Ui::Text::StateRequest::Flags();
+				lookupFlags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+				const auto clickBounds = HitBoundsWhere(
+					probeArticle.get(),
+					body->width(),
+					probeHeight,
+					lookupFlags,
+					[](const MarkdownArticleHitTestResult &hit) {
+						return hit.mediaActivation.kind
+							== MediaActivationKind::Embed;
+					});
+				Check(
+					clickBounds.has_value(),
+					previewEmbedLabel + u" click bounds"_q,
+					ok);
+				if (clickBounds) {
+					Check(
+						!overlayShell->isVisible(),
+						previewEmbedLabel + u" overlay hidden before click"_q,
+						ok);
+					SendMouseClick(body, clickBounds->center(), Qt::LeftButton);
+					FlushPendingWidgetEvents();
+					Check(
+						overlayShell->isVisible(),
+						previewEmbedLabel + u" overlay visible after click"_q,
+						ok);
+				}
+			}
 		}
 	}
 

@@ -1140,6 +1140,10 @@ LaidOutBlock LayoutPlaceholderBlock(
 		block.labelLeaf,
 		block.labelRect,
 		style.labelStyle);
+	if (prepared.placeholder.embed) {
+		block.activation.kind = MediaActivationKind::Embed;
+		block.activation.embed = *prepared.placeholder.embed;
+	}
 
 	auto bottom = top + mediaHeight;
 	LayoutMediaCaption(

@@ -41,6 +41,8 @@ PRIVATE
     iv/markdown/iv_markdown_controller.h
     iv/markdown/iv_markdown_document.cpp
     iv/markdown/iv_markdown_document.h
+    iv/markdown/iv_markdown_embed_overlay.cpp
+    iv/markdown/iv_markdown_embed_overlay.h
     iv/markdown/iv_markdown_history_view_media.cpp
     iv/markdown/iv_markdown_history_view_media.h
     iv/markdown/iv_markdown_math.cpp

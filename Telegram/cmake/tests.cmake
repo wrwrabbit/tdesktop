@@ -73,6 +73,8 @@ PRIVATE
     iv/markdown/iv_markdown_article_text.h
     iv/markdown/iv_markdown_document.cpp
     iv/markdown/iv_markdown_document.h
+    iv/markdown/iv_markdown_embed_overlay.cpp
+    iv/markdown/iv_markdown_embed_overlay.h
     iv/markdown/iv_markdown_math.cpp
     iv/markdown/iv_markdown_math.h
     iv/markdown/iv_markdown_math_renderer.cpp
@@ -132,7 +134,9 @@ PRIVATE
     desktop-app::lib_spellcheck
     desktop-app::lib_tl
     desktop-app::lib_ui
+    desktop-app::lib_webview
     tdesktop::td_scheme
+    tdesktop::td_ui
 )
 
 set_target_properties(

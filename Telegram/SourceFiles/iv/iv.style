@@ -213,6 +213,17 @@ MarkdownFailure {
 	width: pixels;
 	skip: pixels;
 }
+MarkdownEmbedOverlay {
+	scrimBg: color;
+	bg: color;
+	size: size;
+	margin: margins;
+	padding: margins;
+	close: IconButton;
+	closePosition: point;
+	errorLabel: FlatLabel;
+	errorPadding: margins;
+}
 Markdown {
 	textPalette: TextPalette;
 	textColor: color;
@@ -434,6 +445,23 @@ markdownFootnoteLabel: FlatLabel(defaultFlatLabel) {
 	palette: defaultMarkdownTextPalette;
 }
 markdownFootnotePadding: margins(24px, 12px, 24px, 12px);
+markdownEmbedOverlayError: FlatLabel(defaultFlatLabel) {
+	minWidth: 240px;
+	textFg: windowSubTextFg;
+	align: align(top);
+	style: defaultMarkdownBodyStyle;
+}
+markdownEmbedOverlay: MarkdownEmbedOverlay {
+	scrimBg: layerBg;
+	bg: windowBg;
+	size: size(384px, 694px);
+	margin: margins(12px, 12px, 12px, 12px);
+	padding: margins(12px, 12px, 12px, 12px);
+	close: boxTitleClose;
+	closePosition: point(12px, 12px);
+	errorLabel: markdownEmbedOverlayError;
+	errorPadding: margins(12px, 24px, 12px, 24px);
+}
 defaultMarkdown: Markdown {
 	textPalette: defaultMarkdownTextPalette;
 	textColor: windowFg;

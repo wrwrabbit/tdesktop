@@ -1101,7 +1101,7 @@ private:
 		not_null<WebPageData*> page);
 	[[nodiscard]] Markdown::OpenOptions markdownOpenOptions(
 		QString initialFragment,
-		not_null<WebPageData*> page) const;
+		not_null<WebPageData*> page);
 
 	void showWindowed(Prepared result, Source source, bool refresh);
 	void showHtmlWindowed(Prepared result, bool refresh);
@@ -1412,7 +1412,7 @@ void Shown::createController() {
 
 Markdown::OpenOptions Shown::markdownOpenOptions(
 		QString initialFragment,
-		not_null<WebPageData*> page) const {
+		not_null<WebPageData*> page) {
 	const auto clickHandlerContext = std::make_shared<QVariant>();
 	auto options = Markdown::OpenOptions{
 		.sourceName = page->displayedSiteName(),
@@ -1420,6 +1420,26 @@ Markdown::OpenOptions Shown::markdownOpenOptions(
 		.initialFragment = std::move(initialFragment),
 		.viewerKind = Markdown::ViewerKind::InstantView,
 		.clickHandlerContextRef = clickHandlerContext,
+		.ivWebviewDataRequest = [=](
+				QByteArray id,
+				Webview::DataRequest request) {
+			const auto requested = QString::fromUtf8(id);
+			const auto view = QStringView(requested);
+			if (view.startsWith(u"photo/")) {
+				streamPhoto(view.mid(6), std::move(request));
+				return Webview::DataResult::Pending;
+			} else if (view.startsWith(u"document/"_q)) {
+				streamFile(view.mid(9), std::move(request));
+				return Webview::DataResult::Pending;
+			} else if (view.startsWith(u"map/"_q)) {
+				streamMap(view.mid(4).toString().toUtf8(), std::move(request));
+				return Webview::DataResult::Pending;
+			} else if (view.startsWith(u"html/"_q)) {
+				sendEmbed(view.mid(5).toString().toUtf8(), std::move(request));
+				return Webview::DataResult::Pending;
+			}
+			return Webview::DataResult::Failed;
+		},
 		.activateMedia = [=](
 				const Markdown::MediaActivation &activation,
 				Qt::MouseButton button) {
@@ -1547,6 +1567,8 @@ bool Shown::activateMarkdownMedia(
 		}
 		HiddenUrlClickHandler::Open(activation.url, clickHandlerContext);
 		return true;
+	case Markdown::MediaActivationKind::Embed:
+		return false;
 	case Markdown::MediaActivationKind::Photo:
 		if (!activation.photo) {
 			return false;
