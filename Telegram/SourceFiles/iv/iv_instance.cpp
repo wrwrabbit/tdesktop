@@ -1109,7 +1109,8 @@ private:
 		Markdown::MarkdownArticleContent content,
 		QString title,
 		QString initialFragment,
-		not_null<WebPageData*> page);
+		not_null<WebPageData*> page,
+		bool refresh);
 	[[nodiscard]] ShareBoxResult shareBox(ShareBoxDescriptor &&descriptor);
 	[[nodiscard]] std::shared_ptr<Markdown::MediaRuntime> createMediaRuntime(
 		not_null<WebPageData*> page) const;
@@ -1502,7 +1503,8 @@ void Shown::showWindowed(Prepared result, Source source, bool refresh) {
 		std::move(native.content),
 		std::move(result.name),
 		std::move(result.hash),
-		page);
+		page,
+		refresh);
 }
 
 void Shown::showHtmlWindowed(Prepared result, bool refresh) {
@@ -1525,20 +1527,29 @@ void Shown::showMarkdownWindowed(
 		Markdown::MarkdownArticleContent content,
 		QString title,
 		QString initialFragment,
-		not_null<WebPageData*> page) {
+		not_null<WebPageData*> page,
+		bool refresh) {
 	_controller = nullptr;
-	auto options = markdownOpenOptions(std::move(initialFragment), page);
-	if (_markdownController) {
-		_markdownController->update(
-			std::move(content),
-			std::move(title),
-			std::move(options));
-	} else {
+	if (!_markdownController) {
 		createMarkdownController(
 			std::move(content),
 			std::move(title),
 			std::move(initialFragment),
 			page);
+		_markdownController->activate();
+		return;
+	}
+	auto options = markdownOpenOptions(std::move(initialFragment), page);
+	if (refresh) {
+		_markdownController->update(
+			std::move(content),
+			std::move(title),
+			std::move(options));
+	} else {
+		_markdownController->show(
+			std::move(content),
+			std::move(title),
+			std::move(options));
 	}
 }
 

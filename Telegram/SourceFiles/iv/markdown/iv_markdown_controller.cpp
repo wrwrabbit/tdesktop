@@ -294,6 +294,36 @@ void Controller::update(
 		MarkdownArticleContent content,
 		QString title,
 		OpenOptions options) {
+	setContent(
+		std::move(content),
+		std::move(title),
+		std::move(options),
+		true);
+}
+
+void Controller::show(
+		MarkdownArticleContent content,
+		QString title,
+		OpenOptions options) {
+	setContent(
+		std::move(content),
+		std::move(title),
+		std::move(options),
+		false);
+	activate();
+}
+
+void Controller::setContent(
+		MarkdownArticleContent content,
+		QString title,
+		OpenOptions options,
+		bool preserveScroll) {
+	const auto scrollTop = (preserveScroll && _preview)
+		? MarkdownPreviewScrollTop(_preview.get())
+		: 0;
+	if (preserveScroll) {
+		options.initialFragment = QString();
+	}
 	_preparedContent = std::move(content);
 	_title = std::move(title);
 	_options = PrepareOpenOptions(std::move(options), _delegate, _title);
@@ -307,6 +337,9 @@ void Controller::update(
 	}
 	refreshTitle();
 	createPreview();
+	if (preserveScroll && _preview) {
+		ScrollMarkdownPreviewToY(_preview.get(), scrollTop);
+	}
 	if (_window && _window->isActiveWindow() && _preview) {
 		_preview->setFocus();
 	}
@@ -418,10 +451,8 @@ void Controller::updateTitleGeometry(int newWidth) const {
 		- _menuToggle->width());
 	_subtitle->moveToLeft(st::ivSubtitleLeft, st::ivSubtitleTop);
 	_menuToggle->moveToRight(0, 0);
-	if (_titleShadow) {
-		_titleShadow->resizeToWidth(newWidth);
-		_titleShadow->move(0, st::ivSubtitleHeight);
-	}
+	_titleShadow->resizeToWidth(newWidth);
+	_titleShadow->move(0, st::ivSubtitleHeight);
 }
 
 void Controller::openSource() {
@@ -516,21 +547,16 @@ void Controller::createPreview() {
 	parent->sizeValue() | rpl::on_next([=](QSize size) {
 		_preview->resize(size);
 	}, _preview->lifetime());
-	if (_titleShadow) {
-		MarkdownPreviewScrollTopValue(
-			_preview.get()
-		) | rpl::on_next([=](int scrollTop) {
-			_titleShadow->toggle(
-				(scrollTop > 0),
-				anim::type::normal);
-		}, _preview->lifetime());
-	}
+
+	_titleShadow->show(anim::type::instant);
+
 	_preview->show();
 }
 
 void Controller::createWindow() {
 	_window = std::make_unique<Ui::RpWindow>();
 	const auto window = _window.get();
+	_titleShadow.create(window->body().get());
 	_subtitleWrap = std::make_unique<Ui::RpWidget>(window->body().get());
 	_subtitle = std::make_unique<Ui::FlatLabel>(
 		_subtitleWrap.get(),
@@ -570,7 +596,6 @@ void Controller::createWindow() {
 	_container->paintRequest() | rpl::on_next([=](QRect clip) {
 		QPainter(_container).fillRect(clip, st::windowBg);
 	}, _container->lifetime());
-	_titleShadow.create(window->body().get());
 	updateTitleGeometry(window->body()->width());
 
 	createLayerManager();

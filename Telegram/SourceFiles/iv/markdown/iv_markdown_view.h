@@ -32,6 +32,8 @@ namespace Iv::Markdown {
 bool ScrollMarkdownPreviewToAnchor(
 	Ui::RpWidget *preview,
 	const QString &anchorId);
+void ScrollMarkdownPreviewToY(Ui::RpWidget *preview, int top);
+[[nodiscard]] int MarkdownPreviewScrollTop(Ui::RpWidget *preview);
 [[nodiscard]] rpl::producer<int> MarkdownPreviewScrollTopValue(
 	Ui::RpWidget *preview);
 

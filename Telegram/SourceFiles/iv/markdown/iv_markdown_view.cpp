@@ -168,6 +168,8 @@ public:
 	Fn<void(Event)> callback,
 	const OpenOptions &options);
 	bool scrollToAnchor(const QString &anchorId);
+	void scrollToY(int top);
+	[[nodiscard]] int scrollTop() const;
 	[[nodiscard]] rpl::producer<int> scrollTopValue() const;
 
 private:
@@ -556,6 +558,16 @@ bool MarkdownPreviewRoot::scrollToAnchor(const QString &anchorId) {
 	return true;
 }
 
+void MarkdownPreviewRoot::scrollToY(int top) {
+	if (_scroll) {
+		_scroll->scrollToY(top);
+	}
+}
+
+int MarkdownPreviewRoot::scrollTop() const {
+	return _scroll ? _scroll->scrollTop() : 0;
+}
+
 rpl::producer<int> MarkdownPreviewRoot::scrollTopValue() const {
 	return _scroll
 		? _scroll->scrollTopValue()
@@ -567,6 +579,17 @@ bool ScrollMarkdownPreviewToAnchor(
 		const QString &anchorId) {
 	const auto root = dynamic_cast<MarkdownPreviewRoot*>(preview);
 	return root ? root->scrollToAnchor(anchorId) : false;
+}
+
+void ScrollMarkdownPreviewToY(Ui::RpWidget *preview, int top) {
+	if (const auto root = dynamic_cast<MarkdownPreviewRoot*>(preview)) {
+		root->scrollToY(top);
+	}
+}
+
+int MarkdownPreviewScrollTop(Ui::RpWidget *preview) {
+	const auto root = dynamic_cast<MarkdownPreviewRoot*>(preview);
+	return root ? root->scrollTop() : 0;
 }
 
 rpl::producer<int> MarkdownPreviewScrollTopValue(Ui::RpWidget *preview) {

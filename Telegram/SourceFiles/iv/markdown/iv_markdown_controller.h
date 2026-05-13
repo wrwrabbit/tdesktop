@@ -44,6 +44,10 @@ public:
 	~Controller();
 
 	void activate();
+	void show(
+		MarkdownArticleContent content,
+		QString title,
+		OpenOptions options = {});
 	void update(
 		MarkdownArticleContent content,
 		QString title,
@@ -65,6 +69,11 @@ private:
 	void createWindow();
 	void createLayerManager();
 	void createPreview();
+	void setContent(
+		MarkdownArticleContent content,
+		QString title,
+		OpenOptions options,
+		bool preserveScroll);
 	void updateTitleGeometry(int newWidth) const;
 	void showMenu();
 	void openSource();
