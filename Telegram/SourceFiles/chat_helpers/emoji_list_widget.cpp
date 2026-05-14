@@ -3350,6 +3350,10 @@ void EmojiListWidget::refreshCustom() {
 	if (_mode == Mode::RecentReactions || _mode == Mode::MessageEffects) {
 		return;
 	}
+	// Pin the section at the visible top across the rebuild.
+	const auto wasTop = getVisibleTop();
+	const auto wasActive = currentSet(wasTop);
+	const auto wasSectionTop = sectionInfoByOffset(wasTop).top;
 	auto old = base::take(_custom);
 	const auto session = &this->session();
 	const auto premiumPossible = session->premiumPossible();
@@ -3474,12 +3478,27 @@ void EmojiListWidget::refreshCustom() {
 	}
 	refreshMegagroupStickers(push, GroupStickersPlace::Hidden);
 
+	auto newSectionTop = wasSectionTop;
+	auto found = false;
+	enumerateSections([&](const SectionInfo &info) {
+		if (sectionSetId(info.section) == wasActive) {
+			newSectionTop = info.top;
+			found = true;
+			return false;
+		}
+		return true;
+	});
+
 	_footer->refreshIcons(
 		fillIcons(),
-		currentSet(getVisibleTop()),
+		found ? wasActive : currentSet(wasTop),
 		nullptr,
 		ValidateIconAnimations::None);
 	update();
+
+	if (found && newSectionTop != wasSectionTop) {
+		scrollTo(newSectionTop + (wasTop - wasSectionTop));
+	}
 }
 
 Fn<void()> EmojiListWidget::repaintCallback(
