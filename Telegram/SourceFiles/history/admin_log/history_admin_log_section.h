@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/admin_log/history_admin_log_item.h"
 #include "history/admin_log/history_admin_log_filter_value.h"
 #include "ui/controls/swipe_handler_data.h"
+#include "ui/effects/animations.h"
 #include "mtproto/sender.h"
 
 namespace Ui {
@@ -19,6 +20,7 @@ class ScrollArea;
 class PlainShadow;
 class FlatButton;
 class IconButton;
+class JumpDownButton;
 } // namespace Ui
 
 namespace Profile {
@@ -77,6 +79,12 @@ private:
 	void restoreState(not_null<SectionMemento*> memento);
 	void setupShortcuts();
 	void setupSwipeReply();
+	void setupScrollDownButton();
+	void scrollDownClicked();
+	void scrollToAnimationCallback();
+	void updateScrollDownVisibility();
+	void updateScrollDownPosition();
+	void startScrollDownButtonAnimation(bool shown);
 
 	object_ptr<Ui::ScrollArea> _scroll;
 	QPointer<InnerWidget> _inner;
@@ -84,6 +92,10 @@ private:
 	object_ptr<Ui::PlainShadow> _fixedBarShadow;
 	object_ptr<Ui::FlatButton> _settingsFilter;
 	object_ptr<Ui::IconButton> _whatIsThis;
+	object_ptr<Ui::JumpDownButton> _scrollDown;
+	Ui::Animations::Simple _scrollDownShown;
+	Ui::Animations::Simple _scrollToAnimation;
+	bool _scrollDownIsShown = false;
 
 	Ui::Controls::SwipeBackResult _swipeBackData;
 
