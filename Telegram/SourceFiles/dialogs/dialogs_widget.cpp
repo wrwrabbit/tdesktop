@@ -4168,24 +4168,13 @@ void Widget::keyPressEvent(QKeyEvent *e) {
 			|| e->key() == Qt::Key_Left
 			|| e->key() == Qt::Key_Right)) {
 		_suggestions->selectJump(Qt::Key(e->key()));
-	} else if (e->key() == Qt::Key_Down) {
-		_inner->selectSkip(1);
-	} else if (e->key() == Qt::Key_Up) {
-		_inner->selectSkip(-1);
-	} else if (e->key() == Qt::Key_PageDown) {
-		if (_suggestions) {
-			_suggestions->selectJump(Qt::Key_Down, _scroll->height());
-		} else {
-			_inner->selectSkipPage(_scroll->height(), 1);
-		}
-	} else if (e->key() == Qt::Key_PageUp) {
-		if (_suggestions) {
-			_suggestions->selectJump(Qt::Key_Up, _scroll->height());
-		} else {
-			_inner->selectSkipPage(_scroll->height(), -1);
-		}
-	} else if (e->key() == Qt::Key_Space && !_suggestions) {
-		_inner->toggleRowSelection();
+	} else if (_suggestions
+		&& (e->key() == Qt::Key_PageDown
+			|| e->key() == Qt::Key_PageUp)) {
+		_suggestions->selectJump(
+			(e->key() == Qt::Key_PageDown) ? Qt::Key_Down : Qt::Key_Up,
+			_scroll->height());
+	} else if (_inner->processKeyDispatch(e)) {
 	} else if (redirectKeyToSearch(e)) {
 		// This delay in search focus processing allows us not to create
 		// _suggestions in case the event inserts some non-whitespace search

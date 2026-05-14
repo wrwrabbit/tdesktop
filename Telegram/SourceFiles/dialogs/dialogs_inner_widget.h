@@ -10,13 +10,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/flags.h"
 #include "base/object_ptr.h"
 #include "base/timer.h"
-#include "dialogs/dialogs_key.h"
-#include "dialogs/ui/dialogs_quick_action_context.h"
 #include "data/data_messages.h"
-#include "ui/dragging_scroll_manager.h"
-#include "ui/effects/animations.h"
-#include "ui/rp_widget.h"
+#include "dialogs/ui/dialogs_quick_action_context.h"
+#include "dialogs/dialogs_inner_widget_accessibility.h"
+#include "dialogs/dialogs_key.h"
 #include "lang/lang_keys.h"
+#include "ui/effects/animations.h"
+#include "ui/dragging_scroll_manager.h"
+#include "ui/rp_widget.h"
 #include "ui/userpic_view.h"
 
 namespace style {
@@ -149,7 +150,6 @@ public:
 	void showSavedSublists();
 	void selectSkip(int32 direction);
 	void selectSkipPage(int32 pixels, int32 direction);
-	void toggleRowSelection();
 
 	void dragLeft();
 	void setNarrowRatio(float64 narrowRatio);
@@ -171,6 +171,7 @@ public:
 		Qt::KeyboardModifiers modifiers = {},
 		MsgId pressedTopicRootId = {},
 		PeerId pressedSublistPeerId = {});
+	bool processKeyDispatch(QKeyEvent *e);
 
 	void scrollToEntry(const RowDescriptor &entry);
 
@@ -234,10 +235,12 @@ public:
 	void prepareQuickAction(int64 key, Dialogs::Ui::QuickDialogAction);
 	void clearQuickActions();
 
+	Qt::FocusPolicy accessibilityFocusPolicy() override {
+		return Qt::TabFocus;
+	}
 	QAccessible::Role accessibilityRole() override {
 		return QAccessible::Role::List;
 	}
-	QString accessibilityName() override;
 	Ui::AccessibilityState accessibilityState() const override;
 	int accessibilityChildCount() const override;
 	QString accessibilityChildName(int index) const override;
@@ -248,11 +251,6 @@ public:
 	QAccessible::Role accessibilityChildSubItemRole() const override;
 	QString accessibilityChildSubItemName(int row, int column) const override;
 	QString accessibilityChildSubItemValue(int row, int column) const override;
-
-	[[nodiscard]] QString computeSubItemValue(
-		int row, int column) const;
-	[[nodiscard]] const QVector<int> &computeActiveColumns(
-		int row) const;
 
 protected:
 	void visibleTopBottomUpdated(
@@ -497,9 +495,8 @@ private:
 	Ui::VideoUserpic *validateVideoUserpic(not_null<History*> history);
 
 	Row *shownRowByKey(Key key);
-	int indexOfRow(Row *row) const;
-	[[nodiscard]] bool hasEffectiveFocus() const;
-	void setSelectedRow(Row *row);
+	[[nodiscard]] const std::vector<SubItem> &activeSubItems(int row) const;
+	void announceSelectedFocus();
 	void clearSearchResults(bool alsoPeerSearchResults = true);
 	void clearPeerSearchResults();
 	void clearPreviewResults();
@@ -598,10 +595,8 @@ private:
 	Ui::Animations::Basic _pinnedShiftAnimation;
 	base::flat_set<Key> _pinnedOnDragStart;
 
-	// Multi-selection tracking for accessibility.
-	base::flat_set<Key> _selectedForAction;
-	mutable int _activeColumnsRow = -1;
-	mutable QVector<int> _activeColumns;
+	mutable int _activeSubItemsRow = -1;
+	mutable std::vector<SubItem> _activeSubItems;
 
 	// Remember the last currently dragged row top shift for updating area.
 	int _aboveTopShift = -1;
