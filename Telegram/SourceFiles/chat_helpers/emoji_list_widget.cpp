@@ -1046,6 +1046,7 @@ void EmojiListWidget::checkPaginateSearchCloud(
 		int visibleTop,
 		int visibleBottom) {
 	if (!_searchMode
+		|| searchShortcutSelected()
 		|| _searchRequestQuery.isEmpty()
 		|| (_searchRequestQuery != _searchNextRequestQuery)
 		|| _searchCloudRequestId) {
