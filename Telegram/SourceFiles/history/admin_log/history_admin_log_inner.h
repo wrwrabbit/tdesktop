@@ -74,6 +74,8 @@ public:
 	[[nodiscard]] rpl::producer<> showSearchSignal() const;
 	[[nodiscard]] rpl::producer<int> scrollToSignal() const;
 	[[nodiscard]] rpl::producer<> cancelSignal() const;
+	[[nodiscard]] rpl::producer<int> newEventsCountValue() const;
+	void resetNewEventsCount();
 
 	[[nodiscard]] not_null<ChannelData*> channel() const {
 		return _channel;
@@ -247,6 +249,12 @@ private:
 	[[nodiscard]] int displayItemsAboveVisibleTop() const;
 	void updateVisibleTopItem();
 	void preloadMore(Direction direction);
+	void requestNewEvents();
+	void fetchNewEventsBatch(
+		uint64 pollMinId,
+		uint64 maxId,
+		std::shared_ptr<QVector<MTPChannelAdminLogEvent>> accumulated);
+	void flushNewEvents(const QVector<MTPChannelAdminLogEvent> &events);
 
 	struct ScrollAnchor {
 		Element *view = nullptr;
@@ -362,6 +370,7 @@ private:
 	base::flat_set<not_null<HistoryItem*>> _expandMarkupItems;
 	Ui::Animations::Simple _toggleAnimation;
 	bool _skipScrollRestore = false;
+	bool _skipUnreadEventPrune = false;
 
 	int _itemsTop = 0;
 	int _itemsWidth = 0;
@@ -388,6 +397,10 @@ private:
 	uint64 _minId = 0;
 	mtpRequestId _preloadUpRequestId = 0;
 	mtpRequestId _preloadDownRequestId = 0;
+	mtpRequestId _newEventsRequestId = 0;
+	base::Timer _newEventsTimer;
+	rpl::variable<int> _newEventsCount = 0;
+	base::flat_set<uint64> _unreadEventIds;
 
 	// Don't load anything until the memento was read.
 	bool _upLoaded = true;

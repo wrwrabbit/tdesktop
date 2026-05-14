@@ -333,6 +333,11 @@ Widget::Widget(
 	) | rpl::on_next([=](int top) {
 		_scroll->scrollToY(top);
 	}, lifetime());
+	_inner->newEventsCountValue(
+	) | rpl::on_next([=](int count) {
+		_scrollDown->setUnreadCount(count);
+		updateScrollDownVisibility();
+	}, lifetime());
 
 	_scroll->move(0, _fixedBar->height());
 	_scroll->show();
@@ -360,6 +365,7 @@ void Widget::setupScrollDownButton() {
 }
 
 void Widget::scrollDownClicked() {
+	_inner->resetNewEventsCount();
 	const auto scrollTo = _scroll->scrollTopMax();
 	auto scrollTop = _scroll->scrollTop();
 	if (scrollTop == scrollTo) {
@@ -391,8 +397,10 @@ void Widget::updateScrollDownVisibility() {
 	if (_scroll->isHidden()) {
 		return;
 	}
-	const auto top = _scroll->scrollTop() + st::historyToDownShownAfter;
-	startScrollDownButtonAnimation(top < _scroll->scrollTopMax());
+	const auto top = _scroll->scrollTop() + st::historyToDownShownAfter / 4;
+	const auto hasPendingEvents = _scrollDown->unreadCount() > 0;
+	startScrollDownButtonAnimation(hasPendingEvents
+		|| top < _scroll->scrollTopMax());
 }
 
 void Widget::startScrollDownButtonAnimation(bool shown) {
