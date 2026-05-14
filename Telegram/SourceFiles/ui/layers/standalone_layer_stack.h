@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/weak_ptr.h"
 #include "ui/layers/layer_widget.h"
 
+#include <QtCore/QRect>
 #include <QtCore/QSize>
 
 #include <optional>
@@ -43,6 +44,7 @@ public:
 		LayerOptions options,
 		anim::type animated) override;
 	void hideLayers(anim::type animated) override;
+	void setAnchor(std::optional<QRect> geometry, void *transientParent);
 	ShowFactory showFactory() override;
 	std::optional<QSize> layerOuterSize() override;
 	bool centerWithinOuter() override {
@@ -72,6 +74,8 @@ private:
 	void hideAllPanels();
 
 	std::vector<Entry> _entries;
+	std::optional<QRect> _anchorGeometry;
+	void *_transientParent = nullptr;
 	rpl::event_stream<> _boxAdded;
 	rpl::event_stream<> _boxClosed;
 

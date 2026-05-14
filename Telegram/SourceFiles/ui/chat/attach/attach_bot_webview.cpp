@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/ripple_animation.h"
 #include "ui/layers/box_content.h"
 #include "ui/layers/standalone_layer_stack.h"
+#include "ui/platform/ui_platform_utility.h"
 #include "ui/round_rect.h"
 #include "ui/style/style_core_palette.h"
 #include "ui/text/format_values.h"
@@ -1638,10 +1639,28 @@ void Panel::setExternalShellBlocked(bool blocked) {
 	}
 }
 
+Panel::ExternalShellAnchor Panel::externalShellAnchor() const {
+	if (!_webview) {
+		return {};
+	}
+	const auto transientParent = _webview->window.winId();
+	if (!transientParent) {
+		return {};
+	}
+	return {
+		.anchorGeometry = Ui::Platform::ForeignWindowGeometry(
+			transientParent),
+		.transientParent = transientParent,
+	};
+}
+
 Webview::PopupResult Panel::showBlockingPopup(Webview::PopupArgs &&args) {
 	if (!_externalShell) {
 		return Webview::ShowBlockingPopup(std::move(args));
 	}
+	const auto anchor = externalShellAnchor();
+	args.anchorGeometry = anchor.anchorGeometry;
+	args.transientParent = anchor.transientParent;
 	args.parent = nullptr;
 	setExternalShellBlocked(true);
 	const auto weak = base::make_weak(this);
@@ -1720,6 +1739,9 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 			.mode = _externalShell
 				? Webview::WindowMode::External
 				: Webview::WindowMode::Embedded,
+			.windowMargins = _externalShell
+				? st::botWebViewShellShadowPadding
+				: QMargins(),
 		});
 	const auto raw = &_webview->window;
 
@@ -1959,6 +1981,9 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 	});
 	if (_externalShell) {
 		raw->setDialogHandler([=](Webview::DialogArgs args) {
+			const auto anchor = externalShellAnchor();
+			args.anchorGeometry = anchor.anchorGeometry;
+			args.transientParent = anchor.transientParent;
 			args.parent = nullptr;
 			setExternalShellBlocked(true);
 			const auto weak = base::make_weak(this);
@@ -2956,6 +2981,10 @@ void Panel::showBox(
 		LayerOptions options,
 		anim::type animated) {
 	if (_externalShell) {
+		const auto anchor = externalShellAnchor();
+		_externalLayer->setAnchor(
+			anchor.anchorGeometry,
+			anchor.transientParent);
 		_externalLayer->showBox(std::move(box), options, animated);
 		return;
 	}

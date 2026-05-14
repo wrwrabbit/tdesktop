@@ -104,7 +104,10 @@ void StandaloneLayerStack::showBox(
 	} else if (!_entries.empty()) {
 		_entries.back().panel->hideForStacking();
 	}
-	auto panel = base::make_unique_q<SeparatePanel>();
+	auto panel = base::make_unique_q<SeparatePanel>(SeparatePanelArgs{
+		.anchorGeometry = _anchorGeometry,
+		.transientParent = _transientParent,
+	});
 	panel->setWindowFlag(Qt::WindowStaysOnTopHint, false);
 	panel->setAttribute(Qt::WA_DeleteOnClose, false);
 	panel->setTitleHeight(0);
@@ -158,6 +161,13 @@ void StandaloneLayerStack::hideLayers(anim::type animated) {
 	}
 }
 
+void StandaloneLayerStack::setAnchor(
+		std::optional<QRect> geometry,
+		void *transientParent) {
+	_anchorGeometry = std::move(geometry);
+	_transientParent = transientParent;
+}
+
 ShowFactory StandaloneLayerStack::showFactory() {
 	const auto weak = base::make_weak(this);
 	return [weak]() -> ShowPtr {
@@ -166,6 +176,9 @@ ShowFactory StandaloneLayerStack::showFactory() {
 }
 
 std::optional<QSize> StandaloneLayerStack::layerOuterSize() {
+	if (_anchorGeometry) {
+		return _anchorGeometry->size();
+	}
 	if (const auto screen = QGuiApplication::primaryScreen()) {
 		return screen->availableGeometry().size();
 	}

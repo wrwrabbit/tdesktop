@@ -84,6 +84,9 @@ select {
 		var(--shadow-pad-bottom)
 		var(--shadow-pad-left);
 }
+#root.no-window-alpha #scene {
+	background: #eeeeee;
+}
 #shell {
 	position: relative;
 	width: 100%;
@@ -98,6 +101,10 @@ select {
 		0 3px 8px -1px rgba(0, 0, 0, 0.16),
 		0 8px 14px -5px rgba(0, 0, 0, 0.20);
 	overflow: hidden;
+}
+#root.no-window-alpha #shell {
+	box-shadow: none;
+	border: 1px solid rgba(0, 0, 0, 0.10);
 }
 #header {
 	flex: 0 0 auto;

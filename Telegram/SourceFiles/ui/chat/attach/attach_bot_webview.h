@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rect_part.h"
 #include "webview/webview_common.h"
 #include <crl/crl_time.h>
+#include <QtCore/QRect>
 #include <QtGui/QColor>
 #include <QtGui/QImage>
 
@@ -203,6 +204,10 @@ private:
 		std::optional<QColor> body;
 		std::optional<QColor> bottom;
 	};
+	struct ExternalShellAnchor {
+		std::optional<QRect> anchorGeometry;
+		void *transientParent = nullptr;
+	};
 	class Button;
 	struct Progress;
 	struct WebviewWithLifetime;
@@ -229,6 +234,7 @@ private:
 	void applyExternalShellFullscreen(bool fullscreen);
 	void sendExternalShellChrome();
 	void setExternalShellBlocked(bool blocked);
+	[[nodiscard]] ExternalShellAnchor externalShellAnchor() const;
 	Webview::PopupResult showBlockingPopup(Webview::PopupArgs &&args);
 	void createWebviewBottom();
 	void showWebviewProgress();

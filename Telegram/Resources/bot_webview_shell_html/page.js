@@ -36,6 +36,9 @@
 			secondary: null
 		}
 	};
+	if (window.TelegramDesktopWindowAlphaSupported === false) {
+		root.classList.add('no-window-alpha');
+	}
 	const shellAssets = {
 		icons: Object.create(null),
 		titleMenuIcon: null,
