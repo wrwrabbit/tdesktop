@@ -2680,9 +2680,7 @@ EmojiPtr EmojiListWidget::lookupOverEmoji(const OverEmoji *over) const {
 			? v::get<EmojiPtr>(_searchResults[index].id.data)
 			: nullptr)
 		: (_searchMode && section > 0)
-		? ((index < int(searchSetBySection(section).list.size()))
-			? searchSetBySection(section).list[index].emoji
-			: nullptr)
+		? nullptr
 		: (section == int(Section::Recent)
 			&& index < _recent.size()
 			&& v::is<EmojiPtr>(_recent[index].id.data))
