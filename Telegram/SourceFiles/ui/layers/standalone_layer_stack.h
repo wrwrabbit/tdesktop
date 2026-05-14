@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/object_ptr.h"
 #include "base/unique_qptr.h"
 #include "base/weak_ptr.h"
+#include "ui/platform/ui_platform_utility.h"
 #include "ui/layers/layer_widget.h"
 
 #include <QtCore/QRect>
@@ -44,7 +45,10 @@ public:
 		LayerOptions options,
 		anim::type animated) override;
 	void hideLayers(anim::type animated) override;
-	void setAnchor(std::optional<QRect> geometry, void *transientParent);
+	void setAnchor(
+		std::optional<QRect> geometry,
+		std::optional<QSize> outerSize,
+		Platform::ForeignParent transientParent);
 	ShowFactory showFactory() override;
 	std::optional<QSize> layerOuterSize() override;
 	bool centerWithinOuter() override {
@@ -75,7 +79,8 @@ private:
 
 	std::vector<Entry> _entries;
 	std::optional<QRect> _anchorGeometry;
-	void *_transientParent = nullptr;
+	std::optional<QSize> _anchorOuterSize;
+	Platform::ForeignParent _transientParent;
 	rpl::event_stream<> _boxAdded;
 	rpl::event_stream<> _boxClosed;
 

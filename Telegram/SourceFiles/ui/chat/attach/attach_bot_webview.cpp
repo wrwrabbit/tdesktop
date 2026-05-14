@@ -1643,15 +1643,30 @@ Panel::ExternalShellAnchor Panel::externalShellAnchor() const {
 	if (!_webview) {
 		return {};
 	}
-	const auto transientParent = _webview->window.winId();
-	if (!transientParent) {
+	auto popupAnchor = _webview->window.popupAnchor();
+	auto result = ExternalShellAnchor{
+		.outerSize = std::move(popupAnchor.outerSize),
+		.transientParent = std::move(popupAnchor.transientParent),
+	};
+	switch (result.transientParent.type) {
+	case Ui::Platform::ForeignParent::Type::X11:
+		result.anchorGeometry = Ui::Platform::ForeignWindowGeometry(
+			result.transientParent);
+		if (result.anchorGeometry) {
+			result.outerSize = std::nullopt;
+		}
+		break;
+	case Ui::Platform::ForeignParent::Type::None:
+	case Ui::Platform::ForeignParent::Type::Wayland:
+		result.anchorGeometry = std::move(popupAnchor.geometry);
+		break;
+	}
+	if (!result.transientParent
+		&& !result.anchorGeometry
+		&& !result.outerSize) {
 		return {};
 	}
-	return {
-		.anchorGeometry = Ui::Platform::ForeignWindowGeometry(
-			transientParent),
-		.transientParent = transientParent,
-	};
+	return result;
 }
 
 Webview::PopupResult Panel::showBlockingPopup(Webview::PopupArgs &&args) {
@@ -2984,6 +2999,7 @@ void Panel::showBox(
 		const auto anchor = externalShellAnchor();
 		_externalLayer->setAnchor(
 			anchor.anchorGeometry,
+			anchor.outerSize,
 			anchor.transientParent);
 		_externalLayer->showBox(std::move(box), options, animated);
 		return;

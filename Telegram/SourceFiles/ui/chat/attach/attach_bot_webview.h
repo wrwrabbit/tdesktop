@@ -11,10 +11,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/object_ptr.h"
 #include "base/weak_ptr.h"
 #include "base/flags.h"
+#include "ui/platform/ui_platform_utility.h"
 #include "ui/rect_part.h"
 #include "webview/webview_common.h"
 #include <crl/crl_time.h>
 #include <QtCore/QRect>
+#include <QtCore/QSize>
 #include <QtGui/QColor>
 #include <QtGui/QImage>
 
@@ -206,7 +208,8 @@ private:
 	};
 	struct ExternalShellAnchor {
 		std::optional<QRect> anchorGeometry;
-		void *transientParent = nullptr;
+		std::optional<QSize> outerSize;
+		Platform::ForeignParent transientParent;
 	};
 	class Button;
 	struct Progress;

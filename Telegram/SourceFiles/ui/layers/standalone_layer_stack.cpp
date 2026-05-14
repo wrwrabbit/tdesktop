@@ -163,9 +163,14 @@ void StandaloneLayerStack::hideLayers(anim::type animated) {
 
 void StandaloneLayerStack::setAnchor(
 		std::optional<QRect> geometry,
-		void *transientParent) {
+		std::optional<QSize> outerSize,
+		Platform::ForeignParent transientParent) {
 	_anchorGeometry = std::move(geometry);
-	_transientParent = transientParent;
+	_anchorOuterSize = std::move(outerSize);
+	_transientParent = std::move(transientParent);
+	for (const auto &entry : _entries) {
+		entry.panel->setAnchorData(_anchorGeometry, _transientParent);
+	}
 }
 
 ShowFactory StandaloneLayerStack::showFactory() {
@@ -176,6 +181,9 @@ ShowFactory StandaloneLayerStack::showFactory() {
 }
 
 std::optional<QSize> StandaloneLayerStack::layerOuterSize() {
+	if (_anchorOuterSize) {
+		return _anchorOuterSize;
+	}
 	if (_anchorGeometry) {
 		return _anchorGeometry->size();
 	}
@@ -205,6 +213,9 @@ void StandaloneLayerStack::closeEntry(SeparatePanel *panel) {
 	entry.panel->hideGetDuration();
 	_boxClosed.fire({});
 	if (wasTop && !_entries.empty()) {
+		_entries.back().panel->setAnchorData(
+			_anchorGeometry,
+			_transientParent);
 		_entries.back().panel->showAndActivate();
 	}
 }
