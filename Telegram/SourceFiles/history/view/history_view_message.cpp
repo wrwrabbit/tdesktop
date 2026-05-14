@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_suggest_post.h"
 #include "api/api_transcribes.h"
+#include "base/options.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
 #include "core/click_handler_types.h" // ClickHandlerContext
@@ -62,6 +63,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace HistoryView {
 namespace {
+
+base::options::toggle UnlimitedMessageWidth({
+	.id = kOptionUnlimitedMessageWidth,
+	.name = "Unlimited message width",
+	.description = "Allow text-only message bubbles "
+		"to expand beyond the default maximum width.",
+	.restartRequired = true,
+});
 
 constexpr auto kPlayStatusLimit = 2;
 constexpr auto kMaxWidth = (1 << 16) - 1;
@@ -195,6 +204,9 @@ struct BadgePillGeometry {
 }
 
 } // namespace
+
+const char kOptionUnlimitedMessageWidth[]
+	= "unlimited-message-width";
 
 struct Message::CommentsButton {
 	std::unique_ptr<Ui::RippleAnimation> ripple;
@@ -5222,7 +5234,9 @@ int Message::resizeContentGetHeight(int newWidth) {
 		}
 	}
 	accumulate_min(contentWidth, maxWidth());
-	_bubbleWidthLimit = std::max(st::msgMaxWidth, monospaceMaxWidth());
+	_bubbleWidthLimit = (UnlimitedMessageWidth.value() && !mediaDisplayed)
+		? 0x3FFFFFF
+		: std::max(st::msgMaxWidth, monospaceMaxWidth());
 	accumulate_min(contentWidth, int(_bubbleWidthLimit));
 	const auto textualWidth = bubbleTextualWidth();
 	if (mediaDisplayed) {

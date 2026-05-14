@@ -108,6 +108,8 @@ struct BottomRippleMask {
 	int shift = 0;
 };
 
+extern const char kOptionUnlimitedMessageWidth[];
+
 class Message final : public Element {
 public:
 	Message(
