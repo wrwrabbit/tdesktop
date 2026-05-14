@@ -138,72 +138,18 @@ public:
 		std::shared_ptr<::Data::PhotoMedia> media,
 		not_null<PhotoData*> photo,
 		::Data::FileOrigin origin,
-		CachedPagePhotoImageKind kind)
-	: _media(std::move(media))
-	, _photo(photo)
-	, _origin(std::move(origin))
-	, _kind(kind) {
-	}
+		CachedPagePhotoImageKind kind);
 
-	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> clone() override {
-		return std::make_shared<CachedPagePhotoDynamicImage>(
-			_media,
-			_photo,
-			_origin,
-			_kind);
-	}
+	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> clone() override;
 
-	[[nodiscard]] QImage image(int size) override {
-		Q_UNUSED(size);
-		ensureWanted();
-		if (const auto image = resolvedImage()) {
-			return image->original();
-		}
-		return QImage();
-	}
+	[[nodiscard]] QImage image(int size) override;
 
-	void subscribeToUpdates(Fn<void()> callback) override {
-		if (!callback) {
-			_subscription = {};
-			return;
-		}
-		_subscription = _photo->owner().photoLoadProgress(
-		) | rpl::filter([photo = _photo](not_null<PhotoData*> updated) {
-			return (updated == photo);
-		}) | rpl::on_next([callback = std::move(callback)] {
-			callback();
-		});
-	}
+	void subscribeToUpdates(Fn<void()> callback) override;
 
 private:
-	void ensureWanted() {
-		switch (_kind) {
-		case CachedPagePhotoImageKind::Thumbnail:
-			_media->wanted(::Data::PhotoSize::Small, _origin);
-			break;
-		case CachedPagePhotoImageKind::Full:
-			_media->wanted(::Data::PhotoSize::Large, _origin);
-			break;
-		}
-	}
+	void ensureWanted();
 
-	[[nodiscard]] Image *resolvedImage() const {
-		switch (_kind) {
-		case CachedPagePhotoImageKind::Full:
-			if (const auto large = _media->image(::Data::PhotoSize::Large)) {
-				return large;
-			}
-			[[fallthrough]];
-		case CachedPagePhotoImageKind::Thumbnail:
-			if (const auto small = _media->image(::Data::PhotoSize::Small)) {
-				return small;
-			} else if (const auto thumbnail = _media->image(::Data::PhotoSize::Thumbnail)) {
-				return thumbnail;
-			}
-			return _media->thumbnailInline();
-		}
-		return nullptr;
-	}
+	[[nodiscard]] Image *resolvedImage() const;
 
 	const std::shared_ptr<::Data::PhotoMedia> _media;
 	const not_null<PhotoData*> _photo;
@@ -213,70 +159,100 @@ private:
 
 };
 
+CachedPagePhotoDynamicImage::CachedPagePhotoDynamicImage(
+	std::shared_ptr<::Data::PhotoMedia> media,
+	not_null<PhotoData*> photo,
+	::Data::FileOrigin origin,
+	CachedPagePhotoImageKind kind)
+: _media(std::move(media))
+, _photo(photo)
+, _origin(std::move(origin))
+, _kind(kind) {
+}
+
+
+[[nodiscard]] std::shared_ptr<Ui::DynamicImage> CachedPagePhotoDynamicImage::clone() {
+	return std::make_shared<CachedPagePhotoDynamicImage>(
+		_media,
+		_photo,
+		_origin,
+		_kind);
+}
+
+
+[[nodiscard]] QImage CachedPagePhotoDynamicImage::image(int size) {
+	Q_UNUSED(size);
+	ensureWanted();
+	if (const auto image = resolvedImage()) {
+		return image->original();
+	}
+	return QImage();
+}
+
+
+void CachedPagePhotoDynamicImage::subscribeToUpdates(Fn<void()> callback) {
+	if (!callback) {
+		_subscription = {};
+		return;
+	}
+	_subscription = _photo->owner().photoLoadProgress(
+	) | rpl::filter([photo = _photo](not_null<PhotoData*> updated) {
+		return (updated == photo);
+	}) | rpl::on_next([callback = std::move(callback)] {
+		callback();
+	});
+}
+
+void CachedPagePhotoDynamicImage::ensureWanted() {
+	switch (_kind) {
+	case CachedPagePhotoImageKind::Thumbnail:
+		_media->wanted(::Data::PhotoSize::Small, _origin);
+		break;
+	case CachedPagePhotoImageKind::Full:
+		_media->wanted(::Data::PhotoSize::Large, _origin);
+		break;
+	}
+}
+
+
+[[nodiscard]] Image *CachedPagePhotoDynamicImage::resolvedImage() const {
+	switch (_kind) {
+	case CachedPagePhotoImageKind::Full:
+		if (const auto large = _media->image(::Data::PhotoSize::Large)) {
+			return large;
+		}
+		[[fallthrough]];
+	case CachedPagePhotoImageKind::Thumbnail:
+		if (const auto small = _media->image(::Data::PhotoSize::Small)) {
+			return small;
+		} else if (const auto thumbnail = _media->image(::Data::PhotoSize::Thumbnail)) {
+			return thumbnail;
+		}
+		return _media->thumbnailInline();
+	}
+	return nullptr;
+}
+
 class CachedPagePhotoRuntime final : public Markdown::PhotoRuntime {
 public:
 	CachedPagePhotoRuntime(
 		not_null<Main::Session*> session,
 		not_null<PhotoData*> photo,
-		::Data::FileOrigin origin)
-	: _session(session)
-	, _photo(photo)
-	, _origin(std::move(origin))
-	, _media(photo->createMediaView()) {
-	}
+		::Data::FileOrigin origin);
 
 	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> thumbnail(
-			QSize size) const override {
-		Q_UNUSED(size);
-		_media->wanted(::Data::PhotoSize::Small, _origin);
-		return std::make_shared<CachedPagePhotoDynamicImage>(
-			_media,
-			_photo,
-			_origin,
-			CachedPagePhotoImageKind::Thumbnail);
-	}
+			QSize size) const override;
 
 	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> full(
-			QSize size) const override {
-		Q_UNUSED(size);
-		_media->wanted(::Data::PhotoSize::Large, _origin);
-		return std::make_shared<CachedPagePhotoDynamicImage>(
-			_media,
-			_photo,
-			_origin,
-			CachedPagePhotoImageKind::Full);
-	}
+			QSize size) const override;
 
-	[[nodiscard]] bool loaded() const override {
-		_media->wanted(::Data::PhotoSize::Large, _origin);
-		return _media->loaded();
-	}
+	[[nodiscard]] bool loaded() const override;
 
-	[[nodiscard]] bool loading() const override {
-		_media->wanted(::Data::PhotoSize::Large, _origin);
-		return _photo->displayLoading();
-	}
+	[[nodiscard]] bool loading() const override;
 
-	[[nodiscard]] double progress() const override {
-		_media->wanted(::Data::PhotoSize::Large, _origin);
-		return _media->progress();
-	}
+	[[nodiscard]] double progress() const override;
 
-	void open(Qt::MouseButton button) const override {
-		if (button != Qt::LeftButton && button != Qt::MiddleButton) {
-			return;
-		}
-		if (const auto window = Core::App().activeWindow()) {
-			const auto item = (HistoryItem*)nullptr;
-			window->openInMediaView({
-				CurrentSessionController(_session),
-				_photo,
-				item,
-				MsgId(0),
-				PeerId(0),
-			});
-		}
-	}
+	void open(Qt::MouseButton button) const override;
 
 private:
 	const not_null<Main::Session*> _session;
@@ -285,6 +261,75 @@ private:
 	const std::shared_ptr<::Data::PhotoMedia> _media;
 
 };
+
+CachedPagePhotoRuntime::CachedPagePhotoRuntime(
+	not_null<Main::Session*> session,
+	not_null<PhotoData*> photo,
+	::Data::FileOrigin origin)
+: _session(session)
+, _photo(photo)
+, _origin(std::move(origin))
+, _media(photo->createMediaView()) {
+}
+
+
+[[nodiscard]] std::shared_ptr<Ui::DynamicImage> CachedPagePhotoRuntime::thumbnail(
+		QSize size) const {
+	Q_UNUSED(size);
+	_media->wanted(::Data::PhotoSize::Small, _origin);
+	return std::make_shared<CachedPagePhotoDynamicImage>(
+		_media,
+		_photo,
+		_origin,
+		CachedPagePhotoImageKind::Thumbnail);
+}
+
+
+[[nodiscard]] std::shared_ptr<Ui::DynamicImage> CachedPagePhotoRuntime::full(
+		QSize size) const {
+	Q_UNUSED(size);
+	_media->wanted(::Data::PhotoSize::Large, _origin);
+	return std::make_shared<CachedPagePhotoDynamicImage>(
+		_media,
+		_photo,
+		_origin,
+		CachedPagePhotoImageKind::Full);
+}
+
+
+[[nodiscard]] bool CachedPagePhotoRuntime::loaded() const {
+	_media->wanted(::Data::PhotoSize::Large, _origin);
+	return _media->loaded();
+}
+
+
+[[nodiscard]] bool CachedPagePhotoRuntime::loading() const {
+	_media->wanted(::Data::PhotoSize::Large, _origin);
+	return _photo->displayLoading();
+}
+
+
+[[nodiscard]] double CachedPagePhotoRuntime::progress() const {
+	_media->wanted(::Data::PhotoSize::Large, _origin);
+	return _media->progress();
+}
+
+
+void CachedPagePhotoRuntime::open(Qt::MouseButton button) const {
+	if (button != Qt::LeftButton && button != Qt::MiddleButton) {
+		return;
+	}
+	if (const auto window = Core::App().activeWindow()) {
+		const auto item = (HistoryItem*)nullptr;
+		window->openInMediaView({
+			CurrentSessionController(_session),
+			_photo,
+			item,
+			MsgId(0),
+			PeerId(0),
+		});
+	}
+}
 
 [[nodiscard]] ImageWithLocation CachedPageMapImageData(
 		double latitude,
@@ -322,22 +367,6 @@ private:
 	return ::Data::LocationPoint(point.c_geoPoint());
 }
 
-[[nodiscard]] not_null<HistoryItem*> AddIvNeutralHostMessage(
-		not_null<History*> history,
-		QString pageUrl,
-		DocumentData *document = nullptr,
-		PhotoData *photo = nullptr) {
-	const auto item = history->addNewLocalMessage({
-		.id = history->nextNonHistoryEntryId(),
-		.flags = (MessageFlag::FakeHistoryItem
-			| MessageFlag::Local
-			| MessageFlag::HideDisplayDate),
-		.date = base::unixtime::now(),
-	}, TextWithEntities(), MTP_messageMediaEmpty());
-	item->setMediaForInstantView(std::move(pageUrl), document, photo);
-	return item;
-}
-
 [[nodiscard]] bool CanHostNativeIvVideoDocument(
 		not_null<DocumentData*> document) {
 	return !document->isVideoMessage()
@@ -359,52 +388,21 @@ public:
 	CachedPageDocumentRuntime(
 		not_null<Main::Session*> session,
 		not_null<DocumentData*> document,
-		::Data::FileOrigin origin)
-	: _session(session)
-	, _document(document)
-	, _origin(std::move(origin))
-	, _media(document->createMediaView()) {
-	}
+		::Data::FileOrigin origin);
 
 	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> thumbnail(
-			QSize size) const override {
-		Q_UNUSED(size);
-		return Ui::MakeDocumentThumbnailFit(_document, _origin);
-	}
+			QSize size) const override;
 
 	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> full(
-			QSize size) const override {
-		Q_UNUSED(size);
-		return Ui::MakeDocumentThumbnail(_document, _origin);
-	}
+			QSize size) const override;
 
-	[[nodiscard]] bool loaded() const override {
-		return _media->loaded();
-	}
+	[[nodiscard]] bool loaded() const override;
 
-	[[nodiscard]] bool loading() const override {
-		return _document->displayLoading();
-	}
+	[[nodiscard]] bool loading() const override;
 
-	[[nodiscard]] double progress() const override {
-		return _document->progress();
-	}
+	[[nodiscard]] double progress() const override;
 
-	void open(Qt::MouseButton button) const override {
-		if (button != Qt::LeftButton && button != Qt::MiddleButton) {
-			return;
-		}
-		if (const auto window = Core::App().activeWindow()) {
-			const auto item = (HistoryItem*)nullptr;
-			window->openInMediaView({
-				CurrentSessionController(_session),
-				_document,
-				item,
-				MsgId(0),
-				PeerId(0),
-			});
-		}
-	}
+	void open(Qt::MouseButton button) const override;
 
 private:
 	const not_null<Main::Session*> _session;
@@ -414,57 +412,78 @@ private:
 
 };
 
+CachedPageDocumentRuntime::CachedPageDocumentRuntime(
+	not_null<Main::Session*> session,
+	not_null<DocumentData*> document,
+	::Data::FileOrigin origin)
+: _session(session)
+, _document(document)
+, _origin(std::move(origin))
+, _media(document->createMediaView()) {
+}
+
+
+[[nodiscard]] std::shared_ptr<Ui::DynamicImage> CachedPageDocumentRuntime::thumbnail(
+		QSize size) const {
+	Q_UNUSED(size);
+	return Ui::MakeDocumentThumbnailFit(_document, _origin);
+}
+
+
+[[nodiscard]] std::shared_ptr<Ui::DynamicImage> CachedPageDocumentRuntime::full(
+		QSize size) const {
+	Q_UNUSED(size);
+	return Ui::MakeDocumentThumbnail(_document, _origin);
+}
+
+
+[[nodiscard]] bool CachedPageDocumentRuntime::loaded() const {
+	return _media->loaded();
+}
+
+
+[[nodiscard]] bool CachedPageDocumentRuntime::loading() const {
+	return _document->displayLoading();
+}
+
+
+[[nodiscard]] double CachedPageDocumentRuntime::progress() const {
+	return _document->progress();
+}
+
+
+void CachedPageDocumentRuntime::open(Qt::MouseButton button) const {
+	if (button != Qt::LeftButton && button != Qt::MiddleButton) {
+		return;
+	}
+	if (const auto window = Core::App().activeWindow()) {
+		const auto item = (HistoryItem*)nullptr;
+		window->openInMediaView({
+			CurrentSessionController(_session),
+			_document,
+			item,
+			MsgId(0),
+			PeerId(0),
+		});
+	}
+}
+
 class CachedPageInlineDocumentImage final : public Ui::DynamicImage {
 public:
 	CachedPageInlineDocumentImage(
 		not_null<DocumentData*> document,
-		::Data::FileOrigin origin)
-	: _document(document)
-	, _origin(std::move(origin))
-	, _media(document->createMediaView()) {
-	}
+		::Data::FileOrigin origin);
 
-	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> clone() override {
-		return std::make_shared<CachedPageInlineDocumentImage>(
-			_document,
-			_origin);
-	}
+	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> clone() override;
 
-	[[nodiscard]] QImage image(int size) override {
-		Q_UNUSED(size);
-		ensureWanted();
-		if (const auto image = resolvedImage()) {
-			return image->original();
-		}
-		return QImage();
-	}
+	[[nodiscard]] QImage image(int size) override;
 
-	void subscribeToUpdates(Fn<void()> callback) override {
-		_subscription.destroy();
-		if (!callback) {
-			return;
-		}
-		ensureWanted();
-		if (_media->thumbnail()) {
-			return;
-		}
-		_document->session().downloaderTaskFinished(
-		) | rpl::filter([=] {
-			return (_media->thumbnail() != nullptr);
-		}) | rpl::take(1) | rpl::on_next(std::move(callback), _subscription);
-	}
+	void subscribeToUpdates(Fn<void()> callback) override;
 
 private:
-	void ensureWanted() {
-		_media->thumbnailWanted(_origin);
-	}
+	void ensureWanted();
 
-	[[nodiscard]] Image *resolvedImage() const {
-		if (const auto image = _media->thumbnail()) {
-			return image;
-		}
-		return _media->thumbnailInline();
-	}
+	[[nodiscard]] Image *resolvedImage() const;
 
 	const not_null<DocumentData*> _document;
 	const ::Data::FileOrigin _origin;
@@ -473,86 +492,71 @@ private:
 
 };
 
+CachedPageInlineDocumentImage::CachedPageInlineDocumentImage(
+	not_null<DocumentData*> document,
+	::Data::FileOrigin origin)
+: _document(document)
+, _origin(std::move(origin))
+, _media(document->createMediaView()) {
+}
+
+
+[[nodiscard]] std::shared_ptr<Ui::DynamicImage> CachedPageInlineDocumentImage::clone() {
+	return std::make_shared<CachedPageInlineDocumentImage>(
+		_document,
+		_origin);
+}
+
+
+[[nodiscard]] QImage CachedPageInlineDocumentImage::image(int size) {
+	Q_UNUSED(size);
+	ensureWanted();
+	if (const auto image = resolvedImage()) {
+		return image->original();
+	}
+	return QImage();
+}
+
+
+void CachedPageInlineDocumentImage::subscribeToUpdates(Fn<void()> callback) {
+	_subscription.destroy();
+	if (!callback) {
+		return;
+	}
+	ensureWanted();
+	if (_media->thumbnail()) {
+		return;
+	}
+	_document->session().downloaderTaskFinished(
+	) | rpl::filter([=] {
+		return (_media->thumbnail() != nullptr);
+	}) | rpl::take(1) | rpl::on_next(std::move(callback), _subscription);
+}
+
+void CachedPageInlineDocumentImage::ensureWanted() {
+	_media->thumbnailWanted(_origin);
+}
+
+
+[[nodiscard]] Image *CachedPageInlineDocumentImage::resolvedImage() const {
+	if (const auto image = _media->thumbnail()) {
+		return image;
+	}
+	return _media->thumbnailInline();
+}
+
 class CachedPageMapDynamicImage final : public Ui::DynamicImage {
 public:
 	CachedPageMapDynamicImage(
 		not_null<::Data::CloudImage*> data,
 		not_null<Main::Session*> session,
-		::Data::FileOrigin origin)
-	: _data(data)
-	, _session(session)
-	, _origin(std::move(origin)) {
-	}
+		::Data::FileOrigin origin);
 
-	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> clone() override {
-		return std::make_shared<CachedPageMapDynamicImage>(
-			_data,
-			_session,
-			_origin);
-	}
+	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> clone() override;
 
-	[[nodiscard]] QImage image(int size) override {
-		Q_UNUSED(size);
-		const auto loaded = _view ? *_view : QImage();
-		if (loaded.isNull()) {
-			return QImage();
-		}
-		const auto paletteVersion = style::PaletteVersion();
-		if (_prepared.size() == loaded.size()
-			&& _prepared.devicePixelRatio() == loaded.devicePixelRatio()
-			&& _paletteVersion == paletteVersion) {
-			return _prepared;
-		}
-		_paletteVersion = paletteVersion;
-		_prepared = loaded.copy();
-		_prepared.setDevicePixelRatio(loaded.devicePixelRatio());
-		const auto ratio = loaded.devicePixelRatio();
-		const auto width = int(loaded.width() / ratio);
-		const auto height = int(loaded.height() / ratio);
-		const auto markerSize = std::min(width, height);
-		auto p = Painter(&_prepared);
-		auto hq = PainterHighQualityEnabler(p);
-		const auto pinScale = std::min({
-			1.0,
-			width / (st::historyMapPoint.height() * 2.5),
-			height / (st::historyMapPoint.height() * 2.5),
-		});
-		const auto center = QPointF(width / 2.0, height / 2.0);
-		p.translate(center);
-		p.scale(pinScale, pinScale);
-		p.translate(-center);
-		const auto paintMarker = [&](const style::icon &icon) {
-			icon.paint(
-				p,
-				(width - icon.width()) / 2,
-				(height / 2) - icon.height(),
-				markerSize);
-		};
-		paintMarker(st::historyMapPoint);
-		paintMarker(st::historyMapPointInner);
-		return _prepared;
-	}
+	[[nodiscard]] QImage image(int size) override;
 
-	void subscribeToUpdates(Fn<void()> callback) override {
-		_subscription.destroy();
-		if (!callback) {
-			_view = nullptr;
-			_prepared = QImage();
-			return;
-		}
-		_view = _data->createView();
-		_data->load(_session, _origin);
-		if (!_view->isNull()) {
-			return;
-		}
-		_subscription = _session->downloaderTaskFinished(
-		) | rpl::filter([=] {
-			return !_view->isNull();
-		}) | rpl::take(1) | rpl::on_next([=] {
-			_prepared = QImage();
-			callback();
-		});
-	}
+	void subscribeToUpdates(Fn<void()> callback) override;
 
 private:
 	const not_null<::Data::CloudImage*> _data;
@@ -565,6 +569,88 @@ private:
 
 };
 
+CachedPageMapDynamicImage::CachedPageMapDynamicImage(
+	not_null<::Data::CloudImage*> data,
+	not_null<Main::Session*> session,
+	::Data::FileOrigin origin)
+: _data(data)
+, _session(session)
+, _origin(std::move(origin)) {
+}
+
+
+[[nodiscard]] std::shared_ptr<Ui::DynamicImage> CachedPageMapDynamicImage::clone() {
+	return std::make_shared<CachedPageMapDynamicImage>(
+		_data,
+		_session,
+		_origin);
+}
+
+
+[[nodiscard]] QImage CachedPageMapDynamicImage::image(int size) {
+	Q_UNUSED(size);
+	const auto loaded = _view ? *_view : QImage();
+	if (loaded.isNull()) {
+		return QImage();
+	}
+	const auto paletteVersion = style::PaletteVersion();
+	if (_prepared.size() == loaded.size()
+		&& _prepared.devicePixelRatio() == loaded.devicePixelRatio()
+		&& _paletteVersion == paletteVersion) {
+		return _prepared;
+	}
+	_paletteVersion = paletteVersion;
+	_prepared = loaded.copy();
+	_prepared.setDevicePixelRatio(loaded.devicePixelRatio());
+	const auto ratio = loaded.devicePixelRatio();
+	const auto width = int(loaded.width() / ratio);
+	const auto height = int(loaded.height() / ratio);
+	const auto markerSize = std::min(width, height);
+	auto p = Painter(&_prepared);
+	auto hq = PainterHighQualityEnabler(p);
+	const auto pinScale = std::min({
+		1.0,
+		width / (st::historyMapPoint.height() * 2.5),
+		height / (st::historyMapPoint.height() * 2.5),
+	});
+	const auto center = QPointF(width / 2.0, height / 2.0);
+	p.translate(center);
+	p.scale(pinScale, pinScale);
+	p.translate(-center);
+	const auto paintMarker = [&](const style::icon &icon) {
+		icon.paint(
+			p,
+			(width - icon.width()) / 2,
+			(height / 2) - icon.height(),
+			markerSize);
+	};
+	paintMarker(st::historyMapPoint);
+	paintMarker(st::historyMapPointInner);
+	return _prepared;
+}
+
+
+void CachedPageMapDynamicImage::subscribeToUpdates(Fn<void()> callback) {
+	_subscription.destroy();
+	if (!callback) {
+		_view = nullptr;
+		_prepared = QImage();
+		return;
+	}
+	_view = _data->createView();
+	_data->load(_session, _origin);
+	if (!_view->isNull()) {
+		return;
+	}
+	_subscription = _session->downloaderTaskFinished(
+	) | rpl::filter([=] {
+		return !_view->isNull();
+	}) | rpl::take(1) | rpl::on_next([=] {
+		_prepared = QImage();
+		callback();
+	});
+}
+
 class CachedPageMapRuntime final : public Markdown::MapRuntime {
 public:
 	CachedPageMapRuntime(
@@ -574,56 +660,22 @@ public:
 		double longitude,
 		uint64 accessHash,
 		QSize size,
-		int zoom)
-	: _session(session)
-	, _origin(std::move(origin))
-	, _image(session, CachedPageMapImageData(
-		latitude,
-		longitude,
-		accessHash,
-		size,
-		zoom)) {
-	}
+		int zoom);
 
 	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> thumbnail(
-			QSize size) const override {
-		Q_UNUSED(size);
-		ensureLoaded();
-		return std::make_shared<CachedPageMapDynamicImage>(
-			&_image,
-			_session,
-			_origin);
-	}
+			QSize size) const override;
 
 	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> full(
-			QSize size) const override {
-		Q_UNUSED(size);
-		ensureLoaded();
-		return std::make_shared<CachedPageMapDynamicImage>(
-			&_image,
-			_session,
-			_origin);
-	}
+			QSize size) const override;
 
-	[[nodiscard]] bool loaded() const override {
-		ensureLoaded();
-		return _image.loadedOnce();
-	}
+	[[nodiscard]] bool loaded() const override;
 
-	[[nodiscard]] bool loading() const override {
-		ensureLoaded();
-		return _image.loading();
-	}
+	[[nodiscard]] bool loading() const override;
 
-	[[nodiscard]] double progress() const override {
-		ensureLoaded();
-		return _image.loadedOnce() ? 1. : 0.;
-	}
+	[[nodiscard]] double progress() const override;
 
 private:
-	void ensureLoaded() const {
-		_image.load(_session, _origin);
-	}
+	void ensureLoaded() const;
 
 	const not_null<Main::Session*> _session;
 	const ::Data::FileOrigin _origin;
@@ -631,36 +683,81 @@ private:
 
 };
 
+CachedPageMapRuntime::CachedPageMapRuntime(
+	not_null<Main::Session*> session,
+	::Data::FileOrigin origin,
+	double latitude,
+	double longitude,
+	uint64 accessHash,
+	QSize size,
+	int zoom)
+: _session(session)
+, _origin(std::move(origin))
+, _image(session, CachedPageMapImageData(
+	latitude,
+	longitude,
+	accessHash,
+	size,
+	zoom)) {
+}
+
+
+[[nodiscard]] std::shared_ptr<Ui::DynamicImage> CachedPageMapRuntime::thumbnail(
+		QSize size) const {
+	Q_UNUSED(size);
+	ensureLoaded();
+	return std::make_shared<CachedPageMapDynamicImage>(
+		&_image,
+		_session,
+		_origin);
+}
+
+
+[[nodiscard]] std::shared_ptr<Ui::DynamicImage> CachedPageMapRuntime::full(
+		QSize size) const {
+	Q_UNUSED(size);
+	ensureLoaded();
+	return std::make_shared<CachedPageMapDynamicImage>(
+		&_image,
+		_session,
+		_origin);
+}
+
+
+[[nodiscard]] bool CachedPageMapRuntime::loaded() const {
+	ensureLoaded();
+	return _image.loadedOnce();
+}
+
+
+[[nodiscard]] bool CachedPageMapRuntime::loading() const {
+	ensureLoaded();
+	return _image.loading();
+}
+
+
+[[nodiscard]] double CachedPageMapRuntime::progress() const {
+	ensureLoaded();
+	return _image.loadedOnce() ? 1. : 0.;
+}
+
+void CachedPageMapRuntime::ensureLoaded() const {
+	_image.load(_session, _origin);
+}
+
 class CachedPageChannelRuntime final : public Markdown::ChannelRuntime {
 public:
 	CachedPageChannelRuntime(
 		not_null<ChannelData*> channel,
 		QString context,
 		Fn<void(QString)> openChannel,
-		Fn<void(QString)> joinChannel)
-	: _channel(channel)
-	, _context(std::move(context))
-	, _openChannel(std::move(openChannel))
-	, _joinChannel(std::move(joinChannel)) {
-	}
+		Fn<void(QString)> joinChannel);
 
-	[[nodiscard]] bool joinVisible() const override {
-		return !_channel->amIn();
-	}
+	[[nodiscard]] bool joinVisible() const override;
 
-	void open(Qt::MouseButton button) const override {
-		if ((button == Qt::LeftButton || button == Qt::MiddleButton)
-			&& _openChannel) {
-			_openChannel(_context);
-		}
-	}
+	void open(Qt::MouseButton button) const override;
 
-	void join(Qt::MouseButton button) const override {
-		if ((button == Qt::LeftButton || button == Qt::MiddleButton)
-			&& _joinChannel) {
-			_joinChannel(_context);
-		}
-	}
+	void join(Qt::MouseButton button) const override;
 
 private:
 	const not_null<ChannelData*> _channel;
@@ -670,258 +767,349 @@ private:
 
 };
 
+CachedPageChannelRuntime::CachedPageChannelRuntime(
+	not_null<ChannelData*> channel,
+	QString context,
+	Fn<void(QString)> openChannel,
+	Fn<void(QString)> joinChannel)
+: _channel(channel)
+, _context(std::move(context))
+, _openChannel(std::move(openChannel))
+, _joinChannel(std::move(joinChannel)) {
+}
+
+
+[[nodiscard]] bool CachedPageChannelRuntime::joinVisible() const {
+	return !_channel->amIn();
+}
+
+
+void CachedPageChannelRuntime::open(Qt::MouseButton button) const {
+	if ((button == Qt::LeftButton || button == Qt::MiddleButton)
+		&& _openChannel) {
+		_openChannel(_context);
+	}
+}
+
+
+void CachedPageChannelRuntime::join(Qt::MouseButton button) const {
+	if ((button == Qt::LeftButton || button == Qt::MiddleButton)
+		&& _joinChannel) {
+		_joinChannel(_context);
+	}
+}
+
 class CachedPageMediaRuntime final : public Markdown::MediaRuntime {
 public:
 	CachedPageMediaRuntime(
 		not_null<Main::Session*> session,
 		not_null<WebPageData*> page,
 		Fn<void(QString)> openChannel,
-		Fn<void(QString)> joinChannel)
-	: _session(session)
-	, _page(page)
-	, _openChannel(std::move(openChannel))
-	, _joinChannel(std::move(joinChannel)) {
-	}
+		Fn<void(QString)> joinChannel);
 
 	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> resolveInlineImage(
 			uint64 documentId,
-			QSize size) const override {
-		Q_UNUSED(size);
-		const auto document = _session->data().document(DocumentId(documentId));
-		if (document->isNull()) {
-			return nullptr;
-		}
-		return std::make_shared<CachedPageInlineDocumentImage>(
-			document,
-			fileOrigin());
-	}
+			QSize size) const override;
 
 	[[nodiscard]] std::shared_ptr<Markdown::PhotoRuntime> resolvePhoto(
-			uint64 photoId) const override {
-		const auto photo = _session->data().photo(PhotoId(photoId));
-		if (photo->isNull()) {
-			return nullptr;
-		}
-		return std::make_shared<CachedPagePhotoRuntime>(
-			_session,
-			photo,
-			fileOrigin());
-	}
+			uint64 photoId) const override;
 
 	[[nodiscard]] std::shared_ptr<Markdown::DocumentRuntime> resolveDocument(
-			uint64 documentId) const override {
-		const auto document = _session->data().document(DocumentId(documentId));
-		if (document->isNull()) {
-			return nullptr;
-		}
-		return std::make_shared<CachedPageDocumentRuntime>(
-			_session,
-			document,
-			fileOrigin());
-	}
+			uint64 documentId) const override;
 
 	[[nodiscard]] std::shared_ptr<Markdown::MapRuntime> resolveMap(
 			double latitude,
 			double longitude,
 			uint64 accessHash,
 			QSize size,
-			int zoom) const override {
-		return std::make_shared<CachedPageMapRuntime>(
-			_session,
-			fileOrigin(),
-			latitude,
-			longitude,
-			accessHash,
-			size,
-			zoom);
-	}
+			int zoom) const override;
 
 	[[nodiscard]] std::shared_ptr<Markdown::ChannelRuntime> resolveChannel(
 			uint64 channelId,
-			const QString &username) const override {
-		const auto channel = _session->data().channel(ChannelId(channelId));
-		subscribeToChannel(channelId, channel);
-		return std::make_shared<CachedPageChannelRuntime>(
-			channel,
-			SerializeNativeIvChannelContext(channelId, username),
-			_openChannel,
-			_joinChannel);
-	}
+			const QString &username) const override;
 
-	[[nodiscard]] rpl::producer<uint64> channelJoinedChanges() const override {
-		return _channelJoinedChanges.events();
-	}
+	[[nodiscard]] rpl::producer<uint64> channelJoinedChanges() const override;
+
+	[[nodiscard]] std::shared_ptr<Markdown::IvHistoryViewMediaHost>
+	hostedMediaHost(
+			not_null<Window::SessionController*> controller,
+			not_null<History*> history) const;
 
 	[[nodiscard]] std::shared_ptr<Markdown::HostedMediaBlockFactory>
-	hostedMediaBlockFactory() const override {
-		const auto controller = CurrentSessionController(_session);
-		if (!controller || !_session->data().peerLoaded(
-				PeerData::kServiceNotificationsId)) {
-			return nullptr;
-		}
-		const auto history = _session->data().history(
-			PeerData::kServiceNotificationsId);
-		if (!history->peer->isUser()) {
-			return nullptr;
-		}
-		return std::make_shared<Markdown::IvHistoryViewMediaBlockFactory>(
-			base::make_weak(controller),
-			[session = _session, pageUrl = _page->url, history](
-					Window::SessionController *controller,
-					const Markdown::PreparedPhotoBlockData &prepared) {
-				if (!controller
-					|| !prepared.viewerOpen
-					|| !prepared.urlOverride.isEmpty()) {
-					return std::shared_ptr<Markdown::MediaBlock>();
-				}
-				const auto photo = session->data().photo(PhotoId(prepared.photoId));
-				if (photo->isNull()) {
-					return std::shared_ptr<Markdown::MediaBlock>();
-				}
-				const auto item = AddIvNeutralHostMessage(
-					history,
-					pageUrl,
-					nullptr,
-					photo);
-
-				auto descriptor = Markdown::IvHistoryViewMediaDescriptor();
-				descriptor.stableId = prepared.id.value;
-				descriptor.kind = Markdown::IvHistoryViewMediaKind::Photo;
-				descriptor.copyText = u"Photo"_q;
-				descriptor.layoutHint = QSize(prepared.width, prepared.height);
-				descriptor.session = &session->data();
-				descriptor.item = item;
-				descriptor.mediaFactory = [photo](
-						not_null<HistoryView::Element*> view) {
-					return std::make_unique<HistoryView::Photo>(
-						view,
-						view->data(),
-						photo,
-						false);
-				};
-				descriptor.photo = std::make_shared<CachedPagePhotoRuntime>(
-					session,
-					photo,
-					::Data::FileOriginWebPage{ pageUrl });
-				return Markdown::CreateIvHistoryViewMediaBlock(
-					controller,
-					std::move(descriptor));
-			},
-			[session = _session, pageUrl = _page->url, history](
-					Window::SessionController *controller,
-					const Markdown::PreparedVideoBlockData &prepared) {
-				if (!controller
-					|| prepared.media.kind
-						!= Markdown::PreparedMediaItemKind::Document) {
-					return std::shared_ptr<Markdown::MediaBlock>();
-				}
-				const auto document = session->data().document(
-					DocumentId(prepared.media.id));
-				if (document->isNull()
-					|| !CanHostNativeIvVideoDocument(document)) {
-					return std::shared_ptr<Markdown::MediaBlock>();
-				}
-				const auto item = AddIvNeutralHostMessage(
-					history,
-					pageUrl,
-					document);
-				auto media = std::make_shared<::Data::MediaFile>(
-					item,
-					document,
-					CachedPageVideoMediaArgs(session, document));
-
-				auto descriptor = Markdown::IvHistoryViewMediaDescriptor();
-				descriptor.stableId = prepared.id.value;
-				descriptor.kind = Markdown::IvHistoryViewMediaKind::Document;
-				descriptor.copyText = tr::lng_in_dlg_video(tr::now);
-				descriptor.layoutHint = QSize(
-					prepared.media.width,
-					prepared.media.height);
-				descriptor.session = &session->data();
-				descriptor.item = item;
-				descriptor.mediaFactory = [media](
-						not_null<HistoryView::Element*> view) {
-					return media->createView(
-						view,
-						view->data());
-				};
-				descriptor.itemKeepAlive.push_back(base::take(media));
-				descriptor.document = std::make_shared<CachedPageDocumentRuntime>(
-					session,
-					document,
-					::Data::FileOriginWebPage{ pageUrl });
-				return Markdown::CreateIvHistoryViewMediaBlock(
-					controller,
-					std::move(descriptor));
-			},
-			Markdown::IvHistoryViewMediaBlockFactory::AudioFactory(),
-			[session = _session, pageUrl = _page->url, history](
-					Window::SessionController *controller,
-					const Markdown::PreparedMapBlockData &prepared) {
-				if (!controller) {
-					return std::shared_ptr<Markdown::MediaBlock>();
-				}
-				const auto item = AddIvNeutralHostMessage(history, pageUrl);
-				const auto point = CachedPageMapPoint(
-					prepared.latitude,
-					prepared.longitude,
-					prepared.accessHash);
-				const auto mapImage = std::make_shared<::Data::CloudImage>(
-					session,
-					CachedPageMapImageData(
-						prepared.latitude,
-						prepared.longitude,
-						prepared.accessHash,
-						QSize(prepared.width, prepared.height),
-						prepared.zoom));
-				const auto mapImagePtr = mapImage.get();
-
-				auto descriptor = Markdown::IvHistoryViewMediaDescriptor();
-				descriptor.stableId = prepared.id.value;
-				descriptor.kind = Markdown::IvHistoryViewMediaKind::Map;
-				descriptor.copyText = tr::lng_maps_point(tr::now);
-				descriptor.layoutHint = QSize(prepared.width, prepared.height);
-				descriptor.session = &session->data();
-				descriptor.item = item;
-				descriptor.mediaFactory = [mapImagePtr, point](
-						not_null<HistoryView::Element*> view) {
-					return std::make_unique<HistoryView::Location>(
-						view,
-						not_null{ mapImagePtr },
-						point);
-				};
-				descriptor.keepAlive.push_back(mapImage);
-				return Markdown::CreateIvHistoryViewMediaBlock(
-					controller,
-					std::move(descriptor));
-			});
-	}
+	hostedMediaBlockFactory() const override;
 
 private:
 	void subscribeToChannel(
 			uint64 channelId,
-			not_null<ChannelData*> channel) const {
-		if (_channelJoinedSubscriptions.find(channelId)
-			!= end(_channelJoinedSubscriptions)) {
-			return;
-		}
-		Info::Profile::AmInChannelValue(channel) | rpl::on_next([=](bool) {
-			_channelJoinedChanges.fire_copy(channelId);
-		}, _channelJoinedSubscriptions[channelId]);
-	}
+			not_null<ChannelData*> channel) const;
 
-	[[nodiscard]] ::Data::FileOrigin fileOrigin() const {
-		return ::Data::FileOriginWebPage{ _page->url };
-	}
+	[[nodiscard]] ::Data::FileOrigin fileOrigin() const;
 
 	const not_null<Main::Session*> _session;
 	const not_null<WebPageData*> _page;
 	const Fn<void(QString)> _openChannel;
 	const Fn<void(QString)> _joinChannel;
+	mutable std::shared_ptr<Markdown::IvHistoryViewMediaHost> _hostedMediaHost;
 	mutable base::flat_map<uint64, rpl::lifetime> _channelJoinedSubscriptions;
 	mutable rpl::event_stream<uint64> _channelJoinedChanges;
 
 };
+
+CachedPageMediaRuntime::CachedPageMediaRuntime(
+	not_null<Main::Session*> session,
+	not_null<WebPageData*> page,
+	Fn<void(QString)> openChannel,
+	Fn<void(QString)> joinChannel)
+: _session(session)
+, _page(page)
+, _openChannel(std::move(openChannel))
+, _joinChannel(std::move(joinChannel)) {
+}
+
+
+[[nodiscard]] std::shared_ptr<Ui::DynamicImage> CachedPageMediaRuntime::resolveInlineImage(
+		uint64 documentId,
+		QSize size) const {
+	Q_UNUSED(size);
+	const auto document = _session->data().document(DocumentId(documentId));
+	if (document->isNull()) {
+		return nullptr;
+	}
+	return std::make_shared<CachedPageInlineDocumentImage>(
+		document,
+		fileOrigin());
+}
+
+
+[[nodiscard]] std::shared_ptr<Markdown::PhotoRuntime> CachedPageMediaRuntime::resolvePhoto(
+		uint64 photoId) const {
+	const auto photo = _session->data().photo(PhotoId(photoId));
+	if (photo->isNull()) {
+		return nullptr;
+	}
+	return std::make_shared<CachedPagePhotoRuntime>(
+		_session,
+		photo,
+		fileOrigin());
+}
+
+
+[[nodiscard]] std::shared_ptr<Markdown::DocumentRuntime> CachedPageMediaRuntime::resolveDocument(
+		uint64 documentId) const {
+	const auto document = _session->data().document(DocumentId(documentId));
+	if (document->isNull()) {
+		return nullptr;
+	}
+	return std::make_shared<CachedPageDocumentRuntime>(
+		_session,
+		document,
+		fileOrigin());
+}
+
+
+[[nodiscard]] std::shared_ptr<Markdown::MapRuntime> CachedPageMediaRuntime::resolveMap(
+		double latitude,
+		double longitude,
+		uint64 accessHash,
+		QSize size,
+		int zoom) const {
+	return std::make_shared<CachedPageMapRuntime>(
+		_session,
+		fileOrigin(),
+		latitude,
+		longitude,
+		accessHash,
+		size,
+		zoom);
+}
+
+
+[[nodiscard]] std::shared_ptr<Markdown::ChannelRuntime> CachedPageMediaRuntime::resolveChannel(
+		uint64 channelId,
+		const QString &username) const {
+	const auto channel = _session->data().channel(ChannelId(channelId));
+	subscribeToChannel(channelId, channel);
+	return std::make_shared<CachedPageChannelRuntime>(
+		channel,
+		SerializeNativeIvChannelContext(channelId, username),
+		_openChannel,
+		_joinChannel);
+}
+
+
+[[nodiscard]] rpl::producer<uint64> CachedPageMediaRuntime::channelJoinedChanges() const {
+	return _channelJoinedChanges.events();
+}
+
+
+[[nodiscard]] std::shared_ptr<Markdown::IvHistoryViewMediaHost>
+CachedPageMediaRuntime::hostedMediaHost(
+		not_null<Window::SessionController*> controller,
+		not_null<History*> history) const {
+	if (!_hostedMediaHost) {
+		_hostedMediaHost
+			= std::make_shared<Markdown::IvHistoryViewMediaHost>(
+				controller,
+				history,
+				_page->url);
+	}
+	return _hostedMediaHost;
+}
+
+
+[[nodiscard]] std::shared_ptr<Markdown::HostedMediaBlockFactory>
+CachedPageMediaRuntime::hostedMediaBlockFactory() const {
+	const auto controller = CurrentSessionController(_session);
+	if (!controller || !_session->data().peerLoaded(
+			PeerData::kServiceNotificationsId)) {
+		return nullptr;
+	}
+	const auto history = _session->data().history(
+		PeerData::kServiceNotificationsId);
+	if (!history->peer->isUser()) {
+		return nullptr;
+	}
+	const auto host = hostedMediaHost(not_null{ controller }, history);
+	return std::make_shared<Markdown::IvHistoryViewMediaBlockFactory>(
+		base::make_weak(controller),
+		[session = _session, host](
+				Window::SessionController *controller,
+				const Markdown::PreparedPhotoBlockData &prepared) {
+			if (!controller
+				|| !prepared.viewerOpen
+				|| !prepared.urlOverride.isEmpty()) {
+				return std::shared_ptr<Markdown::MediaBlock>();
+			}
+			const auto photo = session->data().photo(PhotoId(prepared.photoId));
+			if (photo->isNull()) {
+				return std::shared_ptr<Markdown::MediaBlock>();
+			}
+			host->registerPhoto(photo);
+
+			auto descriptor = Markdown::IvHistoryViewMediaDescriptor();
+			descriptor.stableId = prepared.id.value;
+			descriptor.kind = Markdown::IvHistoryViewMediaKind::Photo;
+			descriptor.copyText = u"Photo"_q;
+			descriptor.layoutHint = QSize(prepared.width, prepared.height);
+			descriptor.host = host;
+			descriptor.mediaFactory = [photo](
+					not_null<HistoryView::Element*> view) {
+				return std::make_unique<HistoryView::Photo>(
+					view,
+					view->data(),
+					photo,
+					false);
+			};
+			const auto &pageUrl = host->pageUrl();
+			descriptor.photo = std::make_shared<CachedPagePhotoRuntime>(
+				session,
+				photo,
+				::Data::FileOriginWebPage{ pageUrl });
+			return Markdown::CreateIvHistoryViewMediaBlock(
+				controller,
+				std::move(descriptor));
+		},
+		[session = _session, host](
+				Window::SessionController *controller,
+				const Markdown::PreparedVideoBlockData &prepared) {
+			if (!controller
+				|| prepared.media.kind
+					!= Markdown::PreparedMediaItemKind::Document) {
+				return std::shared_ptr<Markdown::MediaBlock>();
+			}
+			const auto document = session->data().document(
+				DocumentId(prepared.media.id));
+			if (document->isNull()
+				|| !CanHostNativeIvVideoDocument(document)) {
+				return std::shared_ptr<Markdown::MediaBlock>();
+			}
+			host->registerDocument(document);
+			auto media = std::make_shared<::Data::MediaFile>(
+				host->item(),
+				document,
+				CachedPageVideoMediaArgs(session, document));
+
+			auto descriptor = Markdown::IvHistoryViewMediaDescriptor();
+			descriptor.stableId = prepared.id.value;
+			descriptor.kind = Markdown::IvHistoryViewMediaKind::Document;
+			descriptor.copyText = tr::lng_in_dlg_video(tr::now);
+			descriptor.layoutHint = QSize(
+				prepared.media.width,
+				prepared.media.height);
+			descriptor.host = host;
+			descriptor.mediaFactory = [media](
+					not_null<HistoryView::Element*> view) {
+				return media->createView(
+					view,
+					view->data());
+			};
+			descriptor.keepAlive.push_back(base::take(media));
+			const auto &pageUrl = host->pageUrl();
+			descriptor.document = std::make_shared<CachedPageDocumentRuntime>(
+				session,
+				document,
+				::Data::FileOriginWebPage{ pageUrl });
+			return Markdown::CreateIvHistoryViewMediaBlock(
+				controller,
+				std::move(descriptor));
+		},
+		Markdown::IvHistoryViewMediaBlockFactory::AudioFactory(),
+		[session = _session, host](
+				Window::SessionController *controller,
+				const Markdown::PreparedMapBlockData &prepared) {
+			if (!controller) {
+				return std::shared_ptr<Markdown::MediaBlock>();
+			}
+			const auto point = CachedPageMapPoint(
+				prepared.latitude,
+				prepared.longitude,
+				prepared.accessHash);
+			const auto mapImage = std::make_shared<::Data::CloudImage>(
+				session,
+				CachedPageMapImageData(
+					prepared.latitude,
+					prepared.longitude,
+					prepared.accessHash,
+					QSize(prepared.width, prepared.height),
+					prepared.zoom));
+			const auto mapImagePtr = mapImage.get();
+
+			auto descriptor = Markdown::IvHistoryViewMediaDescriptor();
+			descriptor.stableId = prepared.id.value;
+			descriptor.kind = Markdown::IvHistoryViewMediaKind::Map;
+			descriptor.copyText = tr::lng_maps_point(tr::now);
+			descriptor.layoutHint = QSize(prepared.width, prepared.height);
+			descriptor.host = host;
+			descriptor.mediaFactory = [mapImagePtr, point](
+					not_null<HistoryView::Element*> view) {
+				return std::make_unique<HistoryView::Location>(
+					view,
+					not_null{ mapImagePtr },
+					point);
+			};
+			descriptor.keepAlive.push_back(mapImage);
+			return Markdown::CreateIvHistoryViewMediaBlock(
+				controller,
+				std::move(descriptor));
+		});
+}
+
+void CachedPageMediaRuntime::subscribeToChannel(
+		uint64 channelId,
+		not_null<ChannelData*> channel) const {
+	if (_channelJoinedSubscriptions.find(channelId)
+		!= end(_channelJoinedSubscriptions)) {
+		return;
+	}
+	Info::Profile::AmInChannelValue(channel) | rpl::on_next([=](bool) {
+		_channelJoinedChanges.fire_copy(channelId);
+	}, _channelJoinedSubscriptions[channelId]);
+}
+
+
+[[nodiscard]] ::Data::FileOrigin CachedPageMediaRuntime::fileOrigin() const {
+	return ::Data::FileOriginWebPage{ _page->url };
+}
 
 struct MarkdownMessageContext {
 	ClickHandlerContext clickHandlerContext;
@@ -1208,6 +1396,73 @@ struct MarkdownShown {
 	std::unique_ptr<Markdown::Controller> controller;
 };
 
+class ShareBoxShow final : public Ui::Show {
+public:
+	ShareBoxShow(QPointer<QWidget> parent, Fn<Ui::LayerStackWidget*()> lookup);
+
+	void showOrHideBoxOrLayer(
+			std::variant<
+			v::null_t,
+			object_ptr<Ui::BoxContent>,
+			std::unique_ptr<Ui::LayerWidget>> &&layer,
+			Ui::LayerOptions options,
+			anim::type animated) const override;
+
+	not_null<QWidget*> toastParent() const override;
+
+	bool valid() const override;
+
+	operator bool() const override;
+
+private:
+	const QPointer<QWidget> _parent;
+	const Fn<Ui::LayerStackWidget*()> _lookup;
+};
+
+ShareBoxShow::ShareBoxShow(
+	QPointer<QWidget> parent,
+	Fn<Ui::LayerStackWidget*()> lookup)
+: _parent(parent)
+, _lookup(lookup) {
+}
+
+
+void ShareBoxShow::showOrHideBoxOrLayer(
+		std::variant<
+		v::null_t,
+		object_ptr<Ui::BoxContent>,
+		std::unique_ptr<Ui::LayerWidget>> &&layer,
+		Ui::LayerOptions options,
+		anim::type animated) const {
+	using UniqueLayer = std::unique_ptr<Ui::LayerWidget>;
+	using ObjectBox = object_ptr<Ui::BoxContent>;
+	const auto stack = _lookup();
+	if (!stack) {
+		return;
+	} else if (auto layerWidget = std::get_if<UniqueLayer>(&layer)) {
+		stack->showLayer(std::move(*layerWidget), options, animated);
+	} else if (auto box = std::get_if<ObjectBox>(&layer)) {
+		stack->showBox(std::move(*box), options, animated);
+	} else {
+		stack->hideAll(animated);
+	}
+}
+
+
+not_null<QWidget*> ShareBoxShow::toastParent() const {
+	return _parent.data();
+}
+
+
+bool ShareBoxShow::valid() const {
+	return _lookup() != nullptr;
+}
+
+
+ShareBoxShow::operator bool() const {
+	return valid();
+}
+
 Shown::Shown(
 	not_null<Delegate*> delegate,
 	not_null<Main::Session*> session,
@@ -1272,48 +1527,6 @@ void Shown::fillEmbeds(base::flat_map<QByteArray, QByteArray> added) {
 }
 
 ShareBoxResult Shown::shareBox(ShareBoxDescriptor &&descriptor) {
-	class Show final : public Ui::Show {
-	public:
-		Show(QPointer<QWidget> parent, Fn<Ui::LayerStackWidget*()> lookup)
-		: _parent(parent)
-		, _lookup(lookup) {
-		}
-		void showOrHideBoxOrLayer(
-				std::variant<
-				v::null_t,
-				object_ptr<Ui::BoxContent>,
-				std::unique_ptr<Ui::LayerWidget>> &&layer,
-				Ui::LayerOptions options,
-				anim::type animated) const override {
-			using UniqueLayer = std::unique_ptr<Ui::LayerWidget>;
-			using ObjectBox = object_ptr<Ui::BoxContent>;
-			const auto stack = _lookup();
-			if (!stack) {
-				return;
-			} else if (auto layerWidget = std::get_if<UniqueLayer>(&layer)) {
-				stack->showLayer(std::move(*layerWidget), options, animated);
-			} else if (auto box = std::get_if<ObjectBox>(&layer)) {
-				stack->showBox(std::move(*box), options, animated);
-			} else {
-				stack->hideAll(animated);
-			}
-		}
-		not_null<QWidget*> toastParent() const override {
-			return _parent.data();
-		}
-		bool valid() const override {
-			return _lookup() != nullptr;
-		}
-		operator bool() const override {
-			return valid();
-		}
-
-	private:
-		const QPointer<QWidget> _parent;
-		const Fn<Ui::LayerStackWidget*()> _lookup;
-
-	};
-
 	const auto url = descriptor.url;
 	const auto wrap = descriptor.parent;
 
@@ -1327,7 +1540,7 @@ ShareBoxResult Shown::shareBox(ShareBoxDescriptor &&descriptor) {
 	const auto lookup = crl::guard(weak, [state] { return state->stack; });
 	const auto layer = Ui::CreateChild<Ui::LayerStackWidget>(
 		wrap.get(),
-		[=] { return std::make_shared<Show>(weak.get(), lookup); });
+		[=] { return std::make_shared<ShareBoxShow>(weak.get(), lookup); });
 	state->stack = layer;
 	const auto show = layer->showFactory()();
 

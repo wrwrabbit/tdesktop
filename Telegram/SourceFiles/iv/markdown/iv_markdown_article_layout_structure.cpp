@@ -44,6 +44,74 @@ namespace {
 	return block.outer.y() + block.outer.height();
 }
 
+[[nodiscard]] bool UsesMediaBand(PreparedBlockKind kind) {
+	switch (kind) {
+	case PreparedBlockKind::Photo:
+	case PreparedBlockKind::Video:
+	case PreparedBlockKind::Audio:
+	case PreparedBlockKind::Map:
+	case PreparedBlockKind::Channel:
+	case PreparedBlockKind::GroupedMedia:
+	case PreparedBlockKind::RelatedArticle:
+	case PreparedBlockKind::Placeholder:
+		return true;
+	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Heading:
+	case PreparedBlockKind::CodeBlock:
+	case PreparedBlockKind::Rule:
+	case PreparedBlockKind::List:
+	case PreparedBlockKind::ListItem:
+	case PreparedBlockKind::Quote:
+	case PreparedBlockKind::DisplayMath:
+	case PreparedBlockKind::Table:
+	case PreparedBlockKind::Details:
+		return false;
+	}
+	return false;
+}
+
+[[nodiscard]] QRect PaddedBand(
+		int left,
+		int width,
+		QMargins padding) {
+	return QRect(
+		left + padding.left(),
+		0,
+		std::max(width - padding.left() - padding.right(), 1),
+		0);
+}
+
+[[nodiscard]] QRect BlockBand(
+		PreparedBlockKind kind,
+		const style::Markdown &markdown,
+		int left,
+		int width,
+		LayoutContext context) {
+	if (!context.useArticleBands) {
+		return QRect(left, 0, std::max(width, 1), 0);
+	}
+	return UsesMediaBand(kind)
+		? PaddedBand(left, width, markdown.mediaPadding)
+		: PaddedBand(left, width, markdown.textPadding);
+}
+
+[[nodiscard]] bool IsRelatedArticlesHeader(
+		const PreparedBlock &block,
+		const PreparedBlock *next) {
+	return next
+		&& (block.kind == PreparedBlockKind::Heading)
+		&& (next->kind == PreparedBlockKind::RelatedArticle);
+}
+
+void PrepareNestedContext(
+		LayoutContext *context,
+		int left,
+		int width) {
+	context->useArticleBands = false;
+	context->articleLeft = left;
+	context->articleWidth = std::max(width, 1);
+}
+
 [[nodiscard]] bool FirstLineComesFromChildren(const LaidOutBlock &block) {
 	switch (block.kind) {
 	case PreparedBlockKind::List:
@@ -155,6 +223,7 @@ namespace {
 
 	auto childContext = context;
 	childContext.tightList = tight;
+	PrepareNestedContext(&childContext, bodyLeft, bodyWidth);
 	const auto childBottom = LayoutBlocks(
 		prepared.children,
 		formulas,
@@ -240,6 +309,7 @@ namespace {
 	auto childContext = context;
 	childContext.listDepth = prepared.visualDepth;
 	childContext.tightList = false;
+	PrepareNestedContext(&childContext, listLeft, listWidth);
 
 	auto y = top;
 	auto first = true;
@@ -322,6 +392,7 @@ namespace {
 	auto childContext = context;
 	childContext.quoteDepth = prepared.visualDepth;
 	childContext.tightList = false;
+	PrepareNestedContext(&childContext, contentLeft, contentWidth);
 	const auto childBottom = LayoutBlocks(
 		prepared.children,
 		formulas,
@@ -430,6 +501,8 @@ namespace {
 				- details.bodyPadding.left()
 				- details.bodyPadding.right(),
 			1);
+		auto childContext = context;
+		PrepareNestedContext(&childContext, childLeft, childWidth);
 		const auto childBottom = LayoutBlocks(
 			prepared.children,
 			formulas,
@@ -442,7 +515,7 @@ namespace {
 			childLeft,
 			childTop,
 			childWidth,
-			context);
+			childContext);
 		const auto contentHeight = std::max(childBottom - childTop, 0);
 		const auto bodyHeight = details.bodyPadding.top()
 			+ contentHeight
@@ -606,6 +679,17 @@ namespace {
 			top,
 			width,
 			context);
+	case PreparedBlockKind::GroupedMedia:
+		return LayoutGroupedMediaBlock(
+			prepared,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
+			markdown,
+			left,
+			top,
+			width,
+			context);
 	case PreparedBlockKind::RelatedArticle:
 		return LayoutRelatedArticleBlock(
 			prepared,
@@ -638,16 +722,7 @@ namespace {
 			width,
 			context);
 	}
-	return LayoutFlowBlock(
-		prepared,
-		formulas,
-		inlineFormulaObjects,
-		mediaRuntime,
-		markdown,
-		left,
-		top,
-		width,
-		context);
+	Unexpected("Unknown markdown article block kind.");
 }
 
 } // namespace
@@ -667,22 +742,56 @@ int LayoutBlocks(
 		LayoutContext context) {
 	auto y = top;
 	auto previous = static_cast<const PreparedBlock*>(nullptr);
-	for (const auto &block : prepared) {
+	for (auto i = 0, count = int(prepared.size()); i != count; ++i) {
+		const auto &block = prepared[i];
+		const auto next = (i + 1 < count) ? &prepared[i + 1] : nullptr;
 		if (previous) {
 			y += BlockSkip(*previous, block, context, markdown);
 		}
-		auto laidOut = LayoutBlock(
-			block,
-			formulas,
-			renderedFormulas,
-			renderer,
-			inlineFormulaObjects,
-			mediaRuntime,
+		const auto band = BlockBand(
+			block.kind,
 			markdown,
 			left,
-			y,
 			std::max(width, 1),
 			context);
+		auto laidOut = IsRelatedArticlesHeader(block, next)
+			? LayoutFlowBlock(
+				block,
+				formulas,
+				inlineFormulaObjects,
+				mediaRuntime,
+				markdown,
+				left + markdown.relatedArticle.headerPadding.left(),
+				y + markdown.relatedArticle.headerPadding.top(),
+				std::max(
+					width
+						- markdown.relatedArticle.headerPadding.left()
+						- markdown.relatedArticle.headerPadding.right(),
+					1),
+				context)
+			: LayoutBlock(
+				block,
+				formulas,
+				renderedFormulas,
+				renderer,
+				inlineFormulaObjects,
+				mediaRuntime,
+				markdown,
+				band.x(),
+				y,
+				band.width(),
+				context);
+		if (IsRelatedArticlesHeader(block, next)) {
+			laidOut.headerRect = QRect(
+				left,
+				y,
+				std::max(width, 1),
+				laidOut.outer.height()
+					+ markdown.relatedArticle.headerPadding.top()
+					+ markdown.relatedArticle.headerPadding.bottom());
+			laidOut.outer = laidOut.headerRect;
+			laidOut.contentRect = laidOut.headerRect;
+		}
 		y = BlockBottom(laidOut);
 		blocks->push_back(std::move(laidOut));
 		previous = &block;

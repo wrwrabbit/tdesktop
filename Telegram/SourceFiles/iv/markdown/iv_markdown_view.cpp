@@ -245,6 +245,7 @@ void MarkdownPreviewRoot::setup() {
 	_footnoteLayerManager->setHideByBackgroundClick(true);
 
 	_scroll = Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll);
+	_scroll->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
 	_body = _scroll->setOwnedWidget(object_ptr<MarkdownDocumentWidget>(_scroll));
 	_failure = Ui::CreateChild<Ui::FlatLabel>(
 		this,
@@ -330,6 +331,7 @@ void MarkdownPreviewRoot::setup() {
 		) | rpl::on_next([=](int value) {
 			if (_body) {
 				_body->setZoom(value);
+				updateChildrenGeometry(size());
 			}
 		}, lifetime());
 	}
@@ -619,7 +621,14 @@ void MarkdownPreviewRoot::updateBodyVisibleTopBottom() {
 void MarkdownPreviewRoot::updateChildrenGeometry(QSize size) {
 	_scroll->setGeometry(QRect(QPoint(), size));
 	if (_body) {
-		_body->resizeToWidth(_scroll->width());
+		const auto bodyWidth = std::min(
+			std::max(_scroll->width(), 1),
+			_body->maxWidth());
+		_body->resizeToWidth(bodyWidth);
+		_body->moveToLeft(
+			std::max((_scroll->width() - bodyWidth) / 2, 0),
+			_body->y(),
+			_scroll->width());
 		updateBodyVisibleTopBottom();
 	}
 	if (_embedOverlay) {

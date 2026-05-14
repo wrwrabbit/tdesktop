@@ -237,6 +237,12 @@ void MarkdownDocumentWidget::invalidateRasterCache() {
 	update();
 }
 
+int MarkdownDocumentWidget::maxWidth() const {
+	return _article
+		? std::max(int(std::ceil(_article->maxWidth() * zoomScale())), 1)
+		: 1;
+}
+
 int MarkdownDocumentWidget::anchorTop(const QString &anchorId) const {
 	const auto top = _article ? _article->anchorTop(anchorId) : -1;
 	if (top < 0) {

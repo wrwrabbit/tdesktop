@@ -132,8 +132,8 @@ struct HistoryMessageEdited
 struct HistoryMessageMediaForInstantView
 : RuntimeComponent<HistoryMessageMediaForInstantView, HistoryItem> {
 	QString url;
-	DocumentData *document = nullptr;
-	PhotoData *photo = nullptr;
+	base::flat_set<not_null<DocumentData*>> documents;
+	base::flat_set<not_null<PhotoData*>> photos;
 };
 
 class HiddenSenderInfo {

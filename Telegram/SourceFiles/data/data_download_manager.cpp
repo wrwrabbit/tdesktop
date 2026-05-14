@@ -69,9 +69,9 @@ constexpr auto ByDocument = [](const auto &entry) {
 
 [[nodiscard]] bool ItemContainsMedia(const DownloadObject &object) {
 	if (const auto iv = object.item->Get<HistoryMessageMediaForInstantView>()) {
-		if (object.photo && iv->photo == object.photo) {
+		if (object.document && iv->documents.contains(object.document)) {
 			return true;
-		} else if (object.document && iv->document == object.document) {
+		} else if (object.photo && iv->photos.contains(object.photo)) {
 			return true;
 		}
 	}
@@ -847,16 +847,7 @@ void DownloadManager::changed(not_null<const HistoryItem*> item) {
 		const auto i = ranges::find(data.downloaded, item.get(), ByItem);
 		Assert(i != end(data.downloaded));
 
-		auto photo = (PhotoData*)nullptr;
-		auto document = (DocumentData*)nullptr;
-		if (const auto iv = item->Get<HistoryMessageMediaForInstantView>()) {
-			photo = iv->photo;
-			document = iv->document;
-		} else if (const auto media = item->media()) {
-			photo = media->photo();
-			document = media->document();
-		}
-		if (i->object->photo != photo || i->object->document != document) {
+		if (!ItemContainsMedia(*i->object)) {
 			detach(*i);
 		}
 	}

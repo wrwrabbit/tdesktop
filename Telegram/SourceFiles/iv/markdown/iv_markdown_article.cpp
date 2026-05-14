@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_prepare_links.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/basic_click_handlers.h"
+#include "ui/dynamic_image.h"
 
 #include "styles/style_iv.h"
 
@@ -23,8 +24,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Iv::Markdown {
 namespace {
-
-constexpr auto kArticleMaxWidth = 32767;
 
 struct PendingHighlightKey {
 	QString text;
@@ -39,17 +38,76 @@ struct PendingHighlightKey {
 
 struct PendingHighlightKeyHasher {
 	[[nodiscard]] size_t operator()(
-			const PendingHighlightKey &key) const noexcept {
-		auto result = size_t(qHash(key.text));
-		result = (result * 1315423911U) ^ size_t(qHash(key.language));
-		return result;
-	}
+			const PendingHighlightKey &key) const noexcept;
 };
+
+[[nodiscard]] size_t PendingHighlightKeyHasher::operator()(
+		const PendingHighlightKey &key) const noexcept {
+	auto result = size_t(qHash(key.text));
+	result = (result * 1315423911U) ^ size_t(qHash(key.language));
+	return result;
+}
 
 struct PendingHighlightEntry {
 	PendingHighlightKey key;
 	std::vector<LaidOutBlock*> blocks;
 };
+
+struct RelatedArticleThumbnailState {
+	std::shared_ptr<Ui::DynamicImage> thumbnailImage;
+	std::shared_ptr<Ui::DynamicImage> previousThumbnailImage;
+	std::shared_ptr<Ui::DynamicImage> subscribedThumbnailImage;
+	QSize thumbnailRequestSize;
+};
+
+void StoreRelatedArticleThumbnailState(
+		const LaidOutBlock &block,
+		std::unordered_map<uint64, RelatedArticleThumbnailState> *states) {
+	if (block.thumbnailPhotoId) {
+		(*states)[block.thumbnailPhotoId] = {
+			.thumbnailImage = block.thumbnailImage,
+			.previousThumbnailImage = block.previousThumbnailImage,
+			.subscribedThumbnailImage = block.subscribedThumbnailImage,
+			.thumbnailRequestSize = block.thumbnailRequestSize,
+		};
+	}
+	for (const auto &child : block.children) {
+		StoreRelatedArticleThumbnailState(child, states);
+	}
+}
+
+void StoreRelatedArticleThumbnailStates(
+		const std::vector<LaidOutBlock> &blocks,
+		std::unordered_map<uint64, RelatedArticleThumbnailState> *states) {
+	for (const auto &block : blocks) {
+		StoreRelatedArticleThumbnailState(block, states);
+	}
+}
+
+void RestoreRelatedArticleThumbnailState(
+		LaidOutBlock *block,
+		const std::unordered_map<uint64, RelatedArticleThumbnailState> &states) {
+	if (block->thumbnailPhotoId) {
+		if (const auto i = states.find(block->thumbnailPhotoId);
+			i != end(states)) {
+			block->thumbnailImage = i->second.thumbnailImage;
+			block->previousThumbnailImage = i->second.previousThumbnailImage;
+			block->subscribedThumbnailImage = i->second.subscribedThumbnailImage;
+			block->thumbnailRequestSize = i->second.thumbnailRequestSize;
+		}
+	}
+	for (auto &child : block->children) {
+		RestoreRelatedArticleThumbnailState(&child, states);
+	}
+}
+
+void RestoreRelatedArticleThumbnailStates(
+		std::vector<LaidOutBlock> *blocks,
+		const std::unordered_map<uint64, RelatedArticleThumbnailState> &states) {
+	for (auto &block : *blocks) {
+		RestoreRelatedArticleThumbnailState(&block, states);
+	}
+}
 
 [[nodiscard]] PendingHighlightKey PendingHighlightKeyForBlock(
 		const LaidOutBlock &block) {
@@ -250,11 +308,6 @@ void RebuildVisibleSegmentLookup(
 			} else {
 				applyActivation(segment.block->mediaBlock->activationAt(point));
 			}
-		} else if (!segment.block->actionRect.isEmpty()
-			&& segment.block->actionRect.contains(point)
-			&& segment.block->channelRuntime
-			&& segment.block->channelRuntime->joinVisible()) {
-			applyActivation(segment.block->actionActivation);
 		} else {
 			applyActivation(segment.block->activation);
 		}
@@ -326,512 +379,114 @@ void ClearColorizedFormulaImages(std::vector<LaidOutBlock> *blocks) {
 
 class MarkdownArticle::Impl final : public CodeBlockSyntaxHighlightTracker {
 public:
-	explicit Impl(std::shared_ptr<MathRenderer> renderer)
-	: _renderer(std::move(renderer))
-	, _inlineFormulaObjects(CreateInlineFormulaObjectCache(_renderer)) {
-	}
+	explicit Impl(std::shared_ptr<MathRenderer> renderer);
 
-	void setRenderer(std::shared_ptr<MathRenderer> renderer) {
-		_renderer = std::move(renderer);
-		SetInlineFormulaObjectCacheRenderer(_inlineFormulaObjects, _renderer);
-		invalidateRasterCache();
-		invalidateLayout();
-	}
+	void setRenderer(std::shared_ptr<MathRenderer> renderer);
 
-	void setMediaBlockHost(MediaBlockHost *host) {
-		_mediaBlockHost = host;
-		refreshMediaBlockHosts();
-	}
+	void setMediaBlockHost(MediaBlockHost *host);
 
 	void setTextRepaintCallbacks(
 			Fn<void()> repaint,
-			Fn<void(QRect)> repaintRect) {
-		_textRepaint = std::move(repaint);
-		_textRepaintRect = std::move(repaintRect);
-	}
+			Fn<void(QRect)> repaintRect);
 
-	void setContent(MarkdownArticleContent content) {
-		clearMediaBlocks();
-		_content = std::move(content);
-		ClearInlineFormulaObjectCache(_inlineFormulaObjects);
-		resetFormulaRasterCache();
-		invalidateLayout();
-	}
+	void setContent(MarkdownArticleContent content);
 
-	[[nodiscard]] int maxWidth() {
-		if (_content.blocks.blocks.empty()) {
-			return st::defaultMarkdown.pagePadding.left()
-				+ st::defaultMarkdown.pagePadding.right();
-		}
-		const auto &markdown = st::defaultMarkdown;
-		const auto &page = markdown.pagePadding;
-		auto blocks = std::vector<LaidOutBlock>();
-		const auto innerWidth = std::max(
-			kArticleMaxWidth - page.left() - page.right(),
-			1);
-		auto repaintScope = InlineIvImageRepaintScope(
-			_textRepaint,
-			_textRepaintRect);
-		const auto layoutBottom = LayoutBlocks(
-			_content.blocks.blocks,
-			&_content.formulas,
-			&_formulaRenders,
-			_renderer.get(),
-			_inlineFormulaObjects.get(),
-			_content.mediaRuntime,
-			&blocks,
-			markdown,
-			page.left(),
-			page.top(),
-			innerWidth,
-			LayoutContext{
-				.allowAsyncSyntaxHighlighting = false,
-			});
-		(void)layoutBottom;
-		return BlockMaxRight(blocks) + page.right();
-	}
+	[[nodiscard]] int maxWidth();
 
-	[[nodiscard]] int resizeGetHeight(int width) {
-		relayout(width);
-		return std::max(_height, 1);
-	}
+	[[nodiscard]] int resizeGetHeight(int width);
 
-	void setVisibleTopBottom(int visibleTop, int visibleBottom) {
-		if (visibleBottom <= visibleTop) {
-			_visibleRange = std::nullopt;
-			_visibleSegmentSpan = {};
-			return;
-		}
-		_visibleRange = LogicalVisibleRange{
-			.top = visibleTop,
-			.bottom = visibleBottom,
-		};
-		refreshVisibleSegmentSpan();
-	}
+	void setVisibleTopBottom(int visibleTop, int visibleBottom);
 
 	void paint(
 			Painter &p,
 			QRect clip,
 			MarkdownArticlePaintCaches caches,
 			MarkdownArticleSelection selection,
-			const MarkdownArticleSelectionEndpoints *endpoints) {
-		const auto &markdown = st::defaultMarkdown;
-		const auto selectionState = PaintSelectionState{
-			.segments = &_segments,
-			.selection = selection,
-			.endpoints = endpoints,
-		};
-		PaintBlocks(
-			p,
-			_blocks,
-			&_content.formulas,
-			&_formulaRenders,
-			_renderer.get(),
-			currentDevicePixelRatio(),
-			std::max(_width, 1),
-			markdown,
-			caches,
-			selectionState,
-			clip);
-	}
+			const MarkdownArticleSelectionEndpoints *endpoints);
 
 	[[nodiscard]] MarkdownArticleHitTestResult hitTest(
 			QPoint point,
-			Ui::Text::StateRequest::Flags flags) const {
-		const auto span = candidateSegmentSpan(point);
-		for (auto i = span.from; i != span.till; ++i) {
-			const auto &segment = _segments[i];
-			if (const auto result = HitTextSegment(segment, point, flags);
-				result.valid()) {
-				return result;
-			}
-		}
-		for (auto i = span.from; i != span.till; ++i) {
-			const auto &segment = _segments[i];
-			if (const auto result = HitBlockSegment(segment, point, flags);
-				result.valid()) {
-				return result;
-			}
-		}
-		if (flags & Ui::Text::StateRequest::Flag::LookupSymbol) {
-			return HitSegmentFallback(_segments, span, point);
-		}
-		return {};
-	}
+			Ui::Text::StateRequest::Flags flags) const;
 
-	[[nodiscard]] int anchorTop(const QString &anchorId) const {
-		for (const auto &entry : _anchors) {
-			if (entry.first == anchorId) {
-				return entry.second;
-			}
-		}
-		return -1;
-	}
+	[[nodiscard]] int anchorTop(const QString &anchorId) const;
 
-	[[nodiscard]] bool toggleDetails(const QString &anchorId) {
-		if (!ToggleDetailsBlock(&_content.blocks.blocks, anchorId)) {
-			return false;
-		}
-		invalidateLayout();
-		return true;
-	}
+	[[nodiscard]] bool toggleDetails(const QString &anchorId);
 
-	[[nodiscard]] bool segmentIsText(int index) const {
-		const auto segment = FindSegment(&_segments, index);
-		return segment && segment->isTextLeaf();
-	}
+	[[nodiscard]] bool segmentIsText(int index) const;
 
-	[[nodiscard]] int segmentLength(int index) const {
-		const auto segment = FindSegment(&_segments, index);
-		return segment ? SegmentLength(*segment) : 0;
-	}
+	[[nodiscard]] int segmentLength(int index) const;
 
 	[[nodiscard]] int selectionOffsetFromHit(
 			const MarkdownArticleHitTestResult &result,
-			TextSelectType selectionType) const {
-		const auto segment = FindSegment(&_segments, result.segmentIndex);
-		if (!segment) {
-			return 0;
-		}
-		if (result.forcedOffset >= 0) {
-			return std::clamp(result.forcedOffset, 0, SegmentLength(*segment));
-		}
-		auto offset = int(result.state.symbol);
-		if (selectionType == TextSelectType::Letters
-			&& result.state.afterSymbol) {
-			++offset;
-		}
-		return std::clamp(offset, 0, SegmentLength(*segment));
-	}
+			TextSelectType selectionType) const;
 
 	[[nodiscard]] TextSelection adjustSelection(
 			int segmentIndex,
 			TextSelection selection,
-			TextSelectType selectionType) const {
-		const auto segment = FindSegment(&_segments, segmentIndex);
-		if (!segment || !segment->isTextLeaf()) {
-			return selection;
-		}
-		return segment->leaf->adjustSelection(selection, selectionType);
-	}
+			TextSelectType selectionType) const;
 
 	[[nodiscard]] bool selectionContains(
 			MarkdownArticleSelection selection,
 			const MarkdownArticleSelectionEndpoints *endpoints,
-			const MarkdownArticleHitTestResult &result) const {
-		const auto segment = FindSegment(&_segments, result.segmentIndex);
-		if (!segment || selection.empty() || !result.valid()) {
-			return false;
-		}
-		const auto selectionState = PaintSelectionState{
-			.segments = &_segments,
-			.selection = selection,
-			.endpoints = endpoints,
-		};
-		if (segment->tableSegmentIndex >= 0
-			&& TableSegmentSelected(selectionState, segment->tableSegmentIndex)) {
-			return true;
-		}
-		if (!segment->isTextLeaf()) {
-			return WholeSegmentSelected(*segment, selectionState);
-		}
-		const auto textSelection = TextSelectionForSegment(*segment, selectionState);
-		if (!textSelection || textSelection->empty()) {
-			return false;
-		}
-		const auto offset = selectionOffsetFromHit(result, TextSelectType::Letters);
-		return (offset >= textSelection->from) && (offset < textSelection->to);
-	}
+			const MarkdownArticleHitTestResult &result) const;
 
 	[[nodiscard]] TextForMimeData textForContext(
-			const MarkdownArticleHitTestResult &result) const {
-		if (!result.valid() || !result.direct) {
-			return TextForMimeData();
-		}
-		const auto segment = FindSegment(&_segments, result.segmentIndex);
-		return segment ? TextForSegment(*segment) : TextForMimeData();
-	}
+			const MarkdownArticleHitTestResult &result) const;
 
 	[[nodiscard]] TextForMimeData textForSelection(
 			MarkdownArticleSelection selection,
-			const MarkdownArticleSelectionEndpoints *endpoints) const {
-		return TextForSelectedSegments(_segments, selection, endpoints);
-	}
+			const MarkdownArticleSelectionEndpoints *endpoints) const;
 
 	[[nodiscard]] bool highlightProcessDone(
-			Spellchecker::HighlightProcessId processId) {
-		const auto i = _pendingHighlightEntries.find(processId);
-		if (i == end(_pendingHighlightEntries)) {
-			return false;
-		}
-		auto entry = std::move(i->second);
-		_pendingHighlightEntries.erase(i);
-		_pendingHighlightProcesses.erase(entry.key);
+			Spellchecker::HighlightProcessId processId);
 
-		auto rebuilt = false;
-		for (const auto block : entry.blocks) {
-			RepopulateCodeBlockLeaf(*block, st::defaultMarkdown, true, this);
-			registerPendingHighlightBlock(*block);
-			rebuilt = true;
-		}
-		return rebuilt;
-	}
+	void invalidatePaletteCache();
 
-	void invalidatePaletteCache() {
-		InvalidateInlineFormulaPaletteCache(_inlineFormulaObjects);
-		ClearColorizedFormulaImages(&_blocks);
-	}
+	void invalidateRasterCache();
 
-	void invalidateRasterCache() {
-		resetFormulaRasterCache();
-		InvalidateInlineFormulaRasterCache(_inlineFormulaObjects);
-		ClearColorizedFormulaImages(&_blocks);
-	}
+	[[nodiscard]] MediaBlockHost *mediaBlockHost() const;
 
-	[[nodiscard]] MediaBlockHost *mediaBlockHost() const {
-		return _mediaBlockHost;
-	}
-
-	void invalidateLayout() {
-		_width = -1;
-		_height = 0;
-		clearPendingHighlightBlockPointers();
-		_blocks.clear();
-		_anchors.clear();
-		_segments.clear();
-		_visibleSegmentSpan = {};
-		_segmentTops.clear();
-		_segmentBottoms.clear();
-	}
+	void invalidateLayout();
 
 private:
-	[[nodiscard]] int currentDevicePixelRatio() const {
-		return std::max(style::DevicePixelRatio(), 1);
-	}
+	[[nodiscard]] int currentDevicePixelRatio() const;
 
-	void rebuildVisibleSegmentLookup() {
-		RebuildVisibleSegmentLookup(
-			_segments,
-			&_segmentTops,
-			&_segmentBottoms);
-		refreshVisibleSegmentSpan();
-	}
+	void rebuildVisibleSegmentLookup();
 
-	void refreshVisibleSegmentSpan() {
-		_visibleSegmentSpan = _visibleRange
-			? LookupVisibleSegmentSpan(
-				_segmentTops,
-				_segmentBottoms,
-				*_visibleRange)
-			: SegmentSpan();
-	}
+	void refreshVisibleSegmentSpan();
 
-	void clearMediaBlocks() {
-		for (const auto &[id, block] : _mediaBlocks) {
-			if (block) {
-				block->setHost(nullptr);
-			}
-		}
-		_mediaBlocks.clear();
-	}
+	void clearMediaBlocks();
 
-	void refreshMediaBlockHosts() {
-		for (const auto &[id, block] : _mediaBlocks) {
-			if (block) {
-				block->setHost(_mediaBlockHost);
-			}
-		}
-	}
+	void refreshMediaBlockHosts();
 
 	[[nodiscard]] std::shared_ptr<MediaBlock> getOrCreateMediaBlock(
-			const PreparedBlock &prepared) {
-		switch (prepared.kind) {
-		case PreparedBlockKind::Photo:
-			return getOrCreateMediaBlock(
-				prepared.photo.id,
-				[=] {
-					return CreatePhotoMediaBlock(
-						prepared.photo,
-						_content.mediaRuntime);
-				});
-		case PreparedBlockKind::Video:
-			return getOrCreateMediaBlock(
-				prepared.video.id,
-				[=] {
-					return CreateVideoMediaBlock(
-						prepared.video,
-						_content.mediaRuntime);
-				});
-		case PreparedBlockKind::Map:
-			return getOrCreateMediaBlock(
-				prepared.map.id,
-				[=] {
-					return CreateMapMediaBlock(
-						prepared.map,
-						_content.mediaRuntime);
-				});
-		case PreparedBlockKind::Audio:
-			return getOrCreateMediaBlock(
-				prepared.audio.id,
-				[=] {
-					return CreateAudioMediaBlock(
-						prepared.audio,
-						_content.mediaRuntime);
-				});
-		case PreparedBlockKind::Channel:
-			return getOrCreateMediaBlock(
-				prepared.channel.id,
-				[=] {
-					return CreateChannelMediaBlock(
-						prepared.channel,
-						_content.mediaRuntime);
-				});
-		case PreparedBlockKind::GroupedMedia:
-			return getOrCreateMediaBlock(
-				prepared.groupedMedia.id,
-				[=] {
-					return CreateGroupedMediaBlock(
-						prepared.groupedMedia,
-						_content.mediaRuntime);
-				});
-		default:
-			return nullptr;
-		}
-	}
+			const PreparedBlock &prepared);
 
 	template <typename Factory>
 	[[nodiscard]] std::shared_ptr<MediaBlock> getOrCreateMediaBlock(
 			PreparedMediaBlockId id,
-			Factory &&factory) {
-		if (!id) {
-			return nullptr;
-		}
-		if (const auto i = _mediaBlocks.find(id.value);
-			i != end(_mediaBlocks)) {
-			return i->second;
-		}
-		auto block = factory();
-		if (block) {
-			block->setHost(_mediaBlockHost);
-		}
-		_mediaBlocks.emplace(id.value, block);
-		return block;
-	}
+			Factory &&factory);
 
 	[[nodiscard]] Spellchecker::HighlightProcessId tryHighlightSyntax(
 			const QString &displayText,
 			const QString &language,
-			TextWithEntities &marked) override {
-		const auto key = PendingHighlightKey{
-			.text = displayText,
-			.language = language,
-		};
-		if (const auto i = _pendingHighlightProcesses.find(key);
-			i != end(_pendingHighlightProcesses)) {
-			return i->second;
-		}
-		const auto processId = Spellchecker::TryHighlightSyntax(marked);
-		if (processId) {
-			registerPendingHighlightProcess(key, processId);
-		}
-		return processId;
-	}
+			TextWithEntities &marked) override;
 
-	[[nodiscard]] SegmentSpan candidateSegmentSpan(QPoint point) const {
-		if (_visibleRange
-			&& (_visibleRange->top <= point.y())
-			&& (point.y() < _visibleRange->bottom)) {
-			return _visibleSegmentSpan.empty()
-				? FullSegmentSpan(_segments)
-				: _visibleSegmentSpan;
-		}
-		return FullSegmentSpan(_segments);
-	}
+	[[nodiscard]] SegmentSpan candidateSegmentSpan(QPoint point) const;
 
-	void clearPendingHighlightBlockPointers() {
-		for (auto &entry : _pendingHighlightEntries) {
-			entry.second.blocks.clear();
-		}
-	}
+	void clearPendingHighlightBlockPointers();
 
 	void registerPendingHighlightProcess(
 			const PendingHighlightKey &key,
-			Spellchecker::HighlightProcessId processId) {
-		_pendingHighlightProcesses[key] = processId;
-		auto &entry = _pendingHighlightEntries[processId];
-		entry.key = key;
-	}
+			Spellchecker::HighlightProcessId processId);
 
-	void registerPendingHighlightBlock(LaidOutBlock &block) {
-		if (!block.syntaxHighlightProcessId) {
-			return;
-		}
-		if (!_pendingHighlightEntries.contains(block.syntaxHighlightProcessId)) {
-			registerPendingHighlightProcess(
-				PendingHighlightKeyForBlock(block),
-				block.syntaxHighlightProcessId);
-		}
-		_pendingHighlightEntries[block.syntaxHighlightProcessId].blocks.push_back(
-			&block);
-	}
+	void registerPendingHighlightBlock(LaidOutBlock &block);
 
-	void registerPendingHighlightBlocks(std::vector<LaidOutBlock> &blocks) {
-		for (auto &block : blocks) {
-			registerPendingHighlightBlock(block);
-			registerPendingHighlightBlocks(block.children);
-		}
-	}
+	void registerPendingHighlightBlocks(std::vector<LaidOutBlock> &blocks);
 
-	void resetFormulaRasterCache() {
-		_formulaRenders.clear();
-		_formulaRenders.resize(_content.formulas.size());
-	}
+	void resetFormulaRasterCache();
 
-	void relayout(int width) {
-		width = std::max(width, 1);
-		if (_width == width) {
-			return;
-		}
-		_width = width;
-		clearPendingHighlightBlockPointers();
-		_blocks.clear();
-		_anchors.clear();
-		_segments.clear();
-		_visibleSegmentSpan = {};
-		_segmentTops.clear();
-		_segmentBottoms.clear();
-
-		const auto &markdown = st::defaultMarkdown;
-		const auto &page = markdown.pagePadding;
-		const auto innerWidth = std::max(width - page.left() - page.right(), 1);
-		auto repaintScope = InlineIvImageRepaintScope(
-			_textRepaint,
-			_textRepaintRect);
-		auto context = LayoutContext{
-			.syntaxHighlightTracker = this,
-		};
-		context.mediaBlockFactory = [=](const PreparedBlock &prepared) {
-			return getOrCreateMediaBlock(prepared);
-		};
-		const auto y = LayoutBlocks(
-			_content.blocks.blocks,
-			&_content.formulas,
-			&_formulaRenders,
-			_renderer.get(),
-			_inlineFormulaObjects.get(),
-			_content.mediaRuntime,
-			&_blocks,
-			markdown,
-			page.left(),
-			page.top(),
-			innerWidth,
-			std::move(context));
-		_height = y + page.bottom();
-		registerPendingHighlightBlocks(_blocks);
-		CollectAnchors(_blocks, &_anchors);
-		CollectSelectableSegments(&_blocks, &_segments);
-		rebuildVisibleSegmentLookup();
-	}
+	void relayout(int width);
 
 	mutable MarkdownArticleContent _content;
 	std::vector<RenderedFormula> _formulaRenders;
@@ -844,6 +499,7 @@ private:
 	int _height = 0;
 	std::vector<LaidOutBlock> _blocks;
 	std::unordered_map<uint64, std::shared_ptr<MediaBlock>> _mediaBlocks;
+	std::unordered_map<uint64, RelatedArticleThumbnailState> _relatedArticleThumbnails;
 	std::unordered_map<
 		PendingHighlightKey,
 		Spellchecker::HighlightProcessId,
@@ -859,6 +515,536 @@ private:
 	std::vector<int> _segmentBottoms;
 
 };
+
+MarkdownArticle::Impl::Impl(std::shared_ptr<MathRenderer> renderer)
+: _renderer(std::move(renderer))
+, _inlineFormulaObjects(CreateInlineFormulaObjectCache(_renderer)) {
+}
+
+
+void MarkdownArticle::Impl::setRenderer(std::shared_ptr<MathRenderer> renderer) {
+	_renderer = std::move(renderer);
+	SetInlineFormulaObjectCacheRenderer(_inlineFormulaObjects, _renderer);
+	invalidateRasterCache();
+	invalidateLayout();
+}
+
+
+void MarkdownArticle::Impl::setMediaBlockHost(MediaBlockHost *host) {
+	_mediaBlockHost = host;
+	refreshMediaBlockHosts();
+}
+
+
+void MarkdownArticle::Impl::setTextRepaintCallbacks(
+		Fn<void()> repaint,
+		Fn<void(QRect)> repaintRect) {
+	_textRepaint = std::move(repaint);
+	_textRepaintRect = std::move(repaintRect);
+}
+
+
+void MarkdownArticle::Impl::setContent(MarkdownArticleContent content) {
+	clearMediaBlocks();
+	_relatedArticleThumbnails.clear();
+	_content = std::move(content);
+	ClearInlineFormulaObjectCache(_inlineFormulaObjects);
+	resetFormulaRasterCache();
+	invalidateLayout();
+}
+
+
+[[nodiscard]] int MarkdownArticle::Impl::maxWidth() {
+	const auto &markdown = st::defaultMarkdown;
+	return std::max(
+		markdown.pageMaxWidth,
+		markdown.pagePadding.left()
+			+ markdown.pagePadding.right()
+			+ 1);
+}
+
+
+[[nodiscard]] int MarkdownArticle::Impl::resizeGetHeight(int width) {
+	relayout(width);
+	return std::max(_height, 1);
+}
+
+
+void MarkdownArticle::Impl::setVisibleTopBottom(int visibleTop, int visibleBottom) {
+	if (visibleBottom <= visibleTop) {
+		_visibleRange = std::nullopt;
+		_visibleSegmentSpan = {};
+		return;
+	}
+	_visibleRange = LogicalVisibleRange{
+		.top = visibleTop,
+		.bottom = visibleBottom,
+	};
+	refreshVisibleSegmentSpan();
+}
+
+
+void MarkdownArticle::Impl::paint(
+		Painter &p,
+		QRect clip,
+		MarkdownArticlePaintCaches caches,
+		MarkdownArticleSelection selection,
+		const MarkdownArticleSelectionEndpoints *endpoints) {
+	const auto &markdown = st::defaultMarkdown;
+	const auto selectionState = PaintSelectionState{
+		.segments = &_segments,
+		.selection = selection,
+		.endpoints = endpoints,
+	};
+	PaintBlocks(
+		p,
+		_blocks,
+		&_content.formulas,
+		&_formulaRenders,
+		_renderer.get(),
+		currentDevicePixelRatio(),
+		std::max(_width, 1),
+		markdown,
+		caches,
+		selectionState,
+		clip);
+}
+
+
+[[nodiscard]] MarkdownArticleHitTestResult MarkdownArticle::Impl::hitTest(
+		QPoint point,
+		Ui::Text::StateRequest::Flags flags) const {
+	const auto span = candidateSegmentSpan(point);
+	for (auto i = span.from; i != span.till; ++i) {
+		const auto &segment = _segments[i];
+		if (const auto result = HitTextSegment(segment, point, flags);
+			result.valid()) {
+			return result;
+		}
+	}
+	for (auto i = span.from; i != span.till; ++i) {
+		const auto &segment = _segments[i];
+		if (const auto result = HitBlockSegment(segment, point, flags);
+			result.valid()) {
+			return result;
+		}
+	}
+	if (flags & Ui::Text::StateRequest::Flag::LookupSymbol) {
+		return HitSegmentFallback(_segments, span, point);
+	}
+	return {};
+}
+
+
+[[nodiscard]] int MarkdownArticle::Impl::anchorTop(const QString &anchorId) const {
+	for (const auto &entry : _anchors) {
+		if (entry.first == anchorId) {
+			return entry.second;
+		}
+	}
+	return -1;
+}
+
+
+[[nodiscard]] bool MarkdownArticle::Impl::toggleDetails(const QString &anchorId) {
+	if (!ToggleDetailsBlock(&_content.blocks.blocks, anchorId)) {
+		return false;
+	}
+	invalidateLayout();
+	return true;
+}
+
+
+[[nodiscard]] bool MarkdownArticle::Impl::segmentIsText(int index) const {
+	const auto segment = FindSegment(&_segments, index);
+	return segment && segment->isTextLeaf();
+}
+
+
+[[nodiscard]] int MarkdownArticle::Impl::segmentLength(int index) const {
+	const auto segment = FindSegment(&_segments, index);
+	return segment ? SegmentLength(*segment) : 0;
+}
+
+
+[[nodiscard]] int MarkdownArticle::Impl::selectionOffsetFromHit(
+		const MarkdownArticleHitTestResult &result,
+		TextSelectType selectionType) const {
+	const auto segment = FindSegment(&_segments, result.segmentIndex);
+	if (!segment) {
+		return 0;
+	}
+	if (result.forcedOffset >= 0) {
+		return std::clamp(result.forcedOffset, 0, SegmentLength(*segment));
+	}
+	auto offset = int(result.state.symbol);
+	if (selectionType == TextSelectType::Letters
+		&& result.state.afterSymbol) {
+		++offset;
+	}
+	return std::clamp(offset, 0, SegmentLength(*segment));
+}
+
+
+[[nodiscard]] TextSelection MarkdownArticle::Impl::adjustSelection(
+		int segmentIndex,
+		TextSelection selection,
+		TextSelectType selectionType) const {
+	const auto segment = FindSegment(&_segments, segmentIndex);
+	if (!segment || !segment->isTextLeaf()) {
+		return selection;
+	}
+	return segment->leaf->adjustSelection(selection, selectionType);
+}
+
+
+[[nodiscard]] bool MarkdownArticle::Impl::selectionContains(
+		MarkdownArticleSelection selection,
+		const MarkdownArticleSelectionEndpoints *endpoints,
+		const MarkdownArticleHitTestResult &result) const {
+	const auto segment = FindSegment(&_segments, result.segmentIndex);
+	if (!segment || selection.empty() || !result.valid()) {
+		return false;
+	}
+	const auto selectionState = PaintSelectionState{
+		.segments = &_segments,
+		.selection = selection,
+		.endpoints = endpoints,
+	};
+	if (segment->tableSegmentIndex >= 0
+		&& TableSegmentSelected(selectionState, segment->tableSegmentIndex)) {
+		return true;
+	}
+	if (!segment->isTextLeaf()) {
+		return WholeSegmentSelected(*segment, selectionState);
+	}
+	const auto textSelection = TextSelectionForSegment(*segment, selectionState);
+	if (!textSelection || textSelection->empty()) {
+		return false;
+	}
+	const auto offset = selectionOffsetFromHit(result, TextSelectType::Letters);
+	return (offset >= textSelection->from) && (offset < textSelection->to);
+}
+
+
+[[nodiscard]] TextForMimeData MarkdownArticle::Impl::textForContext(
+		const MarkdownArticleHitTestResult &result) const {
+	if (!result.valid() || !result.direct) {
+		return TextForMimeData();
+	}
+	const auto segment = FindSegment(&_segments, result.segmentIndex);
+	return segment ? TextForSegment(*segment) : TextForMimeData();
+}
+
+
+[[nodiscard]] TextForMimeData MarkdownArticle::Impl::textForSelection(
+		MarkdownArticleSelection selection,
+		const MarkdownArticleSelectionEndpoints *endpoints) const {
+	return TextForSelectedSegments(_segments, selection, endpoints);
+}
+
+
+[[nodiscard]] bool MarkdownArticle::Impl::highlightProcessDone(
+		Spellchecker::HighlightProcessId processId) {
+	const auto i = _pendingHighlightEntries.find(processId);
+	if (i == end(_pendingHighlightEntries)) {
+		return false;
+	}
+	auto entry = std::move(i->second);
+	_pendingHighlightEntries.erase(i);
+	_pendingHighlightProcesses.erase(entry.key);
+
+	auto rebuilt = false;
+	for (const auto block : entry.blocks) {
+		RepopulateCodeBlockLeaf(*block, st::defaultMarkdown, true, this);
+		registerPendingHighlightBlock(*block);
+		rebuilt = true;
+	}
+	return rebuilt;
+}
+
+
+void MarkdownArticle::Impl::invalidatePaletteCache() {
+	InvalidateInlineFormulaPaletteCache(_inlineFormulaObjects);
+	ClearColorizedFormulaImages(&_blocks);
+}
+
+
+void MarkdownArticle::Impl::invalidateRasterCache() {
+	resetFormulaRasterCache();
+	InvalidateInlineFormulaRasterCache(_inlineFormulaObjects);
+	ClearColorizedFormulaImages(&_blocks);
+}
+
+
+[[nodiscard]] MediaBlockHost *MarkdownArticle::Impl::mediaBlockHost() const {
+	return _mediaBlockHost;
+}
+
+
+void MarkdownArticle::Impl::invalidateLayout() {
+	_width = -1;
+	_height = 0;
+	clearPendingHighlightBlockPointers();
+	_blocks.clear();
+	_anchors.clear();
+	_segments.clear();
+	_visibleSegmentSpan = {};
+	_segmentTops.clear();
+	_segmentBottoms.clear();
+}
+
+[[nodiscard]] int MarkdownArticle::Impl::currentDevicePixelRatio() const {
+	return std::max(style::DevicePixelRatio(), 1);
+}
+
+
+void MarkdownArticle::Impl::rebuildVisibleSegmentLookup() {
+	RebuildVisibleSegmentLookup(
+		_segments,
+		&_segmentTops,
+		&_segmentBottoms);
+	refreshVisibleSegmentSpan();
+}
+
+
+void MarkdownArticle::Impl::refreshVisibleSegmentSpan() {
+	_visibleSegmentSpan = _visibleRange
+		? LookupVisibleSegmentSpan(
+			_segmentTops,
+			_segmentBottoms,
+			*_visibleRange)
+		: SegmentSpan();
+}
+
+
+void MarkdownArticle::Impl::clearMediaBlocks() {
+	for (const auto &[id, block] : _mediaBlocks) {
+		if (block) {
+			block->setHost(nullptr);
+		}
+	}
+	_mediaBlocks.clear();
+}
+
+
+void MarkdownArticle::Impl::refreshMediaBlockHosts() {
+	for (const auto &[id, block] : _mediaBlocks) {
+		if (block) {
+			block->setHost(_mediaBlockHost);
+		}
+	}
+}
+
+
+[[nodiscard]] std::shared_ptr<MediaBlock> MarkdownArticle::Impl::getOrCreateMediaBlock(
+		const PreparedBlock &prepared) {
+	switch (prepared.kind) {
+	case PreparedBlockKind::Photo:
+		return getOrCreateMediaBlock(
+			prepared.photo.id,
+			[=] {
+				return CreatePhotoMediaBlock(
+					prepared.photo,
+					_content.mediaRuntime);
+			});
+	case PreparedBlockKind::Video:
+		return getOrCreateMediaBlock(
+			prepared.video.id,
+			[=] {
+				return CreateVideoMediaBlock(
+					prepared.video,
+					_content.mediaRuntime);
+			});
+	case PreparedBlockKind::Map:
+		return getOrCreateMediaBlock(
+			prepared.map.id,
+			[=] {
+				return CreateMapMediaBlock(
+					prepared.map,
+					_content.mediaRuntime);
+			});
+	case PreparedBlockKind::Audio:
+		return getOrCreateMediaBlock(
+			prepared.audio.id,
+			[=] {
+				return CreateAudioMediaBlock(
+					prepared.audio,
+					_content.mediaRuntime);
+			});
+	case PreparedBlockKind::Channel:
+		return getOrCreateMediaBlock(
+			prepared.channel.id,
+			[=] {
+				return CreateChannelMediaBlock(
+					prepared.channel,
+					_content.mediaRuntime);
+			});
+	case PreparedBlockKind::GroupedMedia:
+		return getOrCreateMediaBlock(
+			prepared.groupedMedia.id,
+			[=] {
+				return CreateGroupedMediaBlock(
+					prepared.groupedMedia,
+					_content.mediaRuntime);
+			});
+	default:
+		return nullptr;
+	}
+}
+
+
+template <typename Factory>
+[[nodiscard]] std::shared_ptr<MediaBlock> MarkdownArticle::Impl::getOrCreateMediaBlock(
+		PreparedMediaBlockId id,
+		Factory &&factory) {
+	if (!id) {
+		return nullptr;
+	}
+	if (const auto i = _mediaBlocks.find(id.value);
+		i != end(_mediaBlocks)) {
+		return i->second;
+	}
+	auto block = factory();
+	if (block) {
+		block->setHost(_mediaBlockHost);
+	}
+	_mediaBlocks.emplace(id.value, block);
+	return block;
+}
+
+
+[[nodiscard]] Spellchecker::HighlightProcessId MarkdownArticle::Impl::tryHighlightSyntax(
+		const QString &displayText,
+		const QString &language,
+		TextWithEntities &marked) {
+	const auto key = PendingHighlightKey{
+		.text = displayText,
+		.language = language,
+	};
+	if (const auto i = _pendingHighlightProcesses.find(key);
+		i != end(_pendingHighlightProcesses)) {
+		return i->second;
+	}
+	const auto processId = Spellchecker::TryHighlightSyntax(marked);
+	if (processId) {
+		registerPendingHighlightProcess(key, processId);
+	}
+	return processId;
+}
+
+
+[[nodiscard]] SegmentSpan MarkdownArticle::Impl::candidateSegmentSpan(QPoint point) const {
+	if (_visibleRange
+		&& (_visibleRange->top <= point.y())
+		&& (point.y() < _visibleRange->bottom)) {
+		return _visibleSegmentSpan.empty()
+			? FullSegmentSpan(_segments)
+			: _visibleSegmentSpan;
+	}
+	return FullSegmentSpan(_segments);
+}
+
+
+void MarkdownArticle::Impl::clearPendingHighlightBlockPointers() {
+	for (auto &entry : _pendingHighlightEntries) {
+		entry.second.blocks.clear();
+	}
+}
+
+
+void MarkdownArticle::Impl::registerPendingHighlightProcess(
+		const PendingHighlightKey &key,
+		Spellchecker::HighlightProcessId processId) {
+	_pendingHighlightProcesses[key] = processId;
+	auto &entry = _pendingHighlightEntries[processId];
+	entry.key = key;
+}
+
+
+void MarkdownArticle::Impl::registerPendingHighlightBlock(LaidOutBlock &block) {
+	if (!block.syntaxHighlightProcessId) {
+		return;
+	}
+	if (!_pendingHighlightEntries.contains(block.syntaxHighlightProcessId)) {
+		registerPendingHighlightProcess(
+			PendingHighlightKeyForBlock(block),
+			block.syntaxHighlightProcessId);
+	}
+	_pendingHighlightEntries[block.syntaxHighlightProcessId].blocks.push_back(
+		&block);
+}
+
+
+void MarkdownArticle::Impl::registerPendingHighlightBlocks(std::vector<LaidOutBlock> &blocks) {
+	for (auto &block : blocks) {
+		registerPendingHighlightBlock(block);
+		registerPendingHighlightBlocks(block.children);
+	}
+}
+
+
+void MarkdownArticle::Impl::resetFormulaRasterCache() {
+	_formulaRenders.clear();
+	_formulaRenders.resize(_content.formulas.size());
+}
+
+
+void MarkdownArticle::Impl::relayout(int width) {
+	width = std::max(width, 1);
+	if (_width == width) {
+		return;
+	}
+	_width = width;
+	StoreRelatedArticleThumbnailStates(
+		_blocks,
+		&_relatedArticleThumbnails);
+	clearPendingHighlightBlockPointers();
+	_blocks.clear();
+	_anchors.clear();
+	_segments.clear();
+	_visibleSegmentSpan = {};
+	_segmentTops.clear();
+	_segmentBottoms.clear();
+
+	const auto &markdown = st::defaultMarkdown;
+	const auto &page = markdown.pagePadding;
+	const auto innerWidth = std::max(width - page.left() - page.right(), 1);
+	auto repaintScope = InlineIvImageRepaintScope(
+		_textRepaint,
+		_textRepaintRect);
+	auto context = LayoutContext{
+		.articleLeft = page.left(),
+		.articleWidth = innerWidth,
+		.useArticleBands = true,
+		.syntaxHighlightTracker = this,
+	};
+	context.mediaBlockFactory = [=](const PreparedBlock &prepared) {
+		return getOrCreateMediaBlock(prepared);
+	};
+	const auto y = LayoutBlocks(
+		_content.blocks.blocks,
+		&_content.formulas,
+		&_formulaRenders,
+		_renderer.get(),
+		_inlineFormulaObjects.get(),
+		_content.mediaRuntime,
+		&_blocks,
+		markdown,
+		page.left(),
+		page.top(),
+		innerWidth,
+		std::move(context));
+	RestoreRelatedArticleThumbnailStates(
+		&_blocks,
+		_relatedArticleThumbnails);
+	_height = y + page.bottom();
+	registerPendingHighlightBlocks(_blocks);
+	CollectAnchors(_blocks, &_anchors);
+	CollectSelectableSegments(&_blocks, &_segments);
+	rebuildVisibleSegmentLookup();
+}
+
 
 MarkdownArticle::MarkdownArticle(std::shared_ptr<MathRenderer> renderer)
 : _impl(std::make_unique<Impl>(std::move(renderer))) {

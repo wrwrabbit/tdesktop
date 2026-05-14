@@ -318,6 +318,11 @@ Message::~Message() {
 	}
 }
 
+void Message::setInstantViewMediaRuntime(QString pageUrl) {
+	AddComponents(InstantViewMediaRuntime::Bit());
+	Get<InstantViewMediaRuntime>()->pageUrl = std::move(pageUrl);
+}
+
 void Message::refreshSuggestedInfo(
 		not_null<HistoryItem*> item,
 		not_null<const HistoryMessageSuggestion*> suggest,
@@ -4520,6 +4525,9 @@ bool Message::unwrapped() const {
 }
 
 int Message::minWidthForMedia() const {
+	if (Get<InstantViewMediaRuntime>()) {
+		return 0;
+	}
 	auto result = infoWidth() + 2 * (st::msgDateImgDelta + st::msgDateImgPadding.x());
 	const auto views = data()->Get<HistoryMessageViews>();
 	if (data()->repliesAreComments() && !views->replies.text.isEmpty()) {

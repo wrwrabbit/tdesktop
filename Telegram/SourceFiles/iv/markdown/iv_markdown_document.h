@@ -170,17 +170,17 @@ struct PreparedFormulaMeasurementSignature {
 	int textSize = 0;
 	int renderWidthCap = 0;
 	int renderHeightCap = 0;
-
-	friend inline bool operator==(
-			const PreparedFormulaMeasurementSignature &a,
-			const PreparedFormulaMeasurementSignature &b) {
-		return a.trimmedTex == b.trimmedTex
-			&& a.kind == b.kind
-			&& a.textSize == b.textSize
-			&& a.renderWidthCap == b.renderWidthCap
-			&& a.renderHeightCap == b.renderHeightCap;
-	}
 };
+
+inline bool operator==(
+		const PreparedFormulaMeasurementSignature &a,
+		const PreparedFormulaMeasurementSignature &b) {
+	return a.trimmedTex == b.trimmedTex
+		&& a.kind == b.kind
+		&& a.textSize == b.textSize
+		&& a.renderWidthCap == b.renderWidthCap
+		&& a.renderHeightCap == b.renderHeightCap;
+}
 
 struct PreparedFormulaMeasurementCacheEntry {
 	PreparedFormulaMeasurementSignature signature;
@@ -190,19 +190,23 @@ struct PreparedFormulaMeasurementCacheEntry {
 struct PreparedFormulaMeasurementSignatureLess {
 	[[nodiscard]] bool operator()(
 		const PreparedFormulaMeasurementSignature &a,
-		const PreparedFormulaMeasurementSignature &b) const {
-		if (a.trimmedTex != b.trimmedTex) {
-			return a.trimmedTex < b.trimmedTex;
-		} else if (a.kind != b.kind) {
-			return (int(a.kind) < int(b.kind));
-		} else if (a.textSize != b.textSize) {
-			return a.textSize < b.textSize;
-		} else if (a.renderWidthCap != b.renderWidthCap) {
-			return a.renderWidthCap < b.renderWidthCap;
-		}
-		return a.renderHeightCap < b.renderHeightCap;
-	}
+		const PreparedFormulaMeasurementSignature &b) const;
 };
+
+inline bool PreparedFormulaMeasurementSignatureLess::operator()(
+		const PreparedFormulaMeasurementSignature &a,
+		const PreparedFormulaMeasurementSignature &b) const {
+	if (a.trimmedTex != b.trimmedTex) {
+		return a.trimmedTex < b.trimmedTex;
+	} else if (a.kind != b.kind) {
+		return (int(a.kind) < int(b.kind));
+	} else if (a.textSize != b.textSize) {
+		return a.textSize < b.textSize;
+	} else if (a.renderWidthCap != b.renderWidthCap) {
+		return a.renderWidthCap < b.renderWidthCap;
+	}
+	return a.renderHeightCap < b.renderHeightCap;
+}
 
 struct PreparedFormulaMeasurementCacheState {
 	std::vector<PreparedFormulaMeasurementCacheEntry> slots;
@@ -226,7 +230,15 @@ struct PreparedDocument {
 
 	PreparedDocument() = default;
 
-	PreparedDocument(const PreparedDocument &other)
+	PreparedDocument(const PreparedDocument &other);
+
+	PreparedDocument &operator=(const PreparedDocument &other);
+
+	PreparedDocument(PreparedDocument &&) noexcept = default;
+	PreparedDocument &operator=(PreparedDocument &&) noexcept = default;
+};
+
+inline PreparedDocument::PreparedDocument(const PreparedDocument &other)
 	: sourceName(other.sourceName)
 	, title(other.title)
 	, sourceText(other.sourceText)
@@ -237,27 +249,24 @@ struct PreparedDocument {
 	, empty(other.empty)
 	, formulaMeasurementCache(
 		std::make_shared<PreparedFormulaMeasurementCacheState>()) {
-	}
+}
 
-	PreparedDocument &operator=(const PreparedDocument &other) {
-		if (this != &other) {
-			sourceName = other.sourceName;
-			title = other.title;
-			sourceText = other.sourceText;
-			document = other.document;
-			formulas = other.formulas;
-			stats = other.stats;
-			warnings = other.warnings;
-			empty = other.empty;
-			formulaMeasurementCache = std::make_shared<
-				PreparedFormulaMeasurementCacheState>();
-		}
-		return *this;
+inline PreparedDocument &PreparedDocument::operator=(
+		const PreparedDocument &other) {
+	if (this != &other) {
+		sourceName = other.sourceName;
+		title = other.title;
+		sourceText = other.sourceText;
+		document = other.document;
+		formulas = other.formulas;
+		stats = other.stats;
+		warnings = other.warnings;
+		empty = other.empty;
+		formulaMeasurementCache = std::make_shared<
+			PreparedFormulaMeasurementCacheState>();
 	}
-
-	PreparedDocument(PreparedDocument &&) noexcept = default;
-	PreparedDocument &operator=(PreparedDocument &&) noexcept = default;
-};
+	return *this;
+}
 
 struct ParseResult {
 	PreparedDocument document;

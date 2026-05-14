@@ -67,12 +67,14 @@ struct MarkdownArticleSelection {
 	MarkdownArticleSelectionPosition from;
 	MarkdownArticleSelectionPosition to;
 
-	[[nodiscard]] bool empty() const {
-		return !from.valid()
-			|| !to.valid()
-			|| (from == to);
-	}
+	[[nodiscard]] bool empty() const;
 };
+
+inline bool MarkdownArticleSelection::empty() const {
+	return !from.valid()
+		|| !to.valid()
+		|| (from == to);
+}
 
 inline bool operator==(
 		MarkdownArticleSelection a,

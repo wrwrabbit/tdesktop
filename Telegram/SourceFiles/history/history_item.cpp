@@ -1549,8 +1549,27 @@ void HistoryItem::setMediaForInstantView(
 	AddComponents(HistoryMessageMediaForInstantView::Bit());
 	const auto data = Get<HistoryMessageMediaForInstantView>();
 	data->url = std::move(url);
-	data->document = document;
-	data->photo = photo;
+	data->documents.clear();
+	data->photos.clear();
+	if (document) {
+		data->documents.emplace(document);
+	}
+	if (photo) {
+		data->photos.emplace(photo);
+	}
+}
+
+void HistoryItem::addDocumentForInstantView(
+		not_null<DocumentData*> document) {
+	AddComponents(HistoryMessageMediaForInstantView::Bit());
+	const auto data = Get<HistoryMessageMediaForInstantView>();
+	data->documents.emplace(document);
+}
+
+void HistoryItem::addPhotoForInstantView(not_null<PhotoData*> photo) {
+	AddComponents(HistoryMessageMediaForInstantView::Bit());
+	const auto data = Get<HistoryMessageMediaForInstantView>();
+	data->photos.emplace(photo);
 }
 
 bool HistoryItem::needsUpdateForVideoQualities(const MTPMessage &data) {

@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/history.h"
 #include "history/view/history_view_element.h"
+#include "history/view/history_view_message.h"
 #include "history/view/history_view_cursor_state.h"
 #include "history/view/history_view_reply.h"
 #include "history/view/history_view_transcribe_button.h"
@@ -74,6 +75,10 @@ constexpr auto kSeekAnimationDuration = crl::time(200);
 constexpr auto kSeekTrackOpacity = 0.2;
 
 using ::Media::ValidFrameSize;
+
+[[nodiscard]] bool IsHostedInstantViewMedia(not_null<const Element*> parent) {
+	return parent->Get<InstantViewMediaRuntime>() != nullptr;
+}
 
 [[nodiscard]] int GifMaxStatusWidth(not_null<DocumentData*> document) {
 	auto result = st::normalFont->width(
@@ -264,13 +269,23 @@ QSize Gif::sizeForAspectRatio() const {
 }
 
 QSize Gif::countThumbSize(int &inOutWidthMax) const {
-	const auto maxSize = _data->isVideoFile()
-		? st::maxMediaSize
-		: _data->isVideoMessage()
-		? st::maxVideoMessageSize
-		: st::maxGifSize;
+	const auto hostedInstantView = IsHostedInstantViewMedia(_parent);
+	const auto maxSize = [&] {
+		if (hostedInstantView) {
+			return std::max(inOutWidthMax, 1);
+		} else if (_data->isVideoFile()) {
+			return st::maxMediaSize;
+		} else if (_data->isVideoMessage()) {
+			return st::maxVideoMessageSize;
+		}
+		return st::maxGifSize;
+	}();
 	const auto size = style::ConvertScale(videoSize());
-	accumulate_min(inOutWidthMax, maxSize);
+	if (hostedInstantView) {
+		inOutWidthMax = std::max(inOutWidthMax, 1);
+	} else {
+		accumulate_min(inOutWidthMax, maxSize);
+	}
 	return DownscaledSize(size, { inOutWidthMax, maxSize });
 }
 
@@ -282,12 +297,16 @@ QSize Gif::countOptimalSize() {
 			entry.shown && (entry.requestId || entry.pending));
 	}
 
+	const auto hostedInstantView = IsHostedInstantViewMedia(_parent);
+	const auto maxMediaWidth = hostedInstantView
+		? std::max(st::msgMaxWidth, st::maxMediaSize)
+		: st::maxMediaSize;
 	const auto minWidth = std::clamp(
 		_parent->minWidthForMedia(),
 		(_parent->hasBubble()
 			? st::historyPhotoBubbleMinWidth
 			: st::minPhotoSize),
-		st::maxMediaSize);
+		maxMediaWidth);
 	auto thumbMaxWidth = st::msgMaxWidth;
 	const auto scaled = countThumbSize(thumbMaxWidth);
 	auto maxWidth = std::min(
@@ -322,13 +341,17 @@ QSize Gif::countOptimalSize() {
 QSize Gif::countCurrentSize(int newWidth) {
 	auto availableWidth = newWidth;
 
+	const auto hostedInstantView = IsHostedInstantViewMedia(_parent);
 	auto thumbMaxWidth = newWidth;
 	const auto scaled = countThumbSize(thumbMaxWidth);
-	const auto minWidthByInfo = _parent->infoWidth()
-		+ 2 * (st::msgDateImgDelta + st::msgDateImgPadding.x());
+	const auto minWidthByInfo = hostedInstantView
+		? _parent->minWidthForMedia()
+		: (_parent->infoWidth()
+			+ 2 * (st::msgDateImgDelta + st::msgDateImgPadding.x()));
+	const auto minPhotoWidth = std::min(st::minPhotoSize, thumbMaxWidth);
 	newWidth = std::clamp(
 		std::max(scaled.width(), minWidthByInfo),
-		st::minPhotoSize,
+		minPhotoWidth,
 		thumbMaxWidth);
 	auto newHeight = qMax(scaled.height(), st::minPhotoSize);
 	if (!activeCurrentStreamed()) {
@@ -460,10 +483,13 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 	const auto rightLayout = _parent->hasRightLayout();
 	const auto inWebPage = (_parent->media() != this);
 	const auto isRound = _data->isVideoMessage();
+	const auto hostedInstantView = IsHostedInstantViewMedia(_parent);
 
-	const auto rounding = (inWebPage
-			// Dangerous change.
-			&& bubbleRounding() == Ui::BubbleRounding())
+	const auto inWebPageWithoutOwnRounding = inWebPage
+		&& bubbleRounding() == Ui::BubbleRounding();
+	const auto rounding = hostedInstantView
+		? std::optional<Ui::BubbleRounding>(Ui::BubbleRounding())
+		: inWebPageWithoutOwnRounding
 		? std::optional<Ui::BubbleRounding>()
 		: adjustedBubbleRounding();
 
@@ -541,7 +567,7 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 	const auto radial = isRadialAnimation()
 		|| (streamedForWaiting && streamedForWaiting->waitingShown());
 
-	if (!bubble && !unwrapped) {
+	if (!bubble && !unwrapped && !hostedInstantView) {
 		Assert(rounding.has_value());
 		fillImageShadow(p, rthumb, *rounding, context);
 	}

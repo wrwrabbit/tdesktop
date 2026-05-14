@@ -607,6 +607,8 @@ public:
 		QString url,
 		DocumentData *document = nullptr,
 		PhotoData *photo = nullptr);
+	void addDocumentForInstantView(not_null<DocumentData*> document);
+	void addPhotoForInstantView(not_null<PhotoData*> photo);
 
 	[[nodiscard]] SuggestionActions computeSuggestionActions() const;
 	[[nodiscard]] SuggestionActions computeSuggestionActions(

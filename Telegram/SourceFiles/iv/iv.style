@@ -201,6 +201,10 @@ MarkdownRelatedArticle {
 	borderFg: color;
 	bg: color;
 	radius: pixels;
+	headerPadding: margins;
+	headerBg: color;
+	separator: pixels;
+	separatorFg: color;
 	textSkip: pixels;
 	footerSkip: pixels;
 	thumbnailSize: pixels;
@@ -257,6 +261,9 @@ Markdown {
 	heading6: TextStyle;
 	code: TextStyle;
 	pagePadding: margins;
+	pageMaxWidth: pixels;
+	textPadding: margins;
+	mediaPadding: margins;
 	blockSkips: MarkdownBlockSkips;
 	list: MarkdownList;
 	quoteIndent: pixels;
@@ -304,7 +311,7 @@ defaultMarkdownBlockSkips: MarkdownBlockSkips {
 	map: 20px;
 	channel: 20px;
 	groupedMedia: 20px;
-	relatedArticle: 10px;
+	relatedArticle: 0px;
 	placeholder: 20px;
 }
 defaultMarkdownList: MarkdownList {
@@ -378,7 +385,7 @@ defaultMarkdownPlaceholder: MarkdownPlaceholder {
 	}
 }
 defaultMarkdownPhoto: MarkdownPhoto {
-	padding: margins(4px, 0px, 0px, 0px);
+	padding: margins(0px, 0px, 0px, 0px);
 	captionSkip: 12px;
 	progressSize: 36px;
 	progressWidth: 3px;
@@ -405,25 +412,25 @@ defaultMarkdownChannelTitleStyle: TextStyle(defaultMarkdownAudioTitleStyle) {
 }
 defaultMarkdownChannelSubtitleStyle: TextStyle(defaultMarkdownDetailsSummaryStyle) {
 }
-defaultMarkdownChannelButtonStyle: TextStyle(defaultMarkdownDetailsSummaryStyle) {
+defaultMarkdownChannelButtonStyle: TextStyle(defaultMarkdownChannelTitleStyle) {
 }
 defaultMarkdownChannelButton: MarkdownChannelButton {
-	padding: margins(10px, 12px, 10px, 12px);
-	border: 1px;
+	padding: margins(44px, 0px, 44px, 0px);
+	border: 0px;
 	borderFg: windowActiveTextFg;
-	bg: windowBg;
-	radius: 6px;
+	bg: windowBgOver;
+	radius: 0px;
 	textStyle: defaultMarkdownChannelButtonStyle;
 	textFg: windowActiveTextFg;
 }
 defaultMarkdownChannel: MarkdownChannel {
-	padding: margins(8px, 12px, 8px, 12px);
-	border: 1px;
+	padding: margins(44px, 8px, 44px, 8px);
+	border: 0px;
 	borderFg: inputBorderFg;
 	bg: windowBgOver;
-	radius: 6px;
+	radius: 0px;
 	textSkip: 8px;
-	buttonSkip: 8px;
+	buttonSkip: 18px;
 	titleStyle: defaultMarkdownChannelTitleStyle;
 	titleFg: windowFg;
 	subtitleStyle: defaultMarkdownChannelSubtitleStyle;
@@ -441,16 +448,20 @@ defaultMarkdownRelatedArticleSubtitleStyle: TextStyle(defaultMarkdownBodyStyle) 
 defaultMarkdownRelatedArticleFooterStyle: TextStyle(defaultMarkdownDetailsSummaryStyle) {
 }
 defaultMarkdownRelatedArticle: MarkdownRelatedArticle {
-	padding: margins(12px, 12px, 12px, 12px);
-	border: 1px;
-	borderFg: inputBorderFg;
-	bg: windowBgOver;
-	radius: 6px;
+	padding: margins(44px, 16px, 44px, 16px);
+	border: 0px;
+	borderFg: boxDividerBg;
+	bg: windowBg;
+	radius: 0px;
+	headerPadding: margins(44px, 14px, 44px, 14px);
+	headerBg: windowBgOver;
+	separator: 1px;
+	separatorFg: boxDividerBg;
 	textSkip: 6px;
 	footerSkip: 8px;
 	thumbnailSize: 87px;
 	thumbnailSkip: 12px;
-	thumbnailRadius: 6px;
+	thumbnailRadius: 0px;
 	titleLines: 2;
 	subtitleLines: 3;
 	footerLines: 1;
@@ -462,10 +473,10 @@ defaultMarkdownRelatedArticle: MarkdownRelatedArticle {
 	footerFg: windowSubTextFg;
 }
 defaultMarkdownGroupedMedia: MarkdownGroupedMedia {
-	padding: margins(4px, 0px, 0px, 0px);
+	padding: margins(0px, 0px, 0px, 0px);
 	captionSkip: 12px;
-	itemSkip: 4px;
-	radius: 6px;
+	itemSkip: 0px;
+	radius: 0px;
 	overlayOpacity: 0.2;
 	navButtonSize: 36px;
 	navButtonSkip: 12px;
@@ -543,7 +554,10 @@ defaultMarkdown: Markdown {
 		lineHeight: 21px;
 	}
 	code: defaultMarkdownCodeStyle;
-	pagePadding: margins(26px, 32px, 32px, 32px);
+	pagePadding: margins(0px, 26px, 0px, 32px);
+	pageMaxWidth: 732px;
+	textPadding: margins(44px, 0px, 44px, 0px);
+	mediaPadding: margins(0px, 0px, 0px, 0px);
 	blockSkips: defaultMarkdownBlockSkips;
 	list: defaultMarkdownList;
 	quoteIndent: 18px;

@@ -30,8 +30,6 @@ constexpr auto kIvMarkedTextOptions = TextParseOptions{
 
 constexpr auto kCodeTabColumns = 4;
 constexpr auto kCodeTrailingGuard = 0x2060;
-const auto kPhotoCopyLabel = u"Photo"_q;
-const auto kUsernamePrefix = u"@"_q;
 
 [[nodiscard]] style::align CellAlign(TableAlignment alignment) {
 	switch (alignment) {
@@ -319,15 +317,54 @@ void SetPlainTextLeaf(
 	return result;
 }
 
-[[nodiscard]] int MediaHeightForWidth(
+[[nodiscard]] QRect PaddedBand(
+		int left,
 		int width,
-		int aspectWidth,
-		int aspectHeight) {
-	aspectWidth = std::max(aspectWidth, 1);
-	aspectHeight = std::max(aspectHeight, 1);
-	return std::max(
-		int((int64(width) * aspectHeight + aspectWidth - 1) / aspectWidth),
+		QMargins padding) {
+	const auto paddedLeft = left + padding.left();
+	const auto paddedWidth = std::max(
+		width - padding.left() - padding.right(),
 		1);
+	return QRect(paddedLeft, 0, paddedWidth, 0);
+}
+
+[[nodiscard]] QRect ArticleTextBand(
+		int fallbackLeft,
+		int fallbackWidth,
+		const style::Markdown &markdown,
+		const LayoutContext &context) {
+	return context.useArticleBands
+		? PaddedBand(
+			context.articleLeft,
+			context.articleWidth,
+			markdown.textPadding)
+		: QRect(fallbackLeft, 0, std::max(fallbackWidth, 1), 0);
+}
+
+[[nodiscard]] int LimitedMediaWidth(
+		int availableWidth,
+		int intrinsicWidth) {
+	const auto limit = (intrinsicWidth > 0)
+		? (2 * intrinsicWidth)
+		: availableWidth;
+	return std::clamp(limit, 1, std::max(availableWidth, 1));
+}
+
+void ApplyMediaBlockGeometry(LaidOutBlock *block, QRect geometry) {
+	if (!block->mediaBlock) {
+		return;
+	}
+	block->mediaBlock->setGeometry(geometry);
+	auto actual = block->mediaBlock->geometry();
+	if (actual.width() < geometry.width() && actual.x() == geometry.x()) {
+		geometry.moveLeft(
+			geometry.x() + std::max((geometry.width() - actual.width()) / 2, 0));
+		block->mediaBlock->setGeometry(geometry);
+		actual = block->mediaBlock->geometry();
+	}
+	block->mediaRect = actual;
+	block->firstLineBaseline = block->mediaBlock->firstLineBaseline();
+	block->visibleMediaRect = block->mediaRect;
 }
 
 void LayoutMediaCaption(
@@ -371,10 +408,12 @@ void LayoutMediaCaption(
 		int top,
 		int width,
 		int skip,
-		int *bottom) {
+		int *bottom,
+		LayoutContext context = {}) {
 	if (prepared.text.text.isEmpty()) {
 		return;
 	}
+	const auto textBand = ArticleTextBand(left, width, markdown, context);
 	LayoutMediaCaption(
 		block,
 		prepared.text,
@@ -383,69 +422,10 @@ void LayoutMediaCaption(
 		inlineFormulaObjects,
 		mediaRuntime,
 		markdown.body,
-		left,
+		textBand.x(),
 		top + skip,
-		width);
+		textBand.width());
 	*bottom = block->textRect.y() + block->textRect.height();
-}
-
-[[nodiscard]] QString AudioTitleText(const PreparedAudioBlockData &audio) {
-	if (!audio.title.isEmpty()) {
-		return audio.title;
-	}
-	if (!audio.fileName.isEmpty()) {
-		return audio.fileName;
-	}
-	return tr::lng_in_dlg_audio_file(tr::now);
-}
-
-[[nodiscard]] QString AudioSubtitleText(const PreparedAudioBlockData &audio) {
-	if (!audio.performer.isEmpty()) {
-		return audio.performer;
-	}
-	if (!audio.fileName.isEmpty() && audio.fileName != AudioTitleText(audio)) {
-		return audio.fileName;
-	}
-	return QString();
-}
-
-[[nodiscard]] QString AudioCopyText(const PreparedAudioBlockData &audio) {
-	const auto title = AudioTitleText(audio);
-	const auto subtitle = AudioSubtitleText(audio);
-	return subtitle.isEmpty() ? title : (title + u"\n"_q + subtitle);
-}
-
-[[nodiscard]] QString ChannelSubtitleText(
-		const PreparedChannelBlockData &channel) {
-	return channel.username.isEmpty()
-		? QString()
-		: (kUsernamePrefix + channel.username);
-}
-
-[[nodiscard]] QString ChannelCopyText(const PreparedChannelBlockData &channel) {
-	const auto subtitle = ChannelSubtitleText(channel);
-	return subtitle.isEmpty()
-		? channel.title
-		: (channel.title + u"\n"_q + subtitle);
-}
-
-[[nodiscard]] QString GroupedMediaCopyText(
-		const PreparedGroupedMediaBlockData &grouped) {
-	auto photos = 0;
-	auto videos = 0;
-	for (const auto &item : grouped.items) {
-		if (item.media.kind == PreparedMediaItemKind::Photo) {
-			++photos;
-		} else {
-			++videos;
-		}
-	}
-	if (photos && !videos) {
-		return tr::lng_media_selected_photo(tr::now, lt_count, photos);
-	} else if (videos && !photos) {
-		return tr::lng_media_selected_video(tr::now, lt_count, videos);
-	}
-	return QString();
 }
 
 } // namespace
@@ -684,18 +664,6 @@ LaidOutBlock LayoutFlowBlock(
 		int top,
 		int width,
 		LayoutContext context) {
-	if (prepared.kind == PreparedBlockKind::GroupedMedia) {
-		return LayoutGroupedMediaBlock(
-			prepared,
-			formulas,
-			inlineFormulaObjects,
-			mediaRuntime,
-			markdown,
-			left,
-			top,
-			width,
-			context);
-	}
 	auto block = LaidOutBlock();
 	block.kind = prepared.kind;
 	block.anchorId = prepared.anchorId;
@@ -1205,6 +1173,7 @@ LaidOutBlock LayoutRelatedArticleBlock(
 	const auto &card = markdown.relatedArticle;
 	const auto blockWidth = std::max(width, 1);
 	const auto hasThumbnail = (prepared.relatedArticle.photoId != 0);
+	block.thumbnailPhotoId = prepared.relatedArticle.photoId;
 	const auto thumbnailSize = hasThumbnail
 		? std::max(card.thumbnailSize, 1)
 		: 0;
@@ -1277,7 +1246,8 @@ LaidOutBlock LayoutRelatedArticleBlock(
 	const auto cardContentHeight = std::max(textHeight, thumbnailSize);
 	const auto cardHeight = card.padding.top()
 		+ cardContentHeight
-		+ card.padding.bottom();
+		+ card.padding.bottom()
+		+ card.separator;
 
 	block.mediaRect = QRect(left, top, blockWidth, cardHeight);
 	block.visibleMediaRect = block.mediaRect;
@@ -1364,30 +1334,26 @@ LaidOutBlock LayoutPhotoBlock(
 	if (block.mediaBlock) {
 		block.copyText = block.mediaBlock->selectionData().copyText;
 	}
-	if (block.copyText.isEmpty()) {
-		block.copyText = kPhotoCopyLabel;
-	}
 
 	const auto &style = markdown.photo;
 	const auto blockWidth = std::max(width, 1);
-	const auto mediaLeft = left + style.padding.left();
+	const auto availableLeft = left + style.padding.left();
 	const auto mediaTop = top + style.padding.top();
-	const auto mediaWidth = std::max(
+	const auto availableWidth = std::max(
 		blockWidth - style.padding.left() - style.padding.right(),
 		1);
+	const auto mediaWidth = LimitedMediaWidth(
+		availableWidth,
+		prepared.photo.width);
+	const auto mediaLeft = availableLeft
+		+ std::max((availableWidth - mediaWidth) / 2, 0);
 	const auto mediaHeight = block.mediaBlock
 		? block.mediaBlock->resizeGetHeight(mediaWidth)
-		: MediaHeightForWidth(
-			mediaWidth,
-			prepared.photo.width,
-			prepared.photo.height);
+		: 0;
 	block.mediaRect = QRect(mediaLeft, mediaTop, mediaWidth, mediaHeight);
 	block.visibleMediaRect = block.mediaRect;
 	if (block.mediaBlock) {
-		block.mediaBlock->setGeometry(block.mediaRect);
-		block.mediaRect = block.mediaBlock->geometry();
-		block.firstLineBaseline = block.mediaBlock->firstLineBaseline();
-		block.visibleMediaRect = block.mediaRect;
+		ApplyMediaBlockGeometry(&block, block.mediaRect);
 	}
 
 	auto bottom = block.mediaRect.y() + block.mediaRect.height()
@@ -1403,7 +1369,8 @@ LaidOutBlock LayoutPhotoBlock(
 		bottom,
 		std::max(block.mediaRect.width(), 1),
 		style.captionSkip,
-		&bottom);
+		&bottom,
+		context);
 
 	block.contentRect = QRect(
 		block.mediaRect.x(),
@@ -1437,30 +1404,26 @@ LaidOutBlock LayoutVideoBlock(
 	if (block.mediaBlock) {
 		block.copyText = block.mediaBlock->selectionData().copyText;
 	}
-	if (block.copyText.isEmpty()) {
-		block.copyText = tr::lng_in_dlg_video(tr::now);
-	}
 
 	const auto &style = markdown.photo;
 	const auto blockWidth = std::max(width, 1);
-	const auto mediaLeft = left + style.padding.left();
+	const auto availableLeft = left + style.padding.left();
 	const auto mediaTop = top + style.padding.top();
-	const auto mediaWidth = std::max(
+	const auto availableWidth = std::max(
 		blockWidth - style.padding.left() - style.padding.right(),
 		1);
+	const auto mediaWidth = LimitedMediaWidth(
+		availableWidth,
+		prepared.video.media.width);
+	const auto mediaLeft = availableLeft
+		+ std::max((availableWidth - mediaWidth) / 2, 0);
 	const auto mediaHeight = block.mediaBlock
 		? block.mediaBlock->resizeGetHeight(mediaWidth)
-		: MediaHeightForWidth(
-			mediaWidth,
-			prepared.video.media.width,
-			prepared.video.media.height);
+		: 0;
 	block.mediaRect = QRect(mediaLeft, mediaTop, mediaWidth, mediaHeight);
 	block.visibleMediaRect = block.mediaRect;
 	if (block.mediaBlock) {
-		block.mediaBlock->setGeometry(block.mediaRect);
-		block.mediaRect = block.mediaBlock->geometry();
-		block.firstLineBaseline = block.mediaBlock->firstLineBaseline();
-		block.visibleMediaRect = block.mediaRect;
+		ApplyMediaBlockGeometry(&block, block.mediaRect);
 	}
 
 	auto bottom = block.mediaRect.y() + block.mediaRect.height()
@@ -1476,7 +1439,8 @@ LaidOutBlock LayoutVideoBlock(
 		bottom,
 		std::max(block.mediaRect.width(), 1),
 		style.captionSkip,
-		&bottom);
+		&bottom,
+		context);
 
 	block.contentRect = QRect(
 		block.mediaRect.x(),
@@ -1504,110 +1468,22 @@ LaidOutBlock LayoutAudioBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Audio;
 	block.anchorId = prepared.anchorId;
-	block.labelText = AudioTitleText(prepared.audio);
 	if (context.mediaBlockFactory) {
 		block.mediaBlock = context.mediaBlockFactory(prepared);
 	}
 	if (block.mediaBlock) {
 		block.copyText = block.mediaBlock->selectionData().copyText;
-	} else {
-		block.copyText = AudioCopyText(prepared.audio);
 	}
 
 	const auto &card = markdown.audio;
 	const auto blockWidth = std::max(width, 1);
-	if (block.mediaBlock) {
-		const auto cardHeight = block.mediaBlock->resizeGetHeight(blockWidth);
-		block.mediaRect = QRect(left, top, blockWidth, cardHeight);
-		block.visibleMediaRect = block.mediaRect;
-		block.mediaBlock->setGeometry(block.mediaRect);
-		block.firstLineBaseline = block.mediaBlock->firstLineBaseline();
-
-		auto bottom = top + cardHeight;
-		LayoutMediaCaption(
-			&block,
-			prepared,
-			formulas,
-			inlineFormulaObjects,
-			mediaRuntime,
-			markdown,
-			left + card.padding.left(),
-			bottom,
-			std::max(blockWidth - card.padding.left() - card.padding.right(), 1),
-			markdown.audio.captionSkip,
-			&bottom);
-		block.contentRect = QRect(
-			left,
-			top,
-			blockWidth,
-			std::max(bottom - top, cardHeight));
-		block.outer = block.contentRect;
-		return block;
-	}
-
-	const auto &padding = card.padding;
-	const auto &titleStyle = card.titleStyle;
-	const auto &subtitleStyle = card.subtitleStyle;
-	const auto subtitleText = AudioSubtitleText(prepared.audio);
-	const auto contentLeft = left + padding.left();
-	const auto contentWidth = std::max(
-		blockWidth - padding.left() - padding.right(),
-		1);
-
-	block.labelWidth = contentWidth;
-	SetPlainTextLeaf(
-		&block.labelLeaf,
-		titleStyle,
-		block.labelText,
-		block.labelWidth);
-	const auto titleHeight = LeafHeight(
-		block.labelLeaf,
-		titleStyle,
-		block.labelWidth);
-
-	auto subtitleHeight = 0;
-	if (!subtitleText.isEmpty()) {
-		block.subtitleWidth = contentWidth;
-		SetPlainTextLeaf(
-			&block.subtitleLeaf,
-			subtitleStyle,
-			subtitleText,
-			block.subtitleWidth);
-		subtitleHeight = LeafHeight(
-			block.subtitleLeaf,
-			subtitleStyle,
-			block.subtitleWidth);
-	}
-	const auto textSkip = subtitleHeight ? card.textSkip : 0;
-	const auto textHeight = titleHeight + textSkip + subtitleHeight;
-	const auto cardHeight = padding.top() + textHeight + padding.bottom();
-
+	const auto cardHeight = block.mediaBlock
+		? block.mediaBlock->resizeGetHeight(blockWidth)
+		: 0;
 	block.mediaRect = QRect(left, top, blockWidth, cardHeight);
 	block.visibleMediaRect = block.mediaRect;
-	block.labelRect = QRect(
-		contentLeft,
-		top + padding.top(),
-		block.labelWidth,
-		titleHeight);
-	if (subtitleHeight) {
-		block.subtitleRect = QRect(
-			contentLeft,
-			block.labelRect.y() + block.labelRect.height() + textSkip,
-			block.subtitleWidth,
-			subtitleHeight);
-	}
-	block.firstLineBaseline = LeafFirstLineBaseline(
-		block.labelLeaf,
-		block.labelRect,
-		titleStyle);
-
-	if (mediaRuntime) {
-		block.documentRuntime = mediaRuntime->resolveDocument(
-			prepared.audio.documentId);
-	}
-	if (block.documentRuntime) {
-		block.activation.kind = MediaActivationKind::Document;
-		block.activation.document = block.documentRuntime;
+	if (block.mediaBlock) {
+		ApplyMediaBlockGeometry(&block, block.mediaRect);
 	}
 
 	auto bottom = top + cardHeight;
@@ -1618,12 +1494,19 @@ LaidOutBlock LayoutAudioBlock(
 		inlineFormulaObjects,
 		mediaRuntime,
 		markdown,
-		contentLeft,
+		left + card.padding.left(),
 		bottom,
-		contentWidth,
-		card.captionSkip,
-		&bottom);
-	block.contentRect = QRect(left, top, blockWidth, std::max(bottom - top, cardHeight));
+		std::max(
+			blockWidth - card.padding.left() - card.padding.right(),
+			1),
+		markdown.audio.captionSkip,
+		&bottom,
+		context);
+	block.contentRect = QRect(
+		left,
+		top,
+		blockWidth,
+		std::max(bottom - top, cardHeight));
 	block.outer = block.contentRect;
 	return block;
 }
@@ -1647,9 +1530,6 @@ LaidOutBlock LayoutMapBlock(
 	if (block.mediaBlock) {
 		block.copyText = block.mediaBlock->selectionData().copyText;
 	}
-	if (block.copyText.isEmpty()) {
-		block.copyText = tr::lng_maps_point(tr::now);
-	}
 
 	const auto &style = markdown.photo;
 	const auto blockWidth = std::max(width, 1);
@@ -1660,17 +1540,11 @@ LaidOutBlock LayoutMapBlock(
 		1);
 	const auto mediaHeight = block.mediaBlock
 		? block.mediaBlock->resizeGetHeight(mediaWidth)
-		: MediaHeightForWidth(
-			mediaWidth,
-			prepared.map.width,
-			prepared.map.height);
+		: 0;
 	block.mediaRect = QRect(mediaLeft, mediaTop, mediaWidth, mediaHeight);
 	block.visibleMediaRect = block.mediaRect;
 	if (block.mediaBlock) {
-		block.mediaBlock->setGeometry(block.mediaRect);
-		block.mediaRect = block.mediaBlock->geometry();
-		block.firstLineBaseline = block.mediaBlock->firstLineBaseline();
-		block.visibleMediaRect = block.mediaRect;
+		ApplyMediaBlockGeometry(&block, block.mediaRect);
 	}
 
 	auto bottom = block.mediaRect.y() + block.mediaRect.height()
@@ -1686,7 +1560,8 @@ LaidOutBlock LayoutMapBlock(
 		bottom,
 		std::max(block.mediaRect.width(), 1),
 		style.captionSkip,
-		&bottom);
+		&bottom,
+		context);
 
 	block.contentRect = QRect(
 		block.mediaRect.x(),
@@ -1714,160 +1589,44 @@ LaidOutBlock LayoutChannelBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Channel;
 	block.anchorId = prepared.anchorId;
-	block.labelText = prepared.channel.title;
 	if (context.mediaBlockFactory) {
 		block.mediaBlock = context.mediaBlockFactory(prepared);
 	}
 	if (block.mediaBlock) {
 		block.copyText = block.mediaBlock->selectionData().copyText;
-	} else {
-		block.copyText = ChannelCopyText(prepared.channel);
 	}
 
 	const auto &card = markdown.channel;
 	const auto blockWidth = std::max(width, 1);
-	if (block.mediaBlock) {
-		const auto cardHeight = block.mediaBlock->resizeGetHeight(blockWidth);
-		block.mediaRect = QRect(left, top, blockWidth, cardHeight);
-		block.visibleMediaRect = block.mediaRect;
-		block.mediaBlock->setGeometry(block.mediaRect);
-		block.firstLineBaseline = block.mediaBlock->firstLineBaseline();
-
-		auto bottom = top + cardHeight;
-		LayoutMediaCaption(
-			&block,
-			prepared,
-			formulas,
-			inlineFormulaObjects,
-			mediaRuntime,
-			markdown,
-			left + card.padding.left(),
-			bottom,
-			std::max(blockWidth - card.padding.left() - card.padding.right(), 1),
-			markdown.audio.captionSkip,
-			&bottom);
-		block.contentRect = QRect(
-			left,
-			top,
-			blockWidth,
-			std::max(bottom - top, cardHeight));
-		block.outer = block.contentRect;
-		return block;
-	}
-
-	const auto &padding = card.padding;
-	const auto &button = card.button;
-	const auto &buttonPadding = button.padding;
-	const auto &titleStyle = card.titleStyle;
-	const auto &subtitleStyle = card.subtitleStyle;
-	const auto &actionStyle = button.textStyle;
-	const auto subtitleText = ChannelSubtitleText(prepared.channel);
-	const auto contentLeft = left + padding.left();
-	const auto contentWidth = std::max(
-		blockWidth - padding.left() - padding.right(),
-		1);
-
-	if (mediaRuntime) {
-		block.channelRuntime = mediaRuntime->resolveChannel(
-			prepared.channel.channelId,
-			prepared.channel.username);
-	}
-	const auto joinVisible = block.channelRuntime
-		&& block.channelRuntime->joinVisible();
-	if (block.channelRuntime) {
-		block.activation.kind = MediaActivationKind::OpenChannel;
-		block.activation.channel = block.channelRuntime;
-	}
-	if (joinVisible) {
-		block.actionActivation.kind = MediaActivationKind::JoinChannel;
-		block.actionActivation.channel = block.channelRuntime;
-	}
-
-	auto actionTextHeight = 0;
-	auto actionOuterWidth = 0;
-	auto actionOuterHeight = 0;
-	if (joinVisible) {
-		SetPlainTextLeaf(
-			&block.actionLeaf,
-			actionStyle,
-			tr::lng_iv_join_channel(tr::now),
-			contentWidth);
-		block.actionWidth = std::max(block.actionLeaf.maxWidth(), 1);
-		actionTextHeight = LeafHeight(
-			block.actionLeaf,
-			actionStyle,
-			block.actionWidth);
-		actionOuterWidth = block.actionWidth
-			+ buttonPadding.left()
-			+ buttonPadding.right();
-		actionOuterHeight = actionTextHeight
-			+ buttonPadding.top()
-			+ buttonPadding.bottom();
-	}
-
-	block.labelWidth = std::max(
-		contentWidth
-			- (joinVisible ? (actionOuterWidth + card.buttonSkip) : 0),
-		1);
-	SetPlainTextLeaf(
-		&block.labelLeaf,
-		titleStyle,
-		block.labelText,
-		block.labelWidth);
-	const auto titleHeight = LeafHeight(
-		block.labelLeaf,
-		titleStyle,
-		block.labelWidth);
-
-	auto subtitleHeight = 0;
-	if (!subtitleText.isEmpty()) {
-		block.subtitleWidth = block.labelWidth;
-		SetPlainTextLeaf(
-			&block.subtitleLeaf,
-			subtitleStyle,
-			subtitleText,
-			block.subtitleWidth);
-		subtitleHeight = LeafHeight(
-			block.subtitleLeaf,
-			subtitleStyle,
-			block.subtitleWidth);
-	}
-	const auto textSkip = subtitleHeight ? card.textSkip : 0;
-	const auto textHeight = titleHeight + textSkip + subtitleHeight;
-	const auto cardContentHeight = std::max(textHeight, actionOuterHeight);
-	const auto cardHeight = padding.top() + cardContentHeight + padding.bottom();
-
+	const auto cardHeight = block.mediaBlock
+		? block.mediaBlock->resizeGetHeight(blockWidth)
+		: 0;
 	block.mediaRect = QRect(left, top, blockWidth, cardHeight);
 	block.visibleMediaRect = block.mediaRect;
+	if (block.mediaBlock) {
+		ApplyMediaBlockGeometry(&block, block.mediaRect);
+	}
 
-	const auto textTop = top + padding.top()
-		+ std::max((cardContentHeight - textHeight) / 2, 0);
-	block.labelRect = QRect(
-		contentLeft,
-		textTop,
-		block.labelWidth,
-		titleHeight);
-	if (subtitleHeight) {
-		block.subtitleRect = QRect(
-			contentLeft,
-			block.labelRect.y() + block.labelRect.height() + textSkip,
-			block.subtitleWidth,
-			subtitleHeight);
-	}
-	if (joinVisible) {
-		block.actionRect = QRect(
-			left + blockWidth - padding.right() - actionOuterWidth,
-			top + padding.top()
-				+ std::max((cardContentHeight - actionOuterHeight) / 2, 0),
-			actionOuterWidth,
-			actionOuterHeight);
-	}
-	block.firstLineBaseline = LeafFirstLineBaseline(
-		block.labelLeaf,
-		block.labelRect,
-		titleStyle);
-	block.contentRect = block.mediaRect;
-	block.outer = block.mediaRect;
+	auto bottom = top + cardHeight;
+	LayoutMediaCaption(
+		&block,
+		prepared,
+		formulas,
+		inlineFormulaObjects,
+		mediaRuntime,
+		markdown,
+		left + card.padding.left(),
+		bottom,
+		std::max(blockWidth - card.padding.left() - card.padding.right(), 1),
+		markdown.audio.captionSkip,
+		&bottom,
+		context);
+	block.contentRect = QRect(
+		left,
+		top,
+		blockWidth,
+		std::max(bottom - top, cardHeight));
+	block.outer = block.contentRect;
 	return block;
 }
 
@@ -1890,9 +1649,6 @@ LaidOutBlock LayoutGroupedMediaBlock(
 	if (block.mediaBlock) {
 		block.copyText = block.mediaBlock->selectionData().copyText;
 	}
-	if (block.copyText.isEmpty()) {
-		block.copyText = GroupedMediaCopyText(prepared.groupedMedia);
-	}
 
 	const auto &style = markdown.groupedMedia;
 	const auto blockWidth = std::max(width, 1);
@@ -1903,12 +1659,10 @@ LaidOutBlock LayoutGroupedMediaBlock(
 		1);
 	const auto mediaHeight = block.mediaBlock
 		? block.mediaBlock->resizeGetHeight(mediaWidth)
-		: std::max(st::defaultMarkdown.placeholder.minHeight, 1);
+		: 0;
 	block.mediaRect = QRect(mediaLeft, mediaTop, mediaWidth, mediaHeight);
 	if (block.mediaBlock) {
-		block.mediaBlock->setGeometry(block.mediaRect);
-		block.mediaRect = block.mediaBlock->geometry();
-		block.firstLineBaseline = block.mediaBlock->firstLineBaseline();
+		ApplyMediaBlockGeometry(&block, block.mediaRect);
 	}
 	block.visibleMediaRect = block.mediaRect;
 
@@ -1925,7 +1679,8 @@ LaidOutBlock LayoutGroupedMediaBlock(
 		bottom,
 		std::max(block.mediaRect.width(), 1),
 		style.captionSkip,
-		&bottom);
+		&bottom,
+		context);
 
 	block.contentRect = QRect(
 		mediaLeft,

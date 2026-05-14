@@ -123,30 +123,49 @@ public:
 	[[nodiscard]] virtual std::shared_ptr<PhotoRuntime> resolvePhoto(
 		uint64 photoId) const = 0;
 	[[nodiscard]] virtual std::shared_ptr<DocumentRuntime> resolveDocument(
-		uint64 documentId) const {
-		return nullptr;
-	}
+		uint64 documentId) const;
 	[[nodiscard]] virtual std::shared_ptr<MapRuntime> resolveMap(
 		double latitude,
 		double longitude,
 		uint64 accessHash,
 		QSize size,
-		int zoom) const {
-		return nullptr;
-	}
+		int zoom) const;
 	[[nodiscard]] virtual std::shared_ptr<ChannelRuntime> resolveChannel(
 		uint64 channelId,
-		const QString &username) const {
-		return nullptr;
-	}
-	[[nodiscard]] virtual rpl::producer<uint64> channelJoinedChanges() const {
-		return rpl::never<uint64>();
-	}
+		const QString &username) const;
+	[[nodiscard]] virtual rpl::producer<uint64> channelJoinedChanges() const;
 	[[nodiscard]] virtual std::shared_ptr<HostedMediaBlockFactory>
-	hostedMediaBlockFactory() const {
-		return nullptr;
-	}
+	hostedMediaBlockFactory() const;
 };
+
+inline std::shared_ptr<DocumentRuntime> MediaRuntime::resolveDocument(
+		uint64) const {
+	return nullptr;
+}
+
+inline std::shared_ptr<MapRuntime> MediaRuntime::resolveMap(
+		double,
+		double,
+		uint64,
+		QSize,
+		int) const {
+	return nullptr;
+}
+
+inline std::shared_ptr<ChannelRuntime> MediaRuntime::resolveChannel(
+		uint64,
+		const QString &) const {
+	return nullptr;
+}
+
+inline rpl::producer<uint64> MediaRuntime::channelJoinedChanges() const {
+	return rpl::never<uint64>();
+}
+
+inline std::shared_ptr<HostedMediaBlockFactory>
+MediaRuntime::hostedMediaBlockFactory() const {
+	return nullptr;
+}
 
 enum class MediaActivationKind {
 	None,

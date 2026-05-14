@@ -68,156 +68,17 @@ public:
 	ItemZoom(
 		not_null<Ui::PopupMenu*> parent,
 		const not_null<Delegate*> delegate,
-		const style::Menu &st)
-	: Ui::Menu::Action(
-		parent->menu(),
-		st,
-		Ui::CreateChild<QAction>(parent),
-		nullptr,
-		nullptr)
-	, _delegate(delegate)
-	, _st(st) {
-		init();
-	}
+		const style::Menu &st);
 
-	void init() {
-		enableMouseSelecting();
+	void init();
 
-		AbstractButton::setDisabled(true);
+	void paintEvent(QPaintEvent *event) override;
 
-		const auto processTooltip = [=](not_null<Ui::RpWidget*> w) {
-			w->events() | rpl::on_next([=](not_null<QEvent*> e) {
-				if (e->type() == QEvent::Enter) {
-					Ui::Tooltip::Show(1000, this);
-				} else if (e->type() == QEvent::Leave) {
-					Ui::Tooltip::Hide();
-				}
-			}, w->lifetime());
-		};
+	QString tooltipText() const override;
 
-		const auto reset = Ui::CreateChild<Ui::RoundButton>(
-			this,
-			rpl::single<QString>(QString()),
-			st::ivResetZoom);
-		processTooltip(reset);
-		const auto resetLabel = Ui::CreateChild<Ui::FlatLabel>(
-			reset,
-			tr::lng_background_reset_default(),
-			st::ivResetZoomLabel);
-		resetLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
-		reset->setClickedCallback([this] {
-			_delegate->ivSetZoom(0);
-		});
-		reset->show();
-		const auto plus = Ui::CreateSimpleCircleButton(
-			this,
-			st::defaultRippleAnimationBgOver);
-		plus->resize(Size(st::ivZoomButtonsSize));
-		plus->paintRequest() | rpl::on_next([=, fg = _st.itemFg] {
-			auto p = QPainter(plus);
-			p.setPen(fg);
-			p.setFont(st::normalFont);
-			p.drawText(plus->rect(), QChar('+'), style::al_center);
-		}, plus->lifetime());
-		processTooltip(plus);
-		const auto step = [] {
-			return base::IsAltPressed()
-				? kZoomTinyStep
-				: base::IsCtrlPressed()
-				? kZoomSmallStep
-				: kZoomStep;
-		};
-		plus->setClickedCallback([this, step] {
-			_delegate->ivSetZoom(_delegate->ivZoom() + step());
-		});
-		plus->show();
-		const auto minus = Ui::CreateSimpleCircleButton(
-			this,
-			st::defaultRippleAnimationBgOver);
-		minus->resize(Size(st::ivZoomButtonsSize));
-		minus->paintRequest() | rpl::on_next([=, fg = _st.itemFg] {
-			auto p = QPainter(minus);
-			const auto r = minus->rect();
-			p.setPen(fg);
-			p.setFont(st::normalFont);
-			p.drawText(
-				QRectF(r).translated(0, style::ConvertFloatScale(-1)),
-				QChar(0x2013),
-				style::al_center);
-		}, minus->lifetime());
-		processTooltip(minus);
-		minus->setClickedCallback([this, step] {
-			_delegate->ivSetZoom(_delegate->ivZoom() - step());
-		});
-		minus->show();
+	QPoint tooltipPos() const override;
 
-		{
-			const auto maxWidthText = u"000%"_q;
-			_text.setText(_st.itemStyle, maxWidthText);
-			Ui::Menu::ItemBase::setMinWidth(
-				_text.maxWidth()
-					+ st::ivResetZoomInnerPadding
-					+ resetLabel->width()
-					+ plus->width()
-					+ minus->width()
-					+ _st.itemPadding.right() * 2);
-		}
-
-		_delegate->ivZoomValue(
-		) | rpl::on_next([this](int value) {
-			_text.setText(_st.itemStyle, QString::number(value) + '%');
-			update();
-		}, lifetime());
-
-		rpl::combine(
-			sizeValue(),
-			reset->sizeValue()
-		) | rpl::on_next([=](const QSize &size, const QSize &) {
-			reset->setFullWidth(0
-				+ resetLabel->width()
-				+ st::ivResetZoomInnerPadding);
-			resetLabel->moveToLeft(
-				(reset->width() - resetLabel->width()) / 2,
-				(reset->height() - resetLabel->height()) / 2);
-			reset->moveToRight(
-				_st.itemPadding.right(),
-				(size.height() - reset->height()) / 2);
-			plus->moveToRight(
-				_st.itemPadding.right() + reset->width(),
-				(size.height() - plus->height()) / 2);
-			minus->moveToRight(
-				_st.itemPadding.right() + plus->width() + reset->width(),
-				(size.height() - minus->height()) / 2);
-		}, lifetime());
-	}
-
-	void paintEvent(QPaintEvent *event) override {
-		auto p = QPainter(this);
-		p.setPen(_st.itemFg);
-		_text.draw(p, {
-			.position = QPoint(
-				_st.itemIconPosition.x(),
-				(height() - _text.minHeight()) / 2),
-			.outerWidth = width(),
-			.availableWidth = width(),
-		});
-	}
-
-	QString tooltipText() const override {
-#ifdef Q_OS_MAC
-		return tr::lng_iv_zoom_tooltip_cmd(tr::now);
-#else
-		return tr::lng_iv_zoom_tooltip_ctrl(tr::now);
-#endif
-	}
-
-	QPoint tooltipPos() const override {
-		return QCursor::pos();
-	}
-
-	bool tooltipWindowActive() const override {
-		return true;
-	}
+	bool tooltipWindowActive() const override;
 
 private:
 	const not_null<Delegate*> _delegate;
@@ -225,6 +86,165 @@ private:
 	Ui::Text::String _text;
 
 };
+
+ItemZoom::ItemZoom(
+	not_null<Ui::PopupMenu*> parent,
+	const not_null<Delegate*> delegate,
+	const style::Menu &st)
+: Ui::Menu::Action(
+	parent->menu(),
+	st,
+	Ui::CreateChild<QAction>(parent),
+	nullptr,
+	nullptr)
+, _delegate(delegate)
+, _st(st) {
+	init();
+}
+
+
+void ItemZoom::init() {
+	enableMouseSelecting();
+
+	AbstractButton::setDisabled(true);
+
+	const auto processTooltip = [=](not_null<Ui::RpWidget*> w) {
+		w->events() | rpl::on_next([=](not_null<QEvent*> e) {
+			if (e->type() == QEvent::Enter) {
+				Ui::Tooltip::Show(1000, this);
+			} else if (e->type() == QEvent::Leave) {
+				Ui::Tooltip::Hide();
+			}
+		}, w->lifetime());
+	};
+
+	const auto reset = Ui::CreateChild<Ui::RoundButton>(
+		this,
+		rpl::single<QString>(QString()),
+		st::ivResetZoom);
+	processTooltip(reset);
+	const auto resetLabel = Ui::CreateChild<Ui::FlatLabel>(
+		reset,
+		tr::lng_background_reset_default(),
+		st::ivResetZoomLabel);
+	resetLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+	reset->setClickedCallback([this] {
+		_delegate->ivSetZoom(0);
+	});
+	reset->show();
+	const auto plus = Ui::CreateSimpleCircleButton(
+		this,
+		st::defaultRippleAnimationBgOver);
+	plus->resize(Size(st::ivZoomButtonsSize));
+	plus->paintRequest() | rpl::on_next([=, fg = _st.itemFg] {
+		auto p = QPainter(plus);
+		p.setPen(fg);
+		p.setFont(st::normalFont);
+		p.drawText(plus->rect(), QChar('+'), style::al_center);
+	}, plus->lifetime());
+	processTooltip(plus);
+	const auto step = [] {
+		return base::IsAltPressed()
+			? kZoomTinyStep
+			: base::IsCtrlPressed()
+			? kZoomSmallStep
+			: kZoomStep;
+	};
+	plus->setClickedCallback([this, step] {
+		_delegate->ivSetZoom(_delegate->ivZoom() + step());
+	});
+	plus->show();
+	const auto minus = Ui::CreateSimpleCircleButton(
+		this,
+		st::defaultRippleAnimationBgOver);
+	minus->resize(Size(st::ivZoomButtonsSize));
+	minus->paintRequest() | rpl::on_next([=, fg = _st.itemFg] {
+		auto p = QPainter(minus);
+		const auto r = minus->rect();
+		p.setPen(fg);
+		p.setFont(st::normalFont);
+		p.drawText(
+			QRectF(r).translated(0, style::ConvertFloatScale(-1)),
+			QChar(0x2013),
+			style::al_center);
+	}, minus->lifetime());
+	processTooltip(minus);
+	minus->setClickedCallback([this, step] {
+		_delegate->ivSetZoom(_delegate->ivZoom() - step());
+	});
+	minus->show();
+
+	{
+		const auto maxWidthText = u"000%"_q;
+		_text.setText(_st.itemStyle, maxWidthText);
+		Ui::Menu::ItemBase::setMinWidth(
+			_text.maxWidth()
+				+ st::ivResetZoomInnerPadding
+				+ resetLabel->width()
+				+ plus->width()
+				+ minus->width()
+				+ _st.itemPadding.right() * 2);
+	}
+
+	_delegate->ivZoomValue(
+	) | rpl::on_next([this](int value) {
+		_text.setText(_st.itemStyle, QString::number(value) + '%');
+		update();
+	}, lifetime());
+
+	rpl::combine(
+		sizeValue(),
+		reset->sizeValue()
+	) | rpl::on_next([=](const QSize &size, const QSize &) {
+		reset->setFullWidth(0
+			+ resetLabel->width()
+			+ st::ivResetZoomInnerPadding);
+		resetLabel->moveToLeft(
+			(reset->width() - resetLabel->width()) / 2,
+			(reset->height() - resetLabel->height()) / 2);
+		reset->moveToRight(
+			_st.itemPadding.right(),
+			(size.height() - reset->height()) / 2);
+		plus->moveToRight(
+			_st.itemPadding.right() + reset->width(),
+			(size.height() - plus->height()) / 2);
+		minus->moveToRight(
+			_st.itemPadding.right() + plus->width() + reset->width(),
+			(size.height() - minus->height()) / 2);
+	}, lifetime());
+}
+
+
+void ItemZoom::paintEvent(QPaintEvent *event) {
+	auto p = QPainter(this);
+	p.setPen(_st.itemFg);
+	_text.draw(p, {
+		.position = QPoint(
+			_st.itemIconPosition.x(),
+			(height() - _text.minHeight()) / 2),
+		.outerWidth = width(),
+		.availableWidth = width(),
+	});
+}
+
+
+QString ItemZoom::tooltipText() const {
+#ifdef Q_OS_MAC
+	return tr::lng_iv_zoom_tooltip_cmd(tr::now);
+#else
+	return tr::lng_iv_zoom_tooltip_ctrl(tr::now);
+#endif
+}
+
+
+QPoint ItemZoom::tooltipPos() const {
+	return QCursor::pos();
+}
+
+
+bool ItemZoom::tooltipWindowActive() const {
+	return true;
+}
 
 [[nodiscard]] QByteArray ComputeStyles(int zoom) {
 	static const auto map = base::flat_map<QByteArray, const style::color*>{

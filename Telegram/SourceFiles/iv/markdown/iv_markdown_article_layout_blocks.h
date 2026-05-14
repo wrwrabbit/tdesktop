@@ -117,10 +117,8 @@ struct LaidOutBlock {
 	int secondarySegmentIndex = -1;
 	std::shared_ptr<MediaBlock> mediaBlock;
 	std::shared_ptr<PhotoRuntime> photoRuntime;
-	std::shared_ptr<DocumentRuntime> documentRuntime;
-	std::shared_ptr<ChannelRuntime> channelRuntime;
 	MediaActivation activation;
-	MediaActivation actionActivation;
+	uint64 thumbnailPhotoId = 0;
 	mutable std::shared_ptr<Ui::DynamicImage> thumbnailImage;
 	mutable std::shared_ptr<Ui::DynamicImage> previousThumbnailImage;
 	mutable std::shared_ptr<Ui::DynamicImage> subscribedThumbnailImage;
@@ -133,7 +131,10 @@ struct LaidOutBlock {
 struct LayoutContext {
 	int listDepth = 0;
 	int quoteDepth = 0;
+	int articleLeft = 0;
+	int articleWidth = 0;
 	bool tightList = false;
+	bool useArticleBands = false;
 	bool allowAsyncSyntaxHighlighting = true;
 	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr;
 	std::function<std::shared_ptr<MediaBlock>(const PreparedBlock&)> mediaBlockFactory;

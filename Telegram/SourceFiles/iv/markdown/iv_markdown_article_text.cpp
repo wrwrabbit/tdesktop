@@ -129,39 +129,59 @@ struct PreparedLinkExternalData {
 
 class PreparedLinkClickHandler final : public ClickHandler {
 public:
-	explicit PreparedLinkClickHandler(PreparedLink link)
-	: _link(std::move(link)) {
-	}
+	explicit PreparedLinkClickHandler(PreparedLink link);
 
-	void onClick(ClickContext) const override {
-	}
+	void onClick(ClickContext) const override;
 
-	[[nodiscard]] const PreparedLink &link() const {
-		return _link;
-	}
+	[[nodiscard]] const PreparedLink &link() const;
 
-	QString url() const override {
-		return _link.target;
-	}
+	QString url() const override;
 
-	QString copyToClipboardText() const override {
-		return CopyTextForLink(_link);
-	}
+	QString copyToClipboardText() const override;
 
-	QString copyToClipboardContextItemText() const override {
-		return copyToClipboardText().isEmpty()
-			? QString()
-			: CopyLabelForLink(_link);
-	}
+	QString copyToClipboardContextItemText() const override;
 
-	TextEntity getTextEntity() const override {
-		return TextEntityForLink(_link);
-	}
+	TextEntity getTextEntity() const override;
 
 private:
 	PreparedLink _link;
 
 };
+
+PreparedLinkClickHandler::PreparedLinkClickHandler(PreparedLink link)
+: _link(std::move(link)) {
+}
+
+
+void PreparedLinkClickHandler::onClick(ClickContext) const {
+}
+
+
+[[nodiscard]] const PreparedLink &PreparedLinkClickHandler::link() const {
+	return _link;
+}
+
+
+QString PreparedLinkClickHandler::url() const {
+	return _link.target;
+}
+
+
+QString PreparedLinkClickHandler::copyToClipboardText() const {
+	return CopyTextForLink(_link);
+}
+
+
+QString PreparedLinkClickHandler::copyToClipboardContextItemText() const {
+	return copyToClipboardText().isEmpty()
+		? QString()
+		: CopyLabelForLink(_link);
+}
+
+
+ClickHandler::TextEntity PreparedLinkClickHandler::getTextEntity() const {
+	return TextEntityForLink(_link);
+}
 
 [[nodiscard]] int FormulaTextSize(const style::TextStyle &textStyle) {
 	return std::max(textStyle.font->height, 1);
@@ -286,15 +306,19 @@ struct InlineFormulaColorizedKey {
 	QRgb color = 0;
 	int devicePixelRatio = 0;
 
-	friend inline bool operator<(
-			InlineFormulaColorizedKey a,
-			InlineFormulaColorizedKey b) {
-		if (a.color != b.color) {
-			return a.color < b.color;
-		}
-		return a.devicePixelRatio < b.devicePixelRatio;
-	}
+	friend bool operator<(
+		InlineFormulaColorizedKey a,
+		InlineFormulaColorizedKey b);
 };
+
+bool operator<(
+		InlineFormulaColorizedKey a,
+		InlineFormulaColorizedKey b) {
+	if (a.color != b.color) {
+		return a.color < b.color;
+	}
+	return a.devicePixelRatio < b.devicePixelRatio;
+}
 
 class InlineFormulaSharedState final {
 public:

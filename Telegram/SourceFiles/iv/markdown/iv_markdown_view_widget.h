@@ -50,6 +50,7 @@ public:
 	void setZoom(int value);
 	void refreshPalette();
 	void invalidateRasterCache();
+	[[nodiscard]] int maxWidth() const;
 	[[nodiscard]] int anchorTop(const QString &anchorId) const;
 	[[nodiscard]] bool toggleDetails(const QString &anchorId);
 	[[nodiscard]] int lastRelayoutMs() const;

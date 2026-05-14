@@ -2674,6 +2674,13 @@ template <typename Predicate>
 		: std::nullopt;
 }
 
+[[nodiscard]] bool IsChannelJoinLinkHit(
+		const MarkdownArticleHitTestResult &hit) {
+	return hit.state.link
+		&& !hit.preparedLink
+		&& (hit.mediaActivation.kind == MediaActivationKind::None);
+}
+
 [[nodiscard]] int HostedRequestCount(
 		const TestMediaRuntime &runtime,
 		TestHostedMediaKind kind) {
@@ -7504,10 +7511,7 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			420,
 			channelHeight,
 			lookupFlags,
-			[](const MarkdownArticleHitTestResult &hit) {
-				return hit.mediaActivation.kind
-					== MediaActivationKind::JoinChannel;
-			});
+			IsChannelJoinLinkHit);
 		Check(openBounds.has_value(), channelLabel + u" open bounds"_q, ok);
 		Check(joinBounds.has_value(), channelLabel + u" join bounds"_q, ok);
 		if (openBounds) {
@@ -7531,16 +7535,12 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 				joinBounds->center(),
 				lookupFlags);
 			Check(
-				joinHit.mediaActivation.kind == MediaActivationKind::JoinChannel,
-				channelLabel + u" join activation kind"_q,
-				ok);
-			Check(
-				joinHit.mediaActivation.channel.get() == channelCardRuntime.get(),
-				channelLabel + u" join runtime forwarded"_q,
+				IsChannelJoinLinkHit(joinHit),
+				channelLabel + u" join link hit"_q,
 				ok);
 			const auto joinContext = channelArticle->textForContext(joinHit);
 			Check(
-				joinContext.expanded == u"Native IV Channel\n@nativeiv"_q,
+				joinContext.expanded == u"Native IV Channel"_q,
 				channelLabel + u" context export text"_q,
 				ok);
 			const auto joinSelection = channelArticle->textForSelection({
@@ -7551,8 +7551,8 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 				joinSelection.expanded == joinContext.expanded,
 				channelLabel + u" selection export text"_q,
 				ok);
-			if (joinHit.mediaActivation.channel) {
-				joinHit.mediaActivation.channel->join(Qt::LeftButton);
+			if (joinHit.state.link) {
+				joinHit.state.link->onClick({ .button = Qt::LeftButton });
 			}
 		}
 		Check(
@@ -7687,10 +7687,7 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			320,
 			joinedLayoutHeight,
 			lookupFlags,
-			[](const MarkdownArticleHitTestResult &hit) {
-				return hit.mediaActivation.kind
-					== MediaActivationKind::JoinChannel;
-			});
+			IsChannelJoinLinkHit);
 		Check(
 			!joinedLayoutJoinBounds.has_value(),
 			channelRelayoutLabel + u" hidden layout has no join bounds"_q,
@@ -7726,10 +7723,7 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			320,
 			articleRelayoutHeight,
 			lookupFlags,
-			[](const MarkdownArticleHitTestResult &hit) {
-				return hit.mediaActivation.kind
-					== MediaActivationKind::JoinChannel;
-			});
+			IsChannelJoinLinkHit);
 		Check(
 			articleJoinBounds.has_value(),
 			channelRelayoutLabel + u" visible layout has join bounds"_q,
@@ -7742,10 +7736,7 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			320,
 			articleRelayoutHeight,
 			lookupFlags,
-			[](const MarkdownArticleHitTestResult &hit) {
-				return hit.mediaActivation.kind
-					== MediaActivationKind::JoinChannel;
-			});
+			IsChannelJoinLinkHit);
 		Check(
 			!articleJoinedBounds.has_value(),
 			channelRelayoutLabel
@@ -10811,6 +10802,213 @@ void CheckAnchorScrollAlignmentCoverage(bool *ok) {
 		ok);
 }
 
+void CheckArticlePageWidthCoverage(bool *ok) {
+	const auto label = FromLatin1("native-iv-page-width-bands");
+	const auto parsed = ParseMarkdownForIv(
+		QByteArray("Simple preview body."),
+		ParseOptions{ label });
+	Check(
+		parsed.ok,
+		label + FromLatin1(" parse failed: ") + parsed.error,
+		ok);
+	if (!parsed.ok) {
+		return;
+	}
+	auto renderer = std::make_shared<MathRenderer>();
+	auto previewPrepared = PrepareParsedDocumentForTest(
+		parsed.document,
+		label,
+		renderer);
+	Check(
+		!previewPrepared.failure.failed(),
+		label + FromLatin1(" prepare failure: ")
+			+ PrepareFailureReason(previewPrepared.failure),
+		ok);
+	if (previewPrepared.failure.failed()) {
+		return;
+	}
+	auto window = Ui::RpWindow();
+	const auto wideWidth = st::defaultMarkdown.pageMaxWidth + 300;
+	window.setGeometry(QRect(0, 0, wideWidth, 260));
+	window.show();
+	FlushPendingWidgetEvents();
+	auto preview = CreateMarkdownPreviewWidget(
+		window.body(),
+		std::move(previewPrepared),
+		renderer,
+		[](Event) {
+		});
+	preview->setGeometry(QRect(QPoint(), window.body()->size()));
+	preview->show();
+	FlushPendingWidgetEvents();
+	const auto scroll = FindChildObject<Ui::ScrollArea>(preview.get());
+	const auto body = FindChildObject<MarkdownDocumentWidget>(preview.get());
+	Check(scroll != nullptr, label + FromLatin1(" preview scroll area"), ok);
+	Check(body != nullptr, label + FromLatin1(" preview body widget"), ok);
+	if (scroll && body) {
+		Check(
+			body->width() == body->maxWidth(),
+			label + FromLatin1(" preview clamps body to max width"),
+			ok);
+		Check(
+			body->x()
+				== std::max((scroll->width() - body->width()) / 2, 0),
+			label + FromLatin1(" preview centers clamped body"),
+			ok);
+	}
+
+	const auto photoId = uint64(9601);
+	const auto largePhotoId = uint64(9602);
+	auto runtime = std::make_shared<TestMediaRuntime>();
+	runtime->hostedFactory = std::make_shared<TestHostedMediaBlockFactory>();
+	auto source = NativeIvSource(
+		QVector<MTPPageBlock>{
+			NativeIvPhotoBlock(photoId, u"Small hosted photo caption"_q),
+			NativeIvPhotoBlock(largePhotoId),
+		},
+		QVector<MTPPhoto>{
+			NativeIvPhoto(photoId, 160, 90),
+			NativeIvPhoto(largePhotoId, 1000, 500),
+		});
+	auto prepared = TryPrepareNativeInstantView({
+		.source = &source,
+		.mediaRuntime = runtime,
+	});
+	Check(prepared.supported(), label + FromLatin1(" prepare supported"), ok);
+	if (!prepared.supported()) {
+		return;
+	}
+	const auto articleWidth = 620;
+	auto articleHeight = 0;
+	auto article = BuildArticleForTest(
+		std::move(prepared.content),
+		renderer,
+		articleWidth,
+		&articleHeight);
+	Check(
+		runtime->hostedPhotoRequests() == 2,
+		label + FromLatin1(" hosted photo request"),
+		ok);
+	const auto &blocks = runtime->hostedFactory->photoBlocks;
+	Check(blocks.size() == 2, label + FromLatin1(" hosted photo block"), ok);
+	if (blocks.size() < 2) {
+		return;
+	}
+	const auto expectedMediaWidth = 320;
+	const auto mediaLimitedAndCentered = std::any_of(
+		blocks.front()->requestedGeometries.begin(),
+		blocks.front()->requestedGeometries.end(),
+		[=](const QRect &geometry) {
+			return (geometry.width() == expectedMediaWidth)
+				&& (geometry.x() > 0);
+		});
+	Check(
+		mediaLimitedAndCentered,
+		label + FromLatin1(" media width limited and centered"),
+		ok);
+	const auto mediaFullWidth = std::any_of(
+		blocks[1]->requestedGeometries.begin(),
+		blocks[1]->requestedGeometries.end(),
+		[=](const QRect &geometry) {
+			return (geometry.x() == 0)
+				&& (geometry.width() == articleWidth);
+		});
+	Check(
+		mediaFullWidth,
+		label + FromLatin1(" wide media uses full article band"),
+		ok);
+	const auto captionBounds = SegmentHitBounds(
+		article.get(),
+		articleWidth,
+		articleHeight,
+		1);
+	Check(
+		captionBounds.has_value(),
+		label + FromLatin1(" caption bounds"),
+		ok);
+	if (captionBounds) {
+		Check(
+			captionBounds->left() >= st::defaultMarkdown.textPadding.left(),
+			label + FromLatin1(" caption uses text left padding"),
+			ok);
+		Check(
+			captionBounds->right()
+				< articleWidth - st::defaultMarkdown.textPadding.right(),
+			label + FromLatin1(" caption uses text right padding"),
+			ok);
+	}
+
+	const auto channelId = uint64(9603);
+	auto channelRuntime = std::make_shared<TestMediaRuntime>();
+	channelRuntime->addChannelRuntime(
+		channelId,
+		u"nativeivpagewidth"_q,
+		std::make_shared<TestChannelRuntime>());
+	auto channelSource = NativeIvSource(QVector<MTPPageBlock>{
+		MTP_pageBlockChannel(NativeIvChannelChat(
+			channelId,
+			u"Native IV Page Width Channel"_q,
+			u"nativeivpagewidth"_q)),
+		MTP_pageBlockParagraph(NativeIvText(u"Body text keeps margins."_q)),
+	});
+	auto channelPrepared = TryPrepareNativeInstantView({
+		.source = &channelSource,
+		.mediaRuntime = channelRuntime,
+	});
+	Check(
+		channelPrepared.supported(),
+		label + FromLatin1(" channel prepare supported"),
+		ok);
+	if (!channelPrepared.supported()) {
+		return;
+	}
+	auto channelHeight = 0;
+	auto channelArticle = BuildArticleForTest(
+		std::move(channelPrepared.content),
+		renderer,
+		articleWidth,
+		&channelHeight);
+	const auto channelBounds = SegmentHitBounds(
+		channelArticle.get(),
+		articleWidth,
+		channelHeight,
+		0);
+	Check(
+		channelBounds.has_value(),
+		label + FromLatin1(" channel bounds"),
+		ok);
+	if (channelBounds) {
+		const auto maxChannelHeight
+			= st::defaultMarkdown.channel.titleStyle.lineHeight
+			+ st::defaultMarkdown.channel.padding.top()
+			+ st::defaultMarkdown.channel.padding.bottom();
+		Check(
+			channelBounds->left() == 0
+				&& channelBounds->right() == articleWidth - 1,
+			label + FromLatin1(" channel uses full article band"),
+			ok);
+		Check(
+			channelBounds->height() <= maxChannelHeight,
+			label + FromLatin1(" channel bar stays compact"),
+			ok);
+	}
+	const auto bodyBounds = SegmentHitBounds(
+		channelArticle.get(),
+		articleWidth,
+		channelHeight,
+		1);
+	Check(
+		bodyBounds.has_value(),
+		label + FromLatin1(" body bounds"),
+		ok);
+	if (bodyBounds) {
+		Check(
+			bodyBounds->left() >= st::defaultMarkdown.textPadding.left(),
+			label + FromLatin1(" body uses text left padding"),
+			ok);
+	}
+}
+
 void CheckArticleHorizontalRelayoutRegression(bool *ok) {
 	const auto label = FromLatin1("generated-horizontal-relayout-regression.md");
 	const auto parsed = ParseMarkdownForIv(
@@ -11423,6 +11621,7 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 	CheckInlineTextObjectArticleCoverage(&ok);
 	CheckArticleRasterRegressionCoverage(&ok);
 	CheckAnchorScrollAlignmentCoverage(&ok);
+	CheckArticlePageWidthCoverage(&ok);
 	CheckArticleHorizontalRelayoutRegression(&ok);
 	CheckNativeInstantViewArticleCoverage(&ok);
 	CheckNativeInstantViewPreviewOpenPageCoverage(&ok);

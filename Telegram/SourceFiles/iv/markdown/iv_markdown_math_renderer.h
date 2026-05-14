@@ -28,39 +28,39 @@ struct FormulaCacheKey {
 	int renderWidthCap = 0;
 	int renderHeightCap = 0;
 	int devicePixelRatio = 1;
-
-	friend inline bool operator==(const FormulaCacheKey &a, const FormulaCacheKey &b) {
-		return std::tie(
-			a.trimmedTex,
-			a.kind,
-			a.textSize,
-			a.renderWidthCap,
-			a.renderHeightCap,
-			a.devicePixelRatio) == std::tie(
-			b.trimmedTex,
-			b.kind,
-			b.textSize,
-			b.renderWidthCap,
-			b.renderHeightCap,
-			b.devicePixelRatio);
-	}
-
-	friend inline bool operator<(const FormulaCacheKey &a, const FormulaCacheKey &b) {
-		return std::tie(
-			a.trimmedTex,
-			a.kind,
-			a.textSize,
-			a.renderWidthCap,
-			a.renderHeightCap,
-			a.devicePixelRatio) < std::tie(
-			b.trimmedTex,
-			b.kind,
-			b.textSize,
-			b.renderWidthCap,
-			b.renderHeightCap,
-			b.devicePixelRatio);
-	}
 };
+
+inline bool operator==(const FormulaCacheKey &a, const FormulaCacheKey &b) {
+	return std::tie(
+		a.trimmedTex,
+		a.kind,
+		a.textSize,
+		a.renderWidthCap,
+		a.renderHeightCap,
+		a.devicePixelRatio) == std::tie(
+		b.trimmedTex,
+		b.kind,
+		b.textSize,
+		b.renderWidthCap,
+		b.renderHeightCap,
+		b.devicePixelRatio);
+}
+
+inline bool operator<(const FormulaCacheKey &a, const FormulaCacheKey &b) {
+	return std::tie(
+		a.trimmedTex,
+		a.kind,
+		a.textSize,
+		a.renderWidthCap,
+		a.renderHeightCap,
+		a.devicePixelRatio) < std::tie(
+		b.trimmedTex,
+		b.kind,
+		b.textSize,
+		b.renderWidthCap,
+		b.renderHeightCap,
+		b.devicePixelRatio);
+}
 
 struct RenderedFormula {
 	QImage image;

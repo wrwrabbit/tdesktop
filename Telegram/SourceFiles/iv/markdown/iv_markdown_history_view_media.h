@@ -18,11 +18,15 @@ namespace Window {
 class SessionController;
 } // namespace Window
 
+class DocumentData;
+class History;
 class HistoryItem;
+class PhotoData;
 
 namespace HistoryView {
 class Element;
 class Media;
+class Message;
 } // namespace HistoryView
 
 namespace Data {
@@ -30,6 +34,27 @@ class Session;
 } // namespace Data
 
 namespace Iv::Markdown {
+
+class IvHistoryViewMediaHost final {
+public:
+	IvHistoryViewMediaHost(
+		not_null<Window::SessionController*> controller,
+		not_null<History*> history,
+		QString pageUrl);
+	~IvHistoryViewMediaHost();
+
+	[[nodiscard]] not_null<::Data::Session*> session() const;
+	[[nodiscard]] not_null<HistoryItem*> item() const;
+	[[nodiscard]] not_null<HistoryView::Message*> view() const;
+	[[nodiscard]] const QString &pageUrl() const;
+
+	void registerPhoto(not_null<PhotoData*> photo) const;
+	void registerDocument(not_null<DocumentData*> document) const;
+
+private:
+	struct State;
+	std::unique_ptr<State> _state;
+};
 
 enum class IvHistoryViewMediaKind {
 	Photo,
@@ -46,11 +71,9 @@ struct IvHistoryViewMediaDescriptor {
 	IvHistoryViewMediaKind kind = IvHistoryViewMediaKind::Map;
 	QString copyText;
 	QSize layoutHint;
-	::Data::Session *session = nullptr;
-	HistoryItem *item = nullptr;
+	std::shared_ptr<IvHistoryViewMediaHost> host;
 	MediaFactory mediaFactory;
 	std::vector<std::shared_ptr<void>> keepAlive;
-	std::vector<std::shared_ptr<void>> itemKeepAlive;
 	std::shared_ptr<PhotoRuntime> photo;
 	std::shared_ptr<DocumentRuntime> document;
 };
@@ -90,13 +113,7 @@ private:
 	template <typename Prepared, typename Factory>
 	[[nodiscard]] std::shared_ptr<MediaBlock> create(
 			const Prepared &prepared,
-			const Factory &factory) const {
-		if (!factory) {
-			return nullptr;
-		}
-		const auto controller = _controller.get();
-		return controller ? factory(controller, prepared) : nullptr;
-	}
+			const Factory &factory) const;
 
 	const base::weak_ptr<Window::SessionController> _controller;
 	const PhotoFactory _createPhoto;
@@ -104,6 +121,17 @@ private:
 	const AudioFactory _createAudio;
 	const MapFactory _createMap;
 };
+
+template <typename Prepared, typename Factory>
+std::shared_ptr<MediaBlock> IvHistoryViewMediaBlockFactory::create(
+		const Prepared &prepared,
+		const Factory &factory) const {
+	if (!factory) {
+		return nullptr;
+	}
+	const auto controller = _controller.get();
+	return controller ? factory(controller, prepared) : nullptr;
+}
 
 [[nodiscard]] std::shared_ptr<MediaBlock> CreateIvHistoryViewMediaBlock(
 	Window::SessionController *controller,
