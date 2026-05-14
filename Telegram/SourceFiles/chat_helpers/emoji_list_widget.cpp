@@ -573,6 +573,30 @@ EmojiListWidget::EmojiListWidget(
 	) | rpl::on_next([=] {
 		refreshCustom();
 		resizeToWidth(width());
+		if (!_searchMode
+			|| !searchShortcutSelected()
+			|| _searchSets.empty()) {
+			return;
+		}
+		// Skip refill when size already matches to preserve hover state.
+		const auto &sets = session().data().stickers().sets();
+		const auto it = sets.find(_searchSelectedSetId);
+		if (it == sets.end()) {
+			return;
+		}
+		const auto set = it->second.get();
+		const auto have = int(_searchSets.front().list.size());
+		const auto want = int(set->stickers.empty()
+			? set->covers.size()
+			: set->stickers.size());
+		if (have == want) {
+			return;
+		}
+		_searchSets.clear();
+		fillSelectedSearchShortcut();
+		resizeToWidth(width());
+		update();
+		updateSelected();
 	}, lifetime());
 
 	rpl::combine(
@@ -1387,6 +1411,16 @@ void EmojiListWidget::toggleSearchShortcut(int index) {
 		_searchSelectedSetId = target;
 		showSearchResults();
 	}, packToPack);
+	if (target) {
+		// Pull full stickers so the grid shows them instead of cover-only.
+		const auto set = _searchShortcutSets[index].set;
+		if (set->stickers.empty()
+			|| (set->flags & Data::StickersSetFlag::NotLoaded)) {
+			auto &api = session().api();
+			api.scheduleStickerSetRequest(set->id, set->accessHash);
+			api.requestStickerSets();
+		}
+	}
 }
 
 void EmojiListWidget::backToSearchResults() {
