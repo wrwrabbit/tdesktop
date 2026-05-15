@@ -973,9 +973,12 @@ QString InlineIvImageObject::entityData() {
 std::optional<Ui::Text::CustomEmojiVerticalMetrics>
 InlineIvImageObject::vertical(const style::TextStyle &textStyle) {
 	if (_height > 0) {
+		const auto line = textStyle.font->height;
+		const auto above = _height - (_height / 2);
+		const auto ascent = above - (line / 2) + textStyle.font->ascent;
 		return Ui::Text::CustomEmojiVerticalMetrics{
-			.ascent = _height,
-			.descent = 0,
+			.ascent = ascent,
+			.descent = _height - ascent,
 		};
 	}
 	const auto ascent = std::max(textStyle.font->ascent, 0);
