@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/thanos_effect.h"
 
 #include "ui/effects/thanos_effect_renderer.h"
+#include "ui/gl/gl_detection.h"
 #include "ui/gl/gl_surface.h"
 #include "ui/power_saving.h"
 #include "ui/rp_widget.h"
@@ -96,6 +97,9 @@ bool ThanosEffect::Supported() {
 	if (PowerSaving::On(PowerSaving::kChatEffects)) {
 		return false;
 	}
+	if (!GL::WidgetsRhiEnabled()) {
+		return false;
+	}
 	return RhiComputeSupportedCached();
 #else
 	return false;
@@ -104,6 +108,9 @@ bool ThanosEffect::Supported() {
 
 void ThanosEffect::WarmUp() {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	if (!GL::WidgetsRhiEnabled()) {
+		return;
+	}
 	(void)RhiComputeSupportedCached();
 #endif
 }
