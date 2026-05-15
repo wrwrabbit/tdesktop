@@ -603,6 +603,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 				info->userCreatesTopics = data.is_bot_forum_can_manage_topics();
 				info->canManageBots = data.is_bot_can_manage_bots();
 				info->supportsGuestChat = data.is_bot_guestchat();
+				info->supportsGuard = data.is_bot_guard();
 			}
 		}
 
@@ -5578,6 +5579,15 @@ void Session::webViewResultSent(WebViewResultSent &&sent) {
 
 auto Session::webViewResultSent() const -> rpl::producer<WebViewResultSent> {
 	return _webViewResultSent.events();
+}
+
+void Session::joinChatWebViewDecision(JoinChatWebViewDecision &&decision) {
+	return _joinChatWebViewDecision.fire(std::move(decision));
+}
+
+auto Session::joinChatWebViewDecision() const
+-> rpl::producer<JoinChatWebViewDecision> {
+	return _joinChatWebViewDecision.events();
 }
 
 rpl::producer<not_null<PeerData*>> Session::peerDecorationsUpdated() const {

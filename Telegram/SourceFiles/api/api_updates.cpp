@@ -2232,6 +2232,15 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 		session().data().webViewResultSent({ .queryId = d.vquery_id().v });
 	} break;
 
+	case mtpc_updateJoinChatWebViewDecision: {
+		const auto &d = update.c_updateJoinChatWebViewDecision();
+		session().data().joinChatWebViewDecision({
+			.peerId = peerFromMTP(d.vpeer()),
+			.queryId = uint64(d.vquery_id().v),
+			.result = d.vresult(),
+		});
+	} break;
+
 	case mtpc_updateBotMenuButton: {
 		const auto &d = update.c_updateBotMenuButton();
 		if (const auto bot = session().data().userLoaded(d.vbot_id())) {

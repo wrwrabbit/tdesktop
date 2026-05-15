@@ -208,6 +208,33 @@ constexpr auto kPopularAppBotsLimit = 100;
 	return result;
 }
 
+[[nodiscard]] QString JoinChatDecisionToast(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		const MTPJoinChatBotResult &result) {
+	const auto isChannel = [&] {
+		if (const auto peer = session->data().peerLoaded(peerId)) {
+			return peer->isBroadcast();
+		}
+		return false;
+	}();
+	return result.match([&](const MTPDjoinChatBotResultApproved &) {
+		return isChannel
+			? tr::lng_action_you_joined_by_request_channel(tr::now)
+			: tr::lng_action_you_joined_by_request(tr::now);
+	}, [&](const MTPDjoinChatBotResultDeclined &) {
+		return isChannel
+			? tr::lng_group_request_declined_channel(tr::now)
+			: tr::lng_group_request_declined(tr::now);
+	}, [&](const MTPDjoinChatBotResultQueued &) {
+		return isChannel
+			? tr::lng_group_request_sent_channel(tr::now)
+			: tr::lng_group_request_sent(tr::now);
+	}, [&](const MTPDjoinChatBotResultWebView &) {
+		return QString();
+	});
+}
+
 [[nodiscard]] Ui::LocationPickerConfig ResolveMapsConfig(
 		not_null<Main::Session*> session) {
 	const auto &appConfig = session->appConfig();
@@ -985,6 +1012,13 @@ void WebViewInstance::resolve() {
 		}
 	}, [&](WebViewSourceAgeVerification) {
 		requestMain();
+	}, [&](WebViewSourceJoinChat data) {
+		confirmOpen([=] {
+			show({
+				.url = data.url,
+				.queryId = data.queryId,
+			});
+		}, true);
 	});
 }
 
@@ -1386,7 +1420,7 @@ void WebViewInstance::show(ShowArgs &&args) {
 		not_null{ _bot },
 		&AttachWebViewBot::user);
 	const auto hasOpenBot = v::is<WebViewSourceMainMenu>(_source)
-		|| (_context.action->history->peer != _bot);
+		|| (_context.action && _context.action->history->peer != _bot);
 	const auto hasRemoveFromMenu = (attached != end(bots))
 		&& (!attached->inactive || attached->inMainMenu)
 		&& (v::is<WebViewSourceMainMenu>(_source)
@@ -1450,6 +1484,18 @@ void WebViewInstance::close() {
 }
 
 void WebViewInstance::started(uint64 queryId) {
+	if (v::is<WebViewSourceJoinChat>(_source)) {
+		if (!queryId) {
+			return;
+		}
+		_session->attachWebView().watchJoinChatWebView(
+			queryId,
+			_parentShow,
+			_context.controller,
+			this);
+		return;
+	}
+
 	Expects(_context.action.has_value());
 
 	if (!queryId) {
@@ -2333,6 +2379,42 @@ AttachWebView::AttachWebView(not_null<Main::Session*> session)
 , _storage(std::make_unique<Storage>(session))
 , _refreshTimer([=] { requestBots(); }) {
 	_refreshTimer.callEach(kRefreshBotsTimeout);
+	_session->data().joinChatWebViewDecision(
+	) | rpl::on_next([=](
+			const Data::Session::JoinChatWebViewDecision &decision) {
+		const auto i = _joinChatWebViews.find(decision.queryId);
+		if (i == end(_joinChatWebViews)) {
+			return;
+		}
+		auto data = std::move(i->second);
+		_joinChatWebViews.erase(i);
+
+		const auto text = JoinChatDecisionToast(
+			_session,
+			decision.peerId,
+			decision.result);
+		const auto approved = (decision.result.type()
+			== mtpc_joinChatBotResultApproved);
+		const auto instance = data.instance.get();
+		if (instance) {
+			close(instance);
+			if (approved) {
+				if (const auto peer = _session->data().peerLoaded(
+						decision.peerId)) {
+					if (const auto window = WindowForThread(
+							data.controller,
+							peer->owner().history(peer))) {
+						window->showPeerHistory(
+							peer,
+							Window::SectionShow::Way::Forward);
+					}
+				}
+			}
+		}
+		if (data.show && !text.isEmpty()) {
+			data.show->showToast(text);
+		}
+	}, _lifetime);
 }
 
 AttachWebView::~AttachWebView() {
@@ -2383,6 +2465,18 @@ void AttachWebView::openByUsername(
 			.source = InlineBots::WebViewSourceLinkAttachMenu{},
 		});
 	}));
+}
+
+void AttachWebView::watchJoinChatWebView(
+		uint64 queryId,
+		std::shared_ptr<Ui::Show> show,
+		base::weak_ptr<Window::SessionController> controller,
+		base::weak_ptr<WebViewInstance> instance) {
+	_joinChatWebViews[queryId] = {
+		.show = std::move(show),
+		.controller = controller,
+		.instance = instance,
+	};
 }
 
 void AttachWebView::close(not_null<WebViewInstance*> instance) {

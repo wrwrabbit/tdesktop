@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_authorizations.h"
 #include "api/api_attached_stickers.h"
 #include "api/api_blocked_peers.h"
+#include "api/api_chat_invite.h"
 #include "api/api_chat_links.h"
 #include "api/api_chat_participants.h"
 #include "api/api_cloud_password.h"
@@ -1822,14 +1823,20 @@ void ApiWrap::joinChannel(not_null<ChannelData*> channel) {
 	} else if (!_channelAmInRequests.contains(channel)) {
 		const auto requestId = request(MTPchannels_JoinChannel(
 			channel->inputChannel()
-		)).done([=](const MTPUpdates &result) {
+		)).done([=](const MTPmessages_ChatInviteJoinResult &result) {
 			_channelAmInRequests.remove(channel);
-			applyUpdates(result);
 
-			session().data().addRecentJoinChat({
-				.fromPeerId = channel->id,
-				.joinedPeerId = channel->id,
-			});
+			Api::ProcessChatInviteJoinResult(
+				_session,
+				ShowForPeer(channel),
+				result,
+				[=](const MTPUpdates &updates) {
+					applyUpdates(updates);
+					session().data().addRecentJoinChat({
+						.fromPeerId = channel->id,
+						.joinedPeerId = channel->id,
+					});
+				});
 		}).fail([=](const MTP::Error &error) {
 			const auto &type = error.type();
 

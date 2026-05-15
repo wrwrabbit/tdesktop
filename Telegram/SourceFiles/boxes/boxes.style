@@ -1251,6 +1251,8 @@ futureOwnerBox: Box(defaultBox) {
 	buttonHeight: 0px;
 }
 futureOwnerBoxSelect: collectibleBox;
+guardBotReplaceBox: Box(futureOwnerBox) {
+}
 
 disableSharingIconPadding: margins(12px, 12px, 12px, 8px);
 disableSharingButtonLock: IconEmoji {

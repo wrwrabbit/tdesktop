@@ -144,6 +144,12 @@ constexpr auto kDefaultChargeStars = 10;
 			{ Flag::Anonymous, tr::lng_rights_group_anonymous(tr::now) },
 			{ Flag::AddAdmins, tr::lng_rights_add_admins(tr::now) },
 		};
+		if (options.canProcessJoinRequests) {
+			second.push_back({
+				Flag::ProcessJoinRequests,
+				tr::lng_rights_group_process_join_requests(tr::now),
+			});
+		}
 		if (!options.isForum) {
 			first.erase(
 				ranges::remove(
@@ -181,6 +187,12 @@ constexpr auto kDefaultChargeStars = 10;
 		{ Flag::AddAdmins, tr::lng_rights_add_admins(tr::now) },
 		{ Flag::BanUsers, tr::lng_rights_group_ban(tr::now) },
 	};
+	if (options.canProcessJoinRequests) {
+		second.push_back({
+			Flag::ProcessJoinRequests,
+			tr::lng_rights_group_process_join_requests(tr::now),
+		});
+	}
 	return {
 		{ std::nullopt, std::move(first) },
 		{ tr::lng_rights_channel_manage(), std::move(messages) },
@@ -1467,7 +1479,9 @@ ChatAdminRights AdminRightsForOwnershipTransfer(
 		Data::AdminRightsSetOptions options) {
 	auto result = ChatAdminRights();
 	for (const auto &entry : AdminRightLabels(options)) {
-		if (!(entry.flags & ChatAdminRight::Anonymous)) {
+		if (!(entry.flags
+			& (ChatAdminRight::Anonymous
+				| ChatAdminRight::ProcessJoinRequests))) {
 			result |= entry.flags;
 		}
 	}

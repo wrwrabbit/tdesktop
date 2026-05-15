@@ -959,6 +959,14 @@ public:
 	void webViewResultSent(WebViewResultSent &&sent);
 	[[nodiscard]] rpl::producer<WebViewResultSent> webViewResultSent() const;
 
+	struct JoinChatWebViewDecision {
+		PeerId peerId;
+		uint64 queryId = 0;
+		MTPJoinChatBotResult result;
+	};
+	void joinChatWebViewDecision(JoinChatWebViewDecision &&decision);
+	[[nodiscard]] rpl::producer<JoinChatWebViewDecision> joinChatWebViewDecision() const;
+
 	void saveViewAsMessages(not_null<Forum*> forum, bool viewAsMessages);
 
 	[[nodiscard]] auto peerDecorationsUpdated() const
@@ -1359,6 +1367,7 @@ private:
 	base::flat_map<not_null<PeerData*>, MTP::DcId> _peerStatsDcIds;
 
 	rpl::event_stream<WebViewResultSent> _webViewResultSent;
+	rpl::event_stream<JoinChatWebViewDecision> _joinChatWebViewDecision;
 
 	rpl::event_stream<not_null<PeerData*>> _peerDecorationsUpdated;
 	base::flat_map<
