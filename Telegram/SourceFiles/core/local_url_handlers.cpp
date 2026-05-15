@@ -315,7 +315,8 @@ bool ShowAiStyle(
 		strong->window().show(Box(
 			PreviewAiToneBox,
 			&strong->session(),
-			std::move(tone)));
+			std::move(tone),
+			weak));
 	}, [=](const MTP::Error &error) {
 		const auto strong = weak.get();
 		if (!strong) {
