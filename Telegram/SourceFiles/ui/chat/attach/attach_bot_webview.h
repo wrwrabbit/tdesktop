@@ -241,7 +241,9 @@ private:
 	void setExternalShellBlocked(bool blocked);
 	void closeExternalShellLayer();
 	[[nodiscard]] ExternalShellAnchor externalShellAnchor() const;
-	Webview::PopupResult showBlockingPopup(Webview::PopupArgs &&args);
+	void showPopup(
+		Webview::PopupArgs &&args,
+		Fn<void(Webview::PopupResult)> done);
 	void createWebviewBottom();
 	void showWebviewProgress();
 	void hideWebviewProgress();

@@ -1673,19 +1673,8 @@ void Panel::sendExternalShellEvent(
 		|| _externalShellToken.isEmpty()) {
 		return;
 	}
-	const auto generation = _externalShellGeneration;
-	const auto token = _externalShellToken;
-	crl::on_main(this, [=] {
-		if (!_externalShell
-			|| !_externalShellBootstrapped
-			|| !_webview
-			|| _externalShellGeneration != generation
-			|| _externalShellToken != token) {
-			return;
-		}
-		_webview->window.eval(
-			LinuxShell::EventScript(event, data, _externalShellToken));
-	});
+	_webview->window.eval(
+		LinuxShell::EventScript(event, data, _externalShellToken));
 }
 
 void Panel::sendExternalShellButton(
@@ -1940,9 +1929,15 @@ QWidget *Panel::webviewWindowForPopup() const {
 	return widget ? widget->window() : nullptr;
 }
 
-Webview::PopupResult Panel::showBlockingPopup(Webview::PopupArgs &&args) {
+void Panel::showPopup(
+		Webview::PopupArgs &&args,
+		Fn<void(Webview::PopupResult)> done) {
 	if (!_externalShell) {
-		return Webview::ShowBlockingPopup(std::move(args));
+		auto result = Webview::ShowBlockingPopup(std::move(args));
+		if (done) {
+			done(std::move(result));
+		}
+		return;
 	}
 	const auto anchor = externalShellAnchor();
 	args.anchorGeometry = anchor.anchorGeometry;
@@ -1950,12 +1945,18 @@ Webview::PopupResult Panel::showBlockingPopup(Webview::PopupArgs &&args) {
 	args.parent = nullptr;
 	setExternalShellBlocked(true);
 	const auto weak = base::make_weak(this);
-	const auto guard = gsl::finally([=] {
-		if (weak) {
-			weak->setExternalShellBlocked(false);
-		}
-	});
-	return Webview::ShowBlockingPopup(std::move(args));
+	Webview::ShowPopupAsync(
+		std::move(args),
+		[=, done = std::move(done)](
+				Webview::PopupResult result) mutable {
+			if (weak) {
+				weak->setExternalShellBlocked(false);
+			}
+			if (done) {
+				done(std::move(result));
+			}
+		},
+		false);
 }
 
 void Panel::createWebviewBottom() {
@@ -2328,6 +2329,27 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 				}
 			});
 			return Webview::DefaultDialogHandler(std::move(args));
+		});
+		raw->setAsyncDialogHandler([=](
+				Webview::DialogArgs args,
+				std::function<void(Webview::DialogResult)> done) {
+			const auto anchor = externalShellAnchor();
+			args.anchorGeometry = anchor.anchorGeometry;
+			args.transientParent = anchor.transientParent;
+			args.parent = nullptr;
+			setExternalShellBlocked(true);
+			const auto weak = base::make_weak(this);
+			Webview::DefaultDialogHandlerAsync(
+				std::move(args),
+				[=, done = std::move(done)](
+						Webview::DialogResult result) mutable {
+					if (weak) {
+						weak->setExternalShellBlocked(false);
+					}
+					done(std::move(result));
+				},
+				false);
+			return true;
 		});
 	}
 
@@ -2712,21 +2734,23 @@ void Panel::openPopup(const QJsonObject &args) {
 		return;
 	}
 	const auto weak = base::make_weak(this);
-	const auto result = showBlockingPopup({
+	showPopup({
 		.parent = webviewWindowForPopup(),
 		.title = args["title"].toString(),
 		.text = message,
 		.buttons = std::move(buttons),
-	});
-	if (weak) {
+	}, [=](Webview::PopupResult result) {
+		if (!weak) {
+			return;
+		}
 		postEvent("popup_closed", result.id
 			? QJsonObject{ { u"button_id"_q, *result.id } }
 			: EventData());
-	}
+	});
 }
 
 void Panel::openScanQrPopup(const QJsonObject &args) {
-	[[maybe_unused]] const auto ok = showBlockingPopup({
+	showPopup({
 		.parent = webviewWindowForPopup(),
 		.text = tr::lng_bot_no_scan_qr(tr::now),
 		.buttons = { {
@@ -2734,11 +2758,11 @@ void Panel::openScanQrPopup(const QJsonObject &args) {
 			.text = tr::lng_box_ok(tr::now),
 			.type = Webview::PopupArgs::Button::Type::Ok,
 		}},
-	});
+	}, [](Webview::PopupResult) {});
 }
 
 void Panel::openShareStory(const QJsonObject &args) {
-	[[maybe_unused]] const auto ok = showBlockingPopup({
+	showPopup({
 		.parent = webviewWindowForPopup(),
 		.text = tr::lng_bot_no_share_story(tr::now),
 		.buttons = { {
@@ -2746,7 +2770,7 @@ void Panel::openShareStory(const QJsonObject &args) {
 			.text = tr::lng_box_ok(tr::now),
 			.type = Webview::PopupArgs::Button::Type::Ok,
 		}},
-	});
+	}, [](Webview::PopupResult) {});
 }
 
 void Panel::requestWriteAccess() {
@@ -2773,7 +2797,7 @@ void Panel::requestWriteAccess() {
 			return;
 		}
 		const auto integration = &Ui::Integration::Instance();
-		const auto result = showBlockingPopup({
+		showPopup({
 			.parent = webviewWindowForPopup(),
 			.title = integration->phraseBotAllowWriteTitle(),
 			.text = integration->phraseBotAllowWrite(),
@@ -2784,14 +2808,15 @@ void Panel::requestWriteAccess() {
 				},
 				{ .id = "cancel", .type = Button::Type::Cancel },
 			},
+		}, [=](Webview::PopupResult result) {
+			if (!weak) {
+				return;
+			} else if (result.id == "allow") {
+				_delegate->botAllowWriteAccess(crl::guard(this, finish));
+			} else {
+				finish(false);
+			}
 		});
-		if (!weak) {
-			return;
-		} else if (result.id == "allow") {
-			_delegate->botAllowWriteAccess(crl::guard(this, finish));
-		} else {
-			finish(false);
-		}
 	});
 }
 
@@ -2818,7 +2843,7 @@ void Panel::requestPhone() {
 		return;
 	}
 	const auto integration = &Ui::Integration::Instance();
-	const auto result = showBlockingPopup({
+	showPopup({
 		.parent = webviewWindowForPopup(),
 		.title = integration->phraseBotSharePhoneTitle(),
 		.text = integration->phraseBotSharePhone(),
@@ -2829,14 +2854,15 @@ void Panel::requestPhone() {
 			},
 			{ .id = "cancel", .type = Button::Type::Cancel },
 		},
+	}, [=](Webview::PopupResult result) {
+		if (!weak) {
+			return;
+		} else if (result.id == "share") {
+			_delegate->botSharePhone(crl::guard(this, finish));
+		} else {
+			finish(false);
+		}
 	});
-	if (!weak) {
-		return;
-	} else if (result.id == "share") {
-		_delegate->botSharePhone(crl::guard(this, finish));
-	} else {
-		finish(false);
-	}
 }
 
 void Panel::replyRequestPhone(bool shared) {
@@ -2940,7 +2966,7 @@ void Panel::closeWithConfirmation() {
 	using Button = Webview::PopupArgs::Button;
 	const auto weak = base::make_weak(this);
 	const auto integration = &Ui::Integration::Instance();
-	const auto result = showBlockingPopup({
+	showPopup({
 		.parent = webviewWindowForPopup(),
 		.title = integration->phrasePanelCloseWarning(),
 		.text = integration->phrasePanelCloseUnsaved(),
@@ -2953,14 +2979,15 @@ void Panel::closeWithConfirmation() {
 			{ .id = "cancel", .type = Button::Type::Cancel },
 		},
 		.ignoreFloodCheck = true,
+	}, [=](Webview::PopupResult result) {
+		if (!weak) {
+			return;
+		} else if (result.id == "close") {
+			_delegate->botClose();
+		} else {
+			_closeWithConfirmationScheduled = false;
+		}
 	});
-	if (!weak) {
-		return;
-	} else if (result.id == "close") {
-		_delegate->botClose();
-	} else {
-		_closeWithConfirmationScheduled = false;
-	}
 }
 
 void Panel::setupClosingBehaviour(const QJsonObject &args) {
