@@ -304,11 +304,23 @@ base::options::toggle OptionFractionalScalingEnabled({
 	.restartRequired = true,
 });
 
+base::options::toggle OptionUseQtRhi({
+	.id = kOptionUseQtRhi,
+	.name = "Use Qt RHI renderer",
+	.defaultValue = !Platform::IsMac(),
+	.scope = [] {
+		return (!Platform::IsWindows() || Platform::IsWindowsARM64())
+			&& QLibraryInfo::version() >= QVersionNumber(6, 7);
+	},
+	.restartRequired = true,
+});
+
 } // namespace
 
 const char kOptionFractionalScalingEnabled[] = "fractional-scaling-enabled";
 const char kOptionHighDpiDownscale[] = "high-dpi-downscale";
 const char kOptionFreeType[] = "freetype";
+const char kOptionUseQtRhi[] = "use-qt-rhi";
 
 Launcher *Launcher::InstanceSetter::Instance = nullptr;
 
@@ -365,15 +377,17 @@ void Launcher::initHighDpi() {
 		qputenv("QT_WIDGETS_RHI_BACKEND", "opengl");
 	}
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-	qputenv("QT_WIDGETS_RHI", "1");
+	if (OptionUseQtRhi.value()) {
+		qputenv("QT_WIDGETS_RHI", "1");
 #ifdef Q_OS_MAC
-	qputenv("QT_WIDGETS_RHI_BACKEND",
-		Platform::MetalSupported() ? "metal" : "opengl");
+		qputenv("QT_WIDGETS_RHI_BACKEND",
+			Platform::MetalSupported() ? "metal" : "opengl");
 #elif defined(Q_OS_WIN)
-	qputenv("QT_WIDGETS_RHI_BACKEND", "d3d11");
+		qputenv("QT_WIDGETS_RHI_BACKEND", "d3d11");
 #else
-	qputenv("QT_WIDGETS_RHI_BACKEND", "opengl");
+		qputenv("QT_WIDGETS_RHI_BACKEND", "opengl");
 #endif
+	}
 #endif // Qt >= 6.7
 
 	if (OptionFractionalScalingEnabled.value()
