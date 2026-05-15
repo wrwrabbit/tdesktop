@@ -13,7 +13,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/style/style_core_direction.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/labels.h"
-#include "ui/widgets/shadow.h"
 #include "ui/wrap/padding_wrap.h"
 #include "webview/webview_data_stream_memory.h"
 #include "webview/webview_embed.h"
@@ -22,15 +21,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_iv.h"
 
+#include <QtCore/QEvent>
+#include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonValue>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPainter>
+#include <QtGui/QWindow>
 #include <QtWidgets/QApplication>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <limits>
 
 namespace Iv::Markdown {
@@ -75,16 +79,121 @@ namespace {
 }
 
 [[nodiscard]] int ParsePositiveInt(const QJsonValue &value) {
-	if (!value.isDouble()) {
+	auto parsed = 0.;
+	if (value.isDouble()) {
+		parsed = value.toDouble();
+	} else if (value.isString()) {
+		auto text = value.toString().trimmed();
+		if (text.endsWith(u"px"_q)) {
+			text.chop(2);
+		}
+		auto ok = false;
+		parsed = text.toDouble(&ok);
+		if (!ok) {
+			return 0;
+		}
+	} else {
 		return 0;
 	}
-	const auto parsed = value.toDouble();
 	if (parsed <= 0.
 		|| parsed > static_cast<double>(std::numeric_limits<int>::max())) {
 		return 0;
 	}
-	const auto result = static_cast<int>(parsed);
-	return (parsed == result) ? result : 0;
+	return static_cast<int>(std::round(parsed));
+}
+
+[[nodiscard]] int ResizeFrameHeight(const QJsonObject &object) {
+	if (object.value("eventType").toString() != u"resize_frame"_q) {
+		return 0;
+	}
+	return ParsePositiveInt(
+		object.value("eventData").toObject().value("height"));
+}
+
+[[nodiscard]] int ResizeFrameHeight(const QJsonDocument &message) {
+	if (message.isArray()) {
+		const auto array = message.array();
+		if (array.size() < 2 || array[0].toString() != u"resize_frame"_q) {
+			return 0;
+		}
+		return ParsePositiveInt(array[1].toObject().value("height"));
+	}
+	return message.isObject() ? ResizeFrameHeight(message.object()) : 0;
+}
+
+[[nodiscard]] QJsonDocument NavigationReadyMessage(
+		QByteArray resourceId,
+		QString token,
+		QString url) {
+	auto object = QJsonObject{
+		{ u"event"_q, u"navigation_ready"_q },
+	};
+	if (!resourceId.isEmpty()) {
+		object.insert(u"resourceId"_q, QString::fromUtf8(resourceId));
+	}
+	if (!token.isEmpty()) {
+		object.insert(u"token"_q, token);
+	}
+	if (!url.isEmpty()) {
+		object.insert(u"url"_q, url);
+	}
+	return QJsonDocument(object);
+}
+
+[[nodiscard]] QByteArray EmbedInitScript() {
+	return QByteArray(
+		"(function(){"
+		"window.TelegramWebviewProxy={"
+		"postEvent:function(eventType,eventData){"
+		"if(window.external&&typeof window.external.invoke==='function'){"
+		"try{"
+		"window.external.invoke(JSON.stringify([eventType,eventData]));"
+		"}catch(e){}"
+		"}"
+		"}"
+		"};"
+		"if(window!==window.top){"
+		"return;"
+		"}"
+		"function resourceId(){"
+		"var path='';"
+		"try{path=String(window.location.pathname||'');}catch(e){}"
+		"while(path.charAt(0)==='/'){path=path.slice(1);}"
+		"return path;"
+		"}"
+		"function token(){"
+		"var hash='';"
+		"try{hash=String(window.location.hash||'');}catch(e){}"
+		"while(hash.charAt(0)==='#'){hash=hash.slice(1);}"
+		"return hash;"
+		"}"
+		"function url(){"
+		"try{return String(window.location.href||'');}catch(e){return '';}"
+		"}"
+		"function report(){"
+		"if(!window.external||typeof window.external.invoke!=='function'){"
+		"return;"
+		"}"
+		"try{"
+		"window.external.invoke(JSON.stringify({"
+		"event:'navigation_ready',"
+		"resourceId:resourceId(),"
+		"token:token(),"
+		"url:url()"
+		"}));"
+		"}catch(e){"
+		"}"
+		"}"
+		"if(document.readyState==='complete'){"
+		"report();"
+		"}else{"
+		"var handler=function(){"
+		"window.removeEventListener('load',handler,false);"
+		"report();"
+		"};"
+		"window.addEventListener('load',handler,false);"
+		"}"
+		"})();");
 }
 
 } // namespace
@@ -93,23 +202,50 @@ EmbedOverlay::EmbedOverlay(
 	QWidget *parent,
 	const base::flat_map<QByteArray, QByteArray> *resources,
 	std::function<void(QString)> linkActivationCallback,
+	Webview::StorageId storageId,
 	std::function<Webview::DataResult(QByteArray, Webview::DataRequest)>
 		dataRequestHandler)
 : Ui::RpWidget(parent)
+, _webviewParent(parent)
 , _resources(resources)
 , _linkActivationCallback(std::move(linkActivationCallback))
-, _dataRequestHandler(std::move(dataRequestHandler)) {
+, _storageId(std::move(storageId))
+, _dataRequestHandler(std::move(dataRequestHandler))
+, _loadingAnimation(
+	[=] {
+		if (!anim::Disabled()) {
+			update(_contentGeometry);
+			if (_content) {
+				_content->update();
+			}
+		}
+	},
+	st::markdownEmbedOverlay.loading) {
 	setObjectName(u"nativeIvEmbedOverlay"_q);
-	setAttribute(Qt::WA_OpaquePaintEvent);
 	setMouseTracking(true);
-	hide();
+	QWidget::hide();
 
 	_content = Ui::CreateChild<Ui::RpWidget>(this);
 	_content->setObjectName(u"nativeIvEmbedOverlayShell"_q);
+	_content->paintRequest(
+	) | rpl::on_next([=] {
+		if (!_loading || _contentGeometry.isEmpty()) {
+			return;
+		}
+		auto p = QPainter(_content);
+		const auto size = st::markdownEmbedOverlay.loading.size;
+		const auto loader = style::centerrect(
+			bodyRectInContent(),
+			QRect(QPoint(), size));
+		_loadingAnimation.draw(p, loader.topLeft(), size, _content->width());
+	}, _content->lifetime());
 	_content->show();
 }
 
-EmbedOverlay::~EmbedOverlay() = default;
+EmbedOverlay::~EmbedOverlay() {
+	destroyWebview();
+	removeEscapeFilter();
+}
 
 bool EmbedOverlay::showEmbed(const EmbedRequest &request) {
 	if (!request) {
@@ -118,12 +254,22 @@ bool EmbedOverlay::showEmbed(const EmbedRequest &request) {
 	if (isHidden()) {
 		_focusRestore = QApplication::focusWidget();
 	}
+	destroyWebview();
 	_request = request;
 	_preferredBodySize = QSize();
+	_pendingPreferredBodySize = QSize();
+	_readyNavigationToken = QString();
+	_cssToQtScale = 1.;
+	_readyFromResource = false;
+	_ready = false;
+	_loading = true;
 	clearWebviewError();
 	QWidget::show();
-	raise();
+	installEscapeFilter();
+	raiseSurfaces();
 	updateContentGeometry();
+	_loadingAnimation.start();
+	_content->update();
 	if (!_webview) {
 		const auto available = Webview::Availability();
 		if (available.error != Webview::Available::Error::None) {
@@ -133,10 +279,18 @@ bool EmbedOverlay::showEmbed(const EmbedRequest &request) {
 	}
 	ensureWebview();
 	if (_webview && _webview->widget()) {
-		_webview->widget()->show();
-		if (_resources
-			&& (_resources->find(request.resourceId) != _resources->end())) {
-			_webview->navigateToData(QString::fromUtf8(request.resourceId));
+		const auto hasResource = _resources
+			&& (_resources->find(request.resourceId) != _resources->end());
+		_readyFromResource = hasResource;
+		_readyNavigationToken = hasResource
+			? QString::number(++_navigationGeneration)
+			: QString();
+		updateWebviewGeometry();
+		if (hasResource) {
+			_webview->navigateToData(
+				QString::fromUtf8(request.resourceId)
+					+ u"#"_q
+					+ _readyNavigationToken);
 		} else if (!request.fallbackUrl.isEmpty()) {
 			_webview->navigate(request.fallbackUrl);
 		} else {
@@ -145,26 +299,41 @@ bool EmbedOverlay::showEmbed(const EmbedRequest &request) {
 		if (_error && !_error->isHidden()) {
 			_error->raise();
 		}
-		_webview->focus();
 	} else {
 		showWebviewError();
 	}
 	return true;
 }
 
-void EmbedOverlay::hide() {
+void EmbedOverlay::closeEmbed() {
 	if (isHidden()) {
 		return;
 	}
+	_loading = false;
+	_loadingAnimation.stop(anim::type::instant);
+	if (_content) {
+		_content->update();
+	}
+	destroyWebview();
+	removeEscapeFilter();
 	QWidget::hide();
+	clearWebviewError();
+	_request = EmbedRequest();
+	_preferredBodySize = QSize();
+	_pendingPreferredBodySize = QSize();
+	_readyNavigationToken = QString();
+	_cssToQtScale = 1.;
+	_readyFromResource = false;
+	_ready = false;
 	restoreFocus();
 }
 
-void EmbedOverlay::updateGeometry(QRect geometry) {
+void EmbedOverlay::updateGeometry(QRect geometry, int contentWidth) {
 	setGeometry(geometry);
+	_contentWidth = contentWidth;
 	updateContentGeometry();
 	if (!isHidden()) {
-		raise();
+		raiseSurfaces();
 	}
 }
 
@@ -172,25 +341,63 @@ void EmbedOverlay::testHandleWebviewMessage(const QJsonDocument &message) {
 	handleWebviewMessage(message);
 }
 
+void EmbedOverlay::testHandleNavigationDone(bool success) {
+	if (success) {
+		handleWebviewMessage(NavigationReadyMessage(
+			_readyFromResource ? _request.resourceId : QByteArray(),
+			_readyFromResource ? _readyNavigationToken : QString(),
+			_readyFromResource ? QString() : _request.fallbackUrl));
+		return;
+	}
+	handleNavigationDone(success);
+}
+
+bool EmbedOverlay::testLoadingCoverVisible() const {
+	return _loading;
+}
+
+const Webview::StorageId &EmbedOverlay::testEffectiveStorageId() const {
+	return _storageId;
+}
+
+bool EmbedOverlay::eventFilter(QObject *object, QEvent *event) {
+	const auto type = event->type();
+	if (isHidden()
+		|| (type != QEvent::ShortcutOverride && type != QEvent::KeyPress)
+		|| !eventFromOverlayWindow(object)) {
+		return QObject::eventFilter(object, event);
+	}
+	const auto keyEvent = static_cast<QKeyEvent*>(event);
+	if (keyEvent->key() != Qt::Key_Escape) {
+		return QObject::eventFilter(object, event);
+	}
+	keyEvent->accept();
+	if (type == QEvent::KeyPress) {
+		closeEmbed();
+	}
+	return true;
+}
+
 void EmbedOverlay::paintEvent(QPaintEvent *e) {
+	Q_UNUSED(e);
+
 	auto p = QPainter(this);
-	p.fillRect(e->rect(), st::markdownEmbedOverlay.scrimBg);
+	const auto full = rect();
+	p.fillRect(full, st::markdownEmbedOverlay.scrimBg);
 	if (_contentGeometry.isEmpty()) {
 		return;
 	}
-	Ui::Shadow::paint(
-		p,
-		_contentGeometry,
-		width(),
-		st::boxRoundShadow,
-		Ui::CachedCornersMasks(Ui::CachedCornerRadius::Small));
-	Ui::FillRoundRect(
-		p,
-		_contentGeometry,
-		st::markdownEmbedOverlay.bg,
-		Ui::PrepareCornerPixmaps(
-			st::roundRadiusSmall,
-			st::markdownEmbedOverlay.bg));
+	if (_request.fullWidth) {
+		p.fillRect(_contentGeometry, st::markdownEmbedOverlay.bg);
+	} else {
+		Ui::FillRoundRect(
+			p,
+			_contentGeometry,
+			st::markdownEmbedOverlay.bg,
+			Ui::PrepareCornerPixmaps(
+				st::roundRadiusSmall,
+				st::markdownEmbedOverlay.bg));
+	}
 }
 
 void EmbedOverlay::mousePressEvent(QMouseEvent *e) {
@@ -201,10 +408,47 @@ void EmbedOverlay::mousePressEvent(QMouseEvent *e) {
 void EmbedOverlay::mouseReleaseEvent(QMouseEvent *e) {
 	const auto outside = !_contentGeometry.contains(e->pos());
 	if (_pressedOutside && outside && e->button() == Qt::LeftButton) {
-		hide();
+		closeEmbed();
 	}
 	_pressedOutside = false;
 	e->accept();
+}
+
+void EmbedOverlay::installEscapeFilter() {
+	if (!_escapeFilterInstalled) {
+		qApp->installEventFilter(this);
+		_escapeFilterInstalled = true;
+	}
+}
+
+void EmbedOverlay::removeEscapeFilter() {
+	if (_escapeFilterInstalled) {
+		qApp->removeEventFilter(this);
+		_escapeFilterInstalled = false;
+	}
+}
+
+bool EmbedOverlay::eventFromOverlayWindow(QObject *object) const {
+	const auto overlayWindow = window();
+	const auto activeWindow = QApplication::activeWindow();
+	if (!overlayWindow) {
+		return true;
+	} else if (const auto widget = qobject_cast<QWidget*>(object)) {
+		return widget->window() == overlayWindow;
+	} else if (const auto qwindow = qobject_cast<QWindow*>(object)) {
+		return (qwindow == overlayWindow->windowHandle())
+			|| !activeWindow
+			|| (activeWindow == overlayWindow);
+	}
+	return !activeWindow || (activeWindow == overlayWindow);
+}
+
+Webview::WindowConfig EmbedOverlay::makeWindowConfig() const {
+	return {
+		.opaqueBg = st::markdownEmbedOverlay.bg->c,
+		.storageId = _storageId,
+		.safe = true,
+	};
 }
 
 void EmbedOverlay::ensureWebview() {
@@ -212,25 +456,28 @@ void EmbedOverlay::ensureWebview() {
 		updateContentGeometry();
 		return;
 	}
+	const auto generation = ++_webviewGeneration;
 	_webview = std::make_unique<Webview::Window>(
-		_content,
-		Webview::WindowConfig{
-			.opaqueBg = st::markdownEmbedOverlay.bg->c,
-			.safe = true,
-		});
+		_webviewParent ? _webviewParent.data() : this,
+		makeWindowConfig());
 	const auto raw = _webview.get();
 	const auto widget = raw->widget();
 	if (!widget) {
 		_webview = nullptr;
+		showWebviewError();
 		return;
 	}
-	widget->show();
+	widget->hide();
 	QObject::connect(widget, &QObject::destroyed, this, [=] {
-		if (!_webview || _webview.get() != raw) {
+		if (_webviewGeneration != generation
+			|| !_webview
+			|| _webview.get() != raw) {
 			return;
 		}
 		crl::on_main(this, [=] {
-			if (_webview && _webview.get() == raw) {
+			if (_webviewGeneration == generation
+				&& _webview
+				&& _webview.get() == raw) {
 				_webview = nullptr;
 				showWebviewError({ u"Error: WebView has crashed."_q });
 			}
@@ -239,6 +486,7 @@ void EmbedOverlay::ensureWebview() {
 	raw->setDataRequestHandler([=](Webview::DataRequest request) {
 		return handleDataRequest(std::move(request));
 	});
+	raw->init(EmbedInitScript());
 	raw->setNavigationStartHandler([=](const QString &uri, bool newWindow) {
 		Q_UNUSED(newWindow);
 
@@ -251,9 +499,20 @@ void EmbedOverlay::ensureWebview() {
 		}
 		return false;
 	});
+	raw->setNavigationDoneHandler([=](bool success) {
+		crl::on_main(this, [=] {
+			if (_webviewGeneration == generation
+				&& _webview
+				&& (_webview.get() == raw)) {
+				handleNavigationDone(success);
+			}
+		});
+	});
 	raw->setMessageHandler([=](const QJsonDocument &message) {
 		crl::on_main(this, [=] {
-			if (_webview && (_webview.get() == raw)) {
+			if (_webviewGeneration == generation
+				&& _webview
+				&& (_webview.get() == raw)) {
 				handleWebviewMessage(message);
 			}
 		});
@@ -265,8 +524,33 @@ void EmbedOverlay::handleWebviewMessage(const QJsonDocument &message) {
 	if (!_request) {
 		return;
 	}
+	if (const auto height = ResizeFrameHeight(message)) {
+		applyPreferredBodyHeight(cssPixelsToQt(height));
+		return;
+	}
 	const auto object = message.object();
-	if (object.value("event").toString() != u"preferred_size"_q) {
+	const auto event = object.value("event").toString();
+	if (event == u"navigation_ready"_q) {
+		if (!_webview || !_webview->widget()) {
+			showWebviewError();
+			return;
+		}
+		if (_readyFromResource) {
+			if (object.value("token").toString() != _readyNavigationToken) {
+				return;
+			}
+			if (normalizedRequestId(
+				object.value("resourceId").toString().toStdString())
+					!= _request.resourceId) {
+				return;
+			}
+		} else if (object.value("url").toString().isEmpty()) {
+			return;
+		}
+		setReady();
+		return;
+	}
+	if (event != u"preferred_size"_q) {
 		return;
 	}
 	const auto width = ParsePositiveInt(object.value("width"));
@@ -274,6 +558,14 @@ void EmbedOverlay::handleWebviewMessage(const QJsonDocument &message) {
 	if (!width || !height) {
 		return;
 	}
+	auto viewportWidth = ParsePositiveInt(object.value("viewportWidth"));
+	if (!viewportWidth) {
+		viewportWidth = ParsePositiveInt(object.value("viewport_width"));
+	}
+	if (!viewportWidth) {
+		viewportWidth = ParsePositiveInt(object.value("innerWidth"));
+	}
+	updateCssToQtScale(viewportWidth);
 	auto resourceId = object.value("resourceId").toString();
 	if (resourceId.isEmpty()) {
 		resourceId = object.value("resource_id").toString();
@@ -282,70 +574,118 @@ void EmbedOverlay::handleWebviewMessage(const QJsonDocument &message) {
 		&& normalizedRequestId(resourceId.toStdString()) != _request.resourceId) {
 		return;
 	}
-	const auto size = QSize(width, height);
-	if (_preferredBodySize == size) {
+	applyPreferredBodySize(QSize(cssPixelsToQt(width), cssPixelsToQt(height)));
+}
+
+void EmbedOverlay::handleNavigationDone(bool success) {
+	if (success || !_request || _ready || isHidden()) {
 		return;
 	}
-	applyPreferredBodySize(size);
+	showWebviewError();
+}
+
+void EmbedOverlay::setReady() {
+	if (_ready || !_webview || !_webview->widget()) {
+		return;
+	}
+	_ready = true;
+	if (_pendingPreferredBodySize.isValid()
+		&& (_pendingPreferredBodySize.width() > 0
+			|| _pendingPreferredBodySize.height() > 0)) {
+		_preferredBodySize = _pendingPreferredBodySize;
+		_pendingPreferredBodySize = QSize();
+		updateContentGeometry();
+	} else {
+		updateWebviewGeometry();
+	}
+	_loading = false;
+	_loadingAnimation.stop(anim::type::normal);
+	_content->update();
+	clearWebviewError();
+	_webview->widget()->show();
+	_webview->widget()->raise();
+	_webview->focus();
+	update();
+	_content->update();
 }
 
 void EmbedOverlay::applyPreferredBodySize(QSize size) {
 	if (!size.isValid()) {
 		return;
 	}
+	if (!_ready) {
+		_pendingPreferredBodySize = size;
+		return;
+	}
+	if (_preferredBodySize == size) {
+		return;
+	}
 	_preferredBodySize = size;
 	updateContentGeometry();
+}
+
+void EmbedOverlay::applyPreferredBodyHeight(int height) {
+	if (height <= 0) {
+		return;
+	}
+	applyPreferredBodySize(QSize(_preferredBodySize.width(), height));
+}
+
+void EmbedOverlay::updateCssToQtScale(int viewportWidth) {
+	const auto body = bodyGeometry();
+	if (viewportWidth <= 0 || body.width() <= 0) {
+		return;
+	}
+	_cssToQtScale = std::clamp(body.width() / double(viewportWidth), 0.25, 4.);
 }
 
 void EmbedOverlay::updateContentGeometry() {
 	if (!_content) {
 		return;
 	}
-	const auto available = rect().marginsRemoved(
-		st::markdownEmbedOverlay.margin + st::boxRoundShadow.extend);
+	const auto margin = st::markdownEmbedOverlay.margin;
+	const auto available = _request.fullWidth
+		? rect().marginsRemoved({ 0, margin.top(), 0, margin.bottom() })
+		: rect().marginsRemoved(margin);
 	if (available.isEmpty()) {
 		_contentGeometry = QRect();
 		_content->setGeometry(_contentGeometry);
-		if (_webview && _webview->widget()) {
-			_webview->widget()->setGeometry(QRect());
-		}
+		updateWebviewGeometry();
 		if (_error) {
 			_error->setGeometry(QRect());
 		}
 		update();
 		return;
 	}
-	const auto padding = st::markdownEmbedOverlay.padding;
+	const auto padding = contentPadding();
 	const auto horizontalPadding = padding.left() + padding.right();
 	const auto verticalPadding = padding.top() + padding.bottom();
 	const auto availableWidth = std::max(available.width(), 1);
 	const auto availableHeight = std::max(available.height(), 1);
-	const auto availableBodyWidth = std::max(
-		availableWidth - horizontalPadding,
-		1);
 	const auto availableBodyHeight = std::max(
 		availableHeight - verticalPadding,
 		1);
-	const auto desiredBodyWidth = [&] {
-		if (_preferredBodySize.width() > 0) {
-			return _preferredBodySize.width();
-		}
-		if (_request.width > 0) {
-			return _request.width;
-		}
-		return st::markdownEmbedOverlay.size.width();
-	}();
 	const auto width = _request.fullWidth
 		? availableWidth
-		: std::min(
-			std::clamp(desiredBodyWidth, 1, availableBodyWidth)
-				+ horizontalPadding,
+		: std::clamp(
+			(_contentWidth > 0)
+				? _contentWidth
+				: st::markdownEmbedOverlay.size.width(),
+			1,
 			availableWidth);
+	const auto bodyWidth = std::max(width - horizontalPadding, 1);
 	const auto desiredBodyHeight = [&] {
 		if (_preferredBodySize.height() > 0) {
 			return _preferredBodySize.height();
 		}
 		if (_request.height > 0) {
+			if (_request.width > 0) {
+				return std::max(
+					static_cast<int>(std::round(
+						bodyWidth
+							* (double(_request.height) / _request.width))),
+					1);
+			}
 			return _request.height;
 		}
 		return st::markdownEmbedOverlay.size.height();
@@ -358,12 +698,10 @@ void EmbedOverlay::updateContentGeometry() {
 		available,
 		QRect(0, 0, width, height));
 	_content->setGeometry(_contentGeometry);
-	const auto body = bodyRect();
-	if (_webview && _webview->widget()) {
-		_webview->widget()->setGeometry(body);
-	}
+	updateWebviewGeometry();
 	if (_error && _errorLabel) {
 		_errorLabel->setContextCopyText(_request.fallbackUrl);
+		const auto body = bodyRectInContent();
 		_error->resizeToWidth(std::max(body.width(), 1));
 		_error->moveToLeft(
 			body.x(),
@@ -372,6 +710,39 @@ void EmbedOverlay::updateContentGeometry() {
 		_error->raise();
 	}
 	update();
+	_content->update();
+}
+
+void EmbedOverlay::updateWebviewGeometry() {
+	if (_webview && _webview->widget()) {
+		_webview->widget()->setGeometry(bodyGeometry());
+		if (!_webview->widget()->isHidden()) {
+			_webview->widget()->raise();
+		}
+	}
+}
+
+void EmbedOverlay::raiseSurfaces() {
+	raise();
+	if (_webview && _webview->widget() && !_webview->widget()->isHidden()) {
+		_webview->widget()->raise();
+	}
+}
+
+void EmbedOverlay::hideWebview() {
+	if (_webview && _webview->widget()) {
+		_webview->widget()->hide();
+	}
+}
+
+void EmbedOverlay::destroyWebview() {
+	++_webviewGeneration;
+	if (_webview) {
+		if (const auto widget = _webview->widget()) {
+			widget->hide();
+		}
+		_webview = nullptr;
+	}
 }
 
 void EmbedOverlay::showWebviewError() {
@@ -382,9 +753,11 @@ void EmbedOverlay::showWebviewError() {
 }
 
 void EmbedOverlay::showWebviewError(const TextWithEntities &text) {
-	if (_webview && _webview->widget()) {
-		_webview->widget()->hide();
-	}
+	_ready = false;
+	_loading = false;
+	_loadingAnimation.stop(anim::type::normal);
+	_content->update();
+	hideWebview();
 	if (!_error) {
 		_error = Ui::CreateChild<Ui::PaddingWrap<Ui::FlatLabel>>(
 			_content,
@@ -425,13 +798,27 @@ void EmbedOverlay::restoreFocus() {
 	_focusRestore = nullptr;
 }
 
-QRect EmbedOverlay::bodyRect() const {
-	const auto padding = st::markdownEmbedOverlay.padding;
+QRect EmbedOverlay::bodyGeometry() const {
+	return _contentGeometry.isEmpty()
+		? QRect()
+		: _contentGeometry.marginsRemoved(contentPadding());
+}
+
+QRect EmbedOverlay::bodyRectInContent() const {
+	const auto body = bodyGeometry();
 	return QRect(
-		padding.left(),
-		padding.top(),
-		std::max(_contentGeometry.width() - padding.left() - padding.right(), 1),
-		std::max(_contentGeometry.height() - padding.top() - padding.bottom(), 1));
+		body.topLeft() - _contentGeometry.topLeft(),
+		body.size());
+}
+
+QMargins EmbedOverlay::contentPadding() const {
+	return _request.fullWidth ? QMargins() : st::markdownEmbedOverlay.padding;
+}
+
+int EmbedOverlay::cssPixelsToQt(int value) const {
+	return (value > 0)
+		? std::max(static_cast<int>(std::round(value * _cssToQtScale)), 1)
+		: 0;
 }
 
 QByteArray EmbedOverlay::normalizedRequestId(const std::string &id) const {

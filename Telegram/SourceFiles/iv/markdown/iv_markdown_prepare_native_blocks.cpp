@@ -262,6 +262,17 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 	return QByteArray(
 		"<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
 		"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+		"<script>"
+		"window.TelegramWebviewProxy={"
+		"postEvent:function(eventType,eventData){"
+		"if(window.external&&typeof window.external.invoke==='function'){"
+		"try{"
+		"window.external.invoke(JSON.stringify([eventType,eventData]));"
+		"}catch(e){}"
+		"}"
+		"}"
+		"};"
+		"</script>"
 		"<style>"
 		"html,body{margin:0;padding:0;background:#fff;color:#000;}"
 		"body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}"
@@ -285,6 +296,46 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 		"if(value<1){return 0;}"
 		"return Math.min(value,max||100000);"
 		"}"
+		"function resourceId(){"
+		"var path='';"
+		"try{path=String(window.location.pathname||'');}catch(e){}"
+		"while(path.charAt(0)==='/'){path=path.slice(1);}"
+		"return path;"
+		"}"
+		"function documentHeight(doc){"
+		"if(!doc){return 0;}"
+		"var body=doc.body;"
+		"var root=doc.documentElement;"
+		"var height=0;"
+		"if(body){"
+		"var bodyRect=body.getBoundingClientRect();"
+		"height=Math.max("
+		"height,"
+		"body.scrollHeight,"
+		"body.offsetHeight,"
+		"body.clientHeight,"
+		"bodyRect.height);"
+		"}"
+		"if(root){"
+		"var rootRect=root.getBoundingClientRect();"
+		"height=Math.max("
+		"height,"
+		"root.scrollHeight,"
+		"root.offsetHeight,"
+		"root.clientHeight,"
+		"rootRect.height);"
+		"}"
+		"return clamp(height,100000);"
+		"}"
+		"function iframeDocumentHeight(iframe){"
+		"try{"
+		"return documentHeight("
+		"iframe.contentDocument"
+		"||(iframe.contentWindow&&iframe.contentWindow.document));"
+		"}catch(e){"
+		"return 0;"
+		"}"
+		"}"
 		"function findWrap(iframe){"
 		"var node=iframe;"
 		"while(node&&node!==document.body){"
@@ -304,14 +355,20 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 		"}"
 		"}"
 		"function seedIframeHeight(iframe){"
+		"if(iframe.getAttribute('data-native-iv-resized')==='1'){"
+		"return;"
+		"}"
+		"var measured=iframeDocumentHeight(iframe);"
+		"if(measured){"
+		"iframe.setAttribute('data-native-iv-measured','1');"
+		"iframe.style.height=measured+'px';"
+		"return;"
+		"}"
 		"var wrap=findWrap(iframe);"
 		"if(!wrap){return;}"
 		"var fixed=clamp(wrap.getAttribute('data-height'),100000);"
 		"if(fixed){"
 		"iframe.style.height=fixed+'px';"
-		"return;"
-		"}"
-		"if(iframe.getAttribute('data-native-iv-resized')==='1'){"
 		"return;"
 		"}"
 		"var ratio=Number(wrap.getAttribute('data-aspect-ratio'));"
@@ -352,6 +409,11 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 		"function measurePreferredSize(){"
 		"var width=0;"
 		"var height=0;"
+		"var viewportWidth=clamp("
+		"Math.max("
+		"window.innerWidth||0,"
+		"document.documentElement?document.documentElement.clientWidth:0),"
+		"100000);"
 		"var body=document.body;"
 		"if(body){"
 		"var bodyRect=body.getBoundingClientRect();"
@@ -379,7 +441,8 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 		"}"
 		"return{"
 		"width:clamp(width,100000),"
-		"height:clamp(height,100000)"
+		"height:clamp(height,100000),"
+		"viewportWidth:viewportWidth"
 		"};"
 		"}"
 		"function reportPreferredSize(){"
@@ -396,8 +459,11 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 		"try{"
 		"window.external.invoke(JSON.stringify({"
 		"event:'preferred_size',"
+		"resourceId:resourceId(),"
 		"width:size.width,"
-		"height:size.height"
+		"height:size.height,"
+		"viewportWidth:size.viewportWidth,"
+		"devicePixelRatio:window.devicePixelRatio||1"
 		"}));"
 		"}catch(e){"
 		"}"
@@ -464,9 +530,11 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 		"if(document.body){"
 		"observer.observe(document.body);"
 		"}"
-		"}else{"
-		"setInterval(scheduleMeasure,250);"
 		"}"
+		"setInterval(function(){"
+		"syncIframes();"
+		"scheduleMeasure();"
+		"},250);"
 		"syncIframes();"
 		"scheduleMeasure();"
 		"})();"
@@ -599,19 +667,31 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 	auto aspectRatio = QByteArray();
 	auto iframeAttributes = NativeIvHtmlAttributes();
 	const auto autosize = !data.vw();
+	const auto fullWidth = data.is_full_width() || (data.vw() && !data.vw()->v);
 	if (autosize) {
 		iframeWidth = "100%";
-	} else if (data.is_full_width() || !data.vw()->v) {
+	} else if (fullWidth) {
 		width = "100%";
-		height = QByteArray::number(data.vh()->v) + "px";
+		if (data.vh()) {
+			if (data.vw()->v) {
+				aspectRatio = QByteArray::number(
+					double(data.vh()->v) / std::max(data.vw()->v, 1),
+					'g',
+					16);
+			} else {
+				height = QByteArray::number(data.vh()->v) + "px";
+			}
+		}
 		iframeWidth = "100%";
 		iframeHeight = height;
 	} else {
 		width = QByteArray::number(data.vw()->v) + "px";
-		aspectRatio = QByteArray::number(
-			double(data.vh()->v) / std::max(data.vw()->v, 1),
-			'g',
-			16);
+		if (data.vh()) {
+			aspectRatio = QByteArray::number(
+				double(data.vh()->v) / std::max(data.vw()->v, 1),
+				'g',
+				16);
+		}
 	}
 	if (!iframeWidth.isEmpty()) {
 		iframeAttributes.push_back({ "width", iframeWidth });
@@ -675,7 +755,7 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 		content += NativeIvCaptionHtml(data.vcaption(), state);
 	}
 	auto figureAttributes = NativeIvHtmlAttributes();
-	if (!data.is_full_width()) {
+	if (!fullWidth) {
 		figureAttributes.push_back({ "class", "nowide" });
 	}
 	return NativeIvHtmlTag("figure", figureAttributes, content);
@@ -702,7 +782,8 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 			: qs(*data.vurl()),
 		.width = data.vw() ? data.vw()->v : 0,
 		.height = data.vh() ? data.vh()->v : 0,
-		.fullWidth = data.is_full_width(),
+		.fullWidth = data.is_full_width() || (data.vw() && !data.vw()->v),
+		.fixedHeight = (data.vh() != nullptr),
 		.allowScrolling = data.is_allow_scrolling(),
 	};
 	return PrepareNativeIvPlaceholderBlock(

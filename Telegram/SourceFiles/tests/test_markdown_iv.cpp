@@ -2455,7 +2455,7 @@ template <typename Object>
 [[nodiscard]] QRect NativeIvOverlayAvailableRect(const EmbedOverlay *overlay) {
 	return overlay
 		? overlay->rect().marginsRemoved(
-			st::markdownEmbedOverlay.margin + st::boxRoundShadow.extend)
+			st::markdownEmbedOverlay.margin)
 		: QRect();
 }
 
@@ -5489,8 +5489,19 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 	}
 
 	const auto previewEmbedLabel = u"native-iv-embed-preview-overlay"_q;
+	const auto previewEmbedBlock = MTP_pageBlockEmbed(
+		MTP_flags(
+			MTPDpageBlockEmbed::Flag::f_allow_scrolling
+			| MTPDpageBlockEmbed::Flag::f_url
+			| MTPDpageBlockEmbed::Flag::f_w),
+		MTP_string("https://example.com/embed"),
+		MTP_string(),
+		MTP_long(0),
+		MTP_int(640),
+		MTP_int(0),
+		NativeIvCaption(u"Embed caption"_q));
 	auto previewEmbedSource = NativeIvSource(QVector<MTPPageBlock>{
-		placeholderFixtures[0].block,
+		previewEmbedBlock,
 	});
 	const auto previewEmbedPrepared = TryPrepareNativeInstantView({
 		.source = &previewEmbedSource,
@@ -5509,12 +5520,19 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 		window.setGeometry(QRect(0, 0, 420, 320));
 		window.show();
 		FlushPendingWidgetEvents();
+		const auto expectedStorageId = Webview::StorageId{
+			u"native-iv-preview-overlay"_q,
+			QByteArray("phase-3"),
+		};
+		auto previewOptions = OpenOptions();
+		previewOptions.ivWebviewStorageId = expectedStorageId;
 		auto preview = CreateMarkdownPreviewWidget(
 			window.body(),
 			std::move(previewEmbedPrepared.content),
 			std::make_shared<MathRenderer>(),
 			[](Event) {
-			});
+			},
+			previewOptions);
 		preview->setGeometry(QRect(QPoint(), window.body()->size()));
 		preview->show();
 		FlushPendingWidgetEvents();
@@ -5540,9 +5558,17 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 				== nullptr,
 			previewEmbedLabel + u" overlay close removed"_q,
 			ok);
+		if (overlay) {
+			Check(
+				overlay->testEffectiveStorageId().path == expectedStorageId.path
+					&& overlay->testEffectiveStorageId().token
+						== expectedStorageId.token,
+				previewEmbedLabel + u" overlay storage id propagated"_q,
+				ok);
+		}
 		if (body && overlay && overlayShell) {
 			auto previewProbeSource = NativeIvSource(QVector<MTPPageBlock>{
-				placeholderFixtures[0].block,
+				previewEmbedBlock,
 			});
 			const auto previewProbePrepared = TryPrepareNativeInstantView({
 				.source = &previewProbeSource,
@@ -5589,15 +5615,10 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 						overlayShell->isVisible(),
 						previewEmbedLabel + u" overlay visible after click"_q,
 						ok);
-					const auto preferredBodySize = QSize(180, 96);
-					overlay->testHandleWebviewMessage(
-						NativeIvPreferredSizeMessage(preferredBodySize));
-					FlushPendingWidgetEvents();
 					Check(
-						overlayShell->size()
-							== NativeIvOverlayShellSizeForBody(preferredBodySize),
+						overlay->testLoadingCoverVisible(),
 						previewEmbedLabel
-							+ u" overlay resize applies preferred body size"_q,
+							+ u" loading cover visible before navigation done"_q,
 						ok);
 					const auto availableRect = NativeIvOverlayAvailableRect(
 						overlay);
@@ -5605,6 +5626,69 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 						availableRect.isValid(),
 						previewEmbedLabel + u" overlay available rect"_q,
 						ok);
+					const auto overlayBeforeResize = RenderWidgetForTest(overlay);
+					Check(
+						!overlayBeforeResize.isNull(),
+						previewEmbedLabel
+							+ u" overlay render before preferred size"_q,
+						ok);
+					const auto loadingGeometry = overlayShell->geometry();
+					auto scrimPoint = QPoint();
+					auto scrimPixel = uint(0);
+					auto canCompareScrimPixel = false;
+					if (availableRect.isValid() && !overlayBeforeResize.isNull()) {
+						scrimPoint = QPoint(
+							std::max(availableRect.left() / 2, 0),
+							std::clamp(
+								availableRect.center().y(),
+								0,
+								overlayBeforeResize.height() - 1));
+						canCompareScrimPixel
+							= !overlayShell->geometry().contains(scrimPoint);
+						Check(
+							canCompareScrimPixel,
+							previewEmbedLabel
+								+ u" scrim sample sits outside shell"_q,
+							ok);
+						if (canCompareScrimPixel) {
+							scrimPixel = overlayBeforeResize.pixel(scrimPoint);
+						}
+					}
+					const auto preferredBodySize = QSize(180, 96);
+					overlay->testHandleWebviewMessage(
+						NativeIvPreferredSizeMessage(preferredBodySize));
+					FlushPendingWidgetEvents();
+					Check(
+						overlay->testLoadingCoverVisible(),
+						previewEmbedLabel
+							+ u" loading cover persists after preferred size"_q,
+						ok);
+					Check(
+						overlayShell->geometry() == loadingGeometry,
+						previewEmbedLabel
+							+ u" overlay defers preferred size while loading"_q,
+						ok);
+					const auto overlayAfterResize = RenderWidgetForTest(overlay);
+					Check(
+						!overlayAfterResize.isNull(),
+						previewEmbedLabel
+							+ u" overlay render after preferred size"_q,
+						ok);
+					if (canCompareScrimPixel && !overlayAfterResize.isNull()) {
+						Check(
+							!overlayShell->geometry().contains(scrimPoint),
+							previewEmbedLabel
+								+ u" scrim sample stays outside shell"_q,
+							ok);
+						if (!overlayShell->geometry().contains(scrimPoint)) {
+							Check(
+								overlayAfterResize.pixel(scrimPoint)
+									== scrimPixel,
+								previewEmbedLabel
+									+ u" scrim pixel stable after resize"_q,
+								ok);
+						}
+					}
 					if (availableRect.isValid()) {
 						overlay->testHandleWebviewMessage(
 							NativeIvPreferredSizeMessage(QSize(
@@ -5612,9 +5696,76 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 								availableRect.height() * 2)));
 						FlushPendingWidgetEvents();
 						Check(
+							overlay->testLoadingCoverVisible(),
+							previewEmbedLabel
+								+ u" loading cover persists before navigation complete"_q,
+							ok);
+						Check(
+							overlayShell->geometry() == loadingGeometry,
+							previewEmbedLabel
+								+ u" overlay defers clamped resize while loading"_q,
+							ok);
+						const auto overlayAfterClamp = RenderWidgetForTest(
+							overlay);
+						Check(
+							!overlayAfterClamp.isNull(),
+							previewEmbedLabel
+								+ u" overlay render after clamped resize"_q,
+							ok);
+						if (canCompareScrimPixel && !overlayAfterClamp.isNull()) {
+							Check(
+								!overlayShell->geometry().contains(scrimPoint),
+								previewEmbedLabel
+									+ u" scrim sample stays outside clamped shell"_q,
+								ok);
+							if (!overlayShell->geometry().contains(scrimPoint)) {
+								Check(
+									overlayAfterClamp.pixel(scrimPoint)
+										== scrimPixel,
+									previewEmbedLabel
+										+ u" scrim pixel stable after clamped resize"_q,
+									ok);
+							}
+						}
+						overlay->testHandleNavigationDone(true);
+						FlushPendingWidgetEvents();
+						Check(
+							!overlay->testLoadingCoverVisible(),
+							previewEmbedLabel
+								+ u" loading cover hides after navigation done"_q,
+							ok);
+						Check(
 							overlayShell->geometry() == availableRect,
 							previewEmbedLabel
-								+ u" overlay resize clamps to available rect"_q,
+								+ u" overlay shell stays clamped after navigation done"_q,
+							ok);
+						overlay->closeEmbed();
+						FlushPendingWidgetEvents();
+						Check(
+							!overlayShell->isVisible(),
+							previewEmbedLabel
+								+ u" overlay hides before failed navigation retry"_q,
+							ok);
+						SendMouseClick(body, clickBounds->center(), Qt::LeftButton);
+						FlushPendingWidgetEvents();
+						Check(
+							overlay->testLoadingCoverVisible(),
+							previewEmbedLabel
+								+ u" loading cover visible before failed navigation"_q,
+							ok);
+						overlay->testHandleNavigationDone(false);
+						FlushPendingWidgetEvents();
+						const auto overlayError = preview->findChild<QWidget*>(
+							u"nativeIvEmbedOverlayErrorWrap"_q);
+						Check(
+							!overlay->testLoadingCoverVisible(),
+							previewEmbedLabel
+								+ u" loading cover hides after failed navigation"_q,
+							ok);
+						Check(
+							overlayError && overlayError->isVisible(),
+							previewEmbedLabel
+								+ u" overlay shows error after failed navigation"_q,
 							ok);
 					}
 				}

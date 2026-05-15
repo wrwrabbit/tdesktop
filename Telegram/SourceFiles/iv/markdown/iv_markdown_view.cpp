@@ -260,6 +260,7 @@ void MarkdownPreviewRoot::setup() {
 		[=](QString url) {
 			openEmbedLink(std::move(url));
 		},
+		_options.ivWebviewStorageId,
 		_options.ivWebviewDataRequest);
 	_embedOverlay->hide();
 
@@ -434,7 +435,7 @@ void MarkdownPreviewRoot::openEmbedLink(QString url) {
 		return;
 	}
 	if (_embedOverlay) {
-		_embedOverlay->hide();
+		_embedOverlay->closeEmbed();
 	}
 	HiddenUrlClickHandler::Open(url, CurrentClickHandlerContext(_options));
 }
@@ -509,7 +510,7 @@ void MarkdownPreviewRoot::applyPreparedContent(
 	const auto failure = prepared.failure;
 	const auto debug = prepared.debug;
 	if (_embedOverlay) {
-		_embedOverlay->hide();
+		_embedOverlay->closeEmbed();
 	}
 	if (failure.failed()) {
 		_article = nullptr;
@@ -626,10 +627,9 @@ void MarkdownPreviewRoot::updateBodyVisibleTopBottom() {
 
 void MarkdownPreviewRoot::updateChildrenGeometry(QSize size) {
 	_scroll->setGeometry(QRect(QPoint(), size));
+	auto bodyWidth = std::max(_scroll->width(), 1);
 	if (_body) {
-		const auto bodyWidth = std::min(
-			std::max(_scroll->width(), 1),
-			_body->maxWidth());
+		bodyWidth = std::min(bodyWidth, _body->maxWidth());
 		_body->resizeToWidth(bodyWidth);
 		_body->moveToLeft(
 			std::max((_scroll->width() - bodyWidth) / 2, 0),
@@ -638,7 +638,7 @@ void MarkdownPreviewRoot::updateChildrenGeometry(QSize size) {
 		updateBodyVisibleTopBottom();
 	}
 	if (_embedOverlay) {
-		_embedOverlay->updateGeometry(QRect(QPoint(), size));
+		_embedOverlay->updateGeometry(QRect(QPoint(), size), bodyWidth);
 	}
 	updateFailureGeometry();
 }

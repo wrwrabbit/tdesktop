@@ -18,6 +18,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <functional>
 #include <memory>
 
+#include "webview/webview_common.h"
+
 namespace Ui {
 class DynamicImage;
 class Show;
@@ -183,6 +185,7 @@ struct EmbedRequest {
 	int width = 0;
 	int height = 0;
 	bool fullWidth = false;
+	bool fixedHeight = false;
 	bool allowScrolling = false;
 
 	[[nodiscard]] explicit operator bool() const {
@@ -220,6 +223,7 @@ struct OpenOptions {
 	std::function<Webview::DataResult(
 		QByteArray,
 		Webview::DataRequest)> ivWebviewDataRequest;
+	Webview::StorageId ivWebviewStorageId;
 	std::function<bool(
 		const MediaActivation &,
 		Qt::MouseButton)> activateMedia;

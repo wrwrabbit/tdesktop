@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/flat_map.h"
 #include "iv/markdown/iv_markdown_common.h"
+#include "ui/effects/radial_animation.h"
 #include "ui/rp_widget.h"
 
 #include <functional>
@@ -19,8 +20,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QRect>
 #include <QtCore/QSize>
 
+class QEvent;
 class QJsonDocument;
 class QMouseEvent;
+class QObject;
 class QPaintEvent;
 class QWidget;
 struct TextWithEntities;
@@ -33,6 +36,7 @@ class RpWidget;
 } // namespace Ui
 
 namespace Webview {
+struct WindowConfig;
 class Window;
 } // namespace Webview
 
@@ -44,47 +48,80 @@ public:
 		QWidget *parent,
 		const base::flat_map<QByteArray, QByteArray> *resources,
 		std::function<void(QString)> linkActivationCallback,
+		Webview::StorageId storageId,
 		std::function<Webview::DataResult(QByteArray, Webview::DataRequest)>
 			dataRequestHandler);
 	~EmbedOverlay();
 
 	[[nodiscard]] bool showEmbed(const EmbedRequest &request);
-	void hide();
-	void updateGeometry(QRect geometry);
+	void closeEmbed();
+	void updateGeometry(QRect geometry, int contentWidth);
 	void testHandleWebviewMessage(const QJsonDocument &message);
+	void testHandleNavigationDone(bool success);
+	[[nodiscard]] bool testLoadingCoverVisible() const;
+	[[nodiscard]] const Webview::StorageId &testEffectiveStorageId() const;
 
 protected:
+	bool eventFilter(QObject *object, QEvent *event) override;
 	void paintEvent(QPaintEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
 
 private:
+	void installEscapeFilter();
+	void removeEscapeFilter();
+	[[nodiscard]] bool eventFromOverlayWindow(QObject *object) const;
 	void ensureWebview();
+	[[nodiscard]] Webview::WindowConfig makeWindowConfig() const;
 	void handleWebviewMessage(const QJsonDocument &message);
+	void handleNavigationDone(bool success);
+	void setReady();
 	void applyPreferredBodySize(QSize size);
+	void applyPreferredBodyHeight(int height);
+	void updateCssToQtScale(int viewportWidth);
 	void updateContentGeometry();
+	void updateWebviewGeometry();
+	void raiseSurfaces();
+	void hideWebview();
+	void destroyWebview();
 	void showWebviewError();
 	void showWebviewError(const TextWithEntities &text);
 	void clearWebviewError();
 	void restoreFocus();
-	[[nodiscard]] QRect bodyRect() const;
+	[[nodiscard]] QRect bodyGeometry() const;
+	[[nodiscard]] QRect bodyRectInContent() const;
+	[[nodiscard]] QMargins contentPadding() const;
+	[[nodiscard]] int cssPixelsToQt(int value) const;
 	[[nodiscard]] QByteArray normalizedRequestId(const std::string &id) const;
 	[[nodiscard]] Webview::DataResult handleDataRequest(
 		Webview::DataRequest request);
 
+	const QPointer<QWidget> _webviewParent;
 	const base::flat_map<QByteArray, QByteArray> *const _resources = nullptr;
 	const std::function<void(QString)> _linkActivationCallback;
+	const Webview::StorageId _storageId;
 	const std::function<Webview::DataResult(QByteArray, Webview::DataRequest)>
 		_dataRequestHandler;
 	Ui::RpWidget *_content = nullptr;
 	Ui::PaddingWrap<Ui::FlatLabel> *_error = nullptr;
 	Ui::FlatLabel *_errorLabel = nullptr;
 	std::unique_ptr<Webview::Window> _webview;
+	Ui::InfiniteRadialAnimation _loadingAnimation;
 	EmbedRequest _request;
 	QRect _contentGeometry;
 	QSize _preferredBodySize;
+	QSize _pendingPreferredBodySize;
+	QString _readyNavigationToken;
 	QPointer<QWidget> _focusRestore;
+	int _contentWidth = 0;
+	int _navigationGeneration = 0;
+	int _webviewGeneration = 0;
+	double _cssToQtScale = 1.;
 	bool _pressedOutside = false;
+	bool _readyFromResource = false;
+	bool _ready = false;
+	bool _loading = false;
+	bool _escapeFilterInstalled = false;
 
 };
 

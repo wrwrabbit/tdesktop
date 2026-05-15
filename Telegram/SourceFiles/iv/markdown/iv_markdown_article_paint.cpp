@@ -168,7 +168,8 @@ void SetTextLeafPen(
 		const MarkdownArticlePaintCaches &caches) {
 	p.setPen(!block.supplementary
 		? markdown.textColor->c
-		: caches.supplementaryColorOverride.value_or(markdown.textColor->c));
+		: caches.supplementaryColorOverride.value_or(
+			markdown.supplementaryTextColor->c));
 }
 
 void PaintRelatedArticleTextLeaf(

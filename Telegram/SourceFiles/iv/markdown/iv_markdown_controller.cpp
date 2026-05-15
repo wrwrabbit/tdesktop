@@ -435,6 +435,9 @@ void Controller::updateOptions(OpenOptions options) {
 	if (refreshed.sourceUrl.isEmpty()) {
 		refreshed.sourceUrl = _options.sourceUrl;
 	}
+	if (!refreshed.ivWebviewStorageId) {
+		refreshed.ivWebviewStorageId = _options.ivWebviewStorageId;
+	}
 	if (refreshed.viewerKind == ViewerKind::Auto) {
 		refreshed.viewerKind = _options.viewerKind;
 	}

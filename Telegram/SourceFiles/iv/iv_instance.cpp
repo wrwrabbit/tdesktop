@@ -636,6 +636,7 @@ Markdown::OpenOptions Shown::markdownOpenOptions(
 			}
 			return Webview::DataResult::Failed;
 		},
+		.ivWebviewStorageId = _session->local().resolveStorageIdOther(),
 		.activateMedia = [=](
 				const Markdown::MediaActivation &activation,
 				Qt::MouseButton button) {

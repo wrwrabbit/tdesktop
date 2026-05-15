@@ -259,6 +259,7 @@ MarkdownFailure {
 MarkdownEmbedOverlay {
 	scrimBg: color;
 	bg: color;
+	loading: InfiniteRadialAnimation;
 	size: size;
 	margin: margins;
 	padding: margins;
@@ -559,6 +560,9 @@ markdownEmbedOverlayError: FlatLabel(defaultFlatLabel) {
 markdownEmbedOverlay: MarkdownEmbedOverlay {
 	scrimBg: layerBg;
 	bg: windowBg;
+	loading: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
+		color: windowSubTextFg;
+	}
 	size: size(384px, 694px);
 	margin: margins(12px, 12px, 12px, 12px);
 	padding: margins(8px, 8px, 8px, 8px);
