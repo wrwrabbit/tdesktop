@@ -885,6 +885,16 @@ void Controller::showEditPeerTypeBox(
 		_typeDataSavedValue = data;
 		refreshHistoryVisibility();
 	});
+	if (const auto channel = _peer->asChannel()) {
+		const auto guardBot = channel->guardBot();
+		const auto guardBotUsername = guardBot
+			? guardBot->username()
+			: QString();
+		_typeDataSavedValue->guardBotUsername = guardBotUsername;
+		_typeDataSavedValue->guardBotLink = guardBotUsername.isEmpty()
+			? QString()
+			: _peer->session().createInternalLink(guardBotUsername);
+	}
 	_typeDataSavedValue->hasDiscussionLink
 		= (_discussionLinkSavedValue.value_or(nullptr) != nullptr);
 	const auto box = _navigation->parentController()->show(

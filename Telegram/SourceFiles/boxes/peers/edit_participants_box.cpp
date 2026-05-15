@@ -253,6 +253,9 @@ void SaveGuardBot(
 			}
 			channel->setGuardBotId(UserId());
 		}
+		channel->session().changes().peerUpdated(
+			channel,
+			Data::PeerUpdate::Flag::FullInfo);
 		if (onDone) {
 			onDone();
 		}
