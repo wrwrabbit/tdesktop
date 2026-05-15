@@ -338,6 +338,9 @@ void CollectSelectableSegments(
 		case PreparedBlockKind::Paragraph:
 		case PreparedBlockKind::Heading:
 		case PreparedBlockKind::Details: {
+			if (block.leaf.isEmpty() && block.textRect.isEmpty()) {
+				break;
+			}
 			auto segment = SelectableSegment();
 			segment.kind = SelectableSegmentKind::TextLeaf;
 			segment.leaf = &block.leaf;

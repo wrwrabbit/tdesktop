@@ -71,6 +71,7 @@ void RememberNativeIvDocument(
 	int headingLevel,
 	PreparedIvRichText prepared,
 	QString anchorId = QString(),
-	bool allowEmpty = false);
+	bool allowEmpty = false,
+	bool supplementary = false);
 
 } // namespace Iv::Markdown

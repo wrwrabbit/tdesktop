@@ -134,7 +134,9 @@ void PaintTextLeaf(
 	leaf.draw(p, {
 		.position = rect.topLeft(),
 		.availableWidth = availableWidth,
-		.geometry = TextGeometry(availableWidth),
+		.geometry = elisionLines
+			? Ui::Text::SimpleGeometry(availableWidth, elisionLines, 0, true)
+			: TextGeometry(availableWidth),
 		.align = align,
 		.clip = clip,
 		.palette = &p.textPalette(),
@@ -146,6 +148,27 @@ void PaintTextLeaf(
 		.selection = selection.value_or(TextSelection()),
 		.elisionLines = elisionLines,
 	});
+}
+
+[[nodiscard]] std::optional<QColor> QuoteSupplementaryColor(
+		const MarkdownArticlePaintCaches &caches) {
+	if (!caches.blockquote) {
+		return {};
+	}
+	return anim::color(
+		caches.blockquote->bg,
+		caches.blockquote->icon,
+		0.75);
+}
+
+void SetTextLeafPen(
+		Painter &p,
+		const LaidOutBlock &block,
+		const style::Markdown &markdown,
+		const MarkdownArticlePaintCaches &caches) {
+	p.setPen(!block.supplementary
+		? markdown.textColor->c
+		: caches.supplementaryColorOverride.value_or(markdown.textColor->c));
 }
 
 void PaintRelatedArticleTextLeaf(
@@ -302,7 +325,7 @@ void PaintTableBlock(
 		const PaintSelectionState &selectionState,
 		QRect clip) {
 	if (!block.textRect.isEmpty()) {
-		p.setPen(markdown.textColor->c);
+		SetTextLeafPen(p, block, markdown, caches);
 		PaintTextLeaf(
 			p,
 			block.leaf,
@@ -586,6 +609,8 @@ void PaintQuoteBlock(
 		p.restore();
 	}
 
+	auto overriden = caches;
+	overriden.supplementaryColorOverride = QuoteSupplementaryColor(caches);
 	PaintBlocks(
 		p,
 		block.children,
@@ -595,7 +620,7 @@ void PaintQuoteBlock(
 		devicePixelRatio,
 		outerWidth,
 		markdown,
-		caches,
+		overriden,
 		selectionState,
 		clip.intersected(block.contentRect));
 }
@@ -641,7 +666,7 @@ void PaintPlaceholderBlock(
 		p.restore();
 	}
 	if (!block.textRect.isEmpty()) {
-		p.setPen(markdown.textColor->c);
+		SetTextLeafPen(p, block, markdown, caches);
 		PaintTextLeaf(
 			p,
 			block.leaf,
@@ -752,7 +777,7 @@ void PaintEmbedPostBlock(
 			clip.intersected(block.bodyRect));
 	}
 	if (!block.textRect.isEmpty()) {
-		p.setPen(markdown.textColor->c);
+		SetTextLeafPen(p, block, markdown, caches);
 		PaintTextLeaf(
 			p,
 			block.leaf,
@@ -777,7 +802,7 @@ void PaintMediaCaption(
 	if (block.textRect.isEmpty()) {
 		return;
 	}
-	p.setPen(markdown.textColor->c);
+	SetTextLeafPen(p, block, markdown, caches);
 	PaintTextLeaf(
 		p,
 		block.leaf,
@@ -914,7 +939,7 @@ void PaintRelatedArticleBlock(
 		}
 	}
 	if (!block.labelRect.isEmpty()) {
-		p.setPen(style.titleFg->c);
+		p.setPen(markdown.textColor->c);
 		PaintRelatedArticleTextLeaf(
 			p,
 			block.labelLeaf,
@@ -925,7 +950,7 @@ void PaintRelatedArticleBlock(
 			style.titleLines);
 	}
 	if (!block.subtitleRect.isEmpty()) {
-		p.setPen(style.subtitleFg->c);
+		p.setPen(markdown.textColor->c);
 		PaintRelatedArticleTextLeaf(
 			p,
 			block.subtitleLeaf,
@@ -936,7 +961,7 @@ void PaintRelatedArticleBlock(
 			style.subtitleLines);
 	}
 	if (!block.actionRect.isEmpty()) {
-		p.setPen(style.footerFg->c);
+		p.setPen(markdown.supplementaryTextColor->c);
 		PaintRelatedArticleTextLeaf(
 			p,
 			block.actionLeaf,
@@ -1133,7 +1158,7 @@ void PaintBlock(
 		if (!block.headerRect.isEmpty()) {
 			p.fillRect(block.headerRect, markdown.relatedArticle.headerBg->c);
 		}
-		p.setPen(markdown.textColor->c);
+		SetTextLeafPen(p, block, markdown, caches);
 		PaintTextLeaf(
 			p,
 			block.leaf,

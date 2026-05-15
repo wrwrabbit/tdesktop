@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_parse.h"
 #include "iv/markdown/iv_markdown_view.h"
 #include "iv/iv_delegate_impl.h"
+#include "iv/iv_zoom_controls.h"
 #include "lang/lang_keys.h"
 #include "ui/layers/layer_manager.h"
 #include "ui/layers/show.h"
@@ -848,6 +849,9 @@ void Controller::showMenu() {
 			}),
 			&st::menuIconShare);
 	}
+
+	_menu->addSeparator();
+	_menu->addAction(CreateZoomMenuAction(_menu, _delegate));
 
 	_menu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
 	_menu->popup(_window->body()->mapToGlobal(

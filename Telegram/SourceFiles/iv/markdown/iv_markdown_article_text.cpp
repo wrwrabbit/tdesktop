@@ -152,32 +152,26 @@ PreparedLinkClickHandler::PreparedLinkClickHandler(PreparedLink link)
 : _link(std::move(link)) {
 }
 
-
 void PreparedLinkClickHandler::onClick(ClickContext) const {
 }
 
-
-[[nodiscard]] const PreparedLink &PreparedLinkClickHandler::link() const {
+const PreparedLink &PreparedLinkClickHandler::link() const {
 	return _link;
 }
-
 
 QString PreparedLinkClickHandler::url() const {
 	return _link.target;
 }
 
-
 QString PreparedLinkClickHandler::copyToClipboardText() const {
 	return CopyTextForLink(_link);
 }
-
 
 QString PreparedLinkClickHandler::copyToClipboardContextItemText() const {
 	return copyToClipboardText().isEmpty()
 		? QString()
 		: CopyLabelForLink(_link);
 }
-
 
 ClickHandler::TextEntity PreparedLinkClickHandler::getTextEntity() const {
 	return TextEntityForLink(_link);
@@ -713,8 +707,8 @@ bool InlineFormulaSharedState::failed() const {
 	return !measured().success;
 }
 
-std::optional<Ui::Text::CustomEmojiVerticalMetrics>
-InlineFormulaSharedState::vertical(const style::TextStyle &textStyle) const {
+auto InlineFormulaSharedState::vertical(const style::TextStyle &textStyle) const
+-> std::optional<Ui::Text::CustomEmojiVerticalMetrics> {
 	const auto &formula = measured();
 	const auto geometry = InlineFormulaGeometryFrom(formula);
 	if (formula.success && (geometry.imageHeight > 0)) {
@@ -879,8 +873,8 @@ QString InlineFormulaObject::entityData() {
 	return QString();
 }
 
-std::optional<Ui::Text::CustomEmojiVerticalMetrics>
-InlineFormulaObject::vertical(const style::TextStyle &textStyle) {
+auto InlineFormulaObject::vertical(const style::TextStyle &textStyle)
+-> std::optional<Ui::Text::CustomEmojiVerticalMetrics> {
 	return _state ? _state->vertical(textStyle) : std::nullopt;
 }
 
@@ -970,8 +964,8 @@ QString InlineIvImageObject::entityData() {
 	return QString();
 }
 
-std::optional<Ui::Text::CustomEmojiVerticalMetrics>
-InlineIvImageObject::vertical(const style::TextStyle &textStyle) {
+auto InlineIvImageObject::vertical(const style::TextStyle &textStyle)
+-> std::optional<Ui::Text::CustomEmojiVerticalMetrics> {
 	if (_height > 0) {
 		const auto line = textStyle.font->height;
 		const auto above = _height - (_height / 2);
@@ -1077,11 +1071,11 @@ std::unique_ptr<Ui::Text::CustomEmoji> InlineFormulaObjectCache::create(
 		std::move(state));
 }
 
-std::shared_ptr<InlineFormulaSharedState>
-InlineFormulaObjectCache::lookupOrCreate(
+auto InlineFormulaObjectCache::lookupOrCreate(
 		const PreparedFormulaMeasurementSignature &signature,
 		const style::TextStyle &textStyle,
-		const std::vector<PreparedFormulaSlot> *formulas) {
+		const std::vector<PreparedFormulaSlot> *formulas)
+-> std::shared_ptr<InlineFormulaSharedState> {
 	if (const auto i = _states.find(signature); i != end(_states)) {
 		return i->second;
 	}

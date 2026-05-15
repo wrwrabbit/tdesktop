@@ -581,7 +581,8 @@ bool AppendPreparedIvRichBlock(
 		int headingLevel,
 		PreparedIvRichText prepared,
 		QString anchorId,
-		bool allowEmpty) {
+		bool allowEmpty,
+		bool supplementary) {
 	SortPreparedIvRichText(&prepared);
 	if (prepared.text.text.isEmpty() && !allowEmpty) {
 		return true;
@@ -592,6 +593,7 @@ bool AppendPreparedIvRichBlock(
 	block.text = std::move(prepared.text);
 	block.links = std::move(prepared.links);
 	block.anchorId = std::move(anchorId);
+	block.supplementary = supplementary;
 	result->push_back(std::move(block));
 	return true;
 }
@@ -626,6 +628,7 @@ bool PrepareNativeIvPhotoBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = std::move(anchorId);
+	block.supplementary = true;
 	block.photo.id = GeneratePreparedMediaBlockId(state);
 	block.photo.photoId = info->id;
 	block.photo.width = info->width;
@@ -658,6 +661,7 @@ bool PrepareNativeIvVideoBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = std::move(anchorId);
+	block.supplementary = true;
 	block.video.id = GeneratePreparedMediaBlockId(state);
 	block.video.media.kind = PreparedMediaItemKind::Document;
 	block.video.media.id = info->id;
@@ -686,6 +690,7 @@ bool PrepareNativeIvAudioBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = std::move(anchorId);
+	block.supplementary = true;
 	block.audio.id = GeneratePreparedMediaBlockId(state);
 	block.audio.documentId = info->id;
 	block.audio.title = info->title;
@@ -730,6 +735,7 @@ bool PrepareNativeIvMapBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = std::move(anchorId);
+	block.supplementary = true;
 	prepared.id = GeneratePreparedMediaBlockId(state);
 	block.map = std::move(prepared);
 	result->push_back(std::move(block));
@@ -807,6 +813,7 @@ bool PrepareNativeIvGroupedMediaBlock(
 	SortPreparedIvRichText(&preparedCaption);
 	block.text = std::move(preparedCaption.text);
 	block.links = std::move(preparedCaption.links);
+	block.supplementary = true;
 	result->push_back(std::move(block));
 	return true;
 }
@@ -842,6 +849,7 @@ bool PrepareNativeIvPlaceholderBlock(
 	block.text = std::move(prepared.text);
 	block.links = std::move(prepared.links);
 	block.anchorId = std::move(anchorId);
+	block.supplementary = true;
 	block.placeholder.label = label;
 	block.placeholder.embed = std::move(embed);
 	block.placeholder.copyText = NativeIvPlaceholderCopyText(

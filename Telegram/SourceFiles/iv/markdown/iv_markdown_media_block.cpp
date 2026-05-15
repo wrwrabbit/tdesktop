@@ -474,7 +474,6 @@ ImageBackedMediaBlock::ImageBackedMediaBlock(
 	}
 }
 
-
 ImageBackedMediaBlock::ImageBackedMediaBlock(
 	const PreparedVideoBlockData &prepared,
 	std::shared_ptr<MediaRuntime> mediaRuntime)
@@ -486,7 +485,6 @@ ImageBackedMediaBlock::ImageBackedMediaBlock(
 , _mediaRuntime(std::move(mediaRuntime))
 , _documentId(prepared.media.id) {
 }
-
 
 ImageBackedMediaBlock::ImageBackedMediaBlock(
 	const PreparedMapBlockData &prepared,
@@ -510,11 +508,11 @@ ImageBackedMediaBlock::ImageBackedMediaBlock(
 	}
 }
 
-[[nodiscard]] uint64 ImageBackedMediaBlock::stableId() const {
+uint64 ImageBackedMediaBlock::stableId() const {
 	return _stableId;
 }
 
-[[nodiscard]] int ImageBackedMediaBlock::resizeGetHeight(int width) {
+int ImageBackedMediaBlock::resizeGetHeight(int width) {
 	return MediaHeightForWidth(width, _aspectWidth, _aspectHeight);
 }
 
@@ -523,11 +521,11 @@ void ImageBackedMediaBlock::setGeometry(QRect geometry) {
 	ensureResolved(geometry.size());
 }
 
-[[nodiscard]] QRect ImageBackedMediaBlock::geometry() const {
+QRect ImageBackedMediaBlock::geometry() const {
 	return _geometry;
 }
 
-[[nodiscard]] int ImageBackedMediaBlock::firstLineBaseline() const {
+int ImageBackedMediaBlock::firstLineBaseline() const {
 	return _geometry.y();
 }
 
@@ -567,17 +565,17 @@ void ImageBackedMediaBlock::paint(
 	p.restore();
 }
 
-[[nodiscard]] ClickHandlerPtr ImageBackedMediaBlock::linkAt(QPoint point) const {
+ClickHandlerPtr ImageBackedMediaBlock::linkAt(QPoint point) const {
 	Q_UNUSED(point);
 	return nullptr;
 }
 
-[[nodiscard]] MediaActivation ImageBackedMediaBlock::activationAt(
+MediaActivation ImageBackedMediaBlock::activationAt(
 		QPoint point) const {
 	return _geometry.contains(point) ? _activation : MediaActivation();
 }
 
-[[nodiscard]] MediaBlockSelectionData ImageBackedMediaBlock::selectionData() const {
+MediaBlockSelectionData ImageBackedMediaBlock::selectionData() const {
 	return {
 		.copyText = _copyText,
 	};
@@ -677,7 +675,7 @@ void ImageBackedMediaBlock::subscribeImage(const std::shared_ptr<Ui::DynamicImag
 	});
 }
 
-[[nodiscard]] bool ImageBackedMediaBlock::loading() const {
+bool ImageBackedMediaBlock::loading() const {
 	if (_photoRuntime) {
 		return _photoRuntime->loading();
 	} else if (_documentRuntime) {
@@ -688,7 +686,7 @@ void ImageBackedMediaBlock::subscribeImage(const std::shared_ptr<Ui::DynamicImag
 	return false;
 }
 
-[[nodiscard]] double ImageBackedMediaBlock::progress() const {
+double ImageBackedMediaBlock::progress() const {
 	if (_photoRuntime) {
 		return _photoRuntime->progress();
 	} else if (_documentRuntime) {
@@ -766,17 +764,14 @@ AudioMediaBlock::AudioMediaBlock(
 	}
 }
 
-
-[[nodiscard]] uint64 AudioMediaBlock::stableId() const {
+uint64 AudioMediaBlock::stableId() const {
 	return _stableId;
 }
 
-
-[[nodiscard]] int AudioMediaBlock::resizeGetHeight(int width) {
+int AudioMediaBlock::resizeGetHeight(int width) {
 	rebuildLayout(width);
 	return _height;
 }
-
 
 void AudioMediaBlock::setGeometry(QRect geometry) {
 	if (_layoutWidth != std::max(geometry.width(), 1)) {
@@ -788,16 +783,13 @@ void AudioMediaBlock::setGeometry(QRect geometry) {
 	applyGeometry();
 }
 
-
-[[nodiscard]] QRect AudioMediaBlock::geometry() const {
+QRect AudioMediaBlock::geometry() const {
 	return _geometry;
 }
 
-
-[[nodiscard]] int AudioMediaBlock::firstLineBaseline() const {
+int AudioMediaBlock::firstLineBaseline() const {
 	return _firstLineBaseline;
 }
-
 
 void AudioMediaBlock::paint(
 		Painter &p,
@@ -838,19 +830,16 @@ void AudioMediaBlock::paint(
 	p.restore();
 }
 
-
-[[nodiscard]] ClickHandlerPtr AudioMediaBlock::linkAt(QPoint point) const {
+ClickHandlerPtr AudioMediaBlock::linkAt(QPoint point) const {
 	Q_UNUSED(point);
 	return nullptr;
 }
 
-
-[[nodiscard]] MediaActivation AudioMediaBlock::activationAt(QPoint point) const {
+MediaActivation AudioMediaBlock::activationAt(QPoint point) const {
 	return _geometry.contains(point) ? _activation : MediaActivation();
 }
 
-
-[[nodiscard]] MediaBlockSelectionData AudioMediaBlock::selectionData() const {
+MediaBlockSelectionData AudioMediaBlock::selectionData() const {
 	return {
 		.copyText = _copyText,
 	};
@@ -900,7 +889,6 @@ void AudioMediaBlock::rebuildLayout(int width) {
 		+ subtitleHeight
 		+ padding.bottom();
 }
-
 
 void AudioMediaBlock::applyGeometry() {
 	const auto &card = st::defaultMarkdown.audio;
@@ -1020,17 +1008,14 @@ ChannelMediaBlock::ChannelMediaBlock(
 	}
 }
 
-
-[[nodiscard]] uint64 ChannelMediaBlock::stableId() const {
+uint64 ChannelMediaBlock::stableId() const {
 	return _stableId;
 }
 
-
-[[nodiscard]] int ChannelMediaBlock::resizeGetHeight(int width) {
+int ChannelMediaBlock::resizeGetHeight(int width) {
 	rebuildLayout(width);
 	return _height;
 }
-
 
 void ChannelMediaBlock::setGeometry(QRect geometry) {
 	if (_layoutWidth != std::max(geometry.width(), 1)) {
@@ -1042,16 +1027,13 @@ void ChannelMediaBlock::setGeometry(QRect geometry) {
 	applyGeometry();
 }
 
-
-[[nodiscard]] QRect ChannelMediaBlock::geometry() const {
+QRect ChannelMediaBlock::geometry() const {
 	return _geometry;
 }
 
-
-[[nodiscard]] int ChannelMediaBlock::firstLineBaseline() const {
+int ChannelMediaBlock::firstLineBaseline() const {
 	return _firstLineBaseline;
 }
-
 
 void ChannelMediaBlock::paint(
 		Painter &p,
@@ -1099,8 +1081,7 @@ void ChannelMediaBlock::paint(
 	p.restore();
 }
 
-
-[[nodiscard]] ClickHandlerPtr ChannelMediaBlock::linkAt(QPoint point) const {
+ClickHandlerPtr ChannelMediaBlock::linkAt(QPoint point) const {
 	if (_joinVisible
 		&& _joinLink
 		&& !_actionRect.isEmpty()
@@ -1110,8 +1091,7 @@ void ChannelMediaBlock::paint(
 	return nullptr;
 }
 
-
-[[nodiscard]] MediaActivation ChannelMediaBlock::activationAt(QPoint point) const {
+MediaActivation ChannelMediaBlock::activationAt(QPoint point) const {
 	if (!_geometry.contains(point)) {
 		return {};
 	}
@@ -1121,8 +1101,7 @@ void ChannelMediaBlock::paint(
 	return _openActivation;
 }
 
-
-[[nodiscard]] MediaBlockSelectionData ChannelMediaBlock::selectionData() const {
+MediaBlockSelectionData ChannelMediaBlock::selectionData() const {
 	return {
 		.copyText = _copyText,
 	};
@@ -1144,7 +1123,6 @@ void ChannelMediaBlock::resolveChannel() {
 		_openActivation.channel = _channelRuntime;
 	}
 }
-
 
 void ChannelMediaBlock::rebuildLayout(int width) {
 	resolveChannel();
@@ -1212,7 +1190,6 @@ void ChannelMediaBlock::rebuildLayout(int width) {
 	_height = padding.top() + _cardContentHeight + padding.bottom();
 }
 
-
 void ChannelMediaBlock::applyGeometry() {
 	const auto &card = st::defaultMarkdown.channel;
 	const auto &padding = card.padding;
@@ -1243,7 +1220,6 @@ void ChannelMediaBlock::applyGeometry() {
 		_actionRect = QRect();
 	}
 }
-
 
 void ChannelMediaBlock::handleJoinedChange() {
 	if (_geometry.width() <= 0 && _layoutWidth <= 0) {
@@ -1405,17 +1381,14 @@ GroupedMediaBlock::GroupedMediaBlock(
 	}
 }
 
-
-[[nodiscard]] uint64 GroupedMediaBlock::stableId() const {
+uint64 GroupedMediaBlock::stableId() const {
 	return _stableId;
 }
 
-
-[[nodiscard]] int GroupedMediaBlock::resizeGetHeight(int width) {
+int GroupedMediaBlock::resizeGetHeight(int width) {
 	rebuildLayout(width);
 	return _height;
 }
-
 
 void GroupedMediaBlock::setGeometry(QRect geometry) {
 	rebuildLayout(geometry.width());
@@ -1430,16 +1403,13 @@ void GroupedMediaBlock::setGeometry(QRect geometry) {
 	applyGeometry();
 }
 
-
-[[nodiscard]] QRect GroupedMediaBlock::geometry() const {
+QRect GroupedMediaBlock::geometry() const {
 	return _geometry;
 }
 
-
-[[nodiscard]] int GroupedMediaBlock::firstLineBaseline() const {
+int GroupedMediaBlock::firstLineBaseline() const {
 	return _geometry.y();
 }
-
 
 void GroupedMediaBlock::paint(
 		Painter &p,
@@ -1473,8 +1443,7 @@ void GroupedMediaBlock::paint(
 	p.restore();
 }
 
-
-[[nodiscard]] ClickHandlerPtr GroupedMediaBlock::linkAt(QPoint point) const {
+ClickHandlerPtr GroupedMediaBlock::linkAt(QPoint point) const {
 	if (_intent == PreparedGroupedMediaIntent::Slideshow) {
 		if (_previousRect.contains(point)) {
 			return _previousLink;
@@ -1485,8 +1454,7 @@ void GroupedMediaBlock::paint(
 	return nullptr;
 }
 
-
-[[nodiscard]] MediaActivation GroupedMediaBlock::activationAt(QPoint point) const {
+MediaActivation GroupedMediaBlock::activationAt(QPoint point) const {
 	if (!_geometry.contains(point)) {
 		return {};
 	} else if (_intent == PreparedGroupedMediaIntent::Slideshow) {
@@ -1508,13 +1476,11 @@ void GroupedMediaBlock::paint(
 	return {};
 }
 
-
-[[nodiscard]] MediaBlockSelectionData GroupedMediaBlock::selectionData() const {
+MediaBlockSelectionData GroupedMediaBlock::selectionData() const {
 	return {
 		.copyText = _copyText,
 	};
 }
-
 
 void GroupedMediaBlock::rebuildLayout(int width) {
 	_layoutWidth = std::max(width, 1);
@@ -1572,7 +1538,6 @@ void GroupedMediaBlock::rebuildLayout(int width) {
 	_useCollageLayout = true;
 }
 
-
 void GroupedMediaBlock::clearCollageLayout() {
 	_contentWidth = _layoutWidth;
 	_height = fallbackHeight(_layoutWidth);
@@ -1583,8 +1548,7 @@ void GroupedMediaBlock::clearCollageLayout() {
 	}
 }
 
-
-[[nodiscard]] int GroupedMediaBlock::fallbackHeight(int width) const {
+int GroupedMediaBlock::fallbackHeight(int width) const {
 	if (_fallbackSize.isEmpty()) {
 		return std::max(st::defaultMarkdown.placeholder.minHeight, 1);
 	}
@@ -1593,7 +1557,6 @@ void GroupedMediaBlock::clearCollageLayout() {
 		_fallbackSize.width(),
 		_fallbackSize.height());
 }
-
 
 void GroupedMediaBlock::applyGeometry() {
 	_previousRect = QRect();
@@ -1624,7 +1587,6 @@ void GroupedMediaBlock::applyGeometry() {
 	}
 }
 
-
 void GroupedMediaBlock::resolveRuntime(ItemState &item) {
 	if (item.runtimeResolved) {
 		return;
@@ -1648,7 +1610,6 @@ void GroupedMediaBlock::resolveRuntime(ItemState &item) {
 		}
 	}
 }
-
 
 void GroupedMediaBlock::resolveImages(ItemState &item) {
 	if (item.rect.isEmpty()) {
@@ -1681,7 +1642,6 @@ void GroupedMediaBlock::resolveImages(ItemState &item) {
 	}
 }
 
-
 void GroupedMediaBlock::subscribeImage(
 		const std::shared_ptr<Ui::DynamicImage> &image,
 		const ItemState *item) {
@@ -1698,7 +1658,6 @@ void GroupedMediaBlock::subscribeImage(
 	});
 }
 
-
 void GroupedMediaBlock::handleImageUpdate(int index) {
 	if (index < 0 || index >= int(_items.size())) {
 		return;
@@ -1710,7 +1669,6 @@ void GroupedMediaBlock::handleImageUpdate(int index) {
 	}
 	requestRepaint(_items[index].rect);
 }
-
 
 void GroupedMediaBlock::paintItem(Painter &p, const ItemState &item) const {
 	if (item.rect.isEmpty()) {
@@ -1739,8 +1697,7 @@ void GroupedMediaBlock::paintItem(Painter &p, const ItemState &item) const {
 	}
 }
 
-
-[[nodiscard]] bool GroupedMediaBlock::itemLoading(const ItemState &item) const {
+bool GroupedMediaBlock::itemLoading(const ItemState &item) const {
 	if (item.photoRuntime) {
 		return item.photoRuntime->loading();
 	} else if (item.documentRuntime) {
@@ -1749,8 +1706,7 @@ void GroupedMediaBlock::paintItem(Painter &p, const ItemState &item) const {
 	return false;
 }
 
-
-[[nodiscard]] double GroupedMediaBlock::itemProgress(const ItemState &item) const {
+double GroupedMediaBlock::itemProgress(const ItemState &item) const {
 	if (item.photoRuntime) {
 		return item.photoRuntime->progress();
 	} else if (item.documentRuntime) {
@@ -1758,7 +1714,6 @@ void GroupedMediaBlock::paintItem(Painter &p, const ItemState &item) const {
 	}
 	return 0.;
 }
-
 
 void GroupedMediaBlock::paintActiveItem(Painter &p) const {
 	const auto item = activeItem();
@@ -1794,7 +1749,6 @@ void GroupedMediaBlock::paintActiveItem(Painter &p) const {
 	}
 }
 
-
 void GroupedMediaBlock::paintNavigation(Painter &p) const {
 	if ((_intent != PreparedGroupedMediaIntent::Slideshow)
 		|| (_items.size() < 2)) {
@@ -1821,7 +1775,6 @@ void GroupedMediaBlock::paintNavigation(Painter &p) const {
 	}
 }
 
-
 void GroupedMediaBlock::ensureNavigationLinks() {
 	if ((_intent != PreparedGroupedMediaIntent::Slideshow)
 		|| (_items.size() < 2)
@@ -1841,7 +1794,6 @@ void GroupedMediaBlock::ensureNavigationLinks() {
 		}
 	});
 }
-
 
 void GroupedMediaBlock::updateNavigationRects() {
 	if ((_intent != PreparedGroupedMediaIntent::Slideshow)
@@ -1874,7 +1826,6 @@ void GroupedMediaBlock::updateNavigationRects() {
 		size);
 }
 
-
 void GroupedMediaBlock::stepActiveIndex(int delta) {
 	if ((_intent != PreparedGroupedMediaIntent::Slideshow)
 		|| (_items.size() < 2)) {
@@ -1906,8 +1857,7 @@ void GroupedMediaBlock::stepActiveIndex(int delta) {
 	requestRepaint(previousGeometry.united(_geometry));
 }
 
-
-[[nodiscard]] int GroupedMediaBlock::activeItemHeight(int width) const {
+int GroupedMediaBlock::activeItemHeight(int width) const {
 	if (const auto item = activeItem()) {
 		return MediaHeightForWidth(
 			width,
@@ -1917,15 +1867,13 @@ void GroupedMediaBlock::stepActiveIndex(int delta) {
 	return fallbackHeight(width);
 }
 
-
-[[nodiscard]] GroupedMediaBlock::ItemState *GroupedMediaBlock::activeItem() {
+GroupedMediaBlock::ItemState *GroupedMediaBlock::activeItem() {
 	return (_activeIndex >= 0 && _activeIndex < int(_items.size()))
 		? &_items[_activeIndex]
 		: nullptr;
 }
 
-
-[[nodiscard]] const GroupedMediaBlock::ItemState *GroupedMediaBlock::activeItem() const {
+const GroupedMediaBlock::ItemState *GroupedMediaBlock::activeItem() const {
 	return (_activeIndex >= 0 && _activeIndex < int(_items.size()))
 		? &_items[_activeIndex]
 		: nullptr;

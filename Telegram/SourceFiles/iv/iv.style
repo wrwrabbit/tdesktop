@@ -268,6 +268,7 @@ MarkdownEmbedOverlay {
 Markdown {
 	textPalette: TextPalette;
 	textColor: color;
+	supplementaryTextColor: color;
 	body: TextStyle;
 	heading1: TextStyle;
 	heading2: TextStyle;
@@ -315,22 +316,22 @@ defaultMarkdownTableHeaderStyle: TextStyle(defaultMarkdownBodyStyle) {
 	lineHeight: 24px;
 }
 defaultMarkdownBlockSkips: MarkdownBlockSkips {
-	paragraph: 16px;
-	heading: 24px;
-	code: 20px;
-	rule: 24px;
-	quote: 18px;
-	displayMath: 20px;
-	table: 20px;
-	photo: 20px;
-	video: 20px;
-	audio: 20px;
-	map: 20px;
-	channel: 20px;
-	groupedMedia: 20px;
+	paragraph: 12px;
+	heading: 16px;
+	code: 12px;
+	rule: 12px;
+	quote: 12px;
+	displayMath: 12px;
+	table: 12px;
+	photo: 12px;
+	video: 12px;
+	audio: 12px;
+	map: 12px;
+	channel: 8px;
+	groupedMedia: 12px;
 	relatedArticle: 0px;
-	embedPost: 20px;
-	placeholder: 20px;
+	embedPost: 12px;
+	placeholder: 12px;
 }
 defaultMarkdownList: MarkdownList {
 	indent: 28px;
@@ -452,8 +453,9 @@ defaultMarkdownChannelSubtitleStyle: TextStyle(defaultMarkdownDetailsSummaryStyl
 }
 defaultMarkdownChannelButtonStyle: TextStyle(defaultMarkdownChannelTitleStyle) {
 }
+defaultMarkdownSidesMargin: margins(18px, 0px, 18px, 0px);
 defaultMarkdownChannelButton: MarkdownChannelButton {
-	padding: margins(44px, 0px, 44px, 0px);
+	padding: defaultMarkdownSidesMargin;
 	border: 0px;
 	borderFg: windowActiveTextFg;
 	bg: windowBgOver;
@@ -462,7 +464,7 @@ defaultMarkdownChannelButton: MarkdownChannelButton {
 	textFg: windowActiveTextFg;
 }
 defaultMarkdownChannel: MarkdownChannel {
-	padding: margins(44px, 8px, 44px, 8px);
+	padding: margins(18px, 8px, 18px, 8px);
 	border: 0px;
 	borderFg: inputBorderFg;
 	bg: windowBgOver;
@@ -486,12 +488,12 @@ defaultMarkdownRelatedArticleSubtitleStyle: TextStyle(defaultMarkdownBodyStyle) 
 defaultMarkdownRelatedArticleFooterStyle: TextStyle(defaultMarkdownDetailsSummaryStyle) {
 }
 defaultMarkdownRelatedArticle: MarkdownRelatedArticle {
-	padding: margins(44px, 16px, 44px, 16px);
+	padding: margins(18px, 8px, 18px, 8px);
 	border: 0px;
 	borderFg: boxDividerBg;
 	bg: windowBg;
 	radius: 0px;
-	headerPadding: margins(44px, 14px, 44px, 14px);
+	headerPadding: margins(18px, 8px, 18px, 8px);
 	headerBg: windowBgOver;
 	separator: 1px;
 	separatorFg: boxDividerBg;
@@ -566,6 +568,7 @@ markdownEmbedOverlay: MarkdownEmbedOverlay {
 defaultMarkdown: Markdown {
 	textPalette: defaultMarkdownTextPalette;
 	textColor: windowFg;
+	supplementaryTextColor: windowSubTextFg;
 	body: defaultMarkdownBodyStyle;
 	heading1: TextStyle(defaultMarkdownBodyStyle) {
 		font: font(30px semibold);
@@ -592,9 +595,9 @@ defaultMarkdown: Markdown {
 		lineHeight: 21px;
 	}
 	code: defaultMarkdownCodeStyle;
-	pagePadding: margins(0px, 26px, 0px, 32px);
+	pagePadding: margins(0px, 0px, 0px, 16px);
 	pageMaxWidth: 732px;
-	textPadding: margins(44px, 0px, 44px, 0px);
+	textPadding: defaultMarkdownSidesMargin;
 	mediaPadding: margins(0px, 0px, 0px, 0px);
 	blockSkips: defaultMarkdownBlockSkips;
 	list: defaultMarkdownList;

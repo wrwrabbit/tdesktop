@@ -27,6 +27,7 @@ struct MarkdownArticlePaintCaches {
 	std::span<Ui::Text::SpecialColor> colors;
 	Fn<void()> repaint;
 	Fn<void(QRect)> repaintRect;
+	std::optional<QColor> supplementaryColorOverride;
 };
 
 struct MarkdownArticleHitTestResult {

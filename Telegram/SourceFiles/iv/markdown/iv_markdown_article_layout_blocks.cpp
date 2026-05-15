@@ -415,6 +415,7 @@ void LayoutMediaCaption(
 	if (prepared.text.text.isEmpty()) {
 		return;
 	}
+	block->supplementary = prepared.supplementary;
 	const auto textBand = ArticleTextBand(left, width, markdown, context);
 	LayoutMediaCaptionText(
 		block,
@@ -467,6 +468,15 @@ QString CodeBlockDisplayText(const QString &text) {
 bool IsFlowKind(PreparedBlockKind kind) {
 	return (kind == PreparedBlockKind::Paragraph)
 		|| (kind == PreparedBlockKind::Heading);
+}
+
+bool IsAnchorOnlyBlock(const PreparedBlock &block) {
+	return (block.kind == PreparedBlockKind::Paragraph)
+		&& !block.anchorId.isEmpty()
+		&& block.text.text.isEmpty()
+		&& block.text.entities.empty()
+		&& block.links.empty()
+		&& block.children.empty();
 }
 
 QString ListMarkerText(const PreparedBlock &block) {
@@ -545,6 +555,9 @@ int TableCellTextMinResizeWidth(
 int BlockSkip(
 		const PreparedBlock &block,
 		const style::Markdown &markdown) {
+	if (IsAnchorOnlyBlock(block)) {
+		return 0;
+	}
 	const auto &skips = markdown.blockSkips;
 	switch (block.kind) {
 	case PreparedBlockKind::Paragraph:
@@ -670,7 +683,13 @@ LaidOutBlock LayoutFlowBlock(
 	block.kind = prepared.kind;
 	block.anchorId = prepared.anchorId;
 	block.headingLevel = prepared.headingLevel;
+	block.supplementary = prepared.supplementary;
 	block.textWidth = std::max(width, 1);
+	if (IsAnchorOnlyBlock(prepared)) {
+		block.textRect = QRect(left, top, block.textWidth, 0);
+		block.outer = block.textRect;
+		return block;
+	}
 
 	const auto &textStyle = TextStyleFor(prepared, markdown);
 	SetTextLeaf(
@@ -853,6 +872,7 @@ LaidOutBlock LayoutTableBlock(
 	block.anchorId = prepared.anchorId;
 	block.tableBordered = prepared.tableBordered;
 	block.tableStriped = prepared.tableStriped;
+	block.supplementary = prepared.supplementary;
 
 	auto tableTop = top;
 	if (!prepared.text.text.isEmpty()) {
@@ -1094,6 +1114,7 @@ LaidOutBlock LayoutPlaceholderBlock(
 	block.anchorId = prepared.anchorId;
 	block.copyText = prepared.placeholder.copyText;
 	block.labelText = prepared.placeholder.label;
+	block.supplementary = prepared.supplementary;
 
 	const auto &style = markdown.placeholder;
 	const auto blockWidth = std::max(width, 1);
@@ -1330,6 +1351,7 @@ LaidOutBlock LayoutPhotoBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Photo;
 	block.anchorId = prepared.anchorId;
+	block.supplementary = prepared.supplementary;
 	if (context.mediaBlockFactory) {
 		block.mediaBlock = context.mediaBlockFactory(prepared);
 	}
@@ -1400,6 +1422,7 @@ LaidOutBlock LayoutVideoBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Video;
 	block.anchorId = prepared.anchorId;
+	block.supplementary = prepared.supplementary;
 	if (context.mediaBlockFactory) {
 		block.mediaBlock = context.mediaBlockFactory(prepared);
 	}
@@ -1470,6 +1493,7 @@ LaidOutBlock LayoutAudioBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Audio;
 	block.anchorId = prepared.anchorId;
+	block.supplementary = prepared.supplementary;
 	if (context.mediaBlockFactory) {
 		block.mediaBlock = context.mediaBlockFactory(prepared);
 	}
@@ -1526,6 +1550,7 @@ LaidOutBlock LayoutMapBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Map;
 	block.anchorId = prepared.anchorId;
+	block.supplementary = prepared.supplementary;
 	if (context.mediaBlockFactory) {
 		block.mediaBlock = context.mediaBlockFactory(prepared);
 	}
@@ -1591,6 +1616,7 @@ LaidOutBlock LayoutChannelBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Channel;
 	block.anchorId = prepared.anchorId;
+	block.supplementary = prepared.supplementary;
 	if (context.mediaBlockFactory) {
 		block.mediaBlock = context.mediaBlockFactory(prepared);
 	}
@@ -1645,6 +1671,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::GroupedMedia;
 	block.anchorId = prepared.anchorId;
+	block.supplementary = prepared.supplementary;
 	if (context.mediaBlockFactory) {
 		block.mediaBlock = context.mediaBlockFactory(prepared);
 	}

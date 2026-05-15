@@ -250,6 +250,7 @@ struct PreparedBlock {
 	bool collapsed = false;
 	bool depthClamped = false;
 	bool tight = false;
+	bool supplementary = false;
 };
 
 struct PreparedRenderDocument {

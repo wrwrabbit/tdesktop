@@ -1292,6 +1292,8 @@ PRIVATE
     intro/intro_step.h
     intro/intro_widget.cpp
     intro/intro_widget.h
+    iv/iv_cached_media.cpp
+    iv/iv_cached_media.h
     iv/iv_delegate_impl.cpp
     iv/iv_delegate_impl.h
     iv/iv_instance.cpp

@@ -336,6 +336,12 @@ void MarkdownPreviewRoot::setup() {
 		}, lifetime());
 	}
 
+	rpl::duplicate(
+		_options.downloadTaskFinished
+	) | rpl::on_next([=] {
+		update();
+	}, lifetime());
+
 	_devicePixelRatio = style::DevicePixelRatio();
 	prepareArticle();
 }

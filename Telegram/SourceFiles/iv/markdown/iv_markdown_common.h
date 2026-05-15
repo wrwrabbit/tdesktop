@@ -162,8 +162,8 @@ inline rpl::producer<uint64> MediaRuntime::channelJoinedChanges() const {
 	return rpl::never<uint64>();
 }
 
-inline std::shared_ptr<HostedMediaBlockFactory>
-MediaRuntime::hostedMediaBlockFactory() const {
+inline auto MediaRuntime::hostedMediaBlockFactory() const
+-> std::shared_ptr<HostedMediaBlockFactory> {
 	return nullptr;
 }
 
@@ -217,9 +217,13 @@ struct OpenOptions {
 	std::shared_ptr<QVariant> clickHandlerContextRef;
 	std::function<void()> openSource;
 	std::function<void(std::shared_ptr<Ui::Show>)> share;
-	std::function<Webview::DataResult(QByteArray, Webview::DataRequest)>
-		ivWebviewDataRequest;
-	std::function<bool(const MediaActivation &, Qt::MouseButton)> activateMedia;
+	std::function<Webview::DataResult(
+		QByteArray,
+		Webview::DataRequest)> ivWebviewDataRequest;
+	std::function<bool(
+		const MediaActivation &,
+		Qt::MouseButton)> activateMedia;
+	rpl::producer<> downloadTaskFinished;
 };
 
 struct ParseOptions {

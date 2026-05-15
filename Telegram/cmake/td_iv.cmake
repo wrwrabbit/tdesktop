@@ -19,6 +19,8 @@ PRIVATE
     iv/iv_pch.h
     iv/iv_prepare.cpp
     iv/iv_prepare.h
+    iv/iv_zoom_controls.cpp
+    iv/iv_zoom_controls.h
 )
 
 nice_target_sources(td_iv ${src_loc}

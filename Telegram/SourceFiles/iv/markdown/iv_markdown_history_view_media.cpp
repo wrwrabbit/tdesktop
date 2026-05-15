@@ -87,28 +87,23 @@ IvHistoryViewDelegate::IvHistoryViewDelegate(
 , _session(session) {
 }
 
-
 HistoryView::Context IvHistoryViewDelegate::elementContext() {
 	return HistoryView::Context::TTLViewer;
 }
-
 
 HistoryView::ElementChatMode IvHistoryViewDelegate::elementChatMode() {
 	return HistoryView::ElementChatMode::Default;
 }
 
-
 bool IvHistoryViewDelegate::elementAnimationsPaused() {
 	return false;
 }
-
 
 void IvHistoryViewDelegate::elementOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) {
 	controller()->openPhoto(photo, { .id = context });
 }
-
 
 void IvHistoryViewDelegate::elementOpenDocument(
 		not_null<DocumentData*> document,
@@ -120,13 +115,11 @@ void IvHistoryViewDelegate::elementOpenDocument(
 		{ .id = context });
 }
 
-
 void IvHistoryViewDelegate::elementCancelUpload(const FullMsgId &context) {
 	if (const auto item = _session->message(context)) {
 		controller()->cancelUploadLayer(item);
 	}
 }
-
 
 void IvHistoryViewDelegate::elementShowTooltip(
 		const TextWithEntities &text,
@@ -286,25 +279,21 @@ IvHistoryViewBlock::IvHistoryViewBlock(
 	}, _lifetime);
 }
 
-
-[[nodiscard]] uint64 IvHistoryViewBlock::stableId() const {
+uint64 IvHistoryViewBlock::stableId() const {
 	return _stableId;
 }
 
-
-[[nodiscard]] bool IvHistoryViewBlock::supported() const {
+bool IvHistoryViewBlock::supported() const {
 	return _supported;
 }
 
-
-[[nodiscard]] int IvHistoryViewBlock::resizeGetHeight(int width) {
+int IvHistoryViewBlock::resizeGetHeight(int width) {
 	if (!_media) {
 		return 0;
 	}
 	_requestedWidth = std::max(width, 1);
 	return _media->resizeGetHeight(_requestedWidth);
 }
-
 
 void IvHistoryViewBlock::setGeometry(QRect geometry) {
 	if (!_media) {
@@ -319,16 +308,13 @@ void IvHistoryViewBlock::setGeometry(QRect geometry) {
 	_geometry = QRect(geometry.topLeft(), _media->currentSize());
 }
 
-
-[[nodiscard]] QRect IvHistoryViewBlock::geometry() const {
+QRect IvHistoryViewBlock::geometry() const {
 	return _geometry;
 }
 
-
-[[nodiscard]] int IvHistoryViewBlock::firstLineBaseline() const {
+int IvHistoryViewBlock::firstLineBaseline() const {
 	return _geometry.y();
 }
-
 
 void IvHistoryViewBlock::paint(
 		Painter &p,
@@ -357,24 +343,21 @@ void IvHistoryViewBlock::paint(
 	p.restore();
 }
 
-
-[[nodiscard]] ClickHandlerPtr IvHistoryViewBlock::linkAt(QPoint point) const {
+ClickHandlerPtr IvHistoryViewBlock::linkAt(QPoint point) const {
 	return resolveHit(point).link;
 }
 
-
-[[nodiscard]] MediaActivation IvHistoryViewBlock::activationAt(QPoint point) const {
+MediaActivation IvHistoryViewBlock::activationAt(QPoint point) const {
 	return resolveHit(point).activation;
 }
 
-
-[[nodiscard]] MediaBlockSelectionData IvHistoryViewBlock::selectionData() const {
+MediaBlockSelectionData IvHistoryViewBlock::selectionData() const {
 	return {
 		.copyText = _copyText,
 	};
 }
 
-[[nodiscard]] IvHistoryViewHit IvHistoryViewBlock::resolveHit(QPoint point) const {
+IvHistoryViewHit IvHistoryViewBlock::resolveHit(QPoint point) const {
 	auto result = IvHistoryViewHit();
 	if (!_supported || !_media || !_geometry.contains(point)) {
 		return result;
@@ -382,8 +365,7 @@ void IvHistoryViewBlock::paint(
 	return resolveLocalHit(point - _geometry.topLeft());
 }
 
-
-[[nodiscard]] IvHistoryViewHit IvHistoryViewBlock::resolveLocalHit(QPoint point) const {
+IvHistoryViewHit IvHistoryViewBlock::resolveLocalHit(QPoint point) const {
 	auto result = IvHistoryViewHit();
 	if (!_media) {
 		return result;
@@ -397,14 +379,12 @@ void IvHistoryViewBlock::paint(
 	return classifyState(state);
 }
 
-
-[[nodiscard]] IvHistoryViewHit IvHistoryViewBlock::classifyState(
+IvHistoryViewHit IvHistoryViewBlock::classifyState(
 		const HistoryView::TextState &state) const {
 	return classifyHandler(state.link);
 }
 
-
-[[nodiscard]] IvHistoryViewHit IvHistoryViewBlock::classifyHandler(
+IvHistoryViewHit IvHistoryViewBlock::classifyHandler(
 		const ClickHandlerPtr &handler) const {
 	auto result = IvHistoryViewHit();
 	if (!handler) {
@@ -459,8 +439,7 @@ void IvHistoryViewBlock::paint(
 	return result;
 }
 
-
-[[nodiscard]] bool IvHistoryViewBlock::probeSupport() {
+bool IvHistoryViewBlock::probeSupport() {
 	if (!_media) {
 		return false;
 	}
@@ -476,8 +455,7 @@ void IvHistoryViewBlock::paint(
 	return false;
 }
 
-
-[[nodiscard]] bool IvHistoryViewBlock::supportsHitClassification() {
+bool IvHistoryViewBlock::supportsHitClassification() {
 	const auto width = std::max(_layoutHint.width(), 1);
 	_media->resizeGetHeight(width);
 	const auto size = _media->currentSize();
@@ -501,17 +479,14 @@ void IvHistoryViewBlock::paint(
 	return true;
 }
 
-
 void IvHistoryViewBlock::handleViewRepaint(QRect rect) {
 	Q_UNUSED(rect);
 	requestRepaint(QRect());
 }
 
-
 void IvHistoryViewBlock::handleItemRepaint() {
 	requestRepaint(QRect());
 }
-
 
 void IvHistoryViewBlock::handleViewResize() {
 	if (!_media) {

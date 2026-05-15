@@ -104,6 +104,17 @@ namespace {
 		&& (next->kind == PreparedBlockKind::RelatedArticle);
 }
 
+[[nodiscard]] const PreparedBlock *NextVisibleBlock(
+		const std::vector<PreparedBlock> &blocks,
+		int index) {
+	for (auto i = index + 1, count = int(blocks.size()); i != count; ++i) {
+		if (!IsAnchorOnlyBlock(blocks[i])) {
+			return &blocks[i];
+		}
+	}
+	return nullptr;
+}
+
 void PrepareNestedContext(
 		LayoutContext *context,
 		int left,
@@ -186,6 +197,7 @@ void PrepareNestedContext(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::ListItem;
 	block.anchorId = prepared.anchorId;
+	block.supplementary = prepared.supplementary;
 	block.listKind = prepared.listKind;
 	block.listDelimiter = prepared.listDelimiter;
 	block.taskState = prepared.taskState;
@@ -314,12 +326,12 @@ void PrepareNestedContext(
 	PrepareNestedContext(&childContext, listLeft, listWidth);
 
 	auto y = top;
-	auto first = true;
+	auto previous = static_cast<const PreparedBlock*>(nullptr);
 	for (const auto &child : prepared.children) {
-		if (!first) {
+		const auto anchorOnly = IsAnchorOnlyBlock(child);
+		if (previous && !anchorOnly) {
 			y += prepared.tight ? 0 : BlockSkip(child, markdown);
 		}
-		first = false;
 
 		auto laidOut = (child.kind == PreparedBlockKind::ListItem)
 			? LayoutListItemBlock(
@@ -349,6 +361,9 @@ void PrepareNestedContext(
 				childContext);
 		y = BlockBottom(laidOut);
 		block.children.push_back(std::move(laidOut));
+		if (!anchorOnly) {
+			previous = &child;
+		}
 	}
 
 	block.outer = QRect(
@@ -441,6 +456,7 @@ void PrepareNestedContext(
 	block.kind = PreparedBlockKind::Details;
 	block.anchorId = prepared.anchorId;
 	block.collapsed = prepared.collapsed;
+	block.supplementary = prepared.supplementary;
 	const auto &details = markdown.details;
 	const auto headerWidth = std::max(width, 1);
 	const auto iconWidth = details.icon.width();
@@ -553,6 +569,7 @@ void PrepareNestedContext(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::EmbedPost;
 	block.anchorId = prepared.anchorId;
+	block.supplementary = prepared.supplementary;
 	block.thumbnailPhotoId = prepared.embedPost.authorPhotoId;
 	if (prepared.embedPost.authorPhotoId && mediaRuntime) {
 		block.photoRuntime = mediaRuntime->resolvePhoto(
@@ -937,8 +954,9 @@ int LayoutBlocks(
 	auto previous = static_cast<const PreparedBlock*>(nullptr);
 	for (auto i = 0, count = int(prepared.size()); i != count; ++i) {
 		const auto &block = prepared[i];
-		const auto next = (i + 1 < count) ? &prepared[i + 1] : nullptr;
-		if (previous) {
+		const auto anchorOnly = IsAnchorOnlyBlock(block);
+		const auto next = NextVisibleBlock(prepared, i);
+		if (previous && !anchorOnly) {
 			y += BlockSkip(*previous, block, context, markdown);
 		}
 		const auto band = BlockBand(
@@ -987,7 +1005,9 @@ int LayoutBlocks(
 		}
 		y = BlockBottom(laidOut);
 		blocks->push_back(std::move(laidOut));
-		previous = &block;
+		if (!anchorOnly) {
+			previous = &block;
+		}
 	}
 	return y;
 }

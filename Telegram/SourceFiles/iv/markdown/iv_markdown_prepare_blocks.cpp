@@ -564,7 +564,6 @@ void PrepareFootnotes(PrepareState *state) {
 	return PrepareChildren(node, {}, state);
 }
 
-
 [[nodiscard]] std::vector<PreparedBlock> PrepareFlowBlock(
 		const MarkdownNode &node,
 		PreparedBlockKind kind,

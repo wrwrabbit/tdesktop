@@ -113,6 +113,7 @@ struct LaidOutBlock {
 	bool overflowed = false;
 	bool tableBordered = true;
 	bool tableStriped = false;
+	bool supplementary = false;
 	int segmentIndex = -1;
 	int secondarySegmentIndex = -1;
 	int tertiarySegmentIndex = -1;
@@ -153,6 +154,7 @@ struct TableRowLayoutData {
 	bool header = false;
 };
 
+[[nodiscard]] bool IsAnchorOnlyBlock(const PreparedBlock &block);
 [[nodiscard]] bool IsFlowKind(PreparedBlockKind kind);
 [[nodiscard]] QString ListMarkerText(const PreparedBlock &block);
 [[nodiscard]] int TextLineHeight(const style::TextStyle &style);

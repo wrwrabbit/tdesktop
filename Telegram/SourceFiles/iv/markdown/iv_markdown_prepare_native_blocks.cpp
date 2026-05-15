@@ -736,6 +736,7 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 	SortPreparedIvRichText(&caption);
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
+	block.supplementary = true;
 	if (data.vblocks().v.isEmpty()) {
 		block.children.push_back(
 			PrepareNativeIvEmbedPostFallbackParagraph(block.embedPost.url));
@@ -841,7 +842,10 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 		&block.children,
 		PreparedBlockKind::Paragraph,
 		0,
-		std::move(cite))) {
+		std::move(cite),
+		QString(),
+		false,
+		true)) {
 		return false;
 	}
 	if (block.children.empty()) {
@@ -1441,7 +1445,9 @@ void MarkNativeIvTableSlots(
 			PreparedBlockKind::Paragraph,
 			0,
 			std::move(prepared),
-			std::move(anchorId));
+			std::move(anchorId),
+			false,
+			true);
 	}, [&](const MTPDpageBlockHeader &data) {
 		return AppendNativeIvFlowBlock(
 			result,
