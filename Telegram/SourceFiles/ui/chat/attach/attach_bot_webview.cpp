@@ -35,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/debug_log.h"
 #include "base/invoke_queued.h"
 #include "base/options.h"
+#include "base/platform/base_platform_info.h"
 #include "base/qt_signal_producer.h"
 #include "base/random.h"
 #include "styles/style_chat.h"
@@ -319,6 +320,19 @@ void LogNativeMessageRejected(
 		const Webview::ThemeParams &params) {
 	const auto parsed = QJsonDocument::fromJson(params.json);
 	return { { u"theme_params"_q, parsed.object() } };
+}
+
+[[nodiscard]] Platform::ForeignParent CompatibleForeignParent(
+		Platform::ForeignParent parent) {
+	switch (parent.type) {
+	case Platform::ForeignParent::Type::None:
+		return {};
+	case Platform::ForeignParent::Type::X11:
+		return ::Platform::IsX11() ? parent : Platform::ForeignParent();
+	case Platform::ForeignParent::Type::Wayland:
+		return ::Platform::IsWayland() ? parent : Platform::ForeignParent();
+	}
+	return {};
 }
 
 enum class SharedPanelMenuAction {
@@ -1659,8 +1673,19 @@ void Panel::sendExternalShellEvent(
 		|| _externalShellToken.isEmpty()) {
 		return;
 	}
-	_webview->window.eval(
-		LinuxShell::EventScript(event, data, _externalShellToken));
+	const auto generation = _externalShellGeneration;
+	const auto token = _externalShellToken;
+	crl::on_main(this, [=] {
+		if (!_externalShell
+			|| !_externalShellBootstrapped
+			|| !_webview
+			|| _externalShellGeneration != generation
+			|| _externalShellToken != token) {
+			return;
+		}
+		_webview->window.eval(
+			LinuxShell::EventScript(event, data, _externalShellToken));
+	});
 }
 
 void Panel::sendExternalShellButton(
@@ -1886,7 +1911,8 @@ Panel::ExternalShellAnchor Panel::externalShellAnchor() const {
 	auto popupAnchor = _webview->window.popupAnchor();
 	auto result = ExternalShellAnchor{
 		.outerSize = std::move(popupAnchor.outerSize),
-		.transientParent = std::move(popupAnchor.transientParent),
+		.transientParent = CompatibleForeignParent(
+			std::move(popupAnchor.transientParent)),
 	};
 	switch (result.transientParent.type) {
 	case Ui::Platform::ForeignParent::Type::X11:
