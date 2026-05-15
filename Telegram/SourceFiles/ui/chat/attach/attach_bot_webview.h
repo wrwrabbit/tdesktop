@@ -218,6 +218,8 @@ private:
 	bool showWebview(Args &&args, const Webview::ThemeParams &params);
 
 	bool createWebview(const Webview::ThemeParams &params);
+	void resetExternalShellIdentity();
+	[[nodiscard]] QWidget *webviewWindowForPopup() const;
 	void installExternalShellDocument();
 	void sendExternalShellBootstrap();
 	void sendExternalShellMethod(
@@ -225,7 +227,7 @@ private:
 		const QJsonObject &data);
 	void sendExternalShellEvent(
 		const QString &event,
-		const QByteArray &data);
+		const QJsonObject &data);
 	void sendExternalShellButton(
 		const char *name,
 		const QJsonObject &args);
@@ -323,6 +325,8 @@ private:
 	bool _externalTitleBadgeVisible = false;
 	bool _externalShell = false;
 	bool _externalShellBootstrapped = false;
+	QString _externalShellToken;
+	uint64 _externalShellGeneration = 0;
 	bool _externalBackVisible = false;
 	ExternalShellColorState _externalShellColorState;
 	MenuButtons _menuButtons = {};

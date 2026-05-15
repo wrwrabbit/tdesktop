@@ -60,58 +60,62 @@ namespace {
 
 } // namespace
 
-QByteArray InstallScript() {
-	static const auto result = [] {
-		const auto css = QString::fromUtf8(PageCss());
-		const auto body = QString::fromUtf8(BodyHtml());
-		auto script = QByteArray();
-		script += "if (window === window.top"
-			" && !window.TelegramDesktopShell"
-			" && !window.TelegramDesktopShellInstalling) {"
-			"window.TelegramDesktopShellInstalling = true;"
-			"try {"
-			"if (!document.head) {"
-			"document.documentElement.insertBefore("
-			"document.createElement('head'),"
-			"document.documentElement.firstChild);"
-			"}"
-			"if (!document.body) {"
-			"document.documentElement.appendChild("
-			"document.createElement('body'));"
-			"}"
-			"document.title = 'Telegram';"
-			"const metaRobots = document.createElement('meta');"
-			"metaRobots.name = 'robots';"
-			"metaRobots.content = 'noindex, nofollow';"
-			"document.head.appendChild(metaRobots);"
-			"const metaViewport = document.createElement('meta');"
-			"metaViewport.name = 'viewport';"
-			"metaViewport.content = 'width=device-width, initial-scale=1.0';"
-			"document.head.appendChild(metaViewport);"
-			"const style = document.createElement('style');"
-			"style.textContent = ";
-		script += JsonValue(css);
-		script += ";"
-			"document.head.appendChild(style);"
-			"document.body.insertAdjacentHTML('beforeend', ";
-		script += JsonValue(body);
-		script += ");";
-		script += PageJs();
-		script += "} finally {"
-			"window.TelegramDesktopShellInstalling = false;"
-			"}"
-			"}";
-		return script;
-	}();
-	return result;
+QByteArray InstallScript(const QString &shellToken) {
+	const auto css = QString::fromUtf8(PageCss());
+	const auto body = QString::fromUtf8(BodyHtml());
+	auto pageJs = PageJs();
+	pageJs.replace(
+		QByteArray("TDESKTOP_SHELL_TOKEN_PLACEHOLDER"),
+		JsonValue(shellToken));
+
+	auto script = QByteArray();
+	script += "if (window === window.top"
+		" && !window.TelegramDesktopShell"
+		" && !window.TelegramDesktopShellInstalling) {"
+		"window.TelegramDesktopShellInstalling = true;"
+		"try {"
+		"if (!document.head) {"
+		"document.documentElement.insertBefore("
+		"document.createElement('head'),"
+		"document.documentElement.firstChild);"
+		"}"
+		"if (!document.body) {"
+		"document.documentElement.appendChild("
+		"document.createElement('body'));"
+		"}"
+		"document.title = 'Telegram';"
+		"const metaRobots = document.createElement('meta');"
+		"metaRobots.name = 'robots';"
+		"metaRobots.content = 'noindex, nofollow';"
+		"document.head.appendChild(metaRobots);"
+		"const metaViewport = document.createElement('meta');"
+		"metaViewport.name = 'viewport';"
+		"metaViewport.content = 'width=device-width, initial-scale=1.0';"
+		"document.head.appendChild(metaViewport);"
+		"const style = document.createElement('style');"
+		"style.textContent = ";
+	script += JsonValue(css);
+	script += ";"
+		"document.head.appendChild(style);"
+		"document.body.insertAdjacentHTML('beforeend', ";
+	script += JsonValue(body);
+	script += ");";
+	script += pageJs;
+	script += "} finally {"
+		"window.TelegramDesktopShellInstalling = false;"
+		"}"
+		"}";
+	return script;
 }
 
 QByteArray MethodCallScript(
 		const QByteArray &method,
-		const QJsonObject &data) {
+		const QJsonObject &data,
+		const QString &shellToken) {
 	const auto payload = JsonObject(data);
+	const auto token = JsonValue(shellToken);
 	auto script = QByteArray();
-	script.reserve(method.size() * 2 + payload.size() + 96);
+	script.reserve(method.size() * 2 + payload.size() + token.size() + 98);
 	script += "if (window.TelegramDesktopShell"
 		" && window.TelegramDesktopShell.";
 	script += method;
@@ -119,17 +123,27 @@ QByteArray MethodCallScript(
 	script += method;
 	script += "(";
 	script += payload;
+	script += ", ";
+	script += token;
 	script += "); }";
 	return script;
 }
 
-QByteArray EventScript(const QString &event, const QByteArray &data) {
+QByteArray EventScript(
+		const QString &event,
+		const QJsonObject &data,
+		const QString &shellToken) {
+	const auto eventValue = JsonValue(event);
+	const auto payload = JsonObject(data);
+	const auto token = JsonValue(shellToken);
 	auto script = QByteArray();
 	script += "if (window.TelegramDesktopShell) {"
 		"window.TelegramDesktopShell.nativeEvent(";
-	script += JsonValue(event);
+	script += eventValue;
 	script += ", ";
-	script += (data.isEmpty() ? QByteArray("{}") : data);
+	script += payload;
+	script += ", ";
+	script += token;
 	script += "); }";
 	return script;
 }

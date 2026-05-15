@@ -45,25 +45,80 @@
 		verifiedBadge: null,
 		menuPalette: null
 	};
+	const shellToken = TDESKTOP_SHELL_TOKEN_PLACEHOLDER;
+	const nativeMessageType = 'tdesktop_external_bot_webapp';
+	const maxPendingEvents = 64;
 	let iframe = null;
 	let frameLoaded = false;
 	let frameUrl = 'about:blank';
+	let frameGeneration = 0;
 	let reloadSupported = false;
 	let reloadTimeout = null;
 	let viewportScheduled = false;
 	let resizeObserver = null;
 	const pendingEvents = [];
 
-	function invoke(eventType, eventData) {
-		if (window.external && window.external.invoke) {
-			window.external.invoke(JSON.stringify([
-				eventType,
-				JSON.stringify(eventData || {})
-			]));
+	function normalizeEventData(eventData) {
+		if (typeof eventData === 'string') {
+			try {
+				const parsed = JSON.parse(eventData);
+				return parsed
+					&& typeof parsed === 'object'
+					&& !Array.isArray(parsed)
+					? parsed
+					: {};
+			} catch (e) {
+				return {};
+			}
 		}
+		return eventData
+			&& typeof eventData === 'object'
+			&& !Array.isArray(eventData)
+			? eventData
+			: {};
 	}
 
-	function sendToFrame(eventType, eventData) {
+	function isShellOrigin() {
+		return window.location.protocol === 'https:'
+			&& window.location.hostname === 'web.telegram.org'
+			&& (!window.location.port || window.location.port === '443');
+	}
+
+	function invokeNative(source, eventType, eventData) {
+		if (!window.external
+			|| typeof window.external.invoke !== 'function'
+			|| typeof shellToken !== 'string'
+			|| !shellToken
+			|| typeof eventType !== 'string') {
+			return;
+		}
+		if (source === 'shell' && !isShellOrigin()) {
+			return;
+		}
+		window.external.invoke(JSON.stringify({
+			type: nativeMessageType,
+			source: source,
+			token: shellToken,
+			origin: window.location.origin,
+			eventType: eventType,
+			eventData: normalizeEventData(eventData)
+		}));
+	}
+
+	function invokeShell(eventType, eventData) {
+		invokeNative('shell', eventType, eventData);
+	}
+
+	function invokeWebApp(eventType, eventData) {
+		invokeNative('webapp', eventType, eventData);
+	}
+
+	function sendToFrame(eventType, eventData, generation) {
+		if (!iframe
+			|| !iframe.contentWindow
+			|| generation !== frameGeneration) {
+			return;
+		}
 		iframe.contentWindow.postMessage(JSON.stringify({
 			eventType: eventType,
 			eventData: eventData || {}
@@ -71,14 +126,19 @@
 	}
 
 	function postToFrame(eventType, eventData) {
+		const generation = frameGeneration;
 		if (!iframe || !iframe.contentWindow || !frameLoaded) {
 			pendingEvents.push({
+				generation: generation,
 				eventType: eventType,
 				eventData: eventData || {}
 			});
+			while (pendingEvents.length > maxPendingEvents) {
+				pendingEvents.shift();
+			}
 			return;
 		}
-		sendToFrame(eventType, eventData);
+		sendToFrame(eventType, eventData, generation);
 	}
 
 	function shellPointerPayload(event, extra) {
@@ -102,11 +162,12 @@
 		if (shellState.blocked
 			|| shellState.isFullscreen
 			|| event.defaultPrevented
+			|| !event.isTrusted
 			|| event.button !== 0) {
 			return;
 		}
 		closeMenu();
-		invoke(command, shellPointerPayload(event, extra));
+		invokeShell(command, shellPointerPayload(event, extra));
 		event.preventDefault();
 	}
 
@@ -117,11 +178,11 @@
 			&& target.closest('.title-control, #menu')) {
 			return;
 		}
-		beginShellControl('tdesktop_shell_begin_move', event);
+		beginShellControl('shell_begin_move', event);
 	}
 
 	function beginShellResize(edge, event) {
-		beginShellControl('tdesktop_shell_begin_resize', event, {
+		beginShellControl('shell_begin_resize', event, {
 			edge: edge
 		});
 	}
@@ -129,7 +190,9 @@
 	function flushPendingEvents() {
 		const pending = pendingEvents.splice(0);
 		for (const event of pending) {
-			postToFrame(event.eventType, event.eventData);
+			if (event.generation === frameGeneration) {
+				sendToFrame(event.eventType, event.eventData, event.generation);
+			}
 		}
 	}
 
@@ -497,7 +560,7 @@
 			return;
 		}
 		state.iconRequestGeneration = state.iconGeneration;
-		invoke('tdesktop_shell_request_button_icon', {
+		invokeShell('shell_request_button_icon', {
 			name: state.name
 		});
 	}
@@ -585,9 +648,9 @@
 		if (clickable) {
 			node.type = 'button';
 			setupRipple(node);
-			node.addEventListener('click', function() {
-				if (!shellState.blocked) {
-					invoke('tdesktop_shell_menu_action', { id: item.id });
+			node.addEventListener('click', function(event) {
+				if (!shellState.blocked && event.isTrusted) {
+					invokeShell('shell_menu_action', { id: item.id });
 					closeMenu();
 				}
 			});
@@ -692,7 +755,10 @@
 		renderMenu();
 	}
 
-	function toggleMenu() {
+	function toggleMenu(event) {
+		if (event && !event.isTrusted) {
+			return;
+		}
 		if (shellState.blocked) {
 			return;
 		}
@@ -700,7 +766,7 @@
 			closeMenu();
 			return;
 		}
-		invoke('tdesktop_shell_menu_request', {});
+		invokeShell('shell_menu_request', {});
 		shellState.menuOpen = true;
 		renderMenu();
 	}
@@ -713,7 +779,9 @@
 				return null;
 			}
 		}
-		return data && typeof data === 'object' ? data : null;
+		return data && typeof data === 'object' && !Array.isArray(data)
+			? data
+			: null;
 	}
 
 	function addRipple(button, x, y) {
@@ -764,23 +832,27 @@
 	}
 
 	window.addEventListener('message', function(event) {
-		if (!iframe || event.source !== iframe.contentWindow) {
+		if (!iframe
+			|| !iframe.contentWindow
+			|| event.source !== iframe.contentWindow) {
 			return;
 		}
 		const message = parseFrameMessage(event.data);
-		if (!message || !message.eventType) {
+		if (!message || typeof message.eventType !== 'string') {
 			return;
 		}
 		if (message.eventType === 'iframe_ready') {
 			reloadSupported = !!(message.eventData && message.eventData.reload_supported);
+			return;
 		} else if (message.eventType === 'iframe_will_reload') {
 			if (reloadTimeout) {
 				window.clearTimeout(reloadTimeout);
 				reloadTimeout = null;
 			}
 			frameLoaded = false;
+			return;
 		}
-		invoke(message.eventType, message.eventData || {});
+		invokeWebApp(message.eventType, message.eventData);
 	});
 
 	menuBackdrop.addEventListener('mousedown', closeMenu);
@@ -812,8 +884,10 @@
 		resizeObserver.observe(root);
 	}
 
-	controls.close.addEventListener('click', function() {
-		invoke('tdesktop_shell_close', {});
+	controls.close.addEventListener('click', function(event) {
+		if (event.isTrusted) {
+			invokeShell('shell_close', {});
+		}
 	});
 	controls.back.addEventListener('click', function() {
 		postToFrame('back_button_pressed', {});
@@ -838,10 +912,13 @@
 			window.clearTimeout(reloadTimeout);
 			reloadTimeout = null;
 		}
+		const generation = ++frameGeneration;
+		pendingEvents.splice(0);
 		const next = document.createElement('iframe');
 		next.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen');
+		next.referrerPolicy = 'no-referrer';
 		next.addEventListener('load', function() {
-			if (iframe !== next) {
+			if (iframe !== next || generation !== frameGeneration) {
 				return;
 			}
 			frameLoaded = true;
@@ -867,7 +944,7 @@
 			return;
 		}
 		if (reloadSupported && frameLoaded && iframe.contentWindow) {
-			sendToFrame('reload_iframe', {});
+			sendToFrame('reload_iframe', {}, frameGeneration);
 			if (reloadTimeout) {
 				window.clearTimeout(reloadTimeout);
 			}
@@ -880,8 +957,15 @@
 		fallbackReloadFrame();
 	}
 
-	window.TelegramDesktopShell = {
-		bootstrap: function(data) {
+	function isNativeToken(token) {
+		return !!shellToken && token === shellToken;
+	}
+
+	const api = {
+		bootstrap: function(data, token) {
+			if (!isNativeToken(token)) {
+				return;
+			}
 			applyMetrics(data && data.metrics);
 			applyColors(data && data.colors);
 			applyChrome(data || {});
@@ -893,7 +977,10 @@
 			renderButtons();
 			renderMenu();
 		},
-		nativeEvent: function(eventType, eventData) {
+		nativeEvent: function(eventType, eventData, token) {
+			if (!isNativeToken(token) || typeof eventType !== 'string') {
+				return;
+			}
 			if (eventType === 'fullscreen_changed' && eventData) {
 				shellState.isFullscreen = !!eventData.is_fullscreen;
 				root.classList.toggle('fullscreen', shellState.isFullscreen);
@@ -901,31 +988,52 @@
 			}
 			postToFrame(eventType, eventData || {});
 		},
-		setTitle: function(data) {
+		setTitle: function(data, token) {
+			if (!isNativeToken(token)) {
+				return;
+			}
 			title.textContent = (data && data.title) || '';
 			document.title = (data && data.title) || 'Telegram';
 		},
-		setChrome: function(data) {
+		setChrome: function(data, token) {
+			if (!isNativeToken(token)) {
+				return;
+			}
 			applyChrome(data || {});
 		},
-		setColors: function(data) {
+		setColors: function(data, token) {
+			if (!isNativeToken(token)) {
+				return;
+			}
 			applyColors(data || {});
 		},
-		setAssets: function(data) {
+		setAssets: function(data, token) {
+			if (!isNativeToken(token)) {
+				return;
+			}
 			applyAssets(data || {});
 		},
-		setMenu: function(data) {
+		setMenu: function(data, token) {
+			if (!isNativeToken(token)) {
+				return;
+			}
 			shellState.menuItems = Array.isArray(data && data.items)
 				? data.items
 				: [];
 			applyChrome({});
 			renderMenu();
 		},
-		setBottomText: function(data) {
+		setBottomText: function(data, token) {
+			if (!isNativeToken(token)) {
+				return;
+			}
 			shellState.bottomText = '';
 			updateFooter();
 		},
-		setButton: function(data) {
+		setButton: function(data, token) {
+			if (!isNativeToken(token)) {
+				return;
+			}
 			if (!data || !data.name) {
 				return;
 			}
@@ -945,7 +1053,10 @@
 			shellState.buttons[data.name] = next;
 			renderButtons();
 		},
-		setButtonIcon: function(data) {
+		setButtonIcon: function(data, token) {
+			if (!isNativeToken(token)) {
+				return;
+			}
 			if (!data || !data.name) {
 				return;
 			}
@@ -961,17 +1072,38 @@
 			state.iconUrl = (icon && icon.url) ? icon.url : '';
 			renderButtons();
 		},
-		setBlocked: function(data) {
+		setBlocked: function(data, token) {
+			if (!isNativeToken(token)) {
+				return;
+			}
 			shellState.blocked = !!(data && data.blocked);
 			root.classList.toggle('blocked', shellState.blocked);
 			if (shellState.blocked) {
 				closeMenu();
 			}
 		},
-		setProgress: function(data) {
+		setProgress: function(data, token) {
+			if (!isNativeToken(token)) {
+				return;
+			}
 			root.classList.toggle('loading', !!(data && data.shown));
 		},
-		reloadFrame: reloadFrame,
-		sendViewport: scheduleViewport
+		reloadFrame: function(data, token) {
+			if (!isNativeToken(token)) {
+				return;
+			}
+			reloadFrame();
+		},
+		sendViewport: function(data, token) {
+			if (!isNativeToken(token)) {
+				return;
+			}
+			scheduleViewport();
+		}
 	};
+	Object.defineProperty(window, 'TelegramDesktopShell', {
+		value: Object.freeze(api),
+		configurable: false,
+		writable: false
+	});
 })();

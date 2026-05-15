@@ -23,13 +23,15 @@ struct ResolvedColors {
 
 #ifdef Q_OS_LINUX
 
-[[nodiscard]] QByteArray InstallScript();
+[[nodiscard]] QByteArray InstallScript(const QString &shellToken);
 [[nodiscard]] QByteArray MethodCallScript(
 	const QByteArray &method,
-	const QJsonObject &data);
+	const QJsonObject &data,
+	const QString &shellToken);
 [[nodiscard]] QByteArray EventScript(
 	const QString &event,
-	const QByteArray &data);
+	const QJsonObject &data,
+	const QString &shellToken);
 [[nodiscard]] QJsonObject Metrics();
 [[nodiscard]] QSize WindowSize(QSize contentSize);
 [[nodiscard]] QJsonObject MenuPalette();
@@ -37,19 +39,21 @@ struct ResolvedColors {
 
 #else // Q_OS_LINUX
 
-[[nodiscard]] inline QByteArray InstallScript() {
+[[nodiscard]] inline QByteArray InstallScript(const QString &) {
 	return {};
 }
 
 [[nodiscard]] inline QByteArray MethodCallScript(
 		const QByteArray &,
-		const QJsonObject &) {
+		const QJsonObject &,
+		const QString &) {
 	return {};
 }
 
 [[nodiscard]] inline QByteArray EventScript(
 		const QString &,
-		const QByteArray &) {
+		const QJsonObject &,
+		const QString &) {
 	return {};
 }
 
