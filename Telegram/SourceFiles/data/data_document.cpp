@@ -641,6 +641,17 @@ int DocumentData::resolveVideoQuality() const {
 		: std::min(attributesSize.width(), attributesSize.height());
 }
 
+Media::VideoQuality DocumentData::initialPlaybackVideoQuality(
+		Media::VideoQuality request) const {
+	return (isVideoFile() && !filepath(true).isEmpty())
+		? Media::VideoQuality{
+			.manual = 1u,
+			.height = uint32(std::max(resolveVideoQuality(), 0)),
+			.original = 1u,
+		}
+		: request;
+}
+
 auto DocumentData::resolveQualities(HistoryItem *context) const
 -> const std::vector<not_null<DocumentData*>> & {
 	static const auto empty = std::vector<not_null<DocumentData*>>();

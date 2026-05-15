@@ -2174,7 +2174,8 @@ void Gif::playAnimation(bool autoplay) {
 }
 
 void Gif::createStreamedPlayer() {
-	const auto quality = Core::App().settings().videoQuality();
+	const auto quality = _data->initialPlaybackVideoQuality(
+		Core::App().settings().videoQuality());
 	const auto chosen = _data->chooseQuality(_realParent, quality);
 	if (_streamed && _streamed->chosen == chosen) {
 		return;
@@ -2200,14 +2201,17 @@ void Gif::createStreamedPlayer() {
 	}, _streamed->instance.lifetime());
 
 	_streamed->instance.switchQualityRequests(
-	) | rpl::on_next([=](int quality) {
+	) | rpl::on_next([=](int requested) {
+		if (quality.manual) {
+			return;
+		}
 		auto now = Core::App().settings().videoQuality();
-		if (now.manual || now.height == quality) {
+		if (now.manual || now.height == requested) {
 			return;
 		}
 		Core::App().settings().setVideoQuality({
 			.manual = 0,
-			.height = uint32(quality),
+			.height = uint32(requested),
 		});
 		Core::App().saveSettingsDelayed();
 		createStreamedPlayer();

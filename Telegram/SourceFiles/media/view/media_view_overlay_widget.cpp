@@ -2733,7 +2733,8 @@ void OverlayWidget::assignMediaPointer(DocumentData *document) {
 		_streamedQualityChangeFrame = QImage();
 		_streamedQualityChangeFinished = false;
 		if ((_document = document)) {
-			_quality = Core::App().settings().videoQuality();
+			_quality = _document->initialPlaybackVideoQuality(
+				Core::App().settings().videoQuality());
 			_chosenQuality = _document->chooseQuality(_message, _quality);
 			_documentMedia = _document->createMediaView();
 			_videoCover = LookupVideoCover(_document, _message);
@@ -5259,16 +5260,26 @@ std::vector<VideoQuality> OverlayWidget::playbackControlsQualities() {
 		return {};
 	}
 	auto result = std::vector<VideoQuality>();
-	result.reserve(list.size());
-	for (const auto &quality : list) {
+	result.reserve(list.size() + 1);
+	const auto add = [&](not_null<DocumentData*> quality) {
+		const auto height = quality->resolveVideoQuality();
+		if (!height) {
+			return;
+		}
 		const auto value = VideoQuality{
 			.manual = 1u,
-			.height = uint32(quality->resolveVideoQuality()),
+			.height = uint32(height),
 			.original = (quality == _document) ? 1u : 0u,
 		};
 		if (!ranges::contains(result, value)) {
 			result.push_back(value);
 		}
+	};
+	if (!_document->filepath(true).isEmpty()) {
+		add(_document);
+	}
+	for (const auto &quality : list) {
+		add(quality);
 	}
 	return result;
 }
