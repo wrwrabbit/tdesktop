@@ -1725,19 +1725,6 @@ void Panel::sendExternalShellButton(
 	});
 }
 
-void Panel::setInitialExternalShellWindowSize() {
-	if (!_externalShell || !_webview) {
-		return;
-	}
-	const auto view = _webview->window.widget();
-	if (!view) {
-		return;
-	}
-	const auto size = LinuxShell::WindowSize(st::botWebViewPanelSize);
-	_webview->window.resize(size);
-	view->resize(size);
-}
-
 void Panel::applyExternalShellFullscreen(bool fullscreen) {
 	if (!_externalShell || !_webview) {
 		return;
@@ -2029,6 +2016,9 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 			.windowMargins = _externalShell
 				? st::botWebViewShellShadowPadding
 				: QMargins(),
+			.initialSize = _externalShell
+				? LinuxShell::WindowSize(st::botWebViewPanelSize)
+				: QSize(),
 			.shellMessageToken = _externalShell
 				? _externalShellToken
 				: QString(),
@@ -2098,7 +2088,6 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 	});
 
 	if (_externalShell) {
-		setInitialExternalShellWindowSize();
 		applyExternalShellFullscreen(_fullscreen.current());
 	} else {
 		rpl::combine(
