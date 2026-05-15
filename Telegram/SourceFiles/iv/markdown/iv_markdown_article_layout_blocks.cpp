@@ -367,7 +367,7 @@ void ApplyMediaBlockGeometry(LaidOutBlock *block, QRect geometry) {
 	block->visibleMediaRect = block->mediaRect;
 }
 
-void LayoutMediaCaption(
+void LayoutMediaCaptionText(
 		LaidOutBlock *block,
 		const TextWithEntities &text,
 		const std::vector<PreparedLink> &links,
@@ -397,6 +397,8 @@ void LayoutMediaCaption(
 			TextLineHeight(textStyle)));
 }
 
+} // namespace
+
 void LayoutMediaCaption(
 		LaidOutBlock *block,
 		const PreparedBlock &prepared,
@@ -409,12 +411,12 @@ void LayoutMediaCaption(
 		int width,
 		int skip,
 		int *bottom,
-		LayoutContext context = {}) {
+		LayoutContext context) {
 	if (prepared.text.text.isEmpty()) {
 		return;
 	}
 	const auto textBand = ArticleTextBand(left, width, markdown, context);
-	LayoutMediaCaption(
+	LayoutMediaCaptionText(
 		block,
 		prepared.text,
 		prepared.links,
@@ -427,8 +429,6 @@ void LayoutMediaCaption(
 		textBand.width());
 	*bottom = block->textRect.y() + block->textRect.height();
 }
-
-} // namespace
 
 [[nodiscard]] int SingleDigitOrderedMarkerWidth(
 		const style::Markdown &markdown) {
@@ -576,6 +576,8 @@ int BlockSkip(
 		return skips.channel;
 	case PreparedBlockKind::RelatedArticle:
 		return skips.relatedArticle;
+	case PreparedBlockKind::EmbedPost:
+		return skips.embedPost;
 	case PreparedBlockKind::Placeholder:
 		return skips.placeholder;
 	case PreparedBlockKind::Details:
@@ -854,7 +856,7 @@ LaidOutBlock LayoutTableBlock(
 
 	auto tableTop = top;
 	if (!prepared.text.text.isEmpty()) {
-		LayoutMediaCaption(
+		LayoutMediaCaptionText(
 			&block,
 			prepared.text,
 			prepared.links,

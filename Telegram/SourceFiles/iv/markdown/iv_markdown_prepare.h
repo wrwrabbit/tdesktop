@@ -43,6 +43,7 @@ enum class PreparedBlockKind {
 	Channel,
 	GroupedMedia,
 	RelatedArticle,
+	EmbedPost,
 	Placeholder,
 };
 
@@ -207,6 +208,13 @@ struct PreparedRelatedArticleBlockData {
 	uint64 photoId = 0;
 };
 
+struct PreparedEmbedPostBlockData {
+	QString url;
+	uint64 authorPhotoId = 0;
+	QString author;
+	QString dateText;
+};
+
 struct PreparedBlock {
 	PreparedBlockKind kind = PreparedBlockKind::Paragraph;
 	TextWithEntities text;
@@ -223,6 +231,7 @@ struct PreparedBlock {
 	PreparedMapBlockData map;
 	PreparedChannelBlockData channel;
 	PreparedGroupedMediaBlockData groupedMedia;
+	PreparedEmbedPostBlockData embedPost;
 	PreparedPlaceholderBlockData placeholder;
 	PreparedRelatedArticleBlockData relatedArticle;
 	ListKind listKind = ListKind::Bullet;

@@ -77,7 +77,7 @@ void PaintImageCenterCrop(Painter &p, QRect rect, const QImage &image) {
 	return false;
 }
 
-[[nodiscard]] bool PaintRelatedArticleThumbnailImage(
+[[nodiscard]] bool PaintThumbnailImage(
 		Painter &p,
 		QRect rect,
 		const std::shared_ptr<Ui::DynamicImage> &thumbnail,
@@ -88,7 +88,7 @@ void PaintImageCenterCrop(Painter &p, QRect rect, const QImage &image) {
 		|| PaintDynamicImage(p, thumbnail, rect);
 }
 
-void RefreshRelatedArticleThumbnail(
+void RefreshBlockThumbnail(
 		const LaidOutBlock &block,
 		const MarkdownArticlePaintCaches &caches) {
 	if (!block.photoRuntime || block.thumbnailRect.isEmpty()) {
@@ -662,6 +662,111 @@ void PaintPlaceholderBlock(
 	return path;
 }
 
+void PaintEmbedPostBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		std::vector<PreparedFormulaSlot> *formulas,
+		std::vector<RenderedFormula> *renderedFormulas,
+		MathRenderer *renderer,
+		int devicePixelRatio,
+		int outerWidth,
+		const style::Markdown &markdown,
+		const MarkdownArticlePaintCaches &caches,
+		const PaintSelectionState &selectionState,
+		QRect clip) {
+	const auto mediaClip = clip.intersected(block.mediaRect);
+	const auto &style = markdown.embedPost;
+	if (!mediaClip.isEmpty()) {
+		RefreshBlockThumbnail(block, caches);
+
+		p.save();
+		p.setClipRect(mediaClip);
+		if (style.accentWidth > 0) {
+			p.fillRect(
+				QRect(
+					block.mediaRect.x(),
+					block.mediaRect.y(),
+					style.accentWidth,
+					block.mediaRect.height()),
+				style.accentFg->c);
+		}
+		if (block.photoRuntime && !block.thumbnailRect.isEmpty()) {
+			auto hq = PainterHighQualityEnabler(p);
+			const auto avatarPath = RoundedRectPath(
+				block.thumbnailRect,
+				style.avatarRadius);
+			p.fillPath(avatarPath, st::windowBg->c);
+			p.save();
+			p.setClipPath(
+				avatarPath,
+				Qt::IntersectClip);
+			(void)PaintThumbnailImage(
+				p,
+				block.thumbnailRect,
+				block.thumbnailImage,
+				block.previousThumbnailImage);
+			p.restore();
+		}
+		if (!block.labelRect.isEmpty()) {
+			p.setPen(style.authorFg->c);
+			PaintTextLeaf(
+				p,
+				block.labelLeaf,
+				caches,
+				block.labelRect,
+				block.labelWidth,
+				mediaClip,
+				style::al_left,
+				TextSelectionForSegmentIndex(
+					selectionState,
+					block.segmentIndex));
+		}
+		if (!block.subtitleRect.isEmpty()) {
+			p.setPen(style.dateFg->c);
+			PaintTextLeaf(
+				p,
+				block.subtitleLeaf,
+				caches,
+				block.subtitleRect,
+				block.subtitleWidth,
+				mediaClip,
+				style::al_left,
+				TextSelectionForSegmentIndex(
+					selectionState,
+					block.secondarySegmentIndex));
+		}
+		p.restore();
+	}
+	if (!block.bodyRect.isEmpty()) {
+		PaintBlocks(
+			p,
+			block.children,
+			formulas,
+			renderedFormulas,
+			renderer,
+			devicePixelRatio,
+			outerWidth,
+			markdown,
+			caches,
+			selectionState,
+			clip.intersected(block.bodyRect));
+	}
+	if (!block.textRect.isEmpty()) {
+		p.setPen(markdown.textColor->c);
+		PaintTextLeaf(
+			p,
+			block.leaf,
+			caches,
+			block.textRect,
+			block.textWidth,
+			clip,
+			style::al_left,
+			TextSelectionForSegmentIndex(
+				selectionState,
+				block.tertiarySegmentIndex));
+	}
+}
+
 void PaintMediaCaption(
 		Painter &p,
 		const LaidOutBlock &block,
@@ -776,7 +881,7 @@ void PaintRelatedArticleBlock(
 		return;
 	}
 	const auto &style = markdown.relatedArticle;
-	RefreshRelatedArticleThumbnail(block, caches);
+	RefreshBlockThumbnail(block, caches);
 
 	p.save();
 	p.setClipRect(visible);
@@ -794,14 +899,14 @@ void PaintRelatedArticleBlock(
 			auto path = RoundedRectPath(block.thumbnailRect, style.thumbnailRadius);
 			p.save();
 			p.setClipPath(path, Qt::IntersectClip);
-			(void)PaintRelatedArticleThumbnailImage(
+			(void)PaintThumbnailImage(
 				p,
 				block.thumbnailRect,
 				block.thumbnailImage,
 				block.previousThumbnailImage);
 			p.restore();
 		} else {
-			(void)PaintRelatedArticleThumbnailImage(
+			(void)PaintThumbnailImage(
 				p,
 				block.thumbnailRect,
 				block.thumbnailImage,
@@ -1186,6 +1291,20 @@ void PaintBlock(
 		PaintRelatedArticleBlock(
 			p,
 			block,
+			markdown,
+			caches,
+			selectionState,
+			clip);
+		break;
+	case PreparedBlockKind::EmbedPost:
+		PaintEmbedPostBlock(
+			p,
+			block,
+			formulas,
+			renderedFormulas,
+			renderer,
+			devicePixelRatio,
+			outerWidth,
 			markdown,
 			caches,
 			selectionState,

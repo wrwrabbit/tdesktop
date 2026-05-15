@@ -88,6 +88,7 @@ MarkdownBlockSkips {
 	channel: pixels;
 	groupedMedia: pixels;
 	relatedArticle: pixels;
+	embedPost: pixels;
 	placeholder: pixels;
 }
 MarkdownList {
@@ -146,6 +147,21 @@ MarkdownDetails {
 	summaryStyle: TextStyle;
 	icon: icon;
 	iconSkip: pixels;
+}
+MarkdownEmbedPost {
+	padding: margins;
+	accentWidth: pixels;
+	accentFg: color;
+	accentSkip: pixels;
+	headerGap: pixels;
+	avatarSize: pixels;
+	avatarRadius: pixels;
+	authorStyle: TextStyle;
+	authorFg: color;
+	dateStyle: TextStyle;
+	dateFg: color;
+	bodySkip: pixels;
+	captionSkip: pixels;
 }
 MarkdownPlaceholder {
 	padding: margins;
@@ -272,6 +288,7 @@ Markdown {
 	displayMath: MarkdownDisplayMath;
 	table: MarkdownTable;
 	details: MarkdownDetails;
+	embedPost: MarkdownEmbedPost;
 	placeholder: MarkdownPlaceholder;
 	photo: MarkdownPhoto;
 	audio: MarkdownAudio;
@@ -312,6 +329,7 @@ defaultMarkdownBlockSkips: MarkdownBlockSkips {
 	channel: 20px;
 	groupedMedia: 20px;
 	relatedArticle: 0px;
+	embedPost: 20px;
 	placeholder: 20px;
 }
 defaultMarkdownList: MarkdownList {
@@ -375,6 +393,26 @@ defaultMarkdownDetails: MarkdownDetails {
 	summaryStyle: defaultMarkdownDetailsSummaryStyle;
 	icon: icon {{ "history_comments_open", windowSubTextFg }};
 	iconSkip: 8px;
+}
+defaultMarkdownEmbedPostAuthorStyle: TextStyle(defaultMarkdownBodyStyle) {
+	font: font(16px semibold);
+}
+defaultMarkdownEmbedPostDateStyle: TextStyle(defaultMarkdownDetailsSummaryStyle) {
+}
+defaultMarkdownEmbedPost: MarkdownEmbedPost {
+	padding: margins(8px, 0px, 8px, 0px);
+	accentWidth: 3px;
+	accentFg: windowActiveTextFg;
+	accentSkip: 12px;
+	headerGap: 10px;
+	avatarSize: 40px;
+	avatarRadius: 20px;
+	authorStyle: defaultMarkdownEmbedPostAuthorStyle;
+	authorFg: windowFg;
+	dateStyle: defaultMarkdownEmbedPostDateStyle;
+	dateFg: windowSubTextFg;
+	bodySkip: 10px;
+	captionSkip: 12px;
 }
 defaultMarkdownPlaceholder: MarkdownPlaceholder {
 	padding: margins(16px, 12px, 16px, 12px);
@@ -566,6 +604,7 @@ defaultMarkdown: Markdown {
 	displayMath: defaultMarkdownDisplayMath;
 	table: defaultMarkdownTable;
 	details: defaultMarkdownDetails;
+	embedPost: defaultMarkdownEmbedPost;
 	placeholder: defaultMarkdownPlaceholder;
 	photo: defaultMarkdownPhoto;
 	audio: defaultMarkdownAudio;

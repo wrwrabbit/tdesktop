@@ -57,6 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/basic_click_handlers.h"
 #include "ui/dynamic_image.h"
 #include "ui/dynamic_thumbnails.h"
+#include "ui/image/image.h"
 #include "ui/painter.h"
 #include "webview/webview_data_stream_memory.h"
 #include "webview/webview_interface.h"
@@ -472,7 +473,8 @@ class CachedPageInlineDocumentImage final : public Ui::DynamicImage {
 public:
 	CachedPageInlineDocumentImage(
 		not_null<DocumentData*> document,
-		::Data::FileOrigin origin);
+		::Data::FileOrigin origin,
+		QSize requestedSize);
 
 	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> clone() override;
 
@@ -483,36 +485,61 @@ public:
 private:
 	void ensureWanted();
 
-	[[nodiscard]] Image *resolvedImage() const;
+	[[nodiscard]] bool fullImageLoaded() const;
+	[[nodiscard]] Image *resolvedFullPhotoImage() const;
+	[[nodiscard]] Image *resolvedPhotoImage() const;
+	[[nodiscard]] Image *resolvedThumbnailImage() const;
+	[[nodiscard]] QImage resolvedDocumentImage();
+	[[nodiscard]] QImage prepareImage(QImage image, int size) const;
+	[[nodiscard]] QSize requestedSize(int size) const;
 
 	const not_null<DocumentData*> _document;
 	const ::Data::FileOrigin _origin;
+	const QSize _requestedSize;
 	const std::shared_ptr<::Data::DocumentMedia> _media;
+	const std::shared_ptr<::Data::PhotoMedia> _photoMedia;
+	QImage _documentImage;
+	bool _documentImageRead = false;
 	rpl::lifetime _subscription;
 
 };
 
+[[nodiscard]] std::shared_ptr<::Data::PhotoMedia> CachedPageInlinePhotoMedia(
+		not_null<DocumentData*> document) {
+	const auto photo = document->goodThumbnailPhoto();
+	return photo ? photo->createMediaView() : nullptr;
+}
+
 CachedPageInlineDocumentImage::CachedPageInlineDocumentImage(
 	not_null<DocumentData*> document,
-	::Data::FileOrigin origin)
+	::Data::FileOrigin origin,
+	QSize requestedSize)
 : _document(document)
 , _origin(std::move(origin))
-, _media(document->createMediaView()) {
+, _requestedSize(requestedSize)
+, _media(document->createMediaView())
+, _photoMedia(CachedPageInlinePhotoMedia(document)) {
 }
 
 
 [[nodiscard]] std::shared_ptr<Ui::DynamicImage> CachedPageInlineDocumentImage::clone() {
 	return std::make_shared<CachedPageInlineDocumentImage>(
 		_document,
-		_origin);
+		_origin,
+		_requestedSize);
 }
 
 
 [[nodiscard]] QImage CachedPageInlineDocumentImage::image(int size) {
-	Q_UNUSED(size);
 	ensureWanted();
-	if (const auto image = resolvedImage()) {
-		return image->original();
+	if (const auto image = resolvedFullPhotoImage()) {
+		return prepareImage(image->original(), size);
+	} else if (auto image = resolvedDocumentImage(); !image.isNull()) {
+		return prepareImage(std::move(image), size);
+	} else if (const auto image = resolvedPhotoImage()) {
+		return prepareImage(image->original(), size);
+	} else if (const auto thumbnail = resolvedThumbnailImage()) {
+		return prepareImage(thumbnail->original(), size);
 	}
 	return QImage();
 }
@@ -524,25 +551,106 @@ void CachedPageInlineDocumentImage::subscribeToUpdates(Fn<void()> callback) {
 		return;
 	}
 	ensureWanted();
-	if (_media->thumbnail()) {
+	if (fullImageLoaded()) {
 		return;
 	}
 	_document->session().downloaderTaskFinished(
 	) | rpl::filter([=] {
-		return (_media->thumbnail() != nullptr);
+		return fullImageLoaded()
+			|| (!_photoMedia
+				&& !_document->isImage()
+				&& resolvedThumbnailImage());
 	}) | rpl::take(1) | rpl::on_next(std::move(callback), _subscription);
 }
 
 void CachedPageInlineDocumentImage::ensureWanted() {
-	_media->thumbnailWanted(_origin);
+	if (_photoMedia) {
+		_photoMedia->wanted(::Data::PhotoSize::Large, _origin);
+	}
+	if (_document->isImage()) {
+		_document->forceToCache(true);
+		_document->save(_origin, QString(), LoadFromCloudOrLocal, true);
+	} else {
+		_media->thumbnailWanted(_origin);
+	}
 }
 
 
-[[nodiscard]] Image *CachedPageInlineDocumentImage::resolvedImage() const {
+[[nodiscard]] bool CachedPageInlineDocumentImage::fullImageLoaded() const {
+	return resolvedFullPhotoImage()
+		|| (_document->isImage() && _media->loaded(true));
+}
+
+[[nodiscard]] Image *CachedPageInlineDocumentImage::resolvedFullPhotoImage() const {
+	return _photoMedia ? _photoMedia->image(::Data::PhotoSize::Large) : nullptr;
+}
+
+[[nodiscard]] Image *CachedPageInlineDocumentImage::resolvedPhotoImage() const {
+	if (!_photoMedia) {
+		return nullptr;
+	} else if (const auto small = _photoMedia->image(::Data::PhotoSize::Small)) {
+		return small;
+	} else if (const auto thumbnail = _photoMedia->image(
+			::Data::PhotoSize::Thumbnail)) {
+		return thumbnail;
+	}
+	return _photoMedia->thumbnailInline();
+}
+
+[[nodiscard]] Image *CachedPageInlineDocumentImage::resolvedThumbnailImage() const {
 	if (const auto image = _media->thumbnail()) {
 		return image;
 	}
 	return _media->thumbnailInline();
+}
+
+[[nodiscard]] QImage CachedPageInlineDocumentImage::resolvedDocumentImage() {
+	if (!_document->isImage() || !_media->loaded(true)) {
+		return QImage();
+	} else if (_documentImageRead) {
+		return _documentImage;
+	}
+	_documentImageRead = true;
+	_document->saveFromDataSilent();
+	auto &location = _document->location(true);
+	if (location.accessEnable()) {
+		_documentImage = Images::Read({
+			.path = location.name(),
+			.maxSize = requestedSize(0),
+		}).image;
+		location.accessDisable();
+	} else {
+		_documentImage = Images::Read({
+			.content = _media->bytes(),
+			.maxSize = requestedSize(0),
+		}).image;
+	}
+	return _documentImage;
+}
+
+[[nodiscard]] QImage CachedPageInlineDocumentImage::prepareImage(
+		QImage image,
+		int size) const {
+	if (image.isNull()) {
+		return QImage();
+	}
+	const auto target = requestedSize(size);
+	if (target.isEmpty()
+		|| (image.width() <= target.width()
+			&& image.height() <= target.height())) {
+		return image;
+	}
+	return image.scaled(
+		target,
+		Qt::KeepAspectRatio,
+		Qt::SmoothTransformation);
+}
+
+[[nodiscard]] QSize CachedPageInlineDocumentImage::requestedSize(int size) const {
+	if (!_requestedSize.isEmpty()) {
+		return _requestedSize;
+	}
+	return (size > 0) ? QSize(size, size) : QSize();
 }
 
 class CachedPageMapDynamicImage final : public Ui::DynamicImage {
@@ -877,7 +985,8 @@ CachedPageMediaRuntime::CachedPageMediaRuntime(
 	}
 	return std::make_shared<CachedPageInlineDocumentImage>(
 		document,
-		fileOrigin());
+		fileOrigin(),
+		size);
 }
 
 

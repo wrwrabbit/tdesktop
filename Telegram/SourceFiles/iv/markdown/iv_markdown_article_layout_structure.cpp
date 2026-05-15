@@ -65,6 +65,7 @@ namespace {
 	case PreparedBlockKind::DisplayMath:
 	case PreparedBlockKind::Table:
 	case PreparedBlockKind::Details:
+	case PreparedBlockKind::EmbedPost:
 		return false;
 	}
 	return false;
@@ -117,6 +118,7 @@ void PrepareNestedContext(
 	case PreparedBlockKind::List:
 	case PreparedBlockKind::ListItem:
 	case PreparedBlockKind::Quote:
+	case PreparedBlockKind::EmbedPost:
 		return true;
 	case PreparedBlockKind::Paragraph:
 	case PreparedBlockKind::Heading:
@@ -536,6 +538,184 @@ void PrepareNestedContext(
 	return block;
 }
 
+[[nodiscard]] LaidOutBlock LayoutEmbedPostBlock(
+		const PreparedBlock &prepared,
+		std::vector<PreparedFormulaSlot> *formulas,
+		std::vector<RenderedFormula> *renderedFormulas,
+		MathRenderer *renderer,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &markdown,
+		int left,
+		int top,
+		int width,
+		LayoutContext context) {
+	auto block = LaidOutBlock();
+	block.kind = PreparedBlockKind::EmbedPost;
+	block.anchorId = prepared.anchorId;
+	block.thumbnailPhotoId = prepared.embedPost.authorPhotoId;
+	if (prepared.embedPost.authorPhotoId && mediaRuntime) {
+		block.photoRuntime = mediaRuntime->resolvePhoto(
+			prepared.embedPost.authorPhotoId);
+	}
+
+	const auto parseOptions = TextParseOptions{
+		TextParseMultiline,
+		0,
+		0,
+		Qt::LayoutDirectionAuto,
+	};
+	const auto &style = markdown.embedPost;
+	const auto blockWidth = std::max(width, 1);
+	const auto contentLeft = left
+		+ style.accentWidth
+		+ style.accentSkip
+		+ style.padding.left();
+	const auto contentTop = top + style.padding.top();
+	const auto contentWidth = std::max(
+		blockWidth
+			- style.accentWidth
+			- style.accentSkip
+			- style.padding.left()
+			- style.padding.right(),
+		1);
+	const auto hasAvatar = (block.photoRuntime != nullptr);
+	const auto avatarSize = hasAvatar ? std::max(style.avatarSize, 1) : 0;
+	const auto headerGap = hasAvatar ? style.headerGap : 0;
+	const auto textLeft = contentLeft + avatarSize + headerGap;
+	const auto textWidth = std::max(contentWidth - avatarSize - headerGap, 1);
+
+	auto authorHeight = 0;
+	if (!prepared.embedPost.author.isEmpty()) {
+		block.labelWidth = textWidth;
+		block.labelLeaf = Ui::Text::String(TextMinResizeWidth(textWidth));
+		block.labelLeaf.setMarkedText(
+			style.authorStyle,
+			TextWithEntities::Simple(prepared.embedPost.author),
+			parseOptions);
+		authorHeight = std::max(
+			block.labelLeaf.countHeight(textWidth, true),
+			TextLineHeight(style.authorStyle));
+	}
+
+	auto dateHeight = 0;
+	if (!prepared.embedPost.dateText.isEmpty()) {
+		block.subtitleWidth = textWidth;
+		block.subtitleLeaf = Ui::Text::String(TextMinResizeWidth(textWidth));
+		block.subtitleLeaf.setMarkedText(
+			style.dateStyle,
+			TextWithEntities::Simple(prepared.embedPost.dateText),
+			parseOptions);
+		dateHeight = std::max(
+			block.subtitleLeaf.countHeight(textWidth, true),
+			TextLineHeight(style.dateStyle));
+	}
+
+	const auto textHeight = authorHeight + dateHeight;
+	const auto headerHeight = std::max(textHeight, avatarSize);
+	if (headerHeight > 0) {
+		block.headerRect = QRect(contentLeft, contentTop, contentWidth, headerHeight);
+	}
+	if (avatarSize > 0) {
+		block.thumbnailRect = QRect(
+			contentLeft,
+			contentTop + std::max((headerHeight - avatarSize) / 2, 0),
+			avatarSize,
+			avatarSize);
+	}
+
+	auto textTop = contentTop + std::max((headerHeight - textHeight) / 2, 0);
+	if (authorHeight > 0) {
+		block.labelRect = QRect(textLeft, textTop, textWidth, authorHeight);
+		textTop += authorHeight;
+	}
+	if (dateHeight > 0) {
+		block.subtitleRect = QRect(textLeft, textTop, textWidth, dateHeight);
+	}
+
+	auto wrapperBottom = contentTop + headerHeight;
+	if (!prepared.children.empty()) {
+		const auto bodyTop = wrapperBottom + ((headerHeight > 0) ? style.bodySkip : 0);
+		auto childContext = context;
+		PrepareNestedContext(&childContext, contentLeft, contentWidth);
+		const auto childBottom = LayoutBlocks(
+			prepared.children,
+			formulas,
+			renderedFormulas,
+			renderer,
+			inlineFormulaObjects,
+			mediaRuntime,
+			&block.children,
+			markdown,
+			contentLeft,
+			bodyTop,
+			contentWidth,
+			childContext);
+		const auto bodyHeight = std::max(childBottom - bodyTop, 0);
+		block.bodyRect = QRect(contentLeft, bodyTop, contentWidth, bodyHeight);
+		wrapperBottom = std::max(wrapperBottom, childBottom);
+	}
+
+	block.contentRect = QRect(
+		contentLeft,
+		contentTop,
+		contentWidth,
+		std::max(wrapperBottom - contentTop, 0));
+	block.mediaRect = QRect(
+		left,
+		top,
+		blockWidth,
+		style.padding.top()
+			+ block.contentRect.height()
+			+ style.padding.bottom());
+
+	auto bottom = block.mediaRect.y() + block.mediaRect.height();
+	LayoutMediaCaption(
+		&block,
+		prepared,
+		formulas,
+		inlineFormulaObjects,
+		mediaRuntime,
+		markdown,
+		left,
+		bottom,
+		blockWidth,
+		style.captionSkip,
+		&bottom,
+		context);
+	block.outer = QRect(
+		left,
+		top,
+		blockWidth,
+		std::max(bottom - top, block.mediaRect.height()));
+
+	if (!block.labelRect.isEmpty() && !block.labelLeaf.isEmpty()) {
+		block.firstLineBaseline = LeafFirstLineBaseline(
+			block.labelLeaf,
+			block.labelRect,
+			style.authorStyle);
+	} else if (!block.subtitleRect.isEmpty() && !block.subtitleLeaf.isEmpty()) {
+		block.firstLineBaseline = LeafFirstLineBaseline(
+			block.subtitleLeaf,
+			block.subtitleRect,
+			style.dateStyle);
+	} else {
+		for (const auto &child : block.children) {
+			if (child.outer.height() <= 0) {
+				continue;
+			}
+			block.firstLineBaseline = ResolveFirstDisplayedLineBaseline(
+				child,
+				markdown);
+			break;
+		}
+		if (block.firstLineBaseline < 0) {
+			block.firstLineBaseline = MarkdownBodyBaseline(top, markdown);
+		}
+	}
+	return block;
+}
+
 [[nodiscard]] LaidOutBlock LayoutBlock(
 		const PreparedBlock &prepared,
 		std::vector<PreparedFormulaSlot> *formulas,
@@ -710,6 +890,19 @@ void PrepareNestedContext(
 			width);
 	case PreparedBlockKind::Details:
 		return LayoutDetailsBlock(
+			prepared,
+			formulas,
+			renderedFormulas,
+			renderer,
+			inlineFormulaObjects,
+			mediaRuntime,
+			markdown,
+			left,
+			top,
+			width,
+			context);
+	case PreparedBlockKind::EmbedPost:
+		return LayoutEmbedPostBlock(
 			prepared,
 			formulas,
 			renderedFormulas,

@@ -115,6 +115,7 @@ struct LaidOutBlock {
 	bool tableStriped = false;
 	int segmentIndex = -1;
 	int secondarySegmentIndex = -1;
+	int tertiarySegmentIndex = -1;
 	std::shared_ptr<MediaBlock> mediaBlock;
 	std::shared_ptr<PhotoRuntime> photoRuntime;
 	MediaActivation activation;
@@ -178,6 +179,19 @@ struct TableRowLayoutData {
 	const PreparedBlock &block,
 	const style::Markdown &markdown);
 [[nodiscard]] int BlockMaxRight(const std::vector<LaidOutBlock> &blocks);
+void LayoutMediaCaption(
+	LaidOutBlock *block,
+	const PreparedBlock &prepared,
+	const std::vector<PreparedFormulaSlot> *formulas,
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
+	const style::Markdown &markdown,
+	int left,
+	int top,
+	int width,
+	int skip,
+	int *bottom,
+	LayoutContext context = {});
 void RepopulateCodeBlockLeaf(
 	LaidOutBlock &block,
 	const style::Markdown &markdown,

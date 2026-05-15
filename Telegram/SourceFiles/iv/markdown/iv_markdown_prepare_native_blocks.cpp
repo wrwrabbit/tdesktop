@@ -86,6 +86,94 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	SortEntities(&text->text);
 }
 
+[[nodiscard]] uint16 InternalPreparedLinkIndex(const QString &data) {
+	const auto prefix = u"internal:index"_q;
+	return (data.size() == prefix.size() + 1 && data.startsWith(prefix))
+		? uint16(data.back().unicode())
+		: uint16(0);
+}
+
+[[nodiscard]] uint16 RemappedPreparedLinkIndex(
+		const std::vector<std::pair<uint16, uint16>> &remapped,
+		uint16 index) {
+	for (const auto &[from, to] : remapped) {
+		if (from == index) {
+			return to;
+		}
+	}
+	return 0;
+}
+
+void AppendPreparedIvRichText(
+		PreparedIvRichText *result,
+		PreparedIvRichText prepared) {
+	auto remapped = std::vector<std::pair<uint16, uint16>>();
+	remapped.reserve(prepared.links.size());
+	result->links.reserve(result->links.size() + prepared.links.size());
+	for (const auto &link : prepared.links) {
+		const auto index = result->links.size() + 1;
+		if (index > std::numeric_limits<uint16>::max()) {
+			continue;
+		}
+		auto copy = link;
+		copy.index = uint16(index);
+		remapped.push_back({ link.index, copy.index });
+		result->links.push_back(std::move(copy));
+	}
+
+	const auto shift = result->text.text.size();
+	result->text.text.append(prepared.text.text);
+	result->text.entities.reserve(
+		result->text.entities.size() + prepared.text.entities.size());
+	for (const auto &entity : prepared.text.entities) {
+		auto data = entity.data();
+		if (entity.type() == EntityType::CustomUrl) {
+			if (const auto from = InternalPreparedLinkIndex(data)) {
+				if (const auto to = RemappedPreparedLinkIndex(remapped, from)) {
+					data = InternalLinkData(to);
+				}
+			}
+		}
+		result->text.entities.push_back(EntityInText(
+			entity.type(),
+			entity.offset() + shift,
+			entity.length(),
+			data));
+	}
+}
+
+[[nodiscard]] bool PrepareNativeIvCaption(
+		const MTPPageCaption &caption,
+		PreparedIvRichText *result,
+		QString *blockAnchorId,
+		NativeIvPrepareState *state) {
+	auto text = PreparedIvRichText();
+	if (!PrepareNativeIvRichText(
+			caption.data().vtext(),
+			&text,
+			blockAnchorId,
+			state)) {
+		return false;
+	}
+	AppendPreparedIvRichText(result, std::move(text));
+
+	auto credit = PreparedIvRichText();
+	if (!PrepareNativeIvRichText(
+			caption.data().vcredit(),
+			&credit,
+			blockAnchorId,
+			state)) {
+		return false;
+	}
+	if (!credit.text.text.isEmpty()) {
+		if (!result->text.text.isEmpty()) {
+			result->text.append(QChar('\n'));
+		}
+		AppendPreparedIvRichText(result, std::move(credit));
+	}
+	return true;
+}
+
 struct NativeIvHtmlAttribute {
 	QByteArray name;
 	QByteArray value;
@@ -95,14 +183,6 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 
 [[nodiscard]] QByteArray NativeIvHtmlEscape(QString text) {
 	return text.toHtmlEscaped().toUtf8();
-}
-
-[[nodiscard]] QByteArray NativeIvHtmlText(QString text) {
-	auto result = NativeIvHtmlEscape(std::move(text));
-	result.replace("\r\n", "<br>");
-	result.replace('\n', "<br>");
-	result.replace('\r', "<br>");
-	return result;
 }
 
 [[nodiscard]] QByteArray NativeIvRichText(QString text) {
@@ -173,30 +253,9 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 	return QByteArray("/") + resourceId;
 }
 
-[[nodiscard]] QByteArray NativeIvPhotoUrl(uint64 photoId) {
-	return NativeIvResourceUrl(
-		QByteArray("photo/") + QByteArray::number(photoId));
-}
-
 [[nodiscard]] QByteArray NativeIvDocumentUrl(uint64 documentId) {
 	return NativeIvResourceUrl(
 		QByteArray("document/") + QByteArray::number(documentId));
-}
-
-[[nodiscard]] QByteArray NativeIvMapUrl(
-		const MTPDgeoPoint &geo,
-		int width,
-		int height,
-		int zoom) {
-	return NativeIvResourceUrl(QByteArray("map/")
-		+ GeoPointId({
-			.lat = geo.vlat().v,
-			.lon = geo.vlong().v,
-			.access = uint64(geo.vaccess_hash().v),
-		}) + '&'
-		+ QByteArray::number(width) + ','
-		+ QByteArray::number(height) + '&'
-		+ QByteArray::number(zoom));
 }
 
 [[nodiscard]] QByteArray WrapNativeIvEmbedHtml(QByteArray body) {
@@ -210,20 +269,6 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 		"img,video{display:block;max-width:100%;height:auto;}"
 		".iframe-wrap{display:block;margin:0 auto;max-width:100%;overflow:hidden;}"
 		"iframe{display:block;width:100%;max-width:100%;border:0;}"
-		".embed-post{box-sizing:border-box;margin:0;padding:16px;"
-		"border:1px solid rgba(0,0,0,.08);border-radius:12px;}"
-		".embed-post address{display:flex;align-items:center;gap:10px;"
-		"margin:0 0 12px;font-style:normal;}"
-		".embed-post address figure{width:40px;height:40px;flex:none;"
-		"border-radius:20px;background:center/cover no-repeat #f1f1f1;}"
-		".embed-post address .meta{display:flex;flex-direction:column;gap:2px;}"
-		".embed-post blockquote{margin:12px 0;padding-left:12px;"
-		"border-left:3px solid rgba(0,0,0,.12);}"
-		".embed-post ul,.embed-post ol{padding-left:20px;}"
-		".embed-post p,.embed-post pre,.embed-post h1,.embed-post h2,"
-		".embed-post h3,.embed-post h4,.embed-post h5{margin:0 0 12px;}"
-		".embed-post figure+figure{margin-top:12px;}"
-		".embed-post small{display:block;margin-top:8px;}"
 		"</style></head><body>")
 		+ body
 		+ QByteArray(
@@ -539,69 +584,9 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 	return NativeIvHtmlTag("figcaption", { { "dir", "auto" } }, text);
 }
 
-[[nodiscard]] std::optional<QByteArray> RenderNativeIvEmbedPostHtml(
-		const MTPDpageBlockEmbedPost &data,
-		NativeIvPrepareState *state,
-		bool includeCaption);
 [[nodiscard]] QString StripOneTrailingNewline(QString text);
-
-[[nodiscard]] std::optional<QByteArray> RenderNativeIvBlockHtml(
-	const MTPPageBlock &block,
-	NativeIvPrepareState *state);
-
-[[nodiscard]] std::optional<QByteArray> RenderNativeIvBlocksHtml(
-		const QVector<MTPPageBlock> &blocks,
-		NativeIvPrepareState *state) {
-	auto result = QByteArray();
-	for (const auto &block : blocks) {
-		const auto rendered = RenderNativeIvBlockHtml(block, state);
-		if (!rendered) {
-			return std::nullopt;
-		}
-		result += *rendered;
-	}
-	return result;
-}
-
-[[nodiscard]] std::optional<QByteArray> RenderNativeIvListItemHtml(
-		const MTPPageListItem &item,
-		NativeIvPrepareState *state) {
-	return item.match([&](const MTPDpageListItemText &data)
-			-> std::optional<QByteArray> {
-		return NativeIvHtmlTag(
-			"li",
-			{ { "dir", "auto" } },
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDpageListItemBlocks &data) -> std::optional<QByteArray> {
-		const auto blocks = RenderNativeIvBlocksHtml(data.vblocks().v, state);
-		return blocks ? std::make_optional(NativeIvHtmlTag("li", {}, *blocks)) : std::nullopt;
-	});
-}
-
-[[nodiscard]] std::optional<QByteArray> RenderNativeIvOrderedListItemHtml(
-		const MTPPageListOrderedItem &item,
-		NativeIvPrepareState *state) {
-	return item.match([&](const MTPDpageListOrderedItemText &data)
-			-> std::optional<QByteArray> {
-		return NativeIvHtmlTag(
-			"li",
-			{
-				{ "value", NativeIvHtmlEscape(qs(data.vnum())) },
-				{ "dir", "auto" },
-			},
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDpageListOrderedItemBlocks &data)
-			-> std::optional<QByteArray> {
-		const auto blocks = RenderNativeIvBlocksHtml(data.vblocks().v, state);
-		if (!blocks) {
-			return std::nullopt;
-		}
-		return NativeIvHtmlTag(
-			"li",
-			{ { "value", NativeIvHtmlEscape(qs(data.vnum())) } },
-			*blocks);
-	});
-}
+[[nodiscard]] PreparedBlock PrepareNativeIvEmbedPostFallbackParagraph(
+	QString url);
 
 [[nodiscard]] QByteArray RenderNativeIvEmbedHtml(
 		const MTPDpageBlockEmbed &data,
@@ -696,243 +681,6 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 	return NativeIvHtmlTag("figure", figureAttributes, content);
 }
 
-[[nodiscard]] std::optional<QByteArray> RenderNativeIvEmbedPostHtml(
-		const MTPDpageBlockEmbedPost &data,
-		NativeIvPrepareState *state,
-		bool includeCaption) {
-	auto content = QByteArray();
-	if (!data.vblocks().v.isEmpty()) {
-		auto address = QByteArray();
-		if (const auto photoId = uint64(data.vauthor_photo_id().v)
-			; FindNativeIvPhoto(photoId, *state)) {
-			address += NativeIvHtmlTag(
-				"figure",
-				{
-					{ "style", QByteArray("background-image:url('")
-						+ NativeIvPhotoUrl(photoId)
-						+ "')" },
-				});
-		}
-		auto meta = NativeIvHtmlTag(
-			"a",
-			{
-				{ "rel", "author" },
-				{ "onclick", "return false;" },
-			},
-			NativeIvHtmlText(qs(data.vauthor())));
-		if (const auto date = data.vdate().v) {
-			meta += NativeIvHtmlTag(
-				"time",
-				{},
-				NativeIvHtmlText(NativeIvDateText(date)));
-		}
-		address += NativeIvHtmlTag("div", { { "class", "meta" } }, meta);
-		const auto blocks = RenderNativeIvBlocksHtml(data.vblocks().v, state);
-		if (!blocks) {
-			return std::nullopt;
-		}
-		content = NativeIvHtmlTag(
-			"blockquote",
-			{ { "class", "embed-post" } },
-			NativeIvHtmlTag("address", {}, address) + *blocks);
-	} else {
-		const auto url = qs(data.vurl());
-		content = NativeIvHtmlTag(
-			"section",
-			{ { "class", "embed-post" } },
-			NativeIvHtmlTag(
-				"strong",
-				{},
-				NativeIvHtmlText(qs(data.vauthor())))
-			+ NativeIvHtmlTag(
-				"small",
-				{},
-				NativeIvHtmlTag(
-					"a",
-					{ { "href", NativeIvHtmlEscape(url) } },
-					NativeIvHtmlText(url))));
-	}
-	if (includeCaption) {
-		content += NativeIvCaptionHtml(data.vcaption(), state);
-	}
-	return NativeIvHtmlTag("figure", {}, content);
-}
-
-[[nodiscard]] std::optional<QByteArray> RenderNativeIvBlockHtml(
-		const MTPPageBlock &block,
-		NativeIvPrepareState *state) {
-	return block.match([&](const MTPDpageBlockTitle &data)
-			-> std::optional<QByteArray> {
-		return NativeIvHtmlTag(
-			"h1",
-			{ { "dir", "auto" } },
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDpageBlockSubtitle &data) -> std::optional<QByteArray> {
-		return NativeIvHtmlTag(
-			"h2",
-			{ { "dir", "auto" } },
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDpageBlockAuthorDate &data) -> std::optional<QByteArray> {
-		auto inner = RenderNativeIvRichTextHtml(data.vauthor(), state);
-		if (const auto date = data.vpublished_date().v) {
-			if (!inner.isEmpty()) {
-				inner += " \xE2\x80\xA2 ";
-			}
-			inner += NativeIvHtmlTag(
-				"time",
-				{},
-				NativeIvHtmlEscape(NativeIvDateText(date)));
-		}
-		return NativeIvHtmlTag("address", { { "dir", "auto" } }, inner);
-	}, [&](const MTPDpageBlockHeader &data) -> std::optional<QByteArray> {
-		return NativeIvHtmlTag(
-			"h3",
-			{ { "dir", "auto" } },
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDpageBlockSubheader &data) -> std::optional<QByteArray> {
-		return NativeIvHtmlTag(
-			"h4",
-			{ { "dir", "auto" } },
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDpageBlockParagraph &data) -> std::optional<QByteArray> {
-		return NativeIvHtmlTag(
-			"p",
-			{ { "dir", "auto" } },
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDpageBlockPreformatted &data) -> std::optional<QByteArray> {
-		return NativeIvHtmlTag(
-			"pre",
-			{ { "dir", "auto" } },
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDpageBlockFooter &data) -> std::optional<QByteArray> {
-		return NativeIvHtmlTag(
-			"footer",
-			{ { "dir", "auto" } },
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDpageBlockDivider &) -> std::optional<QByteArray> {
-		return NativeIvHtmlTag("hr");
-	}, [&](const MTPDpageBlockAnchor &data) -> std::optional<QByteArray> {
-		const auto name = NormalizeFragmentId(qs(data.vname()));
-		return name.isEmpty()
-			? std::make_optional(QByteArray())
-			: std::make_optional(NativeIvHtmlTag(
-				"a",
-				{ { "name", NativeIvHtmlEscape(name) } }));
-	}, [&](const MTPDpageBlockList &data) -> std::optional<QByteArray> {
-		auto inner = QByteArray();
-		for (const auto &item : data.vitems().v) {
-			const auto rendered = RenderNativeIvListItemHtml(item, state);
-			if (!rendered) {
-				return std::nullopt;
-			}
-			inner += *rendered;
-		}
-		return NativeIvHtmlTag("ul", {}, inner);
-	}, [&](const MTPDpageBlockOrderedList &data) -> std::optional<QByteArray> {
-		auto inner = QByteArray();
-		for (const auto &item : data.vitems().v) {
-			const auto rendered = RenderNativeIvOrderedListItemHtml(item, state);
-			if (!rendered) {
-				return std::nullopt;
-			}
-			inner += *rendered;
-		}
-		return NativeIvHtmlTag("ol", {}, inner);
-	}, [&](const MTPDpageBlockBlockquote &data) -> std::optional<QByteArray> {
-		auto inner = NativeIvHtmlTag(
-			"p",
-			{ { "dir", "auto" } },
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-		const auto caption = RenderNativeIvRichTextHtml(data.vcaption(), state);
-		if (!caption.isEmpty()) {
-			inner += NativeIvHtmlTag("cite", { { "dir", "auto" } }, caption);
-		}
-		return NativeIvHtmlTag("blockquote", {}, inner);
-	}, [&](const MTPDpageBlockPullquote &data) -> std::optional<QByteArray> {
-		auto inner = NativeIvHtmlTag(
-			"p",
-			{ { "dir", "auto" } },
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-		const auto caption = RenderNativeIvRichTextHtml(data.vcaption(), state);
-		if (!caption.isEmpty()) {
-			inner += NativeIvHtmlTag("cite", { { "dir", "auto" } }, caption);
-		}
-		return NativeIvHtmlTag("blockquote", {}, inner);
-	}, [&](const MTPDpageBlockPhoto &data) -> std::optional<QByteArray> {
-		const auto photoId = uint64(data.vphoto_id().v);
-		if (!FindNativeIvPhoto(photoId, *state)) {
-			return std::nullopt;
-		}
-		auto content = NativeIvHtmlTag(
-			"img",
-			{
-				{ "src", NativeIvHtmlEscape(QString::fromUtf8(NativeIvPhotoUrl(photoId))) },
-			});
-		content += NativeIvCaptionHtml(data.vcaption(), state);
-		return NativeIvHtmlTag("figure", {}, content);
-	}, [&](const MTPDpageBlockVideo &data) -> std::optional<QByteArray> {
-		const auto documentId = uint64(data.vvideo_id().v);
-		if (!FindNativeIvDocument(documentId, *state)) {
-			return std::nullopt;
-		}
-		auto content = NativeIvHtmlTag(
-			"video",
-			{
-				{ "controls", "controls" },
-				{ "src", NativeIvHtmlEscape(QString::fromUtf8(NativeIvDocumentUrl(documentId))) },
-			});
-		content += NativeIvCaptionHtml(data.vcaption(), state);
-		return NativeIvHtmlTag("figure", {}, content);
-	}, [&](const MTPDpageBlockCover &data) -> std::optional<QByteArray> {
-		return RenderNativeIvBlockHtml(data.vcover(), state);
-	}, [&](const MTPDpageBlockEmbed &data) -> std::optional<QByteArray> {
-		const auto html = RenderNativeIvEmbedHtml(data, state, true);
-		return html.isEmpty() ? std::nullopt : std::make_optional(std::move(html));
-	}, [&](const MTPDpageBlockEmbedPost &data) -> std::optional<QByteArray> {
-		return RenderNativeIvEmbedPostHtml(data, state, true);
-	}, [&](const MTPDpageBlockAudio &data) -> std::optional<QByteArray> {
-		const auto documentId = uint64(data.vaudio_id().v);
-		if (!FindNativeIvDocument(documentId, *state)) {
-			return std::nullopt;
-		}
-		auto content = NativeIvHtmlTag(
-			"audio",
-			{
-				{ "controls", "controls" },
-				{ "src", NativeIvHtmlEscape(QString::fromUtf8(NativeIvDocumentUrl(documentId))) },
-			});
-		content += NativeIvCaptionHtml(data.vcaption(), state);
-		return NativeIvHtmlTag("figure", {}, content);
-	}, [&](const MTPDpageBlockMap &data) -> std::optional<QByteArray> {
-		return data.vgeo().match([&](const MTPDgeoPoint &geo)
-				-> std::optional<QByteArray> {
-			if (!geo.vaccess_hash().v || data.vw().v <= 0 || data.vh().v <= 0) {
-				return std::nullopt;
-			}
-			auto content = NativeIvHtmlTag(
-				"img",
-				{
-					{ "src", NativeIvHtmlEscape(QString::fromUtf8(NativeIvMapUrl(
-						geo,
-						data.vw().v,
-						data.vh().v,
-						data.vzoom().v))) },
-				});
-			content += NativeIvCaptionHtml(data.vcaption(), state);
-			return NativeIvHtmlTag("figure", {}, content);
-		}, [&](const auto &) -> std::optional<QByteArray> {
-			return std::nullopt;
-		});
-	}, [&](const MTPDpageBlockKicker &data) -> std::optional<QByteArray> {
-		return NativeIvHtmlTag(
-			"h5",
-			{ { "dir", "auto" } },
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const auto &) -> std::optional<QByteArray> {
-		return std::nullopt;
-	});
-}
-
 [[nodiscard]] bool PrepareNativeIvEmbedBlock(
 		const MTPDpageBlockEmbed &data,
 		std::vector<PreparedBlock> *result,
@@ -969,27 +717,36 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 		const MTPDpageBlockEmbedPost &data,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
-	const auto html = RenderNativeIvEmbedPostHtml(data, state, false);
-	if (!html) {
-		return PrepareNativeIvPlaceholderBlock(
-			u"Embed Placeholder"_q,
-			data.vcaption(),
-			result,
-			state);
+	auto caption = PreparedIvRichText();
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::EmbedPost;
+	block.embedPost.url = qs(data.vurl()).trimmed();
+	block.embedPost.authorPhotoId = uint64(data.vauthor_photo_id().v);
+	block.embedPost.author = qs(data.vauthor()).trimmed();
+	if (const auto date = data.vdate().v) {
+		block.embedPost.dateText = NativeIvDateText(date);
 	}
-	auto request = EmbedRequest{
-		.resourceId = StoreNativeIvEmbedHtml(
-			WrapNativeIvEmbedHtml(*html),
-			state),
-		.fallbackUrl = qs(data.vurl()),
-		.allowScrolling = true,
-	};
-	return PrepareNativeIvPlaceholderBlock(
-		u"Embed Placeholder"_q,
-		data.vcaption(),
-		result,
-		state,
-		std::move(request));
+	if (!PrepareNativeIvCaption(
+			data.vcaption(),
+			&caption,
+			&block.anchorId,
+			state)) {
+		return false;
+	}
+	SortPreparedIvRichText(&caption);
+	block.text = std::move(caption.text);
+	block.links = std::move(caption.links);
+	if (data.vblocks().v.isEmpty()) {
+		block.children.push_back(
+			PrepareNativeIvEmbedPostFallbackParagraph(block.embedPost.url));
+	} else if (!PrepareNativeIvBlocks(
+			data.vblocks().v,
+			&block.children,
+			state)) {
+		return false;
+	}
+	result->push_back(std::move(block));
+	return true;
 }
 
 [[nodiscard]] QString StripOneTrailingNewline(QString text) {
@@ -1007,6 +764,27 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 [[nodiscard]] PreparedBlock EmptyParagraphBlock() {
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::Paragraph;
+	return block;
+}
+
+[[nodiscard]] PreparedBlock PrepareNativeIvEmbedPostFallbackParagraph(
+		QString url) {
+	auto block = EmptyParagraphBlock();
+	if (url.isEmpty()) {
+		return block;
+	}
+	auto link = PreparedLink();
+	link.index = 1;
+	link.kind = PreparedLinkKind::External;
+	NormalizePreparedUrlLink(&link, url);
+	FinalizePreparedUrlLink(&link, url);
+	block.text.text = std::move(url);
+	block.text.entities.push_back(EntityInText(
+		EntityType::CustomUrl,
+		0,
+		block.text.text.size(),
+		InternalLinkData(link.index)));
+	block.links.push_back(std::move(link));
 	return block;
 }
 

@@ -722,7 +722,6 @@ private:
 enum class NativeIvPlaceholderKind {
 	Video,
 	Embed,
-	EmbedPost,
 	Collage,
 	Slideshow,
 	Audio,
@@ -748,6 +747,9 @@ struct NativeIvMediaFixture {
 	QVector<MTPPhoto> photos;
 	QVector<MTPDocument> documents;
 };
+
+constexpr auto kNativeIvEmbedPostDate = 1715347200;
+constexpr auto kNativeIvEmbedPostAuthorPhotoId = uint64(9301);
 
 [[nodiscard]] QImage SolidTestImage(
 		int width,
@@ -1241,7 +1243,6 @@ struct NativeIvMediaFixture {
 	case NativeIvPlaceholderKind::Video:
 		return u"Video Placeholder"_q;
 	case NativeIvPlaceholderKind::Embed:
-	case NativeIvPlaceholderKind::EmbedPost:
 		return u"Embed Placeholder"_q;
 	case NativeIvPlaceholderKind::Collage:
 		return u"Collage placeholder"_q;
@@ -1279,27 +1280,6 @@ struct NativeIvMediaFixture {
 			MTP_int(640),
 			MTP_int(360),
 			pageCaption);
-	case NativeIvPlaceholderKind::EmbedPost:
-		return MTP_pageBlockEmbedPost(
-			MTP_string("https://example.com/embed-post"),
-			MTP_long(0),
-			MTP_long(0),
-			MTP_string("Author"),
-			MTP_int(0),
-			MTP_vector<MTPPageBlock>(QVector<MTPPageBlock>{
-				MTP_pageBlockParagraph(NativeIvConcat({
-					NativeIvText(u"Links: "_q),
-					NativeIvTextUrl(
-						u"instant view"_q,
-						u"https://telegra.ph/embed-post-link"_q,
-						777),
-					NativeIvText(u" and "_q),
-					NativeIvTextUrl(
-						u"external"_q,
-						u"https://example.com/external-link"_q),
-				})),
-			}),
-			pageCaption);
 	case NativeIvPlaceholderKind::Collage:
 		return MTP_pageBlockCollage(
 			MTP_vector<MTPPageBlock>(),
@@ -1319,6 +1299,65 @@ struct NativeIvMediaFixture {
 			pageCaption);
 	}
 	return MTP_pageBlockUnsupported();
+}
+
+[[nodiscard]] QVector<MTPPageBlock> NativeIvDefaultEmbedPostBlocks() {
+	return {
+		MTP_pageBlockParagraph(NativeIvConcat({
+			NativeIvText(u"Links: "_q),
+			NativeIvTextUrl(
+				u"instant view"_q,
+				u"https://telegra.ph/embed-post-link"_q,
+				777),
+			NativeIvText(u" and "_q),
+			NativeIvTextUrl(
+				u"external"_q,
+				u"https://example.com/external-link"_q),
+		})),
+	};
+}
+
+[[nodiscard]] QString NativeIvEmbedPostDateText(int date) {
+	return langDateTimeFull(QDateTime::fromSecsSinceEpoch(date));
+}
+
+[[nodiscard]] QRect NativeIvEmbedPostAvatarRect() {
+	const auto &embedPostStyle = st::defaultMarkdown.embedPost;
+	const auto textLineHeight = [](const ::style::TextStyle &textStyle) {
+		return std::max(textStyle.lineHeight, textStyle.font->height);
+	};
+	const auto contentLeft = st::defaultMarkdown.textPadding.left()
+		+ embedPostStyle.accentWidth
+		+ embedPostStyle.accentSkip
+		+ embedPostStyle.padding.left();
+	const auto headerHeight = std::max(
+		textLineHeight(embedPostStyle.authorStyle)
+			+ textLineHeight(embedPostStyle.dateStyle),
+		embedPostStyle.avatarSize);
+	return QRect(
+		contentLeft,
+		embedPostStyle.padding.top()
+			+ std::max((headerHeight - embedPostStyle.avatarSize) / 2, 0),
+		embedPostStyle.avatarSize,
+		embedPostStyle.avatarSize);
+}
+
+[[nodiscard]] MTPPageBlock NativeIvEmbedPostBlock(
+		QVector<MTPPageBlock> blocks,
+		QString caption = u"Embed post caption"_q,
+		QString credit = QString(),
+		QString url = u"https://example.com/embed-post"_q,
+		QString author = u"Author"_q,
+		int date = kNativeIvEmbedPostDate,
+		uint64 authorPhotoId = kNativeIvEmbedPostAuthorPhotoId) {
+	return MTP_pageBlockEmbedPost(
+		MTP_string(url),
+		MTP_long(0),
+		MTP_long(authorPhotoId),
+		MTP_string(author),
+		MTP_int(date),
+		MTP_vector<MTPPageBlock>(std::move(blocks)),
+		NativeIvCaption(std::move(caption), std::move(credit)));
 }
 
 [[nodiscard]] MTPRichText NativeIvInlineImageText(
@@ -4082,14 +4121,10 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 		360,
 		true,
 		true);
-	addPlaceholder(
-		NativeIvPlaceholderKind::EmbedPost,
+	const auto embedPostBlock = NativeIvEmbedPostBlock(
+		NativeIvDefaultEmbedPostBlocks(),
 		u"Embed post caption"_q,
-		u"https://example.com/embed-post"_q,
-		0,
-		0,
-		false,
-		true);
+		u"Embed post credit"_q);
 
 	auto supportedBlocks = QVector<MTPPageBlock>();
 	supportedBlocks.push_back(NativeIvInlineImageParagraph(
@@ -4107,6 +4142,7 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 	for (const auto &fixture : placeholderFixtures) {
 		supportedBlocks.push_back(fixture.block);
 	}
+	supportedBlocks.push_back(embedPostBlock);
 	supportedBlocks.push_back(collageFixture.block);
 	supportedBlocks.push_back(slideshowFixture.block);
 	supportedBlocks.push_back(audioFixture.block);
@@ -4169,6 +4205,7 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 	const PreparedBlock *audio = nullptr;
 	const PreparedBlock *map = nullptr;
 	const PreparedBlock *channel = nullptr;
+	const PreparedBlock *embedPost = nullptr;
 	const PreparedBlock *coveredPhoto = nullptr;
 	auto preparedPlaceholders = std::vector<const PreparedBlock*>();
 	ForEachPreparedBlock(
@@ -4211,6 +4248,11 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 				&& block.kind == PreparedBlockKind::Channel
 				&& block.channel.channelId == 7006) {
 				channel = &block;
+			}
+			if (!embedPost
+				&& block.kind == PreparedBlockKind::EmbedPost
+				&& block.text.text == u"Embed post caption\nEmbed post credit"_q) {
+				embedPost = &block;
 			}
 			if (!coveredPhoto
 				&& block.kind == PreparedBlockKind::Photo
@@ -4380,6 +4422,94 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 			parsedChannelContext.username) == u"localnativeiv"_q,
 		unresolvedChannelLabel + u" loaded local username wins"_q,
 		ok);
+
+	Check(embedPost != nullptr, u"native-iv embed-post block"_q, ok);
+	if (embedPost) {
+		Check(
+			embedPost->embedPost.url == u"https://example.com/embed-post"_q,
+			u"native-iv embed-post url"_q,
+			ok);
+		Check(
+			embedPost->embedPost.authorPhotoId == kNativeIvEmbedPostAuthorPhotoId,
+			u"native-iv embed-post author photo id"_q,
+			ok);
+		Check(
+			embedPost->embedPost.author == u"Author"_q,
+			u"native-iv embed-post author"_q,
+			ok);
+		Check(
+			embedPost->embedPost.dateText
+				== NativeIvEmbedPostDateText(kNativeIvEmbedPostDate),
+			u"native-iv embed-post date"_q,
+			ok);
+		Check(
+			embedPost->text.text == u"Embed post caption\nEmbed post credit"_q,
+			u"native-iv embed-post caption text"_q,
+			ok);
+		Check(
+			embedPost->children.size() == 1,
+			u"native-iv embed-post child count"_q,
+			ok);
+		if (embedPost->children.size() == 1) {
+			const auto &child = embedPost->children.front();
+			const auto ivOffset = int(child.text.text.indexOf(u"instant view"_q));
+			const auto externalOffset = int(child.text.text.indexOf(u"external"_q));
+			Check(
+				child.kind == PreparedBlockKind::Paragraph,
+				u"native-iv embed-post child paragraph"_q,
+				ok);
+			Check(
+				child.text.text == u"Links: instant view and external"_q,
+				u"native-iv embed-post child text"_q,
+				ok);
+			const auto ivLink = (ivOffset >= 0)
+				? FindPreparedLinkByCustomUrlRange(
+					child.text,
+					child.links,
+					ivOffset,
+					int(u"instant view"_q.size()))
+				: nullptr;
+			Check(
+				ivLink != nullptr,
+				u"native-iv embed-post iv link"_q,
+				ok);
+			if (ivLink) {
+				Check(
+					ivLink->kind == PreparedLinkKind::InstantViewPage,
+					u"native-iv embed-post iv link kind"_q,
+					ok);
+				Check(
+					ivLink->target == u"https://telegra.ph/embed-post-link"_q,
+					u"native-iv embed-post iv link target"_q,
+					ok);
+				Check(
+					ivLink->webpageId == 777,
+					u"native-iv embed-post iv link webpage id"_q,
+					ok);
+			}
+			const auto externalLink = (externalOffset >= 0)
+				? FindPreparedLinkByCustomUrlRange(
+					child.text,
+					child.links,
+					externalOffset,
+					int(QString(u"external"_q).size()))
+				: nullptr;
+			Check(
+				externalLink != nullptr,
+				u"native-iv embed-post external link"_q,
+				ok);
+			if (externalLink) {
+				Check(
+					externalLink->kind == PreparedLinkKind::External,
+					u"native-iv embed-post external link kind"_q,
+					ok);
+				Check(
+					externalLink->target == u"https://example.com/external-link"_q,
+					u"native-iv embed-post external link target"_q,
+					ok);
+			}
+		}
+	}
 
 	Check(collage != nullptr, u"native-iv collage block"_q, ok);
 	if (collage) {
@@ -5132,39 +5262,172 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 						fixture.expectedLabel
 							+ u" embed wrapper removed iframe spacer"_q,
 						ok);
-					if (fixture.kind == NativeIvPlaceholderKind::EmbedPost) {
-						Check(
-							resource->second.contains(
-								"https://telegra.ph/embed-post-link"),
-							fixture.expectedLabel
-								+ u" embed post iv link restored"_q,
-							ok);
-						Check(
-							resource->second.contains(
-								"https://example.com/external-link"),
-							fixture.expectedLabel
-								+ u" embed post external link restored"_q,
-							ok);
-						Check(
-							!resource->second.contains("internal-iv-link"),
-							fixture.expectedLabel
-								+ u" embed post iv marker removed"_q,
-							ok);
-						Check(
-							!resource->second.contains("data-context"),
-							fixture.expectedLabel
-								+ u" embed post data context removed"_q,
-							ok);
-					}
 				}
 			}
 		}
 	}
 
+	const auto emptyEmbedPostLabel = u"native-iv-embed-post-empty-body"_q;
+	const auto emptyEmbedPostUrl = u"https://example.com/embed-post-empty"_q;
+	const auto emptyEmbedPostDate = kNativeIvEmbedPostDate + 3600;
+	auto emptyEmbedPostSource = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvEmbedPostBlock(
+			{},
+			u"Empty embed post caption"_q,
+			QString(),
+			emptyEmbedPostUrl,
+			u"Fallback Author"_q,
+			emptyEmbedPostDate),
+	});
+	const auto emptyEmbedPostPrepared = TryPrepareNativeInstantView({
+		.source = &emptyEmbedPostSource,
+	});
+	Check(
+		emptyEmbedPostPrepared.supported(),
+		emptyEmbedPostLabel + u" prepare supported"_q,
+		ok);
+	Check(
+		!emptyEmbedPostPrepared.content.failure.failed(),
+		emptyEmbedPostLabel + u" prepare failure"_q,
+		ok);
+	Check(
+		emptyEmbedPostPrepared.content.embedHtmlResources.empty(),
+		emptyEmbedPostLabel + u" embed resources empty"_q,
+		ok);
+	Check(
+		emptyEmbedPostPrepared.content.blocks.blocks.size() == 1,
+		emptyEmbedPostLabel + u" block count"_q,
+		ok);
+	if (emptyEmbedPostPrepared.supported()
+		&& !emptyEmbedPostPrepared.content.failure.failed()
+		&& (emptyEmbedPostPrepared.content.blocks.blocks.size() == 1)) {
+		const auto &block = emptyEmbedPostPrepared.content.blocks.blocks.front();
+		Check(
+			block.kind == PreparedBlockKind::EmbedPost,
+			emptyEmbedPostLabel + u" prepared block kind"_q,
+			ok);
+		Check(
+			block.embedPost.author == u"Fallback Author"_q,
+			emptyEmbedPostLabel + u" author"_q,
+			ok);
+		Check(
+			block.embedPost.dateText
+				== NativeIvEmbedPostDateText(emptyEmbedPostDate),
+			emptyEmbedPostLabel + u" date"_q,
+			ok);
+		Check(
+			block.text.text == u"Empty embed post caption"_q,
+			emptyEmbedPostLabel + u" caption"_q,
+			ok);
+		Check(
+			block.children.size() == 1,
+			emptyEmbedPostLabel + u" fallback child count"_q,
+			ok);
+		if (block.children.size() == 1) {
+			const auto &child = block.children.front();
+			Check(
+				child.kind == PreparedBlockKind::Paragraph,
+				emptyEmbedPostLabel + u" fallback child kind"_q,
+				ok);
+			Check(
+				child.text.text == emptyEmbedPostUrl,
+				emptyEmbedPostLabel + u" fallback child text"_q,
+				ok);
+			const auto fallbackLink = FindPreparedLinkByCustomUrlRange(
+				child.text,
+				child.links,
+				0,
+				child.text.text.size());
+			Check(
+				fallbackLink != nullptr,
+				emptyEmbedPostLabel + u" fallback child link"_q,
+				ok);
+			if (fallbackLink) {
+				Check(
+					fallbackLink->kind == PreparedLinkKind::External,
+					emptyEmbedPostLabel + u" fallback link kind"_q,
+					ok);
+				Check(
+					fallbackLink->target == emptyEmbedPostUrl,
+					emptyEmbedPostLabel + u" fallback link target"_q,
+					ok);
+			}
+		}
+	}
+
+	const auto mediaEmbedPostLabel = u"native-iv-embed-post-native-child-media"_q;
+	auto mediaEmbedPostSource = NativeIvSource(
+		QVector<MTPPageBlock>{
+			NativeIvEmbedPostBlock(
+				QVector<MTPPageBlock>{
+					NativeIvPhotoBlock(9201, u"Nested photo caption"_q),
+				},
+				u"Media embed post caption"_q,
+				QString(),
+				u"https://example.com/embed-post-media"_q,
+				u"Media Author"_q,
+				kNativeIvEmbedPostDate + 7200),
+		},
+		QVector<MTPPhoto>{
+			NativeIvPhoto(9201, 320, 180),
+		});
+	const auto mediaEmbedPostPrepared = TryPrepareNativeInstantView({
+		.source = &mediaEmbedPostSource,
+	});
+	Check(
+		mediaEmbedPostPrepared.supported(),
+		mediaEmbedPostLabel + u" prepare supported"_q,
+		ok);
+	Check(
+		!mediaEmbedPostPrepared.content.failure.failed(),
+		mediaEmbedPostLabel + u" prepare failure"_q,
+		ok);
+	Check(
+		mediaEmbedPostPrepared.content.embedHtmlResources.empty(),
+		mediaEmbedPostLabel + u" embed resources empty"_q,
+		ok);
+	Check(
+		CollectPreparedBlocksByKind(
+			mediaEmbedPostPrepared.content.blocks.blocks,
+			PreparedBlockKind::Placeholder).empty(),
+		mediaEmbedPostLabel + u" no placeholder children"_q,
+		ok);
+	Check(
+		mediaEmbedPostPrepared.content.blocks.blocks.size() == 1,
+		mediaEmbedPostLabel + u" block count"_q,
+		ok);
+	if (mediaEmbedPostPrepared.supported()
+		&& !mediaEmbedPostPrepared.content.failure.failed()
+		&& (mediaEmbedPostPrepared.content.blocks.blocks.size() == 1)) {
+		const auto &block = mediaEmbedPostPrepared.content.blocks.blocks.front();
+		Check(
+			block.kind == PreparedBlockKind::EmbedPost,
+			mediaEmbedPostLabel + u" prepared block kind"_q,
+			ok);
+		Check(
+			block.children.size() == 1,
+			mediaEmbedPostLabel + u" child count"_q,
+			ok);
+		if (block.children.size() == 1) {
+			const auto &child = block.children.front();
+			Check(
+				child.kind == PreparedBlockKind::Photo,
+				mediaEmbedPostLabel + u" native photo child kind"_q,
+				ok);
+			Check(
+				child.photo.photoId == 9201,
+				mediaEmbedPostLabel + u" native photo child id"_q,
+				ok);
+			Check(
+				child.text.text == u"Nested photo caption"_q,
+				mediaEmbedPostLabel + u" native photo child caption"_q,
+				ok);
+		}
+	}
+
 	const auto placeholderArticleLabel = u"native-iv-embed-placeholders-article"_q;
 	auto placeholderArticleSource = NativeIvSource(QVector<MTPPageBlock>{
-		placeholderFixtures[0].block,
-		placeholderFixtures[1].block,
+		placeholderFixtures.front().block,
 	});
 	const auto placeholderArticlePrepared = TryPrepareNativeInstantView({
 		.source = &placeholderArticleSource,
@@ -8202,6 +8465,199 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 	}
 }
 
+void CheckNativeInstantViewEmbedPostAvatarRegression(bool *ok) {
+	const auto label = u"native-iv-embed-post-unresolved-author-photo"_q;
+	const auto renderer = std::make_shared<MathRenderer>();
+	auto runtime = std::make_shared<TestMediaRuntime>();
+	auto source = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvEmbedPostBlock(
+			NativeIvDefaultEmbedPostBlocks(),
+			u"Embed post caption"_q,
+			QString(),
+			u"https://example.com/embed-post-unresolved"_q,
+			u"Unresolved Author"_q,
+			kNativeIvEmbedPostDate,
+			kNativeIvEmbedPostAuthorPhotoId),
+	});
+	auto prepared = TryPrepareNativeInstantView({
+		.source = &source,
+		.mediaRuntime = runtime,
+	});
+	Check(
+		prepared.supported(),
+		label + u" prepare supported"_q,
+		ok);
+	if (!prepared.supported()) {
+		return;
+	}
+	Check(
+		!prepared.content.failure.failed(),
+		label + u" prepare failure"_q,
+		ok);
+	if (prepared.content.failure.failed()) {
+		return;
+	}
+	const auto articleWidth = 420;
+	auto articleHeight = 0;
+	auto article = BuildArticleForTest(
+		std::move(prepared.content),
+		renderer,
+		articleWidth,
+		&articleHeight);
+	Check(
+		runtime->photoRequests.size() == 1
+			&& (runtime->photoRequests.front() == kNativeIvEmbedPostAuthorPhotoId),
+		label + u" photo runtime resolve request"_q,
+		ok);
+	const auto authorBounds = SegmentHitBounds(
+		article.get(),
+		articleWidth,
+		articleHeight,
+		0);
+	const auto dateBounds = SegmentHitBounds(
+		article.get(),
+		articleWidth,
+		articleHeight,
+		1);
+	const auto bodyBounds = SegmentHitBounds(
+		article.get(),
+		articleWidth,
+		articleHeight,
+		2);
+	Check(authorBounds.has_value(), label + u" author bounds"_q, ok);
+	Check(dateBounds.has_value(), label + u" date bounds"_q, ok);
+	Check(bodyBounds.has_value(), label + u" body bounds"_q, ok);
+	if (!authorBounds || !dateBounds || !bodyBounds) {
+		return;
+	}
+	const auto expectedTextLeft = st::defaultMarkdown.textPadding.left()
+		+ st::defaultMarkdown.embedPost.accentWidth
+		+ st::defaultMarkdown.embedPost.accentSkip
+		+ st::defaultMarkdown.embedPost.padding.left();
+	const auto maxTextLeft = expectedTextLeft
+		+ st::defaultMarkdown.embedPost.headerGap;
+	const auto authorLeftDelta = authorBounds->left() - bodyBounds->left();
+	const auto dateLeftDelta = dateBounds->left() - bodyBounds->left();
+	Check(
+		(bodyBounds->left() >= expectedTextLeft)
+			&& (bodyBounds->left() <= maxTextLeft),
+		label + u" body starts at content left"_q,
+		ok);
+	Check(
+		(authorBounds->left() >= expectedTextLeft)
+			&& (authorBounds->left() <= maxTextLeft),
+		label + u" author starts at content left"_q,
+		ok);
+	Check(
+		(dateBounds->left() >= expectedTextLeft)
+			&& (dateBounds->left() <= maxTextLeft),
+		label + u" date starts at content left"_q,
+		ok);
+	Check(
+		(authorLeftDelta >= -6) && (authorLeftDelta <= 6),
+		label + u" author has no avatar gap"_q,
+		ok);
+	Check(
+		(dateLeftDelta >= -6) && (dateLeftDelta <= 6),
+		label + u" date has no avatar gap"_q,
+		ok);
+}
+
+void CheckNativeInstantViewEmbedPostLoadingAvatarPlaceholderRegression(
+		bool *ok) {
+	const auto label = u"native-iv-embed-post-loading-avatar-placeholder"_q;
+	const auto renderer = std::make_shared<MathRenderer>();
+	auto runtime = std::make_shared<TestMediaRuntime>();
+	auto photoRuntime = std::make_shared<TestPhotoRuntime>();
+	photoRuntime->thumbnailImage = std::make_shared<TestDynamicImage>();
+	runtime->addPhotoRuntime(kNativeIvEmbedPostAuthorPhotoId, photoRuntime);
+	auto source = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvEmbedPostBlock(
+			NativeIvDefaultEmbedPostBlocks(),
+			u"Embed post caption"_q,
+			QString(),
+			u"https://example.com/embed-post-loading-avatar"_q,
+			u"Loading Avatar Author"_q,
+			kNativeIvEmbedPostDate,
+			kNativeIvEmbedPostAuthorPhotoId),
+	});
+	auto prepared = TryPrepareNativeInstantView({
+		.source = &source,
+		.mediaRuntime = runtime,
+	});
+	Check(
+		prepared.supported(),
+		label + u" prepare supported"_q,
+		ok);
+	if (!prepared.supported()) {
+		return;
+	}
+	Check(
+		!prepared.content.failure.failed(),
+		label + u" prepare failure"_q,
+		ok);
+	if (prepared.content.failure.failed()) {
+		return;
+	}
+	const auto articleWidth = 420;
+	auto articleHeight = 0;
+	auto article = BuildArticleForTest(
+		std::move(prepared.content),
+		renderer,
+		articleWidth,
+		&articleHeight);
+	const auto image = PaintArticleForTest(
+		article.get(),
+		articleWidth,
+		articleHeight);
+	const auto avatarRect = NativeIvEmbedPostAvatarRect();
+	const auto centerRect = QRect(
+		avatarRect.center() - QPoint(1, 1),
+		QSize(3, 3));
+	const auto cornerSize = QSize(4, 4);
+	const auto topLeftRect = QRect(avatarRect.topLeft(), cornerSize);
+	const auto topRightRect = QRect(
+		QPoint(avatarRect.right() - cornerSize.width() + 1, avatarRect.top()),
+		cornerSize);
+	const auto bottomLeftRect = QRect(
+		QPoint(avatarRect.left(), avatarRect.bottom() - cornerSize.height() + 1),
+		cornerSize);
+	const auto bottomRightRect = QRect(
+		QPoint(
+			avatarRect.right() - cornerSize.width() + 1,
+			avatarRect.bottom() - cornerSize.height() + 1),
+		cornerSize);
+	Check(
+		runtime->photoRequests.size() == 1
+			&& (runtime->photoRequests.front() == kNativeIvEmbedPostAuthorPhotoId),
+		label + u" photo runtime resolve request"_q,
+		ok);
+	Check(
+		!photoRuntime->thumbnailSizes.empty(),
+		label + u" thumbnail size request"_q,
+		ok);
+	Check(
+		PaintedBoundsInRect(image, centerRect).has_value(),
+		label + u" placeholder center painted"_q,
+		ok);
+	Check(
+		!PaintedBoundsInRect(image, topLeftRect).has_value(),
+		label + u" top-left corner stays circular"_q,
+		ok);
+	Check(
+		!PaintedBoundsInRect(image, topRightRect).has_value(),
+		label + u" top-right corner stays circular"_q,
+		ok);
+	Check(
+		!PaintedBoundsInRect(image, bottomLeftRect).has_value(),
+		label + u" bottom-left corner stays circular"_q,
+		ok);
+	Check(
+		!PaintedBoundsInRect(image, bottomRightRect).has_value(),
+		label + u" bottom-right corner stays circular"_q,
+		ok);
+}
+
 void CheckNativeInstantViewPreviewOpenPageCoverage(bool *ok) {
 	const auto renderer = std::make_shared<MathRenderer>();
 	auto lookupFlags = Ui::Text::StateRequest::Flags();
@@ -9390,6 +9846,27 @@ void CheckArticleRasterRegressionCoverage(bool *ok) {
 					return true;
 				}
 				break;
+			case PreparedBlockKind::EmbedPost:
+				if (!block.embedPost.author.isEmpty()
+					&& collectTextSegment(
+						TextWithEntities::Simple(block.embedPost.author))) {
+					return true;
+				}
+				if (!block.embedPost.dateText.isEmpty()
+					&& collectTextSegment(
+						TextWithEntities::Simple(block.embedPost.dateText))) {
+					return true;
+				}
+				for (const auto &child : block.children) {
+					if (self(self, child)) {
+						return true;
+					}
+				}
+				if (!block.text.text.isEmpty()
+					&& collectTextSegment(block.text)) {
+					return true;
+				}
+				return false;
 			case PreparedBlockKind::Rule:
 			case PreparedBlockKind::List:
 			case PreparedBlockKind::ListItem:
@@ -11624,6 +12101,8 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 	CheckArticlePageWidthCoverage(&ok);
 	CheckArticleHorizontalRelayoutRegression(&ok);
 	CheckNativeInstantViewArticleCoverage(&ok);
+	CheckNativeInstantViewEmbedPostAvatarRegression(&ok);
+	CheckNativeInstantViewEmbedPostLoadingAvatarPlaceholderRegression(&ok);
 	CheckNativeInstantViewPreviewOpenPageCoverage(&ok);
 	CheckNativeInstantViewHostedMediaCoverage(&ok);
 	CheckNativeInstantViewHostedMediaFallbackCoverage(&ok);

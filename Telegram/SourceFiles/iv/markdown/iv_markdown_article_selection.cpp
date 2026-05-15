@@ -333,6 +333,7 @@ void CollectSelectableSegments(
 	for (auto &block : *blocks) {
 		block.segmentIndex = -1;
 		block.secondarySegmentIndex = -1;
+		block.tertiarySegmentIndex = -1;
 		switch (block.kind) {
 		case PreparedBlockKind::Paragraph:
 		case PreparedBlockKind::Heading:
@@ -455,6 +456,49 @@ void CollectSelectableSegments(
 					std::move(textSegment));
 			}
 		} break;
+		case PreparedBlockKind::EmbedPost: {
+			if (!block.labelRect.isEmpty() && !block.labelLeaf.isEmpty()) {
+				auto authorSegment = SelectableSegment();
+				authorSegment.kind = SelectableSegmentKind::TextLeaf;
+				authorSegment.leaf = &block.labelLeaf;
+				authorSegment.block = &block;
+				authorSegment.outerRect = block.labelRect;
+				authorSegment.textRect = block.labelRect;
+				authorSegment.textWidth = block.labelWidth;
+				authorSegment.length = block.labelLeaf.length();
+				block.segmentIndex = AddSelectableSegment(
+					segments,
+					std::move(authorSegment));
+			}
+			if (!block.subtitleRect.isEmpty() && !block.subtitleLeaf.isEmpty()) {
+				auto dateSegment = SelectableSegment();
+				dateSegment.kind = SelectableSegmentKind::TextLeaf;
+				dateSegment.leaf = &block.subtitleLeaf;
+				dateSegment.block = &block;
+				dateSegment.outerRect = block.subtitleRect;
+				dateSegment.textRect = block.subtitleRect;
+				dateSegment.textWidth = block.subtitleWidth;
+				dateSegment.length = block.subtitleLeaf.length();
+				block.secondarySegmentIndex = AddSelectableSegment(
+					segments,
+					std::move(dateSegment));
+			}
+			CollectSelectableSegments(&block.children, segments);
+			if (!block.textRect.isEmpty() && !block.leaf.isEmpty()) {
+				auto captionSegment = SelectableSegment();
+				captionSegment.kind = SelectableSegmentKind::TextLeaf;
+				captionSegment.leaf = &block.leaf;
+				captionSegment.block = &block;
+				captionSegment.outerRect = block.textRect;
+				captionSegment.textRect = block.textRect;
+				captionSegment.textWidth = block.textWidth;
+				captionSegment.length = block.leaf.length();
+				block.tertiarySegmentIndex = AddSelectableSegment(
+					segments,
+					std::move(captionSegment));
+			}
+			continue;
+		}
 		case PreparedBlockKind::List:
 		case PreparedBlockKind::ListItem:
 		case PreparedBlockKind::Quote:
