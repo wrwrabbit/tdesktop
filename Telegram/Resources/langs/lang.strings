@@ -5633,6 +5633,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_sr_chat_bot" = "Bot";
 "lng_sr_chat_topic" = "Topic";
 "lng_sr_chat_folder" = "Folder";
+"lng_sr_chat_hashtag" = "Hashtag";
 "lng_sr_chat_service" = "Service Notifications";
 "lng_sr_chat_verified" = "Verified";
 "lng_sr_chat_scam" = "Scam";

@@ -495,7 +495,22 @@ private:
 	Ui::VideoUserpic *validateVideoUserpic(not_null<History*> history);
 
 	Row *shownRowByKey(Key key);
-	[[nodiscard]] const std::vector<SubItem> &activeSubItems(int row) const;
+	[[nodiscard]] const std::vector<SubItem> &activeSubItems(
+		not_null<const Row*> row) const;
+	enum class AccessibilityCohort {
+		Hashtag,
+		Filtered,
+		PeerSearch,
+		Preview,
+		Searched,
+	};
+	struct FilteredChildRef {
+		AccessibilityCohort cohort;
+		int local = 0;
+	};
+	[[nodiscard]] int filteredChildCount() const;
+	[[nodiscard]] std::optional<FilteredChildRef>
+		filteredChildAt(int index) const;
 	void announceSelectedFocus();
 	void clearSearchResults(bool alsoPeerSearchResults = true);
 	void clearPeerSearchResults();
@@ -595,7 +610,7 @@ private:
 	Ui::Animations::Basic _pinnedShiftAnimation;
 	base::flat_set<Key> _pinnedOnDragStart;
 
-	mutable int _activeSubItemsRow = -1;
+	mutable const Row *_activeSubItemsRow = nullptr;
 	mutable std::vector<SubItem> _activeSubItems;
 
 	// Remember the last currently dragged row top shift for updating area.

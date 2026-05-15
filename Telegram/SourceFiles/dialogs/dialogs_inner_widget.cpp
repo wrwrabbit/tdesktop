@@ -2823,6 +2823,9 @@ void InnerWidget::moveSearchIn() {
 void InnerWidget::dialogRowReplaced(
 		Row *oldRow,
 		Row *newRow) {
+	if (_activeSubItemsRow == oldRow) {
+		_activeSubItemsRow = nullptr;
+	}
 	auto found = false;
 	if (_state == WidgetState::Filtered) {
 		auto top = 0;
@@ -3177,6 +3180,7 @@ void InnerWidget::refreshShownList() {
 		_shownList->unfreeze();
 		_shownList = list;
 		_shownList->updateHeights(_narrowRatio);
+		_activeSubItemsRow = nullptr;
 	}
 }
 
@@ -4160,6 +4164,7 @@ void InnerWidget::editOpenedFilter() {
 }
 
 void InnerWidget::refresh(bool toTop) {
+	_activeSubItemsRow = nullptr;
 	if (!_geometryInited) {
 		return;
 	} else if (needCollapsedRowsRefresh()) {
@@ -5728,24 +5733,60 @@ void InnerWidget::deactivateQuickAction() {
 
 void InnerWidget::focusInEvent(QFocusEvent *e) {
 	RpWidget::focusInEvent(e);
-	if (_state != WidgetState::Default) {
-		return;
-	}
-	if (!_selected && !_shownList->empty()) {
-		_selected = _shownList->cbegin()->get();
-	}
-	if (_selected) {
-		const auto row = _selected;
-		InvokeQueued(this, [=] {
-			if (_selected == row && hasFocus()) {
-				announceSelectedFocus();
-			}
-		});
+	if (_state == WidgetState::Default) {
+		if (!_selected && !_shownList->empty()) {
+			_selected = _shownList->cbegin()->get();
+		}
+		if (_selected) {
+			const auto row = _selected;
+			InvokeQueued(this, [=] {
+				if (_selected == row && hasFocus()) {
+					announceSelectedFocus();
+				}
+			});
+		}
+	} else if (_state == WidgetState::Filtered) {
+		const auto noneSelected
+			= !base::in_range(
+				_hashtagSelected, 0, int(_hashtagResults.size()))
+			&& !base::in_range(
+				_filteredSelected, 0, int(_filterResults.size()))
+			&& !base::in_range(
+				_peerSearchSelected, 0, int(_peerSearchResults.size()))
+			&& !base::in_range(
+				_previewSelected, 0, int(_previewResults.size()))
+			&& !base::in_range(
+				_searchedSelected, 0, int(_searchResults.size()));
+		if (noneSelected && filteredChildCount() > 0) {
+			selectSkip(1);
+		}
+		if (filteredChildCount() > 0) {
+			InvokeQueued(this, [=] {
+				if (hasFocus()) {
+					announceSelectedFocus();
+				}
+			});
+		}
 	}
 }
 
 bool InnerWidget::processKeyDispatch(QKeyEvent *e) {
-	const auto previous = _selected;
+	struct Snapshot {
+		Row *selected = nullptr;
+		int hashtag = -1;
+		int filtered = -1;
+		int peerSearch = -1;
+		int preview = -1;
+		int searched = -1;
+	};
+	const auto snap = Snapshot{
+		_selected,
+		_hashtagSelected,
+		_filteredSelected,
+		_peerSearchSelected,
+		_previewSelected,
+		_searchedSelected,
+	};
 	if (e->key() == Qt::Key_Up) {
 		selectSkip(-1);
 	} else if (e->key() == Qt::Key_Down) {
@@ -5757,7 +5798,13 @@ bool InnerWidget::processKeyDispatch(QKeyEvent *e) {
 	} else {
 		return false;
 	}
-	if (_selected != previous) {
+	const auto changed = (_selected != snap.selected)
+		|| (_hashtagSelected != snap.hashtag)
+		|| (_filteredSelected != snap.filtered)
+		|| (_peerSearchSelected != snap.peerSearch)
+		|| (_previewSelected != snap.preview)
+		|| (_searchedSelected != snap.searched);
+	if (changed) {
 		announceSelectedFocus();
 	}
 	return true;
@@ -5774,15 +5821,43 @@ void InnerWidget::keyPressEvent(QKeyEvent *e) {
 }
 
 void InnerWidget::announceSelectedFocus() {
-	if (!_selected || _state != WidgetState::Default) {
-		return;
-	}
-	auto index = 0;
-	for (auto i = _shownList->cbegin(); i != _shownList->cend(); ++i, ++index) {
-		if (i->get() == _selected) {
+	if (_state == WidgetState::Default) {
+		if (!_selected) {
+			return;
+		}
+		auto index = 0;
+		for (auto i = _shownList->cbegin()
+			; i != _shownList->cend()
+			; ++i, ++index) {
+			if (i->get() == _selected) {
+				accessibilityChildNameChanged(index);
+				accessibilityChildFocused(index);
+				return;
+			}
+		}
+	} else if (_state == WidgetState::Filtered) {
+		const auto h = int(_hashtagResults.size());
+		const auto f = int(_filterResults.size());
+		const auto p = int(_peerSearchResults.size());
+		const auto v = int(_previewResults.size());
+		auto index = -1;
+		if (base::in_range(_hashtagSelected, 0, h)) {
+			index = _hashtagSelected;
+		} else if (base::in_range(_filteredSelected, 0, f)) {
+			index = h + _filteredSelected;
+		} else if (base::in_range(_peerSearchSelected, 0, p)) {
+			index = h + f + _peerSearchSelected;
+		} else if (base::in_range(_previewSelected, 0, v)) {
+			index = h + f + p + _previewSelected;
+		} else if (base::in_range(
+				_searchedSelected,
+				0,
+				int(_searchResults.size()))) {
+			index = h + f + p + v + _searchedSelected;
+		}
+		if (index >= 0) {
 			accessibilityChildNameChanged(index);
 			accessibilityChildFocused(index);
-			return;
 		}
 	}
 }
@@ -5791,17 +5866,98 @@ Ui::AccessibilityState InnerWidget::accessibilityState() const {
 	return {};
 }
 
+int InnerWidget::filteredChildCount() const {
+	return int(_hashtagResults.size()
+		+ _filterResults.size()
+		+ _peerSearchResults.size()
+		+ _previewResults.size()
+		+ _searchResults.size());
+}
+
+std::optional<InnerWidget::FilteredChildRef>
+		InnerWidget::filteredChildAt(int index) const {
+	if (index < 0) {
+		return std::nullopt;
+	}
+	const auto h = int(_hashtagResults.size());
+	const auto f = int(_filterResults.size());
+	const auto p = int(_peerSearchResults.size());
+	const auto v = int(_previewResults.size());
+	const auto s = int(_searchResults.size());
+	if (index < h) {
+		return FilteredChildRef{
+			AccessibilityCohort::Hashtag,
+			index,
+		};
+	} else if (index < h + f) {
+		return FilteredChildRef{
+			AccessibilityCohort::Filtered,
+			index - h,
+		};
+	} else if (index < h + f + p) {
+		return FilteredChildRef{
+			AccessibilityCohort::PeerSearch,
+			index - h - f,
+		};
+	} else if (index < h + f + p + v) {
+		return FilteredChildRef{
+			AccessibilityCohort::Preview,
+			index - h - f - p,
+		};
+	} else if (index < h + f + p + v + s) {
+		return FilteredChildRef{
+			AccessibilityCohort::Searched,
+			index - h - f - p - v,
+		};
+	}
+	return std::nullopt;
+}
+
 int InnerWidget::accessibilityChildCount() const {
-	return _shownList->size();
+	if (_state == WidgetState::Default) {
+		return _shownList->size();
+	} else if (_state == WidgetState::Filtered) {
+		return filteredChildCount();
+	}
+	return 0;
 }
 
 QString InnerWidget::accessibilityChildName(int index) const {
-	if (index < 0 || index >= _shownList->size()) {
-		return {};
+	if (_state == WidgetState::Default) {
+		if (index < 0 || index >= _shownList->size()) {
+			return {};
+		}
+		auto it = _shownList->cbegin();
+		std::advance(it, index);
+		return RowAccessibilityName(it->get(), _filterId);
+	} else if (_state == WidgetState::Filtered) {
+		const auto ref = filteredChildAt(index);
+		if (!ref) {
+			return {};
+		}
+		switch (ref->cohort) {
+		case AccessibilityCohort::Hashtag:
+			return HashtagAccessibilityName(
+				_hashtagResults[ref->local]->tag);
+		case AccessibilityCohort::Filtered:
+			return RowAccessibilityName(
+				_filterResults[ref->local].row,
+				_filterId);
+		case AccessibilityCohort::PeerSearch: {
+			const auto &r = _peerSearchResults[ref->local];
+			return PeerSearchResultAccessibilityName(
+				r->peer,
+				r->sponsored != nullptr);
+		}
+		case AccessibilityCohort::Preview:
+			return SearchedMessageAccessibilityName(
+				_previewResults[ref->local].get());
+		case AccessibilityCohort::Searched:
+			return SearchedMessageAccessibilityName(
+				_searchResults[ref->local].get());
+		}
 	}
-	auto it = _shownList->cbegin();
-	std::advance(it, index);
-	return RowAccessibilityName(it->get(), _filterId);
+	return {};
 }
 
 QAccessible::State InnerWidget::accessibilityChildState(int index) const {
@@ -5810,17 +5966,48 @@ QAccessible::State InnerWidget::accessibilityChildState(int index) const {
 	if (Ui::ScreenReaderModeActive()) {
 		state.focusable = true;
 	}
-	if (index < 0 || index >= _shownList->size()) {
-		return state;
-	}
-	auto it = _shownList->cbegin();
-	std::advance(it, index);
-	if (it->get() == _selected) {
-		state.selected = true;
-		state.active = true;
-		if (Ui::ScreenReaderModeActive()) {
-			state.focused = true;
+	if (_state == WidgetState::Default) {
+		if (index < 0 || index >= _shownList->size()) {
+			return state;
 		}
+		auto it = _shownList->cbegin();
+		std::advance(it, index);
+		if (it->get() == _selected) {
+			state.selected = true;
+			state.active = true;
+			if (Ui::ScreenReaderModeActive()) {
+				state.focused = true;
+			}
+		}
+		return state;
+	} else if (_state == WidgetState::Filtered) {
+		const auto ref = filteredChildAt(index);
+		if (!ref) {
+			return state;
+		}
+		const auto active = [&] {
+			switch (ref->cohort) {
+			case AccessibilityCohort::Hashtag:
+				return ref->local == _hashtagSelected;
+			case AccessibilityCohort::Filtered:
+				return ref->local == _filteredSelected;
+			case AccessibilityCohort::PeerSearch:
+				return ref->local == _peerSearchSelected;
+			case AccessibilityCohort::Preview:
+				return ref->local == _previewSelected;
+			case AccessibilityCohort::Searched:
+				return ref->local == _searchedSelected;
+			}
+			return false;
+		}();
+		if (active) {
+			state.selected = true;
+			state.active = true;
+			if (Ui::ScreenReaderModeActive()) {
+				state.focused = true;
+			}
+		}
+		return state;
 	}
 	return state;
 }
@@ -5830,30 +6017,81 @@ QAccessible::Role InnerWidget::accessibilityChildRole() const {
 }
 
 QRect InnerWidget::accessibilityChildRect(int index) const {
-	if (index < 0 || index >= _shownList->size()) {
+	if (_state == WidgetState::Default) {
+		if (index < 0 || index >= _shownList->size()) {
+			return QRect();
+		}
+		auto it = _shownList->cbegin();
+		std::advance(it, index);
+		const auto row = it->get();
+		return QRect(0, row->top(), width(), row->height());
+	} else if (_state == WidgetState::Filtered) {
+		const auto ref = filteredChildAt(index);
+		if (!ref) {
+			return QRect();
+		}
+		switch (ref->cohort) {
+		case AccessibilityCohort::Hashtag:
+			return QRect(
+				0,
+				hashtagsOffset() + ref->local * st::mentionHeight,
+				width(),
+				st::mentionHeight);
+		case AccessibilityCohort::Filtered: {
+			const auto &r = _filterResults[ref->local];
+			return QRect(
+				0,
+				filteredOffset() + r.top,
+				width(),
+				r.row->height());
+		}
+		case AccessibilityCohort::PeerSearch:
+			return QRect(
+				0,
+				peerSearchOffset() + ref->local * st::dialogsRowHeight,
+				width(),
+				st::dialogsRowHeight);
+		case AccessibilityCohort::Preview:
+			return QRect(
+				0,
+				previewOffset() + ref->local * _st->height,
+				width(),
+				_st->height);
+		case AccessibilityCohort::Searched:
+			return QRect(
+				0,
+				searchedOffset() + ref->local * _st->height,
+				width(),
+				_st->height);
+		}
 		return QRect();
 	}
-	auto it = _shownList->cbegin();
-	std::advance(it, index);
-	const auto row = it->get();
-	return QRect(0, row->top(), width(), row->height());
+	return QRect();
 }
 
 int InnerWidget::accessibilityChildColumnCount(int row) const {
-	if (row < 0 || row >= _shownList->size()) {
-		return 0;
-	}
-	return int(activeSubItems(row).size());
-}
-
-const std::vector<SubItem> &InnerWidget::activeSubItems(int row) const {
-	Expects(row >= 0 && row < _shownList->size());
-
-	if (_activeSubItemsRow != row) {
+	if (_state == WidgetState::Default) {
+		if (row < 0 || row >= _shownList->size()) {
+			return 0;
+		}
 		auto it = _shownList->cbegin();
 		std::advance(it, row);
-		_activeSubItems = ActiveSubItems(it->get(), _filterId);
-		_activeSubItemsRow = row;
+		return int(activeSubItems(it->get()).size());
+	} else if (_state == WidgetState::Filtered) {
+		const auto ref = filteredChildAt(row);
+		if (!ref || ref->cohort != AccessibilityCohort::Filtered) {
+			return 0;
+		}
+		return int(activeSubItems(_filterResults[ref->local].row).size());
+	}
+	return 0;
+}
+
+const std::vector<SubItem> &InnerWidget::activeSubItems(
+		not_null<const Row*> row) const {
+	if (row.get() != _activeSubItemsRow) {
+		_activeSubItems = ActiveSubItems(row, _filterId);
+		_activeSubItemsRow = row.get();
 	}
 	return _activeSubItems;
 }
@@ -5865,29 +6103,59 @@ QAccessible::Role InnerWidget::accessibilityChildSubItemRole() const {
 QString InnerWidget::accessibilityChildSubItemName(
 		int row,
 		int column) const {
-	if (row < 0 || row >= _shownList->size()) {
-		return {};
+	if (_state == WidgetState::Default) {
+		if (row < 0 || row >= _shownList->size()) {
+			return {};
+		}
+		auto it = _shownList->cbegin();
+		std::advance(it, row);
+		const auto &active = activeSubItems(it->get());
+		if (column < 0 || column >= int(active.size())) {
+			return {};
+		}
+		return SubItemLabel(active[column]);
+	} else if (_state == WidgetState::Filtered) {
+		const auto ref = filteredChildAt(row);
+		if (!ref || ref->cohort != AccessibilityCohort::Filtered) {
+			return {};
+		}
+		const auto &active = activeSubItems(_filterResults[ref->local].row);
+		if (column < 0 || column >= int(active.size())) {
+			return {};
+		}
+		return SubItemLabel(active[column]);
 	}
-	const auto &active = activeSubItems(row);
-	if (column < 0 || column >= int(active.size())) {
-		return {};
-	}
-	return SubItemLabel(active[column]);
+	return {};
 }
 
 QString InnerWidget::accessibilityChildSubItemValue(
 		int row,
 		int column) const {
-	if (row < 0 || row >= _shownList->size()) {
-		return {};
+	if (_state == WidgetState::Default) {
+		if (row < 0 || row >= _shownList->size()) {
+			return {};
+		}
+		auto it = _shownList->cbegin();
+		std::advance(it, row);
+		const auto rowPtr = it->get();
+		const auto &active = activeSubItems(rowPtr);
+		if (column < 0 || column >= int(active.size())) {
+			return {};
+		}
+		return SubItemValue(rowPtr, _filterId, active[column]);
+	} else if (_state == WidgetState::Filtered) {
+		const auto ref = filteredChildAt(row);
+		if (!ref || ref->cohort != AccessibilityCohort::Filtered) {
+			return {};
+		}
+		const auto rowPtr = _filterResults[ref->local].row;
+		const auto &active = activeSubItems(rowPtr);
+		if (column < 0 || column >= int(active.size())) {
+			return {};
+		}
+		return SubItemValue(rowPtr, _filterId, active[column]);
 	}
-	const auto &active = activeSubItems(row);
-	if (column < 0 || column >= int(active.size())) {
-		return {};
-	}
-	auto it = _shownList->cbegin();
-	std::advance(it, row);
-	return SubItemValue(it->get(), _filterId, active[column]);
+	return {};
 }
 
 } // namespace Dialogs

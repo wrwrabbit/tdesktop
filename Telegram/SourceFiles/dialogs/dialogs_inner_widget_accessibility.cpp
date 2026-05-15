@@ -51,6 +51,105 @@ namespace {
 	return QString();
 }
 
+[[nodiscard]] QStringList MessageTailParts(
+		not_null<const HistoryItem*> item,
+		not_null<History*> history,
+		not_null<PeerData*> peer) {
+	QStringList parts;
+	if (item->isService()) {
+		return parts;
+	}
+	const auto dateTime = ItemDateTime(item);
+
+	QString status;
+	auto statusBeforeMessage = false;
+	if (item->out()) {
+		if (item->isSending()) {
+			status = tr::lng_sr_chat_sending(tr::now);
+			statusBeforeMessage = true;
+		} else if (item->hasFailed()) {
+			status = tr::lng_sr_chat_failed(tr::now);
+			statusBeforeMessage = true;
+		} else if (item->unread(history)) {
+			status = tr::lng_sr_message_not_seen(tr::now);
+			statusBeforeMessage = true;
+		} else {
+			status = tr::lng_sr_message_seen(tr::now);
+			statusBeforeMessage = true;
+		}
+	} else {
+		status = tr::lng_sr_chat_received(tr::now);
+		statusBeforeMessage = false;
+	}
+
+	auto messageText = item->notificationText().text;
+	if (!messageText.isEmpty()) {
+		constexpr auto kMaxMessageLength = 100;
+		if (messageText.size() > kMaxMessageLength) {
+			messageText = messageText.left(kMaxMessageLength) + u"..."_q;
+		}
+		if (peer->isChat() || peer->isMegagroup()) {
+			if (const auto from = item->from()) {
+				if (!item->out()) {
+					messageText = from->shortName()
+						+ u": "_q
+						+ messageText;
+				}
+			}
+		}
+		if (statusBeforeMessage) {
+			messageText = status + u", "_q + messageText;
+		}
+		parts << messageText;
+	}
+
+	const auto &reactions = item->reactions();
+	if (!reactions.empty()) {
+		QStringList reactionParts;
+		for (const auto &reaction : reactions) {
+			QString reactionText;
+			if (reaction.id.paid()) {
+				reactionText = tr::lng_sr_chat_reaction_star(tr::now);
+			} else if (const auto emoji = reaction.id.emoji(); !emoji.isEmpty()) {
+				reactionText = emoji;
+			} else {
+				reactionText = tr::lng_sr_chat_reaction_custom(tr::now);
+			}
+			if (reaction.count > 1) {
+				reactionText += u" "_q + QString::number(reaction.count);
+			}
+			reactionParts << reactionText;
+		}
+		if (!reactionParts.isEmpty()) {
+			parts << tr::lng_sr_chat_message_reactions(
+				tr::now,
+				lt_reactions,
+				reactionParts.join(u", "_q));
+		}
+	}
+
+	if (!statusBeforeMessage) {
+		parts << status;
+	}
+
+	if (dateTime.isValid()) {
+		const auto now = QDateTime::currentDateTime();
+		QString timeText;
+		if (dateTime.date() == now.date()) {
+			timeText = tr::lng_schedule_at(tr::now)
+				+ u" "_q
+				+ QLocale().toString(
+					dateTime.time(),
+					QLocale::ShortFormat);
+		} else {
+			timeText = Ui::FormatDateTime(dateTime);
+		}
+		parts << timeText;
+	}
+
+	return parts;
+}
+
 } // namespace
 
 QString RowAccessibilityName(
@@ -149,95 +248,7 @@ QString RowAccessibilityName(
 	}
 
 	if (const auto item = history->chatListMessage()) {
-		if (!item->isService()) {
-			const auto dateTime = ItemDateTime(item);
-
-			QString status;
-			bool statusBeforeMessage = false;
-			if (item->out()) {
-				if (item->isSending()) {
-					status = tr::lng_sr_chat_sending(tr::now);
-					statusBeforeMessage = true;
-				} else if (item->hasFailed()) {
-					status = tr::lng_sr_chat_failed(tr::now);
-					statusBeforeMessage = true;
-				} else if (item->unread(history)) {
-					status = tr::lng_sr_message_not_seen(tr::now);
-					statusBeforeMessage = true;
-				} else {
-					status = tr::lng_sr_message_seen(tr::now);
-					statusBeforeMessage = true;
-				}
-			} else {
-				status = tr::lng_sr_chat_received(tr::now);
-				statusBeforeMessage = false;
-			}
-
-			auto messageText = item->notificationText().text;
-			if (!messageText.isEmpty()) {
-				constexpr auto kMaxMessageLength = 100;
-				if (messageText.size() > kMaxMessageLength) {
-					messageText = messageText.left(kMaxMessageLength) + u"..."_q;
-				}
-				if (peer->isChat() || peer->isMegagroup()) {
-					if (const auto from = item->from()) {
-						if (!item->out()) {
-							messageText = from->shortName()
-								+ u": "_q
-								+ messageText;
-						}
-					}
-				}
-				if (statusBeforeMessage) {
-					messageText = status + u", "_q + messageText;
-				}
-				parts << messageText;
-			}
-
-			const auto &reactions = item->reactions();
-			if (!reactions.empty()) {
-				QStringList reactionParts;
-				for (const auto &reaction : reactions) {
-					QString reactionText;
-					if (reaction.id.paid()) {
-						reactionText = tr::lng_sr_chat_reaction_star(tr::now);
-					} else if (const auto emoji = reaction.id.emoji(); !emoji.isEmpty()) {
-						reactionText = emoji;
-					} else {
-						reactionText = tr::lng_sr_chat_reaction_custom(tr::now);
-					}
-					if (reaction.count > 1) {
-						reactionText += u" "_q + QString::number(reaction.count);
-					}
-					reactionParts << reactionText;
-				}
-				if (!reactionParts.isEmpty()) {
-					parts << tr::lng_sr_chat_message_reactions(
-						tr::now,
-						lt_reactions,
-						reactionParts.join(u", "_q));
-				}
-			}
-
-			if (!statusBeforeMessage) {
-				parts << status;
-			}
-
-			if (dateTime.isValid()) {
-				const auto now = QDateTime::currentDateTime();
-				QString timeText;
-				if (dateTime.date() == now.date()) {
-					timeText = tr::lng_schedule_at(tr::now)
-						+ u" "_q
-						+ QLocale().toString(
-							dateTime.time(),
-							QLocale::ShortFormat);
-				} else {
-					timeText = Ui::FormatDateTime(dateTime);
-				}
-				parts << timeText;
-			}
-		}
+		parts += MessageTailParts(item, history, peer);
 	}
 
 	return parts.join(u", "_q);
@@ -576,6 +587,74 @@ std::vector<SubItem> ActiveSubItems(
 		}
 	}
 	return result;
+}
+
+QString HashtagAccessibilityName(QStringView tag) {
+	return tr::lng_sr_chat_hashtag(tr::now)
+		+ u": #"_q
+		+ tag.toString();
+}
+
+QString PeerSearchResultAccessibilityName(
+		not_null<PeerData*> peer,
+		bool sponsored) {
+	QStringList parts;
+
+	const auto type = ChatTypeString(peer);
+	if (!type.isEmpty()) {
+		parts << type;
+	}
+
+	parts << peer->name();
+
+	if (peer->isScam()) {
+		parts << tr::lng_sr_chat_scam(tr::now);
+	} else if (peer->isFake()) {
+		parts << tr::lng_sr_chat_fake(tr::now);
+	}
+
+	if (const auto user = peer->asUser()) {
+		if (user->isPremium()) {
+			parts << tr::lng_premium(tr::now);
+		}
+	}
+
+	if (peer->isVerified()) {
+		parts << tr::lng_sr_chat_verified(tr::now);
+	}
+
+	if (const auto user = peer->asUser()) {
+		if (Data::IsUserOnline(user)) {
+			parts << tr::lng_sr_chat_online(tr::now);
+		}
+	}
+
+	if (sponsored) {
+		parts << tr::lng_sr_chat_sponsored(tr::now);
+	}
+
+	return parts.join(u", "_q);
+}
+
+QString SearchedMessageAccessibilityName(
+		not_null<const FakeRow*> row) {
+	const auto item = row->item();
+	const auto history = item->history();
+	const auto peer = history->peer;
+
+	QStringList parts;
+	const auto type = ChatTypeString(peer);
+	if (!type.isEmpty()) {
+		parts << type;
+	}
+	parts << peer->name();
+	if (const auto topic = row->topic()) {
+		parts << (topic->isGeneral()
+			? Data::ForumGeneralIconTitle()
+			: topic->title());
+	}
+	parts += MessageTailParts(item, history, peer);
+	return parts.join(u", "_q);
 }
 
 } // namespace Dialogs
