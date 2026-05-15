@@ -239,6 +239,7 @@ private:
 	void applyExternalShellFullscreen(bool fullscreen);
 	void sendExternalShellChrome();
 	void setExternalShellBlocked(bool blocked);
+	void closeExternalShellLayer();
 	[[nodiscard]] ExternalShellAnchor externalShellAnchor() const;
 	Webview::PopupResult showBlockingPopup(Webview::PopupArgs &&args);
 	void createWebviewBottom();
