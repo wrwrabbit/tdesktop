@@ -2870,6 +2870,15 @@ TextSelection ListWidget::getSelectedTextRange(
 int ListWidget::findItemIndexByY(int y) const {
 	Expects(!_items.empty());
 
+	auto gapShift = 0;
+	for (const auto &gap : _collapseGaps) {
+		if (y < gap.absY + gapShift) {
+			break;
+		}
+		gapShift += gap.height;
+	}
+	y -= gapShift;
+
 	if (y < _itemsTop) {
 		return 0;
 	}
@@ -2891,7 +2900,11 @@ Element *ListWidget::strictFindItemByY(int y) const {
 	if (_items.empty()) {
 		return nullptr;
 	}
-	return (y >= _itemsTop && y < _itemsTop + _itemsHeight)
+	auto gapTotal = 0;
+	for (const auto &gap : _collapseGaps) {
+		gapTotal += gap.height;
+	}
+	return (y >= _itemsTop && y < _itemsTop + _itemsHeight + gapTotal)
 		? findItemByY(y).get()
 		: nullptr;
 }

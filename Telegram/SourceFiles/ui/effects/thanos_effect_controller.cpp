@@ -21,8 +21,8 @@ namespace Ui {
 namespace {
 
 constexpr auto kBaseMs = 400;
-constexpr auto kPerPixelMs = 0.5;
-constexpr auto kMaxMs = 1200;
+constexpr auto kPerPixelMs = 0.15;
+constexpr auto kMaxMs = 600;
 
 } // namespace
 
@@ -36,6 +36,15 @@ ThanosEffectController::ThanosEffectController(
 	) | rpl::on_next([=](const auto &items) {
 		captureItemsBatch(items);
 	}, lifetime);
+
+	_session->data().historyChanged(
+	) | rpl::on_next([=](not_null<History*> history) {
+		if (_restoreScrollPending && history == _capturedHistory) {
+			_restoreScrollPending = false;
+			_capturedHistory = nullptr;
+			_delegate.scrollToY(_savedScrollTop);
+		}
+	}, lifetime);
 }
 
 ThanosEffectController::~ThanosEffectController() = default;
@@ -45,10 +54,21 @@ void ThanosEffectController::captureItemsBatch(
 	if (!ThanosEffect::Supported()) {
 		return;
 	}
-	_suppressCollapseAnimation = true;
-	const auto guard = gsl::finally([&] {
-		_suppressCollapseAnimation = false;
-	});
+	auto firstHistory = (History*)nullptr;
+	for (const auto &item : items) {
+		if (_delegate.viewForItem(item)) {
+			firstHistory = item->history();
+			break;
+		}
+	}
+	if (!firstHistory) {
+		return;
+	}
+	if (!_restoreScrollPending) {
+		_capturedHistory = firstHistory;
+		_savedScrollTop = _delegate.scrollArea()->scrollTop();
+		_restoreScrollPending = true;
+	}
 	for (const auto &item : items) {
 		if (const auto view = _delegate.viewForItem(item)) {
 			const auto top = _delegate.itemTop(view);
@@ -226,12 +246,6 @@ void ThanosEffectController::startCollapseAnimation(
 
 	syncCollapseGapsToHost();
 
-	const auto aboveViewport = std::max(0, scrollTop - itemTop);
-	const auto scrollAdjust = std::min(height, aboveViewport);
-	if (scrollAdjust > 0) {
-		_delegate.scrollToY(scrollTop + scrollAdjust);
-	}
-
 	auto totalHeight = 0;
 	for (const auto &gap : _collapseGaps) {
 		totalHeight += gap.currentHeight;
@@ -246,7 +260,7 @@ void ThanosEffectController::startCollapseAnimation(
 		0.,
 		1.,
 		duration,
-		anim::easeOutCirc);
+		anim::halfSine);
 }
 
 void ThanosEffectController::collapseAnimationCallback() {

@@ -24,6 +24,7 @@ namespace HistoryView {
 class Element;
 } // namespace HistoryView
 
+class History;
 class HistoryItem;
 
 namespace Ui {
@@ -93,11 +94,14 @@ private:
 	base::flat_map<
 		not_null<const HistoryView::Element*>,
 		PreCapturedView> _preCaptured;
-	bool _suppressCollapseAnimation = false;
 	std::vector<CollapseGap> _renderGaps;
 
 	std::vector<CollapseGapState> _collapseGaps;
 	Animations::Simple _collapseAnimation;
+
+	History *_capturedHistory = nullptr;
+	int _savedScrollTop = 0;
+	bool _restoreScrollPending = false;
 };
 
 } // namespace Ui
