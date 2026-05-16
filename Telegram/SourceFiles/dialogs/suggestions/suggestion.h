@@ -68,6 +68,7 @@ struct Spec {
 [[nodiscard]] Spec MakePremiumGraceSpec();
 [[nodiscard]] Spec MakePremiumOfferSpec();
 [[nodiscard]] Spec MakeUnreviewedAuthSpec();
+[[nodiscard]] Spec MakeUserpicSetupSpec();
 
 } // namespace TopBarSuggestions
 } // namespace Dialogs

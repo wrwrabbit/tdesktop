@@ -818,6 +818,7 @@ PRIVATE
     dialogs/suggestions/suggestion_premium_grace.cpp
     dialogs/suggestions/suggestion_premium_offer.cpp
     dialogs/suggestions/suggestion_unreviewed_auth.cpp
+    dialogs/suggestions/suggestion_userpic_setup.cpp
     dialogs/dialogs_widget.cpp
     dialogs/dialogs_widget.h
     editor/color_picker.cpp
