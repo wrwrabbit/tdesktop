@@ -3008,7 +3008,8 @@ void EmojiListWidget::pickerHidden() {
 }
 
 bool EmojiListWidget::hasColorButton(int index) const {
-	return (_staticCount > int(Section::People))
+	return !_searchMode
+		&& (_staticCount > int(Section::People))
 		&& (index == int(Section::People));
 }
 
