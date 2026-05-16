@@ -66,6 +66,7 @@ struct Spec {
 [[nodiscard]] Spec MakeGiftAuctionsSpec();
 [[nodiscard]] Spec MakeLowCreditsSubsSpec();
 [[nodiscard]] Spec MakePremiumGraceSpec();
+[[nodiscard]] Spec MakePremiumOfferSpec();
 [[nodiscard]] Spec MakeUnreviewedAuthSpec();
 
 } // namespace TopBarSuggestions

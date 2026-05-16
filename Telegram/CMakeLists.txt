@@ -816,6 +816,7 @@ PRIVATE
     dialogs/suggestions/suggestion_gift_auctions.cpp
     dialogs/suggestions/suggestion_low_credits_subs.cpp
     dialogs/suggestions/suggestion_premium_grace.cpp
+    dialogs/suggestions/suggestion_premium_offer.cpp
     dialogs/suggestions/suggestion_unreviewed_auth.cpp
     dialogs/dialogs_widget.cpp
     dialogs/dialogs_widget.h
