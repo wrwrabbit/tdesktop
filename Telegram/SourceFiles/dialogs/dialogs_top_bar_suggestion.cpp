@@ -151,10 +151,13 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 		not_null<Ui::RpWidget*> parent,
 		not_null<Main::Session*> session,
 		rpl::producer<bool> outerWrapToggleValue,
-		rpl::producer<float64> childListShown) {
+		rpl::producer<float64> childListShown,
+		rpl::producer<> prepareCollapseSnapshot) {
 	return [=,
 			outerWrapToggleValue = rpl::duplicate(outerWrapToggleValue),
-			childListShown = rpl::duplicate(childListShown)](
+			childListShown = rpl::duplicate(childListShown),
+			prepareCollapseSnapshot = rpl::duplicate(
+				prepareCollapseSnapshot)](
 			auto consumer) {
 		auto lifetime = rpl::lifetime();
 
@@ -165,7 +168,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 
 		struct State {
 			TopBarSuggestionContent *content = nullptr;
-			Ui::SlideWrap<Ui::VerticalLayout> *unconfirmedWarning = nullptr;
+			UnconfirmedAuthWrap *unconfirmedWarning = nullptr;
 			base::unique_qptr<Ui::SlideWrap<Ui::RpWidget>> wrap;
 			rpl::variable<Toggle> desiredWrapToggle;
 			rpl::variable<bool> outerWrapToggle;
@@ -227,7 +230,8 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 						session->api().authorizations().review(
 							hashes,
 							confirmed);
-					});
+					},
+					rpl::duplicate(childListShown));
 				ensureWrap(content);
 				const auto wasUnconfirmedWarning = state->unconfirmedWarning;
 				state->unconfirmedWarning = content;
@@ -715,6 +719,14 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			processCurrentSuggestion(processCurrentSuggestion);
 			if (was != state->wrap || (was && !weak)) {
 				consumer.put_next_copy(state->wrap.get());
+			}
+		}, lifetime);
+
+		rpl::duplicate(prepareCollapseSnapshot) | rpl::on_next([=] {
+			if (state->unconfirmedWarning) {
+				state->unconfirmedWarning->prepareCollapseSnapshot();
+			} else if (state->content) {
+				state->content->prepareCollapseSnapshot();
 			}
 		}, lifetime);
 

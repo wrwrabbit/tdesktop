@@ -1123,7 +1123,8 @@ void Widget::setupTopBarSuggestions() {
 				_innerList,
 				&session(),
 				std::move(on),
-				_childListShown.value());
+				_childListShown.value(),
+				_prepareTopBarSnapshot.events());
 		}) | rpl::flatten_latest() | rpl::on_next([=](
 				Ui::SlideWrap<Ui::RpWidget> *raw) {
 			if (raw) {
@@ -3467,6 +3468,7 @@ void Widget::openChildList(
 		}
 	}, shadow->lifetime());
 
+	_prepareTopBarSnapshot.fire({});
 	updateControlsGeometry();
 	updateControlsVisibility(true);
 

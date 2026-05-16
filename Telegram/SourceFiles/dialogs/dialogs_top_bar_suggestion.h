@@ -26,7 +26,8 @@ namespace Dialogs {
 	not_null<Ui::RpWidget*> parent,
 	not_null<Main::Session*>,
 	rpl::producer<bool> outerWrapToggleValue,
-	rpl::producer<float64> childListShown)
+	rpl::producer<float64> childListShown,
+	rpl::producer<> prepareCollapseSnapshot)
 -> rpl::producer<Ui::SlideWrap<Ui::RpWidget>*>;
 
 } // namespace Dialogs

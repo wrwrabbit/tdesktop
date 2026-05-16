@@ -8,14 +8,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "ui/widgets/buttons.h"
+#include "ui/wrap/slide_wrap.h"
+#include "ui/wrap/vertical_layout.h"
 
 namespace Ui {
 class DynamicImage;
 class GenericBox;
 class IconButton;
-class VerticalLayout;
-template<typename Widget>
-class SlideWrap;
 } // namespace Ui
 
 namespace Ui::Text {
@@ -28,10 +27,33 @@ struct UnreviewedAuth;
 
 namespace Dialogs {
 
-not_null<Ui::SlideWrap<Ui::VerticalLayout>*> CreateUnconfirmedAuthContent(
+class UnconfirmedAuthWrap : public Ui::SlideWrap<Ui::VerticalLayout> {
+public:
+	UnconfirmedAuthWrap(
+		not_null<Ui::RpWidget*> parent,
+		object_ptr<Ui::VerticalLayout> &&child);
+
+	[[nodiscard]] rpl::producer<int> desiredHeightValue() const override;
+
+	void setCollapseProgress(rpl::producer<float64> progress);
+	void prepareCollapseSnapshot();
+
+protected:
+	int resizeGetHeight(int newWidth) override;
+
+private:
+	void releaseCollapseSnapshot();
+
+	float64 _collapseProgress = 0.;
+	QPixmap _collapseSnapshot;
+
+};
+
+not_null<UnconfirmedAuthWrap*> CreateUnconfirmedAuthContent(
 		not_null<Ui::RpWidget*> parent,
 		const std::vector<Data::UnreviewedAuth> &list,
-		Fn<void(bool)> callback);
+		Fn<void(bool)> callback,
+		rpl::producer<float64> collapseProgress);
 
 void ShowAuthDeniedBox(
 	not_null<Ui::GenericBox*> box,
@@ -63,6 +85,7 @@ public:
 		Fn<void()> callback);
 	void setLeadingWidget(Ui::RpWidget *widget);
 	void setCollapseProgress(rpl::producer<float64> progress);
+	void prepareCollapseSnapshot();
 
 	[[nodiscard]] const style::TextStyle &contentTitleSt() const;
 
@@ -72,6 +95,7 @@ protected:
 
 private:
 	void draw(QPainter &p);
+	void releaseCollapseSnapshot();
 
 	const style::TextStyle &_titleSt;
 	const style::TextStyle &_contentTitleSt;
@@ -80,6 +104,7 @@ private:
 	Ui::Text::String _contentTitle;
 	Ui::Text::String _contentText;
 	float64 _collapseProgress = 0.;
+	QPixmap _collapseSnapshot;
 	std::optional<QColor> _descriptionColorOverride;
 
 	base::unique_qptr<Ui::IconButton> _rightHide;

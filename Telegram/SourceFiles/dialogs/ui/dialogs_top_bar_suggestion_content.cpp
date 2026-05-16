@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/format_values.h"
 #include "ui/text/text_custom_emoji.h"
 #include "ui/ui_rpl_filter.h"
+#include "ui/ui_utility.h"
 #include "ui/vertical_list.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
@@ -44,26 +45,77 @@ constexpr auto kLinesForPhoto = 3;
 
 } // namespace
 
-class UnconfirmedAuthWrap : public Ui::SlideWrap<Ui::VerticalLayout> {
-public:
-	UnconfirmedAuthWrap(
-		not_null<Ui::RpWidget*> parent,
-		object_ptr<Ui::VerticalLayout> &&child)
-	: Ui::SlideWrap<Ui::VerticalLayout>(parent, std::move(child)) {
-	}
+UnconfirmedAuthWrap::UnconfirmedAuthWrap(
+	not_null<Ui::RpWidget*> parent,
+	object_ptr<Ui::VerticalLayout> &&child)
+: Ui::SlideWrap<Ui::VerticalLayout>(parent, std::move(child)) {
+	paintRequest() | rpl::on_next([=] {
+		if (!_collapseSnapshot.isNull()) {
+			auto p = QPainter(this);
+			p.drawPixmap(0, 0, _collapseSnapshot);
+		}
+	}, lifetime());
+}
 
-	rpl::producer<int> desiredHeightValue() const override {
-		return entity()->heightValue();
-	}
-};
+rpl::producer<int> UnconfirmedAuthWrap::desiredHeightValue() const {
+	return entity()->heightValue();
+}
 
-not_null<Ui::SlideWrap<Ui::VerticalLayout>*> CreateUnconfirmedAuthContent(
+void UnconfirmedAuthWrap::setCollapseProgress(
+		rpl::producer<float64> progress) {
+	std::move(progress) | rpl::on_next([=](float64 value) {
+		if (_collapseProgress == value) {
+			return;
+		}
+		_collapseProgress = value;
+		if (value == 0.) {
+			releaseCollapseSnapshot();
+		}
+		resizeToWidth(width());
+		update();
+	}, lifetime());
+}
+
+void UnconfirmedAuthWrap::prepareCollapseSnapshot() {
+	_collapseSnapshot = Ui::GrabWidget(this);
+	if (const auto w = wrapped()) {
+		w->hide();
+	}
+	update();
+}
+
+void UnconfirmedAuthWrap::releaseCollapseSnapshot() {
+	if (_collapseSnapshot.isNull()) {
+		return;
+	}
+	_collapseSnapshot = QPixmap();
+	if (const auto w = wrapped()) {
+		w->show();
+	}
+}
+
+int UnconfirmedAuthWrap::resizeGetHeight(int newWidth) {
+	if (!_collapseSnapshot.isNull()) {
+		const auto fullHeight = int(_collapseSnapshot.height()
+			/ _collapseSnapshot.devicePixelRatio());
+		return int(base::SafeRound(
+			fullHeight * (1. - _collapseProgress)));
+	}
+	if (const auto w = wrapped()) {
+		w->resizeToWidth(newWidth);
+	}
+	return wrapped() ? wrapped()->height() : 0;
+}
+
+not_null<UnconfirmedAuthWrap*> CreateUnconfirmedAuthContent(
 		not_null<Ui::RpWidget*> parent,
 		const std::vector<Data::UnreviewedAuth> &list,
-		Fn<void(bool)> callback) {
+		Fn<void(bool)> callback,
+		rpl::producer<float64> collapseProgress) {
 	const auto wrap = Ui::CreateChild<UnconfirmedAuthWrap>(
 		parent,
 		object_ptr<Ui::VerticalLayout>(parent));
+	wrap->setCollapseProgress(std::move(collapseProgress));
 	const auto content = wrap->entity();
 	content->paintRequest() | rpl::on_next([=] {
 		auto p = QPainter(content);
@@ -489,10 +541,42 @@ void TopBarSuggestionContent::setContent(
 
 void TopBarSuggestionContent::paintEvent(QPaintEvent *) {
 	auto p = QPainter(this);
+	if (!_collapseSnapshot.isNull()) {
+		p.drawPixmap(0, 0, _collapseSnapshot);
+		return;
+	}
 	draw(p);
 }
 
+void TopBarSuggestionContent::prepareCollapseSnapshot() {
+	_collapseSnapshot = Ui::GrabWidget(this);
+	for (const auto child : children()) {
+		if (const auto widget = qobject_cast<QWidget*>(child)) {
+			widget->hide();
+		}
+	}
+	update();
+}
+
+void TopBarSuggestionContent::releaseCollapseSnapshot() {
+	if (_collapseSnapshot.isNull()) {
+		return;
+	}
+	_collapseSnapshot = QPixmap();
+	for (const auto child : children()) {
+		if (const auto widget = qobject_cast<QWidget*>(child)) {
+			widget->show();
+		}
+	}
+}
+
 int TopBarSuggestionContent::resizeGetHeight(int newWidth) {
+	if (!_collapseSnapshot.isNull()) {
+		const auto fullHeight = int(_collapseSnapshot.height()
+			/ _collapseSnapshot.devicePixelRatio());
+		return int(base::SafeRound(
+			fullHeight * (1. - _collapseProgress)));
+	}
 	const auto topPadding = st::msgReplyPadding.top();
 	const auto bottomPadding = st::msgReplyPadding.top();
 	const auto availableWidthNoPhoto = newWidth
@@ -549,7 +633,11 @@ void TopBarSuggestionContent::setCollapseProgress(
 			return;
 		}
 		_collapseProgress = value;
+		if (value == 0.) {
+			releaseCollapseSnapshot();
+		}
 		resizeToWidth(width());
+		update();
 	}, lifetime());
 }
 
