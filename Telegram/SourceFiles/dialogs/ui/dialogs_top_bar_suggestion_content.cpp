@@ -491,10 +491,6 @@ void TopBarSuggestionContent::paintEvent(QPaintEvent *) {
 	draw(p);
 }
 
-rpl::producer<int> TopBarSuggestionContent::desiredHeightValue() const {
-	return _desiredHeight.value();
-}
-
 int TopBarSuggestionContent::resizeGetHeight(int newWidth) {
 	const auto topPadding = st::msgReplyPadding.top();
 	const auto bottomPadding = st::msgReplyPadding.top();
@@ -506,9 +502,7 @@ int TopBarSuggestionContent::resizeGetHeight(int newWidth) {
 	const auto availableWidth = availableWidthNoPhoto
 		- (_rightHide ? _rightHide->width() : 0);
 	if (availableWidth <= 0) {
-		const auto fallback = topPadding + bottomPadding;
-		_desiredHeight = fallback;
-		return fallback;
+		return topPadding + bottomPadding;
 	}
 	const auto hasSecondLineTitle
 		= (availableWidth < _contentTitle.maxWidth());
@@ -544,7 +538,6 @@ int TopBarSuggestionContent::resizeGetHeight(int newWidth) {
 	const auto capped = std::min(
 		natural,
 		st::sponsoredMessageBarMaxHeight);
-	_desiredHeight = capped;
 	return int(base::SafeRound(capped * (1. - _collapseProgress)));
 }
 

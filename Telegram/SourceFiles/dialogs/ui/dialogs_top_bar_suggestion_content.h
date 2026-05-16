@@ -56,8 +56,6 @@ public:
 		std::optional<Ui::Text::MarkedContext> context = std::nullopt,
 		std::optional<QColor> descriptionColorOverride = std::nullopt);
 
-	[[nodiscard]] rpl::producer<int> desiredHeightValue() const override;
-
 	void setHideCallback(Fn<void()>);
 	void setRightIcon(RightIcon);
 	void setRightButton(
@@ -81,7 +79,6 @@ private:
 
 	Ui::Text::String _contentTitle;
 	Ui::Text::String _contentText;
-	rpl::variable<int> _desiredHeight = 0;
 	float64 _collapseProgress = 0.;
 	std::optional<QColor> _descriptionColorOverride;
 
