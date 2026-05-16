@@ -60,6 +60,7 @@ struct Spec {
 
 [[nodiscard]] std::vector<Spec> AllSpecs();
 
+[[nodiscard]] Spec MakeCustomPromoSpec();
 [[nodiscard]] Spec MakeGiftAuctionsSpec();
 [[nodiscard]] Spec MakeUnreviewedAuthSpec();
 
