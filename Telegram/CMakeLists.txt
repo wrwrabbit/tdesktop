@@ -808,6 +808,8 @@ PRIVATE
     dialogs/dialogs_search_posts.h
     dialogs/dialogs_top_bar_suggestion.cpp
     dialogs/dialogs_top_bar_suggestion.h
+    dialogs/suggestions/suggestion.cpp
+    dialogs/suggestions/suggestion.h
     dialogs/dialogs_widget.cpp
     dialogs/dialogs_widget.h
     editor/color_picker.cpp
