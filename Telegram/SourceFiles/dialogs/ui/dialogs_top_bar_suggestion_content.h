@@ -64,6 +64,7 @@ public:
 		rpl::producer<TextWithEntities> text,
 		Fn<void()> callback);
 	void setLeftPadding(rpl::producer<int>);
+	void setCollapseProgress(rpl::producer<float64> progress);
 
 	[[nodiscard]] const style::TextStyle &contentTitleSt() const;
 
@@ -81,6 +82,7 @@ private:
 	Ui::Text::String _contentTitle;
 	Ui::Text::String _contentText;
 	rpl::variable<int> _desiredHeight = 0;
+	float64 _collapseProgress = 0.;
 	std::optional<QColor> _descriptionColorOverride;
 
 	base::unique_qptr<Ui::IconButton> _rightHide;

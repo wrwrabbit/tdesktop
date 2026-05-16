@@ -1119,7 +1119,11 @@ void Widget::setupTopBarSuggestions() {
 					&& !searchInPeer
 					&& (id == owner->chatsFilters().defaultId());
 			});
-			return TopBarSuggestionValue(_innerList, &session(), std::move(on));
+			return TopBarSuggestionValue(
+				_innerList,
+				&session(),
+				std::move(on),
+				_childListShown.value());
 		}) | rpl::flatten_latest() | rpl::on_next([=](
 				Ui::SlideWrap<Ui::RpWidget> *raw) {
 			if (raw) {
@@ -1130,19 +1134,6 @@ void Widget::setupTopBarSuggestions() {
 				) | rpl::start_to_stream(
 					_topBarSuggestionHeightChanged,
 					_topBarSuggestion->entity()->lifetime());
-				rpl::combine(
-					_topBarSuggestion->entity()->desiredHeightValue(),
-					_childListShown.value()
-				) | rpl::on_next([=](
-						int desiredHeight,
-						float64 shown) {
-					const auto newHeight = desiredHeight * (1. - shown);
-					_topBarSuggestion->entity()->setMaximumHeight(newHeight);
-					_topBarSuggestion->entity()->setMinimumWidth((shown > 0)
-						? width()
-						: 0);
-					_topBarSuggestion->entity()->resize(width(), newHeight);
-				}, _topBarSuggestion->lifetime());
 			} else {
 				if (_topBarSuggestion) {
 					delete _topBarSuggestion;

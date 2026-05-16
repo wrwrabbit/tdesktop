@@ -545,7 +545,18 @@ int TopBarSuggestionContent::resizeGetHeight(int newWidth) {
 		natural,
 		st::sponsoredMessageBarMaxHeight);
 	_desiredHeight = capped;
-	return capped;
+	return int(base::SafeRound(capped * (1. - _collapseProgress)));
+}
+
+void TopBarSuggestionContent::setCollapseProgress(
+		rpl::producer<float64> progress) {
+	std::move(progress) | rpl::on_next([=](float64 value) {
+		if (_collapseProgress == value) {
+			return;
+		}
+		_collapseProgress = value;
+		resizeToWidth(width());
+	}, lifetime());
 }
 
 void TopBarSuggestionContent::setHideCallback(Fn<void()> hideCallback) {

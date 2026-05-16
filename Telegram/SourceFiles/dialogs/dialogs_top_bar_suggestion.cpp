@@ -150,8 +150,11 @@ constexpr auto kSugLowCreditsSubs = "STARS_SUBSCRIPTION_LOW_BALANCE"_cs;
 rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 		not_null<Ui::RpWidget*> parent,
 		not_null<Main::Session*> session,
-		rpl::producer<bool> outerWrapToggleValue) {
-	return [=, outerWrapToggleValue = rpl::duplicate(outerWrapToggleValue)](
+		rpl::producer<bool> outerWrapToggleValue,
+		rpl::producer<float64> childListShown) {
+	return [=,
+			outerWrapToggleValue = rpl::duplicate(outerWrapToggleValue),
+			childListShown = rpl::duplicate(childListShown)](
 			auto consumer) {
 		auto lifetime = rpl::lifetime();
 
@@ -187,12 +190,8 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 					parent,
 					[=] { return window->isGifPausedAtLeastFor(
 						Window::GifPauseReason::Layer); });
-				rpl::combine(
-					parent->widthValue(),
-					state->content->desiredHeightValue()
-				) | rpl::on_next([=](int width, int height) {
-					state->content->resize(width, height);
-				}, state->content->lifetime());
+				state->content->setCollapseProgress(
+					rpl::duplicate(childListShown));
 			}
 		};
 		const auto ensureWrap = [=](not_null<Ui::RpWidget*> child) {
