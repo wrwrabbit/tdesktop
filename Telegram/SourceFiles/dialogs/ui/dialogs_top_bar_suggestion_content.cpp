@@ -310,6 +310,7 @@ TopBarSuggestionContent::TopBarSuggestionContent(
 , _contentTitleSt(st::dialogsTopBarSuggestionTitleStyle)
 , _contentTextSt(st::dialogsTopBarSuggestionAboutStyle)
 , _emojiPaused(std::move(emojiPaused)) {
+	_leftPadding = st::dialogsTopBarLeftPadding;
 	setRightIcon(RightIcon::Close);
 }
 
@@ -557,15 +558,37 @@ void TopBarSuggestionContent::setHideCallback(Fn<void()> hideCallback) {
 	_rightHide->setClickedCallback(std::move(hideCallback));
 }
 
-void TopBarSuggestionContent::setLeftPadding(rpl::producer<int> value) {
-	std::move(value) | rpl::on_next([=](int padding) {
-		if (_leftPadding == padding) {
-			return;
+void TopBarSuggestionContent::setLeadingWidget(Ui::RpWidget *widget) {
+	_leadingWidgetLifetime.destroy();
+	if (_leadingWidget && _leadingWidget != widget) {
+		_leadingWidget->deleteLater();
+	}
+	_leadingWidget = widget;
+	const auto basePadding = st::dialogsTopBarLeftPadding;
+	if (!widget) {
+		if (_leftPadding != basePadding) {
+			_leftPadding = basePadding;
+			resizeToWidth(width());
+			update();
 		}
+		return;
+	}
+	widget->setParent(this);
+	widget->setAttribute(Qt::WA_TransparentForMouseEvents);
+	sizeValue() | rpl::filter_size(
+	) | rpl::on_next([=](const QSize &s) {
+		widget->raise();
+		widget->show();
+		widget->moveToLeft(
+			basePadding,
+			(s.height() - widget->height()) / 2);
+	}, _leadingWidgetLifetime);
+	const auto padding = widget->width() + basePadding * 2;
+	if (_leftPadding != padding) {
 		_leftPadding = padding;
 		resizeToWidth(width());
 		update();
-	}, lifetime());
+	}
 }
 
 const style::TextStyle & TopBarSuggestionContent::contentTitleSt() const {

@@ -167,13 +167,11 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			TopBarSuggestionContent *content = nullptr;
 			Ui::SlideWrap<Ui::VerticalLayout> *unconfirmedWarning = nullptr;
 			base::unique_qptr<Ui::SlideWrap<Ui::RpWidget>> wrap;
-			rpl::variable<int> leftPadding;
 			rpl::variable<Toggle> desiredWrapToggle;
 			rpl::variable<bool> outerWrapToggle;
 			rpl::lifetime birthdayLifetime;
 			rpl::lifetime premiumLifetime;
 			rpl::lifetime userpicLifetime;
-			rpl::lifetime giftsLifetime;
 			rpl::lifetime creditsLifetime;
 			rpl::lifetime auctionsLifetime;
 			std::unique_ptr<Api::CreditsHistory> creditsHistory;
@@ -181,8 +179,6 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 
 		const auto state = lifetime.make_state<State>();
 		state->outerWrapToggle = rpl::duplicate(outerWrapToggleValue);
-		state->leftPadding = rpl::variable<int>(
-			rpl::single(st::dialogsTopBarLeftPadding));
 		const auto ensureContent = [=] {
 			if (!state->content) {
 				const auto window = FindSessionController(parent);
@@ -205,20 +201,10 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			}
 		};
 
-		const auto setLeftPaddingRelativeTo = [=](
-				not_null<TopBarSuggestionContent*> content,
-				not_null<Ui::RpWidget*> relativeTo) {
-			content->setLeftPadding(state->leftPadding.value(
-				) | rpl::map([w = relativeTo->width()](int padding) {
-					return w + padding * 2;
-				}));
-		};
-
 		const auto processCurrentSuggestion = [=](auto repeat) -> void {
 			state->birthdayLifetime.destroy();
 			state->premiumLifetime.destroy();
 			state->userpicLifetime.destroy();
-			state->giftsLifetime.destroy();
 			state->creditsLifetime.destroy();
 			state->auctionsLifetime.destroy();
 
@@ -304,13 +290,13 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 				});
 				content->setRightButton(button->text.value(), callback);
 				content->setClickedCallback(callback);
-				content->setLeftPadding(state->leftPadding.value());
+				content->setLeadingWidget(nullptr);
 				state->desiredWrapToggle.force_assign(
 					Toggle{ true, anim::type::normal });
 				return;
 			} else if (const auto custom = promo->custom()) {
 				content->setRightIcon(RightIcon::Close);
-				content->setLeftPadding(state->leftPadding.value());
+				content->setLeadingWidget(nullptr);
 				content->setClickedCallback([=] {
 					const auto controller = FindSessionController(parent);
 					UrlClickHandler::Open(
@@ -334,7 +320,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			} else if (session->premiumCanBuy()
 				&& promo->current(kSugPremiumGrace.utf8())) {
 				content->setRightIcon(RightIcon::Close);
-				content->setLeftPadding(state->leftPadding.value());
+				content->setLeadingWidget(nullptr);
 				content->setClickedCallback([=] {
 					const auto controller = FindSessionController(parent);
 					UrlClickHandler::Open(
@@ -371,7 +357,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 						return;
 					}
 					content->setRightIcon(RightIcon::Close);
-					content->setLeftPadding(state->leftPadding.value());
+					content->setLeadingWidget(nullptr);
 					content->setClickedCallback([=] {
 						const auto controller = FindSessionController(parent);
 						controller->uiShow()->show(Box(
@@ -482,82 +468,53 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 							tr::now,
 							TextWithEntities::Simple);
 					content->setContent(std::move(title), std::move(text));
-					state->giftsLifetime.destroy();
 					if (!isSingle) {
 						struct UserViews {
 							std::vector<HistoryView::UserpicInRow> inRow;
 							QImage userpics;
-							base::unique_qptr<Ui::RpWidget> widget;
 						};
-						const auto s
-							= state->giftsLifetime.template make_state<
-								UserViews>();
-						s->widget = base::make_unique_q<Ui::RpWidget>(
-							content);
-						const auto widget = s->widget.get();
-						widget->setAttribute(
-							Qt::WA_TransparentForMouseEvents);
-						content->sizeValue() | rpl::filter_size(
-						) | rpl::on_next([=](const QSize &size) {
-							widget->resize(size);
-							widget->show();
-							widget->raise();
-						}, widget->lifetime());
+						auto inRow
+							= std::vector<HistoryView::UserpicInRow>();
 						for (const auto &id : users) {
-							if (s->inRow.size() >= 3) {
+							if (inRow.size() >= 3) {
 								break;
 							}
 							if (const auto user = session->data().user(id)) {
-								s->inRow.push_back({ .peer = user });
+								inRow.push_back({ .peer = user });
 							}
 						}
+						const auto &userpicsSt
+							= st::historyCommentsUserpics;
+						const auto rowCount = int(inRow.size());
+						const auto rowWidth
+							= rowCount * userpicsSt.size - userpicsSt.shift;
+						const auto rowHeight = userpicsSt.size;
+						const auto widget
+							= Ui::CreateChild<Ui::RpWidget>(content);
+						widget->resize(rowWidth, rowHeight);
+						const auto s = widget->lifetime(
+							).template make_state<UserViews>();
+						s->inRow = std::move(inRow);
 						widget->paintRequest() | rpl::on_next([=] {
 							auto p = QPainter(widget);
 							if (HistoryView::NeedRegenerateUserpics(
 									s->userpics,
 									s->inRow)) {
-								const auto &st = st::historyCommentsUserpics;
 								HistoryView::GenerateUserpicsInRow(
 									s->userpics,
 									s->inRow,
-									st,
+									st::historyCommentsUserpics,
 									3);
-								const auto v = int(users.size() * st.size
-									- st.shift);
-								content->setLeftPadding(
-									state->leftPadding.value(
-									) | rpl::map([v](int padding) {
-										return padding * 2 + v;
-									}));
 							}
-							p.drawImage(
-								state->leftPadding.current(),
-								(widget->height()
-									- (s->userpics.height()
-										/ style::DevicePixelRatio())) / 2,
-								s->userpics);
+							p.drawImage(0, 0, s->userpics);
 						}, widget->lifetime());
+						content->setLeadingWidget(widget);
 					} else {
-						using Ptr = base::unique_qptr<Ui::UserpicButton>;
-						const auto ptr
-							= state->giftsLifetime.template make_state<Ptr>(
-								base::make_unique_q<Ui::UserpicButton>(
-									content,
-									first,
-									st::uploadUserpicButton));
-						const auto fake = ptr->get();
-						fake->setAttribute(Qt::WA_TransparentForMouseEvents);
-						rpl::combine(
-							state->leftPadding.value(),
-							content->sizeValue() | rpl::filter_size()
-						) | rpl::on_next([=](int p, const QSize &s) {
-							fake->raise();
-							fake->show();
-							fake->moveToLeft(
-								p,
-								(s.height() - fake->height()) / 2);
-						}, fake->lifetime());
-						setLeftPaddingRelativeTo(content, fake);
+						const auto fake = Ui::CreateChild<Ui::UserpicButton>(
+							content,
+							first,
+							st::uploadUserpicButton);
+						content->setLeadingWidget(fake);
 					}
 
 					state->desiredWrapToggle.force_assign(
@@ -567,7 +524,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			} else if (promo->current(kSugSetBirthday.utf8())
 				&& !Data::IsBirthdayToday(session->user()->birthday())) {
 				content->setRightIcon(RightIcon::Close);
-				content->setLeftPadding(state->leftPadding.value());
+				content->setLeadingWidget(nullptr);
 				content->setClickedCallback([=] {
 					const auto controller = FindSessionController(parent);
 					Core::App().openInternalUrl(
@@ -642,7 +599,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 				};
 				if (isPremiumAnnual || isPremiumRestore || isPremiumUpgrade) {
 					content->setRightIcon(RightIcon::Arrow);
-					content->setLeftPadding(state->leftPadding.value());
+					content->setLeadingWidget(nullptr);
 					const auto api = &session->api().premium();
 					api->statusTextValue() | rpl::on_next([=] {
 						for (const auto &o : api->subscriptionOptions()) {
@@ -666,17 +623,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 					&controller->window(),
 					Ui::UserpicButton::Role::ChoosePhoto,
 					st::uploadUserpicButton);
-				rpl::combine(
-					state->leftPadding.value(),
-					content->sizeValue() | rpl::filter_size()
-				) | rpl::on_next([=](int padding, const QSize &s) {
-					upload->raise();
-					upload->show();
-					upload->moveToLeft(
-						padding,
-						(s.height() - upload->height()) / 2);
-				}, content->lifetime());
-				setLeftPaddingRelativeTo(content, upload);
+				content->setLeadingWidget(upload);
 				upload->chosenImages() | rpl::on_next([=](
 						Ui::UserpicButton::ChosenImage &&chosen) {
 					if (chosen.type == Ui::UserpicButton::ChosenType::Set) {

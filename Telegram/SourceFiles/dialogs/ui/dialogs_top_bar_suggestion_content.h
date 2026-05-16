@@ -61,7 +61,7 @@ public:
 	void setRightButton(
 		rpl::producer<TextWithEntities> text,
 		Fn<void()> callback);
-	void setLeftPadding(rpl::producer<int>);
+	void setLeadingWidget(Ui::RpWidget *widget);
 	void setCollapseProgress(rpl::producer<float64> progress);
 
 	[[nodiscard]] const style::TextStyle &contentTitleSt() const;
@@ -85,6 +85,8 @@ private:
 	base::unique_qptr<Ui::IconButton> _rightHide;
 	base::unique_qptr<Ui::IconButton> _rightArrow;
 	base::unique_qptr<Ui::RoundButton> _rightButton;
+	QPointer<Ui::RpWidget> _leadingWidget;
+	rpl::lifetime _leadingWidgetLifetime;
 	Fn<void()> _hideCallback;
 	Fn<bool()> _emojiPaused;
 
