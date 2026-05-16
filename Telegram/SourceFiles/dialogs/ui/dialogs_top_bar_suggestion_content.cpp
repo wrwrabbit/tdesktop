@@ -38,6 +38,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_settings.h"
 
 namespace Dialogs {
+namespace {
+
+constexpr auto kLinesForPhoto = 3;
+
+} // namespace
 
 class UnconfirmedAuthWrap : public Ui::SlideWrap<Ui::VerticalLayout> {
 public:
@@ -344,6 +349,7 @@ void TopBarSuggestionContent::setRightIcon(RightIcon icon) {
 		}, arrow->lifetime());
 		arrow->show();
 	}
+	resizeToWidth(width());
 }
 
 void TopBarSuggestionContent::setRightButton(
@@ -375,8 +381,6 @@ void TopBarSuggestionContent::setRightButton(
 }
 
 void TopBarSuggestionContent::draw(QPainter &p) {
-	const auto kLinesForPhoto = 3;
-
 	const auto r = Ui::RpWidget::rect();
 	p.fillRect(r, st::historyPinnedBg);
 	p.fillRect(
@@ -423,11 +427,9 @@ void TopBarSuggestionContent::draw(QPainter &p) {
 				+ _titleSt.font->height
 				+ _contentTitleSt.font->height)
 			: topPadding + _titleSt.font->height;
-		auto lastContentLineAmount = 0;
 		const auto lineHeight = _contentTextSt.font->height;
-		const auto lineLayout = [&](int line) -> Ui::Text::LineGeometry {
+		const auto lineLayout = [=](int line) -> Ui::Text::LineGeometry {
 			line++;
-			lastContentLineAmount = line;
 			const auto diff = (st::sponsoredMessageBarMaxHeight)
 				- line * lineHeight;
 			if (diff < 3 * lineHeight) {
@@ -455,8 +457,6 @@ void TopBarSuggestionContent::draw(QPainter &p) {
 			},
 			.pausedEmoji = paused,
 		});
-		_lastPaintedContentTop = top;
-		_lastPaintedContentLineAmount = lastContentLineAmount;
 	}
 }
 
@@ -482,6 +482,7 @@ void TopBarSuggestionContent::setContent(
 		_contentTitle.setMarkedText(_contentTitleSt, std::move(title));
 		_contentText.setMarkedText(_contentTextSt, std::move(description));
 	}
+	resizeToWidth(width());
 	update();
 }
 
@@ -491,18 +492,60 @@ void TopBarSuggestionContent::paintEvent(QPaintEvent *) {
 }
 
 rpl::producer<int> TopBarSuggestionContent::desiredHeightValue() const {
-	return rpl::combine(
-		_lastPaintedContentTop.value(),
-		_lastPaintedContentLineAmount.value()
-	) | rpl::distinct_until_changed() | rpl::map([=](
-			int lastTop,
-			int lastLines) {
-		const auto bottomPadding = st::msgReplyPadding.top();
-		const auto desiredHeight = lastTop
-			+ (lastLines * _contentTextSt.font->height)
-			+ bottomPadding;
-		return std::min(desiredHeight, st::sponsoredMessageBarMaxHeight);
-	});
+	return _desiredHeight.value();
+}
+
+int TopBarSuggestionContent::resizeGetHeight(int newWidth) {
+	const auto topPadding = st::msgReplyPadding.top();
+	const auto bottomPadding = st::msgReplyPadding.top();
+	const auto availableWidthNoPhoto = newWidth
+		- (_rightArrow
+			? (_rightArrow->width() / 4 * 3) // Takes full height.
+			: 0)
+		- _leftPadding;
+	const auto availableWidth = availableWidthNoPhoto
+		- (_rightHide ? _rightHide->width() : 0);
+	if (availableWidth <= 0) {
+		const auto fallback = topPadding + bottomPadding;
+		_desiredHeight = fallback;
+		return fallback;
+	}
+	const auto hasSecondLineTitle
+		= (availableWidth < _contentTitle.maxWidth());
+	const auto textTop = hasSecondLineTitle
+		? (topPadding
+			+ _titleSt.font->height
+			+ _contentTitleSt.font->height)
+		: (topPadding + _titleSt.font->height);
+
+	const auto lineHeight = _contentTextSt.font->height;
+	auto lineLayout = [=](int line) -> Ui::Text::LineGeometry {
+		line++;
+		const auto diff = (st::sponsoredMessageBarMaxHeight)
+			- line * lineHeight;
+		if (diff < 3 * lineHeight) {
+			return {
+				.width = availableWidthNoPhoto,
+				.elided = true,
+			};
+		} else if (diff < 2 * lineHeight) {
+			return {};
+		}
+		line += (hasSecondLineTitle ? 2 : 1) + 1;
+		return {
+			.width = (line > kLinesForPhoto)
+				? availableWidthNoPhoto
+				: availableWidth,
+		};
+	};
+	const auto dims = _contentText.countDimensions(
+		Ui::Text::GeometryDescriptor{ .layout = std::move(lineLayout) });
+	const auto natural = textTop + dims.height + bottomPadding;
+	const auto capped = std::min(
+		natural,
+		st::sponsoredMessageBarMaxHeight);
+	_desiredHeight = capped;
+	return capped;
 }
 
 void TopBarSuggestionContent::setHideCallback(Fn<void()> hideCallback) {
@@ -512,7 +555,11 @@ void TopBarSuggestionContent::setHideCallback(Fn<void()> hideCallback) {
 
 void TopBarSuggestionContent::setLeftPadding(rpl::producer<int> value) {
 	std::move(value) | rpl::on_next([=](int padding) {
+		if (_leftPadding == padding) {
+			return;
+		}
 		_leftPadding = padding;
+		resizeToWidth(width());
 		update();
 	}, lifetime());
 }

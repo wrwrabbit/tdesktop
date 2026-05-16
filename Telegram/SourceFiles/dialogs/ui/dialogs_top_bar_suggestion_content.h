@@ -69,6 +69,7 @@ public:
 
 protected:
 	void paintEvent(QPaintEvent *) override;
+	int resizeGetHeight(int newWidth) override;
 
 private:
 	void draw(QPainter &p);
@@ -79,8 +80,7 @@ private:
 
 	Ui::Text::String _contentTitle;
 	Ui::Text::String _contentText;
-	rpl::variable<int> _lastPaintedContentLineAmount = 0;
-	rpl::variable<int> _lastPaintedContentTop = 0;
+	rpl::variable<int> _desiredHeight = 0;
 	std::optional<QColor> _descriptionColorOverride;
 
 	base::unique_qptr<Ui::IconButton> _rightHide;
