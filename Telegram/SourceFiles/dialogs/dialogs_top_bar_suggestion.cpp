@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/call_delayed.h"
 #include "boxes/star_gift_box.h" // ShowStarGiftBox.
 #include "boxes/star_gift_auction_box.h"
+#include "boxes/unconfirmed_auth_denied_box.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
 #include "core/ui_integration.h"

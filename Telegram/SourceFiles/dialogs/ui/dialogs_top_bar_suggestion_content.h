@@ -13,7 +13,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Ui {
 class DynamicImage;
-class GenericBox;
 class IconButton;
 } // namespace Ui
 
@@ -54,11 +53,6 @@ not_null<UnconfirmedAuthWrap*> CreateUnconfirmedAuthContent(
 		const std::vector<Data::UnreviewedAuth> &list,
 		Fn<void(bool)> callback,
 		rpl::producer<float64> collapseProgress);
-
-void ShowAuthDeniedBox(
-	not_null<Ui::GenericBox*> box,
-	float64 count,
-	const QString &messageText);
 
 class TopBarSuggestionContent : public Ui::RippleButton {
 public:

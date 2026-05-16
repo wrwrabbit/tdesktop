@@ -392,6 +392,8 @@ PRIVATE
     boxes/preview_ai_tone_box.h
     boxes/translate_box.cpp
     boxes/translate_box.h
+    boxes/unconfirmed_auth_denied_box.cpp
+    boxes/unconfirmed_auth_denied_box.h
     boxes/url_auth_box.cpp
     boxes/url_auth_box.h
     boxes/username_box.cpp
