@@ -60,5 +60,7 @@ struct Spec {
 
 [[nodiscard]] std::vector<Spec> AllSpecs();
 
+[[nodiscard]] Spec MakeUnreviewedAuthSpec();
+
 } // namespace TopBarSuggestions
 } // namespace Dialogs

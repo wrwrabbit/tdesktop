@@ -10,7 +10,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Dialogs::TopBarSuggestions {
 
 std::vector<Spec> AllSpecs() {
-	return {};
+	auto result = std::vector<Spec>();
+	result.push_back(MakeUnreviewedAuthSpec());
+	return result;
 }
 
 } // namespace Dialogs::TopBarSuggestions
