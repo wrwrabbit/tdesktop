@@ -6036,9 +6036,12 @@ bool HistoryWidget::searchInChatEmbedded(
 		Dialogs::Key chat,
 		PeerData *searchFrom) {
 	const auto peer = chat.peer(); // windows todo
+	const auto archiveWindow = (controller()->windowId().type
+		== Window::SeparateType::Archive);
 	if (!peer
 		|| ((Window::SeparateId(peer) != controller()->windowId())
-			&& !controller()->isPrimary())) {
+			&& !controller()->isPrimary()
+			&& !archiveWindow)) {
 		return false;
 	} else if (_peer != peer) {
 		const auto weak = base::make_weak(this);
