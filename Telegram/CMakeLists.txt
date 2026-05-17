@@ -808,6 +808,7 @@ PRIVATE
     dialogs/dialogs_search_posts.h
     dialogs/dialogs_top_bar_suggestion.cpp
     dialogs/dialogs_top_bar_suggestion.h
+    dialogs/dialogs_top_bar_suggestion_test.cpp
     dialogs/suggestions/suggestion.cpp
     dialogs/suggestions/suggestion.h
     dialogs/suggestions/suggestion_birthday_contacts.cpp
