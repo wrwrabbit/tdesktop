@@ -1120,7 +1120,7 @@ void Widget::setupTopBarSuggestions() {
 					&& (id == owner->chatsFilters().defaultId());
 			});
 			return TopBarSuggestionValue(
-				_innerList,
+				this,
 				&session(),
 				std::move(on),
 				_childListShown.value(),
@@ -1128,18 +1128,41 @@ void Widget::setupTopBarSuggestions() {
 		}) | rpl::flatten_latest() | rpl::on_next([=](
 				Ui::SlideWrap<Ui::RpWidget> *raw) {
 			if (raw) {
-				_topBarSuggestion = _innerList->insert(
+				_topBarSuggestionPlaceholder.reset(_innerList->insert(
 					0,
-					object_ptr<Ui::SlideWrap<Ui::RpWidget>>::fromRaw(raw));
+					object_ptr<Ui::RpWidget>(_innerList)));
+				_topBarSuggestionPlaceholder->paintOn([
+					ph = _topBarSuggestionPlaceholder.get()
+				](QPainter &p) {
+					p.fillRect(ph->rect(), st::dialogsBg);
+				});
+				_topBarSuggestion.reset(raw);
+				_topBarSuggestion->setParent(_scroll);
+				_topBarSuggestion->raise();
 				_topBarSuggestion->heightValue(
-				) | rpl::start_to_stream(
-					_topBarSuggestionHeightChanged,
+				) | rpl::on_next([=](int h) {
+					if (_topBarSuggestionPlaceholder) {
+						_topBarSuggestionPlaceholder->resize(
+							_topBarSuggestionPlaceholder->width(),
+							h);
+					}
+					_topBarSuggestionHeightChanged.fire_copy(h);
+				}, _topBarSuggestion->entity()->lifetime());
+				const auto pinToScroll = [=] {
+					if (_topBarSuggestion) {
+						_topBarSuggestion->resizeToWidth(_scroll->width());
+						_topBarSuggestion->moveToLeft(0, 0);
+					}
+				};
+				_scroll->sizeValue(
+				) | rpl::to_empty | rpl::on_next(
+					pinToScroll,
 					_topBarSuggestion->entity()->lifetime());
+				pinToScroll();
 			} else {
-				if (_topBarSuggestion) {
-					delete _topBarSuggestion;
-				}
+				_topBarSuggestionPlaceholder = nullptr;
 				_topBarSuggestion = nullptr;
+				_topBarSuggestionHeightChanged.fire(0);
 			}
 		}, lifetime());
 	});

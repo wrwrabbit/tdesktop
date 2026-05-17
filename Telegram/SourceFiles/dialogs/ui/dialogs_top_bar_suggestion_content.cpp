@@ -120,10 +120,8 @@ not_null<UnconfirmedAuthWrap*> CreateUnconfirmedAuthContent(
 	const auto content = wrap->entity();
 	const auto &margins = st::dialogsTopBarSuggestionMargins;
 	content->paintOn([=](QPainter &p) {
-		const auto outer = content->rect();
-		const auto pill = outer - margins;
+		const auto pill = content->rect() - margins;
 		const auto radius = st::dialogsTopBarSuggestionRadius;
-		p.fillRect(outer, st::dialogsBg);
 		wrap->shadow().paint(p, pill, radius);
 		auto hq = PainterHighQualityEnabler(p);
 		p.setBrush(st::dialogsBg);
@@ -329,8 +327,6 @@ void TopBarSuggestionContent::draw(QPainter &p) {
 	const auto &margins = st::dialogsTopBarSuggestionMargins;
 	const auto pill = outer - margins;
 	const auto radius = st::dialogsTopBarSuggestionRadius;
-
-	p.fillRect(outer, st::dialogsBg);
 
 	_shadow.paint(p, pill, radius);
 
