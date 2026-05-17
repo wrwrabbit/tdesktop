@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/shadow.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 
@@ -32,6 +33,10 @@ public:
 		not_null<Ui::RpWidget*> parent,
 		object_ptr<Ui::VerticalLayout> &&child);
 
+	[[nodiscard]] const Ui::BoxShadow &shadow() const {
+		return _shadow;
+	}
+
 	[[nodiscard]] rpl::producer<int> desiredHeightValue() const override;
 
 	void setCollapseProgress(rpl::producer<float64> progress);
@@ -45,6 +50,7 @@ private:
 
 	float64 _collapseProgress = 0.;
 	QPixmap _collapseSnapshot;
+	Ui::BoxShadow _shadow;
 
 };
 
@@ -100,6 +106,8 @@ private:
 	float64 _collapseProgress = 0.;
 	QPixmap _collapseSnapshot;
 	std::optional<QColor> _descriptionColorOverride;
+
+	Ui::BoxShadow _shadow;
 
 	base::unique_qptr<Ui::IconButton> _rightHide;
 	base::unique_qptr<Ui::IconButton> _rightArrow;
