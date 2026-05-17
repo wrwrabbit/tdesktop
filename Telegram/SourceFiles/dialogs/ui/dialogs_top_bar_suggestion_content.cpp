@@ -43,6 +43,18 @@ namespace {
 
 constexpr auto kLinesForPhoto = 3;
 
+void PaintTopFade(QPainter &p, int outerWidth, int fadeHeight) {
+	if (fadeHeight <= 0) {
+		return;
+	}
+	auto transparent = st::dialogsBg->c;
+	transparent.setAlpha(0);
+	auto grad = QLinearGradient(0, 0, 0, fadeHeight);
+	grad.setColorAt(0, st::dialogsBg->c);
+	grad.setColorAt(1, transparent);
+	p.fillRect(QRect(0, 0, outerWidth, fadeHeight), grad);
+}
+
 } // namespace
 
 UnconfirmedAuthWrap::UnconfirmedAuthWrap(
@@ -120,8 +132,10 @@ not_null<UnconfirmedAuthWrap*> CreateUnconfirmedAuthContent(
 	const auto content = wrap->entity();
 	const auto &margins = st::dialogsTopBarSuggestionMargins;
 	content->paintOn([=](QPainter &p) {
-		const auto pill = content->rect() - margins;
+		const auto outer = content->rect();
+		const auto pill = outer - margins;
 		const auto radius = st::dialogsTopBarSuggestionRadius;
+		PaintTopFade(p, outer.width(), margins.top() + pill.height() / 2);
 		wrap->shadow().paint(p, pill, radius);
 		auto hq = PainterHighQualityEnabler(p);
 		p.setBrush(st::dialogsBg);
@@ -327,6 +341,8 @@ void TopBarSuggestionContent::draw(QPainter &p) {
 	const auto &margins = st::dialogsTopBarSuggestionMargins;
 	const auto pill = outer - margins;
 	const auto radius = st::dialogsTopBarSuggestionRadius;
+
+	PaintTopFade(p, outer.width(), margins.top() + pill.height() / 2);
 
 	_shadow.paint(p, pill, radius);
 
