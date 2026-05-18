@@ -2445,17 +2445,52 @@ template <typename Object>
 	});
 }
 
-[[nodiscard]] QSize NativeIvOverlayShellSizeForBody(QSize bodySize) {
+[[nodiscard]] QSize NativeIvOverlayCloseHitSize() {
+	const auto &style = st::markdownEmbedOverlayClose;
+	return QSize(
+		std::max(
+			style.width,
+			style.rippleAreaSize + 2 * style.rippleAreaPosition.x()),
+		std::max(
+			style.height,
+			style.rippleAreaSize + 2 * style.rippleAreaPosition.y()));
+}
+
+[[nodiscard]] int NativeIvOverlayCloseHitHeight() {
+	return NativeIvOverlayCloseHitSize().height();
+}
+
+[[nodiscard]] QSize NativeIvOverlayShellSizeForBody(
+		QSize bodySize,
+		bool fullWidth = false) {
+	if (fullWidth) {
+		return bodySize;
+	}
 	const auto padding = st::markdownEmbedOverlay.padding;
 	return QSize(
 		bodySize.width() + padding.left() + padding.right(),
 		bodySize.height() + padding.top() + padding.bottom());
 }
 
-[[nodiscard]] QRect NativeIvOverlayAvailableRect(const EmbedOverlay *overlay) {
-	return overlay
-		? overlay->rect().marginsRemoved(
-			st::markdownEmbedOverlay.margin)
+[[nodiscard]] QRect NativeIvOverlayAvailableRect(
+		const EmbedOverlay *overlay,
+		bool fullWidth = false) {
+	if (!overlay) {
+		return QRect();
+	}
+	const auto margin = st::markdownEmbedOverlay.margin;
+	return overlay->rect().marginsRemoved(
+		fullWidth
+			? QMargins(0, margin.top(), 0, margin.bottom())
+			: margin);
+}
+
+[[nodiscard]] QRect NativeIvOverlayFullWidthBodyRect(
+		const EmbedOverlay *overlay) {
+	const auto available = NativeIvOverlayAvailableRect(overlay, true);
+	const auto skip = NativeIvOverlayCloseHitHeight();
+	return available.isValid()
+		? available.marginsRemoved(QMargins(0, skip, 0, skip))
 		: QRect();
 }
 
@@ -5515,12 +5550,16 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 
 	const auto makePreviewEmbedBlock = [](
 			QString url,
-			QString caption) {
+			QString caption,
+			bool fullWidth = false) {
+		auto flags = MTPDpageBlockEmbed::Flag::f_allow_scrolling
+			| MTPDpageBlockEmbed::Flag::f_url
+			| MTPDpageBlockEmbed::Flag::f_w;
+		if (fullWidth) {
+			flags |= MTPDpageBlockEmbed::Flag::f_full_width;
+		}
 		return MTP_pageBlockEmbed(
-			MTP_flags(
-				MTPDpageBlockEmbed::Flag::f_allow_scrolling
-				| MTPDpageBlockEmbed::Flag::f_url
-				| MTPDpageBlockEmbed::Flag::f_w),
+			MTP_flags(flags),
 			MTP_string(url),
 			MTP_string(),
 			MTP_long(0),
@@ -5532,7 +5571,8 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 	const auto previewEmbedLabel = u"native-iv-embed-preview-overlay"_q;
 	const auto previewEmbedBlock = makePreviewEmbedBlock(
 		u"https://example.com/embed"_q,
-		u"Embed caption"_q);
+		u"Embed caption"_q,
+		true);
 	auto previewEmbedSource = NativeIvSource(QVector<MTPPageBlock>{
 		previewEmbedBlock,
 	});
@@ -5574,6 +5614,8 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 			u"nativeIvEmbedOverlay"_q);
 		const auto overlayShell = preview->findChild<QWidget*>(
 			u"nativeIvEmbedOverlayShell"_q);
+		const auto overlayClose = preview->findChild<QWidget*>(
+			u"nativeIvEmbedOverlayClose"_q);
 		Check(
 			body != nullptr,
 			previewEmbedLabel + u" preview body widget"_q,
@@ -5587,9 +5629,8 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 			previewEmbedLabel + u" overlay shell object"_q,
 			ok);
 		Check(
-			preview->findChild<QWidget*>(u"nativeIvEmbedOverlayClose"_q)
-				== nullptr,
-			previewEmbedLabel + u" overlay close removed"_q,
+			overlayClose != nullptr,
+			previewEmbedLabel + u" overlay close object"_q,
 			ok);
 		if (overlay) {
 			Check(
@@ -5599,7 +5640,7 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 				previewEmbedLabel + u" overlay storage id propagated"_q,
 				ok);
 		}
-		if (body && overlay && overlayShell) {
+		if (body && overlay && overlayShell && overlayClose) {
 			auto previewProbeSource = NativeIvSource(QVector<MTPPageBlock>{
 				previewEmbedBlock,
 			});
@@ -5643,12 +5684,93 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 						!overlayShell->isVisible(),
 						previewEmbedLabel + u" overlay hidden before click"_q,
 						ok);
+					Check(
+						!overlayClose->isVisible(),
+						previewEmbedLabel + u" overlay close hidden before click"_q,
+						ok);
 					SendMouseClick(body, clickBounds->center(), Qt::LeftButton);
 					FlushPendingWidgetEvents();
 					const auto loadingBody = RenderWidgetForTest(body);
 					Check(
 						!overlayShell->isVisible(),
 						previewEmbedLabel + u" overlay hidden after click"_q,
+						ok);
+#ifdef Q_OS_LINUX
+					Check(
+						overlay->testMode() == EmbedOverlay::Mode::External,
+						previewEmbedLabel + u" click enters external mode"_q,
+						ok);
+					Check(
+						!overlay->testLoadingCoverVisible(),
+						previewEmbedLabel + u" external click skips loading cover"_q,
+						ok);
+					Check(
+						!overlay->testReadyDelayScheduled(),
+						previewEmbedLabel + u" external click skips ready delay"_q,
+						ok);
+					Check(
+						!PixelsDifferInRect(
+							bodyBeforeClick,
+							loadingBody,
+							*clickBounds),
+						previewEmbedLabel
+							+ u" external click skips placeholder loading"_q,
+						ok);
+					overlay->testHandleNavigationDone(true);
+					FlushPendingWidgetEvents();
+					Check(
+						!overlayShell->isVisible(),
+						previewEmbedLabel
+							+ u" external success keeps overlay hidden"_q,
+						ok);
+					Check(
+						overlay->testMode() == EmbedOverlay::Mode::External,
+						previewEmbedLabel
+							+ u" external success keeps external mode"_q,
+						ok);
+					Check(
+						!overlay->testLoadingCoverVisible(),
+						previewEmbedLabel
+							+ u" external success keeps loading cover hidden"_q,
+						ok);
+					Check(
+						!overlay->testReadyDelayScheduled(),
+						previewEmbedLabel
+							+ u" external success keeps ready delay idle"_q,
+						ok);
+					overlay->testHandleNavigationDone(false);
+					FlushPendingWidgetEvents();
+					const auto overlayError = preview->findChild<QWidget*>(
+						u"nativeIvEmbedOverlayErrorWrap"_q);
+					Check(
+						overlayShell->isVisible(),
+						previewEmbedLabel
+							+ u" external failure shows overlay shell"_q,
+						ok);
+					Check(
+						overlay->testMode() == EmbedOverlay::Mode::Error,
+						previewEmbedLabel
+							+ u" external failure switches to error mode"_q,
+						ok);
+					Check(
+						overlayError && overlayError->isVisible(),
+						previewEmbedLabel
+							+ u" external failure shows overlay error"_q,
+						ok);
+					Check(
+						overlayClose->isVisible(),
+						previewEmbedLabel
+							+ u" overlay close visible on external failure"_q,
+						ok);
+					Check(
+						!overlay->testLoadingCoverVisible(),
+						previewEmbedLabel
+							+ u" external failure keeps loading cover hidden"_q,
+						ok);
+#else // Q_OS_LINUX
+					Check(
+						overlay->testMode() == EmbedOverlay::Mode::EmbeddedPreload,
+						previewEmbedLabel + u" preload mode after click"_q,
 						ok);
 					Check(
 						overlay->testLoadingCoverVisible(),
@@ -5662,7 +5784,8 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 						previewEmbedLabel + u" placeholder loading visible"_q,
 						ok);
 					const auto availableRect = NativeIvOverlayAvailableRect(
-						overlay);
+						overlay,
+						true);
 					Check(
 						availableRect.isValid(),
 						previewEmbedLabel + u" overlay available rect"_q,
@@ -5692,23 +5815,6 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 						overlay->testReadyDelayScheduled(),
 						previewEmbedLabel + u" ready delay scheduled after readiness"_q,
 						ok);
-					overlay->testHandleNavigationDone(false);
-					FlushPendingWidgetEvents();
-					Check(
-						!overlayShell->isVisible(),
-						previewEmbedLabel
-							+ u" late navigation failure keeps ready preload hidden"_q,
-						ok);
-					Check(
-						overlay->testLoadingCoverVisible(),
-						previewEmbedLabel
-							+ u" late navigation failure keeps preload active"_q,
-						ok);
-					Check(
-						overlay->testReadyDelayScheduled(),
-						previewEmbedLabel
-							+ u" late navigation failure keeps ready delay"_q,
-						ok);
 					const auto readyGeometry = overlayShell->geometry();
 					if (availableRect.isValid()) {
 						overlay->testHandleWebviewMessage(
@@ -5728,23 +5834,36 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 						previewEmbedLabel + u" ready delay remains scheduled"_q,
 						ok);
 					if (availableRect.isValid()) {
+						const auto expectedFullWidthGeometry
+							= NativeIvOverlayFullWidthBodyRect(overlay);
 						Check(
 							readyGeometry != settledGeometry,
 							previewEmbedLabel
 								+ u" hidden preload accepts later preferred size"_q,
 							ok);
 						Check(
-							settledGeometry == availableRect,
+							settledGeometry == expectedFullWidthGeometry,
 							previewEmbedLabel
-								+ u" hidden preload clamps latest preferred size"_q,
+								+ u" hidden preload leaves close reserve"_q,
 							ok);
 					}
 					overlay->testFireReadyDelay();
 					FlushPendingWidgetEvents();
 					const auto revealedBody = RenderWidgetForTest(body);
+					const auto revealedBodyGeometry = overlay->testBodyGeometry();
+					const auto expectedBodyGeometry
+						= NativeIvOverlayFullWidthBodyRect(overlay);
 					Check(
 						overlayShell->isVisible(),
 						previewEmbedLabel + u" overlay reveals after ready delay"_q,
+						ok);
+					Check(
+						overlayClose->isVisible(),
+						previewEmbedLabel + u" overlay close visible on reveal"_q,
+						ok);
+					Check(
+						overlay->testMode() == EmbedOverlay::Mode::EmbeddedVisible,
+						previewEmbedLabel + u" reveal switches to visible mode"_q,
 						ok);
 					Check(
 						!overlay->testLoadingCoverVisible(),
@@ -5760,6 +5879,42 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 							+ u" reveal uses latest settled geometry"_q,
 						ok);
 					Check(
+						revealedBodyGeometry == expectedBodyGeometry,
+						previewEmbedLabel
+							+ u" reveal body geometry keeps close reserve"_q,
+						ok);
+					if (availableRect.isValid() && !revealedBodyGeometry.isEmpty()) {
+						Check(
+							(revealedBodyGeometry.top() - availableRect.top())
+									== NativeIvOverlayCloseHitHeight()
+								&& (availableRect.bottom()
+										- revealedBodyGeometry.bottom())
+									== NativeIvOverlayCloseHitHeight(),
+							previewEmbedLabel
+								+ u" full-width body keeps equal top and bottom skip"_q,
+							ok);
+						Check(
+							overlayShell->size() == NativeIvOverlayShellSizeForBody(
+								revealedBodyGeometry.size(),
+								true),
+							previewEmbedLabel
+								+ u" full-width shell size matches body"_q,
+							ok);
+					}
+					Check(
+						overlayClose->geometry().right() == overlay->rect().right()
+							&& overlayClose->geometry().top()
+								== overlay->rect().top(),
+						previewEmbedLabel
+							+ u" overlay close anchored to top right"_q,
+						ok);
+					Check(
+						overlayClose->geometry().bottom()
+								<= revealedBodyGeometry.top(),
+						previewEmbedLabel
+							+ u" overlay close stays inside reserved band"_q,
+						ok);
+					Check(
 						PixelsDifferInRect(
 							loadingBody,
 							revealedBody,
@@ -5768,16 +5923,38 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 						ok);
 					overlay->testHandleNavigationDone(false);
 					FlushPendingWidgetEvents();
+					const auto lateFailureError = preview->findChild<QWidget*>(
+						u"nativeIvEmbedOverlayErrorWrap"_q);
 					Check(
 						overlayShell->isVisible(),
 						previewEmbedLabel
-							+ u" late navigation failure keeps revealed overlay"_q,
+							+ u" late navigation failure keeps overlay visible"_q,
+						ok);
+					Check(
+						overlay->testMode() == EmbedOverlay::Mode::Error,
+						previewEmbedLabel
+							+ u" late navigation failure switches to error mode"_q,
+						ok);
+					Check(
+						lateFailureError && lateFailureError->isVisible(),
+						previewEmbedLabel
+							+ u" late navigation failure shows overlay error"_q,
+						ok);
+					Check(
+						overlayClose->isVisible(),
+						previewEmbedLabel
+							+ u" overlay close visible on late failure"_q,
 						ok);
 					overlay->closeEmbed();
 					FlushPendingWidgetEvents();
 					Check(
 						!overlayShell->isVisible(),
 						previewEmbedLabel + u" overlay hides before failure retry"_q,
+						ok);
+					Check(
+						!overlayClose->isVisible(),
+						previewEmbedLabel
+							+ u" overlay close hides before failure retry"_q,
 						ok);
 					const auto bodyBeforeFailureClick = RenderWidgetForTest(body);
 					SendMouseClick(body, clickBounds->center(), Qt::LeftButton);
@@ -5786,6 +5963,10 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 					Check(
 						!overlayShell->isVisible(),
 						previewEmbedLabel + u" overlay stays hidden on failure click"_q,
+						ok);
+					Check(
+						overlay->testMode() == EmbedOverlay::Mode::EmbeddedPreload,
+						previewEmbedLabel + u" retry reenters preload mode"_q,
 						ok);
 					Check(
 						overlay->testLoadingCoverVisible(),
@@ -5804,8 +5985,13 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 					const auto overlayError = preview->findChild<QWidget*>(
 						u"nativeIvEmbedOverlayErrorWrap"_q);
 					Check(
-						!overlayShell->isVisible(),
-						previewEmbedLabel + u" preload failure stays hidden"_q,
+						overlayShell->isVisible(),
+						previewEmbedLabel + u" preload failure shows overlay shell"_q,
+						ok);
+					Check(
+						overlay->testMode() == EmbedOverlay::Mode::Error,
+						previewEmbedLabel
+							+ u" preload failure switches to error mode"_q,
 						ok);
 					Check(
 						!overlay->testLoadingCoverVisible(),
@@ -5820,12 +6006,20 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 							failureLoadingBody,
 							bodyAfterFailure,
 							*clickBounds),
-						previewEmbedLabel + u" placeholder loading clears on failure"_q,
+						previewEmbedLabel
+							+ u" placeholder loading clears after failure callback"_q,
 						ok);
 					Check(
-						!overlayError || overlayError->isHidden(),
-						previewEmbedLabel + u" preload failure keeps overlay error hidden"_q,
+						overlayError && overlayError->isVisible(),
+						previewEmbedLabel
+							+ u" preload failure shows overlay error"_q,
 						ok);
+					Check(
+						overlayClose->isVisible(),
+						previewEmbedLabel
+							+ u" overlay close visible on preload failure"_q,
+						ok);
+#endif // Q_OS_LINUX
 				}
 			}
 		}
@@ -5958,6 +6152,105 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 						!overlayShell->isVisible(),
 						previewCancelLabel + u" overlay hidden after first click"_q,
 						ok);
+#ifdef Q_OS_LINUX
+					Check(
+						overlay->testMode() == EmbedOverlay::Mode::External,
+						previewCancelLabel + u" first click enters external mode"_q,
+						ok);
+					Check(
+						!overlay->testLoadingCoverVisible(),
+						previewCancelLabel + u" first click skips loading cover"_q,
+						ok);
+					Check(
+						!overlay->testReadyDelayScheduled(),
+						previewCancelLabel + u" first click skips ready delay"_q,
+						ok);
+					Check(
+						!PixelsDifferInRect(
+							bodyBeforeFirstClick,
+							firstLoadingBody,
+							*firstBounds),
+						previewCancelLabel
+							+ u" first click skips placeholder loading"_q,
+						ok);
+					overlay->testHandleNavigationDone(true);
+					FlushPendingWidgetEvents();
+					Check(
+						!overlayShell->isVisible(),
+						previewCancelLabel
+							+ u" external success keeps overlay hidden"_q,
+						ok);
+					Check(
+						overlay->testMode() == EmbedOverlay::Mode::External,
+						previewCancelLabel
+							+ u" external success keeps external mode"_q,
+						ok);
+					Check(
+						!overlay->testReadyDelayScheduled(),
+						previewCancelLabel
+							+ u" external success keeps ready delay idle"_q,
+						ok);
+					SendMouseClick(body, secondBounds->center(), Qt::LeftButton);
+					FlushPendingWidgetEvents();
+					const auto secondLoadingBody = RenderWidgetForTest(body);
+					Check(
+						!overlayShell->isVisible(),
+						previewCancelLabel
+							+ u" overlay hidden after second click"_q,
+						ok);
+					Check(
+						overlay->testMode() == EmbedOverlay::Mode::External,
+						previewCancelLabel + u" second click enters external mode"_q,
+						ok);
+					Check(
+						!overlay->testLoadingCoverVisible(),
+						previewCancelLabel + u" second click skips loading cover"_q,
+						ok);
+					Check(
+						!overlay->testReadyDelayScheduled(),
+						previewCancelLabel + u" second click skips ready delay"_q,
+						ok);
+					Check(
+						!PixelsDifferInRect(
+							firstLoadingBody,
+							secondLoadingBody,
+							*firstBounds),
+						previewCancelLabel
+							+ u" first placeholder stays non-loading"_q,
+						ok);
+					Check(
+						!PixelsDifferInRect(
+							firstLoadingBody,
+							secondLoadingBody,
+							*secondBounds),
+						previewCancelLabel
+							+ u" second click skips placeholder loading"_q,
+						ok);
+					overlay->testHandleNavigationDone(false);
+					FlushPendingWidgetEvents();
+					const auto overlayError = preview->findChild<QWidget*>(
+						u"nativeIvEmbedOverlayErrorWrap"_q);
+					Check(
+						overlayShell->isVisible(),
+						previewCancelLabel
+							+ u" external failure shows overlay shell"_q,
+						ok);
+					Check(
+						overlay->testMode() == EmbedOverlay::Mode::Error,
+						previewCancelLabel
+							+ u" external failure switches to error mode"_q,
+						ok);
+					Check(
+						overlayError && overlayError->isVisible(),
+						previewCancelLabel
+							+ u" external failure shows overlay error"_q,
+						ok);
+					Check(
+						!overlay->testLoadingCoverVisible(),
+						previewCancelLabel
+							+ u" external failure keeps loading cover hidden"_q,
+						ok);
+#else // Q_OS_LINUX
 					Check(
 						overlay->testLoadingCoverVisible(),
 						previewCancelLabel + u" first preload active"_q,
@@ -6048,6 +6341,7 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 						ok);
 					overlay->closeEmbed();
 					FlushPendingWidgetEvents();
+#endif // Q_OS_LINUX
 				}
 			}
 		}

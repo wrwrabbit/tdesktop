@@ -490,6 +490,12 @@ bool MarkdownPreviewRoot::showEmbed(const MediaActivation &activation) {
 		|| !activation.placeholderId) {
 		return false;
 	}
+#ifdef Q_OS_LINUX
+	closeEmbed();
+	return _embedOverlay
+		? _embedOverlay->showExternalEmbed(activation.embed)
+		: false;
+#else // Q_OS_LINUX
 	const auto placeholderId = activation.placeholderId;
 	const auto generation = ++_pendingEmbed.generation;
 	if (_body && _pendingEmbed.placeholderId) {
@@ -524,6 +530,7 @@ bool MarkdownPreviewRoot::showEmbed(const MediaActivation &activation) {
 		finishPending();
 	}
 	return started;
+#endif // !Q_OS_LINUX
 }
 
 void MarkdownPreviewRoot::fillFootnoteBox(

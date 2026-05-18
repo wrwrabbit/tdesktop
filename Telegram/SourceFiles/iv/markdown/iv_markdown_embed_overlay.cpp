@@ -9,10 +9,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/algorithm.h"
 #include "core/file_utilities.h"
+#include "ui/chat/attach/attach_bot_webview.h"
 #include "lang/lang_keys.h"
 #include "ui/cached_round_corners.h"
 #include "ui/style/style_core_direction.h"
 #include "ui/text/text_utilities.h"
+#include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/padding_wrap.h"
 #include "webview/webview_data_stream_memory.h"
@@ -47,27 +49,55 @@ constexpr auto kReadyRevealDelay = crl::time(1000);
 	return { u"Error: Could not initialize WebView."_q };
 }
 
-[[nodiscard]] TextWithEntities AvailabilityErrorText(
-		const Webview::Available &info) {
-	Expects(info.error != Webview::Available::Error::None);
+[[nodiscard]] TextWithEntities CrashedWebviewErrorText() {
+	return { u"Error: WebView has crashed."_q };
+}
 
-	using Error = Webview::Available::Error;
-	switch (info.error) {
-	case Error::NoWebview2:
-		return tr::lng_payments_webview_install_edge(
-			tr::now,
-			lt_link,
-			tr::link(
-				u"Microsoft Edge WebView2 Runtime"_q,
-				u"https://go.microsoft.com/fwlink/p/?LinkId=2124703"_q),
-			tr::marked);
-	case Error::NoWebKitGTK:
-		return { tr::lng_payments_webview_install_webkit(tr::now) };
-	case Error::OldWindows:
-		return { tr::lng_payments_webview_update_windows(tr::now) };
-	default:
-		return { QString::fromStdString(info.details) };
+[[nodiscard]] QSize CloseButtonHitSize() {
+	const auto &style = st::markdownEmbedOverlayClose;
+	return QSize(
+		std::max(
+			style.width,
+			style.rippleAreaSize + 2 * style.rippleAreaPosition.x()),
+		std::max(
+			style.height,
+			style.rippleAreaSize + 2 * style.rippleAreaPosition.y()));
+}
+
+[[nodiscard]] int CloseButtonHitHeight() {
+	return CloseButtonHitSize().height();
+}
+
+[[nodiscard]] bool ShowsErrorSurface(EmbedOverlay::Mode mode) {
+	return mode == EmbedOverlay::Mode::Error;
+}
+
+[[nodiscard]] bool UsesExternalWindow(EmbedOverlay::Mode mode) {
+	return mode == EmbedOverlay::Mode::External;
+}
+
+enum class LayoutMode {
+	RoundedEmbedded,
+	FullWidthEmbedded,
+	ErrorSurface,
+};
+
+[[nodiscard]] LayoutMode CurrentLayoutMode(
+		EmbedOverlay::Mode mode,
+		const EmbedRequest &request) {
+	if (ShowsErrorSurface(mode)) {
+		return LayoutMode::ErrorSurface;
 	}
+	return request.fullWidth
+		? LayoutMode::FullWidthEmbedded
+		: LayoutMode::RoundedEmbedded;
+}
+
+[[nodiscard]] bool ShowsCloseButton(
+		EmbedOverlay::Mode mode,
+		const EmbedRequest &request) {
+	return ShowsErrorSurface(mode)
+		|| ((mode == EmbedOverlay::Mode::EmbeddedVisible) && request.fullWidth);
 }
 
 [[nodiscard]] TextWithEntities AddFallbackAction(
@@ -246,6 +276,13 @@ EmbedOverlay::EmbedOverlay(
 		_loadingAnimation.draw(p, loader.topLeft(), size, _content->width());
 	}, _content->lifetime());
 	_content->show();
+
+	_close = Ui::CreateChild<Ui::IconButton>(this, st::markdownEmbedOverlayClose);
+	_close->setObjectName(u"nativeIvEmbedOverlayClose"_q);
+	_close->setClickedCallback([=] {
+		closeEmbed();
+	});
+	_close->hide();
 }
 
 EmbedOverlay::~EmbedOverlay() {
@@ -260,13 +297,18 @@ bool EmbedOverlay::preloadEmbed(
 		std::function<void()> failedCallback) {
 	return startEmbed(
 		request,
-		false,
+		Mode::EmbeddedPreload,
+		true,
 		std::move(shownCallback),
 		std::move(failedCallback));
 }
 
 bool EmbedOverlay::showEmbed(const EmbedRequest &request) {
-	return startEmbed(request, true, {}, {});
+	return startEmbed(request, Mode::EmbeddedVisible, true, {}, {});
+}
+
+bool EmbedOverlay::showExternalEmbed(const EmbedRequest &request) {
+	return startEmbed(request, Mode::External, true, {}, {});
 }
 
 void EmbedOverlay::cancelPreload() {
@@ -275,6 +317,7 @@ void EmbedOverlay::cancelPreload() {
 
 bool EmbedOverlay::startEmbed(
 		const EmbedRequest &request,
+		Mode mode,
 		bool showErrorOnFailure,
 		std::function<void()> shownCallback,
 		std::function<void()> failedCallback) {
@@ -292,7 +335,8 @@ bool EmbedOverlay::startEmbed(
 	_cssToQtScale = 1.;
 	_readyFromResource = false;
 	_ready = false;
-	_loading = true;
+	_mode = mode;
+	_loading = !UsesExternalWindow(mode);
 	_showErrorOnFailure = showErrorOnFailure;
 	_shownCallback = std::move(shownCallback);
 	_failedCallback = std::move(failedCallback);
@@ -300,12 +344,14 @@ bool EmbedOverlay::startEmbed(
 	QWidget::hide();
 	removeEscapeFilter();
 	updateContentGeometry();
-	_loadingAnimation.start();
+	if (_loading) {
+		_loadingAnimation.start();
+	}
 	_content->update();
 	if (!_webview) {
 		const auto available = Webview::Availability();
 		if (available.error != Webview::Available::Error::None) {
-			showWebviewError(AvailabilityErrorText(available));
+			showWebviewError(Ui::BotWebView::ErrorText(available));
 			return true;
 		}
 	}
@@ -338,28 +384,8 @@ bool EmbedOverlay::startEmbed(
 }
 
 void EmbedOverlay::closeEmbed() {
-	cancelReadyDelay();
-	_loading = false;
-	_loadingAnimation.stop(anim::type::instant);
-	if (_content) {
-		_content->update();
-	}
 	destroyWebview();
-	removeEscapeFilter();
-	QWidget::hide();
-	clearWebviewError();
-	_request = EmbedRequest();
-	_preferredBodySize = QSize();
-	_pendingPreferredBodySize = QSize();
-	_readyNavigationToken = QString();
-	_cssToQtScale = 1.;
-	_readyFromResource = false;
-	_ready = false;
-	_showErrorOnFailure = false;
-	_shownCallback = nullptr;
-	_failedCallback = nullptr;
-	_pressedOutside = false;
-	restoreFocus();
+	resetState();
 }
 
 void EmbedOverlay::updateGeometry(QRect geometry, int contentWidth) {
@@ -403,6 +429,14 @@ const Webview::StorageId &EmbedOverlay::testEffectiveStorageId() const {
 	return _storageId;
 }
 
+QRect EmbedOverlay::testBodyGeometry() const {
+	return bodyGeometry();
+}
+
+EmbedOverlay::Mode EmbedOverlay::testMode() const {
+	return _mode;
+}
+
 bool EmbedOverlay::eventFilter(QObject *object, QEvent *event) {
 	const auto type = event->type();
 	if (isHidden()
@@ -430,9 +464,12 @@ void EmbedOverlay::paintEvent(QPaintEvent *e) {
 	if (_contentGeometry.isEmpty()) {
 		return;
 	}
-	if (_request.fullWidth) {
+	switch (CurrentLayoutMode(_mode, _request)) {
+	case LayoutMode::FullWidthEmbedded:
 		p.fillRect(_contentGeometry, st::markdownEmbedOverlay.bg);
-	} else {
+		break;
+	case LayoutMode::RoundedEmbedded:
+	case LayoutMode::ErrorSurface:
 		Ui::FillRoundRect(
 			p,
 			_contentGeometry,
@@ -440,16 +477,23 @@ void EmbedOverlay::paintEvent(QPaintEvent *e) {
 			Ui::PrepareCornerPixmaps(
 				st::roundRadiusSmall,
 				st::markdownEmbedOverlay.bg));
+		break;
 	}
 }
 
 void EmbedOverlay::mousePressEvent(QMouseEvent *e) {
-	_pressedOutside = !_contentGeometry.contains(e->pos());
+	const auto closeHit = _close
+		&& !_close->isHidden()
+		&& _close->geometry().contains(e->pos());
+	_pressedOutside = !_contentGeometry.contains(e->pos()) && !closeHit;
 	e->accept();
 }
 
 void EmbedOverlay::mouseReleaseEvent(QMouseEvent *e) {
-	const auto outside = !_contentGeometry.contains(e->pos());
+	const auto closeHit = _close
+		&& !_close->isHidden()
+		&& _close->geometry().contains(e->pos());
+	const auto outside = !_contentGeometry.contains(e->pos()) && !closeHit;
 	if (_pressedOutside && outside && e->button() == Qt::LeftButton) {
 		closeEmbed();
 	}
@@ -486,12 +530,64 @@ bool EmbedOverlay::eventFromOverlayWindow(QObject *object) const {
 	return !activeWindow || (activeWindow == overlayWindow);
 }
 
+void EmbedOverlay::resetState() {
+	cancelReadyDelay();
+	_loading = false;
+	_loadingAnimation.stop(anim::type::instant);
+	if (_content) {
+		_content->update();
+	}
+	removeEscapeFilter();
+	QWidget::hide();
+	clearWebviewError();
+	_request = EmbedRequest();
+	_preferredBodySize = QSize();
+	_pendingPreferredBodySize = QSize();
+	_readyNavigationToken = QString();
+	_cssToQtScale = 1.;
+	_readyFromResource = false;
+	_ready = false;
+	_externalWindowCloseReported = false;
+	_showErrorOnFailure = false;
+	_shownCallback = nullptr;
+	_failedCallback = nullptr;
+	_mode = Mode::Hidden;
+	_pressedOutside = false;
+	restoreFocus();
+}
+
 Webview::WindowConfig EmbedOverlay::makeWindowConfig() const {
 	return {
 		.opaqueBg = st::markdownEmbedOverlay.bg->c,
 		.storageId = _storageId,
 		.safe = true,
+		.mode = UsesExternalWindow(_mode)
+			? Webview::WindowMode::External
+			: Webview::WindowMode::Embedded,
+		.initialSize = UsesExternalWindow(_mode)
+			? externalInitialSize()
+			: QSize(),
 	};
+}
+
+QSize EmbedOverlay::externalInitialSize() const {
+	auto width = _request.fullWidth
+		? _contentWidth
+		: _request.width;
+	if (width <= 0) {
+		width = st::markdownEmbedOverlay.size.width();
+	}
+	auto height = _request.height;
+	if ((height > 0) && (_request.width > 0)) {
+		height = std::max(
+			static_cast<int>(std::round(
+				width * (double(_request.height) / _request.width))),
+			1);
+	}
+	if (height <= 0) {
+		height = st::markdownEmbedOverlay.size.height();
+	}
+	return QSize(width, height);
 }
 
 void EmbedOverlay::ensureWebview() {
@@ -521,20 +617,33 @@ void EmbedOverlay::ensureWebview() {
 			if (_webviewGeneration == generation
 				&& _webview
 				&& _webview.get() == raw) {
+				if (UsesExternalWindow(_mode) && _externalWindowCloseReported) {
+					_webview = nullptr;
+					resetState();
+					return;
+				}
 				_webview = nullptr;
-				showWebviewError({ u"Error: WebView has crashed."_q });
+				showWebviewError(CrashedWebviewErrorText());
 			}
 		});
 	});
 	raw->setDataRequestHandler([=](Webview::DataRequest request) {
 		return handleDataRequest(std::move(request));
 	});
+	raw->setExternalWindowCloseHandler([=] {
+		if (_webviewGeneration == generation
+			&& _webview
+			&& (_webview.get() == raw)) {
+			_externalWindowCloseReported = true;
+		}
+	});
 	raw->init(EmbedInitScript());
 	raw->setNavigationStartHandler([=](const QString &uri, bool newWindow) {
-		Q_UNUSED(newWindow);
-
 		if (uri == u"about:blank"_q
 			|| uri.startsWith(u"http://desktop-app-resource/"_q)) {
+			return true;
+		}
+		if (UsesExternalWindow(_mode) && !newWindow && !uri.isEmpty()) {
 			return true;
 		}
 		if (_linkActivationCallback && !uri.isEmpty()) {
@@ -620,16 +729,21 @@ void EmbedOverlay::handleWebviewMessage(const QJsonDocument &message) {
 }
 
 void EmbedOverlay::handleNavigationDone(bool success) {
-	if (!_request || _ready) {
+	if (!_request) {
 		return;
 	}
-	if (success) {
-		if (!_readyFromResource) {
-			setReady();
+	if (!success) {
+		if (UsesExternalWindow(_mode) && _externalWindowCloseReported) {
+			destroyWebview();
+			resetState();
+			return;
 		}
+		showWebviewError();
 		return;
 	}
-	showWebviewError();
+	if (!_ready && !_readyFromResource) {
+		setReady();
+	}
 }
 
 void EmbedOverlay::cancelReadyDelay() {
@@ -649,6 +763,16 @@ void EmbedOverlay::setReady() {
 	}
 	updateContentGeometry();
 	cancelReadyDelay();
+	if (UsesExternalWindow(_mode)) {
+		_loading = false;
+		_loadingAnimation.stop(anim::type::normal);
+		_content->update();
+		if (const auto shownCallback = base::take(_shownCallback)) {
+			shownCallback();
+		}
+		_failedCallback = nullptr;
+		return;
+	}
 	_readyDelayTimer.callOnce(kReadyRevealDelay);
 }
 
@@ -658,6 +782,9 @@ void EmbedOverlay::revealReadyEmbed() {
 	}
 	cancelReadyDelay();
 	clearWebviewError();
+	if (_mode == Mode::EmbeddedPreload) {
+		_mode = Mode::EmbeddedVisible;
+	}
 	QWidget::show();
 	installEscapeFilter();
 	raiseSurfaces();
@@ -710,8 +837,10 @@ void EmbedOverlay::updateContentGeometry() {
 	if (!_content) {
 		return;
 	}
+	const auto layout = CurrentLayoutMode(_mode, _request);
+	const auto fullWidth = (layout == LayoutMode::FullWidthEmbedded);
 	const auto margin = st::markdownEmbedOverlay.margin;
-	const auto available = _request.fullWidth
+	const auto available = fullWidth
 		? rect().marginsRemoved({ 0, margin.top(), 0, margin.bottom() })
 		: rect().marginsRemoved(margin);
 	if (available.isEmpty()) {
@@ -721,60 +850,101 @@ void EmbedOverlay::updateContentGeometry() {
 		if (_error) {
 			_error->setGeometry(QRect());
 		}
+		if (_close) {
+			_close->hide();
+		}
 		update();
 		return;
 	}
-	const auto padding = contentPadding();
-	const auto horizontalPadding = padding.left() + padding.right();
-	const auto verticalPadding = padding.top() + padding.bottom();
-	const auto availableWidth = std::max(available.width(), 1);
-	const auto availableHeight = std::max(available.height(), 1);
-	const auto availableBodyHeight = std::max(
-		availableHeight - verticalPadding,
-		1);
-	const auto width = _request.fullWidth
-		? availableWidth
-		: std::clamp(
+	const auto showClose = ShowsCloseButton(_mode, _request);
+	if (_close) {
+		if (showClose) {
+			_close->show();
+			_close->moveToRight(0, 0);
+		} else {
+			_close->hide();
+		}
+	}
+	if ((layout == LayoutMode::ErrorSurface) && _error) {
+		const auto width = std::clamp(
 			(_contentWidth > 0)
 				? _contentWidth
 				: st::markdownEmbedOverlay.size.width(),
 			1,
-			availableWidth);
-	const auto bodyWidth = std::max(width - horizontalPadding, 1);
-	const auto desiredBodyHeight = [&] {
-		if (_preferredBodySize.height() > 0) {
-			return _preferredBodySize.height();
-		}
-		if (_request.height > 0) {
-			if (_request.width > 0) {
-				return std::max(
-					static_cast<int>(std::round(
-						bodyWidth
-							* (double(_request.height) / _request.width))),
-					1);
+			std::max(available.width(), 1));
+		_error->resizeToWidth(width);
+		_contentGeometry = style::centerrect(
+			available,
+			QRect(QPoint(), _error->size()));
+	} else {
+		const auto verticalReserve = fullWidth
+			? std::min(
+				CloseButtonHitHeight(),
+				std::max((available.height() - 1) / 2, 0))
+			: 0;
+		const auto embedAvailable = fullWidth
+			? available.marginsRemoved(
+				QMargins(0, verticalReserve, 0, verticalReserve))
+			: available;
+		const auto padding = contentPadding();
+		const auto horizontalPadding = padding.left() + padding.right();
+		const auto verticalPadding = padding.top() + padding.bottom();
+		const auto availableWidth = std::max(embedAvailable.width(), 1);
+		const auto availableHeight = std::max(embedAvailable.height(), 1);
+		const auto availableBodyHeight = std::max(
+			availableHeight - verticalPadding,
+			1);
+		const auto width = fullWidth
+			? availableWidth
+			: std::clamp(
+				(_contentWidth > 0)
+					? _contentWidth
+					: st::markdownEmbedOverlay.size.width(),
+				1,
+				availableWidth);
+		const auto bodyWidth = std::max(width - horizontalPadding, 1);
+		const auto desiredBodyHeight = [&] {
+			if (_preferredBodySize.height() > 0) {
+				return _preferredBodySize.height();
 			}
-			return _request.height;
-		}
-		return st::markdownEmbedOverlay.size.height();
-	}();
-	const auto height = std::min(
-		std::clamp(desiredBodyHeight, 1, availableBodyHeight)
-			+ verticalPadding,
-		availableHeight);
-	_contentGeometry = style::centerrect(
-		available,
-		QRect(0, 0, width, height));
+			if (_request.height > 0) {
+				if (_request.width > 0) {
+					return std::max(
+						static_cast<int>(std::round(
+							bodyWidth
+								* (double(_request.height) / _request.width))),
+						1);
+				}
+				return _request.height;
+			}
+			return st::markdownEmbedOverlay.size.height();
+		}();
+		const auto height = std::min(
+			std::clamp(desiredBodyHeight, 1, availableBodyHeight)
+				+ verticalPadding,
+			availableHeight);
+		_contentGeometry = style::centerrect(
+			embedAvailable,
+			QRect(0, 0, width, height));
+	}
 	_content->setGeometry(_contentGeometry);
 	updateWebviewGeometry();
 	if (_error && _errorLabel) {
 		_errorLabel->setContextCopyText(_request.fallbackUrl);
-		const auto body = bodyRectInContent();
-		_error->resizeToWidth(std::max(body.width(), 1));
-		_error->moveToLeft(
-			body.x(),
-			body.y() + std::max((body.height() - _error->height()) / 2, 0),
-			_content->width());
+		if (layout == LayoutMode::ErrorSurface) {
+			_error->moveToLeft(0, 0, _content->width());
+		} else {
+			const auto body = bodyRectInContent();
+			_error->resizeToWidth(std::max(body.width(), 1));
+			_error->moveToLeft(
+				body.x(),
+				body.y() + std::max((body.height() - _error->height()) / 2, 0),
+				_content->width());
+		}
 		_error->raise();
+	}
+	if (_close && !_close->isHidden()) {
+		_close->raise();
 	}
 	update();
 	_content->update();
@@ -785,14 +955,26 @@ void EmbedOverlay::updateWebviewGeometry() {
 		_webview->widget()->setGeometry(bodyGeometry());
 		if (!_webview->widget()->isHidden()) {
 			_webview->widget()->raise();
+			if (_close && !_close->isHidden()) {
+				_close->raise();
+			}
 		}
 	}
 }
 
 void EmbedOverlay::raiseSurfaces() {
 	raise();
+	if (_content) {
+		_content->raise();
+	}
 	if (_webview && _webview->widget() && !_webview->widget()->isHidden()) {
 		_webview->widget()->raise();
+	}
+	if (_error && !_error->isHidden()) {
+		_error->raise();
+	}
+	if (_close && !_close->isHidden()) {
+		_close->raise();
 	}
 }
 
@@ -815,11 +997,16 @@ void EmbedOverlay::destroyWebview() {
 void EmbedOverlay::showWebviewError() {
 	const auto available = Webview::Availability();
 	showWebviewError((available.error != Webview::Available::Error::None)
-		? AvailabilityErrorText(available)
+		? Ui::BotWebView::ErrorText(available)
 		: GenericWebviewErrorText());
 }
 
 void EmbedOverlay::showWebviewError(const TextWithEntities &text) {
+	if (UsesExternalWindow(_mode) && _externalWindowCloseReported) {
+		destroyWebview();
+		resetState();
+		return;
+	}
 	cancelReadyDelay();
 	_ready = false;
 	_loading = false;
@@ -834,12 +1021,7 @@ void EmbedOverlay::showWebviewError(const TextWithEntities &text) {
 	_readyNavigationToken = QString();
 	_readyFromResource = false;
 	if (!showError) {
-		clearWebviewError();
-		_request = EmbedRequest();
-		_preferredBodySize = QSize();
-		_pendingPreferredBodySize = QSize();
-		_cssToQtScale = 1.;
-		restoreFocus();
+		resetState();
 		if (failedCallback) {
 			failedCallback();
 		}
@@ -847,6 +1029,7 @@ void EmbedOverlay::showWebviewError(const TextWithEntities &text) {
 	}
 	QWidget::show();
 	installEscapeFilter();
+	_mode = Mode::Error;
 	raiseSurfaces();
 	if (!_error) {
 		_error = Ui::CreateChild<Ui::PaddingWrap<Ui::FlatLabel>>(
@@ -905,6 +1088,9 @@ QRect EmbedOverlay::bodyRectInContent() const {
 }
 
 QMargins EmbedOverlay::contentPadding() const {
+	if (ShowsErrorSurface(_mode) || UsesExternalWindow(_mode)) {
+		return QMargins();
+	}
 	return _request.fullWidth ? QMargins() : st::markdownEmbedOverlay.padding;
 }
 

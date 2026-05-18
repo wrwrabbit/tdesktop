@@ -31,6 +31,7 @@ struct TextWithEntities;
 
 namespace Ui {
 class FlatLabel;
+class IconButton;
 template <typename Widget>
 class PaddingWrap;
 class RpWidget;
@@ -45,6 +46,14 @@ namespace Iv::Markdown {
 
 class EmbedOverlay final : public Ui::RpWidget {
 public:
+	enum class Mode {
+		Hidden,
+		EmbeddedPreload,
+		EmbeddedVisible,
+		Error,
+		External,
+	};
+
 	EmbedOverlay(
 		QWidget *parent,
 		const base::flat_map<QByteArray, QByteArray> *resources,
@@ -59,6 +68,7 @@ public:
 		std::function<void()> shownCallback = {},
 		std::function<void()> failedCallback = {});
 	[[nodiscard]] bool showEmbed(const EmbedRequest &request);
+	[[nodiscard]] bool showExternalEmbed(const EmbedRequest &request);
 	void cancelPreload();
 	void closeEmbed();
 	void updateGeometry(QRect geometry, int contentWidth);
@@ -68,6 +78,8 @@ public:
 	[[nodiscard]] bool testReadyDelayScheduled() const;
 	void testFireReadyDelay();
 	[[nodiscard]] const Webview::StorageId &testEffectiveStorageId() const;
+	[[nodiscard]] QRect testBodyGeometry() const;
+	[[nodiscard]] Mode testMode() const;
 
 protected:
 	bool eventFilter(QObject *object, QEvent *event) override;
@@ -79,13 +91,16 @@ private:
 	void installEscapeFilter();
 	void removeEscapeFilter();
 	[[nodiscard]] bool eventFromOverlayWindow(QObject *object) const;
+	void resetState();
 	[[nodiscard]] bool startEmbed(
 		const EmbedRequest &request,
+		Mode mode,
 		bool showErrorOnFailure,
 		std::function<void()> shownCallback,
 		std::function<void()> failedCallback);
 	void ensureWebview();
 	[[nodiscard]] Webview::WindowConfig makeWindowConfig() const;
+	[[nodiscard]] QSize externalInitialSize() const;
 	void handleWebviewMessage(const QJsonDocument &message);
 	void handleNavigationDone(bool success);
 	void cancelReadyDelay();
@@ -118,6 +133,7 @@ private:
 	const std::function<Webview::DataResult(QByteArray, Webview::DataRequest)>
 		_dataRequestHandler;
 	Ui::RpWidget *_content = nullptr;
+	Ui::IconButton *_close = nullptr;
 	Ui::PaddingWrap<Ui::FlatLabel> *_error = nullptr;
 	Ui::FlatLabel *_errorLabel = nullptr;
 	std::unique_ptr<Webview::Window> _webview;
@@ -135,7 +151,9 @@ private:
 	int _navigationGeneration = 0;
 	int _webviewGeneration = 0;
 	double _cssToQtScale = 1.;
+	Mode _mode = Mode::Hidden;
 	bool _pressedOutside = false;
+	bool _externalWindowCloseReported = false;
 	bool _readyFromResource = false;
 	bool _ready = false;
 	bool _loading = false;

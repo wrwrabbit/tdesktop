@@ -575,7 +575,14 @@ markdownEmbedOverlay: MarkdownEmbedOverlay {
 	margin: margins(12px, 12px, 12px, 12px);
 	padding: margins(8px, 8px, 8px, 8px);
 	errorLabel: markdownEmbedOverlayError;
-	errorPadding: margins(12px, 24px, 12px, 24px);
+	errorPadding: margins(24px, 36px, 24px, 36px);
+}
+markdownEmbedOverlayClose: IconButton(boxTitleClose) {
+	icon: icon {{ "box_button_close", mediaviewPlaybackActive }};
+	iconOver: icon {{ "box_button_close", mediaviewPlaybackActiveOver }};
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: shadowFg;
+	}
 }
 defaultMarkdown: Markdown {
 	textPalette: defaultMarkdownTextPalette;
