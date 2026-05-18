@@ -894,7 +894,6 @@ dialogsTopBarSuggestionAboutStyle: TextStyle(defaultTextStyle) {
 	font: font(11px);
 }
 dialogsTopBarSuggestionMargins: margins(8px, 8px, 8px, 8px);
-dialogsTopBarSuggestionRadius: 12px;
 dialogsTopBarSuggestionShadow: BoxShadow {
 	blurRadius: 8px;
 	offset: point(0px, 2px);
