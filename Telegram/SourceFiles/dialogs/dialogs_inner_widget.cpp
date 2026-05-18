@@ -5733,17 +5733,10 @@ void InnerWidget::deactivateQuickAction() {
 
 void InnerWidget::focusInEvent(QFocusEvent *e) {
 	RpWidget::focusInEvent(e);
+
 	if (_state == WidgetState::Default) {
 		if (!_selected && !_shownList->empty()) {
 			_selected = _shownList->cbegin()->get();
-		}
-		if (_selected) {
-			const auto row = _selected;
-			InvokeQueued(this, [=] {
-				if (_selected == row && hasFocus()) {
-					announceSelectedFocus();
-				}
-			});
 		}
 	} else if (_state == WidgetState::Filtered) {
 		const auto noneSelected
@@ -5760,14 +5753,12 @@ void InnerWidget::focusInEvent(QFocusEvent *e) {
 		if (noneSelected && filteredChildCount() > 0) {
 			selectSkip(1);
 		}
-		if (filteredChildCount() > 0) {
-			InvokeQueued(this, [=] {
-				if (hasFocus()) {
-					announceSelectedFocus();
-				}
-			});
-		}
 	}
+	InvokeQueued(this, [=] {
+		if (hasFocus()) {
+			announceSelectedFocus();
+		}
+	});
 }
 
 bool InnerWidget::processKeyDispatch(QKeyEvent *e) {
@@ -5825,15 +5816,11 @@ void InnerWidget::announceSelectedFocus() {
 		if (!_selected) {
 			return;
 		}
-		auto index = 0;
-		for (auto i = _shownList->cbegin()
-			; i != _shownList->cend()
-			; ++i, ++index) {
-			if (i->get() == _selected) {
-				accessibilityChildNameChanged(index);
-				accessibilityChildFocused(index);
-				return;
-			}
+		const auto i = _shownList->cfind(_selected);
+		if (i != _shownList->cend()) {
+			const auto index = int(i - _shownList->cbegin());
+			accessibilityChildNameChanged(index);
+			accessibilityChildFocused(index);
 		}
 	} else if (_state == WidgetState::Filtered) {
 		const auto h = int(_hashtagResults.size());
@@ -5876,8 +5863,8 @@ int InnerWidget::filteredChildCount() const {
 		+ _searchResults.size());
 }
 
-std::optional<InnerWidget::FilteredChildRef>
-		InnerWidget::filteredChildAt(int index) const {
+auto InnerWidget::filteredChildAt(int index) const
+-> std::optional<FilteredChildRef> {
 	if (index < 0) {
 		return std::nullopt;
 	}
@@ -5929,8 +5916,7 @@ QString InnerWidget::accessibilityChildName(int index) const {
 		if (index < 0 || index >= _shownList->size()) {
 			return {};
 		}
-		auto it = _shownList->cbegin();
-		std::advance(it, index);
+		const auto it = _shownList->cbegin() + index;
 		return RowAccessibilityName(it->get(), _filterId);
 	} else if (_state == WidgetState::Filtered) {
 		const auto ref = filteredChildAt(index);
@@ -5972,8 +5958,7 @@ QAccessible::State InnerWidget::accessibilityChildState(int index) const {
 		if (index < 0 || index >= _shownList->size()) {
 			return state;
 		}
-		auto it = _shownList->cbegin();
-		std::advance(it, index);
+		const auto it = _shownList->cbegin() + index;
 		if (it->get() == _selected) {
 			state.selected = true;
 			state.active = true;
@@ -6023,9 +6008,7 @@ QRect InnerWidget::accessibilityChildRect(int index) const {
 		if (index < 0 || index >= _shownList->size()) {
 			return QRect();
 		}
-		auto it = _shownList->cbegin();
-		std::advance(it, index);
-		const auto row = it->get();
+		const auto row = (_shownList->cbegin() + index)->get();
 		return QRect(0, row->top(), width(), row->height());
 	} else if (_state == WidgetState::Filtered) {
 		const auto ref = filteredChildAt(index);
@@ -6076,9 +6059,8 @@ int InnerWidget::accessibilityChildColumnCount(int row) const {
 		if (row < 0 || row >= _shownList->size()) {
 			return 0;
 		}
-		auto it = _shownList->cbegin();
-		std::advance(it, row);
-		return int(activeSubItems(it->get()).size());
+		const auto rowPtr = (_shownList->cbegin() + row)->get();
+		return int(activeSubItems(rowPtr).size());
 	} else if (_state == WidgetState::Filtered) {
 		const auto ref = filteredChildAt(row);
 		if (!ref || ref->cohort != AccessibilityCohort::Filtered) {
@@ -6109,9 +6091,8 @@ QString InnerWidget::accessibilityChildSubItemName(
 		if (row < 0 || row >= _shownList->size()) {
 			return {};
 		}
-		auto it = _shownList->cbegin();
-		std::advance(it, row);
-		const auto &active = activeSubItems(it->get());
+		const auto rowPtr = (_shownList->cbegin() + row)->get();
+		const auto &active = activeSubItems(rowPtr);
 		if (column < 0 || column >= int(active.size())) {
 			return {};
 		}
@@ -6137,9 +6118,7 @@ QString InnerWidget::accessibilityChildSubItemValue(
 		if (row < 0 || row >= _shownList->size()) {
 			return {};
 		}
-		auto it = _shownList->cbegin();
-		std::advance(it, row);
-		const auto rowPtr = it->get();
+		const auto rowPtr = (_shownList->cbegin() + row)->get();
 		const auto &active = activeSubItems(rowPtr);
 		if (column < 0 || column >= int(active.size())) {
 			return {};

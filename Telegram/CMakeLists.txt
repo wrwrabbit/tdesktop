@@ -1083,6 +1083,8 @@ PRIVATE
     history/history_item_text.h
     history/history_inner_widget.cpp
     history/history_inner_widget.h
+    history/history_inner_widget_accessibility.cpp
+    history/history_inner_widget_accessibility.h
     history/history_location_manager.cpp
     history/history_location_manager.h
     history/history_streamed_drafts.cpp

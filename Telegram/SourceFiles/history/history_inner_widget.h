@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/tooltip.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/userpic_view.h"
+#include "history/history_inner_widget_accessibility.h"
 #include "history/view/history_view_top_bar_widget.h"
 
 #include <QtGui/QPainterPath>
@@ -114,6 +115,9 @@ public:
 	// Accessibility.
 	QAccessible::Role accessibilityRole() override {
 		return QAccessible::Role::List;
+	}
+	Qt::FocusPolicy accessibilityFocusPolicy() override {
+		return Qt::TabFocus;
 	}
 	int accessibilityChildCount() const override;
 	QString accessibilityChildName(int index) const override;
@@ -288,10 +292,10 @@ private:
 	[[nodiscard]] int accessibilityUnreadBarIndex() const;
 	void toggleMessageSelection();
 	void playPauseFocusedMedia();
-	[[nodiscard]] QString computeSubItemValue(
-		int row, int column) const;
-	[[nodiscard]] const QVector<int> &computeActiveColumns(
-		int row) const;
+	void setAccessibilityFocusedItem(int index, HistoryItem *item);
+	void announceAccessibilityFocus(int index);
+	[[nodiscard]] auto computeActiveColumns(int row) const
+		-> const std::vector<HistoryView::MessageSubItem> &;
 
 	void onTouchSelect();
 	void onTouchScrollTimer();
@@ -512,8 +516,8 @@ private:
 
 	int _accessibilityFocusedIndex = -1;
 	HistoryItem *_accessibilityFocusedItem = nullptr;
-	mutable int _activeColumnsRow = -1;
-	mutable QVector<int> _activeColumns;
+	mutable const HistoryView::Element *_activeColumnsView = nullptr;
+	mutable std::vector<HistoryView::MessageSubItem> _activeColumns;
 
 	const not_null<HistoryWidget*> _widget;
 	const not_null<Ui::ScrollArea*> _scroll;

@@ -23,7 +23,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_menu_my_groups" = "My Groups";
 "lng_menu_my_channels" = "My Channels";
 "lng_main_menu" = "Main menu";
-"lng_chat_list" = "Chats";
 "lng_filter_unread_chats#one" = "{text} ({count} unread chat)";
 "lng_filter_unread_chats#other" = "{text} ({count} unread chats)";
 
@@ -410,7 +409,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_country_ph" = "Search";
 "lng_country_none" = "Country not found";
 "lng_country_select" = "Select Country";
-"lng_country_column_name" = "Country name";
 "lng_phone_number" = "Phone number";
 
 "lng_code_ph" = "Code";
@@ -648,8 +646,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_effect_premium_link" = "Telegram Premium";
 
 "lng_languages" = "Language";
-"lng_languages_column_native" = "Native name";
-"lng_languages_column_name" = "Language name";
 "lng_languages_none" = "No languages found.";
 "lng_languages_count#one" = "{count} language";
 "lng_languages_count#other" = "{count} languages";
@@ -5696,37 +5692,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_sr_message_downloading" = "Downloading";
 "lng_sr_message_reply_to" = "In reply to {name}: {text}";
 "lng_sr_message_edited" = "Edited";
-"lng_sr_message_via_bot" = "via @{bot}";
-"lng_sr_message_reactions" = "Reactions: {list}";
 "lng_sr_message_custom_emoji" = "Custom emoji {emoji}";
 
-"lng_sr_message_column_seen" = "Seen";
-"lng_sr_message_column_sender" = "Sender";
-"lng_sr_message_column_via_bot" = "Via bot";
-"lng_sr_message_column_reply" = "Reply";
-"lng_sr_message_column_forward" = "Forward";
 "lng_sr_message_column_media_type" = "Media type";
-"lng_sr_message_column_download" = "Download";
-"lng_sr_message_column_played" = "Played";
 "lng_sr_message_column_artist" = "Artist";
 "lng_sr_message_column_title" = "Title";
 "lng_sr_message_column_filename" = "Filename";
 "lng_sr_message_column_duration" = "Duration";
 "lng_sr_message_column_dimensions" = "Dimensions";
 "lng_sr_message_column_file_size" = "File size";
-"lng_sr_message_column_message" = "Message";
-"lng_sr_message_column_delivery" = "Delivery";
-"lng_sr_message_column_edited" = "Edited";
-"lng_sr_message_column_time" = "Time";
-"lng_sr_message_column_reactions" = "Reactions";
-"lng_sr_message_column_views" = "Views";
 "lng_sr_message_column_signature" = "Signature";
-"lng_sr_message_column_pinned" = "Pinned";
 "lng_sr_message_column_web_site" = "Website";
 "lng_sr_message_column_web_title" = "Link title";
 "lng_sr_message_column_web_description" = "Link description";
 "lng_sr_message_column_poll_question" = "Poll question";
-"lng_sr_message_column_poll_options" = "Poll options";
 "lng_sr_message_column_poll_status" = "Poll status";
 "lng_sr_message_column_contact_name" = "Contact name";
 "lng_sr_message_column_contact_phone" = "Contact phone";
@@ -5747,10 +5726,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_sr_message_column_forward_author" = "Forward author";
 "lng_sr_message_column_paid_reactions" = "Paid reactions";
 
-"lng_sr_message_pinned" = "Pinned";
 "lng_sr_message_spoiler" = "Hidden media";
-"lng_sr_message_poll_votes#one" = "{count} vote";
-"lng_sr_message_poll_votes#other" = "{count} votes";
 "lng_sr_message_todo_completed" = "Completed";
 "lng_sr_message_todo_not_completed" = "Not completed";
 "lng_sr_message_gift_premium#one" = "Premium gift, {count} day";
