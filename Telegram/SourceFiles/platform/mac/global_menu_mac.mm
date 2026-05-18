@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_info.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/fields/input_field.h"
+#include "base/invoke_queued.h"
 
 #include <QtWidgets/QMenuBar>
 #include <QtWidgets/QMenu>
@@ -91,6 +92,11 @@ private:
 	}
 
 	std::unique_ptr<QMenuBar> _menuBar;
+	// Coalesces requestUpdate() bursts into one recomputeState() per Qt
+	// event-loop turn. Posted events drain on every CFRunLoop
+	// BeforeWaiting before the next NSEvent dispatches, so menu state
+	// is fresh by the time Cmd+C reaches AppKit's performKeyEquivalent.
+	std::unique_ptr<SingleQueuedInvokation> _scheduledUpdate;
 	QAction *_logout = nullptr;
 	QAction *_undo = nullptr;
 	QAction *_redo = nullptr;
@@ -120,7 +126,6 @@ private:
 
 	std::optional<ComputedState> _lastState;
 
-	rpl::event_stream<> _updateRequests;
 	rpl::event_stream<Ui::MarkdownEnabledState> _markdownChanges;
 	rpl::lifetime _lifetime;
 	bool _languageBound = false;
@@ -608,13 +613,16 @@ void Manager::create() {
 
 	buildMenu();
 
-	_updateRequests.events() | rpl::on_next([this] {
-		ensureLanguageBound();
+	_scheduledUpdate = std::make_unique<SingleQueuedInvokation>([this] {
+		if (!_menuBar) {
+			return;
+		}
 		recomputeState();
-	}, _lifetime);
+	});
 }
 
 void Manager::destroy() {
+	_scheduledUpdate.reset();
 	_lifetime.destroy();
 	_menuBar.reset();
 	_languageBound = false;
@@ -634,7 +642,8 @@ void Manager::requestUpdate() {
 	if (!_menuBar) {
 		return;
 	}
-	_updateRequests.fire({});
+	ensureLanguageBound();
+	_scheduledUpdate->call();
 }
 
 auto Manager::markdownStateChanges() const
