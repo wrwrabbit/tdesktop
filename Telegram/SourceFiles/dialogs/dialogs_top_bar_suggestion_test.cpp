@@ -19,7 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/vertical_layout.h"
 #include "styles/style_dialogs.h"
 
-#include <QtGui/QShortcut>
+#include <QShortcut>
 
 namespace Dialogs {
 
