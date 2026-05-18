@@ -1116,10 +1116,8 @@ depends:python/Scripts/activate.bat
     %THIRDPARTY_DIR%\\python\\Scripts\\activate.bat
     meson setup --default-library=static --buildtype=debug -Db_vscrt=mtd out/Debug
     meson compile -C out/Debug
-release:
     meson setup --default-library=static --buildtype=release -Db_vscrt=mt out/Release
     meson compile -C out/Release
-win:
     deactivate
 mac:
     buildOneArch() {
@@ -1564,7 +1562,7 @@ else: # qt > '6'
     stage('qt_' + qt, """
     git clone -b """ + branch + """ https://github.com/qt/qt5.git qt_$QT
     cd qt_$QT
-    git submodule update --init --recursive --progress qtbase qtimageformats qtsvg
+    git submodule update --init --recursive --progress qtbase qtimageformats qtshadertools qtsvg
 depends:patches/qtbase_""" + qt + """/*.patch
 mac:
     find $PWD/../patches/qtbase_$QT -type f -print0 | sort -z | xargs -0 git -C qtbase apply -v
