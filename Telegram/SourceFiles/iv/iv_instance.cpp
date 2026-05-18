@@ -1026,7 +1026,12 @@ void Instance::openWithIvPreferred(
 	const auto openExternal = [=] {
 		auto my = context.value<ClickHandlerContext>();
 		my.ignoreIv = true;
-		UrlClickHandler::Open(uri, QVariant::fromValue(my));
+		const auto updated = QVariant::fromValue(my);
+		if (my.forceExternalUrlConfirmation) {
+			HiddenUrlClickHandler::Open(uri, updated);
+		} else {
+			UrlClickHandler::Open(uri, updated);
+		}
 	};
 	const auto parts = uri.split('#');
 	if (parts.isEmpty() || parts[0].isEmpty()) {
