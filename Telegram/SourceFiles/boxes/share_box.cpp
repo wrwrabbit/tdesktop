@@ -366,7 +366,10 @@ void ShareBox::prepare() {
 				_inner->applyChatFilter(id);
 				scrollToY(0);
 			},
-			Window::GifPauseReason::Layer);
+			Window::GifPauseReason::Layer,
+			nullptr,
+			false,
+			true);
 		chatsFilters->lower();
 		chatsFilters->heightValue() | rpl::on_next([this](int h) {
 			updateScrollSkips();

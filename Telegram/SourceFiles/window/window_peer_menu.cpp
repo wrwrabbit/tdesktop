@@ -3052,7 +3052,10 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 					*lastFilterId = id;
 					applyFilter(box, id);
 				},
-				Window::GifPauseReason::Layer);
+				Window::GifPauseReason::Layer,
+				nullptr,
+				false,
+				true);
 			chatsFilters->lower();
 			rpl::combine(
 				chatsFilters->heightValue(),
