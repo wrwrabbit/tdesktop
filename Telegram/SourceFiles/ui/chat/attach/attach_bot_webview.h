@@ -216,6 +216,8 @@ private:
 	struct WebviewWithLifetime;
 
 	bool showWebview(Args &&args, const Webview::ThemeParams &params);
+	void invalidateExternalShellSession();
+	void showExternalShellError(TextWithEntities text);
 
 	bool createWebview(const Webview::ThemeParams &params);
 	void resetExternalShellIdentity();
@@ -327,6 +329,7 @@ private:
 	bool _externalTitleBadgeVisible = false;
 	bool _externalShell = false;
 	bool _externalShellBootstrapped = false;
+	bool _externalWindowCloseRequested = false;
 	QString _externalShellToken;
 	uint64 _externalShellGeneration = 0;
 	bool _externalBackVisible = false;

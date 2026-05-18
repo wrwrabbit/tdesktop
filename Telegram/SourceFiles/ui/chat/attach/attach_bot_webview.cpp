@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/attach/attach_bot_webview_linux_shell.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/effects/ripple_animation.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/layers/box_content.h"
 #include "ui/layers/standalone_layer_stack.h"
 #include "ui/platform/ui_platform_utility.h"
@@ -56,6 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/qpa/qplatformscreen.h>
 
 #include <algorithm>
+#include <memory>
 
 namespace Ui::BotWebView {
 
@@ -93,6 +95,15 @@ struct NativeMessage {
 
 [[nodiscard]] QString ExternalShellTopUrl() {
 	return u"https://web.telegram.org:443/blank.html"_q;
+}
+
+[[nodiscard]] TextWithEntities WebviewErrorText(
+		const QString &text,
+		const Webview::Available &information) {
+	Expects(information.error != Webview::Available::Error::None);
+
+	return TextWithEntities{ text }.append("\n\n").append(
+		ErrorText(information));
 }
 
 [[nodiscard]] bool IsExternalShellOrigin(const QString &origin) {
@@ -1229,12 +1240,23 @@ Panel::Panel(Args &&args)
 	_widget->setTitleBadge(std::move(args.titleBadge));
 
 	if (!showWebview(std::move(args), params)) {
-		_externalShell = false;
-		const auto available = Webview::Availability();
-		if (available.error != Webview::Available::Error::None) {
-			showWebviewError(tr::lng_bot_no_webview(tr::now), available);
+		if (_externalShell && _externalLayer) {
+			const auto available = Webview::Availability();
+			if (available.error != Webview::Available::Error::None) {
+				showExternalShellError(WebviewErrorText(
+					tr::lng_bot_no_webview(tr::now),
+					available));
+			} else {
+				showExternalShellError({ tr::lng_bot_webview_failed(tr::now) });
+			}
 		} else {
-			showCriticalError({ "Error: Could not initialize WebView." });
+			_externalShell = false;
+			const auto available = Webview::Availability();
+			if (available.error != Webview::Available::Error::None) {
+				showWebviewError(tr::lng_bot_no_webview(tr::now), available);
+			} else {
+				showCriticalError({ tr::lng_bot_webview_failed(tr::now) });
+			}
 		}
 	}
 }
@@ -1621,6 +1643,16 @@ void Panel::resetExternalShellIdentity() {
 	_externalShellBootstrapped = false;
 }
 
+void Panel::invalidateExternalShellSession() {
+	const auto wasActive = _externalShellBootstrapped
+		|| !_externalShellToken.isEmpty();
+	_externalShellBootstrapped = false;
+	_externalShellToken.clear();
+	if (wasActive) {
+		++_externalShellGeneration;
+	}
+}
+
 void Panel::installExternalShellDocument() {
 	if (!_externalShell
 		|| !_externalShellBootstrapped
@@ -1880,6 +1912,48 @@ void Panel::closeExternalShellLayer() {
 	Webview::CloseBlockingPopup();
 }
 
+void Panel::showExternalShellError(TextWithEntities text) {
+	const auto anchor = externalShellAnchor();
+	invalidateExternalShellSession();
+	_progress = nullptr;
+	_webviewProgress = false;
+	base::take(_webview);
+	_externalWebviewParent = nullptr;
+	_webviewParent = nullptr;
+	Webview::CloseBlockingPopup();
+	if (!_externalLayer) {
+		showCriticalError(text);
+		return;
+	}
+	_externalLayer->setAnchor(
+		anchor.anchorGeometry,
+		anchor.outerSize,
+		anchor.transientParent);
+	const auto weak = base::make_weak(this);
+	const auto botClosed = std::make_shared<bool>(false);
+	const auto closeBot = [=] {
+		if (*botClosed) {
+			return;
+		}
+		*botClosed = true;
+		if (const auto panel = weak.get()) {
+			panel->_delegate->botClose();
+		}
+	};
+	auto box = Ui::MakeInformBox({
+		.text = std::move(text),
+		.confirmed = [=](Fn<void()> close) {
+			close();
+			closeBot();
+		},
+	});
+	box->boxClosing() | rpl::on_next(closeBot, box->lifetime());
+	_externalLayer->showBox(
+		std::move(box),
+		LayerOption::CloseOther,
+		anim::type::normal);
+}
+
 Panel::ExternalShellAnchor Panel::externalShellAnchor() const {
 	if (!_webview) {
 		return {};
@@ -2005,6 +2079,7 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 	if (!_externalShell) {
 		container->show();
 	}
+	_externalWindowCloseRequested = false;
 	_webview = std::make_unique<WebviewWithLifetime>(
 		container,
 		Webview::WindowConfig{
@@ -2062,11 +2137,22 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 	raw->setInteractionHandler([=] {
 		_lastWebviewInteraction = crl::now();
 	});
+	raw->setExternalWindowCloseHandler([=] {
+		if (!_externalShell
+			|| !_webview
+			|| &_webview->window != raw) {
+			return;
+		}
+		_externalWindowCloseRequested = true;
+		invalidateExternalShellSession();
+		_delegate->botClose();
+	});
 
 	QObject::connect(raw->widget(), &QObject::destroyed, [=] {
 		const auto parent = _webviewParent.data();
 		if (!_webview
 			|| &_webview->window != raw
+			|| (_externalShell && _externalWindowCloseRequested)
 			|| (!_externalShell
 				&& (!parent || _widget->inner() != parent))) {
 			// If we destroyed _webview ourselves,
@@ -2075,14 +2161,16 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 			return;
 		}
 		if (_externalShell) {
-			_externalShellBootstrapped = false;
-			++_externalShellGeneration;
+			invalidateExternalShellSession();
 		}
 		crl::on_main(this, [=] {
+			if (!_webview || &_webview->window != raw) {
+				return;
+			}
 			if (_externalShell) {
-				_delegate->botClose();
+				showExternalShellError({ tr::lng_bot_webview_crashed(tr::now) });
 			} else {
-				showCriticalError({ "Error: WebView has crashed." });
+				showCriticalError({ tr::lng_bot_webview_crashed(tr::now) });
 			}
 		});
 	});
@@ -2294,9 +2382,14 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 		hideWebviewProgress();
 		if (_externalShell && !_externalShellBootstrapped) {
 			if (!success) {
-				_externalShell = false;
-				showCriticalError({ "Error: Could not initialize WebView." });
-				_widget->showAndActivate();
+				invalidateExternalShellSession();
+				crl::on_main(this, [=] {
+					if (_externalShell && _webview && &_webview->window == raw) {
+						showExternalShellError({
+							tr::lng_bot_webview_failed(tr::now),
+						});
+					}
+				});
 				return;
 			}
 			_externalShellBootstrapped = true;
@@ -3594,9 +3687,7 @@ TextWithEntities ErrorText(const Webview::Available &info) {
 void Panel::showWebviewError(
 		const QString &text,
 		const Webview::Available &information) {
-	showCriticalError(TextWithEntities{ text }.append(
-		"\n\n"
-	).append(ErrorText(information)));
+	showCriticalError(WebviewErrorText(text, information));
 }
 
 rpl::lifetime &Panel::lifetime() {

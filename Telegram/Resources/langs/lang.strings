@@ -4901,6 +4901,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_bot_sure_add_text_group" = "Are you sure you want to add this bot as an admin in the group {group}? It will have access to the list of anonymous admins.";
 "lng_bot_sure_add_text_channel" = "Are you sure you want to add this bot as an admin in the channel {group}? It will have access to lists of channel admins and subscribers.";
 "lng_bot_no_webview" = "Unfortunately, you can't open this menu with your current system configuration.";
+"lng_bot_webview_failed" = "Could not initialize WebView.";
+"lng_bot_webview_crashed" = "Webview crashed.";
 "lng_bot_remove_from_menu" = "Remove from menu";
 "lng_bot_remove_from_menu_sure" = "Remove {bot} from the attachment menu?";
 "lng_bot_remove_from_menu_done" = "Bot removed from the menu.";
