@@ -116,14 +116,6 @@ struct PreparedTableRow {
 	bool header = false;
 };
 
-struct PreparedMediaBlockId {
-	uint64 value = 0;
-
-	[[nodiscard]] explicit operator bool() const {
-		return (value != 0);
-	}
-};
-
 struct PreparedPhotoBlockData {
 	PreparedMediaBlockId id;
 	uint64 photoId = 0;
@@ -194,6 +186,7 @@ struct PreparedGroupedMediaBlockData {
 };
 
 struct PreparedPlaceholderBlockData {
+	PreparedPlaceholderBlockId id;
 	QString label;
 	QString copyText;
 	std::optional<EmbedRequest> embed;

@@ -1108,12 +1108,18 @@ LaidOutBlock LayoutPlaceholderBlock(
 		const style::Markdown &markdown,
 		int left,
 		int top,
-		int width) {
+		int width,
+		LayoutContext context) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Placeholder;
 	block.anchorId = prepared.anchorId;
 	block.copyText = prepared.placeholder.copyText;
 	block.labelText = prepared.placeholder.label;
+	block.placeholderId = prepared.placeholder.id;
+	if (block.placeholderId && context.placeholderRuntimeFactory) {
+		block.placeholderRuntime = context.placeholderRuntimeFactory(
+			block.placeholderId);
+	}
 	block.supplementary = prepared.supplementary;
 
 	const auto &style = markdown.placeholder;
@@ -1136,6 +1142,12 @@ LaidOutBlock LayoutPlaceholderBlock(
 		labelHeight + style.padding.top() + style.padding.bottom());
 	block.mediaRect = QRect(left, top, blockWidth, mediaHeight);
 	block.visibleMediaRect = block.mediaRect;
+	if (block.placeholderRuntime
+		&& block.placeholderRuntime->ripple
+		&& block.placeholderRuntime->rippleSize != block.mediaRect.size()) {
+		block.placeholderRuntime->ripple = nullptr;
+		block.placeholderRuntime->rippleSize = QSize();
+	}
 	block.labelRect = QRect(
 		contentLeft,
 		top + std::max((mediaHeight - labelHeight) / 2, 0),
@@ -1148,6 +1160,7 @@ LaidOutBlock LayoutPlaceholderBlock(
 	if (prepared.placeholder.embed) {
 		block.activation.kind = MediaActivationKind::Embed;
 		block.activation.embed = *prepared.placeholder.embed;
+		block.activation.placeholderId = block.placeholderId;
 	}
 
 	auto bottom = top + mediaHeight;
@@ -1160,9 +1173,10 @@ LaidOutBlock LayoutPlaceholderBlock(
 		markdown,
 		contentLeft,
 		bottom,
-		contentWidth,
-		style.captionSkip,
-		&bottom);
+			contentWidth,
+			style.captionSkip,
+			&bottom,
+			context);
 
 	block.contentRect = QRect(
 		left,

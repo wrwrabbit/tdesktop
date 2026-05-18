@@ -173,9 +173,15 @@ public:
 	[[nodiscard]] rpl::producer<int> scrollTopValue() const;
 
 private:
+	struct PendingEmbedState {
+		PreparedPlaceholderBlockId placeholderId;
+		uint64 generation = 0;
+	};
+
 	void setup();
 	void prepareArticle();
 	void activateLink(const PreparedLink &link, Qt::MouseButton button);
+	void closeEmbed();
 	void openEmbedLink(QString url);
 	void showFootnote(const PreparedLink &link, Qt::MouseButton button);
 	[[nodiscard]] bool showEmbed(const MediaActivation &activation);
@@ -208,6 +214,7 @@ private:
 	std::shared_ptr<MarkdownArticle> _article;
 	QString _pendingFragment;
 	int _devicePixelRatio = 0;
+	PendingEmbedState _pendingEmbed;
 
 };
 
@@ -430,13 +437,27 @@ void MarkdownPreviewRoot::activateLink(
 	}
 }
 
+void MarkdownPreviewRoot::closeEmbed() {
+	if (_body) {
+		_body->clearAllPlaceholderLoading();
+	}
+	const auto hadPending = bool(_pendingEmbed.placeholderId);
+	_pendingEmbed.placeholderId = {};
+	if (!_embedOverlay) {
+		return;
+	}
+	if (hadPending) {
+		_embedOverlay->cancelPreload();
+	} else {
+		_embedOverlay->closeEmbed();
+	}
+}
+
 void MarkdownPreviewRoot::openEmbedLink(QString url) {
 	if (url.isEmpty()) {
 		return;
 	}
-	if (_embedOverlay) {
-		_embedOverlay->closeEmbed();
-	}
+	closeEmbed();
 	HiddenUrlClickHandler::Open(url, CurrentClickHandlerContext(_options));
 }
 
@@ -464,9 +485,45 @@ void MarkdownPreviewRoot::showFootnote(
 }
 
 bool MarkdownPreviewRoot::showEmbed(const MediaActivation &activation) {
-	return _embedOverlay
-		? _embedOverlay->showEmbed(activation.embed)
-		: false;
+	if (activation.kind != MediaActivationKind::Embed
+		|| !activation.embed
+		|| !activation.placeholderId) {
+		return false;
+	}
+	const auto placeholderId = activation.placeholderId;
+	const auto generation = ++_pendingEmbed.generation;
+	if (_body && _pendingEmbed.placeholderId) {
+		_body->clearPlaceholderLoading(_pendingEmbed.placeholderId);
+	}
+	if (_pendingEmbed.placeholderId && _embedOverlay) {
+		_embedOverlay->cancelPreload();
+	}
+	_pendingEmbed.placeholderId = placeholderId;
+	if (_body) {
+		_body->setPlaceholderLoading(placeholderId);
+	}
+	const auto finishPending = [=] {
+		if (_pendingEmbed.generation != generation
+			|| (_pendingEmbed.placeholderId.value != placeholderId.value)) {
+			return;
+		}
+		if (_body) {
+			_body->clearPlaceholderLoading(placeholderId);
+		}
+		_pendingEmbed.placeholderId = {};
+	};
+	if (!_embedOverlay) {
+		finishPending();
+		return false;
+	}
+	const auto started = _embedOverlay->preloadEmbed(
+		activation.embed,
+		finishPending,
+		finishPending);
+	if (!started) {
+		finishPending();
+	}
+	return started;
 }
 
 void MarkdownPreviewRoot::fillFootnoteBox(
@@ -509,9 +566,7 @@ void MarkdownPreviewRoot::applyPreparedContent(
 	int prepareMs) {
 	const auto failure = prepared.failure;
 	const auto debug = prepared.debug;
-	if (_embedOverlay) {
-		_embedOverlay->closeEmbed();
-	}
+	closeEmbed();
 	if (failure.failed()) {
 		_article = nullptr;
 		_footnotes.clear();

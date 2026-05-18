@@ -20,9 +20,19 @@ struct GeoPointLocation;
 namespace Iv::Markdown {
 namespace {
 
+[[nodiscard]] uint64 GeneratePreparedBlockIdValue(
+		NativeIvPrepareState *state) {
+	return uint64(++state->nextGeneratedId);
+}
+
 [[nodiscard]] PreparedMediaBlockId GeneratePreparedMediaBlockId(
 		NativeIvPrepareState *state) {
-	return { .value = uint64(++state->nextGeneratedId) };
+	return { .value = GeneratePreparedBlockIdValue(state) };
+}
+
+[[nodiscard]] PreparedPlaceholderBlockId GeneratePreparedPlaceholderBlockId(
+		NativeIvPrepareState *state) {
+	return { .value = GeneratePreparedBlockIdValue(state) };
 }
 
 void ShiftEntities(EntitiesInText *entities, int delta) {
@@ -850,8 +860,11 @@ bool PrepareNativeIvPlaceholderBlock(
 	block.links = std::move(prepared.links);
 	block.anchorId = std::move(anchorId);
 	block.supplementary = true;
-	block.placeholder.label = label;
+	block.placeholder.label = std::move(label);
 	block.placeholder.embed = std::move(embed);
+	if (block.placeholder.embed && *block.placeholder.embed) {
+		block.placeholder.id = GeneratePreparedPlaceholderBlockId(state);
+	}
 	block.placeholder.copyText = NativeIvPlaceholderCopyText(
 		block.placeholder.label,
 		block.text);

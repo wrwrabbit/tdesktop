@@ -322,6 +322,41 @@ void MarkdownDocumentWidget::requestRelayout(QRect articleRect) {
 	});
 }
 
+void MarkdownDocumentWidget::setPlaceholderLoading(
+		PreparedPlaceholderBlockId id) {
+	if (_article) {
+		_article->setPlaceholderLoading(id);
+	}
+}
+
+void MarkdownDocumentWidget::clearPlaceholderLoading(
+		PreparedPlaceholderBlockId id) {
+	if (_article) {
+		_article->clearPlaceholderLoading(id);
+	}
+}
+
+void MarkdownDocumentWidget::clearAllPlaceholderLoading() {
+	if (_article) {
+		_article->clearAllPlaceholderLoading();
+	}
+}
+
+void MarkdownDocumentWidget::addPlaceholderRipple(
+		PreparedPlaceholderBlockId id,
+		QPoint point) {
+	if (_article) {
+		_article->addPlaceholderRipple(id, point);
+	}
+}
+
+void MarkdownDocumentWidget::stopPlaceholderRipple(
+		PreparedPlaceholderBlockId id) {
+	if (_article) {
+		_article->stopPlaceholderRipple(id);
+	}
+}
+
 void MarkdownDocumentWidget::paintEvent(QPaintEvent *e) {
 	if (!_article) {
 		return;
@@ -519,6 +554,7 @@ void MarkdownDocumentWidget::mouseDoubleClickEvent(QMouseEvent *e) {
 }
 
 void MarkdownDocumentWidget::focusOutEvent(QFocusEvent *e) {
+	stopPressedPlaceholderRipple();
 	if (!_selection.empty()) {
 		_savedSelection = _selection;
 		_savedSelectionEndpoints = _selectionEndpoints;
@@ -868,9 +904,17 @@ MarkdownArticlePaintCaches MarkdownDocumentWidget::textPaintCaches() {
 	};
 }
 
+void MarkdownDocumentWidget::stopPressedPlaceholderRipple() {
+	if (_pressedPlaceholderId) {
+		stopPlaceholderRipple(_pressedPlaceholderId);
+		_pressedPlaceholderId = {};
+	}
+}
+
 void MarkdownDocumentWidget::dragActionStart(
 		QPoint point,
 		Qt::MouseButton button) {
+	stopPressedPlaceholderRipple();
 	const auto state = hitTest(
 		point,
 		Ui::Text::StateRequest::Flag::LookupLink
@@ -878,6 +922,13 @@ void MarkdownDocumentWidget::dragActionStart(
 	updateHover(state);
 	if (button != Qt::LeftButton) {
 		return;
+	}
+	if (state.mediaActivation.kind == MediaActivationKind::Embed
+		&& state.mediaActivation.placeholderId) {
+		_pressedPlaceholderId = state.mediaActivation.placeholderId;
+		addPlaceholderRipple(
+			state.mediaActivation.placeholderId,
+			state.placeholderLocalPoint);
 	}
 	_dragStartPosition = point;
 	_dragStartHadSelection = !selectionForCopy().empty();
@@ -933,6 +984,7 @@ MarkdownArticleHitTestResult MarkdownDocumentWidget::dragActionFinish(
 		QPoint point,
 		Qt::MouseButton button) {
 	const auto state = dragActionUpdate(point);
+	stopPressedPlaceholderRipple();
 	auto activated = ClickHandler::unpressed();
 	const auto dragStartHadSelection = _dragStartHadSelection;
 	const auto toggleFromDetailsClick = !dragStartHadSelection

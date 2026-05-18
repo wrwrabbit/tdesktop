@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/flat_map.h"
+#include "base/timer.h"
 #include "iv/markdown/iv_markdown_common.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/rp_widget.h"
@@ -53,12 +54,19 @@ public:
 			dataRequestHandler);
 	~EmbedOverlay();
 
+	[[nodiscard]] bool preloadEmbed(
+		const EmbedRequest &request,
+		std::function<void()> shownCallback = {},
+		std::function<void()> failedCallback = {});
 	[[nodiscard]] bool showEmbed(const EmbedRequest &request);
+	void cancelPreload();
 	void closeEmbed();
 	void updateGeometry(QRect geometry, int contentWidth);
 	void testHandleWebviewMessage(const QJsonDocument &message);
 	void testHandleNavigationDone(bool success);
 	[[nodiscard]] bool testLoadingCoverVisible() const;
+	[[nodiscard]] bool testReadyDelayScheduled() const;
+	void testFireReadyDelay();
 	[[nodiscard]] const Webview::StorageId &testEffectiveStorageId() const;
 
 protected:
@@ -71,11 +79,18 @@ private:
 	void installEscapeFilter();
 	void removeEscapeFilter();
 	[[nodiscard]] bool eventFromOverlayWindow(QObject *object) const;
+	[[nodiscard]] bool startEmbed(
+		const EmbedRequest &request,
+		bool showErrorOnFailure,
+		std::function<void()> shownCallback,
+		std::function<void()> failedCallback);
 	void ensureWebview();
 	[[nodiscard]] Webview::WindowConfig makeWindowConfig() const;
 	void handleWebviewMessage(const QJsonDocument &message);
 	void handleNavigationDone(bool success);
+	void cancelReadyDelay();
 	void setReady();
+	void revealReadyEmbed();
 	void applyPreferredBodySize(QSize size);
 	void applyPreferredBodyHeight(int height);
 	void updateCssToQtScale(int viewportWidth);
@@ -106,6 +121,7 @@ private:
 	Ui::PaddingWrap<Ui::FlatLabel> *_error = nullptr;
 	Ui::FlatLabel *_errorLabel = nullptr;
 	std::unique_ptr<Webview::Window> _webview;
+	base::Timer _readyDelayTimer;
 	Ui::InfiniteRadialAnimation _loadingAnimation;
 	EmbedRequest _request;
 	QRect _contentGeometry;
@@ -113,6 +129,8 @@ private:
 	QSize _pendingPreferredBodySize;
 	QString _readyNavigationToken;
 	QPointer<QWidget> _focusRestore;
+	std::function<void()> _shownCallback;
+	std::function<void()> _failedCallback;
 	int _contentWidth = 0;
 	int _navigationGeneration = 0;
 	int _webviewGeneration = 0;
@@ -121,6 +139,7 @@ private:
 	bool _readyFromResource = false;
 	bool _ready = false;
 	bool _loading = false;
+	bool _showErrorOnFailure = false;
 	bool _escapeFilterInstalled = false;
 
 };

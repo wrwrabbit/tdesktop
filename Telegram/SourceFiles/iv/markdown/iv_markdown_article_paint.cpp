@@ -629,6 +629,7 @@ void PaintQuoteBlock(
 void PaintPlaceholderBlock(
 		Painter &p,
 		const LaidOutBlock &block,
+		int outerWidth,
 		const style::Markdown &markdown,
 		const MarkdownArticlePaintCaches &caches,
 		const PaintSelectionState &selectionState,
@@ -638,28 +639,88 @@ void PaintPlaceholderBlock(
 		p.save();
 		p.setClipRect(visible);
 		auto hq = PainterHighQualityEnabler(p);
-		const auto max = block.labelLeaf.maxWidth();
-		const auto radius = markdown.placeholder.padding.left();
-		p.setBrush(st::windowBgOver);
-		p.setPen(Qt::NoPen);
-		const auto skip = (max < block.labelRect.width())
-			? ((block.labelRect.width() - max) / 2)
-			: 0;
-		p.drawRoundedRect(
-			block.labelRect.marginsRemoved(
-				{ skip, 0, skip, 0 }
-			).marginsAdded(markdown.placeholder.padding),
-			radius,
-			radius);
-		p.setPen(st::windowSubTextFg->c);
-		PaintTextLeaf(
-			p,
-			block.labelLeaf,
-			caches,
-			block.labelRect,
-			block.labelWidth,
-			visible,
-			style::al_center);
+		if (block.activation.kind == MediaActivationKind::Embed
+			&& block.placeholderRuntime) {
+			const auto border = markdown.placeholder.border;
+			const auto radius = markdown.placeholder.radius;
+			const auto borderSkip = border / 2;
+			const auto borderRect = block.mediaRect.marginsRemoved(QMargins(
+				borderSkip,
+				borderSkip,
+				borderSkip,
+				borderSkip));
+			const auto active = ClickHandler::showAsActive(
+				block.placeholderRuntime->clickHandler);
+			const auto pressed = ClickHandler::showAsPressed(
+				block.placeholderRuntime->clickHandler);
+			if (active || pressed) {
+				p.setPen(Qt::NoPen);
+				p.setBrush(st::windowBgOver);
+				p.drawRoundedRect(block.mediaRect, radius, radius);
+			}
+			if (const auto &ripple = block.placeholderRuntime->ripple) {
+				ripple->paint(
+					p,
+					block.mediaRect.x(),
+					block.mediaRect.y(),
+					outerWidth,
+					&st::windowBgRipple->c);
+			}
+			auto pen = QPen(st::windowActiveTextFg->c);
+			pen.setWidth(border);
+			p.setPen(pen);
+			p.setBrush(Qt::NoBrush);
+			p.drawRoundedRect(borderRect, radius, radius);
+			if (block.placeholderRuntime->loading) {
+				const auto size = QSize(
+					markdown.placeholder.spinnerSize,
+					markdown.placeholder.spinnerSize);
+				const auto spinner = style::centerrect(
+					block.mediaRect,
+					QRect(QPoint(), size));
+				Ui::InfiniteRadialAnimation::Draw(
+					p,
+					block.placeholderRuntime->loadingAnimation.computeState(),
+					spinner.topLeft(),
+					spinner.size(),
+					outerWidth,
+					QPen(st::windowActiveTextFg->c),
+					markdown.placeholder.spinnerWidth);
+			} else {
+				p.setPen(st::windowActiveTextFg->c);
+				PaintTextLeaf(
+					p,
+					block.labelLeaf,
+					caches,
+					block.labelRect,
+					block.labelWidth,
+					visible,
+					style::al_center);
+			}
+		} else {
+			const auto max = block.labelLeaf.maxWidth();
+			const auto radius = markdown.placeholder.padding.left();
+			p.setBrush(st::windowBgOver);
+			p.setPen(Qt::NoPen);
+			const auto skip = (max < block.labelRect.width())
+				? ((block.labelRect.width() - max) / 2)
+				: 0;
+			p.drawRoundedRect(
+				block.labelRect.marginsRemoved(
+					{ skip, 0, skip, 0 }
+				).marginsAdded(markdown.placeholder.padding),
+				radius,
+				radius);
+			p.setPen(st::windowSubTextFg->c);
+			PaintTextLeaf(
+				p,
+				block.labelLeaf,
+				caches,
+				block.labelRect,
+				block.labelWidth,
+				visible,
+				style::al_center);
+		}
 		if (block.segmentIndex >= 0
 			&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
 			p.fillRect(block.visibleMediaRect, p.textPalette().selectOverlay);
@@ -1340,6 +1401,7 @@ void PaintBlock(
 		PaintPlaceholderBlock(
 			p,
 			block,
+			outerWidth,
 			markdown,
 			caches,
 			selectionState,

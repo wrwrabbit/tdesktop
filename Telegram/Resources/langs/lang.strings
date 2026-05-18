@@ -7888,6 +7888,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_contact_send_message" = "Message";
 
 "lng_iv_open_in_browser" = "Open in Browser";
+"lng_iv_click_to_view" = "Click to View";
 "lng_iv_share" = "Share";
 "lng_iv_join_channel" = "Join";
 "lng_iv_window_title" = "Instant View";

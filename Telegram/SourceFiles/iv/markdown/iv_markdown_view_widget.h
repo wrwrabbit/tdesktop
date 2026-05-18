@@ -57,6 +57,11 @@ public:
 	int resizeGetHeight(int newWidth) override;
 	void requestRepaint(QRect articleRect) override;
 	void requestRelayout(QRect articleRect) override;
+	void setPlaceholderLoading(PreparedPlaceholderBlockId id);
+	void clearPlaceholderLoading(PreparedPlaceholderBlockId id);
+	void clearAllPlaceholderLoading();
+	void addPlaceholderRipple(PreparedPlaceholderBlockId id, QPoint point);
+	void stopPlaceholderRipple(PreparedPlaceholderBlockId id);
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
@@ -112,6 +117,7 @@ private:
 	[[nodiscard]] Ui::Text::QuotePaintCache *ensurePrePaintCache();
 	[[nodiscard]] Ui::Text::QuotePaintCache *ensureBlockquotePaintCache();
 	[[nodiscard]] MarkdownArticlePaintCaches textPaintCaches();
+	void stopPressedPlaceholderRipple();
 	void dragActionStart(QPoint point, Qt::MouseButton button);
 	MarkdownArticleHitTestResult dragActionUpdate(QPoint point);
 	MarkdownArticleHitTestResult dragActionFinish(
@@ -141,6 +147,7 @@ private:
 	int _dragSymbol = 0;
 	TextSelection _dragExpandedSelection;
 	std::optional<PreparedLink> _selectionClickPreparedLink;
+	PreparedPlaceholderBlockId _pressedPlaceholderId;
 	bool _dragStartHadSelection = false;
 	int _lastRelayoutMs = 0;
 	int _zoom = 100;

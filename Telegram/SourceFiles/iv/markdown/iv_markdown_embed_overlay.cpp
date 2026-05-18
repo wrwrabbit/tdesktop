@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_embed_overlay.h"
 
+#include "base/algorithm.h"
 #include "core/file_utilities.h"
 #include "lang/lang_keys.h"
 #include "ui/cached_round_corners.h"
@@ -39,6 +40,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Iv::Markdown {
 namespace {
+
+constexpr auto kReadyRevealDelay = crl::time(1000);
 
 [[nodiscard]] TextWithEntities GenericWebviewErrorText() {
 	return { u"Error: Could not initialize WebView."_q };
@@ -211,6 +214,9 @@ EmbedOverlay::EmbedOverlay(
 , _linkActivationCallback(std::move(linkActivationCallback))
 , _storageId(std::move(storageId))
 , _dataRequestHandler(std::move(dataRequestHandler))
+, _readyDelayTimer([=] {
+	revealReadyEmbed();
+})
 , _loadingAnimation(
 	[=] {
 		if (!anim::Disabled()) {
@@ -244,17 +250,41 @@ EmbedOverlay::EmbedOverlay(
 
 EmbedOverlay::~EmbedOverlay() {
 	destroyWebview();
+	cancelReadyDelay();
 	removeEscapeFilter();
 }
 
+bool EmbedOverlay::preloadEmbed(
+		const EmbedRequest &request,
+		std::function<void()> shownCallback,
+		std::function<void()> failedCallback) {
+	return startEmbed(
+		request,
+		false,
+		std::move(shownCallback),
+		std::move(failedCallback));
+}
+
 bool EmbedOverlay::showEmbed(const EmbedRequest &request) {
+	return startEmbed(request, true, {}, {});
+}
+
+void EmbedOverlay::cancelPreload() {
+	closeEmbed();
+}
+
+bool EmbedOverlay::startEmbed(
+		const EmbedRequest &request,
+		bool showErrorOnFailure,
+		std::function<void()> shownCallback,
+		std::function<void()> failedCallback) {
 	if (!request) {
 		return false;
 	}
+	closeEmbed();
 	if (isHidden()) {
 		_focusRestore = QApplication::focusWidget();
 	}
-	destroyWebview();
 	_request = request;
 	_preferredBodySize = QSize();
 	_pendingPreferredBodySize = QSize();
@@ -263,10 +293,12 @@ bool EmbedOverlay::showEmbed(const EmbedRequest &request) {
 	_readyFromResource = false;
 	_ready = false;
 	_loading = true;
+	_showErrorOnFailure = showErrorOnFailure;
+	_shownCallback = std::move(shownCallback);
+	_failedCallback = std::move(failedCallback);
 	clearWebviewError();
-	QWidget::show();
-	installEscapeFilter();
-	raiseSurfaces();
+	QWidget::hide();
+	removeEscapeFilter();
 	updateContentGeometry();
 	_loadingAnimation.start();
 	_content->update();
@@ -306,9 +338,7 @@ bool EmbedOverlay::showEmbed(const EmbedRequest &request) {
 }
 
 void EmbedOverlay::closeEmbed() {
-	if (isHidden()) {
-		return;
-	}
+	cancelReadyDelay();
 	_loading = false;
 	_loadingAnimation.stop(anim::type::instant);
 	if (_content) {
@@ -325,6 +355,10 @@ void EmbedOverlay::closeEmbed() {
 	_cssToQtScale = 1.;
 	_readyFromResource = false;
 	_ready = false;
+	_showErrorOnFailure = false;
+	_shownCallback = nullptr;
+	_failedCallback = nullptr;
+	_pressedOutside = false;
 	restoreFocus();
 }
 
@@ -342,11 +376,11 @@ void EmbedOverlay::testHandleWebviewMessage(const QJsonDocument &message) {
 }
 
 void EmbedOverlay::testHandleNavigationDone(bool success) {
-	if (success) {
+	if (success && _readyFromResource) {
 		handleWebviewMessage(NavigationReadyMessage(
-			_readyFromResource ? _request.resourceId : QByteArray(),
-			_readyFromResource ? _readyNavigationToken : QString(),
-			_readyFromResource ? QString() : _request.fallbackUrl));
+			_request.resourceId,
+			_readyNavigationToken,
+			QString()));
 		return;
 	}
 	handleNavigationDone(success);
@@ -354,6 +388,15 @@ void EmbedOverlay::testHandleNavigationDone(bool success) {
 
 bool EmbedOverlay::testLoadingCoverVisible() const {
 	return _loading;
+}
+
+bool EmbedOverlay::testReadyDelayScheduled() const {
+	return _readyDelayTimer.isActive();
+}
+
+void EmbedOverlay::testFireReadyDelay() {
+	cancelReadyDelay();
+	revealReadyEmbed();
 }
 
 const Webview::StorageId &EmbedOverlay::testEffectiveStorageId() const {
@@ -535,16 +578,15 @@ void EmbedOverlay::handleWebviewMessage(const QJsonDocument &message) {
 			showWebviewError();
 			return;
 		}
-		if (_readyFromResource) {
-			if (object.value("token").toString() != _readyNavigationToken) {
-				return;
-			}
-			if (normalizedRequestId(
-				object.value("resourceId").toString().toStdString())
-					!= _request.resourceId) {
-				return;
-			}
-		} else if (object.value("url").toString().isEmpty()) {
+		if (!_readyFromResource) {
+			return;
+		}
+		if (object.value("token").toString() != _readyNavigationToken) {
+			return;
+		}
+		if (normalizedRequestId(
+			object.value("resourceId").toString().toStdString())
+				!= _request.resourceId) {
 			return;
 		}
 		setReady();
@@ -578,10 +620,20 @@ void EmbedOverlay::handleWebviewMessage(const QJsonDocument &message) {
 }
 
 void EmbedOverlay::handleNavigationDone(bool success) {
-	if (success || !_request || _ready || isHidden()) {
+	if (!_request || _ready) {
+		return;
+	}
+	if (success) {
+		if (!_readyFromResource) {
+			setReady();
+		}
 		return;
 	}
 	showWebviewError();
+}
+
+void EmbedOverlay::cancelReadyDelay() {
+	_readyDelayTimer.cancel();
 }
 
 void EmbedOverlay::setReady() {
@@ -594,19 +646,34 @@ void EmbedOverlay::setReady() {
 			|| _pendingPreferredBodySize.height() > 0)) {
 		_preferredBodySize = _pendingPreferredBodySize;
 		_pendingPreferredBodySize = QSize();
-		updateContentGeometry();
-	} else {
-		updateWebviewGeometry();
 	}
+	updateContentGeometry();
+	cancelReadyDelay();
+	_readyDelayTimer.callOnce(kReadyRevealDelay);
+}
+
+void EmbedOverlay::revealReadyEmbed() {
+	if (!_ready || !_request || !_webview || !_webview->widget()) {
+		return;
+	}
+	cancelReadyDelay();
+	clearWebviewError();
+	QWidget::show();
+	installEscapeFilter();
+	raiseSurfaces();
+	updateContentGeometry();
 	_loading = false;
 	_loadingAnimation.stop(anim::type::normal);
 	_content->update();
-	clearWebviewError();
 	_webview->widget()->show();
 	_webview->widget()->raise();
 	_webview->focus();
 	update();
 	_content->update();
+	if (const auto shownCallback = base::take(_shownCallback)) {
+		shownCallback();
+	}
+	_failedCallback = nullptr;
 }
 
 void EmbedOverlay::applyPreferredBodySize(QSize size) {
@@ -753,11 +820,34 @@ void EmbedOverlay::showWebviewError() {
 }
 
 void EmbedOverlay::showWebviewError(const TextWithEntities &text) {
+	cancelReadyDelay();
 	_ready = false;
 	_loading = false;
 	_loadingAnimation.stop(anim::type::normal);
 	_content->update();
 	hideWebview();
+	destroyWebview();
+	_shownCallback = nullptr;
+	const auto failedCallback = base::take(_failedCallback);
+	const auto showError = !isHidden() || _showErrorOnFailure;
+	_showErrorOnFailure = false;
+	_readyNavigationToken = QString();
+	_readyFromResource = false;
+	if (!showError) {
+		clearWebviewError();
+		_request = EmbedRequest();
+		_preferredBodySize = QSize();
+		_pendingPreferredBodySize = QSize();
+		_cssToQtScale = 1.;
+		restoreFocus();
+		if (failedCallback) {
+			failedCallback();
+		}
+		return;
+	}
+	QWidget::show();
+	installEscapeFilter();
+	raiseSurfaces();
 	if (!_error) {
 		_error = Ui::CreateChild<Ui::PaddingWrap<Ui::FlatLabel>>(
 			_content,
@@ -783,6 +873,9 @@ void EmbedOverlay::showWebviewError(const TextWithEntities &text) {
 	_errorLabel->setMarkedText(AddFallbackAction(text, _request.fallbackUrl));
 	_error->show();
 	updateContentGeometry();
+	if (failedCallback) {
+		failedCallback();
+	}
 }
 
 void EmbedOverlay::clearWebviewError() {

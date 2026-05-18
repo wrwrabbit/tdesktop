@@ -73,6 +73,7 @@ struct LaidOutBlock {
 	QString codeLanguage;
 	std::optional<PreparedLink> preparedLink;
 	ClickHandlerPtr preparedLinkHandler;
+	PreparedPlaceholderBlockId placeholderId;
 	Spellchecker::HighlightProcessId syntaxHighlightProcessId = 0;
 	std::vector<LaidOutBlock> children;
 	std::vector<LaidOutTableRow> tableRows;
@@ -118,6 +119,7 @@ struct LaidOutBlock {
 	int secondarySegmentIndex = -1;
 	int tertiarySegmentIndex = -1;
 	std::shared_ptr<MediaBlock> mediaBlock;
+	std::shared_ptr<PlaceholderBlockRuntime> placeholderRuntime;
 	std::shared_ptr<PhotoRuntime> photoRuntime;
 	MediaActivation activation;
 	uint64 thumbnailPhotoId = 0;
@@ -140,6 +142,8 @@ struct LayoutContext {
 	bool allowAsyncSyntaxHighlighting = true;
 	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr;
 	std::function<std::shared_ptr<MediaBlock>(const PreparedBlock&)> mediaBlockFactory;
+	std::function<std::shared_ptr<PlaceholderBlockRuntime>(
+		PreparedPlaceholderBlockId)> placeholderRuntimeFactory;
 };
 
 struct TableCellLayoutData {
@@ -247,7 +251,8 @@ void RepopulateCodeBlockLeaf(
 	const style::Markdown &markdown,
 	int left,
 	int top,
-	int width);
+	int width,
+	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutRelatedArticleBlock(
 	const PreparedBlock &prepared,
 	const style::Markdown &markdown,

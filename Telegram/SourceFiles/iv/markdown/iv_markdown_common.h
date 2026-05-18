@@ -88,6 +88,22 @@ public:
 	virtual void join(Qt::MouseButton button) const = 0;
 };
 
+struct PreparedMediaBlockId {
+	uint64 value = 0;
+
+	[[nodiscard]] explicit operator bool() const {
+		return (value != 0);
+	}
+};
+
+struct PreparedPlaceholderBlockId {
+	uint64 value = 0;
+
+	[[nodiscard]] explicit operator bool() const {
+		return (value != 0);
+	}
+};
+
 struct PreparedPhotoBlockData;
 struct PreparedVideoBlockData;
 struct PreparedAudioBlockData;
@@ -197,6 +213,7 @@ struct MediaActivation {
 	MediaActivationKind kind = MediaActivationKind::None;
 	QString url;
 	EmbedRequest embed;
+	PreparedPlaceholderBlockId placeholderId;
 	std::shared_ptr<PhotoRuntime> photo;
 	std::shared_ptr<DocumentRuntime> document;
 	std::shared_ptr<ChannelRuntime> channel;

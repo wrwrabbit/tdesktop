@@ -765,10 +765,11 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 		const MTPDpageBlockEmbed &data,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
+	const auto label = tr::lng_iv_click_to_view(tr::now);
 	const auto html = RenderNativeIvEmbedHtml(data, state, false);
 	if (html.isEmpty()) {
 		return PrepareNativeIvPlaceholderBlock(
-			u"Embed Placeholder"_q,
+			label,
 			data.vcaption(),
 			result,
 			state);
@@ -787,7 +788,7 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 		.allowScrolling = data.is_allow_scrolling(),
 	};
 	return PrepareNativeIvPlaceholderBlock(
-		u"Embed Placeholder"_q,
+		label,
 		data.vcaption(),
 		result,
 		state,
@@ -1506,6 +1507,9 @@ void MarkNativeIvTableSlots(
 			data.vtext(),
 			state);
 	}, [&](const MTPDpageBlockAuthorDate &data) {
+		return PrepareNativeIvPlainPlaceholderBlock(
+			u"Unsupported Content"_q,
+			result); AssertIsDebug();
 		auto prepared = PreparedIvRichText();
 		auto anchorId = QString();
 		if (!PrepareNativeIvRichText(

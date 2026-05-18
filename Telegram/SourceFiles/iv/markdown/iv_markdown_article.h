@@ -12,6 +12,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_prepare.h"
 
 #include "spellcheck/spellcheck_highlight_syntax.h"
+#include "ui/click_handler.h"
+#include "ui/effects/radial_animation.h"
+#include "ui/effects/ripple_animation.h"
 #include "ui/painter.h"
 #include "ui/text/text.h"
 
@@ -20,6 +23,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <span>
 
 namespace Iv::Markdown {
+
+struct PlaceholderBlockRuntime {
+	explicit PlaceholderBlockRuntime(Fn<void()> repaint);
+
+	ClickHandlerPtr clickHandler;
+	bool loading = false;
+	Ui::InfiniteRadialAnimation loadingAnimation;
+	std::unique_ptr<Ui::RippleAnimation> ripple;
+	QSize rippleSize;
+};
 
 struct MarkdownArticlePaintCaches {
 	Ui::Text::QuotePaintCache *pre = nullptr;
@@ -35,6 +48,7 @@ struct MarkdownArticleHitTestResult {
 	Ui::Text::StateResult state;
 	std::optional<PreparedLink> preparedLink;
 	MediaActivation mediaActivation;
+	QPoint placeholderLocalPoint;
 	int forcedOffset = -1;
 	bool direct = false;
 
@@ -155,11 +169,17 @@ public:
 	void invalidatePaletteCache();
 	void invalidateRasterCache();
 	[[nodiscard]] MediaBlockHost *mediaBlockHost() const;
+	void setPlaceholderLoading(PreparedPlaceholderBlockId id);
+	void clearPlaceholderLoading(PreparedPlaceholderBlockId id);
+	void clearAllPlaceholderLoading();
+	void addPlaceholderRipple(PreparedPlaceholderBlockId id, QPoint point);
+	void stopPlaceholderRipple(PreparedPlaceholderBlockId id);
 
 private:
 	class Impl;
 
 	std::unique_ptr<Impl> _impl;
+
 };
 
 } // namespace Iv::Markdown

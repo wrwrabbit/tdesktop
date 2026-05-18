@@ -53,7 +53,6 @@ namespace {
 	case PreparedBlockKind::Channel:
 	case PreparedBlockKind::GroupedMedia:
 	case PreparedBlockKind::RelatedArticle:
-	case PreparedBlockKind::Placeholder:
 		return true;
 	case PreparedBlockKind::Paragraph:
 	case PreparedBlockKind::Heading:
@@ -65,6 +64,7 @@ namespace {
 	case PreparedBlockKind::DisplayMath:
 	case PreparedBlockKind::Table:
 	case PreparedBlockKind::Details:
+	case PreparedBlockKind::Placeholder:
 	case PreparedBlockKind::EmbedPost:
 		return false;
 	}
@@ -904,7 +904,8 @@ void PrepareNestedContext(
 			markdown,
 			left,
 			top,
-			width);
+			width,
+			context);
 	case PreparedBlockKind::Details:
 		return LayoutDetailsBlock(
 			prepared,

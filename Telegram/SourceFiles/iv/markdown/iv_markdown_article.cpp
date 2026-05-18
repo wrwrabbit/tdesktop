@@ -16,10 +16,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/dynamic_image.h"
 
 #include "styles/style_iv.h"
+#include "styles/style_widgets.h"
 
 #include <algorithm>
 #include <limits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace Iv::Markdown {
@@ -107,6 +109,54 @@ void RestoreRelatedArticleThumbnailStates(
 	for (auto &block : *blocks) {
 		RestoreRelatedArticleThumbnailState(&block, states);
 	}
+}
+
+void CollectPlaceholderIds(
+		const std::vector<LaidOutBlock> &blocks,
+		std::unordered_set<uint64> *result) {
+	if (!result) {
+		return;
+	}
+	for (const auto &block : blocks) {
+		if (block.placeholderId) {
+			result->emplace(block.placeholderId.value);
+		}
+		CollectPlaceholderIds(block.children, result);
+	}
+}
+
+[[nodiscard]] LaidOutBlock *FindPlaceholderBlock(
+		std::vector<LaidOutBlock> *blocks,
+		PreparedPlaceholderBlockId id) {
+	if (!blocks || !id) {
+		return nullptr;
+	}
+	for (auto &block : *blocks) {
+		if (block.placeholderId.value == id.value) {
+			return &block;
+		}
+		if (const auto child = FindPlaceholderBlock(&block.children, id)) {
+			return child;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] const LaidOutBlock *FindPlaceholderBlock(
+		const std::vector<LaidOutBlock> &blocks,
+		PreparedPlaceholderBlockId id) {
+	if (!id) {
+		return nullptr;
+	}
+	for (const auto &block : blocks) {
+		if (block.placeholderId.value == id.value) {
+			return &block;
+		}
+		if (const auto child = FindPlaceholderBlock(block.children, id)) {
+			return child;
+		}
+	}
+	return nullptr;
 }
 
 [[nodiscard]] PendingHighlightKey PendingHighlightKeyForBlock(
@@ -310,6 +360,12 @@ void RebuildVisibleSegmentLookup(
 			}
 		} else {
 			applyActivation(segment.block->activation);
+			if (result.mediaActivation.kind == MediaActivationKind::Embed
+				&& segment.block->placeholderRuntime) {
+				result.state.link = segment.block->placeholderRuntime->clickHandler;
+				result.placeholderLocalPoint = point
+					- segment.block->mediaRect.topLeft();
+			}
 		}
 	}
 	result.direct = true;
@@ -376,6 +432,18 @@ void ClearColorizedFormulaImages(std::vector<LaidOutBlock> *blocks) {
 }
 
 } // namespace
+
+PlaceholderBlockRuntime::PlaceholderBlockRuntime(Fn<void()> repaint)
+: clickHandler(std::make_shared<LambdaClickHandler>([] {
+}))
+, loadingAnimation(
+	[repaint = std::move(repaint)] {
+		if (repaint) {
+			repaint();
+		}
+	},
+	st::defaultInfiniteRadialAnimation) {
+}
 
 class MarkdownArticle::Impl final : public CodeBlockSyntaxHighlightTracker {
 public:
@@ -446,6 +514,12 @@ public:
 
 	[[nodiscard]] MediaBlockHost *mediaBlockHost() const;
 
+	void setPlaceholderLoading(PreparedPlaceholderBlockId id);
+	void clearPlaceholderLoading(PreparedPlaceholderBlockId id);
+	void clearAllPlaceholderLoading();
+	void addPlaceholderRipple(PreparedPlaceholderBlockId id, QPoint point);
+	void stopPlaceholderRipple(PreparedPlaceholderBlockId id);
+
 	void invalidateLayout();
 
 private:
@@ -458,6 +532,15 @@ private:
 	void clearMediaBlocks();
 
 	void refreshMediaBlockHosts();
+
+	void clearPlaceholderRuntimes();
+
+	[[nodiscard]] std::shared_ptr<PlaceholderBlockRuntime>
+	getOrCreatePlaceholderRuntime(PreparedPlaceholderBlockId id);
+
+	void prunePlaceholderRuntimes();
+
+	void requestPlaceholderRepaint(PreparedPlaceholderBlockId id);
 
 	[[nodiscard]] std::shared_ptr<MediaBlock> getOrCreateMediaBlock(
 		const PreparedBlock &prepared);
@@ -486,6 +569,10 @@ private:
 
 	void resetFormulaRasterCache();
 
+	void setPlaceholderLoadingValue(
+		PreparedPlaceholderBlockId id,
+		bool loading);
+
 	void relayout(int width);
 
 	mutable MarkdownArticleContent _content;
@@ -499,6 +586,8 @@ private:
 	int _height = 0;
 	std::vector<LaidOutBlock> _blocks;
 	std::unordered_map<uint64, std::shared_ptr<MediaBlock>> _mediaBlocks;
+	std::unordered_map<uint64, std::shared_ptr<PlaceholderBlockRuntime>>
+		_placeholderRuntimes;
 	std::unordered_map<
 		uint64,
 		RelatedArticleThumbnailState> _relatedArticleThumbnails;
@@ -544,6 +633,7 @@ void MarkdownArticle::Impl::setTextRepaintCallbacks(
 
 void MarkdownArticle::Impl::setContent(MarkdownArticleContent content) {
 	clearMediaBlocks();
+	clearPlaceholderRuntimes();
 	_relatedArticleThumbnails.clear();
 	_content = std::move(content);
 	ClearInlineFormulaObjectCache(_inlineFormulaObjects);
@@ -761,6 +851,79 @@ MediaBlockHost *MarkdownArticle::Impl::mediaBlockHost() const {
 	return _mediaBlockHost;
 }
 
+void MarkdownArticle::Impl::setPlaceholderLoading(
+		PreparedPlaceholderBlockId id) {
+	setPlaceholderLoadingValue(id, true);
+}
+
+void MarkdownArticle::Impl::clearPlaceholderLoading(
+		PreparedPlaceholderBlockId id) {
+	setPlaceholderLoadingValue(id, false);
+}
+
+void MarkdownArticle::Impl::clearAllPlaceholderLoading() {
+	auto repaintIds = std::vector<PreparedPlaceholderBlockId>();
+	repaintIds.reserve(_placeholderRuntimes.size());
+	for (const auto &[value, runtime] : _placeholderRuntimes) {
+		if (!runtime || !runtime->loading) {
+			continue;
+		}
+		runtime->loading = false;
+		runtime->loadingAnimation.stop(anim::type::instant);
+		repaintIds.push_back({ .value = value });
+	}
+	for (const auto id : repaintIds) {
+		requestPlaceholderRepaint(id);
+	}
+}
+
+void MarkdownArticle::Impl::addPlaceholderRipple(
+		PreparedPlaceholderBlockId id,
+		QPoint point) {
+	const auto block = FindPlaceholderBlock(&_blocks, id);
+	if (!block) {
+		return;
+	}
+	auto runtime = block->placeholderRuntime
+		? block->placeholderRuntime
+		: getOrCreatePlaceholderRuntime(id);
+	if (!runtime) {
+		return;
+	}
+	block->placeholderRuntime = runtime;
+	const auto size = block->mediaRect.size();
+	if (!runtime->ripple || runtime->rippleSize != size) {
+		runtime->ripple = std::make_unique<Ui::RippleAnimation>(
+			st::defaultRippleAnimation,
+			Ui::RippleAnimation::RoundRectMask(
+				size,
+				st::defaultMarkdown.placeholder.radius),
+			[=] {
+				requestPlaceholderRepaint(id);
+			});
+		runtime->rippleSize = size;
+	}
+	point.setX(std::clamp(point.x(), 0, std::max(size.width() - 1, 0)));
+	point.setY(std::clamp(point.y(), 0, std::max(size.height() - 1, 0)));
+	runtime->ripple->add(point);
+	requestPlaceholderRepaint(id);
+}
+
+void MarkdownArticle::Impl::stopPlaceholderRipple(
+		PreparedPlaceholderBlockId id) {
+	if (!id) {
+		return;
+	}
+	const auto i = _placeholderRuntimes.find(id.value);
+	if (i == end(_placeholderRuntimes)
+		|| !i->second
+		|| !i->second->ripple) {
+		return;
+	}
+	i->second->ripple->lastStop();
+	requestPlaceholderRepaint(id);
+}
+
 void MarkdownArticle::Impl::invalidateLayout() {
 	_width = -1;
 	_height = 0;
@@ -803,11 +966,57 @@ void MarkdownArticle::Impl::clearMediaBlocks() {
 	_mediaBlocks.clear();
 }
 
+void MarkdownArticle::Impl::clearPlaceholderRuntimes() {
+	_placeholderRuntimes.clear();
+}
+
 void MarkdownArticle::Impl::refreshMediaBlockHosts() {
 	for (const auto &[id, block] : _mediaBlocks) {
 		if (block) {
 			block->setHost(_mediaBlockHost);
 		}
+	}
+}
+
+std::shared_ptr<PlaceholderBlockRuntime>
+MarkdownArticle::Impl::getOrCreatePlaceholderRuntime(
+		PreparedPlaceholderBlockId id) {
+	if (!id) {
+		return nullptr;
+	}
+	if (const auto i = _placeholderRuntimes.find(id.value);
+		i != end(_placeholderRuntimes)) {
+		return i->second;
+	}
+	auto runtime = std::make_shared<PlaceholderBlockRuntime>([=] {
+		requestPlaceholderRepaint(id);
+	});
+	_placeholderRuntimes.emplace(id.value, runtime);
+	return runtime;
+}
+
+void MarkdownArticle::Impl::prunePlaceholderRuntimes() {
+	auto live = std::unordered_set<uint64>();
+	CollectPlaceholderIds(_blocks, &live);
+	for (auto i = _placeholderRuntimes.begin(); i != _placeholderRuntimes.end();) {
+		if (live.find(i->first) != end(live)) {
+			++i;
+		} else {
+			i = _placeholderRuntimes.erase(i);
+		}
+	}
+}
+
+void MarkdownArticle::Impl::requestPlaceholderRepaint(
+		PreparedPlaceholderBlockId id) {
+	if (const auto block = FindPlaceholderBlock(_blocks, id)) {
+		if (_textRepaintRect) {
+			_textRepaintRect(block->mediaRect);
+		} else if (_textRepaint) {
+			_textRepaint();
+		}
+	} else if (_textRepaint) {
+		_textRepaint();
 	}
 }
 
@@ -955,6 +1164,33 @@ void MarkdownArticle::Impl::resetFormulaRasterCache() {
 	_formulaRenders.resize(_content.formulas.size());
 }
 
+void MarkdownArticle::Impl::setPlaceholderLoadingValue(
+		PreparedPlaceholderBlockId id,
+		bool loading) {
+	if (!id) {
+		return;
+	}
+	const auto runtime = loading
+		? getOrCreatePlaceholderRuntime(id)
+		: [&]() -> std::shared_ptr<PlaceholderBlockRuntime> {
+			if (const auto i = _placeholderRuntimes.find(id.value);
+				i != end(_placeholderRuntimes)) {
+				return i->second;
+			}
+			return nullptr;
+		}();
+	if (!runtime || runtime->loading == loading) {
+		return;
+	}
+	runtime->loading = loading;
+	if (loading) {
+		runtime->loadingAnimation.start();
+	} else {
+		runtime->loadingAnimation.stop(anim::type::instant);
+	}
+	requestPlaceholderRepaint(id);
+}
+
 void MarkdownArticle::Impl::relayout(int width) {
 	width = std::max(width, 1);
 	if (_width == width) {
@@ -987,6 +1223,9 @@ void MarkdownArticle::Impl::relayout(int width) {
 	context.mediaBlockFactory = [=](const PreparedBlock &prepared) {
 		return getOrCreateMediaBlock(prepared);
 	};
+	context.placeholderRuntimeFactory = [=](PreparedPlaceholderBlockId id) {
+		return getOrCreatePlaceholderRuntime(id);
+	};
 	const auto y = LayoutBlocks(
 		_content.blocks.blocks,
 		&_content.formulas,
@@ -999,7 +1238,8 @@ void MarkdownArticle::Impl::relayout(int width) {
 		page.left(),
 		page.top(),
 		innerWidth,
-		std::move(context));
+		context);
+	prunePlaceholderRuntimes();
 	RestoreRelatedArticleThumbnailStates(
 		&_blocks,
 		_relatedArticleThumbnails);
@@ -1136,6 +1376,28 @@ void MarkdownArticle::invalidateRasterCache() {
 
 MediaBlockHost *MarkdownArticle::mediaBlockHost() const {
 	return _impl->mediaBlockHost();
+}
+
+void MarkdownArticle::setPlaceholderLoading(PreparedPlaceholderBlockId id) {
+	_impl->setPlaceholderLoading(id);
+}
+
+void MarkdownArticle::clearPlaceholderLoading(PreparedPlaceholderBlockId id) {
+	_impl->clearPlaceholderLoading(id);
+}
+
+void MarkdownArticle::clearAllPlaceholderLoading() {
+	_impl->clearAllPlaceholderLoading();
+}
+
+void MarkdownArticle::addPlaceholderRipple(
+		PreparedPlaceholderBlockId id,
+		QPoint point) {
+	_impl->addPlaceholderRipple(id, point);
+}
+
+void MarkdownArticle::stopPlaceholderRipple(PreparedPlaceholderBlockId id) {
+	_impl->stopPlaceholderRipple(id);
 }
 
 } // namespace Iv::Markdown

@@ -166,6 +166,10 @@ MarkdownEmbedPost {
 MarkdownPlaceholder {
 	padding: margins;
 	minHeight: pixels;
+	border: pixels;
+	radius: pixels;
+	spinnerWidth: pixels;
+	spinnerSize: pixels;
 	captionSkip: pixels;
 	labelStyle: TextStyle;
 }
@@ -417,8 +421,12 @@ defaultMarkdownEmbedPost: MarkdownEmbedPost {
 	captionSkip: 12px;
 }
 defaultMarkdownPlaceholder: MarkdownPlaceholder {
-	padding: margins(16px, 12px, 16px, 12px);
+	padding: margins(16px, 24px, 16px, 24px);
 	minHeight: 48px;
+	border: 4px;
+	radius: 16px;
+	spinnerWidth: 4px;
+	spinnerSize: 24px;
 	captionSkip: 14px;
 	labelStyle: TextStyle(defaultMarkdownBodyStyle) {
 		font: font(16px semibold);
