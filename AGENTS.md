@@ -183,6 +183,26 @@ QString currentTitle = tr::lng_settings_title(tr::now);
 rpl::producer<QString> nameProducer = GetNameProducer();
 ```
 
+**Use trailing return types for long return types:**
+
+Never split a long return type onto the line before a function declaration or definition:
+
+```cpp
+// BAD:
+std::shared_ptr<PlaceholderBlockRuntime>
+getOrCreatePlaceholderRuntime(PreparedPlaceholderBlockId id);
+```
+
+Use `auto` with a trailing return type instead:
+
+```cpp
+// GOOD:
+auto getOrCreatePlaceholderRuntime(PreparedPlaceholderBlockId id)
+-> std::shared_ptr<PlaceholderBlockRuntime>;
+```
+
+This applies to both declarations and definitions. It keeps the method name at the front, makes scanning easier, and avoids orphaned return-type lines.
+
 **Use `_q` for QString literals:**
 
 Prefer the project literal `u"..."_q` instead of the verbose `QStringLiteral("...")` macro when creating `QString` values:
