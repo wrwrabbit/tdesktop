@@ -616,7 +616,9 @@ void BuildBusinessSectionContent(
 			) | rpl::on_next(check, content->lifetime());
 
 			AddBusinessSummary(content, controller, state, [=](PremiumFeature feature) {
-				if (!session->premium()) {
+				const auto alwaysAvailable
+					= (feature == PremiumFeature::BusinessBots);
+				if (!alwaysAvailable && !session->premium()) {
 					if (state && state->setPaused) {
 						state->setPaused(true);
 					}
