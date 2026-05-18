@@ -35,6 +35,27 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Platform {
 namespace {
 
+struct ComputedState {
+	bool logoutDisabled = false;
+	bool undoDisabled = false;
+	bool redoDisabled = false;
+	bool cutDisabled = false;
+	bool copyDisabled = false;
+	bool pasteDisabled = false;
+	bool deleteDisabled = false;
+	bool selectAllDisabled = false;
+	bool contactsDisabled = false;
+	bool addContactDisabled = false;
+	bool newGroupDisabled = false;
+	bool newChannelDisabled = false;
+	bool showTelegramDisabled = false;
+	Ui::MarkdownEnabledState markdown;
+
+	friend inline bool operator==(
+		const ComputedState &,
+		const ComputedState &) = default;
+};
+
 class Manager final {
 public:
 	void create();
@@ -96,6 +117,8 @@ private:
 	NSPasteboard *_pasteboard = nullptr;
 	int _pasteboardChangeCount = -1;
 	bool _pasteboardHasText = false;
+
+	std::optional<ComputedState> _lastState;
 
 	rpl::event_stream<> _updateRequests;
 	rpl::event_stream<Ui::MarkdownEnabledState> _markdownChanges;
@@ -261,26 +284,48 @@ void Manager::recomputeState() {
 		canDelete = list->canDeleteSelected();
 	}
 
-	_markdownChanges.fire_copy(markdownState);
-
 	widget->updateIsActive();
 	const auto controller = window->sessionController();
 	const auto logged = (controller != nullptr);
 	const auto inactive = !logged || window->locked();
 	const auto support = logged && controller->session().supportMode();
-	ForceDisabled(_logout, !logged && !Core::App().passcodeLocked());
-	ForceDisabled(_undo, !canUndo);
-	ForceDisabled(_redo, !canRedo);
-	ForceDisabled(_cut, !canCut);
-	ForceDisabled(_copy, !canCopy);
-	ForceDisabled(_paste, !canPaste);
-	ForceDisabled(_delete, !canDelete);
-	ForceDisabled(_selectAll, !canSelectAll);
-	ForceDisabled(_contacts, inactive || support);
-	ForceDisabled(_addContact, inactive);
-	ForceDisabled(_newGroup, inactive || support);
-	ForceDisabled(_newChannel, inactive || support);
-	ForceDisabled(_showTelegram, widget->isActive());
+
+	auto next = ComputedState{
+		.logoutDisabled = !logged && !Core::App().passcodeLocked(),
+		.undoDisabled = !canUndo,
+		.redoDisabled = !canRedo,
+		.cutDisabled = !canCut,
+		.copyDisabled = !canCopy,
+		.pasteDisabled = !canPaste,
+		.deleteDisabled = !canDelete,
+		.selectAllDisabled = !canSelectAll,
+		.contactsDisabled = inactive || support,
+		.addContactDisabled = inactive,
+		.newGroupDisabled = inactive || support,
+		.newChannelDisabled = inactive || support,
+		.showTelegramDisabled = widget->isActive(),
+		.markdown = markdownState,
+	};
+	if (_lastState && *_lastState == next) {
+		return;
+	}
+	_lastState = next;
+
+	_markdownChanges.fire_copy(markdownState);
+
+	ForceDisabled(_logout, next.logoutDisabled);
+	ForceDisabled(_undo, next.undoDisabled);
+	ForceDisabled(_redo, next.redoDisabled);
+	ForceDisabled(_cut, next.cutDisabled);
+	ForceDisabled(_copy, next.copyDisabled);
+	ForceDisabled(_paste, next.pasteDisabled);
+	ForceDisabled(_delete, next.deleteDisabled);
+	ForceDisabled(_selectAll, next.selectAllDisabled);
+	ForceDisabled(_contacts, next.contactsDisabled);
+	ForceDisabled(_addContact, next.addContactDisabled);
+	ForceDisabled(_newGroup, next.newGroupDisabled);
+	ForceDisabled(_newChannel, next.newChannelDisabled);
+	ForceDisabled(_showTelegram, next.showTelegramDisabled);
 
 	const auto disabled = [&](const QString &tag) {
 		return !markdownState.enabledForTag(tag);
@@ -582,6 +627,7 @@ void Manager::destroy() {
 	_pasteboard = nullptr;
 	_pasteboardChangeCount = -1;
 	_pasteboardHasText = false;
+	_lastState.reset();
 }
 
 void Manager::requestUpdate() {
