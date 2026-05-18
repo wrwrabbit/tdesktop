@@ -5262,14 +5262,17 @@ std::vector<VideoQuality> OverlayWidget::playbackControlsQualities() {
 	auto result = std::vector<VideoQuality>();
 	result.reserve(list.size() + 1);
 	const auto add = [&](not_null<DocumentData*> quality) {
-		const auto height = quality->resolveVideoQuality();
+		const auto original = (quality == _document);
+		const auto height = original
+			? quality->resolveOriginalVideoQuality()
+			: quality->resolveVideoQuality();
 		if (!height) {
 			return;
 		}
 		const auto value = VideoQuality{
 			.manual = 1u,
 			.height = uint32(height),
-			.original = (quality == _document) ? 1u : 0u,
+			.original = original ? 1u : 0u,
 		};
 		if (!ranges::contains(result, value)) {
 			result.push_back(value);
@@ -5288,10 +5291,13 @@ VideoQuality OverlayWidget::playbackControlsCurrentQuality() {
 	if (!_chosenQuality) {
 		return _quality;
 	}
+	const auto original = (_chosenQuality == _document);
 	return {
 		.manual = _quality.manual,
-		.height = uint32(_chosenQuality->resolveVideoQuality()),
-		.original = (_chosenQuality == _document) ? 1u : 0u,
+		.height = uint32(original
+			? _chosenQuality->resolveOriginalVideoQuality()
+			: _chosenQuality->resolveVideoQuality()),
+		.original = original ? 1u : 0u,
 	};
 }
 

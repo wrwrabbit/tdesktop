@@ -123,6 +123,7 @@ public:
 	void automaticLoadSettingsChanged();
 	void setVideoQualities(std::vector<not_null<DocumentData*>> qualities);
 	[[nodiscard]] int resolveVideoQuality() const;
+	[[nodiscard]] int resolveOriginalVideoQuality() const;
 	[[nodiscard]] Media::VideoQuality initialPlaybackVideoQuality(
 		Media::VideoQuality request) const;
 	[[nodiscard]] auto resolveQualities(HistoryItem *context) const

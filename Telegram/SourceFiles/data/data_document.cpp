@@ -641,12 +641,25 @@ int DocumentData::resolveVideoQuality() const {
 		: std::min(attributesSize.width(), attributesSize.height());
 }
 
+int DocumentData::resolveOriginalVideoQuality() const {
+	if (const auto data = video()) {
+		if (!data->realVideoSize.isEmpty()) {
+			const auto size = data->realVideoSize;
+			return std::min(size.width(), size.height());
+		}
+	}
+	const auto attributesSize = isVideoFile() ? dimensions : QSize();
+	return attributesSize.isEmpty()
+		? 0
+		: std::min(attributesSize.width(), attributesSize.height());
+}
+
 Media::VideoQuality DocumentData::initialPlaybackVideoQuality(
 		Media::VideoQuality request) const {
 	return (isVideoFile() && !filepath(true).isEmpty())
 		? Media::VideoQuality{
 			.manual = 1u,
-			.height = uint32(std::max(resolveVideoQuality(), 0)),
+			.height = uint32(std::max(resolveOriginalVideoQuality(), 0)),
 			.original = 1u,
 		}
 		: request;
