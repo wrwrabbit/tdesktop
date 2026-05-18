@@ -41,8 +41,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Dialogs {
 namespace {
 
-constexpr auto kLinesForPhoto = 3;
-
 [[nodiscard]] int PillRadius() {
 	const auto padding = st::msgReplyPadding.top();
 	return (padding
@@ -430,18 +428,13 @@ void TopBarSuggestionContent::draw(QPainter &p) {
 				- line * lineHeight;
 			if (diff < 3 * lineHeight) {
 				return {
-					.width = availableWidthNoPhoto,
+					.width = availableWidth,
 					.elided = true,
 				};
 			} else if (diff < 2 * lineHeight) {
 				return {};
 			}
-			line += (hasSecondLineTitle ? 2 : 1) + 1;
-			return {
-				.width = (line > kLinesForPhoto)
-					? availableWidthNoPhoto
-					: availableWidth,
-			};
+			return { .width = availableWidth };
 		};
 		p.setPen(_descriptionColorOverride.value_or(st::windowSubTextFg->c));
 		_contentText.draw(p, {
@@ -549,18 +542,13 @@ int TopBarSuggestionContent::resizeGetHeight(int newWidth) {
 			- line * lineHeight;
 		if (diff < 3 * lineHeight) {
 			return {
-				.width = availableWidthNoPhoto,
+				.width = availableWidth,
 				.elided = true,
 			};
 		} else if (diff < 2 * lineHeight) {
 			return {};
 		}
-		line += (hasSecondLineTitle ? 2 : 1) + 1;
-		return {
-			.width = (line > kLinesForPhoto)
-				? availableWidthNoPhoto
-				: availableWidth,
-		};
+		return { .width = availableWidth };
 	};
 	const auto dims = _contentText.countDimensions(
 		Ui::Text::GeometryDescriptor{ .layout = std::move(lineLayout) });
