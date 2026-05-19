@@ -5652,7 +5652,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_sr_chat_failed" = "Failed";
 "lng_sr_chat_received" = "Received";
 "lng_sr_chat_online" = "Online";
-"lng_sr_chat_sent_at" = "Sent {when}";
 "lng_sr_chat_sponsored" = "Sponsored";
 "lng_sr_chat_stories_unread#one" = "{count} unread story";
 "lng_sr_chat_stories_unread#other" = "{count} unread stories";
@@ -5695,7 +5694,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_sr_message_not_downloaded" = "Not downloaded";
 "lng_sr_message_downloading" = "Downloading";
 "lng_sr_message_reply_to" = "In reply to {name}: {text}";
-"lng_sr_message_edited" = "Edited";
 "lng_sr_message_custom_emoji" = "Custom emoji {emoji}";
 
 "lng_sr_message_column_media_type" = "Media type";
@@ -5737,8 +5735,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_sr_message_gift_premium#other" = "Premium gift, {count} days";
 "lng_sr_message_gift_credits#one" = "Star gift, {count} star";
 "lng_sr_message_gift_credits#other" = "Star gift, {count} stars";
-"lng_sr_message_paid_content" = "Paid content";
-"lng_sr_message_live_location" = "Live location";
 "lng_sr_message_invoice_paid" = "Paid";
 "lng_sr_message_invoice_unpaid" = "Unpaid";
 
