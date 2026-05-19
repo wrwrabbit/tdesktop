@@ -3450,7 +3450,10 @@ void StickersListWidget::updateSelected() {
 					&& myrtlrect(featuredAddRect(info, false)).contains(p)) {
 				newSelected = OverButton{ section };
 			} else if (_features.openStickerSets
-				&& !(sets[section].flags & SetFlag::Special)) {
+				&& (!(sets[section].flags & SetFlag::Special)
+					|| (_section == Section::Search
+						&& sets[section].id == _searchSelectedSetId
+						&& _searchSelectedSetId != 0))) {
 				newSelected = OverSet{ section };
 			} else if ((sets[section].id == Data::Stickers::MegagroupSetId)
 				&& (_megagroupSet->canEditStickers()

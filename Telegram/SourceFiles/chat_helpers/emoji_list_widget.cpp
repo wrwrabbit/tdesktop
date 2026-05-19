@@ -3861,8 +3861,10 @@ void EmojiListWidget::updateSelected() {
 			&& myrtlrect(buttonRect(section)).contains(p.x(), p.y())) {
 			newSelected = OverButton{ section };
 		} else if (_features.openStickerSets
-			&& section >= _staticCount
-			&& _mode == Mode::Full) {
+			&& ((_searchMode && section > 0)
+				|| (!_searchMode
+					&& section >= _staticCount
+					&& _mode == Mode::Full))) {
 			newSelected = OverSet{ section };
 		}
 	} else if (p.y() >= info.rowsTop && p.y() < info.rowsBottom) {
