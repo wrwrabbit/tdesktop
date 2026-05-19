@@ -629,7 +629,7 @@ void FormattedDateClickHandler::onClick(ClickContext context) const {
 	if (canForward) {
 		menu->addAction(
 			tr::lng_context_set_reminder(tr::now),
-			[itemId, show] {
+			[date, itemId, show] {
 				const auto session = &show->session();
 				const auto item = session->data().message(itemId);
 				if (!item) {
@@ -637,6 +637,10 @@ void FormattedDateClickHandler::onClick(ClickContext context) const {
 				}
 				const auto self = session->user();
 				const auto history = self->owner().history(self);
+				const auto now = base::unixtime::now();
+				const auto scheduleTime = (date > now + 60)
+					? date
+					: HistoryView::DefaultScheduleTime();
 				show->showBox(HistoryView::PrepareScheduleBox(
 					session,
 					show,
@@ -651,7 +655,9 @@ void FormattedDateClickHandler::onClick(ClickContext context) const {
 							},
 							action,
 							[=] { DoneSetReminder(show); });
-					}));
+					},
+					Api::SendOptions(),
+					scheduleTime));
 			},
 			&st::menuIconNotifications);
 	}
