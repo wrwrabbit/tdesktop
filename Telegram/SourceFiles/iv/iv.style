@@ -571,7 +571,7 @@ markdownEmbedOverlay: MarkdownEmbedOverlay {
 	loading: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
 		color: windowSubTextFg;
 	}
-	size: size(384px, 694px);
+	size: size(640px, 480px);
 	margin: margins(12px, 12px, 12px, 12px);
 	padding: margins(8px, 8px, 8px, 8px);
 	errorLabel: markdownEmbedOverlayError;

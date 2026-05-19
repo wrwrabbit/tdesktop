@@ -2088,6 +2088,9 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 			.mode = _externalShell
 				? Webview::WindowMode::External
 				: Webview::WindowMode::Embedded,
+			.windowStyle = _externalShell
+				? Webview::WindowStyle::Frameless
+				: Webview::WindowStyle::Default,
 			.windowMargins = _externalShell
 				? st::botWebViewShellShadowPadding
 				: QMargins(),
