@@ -663,9 +663,8 @@ void HistoryInner::setupSwipeReplyAndBack() {
 	};
 
 	auto init = [=, show = _controller->uiShow()](
-			int cursorTop,
-			Qt::LayoutDirection direction) {
-		if (direction == Qt::RightToLeft) {
+			Ui::Controls::SwipeHandlerInitData data) {
+		if (data.direction == Qt::RightToLeft) {
 			auto good = true;
 			enumerateItems<EnumItemsDirection::BottomToTop>([&](
 					not_null<Element*> view,
@@ -694,8 +693,8 @@ void HistoryInner::setupSwipeReplyAndBack() {
 				not_null<Element*> view,
 				int itemtop,
 				int itembottom) {
-			if ((cursorTop < itemtop)
-				|| (cursorTop > itembottom)
+			if ((data.cursorPosition.y() < itemtop)
+				|| (data.cursorPosition.y() > itembottom)
 				|| !view->data()->isRegular()
 				|| view->data()->showSimilarChannels()
 				|| view->data()->isService()) {

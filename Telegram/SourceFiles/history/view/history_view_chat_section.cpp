@@ -1049,9 +1049,8 @@ void ChatWidget::setupSwipeReplyAndBack() {
 	};
 
 	auto init = [=, show = controller()->uiShow()](
-			int cursorTop,
-			Qt::LayoutDirection direction) {
-		if (direction == Qt::RightToLeft) {
+			Ui::Controls::SwipeHandlerInitData data) {
+		if (data.direction == Qt::RightToLeft) {
 			return Ui::Controls::DefaultSwipeBackHandlerFinishData([=] {
 				controller()->showBackFromStack();
 			});
@@ -1060,7 +1059,7 @@ void ChatWidget::setupSwipeReplyAndBack() {
 		if (_inner->elementInSelectionMode(nullptr).inSelectionMode) {
 			return result;
 		}
-		const auto view = _inner->lookupItemByY(cursorTop);
+		const auto view = _inner->lookupItemByY(data.cursorPosition.y());
 		if (!view
 			|| !view->data()->isRegular()
 			|| view->data()->isService()) {
