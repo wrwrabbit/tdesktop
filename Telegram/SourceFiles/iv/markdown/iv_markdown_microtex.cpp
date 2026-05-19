@@ -22,6 +22,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <mutex>
 #include <utility>
 
+#ifndef Q_OS_MAC
+void InitIvMarkdownMicrotexBundledResource() {
+	Q_INIT_RESOURCE(bundled);
+}
+#endif // !Q_OS_MAC
+
 namespace Iv::Markdown {
 namespace {
 
@@ -279,7 +285,7 @@ bool EnsureMicrotexInitialized(QString *error) {
 
 #else // Q_OS_MAC
 
-			Q_INIT_RESOURCE(bundled);
+			InitIvMarkdownMicrotexBundledResource();
 
 #endif // Q_OS_MAC
 

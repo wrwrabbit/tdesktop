@@ -571,7 +571,6 @@ QImage CachedPageInlineDocumentImage::prepareImage(
 		return image;
 	}
 	const auto ratio = style::DevicePixelRatio();
-	const auto target = requested * ratio;
 	if (!_cached.isNull() && (_cachedFull || !full)) {
 		const auto cachedSize = _cached.size() / ratio;
 		if (cachedSize.width() == requested.width()

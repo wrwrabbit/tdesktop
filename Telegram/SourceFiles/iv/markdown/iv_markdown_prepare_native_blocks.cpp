@@ -20,27 +20,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Iv::Markdown {
 namespace {
 
-void ShiftEntities(EntitiesInText *entities, int delta) {
-	if (!delta) {
-		return;
-	}
-	for (auto &entity : *entities) {
-		entity = EntityInText(
-			entity.type(),
-			entity.offset() + delta,
-			entity.length(),
-			entity.data());
-	}
-}
-
-void PrependText(TextWithEntities *text, QString prefix) {
-	if (prefix.isEmpty()) {
-		return;
-	}
-	text->text.prepend(prefix);
-	ShiftEntities(&text->entities, prefix.size());
-}
-
 [[nodiscard]] QString NativeIvDateText(TimeId date) {
 	return langDateTimeFull(base::unixtime::parse(date));
 }
@@ -195,9 +174,9 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 }
 
 [[nodiscard]] QByteArray NativeIvHtmlTag(
-		const QByteArray &name,
-		const NativeIvHtmlAttributes &attributes = {},
-		const QByteArray &body = {}) {
+		QByteArray name,
+		NativeIvHtmlAttributes attributes = {},
+		QByteArray body = {}) {
 	auto serialized = QByteArray();
 	for (const auto &[attributeName, value] : attributes) {
 		if (attributeName.isEmpty()) {
@@ -259,297 +238,382 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 }
 
 [[nodiscard]] QByteArray WrapNativeIvEmbedHtml(QByteArray body) {
-	return QByteArray(
-		"<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
-		"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-		"<script>"
-		"window.TelegramWebviewProxy={"
-		"postEvent:function(eventType,eventData){"
-		"if(window.external&&typeof window.external.invoke==='function'){"
-		"try{"
-		"window.external.invoke(JSON.stringify([eventType,eventData]));"
-		"}catch(e){}"
-		"}"
-		"}"
-		"};"
-		"</script>"
-		"<style>"
-		"html,body{margin:0;padding:0;background:#fff;color:#000;}"
-		"body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}"
-		"figure{display:block;margin:0;max-width:100%;}"
-		"img,video{display:block;max-width:100%;height:auto;}"
-		".iframe-wrap{display:block;margin:0 auto;max-width:100%;overflow:hidden;}"
-		"iframe{display:block;width:100%;max-width:100%;border:0;}"
-		"</style></head><body>")
-		+ body
-		+ QByteArray(
-		"<script>"
-		"(function(){"
-		"var iframeWindows=new Map();"
-		"var lastPreferredWidth=0;"
-		"var lastPreferredHeight=0;"
-		"var measureScheduled=false;"
-		"function clamp(value,max){"
-		"value=Number(value);"
-		"if(!isFinite(value)){return 0;}"
-		"value=Math.round(value);"
-		"if(value<1){return 0;}"
-		"return Math.min(value,max||100000);"
-		"}"
-		"function resourceId(){"
-		"var path='';"
-		"try{path=String(window.location.pathname||'');}catch(e){}"
-		"while(path.charAt(0)==='/'){path=path.slice(1);}"
-		"return path;"
-		"}"
-		"function documentHeight(doc){"
-		"if(!doc){return 0;}"
-		"var body=doc.body;"
-		"var root=doc.documentElement;"
-		"var height=0;"
-		"if(body){"
-		"var bodyRect=body.getBoundingClientRect();"
-		"height=Math.max("
-		"height,"
-		"body.scrollHeight,"
-		"body.offsetHeight,"
-		"body.clientHeight,"
-		"bodyRect.height);"
-		"}"
-		"if(root){"
-		"var rootRect=root.getBoundingClientRect();"
-		"height=Math.max("
-		"height,"
-		"root.scrollHeight,"
-		"root.offsetHeight,"
-		"root.clientHeight,"
-		"rootRect.height);"
-		"}"
-		"return clamp(height,100000);"
-		"}"
-		"function iframeDocumentHeight(iframe){"
-		"try{"
-		"return documentHeight("
-		"iframe.contentDocument"
-		"||(iframe.contentWindow&&iframe.contentWindow.document));"
-		"}catch(e){"
-		"return 0;"
-		"}"
-		"}"
-		"function findWrap(iframe){"
-		"var node=iframe;"
-		"while(node&&node!==document.body){"
-		"if(node.classList&&node.classList.contains('iframe-wrap')){"
-		"return node;"
-		"}"
-		"node=node.parentNode;"
-		"}"
-		"return null;"
-		"}"
-		"function rememberIframe(iframe){"
-		"try{"
-		"if(iframe.contentWindow){"
-		"iframeWindows.set(iframe.contentWindow,iframe);"
-		"}"
-		"}catch(e){"
-		"}"
-		"}"
-		"function seedIframeHeight(iframe){"
-		"if(iframe.getAttribute('data-native-iv-resized')==='1'){"
-		"return;"
-		"}"
-		"var measured=iframeDocumentHeight(iframe);"
-		"if(measured){"
-		"iframe.setAttribute('data-native-iv-measured','1');"
-		"iframe.style.height=measured+'px';"
-		"return;"
-		"}"
-		"var wrap=findWrap(iframe);"
-		"if(!wrap){return;}"
-		"var fixed=clamp(wrap.getAttribute('data-height'),100000);"
-		"if(fixed){"
-		"iframe.style.height=fixed+'px';"
-		"return;"
-		"}"
-		"var ratio=Number(wrap.getAttribute('data-aspect-ratio'));"
-		"if(!isFinite(ratio)||ratio<=0){"
-		"return;"
-		"}"
-		"var width=clamp(Math.ceil("
-		"wrap.getBoundingClientRect().width"
-		"||iframe.getBoundingClientRect().width"
-		"||0),100000);"
-		"if(!width){"
-		"return;"
-		"}"
-		"var height=clamp(width*ratio,100000);"
-		"if(height){"
-		"iframe.style.height=height+'px';"
-		"}"
-		"}"
-		"function syncIframe(iframe){"
-		"rememberIframe(iframe);"
-		"seedIframeHeight(iframe);"
-		"if(iframe.getAttribute('data-native-iv-registered')==='1'){"
-		"return;"
-		"}"
-		"iframe.setAttribute('data-native-iv-registered','1');"
-		"iframe.addEventListener('load',function(){"
-		"rememberIframe(iframe);"
-		"seedIframeHeight(iframe);"
-		"scheduleMeasure();"
-		"},false);"
-		"}"
-		"function syncIframes(){"
-		"var iframes=document.getElementsByTagName('iframe');"
-		"for(var i=0;i<iframes.length;i++){"
-		"syncIframe(iframes[i]);"
-		"}"
-		"}"
-		"function measurePreferredSize(){"
-		"var width=0;"
-		"var height=0;"
-		"var viewportWidth=clamp("
-		"Math.max("
-		"window.innerWidth||0,"
-		"document.documentElement?document.documentElement.clientWidth:0),"
-		"100000);"
-		"var body=document.body;"
-		"if(body){"
-		"var bodyRect=body.getBoundingClientRect();"
-		"height=Math.max(height,body.scrollHeight,body.offsetHeight,bodyRect.height);"
-		"var children=body.children;"
-		"for(var i=0;i<children.length;i++){"
-		"var child=children[i];"
-		"var rect=child.getBoundingClientRect();"
-		"width=Math.max(width,child.scrollWidth,child.offsetWidth,rect.width);"
-		"height=Math.max(height,child.scrollHeight,child.offsetHeight,rect.bottom-bodyRect.top);"
-		"}"
-		"if(!width){"
-		"width=Math.max(body.scrollWidth,body.offsetWidth,bodyRect.width);"
-		"}"
-		"}"
-		"var doc=document.documentElement;"
-		"if(doc&&(!width||!height)){"
-		"var docRect=doc.getBoundingClientRect();"
-		"if(!width){"
-		"width=Math.max(doc.scrollWidth,doc.offsetWidth,doc.clientWidth,docRect.width);"
-		"}"
-		"if(!height){"
-		"height=Math.max(doc.scrollHeight,doc.offsetHeight,doc.clientHeight,docRect.height);"
-		"}"
-		"}"
-		"return{"
-		"width:clamp(width,100000),"
-		"height:clamp(height,100000),"
-		"viewportWidth:viewportWidth"
-		"};"
-		"}"
-		"function reportPreferredSize(){"
-		"var size=measurePreferredSize();"
-		"if(!size.width||!size.height){"
-		"return;"
-		"}"
-		"if(size.width===lastPreferredWidth&&size.height===lastPreferredHeight){"
-		"return;"
-		"}"
-		"lastPreferredWidth=size.width;"
-		"lastPreferredHeight=size.height;"
-		"if(window.external&&typeof window.external.invoke==='function'){"
-		"try{"
-		"window.external.invoke(JSON.stringify({"
-		"event:'preferred_size',"
-		"resourceId:resourceId(),"
-		"width:size.width,"
-		"height:size.height,"
-		"viewportWidth:size.viewportWidth,"
-		"devicePixelRatio:window.devicePixelRatio||1"
-		"}));"
-		"}catch(e){"
-		"}"
-		"}"
-		"}"
-		"function scheduleMeasure(){"
-		"if(measureScheduled){"
-		"return;"
-		"}"
-		"measureScheduled=true;"
-		"var callback=function(){"
-		"measureScheduled=false;"
-		"reportPreferredSize();"
-		"};"
-		"if(window.requestAnimationFrame){"
-		"window.requestAnimationFrame(callback);"
-		"}else{"
-		"setTimeout(callback,0);"
-		"}"
-		"}"
-		"window.addEventListener('message',function(event){"
-		"var iframe=iframeWindows.get(event.source);"
-		"if(!iframe){"
-		"return;"
-		"}"
-		"var data=event.data;"
-		"if(typeof data==='string'){"
-		"try{"
-		"data=JSON.parse(data);"
-		"}catch(e){"
-		"return;"
-		"}"
-		"}"
-		"if(!data||data.eventType!=='resize_frame'||!data.eventData){"
-		"return;"
-		"}"
-		"var height=clamp(data.eventData.height,100000);"
-		"if(!height){"
-		"return;"
-		"}"
-		"iframe.setAttribute('data-native-iv-resized','1');"
-		"iframe.style.height=height+'px';"
-		"scheduleMeasure();"
-		"},false);"
-		"document.addEventListener('DOMContentLoaded',function(){"
-		"syncIframes();"
-		"scheduleMeasure();"
-		"},false);"
-		"window.addEventListener('load',function(){"
-		"syncIframes();"
-		"scheduleMeasure();"
-		"},false);"
-		"window.addEventListener('resize',function(){"
-		"syncIframes();"
-		"scheduleMeasure();"
-		"},false);"
-		"if(window.ResizeObserver){"
-		"var observer=new ResizeObserver(function(){"
-		"scheduleMeasure();"
-		"});"
-		"if(document.documentElement){"
-		"observer.observe(document.documentElement);"
-		"}"
-		"if(document.body){"
-		"observer.observe(document.body);"
-		"}"
-		"}"
-		"setInterval(function(){"
-		"syncIframes();"
-		"scheduleMeasure();"
-		"},250);"
-		"syncIframes();"
-		"scheduleMeasure();"
-		"})();"
-		"</script></body></html>");
-}
-
-[[nodiscard]] const NativeIvPhotoInfo *FindNativeIvPhoto(
-		uint64 photoId,
-		const NativeIvPrepareState &state) {
-	for (const auto &photo : state.photos) {
-		if (photo.id == photoId) {
-			return &photo;
+	return QByteArray(R"NativeIvHtml(<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script>
+window.TelegramWebviewProxy = {
+	postEvent: function(eventType, eventData) {
+		if (window.external && typeof window.external.invoke === 'function') {
+			try {
+				window.external.invoke(JSON.stringify([eventType, eventData]));
+			} catch (e) {
+			}
 		}
 	}
-	return nullptr;
+};
+</script>
+<style>
+html,
+body {
+	margin: 0;
+	padding: 0;
+	background: #fff;
+	color: #000;
+}
+
+body {
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+figure {
+	display: block;
+	margin: 0;
+	max-width: 100%;
+}
+
+img,
+video {
+	display: block;
+	max-width: 100%;
+	height: auto;
+}
+
+.iframe-wrap {
+	display: block;
+	margin: 0 auto;
+	max-width: 100%;
+	overflow: hidden;
+}
+
+iframe {
+	display: block;
+	width: 100%;
+	max-width: 100%;
+	border: 0;
+}
+</style>
+</head>
+<body>)NativeIvHtml")
+		+ body
+		+ QByteArray(R"NativeIvHtml(<script>
+(function() {
+	var iframeWindows = new Map();
+	var lastPreferredWidth = 0;
+	var lastPreferredHeight = 0;
+	var measureScheduled = false;
+
+	function clamp(value, max) {
+		value = Number(value);
+		if (!isFinite(value)) {
+			return 0;
+		}
+		value = Math.round(value);
+		if (value < 1) {
+			return 0;
+		}
+		return Math.min(value, max || 100000);
+	}
+
+	function resourceId() {
+		var path = '';
+		try {
+			path = String(window.location.pathname || '');
+		} catch (e) {
+		}
+		while (path.charAt(0) === '/') {
+			path = path.slice(1);
+		}
+		return path;
+	}
+
+	function documentHeight(doc) {
+		if (!doc) {
+			return 0;
+		}
+		var body = doc.body;
+		var root = doc.documentElement;
+		var height = 0;
+		if (body) {
+			var bodyRect = body.getBoundingClientRect();
+			height = Math.max(
+				height,
+				body.scrollHeight,
+				body.offsetHeight,
+				body.clientHeight,
+				bodyRect.height);
+		}
+		if (root) {
+			var rootRect = root.getBoundingClientRect();
+			height = Math.max(
+				height,
+				root.scrollHeight,
+				root.offsetHeight,
+				root.clientHeight,
+				rootRect.height);
+		}
+		return clamp(height, 100000);
+	}
+
+	function iframeDocumentHeight(iframe) {
+		try {
+			return documentHeight(
+				iframe.contentDocument
+				|| (iframe.contentWindow && iframe.contentWindow.document));
+		} catch (e) {
+			return 0;
+		}
+	}
+
+	function findWrap(iframe) {
+		var node = iframe;
+		while (node && node !== document.body) {
+			if (node.classList && node.classList.contains('iframe-wrap')) {
+				return node;
+			}
+			node = node.parentNode;
+		}
+		return null;
+	}
+
+	function rememberIframe(iframe) {
+		try {
+			if (iframe.contentWindow) {
+				iframeWindows.set(iframe.contentWindow, iframe);
+			}
+		} catch (e) {
+		}
+	}
+
+	function seedIframeHeight(iframe) {
+		if (iframe.getAttribute('data-native-iv-resized') === '1') {
+			return;
+		}
+		var measured = iframeDocumentHeight(iframe);
+		if (measured) {
+			iframe.setAttribute('data-native-iv-measured', '1');
+			iframe.style.height = measured + 'px';
+			return;
+		}
+		var wrap = findWrap(iframe);
+		if (!wrap) {
+			return;
+		}
+		var fixed = clamp(wrap.getAttribute('data-height'), 100000);
+		if (fixed) {
+			iframe.style.height = fixed + 'px';
+			return;
+		}
+		var ratio = Number(wrap.getAttribute('data-aspect-ratio'));
+		if (!isFinite(ratio) || ratio <= 0) {
+			return;
+		}
+		var width = clamp(Math.ceil(
+			wrap.getBoundingClientRect().width
+			|| iframe.getBoundingClientRect().width
+			|| 0), 100000);
+		if (!width) {
+			return;
+		}
+		var height = clamp(width * ratio, 100000);
+		if (height) {
+			iframe.style.height = height + 'px';
+		}
+	}
+
+	function syncIframe(iframe) {
+		rememberIframe(iframe);
+		seedIframeHeight(iframe);
+		if (iframe.getAttribute('data-native-iv-registered') === '1') {
+			return;
+		}
+		iframe.setAttribute('data-native-iv-registered', '1');
+		iframe.addEventListener('load', function() {
+			rememberIframe(iframe);
+			seedIframeHeight(iframe);
+			scheduleMeasure();
+		}, false);
+	}
+
+	function syncIframes() {
+		var iframes = document.getElementsByTagName('iframe');
+		for (var i = 0; i < iframes.length; i++) {
+			syncIframe(iframes[i]);
+		}
+	}
+
+	function measurePreferredSize() {
+		var width = 0;
+		var height = 0;
+		var viewportWidth = clamp(
+			Math.max(
+				window.innerWidth || 0,
+				document.documentElement
+					? document.documentElement.clientWidth
+					: 0),
+			100000);
+		var body = document.body;
+		if (body) {
+			var bodyRect = body.getBoundingClientRect();
+			height = Math.max(
+				height,
+				body.scrollHeight,
+				body.offsetHeight,
+				bodyRect.height);
+			var children = body.children;
+			for (var i = 0; i < children.length; i++) {
+				var child = children[i];
+				var rect = child.getBoundingClientRect();
+				width = Math.max(
+					width,
+					child.scrollWidth,
+					child.offsetWidth,
+					rect.width);
+				height = Math.max(
+					height,
+					child.scrollHeight,
+					child.offsetHeight,
+					rect.bottom - bodyRect.top);
+			}
+			if (!width) {
+				width = Math.max(
+					body.scrollWidth,
+					body.offsetWidth,
+					bodyRect.width);
+			}
+		}
+		var doc = document.documentElement;
+		if (doc && (!width || !height)) {
+			var docRect = doc.getBoundingClientRect();
+			if (!width) {
+				width = Math.max(
+					doc.scrollWidth,
+					doc.offsetWidth,
+					doc.clientWidth,
+					docRect.width);
+			}
+			if (!height) {
+				height = Math.max(
+					doc.scrollHeight,
+					doc.offsetHeight,
+					doc.clientHeight,
+					docRect.height);
+			}
+		}
+		return {
+			width: clamp(width, 100000),
+			height: clamp(height, 100000),
+			viewportWidth: viewportWidth
+		};
+	}
+
+	function reportPreferredSize() {
+		var size = measurePreferredSize();
+		if (!size.width || !size.height) {
+			return;
+		}
+		if (size.width === lastPreferredWidth
+			&& size.height === lastPreferredHeight) {
+			return;
+		}
+		lastPreferredWidth = size.width;
+		lastPreferredHeight = size.height;
+		if (window.external && typeof window.external.invoke === 'function') {
+			try {
+				window.external.invoke(JSON.stringify({
+					event: 'preferred_size',
+					resourceId: resourceId(),
+					width: size.width,
+					height: size.height,
+					viewportWidth: size.viewportWidth,
+					devicePixelRatio: window.devicePixelRatio || 1
+				}));
+			} catch (e) {
+			}
+		}
+	}
+
+	function scheduleMeasure() {
+		if (measureScheduled) {
+			return;
+		}
+		measureScheduled = true;
+		var callback = function() {
+			measureScheduled = false;
+			reportPreferredSize();
+		};
+		if (window.requestAnimationFrame) {
+			window.requestAnimationFrame(callback);
+		} else {
+			setTimeout(callback, 0);
+		}
+	}
+
+	window.addEventListener('message', function(event) {
+		var iframe = iframeWindows.get(event.source);
+		if (!iframe) {
+			return;
+		}
+		var data = event.data;
+		if (typeof data === 'string') {
+			try {
+				data = JSON.parse(data);
+			} catch (e) {
+				return;
+			}
+		}
+		if (!data || data.eventType !== 'resize_frame' || !data.eventData) {
+			return;
+		}
+		var height = clamp(data.eventData.height, 100000);
+		if (!height) {
+			return;
+		}
+		iframe.setAttribute('data-native-iv-resized', '1');
+		iframe.style.height = height + 'px';
+		scheduleMeasure();
+	}, false);
+
+	document.addEventListener('DOMContentLoaded', function() {
+		syncIframes();
+		scheduleMeasure();
+	}, false);
+
+	window.addEventListener('load', function() {
+		syncIframes();
+		scheduleMeasure();
+	}, false);
+
+	window.addEventListener('resize', function() {
+		syncIframes();
+		scheduleMeasure();
+	}, false);
+
+	if (window.ResizeObserver) {
+		var observer = new ResizeObserver(function() {
+			scheduleMeasure();
+		});
+		if (document.documentElement) {
+			observer.observe(document.documentElement);
+		}
+		if (document.body) {
+			observer.observe(document.body);
+		}
+	}
+
+	setInterval(function() {
+		syncIframes();
+		scheduleMeasure();
+	}, 250);
+
+	syncIframes();
+	scheduleMeasure();
+})();
+</script>
+</body>
+</html>)NativeIvHtml");
 }
 
 [[nodiscard]] const NativeIvDocumentInfo *FindNativeIvDocument(
@@ -628,14 +692,14 @@ using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
 			{ { "href", "tel:" + NativeIvHtmlEscape(qs(data.vphone())) } },
 			RenderNativeIvRichTextHtml(data.vtext(), state));
 	}, [&](const MTPDtextAnchor &data) {
-		const auto inner = RenderNativeIvRichTextHtml(data.vtext(), state);
+		auto inner = RenderNativeIvRichTextHtml(data.vtext(), state);
 		const auto name = NativeIvHtmlEscape(qs(data.vname()));
-		return inner.isEmpty()
-			? NativeIvHtmlTag("a", { { "name", name } })
-			: NativeIvHtmlTag(
-				"span",
-				{ { "class", "reference" } },
-				NativeIvHtmlTag("a", { { "name", name } }) + inner);
+		auto anchor = NativeIvHtmlTag("a", { { "name", name } });
+		if (inner.isEmpty()) {
+			return anchor;
+		}
+		anchor += inner;
+		return NativeIvHtmlTag("span", { { "class", "reference" } }, anchor);
 	});
 }
 

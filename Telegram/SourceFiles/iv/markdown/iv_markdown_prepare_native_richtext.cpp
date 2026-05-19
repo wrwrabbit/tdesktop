@@ -35,19 +35,6 @@ namespace {
 	return { .value = GeneratePreparedBlockIdValue(state) };
 }
 
-void ShiftEntities(EntitiesInText *entities, int delta) {
-	if (!delta) {
-		return;
-	}
-	for (auto &entity : *entities) {
-		entity = EntityInText(
-			entity.type(),
-			entity.offset() + delta,
-			entity.length(),
-			entity.data());
-	}
-}
-
 [[nodiscard]] const NativeIvPhotoInfo *FindNativeIvPhoto(
 		uint64 photoId,
 		const NativeIvPrepareState &state) {

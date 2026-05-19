@@ -20,9 +20,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_widgets.h"
 
 #include <QtCore/QEvent>
-#include <QtWidgets/QAction>
 #include <QtGui/QCursor>
 #include <QtGui/QPainter>
+#include <QAction>
 
 namespace Iv {
 namespace {

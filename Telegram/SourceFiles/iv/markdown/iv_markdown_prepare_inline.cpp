@@ -145,15 +145,6 @@ struct DecodedDisplaySpan {
 	return result;
 }
 
-[[nodiscard]] int ScaleFormulaCap(int cap, int textSize, int baseTextSize) {
-	if (cap <= 0) {
-		return 0;
-	}
-	const auto numerator = int64(cap) * std::max(textSize, 1);
-	const auto denominator = std::max(baseTextSize, 1);
-	return std::max(int((numerator + denominator - 1) / denominator), 1);
-}
-
 [[nodiscard]] std::vector<InlineFormulaSource> CollectInlineFormulas(
 		const MarkdownNode &node,
 		PrepareState *state) {
