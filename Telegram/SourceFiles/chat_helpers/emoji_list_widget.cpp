@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/power_saving.h"
 #include "ui/ui_utility.h"
 #include "ui/cached_round_corners.h"
+#include "boxes/share_box.h"
 #include "boxes/sticker_set_box.h"
 #include "lang/lang_keys.h"
 #include "layout/layout_position.h"
@@ -1930,6 +1931,26 @@ base::unique_qptr<Ui::PopupMenu> EmojiListWidget::fillContextMenu(
 	if (v::is_null(_selected)) {
 		return nullptr;
 	}
+	if (const auto setOver = std::get_if<OverSet>(&_selected)) {
+		const auto section = setOver->section;
+		if (_searchMode
+			&& section > 0
+			&& section <= int(_searchSets.size())) {
+			return fillSetContextMenu(searchSetBySection(section));
+		} else if (!_searchMode
+			&& section >= _staticCount
+			&& (section - _staticCount) < int(_custom.size())) {
+			return fillSetContextMenu(_custom[section - _staticCount]);
+		}
+		return nullptr;
+	}
+	if (const auto shortcut = std::get_if<OverSearchShortcut>(&_selected)) {
+		if (shortcut->index >= 0
+			&& shortcut->index < int(_searchShortcutSets.size())) {
+			return fillSetContextMenu(_searchShortcutSets[shortcut->index]);
+		}
+		return nullptr;
+	}
 	const auto over = std::get_if<OverEmoji>(&_selected);
 	if (!over) {
 		return nullptr;
@@ -2056,6 +2077,18 @@ void EmojiListWidget::fillEmojiStatusMenu(
 		tr::lng_manage_messages_ttl_after_custom(tr::now),
 		crl::guard(this, [=] { selectWith(
 			TabbedSelector::kPickCustomTimeId); }));
+}
+
+base::unique_qptr<Ui::PopupMenu> EmojiListWidget::fillSetContextMenu(
+		const CustomSet &set) {
+	return FillStickerSetContextMenu(
+		this,
+		_show,
+		set.set,
+		_localSetsManager.get(),
+		crl::guard(this, [this](uint64 id) { removeSet(id); }),
+		crl::guard(this, [this] { update(); }),
+		st::popupMenuWithIcons);
 }
 
 void EmojiListWidget::paintEvent(QPaintEvent *e) {
