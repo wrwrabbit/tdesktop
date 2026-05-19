@@ -591,6 +591,7 @@ private:
 		int characters = 0;
 		float64 howMuchOver = 0.;
 		HistoryMessageMarkupButton::Type type = {};
+		HistoryMessageMarkupButton::Type iconType = {};
 		HistoryMessageMarkupButton::Color color = {};
 		std::shared_ptr<ReplyMarkupClickHandler> link;
 		mutable std::unique_ptr<Ui::RippleAnimation> ripple;
