@@ -4320,7 +4320,11 @@ void ForwardToSelf(
 					.to1 = session->user(),
 				})).current();
 				if (!phrase.empty()) {
-					show->showToast(std::move(phrase));
+					show->showToast({
+						.text = std::move(phrase),
+						.filter = ChatHelpers::ForwardedToSavedMessagesFilter(
+							session),
+					});
 				}
 			});
 	}

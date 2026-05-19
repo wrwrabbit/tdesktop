@@ -226,6 +226,8 @@ void SelfForwardsTagger::showToast(
 		.textContext = Core::TextContext({
 			.session = &_controller->session(),
 		}),
+		.filter = ChatHelpers::ForwardedToSavedMessagesFilter(
+			&_controller->session()),
 		.iconLottie = u"toast/saved_messages"_q,
 		.iconPadding = st::selfForwardsTaggerIconPadding,
 		.st = &st::selfForwardsTaggerToast,
