@@ -88,7 +88,8 @@ public:
 		std::shared_ptr<::Data::PhotoMedia> media,
 		not_null<PhotoData*> photo,
 		::Data::FileOrigin origin,
-		CachedPagePhotoImageKind kind);
+		CachedPagePhotoImageKind kind,
+		QSize requestedSize);
 
 	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> clone() override;
 
@@ -100,24 +101,30 @@ private:
 	void ensureWanted();
 
 	[[nodiscard]] Image *resolvedImage() const;
+	[[nodiscard]] QImage prepareImage(QImage image, int size) const;
+	[[nodiscard]] QSize requestedSize(int size) const;
 
 	const std::shared_ptr<::Data::PhotoMedia> _media;
 	const not_null<PhotoData*> _photo;
 	const ::Data::FileOrigin _origin;
 	const CachedPagePhotoImageKind _kind;
+	const QSize _requestedSize;
+	mutable QImage _cached;
 	rpl::lifetime _subscription;
 
 };
 
 CachedPagePhotoDynamicImage::CachedPagePhotoDynamicImage(
-	std::shared_ptr<::Data::PhotoMedia> media,
-	not_null<PhotoData*> photo,
-	::Data::FileOrigin origin,
-	CachedPagePhotoImageKind kind)
+		std::shared_ptr<::Data::PhotoMedia> media,
+		not_null<PhotoData*> photo,
+		::Data::FileOrigin origin,
+		CachedPagePhotoImageKind kind,
+		QSize requestedSize)
 : _media(std::move(media))
 , _photo(photo)
 , _origin(std::move(origin))
-, _kind(kind) {
+, _kind(kind)
+, _requestedSize(requestedSize) {
 }
 
 std::shared_ptr<Ui::DynamicImage> CachedPagePhotoDynamicImage::clone() {
@@ -125,13 +132,14 @@ std::shared_ptr<Ui::DynamicImage> CachedPagePhotoDynamicImage::clone() {
 		_media,
 		_photo,
 		_origin,
-		_kind);
+		_kind,
+		_requestedSize);
 }
 
 QImage CachedPagePhotoDynamicImage::image(int size) {
 	ensureWanted();
 	if (const auto image = resolvedImage()) {
-		return image->original();
+		return prepareImage(image->original(), size);
 	}
 	return QImage();
 }
@@ -144,7 +152,8 @@ void CachedPagePhotoDynamicImage::subscribeToUpdates(Fn<void()> callback) {
 	_subscription = _photo->owner().photoLoadProgress(
 	) | rpl::filter([photo = _photo](not_null<PhotoData*> updated) {
 		return (updated == photo);
-	}) | rpl::on_next([callback = std::move(callback)] {
+	}) | rpl::on_next([=, callback = std::move(callback)] {
+		_cached = QImage();
 		callback();
 	});
 }
@@ -176,6 +185,37 @@ Image *CachedPagePhotoDynamicImage::resolvedImage() const {
 		return _media->thumbnailInline();
 	}
 	return nullptr;
+}
+
+QImage CachedPagePhotoDynamicImage::prepareImage(
+		QImage image,
+		int size) const {
+	const auto requested = requestedSize(size);
+	if (requested.isEmpty() || image.isNull()) {
+		return image;
+	}
+	const auto ratio = style::DevicePixelRatio();
+	if (!_cached.isNull()) {
+		const auto cachedSize = _cached.size() / ratio;
+		if (cachedSize.width() == requested.width()
+			|| cachedSize.height() == requested.height()) {
+			return _cached;
+		}
+	}
+	const auto to = image.size().scaled(requested, Qt::KeepAspectRatio);
+	_cached = image.scaled(
+		QSize(std::max(to.width(), 1), std::max(to.height(), 1)) * ratio,
+		Qt::IgnoreAspectRatio,
+		Qt::SmoothTransformation);
+	_cached.setDevicePixelRatio(ratio);
+	return _cached;
+}
+
+QSize CachedPagePhotoDynamicImage::requestedSize(int size) const {
+	if (!_requestedSize.isEmpty()) {
+		return _requestedSize;
+	}
+	return (size > 0) ? QSize(size, size) : QSize();
 }
 
 class CachedPagePhotoRuntime final : public Markdown::PhotoRuntime {
@@ -224,7 +264,8 @@ std::shared_ptr<Ui::DynamicImage> CachedPagePhotoRuntime::thumbnail(
 		_media,
 		_photo,
 		_origin,
-		CachedPagePhotoImageKind::Thumbnail);
+		CachedPagePhotoImageKind::Thumbnail,
+		size);
 }
 
 std::shared_ptr<Ui::DynamicImage> CachedPagePhotoRuntime::full(
@@ -234,7 +275,8 @@ std::shared_ptr<Ui::DynamicImage> CachedPagePhotoRuntime::full(
 		_media,
 		_photo,
 		_origin,
-		CachedPagePhotoImageKind::Full);
+		CachedPagePhotoImageKind::Full,
+		size);
 }
 
 bool CachedPagePhotoRuntime::loaded() const {

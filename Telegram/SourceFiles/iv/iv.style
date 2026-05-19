@@ -405,9 +405,10 @@ defaultMarkdownEmbedPostAuthorStyle: TextStyle(defaultMarkdownBodyStyle) {
 }
 defaultMarkdownEmbedPostDateStyle: TextStyle(defaultMarkdownDetailsSummaryStyle) {
 }
+defaultMarkdownEmbedPostAccentWidth: 3px;
 defaultMarkdownEmbedPost: MarkdownEmbedPost {
 	padding: margins(8px, 0px, 8px, 0px);
-	accentWidth: 3px;
+	accentWidth: defaultMarkdownEmbedPostAccentWidth;
 	accentFg: windowActiveTextFg;
 	accentSkip: 12px;
 	headerGap: 10px;
@@ -423,7 +424,7 @@ defaultMarkdownEmbedPost: MarkdownEmbedPost {
 defaultMarkdownPlaceholder: MarkdownPlaceholder {
 	padding: margins(16px, 24px, 16px, 24px);
 	minHeight: 48px;
-	border: 4px;
+	border: defaultMarkdownEmbedPostAccentWidth;
 	radius: 16px;
 	spinnerWidth: 4px;
 	spinnerSize: 24px;
@@ -524,7 +525,7 @@ defaultMarkdownRelatedArticle: MarkdownRelatedArticle {
 defaultMarkdownGroupedMedia: MarkdownGroupedMedia {
 	padding: margins(0px, 0px, 0px, 0px);
 	captionSkip: 12px;
-	itemSkip: 0px;
+	itemSkip: 3px;
 	radius: 0px;
 	overlayOpacity: 0.2;
 	navButtonSize: 36px;
