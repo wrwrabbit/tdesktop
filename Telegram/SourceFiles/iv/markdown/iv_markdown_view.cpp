@@ -679,7 +679,7 @@ int MarkdownPreviewRoot::scrollTop() const {
 rpl::producer<int> MarkdownPreviewRoot::scrollTopValue() const {
 	return _scroll
 		? _scroll->scrollTopValue()
-		: rpl::single(0);
+		: rpl::single(0) | rpl::type_erased;
 }
 
 bool ScrollMarkdownPreviewToAnchor(
