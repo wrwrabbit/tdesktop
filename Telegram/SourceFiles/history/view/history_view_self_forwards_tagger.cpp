@@ -136,6 +136,7 @@ void SelfForwardsTagger::showSelectorForMessages(
 		[] { return false; },
 		false);
 	selector->setBubbleUp(true);
+	selector->setExpandDown(true);
 
 	const auto hideAndDestroy = [
 			selectorWeak = base::make_weak(selector),
