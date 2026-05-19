@@ -1507,9 +1507,6 @@ void MarkNativeIvTableSlots(
 			data.vtext(),
 			state);
 	}, [&](const MTPDpageBlockAuthorDate &data) {
-		return PrepareNativeIvPlainPlaceholderBlock(
-			u"Unsupported Content"_q,
-			result); AssertIsDebug();
 		auto prepared = PreparedIvRichText();
 		auto anchorId = QString();
 		if (!PrepareNativeIvRichText(

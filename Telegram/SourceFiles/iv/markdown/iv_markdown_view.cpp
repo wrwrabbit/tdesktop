@@ -15,6 +15,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_view_widget.h"
 #include "iv/iv_delegate.h"
 #include "lang/lang_keys.h"
+#include "ui/controls/jump_down_button.h"
+#include "ui/effects/animations.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/layer_manager.h"
 #include "ui/style/style_core_scale.h"
@@ -27,7 +29,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "logs.h"
 
 #include "styles/style_iv.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_layers.h"
+#include "styles/style_window.h"
 
 #include <QtCore/QElapsedTimer>
 #include <QtGui/QScreen>
@@ -189,7 +193,11 @@ private:
 		not_null<Ui::GenericBox*> box,
 		PreparedFootnote footnote);
 	void applyPreparedContent(MarkdownArticleContent prepared, int prepareMs);
+	void scrollToTop();
 	void updateBodyVisibleTopBottom();
+	void updateScrollToTopVisibility();
+	void startScrollToTopButtonAnimation(bool shown);
+	void updateScrollToTopPosition();
 	void updateChildrenGeometry(QSize size);
 	void updateFailureGeometry();
 	void logPreparationSummary(
@@ -207,6 +215,7 @@ private:
 	std::unique_ptr<Ui::LayerManager> _footnoteLayerManager;
 	EmbedOverlay *_embedOverlay = nullptr;
 	Ui::ScrollArea *_scroll = nullptr;
+	Ui::JumpDownButton *_scrollToTop = nullptr;
 	MarkdownDocumentWidget *_body = nullptr;
 	Ui::FlatLabel *_failure = nullptr;
 	Ui::LinkButton *_failureOpen = nullptr;
@@ -215,6 +224,9 @@ private:
 	QString _pendingFragment;
 	int _devicePixelRatio = 0;
 	PendingEmbedState _pendingEmbed;
+	Ui::Animations::Simple _scrollToAnimation;
+	Ui::Animations::Simple _scrollToTopShown;
+	bool _scrollToTopIsShown = false;
 
 };
 
@@ -254,6 +266,10 @@ void MarkdownPreviewRoot::setup() {
 	_scroll = Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll);
 	_scroll->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
 	_body = _scroll->setOwnedWidget(object_ptr<MarkdownDocumentWidget>(_scroll));
+	_scrollToTop = Ui::CreateChild<Ui::JumpDownButton>(_scroll, st::dialogsToUp);
+	_scrollToTop->setClickedCallback([=] { scrollToTop(); });
+	_scrollToTop->setAccessibleName(tr::lng_sr_scroll_to_top(tr::now));
+	_scrollToTop->raise();
 	_failure = Ui::CreateChild<Ui::FlatLabel>(
 		this,
 		tr::lng_markdown_preview_cant(tr::now),
@@ -315,6 +331,8 @@ void MarkdownPreviewRoot::setup() {
 		_scroll->heightValue()
 	) | rpl::on_next([=](int, int) {
 		updateBodyVisibleTopBottom();
+		updateScrollToTopVisibility();
+		updateScrollToTopPosition();
 	}, lifetime());
 
 	style::PaletteChanged() | rpl::on_next([=] {
@@ -578,6 +596,8 @@ void MarkdownPreviewRoot::applyPreparedContent(
 		_article = nullptr;
 		_footnotes.clear();
 		_embedHtmlResources.clear();
+		_scrollToAnimation.stop();
+		startScrollToTopButtonAnimation(false);
 		_scroll->hide();
 		if (_body) {
 			_body->hide();
@@ -622,6 +642,9 @@ void MarkdownPreviewRoot::applyPreparedContent(
 		static_cast<void>(scrolled);
 		_pendingFragment.clear();
 	}
+	_scrollToTop->raise();
+	updateScrollToTopVisibility();
+	updateScrollToTopPosition();
 	logPreparationSummary(
 		failure,
 		debug,
@@ -637,13 +660,15 @@ bool MarkdownPreviewRoot::scrollToAnchor(const QString &anchorId) {
 	if (top < 0) {
 		return false;
 	}
-	_scroll->scrollToY(top);
+	scrollToY(top);
 	return true;
 }
 
 void MarkdownPreviewRoot::scrollToY(int top) {
 	if (_scroll) {
+		_scrollToAnimation.stop();
 		_scroll->scrollToY(top);
+		updateScrollToTopVisibility();
 	}
 }
 
@@ -680,10 +705,76 @@ rpl::producer<int> MarkdownPreviewScrollTopValue(Ui::RpWidget *preview) {
 	return root ? root->scrollTopValue() : rpl::single(0);
 }
 
+void MarkdownPreviewRoot::scrollToTop() {
+	if (!_scroll || _scrollToAnimation.animating()) {
+		return;
+	}
+	auto scrollTop = _scroll->scrollTop();
+	const auto scrollTo = 0;
+	if (scrollTop == scrollTo) {
+		return;
+	}
+	const auto maxAnimatedDelta = _scroll->height();
+	if (scrollTo + maxAnimatedDelta < scrollTop) {
+		scrollTop = scrollTo + maxAnimatedDelta;
+		_scroll->scrollToY(scrollTop);
+	}
+
+	startScrollToTopButtonAnimation(false);
+
+	_scrollToAnimation.start(
+		[=] {
+			if (_scroll) {
+				_scroll->scrollToY(qRound(_scrollToAnimation.value(scrollTo)));
+			}
+		},
+		scrollTop,
+		scrollTo,
+		st::slideDuration,
+		anim::sineInOut);
+}
+
 void MarkdownPreviewRoot::updateBodyVisibleTopBottom() {
 	if (_body) {
 		const auto scrollTop = _scroll->scrollTop();
 		_body->setVisibleTopBottom(scrollTop, scrollTop + _scroll->height());
+	}
+}
+
+void MarkdownPreviewRoot::updateScrollToTopVisibility() {
+	if (_scrollToAnimation.animating()) {
+		return;
+	}
+	startScrollToTopButtonAnimation(
+		!_scroll->isHidden()
+		&& (_scroll->scrollTop() > (st::historyToDownShownAfter / 2))
+		&& (_scroll->scrollTop() < _scroll->scrollTopMax()));
+}
+
+void MarkdownPreviewRoot::startScrollToTopButtonAnimation(bool shown) {
+	if (_scrollToTopIsShown == shown) {
+		return;
+	}
+	_scrollToTopIsShown = shown;
+	_scrollToTopShown.start(
+		[=] { updateScrollToTopPosition(); },
+		_scrollToTopIsShown ? 0. : 1.,
+		_scrollToTopIsShown ? 1. : 0.,
+		st::historyToDownDuration);
+}
+
+void MarkdownPreviewRoot::updateScrollToTopPosition() {
+	const auto top = anim::interpolate(
+		0,
+		_scrollToTop->height() + st::connectingMargin.top(),
+		_scrollToTopShown.value(_scrollToTopIsShown ? 1. : 0.));
+	_scrollToTop->moveToRight(
+		st::historyToDownPosition.x(),
+		_scroll->height() - top);
+	const auto shouldBeHidden
+		= !_scrollToTopIsShown && !_scrollToTopShown.animating();
+	if (shouldBeHidden != _scrollToTop->isHidden()) {
+		_scrollToTop->setVisible(!shouldBeHidden);
 	}
 }
 
@@ -702,6 +793,8 @@ void MarkdownPreviewRoot::updateChildrenGeometry(QSize size) {
 	if (_embedOverlay) {
 		_embedOverlay->updateGeometry(QRect(QPoint(), size), bodyWidth);
 	}
+	_scrollToTop->raise();
+	updateScrollToTopPosition();
 	updateFailureGeometry();
 }
 
