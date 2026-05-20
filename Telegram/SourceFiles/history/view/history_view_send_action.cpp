@@ -134,6 +134,7 @@ bool SendActionPainter::updateNeedsAnimating(
 	}, [&](const MTPDsendMessageTextDraftAction &) {
 	}, [&](const MTPDsendMessageCancelAction &) {
 		Unexpected("CancelAction here.");
+	}, [&](const auto &) {
 	});
 	return updateNeedsAnimating(now, true);
 }

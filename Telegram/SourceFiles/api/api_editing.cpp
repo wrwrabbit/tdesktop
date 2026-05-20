@@ -319,7 +319,8 @@ mtpRequestId EditMessage(
 		sentEntities,
 		MTP_int(options.scheduled),
 		MTP_int(options.scheduleRepeatPeriod),
-		MTP_int(item->shortcutId())
+		MTP_int(item->shortcutId()),
+		MTPInputRichMessage()
 	)).done([=](
 			const MTPUpdates &result,
 			[[maybe_unused]] mtpRequestId requestId) {

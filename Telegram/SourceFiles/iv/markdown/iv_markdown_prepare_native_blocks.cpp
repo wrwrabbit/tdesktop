@@ -700,6 +700,8 @@ iframe {
 		}
 		anchor += inner;
 		return NativeIvHtmlTag("span", { { "class", "reference" } }, anchor);
+	}, [](const auto &) {
+		return QByteArray();
 	});
 }
 
@@ -1728,7 +1730,11 @@ void MarkNativeIvTableSlots(
 		return PrepareNativeIvRelatedArticlesBlock(data, result, state);
 	}, [&](const MTPDpageBlockMap &data) {
 		return PrepareNativeIvMapBlock(data, result, state);
-		});
+	}, [&](const auto &) {
+		return PrepareNativeIvPlainPlaceholderBlock(
+			u"Unsupported Content"_q,
+			result);
+	});
 }
 
 } // namespace

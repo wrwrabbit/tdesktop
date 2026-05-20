@@ -204,7 +204,8 @@ MTPMessage PrepareLogMessage(const MTPMessage &message, TimeId newDate) {
 			MTP_long(data.vpaid_message_stars().value_or_empty()),
 			MTPSuggestedPost(),
 			MTPint(), // schedule_repeat_period
-			MTPstring()); // summary_from_language
+			MTPstring(), // summary_from_language
+			MTPRichMessage());
 	});
 }
 

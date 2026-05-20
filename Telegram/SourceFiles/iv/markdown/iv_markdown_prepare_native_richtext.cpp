@@ -407,6 +407,8 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 			links,
 			blockAnchorId,
 			state);
+	}, [](const auto &) {
+		return true;
 	});
 }
 

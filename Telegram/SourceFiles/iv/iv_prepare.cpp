@@ -142,6 +142,11 @@ private:
 	[[nodiscard]] QByteArray block(
 		const MTPDpageListOrderedItemBlocks &data);
 
+	template <typename T>
+	[[nodiscard]] QByteArray block(const T &) {
+		return {};
+	}
+
 	[[nodiscard]] QByteArray wrap(const QByteArray &content, int views);
 
 	[[nodiscard]] QByteArray tag(
@@ -1100,6 +1105,8 @@ QByteArray Parser::rich(const MTPRichText &text) {
 				{ { "class", "reference" } },
 				tag("a", { { "name", name } }) + inner);
 		}
+	}, [](const auto &) {
+		return QByteArray();
 	});
 }
 

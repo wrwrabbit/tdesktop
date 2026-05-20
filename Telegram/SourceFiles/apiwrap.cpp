@@ -2300,7 +2300,8 @@ void ApiWrap::saveDraftsToCloud() {
 				cloudDraft->webpage,
 				textWithTags.text.isEmpty()),
 			MTP_long(0), // effect
-			Api::SuggestToMTP(cloudDraft->suggest)
+			Api::SuggestToMTP(cloudDraft->suggest),
+			MTPInputRichMessage()
 		)).done([=](const MTPBool &result, const MTP::Response &response) {
 			const auto requestId = response.requestId;
 			history->finishSavingCloudDraft(
@@ -4323,7 +4324,8 @@ void ApiWrap::sendMessage(
 					mtpShortcut,
 					MTP_long(action.options.effectId),
 					MTP_long(starsPaid),
-					Api::SuggestToMTP(action.options.suggest)
+					Api::SuggestToMTP(action.options.suggest),
+					MTPInputRichMessage()
 				), done, fail);
 		}
 		isFirst = false;
