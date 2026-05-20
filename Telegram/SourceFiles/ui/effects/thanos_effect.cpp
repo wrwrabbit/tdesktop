@@ -15,8 +15,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "base/debug_log.h"
 #include "base/platform/base_platform_info.h"
+#include "base/qt_signal_producer.h"
 
 #include <QTimer>
+#include <QtGui/QWindow>
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 #include <rhi/qrhi.h>
@@ -129,7 +131,24 @@ void ThanosEffect::ensureSurface() {
 		return;
 	}
 
-	auto renderer = std::make_unique<ThanosEffectRenderer>();
+	auto devicePixelRatio = [&]() -> rpl::producer<float64> {
+		const auto initial = float64(_parent->devicePixelRatioF());
+		const auto handle = _parent->windowHandle();
+		if (!handle) {
+			return rpl::single(initial);
+		}
+		return rpl::single(
+			initial
+		) | rpl::then(base::qt_signal_producer(
+			handle,
+			&QWindow::screenChanged
+		) | rpl::map([parent = _parent](QScreen*) {
+			return float64(parent->devicePixelRatioF());
+		}));
+	}();
+
+	auto renderer = std::make_unique<ThanosEffectRenderer>(
+		std::move(devicePixelRatio));
 	_renderer = renderer.get();
 
 	_renderer->allDone() | rpl::on_next([=] {

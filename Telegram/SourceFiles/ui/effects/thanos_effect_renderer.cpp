@@ -96,7 +96,13 @@ static_assert(sizeof(RenderUniforms) % 16 == 0);
 
 } // namespace
 
-ThanosEffectRenderer::ThanosEffectRenderer() {
+ThanosEffectRenderer::ThanosEffectRenderer(
+		rpl::producer<float64> devicePixelRatio) {
+	std::move(
+		devicePixelRatio
+	) | rpl::on_next([=, this](float64 value) {
+		_factor = value;
+	}, _lifetime);
 	_elapsed.start();
 }
 
@@ -289,9 +295,8 @@ void ThanosEffectRenderer::render(
 	}
 
 	const auto pixelSize = rt->pixelSize();
-	const auto factor = style::DevicePixelRatio();
-	const auto viewW = float(pixelSize.width()) / factor;
-	const auto viewH = float(pixelSize.height()) / factor;
+	const auto viewW = float(pixelSize.width()) / _factor;
+	const auto viewH = float(pixelSize.height()) / _factor;
 
 	{
 		auto *rub = rhi->nextResourceUpdateBatch();

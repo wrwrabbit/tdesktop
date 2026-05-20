@@ -36,7 +36,8 @@ class ThanosEffectRenderer final
 	: public GL::Renderer
 	, public Rhi::Renderer {
 public:
-	ThanosEffectRenderer();
+	explicit ThanosEffectRenderer(
+		rpl::producer<float64> devicePixelRatio);
 	~ThanosEffectRenderer();
 
 	void initialize(
@@ -87,6 +88,7 @@ private:
 	void destroyAnimatingItem(AnimatingItem &item);
 
 	QRhi *_rhi = nullptr;
+	float64 _factor = 1.;
 
 	QRhiBuffer *_quadVertexBuffer = nullptr;
 	QRhiBuffer *_computeInitUniformBuffer = nullptr;
@@ -114,6 +116,7 @@ private:
 	uint32_t _seedCounter = 0;
 
 	rpl::event_stream<> _allDone;
+	rpl::lifetime _lifetime;
 
 };
 
