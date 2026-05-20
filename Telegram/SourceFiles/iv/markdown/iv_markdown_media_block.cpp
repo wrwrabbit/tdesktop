@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_prepare.h"
 #include "lang/lang_keys.h"
 #include "ui/dynamic_image.h"
+#include "ui/effects/spoiler_mess.h"
 #include "ui/grouped_layout.h"
 
 #include "rpl/lifetime.h"
@@ -71,6 +72,10 @@ constexpr auto kMaxGroupedMediaLayoutItems = 10;
 		rect);
 	const auto paintedPreviousFull = PaintDynamicImage(p, previousFull, rect);
 	return paintedPreviousThumbnail || paintedPreviousFull;
+}
+
+void PaintImageSpoiler(Painter &p, QRect rect) {
+	Ui::FillSpoilerRect(p, rect, Ui::DefaultImageSpoiler().frame());
 }
 
 [[nodiscard]] bool UpdateResolvedImage(
@@ -438,6 +443,7 @@ private:
 	const uint64 _documentId = 0;
 	const QString _url;
 	const bool _viewerOpen = false;
+	const bool _spoiler = false;
 	const MapDescriptor _map;
 
 	QRect _geometry;
@@ -467,7 +473,8 @@ ImageBackedMediaBlock::ImageBackedMediaBlock(
 , _mediaRuntime(std::move(mediaRuntime))
 , _photoId(prepared.photoId)
 , _url(prepared.urlOverride)
-, _viewerOpen(prepared.viewerOpen) {
+, _viewerOpen(prepared.viewerOpen)
+, _spoiler(prepared.spoiler) {
 	if (!_url.isEmpty()) {
 		_activation.kind = MediaActivationKind::ExternalUrl;
 		_activation.url = _url;
@@ -483,7 +490,8 @@ ImageBackedMediaBlock::ImageBackedMediaBlock(
 , _aspectWidth(prepared.media.width)
 , _aspectHeight(prepared.media.height)
 , _mediaRuntime(std::move(mediaRuntime))
-, _documentId(prepared.media.id) {
+, _documentId(prepared.media.id)
+, _spoiler(prepared.media.spoiler) {
 }
 
 ImageBackedMediaBlock::ImageBackedMediaBlock(
@@ -553,6 +561,9 @@ void ImageBackedMediaBlock::paint(
 			_geometry,
 			Qt::AlignCenter | Qt::TextWordWrap,
 			_copyText);
+	}
+	if (_spoiler) {
+		PaintImageSpoiler(p, _geometry);
 	}
 
 	if (loading()) {
@@ -1293,6 +1304,7 @@ private:
 		std::shared_ptr<Ui::DynamicImage> previousThumbnailImage;
 		std::shared_ptr<Ui::DynamicImage> previousFullImage;
 		QSize requestedSize;
+		bool spoiler = false;
 		bool runtimeResolved = false;
 	};
 
@@ -1377,6 +1389,7 @@ GroupedMediaBlock::GroupedMediaBlock(
 			std::max(item.media.width, 1),
 			std::max(item.media.height, 1));
 		state.copyText = GroupedMediaItemCopyText(item.media.kind);
+		state.spoiler = item.media.spoiler;
 		_items.push_back(std::move(state));
 	}
 }
@@ -1688,6 +1701,9 @@ void GroupedMediaBlock::paintItem(Painter &p, const ItemState &item) const {
 			Qt::AlignCenter | Qt::TextWordWrap,
 			item.copyText);
 	}
+	if (item.spoiler) {
+		PaintImageSpoiler(p, item.rect);
+	}
 	if (itemLoading(item)) {
 		PaintPhotoProgress(
 			p,
@@ -1739,6 +1755,9 @@ void GroupedMediaBlock::paintActiveItem(Painter &p) const {
 			_geometry,
 			Qt::AlignCenter | Qt::TextWordWrap,
 			item->copyText.isEmpty() ? _fallbackLabel : item->copyText);
+	}
+	if (item->spoiler) {
+		PaintImageSpoiler(p, _geometry);
 	}
 	if (itemLoading(*item)) {
 		PaintPhotoProgress(

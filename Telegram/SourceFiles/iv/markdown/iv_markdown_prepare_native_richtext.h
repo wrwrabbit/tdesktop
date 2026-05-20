@@ -18,6 +18,12 @@ struct PreparedIvRichText {
 	std::vector<PreparedLink> links;
 };
 
+struct NativeIvRichTextContext {
+	int textSize = 0;
+	int renderWidthCap = 0;
+	int renderHeightCap = 0;
+};
+
 void RememberNativeIvPhoto(
 	NativeIvPrepareState *state,
 	const MTPPhoto &photo);
@@ -64,7 +70,8 @@ void RememberNativeIvDocument(
 	const MTPRichText &text,
 	PreparedIvRichText *result,
 	QString *blockAnchorId,
-	NativeIvPrepareState *state);
+	NativeIvPrepareState *state,
+	NativeIvRichTextContext context = {});
 [[nodiscard]] bool AppendPreparedIvRichBlock(
 	std::vector<PreparedBlock> *result,
 	PreparedBlockKind kind,

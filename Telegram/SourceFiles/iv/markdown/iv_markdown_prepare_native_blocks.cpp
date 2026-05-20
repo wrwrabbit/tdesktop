@@ -24,6 +24,46 @@ namespace {
 	return langDateTimeFull(base::unixtime::parse(date));
 }
 
+[[nodiscard]] int ScaleNativeIvFormulaCap(
+		int cap,
+		int textSize,
+		int baseTextSize) {
+	if (cap <= 0) {
+		return 0;
+	}
+	const auto numerator = int64(cap) * std::max(textSize, 1);
+	const auto denominator = std::max(baseTextSize, 1);
+	return std::max(int((numerator + denominator - 1) / denominator), 1);
+}
+
+[[nodiscard]] NativeIvRichTextContext NativeIvRichTextContextForTextSize(
+		int textSize,
+		const MarkdownPrepareDimensions &dimensions) {
+	return {
+		.textSize = textSize,
+		.renderWidthCap = ScaleNativeIvFormulaCap(
+			dimensions.displayMathMaxRenderWidth,
+			textSize,
+			dimensions.displayMathTextSize),
+		.renderHeightCap = ScaleNativeIvFormulaCap(
+			dimensions.displayMathMaxRenderHeight,
+			textSize,
+			dimensions.displayMathTextSize),
+	};
+}
+
+[[nodiscard]] int NativeIvFlowTextSize(
+		PreparedBlockKind kind,
+		int headingLevel,
+		const MarkdownPrepareDimensions &dimensions) {
+	if (kind == PreparedBlockKind::Heading
+		&& headingLevel >= 1
+		&& headingLevel <= int(dimensions.headingTextSizes.size())) {
+		return dimensions.headingTextSizes[headingLevel - 1];
+	}
+	return dimensions.bodyTextSize;
+}
+
 [[nodiscard]] QString NativeIvRelatedArticleFooterText(
 		const MTPDpageRelatedArticle &data) {
 	const auto author = qs(data.vauthor().value_or_empty()).trimmed();
@@ -630,6 +670,20 @@ iframe {
 [[nodiscard]] QByteArray RenderNativeIvRichTextHtml(
 		const MTPRichText &text,
 		NativeIvPrepareState *state) {
+	const auto renderAutoLink = [&](const MTPRichText &child, QString prefix) {
+		auto inner = RenderNativeIvRichTextHtml(child, state);
+		const auto target = child.match([&](const MTPDtextPlain &data) {
+			return prefix + qs(data.vtext());
+		}, [](const auto &) {
+			return QString();
+		});
+		return target.isEmpty()
+			? inner
+			: NativeIvHtmlTag(
+				"a",
+				{ { "href", NativeIvHtmlEscape(target) } },
+				inner);
+	};
 	return text.match([&](const MTPDtextEmpty &) {
 		return QByteArray();
 	}, [&](const MTPDtextPlain &data) {
@@ -657,6 +711,10 @@ iframe {
 			attributes.push_back({ "height", QByteArray::number(height) });
 		}
 		return NativeIvHtmlTag("img", attributes);
+	}, [&](const MTPDtextMath &data) {
+		return NativeIvRichText(qs(data.vsource()));
+	}, [&](const MTPDtextCustomEmoji &data) {
+		return NativeIvRichText(qs(data.valt()));
 	}, [&](const MTPDtextBold &data) {
 		return NativeIvHtmlTag("b", {}, RenderNativeIvRichTextHtml(data.vtext(), state));
 	}, [&](const MTPDtextItalic &data) {
@@ -686,6 +744,31 @@ iframe {
 		return NativeIvHtmlTag("sup", {}, RenderNativeIvRichTextHtml(data.vtext(), state));
 	}, [&](const MTPDtextMarked &data) {
 		return NativeIvHtmlTag("mark", {}, RenderNativeIvRichTextHtml(data.vtext(), state));
+	}, [&](const MTPDtextSpoiler &data) {
+		return NativeIvHtmlTag(
+			"span",
+			{ { "class", "spoiler" } },
+			RenderNativeIvRichTextHtml(data.vtext(), state));
+	}, [&](const MTPDtextMention &data) {
+		return RenderNativeIvRichTextHtml(data.vtext(), state);
+	}, [&](const MTPDtextHashtag &data) {
+		return RenderNativeIvRichTextHtml(data.vtext(), state);
+	}, [&](const MTPDtextBotCommand &data) {
+		return RenderNativeIvRichTextHtml(data.vtext(), state);
+	}, [&](const MTPDtextCashtag &data) {
+		return RenderNativeIvRichTextHtml(data.vtext(), state);
+	}, [&](const MTPDtextAutoUrl &data) {
+		return renderAutoLink(data.vtext(), QString());
+	}, [&](const MTPDtextAutoEmail &data) {
+		return renderAutoLink(data.vtext(), u"mailto:"_q);
+	}, [&](const MTPDtextAutoPhone &data) {
+		return renderAutoLink(data.vtext(), u"tel:"_q);
+	}, [&](const MTPDtextBankCard &data) {
+		return RenderNativeIvRichTextHtml(data.vtext(), state);
+	}, [&](const MTPDtextMentionName &data) {
+		return RenderNativeIvRichTextHtml(data.vtext(), state);
+	}, [&](const MTPDtextDate &data) {
+		return RenderNativeIvRichTextHtml(data.vtext(), state);
 	}, [&](const MTPDtextPhone &data) {
 		return NativeIvHtmlTag(
 			"a",
@@ -700,8 +783,6 @@ iframe {
 		}
 		anchor += inner;
 		return NativeIvHtmlTag("span", { { "class", "reference" } }, anchor);
-	}, [](const auto &) {
-		return QByteArray();
 	});
 }
 
@@ -943,6 +1024,23 @@ iframe {
 	return block;
 }
 
+[[nodiscard]] bool PrepareNativeIvMathBlock(
+		const MTPDpageBlockMath &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	const auto source = qs(data.vsource());
+	if (source.trimmed().isEmpty()) {
+		return true;
+	}
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::DisplayMath;
+	block.formulaTex = source;
+	block.mathKind = MathKind::Display;
+	block.formulaIndex = state->rememberFormula(block);
+	result->push_back(std::move(block));
+	return true;
+}
+
 [[nodiscard]] bool AppendNativeIvFlowBlock(
 		std::vector<PreparedBlock> *result,
 		PreparedBlockKind kind,
@@ -952,7 +1050,10 @@ iframe {
 		bool allowEmpty = false) {
 	auto prepared = PreparedIvRichText();
 	auto anchorId = QString();
-	if (!PrepareNativeIvRichText(text, &prepared, &anchorId, state)) {
+	const auto context = NativeIvRichTextContextForTextSize(
+		NativeIvFlowTextSize(kind, headingLevel, state->dimensions),
+		state->dimensions);
+	if (!PrepareNativeIvRichText(text, &prepared, &anchorId, state, context)) {
 		return false;
 	}
 	return AppendPreparedIvRichBlock(
@@ -1003,6 +1104,13 @@ iframe {
 	return true;
 }
 
+[[nodiscard]] TaskState NativeIvTaskState(bool checkbox, bool checked) {
+	if (!checkbox) {
+		return TaskState::None;
+	}
+	return checked ? TaskState::Checked : TaskState::Unchecked;
+}
+
 [[nodiscard]] bool PrepareNativeIvList(
 		const QVector<MTPPageListItem> &items,
 		PreparedBlock *result,
@@ -1013,6 +1121,9 @@ iframe {
 		block.listKind = result->listKind;
 		block.listDelimiter = result->listDelimiter;
 		const auto ok = item.match([&](const MTPDpageListItemText &data) {
+			block.taskState = NativeIvTaskState(
+				data.is_checkbox(),
+				data.is_checked());
 			auto prepared = PreparedIvRichText();
 			if (!PrepareNativeIvRichText(
 					data.vtext(),
@@ -1027,6 +1138,9 @@ iframe {
 				0,
 				std::move(prepared));
 		}, [&](const MTPDpageListItemBlocks &data) {
+			block.taskState = NativeIvTaskState(
+				data.is_checkbox(),
+				data.is_checked());
 			return PrepareNativeIvBlocks(data.vblocks().v, &block.children, state);
 		});
 		if (!ok) {
@@ -1069,6 +1183,9 @@ iframe {
 		block.listKind = result->listKind;
 		block.listDelimiter = result->listDelimiter;
 		const auto ok = item.match([&](const MTPDpageListOrderedItemText &data) {
+			block.taskState = NativeIvTaskState(
+				data.is_checkbox(),
+				data.is_checked());
 			auto orderedNumber = 0;
 			if (!ParseOrderedNumber(qs(data.vnum()), &orderedNumber)) {
 				orderedNumber = NextNativeIvOrderedNumber(*result);
@@ -1088,6 +1205,9 @@ iframe {
 				0,
 				std::move(prepared));
 		}, [&](const MTPDpageListOrderedItemBlocks &data) {
+			block.taskState = NativeIvTaskState(
+				data.is_checkbox(),
+				data.is_checked());
 			auto orderedNumber = 0;
 			if (!ParseOrderedNumber(qs(data.vnum()), &orderedNumber)) {
 				orderedNumber = NextNativeIvOrderedNumber(*result);
@@ -1365,11 +1485,17 @@ void MarkNativeIvTableSlots(
 					preparedCell.rowspan = rowspan;
 					if (cellData.vtext()) {
 						auto rich = PreparedIvRichText();
+						const auto context = NativeIvRichTextContextForTextSize(
+							cellData.is_header()
+								? state->dimensions.tableHeaderTextSize
+								: state->dimensions.tableBodyTextSize,
+							state->dimensions);
 						if (!PrepareNativeIvRichText(
 								*cellData.vtext(),
 								&rich,
 								nullptr,
-								state)) {
+								state,
+								context)) {
 							return false;
 						}
 						SortPreparedIvRichText(&rich);
@@ -1713,6 +1839,50 @@ void MarkNativeIvTableSlots(
 			5,
 			data.vtext(),
 			state);
+	}, [&](const MTPDpageBlockHeading1 &data) {
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Heading,
+			1,
+			data.vtext(),
+			state);
+	}, [&](const MTPDpageBlockHeading2 &data) {
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Heading,
+			2,
+			data.vtext(),
+			state);
+	}, [&](const MTPDpageBlockHeading3 &data) {
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Heading,
+			3,
+			data.vtext(),
+			state);
+	}, [&](const MTPDpageBlockHeading4 &data) {
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Heading,
+			4,
+			data.vtext(),
+			state);
+	}, [&](const MTPDpageBlockHeading5 &data) {
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Heading,
+			5,
+			data.vtext(),
+			state);
+	}, [&](const MTPDpageBlockHeading6 &data) {
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Heading,
+			6,
+			data.vtext(),
+			state);
+	}, [&](const MTPDpageBlockMath &data) {
+		return PrepareNativeIvMathBlock(data, result, state);
 	}, [&](const MTPDpageBlockTable &data) {
 		return PrepareNativeIvTableBlock(data, result, state);
 	}, [&](const MTPDpageBlockOrderedList &data) {
@@ -1730,7 +1900,11 @@ void MarkNativeIvTableSlots(
 		return PrepareNativeIvRelatedArticlesBlock(data, result, state);
 	}, [&](const MTPDpageBlockMap &data) {
 		return PrepareNativeIvMapBlock(data, result, state);
-	}, [&](const auto &) {
+	}, [&](const MTPDinputPageBlockMap &) {
+		return PrepareNativeIvPlainPlaceholderBlock(
+			u"Unsupported Content"_q,
+			result);
+	}, [&](const MTPDinputPageBlockOrderedList &) {
 		return PrepareNativeIvPlainPlaceholderBlock(
 			u"Unsupported Content"_q,
 			result);

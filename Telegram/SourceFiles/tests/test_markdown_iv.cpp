@@ -12,6 +12,10 @@
 #include "iv/iv_prepare.h"
 #include "scheme.h"
 
+namespace Data {
+[[nodiscard]] QString SerializeCustomEmojiId(uint64 id);
+} // namespace Data
+
 #include "lang/lang_keys.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 #include "ui/basic_click_handlers.h"
@@ -19,6 +23,7 @@
 #include "ui/dynamic_image.h"
 #include "ui/style/style_core.h"
 #include "ui/style/style_core_scale.h"
+#include "ui/text/text_entity.h"
 #include "ui/widgets/rp_window.h"
 #include "ui/widgets/scroll_area.h"
 
@@ -418,6 +423,7 @@ public:
 
 	[[nodiscard]] std::shared_ptr<MediaBlock> createPhoto(
 			const PreparedPhotoBlockData &prepared) const override {
+		preparedPhotos.push_back(prepared);
 		++photoRequests;
 		auto activation = MediaActivation();
 		activation.kind = MediaActivationKind::Photo;
@@ -432,6 +438,7 @@ public:
 
 	[[nodiscard]] std::shared_ptr<MediaBlock> createVideo(
 			const PreparedVideoBlockData &prepared) const override {
+		preparedVideos.push_back(prepared);
 		++videoRequests;
 		auto activation = MediaActivation();
 		activation.kind = MediaActivationKind::Document;
@@ -480,6 +487,8 @@ public:
 	mutable int videoRequests = 0;
 	mutable int audioRequests = 0;
 	mutable int mapRequests = 0;
+	mutable std::vector<PreparedPhotoBlockData> preparedPhotos;
+	mutable std::vector<PreparedVideoBlockData> preparedVideos;
 	mutable std::vector<std::shared_ptr<TestHostedMediaBlock>> photoBlocks;
 	mutable std::vector<std::shared_ptr<TestHostedMediaBlock>> videoBlocks;
 	mutable std::vector<std::shared_ptr<TestHostedMediaBlock>> audioBlocks;
@@ -632,6 +641,18 @@ public:
 	[[nodiscard]] std::shared_ptr<HostedMediaBlockFactory>
 	hostedMediaBlockFactory() const override {
 		return hostedFactory;
+	}
+
+	[[nodiscard]] Ui::Text::MarkedContext textContext() const override {
+		return {};
+	}
+
+	[[nodiscard]] QString mentionNameEntityData(uint64 userId) const override {
+		return TextUtilities::MentionNameDataFromFields({
+			.selfId = 1,
+			.userId = userId,
+			.accessHash = 2,
+		});
 	}
 
 	[[nodiscard]] int hostedPhotoRequests() const {
@@ -954,12 +975,17 @@ constexpr auto kNativeIvEmbedPostAuthorPhotoId = uint64(9301);
 		uint64 photoId,
 		QString caption = QString(),
 		QString credit = QString(),
-		QString urlOverride = QString()) {
-	const auto flags = urlOverride.isEmpty()
-		? MTP_flags(0)
-		: MTP_flags(MTPDpageBlockPhoto::Flag::f_url);
+		QString urlOverride = QString(),
+		bool spoiler = false) {
+	auto flags = MTPDpageBlockPhoto::Flags();
+	if (!urlOverride.isEmpty()) {
+		flags |= MTPDpageBlockPhoto::Flag::f_url;
+	}
+	if (spoiler) {
+		flags |= MTPDpageBlockPhoto::Flag::f_spoiler;
+	}
 	return MTP_pageBlockPhoto(
-		flags,
+		MTP_flags(flags),
 		MTP_long(photoId),
 		NativeIvCaption(std::move(caption), std::move(credit)),
 		MTP_string(urlOverride),
@@ -1116,12 +1142,17 @@ constexpr auto kNativeIvEmbedPostAuthorPhotoId = uint64(9301);
 		MTPlong());
 }
 
-[[nodiscard]] NativeIvMediaFixture NativeIvVideoFixture() {
+[[nodiscard]] NativeIvMediaFixture NativeIvVideoFixture(
+		bool spoiler = false) {
+	auto flags = MTPDpageBlockVideo::Flags();
+	if (spoiler) {
+		flags |= MTPDpageBlockVideo::Flag::f_spoiler;
+	}
 	return {
 		.label = u"Video"_q,
 		.caption = u"Video caption"_q,
 		.block = MTP_pageBlockVideo(
-			MTP_flags(0),
+			MTP_flags(flags),
 			MTP_long(7001),
 			NativeIvCaption(u"Video caption"_q)),
 		.documents = {
@@ -1130,12 +1161,17 @@ constexpr auto kNativeIvEmbedPostAuthorPhotoId = uint64(9301);
 	};
 }
 
-[[nodiscard]] NativeIvMediaFixture NativeIvAnimationFixture() {
+[[nodiscard]] NativeIvMediaFixture NativeIvAnimationFixture(
+		bool spoiler = false) {
+	auto flags = MTPDpageBlockVideo::Flags();
+	if (spoiler) {
+		flags |= MTPDpageBlockVideo::Flag::f_spoiler;
+	}
 	return {
 		.label = u"Animation"_q,
 		.caption = u"Animation caption"_q,
 		.block = MTP_pageBlockVideo(
-			MTP_flags(0),
+			MTP_flags(flags),
 			MTP_long(7601),
 			NativeIvCaption(u"Animation caption"_q)),
 		.documents = {
@@ -3397,7 +3433,7 @@ void ForEachPreparedFootnoteLink(
 	return result;
 }
 
-[[nodiscard]] bool HasEntityRange(
+[[nodiscard]] const EntityInText *FindEntityRange(
 		const TextWithEntities &text,
 		EntityType type,
 		int offset,
@@ -3406,10 +3442,29 @@ void ForEachPreparedFootnoteLink(
 		if (entity.type() == type
 			&& entity.offset() == offset
 			&& entity.length() == length) {
-			return true;
+			return &entity;
 		}
 	}
-	return false;
+	return nullptr;
+}
+
+[[nodiscard]] const EntityInText *FindEntityByType(
+		const TextWithEntities &text,
+		EntityType type) {
+	for (const auto &entity : text.entities) {
+		if (entity.type() == type) {
+			return &entity;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] bool HasEntityRange(
+		const TextWithEntities &text,
+		EntityType type,
+		int offset,
+		int length) {
+	return FindEntityRange(text, type, offset, length) != nullptr;
 }
 
 [[nodiscard]] uint16 PreparedLinkIndexFromCustomUrlData(
@@ -6845,6 +6900,583 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 		Check(
 			block.text.text == slideshowFixture.caption,
 			u"native-iv missing-grouped-document placeholder caption"_q,
+			ok);
+	}
+}
+
+void CheckNativeInstantViewLayer227RichTextCoverage(bool *ok) {
+	const auto label = u"native-iv-layer-227-richtext"_q;
+	const auto formulaSource = u"x^2 + y^2"_q;
+	const auto customEmojiDocumentId = uint64(8800001);
+	const auto customEmojiAlt = u"ivemoji"_q;
+	const auto spoilerText = u"spoiler"_q;
+	const auto mentionText = u"@mention"_q;
+	const auto hashtagText = u"#hashtag"_q;
+	const auto botCommandText = u"/start"_q;
+	const auto cashtagText = u"$cash"_q;
+	const auto urlText = u"https://example.com"_q;
+	const auto emailText = u"user@example.com"_q;
+	const auto phoneText = u"+15551234567"_q;
+	const auto bankCardText = u"4242424242424242"_q;
+	const auto mentionNameText = u"Alice"_q;
+	const auto dateText = u"date"_q;
+	const auto mentionNameUserId = uint64(42);
+	const auto formattedDate = 1715347200;
+	auto mtpDateFlags = MTPDtextDate::Flags();
+	mtpDateFlags |= MTPDtextDate::Flag::f_short_time;
+	mtpDateFlags |= MTPDtextDate::Flag::f_long_date;
+	mtpDateFlags |= MTPDtextDate::Flag::f_day_of_week;
+	const auto text = NativeIvConcat({
+		MTP_textMath(MTP_string(formulaSource)),
+		NativeIvText(u" "_q),
+		MTP_textCustomEmoji(
+			MTP_long(customEmojiDocumentId),
+			MTP_string(customEmojiAlt)),
+		NativeIvText(u" "_q),
+		MTP_textSpoiler(NativeIvText(spoilerText)),
+		NativeIvText(u" "_q),
+		MTP_textMention(NativeIvText(mentionText)),
+		NativeIvText(u" "_q),
+		MTP_textHashtag(NativeIvText(hashtagText)),
+		NativeIvText(u" "_q),
+		MTP_textBotCommand(NativeIvText(botCommandText)),
+		NativeIvText(u" "_q),
+		MTP_textCashtag(NativeIvText(cashtagText)),
+		NativeIvText(u" "_q),
+		MTP_textAutoUrl(NativeIvText(urlText)),
+		NativeIvText(u" "_q),
+		MTP_textAutoEmail(NativeIvText(emailText)),
+		NativeIvText(u" "_q),
+		MTP_textAutoPhone(NativeIvText(phoneText)),
+		NativeIvText(u" "_q),
+		MTP_textBankCard(NativeIvText(bankCardText)),
+		NativeIvText(u" "_q),
+		MTP_textMentionName(
+			NativeIvText(mentionNameText),
+			MTP_long(mentionNameUserId)),
+		NativeIvText(u" "_q),
+		MTP_textDate(
+			MTP_flags(mtpDateFlags),
+			NativeIvText(dateText),
+			MTP_int(formattedDate)),
+	});
+	auto runtime = std::make_shared<TestMediaRuntime>();
+	auto source = NativeIvSource(QVector<MTPPageBlock>{
+		MTP_pageBlockParagraph(text),
+	});
+	const auto prepared = TryPrepareNativeInstantView({
+		.source = &source,
+		.mediaRuntime = runtime,
+	});
+	Check(prepared.supported(), label + u" prepare supported"_q, ok);
+	if (!prepared.supported()) {
+		return;
+	}
+	const auto paragraph = FindPreparedParagraphContaining(
+		prepared.content,
+		spoilerText);
+	Check(paragraph != nullptr, label + u" paragraph"_q, ok);
+	if (!paragraph) {
+		return;
+	}
+	const auto &richText = paragraph->text;
+	const auto expectedText = QString(QChar::ObjectReplacementCharacter)
+		+ u" ivemoji spoiler @mention #hashtag /start $cash "_q
+		+ u"https://example.com user@example.com +15551234567 "_q
+		+ u"4242424242424242 Alice date"_q;
+	Check(richText.text == expectedText, label + u" visible text"_q, ok);
+
+	auto formulaCount = 0;
+	auto formulaDataOk = false;
+	for (const auto &match : CollectInlineTextObjectMatches(richText)) {
+		if (match.object.kind != InlineTextObjectKind::Formula) {
+			continue;
+		}
+		++formulaCount;
+		if (const auto formula = std::get_if<InlineTextObjectFormulaData>(
+				&match.object.data)) {
+			formulaDataOk = (formula->copySource == formulaSource)
+				&& (formula->trimmedTex == formulaSource.trimmed());
+		}
+	}
+	Check(formulaCount == 1, label + u" inline formula entity count"_q, ok);
+	Check(formulaDataOk, label + u" inline formula entity data"_q, ok);
+	Check(
+		FindEntityRange(richText, EntityType::CustomEmoji, 0, 1) != nullptr,
+		label + u" inline formula entity range"_q,
+		ok);
+	auto formulaSlotFound = false;
+	for (const auto &slot : prepared.content.formulas) {
+		if (slot.present
+			&& slot.kind == MathKind::Inline
+			&& slot.trimmedTex == formulaSource.trimmed()) {
+			formulaSlotFound = true;
+			break;
+		}
+	}
+	Check(formulaSlotFound, label + u" inline formula slot"_q, ok);
+
+	const auto customEmojiOffset = richText.text.indexOf(customEmojiAlt);
+	Check(customEmojiOffset >= 0, label + u" custom emoji text range"_q, ok);
+	if (customEmojiOffset >= 0) {
+		const auto customEmoji = FindEntityRange(
+			richText,
+			EntityType::CustomEmoji,
+			customEmojiOffset,
+			customEmojiAlt.size());
+		Check(customEmoji != nullptr, label + u" custom emoji entity"_q, ok);
+		if (customEmoji) {
+			Check(
+				customEmoji->data()
+					== Data::SerializeCustomEmojiId(customEmojiDocumentId),
+				label + u" custom emoji data"_q,
+				ok);
+		}
+	}
+
+	const auto checkWrappedEntity = [&](
+			EntityType type,
+			const QString &value,
+			const QString &name) {
+		const auto offset = richText.text.indexOf(value);
+		Check(offset >= 0, label + name + u" text range"_q, ok);
+		Check(
+			FindEntityByType(richText, type) != nullptr,
+			label + name + u" entity type"_q,
+			ok);
+		if (offset >= 0) {
+			Check(
+				FindEntityRange(richText, type, offset, value.size()) != nullptr,
+				label + name + u" entity range"_q,
+				ok);
+		}
+	};
+	checkWrappedEntity(EntityType::Spoiler, spoilerText, u" spoiler"_q);
+	checkWrappedEntity(EntityType::Mention, mentionText, u" mention"_q);
+	checkWrappedEntity(EntityType::Hashtag, hashtagText, u" hashtag"_q);
+	checkWrappedEntity(EntityType::BotCommand, botCommandText, u" bot command"_q);
+	checkWrappedEntity(EntityType::Cashtag, cashtagText, u" cashtag"_q);
+	checkWrappedEntity(EntityType::Url, urlText, u" auto url"_q);
+	checkWrappedEntity(EntityType::Email, emailText, u" auto email"_q);
+	checkWrappedEntity(EntityType::Phone, phoneText, u" auto phone"_q);
+	checkWrappedEntity(EntityType::BankCard, bankCardText, u" bank card"_q);
+
+	const auto mentionNameOffset = richText.text.indexOf(mentionNameText);
+	Check(mentionNameOffset >= 0, label + u" mention name text range"_q, ok);
+	if (mentionNameOffset >= 0) {
+		const auto mentionName = FindEntityRange(
+			richText,
+			EntityType::MentionName,
+			mentionNameOffset,
+			mentionNameText.size());
+		Check(mentionName != nullptr, label + u" mention name entity"_q, ok);
+		if (mentionName) {
+			Check(
+				mentionName->data()
+					== TextUtilities::MentionNameDataFromFields({
+						.selfId = 1,
+						.userId = mentionNameUserId,
+						.accessHash = 2,
+					}),
+				label + u" mention name data"_q,
+				ok);
+		}
+	}
+
+	auto expectedDateFlags = FormattedDateFlags();
+	expectedDateFlags |= FormattedDateFlag::ShortTime;
+	expectedDateFlags |= FormattedDateFlag::LongDate;
+	expectedDateFlags |= FormattedDateFlag::DayOfWeek;
+	const auto dateOffset = richText.text.indexOf(dateText);
+	Check(dateOffset >= 0, label + u" formatted date text range"_q, ok);
+	if (dateOffset >= 0) {
+		const auto date = FindEntityRange(
+			richText,
+			EntityType::FormattedDate,
+			dateOffset,
+			dateText.size());
+		Check(date != nullptr, label + u" formatted date entity"_q, ok);
+		if (date) {
+			Check(
+				date->data()
+					== SerializeFormattedDateData(
+						formattedDate,
+						expectedDateFlags),
+				label + u" formatted date data"_q,
+				ok);
+		}
+	}
+}
+
+void CheckNativeInstantViewLayer227BlockCoverage(bool *ok) {
+	const auto label = u"native-iv-layer-227-blocks"_q;
+	const auto mathSource = u"E = mc^2"_q;
+	auto source = NativeIvSource(QVector<MTPPageBlock>{
+		MTP_pageBlockHeading1(NativeIvText(u"Heading 1"_q)),
+		MTP_pageBlockHeading2(NativeIvText(u"Heading 2"_q)),
+		MTP_pageBlockHeading3(NativeIvText(u"Heading 3"_q)),
+		MTP_pageBlockHeading4(NativeIvText(u"Heading 4"_q)),
+		MTP_pageBlockHeading5(NativeIvText(u"Heading 5"_q)),
+		MTP_pageBlockHeading6(NativeIvText(u"Heading 6"_q)),
+		MTP_pageBlockMath(MTP_string(mathSource)),
+	});
+	const auto prepared = TryPrepareNativeInstantView({
+		.source = &source,
+	});
+	Check(prepared.supported(), label + u" prepare supported"_q, ok);
+	if (!prepared.supported()) {
+		return;
+	}
+	const auto headings = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::Heading);
+	Check(headings.size() == 6, label + u" heading count"_q, ok);
+	const auto headingCount = std::min<int>(int(headings.size()), 6);
+	for (auto i = 0; i != headingCount; ++i) {
+		Check(
+			headings[i]->headingLevel == i + 1,
+			label + u" heading level "_q + QString::number(i + 1),
+			ok);
+	}
+	const auto displayMathBlocks = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::DisplayMath);
+	Check(displayMathBlocks.size() == 1, label + u" display math count"_q, ok);
+	if (displayMathBlocks.empty()) {
+		return;
+	}
+	const auto displayMath = displayMathBlocks.front();
+	Check(
+		displayMath->formulaTex == mathSource,
+		label + u" display math source"_q,
+		ok);
+	Check(
+		displayMath->formulaIndex >= 0,
+		label + u" display math formula index"_q,
+		ok);
+	if (displayMath->formulaIndex >= 0
+		&& displayMath->formulaIndex < int(prepared.content.formulas.size())) {
+		const auto &slot = prepared.content.formulas[displayMath->formulaIndex];
+		Check(
+			slot.present
+				&& slot.kind == MathKind::Display
+				&& slot.trimmedTex == mathSource.trimmed(),
+			label + u" display math formula slot"_q,
+			ok);
+	} else {
+		Check(false, label + u" display math formula slot range"_q, ok);
+	}
+}
+
+void CheckNativeInstantViewLayer227ListCoverage(bool *ok) {
+	const auto label = u"native-iv-layer-227-lists"_q;
+	auto checkedListTextFlags = MTPDpageListItemText::Flags();
+	checkedListTextFlags |= MTPDpageListItemText::Flag::f_checkbox;
+	checkedListTextFlags |= MTPDpageListItemText::Flag::f_checked;
+	auto uncheckedListBlockFlags = MTPDpageListItemBlocks::Flags();
+	uncheckedListBlockFlags |= MTPDpageListItemBlocks::Flag::f_checkbox;
+	auto unorderedBlockChildren = QVector<MTPPageBlock>();
+	unorderedBlockChildren.push_back(MTP_pageBlockParagraph(NativeIvText(
+		u"unchecked unordered block"_q)));
+	auto unorderedItems = QVector<MTPPageListItem>();
+	unorderedItems.push_back(MTP_pageListItemText(
+		MTP_flags(checkedListTextFlags),
+		NativeIvText(u"checked unordered text"_q)));
+	unorderedItems.push_back(MTP_pageListItemBlocks(
+		MTP_flags(uncheckedListBlockFlags),
+		MTP_vector<MTPPageBlock>(std::move(unorderedBlockChildren))));
+
+	auto checkedOrderedTextFlags = MTPDpageListOrderedItemText::Flags();
+	checkedOrderedTextFlags |= MTPDpageListOrderedItemText::Flag::f_checkbox;
+	checkedOrderedTextFlags |= MTPDpageListOrderedItemText::Flag::f_checked;
+	auto uncheckedOrderedBlockFlags = MTPDpageListOrderedItemBlocks::Flags();
+	uncheckedOrderedBlockFlags |= MTPDpageListOrderedItemBlocks::Flag::f_checkbox;
+	auto orderedBlockChildren = QVector<MTPPageBlock>();
+	orderedBlockChildren.push_back(MTP_pageBlockParagraph(NativeIvText(
+		u"unchecked ordered block"_q)));
+	auto orderedItems = QVector<MTPPageListOrderedItem>();
+	orderedItems.push_back(MTP_pageListOrderedItemText(
+		MTP_flags(checkedOrderedTextFlags),
+		MTP_string("4"),
+		NativeIvText(u"checked ordered text"_q)));
+	orderedItems.push_back(MTP_pageListOrderedItemBlocks(
+		MTP_flags(uncheckedOrderedBlockFlags),
+		MTP_string("fallback"),
+		MTP_vector<MTPPageBlock>(std::move(orderedBlockChildren))));
+
+	auto source = NativeIvSource(QVector<MTPPageBlock>{
+		MTP_pageBlockList(MTP_vector<MTPPageListItem>(std::move(unorderedItems))),
+		MTP_pageBlockOrderedList(
+			MTP_vector<MTPPageListOrderedItem>(std::move(orderedItems))),
+	});
+	const auto prepared = TryPrepareNativeInstantView({
+		.source = &source,
+	});
+	Check(prepared.supported(), label + u" prepare supported"_q, ok);
+	if (!prepared.supported()) {
+		return;
+	}
+	const auto lists = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::List);
+	Check(lists.size() == 2, label + u" list count"_q, ok);
+	if (lists.size() < 2) {
+		return;
+	}
+	const auto unordered = lists[0];
+	const auto ordered = lists[1];
+	Check(
+		unordered->listKind == ListKind::Bullet,
+		label + u" unordered kind"_q,
+		ok);
+	Check(
+		ordered->listKind == ListKind::Ordered,
+		label + u" ordered kind"_q,
+		ok);
+	Check(
+		unordered->children.size() == 2,
+		label + u" unordered item count"_q,
+		ok);
+	if (unordered->children.size() == 2) {
+		Check(
+			unordered->children[0].taskState == TaskState::Checked,
+			label + u" unordered checked task"_q,
+			ok);
+		Check(
+			unordered->children[1].taskState == TaskState::Unchecked,
+			label + u" unordered unchecked task"_q,
+			ok);
+	}
+	Check(
+		ordered->children.size() == 2,
+		label + u" ordered item count"_q,
+		ok);
+	if (ordered->children.size() == 2) {
+		Check(
+			ordered->children[0].taskState == TaskState::Checked,
+			label + u" ordered checked task"_q,
+			ok);
+		Check(
+			ordered->children[1].taskState == TaskState::Unchecked,
+			label + u" ordered unchecked task"_q,
+			ok);
+		Check(
+			ordered->children[0].orderedNumber == 4,
+			label + u" ordered explicit number"_q,
+			ok);
+		Check(
+			ordered->children[1].orderedNumber == 5,
+			label + u" ordered fallback number"_q,
+			ok);
+	}
+}
+
+void CheckNativeInstantViewLayer227SpoilerMediaCoverage(bool *ok) {
+	const auto label = u"native-iv-layer-227-spoiler-media"_q;
+	const auto photoId = uint64(9701);
+	const auto videoDocumentId = uint64(9702);
+	const auto groupedPhotoId = uint64(9703);
+	const auto groupedVideoDocumentId = uint64(9704);
+	const auto makeVideoBlock = [](uint64 documentId) {
+		auto flags = MTPDpageBlockVideo::Flags();
+		flags |= MTPDpageBlockVideo::Flag::f_spoiler;
+		return MTP_pageBlockVideo(
+			MTP_flags(flags),
+			MTP_long(documentId),
+			NativeIvCaption());
+	};
+	const auto makeSource = [&] {
+		auto groupedItems = QVector<MTPPageBlock>();
+		groupedItems.push_back(NativeIvPhotoBlock(
+			groupedPhotoId,
+			QString(),
+			QString(),
+			QString(),
+			true));
+		groupedItems.push_back(makeVideoBlock(groupedVideoDocumentId));
+		return NativeIvSource(
+			QVector<MTPPageBlock>{
+				NativeIvPhotoBlock(
+					photoId,
+					u"Spoiler photo caption"_q,
+					QString(),
+					QString(),
+					true),
+				makeVideoBlock(videoDocumentId),
+				MTP_pageBlockCollage(
+					MTP_vector<MTPPageBlock>(std::move(groupedItems)),
+					NativeIvCaption(u"Spoiler grouped caption"_q)),
+			},
+			QVector<MTPPhoto>{
+				NativeIvPhoto(photoId, 640, 360),
+				NativeIvPhoto(groupedPhotoId, 400, 300),
+			},
+			QVector<MTPDocument>{
+				NativeIvVideoDocument(
+					videoDocumentId,
+					1280,
+					720,
+					u"spoiler-video.mp4"_q,
+					42.),
+				NativeIvVideoDocument(
+					groupedVideoDocumentId,
+					640,
+					360,
+					u"spoiler-grouped-video.mp4"_q,
+					13.),
+			});
+	};
+
+	auto source = makeSource();
+	const auto prepared = TryPrepareNativeInstantView({
+		.source = &source,
+	});
+	Check(prepared.supported(), label + u" prepare supported"_q, ok);
+	if (!prepared.supported()) {
+		return;
+	}
+	const auto photos = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::Photo);
+	Check(photos.size() == 1, label + u" photo block count"_q, ok);
+	if (!photos.empty()) {
+		Check(photos.front()->photo.spoiler, label + u" photo spoiler"_q, ok);
+	}
+	const auto videos = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::Video);
+	Check(videos.size() == 1, label + u" video block count"_q, ok);
+	if (!videos.empty()) {
+		Check(
+			videos.front()->video.media.spoiler,
+			label + u" video spoiler"_q,
+			ok);
+	}
+	const auto grouped = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::GroupedMedia);
+	Check(grouped.size() == 1, label + u" grouped media block count"_q, ok);
+	if (!grouped.empty()) {
+		const auto &items = grouped.front()->groupedMedia.items;
+		Check(items.size() == 2, label + u" grouped media item count"_q, ok);
+		if (items.size() == 2) {
+			Check(
+				items[0].media.spoiler,
+				label + u" grouped photo spoiler"_q,
+				ok);
+			Check(
+				items[1].media.spoiler,
+				label + u" grouped video spoiler"_q,
+				ok);
+		}
+	}
+
+	auto hostedRuntime = std::make_shared<TestMediaRuntime>();
+	hostedRuntime->hostedFactory =
+		std::make_shared<TestHostedMediaBlockFactory>();
+	const auto hostedFactory = hostedRuntime->hostedFactory;
+	auto hostedSource = NativeIvSource(
+		QVector<MTPPageBlock>{
+			NativeIvPhotoBlock(
+				photoId,
+				u"Hosted spoiler photo caption"_q,
+				QString(),
+				QString(),
+				true),
+			makeVideoBlock(videoDocumentId),
+		},
+		QVector<MTPPhoto>{ NativeIvPhoto(photoId, 640, 360) },
+		QVector<MTPDocument>{
+			NativeIvVideoDocument(
+				videoDocumentId,
+				1280,
+				720,
+				u"hosted-spoiler-video.mp4"_q,
+				42.),
+		});
+	auto hostedPrepared = TryPrepareNativeInstantView({
+		.source = &hostedSource,
+		.mediaRuntime = hostedRuntime,
+	});
+	Check(
+		hostedPrepared.supported(),
+		label + u" hosted prepare supported"_q,
+		ok);
+	if (hostedPrepared.supported()) {
+		auto hostedHeight = 0;
+		const auto renderer = std::make_shared<MathRenderer>();
+		auto hostedArticle = BuildArticleForTest(
+			std::move(hostedPrepared.content),
+			renderer,
+			420,
+			&hostedHeight);
+		const auto hostedImage = PaintArticleForTest(
+			hostedArticle.get(),
+			420,
+			hostedHeight);
+		Check(
+			HasPaintedPixels(hostedImage),
+			label + u" hosted paint produced pixels"_q,
+			ok);
+		Check(
+			hostedFactory->preparedPhotos.size() == 1,
+			label + u" hosted photo prepared count"_q,
+			ok);
+		if (!hostedFactory->preparedPhotos.empty()) {
+			Check(
+				hostedFactory->preparedPhotos.front().spoiler,
+				label + u" hosted photo spoiler"_q,
+				ok);
+		}
+		Check(
+			hostedFactory->preparedVideos.size() == 1,
+			label + u" hosted video prepared count"_q,
+			ok);
+		if (!hostedFactory->preparedVideos.empty()) {
+			Check(
+				hostedFactory->preparedVideos.front().media.spoiler,
+				label + u" hosted video spoiler"_q,
+				ok);
+		}
+	}
+
+	auto fallbackRuntime = std::make_shared<TestMediaRuntime>();
+	fallbackRuntime->addPhotoRuntime(
+		photoId,
+		std::make_shared<TestPhotoRuntime>());
+	fallbackRuntime->addPhotoRuntime(
+		groupedPhotoId,
+		std::make_shared<TestPhotoRuntime>());
+	fallbackRuntime->addDocumentRuntime(
+		videoDocumentId,
+		std::make_shared<TestDocumentRuntime>());
+	fallbackRuntime->addDocumentRuntime(
+		groupedVideoDocumentId,
+		std::make_shared<TestDocumentRuntime>());
+	auto fallbackSource = makeSource();
+	auto fallbackPrepared = TryPrepareNativeInstantView({
+		.source = &fallbackSource,
+		.mediaRuntime = fallbackRuntime,
+	});
+	Check(
+		fallbackPrepared.supported(),
+		label + u" fallback prepare supported"_q,
+		ok);
+	if (fallbackPrepared.supported()) {
+		auto fallbackHeight = 0;
+		const auto renderer = std::make_shared<MathRenderer>();
+		auto fallbackArticle = BuildArticleForTest(
+			std::move(fallbackPrepared.content),
+			renderer,
+			420,
+			&fallbackHeight);
+		const auto fallbackImage = PaintArticleForTest(
+			fallbackArticle.get(),
+			420,
+			fallbackHeight);
+		Check(
+			HasPaintedPixels(fallbackImage),
+			label + u" fallback paint produced pixels"_q,
 			ok);
 	}
 }
@@ -12811,6 +13443,10 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 
 	CheckInlineTextObjectPrepareCoverage(&ok);
 	CheckNativeInstantViewPrepareCoverage(&ok);
+	CheckNativeInstantViewLayer227RichTextCoverage(&ok);
+	CheckNativeInstantViewLayer227BlockCoverage(&ok);
+	CheckNativeInstantViewLayer227ListCoverage(&ok);
+	CheckNativeInstantViewLayer227SpoilerMediaCoverage(&ok);
 	CheckCodeBlockTrailingNewlineTrim(&ok);
 	CheckCodeBlockSelectionExportCoverage(&ok);
 	CheckCodeBlockAsyncSyntaxHighlightCoverage(&ok);

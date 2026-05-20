@@ -478,10 +478,6 @@ private:
 
 };
 
-struct InlineIvImageMarkedContext {
-	Fn<void(QRect)> repaintRect;
-};
-
 struct InlineIvImageRepaintCallbacks {
 	Fn<void()> repaint;
 	Fn<void(QRect)> repaintRect;
@@ -1158,20 +1154,24 @@ void SetTextLeaf(
 		const std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-	int minResizeWidth) {
+		int minResizeWidth) {
 	*leaf = Ui::Text::String(TextMinResizeWidth(minResizeWidth));
-	auto context = Ui::Text::MarkedContext();
+	auto context = mediaRuntime
+		? mediaRuntime->textContext()
+		: Ui::Text::MarkedContext();
+	auto repaintRect = Fn<void(QRect)>();
 	if (!CurrentInlineIvImageRepaintCallbacks.empty()) {
 		const auto &callbacks = CurrentInlineIvImageRepaintCallbacks.back();
 		context.repaint = callbacks.repaint;
-		context.other = InlineIvImageMarkedContext{
-			.repaintRect = callbacks.repaintRect,
-		};
+		repaintRect = callbacks.repaintRect;
 	}
+	auto originalCustomEmojiFactory = std::move(context.customEmojiFactory);
 	context.customEmojiFactory = [
 		formulas,
 		inlineFormulaObjects,
 		mediaRuntime,
+		repaintRect = std::move(repaintRect),
+		originalCustomEmojiFactory = std::move(originalCustomEmojiFactory),
 		&textStyle
 	](
 			QStringView data,
@@ -1179,7 +1179,9 @@ void SetTextLeaf(
 	) -> std::unique_ptr<Ui::Text::CustomEmoji> {
 		const auto parsed = ParseInlineTextObjectEntity(data);
 		if (!parsed) {
-			return std::unique_ptr<Ui::Text::CustomEmoji>();
+			return originalCustomEmojiFactory
+				? originalCustomEmojiFactory(data, context)
+				: std::unique_ptr<Ui::Text::CustomEmoji>();
 		}
 		switch (parsed->kind) {
 		case InlineTextObjectKind::Formula: {
@@ -1203,20 +1205,13 @@ void SetTextLeaf(
 					image->documentId,
 					QSize(image->width, image->height))
 				: nullptr;
-			const auto repaintRect = [&]() -> Fn<void(QRect)> {
-				if (const auto data = std::any_cast<InlineIvImageMarkedContext>(
-						&context.other)) {
-					return data->repaintRect;
-				}
-				return nullptr;
-			}();
 			return std::make_unique<InlineIvImageObject>(
 				image->replacementText,
 				image->width,
 				image->height,
 				std::move(resolved),
 				context.repaint,
-				std::move(repaintRect));
+				repaintRect);
 		}
 		}
 		return std::unique_ptr<Ui::Text::CustomEmoji>();

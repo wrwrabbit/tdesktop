@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <functional>
 #include <memory>
 
+#include "ui/text/text.h"
 #include "webview/webview_common.h"
 
 namespace Ui {
@@ -135,6 +136,8 @@ class MediaRuntime {
 public:
 	virtual ~MediaRuntime() = default;
 
+	[[nodiscard]] virtual Ui::Text::MarkedContext textContext() const;
+	[[nodiscard]] virtual QString mentionNameEntityData(uint64 userId) const;
 	[[nodiscard]] virtual std::shared_ptr<Ui::DynamicImage> resolveInlineImage(
 		uint64 documentId,
 		QSize size) const = 0;
@@ -155,6 +158,14 @@ public:
 	[[nodiscard]] virtual std::shared_ptr<HostedMediaBlockFactory>
 	hostedMediaBlockFactory() const;
 };
+
+inline Ui::Text::MarkedContext MediaRuntime::textContext() const {
+	return {};
+}
+
+inline QString MediaRuntime::mentionNameEntityData(uint64) const {
+	return QString();
+}
 
 inline std::shared_ptr<DocumentRuntime> MediaRuntime::resolveDocument(
 		uint64) const {

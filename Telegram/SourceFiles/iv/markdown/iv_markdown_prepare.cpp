@@ -131,6 +131,7 @@ NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 	auto timer = QElapsedTimer();
 	timer.start();
 	state.result.mediaRuntime = std::move(request.mediaRuntime);
+	state.dimensions = CaptureMarkdownPrepareDimensions();
 	const auto finish = [&](NativeInstantViewPrepareResultKind kind, QString reason) {
 		state.result.debug.prepareMs = int(timer.elapsed());
 		return NativeInstantViewPrepareResult{
@@ -178,6 +179,13 @@ NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 			&state.result.blocks.blocks);
 	}
 	ApplySoftPreparedBlockLimit(&state.result.blocks.blocks);
+	MeasureNativeIvPreparedFormulas(&state);
+	if (state.result.failure.failed()) {
+		ClearPreparedOutput(&state.result);
+		return finish(
+			NativeInstantViewPrepareResultKind::Failure,
+			state.result.failure.debugReason);
+	}
 	return finish(
 		NativeInstantViewPrepareResultKind::Supported,
 		QString());

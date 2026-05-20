@@ -72,10 +72,20 @@ struct NativeIvDocumentInfo {
 
 struct NativeIvPrepareState {
 	MarkdownArticleContent result;
+	MarkdownPrepareDimensions dimensions;
 	std::vector<NativeIvPhotoInfo> photos;
 	std::vector<NativeIvDocumentInfo> documents;
 	int nextGeneratedId = 0;
+	int nextFormulaIndex = 0;
 
+	[[nodiscard]] int rememberFormula(
+		MathKind kind,
+		QString formulaTex,
+		int textSize,
+		int renderWidthCap,
+		int renderHeightCap);
+	[[nodiscard]] int rememberFormula(const PreparedBlock &block);
+	void addFormulaWarning();
 	void setFailure(
 		PrepareTerminalFailure terminal,
 		QString debugReason);

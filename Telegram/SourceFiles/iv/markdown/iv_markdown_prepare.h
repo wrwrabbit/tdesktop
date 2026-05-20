@@ -122,6 +122,7 @@ struct PreparedPhotoBlockData {
 	int width = 0;
 	int height = 0;
 	QString urlOverride;
+	bool spoiler = false;
 	bool viewerOpen = false;
 };
 
@@ -135,6 +136,7 @@ struct PreparedMediaItemData {
 	uint64 id = 0;
 	int width = 0;
 	int height = 0;
+	bool spoiler = false;
 };
 
 struct PreparedVideoBlockData {

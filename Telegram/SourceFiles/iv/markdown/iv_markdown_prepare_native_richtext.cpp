@@ -12,10 +12,16 @@ struct GeoPointLocation;
 #include "data/data_location.h"
 #include "iv/markdown/iv_markdown_prepare_links.h"
 #include "ui/basic_click_handlers.h"
+#include "ui/text/text_utilities.h"
 #include "history/history_location_manager.h"
 
+#include <algorithm>
 #include <limits>
 #include <utility>
+
+namespace Data {
+[[nodiscard]] QString SerializeCustomEmojiId(uint64 id);
+} // namespace Data
 
 namespace Iv::Markdown {
 namespace {
@@ -107,6 +113,7 @@ void MergeNativeIvDocumentInfo(
 		result->media.id = info->id;
 		result->media.width = info->width;
 		result->media.height = info->height;
+		result->media.spoiler = data.is_spoiler();
 		return true;
 	}, [&](const MTPDpageBlockVideo &data) {
 		const auto info = FindNativeIvDocument(uint64(data.vvideo_id().v), state);
@@ -120,6 +127,7 @@ void MergeNativeIvDocumentInfo(
 		result->media.id = info->id;
 		result->media.width = info->width;
 		result->media.height = info->height;
+		result->media.spoiler = data.is_spoiler();
 		return true;
 	}, [](const auto &) {
 		return false;
@@ -185,15 +193,112 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	return true;
 }
 
+[[nodiscard]] bool AppendNativeIvRichText(
+	const MTPRichText &text,
+	TextWithEntities *result,
+	std::vector<PreparedLink> *links,
+	QString *blockAnchorId,
+	NativeIvPrepareState *state,
+	NativeIvRichTextContext context);
+
 [[nodiscard]] bool AddNativeIvEntity(
 		TextWithEntities *text,
 		int from,
-		EntityType type) {
+		EntityType type,
+		const QString &data = QString()) {
 	const auto length = text->text.size() - from;
 	if (length <= 0) {
 		return true;
 	}
-	text->entities.push_back(EntityInText(type, from, length));
+	text->entities.push_back(EntityInText(type, from, length, data));
+	return true;
+}
+
+[[nodiscard]] int ScaleNativeIvFormulaCap(
+		int cap,
+		int textSize,
+		int baseTextSize) {
+	if (cap <= 0) {
+		return 0;
+	}
+	const auto numerator = int64(cap) * std::max(textSize, 1);
+	const auto denominator = std::max(baseTextSize, 1);
+	return std::max(int((numerator + denominator - 1) / denominator), 1);
+}
+
+[[nodiscard]] NativeIvRichTextContext ResolveNativeIvRichTextContext(
+		NativeIvPrepareState *state,
+		NativeIvRichTextContext context) {
+	const auto bodyTextSize = state->dimensions.bodyTextSize;
+	if (!context.textSize) {
+		context.textSize = bodyTextSize;
+	}
+	if (!context.renderWidthCap) {
+		context.renderWidthCap = ScaleNativeIvFormulaCap(
+			state->dimensions.displayMathMaxRenderWidth,
+			context.textSize,
+			state->dimensions.displayMathTextSize);
+	}
+	if (!context.renderHeightCap) {
+		context.renderHeightCap = ScaleNativeIvFormulaCap(
+			state->dimensions.displayMathMaxRenderHeight,
+			context.textSize,
+			state->dimensions.displayMathTextSize);
+	}
+	return context;
+}
+
+[[nodiscard]] bool AppendNativeIvEntityWrapper(
+		const MTPRichText &text,
+		TextWithEntities *result,
+		std::vector<PreparedLink> *links,
+		QString *blockAnchorId,
+		NativeIvPrepareState *state,
+		NativeIvRichTextContext context,
+		EntityType type,
+		const QString &data = QString()) {
+	const auto from = result->text.size();
+	if (!AppendNativeIvRichText(
+			text,
+			result,
+			links,
+			blockAnchorId,
+			state,
+			context)) {
+		return false;
+	}
+	return AddNativeIvEntity(result, from, type, data);
+}
+
+[[nodiscard]] bool AppendNativeIvInlineFormula(
+		const QString &source,
+		TextWithEntities *result,
+		NativeIvPrepareState *state,
+		NativeIvRichTextContext context) {
+	const auto entityData = SerializeInlineTextObjectEntity({
+		.kind = InlineTextObjectKind::Formula,
+		.data = InlineTextObjectFormulaData{
+			.copySource = source,
+			.trimmedTex = source.trimmed(),
+		},
+	});
+	if (entityData.isEmpty()) {
+		result->append(source);
+		return true;
+	}
+	const auto from = result->text.size();
+	result->append(QChar::ObjectReplacementCharacter);
+	result->entities.push_back(EntityInText(
+		EntityType::CustomEmoji,
+		from,
+		1,
+		entityData));
+	(void)state->rememberFormula(
+		MathKind::Inline,
+		source,
+		context.textSize,
+		context.renderWidthCap,
+		context.renderHeightCap);
 	return true;
 }
 
@@ -202,7 +307,8 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 		TextWithEntities *result,
 		std::vector<PreparedLink> *links,
 		QString *blockAnchorId,
-		NativeIvPrepareState *state) {
+		NativeIvPrepareState *state,
+		NativeIvRichTextContext context) {
 	if (state->blocked()) {
 		return false;
 	}
@@ -218,7 +324,8 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 					result,
 					links,
 					blockAnchorId,
-					state)) {
+					state,
+					context)) {
 				return false;
 			}
 		}
@@ -250,6 +357,17 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 			1,
 			entityData));
 		return true;
+	}, [&](const MTPDtextMath &data) {
+		return AppendNativeIvInlineFormula(
+			qs(data.vsource()),
+			result,
+			state,
+			context);
+	}, [&](const MTPDtextCustomEmoji &data) {
+		result->append(Ui::Text::SingleCustomEmoji(
+			Data::SerializeCustomEmojiId(uint64(data.vdocument_id().v)),
+			qs(data.valt())));
+		return true;
 	}, [&](const MTPDtextBold &data) {
 		const auto from = result->text.size();
 		if (!AppendNativeIvRichText(
@@ -257,7 +375,8 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 				result,
 				links,
 				blockAnchorId,
-				state)) {
+				state,
+				context)) {
 			return false;
 		}
 		return AddNativeIvEntity(result, from, EntityType::Bold);
@@ -268,7 +387,8 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 				result,
 				links,
 				blockAnchorId,
-				state)) {
+				state,
+				context)) {
 			return false;
 		}
 		return AddNativeIvEntity(result, from, EntityType::Italic);
@@ -279,7 +399,8 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 				result,
 				links,
 				blockAnchorId,
-				state)) {
+				state,
+				context)) {
 			return false;
 		}
 		return AddNativeIvEntity(result, from, EntityType::Underline);
@@ -290,7 +411,8 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 				result,
 				links,
 				blockAnchorId,
-				state)) {
+				state,
+				context)) {
 			return false;
 		}
 		return AddNativeIvEntity(result, from, EntityType::StrikeOut);
@@ -301,7 +423,8 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 				result,
 				links,
 				blockAnchorId,
-				state)) {
+				state,
+				context)) {
 			return false;
 		}
 		return AddNativeIvEntity(result, from, EntityType::Code);
@@ -312,7 +435,8 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 				result,
 				links,
 				blockAnchorId,
-				state)) {
+				state,
+				context)) {
 			return false;
 		}
 		if (result->text.size() == from) {
@@ -333,7 +457,8 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 				result,
 				links,
 				blockAnchorId,
-				state)) {
+				state,
+				context)) {
 			return false;
 		}
 		if (result->text.size() == from) {
@@ -352,7 +477,8 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 				result,
 				links,
 				blockAnchorId,
-				state)) {
+				state,
+				context)) {
 			return false;
 		}
 		return AddNativeIvEntity(result, from, EntityType::Subscript);
@@ -363,7 +489,8 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 				result,
 				links,
 				blockAnchorId,
-				state)) {
+				state,
+				context)) {
 			return false;
 		}
 		return AddNativeIvEntity(result, from, EntityType::Superscript);
@@ -374,10 +501,149 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 				result,
 				links,
 				blockAnchorId,
-				state)) {
+				state,
+				context)) {
 			return false;
 		}
 		return AddNativeIvEntity(result, from, EntityType::Marked);
+	}, [&](const MTPDtextSpoiler &data) {
+		return AppendNativeIvEntityWrapper(
+			data.vtext(),
+			result,
+			links,
+			blockAnchorId,
+			state,
+			context,
+			EntityType::Spoiler);
+	}, [&](const MTPDtextMention &data) {
+		return AppendNativeIvEntityWrapper(
+			data.vtext(),
+			result,
+			links,
+			blockAnchorId,
+			state,
+			context,
+			EntityType::Mention);
+	}, [&](const MTPDtextHashtag &data) {
+		return AppendNativeIvEntityWrapper(
+			data.vtext(),
+			result,
+			links,
+			blockAnchorId,
+			state,
+			context,
+			EntityType::Hashtag);
+	}, [&](const MTPDtextBotCommand &data) {
+		return AppendNativeIvEntityWrapper(
+			data.vtext(),
+			result,
+			links,
+			blockAnchorId,
+			state,
+			context,
+			EntityType::BotCommand);
+	}, [&](const MTPDtextCashtag &data) {
+		return AppendNativeIvEntityWrapper(
+			data.vtext(),
+			result,
+			links,
+			blockAnchorId,
+			state,
+			context,
+			EntityType::Cashtag);
+	}, [&](const MTPDtextAutoUrl &data) {
+		return AppendNativeIvEntityWrapper(
+			data.vtext(),
+			result,
+			links,
+			blockAnchorId,
+			state,
+			context,
+			EntityType::Url);
+	}, [&](const MTPDtextAutoEmail &data) {
+		return AppendNativeIvEntityWrapper(
+			data.vtext(),
+			result,
+			links,
+			blockAnchorId,
+			state,
+			context,
+			EntityType::Email);
+	}, [&](const MTPDtextAutoPhone &data) {
+		return AppendNativeIvEntityWrapper(
+			data.vtext(),
+			result,
+			links,
+			blockAnchorId,
+			state,
+			context,
+			EntityType::Phone);
+	}, [&](const MTPDtextBankCard &data) {
+		return AppendNativeIvEntityWrapper(
+			data.vtext(),
+			result,
+			links,
+			blockAnchorId,
+			state,
+			context,
+			EntityType::BankCard);
+	}, [&](const MTPDtextMentionName &data) {
+		const auto from = result->text.size();
+		if (!AppendNativeIvRichText(
+				data.vtext(),
+				result,
+				links,
+				blockAnchorId,
+				state,
+				context)) {
+			return false;
+		}
+		const auto entityData = state->result.mediaRuntime
+			? state->result.mediaRuntime->mentionNameEntityData(
+				uint64(data.vuser_id().v))
+			: QString();
+		return entityData.isEmpty()
+			? true
+			: AddNativeIvEntity(
+				result,
+				from,
+				EntityType::MentionName,
+				entityData);
+	}, [&](const MTPDtextDate &data) {
+		const auto from = result->text.size();
+		if (!AppendNativeIvRichText(
+				data.vtext(),
+				result,
+				links,
+				blockAnchorId,
+				state,
+				context)) {
+			return false;
+		}
+		auto flags = FormattedDateFlags();
+		if (data.is_relative()) {
+			flags |= FormattedDateFlag::Relative;
+		}
+		if (data.is_short_time()) {
+			flags |= FormattedDateFlag::ShortTime;
+		}
+		if (data.is_long_time()) {
+			flags |= FormattedDateFlag::LongTime;
+		}
+		if (data.is_short_date()) {
+			flags |= FormattedDateFlag::ShortDate;
+		}
+		if (data.is_long_date()) {
+			flags |= FormattedDateFlag::LongDate;
+		}
+		if (data.is_day_of_week()) {
+			flags |= FormattedDateFlag::DayOfWeek;
+		}
+		return AddNativeIvEntity(
+			result,
+			from,
+			EntityType::FormattedDate,
+			SerializeFormattedDateData(data.vdate().v, flags));
 	}, [&](const MTPDtextPhone &data) {
 		const auto from = result->text.size();
 		if (!AppendNativeIvRichText(
@@ -385,7 +651,8 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 				result,
 				links,
 				blockAnchorId,
-				state)) {
+				state,
+				context)) {
 			return false;
 		}
 		if (result->text.size() == from) {
@@ -406,9 +673,8 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 			result,
 			links,
 			blockAnchorId,
-			state);
-	}, [](const auto &) {
-		return true;
+			state,
+			context);
 	});
 }
 
@@ -417,12 +683,14 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 		PreparedIvRichText *result,
 		QString *blockAnchorId,
 		NativeIvPrepareState *state) {
+	const auto context = ResolveNativeIvRichTextContext(state, {});
 	if (!AppendNativeIvRichText(
 			caption.data().vtext(),
 			&result->text,
 			&result->links,
 			blockAnchorId,
-			state)) {
+			state,
+			context)) {
 		return false;
 	}
 	auto credit = PreparedIvRichText();
@@ -442,7 +710,8 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 				&result->text,
 				&result->links,
 				blockAnchorId,
-				state)) {
+				state,
+				context)) {
 			return false;
 		}
 	}
@@ -565,13 +834,16 @@ bool PrepareNativeIvRichText(
 		const MTPRichText &text,
 		PreparedIvRichText *result,
 		QString *blockAnchorId,
-		NativeIvPrepareState *state) {
+		NativeIvPrepareState *state,
+		NativeIvRichTextContext context) {
+	context = ResolveNativeIvRichTextContext(state, context);
 	return AppendNativeIvRichText(
 		text,
 		&result->text,
 		&result->links,
 		blockAnchorId,
-		state);
+		state,
+		context);
 }
 
 bool AppendPreparedIvRichBlock(
@@ -633,6 +905,7 @@ bool PrepareNativeIvPhotoBlock(
 	block.photo.width = info->width;
 	block.photo.height = info->height;
 	block.photo.urlOverride = data.vurl() ? qs(*data.vurl()) : QString();
+	block.photo.spoiler = data.is_spoiler();
 	block.photo.viewerOpen = true;
 	result->push_back(std::move(block));
 	return true;
@@ -666,6 +939,7 @@ bool PrepareNativeIvVideoBlock(
 	block.video.media.id = info->id;
 	block.video.media.width = info->width;
 	block.video.media.height = info->height;
+	block.video.media.spoiler = data.is_spoiler();
 	result->push_back(std::move(block));
 	return true;
 }

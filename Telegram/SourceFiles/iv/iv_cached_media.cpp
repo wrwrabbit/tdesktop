@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/flat_map.h"
 #include "base/weak_ptr.h"
 #include "core/application.h"
+#include "core/ui_integration.h"
 #include "data/data_channel.h"
 #include "data/data_cloud_file.h"
 #include "data/data_document.h"
@@ -21,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer.h"
 #include "data/data_photo_media.h"
 #include "data/data_session.h"
+#include "data/data_user.h"
 #include "data/data_web_page.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -39,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/dynamic_thumbnails.h"
 #include "ui/image/image.h"
 #include "ui/painter.h"
+#include "ui/text/text_entity.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 
@@ -354,11 +357,13 @@ void CachedPagePhotoRuntime::open(Qt::MouseButton button) const {
 
 [[nodiscard]] ::Data::MediaFile::Args CachedPageVideoMediaArgs(
 		not_null<Main::Session*> session,
-		not_null<DocumentData*> document) {
+		not_null<DocumentData*> document,
+		bool spoiler) {
 	const auto video = document->video();
 	return {
 		.hasQualitiesList = video && !video->qualities.empty(),
 		.skipPremiumEffect = !session->premium(),
+		.spoiler = spoiler,
 	};
 }
 
@@ -906,6 +911,9 @@ public:
 
 	[[nodiscard]] rpl::producer<uint64> channelJoinedChanges() const override;
 
+	[[nodiscard]] Ui::Text::MarkedContext textContext() const override;
+	[[nodiscard]] QString mentionNameEntityData(uint64 userId) const override;
+
 	[[nodiscard]] std::shared_ptr<Markdown::IvHistoryViewMediaHost>
 	hostedMediaHost(
 			not_null<Window::SessionController*> controller,
@@ -1011,6 +1019,22 @@ rpl::producer<uint64> CachedPageMediaRuntime::channelJoinedChanges() const {
 	return _channelJoinedChanges.events();
 }
 
+Ui::Text::MarkedContext CachedPageMediaRuntime::textContext() const {
+	return Core::TextContext({ .session = _session });
+}
+
+QString CachedPageMediaRuntime::mentionNameEntityData(uint64 userId) const {
+	if (userId == 0) {
+		return QString();
+	}
+	const auto loadedUser = _session->data().userLoaded(UserId(userId));
+	return TextUtilities::MentionNameDataFromFields({
+		.selfId = _session->userId().bare,
+		.userId = userId,
+		.accessHash = loadedUser ? loadedUser->accessHash() : 0,
+	});
+}
+
 auto CachedPageMediaRuntime::hostedMediaHost(
 		not_null<Window::SessionController*> controller,
 		not_null<History*> history) const
@@ -1060,13 +1084,13 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 			descriptor.copyText = u"Photo"_q;
 			descriptor.layoutHint = QSize(prepared.width, prepared.height);
 			descriptor.host = host;
-			descriptor.mediaFactory = [photo](
+			descriptor.mediaFactory = [photo, spoiler = prepared.spoiler](
 					not_null<HistoryView::Element*> view) {
 				return std::make_unique<HistoryView::Photo>(
 					view,
 					view->data(),
 					photo,
-					false);
+					spoiler);
 			};
 			const auto &pageUrl = host->pageUrl();
 			descriptor.photo = std::make_shared<CachedPagePhotoRuntime>(
@@ -1095,7 +1119,10 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 			auto media = std::make_shared<::Data::MediaFile>(
 				host->item(),
 				document,
-				CachedPageVideoMediaArgs(session, document));
+				CachedPageVideoMediaArgs(
+					session,
+					document,
+					prepared.media.spoiler));
 
 			auto descriptor = Markdown::IvHistoryViewMediaDescriptor();
 			descriptor.stableId = prepared.id.value;
