@@ -572,7 +572,7 @@ void Viewport::RendererRhi::renderOffscreen(
 	_nextPoolIndex = 0;
 
 	const auto size = rt->pixelSize();
-	const auto factor = style::DevicePixelRatio();
+	const auto factor = float(_owner->widget()->devicePixelRatioF());
 	if (_factor != factor) {
 		_factor = factor;
 		_ifactor = int(std::ceil(factor));
