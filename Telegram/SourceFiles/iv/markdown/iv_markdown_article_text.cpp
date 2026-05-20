@@ -1217,6 +1217,11 @@ void SetTextLeaf(
 		return std::unique_ptr<Ui::Text::CustomEmoji>();
 	};
 	leaf->setMarkedText(textStyle, text, kIvMarkedTextOptions, context);
+	if (leaf->hasSpoilers()) {
+		leaf->setSpoilerLinkFilter([](const ClickContext &context) {
+			return context.button == Qt::LeftButton;
+		});
+	}
 }
 
 } // namespace Iv::Markdown

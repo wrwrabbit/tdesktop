@@ -81,6 +81,12 @@ constexpr auto kMinLoginCode = 5;
 
 using ItemPreview = HistoryView::ItemPreview;
 
+[[nodiscard]] QString RichMessageInternalUrl(FullMsgId itemId) {
+	return u"internal://rich_text?peer=%1&msg=%2"_q
+		.arg(itemId.peer.value)
+		.arg(itemId.msg.bare);
+}
+
 template <typename T>
 [[nodiscard]] PreparedServiceText PrepareEmptyText(const T &) {
 	return PreparedServiceText();
@@ -443,7 +449,12 @@ HistoryItem::HistoryItem(
 		_flags &= ~MessageFlag::HasPostAuthor;
 		_flags |= MessageFlag::Legacy;
 		createComponents(data);
-		setText(UnsupportedMessageText());
+		if (const auto richMessage = data.vrich_message()) {
+			setRichMessage(*richMessage);
+			setText(richMessageLinkText());
+		} else {
+			setText(UnsupportedMessageText());
+		}
 		if (!Has<HistoryMessageReplyMarkup>()) {
 			AddComponents(HistoryMessageReplyMarkup::Bit());
 		}
@@ -470,13 +481,18 @@ HistoryItem::HistoryItem(
 		if (const auto media = data.vmedia()) {
 			setMedia(*media);
 		}
-		auto textWithEntities = TextWithEntities{
-			qs(data.vmessage()),
-			Api::EntitiesFromMTP(
-				&history->session(),
-				data.ventities().value_or_empty())
-		};
-		setText(_media ? textWithEntities : EnsureNonEmpty(textWithEntities));
+		if (const auto richMessage = data.vrich_message()) {
+			setRichMessage(*richMessage);
+			setText(richMessageLinkText());
+		} else {
+			auto textWithEntities = TextWithEntities{
+				qs(data.vmessage()),
+				Api::EntitiesFromMTP(
+					&history->session(),
+					data.ventities().value_or_empty())
+			};
+			setText(_media ? textWithEntities : EnsureNonEmpty(textWithEntities));
+		}
 		if (const auto groupedId = data.vgrouped_id()) {
 			setGroupId(
 				MessageGroupId::FromRaw(
@@ -2181,12 +2197,20 @@ void HistoryItem::applyEdition(HistoryMessageEdition &&edition) {
 	const auto &checkedMedia = updatingSavedLocalEdit
 		? Get<HistoryMessageSavedMediaData>()->media
 		: _media;
-	auto updatedText = (mediaCheck == MediaCheckResult::Unsupported)
+	if (edition.hasRichMessage) {
+		setRichMessage(std::move(edition.richMessage));
+	} else {
+		clearRichMessage();
+	}
+	auto updatedText = edition.hasRichMessage
+		? richMessageLinkText()
+		: (mediaCheck == MediaCheckResult::Unsupported)
 		? UnsupportedMessageText()
 		: checkedMedia
 		? edition.textWithEntities
 		: EnsureNonEmpty(edition.textWithEntities);
-	auto serviceText = (!checkedMedia
+	auto serviceText = (!edition.hasRichMessage
+		&& !checkedMedia
 		&& edition.textWithEntities.empty()
 		&& edition.mtpMedia)
 		? prepareServiceTextForMessage(
@@ -2383,7 +2407,7 @@ void HistoryItem::applySentMessage(const MTPDmessage &data) {
 		Api::EntitiesFromMTP(
 			&_history->session(),
 			data.ventities().value_or_empty())
-	}, data.vmedia());
+	}, data.vmedia(), data.vrich_message());
 	updateReplyMarkup(HistoryMessageMarkupData(data.vreply_markup()));
 	updateForwardedInfo(data.vfwd_from());
 	changeViewsCount(data.vviews().value_or(-1));
@@ -2432,12 +2456,15 @@ void HistoryItem::applySentMessage(
 		const QString &text,
 		const MTPDupdateShortSentMessage &data,
 		bool wasAlready) {
+	const auto existingRichMessage = Get<HistoryMessageRichTextSource>();
 	updateSentContent({
 		text,
 		Api::EntitiesFromMTP(
 			&_history->session(),
 			data.ventities().value_or_empty())
-		}, data.vmedia());
+		}, data.vmedia(), existingRichMessage
+			? &existingRichMessage->data
+			: nullptr);
 	contributeToSlowmode(data.vdate().v);
 	if (!wasAlready) {
 		addToSharedMediaIndex();
@@ -2453,7 +2480,8 @@ void HistoryItem::applySentMessage(
 
 void HistoryItem::updateSentContent(
 		const TextWithEntities &textWithEntities,
-		const MTPMessageMedia *media) {
+		const MTPMessageMedia *media,
+		const MTPRichMessage *richMessage) {
 	if (isEditingMedia()) {
 		return;
 	}
@@ -2463,13 +2491,25 @@ void HistoryItem::updateSentContent(
 	if (mediaCheck == MediaCheckResult::Unsupported) {
 		_flags &= ~MessageFlag::HasPostAuthor;
 		_flags |= MessageFlag::Legacy;
-		setText(UnsupportedMessageText());
+		if (richMessage) {
+			setRichMessage(*richMessage);
+			setText(richMessageLinkText());
+		} else {
+			clearRichMessage();
+			setText(UnsupportedMessageText());
+		}
 		setReplyMarkup(UnsupportedMessageMarkup());
 	} else {
 		if (_flags & MessageFlag::Legacy) {
 			_flags &= ~MessageFlag::Legacy;
 		}
-		setText(textWithEntities);
+		if (richMessage) {
+			setRichMessage(*richMessage);
+			setText(richMessageLinkText());
+		} else {
+			clearRichMessage();
+			setText(textWithEntities);
+		}
 	}
 	if (mediaCheck == MediaCheckResult::Unsupported) {
 		_media = nullptr;
@@ -4067,6 +4107,26 @@ void HistoryItem::setText(TextWithEntities textWithEntities) {
 	setTextValue((_media && _media->consumeMessageText(textWithEntities))
 		? TextWithEntities()
 		: std::move(textWithEntities));
+}
+
+void HistoryItem::setRichMessage(MTPRichMessage data) {
+	AddComponents(HistoryMessageRichTextSource::Bit());
+	Get<HistoryMessageRichTextSource>()->data = std::move(data);
+}
+
+void HistoryItem::clearRichMessage() {
+	RemoveComponents(HistoryMessageRichTextSource::Bit());
+}
+
+TextWithEntities HistoryItem::richMessageLinkText() const {
+	auto result = TextWithEntities{ u"Click to view Rich Text"_q };
+	result.entities.push_back({
+		EntityType::CustomUrl,
+		0,
+		result.text.size(),
+		RichMessageInternalUrl(fullId()),
+	});
+	return result;
 }
 
 void HistoryItem::setTextValue(TextWithEntities text, bool force) {

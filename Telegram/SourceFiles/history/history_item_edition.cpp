@@ -28,6 +28,10 @@ HistoryMessageEdition::HistoryMessageEdition(
 	mtpMedia = message.vmedia();
 	mtpReactions = message.vreactions();
 	mtpFactcheck = message.vfactcheck();
+	if (const auto data = message.vrich_message()) {
+		hasRichMessage = true;
+		richMessage = *data;
+	}
 	views = message.vviews().value_or(-1);
 	forwards = message.vforwards().value_or(-1);
 	if (const auto mtpReplies = message.vreplies()) {

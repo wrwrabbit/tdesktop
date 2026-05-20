@@ -887,6 +887,11 @@ public:
 		not_null<WebPageData*> page,
 		Fn<void(QString)> openChannel,
 		Fn<void(QString)> joinChannel);
+	CachedPageMediaRuntime(
+		not_null<Main::Session*> session,
+		FullMsgId itemId,
+		Fn<void(QString)> openChannel,
+		Fn<void(QString)> joinChannel);
 
 	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> resolveInlineImage(
 			uint64 documentId,
@@ -930,7 +935,8 @@ private:
 	[[nodiscard]] ::Data::FileOrigin fileOrigin() const;
 
 	const not_null<Main::Session*> _session;
-	const not_null<WebPageData*> _page;
+	const ::Data::FileOrigin _origin;
+	const QString _pageUrl;
 	const Fn<void(QString)> _openChannel;
 	const Fn<void(QString)> _joinChannel;
 	mutable std::shared_ptr<Markdown::IvHistoryViewMediaHost> _hostedMediaHost;
@@ -945,7 +951,20 @@ CachedPageMediaRuntime::CachedPageMediaRuntime(
 	Fn<void(QString)> openChannel,
 	Fn<void(QString)> joinChannel)
 : _session(session)
-, _page(page)
+, _origin(::Data::FileOriginWebPage{ page->url })
+, _pageUrl(page->url)
+, _openChannel(std::move(openChannel))
+, _joinChannel(std::move(joinChannel)) {
+}
+
+CachedPageMediaRuntime::CachedPageMediaRuntime(
+	not_null<Main::Session*> session,
+	FullMsgId itemId,
+	Fn<void(QString)> openChannel,
+	Fn<void(QString)> joinChannel)
+: _session(session)
+, _origin(itemId)
+, _pageUrl()
 , _openChannel(std::move(openChannel))
 , _joinChannel(std::move(joinChannel)) {
 }
@@ -1044,7 +1063,7 @@ auto CachedPageMediaRuntime::hostedMediaHost(
 			= std::make_shared<Markdown::IvHistoryViewMediaHost>(
 				controller,
 				history,
-				_page->url);
+				_pageUrl);
 	}
 	return _hostedMediaHost;
 }
@@ -1064,7 +1083,7 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 	const auto host = hostedMediaHost(not_null{ controller }, history);
 	return std::make_shared<Markdown::IvHistoryViewMediaBlockFactory>(
 		base::make_weak(controller),
-		[session = _session, host](
+		[session = _session, host, origin = fileOrigin()](
 				Window::SessionController *controller,
 				const Markdown::PreparedPhotoBlockData &prepared) {
 			if (!controller
@@ -1092,16 +1111,15 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 					photo,
 					spoiler);
 			};
-			const auto &pageUrl = host->pageUrl();
 			descriptor.photo = std::make_shared<CachedPagePhotoRuntime>(
 				session,
 				photo,
-				::Data::FileOriginWebPage{ pageUrl });
+				origin);
 			return Markdown::CreateIvHistoryViewMediaBlock(
 				controller,
 				std::move(descriptor));
 		},
-		[session = _session, host](
+		[session = _session, host, origin = fileOrigin()](
 				Window::SessionController *controller,
 				const Markdown::PreparedVideoBlockData &prepared) {
 			if (!controller
@@ -1139,11 +1157,10 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 					view->data());
 			};
 			descriptor.keepAlive.push_back(base::take(media));
-			const auto &pageUrl = host->pageUrl();
 			descriptor.document = std::make_shared<CachedPageDocumentRuntime>(
 				session,
 				document,
-				::Data::FileOriginWebPage{ pageUrl });
+				origin);
 			return Markdown::CreateIvHistoryViewMediaBlock(
 				controller,
 				std::move(descriptor));
@@ -1202,7 +1219,7 @@ void CachedPageMediaRuntime::subscribeToChannel(
 }
 
 ::Data::FileOrigin CachedPageMediaRuntime::fileOrigin() const {
-	return ::Data::FileOriginWebPage{ _page->url };
+	return _origin;
 }
 
 } // namespace
@@ -1216,6 +1233,19 @@ auto CreateCachedPageMediaRuntime(
 	return std::make_shared<CachedPageMediaRuntime>(
 		session,
 		page,
+		std::move(openChannel),
+		std::move(joinChannel));
+}
+
+auto CreateMessageMediaRuntime(
+	not_null<Main::Session*> session,
+	FullMsgId itemId,
+	Fn<void(QString)> openChannel,
+	Fn<void(QString)> joinChannel)
+-> std::shared_ptr<Markdown::MediaRuntime> {
+	return std::make_shared<CachedPageMediaRuntime>(
+		session,
+		itemId,
 		std::move(openChannel),
 		std::move(joinChannel));
 }

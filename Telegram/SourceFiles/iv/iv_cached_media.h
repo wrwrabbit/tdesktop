@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/basic_types.h"
+#include "data/data_msg_id.h"
 
 #include <QtCore/QString>
 
@@ -28,6 +29,13 @@ namespace Iv {
 [[nodiscard]] auto CreateCachedPageMediaRuntime(
 	not_null<Main::Session*> session,
 	not_null<WebPageData*> page,
+	Fn<void(QString)> openChannel,
+	Fn<void(QString)> joinChannel)
+-> std::shared_ptr<Markdown::MediaRuntime>;
+
+[[nodiscard]] auto CreateMessageMediaRuntime(
+	not_null<Main::Session*> session,
+	FullMsgId itemId,
 	Fn<void(QString)> openChannel,
 	Fn<void(QString)> joinChannel)
 -> std::shared_ptr<Markdown::MediaRuntime>;

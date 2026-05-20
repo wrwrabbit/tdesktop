@@ -836,13 +836,15 @@ void Controller::showMenu() {
 	}));
 	_menuToggle->setForceRippled(true);
 
-	const auto action = _menu->addAction(
-		OpenSourceLabel(viewerKind()),
-		crl::guard(_window.get(), [=] {
-			openSource();
-		}),
-		OpenSourceIcon(viewerKind()));
-	action->setEnabled(canOpenSource());
+	const auto hasOpenSource = canOpenSource();
+	if (hasOpenSource) {
+		_menu->addAction(
+			OpenSourceLabel(viewerKind()),
+			crl::guard(_window.get(), [=] {
+				openSource();
+			}),
+			OpenSourceIcon(viewerKind()));
+	}
 
 	if (canShare()) {
 		_menu->addAction(
@@ -853,7 +855,9 @@ void Controller::showMenu() {
 			&st::menuIconShare);
 	}
 
-	_menu->addSeparator();
+	if (hasOpenSource || canShare()) {
+		_menu->addSeparator();
+	}
 	_menu->addAction(CreateZoomMenuAction(_menu, _delegate));
 
 	_menu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);

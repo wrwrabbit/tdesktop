@@ -7106,6 +7106,35 @@ void CheckNativeInstantViewLayer227RichTextCoverage(bool *ok) {
 				ok);
 		}
 	}
+
+	auto articleHeight = 0;
+	auto article = BuildArticleForTest(
+		prepared.content,
+		std::make_shared<MathRenderer>(),
+		420,
+		&articleHeight);
+	auto lookupFlags = Ui::Text::StateRequest::Flags();
+	lookupFlags |= Ui::Text::StateRequest::Flag::LookupLink;
+	lookupFlags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+	const auto spoilerOffset = richText.text.indexOf(spoilerText);
+	Check(spoilerOffset >= 0, label + u" spoiler hit text range"_q, ok);
+	const auto spoilerHitBounds = HitBoundsWhere(
+		article.get(),
+		420,
+		articleHeight,
+		lookupFlags,
+		[&](const MarkdownArticleHitTestResult &hit) {
+			const auto symbol = int(hit.state.symbol);
+			return hit.state.link
+				&& !hit.preparedLink
+				&& (spoilerOffset >= 0)
+				&& (symbol >= spoilerOffset)
+				&& (symbol < spoilerOffset + spoilerText.size());
+		});
+	Check(
+		spoilerHitBounds.has_value(),
+		label + u" spoiler click handler"_q,
+		ok);
 }
 
 void CheckNativeInstantViewLayer227BlockCoverage(bool *ok) {

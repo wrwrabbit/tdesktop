@@ -157,8 +157,8 @@ void PaintTextLeaf(
 	}
 	return anim::color(
 		caches.blockquote->bg,
-		caches.blockquote->icon,
-		0.75);
+		caches.blockquote->outlines[0],
+		0.9);
 }
 
 void SetTextLeafPen(

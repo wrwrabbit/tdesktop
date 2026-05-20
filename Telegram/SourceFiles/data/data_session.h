@@ -432,6 +432,7 @@ public:
 	[[nodiscard]] rpl::producer<not_null<const HistoryItem*>> itemRemoved() const;
 	[[nodiscard]] rpl::producer<not_null<const HistoryItem*>> itemRemoved(
 		FullMsgId itemId) const;
+	[[nodiscard]] rpl::producer<> sessionDataAboutToBeCleared() const;
 	void notifyItemsAboutToBeDestroyed(
 		const std::vector<not_null<HistoryItem*>> &items);
 	[[nodiscard]] auto itemsAboutToBeDestroyed() const
@@ -1198,6 +1199,7 @@ private:
 	rpl::event_stream<not_null<HistoryItem*>> _itemDataChanges;
 	rpl::event_stream<ReactionsRemoved> _reactionsRemoved;
 	rpl::event_stream<not_null<const HistoryItem*>> _itemRemoved;
+	rpl::event_stream<> _sessionDataAboutToBeCleared;
 	rpl::event_stream<std::vector<not_null<HistoryItem*>>> _itemsAboutToBeDestroyed;
 	rpl::event_stream<ViewRemoval> _viewAboutToBeRemoved;
 	rpl::event_stream<not_null<const ViewElement*>> _viewRemoved;

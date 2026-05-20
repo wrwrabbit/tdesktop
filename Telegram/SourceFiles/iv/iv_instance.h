@@ -7,12 +7,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "data/data_msg_id.h"
 #include "iv/iv_delegate.h"
 
 namespace Main {
 class Session;
 class SessionShow;
 } // namespace Main
+
+class HistoryItem;
 
 namespace Window {
 class SessionController;
@@ -59,6 +62,10 @@ public:
 		const QString &uri,
 		QVariant context = {});
 
+	void showRichMessage(
+		not_null<Window::SessionController*> controller,
+		not_null<HistoryItem*> item);
+
 	bool showMarkdown(
 		const QString &path,
 		QVariant context = {});
@@ -85,6 +92,15 @@ private:
 	void requestFull(not_null<Main::Session*> session, const QString &id);
 
 	void trackSession(not_null<Main::Session*> session);
+	void bindMarkdown(
+		const QString &key,
+		not_null<Main::Session*> session,
+		FullMsgId itemId);
+	void closeMarkdownsForItem(
+		not_null<Main::Session*> session,
+		FullMsgId itemId);
+	void closeMarkdownsForSession(not_null<Main::Session*> session);
+	void closeSessionDataViews(not_null<Main::Session*> session);
 
 	WebPageData *processReceivedPage(
 		not_null<Main::Session*> session,
@@ -112,9 +128,15 @@ private:
 
 	std::unique_ptr<TonSite> _tonSite;
 
+	struct MarkdownBinding {
+		Main::Session *session = nullptr;
+		FullMsgId itemId;
+	};
+
 	base::flat_map<
 		QString,
 		std::unique_ptr<Markdown::Controller>> _markdowns;
+	base::flat_map<QString, MarkdownBinding> _markdownBindings;
 
 	rpl::lifetime _lifetime;
 

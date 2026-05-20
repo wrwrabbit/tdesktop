@@ -389,7 +389,8 @@ public:
 	void updateForwardedInfo(const MTPMessageFwdHeader *fwd);
 	void updateSentContent(
 		const TextWithEntities &textWithEntities,
-		const MTPMessageMedia *media);
+		const MTPMessageMedia *media,
+		const MTPRichMessage *richMessage = nullptr);
 	void applySentMessage(const MTPDmessage &data);
 	void applySentMessage(
 		const QString &text,
@@ -535,6 +536,9 @@ public:
 	}
 	[[nodiscard]] bool computeDropForwardedInfo() const;
 	void setText(TextWithEntities textWithEntities);
+	void setRichMessage(MTPRichMessage data);
+	void clearRichMessage();
+	[[nodiscard]] TextWithEntities richMessageLinkText() const;
 
 	[[nodiscard]] MsgId replyToId() const;
 	[[nodiscard]] FullMsgId replyToFullId() const;

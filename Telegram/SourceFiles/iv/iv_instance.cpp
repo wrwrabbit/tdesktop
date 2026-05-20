@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/history_item_components.h"
 #include "history/history_item_helpers.h"
 #include "info/profile/info_profile_values.h"
 #include "iv/markdown/iv_markdown_controller.h"
@@ -177,6 +178,136 @@ struct LocalMarkdownTarget {
 [[nodiscard]] bool CanShareMarkdownItem(not_null<HistoryItem*> item) {
 	const auto peer = item->history()->peer;
 	return peer->allowsForwarding() && !item->forbidsForward();
+}
+
+[[nodiscard]] QString RichMessageKey(FullMsgId itemId) {
+	return u"internal://rich_text?peer=%1&msg=%2"_q
+		.arg(itemId.peer.value)
+		.arg(itemId.msg.bare);
+}
+
+[[nodiscard]] uint64 RichMessagePageId(FullMsgId itemId) {
+	return uint64(itemId.peer.value) ^ (uint64(itemId.msg.bare) << 1);
+}
+
+[[nodiscard]] MTPPage RichMessagePage(
+		const QString &url,
+		const MTPDrichMessage &data) {
+	auto flags = MTPDpage::Flags();
+	flags |= MTPDpage::Flag::f_v2;
+	if (data.is_part()) {
+		flags |= MTPDpage::Flag::f_part;
+	}
+	if (data.is_rtl()) {
+		flags |= MTPDpage::Flag::f_rtl;
+	}
+	return MTP_page(
+		MTP_flags(flags),
+		MTP_string(url),
+		MTP_vector<MTPPageBlock>(data.vblocks().v),
+		MTP_vector<MTPPhoto>(data.vphotos().v),
+		MTP_vector<MTPDocument>(data.vdocuments().v),
+		MTP_int(0));
+}
+
+void ProcessRichMessageMedia(
+		not_null<Main::Session*> session,
+		const MTPDrichMessage &data) {
+	for (const auto &photo : data.vphotos().v) {
+		session->data().processPhoto(photo);
+	}
+	for (const auto &document : data.vdocuments().v) {
+		session->data().processDocument(document);
+	}
+}
+
+void OpenRichMessageChannel(
+		not_null<Main::Session*> session,
+		const QString &context) {
+	const auto parsed = ParseNativeIvChannelContext(context);
+	if (const auto channelId = ChannelId(parsed.channelId)) {
+		const auto channel = session->data().channel(channelId);
+		if (channel->isLoaded()) {
+			if (const auto controller = session->tryResolveWindow(channel)) {
+				controller->showPeerHistory(channel);
+			}
+		} else if (const auto username = ResolveNativeIvChannelUsername(
+				channel->username(),
+				parsed.username); !username.isEmpty()) {
+			if (const auto controller = session->tryResolveWindow(channel)) {
+				controller->showPeerByLink({
+					.usernameOrId = username,
+				});
+			}
+		}
+	}
+}
+
+void JoinRichMessageChannel(
+		not_null<Main::Session*> session,
+		const QString &context) {
+	const auto parsed = ParseNativeIvChannelContext(context);
+	if (const auto channelId = ChannelId(parsed.channelId)) {
+		const auto channel = session->data().channel(channelId);
+		if (channel->isLoaded()) {
+			session->api().joinChannel(channel);
+		} else if (const auto username = ResolveNativeIvChannelUsername(
+				channel->username(),
+				parsed.username); !username.isEmpty()) {
+			if (const auto controller = session->tryResolveWindow(channel)) {
+				controller->showPeerByLink({
+					.usernameOrId = username,
+					.joinChannel = true,
+				});
+			}
+		}
+	}
+}
+
+[[nodiscard]] bool ActivateRichMessageMedia(
+		const Markdown::MediaActivation &activation,
+		Qt::MouseButton button,
+		const QVariant &clickHandlerContext) {
+	if (button != Qt::LeftButton && button != Qt::MiddleButton) {
+		return false;
+	}
+	switch (activation.kind) {
+	case Markdown::MediaActivationKind::None:
+		return false;
+	case Markdown::MediaActivationKind::ExternalUrl:
+		if (activation.url.isEmpty()) {
+			return false;
+		}
+		HiddenUrlClickHandler::Open(activation.url, clickHandlerContext);
+		return true;
+	case Markdown::MediaActivationKind::Embed:
+		return false;
+	case Markdown::MediaActivationKind::Photo:
+		if (!activation.photo) {
+			return false;
+		}
+		activation.photo->open(button);
+		return true;
+	case Markdown::MediaActivationKind::Document:
+		if (!activation.document) {
+			return false;
+		}
+		activation.document->open(button);
+		return true;
+	case Markdown::MediaActivationKind::OpenChannel:
+		if (!activation.channel) {
+			return false;
+		}
+		activation.channel->open(button);
+		return true;
+	case Markdown::MediaActivationKind::JoinChannel:
+		if (!activation.channel) {
+			return false;
+		}
+		activation.channel->join(button);
+		return true;
+	}
+	return false;
 }
 
 [[nodiscard]] Markdown::OpenOptions PrepareLocalMarkdownOptions(
@@ -1400,7 +1531,22 @@ void Instance::trackSession(not_null<Main::Session*> session) {
 	if (!_tracking.emplace(session).second) {
 		return;
 	}
+	session->data().sessionDataAboutToBeCleared(
+	) | rpl::on_next([=] {
+		closeSessionDataViews(session);
+	}, session->lifetime());
+	session->data().itemRemoved(
+	) | rpl::on_next([=](not_null<const HistoryItem*> item) {
+		closeMarkdownsForItem(session, item->fullId());
+	}, session->lifetime());
+	session->data().itemsAboutToBeDestroyed(
+	) | rpl::on_next([=](std::vector<not_null<HistoryItem*>> items) {
+		for (const auto &item : items) {
+			closeMarkdownsForItem(session, item->fullId());
+		}
+	}, session->lifetime());
 	session->lifetime().add([=] {
+		closeSessionDataViews(session);
 		_tracking.remove(session);
 		_joining.remove(session);
 		_fullRequested.remove(session);
@@ -1411,13 +1557,59 @@ void Instance::trackSession(not_null<Main::Session*> session) {
 			_ivRequestUri = QString();
 			_ivRequestId = 0;
 		}
-		if (_shownSession == session) {
-			_shownSession = nullptr;
-		}
-		if (_shown && _shown->showingFrom(session)) {
-			_shown = nullptr;
-		}
 	});
+}
+
+void Instance::bindMarkdown(
+		const QString &key,
+		not_null<Main::Session*> session,
+		FullMsgId itemId) {
+	_markdownBindings[key] = {
+		.session = session.get(),
+		.itemId = itemId,
+	};
+	trackSession(session);
+}
+
+void Instance::closeMarkdownsForItem(
+		not_null<Main::Session*> session,
+		FullMsgId itemId) {
+	if (!itemId) {
+		return;
+	}
+	auto keys = std::vector<QString>();
+	for (const auto &[key, binding] : _markdownBindings) {
+		if (binding.session == session.get() && binding.itemId == itemId) {
+			keys.push_back(key);
+		}
+	}
+	for (const auto &key : keys) {
+		_markdownBindings.remove(key);
+		_markdowns.take(key);
+	}
+}
+
+void Instance::closeMarkdownsForSession(not_null<Main::Session*> session) {
+	auto keys = std::vector<QString>();
+	for (const auto &[key, binding] : _markdownBindings) {
+		if (binding.session == session.get()) {
+			keys.push_back(key);
+		}
+	}
+	for (const auto &key : keys) {
+		_markdownBindings.remove(key);
+		_markdowns.take(key);
+	}
+}
+
+void Instance::closeSessionDataViews(not_null<Main::Session*> session) {
+	closeMarkdownsForSession(session);
+	if (_shownSession == session) {
+		_shownSession = nullptr;
+	}
+	if (_shown && _shown->showingFrom(session)) {
+		_shown = nullptr;
+	}
 }
 
 void Instance::openWithIvPreferred(
@@ -1545,10 +1737,121 @@ void Instance::showTonSite(
 	}, _tonSite->lifetime());
 }
 
+void Instance::showRichMessage(
+		not_null<Window::SessionController*> controller,
+		not_null<HistoryItem*> item) {
+	const auto richMessage = item->Get<HistoryMessageRichTextSource>();
+	if (!richMessage) {
+		Ui::Toast::Show(tr::lng_iv_not_supported(tr::now));
+		return;
+	} else if (Platform::IsMac()) {
+		Core::App().hideMediaView();
+	}
+	const auto session = &controller->session();
+	const auto itemId = item->fullId();
+	const auto key = RichMessageKey(itemId);
+	const auto title = item->history()->peer->name();
+	const auto &data = richMessage->data.data();
+	ProcessRichMessageMedia(session, data);
+
+	auto source = Source{
+		.pageId = RichMessagePageId(itemId),
+		.page = RichMessagePage(key, data),
+		.name = title,
+	};
+	auto clickHandlerContext = ClickHandlerContext();
+	clickHandlerContext.sessionWindow = controller;
+	clickHandlerContext.itemId = itemId;
+	auto context = QVariant::fromValue(clickHandlerContext);
+	auto mediaRuntime = CreateMessageMediaRuntime(
+		session,
+		itemId,
+		[=](QString context) {
+			OpenRichMessageChannel(session, context);
+		},
+		[=](QString context) {
+			JoinRichMessageChannel(session, context);
+		});
+	auto prepared = Markdown::TryPrepareNativeInstantView({
+		.source = &source,
+		.mediaRuntime = std::move(mediaRuntime),
+	});
+	if (!prepared.supported()) {
+		Ui::Toast::Show(tr::lng_iv_not_supported(tr::now));
+		return;
+	}
+	auto options = Markdown::OpenOptions{
+		.sourceName = title,
+		.currentPageId = source.pageId,
+		.viewerKind = Markdown::ViewerKind::InstantView,
+		.clickHandlerContext = context,
+		.activateMedia = [=](
+				const Markdown::MediaActivation &activation,
+				Qt::MouseButton button) {
+			return ActivateRichMessageMedia(activation, button, context);
+		},
+		.downloadTaskFinished = session->downloaderTaskFinished(),
+	};
+	if (CanShareMarkdownItem(item)) {
+		options.share = [=](std::shared_ptr<Ui::Show> show) {
+			const auto current = session->data().message(itemId);
+			if (!show || !current || !CanShareMarkdownItem(not_null{ current })) {
+				return;
+			}
+			FastShareMessage(
+				Main::MakeSessionShow(show, not_null{ session }),
+				not_null{ current });
+		};
+	}
+
+	auto i = _markdowns.find(key);
+	if (i == end(_markdowns)) {
+		auto controller = std::make_unique<Markdown::Controller>(
+			_delegate,
+			std::move(prepared.content),
+			title,
+			nullptr,
+			std::move(options));
+		controller->events() | rpl::on_next([=](Markdown::Event event) {
+			using Type = Markdown::Event::Type;
+			switch (event.type) {
+			case Type::Close:
+				_markdownBindings.remove(key);
+				_markdowns.take(key);
+				break;
+			case Type::Quit:
+				Shortcuts::Launch(Shortcuts::Command::Quit);
+				break;
+			case Type::OpenPage:
+			case Type::OpenFile:
+				if (!event.url.isEmpty()) {
+					UrlClickHandler::Open(event.url, event.context);
+				}
+				break;
+			}
+		}, controller->lifetime());
+		i = _markdowns.emplace(key, std::move(controller)).first;
+	} else {
+		i->second->show(
+			std::move(prepared.content),
+			title,
+			std::move(options));
+	}
+	bindMarkdown(key, session, itemId);
+	i->second->activate();
+}
+
 bool Instance::showMarkdown(
 		const QString &path,
 		QVariant context) {
 	const auto target = ParseLocalMarkdownTarget(path);
+	const auto messageContext = ExtractMarkdownMessageContext(context);
+	const auto session = messageContext
+		? ResolveMarkdownSession(*messageContext)
+		: nullptr;
+	const auto itemId = messageContext
+		? messageContext->clickHandlerContext.itemId
+		: FullMsgId();
 	auto options = PrepareLocalMarkdownOptions(context);
 	if (!target.sourceName.isEmpty()) {
 		options.sourceName = target.sourceName;
@@ -1565,6 +1868,7 @@ bool Instance::showMarkdown(
 				using Type = Markdown::Event::Type;
 				switch (event.type) {
 				case Type::Close:
+					_markdownBindings.remove(target.key);
 					_markdowns.take(target.key);
 					break;
 				case Type::Quit:
@@ -1590,6 +1894,11 @@ bool Instance::showMarkdown(
 		}
 	} else {
 		i->second->updateOptions(std::move(options));
+	}
+	if (session) {
+		bindMarkdown(target.key, not_null{ session }, itemId);
+	} else {
+		_markdownBindings.remove(target.key);
 	}
 	i->second->activate();
 	return true;

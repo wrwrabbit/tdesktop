@@ -73,6 +73,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "inline_bots/bot_attach_web_view.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/history_item_components.h"
+#include "iv/iv_instance.h"
 #include "apiwrap.h"
 
 #include <QtGui/QGuiApplication>
@@ -1673,6 +1675,28 @@ bool ResolveOAuth(
 	return true;
 }
 
+bool ShowRichText(
+		Window::SessionController *controller,
+		const Match &match,
+		const QVariant &) {
+	if (!controller) {
+		return true;
+	}
+	auto peerOk = false;
+	auto msgOk = false;
+	const auto peer = PeerId(match->captured(1).toULongLong(&peerOk));
+	const auto msg = MsgId(match->captured(2).toLongLong(&msgOk));
+	if (!peerOk || !msgOk) {
+		return true;
+	}
+	const auto item = controller->session().data().message(FullMsgId(peer, msg));
+	if (!item || !item->Get<HistoryMessageRichTextSource>()) {
+		return true;
+	}
+	Core::App().iv().showRichMessage(controller, not_null{ item });
+	return true;
+}
+
 } // namespace
 
 bool TryRouterForLocalUrl(
@@ -1805,6 +1829,10 @@ const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
 
 const std::vector<LocalUrlHandler> &InternalUrlHandlers() {
 	static auto Result = std::vector<LocalUrlHandler>{
+		{
+			u"^//?rich_text\\?peer=([0-9]+)&msg=(-?[0-9]+)(&|$)"_q,
+			ShowRichText
+		},
 		{
 			u"^media_timestamp/?\\?base=([a-zA-Z0-9\\.\\_\\-]+)&t=(\\d+)(&|$)"_q,
 			OpenMediaTimestamp

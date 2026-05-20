@@ -34,10 +34,12 @@ struct HistoryMessageEdition {
 	bool useSameSuggest = false;
 	bool savePreviousMedia = false;
 	bool invertMedia = false;
+	bool hasRichMessage = false;
 	TextWithEntities textWithEntities;
 	HistoryMessageMarkupData replyMarkup;
 	HistoryMessageRepliesData replies;
 	HistoryMessageSuggestInfo suggest;
+	MTPRichMessage richMessage;
 	const MTPMessageMedia *mtpMedia = nullptr;
 	const MTPMessageReactions *mtpReactions = nullptr;
 	const MTPFactCheck *mtpFactcheck = nullptr;

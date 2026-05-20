@@ -398,6 +398,8 @@ void Session::subscribeForTopicRepliesLists() {
 }
 
 void Session::clear() {
+	_sessionDataAboutToBeCleared.fire({});
+
 	// Optimization: clear notifications before destroying items.
 	Core::App().notifications().clearFromSession(_session);
 
@@ -2194,6 +2196,10 @@ rpl::producer<not_null<const HistoryItem*>> Session::itemRemoved(
 	) | rpl::filter([=](not_null<const HistoryItem*> item) {
 		return (itemId == item->fullId());
 	});
+}
+
+rpl::producer<> Session::sessionDataAboutToBeCleared() const {
+	return _sessionDataAboutToBeCleared.events();
 }
 
 void Session::notifyItemsAboutToBeDestroyed(

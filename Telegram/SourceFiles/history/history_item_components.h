@@ -137,6 +137,11 @@ struct HistoryMessageMediaForInstantView
 	base::flat_set<not_null<PhotoData*>> photos;
 };
 
+struct HistoryMessageRichTextSource
+: RuntimeComponent<HistoryMessageRichTextSource, HistoryItem> {
+	MTPRichMessage data;
+};
+
 class HiddenSenderInfo {
 public:
 	HiddenSenderInfo(
