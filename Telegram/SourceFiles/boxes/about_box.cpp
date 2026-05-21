@@ -108,6 +108,12 @@ void AboutBox(not_null<Ui::GenericBox*> box) {
 				.arg(Core::countAlphaVersionSignature(cRealAlphaVersion())));
 
 			QGuiApplication::clipboard()->setText(url);
+
+			box->getDelegate()->show(
+				Ui::MakeInformBox(
+					"The link to the current private alpha "
+					"version of Telegram Desktop was copied "
+					"to the clipboard."));
 		} else {
 			File::OpenUrl(Core::App().changelogLink());
 		}
@@ -115,7 +121,7 @@ void AboutBox(not_null<Ui::GenericBox*> box) {
 
 	Ui::AddSkip(layout, st::aboutTopSkip);
 
-    if (!PTG::IsFakeActive()) {
+    /*if (!PTG::IsFakeActive())*/ {
 		const auto label = layout->add(
 			object_ptr<Ui::FlatLabel>(box
 				, tr::lng_ptelegram_version(
