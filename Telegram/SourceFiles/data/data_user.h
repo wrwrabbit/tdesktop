@@ -7,7 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "core/stars_amount.h"
+#include "core/credits_amount.h"
 #include "data/components/credits.h"
 #include "data/data_birthday.h"
 #include "data/data_peer.h"
@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/flags.h"
 
 namespace Data {
+class Forum;
 struct BotCommand;
 struct BusinessDetails;
 } // namespace Data
@@ -28,7 +29,7 @@ using DisallowedGiftTypes = base::flags<DisallowedGiftType>;
 } // namespace Api
 
 struct StarRefProgram {
-	StarsAmount revenuePerUser;
+	CreditsAmount revenuePerUser;
 	TimeId endDate = 0;
 	ushort commission = 0;
 	uint8 durationMonths = 0;
@@ -54,7 +55,18 @@ struct BotVerifierSettings {
 };
 
 struct BotInfo {
+	enum class SetBotPhotoOpenState : uchar {
+		Unknown,
+		OpenedWithHistory,
+		OpenedEmpty,
+	};
+
 	BotInfo();
+	~BotInfo();
+
+	void ensureForum(not_null<UserData*> that);
+	[[nodiscard]] Data::Forum *forum() const;
+	[[nodiscard]] std::unique_ptr<Data::Forum> takeForumData();
 
 	QString description;
 	QString inlinePlaceholder;
@@ -84,6 +96,7 @@ struct BotInfo {
 	int version = 0;
 	int descriptionVersion = 0;
 	int activeUsers = 0;
+	SetBotPhotoOpenState setBotPhotoOpenState = SetBotPhotoOpenState::Unknown;
 	bool inited : 1 = false;
 	bool readsAllHistory : 1 = false;
 	bool cantJoinGroups : 1 = false;
@@ -92,9 +105,17 @@ struct BotInfo {
 	bool canManageEmojiStatus : 1 = false;
 	bool supportsBusiness : 1 = false;
 	bool hasMainApp : 1 = false;
+	bool userCreatesTopics : 1 = false;
+	bool setBotPhotoHidden : 1 = false;
+	bool canManageBots : 1 = false;
+	bool supportsGuestChat : 1 = false;
+
+private:
+	std::unique_ptr<Data::Forum> _forum;
+
 };
 
-enum class UserDataFlag : uint32 {
+enum class UserDataFlag : uint64 {
 	Contact = (1 << 0),
 	MutualContact = (1 << 1),
 	Deleted = (1 << 2),
@@ -110,7 +131,7 @@ enum class UserDataFlag : uint32 {
 	DiscardMinPhoto = (1 << 12),
 	Self = (1 << 13),
 	Premium = (1 << 14),
-	//CanReceiveGifts = (1 << 15),
+	UnofficialSecurityRisk = (1 << 15),
 	VoiceMessagesForbidden = (1 << 16),
 	PersonalPhoto = (1 << 17),
 	StoriesHidden = (1 << 18),
@@ -121,11 +142,16 @@ enum class UserDataFlag : uint32 {
 	HasStarsPerMessage = (1 << 23),
 	MessageMoneyRestrictionsKnown = (1 << 24),
 	ReadDatesPrivate = (1 << 25),
+	StoriesCorrespondent = (1 << 26),
+	Forum = (1 << 27),
+	HasActiveVideoStream = (1 << 28),
+	NoForwardsMyEnabled = (1 << 29),
+	NoForwardsPeerEnabled = (1 << 30),
 
 	// shift values!
-	PTG_Verified = (1ull << 29),
-	PTG_Scam = (1ull << 30),
-	PTG_Fake = (1ull << 31),
+	PTG_Verified = (1ull << 61),
+	PTG_Scam = (1ull << 62),
+	PTG_Fake = (1ull << 63),
 };
 inline constexpr bool is_flag_type(UserDataFlag) { return true; };
 using UserDataFlags = base::flags<UserDataFlag>;
@@ -160,7 +186,7 @@ public:
 
 	void madeAction(TimeId when); // pseudo-online
 
-	uint64 accessHash() const {
+	[[nodiscard]] uint64 accessHash() const {
 		return _accessHash;
 	}
 	void setAccessHash(uint64 accessHash);
@@ -192,9 +218,23 @@ public:
 	[[nodiscard]] bool messageMoneyRestrictionsKnown() const;
 	[[nodiscard]] bool canSendIgnoreMoneyRestrictions() const;
 	[[nodiscard]] bool readDatesPrivate() const;
+	[[nodiscard]] bool allowsForwarding() const;
+	void setNoForwardsFlags(bool myEnabled, bool peerEnabled);
+	[[nodiscard]] bool isForum() const {
+		return flags() & Flag::Forum;
+	}
+	[[nodiscard]] Data::Forum *forum() const {
+		return botInfo ? botInfo->forum() : nullptr;
+	}
+
+	void setStoriesCorrespondent(bool is);
+	[[nodiscard]] bool storiesCorrespondent() const;
 
 	void setStarsPerMessage(int stars);
 	[[nodiscard]] int starsPerMessage() const;
+
+	void setStarsRating(Data::StarsRating value);
+	[[nodiscard]] Data::StarsRating starsRating() const;
 
 	[[nodiscard]] bool canShareThisContact() const;
 	[[nodiscard]] bool canAddContact() const;
@@ -254,6 +294,7 @@ public:
 
 	[[nodiscard]] bool hasActiveStories() const;
 	[[nodiscard]] bool hasUnreadStories() const;
+	[[nodiscard]] bool hasActiveVideoStream() const;
 	void setStoriesState(StoriesState state);
 
 	[[nodiscard]] const Data::BusinessDetails &businessDetails() const;
@@ -265,7 +306,14 @@ public:
 	[[nodiscard]] MsgId personalChannelMessageId() const;
 	void setPersonalChannel(ChannelId channelId, MsgId messageId);
 
-	MTPInputUser inputUser = MTP_inputUserEmpty();
+	[[nodiscard]] UserId botManagerId() const;
+	void setBotManagerId(UserId managerId);
+
+	[[nodiscard]] bool unofficialSecurityRisk() const {
+		return flags() & Flag::UnofficialSecurityRisk;
+	}
+
+	[[nodiscard]] MTPInputUser inputUser() const;
 
 	QString firstName;
 	QString lastName;
@@ -277,6 +325,9 @@ public:
 		return _disallowedGiftTypes;
 	}
 	void setDisallowedGiftTypes(Api::DisallowedGiftTypes types);
+
+	[[nodiscard]] const TextWithEntities &note() const;
+	void setNote(const TextWithEntities &note);
 
 private:
 	auto unavailableReasons() const
@@ -301,15 +352,18 @@ private:
 	QString _phone;
 	QString _privateForwardName;
 	std::unique_ptr<Ui::BotVerifyDetails> _botVerifyDetails;
+	Data::StarsRating _starsRating;
 
 	ChannelId _personalChannelId = 0;
 	MsgId _personalChannelMessageId = 0;
+	UserId _botManagerId = 0;
 
 	uint64 _accessHash = 0;
 	static constexpr auto kInaccessibleAccessHashOld
 		= 0xFFFFFFFFFFFFFFFFULL;
 
 	Api::DisallowedGiftTypes _disallowedGiftTypes;
+	TextWithEntities _note;
 
 };
 

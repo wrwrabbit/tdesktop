@@ -12,7 +12,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/credits_graphics.h"
 #include "ui/effects/outline_segments.h"
 #include "ui/effects/ripple_animation.h"
+#include "ui/effects/ttl_icon.h"
+#include "ui/effects/round_checkbox.h"
 #include "ui/image/image_prepare.h"
+#include "ui/text/custom_emoji_text_badge.h"
 #include "ui/text/format_values.h"
 #include "ui/text/text_options.h"
 #include "ui/text/text_utilities.h"
@@ -30,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "lang/lang_keys.h"
 #include "base/unixtime.h"
+#include "styles/style_calls.h"
 #include "styles/style_dialogs.h"
 
 namespace Dialogs {
@@ -131,30 +135,7 @@ constexpr auto kBlurRadius = 24;
 		- st::dialogsTTLBadgeInnerMargins;
 	const auto ttlText = Ui::FormatTTLTiny(ttl);
 
-	q.setFont(st::dialogsScamFont);
-	q.setPen(st::premiumButtonFg);
-	q.drawText(
-		innerRect,
-		(ttlText.size() > 2) ? ttlText.mid(0, 2) : ttlText,
-		style::al_center);
-
-	constexpr auto kPenWidth = 1.5;
-
-	const auto penWidth = style::ConvertScaleExact(kPenWidth);
-	auto pen = QPen(st::premiumButtonFg);
-	pen.setJoinStyle(Qt::RoundJoin);
-	pen.setCapStyle(Qt::RoundCap);
-	pen.setWidthF(penWidth);
-
-	q.setPen(pen);
-	q.setBrush(Qt::NoBrush);
-	q.drawArc(innerRect, arc::kQuarterLength, arc::kHalfLength);
-
-	q.setClipRect(innerRect
-		- QMargins(innerRect.width() / 2, -penWidth, -penWidth, -penWidth));
-	pen.setStyle(Qt::DotLine);
-	q.setPen(pen);
-	q.drawEllipse(innerRect);
+	Ui::PaintTimerIcon(q, innerRect, ttlText, st::premiumButtonFg->c);
 
 	return result;
 }
@@ -317,29 +298,32 @@ Row::~Row() {
 	clearTopicJumpRipple();
 }
 
-void Row::recountHeight(float64 narrowRatio, FilterId filterId) {
-	if (const auto history = _id.history()) {
-		const auto hasTags = _id.entry()->hasChatsFilterTags(filterId);
-		_height = history->isForum()
-			? anim::interpolate(
-				hasTags
-					? st::taggedForumDialogRow.height
-					: st::forumDialogRow.height,
-				st::defaultDialogRow.height,
-				narrowRatio)
+const style::DialogRow &Row::ComputeSt(
+		not_null<const Entry*> entry,
+		FilterId filterId) {
+	if (const auto history = entry->asHistory()) {
+		const auto hasTags = entry->hasChatsFilterTags(filterId);
+		const auto wideRow = history->peer->displayAsForum()
+			|| history->amMonoforumAdmin();
+		return wideRow
+			? (hasTags ? st::taggedForumDialogRow : st::forumDialogRow)
 			: hasTags
-			? anim::interpolate(
-				st::taggedDialogRow.height,
-				st::defaultDialogRow.height,
-				narrowRatio)
-			: st::defaultDialogRow.height;
-	} else if (_id.folder()) {
-		_height = st::defaultDialogRow.height;
-	} else if (_id.topic()) {
-		_height = st::forumTopicRow.height;
-	} else {
-		_height = st::defaultDialogRow.height;
+			? st::taggedDialogRow
+			: st::defaultDialogRow;
+	} else if (entry->asTopic()) {
+		return st::forumTopicRow;
 	}
+	return st::defaultDialogRow;
+}
+
+void Row::recountHeight(float64 narrowRatio, FilterId filterId) {
+	const auto &st = ComputeSt(_id.entry(), filterId);
+	_height = ((&st == &st::defaultDialogRow) || !_id.history())
+		? st::defaultDialogRow.height
+		: anim::interpolate(
+			st.height,
+			st::defaultDialogRow.height,
+			narrowRatio);
 }
 
 uint64 Row::sortKey(FilterId filterId) const {
@@ -444,34 +428,43 @@ void Row::PaintCornerBadgeFrame(
 		q.restore();
 
 		const auto outline = QRectF(0, 0, photoSize, photoSize);
-		const auto storiesUnreadCount = data->storiesUnreadCount;
-		const auto storiesUnreadBrush = [&] {
-			if (context.active || !storiesUnreadCount) {
-				return st::dialogsUnreadBgMutedActive->b;
-			}
-			auto gradient = Ui::UnreadStoryOutlineGradient(outline);
-			return QBrush(gradient);
-		}();
-		const auto storiesBrush = context.active
-			? st::dialogsUnreadBgMutedActive->b
-			: st::dialogsUnreadBgMuted->b;
 		const auto storiesUnread = st::dialogsStoriesFull.lineTwice / 2.;
 		const auto storiesLine = st::dialogsStoriesFull.lineReadTwice / 2.;
 		auto segments = std::vector<Ui::OutlineSegment>();
-		segments.reserve(storiesCount);
-		const auto storiesReadCount = storiesCount - storiesUnreadCount;
-		for (auto i = 0; i != storiesReadCount; ++i) {
-			segments.push_back({ storiesBrush, storiesLine });
+		if (data->storiesHasVideoStream) {
+			const auto storiesVideoStreamBrush = st::attentionButtonFg->b;
+			segments.push_back({ storiesVideoStreamBrush, storiesUnread });
+		} else {
+			const auto storiesUnreadCount = data->storiesUnreadCount;
+			const auto storiesUnreadBrush = [&] {
+				if (context.active || !storiesUnreadCount) {
+					return st::dialogsUnreadBgMutedActive->b;
+				}
+				auto gradient = Ui::UnreadStoryOutlineGradient(outline);
+				return QBrush(gradient);
+			}();
+			const auto storiesBrush = context.active
+				? st::dialogsUnreadBgMutedActive->b
+				: st::dialogsUnreadBgMuted->b;
+			segments.reserve(storiesCount);
+			const auto storiesReadCount = storiesCount - storiesUnreadCount;
+			for (auto i = 0; i != storiesReadCount; ++i) {
+				segments.push_back({ storiesBrush, storiesLine });
+			}
+			for (auto i = 0; i != storiesUnreadCount; ++i) {
+				segments.push_back({ storiesUnreadBrush, storiesUnread });
+			}
 		}
-		for (auto i = 0; i != storiesUnreadCount; ++i) {
-			segments.push_back({ storiesUnreadBrush, storiesUnread });
-		}
-		if (peer && peer->forum()) {
+		if (peer && (peer->forum() || peer->monoforum())) {
 			const auto radius = context.st->photoSize
 				* Ui::ForumUserpicRadiusMultiplier();
 			Ui::PaintOutlineSegments(q, outline, radius, segments);
 		} else {
 			Ui::PaintOutlineSegments(q, outline, segments);
+		}
+
+		if (data->storiesHasVideoStream) {
+			Ui::PaintLiveBadge(q, 0, 0, photoSize);
 		}
 	}
 
@@ -559,7 +552,7 @@ void Row::paintUserpic(
 	const auto storiesHas = storiesPeer
 		? storiesPeer->hasActiveStories()
 		: storiesFolder
-		? storiesFolder->storiesCount()
+		? (storiesFolder->storiesCount() > 0)
 		: false;
 	if (!cornerBadgeShown && !storiesHas) {
 		BasicRow::paintUserpic(p, entry, peer, videoUserpic, context, false);
@@ -594,6 +587,11 @@ void Row::paintUserpic(
 		: (storiesPeer && storiesPeer->hasUnreadStories())
 		? 1
 		: 0;
+	const auto storiesHasVideoStream = storiesSource
+		? storiesSource->hasVideoStream
+		: (storiesPeer && storiesPeer->hasActiveVideoStream())
+		? 1
+		: 0;
 	const auto limit = Ui::kOutlineSegmentsMax;
 	const auto storiesCount = std::min(storiesCountReal, limit);
 	const auto storiesUnreadCount = std::min(storiesUnreadCountReal, limit);
@@ -622,12 +620,14 @@ void Row::paintUserpic(
 		|| _cornerBadgeUserpic->frameIndex != frameIndex
 		|| _cornerBadgeUserpic->storiesCount != storiesCount
 		|| _cornerBadgeUserpic->storiesUnreadCount != storiesUnreadCount
+		|| _cornerBadgeUserpic->storiesHasVideoStream != storiesHasVideoStream
 		|| videoUserpic) {
 		_cornerBadgeUserpic->key = key;
 		_cornerBadgeUserpic->paletteVersion = paletteVersion;
 		_cornerBadgeUserpic->active = active;
 		_cornerBadgeUserpic->storiesCount = storiesCount;
 		_cornerBadgeUserpic->storiesUnreadCount = storiesUnreadCount;
+		_cornerBadgeUserpic->storiesHasVideoStream = storiesHasVideoStream;
 		_cornerBadgeUserpic->frameIndex = frameIndex;
 		_cornerBadgeUserpic->layersManager.markFrameShown();
 		PaintCornerBadgeFrame(
@@ -758,6 +758,12 @@ const Ui::Text::String &FakeRow::name() const {
 			Ui::NameTextOptions());
 	}
 	return _name;
+}
+
+DateText FakeRow::dateText(
+		TimeId date,
+		crl::time now) const {
+	return ResolveDateText(_dateCache, date, now);
 }
 
 } // namespace Dialogs

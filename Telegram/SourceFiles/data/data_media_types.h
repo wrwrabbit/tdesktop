@@ -41,12 +41,14 @@ class WallPaper;
 class Session;
 struct UniqueGift;
 
-enum class CallFinishReason : char {
+enum class CallState : char {
 	Missed,
 	Busy,
 	Disconnected,
 	Hangup,
-	AllowGroupCall,
+	MigrateConferenceCall,
+	Invitation,
+	Active,
 };
 
 struct SharedContact final {
@@ -78,10 +80,12 @@ struct SharedContact final {
 };
 
 struct Call {
-	using FinishReason = CallFinishReason;
+	using State = CallState;
 
+	std::vector<not_null<PeerData*>> otherParticipants;
+	CallId conferenceId = 0;
 	int duration = 0;
-	FinishReason finishReason = FinishReason::Missed;
+	State state = State::Missed;
 	bool video = false;
 
 };
@@ -129,32 +133,68 @@ struct GiveawayResults {
 	bool all = false;
 };
 
+struct DiceGameOptions {
+	QByteArray seedHash;
+	int64 previousSteakNanoTon = 0;
+	std::array<int, 6> milliRewards;
+	int jackpotMilliReward = 0;
+	int currentStreak = 0;
+	int playsLeft = 0;
+
+	explicit operator bool() const {
+		return !seedHash.isEmpty();
+	}
+};
+
+struct DiceGameOutcome {
+	int64 nanoTon = 0;
+	int64 stakeNanoTon = 0;
+	QByteArray seed;
+
+	explicit operator bool() const {
+		return stakeNanoTon != 0;
+	}
+};
+
 enum class GiftType : uchar {
-	Premium, // count - months
+	Premium, // count - days
 	Credits, // count - credits
+	Ton, // count - nano tons
 	StarGift, // count - stars
+	ChatTheme,
+	BirthdaySuggest,
+	GiftOffer,
 };
 
 struct GiftCode {
 	QString slug;
 	uint64 stargiftId = 0;
 	DocumentData *document = nullptr;
+	PeerData *stargiftReleasedBy = nullptr;
 	std::shared_ptr<UniqueGift> unique;
 	TextWithEntities message;
+	PeerData *auctionTo = nullptr;
 	ChannelData *channel = nullptr;
 	PeerData *channelFrom = nullptr;
 	uint64 channelSavedId = 0;
+	QString giftPrepayUpgradeHash;
+	QString giftTitle;
 	MsgId giveawayMsgId = 0;
-	MsgId upgradeMsgId = 0;
+	MsgId realGiftMsgId = 0;
 	int starsConverted = 0;
 	int starsToUpgrade = 0;
 	int starsUpgradedBySender = 0;
+	int starsForDetailsRemove = 0;
+	int starsBid = 0;
+	int giftNum = 0;
 	int limitedCount = 0;
 	int limitedLeft = 0;
-	int count = 0;
+	int64 count = 0;
 	GiftType type = GiftType::Premium;
 	bool viaGiveaway : 1 = false;
 	bool transferred : 1 = false;
+	bool upgradeSeparate : 1 = false;
+	bool upgradeGifted : 1 = false;
 	bool upgradable : 1 = false;
 	bool unclaimed : 1 = false;
 	bool anonymous : 1 = false;
@@ -163,6 +203,7 @@ struct GiftCode {
 	bool refunded : 1 = false;
 	bool upgrade : 1 = false;
 	bool saved : 1 = false;
+	bool craft : 1 = false;
 };
 
 class Media {
@@ -192,13 +233,16 @@ public:
 	virtual const GiftCode *gift() const;
 	virtual CloudImage *location() const;
 	virtual PollData *poll() const;
+	virtual TodoListData *todolist() const;
 	virtual const WallPaper *paper() const;
 	virtual bool paperForBoth() const;
 	virtual FullStoryId storyId() const;
 	virtual bool storyExpired(bool revalidate = false);
+	virtual bool storyUnsupported() const;
 	virtual bool storyMention() const;
 	virtual const GiveawayStart *giveawayStart() const;
 	virtual const GiveawayResults *giveawayResults() const;
+	virtual DiceGameOutcome diceGameOutcome() const;
 
 	virtual bool uploading() const;
 	virtual Storage::SharedMediaTypesMask sharedMediaTypes() const;
@@ -462,9 +506,10 @@ public:
 		not_null<HistoryItem*> realParent,
 		HistoryView::Element *replacing = nullptr) override;
 
-	static QString Text(
+	[[nodiscard]] static QString Text(
 		not_null<HistoryItem*> item,
-		CallFinishReason reason,
+		CallState state,
+		bool conference,
 		bool video);
 
 private:
@@ -588,10 +633,14 @@ public:
 	std::unique_ptr<Media> clone(not_null<HistoryItem*> parent) override;
 
 	PollData *poll() const override;
+	Storage::SharedMediaTypesMask sharedMediaTypes() const override;
 
+	ItemPreview toPreview(ToPreviewOptions options) const override;
 	TextWithEntities notificationText() const override;
 	QString pinnedTextSubstring() const override;
 	TextForMimeData clipboardText() const override;
+	bool consumeMessageText(const TextWithEntities &text) override;
+	TextWithEntities consumedMessageText() const override;
 
 	bool updateInlineResultMedia(const MTPMessageMedia &media) override;
 	bool updateSentMedia(const MTPMessageMedia &media) override;
@@ -602,12 +651,45 @@ public:
 
 private:
 	not_null<PollData*> _poll;
+	TextWithEntities _consumedText;
+
+};
+
+class MediaTodoList final : public Media {
+public:
+	MediaTodoList(
+		not_null<HistoryItem*> parent,
+		not_null<TodoListData*> todolist);
+	~MediaTodoList();
+
+	std::unique_ptr<Media> clone(not_null<HistoryItem*> parent) override;
+
+	TodoListData *todolist() const override;
+
+	TextWithEntities notificationText() const override;
+	QString pinnedTextSubstring() const override;
+	TextForMimeData clipboardText() const override;
+	bool allowsEdit() const override;
+
+	bool updateInlineResultMedia(const MTPMessageMedia &media) override;
+	bool updateSentMedia(const MTPMessageMedia &media) override;
+	std::unique_ptr<HistoryView::Media> createView(
+		not_null<HistoryView::Element*> message,
+		not_null<HistoryItem*> realParent,
+		HistoryView::Element *replacing = nullptr) override;
+
+private:
+	not_null<TodoListData*> _todolist;
 
 };
 
 class MediaDice final : public Media {
 public:
-	MediaDice(not_null<HistoryItem*> parent, QString emoji, int value);
+	MediaDice(
+		not_null<HistoryItem*> parent,
+		DiceGameOutcome outcome,
+		QString emoji,
+		int value);
 
 	std::unique_ptr<Media> clone(not_null<HistoryItem*> parent) override;
 
@@ -619,6 +701,7 @@ public:
 	QString pinnedTextSubstring() const override;
 	TextForMimeData clipboardText() const override;
 	bool forceForwardedInfo() const override;
+	DiceGameOutcome diceGameOutcome() const override;
 
 	bool updateInlineResultMedia(const MTPMessageMedia &media) override;
 	bool updateSentMedia(const MTPMessageMedia &media) override;
@@ -633,6 +716,7 @@ public:
 		const QString &emoji);
 
 private:
+	DiceGameOutcome _outcome;
 	QString _emoji;
 	int _value = 0;
 
@@ -644,7 +728,7 @@ public:
 		not_null<HistoryItem*> parent,
 		not_null<PeerData*> from,
 		GiftType type,
-		int count);
+		int64 count);
 	MediaGiftBox(
 		not_null<HistoryItem*> parent,
 		not_null<PeerData*> from,
@@ -714,6 +798,7 @@ public:
 
 	FullStoryId storyId() const override;
 	bool storyExpired(bool revalidate = false) override;
+	bool storyUnsupported() const override;
 	bool storyMention() const override;
 
 	TextWithEntities notificationText() const override;
@@ -735,6 +820,7 @@ private:
 	const FullStoryId _storyId;
 	const bool _mention = false;
 	bool _viewMayExist = false;
+	bool _unsupported = false;
 	bool _expired = false;
 
 };
@@ -798,7 +884,12 @@ private:
 	not_null<HistoryItem*> item,
 	const MTPDmessageMediaPaidMedia &data);
 
-[[nodiscard]] Call ComputeCallData(const MTPDmessageActionPhoneCall &call);
+[[nodiscard]] Call ComputeCallData(
+	not_null<Session*> owner,
+	const MTPDmessageActionPhoneCall &call);
+[[nodiscard]] Call ComputeCallData(
+	not_null<Session*> owner,
+	const MTPDmessageActionConferenceCall &call);
 
 [[nodiscard]] GiveawayStart ComputeGiveawayStartData(
 	not_null<HistoryItem*> item,

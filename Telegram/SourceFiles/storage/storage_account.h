@@ -53,6 +53,7 @@ enum class StartResult : uchar;
 
 struct MessageDraft {
 	FullReplyTo reply;
+	SuggestOptions suggest;
 	TextWithTags textWithTags;
 	Data::WebPageDraft webpage;
 };
@@ -181,6 +182,19 @@ public:
 	[[nodiscard]] bool hasPeerTrustedPayForMessageEntry(PeerId peerId) const;
 	void clearPeerTrustedPayForMessage(PeerId peerId);
 
+	template <typename Type, typename Other>
+	void writePref(std::string_view key, Other &&value) {
+		writePrefImpl<Type>(key, std::forward<Other>(value));
+	}
+	void clearPref(std::string_view key);
+
+	template <typename Type, typename Other = Type>
+	[[nodiscard]] Type readPref(
+			std::string_view key,
+			Other &&fallback = Type()) {
+		return readPrefImpl<Type>(key).value_or(std::forward<Other>(fallback));
+	}
+
 	void enforceModernStorageIdBots();
 	[[nodiscard]] Webview::StorageId resolveStorageIdBots();
 	[[nodiscard]] Webview::StorageId resolveStorageIdOther();
@@ -190,6 +204,9 @@ public:
 
 	[[nodiscard]] QByteArray readInlineBotsDownloads();
 	void writeInlineBotsDownloads(const QByteArray &bytes);
+
+	void writeBotStorage(PeerId botId, const QByteArray &serialized);
+	[[nodiscard]] QByteArray readBotStorage(PeerId botId);
 
 	[[nodiscard]] bool encrypt(
 		const void *src,
@@ -245,6 +262,10 @@ private:
 	void writeLocationsQueued();
 	void writeLocationsDelayed();
 
+	void readPrefs();
+	void writePrefs();
+	void writePrefsDelayed();
+
 	std::unique_ptr<Main::SessionSettings> readSessionSettings();
 	void writeSessionSettings(Main::SessionSettings *stored);
 
@@ -289,6 +310,16 @@ private:
 		Fn<RecentHashtagPack()> getPack,
 		const QString &text);
 
+	template <typename Type>
+	void writePrefImpl(std::string_view key, Type value);
+
+	template <typename Type>
+	[[nodiscard]] std::optional<Type> readPrefImpl(std::string_view key);
+
+	void writePrefGeneric(std::string_view key, const QByteArray &value);
+	[[nodiscard]] std::optional<QByteArray> readPrefGeneric(
+		std::string_view key);
+
 	const not_null<Main::Account*> _owner;
 	const QString _dataName;
 	const FileKey _dataNameKey = 0;
@@ -304,6 +335,8 @@ private:
 	base::flat_map<
 		not_null<History*>,
 		base::flat_map<Data::DraftKey, MessageDraftSource>> _draftSources;
+	base::flat_map<PeerId, FileKey> _botStoragesMap;
+	base::flat_map<PeerId, bool> _botStoragesNotReadMap;
 
 	QMultiMap<MediaKey, Core::FileLocation> _fileLocations;
 	QMap<QString, QPair<MediaKey, Core::FileLocation>> _fileLocationPairs;
@@ -312,6 +345,7 @@ private:
 	QByteArray _downloadsSerialized;
 	Fn<std::optional<QByteArray>()> _downloadsSerialize;
 
+	FileKey _prefsKey = 0;
 	FileKey _locationsKey = 0;
 	FileKey _trustedPeersKey = 0;
 	FileKey _installedStickersKey = 0;
@@ -356,12 +390,16 @@ private:
 	Webview::StorageId _webviewStorageIdBots;
 	Webview::StorageId _webviewStorageIdOther;
 
+	base::flat_map<QByteArray, QByteArray> _prefs;
+
 	int _oldMapVersion = 0;
 
 	base::Timer _writeMapTimer;
+	base::Timer _writePrefsTimer;
 	base::Timer _writeLocationsTimer;
 	base::Timer _writeSearchSuggestionsTimer;
 	bool _mapChanged = false;
+	bool _prefsChanged = false;
 	bool _locationsChanged = false;
 
 	QImage _roundPlaceholder;

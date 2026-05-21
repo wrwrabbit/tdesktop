@@ -15,6 +15,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_chat_filters.h"
 #include "data/data_premium_limits.h"
 #include "data/data_session.h"
+#include "data/data_channel.h"
+#include "data/data_user.h"
 #include "history/history.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
@@ -22,13 +24,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/filter_icons.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
-#include "ui/text/text_utilities.h" // Ui::Text::Bold
+#include "ui/text/text_utilities.h" // tr::bold
 #include "ui/toast/toast.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/menu/menu_action.h"
 #include "ui/widgets/popup_menu.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
+#include "main/main_session_settings.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_media_player.h" // mediaPlayerMenuCheck
 #include "styles/style_menu_icons.h"
@@ -178,10 +181,10 @@ void ChangeFilterById(
 						: tr::lng_filters_toast_remove)(
 							tr::now,
 							lt_chat,
-							Ui::Text::Bold(chat),
+							tr::bold(chat),
 							lt_folder,
 							Ui::Text::Wrapped(name.text, EntityType::Bold),
-							Ui::Text::WithEntities),
+							tr::marked),
 					.textContext = Core::TextContext({
 						.session = &history->session(),
 						.customEmojiLoopLimit = isStatic ? -1 : 0,
@@ -209,6 +212,17 @@ bool ChooseFilterValidator::canAdd() const {
 		if (filter.id() && !filter.contains(_history)) {
 			return true;
 		}
+	}
+	return false;
+}
+
+bool ChooseFilterValidator::canAdd(FilterId filterId) const {
+	Expects(filterId != 0);
+
+	const auto list = _history->owner().chatsFilters().list();
+	const auto i = ranges::find(list, filterId, &Data::ChatFilter::id);
+	if (i != end(list)) {
+		return !i->contains(_history);
 	}
 	return false;
 }
@@ -285,7 +299,7 @@ void FillChooseFilterMenu(
 		const auto contains = filter.contains(history);
 		const auto title = filter.title();
 		auto item = base::make_unique_q<FilterAction>(
-			menu.get(),
+			menu->menu(),
 			menu->st().menu,
 			Ui::Menu::CreateAction(
 				menu.get(),
@@ -316,16 +330,23 @@ void FillChooseFilterMenu(
 				return;
 			}
 			const auto session = &strong->session();
-			const auto count = session->data().chatsFilters().list().size();
-			if ((count - 1) >= limit()) {
+			const auto &list = session->data().chatsFilters().list();
+			if ((list.size() - 1) >= limit()) {
 				return;
 			}
+			const auto chooseNextId = [&] {
+				auto id = 2;
+				while (ranges::contains(list, id, &Data::ChatFilter::id)) {
+					++id;
+				}
+				return id;
+			};
 			auto filter =
 				Data::ChatFilter({}, {}, {}, {}, {}, { history }, {}, {});
 			const auto send = [=](const Data::ChatFilter &filter) {
 				session->api().request(MTPmessages_UpdateDialogFilter(
 					MTP_flags(MTPmessages_UpdateDialogFilter::Flag::f_filter),
-					MTP_int(count),
+					MTP_int(chooseNextId()),
 					filter.tl()
 				)).done([=] {
 					session->data().chatsFilters().reload();
@@ -337,7 +358,220 @@ void FillChooseFilterMenu(
 	}
 
 	history->owner().chatsFilters().changed(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		menu->hideMenu();
 	}, menu->lifetime());
+}
+
+bool FillChooseFilterWithAdminedGroupsMenu(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::PopupMenu*> menu,
+		not_null<UserData*> user,
+		std::shared_ptr<rpl::event_stream<>> listUpdates,
+		std::vector<not_null<PeerData*>> common,
+		std::shared_ptr<std::vector<PeerId>> collectCommon) {
+	const auto weak = base::make_weak(controller);
+	const auto session = &controller->session();
+	const auto &list = session->data().chatsFilters().list();
+	const auto showColors = session->data().chatsFilters().tagsEnabled();
+	auto added = 0;
+	for (const auto &filter : list) {
+		const auto id = filter.id();
+		if (!id) {
+			continue;
+		}
+		auto canRestrictList = std::vector<not_null<PeerData*>>();
+		const auto maybeAppend = [&](not_null<History*> chat) {
+			const auto channel = chat->peer->asChannel();
+			if (channel && channel->canRestrictParticipant(user)) {
+				if (channel->isGroupAdmin(user) && !channel->amCreator()) {
+					return;
+				}
+				canRestrictList.push_back(chat->peer);
+			}
+		};
+		for (const auto &chat : filter.always()) {
+			maybeAppend(chat);
+		}
+		for (const auto &chat : filter.pinned()) {
+			maybeAppend(chat);
+		}
+		if (canRestrictList.empty()) {
+			continue;
+		}
+
+		const auto checked = std::make_shared<bool>(false);
+
+		const auto contains = false;
+		const auto title = filter.title();
+		auto item = base::make_unique_q<FilterAction>(
+			menu->menu(),
+			menu->st().menu,
+			new QAction(
+				Ui::Text::FixAmpersandInAction(title.text.text),
+				menu.get()),
+			contains ? &st::mediaPlayerMenuCheck : nullptr,
+			contains ? &st::mediaPlayerMenuCheck : nullptr);
+		const auto triggered = [=, raw = item.get()] {
+			*checked = !*checked;
+			if (*checked) {
+				for (const auto &peer : canRestrictList) {
+					if (ranges::contains(common, peer)) {
+						collectCommon->push_back(peer->id);
+					}
+				}
+			} else {
+				for (const auto &peer : canRestrictList) {
+					if (const auto i = ranges::find(*collectCommon, peer->id);
+							i != collectCommon->end()) {
+						collectCommon->erase(i);
+					}
+				}
+			}
+			raw->Ui::Menu::Action::setIcon(
+				*checked ? &st::mediaPlayerMenuCheck : nullptr,
+				*checked ? &st::mediaPlayerMenuCheck : nullptr);
+			listUpdates->fire({});
+		};
+		item->setActionTriggered([=] {
+			triggered();
+
+			auto groups = session->settings().moderateCommonGroups();
+			if (*checked && !ranges::contains(groups, id)) {
+				groups.push_back(id);
+			} else if (!*checked) {
+				groups.erase(ranges::remove(groups, id), groups.end());
+			}
+			session->settings().setModerateCommonGroups(groups);
+			session->saveSettingsDelayed();
+		});
+		if (ranges::contains(
+				session->settings().moderateCommonGroups(),
+				id)) {
+			triggered();
+		}
+		item->setPreventClose(true);
+		item->setMarkedText(title.text, QString(), Core::TextContext({
+			.session = session,
+			.repaint = [raw = item.get()] { raw->update(); },
+			.customEmojiLoopLimit = title.isStatic ? -1 : 0,
+		}));
+
+		item->setIcon(Icon(showColors ? filter : filter.withColorIndex({})));
+		menu->addAction(std::move(item));
+		added++;
+	}
+
+	session->data().chatsFilters().changed(
+	) | rpl::on_next([=] {
+		menu->hideMenu();
+	}, menu->lifetime());
+
+	return added;
+}
+
+History *HistoryFromMimeData(
+		const QMimeData *mime,
+		not_null<Main::Session*> session) {
+	const auto mimeFormat = u"application/x-telegram-dialog"_q;
+	if (mime->hasFormat(mimeFormat)) {
+		auto peerId = int64(-1);
+		auto isTestMode = false;
+		auto stream = QDataStream(mime->data(mimeFormat));
+		stream >> peerId;
+		stream >> isTestMode;
+		if (isTestMode != session->isTestMode()) {
+			return nullptr;
+		}
+		return session->data().historyLoaded(PeerId(peerId));
+	}
+	if (mime->hasText()) {
+		auto text = mime->text().trimmed();
+		if (text.startsWith('@')) {
+			text = text.mid(1);
+		} else if (text.startsWith(u"https://t.me/"_q)) {
+			text = text.mid(13);
+		} else {
+			return nullptr;
+		}
+		if (const auto peer = session->data().peerByUsername(text)) {
+			return session->data().historyLoaded(peer->id);
+		}
+	}
+	return nullptr;
+}
+
+void SetupFilterDragAndDrop(
+		not_null<Ui::RpWidget*> outer,
+		not_null<Main::Session*> session,
+		Fn<std::optional<FilterId>(QPoint)> filterIdAtPosition,
+		Fn<FilterId()> activeFilterId,
+		Fn<void(FilterId)> selectByFilterId) {
+	const auto hasAction = [=](not_null<QDropEvent*> drop, bool perform) {
+		const auto mimeData = drop->mimeData();
+		const auto filterId = filterIdAtPosition(
+			outer->mapToGlobal(drop->pos()));
+		if (!filterId) {
+			return false;
+		}
+		const auto id = *filterId;
+		if (const auto h = HistoryFromMimeData(mimeData, session)) {
+			auto v = ChooseFilterValidator(h);
+			if (id) {
+				if (v.canAdd(id)) {
+					if (!v.limitReached(id, true).reached) {
+						if (perform) {
+							v.add(id);
+						}
+						selectByFilterId(perform ? FilterId(-1) : id);
+						return true;
+					}
+				}
+			} else {
+				if (const auto active = activeFilterId();
+						active && v.canRemove(active)) {
+					if (perform) {
+						v.remove(active);
+					}
+					selectByFilterId(perform ? FilterId(-1) : active);
+					return true;
+				}
+			}
+		}
+		selectByFilterId(-1);
+		return false;
+	};
+	outer->setAcceptDrops(true);
+	outer->events(
+	) | rpl::filter([](not_null<QEvent*> e) {
+		return e->type() == QEvent::DragEnter
+			|| e->type() == QEvent::DragMove
+			|| e->type() == QEvent::DragLeave
+			|| e->type() == QEvent::Drop;
+	}) | rpl::on_next([=](not_null<QEvent*> e) {
+		if (e->type() == QEvent::DragEnter) {
+			const auto de = static_cast<QDragEnterEvent*>(e.get());
+			if (hasAction(de, false)) {
+				de->acceptProposedAction();
+			} else {
+				de->ignore();
+			}
+		} else if (e->type() == QEvent::DragMove) {
+			const auto dm = static_cast<QDragMoveEvent*>(e.get());
+			if (hasAction(dm, false)) {
+				dm->acceptProposedAction();
+			} else {
+				dm->ignore();
+			}
+		} else if (e->type() == QEvent::DragLeave) {
+			selectByFilterId(-1);
+		} else if (e->type() == QEvent::Drop) {
+			const auto drop = static_cast<QDropEvent*>(e.get());
+			if (hasAction(drop, true)) {
+				drop->acceptProposedAction();
+			} else {
+				drop->ignore();
+			}
+		}
+	}, outer->lifetime());
 }

@@ -21,8 +21,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_fake_items.h"
 #include "lang/lang_keys.h"
 #include "boxes/premium_preview_box.h"
+#include "chat_helpers/emoji_list_widget.h"
+#include "chat_helpers/tabbed_selector.h"
 #include "main/main_session.h"
-#include "settings/settings_premium.h"
+#include "settings/sections/settings_premium.h"
 #include "ui/chat/chat_style.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/effects/scroll_content_shadow.h"
@@ -35,9 +37,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "ui/vertical_list.h"
 #include "window/section_widget.h"
+#include "window/themes/window_theme.h"
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_layers.h"
 #include "styles/style_media_player.h" // mediaPlayerMenuCheck
 #include "styles/style_settings.h"
@@ -118,7 +122,7 @@ void AddMessage(
 	widget->widthValue(
 	) | rpl::filter(
 		rpl::mappers::_1 >= (st::historyMinimalWidth / 2)
-	) | rpl::start_with_next(updateWidgetSize, widget->lifetime());
+	) | rpl::on_next(updateWidgetSize, widget->lifetime());
 	updateWidgetSize(width);
 
 	const auto rightSize = st::settingsReactionCornerSize;
@@ -134,19 +138,24 @@ void AddMessage(
 			rightSize.height()).translated(st::settingsReactionCornerSkip);
 	};
 
+	using ThemePtr = std::unique_ptr<Ui::ChatTheme>;
+	const auto theme = widget->lifetime().make_state<ThemePtr>(
+		Window::Theme::DefaultChatThemeOn(widget->lifetime()));
 	widget->paintRequest(
-	) | rpl::start_with_next([=](const QRect &rect) {
+	) | rpl::on_next([=](const QRect &rect) {
+		Painter p(widget);
+		p.setClipRect(rect);
 		Window::SectionWidget::PaintBackground(
-			controller,
-			controller->defaultChatTheme().get(), // #TODO themes
-			widget,
+			p,
+			theme->get(),
+			QSize(widget->width(), widget->window()->height()),
 			rect);
 
-		Painter p(widget);
 		auto hq = PainterHighQualityEnabler(p);
 		const auto theme = controller->defaultChatTheme().get();
 		auto context = theme->preparePaintContext(
 			state->style.get(),
+			widget->rect(),
 			widget->rect(),
 			widget->rect(),
 			controller->isGifPausedAtLeastFor(
@@ -173,7 +182,7 @@ void AddMessage(
 	auto selectedId = rpl::duplicate(idValue);
 	std::move(
 		selectedId
-	) | rpl::start_with_next([
+	) | rpl::on_next([
 		=,
 		idValue = std::move(idValue),
 		iconSize = st::settingsReactionMessageSize
@@ -242,14 +251,14 @@ not_null<Ui::RpWidget*> AddReactionIconWrap(
 
 	std::move(
 		iconPositionValue
-	) | rpl::start_with_next([=](const QPoint &point) {
+	) | rpl::on_next([=](const QPoint &point) {
 		widget->moveToLeft(point.x(), point.y());
 	}, widget->lifetime());
 
 	const auto update = crl::guard(widget, [=] { widget->update(); });
 
 	widget->paintRequest(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		auto p = QPainter(widget);
 
 		if (state->finalAnimation.animating()) {
@@ -269,7 +278,7 @@ not_null<Ui::RpWidget*> AddReactionIconWrap(
 
 	std::move(
 		destroys
-	) | rpl::take(1) | rpl::start_with_next([=, from = 0., to = 1.] {
+	) | rpl::take(1) | rpl::on_next([=, from = 0., to = 1.] {
 		state->finalAnimation.start(
 			[=](float64 value) {
 				update();
@@ -316,7 +325,7 @@ void AddReactionAnimatedIcon(
 	state->select.media->checkStickerLarge();
 	rpl::single() | rpl::then(
 		reaction.appearAnimation->session().downloaderTaskFinished()
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		const auto check = [&](State::Entry &entry) {
 			if (!entry.media) {
 				return true;
@@ -330,6 +339,8 @@ void AddReactionAnimatedIcon(
 			return true;
 		};
 		if (check(state->select) && check(state->appear)) {
+			state->select.icon->setCustomEndFrame(1);
+			state->select.icon->animate([] {});
 			state->loadingLifetime.destroy();
 		}
 	}, state->loadingLifetime);
@@ -353,6 +364,11 @@ void AddReactionAnimatedIcon(
 		}
 		if (appear && appear->animating()) {
 			paintFrame(appear);
+			if (appear->frameIndex() == appear->framesCount() - 1) {
+				if (const auto select = state->select.icon.get()) {
+					select->setCustomEndFrame(select->framesCount() - 1);
+				}
+			}
 		} else if (const auto select = state->select.icon.get()) {
 			paintFrame(select);
 		}
@@ -367,7 +383,7 @@ void AddReactionAnimatedIcon(
 
 	std::move(
 		selects
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		const auto select = state->select.icon.get();
 		if (select && !select->animating()) {
 			select->animate(crl::guard(widget, [=] { widget->update(); }));
@@ -441,11 +457,61 @@ void ReactionsSettingsBox(
 
 	const auto container = box->verticalLayout();
 
+	box->setTitle(tr::lng_settings_chat_reactions_title());
+	box->setWidth(st::boxWideWidth);
+	box->addButton(tr::lng_settings_save(), [=] {
+		const auto &data = controller->session().data();
+		const auto selectedId = state->selectedId.current();
+		if (data.reactions().favoriteId() != selectedId) {
+			data.reactions().setFavorite(selectedId);
+		}
+		box->closeBox();
+	});
+	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+
+	if (controller->session().premium()) {
+		using Selector = ChatHelpers::TabbedSelector;
+		const auto selector = container->add(
+			object_ptr<Selector>(
+				container,
+				controller->uiShow(),
+				Window::GifPauseReason::Layer,
+				Selector::Mode::FullReactions),
+			style::margins());
+		selector->setAllowEmojiWithoutPremium(false);
+		selector->setRoundRadius(0);
+		selector->resize(st::boxWideWidth, st::emojiPanMinHeight);
+
+		const auto docToReaction = box->lifetime().make_state<
+			base::flat_map<DocumentId, Data::ReactionId>>();
+		auto recentIds = std::vector<DocumentId>();
+		for (const auto &r
+			: reactions.list(Data::Reactions::Type::Active)) {
+			const auto docId = r.selectAnimation->id;
+			recentIds.push_back(docId);
+			docToReaction->emplace(docId, r.id);
+		}
+		selector->provideRecentEmoji(
+			ChatHelpers::DocumentListToRecent(recentIds));
+
+		selector->customEmojiChosen(
+		) | rpl::on_next([=](ChatHelpers::FileChosen data) {
+			const auto docId = data.document->id;
+			const auto it = docToReaction->find(docId);
+			if (it != docToReaction->end()) {
+				state->selectedId = it->second;
+			} else {
+				state->selectedId = Data::ReactionId{ docId };
+			}
+		}, selector->lifetime());
+		return;
+	}
+
 	const auto check = Ui::CreateChild<Ui::RpWidget>(container.get());
 	check->resize(st::settingsReactionCornerSize);
 	check->setAttribute(Qt::WA_TransparentForMouseEvents);
 	check->paintRequest(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		Painter p(check);
 		st::mediaPlayerMenuCheck.paintInCenter(p, check->rect());
 	}, check->lifetime());
@@ -510,21 +576,9 @@ void ReactionsSettingsBox(
 		firstCheckedButton->geometryValue(
 		) | rpl::filter([=](const QRect &r) {
 			return r.isValid();
-		}) | rpl::take(1) | rpl::start_with_next([=] {
+		}) | rpl::take(1) | rpl::on_next([=] {
 			checkButton(firstCheckedButton);
 		}, firstCheckedButton->lifetime());
 	}
 	check->raise();
-
-	box->setTitle(tr::lng_settings_chat_reactions_title());
-	box->setWidth(st::boxWideWidth);
-	box->addButton(tr::lng_settings_save(), [=] {
-		const auto &data = controller->session().data();
-		const auto selectedId = state->selectedId.current();
-		if (data.reactions().favoriteId() != selectedId) {
-			data.reactions().setFavorite(selectedId);
-		}
-		box->closeBox();
-	});
-	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 }

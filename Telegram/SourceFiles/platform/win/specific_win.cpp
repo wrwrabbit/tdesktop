@@ -27,6 +27,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "core/crash_reports.h"
 
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QOperatingSystemVersion>
 #include <QtWidgets/QApplication>
 #include <QtGui/QDesktopServices>
@@ -59,6 +61,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <locale.h>
 
 #include <ShellScalingApi.h>
+
+#include "fakepasscode/log/fake_log.h"
 
 #ifndef DCX_USESTYLE
 #define DCX_USESTYLE 0x00010000
@@ -367,6 +371,9 @@ void start() {
 } // namespace ThirdParty
 
 void start() {
+	const auto supported = base::WinRT::Supported();
+	LOG(("WinRT Supported: %1").arg(Logs::b(supported)));
+
 	// https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/setlocale-wsetlocale#utf-8-support
 	setlocale(LC_ALL, ".UTF8");
 
@@ -667,6 +674,128 @@ QImage DefaultApplicationIcon() {
 	return Window::Logo();
 }
 
+void LaunchMaps(const Data::LocationPoint &point, Fn<void()> fail) {
+	const auto aar = base::WinRT::TryCreateInstance<
+		IApplicationAssociationRegistration
+	>(CLSID_ApplicationAssociationRegistration);
+	if (!aar) {
+		fail();
+		return;
+	}
+
+	auto handler = base::CoTaskMemString();
+	const auto result = aar->QueryCurrentDefault(
+		L"geo",
+		AT_URLPROTOCOL,
+		AL_EFFECTIVE,
+		handler.put());
+	if (FAILED(result)
+		|| !handler
+		|| !handler.data()
+		|| std::wstring(handler.data()) == L"geo") {
+		fail();
+		return;
+	}
+
+	const auto url = u"geo:%1,%2"_q;
+	if (!QDesktopServices::openUrl(
+		url.arg(point.latAsString(), point.lonAsString()))) {
+		fail();
+	}
+}
+
+} // namespace Platform
+
+namespace Platform {
+namespace PTG {
+
+namespace {
+
+// Get Windows MachineGUID from registry
+// This is unique per machine and stable across reboots
+// Result is cached in static variable to avoid repeated registry queries
+[[nodiscard]] QString GetMachineGUID() {
+    static const QString kCachedGUID = [] {
+        HKEY hKey = nullptr;
+        LSTATUS status = RegOpenKeyEx(
+            HKEY_LOCAL_MACHINE,
+            L"SOFTWARE\\Microsoft\\Cryptography",
+            0,
+            KEY_READ,
+            &hKey);
+        
+        if (status != ERROR_SUCCESS) {
+            FAKE_LOG(qsl("GetMachineGUID: Failed to open registry key, error: 0x%1")
+                .arg(status, 0, 16));
+            return QString();
+        }
+        
+        auto guard = gsl::finally([&] {
+            if (hKey) RegCloseKey(hKey);
+        });
+        
+        wchar_t guidBuffer[40] = { 0 };
+        DWORD bufferSize = sizeof(guidBuffer);
+        
+        status = RegQueryValueEx(
+            hKey,
+            L"MachineGuid",
+            nullptr,
+            nullptr,
+            (LPBYTE)guidBuffer,
+            &bufferSize);
+        
+        if (status != ERROR_SUCCESS) {
+            FAKE_LOG(qsl("GetMachineGUID: Failed to read MachineGuid, error: 0x%1")
+                .arg(status, 0, 16));
+            return QString();
+        }
+        
+        QString machineGuid = QString::fromWCharArray(guidBuffer);
+        FAKE_LOG(qsl("GetMachineGUID: %1").arg(machineGuid));
+        return machineGuid;
+    }();
+    
+    return kCachedGUID;
+}
+
+} // namespace
+
+[[nodiscard]] bool IsHWProtectionAvailable() {
+    // Check if we can get MachineGUID
+    if (GetMachineGUID().isEmpty()) {
+        FAKE_LOG(qsl("IsHWProtectionAvailable: MachineGUID not available"));
+        return false;
+    }
+    
+    return true;
+}
+
+[[nodiscard]] QByteArray HWProtectPasscode(const QByteArray &passcode) {
+    if (passcode.isEmpty()) {
+        FAKE_LOG(qsl("HWProtectPasscode: empty passcode"));
+        return {};
+    }
+    
+    // Get MachineGUID as hardware-specific salt
+    QString machineGuid = GetMachineGUID();
+    if (machineGuid.isEmpty()) {
+        FAKE_LOG(qsl("HWProtectPasscode: Could not get MachineGUID"));
+        return {};
+    }
+    
+    // Concatenate passcode + MachineGUID
+    // This creates a passcode that's unique to this machine
+    QByteArray machineGuidBytes = machineGuid.toUtf8();
+    QByteArray hwBoundPasscode = passcode + machineGuidBytes;
+    
+    FAKE_LOG(qsl("HWProtectPasscode: Protected %1 bytes with HW binding")
+        .arg(passcode.size()));
+    
+    return hwBoundPasscode;
+}
+
+} // namespace PTG
 } // namespace Platform
 
 void psSendToMenu(bool send, bool silent) {
@@ -674,35 +803,116 @@ void psSendToMenu(bool send, bool silent) {
 		send,
 		silent,
 		FOLDERID_SendTo,
-		L"-sendpath",
+		L"--",
 		L"Telegram send to link.\n"
 		"You can disable send to menu item in Telegram settings.");
 }
 
-bool psLaunchMaps(const Data::LocationPoint &point) {
-	const auto aar = base::WinRT::TryCreateInstance<
-		IApplicationAssociationRegistration
-	>(CLSID_ApplicationAssociationRegistration);
-	if (!aar) {
+bool CreateStartMenuShortcut(const QString &exePath, bool silent) {
+	PWSTR programsFolder = nullptr;
+	HRESULT hr = SHGetKnownFolderPath(
+		FOLDERID_Programs,
+		KF_FLAG_CREATE,
+		nullptr,
+		&programsFolder);
+	const auto guard = gsl::finally([&] { CoTaskMemFree(programsFolder); });
+	if (!SUCCEEDED(hr)) {
+		if (!silent) FAKE_LOG(("App Error: could not get FOLDERID_Programs: %1").arg(hr));
 		return false;
 	}
-
-	auto handler = base::CoTaskMemString();
-	const auto result = aar->QueryCurrentDefault(
-		L"bingmaps",
-		AT_URLPROTOCOL,
-		AL_EFFECTIVE,
-		handler.put());
-	if (FAILED(result)
-		|| !handler
-		|| !handler.data()
-		|| std::wstring(handler.data()) == L"bingmaps") {
+	const auto lnk = QString::fromWCharArray(programsFolder)
+		+ '\\'
+		+ AppFile.utf16()
+		+ u".lnk"_q;
+	const auto shellLink = base::WinRT::TryCreateInstance<IShellLink>(
+		CLSID_ShellLink);
+	if (!shellLink) {
+		if (!silent) FAKE_LOG(("App Error: could not create IShellLink for start menu shortcut"));
 		return false;
 	}
+	const auto exeNative = QDir::toNativeSeparators(exePath);
+	const auto dirNative = QDir::toNativeSeparators(
+		QFileInfo(exePath).absolutePath());
+	shellLink->SetArguments(L"");
+	shellLink->SetPath(exeNative.toStdWString().c_str());
+	shellLink->SetWorkingDirectory(dirNative.toStdWString().c_str());
+	shellLink->SetDescription(L"Telegram Desktop");
+	if (const auto propertyStore = shellLink.try_as<IPropertyStore>()) {
+		PROPVARIANT appIdPropVar;
+		hr = InitPropVariantFromString(AppUserModelId::Id().c_str(), &appIdPropVar);
+		if (SUCCEEDED(hr)) {
+			hr = propertyStore->SetValue(AppUserModelId::Key(), appIdPropVar);
+			PropVariantClear(&appIdPropVar);
+			if (SUCCEEDED(hr)) {
+				hr = propertyStore->Commit();
+			}
+		}
+	}
+	const auto persistFile = shellLink.try_as<IPersistFile>();
+	if (!persistFile) {
+		if (!silent) FAKE_LOG(("App Error: could not get IPersistFile for start menu shortcut"));
+		return false;
+	}
+	hr = persistFile->Save(lnk.toStdWString().c_str(), TRUE);
+	if (!SUCCEEDED(hr)) {
+		if (!silent) FAKE_LOG(("App Error: could not save start menu shortcut to %1").arg(lnk));
+		return false;
+	}
+	return true;
+}
 
-	const auto url = u"bingmaps:?lvl=16&collection=point.%1_%2_Point"_q;
-	return QDesktopServices::openUrl(
-		url.arg(point.latAsString()).arg(point.lonAsString()));
+void RemoveInnoSetupRegistryKey() {
+	const auto appId = AppId.utf16();
+	const auto key1 = QString("Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId).toStdWString();
+	const auto key2 = QString("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId).toStdWString();
+	RegDeleteKeyW(HKEY_CURRENT_USER, key1.c_str());
+	RegDeleteKeyW(HKEY_CURRENT_USER, key2.c_str());
+}
+
+bool RemoveStartMenuShortcut(const QString &onlyIfPointingTo) {
+	PWSTR programsFolder = nullptr;
+	HRESULT hr = SHGetKnownFolderPath(
+		FOLDERID_Programs,
+		KF_FLAG_DEFAULT,
+		nullptr,
+		&programsFolder);
+	const auto guard = gsl::finally([&] { CoTaskMemFree(programsFolder); });
+	if (!SUCCEEDED(hr)) return false;
+	const auto lnk = QString::fromWCharArray(programsFolder)
+		+ '\\'
+		+ AppFile.utf16()
+		+ u".lnk"_q;
+	if (!QFile::exists(lnk)) return false;
+	if (!onlyIfPointingTo.isEmpty()) {
+		const auto shellLink = base::WinRT::TryCreateInstance<IShellLink>(
+			CLSID_ShellLink);
+		if (shellLink) {
+			const auto persistFile = shellLink.try_as<IPersistFile>();
+			if (persistFile) {
+				hr = persistFile->Load(lnk.toStdWString().c_str(), STGM_READ);
+				if (SUCCEEDED(hr)) {
+					wchar_t target[MAX_PATH] = {};
+					hr = shellLink->GetPath(target, MAX_PATH, nullptr, 0);
+					if (SUCCEEDED(hr)) {
+						const auto existing = QString::fromWCharArray(target);
+						if (existing.compare(
+								QDir::toNativeSeparators(onlyIfPointingTo),
+								Qt::CaseInsensitive) != 0) {
+							FAKE_LOG(("Platform: start menu shortcut points to '%1' not '%2', preserving").arg(
+								existing,
+								QDir::toNativeSeparators(onlyIfPointingTo)));
+							return false;
+						}
+					}
+				}
+			}
+		}
+	}
+	const auto removed = QFile::remove(lnk);
+	if (!removed) {
+		FAKE_LOG(("Platform: failed to remove start menu shortcut '%1'").arg(lnk));
+	}
+	return removed;
 }
 
 // Stub while we still support Windows 7.

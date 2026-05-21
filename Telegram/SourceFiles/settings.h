@@ -99,17 +99,12 @@ typedef QList<QPair<QString, ushort>> RecentHashtagPack;
 DeclareRefSetting(RecentHashtagPack, RecentWriteHashtags);
 DeclareSetting(RecentHashtagPack, RecentSearchHashtags);
 
-class UserData;
-typedef QVector<UserData*> RecentInlineBots;
-DeclareRefSetting(RecentInlineBots, RecentInlineBots);
-
 DeclareSetting(bool, PasswordRecovered);
 
 DeclareSetting(int32, PasscodeBadTries);
 DeclareSetting(crl::time, PasscodeLastTry);
 
-DeclareSetting(QStringList, SendPaths);
-DeclareSetting(QString, StartUrl);
+DeclareRefSetting(QList<QUrl>, StartUrls);
 
 DeclareSetting(int, OtherOnline);
 

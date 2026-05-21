@@ -105,11 +105,9 @@ void ShowReportMessageBox(
 			}
 			if (!result.options.empty() || result.commentOption) {
 				show->show(Box([=](not_null<Ui::GenericBox*> box) {
-					box->setTitle(
-						rpl::single(
-							result.title.isEmpty()
-								? reportInput.optionText
-								: result.title));
+					box->setTitle(result.title.isEmpty()
+						? reportInput.optionText
+						: result.title);
 
 					for (const auto &option : result.options) {
 						const auto button = Ui::AddReportOptionButton(
@@ -147,8 +145,7 @@ void ShowReportMessageBox(
 							auto label = object_ptr<Ui::FlatLabel>(
 								container,
 								tr::lng_report_details_message_about(),
-								st::boxDividerLabel);
-							label->setTextColorOverride(st->dividerFg->c);
+								st->divider.label);
 							using namespace Ui;
 							const auto widget = container->add(
 								object_ptr<PaddingWrap<>>(
@@ -159,11 +156,11 @@ void ShowReportMessageBox(
 								= CreateChild<BoxContentDivider>(
 									widget,
 									st::boxDividerHeight,
-									st->dividerBg,
+									st->divider.bar,
 									RectPart::Top | RectPart::Bottom);
 							background->lower();
 							widget->sizeValue(
-							) | rpl::start_with_next([=](const QSize &s) {
+							) | rpl::on_next([=](const QSize &s) {
 								background->resize(s);
 							}, background->lifetime());
 						}
@@ -184,7 +181,7 @@ void ShowReportMessageBox(
 							repeatRequest(repeatRequest, std::move(copy));
 						};
 						details->submits(
-						) | rpl::start_with_next(submit, details->lifetime());
+						) | rpl::on_next(submit, details->lifetime());
 						box->addButton(tr::lng_report_button(), submit);
 					} else {
 						box->addButton(

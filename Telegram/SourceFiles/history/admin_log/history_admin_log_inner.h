@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
 #include "ui/widgets/tooltip.h"
+#include "ui/widgets/scroll_area.h"
 #include "mtproto/sender.h"
 #include "base/timer.h"
 
@@ -47,6 +48,14 @@ namespace AdminLog {
 
 class SectionMemento;
 
+struct DeleteGroup {
+	uint64 eventId = 0;
+	UserId adminId;
+	int startIndex = -1;
+	int endIndex = -1;
+	int eventCount = 0;
+};
+
 class InnerWidget final
 	: public Ui::RpWidget
 	, public Ui::AbstractTooltipShower
@@ -77,7 +86,7 @@ public:
 
 	void resizeToWidth(int newWidth, int minHeight) {
 		_minHeight = minHeight;
-		return TWidget::resizeToWidth(newWidth);
+		return RpWidget::resizeToWidth(newWidth);
 	}
 
 	void saveState(not_null<SectionMemento*> memento);
@@ -108,6 +117,12 @@ public:
 	void elementShowPollResults(
 		not_null<PollData*> poll,
 		FullMsgId context) override;
+	void elementShowAddPollOption(
+		not_null<HistoryView::Element*> view,
+		not_null<PollData*> poll,
+		FullMsgId context,
+		QRect optionRect) override;
+	void elementSubmitAddPollOption(FullMsgId context) override;
 	void elementOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) override;
@@ -131,7 +146,7 @@ public:
 		const QString &query,
 		const FullMsgId &context) override;
 	void elementHandleViaClick(not_null<UserData*> bot) override;
-	bool elementIsChatWide() override;
+	HistoryView::ElementChatMode elementChatMode() override;
 	not_null<Ui::PathShiftGradient*> elementPathShiftGradient() override;
 	void elementReplyTo(const FullReplyTo &to) override;
 	void elementStartInteraction(
@@ -165,6 +180,7 @@ protected:
 	void enterEventHook(QEnterEvent *e) override;
 	void leaveEventHook(QEvent *e) override;
 	void contextMenuEvent(QContextMenuEvent *e) override;
+	bool eventHook(QEvent *e) override;
 
 	// Resizes content and counts natural widget height for the desired width.
 	int resizeGetHeight(int newWidth) override;
@@ -198,6 +214,7 @@ private:
 	void performDrag();
 	int itemTop(not_null<const Element*> view) const;
 	void repaintItem(const Element *view);
+	void repaintItem(const Element *view, QRect rect);
 	void refreshItem(not_null<const Element*> view);
 	void resizeItem(not_null<Element*> view);
 	QPoint mapPointToItem(QPoint point, const Element *view) const;
@@ -213,7 +230,9 @@ private:
 	void copyContextText(FullMsgId itemId);
 	void copySelectedText();
 	TextForMimeData getSelectedText() const;
-	void suggestRestrictParticipant(not_null<PeerData*> participant);
+	void suggestRestrictParticipant(
+		not_null<PeerData*> participant,
+		FullMsgId realId);
 	void restrictParticipant(
 		not_null<PeerData*> participant,
 		ChatRestrictionsInfo oldRights,
@@ -221,12 +240,12 @@ private:
 	void restrictParticipantDone(
 		not_null<PeerData*> participant,
 		ChatRestrictionsInfo rights);
+	[[nodiscard]] bool canRestrict() const;
 
 	void requestAdmins();
 	void checkPreloadMore();
 	void updateVisibleTopItem();
 	void preloadMore(Direction direction);
-	void itemsAdded(Direction direction, int addedCount);
 	void updateSize();
 	void updateMinMaxIds();
 	void updateEmptyText();
@@ -236,6 +255,26 @@ private:
 	void addEvents(
 		Direction direction,
 		const QVector<MTPChannelAdminLogEvent> &events);
+	enum class DisplayPointerScope {
+		Transient,
+		All,
+	};
+	void computeDeleteGroups();
+	void rebuildDisplayItems();
+	void clearDisplayItems(DisplayPointerScope pointerScope);
+	void clearDisplayPointers(DisplayPointerScope pointerScope);
+	[[nodiscard]] bool displayPointerMatches(
+		const Element *view,
+		DisplayPointerScope pointerScope) const;
+	void toggleDeleteGroup(uint64 groupEventId);
+	OwnedItem createGroupSummaryItem(
+		const DeleteGroup &group,
+		bool expanded);
+	void setupExpandButton(
+		not_null<HistoryItem*> item,
+		int hiddenCount,
+		uint64 groupEventId);
+	void clearExpandButtons();
 	[[nodiscard]] Element *viewForItem(const HistoryItem *item);
 	[[nodiscard]] bool myView(
 		not_null<const HistoryView::Element*> view) const;
@@ -246,12 +285,13 @@ private:
 	void scrollDateHide();
 	void scrollDateCheck();
 	void scrollDateHideByTimer();
+	void scrollDateCheckDownward();
 
 	// This function finds all history items that are displayed and calls template method
 	// for each found message (in given direction) in the passed history with passed top offset.
 	//
 	// Method has "bool (*Method)(not_null<Element*> view, int itemtop, int itembottom)" signature
-	// if it returns false the enumeration stops immidiately.
+	// if it returns false the enumeration stops immediately.
 	template <EnumItemsDirection direction, typename Method>
 	void enumerateItems(Method method);
 
@@ -271,6 +311,14 @@ private:
 	template <typename Method>
 	void enumerateDates(Method method);
 
+	void touchEvent(QTouchEvent *e);
+	void touchScrollUpdated(const QPoint &screenPos);
+	void touchResetSpeed();
+	void touchUpdateSpeed();
+	void touchDeaccelerate(int32 elapsed);
+	void onTouchSelect();
+	void onTouchScrollTimer();
+
 	const not_null<Window::SessionController*> _controller;
 	const not_null<ChannelData*> _channel;
 	const not_null<History*> _history;
@@ -286,6 +334,19 @@ private:
 	base::flat_set<FullMsgId> _animatedStickersPlayed;
 	base::flat_map<not_null<PeerData*>, Ui::PeerUserpicView> _userpics;
 	base::flat_map<not_null<PeerData*>, Ui::PeerUserpicView> _userpicsCache;
+	base::flat_map<FullMsgId, MsgId> _realIdsForReport;
+
+	// Delete event grouping.
+	std::vector<Element*> _displayItems;
+	std::vector<DeleteGroup> _deleteGroups;
+	std::set<uint64> _expandedGroups;
+	std::vector<OwnedItem> _summaryItems;
+	base::flat_map<not_null<const HistoryItem*>, uint64> _itemEventIds;
+	base::flat_map<uint64, UserId> _eventAdminIds;
+	base::flat_set<not_null<HistoryItem*>> _expandMarkupItems;
+	Ui::Animations::Simple _toggleAnimation;
+	bool _skipScrollRestore = false;
+
 	int _itemsTop = 0;
 	int _itemsWidth = 0;
 	int _itemsHeight = 0;
@@ -303,6 +364,7 @@ private:
 	base::Timer _scrollDateHideTimer;
 	Element *_scrollDateLastItem = nullptr;
 	int _scrollDateLastItemTop = 0;
+	bool _scrollDateAfterDayCrossing = false;
 
 	// Up - max, Down - min.
 	uint64 _maxId = 0;
@@ -335,6 +397,22 @@ private:
 
 	QPoint _trippleClickPoint;
 	base::Timer _trippleClickTimer;
+
+	base::Timer _touchSelectTimer;
+	base::Timer _touchScrollTimer;
+
+	// Touch scroll support.
+	bool _touchScroll = false;
+	bool _touchSelect = false;
+	bool _touchInProgress = false;
+	QPoint _touchStart, _touchPrevPos, _touchPos;
+	Ui::TouchScrollState _touchScrollState = Ui::TouchScrollState::Manual;
+	bool _touchPrevPosValid = false;
+	bool _touchWaitingAcceleration = false;
+	QPoint _touchSpeed;
+	crl::time _touchSpeedTime = 0;
+	crl::time _touchAccelerationTime = 0;
+	crl::time _touchTime = 0;
 
 	FilterValue _filter;
 	QString _searchQuery;

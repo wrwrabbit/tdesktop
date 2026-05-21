@@ -13,18 +13,23 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/about_box.h"
 #include "boxes/peer_list_controllers.h"
 #include "boxes/premium_preview_box.h"
+#include "calls/group/calls_group_common.h"
 #include "calls/calls_box_controller.h"
+#include "calls/calls_instance.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
 #include "data/data_changes.h"
 #include "data/data_document_media.h"
 #include "data/data_folder.h"
+#include "data/data_group_call.h"
 #include "data/data_session.h"
 #include "data/data_stories.h"
 #include "data/data_user.h"
 #include "info/info_memento.h"
 #include "info/profile/info_profile_badge.h"
+#include "settings/settings_common.h"
 #include "info/profile/info_profile_emoji_status_panel.h"
+#include "info/profile/info_profile_icon.h"
 #include "info/stories/info_stories_widget.h"
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
@@ -32,12 +37,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "mtproto/mtproto_config.h"
-#include "settings/settings_advanced.h"
-#include "settings/settings_calls.h"
-#include "settings/settings_information.h"
+#include "settings/sections/settings_advanced.h"
+#include "settings/sections/settings_calls.h"
+#include "settings/sections/settings_information.h"
 #include "storage/localstorage.h"
 #include "storage/storage_account.h"
 #include "support/support_templates.h"
+#include "tde2e/tde2e_api.h"
+#include "tde2e/tde2e_integration.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/controls/swipe_handler.h"
@@ -92,89 +99,6 @@ constexpr auto kPlayStatusLimit = 2;
 		|| (now.month() == 1 && now.day() == 1);
 }
 
-void ShowCallsBox(not_null<Window::SessionController*> window) {
-	struct State {
-		State(not_null<Window::SessionController*> window)
-		: callsController(window)
-		, groupCallsController(window) {
-		}
-		Calls::BoxController callsController;
-		PeerListContentDelegateSimple callsDelegate;
-
-		Calls::GroupCalls::ListController groupCallsController;
-		PeerListContentDelegateSimple groupCallsDelegate;
-
-		base::unique_qptr<Ui::PopupMenu> menu;
-	};
-
-	window->show(Box([=](not_null<Ui::GenericBox*> box) {
-		const auto state = box->lifetime().make_state<State>(window);
-
-		const auto groupCalls = box->addRow(
-			object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-				box,
-				object_ptr<Ui::VerticalLayout>(box)),
-			{});
-		groupCalls->hide(anim::type::instant);
-		groupCalls->toggleOn(state->groupCallsController.shownValue());
-
-		Ui::AddSubsectionTitle(
-			groupCalls->entity(),
-			tr::lng_call_box_groupcalls_subtitle());
-		state->groupCallsDelegate.setContent(groupCalls->entity()->add(
-			object_ptr<PeerListContent>(box, &state->groupCallsController),
-			{}));
-		state->groupCallsController.setDelegate(&state->groupCallsDelegate);
-		Ui::AddSkip(groupCalls->entity());
-		Ui::AddDivider(groupCalls->entity());
-		Ui::AddSkip(groupCalls->entity());
-
-		const auto content = box->addRow(
-			object_ptr<PeerListContent>(box, &state->callsController),
-			{});
-		state->callsDelegate.setContent(content);
-		state->callsController.setDelegate(&state->callsDelegate);
-
-		box->setWidth(state->callsController.contentWidth());
-		state->callsController.boxHeightValue(
-		) | rpl::start_with_next([=](int height) {
-			box->setMinHeight(height);
-		}, box->lifetime());
-		box->setTitle(tr::lng_call_box_title());
-		box->addButton(tr::lng_close(), [=] {
-			box->closeBox();
-		});
-		const auto menuButton = box->addTopButton(st::infoTopBarMenu);
-		menuButton->setClickedCallback([=] {
-			state->menu = base::make_unique_q<Ui::PopupMenu>(
-				menuButton,
-				st::popupMenuWithIcons);
-			const auto showSettings = [=] {
-				window->showSettings(
-					Settings::Calls::Id(),
-					Window::SectionShow(anim::type::instant));
-			};
-			const auto clearAll = crl::guard(box, [=] {
-				box->uiShow()->showBox(Box(Calls::ClearCallsBox, window));
-			});
-			state->menu->addAction(
-				tr::lng_settings_section_call_settings(tr::now),
-				showSettings,
-				&st::menuIconSettings);
-			if (state->callsDelegate.peerListFullRowsCount() > 0) {
-				Ui::Menu::CreateAddActionCallback(state->menu)({
-					.text = tr::lng_call_box_clear_all(tr::now),
-					.handler = clearAll,
-					.icon = &st::menuIconDeleteAttention,
-					.isAttention = true,
-				});
-			}
-			state->menu->popup(QCursor::pos());
-			return true;
-		});
-	}));
-}
-
 [[nodiscard]] rpl::producer<TextWithEntities> SetStatusLabel(
 		not_null<Main::Session*> session) {
 	const auto self = session->user();
@@ -185,7 +109,7 @@ void ShowCallsBox(not_null<Window::SessionController*> window) {
 		return !!self->emojiStatusId();
 	}) | rpl::distinct_until_changed() | rpl::map([](bool has) {
 		const auto makeLink = [](const QString &text) {
-			return Ui::Text::Link(text);
+			return tr::link(text);
 		};
 		return (has
 			? tr::lng_menu_change_status
@@ -241,7 +165,7 @@ MainMenu::ToggleAccountsButton::ToggleAccountsButton(
 , _current(current) {
 	rpl::single(rpl::empty) | rpl::then(
 		Core::App().unreadBadgeChanges()
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_unreadBadgeStale = true;
 		if (!_toggled) {
 			validateUnreadBadge();
@@ -257,7 +181,7 @@ MainMenu::ToggleAccountsButton::ToggleAccountsButton(
 	settings.mainMenuAccountsShownValue(
 	) | rpl::filter([=](bool value) {
 		return (_toggled != value);
-	}) | rpl::start_with_next([=](bool value) {
+	}) | rpl::on_next([=](bool value) {
 		_toggled = value;
 		_toggledAnimation.start(
 			[=] { update(); },
@@ -429,7 +353,7 @@ MainMenu::MainMenu(
 
 	const auto shadow = Ui::CreateChild<Ui::PlainShadow>(this);
 	widthValue(
-	) | rpl::start_with_next([=](int width) {
+	) | rpl::on_next([=](int width) {
 		const auto line = st::lineWidth;
 		shadow->setGeometry(0, st::mainMenuCoverHeight - line, width, line);
 	}, shadow->lifetime());
@@ -445,7 +369,7 @@ MainMenu::MainMenu(
 	});
 
 	_footer->heightValue(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_telegram->moveToLeft(st::mainMenuFooterLeft, _footer->height() - st::mainMenuTelegramBottom - _telegram->height());
 		_version->moveToLeft(st::mainMenuFooterLeft, _footer->height() - st::mainMenuVersionBottom - _version->height());
 	}, _footer->lifetime());
@@ -453,18 +377,18 @@ MainMenu::MainMenu(
 	rpl::combine(
 		heightValue(),
 		_inner->heightValue()
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		updateInnerControlsGeometry();
 	}, _inner->lifetime());
 
 	parentResized();
 
-	_telegram->setMarkedText(Ui::Text::Link(
+	_telegram->setMarkedText(tr::link(
 		u"Telegram Desktop"_q,
 		u"https://desktop.telegram.org"_q));
 	_telegram->setLinksTrusted();
 	_version->setMarkedText(
-		Ui::Text::Link(
+		tr::link(
 			tr::lng_settings_current_version(
 				tr::now,
 				lt_version,
@@ -473,20 +397,20 @@ MainMenu::MainMenu(
 		.append(QChar(' '))
 		.append(QChar(8211))
 		.append(QChar(' '))
-		.append(Ui::Text::Link(tr::lng_menu_about(tr::now), 2))); // Link 2.
+		.append(tr::link(tr::lng_menu_about(tr::now), 2))); // Link 2.
 	_version->setLink(
 		1,
 		std::make_shared<UrlClickHandler>(Core::App().changelogLink()));
 	_version->setLink(
 		2,
 		std::make_shared<LambdaClickHandler>([=] {
-			controller->show(Box<AboutBox>());
+			controller->show(Box(AboutBox));
 		}));
 
 	rpl::combine(
 		_toggleAccounts->rightSkipValue(),
 		rpl::single(rpl::empty) | rpl::then(_badge->updated())
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		moveBadge();
 	}, lifetime());
 	_badge->setPremiumClickCallback([=] {
@@ -494,7 +418,7 @@ MainMenu::MainMenu(
 	});
 
 	_controller->session().downloaderTaskFinished(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		update();
 	}, lifetime());
 
@@ -508,18 +432,18 @@ MainMenu::MainMenu(
 				[=](const QRect &r) { snowRaw->update(r); });
 			snow->setBrush(QColor(230, 230, 230));
 			_showFinished.value(
-			) | rpl::start_with_next([=](bool shown) {
+			) | rpl::on_next([=](bool shown) {
 				snow->setPaused(!shown);
 			}, snowRaw->lifetime());
 			snowRaw->paintRequest(
-			) | rpl::start_with_next([=](const QRect &r) {
+			) | rpl::on_next([=](const QRect &r) {
 				auto p = Painter(snowRaw);
 				p.fillRect(r, st::mainMenuBg);
 				drawName(p);
 				snow->paint(p, snowRaw->rect());
 			}, snowRaw->lifetime());
 			widthValue(
-			) | rpl::start_with_next([=](int width) {
+			) | rpl::on_next([=](int width) {
 				snowRaw->setGeometry(0, 0, width, st::mainMenuCoverHeight);
 			}, snowRaw->lifetime());
 			snowRaw->show();
@@ -528,7 +452,7 @@ MainMenu::MainMenu(
 			snowLifetime->add([=] { base::unique_qptr{ snowRaw }; });
 		};
 		Window::Theme::IsNightModeValue(
-		) | rpl::start_with_next([=](bool isNightMode) {
+		) | rpl::on_next([=](bool isNightMode) {
 			snowLifetime->destroy();
 			if (isNightMode) {
 				rebuild();
@@ -600,7 +524,7 @@ void MainMenu::setupArchive() {
 		{ 0, st::mainMenuSkip, 0, st::mainMenuSkip });
 	button->setAcceptBoth(true);
 	button->clicks(
-	) | rpl::start_with_next([=](Qt::MouseButton which) {
+	) | rpl::on_next([=](Qt::MouseButton which) {
 		if (which == Qt::LeftButton) {
 			showArchive(button->clickModifiers());
 			return;
@@ -622,7 +546,7 @@ void MainMenu::setupArchive() {
 
 	const auto now = folder();
 	auto folderValue = now
-		? (rpl::single(now) | rpl::type_erased())
+		? (rpl::single(now) | rpl::type_erased)
 		: controller->session().data().chatsListChanges(
 		) | rpl::filter([](Data::Folder *folder) {
 			return folder && (folder->id() == Data::Folder::kId);
@@ -649,7 +573,7 @@ void MainMenu::setupArchive() {
 		controller->session().data().stories().sourcesChanged(
 			Data::StorySourcesList::Hidden
 		)
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		const auto isArchiveVisible = checkArchive();
 		wrap->toggle(isArchiveVisible, anim::type::normal);
 		if (!isArchiveVisible) {
@@ -680,7 +604,7 @@ void MainMenu::setupAccounts() {
 
 	std::move(
 		events.closeRequests
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		closeLayer();
 	}, inner->lifetime());
 
@@ -712,6 +636,14 @@ void MainMenu::parentResized() {
 
 void MainMenu::showFinished() {
 	_showFinished = true;
+
+	_controller->checkHighlightControl(
+		u"main-menu/emoji-status"_q,
+		_setEmojiStatus,
+		Settings::SubsectionTitleHighlight());
+	_controller->checkHighlightControl(
+		u"main-menu/night-mode"_q,
+		_nightThemeToggle);
 }
 
 void MainMenu::setupMenu() {
@@ -773,7 +705,7 @@ void MainMenu::setupMenu() {
 			tr::lng_menu_calls(),
 			{ &st::menuIconPhone }
 		)->setClickedCallback([=] {
-			ShowCallsBox(controller);
+			::Calls::ShowCallsBox(controller);
 		});
 		addAction(
 			tr::lng_saved_messages(),
@@ -794,7 +726,7 @@ void MainMenu::setupMenu() {
 		)->toggleOn(rpl::single(
 			_controller->session().settings().supportFixChatsOrder()
 		))->toggledChanges(
-		) | rpl::start_with_next([=](bool fix) {
+		) | rpl::on_next([=](bool fix) {
 			_controller->session().settings().setSupportFixChatsOrder(fix);
 			_controller->session().saveSettings();
 		}, _menu->lifetime());
@@ -821,14 +753,14 @@ void MainMenu::setupMenu() {
 	_nightThemeToggle->toggledChanges(
 	) | rpl::filter([=](bool night) {
 		return (night != Window::Theme::IsNightMode());
-	}) | rpl::start_with_next([=](bool night) {
+	}) | rpl::on_next([=](bool night) {
 		if (Window::Theme::Background()->editingTheme()) {
 			_nightThemeSwitches.fire(!night);
 			controller->show(Ui::MakeInformBox(
 				tr::lng_theme_editor_cant_change_theme()));
 			return;
 		}
-		const auto weak = MakeWeak(this);
+		const auto weak = base::make_weak(this);
 		const auto toggle = [=] {
 			if (!weak) {
 				Window::Theme::ToggleNightMode();
@@ -843,7 +775,7 @@ void MainMenu::setupMenu() {
 	}, _nightThemeToggle->lifetime());
 
 	Core::App().settings().systemDarkModeValue(
-	) | rpl::start_with_next([=](std::optional<bool> darkMode) {
+	) | rpl::on_next([=](std::optional<bool> darkMode) {
 		const auto darkModeEnabled
 			= Core::App().settings().systemDarkModeEnabled();
 		if (darkModeEnabled && darkMode.has_value()) {
@@ -968,7 +900,7 @@ void MainMenu::initResetScaleButton() {
 		return (available.width() >= st::windowMinWidth)
 			&& (available.height() >= st::windowMinHeight);
 	}) | rpl::distinct_until_changed(
-	) | rpl::start_with_next([=](bool good) {
+	) | rpl::on_next([=](bool good) {
 		if (good) {
 			_resetScaleButton.destroy();
 		} else {
@@ -995,8 +927,8 @@ OthersUnreadState OtherAccountsUnreadStateCurrent(
 		} else if (account->isHiddenMode()) {
 			continue;
 		} else if (const auto session = account->maybeSession()) {
-			counter += session->data().unreadBadge();
-			if (!session->data().unreadBadgeMuted()) {
+			counter += session->data().unreadWithMentionsBadge();
+			if (!session->data().unreadWithMentionsBadgeMuted()) {
 				allMuted = false;
 			}
 		}
@@ -1020,7 +952,7 @@ base::EventFilterResult MainMenu::redirectToInnerChecked(not_null<QEvent*> e) {
 	if (_insideEventRedirect) {
 		return base::EventFilterResult::Continue;
 	}
-	const auto weak = Ui::MakeWeak(this);
+	const auto weak = base::make_weak(this);
 	_insideEventRedirect = true;
 	QGuiApplication::sendEvent(_inner, e);
 	if (weak) {
@@ -1076,6 +1008,9 @@ void MainMenu::setupSwipe() {
 
 	auto init = [=](int, Qt::LayoutDirection direction) {
 		if (direction != Qt::LeftToRight) {
+			return Ui::Controls::SwipeHandlerFinishData();
+		}
+		if (_emojiStatusPanel && _emojiStatusPanel->hasFocus()) {
 			return Ui::Controls::SwipeHandlerFinishData();
 		}
 		return Ui::Controls::DefaultSwipeBackHandlerFinishData([=] {

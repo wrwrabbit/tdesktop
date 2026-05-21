@@ -43,7 +43,7 @@ ChatsFiltersTabs::ChatsFiltersTabs(
 		_cachedBadgeHeight = one.height();
 	}
 	style::PaletteChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		for (auto &[index, unread] : _unreadCounts) {
 			unread.cache = cacheUnreadCount(unread.count, unread.muted);
 		}
@@ -101,14 +101,16 @@ void ChatsFiltersTabs::setUnreadCount(int index, int unreadCount, bool mute) {
 					int(std::numeric_limits<ushort>::max()))),
 				.muted = mute,
 			});
+			update();
 		}
-	} else {
-		if (unreadCount) {
-			it->second.count = unreadCount;
-			it->second.cache = cacheUnreadCount(unreadCount, mute);
-		} else {
-			_unreadCounts.erase(it);
-		}
+	} else if (!unreadCount) {
+		_unreadCounts.erase(it);
+		update();
+	} else if (it->second.count != unreadCount || it->second.muted != mute) {
+		it->second.count = unreadCount;
+		it->second.muted = mute;
+		it->second.cache = cacheUnreadCount(unreadCount, mute);
+		update();
 	}
 	if (unreadCount) {
 		const auto widthIndex = (unreadCount < 10)
@@ -150,7 +152,7 @@ void ChatsFiltersTabs::setLockedFrom(int index) {
 		return;
 	}
 	_paletteLifetime = style::PaletteChanged(
-	) | rpl::start_with_next([this] {
+	) | rpl::on_next([this] {
 		_lockCache.emplace(Ui::SideBarLockIcon(_st.labelFg));
 	});
 }
@@ -378,7 +380,7 @@ void ChatsFiltersTabs::setHorizontalShift(int index, int shift) {
 	Expects(index >= 0 && index < _sections.size());
 
 	auto &section = _sections[index];
-	if (const auto delta = shift - section.horizontalShift) {
+	if (shift - section.horizontalShift) {
 		section.horizontalShift = shift;
 		update();
 	}

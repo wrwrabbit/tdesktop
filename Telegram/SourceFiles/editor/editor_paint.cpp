@@ -8,19 +8,23 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/editor_paint.h"
 
 #include "core/mime_type.h"
-#include "ui/boxes/confirm_box.h"
 #include "editor/controllers/controllers.h"
-#include "editor/scene/scene.h"
 #include "editor/scene/scene_item_canvas.h"
 #include "editor/scene/scene_item_image.h"
 #include "editor/scene/scene_item_sticker.h"
+#include "editor/scene/scene_item_text.h"
+#include "editor/scene/scene.h"
 #include "lang/lang_keys.h"
 #include "lottie/lottie_single_player.h"
 #include "storage/storage_media_prepare.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/chat/attach/attach_prepare.h"
+#include "ui/rect.h"
 #include "ui/ui_utility.h"
 
 #include <QGraphicsView>
+#include <QScrollBar>
+#include <QWheelEvent>
 #include <QtCore/QMimeData>
 
 namespace Editor {
@@ -28,6 +32,13 @@ namespace {
 
 constexpr auto kMaxBrush = 25.;
 constexpr auto kMinBrush = 1.;
+constexpr auto kMinCanvasZoom = 1.;
+constexpr auto kMaxCanvasZoom = 8.;
+constexpr auto kCanvasZoomStep = 1.15;
+constexpr auto kZoomEpsilon = 0.0001;
+constexpr auto kMinItemZoom = 0.1;
+constexpr auto kMaxItemZoom = 10.;
+constexpr auto kCanvasZoomStepFine = 1.015;
 
 std::shared_ptr<Scene> EnsureScene(
 		PhotoModifications &mods,
@@ -46,13 +57,30 @@ Paint::Paint(
 	not_null<Ui::RpWidget*> parent,
 	PhotoModifications &modifications,
 	const QSize &imageSize,
-	std::shared_ptr<Controllers> controllers)
+	std::shared_ptr<Controllers> controllers,
+	Fn<QImage(QRect)> blurSource,
+	bool fixedCrop)
 : RpWidget(parent)
 , _controllers(controllers)
 , _scene(EnsureScene(modifications, imageSize))
 , _view(base::make_unique_q<QGraphicsView>(_scene.get(), this))
-, _imageSize(imageSize) {
+, _viewport(_view->viewport())
+, _imageSize(imageSize)
+, _fixedCrop(fixedCrop) {
 	Expects(modifications.paint != nullptr);
+
+	_scene->setBlurSource(std::move(blurSource));
+
+	{
+		constexpr auto kDefaultFontSizeDivisor = 15.;
+		const auto shortSide = std::min(
+			imageSize.width(),
+			imageSize.height());
+		_scene->setTextDefaults(
+			QColor(255, 255, 255),
+			shortSide / kDefaultFontSizeDivisor,
+			int(TextStyle::Plain));
+	}
 
 	keepResult();
 
@@ -60,11 +88,23 @@ Paint::Paint(
 	_view->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 	_view->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 	_view->setFrameStyle(int(QFrame::NoFrame) | QFrame::Plain);
-	_view->viewport()->setAutoFillBackground(false);
+	_view->setBackgroundBrush(Qt::transparent);
+	_view->setAttribute(Qt::WA_TranslucentBackground, true);
+	_viewport->setAutoFillBackground(false);
+	_viewport->setAttribute(Qt::WA_TranslucentBackground, true);
+	_viewport->installEventFilter(this);
+
+	_scene->textEditStates(
+	) | rpl::on_next([=](bool editing) {
+		_textEditing = editing;
+	}, lifetime());
 
 	// Undo / Redo.
 	controllers->undoController->performRequestChanges(
-	) | rpl::start_with_next([=](const Undo &command) {
+	) | rpl::on_next([=](const Undo &command) {
+		if (_textEditing.current()) {
+			return;
+		}
 		if (command == Undo::Undo) {
 			_scene->performUndo();
 		} else {
@@ -76,16 +116,22 @@ Paint::Paint(
 	}, lifetime());
 
 	controllers->undoController->setCanPerformChanges(rpl::merge(
-		_hasUndo.value() | rpl::map([](bool enable) {
+		rpl::combine(
+			_hasUndo.value(),
+			_textEditing.value()
+		) | rpl::map([](bool enable, bool editing) {
 			return UndoController::EnableRequest{
 				.command = Undo::Undo,
-				.enable = enable,
+				.enable = enable && !editing,
 			};
 		}),
-		_hasRedo.value() | rpl::map([](bool enable) {
+		rpl::combine(
+			_hasRedo.value(),
+			_textEditing.value()
+		) | rpl::map([](bool enable, bool editing) {
 			return UndoController::EnableRequest{
 				.command = Undo::Redo,
-				.enable = enable,
+				.enable = enable && !editing,
 			};
 		})));
 
@@ -97,7 +143,7 @@ Paint::Paint(
 			) | rpl::map_to(ShowRequest::HideAnimated));
 
 		controllers->stickersPanelController->stickerChosen(
-		) | rpl::start_with_next([=](not_null<DocumentData*> document) {
+		) | rpl::on_next([=](not_null<DocumentData*> document) {
 			const auto item = std::make_shared<ItemSticker>(
 				document,
 				itemBaseData());
@@ -110,25 +156,96 @@ Paint::Paint(
 		controllers->stickersPanelController
 			? controllers->stickersPanelController->stickerChosen(
 				) | rpl::to_empty
-			: rpl::never<>() | rpl::type_erased(),
+			: rpl::never<>() | rpl::type_erased,
 		_scene->addsItem()
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		clearRedoList();
 		updateUndoState();
 	}, lifetime());
 
 	_scene->removesItem(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		updateUndoState();
 	}, lifetime());
 
+}
+
+bool Paint::zoomSceneItems(float64 wheelDelta, bool fine) {
+	if (!wheelDelta) {
+		return false;
+	}
+	const auto step = wheelDelta
+		/ float64(QWheelEvent::DefaultDeltasPerStep);
+	const auto base = fine ? kCanvasZoomStepFine : kCanvasZoomStep;
+	const auto factor = std::pow(base, step);
+	const auto center = rect::center(_scene->sceneRect());
+	auto applied = false;
+	for (const auto &item : _scene->items()) {
+		const auto raw = item.get();
+		const auto oldScale = raw->scale();
+		const auto newScale = std::clamp(
+			oldScale * factor,
+			kMinItemZoom,
+			kMaxItemZoom);
+		if (std::abs(newScale - oldScale) < kZoomEpsilon) {
+			continue;
+		}
+		const auto ratio = newScale / oldScale;
+		raw->setScale(newScale);
+		const auto pos = raw->pos();
+		raw->setPos(center + (pos - center) * ratio);
+		applied = true;
+	}
+	return applied;
+}
+
+void Paint::panSceneItems(QPointF sceneDelta) {
+	if (sceneDelta.isNull()) {
+		return;
+	}
+	for (const auto &item : _scene->items()) {
+		item->setPos(item->pos() + sceneDelta);
+	}
+}
+
+QPointF Paint::mapWidgetDeltaToScene(QPoint delta) const {
+	if (!_view) {
+		return QPointF(delta);
+	}
+	return _view->mapToScene(delta) - _view->mapToScene(QPoint());
+}
+
+Paint::~Paint() {
+	_scene->cancelTextEditing();
+	if (_viewport) {
+		_viewport->removeEventFilter(this);
+	}
+}
+
+void Paint::updateViewGeometry() {
+	if (_imageGeometry.isEmpty()) {
+		return;
+	}
+	const auto target = (_transform.userZoom - kMinCanvasZoom) > kZoomEpsilon
+		? _outerGeometry
+		: _imageGeometry;
+	if (geometry() != target) {
+		setGeometry(target);
+	}
+	_view->setGeometry(rect());
 }
 
 void Paint::applyTransform(QRect geometry, int angle, bool flipped) {
 	if (geometry.isEmpty()) {
 		return;
 	}
-	setGeometry(geometry);
+	_imageGeometry = geometry;
+	_outerGeometry = parentWidget() ? parentWidget()->rect() : geometry;
+
+	const auto center = (_transform.fitZoom <= 0.)
+		|| _view->viewport()->rect().isEmpty()
+		? rect::center(_scene->sceneRect())
+		: _view->mapToScene(_view->viewport()->rect().center());
 	const auto size = geometry.size();
 
 	const auto rotatedImageSize = QTransform()
@@ -139,15 +256,22 @@ void Paint::applyTransform(QRect geometry, int angle, bool flipped) {
 		* (flipped ? -1 : 1);
 	const auto ratioH = size.height() / float64(rotatedImageSize.height());
 
-	_view->setTransform(QTransform().scale(ratioW, ratioH).rotate(angle));
-	_view->setGeometry(QRect(QPoint(), size));
+	_view->setGeometry(rect());
 
 	_transform = {
 		.angle = angle,
 		.flipped = flipped,
-		.zoom = size.width() / float64(_scene->sceneRect().width()),
+		.fitZoom = ((std::abs(ratioW) + std::abs(ratioH)) / 2.),
+		.ratioW = ratioW,
+		.ratioH = ratioH,
+		.userZoom = _transform.userZoom,
 	};
-	_scene->updateZoom(_transform.zoom);
+	updateViewGeometry();
+	applyViewTransform();
+	_view->centerOn(center);
+	if (const auto parent = parentWidget()) {
+		parent->update();
+	}
 }
 
 std::shared_ptr<Scene> Paint::saveScene() const {
@@ -183,7 +307,40 @@ void Paint::updateUndoState() {
 void Paint::applyBrush(const Brush &brush) {
 	_scene->applyBrush(
 		brush.color,
-		(kMinBrush + float64(kMaxBrush - kMinBrush) * brush.sizeRatio));
+		(kMinBrush + float64(kMaxBrush - kMinBrush) * brush.sizeRatio),
+		brush.tool);
+}
+
+void Paint::createTextItem() {
+	_scene->createTextAtCenter(-_transform.angle);
+}
+
+void Paint::clearSelection() {
+	_scene->clearSelection();
+}
+
+void Paint::setTextColor(const QColor &color) {
+	_scene->setTextColor(color);
+}
+
+void Paint::setSelectedTextColor(const QColor &color) {
+	_scene->setSelectedTextColor(color);
+}
+
+rpl::producer<QColor> Paint::textColorRequests() const {
+	return _scene->textColorRequests();
+}
+
+rpl::producer<QColor> Paint::textItemSelections() const {
+	return _scene->textItemSelections();
+}
+
+rpl::producer<> Paint::textItemDeselections() const {
+	return _scene->textItemDeselections();
+}
+
+rpl::producer<bool> Paint::textEditStates() const {
+	return _scene->textEditStates();
 }
 
 void Paint::handleMimeData(const QMimeData *data) {
@@ -220,6 +377,31 @@ void Paint::handleMimeData(const QMimeData *data) {
 	}
 }
 
+void Paint::paintImage(QPainter &p, const QPixmap &image) const {
+	if (_view->geometry().isEmpty()) {
+		return;
+	}
+	p.save();
+	p.setClipRect(geometry(), Qt::IntersectClip);
+	p.translate(pos());
+	p.setTransform(_view->viewportTransform(), true);
+	p.drawPixmap(Rect(_imageSize), image);
+	p.restore();
+}
+
+void Paint::resetView() {
+	if (_transform.userZoom == kMinCanvasZoom) {
+		return;
+	}
+	_transform.userZoom = kMinCanvasZoom;
+	updateViewGeometry();
+	applyViewTransform();
+	_view->centerOn(rect::center(_scene->sceneRect()));
+	if (const auto parent = parentWidget()) {
+		parent->update(geometry());
+	}
+}
+
 ItemBase::Data Paint::itemBaseData() const {
 	const auto s = _scene->sceneRect().toRect().size();
 	const auto size = std::min(s.width(), s.height()) / 2;
@@ -235,6 +417,108 @@ ItemBase::Data Paint::itemBaseData() const {
 		.rotation = -_transform.angle,
 		.imageSize = _imageSize,
 	};
+}
+
+void Paint::applyViewTransform() {
+	_view->setTransform(QTransform()
+		.scale(
+			_transform.ratioW * _transform.userZoom,
+			_transform.ratioH * _transform.userZoom)
+		.rotate(_transform.angle));
+	_transform.zoom = _transform.fitZoom * _transform.userZoom;
+	_scene->updateZoom(_transform.zoom);
+}
+
+bool Paint::eventFilter(QObject *obj, QEvent *e) {
+	if (obj != _viewport) {
+		return RpWidget::eventFilter(obj, e);
+	}
+	const auto view = _view.get();
+	if (!view || !_viewport) {
+		return true;
+	}
+	if (e->type() == QEvent::Wheel) {
+		const auto wheel = static_cast<QWheelEvent*>(e);
+		const auto raw = wheel->angleDelta();
+		const auto delta = raw.y() ? raw.y() : raw.x();
+		if (!delta) {
+			return true;
+		}
+
+		if (_fixedCrop) {
+			zoomSceneItems(
+				delta,
+				wheel->modifiers().testFlag(Qt::ShiftModifier));
+			return true;
+		}
+		const auto step = delta / float64(QWheelEvent::DefaultDeltasPerStep);
+		const auto factor = std::pow(kCanvasZoomStep, step);
+		const auto newZoom = std::clamp(
+			_transform.userZoom * factor,
+			kMinCanvasZoom,
+			kMaxCanvasZoom);
+		if (std::abs(newZoom - _transform.userZoom) < 0.0001) {
+			return true;
+		}
+
+		const auto viewportPoint = wheel->position().toPoint();
+		const auto globalPoint = _viewport->mapToGlobal(viewportPoint);
+		const auto scenePoint = view->mapToScene(viewportPoint);
+		_transform.userZoom = newZoom;
+		updateViewGeometry();
+		applyViewTransform();
+		const auto scenePointAfter = view->mapToScene(
+			_viewport->mapFromGlobal(globalPoint));
+		const auto center = view->mapToScene(rect::center(_viewport->rect()));
+		view->centerOn(center - (scenePointAfter - scenePoint));
+		if (const auto parent = parentWidget()) {
+			parent->update(geometry());
+		}
+		return true;
+	} else if (e->type() == QEvent::MouseButtonPress) {
+		const auto mouse = static_cast<QMouseEvent*>(e);
+		if (mouse->button() == Qt::MiddleButton) {
+			_pan = {
+				.active = (_fixedCrop
+					|| _transform.userZoom > kMinCanvasZoom),
+				.point = mouse->pos(),
+			};
+			if (_pan.active) {
+				_viewport->setCursor(Qt::ClosedHandCursor);
+			}
+			return true;
+		}
+	} else if (e->type() == QEvent::MouseMove) {
+		const auto mouse = static_cast<QMouseEvent*>(e);
+		if (_pan.active) {
+			const auto point = mouse->pos();
+			const auto delta = point - _pan.point;
+			_pan.point = point;
+
+			if (_fixedCrop) {
+				panSceneItems(mapWidgetDeltaToScene(delta));
+			} else if (_transform.userZoom > kMinCanvasZoom) {
+				view->horizontalScrollBar()->setValue(
+					view->horizontalScrollBar()->value() - delta.x());
+				view->verticalScrollBar()->setValue(
+					view->verticalScrollBar()->value() - delta.y());
+				if (const auto parent = parentWidget()) {
+					parent->update(geometry());
+				}
+			}
+			return true;
+		}
+	} else if (e->type() == QEvent::MouseButtonRelease) {
+		const auto mouse = static_cast<QMouseEvent*>(e);
+		if (mouse->button() == Qt::MiddleButton) {
+			if (_pan.active) {
+				_viewport->unsetCursor();
+			}
+			_pan.active = false;
+			return true;
+		}
+	}
+	return RpWidget::eventFilter(obj, e);
 }
 
 } // namespace Editor

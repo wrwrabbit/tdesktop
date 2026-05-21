@@ -20,6 +20,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/win/windows_dlls.h"
 #include "platform/win/specific_win.h"
 #include "data/data_forum_topic.h"
+#include "data/data_saved_sublist.h"
+#include "data/data_peer.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "core/application.h"
@@ -415,6 +417,10 @@ bool ByDefault() {
 	return false;
 }
 
+bool VolumeSupported() {
+	return true;
+}
+
 void Create(Window::Notifications::System *system) {
 	system->setManager([=] {
 		auto result = std::make_unique<Manager>(system);
@@ -433,6 +439,7 @@ public:
 	void clearAll();
 	void clearFromItem(not_null<HistoryItem*> item);
 	void clearFromTopic(not_null<Data::ForumTopic*> topic);
+	void clearFromSublist(not_null<Data::SavedSublist*> sublist);
 	void clearFromHistory(not_null<History*> history);
 	void clearFromSession(not_null<Main::Session*> session);
 	void beforeNotificationActivated(NotificationId id);
@@ -468,7 +475,7 @@ private:
 Manager::Private::Private(Manager *instance)
 : _guarded(std::make_shared<Manager*>(instance)) {
 	ToastActivations(
-	) | rpl::start_with_next([=](const ToastActivation &activation) {
+	) | rpl::on_next([=](const ToastActivation &activation) {
 		handleActivation(activation);
 	}, _lifetime);
 }
@@ -508,6 +515,7 @@ void Manager::Private::clearFromItem(not_null<HistoryItem*> item) {
 		.sessionId = item->history()->session().uniqueId(),
 		.peerId = item->history()->peer->id,
 		.topicRootId = item->topicRootId(),
+		.monoforumPeerId = item->sublistPeerId(),
 	});
 	if (i == _notifications.cend()) {
 		return;
@@ -533,6 +541,27 @@ void Manager::Private::clearFromTopic(not_null<Data::ForumTopic*> topic) {
 		.sessionId = topic->session().uniqueId(),
 		.peerId = topic->history()->peer->id,
 		.topicRootId = topic->rootId(),
+	});
+	if (i != _notifications.cend()) {
+		const auto temp = base::take(i->second);
+		_notifications.erase(i);
+
+		for (const auto &[msgId, notification] : temp) {
+			tryHide(notification);
+		}
+	}
+}
+
+void Manager::Private::clearFromSublist(
+		not_null<Data::SavedSublist*> sublist) {
+	if (!_notifier) {
+		return;
+	}
+
+	const auto i = _notifications.find(ContextId{
+		.sessionId = sublist->session().uniqueId(),
+		.peerId = sublist->owningHistory()->peer->id,
+		.monoforumPeerId = sublist->sublistPeer()->id,
 	});
 	if (i != _notifications.cend()) {
 		const auto temp = base::take(i->second);
@@ -626,7 +655,9 @@ void Manager::Private::handleActivation(const ToastActivation &activation) {
 		.contextId = ContextId{
 			.sessionId = parsed.value("session").toULongLong(),
 			.peerId = PeerId(parsed.value("peer").toULongLong()),
-			.topicRootId = MsgId(parsed.value("topic").toLongLong())
+			.topicRootId = MsgId(parsed.value("topic").toLongLong()),
+			.monoforumPeerId = PeerId(
+					parsed.value("monoforumpeer").toULongLong()),
 		},
 		.msgId = MsgId(parsed.value("msg").toLongLong()),
 	};
@@ -656,7 +687,9 @@ void Manager::Private::handleActivation(const ToastActivation &activation) {
 	} else if (action == "mark") {
 		manager->notificationReplied(id, TextWithTags());
 	} else {
-		manager->notificationActivated(id, text);
+		manager->notificationActivated(id, {
+			.draft = std::move(text),
+		});
 	}
 }
 
@@ -692,16 +725,18 @@ bool Manager::Private::showNotificationInTryCatch(
 		.sessionId = peer->session().uniqueId(),
 		.peerId = peer->id,
 		.topicRootId = info.topicRootId,
+		.monoforumPeerId = info.monoforumPeerId,
 	};
 	const auto notificationId = NotificationId{
 		.contextId = key,
 		.msgId = info.itemId,
 	};
-	const auto idString = u"pid=%1&session=%2&peer=%3&topic=%4&msg=%5"_q
+	const auto idString = u"pid=%1&session=%2&peer=%3&topic=%4&monoforumpeer=%5&msg=%6"_q
 		.arg(GetCurrentProcessId())
 		.arg(key.sessionId)
 		.arg(key.peerId.value)
 		.arg(info.topicRootId.bare)
+		.arg(info.monoforumPeerId.value)
 		.arg(info.itemId.bare);
 
 	const auto modern = Platform::IsWindows10OrGreater();
@@ -893,6 +928,10 @@ void Manager::doClearFromItem(not_null<HistoryItem*> item) {
 
 void Manager::doClearFromTopic(not_null<Data::ForumTopic*> topic) {
 	_private->clearFromTopic(topic);
+}
+
+void Manager::doClearFromSublist(not_null<Data::SavedSublist*> sublist) {
+	_private->clearFromSublist(sublist);
 }
 
 void Manager::doClearFromHistory(not_null<History*> history) {

@@ -95,7 +95,7 @@ GroupCallUserpics::GroupCallUserpics(
 	_maxWidth = 2 * single + (limit - 1) * (single - shift);
 
 	style::PaletteChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		for (auto &userpic : _list) {
 			userpic.cache = QImage();
 		}
@@ -120,7 +120,7 @@ GroupCallUserpics::GroupCallUserpics(
 	rpl::combine(
 		PowerSaving::OnValue(PowerSaving::kCalls),
 		std::move(hideBlobs)
-	) | rpl::start_with_next([=](bool disabled, bool deactivated) {
+	) | rpl::on_next([=](bool disabled, bool deactivated) {
 		const auto hide = disabled || deactivated;
 
 		if (!(hide && _speakingAnimationHideLastTime)) {
@@ -241,7 +241,7 @@ void GroupCallUserpics::sendRandomLevels() {
 	for (auto &userpic : _list) {
 		if (const auto blobs = userpic.blobsAnimation.get()) {
 			const auto value = 30 + base::RandomIndex(70);
-			userpic.blobsAnimation->blobs.setLevel(float64(value) / 100.);
+			blobs->blobs.setLevel(float64(value) / 100.);
 		}
 	}
 }

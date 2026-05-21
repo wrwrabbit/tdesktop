@@ -418,7 +418,7 @@ void WebLoadManager::failed(
 }
 
 void WebLoadManager::failed(int id, not_null<QNetworkReply*> reply) {
-	if (const auto sent = findSent(id, reply)) {
+	if ([[maybe_unused]] const auto sent = findSent(id, reply)) {
 		removeSent(id);
 		queueFailedUpdate(id);
 	}
@@ -552,7 +552,7 @@ void webFileLoader::startLoading() {
 		_manager = GetManager();
 		_manager->updates(
 			this
-		) | rpl::start_with_next([=](const Update &data) {
+		) | rpl::on_next([=](const Update &data) {
 			if (const auto progress = std::get_if<Progress>(&data)) {
 				loadProgress(
 					progress->ready,

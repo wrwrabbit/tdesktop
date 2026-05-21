@@ -15,7 +15,7 @@ jobs:
     
     steps:
       - name: Trigger sync
-        uses: actions/github-script@v5
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.PAT_TRIGGER  }}
           script: |

@@ -25,19 +25,19 @@
 #include "styles/style_passport.h"
 #include "styles/style_boxes.h"
 #include "fakepasscode/log/fake_log.h"
-#include "fakepasscodes_list.h"
-
 FakePasscodeBox::FakePasscodeBox(
         QWidget*,
         not_null<Window::SessionController*> controller,
         bool turningOff,
         bool turningOn,
-        size_t fakeIndex)
+        size_t fakeIndex,
+        Fn<void(size_t)> onCreate)
         : _session(&controller->session())
         , _controller(controller)
         , _turningOff(turningOff)
         , _turningOn(turningOn)
         , _fakeIndex(fakeIndex)
+        , _onCreate(std::move(onCreate))
         , _about(st::boxWidth - st::boxPadding.left() * 1.5)
         , _oldPasscode(this, st::defaultInputField, tr::lng_passcode_enter_old())
         , _newPasscode(
@@ -100,18 +100,18 @@ void FakePasscodeBox::prepare() {
     connect(_reenterPasscode, &Ui::MaskedInputField::changed, [=] { newChanged(); });
 
     _passwordName->changes(
-    ) | rpl::start_with_next([=] { newChanged(); }, _passwordName->lifetime());
+    ) | rpl::on_next([=] { newChanged(); }, _passwordName->lifetime());
     _passwordHint->changes(
-    ) | rpl::start_with_next([=] { newChanged(); }, _passwordHint->lifetime());
+    ) | rpl::on_next([=] { newChanged(); }, _passwordHint->lifetime());
 
     const auto fieldSubmit = [=] { submit(); };
     connect(_oldPasscode, &Ui::MaskedInputField::submitted, fieldSubmit);
     connect(_newPasscode, &Ui::MaskedInputField::submitted, fieldSubmit);
     connect(_reenterPasscode, &Ui::MaskedInputField::submitted, fieldSubmit);
     _passwordName->submits(
-    ) | rpl::start_with_next(fieldSubmit, _passwordName->lifetime());
+    ) | rpl::on_next(fieldSubmit, _passwordName->lifetime());
     _passwordHint->submits(
-    ) | rpl::start_with_next(fieldSubmit, _passwordHint->lifetime());
+    ) | rpl::on_next(fieldSubmit, _passwordHint->lifetime());
 
     const auto has = currentlyHave();
     _oldPasscode->setVisible(onlyCheck || has);
@@ -253,12 +253,13 @@ void FakePasscodeBox::save(bool force) {
         update();
         return;
     } else {
-        const auto weak = Ui::MakeWeak(this);
+        const auto weak = base::make_weak(this);
         cSetPasscodeBadTries(0);
         if (_turningOn) {
             _fakeIndex = _session->domain().local().AddFakePasscode(pwd.toUtf8(), name);
-            _controller->show(Box<FakePasscodeContentBox>(&_session->domain(), _controller, _fakeIndex),
-                Ui::LayerOption::KeepOther);
+            if (_onCreate) {
+                _onCreate(_fakeIndex);
+            }
         } else {
             if (pwd.isEmpty()) {
                 _session->domain().local().SetFakePasscodeName(name, _fakeIndex);

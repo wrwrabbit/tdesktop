@@ -7,10 +7,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/media/info_media_provider.h"
 
+#include "apiwrap.h"
 #include "info/media/info_media_widget.h"
 #include "info/media/info_media_list_section.h"
 #include "info/info_controller.h"
 #include "layout/layout_selection.h"
+#include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "lang/lang_keys.h"
 #include "history/history.h"
@@ -23,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "data/data_peer_values.h"
 #include "data/data_document.h"
+#include "data/data_saved_sublist.h"
 #include "styles/style_info.h"
 #include "styles/style_overview.h"
 
@@ -40,19 +43,32 @@ Provider::Provider(not_null<AbstractController*> controller)
 , _peer(_controller->key().peer())
 , _topicRootId(_controller->key().topic()
 	? _controller->key().topic()->rootId()
-	: 0)
+	: MsgId())
+, _monoforumPeerId(_controller->key().sublist()
+	? _controller->key().sublist()->sublistPeer()->id
+	: PeerId())
 , _migrated(_controller->migrated())
 , _type(_controller->section().mediaType())
 , _slice(sliceKey(_universalAroundId)) {
 	_controller->session().data().itemRemoved(
-	) | rpl::start_with_next([this](auto item) {
+	) | rpl::on_next([this](auto item) {
 		itemRemoved(item);
 	}, _lifetime);
 
 	style::PaletteChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		for (auto &layout : _layouts) {
 			layout.second.item->invalidateCache();
+		}
+	}, _lifetime);
+
+	_controller->session().appConfig().ignoredRestrictionReasonsChanges(
+	) | rpl::on_next([=](std::vector<QString> &&changed) {
+		const auto sensitive = Data::UnavailableReason::Sensitive();
+		if (ranges::contains(changed, sensitive.reason)) {
+			for (auto &[id, layout] : _layouts) {
+				layout.item->maybeClearSensitiveSpoiler();
+			}
 		}
 	}, _lifetime);
 }
@@ -75,8 +91,13 @@ bool Provider::hasSelectRestriction() {
 }
 
 rpl::producer<bool> Provider::hasSelectRestrictionChanges() {
-	if (_peer->isUser()) {
-		return rpl::never<bool>();
+	if (const auto user = _peer->asUser()) {
+		return rpl::combine(
+			Data::PeerFlagValue(user, UserDataFlag::NoForwardsMyEnabled),
+			Data::PeerFlagValue(user, UserDataFlag::NoForwardsPeerEnabled)
+		) | rpl::map([=] {
+			return hasSelectRestriction();
+		}) | rpl::distinct_until_changed() | rpl::skip(1);
 	}
 	const auto chat = _peer->asChat();
 	const auto channel = _peer->asChannel();
@@ -85,7 +106,7 @@ rpl::producer<bool> Provider::hasSelectRestrictionChanges() {
 		: Data::PeerFlagValue(
 			channel,
 			ChannelDataFlag::NoForwards
-		) | rpl::type_erased();
+		) | rpl::type_erased;
 
 	auto rights = chat
 		? chat->adminRightsValue()
@@ -242,7 +263,7 @@ void Provider::refreshViewer() {
 		idForViewer,
 		_idsLimit,
 		_idsLimit
-	) | rpl::start_with_next([=](SparseIdsMergedSlice &&slice) {
+	) | rpl::on_next([=](SparseIdsMergedSlice &&slice) {
 		if (!slice.fullCount()) {
 			// Don't display anything while full count is unknown.
 			return;
@@ -327,17 +348,68 @@ void Provider::setSearchQuery(QString query) {
 	Unexpected("Media::Provider::setSearchQuery.");
 }
 
+void Provider::jumpToMessage(
+		MsgId messageId,
+		Fn<void(FullMsgId)> callback) {
+	_viewerLifetime.destroy();
+
+	const auto peer = _controller->session().data().peer(_peer->id);
+	const auto request = Api::PrepareSearchRequest(
+		peer,
+		_topicRootId,
+		_monoforumPeerId,
+		_type,
+		QString(),
+		messageId,
+		Data::LoadDirection::Around);
+
+	if (!request) {
+		return;
+	}
+
+	_controller->session().api().request(
+		std::move(*request)
+	).done([=](const Api::SearchRequestResult &result) {
+		const auto parsed = Api::ParseSearchResult(
+			peer,
+			_type,
+			messageId,
+			Data::LoadDirection::Around,
+			result);
+
+		if (!parsed.messageIds.empty()) {
+			const auto fullId = FullMsgId(_peer->id, messageId);
+			_universalAroundId = GetUniversalId(fullId);
+			if (callback) {
+				callback(fullId);
+			}
+			_idsLimit = kMinimalIdsLimit * 2;
+			refreshViewer();
+		}
+	}).send();
+}
+
 SparseIdsMergedSlice::Key Provider::sliceKey(
 		UniversalMsgId universalId) const {
 	using Key = SparseIdsMergedSlice::Key;
 	if (!_topicRootId && _migrated) {
-		return Key(_peer->id, _topicRootId, _migrated->id, universalId);
+		return Key(
+			_peer->id,
+			_topicRootId,
+			_monoforumPeerId,
+			_migrated->id,
+			universalId);
 	}
 	if (universalId < 0) {
 		// Convert back to plain id for non-migrated histories.
 		universalId = universalId + ServerMaxMsgId;
 	}
-	return Key(_peer->id, _topicRootId, 0, universalId);
+	return Key(
+		_peer->id,
+		_topicRootId,
+		_monoforumPeerId,
+		PeerId(),
+		universalId);
 }
 
 void Provider::itemRemoved(not_null<const HistoryItem*> item) {

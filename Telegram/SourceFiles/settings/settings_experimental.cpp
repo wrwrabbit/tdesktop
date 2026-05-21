@@ -7,7 +7,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/settings_experimental.h"
 
+#include "data/components/passkeys.h"
+#include "main/main_session.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/text/text_entity.h"
+#include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/widgets/buttons.h"
@@ -15,15 +19,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/vertical_list.h"
 #include "ui/gl/gl_detection.h"
 #include "ui/chat/chat_style_radius.h"
+#include "ui/controls/compose_ai_button_factory.h"
 #include "base/options.h"
+#include "boxes/moderate_messages_box.h"
 #include "core/application.h"
 #include "core/launcher.h"
+#include "core/sandbox.h"
 #include "chat_helpers/tabbed_panel.h"
 #include "dialogs/dialogs_widget.h"
+#include "dialogs/ui/dialogs_layout.h"
 #include "history/history_item_components.h"
 #include "info/profile/info_profile_actions.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
+#include "mainwidget.h"
 #include "media/player/media_player_instance.h"
 #include "mtproto/session_private.h"
 #include "webview/webview_embed.h"
@@ -32,19 +41,67 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
 #include "window/notifications_manager.h"
-#include "storage/localimageloader.h"
-#include "data/data_document_resolver.h"
+#include "info/info_flexible_scroll.h"
+#include "chat_helpers/stickers_list_widget.h"
 #include "styles/style_settings.h"
 #include "styles/style_layers.h"
+#include "styles/style_menu_icons.h"
+
+#include <QtCore/QJsonDocument>
+#include <QtGui/QGuiApplication>
 
 namespace Settings {
 namespace {
+
+const auto kOptionsClipboardPrefix = u"tdesktop-flags:"_q;
+
+struct DecodeOptionsResult {
+	bool ok = false;
+	QString json;
+};
+
+[[nodiscard]] QString EncodeOptionsToText(const QString &json) {
+	const auto flags = QByteArray::Base64UrlEncoding
+		| QByteArray::OmitTrailingEquals;
+	return kOptionsClipboardPrefix
+		+ qs(qCompress(json.toLatin1(), 9).toBase64(flags));
+}
+
+[[nodiscard]] DecodeOptionsResult DecodeOptionsFromText(const QString &text) {
+	auto result = DecodeOptionsResult();
+	if (!text.startsWith(kOptionsClipboardPrefix)) {
+		return result;
+	}
+	auto encoded = QStringView(text).mid(
+		kOptionsClipboardPrefix.size()).toLatin1();
+	const auto compressed = QByteArray::fromBase64Encoding(
+		std::move(encoded),
+		QByteArray::Base64UrlEncoding
+			| QByteArray::AbortOnBase64DecodingErrors);
+	if (!compressed || (*compressed).isEmpty()) {
+		return result;
+	}
+	const auto decoded = qUncompress(*compressed);
+	if (decoded.isEmpty()) {
+		return result;
+	}
+
+	auto error = QJsonParseError();
+	const auto parsed = QJsonDocument::fromJson(decoded, &error);
+	if ((error.error != QJsonParseError::NoError) || !parsed.isObject()) {
+		return result;
+	}
+	result.ok = true;
+	result.json = QString::fromUtf8(decoded);
+	return result;
+}
 
 void AddOption(
 		not_null<Window::Controller*> window,
 		not_null<Ui::VerticalLayout*> container,
 		base::options::option<bool> &option,
-		rpl::producer<> resetClicks) {
+		rpl::producer<> resetClicks,
+		rpl::producer<> reloadOptionsRequests) {
 	auto &lifetime = container->lifetime();
 	const auto name = option.name().isEmpty() ? option.id() : option.name();
 	const auto toggles = lifetime.make_state<rpl::event_stream<bool>>();
@@ -53,6 +110,9 @@ void AddOption(
 	) | rpl::map_to(
 		option.defaultValue()
 	) | rpl::start_to_stream(*toggles, lifetime);
+	std::move(reloadOptionsRequests) | rpl::on_next([=, &option] {
+		toggles->fire_copy(option.value());
+	}, lifetime);
 
 	const auto button = container->add(object_ptr<Button>(
 		container,
@@ -76,7 +136,7 @@ void AddOption(
 		});
 	}
 	button->toggledChanges(
-	) | rpl::start_with_next([=, &option](bool toggled) {
+	) | rpl::on_next([=, &option](bool toggled) {
 		if (!option.relevant() && toggled != option.defaultValue()) {
 			toggles->fire_copy(option.defaultValue());
 			window->showToast(
@@ -99,7 +159,8 @@ void AddOption(
 
 void SetupExperimental(
 		not_null<Window::Controller*> window,
-		not_null<Ui::VerticalLayout*> container) {
+		not_null<Ui::VerticalLayout*> container,
+		rpl::producer<> reloadOptionsRequests) {
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 
 	container->add(
@@ -139,30 +200,41 @@ void SetupExperimental(
 			base::options::lookup<bool>(name),
 			(reset
 				? (reset->clicks() | rpl::to_empty)
-				: rpl::producer<>()));
+				: rpl::producer<>()),
+			rpl::duplicate(reloadOptionsRequests));
 	};
 
 	addToggle(ChatHelpers::kOptionTabbedPanelShowOnClick);
 	addToggle(Dialogs::kOptionForumHideChatsList);
+	addToggle(Dialogs::Ui::kOptionDialogsMuteIcon);
 	addToggle(Core::kOptionFractionalScalingEnabled);
+	addToggle(Core::kOptionHighDpiDownscale);
 	addToggle(Window::kOptionViewProfileInChatsListContextMenu);
 	addToggle(Info::Profile::kOptionShowPeerIdBelowAbout);
+	addToggle(Info::Profile::kOptionShowChannelJoinedBelowAbout);
 	addToggle(Ui::kOptionUseSmallMsgBubbleRadius);
 	addToggle(Media::Player::kOptionDisableAutoplayNext);
-	addToggle(kOptionSendLargePhotos);
 	addToggle(Webview::kOptionWebviewDebugEnabled);
 	addToggle(Webview::kOptionWebviewLegacyEdge);
 	addToggle(kOptionAutoScrollInactiveChat);
+	addToggle(Window::Notifications::kOptionHideReplyButton);
+	addToggle(Window::Notifications::kOptionCustomNotification);
 	addToggle(Window::Notifications::kOptionGNotification);
 	addToggle(Core::kOptionFreeType);
 	addToggle(Core::kOptionSkipUrlSchemeRegister);
-	addToggle(Data::kOptionExternalVideoPlayer);
+	addToggle(Core::kOptionDeadlockDetector);
+	addToggle(Window::kOptionExternalMediaViewer);
 	addToggle(Window::kOptionNewWindowsSizeAsFirst);
 	addToggle(MTP::details::kOptionPreferIPv6);
 	if (base::options::lookup<bool>(kOptionFastButtonsMode).value()) {
 		addToggle(kOptionFastButtonsMode);
 	}
 	addToggle(Window::kOptionDisableTouchbar);
+	addToggle(Info::kAlternativeScrollProcessing);
+	addToggle(kModerateCommonGroups);
+	addToggle(kForceComposeSearchOneColumn);
+	addToggle(ChatHelpers::kOptionUnlimitedRecentStickers);
+	addToggle(Ui::kOptionHideAiButton);
 }
 
 } // namespace
@@ -170,19 +242,56 @@ void SetupExperimental(
 Experimental::Experimental(
 	QWidget *parent,
 	not_null<Window::SessionController*> controller)
-: Section(parent) {
-	setupContent(controller);
+: Section(parent, controller) {
+	setupContent();
 }
 
 rpl::producer<QString> Experimental::title() {
 	return tr::lng_settings_experimental();
 }
 
-void Experimental::setupContent(
-		not_null<Window::SessionController*> controller) {
+void Experimental::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
+	const auto window = &controller()->window();
+	addAction(
+		tr::lng_theme_editor_menu_export(tr::now),
+		[=] {
+			TextUtilities::SetClipboardText(
+				{ EncodeOptionsToText(base::options::serialize()) });
+			window->showToast(u"Experimental settings code copied to clipboard."_q);
+		},
+		&st::menuIconCopy);
+	if (!DecodeOptionsFromText(QGuiApplication::clipboard()->text()).ok) {
+		return;
+	}
+	addAction(
+		tr::lng_theme_editor_menu_import(tr::now),
+		[=] {
+			const auto decoded = DecodeOptionsFromText(
+				QGuiApplication::clipboard()->text());
+			if (!decoded.ok) {
+				window->showToast(u"Clipboard does not contain "
+					"a valid experimental settings code."_q);
+				return;
+			}
+			if (!base::options::deserialize(decoded.json)) {
+				window->showToast(u"Experimental settings code is valid"
+					", but data format is not supported."_q);
+				return;
+			}
+			_reloadOptionsRequests.fire({});
+			window->showToast(u"Experimental settings imported "
+				"from code in clipboard."_q);
+		},
+		&st::menuIconImportTheme);
+}
+
+void Experimental::setupContent() {
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
 
-	SetupExperimental(&controller->window(), content);
+	SetupExperimental(
+		&controller()->window(),
+		content,
+		_reloadOptionsRequests.events());
 
 	Ui::ResizeFitChild(this, content);
 }

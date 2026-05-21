@@ -50,6 +50,14 @@ void CountryCodeInput::codeSelected(const QString &code) {
 	changed();
 }
 
+void CountryCodeInput::keyPressEvent(QKeyEvent *e) {
+	if (e->key() == Qt::Key_Space) {
+		_spacePressed.fire({});
+	} else {
+		MaskedInputField::keyPressEvent(e);
+	}
+}
+
 void CountryCodeInput::correctValue(
 		const QString &was,
 		int wasCursor,
@@ -272,6 +280,10 @@ void UsernameInput::setLinkPlaceholder(const QString &placeholder) {
 	}
 }
 
+void UsernameInput::setMaxLength(int maxLength) {
+	_maxLength = maxLength;
+}
+
 void UsernameInput::paintAdditionalPlaceholder(QPainter &p) {
 	if (!_linkPlaceholder.isEmpty()) {
 		p.setFont(_st.style.font);
@@ -294,8 +306,11 @@ void UsernameInput::correctValue(
 		if (newPos > 0) --newPos;
 	}
 	len -= from;
-	if (len > kMaxUsernameLength) {
-		len = kMaxUsernameLength + (now.at(from) == '@' ? 1 : 0);
+	const auto maxLength = (_maxLength > 0)
+		? _maxLength
+		: kMaxUsernameLength;
+	if (len > maxLength) {
+		len = maxLength + (now.at(from) == '@' ? 1 : 0);
 	}
 	for (int32 to = from + len; to > from;) {
 		--to;

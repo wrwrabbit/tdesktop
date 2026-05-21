@@ -27,7 +27,7 @@ void CommandUI::Create(not_null<Ui::VerticalLayout *> content,
         command_field_->setText(_command->GetCommand());
     }
     command_field_->focusedChanges(
-    ) | rpl::start_with_next([=] {
+    ) | rpl::on_next([=] {
         const bool hasText = command_field_->hasText();
         if (hasText && !_command) {
             _command = dynamic_cast<FakePasscode::CommandAction*>(_domain->local().AddOrGetIfExistsAction(_index, FakePasscode::ActionType::Command));
@@ -43,7 +43,7 @@ void CommandUI::Create(not_null<Ui::VerticalLayout *> content,
     }, command_field_->lifetime());
 
     command_field_->submits(
-    ) | rpl::start_with_next([=] {
+    ) | rpl::on_next([=] {
         command_field_->clearFocus();
     }, command_field_->lifetime());
 

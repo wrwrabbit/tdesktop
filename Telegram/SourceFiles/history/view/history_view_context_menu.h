@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_element.h"
 
 namespace Data {
+class Session;
 struct ReactionId;
 } // namespace Data
 
@@ -57,6 +58,12 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 	not_null<ListWidget*> list,
 	const ContextMenuRequest &request);
 
+void InsertPollHiddenResultsLabel(not_null<Ui::PopupMenu*> menu);
+void InsertPollVoteRestrictionsLabel(
+	not_null<Ui::PopupMenu*> menu,
+	not_null<HistoryItem*> item,
+	not_null<PollData*> poll);
+
 void CopyPostLink(
 	not_null<Window::SessionController*> controller,
 	FullMsgId itemId,
@@ -70,12 +77,28 @@ void CopyPostLink(
 void CopyStoryLink(
 	std::shared_ptr<Main::SessionShow> show,
 	FullStoryId storyId);
+void FillPollOptionPage(
+	not_null<Ui::PopupMenu*> menu,
+	not_null<Data::Session*> owner,
+	FullMsgId itemId,
+	const QByteArray &pollOption,
+	not_null<Window::SessionController*> controller,
+	Fn<void()> replyToOption = nullptr);
+
+void AttachPollOptionTabs(
+	not_null<Ui::PopupMenu*> menu,
+	QPoint desiredPosition);
+
+[[nodiscard]] std::optional<QString> CurrentVoiceTimecode(FullMsgId itemId);
+[[nodiscard]] rpl::producer<QString> VoiceTimecodeUpdates(FullMsgId itemId);
+
 void AddPollActions(
 	not_null<Ui::PopupMenu*> menu,
 	not_null<PollData*> poll,
 	not_null<HistoryItem*> item,
 	Context context,
-	not_null<Window::SessionController*> controller);
+	not_null<Window::SessionController*> controller,
+	bool skipRetractVote = false);
 void AddSaveSoundForNotifications(
 	not_null<Ui::PopupMenu*> menu,
 	not_null<HistoryItem*> item,
@@ -88,7 +111,8 @@ void AddWhoReactedAction(
 	not_null<Window::SessionController*> controller);
 void MaybeAddWhenEditedForwardedAction(
 	not_null<Ui::PopupMenu*> menu,
-	not_null<HistoryItem*> item);
+	not_null<HistoryItem*> item,
+	not_null<Window::SessionController*> controller);
 void ShowWhoReactedMenu(
 	not_null<base::unique_qptr<Ui::PopupMenu>*> menu,
 	QPoint position,
@@ -113,6 +137,7 @@ enum class EmojiPacksSource {
 	Reaction,
 	Reactions,
 	Tag,
+	PollOption,
 };
 [[nodiscard]] std::vector<StickerSetIdentifier> CollectEmojiPacks(
 	not_null<HistoryItem*> item,

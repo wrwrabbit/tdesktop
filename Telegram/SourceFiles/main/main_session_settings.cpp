@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/send_files_box.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "data/components/promo_suggestions.h"
 
 namespace Main {
 namespace {
@@ -28,22 +29,48 @@ constexpr auto kVersion = 2;
 
 SessionSettings::SessionSettings()
 : _selectorTab(ChatHelpers::SelectorTab::Emoji)
-, _supportSwitch(Support::SwitchSettings::Next) {
+, _supportSwitch(Support::SwitchSettings::Next)
+, _setupEmailState(Data::SetupEmailState::None) {
 }
 
 QByteArray SessionSettings::serialize() const {
 	const auto autoDownload = _autoDownload.serialize();
-	const auto size = sizeof(qint32) * 4
+	auto size = sizeof(qint32) * 4
 		+ _groupStickersSectionHidden.size() * sizeof(quint64)
 		+ sizeof(qint32) * 4
 		+ Serialize::bytearraySize(autoDownload)
 		+ sizeof(qint32) * 11
 		+ (_mutePeriods.size() * sizeof(quint64))
-		+ sizeof(qint32) * 2
-		+ _hiddenPinnedMessages.size() * (sizeof(quint64) * 3)
-		+ sizeof(qint32)
+		+ sizeof(qint32) * 3
 		+ _groupEmojiSectionHidden.size() * sizeof(quint64)
-		+ sizeof(qint32) * 2;
+		+ sizeof(qint32) * 3
+		+ _hiddenPinnedMessages.size() * (sizeof(quint64) * 4)
+		+ sizeof(qint32)
+		+ sizeof(qint32) // _ringtoneDefaultVolumes size
+		+ (_ringtoneDefaultVolumes.size()
+			* (0
+				+ sizeof(uint8_t) * 1 // Data::DefaultNotify
+				+ sizeof(ushort))) // Volume
+		+ sizeof(qint32) // _ringtoneVolumes size
+		+ (_ringtoneVolumes.size()
+			* (0
+				+ sizeof(quint64) * 3 // ThreadId
+				+ sizeof(ushort))) // Volume
+		+ sizeof(qint32) // _ratedTranscriptions size
+		+ (_ratedTranscriptions.size() * sizeof(quint64))
+		+ sizeof(qint32); // _unreviewed size
+	for (const auto &auth : _unreviewed) {
+		size += sizeof(quint64) + sizeof(qint32) + sizeof(qint32)
+			+ Serialize::stringSize(auth.device)
+			+ Serialize::stringSize(auth.location);
+	}
+	size += sizeof(qint32); // _setupEmailState
+	size += sizeof(qint32) // _moderateCommonGroups size
+		+ (_moderateCommonGroups.size() * sizeof(qint32));
+	size += sizeof(qint32);
+	size += sizeof(qint32)
+		+ _subsectionTabsModes.size() * (sizeof(quint64) + sizeof(qint32));
+	size += sizeof(qint32); // _phoneNumberHidden
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -68,32 +95,70 @@ QByteArray SessionSettings::serialize() const {
 			<< qint32(_archiveInMainMenu.current() ? 1 : 0)
 			<< qint32(_skipArchiveInSearch.current() ? 1 : 0)
 			<< qint32(0) // old _mediaLastPlaybackPosition.size());
-			<< qint32(0) // very old _hiddenPinnedMessages.size());
+			<< qint32(0) // very very old _hiddenPinnedMessages.size());
 			<< qint32(_dialogsFiltersEnabled ? 1 : 0)
 			<< qint32(_supportAllSilent ? 1 : 0)
 			<< qint32(_photoEditorHintShowsCount)
-			<< qint32(0) // old _hiddenPinnedMessages.size());
+			<< qint32(0) // very old _hiddenPinnedMessages.size());
 			<< qint32(_mutePeriods.size());
 		for (const auto &period : _mutePeriods) {
 			stream << quint64(period);
 		}
 		stream
 			<< qint32(0) // old _skipPremiumStickersSet
-			<< qint32(_hiddenPinnedMessages.size());
-		for (const auto &[key, value] : _hiddenPinnedMessages) {
-			stream
-				<< SerializePeerId(key.peerId)
-				<< qint64(key.topicRootId.bare)
-				<< qint64(value.bare);
-		}
-		stream
+			<< qint32(0) // old _hiddenPinnedMessages.size());
 			<< qint32(_groupEmojiSectionHidden.size());
 		for (const auto &peerId : _groupEmojiSectionHidden) {
 			stream << SerializePeerId(peerId);
 		}
 		stream
 			<< qint32(_lastNonPremiumLimitDownload)
-			<< qint32(_lastNonPremiumLimitUpload);
+			<< qint32(_lastNonPremiumLimitUpload)
+			<< qint32(_hiddenPinnedMessages.size());
+		for (const auto &[key, value] : _hiddenPinnedMessages) {
+			stream
+				<< SerializePeerId(key.peerId)
+				<< qint64(key.topicRootId.bare)
+				<< SerializePeerId(key.monoforumPeerId)
+				<< qint64(value.bare);
+		}
+		stream << qint32(0);
+		stream << qint32(_ringtoneDefaultVolumes.size());
+		for (const auto &[key, value] : _ringtoneDefaultVolumes) {
+			stream << uint8_t(key) << ushort(value);
+		}
+		stream << qint32(_ringtoneVolumes.size());
+		for (const auto &[key, value] : _ringtoneVolumes) {
+			stream
+				<< SerializePeerId(key.peerId)
+				<< qint64(key.topicRootId.bare)
+				<< SerializePeerId(key.monoforumPeerId)
+				<< ushort(value);
+		}
+		stream << qint32(_ratedTranscriptions.size());
+		for (const auto &transcriptionId : _ratedTranscriptions) {
+			stream << quint64(transcriptionId);
+		}
+		stream << qint32(_unreviewed.size());
+		for (const auto &auth : _unreviewed) {
+			stream
+				<< quint64(auth.hash)
+				<< qint32(auth.unconfirmed ? 1 : 0)
+				<< qint32(auth.date)
+				<< auth.device
+				<< auth.location;
+		}
+		stream << qint32(static_cast<int>(_setupEmailState));
+		stream << qint32(_moderateCommonGroups.size());
+		for (const auto &filterId : _moderateCommonGroups) {
+			stream << qint32(filterId);
+		}
+		stream << qint32(_disableSharingBoxShowsCount);
+		stream << qint32(_subsectionTabsModes.size());
+		for (const auto &[peerId, mode] : _subsectionTabsModes) {
+			stream << SerializePeerId(peerId) << qint32(mode);
+		}
+		stream << qint32(_phoneNumberHidden ? 1 : 0);
 	}
 
 	Ensures(result.size() == size);
@@ -153,6 +218,7 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 	std::vector<int> appDictionariesEnabled;
 	qint32 appAutoDownloadDictionaries = app.autoDownloadDictionaries() ? 1 : 0;
 	base::flat_map<ThreadId, MsgId> hiddenPinnedMessages;
+	base::flat_map<PeerId, qint32> subsectionTabsModes;
 	qint32 dialogsFiltersEnabled = _dialogsFiltersEnabled ? 1 : 0;
 	qint32 supportAllSilent = _supportAllSilent ? 1 : 0;
 	qint32 photoEditorHintShowsCount = _photoEditorHintShowsCount;
@@ -160,6 +226,14 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 	qint32 legacySkipPremiumStickersSet = 0;
 	qint32 lastNonPremiumLimitDownload = 0;
 	qint32 lastNonPremiumLimitUpload = 0;
+	base::flat_map<Data::DefaultNotify, ushort> ringtoneDefaultVolumes;
+	base::flat_map<ThreadId, ushort> ringtoneVolumes;
+	base::flat_set<uint64> ratedTranscriptions;
+	std::vector<Data::UnreviewedAuth> unreviewed;
+	qint32 setupEmailState = 0;
+	std::vector<int32> moderateCommonGroups;
+	qint32 disableSharingBoxShowsCount = 0;
+	qint32 phoneNumberHidden = 0;
 
 	stream >> versionTag;
 	if (versionTag == kVersionTag) {
@@ -388,7 +462,7 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 		stream >> count;
 		if (stream.status() == QDataStream::Ok) {
 			for (auto i = 0; i != count; ++i) {
-				quint64 period;
+				auto period = quint64();
 				stream >> period;
 				mutePeriods.emplace_back(period);
 			}
@@ -401,6 +475,7 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 		auto count = qint32(0);
 		stream >> count;
 		if (stream.status() == QDataStream::Ok) {
+			// Legacy.
 			for (auto i = 0; i != count; ++i) {
 				auto keyPeerId = quint64();
 				auto keyTopicRootId = qint64();
@@ -437,6 +512,185 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 		stream
 			>> lastNonPremiumLimitDownload
 			>> lastNonPremiumLimitUpload;
+	}
+	if (!stream.atEnd()) {
+		auto count = qint32(0);
+		stream >> count;
+		if (stream.status() == QDataStream::Ok) {
+			for (auto i = 0; i != count; ++i) {
+				auto keyPeerId = quint64();
+				auto keyTopicRootId = qint64();
+				auto keyMonoforumPeerId = quint64();
+				auto value = qint64();
+				stream
+					>> keyPeerId
+					>> keyTopicRootId
+					>> keyMonoforumPeerId
+					>> value;
+				if (stream.status() != QDataStream::Ok) {
+					LOG(("App Error: "
+						"Bad data for SessionSettings::addFromSerialized()"));
+					return;
+				}
+				hiddenPinnedMessages.emplace(ThreadId{
+					DeserializePeerId(keyPeerId),
+					keyTopicRootId,
+					DeserializePeerId(keyMonoforumPeerId),
+				}, value);
+			}
+		}
+	}
+	if (!stream.atEnd()) {
+		auto count = qint32(0);
+		stream >> count;
+		if (stream.status() == QDataStream::Ok) {
+			for (auto i = 0; i != count; ++i) {
+				auto peerId = quint64();
+				stream >> peerId;
+				if (stream.status() != QDataStream::Ok) {
+					LOG(("App Error: "
+						"Bad data for SessionSettings::addFromSerialized()"));
+					return;
+				}
+				subsectionTabsModes.emplace(
+					DeserializePeerId(peerId), qint32(1));
+			}
+		}
+	}
+	if (!stream.atEnd()) {
+		auto count = qint32(0);
+		stream >> count;
+		if (stream.status() == QDataStream::Ok) {
+			for (auto i = 0; i != count; ++i) {
+				auto keyDefaultNotify = uint8_t();
+				auto value = ushort();
+				stream
+					>> keyDefaultNotify
+					>> value;
+				if (stream.status() != QDataStream::Ok) {
+					LOG(("App Error: "
+						"Bad data for SessionSettings::addFromSerialized()"));
+					return;
+				}
+				ringtoneDefaultVolumes.emplace(
+					static_cast<Data::DefaultNotify>(keyDefaultNotify),
+					value);
+			}
+		}
+	}
+	if (!stream.atEnd()) {
+		auto count = qint32(0);
+		stream >> count;
+		if (stream.status() == QDataStream::Ok) {
+			for (auto i = 0; i != count; ++i) {
+				auto keyPeerId = quint64();
+				auto keyTopicRootId = qint64();
+				auto keyMonoforumPeerId = quint64();
+				auto value = ushort();
+				stream
+					>> keyPeerId
+					>> keyTopicRootId
+					>> keyMonoforumPeerId
+					>> value;
+				if (stream.status() != QDataStream::Ok) {
+					LOG(("App Error: "
+						"Bad data for SessionSettings::addFromSerialized()"));
+					return;
+				}
+				ringtoneVolumes.emplace(ThreadId{
+					DeserializePeerId(keyPeerId),
+					keyTopicRootId,
+					DeserializePeerId(keyMonoforumPeerId),
+				}, value);
+			}
+		}
+	}
+	if (!stream.atEnd()) {
+		auto count = qint32(0);
+		stream >> count;
+		if (stream.status() == QDataStream::Ok) {
+			for (auto i = 0; i != count; ++i) {
+				auto transcriptionId = quint64();
+				stream >> transcriptionId;
+				if (stream.status() != QDataStream::Ok) {
+					LOG(("App Error: "
+						"Bad data for SessionSettings::addFromSerialized()"
+						"with ratedTranscriptions"));
+					return;
+				}
+				ratedTranscriptions.emplace(transcriptionId);
+			}
+		}
+	}
+	if (!stream.atEnd()) {
+		auto count = qint32(0);
+		stream >> count;
+		if (stream.status() == QDataStream::Ok) {
+			for (auto i = 0; i != count; ++i) {
+				auto hash = quint64();
+				auto unconfirmed = qint32();
+				auto date = qint32();
+				QString device, location;
+				stream >> hash >> unconfirmed >> date >> device >> location;
+				if (stream.status() != QDataStream::Ok) {
+					LOG(("App Error: "
+						"Bad data for SessionSettings::addFromSerialized()"
+						"with unreviewed"));
+					return;
+				}
+				unreviewed.emplace_back(Data::UnreviewedAuth{
+					.hash = hash,
+					.unconfirmed = (unconfirmed == 1),
+					.date = TimeId(date),
+					.device = device,
+					.location = location,
+				});
+			}
+		}
+	}
+	if (!stream.atEnd()) {
+		stream >> setupEmailState;
+	}
+	if (!stream.atEnd()) {
+		auto count = qint32(0);
+		stream >> count;
+		if (stream.status() == QDataStream::Ok) {
+			for (auto i = 0; i != count; ++i) {
+				qint32 filterId;
+				stream >> filterId;
+				if (stream.status() != QDataStream::Ok) {
+					LOG(("App Error: "
+						"Bad data for SessionSettings::addFromSerialized()"
+						"with moderateCommonGroups"));
+					return;
+				}
+				moderateCommonGroups.emplace_back(filterId);
+			}
+		}
+	}
+	if (!stream.atEnd()) {
+		stream >> disableSharingBoxShowsCount;
+	}
+	if (!stream.atEnd()) {
+		auto count = qint32(0);
+		stream >> count;
+		if (stream.status() == QDataStream::Ok) {
+			for (auto i = 0; i != count; ++i) {
+				auto peerId = quint64();
+				auto mode = qint32(0);
+				stream >> peerId >> mode;
+				if (stream.status() != QDataStream::Ok) {
+					LOG(("App Error: "
+						"Bad data for SessionSettings::addFromSerialized()"));
+					return;
+				}
+				subsectionTabsModes.emplace(
+					DeserializePeerId(peerId), mode);
+			}
+		}
+	}
+	if (!stream.atEnd()) {
+		stream >> phoneNumberHidden;
 	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
@@ -484,6 +738,26 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 	_mutePeriods = std::move(mutePeriods);
 	_lastNonPremiumLimitDownload = lastNonPremiumLimitDownload;
 	_lastNonPremiumLimitUpload = lastNonPremiumLimitUpload;
+	_subsectionTabsModes = std::move(subsectionTabsModes);
+	_ringtoneDefaultVolumes = std::move(ringtoneDefaultVolumes);
+	_ringtoneVolumes = std::move(ringtoneVolumes);
+	_ratedTranscriptions = std::move(ratedTranscriptions);
+	_unreviewed = std::move(unreviewed);
+	auto uncheckedSetupEmailState = static_cast<Data::SetupEmailState>(
+		setupEmailState);
+	switch (uncheckedSetupEmailState) {
+	case Data::SetupEmailState::None:
+	case Data::SetupEmailState::Setup:
+	case Data::SetupEmailState::SetupNoSkip:
+	case Data::SetupEmailState::SettingUp:
+	case Data::SetupEmailState::SettingUpNoSkip:
+		_setupEmailState = uncheckedSetupEmailState;
+		break;
+	}
+
+	_moderateCommonGroups = std::move(moderateCommonGroups);
+	_disableSharingBoxShowsCount = disableSharingBoxShowsCount;
+	_phoneNumberHidden = (phoneNumberHidden == 1);
 
 	if (version < 2) {
 		app.setLastSeenWarningSeen(appLastSeenWarningSeen == 1);
@@ -595,20 +869,41 @@ rpl::producer<bool> SessionSettings::skipArchiveInSearchChanges() const {
 
 MsgId SessionSettings::hiddenPinnedMessageId(
 		PeerId peerId,
-		MsgId topicRootId) const {
-	const auto i = _hiddenPinnedMessages.find({ peerId, topicRootId });
+		MsgId topicRootId,
+		PeerId monoforumPeerId) const {
+	const auto i = _hiddenPinnedMessages.find({
+		peerId,
+		topicRootId,
+		monoforumPeerId,
+	});
 	return (i != end(_hiddenPinnedMessages)) ? i->second : 0;
 }
 
 void SessionSettings::setHiddenPinnedMessageId(
 		PeerId peerId,
 		MsgId topicRootId,
+		PeerId monoforumPeerId,
 		MsgId msgId) {
-	const auto id = ThreadId{ peerId, topicRootId };
+	const auto id = ThreadId{ peerId, topicRootId, monoforumPeerId };
 	if (msgId) {
 		_hiddenPinnedMessages[id] = msgId;
 	} else {
 		_hiddenPinnedMessages.remove(id);
+	}
+}
+
+qint32 SessionSettings::subsectionTabsMode(PeerId peerId) const {
+	const auto i = _subsectionTabsModes.find(peerId);
+	return (i != end(_subsectionTabsModes)) ? i->second : 0;
+}
+
+void SessionSettings::setSubsectionTabsMode(
+		PeerId peerId,
+		qint32 mode) {
+	if (mode) {
+		_subsectionTabsModes[peerId] = mode;
+	} else {
+		_subsectionTabsModes.remove(peerId);
 	}
 }
 
@@ -620,6 +915,20 @@ void SessionSettings::incrementPhotoEditorHintShown() {
 	if (photoEditorHintShown()) {
 		_photoEditorHintShowsCount++;
 	}
+}
+
+bool SessionSettings::shouldShowDisableSharingBox() const {
+	return _disableSharingBoxShowsCount < kDisableSharingBoxMaxShowsCount;
+}
+
+void SessionSettings::incrementDisableSharingBoxShown() {
+	if (shouldShowDisableSharingBox()) {
+		_disableSharingBoxShowsCount++;
+	}
+}
+
+void SessionSettings::resetDisableSharingBoxShown() {
+	_disableSharingBoxShowsCount = 0;
 }
 
 std::vector<TimeId> SessionSettings::mutePeriods() const {
@@ -636,6 +945,68 @@ void SessionSettings::addMutePeriod(TimeId period) {
 			_mutePeriods = { period, _mutePeriods.back() };
 		}
 	}
+}
+
+ushort SessionSettings::ringtoneVolume(
+		Data::DefaultNotify defaultNotify) const {
+	const auto i = _ringtoneDefaultVolumes.find(defaultNotify);
+	return (i != end(_ringtoneDefaultVolumes)) ? i->second : 0;
+}
+
+void SessionSettings::setRingtoneVolume(
+		Data::DefaultNotify defaultNotify,
+		ushort volume) {
+	if (volume > 0 && volume <= 100) {
+		_ringtoneDefaultVolumes[defaultNotify] = volume;
+	} else {
+		_ringtoneDefaultVolumes.remove(defaultNotify);
+	}
+}
+
+ushort SessionSettings::ringtoneVolume(
+		PeerId peerId,
+		MsgId topicRootId,
+		PeerId monoforumPeerId) const {
+	const auto i = _ringtoneVolumes.find(
+		ThreadId{ peerId, topicRootId, monoforumPeerId });
+	return (i != end(_ringtoneVolumes)) ? i->second : 0;
+}
+
+void SessionSettings::setRingtoneVolume(
+		PeerId peerId,
+		MsgId topicRootId,
+		PeerId monoforumPeerId,
+		ushort volume) {
+	const auto id = ThreadId{ peerId, topicRootId, monoforumPeerId };
+	if (volume > 0 && volume <= 100) {
+		_ringtoneVolumes[id] = volume;
+	} else {
+		_ringtoneVolumes.remove(id);
+	}
+}
+
+void SessionSettings::markTranscriptionAsRated(uint64 transcriptionId) {
+	_ratedTranscriptions.emplace(transcriptionId);
+}
+
+bool SessionSettings::isTranscriptionRated(uint64 transcriptionId) const {
+	return _ratedTranscriptions.contains(transcriptionId);
+}
+
+void SessionSettings::setUnreviewed(std::vector<Data::UnreviewedAuth> auths) {
+	_unreviewed = std::move(auths);
+}
+
+const std::vector<Data::UnreviewedAuth> &SessionSettings::unreviewed() const {
+	return _unreviewed;
+}
+
+void SessionSettings::setSetupEmailState(Data::SetupEmailState state) {
+	_setupEmailState = state;
+}
+
+Data::SetupEmailState SessionSettings::setupEmailState() const {
+	return _setupEmailState;
 }
 
 } // namespace Main

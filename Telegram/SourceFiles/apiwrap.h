@@ -25,10 +25,11 @@ class Session;
 } // namespace Main
 
 namespace Data {
+struct ReactionId;
 struct UpdatedFileReferences;
 class WallPaper;
 struct ResolvedForwardDraft;
-enum class DefaultNotify;
+enum class DefaultNotify : uint8_t;
 enum class StickersType : uchar;
 class Forum;
 class ForumTopic;
@@ -69,6 +70,7 @@ class CloudPassword;
 class SelfDestruct;
 class SensitiveContent;
 class GlobalPrivacy;
+class ReactionsNotifySettings;
 class UserPrivacy;
 class InviteLinks;
 class ChatLinks;
@@ -77,11 +79,14 @@ class ConfirmPhone;
 class PeerPhoto;
 class PeerColors;
 class Polls;
+class TodoLists;
 class ChatParticipants;
 class UnreadThings;
 class Ringtones;
+class ComposeWithAi;
 class Transcribes;
 class Premium;
+class ReadMetrics;
 class Usernames;
 class Websites;
 
@@ -127,6 +132,8 @@ QString RequestKey(Types &&...values) {
 	}
 	return result;
 }
+
+[[nodiscard]] TimeId UnixtimeFromMsgId(mtpMsgId msgId);
 
 } // namespace Api
 
@@ -200,7 +207,6 @@ public:
 	void requestChangelog(
 		const QString &sinceVersion,
 		Fn<void(const MTPUpdates &result)> callback);
-	void refreshTopPromotion();
 	void requestDeepLinkInfo(
 		const QString &path,
 		Fn<void(TextWithEntities message, bool updateRequired)> callback);
@@ -232,6 +238,19 @@ public:
 	void deleteAllFromParticipant(
 		not_null<ChannelData*> channel,
 		not_null<PeerData*> from);
+	void deleteAllReactionsFromParticipant(
+		not_null<PeerData*> peer,
+		not_null<PeerData*> participant,
+		MsgId originMsgId,
+		const Data::ReactionId &originReaction);
+	void deleteParticipantReaction(
+		not_null<PeerData*> peer,
+		MsgId msgId,
+		not_null<PeerData*> participant,
+		const Data::ReactionId &reaction);
+	void deleteSublistHistory(
+		not_null<ChannelData*> parentChat,
+		not_null<PeerData*> sublistPeer);
 
 	void requestWebPageDelayed(not_null<WebPageData*> page);
 	void clearWebPageRequest(not_null<WebPageData*> page);
@@ -287,6 +306,7 @@ public:
 	void requestSharedMedia(
 		not_null<PeerData*> peer,
 		MsgId topicRootId,
+		PeerId monoforumPeerId,
 		Storage::SharedMediaType type,
 		MsgId messageId,
 		SliceType slice);
@@ -331,7 +351,6 @@ public:
 	void sendFiles(
 		Ui::PreparedList &&list,
 		SendMediaType type,
-		TextWithTags &&caption,
 		std::shared_ptr<SendingAlbum> album,
 		const SendAction &action);
 	void sendFile(
@@ -359,7 +378,9 @@ public:
 	void sendShortcutMessages(
 		not_null<PeerData*> peer,
 		BusinessShortcutId id);
-	void sendMessage(MessageToSend &&message);
+	void sendMessage(
+		MessageToSend &&message,
+		std::optional<MsgId> localMessageId = std::nullopt);
 	void sendBotStart(
 		std::shared_ptr<Ui::Show> show,
 		not_null<UserData*> bot,
@@ -403,16 +424,20 @@ public:
 	[[nodiscard]] Api::SelfDestruct &selfDestruct();
 	[[nodiscard]] Api::SensitiveContent &sensitiveContent();
 	[[nodiscard]] Api::GlobalPrivacy &globalPrivacy();
+	[[nodiscard]] Api::ReactionsNotifySettings &reactionsNotifySettings();
 	[[nodiscard]] Api::UserPrivacy &userPrivacy();
 	[[nodiscard]] Api::InviteLinks &inviteLinks();
 	[[nodiscard]] Api::ChatLinks &chatLinks();
 	[[nodiscard]] Api::ViewsManager &views();
+	[[nodiscard]] Api::ReadMetrics &readMetrics();
 	[[nodiscard]] Api::ConfirmPhone &confirmPhone();
 	[[nodiscard]] Api::PeerPhoto &peerPhoto();
 	[[nodiscard]] Api::Polls &polls();
+	[[nodiscard]] Api::TodoLists &todoLists();
 	[[nodiscard]] Api::ChatParticipants &chatParticipants();
 	[[nodiscard]] Api::UnreadThings &unreadThings();
 	[[nodiscard]] Api::Ringtones &ringtones();
+	[[nodiscard]] Api::ComposeWithAi &composeWithAi();
 	[[nodiscard]] Api::Transcribes &transcribes();
 	[[nodiscard]] Api::Premium &premium();
 	[[nodiscard]] Api::Usernames &usernames();
@@ -422,6 +447,12 @@ public:
 	void updatePrivacyLastSeens();
 
 	static constexpr auto kJoinErrorDuration = 5 * crl::time(1000);
+
+	static void ProcessRecentSelfForwards(
+		not_null<Main::Session*> session,
+		const MTPUpdates &updates,
+		PeerId targetPeerId,
+		PeerId fromPeerId);
 
 private:
 	struct MessageDataRequest {
@@ -503,18 +534,21 @@ private:
 	void resolveJumpToHistoryDate(
 		not_null<PeerData*> peer,
 		MsgId topicRootId,
+		PeerId monoforumPeerId,
 		const QDate &date,
 		Fn<void(not_null<PeerData*>, MsgId)> callback);
 	template <typename Callback>
 	void requestMessageAfterDate(
 		not_null<PeerData*> peer,
 		MsgId topicRootId,
+		PeerId monoforumPeerId,
 		const QDate &date,
 		Callback &&callback);
 
 	void sharedMediaDone(
 		not_null<PeerData*> peer,
 		MsgId topicRootId,
+		PeerId monoforumPeerId,
 		SharedMediaType type,
 		Api::SearchResult &&parsed);
 	void globalMediaDone(
@@ -540,6 +574,9 @@ private:
 	void deleteAllFromParticipantSend(
 		not_null<ChannelData*> channel,
 		not_null<PeerData*> from);
+	void deleteSublistHistorySend(
+		not_null<ChannelData*> parentChat,
+		not_null<PeerData*> sublistPeer);
 
 	void uploadAlbumMedia(
 		not_null<HistoryItem*> item,
@@ -568,9 +605,6 @@ private:
 		not_null<HistoryItem*> item,
 		not_null<SendingAlbum*> album,
 		Fn<void(bool)> done = nullptr);
-
-	void getTopPromotionDelayed(TimeId now, TimeId next);
-	void topPromotionDone(const MTPhelp_PromoData &proxy);
 
 	void sendNotifySettingsUpdates();
 
@@ -663,6 +697,7 @@ private:
 	struct SharedMediaRequest {
 		not_null<PeerData*> peer;
 		MsgId topicRootId = 0;
+		PeerId monoforumPeerId = 0;
 		SharedMediaType mediaType = {};
 		MsgId aroundId = 0;
 		SliceType sliceType = {};
@@ -709,11 +744,6 @@ private:
 	std::unique_ptr<TaskQueue> _fileLoader;
 	base::flat_map<uint64, std::shared_ptr<SendingAlbum>> _sendingAlbums;
 
-	mtpRequestId _topPromotionRequestId = 0;
-	std::pair<QString, uint32> _topPromotionKey;
-	TimeId _topPromotionNextRequestTime = TimeId(0);
-	base::Timer _topPromotionTimer;
-
 	base::flat_set<not_null<const Data::ForumTopic*>> _updateNotifyTopics;
 	base::flat_set<not_null<const PeerData*>> _updateNotifyPeers;
 	base::flat_set<Data::DefaultNotify> _updateNotifyDefaults;
@@ -755,16 +785,20 @@ private:
 	const std::unique_ptr<Api::SelfDestruct> _selfDestruct;
 	const std::unique_ptr<Api::SensitiveContent> _sensitiveContent;
 	const std::unique_ptr<Api::GlobalPrivacy> _globalPrivacy;
+	const std::unique_ptr<Api::ReactionsNotifySettings> _reactionsNotifySettings;
 	const std::unique_ptr<Api::UserPrivacy> _userPrivacy;
 	const std::unique_ptr<Api::InviteLinks> _inviteLinks;
 	const std::unique_ptr<Api::ChatLinks> _chatLinks;
 	const std::unique_ptr<Api::ViewsManager> _views;
+	const std::unique_ptr<Api::ReadMetrics> _readMetrics;
 	const std::unique_ptr<Api::ConfirmPhone> _confirmPhone;
 	const std::unique_ptr<Api::PeerPhoto> _peerPhoto;
 	const std::unique_ptr<Api::Polls> _polls;
+	const std::unique_ptr<Api::TodoLists> _todoLists;
 	const std::unique_ptr<Api::ChatParticipants> _chatParticipants;
 	const std::unique_ptr<Api::UnreadThings> _unreadThings;
 	const std::unique_ptr<Api::Ringtones> _ringtones;
+	const std::unique_ptr<Api::ComposeWithAi> _composeWithAi;
 	const std::unique_ptr<Api::Transcribes> _transcribes;
 	const std::unique_ptr<Api::Premium> _premium;
 	const std::unique_ptr<Api::Usernames> _usernames;

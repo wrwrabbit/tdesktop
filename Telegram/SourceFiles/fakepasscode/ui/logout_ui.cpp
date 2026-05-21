@@ -24,14 +24,14 @@ void LogoutUI::Create(not_null<Ui::VerticalLayout *> content,
     FakePasscode::HideAccountKind::HideAccountEnum value 
         = (_action != nullptr) ? _action->GetData(_accountIndex).Kind : FakePasscode::HideAccountKind::None;
 
-    const auto tgl_logout = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
+    const auto tgl_logout = content->lifetime().make_state<rpl::event_stream<bool>>();
     auto btn_logout = Settings::AddButtonWithIcon(
             content,
             tr::lng_logout(),
             st::settingsButton,
             {&st::menuIconLeave}
     )->toggleOn(tgl_logout->events_starting_with_copy(value == FakePasscode::HideAccountKind::Logout));
-    const auto tgl_hide = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
+    const auto tgl_hide = content->lifetime().make_state<rpl::event_stream<bool>>();
     auto btn_hide = Settings::AddButtonWithIcon(
             content,
             tr::lng_hide(),

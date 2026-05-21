@@ -7,8 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/controls/swipe_handler.h"
 
-#include "base/debug_log.h"
-
 #include "base/platform/base_platform_haptic.h"
 #include "base/platform/base_platform_info.h"
 #include "base/qt/qt_common_adapters.h"
@@ -76,7 +74,7 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 		bool touch = false;
 	};
 	struct State {
-		base::unique_qptr<QObject> filterContext;
+		base::unique_qptr<QObject> filter;
 		Ui::Animations::Simple animationReach;
 		Ui::Animations::Simple animationEnd;
 		SwipeContextData data;
@@ -103,14 +101,14 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 	if (args.dontStart) {
 		std::move(
 			args.dontStart
-		) | rpl::start_with_next([=](bool dontStart) {
+		) | rpl::on_next([=](bool dontStart) {
 			state->dontStart = dontStart;
 		}, state->lifetime);
 	} else {
 		v::match(scroll, [](v::null_t) {
 		}, [&](const auto &scroll) {
 			scroll->touchMaybePressing(
-			) | rpl::start_with_next([=](bool maybePressing) {
+			) | rpl::on_next([=](bool maybePressing) {
 				state->dontStart = maybePressing;
 			}, state->lifetime);
 		});
@@ -178,7 +176,7 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 	};
 	v::match(scroll, [](v::null_t) {
 	}, [&](const auto &scroll) {
-		scroll->scrolls() | rpl::start_with_next([=] {
+		scroll->scrolls() | rpl::on_next([=] {
 			if (state->orientation != Qt::Vertical) {
 				processEnd();
 			}
@@ -191,10 +189,8 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 	const auto updateWith = [=, generateFinish = args.init](UpdateArgs args) {
 		const auto fillFinishByTop = [&] {
 			if (!args.delta.x()) {
-				LOG(("SKIPPING fillFinishByTop."));
 				return;
 			}
-			LOG(("SETTING DIRECTION"));
 			state->direction = (args.delta.x() < 0)
 				? Qt::RightToLeft
 				: Qt::LeftToRight;
@@ -206,12 +202,13 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 				*state->direction);
 			state->threshold = style::ConvertFloatScale(kThresholdWidth)
 				* state->finishByTopData.speedRatio;
-			if (!state->finishByTopData.callback) {
+			if (!state->finishByTopData.callback
+				|| (state->finishByTopData.msgBareId == kMsgBareIdSwipeBack
+					&& !base::Platform::IsSwipeBackEnabled())) {
 				setOrientation(Qt::Vertical);
 			}
 		};
 		if (!state->started || state->touch != args.touch) {
-			LOG(("STARTING"));
 			state->started = true;
 			state->data.reachRatio = 0.;
 			state->touch = args.touch;
@@ -232,10 +229,6 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 			const auto diffXtoY = std::abs(args.delta.x())
 				- std::abs(args.delta.y());
 			constexpr auto kOrientationThreshold = 1.;
-			LOG(("SETTING ORIENTATION WITH: %1,%2, diff %3"
-				).arg(args.delta.x()
-				).arg(args.delta.y()
-				).arg(diffXtoY));
 			if (diffXtoY > kOrientationThreshold) {
 				if (!state->dontStart) {
 					setOrientation(Qt::Horizontal);
@@ -339,10 +332,8 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 					.delta = state->startAt - touches[0].pos(),
 					.touch = true,
 				};
-				LOG(("ORIENTATION UPDATING WITH: %1, %2").arg(args.delta.x()).arg(args.delta.y()));
 				updateWith(args);
 			}
-			LOG(("ORIENTATION: %1").arg(!state->orientation ? "none" : (state->orientation == Qt::Horizontal) ? "horizontal" : "vertical"));
 			return (touchscreen && state->orientation != Qt::Horizontal)
 				? base::EventFilterResult::Continue
 				: base::EventFilterResult::Cancel;
@@ -376,8 +367,8 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 		return base::EventFilterResult::Continue;
 	};
 	widget->setAttribute(Qt::WA_AcceptTouchEvents);
-	state->filterContext = base::make_unique_q<QObject>(nullptr);
-	base::install_event_filter(state->filterContext.get(), widget, filter);
+	state->filter = base::unique_qptr<QObject>(
+		base::install_event_filter(widget, filter));
 }
 
 SwipeBackResult SetupSwipeBack(
@@ -490,7 +481,7 @@ SwipeBackResult SetupSwipeBack(
 				state->back = base::make_unique_q<Ui::RpWidget>(widget);
 				const auto raw = state->back.get();
 				raw->paintRequest(
-				) | rpl::start_with_next(paintCallback(), raw->lifetime());
+				) | rpl::on_next(paintCallback(), raw->lifetime());
 				raw->setAttribute(Qt::WA_TransparentForMouseEvents);
 				raw->resize(Size(st::swipeBackSize));
 				raw->show();

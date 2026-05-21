@@ -131,9 +131,9 @@ TextWithEntities AddTimestampLinks(
 		return text;
 	}
 	static const auto expression = QRegularExpression(
-		"(?<![^\\s\\(\\)\"\\,\\.\\-])"
+		"(?<![^\\s\\(\\)\\[\\]\"\\,\\.\\-])"
 		"(?:(?:(\\d{1,2}):)?(\\d))?(\\d):(\\d\\d)"
-		"(?![^\\s\\(\\)\",\\.\\-\\+])");
+		"(?![^\\s\\(\\)\\[\\]\",\\.\\-\\+])");
 	const auto &string = text.text;
 	auto offset = 0;
 	while (true) {
@@ -241,14 +241,12 @@ void Media::drawPurchasedTag(
 		if (!amount) {
 			return;
 		}
-		const auto session = &item->history()->session();
-		auto text = Ui::Text::Colorized(Ui::CreditsEmojiSmall(session));
+		auto text = Ui::Text::Colorized(Ui::CreditsEmojiSmall());
 		text.append(Lang::FormatCountDecimal(amount));
 		purchased->text.setMarkedText(
 			st::defaultTextStyle,
 			text,
-			kMarkupTextOptions,
-			Core::TextContext({ .session = session }));
+			kMarkupTextOptions);
 	}
 
 	const auto st = context.st;
@@ -403,8 +401,7 @@ void Media::drawSpoilerTag(
 				tr::lng_sensitive_tag(tr::now));
 			iconSkip = st::mediaMenuIconStealth.width() * 1.4;
 		} else {
-			const auto session = &history()->session();
-			auto price = Ui::Text::Colorized(Ui::CreditsEmoji(session));
+			auto price = Ui::Text::Colorized(Ui::CreditsEmoji());
 			price.append(Lang::FormatCountDecimal(tag->price));
 			text.setMarkedText(
 				st::semiboldTextStyle,
@@ -412,9 +409,8 @@ void Media::drawSpoilerTag(
 					tr::now,
 					lt_price,
 					price,
-					Ui::Text::WithEntities),
-				kMarkupTextOptions,
-				Core::TextContext({ .session = session }));
+					tr::marked),
+				kMarkupTextOptions);
 		}
 		const auto width = iconSkip + text.maxWidth();
 		const auto inner = QRect(0, 0, width, text.minHeight());
@@ -587,6 +583,10 @@ std::unique_ptr<StickerPlayer> Media::stickerTakePlayer(
 
 QImage Media::locationTakeImage() {
 	return QImage();
+}
+
+std::vector<Media::TodoTaskInfo> Media::takeTasksInfo() {
+	return {};
 }
 
 TextState Media::getStateGrouped(

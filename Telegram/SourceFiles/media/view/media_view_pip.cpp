@@ -330,6 +330,10 @@ QImage RotateFrameImage(QImage image, int rotation) {
 	return image.transformed(transform);
 }
 
+const style::Shadow &PipShadow() {
+	return st::mediaviewPipShadow;
+}
+
 PipPanel::PipPanel(
 	QWidget *parent,
 	Fn<Ui::GL::ChosenRenderer(Ui::GL::Capabilities)> renderer)
@@ -359,20 +363,24 @@ void PipPanel::init() {
 		return widget()->windowHandle()
 			&& widget()->windowHandle()->isExposed();
 	}) | rpl::distinct_until_changed(
-	) | rpl::filter(rpl::mappers::_1) | rpl::start_with_next([=] {
+	) | rpl::filter(rpl::mappers::_1) | rpl::on_next([=] {
 		// Workaround Qt's forced transient parent.
 		Ui::Platform::ClearTransientParent(widget());
+	}, rp()->lifetime());
+
+	rp()->shownValue(
+	) | rpl::filter(rpl::mappers::_1) | rpl::on_next([=] {
 		Ui::Platform::SetWindowMargins(widget(), _padding);
 	}, rp()->lifetime());
 
 	rp()->screenValue(
-	) | rpl::skip(1) | rpl::start_with_next([=](not_null<QScreen*> screen) {
+	) | rpl::skip(1) | rpl::on_next([=](not_null<QScreen*> screen) {
 		handleScreenChanged(screen);
 	}, rp()->lifetime());
 
 	if (Platform::IsWayland()) {
 		rp()->sizeValue(
-		) | rpl::skip(1) | rpl::start_with_next([=](QSize size) {
+		) | rpl::skip(1) | rpl::on_next([=](QSize size) {
 			handleWaylandResize(size);
 		}, rp()->lifetime());
 	}
@@ -864,7 +872,7 @@ void PipPanel::updateDecorations() {
 	});
 	const auto position = countPosition();
 	const auto use = Ui::Platform::TranslucentWindowsSupported();
-	const auto full = use ? st::callShadow.extend : style::margins();
+	const auto full = use ? PipShadow().extend : style::margins();
 	const auto padding = style::margins(
 		(position.attached & RectPart::Left) ? 0 : full.left(),
 		(position.attached & RectPart::Top) ? 0 : full.top(),
@@ -924,13 +932,13 @@ Pip::Pip(
 	setupStreaming();
 
 	_data->session().account().sessionChanges(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_destroy();
 	}, _panel.rp()->lifetime());
 
 	if (_context) {
 		_data->owner().itemRemoved(
-		) | rpl::start_with_next([=](not_null<const HistoryItem*> data) {
+		) | rpl::on_next([=](not_null<const HistoryItem*> data) {
 			if (_context != data) {
 				_context = nullptr;
 			}
@@ -963,12 +971,12 @@ void Pip::setupPanel() {
 	_panel.widget()->show();
 
 	_panel.saveGeometryRequests(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		saveGeometry();
 	}, _panel.rp()->lifetime());
 
 	_panel.rp()->events(
-	) | rpl::start_with_next([=](not_null<QEvent*> e) {
+	) | rpl::on_next([=](not_null<QEvent*> e) {
 		const auto mousePosition = [&] {
 			return static_cast<QMouseEvent*>(e.get())->pos();
 		};
@@ -1005,7 +1013,7 @@ void Pip::handleLeave() {
 }
 
 void Pip::handleMouseMove(QPoint position) {
-	const auto weak = Ui::MakeWeak(_panel.widget());
+	const auto weak = base::make_weak(_panel.widget());
 	const auto guard = gsl::finally([&] {
 		if (weak) {
 			_panel.handleMouseMove(position);
@@ -1083,7 +1091,7 @@ Pip::OverState Pip::ResolveShownOver(OverState state) {
 }
 
 void Pip::handleMousePress(QPoint position, Qt::MouseButton button) {
-	const auto weak = Ui::MakeWeak(_panel.widget());
+	const auto weak = base::make_weak(_panel.widget());
 	const auto guard = gsl::finally([&] {
 		if (weak) {
 			_panel.handleMousePress(position, button);
@@ -1101,7 +1109,7 @@ void Pip::handleMousePress(QPoint position, Qt::MouseButton button) {
 }
 
 void Pip::handleMouseRelease(QPoint position, Qt::MouseButton button) {
-	const auto weak = Ui::MakeWeak(_panel.widget());
+	const auto weak = base::make_weak(_panel.widget());
 	const auto guard = gsl::finally([&] {
 		if (weak) {
 			_panel.handleMouseRelease(position, button);
@@ -1226,7 +1234,7 @@ void Pip::setupButtons() {
 	_panel.rp()->sizeValue(
 	) | rpl::map([=] {
 		return _panel.inner();
-	}) | rpl::start_with_next([=](QRect rect) {
+	}) | rpl::on_next([=](QRect rect) {
 		const auto skip = st::pipControlSkip;
 		_close.area = QRect(
 			rect.x(),
@@ -1330,7 +1338,7 @@ void Pip::setupStreaming() {
 	_instance->switchQualityRequests(
 	) | rpl::filter([=](int quality) {
 		return !_quality.manual && _quality.height != quality;
-	}) | rpl::start_with_next([=](int quality) {
+	}) | rpl::on_next([=](int quality) {
 		applyVideoQuality({
 			.manual = 0,
 			.height = uint32(quality),
@@ -1338,7 +1346,7 @@ void Pip::setupStreaming() {
 	}, _instance->lifetime());
 
 	_instance->player().updates(
-	) | rpl::start_with_next_error([=](Streaming::Update &&update) {
+	) | rpl::on_next_error([=](Streaming::Update &&update) {
 		handleStreamingUpdate(std::move(update));
 	}, [=](Streaming::Error &&error) {
 		handleStreamingError(std::move(error));
@@ -1348,7 +1356,7 @@ void Pip::setupStreaming() {
 
 void Pip::applyVideoQuality(VideoQuality value) {
 	if (_quality == value
-		|| !_dataMedia->canBePlayed(_context)) {
+		|| !_dataMedia->canBePlayed()) {
 		return;
 	}
 	const auto resolved = _data->chooseQuality(_context, value);

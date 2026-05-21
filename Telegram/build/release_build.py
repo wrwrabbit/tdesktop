@@ -10,7 +10,7 @@ import release_patch
 _THIS_DIR = os.path.dirname(__file__)
 
 TARGET_MAP = {
-    "Win32": "win",
+    "x64_x86": "win",
     "x64": "win64"
 }
 
@@ -89,7 +89,7 @@ def main():
     if platform.system() == "Windows":
         cmd = "build.bat"
     elif platform.system() == "Linux":
-        cmd = "bash ./build.sh -DDESKTOP_APP_DISABLE_CRASH_REPORTS=OFF -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON "
+        cmd = "bash ./build.sh -DDESKTOP_APP_DISABLE_CRASH_REPORTS=OFF "
     else:
         cmd = "bash ./build.sh"
     cmd += " -DDESKTOP_APP_SPECIAL_TARGET=" + target

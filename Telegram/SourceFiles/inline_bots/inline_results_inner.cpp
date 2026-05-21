@@ -66,12 +66,12 @@ Inner::Inner(
 	setAttribute(Qt::WA_OpaquePaintEvent);
 
 	_controller->session().downloaderTaskFinished(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		updateInlineItems();
 	}, lifetime());
 
 	controller->gifPauseLevelChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		if (!_controller->isGifPausedAtLeastFor(
 				Window::GifPauseReason::InlineResults)) {
 			updateInlineItems();
@@ -82,7 +82,7 @@ Inner::Inner(
 		Data::PeerUpdate::Flag::Rights
 	) | rpl::filter([=](const Data::PeerUpdate &update) {
 		return (update.peer.get() == _inlineQueryPeer);
-	}) | rpl::start_with_next([=] {
+	}) | rpl::on_next([=] {
 		auto isRestricted = (_restrictedLabel != nullptr);
 		if (isRestricted != isRestrictedView()) {
 			auto h = countHeight();
@@ -91,7 +91,7 @@ Inner::Inner(
 	}, lifetime());
 
 	sizeValue(
-	) | rpl::start_with_next([=](const QSize &s) {
+	) | rpl::on_next([=](const QSize &s) {
 		_mosaic.setFullWidth(s.width());
 	}, lifetime());
 
@@ -125,7 +125,7 @@ void Inner::checkRestrictedPeer() {
 			_restrictedLabel.create(
 				this,
 				rpl::single(error.boostsToLift
-					? Ui::Text::Link(error.text)
+					? tr::link(error.text)
 					: TextWithEntities{ error.text }),
 				st::stickersRestrictedLabel);
 			const auto lifting = error.boostsToLift;
@@ -455,7 +455,8 @@ ItemBase *Inner::layoutPrepareInlineResult(std::shared_ptr<Result> result) {
 		if (auto layout = ItemBase::createLayout(
 				this,
 				std::move(result),
-				_inlineWithThumb)) {
+				_inlineWithThumb,
+				_gallery)) {
 			it = _inlineLayouts.emplace(raw, std::move(layout)).first;
 			it->second->initDimensions();
 		} else {
@@ -513,7 +514,6 @@ void Inner::refreshSwitchPmButton(const CacheEntry *entry) {
 		if (!_switchPmButton) {
 			_switchPmButton.create(this, nullptr, st::switchPmButton);
 			_switchPmButton->show();
-			_switchPmButton->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 			_switchPmButton->addClickHandler([=] { switchPm(); });
 		}
 		_switchPmButton->setText(rpl::single(entry->switchPmText));
@@ -555,6 +555,8 @@ int Inner::refreshInlineRows(PeerData *queryPeer, UserData *bot, const CacheEntr
 	clearSelection();
 
 	Assert(_inlineBot != 0);
+
+	_gallery = entry->gallery;
 
 	const auto count = int(entry->results.size());
 	const auto from = validateExistingInlineRows(entry->results);

@@ -9,17 +9,26 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "lang/lang_keys.h"
 #include "ui/effects/ripple_animation.h"
+#include "ui/layers/generic_box.h"
+#include "ui/text/text_utilities.h"
+#include "ui/widgets/menu/menu_add_action_callback.h"
+#include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/wrap/slide_wrap.h"
 #include "ui/painter.h"
+#include "ui/vertical_list.h"
 #include "core/application.h"
+#include "calls/group/calls_group_common.h"
+#include "calls/group/calls_group_invite_controller.h"
 #include "calls/calls_instance.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_helpers.h"
 #include "mainwidget.h"
 #include "window/window_session_controller.h"
+#include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "data/data_session.h"
 #include "data/data_changes.h"
@@ -32,6 +41,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "api/api_updates.h"
 #include "apiwrap.h"
+#include "info/profile/info_profile_icon.h"
+#include "settings/sections/settings_calls.h"
+#include "settings/settings_common.h"
+#include "styles/style_info.h" // infoTopBarMenu
 #include "styles/style_layers.h" // st::boxLabel.
 #include "styles/style_calls.h"
 #include "styles/style_boxes.h"
@@ -64,6 +77,16 @@ public:
 			bool selected) override {
 		return 0;
 	}
+	int paintNameIconGetLeadingWidth(
+			Painter &p,
+			Fn<void()> repaint,
+			crl::time now,
+			int nameLeft,
+			int nameTop,
+			int outerWidth,
+			bool selected) override {
+		return 0;
+	}
 	QSize rightActionSize() const override {
 		return peer()->isChannel() ? QSize(_st.width, _st.height) : QSize();
 	}
@@ -92,7 +115,7 @@ GroupCallRow::GroupCallRow(not_null<PeerData*> peer)
 : PeerListRow(peer)
 , _st(st::callGroupCall) {
 	if (const auto channel = peer->asChannel()) {
-		const auto status = (channel->isMegagroup()
+		const auto status = (!channel->isMegagroup()
 			? (channel->isPublic()
 				? tr::lng_create_public_channel_title
 				: tr::lng_create_private_channel_title)
@@ -150,7 +173,7 @@ void GroupCallRow::rightActionStopLastRipple() {
 
 namespace GroupCalls {
 
-ListController::ListController(not_null<Window::SessionController*> window)
+ListController::ListController(not_null<::Window::SessionController*> window)
 : _window(window) {
 	setStyleOverrides(&st::peerListSingleRow);
 }
@@ -195,7 +218,7 @@ void ListController::prepare() {
 
 	session().changes().peerUpdates(
 		Data::PeerUpdate::Flag::GroupCall
-	) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
+	) | rpl::on_next([=](const Data::PeerUpdate &update) {
 		processPeer(update.peer);
 		finishProcess();
 	}, lifetime());
@@ -227,7 +250,7 @@ void ListController::rowClicked(not_null<PeerListRow*> row) {
 	crl::on_main(window, [=, peer = row->peer()] {
 		window->showPeerHistory(
 			peer,
-			Window::SectionShow::Way::ClearStack);
+			::Window::SectionShow::Way::ClearStack);
 	});
 }
 
@@ -313,6 +336,16 @@ public:
 			int nameTop,
 			int nameWidth,
 			int availableWidth,
+			int outerWidth,
+			bool selected) override {
+		return 0;
+	}
+	int paintNameIconGetLeadingWidth(
+			Painter &p,
+			Fn<void()> repaint,
+			crl::time now,
+			int nameLeft,
+			int nameTop,
 			int outerWidth,
 			bool selected) override {
 		return 0;
@@ -430,9 +463,9 @@ BoxController::Row::Type BoxController::Row::ComputeType(
 		return Type::Out;
 	} else if (auto media = item->media()) {
 		if (const auto call = media->call()) {
-			const auto reason = call->finishReason;
-			if (reason == Data::Call::FinishReason::Busy
-				|| reason == Data::Call::FinishReason::Missed) {
+			using State = Data::CallState;
+			const auto state = call->state;
+			if (state == State::Busy || state == State::Missed) {
 				return Type::Missed;
 			}
 		}
@@ -470,7 +503,7 @@ void BoxController::Row::rightActionStopLastRipple() {
 	}
 }
 
-BoxController::BoxController(not_null<Window::SessionController*> window)
+BoxController::BoxController(not_null<::Window::SessionController*> window)
 : _window(window)
 , _api(&_window->session().mtp()) {
 }
@@ -481,7 +514,7 @@ Main::Session &BoxController::session() const {
 
 void BoxController::prepare() {
 	session().data().itemRemoved(
-	) | rpl::start_with_next([=](not_null<const HistoryItem*> item) {
+	) | rpl::on_next([=](not_null<const HistoryItem*> item) {
 		if (const auto row = rowForItem(item)) {
 			row->itemRemoved(item);
 			if (!row->hasItems()) {
@@ -499,7 +532,7 @@ void BoxController::prepare() {
 	) | rpl::filter([=](const Data::MessageUpdate &update) {
 		const auto media = update.item->media();
 		return (media != nullptr) && (media->call() != nullptr);
-	}) | rpl::start_with_next([=](const Data::MessageUpdate &update) {
+	}) | rpl::on_next([=](const Data::MessageUpdate &update) {
 		insertRow(update.item, InsertWay::Prepend);
 	}, lifetime());
 
@@ -591,7 +624,7 @@ void BoxController::rowClicked(not_null<PeerListRow*> row) {
 	crl::on_main(window, [=, peer = row->peer()] {
 		window->showPeerHistory(
 			peer,
-			Window::SectionShow::Way::ClearStack,
+			::Window::SectionShow::Way::ClearStack,
 			itemId);
 	});
 }
@@ -600,7 +633,7 @@ void BoxController::rowRightActionClicked(not_null<PeerListRow*> row) {
 	auto user = row->peer()->asUser();
 	Assert(user != nullptr);
 
-	Core::App().calls().startOutgoingCall(user, false);
+	Core::App().calls().startOutgoingCall(user, {});
 }
 
 void BoxController::receivedCalls(const QVector<MTPMessage> &result) {
@@ -611,7 +644,7 @@ void BoxController::receivedCalls(const QVector<MTPMessage> &result) {
 	for (const auto &message : result) {
 		const auto msgId = IdFromMessage(message);
 		const auto peerId = PeerFromMessage(message);
-		if (const auto peer = session().data().peerLoaded(peerId)) {
+		if (session().data().peerLoaded(peerId)) {
 			const auto item = session().data().addNewMessage(
 				message,
 				MessageFlags(),
@@ -698,8 +731,8 @@ std::unique_ptr<PeerListRow> BoxController::createRow(
 
 void ClearCallsBox(
 		not_null<Ui::GenericBox*> box,
-		not_null<Window::SessionController*> window) {
-	const auto weak = Ui::MakeWeak(box);
+		not_null<::Window::SessionController*> window) {
+	const auto weak = base::make_weak(box);
 	box->addRow(
 		object_ptr<Ui::FlatLabel>(
 			box,
@@ -742,7 +775,7 @@ void ClearCallsBox(
 					self(revoke, self);
 				} else {
 					api->session().data().destroyAllCallItems();
-					if (const auto strong = weak.data()) {
+					if (const auto strong = weak.get()) {
 						strong->closeBox();
 					}
 				}
@@ -754,6 +787,143 @@ void ClearCallsBox(
 		sendRequest(revokeCheckbox->checked(), sendRequest);
 	});
 	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+}
+
+[[nodiscard]] not_null<Ui::SettingsButton*> AddCreateCallButton(
+		not_null<Ui::VerticalLayout*> container,
+		not_null<::Window::SessionController*> controller,
+		Fn<void()> done) {
+	const auto result = container->add(object_ptr<Ui::SettingsButton>(
+		container,
+		tr::lng_confcall_create_call(),
+		st::inviteViaLinkButton), QMargins());
+	Ui::AddSkip(container);
+	Ui::AddDividerText(
+		container,
+		tr::lng_confcall_create_call_description(
+			lt_count,
+			rpl::single(controller->session().appConfig().confcallSizeLimit()
+				* 1.),
+			tr::marked));
+
+	const auto icon = Ui::CreateChild<Info::Profile::FloatingIcon>(
+		result,
+		st::inviteViaLinkIcon,
+		QPoint());
+	result->heightValue(
+	) | rpl::on_next([=](int height) {
+		icon->moveToLeft(
+			st::inviteViaLinkIconPosition.x(),
+			(height - st::inviteViaLinkIcon.height()) / 2);
+	}, icon->lifetime());
+
+	result->setClickedCallback([=] {
+		controller->show(Group::PrepareCreateCallBox(controller, done));
+	});
+
+	return result;
+}
+
+void ShowCallsBox(
+		not_null<::Window::SessionController*> window,
+		bool highlightStartCall) {
+	struct State {
+		State(not_null<::Window::SessionController*> window)
+		: callsController(window)
+		, groupCallsController(window) {
+		}
+		Calls::BoxController callsController;
+		PeerListContentDelegateSimple callsDelegate;
+
+		Calls::GroupCalls::ListController groupCallsController;
+		PeerListContentDelegateSimple groupCallsDelegate;
+
+		base::unique_qptr<Ui::PopupMenu> menu;
+	};
+
+	window->show(Box([=](not_null<Ui::GenericBox*> box) {
+		const auto state = box->lifetime().make_state<State>(window);
+
+		const auto groupCalls = box->addRow(
+			object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+				box,
+				object_ptr<Ui::VerticalLayout>(box)),
+			style::margins());
+		groupCalls->hide(anim::type::instant);
+		groupCalls->toggleOn(state->groupCallsController.shownValue());
+
+		Ui::AddSubsectionTitle(
+			groupCalls->entity(),
+			tr::lng_call_box_groupcalls_subtitle());
+		state->groupCallsDelegate.setContent(groupCalls->entity()->add(
+			object_ptr<PeerListContent>(box, &state->groupCallsController)));
+		state->groupCallsController.setDelegate(&state->groupCallsDelegate);
+		Ui::AddSkip(groupCalls->entity());
+		Ui::AddDivider(groupCalls->entity());
+		Ui::AddSkip(groupCalls->entity());
+
+		const auto button = AddCreateCallButton(
+			box->verticalLayout(),
+			window,
+			crl::guard(box, [=] { box->closeBox(); }));
+		button->events(
+		) | rpl::filter([=](not_null<QEvent*> e) {
+			return (e->type() == QEvent::Enter);
+		}) | rpl::on_next([=] {
+			state->callsDelegate.peerListMouseLeftGeometry();
+		}, button->lifetime());
+
+		const auto content = box->addRow(
+			object_ptr<PeerListContent>(box, &state->callsController),
+			style::margins());
+		state->callsDelegate.setContent(content);
+		state->callsController.setDelegate(&state->callsDelegate);
+
+		box->setWidth(state->callsController.contentWidth());
+		state->callsController.boxHeightValue(
+		) | rpl::on_next([=](int height) {
+			box->setMinHeight(height);
+		}, box->lifetime());
+		box->setTitle(tr::lng_call_box_title());
+		box->addButton(tr::lng_close(), [=] {
+			box->closeBox();
+		});
+		const auto menuButton = box->addTopButton(st::infoTopBarMenu);
+		menuButton->setClickedCallback([=] {
+			state->menu = base::make_unique_q<Ui::PopupMenu>(
+				menuButton,
+				st::popupMenuWithIcons);
+			const auto showSettings = [=] {
+				window->showSettings(
+					Settings::CallsId(),
+					::Window::SectionShow(anim::type::instant));
+			};
+			const auto clearAll = crl::guard(box, [=] {
+				box->uiShow()->showBox(Box(Calls::ClearCallsBox, window));
+			});
+			state->menu->addAction(
+				tr::lng_settings_section_call_settings(tr::now),
+				showSettings,
+				&st::menuIconSettings);
+			if (state->callsDelegate.peerListFullRowsCount() > 0) {
+				Ui::Menu::CreateAddActionCallback(state->menu)({
+					.text = tr::lng_call_box_clear_all(tr::now),
+					.handler = clearAll,
+					.icon = &st::menuIconDeleteAttention,
+					.isAttention = true,
+				});
+			}
+			state->menu->popup(QCursor::pos());
+			return true;
+		});
+
+		if (highlightStartCall) {
+			box->showFinishes(
+			) | rpl::take(1) | rpl::on_next([=] {
+				Settings::HighlightWidget(button);
+			}, box->lifetime());
+		}
+	}));
 }
 
 } // namespace Calls

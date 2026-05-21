@@ -20,8 +20,7 @@ bool gManyInstance = false;
 QString gKeyFile;
 QString gWorkingDir;
 
-QStringList gSendPaths;
-QString gStartUrl;
+QList<QUrl> gStartUrls;
 
 QString gDialogLastPath, gDialogHelperPath; // optimize QFileDialog
 
@@ -49,8 +48,6 @@ RecentStickerPreload gRecentStickersPreload;
 RecentStickerPack gRecentStickers;
 
 RecentHashtagPack gRecentWriteHashtags, gRecentSearchHashtags;
-
-RecentInlineBots gRecentInlineBots;
 
 bool gPasswordRecovered = false;
 int32 gPasscodeBadTries = 0;

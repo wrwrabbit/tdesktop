@@ -13,6 +13,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/group/calls_volume_item.h"
 #include "calls/group/calls_group_members_row.h"
 #include "calls/group/calls_group_viewport.h"
+#include "calls/calls_emoji_fingerprint.h"
+#include "calls/calls_instance.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
@@ -107,6 +109,9 @@ private:
 	[[nodiscard]] std::unique_ptr<Row> createRow(
 		const Data::GroupCallParticipant &participant);
 	[[nodiscard]] std::unique_ptr<Row> createInvitedRow(
+		not_null<PeerData*> participantPeer,
+		bool calling);
+	[[nodiscard]] std::unique_ptr<Row> createWithAccessRow(
 		not_null<PeerData*> participantPeer);
 
 	[[nodiscard]] bool isMe(not_null<PeerData*> participantPeer) const;
@@ -128,7 +133,8 @@ private:
 	void updateRow(
 		not_null<Row*> row,
 		const std::optional<Data::GroupCallParticipant> &was,
-		const Data::GroupCallParticipant *participant);
+		const Data::GroupCallParticipant *participant,
+		Row::State noParticipantState = Row::State::Invited);
 	void updateRowInSoundingMap(
 		not_null<Row*> row,
 		bool wasSounding,
@@ -162,8 +168,13 @@ private:
 		const VideoEndpoint &endpoint,
 		bool active);
 
-	void appendInvitedUsers();
+	void partitionRows();
+	void setupInvitedUsers();
+	[[nodiscard]] bool appendInvitedUsers();
+	void setupWithAccessUsers();
+	[[nodiscard]] bool appendWithAccessUsers();
 	void scheduleRaisedHandStatusRemove();
+	void refreshWithAccessRows(base::flat_set<UserId> &&nowIds);
 
 	void hideRowsWithVideoExcept(const VideoEndpoint &large);
 	void showAllHiddenRows();
@@ -205,6 +216,8 @@ private:
 	Ui::RoundRect _narrowRoundRect;
 	QImage _narrowShadow;
 
+	base::flat_set<UserId> _withAccess;
+
 	rpl::lifetime _lifetime;
 
 };
@@ -228,7 +241,7 @@ Members::Controller::Controller(
 	st::groupCallMembersBgOver)
 , _narrowRoundRect(ImageRoundRadius::Large, st::groupCallMembersBg) {
 	style::PaletteChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_inactiveCrossLine.invalidate();
 		_coloredCrossLine.invalidate();
 		_inactiveNarrowCrossLine.invalidate();
@@ -238,7 +251,7 @@ Members::Controller::Controller(
 	rpl::combine(
 		PowerSaving::OnValue(PowerSaving::kCalls),
 		Core::App().appDeactivatedValue()
-	) | rpl::start_with_next([=](bool disabled, bool deactivated) {
+	) | rpl::on_next([=](bool disabled, bool deactivated) {
 		const auto hide = disabled || deactivated;
 
 		if (!(hide && _soundingAnimationHideLastTime)) {
@@ -271,7 +284,7 @@ Members::Controller::Controller(
 
 	_peer->session().changes().peerUpdates(
 		Data::PeerUpdate::Flag::About
-	) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
+	) | rpl::on_next([=](const Data::PeerUpdate &update) {
 		if (const auto row = findRow(update.peer)) {
 			row->setAbout(update.peer->about());
 		}
@@ -284,12 +297,12 @@ Members::Controller::~Controller() {
 
 void Members::Controller::setupListChangeViewers() {
 	_call->real(
-	) | rpl::start_with_next([=](not_null<Data::GroupCall*> real) {
+	) | rpl::on_next([=](not_null<Data::GroupCall*> real) {
 		subscribeToChanges(real);
 	}, _lifetime);
 
 	_call->levelUpdates(
-	) | rpl::start_with_next([=](const LevelUpdate &update) {
+	) | rpl::on_next([=](const LevelUpdate &update) {
 		const auto i = _soundingRowBySsrc.find(update.ssrc);
 		if (i != end(_soundingRowBySsrc)) {
 			updateRowLevel(i->second, update.value);
@@ -297,7 +310,7 @@ void Members::Controller::setupListChangeViewers() {
 	}, _lifetime);
 
 	_call->videoEndpointLargeValue(
-	) | rpl::start_with_next([=](const VideoEndpoint &large) {
+	) | rpl::on_next([=](const VideoEndpoint &large) {
 		if (large) {
 			hideRowsWithVideoExcept(large);
 		} else {
@@ -309,7 +322,7 @@ void Members::Controller::setupListChangeViewers() {
 	) | rpl::filter([=](const VideoStateToggle &update) {
 		const auto &large = _call->videoEndpointLarge();
 		return large && (update.endpoint != large);
-	}) | rpl::start_with_next([=](const VideoStateToggle &update) {
+	}) | rpl::on_next([=](const VideoStateToggle &update) {
 		if (update.value) {
 			hideRowWithVideo(update.endpoint);
 		} else {
@@ -318,7 +331,7 @@ void Members::Controller::setupListChangeViewers() {
 	}, _lifetime);
 
 	_call->rejoinEvents(
-	) | rpl::start_with_next([=](const Group::RejoinEvent &event) {
+	) | rpl::on_next([=](const Group::RejoinEvent &event) {
 		const auto guard = gsl::finally([&] {
 			delegate()->peerListRefreshRows();
 		});
@@ -398,13 +411,13 @@ void Members::Controller::subscribeToChanges(not_null<Data::GroupCall*> real) {
 	_fullCount = real->fullCountValue();
 
 	real->participantsReloaded(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		prepareRows(real);
 	}, _lifetime);
 
 	using Update = Data::GroupCall::ParticipantUpdate;
 	real->participantUpdated(
-	) | rpl::start_with_next([=](const Update &update) {
+	) | rpl::on_next([=](const Update &update) {
 		Expects(update.was.has_value() || update.now.has_value());
 
 		const auto participantPeer = update.was
@@ -414,6 +427,9 @@ void Members::Controller::subscribeToChanges(not_null<Data::GroupCall*> real) {
 			if (const auto row = findRow(participantPeer)) {
 				if (isMe(participantPeer)) {
 					updateRow(row, update.was, nullptr);
+				} else if (_withAccess.contains(peerToUser(participantPeer->id))) {
+					updateRow(row, update.was, nullptr, Row::State::WithAccess);
+					partitionRows();
 				} else {
 					removeRow(row);
 					delegate()->peerListRefreshRows();
@@ -428,13 +444,9 @@ void Members::Controller::subscribeToChanges(not_null<Data::GroupCall*> real) {
 		toggleVideoEndpointActive(endpoint, true);
 	}
 	_call->videoStreamActiveUpdates(
-	) | rpl::start_with_next([=](const VideoStateToggle &update) {
+	) | rpl::on_next([=](const VideoStateToggle &update) {
 		toggleVideoEndpointActive(update.endpoint, update.value);
 	}, _lifetime);
-
-	if (_prepared) {
-		appendInvitedUsers();
-	}
 }
 
 void Members::Controller::toggleVideoEndpointActive(
@@ -481,13 +493,22 @@ void Members::Controller::toggleVideoEndpointActive(
 
 }
 
-void Members::Controller::appendInvitedUsers() {
+bool Members::Controller::appendInvitedUsers() {
+	auto changed = false;
 	if (const auto id = _call->id()) {
-		for (const auto &user : _peer->owner().invitedToCallUsers(id)) {
-			if (auto row = createInvitedRow(user)) {
+		const auto &invited = _peer->owner().invitedToCallUsers(id);
+		for (const auto &[user, calling] : invited) {
+			if (auto row = createInvitedRow(user, calling)) {
 				delegate()->peerListAppendRow(std::move(row));
+				changed = true;
 			}
 		}
+	}
+	return changed;
+}
+
+void Members::Controller::setupInvitedUsers() {
+	if (appendInvitedUsers()) {
 		delegate()->peerListRefreshRows();
 	}
 
@@ -495,23 +516,99 @@ void Members::Controller::appendInvitedUsers() {
 	_peer->owner().invitesToCalls(
 	) | rpl::filter([=](const Invite &invite) {
 		return (invite.id == _call->id());
-	}) | rpl::start_with_next([=](const Invite &invite) {
-		if (auto row = createInvitedRow(invite.user)) {
+	}) | rpl::on_next([=](const Invite &invite) {
+		const auto user = invite.user;
+		if (invite.removed) {
+			if (const auto row = findRow(user)) {
+				if (row->state() == Row::State::Invited
+					|| row->state() == Row::State::Calling) {
+					delegate()->peerListRemoveRow(row);
+					delegate()->peerListRefreshRows();
+				}
+			}
+		} else if (auto row = createInvitedRow(user, invite.calling)) {
 			delegate()->peerListAppendRow(std::move(row));
 			delegate()->peerListRefreshRows();
 		}
 	}, _lifetime);
 }
 
+bool Members::Controller::appendWithAccessUsers() {
+	auto changed = false;
+	for (const auto id : _withAccess) {
+		if (auto row = createWithAccessRow(_peer->owner().user(id))) {
+			changed = true;
+			delegate()->peerListAppendRow(std::move(row));
+		}
+	}
+	return changed;
+}
+
+void Members::Controller::setupWithAccessUsers() {
+	const auto conference = _call->sharedCall().get();
+	if (!_call->conference() || !conference) {
+		return;
+	}
+	conference->participantsWithAccessValue(
+	) | rpl::on_next([=](base::flat_set<UserId> &&nowIds) {
+		for (auto i = begin(_withAccess); i != end(_withAccess);) {
+			const auto oldId = *i;
+			if (nowIds.remove(oldId)) {
+				++i;
+				continue;
+			}
+			const auto user = _peer->owner().user(oldId);
+			if (const auto row = findRow(user)) {
+				if (row->state() == Row::State::WithAccess) {
+					removeRow(row);
+				}
+			}
+			i = _withAccess.erase(i);
+		}
+		auto partition = false;
+		auto partitionChecked = false;
+		for (const auto nowId : nowIds) {
+			const auto user = _peer->owner().user(nowId);
+			if (!findRow(user)) {
+				if (auto row = createWithAccessRow(user)) {
+					if (!partitionChecked) {
+						partitionChecked = true;
+						if (const auto count = delegate()->peerListFullRowsCount()) {
+							const auto last = delegate()->peerListRowAt(count - 1);
+							const auto state = static_cast<Row*>(last.get())->state();
+							if (state == Row::State::Invited
+								|| state == Row::State::Calling) {
+								partition = true;
+							}
+						}
+					}
+					delegate()->peerListAppendRow(std::move(row));
+				}
+			}
+			_withAccess.emplace(nowId);
+		}
+		if (partition) {
+			delegate()->peerListPartitionRows([](const PeerListRow &row) {
+				const auto state = static_cast<const Row&>(row).state();
+				return (state != Row::State::Invited)
+					&& (state != Row::State::Calling);
+			});
+		}
+		delegate()->peerListRefreshRows();
+	}, _lifetime);
+}
+
 void Members::Controller::updateRow(
 		const std::optional<Data::GroupCallParticipant> &was,
 		const Data::GroupCallParticipant &now) {
-	auto reorderIfInvitedBefore = 0;
+	auto reorderIfNonRealBefore = 0;
 	auto checkPosition = (Row*)nullptr;
 	auto addedToBottom = (Row*)nullptr;
 	if (const auto row = findRow(now.peer)) {
-		if (row->state() == Row::State::Invited) {
-			reorderIfInvitedBefore = row->absoluteIndex();
+		if (row->state() == Row::State::Invited
+			|| row->state() == Row::State::Calling
+			|| row->state() == Row::State::WithAccess) {
+			reorderIfNonRealBefore = row->absoluteIndex();
 		}
 		updateRow(row, was, &now);
 		if ((now.speaking && (!was || !was->speaking))
@@ -523,7 +620,7 @@ void Members::Controller::updateRow(
 		if (row->speaking()) {
 			delegate()->peerListPrependRow(std::move(row));
 		} else {
-			reorderIfInvitedBefore = delegate()->peerListFullRowsCount();
+			reorderIfNonRealBefore = delegate()->peerListFullRowsCount();
 			if (now.raisedHandRating != 0) {
 				checkPosition = row.get();
 			} else {
@@ -533,20 +630,21 @@ void Members::Controller::updateRow(
 		}
 		delegate()->peerListRefreshRows();
 	}
-	static constexpr auto kInvited = Row::State::Invited;
 	const auto reorder = [&] {
-		const auto count = reorderIfInvitedBefore;
+		const auto count = reorderIfNonRealBefore;
 		if (count <= 0) {
 			return false;
 		}
 		const auto row = delegate()->peerListRowAt(
-			reorderIfInvitedBefore - 1).get();
-		return (static_cast<Row*>(row)->state() == kInvited);
+			reorderIfNonRealBefore - 1).get();
+		using State = Row::State;
+		const auto state = static_cast<Row*>(row)->state();
+		return (state == State::Invited)
+			|| (state == State::Calling)
+			|| (state == State::WithAccess);
 	}();
 	if (reorder) {
-		delegate()->peerListPartitionRows([](const PeerListRow &row) {
-			return static_cast<const Row&>(row).state() != kInvited;
-		});
+		partitionRows();
 	}
 	if (checkPosition) {
 		checkRowPosition(checkPosition);
@@ -567,6 +665,27 @@ void Members::Controller::updateRow(
 				return proj(a) > proj(b);
 			});
 		}
+	}
+}
+
+void Members::Controller::partitionRows() {
+	auto hadWithAccess = false;
+	delegate()->peerListPartitionRows([&](const PeerListRow &row) {
+		using State = Row::State;
+		const auto state = static_cast<const Row&>(row).state();
+		if (state == State::WithAccess) {
+			hadWithAccess = true;
+		}
+		return (state != State::Invited)
+			&& (state != State::Calling)
+			&& (state != State::WithAccess);
+	});
+	if (hadWithAccess) {
+		delegate()->peerListPartitionRows([](const PeerListRow &row) {
+			const auto state = static_cast<const Row&>(row).state();
+			return (state != Row::State::Invited)
+				&& (state != Row::State::Calling);
+		});
 	}
 }
 
@@ -615,7 +734,7 @@ bool Members::Controller::needToReorder(not_null<Row*> row) const {
 
 	if (row->speaking()) {
 		return !allRowsAboveAreSpeaking(row);
-	} else if (!_peer->canManageGroupCall()) {
+	} else if (!_call->canManage()) {
 		// Raising hands reorder participants only for voice chat admins.
 		return false;
 	}
@@ -684,7 +803,7 @@ void Members::Controller::checkRowPosition(not_null<Row*> row) {
 			return proj(a) > proj(b);
 		};
 	};
-	delegate()->peerListSortRows(_peer->canManageGroupCall()
+	delegate()->peerListSortRows(_call->canManage()
 		? makeComparator(projForAdmin)
 		: makeComparator(projForOther));
 }
@@ -692,14 +811,21 @@ void Members::Controller::checkRowPosition(not_null<Row*> row) {
 void Members::Controller::updateRow(
 		not_null<Row*> row,
 		const std::optional<Data::GroupCallParticipant> &was,
-		const Data::GroupCallParticipant *participant) {
+		const Data::GroupCallParticipant *participant,
+		Row::State noParticipantState) {
 	const auto wasSounding = row->sounding();
 	const auto wasSsrc = was ? was->ssrc : 0;
 	const auto wasAdditionalSsrc = was
 		? GetAdditionalAudioSsrc(was->videoParams)
 		: 0;
 	row->setSkipLevelUpdate(_skipRowLevelUpdate);
-	row->updateState(participant);
+	if (participant) {
+		row->updateState(*participant);
+	} else if (noParticipantState == Row::State::WithAccess) {
+		row->updateStateWithAccess();
+	} else {
+		row->updateStateInvited(noParticipantState == Row::State::Calling);
+	}
 
 	const auto wasNoSounding = _soundingRowBySsrc.empty();
 	updateRowInSoundingMap(
@@ -842,7 +968,8 @@ void Members::Controller::prepare() {
 	}
 
 	loadMoreRows();
-	appendInvitedUsers();
+	setupWithAccessUsers();
+	setupInvitedUsers();
 	_prepared = true;
 
 	setupListChangeViewers();
@@ -893,6 +1020,12 @@ void Members::Controller::prepareRows(not_null<Data::GroupCall*> real) {
 			delegate()->peerListAppendRow(std::move(row));
 		}
 	}
+	if (appendWithAccessUsers()) {
+		changed = true;
+	}
+	if (appendInvitedUsers()) {
+		changed = true;
+	}
 	if (changed) {
 		delegate()->peerListRefreshRows();
 	}
@@ -919,7 +1052,7 @@ bool Members::Controller::rowIsMe(not_null<PeerData*> participantPeer) {
 }
 
 bool Members::Controller::rowCanMuteMembers() {
-	return _peer->canManageGroupCall();
+	return _call->canManage();
 }
 
 void Members::Controller::rowUpdateRow(not_null<Row*> row) {
@@ -973,15 +1106,21 @@ void Members::Controller::rowPaintIcon(
 		return;
 	}
 	const auto narrow = (state.style == MembersRowStyle::Narrow);
-	if (state.invited) {
+	if (state.invited || state.calling) {
 		if (narrow) {
-			st::groupCallNarrowInvitedIcon.paintInCenter(p, rect);
+			(state.invited
+				? st::groupCallNarrowInvitedIcon
+				: st::groupCallNarrowCallingIcon).paintInCenter(p, rect);
 		} else {
-			st::groupCallMemberInvited.paintInCenter(
+			const auto &icon = state.invited
+				? st::groupCallMemberInvited
+				: st::groupCallMemberCalling;
+			const auto shift = state.invited
+				? st::groupCallMemberInvitedPosition
+				: st::groupCallMemberCallingPosition;
+			icon.paintInCenter(
 				p,
-				QRect(
-					rect.topLeft() + st::groupCallMemberInvitedPosition,
-					st::groupCallMemberInvited.size()));
+				QRect(rect.topLeft() + shift, icon.size()));
 		}
 		return;
 	}
@@ -1189,9 +1328,12 @@ base::unique_qptr<Ui::PopupMenu> Members::Controller::createRowContextMenu(
 	const auto participantPeer = row->peer();
 	const auto real = static_cast<Row*>(row.get());
 	const auto muteState = real->state();
+	if (muteState == Row::State::WithAccess) {
+		return nullptr;
+	}
 	const auto muted = (muteState == Row::State::Muted)
 		|| (muteState == Row::State::RaisedHand);
-	const auto addCover = !_call->rtmp();
+	const auto addCover = !_call->rtmp() && !_call->videoStream();
 	const auto addVolumeItem = (!muted || isMe(participantPeer));
 	const auto admin = IsGroupCallAdmin(_peer, participantPeer);
 	const auto session = &_peer->session();
@@ -1204,36 +1346,36 @@ base::unique_qptr<Ui::PopupMenu> Members::Controller::createRowContextMenu(
 			: addVolumeItem
 			? st::groupCallPopupMenuWithVolume
 			: st::groupCallPopupMenu));
-	const auto weakMenu = Ui::MakeWeak(result.get());
+	const auto weakMenu = base::make_weak(result.get());
 	const auto withActiveWindow = [=](auto callback) {
 		if (const auto window = Core::App().activePrimaryWindow()) {
-			if (const auto menu = weakMenu.data()) {
+			if (const auto menu = weakMenu.get()) {
 				menu->discardParentReActivate();
 
 				// We must hide PopupMenu before we activate the MainWindow,
 				// otherwise we set focus in field inside MainWindow and then
 				// PopupMenu::hide activates back the group call panel :(
-				delete weakMenu;
+				delete weakMenu.get();
 			}
 			window->invokeForSessionController(
 				account,
 				participantPeer,
-				[&](not_null<Window::SessionController*> newController) {
+				[&](not_null<::Window::SessionController*> newController) {
 					callback(newController);
 					newController->widget()->activate();
 				});
 		}
 	};
 	const auto showProfile = [=] {
-		withActiveWindow([=](not_null<Window::SessionController*> window) {
+		withActiveWindow([=](not_null<::Window::SessionController*> window) {
 			window->showPeerInfo(participantPeer);
 		});
 	};
 	const auto showHistory = [=] {
-		withActiveWindow([=](not_null<Window::SessionController*> window) {
+		withActiveWindow([=](not_null<::Window::SessionController*> window) {
 			window->showPeerHistory(
 				participantPeer,
-				Window::SectionShow::Way::Forward);
+				::Window::SectionShow::Way::Forward);
 		});
 	};
 	const auto removeFromVoiceChat = crl::guard(this, [=] {
@@ -1310,14 +1452,14 @@ base::unique_qptr<Ui::PopupMenu> Members::Controller::createRowContextMenu(
 			}
 		}
 
-		if (_call->rtmp()) {
+		if (_call->rtmp() || _call->videoStream()) {
 			addMuteActionsToContextMenu(
 				result,
 				row->peer(),
 				false,
 				static_cast<Row*>(row.get()));
 		} else if (participant
-			&& (!isMe(participantPeer) || _peer->canManageGroupCall())
+			&& (!isMe(participantPeer) || _call->canManage())
 			&& (participant->ssrc != 0
 				|| GetAdditionalAudioSsrc(participant->videoParams) != 0)) {
 			addMuteActionsToContextMenu(
@@ -1340,6 +1482,30 @@ base::unique_qptr<Ui::PopupMenu> Members::Controller::createRowContextMenu(
 				removeHand);
 		}
 	} else {
+		const auto invited = (muteState == Row::State::Invited)
+			|| (muteState == Row::State::Calling);
+		const auto conference = _call->sharedCall().get();
+		if (_call->conference()
+			&& conference
+			&& participantPeer->isUser()
+			&& invited) {
+			const auto id = conference->id();
+			const auto cancelInvite = [=](bool discard) {
+				Core::App().calls().declineOutgoingConferenceInvite(
+					id,
+					participantPeer->asUser(),
+					discard);
+			};
+			if (muteState == Row::State::Calling) {
+				result->addAction(
+					tr::lng_group_call_context_stop_ringing(tr::now),
+					[=] { cancelInvite(false); });
+			}
+			result->addAction(
+				tr::lng_group_call_context_cancel_invite(tr::now),
+				[=] { cancelInvite(true); });
+			result->addSeparator();
+		}
 		result->addAction(
 			(participantPeer->isUser()
 				? tr::lng_context_view_profile(tr::now)
@@ -1354,9 +1520,12 @@ base::unique_qptr<Ui::PopupMenu> Members::Controller::createRowContextMenu(
 		}
 		const auto canKick = [&] {
 			const auto user = participantPeer->asUser();
-			if (static_cast<Row*>(row.get())->state()
-				== Row::State::Invited) {
+			if (muteState == Row::State::Invited
+				|| muteState == Row::State::Calling
+				|| muteState == Row::State::WithAccess) {
 				return false;
+			} else if (conference && _call->canManage()) {
+				return true;
 			} else if (const auto chat = _peer->asChat()) {
 				return chat->amCreator()
 					|| (user
@@ -1387,11 +1556,11 @@ void Members::Controller::addMuteActionsToContextMenu(
 		bool participantIsCallAdmin,
 		not_null<Row*> row) {
 	const auto muteUnmuteString = [=](bool muted, bool mutedByMe) {
-		return (muted && _peer->canManageGroupCall())
+		return (muted && _call->canManage())
 			? tr::lng_group_call_context_unmute(tr::now)
 			: mutedByMe
 			? tr::lng_group_call_context_unmute_for_me(tr::now)
-			: _peer->canManageGroupCall()
+			: _call->canManage()
 			? tr::lng_group_call_context_mute(tr::now)
 			: tr::lng_group_call_context_mute_for_me(tr::now);
 	};
@@ -1418,7 +1587,7 @@ void Members::Controller::addMuteActionsToContextMenu(
 		|| (muteState == Row::State::RaisedHand);
 	const auto mutedByMe = row->mutedByMe();
 
-	auto mutesFromVolume = rpl::never<bool>() | rpl::type_erased();
+	auto mutesFromVolume = rpl::never<bool>() | rpl::type_erased;
 
 	const auto addVolumeItem = (!muted || isMe(participantPeer));
 	if (addVolumeItem) {
@@ -1441,7 +1610,7 @@ void Members::Controller::addMuteActionsToContextMenu(
 		mutesFromVolume = volumeItem->toggleMuteRequests();
 
 		volumeItem->toggleMuteRequests(
-		) | rpl::start_with_next([=](bool muted) {
+		) | rpl::on_next([=](bool muted) {
 			if (muted) {
 				// Slider value is changed after the callback is called.
 				// To capture good state inside the slider frame we postpone.
@@ -1453,19 +1622,19 @@ void Members::Controller::addMuteActionsToContextMenu(
 		}, volumeItem->lifetime());
 
 		volumeItem->toggleMuteLocallyRequests(
-		) | rpl::start_with_next([=](bool muted) {
+		) | rpl::on_next([=](bool muted) {
 			if (!isMe(participantPeer)) {
 				toggleMute(muted, true);
 			}
 		}, volumeItem->lifetime());
 
 		volumeItem->changeVolumeRequests(
-		) | rpl::start_with_next([=](int volume) {
+		) | rpl::on_next([=](int volume) {
 			changeVolume(volume, false);
 		}, volumeItem->lifetime());
 
 		volumeItem->changeVolumeLocallyRequests(
-		) | rpl::start_with_next([=](int volume) {
+		) | rpl::on_next([=](int volume) {
 			if (!isMe(participantPeer)) {
 				changeVolume(volume, true);
 			}
@@ -1477,18 +1646,23 @@ void Members::Controller::addMuteActionsToContextMenu(
 
 		menu->addAction(std::move(volumeItem));
 
-		if (!_call->rtmp() && !isMe(participantPeer)) {
+		if (!_call->rtmp()
+			&& !_call->videoStream()
+			&& !isMe(participantPeer)) {
 			menu->addSeparator();
 		}
 	};
 
 	const auto muteAction = [&]() -> QAction* {
 		if (muteState == Row::State::Invited
+			|| muteState == Row::State::Calling
+			|| muteState == Row::State::WithAccess
 			|| _call->rtmp()
+			|| _call->videoStream()
 			|| isMe(participantPeer)
 			|| (muteState == Row::State::Inactive
 				&& participantIsCallAdmin
-				&& _peer->canManageGroupCall())) {
+				&& _call->canManage())) {
 			return nullptr;
 		}
 		auto callback = [=] {
@@ -1506,7 +1680,7 @@ void Members::Controller::addMuteActionsToContextMenu(
 	if (muteAction) {
 		std::move(
 			mutesFromVolume
-		) | rpl::start_with_next([=](bool mutedFromVolume) {
+		) | rpl::on_next([=](bool mutedFromVolume) {
 			const auto state = _call->canManage()
 				? (mutedFromVolume
 					? (row->raisedHandRating()
@@ -1538,12 +1712,29 @@ std::unique_ptr<Row> Members::Controller::createRow(
 }
 
 std::unique_ptr<Row> Members::Controller::createInvitedRow(
+		not_null<PeerData*> participantPeer,
+		bool calling) {
+	if (const auto row = findRow(participantPeer)) {
+		if (row->state() == Row::State::Invited
+			|| row->state() == Row::State::Calling) {
+			row->updateStateInvited(calling);
+			delegate()->peerListUpdateRow(row);
+		}
+		return nullptr;
+	}
+	const auto state = calling ? Row::State::Calling : Row::State::Invited;
+	auto result = std::make_unique<Row>(this, participantPeer);
+	updateRow(result.get(), std::nullopt, nullptr, state);
+	return result;
+}
+
+std::unique_ptr<Row> Members::Controller::createWithAccessRow(
 		not_null<PeerData*> participantPeer) {
 	if (findRow(participantPeer)) {
 		return nullptr;
 	}
 	auto result = std::make_unique<Row>(this, participantPeer);
-	updateRow(result.get(), std::nullopt, nullptr);
+	updateRow(result.get(), std::nullopt, nullptr, Row::State::WithAccess);
 	return result;
 }
 
@@ -1559,6 +1750,9 @@ Members::Members(
 , _listController(std::make_unique<Controller>(call, parent, mode))
 , _layout(_scroll->setOwnedWidget(
 	object_ptr<Ui::VerticalLayout>(_scroll.data())))
+, _fingerprint(call->conference()
+	? _layout->add(object_ptr<Ui::RpWidget>(_layout.get()))
+	: nullptr)
 , _videoWrap(_layout->add(object_ptr<Ui::RpWidget>(_layout.get())))
 , _viewport(
 	std::make_unique<Viewport>(
@@ -1567,6 +1761,7 @@ Members::Members(
 		backend)) {
 	setupList();
 	setupAddMember(call);
+	setupFingerprint();
 	setContent(_list);
 	setupFakeRoundCorners();
 	_listController->setDelegate(static_cast<PeerListDelegate*>(this));
@@ -1615,6 +1810,7 @@ rpl::producer<int> Members::desiredHeightValue() const {
 	return rpl::combine(
 		heightValue(),
 		_addMemberButton.value(),
+		_shareLinkButton.value(),
 		_listController->fullCountValue(),
 		_mode.value()
 	) | rpl::map([=] {
@@ -1626,21 +1822,27 @@ void Members::setupAddMember(not_null<GroupCall*> call) {
 	using namespace rpl::mappers;
 
 	const auto peer = call->peer();
+	const auto conference = call->conference();
 	const auto canAddByPeer = [=](not_null<PeerData*> peer) {
-		if (peer->isBroadcast()) {
-			return rpl::single(false) | rpl::type_erased();
+		if (conference) {
+			return rpl::single(true) | rpl::type_erased;
+		} else if (peer->isBroadcast()) {
+			return rpl::single(false) | rpl::type_erased;
 		}
 		return rpl::combine(
 			Data::CanSendValue(peer, ChatRestriction::SendOther, false),
 			_call->joinAsValue()
 		) | rpl::map([=](bool can, not_null<PeerData*> joinAs) {
 			return can && joinAs->isSelf();
-		}) | rpl::type_erased();
+		}) | rpl::type_erased;
 	};
 	const auto canInviteByLinkByPeer = [=](not_null<PeerData*> peer) {
+		if (conference) {
+			return rpl::single(true) | rpl::type_erased;
+		}
 		const auto channel = peer->asChannel();
 		if (!channel) {
-			return rpl::single(false) | rpl::type_erased();
+			return rpl::single(false) | rpl::type_erased;
 		}
 		return rpl::single(
 			false
@@ -1649,7 +1851,7 @@ void Members::setupAddMember(not_null<GroupCall*> call) {
 			return Data::PeerFlagValue(
 				channel,
 				ChannelDataFlag::Username);
-		}) | rpl::flatten_latest()) | rpl::type_erased();
+		}) | rpl::flatten_latest()) | rpl::type_erased;
 	};
 	_canAddMembers = canAddByPeer(peer);
 	_canInviteByLink = canInviteByLinkByPeer(peer);
@@ -1661,22 +1863,31 @@ void Members::setupAddMember(not_null<GroupCall*> call) {
 			_canInviteByLink = canInviteByLinkByPeer(channel);
 		});
 
+	const auto baseIndex = _layout->count() - 2;
+
 	rpl::combine(
 		_canAddMembers.value(),
 		_canInviteByLink.value(),
 		_mode.value()
-	) | rpl::start_with_next([=](bool add, bool invite, PanelMode mode) {
+	) | rpl::on_next([=](bool add, bool invite, PanelMode mode) {
 		if (!add && !invite) {
 			if (const auto old = _addMemberButton.current()) {
 				delete old;
 				_addMemberButton = nullptr;
 				updateControlsGeometry();
 			}
+			if (const auto old = _shareLinkButton.current()) {
+				delete old;
+				_shareLinkButton = nullptr;
+				updateControlsGeometry();
+			}
 			return;
 		}
 		auto addMember = Settings::CreateButtonWithIcon(
 			_layout.get(),
-			tr::lng_group_call_invite(),
+			(conference
+				? tr::lng_group_call_invite_conf()
+				: tr::lng_group_call_invite()),
 			st::groupCallAddMember,
 			{ .icon = &st::groupCallAddMemberIcon });
 		addMember->clicks(
@@ -1687,7 +1898,22 @@ void Members::setupAddMember(not_null<GroupCall*> call) {
 		addMember->resizeToWidth(_layout->width());
 		delete _addMemberButton.current();
 		_addMemberButton = addMember.data();
-		_layout->insert(3, std::move(addMember));
+		_layout->insert(baseIndex, std::move(addMember));
+		if (conference) {
+			auto shareLink = Settings::CreateButtonWithIcon(
+				_layout.get(),
+				tr::lng_group_invite_share(),
+				st::groupCallAddMember,
+				{ .icon = &st::groupCallShareLinkIcon });
+			shareLink->clicks() | rpl::to_empty | rpl::start_to_stream(
+				_shareLinkRequests,
+				shareLink->lifetime());
+			shareLink->show();
+			shareLink->resizeToWidth(_layout->width());
+			delete _shareLinkButton.current();
+			_shareLinkButton = shareLink.data();
+			_layout->insert(baseIndex + 1, std::move(shareLink));
+		}
 	}, lifetime());
 
 	updateControlsGeometry();
@@ -1713,13 +1939,15 @@ void Members::setMode(PanelMode mode) {
 }
 
 QRect Members::getInnerGeometry() const {
+	const auto shareLink = _shareLinkButton.current();
 	const auto addMembers = _addMemberButton.current();
+	const auto share = shareLink ? shareLink->height() : 0;
 	const auto add = addMembers ? addMembers->height() : 0;
 	return QRect(
 		0,
 		-_scroll->scrollTop(),
 		width(),
-		_list->y() + _list->height() + _bottomSkip->height() + add);
+		_list->y() + _list->height() + _bottomSkip->height() + add + share);
 }
 
 rpl::producer<int> Members::fullCountValue() const {
@@ -1734,7 +1962,7 @@ void Members::setupList() {
 				_layout.get(),
 				st::groupCallMembersTopSkip));
 		result->paintRequest(
-		) | rpl::start_with_next([=](QRect clip) {
+		) | rpl::on_next([=](QRect clip) {
 			QPainter(result).fillRect(clip, st::groupCallMembersBg);
 		}, result->lifetime());
 		return result;
@@ -1751,7 +1979,7 @@ void Members::setupList() {
 		_list->heightValue() | rpl::map(_1 > 0),
 		_addMemberButton.value() | rpl::map(_1 != nullptr)
 	) | rpl::distinct_until_changed(
-	) | rpl::start_with_next([=](bool hasList, bool hasAddMembers) {
+	) | rpl::on_next([=](bool hasList, bool hasAddMembers) {
 		_topSkip->resize(
 			_topSkip->width(),
 			hasList ? st::groupCallMembersTopSkip : 0);
@@ -1762,7 +1990,7 @@ void Members::setupList() {
 
 	const auto skip = _layout->add(object_ptr<Ui::RpWidget>(_layout.get()));
 	_mode.value(
-	) | rpl::start_with_next([=](PanelMode mode) {
+	) | rpl::on_next([=](PanelMode mode) {
 		skip->resize(skip->width(), (mode == PanelMode::Default)
 			? st::groupCallMembersBottomSkip
 			: 0);
@@ -1771,21 +1999,38 @@ void Members::setupList() {
 	rpl::combine(
 		_mode.value(),
 		_layout->heightValue()
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		resizeToList();
 	}, _layout->lifetime());
 
 	rpl::combine(
 		_scroll->scrollTopValue(),
 		_scroll->heightValue()
-	) | rpl::start_with_next([=](int scrollTop, int scrollHeight) {
+	) | rpl::on_next([=](int scrollTop, int scrollHeight) {
 		_layout->setVisibleTopBottom(scrollTop, scrollTop + scrollHeight);
 	}, _scroll->lifetime());
 }
 
+void Members::setupFingerprint() {
+	if (const auto raw = _fingerprint) {
+		auto badge = SetupFingerprintBadge(
+			raw->lifetime(),
+			_call->emojiHashValue());
+		std::move(badge.repaints) | rpl::start_to_stream(
+			_fingerprintRepaints,
+			raw->lifetime());
+		_fingerprintState = badge.state;
+
+		SetupFingerprintBadgeWidget(
+			raw,
+			_fingerprintState,
+			_fingerprintRepaints.events());
+	}
+}
+
 void Members::trackViewportGeometry() {
 	_call->videoEndpointLargeValue(
-	) | rpl::start_with_next([=](const VideoEndpoint &large) {
+	) | rpl::on_next([=](const VideoEndpoint &large) {
 		_viewport->showLarge(large);
 	}, _viewport->lifetime());
 
@@ -1808,19 +2053,19 @@ void Members::trackViewportGeometry() {
 			std::min(_scroll->height(), _viewport->fullHeight()));
 	};
 	_layout->widthValue(
-	) | rpl::start_with_next([=](int width) {
+	) | rpl::on_next([=](int width) {
 		_viewport->resizeToWidth(width);
 		resize();
 	}, _viewport->lifetime());
 
 	_scroll->heightValue(
-	) | rpl::skip(1) | rpl::start_with_next(resize, _viewport->lifetime());
+	) | rpl::skip(1) | rpl::on_next(resize, _viewport->lifetime());
 
 	_scroll->scrollTopValue(
-	) | rpl::skip(1) | rpl::start_with_next(move, _viewport->lifetime());
+	) | rpl::skip(1) | rpl::on_next(move, _viewport->lifetime());
 
 	_viewport->fullHeightValue(
-	) | rpl::start_with_next([=](int viewport) {
+	) | rpl::on_next([=](int viewport) {
 		_videoWrap->resize(_videoWrap->width(), viewport);
 		if (viewport > 0) {
 			move();
@@ -1879,7 +2124,7 @@ void Members::setupFakeRoundCorners() {
 		result->resize(size, size);
 		result->setAttribute(Qt::WA_TransparentForMouseEvents);
 		result->paintRequest(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			QPainter(result).drawImage(
 				result->rect(),
 				*image,
@@ -1894,16 +2139,22 @@ void Members::setupFakeRoundCorners() {
 	const auto bottomleft = create({ 0, shift });
 	const auto bottomright = create({ shift, shift });
 
+	const auto heightValue = [=](Ui::RpWidget *widget) {
+		topleft->raise();
+		topright->raise();
+		bottomleft->raise();
+		bottomright->raise();
+		return widget ? widget->heightValue() : rpl::single(0);
+	};
 	rpl::combine(
 		_list->geometryValue(),
-		_addMemberButton.value() | rpl::map([=](Ui::RpWidget *widget) {
-			topleft->raise();
-			topright->raise();
-			bottomleft->raise();
-			bottomright->raise();
-			return widget ? widget->heightValue() : rpl::single(0);
-		}) | rpl::flatten_latest()
-	) | rpl::start_with_next([=](QRect list, int addMembers) {
+		_addMemberButton.value() | rpl::map(
+			heightValue
+		) | rpl::flatten_latest(),
+		_shareLinkButton.value() | rpl::map(
+			heightValue
+		) | rpl::flatten_latest()
+	) | rpl::on_next([=](QRect list, int addMembers, int shareLink) {
 		const auto left = list.x();
 		const auto top = list.y() - _topSkip->height();
 		const auto right = left + list.width() - topright->width();
@@ -1912,6 +2163,7 @@ void Members::setupFakeRoundCorners() {
 			+ list.height()
 			+ _bottomSkip->height()
 			+ addMembers
+			+ shareLink
 			- bottomleft->height();
 		topleft->move(left, top);
 		topright->move(right, top);
@@ -1921,7 +2173,7 @@ void Members::setupFakeRoundCorners() {
 
 	refreshImage();
 	style::PaletteChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		refreshImage();
 		topleft->update();
 		topright->update();

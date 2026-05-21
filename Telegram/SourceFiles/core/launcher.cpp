@@ -16,16 +16,30 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/crash_reports.h"
 #include "core/update_checker.h"
 #include "core/sandbox.h"
+#include "storage/storage_location_switch.h"
 #include "base/concurrent_timer.h"
 #include "base/options.h"
 
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QStandardPaths>
+#include <QtCore/QLibraryInfo>
 
 namespace Core {
 namespace {
 
 uint64 InstallationTag = 0;
+
+base::options::toggle OptionHighDpiDownscale({
+	.id = kOptionHighDpiDownscale,
+	.name = "High DPI downscale",
+	.description = "Follow system interface scale settings exactly"
+		" (another approach, likely better quality).",
+	.scope = [] {
+		return !Platform::IsMac()
+			&& QLibraryInfo::version() >= QVersionNumber(6, 4);
+	},
+	.restartRequired = true,
+});
 
 base::options::toggle OptionFreeType({
 	.id = kOptionFreeType,
@@ -62,7 +76,7 @@ FilteredCommandLineArguments::FilteredCommandLineArguments(
 	}
 
 #if defined Q_OS_WIN || defined Q_OS_MAC
-	if (OptionFreeType.value()) {
+	if (OptionFreeType.value() || OptionHighDpiDownscale.value()) {
 		pushArgument("-platform");
 #ifdef Q_OS_WIN
 		pushArgument("windows:fontengine=freetype");
@@ -106,7 +120,7 @@ void ComputeDebugMode() {
 	auto file = QFile(debugModeSettingPath);
 	if (file.exists() && file.open(QIODevice::ReadOnly)) {
 		Logs::SetDebugEnabled(file.read(1) != "0");
-#if defined _DEBUG
+#if defined _DEBUG && !defined Q_OS_MAC
 	} else {
 		Logs::SetDebugEnabled(true);
 #endif
@@ -229,9 +243,22 @@ bool MoveLegacyAlphaFolder() {
 }
 
 bool CheckPortableVersionFolder() {
+	if (Storage::ApplyPendingSwitch()) {
+		return true;
+	}
+
 	if (!MoveLegacyAlphaFolder()) {
 		return false;
 	}
+
+#ifndef Q_OS_WIN // mac/linux
+	// PTG: portable folder
+	const auto ptg_portable_folder = cExeDir() + u"tdata"_q;
+	if (QDir(ptg_portable_folder).exists()) {
+		cForceWorkingDir(cExeDir());
+		return true;
+	}
+#endif // !Q_OS_WIN
 
 	const auto portable = cExeDir() + u"TelegramForcePortable"_q;
 	QFile key(portable + u"/tdata/alpha"_q);
@@ -294,6 +321,7 @@ base::options::toggle OptionFractionalScalingEnabled({
 } // namespace
 
 const char kOptionFractionalScalingEnabled[] = "fractional-scaling-enabled";
+const char kOptionHighDpiDownscale[] = "high-dpi-downscale";
 const char kOptionFreeType[] = "freetype";
 
 Launcher *Launcher::InstanceSetter::Instance = nullptr;
@@ -345,7 +373,14 @@ void Launcher::initHighDpi() {
 	QApplication::setAttribute(Qt::AA_EnableHighDpiScaling, true);
 #endif // Qt < 6.0.0
 
-	if (OptionFractionalScalingEnabled.value()) {
+	if (OptionHighDpiDownscale.value()) {
+		qputenv("QT_WIDGETS_HIGHDPI_DOWNSCALE", "1");
+		qputenv("QT_WIDGETS_RHI", "1");
+		qputenv("QT_WIDGETS_RHI_BACKEND", "opengl");
+	}
+
+	if (OptionFractionalScalingEnabled.value()
+			|| OptionHighDpiDownscale.value()) {
 		QApplication::setHighDpiScaleFactorRoundingPolicy(
 			Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
 	} else {
@@ -536,15 +571,18 @@ void Launcher::processArguments() {
 		{ "-tosettings"     , KeyFormat::NoValues },
 		{ "-startintray"    , KeyFormat::NoValues },
 		{ "-quit"           , KeyFormat::NoValues },
-		{ "-sendpath"       , KeyFormat::AllLeftValues },
 		{ "-workdir"        , KeyFormat::OneValue },
-		{ "--"              , KeyFormat::OneValue },
+		{ "--"              , KeyFormat::AllLeftValues },
 		{ "-scale"          , KeyFormat::OneValue },
 	};
 	auto parseResult = QMap<QByteArray, QStringList>();
 	auto parsingKey = QByteArray();
 	auto parsingFormat = KeyFormat::NoValues;
-	for (const auto &argument : std::as_const(_arguments)) {
+	for (auto i = _arguments.cbegin(); i != _arguments.cend(); ++i) {
+		if (i == _arguments.cbegin()) {
+			continue;
+		}
+		const auto &argument = *i;
 		switch (parsingFormat) {
 		case KeyFormat::OneValue: {
 			parseResult[parsingKey] = QStringList(argument.mid(0, 8192));
@@ -559,7 +597,9 @@ void Launcher::processArguments() {
 			if (it != parseMap.end()) {
 				parsingFormat = it->second;
 				parseResult[parsingKey] = QStringList();
+				continue;
 			}
+			parseResult["--"].push_back(argument.mid(0, 8192));
 		} break;
 		}
 	}
@@ -579,12 +619,15 @@ void Launcher::processArguments() {
 	gStartToSettings = parseResult.contains("-tosettings");
 	gStartInTray = parseResult.contains("-startintray");
 	gQuit = parseResult.contains("-quit");
-	gSendPaths = parseResult.value("-sendpath", {});
 	_customWorkingDir = parseResult.value("-workdir", {}).join(QString());
 	if (!_customWorkingDir.isEmpty()) {
 		_customWorkingDir = QDir(_customWorkingDir).absolutePath() + '/';
 	}
-	gStartUrl = parseResult.value("--", {}).join(QString());
+
+	const auto startUrls = parseResult.value("--", {});
+	gStartUrls = startUrls | ranges::views::transform([&](const QString &url) {
+		return QUrl::fromUserInput(url, _initialWorkingDir);
+	}) | ranges::views::filter(&QUrl::isValid) | ranges::to<QList<QUrl>>;
 
 	const auto scaleKey = parseResult.value("-scale", {});
 	if (scaleKey.size() > 0) {

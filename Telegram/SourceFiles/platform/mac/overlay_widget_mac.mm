@@ -93,6 +93,18 @@ void MacOverlayWidgetHelper::updateStyles(bool fullscreen) {
 		? NSNormalWindowLevel
 		: NSPopUpMenuWindowLevel;
 	[window setLevel:level];
+
+	// Fullscreen overlay: follow the currently active Space on activation.
+	// Windowed overlay: behave like a normal tool panel, so the user can move
+	// it to another desktop and it stays there.
+	auto behavior = [window collectionBehavior];
+	if (fullscreen) {
+		behavior |= NSWindowCollectionBehaviorMoveToActiveSpace;
+	} else {
+		behavior &= ~NSWindowCollectionBehaviorMoveToActiveSpace;
+	}
+	[window setCollectionBehavior:behavior];
+
 	[window setHidesOnDeactivate:!_data->window->testAttribute(Qt::WA_MacAlwaysShowToolWindow)];
 	[window setTitleVisibility:NSWindowTitleHidden];
 	[window setTitlebarAppearsTransparent:YES];
@@ -182,12 +194,12 @@ object_ptr<Ui::AbstractButton> MacOverlayWidgetHelper::create(
 	rpl::merge(
 		_data->masterOpacity.changes() | rpl::to_empty,
 		_data->maximized.changes() | rpl::to_empty
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		raw->update();
 	}, raw->lifetime());
 
 	_data->clearStateRequests.events(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		raw->clearState();
 		raw->update();
 		state->over = raw->isOver();
@@ -273,7 +285,7 @@ object_ptr<Ui::AbstractButton> MacOverlayWidgetHelper::create(
 	};
 
 	raw->paintRequest(
-	) | rpl::start_with_next([=, padding = info.padding] {
+	) | rpl::on_next([=, padding = info.padding] {
 		updateOver();
 		prepareFrame();
 

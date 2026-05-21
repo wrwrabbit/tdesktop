@@ -36,6 +36,10 @@ namespace Window {
 class SessionController;
 } // namespace Window
 
+namespace Calls {
+struct StartOutgoingCallArgs;
+} // namespace Calls
+
 namespace HistoryView {
 
 class SendActionPainter;
@@ -141,12 +145,15 @@ private:
 	void updateInfoToggleActive();
 	void setupDragOnBackButton();
 
-	void call();
+	void call(Calls::StartOutgoingCallArgs);
 	void groupCall();
 	void showGroupCallMenu(not_null<PeerData*> peer);
+	void showCallMenu();
 	void toggleInfoSection();
 
-	[[nodiscard]] bool createMenu(not_null<Ui::IconButton*> button);
+	[[nodiscard]] bool createMenu(
+		not_null<Ui::IconButton*> button,
+		bool withIcons = true);
 
 	void handleEmojiInteractionSeen(const QString &emoticon);
 	bool paintSendAction(
@@ -233,7 +240,7 @@ private:
 	object_ptr<Ui::IconButton> _menuToggle;
 	base::unique_qptr<Ui::PopupMenu> _menu;
 
-	object_ptr<TWidget> _membersShowArea = { nullptr };
+	object_ptr<RpWidget> _membersShowArea = { nullptr };
 	rpl::event_stream<bool> _membersShowAreaActive;
 
 	float64 _narrowRatio = 0.;

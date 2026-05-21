@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_global_privacy.h"
 
 #include "apiwrap.h"
+#include "data/components/promo_suggestions.h"
 #include "data/data_user.h"
 #include "main/main_session.h"
 #include "main/main_app_config.h"
@@ -67,7 +68,7 @@ void GlobalPrivacy::reload(Fn<void()> callback) {
 	}).send();
 
 	_session->appConfig().value(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_showArchiveAndMute = _session->appConfig().get<bool>(
 			u"autoarchive_setting_available"_q,
 			false);
@@ -101,13 +102,11 @@ rpl::producer<bool> GlobalPrivacy::showArchiveAndMute() const {
 }
 
 rpl::producer<> GlobalPrivacy::suggestArchiveAndMute() const {
-	return _session->appConfig().suggestionRequested(
-		u"AUTOARCHIVE_POPULAR"_q);
+	return _session->promoSuggestions().requested(u"AUTOARCHIVE_POPULAR"_q);
 }
 
 void GlobalPrivacy::dismissArchiveAndMuteSuggestion() {
-	_session->appConfig().dismissSuggestion(
-		u"AUTOARCHIVE_POPULAR"_q);
+	_session->promoSuggestions().dismiss(u"AUTOARCHIVE_POPULAR"_q);
 }
 
 void GlobalPrivacy::updateHideReadTime(bool hide) {
@@ -263,6 +262,9 @@ void GlobalPrivacy::update(
 			: DisallowedFlag())
 		| ((disallowedGiftTypes & DisallowedGiftType::Unique)
 			? DisallowedFlag::f_disallow_unique_stargifts
+			: DisallowedFlag())
+		| ((disallowedGiftTypes & DisallowedGiftType::FromChannels)
+			? DisallowedFlag::f_disallow_stargifts_from_channels
 			: DisallowedFlag());
 	const auto typesWas = _disallowedGiftTypes.current();
 	const auto typesChanged = (typesWas != disallowedGiftTypes);
@@ -322,6 +324,9 @@ void GlobalPrivacy::apply(const MTPGlobalPrivacySettings &settings) {
 				: DisallowedGiftType())
 			| (disallow.is_disallow_premium_gifts()
 				? DisallowedGiftType::Premium
+				: DisallowedGiftType())
+			| (disallow.is_disallow_stargifts_from_channels()
+				? DisallowedGiftType::FromChannels
 				: DisallowedGiftType())
 			| (data.is_display_gifts_button()
 				? DisallowedGiftType::SendHide

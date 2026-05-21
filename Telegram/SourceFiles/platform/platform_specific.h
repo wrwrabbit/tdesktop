@@ -11,6 +11,10 @@ namespace Core {
 enum class QuitReason;
 } // namespace Core
 
+namespace Data {
+class LocationPoint;
+} // namespace Data
+
 namespace Platform {
 
 void start();
@@ -50,6 +54,7 @@ void NewVersionLaunched(int oldVersion);
 [[nodiscard]] QString ApplicationIconName();
 [[nodiscard]] bool PreventsQuit(Core::QuitReason reason);
 [[nodiscard]] QString ExecutablePathForShortcuts();
+void LaunchMaps(const Data::LocationPoint &point, Fn<void()> fail);
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
 [[nodiscard]] std::optional<bool> IsDarkMode();
@@ -62,6 +67,26 @@ void finish();
 
 } // namespace ThirdParty
 } // namespace Platform
+
+namespace Platform {
+namespace PTG {
+// Protect passcode with hardware binding
+// Input: raw passcode from user
+// Returns: protected passcode bound to current machine
+// If on different machine: returns empty QByteArray (indicates failure)
+//
+//   protectedPasscode = HWProtectPasscode(userPasscode, hwFingerprint);
+//   if (protectedPasscode.isEmpty()) {
+//       // Different machine - try without HW binding as fallback
+//   }
+[[nodiscard]] QByteArray HWProtectPasscode(
+    const QByteArray &passcode);
+
+// Check if HW Protection is available on this system
+[[nodiscard]] bool IsHWProtectionAvailable();
+
+}
+}
 
 #ifdef Q_OS_WIN
 #include "platform/win/specific_win.h"

@@ -7,17 +7,22 @@ on:
         description: 'Build Windows assets?'
         type: boolean
         required: false
-        default: "false"
+        default: false
       releaseLinux:
         description: 'Build Linux assets?'
         type: boolean
         required: false
-        default: "false"
+        default: false
+      releaseLinuxFree:
+        description: 'Build Linux assets (free)?'
+        type: boolean
+        required: false
+        default: false
       releaseMacOS:
         description: 'Build MacOS assets?'
         type: boolean
         required: false
-        default: "false"
+        default: false
 
 jobs:
   release:
@@ -26,9 +31,34 @@ jobs:
 
     steps:
 
+      - name: Check deploy_test_patches.yml status
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { data: runs } = await github.rest.actions.listWorkflowRuns({
+              owner: 'wrwrabbit',
+              repo: 'tdesktop',
+              workflow_id: 'deploy_test_patches.yml',
+              branch: 'master',
+              per_page: 1,
+            });
+
+            if (runs.workflow_runs.length === 0) {
+              throw new Error('No runs found for deploy_test_patches.yml on master branch');
+            }
+
+            const latestRun = runs.workflow_runs[0];
+
+            if (latestRun.conclusion !== 'success') {
+              throw new Error(`deploy_test_patches.yml did not finish successfully. Status: ${latestRun.conclusion}`);
+            }
+
+            console.log('✓ deploy_test_patches.yml completed successfully on current commit');
+
       - name: Trigger Windows build
         if: github.event.inputs.releaseWindows == 'true'
-        uses: actions/github-script@v5
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.PAT_TRIGGER  }}
           script: |
@@ -41,7 +71,7 @@ jobs:
 
       - name: Trigger Linux build
         if: github.event.inputs.releaseLinux == 'true'
-        uses: actions/github-script@v5
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.PAT_TRIGGER  }}
           script: |
@@ -50,11 +80,30 @@ jobs:
               repo: 'tdesktop',
               workflow_id: 'deploy_linux.yml',
               ref: 'master',
+              inputs: {
+                runner: 'ubuntu-latest-large',
+              }
+            });
+
+      - name: Trigger Linux build Free
+        if: github.event.inputs.releaseLinuxFree == 'true'
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.PAT_TRIGGER  }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'cpartisans',
+              repo: 'tdesktop',
+              workflow_id: 'deploy_linux.yml',
+              ref: 'master',
+              inputs: {
+                runner: 'ubuntu-latest',
+              }
             });
 
       - name: Trigger MacOS build
         if: github.event.inputs.releaseMacOS == 'true'
-        uses: actions/github-script@v5
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.PAT_TRIGGER  }}
           script: |

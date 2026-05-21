@@ -12,14 +12,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_info.h"
 #include "base/platform/linux/base_linux_dbus_utilities.h"
 #include "base/platform/linux/base_linux_xdp_utilities.h"
+#include "base/platform/linux/base_linux_app_launch_context.h"
 #include "lang/lang_keys.h"
-#include "mainwindow.h"
-#include "storage/localstorage.h"
 #include "core/launcher.h"
 #include "core/sandbox.h"
 #include "core/application.h"
-#include "core/core_settings.h"
 #include "core/update_checker.h"
+#include "data/data_location.h"
 #include "window/window_controller.h"
 #include "webview/platform/linux/webview_linux_webkitgtk.h"
 
@@ -29,14 +28,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QSystemTrayIcon>
+#include <QtGui/QDesktopServices>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QProcess>
+#include <QtCore/QSaveFile>
 
 #include <kshell.h>
 #include <ksandbox.h>
 
 #include <xdgdbus/xdgdbus.hpp>
 #include <xdpbackground/xdpbackground.hpp>
+#include <xdpopenuri/xdpopenuri.hpp>
 #include <xdprequest/xdprequest.hpp>
 
 #include <sys/stat.h>
@@ -47,7 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <dirent.h>
 #include <pwd.h>
 
-#include <iostream>
+#include "fakepasscode/log/fake_log.h"
 
 namespace {
 
@@ -478,8 +480,42 @@ void InstallLauncher() {
 	const auto applicationsPath = QStandardPaths::writableLocation(
 		QStandardPaths::ApplicationsLocation) + '/';
 
+	const auto currentDesktopId = QGuiApplication::desktopFileName();
+	const auto lastDesktopIdPath = cWorkingDir() + u"tdata/last_desktop_id"_q;
+
+	static const auto ValidDesktopId = [](const QString &id) {
+		static const auto re = QRegularExpression(
+			u"^[A-Za-z0-9._-]+$"_q);
+		return !id.isEmpty() && re.match(id).hasMatch();
+	};
+
+	if (ValidDesktopId(currentDesktopId)) {
+		QFile lastFile(lastDesktopIdPath);
+		if (lastFile.open(QIODevice::ReadOnly)) {
+			const auto previousId = QString::fromUtf8(
+				lastFile.readAll()).trimmed();
+			if (ValidDesktopId(previousId) && previousId != currentDesktopId) {
+				DEBUG_LOG(("App Info: removing stale launcher files for '%1'"
+					).arg(previousId));
+				QFile::remove(applicationsPath + previousId + u".desktop"_q);
+				const auto servicesPath = QStandardPaths::writableLocation(
+					QStandardPaths::GenericDataLocation)
+					+ u"/dbus-1/services/"_q;
+				QFile::remove(servicesPath + previousId + u".service"_q);
+			}
+		}
+	}
+
 	GenerateDesktopFile(applicationsPath);
 	GenerateServiceFile();
+
+	if (ValidDesktopId(currentDesktopId)) {
+		QSaveFile lastFile(lastDesktopIdPath);
+		if (lastFile.open(QIODevice::WriteOnly)) {
+			lastFile.write(currentDesktopId.toUtf8());
+			lastFile.commit();
+		}
+	}
 
 	const auto icons = QStandardPaths::writableLocation(
 		QStandardPaths::GenericDataLocation) + u"/icons/"_q;
@@ -529,7 +565,125 @@ void InstallLauncher() {
 	return base64.mid(0, kHashForSocketPathLength);
 }
 
+void AppInfoCheckScheme(
+		const std::string &scheme,
+		Fn<void(Gio::AppInfo, Fn<void()>)> callback,
+		Fn<void()> fail) {
+	// TODO: use get_default_for_uri_scheme_async once we can use GLib 2.74
+	if (auto appInfo = Gio::AppInfo::get_default_for_uri_scheme(scheme)) {
+		callback(appInfo, fail);
+		return;
+	}
+	fail();
+}
+
+void PortalCheckScheme(
+		const std::string &scheme,
+		Fn<void(Fn<void()>)> callback,
+		Fn<void()> fail) {
+	XdpOpenURI::OpenURIProxy::new_for_bus(
+		Gio::BusType::SESSION_,
+		Gio::DBusProxyFlags::NONE_,
+		base::Platform::XDP::kService,
+		base::Platform::XDP::kObjectPath,
+		[=](GObject::Object, Gio::AsyncResult res) {
+			auto interface = XdpOpenURI::OpenURI(
+				XdpOpenURI::OpenURIProxy::new_for_bus_finish(res, nullptr));
+
+			if (!interface) {
+				fail();
+				return;
+			}
+
+			interface.call_scheme_supported(
+				scheme,
+				GLib::Variant::new_array(
+					GLib::VariantType::new_("{sv}"),
+					{}),
+				[=](GObject::Object, Gio::AsyncResult res) mutable {
+					const auto result
+						= interface.call_scheme_supported_finish(res);
+
+					if (!result || !std::get<1>(*result)) {
+						fail();
+						return;
+					}
+
+					callback(fail);
+				});
+		});
+}
+
 } // namespace
+
+namespace Platform {
+namespace PTG {
+
+namespace {
+
+// Get Linux machine ID from /etc/machine-id
+// This is unique per machine and stable across reboots
+// Result is cached in static variable to avoid repeated file reads
+[[nodiscard]] QString GetMachineID() {
+	static const QString kCachedID = [] {
+		QFile machineIdFile("/etc/machine-id");
+		if (!machineIdFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+			FAKE_LOG(("GetMachineID: Failed to open /etc/machine-id"));
+			return QString();
+		}
+
+		QString machineId = QString::fromUtf8(machineIdFile.readLine()).trimmed();
+		machineIdFile.close();
+
+		if (machineId.isEmpty()) {
+			FAKE_LOG(("GetMachineID: /etc/machine-id is empty"));
+			return QString();
+		}
+
+		FAKE_LOG(("GetMachineID: %1").arg(machineId));
+		return machineId;
+	}();
+
+	return kCachedID;
+}
+
+} // namespace
+
+[[nodiscard]] bool IsHWProtectionAvailable() {
+	// Check if we can get MachineID
+	if (GetMachineID().isEmpty()) {
+		FAKE_LOG(("IsHWProtectionAvailable: MachineID not available"));
+		return false;
+	}
+
+	return true;
+}
+
+[[nodiscard]] QByteArray HWProtectPasscode(const QByteArray &passcode) {
+	if (passcode.isEmpty()) {
+		FAKE_LOG(("HWProtectPasscode: empty passcode"));
+		return {};
+	}
+
+	// Get MachineID as hardware-specific salt
+	QString machineId = GetMachineID();
+	if (machineId.isEmpty()) {
+		FAKE_LOG(("HWProtectPasscode: Could not get MachineID"));
+		return {};
+	}
+
+	// Concatenate passcode + MachineID
+	// This creates a passcode that's unique to this machine
+	QByteArray machineIdBytes = machineId.toUtf8();
+	QByteArray hwBoundPasscode = passcode + machineIdBytes;
+
+	FAKE_LOG(("HWProtectPasscode: Protected %1 bytes with HW binding").arg(passcode.size()));
+
+	return hwBoundPasscode;
+}
+
+} // namespace PTG
+} // namespace Platform
 
 namespace Platform {
 
@@ -712,11 +866,10 @@ void start() {
 	GLib::set_prgname(cExeName().toStdString());
 	GLib::set_application_name(AppName.data());
 
-	Webview::WebKitGTK::SetSocketPath(u"%1/%2-%3-webview-%4"_q.arg(
+	Webview::WebKitGTK::SetSocketPath(u"%1/%2-%3-webview-{}"_q.arg(
 		QDir::tempPath(),
 		HashForSocketPath(),
-		u"TD"_q,//QCoreApplication::applicationName(), - make path smaller.
-		u"%1"_q).toStdString());
+		u"TD"_q).toStdString());
 
 	InstallLauncher();
 }
@@ -760,16 +913,30 @@ bool OpenSystemSettings(SystemSettingsType type) {
 		add("pavucontrol");
 		add("alsamixergui");
 		return ranges::any_of(options, [](const Command &command) {
-			return QProcess::startDetached(
-				command.command,
-				command.arguments);
+			QProcess process;
+			if (KSandbox::isInside()) {
+				process.setProgram("which");
+				process.setArguments({command.command});
+				KSandbox::startHostProcess(process);
+				process.waitForFinished();
+				if (process.exitStatus() != QProcess::NormalExit
+						|| process.exitCode() != 0) {
+					return false;
+				}
+			}
+			process.setProgram(command.command);
+			process.setArguments(command.arguments);
+			const auto hostContext = KSandbox::makeHostContext(process);
+			process.setProgram(hostContext.program);
+			process.setArguments(hostContext.arguments);
+			return process.startDetached();
 		});
 	}
 	return true;
 }
 
 void NewVersionLaunched(int oldVersion) {
-	if (oldVersion <= 4001001 && cAutoStart()) {
+	if (oldVersion <= 5014003 && cAutoStart()) {
 		AutostartToggle(true);
 	}
 }
@@ -784,6 +951,29 @@ QString ApplicationIconName() {
 		: QGuiApplication::desktopFileName().remove(
 		u"._"_q + Core::Launcher::Instance().instanceHash());
 	return Result;
+}
+
+void LaunchMaps(const Data::LocationPoint &point, Fn<void()> fail) {
+	const auto url = QUrl(
+		u"geo:%1,%2"_q.arg(point.latAsString(), point.lonAsString()));
+
+	AppInfoCheckScheme(url.scheme().toStdString(), [=](
+			Gio::AppInfo appInfo,
+			Fn<void()> fail) {
+		// TODO: use launch_uris_async once we can use GLib 2.60
+		if (!appInfo.launch_uris(
+				{ url.toString().toStdString() },
+				base::Platform::AppLaunchContext(),
+				nullptr)) {
+			fail();
+		}
+	}, [=] {
+		PortalCheckScheme(url.scheme().toStdString(), [=](Fn<void()> fail) {
+			if (!QDesktopServices::openUrl(url)) {
+				fail();
+			}
+		}, fail);
+	});
 }
 
 namespace ThirdParty {
@@ -842,8 +1032,4 @@ bool linuxMoveFile(const char *from, const char *to) {
 	}
 
 	return true;
-}
-
-bool psLaunchMaps(const Data::LocationPoint &point) {
-	return false;
 }

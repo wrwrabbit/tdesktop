@@ -15,7 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Ui {
 
 void ConfirmBox(not_null<Ui::GenericBox*> box, ConfirmBoxArgs &&args) {
-	const auto weak = Ui::MakeWeak(box);
+	const auto weak = base::make_weak(box);
 	const auto lifetime = box->lifetime().make_state<rpl::lifetime>();
 
 	const auto withTitle = !v::is_null(args.title);
@@ -58,16 +58,27 @@ void ConfirmBox(not_null<Ui::GenericBox*> box, ConfirmBoxArgs &&args) {
 	};
 
 	const auto &defaultButtonStyle = box->getDelegate()->style().button;
-
+	const auto confirmTextPlain = v::is_null(args.confirmText)
+		|| v::is<rpl::producer<QString>>(args.confirmText)
+		|| v::is<QString>(args.confirmText);
 	const auto confirmButton = box->addButton(
-		v::text::take_plain(std::move(args.confirmText), tr::lng_box_ok()),
+		(confirmTextPlain
+			? v::text::take_plain(
+				std::move(args.confirmText),
+				tr::lng_box_ok())
+			: rpl::single(QString())),
 		[=, c = prepareCallback(args.confirmed)]() {
 			lifetime->destroy();
 			c();
 		},
 		args.confirmStyle ? *args.confirmStyle : defaultButtonStyle);
+	if (!confirmTextPlain) {
+		confirmButton->setText(
+			v::text::take_marked(std::move(args.confirmText)));
+	}
+
 	box->events(
-	) | rpl::start_with_next([=](not_null<QEvent*> e) {
+	) | rpl::on_next([=](not_null<QEvent*> e) {
 		if ((e->type() != QEvent::KeyPress) || !confirmButton) {
 			return;
 		}
@@ -87,7 +98,7 @@ void ConfirmBox(not_null<Ui::GenericBox*> box, ConfirmBoxArgs &&args) {
 			args.cancelStyle ? *args.cancelStyle : defaultButtonStyle);
 
 		box->boxClosing(
-		) | rpl::start_with_next(crl::guard(cancelButton, [=] {
+		) | rpl::on_next(crl::guard(cancelButton, [=] {
 			cancelButton->clicked(Qt::KeyboardModifiers(), Qt::LeftButton);
 		}), *lifetime);
 	}
@@ -116,12 +127,12 @@ void IconWithTitle(
 	}
 
 	icon->heightValue(
-	) | rpl::start_with_next([=](int height) {
+	) | rpl::on_next([=](int height) {
 		line->resize(line->width(), height);
 	}, icon->lifetime());
 
 	line->widthValue(
-	) | rpl::start_with_next([=](int width) {
+	) | rpl::on_next([=](int width) {
 		icon->moveToLeft(0, 0);
 		const auto skip = st::defaultBoxCheckbox.textPosition.x();
 		title->resizeToWidth(width - rect::right(icon) - skip);

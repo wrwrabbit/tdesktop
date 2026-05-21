@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "info/info_flexible_scroll.h"
 #include "info/info_wrap_widget.h"
 #include "info/statistics/info_statistics_tag.h"
 #include "ui/controls/swipe_handler_data.h"
@@ -39,6 +40,14 @@ namespace Ui::Menu {
 struct MenuCallback;
 } // namespace Ui::Menu
 
+namespace ChatHelpers {
+struct FileChosen;
+} // namespace ChatHelpers
+
+namespace SendMenu {
+struct Details;
+} // namespace SendMenu
+
 namespace Info::Settings {
 struct Tag;
 } // namespace Info::Settings
@@ -46,11 +55,6 @@ struct Tag;
 namespace Info::Downloads {
 struct Tag;
 } // namespace Info::Downloads
-
-namespace Info::Stories {
-struct Tag;
-enum class Tab;
-} // namespace Info::Stories
 
 namespace Info::Statistics {
 struct Tag;
@@ -65,10 +69,23 @@ namespace Info::GlobalMedia {
 struct Tag;
 } // namespace Info::GlobalMedia
 
+namespace Info::PeerGifts {
+struct Tag;
+} // namespace Info::PeerGifts
+
+namespace Info::Stories {
+struct Tag;
+} // namespace Info::Stories
+
+namespace Info::Saved {
+struct MusicTag;
+} // namespace Info::Saved
+
 namespace Info {
 
 class ContentMemento;
 class Controller;
+struct FlexibleScrollData;
 
 class ContentWidget : public Ui::RpWidget {
 public:
@@ -132,6 +149,8 @@ public:
 		-> rpl::producer<Dialogs::Stories::Content>;
 
 	virtual void saveChanges(FnMut<void()> done);
+	[[nodiscard]] virtual SendMenu::Details sendMenuDetails() const;
+	virtual bool processChosenSticker(ChatHelpers::FileChosen &&chosen);
 
 	[[nodiscard]] int scrollBottomSkip() const;
 	[[nodiscard]] rpl::producer<int> scrollBottomSkipValue() const;
@@ -145,6 +164,20 @@ protected:
 	Widget *setInnerWidget(object_ptr<Widget> inner) {
 		return static_cast<Widget*>(
 			doSetInnerWidget(std::move(inner)));
+	}
+
+	template <typename Widget>
+	Widget *setupFlexibleInnerWidget(
+			object_ptr<Widget> inner,
+			FlexibleScrollData &flexibleScroll,
+			Fn<void(Ui::RpWidget*)> customSetup = nullptr) {
+		if (!inner->hasFlexibleTopBar()) {
+			return setInnerWidget(std::move(inner));
+		}
+		return static_cast<Widget*>(doSetupFlexibleInnerWidget(
+			std::move(inner),
+			flexibleScroll,
+			std::move(customSetup)));
 	}
 
 	[[nodiscard]] not_null<Controller*> controller() const {
@@ -170,7 +203,12 @@ protected:
 	void setViewport(rpl::producer<not_null<QEvent*>> &&events) const;
 
 private:
-	RpWidget *doSetInnerWidget(object_ptr<RpWidget> inner);
+	Ui::RpWidget *doSetInnerWidget(object_ptr<Ui::RpWidget> inner);
+	Ui::RpWidget *doSetupFlexibleInnerWidget(
+		object_ptr<Ui::RpWidget> inner,
+		FlexibleScrollData &flexibleScroll,
+		Fn<void(Ui::RpWidget*)> customSetup);
+
 	void updateControlsGeometry();
 	void refreshSearchField(bool shown);
 	void setupSwipeHandler(not_null<Ui::RpWidget*> widget);
@@ -210,10 +248,13 @@ public:
 	ContentMemento(
 		not_null<PeerData*> peer,
 		Data::ForumTopic *topic,
+		Data::SavedSublist *sublist,
 		PeerId migratedPeerId);
+	explicit ContentMemento(PeerGifts::Tag gifts);
 	explicit ContentMemento(Settings::Tag settings);
 	explicit ContentMemento(Downloads::Tag downloads);
 	explicit ContentMemento(Stories::Tag stories);
+	explicit ContentMemento(Saved::MusicTag music);
 	explicit ContentMemento(Statistics::Tag statistics);
 	explicit ContentMemento(BotStarRef::Tag starref);
 	explicit ContentMemento(GlobalMedia::Tag global);
@@ -225,62 +266,77 @@ public:
 		std::shared_ptr<Api::WhoReadList> whoReadIds,
 		FullMsgId contextId,
 		Data::ReactionId selected);
+	virtual ~ContentMemento() = default;
 
-	virtual object_ptr<ContentWidget> createWidget(
+	[[nodiscard]] virtual object_ptr<ContentWidget> createWidget(
 		QWidget *parent,
 		not_null<Controller*> controller,
 		const QRect &geometry) = 0;
 
-	PeerData *peer() const {
+	[[nodiscard]] PeerData *peer() const {
 		return _peer;
 	}
-	PeerId migratedPeerId() const {
+	[[nodiscard]] PeerId migratedPeerId() const {
 		return _migratedPeerId;
 	}
-	Data::ForumTopic *topic() const {
+	[[nodiscard]] Data::ForumTopic *topic() const {
 		return _topic;
 	}
-	UserData *settingsSelf() const {
+	[[nodiscard]] Data::SavedSublist *sublist() const {
+		return _sublist;
+	}
+	[[nodiscard]] UserData *settingsSelf() const {
 		return _settingsSelf;
 	}
-	PeerData *storiesPeer() const {
+	[[nodiscard]] PeerData *storiesPeer() const {
 		return _storiesPeer;
 	}
-	Stories::Tab storiesTab() const {
-		return _storiesTab;
+	[[nodiscard]] int storiesAlbumId() const {
+		return _storiesAlbumId;
 	}
-	Statistics::Tag statisticsTag() const {
+	[[nodiscard]] int storiesAddToAlbumId() const {
+		return _storiesAddToAlbumId;
+	}
+	[[nodiscard]] PeerData *musicPeer() const {
+		return _musicPeer;
+	}
+	[[nodiscard]] PeerData *giftsPeer() const {
+		return _giftsPeer;
+	}
+	[[nodiscard]] int giftsCollectionId() const {
+		return _giftsCollectionId;
+	}
+	[[nodiscard]] Statistics::Tag statisticsTag() const {
 		return _statisticsTag;
 	}
-	PeerData *starrefPeer() const {
+	[[nodiscard]] PeerData *starrefPeer() const {
 		return _starrefPeer;
 	}
-	BotStarRef::Type starrefType() const {
+	[[nodiscard]] BotStarRef::Type starrefType() const {
 		return _starrefType;
 	}
-	PollData *poll() const {
+	[[nodiscard]] PollData *poll() const {
 		return _poll;
 	}
-	FullMsgId pollContextId() const {
+	[[nodiscard]] FullMsgId pollContextId() const {
 		return _poll ? _pollReactionsContextId : FullMsgId();
 	}
-	std::shared_ptr<Api::WhoReadList> reactionsWhoReadIds() const {
+	[[nodiscard]] auto reactionsWhoReadIds() const
+	-> std::shared_ptr<Api::WhoReadList> {
 		return _reactionsWhoReadIds;
 	}
-	Data::ReactionId reactionsSelected() const {
+	[[nodiscard]] Data::ReactionId reactionsSelected() const {
 		return _reactionsSelected;
 	}
-	FullMsgId reactionsContextId() const {
+	[[nodiscard]] FullMsgId reactionsContextId() const {
 		return _reactionsWhoReadIds ? _pollReactionsContextId : FullMsgId();
 	}
-	UserData *globalMediaSelf() const {
+	[[nodiscard]] UserData *globalMediaSelf() const {
 		return _globalMediaSelf;
 	}
-	Key key() const;
+	[[nodiscard]] Key key() const;
 
-	virtual Section section() const = 0;
-
-	virtual ~ContentMemento() = default;
+	[[nodiscard]] virtual Section section() const = 0;
 
 	void setScrollTop(int scrollTop) {
 		_scrollTop = scrollTop;
@@ -291,19 +347,19 @@ public:
 	void setSearchFieldQuery(const QString &query) {
 		_searchFieldQuery = query;
 	}
-	QString searchFieldQuery() const {
+	[[nodiscard]] QString searchFieldQuery() const {
 		return _searchFieldQuery;
 	}
 	void setSearchEnabledByContent(bool enabled) {
 		_searchEnabledByContent = enabled;
 	}
-	bool searchEnabledByContent() const {
+	[[nodiscard]] bool searchEnabledByContent() const {
 		return _searchEnabledByContent;
 	}
 	void setSearchStartsFocused(bool focused) {
 		_searchStartsFocused = focused;
 	}
-	bool searchStartsFocused() const {
+	[[nodiscard]] bool searchStartsFocused() const {
 		return _searchStartsFocused;
 	}
 
@@ -311,9 +367,14 @@ private:
 	PeerData * const _peer = nullptr;
 	const PeerId _migratedPeerId = 0;
 	Data::ForumTopic *_topic = nullptr;
+	Data::SavedSublist *_sublist = nullptr;
 	UserData * const _settingsSelf = nullptr;
 	PeerData * const _storiesPeer = nullptr;
-	Stories::Tab _storiesTab = {};
+	int _storiesAlbumId = 0;
+	int _storiesAddToAlbumId = 0;
+	PeerData * const _musicPeer = nullptr;
+	PeerData * const _giftsPeer = nullptr;
+	int _giftsCollectionId = 0;
 	Statistics::Tag _statisticsTag;
 	PeerData * const _starrefPeer = nullptr;
 	BotStarRef::Type _starrefType = {};

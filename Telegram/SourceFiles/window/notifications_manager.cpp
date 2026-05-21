@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/notifications_manager.h"
 
 #include "base/options.h"
+#include "base/platform/base_platform_info.h"
+#include "base/qt/qt_key_modifiers.h"
 #include "platform/platform_notifications_manager.h"
 #include "window/notifications_manager_default.h"
 #include "media/audio/media_audio_track.h"
@@ -15,11 +17,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtproto_config.h"
 #include "history/history.h"
 #include "history/history_item_components.h"
-#include "history/view/history_view_replies_section.h"
+#include "history/view/history_view_chat_section.h"
 #include "lang/lang_keys.h"
 #include "data/notify/data_notify_settings.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_document_media.h"
+#include "data/data_saved_sublist.h"
 #include "data/data_session.h"
 #include "data/data_channel.h"
 #include "data/data_forum_topic.h"
@@ -31,14 +34,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "core/application.h"
 #include "mainwindow.h"
+#include "api/api_reactions_notify_settings.h"
 #include "api/api_updates.h"
 #include "apiwrap.h"
 #include "main/main_account.h"
-#include "main/main_session.h"
 #include "main/main_domain.h"
+#include "main/main_session.h"
+#include "main/main_session_settings.h"
 #include "ui/text/text_utilities.h"
+#include "platform/platform_specific.h"
 
 #include <QtGui/QWindow>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QScreen>
 
 #if __has_include(<gio/gio.hpp>)
 #include <gio/gio.hpp>
@@ -124,9 +132,27 @@ constexpr auto kSystemAlertDuration = crl::time(0);
 		: std::optional<DocumentId>();
 }
 
+[[nodiscard]] bool AllowNotificationActions(not_null<PeerData*> peer) {
+	return Platform::IsMac() && peer->isNotificationsUser();
+}
+
 } // namespace
 
+const char kOptionCustomNotification[] = "custom-notification";
+
+base::options::toggle OptionCustomNotification({
+	.id = kOptionCustomNotification,
+	.name = "Force non-native notifications availability",
+	.description = "Allow to disable native notifications"
+		" even if custom notifications are broken on this platform",
+	.scope = [] {
+		return Platform::Notifications::Enforced();
+	},
+	.restartRequired = true,
+});
+
 const char kOptionGNotification[] = "gnotification";
+const char kOptionHideReplyButton[] = "hide-reply-button";
 
 base::options::toggle OptionGNotification({
 	.id = kOptionGNotification,
@@ -144,9 +170,15 @@ base::options::toggle OptionGNotification({
 	.restartRequired = true,
 });
 
+base::options::toggle HideReplyButtonOption({
+	.id = kOptionHideReplyButton,
+	.name = "Hide reply button",
+	.description = "Hide reply button in notifications.",
+});
+
 struct System::Waiter {
 	NotificationInHistoryKey key;
-	UserData *reactionSender = nullptr;
+	UserData *reactionOrVoteSender = nullptr;
 	Data::ItemNotificationType type = Data::ItemNotificationType::Message;
 	crl::time when = 0;
 };
@@ -168,7 +200,7 @@ System::System()
 , _waitForAllGroupedTimer([=] { showGrouped(); })
 , _manager(std::make_unique<DummyManager>(this)) {
 	settingsChanged(
-	) | rpl::start_with_next([=](ChangeType type) {
+	) | rpl::on_next([=](ChangeType type) {
 		if (type == ChangeType::DesktopEnabled) {
 			clearAll();
 		} else if (type == ChangeType::ViewParams) {
@@ -186,12 +218,16 @@ void System::createManager() {
 
 void System::setManager(Fn<std::unique_ptr<Manager>()> create) {
 	Expects(_manager != nullptr);
+	const auto oldManager = _manager.get();
 	const auto guard = gsl::finally([&] {
 		Ensures(_manager != nullptr);
+		if (oldManager != _manager.get()) {
+			_managerChanged.fire({});
+		}
 	});
 
 	if ((Core::App().settings().nativeNotifications()
-				|| Platform::Notifications::Enforced())
+				|| nativeEnforced())
 			&& Platform::Notifications::Supported()) {
 		if (_manager->type() == ManagerType::Native) {
 			return;
@@ -203,13 +239,26 @@ void System::setManager(Fn<std::unique_ptr<Manager>()> create) {
 		}
 	}
 
-	if (Platform::Notifications::Enforced()) {
+	if (nativeEnforced()) {
 		if (_manager->type() != ManagerType::Dummy) {
 			_manager = std::make_unique<DummyManager>(this);
 		}
 	} else if (_manager->type() != ManagerType::Default) {
 		_manager = std::make_unique<Default::Manager>(this);
 	}
+}
+
+Manager &System::manager() const {
+	Expects(_manager != nullptr);
+	return *_manager;
+}
+
+rpl::producer<> System::managerChanged() const {
+	return _managerChanged.events();
+}
+
+bool System::nativeEnforced() const {
+	return !OptionCustomNotification.value() && Platform::Notifications::Enforced();
 }
 
 Main::Session *System::findSession(uint64 sessionId) const {
@@ -223,23 +272,23 @@ Main::Session *System::findSession(uint64 sessionId) const {
 	return nullptr;
 }
 
-bool System::skipReactionNotification(not_null<HistoryItem*> item) const {
-	const auto id = ReactionNotificationId{
+bool System::skipSentNotification(
+		not_null<HistoryItem*> item,
+		base::flat_map<SentNotificationId, crl::time> &already) const {
+	const auto id = SentNotificationId{
 		.itemId = item->fullId(),
 		.sessionId = item->history()->session().uniqueId(),
 	};
 	const auto now = crl::now();
 	const auto clearBefore = now - kReactionNotificationEach;
-	for (auto i = begin(_sentReactionNotifications)
-		; i != end(_sentReactionNotifications)
-		;) {
+	for (auto i = begin(already); i != end(already);) {
 		if (i->second <= clearBefore) {
-			i = _sentReactionNotifications.erase(i);
+			i = already.erase(i);
 		} else {
 			++i;
 		}
 	}
-	return !_sentReactionNotifications.emplace(id, now).second;
+	return !already.emplace(id, now).second;
 }
 
 System::SkipState System::skipNotification(
@@ -247,10 +296,14 @@ System::SkipState System::skipNotification(
 	const auto item = notification.item;
 	const auto type = notification.type;
 	const auto messageType = (type == Data::ItemNotificationType::Message);
-	if (!item->notificationThread()->currentNotification()
+	const auto thread = item->maybeNotificationThread();
+	if (!thread
+		|| !thread->currentNotification()
 		|| (messageType && item->skipNotification())
 		|| (type == Data::ItemNotificationType::Reaction
-			&& skipReactionNotification(item))) {
+			&& skipSentNotification(item, _sentReactionNotifications))
+		|| (type == Data::ItemNotificationType::PollVote
+			&& skipSentNotification(item, _sentPollVoteNotifications))) {
 		return { SkipState::Skip };
 	}
 	return computeSkipState(notification);
@@ -279,7 +332,7 @@ System::SkipState System::computeSkipState(
 		&& item->isFromScheduled();
 	const auto notifyBy = messageType
 		? item->specialNotificationPeer()
-		: notification.reactionSender;
+		: notification.reactionOrVoteSender;
 	if (Core::Quitting()) {
 		return { SkipState::Skip };
 	} else if (!Core::App().settings().notifyFromAll()
@@ -344,8 +397,17 @@ void System::registerThread(not_null<Data::Thread*> thread) {
 	if (const auto topic = thread->asTopic()) {
 		const auto &[i, ok] = _watchedTopics.emplace(topic, rpl::lifetime());
 		if (ok) {
-			topic->destroyed() | rpl::start_with_next([=] {
+			topic->destroyed() | rpl::on_next([=] {
 				clearFromTopic(topic);
+			}, i->second);
+		}
+	} else if (const auto sublist = thread->asSublist()) {
+		const auto &[i, ok] = _watchedSublists.emplace(
+			sublist,
+			rpl::lifetime());
+		if (ok) {
+			sublist->destroyed() | rpl::on_next([=] {
+				clearFromSublist(sublist);
 			}, i->second);
 		}
 	}
@@ -365,7 +427,8 @@ void System::schedule(Data::ItemNotification notification) {
 	const auto ready = (skip.value != SkipState::Unknown)
 		&& item->notificationReady();
 
-	const auto minimalDelay = (type == Data::ItemNotificationType::Reaction)
+	const auto minimalDelay = (type == Data::ItemNotificationType::Reaction
+		|| type == Data::ItemNotificationType::PollVote)
 		? kMinimalDelay
 		: item->Has<HistoryMessageForwarded>()
 		? kMinimalForwardDelay
@@ -373,7 +436,7 @@ void System::schedule(Data::ItemNotification notification) {
 	const auto timing = countTiming(thread, minimalDelay);
 	const auto notifyBy = (type == Data::ItemNotificationType::Message)
 		? item->specialNotificationPeer()
-		: notification.reactionSender;
+		: notification.reactionOrVoteSender;
 	if (!skip.silent) {
 		registerThread(thread);
 		_whenAlerts[thread].emplace(timing.when, notifyBy);
@@ -398,7 +461,7 @@ void System::schedule(Data::ItemNotification notification) {
 		if (it == addTo.end() || it->second.when > timing.when) {
 			addTo.emplace(thread, Waiter{
 				.key = key,
-				.reactionSender = notification.reactionSender,
+				.reactionOrVoteSender = notification.reactionOrVoteSender,
 				.type = notification.type,
 				.when = timing.when,
 			});
@@ -425,6 +488,7 @@ void System::clearAll() {
 	_waiters.clear();
 	_settingWaiters.clear();
 	_watchedTopics.clear();
+	_watchedSublists.clear();
 }
 
 void System::clearFromTopic(not_null<Data::ForumTopic*> topic) {
@@ -439,6 +503,23 @@ void System::clearFromTopic(not_null<Data::ForumTopic*> topic) {
 	_settingWaiters.remove(topic);
 
 	_watchedTopics.remove(topic);
+
+	_waitTimer.cancel();
+	showNext();
+}
+
+void System::clearFromSublist(not_null<Data::SavedSublist*> sublist) {
+	if (_manager) {
+		_manager->clearFromSublist(sublist);
+	}
+
+	sublist->clearNotifications();
+	_whenMaps.remove(sublist);
+	_whenAlerts.remove(sublist);
+	_waiters.remove(sublist);
+	_settingWaiters.remove(sublist);
+
+	_watchedSublists.remove(sublist);
 
 	_waitTimer.cancel();
 	showNext();
@@ -459,6 +540,8 @@ void System::clearForThreadIf(Fn<bool(not_null<Data::Thread*>)> predicate) {
 		_settingWaiters.remove(thread);
 		if (const auto topic = thread->asTopic()) {
 			_watchedTopics.remove(topic);
+		} else if (const auto sublist = thread->asSublist()) {
+			_watchedSublists.remove(sublist);
 		}
 	}
 	const auto clearFrom = [&](auto &map) {
@@ -467,6 +550,8 @@ void System::clearForThreadIf(Fn<bool(not_null<Data::Thread*>)> predicate) {
 			if (predicate(thread)) {
 				if (const auto topic = thread->asTopic()) {
 					_watchedTopics.remove(topic);
+				} else if (const auto sublist = thread->asSublist()) {
+					_watchedSublists.remove(sublist);
 				}
 				i = map.erase(i);
 			} else {
@@ -516,6 +601,15 @@ void System::clearIncomingFromTopic(not_null<Data::ForumTopic*> topic) {
 	_whenAlerts.remove(topic);
 }
 
+void System::clearIncomingFromSublist(
+		not_null<Data::SavedSublist*> sublist) {
+	if (_manager) {
+		_manager->clearFromSublist(sublist);
+	}
+	sublist->clearIncomingNotifications();
+	_whenAlerts.remove(sublist);
+}
+
 void System::clearFromItem(not_null<HistoryItem*> item) {
 	if (_manager) {
 		_manager->clearFromItem(item);
@@ -532,6 +626,7 @@ void System::clearAllFast() {
 	_waiters.clear();
 	_settingWaiters.clear();
 	_watchedTopics.clear();
+	_watchedSublists.clear();
 }
 
 void System::checkDelayed() {
@@ -546,7 +641,7 @@ void System::checkDelayed() {
 			}
 			const auto state = computeSkipState({
 				.item = item,
-				.reactionSender = i->second.reactionSender,
+				.reactionOrVoteSender = i->second.reactionOrVoteSender,
 				.type = i->second.type,
 			});
 			if (state.value == SkipState::Skip) {
@@ -652,9 +747,18 @@ void System::showNext() {
 		if (settings.soundNotify()) {
 			const auto owner = &alertThread->owner();
 			const auto id = owner->notifySettings().sound(alertThread).id;
+			auto volume
+				= owner->session().settings().ringtoneVolume(
+					alertThread->peer()->id,
+					alertThread->topicRootId(),
+					alertThread->monoforumPeerId());
+			if (!volume) {
+				volume = owner->session().settings().ringtoneVolume(
+					Data::DefaultNotifyType(alertThread->peer()));
+			}
 			_manager->maybePlaySound(crl::guard(&owner->session(), [=] {
 				const auto track = lookupSound(owner, id);
-				track->playOnce();
+				track->playOnce(volume ? volume * 0.01 : 0);
 				Media::Player::mixer()->suppressAll(track->getLengthMs());
 				Media::Player::mixer()->scheduleFaderCallback();
 			}));
@@ -828,18 +932,27 @@ void System::showNext() {
 			showGrouped();
 			const auto reactionNotification
 				= (notify->type == Data::ItemNotificationType::Reaction);
+			const auto pollVoteNotification
+				= (notify->type == Data::ItemNotificationType::PollVote);
 			const auto reaction = reactionNotification
-				? notify->item->lookupUnreadReaction(notify->reactionSender)
+				? notify->item->lookupUnreadReaction(notify->reactionOrVoteSender)
 				: Data::ReactionId();
-			const auto soundFrom = reactionNotification
-				? notify->reactionSender
+			const auto pollVoteOption = pollVoteNotification
+				? notify->item->lookupUnreadPollVote(
+					notify->reactionOrVoteSender)
+				: QByteArray();
+			const auto soundFrom = (reactionNotification
+				|| pollVoteNotification)
+				? notify->reactionOrVoteSender
 				: notify->item->specialNotificationPeer();
-			if (!reactionNotification || !reaction.empty()) {
+			if ((!reactionNotification || !reaction.empty())
+				&& (!pollVoteNotification || !pollVoteOption.isEmpty())) {
 				_manager->showNotification({
 					.item = notify->item,
 					.forwardedCount = forwardedCount,
-					.reactionFrom = notify->reactionSender,
+					.reactionFrom = notify->reactionOrVoteSender,
 					.reactionId = reaction,
+					.pollVoteOption = pollVoteOption,
 					.soundId = (notifySilent
 						? std::nullopt
 						: MaybeSoundFor(notifyThread, soundFrom)),
@@ -924,8 +1037,29 @@ void System::notifySettingsChanged(ChangeType type) {
 	return _settingsChanged.fire(std::move(type));
 }
 
-void System::playSound(not_null<Main::Session*> session, DocumentId id) {
-	lookupSound(&session->data(), id)->playOnce();
+bool System::volumeSupported() const {
+	// Play through native notification system if toasts are enabled.
+	return Core::App().settings().soundNotify()
+		&& (!Core::App().settings().desktopNotify()
+			|| _manager->type() != ManagerType::Native
+			|| Platform::Notifications::VolumeSupported());
+}
+
+rpl::producer<bool> System::volumeSupportedValue() const {
+	return rpl::single(
+		rpl::empty_value()
+	) | rpl::then(
+		rpl::merge(settingsChanged() | rpl::to_empty, managerChanged())
+	) | rpl::map([=] {
+		return volumeSupported();
+	}) | rpl::distinct_until_changed();
+}
+
+void System::playSound(
+		not_null<Main::Session*> session,
+		DocumentId id,
+		float64 volumeOverride) {
+	lookupSound(&session->data(), id)->playOnce(volumeOverride);
 }
 
 Manager::DisplayOptions Manager::getNotificationOptions(
@@ -951,11 +1085,12 @@ Manager::DisplayOptions Manager::getNotificationOptions(
 			&& (!topic || !Data::CanSendTexts(topic)))
 		|| peer->isBroadcast()
 		|| (peer->slowmodeSecondsLeft() > 0)
-		|| (peer->starsPerMessageChecked() > 0);
+		|| (peer->starsPerMessageChecked() > 0)
+		|| HideReplyButtonOption.value();
 	result.spoilerLoginCode = item
 		&& !item->out()
-		&& peer->isNotificationsUser()
-		&& Core::App().isSharingScreen();
+		&& (peer->isNotificationsUser()
+			|| peer->isVerifyCodes());
 	return result;
 }
 
@@ -993,7 +1128,7 @@ TextWithEntities Manager::ComposeReactionNotification(
 			tr::now,
 			lt_reaction,
 			reactionWithEntities,
-			Ui::Text::WithEntities);
+			tr::marked);
 	};
 	if (hideContent) {
 		return simple(tr::lng_reaction_notext);
@@ -1006,7 +1141,7 @@ TextWithEntities Manager::ComposeReactionNotification(
 			reactionWithEntities,
 			lt_text,
 			item->notificationText(),
-			Ui::Text::WithEntities);
+			tr::marked);
 	};
 	if (!media || media->webpage()) {
 		return text();
@@ -1027,8 +1162,8 @@ TextWithEntities Manager::ComposeReactionNotification(
 				lt_reaction,
 				reactionWithEntities,
 				lt_emoji,
-				Ui::Text::WithEntities(sticker->alt),
-				Ui::Text::WithEntities);
+				tr::marked(sticker->alt),
+				tr::marked);
 		}
 		return simple(tr::lng_reaction_document);
 	} else if (const auto contact = media->sharedContact()) {
@@ -1047,8 +1182,8 @@ TextWithEntities Manager::ComposeReactionNotification(
 			lt_reaction,
 			reactionWithEntities,
 			lt_name,
-			Ui::Text::WithEntities(name),
-			Ui::Text::WithEntities);
+			tr::marked(name),
+			tr::marked);
 	} else if (media->location()) {
 		return simple(tr::lng_reaction_location);
 		// lng_reaction_live_location not used right now :(
@@ -1061,13 +1196,39 @@ TextWithEntities Manager::ComposeReactionNotification(
 				reactionWithEntities,
 				lt_title,
 				poll->question,
-				Ui::Text::WithEntities);
+				tr::marked);
 	} else if (media->game()) {
 		return simple(tr::lng_reaction_game);
 	} else if (media->invoice()) {
 		return simple(tr::lng_reaction_invoice);
 	}
 	return text();
+}
+
+TextWithEntities Manager::ComposePollVoteNotification(
+		not_null<HistoryItem*> item,
+		const QByteArray &option,
+		bool hideContent) {
+	if (hideContent) {
+		return tr::lng_poll_vote_notext(tr::now, tr::marked);
+	}
+	const auto media = item->media();
+	const auto poll = media ? media->poll() : nullptr;
+	if (!poll) {
+		return tr::lng_poll_vote_notext(tr::now, tr::marked);
+	}
+	if (const auto answer = poll->answerByOption(option)) {
+		return tr::lng_poll_vote_option(
+			tr::now,
+			lt_option,
+			answer->text,
+			tr::marked);
+	}
+	return tr::lng_poll_vote(
+		tr::now,
+		lt_title,
+		poll->question,
+		tr::marked);
 }
 
 TextWithEntities Manager::addTargetAccountName(
@@ -1104,77 +1265,136 @@ QString Manager::accountNameSeparator() {
 
 void Manager::notificationActivated(
 		NotificationId id,
-		const TextWithTags &reply) {
+		ActivateOptions &&options) {
 	onBeforeNotificationActivated(id);
 	if (const auto session = system()->findSession(id.contextId.sessionId)) {
-		if (session->windows().empty()) {
-			Core::App().domain().activate(&session->account());
+		const auto history = session->data().history(
+			id.contextId.peerId);
+		const auto item = history->owner().message(
+			history->peer,
+			id.msgId);
+		const auto topic = item ? item->topic() : nullptr;
+		const auto sublist = item ? item->savedSublist() : nullptr;
+		if (!options.draft.text.isEmpty()) {
+			const auto topicRootId = topic
+				? topic->rootId()
+				: id.contextId.topicRootId;
+			const auto monoforumPeerId = (sublist && sublist->parentChat())
+				? sublist->sublistPeer()->id
+				: id.contextId.monoforumPeerId;
+			const auto replyToId = (id.msgId > 0
+				&& !history->peer->isUser()
+				&& id.msgId != topicRootId)
+				? FullMsgId(history->peer->id, id.msgId)
+				: FullMsgId();
+			const auto length = int(options.draft.text.size());
+			auto draft = std::make_unique<Data::Draft>(
+				std::move(options.draft),
+				FullReplyTo{
+					.messageId = replyToId,
+					.topicRootId = topicRootId,
+					.monoforumPeerId = monoforumPeerId,
+				},
+				SuggestOptions(),
+				MessageCursor{
+					length,
+					length,
+					Ui::kQFixedMax,
+				},
+				Data::WebPageDraft());
+			history->setLocalDraft(std::move(draft));
 		}
-		if (!session->windows().empty()) {
-			const auto window = session->windows().front();
-			const auto history = session->data().history(
-				id.contextId.peerId);
-			const auto item = history->owner().message(
-				history->peer,
-				id.msgId);
-			const auto topic = item ? item->topic() : nullptr;
-			if (!reply.text.isEmpty()) {
-				const auto topicRootId = topic
-					? topic->rootId()
-					: id.contextId.topicRootId;
-				const auto replyToId = (id.msgId > 0
-					&& !history->peer->isUser()
-					&& id.msgId != topicRootId)
-					? FullMsgId(history->peer->id, id.msgId)
-					: FullMsgId();
-				auto draft = std::make_unique<Data::Draft>(
-					reply,
-					FullReplyTo{
-						.messageId = replyToId,
-						.topicRootId = topicRootId,
-					},
-					MessageCursor{
-						int(reply.text.size()),
-						int(reply.text.size()),
-						Ui::kQFixedMax,
-					},
-					Data::WebPageDraft());
-				history->setLocalDraft(std::move(draft));
-			}
-			window->widget()->showFromTray();
-			if (Core::App().passcodeLocked()) {
-				window->widget()->setInnerFocus();
-				system()->clearAll();
-			} else {
-				openNotificationMessage(history, id.msgId);
-			}
-			onAfterNotificationActivated(id, window);
-		}
+		const auto openSeparated = options.allowNewWindow
+			&& base::IsCtrlPressed();
+		const auto window = openNotificationMessage(
+			history,
+			id.msgId,
+			openSeparated);
+		onAfterNotificationActivated(id, window);
 	}
 }
 
-void Manager::openNotificationMessage(
+Window::SessionController *Manager::openNotificationMessage(
 		not_null<History*> history,
-		MsgId messageId) {
+		MsgId messageId,
+		bool openSeparated) {
+	if (Core::App().passcodeLocked()) {
+		const auto window = history->session().tryResolveWindow();
+		if (window) {
+			window->widget()->showFromTray();
+			window->widget()->setInnerFocus();
+			system()->clearAll();
+		}
+		return window;
+	}
 	const auto item = history->owner().message(history->peer, messageId);
 	const auto openExactlyMessage = !history->peer->isBroadcast()
 		&& item
 		&& item->isRegular()
 		&& (item->out() || (item->mentionsMe() && !history->peer->isUser()));
 	const auto topic = item ? item->topic() : nullptr;
-	const auto separate = Core::App().separateWindowFor(history->peer);
+	const auto sublist = item ? item->savedSublist() : nullptr;
+
+	const auto guard = gsl::finally([&] {
+		if (topic) {
+			system()->clearFromTopic(topic);
+		} else if (sublist && sublist->parentChat()) {
+			system()->clearFromSublist(sublist);
+		} else {
+			system()->clearFromHistory(history);
+		}
+	});
+
+	const auto separateId = !topic
+		? Window::SeparateId(history->peer)
+		: history->peer->useSubsectionTabs()
+		? Window::SeparateId(Window::SeparateType::Chat, topic)
+		: Window::SeparateId(Window::SeparateType::Forum, history);
+	const auto separate = Core::App().separateWindowFor(separateId);
+	const auto itemId = openExactlyMessage ? messageId : ShowAtUnreadMsgId;
+	if (openSeparated && !separate && !topic) {
+		// In case we're opening a chat history we first try to open it like
+		// it is done from the main window context menu (that checks if the
+		// chat isn't restricted and also closes the chat we're opening
+		// in the window itself). If this couldn't be done, we open normally.
+		const auto tryInExisting = [&](bool primary) {
+			for (const auto &window : history->session().windows()) {
+				if (primary && !window->window().id().primary()) {
+					continue;
+				} else if (!primary && !window->window().id().folder()) {
+					continue;
+				}
+				window->showInNewWindow(separateId, itemId);
+				const auto shown = Core::App().separateWindowFor(
+					separateId);
+				return shown ? shown->sessionController() : window.get();
+			}
+			return (Window::SessionController*)nullptr;
+		};
+		const auto shownPrimary = tryInExisting(true);
+		const auto shown = shownPrimary
+			? shownPrimary
+			: tryInExisting(false);
+		if (shown) {
+			return shown;
+		}
+	}
 	const auto window = separate
 		? separate->sessionController()
+		: openSeparated
+		? [&] {
+			const auto window = Core::App().ensureSeparateWindowFor(
+				separateId,
+				itemId);
+			return window ? window->sessionController() : nullptr;
+		}()
 		: history->session().tryResolveWindow();
-	const auto itemId = openExactlyMessage ? messageId : ShowAtUnreadMsgId;
 	if (window) {
+		window->widget()->showFromTray();
 		if (topic) {
-			window->showSection(
-				std::make_shared<HistoryView::RepliesMemento>(
-					history,
-					topic->rootId(),
-					itemId),
-				SectionShow::Way::Forward);
+			window->showTopic(topic, itemId, SectionShow::Way::Forward);
+		} else if (sublist) {
+			window->showSublist(sublist, itemId, SectionShow::Way::Forward);
 		} else {
 			window->showPeerHistory(
 				history->peer->id,
@@ -1182,11 +1402,7 @@ void Manager::openNotificationMessage(
 				itemId);
 		}
 	}
-	if (topic) {
-		system()->clearFromTopic(topic);
-	} else {
-		system()->clearFromHistory(history);
-	}
+	return window;
 }
 
 void Manager::notificationReplied(
@@ -1206,6 +1422,10 @@ void Manager::notificationReplied(
 	const auto topicRootId = topic
 		? topic->rootId()
 		: id.contextId.topicRootId;
+	const auto sublist = item ? item->savedSublist() : nullptr;
+	const auto monoforumPeerId = (sublist && sublist->parentChat())
+		? sublist->sublistPeer()->id
+		: id.contextId.monoforumPeerId;
 
 	auto message = Api::MessageToSend(Api::SendAction(history));
 	message.textWithTags = reply;
@@ -1218,6 +1438,7 @@ void Manager::notificationReplied(
 	message.action.replyTo = {
 		.messageId = { replyToId ? history->peer->id : 0, replyToId },
 		.topicRootId = topic ? topic->rootId() : 0,
+		.monoforumPeerId = monoforumPeerId,
 	};
 	message.action.clearDraft = false;
 	history->session().api().sendMessage(std::move(message));
@@ -1227,12 +1448,101 @@ void Manager::notificationReplied(
 	}
 }
 
+void Manager::notificationActionActivated(
+		NotificationId id,
+		const QString &actionId) {
+	if (actionId == u"markAsRead"_q) {
+		notificationReplied(id, {});
+		return;
+	}
+	if (!actionId.startsWith(u"callbackButton:"_q)) {
+		return;
+	}
+	const auto payload = QStringView(actionId).mid(15);
+	const auto sep = payload.indexOf(':');
+	if (sep < 0) {
+		return;
+	}
+	const auto row = payload.left(sep).toInt();
+	const auto column = payload.mid(sep + 1).toInt();
+	if (!id.contextId.sessionId || !id.contextId.peerId) {
+		return;
+	}
+	const auto session = system()->findSession(id.contextId.sessionId);
+	if (!session) {
+		return;
+	}
+	const auto history = session->data().history(id.contextId.peerId);
+	const auto item = history->owner().message(history->peer, id.msgId);
+	if (!item || !item->isRegular()) {
+		return;
+	}
+	const auto owner = &history->owner();
+	const auto fullId = item->fullId();
+	const auto button = HistoryMessageMarkupButton::Get(
+		owner,
+		fullId,
+		row,
+		column);
+	if (!button || button->requestId) {
+		return;
+	}
+	using ButtonType = HistoryMessageMarkupButton::Type;
+	if (button->type != ButtonType::Callback) {
+		return;
+	}
+	auto flags = MTPmessages_GetBotCallbackAnswer::Flags(0);
+	flags |= MTPmessages_GetBotCallbackAnswer::Flag::f_data;
+	const auto sendData = button->data;
+	button->requestId = session->api().request(
+		MTPmessages_GetBotCallbackAnswer(
+			MTP_flags(flags),
+			history->peer->input(),
+			MTP_int(item->id),
+			MTP_bytes(sendData),
+			MTP_inputCheckPasswordEmpty())
+	).done([=](const MTPmessages_BotCallbackAnswer &result) {
+		const auto item = owner->message(fullId);
+		if (!item) {
+			return;
+		}
+		if (const auto button = HistoryMessageMarkupButton::Get(
+				owner,
+				fullId,
+				row,
+				column)) {
+			button->requestId = 0;
+			owner->requestItemRepaint(item);
+		}
+	}).fail([=](const MTP::Error &error) {
+		const auto item = owner->message(fullId);
+		if (!item) {
+			return;
+		}
+		if (const auto button = HistoryMessageMarkupButton::Get(
+				owner,
+				fullId,
+				row,
+				column)) {
+			button->requestId = 0;
+		}
+	}).send();
+}
+
+void Manager::maybePlaySound(Fn<void()> playSound) {
+	if (_system->volumeSupported()) {
+		doMaybePlaySound(std::move(playSound));
+	}
+}
+
 void NativeManager::doShowNotification(NotificationFields &&fields) {
-	const auto options = getNotificationOptions(
-		fields.item,
-		(fields.reactionFrom
-			? Data::ItemNotificationType::Reaction
-			: Data::ItemNotificationType::Message));
+	const auto pollVote = !fields.pollVoteOption.isEmpty();
+	const auto type = fields.reactionFrom
+		? (pollVote
+			? Data::ItemNotificationType::PollVote
+			: Data::ItemNotificationType::Reaction)
+		: Data::ItemNotificationType::Message;
+	const auto options = getNotificationOptions(fields.item, type);
 	const auto item = fields.item;
 	const auto peer = item->history()->peer;
 	const auto reactionFrom = fields.reactionFrom;
@@ -1243,23 +1553,38 @@ void NativeManager::doShowNotification(NotificationFields &&fields) {
 		&& !reactionFrom
 		&& (item->out() || peer->isSelf())
 		&& item->isFromScheduled();
-	const auto topicWithChat = [&] {
+	const auto subWithChat = [&] {
 		const auto name = peer->name();
 		const auto topic = item->topic();
-		return topic ? (topic->title() + u" ("_q + name + ')') : name;
+		const auto sublist = item->savedSublist();
+		return topic
+			? (topic->title() + u" ("_q + name + ')')
+			: (sublist && sublist->parentChat())
+			? (sublist->sublistPeer()->shortName() + u" ("_q + name + ')')
+			: name;
 	};
 	const auto title = options.hideNameAndPhoto
 		? AppName.utf16()
 		: (scheduled && peer->isSelf())
 		? tr::lng_notification_reminder(tr::now)
-		: topicWithChat();
+		: subWithChat();
 	const auto fullTitle = addTargetAccountName(title, &peer->session());
+	const auto hideReactionSender = reactionFrom
+		&& !peer->session().api().reactionsNotifySettings()
+			.showPreviewsCurrent();
 	const auto subtitle = reactionFrom
-		? (reactionFrom != peer ? reactionFrom->name() : QString())
+		? ((!hideReactionSender && reactionFrom != peer)
+			? reactionFrom->name()
+			: QString())
 		: options.hideNameAndPhoto
 		? QString()
 		: item->notificationHeader();
-	const auto text = reactionFrom
+	const auto text = pollVote
+		? TextWithPermanentSpoiler(ComposePollVoteNotification(
+			item,
+			fields.pollVoteOption,
+			options.hideMessageText))
+		: reactionFrom
 		? TextWithPermanentSpoiler(ComposeReactionNotification(
 			item,
 			fields.reactionId,
@@ -1288,15 +1613,40 @@ void NativeManager::doShowNotification(NotificationFields &&fields) {
 			return Core::App().notifications().lookupSoundBytes(owner, 0);
 		});
 	} : Fn<NotificationSound()>();
+	auto actions = std::vector<NotificationAction>();
+	if (AllowNotificationActions(peer) && !options.hideMarkAsRead) {
+		if (const auto markup = item->inlineReplyMarkup()) {
+			using ButtonType = HistoryMessageMarkupButton::Type;
+			const auto &rows = markup->data.rows;
+			const auto rowsCount = int(rows.size());
+			for (auto row = 0; row != rowsCount; ++row) {
+				const auto &buttons = rows[row];
+				const auto colsCount = int(buttons.size());
+				for (auto col = 0; col != colsCount; ++col) {
+					const auto &button = buttons[col];
+					if (button.type == ButtonType::Callback) {
+						actions.push_back({
+							.id = u"callbackButton:%1:%2"_q.arg(row).arg(col),
+							.text = button.text,
+						});
+					}
+				}
+			}
+		}
+	}
 	doShowNativeNotification({
 		.peer = item->history()->peer,
 		.topicRootId = item->topicRootId(),
+		.monoforumPeerId = (item->history()->amMonoforumAdmin()
+			? item->sublistPeerId()
+			: PeerId()),
 		.itemId = item->id,
 		.title = scheduled ? WrapFromScheduled(fullTitle) : fullTitle,
 		.subtitle = subtitle,
 		.message = text,
 		.sound = sound,
 		.options = options,
+		.actions = std::move(actions),
 	}, userpicView);
 }
 
@@ -1308,6 +1658,28 @@ System::~System() = default;
 
 QString WrapFromScheduled(const QString &text) {
 	return QString::fromUtf8("\xF0\x9F\x93\x85 ") + text;
+}
+
+QRect NotificationDisplayRect(Window::Controller *controller) {
+	const auto displayChecksum
+		= Core::App().settings().notificationsDisplayChecksum();
+
+	auto screen = (QScreen*)(nullptr);
+	if (displayChecksum) {
+		using namespace Platform;
+		for (const auto candidateScreen : QGuiApplication::screens()) {
+			if (ScreenNameChecksum(candidateScreen) == displayChecksum) {
+				screen = candidateScreen;
+				break;
+			}
+		}
+	}
+
+	return screen
+		? screen->availableGeometry()
+		: controller
+		? controller->widget()->desktopRect()
+		: QGuiApplication::primaryScreen()->availableGeometry();
 }
 
 } // namespace Notifications

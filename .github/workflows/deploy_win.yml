@@ -13,7 +13,7 @@ jobs:
 
     strategy:
       matrix:
-        arch: [Win32, x64]
+        arch: [x64_x86, x64]
 
     env:
       UPLOAD_ARTIFACT: "true"
@@ -29,32 +29,36 @@ jobs:
       - name: Prepare directories.
         run: |
           mkdir %userprofile%\TBuild\Libraries
-          mkdir %userprofile%\TBuild\ThirdParty
           mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
           echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries${{ matrix.arch == 'x64' && '\win64' || '' }}>>%GITHUB_ENV%
 
       - name: Get repository name.
         shell: bash
         run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
 
-      - uses: ilammy/msvc-dev-cmd@v1.12.0
-        name: Native Tools Command Prompt.
-        with:
-          arch: ${{ matrix.arch }}
-          sdk: 10.0.22000.0
-
       - name: Clone.
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
-      - name: Set up environment paths.
+      - name: First set up.
         shell: bash
         run: |
+          DOCPATH=$TBUILD/$REPO_NAME/docs/building-win.md
+          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
+          echo "SDK=$SDK" >> $GITHUB_ENV
+
           echo "Configurate git for cherry-picks."
           git config --global user.email "you@example.com"
           git config --global user.name "Sample"
+
+      - uses: ilammy/msvc-dev-cmd@v1.13.0
+        name: Native Tools Command Prompt.
+        with:
+          arch: ${{ matrix.arch }}
+          sdk: ${{ env.SDK }}
 
       - name: NuGet sources.
         run: |
@@ -63,7 +67,7 @@ jobs:
 
       - name: Libraries cache.
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
               ${{ env.TBUILD }}\Libraries
@@ -72,10 +76,10 @@ jobs:
 
       - name: Libraries.
         env:
+          GYP_MSVS_OVERRIDE_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\'
           GYP_MSVS_VERSION: 2022
         run: |
-          cd %TBUILD%
-          %REPO_NAME%\Telegram\build\prepare\win.bat silent
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent
 
       - name: Free up some disk space.
         run: |
@@ -96,7 +100,7 @@ jobs:
           - arch: "x64"
             runner: "windows-latest"
             #runner: "t-desktop"
-          - arch: "Win32"
+          - arch: "x64_x86"
             runner: "windows-latest"
 
     runs-on: ${{ matrix.runner }}
@@ -115,25 +119,32 @@ jobs:
       - name: Prepare directories.
         run: |
           mkdir %userprofile%\TBuild\Libraries
-          mkdir %userprofile%\TBuild\ThirdParty
           mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
           echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries${{ matrix.arch == 'x64' && '\win64' || '' }}>>%GITHUB_ENV%
 
       - name: Get repository name.
         shell: bash
         run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
 
-      - uses: ilammy/msvc-dev-cmd@v1.12.0
-        name: Native Tools Command Prompt.
-        with:
-          arch: ${{ matrix.arch }}
-          sdk: 10.0.22000.0
-
       - name: Clone.
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
+      - name: Detect SDK
+        shell: bash
+        run: |
+          DOCPATH=$TBUILD/$REPO_NAME/docs/building-win.md
+          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
+          echo "SDK=$SDK" >> $GITHUB_ENV
+
+      - uses: ilammy/msvc-dev-cmd@v1.13.0
+        name: Native Tools Command Prompt.
+        with:
+          arch: ${{ matrix.arch }}
+          sdk: ${{ env.SDK }}
 
       - name: Set up environment paths.
         shell: bash
@@ -149,7 +160,7 @@ jobs:
 
       - name: Libraries cache.
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
               ${{ env.TBUILD }}\Libraries
@@ -166,7 +177,7 @@ jobs:
           ARCH=""
           if [ -n "${{ matrix.arch }}" ]; then
             case "${{ matrix.arch }}" in
-              Win32) ARCH="x86";;
+              x64_x86) ARCH="x86";;
               *) ARCH="${{ matrix.arch }}";;
             esac
             echo "Architecture from matrix: $ARCH"
@@ -190,19 +201,35 @@ jobs:
         if: (env.UPLOAD_ARTIFACT == 'true') || ${{ github.ref == 'refs/heads/nightly' }}
         run: |
           mkdir artifact
+          mkdir symbols
           xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\tportable*.zip artifact\ /E/C
+          xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\tsetup*.exe artifact\ /E/C
           xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\t*upd* artifact\ /E/C
-      - uses: actions/upload-artifact@v4
+          xcopy %TBUILD%\Dropbox\Telegram\symbols\* symbols\ /E/S/C
+      - uses: actions/upload-artifact@v7
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: artifact\tportable*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
+        name: Upload installer artifact.
+        if: (env.UPLOAD_ARTIFACT == 'true')
+        with:
+          name: ${{ env.ARTIFACT_NAME }}_setup
+          path: artifact\tsetup*
+
+      - uses: actions/upload-artifact@v7
         name: Upload artifact TG.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: ${{ env.ARTIFACT_NAME }}_tg
           path: artifact\t*upd*
           
+      - uses: actions/upload-artifact@v7
+        name: Upload symbols artifact.
+        if: (env.UPLOAD_ARTIFACT == 'true')
+        with:
+          name: ${{ env.ARTIFACT_NAME }}_symbols
+          path: symbols\*

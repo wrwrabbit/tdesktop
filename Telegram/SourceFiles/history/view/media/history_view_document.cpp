@@ -16,7 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_instance.h"
 #include "history/history_item_components.h"
-#include "history/history_item_helpers.h" // ClearMediaAsExpired.
+#include "history/history_item.h"
 #include "history/history.h"
 #include "core/click_handler_types.h" // kDocumentFilenameTooltipProperty.
 #include "history/view/history_view_element.h"
@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_media_common.h"
 #include "ui/text/format_values.h"
 #include "ui/text/format_song_document_name.h"
+#include "ui/text/text_lottie_custom_emoji.h"
 #include "ui/text/text_utilities.h"
 #include "ui/chat/chat_style.h"
 #include "ui/painter.h"
@@ -192,7 +193,8 @@ void PaintWaveform(
 		const VoiceData *voiceData,
 		int availableWidth,
 		float64 progress,
-		bool ttl) {
+		bool ttl,
+		float64 hoverProgress = -1) {
 	const auto wf = [&]() -> const VoiceWaveform* {
 		if (!voiceData) {
 			return nullptr;
@@ -216,6 +218,9 @@ void PaintWaveform(
 		? int(wf->size())
 		: ::Media::Player::kWaveformSamplesCount;
 	const auto activeWidth = base::SafeRound(availableWidth * progress);
+	const auto hoverWidth = (hoverProgress >= 0)
+		? base::SafeRound(availableWidth * hoverProgress)
+		: -1.;
 
 	const auto &barWidth = st::msgWaveformBar;
 	const auto barCount = std::min(
@@ -257,6 +262,19 @@ void PaintWaveform(
 			const auto &color = (barLeft >= activeWidth) ? inactive : active;
 			p.fillRect(QRectF(barLeft, barTop, barWidth, barHeight), color);
 		}
+		if (hoverWidth >= 0) {
+			const auto hoverFrom = std::min(activeWidth, hoverWidth);
+			const auto hoverTo = std::max(activeWidth, hoverWidth);
+			if (barLeft < hoverTo && barLeft + barWidth > hoverFrom) {
+				const auto left = std::max(double(barLeft), hoverFrom);
+				const auto right = std::min(
+					double(barLeft + barWidth),
+					hoverTo);
+				p.fillRect(
+					QRectF(left, barTop, right - left, barHeight),
+					anim::with_alpha(active->c, 0.30));
+			}
+		}
 		barLeft += barWidth + st::msgWaveformSkip;
 
 		maxValue = (sum < (barCount + 1) / 2) ? 0 : value;
@@ -271,10 +289,10 @@ void PaintWaveform(
 	};
 	add(FormatDownloadText(document->size, document->size));
 	const auto duration = document->duration() / 1000;
-	if (const auto song = document->song()) {
+	if (document->song()) {
 		add(FormatPlayedText(duration, duration));
 		add(FormatDurationAndSizeText(duration, document->size));
-	} else if (const auto voice = document->voice() ? document->voice() : document->round()) {
+	} else if (document->voice() ? document->voice() : document->round()) {
 		add(FormatPlayedText(duration, duration));
 		add(FormatDurationAndSizeText(duration, document->size));
 	} else if (document->isVideoFile()) {
@@ -311,7 +329,7 @@ Document::Document(
 		const auto fullId = _realParent->fullId();
 		if (_parent->delegate()->elementContext() == Context::TTLViewer) {
 			auto lifetime = std::make_shared<rpl::lifetime>();
-			TTLVoiceStops(fullId) | rpl::start_with_next([=]() mutable {
+			TTLVoiceStops(fullId) | rpl::on_next([=]() mutable {
 				if (lifetime) {
 					base::take(lifetime)->destroy();
 				}
@@ -324,13 +342,13 @@ Document::Document(
 				_openl = nullptr;
 
 				auto lifetime = std::make_shared<rpl::lifetime>();
-				TTLVoiceStops(fullId) | rpl::start_with_next([=]() mutable {
+				TTLVoiceStops(fullId) | rpl::on_next([=]() mutable {
 					if (lifetime) {
 						base::take(lifetime)->destroy();
 					}
 					if (const auto item = data->message(fullId)) {
 						// Destroys this.
-						ClearMediaAsExpired(item);
+						item->clearMediaAsExpired();
 					}
 				}, *lifetime);
 
@@ -420,6 +438,7 @@ QSize Document::countOptimalSize() {
 		const auto transcribes = &session->api().transcribes();
 		if (_parent->data()->media()->ttlSeconds()
 			|| _realParent->isScheduled()
+			|| _realParent->isAdminLogEntry()
 			|| (!session->premium()
 				&& !transcribes->freeFor(_realParent)
 				&& !transcribes->trialsSupport())
@@ -437,17 +456,26 @@ QSize Document::countOptimalSize() {
 			const auto &entry = transcribes->entry(_realParent);
 			const auto update = [=] { repaint(); };
 			voice->transcribe->setLoading(
-				entry.shown && (entry.requestId || entry.pending),
-				update);
+				entry.shown && (entry.requestId || entry.pending));
+			const auto pending = entry.pending;
+			auto descriptor = pending
+				? Lottie::IconDescriptor{
+					.name = u"transcribe_loading"_q,
+					.color = &st::attentionButtonFg, // Any contrast.
+					.sizeOverride = Size(st::historyTranscribeLoadingSize),
+					.colorizeUsingAlpha = true,
+				}
+				: Lottie::IconDescriptor();
 			auto text = (entry.requestId || !entry.shown)
 				? TextWithEntities()
 				: entry.toolong
-				? Ui::Text::Italic(tr::lng_audio_transcribe_long(tr::now))
+				? tr::italic(tr::lng_audio_transcribe_long(tr::now))
 				: entry.failed
-				? Ui::Text::Italic(tr::lng_attach_failed(tr::now))
-				: TextWithEntities{
-					entry.result + (entry.pending ? " [...]" : ""),
-				};
+				? tr::italic(tr::lng_attach_failed(tr::now))
+				: TextWithEntities{ entry.result }.append(
+					pending
+						? Ui::Text::LottieEmoji(descriptor)
+						: TextWithEntities());
 			voice->transcribe->setOpened(
 				!text.empty(),
 				creating ? Fn<void()>() : update);
@@ -460,7 +488,11 @@ QSize Document::countOptimalSize() {
 				voice->transcribeText = Ui::Text::String(minResizeWidth);
 				voice->transcribeText.setMarkedText(
 					st::messageTextStyle,
-					text);
+					text,
+					kMarkupTextOptions,
+					pending
+						? Ui::Text::LottieEmojiContext(std::move(descriptor))
+						: Ui::Text::MarkedContext());
 				hasTranscribe = true;
 				if (const auto skipBlockWidth = _parent->hasVisibleText()
 					? 0
@@ -567,7 +599,7 @@ QSize Document::countCurrentSize(int newWidth) {
 							+ st::mediaUnreadSkip)
 					+ (thumbedWidth + statusWidth)
 					+ st.thumbSkip
-					+ (_realParent->hasUnreadMediaFlag()
+					+ (_realParent->isUnreadMedia()
 						? st::mediaUnreadSkip + st::mediaUnreadSize
 						: 0)
 					+ _parent->bottomInfoFirstLineWidth()
@@ -622,7 +654,7 @@ void Document::draw(
 
 	const auto cornerDownload = downloadInCorner();
 
-	if (!_dataMedia->canBePlayed(_realParent)) {
+	if (!_dataMedia->canBePlayed()) {
 		_dataMedia->automaticLoad(_realParent->fullId(), _realParent);
 	}
 	bool loaded = dataLoaded(), displayLoading = _data->displayLoading();
@@ -758,8 +790,8 @@ void Document::draw(
 				return _data->isSongWithCover()
 					? sti->historyFileThumbPause
 					: stm->historyFilePause;
-			} else if (loaded || _dataMedia->canBePlayed(_realParent)) {
-				return _dataMedia->canBePlayed(_realParent)
+			} else if (loaded || _dataMedia->canBePlayed()) {
+				return _dataMedia->canBePlayed()
 					? (_data->isSongWithCover()
 						? sti->historyFileThumbPlay
 						: stm->historyFilePlay)
@@ -895,7 +927,8 @@ void Document::draw(
 			_transcribedRound ? _data->round() : _data->voice(),
 			namewidth + st::msgWaveformSkip,
 			progress,
-			inTTLViewer);
+			inTTLViewer,
+			_voiceHoverProgress);
 		p.restore();
 	} else if (const auto named = Get<HistoryDocumentNamed>()) {
 		p.setPen(stm->historyFileNameFg);
@@ -914,7 +947,7 @@ void Document::draw(
 	p.setPen(stm->mediaFg);
 	p.drawTextLeft(nameleft, statustop, width, statusText);
 
-	if (_realParent->hasUnreadMediaFlag()) {
+	if (_realParent->isUnreadMedia()) {
 		auto w = st::normalFont->width(statusText);
 		if (w + st::mediaUnreadSkip + st::mediaUnreadSize <= statuswidth) {
 			p.setPen(Qt::NoPen);
@@ -938,13 +971,16 @@ void Document::draw(
 	if (const auto captioned = Get<HistoryDocumentCaptioned>()) {
 		p.setPen(stm->historyTextFg);
 		_parent->prepareCustomEmojiPaint(p, context, captioned->caption);
+
 		auto highlightRequest = context.computeHighlightCache();
 		captioned->caption.draw(p, {
 			.position = { st::msgPadding.left(), captiontop },
 			.availableWidth = captionw,
 			.palette = &stm->textPalette,
 			.pre = stm->preCache.get(),
-			.blockquote = context.quoteCache(parent()->contentColorIndex()),
+			.blockquote = context.quoteCache(
+				parent()->contentColorCollectible(),
+				parent()->contentColorIndex()),
 			.colors = context.st->highlightColors(),
 			.spoiler = Ui::Text::DefaultSpoilerCache(),
 			.now = context.now,
@@ -1046,7 +1082,7 @@ void Document::ensureDataMediaCreated() const {
 bool Document::downloadInCorner() const {
 	return _data->isAudioFile()
 		&& _realParent->allowsForward()
-		&& _data->canBeStreamed(_realParent)
+		&& _data->canBeStreamed()
 		&& !_data->inappPlaybackFailed();
 }
 
@@ -1223,12 +1259,24 @@ TextState Document::textState(
 			const auto state = ::Media::Player::instance()->getState(AudioMsgId::Type::Voice);
 			if (state.id == AudioMsgId(_data, _realParent->fullId(), state.id.externalPlayId())
 				&& !::Media::Player::IsStoppedOrStopping(state.state)) {
+				const auto hover = std::clamp(
+					(point.x() - nameleft) / float64(namewidth),
+					0.,
+					1.);
+				if (_voiceHoverProgress != hover) {
+					_voiceHoverProgress = hover;
+					repaint();
+				}
 				if (!voice->seeking()) {
 					voice->setSeekingStart((point.x() - nameleft) / float64(namewidth));
 				}
 				result.link = voice->seekl;
 				return result;
 			}
+		}
+		if (_voiceHoverProgress >= 0) {
+			_voiceHoverProgress = -1;
+			repaint();
 		}
 		transcribeLength = voice->transcribeText.length();
 		if (transcribeLength > 0) {
@@ -1275,7 +1323,7 @@ TextState Document::textState(
 		&& (!_data->loading() || downloadInCorner())
 		&& !_data->uploading()
 		&& !_data->isNull()) {
-		if (loaded || _dataMedia->canBePlayed(_realParent)) {
+		if (loaded || _dataMedia->canBePlayed()) {
 			result.link = _openl;
 		} else {
 			result.link = _savel;
@@ -1551,35 +1599,51 @@ QMargins Document::bubbleMargins() const {
 }
 
 void Document::refreshCaption(bool last) {
-	const auto now = Get<HistoryDocumentCaptioned>();
-	auto caption = createCaption();
-	if (!caption.isEmpty()) {
-		if (now) {
-			return;
-		}
-		AddComponents(HistoryDocumentCaptioned::Bit());
-		auto captioned = Get<HistoryDocumentCaptioned>();
-		captioned->caption = std::move(caption);
+	const auto applySkipBlock = [&](Ui::Text::String &caption) {
 		const auto skip = last ? _parent->skipBlockWidth() : 0;
 		if (skip) {
-			captioned->caption.updateSkipBlock(
+			caption.updateSkipBlock(
 				_parent->skipBlockWidth(),
 				_parent->skipBlockHeight());
 		} else {
-			captioned->caption.removeSkipBlock();
+			caption.removeSkipBlock();
 		}
-	} else if (now) {
-		RemoveComponents(HistoryDocumentCaptioned::Bit());
+	};
+	if (const auto now = Get<HistoryDocumentCaptioned>()) {
+		applySkipBlock(now->caption);
+		return;
 	}
+	auto caption = createCaption();
+	if (caption.isEmpty()) {
+		return;
+	}
+	AddComponents(HistoryDocumentCaptioned::Bit());
+	const auto captioned = Get<HistoryDocumentCaptioned>();
+	captioned->caption = std::move(caption);
+	applySkipBlock(captioned->caption);
+}
+
+int Document::widenGroupingMaxWidth(int current, bool last) {
+	refreshCaption(last);
+	const auto captioned = Get<HistoryDocumentCaptioned>();
+	if (!captioned) {
+		return current;
+	}
+	const auto &caption = captioned->caption;
+	const auto padding = st::msgPadding.left() + st::msgPadding.right();
+	const auto proseFull = padding + caption.maxWidth();
+	const auto proseCapped = std::min(proseFull, int(st::msgMaxWidth));
+	const auto monospaceRaw = caption.countMaxMonospaceWidth();
+	const auto monospaceFull = monospaceRaw
+		? (padding + monospaceRaw)
+		: 0;
+	return std::max({ current, proseCapped, monospaceFull });
 }
 
 QSize Document::sizeForGroupingOptimal(int maxWidth, bool last) const {
 	const auto thumbed = Get<HistoryDocumentThumbed>();
 	const auto &st = (thumbed ? st::msgFileThumbLayoutGrouped : st::msgFileLayoutGrouped);
 	auto height = st.padding.top() + st.thumbSize + st.padding.bottom();
-
-	const_cast<Document*>(this)->refreshCaption(last);
-
 	if (const auto captioned = Get<HistoryDocumentCaptioned>()) {
 		auto captionw = maxWidth
 			- st::msgPadding.left()
@@ -1713,6 +1777,13 @@ void Document::hideSpoilers() {
 
 Ui::Text::String Document::createCaption() const {
 	return File::createCaption(_realParent);
+}
+
+int Document::contributedMaxMonospaceWidth() const {
+	if (const auto captioned = Get<HistoryDocumentCaptioned>()) {
+		return captioned->caption.countMaxMonospaceWidth();
+	}
+	return 0;
 }
 
 void Document::TooltipFilename::setElided(bool value) {

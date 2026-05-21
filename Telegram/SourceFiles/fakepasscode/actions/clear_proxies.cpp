@@ -6,6 +6,8 @@
 #include "main/main_account.h"
 #include "main/main_session.h"
 #include "data/data_session.h"
+#include "data/components/promo_suggestions.h"
+
 #include "apiwrap.h"
 
 #include "fakepasscode/log/fake_log.h"
@@ -25,7 +27,7 @@ void FakePasscode::ClearProxies::Execute() {
         FAKE_LOG(("Remove proxy for %1").arg(index));
         if (account->sessionExists()) {
             FAKE_LOG(("%1 exists, remove promoted").arg(index));
-            account->session().data().setTopPromoted(nullptr, QString(), QString());
+            account->session().promoSuggestions().refreshTopPromotion();
         }
     }
 }

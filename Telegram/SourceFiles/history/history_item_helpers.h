@@ -45,6 +45,8 @@ namespace Window {
 class SessionNavigation;
 } // namespace Window
 
+struct HistoryMessageMarkupData;
+
 struct PreparedServiceText {
 	TextWithEntities text;
 	std::vector<ClickHandlerPtr> links;
@@ -84,6 +86,9 @@ using OnStackUsers = std::array<UserData*, kMaxUnreadReactions>;
 void CheckReactionNotificationSchedule(
 	not_null<HistoryItem*> item,
 	const OnStackUsers &wasUsers);
+void CheckPollVoteNotificationSchedule(
+	not_null<HistoryItem*> item,
+	const std::vector<not_null<PeerData*>> &wasRecentVoters);
 [[nodiscard]] MessageFlags NewForwardedFlags(
 	not_null<PeerData*> peer,
 	PeerId from,
@@ -95,6 +100,7 @@ void CheckReactionNotificationSchedule(
 [[nodiscard]] TextWithEntities EnsureNonEmpty(
 	const TextWithEntities &text = TextWithEntities());
 [[nodiscard]] TextWithEntities UnsupportedMessageText();
+[[nodiscard]] HistoryMessageMarkupData UnsupportedMessageMarkup();
 
 void RequestDependentMessageItem(
 	not_null<HistoryItem*> item,
@@ -149,6 +155,10 @@ struct SendPaymentDetails {
 	not_null<PeerData*> peer,
 	int messagesCount);
 
+[[nodiscard]] bool SuggestPaymentDataReady(
+	not_null<PeerData*> peer,
+	SuggestOptions suggest);
+
 struct PaidConfirmStyles {
 	const style::FlatLabel *label = nullptr;
 	const style::Checkbox *checkbox = nullptr;
@@ -158,34 +168,37 @@ void ShowSendPaidConfirm(
 	not_null<PeerData*> peer,
 	SendPaymentDetails details,
 	Fn<void()> confirmed,
-	PaidConfirmStyles styles = {});
+	PaidConfirmStyles styles = {},
+	int suggestStarsPrice = 0);
 void ShowSendPaidConfirm(
 	std::shared_ptr<Main::SessionShow> show,
 	not_null<PeerData*> peer,
 	SendPaymentDetails details,
 	Fn<void()> confirmed,
-	PaidConfirmStyles styles = {});
+	PaidConfirmStyles styles = {},
+	int suggestStarsPrice = 0);
 void ShowSendPaidConfirm(
 	std::shared_ptr<Main::SessionShow> show,
 	const std::vector<not_null<PeerData*>> &peers,
 	SendPaymentDetails details,
 	Fn<void()> confirmed,
-	PaidConfirmStyles styles = {});
+	PaidConfirmStyles styles = {},
+	int suggestStarsPrice = 0);
 
 class SendPaymentHelper final {
 public:
 	[[nodiscard]] bool check(
 		not_null<Window::SessionNavigation*> navigation,
 		not_null<PeerData*> peer,
+		Api::SendOptions options,
 		int messagesCount,
-		int starsApproved,
 		Fn<void(int)> resend,
 		PaidConfirmStyles styles = {});
 	[[nodiscard]] bool check(
 		std::shared_ptr<Main::SessionShow> show,
 		not_null<PeerData*> peer,
+		Api::SendOptions options,
 		int messagesCount,
-		int starsApproved,
 		Fn<void(int)> resend,
 		PaidConfirmStyles styles = {});
 
@@ -222,13 +235,11 @@ private:
 	not_null<PeerData*> peer,
 	MsgId msgId,
 	FullMsgId returnToId = FullMsgId(),
-	TextWithEntities highlightPart = {},
-	int highlightPartOffsetHint = 0);
+	MessageHighlightId highlight = {});
 [[nodiscard]] ClickHandlerPtr JumpToMessageClickHandler(
 	not_null<HistoryItem*> item,
 	FullMsgId returnToId = FullMsgId(),
-	TextWithEntities highlightPart = {},
-	int highlightPartOffsetHint = 0);
+	MessageHighlightId highlight = {});
 [[nodiscard]] ClickHandlerPtr JumpToStoryClickHandler(
 	not_null<Data::Story*> story);
 ClickHandlerPtr JumpToStoryClickHandler(
@@ -256,8 +267,6 @@ ClickHandlerPtr JumpToStoryClickHandler(
 	CallId callId);
 
 void ShowTrialTranscribesToast(int left, TimeId until);
-
-void ClearMediaAsExpired(not_null<HistoryItem*> item);
 
 [[nodiscard]] int ItemsForwardSendersCount(const HistoryItemsList &list);
 [[nodiscard]] int ItemsForwardCaptionsCount(const HistoryItemsList &list);

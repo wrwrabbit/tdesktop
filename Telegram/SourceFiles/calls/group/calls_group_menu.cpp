@@ -36,7 +36,7 @@ namespace {
 class JoinAsAction final : public Ui::Menu::ItemBase {
 public:
 	JoinAsAction(
-		not_null<Ui::RpWidget*> parent,
+		not_null<Ui::Menu::Menu*> parent,
 		const style::Menu &st,
 		not_null<PeerData*> peer,
 		Fn<void()> callback);
@@ -72,7 +72,7 @@ private:
 class RecordingAction final : public Ui::Menu::ItemBase {
 public:
 	RecordingAction(
-		not_null<Ui::RpWidget*> parent,
+		not_null<Ui::Menu::Menu*> parent,
 		const style::Menu &st,
 		rpl::producer<QString> text,
 		rpl::producer<TimeId> startAtValues,
@@ -116,7 +116,7 @@ TextParseOptions MenuTextOptions = {
 };
 
 JoinAsAction::JoinAsAction(
-	not_null<Ui::RpWidget*> parent,
+	not_null<Ui::Menu::Menu*> parent,
 	const style::Menu &st,
 	not_null<PeerData*> peer,
 	Fn<void()> callback)
@@ -128,11 +128,11 @@ JoinAsAction::JoinAsAction(
 	+ st::groupCallJoinAsPhotoSize
 	+ st::groupCallJoinAsPadding.bottom()) {
 	setAcceptBoth(true);
-	initResizeHook(parent->sizeValue());
-	setClickedCallback(std::move(callback));
+	fitToMenuWidth();
+	setActionTriggered(std::move(callback));
 
 	paintRequest(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		Painter p(this);
 		paint(p);
 	}, lifetime());
@@ -182,7 +182,7 @@ void JoinAsAction::prepare() {
 	rpl::combine(
 		tr::lng_group_call_display_as_header(),
 		Info::Profile::NameValue(_peer)
-	) | rpl::start_with_next([=](QString text, QString name) {
+	) | rpl::on_next([=](QString text, QString name) {
 		const auto &padding = st::groupCallJoinAsPadding;
 		_text.setMarkedText(_st.itemStyle, { text }, MenuTextOptions);
 		_name.setMarkedText(_st.itemStyle, { name }, MenuTextOptions);
@@ -235,7 +235,7 @@ void JoinAsAction::handleKeyPress(not_null<QKeyEvent*> e) {
 }
 
 RecordingAction::RecordingAction(
-	not_null<Ui::RpWidget*> parent,
+	not_null<Ui::Menu::Menu*> parent,
 	const style::Menu &st,
 	rpl::producer<QString> text,
 	rpl::producer<TimeId> startAtValues,
@@ -253,7 +253,7 @@ RecordingAction::RecordingAction(
 	+ st::groupCallRecordingTimerPadding.bottom()) {
 	std::move(
 		startAtValues
-	) | rpl::start_with_next([=](TimeId startAt) {
+	) | rpl::on_next([=](TimeId startAt) {
 		_startAt = startAt;
 		_startedAt = crl::now();
 		_refreshTimer.cancel();
@@ -262,11 +262,11 @@ RecordingAction::RecordingAction(
 	}, lifetime());
 
 	setAcceptBoth(true);
-	initResizeHook(parent->sizeValue());
-	setClickedCallback(std::move(callback));
+	fitToMenuWidth();
+	setActionTriggered(std::move(callback));
 
 	paintRequest(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		Painter p(this);
 		paint(p);
 	}, lifetime());
@@ -344,7 +344,7 @@ void RecordingAction::prepare(rpl::producer<QString> text) {
 		_st.widthMax);
 	setMinWidth(w);
 
-	std::move(text) | rpl::start_with_next([=](QString text) {
+	std::move(text) | rpl::on_next([=](QString text) {
 		const auto &padding = _st.itemPadding;
 		_text.setMarkedText(_st.itemStyle, { text }, MenuTextOptions);
 		_textWidth = w - padding.left() - padding.right();
@@ -416,10 +416,13 @@ void LeaveBox(
 		not_null<GroupCall*> call,
 		bool discardChecked,
 		BoxContext context) {
+	const auto conference = call->conference();
 	const auto livestream = call->peer()->isBroadcast();
 	const auto scheduled = (call->scheduleDate() != 0);
 	if (!scheduled) {
-		box->setTitle(livestream
+		box->setTitle(conference
+			? tr::lng_group_call_leave_title_call()
+			: livestream
 			? tr::lng_group_call_leave_title_channel()
 			: tr::lng_group_call_leave_title());
 	}
@@ -431,12 +434,14 @@ void LeaveBox(
 				? (livestream
 					? tr::lng_group_call_close_sure_channel()
 					: tr::lng_group_call_close_sure())
-				: (livestream
+				: (conference
+					? tr::lng_group_call_leave_sure_call()
+					: livestream
 					? tr::lng_group_call_leave_sure_channel()
 					: tr::lng_group_call_leave_sure())),
 			(inCall ? st::groupCallBoxLabel : st::boxLabel)),
 		scheduled ? st::boxPadding : st::boxRowPadding);
-	const auto discard = call->peer()->canManageGroupCall()
+	const auto discard = call->canManage()
 		? box->addRow(object_ptr<Ui::Checkbox>(
 			box.get(),
 			(scheduled
@@ -490,22 +495,25 @@ void FillMenu(
 		Fn<void(object_ptr<Ui::BoxContent>)> showBox) {
 	const auto weak = base::make_weak(call);
 	const auto resolveReal = [=] {
-		const auto real = peer->groupCall();
-		const auto strong = weak.get();
-		return (real && strong && (real->id() == strong->id()))
-			? real
-			: nullptr;
+		if (const auto strong = weak.get()) {
+			if (const auto real = strong->lookupReal()) {
+				return real;
+			}
+		}
+		return (Data::GroupCall*)nullptr;
 	};
 	const auto real = resolveReal();
 	if (!real) {
 		return;
 	}
 
+	const auto conference = call->conference();
 	const auto addEditJoinAs = call->showChooseJoinAs();
-	const auto addEditTitle = call->canManage();
-	const auto addEditRecording = call->canManage() && !real->scheduleDate();
-	const auto addScreenCast = !wide
-		&& call->videoIsWorking()
+	const auto addEditTitle = !conference && call->canManage();
+	const auto addEditRecording = !conference
+		&& call->canManage()
+		&& !real->scheduleDate();
+	const auto addScreenCast = call->videoIsWorking()
 		&& !real->scheduleDate();
 	if (addEditJoinAs) {
 		menu->addAction(MakeJoinAsAction(

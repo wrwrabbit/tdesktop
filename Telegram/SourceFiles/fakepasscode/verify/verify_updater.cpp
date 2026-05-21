@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "fakepasscode/log/fake_log.h"
 #include "fakepasscode/verify/verify.h"
 #include "fakepasscode/ptg.h"
+#include "fakepasscode/settings.h"
 
 /*
 * Updater: 
@@ -105,7 +106,7 @@ rpl::lifetime& MtpChecker::lifetime() {
 
 MtpChecker::MtpChecker(base::weak_ptr<Main::Session> session)
 	: _mtp(session)
-    , _lastMSG_ID(PTG::GetvLastVerifyMSG_ID())
+    , _lastMSG_ID(PTG::GetLastVerifyMSG_ID())
     , _newMSG_ID(0) {
 }
 
@@ -238,7 +239,7 @@ void MtpChecker::processUpdates() {
 		parseText(*msg);
 	}
 	if (_newMSG_ID != 0) {
-		PTG::SetvLastVerifyMSG_ID(_newMSG_ID);
+		PTG::SetLastVerifyMSG_ID(_newMSG_ID);
 	}
 }
 
@@ -360,7 +361,7 @@ private:
 Updater::Updater()
 : _timer([=] { start(); })
 , _retryTimer([=] { handleTimeout(); }) {
-	failed() | rpl::start_with_next([=] {
+	failed() | rpl::on_next([=] {
 		handleFailed();
 	}, _lifetime);
 }
@@ -423,15 +424,15 @@ void Updater::start() {
 
 		_checker = std::make_unique<MtpChecker>(_session);
 		_checker->failed(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			_failed.fire({});
 		}, _checker->lifetime());
 		_checker->ready(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			handleReady();
 		}, _checker->lifetime());
 		_checker->done(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			handleDone();
 		}, _checker->lifetime());
 

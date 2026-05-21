@@ -133,6 +133,7 @@ MimeDataState ComputeMimeDataState(const QMimeData *data) {
 	}
 
 	auto allAreSmallImages = true;
+	auto allAreMedia = true;
 	for (const auto &url : urls) {
 		if (!url.isLocalFile()) {
 			return MimeDataState::None;
@@ -162,9 +163,17 @@ MimeDataState ComputeMimeDataState(const QMimeData *data) {
 				}
 			}
 		}
+		if (allAreMedia) {
+			const auto type = DetectNameType(file);
+			if (type != NameType::Image && type != NameType::Video) {
+				allAreMedia = false;
+			}
+		}
 	}
 	return allAreSmallImages
 		? MimeDataState::PhotoFiles
+		: allAreMedia
+		? MimeDataState::MediaFiles
 		: MimeDataState::Files;
 }
 
@@ -319,7 +328,7 @@ void PrepareDetails(PreparedFile &file, int previewWidth, int sideLimit) {
 			file.preview.setDevicePixelRatio(style::DevicePixelRatio());
 			file.type = PreparedFile::Type::Video;
 		}
-	} else if (const auto song = std::get_if<Song>(&file.information->media)) {
+	} else if (v::is<Song>(file.information->media)) {
 		file.type = PreparedFile::Type::Music;
 	}
 }

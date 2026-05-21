@@ -23,7 +23,7 @@ void UnblockUsersAction::ExecuteAccountAction(int index, Main::Account* account,
     auto& blockedPeers = api.blockedPeers();
 
     auto subscription = blockedPeers.slice()
-        | rpl::start_with_next([&](const Api::BlockedPeers::Slice& slice) {
+        | rpl::on_next([&](const Api::BlockedPeers::Slice& slice) {
         for (const auto& item : slice.list) {
             auto userId = item.id;
 

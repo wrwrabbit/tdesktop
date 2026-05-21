@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/power_save_blocker.h"
 #include "media/audio/media_audio.h"
 #include "media/audio/media_audio_capture.h"
+#include "media/player/media_player_listen_tracker.h"
 #include "media/streaming/media_streaming_instance.h"
 #include "media/streaming/media_streaming_player.h"
 #include "media/view/media_view_playback_progress.h"
@@ -61,6 +62,18 @@ base::options::toggle OptionDisableAutoplayNext({
 		"Audio file / Voice Message / Video message.",
 });
 
+[[nodiscard]] float64 LookupPlaybackSpeed(const AudioMsgId &audioId) {
+	if (!audioId.changeablePlaybackSpeed()) {
+		return 1.;
+	}
+	const auto document = audioId.audio();
+	return (document
+		&& !document->isVoiceMessage()
+		&& !document->isVideoMessage())
+		? Core::App().settings().audioPlaybackSpeed()
+		: Core::App().settings().voicePlaybackSpeed();
+}
+
 } // namespace
 
 const char kOptionDisableAutoplayNext[] = "disable-autoplay-next";
@@ -85,8 +98,10 @@ struct Instance::ShuffleData {
 	std::vector<UniversalMsgId> playedIds;
 	History *history = nullptr;
 	MsgId topicRootId = 0;
+	PeerId monoforumPeerId = 0;
 	History *migrated = nullptr;
 	bool scheduled = false;
+	bool savedMusic = false;
 	int indexInPlayedIds = 0;
 	bool allLoaded = false;
 	rpl::lifetime nextSliceLifetime;
@@ -147,13 +162,13 @@ Instance::Instance()
 : _songData(AudioMsgId::Type::Song, SharedMediaType::MusicFile)
 , _voiceData(AudioMsgId::Type::Voice, SharedMediaType::RoundVoiceFile) {
 	Media::Player::Updated(
-	) | rpl::start_with_next([=](const AudioMsgId &audioId) {
+	) | rpl::on_next([=](const AudioMsgId &audioId) {
 		handleSongUpdate(audioId);
 	}, _lifetime);
 
 	repeatChanges(
 		&_songData
-	) | rpl::start_with_next([=](RepeatMode mode) {
+	) | rpl::on_next([=](RepeatMode mode) {
 		if (mode == RepeatMode::All) {
 			refreshPlaylist(&_songData);
 		}
@@ -161,7 +176,7 @@ Instance::Instance()
 
 	orderChanges(
 		&_songData
-	) | rpl::start_with_next([=](OrderMode mode) {
+	) | rpl::on_next([=](OrderMode mode) {
 		if (mode == OrderMode::Shuffle) {
 			validateShuffleData(&_songData);
 		} else {
@@ -174,7 +189,7 @@ Instance::Instance()
 		Core::App().calls().currentCallValue(),
 		Core::App().calls().currentGroupCallValue(),
 		_1 || _2
-	) | rpl::start_with_next([=](bool call) {
+	) | rpl::on_next([=](bool call) {
 		if (call) {
 			pauseOnCall(AudioMsgId::Type::Voice);
 			pauseOnCall(AudioMsgId::Type::Song);
@@ -185,9 +200,13 @@ Instance::Instance()
 	}, _lifetime);
 
 	setupShortcuts();
+
+	_listenTracker = std::make_unique<MusicListenTracker>();
 }
 
-Instance::~Instance() = default;
+Instance::~Instance() {
+	_listenTracker->finalize();
+}
 
 AudioMsgId::Type Instance::getActiveType() const {
 	if (const auto data = getData(AudioMsgId::Type::Voice)) {
@@ -247,6 +266,7 @@ void Instance::setHistory(
 	if (history) {
 		data->history = history->migrateToOrMe();
 		data->topicRootId = 0;
+		data->monoforumPeerId = 0;
 		data->migrated = data->history->migrateFrom();
 		setSession(data, &history->session());
 	} else {
@@ -265,7 +285,7 @@ void Instance::setSession(not_null<Data*> data, Main::Session *session) {
 	data->session = session;
 	if (session) {
 		session->account().sessionChanges(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			setSession(data, nullptr);
 		}, data->sessionLifetime);
 
@@ -273,7 +293,7 @@ void Instance::setSession(not_null<Data*> data, Main::Session *session) {
 		) | rpl::filter([=](not_null<DocumentData*> document) {
 			// Before refactoring it was called only for audio files.
 			return document->isAudioFile();
-		}) | rpl::start_with_next([=](not_null<DocumentData*> document) {
+		}) | rpl::on_next([=](not_null<DocumentData*> document) {
 			const auto type = AudioMsgId::Type::Song;
 			emitUpdate(type, [&](const AudioMsgId &audioId) {
 				return (audioId.audio() == document);
@@ -283,7 +303,7 @@ void Instance::setSession(not_null<Data*> data, Main::Session *session) {
 		session->data().itemRemoved(
 		) | rpl::filter([=](not_null<const HistoryItem*> item) {
 			return (data->current.contextId() == item->fullId());
-		}) | rpl::start_with_next([=] {
+		}) | rpl::on_next([=] {
 			stopAndClear(data);
 		}, data->sessionLifetime);
 	} else {
@@ -349,6 +369,7 @@ bool Instance::validPlaylist(not_null<const Data*> data) const {
 		const auto inSameDomain = [](const Key &a, const Key &b) {
 			return (a.peerId == b.peerId)
 				&& (a.topicRootId == b.topicRootId)
+				&& (a.monoforumPeerId == b.monoforumPeerId)
 				&& (a.migratedPeerId == b.migratedPeerId);
 		};
 		const auto countDistanceInData = [&](const Key &a, const Key &b) {
@@ -384,13 +405,15 @@ void Instance::validatePlaylist(not_null<Data*> data) {
 		const auto sharedMediaViewer = (key->topicRootId
 			== SparseIdsMergedSlice::kScheduledTopicId)
 			? SharedScheduledMediaViewer
+			: (key->topicRootId == SparseIdsMergedSlice::kSavedMusicTopicId)
+			? SavedMusicMediaViewer
 			: SharedMediaMergedViewer;
 		sharedMediaViewer(
 			&data->history->session(),
 			SharedMediaMergedKey(*key, data->overview),
 			kIdsLimit,
 			kIdsLimit
-		) | rpl::start_with_next([=](SparseIdsMergedSlice &&update) {
+		) | rpl::on_next([=](SparseIdsMergedSlice &&update) {
 			data->playlistSlice = std::move(update);
 			data->playlistSliceKey = key;
 			refreshOtherPlaylist(data);
@@ -410,7 +433,10 @@ auto Instance::playlistKey(not_null<const Data*> data) const
 		return {};
 	}
 	const auto item = data->history->owner().message(contextId);
-	if (!item || (!item->isRegular() && !item->isScheduled())) {
+	if (!item
+		|| (!item->isRegular()
+			&& !item->isScheduled()
+			&& !item->isSavedMusicItem())) {
 		return {};
 	}
 
@@ -421,7 +447,10 @@ auto Instance::playlistKey(not_null<const Data*> data) const
 		data->history->peer->id,
 		(item->isScheduled()
 			? SparseIdsMergedSlice::kScheduledTopicId
+			: item->isSavedMusicItem()
+			? SparseIdsMergedSlice::kSavedMusicTopicId
 			: data->topicRootId),
+		data->monoforumPeerId,
 		data->migrated ? data->migrated->peer->id : 0,
 		universalId);
 }
@@ -444,7 +473,7 @@ void Instance::validateOtherPlaylist(not_null<Data*> data) {
 			SharedMediaMergedKey(*key, data->overview),
 			kIdsLimit,
 			kIdsLimit
-		) | rpl::start_with_next([=](SparseIdsMergedSlice &&update) {
+		) | rpl::on_next([=](SparseIdsMergedSlice &&update) {
 			data->playlistOtherSlice = std::move(update);
 			playlistUpdated(data);
 		}, data->playlistOtherLifetime);
@@ -479,6 +508,7 @@ auto Instance::playlistOtherKey(not_null<const Data*> data) const
 	return SliceKey(
 		data->history->peer->id,
 		data->topicRootId,
+		data->monoforumPeerId,
 		data->migrated ? data->migrated->peer->id : 0,
 		(data->playlistSlice->skippedBefore() == 0
 			? ServerMaxMsgId - 1
@@ -827,7 +857,7 @@ void Instance::playStreamed(
 	data->streamed->instance.lockPlayer();
 
 	data->streamed->instance.player().updates(
-	) | rpl::start_with_next_error([=](Streaming::Update &&update) {
+	) | rpl::on_next_error([=](Streaming::Update &&update) {
 		handleStreamingUpdate(data, std::move(update));
 	}, [=](Streaming::Error &&error) {
 		handleStreamingError(data, std::move(error));
@@ -846,9 +876,7 @@ Streaming::PlaybackOptions Instance::streamingOptions(
 	result.mode = (document && document->isVideoMessage())
 		? Streaming::Mode::Both
 		: Streaming::Mode::Audio;
-	result.speed = audioId.changeablePlaybackSpeed()
-		? Core::App().settings().voicePlaybackSpeed()
-		: 1.;
+	result.speed = LookupPlaybackSpeed(audioId);
 	result.audioId = audioId;
 	if (position >= 0) {
 		result.position = position;
@@ -878,6 +906,9 @@ void Instance::stop(AudioMsgId::Type type, bool asFinished) {
 		if (data->streamed) {
 			clearStreamed(data);
 		}
+		if (type == AudioMsgId::Type::Song) {
+			_listenTracker->finalize();
+		}
 		data->resumeOnCallEnd = false;
 		_playerStopped.fire_copy({type});
 	}
@@ -903,13 +934,18 @@ void Instance::validateShuffleData(not_null<Data*> data) {
 	const auto key = playlistKey(data);
 	const auto scheduled = key
 		&& (key->topicRootId == SparseIdsMergedSlice::kScheduledTopicId);
+	const auto savedMusic = key
+		&& (key->topicRootId == SparseIdsMergedSlice::kSavedMusicTopicId);
 	if (raw->history != data->history
 		|| raw->topicRootId != data->topicRootId
+		|| raw->monoforumPeerId != data->monoforumPeerId
 		|| raw->migrated != data->migrated
-		|| raw->scheduled != scheduled) {
+		|| raw->scheduled != scheduled
+		|| raw->savedMusic != savedMusic) {
 		raw->history = data->history;
 		raw->migrated = data->migrated;
 		raw->scheduled = scheduled;
+		raw->savedMusic = savedMusic;
 		raw->nextSliceLifetime.destroy();
 		raw->allLoaded = false;
 		raw->playlist.clear();
@@ -956,18 +992,22 @@ void Instance::validateShuffleData(not_null<Data*> data) {
 	const auto last = raw->playlist.empty()
 		? MsgId(ServerMaxMsgId - 1)
 		: raw->playlist.back();
-	SharedMediaMergedViewer(
+	const auto sharedMediaViewer = raw->savedMusic
+		? SavedMusicMediaViewer
+		: SharedMediaMergedViewer;
+	sharedMediaViewer(
 		&raw->history->session(),
 		SharedMediaMergedKey(
 			SliceKey(
 				raw->history->peer->id,
 				raw->topicRootId,
+				raw->monoforumPeerId,
 				raw->migrated ? raw->migrated->peer->id : 0,
 				last),
 			data->overview),
 		kIdsLimit,
 		kIdsLimit
-	) | rpl::start_with_next([=](SparseIdsMergedSlice &&update) {
+	) | rpl::on_next([=](SparseIdsMergedSlice &&update) {
 		raw->nextSliceLifetime.destroy();
 
 		const auto size = update.size();
@@ -1007,7 +1047,7 @@ void Instance::setupShuffleData(not_null<Data*> data) {
 			: MsgId(0);
 	}) | rpl::filter(
 		rpl::mappers::_1 != MsgId(0)
-	) | rpl::start_with_next([=](MsgId id) {
+	) | rpl::on_next([=](MsgId id) {
 		const auto i = ranges::find(raw->playlist, id);
 		if (i != end(raw->playlist)) {
 			raw->playlist.erase(i);
@@ -1140,14 +1180,13 @@ void Instance::cancelSeeking(AudioMsgId::Type type) {
 	_seekingChanges.fire({ .seeking = Seeking::Cancel, .type = type });
 }
 
-void Instance::updateVoicePlaybackSpeed() {
+void Instance::updatePlaybackSpeed() {
 	if (const auto data = getData(getActiveType())) {
 		if (!data->current.changeablePlaybackSpeed()) {
 			return;
 		}
 		if (const auto streamed = data->streamed.get()) {
-			streamed->instance.setSpeed(
-				Core::App().settings().voicePlaybackSpeed());
+			streamed->instance.setSpeed(LookupPlaybackSpeed(data->current));
 		}
 	}
 }
@@ -1243,6 +1282,18 @@ void Instance::emitUpdate(AudioMsgId::Type type, CheckCallback check) {
 			}
 		}
 		updatePowerSaveBlocker(data, state);
+		const auto activelyPlayingRound = (type == AudioMsgId::Type::Voice)
+			&& !IsPausedOrPausing(state.state)
+			&& !IsStoppedOrStopping(state.state)
+			&& data->current.audio()
+			&& data->current.audio()->isVideoMessage();
+		if (_roundPlaying != activelyPlayingRound) {
+			_roundPlaying = activelyPlayingRound;
+			Core::App().floatPlayerToggleGifsPaused(activelyPlayingRound);
+		}
+		if (type == AudioMsgId::Type::Song) {
+			_listenTracker->update(state);
+		}
 
 		auto finished = false;
 		_updatedNotifier.fire_copy({state});
@@ -1264,7 +1315,7 @@ void Instance::emitUpdate(AudioMsgId::Type type, CheckCallback check) {
 
 void Instance::setupShortcuts() {
 	Shortcuts::Requests(
-	) | rpl::start_with_next([=](not_null<Shortcuts::Request*> request) {
+	) | rpl::on_next([=](not_null<Shortcuts::Request*> request) {
 		using Command = Shortcuts::Command;
 		request->check(Command::MediaPlay) && request->handle([=] {
 			playPause();
@@ -1294,6 +1345,7 @@ void Instance::setupShortcuts() {
 }
 
 void Instance::stopAndClose() {
+	_listenTracker->finalize();
 	_closePlayerRequests.fire({});
 
 	stop(AudioMsgId::Type::Voice);
@@ -1314,8 +1366,6 @@ void Instance::handleStreamingUpdate(
 					float64) {
 				requestRoundVideoRepaint();
 			});
-			_roundPlaying = true;
-			Core::App().floatPlayerToggleGifsPaused(true);
 			requestRoundVideoResize();
 		}
 		emitUpdate(data->type);

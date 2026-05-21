@@ -57,14 +57,14 @@ void AddDialogImageToButton(
     icon->widget.setAttribute(Qt::WA_TransparentForMouseEvents);
     icon->widget.resize(st::menuIconLock.size()); // use size from icon
     button->sizeValue(
-    ) | rpl::start_with_next([=, left = st.iconLeft](QSize size) {
+    ) | rpl::on_next([=, left = st.iconLeft](QSize size) {
         icon->widget.moveToLeft(
             left,
             (size.height() - icon->widget.height()) / 2,
             size.width());
         }, icon->widget.lifetime());
     icon->widget.paintRequest(
-    ) | rpl::start_with_next([=] {
+    ) | rpl::on_next([=] {
         auto iconStyle = style::DialogRow{
             .height = icon->widget.height(),
             .padding = style::margins(0, 0, 0, 0),

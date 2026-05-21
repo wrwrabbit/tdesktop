@@ -11,7 +11,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_media.h"
 #include "history/view/media/history_view_web_page.h"
 #include "history/history_item.h"
+#include "history/history_item_helpers.h"
 #include "history/history_item_components.h"
+#include "history/history_item_reply_markup.h"
 #include "history/history_item_text.h"
 #include "history/admin_log/history_admin_log_section.h"
 #include "history/admin_log/history_admin_log_filter.h"
@@ -21,8 +23,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_cursor_state.h"
 #include "chat_helpers/message_field.h"
 #include "boxes/sticker_set_box.h"
+#include "boxes/translate_box.h"
 #include "ui/boxes/confirm_box.h"
 #include "base/platform/base_platform_info.h"
+#include "base/qt/qt_common_adapters.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
 #include "base/call_delayed.h"
@@ -32,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "api/api_chat_participants.h"
 #include "api/api_attached_stickers.h"
+#include "api/api_report.h"
 #include "window/window_session_controller.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
@@ -78,6 +83,7 @@ namespace {
 // If we require to support more admins we'll have to rewrite this anyway.
 constexpr auto kMaxChannelAdmins = 200;
 constexpr auto kScrollDateHideTimeout = 1000;
+constexpr auto kScrollDateHideOnDayCrossingTimeout = crl::time(3000);
 constexpr auto kEventsFirstPage = 20;
 constexpr auto kEventsPerPage = 50;
 constexpr auto kClearUserpicsAfter = 50;
@@ -89,14 +95,14 @@ void InnerWidget::enumerateItems(Method method) {
 	constexpr auto TopToBottom = (direction == EnumItemsDirection::TopToBottom);
 
 	// No displayed messages in this history.
-	if (_items.empty()) {
+	if (_displayItems.empty()) {
 		return;
 	}
 	if (_visibleBottom <= _itemsTop || _itemsTop + _itemsHeight <= _visibleTop) {
 		return;
 	}
 
-	auto begin = std::rbegin(_items), end = std::rend(_items);
+	auto begin = std::rbegin(_displayItems), end = std::rend(_displayItems);
 	auto from = TopToBottom ? std::lower_bound(begin, end, _visibleTop, [this](auto &elem, int top) {
 		return this->itemTop(elem) + elem->height() <= top;
 	}) : std::upper_bound(begin, end, _visibleBottom, [this](int bottom, auto &elem) {
@@ -107,13 +113,13 @@ void InnerWidget::enumerateItems(Method method) {
 		--from;
 	}
 	if (TopToBottom) {
-		Assert(itemTop(from->get()) + from->get()->height() > _visibleTop);
+		Assert(itemTop(*from) + (*from)->height() > _visibleTop);
 	} else {
-		Assert(itemTop(from->get()) < _visibleBottom);
+		Assert(itemTop(*from) < _visibleBottom);
 	}
 
 	while (true) {
-		auto item = from->get();
+		auto item = *from;
 		auto itemtop = itemTop(item);
 		auto itembottom = itemtop + item->height();
 
@@ -260,37 +266,40 @@ InnerWidget::InnerWidget(
 		st::historyAdminLogEmptyWidth
 		- st::historyAdminLogEmptyPadding.left()
 		- st::historyAdminLogEmptyPadding.left())
-, _antiSpamValidator(_controller, _channel) {
+, _antiSpamValidator(_controller, _channel)
+, _touchSelectTimer([=] { onTouchSelect(); })
+, _touchScrollTimer([=] { onTouchScrollTimer(); }) {
 	Window::ChatThemeValueFromPeer(
 		controller,
 		channel
-	) | rpl::start_with_next([=](std::shared_ptr<Ui::ChatTheme> &&theme) {
+	) | rpl::on_next([=](std::shared_ptr<Ui::ChatTheme> &&theme) {
 		_theme = std::move(theme);
 		controller->setChatStyleTheme(_theme);
 	}, lifetime());
 
+	setAttribute(Qt::WA_AcceptTouchEvents);
 	setMouseTracking(true);
 	_scrollDateHideTimer.setCallback([=] { scrollDateHideByTimer(); });
 	session().data().viewRepaintRequest(
-	) | rpl::start_with_next([=](auto view) {
-		if (myView(view)) {
-			repaintItem(view);
+	) | rpl::on_next([=](Data::RequestViewRepaint data) {
+		if (myView(data.view)) {
+			repaintItem(data.view, data.rect);
 		}
 	}, lifetime());
 	session().data().viewResizeRequest(
-	) | rpl::start_with_next([=](auto view) {
+	) | rpl::on_next([=](auto view) {
 		if (myView(view)) {
 			resizeItem(view);
 		}
 	}, lifetime());
 	session().data().itemViewRefreshRequest(
-	) | rpl::start_with_next([=](auto item) {
+	) | rpl::on_next([=](auto item) {
 		if (const auto view = viewForItem(item)) {
 			refreshItem(view);
 		}
 	}, lifetime());
 	session().data().viewLayoutChanged(
-	) | rpl::start_with_next([=](auto view) {
+	) | rpl::on_next([=](auto view) {
 		if (myView(view)) {
 			if (view->isUnderCursor()) {
 				updateSelected();
@@ -298,7 +307,7 @@ InnerWidget::InnerWidget(
 		}
 	}, lifetime());
 	session().data().itemDataChanges(
-	) | rpl::start_with_next([=](not_null<HistoryItem*> item) {
+	) | rpl::on_next([=](not_null<HistoryItem*> item) {
 		if (const auto view = viewForItem(item)) {
 			view->itemDataChanged();
 		}
@@ -309,7 +318,7 @@ InnerWidget::InnerWidget(
 		return (_history == query.item->history())
 			&& query.item->isAdminLogEntry()
 			&& isVisible();
-	}) | rpl::start_with_next([=](
+	}) | rpl::on_next([=](
 			const Data::Session::ItemVisibilityQuery &query) {
 		if (const auto view = viewForItem(query.item)) {
 			auto top = itemTop(view);
@@ -322,7 +331,7 @@ InnerWidget::InnerWidget(
 	}, lifetime());
 
 	controller->adaptive().chatWideValue(
-	) | rpl::start_with_next([=](bool wide) {
+	) | rpl::on_next([=](bool wide) {
 		_isChatWide = wide;
 	}, lifetime());
 
@@ -368,9 +377,10 @@ void InnerWidget::visibleTopBottomUpdated(
 	updateVisibleTopItem();
 	checkPreloadMore();
 	if (scrolledUp) {
+		_scrollDateAfterDayCrossing = false;
 		_scrollDateCheck.call();
 	} else {
-		scrollDateHideByTimer();
+		scrollDateCheckDownward();
 	}
 	_controller->floatPlayerAreaUpdated();
 	session().data().itemVisibilitiesUpdated();
@@ -380,7 +390,7 @@ void InnerWidget::updateVisibleTopItem() {
 	if (_visibleBottom == height()) {
 		_visibleTopItem = nullptr;
 	} else {
-		auto begin = std::rbegin(_items), end = std::rend(_items);
+		auto begin = std::rbegin(_displayItems), end = std::rend(_displayItems);
 		auto from = std::lower_bound(begin, end, _visibleTop, [this](auto &&elem, int top) {
 			return this->itemTop(elem) + elem->height() <= top;
 		});
@@ -414,8 +424,33 @@ void InnerWidget::scrollDateCheck() {
 	}
 }
 
+void InnerWidget::scrollDateCheckDownward() {
+	const auto previousDay = _scrollDateLastItem
+		? _scrollDateLastItem->dateTime().date()
+		: QDate();
+	const auto currentDay = _visibleTopItem
+		? _visibleTopItem->dateTime().date()
+		: QDate();
+	const auto crossedDay = previousDay.isValid()
+		&& currentDay.isValid()
+		&& (previousDay != currentDay);
+	_scrollDateLastItem = _visibleTopItem;
+	_scrollDateLastItemTop = _visibleTopFromItem;
+	if (crossedDay) {
+		if (!_scrollDateShown) {
+			toggleScrollDateShown();
+		}
+		_scrollDateAfterDayCrossing = true;
+		_scrollDateHideTimer.callOnce(
+			kScrollDateHideOnDayCrossingTimeout);
+	} else if (!_scrollDateAfterDayCrossing) {
+		scrollDateHideByTimer();
+	}
+}
+
 void InnerWidget::scrollDateHideByTimer() {
 	_scrollDateHideTimer.cancel();
+	_scrollDateAfterDayCrossing = false;
 	scrollDateHide();
 }
 
@@ -465,7 +500,7 @@ void InnerWidget::requestAdmins() {
 	const auto offset = 0;
 	const auto participantsHash = uint64(0);
 	_api.request(MTPchannels_GetParticipants(
-		_channel->inputChannel,
+		_channel->inputChannel(),
 		MTP_channelParticipantsAdmins(),
 		MTP_int(offset),
 		MTP_int(kMaxChannelAdmins),
@@ -549,7 +584,7 @@ void InnerWidget::showFilter(Fn<void(FilterValue &&filter)> callback) {
 				box->verticalLayout(),
 				tr::lng_admin_log_filter_actions_admins_section(
 					tr::now,
-					Ui::Text::WithEntities),
+					tr::marked),
 				checkedPeerId.size() == admins.size(),
 				st::defaultBoxCheckbox));
 		using Controller = Ui::ExpandablePeerListController;
@@ -602,7 +637,7 @@ void InnerWidget::clearAndRequestLog() {
 void InnerWidget::updateEmptyText() {
 	auto hasSearch = !_searchQuery.isEmpty();
 	auto hasFilter = _filter.flags || _filter.admins;
-	auto text = Ui::Text::Semibold((hasSearch || hasFilter)
+	auto text = tr::semibold((hasSearch || hasFilter)
 		? tr::lng_admin_log_no_results_title(tr::now)
 		: tr::lng_admin_log_no_events_title(tr::now));
 	auto description = hasSearch
@@ -620,8 +655,9 @@ void InnerWidget::updateEmptyText() {
 }
 
 QString InnerWidget::tooltipText() const {
-	if (_mouseCursorState == CursorState::Date
-		&& _mouseAction == MouseAction::None) {
+	if (_mouseAction == MouseAction::None
+		&& (_mouseCursorState == CursorState::Date
+			|| _mouseCursorState == CursorState::LogAdminService)) {
 		if (const auto view = Element::Hovered()) {
 			auto dateText = HistoryView::DateTooltipText(view);
 
@@ -690,6 +726,16 @@ void InnerWidget::elementShowPollResults(
 	FullMsgId context) {
 }
 
+void InnerWidget::elementShowAddPollOption(
+	not_null<HistoryView::Element*> view,
+	not_null<PollData*> poll,
+	FullMsgId context,
+	QRect optionRect) {
+}
+
+void InnerWidget::elementSubmitAddPollOption(FullMsgId context) {
+}
+
 void InnerWidget::elementOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) {
@@ -719,7 +765,7 @@ bool InnerWidget::elementAnimationsPaused() {
 }
 
 bool InnerWidget::elementHideReply(not_null<const Element*> view) {
-	return true;
+	return false;
 }
 
 bool InnerWidget::elementShownUnread(not_null<const Element*> view) {
@@ -740,8 +786,9 @@ void InnerWidget::elementSearchInList(
 void InnerWidget::elementHandleViaClick(not_null<UserData*> bot) {
 }
 
-bool InnerWidget::elementIsChatWide() {
-	return _isChatWide;
+HistoryView::ElementChatMode InnerWidget::elementChatMode() {
+	using Mode = HistoryView::ElementChatMode;
+	return _isChatWide ? Mode::Wide : Mode::Default;
 }
 
 not_null<Ui::PathShiftGradient*> InnerWidget::elementPathShiftGradient() {
@@ -780,7 +827,9 @@ void InnerWidget::saveState(not_null<SectionMemento*> memento) {
 	memento->setAdmins(std::move(_admins));
 	memento->setAdminsCanEdit(std::move(_adminsCanEdit));
 	memento->setSearchQuery(std::move(_searchQuery));
+	memento->setExpandedGroups(std::move(_expandedGroups));
 	if (!_filterChanged) {
+		clearDisplayItems(DisplayPointerScope::All);
 		for (auto &item : _items) {
 			item.clearView();
 		}
@@ -789,6 +838,9 @@ void InnerWidget::saveState(not_null<SectionMemento*> memento) {
 			base::take(_eventIds),
 			_upLoaded,
 			_downLoaded);
+		memento->setDeleteEventMeta(
+			base::take(_itemEventIds),
+			base::take(_eventAdminIds));
 		base::take(_itemsByData);
 	}
 	_upLoaded = _downLoaded = true; // Don't load or handle anything anymore.
@@ -801,7 +853,6 @@ void InnerWidget::restoreState(not_null<SectionMemento*> memento) {
 	auto items = memento->takeItems();
 	for (auto &item : items) {
 		item.refreshView(this);
-		_itemsByData.emplace(item->data(), item.get());
 	}
 	_items = std::move(items);
 
@@ -810,11 +861,15 @@ void InnerWidget::restoreState(not_null<SectionMemento*> memento) {
 	_adminsCanEdit = memento->takeAdminsCanEdit();
 	_filter = memento->takeFilter();
 	_searchQuery = memento->takeSearchQuery();
+	_expandedGroups = memento->takeExpandedGroups();
+	_itemEventIds = memento->takeItemEventIds();
+	_eventAdminIds = memento->takeEventAdminIds();
 	_upLoaded = memento->upLoaded();
 	_downLoaded = memento->downLoaded();
 	_filterChanged = false;
 	updateMinMaxIds();
-	updateSize();
+	computeDeleteGroups();
+	rebuildDisplayItems();
 }
 
 void InnerWidget::preloadMore(Direction direction) {
@@ -848,7 +903,8 @@ void InnerWidget::preloadMore(Direction direction) {
 			| ((f & LocalFlag::GroupCall) ? Flag::f_group_call : empty)
 			| ((f & LocalFlag::Invites) ? Flag::f_invites : empty)
 			| ((f & LocalFlag::Topics) ? Flag::f_forums : empty)
-			| ((f & LocalFlag::SubExtend) ? Flag::f_sub_extend : empty);
+			| ((f & LocalFlag::SubExtend) ? Flag::f_sub_extend : empty)
+			| ((f & LocalFlag::EditRank) ? Flag::f_edit_rank : empty);
 	}();
 	if (_filter.flags != 0) {
 		flags |= MTPchannels_GetAdminLog::Flag::f_events_filter;
@@ -858,7 +914,7 @@ void InnerWidget::preloadMore(Direction direction) {
 		if (!_filter.admins->empty()) {
 			admins.reserve(_filter.admins->size());
 			for (const auto &admin : (*_filter.admins)) {
-				admins.push_back(admin->inputUser);
+				admins.push_back(admin->inputUser());
 			}
 		}
 		flags |= MTPchannels_GetAdminLog::Flag::f_admins;
@@ -868,7 +924,7 @@ void InnerWidget::preloadMore(Direction direction) {
 	auto perPage = _items.empty() ? kEventsFirstPage : kEventsPerPage;
 	requestId = _api.request(MTPchannels_GetAdminLog(
 		MTP_flags(flags),
-		_channel->inputChannel,
+		_channel->inputChannel(),
 		MTP_string(_searchQuery),
 		MTP_channelAdminLogEventsFilter(MTP_flags(filter)),
 		MTP_vector<MTPInputUser>(admins),
@@ -914,6 +970,7 @@ void InnerWidget::addEvents(Direction direction, const QVector<MTPChannelAdminLo
 		: newItemsForDownDirection;
 	addToItems.reserve(oldItemsCount + events.size() * 2);
 
+	const auto canRestrict = InnerWidget::canRestrict();
 	const auto antiSpamUserId = _antiSpamValidator.userId();
 	for (const auto &event : events) {
 		const auto &data = event.data();
@@ -923,6 +980,13 @@ void InnerWidget::addEvents(Direction direction, const QVector<MTPChannelAdminLo
 		}
 		const auto rememberRealMsgId = (antiSpamUserId
 			== peerToUser(peerFromUser(data.vuser_id())));
+		const auto isDeleteAction = (data.vaction().type()
+			== mtpc_channelAdminLogEventActionDeleteMessage);
+		if (isDeleteAction) {
+			_eventAdminIds.emplace(
+				id,
+				peerToUser(peerFromUser(data.vuser_id())));
+		}
 
 		auto count = 0;
 		const auto addOne = [&](
@@ -934,10 +998,16 @@ void InnerWidget::addEvents(Direction direction, const QVector<MTPChannelAdminLo
 			}
 			_eventIds.emplace(id);
 			_itemsByData.emplace(item->data(), item.get());
-			if (rememberRealMsgId && realId) {
-				_antiSpamValidator.addEventMsgId(
-					item->data()->fullId(),
-					realId);
+			_itemEventIds.emplace(item->data(), id);
+			if (realId) {
+				if (rememberRealMsgId) {
+					_antiSpamValidator.addEventMsgId(
+						item->data()->fullId(),
+						realId);
+				}
+				if (canRestrict) {
+					_realIdsForReport[item->data()->fullId()] = realId;
+				}
 			}
 			addToItems.push_back(std::move(item));
 			++count;
@@ -966,7 +1036,8 @@ void InnerWidget::addEvents(Direction direction, const QVector<MTPChannelAdminLo
 			_items = std::move(newItemsForDownDirection);
 		}
 		updateMinMaxIds();
-		itemsAdded(direction, newItemsCount - oldItemsCount);
+		computeDeleteGroups();
+		rebuildDisplayItems();
 	}
 	update();
 }
@@ -983,31 +1054,424 @@ void InnerWidget::updateMinMaxIds() {
 	}
 }
 
-void InnerWidget::itemsAdded(Direction direction, int addedCount) {
-	Expects(addedCount >= 0);
-	auto checkFrom = (direction == Direction::Up)
-		? (_items.size() - addedCount)
-		: 1; // Should be ": 0", but zero is skipped anyway.
-	auto checkTo = (direction == Direction::Up) ? (_items.size() + 1) : (addedCount + 1);
-	for (auto i = checkFrom; i != checkTo; ++i) {
-		if (i > 0) {
-			const auto view = _items[i - 1].get();
-			if (i < _items.size()) {
-				const auto previous = _items[i].get();
-				view->setDisplayDate(view->dateTime().date() != previous->dateTime().date());
-				const auto attach = view->computeIsAttachToPrevious(previous);
-				view->setAttachToPrevious(attach, previous);
-				previous->setAttachToNext(attach, view);
-			} else {
-				view->setDisplayDate(true);
+
+void InnerWidget::computeDeleteGroups() {
+	_deleteGroups.clear();
+
+	if (_items.empty()) {
+		return;
+	}
+
+	// Walk _items and find consecutive runs of delete-action items
+	// from the same admin. Each delete event produces exactly 2 items
+	// (content + service). Delete events are identified via _eventAdminIds.
+	auto groupStart = -1;
+	auto groupAdmin = UserId();
+	auto groupEventId = uint64(0);
+	auto groupEventCount = 0;
+	auto currentEventId = uint64(0);
+
+	const auto finalizeGroup = [&](int endIndex) {
+		if (groupEventCount > 0) {
+			Assert(endIndex - groupStart >= groupEventCount * 2);
+			_deleteGroups.push_back({
+				.eventId = groupEventId,
+				.adminId = groupAdmin,
+				.startIndex = groupStart,
+				.endIndex = endIndex,
+				.eventCount = groupEventCount,
+			});
+		}
+		groupStart = -1;
+		groupAdmin = UserId();
+		groupEventId = 0;
+		groupEventCount = 0;
+	};
+
+	for (auto i = 0, count = int(_items.size()); i < count; ++i) {
+		const auto item = _items[i]->data();
+		const auto eit = _itemEventIds.find(item);
+		if (eit == _itemEventIds.end()) {
+			finalizeGroup(i);
+			continue;
+		}
+		const auto eventId = eit->second;
+		const auto adminIt = _eventAdminIds.find(eventId);
+		if (adminIt == _eventAdminIds.end()) {
+			finalizeGroup(i);
+			continue;
+		}
+		const auto adminId = adminIt->second;
+
+		if (eventId != currentEventId) {
+			// New event encountered.
+			if (groupStart < 0 || adminId != groupAdmin) {
+				finalizeGroup(i);
+				groupStart = i;
+				groupAdmin = adminId;
+			}
+			currentEventId = eventId;
+			groupEventId = eventId;
+			++groupEventCount;
+		}
+		// Items within the same event just extend the range.
+	}
+	finalizeGroup(int(_items.size()));
+}
+
+OwnedItem InnerWidget::createGroupSummaryItem(
+		const DeleteGroup &group,
+		bool expanded) {
+	const auto admin = _history->owner().user(group.adminId);
+	const auto fromLink = admin->createOpenLink();
+	const auto fromLinkText = tr::link(admin->name(), QString());
+
+	// Collect unique author names from content messages in the group.
+	constexpr auto kMaxNames = 4;
+	auto authorNames = QStringList();
+	auto seenAuthors = base::flat_set<PeerId>();
+	auto totalAuthors = 0;
+	for (auto i = group.startIndex; i < group.endIndex; ++i) {
+		const auto item = _items[i]->data();
+		if (!item->isService()) {
+			const auto authorId = item->from()->id;
+			if (!seenAuthors.contains(authorId)) {
+				seenAuthors.emplace(authorId);
+				++totalAuthors;
+				if (authorNames.size() < kMaxNames) {
+					authorNames.push_back(item->from()->name());
+				}
 			}
 		}
 	}
+	auto names = authorNames.join(u", "_q);
+	if (totalAuthors > kMaxNames) {
+		names += u", \u2026"_q;
+	}
+
+	const auto toggleText = expanded
+		? tr::lng_admin_log_hide_all(tr::now)
+		: tr::lng_admin_log_show_all(tr::now);
+
+	const auto groupEventId = group.eventId;
+	const auto toggleLink = std::make_shared<LambdaClickHandler>(
+		[weak = QPointer<InnerWidget>(this), groupEventId] {
+			if (const auto strong = weak.data()) {
+				strong->toggleDeleteGroup(groupEventId);
+			}
+		});
+
+	auto text = tr::lng_admin_log_deleted_messages_collapsed(
+		tr::now,
+		lt_count,
+		group.eventCount,
+		lt_from,
+		fromLinkText,
+		lt_names,
+		{ names },
+		lt_link,
+		tr::link(toggleText, QString()),
+		tr::marked);
+
+	auto message = PreparedServiceText{ text };
+	message.links.push_back(fromLink);
+	message.links.push_back(toggleLink);
+
+	const auto date = (group.endIndex > group.startIndex)
+		? _items[group.endIndex - 1]->dateTime().toSecsSinceEpoch()
+		: 0;
+
+	return OwnedItem(this, _history->makeMessage({
+		.id = _history->nextNonHistoryEntryId(),
+		.flags = MessageFlag::AdminLogEntry,
+		.from = peerFromUser(group.adminId),
+		.date = TimeId(date),
+	}, std::move(message)));
+}
+
+void InnerWidget::setupExpandButton(
+		not_null<HistoryItem*> item,
+		int hiddenCount,
+		uint64 groupEventId) {
+	const auto text = tr::lng_admin_log_expand_more(
+		tr::now,
+		lt_count,
+		hiddenCount);
+
+	auto markup = HistoryMessageMarkupData();
+	markup.flags = ReplyMarkupFlag::Inline;
+	markup.rows.push_back({
+		HistoryMessageMarkupButton(
+			HistoryMessageMarkupButton::Type::Callback,
+			text,
+			{},
+			QByteArray()),
+	});
+	item->updateReplyMarkup(std::move(markup));
+	_expandMarkupItems.emplace(item);
+}
+
+void InnerWidget::clearExpandButtons() {
+	const auto hasExpandButton = [&](const Element *view) {
+		if (!view) {
+			return false;
+		}
+		for (const auto &item : _items) {
+			if (item.get() == view) {
+				return _expandMarkupItems.contains(item->data());
+			}
+		}
+		return false;
+	};
+	if (hasExpandButton(_mouseActionItem)) {
+		_mouseActionItem = nullptr;
+		_mouseAction = MouseAction::None;
+	}
+	if (hasExpandButton(Element::Hovered())) {
+		Element::Hovered(nullptr);
+		ClickHandler::clearActive();
+	}
+	if (hasExpandButton(Element::Pressed())) {
+		Element::Pressed(nullptr);
+		ClickHandler::unpressed();
+	}
+	if (hasExpandButton(Element::HoveredLink())) {
+		Element::HoveredLink(nullptr);
+		ClickHandler::clearActive();
+	}
+	if (hasExpandButton(Element::PressedLink())) {
+		Element::PressedLink(nullptr);
+		ClickHandler::unpressed();
+	}
+	if (hasExpandButton(Element::Moused())) {
+		Element::Moused(nullptr);
+	}
+	for (const auto &item : _expandMarkupItems) {
+		item->updateReplyMarkup({});
+	}
+	_expandMarkupItems.clear();
+}
+
+void InnerWidget::toggleDeleteGroup(uint64 groupEventId) {
+	_toggleAnimation.stop();
+
+	const auto scrollBefore = _visibleTop;
+
+	// Find a stable scroll anchor from _items (not a summary item)
+	// near the current visible top position.
+	Element *anchor = nullptr;
+	auto anchorDelta = 0;
+	if (!_displayItems.empty()) {
+		auto begin = std::rbegin(_displayItems);
+		auto end = std::rend(_displayItems);
+		auto from = std::lower_bound(begin, end, _visibleTop,
+			[this](auto &elem, int top) {
+				return this->itemTop(elem) + elem->height() <= top;
+			});
+		for (auto it = from; it != end; ++it) {
+			const auto view = *it;
+			if (_itemEventIds.contains(view->data())) {
+				anchor = view;
+				anchorDelta = _visibleTop - itemTop(view);
+				break;
+			}
+		}
+	}
+
+	// Prepare a fallback anchor: the last item of the toggled group
+	// (always visible in both collapsed and expanded states).
+	Element *fallback = nullptr;
+	for (const auto &group : _deleteGroups) {
+		if (group.eventId == groupEventId && group.endIndex > 0) {
+			fallback = _items[group.endIndex - 1].get();
+			break;
+		}
+	}
+
+	if (_expandedGroups.contains(groupEventId)) {
+		_expandedGroups.erase(groupEventId);
+	} else {
+		_expandedGroups.insert(groupEventId);
+	}
+
+	clearDisplayPointers(DisplayPointerScope::All);
+
+	// Rebuild without triggering scroll restore inside updateSize().
+	_skipScrollRestore = true;
+	rebuildDisplayItems();
+	_skipScrollRestore = false;
+
+	// Compute target scroll position.
+	auto scrollTarget = scrollBefore;
+	if (anchor && _itemsByData.contains(anchor->data())) {
+		scrollTarget = itemTop(anchor) + anchorDelta;
+	} else if (fallback && _itemsByData.contains(fallback->data())) {
+		scrollTarget = itemTop(fallback);
+	}
+
+	// Snap to old position and animate to target.
+	_scrollToSignal.fire_copy(scrollBefore);
+	if (scrollBefore != scrollTarget) {
+		const auto from = scrollBefore;
+		const auto to = scrollTarget;
+		_toggleAnimation.start(
+			[=] { _scrollToSignal.fire_copy(anim::interpolate(
+				from, to, _toggleAnimation.value(1.))); },
+			0.,
+			1.,
+			st::slideDuration,
+			anim::easeOutCubic);
+	}
+}
+
+bool InnerWidget::displayPointerMatches(
+		const Element *view,
+		DisplayPointerScope pointerScope) const {
+	if (!view) {
+		return false;
+	}
+	for (const auto &item : _summaryItems) {
+		if (item.get() == view) {
+			return true;
+		}
+	}
+	if (pointerScope == DisplayPointerScope::All) {
+		for (const auto &item : _items) {
+			if (item.get() == view) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void InnerWidget::clearDisplayPointers(DisplayPointerScope pointerScope) {
+	const auto clearAll = (pointerScope == DisplayPointerScope::All);
+	const auto clearMember = [&](const Element *view) {
+		return clearAll || displayPointerMatches(view, pointerScope);
+	};
+	if (clearMember(_visibleTopItem)) {
+		_visibleTopItem = nullptr;
+		_visibleTopFromItem = 0;
+	}
+	if (clearMember(_scrollDateLastItem)) {
+		_scrollDateLastItem = nullptr;
+		_scrollDateLastItemTop = 0;
+	}
+	if (clearMember(_mouseActionItem)) {
+		_mouseActionItem = nullptr;
+		_mouseAction = MouseAction::None;
+	}
+	if (clearMember(_selectedItem)) {
+		_selectedItem = nullptr;
+		_selectedText = TextSelection();
+	}
+	if (displayPointerMatches(Element::Hovered(), pointerScope)) {
+		Element::Hovered(nullptr);
+		ClickHandler::clearActive();
+	}
+	if (displayPointerMatches(Element::Pressed(), pointerScope)) {
+		Element::Pressed(nullptr);
+		ClickHandler::unpressed();
+	}
+	if (displayPointerMatches(Element::HoveredLink(), pointerScope)) {
+		Element::HoveredLink(nullptr);
+		ClickHandler::clearActive();
+	}
+	if (displayPointerMatches(Element::PressedLink(), pointerScope)) {
+		Element::PressedLink(nullptr);
+		ClickHandler::unpressed();
+	}
+	if (displayPointerMatches(Element::Moused(), pointerScope)) {
+		Element::Moused(nullptr);
+	}
+}
+
+void InnerWidget::clearDisplayItems(DisplayPointerScope pointerScope) {
+	clearExpandButtons();
+	clearDisplayPointers(pointerScope);
+	_summaryItems.clear();
+	_displayItems.clear();
+	_itemsByData.clear();
+}
+
+void InnerWidget::rebuildDisplayItems() {
+	clearDisplayItems(DisplayPointerScope::Transient);
+
+	const auto groupDisplayEnabled = _searchQuery.isEmpty();
+
+	// Build a set of group start indices for quick lookup.
+	auto groupByStart = base::flat_map<int, int>(); // startIndex -> group index
+	for (auto g = 0, gc = int(_deleteGroups.size()); g < gc; ++g) {
+		groupByStart.emplace(_deleteGroups[g].startIndex, g);
+	}
+
+	auto i = 0;
+	const auto count = int(_items.size());
+	while (i < count) {
+		const auto git = groupByStart.find(i);
+		if (groupDisplayEnabled && git != groupByStart.end()) {
+			const auto &group = _deleteGroups[git->second];
+			if (group.eventCount > 3) {
+				const auto expanded = _expandedGroups.contains(group.eventId);
+				if (expanded) {
+					for (auto j = group.startIndex; j < group.endIndex; ++j) {
+						const auto view = _items[j].get();
+						_displayItems.push_back(view);
+						_itemsByData.emplace(view->data(), view);
+					}
+				} else if (group.endIndex >= group.startIndex + 2) {
+					// Collapsed: show only the content message
+					// (skip service header at endIndex-1).
+					const auto contentItem = _items[group.endIndex - 2]->data();
+					setupExpandButton(
+						contentItem,
+						group.eventCount - 1,
+						group.eventId);
+					const auto contentView = _items[group.endIndex - 2].get();
+					_displayItems.push_back(contentView);
+					_itemsByData.emplace(contentView->data(), contentView);
+				}
+				// Add summary item.
+				auto summary = createGroupSummaryItem(group, expanded);
+				const auto summaryView = summary.get();
+				_displayItems.push_back(summaryView);
+				_itemsByData.emplace(summaryView->data(), summaryView);
+				_summaryItems.push_back(std::move(summary));
+
+				i = group.endIndex;
+				continue;
+			}
+		}
+		const auto view = _items[i].get();
+		_displayItems.push_back(view);
+		_itemsByData.emplace(view->data(), view);
+		++i;
+	}
+
+	for (const auto view : _displayItems) {
+		view->setAttachToPrevious(false);
+		view->setAttachToNext(false);
+	}
+	for (auto d = 0, dc = int(_displayItems.size()); d < dc; ++d) {
+		const auto view = _displayItems[d];
+		if (d + 1 < dc) {
+			const auto previous = _displayItems[d + 1];
+			view->setDisplayDate(
+				view->dateTime().date() != previous->dateTime().date());
+			const auto attach = view->computeIsAttachToPrevious(previous);
+			view->setAttachToPrevious(attach, previous);
+			previous->setAttachToNext(attach, view);
+		} else {
+			view->setDisplayDate(true);
+		}
+	}
+
 	updateSize();
 }
 
 void InnerWidget::updateSize() {
-	TWidget::resizeToWidth(width());
+	RpWidget::resizeToWidth(width());
 	restoreScrollPosition();
 	updateVisibleTopItem();
 	checkPreloadMore();
@@ -1018,12 +1482,13 @@ int InnerWidget::resizeGetHeight(int newWidth) {
 
 	const auto resizeAllItems = (_itemsWidth != newWidth);
 	auto newHeight = 0;
-	for (const auto &item : ranges::views::reverse(_items)) {
-		item->setY(newHeight);
-		if (item->pendingResize() || resizeAllItems) {
-			newHeight += item->resizeGetHeight(newWidth);
+	for (auto it = _displayItems.rbegin(); it != _displayItems.rend(); ++it) {
+		const auto view = *it;
+		view->setY(newHeight);
+		if (view->pendingResize() || resizeAllItems) {
+			newHeight += view->resizeGetHeight(newWidth);
 		} else {
-			newHeight += item->height();
+			newHeight += view->height();
 		}
 	}
 	_itemsWidth = newWidth;
@@ -1033,6 +1498,9 @@ int InnerWidget::resizeGetHeight(int newWidth) {
 }
 
 void InnerWidget::restoreScrollPosition() {
+	if (_skipScrollRestore) {
+		return;
+	}
 	const auto newVisibleTop = _visibleTopItem
 		? (itemTop(_visibleTopItem) + _visibleTopFromItem)
 		: ScrollMax;
@@ -1046,6 +1514,7 @@ Ui::ChatPaintContext InnerWidget::preparePaintContext(QRect clip) const {
 		.visibleAreaPositionGlobal = mapToGlobal(QPoint(0, _visibleTop)),
 		.visibleAreaTop = _visibleTop,
 		.visibleAreaWidth = width(),
+		.visibleAreaHeight = _visibleBottom - _visibleTop,
 	});
 }
 
@@ -1070,7 +1539,7 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 			width(),
 			std::min(st::msgMaxWidth / 2, width() / 2));
 
-		auto begin = std::rbegin(_items), end = std::rend(_items);
+		auto begin = std::rbegin(_displayItems), end = std::rend(_displayItems);
 		auto from = std::lower_bound(begin, end, clip.top(), [this](auto &elem, int top) {
 			return this->itemTop(elem) + elem->height() <= top;
 		});
@@ -1078,11 +1547,11 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 			return this->itemTop(elem) < bottom;
 		});
 		if (from != end) {
-			auto top = itemTop(from->get());
+			auto top = itemTop(*from);
 			context.translate(0, -top);
 			p.translate(0, top);
 			for (auto i = from; i != to; ++i) {
-				const auto view = i->get();
+				const auto view = *i;
 				context.outbg = view->hasOutLayout();
 				context.selection = (view == _selectedItem)
 					? _selectedText
@@ -1165,14 +1634,12 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 }
 
 void InnerWidget::clearAfterFilterChange() {
-	_visibleTopItem = nullptr;
-	_visibleTopFromItem = 0;
-	_scrollDateLastItem = nullptr;
-	_scrollDateLastItemTop = 0;
-	_mouseActionItem = nullptr;
-	_selectedItem = nullptr;
-	_selectedText = TextSelection();
 	_filterChanged = false;
+	clearDisplayItems(DisplayPointerScope::All);
+	_deleteGroups.clear();
+	_expandedGroups.clear();
+	_itemEventIds.clear();
+	_eventAdminIds.clear();
 	_items.clear();
 	_eventIds.clear();
 	_itemsByData.clear();
@@ -1380,7 +1847,15 @@ void InnerWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		}
 	} else if (fromId) { // suggest to block
 		if (const auto participant = session().data().peer(fromId)) {
-			suggestRestrictParticipant(participant);
+			const auto item = view ? view->data().get() : nullptr;
+			auto realId = FullMsgId();
+			if (const auto itemId = item ? item->fullId() : FullMsgId()) {
+				const auto it = _realIdsForReport.find(itemId);
+				if (it != _realIdsForReport.end()) {
+					realId = FullMsgId(_channel->id, it->second);
+				}
+			}
+			suggestRestrictParticipant(participant, realId);
 		}
 	} else { // maybe cursor on some text history item?
 		const auto item = view ? view->data().get() : nullptr;
@@ -1393,6 +1868,17 @@ void InnerWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				tr::lng_context_copy_selected(tr::now),
 				[this] { copySelectedText(); },
 				&st::menuIconCopy);
+			if (item && !Ui::SkipTranslate(getSelectedText().rich)) {
+				const auto peer = item->history()->peer;
+				_menu->addAction(tr::lng_context_translate_selected({}), [=] {
+					_controller->show(Box(
+						Ui::TranslateBox,
+						peer,
+						MsgId(),
+						getSelectedText().rich,
+						false));
+				}, &st::menuIconTranslate);
+			}
 		} else {
 			if (item && !isUponSelected) {
 				const auto media = view->media();
@@ -1413,6 +1899,17 @@ void InnerWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					_menu->addAction(tr::lng_context_copy_text(tr::now), [=] {
 						copyContextText(itemId);
 					}, &st::menuIconCopy);
+				}
+				if (!item->isService() && !Ui::SkipTranslate(item->originalText())) {
+					const auto peer = item->history()->peer;
+					_menu->addAction(tr::lng_context_translate({}), [=] {
+						_controller->show(Box(
+							Ui::TranslateBox,
+							peer,
+							MsgId(),
+							item->originalText(),
+							false));
+					}, &st::menuIconTranslate);
 				}
 			}
 		}
@@ -1508,12 +2005,11 @@ void InnerWidget::copyContextText(FullMsgId itemId) {
 }
 
 void InnerWidget::suggestRestrictParticipant(
-		not_null<PeerData*> participant) {
+		not_null<PeerData*> participant,
+		FullMsgId realId) {
 	Expects(_menu != nullptr);
 
-	if (!_channel->isMegagroup()
-		|| !_channel->canBanMembers()
-		|| _admins.empty()) {
+	if (!canRestrict()) {
 		return;
 	}
 	if (ranges::contains(_admins, participant)) {
@@ -1529,12 +2025,13 @@ void InnerWidget::suggestRestrictParticipant(
 				UserData *by,
 				TimeId since) {
 			auto weak = QPointer<InnerWidget>(this);
-			auto weakBox = std::make_shared<QPointer<Ui::BoxContent>>();
+			auto weakBox = std::make_shared<base::weak_qptr<Ui::BoxContent>>();
 			auto box = Box<EditRestrictedBox>(
 				_channel,
 				user,
 				hasAdminRights,
 				currentRights,
+				QString(),
 				by,
 				since);
 			box->setSaveCallback([=](
@@ -1559,7 +2056,7 @@ void InnerWidget::suggestRestrictParticipant(
 					tr::now,
 					lt_user,
 					participant->name());
-			auto weakBox = std::make_shared<QPointer<Ui::BoxContent>>();
+			auto weakBox = std::make_shared<base::weak_qptr<Ui::BoxContent>>();
 			const auto sure = crl::guard(this, [=] {
 				restrictParticipant(
 					participant,
@@ -1574,8 +2071,8 @@ void InnerWidget::suggestRestrictParticipant(
 			editRestrictions(true, {}, nullptr, 0);
 		} else {
 			_api.request(MTPchannels_GetParticipant(
-				_channel->inputChannel,
-				user->input
+				_channel->inputChannel(),
+				user->input()
 			)).done([=](const MTPchannels_ChannelParticipant &result) {
 				user->owner().processUsers(result.data().vusers());
 
@@ -1606,7 +2103,7 @@ void InnerWidget::suggestRestrictParticipant(
 			participant->session().changes().peerUpdates(
 				_channel,
 				Data::PeerUpdate::Flag::Members
-			) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
+			) | rpl::on_next([=](const Data::PeerUpdate &update) {
 				_downLoaded = false;
 				preloadMore(Direction::Down);
 				lifetime->destroy();
@@ -1616,12 +2113,26 @@ void InnerWidget::suggestRestrictParticipant(
 				participant,
 				{ _channel->restrictions(), 0 });
 		};
-		Ui::Menu::CreateAddActionCallback(_menu)({
+		const auto addAction = Ui::Menu::CreateAddActionCallback(_menu);
+		addAction({
 			.text = tr::lng_context_ban_user(tr::now),
-			.handler = std::move(handler),
+			.handler = handler,
 			.icon = &st::menuIconBlockAttention,
 			.isAttention = true,
 		});
+
+		if (realId) {
+			addAction({
+				.text = tr::lng_report_and_ban(tr::now),
+				.handler = [=, show = _controller->uiShow()] {
+					Api::ReportSpam(participant, { realId });
+					handler();
+					show->showToast(tr::lng_report_spam_done(tr::now));
+				},
+				.icon = &st::menuIconReportAttention,
+				.isAttention = true,
+			});
+		}
 	}
 }
 
@@ -1633,6 +2144,7 @@ void InnerWidget::restrictParticipant(
 		restrictParticipantDone(participant, newRights);
 	};
 	const auto callback = SaveRestrictedCallback(
+		_controller->uiShow(),
 		_channel,
 		participant,
 		crl::guard(this, done),
@@ -1656,6 +2168,12 @@ void InnerWidget::restrictParticipantDone(
 	}
 	_downLoaded = false;
 	checkPreloadMore();
+}
+
+bool InnerWidget::canRestrict() const {
+	return _channel->isMegagroup()
+		&& _channel->canBanMembers()
+		&& !_admins.empty();
 }
 
 void InnerWidget::mousePressEvent(QMouseEvent *e) {
@@ -1683,7 +2201,7 @@ void InnerWidget::mouseReleaseEvent(QMouseEvent *e) {
 
 void InnerWidget::enterEventHook(QEnterEvent *e) {
 	mouseActionUpdate(QCursor::pos());
-	return TWidget::enterEventHook(e);
+	return RpWidget::enterEventHook(e);
 }
 
 void InnerWidget::leaveEventHook(QEvent *e) {
@@ -1697,7 +2215,7 @@ void InnerWidget::leaveEventHook(QEvent *e) {
 		_cursor = style::cur_default;
 		setCursor(_cursor);
 	}
-	return TWidget::leaveEventHook(e);
+	return RpWidget::leaveEventHook(e);
 }
 
 void InnerWidget::mouseActionStart(const QPoint &screenPos, Qt::MouseButton button) {
@@ -1805,14 +2323,26 @@ void InnerWidget::mouseActionFinish(const QPoint &screenPos, Qt::MouseButton but
 	_wasSelectedText = false;
 
 	if (activated) {
+		// Intercept inline keyboard button clicks on items
+		// with our expand button markup.
+		if (_mouseActionItem) {
+			const auto item = _mouseActionItem->data();
+			if (dynamic_cast<ReplyMarkupClickHandler*>(activated.get())
+				&& _expandMarkupItems.contains(item)) {
+				const auto it = _itemEventIds.find(item);
+				if (it != _itemEventIds.end()) {
+					mouseActionCancel();
+					toggleDeleteGroup(it->second);
+					return;
+				}
+			}
+		}
 		mouseActionCancel();
 		ActivateClickHandler(window(), activated, {
 			button,
 			QVariant::fromValue(ClickHandlerContext{
-				.elementDelegate = [weak = Ui::MakeWeak(this)] {
-					return weak
-						? (ElementDelegate*)weak
-						: nullptr;
+				.elementDelegate = [weak = base::make_weak(this)] {
+					return (ElementDelegate*)weak.get();
 				},
 				.sessionWindow = base::make_weak(_controller),
 			})
@@ -1850,13 +2380,13 @@ void InnerWidget::updateSelected() {
 		std::clamp(mousePosition.y(), _visibleTop, _visibleBottom));
 
 	auto itemPoint = QPoint();
-	auto begin = std::rbegin(_items), end = std::rend(_items);
+	auto begin = std::rbegin(_displayItems), end = std::rend(_displayItems);
 	auto from = (point.y() >= _itemsTop && point.y() < _itemsTop + _itemsHeight)
 		? std::lower_bound(begin, end, point.y(), [this](auto &elem, int top) {
 			return this->itemTop(elem) + elem->height() <= top;
 		})
 		: end;
-	const auto view = (from != end) ? from->get() : nullptr;
+	const auto view = (from != end) ? *from : nullptr;
 	const auto item = view ? view->data().get() : nullptr;
 	if (item) {
 		Element::Moused(view);
@@ -1896,6 +2426,9 @@ void InnerWidget::updateSelected() {
 		}
 		dragState = view->textState(itemPoint, request);
 		lnkhost = view;
+		if (item->isService()) {
+			dragState.cursor = CursorState::LogAdminService;
+		}
 		if (!dragState.link && itemPoint.x() >= st::historyPhotoLeft && itemPoint.x() < st::historyPhotoLeft + st::msgPhotoSize) {
 			if (!item->isService() && view->hasFromPhoto()) {
 				enumerateUserpics([&](not_null<Element*> view, int userpicTop) {
@@ -1921,7 +2454,8 @@ void InnerWidget::updateSelected() {
 	}
 	if (dragState.link
 		|| dragState.cursor == CursorState::Date
-		|| dragState.cursor == CursorState::Forwarded) {
+		|| dragState.cursor == CursorState::Forwarded
+		|| dragState.cursor == CursorState::LogAdminService) {
 		Ui::Tooltip::Show(1000, this);
 	}
 
@@ -2094,6 +2628,17 @@ void InnerWidget::repaintItem(const Element *view) {
 	update(0, top + range.top, width(), range.height);
 }
 
+void InnerWidget::repaintItem(const Element *view, QRect rect) {
+	if (rect.isNull()) {
+		return repaintItem(view);
+	}
+	if (!view) {
+		return;
+	}
+	const auto top = itemTop(view);
+	update(rect.translated(0, top));
+}
+
 void InnerWidget::resizeItem(not_null<Element*> view) {
 	updateSize();
 }
@@ -2107,6 +2652,245 @@ QPoint InnerWidget::mapPointToItem(QPoint point, const Element *view) const {
 		return QPoint();
 	}
 	return point - QPoint(0, itemTop(view));
+}
+
+bool InnerWidget::eventHook(QEvent *e) {
+	if (e->type() == QEvent::TouchBegin
+		|| e->type() == QEvent::TouchUpdate
+		|| e->type() == QEvent::TouchEnd
+		|| e->type() == QEvent::TouchCancel) {
+		QTouchEvent *ev = static_cast<QTouchEvent*>(e);
+		if (ev->device()->type() == base::TouchDevice::TouchScreen) {
+			touchEvent(ev);
+			return true;
+		}
+	}
+	return RpWidget::eventHook(e);
+}
+
+void InnerWidget::onTouchSelect() {
+	_touchSelect = true;
+	mouseActionStart(_touchPos, Qt::LeftButton);
+}
+
+void InnerWidget::onTouchScrollTimer() {
+	auto nowTime = crl::now();
+	if (_touchScrollState == Ui::TouchScrollState::Acceleration
+		&& _touchWaitingAcceleration
+		&& (nowTime - _touchAccelerationTime) > 40) {
+		_touchScrollState = Ui::TouchScrollState::Manual;
+		touchResetSpeed();
+	} else if (_touchScrollState == Ui::TouchScrollState::Auto
+		|| _touchScrollState == Ui::TouchScrollState::Acceleration) {
+		int32 elapsed = int32(nowTime - _touchTime);
+		QPoint delta = _touchSpeed * elapsed / 1000;
+		bool hasScrolled = !delta.isNull();
+		if (hasScrolled) {
+			_scrollToSignal.fire_copy(_visibleTop - delta.y());
+		}
+
+		if (_touchSpeed.isNull() || !hasScrolled) {
+			_touchScrollState = Ui::TouchScrollState::Manual;
+			_touchScroll = false;
+			_touchScrollTimer.cancel();
+		} else {
+			_touchTime = nowTime;
+		}
+		touchDeaccelerate(elapsed);
+	}
+}
+
+void InnerWidget::touchUpdateSpeed() {
+	const auto nowTime = crl::now();
+	if (_touchPrevPosValid) {
+		const int elapsed = nowTime - _touchSpeedTime;
+		if (elapsed) {
+			const QPoint newPixelDiff = (_touchPos - _touchPrevPos);
+			const QPoint pixelsPerSecond = newPixelDiff * (1000 / elapsed);
+
+			const int newSpeedY = (qAbs(pixelsPerSecond.y())
+					> Ui::kFingerAccuracyThreshold)
+				? pixelsPerSecond.y()
+				: 0;
+			const int newSpeedX = (qAbs(pixelsPerSecond.x())
+					> Ui::kFingerAccuracyThreshold)
+				? pixelsPerSecond.x()
+				: 0;
+			if (_touchScrollState == Ui::TouchScrollState::Auto) {
+				const int oldSpeedY = _touchSpeed.y();
+				const int oldSpeedX = _touchSpeed.x();
+				if ((oldSpeedY <= 0 && newSpeedY <= 0) || ((oldSpeedY >= 0 && newSpeedY >= 0)
+					&& (oldSpeedX <= 0 && newSpeedX <= 0)) || (oldSpeedX >= 0 && newSpeedX >= 0)) {
+					_touchSpeed.setY(std::clamp(
+						(oldSpeedY + (newSpeedY / 4)),
+						-Ui::kMaxScrollAccelerated,
+						+Ui::kMaxScrollAccelerated));
+					_touchSpeed.setX(std::clamp(
+						(oldSpeedX + (newSpeedX / 4)),
+						-Ui::kMaxScrollAccelerated,
+						+Ui::kMaxScrollAccelerated));
+				} else {
+					_touchSpeed = QPoint();
+				}
+			} else {
+				if (!_touchSpeed.isNull()) {
+					_touchSpeed.setX(std::clamp(
+						(_touchSpeed.x() / 4) + (newSpeedX * 3 / 4),
+						-Ui::kMaxScrollFlick,
+						+Ui::kMaxScrollFlick));
+					_touchSpeed.setY(std::clamp(
+						(_touchSpeed.y() / 4) + (newSpeedY * 3 / 4),
+						-Ui::kMaxScrollFlick,
+						+Ui::kMaxScrollFlick));
+				} else {
+					_touchSpeed = QPoint(newSpeedX, newSpeedY);
+				}
+			}
+		}
+	} else {
+		_touchPrevPosValid = true;
+	}
+	_touchSpeedTime = nowTime;
+	_touchPrevPos = _touchPos;
+}
+
+void InnerWidget::touchResetSpeed() {
+	_touchSpeed = QPoint();
+	_touchPrevPosValid = false;
+}
+
+void InnerWidget::touchDeaccelerate(int32 elapsed) {
+	int32 x = _touchSpeed.x();
+	int32 y = _touchSpeed.y();
+	_touchSpeed.setX((x == 0)
+		? x
+		: (x > 0)
+		? qMax(0, x - elapsed)
+		: qMin(0, x + elapsed));
+	_touchSpeed.setY((y == 0)
+		? y
+		: (y > 0)
+		? qMax(0, y - elapsed)
+		: qMin(0, y + elapsed));
+}
+
+void InnerWidget::touchEvent(QTouchEvent *e) {
+	if (e->type() == QEvent::TouchCancel) {
+		if (!_touchInProgress) {
+			return;
+		}
+		_touchInProgress = false;
+		_touchSelectTimer.cancel();
+		_touchScroll = _touchSelect = false;
+		_touchScrollState = Ui::TouchScrollState::Manual;
+		mouseActionCancel();
+		return;
+	}
+
+	if (!e->touchPoints().isEmpty()) {
+		_touchPrevPos = _touchPos;
+		_touchPos = e->touchPoints().cbegin()->screenPos().toPoint();
+	}
+
+	switch (e->type()) {
+	case QEvent::TouchBegin: {
+		if (_menu) {
+			e->accept();
+			return;
+		}
+		if (_touchInProgress || e->touchPoints().isEmpty()) {
+			return;
+		}
+
+		_touchInProgress = true;
+		if (_touchScrollState == Ui::TouchScrollState::Auto) {
+			_touchScrollState = Ui::TouchScrollState::Acceleration;
+			_touchWaitingAcceleration = true;
+			_touchAccelerationTime = crl::now();
+			touchUpdateSpeed();
+			_touchStart = _touchPos;
+		} else {
+			_touchScroll = false;
+			_touchSelectTimer.callOnce(QApplication::startDragTime());
+		}
+		_touchSelect = false;
+		_touchStart = _touchPrevPos = _touchPos;
+	} break;
+
+	case QEvent::TouchUpdate: {
+		if (!_touchInProgress) {
+			return;
+		} else if (_touchSelect) {
+			mouseActionUpdate(_touchPos);
+		} else if (!_touchScroll
+				&& (_touchPos - _touchStart).manhattanLength()
+					>= QApplication::startDragDistance()) {
+			_touchSelectTimer.cancel();
+			_touchScroll = true;
+			touchUpdateSpeed();
+		}
+		if (_touchScroll) {
+			if (_touchScrollState == Ui::TouchScrollState::Manual) {
+				touchScrollUpdated(_touchPos);
+			} else if (_touchScrollState == Ui::TouchScrollState::Acceleration) {
+				touchUpdateSpeed();
+				_touchAccelerationTime = crl::now();
+				if (_touchSpeed.isNull()) {
+					_touchScrollState = Ui::TouchScrollState::Manual;
+				}
+			}
+		}
+	} break;
+
+	case QEvent::TouchEnd: {
+		if (!_touchInProgress) {
+			return;
+		}
+		_touchInProgress = false;
+		const auto notMoved = (_touchPos - _touchStart).manhattanLength()
+			< QApplication::startDragDistance();
+		auto weak = base::make_weak(this);
+		if (_touchSelect) {
+			if (notMoved) {
+				mouseActionFinish(_touchPos, Qt::RightButton);
+				auto contextMenu = QContextMenuEvent(
+					QContextMenuEvent::Mouse,
+					mapFromGlobal(_touchPos),
+					_touchPos);
+				showContextMenu(&contextMenu, true);
+			}
+			_touchScroll = false;
+		} else if (_touchScroll) {
+			if (_touchScrollState == Ui::TouchScrollState::Manual) {
+				_touchScrollState = Ui::TouchScrollState::Auto;
+				_touchPrevPosValid = false;
+				_touchScrollTimer.callEach(15);
+				_touchTime = crl::now();
+			} else if (_touchScrollState == Ui::TouchScrollState::Auto) {
+				_touchScrollState = Ui::TouchScrollState::Manual;
+				_touchScroll = false;
+				touchResetSpeed();
+			} else if (_touchScrollState == Ui::TouchScrollState::Acceleration) {
+				_touchScrollState = Ui::TouchScrollState::Auto;
+				_touchWaitingAcceleration = false;
+				_touchPrevPosValid = false;
+			}
+		} else if (notMoved) {
+			mouseActionStart(_touchPos, Qt::LeftButton);
+			mouseActionFinish(_touchPos, Qt::LeftButton);
+		}
+		if (weak) {
+			_touchSelectTimer.cancel();
+			_touchSelect = false;
+		}
+	} break;
+	}
+}
+
+void InnerWidget::touchScrollUpdated(const QPoint &screenPos) {
+	_touchPos = screenPos;
+	_scrollToSignal.fire_copy(_visibleTop - (_touchPos - _touchPrevPos).y());
+	touchUpdateSpeed();
 }
 
 InnerWidget::~InnerWidget() = default;

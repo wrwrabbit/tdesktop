@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "dialogs/dialogs_key.h"
 #include "dialogs/dialogs_indexed_list.h"
+#include "base/unixtime.h"
 #include "data/data_changes.h"
 #include "data/data_session.h"
 #include "data/data_folder.h"
@@ -20,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
+#include "ui/text/format_values.h"
 #include "ui/text/text_options.h"
 #include "ui/ui_utility.h"
 #include "history/history.h"
@@ -76,6 +78,8 @@ BadgesState BadgesForUnread(
 		.mention = (state.mentions > 0),
 		.reaction = (state.reactions > 0),
 		.reactionMuted = (state.reactions <= state.reactionsMuted),
+		.poll = (state.polls > 0),
+		.pollMuted = (state.polls <= state.pollsMuted),
 	};
 }
 
@@ -84,9 +88,9 @@ Entry::Entry(not_null<Data::Session*> owner, Type type)
 , _flags((type == Type::History)
 	? (Flag::IsThread | Flag::IsHistory)
 	: (type == Type::ForumTopic)
-	? Flag::IsThread
+	? (Flag::IsThread | Flag::IsForumTopic)
 	: (type == Type::SavedSublist)
-	? Flag::IsSavedSublist
+	? (Flag::IsThread | Flag::IsSavedSublist)
 	: Flag(0)) {
 }
 
@@ -113,7 +117,7 @@ Data::Forum *Entry::asForum() {
 }
 
 Data::Folder *Entry::asFolder() {
-	return (_flags & (Flag::IsThread | Flag::IsSavedSublist))
+	return (_flags & Flag::IsThread)
 		? nullptr
 		: static_cast<Data::Folder*>(this);
 }
@@ -125,7 +129,7 @@ Data::Thread *Entry::asThread() {
 }
 
 Data::ForumTopic *Entry::asTopic() {
-	return ((_flags & Flag::IsThread) && !(_flags & Flag::IsHistory))
+	return (_flags & Flag::IsForumTopic)
 		? static_cast<Data::ForumTopic*>(this)
 		: nullptr;
 }
@@ -229,6 +233,13 @@ uint64 Entry::computeSortPosition(FilterId filterId) const {
 }
 
 void Entry::updateChatListExistence() {
+	if (const auto history = asHistory()) {
+		if (history->peer->asMonoforum()) {
+			if (!folderKnown()) {
+				history->clearFolder();
+			}
+		}
+	}
 	setChatListExistence(shouldBeInChatList());
 }
 
@@ -280,6 +291,10 @@ void Entry::notifyUnreadStateChange(const UnreadState &wasState) {
 				}
 			}
 		}
+	} else if (const auto sublist = asSublist()) {
+		session().changes().sublistUpdated(
+			sublist,
+			Data::SublistUpdate::Flag::UnreadView);
 	}
 	updateChatListEntryPostponed();
 }
@@ -294,6 +309,33 @@ const Ui::Text::String &Entry::chatListNameText() const {
 			Ui::NameTextOptions());
 	}
 	return _chatListNameText;
+}
+
+DateText ResolveDateText(
+		DateTextCache &cache,
+		TimeId date,
+		crl::time now) {
+	static crl::time LastNow = 0;
+	static int LastTodaySerial = 0;
+	if (!now || LastNow != now) {
+		LastNow = now;
+		LastTodaySerial = int(QDate::currentDate().toJulianDay());
+	}
+	if (cache.messageTimeId != date
+		|| cache.todaySerial != LastTodaySerial) {
+		const auto qdt = base::unixtime::parse(date);
+		cache.text = Ui::FormatDialogsDate(qdt);
+		cache.width = st::dialogsDateFont->width(cache.text);
+		cache.messageTimeId = date;
+		cache.todaySerial = LastTodaySerial;
+	}
+	return { cache.text, cache.width };
+}
+
+DateText Entry::chatListTimestampText(
+		TimeId date,
+		crl::time now) const {
+	return ResolveDateText(_chatListDateCache, date, now);
 }
 
 void Entry::setChatListExistence(bool exists) {
@@ -447,7 +489,7 @@ void Entry::updateChatListEntryHeight() {
 	session().changes().entryUpdated(this, Data::EntryUpdate::Flag::Height);
 }
 
-[[nodiscard]] bool Entry::hasChatsFilterTags(FilterId exclude) const {
+bool Entry::hasChatsFilterTags(FilterId exclude) const {
 	if (!owner().chatsFilters().tagsEnabled()) {
 		return false;
 	}

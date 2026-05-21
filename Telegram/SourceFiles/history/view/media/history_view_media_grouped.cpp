@@ -146,6 +146,13 @@ QSize GroupedMedia::countOptimalSize() {
 			media->initDimensions();
 			accumulate_max(maxWidth, media->maxWidth());
 		}
+		auto index = 0;
+		for (const auto &part : _parts) {
+			const auto last = (++index == _parts.size());
+			accumulate_max(
+				maxWidth,
+				part.content->widenGroupingMaxWidth(maxWidth, last));
+		}
 	}
 	auto index = 0;
 	for (const auto &part : _parts) {
@@ -172,7 +179,9 @@ QSize GroupedMedia::countOptimalSize() {
 		_parts[i].sides = item.sides;
 	}
 
-	if (_mode == Mode::Column && _parts.back().item->emptyText()) {
+	if (_mode == Mode::Column
+		&& isBubbleBottom()
+		&& _parts.back().item->emptyText()) {
 		const auto item = _parent->data();
 		const auto msgsigned = item->Get<HistoryMessageSigned>();
 		const auto views = item->Get<HistoryMessageViews>();
@@ -236,7 +245,9 @@ QSize GroupedMedia::countCurrentSize(int newWidth) {
 			accumulate_max(newHeight, top + height);
 		}
 	}
-	if (_mode == Mode::Column && _parts.back().item->emptyText()) {
+	if (_mode == Mode::Column
+		&& isBubbleBottom()
+		&& _parts.back().item->emptyText()) {
 		const auto item = _parent->data();
 		const auto msgsigned = item->Get<HistoryMessageSigned>();
 		const auto views = item->Get<HistoryMessageViews>();
@@ -295,6 +306,15 @@ QMargins GroupedMedia::groupedPadding() const {
 		(normal.top() - grouped.top()) - topMinus,
 		0,
 		(normal.bottom() - grouped.bottom()) + addToBottom);
+}
+
+QRect GroupedMedia::groupItemRect(int index) const {
+	if (index >= 0 && index < int(_parts.size())) {
+		return _parts[index].geometry.translated(
+			0,
+			groupedPadding().top());
+	}
+	return {};
 }
 
 Media *GroupedMedia::lookupSpoilerTagMedia() const {
@@ -878,6 +898,19 @@ std::optional<PaidInformation> GroupedMedia::paidInformation() const {
 
 bool GroupedMedia::enforceBubbleWidth() const {
 	return _mode == Mode::Grid;
+}
+
+int GroupedMedia::contributedMaxMonospaceWidth() const {
+	if (_mode != Mode::Column) {
+		return 0;
+	}
+	auto result = 0;
+	for (const auto &part : _parts) {
+		accumulate_max(
+			result,
+			part.content->contributedMaxMonospaceWidth());
+	}
+	return result;
 }
 
 bool GroupedMedia::computeNeedBubble() const {

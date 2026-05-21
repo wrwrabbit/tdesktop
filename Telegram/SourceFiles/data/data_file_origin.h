@@ -208,6 +208,7 @@ struct UpdatedFileReferences {
 UpdatedFileReferences GetFileReferences(const MTPmessages_Messages &data);
 UpdatedFileReferences GetFileReferences(const MTPphotos_Photos &data);
 UpdatedFileReferences GetFileReferences(const MTPusers_UserFull &data);
+UpdatedFileReferences GetFileReferences(const MTPmessages_ChatFull &data);
 UpdatedFileReferences GetFileReferences(
 	const MTPmessages_RecentStickers &data);
 UpdatedFileReferences GetFileReferences(
@@ -221,6 +222,7 @@ UpdatedFileReferences GetFileReferences(
 UpdatedFileReferences GetFileReferences(const MTPhelp_PremiumPromo &data);
 UpdatedFileReferences GetFileReferences(const MTPmessages_WebPage &data);
 UpdatedFileReferences GetFileReferences(const MTPstories_Stories &data);
+UpdatedFileReferences GetFileReferences(const MTPusers_SavedMusic &data);
 
 // Admin Log Event.
 UpdatedFileReferences GetFileReferences(const MTPMessageMedia &data);

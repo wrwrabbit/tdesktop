@@ -25,12 +25,19 @@ EditFlagsDescriptor<FilterValue::Flags> FilterValueLabels(bool isChannel) {
 		| Flag::Unkick;
 	const auto membersNew = Flag::Join | Flag::Invite;
 	const auto membersRemoved = Flag::Leave;
+	auto membersNewText = (isChannel
+		? tr::lng_admin_log_filter_subscribers_new
+		: tr::lng_admin_log_filter_members_new)(tr::now);
+	auto membersRemovedText = (isChannel
+		? tr::lng_admin_log_filter_subscribers_removed
+		: tr::lng_admin_log_filter_members_removed)(tr::now);
 
 	auto members = std::vector<Label>{
 		{ adminRights, tr::lng_admin_log_filter_admins_new(tr::now) },
+		{ Flag::EditRank, tr::lng_admin_log_filter_edit_rank(tr::now) },
 		{ restrictions, tr::lng_admin_log_filter_restrictions(tr::now) },
-		{ membersNew, tr::lng_admin_log_filter_members_new(tr::now) },
-		{ membersRemoved, tr::lng_admin_log_filter_members_removed(tr::now) },
+		{ membersNew, std::move(membersNewText) },
+		{ membersRemoved, std::move(membersRemovedText) },
 	};
 
 	const auto info = Flag::Info | Flag::Settings;
@@ -76,11 +83,15 @@ EditFlagsDescriptor<FilterValue::Flags> FilterValueLabels(bool isChannel) {
 	}
 	return { .labels = {
 		{
-			tr::lng_admin_log_filter_actions_member_section(),
+			!isChannel
+				? tr::lng_admin_log_filter_actions_member_section()
+				: tr::lng_admin_log_filter_actions_subscriber_section(),
 			std::move(members),
 		},
 		{
-			tr::lng_admin_log_filter_actions_settings_section(),
+			!isChannel
+				? tr::lng_admin_log_filter_actions_settings_section()
+				: tr::lng_admin_log_filter_actions_channel_settings_section(),
 			std::move(settings),
 		},
 		{
@@ -94,7 +105,7 @@ Fn<FilterValue::Flags()> FillFilterValueList(
 		not_null<Ui::VerticalLayout*> container,
 		bool isChannel,
 		const FilterValue &filter) {
-	auto [checkboxes, getResult, changes] = CreateEditAdminLogFilter(
+	auto [checkboxes, getResult, changes, highlightWidget] = CreateEditAdminLogFilter(
 		container,
 		filter.flags ? (*filter.flags) : ~FilterValue::Flags(0),
 		isChannel);

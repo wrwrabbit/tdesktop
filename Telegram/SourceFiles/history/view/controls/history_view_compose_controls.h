@@ -46,7 +46,9 @@ struct MessagePosition;
 struct Draft;
 class DraftKey;
 class PhotoMedia;
+class GroupCall;
 struct WebPageDraft;
+struct MessageReactionsTopPaid;
 } // namespace Data
 
 namespace InlineBots {
@@ -59,13 +61,18 @@ struct ResultSelected;
 } // namespace InlineBots
 
 namespace Ui {
+class AbstractButton;
 class SendButton;
 class IconButton;
 class EmojiButton;
 class SendAsButton;
 class SilentToggle;
 class DropdownMenu;
+struct PreparedBundle;
 struct PreparedList;
+struct SendStarButtonState;
+class ReactionFlyAnimation;
+class ChatStyle;
 } // namespace Ui
 
 namespace Ui::Emoji {
@@ -74,6 +81,7 @@ class SuggestionsController;
 
 namespace Main {
 class Session;
+struct SendAsKey;
 } // namespace Main
 
 namespace Webrtc {
@@ -94,6 +102,9 @@ class VoiceRecordBar;
 class TTLButton;
 class WebpageProcessor;
 class CharactersLimitLabel;
+class ComposeAiButton;
+class ComposeTooltipManager;
+using AiTooltipManager = ComposeTooltipManager;
 } // namespace HistoryView::Controls
 
 namespace HistoryView {
@@ -137,6 +148,8 @@ public:
 	using ReplyNextRequest = Controls::ReplyNextRequest;
 	using FieldHistoryAction = Ui::InputField::HistoryAction;
 	using Mode = ComposeControlsMode;
+	using ToggleCommentsState = Controls::ToggleCommentsState;
+	using SendStarButtonEffect = Controls::SendStarButtonEffect;
 
 	ComposeControls(
 		not_null<Ui::RpWidget*> parent,
@@ -145,6 +158,7 @@ public:
 
 	[[nodiscard]] Main::Session &session() const;
 	void setHistory(SetHistoryArgs &&args);
+	void updateFeatures(ChatHelpers::ComposeFeatures features);
 	void updateTopicRootId(MsgId topicRootId);
 	void updateShortcutId(BusinessShortcutId shortcutId);
 	void setCurrentDialogsEntryState(Dialogs::EntryState state);
@@ -158,6 +172,22 @@ public:
 	[[nodiscard]] rpl::producer<int> height() const;
 	[[nodiscard]] int heightCurrent() const;
 
+	void setupCommentsShownNewDot();
+	void setToggleCommentsButton(rpl::producer<ToggleCommentsState> state);
+	[[nodiscard]] rpl::producer<> commentsShownToggles() const;
+	void setStarsReactionCounter(
+		rpl::producer<Ui::SendStarButtonState> count,
+		rpl::producer<SendStarButtonEffect> effects);
+	using StarReactionTop = Data::MessageReactionsTopPaid;
+	void setStarsReactionTop(
+		rpl::producer<std::vector<StarReactionTop>> top);
+	struct StarReactionIncrement {
+		int count = 0;
+		bool fromBox = false;
+	};
+	[[nodiscard]] auto starsReactionIncrements() const
+		-> rpl::producer<StarReactionIncrement>;
+
 	bool focus();
 	[[nodiscard]] bool focused() const;
 	[[nodiscard]] rpl::producer<bool> focusedValue() const;
@@ -168,6 +198,11 @@ public:
 	[[nodiscard]] rpl::producer<QString> sendCommandRequests() const;
 	[[nodiscard]] rpl::producer<MessageToEdit> editRequests() const;
 	[[nodiscard]] rpl::producer<std::optional<bool>> attachRequests() const;
+	void setSendAsFileConfirmed(
+		Fn<void(
+			std::shared_ptr<Ui::PreparedBundle>,
+			Api::SendOptions)> confirmed);
+	void processChosenSticker(FileChosen &&chosen);
 	[[nodiscard]] rpl::producer<FileChosen> fileChosen() const;
 	[[nodiscard]] rpl::producer<PhotoChosen> photoChosen() const;
 	[[nodiscard]] rpl::producer<FullReplyTo> jumpToItemRequests() const;
@@ -183,6 +218,7 @@ public:
 	-> rpl::producer<ReplyNextRequest>;
 	[[nodiscard]] rpl::producer<> focusRequests() const;
 	[[nodiscard]] rpl::producer<> showScheduledRequests() const;
+	[[nodiscard]] rpl::producer<> scrollToMaxRequests() const;
 
 	using MimeDataHook = Fn<bool(
 		not_null<const QMimeData*> data,
@@ -227,6 +263,9 @@ public:
 	void hidePanelsAnimated();
 	void clearListenState();
 
+	void clearChosenStarsForMessage();
+	[[nodiscard]] int chosenStarsForMessage() const;
+
 	void hide();
 	void show();
 
@@ -238,7 +277,7 @@ public:
 	[[nodiscard]] rpl::producer<bool> recordingActiveValue() const;
 	[[nodiscard]] rpl::producer<bool> hasSendTextValue() const;
 	[[nodiscard]] rpl::producer<bool> fieldMenuShownValue() const;
-	[[nodiscard]] not_null<Ui::RpWidget*> likeAnimationTarget() const;
+	[[nodiscard]] Ui::RpWidget *likeAnimationTarget() const;
 	[[nodiscard]] int fieldCharacterCount() const;
 
 	[[nodiscard]] TextWithEntities prepareTextForEditMsg() const;
@@ -252,6 +291,7 @@ public:
 	[[nodiscard]] Ui::InputField *fieldForMention() const;
 
 private:
+	struct StarEffect;
 	enum class TextUpdateEvent {
 		SaveDraft = (1 << 0),
 		SendTyping = (1 << 1),
@@ -272,21 +312,41 @@ private:
 	void initFieldAutocomplete();
 	void initTabbedSelector();
 	void initSendButton();
-	void initSendAsButton(not_null<PeerData*> peer);
+	void initSendAsButton(
+		not_null<PeerData*> peer,
+		std::shared_ptr<Data::GroupCall> videoStream);
 	void initWebpageProcess();
 	void initForwardProcess();
 	void initWriteRestriction();
 	void initVoiceRecordBar();
 	void initKeyHandler();
+	void initLikeButton();
+	void initEditStarsButton();
+	void initAiButton();
+	void updateControlsParents();
 	void updateSubmitSettings();
 	void updateSendButtonType();
 	void updateMessagesTTLShown();
-	bool updateSendAsButton();
+	bool updateSendAsButton(std::shared_ptr<Data::GroupCall> videoStream);
 	void updateAttachBotsMenu();
 	void updateHeight();
 	void updateWrappingVisibility();
 	void updateControlsVisibility();
 	void updateControlsGeometry(QSize size);
+	void updateAiButtonVisibility();
+	void updateAiButtonGeometry();
+	void initSendAsFileButton();
+	void fireSendTextAsFile(
+		const QString &fileText,
+		Fn<void()> restoreText);
+	[[nodiscard]] bool checkLargeTextPaste(
+		not_null<const QMimeData*> data,
+		Ui::InputField::MimeAction action);
+	void updateSendAsFileVisibility();
+	void updateSendAsFileGeometry();
+	void setupSendMenu(
+		not_null<Ui::RpWidget*> button,
+		Fn<void(Api::SendOptions)> send);
 	bool updateReplaceMediaButton();
 	void updateOuterGeometry(QRect rect);
 	void paintBackground(QPainter &p, QRect full, QRect clip);
@@ -298,6 +358,7 @@ private:
 
 	[[nodiscard]] auto sendContentRequests(
 		SendRequestType requestType = SendRequestType::Text) const;
+	void editStarsFrom(int selected = 0);
 
 	void orderControls();
 	void updateFieldPlaceholder();
@@ -309,16 +370,27 @@ private:
 	void toggleTabbedSelectorMode();
 	void createTabbedPanel();
 	void setTabbedPanel(std::unique_ptr<ChatHelpers::TabbedPanel> panel);
+	void showAiComposeBox();
+	[[nodiscard]] bool canSendAiComposeDirect() const;
 
-	bool showRecordButton() const;
+	[[nodiscard]] bool showRecordButton() const;
+	[[nodiscard]] bool showEditStarsButton() const;
+	[[nodiscard]] int shownStarsPerMessage() const;
 	bool updateBotCommandShown();
 	bool updateLikeShown();
+	[[nodiscard]] bool hasEnoughLinesForAi() const;
+	[[nodiscard]] bool textExceedsMaxSize() const;
 
 	void cancelInlineBot();
 	void clearInlineBot();
 	void inlineBotChanged();
 
-	bool hasSilentBroadcastToggle() const;
+	[[nodiscard]] bool hasSilentBroadcastToggle() const;
+	[[nodiscard]] bool editStarsButtonShown() const;
+	void startStarsSendEffect();
+	void setupStarsSendEffectsCanvas();
+	void startStarsEffect(SendStarButtonEffect event);
+	void setupStarsEffectsCanvas();
 
 	// Look in the _field for the inline bot and query string.
 	void updateInlineBotQuery();
@@ -331,6 +403,7 @@ private:
 	[[nodiscard]] Data::DraftKey draftKeyCurrent() const;
 	void saveDraft(bool delayed = false);
 	void saveDraftDelayed();
+	void saveDraftWithTextNow();
 	void saveCloudDraft();
 
 	void writeDrafts();
@@ -352,8 +425,8 @@ private:
 	void checkCharsLimitation();
 
 	const style::ComposeControls &_st;
-	const ChatHelpers::ComposeFeatures _features;
-	const not_null<QWidget*> _parent;
+	ChatHelpers::ComposeFeatures _features;
+	const not_null<Ui::RpWidget*> _parent;
 	const not_null<QWidget*> _panelsParent;
 	const std::shared_ptr<ChatHelpers::Show> _show;
 	const not_null<Main::Session*> _session;
@@ -365,9 +438,11 @@ private:
 
 	History *_history = nullptr;
 	MsgId _topicRootId = 0;
+	PeerId _monoforumPeerId = 0;
 	BusinessShortcutId _shortcutId = 0;
 	Fn<bool()> _showSlowmodeError;
 	Fn<Api::SendAction()> _sendActionFactory;
+	Fn<void(TextWithEntities, Api::SendOptions, Fn<void()>)> _sendWithText;
 	rpl::variable<int> _slowmodeSecondsLeft;
 	rpl::variable<bool> _sendDisabledBySlowmode;
 	rpl::variable<bool> _liked;
@@ -382,14 +457,28 @@ private:
 	std::optional<Ui::RoundRect> _backgroundRect;
 
 	const std::shared_ptr<Ui::SendButton> _send;
-	Ui::IconButton * const _like = nullptr;
-	const not_null<Ui::IconButton*> _attachToggle;
+	Controls::ComposeAiButton * const _aiButton = nullptr;
+	Ui::IconButton * const _sendAsFile = nullptr;
+	Ui::IconButton *_editStars = nullptr;
+	Ui::IconButton *_like = nullptr;
+	rpl::variable<int> _minStarsCount;
+	std::optional<int> _chosenStarsCount;
+	Ui::IconButton *_commentsShown = nullptr;
+	rpl::variable<bool> _commentsShownHidden;
+	Ui::RpWidget *_commentsShownNewDot = nullptr;
+	Ui::IconButton *_attachToggle = nullptr;
+	Ui::AbstractButton *_starsReaction = nullptr;
+	std::vector<std::unique_ptr<Ui::ReactionFlyAnimation>> _starSendEffects;
+	std::unique_ptr<Ui::RpWidget> _starSendEffectsCanvas;
+	std::vector<std::unique_ptr<StarEffect>> _starEffects;
+	std::unique_ptr<Ui::RpWidget> _starEffectsCanvas;
 	std::unique_ptr<Ui::IconButton> _replaceMedia;
 	const not_null<Ui::EmojiButton*> _tabbedSelectorToggle;
 	rpl::producer<QString> _fieldCustomPlaceholder;
 	const not_null<Ui::InputField*> _field;
 	Ui::IconButton * const _botCommandStart = nullptr;
 	std::unique_ptr<Ui::SendAsButton> _sendAs;
+	rpl::variable<bool> _videoStreamAdmin;
 	std::unique_ptr<Ui::SilentToggle> _silent;
 	std::unique_ptr<Controls::TTLButton> _ttlInfo;
 	base::unique_qptr<Controls::CharactersLimitLabel> _charsLimitation;
@@ -404,6 +493,9 @@ private:
 	friend class FieldHeader;
 	const std::unique_ptr<FieldHeader> _header;
 	const std::unique_ptr<Controls::VoiceRecordBar> _voiceRecordBar;
+	std::unique_ptr<Controls::AiTooltipManager> _aiTooltipManager;
+	std::unique_ptr<Controls::AiTooltipManager> _sendAsFileTooltipManager;
+	std::shared_ptr<Ui::ChatStyle> _chatStyle;
 
 	const Fn<SendMenu::Details()> _sendMenuDetails;
 	const Fn<void(not_null<DocumentData*>)> _unavailableEmojiPasted;
@@ -418,10 +510,14 @@ private:
 	rpl::event_stream<not_null<QKeyEvent*>> _scrollKeyEvents;
 	rpl::event_stream<not_null<QKeyEvent*>> _editLastMessageRequests;
 	rpl::event_stream<std::optional<bool>> _attachRequests;
+	Fn<void(std::shared_ptr<Ui::PreparedBundle>, Api::SendOptions)> _sendAsFileConfirmed;
 	rpl::event_stream<> _likeToggled;
 	rpl::event_stream<ReplyNextRequest> _replyNextRequests;
 	rpl::event_stream<> _focusRequests;
 	rpl::event_stream<> _showScheduledRequests;
+	rpl::event_stream<> _commentsShownToggles;
+	rpl::event_stream<StarReactionIncrement> _starsReactionIncrements;
+	rpl::variable<std::vector<StarReactionTop>> _starsReactionTop;
 	rpl::variable<bool> _recording;
 	rpl::variable<bool> _hasSendText;
 

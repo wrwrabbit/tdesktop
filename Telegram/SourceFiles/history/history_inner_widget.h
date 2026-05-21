@@ -13,8 +13,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/controls/swipe_handler_data.h"
 #include "ui/effects/animations.h"
 #include "ui/dragging_scroll_manager.h"
+#include "ui/widgets/middle_click_autoscroll.h"
 #include "ui/widgets/tooltip.h"
 #include "ui/widgets/scroll_area.h"
+#include "ui/userpic_view.h"
 #include "history/view/history_view_top_bar_widget.h"
 
 #include <QtGui/QPainterPath>
@@ -34,9 +36,12 @@ struct SelectionModeResult;
 struct StateRequest;
 enum class CursorState : char;
 enum class PointState : char;
+enum class ElementChatMode : char;
+class ElementOverlayHost;
 class EmptyPainter;
 class Element;
 class TranslateTracker;
+class ReadMetricsTracker;
 struct PinnedId;
 struct SelectedQuote;
 class AboutView;
@@ -47,6 +52,11 @@ class Manager;
 struct ChosenReaction;
 struct ButtonParameters;
 } // namespace HistoryView::Reactions
+
+namespace HistoryView::ReplyButton {
+class Manager;
+struct ButtonParameters;
+} // namespace HistoryView::ReplyButton
 
 namespace Window {
 class SessionController;
@@ -127,6 +137,7 @@ public:
 
 	void repaintItem(const HistoryItem *item);
 	void repaintItem(const Element *view);
+	void repaintItem(const Element *view, QRect rect);
 
 	[[nodiscard]] bool canCopySelected() const;
 	[[nodiscard]] bool canDeleteSelected() const;
@@ -145,6 +156,13 @@ public:
 	void elementShowPollResults(
 		not_null<PollData*> poll,
 		FullMsgId context);
+	void elementShowAddPollOption(
+		not_null<HistoryView::Element*> view,
+		not_null<PollData*> poll,
+		FullMsgId context,
+		QRect optionRect);
+	void elementSubmitAddPollOption(FullMsgId context);
+	void hideElementOverlay();
 	void elementOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context);
@@ -164,7 +182,7 @@ public:
 		const QString &query,
 		const FullMsgId &context);
 	void elementHandleViaClick(not_null<UserData*> bot);
-	bool elementIsChatWide();
+	HistoryView::ElementChatMode elementChatMode();
 	not_null<Ui::PathShiftGradient*> elementPathShiftGradient();
 	void elementReplyTo(const FullReplyTo &to);
 	void elementStartInteraction(not_null<const Element*> view);
@@ -192,6 +210,7 @@ public:
 
 	void setChooseReportReason(Data::ReportInput reportInput);
 	void clearChooseReportReason();
+	void toggleRemoveFromUserpics(bool remove);
 
 	// -1 if should not be visible, -2 if bad history()
 	[[nodiscard]] int itemTop(const HistoryItem *item) const;
@@ -246,6 +265,8 @@ protected:
 private:
 	void onTouchSelect();
 	void onTouchScrollTimer();
+	void markReadMetricsStale();
+	void registerReadMetricsActivity();
 
 	[[nodiscard]] static int SelectionViewOffset(
 		not_null<const HistoryInner*> inner,
@@ -253,7 +274,8 @@ private:
 
 	using ChosenReaction = HistoryView::Reactions::ChosenReaction;
 	using VideoUserpic = Dialogs::Ui::VideoUserpic;
-	using SelectedItems = std::map<HistoryItem*, TextSelection, std::less<>>;
+	using SelectedItems
+		= base::flat_map<HistoryItem*, TextSelection, std::less<>>;
 	enum class MouseAction {
 		None,
 		PrepareDrag,
@@ -279,7 +301,7 @@ private:
 	// for each found message (in given direction) in the passed history with passed top offset.
 	//
 	// Method has "bool (*Method)(not_null<Element*> view, int itemtop, int itembottom)" signature
-	// if it returns false the enumeration stops immidiately.
+	// if it returns false the enumeration stops immediately.
 	template <bool TopToBottom, typename Method>
 	void enumerateItemsInHistory(History *history, int historytop, Method method);
 
@@ -299,7 +321,7 @@ private:
 	// for each found userpic (from the top to the bottom) using enumerateItems() method.
 	//
 	// Method has "bool (*Method)(not_null<Element*> view, int userpicTop)" signature
-	// if it returns false the enumeration stops immidiately.
+	// if it returns false the enumeration stops immediately.
 	template <typename Method>
 	void enumerateUserpics(Method method);
 
@@ -307,12 +329,21 @@ private:
 	// for each found date element (from the bottom to the top) using enumerateItems() method.
 	//
 	// Method has "bool (*Method)(not_null<Element*> view, int itemtop, int dateTop)" signature
-	// if it returns false the enumeration stops immidiately.
+	// if it returns false the enumeration stops immediately.
 	template <typename Method>
 	void enumerateDates(Method method);
 
+	// This function finds all forum thread bar elements that are displayed and calls template method
+	// for each found date element (from the bottom to the top) using enumerateItems() method.
+	//
+	// Method has "bool (*Method)(not_null<Element*> view, int itemtop, int dateTop)" signature
+	// if it returns false the enumeration stops immediately.
+	template <typename Method>
+	void enumerateForumThreadBars(Method method);
+
 	void scrollDateCheck();
 	void scrollDateHideByTimer();
+	void scrollDateCheckDownward();
 	bool canHaveFromUserpics() const;
 	void mouseActionStart(const QPoint &screenPos, Qt::MouseButton button);
 	void mouseActionUpdate();
@@ -418,12 +449,18 @@ private:
 	void blockSenderItem(FullMsgId itemId);
 	void blockSenderAsGroup(FullMsgId itemId);
 	void copySelectedText();
+	void editCaptionUploadLayer(not_null<HistoryItem*> item);
 
 	[[nodiscard]] auto reactionButtonParameters(
 		not_null<const Element*> view,
 		QPoint position,
 		const HistoryView::TextState &reactionState) const
 	-> HistoryView::Reactions::ButtonParameters;
+	[[nodiscard]] auto replyButtonParameters(
+		not_null<const Element*> view,
+		QPoint position,
+		const HistoryView::TextState &replyState) const
+	-> HistoryView::ReplyButton::ButtonParameters;
 	void toggleFavoriteReaction(not_null<Element*> view) const;
 	void reactionChosen(const ChosenReaction &reaction);
 
@@ -455,8 +492,11 @@ private:
 	History *_migrated = nullptr;
 	HistoryView::ElementDelegate *_migratedElementDelegate = nullptr;
 	int _contentWidth = 0;
-	int _historyPaddingTop = 0;
+	int _historyMarginTop = 0;
+	int _historyMarginBottom = 0;
 	int _revealHeight = 0;
+	int _forumThreadBarWidth = 0;
+	Ui::PeerUserpicView _forumThreadBarUserpicView;
 
 	// Save visible area coords for painting / pressing userpics.
 	int _visibleAreaTop = 0;
@@ -469,6 +509,8 @@ private:
 	std::unique_ptr<HistoryView::AboutView> _aboutView;
 	std::unique_ptr<HistoryView::EmptyPainter> _emptyPainter;
 	std::unique_ptr<HistoryView::TranslateTracker> _translateTracker;
+	std::unique_ptr<HistoryView::ReadMetricsTracker> _readMetricsTracker;
+	bool _readMetricsStale = false;
 	rpl::event_stream<not_null<DocumentData*>> _sendIntroSticker;
 
 	mutable History *_curHistory = nullptr;
@@ -482,6 +524,7 @@ private:
 	const std::unique_ptr<Ui::PathShiftGradient> _pathGradient;
 	QPainterPath _highlightPathCache;
 	bool _isChatWide = false;
+	bool _removeFromUserpics = false;
 
 	base::flat_set<not_null<const HistoryItem*>> _animatedStickersPlayed;
 	base::flat_map<not_null<PeerData*>, Ui::PeerUserpicView> _userpics;
@@ -493,6 +536,7 @@ private:
 
 	std::unique_ptr<HistoryView::Reactions::Manager> _reactionsManager;
 	rpl::variable<HistoryItem*> _reactionsItem;
+	std::unique_ptr<HistoryView::ReplyButton::Manager> _replyButtonManager;
 	HistoryItem *_pinnedItem = nullptr;
 
 	MouseAction _mouseAction = MouseAction::None;
@@ -507,6 +551,7 @@ private:
 	bool _dragStateUserpic = false;
 	bool _pressWasInactive = false;
 	bool _recountedAfterPendingResizedItems = false;
+	bool _useCornerReply = false;
 	bool _useCornerReaction = false;
 	bool _acceptsHorizontalScroll = false;
 	bool _horizontalScrollLocked = false;
@@ -542,6 +587,7 @@ private:
 	crl::time _touchAccelerationTime = 0;
 	crl::time _touchTime = 0;
 	base::Timer _touchScrollTimer;
+	Ui::MiddleClickAutoscroll _middleClickAutoscroll;
 
 	Ui::Controls::SwipeContextData _gestureHorizontal;
 	Ui::Controls::SwipeBackResult _swipeBackData;
@@ -556,7 +602,12 @@ private:
 	base::Timer _scrollDateHideTimer;
 	Element *_scrollDateLastItem = nullptr;
 	int _scrollDateLastItemTop = 0;
+	bool _scrollDateAfterDayCrossing = false;
 	ClickHandlerPtr _scrollDateLink;
+	ClickHandlerPtr _forumThreadBarLink;
+
+	[[nodiscard]] HistoryView::ElementOverlayHost &ensureOverlayHost();
+	std::unique_ptr<HistoryView::ElementOverlayHost> _overlayHost;
 
 };
 

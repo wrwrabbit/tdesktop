@@ -17,6 +17,7 @@ class History;
 namespace Data {
 class Session;
 class ForumTopic;
+class SavedSublist;
 class Thread;
 struct ItemNotification;
 enum class ItemNotificationType;
@@ -41,6 +42,7 @@ class Track;
 } // namespace Media::Audio
 
 namespace Window {
+class Controller;
 class SessionController;
 } // namespace Window
 
@@ -86,10 +88,18 @@ using toggle = option<bool>;
 
 namespace Window::Notifications {
 
+extern const char kOptionCustomNotification[];
 extern const char kOptionGNotification[];
 extern base::options::toggle OptionGNotification;
 
+extern const char kOptionHideReplyButton[];
+
 class Manager;
+
+struct ActivateOptions {
+	TextWithTags draft;
+	bool allowNewWindow = false;
+};
 
 class System final {
 public:
@@ -100,12 +110,17 @@ public:
 
 	void createManager();
 	void setManager(Fn<std::unique_ptr<Manager>()> create);
+	[[nodiscard]] Manager &manager() const;
+	[[nodiscard]] rpl::producer<> managerChanged() const;
+	[[nodiscard]] bool nativeEnforced() const;
 
 	void checkDelayed();
 	void schedule(Data::ItemNotification notification);
 	void clearFromTopic(not_null<Data::ForumTopic*> topic);
+	void clearFromSublist(not_null<Data::SavedSublist*> sublist);
 	void clearFromHistory(not_null<History*> history);
 	void clearIncomingFromTopic(not_null<Data::ForumTopic*> topic);
+	void clearIncomingFromSublist(not_null<Data::SavedSublist*> sublist);
 	void clearIncomingFromHistory(not_null<History*> history);
 	void clearFromSession(not_null<Main::Session*> session);
 	void clearFromItem(not_null<HistoryItem*> item);
@@ -116,7 +131,13 @@ public:
 	[[nodiscard]] rpl::producer<ChangeType> settingsChanged() const;
 	void notifySettingsChanged(ChangeType type);
 
-	void playSound(not_null<Main::Session*> session, DocumentId id);
+	[[nodiscard]] bool volumeSupported() const;
+	[[nodiscard]] rpl::producer<bool> volumeSupportedValue() const;
+
+	void playSound(
+		not_null<Main::Session*> session,
+		DocumentId id,
+		float64 volumeOverride = -1);
 	[[nodiscard]] QByteArray lookupSoundBytes(
 		not_null<Data::Session*> owner,
 		DocumentId id);
@@ -154,13 +175,13 @@ private:
 		crl::time delay = 0;
 		crl::time when = 0;
 	};
-	struct ReactionNotificationId {
+	struct SentNotificationId {
 		FullMsgId itemId;
 		uint64 sessionId = 0;
 
 		friend inline bool operator<(
-				ReactionNotificationId a,
-				ReactionNotificationId b) {
+				SentNotificationId a,
+				SentNotificationId b) {
 			return std::pair(a.itemId, a.sessionId)
 				< std::pair(b.itemId, b.sessionId);
 		}
@@ -175,8 +196,9 @@ private:
 	[[nodiscard]] Timing countTiming(
 		not_null<Data::Thread*> thread,
 		crl::time minimalDelay) const;
-	[[nodiscard]] bool skipReactionNotification(
-		not_null<HistoryItem*> item) const;
+	[[nodiscard]] bool skipSentNotification(
+		not_null<HistoryItem*> item,
+		base::flat_map<SentNotificationId, crl::time> &already) const;
 
 	void showNext();
 	void showGrouped();
@@ -201,10 +223,14 @@ private:
 		base::flat_map<crl::time, PeerData*>> _whenAlerts;
 
 	mutable base::flat_map<
-		ReactionNotificationId,
+		SentNotificationId,
 		crl::time> _sentReactionNotifications;
+	mutable base::flat_map<
+		SentNotificationId,
+		crl::time> _sentPollVoteNotifications;
 
 	std::unique_ptr<Manager> _manager;
+	rpl::event_stream<> _managerChanged;
 
 	rpl::event_stream<ChangeType> _settingsChanged;
 
@@ -216,6 +242,9 @@ private:
 	base::flat_map<
 		not_null<Data::ForumTopic*>,
 		rpl::lifetime> _watchedTopics;
+	base::flat_map<
+		not_null<Data::SavedSublist*>,
+		rpl::lifetime> _watchedSublists;
 
 	int _lastForwardedCount = 0;
 	uint64 _lastHistorySessionId = 0;
@@ -232,6 +261,7 @@ public:
 		uint64 sessionId = 0;
 		PeerId peerId = 0;
 		MsgId topicRootId = 0;
+		PeerId monoforumPeerId = 0;
 
 		friend inline auto operator<=>(
 			const ContextId&,
@@ -250,6 +280,7 @@ public:
 		int forwardedCount = 0;
 		PeerData *reactionFrom = nullptr;
 		Data::ReactionId reactionId;
+		QByteArray pollVoteOption;
 		std::optional<DocumentId> soundId;
 	};
 
@@ -274,6 +305,9 @@ public:
 	void clearFromTopic(not_null<Data::ForumTopic*> topic) {
 		doClearFromTopic(topic);
 	}
+	void clearFromSublist(not_null<Data::SavedSublist*> sublist) {
+		doClearFromSublist(sublist);
+	}
 	void clearFromHistory(not_null<History*> history) {
 		doClearFromHistory(history);
 	}
@@ -283,8 +317,11 @@ public:
 
 	void notificationActivated(
 		NotificationId id,
-		const TextWithTags &draft = {});
+		ActivateOptions &&options = {});
 	void notificationReplied(NotificationId id, const TextWithTags &reply);
+	void notificationActionActivated(
+		NotificationId id,
+		const QString &actionId);
 
 	struct DisplayOptions {
 		bool hideNameAndPhoto : 1 = false;
@@ -303,6 +340,10 @@ public:
 		not_null<HistoryItem*> item,
 		const Data::ReactionId &reaction,
 		bool hideContent);
+	[[nodiscard]] static TextWithEntities ComposePollVoteNotification(
+		not_null<HistoryItem*> item,
+		const QByteArray &option,
+		bool hideContent);
 
 	[[nodiscard]] TextWithEntities addTargetAccountName(
 		TextWithEntities title,
@@ -316,9 +357,7 @@ public:
 	[[nodiscard]] bool skipToast() const {
 		return doSkipToast();
 	}
-	void maybePlaySound(Fn<void()> playSound) {
-		doMaybePlaySound(std::move(playSound));
-	}
+	void maybePlaySound(Fn<void()> playSound);
 	void maybeFlashBounce(Fn<void()> flashBounce) {
 		doMaybeFlashBounce(std::move(flashBounce));
 	}
@@ -336,6 +375,8 @@ protected:
 	virtual void doClearAllFast() = 0;
 	virtual void doClearFromItem(not_null<HistoryItem*> item) = 0;
 	virtual void doClearFromTopic(not_null<Data::ForumTopic*> topic) = 0;
+	virtual void doClearFromSublist(
+		not_null<Data::SavedSublist*> sublist) = 0;
 	virtual void doClearFromHistory(not_null<History*> history) = 0;
 	virtual void doClearFromSession(not_null<Main::Session*> session) = 0;
 	[[nodiscard]] virtual bool doSkipToast() const = 0;
@@ -353,9 +394,10 @@ protected:
 	[[nodiscard]] virtual QString accountNameSeparator();
 
 private:
-	void openNotificationMessage(
+	Window::SessionController *openNotificationMessage(
 		not_null<History*> history,
-		MsgId messageId);
+		MsgId messageId,
+		bool openSeparated);
 
 	const not_null<System*> _system;
 
@@ -368,15 +410,21 @@ public:
 	}
 
 	using NotificationSound = Media::Audio::LocalSound;
+	struct NotificationAction {
+		QString id;
+		QString text;
+	};
 	struct NotificationInfo {
 		not_null<PeerData*> peer;
 		MsgId topicRootId = 0;
+		PeerId monoforumPeerId = 0;
 		MsgId itemId = 0;
 		QString title;
 		QString subtitle;
 		QString message;
 		Fn<NotificationSound()> sound;
 		DisplayOptions options;
+		std::vector<NotificationAction> actions;
 	};
 
 protected:
@@ -420,6 +468,8 @@ protected:
 	}
 	void doClearFromTopic(not_null<Data::ForumTopic*> topic) override {
 	}
+	void doClearFromSublist(not_null<Data::SavedSublist*> sublist) override {
+	}
 	void doClearFromHistory(not_null<History*> history) override {
 	}
 	void doClearFromSession(not_null<Main::Session*> session) override {
@@ -437,5 +487,7 @@ protected:
 };
 
 [[nodiscard]] QString WrapFromScheduled(const QString &text);
+
+[[nodiscard]] QRect NotificationDisplayRect(Window::Controller *controller);
 
 } // namespace Window::Notifications

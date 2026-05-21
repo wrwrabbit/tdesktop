@@ -35,7 +35,7 @@ jobs:
 
     strategy:
       matrix:
-        arch: [Win32, x64]
+        arch: [x64_x86, x64]
 
     env:
       UPLOAD_ARTIFACT: "true"
@@ -65,7 +65,7 @@ jobs:
           arch: ${{ matrix.arch }}
 
       - name: Clone.
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
@@ -86,11 +86,10 @@ jobs:
 
       - name: Libraries.
         env:
-          #GYP_MSVS_OVERRIDE_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Community\'
+          GYP_MSVS_OVERRIDE_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\'
           GYP_MSVS_VERSION: 2022
         run: |
-          cd %TBUILD%
-          %REPO_NAME%\Telegram\build\prepare\win.bat silent
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat
 
       - name: Read configuration matrix.
         shell: bash
@@ -100,7 +99,7 @@ jobs:
           ARCH=""
           if [ -n "${{ matrix.arch }}" ]; then
             case "${{ matrix.arch }}" in
-              Win32) ARCH="x86";;
+              x64_x86) ARCH="x86";;
               *) ARCH="${{ matrix.arch }}";;
             esac
             echo "Architecture from matrix: $ARCH"
@@ -154,6 +153,7 @@ jobs:
           -D TDESKTOP_API_ID=${{ secrets.API_ID }} ^
           -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF ^
+          -D CMAKE_CONFIGURATION_TYPES=Release ^
           -D DESKTOP_APP_NO_PDB=ON ^
           %TDESKTOP_BUILD_DEFINE%
           
@@ -166,7 +166,7 @@ jobs:
           set OUT=%TBUILD%\%REPO_NAME%\out\Release
           mkdir artifact_${{ matrix.arch }}
           move %OUT%\Telegram.exe artifact_${{ matrix.arch }}/Telegram_${{ matrix.arch }}.exe
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || ${{ github.ref == 'refs/heads/nightly' }}
         with:

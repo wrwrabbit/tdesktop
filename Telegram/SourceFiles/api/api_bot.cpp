@@ -10,10 +10,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "api/api_cloud_password.h"
 #include "api/api_send_progress.h"
-#include "boxes/share_box.h"
-#include "boxes/passcode_box.h"
-#include "boxes/url_auth_box.h"
+#include "api/api_suggest_post.h"
 #include "boxes/peers/choose_peer_box.h"
+#include "boxes/peers/create_managed_bot_box.h"
+#include "boxes/passcode_box.h"
+#include "boxes/share_box.h"
+#include "boxes/url_auth_box.h"
 #include "lang/lang_keys.h"
 #include "chat_helpers/bot_command.h"
 #include "core/core_cloud_password.h"
@@ -38,7 +40,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/layers/generic_box.h"
 #include "ui/text/text_utilities.h"
+#include "styles/style_chat.h"
 
+#include <QtCore/QDataStream>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
 
@@ -90,7 +94,7 @@ void SendBotCallbackData(
 	const auto show = controller->uiShow();
 	button->requestId = api->request(MTPmessages_GetBotCallbackAnswer(
 		MTP_flags(flags),
-		history->peer->input,
+		history->peer->input(),
 		MTP_int(item->id),
 		MTP_bytes(sendData),
 		password ? password->result : MTP_inputCheckPasswordEmpty()
@@ -217,7 +221,7 @@ void SendBotCallbackDataWithPassword(
 			session,
 			tr::lng_bots_password_confirm_check_about(
 				tr::now,
-				Ui::Text::WithEntities));
+				tr::marked));
 		if (box) {
 			show->showBox(std::move(box), Ui::LayerOption::CloseOther);
 		} else {
@@ -226,7 +230,7 @@ void SendBotCallbackDataWithPassword(
 			api->cloudPassword().state(
 			) | rpl::take(
 				1
-			) | rpl::start_with_next([=](const Core::CloudPasswordState &state) mutable {
+			) | rpl::on_next([=](const Core::CloudPasswordState &state) mutable {
 				if (lifetime) {
 					base::take(lifetime)->destroy();
 				}
@@ -244,7 +248,7 @@ void SendBotCallbackDataWithPassword(
 				fields.customSubmitButton = tr::lng_passcode_submit();
 				fields.customCheckCallback = [=](
 						const Core::CloudPasswordResult &result,
-						QPointer<PasscodeBox> box) {
+						base::weak_qptr<PasscodeBox> box) {
 					if (const auto button = getButton()) {
 						if (button->requestId) {
 							return;
@@ -390,7 +394,7 @@ void ActivateBotCommand(ClickHandlerContext context, int row, int column) {
 
 	case ButtonType::RequestPoll: {
 		HideSingleUseKeyboard(controller, item);
-		auto chosen = PollData::Flags();
+		auto chosen = kDefaultPollCreateFlags;
 		auto disabled = PollData::Flags();
 		if (!button->data.isEmpty()) {
 			disabled |= PollData::Flag::Quiz;
@@ -399,10 +403,12 @@ void ActivateBotCommand(ClickHandlerContext context, int row, int column) {
 			}
 		}
 		const auto replyTo = FullReplyTo();
+		const auto suggest = SuggestOptions();
 		Window::PeerMenuCreatePoll(
 			controller,
 			item->history()->peer,
 			replyTo,
+			suggest,
 			chosen,
 			disabled);
 	} break;
@@ -417,14 +423,17 @@ void ActivateBotCommand(ClickHandlerContext context, int row, int column) {
 		const auto itemId = item->id;
 		const auto id = int32(button->buttonId);
 		const auto chosen = [=](std::vector<not_null<PeerData*>> result) {
+			using Flag = MTPmessages_SendBotRequestedPeer::Flag;
 			peer->session().api().request(MTPmessages_SendBotRequestedPeer(
-				peer->input,
+				MTP_flags(Flag::f_msg_id),
+				peer->input(),
 				MTP_int(itemId),
+				MTPstring(), // request_id
 				MTP_int(id),
 				MTP_vector_from_range(
 					result | ranges::views::transform([](
 							not_null<PeerData*> peer) {
-						return MTPInputPeer(peer->input);
+						return MTPInputPeer(peer->input());
 					}))
 			)).done([=](const MTPUpdates &result) {
 				peer->session().api().applyUpdates(result);
@@ -479,7 +488,7 @@ void ActivateBotCommand(ClickHandlerContext context, int row, int column) {
 	} break;
 
 	case ButtonType::Auth:
-		UrlAuthBox::Activate(item, row, column);
+		UrlAuthBox::ActivateButton(controller->uiShow(), item, row, column);
 		break;
 
 	case ButtonType::UserProfile: {
@@ -518,6 +527,79 @@ void ActivateBotCommand(ClickHandlerContext context, int row, int column) {
 			QGuiApplication::clipboard()->setText(text);
 			controller->showToast(tr::lng_text_copied(tr::now));
 		}
+	} break;
+
+	case ButtonType::SuggestAccept: {
+		Api::AcceptClickHandler(item)->onClick(ClickContext{
+			Qt::LeftButton,
+			QVariant::fromValue(context),
+		});
+	} break;
+
+	case ButtonType::SuggestDecline: {
+		Api::DeclineClickHandler(item)->onClick(ClickContext{
+			Qt::LeftButton,
+			QVariant::fromValue(context),
+		});
+	} break;
+
+	case ButtonType::SuggestChange: {
+		Api::SuggestChangesClickHandler(item)->onClick(ClickContext{
+			Qt::LeftButton,
+			QVariant::fromValue(context),
+		});
+	} break;
+
+	case ButtonType::CreateBot: {
+		HideSingleUseKeyboard(controller, item);
+
+		auto suggestedName = QString();
+		auto suggestedUsername = QString();
+		{
+			auto stream = QDataStream(button->data);
+			stream >> suggestedName >> suggestedUsername;
+		}
+		const auto peer = item->history()->peer;
+		const auto itemId = item->id;
+		const auto id = int32(button->buttonId);
+		const auto bot = item->getMessageBot();
+		if (!bot) {
+			break;
+		}
+		ShowCreateManagedBotBox({
+			.show = controller->uiShow(),
+			.manager = bot,
+			.suggestedName = suggestedName,
+			.suggestedUsername = suggestedUsername,
+			.done = [=](not_null<UserData*> createdBot) {
+				using Flag = MTPmessages_SendBotRequestedPeer::Flag;
+				peer->session().api().request(
+					MTPmessages_SendBotRequestedPeer(
+						MTP_flags(Flag::f_msg_id),
+						peer->input(),
+						MTP_int(itemId),
+						MTPstring(),
+						MTP_int(id),
+						MTP_vector<MTPInputPeer>(
+							1,
+							createdBot->input()))
+				).done([=](const MTPUpdates &result) {
+					peer->session().api().applyUpdates(result);
+				}).send();
+				controller->showPeerHistory(createdBot);
+				controller->showToast({
+					.title = tr::lng_managed_bot_created_title(
+						tr::now,
+						lt_name,
+						createdBot->name()),
+					.text = { tr::lng_managed_bot_created_text(
+						tr::now,
+						lt_parent_name,
+						bot->name()) },
+					.icon = &st::toastCheckIcon,
+				});
+			},
+		});
 	} break;
 	}
 }

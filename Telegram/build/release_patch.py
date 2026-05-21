@@ -13,7 +13,6 @@ def main():
         ["../../cmake", "options_linux.cmake", "options_linux.patch"],
         ["../../cmake", "options_mac.cmake", "options_mac.patch"],
         ["../../cmake", "options_win.cmake", "options_win.patch"],
-        ["../../cmake", "init_target.cmake", "init_target.patch"],
     ]
     print("Apply patches")
     errors = 0

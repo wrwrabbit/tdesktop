@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "menu/menu_item_download_files.h"
 
+#include "base/base_file_utilities.h"
+#include "base/unixtime.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "core/file_utilities.h"
@@ -102,20 +104,26 @@ void AddAction(
 							: tr::lng_mediaview_saved_to)(
 						tr::now,
 						lt_downloads,
-						Ui::Text::Link(
+						tr::link(
 							tr::lng_mediaview_downloads(tr::now),
 							"internal:show_saved_message"),
-						Ui::Text::WithEntities),
+						tr::marked),
 					.filter = filter,
 					.st = &st::defaultToast,
 				});
 			};
 
 		auto views = std::vector<std::shared_ptr<Data::PhotoMedia>>();
+		auto dates = std::vector<TimeId>();
 		for (const auto &[photo, fullId] : photos) {
 			if (const auto view = photo->createMediaView()) {
 				view->wanted(Data::PhotoSize::Large, fullId);
 				views.push_back(view);
+				const auto photoDate = photo->date();
+				const auto item = session->data().message(fullId);
+				dates.push_back(photoDate
+					? photoDate
+					: (item ? item->date() : TimeId(0)));
 			}
 		}
 
@@ -138,7 +146,18 @@ void AddAction(
 			auto lastPath = QString();
 			for (auto i = 0; i < views.size(); i++) {
 				lastPath = fullPath(i + 1);
-				views[i]->saveToFile(lastPath);
+				if (views[i]->saveToFile(lastPath) && dates[i] > 0) {
+					auto f = QFile(lastPath);
+					if (f.open(QIODevice::ReadWrite)) {
+						const auto when = base::unixtime::parse(dates[i]);
+						f.setFileTime(
+							when,
+							QFileDevice::FileModificationTime);
+						f.setFileTime(
+							when,
+							QFileDevice::FileAccessTime);
+					}
+				}
 			}
 			if (showToast) {
 				showToast(lastPath);
@@ -150,7 +169,7 @@ void AddAction(
 		} else {
 			auto lifetime = std::make_shared<rpl::lifetime>();
 			session->downloaderTaskFinished(
-			) | rpl::start_with_next([=]() mutable {
+			) | rpl::on_next([=]() mutable {
 				if (finalCheck()) {
 					saveToFiles();
 					base::take(lifetime)->destroy();
@@ -161,7 +180,9 @@ void AddAction(
 	const auto saveDocuments = [=](const QString &folderPath) {
 		for (const auto &[document, origin] : documents) {
 			if (!folderPath.isEmpty()) {
-				document->save(origin, folderPath + document->filename());
+				const auto name =
+					base::FileNameFromUserString(document->filename());
+				document->save(origin, folderPath + name);
 			} else {
 				DocumentSaveClickHandler::SaveAndTrack(origin, document);
 			}
@@ -226,8 +247,8 @@ void AddDownloadFilesAction(
 			return;
 		}
 	}
-	const auto done = [weak = Ui::MakeWeak(list)] {
-		if (const auto strong = weak.data()) {
+	const auto done = [weak = base::make_weak(list)] {
+		if (const auto strong = weak.get()) {
 			strong->cancelSelection();
 		}
 	};
@@ -237,20 +258,24 @@ void AddDownloadFilesAction(
 void AddDownloadFilesAction(
 		not_null<Ui::PopupMenu*> menu,
 		not_null<Window::SessionController*> window,
-		const std::map<HistoryItem*, TextSelection, std::less<>> &items,
+		const base::flat_map<HistoryItem*, TextSelection, std::less<>> &items,
 		not_null<HistoryInner*> list) {
 	if (items.empty()) {
 		return;
 	}
+	auto sortedItems = ranges::views::all(items)
+		| ranges::views::keys
+		| ranges::to<std::vector>();
+	ranges::sort(sortedItems, {}, &HistoryItem::fullId);
 	auto docs = Documents();
 	auto photos = Photos();
-	for (const auto &pair : items) {
-		if (!Added(pair.first, docs, photos)) {
+	for (const auto &item : sortedItems) {
+		if (!Added(item, docs, photos)) {
 			return;
 		}
 	}
-	const auto done = [weak = Ui::MakeWeak(list)] {
-		if (const auto strong = weak.data()) {
+	const auto done = [weak = base::make_weak(list)] {
+		if (const auto strong = weak.get()) {
 			strong->clearSelected();
 		}
 	};

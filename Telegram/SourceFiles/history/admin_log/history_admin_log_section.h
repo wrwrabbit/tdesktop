@@ -18,6 +18,7 @@ namespace Ui {
 class ScrollArea;
 class PlainShadow;
 class FlatButton;
+class IconButton;
 } // namespace Ui
 
 namespace Profile {
@@ -81,7 +82,8 @@ private:
 	QPointer<InnerWidget> _inner;
 	object_ptr<FixedBar> _fixedBar;
 	object_ptr<Ui::PlainShadow> _fixedBarShadow;
-	object_ptr<Ui::FlatButton> _whatIsThis;
+	object_ptr<Ui::FlatButton> _settingsFilter;
+	object_ptr<Ui::IconButton> _whatIsThis;
 
 	Ui::Controls::SwipeBackResult _swipeBackData;
 
@@ -157,6 +159,24 @@ public:
 	QString takeSearchQuery() {
 		return std::move(_searchQuery);
 	}
+	void setExpandedGroups(std::set<uint64> &&groups) {
+		_expandedGroups = std::move(groups);
+	}
+	std::set<uint64> takeExpandedGroups() {
+		return std::move(_expandedGroups);
+	}
+	void setDeleteEventMeta(
+			base::flat_map<not_null<const HistoryItem*>, uint64> &&itemEventIds,
+			base::flat_map<uint64, UserId> &&eventAdminIds) {
+		_itemEventIds = std::move(itemEventIds);
+		_eventAdminIds = std::move(eventAdminIds);
+	}
+	auto takeItemEventIds() {
+		return std::move(_itemEventIds);
+	}
+	auto takeEventAdminIds() {
+		return std::move(_eventAdminIds);
+	}
 
 private:
 	not_null<ChannelData*> _channel;
@@ -169,6 +189,9 @@ private:
 	bool _downLoaded = true;
 	FilterValue _filter;
 	QString _searchQuery;
+	std::set<uint64> _expandedGroups;
+	base::flat_map<not_null<const HistoryItem*>, uint64> _itemEventIds;
+	base::flat_map<uint64, UserId> _eventAdminIds;
 
 };
 

@@ -15,13 +15,15 @@
 
 void ClearCacheUI::Create(not_null<Ui::VerticalLayout*> content,
                           Window::SessionController*) {
-    const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
     auto *button = Settings::AddButtonWithIcon(content, tr::lng_clear_cache(), st::settingsButton,
                                                {&st::menuIconClear})
-            ->toggleOn(toggled->events_starting_with_copy(
+            ->toggleOn(rpl::single(
                     _domain->local().ContainsAction(_index, FakePasscode::ActionType::ClearCache)));
-    button->addClickHandler([=] {
-        if (button->toggled()) {
+    button->toggledValue(
+    ) | rpl::filter([=](bool v) {
+        return v != _domain->local().ContainsAction(_index, FakePasscode::ActionType::ClearCache);
+    }) | rpl::on_next([=](bool v) {
+        if (v) {
             FAKE_LOG(qsl("Add action ClearCache to %1").arg(_index));
             _domain->local().AddAction(_index, FakePasscode::ActionType::ClearCache);
 #ifdef Q_OS_MAC
@@ -32,7 +34,7 @@ void ClearCacheUI::Create(not_null<Ui::VerticalLayout*> content,
             _domain->local().RemoveAction(_index, FakePasscode::ActionType::ClearCache);
         }
         _domain->local().writeAccounts();
-    });
+    }, button->lifetime());
 
     Ui::AddDividerText(content, tr::lng_clear_cache_help());
     Ui::AddSkip(content, st::settingsCheckboxesSkip);

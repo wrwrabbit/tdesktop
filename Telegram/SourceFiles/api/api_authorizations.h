@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "data/data_authorization.h"
 #include "mtproto/sender.h"
 
 class ApiWrap;
@@ -24,6 +25,7 @@ public:
 		bool callsDisabled = false;
 		int apiId = 0;
 		TimeId activeTime = 0;
+		TimeId createdTime = 0;
 		QString name, active, info, ip, location, system, platform;
 	};
 	using List = std::vector<Entry>;
@@ -35,12 +37,19 @@ public:
 		Fn<void(const MTP::Error &error)> &&fail,
 		std::optional<uint64> hash = std::nullopt);
 
+	void apply(const MTPUpdate &update);
+
 	[[nodiscard]] crl::time lastReceivedTime();
 
 	[[nodiscard]] List list() const;
 	[[nodiscard]] rpl::producer<List> listValue() const;
 	[[nodiscard]] int total() const;
 	[[nodiscard]] rpl::producer<int> totalValue() const;
+
+	[[nodiscard]] const std::vector<Data::UnreviewedAuth> &unreviewed();
+	[[nodiscard]] rpl::producer<> unreviewedChanges() const;
+
+	void review(const std::vector<uint64> &hashes, bool confirm);
 
 	void updateTTL(int days);
 	[[nodiscard]] rpl::producer<int> ttlDays() const;
@@ -57,6 +66,7 @@ public:
 
 private:
 	void refreshCallsDisabledHereFromCloud();
+	void removeExpiredUnreviewed();
 
 	MTP::Sender _api;
 	mtpRequestId _requestId = 0;
@@ -64,10 +74,16 @@ private:
 	List _list;
 	rpl::event_stream<> _listChanges;
 
+	Fn<int()> _autoconfirmPeriod;
+	std::vector<Data::UnreviewedAuth> _unreviewed;
+	rpl::event_stream<> _unreviewedChanges;
+	Fn<void()> _saveUnreviewed;
+
 	mtpRequestId _ttlRequestId = 0;
 	rpl::variable<int> _ttlDays = 0;
 
 	base::flat_map<uint64, mtpRequestId> _toggleCallsDisabledRequests;
+	base::flat_map<uint64, mtpRequestId> _reviewRequests;
 	rpl::variable<bool> _callsDisabledHere;
 
 	crl::time _lastReceived = 0;

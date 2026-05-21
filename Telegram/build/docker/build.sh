@@ -27,6 +27,8 @@ if [ ! -f "/usr/bin/cmake" ]; then
 fi
 
 ./configure.sh -DDESKTOP_APP_SPECIAL_TARGET=linux
+# not using -DDESKTOP_APP_ENABLE_LTO=ON
+# ./configure.sh -DDESKTOP_APP_ENABLE_LTO=ON
 
 cd $ProjectPath
 cmake --build . --config Release --target Telegram --parallel

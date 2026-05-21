@@ -14,7 +14,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_cursor_state.h"
 #include "ui/chat/chat_style.h"
-#include "ui/widgets/tooltip.h"
 #include "ui/dynamic_image.h"
 #include "ui/dynamic_thumbnails.h"
 #include "ui/painter.h"
@@ -27,19 +26,6 @@ namespace HistoryView {
 namespace {
 
 constexpr auto kAdditionalPrizesWithLineOpacity = 0.6;
-
-[[nodiscard]] QSize CountOptimalTextSize(
-		const Ui::Text::String &text,
-		int minWidth,
-		int maxWidth) {
-	if (text.maxWidth() <= maxWidth) {
-		return { text.maxWidth(), text.minHeight() };
-	}
-	const auto height = text.countHeight(maxWidth);
-	return { Ui::FindNiceTooltipWidth(minWidth, maxWidth, [&](int width) {
-		return text.countHeight(width);
-	}), height };
-}
 
 } // namespace
 
@@ -69,6 +55,21 @@ auto MediaGenericPart::stickerTakePlayer(
 	return nullptr;
 }
 
+uint16 MediaGenericPart::fullSelectionLength() const {
+	return 0;
+}
+
+TextSelection MediaGenericPart::adjustSelection(
+		TextSelection selection,
+		TextSelectType type) const {
+	return selection;
+}
+
+TextForMimeData MediaGenericPart::selectedText(
+		TextSelection selection) const {
+	return {};
+}
+
 MediaGeneric::MediaGeneric(
 	not_null<Element*> parent,
 	Fn<void(
@@ -76,8 +77,11 @@ MediaGeneric::MediaGeneric(
 		Fn<void(std::unique_ptr<Part>)>)> generate,
 	MediaGenericDescriptor &&descriptor)
 : Media(parent)
-, _paintBg(std::move(descriptor.paintBg))
+, _paintBgFactory(std::move(descriptor.paintBgFactory))
+, _paintBg(_paintBgFactory ? _paintBgFactory() : nullptr)
+, _fullAreaLink(descriptor.fullAreaLink)
 , _maxWidthCap(descriptor.maxWidth)
+, _expandCurrentWidth(descriptor.expandCurrentWidth)
 , _service(descriptor.service)
 , _hideServiceText(descriptor.hideServiceText) {
 	generate(this, [&](std::unique_ptr<Part> part) {
@@ -85,10 +89,6 @@ MediaGeneric::MediaGeneric(
 			.object = std::move(part),
 		});
 	});
-	if (descriptor.serviceLink) {
-		parent->data()->setCustomServiceLink(
-			std::move(descriptor.serviceLink));
-	}
 }
 
 MediaGeneric::~MediaGeneric() {
@@ -113,35 +113,62 @@ QSize MediaGeneric::countOptimalSize() {
 }
 
 QSize MediaGeneric::countCurrentSize(int newWidth) {
-	if (newWidth > maxWidth()) {
+	if (!_expandCurrentWidth && newWidth > maxWidth()) {
 		newWidth = maxWidth();
 	}
+	auto top = 0;
 	for (auto &entry : _entries) {
-		entry.object->resizeGetHeight(newWidth);
+		top += entry.object->resizeGetHeight(newWidth);
 	}
-	return { newWidth, minHeight() };
+	return { newWidth, top };
 }
 
 void MediaGeneric::draw(Painter &p, const PaintContext &context) const {
 	const auto outer = width();
 	if (outer < st::msgPadding.left() + st::msgPadding.right() + 1) {
 		return;
-	} else if (_paintBg) {
+	}
+	if (!_paintBg && _paintBgFactory) {
+		_paintBg = _paintBgFactory();
+	}
+	if (_paintBg) {
 		_paintBg(p, context, this);
 	} else if (_service) {
 		PainterHighQualityEnabler hq(p);
 		const auto radius = st::msgServiceGiftBoxRadius;
 		p.setPen(Qt::NoPen);
 		p.setBrush(context.st->msgServiceBg());
-		p.drawRoundedRect(QRect(0, 0, width(), height()), radius, radius);
+		const auto rect = QRect(0, 0, width(), height());
+		if (parent()->data()->inlineReplyKeyboard()) {
+			const auto half = rect.height() / 2;
+			p.setClipRect(rect - QMargins(0, 0, 0, half));
+			p.drawRoundedRect(rect, radius, radius);
+			p.setClipRect(rect - QMargins(0, rect.height() - half, 0, 0));
+			const auto small = Ui::BubbleRadiusSmall();
+			p.drawRoundedRect(rect, small, small);
+			p.setClipping(false);
+		} else {
+			p.drawRoundedRect(rect, radius, radius);
+		}
 	}
 
+	const auto fullSelection = (context.selection == FullSelection);
 	auto translated = 0;
+	auto symbolOffset = uint16(0);
 	for (const auto &entry : _entries) {
 		const auto raw = entry.object.get();
 		const auto height = raw->height();
-		raw->draw(p, this, context, outer);
+		const auto length = raw->fullSelectionLength();
+		if (length > 0 && !fullSelection) {
+			const auto local = UnshiftItemSelection(
+				context.selection,
+				symbolOffset);
+			raw->draw(p, this, context.withSelection(local), outer);
+		} else {
+			raw->draw(p, this, context, outer);
+		}
 		translated += height;
+		symbolOffset = uint16(symbolOffset + length);
 		p.translate(0, height);
 	}
 	p.translate(0, -translated);
@@ -157,16 +184,34 @@ TextState MediaGeneric::textState(
 		return result;
 	}
 
+	if (_fullAreaLink && QRect(0, 0, width(), height()).contains(point)) {
+		result.link = _fullAreaLink;
+		return result;
+	}
+
+	auto symbolOffset = uint16(0);
 	for (const auto &entry : _entries) {
 		const auto raw = entry.object.get();
 		const auto height = raw->height();
+		const auto length = raw->fullSelectionLength();
 		if (point.y() >= 0 && point.y() < height) {
 			const auto part = raw->textState(point, request, outer);
 			result.link = part.link;
+			result.cursor = part.cursor;
+			if (length > 0) {
+				result.symbol = uint16(symbolOffset + part.symbol);
+				result.afterSymbol = part.afterSymbol;
+				result.overMessageText
+					= (part.cursor == CursorState::Text);
+			} else {
+				result.symbol = symbolOffset;
+			}
 			return result;
 		}
 		point.setY(point.y() - height);
+		symbolOffset = uint16(symbolOffset + length);
 	}
+	result.symbol = symbolOffset;
 	return result;
 }
 
@@ -181,6 +226,83 @@ void MediaGeneric::clickHandlerPressedChanged(
 	for (const auto &entry : _entries) {
 		entry.object->clickHandlerPressedChanged(p, pressed);
 	}
+}
+
+bool MediaGeneric::hasTextForCopy() const {
+	return fullSelectionLength() > 0;
+}
+
+uint16 MediaGeneric::fullSelectionLength() const {
+	auto total = uint16(0);
+	for (const auto &entry : _entries) {
+		total = uint16(total + entry.object->fullSelectionLength());
+	}
+	return total;
+}
+
+TextForMimeData MediaGeneric::selectedText(TextSelection selection) const {
+	auto offset = uint16(0);
+	auto result = TextForMimeData();
+	for (const auto &entry : _entries) {
+		const auto length = entry.object->fullSelectionLength();
+		if (length > 0) {
+			auto part = entry.object->selectedText(
+				UnshiftItemSelection(selection, offset));
+			if (!part.empty()) {
+				if (result.empty()) {
+					result = std::move(part);
+				} else {
+					result.append('\n').append(std::move(part));
+				}
+			}
+		}
+		offset = uint16(offset + length);
+	}
+	return result;
+}
+
+TextSelection MediaGeneric::adjustSelection(
+		TextSelection selection,
+		TextSelectType type) const {
+	if (selection == FullSelection) {
+		return selection;
+	}
+	auto offset = uint16(0);
+	auto firstFrom = std::optional<uint16>();
+	auto firstOffset = uint16(0);
+	auto lastTo = uint16(0);
+	auto lastOffset = uint16(0);
+	for (const auto &entry : _entries) {
+		const auto length = entry.object->fullSelectionLength();
+		if (length > 0) {
+			const auto end = uint16(offset + length);
+			if (selection.from < end && selection.to > offset) {
+				const auto from = uint16((selection.from > offset)
+					? (selection.from - offset)
+					: 0);
+				const auto to = uint16((selection.to < end)
+					? (selection.to - offset)
+					: length);
+				const auto local = entry.object->adjustSelection(
+					{ from, to },
+					type);
+				if (!firstFrom.has_value()) {
+					firstFrom = local.from;
+					firstOffset = offset;
+				}
+				lastTo = local.to;
+				lastOffset = offset;
+			}
+		}
+		offset = uint16(offset + length);
+	}
+	if (!firstFrom.has_value()) {
+		return selection;
+	}
+	return {
+		uint16(firstOffset + *firstFrom),
+		uint16(lastOffset + lastTo),
+	};
 }
 
 std::unique_ptr<StickerPlayer> MediaGeneric::stickerTakePlayer(
@@ -214,6 +336,7 @@ bool MediaGeneric::hasHeavyPart() const {
 }
 
 void MediaGeneric::unloadHeavyPart() {
+	_paintBg = nullptr;
 	for (const auto &entry : _entries) {
 		entry.object->unloadHeavyPart();
 	}
@@ -236,9 +359,11 @@ MediaGenericTextPart::MediaGenericTextPart(
 	QMargins margins,
 	const style::TextStyle &st,
 	const base::flat_map<uint16, ClickHandlerPtr> &links,
-	const Ui::Text::MarkedContext &context)
+	const Ui::Text::MarkedContext &context,
+	style::align align)
 : _text(st::msgMinWidth)
-, _margins(margins) {
+, _margins(margins)
+, _align(align) {
 	_text.setMarkedText(
 		st,
 		text,
@@ -254,12 +379,18 @@ void MediaGenericTextPart::draw(
 		not_null<const MediaGeneric*> owner,
 		const PaintContext &context,
 		int outerWidth) const {
+	const auto use = (width() - _margins.left() - _margins.right());
 	setupPen(p, owner, context);
 	_text.draw(p, {
-		.position = { (outerWidth - width()) / 2, _margins.top() },
+		.position = {
+			((_align == style::al_top)
+				? ((outerWidth - use) / 2)
+				: _margins.left()),
+			_margins.top(),
+		},
 		.outerWidth = outerWidth,
-		.availableWidth = width(),
-		.align = style::al_top,
+		.availableWidth = use,
+		.align = _align,
 		.palette = &(owner->service()
 			? context.st->serviceTextPalette()
 			: context.messageStyle()->textPalette),
@@ -267,6 +398,8 @@ void MediaGenericTextPart::draw(
 		.now = context.now,
 		.pausedEmoji = context.paused || On(PowerSaving::kEmojiChat),
 		.pausedSpoiler = context.paused || On(PowerSaving::kChatSpoiler),
+		.selection = context.selection,
+		.elisionLines = elisionLines(),
 	});
 }
 
@@ -280,34 +413,67 @@ void MediaGenericTextPart::setupPen(
 		: context.messageStyle()->historyTextFg);
 }
 
+int MediaGenericTextPart::elisionLines() const {
+	return 0;
+}
+
 TextState MediaGenericTextPart::textState(
 		QPoint point,
 		StateRequest request,
 		int outerWidth) const {
-	point -= QPoint{ (outerWidth - width()) / 2, _margins.top() };
-	auto result = TextState();
+	const auto use = (width() - _margins.left() - _margins.right());
+	point -= QPoint{
+		((_align == style::al_top)
+			? ((outerWidth - use) / 2)
+			: _margins.left()),
+		_margins.top(),
+	};
 	auto forText = request.forText();
-	forText.align = style::al_top;
-	result.link = _text.getState(point, width(), forText).link;
-	return result;
+	forText.align = _align;
+	return TextState(nullptr, _text.getState(point, use, forText));
+}
+
+uint16 MediaGenericTextPart::fullSelectionLength() const {
+	return _text.length();
+}
+
+TextSelection MediaGenericTextPart::adjustSelection(
+		TextSelection selection,
+		TextSelectType type) const {
+	return _text.adjustSelection(selection, type);
+}
+
+TextForMimeData MediaGenericTextPart::selectedText(
+		TextSelection selection) const {
+	return _text.toTextForMimeData(selection);
 }
 
 QSize MediaGenericTextPart::countOptimalSize() {
+	const auto lines = elisionLines();
+	const auto height = lines
+		? std::min(_text.minHeight(), lines * _text.style()->font->height)
+		: _text.minHeight();
 	return {
 		_margins.left() + _text.maxWidth() + _margins.right(),
-		_margins.top() + _text.minHeight() + _margins.bottom(),
+		_margins.top() + height + _margins.bottom(),
 	};
 }
 
 QSize MediaGenericTextPart::countCurrentSize(int newWidth) {
 	auto skip = _margins.left() + _margins.right();
-	const auto size = CountOptimalTextSize(
-		_text,
-		st::msgMinWidth,
-		std::max(st::msgMinWidth, newWidth - skip));
+	const auto size = (_align == style::al_top)
+		? Ui::Text::CountOptimalTextSize(
+			_text,
+			st::msgMinWidth,
+			std::max(st::msgMinWidth, newWidth - skip))
+		: QSize(newWidth - skip, _text.countHeight(newWidth - skip));
+	const auto lines = elisionLines();
+	const auto height = lines
+		? std::min(size.height(), lines * _text.style()->font->height)
+		: size.height();
 	return {
 		size.width() + skip,
-		_margins.top() + size.height() + _margins.bottom(),
+		_margins.top() + height + _margins.bottom(),
 	};
 }
 
@@ -360,6 +526,35 @@ QSize TextDelimeterPart::countOptimalSize() {
 
 QSize TextDelimeterPart::countCurrentSize(int newWidth) {
 	return { newWidth, minHeight() };
+}
+
+LambdaGenericPart::LambdaGenericPart(
+	QSize size,
+	Fn<void(
+		Painter &p,
+		not_null<const MediaGeneric*> owner,
+		const PaintContext &context,
+		int outerWidth)> draw)
+: _size(size)
+, _draw(std::move(draw)) {
+}
+
+void LambdaGenericPart::draw(
+		Painter &p,
+		not_null<const MediaGeneric*> owner,
+		const PaintContext &context,
+		int outerWidth) const {
+	if (_draw) {
+		_draw(p, owner, context, outerWidth);
+	}
+}
+
+QSize LambdaGenericPart::countOptimalSize() {
+	return _size;
+}
+
+QSize LambdaGenericPart::countCurrentSize(int newWidth) {
+	return { newWidth, _size.height() };
 }
 
 StickerInBubblePart::StickerInBubblePart(
@@ -448,13 +643,13 @@ void StickerInBubblePart::ensureCreated(Element *replacing) const {
 		return;
 	} else if (const auto data = _lookup()) {
 		const auto sticker = data.sticker;
-		if (const auto info = sticker->sticker()) {
+		if (sticker->sticker()) {
 			const auto skipPremiumEffect = true;
 			_link = data.link;
 			_skipTop = data.skipTop;
 			_sticker.emplace(_parent, sticker, skipPremiumEffect, replacing);
-			if (data.singleTimePlayback) {
-				_sticker->setPlayingOnce(true);
+			if (data.stopOnLastFrame) {
+				_sticker->setStopOnLastFrame(true);
 			}
 			_sticker->initSize(data.size);
 			_sticker->setCustomCachingTag(data.cacheTag);

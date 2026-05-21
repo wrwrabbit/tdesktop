@@ -55,6 +55,7 @@ private:
 	void showMenu(QPoint position, FilterId id);
 	void scrollToButton(not_null<Ui::RpWidget*> widget);
 	void openFiltersSettings();
+	void setupDragAndDrop();
 
 	const not_null<SessionController*> _session;
 	const not_null<Ui::RpWidget*> _parent;
@@ -73,9 +74,6 @@ private:
 	bool _waitingSuggested = false;
 
 	Api::RemoveComplexChatFilter _removeApi;
-
-	FilterId _removingId = 0;
-	mtpRequestId _removingRequestId = 0;
 
 	base::unique_qptr<Ui::PopupMenu> _popupMenu;
 	struct {

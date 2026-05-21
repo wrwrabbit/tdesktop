@@ -13,6 +13,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/sender.h"
 #include "mtproto/mtproto_auth_key.h"
 #include "webrtc/webrtc_device_resolver.h"
+#include "webrtc/webrtc_system_audio_capture.h"
+
+namespace Data {
+class GroupCall;
+} // namespace Data
 
 namespace Media {
 namespace Audio {
@@ -39,6 +44,8 @@ struct DeviceResolvedId;
 } // namespace Webrtc
 
 namespace Calls {
+
+struct StartConferenceInfo;
 
 struct DhConfig {
 	int32 version = 0;
@@ -102,6 +109,13 @@ public:
 		not_null<UserData*> user,
 		Type type,
 		bool video);
+	Call(
+		not_null<Delegate*> delegate,
+		not_null<UserData*> user,
+		CallId conferenceId,
+		MsgId conferenceInviteMsgId,
+		std::vector<not_null<PeerData*>> conferenceParticipants,
+		bool video);
 
 	[[nodiscard]] Type type() const {
 		return _type;
@@ -111,6 +125,19 @@ public:
 	}
 	[[nodiscard]] CallId id() const {
 		return _id;
+	}
+	[[nodiscard]] bool conferenceInvite() const {
+		return _conferenceId != 0;
+	}
+	[[nodiscard]] CallId conferenceId() const {
+		return _conferenceId;
+	}
+	[[nodiscard]] MsgId conferenceInviteMsgId() const {
+		return _conferenceInviteMsgId;
+	}
+	[[nodiscard]] auto conferenceParticipants() const
+	-> const std::vector<not_null<PeerData*>> & {
+		return _conferenceParticipants;
 	}
 	[[nodiscard]] bool isIncomingWaiting() const;
 
@@ -126,6 +153,7 @@ public:
 		FailedHangingUp,
 		Failed,
 		HangingUp,
+		MigrationHangingUp,
 		Ended,
 		EndedByOtherDevice,
 		ExchangingKeys,
@@ -145,6 +173,10 @@ public:
 
 	[[nodiscard]] rpl::producer<Error> errors() const {
 		return _errors.events();
+	}
+
+	[[nodiscard]] rpl::producer<bool> confereceSupportedValue() const {
+		return _conferenceSupported.value();
 	}
 
 	enum class RemoteAudioState {
@@ -202,7 +234,9 @@ public:
 
 	void applyUserConfirmation();
 	void answer();
-	void hangup();
+	void hangup(
+		Data::GroupCall *migrateCall = nullptr,
+		const QString &migrateSlug = QString());
 	void redial();
 	void hangupSilent();
 
@@ -224,7 +258,14 @@ public:
 	[[nodiscard]] QString cameraSharingDeviceId() const;
 	[[nodiscard]] QString screenSharingDeviceId() const;
 	void toggleCameraSharing(bool enabled);
-	void toggleScreenSharing(std::optional<QString> uniqueId);
+	void toggleScreenSharing(
+		std::optional<QString> uniqueId,
+		bool withAudio = false);
+	[[nodiscard]] bool screenSharingWithAudio() const {
+		return _screenWithAudio;
+	}
+	[[nodiscard]] auto peekVideoCapture() const
+		-> std::shared_ptr<tgcalls::VideoCaptureInterface>;
 
 	[[nodiscard]] auto playbackDeviceIdValue() const
 		-> rpl::producer<Webrtc::DeviceResolvedId>;
@@ -253,7 +294,9 @@ private:
 	void finish(
 		FinishType type,
 		const MTPPhoneCallDiscardReason &reason
-			= MTP_phoneCallDiscardReasonDisconnect());
+			= MTP_phoneCallDiscardReasonDisconnect(),
+		Data::GroupCall *migrateCall = nullptr);
+	void finishByMigration(const QString &slug);
 	void startOutgoing();
 	void startIncoming();
 	void startWaitingTrack();
@@ -270,6 +313,7 @@ private:
 	bool checkCallFields(const MTPDphoneCallAccepted &call);
 
 	void actuallyAnswer();
+	void acceptConferenceInvite();
 	void confirmAcceptedCall(const MTPDphoneCallAccepted &call);
 	void startConfirmedCall(const MTPDphoneCall &call);
 	void setState(State state);
@@ -287,11 +331,15 @@ private:
 		tgcalls::AudioState audio,
 		tgcalls::VideoState video);
 
+	[[nodiscard]] StartConferenceInfo migrateConferenceInfo(
+		StartConferenceInfo extend);
+
 	const not_null<Delegate*> _delegate;
 	const not_null<UserData*> _user;
 	MTP::Sender _api;
 	Type _type = Type::Outgoing;
 	rpl::variable<State> _state = State::Starting;
+	rpl::variable<bool> _conferenceSupported = false;
 	rpl::variable<RemoteAudioState> _remoteAudioState
 		= RemoteAudioState::Active;
 	rpl::variable<Webrtc::VideoState> _remoteVideoState;
@@ -323,10 +371,16 @@ private:
 	uint64 _accessHash = 0;
 	uint64 _keyFingerprint = 0;
 
+	CallId _conferenceId = 0;
+	MsgId _conferenceInviteMsgId = 0;
+	std::vector<not_null<PeerData*>> _conferenceParticipants;
+
 	std::unique_ptr<tgcalls::Instance> _instance;
 	std::shared_ptr<tgcalls::VideoCaptureInterface> _videoCapture;
 	QString _videoCaptureDeviceId;
 	bool _videoCaptureIsScreencast = false;
+	bool _screenWithAudio = false;
+	std::unique_ptr<Webrtc::SystemAudioCapture> _systemAudioCapture;
 	const std::unique_ptr<Webrtc::VideoTrack> _videoIncoming;
 	const std::unique_ptr<Webrtc::VideoTrack> _videoOutgoing;
 

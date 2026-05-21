@@ -83,7 +83,6 @@ notifySendReply: IconButton {
 notifyFadeRight: icon {{ "fade_horizontal", notificationBg }};
 
 titleUnreadCounterTop: 6px;
-titleUnreadCounterRight: 35px;
 
 mainMenuWidth: 274px;
 mainMenuCoverHeight: 134px;
@@ -208,6 +207,21 @@ windowOutdatedClose: IconButton(defaultIconButton) {
 	iconPosition: point(-1px, -1px);
 }
 
+windowScreenReaderLabel: FlatLabel(defaultFlatLabel) {
+	align: align(left);
+	textFg: activeButtonFg;
+	style: semiboldTextStyle;
+}
+windowScreenReaderPadding: margins(12px, 4px, 4px, 4px);
+windowScreenReaderDisableTextStyle: semiboldTextStyle;
+windowScreenReaderButtonPadding: margins(12px, 0px, 12px, 0px);
+windowScreenReaderButtonHeight: 28px;
+windowScreenReaderButtonBorderWidth: 2px;
+windowScreenReaderButtonRadius: 14px;
+windowScreenReaderButtonRipple: RippleAnimation(defaultRippleAnimation) {
+	color: activeButtonBgRipple;
+}
+
 createThemeImportButton: SettingsButton(defaultSettingsButton) {
 	textFg: lightButtonFg;
 	textFgOver: lightButtonFgOver;
@@ -283,8 +297,10 @@ windowFilterSmallRemove: IconButton(notifyClose) {
 }
 windowFilterSmallRemoveRight: 10px;
 windowFilterNameInput: InputField(defaultInputField) {
-	textMargins: margins(0px, 26px, 36px, 4px);
+	textMargins: margins(0px, 26px, 87px, 4px);
 }
+windowFilterNameEmojiPosition: point(-65px, 22px);
+windowFilterNameCharsLimitRightPosition: point(75px, 27px);
 windowFilterStaticTitlePosition: point(0px, 5px);
 windowFilterIconToggleSize: size(36px, 36px);
 windowFilterIconTogglePosition: point(-4px, 18px);
@@ -316,12 +332,63 @@ windowArchiveToast: Toast(defaultToast) {
 	maxWidth: boxWideWidth;
 }
 
+windowFeeItem: Menu(defaultMenu) {
+	itemPadding: margins(17px, 3px, 17px, 4px);
+	itemRightSkip: 0px;
+	itemStyle: whenReadStyle;
+	itemFgOver: windowFg;
+	itemFgDisabled: windowFg;
+}
+
 ivWidthMin: 380px;
 ivHeightMin: 480px;
 ivWidthDefault: 600px;
 ivHeightDefault: 800px;
 
 maxWidthSharedMediaWindow: 419px;
+
+chatSwitchMargins: margins(16px, 16px, 16px, 16px);
+chatSwitchPadding: margins(12px, 12px, 12px, 12px);
+chatSwitchSize: size(72px, 104px);
+chatSwitchUserpic: UserpicButton(defaultUserpicButton) {
+	size: size(56px, 56px);
+	photoSize: 56px;
+}
+chatSwitchUserpicSublist: UserpicButton(defaultUserpicButton) {
+	size: size(40px, 40px);
+	photoSize: 40px;
+}
+chatSwitchUserpicSmall: UserpicButton(defaultUserpicButton) {
+	size: size(24px, 24px);
+	photoSize: 24px;
+}
+chatSwitchUserpicTop: 8px;
+chatSwitchNameLabel: FlatLabel(defaultFlatLabel) {
+	style: TextStyle(defaultTextStyle) {
+		font: font(11px);
+	}
+	align: align(top);
+	minWidth: 56px;
+	maxHeight: 36px;
+}
+chatSwitchNameSkip: 6px;
+chatSwitchSelectLine: 3px;
+
+lockSetupEmailLabelMaxWidth: 256px + 24px + 24px;
+lockSetupEmailTitle: FlatLabel(defaultFlatLabel) {
+	minWidth: lockSetupEmailLabelMaxWidth;
+	style: TextStyle(defaultTextStyle) {
+		font: font(19px);
+	}
+}
+lockSetupEmailLabel: FlatLabel(defaultFlatLabel) {
+	minWidth: 256px;
+}
+lockSetupEmailLogOutPosition: point(10px, 10px);
+lockSetupEmailUserpicSmall: UserpicButton(defaultUserpicButton) {
+	size: size(22px, 22px);
+	photoSize: 22px;
+}
 
 // Windows specific
 

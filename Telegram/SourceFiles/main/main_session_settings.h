@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "data/data_auto_download.h"
+#include "data/notify/data_peer_notify_settings.h"
+#include "data/data_authorization.h"
 #include "ui/rect_part.h"
 
 namespace Support {
@@ -17,6 +19,10 @@ enum class SwitchSettings;
 namespace ChatHelpers {
 enum class SelectorTab;
 } // namespace ChatHelpers
+
+namespace Data {
+enum class SetupEmailState;
+} // namespace Data
 
 namespace Main {
 
@@ -110,11 +116,16 @@ public:
 
 	[[nodiscard]] MsgId hiddenPinnedMessageId(
 		PeerId peerId,
-		MsgId topicRootId = 0) const;
+		MsgId topicRootId = 0,
+		PeerId monoforumPeerId = 0) const;
 	void setHiddenPinnedMessageId(
 		PeerId peerId,
 		MsgId topicRootId,
+		PeerId monoforumPeerId,
 		MsgId msgId);
+
+	[[nodiscard]] qint32 subsectionTabsMode(PeerId peerId) const;
+	void setSubsectionTabsMode(PeerId peerId, qint32 mode);
 
 	[[nodiscard]] bool dialogsFiltersEnabled() const {
 		return _dialogsFiltersEnabled;
@@ -125,6 +136,10 @@ public:
 
 	[[nodiscard]] bool photoEditorHintShown() const;
 	void incrementPhotoEditorHintShown();
+
+	[[nodiscard]] bool shouldShowDisableSharingBox() const;
+	void incrementDisableSharingBoxShown();
+	void resetDisableSharingBoxShown();
 
 	[[nodiscard]] std::vector<TimeId> mutePeriods() const;
 	void addMutePeriod(TimeId period);
@@ -141,14 +156,53 @@ public:
 	void setLastNonPremiumLimitUpload(TimeId when) {
 		_lastNonPremiumLimitUpload = when;
 	}
+	void setRingtoneVolume(
+		Data::DefaultNotify defaultNotify,
+		ushort volume);
+	[[nodiscard]] ushort ringtoneVolume(
+		Data::DefaultNotify defaultNotify) const;
+	void setRingtoneVolume(
+		PeerId peerId,
+		MsgId topicRootId,
+		PeerId monoforumPeerId,
+		ushort volume);
+	[[nodiscard]] ushort ringtoneVolume(
+		PeerId peerId,
+		MsgId topicRootId,
+		PeerId monoforumPeerId) const;
+
+	void markTranscriptionAsRated(uint64 transcriptionId);
+	[[nodiscard]] bool isTranscriptionRated(uint64 transcriptionId) const;
+
+	void setUnreviewed(std::vector<Data::UnreviewedAuth> auths);
+	[[nodiscard]] const std::vector<Data::UnreviewedAuth> &unreviewed() const;
+
+	void setSetupEmailState(Data::SetupEmailState state);
+	[[nodiscard]] Data::SetupEmailState setupEmailState() const;
+
+	void setModerateCommonGroups(std::vector<int32> groups) {
+		_moderateCommonGroups = std::move(groups);
+	}
+	[[nodiscard]] const std::vector<int32> &moderateCommonGroups() const {
+		return _moderateCommonGroups;
+	}
+
+	void setPhoneNumberHidden(bool hidden) {
+		_phoneNumberHidden = hidden;
+	}
+	[[nodiscard]] bool phoneNumberHidden() const {
+		return _phoneNumberHidden;
+	}
 
 private:
 	static constexpr auto kDefaultSupportChatsLimitSlice = 7 * 24 * 60 * 60;
 	static constexpr auto kPhotoEditorHintMaxShowsCount = 5;
+	static constexpr auto kDisableSharingBoxMaxShowsCount = 3;
 
 	struct ThreadId {
 		PeerId peerId;
 		MsgId topicRootId;
+		PeerId monoforumPeerId;
 
 		friend inline constexpr auto operator<=>(
 			ThreadId,
@@ -164,8 +218,12 @@ private:
 	rpl::variable<bool> _archiveInMainMenu = false;
 	rpl::variable<bool> _skipArchiveInSearch = false;
 	base::flat_map<ThreadId, MsgId> _hiddenPinnedMessages;
+	base::flat_map<PeerId, qint32> _subsectionTabsModes;
+	base::flat_map<Data::DefaultNotify, ushort> _ringtoneDefaultVolumes;
+	base::flat_map<ThreadId, ushort> _ringtoneVolumes;
 	bool _dialogsFiltersEnabled = false;
 	int _photoEditorHintShowsCount = 0;
+	int _disableSharingBoxShowsCount = 0;
 	std::vector<TimeId> _mutePeriods;
 	TimeId _lastNonPremiumLimitDownload = 0;
 	TimeId _lastNonPremiumLimitUpload = 0;
@@ -177,6 +235,16 @@ private:
 	rpl::variable<int> _supportChatsTimeSlice
 		= kDefaultSupportChatsLimitSlice;
 	rpl::variable<bool> _supportAllSearchResults = false;
+
+	base::flat_set<uint64> _ratedTranscriptions;
+
+	std::vector<Data::UnreviewedAuth> _unreviewed;
+
+	Data::SetupEmailState _setupEmailState;
+
+	std::vector<int32> _moderateCommonGroups;
+
+	bool _phoneNumberHidden = false;
 
 };
 

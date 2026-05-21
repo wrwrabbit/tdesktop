@@ -27,6 +27,7 @@ class Forum;
 class Folder;
 class ForumTopic;
 class SavedSublist;
+class SavedMessages;
 class Thread;
 } // namespace Data
 
@@ -50,6 +51,23 @@ class MainList;
 	const UnreadState &state,
 	CountInBadge count = CountInBadge::Default,
 	IncludeInBadge include = IncludeInBadge::Default);
+
+struct DateTextCache {
+	QString text;
+	TimeId messageTimeId = 0;
+	int todaySerial = 0;
+	int width = 0;
+};
+
+struct DateText {
+	const QString &text;
+	int width = 0;
+};
+
+[[nodiscard]] DateText ResolveDateText(
+	DateTextCache &cache,
+	TimeId date,
+	crl::time now);
 
 class Entry : public base::has_weak_ptr {
 public:
@@ -153,6 +171,9 @@ public:
 	}
 
 	[[nodiscard]] const Ui::Text::String &chatListNameText() const;
+	[[nodiscard]] DateText chatListTimestampText(
+		TimeId date,
+		crl::time now) const;
 	[[nodiscard]] Ui::PeerBadge &chatListPeerBadge() const {
 		return _chatListPeerBadge;
 	}
@@ -168,9 +189,10 @@ private:
 	enum class Flag : uchar {
 		IsThread = (1 << 0),
 		IsHistory = (1 << 1),
-		IsSavedSublist = (1 << 2),
-		UpdatePostponed = (1 << 3),
-		InUnreadChangeBlock = (1 << 4),
+		IsForumTopic = (1 << 2),
+		IsSavedSublist = (1 << 3),
+		UpdatePostponed = (1 << 4),
+		InUnreadChangeBlock = (1 << 5),
 	};
 	friend inline constexpr bool is_flag_type(Flag) { return true; }
 	using Flags = base::flags<Flag>;
@@ -192,6 +214,7 @@ private:
 	mutable Ui::PeerBadge _chatListPeerBadge;
 	mutable Ui::Text::String _chatListNameText;
 	mutable int _chatListNameVersion = 0;
+	mutable DateTextCache _chatListDateCache;
 	TimeId _timeId = 0;
 	Flags _flags;
 

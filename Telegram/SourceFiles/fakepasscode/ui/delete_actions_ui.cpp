@@ -19,7 +19,7 @@
 
 void DeleteActionsUI::Create(not_null<Ui::VerticalLayout*> content,
                              Window::SessionController* session) {
-    const auto toggled = Ui::CreateChild<rpl::event_stream<bool>>(content.get());
+    const auto toggled = content->lifetime().make_state<rpl::event_stream<bool>>();
     auto *button = Settings::AddButtonWithIcon(content, tr::lng_delete_actions(), st::settingsButton,
                                                {&st::menuIconRemove})
             ->toggleOn(toggled->events_starting_with_copy(

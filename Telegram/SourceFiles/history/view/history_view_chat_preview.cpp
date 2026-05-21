@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer.h"
 #include "data/data_peer_values.h"
 #include "data/data_replies_list.h"
+#include "data/data_saved_sublist.h"
 #include "data/data_session.h"
 #include "data/data_thread.h"
 #include "history/view/reactions/history_view_reactions_button.h"
@@ -59,7 +60,7 @@ class Item final
 	, private ListDelegate
 	, private CornerButtonsDelegate {
 public:
-	Item(not_null<Ui::RpWidget*> parent, not_null<Data::Thread*> thread);
+	Item(not_null<Ui::Menu::Menu*> parent, not_null<Data::Thread*> thread);
 
 	[[nodiscard]] not_null<QAction*> action() const override;
 	[[nodiscard]] bool isEnabled() const override;
@@ -98,7 +99,8 @@ private:
 	void listMarkContentsRead(
 		const base::flat_set<not_null<HistoryItem*>> &items) override;
 	MessagesBarData listMessagesBar(
-		const std::vector<not_null<Element*>> &elements) override;
+		const std::vector<not_null<Element*>> &elements,
+		bool markLastAsRead) override;
 	void listContentRefreshed() override;
 	void listUpdateDateLink(
 		ClickHandlerPtr &link,
@@ -186,6 +188,7 @@ private:
 	const not_null<Main::Session*> _session;
 	const not_null<Data::Thread*> _thread;
 	const std::shared_ptr<Data::RepliesList> _replies;
+	Data::SavedSublist * const _sublist = nullptr;
 	const not_null<History*> _history;
 	const not_null<PeerData*> _peer;
 	const std::shared_ptr<Ui::ChatTheme> _theme;
@@ -256,6 +259,11 @@ struct StatusFields {
 [[nodiscard]] rpl::producer<Info::Profile::Badge::Content> ContentForPeer(
 		not_null<PeerData*> peer) {
 	using namespace Info::Profile;
+	if (peer->isSelf()
+		|| peer->isRepliesChat()
+		|| peer->isSavedHiddenAuthor()) {
+		return rpl::single(Badge::Content{});
+	}
 	return rpl::combine(
 		BadgeContentForPeer(peer),
 		VerifiedContentForPeer(peer)
@@ -267,12 +275,13 @@ struct StatusFields {
 	});
 }
 
-Item::Item(not_null<Ui::RpWidget*> parent, not_null<Data::Thread*> thread)
+Item::Item(not_null<Ui::Menu::Menu*> parent, not_null<Data::Thread*> thread)
 : Ui::Menu::ItemBase(parent, st::previewMenu.menu)
 , _dummyAction(new QAction(parent))
 , _session(&thread->session())
 , _thread(thread)
 , _replies(thread->asTopic() ? thread->asTopic()->replies() : nullptr)
+, _sublist(thread->asSublist())
 , _history(thread->owningHistory())
 , _peer(thread->peer())
 , _theme(Window::Theme::DefaultChatThemeOn(lifetime()))
@@ -319,7 +328,7 @@ void Item::setupTop() {
 	_top->setClickedCallback([=] {
 		_actions.fire({ .openInfo = true });
 	});
-	_top->paintRequest() | rpl::start_with_next([=](QRect clip) {
+	_top->paintRequest() | rpl::on_next([=](QRect clip) {
 		auto p = QPainter(_top.get());
 		p.fillRect(clip, st::topBarBg);
 	}, _top->lifetime());
@@ -349,13 +358,13 @@ void Item::setupTop() {
 		: Ui::CreateChild<Ui::FlatLabel>(
 			_top.get(),
 			(topic
-				? Info::Profile::NameValue(topic->channel())
+				? Info::Profile::NameValue(topic->peer())
 				: std::move(statusText)),
 			st::previewStatus);
 	if (status) {
 		std::move(
 			statusFields
-		) | rpl::start_with_next([=](const StatusFields &fields) {
+		) | rpl::on_next([=](const StatusFields &fields) {
 			status->setTextColorOverride(fields.active
 				? st::windowActiveTextFg->c
 				: std::optional<QColor>());
@@ -366,8 +375,9 @@ void Item::setupTop() {
 		? nullptr
 		: Ui::CreateChild<Ui::UserpicButton>(
 			_top.get(),
-			_thread->peer(),
-			st::previewUserpic);
+			_thread->peer()->userpicPaintingPeer(),
+			st::previewUserpic,
+			_thread->peer()->userpicShape());
 	if (userpic) {
 		userpic->showSavedMessagesOnSelf(true);
 		userpic->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -387,7 +397,7 @@ void Item::setupTop() {
 		_top->widthValue(),
 		std::move(nameValue),
 		rpl::single(rpl::empty) | rpl::then(_badge.updated())
-	) | rpl::start_with_next([=](int width, const auto &, const auto &) {
+	) | rpl::on_next([=](int width, const auto &, const auto &) {
 		const auto &st = st::previewTop;
 		name->resizeToNaturalWidth(width
 			- st.namePosition.x()
@@ -406,7 +416,7 @@ void Item::setupTop() {
 			name->y() + name->height());
 	}, name->lifetime());
 
-	_top->geometryValue() | rpl::start_with_next([=](QRect geometry) {
+	_top->geometryValue() | rpl::on_next([=](QRect geometry) {
 		const auto &st = st::previewTop;
 		if (status) {
 			status->resizeToWidth(geometry.width()
@@ -438,12 +448,13 @@ void Item::setupMarkRead() {
 	) | rpl::then(
 		_thread->owner().chatsListFor(_thread)->unreadStateChanges(
 		) | rpl::to_empty
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		const auto state = _thread->chatListBadgesState();
 		const auto unread = (state.unreadCounter || state.unread);
-		const auto hidden = _thread->asTopic()
+		const auto hidden = (_thread->asTopic() || _thread->asSublist())
 			? (!unread)
-			: _thread->peer()->isForum();
+			: (_thread->peer()->isForum()
+				|| _thread->peer()->amMonoforumAdmin());
 		if (hidden) {
 			_markRead->hide();
 			return;
@@ -458,7 +469,7 @@ void Item::setupMarkRead() {
 	}, _markRead->lifetime());
 
 	const auto shadow = Ui::CreateChild<Ui::PlainShadow>(this);
-	_markRead->geometryValue() | rpl::start_with_next([=](QRect geometry) {
+	_markRead->geometryValue() | rpl::on_next([=](QRect geometry) {
 		shadow->setGeometry(
 			geometry.x(),
 			geometry.y() - st::lineWidth,
@@ -483,7 +494,7 @@ void Item::setupBackground() {
 			QRect(QPoint(), size()));
 	};
 	paint();
-	_theme->repaintBackgroundRequests() | rpl::start_with_next([=] {
+	_theme->repaintBackgroundRequests() | rpl::on_next([=] {
 		paint();
 		update();
 	}, lifetime());
@@ -499,7 +510,7 @@ void Item::setupHistory() {
 		_chatStyle.get(),
 		static_cast<CornerButtonsDelegate*>(this));
 
-	_markRead->shownValue() | rpl::start_with_next([=](bool shown) {
+	_markRead->shownValue() | rpl::on_next([=](bool shown) {
 		const auto top = _top->height();
 		const auto bottom = shown ? _markRead->height() : 0;
 		_scroll->setGeometry(rect().marginsRemoved({ 0, top, 0, bottom }));
@@ -507,7 +518,7 @@ void Item::setupHistory() {
 	}, _markRead->lifetime());
 
 	_scroll->scrolls(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		updateInnerVisibleArea();
 	}, lifetime());
 	_scroll->setOverscrollBg(QColor(0, 0, 0, 0));
@@ -515,11 +526,11 @@ void Item::setupHistory() {
 	_scroll->setOverscrollTypes(Type::Real, Type::Real);
 
 	_inner->scrollKeyEvents(
-	) | rpl::start_with_next([=](not_null<QKeyEvent*> e) {
+	) | rpl::on_next([=](not_null<QKeyEvent*> e) {
 		_scroll->keyPressEvent(e);
 	}, lifetime());
 
-	_scroll->events() | rpl::start_with_next([=](not_null<QEvent*> e) {
+	_scroll->events() | rpl::on_next([=](not_null<QEvent*> e) {
 		if (e->type() == QEvent::MouseButtonDblClick) {
 			const auto button = static_cast<QMouseEvent*>(e.get())->button();
 			if (button == Qt::LeftButton) {
@@ -590,6 +601,8 @@ rpl::producer<Data::MessagesSlice> Item::listSource(
 		int limitAfter) {
 	return _replies
 		? _replies->source(aroundId, limitBefore, limitAfter)
+		: _sublist
+		? _sublist->source(aroundId, limitBefore, limitAfter)
 		: Data::HistoryMessagesViewer(
 			_thread->asHistory(),
 			aroundId,
@@ -636,35 +649,48 @@ void Item::listMarkContentsRead(
 }
 
 MessagesBarData Item::listMessagesBar(
-		const std::vector<not_null<Element*>> &elements) {
+		const std::vector<not_null<Element*>> &elements,
+		bool markLastAsRead) {
 	if (elements.empty()) {
 		return {};
-	} else if (!_replies && !_history->unreadCount()) {
+	} else if (!_replies && !_sublist && !_history->unreadCount()) {
 		return {};
 	}
 	const auto repliesTill = _replies
 		? _replies->computeInboxReadTillFull()
 		: MsgId();
-	const auto migrated = _replies ? nullptr : _history->migrateFrom();
+	const auto sublistTill = _sublist
+		? _sublist->computeInboxReadTillFull()
+		: MsgId();
+	const auto migrated = (_replies || _sublist)
+		? nullptr
+		: _history->migrateFrom();
 	const auto migratedTill = (migrated && migrated->unreadCount() > 0)
 		? migrated->inboxReadTillId()
 		: 0;
-	const auto historyTill = (_replies || !_history->unreadCount())
+	const auto historyTill = (_replies
+		|| _sublist
+		|| !_history->unreadCount()
+		|| _history->amMonoforumAdmin())
 		? 0
 		: _history->inboxReadTillId();
-	if (!_replies && !migratedTill && !historyTill) {
+	if (!_replies && !_sublist && !migratedTill && !historyTill) {
 		return {};
 	}
 
 	auto skipped = false;
-	const auto hidden = _replies && (repliesTill < 2);
+	const auto hidden = (_replies && (repliesTill < 2))
+		|| (_sublist && (sublistTill < 2));
 	for (auto i = 0, count = int(elements.size()); i != count; ++i) {
 		const auto item = elements[i]->data();
-		if (!item->isRegular() || (_replies && !item->replyToId())) {
+		if (!item->isRegular()
+			|| (_replies && !item->replyToId())
+			|| (_sublist && !item->sublistPeerId())) {
 			continue;
 		}
 		const auto inHistory = (item->history() == _history);
 		const auto unread = (_replies && item->id > repliesTill)
+			|| (_sublist && item->id > sublistTill)
 			|| (migratedTill && (inHistory || item->id > migratedTill))
 			|| (historyTill && inHistory && item->id > historyTill);
 		if (!unread) {
@@ -836,6 +862,11 @@ Ui::ChatPaintContext Item::listPreparePaintContext(
 		Ui::ChatPaintContextArgs &&args) {
 	const auto visibleAreaTopLocal = mapFromGlobal(
 		args.visibleAreaPositionGlobal).y();
+	const auto area = QRect(
+		0,
+		args.visibleAreaTop,
+		args.visibleAreaWidth,
+		args.visibleAreaHeight);
 	const auto viewport = QRect(
 		0,
 		args.visibleAreaTop - visibleAreaTopLocal,
@@ -844,6 +875,7 @@ Ui::ChatPaintContext Item::listPreparePaintContext(
 	return args.theme->preparePaintContext(
 		_chatStyle.get(),
 		viewport,
+		area,
 		args.clip,
 		false);
 }
@@ -936,13 +968,13 @@ ChatPreview MakeChatPreview(
 	};
 	const auto menu = result.menu.get();
 
-	auto action = base::make_unique_q<Item>(menu, thread);
+	auto action = base::make_unique_q<Item>(menu->menu(), thread);
 	result.actions = action->actions();
 	menu->addAction(std::move(action));
 	if (const auto topic = thread->asTopic()) {
-		const auto weak = Ui::MakeWeak(menu);
-		topic->destroyed() | rpl::start_with_next([weak] {
-			if (const auto strong = weak.data()) {
+		const auto weak = base::make_weak(menu);
+		topic->destroyed() | rpl::on_next([weak] {
+			if (const auto strong = weak.get()) {
 				LOG(("Preview hidden for a destroyed topic."));
 				strong->hideMenu(true);
 			}

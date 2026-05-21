@@ -19,6 +19,11 @@ namespace Main {
 class Session;
 } // namespace Main
 
+namespace Ui::Text {
+class CustomEmoji;
+struct MarkedContext;
+} // namespace Ui::Text
+
 namespace Ui {
 
 class MaskedInputField;
@@ -40,7 +45,7 @@ using PaintRoundImageCallback = Fn<void(
 
 [[nodiscard]] not_null<Ui::MaskedInputField*> AddInputFieldForCredits(
 	not_null<Ui::VerticalLayout*> container,
-	rpl::producer<StarsAmount> value);
+	rpl::producer<CreditsAmount> value);
 
 PaintRoundImageCallback GenerateCreditsPaintUserpicCallback(
 	const Data::CreditsHistoryEntry &entry);
@@ -81,5 +86,13 @@ Fn<void(QPainter &)> PaintOutlinedColoredCreditsIconCallback(
 	float64 outlineRatio);
 
 [[nodiscard]] QImage CreditsWhiteDoubledIcon(int size, float64 outlineRatio);
+
+[[nodiscard]] std::unique_ptr<Ui::Text::CustomEmoji> MakeCreditsIconEmoji(
+	int height,
+	int count);
+[[nodiscard]] Ui::Text::MarkedContext MakeCreditsIconContext(
+	int height,
+	int count);
+[[nodiscard]] TextWithEntities MakeCreditsIconEntity();
 
 } // namespace Ui

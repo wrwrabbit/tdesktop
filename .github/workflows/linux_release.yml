@@ -15,6 +15,7 @@ on:
       - '!.github/workflows/linux_release.yml'
       - 'snap/**'
       - 'Telegram/build/**'
+      - '!Telegram/build/docker/centos_env/**'
       - 'Telegram/Resources/uwp/**'
       - 'Telegram/Resources/winrc/**'
       - 'Telegram/SourceFiles/platform/win/**'
@@ -39,27 +40,56 @@ jobs:
 
     env:
       UPLOAD_ARTIFACT: "true"
+      ONLY_CACHE: "false"
+      IMAGE_TAG: tdesktop:centos_env
 
     steps:
-      - name: Get repository name.
-        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
-
       - name: Clone.
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
-          path: ${{ env.REPO_NAME }}
 
       - name: First set up.
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
-          docker pull ghcr.io/$GITHUB_REPOSITORY/centos_env
-          docker tag ghcr.io/$GITHUB_REPOSITORY/centos_env tdesktop:centos_env
+          sudo apt update
+          curl -sSL https://install.python-poetry.org | python3 -
+          cd Telegram/build/docker/centos_env
+          poetry install
+          DOCKERFILE=$(DEBUG= LTO= poetry run gen_dockerfile)
+          echo "$DOCKERFILE" > Dockerfile
+
+      - name: Free up some disk space.
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        with:
+          tool-cache: true
+
+      - name: Set up Docker Buildx.
+        uses: docker/setup-buildx-action@v3
+
+      - name: Libraries cache.
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/.buildx-cache
+          key: ${{ runner.OS }}-libs-${{ hashFiles('Telegram/build/docker/centos_env/**') }}
+          restore-keys: ${{ runner.OS }}-libs-
+
+      - name: Libraries.
+        uses: docker/build-push-action@v6
+        with:
+          context: Telegram/build/docker/centos_env
+          load: ${{ env.ONLY_CACHE == 'false' }}
+          tags: ${{ env.IMAGE_TAG }}
+          cache-from: type=local,src=${{ runner.temp }}/.buildx-cache
+          cache-to: type=local,dest=${{ runner.temp }}/.buildx-cache-new,mode=max
+
+      - name: Move cache.
+        run: |
+          rm -rf ${{ runner.temp }}/.buildx-cache
+          mv ${{ runner.temp }}/.buildx-cache{-new,}
 
       - name: Telegram Desktop build.
+        if: env.ONLY_CACHE == 'false'
         run: |
-          cd $REPO_NAME
-
           ARTIFACT_PREFIX=""
           
           if [ "${{ github.ref_name }}" != "${{ github.event.repository.default_branch }}" ]; then
@@ -75,31 +105,28 @@ jobs:
           else
             echo "ARTIFACT_NAME=${ARTIFACT_PREFIX}Telegram" >> $GITHUB_ENV
           fi
-          
-          #          -D CMAKE_C_FLAGS="-Werror" 
-          #          -D CMAKE_CXX_FLAGS="-Werror" 
-          # not used in actual Release build
 
           docker run --rm \
           -u $(id -u) \
           -v $PWD:/usr/src/tdesktop \
           -e CONFIG=Release \
-          tdesktop:centos_env \
+          $IMAGE_TAG \
           /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
-          -D CMAKE_C_FLAGS_DEBUG="" \
-          -D CMAKE_CXX_FLAGS_DEBUG="" \
-          -D CMAKE_EXE_LINKER_FLAGS="-s" \
+          -D CMAKE_CONFIGURATION_TYPES=Release \
+          -D CMAKE_EXE_LINKER_FLAGS_RELEASE="-s" \
+          -D CMAKE_COMPILE_WARNING_AS_ERROR=OFF \
+          -D DESKTOP_APP_PRINT_LINK_FLAGS=ON \
           -D TDESKTOP_API_TEST=OFF \
-          -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
-          -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
-          -D CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+          -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
+          -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
           $DEFINE
 
       - name: Check.
+        if: env.ONLY_CACHE == 'false'
         run: |
-          filePath="$REPO_NAME/out/Release/Telegram"
+          filePath="out/Release/Telegram"
           if test -f "$filePath"; then
             echo "Build successfully done! :)"
 
@@ -113,19 +140,19 @@ jobs:
       - name: Move artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
-          cd $REPO_NAME
+          cd out/Release
           mkdir artifact
           mkdir "artifact/Telegram"
-          cp out/Release/Telegram artifact/Telegram/
+          cp Telegram artifact/Telegram/
           strip -s "artifact/Telegram/Telegram"
           cd artifact
           tar -cJvf "${{ env.ARTIFACT_NAME }}_linux.tar.xz" "Telegram/"
           rm -rf Telegram/
           # mv {Telegram,Updater} artifact/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.REPO_NAME }}/artifact/
+          path: out/Release/artifact/

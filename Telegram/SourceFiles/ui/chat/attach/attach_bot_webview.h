@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rect_part.h"
 #include "ui/round_rect.h"
 #include "webview/webview_common.h"
+#include <crl/crl_time.h>
 
 class QJsonObject;
 class QJsonValue;
@@ -31,6 +32,10 @@ using LayerOptions = base::flags<LayerOption>;
 namespace Webview {
 struct Available;
 } // namespace Webview
+
+namespace Ui::Text {
+struct MarkedContext;
+} // namespace Ui::Text
 
 namespace Ui::BotWebView {
 
@@ -74,9 +79,15 @@ struct SendPreparedMessageRequest {
 	Fn<void(QString)> callback;
 };
 
+struct RequestChatRequest {
+	QString requestId;
+	Fn<void(QString)> callback;
+};
+
 class Delegate {
 public:
 	[[nodiscard]] virtual Webview::ThemeParams botThemeParams() = 0;
+	[[nodiscard]] virtual Ui::Text::MarkedContext botTextContext() = 0;
 	[[nodiscard]] virtual auto botDownloads(bool forceCheck = false)
 		-> const std::vector<DownloadsEntry> & = 0;
 	virtual void botDownloadsAction(uint32 id, DownloadsAction type) = 0;
@@ -91,6 +102,12 @@ public:
 		QString query) = 0;
 	virtual void botCheckWriteAccess(Fn<void(bool allowed)> callback) = 0;
 	virtual void botAllowWriteAccess(Fn<void(bool allowed)> callback) = 0;
+	virtual bool botStorageWrite(
+		QString key,
+		std::optional<QString> value) = 0;
+	[[nodiscard]] virtual std::optional<QString> botStorageRead(
+		QString key) = 0;
+	virtual void botStorageClear() = 0;
 	virtual void botRequestEmojiStatusAccess(
 		Fn<void(bool allowed)> callback) = 0;
 	virtual void botSharePhone(Fn<void(bool shared)> callback) = 0;
@@ -99,6 +116,8 @@ public:
 	virtual void botDownloadFile(DownloadFileRequest request) = 0;
 	virtual void botSendPreparedMessage(
 		SendPreparedMessageRequest request) = 0;
+	virtual void botRequestChat(RequestChatRequest request) = 0;
+	virtual void botVerifyAge(int age) = 0;
 	virtual void botOpenPrivacyPolicy() = 0;
 	virtual void botClose() = 0;
 };
@@ -163,8 +182,12 @@ private:
 	void sendDataMessage(const QJsonObject &args);
 	void switchInlineQueryMessage(const QJsonObject &args);
 	void processSendMessageRequest(const QJsonObject &args);
+	void processRequestChat(const QJsonObject &args);
 	void processEmojiStatusRequest(const QJsonObject &args);
 	void processEmojiStatusAccessRequest();
+	void processStorageSaveKey(const QJsonObject &args);
+	void processStorageGetKey(const QJsonObject &args);
+	void processStorageClear(const QJsonObject &args);
 	void processButtonMessage(
 		std::unique_ptr<Button> &button,
 		const QJsonObject &args);
@@ -188,6 +211,12 @@ private:
 	void replyCustomMethod(QJsonValue requestId, QJsonObject response);
 	void requestClipboardText(const QJsonObject &args);
 	void setupClosingBehaviour(const QJsonObject &args);
+	void replyDeviceStorage(
+		const QJsonObject &args,
+		const QString &event,
+		QJsonObject response);
+	void deviceStorageFailed(const QJsonObject &args, QString error);
+	void secureStorageFailed(const QJsonObject &args);
 	void createButton(std::unique_ptr<Button> &button);
 	void scheduleCloseWithConfirmation();
 	void closeWithConfirmation();
@@ -234,6 +263,7 @@ private:
 	rpl::lifetime _bottomBarColorLifetime;
 	rpl::event_stream<> _downloadsUpdated;
 	rpl::variable<bool> _fullscreen = false;
+	crl::time _lastWebviewInteraction = 0;
 	bool _layerShown : 1 = false;
 	bool _webviewProgress : 1 = false;
 	bool _themeUpdateScheduled : 1 = false;
