@@ -3174,14 +3174,13 @@ HistoryItem *Session::addNewMessage(
 		return nullptr;
 	}
 
-	if (data.type() == mtpc_message) {
+	if (type == NewMessageType::Unread
+		&& data.type() == mtpc_message) {
 		if (const auto h = historyLoaded(peerId)) {
 			if (const auto streamed = h->streamedDraftsIfExists()) {
 				if (const auto adopted = streamed->adoptIncoming(
 						data.c_message())) {
-					if (type == NewMessageType::Unread) {
-						CheckForSwitchInlineButton(adopted);
-					}
+					CheckForSwitchInlineButton(adopted);
 					return adopted;
 				}
 			}
