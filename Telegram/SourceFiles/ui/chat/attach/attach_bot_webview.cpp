@@ -35,7 +35,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "webview/webview_interface.h"
 #include "base/debug_log.h"
 #include "base/invoke_queued.h"
-#include "base/options.h"
 #include "base/platform/base_platform_info.h"
 #include "base/qt_signal_producer.h"
 #include "base/random.h"
@@ -60,8 +59,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <memory>
 
 namespace Ui::BotWebView {
-
-const char kOptionLinuxExternalBotWebApps[] = "linux-external-bot-webapps";
 
 namespace {
 
@@ -117,15 +114,6 @@ struct NativeMessage {
 		&& url.query().isEmpty()
 		&& url.fragment().isEmpty();
 }
-
-base::options::toggle OptionLinuxExternalBotWebApps({
-	.id = kOptionLinuxExternalBotWebApps,
-	.name = "Use external Linux bot web app windows",
-	.description = "Open bot web apps in a top-level WebKitGTK window"
-		" with an HTML shell instead of embedding the GTK surface.",
-	.scope = base::options::linux,
-	.restartRequired = true,
-});
 
 [[nodiscard]] RectPart ParsePosition(const QString &position) {
 	if (position == u"left"_q) {
@@ -318,9 +306,11 @@ void LogNativeMessageRejected(
 }
 
 [[nodiscard]] bool UseExternalBotWebApps() {
-	static const auto Result = OptionLinuxExternalBotWebApps.relevant()
-		&& OptionLinuxExternalBotWebApps.value();
-	return Result;
+#ifdef Q_OS_LINUX
+	return true;
+#else // Q_OS_LINUX
+	return false;
+#endif // Q_OS_LINUX
 }
 
 [[nodiscard]] QColor ResolveExternalShellThemeColor(QColor color) {

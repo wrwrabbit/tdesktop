@@ -49,8 +49,6 @@ struct ResolvedColors;
 
 namespace Ui::BotWebView {
 
-extern const char kOptionLinuxExternalBotWebApps[];
-
 struct DownloadsProgress;
 struct DownloadsEntry;
 enum class DownloadsAction;
